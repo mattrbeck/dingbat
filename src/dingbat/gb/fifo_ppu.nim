@@ -760,6 +760,108 @@ proc fifo_get_sprites*(ppu: GbFifoPpu; gb: GB): seq[GbSprite] =
       if result.len >= 10: break
     sprite_addr += 4
 
+# ---- A HALTED OAM DMA drives the OAM bus; a running one does not -----------
+#
+# `OAM_SCAN_DMA_HOLD` above says the mode-2 comparator gets no new Y/X off the
+# OAM data bus while a transfer owns it, and holds what it last latched. That
+# is the RUNNING transfer: its destination moves an entry every sixteen dots
+# against a scan that does one every two, so nothing coherent is ever standing
+# on the bus long enough for the comparator to take.
+#
+# A transfer FROZEN by a HALT is the other half of that same split -- the one
+# that has produced every win this round (M2_LEAD_HALT_BLIND, LYC_SETTLE_HALT_SKIP,
+# OAMDMA_HALT_PAUSE). PHI stops, so the unit stops mid-write with its address
+# on OAM and its WR asserted, and the bus is not idle at all: it is DRIVEN,
+# continuously, with one word. Every entry the comparator steps over latches
+# that word, and the mode-3 object fetch -- which reads the object's tile byte
+# over the same bus -- reads it too.
+#
+# LIJI32 (mooneye-test-suite issue #1) states the addressing half of this as a
+# rule: "when the PPU reads OAM in this case, it uses the DMA destination
+# address (except for bit 0)". The redirect was tried once as a model of the
+# RUNNING span and refused (see OAM_SCAN_DMA_LOCK's 2026-08-20 section); it is
+# not refused here, because here the destination stands still.
+#
+# What is on that bus is the destination word in conflict with the held write.
+# `mooneye madness/mgb_oam_dma_halt_sprites` is the ROM that measures it, and
+# its own comment gives the rule with variables rather than constants:
+#
+#     Y = (existing | incoming) & $FC        X = (next_existing | incoming)
+#     C = (existing | incoming) & $FC        F = (next_existing | incoming)
+#
+# Y and C are equal, and X and F are equal, for exactly the reason above: with
+# the address standing still the scan's (Y,X) read and the fetch's (tile,flags)
+# read are the SAME word. The `& $FC` is the one part neither Gekkio ("Why
+# & $FC? I have no idea") nor LIJI32 explains; written as a 16-bit word with
+# the even OAM byte as the low half it is a single mask of the word's low two
+# bits, which is how it is spelled below.
+#
+# Pinned pixel-exactly, not fitted to a formula. The reference PNG's 18 dark
+# pixels are at x 83..88, y 42..47, and dingbat's own VRAM dump at the halt
+# says tile $38 is
+#
+#     ..3333..  .3....3.  ..3333..  .3....3.  .3....3.  ..3333..  ........  ........
+#
+# so an object at Y=$38 (screen y 40), X=$5A (screen x 82), tile $38, flags
+# $5A (Y-FLIP set, OBP1, above BG) with OBP1 = 2,2,2,2 -- every colour to shade
+# 2 -- reproduces all eighteen and nothing else. Y=$3A -- the unmasked OR -- puts the glyph's
+# rows in the wrong order under the Y-flip and tile $3A is two isolated dots,
+# so the mask is measured by the picture and not taken on the comment's word.
+const OAMDMA_FREEZE_BUS* {.intdefine.} = 1
+  ## Model the frozen transfer's held write as a DRIVEN OAM bus. 0 is the
+  ## control arm: a frozen transfer holds the bus like a running one.
+  ##
+  ## DMG-family only. LIJI32 has CGB-E and later reading the unmodified values
+  ## and CGB-0..D blocking the PPU from OAM in mode 2 during a transfer, so
+  ## neither CGB arm is this; the ROM's own header says the CGB answer is a
+  ## checkerboard with no object at all, which is what a CGB scores here today.
+const OAMDMA_FREEZE_DEST_LEAD {.intdefine.} = 1
+  ## M-cycles the frozen write's destination leads `dma_position` by.
+  ##
+  ## `dma_position` is the index of the byte the unit moves NEXT and the freeze
+  ## returns from `mem_dma_tick` before that M-cycle's write, so the naive
+  ## reading is 0. Hardware is one further on: LIJI32 puts the in-flight write
+  ## at `$FE02` for this ROM and dingbat's `dma_position` is 1 there. That is
+  ## the same one M-cycle the transfer's start phase is known to be soft in
+  ## (`CGB_OAM_DMA_START_T`), read from the other end. Swept: see the table in
+  ## docs/gb-failure-triage.md.
+
+proc oam_dma_frozen*(gb: GB): bool {.inline.} =
+  ## Is an OAM DMA frozen mid-write with its address and data standing on OAM?
+  ## `dma_busy` with the CPU HALTED is exactly the state OAMDMA_HALT_PAUSE
+  ## leaves the unit in. The console test is `console_is_cgb`, spelled out
+  ## because memory.nim is included after this file.
+  when OAMDMA_FREEZE_BUS == 0: false
+  else:
+    gb.memory.dma_busy and gb.cpu.halted and
+      gb.boot_model notin {bmCgb0, bmCgbABCDE, bmAgb}
+
+proc oam_dma_frozen_bus(ppu: GbFifoPpu; gb: GB): (uint8, uint8) {.noinline.} =
+  ## The two bytes standing on the OAM data bus while a transfer is frozen:
+  ## the destination word (bit 0 of the address ignored) in conflict with the
+  ## byte the unit is holding on the lines. Returns (even byte, odd byte) --
+  ## (Y, X) to the mode-2 comparator and (tile, flags) to the mode-3 fetch,
+  ## which are the same read.
+  let mem = gb.memory
+  var dst = mem.dma_position + OAMDMA_FREEZE_DEST_LEAD
+  if dst > 0x9F: dst = 0x9F
+  dst = dst and not 1
+  var drv: uint8
+  if mem.dma_openbus:
+    drv = 0xFF'u8
+  else:
+    # The byte in flight is the source byte for the destination the write is
+    # standing on -- not `dma_latch`, which is the byte the LAST completed
+    # write moved. Same echo fold as the unit itself (mooneye oam_dma/sources-GS).
+    var src = int(mem.current_dma_source) + dst
+    if src >= 0xE000: src = src and not 0x2000
+    drv = read_byte(mem, gb, src)
+  # One 16-bit word, even OAM byte as the low half, wired-OR against the held
+  # write on both halves, low two bits of the word not driven. See above.
+  let w = (uint16(ppu.sprite_table[dst + 1]) shl 8) or uint16(ppu.sprite_table[dst])
+  let v = (w or (uint16(drv) * 0x0101'u16)) and 0xFFFC'u16
+  result = (uint8(v and 0xFF'u16), uint8(v shr 8))
+
 proc oam_scan_advance*(ppu: GbFifoPpu; gb: GB; upto: int32; blocked = false) =
   ## Run the mode-2 OAM scan forward through every entry whose own dot is
   ## before `upto`, against OAM as it stands NOW. `blocked` is for the span an
@@ -801,6 +903,12 @@ proc oam_scan_advance*(ppu: GbFifoPpu; gb: GB; upto: int32; blocked = false) =
       if not blocked:
         ppu.scan_y_bus = ppu.sprite_table[sprite_addr]
         ppu.scan_x_bus = ppu.sprite_table[sprite_addr + 1]
+      elif oam_dma_frozen(gb):
+        # ...unless the transfer is FROZEN, in which case the bus is not idle
+        # but driven, with the same word for every entry. See OAMDMA_FREEZE_BUS.
+        let (y, x) = oam_dma_frozen_bus(ppu, gb)
+        ppu.scan_y_bus = y
+        ppu.scan_x_bus = x
     let s = GbSprite(
       y:          ppu.scan_y_bus,
       x:          ppu.scan_x_bus,
@@ -2328,6 +2436,15 @@ proc obj_oam_dma_read(ppu: GbFifoPpu; gb: GB) {.noinline.} =
   ## is false for all but ~160 of the ~17,500 M-cycles of a frame, and only for
   ## the frames that run a transfer at all.
   let mem = gb.memory
+  if oam_dma_frozen(gb):
+    # A frozen transfer stands still on OAM and drives it: the fetch's own read
+    # lands on the destination word, exactly as the mode-2 comparator's does,
+    # so tile and flags are the two halves of that word rather than one source
+    # byte twice. See OAMDMA_FREEZE_BUS.
+    let (tile, flags) = oam_dma_frozen_bus(ppu, gb)
+    ppu.sprites[0].tile_num   = tile
+    ppu.sprites[0].attributes = flags
+    return
   var b: uint8
   if mem.dma_openbus:
     b = 0xFF'u8

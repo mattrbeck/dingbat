@@ -807,13 +807,24 @@ proc build_mooneye_tests(roms_dir: string): seq[TestDef] =
         expected_png: rom.parentDir / "mgb_oam_dma_halt_sprites_expected.png",
         # Its reference PNG uses a DIFFERENT grey ramp from every other
         # mooneye reference: 255/176/104 where `sprite_priority-dmg.png` (and
-        # dingbat, and the rest of the suite) use 255/170/0. Compared exactly,
-        # all 11520 checkerboard greys count as wrong and the row reports 50%,
-        # which is badly misleading triage -- the real disagreement is 18
-        # pixels. A tolerance of 8 absorbs the 6-level ramp difference and
-        # nothing else: the sprite this row is actually about is 66 levels away
-        # and still counts.
-        grey_tolerance: 8,
+        # dingbat, and the rest of the suite) use 255/170/85. Compared exactly,
+        # all 23023 non-white pixels count as wrong and the row reports 0.1%,
+        # which is badly misleading triage. The tolerance has to absorb the
+        # ramp and nothing else, so it is bounded from BOTH sides and every
+        # bound is a measured number:
+        #
+        #   shade 0  255 vs 255   delta  0
+        #   shade 1  176 vs 170   delta  6
+        #   shade 2  104 vs  85   delta 19   <- the objects this row is about
+        #
+        # and the reference's own smallest step between two DIFFERENT shades is
+        # 176 - 104 = 72. So any tolerance in [19, 71] is exactly shade-index
+        # equality on these two ramps, and 32 sits in the middle of it. 8 was
+        # BELOW the shade-2 offset: it absorbed the checkerboard and then
+        # scored a correctly drawn object as 18 wrong pixels, which is the same
+        # count a MISSING object scores and is why the row read as unchanged
+        # while the model under it changed completely.
+        grey_tolerance: 32,
         model: "mgb",
       ))
       continue
@@ -1382,9 +1393,11 @@ proc build_wilbertpol_tests(roms_dir: string): seq[TestDef] =
     if rel == "madness" / "mgb_oam_dma_halt_sprites.gb":
       var t = shot(name, rom, rom.parentDir / "mgb_oam_dma_halt_sprites_expected.png", 120)
       # See the Gekkio builder above: this reference's grey ramp is 255/176/104
-      # where the rest of the suite uses 255/170/0, so an exact compare scores
-      # the whole checkerboard wrong and hides an 18-pixel disagreement.
-      t.grey_tolerance = 8
+      # where the rest of the suite uses 255/170/85, so an exact compare scores
+      # every non-white pixel wrong. 32 is the middle of the [19, 71] band that
+      # is shade-index equality for those two ramps; 8 was below the shade-2
+      # offset and scored a correctly drawn object as wrong.
+      t.grey_tolerance = 32
       t.model = "mgb"
       tests.add(t)
       continue

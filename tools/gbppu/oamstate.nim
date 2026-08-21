@@ -31,5 +31,28 @@ proc main() =
   for i in 0 ..< 16:
     line.add(&" {emu.ppu.sprite_table[i]:02X}")
   echo line
+  # The rest of what it takes to turn "which four bytes does the PPU read" into
+  # a PICTURE, which is what closed the row: the object registers, and the tile
+  # bitmaps the candidate tile numbers name. Compare these against the 18 dark
+  # pixels of `mgb_oam_dma_halt_sprites_expected.png` (x 83..88, y 42..47) and
+  # the Y/X/tile/flags are pinned outright -- Y = $38 with the Y-flip in flags
+  # $5A is the only assignment that puts tile $38's rows in the reference's
+  # order, which is how the `& $FC` in the ROM's own comment is measured rather
+  # than taken on trust. See docs/gb-failure-triage.md.
+  echo &"  LCDC = 0x{emu.ppu.lcd_control:02X}   BGP = {emu.ppu.bgp}   " &
+       &"OBP0 = {emu.ppu.obp0}   OBP1 = {emu.ppu.obp1}"
+  let tiles = if args.len > 3: args[3 .. ^1] else: @["0x30", "0x38", "0x3A"]
+  for t in tiles:
+    let n = parseHexInt(t.replace("0x", ""))
+    var rows: seq[string] = @[]
+    for r in 0 ..< 8:
+      let lo = emu.ppu.vram[0][n * 16 + r * 2]
+      let hi = emu.ppu.vram[0][n * 16 + r * 2 + 1]
+      var s = ""
+      for b in countdown(7, 0):
+        let v = ((lo shr b) and 1) or (((hi shr b) and 1) shl 1)
+        s.add(if v == 0: '.' else: char(ord('0') + int(v)))
+      rows.add(s)
+    echo &"  tile 0x{n:02X}        = " & rows.join("  ")
 
 main()

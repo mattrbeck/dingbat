@@ -407,7 +407,119 @@ cheap revision-gating win hiding in the self-checking suites. That is the
 useful negative: the remaining 107 failures are real behaviour gaps, not
 mis-assigned machines.
 
-## The last mooneye row: `madness/mgb_oam_dma_halt_sprites` — 18 pixels
+## CLOSED 2026-08-21: `madness/mgb_oam_dma_halt_sprites` — Mooneye is 152/152
+
+**A transfer FROZEN by a HALT does not hold the OAM bus. It DRIVES it.** That
+one sentence is the whole fix; everything below it in this section is the
+derivation that led there and is kept because most of it is still true.
+
+`OAMDMA_FREEZE_BUS` in `fifo_ppu.nim`. Mooneye **151 -> 152**, wilbertpol
+**146 -> 147**, runner **1102 -> 1104**, gambatte **4567 -> 4567 (not one row
+either way)**, shootout **261/261**, and the per-row diff of all three results
+files moves exactly the two rows named. Both frames are now a perfect
+shade-for-shade match to the reference: across all 23040 pixels the only
+(dingbat, reference) pairings that occur at all are (255,255) x 11517,
+(170,176) x 11505 and (85,104) x 18.
+
+### Why it looked unreachable, and what was actually in the way
+
+The 2026-08-20 attempt below built all three of LIJI32's mechanisms, got the
+destination redirect working, and stopped because the redirect reads `$30`/`$40`
+where hardware draws tile `$38` at (56, 90) — concluding that the gap is a
+unit-specific OAM corruption pattern and therefore a fit to one console. Two
+things were wrong with that stop:
+
+1. **The corruption does not have to be stored to be seen.** LIJI32's own note
+   says the transfer overwrites every corrupted byte before it ends, so the
+   corruption is only ever observable *on the bus*. Modelling it as a bus value
+   computed at the read — rather than as a write into `sprite_table` — needs no
+   claim about OAM's contents at all, and touches nothing but the frozen span.
+2. **The redirect and the bus hold are not competing models; they are the two
+   halves of the halted/running split** (BRIEF rule 1). `OAM_SCAN_DMA_HOLD`'s
+   refutation of the redirect was measured on a RUNNING transfer, where the
+   destination moves an entry every sixteen dots against a scan that does one
+   every two, so nothing stands still long enough to be latched. A frozen
+   transfer stands still by definition. The hold model is unchanged and still
+   ships; this is the `elif` after it.
+
+Composed, the two give the sprite for free: with the address standing still the
+mode-2 comparator's (Y, X) read and the mode-3 fetch's (tile, flags) read are
+the SAME word, which is exactly why the ROM's comment records `Y == C` and
+`X == F`, and why all forty objects resolve to one.
+
+### The `& $FC` is measured by the PICTURE, not taken from the comment
+
+The mask upstream calls unexplained ("Why & $FC? I have no idea") is the one
+part that could have been a fit. It is not: the reference PNG decides it.
+
+Its 18 dark pixels are at x 83..88, y 42..47, and dingbat's own VRAM dump at
+the halt (`tools/gbppu/oamstate.nim`, extended) gives tile `$38` as
+
+    ..3333..  .3....3.  ..3333..  .3....3.  .3....3.  ..3333..  ........  ........
+
+with `LCDC = $93` (8x8 objects, `$8000` addressing) and `OBP1 = 2,2,2,2` —
+every colour to shade 2, which is the reference's `104`. An
+object at Y = `$38` (screen y 40), X = `$5A` (screen x 82), tile `$38`, flags
+`$5A` (**Y-FLIP set**, OBP1, above BG) reproduces all eighteen and nothing else.
+The unmasked OR gives Y = `$3A` and tile `$3A`: tile `$3A` is two isolated dots,
+and even ignoring the tile, Y = `$3A` under the Y-flip puts the glyph's rows in
+the wrong order. Measured on the arm: **plain OR draws 2 dark pixels and scores
+18 wrong; with the mask, 0 wrong.** So the mask is bracketed by the frame.
+
+Spelled as a 16-bit word with the even OAM byte as the low half, the two halves
+of the ROM's four-line formula collapse to one expression — `(word | drv*$0101)
+& $FFFC` — i.e. the word's low two bits are the ones the held write does not
+drive. That is a statement about the OAM word, not about two unrelated bytes.
+
+### The destination is bracketed two-sidedly
+
+`OAMDMA_FREEZE_DEST_LEAD` is the one constant, and it is a bracket rather than
+a fit. Swept against the reference (wrong pixels at shade-index equality):
+
+    LEAD   destination word   wrong px   dark px drawn
+      -1        $FE00            18            0
+       0        $FE00            18            0
+       1        $FE02             0           18
+       2        $FE02             0           18
+       3        $FE04            18            0
+
+1 and 2 are the same word (bit 0 of the address is ignored), so this is a
+one-word plateau with both sides falling off it. dingbat's `dma_position` is 1
+at the freeze and LIJI32 puts the in-flight write at `$FE02`, so the one
+M-cycle the constant carries is the same softness the transfer's start phase
+has (`CGB_OAM_DMA_START_T`), read from the other end.
+
+### The instrument was ALSO lying, and that is the second half of the story
+
+The row reported "18 wrong pixels" **before and after** the model changed, and
+that is a harness property (BRIEF rule 3). `grey_tolerance` was 8, and the
+reference's ramp offsets are 0 / 6 / **19** for shades 0 / 1 / 2 — so a
+correctly drawn object scored exactly the same 18 pixels as a missing one. The
+reference's own smallest step between two DIFFERENT shades is 176 - 104 = 72,
+so any tolerance in **[19, 71]** is exact shade-index equality on these two
+ramps; both rows now carry 32. **Check what a tolerance is bounded BY, not just
+that one exists.**
+
+### Cost
+
+Nothing. Both call sites sit inside `dma_busy` guards that were already there,
+so the hot path is byte-for-byte the work it was. `DINGBAT_BENCH_COUNTERS`,
+Pokemon Blue, 2400 frames, min of three, `cycles=` identical on both arms:
+24,804,908,698 (off) vs 24,804,632,970 (on), i.e. **-0.001%**, noise. Pokemon
+Blue's framebuffer is byte-identical between the two arms at 200 / 600 / 1200 /
+2000 frames.
+
+### Still open (and it is not this row)
+
+LIJI32 puts CGB-0..D in a *blocking* camp during a transfer's mode 2 while
+CGB-E+ reads unmodified values. dingbat's CGB arm does neither — it holds the
+bus, like the DMG — and scores this ROM's stated CGB answer (a checkerboard
+with no object) correctly today, so nothing in the tree asks the question. If a
+CGB witness ever turns up, that is where it lands.
+
+---
+
+## The historical record: how the row read before it closed — 18 pixels
 
 **Corrected 2026-08-19.** An earlier note here read the diff as a
 "phase-inverted checkerboard" from the tile grid. That was wrong. The colour
@@ -420,10 +532,12 @@ The checkerboard PHASE matches exactly. The tile diff lit up alternate columns
 because only the GREY tiles differ, and in a checkerboard the grey tiles ARE
 alternate columns. And they differ only in SHADE: this reference uses a
 255/176/104 ramp where every other mooneye reference — `sprite_priority-dmg.png`
-included, which dingbat matches exactly — uses 255/170/0. That is an encoding
-difference in the PNG, not an emulator difference, so both rows now carry
-`grey_tolerance: 8`, which absorbs the 6-level ramp gap and nothing else. The
-row went from a misleading **50.0%** to **99.9% (23022/23040)**.
+included, which dingbat matches exactly — uses 255/170/85. That is an encoding
+difference in the PNG, not an emulator difference, so both rows carry a
+`grey_tolerance`. It was set at 8, which absorbs the 6-level shade-1 gap and
+**not** the 19-level shade-2 one — the bug described in the CLOSED section
+above. It is 32 now. The row went from a misleading **50.0%** to **99.9%
+(23022/23040)**.
 
 **The entire real defect is 18 pixels: one sprite dingbat does not draw.**
 
@@ -594,7 +708,7 @@ knowing that the accepted rule upstream is phrased about the destination, and
 that dingbat's mode-2 OAM scan applies no DMA redirect at all. Any attempt on
 this row should start there rather than at the phantom sprite.
 
-### Attempted 2026-08-20 with LIJI's mechanism: two of three parts WORK, and the row still cannot close
+### Attempted 2026-08-20 with LIJI's mechanism: two of three parts WORK (superseded — see the CLOSED section at the head of this chapter)
 
 All three mechanisms were built behind defines and measured. Reverted, but what
 they established is worth keeping — `tools/gbppu/oamstate.nim` (committed) dumps
@@ -633,7 +747,10 @@ The object fetch had to be redirected as well: with only the scan redirected the
 fetch still painted the object with the DMA's SOURCE byte ($FF), which is why
 the first attempt still rendered blank.
 
-**Why it still cannot close the row.** Hardware draws tile `$38` at (56, 90).
+**Why it looked like it still could not close the row — SUPERSEDED 2026-08-21,
+see the CLOSED section at the head of this chapter; the corruption is a BUS
+value, never a stored one, and the mask is bracketed by the reference frame.**
+Hardware draws tile `$38` at (56, 90).
 The redirect gives tile `$30` at (48, 64). The difference is precisely the OAM
 CORRUPTION — `$38` and `$5A` are what the held write leaves in OAM, and LIJI
 says that pattern is UNIT SPECIFIC. So a correct redirect draws the WRONG
@@ -659,7 +776,7 @@ That is a general correctness question worth testing on its own: it touches the
 40-row `oamdma` family, the sixteen `late_sp*` brackets and `strikethrough`,
 none of which need this madness ROM to arbitrate them. Start there.
 
-### Why it is not implemented yet
+### Why it was not implemented (superseded 2026-08-21; the probe below is no longer needed)
 
 Scope is small (one phantom sprite, gated on `dma_active and cpu.halted`) but
 the details are invented rather than derived: which OAM index the stall lands
