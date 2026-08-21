@@ -1080,6 +1080,89 @@ const STAT_M2_LEAD* {.intdefine.} = 0
   ## CPU M-cycles the OAM STAT source comes up before the line boundary.
   ## 0 is the boundary itself and compiles the whole mechanism out.
   ##
+  ## ---- 2026-08-20: bracketed TWO-SIDED, and the device split is the bug ------
+  ##
+  ## Everything below this paragraph derives the lead from SLEDS -- one-sided
+  ## rulers that count M-cycles from the source's rise and can only say "one
+  ## over". GBMicrotest's `oam_int_if_edge_{a,b,c,d}` are a different and much
+  ## sharper instrument, and they were not read as one until now. The four are
+  ## the same ROM with `xor a ; ldh ($FF0F),a ; ldh a,($FF0F)` at four offsets
+  ## in a NOP sled (+0, +1, +3, +4 M-cycles): the block clears IF and reads it
+  ## back three M-cycles later, so `$E2` means the OAM source's RISING edge fell
+  ## inside that window and `$E0` means it did not. A window of known width
+  ## swept across an edge locates the edge, and hardware's four members put it
+  ## at exactly one M-cycle.
+  ##
+  ## `tools/gbppu/ifedgesled.py` manufactures the members the suite does not
+  ## ship, so the whole sled can be read off instead of four points of it. At
+  ## k = 0..8, the `$E2` window:
+  ##
+  ##   hardware (the four shipped members)      k = 1, 2, 3
+  ##   dingbat, DMG                             k = 2, 3, 4    <- one M LATE
+  ##   dingbat, CGB (STAT_M2_LEAD_CGB = 1)      k = 1, 2, 3    <- EXACT
+  ##
+  ## Same width, shifted by one, on one device only. So the quantity is real,
+  ## it is one CPU M-cycle, and **the CGB already has it right**: what ships is
+  ## not "the CGB leads the DMG" but "the DMG is a cycle late and the CGB's
+  ## addend hides it". The lead wants spelling as `STAT_M2_LEAD = 1` with
+  ## `STAT_M2_LEAD_CGB = 0`, which is the same total on CGB and moves DMG onto
+  ## it.
+  ##
+  ## ---- What that re-spelling costs, measured on f8811ba ---------------------
+  ##
+  ## It is not one constant, it is three, and each of the three is a DMG/CGB
+  ## split that collapses to a single device-independent value:
+  ##
+  ##   STAT_M2_LEAD 0 -> 1   with STAT_M2_LEAD_CGB 1 -> 0     (this file)
+  ##   M3_PIPE_AHEAD 0 -> 1  with CGB_PIPE_MCYCLES 1 -> 0     (fifo_ppu.nim)
+  ##   STAT_M0_FIELD_TAIL 3 -> 0   (== STAT_M0_FIELD_TAIL_CGB, gb.nim)
+  ##
+  ## All five together: runner 1043 -> 1048, gambatte 4387 -> 4410,
+  ## GBMicrotest 438 -> 446, mooneye-wilbertpol 136 -> 138, mooneye 151 -> 146,
+  ## mealybug / AGE / SameSuite / the shootout rows unmoved -- and **not one
+  ## `[cgb]` row in the whole gambatte suite moves in either direction**, which
+  ## is the check that says the re-spelling is a re-spelling. `m2int_m3stat`
+  ## goes 44/44, `m2int_m0stat` 6/6, `m2int_m2stat` 8/8, `window` +11,
+  ## `m2int_m0irq` +6, and every remaining `m2int_m0irq` failure becomes the
+  ## SAME row on both devices where it used to be device-split.
+  ##
+  ## The three cannot be taken separately. This file's two alone (with the field
+  ## tail) are runner 1023 / gambatte 4290: every loss is a mode-3 pixel family
+  ## (`scy` 67 -> 43, `bgtiledata` 34 -> 18, `bgtilemap` 40 -> 24), because the
+  ## handler now reaches its register write four dots earlier and the pipeline
+  ## has not moved with it. `M3_PIPE_AHEAD` gives all of those back row for row.
+  ##
+  ## ---- Why it is still not flipped here -------------------------------------
+  ##
+  ## Two of the five live in `fifo_ppu.nim`, and the residual is in that file's
+  ## families rather than this one's. Scored against SameBoy the trade is
+  ## **+58 rows the oracle passes, -34 rows the oracle also passes** -- a net
+  ## +24, but 34 rows a good emulator gets right and this does not. They are one
+  ## shape: `oam_access`/`vram_m3` `postread_*_2`, `window/*_m3stat_2` and
+  ## `sprites/sprite_late_*_disable_*_1`, all `got 3 expected 0`, all saying the
+  ## mode 3 -> 0 edge is now four dots late RELATIVE TO THE SOURCE that just
+  ## moved. The obvious next leg is refused: `M3_END_EARLY = 4` on top of the
+  ## five is runner 1023 / gambatte 4290, i.e. the mode 3 END must stay exactly
+  ## where it is. So the missing term moves the mode 2/3/0 dot grid with the
+  ## source while leaving mode 3's LENGTH and LY alone, and it is not any knob
+  ## in the tree today.
+  ##
+  ## `LCD_ON_HEAD_START` is refused as that term, and cheaply: `int_oam_nops`
+  ## and `int_lyc_nops` are byte-for-byte the same ROM apart from the STAT
+  ## source bit ($20 against $40), both anchored on the same `LDH ($40),A`
+  ## LCD-on, and the LYC arm is exact ($99) while the OAM arm is one M over
+  ## ($94 against $93). A whole-PPU phase would move both.
+  ##
+  ## ---- The halt half, measured on the same tree ------------------------------
+  ##
+  ## `HALT_IF_SAMPLE_T = 2` on top of the five is runner 1052 / gambatte 4394.
+  ## It does exactly what the paragraph below predicts -- all five mooneye
+  ## `intr_2_*` rows come back in both suites, and GBMicrotest's
+  ## `int_hblank_halt_scx{0,3,4,7}`, `int_oam_halt` and `oam_int_halt_b` with
+  ## them -- and it still costs its own named rows: `hblank_ly_scx_timing-GS`
+  ## x4 and `vblank_stat_intr-C` x2 in each mooneye suite, plus gambatte `halt`
+  ## 137 -> 122. Runner +4 and gambatte -16 against the five alone.
+  ##
   ## ---- M-cycles, not dots ---------------------------------------------------
   ##
   ## Spelled as a fixed PPU dot first, because a pulse the OAM scan generates

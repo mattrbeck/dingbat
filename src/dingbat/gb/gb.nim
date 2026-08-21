@@ -164,6 +164,31 @@ const STAT_M0_FIELD_TAIL* {.intdefine.} = 3
   ## charged at the read instead. With that gate the same K keeps every gain and
   ## loses nothing: **local runner 773 -> 779, gambatte 4004 -> 4044, and no row
   ## anywhere goes the other way.**
+  ##
+  ## ---- 2026-08-20: this term may be the OAM lead, one level down -----------
+  ##
+  ## The note below calls the DMG/CGB difference here "independently predicted
+  ## by the `scx_m3_extend` brackets, which are themselves device-split by one
+  ## M-cycle". That one M-cycle is now bracketed two-sided somewhere else, and
+  ## on the other device: GBMicrotest's `oam_int_if_edge` sled says the DMG's
+  ## OAM STAT source is one M-cycle late and the CGB's is exact (see
+  ## `STAT_M2_LEAD` in ppu.nim). Move the DMG source onto the CGB's phase and
+  ## THIS term wants 0 as well -- swept on f8811ba on top of that re-spelling,
+  ## runner / gambatte:
+  ##
+  ##   K   -1     0     1     2     3 (ships)
+  ##      1048  1048  1044  1042  1040
+  ##      4410  4410  4370  4351  4344
+  ##
+  ## -1 and 0 are indistinguishable (nothing samples between them, the same
+  ## ambiguity the "K = 3 or 4" solve below has), and 0 is the value the CGB
+  ## already carries. So all three of the tree's DMG/CGB splits in this bucket
+  ## -- this one, `STAT_M2_LEAD`/`_CGB`, and `M3_PIPE_AHEAD`/`CGB_PIPE_MCYCLES`
+  ## -- collapse to one device-independent value at once, and no `[cgb]` row
+  ## moves when they do.
+  ##
+  ## It is NOT flipped on its own: alone on the shipping tree 3 is still the
+  ## strict local maximum the sweep below found. It only wants 0 in company.
 
 const STAT_M0_FIELD_TAIL_CGB* {.intdefine.} = 0
   ## `STAT_M0_FIELD_TAIL` on a CGB. Zero is both the shipping value and the

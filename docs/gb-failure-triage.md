@@ -479,6 +479,104 @@ mode-1/mode-2 handover at the top of line 144 where hardware refuses an edge
 that a level-OR gives -- and they are no longer worth 24 rows of the comparator
 handover to keep.
 
+## BRACKETED 2026-08-20: the DMG OAM STAT source is one M-cycle late, and the tree spells it as three DMG/CGB splits
+
+
+Bucket 14, re-measured with a two-sided instrument instead of a sled, and the
+answer is not what the bucket was named for. **Nothing is flipped for it yet**:
+two of the five constants live in `fifo_ppu.nim` and the residual is in that
+file's families. The reproduction is one command, below.
+
+### The instrument
+
+GBMicrotest's `oam_int_if_edge_{a,b,c,d}` are four copies of one ROM with
+`xor a ; ldh ($FF0F),a ; ldh a,($FF0F)` at four offsets in a NOP sled (+0, +1,
++3, +4 M-cycles). The block clears IF and reads it back three M-cycles later, so
+`$E2` means a STAT source's *rising edge* fell inside that three-M-cycle window
+and `$E0` means it did not — a window of known width swept across an edge, which
+locates the edge outright rather than counting up to it.
+`tools/gbppu/ifedgesled.py` manufactures the members the suite does not ship:
+
+```
+python3 tools/gbppu/ifedgesled.py \
+  /tmp/dingbat-test-roms/game-boy-test-roms/gbmicrotest/oam_int_if_edge_a.gb \
+  233 0,1,2,3,4,5,6,7,8 /tmp/sled
+./dingbat_test /tmp/sled/oam_int_if_edge_a_k3.gb --mode=microtest --timeout=60
+```
+
+`$FF80` carries the value read whether the ROM's own compare passes or fails, so
+every manufactured member reports. The `$E2` window, k = 0..8:
+
+| | window |
+|---|---|
+| hardware (from the four shipped members) | k = 1, 2, 3 |
+| dingbat, DMG | k = 2, 3, 4 — **one M-cycle late** |
+| dingbat, CGB (`STAT_M2_LEAD_CGB = 1`) | k = 1, 2, 3 — **exact** |
+
+Same width, shifted by one, on one device only. So the CGB already has this
+right and what ships is not "the CGB leads the DMG" but "the DMG is a cycle late
+and the CGB's addend hides it".
+
+### Three splits, one quantity
+
+| constant | ships | wants | file |
+|---|---|---|---|
+| `STAT_M2_LEAD` / `STAT_M2_LEAD_CGB` | 0 / 1 | **1 / 0** | `ppu.nim` |
+| `M3_PIPE_AHEAD` / `CGB_PIPE_MCYCLES` | 0 / 1 | **1 / 0** | `fifo_ppu.nim` |
+| `STAT_M0_FIELD_TAIL` (`_CGB` is already 0) | 3 | **0** | `gb.nim` |
+
+All five together, on `f8811ba`: runner **1043 → 1048**, gambatte
+**4387 → 4410**, GBMicrotest **438 → 446**, mooneye-wilbertpol 136 → 138,
+mooneye 151 → 146, and mealybug / AGE / SameSuite / the shootout rows unmoved.
+**Not one `[cgb]` row in the gambatte suite moves in either direction** — the
+check that says a re-spelling really is a re-spelling. `m2int_m3stat` goes
+44/44, `m2int_m0stat` 6/6, `m2int_m2stat` 8/8, `window` +11, `m2int_m0irq` +6,
+and every surviving `m2int_m0irq` failure becomes the SAME row on both devices
+where it used to be device-split.
+
+The `STAT_M0_FIELD_TAIL` sweep on top of the other four is two-sided and lands
+on the CGB's own value: K = −1/0/1/2/3 → runner 1048/1048/1044/1042/1040,
+gambatte 4410/4410/4370/4351/4344.
+
+### Why it is not flipped
+
+* **Ownership.** `M3_PIPE_AHEAD` and `CGB_PIPE_MCYCLES` belong to the mode-3
+  agent, and the residual below is in that agent's families.
+* **The residual is 34 rows SameBoy passes.** Against the oracle the trade is
+  **+58 / −34**, not a sweep. The 34 are one shape — `oam_access` / `vram_m3`
+  `postread_*_2`, `window/*_m3stat_2`, `sprites/sprite_late_*_disable_*_1`, all
+  `got 3 expected 0` — saying the mode 3 → 0 edge is now four dots late
+  *relative to the source that just moved*.
+
+So the missing term moves the mode 2/3/0 dot grid with the source while leaving
+mode 3's LENGTH and LY where they are. Two candidates are already refused:
+
+* `M3_END_EARLY = 4` on top of the five is runner 1023 / gambatte 4290. The mode
+  3 END must stay exactly where it is.
+* `LCD_ON_HEAD_START` — i.e. a whole-PPU phase — is refused by construction.
+  `int_oam_nops` and `int_lyc_nops` are byte-for-byte the same ROM apart from
+  the STAT source bit (`$20` against `$40`), both anchored on the same
+  `LDH ($40),A` LCD-on; the LYC arm is exact (`$99`) and the OAM arm is one
+  M-cycle over (`$94` against `$93`). A whole-PPU phase would move both.
+
+### The halt half, on the same tree
+
+`HALT_IF_SAMPLE_T = 2` on top of the five is runner **1052** / gambatte **4394**.
+It does exactly what `STAT_M2_LEAD`'s note predicts — all five mooneye
+`intr_2_*` rows return in both suites, with GBMicrotest's
+`int_hblank_halt_scx{0,3,4,7}`, `int_oam_halt` and `oam_int_halt_b` — and still
+costs its own named rows: `hblank_ly_scx_timing-GS` ×4 and `vblank_stat_intr-C`
+×2 in each mooneye suite, plus gambatte `halt` 137 → 122. Runner +4, gambatte
+−16 against the five alone.
+
+### Also refuted
+
+`STAT_M2_LEAD = 1` + `STAT_M2_LEAD_CGB = 0` + `STAT_M0_FIELD_TAIL = 0` **without**
+the `fifo_ppu.nim` pair is runner 1023 / gambatte 4290: every loss is a mode-3
+pixel family (`scy` 67 → 43, `bgtiledata` 34 → 18, `bgtilemap` 40 → 24), because
+the handler reaches its register write four dots earlier and the pipeline has
+not moved with it. The three cannot be taken separately.
+
 ## SOLVED 2026-08-20: a `$FF0F` read samples 2 dots into its own M-cycle
 
 `IF_READ_SAMPLE_T` in `gb.nim`, mechanism written up above `irq_read` in
