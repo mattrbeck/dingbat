@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-21 08:46:24*
+*Generated: 2026-08-21 08:52:03*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4470/4996 passed.**
+**4471/4996 passed.**
 
 ## bgen
 
@@ -110,7 +110,7 @@ All 8 tests passed.
 | dma/hdma_transition_speedchange_7fffstop_inc_cgb04c_out02 [cgb] | got 01, expected 02 |
 | dma/hdma_transition_speedchange_ldaaimm_scx1_cgb04c_outFF [cgb] | got 31, expected FF |
 | dma/hdma_transition_speedchange_ldaaimm_scx1_ds_cgb04c_out03 [cgb] | got 31, expected 03 |
-| dma/hdma_transition_speedchange_oamdma_cgb04c_out71 [cgb] | got A0, expected 71 |
+| dma/hdma_transition_speedchange_oamdma_cgb04c_out71 [cgb] | got 72, expected 71 |
 | dma/hdma_vs_m0int_pc_scx1_1_cgb04c_out1033 [cgb] | got 1034, expected 1033 |
 | dma/hdma_vs_m0int_pc_scx1_2_cgb04c_out1033 [cgb] | got 1034, expected 1033 |
 | dma/late_gdma_pc_7ffe_1_cgb04c_out02 [cgb] | got 00, expected 02 |
@@ -571,9 +571,9 @@ All 44 tests passed.
 | oam_access/prewrite_ds_2_cgb04c_out0 [cgb] | got 1, expected 0 |
 | oam_access/prewrite_ds_lcdoffset1_2_cgb04c_out0 [cgb] | got 1, expected 0 |
 
-## oamdma (785/802 passed)
+## oamdma (786/802 passed)
 
-785/802 tests passed, 17 failed:
+786/802 tests passed, 16 failed:
 
 | Test | Result |
 |------|--------|
@@ -593,7 +593,6 @@ All 44 tests passed.
 | oamdma/oamdma_src0000_busyint0002_dmg08_cgb04c_outFF941234 [cgb] | got 76871234, expected FF941234 |
 | oamdma/oamdma_src8000_srcchange0000_busyinc_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |
 | oamdma/oamdma_src8000_srcchange0000_busyinc_dmg08_cgb04c_out0 [cgb] | got 1, expected 0 |
-| oamdma/oamdmasrcC0_speedchange_readC000_cgb04c_out11 [cgb] | got 00, expected 11 |
 
 ## scx_during_m3 (131/141 passed)
 

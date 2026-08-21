@@ -1012,6 +1012,38 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
         mem.dma_busy = mem.dma_position <= 0xA0
       inc mem.internal_dma_timer
 
+const SPEED_SWITCH_FREEZES_OAM_DMA* {.intdefine.} = 1
+  ## The OAM DMA unit does NOT step through a speed-switch stall.
+  ##
+  ## It is clocked by BUS cycles, and there are none while the CPU clock is
+  ## off -- the same thing OAMDMA_HALT_PAUSE says about a HALT, and the same
+  ## thing SameBoy's `GB_dma_run` says with its `gb->halted || gb->stopped`
+  ## early return. The TIMER is a separate domain: the divider goes on
+  ## counting, which is what `speedchange_tima00_*` needs and why
+  ## SPEED_SWITCH_STALL_RUNS_CPU_CLOCK ticks it here at all. Freezing the two
+  ## together was reading one domain's evidence onto the other.
+  ##
+  ## The stall is ~32768 M-cycles, so before this ANY transfer in flight over
+  ## a switch simply completed. Both rows that watch one say otherwise:
+  ##
+  ##   row                                     off   frozen   want
+  ##   oamdma/oamdmasrcC0_speedchange_readC000  00     10      11
+  ##   dma/hdma_transition_speedchange_oamdma   A0     73      71
+  ##
+  ## -- a whole-transfer error becoming a one-M-cycle one on both.
+const SPEED_SWITCH_OAM_DMA_HANDBACK_T* {.intdefine.} = 4
+  ## Cycles the unit IS still clocked for across that stall: the bus
+  ## hand-back, exactly the one M-cycle OAMDMA_HALT_PAUSE charges at a HALT
+  ## wake for the same reason.
+  ##
+  ## Two-sided, and the two rows above are the two sides: at 4
+  ## `oamdmasrcC0_speedchange_readC000` is exact and
+  ## `hdma_transition_speedchange_oamdma` answers $72 for $71; at 8 they swap
+  ## ($11 becomes $12, $71 lands). Both score gambatte 4471. **4 is chosen
+  ## because it is the M-cycle the HALT path already charges, not because it
+  ## fits better** -- the residue is one M-cycle of where the hand-back sits
+  ## relative to the HDMA that the second ROM also has running, and that is
+  ## the thing left to derive.
 const SPEED_SWITCH_STALL_T* {.intdefine.} = 65548
   ## How long the CPU clock is stopped by a KEY1 speed switch, in T-cycles of
   ## the 4.194304 MHz base clock, i.e. real time (~15.6 ms) — the CPU clock is
@@ -1353,7 +1385,10 @@ proc mem_tick_stalled(mem: GbMemory; gb: GB; cycles: int) =
   gb.scheduler.tick(cycles)
   when SPEED_SWITCH_STALL_RUNS_CPU_CLOCK != 0:
     timer_tick(gb.timer, gb, cycles)
-    mem_dma_tick(mem, gb, cycles)
+    when SPEED_SWITCH_FREEZES_OAM_DMA == 0:
+      mem_dma_tick(mem, gb, cycles)
+    elif SPEED_SWITCH_OAM_DMA_HANDBACK_T != 0:
+      mem_dma_tick(mem, gb, SPEED_SWITCH_OAM_DMA_HANDBACK_T)
   # `current_speed` is already the speed being switched TO, so this picks the
   # extra by DIRECTION: 1 is a switch that ended in double speed.
   const extra_single =
