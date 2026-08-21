@@ -126,6 +126,36 @@ proc serial_tap(gb: GB): uint16 {.inline.} =
   ## table and the (measured) reason neither the boot seed nor anything on this
   ## side settles it are at SERIAL_TAP_DMG in gb.nim; the DMG ships at 4, where
   ## the hardware-verified mooneye row is green.
+  ##
+  ## ---- REFUTED 2026-08-21: the CGB FAST clock's residue is not a phase -----
+  ##
+  ## `start83_*` runs the CGB fast clock (SC.1, tap bit 2, 8 T per toggle,
+  ## 16 T per bit) and dingbat is a uniform TWO M-cycles late on it. Measured
+  ## two-sidedly against SameBoy on `start83_late_div_write_wait_read_if_1a`,
+  ## sliding both islands through their sleds: dingbat's E0->E8 flip is at +2
+  ## where SameBoy's is at 0, at all thirteen DIV-write positions, with the
+  ## 2-M-cycle alternation of the tap's own period on top. Eight T-cycles is
+  ## one whole master-clock toggle, which no tap value can express -- the fast
+  ## mask is bit 2, so a tap only reaches phases 0..7.
+  ##
+  ## The complete phase space was then swept, 24 builds, over all 82 `serial`
+  ## rows: a fast-clock-specific tap 0..7 crossed with what the SC write does
+  ## to the half-rate master clock (reseed LOW = shipping, reseed HIGH, or
+  ## leave it free-running). Everything scores 75 except (seed HIGH, tap 4..7)
+  ## which scores 77 -- a four-cell plateau, one M-cycle wide, and the global
+  ## maximum of the whole space.
+  ##
+  ## It is not shipped, and the reason is not the total. At that maximum three
+  ## rows go green (`nopx1_start83_wait_read_if_2`,
+  ## `start83_late_div_write_wait_read_if_{1b,2b}`) and
+  ## `nopx2_start83_wait_read_if_1` goes red -- a row SameBoy passes -- so the
+  ## maximum still does not reconcile with the oracle, "the master clock is
+  ## reseeded HIGH on a fast start" has no support outside this score, it is
+  ## worth zero RUNNER rows (`gambatte/serial` fails either way), and it would
+  ## change what a real CGB link cable does. **What the sweep does establish is
+  ## that the residue is not reachable by any phase of this model at all**, so
+  ## the next attempt needs a different one -- most likely that SC.1 does not
+  ## use the same half-rate master divider as SC.0 in the first place.
   if gb.cgb_enabled: uint16(SERIAL_TAP_CGB) else: uint16(SERIAL_TAP_DMG)
 
 proc serial_clock_level(serial: GbSerial; gb: GB): bool {.inline.} =
