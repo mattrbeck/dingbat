@@ -4674,7 +4674,7 @@ template fifo_skip_target(ppu: GbFifoPpu; gb: GB; m: uint8): int32 =
     # extra dot for the idle skip to stop on and the shipping build keeps the
     # plain three-way choice. Only a DOMAIN lead needs the branch below.
     if m == 2: m3_start_dot(gb)
-    elif ppu.ly == 143 and m == 0 and gb.cgb_enabled: M2_144_EARLY_DOT
+    elif ppu.ly == 143 and m == 0 and m2_144_early_active(gb): M2_144_EARLY_DOT
     elif ppu.m2_early_stop(gb): ppu.m2_early_dot(gb)
     else: gb_line_end(ppu)
   else:
@@ -4703,7 +4703,7 @@ template fifo_skip_target(ppu: GbFifoPpu; gb: GB; m: uint8): int32 =
         if ppu.m2_early_stop(gb):
           let m2_dot = ppu.m2_early_dot(gb)
           if m2_dot >= ppu.cycle_counter and m2_dot < tgt: tgt = m2_dot
-      if ppu.ly == 143 and m == 0 and gb.cgb_enabled and
+      if ppu.ly == 143 and m == 0 and m2_144_early_active(gb) and
          M2_144_EARLY_DOT >= ppu.cycle_counter and M2_144_EARLY_DOT < tgt:
         tgt = M2_144_EARLY_DOT
       tgt
@@ -5311,7 +5311,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         # detector has to be run here explicitly; the skip target above stops
         # the idle jump on it so this dot is actually visited.
         if ppu.cycle_counter == M2_144_EARLY_DOT and ppu.ly == 143 and
-           gb.cgb_enabled:
+           m2_144_early_active(gb):
           ppu_handle_stat_interrupt(ppu, gb)
         # ...and the OAM source of the line about to START comes up in this
         # line's last M-cycle, on every line that scans OAM. Same shape, same

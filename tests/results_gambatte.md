@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-21 12:24:31*
+*Generated: 2026-08-21 12:40:22*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4522/4996 passed.**
+**4524/4996 passed.**
 
 ## bgen
 
@@ -128,9 +128,9 @@ All 8 tests passed.
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_4 [dmg, png] | 1/23040 pixels differ |
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_5 [dmg, png] | 144/23040 pixels differ |
 
-## enable_display (155/184 passed)
+## enable_display (157/184 passed)
 
-155/184 tests passed, 29 failed:
+157/184 tests passed, 27 failed:
 
 | Test | Result |
 |------|--------|
@@ -139,14 +139,12 @@ All 8 tests passed.
 | enable_display/enable_display_ly0_sprites_m0stat_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | enable_display/frame0_m0irq_count_scx2_ds_1_cgb04c_out90 [cgb] | got 00, expected 90 |
 | enable_display/frame0_m0irq_count_scx3_ds_1_cgb04c_out90 [cgb] | got 00, expected 90 |
-| enable_display/frame0_m2irq_count_2_dmg08_cgb04c_out91 [dmg] | got 90, expected 91 |
 | enable_display/frame0_m2irq_count_ds_1_cgb04c_out98 [cgb] | got 90, expected 98 |
 | enable_display/frame0_m2stat_count_ds_1_cgb04c_out91 [cgb] | got 01, expected 91 |
 | enable_display/frame0_m3stat_count_ds_1_cgb04c_out90 [cgb] | got 00, expected 90 |
 | enable_display/frame1_ly_count_2_dmg08_cgb04c_out9A [dmg] | got 00, expected 9A |
 | enable_display/frame1_ly_count_2_dmg08_cgb04c_out9A [cgb] | got 00, expected 9A |
 | enable_display/frame1_m0irq_count_scx3_ds_1_cgb04c_out90 [cgb] | got 00, expected 90 |
-| enable_display/frame1_m2irq_count_2_dmg08_cgb04c_out91 [dmg] | got 90, expected 91 |
 | enable_display/frame1_m2irq_count_ds_1_cgb04c_out98 [cgb] | got 90, expected 98 |
 | enable_display/frame1_m2stat_count_1_dmg08_cgb04c_out91 [cgb] | got 00, expected 91 |
 | enable_display/frame1_m2stat_count_ds_1_cgb04c_out91 [cgb] | got 01, expected 91 |

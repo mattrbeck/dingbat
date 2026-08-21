@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-21 12:24:31 · commit 7ac5983 · game-boy-test-roms v7.0*
+*Generated: 2026-08-21 12:40:22 · commit 194db44 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1225
-- **Pass:** 1093
-- **Fail:** 132
+- **Pass:** 1097
+- **Fail:** 128
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -22,13 +22,13 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Acid2 | 2 | 2 |
 | Game Boy - MagenTests | 7 | 7 |
 | Game Boy - Mealybug Tearoom | 73 | 74 |
-| Game Boy - GBMicrotest | 472 | 482 |
+| Game Boy - GBMicrotest | 475 | 482 |
 | Game Boy - AGE | 44 | 89 |
 | Game Boy - Screenshot suites | 13 | 13 |
 | Game Boy - SameSuite | 8 | 8 |
 | Game Boy - SameSuite APU | 67 | 70 |
 | Game Boy - Shootout ROMs | 13 | 13 |
-| Game Boy - Mooneye (wilbertpol) | 144 | 184 |
+| Game Boy - Mooneye (wilbertpol) | 145 | 184 |
 | Game Boy - gambatte | 17 | 48 |
 
 ## Game Boy - Blargg (28/28)
@@ -315,7 +315,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mealybug/dma/hdma_timing-C | CGB | 👀 Mooneye: FAIL |
 | mealybug/mbc/mbc3_rtc | cart | 👌 |
 
-## Game Boy - GBMicrotest (472/482)
+## Game Boy - GBMicrotest (475/482)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -484,9 +484,9 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/lcdon_to_stat3_c | cart | 👌 |
 | gbmicrotest/lcdon_to_stat3_d | cart | 👌 |
 | gbmicrotest/line_144_oam_int_a | cart | 👌 |
-| gbmicrotest/line_144_oam_int_b | cart | 👀 actual=0xE0 expected=0xFF verdict=0xFF |
-| gbmicrotest/line_144_oam_int_c | cart | 👀 actual=0xE0 expected=0xE2 verdict=0xFF |
-| gbmicrotest/line_144_oam_int_d | cart | 👀 actual=0xE3 expected=0x00 verdict=0xFF |
+| gbmicrotest/line_144_oam_int_b | cart | 👌 |
+| gbmicrotest/line_144_oam_int_c | cart | 👌 |
+| gbmicrotest/line_144_oam_int_d | cart | 👌 |
 | gbmicrotest/line_153_ly_a | cart | 👌 |
 | gbmicrotest/line_153_ly_b | cart | 👌 |
 | gbmicrotest/line_153_ly_c | cart | 👀 actual=0x99 expected=0x00 verdict=0xFF |
@@ -983,7 +983,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 13 tests passed.**
 
-## Game Boy - Mooneye (wilbertpol) (144/184)
+## Game Boy - Mooneye (wilbertpol) (145/184)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -1039,7 +1039,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx4_nops | cart | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/intr_2_mode3_timing | cart | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/intr_2_oam_ok_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_timing | cart | 👀 Mooneye: FAIL |
+| mooneye-wilbertpol/acceptance/gpu/intr_2_timing | cart | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/lcdon_mode_timing | cart | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly00_01_mode0_2 | cart | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly00_mode0_2-GS@dmgABC | DMG dmgABC | 👌 |
@@ -1184,7 +1184,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/div | per-ROM | 👌 8/8 passed |
 | gambatte/dma | per-ROM | 👀 177/229 passed |
 | gambatte/dmgpalette_during_m3 | per-ROM | 👀 9/17 passed |
-| gambatte/enable_display | per-ROM | 👀 155/184 passed |
+| gambatte/enable_display | per-ROM | 👀 157/184 passed |
 | gambatte/halt | per-ROM | 👀 141/158 passed |
 | gambatte/irq_precedence | per-ROM | 👀 48/64 passed |
 | gambatte/lcd_offset | per-ROM | 👀 42/62 passed |

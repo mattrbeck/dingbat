@@ -1082,6 +1082,26 @@ proc stat_read_mode*(ppu: GbPpu; gb: GB): uint8 {.inline.} =
 # See m2_line144 below: 456 - 4 dots, i.e. one M-cycle before the line ends.
 const M2_144_EARLY_DOT* = 452'i32
 
+const M2_144_EARLY_DMG* {.booldefine.} = true
+  ## Whether the DMG raises the line-144 OAM STAT source one M-cycle before the
+  ## line ends, the way the CGB already does, FOR A RUNNING CPU. See
+  ## m2_line144 for the two witnesses and how they are told apart.
+
+const M2_144_EARLY_DMG_HALT* {.booldefine.} = true
+  ## ...and whether a HALTED DMG is blind to it there, so its wake still lands
+  ## on the line boundary with the vblank interrupt. Same shape as
+  ## `M2_LEAD_HALT_BLIND` (cpu.nim) and `LYC_SETTLE_HALT_SKIP` (gb.nim): the
+  ## early dot is a RUNNING-CPU rule. Inert at `M2_144_EARLY_DMG = false`.
+
+template m2_144_early_active*(gb: GB): bool =
+  ## Which consoles raise the line-144 OAM STAT source before the line ends.
+  ## The skip target and the dot loop in fifo_ppu.nim ask this too -- the dot
+  ## has to be VISITED for the level source's edge to be seen at all, and they
+  ## ask it WITHOUT the halt test below, so a halt that ends mid-window still
+  ## finds the dot it needs.
+  when M2_144_EARLY_DMG: true
+  else: gb.cgb_enabled
+
 # ---- The OAM (mode 2) STAT source is a pulse, not a level -------------------
 #
 # It goes high for the first four dots of a line and low again for the rest of
@@ -1585,6 +1605,31 @@ proc m2_line144*(ppu: GbPpu; gb: GB): bool {.inline.} =
   ##   * DMG/MGB/SGB (vblank_stat_intr-GS): together with the vblank interrupt.
   ##   * CGB/AGB/AGS (misc/ppu/vblank_stat_intr-C): one M-cycle earlier.
   ##
+  ## **The DMG half of that is a HALTED reading** (2026-08-21). GBMicrotest's
+  ## `line_144_oam_int_{a..d}` ask the same question with a RUNNING NOP sled and
+  ## an IF READ rather than a dispatch, and they answer `E2` -- the OAM source
+  ## already up, the vblank flag not yet -- on the M-cycle where
+  ## `vblank_stat_intr-GS` says the two coincide. Read $FF0F on a sled with
+  ## IE = 0 (`.work/ifsled.py`, tools/gbfuzz/sameboy_microtest) and the two
+  ## emulators differ on EXACTLY ONE M-cycle of a hundred:
+  ##
+  ##     k        ...93     94      95   ...
+  ##     dingbat   E0       E0      E3
+  ##     SameBoy   E0     **E2**    E3
+  ##
+  ## `vblank_stat_intr-GS` waits with `EI ; HALT` (at $0167 and $01D3);
+  ## `line_144_oam_int_*` runs a 90-93 NOP sled. So the DMG's early dot is a
+  ## RUNNING-CPU rule and a halted DMG is blind to it, exactly like
+  ## `M2_LEAD_HALT_BLIND` for the per-line lead and `LYC_SETTLE_HALT_SKIP` for
+  ## the snapback. With `M2_144_EARLY_DMG` + `M2_144_EARLY_DMG_HALT` both on,
+  ## the three `line_144_oam_int_{b,c,d}` rows,
+  ## `mooneye-wilbertpol acceptance/gpu/intr_2_timing` and two
+  ## `gambatte enable_display/frame{0,1}_m2irq_count_2 [dmg]` rows go green and
+  ## NOTHING in the tree goes red -- `vblank_stat_intr-GS` included, on all
+  ## eight machine arms. Without the halt half it is -4 runner rows: the same
+  ## three microtest rows and `intr_2_timing`, against `vblank_stat_intr-GS`
+  ## red on all eight.
+  ##
   ## Both ROMs time the interrupt by resetting DIV a fixed number of NOPs into
   ## line 143 and reading it back in the handler. The vblank rounds bracket the
   ## DIV tick at 54/55 NOPs on every model; the STAT rounds bracket it at the
@@ -1600,8 +1645,10 @@ proc m2_line144*(ppu: GbPpu; gb: GB): bool {.inline.} =
   if ppu.ly == 144:
     ppu.mode_flag == 1
   elif ppu.ly == 143:
-    gb.cgb_enabled and ppu.mode_flag == 0 and
-      ppu.cycle_counter >= M2_144_EARLY_DOT
+    ppu.mode_flag == 0 and ppu.cycle_counter >= M2_144_EARLY_DOT and
+      (when M2_144_EARLY_DMG and M2_144_EARLY_DMG_HALT:
+         gb.cgb_enabled or not gb.cpu.halted
+       else: m2_144_early_active(gb))
   else:
     false
 
