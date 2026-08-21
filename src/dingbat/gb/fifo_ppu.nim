@@ -1751,12 +1751,50 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
     # cannot arrive before it happens, so the equivalent is "the CGB confirms
     # the window start one M-cycle after taking it", and by dot 93 this
     # renderer has already flushed the BG FIFO and spent two dots of the
-    # restart. Undoing that is not fifo_obj_abort's trick -- there the refund
-    # can be spent as pipeline dots because the BG FIFO is full, and here it is
-    # empty by construction. The two shapes that could work, neither tried:
-    # defer the CGB's FIFO flush by an M-cycle so the start is genuinely
-    # abortable, or give the line the six dots back through `m3_lead` the way
-    # M3_END_EARLY does. The second is another agent's constant this round.
+    # restart. Undoing that is not fifo_obj_abort's trick AS THE CODE STANDS --
+    # there the refund can be spent as pipeline dots because the BG FIFO is
+    # full, and here it is empty by construction.
+    #
+    # ---- Which of the two shapes it is, settled 2026-08-21 ----------------
+    #
+    # The note used to name two shapes and try neither. One of them is wrong
+    # and the other is right, and both can be decided on paper:
+    #
+    #  * **"give the line the six dots back through `m3_lead`"** is WRONG. It
+    #    would score these ROMs (they read STAT, and 172 is 178 minus the
+    #    restart) while drawing the window anyway -- a CGB game that clears
+    #    LCDC.5 just after a WX match would lose six dots of background it is
+    #    entitled to, and nothing in the suite would say so. Do not spend a
+    #    round on it.
+    #  * **"defer the CGB's FIFO flush by an M-cycle"** is right, and the
+    #    "empty by construction" objection dissolves once the flush is what
+    #    moves. The schedule, for a CGB match on dot D:
+    #
+    #      D .. D+3   the shifter is STALLED and nothing else happens: no
+    #                 flush, no restart, no pixel. The match is held.
+    #      D+4        LCDC.5 is read. Set -> flush and restart now, with four
+    #                 of the restart's six dots already spent, so the window's
+    #                 first pixel lands on the pixel the MATCH was on and mode
+    #                 3 is 172 + 6 as it is today. Clear -> drop the match and
+    #                 spend the four held dots as pipeline dots, exactly as
+    #                 fifo_obj_abort spends OBJ_ABORT_LEAD, and mode 3 is 172.
+    #
+    #    Both arms are pixel-neutral and length-neutral by construction, which
+    #    is the whole point: the CGB's mode-3 length does not depend on WHERE
+    #    on the line the window starts (the shifter emits 160 pixels and pays
+    #    one 6-dot restart either way), so the hold costs nothing that the
+    #    commit does not give straight back.
+    #
+    #    What it is NOT is a latency on the trigger. Moving the CGB's WX
+    #    comparison itself four dots later scores this family identically and
+    #    starts the window four pixels right of where mealybug's CGB references
+    #    put it -- the difference between the two is invisible to gambatte and
+    #    obvious to the ruler, so the hold has to take the pixel back the way
+    #    WIN_EN_HOLD_BACK already does for the DMG's late-arriving bit.
+    #
+    #    Not built here because it is a new stall site in the CGB's mode 3 and
+    #    the ~30 mealybug CGB rows are the acceptance test for it, not the 16
+    #    gambatte rows it is for.
     #
     # This supersedes the note in memory.nim's "What this is NOT" block, which
     # named "SameBoy's CGB-only fetcher-abort on a late window disable" as the
