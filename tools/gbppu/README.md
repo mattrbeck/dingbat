@@ -444,3 +444,53 @@ they are: the same measurement with two expected tables, one per silicon family.
 
 Clone `github.com/c-sp/age-test-roms` for the sources — every ROM is a few dozen
 lines of RGBDS with the devices it was verified on in a header comment.
+
+## Asking SameBoy a question the gambatte suite cannot
+
+    export SAMEBOY_GAMBATTE=~/code/dingbat/tools/gbfuzz/sameboy_gambatte
+    export SAMEBOY_BOOT=<dir with dmg_boot.bin / cgb_boot.bin>
+
+    python3 tools/gbppu/gam_dispatch.py 0    dmg          # line 0 after LCD-on
+    python3 tools/gbppu/gam_dispatch.py 1140 dmg          # the steady state
+    python3 tools/gbppu/gam_haltwake.py 0    dmg          # halted vs running
+    python3 tools/gbppu/gam_sled.py 42 52 0,1,2,3,4,5,6,7 cgb stat,vram
+
+`tools/gbfuzz/sameboy_gambatte` decodes the hex a gambatte ROM draws on screen,
+so SameBoy can score any ROM in *that* format — and the gambatte ROMs are
+mostly NOP padding with a `wait for LY == B` helper at `$7400` and the printer
+at `$7000`, which makes any one of them a blank program with a known output
+path. `gam_patchrun.py` overwrites the body, re-checksums the header and runs
+the result through both emulators.
+
+That is what these four are for. GBMicrotest asks exactly the right questions
+about the mode-0 STAT source — and answers them in `$FF80`, which no SameBoy
+runner here reads — so before this the oracle could not be pointed at them at
+all. Rebuilt in gambatte's format they can:
+
+* `gam_dispatch.py` — INC A until the mode-0 STAT interrupt **dispatches**,
+  swept over SCX 0..7, N lines after an LCD enable. The step positions in SCX
+  locate the edge to the dot (a staircase that steps two SCX later is an edge
+  two dots later).
+* `gam_haltwake.py` — the same wake taken by a **halted** CPU against a running
+  one, differentially: two programs identical apart from `$76` versus a NOP
+  sled, both printing TIMA from one handler.
+* `gam_sled.py` — one register read (IF / STAT / VRAM / OAM / LY) at an exact
+  M-cycle offset, for the boundaries that are not interrupts.
+
+What they measured (2026-08-21, on `65bcb71`, both devices, all eight SCX):
+
+|            | first line after an LCD enable | every later line |
+|------------|--------------------------------|------------------|
+| running    | exact                          | 2 dots LATE      |
+| halted     | 2 dots EARLY                   | exact            |
+
+Two independent 2-dot errors that cancel in the halted steady state — which is
+where mooneye `hblank_ly_scx_timing-GS` and the gambatte `halt/*_m0stat_*`
+families live, and why fixing either alone has always reddened the other. The
+full write-up, and which of the two is built, is at `M0_HALT_BLIND_DOTS` in
+`src/dingbat/gb/ppu.nim`.
+
+**The oracle's caveat still applies** (see the round brief): SameBoy plays the
+boot ROM where dingbat skips it, so absolute phase can differ by an M-cycle.
+Everything above is immune to that because every ROM here re-anchors on its own
+`LDH ($40),A` LCD enable, which restarts the PPU in both emulators.

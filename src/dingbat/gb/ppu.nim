@@ -1681,6 +1681,150 @@ proc lyc_settle_halt_skip(gb: GB): bool {.inline.} =
   when LYC_SETTLE_HALT_SKIP: gb.cpu.halted
   else: false
 
+# ---- The MODE 0 source's rise is invisible to a HALTED CPU for 2 T-cycles ---
+#
+# The same shape as `M2_LEAD_HALT_BLIND` (cpu.nim) and `LYC_SETTLE_HALT_SKIP`
+# (gb.nim), for the one source neither of them touches, and it is the ONLY one
+# of the three whose two sides come from the same suite -- GBMicrotest ships the
+# halted and the running arm of one ROM, byte-identical apart from `$76` against
+# a NOP sled, and they disagree:
+#
+#   SCX & 7                     0    1    2    3    4    5    6    7
+#   int_hblank_nops_scx*       61   62   62   62   62   63   63   63   running
+#   int_hblank_halt_scx*       62   62   62   63   63   63   63   64   halted
+#
+# Both count the same ruler (TAC = $05, one TIMA tick per 16 T) from the same
+# LCD-on write to the same mode-0 STAT dispatch. The running staircase steps at
+# SCX 1 and 5; the halted one steps at 3 and 7. A staircase sampled on a 4-dot
+# grid steps two SCX later exactly when the thing it is sampling is **2 dots
+# later**, so the halted wake is 2 dots behind the running dispatch. This tree
+# has them equal, which is why `int_hblank_halt_scx{0,3,4,7}` are red and their
+# `_nops` twins are green.
+#
+# SameBoy reproduces the pair, on ROMs rebuilt in gambatte's output format so it
+# can answer at all (`tools/gbppu/haltwake.py`): at W = 0 its running arm prints
+# 12/13/13/13/13/13/13/13 and its halted arm 13/13/13/13/13/13/13/13, i.e. the
+# halted staircase has already stepped where the running one has not. dingbat
+# prints the running arm for both.
+#
+# 2 dots is HALF a CPU M-cycle, which is what makes this a LATCH POSITION and
+# not a lead: the halted CPU takes its interrupt latch two T-cycles into the
+# M-cycle (`HALT_IF_SAMPLE_T = 2`) while the running dispatch sees the whole of
+# it. Scaled by the CPU's clock, not the PPU's -- in double speed an M-cycle is
+# 2 dots and the blind is 1 -- which is why the value is shifted by
+# `current_speed` below and why the flat `M3_END_EARLY = 2` that also spends 2
+# dots costs 221 double-speed gambatte rows (see the write-up in fifo_ppu.nim).
+#
+# ---- Why it ships at 0 ------------------------------------------------------
+#
+# Because it is only half of a pair, and the other half is not built. The
+# halted mode-0 wake is measurably EXACT in this tree in the steady state and
+# 2 dots early only on the first line after an LCD enable, because a SECOND
+# 2-dot error cancels it there. The whole map, measured against SameBoy with
+# `tools/gbppu/gam_haltwake.py` and `gam_dispatch.py` (line 0, and lines
+# 1/2/3/10 after the enable, both devices, all eight SCX):
+#
+#                 first line after an LCD enable      every later line
+#   running CPU   exact                               2 dots LATE
+#   halted CPU    2 dots EARLY                        exact
+#
+# Read down the columns and it is two independent 2-dot errors:
+#
+#   (A) the mode 3 -> 0 boundary is 2 dots late on every line EXCEPT the first
+#       line after an LCD enable, and
+#   (B) this rule, missing.
+#
+# They cancel exactly in the halted steady state, which is where mooneye
+# `acceptance/ppu/hblank_ly_scx_timing-GS` (it is `ei ; halt` at $042A), its
+# wilbertpol twin and the gambatte `halt/*_m0stat_*` families all live.
+# **That cancellation is the whole of the "two-sided contradiction about the
+# mode 0 source" recorded at `HALT_IF_SAMPLE_T` in cpu.nim** -- the two
+# witnesses are not contradicting each other, they are one error each, and
+# fixing either one alone exposes the other.
+#
+# Measured on 65bcb71, this rule alone at 2 (runner 1063 -> 1059,
+# gambatte 4443 -> 4427):
+#
+#   GBMicrotest  448 -> 452   int_hblank_halt_scx{0,3,4,7} -- ALL FOUR, i.e.
+#                             the whole of its own instrument's disagreement
+#   Mooneye      151 -> 147   hblank_ly_scx_timing-GS, four machine arms
+#   wilbertpol   143 -> 139   the same ROM, same four arms
+#   gambatte     -18 / +2     every one of them
+#                             `halt/{late_,}m0{int,irq}_halt_m0stat_scx{2,3,4}*`
+#
+# Every row it costs is a HALTED STEADY-STATE mode-0 readback -- the one cell
+# of the table above where the two errors cancel today -- and every row it buys
+# is the halted LCD-on line 0. It pays for itself only once (A) lands, which is
+# why it ships at 0.
+#
+# ---- What (A)'s carrier has to be, and what it is NOT -----------------------
+#
+# `M3_END_EARLY = 2` (fifo_ppu.nim) is the right SHAPE -- mode 3 shorter, every
+# pixel where it was -- and gated off `ppu.first_line` and shifted by
+# `current_speed` it turns the whole running-steady-state family green in one
+# go: `hblank_int_scx{1,2,5,6}` plus all of their `_if_b`, `_if_d`, `_nops_a`
+# and `_nops_b` siblings, twenty-one rows, and `hblank_ly_scx_timing_nops` with
+# them. **But it is still refused, and by a set of ROMs that names the carrier:**
+#
+#   poweron_stat_069/_183, lcdon_to_stat0_c, line_153_lyc0_stat_timing_j,
+#   ppu_sprite0_scx{0,1,4,5}_a, sprite4_{0..7}_a, win10_scx3_a
+#       all `actual=$80 expected=$83` -- they READ STAT and now see mode 0
+#       where hardware still reads mode 3
+#   mooneye {,-wilbertpol}/acceptance/*/intr_2_mode0_timing{,_sprites,_*_nops}
+#       same thing out of a mode-2 handler; this rule does not reach them
+#       because they are not woken by the mode-0 source at all
+#
+# So the readable mode FLAG's 3 -> 0 edge is exactly where it belongs and only
+# the mode-0 SOURCE (and the halted latch that reads it) is 2 dots late. That
+# is a source/flag split of the kind `STAT_M2_LEAD` already makes for mode 2,
+# and the `STAT_IRQ_SPLIT` domain (`irq_mode`) is where it would live -- but at
+# 2 dots rather than a whole M-cycle, and only from the second line after an
+# LCD enable. Nothing in the tree spells that today. See LCD_ON_LINE0_TRIM in
+# gb.nim for the three shapes that were tried before this one and refused; what
+# this measurement adds to that note is that its "later frames say 0" leg is
+# wrong (lines 1, 2, 3 and 10 after an enable all want the same 2 dots) and
+# that the carrier is the SOURCE, not the length, not the line and not the
+# phase.
+const M0_HALT_BLIND_DOTS* {.intdefine.} = 0
+  ## T-cycles of a halted M-cycle's TAIL in which the mode-0 STAT source's rise
+  ## is invisible to the halted CPU's latch. 0 compiles the rule out; 2 is the
+  ## measurement above. Shifted by `current_speed` at the use site.
+
+when M0_HALT_BLIND_DOTS > 0:
+  proc halt_m0_tail_blind*(gb: GB): bool {.noinline.} =
+    ## Is the interrupt line up ONLY because the mode-0 STAT source rose in the
+    ## tail of this halted M-cycle? Then the halted CPU has not latched it yet.
+    ##
+    ## `noinline`, and reached only from behind `result` in cpu_halt_tick, so a
+    ## halted M-cycle that raises nothing never runs a byte of it. Same
+    ## deliberate approximation as `halt_m2_lead_blind`: a STAT bit raised by
+    ## some other source earlier in this halt and re-masked by an IE write
+    ## would be deferred too.
+    let irq = gb.interrupts
+    if not (irq.lcd_stat_interrupt and irq.lcd_stat_enabled): return false
+    if (irq.vblank_interrupt and irq.vblank_enabled) or
+       (irq.timer_interrupt  and irq.timer_enabled)  or
+       (irq.serial_interrupt and irq.serial_enabled) or
+       (irq.joypad_interrupt and irq.joypad_enabled): return false
+    let ppu = gb.ppu
+    if not (ppu.lcd_enabled and ppu.hblank_interrupt_enabled): return false
+    if (ppu.lcd_status and 3'u8) != 0'u8: return false
+    # The comparator would be holding the line up on its own.
+    if ppu.coincidence_interrupt_enabled and ppu.irq_ly_of == ppu.lyc:
+      return false
+    # `stat_chg_dot` is the dot the mode last changed on, and for a change to
+    # anything but mode 3 it is exactly `cycle_counter` at that moment.
+    #
+    # The window is ages 1..N, not 0..N-1, and the ROMs say which: the halted
+    # M-cycle's dots are processed before this latch runs, so `cycle_counter`
+    # is already one past the last of them, and mode 0's `stat_chg_dot` is its
+    # FIRST dot rather than mode 3's last. At 0..N-1 only
+    # `int_hblank_halt_scx{0,4}` go green and `scx{3,7}` stay red -- the
+    # residue-3 half of the family -- which places the window one dot later.
+    let age = ppu.cycle_counter - ppu.stat_chg_dot
+    age >= 1'i32 and
+      age <= int32(M0_HALT_BLIND_DOTS shr gb.memory.current_speed)
+
 proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
   # While the PPU is off the LY=LYC comparison clock is stopped: the coincidence
   # bit freezes at its last value and no STAT interrupt fires (mooneye

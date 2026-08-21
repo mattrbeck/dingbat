@@ -640,6 +640,11 @@ proc cpu_halt_tick(gb: GB): bool {.inline.} =
     result = interrupt_ready(gb.interrupts)
     when STAT_M2_EARLY and M2_LEAD_HALT_BLIND:
       if result and halt_m2_lead_blind(gb): result = false
+    when M0_HALT_BLIND_DOTS > 0:
+      # The mode-0 source's own half of the same question. See
+      # M0_HALT_BLIND_DOTS in ppu.nim -- it ships at 0 and the note there is
+      # the measured map of what still has to move with it.
+      if result and halt_m0_tail_blind(gb): result = false
   else:
     # The bus half whole, the PPU half split. The timer is the reason: its IRQ
     # is one of the sources the halt pairs put in the HEAD of the M-cycle (see
