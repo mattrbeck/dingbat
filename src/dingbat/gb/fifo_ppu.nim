@@ -1713,6 +1713,52 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
       # offset below, which reads SCX itself.
       if ppu.head_cycle and not ppu.smooth_scroll_sampled:
         fifo_sample_smooth_scroll(ppu)
+    # ---- NOT MODELLED: the CGB's window-enable gate is one M-cycle later ---
+    #
+    # Measured 2026-08-21 and left here because it is the largest single block
+    # in the `gambatte/window` bucket and the measurement is finished even
+    # though the implementation is not. `window/late_disable_{0,1,2}` is one
+    # ROM stepped by one M-cycle, WX = 7 and WY = LY so the match lands on the
+    # line's first push, and a STAT read at dot 257 that says whether the
+    # window's 6-dot restart was paid. Traced (`-d:gb_win_trace -d:gb_m3_trace
+    # -d:GB_TRACE_LY=1`), LY 1 of the scored frame; the WX match is on dot 90
+    # on both devices and in both references:
+    #
+    #   ROM   LCDC.5 clears on   DMG wants   CGB wants   dingbat (both)
+    #   _0          89           no window   no window   no window (172)
+    #   _1          93           WINDOW      no window   WINDOW    (178)
+    #   _2          97           WINDOW      WINDOW      WINDOW    (178)
+    #
+    # so the DMG's enable gate answers as of a dot in `(89, 93]` -- the match
+    # dot 90, which is what this file does -- and the CGB's as of a dot in
+    # `(93, 97]`, exactly one M-cycle later. Every `late_disable*`, plus
+    # `late_scx_late_disable` and `late_reenable_scx3`, is that one statement:
+    # about 16 `[cgb]` rows, and they are the whole of what is left in this
+    # family after the WY latency landed.
+    #
+    # **Note the sign, and note that it is OPPOSITE to CGB_WY_LATENCY, which
+    # this round shipped at +4 for the same comparator's other input.** WY
+    # reaches the window an M-cycle LATE on CGB; LCDC.5 reaches its gate an
+    # M-cycle EARLY. That is not a contradiction -- the WY latch and the enable
+    # gate are different readers, and the file already carries per-register CGB
+    # deltas with different values -- but it does mean no single "CGB samples
+    # the window later/earlier" rule can serve both, and it rules out a global
+    # phase for this family.
+    #
+    # What blocks it is that a negative latency is not expressible: the write
+    # cannot arrive before it happens, so the equivalent is "the CGB confirms
+    # the window start one M-cycle after taking it", and by dot 93 this
+    # renderer has already flushed the BG FIFO and spent two dots of the
+    # restart. Undoing that is not fifo_obj_abort's trick -- there the refund
+    # can be spent as pipeline dots because the BG FIFO is full, and here it is
+    # empty by construction. The two shapes that could work, neither tried:
+    # defer the CGB's FIFO flush by an M-cycle so the start is genuinely
+    # abortable, or give the line the six dots back through `m3_lead` the way
+    # M3_END_EARLY does. The second is another agent's constant this round.
+    #
+    # This supersedes the note in memory.nim's "What this is NOT" block, which
+    # named "SameBoy's CGB-only fetcher-abort on a late window disable" as the
+    # missing mechanism without a dot for it.
     when WIN_EN_ABORT != 0:
       # LCDC.5 cleared while the window is the active fetch source. mealybug's
       # PPU notes: "WIN_EN can be disabled during mode 3. The disabling will
