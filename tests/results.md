@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-20 18:45:17 · commit 502f544 · game-boy-test-roms v7.0*
+*Generated: 2026-08-20 18:40:59 · commit 3d4e6a0 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1225
-- **Pass:** 1043
-- **Fail:** 182
+- **Pass:** 1042
+- **Fail:** 183
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -23,7 +23,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - MagenTests | 7 | 7 |
 | Game Boy - Mealybug Tearoom | 73 | 74 |
 | Game Boy - GBMicrotest | 438 | 482 |
-| Game Boy - AGE | 39 | 89 |
+| Game Boy - AGE | 38 | 89 |
 | Game Boy - Screenshot suites | 13 | 13 |
 | Game Boy - SameSuite | 8 | 8 |
 | Game Boy - SameSuite APU | 67 | 70 |
@@ -802,7 +802,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/win9_a | cart | 👌 |
 | gbmicrotest/win9_b | cart | 👌 |
 
-## Game Boy - AGE (39/89)
+## Game Boy - AGE (38/89)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -870,7 +870,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | age/stat-interrupt/stat-int-dmgC-cgbBCE@cgbab | CGB cgbab | 👀 Mooneye: FAIL |
 | age/stat-interrupt/stat-int-dmgC-cgbBCE@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
 | age/stat-interrupt/stat-int-dmgC-cgbBCE@cgbe | CGB cgbe | 👀 Mooneye: FAIL |
-| age/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE@dmgC | DMG dmgC | 👌 |
+| age/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE@dmgC | DMG dmgC | 👀 Mooneye: FAIL |
 | age/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE@cgbab | CGB cgbab | 👌 |
 | age/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE@cgbc | CGB cgbc | 👌 |
 | age/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE@cgbe | CGB cgbe | 👌 |
@@ -1212,8 +1212,8 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/m2int_m3stat | per-ROM | 👀 42/44 passed |
 | gambatte/miscmstatirq | per-ROM | 👀 268/279 passed |
 | gambatte/oam_access | per-ROM | 👀 53/69 passed |
-| gambatte/oamdma | per-ROM | 👀 784/811 passed |
-| gambatte/scx_during_m3 | per-ROM | 👀 130/141 passed |
+| gambatte/oamdma | per-ROM | 👀 766/811 passed |
+| gambatte/scx_during_m3 | per-ROM | 👀 121/141 passed |
 | gambatte/scy | per-ROM | 👌 67/67 passed |
 | gambatte/serial | per-ROM | 👀 53/82 passed |
 | gambatte/sound | per-ROM | 👀 113/116 passed |

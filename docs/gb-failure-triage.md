@@ -11,6 +11,233 @@ Reproduced with an isolated `TMPDIR`, a private `DINGBAT_ROM_CACHE` and a privat
 nimcache. All three are shared across worktrees and have produced wrong results
 here; the run below matches the committed `tests/results.md` row for row.
 
+## 2026-08-20: the AGE suite becomes readable — 50 opaque rows are 6 defects
+
+`Game Boy - AGE` has sat at 39/89 with every one of its 50 failures reporting the
+same three words, `Mooneye: FAIL`. That is one bit per row and it is why nothing
+in this document has ever pointed at the suite. It is now ~620 datapoints, and
+what they say is below.
+
+### The instrument, and the one fact that makes it work
+
+Every AGE ROM draws its own result: a `TEST FAILED!` banner over a table of
+bytes, one row per eight, each disagreeing cell drawn **inverted**. Three tools
+read that back (usage and design notes in `tools/gbppu/README.md`):
+
+* `tools/gbppu/agetable.py` — which cells disagree, from the background shade.
+* `tools/gbppu/agecells.py` — and their values.
+* `tools/gbppu/agediff.py` — and what hardware returns. The expected array is
+  **in the ROM**: it is the only run of `len(table)` bytes that agrees with every
+  non-inverted cell and differs at every inverted one, which pins it uniquely on
+  45 of the 50 failing arms (the other 5 are short DMG tables where the array is
+  a prefix, and they land on 2-3 candidates that agree where it matters).
+
+**A cell is not a measurement. It is the index of the first mismatching byte in a
+run of them.** `compact_results`, in the suite's own
+`src/_include/utilities.inc`, writes `$FF` when all N bytes matched and otherwise
+the index of the first that did not. N is the ROM's `BYTES_PER_LINE` — 12 for
+`stat-mode`, `oam-*`, `vram-*`; 8 for `stat-mode-window` — and each of those N is
+a *named* sample in the ROM's own `EXPECTED_*` table: "read at the edge of line 1
+mode 0", "read on the edge of line 152/153", "line 0-3 / line 142-145 /
+line 152-155". So a failing cell already names which timed sample went wrong, and
+its siblings in the same row bracket it to the M-cycle. `ly`, `lcd-align-ly` and
+`halt-m0-interrupt` skip the compaction and print the raw measurements.
+
+Sources: `github.com/c-sp/age-test-roms`, a few dozen lines of RGBDS per ROM with
+the silicon each expected table was taken on in a header comment
+(`2022-03-16 pass: CPU CGB C - CPU-CGB-04`).
+
+### CORRECTION: none of the 50 is a timeout
+
+An earlier reading of this suite held that the nine `spsw-*` arms never reach
+`LD B,B` and that "Mooneye: FAIL" there means "never finished". **All 50 reach
+`LD B,B` and all 50 print a table.** Verified by wall-clock invariance under
+`--timeout=100 / 1800 / 18000` (spsw-tima 0.039 / 0.039 / 0.040 s; stat-mode
+0.070 s flat). The timeout is what you see **without `--bb-breakpoint`**, which
+the runner passes and a hand-run `dingbat_test` does not. A harness verdict of
+"timeout" is a statement about the harness's flags as much as about the emulator.
+
+### The inventory
+
+Bad cells per arm, `3d4e6a0`, DMG arms forced to a DMG (see the harness fix
+below). The per-revision axis is **inert**: wherever a ROM has `@cgbab`,
+`@cgbc` and `@cgbe` arms the three frames are byte-identical. The `-cgbE` ROMs
+are DIFFERENT FILES with different expected tables, not the same ROM on another
+revision.
+
+```
+halt/halt-m0-interrupt    dmgC 2/8    cgbab/c/e 2/8      lcd-align-ly-cgbBC  6/72 x2
+ly-dmgC-cgbBC   dmgC 1/32  cgbab/c 1/72                  lcd-align-ly-cgbE   3/72
+oam-read-dmgC-cgbBC  dmgC 6/64  cgbab/c 21/128           oam-read-cgbE      19/128
+oam-write-dmgC 11/64      oam-write-cgbBCE  26/128 x3
+spsw-interrupts-cgbBC/E 38/88 x3    spsw-ch2-lc-delay-cgbBCE 16/64 x3
+spsw-tima-cgbBC 13/64 x2            spsw-tima-cgbE 5/64
+stat-int-dmgC-cgbBCE  dmgC 7/40   cgbab/c/e 5/80
+stat-mode-window-cgbBCE 4/128 x3   -dmgC 44/128   -ds-cgbBCE 9/128 x3
+stat-mode-cgbE 4/112   stat-mode-dmgC-cgbBC dmgC 4/112, cgbab/c 6/112
+stat-mode-ds-cgbBCE 12/112 x3      vram-read-dmgC 6/64   vram-read-cgbBCE 26/128 x3
+m3-bg-bgp-dmgC = the 23038/23040 screenshot row, no table
+TOTAL 659 bad cells over all 88 table-bearing arms (620 over the 50 that fail)
+```
+
+### The clusters: 50 rows are 6 defects, and 4 are already someone's open
+
+**C1 — the LY=153 readback window is one M-cycle too wide on DMG and CGB-B/C.**
+`ly-dmgC-cgbBC` and `ly-cgbE` are the same 8 LY reads with two expected tables,
+differing in exactly one cell (`L99`/`EXTEND_L99` in `src/ly/ly.inc`): the read
+on the line 152/153 edge at one initial delay wants `$00` on DMG-C and CGB-B/C
+and `$99` on CGB-E. dingbat answers `$99` on every device, so `ly-cgbE` passes
+and all three `ly-dmgC-cgbBC` arms fail on that single cell — **1 bad cell out of
+32, three rows**. `lcd-align-ly` reads the same edge (its byte 5) and splits the
+same way: the BC file's row-0/row-8 cells fail and the E file's do not.
+
+**C2 — the standing "2 dots at the mode 3 -> 0 edge"** (`LCD_ON_LINE0_TRIM` in
+`gb.nim`). `halt-m0-interrupt` is a fourth family asking for exactly those 2
+dots and it is the sharpest statement of them yet — see below. Most of the
+`oam-read` / `oam-write` / `vram-read` / `stat-mode` residue is the same shape.
+
+**C3 — the DMG OAM STAT source one M-cycle late** (the five-constant re-spelling
+bracketed above). AGE is independent evidence for it; see the measurement below.
+
+**C4 — CGB revisions B/C and E are genuinely different silicon and dingbat
+models one machine.** AGE brackets at least four places: C1's LY window; the
+single mode-0 M-cycle at the very end of mode 1 that DMG and CGB-B/C have and
+CGB-E does not (`M1E` in `src/stat-mode/stat-mode.inc` — it is `stat-mode`'s
+cells `051`/`059`, the `M12_INITIAL+1` arm of the mode-1/2 group at SCX 0 and 7,
+whose sample 9 is line 153: present on the CGB arms and absent on the DMG arm,
+so dingbat has that M-cycle on DMG and lacks it on every CGB revision. The two
+ROMs differ in exactly those two bytes plus the header checksum, which is what
+makes it a clean one-bit reading); the one-dot `EFF` difference at the LCD-on
+mode-3 edge in `src/oam/oam-read.inc`; and the whole `spsw-tima` BC-vs-E split
+(13 bad cells against 5). **In every one of them dingbat gives the CGB-E answer
+on every CGB revision.** `gb_quirks_for` in `gb.nim` is where such a split
+belongs and already carries two PPU-adjacent ones (`scy_fetch_latch`), but note
+that the default CGB revision is **C**, so any of these is a shipping-default
+change and not a new-revision addition.
+
+**C5 — speed switch.** `spsw-interrupts` 38/88, `spsw-ch2-lc-delay` 16/64,
+`spsw-tima` 13/64 and 5/64: 9 rows, 67 cells, and **not one of them moved under
+any PPU constant tried in this pass** (the five-constant re-spelling,
+`LCD_ON_LINE0_TRIM`, `LY153_SNAP_DOT`, `LYC_SETTLE_DOTS`). They are a separate
+machine. Their tables are readable now and are worth a round on their own:
+`spsw-tima`'s is a clean staircase where dingbat is exactly one tick behind in
+the second half of rows `028`/`030`/`038` and nowhere else.
+
+**C6 — the window's mode-3 end**, the 4-cell CGB residue of `stat-mode-window`
+(rows `068`/`070`, WX 169/170) and the 9-cell double-speed one. `fifo_ppu.nim`.
+
+### MEASURED: AGE is independent, DMG-only evidence for the five-constant re-spelling
+
+`-d:STAT_M2_LEAD=1 -d:STAT_M2_LEAD_CGB=0 -d:M3_PIPE_AHEAD=1 -d:CGB_PIPE_MCYCLES=0
+-d:STAT_M0_FIELD_TAIL=0`, scored on AGE cells:
+
+```
+                              base   five
+stat-mode-window-dmgC          44      4     -> exactly its CGB arms' residue
+stat-mode-sprites-dmgC@dmgC    39      0     -> a PASS on a real DMG
+stat-int-dmgC-cgbBCE@dmgC       7      5     -> exactly its CGB arms' residue
+halt-m0-interrupt@dmgC   2 bad, DMG-shaped   -> 2 bad, CGB-shaped (identical arms)
+everything else            unchanged
+TOTAL (88 arms)               659    578
+```
+
+Every gain is a DMG arm collapsing onto exactly its CGB sibling's residue, which
+is "the DMG is one M-cycle late and the CGB is exact" stated as a diff rather
+than as a total. Nothing in AGE regresses. The bracket section above records AGE
+as "unmoved" under this change: that is true at pass/fail resolution and **false
+at cell resolution**, and with the harness fix below it is false at pass/fail
+resolution too — the whole runner reads **1042 -> 1048, gambatte 4393 -> 4416**,
+and `age/stat-mode-sprites-dmgC-cgbBCE@dmgC` is one of the rows it recovers.
+
+### `halt-m0-interrupt`: a two-sided, two-device bracket that lands on those 2 dots
+
+Eight raw cells, one per SCX 0..7. Each is `2` when the mode-0 STAT flag was
+ALREADY set at the `HALT` (the halt bug fires and `inc a` runs twice) and `1`
+when the HALT waited for it. SCX moves the mode 3 -> 0 edge one dot per step, so
+the SCX the row flips on IS the edge's dot against the CPU's grid.
+
+```
+                      flips after SCX      error
+hardware (DMG-C, CGB-B/C/E, one table)   2       --
+dingbat DMG, 3d4e6a0                     4       mode 0 two dots EARLY
+dingbat CGB, 3d4e6a0                     0       mode 0 two dots LATE
+dingbat, with the five-constant respelling, BOTH devices   0   two dots late
+dingbat, respelling + LCD_ON_LINE0_TRIM=2, CGB            2   exact, row PASSES
+```
+
+Two things fall out. The re-spelling **unifies the devices** on this row, which
+is the third independent witness that the DMG/CGB split it removes is not real.
+And what is left is 2 dots, on both devices, in the same direction — the
+`LCD_ON_LINE0_TRIM` quantity. This ROM measures line 10 after an LCD enable, so
+it is a fourth entry for that constant's table, and unlike the other three it
+brackets from both sides.
+
+### REFUTED at cell resolution: `LCD_ON_LINE0_TRIM = 2`
+
+The long-standing open at that constant ("line 0 says 0, line 1 says -2 ...
+nothing derives it"). AGE arbitrates it and the answer is no, twice:
+
+```
+                                       AGE bad cells (50 failing arms / all 88)
+3d4e6a0                                        620 / 659
+-d:LCD_ON_LINE0_TRIM=2                         818 /  --
+five-constant respelling                       578 / 578
+respelling + LCD_ON_LINE0_TRIM=2                -- / 1009
+```
+
+It is not a sign error either, and it is not device-split: at `=2` alone it fixes
+`halt-m0-interrupt` on all three CGB arms (2 -> 0, the row passes) and
+`ly-dmgC-cgbBC@dmgC` (1 -> 0), while taking `stat-mode-window` CGB 4 -> 29,
+`stat-mode` 4 -> 14, `stat-int` 5 -> 14 and `ly` CGB 1 -> 7 — a mix inside each
+device. On top of the re-spelling it additionally breaks two arms that pass
+today (`spsw-mode0` 0 -> 39, `stat-mode-sprites` 0 -> 21). The 2 dots
+`halt-m0-interrupt` wants are real; this constant is still not their carrier.
+
+### REFUTED: the readable LY and the LY=LYC comparator do not split at 153 either
+
+C1 looks like a read-path rule, so it was built as one: `LY153_SNAP_DOT` moved to
+1 with `LYC_SETTLE_DOTS` to 8 (so the comparator's re-latch stays on the 9 daid
+pins) is runner 1043 -> 1040, gambatte 4393 -> 4383, and the row diff separates
+the two consumers cleanly — every gain reads LY (GBMicrotest `line_153_ly_c`, AGE
+`ly@dmgC`, wilbertpol `ly_new_frame-GS` x4, `ly_lyc_0-GS` x4) and every loss on
+the same device is a LYC=153 match ending too early (`ly_lyc_153-GS` x4,
+`ly_lyc_153_write-GS` x4, `line_153_lyc153_stat_timing_b`, `line_153_lyc_b`).
+
+So the *read* side was split off on its own — a threshold in `ppu_read`'s `$FF44`
+that answers 0 from dot T of line 153 while the field, the comparator and
+`lyc_settling` stay where they are. **It cannot be made to fit.** At T = 1 the
+runner is 1043 -> 1028: GBMicrotest `line_153_ly_c` comes green and
+`line_153_ly_b` — its sibling, one NOP apart — goes red, along with 14 wilbertpol
+`ly*` rows, and **AGE `ly@dmgC` is still red**. dingbat ticks a read's whole
+M-cycle before serving it, so `ppu.ly == 153` at serve time already implies a dot
+counter of 0..4 and every T in 1..4 is the same setting; there is no threshold
+between the two GBMicrotest siblings, and AGE's cell is not on the near side of
+one anyway. **C1 is a whole-M-cycle phase question, not a snap-dot question** —
+which is also what `LCD_ON_LINE0_TRIM=2` fixing `ly@dmgC` says. The knob was
+built, measured and removed; do not re-derive it.
+
+### HARNESS FIX: AGE's DMG arms were running on a CGB
+
+8 of AGE's 47 ROMs carry `$80` at `$0143` (`CART_COMPATIBLE_DMG_GBC`), and the
+AGE builder in `tests/dingbat_test_runner.nim` set only `cgb:` on an arm, never
+`dmg:`. With neither flag the cart header picks the machine — so every `-dmgC`
+arm of those eight ran on a **CGB** while the Device column read `DMG dmgC`
+(that column is computed from `--model`, which only picks a boot table). Affected:
+`halt/*`, `ly-dmgC-cgbBC`, `oam-read-dmgC-cgbBC`, `oam-write-dmgC`,
+`stat-int-dmgC-cgbBCE`, `stat-mode-sprites-dmgC-cgbBCE`, `stat-mode-dmgC-cgbBC`,
+`vram-read-dmgC`.
+
+Fixed by setting `dmg: not arm_cgb`. It changes ONE verdict and the direction is
+the tell: `age/stat-mode-sprites-dmgC-cgbBCE@dmgC` was a **PASS** and is a real
+DMG **FAIL** (39 of its 80 cells wrong), because it was being scored on the
+machine its own three CGB arms already cover. Runner **1043 -> 1042**. The
+five-constant re-spelling gives that row back as a genuine DMG pass, so the two
+changes together are 1043 -> 1048.
+
+This is the same trap as the CGB-header device pick that cost the Blargg rows.
+Any suite builder that names a device in a row's NAME and does not force it in
+the row's FLAGS is scoring a machine chosen by the cart header.
+
 ## 2026-08-20: the speed-switch bucket, closed as far as one constant reaches
 
 `gambatte/speedchange` 182/208 -> **192/208** and `gambatte/dma` 134 -> 136 (whole

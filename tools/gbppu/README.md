@@ -404,3 +404,43 @@ re-trigger: one line per dot the WX equality is reached, with the fetcher
 position and FIFO depth that decide whether the edge survives it. A mealybug
 `m3_wx_*` frame carries exactly one per line, so the whole frame reads out as a
 table.
+
+## The AGE suite, as a table of measurements rather than a bit
+
+    ./dingbat_test <rom> --mode=screenshot --timeout=600 --nosave \
+        [--dmg|--cgb] [--model=<tok>] --screenshot=/tmp/f.ppm
+    python3 tools/gbppu/agetable.py /tmp/f.ppm      # which cells disagree
+    python3 tools/gbppu/agecells.py /tmp/f.ppm      # + the values, decoded
+    python3 tools/gbppu/agediff.py <rom> /tmp/f.ppm # + what hardware wanted
+
+c-sp's AGE ROMs are scored through the mooneye protocol, which collapses each to
+one bit — and 50 of the 89 rows report that bit as `FAIL`, which is why the suite
+sat unread. But every AGE ROM **draws its own result**: a `TEST FAILED!` banner
+over a table of bytes, one row per eight, each disagreeing cell drawn inverted.
+
+**A cell is not a measurement, it is the INDEX OF THE FIRST MISMATCHING BYTE in a
+run of them** (`compact_results` in the suite's `src/_include/utilities.inc`:
+`$FF` if all N matched, else the index of the first that did not). N is the ROM's
+`BYTES_PER_LINE` — 12 for `stat-mode`, `oam-*` and `vram-*`, 8 for
+`stat-mode-window` — and each of those N is a named sample in the ROM's own
+`EXPECTED_*` table ("read at the edge of line 1 mode 0", "line 152/153"). So a
+failing cell already says *which* timed sample went wrong, and the neighbouring
+cells bracket it to the M-cycle. A handful of ROMs (`ly`, `lcd-align-ly`,
+`halt-m0-interrupt`) skip the compaction and print the raw measurements.
+
+`agetable.py` needs no font: it reads the inversion from each cell's background
+shade. `agecells.py` adds the values (5x7 glyph boxes at a fixed pitch; the font
+is pinned in the file and the offset-label column doubles as a training set).
+`agediff.py` adds the expected value, which is **in the ROM** — the array is the
+only run of `len(table)` bytes that agrees with every non-inverted cell and
+differs at every inverted one, which pins it uniquely on 45 of the 50 failing
+arms.
+
+Two things this changes. It turns 50 bits into ~620 datapoints, so a constant
+sweep can be scored on AGE at cell resolution — the five-constant DMG STAT
+re-spelling is "AGE unmoved" at pass/fail and **+42 cells with zero regressions**
+here. And it makes the suite's paired `-cgbBC` / `-cgbE` ROMs readable as what
+they are: the same measurement with two expected tables, one per silicon family.
+
+Clone `github.com/c-sp/age-test-roms` for the sources — every ROM is a few dozen
+lines of RGBDS with the devices it was verified on in a header comment.

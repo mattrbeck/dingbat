@@ -1228,6 +1228,7 @@ proc build_age_tests(age_dir: string): seq[TestDef] =
                        (if models.len > 1: "@" & m else: ""),
                        rom, png, timeout = 120, color = cgb, cgb = cgb)
           t.model = m
+          t.dmg = not cgb          # see the DMG arms below
           tests.add(t)
       continue
     let devices = age_device_tokens(base)
@@ -1260,6 +1261,22 @@ proc build_age_tests(age_dir: string): seq[TestDef] =
         mode: tmMooneye,
         timeout: 1800,
         cgb: arm_cgb,
+        # A DMG ARM HAS TO SAY SO. 8 of AGE's 47 ROMs carry a `$80` CGB flag at
+        # $0143 -- `CART_COMPATIBLE_DMG_GBC`, "runs on a CGB, still works on a
+        # DMG" -- and for those the absence of `--cgb`/`--dmg` let the HEADER
+        # pick the machine, so every one of their `-dmgC` arms ran on a CGB
+        # while the Device column read "DMG dmgC" (the column is computed from
+        # `--model`, which only picks a boot table). The arms affected are
+        # halt/*, ly-dmgC-cgbBC, oam-read-dmgC-cgbBC, oam-write-dmgC,
+        # stat-int-dmgC-cgbBCE, stat-mode-sprites-dmgC-cgbBCE,
+        # stat-mode-dmgC-cgbBC and vram-read-dmgC.
+        #
+        # It changes ONE verdict today and the direction is the tell:
+        # `stat-mode-sprites-dmgC-cgbBCE@dmgC` was a PASS and is a real DMG
+        # FAIL (39 of its 80 cells wrong -- tools/gbppu/agediff.py). It was
+        # passing because it was being scored on the machine its three CGB arms
+        # already cover. Every other affected arm fails either way.
+        dmg: not arm_cgb,
         model: m,
         # AGE signals failure with "any register values other than the Fibonacci
         # ones", not with a dedicated failure signature, so LD B,B has to end the
