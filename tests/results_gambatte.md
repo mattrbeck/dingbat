@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-21 15:53:09*
+*Generated: 2026-08-21 16:19:45*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4584/4996 passed.**
+**4588/4996 passed.**
 
 ## bgen
 
@@ -54,9 +54,9 @@ All 40 tests passed.
 
 All 8 tests passed.
 
-## dma (185/229 passed)
+## dma (186/229 passed)
 
-185/229 tests passed, 44 failed:
+186/229 tests passed, 43 failed:
 
 | Test | Result |
 |------|--------|
@@ -88,7 +88,6 @@ All 8 tests passed.
 | dma/hdma_m0speedchange_late_m3wakeup_scx2_2_cgb04c_out00 [cgb] | got FF, expected 00 |
 | dma/hdma_pc_7ffe_cgb04c_out02 [cgb] | got 80, expected 02 |
 | dma/hdma_start_ds_2_cgb04c_out1 [cgb] | got 0, expected 1 |
-| dma/hdma_start_scx5_1_cgb04c_out0 [cgb] | got 7, expected 0 |
 | dma/hdma_start_scx5_2_cgb04c_out1 [cgb] | got 0, expected 1 |
 | dma/hdma_start_scx5_ds_2_cgb04c_out1 [cgb] | got 0, expected 1 |
 | dma/hdma_transition_7fffhalt_inc_m3unhalt_cgb04c_out01 [cgb] | got 00, expected 01 |
@@ -613,9 +612,9 @@ All 67 tests passed.
 
 All 20 tests passed.
 
-## vram_m3 (40/50 passed)
+## vram_m3 (42/50 passed)
 
-40/50 tests passed, 10 failed:
+42/50 tests passed, 8 failed:
 
 | Test | Result |
 |------|--------|
@@ -625,8 +624,6 @@ All 20 tests passed.
 | vram_m3/postread_scx2_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | vram_m3/postread_scx3_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | vram_m3/postread_scx3_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
-| vram_m3/postread_scx5_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| vram_m3/postread_scx5_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | vram_m3/preread_lcdoffset2_1_cgb04c_out0 [cgb] | got 3, expected 0 |
 | vram_m3/prewrite_lcdoffset2_1_cgb04c_out1 [cgb] | got 0, expected 1 |
 
@@ -641,9 +638,9 @@ All 20 tests passed.
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 
-## window (424/476 passed)
+## window (425/476 passed)
 
-424/476 tests passed, 52 failed:
+425/476 tests passed, 51 failed:
 
 | Test | Result |
 |------|--------|
@@ -695,7 +692,6 @@ All 20 tests passed.
 | window/m2int_wxA6_spxA7_m0irq_2_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | window/m2int_wxA6_spxA7_m3stat_2_dmg08_out0_cgb04c_out3 [dmg] | got 3, expected 0 |
 | window/m2int_wxA6_spxA7_m3stat_4_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/m2int_wxA6_vrambusyread_2_dmg08_out5_cgb04c_out0 [dmg] | got 0, expected 5 |
 | window/m2int_wxA6_vrambusyread_3_dmg08_cgb04c_out5 [cgb] | got 0, expected 5 |
 | window/on_screen/wx17_weoff_wxA5_weon [cgb, png] | 960/23040 pixels differ |
 | window/on_screen/wxA6_late_we_reenable_3 [dmg, png] | 916/23040 pixels differ |

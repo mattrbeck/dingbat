@@ -560,6 +560,43 @@ const VRAM_READ_LIVE_LOCK* {.intdefine.} = 2
   ## 1 asks it on every device (the rule this replaces), 0 never asks it, 2
   ## asks it on a DMG and not on a CGB. See the bracket in cpu_vram_open.
 
+const VRAM_READ_M0_OPEN_DOTS* {.intdefine.} = 4
+  ## The VRAM read lock's OPEN edge, in PPU DOTS after the mode-3 -> 0 flag
+  ## edge. 0 disables the rule and restores the pure `read_mode` snapshot.
+  ##
+  ## `read_mode` is sampled at the top of `fifo_tick`, one instant before the
+  ## M-cycle's first dot is processed, so the lock as spelled by that snapshot
+  ## alone opens at the first M-cycle boundary STRICTLY AFTER the edge -- one
+  ## whole M-cycle late whenever the edge happens to fall ON a boundary, and
+  ## an M-cycle is 4 dots at normal speed but only 2 in double. Three gambatte
+  ## rows say the real edge is neither of those: it is **4 PPU dots, flat, at
+  ## both speeds**, which is real time on the PPU's clock and not a CPU-cycle
+  ## count.
+  ##
+  ## A read is answered with `cycle_counter` at the END of its M-cycle and
+  ## `stat_chg_dot` is the FIRST dot of the new mode (see `mode_flag=`), so
+  ## `cycle_counter - stat_chg_dot` is the gap this is measured in. All three
+  ## witnesses put the mode-3 end at dot 257 (SCX = 5) and differ only in where
+  ## the read's M-cycle sits, `-d:gb_dma_trace` printing each one:
+  ##
+  ##   row                              speed  read M-cycle  answered  gap  hw
+  ##   ------------------------------   -----  ------------  --------  ---  --
+  ##   dma/hdma_start_scx5_1              1x     [257,261)      261      4   open
+  ##   vram_m3/postread_scx5_ds_1         2x     [257,259)      259      2   shut
+  ##   vram_m3/postread_scx5_ds_2         2x     [259,261)      261      4   open
+  ##
+  ## so the edge is in (2, 4] and 4 is the only value on the M grid. The
+  ## snapshot rule gets the first row wrong (gap 4 = one M-cycle, so the edge
+  ## is not strictly inside the previous M-cycle) and would get the second
+  ## wrong if it were relaxed to a boundary-inclusive test in M-cycles (gap 2
+  ## IS one double-speed M-cycle). Only a flat dot count fits all three.
+  ##
+  ## It can only ever fire where the snapshot says shut and the gap says open,
+  ## i.e. `gap == 4` exactly with the edge on the M boundary, which needs a
+  ## particular SCX -- and at double speed it cannot fire at all, since a
+  ## `read_mode` of 3 caps the gap at that speed's 2-dot M-cycle. That is the
+  ## whole of the asymmetry the three rows above measure.
+
 proc cpu_vram_open*(ppu: GbPpu; is_write: bool; cgb = false): bool {.inline.} =
   if not lcd_enabled(ppu): return true
   if is_write:
@@ -569,7 +606,12 @@ proc cpu_vram_open*(ppu: GbPpu; is_write: bool; cgb = false): bool {.inline.} =
     # this used to spell as `read_mode != 3`, evaluated at the write's own
     # commit point instead of one M-cycle after it.
     return (ppu.lcd_status and 3'u8) != 3
-  if (ppu.read_mode and 3'u8) == 3: return false
+  if (ppu.read_mode and 3'u8) == 3:
+    when VRAM_READ_M0_OPEN_DOTS != 0:
+      if (ppu.lcd_status and 3'u8) == 0'u8 and ppu.stat_prev_mode == 3'u8 and
+         ppu.cycle_counter - ppu.stat_chg_dot >= int32(VRAM_READ_M0_OPEN_DOTS):
+        return true
+    return false
   if ppu.first_line: return true
   # Both clauses are load-bearing, and the LIVE one is bracketed from the CGB
   # side by two rows it costs. gambatte `dma/hdma_late_enable_1` and
