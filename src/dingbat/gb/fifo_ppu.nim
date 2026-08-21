@@ -3746,6 +3746,42 @@ template fifo_emit_pixel(ppu: GbFifoPpu; gb: GB) =
       fifo_mix(ppu, gb, bg_px, sp_px, ppu.lx)
   inc ppu.lx
 
+proc fifo_obj_walked_past(ppu: GbFifoPpu): bool {.noinline.} =
+  ## Did the shifter walk past this object while LCDC.1 was LOW -- in which
+  ## case the object is gone for the line, and is retired here? The table at
+  ## the call site in tick_shifter is the eight ROMs that measure it.
+  ##
+  ## Asked at the TRIGGER rather than once per dot, which is exact and not a
+  ## shortcut: a first trigger can only ever land on `lx + 8 == x` (`lx` grows
+  ## by one per emitted pixel), so `lx + 8 > x` here means the comparator was
+  ## blocked on the object's own dot, and the only two things that block it are
+  ## LCDC.1 and a window that won the dot -- and a window yield is ONE dot,
+  ## which OBJ_ABORT_LEAD = 2 does not reach. Asking here also costs the dot
+  ## loop nothing: it runs on the handful of dots a line an object triggers on
+  ## rather than on all ~170. The same rule written as a per-dot prune in
+  ## tick_shifter measures +0.69% of retired instructions on Pokemon Blue and
+  ## +0.66% on Crystal, for a rule that fires on no line either game draws.
+  ## Asked here it is +0.071% and +0.017% (DINGBAT_BENCH_COUNTERS, 2400 frames,
+  ## min of three, `cycles=` equal on both arms).
+  ##
+  ## An object at OAM X < 8 is left alone, and that is the one thing this form
+  ## cannot express. Its trigger dot is not `x - 8` -- that is off the left of
+  ## the line -- but the line's FIRST shifter dot, which is `lx = 0` at SCX = 0
+  ## and `-(SCX and 7)` otherwise, so "how many dots ago could it have fired"
+  ## is not `lx - (x - 8)` for it. Testing it as if it were retires left-edge
+  ## objects that were never passed at all and costs six gambatte
+  ## `scx_during_m3` rows and six `sprites` rows, measured. Nothing in the tree
+  ## measures a late LCDC.1 enable against a left-edge object, so the arm is
+  ## excluded rather than guessed at.
+  ##
+  ## `{.noinline.}` for the same reason as the placement: `delete` is a seq
+  ## operation and inlining it into the mode 3 dot loop is the inline cliff
+  ## docs/gb_oam_dma_cost.md describes.
+  let x = int32(ppu.sprites[0].x)
+  if x < 8'i32 or ppu.lx - (x - 8'i32) < OBJ_ABORT_LEAD: return false
+  ppu.sprites.delete(0)
+  true
+
 proc win_start_carries(ppu: GbFifoPpu): bool {.inline.} =
   ## Is this window START the one a DMG cannot draw -- the match on the line's
   ## LAST pixel? See DMG_WIN_LAST_PX_CARRY. Only WX = 166 reaches x = 159, and
@@ -3771,10 +3807,49 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
     # docs/pandocs-upstream.md section 2 holds the flashcart question.
     if sprite_enabled(ppu) and ppu.sprites.len > 0 and
        int(ppu.lx) + 8 >= int(ppu.sprites[0].x) and
-       # Last, and only reachable once the three tests above have already
-       # passed -- an object trigger is a handful of dots a line, so the whole
-       # tie-break sits off the dot loop's hot path. See obj_yields_to_window.
-       not obj_yields_to_window(ppu):
+       # Reachable only once the three tests above have already passed -- an
+       # object trigger is a handful of dots a line, so the whole tie-break
+       # sits off the dot loop's hot path. See obj_yields_to_window.
+       not obj_yields_to_window(ppu) and
+       # ---- An object the shifter walks PAST with LCDC.1 low is gone --------
+       #
+       # The comparator that fires an object is the shifter's own `lx == X - 8`
+       # and `lx` only ever grows, so a dot spent with objects off is a dot the
+       # object can never get back: turning LCDC.1 on again later must not
+       # revive it. gambatte's `sprites/sprite_late_enable_spx{18,19,1A,1B}_{1,2}`
+       # is eight ROMs whose only content is that sentence -- one object at OAM
+       # X 24..27, LCDC.1 low from before mode 3, ONE `ld [c],a` that sets it,
+       # moved one M-cycle per step, and a STAT read that says whether mode 3
+       # was still running. Traced (`-d:gb_m3_trace -d:GB_TRACE_LY=8`) with `T`
+       # the dot `lx` reaches `X - 8` on and `W` the write's:
+       #
+       #   row                  X    T     W    W - T   wants
+       #   late_enable_spx19_1  25  107   105    -2     object kept (out3)
+       #   late_enable_spx18_1  24  106   105    -1     object kept (out3)
+       #   late_enable_spx1B_1  27  109   109     0     object kept (out3)
+       #   late_enable_spx1A_1  26  108   109    +1     object kept (out3)
+       #   late_enable_spx19_2  25  107   109    +2     NOT SCORED (`xout0`)
+       #   late_enable_spx18_2  24  106   109    +3     object lost  (out0)
+       #   late_enable_spx1B_2  27  109   113    +4     object lost  (out0)
+       #   late_enable_spx1A_2  26  108   113    +5     object lost  (out0)
+       #
+       # so the flip is between `W - T = +1` and `+3`, and the one ROM that
+       # lands on `+2` is the one gambatte itself marks unscoreable (`xout0`).
+       # The family brackets the boundary from both sides and then declines to
+       # answer AT it, which is as direct a statement that the boundary is +2
+       # as a suite can make.
+       #
+       # `+2` is not a new number: it is OBJ_ABORT_LEAD, what the FALLING edge
+       # of the same bit is already given at fifo_obj_abort, and the sign is
+       # the one that makes the two halves one statement -- **LCDC.1 reaches
+       # the object fetcher OBJ_ABORT_LEAD dots before the CPU's write dot.**
+       # The abort spends that lead forwards (it runs the pipeline on by that
+       # many dots); on this edge there is nothing to run, so it is spent by
+       # letting the object still trigger for that many dots after the shifter
+       # has walked past it. Beyond them it is retired -- see
+       # fifo_obj_walked_past for why asking here is the same rule as a
+       # per-dot prune and costs the dot loop nothing.
+       not fifo_obj_walked_past(ppu):
       ppu.fetching_sprite = true
       when CGB_WIN_TAIL_LAST != 0:
         # One store, on the object trigger and nowhere else (a handful of dots
@@ -4090,6 +4165,7 @@ proc fifo_pipeline_dot(ppu: GbFifoPpu; gb: GB) {.inline.} =
            FETCHER_ORDER[ppu.fetch_counter], " lx=", ppu.lx,
            " fx=", ppu.fetcher_x, " lcdc=", toHex(ppu.lcd_control, 2),
            " fifo=", ppu.fifo.size, " spr=", ppu.fetching_sprite,
+           " pen=", ppu.obj_penalty,
            " tn=", toHex(ppu.tile_num, 2), " mode=", ppu.mode_flag
   when SCX_STORE_STALL_DOTS != 0:
     # A mid-line SCX store holds the whole pipeline, fetcher and shifter both,
@@ -4111,125 +4187,160 @@ proc fifo_obj_abort*(ppu: GbFifoPpu; gb: GB) =
   ## OBJ-penalty section names the case and stops there ("what this does NOT
   ## model is the object fetch being CANCELLED mid-flight" was the note at
   ## OBJ_FETCH_DOTS until this shipped): the fetch is abandoned, the object is
-  ## dropped, and the rest of the penalty comes back. Two dots of it come back
-  ## to the SHIFTER and one of those never reaches the FETCHER; the two halves
-  ## are OBJ_ABORT_LEAD and OBJ_ABORT_FLAG_HOLD and the second section below is
-  ## why they differ.
+  ## dropped, and the rest of the penalty comes back. Two dots of it come back,
+  ## to the shifter and to the mode 3 -> 0 flag alike -- OBJ_ABORT_LEAD, and
+  ## nothing else. See the RE-DERIVATION section for why that used to be two
+  ## numbers instead of one.
   ##
   ## ---- Which dot the line gets back --------------------------------------
   ##
-  ## Four gambatte DMG families bracket it, and they are the reason this is a
-  ## dot and not a guess. Each is one ROM with ONE object at a known OAM X, one
+  ## Two gambatte DMG families bracket it and they are the reason this is a dot
+  ## and not a guess. Each is one ROM with ONE object at a known OAM X, one
   ## mid-mode-3 `ld [c],a` moved by one M-cycle per step, and a STAT read on a
   ## fixed dot -- so the step where the EXPECTED answer flips from mode 0 to
-  ## mode 3 names the dot the penalty stopped costing, to one M-cycle.
+  ## mode 3 names the dot the penalty stopped costing, to one M-cycle. The two
+  ## families read at two DIFFERENT dots (R = 257 and R = 261) over the same
+  ## four objects, which is what turns a one-sided bound into a bracket.
   ##
   ## Traced with `-d:gb_m3_len -d:gb_m3_trace -d:gb_stat_read_trace`, LY 8 of
-  ## each. `T` is the object's trigger dot, `W` the write's, `R` the STAT
-  ## read's; the wait half of the penalty runs T .. T+wait-1 and the object's
-  ## own six dots T+wait .. T+wait+5. The transducer is exact and calibrated on
-  ## this same set: the read at R reports mode 0 iff `len <= R - 85`.
+  ## each. `T` is the object's trigger dot -- the dot `lx` reaches `X - 8`, and
+  ## the FIRST dot of the stall -- `W` the write's, `R` the STAT read's; the
+  ## stall runs T .. T+P-1 for the penalty P, its wait half first and the
+  ## object's own six dots last. `charge` is what mode 3 keeps of P, so mode 3
+  ## is `172 + charge` dots long. The transducer is exact and calibrated on this
+  ## same set: the read at R reports mode 0 iff `len <= R - 82`.
   ##
-  ##   row (sprites/)                 OAM X   T   wait   W    R   wants
-  ##   late_disable_2                    8   94    5    97  257  charge >= 1
-  ##   sprite_late_disable_spx18_2      24  110    5   113  257  charge >= 1
-  ##   sprite_late_disable_spx19_2      25  111    4   113  257  charge >= 1
-  ##   sprite_late_disable_spx1A_1      26  112    3   113  257  charge <= 0
-  ##   sprite_late_disable_spx1A_2      26  112    3   117  257  charge >= 1
-  ##   sprite_late_disable_spx1B_2      27  113    2   117  257  charge >= 1
-  ##   sprite_late_late_disable_spx18_1 24  110    5   113  261  charge <= 4
-  ##   sprite_late_late_disable_spx18_2 24  110    5   117  261  charge >= 5
-  ##   sprite_late_late_disable_spx19_1 25  111    4   113  261  charge <= 4
-  ##   sprite_late_late_disable_spx19_2 25  111    4   117  261  charge >= 5
-  ##   sprite_late_late_disable_spx1A_1 26  112    3   117  261  charge <= 4
-  ##   sprite_late_late_disable_spx1B_1 27  113    2   117  261  charge <= 4
+  ##   row (sprites/sprite_)        X   P   T    W    R   charge must be
+  ##   late_disable_spx18_1        24  11  106  109  257   <= 3
+  ##   late_disable_spx19_1        25  10  107  109  257   <= 3
+  ##   late_disable_spx1A_1        26   9  108  113  257   <= 3
+  ##   late_disable_spx1B_1        27   8  109  113  257   <= 3
+  ##   late_disable_spx18_2        24  11  106  113  257   >= 4
+  ##   late_disable_spx19_2        25  10  107  113  257   >= 4
+  ##   late_disable_spx1A_2        26   9  108  117  257   >= 4
+  ##   late_disable_spx1B_2        27   8  109  117  257   >= 4
+  ##   late_late_disable_spx18_1   24  11  106  113  261   <= 7
+  ##   late_late_disable_spx19_1   25  10  107  113  261   <= 7
+  ##   late_late_disable_spx1A_1   26   9  108  117  261   <= 7
+  ##   late_late_disable_spx1B_1   27   8  109  117  261   <= 7
+  ##   late_late_disable_spx18_2   24  11  106  117  261   >= 8
+  ##   late_late_disable_spx19_2   25  10  107  117  261   >= 8
+  ##   late_late_disable_spx1A_2   26   9  108  121  261   >= 8
+  ##   late_late_disable_spx1B_2   27   8  109  121  261   >= 8
   ##
-  ## The FLAG's length is `charge = W - 1 - T` and that is the only offset the
-  ## twelve accept -- measured, not argued, by rebuilding the whole gambatte
-  ## suite per setting and reading which rows move:
+  ## Fit `charge = min(W - k - T, P)` -- the stall dots already spent when the
+  ## write lands, capped by the penalty -- and the sixteen intersect at a single
+  ## `k`. Every bound is linear in `k`, so this is solved and not searched:
   ##
-  ##   flag charge = W - T      spx1A_1 and late_late_spx1A_1 fail: one dot too
-  ##                            much charged
-  ##   flag charge = W - 1 - T  all twelve, and no other row of the 5,005 moves
-  ##                            either way
-  ##   flag charge = W - 2 - T  spx19_2 and late_late_spx19_2 fail: one dot too
-  ##                            little
+  ##   `late_disable_spx1A_1`      5 - k <= 3          =>  k >= 2
+  ##   `late_late_disable_spx19_2` min(10 - k, 10) >= 8 =>  k <= 2
   ##
-  ## So the flag is pinned from both sides by a different pair of rows on each
-  ## side. The PIXELS are one dot ahead of it, which is the next section; the
-  ## shipping pair is (OBJ_ABORT_LEAD, OBJ_ABORT_FLAG_HOLD) = (2, 1) and it
-  ## reproduces this whole table exactly, because 2 - 1 is the same 1.
+  ## and the other fourteen contain `k = 2`. **`charge = W - 2 - T`**, pinned
+  ## from both sides by two rows that are not even in the same family.
+  ##
+  ## `2` is not a new constant: it is OBJ_ABORT_LEAD, and OBJ_ABORT_LEAD is
+  ## M3_PIPE_DELAY, the lead this file already charges the pipeline over the
+  ## CPU's register view for the whole of every line. The FLAG and the PIXELS
+  ## get the same two dots, so OBJ_ABORT_FLAG_HOLD is 0.
   ##
   ## Both quantities are separate from the MIXER's copy of the same bit, which
   ## reads it one stage the OTHER way (MIXER_PRIORITY_BACK).
   ##
-  ## Note that spx1A_1 and the late_late `_1` rows are what say the WAIT half
-  ## is abortable too, not just the object's own six dots: spx1A_1's write
-  ## lands ONE dot after the trigger, three dots before that object's fetch
-  ## would even start, and the row still wants the whole 9-dot penalty gone.
+  ## Note that the `_1` rows are what say the WAIT half is abortable too, not
+  ## just the object's own six dots: `late_disable_spx19_1`'s write lands two
+  ## dots after the trigger, five dots before that object's fetch would even
+  ## start, and the row still wants the whole 10-dot penalty gone.
   ##
-  ## ---- Two instruments, and they read different things -------------------
+  ## ---- RE-DERIVATION, 2026-08-21: the old table was stale, and its
+  ## ---- "irreconcilable two instruments" went with it ---------------------
   ##
-  ## mealybug m3_lcdc_obj_en_change_variant measures the same abort without a
+  ## Until this revision the table above read `charge = W - 1 - T`, split as
+  ## `(OBJ_ABORT_LEAD, OBJ_ABORT_FLAG_HOLD) = (2, 1)` so that the SHIFTER got
+  ## two dots and the FLAG one, and it carried a long note about mealybug
+  ## `m3_lcdc_obj_en_change_variant` bands 16/17 wanting `W - 2 - T` -- "no
+  ## refund that is a single number satisfies both".
+  ##
+  ## **There was never a conflict; the gambatte half of it was measured against
+  ## trigger dots that have since moved.** Every `T` in the old table was four
+  ## dots higher than the ones above (`late_disable_spx18_2`: T = 110 then, 106
+  ## now) because the mode-3 pipeline was advanced by an M-cycle after that
+  ## table was written, and the object trigger moved with it while the CPU's
+  ## write dot did not. Re-tracing the same sixteen rows on the current tree
+  ## gives `k = 2` -- **the value mealybug's pixel ruler wanted all along** --
+  ## and mealybug's two bands stay pixel-exact at it, because they only ever
+  ## constrained OBJ_ABORT_LEAD, which does not move.
+  ##
+  ## The lesson is not about objects: a table of measured DOTS is only valid
+  ## against the pipeline phase it was taken on. This one had gone stale
+  ## silently, because `(2, 1)` reproduces `W - 1 - T` at any phase and the two
+  ## rows it then costs (`spx1A_1`, and the two `late_late` rows below) were
+  ## filed as "the family wants re-deriving" rather than as a phase artefact.
+  ##
+  ## ---- What is still red, and exactly why --------------------------------
+  ##
+  ## `late_late_disable_spx1A_1` and `late_late_disable_spx1B_1` are the two
+  ## rows of the sixteen this file cannot serve, and they share a signature:
+  ## `W = T + P` exactly (117 = 108+9 and 117 = 109+8). Their write lands on the
+  ## dot the shifter RESUMES on -- one dot past the last stall dot -- so by the
+  ## time `ppu_write` runs, `fetching_sprite` is already false and
+  ## `obj_penalty` is 0 and this proc is never called at all. The arithmetic
+  ## wants `charge = 117 - 2 - 108 = 7`, which is inside their bound; the
+  ## machinery cannot produce it because the dots it would refund are in the
+  ## past.
+  ##
+  ## The faithful reading is that LCDC.1 reaches the fetcher at `W - 2` = 115,
+  ## which IS inside the stall, and that our PPU has simply already run dots
+  ## 115 and 116 by the time the write is processed (the catch-up leaves
+  ## `cycle_counter == W`). Two ways to serve it, neither taken here:
+  ##
+  ##   * catch the PPU up only to `W - OBJ_ABORT_LEAD` before `ppu_write` and
+  ##     spend the lead afterwards. Faithful, and a change to the write
+  ##     ordering for every register in the machine -- far outside this proc.
+  ##   * remember the stall's end dot and allow the abort for OBJ_ABORT_LEAD
+  ##     dots past it, refunding `(T + P) - (W - OBJ_ABORT_LEAD)`. One new
+  ##     field, and it must NOT reach the `idx < 0` arm: mealybug variant band
+  ##     0 (X = 0, stall 94..104, write on 105 = T + P) is the same
+  ##     configuration on the head arm and wants NO refund there -- correctly,
+  ##     because that arm's six object dots are T+1..T+6 and were finished long
+  ##     before 103. The rule that separates them is "the abort cancels the
+  ##     object's own FETCH, and is effective iff `W - OBJ_ABORT_LEAD` is at or
+  ##     before the fetch's last dot", which is T+6 on the head arm and T+P-1
+  ##     on the tail arm.
+  ##
+  ## ---- Two instruments, and they now agree -------------------------------
+  ##
+  ## mealybug `m3_lcdc_obj_en_change_variant` measures the same abort without a
   ## STAT read in the path: its handler pulses BGP black at a fixed dot near the
   ## end of every line, so the x the black run starts at IS the shifter's
   ## position. Its bands 8..15 calibrate the ruler exactly -- run start
   ## = 161 - P for the object penalty P, all eight of them -- and its last two
-  ## bands are the aborted ones:
+  ## bands are the aborted ones, both wanting `charge = W - 2 - T`. That is the
+  ## gambatte answer above, so the SHIFTER and the FLAG take the same refund and
+  ## `m3_hold` is not involved. `fetcher_retired` still says mode 3 ends when the
+  ## FETCHER is done rather than when the last pixel leaves; the abort just does
+  ## not add anything to that difference.
   ##
-  ##   band  X   T    wait  W    run start   charge
-  ##    16  16  102    5   109      156         5      = W - 2 - T
-  ##    17  17  103    4   109      157         4      = W - 2 - T
+  ## Measured on this base, whole suites (each cell one build; the gambatte
+  ## column includes the OBJ-off prune in tick_shifter, so its control is 4446):
   ##
-  ## That is one dot MORE refund than the twelve gambatte rows above allow, and
-  ## the conflict does not go away by reading the table harder. As a function of
-  ## `W - T` alone -- which is what the table is -- ten of the twelve rows accept
-  ## either answer and the disagreement is exactly ONE gambatte ROM (`spx19`,
-  ## read at two STAT dots, hence two rows) against those two bands, at
-  ## configurations congruent to the dot:
+  ##   lead  hold   k   gambatte   variant DMG   what is red that (2,0) is not
+  ##      1     0    1     4446     16 px out     spx1A_1
+  ##      2     2    0     4445     exact         spx1A_1, spx1B_1
+  ##      2     1    1     4446     exact         spx1A_1
+  ##      2     0    2   **4447**   exact         --
+  ##      3     1    2     4446     16 px out     late_enable_spx18_2
   ##
-  ##   instrument                  X    T   wait  W    W-T   says
-  ##   gambatte late_late_spx19_2  25  111   4   117    6    charge >= 5
-  ##   mealybug variant band 17    17  103   4   109    6    charge  = 4
+  ## Every cell also carries the two `W = T + P` rows named above. The mealybug
+  ## CGB set does not move at any of them.
   ##
-  ## Same X mod 8, same wait, same offset into the object's own fetch, opposite
-  ## answers. No refund that is a single number satisfies both.
-  ##
-  ## What separates them is not the number, it is the QUANTITY: gambatte's rows
-  ## read the mode 3 -> 0 flag back through STAT and mealybug's ruler reads the
-  ## pixels. So the shifter and the fetcher are given different amounts, which
-  ## is a mechanism this file already has a name for -- `fetcher_retired` says
-  ## mode 3 ends when the FETCHER is done, not when the last pixel leaves.
-  ##
-  ##   * the SHIFTER gets both dots back (OBJ_ABORT_LEAD = 2). It needs nothing
-  ##     but the BG FIFO, which is full, and 2 is not a new constant: it is
-  ##     M3_PIPE_DELAY, the lead this file already charges the pipeline over the
-  ##     CPU's register view for the whole of every line.
-  ##   * the FETCHER gets one of them (OBJ_ABORT_FLAG_HOLD = 1). The VRAM cycle
-  ##     the object had already issued still owns the bus for its last dot, so
-  ##     the fetcher retires one dot behind the pixels and only the flag can see
-  ##     it. `m3_hold` is the field that already means exactly this, added for
-  ##     line 0's early pipeline (LY0_PIPE_MCYCLES).
-  ##
-  ## Both halves are needed and each is refused on its own, measured on this
-  ## base, whole suites:
-  ##
-  ##   lead  hold   gambatte   mealybug DMG   what fails
-  ##      1     0     3818        552580      variant bands 16/17, 16 px
-  ##      2     0     3816        552596      spx19_2 and late_late_spx19_2
-  ##      2     1     3818        552596      nothing
-  ##
-  ## At (2, 1) the whole 5,005-row gambatte suite is identical row for row to
-  ## (1, 0) -- the flag's length on an aborted line is `W - 1 - T` either way --
-  ## and the variant's DMG row goes to 0 wrong pixels. The mealybug CGB set does
-  ## not move at either setting.
-  ##
-  ## The honest caveat: (2, 1) is two numbers against two instruments, and no
-  ## third ROM in the tree separates it from "one of the two instruments is a
-  ## dot out". What would settle it is a mealybug-style PIXEL ruler for the
-  ## gambatte geometry -- the `_2` rows re-cut with a BGP pulse instead of a
-  ## STAT read. Until then the pair is preferred over either single number
-  ## because it is the only setting that costs nothing on either side.
+  ## So the pair is pinned in both coordinates and by two different instruments:
+  ## `lead` two-sided by mealybug's pixel ruler (1 and 3 each cost it 16 pixels)
+  ## and from above by the OBJ-off prune in tick_shifter, which spends the same
+  ## constant on the RISING edge (`late_enable_spx18_2` is `W - T = +3` and must
+  ## lose its object, which a lead of 3 keeps); `k = lead - hold` two-sided by
+  ## the sixteen-row fit. `hold` is 0 because `k` is 2 and `lead` is 2, not
+  ## because anything measured a hold of 0 -- there is no longer a quantity for
+  ## it to be.
   ##
   ## ---- The CGB does not do this ------------------------------------------
   ##

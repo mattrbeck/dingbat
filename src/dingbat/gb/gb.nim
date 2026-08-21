@@ -2752,17 +2752,23 @@ const OBJ_ABORT_LEAD*         {.intdefine.} = 2
   ## dot, when the write cancels a fetch (OBJ_ABORT). The SHIFTER comes back on
   ## dot `W - OBJ_ABORT_LEAD`, paid as that many catch-up pipeline dots on the
   ## write's own dot; it is the same two dots M3_PIPE_DELAY already charges the
-  ## rest of the line. What the shifter gets and the FETCHER does not is
-  ## OBJ_ABORT_FLAG_HOLD below; the bracket that pins the pair is at
-  ## `fifo_obj_abort` in fifo_ppu.nim.
-const OBJ_ABORT_FLAG_HOLD*    {.intdefine.} = 1
+  ## rest of the line. The bracket that pins it is at `fifo_obj_abort` in
+  ## fifo_ppu.nim, and it is two-sided from two instruments at once: mealybug's
+  ## pixel ruler refuses 1 and 3 (16 pixels each) and gambatte's
+  ## `sprite_late_enable` family refuses 3 from the other direction, because the
+  ## RISING edge of the same bit spends the same constant (see the OBJ-off prune
+  ## in tick_shifter).
+const OBJ_ABORT_FLAG_HOLD*    {.intdefine.} = 0
   ## Dots the mode 3 -> 0 FLAG keeps after an aborted object fetch that the
-  ## shifter does not: the cancelled VRAM cycle still owns the bus for its last
-  ## dot, so the fetcher retires one dot behind the pixels. It is what makes the
-  ## two instruments agree -- mealybug reads the PIXELS and gambatte's
-  ## sprite_late_disable rows read the FLAG -- and both are exact with the pair
-  ## (2, 1) where no single refund satisfies either pair of rows. See
-  ## `fifo_obj_abort`.
+  ## shifter does not. **0 as of 2026-08-21, and there is no longer a quantity
+  ## here at all**: it shipped at 1 to reconcile gambatte's flag rows with
+  ## mealybug's pixel ruler, and the disagreement turned out to be an artefact
+  ## of trigger dots measured before the mode-3 pipeline was advanced. Re-traced
+  ## on the current tree, all sixteen `sprite_late{,_late}_disable_spx*` rows
+  ## want the flag charged `W - 2 - T`, which is the same `W - OBJ_ABORT_LEAD -
+  ## T` mealybug's two aborted bands want for the pixels. Setting it back to 1
+  ## costs `sprite_late_disable_spx1A_1`. Full re-derivation at `fifo_obj_abort`
+  ## in fifo_ppu.nim.
 const MIXER_PRIORITY_BACK*    {.intdefine.} = 1
   ## Stages of the mixer tail LCDC's priority bits are read at the far end of.
 const BG_EN_AT_MIX*           {.intdefine.} = 1
