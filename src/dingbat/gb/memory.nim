@@ -545,7 +545,8 @@ proc mem_read_open(mem: GbMemory; gb: GB; idx: int): uint8 {.inline.} =
       echo "VRAMRD ly=", gb.ppu.ly, " dot=", gb.ppu.cycle_counter,
            " idx=", toHex(idx, 4), " latch=", gb.ppu.read_mode and 3'u8,
            " live=", gb.ppu.lcd_status and 3'u8,
-           " open=", (if cpu_vram_open(gb.ppu, is_write = false): 1 else: 0),
+           " open=", (if cpu_vram_open(gb.ppu, is_write = false,
+                                       cgb = gb.cgb_enabled): 1 else: 0),
            " val=", toHex(read_byte(mem, gb, idx), 2)
   if (idx and 0xE000) == 0x8000:
     # This read samples after its M-cycle's dots, so it is one of the two points
@@ -554,7 +555,8 @@ proc mem_read_open(mem: GbMemory; gb: GB; idx: int): uint8 {.inline.} =
     # than counted out on every tick.
     when HDMA_VISIBLE_DOTS != 0:
       if gb.ppu.hdma_bytes_held: ppu_land_hdma_if_due(gb.ppu, gb)
-    if not cpu_vram_open(gb.ppu, is_write = false): return 0xFF'u8
+    if not cpu_vram_open(gb.ppu, is_write = false,
+                         cgb = gb.cgb_enabled): return 0xFF'u8
   read_byte(mem, gb, idx)
 
 const OAMDMA_WRAM_A12* {.intdefine.} = 1

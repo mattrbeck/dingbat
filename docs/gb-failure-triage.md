@@ -479,6 +479,35 @@ mode-1/mode-2 handover at the top of line 144 where hardware refuses an edge
 that a level-OR gives -- and they are no longer worth 24 rows of the comparator
 handover to keep.
 
+## SOLVED 2026-08-20: the VRAM read lock's live-mode clause is DMG-only
+
+`VRAM_READ_LIVE_LOCK` in `gb/ppu.nim`, at `cpu_vram_open`. gambatte
+**4387 → 4393**, runner unmoved at 1043, **+6 / −0** and no row anywhere goes
+the other way.
+
+The HDMA round left this as an open bracket: dropping the live-mode clause from
+the VRAM *read* lock was gambatte +5 but runner −7, "and every loser is
+DMG/power-on while every gainer is CGB — a device or line split is missing".
+It is the device. Swept on `f8811ba`, runner / gambatte:
+
+| `VRAM_READ_LIVE_LOCK` | | |
+|---|---|---|
+| 0 — never ask the live mode | 1036 | 4392 |
+| 1 — ask on every device (was shipping) | 1043 | 4387 |
+| **2 — ask on DMG, not on CGB** | **1043** | **4393** |
+
+2 keeps every row 1 keeps and gains every row 0 gains: `dma/hdma_late_enable_1`
+and `_lcdoffset3_1` (which read `$8000` one dot into mode 3 with the latched
+mode still 2) plus four `vram_m3/preread_*`. All six are CGB and all six are
+SameBoy-passing.
+
+The row that says it is really the device rather than a fit is
+`vram_m3/preread_2_dmg08_out3_cgb04c_out0`: gambatte's own filename declares
+DMG 3 and CGB 0 for one ROM — a device split measured on hardware — and it is
+among the six. The gate is on the CONSOLE (`gb.cgb_enabled`), not the
+compatibility mode: `lcdon_timing-GS` is a DMG cart and the rows this buys are
+CGB carts, and nothing here has been shown to follow `cgb_native`.
+
 ## BRACKETED 2026-08-20: the DMG OAM STAT source is one M-cycle late, and the tree spells it as three DMG/CGB splits
 
 

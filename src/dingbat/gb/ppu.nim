@@ -530,7 +530,12 @@ proc bg_display*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_control and 0x01) != 0
 #     2 T-cycles off the CPU's M-cycle grid (see the LCDC-enable write), so
 #     every edge on that line rounds to the same M-cycle as the STAT bits do.
 #     One line, one flag: `first_line` selects the latched mode for both.
-proc cpu_vram_open*(ppu: GbPpu; is_write: bool): bool {.inline.} =
+const VRAM_READ_LIVE_LOCK* {.intdefine.} = 2
+  ## Whether a CPU VRAM READ also asks the LIVE mode, on top of the latched one.
+  ## 1 asks it on every device (the rule this replaces), 0 never asks it, 2
+  ## asks it on a DMG and not on a CGB. See the bracket in cpu_vram_open.
+
+proc cpu_vram_open*(ppu: GbPpu; is_write: bool; cgb = false): bool {.inline.} =
   if not lcd_enabled(ppu): return true
   if is_write:
     # A write is applied BEFORE its M-cycle's dots (see mem_write), so the live
@@ -552,7 +557,29 @@ proc cpu_vram_open*(ppu: GbPpu; is_write: bool): bool {.inline.} =
   # `vram_read_l1_b`. Every loser is DMG-side or a power-on line and every
   # gainer is CGB, so what is missing is a device or line split, not this
   # clause. Measured 2026-08-20; see the HDMA_BLOCK_OVERHEAD_BUS commit.
-  (ppu.lcd_status and 3'u8) != 3
+  #
+  # **That split is now built and it is the device.** `VRAM_READ_LIVE_LOCK = 2`, spelled and swept 2026-08-20 on
+  # f8811ba (runner of 1225 / gambatte of 5005):
+  #
+  #   0 (no live clause)   1036 / 4392
+  #   1 (ships)            1043 / 4387
+  #   2 (DMG only)         1043 / 4392
+  #
+  # 2 keeps every row 1 keeps and gains every row 0 gains -- gambatte +6 / -0,
+  # all six CGB, all six SameBoy-passing, and the runner unmoved at 1043.
+  # `vram_m3/preread_2_dmg08_out3_cgb04c_out0` is the row that says it is
+  # really the device and not a fit: gambatte's own filename declares DMG 3 and
+  # CGB 0 for one ROM, which is a device split measured on hardware, and it is
+  # among the six. `cgb` is the
+  # CONSOLE (gb.cgb_enabled), not the mode -- `lcdon_timing-GS` is a DMG cart
+  # and the CGB rows this buys are CGB carts, and nothing here has been shown
+  # to follow the compatibility mode.
+  when VRAM_READ_LIVE_LOCK == 0:
+    true
+  else:
+    when VRAM_READ_LIVE_LOCK == 2:
+      if cgb: return true
+    (ppu.lcd_status and 3'u8) != 3
 
 const CRAM_LOCK_R {.intdefine.} = 3
 const CRAM_LOCK_W {.intdefine.} = 0

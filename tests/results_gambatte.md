@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-20 17:16:33*
+*Generated: 2026-08-20 17:39:38*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4387/5005 passed.**
+**4393/5005 passed.**
 
 ## bgen
 
@@ -54,9 +54,9 @@ All 40 tests passed.
 
 All 8 tests passed.
 
-## dma (165/229 passed)
+## dma (167/229 passed)
 
-165/229 tests passed, 64 failed:
+167/229 tests passed, 62 failed:
 
 | Test | Result |
 |------|--------|
@@ -65,10 +65,8 @@ All 8 tests passed.
 | dma/hdma_late_ei_m3halt_m2unhalt_ly_scx1_2_cgb04c_out03 [cgb] | got 02, expected 03 |
 | dma/hdma_late_ei_m3halt_m2unhalt_ly_scx1_4_cgb04c_out03 [cgb] | got 02, expected 03 |
 | dma/hdma_late_ei_m3halt_m2unhalt_ly_scx1_6_cgb04c_out03 [cgb] | got 02, expected 03 |
-| dma/hdma_late_enable_1_cgb04c_out1 [cgb] | got 7, expected 1 |
 | dma/hdma_late_enable_ds_lcdoffset1_2_cgb04c_out0 [cgb] | got 1, expected 0 |
-| dma/hdma_late_enable_lcdoffset3_1_cgb04c_out1 [cgb] | got ?, expected 1 |
-| dma/hdma_late_enable_lcdoffset3_2_cgb04c_out0 [cgb] | got ?, expected 0 |
+| dma/hdma_late_enable_lcdoffset3_2_cgb04c_out0 [cgb] | got 1, expected 0 |
 | dma/hdma_late_if_and_ie_halt_2_cgb04c_out02 [cgb] | got 00, expected 02 |
 | dma/hdma_late_m0halt_1_cgb04c_out00 [cgb] | got FF, expected 00 |
 | dma/hdma_late_m0halt_ds_1_cgb04c_out00 [cgb] | got FF, expected 00 |
@@ -792,9 +790,9 @@ All 67 tests passed.
 
 All 20 tests passed.
 
-## vram_m3 (37/50 passed)
+## vram_m3 (41/50 passed)
 
-37/50 tests passed, 13 failed:
+41/50 tests passed, 9 failed:
 
 | Test | Result |
 |------|--------|
@@ -804,10 +802,6 @@ All 20 tests passed.
 | vram_m3/postread_scx2_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | vram_m3/postread_scx3_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | vram_m3/postread_scx5_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
-| vram_m3/preread_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
-| vram_m3/preread_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
-| vram_m3/preread_ds_lcdoffset1_1_cgb04c_out0 [cgb] | got 3, expected 0 |
-| vram_m3/preread_lcdoffset1_1_cgb04c_out0 [cgb] | got 3, expected 0 |
 | vram_m3/preread_lcdoffset2_1_cgb04c_out0 [cgb] | got 3, expected 0 |
 | vram_m3/prewrite_lcdoffset2_1_cgb04c_out1 [cgb] | got 0, expected 1 |
 | vram_m3/vramw_m3start_1_dmg08_cgb04c_out1 [dmg] | got 0, expected 1 |
