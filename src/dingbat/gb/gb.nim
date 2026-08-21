@@ -73,7 +73,37 @@ const STAT_LYC_LEAD* {.intdefine.} = 0
   ## **It ships at 0, and the reason is a two-sided bracket, not caution.** See
   ## STAT_LYC_LEAD's write-up next to STAT_M2_LEAD in ppu.nim and the 2026-08-14
   ## entry in docs/gb-failure-triage.md.
-const STAT_IRQ_SPLIT* = STAT_IRQ_LEAD != 0 or STAT_LYC_LEAD != 0
+const STAT_M0_TAIL_SPEED_SCALED* {.booldefine.} = false
+  ## Whether `STAT_M0_FIELD_TAIL` is a CPU-clock quantity (`shr current_speed`)
+  ## rather than a flat dot count. Inert at the shipping tail of 0; it matters
+  ## only in a build that pays the tail back against a mode-3 end that moved by
+  ## the same amount, where a flat 2 dots over-pays in double speed. See
+  ## `M0_HALT_BLIND_DOTS` in ppu.nim.
+
+const STAT_M0_LEAD_T* {.intdefine.} = 0
+  ## The same lead again, applied to the **mode 0 source alone**, and in
+  ## T-CYCLES rather than whole M-cycles -- the two things that make it a
+  ## different quantity from `STAT_IRQ_LEAD` rather than a smaller one.
+  ##
+  ## Both differences are measured. `tools/gbppu/gam_dispatch.py` puts the
+  ## mode-0 STAT dispatch 2 dots late from the second line after an LCD enable
+  ## onward and exact on the first, on both devices and all eight SCX; and 2
+  ## dots is HALF an M-cycle, so it has to be spent in T-cycles of the CPU's
+  ## clock and not in dots -- flat in dots it costs 221 double-speed gambatte
+  ## rows, shifted by `current_speed` it costs 96. See `M0_HALT_BLIND_DOTS` in
+  ## ppu.nim for the whole map and for the halted half of the same 2 dots.
+  ##
+  ## What makes this expressible at all is that the mode 3 -> 0 hook in
+  ## fifo_ppu's mode-3 dot loop already exists (`fifo_irq_m0_ready`) -- the
+  ## fetcher's own lookahead -- and that the OTHER two arms of the shared irq
+  ## domain are gated on the OLD constants in ppu.nim, so this one moves the
+  ## mode-0 source without taking LYC, mode 1 or the readable mode field with
+  ## it. That separation is the whole point: `M3_END_EARLY = 2` moves the same
+  ## edge and is refused because the readable field goes with it
+  ## (`poweron_stat_069/_183`, `ppu_sprite0_scx{0,1,4,5}_a`, `sprite4_{0..7}_a`,
+  ## `win10_scx3_a`, `lcdon_to_stat0_c`, all `$80` against `$83`).
+const STAT_IRQ_SPLIT* = STAT_IRQ_LEAD != 0 or STAT_LYC_LEAD != 0 or
+                        STAT_M0_LEAD_T != 0
 static:
   # The two share one early-advancing domain (irq_ly / irq_mode), so they cannot
   # ask for different amounts of lead at once. Either is free to be 0.

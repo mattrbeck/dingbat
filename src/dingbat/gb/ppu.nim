@@ -81,9 +81,27 @@ when STAT_IRQ_SPLIT:
   # clock, which is what makes the LYC source separable from them.
   template irq_mode_of(ppu: GbPpu): uint8 =
     when STAT_IRQ_LEAD != 0: ppu.irq_mode else: ppu.mode_flag
-  template irq_ly_of(ppu: GbPpu): uint8 = ppu.irq_ly
+  # ...and the same separation once more, for `STAT_M0_LEAD_T`, which is a
+  # lead for the MODE 0 SOURCE ALONE. The domain still advances on all three of
+  # its hooks -- one counter pair, one `lead` local in fifo_tick_slow -- so
+  # what makes a source separable is which CLOCK its term below reads, not
+  # which hook fired. Mode 0 reads the irq clock as soon as either constant is
+  # on; LYC, mode 1 and the OAM pulse only when their own is.
+  #
+  # The mode 2 -> 3 hook needs no gate: `irq_mode == 3` is not read by any
+  # term here (only `== 0` and `== 1` are), so moving the domain through it
+  # early is unobservable either way.
+  template irq_m0_of(ppu: GbPpu): uint8 =
+    when STAT_IRQ_LEAD != 0 or STAT_M0_LEAD_T != 0: ppu.irq_mode
+    else: ppu.mode_flag
+  template irq_m1_of(ppu: GbPpu): uint8 =
+    when STAT_IRQ_LEAD != 0: ppu.irq_mode else: ppu.mode_flag
+  template irq_ly_of(ppu: GbPpu): uint8 =
+    when STAT_IRQ_LEAD != 0 or STAT_LYC_LEAD != 0: ppu.irq_ly else: ppu.ly
 else:
   template irq_mode_of(ppu: GbPpu): uint8 = ppu.mode_flag
+  template irq_m0_of(ppu: GbPpu): uint8 = ppu.mode_flag
+  template irq_m1_of(ppu: GbPpu): uint8 = ppu.mode_flag
   template irq_ly_of(ppu: GbPpu): uint8 = ppu.ly
 
 when not LCD_ON_TRIM_ANY:
@@ -877,8 +895,18 @@ proc stat_irq_lead*(gb: GB): int32 {.inline.} =
   ## How far ahead of the mode flag the STAT interrupt line runs, in dots.
   ## STAT_IRQ_LEAD is in CPU M-cycles, and one M-cycle is 4 dots at normal
   ## speed and 2 in double speed (Pan Docs, "Dots").
-  when STAT_IRQ_SPLIT: int32(STAT_DOMAIN_LEAD) * int32(4 shr gb.memory.current_speed)
+  ## `STAT_M0_LEAD_T` rides the same local, in T-cycles rather than M-cycles:
+  ## it is half an M-cycle and the domain has only one lead to give. The two
+  ## are never on at once (the static assert below says so), so this is a sum
+  ## of which one is set rather than a mixture.
+  when STAT_IRQ_SPLIT:
+    int32(STAT_DOMAIN_LEAD) * int32(4 shr gb.memory.current_speed) +
+      int32(STAT_M0_LEAD_T shr gb.memory.current_speed)
   else: 0'i32
+static:
+  doAssert STAT_M0_LEAD_T == 0 or (STAT_IRQ_LEAD == 0 and STAT_LYC_LEAD == 0),
+    "STAT_M0_LEAD_T shares the irq domain's one lead: it cannot ride with " &
+    "STAT_IRQ_LEAD or STAT_LYC_LEAD"
 
 # ---- Where STAT's mode bits are sampled ------------------------------------
 #
@@ -962,6 +990,14 @@ proc stat_m0_tail(ppu: GbPpu; gb: GB): int32 {.noinline.} =
     return 0'i32
   var tail = if gb.cgb_enabled: int32(STAT_M0_FIELD_TAIL_CGB)
              else: int32(STAT_M0_FIELD_TAIL)
+  when STAT_M0_TAIL_SPEED_SCALED:
+    # The tail is a CPU-clock quantity, not a dot-clock one, whenever it is
+    # paying back a mode-3 end that moved by the same amount: a double-speed
+    # M-cycle is 2 dots, so 2 dots of tail against 1 dot of moved edge
+    # over-pays by one and it is the `_ds_` rows that say so (96 gambatte
+    # `sprites/*_m3stat_ds_1` rows). Off by default -- the shipping tail is 0
+    # and there is nothing to scale. See M0_HALT_BLIND_DOTS.
+    tail = tail shr gb.memory.current_speed
   when STAT_M0_TAIL_ANY and STAT_M0_FIELD_TAIL_ABSORB:
     if gb.fifo_ppu != nil:
       tail = max(0'i32, tail - gb.fifo_ppu.obj_dots_line)
@@ -1777,9 +1813,62 @@ proc lyc_settle_halt_skip(gb: GB): bool {.inline.} =
 # So the readable mode FLAG's 3 -> 0 edge is exactly where it belongs and only
 # the mode-0 SOURCE (and the halted latch that reads it) is 2 dots late. That
 # is a source/flag split of the kind `STAT_M2_LEAD` already makes for mode 2,
-# and the `STAT_IRQ_SPLIT` domain (`irq_mode`) is where it would live -- but at
-# 2 dots rather than a whole M-cycle, and only from the second line after an
-# LCD enable. Nothing in the tree spells that today. See LCD_ON_LINE0_TRIM in
+# and the `STAT_IRQ_SPLIT` domain (`irq_mode`) is where it would live.
+#
+# ---- The split is now BUILT, and what it ran into ---------------------------
+#
+# `STAT_M0_LEAD_T` (gb.nim) is that lead: the mode 0 source alone, in T-cycles
+# rather than whole M-cycles. Three gates in this file keep it to one source --
+# `irq_m0_of` reads the irq clock as soon as either lead constant is on, while
+# `irq_m1_of` and `irq_ly_of` only do so for their own -- and the mode 2 -> 3
+# hook needs no gate because `irq_mode == 3` is not read by any source term.
+# The hook it drives already exists (`fifo_irq_m0_ready`, fifo_ppu.nim): the
+# fetcher's own lookahead into the tail of mode 3.
+#
+# It does not reach 2 dots, and the reason is geometric rather than a tuning
+# question. Measured with `tools/gbppu/gam_dispatch.py`, W = 114, DMG, as the
+# number of dots the source actually moved:
+#
+#   STAT_M0_LEAD_T   0        1        2         wanted
+#   dots moved       0        5        6         2
+#
+# Two things make that table. The hook's threshold is written against
+# `GB_WIDTH`, but `M3_PIPE_DELAY = 2` ships and the fetcher retires at lx 158,
+# so any lead of 2 or less asks for a dot the mode-3 loop has already exited
+# on -- that is the 0. And `M3_PIPE_AHEAD = 1` puts the pipeline four dots
+# ahead of machine time, so the last dot the hook CAN fire on is already five
+# machine-dots before the flag -- that is the jump from 0 to 5. The reachable
+# set is {0, 5, 6, 7, ...} and 2 is not in it.
+#
+# **So the mode-0 source's 2 dots cannot ride the fetcher's lookahead.** They
+# have to be spent on the other side of the retire -> flag hand-off, which is
+# `M3_PIPE_AHEAD`'s accounting in fifo_ppu.nim, not this domain's.
+#
+# Two latent bugs in the split path were found on the way and are worth fixing
+# whoever carries this next, because both are invisible at the only leads ever
+# built (exactly one M-cycle) and both are in fifo_ppu.nim:
+#
+#   * `fifo_skip_target`'s STAT_IRQ_SPLIT branch drops the `STAT_M2_LEAD` stop
+#     that its own unsplit branch has (`m2_early_stop` / `m2_early_dot`), so
+#     the idle skip jumps over the OAM source's lead dot and `STAT_M2_LEAD`
+#     silently turns off. Worth **runner 948 -> 1057** at STAT_M0_LEAD_T = 2.
+#     It hides at a one-M-cycle lead only because `irq_dot` lands on the same
+#     dot by arithmetic accident.
+#   * the mode-0 hook's `lx >= GB_WIDTH - lead` should be measured from the
+#     fetcher's retire point, not from GB_WIDTH (the first paragraph above).
+#
+# ---- The best combination measured so far -----------------------------------
+#
+# `M3_END_EARLY = 2` gated off `ppu.first_line` and shifted by `current_speed`,
+# plus `STAT_M0_FIELD_TAIL{,_CGB} = 2` with `STAT_M0_TAIL_SPEED_SCALED`, plus
+# this rule: **runner 1051 / gambatte 4242** against 1063 / 4443. It turns the
+# whole running-steady-state family green (`hblank_int_scx{1,2,5,6}` and all
+# their `_if_b`/`_if_d`/`_nops_a`/`_nops_b` siblings, 21 rows) and all four
+# `int_hblank_halt` rows, and the residue is dominated by **96
+# `sprites/*_m3stat_ds_1` rows**: in double speed an M-cycle is 2 dots, so even
+# the minimum 1-dot move of the mode-3 end is a whole M-cycle to a `_m3stat_`
+# read. Whatever carries the 2 dots has to leave the double-speed mode-3 end
+# alone, which no spelling tried here does. See LCD_ON_LINE0_TRIM in
 # gb.nim for the three shapes that were tried before this one and refused; what
 # this measurement adds to that note is that its "later frames say 0" leg is
 # wrong (lines 1, 2, 3 and 10 after an enable all want the same 2 dots) and
@@ -1859,8 +1948,8 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
     # (line 144) — simultaneously with the vblank interrupt on DMG, one
     # M-cycle earlier on CGB. See m2_line144.
     (ppu.oam_interrupt_enabled and ppu.m2_line144(gb)) or
-    (ppu.irq_mode_of == 0     and ppu.hblank_interrupt_enabled) or
-    (ppu.irq_mode_of == 1     and ppu.vblank_stat_enabled)
+    (ppu.irq_m0_of == 0       and ppu.hblank_interrupt_enabled) or
+    (ppu.irq_m1_of == 1       and ppu.vblank_stat_enabled)
   if not ppu.old_stat_flag and stat_flag:
     when defined(gb_stat_read_trace):
       echo "STATIRQ ly=", ppu.ly, " cc=", ppu.cycle_counter,

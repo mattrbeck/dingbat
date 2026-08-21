@@ -445,7 +445,7 @@ they are: the same measurement with two expected tables, one per silicon family.
 Clone `github.com/c-sp/age-test-roms` for the sources — every ROM is a few dozen
 lines of RGBDS with the devices it was verified on in a header comment.
 
-## Asking SameBoy a question the gambatte suite cannot
+## Asking SameBoy a GBMicrotest question — the oracle reaches further than it looks
 
     export SAMEBOY_GAMBATTE=~/code/dingbat/tools/gbfuzz/sameboy_gambatte
     export SAMEBOY_BOOT=<dir with dmg_boot.bin / cgb_boot.bin>
@@ -462,10 +462,22 @@ at `$7000`, which makes any one of them a blank program with a known output
 path. `gam_patchrun.py` overwrites the body, re-checksums the header and runs
 the result through both emulators.
 
-That is what these four are for. GBMicrotest asks exactly the right questions
-about the mode-0 STAT source — and answers them in `$FF80`, which no SameBoy
-runner here reads — so before this the oracle could not be pointed at them at
-all. Rebuilt in gambatte's format they can:
+**If you are looking at a GBMicrotest row and have been told it "has no
+oracle", this is the section you need.** GBMicrotest asks exactly the right
+questions and answers them in `$FF80`, which no SameBoy runner in this tree
+reads — so the round-brief oracle tables, which are built from the gambatte
+suite, simply do not cover it. That is a property of the HARNESS, not of the
+oracle: rebuild the ROM's measurement in gambatte's output format and SameBoy
+answers it like any other row.
+
+Verified by reproducing GBMicrotest's own hardware staircases exactly:
+`gam_dispatch.py 0 dmg` prints `29 2A 2A 2A 2A 2B 2B 2B` (steps at SCX 1 and 5,
+the shape of `int_hblank_nops_scx0..7`) and SameBoy at `W=114` prints
+`29 29 29 2A 2A 2A 2A 2B` (steps at 3 and 7, the shape of `hblank_int_scx0..7`).
+Two ROM families, two hardware answers, both reproduced from a gambatte ROM
+body — so the oracle can now be pointed at anything GBMicrotest measures.
+
+The three instruments:
 
 * `gam_dispatch.py` — INC A until the mode-0 STAT interrupt **dispatches**,
   swept over SCX 0..7, N lines after an LCD enable. The step positions in SCX
