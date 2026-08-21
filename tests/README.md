@@ -562,6 +562,43 @@ edit:
   `nim c -d:test_harness -d:release --path:src -d:<CONST>=<n> -o:dingbat_test
   tests/dingbat_test.nim && ./dingbat_test_runner`.
 
+**What `dmg08` and `cgb04c` actually select — and why the tree runs the defaults.**
+Those tags name the **silicon the reference was captured on**, not a device the runner
+has to be told about. gambatte-core's own `test/testrunner.cpp` proves it: the tags are
+matched only to pick which `_out<hex>` value to score against, and the sole flags it
+passes to `GB::load` are `CGB_MODE`, `GBA_FLAG` and `NO_BIOS` — **no revision parameter
+exists on that path at all**. The bundle's own howto reads the names the same way, as a
+guess at provenance: `dmg08` = a DMG-CPU-08 mainboard, `cgb04c` = CGB-CPU-04, i.e.
+**CPU CGB C**.
+
+dingbat constructs those rows at its defaults (`gb.nim`'s `new_gb`: `grCgbC` for a CGB,
+`grDmgABC` for a DMG), and `cgb04c` and `grCgbC` are the same machine. **Measured
+2026-08-21 on `64fe90a`, sweeping one device axis at a time over the whole suite with
+`gb_set_revision` applied before `post_init`** (which re-resolves the boot table *and*
+`GbQuirks`, so it is the real machine and not just a relabelling):
+
+```
+DMG axis, CGB held at C     CGB axis, DMG held at ABC
+  dmgABC   4484  <- ships     cgbAB   4484
+  mgb      4484               cgbC    4484  <- ships
+  sgb      4476               cgb0    4477
+  sgb2     4476               cgbD    4459
+  dmg0     4353               agb     4451
+                              cgbE    4433
+```
+
+So **both defaults are already at the maximum**, and the axis is far from inert — the
+wrong CGB revision costs up to 51 rows and the wrong DMG revision up to 131. The two
+ties are not ambiguities: `mgb` is a Game Boy Pocket rather than a DMG, and `cgbAB` is
+older silicon than the `cgb04c` the references name, so in both cases the tag picks the
+member the suite actually measured. This is worth knowing before adding a `--model` axis
+to the gambatte rows: there is nothing to gain, and the revision the tags name is the
+revision already in use.
+
+Note `--model=` is parsed but **not plumbed into `--mode=gambatte`** (the batch quits
+before that block), which is correct for the above and is why the sweep needed a
+temporary hook rather than a flag.
+
 **A SameBoy oracle for this suite: `tools/gbfuzz/sameboy_gambatte`.** Scoring dingbat
 tells you a row is wrong; it does not tell you what a *correct* emulator does with a ROM
 you have just modified, which is the whole method for pinning one of these families to an
