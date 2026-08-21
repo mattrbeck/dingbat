@@ -134,6 +134,10 @@ proc timer_check_edge(t: GbTimer; gb: GB; on_write = false) =
         timer_reload_tima(t, gb)
       else:
         t.countdown = 4
+        when TIMER_IRQ_RUN_LEAD != 0:
+          # The overflow edge, one M-cycle in front of the reload the countdown
+          # arms. Only handle_interrupts reads it. See TIMER_IRQ_RUN_LEAD.
+          gb.interrupts.timer_interrupt_early = true
   t.previous_bit = current_bit
 
 proc apu_div_bit(gb: GB): int {.inline.} =

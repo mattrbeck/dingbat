@@ -144,6 +144,11 @@ proc cpu_lock*(cpu: GbCpu) =
   cpu.halted = true
   cpu.locked = true
 
+const IRQ_PUSH_T* {.intdefine.} = 0
+  ## T-cycles of internal wait charged BEFORE the two push M-cycles of the
+  ## interrupt dispatch. Measurement scaffold; see IRQ_SAMPLE_T's last
+  ## paragraph.
+
 const IRQ_SAMPLE_T* {.intdefine.} = 16
   ## How far into the 5 M-cycle interrupt dispatch, in T-cycles, the IF bit of
   ## the line being taken is cleared.
@@ -245,6 +250,10 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
       echo "IRQ ly=", gb.fifo_ppu.ly, " dot=", gb.fifo_ppu.cycle_counter,
            " if=", toHex(irq_read(gb.interrupts, 0xFF0F), 2),
            " pc=", toHex(cpu.pc, 4)
+  # IRQ_PUSH_T: the two internal wait M-cycles Pan Docs puts ahead of the two
+  # pushes. 0 = incumbent (pushes first); 8 = Pan Docs' order.
+  when IRQ_PUSH_T > 0:
+    mem_tick_components(gb.memory, gb, IRQ_PUSH_T)
   # The same three OAM-bug M-cycles PUSH has (cpu_push16); Pan Docs lists
   # interrupt handling with it.
   oam_bug_if(gb, cpu.sp, obWrite)
@@ -266,17 +275,20 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
   cpu.pc = interrupt
   # Run out to the sample point before clearing IF -- see IRQ_SAMPLE_T. The two
   # writes above have already charged 8 of it.
-  when IRQ_SAMPLE_T > 8:
+  when IRQ_SAMPLE_T > 8 + IRQ_PUSH_T:
     # One call, not one per M-cycle: the PPU's dot loop and the timer are both
     # granular inside a multi-cycle tick, the two spellings score identically
     # over the whole gambatte suite, and the M-cycle-at-a-time version inlines
     # a second copy of the tick pair into this proc for nothing.
-    mem_tick_components(gb.memory, gb, IRQ_SAMPLE_T - 8)
+    mem_tick_components(gb.memory, gb, IRQ_SAMPLE_T - 8 - IRQ_PUSH_T)
   clear_interrupt(gb.interrupts, interrupt)
   mem_tick_extra(gb.memory, gb, 20)
 
 proc handle_interrupts*(cpu: GbCpu; gb: GB) =
-  if interrupt_ready(gb.interrupts):
+  # interrupt_ready_RUN, not interrupt_ready: this is the running CPU's test,
+  # and the timer's request reaches it one M-cycle ahead of everyone else's
+  # view of IF. TIMER_IRQ_RUN_LEAD in gb.nim; inert at the shipping 0.
+  if interrupt_ready_run(gb.interrupts):
     # STOP mode is entered WITH an interrupt pending on one of its two leaves
     # (Pan Docs' STOP chart; it is the one daid's stop_instr.gb takes), and
     # nothing but a joypad line ends it -- the clock the interrupt logic runs

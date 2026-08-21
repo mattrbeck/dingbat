@@ -60,6 +60,84 @@ const LY_BLIND_SCOPE* {.intdefine.} = 2
 # gates is in the type block below.
 const IF_READ_SAMPLE_T* {.intdefine.} = 0
 
+const TIMER_IRQ_RUN_LEAD* {.intdefine.} = 1
+  ## M-cycles by which a TIMA overflow reaches a **running** CPU's interrupt
+  ## dispatch ahead of the reload that raises IF bit 2. 0 = the incumbent
+  ## model (one instant for everybody); 1 = the overflow edge itself, one
+  ## M-cycle in front of the reload.
+  ##
+  ## Measured against SameBoy 2026-08-21 with four purpose-built probes, all
+  ## of them a gambatte-format ROM whose PPU is started by the run itself so
+  ## no post-boot phase enters (tools/gbppu/gam_patchrun.py builds them). Each
+  ## one slides a `LDH A,($44) ; JP $7000` readout one M-cycle at a time and
+  ## reports the address the printed LY steps on -- so a one-address
+  ## disagreement IS one M-cycle:
+  ##
+  ##   probe                                    dingbat   SameBoy
+  ##   --------------------------------------   -------   -------
+  ##   PPU vs the instruction stream            $1251     $1251    (exact)
+  ##   TIMA overflow vs the instruction stream  $130A-C   $130A-C  (exact)
+  ##   timer wakes a HALT, then read LY         $1225     $1225    (exact)
+  ##   timer VECTORS, handler reads LY          $141B     $141C    <- 1 M late
+  ##
+  ## and the same pair with a mode-0 STAT source instead of the timer is exact
+  ## on both arms ($1142 halt / $1426 vector). So it is not the PPU, not the
+  ## divider chain, not the 5 M-cycle dispatch (a STAT vector lands on time
+  ## through the identical code) and not the halted wake: **only the running
+  ## CPU's dispatch on a TIMER source is one M-cycle late**, and hardware puts
+  ## that dispatch one M-cycle AHEAD of the halted wake where dingbat puts the
+  ## two together.
+  ##
+  ## Two shipped families are exactly this M-cycle, and both are two-sided:
+  ##
+  ##  * `dma/hdma_*halt*_ly_*` -- 11 ROMs whose readout brackets an LY step to
+  ##    one M-cycle. Sliding the readout of `hdma_late_m3halt_m2unhalt_ly_scx1`
+  ##    puts SameBoy's step at +1 and dingbat's at +2; with the HBlank DMA
+  ##    patched out entirely the pair moves to +10 / +11, i.e. **the 9 M-cycles
+  ##    the VRAM DMA costs are exact in dingbat and the residue is not the DMA
+  ##    at all**.
+  ##  * `irq_precedence/late_m0irq_vs_tima_scx{2,3}[_halt]` -- a mode-0 STAT
+  ##    source racing a timer overflow for the same dispatch. This is 1 of the
+  ##    3 M-cycles that family is out by; the other 2 are IRQ_PUSH_T (cpu.nim).
+  ##
+  ## Spelled as a lead on the SOURCE rather than a lag on the dispatch because
+  ## the other three consumers of IF bit 2 are already exact and must not move:
+  ## `irq_read` ($FF0F), the halted wake, and `highest_priority` inside the
+  ## dispatch (which runs a full M-cycle after the start, by which time the
+  ## reload has raised the real bit either way).
+  ##
+  ## Scored on `4177703` (1089 / gambatte 4497 / shootout 261), whole runner,
+  ## one build per cell. **Shootout 261 PASS / 0 FAIL / 3 INFO at 1** -- the
+  ## gate holds:
+  ##
+  ##   0 (was)  1089   gambatte 4497
+  ##   1        1093   gambatte 4503   +18 / -12, and +3 GBMicrotest
+  ##                                   (`int_timer_incs`, `int_timer_nops`,
+  ##                                   `int_timer_nops_div_a`) + 1
+  ##                                   mooneye-wilbertpol (`acceptance/timer/
+  ##                                   timer_if`) -- four HARDWARE rows on the
+  ##                                   exact quantity, none of them gambatte.
+  ##
+  ## The 18 gambatte gains are 10 of the `dma/hdma_*halt*_ly_*` family, both
+  ## `oamdma/oamdma_late_halt_stat_1` rows, `speedchange_tima00_1{a,b}`, and
+  ## four `tima/tc00_irq_*` rows. The 12 losses, by name and classified:
+  ##
+  ##  * `tima/tc00_irq_late_retrigger_3` (x2) -- the IRQ_SAMPLE_T staircase
+  ##    slid one member. IRQ_SAMPLE_T = 16 was fitted with the dispatch
+  ##    starting one M-cycle later than this; re-deriving it is the fix, and
+  ##    12 is NOT it (whole runner: 4490, and it takes 14 more `*_retrigger`
+  ##    rows across five families down with it).
+  ##  * `tima/tc00_late_tc01_7` (x2) -- the TAC arriving-tap ladder, same
+  ##    shape: the member the ladder ends on moved.
+  ##  * six `speedchange/speedchange*_tima0{1,2,3}_*` -- SPEED_SWITCH_DIV_RESET_T
+  ##    is the other half of this phase and was fitted against the old one. At
+  ##    8 instead of 4 all six come back and eight more with them (gambatte
+  ##    4509), but it costs five `speedchange*_ch2_nr52*` APU rows and four
+  ##    `*_tima00_1*`, so it is a re-derivation for whoever owns `speedchange`
+  ##    and not a free ride.
+  ##  * `dma/hdma_late_m0unhalt_2` and `_ds_2` -- an owed HBlank block whose
+  ##    commit now falls on the other side of the wake.
+
 const STAT_IRQ_LEAD* {.intdefine.} = 0
 const STAT_LYC_LEAD* {.intdefine.} = 0
   ## The same lead as STAT_IRQ_LEAD, applied to the **LYC source alone** --
@@ -3787,6 +3865,12 @@ type
     vblank_interrupt*:   bool
     lcd_stat_interrupt*: bool
     timer_interrupt*:    bool
+    # TIMER_IRQ_RUN_LEAD: the TIMA overflow itself, one M-cycle ahead of the
+    # reload that raises `timer_interrupt`. Only the RUNNING CPU's dispatch
+    # test looks at it; IF reads, the halted wake and `highest_priority` all
+    # keep the real bit. Not serialized -- it is live for exactly the 4 T of
+    # the reload countdown. See TIMER_IRQ_RUN_LEAD below.
+    timer_interrupt_early*: bool
     serial_interrupt*:   bool
     joypad_interrupt*:   bool
     vblank_enabled*:     bool

@@ -41,7 +41,9 @@ proc clear_interrupt*(irq: GbInterrupts; line: uint16) =
   case line
   of INT_VBLANK: irq.vblank_interrupt    = false
   of INT_STAT:   irq.lcd_stat_interrupt  = false
-  of INT_TIMER:  irq.timer_interrupt     = false
+  of INT_TIMER:
+    irq.timer_interrupt     = false
+    when TIMER_IRQ_RUN_LEAD != 0: irq.timer_interrupt_early = false
   of INT_SERIAL: irq.serial_interrupt    = false
   of INT_JOYPAD: irq.joypad_interrupt    = false
   else: discard
@@ -219,12 +221,28 @@ proc interrupt_ready*(irq: GbInterrupts): bool {.inline.} =
   (irq.serial_interrupt   and irq.serial_enabled)   or
   (irq.joypad_interrupt   and irq.joypad_enabled)
 
+proc interrupt_ready_run*(irq: GbInterrupts): bool {.inline.} =
+  ## `interrupt_ready` for a RUNNING CPU. Identical to it at the shipping
+  ## TIMER_IRQ_RUN_LEAD = 0; with the lead on, the timer's request arrives here
+  ## one M-cycle before it arrives anywhere else. See TIMER_IRQ_RUN_LEAD in
+  ## gb.nim for the four probes that measure the M-cycle.
+  when TIMER_IRQ_RUN_LEAD == 0:
+    interrupt_ready(irq)
+  else:
+    interrupt_ready(irq) or
+      (irq.timer_interrupt_early and irq.timer_enabled)
+
 proc irq_write*(irq: GbInterrupts; idx: int; val: uint8) =
   case idx
   of 0xFF0F:
     irq.vblank_interrupt    = (val and 0x01) != 0
     irq.lcd_stat_interrupt  = (val and 0x02) != 0
     irq.timer_interrupt     = (val and 0x04) != 0
+    when TIMER_IRQ_RUN_LEAD != 0:
+      # A write to IF is the CPU's own view of the request and settles it for
+      # the lead as well: clearing bit 2 by hand must not leave a dispatch
+      # armed behind it.
+      irq.timer_interrupt_early = irq.timer_interrupt
     irq.serial_interrupt    = (val and 0x08) != 0
     irq.joypad_interrupt    = (val and 0x10) != 0
   of 0xFFFF:
