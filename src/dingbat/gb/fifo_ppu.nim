@@ -104,7 +104,7 @@ const M3_GRID_EARLY* {.intdefine.} = 0
   ## the CGB rows FIRST, where it is visible today and where no constant in
   ## this file has to move for it to be studied.
 
-const M3_PIPE_AHEAD* {.intdefine.} = 0
+const M3_PIPE_AHEAD* {.intdefine.} = 1
   ## CPU M-cycles the mode-3 pipeline runs AHEAD of machine time on EVERY
   ## device -- the device-independent half of the advance whose CGB-only half is
   ## `CGB_PIPE_MCYCLES` below; the two are added. Declared here rather than
@@ -112,12 +112,17 @@ const M3_PIPE_AHEAD* {.intdefine.} = 0
   ## block) because `obj_oam_dma_read` sums it into the OAM DMA bus lead and a
   ## const cannot be read before it is declared.
   ##
-  ## Still 0: nothing measured here asks the DMG pipeline to move, and daid's
-  ## DMG arm refuses it outright (`ppu_scanline_bgp` pixel-exact at 0, 90.5% at
-  ## 1). See the derivation for what a nonzero value buys and what stands in
-  ## the way.
+  ## **1 since 2026-08-20, and it absorbed `CGB_PIPE_MCYCLES` doing it.** The
+  ## advance is one quantity on both devices; what used to look like a device
+  ## split was the DMG's mode-2 STAT source being an M-cycle late
+  ## (`STAT_M2_LEAD`) and the DMG's snapback halt wake being an M-cycle late
+  ## (`LYC_SETTLE_HALT_SKIP` in gb.nim), each of which cancelled a piece of it.
+  ## daid's DMG arm looked like an outright refusal for two rounds and is not
+  ## one -- move its anchor off the LY 153 -> 0 snapback and it asks for this
+  ## constant at 1. The measurement, one cart and one patched byte, is in the
+  ## derivation below.
 
-const CGB_PIPE_MCYCLES* {.intdefine.} = 1
+const CGB_PIPE_MCYCLES* {.intdefine.} = 0
   ## CPU M-cycles the CGB's mode-3 pipeline runs AHEAD of machine time, over the
   ## DMG's. Declared here, at the top of the file, rather than beside
   ## `M3_PIPE_AHEAD` where it is spent, because two consumers below need it and
@@ -134,11 +139,22 @@ const CGB_PIPE_MCYCLES* {.intdefine.} = 1
   ## 10x(`ld a,[hl+]` + `ld [c],a`) + 70 `nop` + `jp` -- 114 M-cycles, exactly
   ## one scanline -- for the whole frame. One anchor, 144 lines of ruler.
   ##
-  ## The same cart on the two consoles wants two different values, which is why
-  ## this is a device split and not a change to `M3_PIPE_AHEAD`:
+  ## **0 since 2026-08-20: the split was an artefact and the advance is now
+  ## device-independent in `M3_PIPE_AHEAD`.** The reading below -- "the same
+  ## cart on the two consoles wants two different values" -- is true of the
+  ## frames and false about the pipeline: daid's DMG arm is anchored on the
+  ## LY 153 -> 0 snapback, and re-anchoring it on an ordinary line (one patched
+  ## byte; see the daid block in the derivation) flips its answer to the CGB's.
+  ## What is left device-split is the WAKE, not the pipeline. The paragraphs
+  ## below are kept because everything else in them still holds and because the
+  ## three compensating constants they name are what made the axis readable.
+  ##
+  ## The same cart on the two consoles LOOKED like it wanted two different
+  ## values, which is why this was spelled as a device split:
   ##
   ##   * DMG: pixel-exact against `ppu_scanline_bgp_1.dmg.png` at 0, and 90.5%
-  ##     at 1. The DMG pipeline does not move.
+  ##     at 1 -- **on the snapback anchor only**. On a normal-line anchor the
+  ##     DMG pipeline moves exactly as the CGB's does.
   ##   * CGB: 2130/2130 band edges exact at 1 with `--cgb-rev=D`, and three dots
   ##     early at 0. Measured by pairing colour-transition columns row by row
   ##     (tools/gbedge/bandedge.py), not by a whole-frame shift metric, which
@@ -2920,7 +2936,12 @@ const M3_END_EARLY {.intdefine.} = 0
 # units it is. That is also what the `_ds` rows say: in double speed the same
 # five families want 2 dots, not 4, so the quantity is a CPU M-cycle and not a
 # count of PPU dots (a fixed 4 costs 14 `_ds` rows that one M-cycle keeps).
-const LY0_PIPE_MCYCLES {.intdefine.} = 1
+const LY0_PIPE_MCYCLES {.intdefine.} = 0
+  ## **0 since 2026-08-20**, and everything above still derives it: line 0's
+  ## four dots and the whole-frame advance are the same four dots, so once
+  ## `M3_PIPE_AHEAD` carries them on every line this constant must not add them
+  ## again on line 0. It is a DIFFERENCE, not an offset. Measured on the pair:
+  ## 3964 gambatte at 0 against 3819 at 1 with the advance on.
 
 # The same mechanism on EVERY line -- the second axis of bucket 14, and it only
 # means anything alongside `STAT_M2_LEAD` in ppu.nim.
@@ -2937,8 +2958,10 @@ const LY0_PIPE_MCYCLES {.intdefine.} = 1
 # `STAT_M2_LEAD = 1` this is 3963 gambatte against 3743 at 0 and 3716 at 2,
 # and with the LEAD at 0 it is 3671, so neither term scores without the other.
 #
-# It ships at 0 because the LEAD does; see the halt/sled paragraph at
-# STAT_M2_LEAD for what blocks the pair. Two notes for whoever lands them:
+# **It SHIPS, 2026-08-20**, as `M3_PIPE_AHEAD = 1` / `CGB_PIPE_MCYCLES = 0`:
+# the advance is device-INDEPENDENT and the DMG was the device that was one
+# M-cycle out. Two notes that were written for whoever landed it, both still
+# true and both now paid:
 #
 #  * `LY0_PIPE_MCYCLES` must go to 0 at the same time (3964 against 3819). Line
 #    0's four dots and this lead are the same four dots, seen from the two ends,
@@ -2946,48 +2969,50 @@ const LY0_PIPE_MCYCLES {.intdefine.} = 1
 #  * daid `ppu_scanline_bgp` is the one instrument that pins the pipeline's
 #    phase against something OTHER than the mode 2 interrupt -- it syncs on the
 #    LYC = 0 relatch of line 153 (`ly=0 cc=9 mode=1`) -- and it is a HALT ROM.
-#    It goes 100% -> 90.5% here, which is four dots.
+#    It goes 100% -> 90.5% here, which is four dots, and for two rounds it was
+#    the single shootout row that refused this constant.
 #
-#    **"It is expected back when the halt half lands" is FALSIFIED (2026-08-20).
-#    It is the one row that does not come back, and it is what refuses this
-#    constant.** Both spellings of the halt half were built on 62a62db and
-#    scored with the 261-ROM shootout: `HALT_IF_SAMPLE_T = 2`, and the
-#    per-source `M2_LEAD_HALT_BLIND` in cpu.nim that supersedes it. Each one
-#    puts all five mooneye `intr_2_*` rows back; neither moves daid-dmg by a
-#    pixel (2656/23040 wrong in every arm). It cannot: daid's anchor is the
-#    snapback's LYC = 0 match, and GBMicrotest's `int_lyc_nops` / `int_lyc_halt`
-#    are BOTH `$99`, i.e. the LYC source is measured not to differ between a
-#    halted CPU and a running one, so no halt rule reaches it.
+#    **It is not a statement about the pipeline. It is a statement about the
+#    SNAPBACK WAKE, and the way to see that is to move the anchor off the
+#    snapback** (2026-08-20). daid's cart takes its one interrupt on `LYC = 0`,
+#    i.e. on the LY 153 -> 0 snap; a one-byte patch moves it to an ordinary
+#    line without touching anything else, because the `xor a` at $178 that
+#    zeroes A for `ldh [rLYC],a` sits right after `ld a, IEF_LCDC|IEF_VBLANK`,
+#    so `AF` -> `3C` (`inc a`) arms LYC = 4 and `AF` -> `3D` (`dec a`) arms
+#    LYC = 2. Run against SameBoy on the DMG, which reproduces the shootout's
+#    own `ppu_scanline_bgp_1.dmg.png` exactly at LYC = 0 before it is asked
+#    anything:
 #
-#    The only quantity with the right sign is the snapback's own arrival dot:
-#    `LYC_SETTLE_DOTS = 0` (ppu.nim) returns daid-dmg to 23040/23040 exactly,
-#    on top of this constant, which is the direct confirmation that the two are
-#    the same four dots seen from the two ends. It is refused three ways, and
-#    two of them are device-UNIFORM, so it cannot be escaped with a DMG-only
-#    settle window either:
-#      - gambatte `ly0/lycint152_lyc0flag_{1,2}` and `ly0/lycint152_lyc0irq_{1,2}`
-#        are one-M-cycle pairs and flip from green to red on BOTH `[dmg]` and
-#        `[cgb]` arms (`lyc0flag_1` C1 -> C5, `lyc0irq_1` E0 -> E2);
-#      - `daid/ppu_scanline_bgp-gbc` breaks (23040 -> 20736), pinning the same
-#        window at 4 on the other device;
-#      - `gbmicrotest/line_153_lyc0_stat_timing_c` breaks, on a DMG cart.
+#      anchor                  this constant at 0      at 1
+#      LYC = 0   (snapback)      0 px vs SameBoy      2656 px
+#      LYC = 2   (normal line) 2655 px                   0 px
+#      LYC = 4   (normal line) 2655 px                   0 px
 #
-#    It is also not the DMG BGP unit selector (`MIXER_PALETTE_OR` in gb.nim):
-#    daid ships THREE accepted DMG references and they are 464 px apart, while
-#    this constant puts the frame 2192 / 2656 / 2768 px from them -- five times
-#    the whole documented spread, so the frame has not landed on another
-#    outcome, it has moved off the lattice.
+#    Two-sided, on one cart, with one byte between the arms: on an ordinary
+#    line the DMG pipeline is one CPU M-cycle ahead of where this tree used to
+#    put it, and the snapback frame was the only place that did not show it.
+#    So the four dots belong to the wake, not to the pipeline -- see
+#    `LYC_SETTLE_HALT_SKIP` in gb.nim, which is the rule that follows from it
+#    and which puts daid's DMG frame back to 23040/23040 with the advance on.
 #
-#    So daid's two frames, taken together, are a direct two-sided statement
-#    that the DMG and CGB pixel pipelines differ by exactly one CPU M-cycle:
-#    at one and the same pipeline lead and one and the same (unmoved) snapback
-#    wake, the CGB frame is exact and the DMG frame is four columns out. That
-#    is what the shipping `M3_PIPE_AHEAD = 0` / `CGB_PIPE_MCYCLES = 1` spelling
-#    says, and it is what the "one quantity spelled three times, all three
-#    values swapped" re-spelling denies. Whoever picks this up again needs a
-#    DMG/CGB term of four dots somewhere between the snapback wake and a BGP
-#    write's effect on a pixel that is NOT this constant; nothing in the tree
-#    is currently shaped like one.
+#    Refuted on the way, so nobody re-runs them:
+#      - it is NOT the DMG BGP unit selector (`MIXER_PALETTE_OR` in gb.nim).
+#        daid ships THREE accepted DMG references; they are 464 px apart
+#        (measured: 464 / 0 / 464 against dingbat's own frame), and the advance
+#        alone puts the frame 2192 / 2656 / 2768 px from them -- five times the
+#        whole documented spread, so the frame had not landed on another
+#        outcome, it had moved off the lattice. The three references are the
+#        prev/next/OR axis daid's own description names, not a phase axis.
+#      - it is NOT the DMG model. dingbat's `dmgABC` and `mgb` produce the same
+#        frame and both match SameBoy; `dmg0` is a different machine and
+#        matches neither reference nor oracle (928 px at LYC = 0).
+#      - `LYC_SETTLE_DOTS = 0` (ppu.nim) also returns daid-dmg to 23040/23040,
+#        because it moves the same wake -- but device-uniformly and for a
+#        RUNNING CPU too, which costs eleven gambatte `ly0`/`lycEnable` rows and
+#        `gbmicrotest/line_153_lyc0_stat_timing_c` (it buys sixteen other rows
+#        of the same staircase back; net gambatte +5, runner +5). Measured, kept
+#        out: every ROM in that eleven is a running-CPU sled, and the halt-gated
+#        rule keeps all of them.
 # `M3_PIPE_AHEAD` -- the device-INDEPENDENT advance -- is declared at the head
 # of this file for the same reason `CGB_PIPE_MCYCLES` is: `obj_oam_dma_read`
 # reads it, and a const cannot be read before it is declared. Its derivation is

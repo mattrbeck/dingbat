@@ -92,7 +92,7 @@ const STAT_READ_SAMPLE*     {.intdefine.} = 2
 # absolute value so the read stays branchless: `T = SAMPLE + DS_ADD * speed`.
 const STAT_READ_SAMPLE_DS_ADD* {.intdefine.} = 1
 
-const STAT_M0_FIELD_TAIL* {.intdefine.} = 3
+const STAT_M0_FIELD_TAIL* {.intdefine.} = 0
   ## Dots by which the STAT register's MODE FIELD keeps reading 3 after the PPU
   ## has internally entered mode 0, on a DMG, on a line with no object fetch --
   ## and only the field. The mode-0 STAT source, the HBlank DMA trigger, the
@@ -100,6 +100,16 @@ const STAT_M0_FIELD_TAIL* {.intdefine.} = 3
   ## Spent on `stat_chg_dot`, the field's own timestamp, and nothing else can
   ## see it. `STAT_M0_FIELD_TAIL_CGB` is the same thing on a CGB, and
   ## `STAT_M0_FIELD_TAIL_ABSORB` is what makes it survive.
+  ##
+  ## **0 since 2026-08-20.** Three of these dots were the DMG's mode-2 STAT
+  ## source arriving an M-cycle late (`STAT_M2_LEAD` in ppu.nim, now 1): every
+  ## row this constant was fitted to reads the field out of a mode-2 handler,
+  ## so a late dispatch and a long field tail are the same observation, and
+  ## holding the tail once the source has moved counts it twice. It is one of
+  ## the six values that move together -- see the ladder at `STAT_M2_LEAD` --
+  ## and the derivation below is kept because it is what identified the three
+  ## row-sets in the first place and because `_CGB` and `_ABSORB` still stand
+  ## on it.
   ##
   ## ---- The three-way split that derives it ---------------------------------
   ##
@@ -580,13 +590,79 @@ const CGB_HALT_EXIT_MCYCLES* {.intdefine.} = 0
 const CGB_HALT_LEAD_LYC_ONLY* {.intdefine.} = 0
   ## EXPERIMENT. Restrict CGB_HALT_PPU_LEAD to halts where the LYC comparator is
   ## the only armed STAT source. 0 ships; see the test it gates in cpu.nim.
-const CGB_HALT_LEAD_SKIP_LYC0* {.intdefine.} = 1
+# ---- The snapback's blind window does not defer a HALTED CPU's wake ---------
+#
+# `LYC_SETTLE_DOTS` (ppu.nim) is the four dots the LY = LYC comparator is blind
+# for after the LY 153 -> 0 snapback: the match, and its STAT source, arrive on
+# the FAR side of the window (dot 9 of line 153) and not on the near side (dot
+# 5, where LY itself snaps). Four suites read that dot out and all four of them
+# read it with the CPU RUNNING -- GBMicrotest's `line_153_lyc0_stat_timing_*`
+# pair reads STAT out of a sled, gambatte's `ly0/lycint152_lyc0{flag,irq}_*`
+# read the flag and the IRQ out of one, and neither family contains a HALT
+# instruction anywhere in bank 0 (checked byte-wise on all nine ROMs the
+# question touches).
+#
+# daid's `ppu_scanline_bgp` is the fifth witness and the only HALTED one, and
+# it is the one that says the halted wake is on the NEAR side. Measured against
+# SameBoy on the DMG, same cart with a one-byte patch that moves the anchor off
+# the snapback and onto an ordinary line (`xor a` -> `inc a` at $178, so the
+# LYC the ROM arms is 4 instead of 0 -- A holds $03 there, it was just loaded
+# for IE):
+#
+#   anchor                 dingbat DMG, this M-cycle OFF   ON (M3_PIPE_AHEAD=1)
+#   LYC = 0  (snapback)    0 px vs SameBoy                 2656 px
+#   LYC = 2  (normal)      2655 px                            0 px
+#   LYC = 4  (normal)      2655 px                            0 px
+#
+# SameBoy reproduces `ppu_scanline_bgp_1.dmg.png` exactly at LYC = 0, so the
+# oracle is anchored to the shootout's own reference before it is asked
+# anything. Read the two rows together: on an ORDINARY line the DMG pixel
+# pipeline is one CPU M-cycle ahead of where this tree puts it, and on the
+# SNAPBACK it is exactly where this tree puts it. One M-cycle, one place, and
+# the only thing that differs between the two runs is which dot the halted
+# CPU's wake lands on.
+#
+# So the snapback's wake is one M-cycle earlier for a halted CPU than for a
+# running one, which is the same KIND of statement `CGB_HALT_PPU_LEAD` below
+# already ships (a halt wake landing at a different point of the PPU's line
+# than a running dispatch) and the same kind as `M2_LEAD_HALT_BLIND` in
+# cpu.nim. It costs nothing: every row that pins the window at 4 is a running
+# CPU and never enters this branch.
+#
+# ---- And it SUBSUMES CGB_HALT_LEAD_SKIP_LYC0 -------------------------------
+#
+# The CGB reaches the same place from the other side. `CGB_HALT_PPU_LEAD` puts
+# every CGB halt wake one M-cycle LATER in the PPU's line, and the snapback was
+# exempted from it because daid's GBC frame refused it there. With this rule on,
+# the snapback wake is one M-cycle EARLIER to begin with and the lead puts it
+# back: net zero, daid-GBC exact, and the exemption is no longer a special case
+# but the sum of two general ones. That is why the default below is derived
+# from this constant rather than written down twice -- see the sweep at
+# CGB_HALT_PPU_LEAD, which is the measurement the exemption was built on and
+# which this reading reproduces without it.
+const LYC_SETTLE_HALT_SKIP* {.booldefine.} = true
+  ## Whether a HALTED CPU's wake is exempt from the LY 153 -> 0 snapback's
+  ## `LYC_SETTLE_DOTS` blind window -- i.e. lands on the window's near side
+  ## where a running CPU's dispatch lands on its far side. See above.
+  ##
+  ## Ships OFF because the DMG pipeline M-cycle it pairs with does
+  ## (`M3_PIPE_AHEAD`): at the shipping pipeline phase daid's DMG frame is
+  ## exact with the halted wake on the FAR side, and this rule alone would move
+  ## it four columns. The two are one measurement and turn on together.
+const CGB_HALT_LEAD_SKIP_LYC0* {.intdefine.} =
+  (if LYC_SETTLE_HALT_SKIP: 0 else: 1)
   ## Whether a halt that the LY 153 -> 0 snapback's `LYC = 0` match will wake is
   ## exempt from CGB_HALT_PPU_LEAD below. 1 ships (and is inert while the lead
   ## is 0); 0 is the control build, i.e. the lead applied to every wake alike.
   ## The derivation -- a LYC sweep of daid's `ppu_scanline_bgp` against SameBoy,
   ## same ROM and same entry with only the wake line changing -- is at the test
   ## in cpu.nim, next to the code it gates.
+  ##
+  ## The default follows `LYC_SETTLE_HALT_SKIP` above, which says the same thing
+  ## about the same wake without a device in it: with that rule on the exemption
+  ## is redundant and turning it on as well would move the CGB snapback wake
+  ## twice. An explicit `-d:CGB_HALT_LEAD_SKIP_LYC0=` still overrides, which is
+  ## what the control build wants.
 const CGB_HALT_PPU_LEAD* {.intdefine.} = 1
   ## The same M-cycle as CGB_HALT_EXIT_MCYCLES above, spent as PHASE instead of
   ## as time -- which is the shape the two halves of that measurement demand.
@@ -617,6 +693,16 @@ const CGB_HALT_PPU_LEAD* {.intdefine.} = 1
   ## snapback, and `cgb-acid-hell`'s disputed pixels are on lines 68 and 69 --
   ## normal lines. See CGB_HALT_LEAD_SKIP_LYC0, which is the gate that falls out
   ## of it, and tools/gbppu/daidsweep.py, which is the sweep.
+  ##
+  ## **The exemption is no longer a special case** (2026-08-20). The same
+  ## measurement, run on the DMG where there is no lead at all, says the LY 153
+  ## -> 0 snapback's halted wake is one M-cycle EARLY on both devices --
+  ## `LYC_SETTLE_HALT_SKIP` above -- and on the CGB this lead is what puts it
+  ## back. Net zero at the snapback, unchanged on normal lines, so the sweep
+  ## row above reproduces with `CGB_HALT_LEAD_SKIP_LYC0 = 0` and the gate now
+  ## derives from that constant instead of standing on its own. The two
+  ## readings of the same four dots agreed independently before either knew
+  ## about the other, which is the reason to prefer this spelling.
   ##
   ## Refuted on the way, so nobody re-runs them: it is NOT IME or whether a
   ## vector is taken (acid-hell continues inline after `halt`, IME 0, no vector;

@@ -479,8 +479,19 @@ const HALT_IF_SAMPLE_T* {.intdefine.} = 4
 # are `STAT_M2_LEAD` alone (`M3_PIPE_AHEAD` alone leaves them green), daid is
 # `M3_PIPE_AHEAD` alone (`STAT_M2_LEAD` alone leaves it green, and turning both
 # on does not cancel on that frame). This rule closes the first cause outright.
-# The second is not a halt question -- see the daid note at `M3_PIPE_AHEAD` in
-# fifo_ppu.nim -- and it is what the five now stand or fall on.
+#
+# **The second is a halt question after all, and it is closed too**
+# (2026-08-20): it is the LY 153 -> 0 snapback's WAKE, not the pipeline, and
+# `LYC_SETTLE_HALT_SKIP` in gb.nim is the rule. The two are mirror images and
+# it is worth holding them side by side, because a halt rule that only ever
+# pushed one way would be a fudge and these do not:
+#
+#   mode 2 STAT source   moves for a RUNNING CPU, not for a halted one
+#   snapback LYC = 0     moves for a HALTED CPU, not for a running one
+#
+# and each is derived from the one instrument that is halted (or not) where
+# every other witness for the same edge is the opposite. With both on, the six
+# constants take the shootout to **261 / 261** at runner 1063 / gambatte 4443.
 #
 # gambatte, against the same tree with the five and this rule on: +59 / -38.
 # Thirty-seven of the thirty-eight are `[dmg]` rows of the residual shape the
@@ -499,11 +510,11 @@ const HALT_IF_SAMPLE_T* {.intdefine.} = 4
 # (`CGB_HALT_PPU_LEAD`) is already paying for it there and the two double up.
 # Unresolved, and cheap for the next round to settle.
 #
-# Ships OFF, because `STAT_M2_LEAD` does: at the shipping DMG lead of 0 there is
-# no window to be blind to, and it compiles out entirely at `false` -- verified,
-# the tree with this patch and the shipping defaults scores 1042/1225 and
-# gambatte 4420/5005, the committed baseline exactly.
-const M2_LEAD_HALT_BLIND* {.booldefine.} = false
+# **Ships ON since 2026-08-20**, because `STAT_M2_LEAD` does. It compiles out
+# entirely at `false`, and at `false` with the rest of the group left alone the
+# tree is the pre-flip baseline (1042/1225, gambatte 4420/5005) exactly, which
+# is the control build for anyone re-deriving this.
+const M2_LEAD_HALT_BLIND* {.booldefine.} = true
   ## Whether a HALTED CPU is blind to the mode 2 STAT source for the
   ## `STAT_M2_LEAD` M-cycles it leads the line boundary by. See above.
 

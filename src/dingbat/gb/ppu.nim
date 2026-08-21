@@ -1103,9 +1103,35 @@ const STAT_M2_PULSE* {.intdefine.} = 3
 # The OAM source reads over and the LYC source reads exact, on one instrument.
 # That asymmetry is the whole of bucket 14, and it is why the LYC half has no
 # M-cycle to give.
-const STAT_M2_LEAD* {.intdefine.} = 0
+const STAT_M2_LEAD* {.intdefine.} = 1
   ## CPU M-cycles the OAM STAT source comes up before the line boundary.
   ## 0 is the boundary itself and compiles the whole mechanism out.
+  ##
+  ## ---- 2026-08-20: LANDED, at 1 with `STAT_M2_LEAD_CGB = 0` -----------------
+  ##
+  ## It ships as one of six values that move together, because they are one
+  ## M-cycle spelled six ways and no subset of them scores:
+  ##
+  ##   STAT_M2_LEAD 0 -> 1        STAT_M2_LEAD_CGB 1 -> 0   (this file)
+  ##   M3_PIPE_AHEAD 0 -> 1       CGB_PIPE_MCYCLES 1 -> 0   (fifo_ppu.nim)
+  ##   LY0_PIPE_MCYCLES 1 -> 0    (fifo_ppu.nim)
+  ##   STAT_M0_FIELD_TAIL 3 -> 0  (gb.nim)
+  ##
+  ## plus the two halt rules the halted CPU needs and the running one does not:
+  ## `M2_LEAD_HALT_BLIND` (cpu.nim) and `LYC_SETTLE_HALT_SKIP` (gb.nim).
+  ##
+  ##   arm                                  runner   gambatte   shootout
+  ##   shipping (a554e7f)                     1042     4420      261 / 261
+  ##   the six + M2_LEAD_HALT_BLIND           1062     4443      260  (daid-dmg)
+  ##   ... + LYC_SETTLE_HALT_SKIP             1063     4443      261 / 261
+  ##
+  ## What each of the two halt rules is FOR, in one line each: the source moves
+  ## for a running CPU and not for a halted one (`M2_LEAD_HALT_BLIND`, five
+  ## hardware-verified mooneye `intr_2_*` rows), and the LY 153 -> 0 snapback's
+  ## wake moves for a halted CPU and not for a running one
+  ## (`LYC_SETTLE_HALT_SKIP`, daid `ppu_scanline_bgp` re-anchored against
+  ## SameBoy). Neither is a tuning constant; each has one instrument and a
+  ## two-sided reading of it.
   ##
   ## ---- 2026-08-20: bracketed TWO-SIDED, and the device split is the bug ------
   ##
@@ -1343,7 +1369,7 @@ const STAT_M2_LEAD* {.intdefine.} = 0
 const STAT_M2_EARLY_LY0* {.booldefine.} = false
   ## Does LINE 0's pulse lead too? It does not -- see above, and mooneye
   ## intr_1_2_timing-GS is what says so.
-const STAT_M2_LEAD_CGB* {.intdefine.} = 1
+const STAT_M2_LEAD_CGB* {.intdefine.} = 0
   ## CGB-only ADDITION to `STAT_M2_LEAD`, in the same M-cycles.
   ##
   ## It exists because the lead and `CGB_PIPE_MCYCLES` (fifo_ppu.nim) are a
@@ -1355,13 +1381,17 @@ const STAT_M2_LEAD_CGB* {.intdefine.} = 1
   ## mealybug set is 1/23 green, and at 1 it is back (see the ladder in
   ## docs/gb-renderer-structure-research-2026-08-10.md).
   ##
-  ## **Device-gated because the DMG pipeline does not move.** Left
-  ## device-independent it takes the whole DMG mode-2 side down with it --
-  ## `m3_bgp_change` alone reads 3163 wrong pixels -- which is a property of the
-  ## half-applied gate and not of the quantity. The DMG half of `STAT_M2_LEAD`
-  ## is a separate question with its own seven GBMicrotest rows and its own
-  ## blocker (`HALT_IF_SAMPLE_T`); it still ships at 0 and this does not
-  ## prejudge it.
+  ## **0 since 2026-08-20.** The DMG pipeline DOES move -- see `M3_PIPE_AHEAD`
+  ## in fifo_ppu.nim, which now carries the whole advance -- so the source's
+  ## M-cycle is device-independent too and `STAT_M2_LEAD` carries all of it.
+  ## The paragraph this replaces read "device-gated because the DMG pipeline
+  ## does not move", and the observation under it is still the right warning:
+  ## moving one of the pair without the other takes the whole DMG mode-2 side
+  ## down (`m3_bgp_change` alone reads 3163 wrong pixels with the source moved
+  ## and the pipeline held, 3338 the other way round). All 24 shootout mealybug
+  ## DMG rows are pixel-EXACT with both moved, and 2 of 24 with either one
+  ## alone: that cancellation is the measurement, and it is what says the two
+  ## are one quantity.
 const STAT_M2_EARLY* = STAT_M2_LEAD != 0 or STAT_M2_LEAD_CGB != 0
 
 template m2_lead_console_cgb*(gb: GB): bool =
@@ -1529,6 +1559,24 @@ proc m2_line144*(ppu: GbPpu; gb: GB): bool {.inline.} =
 #     out and 2656 pixels are wrong. It is also the only one of the four that
 #     does not sync off an LCD enable.
 #
+#     **And it is the only one of the four that is HALTED, which is the whole
+#     of the difference** (2026-08-20). The first three read this dot out of a
+#     NOP sled -- checked byte-wise, there is not one `$76` in bank 0 of any of
+#     `line_153_lyc0_stat_timing_*` or of the nine gambatte `ly0`/`lycEnable`
+#     ROMs the question touches -- and daid takes its anchor out of `ei ; halt`.
+#     With the mode-3 pipeline advance on (`M3_PIPE_AHEAD = 1`) they disagree
+#     outright: the sleds still want 4 and daid wants 0. `LYC_SETTLE_HALT_SKIP`
+#     (gb.nim) is what reconciles them -- the window is real and a halted CPU's
+#     wake is not deferred by it -- and it costs nothing precisely because
+#     every row that pins the window at 4 is a running CPU. Setting this
+#     constant to 0 instead is the device- and state-uniform alternative:
+#     measured on the same tree it is gambatte +5 / runner +5 net, and it pays
+#     for that by breaking `gbmicrotest/line_153_lyc0_stat_timing_c` and eleven
+#     `ly0`/`lycEnable` rows (`lycint152_lyc0{flag,irq}_1` on both arms and
+#     their `_ds_` twins) to buy sixteen `_2`/`_3` members of the same
+#     staircase. Not taken: the eleven are the members that measure nothing but
+#     this dot.
+#
 # Four dots, and it is a fixed dot count rather than `4 shr current_speed`
 # because the comparator is on the PPU's own clock, which double speed does not
 # touch (Pan Docs, "Dots") -- gambatte's `_ds_` arms in ly0 are what would say
@@ -1625,6 +1673,14 @@ proc lyc_settling*(ppu: GbPpu): bool {.noinline.} =
     ppu.cycle_counter >= LY153_SNAP_DOT and
     ppu.cycle_counter < LYC_RELATCH_DOT
 
+proc lyc_settle_halt_skip(gb: GB): bool {.inline.} =
+  ## Is this CPU one the snapback's blind window does not defer? See
+  ## LYC_SETTLE_HALT_SKIP in gb.nim for the measurement. Folds to `false` at
+  ## the shipping default, so the `and not` below costs a running build
+  ## nothing.
+  when LYC_SETTLE_HALT_SKIP: gb.cpu.halted
+  else: false
+
 proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
   # While the PPU is off the LY=LYC comparison clock is stopped: the coincidence
   # bit freezes at its last value and no STAT interrupt fires (mooneye
@@ -1646,7 +1702,8 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
   # see ly_advance_open below for why it is spelled as the enable bit instead,
   # and the write-up above it for what derives it.
   # `ly == 0` first, in line, and the rest behind the call: see lyc_settling.
-  let settling = ppu.ly == 0'u8 and ppu.lyc_settling
+  let settling = ppu.ly == 0'u8 and ppu.lyc_settling and
+                 not lyc_settle_halt_skip(gb)
   # The readable bit follows the readable LY; the SOURCE below follows irq_ly,
   # one M-cycle ahead of it (gambatte lycint_lycflag times the two apart).
   ppu.coincidence_flag = ppu.ly == ppu.lyc and not settling
