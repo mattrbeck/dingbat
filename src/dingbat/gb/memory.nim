@@ -747,7 +747,11 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
   of 0xFF00:         joypad_write(gb.joypad, gb, val)
   of 0xFF01..0xFF02: serial_write(gb.serial, gb, idx, val)
   of 0xFF04..0xFF07: timer_write(gb.timer, gb, idx, val)
-  of 0xFF0F:         irq_write(gb.interrupts, idx, val)
+  of 0xFF0F:
+    irq_write(gb.interrupts, idx, val)
+    # The serial source's own rule about where in the M-cycle a CPU access
+    # meets the shifter, on the write side. See SERIAL_CPU_SAMPLE_T in gb.nim.
+    when SERIAL_CPU_SAMPLE_T < 4: serial_if_write_fixup(gb)
   of 0xFF10..0xFF3F: apu_write(gb.apu, idx, val, gb)
   of 0xFF46:         mem_dma_transfer(mem, val)
   of 0xFF40..0xFF45, 0xFF47..0xFF4B: ppu_write(gb.ppu, gb, idx, val)

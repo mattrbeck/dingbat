@@ -494,10 +494,15 @@ const SERIAL_TAP_CGB* {.intdefine.} = 4
 #   read latch, SB/SC + the $FF0F serial bit    61
 #   write ordering only                         57
 #   all three                                   65     (at the old CGB tap 2)
-#   all three + SERIAL_TAP_CGB 2 -> 4           68     <- ships
+#   all three + SERIAL_TAP_CGB 2 -> 4           68
+#   + the $FF0F WRITE ordered the same way      71     <- ships
 #
-# The two halves are exactly additive (+8 and +4), so they are independent
-# defects with a shared cause and not one defect counted twice.
+# The read and write halves are exactly additive (+8 and +4), so they are
+# independent defects with a shared cause and not one defect counted twice.
+# The last line is `serial_if_write_fixup`: an $FF0F write in the completing
+# edge's own M-cycle clears a bit that has not been set yet, so the edge sets
+# it afterwards. That is +3 (`start_wait_clear_if_read_if_1` and its `_ds`
+# arm) with nothing else in the 1225-row runner moving.
 #
 # **AND IT SETTLES THE TAP.** Re-running the DMG x CGB tap grid on top of this
 # (7x7 over [-8,4], then 8x8 over [1,8]) turns the old lopsided picture into

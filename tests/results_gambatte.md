@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-21 07:40:22*
+*Generated: 2026-08-21 07:58:13*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4458/5005 passed.**
+**4461/5005 passed.**
 
 ## bgen
 
@@ -634,9 +634,9 @@ All 44 tests passed.
 
 All 67 tests passed.
 
-## serial (68/82 passed)
+## serial (71/82 passed)
 
-68/82 tests passed, 14 failed:
+71/82 tests passed, 11 failed:
 
 | Test | Result |
 |------|--------|
@@ -649,9 +649,6 @@ All 67 tests passed.
 | serial/start_late_div_write_wait_read_if_1a_dmg08_cgb04c_outE0 [cgb] | got E8, expected E0 |
 | serial/start_late_div_write_wait_read_if_3a_dmg08_cgb04c_outE0 [dmg] | got E8, expected E0 |
 | serial/start_late_div_write_wait_read_if_3a_dmg08_cgb04c_outE0 [cgb] | got E8, expected E0 |
-| serial/start_wait_clear_if_read_if_1_dmg08_cgb04c_outE8 [dmg] | got E0, expected E8 |
-| serial/start_wait_clear_if_read_if_1_dmg08_cgb04c_outE8 [cgb] | got E0, expected E8 |
-| serial/start_wait_clear_if_read_if_ds_1_cgb04c_outE8 [cgb] | got E0, expected E8 |
 | serial/start_wait_trigger_int8_read_if_2_dmg08_outE8_cgb04c_outE0 [cgb] | got E8, expected E0 |
 | serial/start_wait_trigger_int8_read_if_ds_2_cgb04c_outE0 [cgb] | got E8, expected E0 |
 

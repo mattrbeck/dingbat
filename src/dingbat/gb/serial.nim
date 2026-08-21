@@ -193,6 +193,24 @@ when SERIAL_CPU_SAMPLE_T < 4:
     ## shifter's pre-edge state. See SERIAL_CPU_SAMPLE_T in gb.nim.
     serial.edge_cycle == gb.scheduler.cycles
 
+  proc serial_edge_completed(serial: GbSerial): bool {.inline.} =
+    ## Did the edge captured this M-cycle finish a transfer? Only an edge that
+    ## takes the master clock LOW shifts, and only the eighth shift completes.
+    serial.pre_master and serial.pre_bits == 1 and
+      (serial.pre_sc and 0x81) == 0x81
+
+  proc serial_if_write_fixup*(gb: GB) {.inline.} =
+    ## An $FF0F WRITE is ordered in front of this M-cycle's tap edge for the
+    ## same reason a read is, so an edge that completed a transfer raises the
+    ## serial request AGAIN once the written byte has landed -- the CPU cleared
+    ## a bit that had not been set yet. `start_wait_clear_if_read_if_1` and its
+    ## `_ds` arm (three rows) clear IF in exactly that M-cycle and then read it
+    ## back expecting $E8; without this they read $E0.
+    let serial = gb.serial
+    if serial.serial_cpu_pre(gb) and not serial.pre_irq and
+       serial.serial_edge_completed():
+      gb.interrupts.serial_interrupt = true
+
   proc serial_if_latch_fixup*(gb: GB) {.inline.} =
     ## The serial IF bit half of the same rule, for the one register whose read
     ## does not come through serial_read: $FF0F. Called from mem_tick_if_read
@@ -257,13 +275,6 @@ proc serial_write_commit(serial: GbSerial; gb: GB; idx: int; val: uint8) =
     serial.serial_prime_history(gb)
     serial.serial_update_shifting()
   else: discard
-
-when SERIAL_CPU_SAMPLE_T < 4:
-  proc serial_edge_completed(serial: GbSerial): bool {.inline.} =
-    ## Did the edge captured this M-cycle finish a transfer? Only an edge that
-    ## takes the master clock LOW shifts, and only the eighth shift completes.
-    serial.pre_master and serial.pre_bits == 1 and
-      (serial.pre_sc and 0x81) == 0x81
 
 proc serial_write*(serial: GbSerial; gb: GB; idx: int; val: uint8) =
   when SERIAL_CPU_SAMPLE_T < 4:
