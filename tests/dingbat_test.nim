@@ -306,6 +306,15 @@ proc gb_link_test(rom1, rom2: string; timeout: int): int =
     result.post_init()
     result.memory.wram[0][0x7FF] = role
   let cores = @[make_gb(rom1, 0), make_gb(rom2, 1)]
+  # The ROM only ever INCREMENTS its serial-IF counter at 0xC808, and WRAM does
+  # not power up zeroed -- 51bd27b randomizes it, which is what bully/bully and
+  # the Screenshot suite need. So the counter has to be read as a DELTA against
+  # the power-on byte; before this it was read as an absolute and reported
+  # "got 192, expected 16" on both units, every run, with the sixteen received
+  # bytes all correct. Fixing it in the ROM instead is not free: the ROM file's
+  # fnv1a is the save-state identity six pinned fixtures in
+  # tests/savestate_compat_test.nim are keyed on.
+  let irq_base = @[cores[0].memory.wram[0][0x808], cores[1].memory.wram[0][0x808]]
   let lnk = new_gb_link(cores)
 
   proc done(g: GB): bool =
@@ -333,7 +342,7 @@ proc gb_link_test(rom1, rom2: string; timeout: int): int =
         check got == expected,
           who & " round " & $r & " received byte: got 0x" & toHex(got) &
           ", expected 0x" & toHex(expected)
-      let irqs = g.memory.wram[0][0x808]
+      let irqs = int(g.memory.wram[0][0x808]) - int(irq_base[i])
       check irqs == 16, who & " serial-IF count: got " & $irqs & ", expected 16"
   echo "GBLINKTEST: master ", (if cores[0].done(): "complete" else: "incomplete"),
        ", slave ", (if cores[1].done(): "complete" else: "incomplete"),

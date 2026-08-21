@@ -50,7 +50,13 @@
 #    every unit that gets completion semantics.
 
 proc new_gb_serial*(): GbSerial =
-  GbSerial(driver: GbSerialDriver())
+  when SERIAL_CPU_SAMPLE_T < 4:
+    # `high` and not 0: cycle 0 is a real M-cycle on a boot-skipped start, and
+    # a zero sentinel would serve that M-cycle's accesses a pre-edge state that
+    # was never captured.
+    GbSerial(driver: GbSerialDriver(), edge_cycle: high(CycleCount))
+  else:
+    GbSerial(driver: GbSerialDriver())
 
 proc serial_clock_mask(serial: GbSerial; gb: GB): uint16 {.inline.} =
   ## The DIV counter bit whose falling edge TOGGLES the shift clock. It runs
@@ -75,6 +81,21 @@ proc serial_finish_transfer*(serial: GbSerial; gb: GB) =
   serial.bits_remaining = 0
   serial.serial_update_shifting()
   gb.interrupts.serial_interrupt = true
+
+method serial_peer_committed*(drv: GbSerialDriver): bool {.base.} =
+  ## Does this driver's `serial_complete` publish anything OUTSIDE this core --
+  ## a byte handed to a peer, a printer command accepted -- that cannot be
+  ## taken back?
+  ##
+  ## False for the base (no-cable) driver: its completion only clears SC.7,
+  ## zeroes the counter and raises IF, all of which SERIAL_CPU_SAMPLE_T's
+  ## rollback restores exactly. **Any driver that talks to something else MUST
+  ## override this to true**, or a CPU store landing in the same M-cycle as the
+  ## eighth shift will rewind this side of an exchange the other side already
+  ## saw. `LockstepGbSerialDriver` (link.nim) and `GbPrinterDriver`
+  ## (printer.nim) both do; overriding costs those drivers the two
+  ## `start_wait_{sc80,stop}` rows, which is the price of not desyncing a cable.
+  false
 
 method serial_start*(drv: GbSerialDriver; gb: GB) {.base.} =
   discard
@@ -126,11 +147,31 @@ proc serial_master_edge(serial: GbSerial; gb: GB) =
   ##    SC.7 write -- between 256 and 512 T later, not between 0 and 512. When
   ##    the write lands in the tap bit's high half, hardware is a whole bit
   ##    period behind a naive single-tap model.
+  when SERIAL_CPU_SAMPLE_T < 4:
+    # The state a CPU access in THIS M-cycle is entitled to: the edge is on the
+    # M-cycle's last T-cycle and dingbat runs it at the top, so everything the
+    # edge touches is snapshotted here and served to serial_read /
+    # serial_write below. Only the first edge of an M-cycle captures (a second
+    # cannot happen -- the fastest tap is 8 T per toggle -- but the guard costs
+    # nothing and keeps the invariant local).
+    if serial.edge_cycle != gb.scheduler.cycles:
+      serial.edge_cycle = gb.scheduler.cycles
+      serial.pre_master = serial.master_clock
+      serial.pre_sb     = serial.sb
+      serial.pre_sc     = serial.sc
+      serial.pre_bits   = serial.bits_remaining
+      serial.pre_irq    = gb.interrupts.serial_interrupt
   serial.master_clock = not serial.master_clock
   if serial.master_clock: return
   if (serial.sc and 0x81) != 0x81 or serial.bits_remaining <= 0: return
   serial.sb = (serial.sb shl 1) or 1'u8  # a lone/disconnected line reads 1
   dec serial.bits_remaining
+  when defined(gb_serial_trace):
+    # Diagnostic (tools only). The T-cycle a shift landed on inside its own
+    # M-cycle is the whole of SERIAL_CPU_SAMPLE_T's evidence, and no suite
+    # reports it. Pair with -d:gb_phase_trace for the `phase=` field.
+    echo "SHIFT t=", gb.scheduler.cycles, " tdiv=", gb.timer.tdiv,
+         " left=", serial.bits_remaining, " sb=", serial.sb.toHex(2)
   if serial.bits_remaining == 0:
     serial.driver.serial_complete(gb)
 
@@ -145,7 +186,35 @@ proc serial_tick*(serial: GbSerial; gb: GB) {.inline.} =
 
 # ==================== Register access ====================
 
+when SERIAL_CPU_SAMPLE_T < 4:
+  proc serial_cpu_pre*(serial: GbSerial; gb: GB): bool {.inline.} =
+    ## True when the M-cycle this CPU access is being served in carries a
+    ## serial tap edge -- so the access is ordered in front of it and reads the
+    ## shifter's pre-edge state. See SERIAL_CPU_SAMPLE_T in gb.nim.
+    serial.edge_cycle == gb.scheduler.cycles
+
+  proc serial_if_latch_fixup*(gb: GB) {.inline.} =
+    ## The serial IF bit half of the same rule, for the one register whose read
+    ## does not come through serial_read: $FF0F. Called from mem_tick_if_read
+    ## after irq_latch_mcycle, which is the point the $FF0F read's byte is
+    ## fixed. `pre_irq` keeps a bit that was ALREADY pending before this
+    ## M-cycle's edge -- only the edge's own contribution is taken back.
+    let serial = gb.serial
+    if serial.serial_cpu_pre(gb) and not serial.pre_irq:
+      gb.interrupts.if_prev = gb.interrupts.if_prev and not 0x08'u8
+
 proc serial_read*(serial: GbSerial; gb: GB; idx: int): uint8 =
+  when SERIAL_CPU_SAMPLE_T < 4:
+    if serial.serial_cpu_pre(gb):
+      when defined(gb_serial_trace):
+        echo "PREREAD t=", gb.scheduler.cycles, " idx=", idx.toHex(4),
+             " sb=", serial.pre_sb.toHex(2), " sc=", serial.pre_sc.toHex(2)
+      case idx
+      of 0xFF01: return serial.pre_sb
+      of 0xFF02:
+        return (if gb.cgb_native: serial.pre_sc or 0x7C'u8
+                else: serial.pre_sc or 0x7E'u8)
+      else: return 0xFF'u8
   case idx
   of 0xFF01: serial.sb
   of 0xFF02:
@@ -154,7 +223,7 @@ proc serial_read*(serial: GbSerial; gb: GB; idx: int): uint8 =
     else: serial.sc or 0x7E'u8
   else: 0xFF'u8
 
-proc serial_write*(serial: GbSerial; gb: GB; idx: int; val: uint8) =
+proc serial_write_commit(serial: GbSerial; gb: GB; idx: int; val: uint8) =
   case idx
   of 0xFF01:
     serial.sb = val
@@ -188,3 +257,43 @@ proc serial_write*(serial: GbSerial; gb: GB; idx: int; val: uint8) =
     serial.serial_prime_history(gb)
     serial.serial_update_shifting()
   else: discard
+
+when SERIAL_CPU_SAMPLE_T < 4:
+  proc serial_edge_completed(serial: GbSerial): bool {.inline.} =
+    ## Did the edge captured this M-cycle finish a transfer? Only an edge that
+    ## takes the master clock LOW shifts, and only the eighth shift completes.
+    serial.pre_master and serial.pre_bits == 1 and
+      (serial.pre_sc and 0x81) == 0x81
+
+proc serial_write*(serial: GbSerial; gb: GB; idx: int; val: uint8) =
+  when SERIAL_CPU_SAMPLE_T < 4:
+    # A completing edge is rolled back too -- gambatte's `start_wait_sc80_read_if_1`
+    # and `start_wait_stop_read_if_1` (four rows) put the SC write in exactly
+    # the M-cycle of the eighth shift and hardware ABORTS the transfer there,
+    # so the completion has to be undone. That is exact for the no-cable
+    # driver, whose completion is entirely local; a driver that has already
+    # published the byte to a peer declines it (serial_peer_committed above),
+    # keeping the four rows red on a linked core rather than desyncing it.
+    if serial.serial_cpu_pre(gb) and
+       not (serial.serial_edge_completed() and
+            serial.driver.serial_peer_committed()):
+      # The store is ordered in front of this M-cycle's tap edge: rewind the
+      # shifter to the state captured in serial_master_edge, commit, and run
+      # the edge again on top of it. This is what inverts `nopx1_*` -- the SC
+      # write reseeds the master clock from the PRE-edge level, so the edge it
+      # shares an M-cycle with counts toward the transfer instead of being
+      # swallowed by the reseed, and the first shift comes 256 T sooner. See
+      # SERIAL_CPU_SAMPLE_T in gb.nim.
+      serial.master_clock    = serial.pre_master
+      serial.sb              = serial.pre_sb
+      serial.sc              = serial.pre_sc
+      serial.bits_remaining  = serial.pre_bits
+      gb.interrupts.serial_interrupt = serial.pre_irq
+      serial.serial_update_shifting()
+      serial_write_commit(serial, gb, idx, val)
+      # Let the replay capture again: the pre-edge state a later observer is
+      # entitled to is now the post-write one.
+      serial.edge_cycle = high(CycleCount)
+      serial.serial_master_edge(gb)
+      return
+  serial_write_commit(serial, gb, idx, val)

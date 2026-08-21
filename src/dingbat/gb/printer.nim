@@ -332,6 +332,11 @@ proc resync*(prn: GbPrinter) =
 
 # ---- serial drivers -------------------------------------------------------
 
+method serial_peer_committed*(drv: GbPrinterDriver): bool =
+  ## The completed byte has already been fed to the printer's packet state
+  ## machine, which cannot be un-fed. See the base method in serial.nim.
+  true
+
 method serial_complete*(drv: GbPrinterDriver; gb: GB) =
   if drv.printer.muted:
     gb.serial.sb = 0x00

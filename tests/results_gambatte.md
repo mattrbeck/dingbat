@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-20 20:33:25*
+*Generated: 2026-08-21 07:40:22*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4443/5005 passed.**
+**4458/5005 passed.**
 
 ## bgen
 
@@ -634,39 +634,24 @@ All 44 tests passed.
 
 All 67 tests passed.
 
-## serial (53/82 passed)
+## serial (68/82 passed)
 
-53/82 tests passed, 29 failed:
+68/82 tests passed, 14 failed:
 
 | Test | Result |
 |------|--------|
-| serial/div_write_start_wait_read_if_1_dmg08_cgb04c_outE0 [dmg] | got E8, expected E0 |
-| serial/nopx1_div_write_start_wait_read_if_1_dmg08_cgb04c_outE0 [dmg] | got E8, expected E0 |
 | serial/nopx1_start83_wait_read_if_2_dmg08_outE0_cgb04c_outE8 [cgb] | got E0, expected E8 |
 | serial/nopx1_start_wait_read_if_2_dmg08_cgb04c_outE8 [dmg] | got E0, expected E8 |
 | serial/nopx1_start_wait_read_if_2_dmg08_cgb04c_outE8 [cgb] | got E0, expected E8 |
-| serial/nopx2_start83_wait_read_if_1_dmg08_cgb04c_outE0 [cgb] | got E8, expected E0 |
-| serial/nopx2_start_wait_read_if_1_dmg08_cgb04c_outE0 [dmg] | got E8, expected E0 |
-| serial/nopx2_start_wait_read_if_1_dmg08_cgb04c_outE0 [cgb] | got E8, expected E0 |
+| serial/start83_late_div_write_wait_read_if_1b_cgb04c_outE8 [cgb] | got E0, expected E8 |
+| serial/start83_late_div_write_wait_read_if_2b_cgb04c_outE8 [cgb] | got E0, expected E8 |
 | serial/start_late_div_write_wait_read_if_1a_dmg08_cgb04c_outE0 [dmg] | got E8, expected E0 |
-| serial/start_late_div_write_wait_read_if_2a_dmg08_cgb04c_outE0 [dmg] | got E8, expected E0 |
+| serial/start_late_div_write_wait_read_if_1a_dmg08_cgb04c_outE0 [cgb] | got E8, expected E0 |
 | serial/start_late_div_write_wait_read_if_3a_dmg08_cgb04c_outE0 [dmg] | got E8, expected E0 |
+| serial/start_late_div_write_wait_read_if_3a_dmg08_cgb04c_outE0 [cgb] | got E8, expected E0 |
 | serial/start_wait_clear_if_read_if_1_dmg08_cgb04c_outE8 [dmg] | got E0, expected E8 |
 | serial/start_wait_clear_if_read_if_1_dmg08_cgb04c_outE8 [cgb] | got E0, expected E8 |
 | serial/start_wait_clear_if_read_if_ds_1_cgb04c_outE8 [cgb] | got E0, expected E8 |
-| serial/start_wait_read_if_1_dmg08_cgb04c_outE0 [dmg] | got E8, expected E0 |
-| serial/start_wait_read_if_1_dmg08_cgb04c_outE0 [cgb] | got E8, expected E0 |
-| serial/start_wait_read_if_ds_1_cgb04c_outE0 [cgb] | got E8, expected E0 |
-| serial/start_wait_read_sb_1_dmg08_cgb04c_out7F [dmg] | got FF, expected 7F |
-| serial/start_wait_read_sb_1_dmg08_cgb04c_out7F [cgb] | got FF, expected 7F |
-| serial/start_wait_read_sc_1_dmg08_outFF_cgb04c_outFD [dmg] | got 7F, expected FF |
-| serial/start_wait_read_sc_1_dmg08_outFF_cgb04c_outFD [cgb] | got 7D, expected FD |
-| serial/start_wait_restart_read_if_1_dmg08_cgb04c_outE0 [dmg] | got E8, expected E0 |
-| serial/start_wait_restart_read_if_1_dmg08_cgb04c_outE0 [cgb] | got E8, expected E0 |
-| serial/start_wait_sc80_read_if_1_dmg08_cgb04c_outE0 [dmg] | got E8, expected E0 |
-| serial/start_wait_sc80_read_if_1_dmg08_cgb04c_outE0 [cgb] | got E8, expected E0 |
-| serial/start_wait_stop_read_if_1_dmg08_cgb04c_outE0 [dmg] | got E8, expected E0 |
-| serial/start_wait_stop_read_if_1_dmg08_cgb04c_outE0 [cgb] | got E8, expected E0 |
 | serial/start_wait_trigger_int8_read_if_2_dmg08_outE8_cgb04c_outE0 [cgb] | got E8, expected E0 |
 | serial/start_wait_trigger_int8_read_if_ds_2_cgb04c_outE0 [cgb] | got E8, expected E0 |
 

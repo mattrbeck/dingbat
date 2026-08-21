@@ -690,6 +690,11 @@ when IF_READ_SAMPLE_T < 4:
         if dots > head:
           mem_tick_ppu(mem, gb, dots - head, ignore_speed = true)
           gb.ppu.read_mode = head_rm or (gb.ppu.read_mode and LY_JUST_CHANGED)
+    # The serial source is the one IF bit whose rise this M-cycle the read is
+    # NOT entitled to: the shift edge is on the M-cycle's last T-cycle and the
+    # bus half above ran all four at its top. See SERIAL_CPU_SAMPLE_T in gb.nim.
+    when SERIAL_CPU_SAMPLE_T < 4:
+      serial_if_latch_fixup(gb)
 
 proc mem_read*(mem: GbMemory; gb: GB; idx: int): uint8 {.hot_bus_inline.} =
   when IF_READ_SAMPLE_T < 4:

@@ -416,45 +416,118 @@ const GDMA_SETUP_MCYCLES* {.intdefine.} = 0
 #
 # Raising the tap makes every edge land EARLIER in real time (the sum reaches
 # the bit boundary sooner); lowering it makes them land later.
-# **A two-sided contradiction, quarantined at the DMG value gambatte refuses.**
 #
-# Swept against the 82-row gambatte `serial` bucket, whole suite rebuilt per
-# value, BOTH taps moved together (the DMG-only column, CGB held at 2, is
-# 4 -> 53 and 2 -> 58, so each SoC contributes its own half of the step):
+# **Both SoCs want the same M-cycle, and the two-sided grid now says so.** The
+# tap grid this file used to carry was measured with the CPU's bus transaction
+# ordered AFTER the M-cycle's tap edge, which is wrong (SERIAL_CPU_SAMPLE_T
+# below), and under that error the gambatte bucket appeared to want [0,3] while
+# hardware's `boot_sclk_align-dmgABCmgb` pinned [4,7]. With the ordering fixed
+# the grid is one plateau per SoC, four T-cycles wide, at [4,7] on BOTH:
 #
-#   SERIAL_TAP       -8  -4  -2 | 0   1   2   3 | 4   5   6 | 8   12
-#   serial rows      48  46  46 | 58  58  58  58| 46  46  46| 48  46
+#   tap (either axis)   1   2   3 | 4   5   6   7 | 8      (other axis at 4)
+#   serial rows        62  62  62 |68  68  68  68 |62
 #
-# so gambatte puts both taps in [0,3]: a strict local maximum bracketed on BOTH
-# sides, with no collateral row in any of the other 46 buckets. The plateau is
-# exactly 4 T wide, which is what says the tap is a phase quantised to the
-# M-cycle and not a duration.
+# A strict two-sided maximum with no collateral row in any of the other 46
+# buckets. The plateau being exactly 4 T wide is what says the tap is a phase
+# quantised to the M-cycle and not a duration.
 #
-# Only FIVE of those rows are really the tap's: `div_write_start_wait_read_if_1`,
-# its `nopx1` arm and `start_late_div_write_wait_read_if_{1a,2a,3a}`, all DMG.
-# They reset DIV immediately before the transfer, so they are the only ones in
-# the bucket that see the tap without the boot seed. Everything else in the
-# step is CGB-side arithmetic on the same phase.
+# HISTORY, so it is not re-derived: with both taps moved together and the old
+# ordering the same grid read `-8/-4/-2: 48/46/46 | 0..3: 58 | 4..6: 46 |
+# 8: 48`, and the DMG-only column (CGB held at 2) was 4 -> 53, 2 -> 58. Every
+# one of those numbers was the ordering defect, not the tap.
 #
-# **`mooneye/acceptance/serial/boot_sclk_align-dmgABCmgb` refuses [0,3] and pins
-# 4.** It is hardware-verified on DMG/MGB, so it wins and the tap ships at 4 --
-# those five gambatte rows stay red deliberately, and flipping the default is a
-# suite-wide call (the local runner is not a superset of the shootout).
-#
-# The two cannot be reconciled by re-partitioning the tap against the boot
-# divider seed. `boot_div-dmgABCmgb` reads DIV, which is `tdiv shr 8`, so it
-# cannot see a 4 T change in the seed at all -- but the gbmicrotest
-# `timer_tima_phase_*` set, gambatte `div` and parts of `sound`/`tima` can, and
-# do: 0xABC8 -> 0xABCC lands boot_sclk_align at tap 2 and takes thirteen of
-# those rows down. Measured, not assumed.
-#
-# What DOES reconcile them is one M-cycle on the READ side of the bus, not
-# anything in this constant -- see the `start_wait_*` block below, which needs
-# the same change for its own 24 rows.
+# Also refuted, and not to be re-run: the disagreement could NOT be reconciled
+# by re-partitioning the tap against the boot divider seed. `boot_div-dmgABCmgb`
+# reads DIV, which is `tdiv shr 8`, so it cannot see a 4 T change in the seed at
+# all -- but the gbmicrotest `timer_tima_phase_*` set, gambatte `div` and parts
+# of `sound`/`tima` can, and do: 0xABC8 -> 0xABCC lands boot_sclk_align at tap 2
+# and takes thirteen of those rows down. Measured, not assumed.
 const SERIAL_TAP_DMG* {.intdefine.} = 4
-const SERIAL_TAP_CGB* {.intdefine.} = 2
+const SERIAL_TAP_CGB* {.intdefine.} = 4
 
-# ---- The residual `start_wait_*` cluster, and what it actually needs ---------
+# ---- Where in its M-cycle a CPU access meets the serial shifter -------------
+#
+# 0 = the CPU's bus transaction is ordered BEFORE the M-cycle's serial tap edge
+# (what this ships); 4 = after it, which is what the tree did before this
+# existed and compiles the whole mechanism -- the fields, the capture and the
+# rollback -- out again.
+#
+# The fact underneath it, read straight off `-d:gb_serial_trace`: **the serial
+# tap edge lands on the LAST T-cycle of its M-cycle**, and dingbat runs the
+# whole bus half (`mem_tick_bus`, the timer and with it the shifter) at the TOP
+# of the M-cycle, before the access's byte is latched or its store committed.
+# So every CPU access is served the shifter as it stands AFTER an edge hardware
+# puts after the access. Traced on `serial/start_wait_read_sb_1` (DMG, tap 4):
+#
+#   SHIFT t=8244 tdiv=52220 left=0 sb=FF phase=3/4
+#   READ  t=8244 tdiv=52220 idx=FF01 sb=FF          <- same M-cycle, exp 7F
+#
+# and on CGB (tap 2) the same read sees an edge at phase 1/4 of its own
+# M-cycle. That CGB row is the one that proves this is not the tap: to move the
+# CGB edge out of the reading M-cycle the tap would have to go to 0, and at
+# tap 0 the edge lands at phase 3 of the SAME M-cycle -- no tap value moves it.
+# The 2-D DMG x CGB tap sweep over the 82-row `serial` bucket (7x7, -8..4)
+# confirms it: the CGB axis peaks exactly where it already ships and the DMG
+# axis peaks at 0/2, and the best cell of the whole grid is 58/82.
+#
+# Both halves of the access want it, and each has its own family:
+#
+#  * READ (`a_r = 0`). `start_wait_read_{sb,sc,if}_1` and the 15 other rows
+#    that answer with the shift their own M-cycle contains: SB $FF for $7F, SC
+#    $7F for $FF, IF $E8 for $E0.
+#  * WRITE (`a_w = 0`). `nopx1_*`: 46 NOPs in front of the handler slide the
+#    SC write onto the M-cycle that carries a tap edge. dingbat toggles the
+#    master clock first and the write then reseeds from the post-edge state, so
+#    its first shift comes 256 T late and the family's verdict inverts --
+#    `nopx1_start_wait_read_if_2` answers $E0 where every other arm of the same
+#    family is early, not late. Ordering the write first restores it.
+#
+# The three families the tap could never reconcile (this bucket, the
+# `div_write` cluster and mooneye `boot_sclk_align-dmgABCmgb`) all sit on this
+# one ordering; see the write-up above SERIAL_TAP_DMG for the algebra that
+# named `a_r` before the mechanism behind it was found.
+#
+# Ablation over the 82-row bucket, one build per cell, everything else held:
+#
+#   off (= 4)                                   53
+#   read latch, SB/SC only                      57
+#   read latch, SB/SC + the $FF0F serial bit    61
+#   write ordering only                         57
+#   all three                                   65     (at the old CGB tap 2)
+#   all three + SERIAL_TAP_CGB 2 -> 4           68     <- ships
+#
+# The two halves are exactly additive (+8 and +4), so they are independent
+# defects with a shared cause and not one defect counted twice.
+#
+# **AND IT SETTLES THE TAP.** Re-running the DMG x CGB tap grid on top of this
+# (7x7 over [-8,4], then 8x8 over [1,8]) turns the old lopsided picture into
+# one two-sided plateau per axis, four T-cycles wide, at the SAME place on both
+# SoCs -- and that place is [4,7], where mooneye `boot_sclk_align-dmgABCmgb`
+# has always put the DMG:
+#
+#   tap (either axis)   1   2   3 | 4   5   6   7 | 8
+#   serial rows        62  62  62 |68  68  68  68 |62      (other axis at 4)
+#
+# So SERIAL_TAP_CGB moves 2 -> 4, both SoCs now want the same M-cycle (which is
+# what the note above SERIAL_TAP_DMG always predicted they should), and the
+# hardware-verified mooneye row and the gambatte bucket stop contradicting each
+# other. Nothing outside `serial` moves in the whole 1225-row runner, and all
+# 292 shootout ROMs render byte-identically in both device modes except
+# `boot_sclk_align` itself on CGB -- a device the shootout does not score it on
+# (model=DMG, and its DMG frame is identical), and where it fails either way.
+const SERIAL_CPU_SAMPLE_T* {.intdefine.} = 0
+
+# ---- The `start_wait_*` cluster: SOLVED, kept for the algebra ----------------
+#
+# CLOSED by SERIAL_CPU_SAMPLE_T above (2026-08-21): nineteen of these rows are
+# green and the bucket is 68/82. The algebra below is what named `a_r` and it is
+# left in place because it is still the derivation; what it got wrong is only
+# WHERE the M-cycle goes -- it read the defect as "the eighth shift edge is
+# early" and asked for the whole bus half to move, and the trace says the edge
+# is exactly right and it is the CPU's own transaction that is on the wrong side
+# of it. So the change turned out to be a serial change after all, and the
+# `tima`/`halt`/`irq_precedence` families it feared are untouched (they are on
+# the timer's edge, which is NOT on the M-cycle's last T-cycle in the same way).
 #
 # Twenty-four rows (`start_wait_read_if`, `_read_sb`, `_read_sc`,
 # `start_wait_clear_if_read_if`, `_restart`, `_sc80`, `_stop`, the `nopx*` arms
@@ -503,12 +576,11 @@ const SERIAL_TAP_CGB* {.intdefine.} = 2
 # `start_wait` cluster, the `div_write` cluster and boot_sclk_align all land
 # together, and nothing else in the serial family is sensitive to it.
 #
-# It is not taken here because it is not a serial change: `mem_read` charges
-# the whole M-cycle to bus and PPU alike before returning a byte
-# (`mem_tick_components(mem, gb, 4)`), and moving the bus half after the read
-# re-times every IF, DIV, TIMA, LY and STAT read in the emulator. That is a
-# memory.nim question with the `tima`, `halt` and `irq_precedence` families on
-# the other side of it, and it wants its own round.
+# That is what happened, and the two ARE reconciled at tap 4 on both SoCs -- but
+# not by re-timing the whole bus half. `IF_READ_SAMPLE_T = -1` is that reading
+# (the latch in front of the entire M-cycle) and it costs thirteen `tima` rows;
+# the version that lands is per-unit and touches only the serial shifter, which
+# is what SERIAL_CPU_SAMPLE_T is.
 #
 # Refuted alongside, so they are not re-run: the DMG boot seed cannot absorb
 # the tap disagreement either -- 0xABC8 -> 0xABCC does land boot_sclk_align at
@@ -3466,6 +3538,17 @@ type
                              # shifted only on its high->low half (serial.nim)
     shifting*:       bool    # cached: internal-clock transfer in progress
     driver*:         GbSerialDriver
+    when SERIAL_CPU_SAMPLE_T < 4:
+      # The shifter as it stood BEFORE the tap edge of `edge_cycle`, so a CPU
+      # access landing in that same M-cycle can be served the state hardware
+      # gives it (SERIAL_CPU_SAMPLE_T above). Scratch within one M-cycle --
+      # deliberately not serialized, like GbMemory.cycle_tick_count.
+      edge_cycle*:   CycleCount
+      pre_master*:   bool
+      pre_sb*:       uint8
+      pre_sc*:       uint8
+      pre_bits*:     int
+      pre_irq*:      bool
 
   # ---- Timer ----
   GbTimer* = ref object

@@ -156,6 +156,12 @@ proc complete_transfer(link: GbLink; m: int) =
 
 # ---------------- driver ----------------
 
+method serial_peer_committed*(drv: LockstepGbSerialDriver): bool =
+  ## complete_transfer has already swapped bytes with the other core and
+  ## finished the transfer on BOTH, so this side cannot be rewound alone. See
+  ## the base method in serial.nim.
+  true
+
 method serial_complete*(drv: LockstepGbSerialDriver; gb: GB) =
   drv.link.complete_transfer(drv.id)
 
