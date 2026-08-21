@@ -233,6 +233,32 @@ proc new_gb_fifo_ppu*(gb: GB): GbFifoPpu =
     result.irq_ly   = base.irq_ly
 
 proc fifo_arm_window*(ppu: GbFifoPpu) =
+  when defined(gb_win_trace):
+    # Every write that can move the window's comparator, with the four inputs
+    # that decide it. Noisy on purpose: with `gb_stat_read_trace` next to it
+    # this is what brackets a `late_disable*` row to the dot -- the match dot,
+    # the LCDC.5 write dot and the STAT read dot are the whole geometry, and
+    # the last of the three is what separates two ROMs whose PPU traces are
+    # otherwise byte-identical (see CGB_WIN_EN_DEFER).
+    echo "ARM ly=", ppu.ly, " dot=", ppu.cycle_counter,
+         " lcdc=", toHex(ppu.lcd_control, 2), " wx=", ppu.wx, " scx=", ppu.scx,
+         " fw=", ppu.fetching_window, " lx=", ppu.lx
+  when CGB_WIN_EN_DEFER != 0:
+    # ---- The CGB's window start is REVOCABLE, and this is the edge ---------
+    #
+    # LCDC.5 has gone low while a CGB window start is still inside its restart.
+    # See CGB_WIN_EN_DEFER: the start is taken back and the line keeps only the
+    # dots the restart had actually spent. Scheduled here rather than acted on
+    # here because the charge is `W - D + 1` and the undo has to land two dots
+    # after the write for the replay to leave exactly that behind.
+    #
+    # Once only: WIN_EN_ABORT re-enters this proc on the fetcher's next map
+    # read with the bit still low, and restarting the countdown there would
+    # move the undo (and with it the charge) by however far away that read is.
+    if ppu.win_defer > 0'u8 and not ppu.win_revoking and
+       not window_enabled(ppu):
+      ppu.win_revoking = true
+      ppu.win_defer = uint8(CGB_WIN_REVOKE_LAG)
   ## Re-derive the one `lx` the shifter has to watch for on this line. Called
   ## from every write that can move one of the four inputs (LCDC, WX, the WY
   ## latch) and from fifo_reset_bg, which is where the fourth (fetching_window)
@@ -341,6 +367,11 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
     ppu.win_carry_gap = false
   ppu.win_lx = WIN_LX_OFF
   ppu.win_hold = 0'u8
+  when CGB_WIN_EN_DEFER != 0:
+    # Per-line, like the hold above: a start taken in the last dots of one
+    # line must not be revoked on the head of the next one.
+    ppu.win_defer = 0'u8
+    ppu.win_revoking = false
   ppu.obj_penalty = 0
   ppu.obj_tile_fx = -1
   ppu.obj_fix_from = OBJ_FIX_OFF
@@ -1715,86 +1746,27 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
       # offset below, which reads SCX itself.
       if ppu.head_cycle and not ppu.smooth_scroll_sampled:
         fifo_sample_smooth_scroll(ppu)
-    # ---- NOT MODELLED: the CGB's window-enable gate is one M-cycle later ---
+    # ---- The CGB's window start is REVOCABLE -------------------------------
     #
-    # Measured 2026-08-21 and left here because it is the largest single block
-    # in the `gambatte/window` bucket and the measurement is finished even
-    # though the implementation is not. `window/late_disable_{0,1,2}` is one
-    # ROM stepped by one M-cycle, WX = 7 and WY = LY so the match lands on the
-    # line's first push, and a STAT read at dot 257 that says whether the
-    # window's 6-dot restart was paid. Traced (`-d:gb_win_trace -d:gb_m3_trace
-    # -d:GB_TRACE_LY=1`), LY 1 of the scored frame; the WX match is on dot 90
-    # on both devices and in both references:
+    # Modelled since 2026-08-21; the mechanism, the ~25-row bracket table it is
+    # fitted to and the three spellings it is NOT are all at CGB_WIN_EN_DEFER
+    # in gb.nim, and the code is `win_defer_arm` / `win_defer_undo` below. In
+    # one line: on a CGB an LCDC.5 that goes low while the window's six-dot
+    # startup fetch is still running abandons the start, and the line pays only
+    # the dots the abandoned fetch had run for. The commit arm is untouched.
     #
-    #   ROM   LCDC.5 clears on   DMG wants   CGB wants   dingbat (both)
-    #   _0          89           no window   no window   no window (172)
-    #   _1          93           WINDOW      no window   WINDOW    (178)
-    #   _2          97           WINDOW      WINDOW      WINDOW    (178)
+    # Two things about the MEASUREMENT are worth keeping even though the
+    # question is answered, because they are the reason two agents read this
+    # family wrong before it was:
     #
-    # so the DMG's enable gate answers as of a dot in `(89, 93]` -- the match
-    # dot 90, which is what this file does -- and the CGB's as of a dot in
-    # `(93, 97]`, exactly one M-cycle later. Every `late_disable*`, plus
-    # `late_scx_late_disable` and `late_reenable_scx3`, is that one statement:
-    # about 16 `[cgb]` rows, and they are the whole of what is left in this
-    # family after the WY latency landed.
-    #
-    # **Note the sign, and note that it is OPPOSITE to CGB_WY_LATENCY, which
-    # this round shipped at +4 for the same comparator's other input.** WY
-    # reaches the window an M-cycle LATE on CGB; LCDC.5 reaches its gate an
-    # M-cycle EARLY. That is not a contradiction -- the WY latch and the enable
-    # gate are different readers, and the file already carries per-register CGB
-    # deltas with different values -- but it does mean no single "CGB samples
-    # the window later/earlier" rule can serve both, and it rules out a global
-    # phase for this family.
-    #
-    # What blocks it is that a negative latency is not expressible: the write
-    # cannot arrive before it happens, so the equivalent is "the CGB confirms
-    # the window start one M-cycle after taking it", and by dot 93 this
-    # renderer has already flushed the BG FIFO and spent two dots of the
-    # restart. Undoing that is not fifo_obj_abort's trick AS THE CODE STANDS --
-    # there the refund can be spent as pipeline dots because the BG FIFO is
-    # full, and here it is empty by construction.
-    #
-    # ---- Which of the two shapes it is, settled 2026-08-21 ----------------
-    #
-    # The note used to name two shapes and try neither. One of them is wrong
-    # and the other is right, and both can be decided on paper:
-    #
-    #  * **"give the line the six dots back through `m3_lead`"** is WRONG. It
-    #    would score these ROMs (they read STAT, and 172 is 178 minus the
-    #    restart) while drawing the window anyway -- a CGB game that clears
-    #    LCDC.5 just after a WX match would lose six dots of background it is
-    #    entitled to, and nothing in the suite would say so. Do not spend a
-    #    round on it.
-    #  * **"defer the CGB's FIFO flush by an M-cycle"** is right, and the
-    #    "empty by construction" objection dissolves once the flush is what
-    #    moves. The schedule, for a CGB match on dot D:
-    #
-    #      D .. D+3   the shifter is STALLED and nothing else happens: no
-    #                 flush, no restart, no pixel. The match is held.
-    #      D+4        LCDC.5 is read. Set -> flush and restart now, with four
-    #                 of the restart's six dots already spent, so the window's
-    #                 first pixel lands on the pixel the MATCH was on and mode
-    #                 3 is 172 + 6 as it is today. Clear -> drop the match and
-    #                 spend the four held dots as pipeline dots, exactly as
-    #                 fifo_obj_abort spends OBJ_ABORT_LEAD, and mode 3 is 172.
-    #
-    #    Both arms are pixel-neutral and length-neutral by construction, which
-    #    is the whole point: the CGB's mode-3 length does not depend on WHERE
-    #    on the line the window starts (the shifter emits 160 pixels and pays
-    #    one 6-dot restart either way), so the hold costs nothing that the
-    #    commit does not give straight back.
-    #
-    #    What it is NOT is a latency on the trigger. Moving the CGB's WX
-    #    comparison itself four dots later scores this family identically and
-    #    starts the window four pixels right of where mealybug's CGB references
-    #    put it -- the difference between the two is invisible to gambatte and
-    #    obvious to the ruler, so the hold has to take the pixel back the way
-    #    WIN_EN_HOLD_BACK already does for the DMG's late-arriving bit.
-    #
-    #    Not built here because it is a new stall site in the CGB's mode 3 and
-    #    the ~30 mealybug CGB rows are the acceptance test for it, not the 16
-    #    gambatte rows it is for.
+    #  * a `late_disable*` row's geometry is THREE dots -- the WX match `D`,
+    #    the LCDC.5 write `W` and the STAT read `R` -- and two of them are not
+    #    enough. `late_disable_early_scx03_wx12_2` and
+    #    `late_disable_late_scx03_wx12_1` have identical PPU traces and
+    #    opposite references; they differ only in `R`.
+    #  * so a single row is not a statement about whether the window started.
+    #    A PAIR at the same `(D, W)` with different `R` two-sidedly brackets
+    #    the LENGTH of mode 3, and that is what the family is for.
     #
     # This supersedes the note in memory.nim's "What this is NOT" block, which
     # named "SameBoy's CGB-only fetcher-abort on a late window disable" as the
@@ -3879,6 +3851,42 @@ proc win_start_carries(ppu: GbFifoPpu): bool {.inline.} =
   when DMG_WIN_LAST_PX_CARRY == 0: false
   else: not ppu.cgb and ppu.lx == int32(GB_WIDTH) - 1
 
+
+when CGB_WIN_EN_DEFER != 0:
+  proc win_defer_arm(ppu: GbFifoPpu) {.noinline.} =
+    ## The CGB's window START has just been taken and is revocable for
+    ## CGB_WIN_EN_DEFER dots. Record everything `win_start_reset` is about to
+    ## overwrite, so that a LCDC.5 that goes low inside those dots can put the
+    ## line back the way it was. Called from the match dot and nowhere else --
+    ## at most once a line, and only on a CGB.
+    ##
+    ## `fifo_clear` moves head/tail/size and leaves `data` alone, and nothing
+    ## pushes to the BG FIFO during the deferred dots (the restart's own push is
+    ## six dots in), so three ints are the whole of the FIFO's undo.
+    ##
+    ## `{.noinline.}` deliberately: this is called from the mode 3 dot loop's
+    ## one window branch and eleven stores inlined into it is exactly the kind
+    ## of code growth that branch's neighbours are documented to pay for.
+    ppu.win_defer        = uint8(CGB_WIN_EN_DEFER)
+    ppu.win_revoking     = false
+    ppu.wd_head          = ppu.fifo.head
+    ppu.wd_tail          = ppu.fifo.tail
+    ppu.wd_size          = ppu.fifo.size
+    ppu.wd_fetcher_x     = ppu.fetcher_x
+    ppu.wd_fetch_counter = ppu.fetch_counter
+    ppu.wd_obj_tile_fx   = ppu.obj_tile_fx
+    ppu.wd_lx            = ppu.lx
+    ppu.wd_head_cycle    = ppu.head_cycle
+    when MIXER_DOT_LAG != 0:
+      ppu.wd_tail_dot0 = ppu.tail_dot0
+      ppu.wd_mix_run   = ppu.mix_run
+
+  proc win_defer_undo(ppu: GbFifoPpu; gb: GB) {.noinline.}
+    ## Forward declaration: the undo replays the match dot's shifter step, so it
+    ## needs `tick_shifter`, which is the proc that calls it. Pragmas repeated
+    ## on both halves -- see the memory note on gcc-only forward-declaration
+    ## mismatches, which are invisible on clang and red on Linux only.
+
 proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
   if ppu.fifo.size > 0:
     if not ppu.smooth_scroll_sampled: fifo_sample_smooth_scroll(ppu)
@@ -4105,6 +4113,12 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
               fifo_reset_bg(ppu, true)
               return
             # fifo_reset_bg clears the hold on its way through.
+            when CGB_WIN_EN_DEFER != 0:
+              # ...and on a CGB the start it does is REVOCABLE for one more
+              # M-cycle. See CGB_WIN_EN_DEFER: the snapshot has to be taken
+              # before the reset, and the reset itself is untouched, so the arm
+              # that goes on to commit is the shipping build dot for dot.
+              if ppu.cgb: win_defer_arm(ppu)
             win_start_reset(ppu)
             return
         else:
@@ -4112,6 +4126,8 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
             fifo_emit_pixel(ppu, gb)
             fifo_reset_bg(ppu, true)
             return
+          when CGB_WIN_EN_DEFER != 0:
+            if ppu.cgb: win_defer_arm(ppu)
           win_start_reset(ppu)
           return
       elif ppu.fetch_counter == WIN_REACT_PHASE and win_react_last_park(ppu) and
@@ -4121,6 +4137,27 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
         # displacement, one dot earlier, so it can share the compare above.
         window_reactivate(ppu)
     fifo_emit_pixel(ppu, gb)
+  else:
+    when CGB_WIN_EN_DEFER != 0:
+      # ---- The CGB's window start, counted out ------------------------------
+      #
+      # See CGB_WIN_EN_DEFER. A start is revocable for its first
+      # CGB_WIN_EN_DEFER dots, and this is where those dots are counted and
+      # where the revocation lands.
+      #
+      # HERE, in the arm the shifter takes when the FIFO is EMPTY, and not at
+      # the top of the dot loop: the deferred dots are the window restart's own
+      # first five, and the restart flushed the FIFO and does not push until
+      # its sixth, so every one of them arrives here and no dot that draws a
+      # pixel does. That placement is the whole cost of the mechanism -- a byte
+      # test at the top of `fifo_pipeline_dot` instead measured **+0.6% of
+      # retired instructions** on Pokemon Crystal and cgb-acid2 (146.73 against
+      # 145.88 and 143.21 against 142.31 instructions per emulated cycle), and
+      # this arm is already reached on every stall dot and is free.
+      if ppu.win_defer > 0'u8:
+        dec ppu.win_defer
+        if ppu.win_defer == 0'u8 and ppu.win_revoking:
+          win_defer_undo(ppu, gb)
 
 proc fetch_work_pending(ppu: GbFifoPpu): bool {.inline.} =
   ## What the fetcher still owes for the last `m3_lead` pixels of a line,
@@ -4291,6 +4328,52 @@ proc fifo_pipeline_dot(ppu: GbFifoPpu; gb: GB) {.inline.} =
   else:
     tick_bg_fetcher(ppu, gb)
   tick_shifter(ppu, gb)
+
+when CGB_WIN_EN_DEFER != 0:
+  proc win_defer_undo(ppu: GbFifoPpu; gb: GB) {.noinline.} =
+    ## LCDC.5 went low while this CGB window start's restart was still running.
+    ## The start never happened: put the line back to the match dot `D` and let
+    ## it go on from there. See CGB_WIN_EN_DEFER for what the family measures.
+    ##
+    ## **The charge falls out of WHERE this lands, and that is the whole of
+    ## CGB_WIN_REVOKE_LAG.** The record is the state `D` had after its own
+    ## fetcher step; restoring it and replaying that dot's SHIFTER step is one
+    ## fetcher step and one pixel for the dot this runs on, so a line whose
+    ## undo lands on dot `X` comes out `X - D` dots behind where a line with no
+    ## window would be. `X = W` is `charge = W - D`, which is what the family
+    ## brackets.
+    ##
+    ## Nothing else has to be undone, because of what a revocable dot can
+    ## contain. The BG FIFO is EMPTY for all of them (the restart flushed it and
+    ## its own push is the sixth dot, past the last revocable one), so
+    ## `tick_shifter` falls straight into the arm this is called from on every
+    ## one: no pixel, no object trigger, no re-trigger, no second match, and --
+    ## the part that makes the FIFO's undo three ints -- no push over `data`,
+    ## which `fifo_clear` never touched.
+    ppu.win_defer     = 0'u8          # before the replay: it must not re-enter
+    ppu.win_revoking  = false
+    ppu.fifo.head     = ppu.wd_head
+    ppu.fifo.tail     = ppu.wd_tail
+    ppu.fifo.size     = ppu.wd_size
+    ppu.fetcher_x     = ppu.wd_fetcher_x
+    ppu.fetch_counter = ppu.wd_fetch_counter
+    ppu.obj_tile_fx   = ppu.wd_obj_tile_fx
+    ppu.lx            = ppu.wd_lx
+    ppu.head_cycle    = ppu.wd_head_cycle
+    ppu.fetching_window = false
+    dec ppu.current_window_line
+    when MIXER_DOT_LAG != 0:
+      ppu.tail_dot0 = ppu.wd_tail_dot0
+      ppu.mix_run   = ppu.wd_mix_run
+    # Re-derived rather than saved: with LCDC.5 low and no hold on a CGB this
+    # is WIN_LX_OFF, which is also what a match the gate refuses leaves behind.
+    # The window cannot start again on this line -- the comparator only counts
+    # up and `lx` is back on the pixel it already matched.
+    fifo_arm_window(ppu)
+    when defined(gb_win_trace):
+      echo "WINUNDO ly=", ppu.ly, " dot=", ppu.cycle_counter, " lx=", ppu.lx,
+           " fifo=", ppu.fifo.size
+    tick_shifter(ppu, gb)
 
 proc fifo_obj_abort*(ppu: GbFifoPpu; gb: GB) =
   ## LCDC.1 has just gone low while an object's stall is running. Pan Docs'

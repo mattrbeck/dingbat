@@ -2727,6 +2727,131 @@ const WIN_EN_HOLD_ZERO*       {.intdefine.} = 1
   ## for the flashcart, see docs/hwprobe-questions.md: they INSERT the pixel
   ## into an empty FIFO and delay the line by a dot; the mealybug reference
   ## reads back unshifted either side, so this model REPLACES.
+const CGB_WIN_EN_DEFER*       {.intdefine.} = 5
+  ## Dots a CGB window START stays REVOCABLE. LCDC.5 going low inside them
+  ## takes the start back -- the restart is abandoned, the background FIFO and
+  ## the fetcher go back to what they held on the match dot, and the line pays
+  ## only the dots the abandoned restart had actually spent. 0 is the control
+  ## build and the pre-2026-08-21 behaviour, where a start committed on the
+  ## match dot could not be undone and always cost its full six.
+  ##
+  ## ---- What the family actually measures, and the trap in reading it ------
+  ##
+  ## `window/late_disable*` is ~25 CGB rows of one shape: WY = LY, a WX the
+  ## name gives, a single `ld [hl],a` clearing LCDC.5 a few dots after the WX
+  ## match, and a STAT read that says whether mode 3 was still running. The
+  ## geometry of a row is three dots -- **D** the match, **W** the write, **R**
+  ## the STAT read -- and it is not enough to know two of them:
+  ##
+  ##   * `late_disable_early_scx03_wx12_2` and `late_disable_late_scx03_wx12_1`
+  ##     have IDENTICAL PPU traces (D = 104, W = 105, SCX 3, WX 0x12; the whole
+  ##     `-d:gb_win_trace` dump differs in one line, the LCD-off dot in
+  ##     V-Blank) and OPPOSITE references -- `out3` and `out0`. They differ
+  ##     only in R: 257 against 261, four dots, one M-cycle.
+  ##
+  ## So a row is not "did the window start"; a PAIR of rows at the same (D, W)
+  ## with different R is a two-sided bracket on the LENGTH of mode 3, and that
+  ## pair says the CGB's mode 3 ends strictly between them. Reading the rows
+  ## one at a time produces a "defer" -- the number of dots after which LCDC.5
+  ## is re-read -- and no single defer fits: the same pair above wants 0 from
+  ## one half and 5 from the other. Traced with
+  ## `-d:gb_win_trace -d:gb_stat_read_trace -d:gb_m3_len`.
+  ##
+  ## ---- The rule the brackets do fit --------------------------------------
+  ##
+  ## Write `k = W - D`. Every bracket in the family is satisfied by
+  ##
+  ##     charge = 0            k <= 0   (the match is refused; nothing is spent)
+  ##     charge = k            1 <= k <= 5
+  ##     charge = 6            k >= 6   (committed: the restart has pushed)
+  ##
+  ## i.e. **the abandoned window restart costs exactly the dots it ran for.**
+  ## The constraints, each read off a pair or off a row whose sibling pins the
+  ## other side (base = the line's no-window mode 3, and a STAT read at R sees
+  ## mode 0 iff mode 3 ended at or before R - 2):
+  ##
+  ##   k   row                                    says
+  ##   1   late_disable_scx2_0 / late_scx03_wx12_1   charge <= 5, <= 4
+  ##   2   late_disable_scx5_1                       charge <= 2
+  ##   3   late_disable_1, late_disable_wx0f_1       charge <= 3
+  ##   4   late_disable_scx3_1, late_scx03_wx0f_2    charge <= 4
+  ##   5   late_disable_scx2_1                       charge <= 5
+  ##   5   late_scx03_wx12_2                         charge >= 5
+  ##   1..4 early_scx03_wx{0f,10,11,12}_2            charge >= 1
+  ##   7   late_disable_2, late_disable_wx0f_2       charge >= 4
+  ##   9   late_disable_scx2_2                       charge >= 6
+  ##
+  ## `k = 5` is pinned from BOTH sides by two different ROMs, which is what
+  ## makes it the identity `charge = k` rather than a fitted staircase. 5 is
+  ## therefore not a free number either: it is the last dot before the
+  ## restart's push (the six-dot startup fetch pushes on its sixth), after
+  ## which there is nothing left to revoke.
+  ##
+  ## **Note the sign, and note that it is OPPOSITE to CGB_WY_LATENCY**, which
+  ## ships at +4 for the same comparator's OTHER input. WY reaches the window
+  ## an M-cycle late on a CGB; LCDC.5 reaches this gate for as long as the
+  ## restart is still running. Two different readers of two different
+  ## registers, so no global "the CGB samples the window later" rule serves
+  ## both -- which is what rules out a phase for this family.
+  ##
+  ## ---- Three spellings that are wrong, all decidable on paper -------------
+  ##
+  ##  * **refunding the six dots through `m3_lead`** scores these ROMs (they
+  ##    read STAT, and 172 is 178 minus the restart) while still DRAWING the
+  ##    window. A CGB game that clears LCDC.5 just after a WX match would lose
+  ##    six dots of background it is entitled to and nothing here would say so.
+  ##  * **a four-dot latency on the WX comparison itself** starts the window
+  ##    four pixels right of where mealybug's CGB references put it --
+  ##    invisible to gambatte, obvious to the ruler.
+  ##  * **holding the match with the shifter stalled and flushing an M-cycle
+  ##    later** is a fixed defer, and the pair above refutes every fixed defer.
+  ##    It is also length-neutral only if the restart that follows is charged
+  ##    two dots instead of six, i.e. only if the fetch's map and low-plane
+  ##    reads are taken out of their own slots.
+  ##
+  ## What ships is the revocation, and its shape has the property none of those
+  ## do: **the arm that COMMITS is bit-identical to the control build**, dot for
+  ## dot and pixel for pixel, so only a line that actually clears LCDC.5 inside
+  ## a running restart can move. mealybug's `m3_lcdc_win_en_change_multiple` is
+  ## pixel-exact on both CGB revisions before and after.
+  ##
+  ## What makes the undo cheap is what a deferred dot can contain. The BG FIFO
+  ## is EMPTY for all five (the restart flushed it and its own push is the
+  ## sixth), so nothing pushes, no object can trigger (that test is inside
+  ## `fifo.size > 0`) and no pixel is emitted: the only thing that ran is the
+  ## fetcher. `fifo_clear` moves head/tail/size and leaves `data` alone, so the
+  ## whole undo is nine scalars and one replayed shifter step, and the counter
+  ## lives in the arm `tick_shifter` already takes when the FIFO is empty --
+  ## measured at parity, against +0.6% for the same test at the top of the dot
+  ## loop (see the site).
+  ##
+  ## ---- Open: the five DOUBLE-SPEED rows want one dot less -----------------
+  ##
+  ## `late_disable_ds_1`, `late_disable_early_scx00_wx{0f,11}_ds_1`,
+  ## `late_disable_late_scx00_wx0f_ds_1` and `late_disable_scx5_ds_1` are the
+  ## family's remaining CGB failures and all five go green at `charge = k - 1`
+  ## -- which costs `late_scx03_wx12_2` and `early_scx03_wx12_2`, both
+  ## single-speed. So the double-speed arm wants the write to reach this gate
+  ## one dot earlier than the single-speed arm does, which is half of the
+  ## double-speed M-cycle and has precedent in this tree
+  ## (`oamdma_late_speedchange`). Not spelled that way here because the PPU has
+  ## no speed input on this path and inventing one for five rows without an
+  ## independent instrument is the kind of knob this file exists to avoid.
+const CGB_WIN_REVOKE_LAG*     {.intdefine.} = 1
+  ## Shifter dots between the LCDC.5 write that revokes a CGB window start and
+  ## the dot the undo lands on. NOT a free parameter -- it is what sets the
+  ## charge, and CGB_WIN_EN_DEFER's table pins the charge to `W - D`.
+  ##
+  ## The undo restores the state the match dot `D` had after its own fetcher
+  ## step and replays that dot's shifter step, so an undo landing on dot `X`
+  ## leaves the line `X - D` dots behind -- and `charge = W - D` is `X = W`.
+  ## A write is applied with `cycle_counter` still on `W` (the PPU is caught up
+  ## to the write dot, which has not run yet) and the countdown is read once
+  ## per dot from the shifter, so ONE is dot `W` itself.
+  ##
+  ## Raising it by one is the same thing as `charge = k + 1` and is refused by
+  ## `late_disable_1` / `late_disable_wx0f_1` from the short side; the whole
+  ## sweep is in the table at CGB_WIN_EN_DEFER.
 const WIN_LINE_START_WX*      {.intdefine.} = 6
   ## The WX below which a line STARTS as a window line instead of reaching the
   ## window through the shifter's equality. See the mode 2 -> 3 edge in
@@ -4612,6 +4737,30 @@ type
     # keeps comparing whatever these last held. See OAM_SCAN_DMA_LOCK.
     scan_y_bus*:          uint8
     scan_x_bus*:          uint8
+    # ---- The CGB window start's undo record (CGB_WIN_EN_DEFER) -------------
+    #
+    # `win_defer` counts the dots left before LCDC.5 is read a second time and
+    # the start becomes final; zero is every dot of almost every line. The rest
+    # is what `win_start_reset` overwrote on the match dot, kept so the start
+    # can be taken back -- `fifo_clear` only moves head/tail/size, so the FIFO's
+    # `data` needs nothing. Per-line scratch, and never touched on a DMG.
+    #
+    # Inside its own `when` so a build with the mechanism off is byte-identical
+    # to not having it: an unconditional block here is the object-layout cliff
+    # `win_lx` and `win_hold` both record.
+    when CGB_WIN_EN_DEFER != 0:
+      win_defer*:         uint8
+      win_revoking*:      bool
+      wd_head*:           int
+      wd_tail*:           int
+      wd_size*:           int
+      wd_fetcher_x*:      int
+      wd_fetch_counter*:  int
+      wd_obj_tile_fx*:    int32
+      wd_lx*:             int32
+      wd_head_cycle*:     bool
+      wd_tail_dot0*:      int32
+      wd_mix_run*:        int32
 
   # ---- APU Channels (base types) ----
   GbSoundChannel* = ref object of RootObj
