@@ -927,6 +927,28 @@ const CGB_HALT_LEAD_LYC_ONLY* {.intdefine.} = 0
 # from this constant rather than written down twice -- see the sweep at
 # CGB_HALT_PPU_LEAD, which is the measurement the exemption was built on and
 # which this reading reproduces without it.
+# ---- 2026-08-21: this rule is now REDUNDANT, and that is the confirmation ---
+#
+# `LYC_SRC_RELATCH_LEAD` (ppu.nim) says the STAT SOURCE leaves the blind window
+# one CPU M-cycle before the readable coincidence bit does -- for every CPU,
+# halted or running. At normal speed that puts the source at `LY153_SNAP_DOT`
+# itself, which is exactly where this rule was putting the halted wake, so the
+# two coincide and this constant decides nothing. Measured: built with
+# `-d:LYC_SETTLE_HALT_SKIP=false -d:CGB_HALT_LEAD_SKIP_LYC0=0` (the exemption
+# held at its current value so only this rule moves), the runner is 1119/1223
+# and gambatte 4584/4996 **row for row**, and the shootout is 261 PASS / 0 FAIL
+# / 3 INFO -- daid's `ppu_scanline_bgp` DMG and GBC frames, the two references
+# this rule was derived from, included.
+#
+# Read that as the derivation being confirmed rather than overturned: the daid
+# measurement really did see the source an M-cycle before the flag's dot, and
+# "halted" was the only axis available to attribute it to at the time, because
+# daid was the only witness in the set that timed the INTERRUPT instead of the
+# BIT. GBMicrotest's `line_153_lyc0_int_inc_sled` is the running witness that
+# was missing, and it says the same M-cycle. Left in place rather than deleted:
+# it still carries `CGB_HALT_LEAD_SKIP_LYC0`'s default, and in a double-speed
+# build the two dots are not the same dot (source at 7, this rule's wake at 5)
+# -- no row in the tree distinguishes them today.
 const LYC_SETTLE_HALT_SKIP* {.booldefine.} = true
   ## Whether a HALTED CPU's wake is exempt from the LY 153 -> 0 snapback's
   ## `LYC_SETTLE_DOTS` blind window -- i.e. lands on the window's near side
