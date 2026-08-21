@@ -872,6 +872,55 @@ const CGB_HALT_PPU_LEAD* {.intdefine.} = 1
   ## entry. **What the 4 dots are is now answered and it is not this knob:**
   ## `M3_PIPE_AHEAD` supplies them from the consumer side, and the same entry
   ## carries the bundle world's numbers.
+const OAMDMA_HALT_PAUSE* {.intdefine.} = 1
+  ## The OAM DMA unit FREEZES while the CPU is halted, and the M-cycle the CPU
+  ## wakes on is the one that hands the bus back.
+  ##
+  ## 1 ships. 0 is the previous model -- the transfer runs straight through a
+  ## HALT -- and 2 and 3 are the two control arms below.
+  ##
+  ## **The unit is clocked by the CPU's bus cycles.** HALT stops them, so the
+  ## transfer stops with them; it does not run on in the background and it does
+  ## not catch up afterwards. LIJI32 spells the same rule in SameBoy
+  ## (`GB_dma_run` returns immediately on `halted || stopped`, and the wake
+  ## paths in sm83_cpu.c then hand it exactly one M-cycle back with
+  ## `gb->dma_cycles = 4; GB_dma_run(gb);`).
+  ##
+  ## **What pins the wake M-cycle, to the byte.** gambatte's
+  ## `oamdmasrc80_halt_lycirq_read8000` and `oamdmasrc80_halt_m2irq_read8000`
+  ## start a transfer out of VRAM, HALT inside it, and read `$8000` a fixed
+  ## number of M-cycles after the wake -- so the byte they print is the source
+  ## byte the unit is on at that instant, and one M-cycle either way is a
+  ## different answer. All four rows want `$81`:
+  ##
+  ##   arm                                     lycirq        m2irq
+  ##   0  no pause                             $A0           $2B / $2A
+  ##   3  pause, wake M-cycle does NOT clock   $82           $82
+  ##   2  pause, plain (no hand-back)          $82           $82
+  ##   1  pause + wake M-cycle clocks (SHIPS)  **$81**       **$81**
+  ##
+  ## Two families, both devices, exact value, from three wrong answers that are
+  ## nowhere near each other. That is not a coincidence a knob can buy.
+  ##
+  ## **The bill: `oamdma_late_halt_stat_2`, and it was ambiguous.** That pair
+  ## expects `0` then `3`; this tree answered `3` for BOTH before the pause and
+  ## `3` then `0` after it, so `_2` was passing by the family printing only two
+  ## values (the brief's "any wrong answer matches by construction"), not by
+  ## being modelled. What the pair actually measures is LY 4's mode-3 LENGTH --
+  ## the two ROMs differ by one M-cycle of transfer, which changes how much of
+  ## LY 4's mode 2 the transfer holds, which changes the object count, which
+  ## changes when mode 3 ends -- and dingbat's response to that shift is
+  ## inverted from hardware's under a fully-held scan. That is the same regime
+  ## as `late_sp39x_4` and the six `late_sp*_ds_*` rows, which SameBoy misses
+  ## too. Net over the family: gambatte 4409 -> 4411, oamdma 782 -> 784.
+  ##
+  ## **Refuted while looking for the rest of it.** SameBoy's `GB_STAT_update`
+  ## also zeroes STAT's mode bits wherever they would read 2 while a transfer
+  ## is active. Built and measured both readings against this tree: as a READ
+  ## rule it moves **zero rows** in the whole suite, with or without the pause;
+  ## as an INTERRUPT rule (suppressing the mode-2 STAT source) it costs
+  ## `oamdmasrc80_halt_m2irq_read8000` on both devices outright -- the ROM
+  ## never wakes. It is neither, here.
 const CGB_OAM_DMA_START_T* {.intdefine.} = 8
   ## T-cycles between the write to FF46 and the OAM DMA unit taking the bus, on
   ## CGB. 8 is what both devices ship with (mem_dma_tick) and what this tree
@@ -4208,6 +4257,10 @@ type
     internal_dma_timer*:   int
     dma_position*:         int
     requested_oam_dma*:    bool
+    # OAMDMA_HALT_PAUSE only: the unit was frozen by a HALT on the previous
+    # M-cycle, so the M-cycle the CPU wakes on can be charged for the bus
+    # hand-back. Scratch, and dead outside a transfer.
+    dma_was_halted*:       bool
     next_dma_counter*:     uint8
     # Derived from dma_position, maintained by mem_dma_tick: true for exactly
     # the M-cycles in `dma_position in 1 .. 0xA0`, i.e. while the OAM DMA unit

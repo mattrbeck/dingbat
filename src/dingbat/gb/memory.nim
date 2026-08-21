@@ -882,6 +882,20 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
   # 0xFF46 and dma_position is only reset alongside it), so an idle entry
   # means an idle span: bit-identical, ~8-12% of a profile.
   if not mem.requested_oam_dma and mem.dma_position > 0xA0: return
+  when OAMDMA_HALT_PAUSE != 0:
+    var cycles = cycles
+    # The transfer is clocked by the CPU's bus cycles and HALT stops them: the
+    # unit freezes where it is until the CPU is back on the bus. The M-cycle
+    # the CPU wakes on is the hand-back and it DOES clock the unit, which is
+    # why it is added here rather than left to the caller -- dingbat runs that
+    # M-cycle's bus half with `halted` still set. See OAMDMA_HALT_PAUSE.
+    if gb.cpu.halted:
+      mem.dma_was_halted = true
+      return
+    if mem.dma_was_halted:
+      mem.dma_was_halted = false
+      when OAMDMA_HALT_PAUSE == 1: cycles += 4
+      when OAMDMA_HALT_PAUSE == 3: return
   for _ in 0 ..< cycles:
     if mem.requested_oam_dma:
       inc mem.next_dma_counter
