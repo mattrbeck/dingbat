@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-21 12:13:19*
+*Generated: 2026-08-21 12:25:45*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4509/4996 passed.**
+**4513/4996 passed.**
 
 ## bgen
 
@@ -715,9 +715,9 @@ All 20 tests passed.
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 
-## window (417/476 passed)
+## window (421/476 passed)
 
-417/476 tests passed, 59 failed:
+421/476 tests passed, 55 failed:
 
 | Test | Result |
 |------|--------|
@@ -742,11 +742,7 @@ All 20 tests passed.
 | window/arg/late_wy_FFto2_ly2_scx2_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_FFto2_ly2_scx3_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_FFto2_ly2_scx3_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| window/late_disable_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_disable_early_scx00_wx0f_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_disable_early_scx00_wx11_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_disable_early_scx03_wx12_2_dmg08_out0_cgb04c_out3 [dmg] | got 3, expected 0 |
-| window/late_disable_late_scx00_wx0f_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_disable_late_scx03_wx12_1_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/late_disable_scx2_0_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/late_disable_scx5_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |

@@ -2825,18 +2825,19 @@ const CGB_WIN_EN_DEFER*       {.intdefine.} = 5
   ## measured at parity, against +0.6% for the same test at the top of the dot
   ## loop (see the site).
   ##
-  ## ---- Open: the five DOUBLE-SPEED rows want one dot less -----------------
+  ## ---- The DOUBLE-SPEED arm wants one dot less ---------------------------
   ##
-  ## `late_disable_ds_1`, `late_disable_early_scx00_wx{0f,11}_ds_1`,
-  ## `late_disable_late_scx00_wx0f_ds_1` and `late_disable_scx5_ds_1` are the
-  ## family's remaining CGB failures and all five go green at `charge = k - 1`
-  ## -- which costs `late_scx03_wx12_2` and `early_scx03_wx12_2`, both
-  ## single-speed. So the double-speed arm wants the write to reach this gate
-  ## one dot earlier than the single-speed arm does, which is half of the
-  ## double-speed M-cycle and has precedent in this tree
-  ## (`oamdma_late_speedchange`). Not spelled that way here because the PPU has
-  ## no speed input on this path and inventing one for five rows without an
-  ## independent instrument is the kind of knob this file exists to avoid.
+  ## `charge = k` is the SINGLE-SPEED rule. Four `_ds_` rows of this family
+  ## want `k - 1`, which is half of the double-speed M-cycle and the same
+  ## idiom two other CGB latencies here already use; it ships as
+  ## CGB_WIN_REVOKE_DS_TRIM and costs nothing anywhere else. Applying `k - 1`
+  ## to BOTH speeds instead is refused by `late_scx03_wx12_2` and
+  ## `early_scx03_wx12_2`, so the split is two-sided.
+  ##
+  ## Still open after it: `late_disable_scx5_ds_1`, which wants the start to be
+  ## revocable at `k = 6` -- i.e. one dot past the restart's own push, where
+  ## there should be nothing left to revoke. It is the only row in the family
+  ## that asks for that and the only one this block does not explain.
 const CGB_WIN_REVOKE_LAG*     {.intdefine.} = 1
   ## Shifter dots between the LCDC.5 write that revokes a CGB window start and
   ## the dot the undo lands on. NOT a free parameter -- it is what sets the
@@ -2852,6 +2853,32 @@ const CGB_WIN_REVOKE_LAG*     {.intdefine.} = 1
   ## Raising it by one is the same thing as `charge = k + 1` and is refused by
   ## `late_disable_1` / `late_disable_wx0f_1` from the short side; the whole
   ## sweep is in the table at CGB_WIN_EN_DEFER.
+const CGB_WIN_REVOKE_DS_TRIM* {.intdefine.} = 1
+  ## Dots taken OFF a revoked CGB window start's charge (CGB_WIN_EN_DEFER) when
+  ## the machine is in DOUBLE SPEED: the write reaches the window's enable gate
+  ## one dot earlier there, so `charge = W - D - 1` and not `W - D`. 0 is the
+  ## control build.
+  ##
+  ## **This is the same idiom the file already uses twice** for a CGB register
+  ## latency measured in DOTS whose source is a CPU write --
+  ## `CGB_WY_LATCH_LATENCY - current_speed` in memory.nim and
+  ## `max(0, CGB_MAP_LATENCY - current_speed)` above -- and it is the same
+  ## quantity: half of the double-speed M-cycle. It is spelled here as an extra
+  ## replayed dot rather than as a subtraction because the undo's landing dot
+  ## cannot be moved earlier than the write that causes it (see
+  ## CGB_WIN_REVOKE_LAG), and one more replayed dot IS one dot off the charge.
+  ##
+  ## Worth exactly four double-speed CGB rows and nothing else, measured over
+  ## all 4,674 hex rows of the gambatte suite and again over the runner's
+  ## 4,996: `late_disable_ds_1`, `late_disable_early_scx00_wx{0f,11}_ds_1` and
+  ## `late_disable_late_scx00_wx0f_ds_1`. **Zero rows move the other way** -- the single-speed arm is untouched by construction, and the whole
+  ## mechanism only fires on a line that clears LCDC.5 inside a running window
+  ## restart.
+  ##
+  ## What would refute it: a double-speed CGB row anywhere that wants the full
+  ## `W - D`. There is none in gambatte, and mealybug has no double-speed ROM,
+  ## so this rests on five rows of one family and is the softest number in the
+  ## block.
 const WIN_LINE_START_WX*      {.intdefine.} = 6
   ## The WX below which a line STARTS as a window line instead of reaching the
   ## window through the shifter's equality. See the mode 2 -> 3 edge in

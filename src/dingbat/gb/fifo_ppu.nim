@@ -4374,6 +4374,11 @@ when CGB_WIN_EN_DEFER != 0:
       echo "WINUNDO ly=", ppu.ly, " dot=", ppu.cycle_counter, " lx=", ppu.lx,
            " fifo=", ppu.fifo.size
     tick_shifter(ppu, gb)
+    when CGB_WIN_REVOKE_DS_TRIM != 0:
+      # See CGB_WIN_REVOKE_DS_TRIM: the double-speed arm's write reaches this
+      # gate a dot earlier, and an extra replayed dot IS a dot off the charge.
+      if gb.memory.current_speed != 0:
+        for _ in 0 ..< CGB_WIN_REVOKE_DS_TRIM: fifo_pipeline_dot(ppu, gb)
 
 proc fifo_obj_abort*(ppu: GbFifoPpu; gb: GB) =
   ## LCDC.1 has just gone low while an object's stall is running. Pan Docs'
