@@ -34,6 +34,12 @@ cc -O2 -std=gnu11 -I"$SAMEBOY" -D_GNU_SOURCE -DGB_VERSION='"1.0.3"' \
    "$SAMEBOY/build/lib/libsameboy.a" \
    -lm -o tools/gbfuzz/sameboy_microtest
 
+echo "== sameboy_ssdump"
+cc -O2 -std=gnu11 -I"$SAMEBOY" -D_GNU_SOURCE -DGB_VERSION='"1.0.3"' \
+   tools/gbfuzz/sameboy_ssdump.c \
+   "$SAMEBOY/build/lib/libsameboy.a" \
+   -lm -o tools/gbfuzz/sameboy_ssdump
+
 echo "== mgba_gb_runner"
 cc -O2 -std=gnu11 -pthread \
    -I"$MGBA/include" -I"$MGBA/src" -I"$MGBA/build-headless/include" \
