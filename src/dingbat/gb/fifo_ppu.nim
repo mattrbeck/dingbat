@@ -2945,10 +2945,49 @@ const LY0_PIPE_MCYCLES {.intdefine.} = 1
 #    and mealybug's `line_0_fix` reads either way round.
 #  * daid `ppu_scanline_bgp` is the one instrument that pins the pipeline's
 #    phase against something OTHER than the mode 2 interrupt -- it syncs on the
-#    LYC = 0 relatch of line 153 (`ly=0 cc=9 mode=1`) -- and it is a HALT ROM,
-#    so it moves with the halt bucket rather than with this. It goes 100% ->
-#    90.5% here, which is four dots, and it is expected back when the halt half
-#    lands.
+#    LYC = 0 relatch of line 153 (`ly=0 cc=9 mode=1`) -- and it is a HALT ROM.
+#    It goes 100% -> 90.5% here, which is four dots.
+#
+#    **"It is expected back when the halt half lands" is FALSIFIED (2026-08-20).
+#    It is the one row that does not come back, and it is what refuses this
+#    constant.** Both spellings of the halt half were built on 62a62db and
+#    scored with the 261-ROM shootout: `HALT_IF_SAMPLE_T = 2`, and the
+#    per-source `M2_LEAD_HALT_BLIND` in cpu.nim that supersedes it. Each one
+#    puts all five mooneye `intr_2_*` rows back; neither moves daid-dmg by a
+#    pixel (2656/23040 wrong in every arm). It cannot: daid's anchor is the
+#    snapback's LYC = 0 match, and GBMicrotest's `int_lyc_nops` / `int_lyc_halt`
+#    are BOTH `$99`, i.e. the LYC source is measured not to differ between a
+#    halted CPU and a running one, so no halt rule reaches it.
+#
+#    The only quantity with the right sign is the snapback's own arrival dot:
+#    `LYC_SETTLE_DOTS = 0` (ppu.nim) returns daid-dmg to 23040/23040 exactly,
+#    on top of this constant, which is the direct confirmation that the two are
+#    the same four dots seen from the two ends. It is refused three ways, and
+#    two of them are device-UNIFORM, so it cannot be escaped with a DMG-only
+#    settle window either:
+#      - gambatte `ly0/lycint152_lyc0flag_{1,2}` and `ly0/lycint152_lyc0irq_{1,2}`
+#        are one-M-cycle pairs and flip from green to red on BOTH `[dmg]` and
+#        `[cgb]` arms (`lyc0flag_1` C1 -> C5, `lyc0irq_1` E0 -> E2);
+#      - `daid/ppu_scanline_bgp-gbc` breaks (23040 -> 20736), pinning the same
+#        window at 4 on the other device;
+#      - `gbmicrotest/line_153_lyc0_stat_timing_c` breaks, on a DMG cart.
+#
+#    It is also not the DMG BGP unit selector (`MIXER_PALETTE_OR` in gb.nim):
+#    daid ships THREE accepted DMG references and they are 464 px apart, while
+#    this constant puts the frame 2192 / 2656 / 2768 px from them -- five times
+#    the whole documented spread, so the frame has not landed on another
+#    outcome, it has moved off the lattice.
+#
+#    So daid's two frames, taken together, are a direct two-sided statement
+#    that the DMG and CGB pixel pipelines differ by exactly one CPU M-cycle:
+#    at one and the same pipeline lead and one and the same (unmoved) snapback
+#    wake, the CGB frame is exact and the DMG frame is four columns out. That
+#    is what the shipping `M3_PIPE_AHEAD = 0` / `CGB_PIPE_MCYCLES = 1` spelling
+#    says, and it is what the "one quantity spelled three times, all three
+#    values swapped" re-spelling denies. Whoever picks this up again needs a
+#    DMG/CGB term of four dots somewhere between the snapback wake and a BGP
+#    write's effect on a pixel that is NOT this constant; nothing in the tree
+#    is currently shaped like one.
 # `M3_PIPE_AHEAD` -- the device-INDEPENDENT advance -- is declared at the head
 # of this file for the same reason `CGB_PIPE_MCYCLES` is: `obj_oam_dma_read`
 # reads it, and a const cannot be read before it is declared. Its derivation is

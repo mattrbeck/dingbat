@@ -427,6 +427,111 @@ const HALT_IF_SAMPLE_T* {.intdefine.} = 4
   ## ships -- and compiles the split tick and both head rules out entirely.
   ## 2 is the measurement above.
 
+# ---- The OAM source's LEAD is invisible to a HALTED CPU --------------------
+#
+# `STAT_M2_LEAD` (ppu.nim) moves the mode 2 STAT source one CPU M-cycle ahead
+# of the line boundary. Every instrument that derives it reads IF or takes a
+# dispatch with the CPU RUNNING -- GBMicrotest's `oam_int_if_edge_{a..d}` sled
+# clears and re-reads `$FF0F`, `int_oam_nops`/`int_oam_incs` count a sled,
+# gambatte's `m2int_*` read STAT out of the handler. Not one of them is halted.
+#
+# The five mooneye acceptance ROMs that ARE halted say the opposite, and they
+# say it two-sidedly. `intr_2_0_timing`, `intr_2_mode0_timing`,
+# `intr_2_mode3_timing`, `intr_2_oam_ok_timing` and `intr_2_mode0_timing_sprites`
+# all share one prologue -- `wait_ly $42 ; wait_mode 0 ; wait_mode 3 ; STAT :=
+# $20 ; IF := 0 ; ei ; halt` -- and then time a second event off that wake with
+# a pair of arms one M-cycle apart. Turn the lead on without this rule and all
+# five collapse onto their LATE arm together: measured on 62a62db,
+#
+#   intr_2_0_timing      D wants $07, gets $08   E wants $08, gets $08
+#   intr_2_mode0_timing  D wants $01, gets $02   E wants $02, gets $02
+#   intr_2_mode3_timing  D wants $01, gets $02   E wants $02, gets $02
+#   intr_2_oam_ok_timing D wants $01, gets $02   E wants $02, gets $02
+#
+# -- the signature of a bracket whose two arms have both fallen to the same
+# side, i.e. of the wake moving by exactly the M-cycle the ROMs step in. Those
+# five are hardware-verified on DMG, MGB, SGB, SGB2, CGB, AGB and AGS, and four
+# of the five are GBEmulatorShootout rows.
+#
+# So the lead is real at the CPU's IF pin and absent at the halted CPU's latch,
+# which is what a source rising in the TAIL of its M-cycle does to a latch taken
+# part way through one: the halted CPU misses it and catches it at the boundary,
+# exactly where it caught it before the lead existed. That is the same
+# classification `HALT_IF_SAMPLE_T`'s table makes ("OAM (mode 2) -- rises tail
+# -- +1"), spelled for the ONE source it is measured on instead of as a global
+# threshold. The global threshold is what `mooneye acceptance/ppu/
+# hblank_ly_scx_timing-GS` refuses: its eight SCX arms group 1/4/3 and only a
+# latch that never misses reproduces that, while GBMicrotest's
+# `int_hblank_{nops,halt}_scx0..7` want the mode-0 source to miss on T 2 and 3.
+# Those two are a two-sided contradiction about the MODE 0 source and this rule
+# does not touch it -- it leaves the mode 0, LYC, vblank and timer wakes exactly
+# where they are, which is what keeps the mooneye row green.
+#
+# ---- Measured, on 62a62db, whole runner + the 261-ROM shootout -------------
+#
+#   shipping                                     1042  gam 4420  shootout 261
+#   the five + LY0_PIPE_MCYCLES=0                1050  gam 4425  shootout 255
+#   ... + HALT_IF_SAMPLE_T = 2                   1054  gam 4427  shootout 259
+#   ... + this rule instead                      1062  gam 4443  shootout 260
+#
+# The six the bare five lose are the five `intr_2_*` rows above plus
+# `daid/ppu_scanline_bgp (DMG)`, and they have two different causes: the five
+# are `STAT_M2_LEAD` alone (`M3_PIPE_AHEAD` alone leaves them green), daid is
+# `M3_PIPE_AHEAD` alone (`STAT_M2_LEAD` alone leaves it green, and turning both
+# on does not cancel on that frame). This rule closes the first cause outright.
+# The second is not a halt question -- see the daid note at `M3_PIPE_AHEAD` in
+# fifo_ppu.nim -- and it is what the five now stand or fall on.
+#
+# gambatte, against the same tree with the five and this rule on: +59 / -38.
+# Thirty-seven of the thirty-eight are `[dmg]` rows of the residual shape the
+# paragraph at `STAT_M2_LEAD` describes. The thirty-eighth is this rule's own
+# and is the reason it is written as a question rather than a settled fact:
+#
+#   halt/noime_m2irq_m0stat_1 [cgb]   green today, red with this on
+#
+# It is the only row in the whole suite that moves when this rule is turned on
+# WITHOUT the DMG lead (`-d:M2_LEAD_HALT_BLIND=true` on shipping defaults:
+# 1042 / gambatte 4419, one row, nothing else). So on the CGB -- the device
+# whose lead already ships -- the blinding is measurably wrong at one boundary,
+# while the five DMG-run `intr_2_*` ROMs that derive it are hardware-verified
+# on CGB too. Either the rule is DMG-only (a device gate is the obvious first
+# thing to try, and it would keep that row), or the CGB's own halt phase
+# (`CGB_HALT_PPU_LEAD`) is already paying for it there and the two double up.
+# Unresolved, and cheap for the next round to settle.
+#
+# Ships OFF, because `STAT_M2_LEAD` does: at the shipping DMG lead of 0 there is
+# no window to be blind to, and it compiles out entirely at `false` -- verified,
+# the tree with this patch and the shipping defaults scores 1042/1225 and
+# gambatte 4420/5005, the committed baseline exactly.
+const M2_LEAD_HALT_BLIND* {.booldefine.} = false
+  ## Whether a HALTED CPU is blind to the mode 2 STAT source for the
+  ## `STAT_M2_LEAD` M-cycles it leads the line boundary by. See above.
+
+when STAT_M2_EARLY and M2_LEAD_HALT_BLIND:
+  proc halt_m2_lead_blind(gb: GB): bool {.noinline.} =
+    ## Is the interrupt line up ONLY because the OAM source is inside its lead
+    ## window? Then a halted CPU has not seen it yet.
+    ##
+    ## `noinline`, and reached only from behind `result` in cpu_halt_tick, so a
+    ## halted M-cycle that raises nothing never runs a byte of it.
+    ##
+    ## Deliberately approximate in one direction: if IF's STAT bit was set
+    ## earlier in this halt by some OTHER source and the PPU happens to be
+    ## inside the window now, the wake is deferred to the boundary as well. The
+    ## window is the last M-cycle of a mode-0 line tail, and a CPU whose STAT
+    ## bit went up before it would already be awake, so the case needs the bit
+    ## to be raised and re-masked mid-halt by an IE write.
+    let irq = gb.interrupts
+    if not (irq.lcd_stat_interrupt and irq.lcd_stat_enabled): return false
+    if (irq.vblank_interrupt and irq.vblank_enabled) or
+       (irq.timer_interrupt  and irq.timer_enabled)  or
+       (irq.serial_interrupt and irq.serial_enabled) or
+       (irq.joypad_interrupt and irq.joypad_enabled): return false
+    let ppu = gb.ppu
+    ppu.lcd_enabled and ppu.oam_interrupt_enabled and
+      m2_lead_active(gb) and ppu.m2_early and
+      ppu.cycle_counter >= ppu.m2_early_dot(gb)
+
 proc cpu_halt_tick(gb: GB): bool {.inline.} =
   ## One halted M-cycle's worth of ticking, answering "does this M-cycle end
   ## with the CPU awake". The whole M-cycle is spent either way; the latch is
@@ -521,7 +626,9 @@ proc cpu_halt_tick(gb: GB): bool {.inline.} =
       return interrupt_ready(gb.interrupts)
   when HALT_IF_SAMPLE_T >= 4:
     mem_tick_extra(gb.memory, gb, 4)
-    interrupt_ready(gb.interrupts)
+    result = interrupt_ready(gb.interrupts)
+    when STAT_M2_EARLY and M2_LEAD_HALT_BLIND:
+      if result and halt_m2_lead_blind(gb): result = false
   else:
     # The bus half whole, the PPU half split. The timer is the reason: its IRQ
     # is one of the sources the halt pairs put in the HEAD of the M-cycle (see

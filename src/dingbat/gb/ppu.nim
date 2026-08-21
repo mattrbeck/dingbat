@@ -1190,6 +1190,22 @@ const STAT_M2_LEAD* {.intdefine.} = 0
   ## x4 and `vblank_stat_intr-C` x2 in each mooneye suite, plus gambatte `halt`
   ## 137 -> 122. Runner +4 and gambatte -16 against the five alone.
   ##
+  ## **The halt half is now SOLVED, and not by that constant: it is
+  ## `M2_LEAD_HALT_BLIND` in cpu.nim** (2026-08-20). The global threshold moves
+  ## every source's wake; what the intr_2 family measures is THIS source's, and
+  ## blinding a halted CPU to the lead window alone buys the same five mooneye
+  ## rows while leaving the mode-0, LYC, vblank and timer wakes exactly where
+  ## they are -- so `hblank_ly_scx_timing-GS` and `vblank_stat_intr-C` stay
+  ## green and gambatte `halt` gains 7 instead of losing 15. On 62a62db, the
+  ## five + `LY0_PIPE_MCYCLES = 0` + that rule is **runner 1062, gambatte 4443,
+  ## shootout 260/261** against 1042 / 4420 / 261 shipping.
+  ##
+  ## The one row it does not reach is `daid/ppu_scanline_bgp.gb (DMG)`, and
+  ## that row is not a halt question at all -- see the daid note at
+  ## `M3_PIPE_AHEAD` in fifo_ppu.nim, which is where the five now stand or fall.
+  ## Read that note before spending another round here: the halt bucket is
+  ## closed and the pipeline's DMG/CGB split is the open one.
+  ##
   ## ---- M-cycles, not dots ---------------------------------------------------
   ##
   ## Spelled as a fixed PPU dot first, because a pulse the OAM scan generates

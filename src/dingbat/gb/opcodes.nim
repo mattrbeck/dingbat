@@ -563,6 +563,17 @@ var UNPREFIXED* = [
       # that). Only those two signatures may finish the run: LD B,B is an
       # ordinary instruction, and e.g. blargg's 06-ld r,r and instr_timing
       # execute it mid-test with arbitrary register values.
+      #
+      # **A mooneye ASSERTION failure reaches neither signature in the ROM
+      # builds game-boy-test-roms ships, and arrives here as a TIMEOUT.**
+      # Their `quit` tail is assembled as `magic_breakpoint ; ld a,$42 ; call
+      # serial_send_byte` six times over, so A is $42 and B/C/D/E/H/L still
+      # hold the print routine's leftovers ($48 $41 ... on intr_2_0_timing) --
+      # the all-$42 test above cannot match. Do not read "TIMEOUT" on a mooneye
+      # row as a hang: run the same ROM under `--mode=screenshot` instead and
+      # the failure screen prints the assertion, e.g. `D: 07! E: OK` with the
+      # register dump above it, which is the actual measured value and the
+      # thing worth having.
       if gb.test_output != nil:
         if cpu.b == 3 and cpu.c == 5 and cpu.d == 8 and
            cpu.e == 13 and cpu.h == 21 and cpu.l == 34:
