@@ -53,6 +53,15 @@ proc ch2_dac_input*(ch: GbChannel2): uint8 =
     uint8(int(ch.sample_bit) * int(ch.current_volume)) and 0x0F
   else: 0'u8
 
+proc ch2_pcm_edge_zero*(ch: GbChannel2; gb: GB): bool {.inline.} =
+  ## See ch1_pcm_edge_zero. SameBoy masks BOTH squares' nibbles of PCM12 on
+  ## CGB 0/A/B/C (`pcm_mask[0] &= i == GB_SQUARE_1? 0xF0 : 0x0F`), and the two
+  ## channels are the same duty hardware, so the rule is mirrored here even
+  ## though SameSuite ships no channel_2 build of the ROM that measures it.
+  ch.enabled and ch.dac_enabled and ch.last_step_at == gb.scheduler.cycles and
+    int(WAVE_DUTY2[ch.duty][(ch.wave_duty_position + 7) and 7]) *
+      int(ch.current_volume) == 0
+
 proc ch2_get_amplitude*(ch: GbChannel2): float32 =
   ## See ch1_get_amplitude: DAC-gated, and the slope is negative.
   if ch.dac_enabled: GB_DAC_LUT[ch.ch2_dac_input()] else: 0.0'f32
@@ -79,6 +88,19 @@ proc ch2_write*(ch: GbChannel2; idx: int; val: uint8; gb: GB) =
     if reload_now: ch.next_step = gb.scheduler.cycles + ch2_period(ch, gb)
   of 0xFF19:
     let reload_now = ch2_reload_is_now(ch, gb)
+    # See the same arm in ch1_write: CGB D/E's extra half-tick backstep window.
+    if gb.quirks.square_freq_backstep_halftick and (val and 0x80) == 0 and
+       ch.enabled and (ch.frequency and 0x0700'u16) == 0x0700'u16 and
+       (val and 0x07) != 0x07 and not reload_now and
+       ch.last_step_at != GB_NO_STEP and
+       gb.scheduler.cycles - ch.last_step_at == gb_apu_tick(gb) div 2:
+      # Only the POSITION moves. The latched sample stays where the undone
+      # step put it -- SameBoy's decrement does not call update_square_sample
+      # either, and the ladder says so directly: at the two extra ladder rungs
+      # this window reaches (double speed n = 10 and n = 18, off the shipped
+      # ROM's table) latching the stepped-back sample answers read1 wrong on
+      # both, and leaving it alone answers both the way SameBoy does.
+      ch.wave_duty_position = (ch.wave_duty_position + 7) and 7
     ch.frequency = (ch.frequency and 0x00FF'u16) or ((uint16(val) and 0x07'u16) shl 8)
     if reload_now: ch.next_step = gb.scheduler.cycles + ch2_period(ch, gb)
     let len_enable = (val and 0x40) != 0

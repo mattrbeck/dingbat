@@ -4546,6 +4546,10 @@ hand the default machine.
 | `$FEA0-$FEFF` (`unusable_region`) | RAM, `addr and not $18` | same | **RAM, unmasked** | **nibble echo** | Pan Docs + `cgb-acid-hell`'s own readback |
 
 ### 2026-08-21: the last three SameSuite APU rows are MORE of this axis, not APU bugs
+<!-- CLOSED the same day; see "SameSuite APU is 70/70" two sections below. This
+     section's diagnosis stands, its size estimate ("a port of a whole
+     per-revision APU model") does not. -->
+
 
 `channel_1/channel_1_freq_change_timing-{cgb0BC,cgbDE}` and
 `channel_3/channel_3_extra_length_clocking-cgbB` are the whole of SameSuite APU
@@ -4606,6 +4610,91 @@ family — and no reference pair, ROM header or Pan Docs sentence splits the
 CGB halt phase by revision. The same goes for `CGB_HALT_EXIT_MCYCLES` and
 `SPEED_SWITCH_STALL_T`. Its own write-up in `gb.nim` is the place that argues
 the quantity; this axis has nothing to add to it.
+
+### 2026-08-21: CLOSED — SameSuite APU is 70/70, and it took ONE glitch plus the right machine
+
+The split above was right about the shape and wrong about the size. It is not
+"a port of a whole per-revision APU model". Two flags close channel 1's
+three-way split outright, and the third row (`channel_3_extra_length_clocking`)
+was already closed by the round before this one.
+
+**The mechanism, and how it was pinned.** `channel_1_freq_change_timing`'s
+sixteen cells are a delay ladder: cell *i* triggers channel 1 at frequency
+`$7FC` (a duty step every 4 M-cycles), waits *i* M-cycles longer than the last,
+writes `NR14 = $00` to drop the frequency to `$0FC` (a step every 1796
+M-cycles, i.e. it freezes), then reads PCM12 twice — 2 and 23 M-cycles after
+that write — and stores `(read1 << 4) | read2`. Cells 0-7 run at single speed,
+cells 8-15 after a `STOP` into double speed.
+
+The ladder is *patchable*: the two `call $7FFx` targets in each of the sixteen
+blocks are the two delays, and `$7FFF` is the ladder's `ret` with plain `$00`
+nops all the way back to `$0878`, so setting a call's low byte to `$FF - n`
+moves that read by *n* M-cycles. Sweeping the first delay over 20 rungs (both
+speeds) and reading `$C000` out of SameBoy on all six CGB revisions and dingbat
+gives a 240-cell table that says exactly which cycle each behaviour turns on.
+Tools, all shipped: `tools/gbapu/` (`ssdump.nim` reads dingbat's `$C000`
+buffer per revision, `ssladder.py` is the sweep, `ssgrid.py` is the 70 x 6
+verdict grid) plus `tools/gbfuzz/sameboy_ssdump.c` for the SameBoy side. One
+thing that is NOT in the kit and was needed to prove the mechanism: to bisect
+SameBoy's own model gates you must rebuild its library from a private copy,
+because the shipped `libsameboy.a` is a single amalgamated object and a modified
+`apu.c` cannot be linked over it.
+
+Two behaviours, both now `GbQuirks` flags:
+
+* **`pcm_read_edge_zero` (CGB 0/A/B/C).** A PCM12 read landing on the very cycle
+  of a square channel's duty step reads **0** for that channel when the output
+  before the step was 0 — the rising edge is invisible to a read taken on it,
+  the falling edge is not. Cells 4 (single speed) and 15 (double speed).
+* **`square_freq_backstep_halftick` (CGB D/E).** A non-triggering NR14 write
+  that takes the frequency high bits out of 7 undoes the duty step it lands
+  within one 2 MHz tick *after*; every other revision undoes it only when the
+  write lands exactly on the step. Half a tick is 2 T-cycles, so this is
+  unreachable at single speed and moves cell 10 alone.
+
+After both, dingbat reproduces SameBoy's answer on **all 240 swept cells**, on
+all six revisions, with zero mismatches.
+
+**And then the real find.** With `pcm_read_edge_zero` in, 21 previously-green
+SameSuite APU rows went red — every unsuffixed `channel_1_*` and `channel_2_*`
+ROM. They were green because dingbat's CGB-C did not have the glitch, and
+`same-suite/apu/README.md` says outright that they must not be:
+
+> * CPU-CGB-C – passes the channel 3 tests and non-channel-specific tests. Most
+>   other tests fail (see To Do)
+> * CPU-CGB-D - passes all tests, except `channel_1_sweep_restart_2`
+> * CPU-CGB-E – passes all tests
+>
+> A quirk in CPU-CGB revisions C and older makes registers PCM12 and PCM34
+> report a glitched PCM amplitude for channels 1, 2 and 4 if they're read in the
+> same M-cycle they change. … **This quirk is what causes tests testing those
+> channels fail.**
+
+So the sub-suite was being scored on the wrong machine, exactly the way the
+`-cgb0B` ROMs would be on the default. `build_samesuite_apu_tests` now defaults
+to `cgbE` (tokens still override), and the suite is **70/70**. Forced to one
+revision dingbat now scores 46/70 at cgb0 and cgbAB, 42/70 at cgbC, 63/70 at D,
+E and AGB — and the C column is that README paragraph, reproduced.
+
+**Two arms of the same quirk are deliberately NOT modelled**, both unscored once
+the default is cgbE, both listed at `pcm_read_edge_zero` in `gb.nim` with the
+rows that would move: the channel-4/PCM34 arm (ten `channel_4_*` rows where
+dingbat passes at CGB 0/A/B/C and SameBoy — correctly — fails), and SameBoy's
+second, double-speed-envelope mask (`channel_1_nrx2_glitch`,
+`channel_2_nrx2_glitch`, `channel_1_volume`).
+
+**Refuted here:** "SameSuite APU needs a port of SameBoy's ~20 `gb->model <=`
+gates." It needed two of them. And SameBoy is *not* a safe oracle for these ROMs
+read absolutely — it plays the boot ROM, and on `channel_1_duty` that shifts its
+whole staircase two cells relative to dingbat's skip-boot timeline. Read its
+`$CFFE` verdict byte (`$50` pass / `$46` fail) instead of comparing buffers and
+the whole 70 x 6 grid becomes readable: **375 of the 420 verdicts agree.** Of
+the 45 that do not, 33 are the unmodelled channel-4/PCM34 arm, 9 are the
+unmodelled double-speed envelope mask (`channel_1/2_nrx2_glitch`,
+`channel_1_volume`), 2 are `channel_3_extra_length_clocking-{cgb0,cgbB}` at
+cgbAB where SameBoy has no CGB-0 length gate and dingbat is the correct one, and
+the last is `channel_1_sweep_restart_2` at CGB-D, where SameBoy fails and its
+own README says the hardware does too.
 
 ### The palette dot is a palette dot, not a mixer dot
 

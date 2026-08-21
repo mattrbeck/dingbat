@@ -628,6 +628,31 @@ proc build_samesuite_apu_tests(samesuite_dir: string): seq[TestDef] =
   ## PCM12/PCM34 registers, so they all run on CGB hardware (per the suite's
   ## README, pre-CGB devices only pass the div_write_trigger pair). Opt-in, see
   ## --apu in main().
+  ##
+  ## The DEFAULT for this sub-suite is CPU CGB E, not the tree's default CGB C,
+  ## and `same-suite/apu/README.md` is why -- it states the per-revision result
+  ## outright:
+  ##
+  ##   * CPU-CGB-C - passes the channel 3 tests and non-channel-specific tests.
+  ##     Most other tests fail (see To Do)
+  ##   * CPU-CGB-D - passes all tests, except `channel_1_sweep_restart_2`
+  ##   * CPU-CGB-E - passes all tests
+  ##
+  ## and names the cause in its To Do list: "A quirk in CPU-CGB revisions C and
+  ## older makes registers PCM12 and PCM34 report a glitched PCM amplitude for
+  ## channels 1, 2 and 4 if they're read in the same M-cycle they change. ...
+  ## This quirk is what causes tests testing those channels fail."
+  ##
+  ## dingbat models that quirk (GbQuirks.pcm_read_edge_zero), so scoring these
+  ## on CGB C now asks 21 of them a question their tables were not captured to
+  ## answer, exactly the way `channel_1_extra_length_clocking-cgb0B` would be
+  ## asked the wrong question on the default. Measured 2026-08-21 over the whole
+  ## 70 ROM x 6 revision grid (each ROM's own `$CFFE` verdict byte, dingbat
+  ## against SameBoy): 375 of the 420 verdicts agree, and in particular BOTH
+  ## emulators fail channel_1's and channel_2's align, delay, duty, restart,
+  ## stop, sweep and freq_change on CGB 0, A/B and C and pass every one of them
+  ## on CGB D, E and AGB. See docs/gb-failure-triage.md for the 45 that differ.
+  ## The filename tokens keep overriding this for the eight ROMs that carry one.
   var tests: seq[TestDef]
   let apu_dir = samesuite_dir / "apu"
   if not dirExists(apu_dir):
@@ -635,13 +660,14 @@ proc build_samesuite_apu_tests(samesuite_dir: string): seq[TestDef] =
     return tests
   for rom in find_roms_recursive(apu_dir, ".gb"):
     let rel = rom.relativePath(apu_dir)
+    let tok = samesuite_model_for(rom.splitFile().name)
     tests.add(TestDef(
       name: "same-suite/apu/" & rel.changeFileExt(""),
       rom_path: rom,
       mode: tmMooneye,
       timeout: 1800,
       cgb: true,
-      model: samesuite_model_for(rom.splitFile().name),
+      model: if tok.len > 0: tok else: "cgbE",
     ))
   tests
 

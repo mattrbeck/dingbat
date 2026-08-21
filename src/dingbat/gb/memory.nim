@@ -510,7 +510,14 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
   of 0xFF76:
     if gb.cgb_enabled:
       apu_catchup_all(gb.apu, gb)
-      gb.apu.channel1.ch1_dac_input() or (gb.apu.channel2.ch2_dac_input() shl 4)
+      var lo = gb.apu.channel1.ch1_dac_input()
+      var hi = gb.apu.channel2.ch2_dac_input()
+      # CGB 0/A/B/C only: a read sitting on a RISING duty step answers 0 for
+      # that channel. See GbQuirks.pcm_read_edge_zero for the measurement.
+      if gb.quirks.pcm_read_edge_zero:
+        if gb.apu.channel1.ch1_pcm_edge_zero(gb): lo = 0
+        if gb.apu.channel2.ch2_pcm_edge_zero(gb): hi = 0
+      lo or (hi shl 4)
     else: 0xFF'u8
   of 0xFF77:
     if gb.cgb_enabled:

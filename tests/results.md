@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-21 16:19:45 · commit f398fe3a · game-boy-test-roms v7.0*
+*Generated: 2026-08-21 16:29:21 · commit ead1c4d3 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1223
-- **Pass:** 1121
-- **Fail:** 102
+- **Pass:** 1123
+- **Fail:** 100
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -26,7 +26,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - AGE | 45 | 89 |
 | Game Boy - Screenshot suites | 13 | 13 |
 | Game Boy - SameSuite | 8 | 8 |
-| Game Boy - SameSuite APU | 68 | 70 |
+| Game Boy - SameSuite APU | 70 | 70 |
 | Game Boy - Shootout ROMs | 13 | 13 |
 | Game Boy - Mooneye (wilbertpol) | 159 | 184 |
 | Game Boy - gambatte | 19 | 48 |
@@ -268,80 +268,9 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 8 tests passed.**
 
-## Game Boy - SameSuite APU (68/70)
+## Game Boy - SameSuite APU (70/70)
 
-| Test | Device | Result |
-|------|--------|--------|
-| same-suite/apu/channel_1/channel_1_align | CGB | 👌 |
-| same-suite/apu/channel_1/channel_1_align_cpu | CGB | 👌 |
-| same-suite/apu/channel_1/channel_1_delay | CGB | 👌 |
-| same-suite/apu/channel_1/channel_1_duty | CGB | 👌 |
-| same-suite/apu/channel_1/channel_1_duty_delay | CGB | 👌 |
-| same-suite/apu/channel_1/channel_1_extra_length_clocking-cgb0B | CGB cgb0B | 👌 |
-| same-suite/apu/channel_1/channel_1_freq_change | CGB | 👌 |
-| same-suite/apu/channel_1/channel_1_freq_change_timing-A | CGB A | 👌 |
-| same-suite/apu/channel_1/channel_1_freq_change_timing-cgb0BC | CGB cgb0BC | 👀 Mooneye: FAIL |
-| same-suite/apu/channel_1/channel_1_freq_change_timing-cgbDE | CGB cgbDE | 👀 Mooneye: FAIL |
-| same-suite/apu/channel_1/channel_1_nrx2_glitch | CGB | 👌 |
-| same-suite/apu/channel_1/channel_1_nrx2_speed_change | CGB | 👌 |
-| same-suite/apu/channel_1/channel_1_restart | CGB | 👌 |
-| same-suite/apu/channel_1/channel_1_restart_nrx2_glitch | CGB | 👌 |
-| same-suite/apu/channel_1/channel_1_stop_div | CGB | 👌 |
-| same-suite/apu/channel_1/channel_1_stop_restart | CGB | 👌 |
-| same-suite/apu/channel_1/channel_1_sweep | CGB | 👌 |
-| same-suite/apu/channel_1/channel_1_sweep_restart | CGB | 👌 |
-| same-suite/apu/channel_1/channel_1_sweep_restart_2 | CGB | 👌 |
-| same-suite/apu/channel_1/channel_1_volume | CGB | 👌 |
-| same-suite/apu/channel_1/channel_1_volume_div | CGB | 👌 |
-| same-suite/apu/channel_2/channel_2_align | CGB | 👌 |
-| same-suite/apu/channel_2/channel_2_align_cpu | CGB | 👌 |
-| same-suite/apu/channel_2/channel_2_delay | CGB | 👌 |
-| same-suite/apu/channel_2/channel_2_duty | CGB | 👌 |
-| same-suite/apu/channel_2/channel_2_duty_delay | CGB | 👌 |
-| same-suite/apu/channel_2/channel_2_extra_length_clocking-cgb0B | CGB cgb0B | 👌 |
-| same-suite/apu/channel_2/channel_2_freq_change | CGB | 👌 |
-| same-suite/apu/channel_2/channel_2_nrx2_glitch | CGB | 👌 |
-| same-suite/apu/channel_2/channel_2_nrx2_speed_change | CGB | 👌 |
-| same-suite/apu/channel_2/channel_2_restart | CGB | 👌 |
-| same-suite/apu/channel_2/channel_2_restart_nrx2_glitch | CGB | 👌 |
-| same-suite/apu/channel_2/channel_2_stop_div | CGB | 👌 |
-| same-suite/apu/channel_2/channel_2_stop_restart | CGB | 👌 |
-| same-suite/apu/channel_2/channel_2_volume | CGB | 👌 |
-| same-suite/apu/channel_2/channel_2_volume_div | CGB | 👌 |
-| same-suite/apu/channel_3/channel_3_and_glitch | CGB | 👌 |
-| same-suite/apu/channel_3/channel_3_delay | CGB | 👌 |
-| same-suite/apu/channel_3/channel_3_extra_length_clocking-cgb0 | CGB cgb0 | 👌 |
-| same-suite/apu/channel_3/channel_3_extra_length_clocking-cgbB | CGB cgbB | 👌 |
-| same-suite/apu/channel_3/channel_3_first_sample | CGB | 👌 |
-| same-suite/apu/channel_3/channel_3_freq_change_delay | CGB | 👌 |
-| same-suite/apu/channel_3/channel_3_restart_delay | CGB | 👌 |
-| same-suite/apu/channel_3/channel_3_restart_during_delay | CGB | 👌 |
-| same-suite/apu/channel_3/channel_3_restart_stop_delay | CGB | 👌 |
-| same-suite/apu/channel_3/channel_3_shift_delay | CGB | 👌 |
-| same-suite/apu/channel_3/channel_3_shift_skip_delay | CGB | 👌 |
-| same-suite/apu/channel_3/channel_3_stop_delay | CGB | 👌 |
-| same-suite/apu/channel_3/channel_3_stop_div | CGB | 👌 |
-| same-suite/apu/channel_3/channel_3_wave_ram_dac_on_rw | CGB | 👌 |
-| same-suite/apu/channel_3/channel_3_wave_ram_locked_write | CGB | 👌 |
-| same-suite/apu/channel_3/channel_3_wave_ram_sync | CGB | 👌 |
-| same-suite/apu/channel_4/channel_4_align | CGB | 👌 |
-| same-suite/apu/channel_4/channel_4_delay | CGB | 👌 |
-| same-suite/apu/channel_4/channel_4_equivalent_frequencies | CGB | 👌 |
-| same-suite/apu/channel_4/channel_4_extra_length_clocking-cgb0B | CGB cgb0B | 👌 |
-| same-suite/apu/channel_4/channel_4_freq_change | CGB | 👌 |
-| same-suite/apu/channel_4/channel_4_frequency_alignment | CGB | 👌 |
-| same-suite/apu/channel_4/channel_4_lfsr | CGB | 👌 |
-| same-suite/apu/channel_4/channel_4_lfsr15 | CGB | 👌 |
-| same-suite/apu/channel_4/channel_4_lfsr_15_7 | CGB | 👌 |
-| same-suite/apu/channel_4/channel_4_lfsr_7_15 | CGB | 👌 |
-| same-suite/apu/channel_4/channel_4_lfsr_restart | CGB | 👌 |
-| same-suite/apu/channel_4/channel_4_lfsr_restart_fast | CGB | 👌 |
-| same-suite/apu/channel_4/channel_4_volume_div | CGB | 👌 |
-| same-suite/apu/div_trigger_volume_10 | CGB | 👌 |
-| same-suite/apu/div_write_trigger | CGB | 👌 |
-| same-suite/apu/div_write_trigger_10 | CGB | 👌 |
-| same-suite/apu/div_write_trigger_volume | CGB | 👌 |
-| same-suite/apu/div_write_trigger_volume_10 | CGB | 👌 |
+**All 70 tests passed.**
 
 ## Game Boy - Shootout ROMs (13/13)
 

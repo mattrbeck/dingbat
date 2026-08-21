@@ -4138,6 +4138,73 @@ type
       ## -- mealybug ships no `_agb` reference for this ROM -- and the tree's
       ## AGE `agb` rows are scored against the current behaviour. A guess that
       ## moves scored rows is worse than an honest gap.
+    pcm_read_edge_zero*: bool
+      ## CGB 0 / A / B / C. A PCM12 read that lands on the very cycle a square
+      ## channel's duty step lands reads **0** for that channel if the channel's
+      ## output was 0 immediately BEFORE that step. The rising edge is therefore
+      ## invisible to a read taken on it; the falling edge is not (the pre-step
+      ## output is non-zero there, so the read simply shows the new 0). CGB D,
+      ## CGB E and AGB show the post-step sample on the same cycle.
+      ##
+      ## This is the FIRST flag in this object that is true on the DEFAULT
+      ## revision (grCgbC), i.e. the one place the default machine is no longer
+      ## the pre-revision machine. It has to be: the ROM that measures it names
+      ## its device list `-cgb0BC`, which resolves to grCgbC.
+      ##
+      ## SameSuite `channel_1_freq_change_timing` is the measurement, and it
+      ## ships THREE builds of one ladder -- `-A`, `-cgb0BC`, `-cgbDE` -- whose
+      ## only difference is the 16-byte expected table at $05AB. Cell 4 (single
+      ## speed) and cell 15 (double speed) are the two cells where the ladder
+      ## puts a PCM12 read exactly on a rising duty step, and they are exactly
+      ## the two cells where the `-cgb0BC` table reads `$0f` where `-A` and
+      ## `-cgbDE` read `$ff`. Confirmed against SameBoy by compiling its
+      ## `pcm_mask` (Core/apu.c:966, Core/memory.c:641, gated `model <=
+      ## GB_MODEL_CGB_C`) out: with the mask removed SameBoy answers CGB 0, B
+      ## and C with the AGB table, byte for byte, and with it in it answers all
+      ## three tables on their own revisions.
+      ##
+      ## SameSuite's own `apu/README.md` documents the quirk from the other
+      ## side, and states its scope: "A quirk in CPU-CGB revisions C and older
+      ## makes registers PCM12 and PCM34 report a glitched PCM amplitude for
+      ## channels 1, 2 **and 4** if they're read in the same M-cycle they
+      ## change." Channel 4 is NOT modelled here. SameBoy spells that arm
+      ## separately (Core/apu.c:1048, on the LFSR step, and single speed only),
+      ## it needs a `last_step_at` on GbChannel4 that does not exist, and since
+      ## `build_samesuite_apu_tests` now scores the APU sub-suite on CGB E it
+      ## buys no row. The measured size of the gap, 2026-08-21: at CGB 0, A/B
+      ## and C dingbat passes and SameBoy fails `channel_4_align`, `_delay`,
+      ## `_equivalent_frequencies`, `_extra_length_clocking-cgb0B` (cgb0/AB
+      ## only), `_freq_change`, `_frequency_alignment`, `_lfsr`, `_lfsr15`,
+      ## `_lfsr_15_7` and `_lfsr_7_15` -- ten rows, and SameBoy is the one
+      ## agreeing with the README there.
+      ##
+      ## Three more rows are still short on the CGB-C side after this flag:
+      ## `channel_1_nrx2_glitch`, `channel_2_nrx2_glitch` and `channel_1_volume`
+      ## pass here and fail on SameBoy at CGB 0/A/B/C. SameBoy narrows the same
+      ## mask on a double-speed ENVELOPE tick as well (Core/apu.c:541 and :558,
+      ## `pcm_mask[0] &= current_volume | 0xF1`), which is a second, separate
+      ## glitch on the same register and is what those three rows are measuring.
+      ## Also unscored, also not modelled.
+    square_freq_backstep_halftick*: bool
+      ## CGB D / E. When a non-triggering NR14 / NR24 write takes the frequency
+      ## high bits from 7 to anything else -- a jump from a sub-256 period to a
+      ## long one -- the duty step that just fired is UNDONE if the write lands
+      ## within one 2 MHz tick after it. Every other revision (and the AGB)
+      ## undoes it only when the write lands exactly ON the step.
+      ##
+      ## Half an APU tick is 2 T-cycles, so at single speed a CPU write can
+      ## never land in the extra window (M-cycles and duty steps are both on the
+      ## 4 T grid) and the flag is inert. At double speed one CPU M-cycle IS
+      ## that half tick, which is why the only cell that moves is cell 10 of
+      ## `channel_1_freq_change_timing`, in the ladder's double-speed half:
+      ## `-cgbDE` reads `$00` where `-A` and `-cgb0BC` read `$0f`.
+      ##
+      ## SameBoy spells the same rule as an index decrement gated on
+      ## `model == CGB_D || model == CGB_E || (sample_countdown & 1)`
+      ## (Core/apu.c:1815-1825) -- the `& 1` arm is the odd half-tick every
+      ## model takes, and D/E drop the parity test. Its TODO there says the
+      ## hardware behaviour being approximated is "the countdown should change
+      ## to the old length, but the current sample should not change".
     unusable_region*: GbUnusableRegion
       ## What `$FEA0..$FEFF` does on this machine; see GbUnusableRegion, which
       ## carries the Pan Docs quote and the per-member evidence.
@@ -6414,6 +6481,8 @@ proc gb_quirks_for*(rev: GbRevision): GbQuirks =
     length_clock_any_nrx4: rev in {grCgb0, grCgbAB},
     mixer_write_immediate: rev in {grCgbD, grCgbE},
     scy_fetch_latch: rev in {grCgbD, grCgbE},
+    pcm_read_edge_zero: rev in {grCgb0, grCgbAB, grCgbC},
+    square_freq_backstep_halftick: rev in {grCgbD, grCgbE},
     unusable_region:
       if GB_UNUSABLE_ZERO: urZero
       else:
