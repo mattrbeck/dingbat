@@ -459,6 +459,110 @@ intentionally updating the baseline.
 `tests/golden/` holds per-row mGBA-suite captures (passing *and* failing
 rows) for diff-based timing work — see `tests/golden/README.md`.
 
+### The device axis: which silicon every suite is actually scored on
+
+Audited suite by suite on 2026-08-21 against `90accfd5`, because a suite scored
+on the wrong machine has rows that are impossible by construction and no amount
+of constant-sweeping can reach them. Method: for each suite, read what the ROMs
+/ their filenames / the bundle's per-suite `game-boy-test-roms-howto.md` claim,
+then **measure** — the whole runner re-scored on every revision dingbat models,
+one device axis at a time, with `gb_set_revision` applied before `post_init` so
+the boot table *and* `GbQuirks` move together.
+
+**The result, first, because it is the useful part: no currently-failing row is
+failing because of the machine it is scored on.** Every one of the 123 red rows
+in the committed baseline is red on all five DMG revisions and all six CGB
+revisions. The revision axis is far from inert — see the tables below — it just
+does not touch anything that is red.
+
+| suite | what the ROMs/refs claim | what dingbat runs | revision axis measured | verdict |
+|---|---|---|---|---|
+| Blargg | howto: DMG-C and CGB-B/E tables | 19 rows `cart` ($0143 = $80 → CGB C), `oam_bug` forced DMG, `interrupt_time`/`cgb_sound` CGB, `dmg_sound` DMG | all 19 `cart` rows PASS on **both** devices; `mgb`/`sgb2` cost `oam_bug/combined` (a timeout, not a verdict) | correct |
+| Blargg dmg_sound | howto: DMG-C | DMG, grDmgABC | 12/12 on every DMG revision | correct |
+| Blargg cgb_sound | howto: ❌ CGB-B, ✅ CGB-C, ✅ CGB-E | CGB, default grCgbC | 12/12 at C/D/E; **11/12 at cgb0 and cgbAB, and the row it drops is `03-trigger`** — which is the howto's own footnote ("test case 3 fails with code 04" on CGB-B) reproduced | correct, and the axis is validated by it |
+| Mooneye | README "Test naming": suffix = the machines it passes on | 81 `cart` (all carts $0143 = $00 → DMG ABC) + one row per machine the suffix names | dmgABC is the max (151); dmg0 148, and cgbC/agb split `misc/boot_hwio-C` | correct |
+| Acid2 | howto: "probably any GB" / "any GBC" | dmg-acid2 DMG, cgb-acid2 CGB | 2/2 everywhere | correct |
+| MagenTests | CGB-only suite; 3 carts $C0, 4 carts $80 | `cart` → CGB C | 7/7 on all six CGB revisions | correct |
+| Mealybug Tearoom | capture names: `_dmg_blob`, `_cgb_c`, `_cgb_d` | DMG / cgbc / cgbd, one row per capture | **live**: forcing everything to C costs the 7 `_cgb_d` rows, to D or E costs 8 `_cgb_c` rows | correct |
+| GBMicrotest | howto: "checked on real hardware believed to be a DMG-CPU-08 … a DMG-CPU B or C" | `cart`, and **all 513 carts are $0143 = $00**, so DMG at grDmgABC | 478/482 on *all five* DMG revisions — but only 368/513 on a CGB, so the axis mattered and the answer is right | correct |
+| AGE | howto: DMG-CPU-C, CPU CGB B, C and E; filename names the arms | one row per named revision (`@cgbab`/`@cgbc`/`@cgbe`, `dmgC`) | **44/89 on every revision, even with each row's `--model` overridden.** None of the four `GbQuirks` reaches an AGE row | correct, but see "inert arms" below |
+| Screenshot suites | per-PNG device token (`-dmg`, `-cgb`, `-cgb-dmg`) | the device the PNG names | bully needs cgbAB..cgbE (fails cgb0/agb); cgb-acid-hell needs C or E (fails D — its own `$FEA0` gate) | correct |
+| SameSuite | howto: no compat info for the non-APU groups | dma/ppu/interrupt CGB, `sgb/` with `--sgb` | 8/8 everywhere | correct |
+| SameSuite APU | howto + apu/README: some tests are CPU-CGB-E-only; nine ROMs carry a `-cgb0B`/`-cgb0`/`-cgbB`/`-cgb0BC`/`-cgbDE`/`-A` token | token → `--model`, a range resolving to its highest member | **the policy is confirmed by measurement**: `-cgb0B` passes at cgb0 *and* cgbAB and nowhere else, and the `-cgb0`/`-cgbB` pair passes at exactly one revision each. Whole suite: 67/70 at cgb0/cgbAB, 63/70 at C/D/E/agb | correct |
+| Shootout ROMs | the shootout's own device column | mirrors it; `daid/ppu_scanline_bgp-gbc` pinned to `cgbe` | see the two-harness note below | correct |
+| Mooneye (wilbertpol) | same naming scheme as Gekkio's | 76 `cart` (all $00 → DMG ABC) + per-machine arms | same shape as Mooneye | correct |
+| gambatte | `dmg08` / `cgb04c` are capture provenance, not a selector | defaults grDmgABC / grCgbC | dmgABC 4567 vs dmg0 4443; cgbC 4567 vs cgbD 4542 / cgbE 4516 / agb 4534 | correct — see the full write-up below |
+
+**The two harnesses run different CGB silicon, and that is deliberate.** The
+local runner's default CGB is **CPU CGB C**; the 261-ROM gbdev shootout drives
+`dingbat_test` with `--cgb-rev=E` (`emulators/dingbat.py`). Both are at their
+own measured maximum and the disagreement is exactly two references:
+
+```
+shootout, forced to one revision      local runner, default CGB moved
+  cgbE  261  <- what it ships           cgbC  1102  <- what it ships
+  cgbD  260   (loses cgb-acid-hell)     cgbE  1101  (gambatte 4567 -> 4516:
+  cgbC  260   (loses ppu_scanline_bgp)                25 scy + 26 oamdma)
+  cgbAB 259                             cgbD  1100
+  cgb0  257    DMG axis: dmgABC 261     cgb0  1099
+  agb   257                mgb    260   agb   1100
+                           dmg0   234
+```
+
+CGB-E is the *unique* shootout maximum because `cgb-acid-hell` and
+`daid/ppu_scanline_bgp.gbc.png` pull in opposite directions across the C/D
+boundary and only E clears both; CGB-C is the local maximum because gambatte's
+4,996 rows are `cgb04c` captures. There is no contradiction to resolve: every
+reference that names a revision is already scored at that revision (mealybug's
+`_cgb_c`/`_cgb_d` pair, `daid/ppu_scanline_bgp-gbc` at `cgbe`), and the split
+is one modelled quirk, `mixer_write_immediate`. Re-measured per revision on
+2026-08-21, `ppu_scanline_bgp.gbc.png` is **0 px at cgbD and cgbE and 576 px at
+cgb0/cgbAB/cgbC/agb**.
+
+**AGE's per-revision arms are inert and stay anyway.** Scoring the suite with
+every row forced to one revision gives 44/89 at cgb0, cgbAB, cgbC, cgbD, cgbE
+*and* agb — so the 25 `@cgbab` / 25 `@cgbc` / 25 `@cgbe` arms are today three
+copies of one measurement. That is not an argument for deleting them: AGE's
+filenames make a per-revision claim, the rows are what check it, and the day a
+CGB quirk lands that an AGE ROM can see, 50 of these rows stop being copies.
+It IS an argument against reading an AGE delta as evidence about a revision.
+
+**Rows that are impossible as currently scored** — i.e. no revision on either
+axis reaches them, so they need model work, not a device flag:
+
+- `same-suite/apu/channel_1/channel_1_freq_change_timing-cgb0BC` and `-cgbDE`.
+  The suite ships this test three times, once per silicon family, and dingbat
+  passes only the `-A` (AGB) build — on *every* revision, including cgb0. No
+  member of `GbQuirks` distinguishes the CGB families' PCM12 duty edge from
+  the AGB's, so both rows are unreachable until one does. The range-token
+  policy is not the blocker: `-cgb0BC` resolves to grCgbC, which is the
+  default, and forcing it to grCgb0 or grCgbAB does not help either.
+- `mealybug/dma/hdma_timing-C` — red on all six CGB revisions.
+- All four red GBMicrotest rows (`halt_op_dupe_delay`, `line_153_ly_c`,
+  `line_153_lyc0_int_inc_sled`, `stat_write_glitch_l154_d`) — red on all five
+  DMG revisions and on all six CGB ones.
+- All 45 red AGE rows, per the inertness above.
+
+**One thing this audit changed and one it deliberately did not.** Changed:
+mealybug's two `dma/*-C` rows were the only rows in the runner whose filename
+named a device and whose row did not, so they now carry `model: "cgbc"` (no
+verdict moves — the default already was grCgbC). Not changed: the `agb` half of
+that `-C` token, and CGB arms for the three scribbltests whose reference is
+named `-cgb-dmg`. Both were measured and both would be pure row inflation —
+`hdma_during_halt-C` passes and `hdma_timing-C` fails on cgbc and agb alike,
+and `lycscx`, `lycscy` and `statcount-auto` are already 0 wrong pixels on a CGB
+as well as on the DMG they are scored on.
+
+**How to re-run this.** `--model=` reaches every mode except `--mode=gambatte`
+(the batch quits before that block), so sweeping the whole runner needs a
+temporary hook in `dingbat_test.nim` that calls `gb_set_revision` before
+`post_init`. Two traps, both hit during this audit: a cleanup that runs
+`git checkout -- tests/` between sweeps reverts the hook along with the results
+files (restore only `tests/results*.md`), and the shootout adapter passes
+`--cgb-rev=E` itself, so a hook that defers to an explicit `--model` does
+nothing there and every cell reads identical. **Always run a control that must
+fail** — feed the hook a bogus revision name and check that it aborts.
+
 ## The gambatte suite
 
 3,524 ROMs inside the same game-boy-test-roms bundle as Blargg/Mooneye/

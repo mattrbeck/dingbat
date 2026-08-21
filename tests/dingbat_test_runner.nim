@@ -525,9 +525,11 @@ proc build_blargg_tests(repo_dir: string): seq[TestDef] =
       timeout: 1800,
     ))
   # interrupt_time is a CGB-only ROM (the howto records DMG-C failing it with
-  # checksum 7F8F4AAF: "this is a CGB-only rom, so failure was expected"), but
-  # the cart is DMG-flagged — so it needs the CGB boot state forced, exactly
-  # like blargg's cgb_sound.
+  # checksum 7F8F4AAF: "this is a CGB-only rom, so failure was expected"), so
+  # it runs on a CGB. `cgb = true` is belt-and-braces, not a correction: the
+  # cart carries $0143 = $C0 (CGB EXCLUSIVE, verified 2026-08-21), so the
+  # header already picks a CGB. An earlier version of this comment called the
+  # cart DMG-flagged; it is not, and neither is cgb_sound's.
   let interrupt_time = repo_dir / "interrupt_time" / "interrupt_time.gb"
   if fileExists(interrupt_time):
     tests.add(TestDef(
@@ -543,11 +545,19 @@ proc build_blargg_sound_tests(sound_dir, suite: string; cgb: bool): seq[TestDef]
   ## blargg's dmg_sound / cgb_sound APU suites (rom_singles). Unlike cpu_instrs
   ## these print nothing to the serial port: they report through the newer
   ## framework's SRAM protocol ($A000 status byte + "DEB061" signature + text),
-  ## which is what tmSram reads. cgb_sound asserts CGB APU behavior from a
-  ## DMG-flagged cart, so it needs the CGB boot state (cgb = true); dmg_sound is
-  ## DMG-only, and forced (`dmg = true`) rather than left to the cart header
-  ## after the oam_bug lesson: the suite names the hardware, the header does
-  ## not. Part of the default run; --apu runs only the APU suites.
+  ## which is what tmSram reads. cgb_sound asserts CGB APU behavior and runs on
+  ## a CGB (cgb = true); its carts are $0143 = $C0, CGB-exclusive, so that flag
+  ## agrees with the header rather than overriding it. dmg_sound's are $00 and
+  ## the flag agrees there too, but it is still forced (`dmg = true`) rather
+  ## than left to the cart header after the oam_bug lesson: the suite names the
+  ## hardware, the header does not. Part of the default run; --apu runs only
+  ## the APU suites.
+  ##
+  ## The revision matters here and the suite's own howto says which one:
+  ## `cgb_sound` is ❌ on CPU CGB B ("test case 3 fails with code 04") and ✅ on
+  ## CGB C and CGB E. dingbat runs the default grCgbC and scores 12/12; forced
+  ## onto CGB-AB it scores 11/12 and the row it drops is `03-trigger`, which is
+  ## that howto entry reproduced (measured 2026-08-21).
   var tests: seq[TestDef]
   let singles = sound_dir / "rom_singles"
   if not dirExists(singles):
@@ -570,8 +580,8 @@ proc samesuite_model_for(base: string): string =
   ## trailing `-<devices>` token listing the revisions the ROM's own
   ## `CorrectResults` table was taken on — `channel_1_extra_length_clocking-cgb0B`,
   ## `channel_3_extra_length_clocking-cgb0` / `-cgbB`,
-  ## `channel_1_freq_change_timing-A` / `-cgb0BC` / `-cgbDE`. Nine of the 70 APU
-  ## ROMs carry one.
+  ## `channel_1_freq_change_timing-A` / `-cgb0BC` / `-cgbDE`. EIGHT of the 70
+  ## APU ROMs carry one.
   ##
   ## Without this the runner scores every one of them on the default revision,
   ## where most of them CANNOT pass by construction: `-cgb0B` asserts the
@@ -579,6 +589,25 @@ proc samesuite_model_for(base: string): string =
   ## would mean the default was wrong. Passing the token through to
   ## `--model=` is what makes "this ROM passes on revision X" expressible; the
   ## harness resolves it with the same gb_revision_from_name the emulator uses.
+  ##
+  ## `gb_revision_from_name` resolves a RANGE to its highest member, and that
+  ## policy was checked here by measurement on 2026-08-21 — every one of these
+  ## eight run on all six CGB revisions:
+  ##
+  ##   channel_{1,2,4}_extra_length_clocking-cgb0B  pass at cgb0 AND cgbAB only
+  ##   channel_3_extra_length_clocking-cgb0         pass at cgb0 only
+  ##   channel_3_extra_length_clocking-cgbB         pass at cgbAB only
+  ##   channel_1_freq_change_timing-A               pass on ALL SIX
+  ##   channel_1_freq_change_timing-cgb0BC          fail on ALL SIX
+  ##   channel_1_freq_change_timing-cgbDE           fail on ALL SIX
+  ##
+  ## So the `-cgb0B` -> grCgbAB choice is right (AB is where the ROM's claim
+  ## still holds, and it is the newest such revision), and the `-cgb0`/`-cgbB`
+  ## pair is exactly why "highest member" must not collapse to grCgb0. The two
+  ## red `freq_change_timing` rows are NOT a token problem: `-cgb0BC` already
+  ## resolves to grCgbC, which IS the default, and no revision reaches either
+  ## row. dingbat produces the AGB answer on every machine because nothing in
+  ## `GbQuirks` distinguishes the CGB families' PCM12 duty edge from the AGB's.
   ##
   ## Only tokens after the LAST '-' are considered, and only if they look like
   ## a device list, so `channel_1_freq_change` (no suffix) and
@@ -929,9 +958,21 @@ proc build_mealybug_tests(mealybug_dir: string): seq[TestDef] =
   # otherwise; `mbc/mbc3_rtc` is device-independent. All three run --nosave:
   # mbc3_rtc is battery-backed with an RTC, so without it the next run starts
   # from the previous run's clock, and it costs the other two nothing.
-  for (group, name, cgb) in [("dma", "hdma_during_halt-C", true),
-                             ("dma", "hdma_timing-C", true),
-                             ("mbc", "mbc3_rtc", false)]:
+  #
+  # The two `dma/` ROMs carry mooneye's `-C` device token (README, "Test
+  # naming": C = cgb+agb+ags), and until 2026-08-21 they were the only rows in
+  # the runner whose FILENAME named a device and whose row did not — every
+  # other suite passes its token through to `--model`, so their Device column
+  # read a bare "CGB" and claimed whatever the default happened to be. Naming
+  # `cgbc` fixes the label; it changes no verdict, because the default already
+  # IS grCgbC. The other half of `-C` (the `agb` arm the mooneye builder fans
+  # out to) is deliberately NOT added: measured across all six CGB revisions on
+  # 2026-08-21, `hdma_during_halt-C` passes on every one and `hdma_timing-C`
+  # fails on every one, so an AGB arm would be two rows of no information — the
+  # same trade `mooneye_machines_for` documents rejecting for the `C` group.
+  for (group, name, cgb, model) in [("dma", "hdma_during_halt-C", true, "cgbc"),
+                                    ("dma", "hdma_timing-C", true, "cgbc"),
+                                    ("mbc", "mbc3_rtc", false, "")]:
     let rom = mealybug_dir / group / (name & ".gb")
     if not fileExists(rom): continue
     tests.add(TestDef(
@@ -940,6 +981,7 @@ proc build_mealybug_tests(mealybug_dir: string): seq[TestDef] =
       mode: tmMooneye,
       timeout: 1800,
       cgb: cgb,
+      model: model,
       no_save: true,
     ))
   tests
@@ -1002,6 +1044,18 @@ proc build_gbmicrotest_tests(dir: string): seq[TestDef] =
   ##
   ## Two frames per ROM is why 500 processes cost about as much as one mGBA
   ## suite run; the whole suite is ~2 s wall clock.
+  ##
+  ## THE DEVICE, since these rows are 482 of the runner's 659 `cart` rows and
+  ## `cart` means "the header picks". Verified 2026-08-21: **all 513 bundled
+  ## carts carry $0143 = $00**, so every one of them runs as a DMG at the
+  ## default grDmgABC — which is exactly what the suite's howto asks for
+  ## ("checked on real hardware believed to be a DMG-CPU-08 … a DMG-CPU B or a
+  ## DMG-CPU C"). The axis is not decorative: the same 513 ROMs score 368 on a
+  ## CGB against 478 on the DMG, so getting this wrong would cost ~110 rows.
+  ## Within the DMG family it is flat — 478/482 on dmg0, dmgABC, mgb, sgb and
+  ## sgb2 alike — and all four red rows are red on every one of those five and
+  ## on all six CGB revisions too, so none of them is a device-scoring
+  ## artefact.
   var tests: seq[TestDef]
   if not dirExists(dir):
     echo "  Warning: gbmicrotest directory not found"
@@ -1174,6 +1228,16 @@ proc age_models_for(device: string): seq[string] =
   ##
   ## An unrecognised character falls back to the single-token behaviour rather
   ## than guessing, because dingbat_test QUITS on a token it cannot parse.
+  ##
+  ## MEASURED 2026-08-21, whole suite, every row's `--model` overridden to one
+  ## revision at a time: **44/89 at cgb0, cgbAB, cgbC, cgbD, cgbE and agb** —
+  ## identical. So none of the four `GbQuirks` members reaches an AGE ROM and
+  ## the 25 `@cgbab` / 25 `@cgbc` / 25 `@cgbe` arms are three copies of one
+  ## measurement today. Keep them: AGE's filenames make a per-revision claim
+  ## and these rows are what will check it once a quirk an AGE ROM can see
+  ## lands. But do NOT read an AGE delta as evidence about a revision, and do
+  ## not go looking for a device-scoring explanation for the 45 red rows —
+  ## there isn't one.
   let d = device.toLowerAscii()
   if d.startsWith("ncm"): return @[]        # CGB in non-CGB mode: not modelled
   if not d.startsWith("cgb") or d.len <= 3:
@@ -1556,10 +1620,18 @@ proc build_shootout_tests(): seq[TestDef] =
   ))
   # The same ROM on a CGB in compatibility mode, at the revision its capture is
   # of. One reference, no alternates: unlike the DMG arm this frame has a single
-  # legitimate outcome. `model: "cgbe"` is the passthrough and `--cgb --model=
-  # cgbe` is what the shootout adapter runs; the row is pixel-exact there and
-  # nowhere else (2304 px at every other revision). See the note above for why
-  # it was held out until 2026-08-18 and what leaving it out cost.
+  # legitimate outcome. `model: "cgbe"` is the passthrough and `--cgb
+  # --cgb-rev=E` is what the shootout adapter runs (emulators/dingbat.py).
+  #
+  # Re-measured per revision 2026-08-21 (tools/gbppu/pngdiff.py against
+  # `ppu_scanline_bgp.gbc.png`): **0 px at cgbD and cgbE, 576 px at cgb0,
+  # cgbAB, cgbC and agb.** So the split is `quirks.mixer_write_immediate`, which
+  # is D-and-later, and an earlier version of this comment was wrong twice —
+  # the row is exact on TWO revisions, not one, and the miss is 576 px, not
+  # 2304. It is still the ONLY row in either harness that separates CGB-C from
+  # CGB-E: forcing the whole 261-ROM shootout onto CGB-C scores 260 and this is
+  # the single row it loses. See the note above for why it was held out until
+  # 2026-08-18 and what leaving it out cost.
   tests.add(TestDef(
     name: "daid/ppu_scanline_bgp-gbc",
     rom_path: ensure_shootout_file("daid/ppu_scanline_bgp.gb"),
