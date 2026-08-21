@@ -2879,6 +2879,38 @@ const CGB_WIN_REVOKE_DS_TRIM* {.intdefine.} = 1
   ## `W - D`. There is none in gambatte, and mealybug has no double-speed ROM,
   ## so this rests on five rows of one family and is the softest number in the
   ## block.
+const DMG_WIN_EN_REVOKE*      {.intdefine.} = 1
+  ## CGB_WIN_EN_DEFER's other half: dots a DMG window START stays revocable.
+  ## 0 is the control build and the pre-2026-08-21 behaviour.
+  ##
+  ## Two things differ from the CGB and both are measured, not assumed:
+  ##
+  ##  * **the reach is ONE dot, not five.** Two-sided, and the two sides are
+  ##    three rows each. `k = W - D = 1` must revoke -- `late_disable_scx2_0`,
+  ##    `late_disable_late_scx03_wx12_1` and
+  ##    `late_disable_early_scx03_wx12_2`, all `[dmg]`, all red at 0 and green
+  ##    at 1. `k = 2` must NOT -- `late_disable_scx5_1`,
+  ##    `late_disable_late_scx03_wx11_2` and
+  ##    `late_disable_early_scx03_wx11_2`, all `[dmg]`, all green at 1 and red
+  ##    at 2. Nothing else in the gambatte suite's 4,674 hex rows moves either
+  ##    way, so the bracket is the whole evidence and it is exact.
+  ##  * **the charge is ALL-OR-NOTHING.** A revoked start costs a DMG line
+  ##    nothing at all, where the CGB pays the dots its restart ran for. That
+  ##    is what those same three `k = 1` rows say: at `charge = k` they would
+  ##    read one dot long and stay red.
+  ##
+  ## It is the FALLING edge of what WIN_EN_HOLD models on the rising one: that
+  ## constant lets a match with LCDC.5 already low wait two dots for the bit,
+  ## this one lets a match with the bit set be taken back one dot later. The
+  ## two are not the same number, and there is no reason from the silicon why
+  ## they should be -- the rising edge is a comparator being re-armed, the
+  ## falling one a fetch being abandoned.
+  ##
+  ## Same machinery as the CGB's, with a different refund; see the site in
+  ## win_defer_undo, where the three charges sit next to each other.
+const WIN_EN_REVOKE_ANY* = CGB_WIN_EN_DEFER != 0 or DMG_WIN_EN_REVOKE != 0
+  ## Whether any device revokes, i.e. whether the record on GbFifoPpu and the
+  ## counter in tick_shifter's FIFO-empty arm exist at all.
 const WIN_LINE_START_WX*      {.intdefine.} = 6
   ## The WX below which a line STARTS as a window line instead of reaching the
   ## window through the shifter's equality. See the mode 2 -> 3 edge in
@@ -4764,7 +4796,7 @@ type
     # keeps comparing whatever these last held. See OAM_SCAN_DMA_LOCK.
     scan_y_bus*:          uint8
     scan_x_bus*:          uint8
-    # ---- The CGB window start's undo record (CGB_WIN_EN_DEFER) -------------
+    # ---- The window start's undo record (CGB_WIN_EN_DEFER) ----------------
     #
     # `win_defer` counts the dots left before LCDC.5 is read a second time and
     # the start becomes final; zero is every dot of almost every line. The rest
@@ -4775,9 +4807,11 @@ type
     # Inside its own `when` so a build with the mechanism off is byte-identical
     # to not having it: an unconditional block here is the object-layout cliff
     # `win_lx` and `win_hold` both record.
-    when CGB_WIN_EN_DEFER != 0:
+    when WIN_EN_REVOKE_ANY:
       win_defer*:         uint8
       win_revoking*:      bool
+      wd_dot*:            int32
+      wd_win_hold*:       uint8
       wd_head*:           int
       wd_tail*:           int
       wd_size*:           int

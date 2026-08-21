@@ -243,8 +243,8 @@ proc fifo_arm_window*(ppu: GbFifoPpu) =
     echo "ARM ly=", ppu.ly, " dot=", ppu.cycle_counter,
          " lcdc=", toHex(ppu.lcd_control, 2), " wx=", ppu.wx, " scx=", ppu.scx,
          " fw=", ppu.fetching_window, " lx=", ppu.lx
-  when CGB_WIN_EN_DEFER != 0:
-    # ---- The CGB's window start is REVOCABLE, and this is the edge ---------
+  when WIN_EN_REVOKE_ANY:
+    # ---- The window start is REVOCABLE, and this is the edge ---------------
     #
     # LCDC.5 has gone low while a CGB window start is still inside its restart.
     # See CGB_WIN_EN_DEFER: the start is taken back and the line keeps only the
@@ -367,7 +367,7 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
     ppu.win_carry_gap = false
   ppu.win_lx = WIN_LX_OFF
   ppu.win_hold = 0'u8
-  when CGB_WIN_EN_DEFER != 0:
+  when WIN_EN_REVOKE_ANY:
     # Per-line, like the hold above: a start taken in the last dots of one
     # line must not be revoked on the head of the next one.
     ppu.win_defer = 0'u8
@@ -3852,7 +3852,7 @@ proc win_start_carries(ppu: GbFifoPpu): bool {.inline.} =
   else: not ppu.cgb and ppu.lx == int32(GB_WIDTH) - 1
 
 
-when CGB_WIN_EN_DEFER != 0:
+when WIN_EN_REVOKE_ANY:
   proc win_defer_arm(ppu: GbFifoPpu) {.noinline.} =
     ## The CGB's window START has just been taken and is revocable for
     ## CGB_WIN_EN_DEFER dots. Record everything `win_start_reset` is about to
@@ -3867,8 +3867,12 @@ when CGB_WIN_EN_DEFER != 0:
     ## `{.noinline.}` deliberately: this is called from the mode 3 dot loop's
     ## one window branch and eleven stores inlined into it is exactly the kind
     ## of code growth that branch's neighbours are documented to pay for.
-    ppu.win_defer        = uint8(CGB_WIN_EN_DEFER)
+    ppu.win_defer =
+      if ppu.cgb: uint8(CGB_WIN_EN_DEFER) else: uint8(DMG_WIN_EN_REVOKE)
+    if ppu.win_defer == 0'u8: return
     ppu.win_revoking     = false
+    ppu.wd_dot           = ppu.cycle_counter
+    ppu.wd_win_hold      = ppu.win_hold
     ppu.wd_head          = ppu.fifo.head
     ppu.wd_tail          = ppu.fifo.tail
     ppu.wd_size          = ppu.fifo.size
@@ -4089,6 +4093,12 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
           if not window_enabled(ppu):
             window_refuse_start(ppu)
           else:
+            when WIN_EN_REVOKE_ANY:
+              # The start about to be taken is REVOCABLE: record what it is
+              # about to overwrite. Before the WIN_EN_HOLD_BACK pixel below,
+              # because that moves `lx` and the undo has to put it back. See
+              # CGB_WIN_EN_DEFER and DMG_WIN_EN_REVOKE.
+              win_defer_arm(ppu)
             when WIN_EN_HOLD_BACK != 0:
               # A match that WAITED starts the window one pixel left of the
               # pixel the shifter has reached -- the same slot the comparator
@@ -4105,6 +4115,14 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
             # FIFO it comes out of. See DMG_WIN_LAST_PX_CARRY; everything else
             # about the start is unchanged, including the window line counter.
             if win_start_carries(ppu):
+              when WIN_EN_REVOKE_ANY:
+                # NOT revocable: this start has already emitted a pixel and is
+                # owed to the NEXT line, so there is nothing on this one to put
+                # back and the record's `lx` is a dot stale. The whole
+                # `window/on_screen/wxA6_late_we_reenable_*` set is this branch
+                # (WX = 0xA6 matches on x = 159) and revoking here costs it
+                # 14,672 pixels.
+                ppu.win_defer = 0'u8
               fifo_emit_pixel(ppu, gb)
               # fifo_reset_bg and not win_start_reset: the pre-pixel clamp that
               # one reads back off `lx` would see the pixel just emitted and
@@ -4113,12 +4131,6 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
               fifo_reset_bg(ppu, true)
               return
             # fifo_reset_bg clears the hold on its way through.
-            when CGB_WIN_EN_DEFER != 0:
-              # ...and on a CGB the start it does is REVOCABLE for one more
-              # M-cycle. See CGB_WIN_EN_DEFER: the snapshot has to be taken
-              # before the reset, and the reset itself is untouched, so the arm
-              # that goes on to commit is the shipping build dot for dot.
-              if ppu.cgb: win_defer_arm(ppu)
             win_start_reset(ppu)
             return
         else:
@@ -4126,8 +4138,7 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
             fifo_emit_pixel(ppu, gb)
             fifo_reset_bg(ppu, true)
             return
-          when CGB_WIN_EN_DEFER != 0:
-            if ppu.cgb: win_defer_arm(ppu)
+          when WIN_EN_REVOKE_ANY: win_defer_arm(ppu)
           win_start_reset(ppu)
           return
       elif ppu.fetch_counter == WIN_REACT_PHASE and win_react_last_park(ppu) and
@@ -4138,8 +4149,8 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
         window_reactivate(ppu)
     fifo_emit_pixel(ppu, gb)
   else:
-    when CGB_WIN_EN_DEFER != 0:
-      # ---- The CGB's window start, counted out ------------------------------
+    when WIN_EN_REVOKE_ANY:
+      # ---- The window start, counted out ------------------------------------
       #
       # See CGB_WIN_EN_DEFER. A start is revocable for its first
       # CGB_WIN_EN_DEFER dots, and this is where those dots are counted and
@@ -4329,7 +4340,7 @@ proc fifo_pipeline_dot(ppu: GbFifoPpu; gb: GB) {.inline.} =
     tick_bg_fetcher(ppu, gb)
   tick_shifter(ppu, gb)
 
-when CGB_WIN_EN_DEFER != 0:
+when WIN_EN_REVOKE_ANY:
   proc win_defer_undo(ppu: GbFifoPpu; gb: GB) {.noinline.} =
     ## LCDC.5 went low while this CGB window start's restart was still running.
     ## The start never happened: put the line back to the match dot `D` and let
@@ -4360,6 +4371,7 @@ when CGB_WIN_EN_DEFER != 0:
     ppu.obj_tile_fx   = ppu.wd_obj_tile_fx
     ppu.lx            = ppu.wd_lx
     ppu.head_cycle    = ppu.wd_head_cycle
+    ppu.win_hold      = ppu.wd_win_hold
     ppu.fetching_window = false
     dec ppu.current_window_line
     when MIXER_DOT_LAG != 0:
@@ -4374,11 +4386,25 @@ when CGB_WIN_EN_DEFER != 0:
       echo "WINUNDO ly=", ppu.ly, " dot=", ppu.cycle_counter, " lx=", ppu.lx,
            " fifo=", ppu.fifo.size
     tick_shifter(ppu, gb)
-    when CGB_WIN_REVOKE_DS_TRIM != 0:
-      # See CGB_WIN_REVOKE_DS_TRIM: the double-speed arm's write reaches this
-      # gate a dot earlier, and an extra replayed dot IS a dot off the charge.
-      if gb.memory.current_speed != 0:
-        for _ in 0 ..< CGB_WIN_REVOKE_DS_TRIM: fifo_pipeline_dot(ppu, gb)
+    # ---- The CHARGE, spelled as dots the replay gets back --------------------
+    #
+    # The line comes out `X - D - extra` dots behind, so `extra` IS the
+    # difference between the charge this device wants and `W - D`:
+    #
+    #   CGB, single speed  extra = 0            charge = W - D
+    #   CGB, double speed  extra = 1            charge = W - D - 1
+    #   DMG                extra = W - D        charge = 0
+    #
+    # See CGB_WIN_EN_DEFER (the CGB's proportional charge), CGB_WIN_REVOKE_DS_TRIM
+    # and DMG_WIN_EN_REVOKE (the DMG's, which is all-or-nothing).
+    var extra = 0
+    if ppu.cgb:
+      when CGB_WIN_REVOKE_DS_TRIM != 0:
+        if gb.memory.current_speed != 0: extra = CGB_WIN_REVOKE_DS_TRIM
+    else:
+      when DMG_WIN_EN_REVOKE != 0:
+        extra = int(ppu.cycle_counter - ppu.wd_dot)
+    for _ in 0 ..< extra: fifo_pipeline_dot(ppu, gb)
 
 proc fifo_obj_abort*(ppu: GbFifoPpu; gb: GB) =
   ## LCDC.1 has just gone low while an object's stall is running. Pan Docs'
