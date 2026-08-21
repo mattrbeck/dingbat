@@ -4121,6 +4121,22 @@ proc fetch_work_pending(ppu: GbFifoPpu): bool {.inline.} =
        int(ppu.wx) == GB_WIDTH + 6: return true
   false
 
+template m3_retire_lx(ppu: GbFifoPpu): int32 =
+  ## The FIRST `lx` at which the BG fetcher can be retired -- `m3_lead` pixels
+  ## short of the last one, because `fifo_burst_tail` emits that tail on the
+  ## retire dot. This is `fetcher_retired`'s own opening test, factored out
+  ## because the mode-0 STAT lookahead has to be measured from the same point:
+  ## the hook used to count back from `GB_WIDTH`, which is `m3_lead` dots after
+  ## the loop it lives in has already exited (see `fifo_irq_m0_ready`).
+  ##
+  ## The lead is only speed-dependent through its M-cycle term; with that term
+  ## off it is a compile-time constant, and this is on the mode 3 dot loop (it
+  ## runs for every one of a line's ~170 dots), so spell the constant case out
+  ## rather than load the field: the field form loads and subtracts where this
+  ## one folds to an immediate.
+  when M3_PIPE_MCYCLES == 0: int32(GB_WIDTH - M3_PIPE_DELAY - M3_END_EARLY)
+  else: int32(GB_WIDTH) - ppu.m3_lead
+
 proc fetcher_retired(ppu: GbFifoPpu): bool {.inline.} =
   ## Has the BG fetcher run out of work for this line? That -- not the last
   ## pixel leaving the shifter -- is what ends mode 3 and hands VRAM back to
@@ -4183,15 +4199,8 @@ proc fetcher_retired(ppu: GbFifoPpu): bool {.inline.} =
     # optimiser to fold three branches back into the one compare it replaces.
     ppu.lx >= GB_WIDTH
   else:
-    # The lead is only speed-dependent through its M-cycle term; with that term
-    # off it is a compile-time constant, and this test is on the mode 3 dot loop
-    # (it runs for every one of a line's ~170 dots), so spell the constant case
-    # out rather than load the field: the field form loads and subtracts where
-    # this one folds to an immediate.
-    when M3_PIPE_MCYCLES == 0:
-      if ppu.lx < int32(GB_WIDTH - M3_PIPE_DELAY - M3_END_EARLY): return false
-    else:
-      if ppu.lx < int32(GB_WIDTH) - ppu.m3_lead: return false
+    # See `m3_retire_lx` for why the constant case is spelled out there.
+    if ppu.lx < ppu.m3_retire_lx: return false
     if ppu.lx >= GB_WIDTH: return true
     not fetch_work_pending(ppu)
 
@@ -4471,6 +4480,19 @@ template fifo_skip_target(ppu: GbFifoPpu; gb: GB; m: uint8): int32 =
       var tgt = boundary
       let irq_dot = boundary - stat_irq_lead(gb)
       if irq_dot >= ppu.cycle_counter: tgt = irq_dot
+      # The OAM source's own early dot is a THIRD stop, and it is not the same
+      # dot as `irq_dot`: `STAT_M2_LEAD` is a per-source lead on the flag
+      # clock, while `irq_dot` is the whole irq domain's. They coincide only at
+      # a one-M-cycle domain lead, by arithmetic accident, which is why the
+      # omission was invisible in every build made before this one -- at any
+      # other lead the skip jumps clean over the rising dot, `fifo_m2_early_edge`
+      # never runs and `STAT_M2_LEAD` silently turns off. Worth runner
+      # 948 -> 1057 at `STAT_M0_LEAD_T = 2`. The unsplit branch above has had
+      # this stop all along.
+      when STAT_M2_EARLY:
+        if ppu.m2_early_stop(gb):
+          let m2_dot = ppu.m2_early_dot(gb)
+          if m2_dot >= ppu.cycle_counter and m2_dot < tgt: tgt = m2_dot
       if ppu.ly == 143 and m == 0 and gb.cgb_enabled and
          M2_144_EARLY_DOT >= ppu.cycle_counter and M2_144_EARLY_DOT < tgt:
         tgt = M2_144_EARLY_DOT
@@ -4550,11 +4572,19 @@ when STAT_IRQ_SPLIT:
     ## STAT interrupt line's mode 0 rises, ahead of the flag's.
     ##
     ## The shifter takes one pixel per dot through the tail of a line, so "lx
-    ## is within `lead` of the end" IS the lookahead -- except where an object
-    ## or a not-yet-started window still owes the fetcher work, which holds
-    ## mode 3 open past that point exactly as fetcher_retired describes.
-    if ppu.lx < int32(GB_WIDTH) - lead: return false
-    if ppu.lx >= GB_WIDTH: return true
+    ## is within `lead` of the retire point" IS the lookahead -- except where
+    ## an object or a not-yet-started window still owes the fetcher work, which
+    ## holds mode 3 open past that point exactly as fetcher_retired describes.
+    ##
+    ## **Measured from the retire point, not from `GB_WIDTH`.** The retire dot
+    ## is `m3_retire_lx`, which `M3_PIPE_DELAY = 2` puts at lx 158 and not at
+    ## 160 -- and the loop this hook lives in exits ON that dot, so counting
+    ## back from `GB_WIDTH` asks for a dot the loop has already left whenever
+    ## `lead <= M3_PIPE_DELAY + M3_END_EARLY`. That is why the lead's measured
+    ## effect used to be 0 dots at `STAT_M0_LEAD_T = 1..2` and then jump
+    ## straight to 5; see the table on `STAT_M0_LEAD_T` in ppu.nim.
+    if ppu.lx < ppu.m3_retire_lx - lead: return false
+    if ppu.lx >= int32(GB_WIDTH) - lead: return true
     not fetch_work_pending(ppu)
 
 when M3_PIPE_LEAD_ANY:
@@ -4701,7 +4731,12 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             # The mode-0 STAT source rises `lead` dots before the flag does.
             # The flag's dot is the one this loop exits on, so asking at the
             # TOP of a dot puts this exactly `lead` dots ahead of it.
-            if ppu.irq_mode == 3 and ppu.lx >= int32(GB_WIDTH) - lead and
+            #
+            # The cheap guard has to be the same threshold `fifo_irq_m0_ready`
+            # opens with (`m3_retire_lx - lead`), or it takes back exactly the
+            # dots the hook is trying to spend: at `GB_WIDTH - lead` it never
+            # fires for a lead inside the pipeline delay.
+            if ppu.irq_mode == 3 and ppu.lx >= ppu.m3_retire_lx - lead and
                fifo_irq_m0_ready(ppu, lead):
               ppu_set_irq_mode(ppu, gb, 0'u8)
           fifo_pipeline_dot(ppu, gb)
