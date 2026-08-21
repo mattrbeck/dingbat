@@ -476,6 +476,11 @@ proc fifo_obj_size_write*(ppu: GbFifoPpu; gb: GB) {.noinline.}
 # forward-declaration reason again; the body, the dot the shifter comes back on
 # and the twelve gambatte rows that bracket it are at fifo_obj_abort.
 proc fifo_obj_abort*(ppu: GbFifoPpu; gb: GB)
+# ...and for OBJ_ABORT_LEAD dots after that stall has ended, because the
+# fetcher's view of the bit leads the write dot by exactly that much. See
+# OBJ_ABORT_LATE in gb.nim and fifo_obj_abort_late in fifo_ppu.nim.
+when OBJ_ABORT != 0 and OBJ_ABORT_LATE:
+  proc fifo_obj_abort_late*(ppu: GbFifoPpu; gb: GB)
 
 template mixer_write_repaint(gb: GB; back: int32; latency: int32;
                              skip: int32 = 0'i32) =
@@ -3073,9 +3078,20 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     when OBJ_ABORT != 0:
       if (val and 0x02'u8) == 0 and
          (CGB_OBJ_ABORT != 0 or not gb.cgb_enabled) and
-         gb.fifo_ppu != nil and gb.fifo_ppu.fetching_sprite and
-         gb.fifo_ppu.obj_penalty > 0:
-        fifo_obj_abort(gb.fifo_ppu, gb)
+         gb.fifo_ppu != nil:
+        if gb.fifo_ppu.fetching_sprite and gb.fifo_ppu.obj_penalty > 0:
+          fifo_obj_abort(gb.fifo_ppu, gb)
+        else:
+          # The stall is over, but the fetcher saw the bit OBJ_ABORT_LEAD dots
+          # ago, and those dots can still be inside the object's fetch. The
+          # window is `(obj_abort_last, obj_abort_last + OBJ_ABORT_LEAD]` and
+          # `obj_abort_last` is the sentinel on the head arm, so the two tests
+          # together are the whole rule. See fifo_obj_abort_late.
+          when OBJ_ABORT_LATE:
+            let last = gb.fifo_ppu.obj_abort_last
+            if gb.fifo_ppu.cycle_counter > last and
+               gb.fifo_ppu.cycle_counter <= last + OBJ_ABORT_LEAD:
+              fifo_obj_abort_late(gb.fifo_ppu, gb)
     ppu.stat_write_pending = true
     gb.memory.write_deferred = true
   of 0xFF41:

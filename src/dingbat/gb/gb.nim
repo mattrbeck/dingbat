@@ -2985,6 +2985,25 @@ const OBJ_ABORT_FLAG_HOLD*    {.intdefine.} = 0
   ## T` mealybug's two aborted bands want for the pixels. Setting it back to 1
   ## costs `sprite_late_disable_spx1A_1`. Full re-derivation at `fifo_obj_abort`
   ## in fifo_ppu.nim.
+const OBJ_ABORT_LATE*         {.booldefine.} = true
+  ## Whether the object abort is still effective for `OBJ_ABORT_LEAD` dots
+  ## AFTER the stall has ended. It is: the fetcher's view of LCDC.1 leads the
+  ## CPU's write dot by that much, so a write on `W = T + P` -- the dot the
+  ## shifter resumes on -- reaches the fetcher at `W - OBJ_ABORT_LEAD`, which
+  ## is still inside the fetch. `ppu_write` cannot see that, because the PPU has
+  ## been caught up to `W` before the write is processed and `obj_penalty` is
+  ## already 0; this is the "remember the stall's end dot" half of the fix
+  ## written up at `fifo_obj_abort`.
+  ##
+  ## It must NOT reach the `idx < 0` arm, and does not: `obj_abort_last` is the
+  ## last dot of the object's own FETCH, which is the end of the stall on the
+  ## tail arm but `T + OBJ_FETCH_DOTS` on the head arm -- inside the stall,
+  ## where the ordinary path already answers. mealybug
+  ## `m3_lcdc_obj_en_change_variant` band 0 is exactly that configuration and
+  ## wants no refund.
+  ##
+  ## Worth `sprites/sprite_late_late_disable_spx{1A,1B}_1`, the last two of the
+  ## sixteen-row bracket.
 const MIXER_PRIORITY_BACK*    {.intdefine.} = 1
   ## Stages of the mixer tail LCDC's priority bits are read at the far end of.
 const BG_EN_AT_MIX*           {.intdefine.} = 1
@@ -3049,6 +3068,10 @@ const NO_LCDC2_FLIP*          = int32.low
   ## merge asks for a read that has not happened yet -- and the empty history
   ## costs no branch of its own.
 const OBJ_FIX_OFF*            = int32.high
+const OBJ_ABORT_LAST_OFF*     = int32.low div 2
+  ## `obj_abort_last` when no object's fetch is abortable at all -- no object
+  ## in flight, or the `idx < 0` head arm, whose whole abort window is inside
+  ## the stall. Halved so `+ OBJ_ABORT_LEAD` cannot wrap.
   ## `GbFifoPpu.obj_fix_from` meaning "no object fetch is still reachable by an
   ## LCDC.2 write". Same shape as above: the window test is one compare either
   ## way.
@@ -4261,6 +4284,14 @@ type
     # themselves, see fifo_obj_size_write. All per-line scratch, live for at most
     # OBJ_PLANE1_LAG dots, and not serialized.
     obj_hi_dot*:          int32
+    # The last dot of the object's own six-dot FETCH, latched at the trigger
+    # because that is the only place the arm (`idx`) and the penalty are both
+    # in hand. `OBJ_ABORT_LATE` reads it to decide whether a write that lands
+    # AFTER the stall still cancels the fetch; the head arm stores a sentinel
+    # far in the past, because there the whole abort window is inside the stall
+    # and the ordinary path owns it. Per-line scratch like the rest of this
+    # block, and not serialized.
+    obj_abort_last*:      int32
     obj_fix_from*:        int32
     obj_fix_bank*:        int32
     obj_fix_lo*:          uint8

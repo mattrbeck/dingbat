@@ -216,6 +216,7 @@ proc new_gb_fifo_ppu*(gb: GB): GbFifoPpu =
     win_lx: WIN_LX_OFF,
     stat_chg_dot: STAT_NO_HOLD,
     obj_fix_from: OBJ_FIX_OFF,
+    obj_abort_last: OBJ_ABORT_LAST_OFF,
     lcdc2_flip: [NO_LCDC2_FLIP, NO_LCDC2_FLIP],
     tdsel_dot: NO_TDSEL_CHANGE,
     tdsel_addr: TDSEL_ADDR_OFF,
@@ -343,6 +344,7 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
   ppu.obj_penalty = 0
   ppu.obj_tile_fx = -1
   ppu.obj_fix_from = OBJ_FIX_OFF
+  ppu.obj_abort_last = OBJ_ABORT_LAST_OFF
   ppu.lcdc2_flip[0] = NO_LCDC2_FLIP
   ppu.lcdc2_flip[1] = NO_LCDC2_FLIP
   ppu.tdsel_dot = NO_TDSEL_CHANGE
@@ -2459,6 +2461,10 @@ proc sprite_fetch_merge*(ppu: GbFifoPpu; gb: GB) =
     # 1..10 objects at X=0 and its expectations step by exactly 6 dots per
     # extra object.
     ppu.obj_penalty = OBJ_FETCH_DOTS
+    when OBJ_ABORT_LATE:
+      # Its six dots ARE its stall, so the fetch ends with the stall on either
+      # arm and it is a tail-arm object for this purpose.
+      ppu.obj_abort_last = ppu.cycle_counter + OBJ_FETCH_DOTS - 1
     # Its six dots ARE its penalty, so its high plane sits at the tail arm's
     # offset from its own merge dot whichever arm the first object took.
     ppu.obj_hi_dot = ppu.cycle_counter + OBJ_FETCH_DOTS + OBJ_PLANE1_LAG -
@@ -3938,6 +3944,17 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
         let sub = if ppu.sprites[0].x == 0: 0'i32 else: idx and 7
         pen += max(0'i32, (7 - sub) - (OBJ_WAIT_SUB - 1))
       ppu.obj_penalty = pen
+      when OBJ_ABORT_LATE:
+        # The last dot of the object's own FETCH, for the abort that arrives
+        # after the stall has ended (OBJ_ABORT_LATE in gb.nim). The tail arm
+        # spends its wait first and its six dots last, so the fetch ends with
+        # the stall; the head arm runs the six dots at T+1..T+6 and its whole
+        # abort window is inside the stall, where the ordinary path answers --
+        # so it stores the sentinel rather than a dot, and mealybug
+        # `m3_lcdc_obj_en_change_variant` band 0 keeps the penalty it is
+        # measured to keep.
+        ppu.obj_abort_last =
+          if idx < 0: OBJ_ABORT_LAST_OFF else: ppu.cycle_counter + pen
       when STAT_M0_TAIL_ANY and STAT_M0_FIELD_TAIL_ABSORB:
         ppu.obj_dots_line += pen
       # Which dot the fetch's HIGH bitplane reads LCDC.2 on. The two arms are
@@ -4331,36 +4348,43 @@ proc fifo_obj_abort*(ppu: GbFifoPpu; gb: GB) =
   ## rows it then costs (`spx1A_1`, and the two `late_late` rows below) were
   ## filed as "the family wants re-deriving" rather than as a phase artefact.
   ##
-  ## ---- What is still red, and exactly why --------------------------------
+  ## ---- The last two rows, and how they are served -------------------------
   ##
-  ## `late_late_disable_spx1A_1` and `late_late_disable_spx1B_1` are the two
-  ## rows of the sixteen this file cannot serve, and they share a signature:
+  ## `late_late_disable_spx1A_1` and `late_late_disable_spx1B_1` were the two
+  ## rows of the sixteen this proc cannot serve, and they share a signature:
   ## `W = T + P` exactly (117 = 108+9 and 117 = 109+8). Their write lands on the
   ## dot the shifter RESUMES on -- one dot past the last stall dot -- so by the
   ## time `ppu_write` runs, `fetching_sprite` is already false and
   ## `obj_penalty` is 0 and this proc is never called at all. The arithmetic
-  ## wants `charge = 117 - 2 - 108 = 7`, which is inside their bound; the
-  ## machinery cannot produce it because the dots it would refund are in the
-  ## past.
+  ## wants `charge = 117 - 2 - 108 = 7`, which is inside their bound; this proc
+  ## cannot produce it because the dots it would refund are in the past.
   ##
   ## The faithful reading is that LCDC.1 reaches the fetcher at `W - 2` = 115,
-  ## which IS inside the stall, and that our PPU has simply already run dots
+  ## which IS inside the fetch, and that our PPU has simply already run dots
   ## 115 and 116 by the time the write is processed (the catch-up leaves
-  ## `cycle_counter == W`). Two ways to serve it, neither taken here:
+  ## `cycle_counter == W`). Two ways to serve it:
   ##
   ##   * catch the PPU up only to `W - OBJ_ABORT_LEAD` before `ppu_write` and
   ##     spend the lead afterwards. Faithful, and a change to the write
   ##     ordering for every register in the machine -- far outside this proc.
+  ##     NOT taken.
   ##   * remember the stall's end dot and allow the abort for OBJ_ABORT_LEAD
-  ##     dots past it, refunding `(T + P) - (W - OBJ_ABORT_LEAD)`. One new
-  ##     field, and it must NOT reach the `idx < 0` arm: mealybug variant band
-  ##     0 (X = 0, stall 94..104, write on 105 = T + P) is the same
-  ##     configuration on the head arm and wants NO refund there -- correctly,
-  ##     because that arm's six object dots are T+1..T+6 and were finished long
-  ##     before 103. The rule that separates them is "the abort cancels the
-  ##     object's own FETCH, and is effective iff `W - OBJ_ABORT_LEAD` is at or
-  ##     before the fetch's last dot", which is T+6 on the head arm and T+P-1
-  ##     on the tail arm.
+  ##     dots past it, refunding `(T + P) - (W - OBJ_ABORT_LEAD)`. **This is
+  ##     what ships**, as `OBJ_ABORT_LATE` / `obj_abort_last` /
+  ##     `fifo_obj_abort_late`; both rows are green and nothing else in the tree
+  ##     moves (gambatte sprites 468 -> 470, total 4495 -> 4497, mealybug and
+  ##     the 261-ROM shootout untouched).
+  ##
+  ##     It must NOT reach the `idx < 0` arm: mealybug variant band 0 (X = 0,
+  ##     stall 94..104, write on 105 = T + P) is the same configuration on the
+  ##     head arm and wants NO refund there -- correctly, because that arm's six
+  ##     object dots are T+1..T+6 and were finished long before 103. The rule
+  ##     that separates them is "the abort cancels the object's own FETCH, and
+  ##     is effective iff `W - OBJ_ABORT_LEAD` is at or before the fetch's last
+  ##     dot", which is T+6 on the head arm and T+P-1 on the tail arm -- so
+  ##     `obj_abort_last` stores that dot on the tail arm and a sentinel far in
+  ##     the past on the head arm, where the whole abort window is inside the
+  ##     stall and this proc already owns it.
   ##
   ## ---- Two instruments, and they now agree -------------------------------
   ##
@@ -4436,6 +4460,36 @@ proc fifo_obj_abort*(ppu: GbFifoPpu; gb: GB) =
   # flag can see. See the two-part account above.
   when OBJ_ABORT_FLAG_HOLD != 0:
     ppu.m3_hold = ppu.m3_hold + uint8(OBJ_ABORT_FLAG_HOLD)
+
+when OBJ_ABORT != 0 and OBJ_ABORT_LATE:
+  proc fifo_obj_abort_late*(ppu: GbFifoPpu; gb: GB) =
+    ## The other end of `fifo_obj_abort`: LCDC.1 went low on a dot the STALL has
+    ## already finished, but which still reaches the object FETCHER inside it.
+    ##
+    ## `ppu_write` cannot see this case the ordinary way. The PPU is caught up
+    ## to the write's dot `W` before the write is processed, so at `W = T + P`
+    ## -- the dot the shifter resumes on -- `obj_penalty` is already 0 and the
+    ## ordinary guard is false; but the fetcher saw the bit at
+    ## `W - OBJ_ABORT_LEAD`, which is `T + P - 2`, the second-to-last dot of the
+    ## fetch. `sprites/sprite_late_late_disable_spx{1A,1B}_1` are exactly that
+    ## dot and are the last two of the sixteen-row bracket at `fifo_obj_abort`.
+    ##
+    ## The refund is the same `charge = min(W - OBJ_ABORT_LEAD - T, P)` the
+    ## sixteen rows fit -- here `(T + P) - (W - OBJ_ABORT_LEAD)` dots of it are
+    ## still owed -- and it is paid the same way, as catch-up pipeline dots on
+    ## the write's own dot. Nothing else of the abort applies: the object's
+    ## fetch has completed and merged, so there is no stall to cut short and no
+    ## entry left in `sprites` to drop, and the pixels it already pushed are the
+    ## mixer's question (`mixer_write_repaint`, MIXER_PRIORITY_BACK), not this
+    ## one.
+    ##
+    ## The caller has already bracketed the dot; `obj_abort_last` is the last
+    ## dot of the FETCH, which is the sentinel on the `idx < 0` head arm so that
+    ## mealybug `m3_lcdc_obj_en_change_variant` band 0 -- same `W = T + P`,
+    ## other arm, and correctly no refund -- can never reach here.
+    let refund = ppu.obj_abort_last + 1 + OBJ_ABORT_LEAD - ppu.cycle_counter
+    ppu.obj_abort_last = OBJ_ABORT_LAST_OFF
+    for _ in 0 ..< refund: fifo_pipeline_dot(ppu, gb)
 
 template m3_start_dot(gb: GB): int32 =
   ## The dot the mode 2 -> 3 boundary lands on. 80 unless `M3_GRID_EARLY` moves

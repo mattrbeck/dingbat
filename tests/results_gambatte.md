@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-21 10:25:03*
+*Generated: 2026-08-21 10:34:49*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4495/4996 passed.**
+**4497/4996 passed.**
 
 ## bgen
 
@@ -655,9 +655,9 @@ All 67 tests passed.
 | speedchange/speedchange_tima00_1a_cgb04c_out80 [cgb] | got 81, expected 80 |
 | speedchange/speedchange_tima00_1b_cgb04c_out81 [cgb] | got 82, expected 81 |
 
-## sprites (468/476 passed)
+## sprites (470/476 passed)
 
-468/476 tests passed, 8 failed:
+470/476 tests passed, 6 failed:
 
 | Test | Result |
 |------|--------|
@@ -667,8 +667,6 @@ All 67 tests passed.
 | sprites/enable/late_disable_ds_3_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/late_disable_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/mix_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| sprites/sprite_late_late_disable_spx1A_1_dmg08_out0 [dmg] | got 3, expected 0 |
-| sprites/sprite_late_late_disable_spx1B_1_dmg08_out0 [dmg] | got 3, expected 0 |
 
 ## tima (224/232 passed)
 
