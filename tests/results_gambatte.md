@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-21 08:25:08*
+*Generated: 2026-08-21 08:41:39*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4474/5005 passed.**
+**4470/5005 passed.**
 
 ## bgen
 
@@ -54,9 +54,9 @@ All 40 tests passed.
 
 All 8 tests passed.
 
-## dma (167/229 passed)
+## dma (175/229 passed)
 
-167/229 tests passed, 62 failed:
+175/229 tests passed, 54 failed:
 
 | Test | Result |
 |------|--------|
@@ -68,12 +68,6 @@ All 8 tests passed.
 | dma/hdma_late_enable_ds_lcdoffset1_2_cgb04c_out0 [cgb] | got 1, expected 0 |
 | dma/hdma_late_enable_lcdoffset3_2_cgb04c_out0 [cgb] | got 1, expected 0 |
 | dma/hdma_late_if_and_ie_halt_2_cgb04c_out02 [cgb] | got 00, expected 02 |
-| dma/hdma_late_m0halt_1_cgb04c_out00 [cgb] | got FF, expected 00 |
-| dma/hdma_late_m0halt_ds_1_cgb04c_out00 [cgb] | got FF, expected 00 |
-| dma/hdma_late_m0halt_ds_lcdoffset1_1_cgb04c_out00 [cgb] | got FF, expected 00 |
-| dma/hdma_late_m0halt_lcdoffset3_1_cgb04c_out00 [cgb] | got FF, expected 00 |
-| dma/hdma_late_m0unhalt_1_cgb04c_out00 [cgb] | got FF, expected 00 |
-| dma/hdma_late_m0unhalt_ds_1_cgb04c_out00 [cgb] | got FF, expected 00 |
 | dma/hdma_late_m3halt_m2unhalt_inc_scx1_2_cgb04c_out02 [cgb] | got 01, expected 02 |
 | dma/hdma_late_m3halt_m2unhalt_inc_scx2_2_cgb04c_out02 [cgb] | got 01, expected 02 |
 | dma/hdma_late_m3halt_m2unhalt_ly_scx1_2_cgb04c_out03 [cgb] | got 02, expected 03 |
@@ -113,8 +107,6 @@ All 8 tests passed.
 | dma/hdma_transition_halt_late_unhalt_ldaaimm_hdma_scx1_2_cgb04c_out02 [cgb] | got FF, expected 02 |
 | dma/hdma_transition_halt_late_unhalt_scx1_2_cgb04c_outFF [cgb] | got 00, expected FF |
 | dma/hdma_transition_halt_m0unhalt_ldaaimm_scx1_cgb04c_out02 [cgb] | got 01, expected 02 |
-| dma/hdma_transition_oamdma_1_cgb04c_out509E529C [cgb] | got 50515253, expected 509E529C |
-| dma/hdma_transition_oamdma_2_cgb04c_out67 [cgb] | got 5E, expected 67 |
 | dma/hdma_transition_speedchange_7fffstop_inc_cgb04c_out02 [cgb] | got 01, expected 02 |
 | dma/hdma_transition_speedchange_ldaaimm_scx1_cgb04c_outFF [cgb] | got 31, expected FF |
 | dma/hdma_transition_speedchange_ldaaimm_scx1_ds_cgb04c_out03 [cgb] | got 31, expected 03 |
@@ -579,9 +571,9 @@ All 44 tests passed.
 | oam_access/prewrite_ds_2_cgb04c_out0 [cgb] | got 1, expected 0 |
 | oam_access/prewrite_ds_lcdoffset1_2_cgb04c_out0 [cgb] | got 1, expected 0 |
 
-## oamdma (784/811 passed)
+## oamdma (785/811 passed)
 
-784/811 tests passed, 27 failed:
+785/811 tests passed, 26 failed:
 
 | Test | Result |
 |------|--------|
@@ -610,7 +602,6 @@ All 44 tests passed.
 | oamdma/oamdma_srcFF00_busyreadC000_dmg08_out1_cgb_xoutblank [dmg] | got ?, expected 1 |
 | oamdma/oamdma_srcFF00_readFE00_dmg08_out1_cgb04c_out0 [dmg] | got ?, expected 1 |
 | oamdma/oamdma_srcFF00_readFE45_dmg08_out1_cgb04c_out0 [dmg] | got ?, expected 1 |
-| oamdma/oamdmasrcC000_hdmasrc0000_cgb04c_out0A940C0D [cgb] | got 0A0B0C0D, expected 0A940C0D |
 | oamdma/oamdmasrcC0_speedchange_readC000_cgb04c_out11 [cgb] | got 00, expected 11 |
 
 ## scx_during_m3 (131/141 passed)
@@ -685,9 +676,9 @@ All 67 tests passed.
 | speedchange/speedchange_tima00_1a_cgb04c_out80 [cgb] | got 81, expected 80 |
 | speedchange/speedchange_tima00_1b_cgb04c_out81 [cgb] | got 82, expected 81 |
 
-## sprites (468/476 passed)
+## sprites (464/476 passed)
 
-468/476 tests passed, 8 failed:
+464/476 tests passed, 12 failed:
 
 | Test | Result |
 |------|--------|
@@ -697,6 +688,10 @@ All 67 tests passed.
 | sprites/enable/late_disable_ds_3_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/late_disable_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/mix_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
+| sprites/sprite_late_disable_spx1A_1_dmg08_out0 [dmg] | got 3, expected 0 |
+| sprites/sprite_late_enable_spx18_2_dmg08_out0 [dmg] | got 3, expected 0 |
+| sprites/sprite_late_enable_spx1A_2_dmg08_out0 [dmg] | got 3, expected 0 |
+| sprites/sprite_late_enable_spx1B_2_dmg08_out0 [dmg] | got 3, expected 0 |
 | sprites/sprite_late_late_disable_spx1A_1_dmg08_out0 [dmg] | got 3, expected 0 |
 | sprites/sprite_late_late_disable_spx1B_1_dmg08_out0 [dmg] | got 3, expected 0 |
 
@@ -747,23 +742,26 @@ All 20 tests passed.
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 
-## window (405/476 passed)
+## window (396/476 passed)
 
-405/476 tests passed, 71 failed:
+396/476 tests passed, 80 failed:
 
 | Test | Result |
 |------|--------|
 | window/arg/late_enable_afterVblank_4_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_enable_afterVblank_5_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/arg/late_enable_afterVblank_5_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/arg/late_scx_late_wy_FFto4_ly4_wx00_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/arg/late_scx_late_wy_FFto4_ly4_wx00_2_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
+| window/arg/late_scx_late_wy_FFto4_ly4_wx20_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_10to0_ly1_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_10to0_ly1_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/arg/late_wy_10to0_ly1_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/arg/late_wy_10to1_ly1_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_1toFF_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
+| window/arg/late_wy_1toFF_ds_lcdoffset1_2_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/arg/late_wy_1toFF_lcdoffset1_2_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/arg/late_wy_2toFF_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
+| window/arg/late_wy_FFto0_ly0_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_FFto0_ly2_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_FFto0_ly2_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/arg/late_wy_FFto0_ly2_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
@@ -771,9 +769,15 @@ All 20 tests passed.
 | window/arg/late_wy_FFto1_ly2_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_FFto1_ly2_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/arg/late_wy_FFto1_ly2_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/arg/late_wy_FFto2_ly2_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_FFto2_ly2_scx2_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_FFto2_ly2_scx3_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_FFto2_ly2_scx3_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
+| window/arg/late_wy_FFto2_ly2_scx3_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/arg/late_wy_FFto2_ly2_scx5_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/arg/late_wy_FFto2_ly2_scx5_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/arg/late_wy_FFto2_ly2_wx00_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/arg/late_wy_FFto2_ly2_wx0f_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_disable_1_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_disable_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_disable_early_scx00_wx0f_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |

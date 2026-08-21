@@ -145,6 +145,8 @@ proc new_ppu_base(cgb: bool): GbPpu =
   # would have been written with.
   result.hdma5    = 0xFF
   result.hdma_kill_from = -1
+  # Anything non-zero: the first mode-0 edge after power-up is a real edge.
+  result.hdma_seen_mode = 2
   result.hdma_src = 0xFFF0'u16
   result.hdma_dst = 0xFFF0'u16
   result.ran_bios = cgb
@@ -2416,6 +2418,18 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   # `in_cpu_cycle`: this edge lands inside the dots of a CPU access that is
   # still on the bus, so the block's BYTES are held back HDMA_VISIBLE_DOTS dots.
   # Everything else about the block, its 8 M-cycles included, happens here.
+  when HDMA_HALT_M0_BLIND != 0:
+    # The edge detector's registered mode, clocked by the CPU: read it before
+    # this change updates it, and do not update it at all while the CPU is
+    # halted. See HDMA_HALT_M0_BLIND in gb.nim.
+    let hdma_seen_was = ppu.hdma_seen_mode
+    var hdma_since_halt = ppu.cycle_counter - ppu.hdma_halt_dot
+    if hdma_since_halt < 0: hdma_since_halt += gb_line_end(ppu)
+    let hdma_blind_lag = int32(if gb.memory.current_speed != 0'u8:
+                                 HDMA_HALT_BLIND_LAG_DS
+                               else: HDMA_HALT_BLIND_LAG)
+    if (not gb.cpu.halted) or hdma_since_halt <= hdma_blind_lag:
+      ppu.hdma_seen_mode = mode
   if mode == 0 and prev_mode != 0 and ppu.hdma_active and ppu.lcd_enabled:
     when HDMA_SPEEDSWITCH_KILL_W != 0:
       # A CGB speed switch that lands in the last few dots of mode 3 destroys
@@ -2434,6 +2448,10 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
     when HDMA_DISABLE_GRACE_DOTS != 0:
       ppu.hdma_due_dot = ppu.cycle_counter
     if gb.cpu.halted:
+      when HDMA_HALT_M0_BLIND != 0:
+        # The CPU halted inside a mode 0 and the detector is still registering
+        # it: there is no edge here for the engine to see.
+        if hdma_seen_was == 0'u8: return
       ppu.hdma_block_due = true
       ppu.hdma_due_delay = 0
     else:

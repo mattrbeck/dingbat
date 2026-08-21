@@ -109,6 +109,16 @@ proc cpu_halt*(cpu: GbCpu; gb: GB) =
     cpu.halted   = false
   else:
     cpu.halted = true
+    when HDMA_HALT_M0_BLIND != 0:
+      # The dot the VRAM DMA's HBlank edge detector stops being clocked on.
+      # See HDMA_HALT_M0_BLIND / HDMA_HALT_BLIND_LAG in gb.nim.
+      gb.ppu.hdma_halt_dot = gb.ppu.cycle_counter
+    when defined(gb_dma_trace):
+      # Diagnostic (tools only). The dot and mode a HALT freezes the VRAM
+      # DMA's HBlank edge detector at -- the quantity HDMA_HALT_M0_BLIND is
+      # about, and the one that separates every `hdma_*halt*` pair.
+      echo "HALT ly=", gb.ppu.ly, " dot=", gb.ppu.cycle_counter,
+           " mode=", (gb.ppu.lcd_status and 3'u8)
 
 proc cpu_lock*(cpu: GbCpu) =
   ## Enter the SM83's undefined-opcode lockup (opcodes.nim). Pan Docs, "CPU
@@ -758,7 +768,11 @@ proc tick*(cpu: GbCpu; gb: GB) =
       # is not one), so nothing here holds the bytes back: see
       # HDMA_VISIBLE_DOTS and `in_cpu_cycle`.
       if gb.ppu.hdma_block_due:
-        if gb.ppu.hdma_active and (gb.ppu.lcd_status and 3'u8) == 0'u8:
+        if gb.ppu.hdma_active and (gb.ppu.lcd_status and 3'u8) == 0'u8 and
+           (HDMA_WAKE_M0_MARGIN == 0 or
+            gb.ppu.cycle_counter +
+              int32(HDMA_WAKE_M0_MARGIN shr int(gb.memory.current_speed)) <
+              gb_line_end(gb.ppu)):
           ppu_step_hdma(gb.ppu, gb)
         else:
           gb.ppu.hdma_block_due = false

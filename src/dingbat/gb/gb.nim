@@ -1469,6 +1469,81 @@ const VDMA_OAM_BUS_CAPTURE* {.intdefine.} = 1
   ## `dma_cycles_modulo == 2 || cgb_double_speed` in GB_hdma_run; here it falls
   ## out of `internal_dma_timer` on its own, and in double speed every block
   ## byte is a whole OAM DMA slot so every one of them lands.
+const HDMA_HALT_M0_BLIND* {.intdefine.} = 1
+  ## A HALTED CPU cannot hand a VRAM DMA a mode-0 edge it did not see.
+  ##
+  ## The HBlank block's trigger is an EDGE, and the edge detector holds a
+  ## registered copy of the mode that is clocked by the CPU -- so a HALT
+  ## freezes it. Halt DURING a mode 0 and the registered copy stays 0 for the
+  ## whole halt: every mode-0 edge that passes underneath is invisible, and the
+  ## transfer gets nothing until the CPU is running again, has seen a non-zero
+  ## mode, and then sees the next mode 0. Halt during mode 2 or 3 and the copy
+  ## is frozen non-zero, so the mode 0 the CPU wakes into IS an edge and the
+  ## block is taken at the wake. That is what the two ROM families are called:
+  ## `hdma_m3halt_m0unhalt` transfers, `hdma_late_m0halt` does not.
+  ##
+  ## **Measured, on SameBoy, by moving one thing at a time.**
+  ## `dma/hdma_late_m0halt_{1,2}` differ by a single NOP and want 1 block then
+  ## 2. Rebuilding that ROM's tail (`LD A,$81 ; LDH ($55),A ; XOR A ;
+  ## LDH ($0F),A ; HALT ; NOP ; LDH A,($55)`) and sliding the pieces
+  ## independently says which piece the answer is a function of:
+  ##
+  ##   * moving the **FF55 write** 0-6 M-cycles earlier, halt fixed: **flat.**
+  ##   * moving the **read** 0-9 M-cycles later: **flat.**
+  ##   * moving the **HALT** one M-cycle later: **00 -> FF, one-sided over the
+  ##     whole +-8 M-cycle slide.** Nothing else in the ROM moves the answer.
+  ##
+  ## And the two worlds differ by exactly one block's worth of work after the
+  ## wake, not by a different wake: patching HDMA5 to $80 so no second block
+  ## can exist makes a STAT sweep after the halt flip mode at k = 16 in BOTH,
+  ## while with $81 the flips are k = 16 and k = 8 -- eight M-cycles, i.e. the
+  ## block, and it runs at the wake in the `_2` world only. Sweeping the read
+  ## out to 140 M-cycles finds the `_1` world's second block at the mode-0 edge
+  ## of the line AFTER the one it woke in, which is exactly "wait for a
+  ## non-zero mode, then the next mode 0". dingbat's own trace now agrees ROM
+  ## for ROM: `_1` halts at ly 1 dot 453 in mode 0 and blocks at ly 3 dot 253;
+  ## `_2` halts at ly 2 dot 1 in mode 2 and blocks at ly 2 dot 377, the wake.
+  ##
+  ##   gambatte 4446 -> 4450, +4 / -0: the four `hdma_late_m0halt_*_1` rows.
+const HDMA_HALT_BLIND_LAG* {.intdefine.} = 2
+  ## Dots past the CPU's halt that the edge detector goes on registering the
+  ## mode for, in NORMAL speed. See HDMA_HALT_BLIND_LAG_DS for the other one.
+  ##
+  ## The four `lcdoffset` arms of the family above are what measure it: they
+  ## move the line boundary by 1 and 3 dots against the CPU's M-cycle grid, so
+  ## a freeze exactly at the halt satisfies the plain pair and neither offset
+  ## pair, and vice versa. dingbat's traces bracket it two-sided --
+  ## `hdma_late_m0halt_1` halts 3 dots before the line end and must NOT see the
+  ## mode-2 transition there, `hdma_late_m0halt_lcdoffset3_2` halts 2 dots
+  ## before it and must. **2 <= lag < 3.**
+const HDMA_HALT_BLIND_LAG_DS* {.intdefine.} = 0
+  ## The same lag in DOUBLE speed, and it is NOT the normal-speed one scaled.
+  ## `hdma_late_m0halt_ds_1` refuses any nonzero value (red at 1 dot, green at
+  ## 0) while the normal-speed pairs refuse anything under 2 dots, so the two
+  ## speeds are separately bracketed and this is recorded as its own constant
+  ## rather than dressed up as one quantity.
+const HDMA_WAKE_M0_MARGIN* {.intdefine.} = 8
+  ## Dots of the owing mode 0 that must still be left when the HALT ends for
+  ## the block to be taken at the wake, in normal-speed dots (halved in double
+  ## speed, which is the scaling the `_ds` arms DO agree with, unlike the lag
+  ## above). 0 = take it however little of the HBlank is left.
+  ##
+  ## The debt is to a mode 0, and dingbat already drops it if the mode has
+  ## ENDED by the wake; this says the mode also has to have some left to give.
+  ## `dma/hdma_late_m0unhalt_{1,2}` is the pair that measures it -- both halt
+  ## in mode 3, both are armed by the mode-0 edge, and they wake 4 dots apart
+  ## with 7 and 11 dots of mode 0 remaining, wanting no block and a block.
+  ##
+  ##   margin     4      **8**    12
+  ##   gambatte   4450    4452    4450
+  ##
+  ## A local maximum bracketed on both sides, +2 / -0 at the peak.
+  ##
+  ## **Not a derivation: this is the one fitted number in the round.** The
+  ## physical claim it stands in for is that a 36-dot block cannot be started
+  ## on an HBlank that is about to end -- but neither 7 nor 11 dots is room for
+  ## one, so the real rule is something else that happens to split this pair
+  ## here. Treat it as a bracket to re-derive, not as a mechanism.
 const HDMA_OVERHEAD_LEADS* {.intdefine.} = 1
   ## Charge HDMA_BLOCK_OVERHEAD_BUS BEFORE the transfer's bytes rather than
   ## after: you take the bus, and THEN you drive it.
@@ -3842,6 +3917,13 @@ type
     # of mode 0, so it is never set at a frame boundary — where every state,
     # rewind snapshot and rollback snapshot is captured — and is not serialized.
     hdma_block_due*: bool
+    # HDMA_HALT_M0_BLIND only: the HBlank edge detector's registered copy of
+    # the mode. Updated on every mode change the CPU is awake for and frozen
+    # across a HALT, which is the whole of what the constant models.
+    hdma_seen_mode*: uint8
+    # ...and the PPU dot the CPU halted on, so the freeze can carry
+    # HDMA_HALT_BLIND_LAG dots past it. Scratch, like hdma_block_due.
+    hdma_halt_dot*: int32
     # CPU instruction boundaries still owed before a due HBlank DMA block may
     # take the bus. See HDMA_STEAL_DELAY_M.
     hdma_due_delay*: int8
