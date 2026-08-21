@@ -4428,6 +4428,58 @@ hand the default machine.
 | LCDC write dot at the mixer (`gb_lcdc_mixer_latency`) | charged | charged | charged | charged | the same pair, which is IDENTICAL on the LCDC ROMs |
 | `$FEA0-$FEFF` (`unusable_region`) | RAM, `addr and not $18` | same | **RAM, unmasked** | **nibble echo** | Pan Docs + `cgb-acid-hell`'s own readback |
 
+### 2026-08-21: the last three SameSuite APU rows are MORE of this axis, not APU bugs
+
+`channel_1/channel_1_freq_change_timing-{cgb0BC,cgbDE}` and
+`channel_3/channel_3_extra_length_clocking-cgbB` are the whole of SameSuite APU
+67/70. A previous round classified them as "plain APU bugs, not speed-switch
+ones". They are neither: **dingbat's answer is right, for a different machine.**
+
+Each of these ROMs is the same measurement ladder with a different 16-byte
+expected table compiled in — they differ from their siblings in exactly those
+table bytes and the (unverified) global checksum, and nowhere else:
+
+| ROM pair | differing bytes | values |
+|---|---|---|
+| `channel_1_freq_change_timing` `-A` / `-cgb0BC` / `-cgbDE` | `$05AF`, `$05B5`, `$05BA` | A `FF,0F,FF` · 0BC `0F,0F,0F` · DE `FF,00,FF` |
+| `channel_3_extra_length_clocking` `-cgb0` / `-cgbB` | `$05AD-$05B4`, `$05BD-$05C4` (all 16) | cgb0 `F0` · cgbB `F4` |
+
+Patch the failing ROM's table to its passing sibling's and dingbat passes it —
+measured, all three:
+
+```
+ch1 freq_change stock  -A       (model a)       PASS
+ch1 freq_change stock  -cgb0BC  (model cgb0BC)  FAIL
+ch1 freq_change stock  -cgbDE   (model cgbDE)   FAIL
+ch1 freq_change -cgb0BC rom carrying the A table  PASS
+ch1 freq_change -cgbDE  rom carrying the A table  PASS
+ch3 extra_length stock -cgb0    (model cgb0)    PASS
+ch3 extra_length stock -cgbB    (model cgbB)    FAIL
+ch3 extra_length -cgbB rom carrying the cgb0 table  PASS
+```
+
+So dingbat answers the **AGB** table on all sixteen channel-1 cells at every
+revision, and the **CGB-0** table on all sixteen channel-3 cells. The three rows
+are mutually exclusive with their green siblings by construction, so no single
+behaviour can take more than one of each pair: the only way to close them is to
+gate the APU on `GB.revision` the way `length_clock_any_nrx4` already is, twice
+more —
+
+* channel 1's frequency-change timing splits **three** ways (AGB, CGB 0/B/C at
+  ladder cells 4 and 15, CGB D/E at cell 10),
+* channel 3's extra-length clocking splits CGB-0 from CGB-B on every cell,
+
+and each split is supported by exactly the one table cell that names it. SameBoy
+carries the corresponding axis (about twenty `gb->model <=` gates in
+`Core/apu.c`, including `/* Current value is irrelevant on CGB-B and older */`
+at the two `NRx4` length-enable writes), so it is portable work — but it is a
+port of a whole per-revision APU model, not a knob, and it is worth three rows.
+
+**Refuted while measuring it:** the "4x sampling-rate mismatch" that stalled the
+old `worktree-samesuite-apu` branch is NOT what these three are about. Sample
+rate cannot be the issue when the same binary passes the same ladder against a
+sibling table.
+
 `CGB_HALT_PPU_LEAD` is **not** revision-gated and must not be gated on a guess.
 It ships at 0 for a reason that has nothing to do with silicon revision — a
 pixel-exact local-suite row (`strikethrough-cgb`; the shootout's strikethrough

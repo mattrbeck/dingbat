@@ -78,6 +78,29 @@ const TAC_SELECT_LEAD_T* {.intdefine.} = 4
   ## reload countdown expires, so it sees `FE` where hardware still reads `00`.
   ## That is a reload-vs-read phase question, and the countdown is not free to
   ## move for it: arming it at 5 takes the whole family from 14/16 to 8/16.
+  ##
+  ## ---- REFUTED 2026-08-21: it is NOT a $FF05 read-sample point -------------
+  ##
+  ## The serial unit turned out to have exactly this shape and the fix was a
+  ## per-unit read latch (SERIAL_CPU_SAMPLE_T in gb.nim): the serial tap edge
+  ## lands on the LAST T-cycle of its M-cycle, dingbat runs the whole bus half
+  ## at the TOP of the M-cycle, and a CPU access in that M-cycle is entitled to
+  ## the PRE-edge state. `-d:gb_phase_trace` says the timer's own events land on
+  ## the same T-cycle -- `TIMIRQ t=3/4` for the reload, and every TAC tap edge
+  ## is at `tdiv = 0 mod 2^s` with `2^s` a multiple of 4, i.e. the M-cycle's
+  ## last T -- so the same latch was built for $FF05 and measured over the 440
+  ## `tima` + `speedchange` rows:
+  ##
+  ##   shipping (the read sees its own M-cycle's change)   416 / 440
+  ##   $FF05 reads the value before ANY change this M-cycle 331   (-85)
+  ##   $FF05 reads the value before the RELOAD only         398   (-18)
+  ##
+  ## So the two units are genuinely asymmetric on the same T-cycle: hardware's
+  ## TIMA read DOES see an increment (and a reload) that landed inside its own
+  ## M-cycle, and hardware's SB/SC/IF read does NOT see the shift that landed
+  ## inside its own. That asymmetry is also why `IF_READ_SAMPLE_T = -1` (the
+  ## latch in front of the whole M-cycle, timer included) costs thirteen `tima`
+  ## rows while the serial-only version costs none. Do not re-run either cell.
 
 proc timer_reload_tima(t: GbTimer; gb: GB) =
   when defined(gb_phase_trace):
