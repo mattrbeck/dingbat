@@ -109,7 +109,7 @@ when IF_READ_SAMPLE_T < 4:
 #         -1              --        --       --   see the a_r paragraph below
 #          0            1037      4322      433
 #          1            1039      4320      435
-#          2            1042      4319      438   <- ships
+#          2            1042      4319      438   <- shipped, until 2026-08-21
 #          3            1039      4307      435
 #          4 (off)      1016      4269      430
 #
@@ -119,6 +119,35 @@ when IF_READ_SAMPLE_T < 4:
 # family whose OTHER arm moves the opposite way, i.e. the OAM-source phase this
 # constant does not own (see STAT_M2_LEAD in ppu.nim). Mooneye-wilbertpol is
 # +15 at every cell, mooneye proper, mealybug, AGE and the shootout unmoved.
+#
+# ---- ...and the maximum MOVED TO 0 when the mode-0 source was fixed ---------
+#
+# That sweep was taken against a tree whose mode-0 STAT SOURCE was 2 dots late
+# on every line but the first after an LCD enable (`STAT_M0_LEAD_T` in gb.nim,
+# and the whole map at `M0_HALT_BLIND_DOTS` in ppu.nim). This constant was
+# therefore fitted against that error, and 2 was partly paying for it: a read
+# that samples 2 T into its M-cycle and a source that rises 2 dots late flip
+# exactly complementary residue classes of SCX, which is why GBMicrotest's
+# `hblank_int_scx{0,3,4,7}_if_b` were green while `scx{1,2,5,6}` were red.
+# Re-swept on 64fe90a with the source carried at its measured dot
+# (`STAT_M0_LEAD_T = 2`, `M0_HALT_BLIND_DOTS = 2`), whole runner of 1225 and
+# gambatte of 4996:
+#
+#   IF_READ_SAMPLE_T   runner   gambatte
+#         -1            1088      4482
+#          0            1089      4495   <- ships
+#          1            1085      4485
+#          2            1082      4473
+#          3            1080      4466
+#
+# Still two-sided, on both columns now, and the maximum is 0. `IF_READ_SAMPLE_T
+# = 0` ALONE, on the un-fixed source, is runner 1057 / gambatte 4477 -- i.e.
+# WORSE than the 2 it replaces, by 6 and 7 rows. That is the signature of two
+# compensating errors: neither constant can be scored without the other, and
+# only the pair is right. The one family that still refuses 0 is exactly the
+# one this note names below as the reason it is not a whole M-cycle --
+# `ly0/lycint152_lyc0irq_2`, three device rows -- so the bracket's lower side is
+# the same ROM it always was, now one step closer.
 #
 # The split has to be proven neutral before the column means anything, and it
 # is not neutral for free: `fifo_tick` re-snapshots `read_mode` on every entry,

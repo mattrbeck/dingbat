@@ -1753,9 +1753,14 @@ proc lyc_settle_halt_skip(gb: GB): bool {.inline.} =
 # `current_speed` below and why the flat `M3_END_EARLY = 2` that also spends 2
 # dots costs 221 double-speed gambatte rows (see the write-up in fifo_ppu.nim).
 #
-# ---- Why it ships at 0 ------------------------------------------------------
+# ---- Why it shipped at 0, and why it now ships at 2 -------------------------
 #
-# Because it is only half of a pair, and the other half is not built. The
+# It shipped at 0 because it is only half of a pair and the other half was not
+# built. **Both halves are built now** -- (A) below is `STAT_M0_LEAD_T = 2`
+# carried in the retire -> flag hand-off (`m3_hold`, fifo_ppu.nim) -- so this
+# rule is on and the two cancel where they are supposed to. Everything from
+# here to the end of the block is the derivation that got there; the last two
+# sections say what changed and what it cost. The
 # halted mode-0 wake is measurably EXACT in this tree in the steady state and
 # 2 dots early only on the first line after an LCD enable, because a SECOND
 # 2-dot error cancels it there. The whole map, measured against SameBoy with
@@ -1827,56 +1832,96 @@ proc lyc_settle_halt_skip(gb: GB): bool {.inline.} =
 # The hook it drives already exists (`fifo_irq_m0_ready`, fifo_ppu.nim): the
 # fetcher's own lookahead into the tail of mode 3.
 #
-# It does not reach 2 dots, and the reason is geometric rather than a tuning
-# question. Measured with `tools/gbppu/gam_dispatch.py`, W = 114, DMG, as the
-# number of dots the source actually moved:
+# **The fetcher's lookahead cannot reach 2 dots, and the reason is geometric
+# rather than a tuning question.** Measured with `tools/gbppu/gam_dispatch.py`,
+# W = 114, DMG, as the number of dots the source actually moved, through the
+# lookahead alone:
 #
 #   STAT_M0_LEAD_T   0        1        2         wanted
 #   dots moved       0        5        6         2
 #
-# Two things make that table. The hook's threshold is written against
-# `GB_WIDTH`, but `M3_PIPE_DELAY = 2` ships and the fetcher retires at lx 158,
-# so any lead of 2 or less asks for a dot the mode-3 loop has already exited
-# on -- that is the 0. And `M3_PIPE_AHEAD = 1` puts the pipeline four dots
-# ahead of machine time, so the last dot the hook CAN fire on is already five
-# machine-dots before the flag -- that is the jump from 0 to 5. The reachable
-# set is {0, 5, 6, 7, ...} and 2 is not in it.
+# `M3_PIPE_AHEAD = 1` puts the pipeline four dots ahead of machine time, so the
+# LAST dot the lookahead can fire on is already five machine-dots before the
+# flag: the reachable set is {0} u {4 + lead} = {0, 5, 6, 7, ...} and 2 is not
+# in it. (That table was itself only visible after the second of the two bugs
+# below was fixed; before it, the threshold was written against `GB_WIDTH` and
+# the whole column read 0, because `M3_PIPE_DELAY = 2` retires the fetcher at
+# lx 158 and any lead of 2 or less asked for a dot the loop had already left.)
 #
-# **So the mode-0 source's 2 dots cannot ride the fetcher's lookahead.** They
-# have to be spent on the other side of the retire -> flag hand-off, which is
-# `M3_PIPE_AHEAD`'s accounting in fifo_ppu.nim, not this domain's.
+# **So the mode-0 source's 2 dots cannot ride the fetcher's lookahead. They are
+# spent on the other side of the retire -> flag hand-off**, which is
+# `M3_PIPE_AHEAD`'s accounting in fifo_ppu.nim -- see the last two sections of
+# this block, and `m0_source_lead` / `M0_LOOKAHEAD_REACHABLE` at the site.
+# A lead LARGER than the hand-off still uses the lookahead for the remainder,
+# and the two compose: `STAT_M0_LEAD_T = 6` measures as 6 dots, 4 of them in
+# the hold and 2 in the lookahead.
 #
-# Two latent bugs in the split path were found on the way and are worth fixing
-# whoever carries this next, because both are invisible at the only leads ever
-# built (exactly one M-cycle) and both are in fifo_ppu.nim:
+# Two latent bugs in the split path were found on the way, both in fifo_ppu.nim
+# and both invisible at the only leads ever built (exactly one M-cycle). Both
+# are FIXED, and each is worth naming because each hid for a different reason:
 #
-#   * `fifo_skip_target`'s STAT_IRQ_SPLIT branch drops the `STAT_M2_LEAD` stop
-#     that its own unsplit branch has (`m2_early_stop` / `m2_early_dot`), so
-#     the idle skip jumps over the OAM source's lead dot and `STAT_M2_LEAD`
-#     silently turns off. Worth **runner 948 -> 1057** at STAT_M0_LEAD_T = 2.
-#     It hides at a one-M-cycle lead only because `irq_dot` lands on the same
-#     dot by arithmetic accident.
-#   * the mode-0 hook's `lx >= GB_WIDTH - lead` should be measured from the
-#     fetcher's retire point, not from GB_WIDTH (the first paragraph above).
+#   * `fifo_skip_target`'s STAT_IRQ_SPLIT branch dropped the `STAT_M2_LEAD`
+#     stop that its own unsplit branch has (`m2_early_stop`/`m2_early_dot`), so
+#     the idle skip jumped over the OAM source's lead dot. Measured, in a
+#     `STAT_M0_LEAD_T = 2` build: **runner 948 -> 1057** (and 834 -> 944 at
+#     `STAT_IRQ_LEAD = 2`). It hid at a one-M-cycle lead because `irq_dot`
+#     lands on the same dot by arithmetic accident. Note the effect is not
+#     quite "the constant turns off": `m2_source` is level-triggered, so the
+#     rise is caught at the next dot the loop DOES visit -- the lead is
+#     truncated to that dot, not lost -- which is why it costs nothing at all
+#     when the skipped distance is under one M-cycle.
+#   * the mode-0 hook's `lx >= GB_WIDTH - lead` had to be measured from the
+#     fetcher's retire point (`m3_retire_lx`), not from `GB_WIDTH`.
 #
-# ---- The best combination measured so far -----------------------------------
+# ---- The combination that was best BEFORE the carrier, and why it lost ------
 #
 # `M3_END_EARLY = 2` gated off `ppu.first_line` and shifted by `current_speed`,
 # plus `STAT_M0_FIELD_TAIL{,_CGB} = 2` with `STAT_M0_TAIL_SPEED_SCALED`, plus
-# this rule: **runner 1051 / gambatte 4242** against 1063 / 4443. It turns the
+# this rule: **runner 1051 / gambatte 4242** against 1063 / 4443. It turned the
 # whole running-steady-state family green (`hblank_int_scx{1,2,5,6}` and all
 # their `_if_b`/`_if_d`/`_nops_a`/`_nops_b` siblings, 21 rows) and all four
-# `int_hblank_halt` rows, and the residue is dominated by **96
+# `int_hblank_halt` rows, and its residue was dominated by **96
 # `sprites/*_m3stat_ds_1` rows**: in double speed an M-cycle is 2 dots, so even
 # the minimum 1-dot move of the mode-3 end is a whole M-cycle to a `_m3stat_`
-# read. Whatever carries the 2 dots has to leave the double-speed mode-3 end
-# alone, which no spelling tried here does. See LCD_ON_LINE0_TRIM in
-# gb.nim for the three shapes that were tried before this one and refused; what
-# this measurement adds to that note is that its "later frames say 0" leg is
-# wrong (lines 1, 2, 3 and 10 after an enable all want the same 2 dots) and
-# that the carrier is the SOURCE, not the length, not the line and not the
-# phase.
-const M0_HALT_BLIND_DOTS* {.intdefine.} = 0
+# read. **That is the constraint that decided the carrier**: whatever spends
+# the 2 dots has to leave the double-speed mode 3 END alone, which no spelling
+# of `M3_END_EARLY` can. See LCD_ON_LINE0_TRIM in gb.nim for the three shapes
+# tried before that one and refused; what this measurement adds to that note is
+# that its "later frames say 0" leg is wrong (lines 1, 2, 3 and 10 after an
+# enable all want the same 2 dots) and that the carrier is the SOURCE, not the
+# length, not the line and not the phase.
+#
+# ---- What the carrier turned out to be, and what it cost --------------------
+#
+# The retire -> flag hand-off. `M3_PIPE_AHEAD` retires the fetcher `m3_hold`
+# dots before the mode 3 -> 0 FLAG moves, and those dots are already spent
+# waiting; the mode-0 SOURCE just rises on the one with `m3_hold == lead`. It
+# moves no pixel, no flag, no mode-3 length and -- the point -- no double-speed
+# mode-3 end, so the 96-row `_m3stat_ds_1` residue is not merely smaller, it is
+# absent. The whole thing is at `m0_source_lead` / `M0_LOOKAHEAD_REACHABLE` in
+# fifo_ppu.nim.
+#
+# Measured on 64fe90a, all three constants together
+# (`STAT_M0_LEAD_T = 2`, this rule at 2, `IF_READ_SAMPLE_T = 0`):
+# **runner 1063 -> 1089, gambatte 4484 -> 4495, shootout 261/261**, and
+# `tools/gbppu/gam_dispatch.py` now reads byte-identical to SameBoy on both
+# devices, on the LCD-on line and on later lines, at all eight SCX. This rule
+# is worth +6 runner rows inside that combination (1083 -> 1089) and its four
+# `int_hblank_halt_scx{0,3,4,7}` rows are green with `hblank_ly_scx_timing-GS`
+# green beside them -- the cancellation the block above describes, now with
+# both halves present instead of neither.
+#
+# Two things this needed that are not obvious and cost real rows when wrong:
+#
+#   * the blind window is a rule about the SOURCE's dot, so it is measured from
+#     `irq_chg_dot` and gated on `irq_m0_of`, not on `stat_chg_dot` and the
+#     readable field. Measured from the field it lands two dots past the rise
+#     and the halves stop cancelling: `hblank_ly_scx_timing-GS` red on all
+#     eight arms and the shootout at 260.
+#   * only the mode-0 EDGE leads. Moving the irq domain's three boundary hooks
+#     with it (`STAT_M0_LEAD_DOMAIN`) makes the source FALL early too and costs
+#     55 gambatte rows SameBoy agrees with on 52.
+const M0_HALT_BLIND_DOTS* {.intdefine.} = 2
   ## T-cycles of a halted M-cycle's TAIL in which the mode-0 STAT source's rise
   ## is invisible to the halted CPU's latch. 0 compiles the rule out; 2 is the
   ## measurement above. Shifted by `current_speed` at the use site.
@@ -1899,7 +1944,13 @@ when M0_HALT_BLIND_DOTS > 0:
        (irq.joypad_interrupt and irq.joypad_enabled): return false
     let ppu = gb.ppu
     if not (ppu.lcd_enabled and ppu.hblank_interrupt_enabled): return false
-    if (ppu.lcd_status and 3'u8) != 0'u8: return false
+    # Which clock says "mode 0" is the same question the source terms ask: with
+    # `STAT_M0_LEAD_T` on, the line can be up on the source's mode 0 while the
+    # readable field is still 3, and it is the SOURCE this rule is about.
+    when STAT_M0_LEAD_T != 0:
+      if ppu.irq_m0_of != 0'u8: return false
+    else:
+      if (ppu.lcd_status and 3'u8) != 0'u8: return false
     # The comparator would be holding the line up on its own.
     if ppu.coincidence_interrupt_enabled and ppu.irq_ly_of == ppu.lyc:
       return false
@@ -1912,7 +1963,19 @@ when M0_HALT_BLIND_DOTS > 0:
     # FIRST dot rather than mode 3's last. At 0..N-1 only
     # `int_hblank_halt_scx{0,4}` go green and `scx{3,7}` stay red -- the
     # residue-3 half of the family -- which places the window one dot later.
-    let age = ppu.cycle_counter - ppu.stat_chg_dot
+    #
+    # With `STAT_M0_LEAD_T` on the two dots part company: the source rises
+    # `lead` dots before the field does, `stat_chg_dot` is the field's dot and
+    # has not even been written yet at the dots this window covers, so the
+    # source's own `irq_chg_dot` is what the age has to be measured from.
+    # Getting this wrong is not a small error -- at a lead of 2 the window
+    # lands two dots past where the source rose and the two halves of the
+    # measurement stop cancelling, which is what `hblank_ly_scx_timing-GS`
+    # reports.
+    when STAT_M0_LEAD_T != 0:
+      let age = ppu.cycle_counter - int32(ppu.irq_chg_dot)
+    else:
+      let age = ppu.cycle_counter - ppu.stat_chg_dot
     age >= 1'i32 and
       age <= int32(M0_HALT_BLIND_DOTS shr gb.memory.current_speed)
 
@@ -2325,6 +2388,10 @@ when STAT_IRQ_SPLIT:
     ## back does.
     if ppu.irq_mode != mode:
       ppu.irq_mode = mode
+      # The source's own change dot -- see `irq_chg_dot` in gb.nim and
+      # `halt_m0_tail_blind` below, which is a rule about THIS dot and not
+      # about `stat_chg_dot`, the readable field's.
+      ppu.irq_chg_dot = int16(ppu.cycle_counter)
       ppu_handle_stat_interrupt(ppu, gb)
 
 proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =

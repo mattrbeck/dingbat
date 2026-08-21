@@ -58,7 +58,7 @@ const LY_BLIND_SCOPE* {.intdefine.} = 2
 # out entirely. The write-up and the ROMs that bracket it are above `irq_read`
 # in interrupts.nim; it is declared here only because the GbInterrupts field it
 # gates is in the type block below.
-const IF_READ_SAMPLE_T* {.intdefine.} = 2
+const IF_READ_SAMPLE_T* {.intdefine.} = 0
 
 const STAT_IRQ_LEAD* {.intdefine.} = 0
 const STAT_LYC_LEAD* {.intdefine.} = 0
@@ -80,7 +80,7 @@ const STAT_M0_TAIL_SPEED_SCALED* {.booldefine.} = false
   ## the same amount, where a flat 2 dots over-pays in double speed. See
   ## `M0_HALT_BLIND_DOTS` in ppu.nim.
 
-const STAT_M0_LEAD_T* {.intdefine.} = 0
+const STAT_M0_LEAD_T* {.intdefine.} = 2
   ## The same lead again, applied to the **mode 0 source alone**, and in
   ## T-CYCLES rather than whole M-cycles -- the two things that make it a
   ## different quantity from `STAT_IRQ_LEAD` rather than a smaller one.
@@ -93,15 +93,52 @@ const STAT_M0_LEAD_T* {.intdefine.} = 0
   ## rows, shifted by `current_speed` it costs 96. See `M0_HALT_BLIND_DOTS` in
   ## ppu.nim for the whole map and for the halted half of the same 2 dots.
   ##
-  ## What makes this expressible at all is that the mode 3 -> 0 hook in
-  ## fifo_ppu's mode-3 dot loop already exists (`fifo_irq_m0_ready`) -- the
-  ## fetcher's own lookahead -- and that the OTHER two arms of the shared irq
-  ## domain are gated on the OLD constants in ppu.nim, so this one moves the
+  ## What makes this expressible at all is that the OTHER two arms of the shared
+  ## irq domain are gated on the OLD constants in ppu.nim, so this one moves the
   ## mode-0 source without taking LYC, mode 1 or the readable mode field with
   ## it. That separation is the whole point: `M3_END_EARLY = 2` moves the same
   ## edge and is refused because the readable field goes with it
   ## (`poweron_stat_069/_183`, `ppu_sprite0_scx{0,1,4,5}_a`, `sprite4_{0..7}_a`,
   ## `win10_scx3_a`, `lcdon_to_stat0_c`, all `$80` against `$83`).
+  ##
+  ## **Where the 2 dots are spent** is the retire -> flag hand-off, not the
+  ## fetcher's lookahead: `M3_PIPE_AHEAD` retires the fetcher `m3_hold` dots
+  ## before the mode 3 -> 0 flag moves, and the source rises on the dot with
+  ## `m3_hold == lead`. That leaves the mode-3 END exactly where it was -- which
+  ## is the constraint every `M3_END_EARLY` spelling failed, because in double
+  ## speed an M-cycle is 2 dots and the 96 `sprites/*_m3stat_ds_1` rows read the
+  ## end through one. See `m0_source_lead` and `M0_LOOKAHEAD_REACHABLE` in
+  ## fifo_ppu.nim, and the write-up at `M0_HALT_BLIND_DOTS` in ppu.nim for the
+  ## whole four-cell map this is one cell of.
+  ##
+  ## Ships at 2 with `M0_HALT_BLIND_DOTS = 2` (the halted half of the same 2
+  ## dots) and `IF_READ_SAMPLE_T = 0` (which was fitted against this error and
+  ## re-brackets to 0 once it is gone): runner 1063 -> 1089, gambatte
+  ## 4484 -> 4495, shootout 261/261, +0.12% of retired instructions on Pokemon
+  ## Blue and +0.24% on Crystal.
+const STAT_M0_LEAD_DOMAIN* {.booldefine.} = STAT_IRQ_LEAD != 0 or
+                                            STAT_LYC_LEAD != 0
+  ## Whether the irq domain's three BOUNDARY hooks (mode 2 -> 3, the line
+  ## advance, the LY 153 snapback) run ahead of the flag domain too, or only
+  ## the mode 3 -> 0 source edge does.
+  ##
+  ## `STAT_IRQ_LEAD` and `STAT_LYC_LEAD` are domain leads and need them, so it
+  ## defaults on for those. `STAT_M0_LEAD_T` is a rule about ONE EDGE and does
+  ## not: with the hooks on, the mode-0 source also FALLS early at the line
+  ## boundary and `irq_ly` advances early, which is worth 55 gambatte rows in
+  ## the wrong direction (m0enable/disable_scx{1,2,5}, lycEnable/late_ff45_*,
+  ## m1/m1irq_m0disable_*, m2int_m0irq_scx3_* -- and SameBoy agrees with the
+  ## expected value on 52 of those 55).
+  ##
+  ## Inert at `STAT_M0_LEAD_T = 0`.
+
+const STAT_M0_LEAD_FIRST_LINE* {.booldefine.} = false
+  ## Whether `STAT_M0_LEAD_T` also applies on the first line after an LCD
+  ## enable. It does not: `tools/gbppu/gam_dispatch.py` reads the mode-0 STAT
+  ## dispatch as exact there and 2 dots late on every later line, on both
+  ## devices and all eight SCX. Ships `false`, i.e. gated off `ppu.first_line`
+  ## (`m0_source_lead`, fifo_ppu.nim). Inert at `STAT_M0_LEAD_T = 0`.
+
 const STAT_IRQ_SPLIT* = STAT_IRQ_LEAD != 0 or STAT_LYC_LEAD != 0 or
                         STAT_M0_LEAD_T != 0
 static:
@@ -4028,6 +4065,12 @@ type
       # exact at the VBlank a state is captured at.
       irq_mode*:         uint8
       irq_ly*:           uint8
+      # The dot `irq_mode` last changed on -- the SOURCE's own `stat_chg_dot`.
+      # It is a different dot from the flag's whenever a lead is on, and the
+      # halted CPU's blind window (`M0_HALT_BLIND_DOTS`) is a rule about the
+      # source's rise, not about the readable field's. Transient per-line
+      # state; not serialized, for the reason above.
+      irq_chg_dot*:      int16
     # Dots since the last frame was pushed, counted whether or not the PPU is
     # driving the panel. The panel refreshes at a fixed rate regardless, so
     # this is what keeps frame output steady across an LCD that switches off

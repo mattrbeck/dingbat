@@ -404,6 +404,9 @@ proc load_ppu_state(ppu: GbPpu; r: var Reader; rev: uint32) =
   when STAT_IRQ_SPLIT:
     ppu.irq_mode = ppu.lcd_status and 3'u8
     ppu.irq_ly = ppu.ly
+    # Its change dot with it: a state is captured at VBlank, where the halted
+    # mode-0 blind window this feeds cannot be open.
+    ppu.irq_chg_dot = int16(ppu.cycle_counter)
   ppu.stat_chg_dot = STAT_NO_HOLD
   # Renderer scratch isn't serialized; clear it so a load onto a running
   # core (rollback) can't inherit stale per-line fetch state.

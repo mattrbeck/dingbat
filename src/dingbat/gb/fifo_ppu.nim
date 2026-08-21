@@ -4462,7 +4462,11 @@ template fifo_skip_target(ppu: GbFifoPpu; gb: GB; m: uint8): int32 =
   ## times a frame from a body that is itself inlined into the bus path. Left
   ## as a proc it measured +1.0% of retired instructions on both a DMG and a
   ## CGB title -- the whole cost of a call, for three compares.
-  when not STAT_IRQ_SPLIT:
+  when not STAT_M0_LEAD_DOMAIN:
+    # `STAT_M0_LEAD_T` alone moves ONE EDGE inside mode 3 and compiles all three
+    # of the domain's boundary hooks out (STAT_M0_LEAD_DOMAIN), so there is no
+    # extra dot for the idle skip to stop on and the shipping build keeps the
+    # plain three-way choice. Only a DOMAIN lead needs the branch below.
     if m == 2: m3_start_dot(gb)
     elif ppu.ly == 143 and m == 0 and gb.cgb_enabled: M2_144_EARLY_DOT
     elif ppu.m2_early_stop(gb): ppu.m2_early_dot(gb)
@@ -4550,7 +4554,40 @@ proc fifo_line153_edge(ppu: GbFifoPpu; gb: GB) {.noinline.} =
     # reads 0.
     ppu_handle_stat_interrupt(ppu, gb)
 
+# Can the mode-0 source's lead ever be LARGER than the retire -> flag hand-off
+# it is spent in, i.e. does the fetcher lookahead in the mode 3 dot loop have
+# anything to do?
+#
+# `m3_hold` is `M3_PIPE_AHEAD` CPU M-cycles (plus the CGB's, plus line 0's --
+# both can only make it bigger) and the lead is `STAT_M0_LEAD_T` T-cycles; both
+# are shifted by `current_speed` together, so the comparison is speed-
+# independent and can be made here. Where the whole lead fits inside the hold --
+# which is where this ships -- the loop hook is compiled out entirely and the
+# mode 3 dot loop is instruction-for-instruction the loop an unsplit build gets.
+# That is worth 1.3% of ALL retired instructions on Pokemon Blue and Crystal
+# alike; a per-dot compare on ~26,000 dots a frame is not free on this path.
+const M0_LOOKAHEAD_REACHABLE* = STAT_DOMAIN_LEAD != 0 or not M3_AHEAD_HOLD or
+                                STAT_M0_LEAD_T > 4 * M3_PIPE_AHEAD
+
 when STAT_IRQ_SPLIT:
+  template m0_source_lead(ppu: GbFifoPpu; lead: int32): int32 =
+    ## The mode-0 SOURCE's share of the domain's lead, which is not the whole
+    ## of it on the first line after an LCD enable.
+    ##
+    ## `tools/gbppu/gam_dispatch.py` measures the mode-0 STAT dispatch as exact
+    ## on that line and 2 dots late on every later one (W = 0 against W = 114 /
+    ## 228 / 342 / 1140, both devices, all eight SCX; the table is at
+    ## `M0_HALT_BLIND_DOTS` in ppu.nim). So the lead is a steady-state rule and
+    ## the enable line is outside it -- exactly the split `M3_END_EARLY` needed
+    ## `ppu.first_line` for when it was the candidate carrier. Left as a
+    ## booldefine so the gate itself can be A/B'd; only the mode-0 source is
+    ## gated, because `STAT_IRQ_LEAD`'s three sources have never been measured
+    ## against this line.
+    when STAT_M0_LEAD_T != 0 and not STAT_M0_LEAD_FIRST_LINE:
+      (if ppu.first_line: 0'i32 else: lead)
+    else:
+      lead
+
   proc fifo_irq_line_advance(ppu: GbFifoPpu; gb: GB) =
     ## The STAT interrupt line's own line boundary, STAT_IRQ_LEAD M-cycles
     ## before the flag domain's below. Mirrors it exactly, on irq_ly /
@@ -4567,9 +4604,19 @@ when STAT_IRQ_SPLIT:
       ppu.irq_mode = if int(ppu.irq_ly) == GB_HEIGHT: 1'u8 else: 2'u8
     ppu_handle_stat_interrupt(ppu, gb)
 
-  proc fifo_irq_m0_ready(ppu: GbFifoPpu; lead: int32): bool {.inline.} =
+  proc fifo_irq_m0_ready(ppu: GbFifoPpu; lead: int32): bool {.noinline.} =
     ## Will the fetcher have retired `lead` dots from now? That is when the
     ## STAT interrupt line's mode 0 rises, ahead of the flag's.
+    ##
+    ## `noinline`, and it matters: in line it puts a SECOND copy of
+    ## `fetch_work_pending` inside fifo_tick_slow's mode 3 branch -- the first
+    ## is `fetcher_retired`'s -- which is the kind of code growth that pushes
+    ## the whole bus path over clang's inline threshold, the cliff
+    ## docs/gb_oam_dma_cost.md describes and the same one `fifo_burst_tail` and
+    ## `fifo_line153_edge` carry warnings about. The caller's
+    ## `lx >= m0_hook_lx` guard means the call is never actually made at a lead
+    ## that fits inside `m3_hold`, so the out-of-line form costs nothing where
+    ## it ships.
     ##
     ## The shifter takes one pixel per dot through the tail of a line, so "lx
     ## is within `lead` of the retire point" IS the lookahead -- except where
@@ -4615,10 +4662,23 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
   ## on both paths before this runs.
   if lcd_enabled(ppu):
     var remaining = cycles
-    when STAT_IRQ_SPLIT:
+    when STAT_IRQ_SPLIT and (STAT_M0_LEAD_DOMAIN or M0_LOOKAHEAD_REACHABLE):
       # Dots the STAT interrupt line runs ahead of the mode flag. Read once: a
       # speed switch cannot land inside a tick, and `mode_flag=` re-syncs the
       # irq domain anyway if one ever stepped over a lead dot.
+      #
+      # Only hoisted where something in this loop reads it every tick. Where
+      # the whole lead is spent in the retire -> flag hand-off (the shipping
+      # `STAT_M0_LEAD_T` build) its one reader runs once a LINE, and it asks
+      # for itself there rather than making ~17,500 bus ticks a frame carry a
+      # load and a shift they never use.
+      #
+      # Which hooks read it is itself a compile-time question:
+      # `STAT_IRQ_LEAD`/`STAT_LYC_LEAD` move the domain's three boundary hooks
+      # (mode 2 -> 3, the line advance, the LY 153 snapback) with the source,
+      # while `STAT_M0_LEAD_T` is a rule about ONE EDGE and compiles all three
+      # out (STAT_M0_LEAD_DOMAIN). `mode_flag=` catches `irq_mode` up at every
+      # boundary the hooks are compiled out of, so nothing is left stale.
       let lead = stat_irq_lead(gb)
     while remaining > 0:
       # Modes 0, 1 and 2 do nothing at all until the dot counter reaches a
@@ -4726,18 +4786,38 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             ppu.m3_delay -= uint8(skip)
             ppu.cycle_counter += int32(skip)
             remaining -= skip
+        when STAT_IRQ_SPLIT and M0_LOOKAHEAD_REACHABLE:
+          # The mode-0 STAT source rises `lead` dots before the flag does --
+          # but the loop below exits on the dot the FETCHER retires, and the
+          # flag is `m3_hold` dots after that (M3_PIPE_AHEAD's hand-off). So
+          # the first `m3_hold` dots of the lead are spent on the far side of
+          # the hand-off, in the hold branch further down, and only the
+          # remainder is a fetcher lookahead. Without the subtraction the
+          # smallest move this hook can make is `m3_hold + 1` dots, which is
+          # why the reachable set used to be {0, 5, 6, 7, ...} at
+          # M3_PIPE_AHEAD = 1 -- and 2, the value the ROMs want, is not in it.
+          #
+          # Hoisted out of the dot loop, and both halves of it: neither term
+          # can change while this loop runs (`m3_hold` is latched at the mode 3
+          # head and only spent after the retire, `first_line` is a per-line
+          # flag), so the loop below pays one register compare per dot instead
+          # of a load, a branch and a subtract on ~26,000 dots a frame. At the
+          # shipping lead the hook never fires from here at all -- the whole 2
+          # dots fit inside `m3_hold` -- and `m0_hook_lx` is then `int32.high`,
+          # which is a compare the branch predictor never misses.
+          #
+          # The threshold has to be the one `fifo_irq_m0_ready` opens with
+          # (`m3_retire_lx - px_lead`), not one written against `GB_WIDTH`:
+          # written against `GB_WIDTH` it takes back exactly the dots the hook
+          # is trying to spend and never fires for a lead inside
+          # `M3_PIPE_DELAY + M3_END_EARLY`.
+          let px_lead = ppu.m0_source_lead(lead) - int32(ppu.m3_hold)
+          let m0_hook_lx = if px_lead > 0: ppu.m3_retire_lx - px_lead
+                           else: high(int32)
         while remaining > 0 and not fetcher_retired(ppu):
-          when STAT_IRQ_SPLIT:
-            # The mode-0 STAT source rises `lead` dots before the flag does.
-            # The flag's dot is the one this loop exits on, so asking at the
-            # TOP of a dot puts this exactly `lead` dots ahead of it.
-            #
-            # The cheap guard has to be the same threshold `fifo_irq_m0_ready`
-            # opens with (`m3_retire_lx - lead`), or it takes back exactly the
-            # dots the hook is trying to spend: at `GB_WIDTH - lead` it never
-            # fires for a lead inside the pipeline delay.
-            if ppu.irq_mode == 3 and ppu.lx >= ppu.m3_retire_lx - lead and
-               fifo_irq_m0_ready(ppu, lead):
+          when STAT_IRQ_SPLIT and M0_LOOKAHEAD_REACHABLE:
+            if ppu.lx >= m0_hook_lx and ppu.irq_mode == 3 and
+               fifo_irq_m0_ready(ppu, px_lead):
               ppu_set_irq_mode(ppu, gb, 0'u8)
           fifo_pipeline_dot(ppu, gb)
           ppu.cycle_counter += 1
@@ -4755,7 +4835,8 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         when STAT_IRQ_SPLIT:
           # Mode 2 ends for the interrupt line a lead before it ends for the
           # mode bits. Nothing else about the boundary moves.
-          if ppu.cycle_counter == m3_dot - lead: ppu_set_irq_mode(ppu, gb, 3'u8)
+          when STAT_M0_LEAD_DOMAIN:
+            if ppu.cycle_counter == m3_dot - lead: ppu_set_irq_mode(ppu, gb, 3'u8)
         if ppu.cycle_counter == m3_dot:
           ppu.`mode_flag=`(3'u8, gb)
           # WX below 7 puts the window's first pixel LEFT of the screen, where
@@ -4954,6 +5035,29 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           # -- that is where the pixels are decided -- and only the flag waits.
           when LY0_PIPE_ANY:
             if ppu.m3_hold != 0:
+              when STAT_IRQ_SPLIT:
+                # ---- The far side of the retire -> flag hand-off ------------
+                #
+                # This is where a mode-0 STAT lead SHORTER than the pipeline's
+                # own advance has to be spent, and it is the only place it can
+                # be. `m3_hold` is exactly the gap between the two events: the
+                # fetcher retired `m3_hold` dots ago (the pixels are decided,
+                # the burst has run) and the flag leaves mode 3 when this
+                # counter reaches 0. So the dot with `m3_hold == lead` IS
+                # `lead` dots before the flag, for any lead in 0 .. m3_hold --
+                # and 2 is in that range where it is not in the fetcher
+                # lookahead's, whose smallest nonzero move is `m3_hold + 1`.
+                #
+                # It moves NOTHING else: not a pixel (the burst is upstream of
+                # here), not the flag, not the length of mode 3, and in
+                # particular not the double-speed mode-3 end -- which is the
+                # constraint that refuses every `M3_END_EARLY` spelling, since
+                # a double-speed M-cycle is 2 dots and the 96
+                # `sprites/*_m3stat_ds_1` rows read the end through one.
+                if ppu.irq_mode == 3 and
+                   int32(ppu.m3_hold) <=
+                     ppu.m0_source_lead(stat_irq_lead(gb)):
+                  ppu_set_irq_mode(ppu, gb, 0'u8)
               dec ppu.m3_hold
               ppu.cycle_counter += 1
               continue
@@ -5010,8 +5114,9 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           if m2_lead_active(gb) and ppu.cycle_counter == ppu.m2_early_dot(gb):
             fifo_m2_early_edge(ppu, gb)
         when STAT_IRQ_SPLIT:
-          if ppu.cycle_counter == gb_line_end(ppu) - lead:
-            fifo_irq_line_advance(ppu, gb)
+          when STAT_M0_LEAD_DOMAIN:
+            if ppu.cycle_counter == gb_line_end(ppu) - lead:
+              fifo_irq_line_advance(ppu, gb)
         if ppu.cycle_counter == gb_line_end(ppu):
           ppu.stat_chg_dot -= ppu.cycle_counter
           when LCD_ON_TRIM_ANY:
@@ -5055,7 +5160,8 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           if m2_lead_active(gb) and ppu.cycle_counter == ppu.m2_early_dot(gb):
             fifo_m2_early_edge(ppu, gb)
         when STAT_IRQ_SPLIT:
-          if ppu.cycle_counter == 456 - lead: fifo_irq_line_advance(ppu, gb)
+          when STAT_M0_LEAD_DOMAIN:
+            if ppu.cycle_counter == 456 - lead: fifo_irq_line_advance(ppu, gb)
         if ppu.cycle_counter == 456:
           ppu.cycle_counter = 0
           ppu.stat_chg_dot -= 456
@@ -5086,10 +5192,11 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           # shipping build is LEAD = 0, where this whole block is compiled out
           # and the snap below is the only edge; anyone reviving the axis has to
           # answer that question first.
-          if ppu.ly == 153 and ppu.irq_ly == 153 and
-             ppu.cycle_counter >= LY153_SNAP_DOT - lead:
-            ppu.irq_ly = 0
-            ppu_handle_stat_interrupt(ppu, gb)
+          when STAT_M0_LEAD_DOMAIN:
+            if ppu.ly == 153 and ppu.irq_ly == 153 and
+               ppu.cycle_counter >= LY153_SNAP_DOT - lead:
+              ppu.irq_ly = 0
+              ppu_handle_stat_interrupt(ppu, gb)
         # The LY 153 -> 0 snapback and the comparator re-latch after it: see
         # fifo_line153_edge, which is where both live and why they are not
         # written out here. Same two compares this branch has always had -- the
