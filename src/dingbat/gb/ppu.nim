@@ -892,6 +892,50 @@ proc coincidence_interrupt_enabled*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_stat
 proc oam_interrupt_enabled*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_status and 0x20) != 0
 proc vblank_stat_enabled*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_status and 0x10) != 0
 proc hblank_interrupt_enabled*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_status and 0x08) != 0
+
+# ---- When a STAT write's source-enable bits reach the interrupt line -------
+#
+# Not at the M-cycle boundary, which is where the rest of the store still goes
+# (ppu_write_machinery, mem_flush_deferred): at the TOP of the M-cycle on DMG
+# and two dots into it on CGB. See STAT_ENABLE_LATENCY in gb.nim for the
+# fourteen rows that said so and the grid it was swept on.
+#
+# Spelled as a preview rather than as an early store. The parked byte already
+# lives in `gb.memory.deferred_reg`/`deferred_val` and is drained by the
+# boundary of the very M-cycle that filled it, so "a STAT write is parked" is
+# exactly "these dots are the ones the rule is about" -- and reading it here
+# leaves the readback path, the DMG write glitch and FF55's half of the slot
+# exactly as they were. Nothing can observe the difference: the CPU cannot read
+# a register in the same M-cycle it writes it, and the STAT line is a level OR
+# that is re-evaluated at every PPU event and again at the boundary.
+when STAT_ENABLE_EARLY:
+  proc stat_enables_leading(ppu: GbPpu; gb: GB): uint8 {.noinline.} =
+    ## `lcd_status` with the parked STAT write's enable bits already in it, for
+    ## the dots of the M-cycle that are past this device's latency.
+    ##
+    ## `noinline` and reached only from behind the caller's inlined
+    ## `deferred_reg` test: ppu_handle_stat_interrupt runs on every mode edge of
+    ## every line, and a STAT write is parked for at most one M-cycle in some
+    ## thousands.
+    let lat = int32(if gb.cgb_enabled: CGB_STAT_ENABLE_LATENCY
+                    else: STAT_ENABLE_LATENCY) shr gb.memory.current_speed
+    # The dots of one M-cycle can straddle a line boundary, where
+    # `cycle_counter` restarts at 0. Nothing else moves it backwards inside an
+    # M-cycle, so one wrap is the whole correction.
+    var elapsed = ppu.cycle_counter - int32(ppu.stat_wr_dot)
+    if elapsed < 0: elapsed += ppu.gb_line_end
+    if elapsed >= lat:
+      (ppu.lcd_status and 0b1000_0111'u8) or
+        (gb.memory.deferred_val and 0b0111_1000'u8)
+    else:
+      ppu.lcd_status
+
+  template stat_enables_now(ppu: GbPpu; gb: GB): uint8 =
+    (if gb.memory.deferred_reg == 0xFF41'u16: ppu.stat_enables_leading(gb)
+     else: ppu.lcd_status)
+else:
+  template stat_enables_now(ppu: GbPpu; gb: GB): uint8 = ppu.lcd_status
+
 proc coincidence_flag*(ppu: GbPpu): bool {.inline.} = (ppu.lcd_status and 0x04) != 0
 proc `coincidence_flag=`*(ppu: GbPpu; on: bool) {.inline.} =
   if on: ppu.lcd_status = ppu.lcd_status or 0x04
@@ -2010,16 +2054,17 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
   # The readable bit follows the readable LY; the SOURCE below follows irq_ly,
   # one M-cycle ahead of it (gambatte lycint_lycflag times the two apart).
   ppu.coincidence_flag = ppu.ly == ppu.lyc and not settling
+  let en = ppu.stat_enables_now(gb)
   let stat_flag =
-    (ppu.irq_ly_of == ppu.lyc and ppu.coincidence_interrupt_enabled and
+    (ppu.irq_ly_of == ppu.lyc and (en and 0x40'u8) != 0 and
      not settling) or
-    (ppu.m2_source(gb)        and ppu.oam_interrupt_enabled) or
+    (ppu.m2_source(gb)        and (en and 0x20'u8) != 0) or
     # The OAM (mode 2) STAT source also asserts at the start of vblank
     # (line 144) — simultaneously with the vblank interrupt on DMG, one
     # M-cycle earlier on CGB. See m2_line144.
-    (ppu.oam_interrupt_enabled and ppu.m2_line144(gb)) or
-    (ppu.irq_m0_of == 0       and ppu.hblank_interrupt_enabled) or
-    (ppu.irq_m1_of == 1       and ppu.vblank_stat_enabled)
+    ((en and 0x20'u8) != 0    and ppu.m2_line144(gb)) or
+    (ppu.irq_m0_of == 0       and (en and 0x08'u8) != 0) or
+    (ppu.irq_m1_of == 1       and (en and 0x10'u8) != 0)
   if not ppu.old_stat_flag and stat_flag:
     when defined(gb_stat_read_trace):
       echo "STATIRQ ly=", ppu.ly, " cc=", ppu.cycle_counter,
@@ -3109,6 +3154,10 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     # of the write acts here, at the write's commit point, and only the real
     # value waits for the M-cycle boundary.
     if not gb.cgb_enabled: ppu_stat_write_glitch(ppu, gb)
+    when STAT_ENABLE_EARLY:
+      # Where the M-cycle's PPU dots start. mem_write applies the byte between
+      # mem_tick_bus and mem_tick_ppu, so the dot counter has not moved yet.
+      ppu.stat_wr_dot = int16(ppu.cycle_counter)
     ppu_defer_machinery_write(ppu, gb, idx, val)
   of 0xFF42:
     when defined(gb_m3_trace):

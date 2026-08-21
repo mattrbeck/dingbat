@@ -1,6 +1,6 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-21 12:58:28*
+*Generated: 2026-08-21 12:12:00*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
@@ -54,21 +54,28 @@ All 40 tests passed.
 
 All 8 tests passed.
 
-## dma (185/229 passed)
+## dma (177/229 passed)
 
-185/229 tests passed, 44 failed:
+177/229 tests passed, 52 failed:
 
 | Test | Result |
 |------|--------|
 | dma/hdma_disable_display_1_cgb04c_out1 [cgb] | got 0, expected 1 |
+| dma/hdma_ei_m3halt_m0unhalt_ly_2_cgb04c_out03 [cgb] | got 02, expected 03 |
+| dma/hdma_late_ei_m3halt_m2unhalt_ly_scx1_2_cgb04c_out03 [cgb] | got 02, expected 03 |
+| dma/hdma_late_ei_m3halt_m2unhalt_ly_scx1_4_cgb04c_out03 [cgb] | got 02, expected 03 |
+| dma/hdma_late_ei_m3halt_m2unhalt_ly_scx1_6_cgb04c_out03 [cgb] | got 02, expected 03 |
 | dma/hdma_late_enable_ds_lcdoffset1_2_cgb04c_out0 [cgb] | got 1, expected 0 |
 | dma/hdma_late_enable_lcdoffset3_2_cgb04c_out0 [cgb] | got 1, expected 0 |
 | dma/hdma_late_if_and_ie_halt_2_cgb04c_out02 [cgb] | got 00, expected 02 |
-| dma/hdma_late_m0unhalt_2_cgb04c_outFF [cgb] | got 00, expected FF |
-| dma/hdma_late_m0unhalt_ds_2_cgb04c_outFF [cgb] | got 00, expected FF |
 | dma/hdma_late_m3halt_m2unhalt_inc_scx1_2_cgb04c_out02 [cgb] | got 01, expected 02 |
 | dma/hdma_late_m3halt_m2unhalt_inc_scx2_2_cgb04c_out02 [cgb] | got 01, expected 02 |
+| dma/hdma_late_m3halt_m2unhalt_ly_scx1_2_cgb04c_out03 [cgb] | got 02, expected 03 |
+| dma/hdma_late_m3halt_m2unhalt_ly_scx1_4_cgb04c_out03 [cgb] | got 02, expected 03 |
+| dma/hdma_late_m3halt_m2unhalt_ly_scx1_6_cgb04c_out03 [cgb] | got 02, expected 03 |
+| dma/hdma_late_m3halt_m2unhalt_ly_scx2_2_cgb04c_out03 [cgb] | got 02, expected 03 |
 | dma/hdma_late_m3halt_m2unhalt_ly_scx2_4_cgb04c_out03 [cgb] | got 02, expected 03 |
+| dma/hdma_late_m3halt_m2unhalt_ly_scx2_6_cgb04c_out03 [cgb] | got 02, expected 03 |
 | dma/hdma_late_m3halt_m2unhalt_scx1_2_cgb04c_outFF [cgb] | got 00, expected FF |
 | dma/hdma_late_m3speedchange_hdma5_scx1_3_cgb04c_outFF [cgb] | got 00, expected FF |
 | dma/hdma_late_m3speedchange_hdma5_scx1_ds_1_cgb04c_out00 [cgb] | got 80, expected 00 |
@@ -86,6 +93,7 @@ All 8 tests passed.
 | dma/hdma_m0halt_late_m3unhalt_scx1_2_cgb04c_out00 [cgb] | got FF, expected 00 |
 | dma/hdma_m0speedchange_late_m3wakeup_scx1_2_cgb04c_out00 [cgb] | got FF, expected 00 |
 | dma/hdma_m0speedchange_late_m3wakeup_scx2_2_cgb04c_out00 [cgb] | got FF, expected 00 |
+| dma/hdma_m3halt_m0unhalt_ly_2_cgb04c_out03 [cgb] | got 02, expected 03 |
 | dma/hdma_pc_7ffe_cgb04c_out02 [cgb] | got 80, expected 02 |
 | dma/hdma_start_ds_2_cgb04c_out1 [cgb] | got 0, expected 1 |
 | dma/hdma_start_scx5_1_cgb04c_out0 [cgb] | got 7, expected 0 |
@@ -276,14 +284,13 @@ All 62 tests passed.
 | lyc153int_m2irq/lyc153int_m2irq_late_retrigger_2_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
 | lyc153int_m2irq/lyc153int_m2irq_late_retrigger_2_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 
-## lycEnable (181/225 passed)
+## lycEnable (183/225 passed)
 
-181/225 tests passed, 44 failed:
+183/225 tests passed, 42 failed:
 
 | Test | Result |
 |------|--------|
-| lycEnable/ff41_disable_2_dmg08_out0_cgb04c_out2 [dmg] | got 2, expected 0 |
-| lycEnable/ff41_disable_ds_1_cgb04c_out1 [cgb] | got 3, expected 1 |
+| lycEnable/ff41_disable_2_dmg08_out0_cgb04c_out2 [cgb] | got 0, expected 2 |
 | lycEnable/ff45_disable_2_dmg08_out1_cgb04c_out3 [cgb] | got 1, expected 3 |
 | lycEnable/ff45_enable_weirdpoint_2_dmg08_out3_cgb04c_out1 [cgb] | got 3, expected 1 |
 | lycEnable/ff45_enable_weirdpoint_3_dmg08_out1_cgb04c_out3 [cgb] | got 1, expected 3 |
@@ -309,7 +316,6 @@ All 62 tests passed.
 | lycEnable/lyc0_ff45_disable_3_dmg08_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lyc0_ff45_disable_ds_2_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lyc0_late_ff45_enable_2_dmg08_outE2_cgb04c_outE0 [cgb] | got E2, expected E0 |
-| lycEnable/lyc0_m1disable_2_dmg08_outE2_cgb04c_outE0 [dmg] | got E0, expected E2 |
 | lycEnable/lyc0_m1disable_ds_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lyc153_late_enable_m1disable_2_dmg08_outE2_cgb04c_outE0 [dmg] | got E0, expected E2 |
 | lycEnable/lyc153_late_ff41_enable_ds_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
@@ -360,23 +366,14 @@ All 6 tests passed.
 
 All 8 tests passed.
 
-## m0enable (139/167 passed)
+## m0enable (148/167 passed)
 
-139/167 tests passed, 28 failed:
+148/167 tests passed, 19 failed:
 
 | Test | Result |
 |------|--------|
-| m0enable/disable_2_dmg08_out0_cgb04c_out2 [dmg] | got 2, expected 0 |
 | m0enable/disable_ds_1_cgb04c_out1 [cgb] | got 3, expected 1 |
-| m0enable/disable_scx1_1_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
-| m0enable/disable_scx1_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
-| m0enable/disable_scx2_1_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
-| m0enable/disable_scx2_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
-| m0enable/disable_scx3_2_dmg08_out0_cgb04c_out2 [dmg] | got 2, expected 0 |
-| m0enable/disable_scx4_2_dmg08_out0_cgb04c_out2 [dmg] | got 2, expected 0 |
-| m0enable/disable_scx5_1_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
-| m0enable/disable_scx5_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
-| m0enable/disable_scx7_2_dmg08_out0_cgb04c_out2 [dmg] | got 2, expected 0 |
+| m0enable/disable_scx5_ds_2_cgb04c_out3 [cgb] | got 1, expected 3 |
 | m0enable/enable_wxA6_2x_spxA7_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m0enable/enable_wxA6_2x_spxA7_ds_2_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m0enable/late_enable_lcdoffset1_1_cgb04c_out2 [cgb] | got 0, expected 2 |
@@ -411,13 +408,13 @@ All 4 tests passed.
 
 All 6 tests passed.
 
-## m1 (139/170 passed)
+## m1 (142/170 passed)
 
-139/170 tests passed, 31 failed:
+142/170 tests passed, 28 failed:
 
 | Test | Result |
 |------|--------|
-| m1/ly143_late_m0enable_ds_1_cgb04c_out3 [cgb] | got 1, expected 3 |
+| m1/ly143_late_m0enable_2_dmg08_out3_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m1/ly143_late_m0enable_lcdoffset1_1_cgb04c_out3 [cgb] | got 1, expected 3 |
 | m1/ly143_late_m2enable_2_dmg08_out3_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m1/ly143_late_m2enable_ds_2_cgb04c_out1 [cgb] | got 3, expected 1 |
@@ -430,13 +427,10 @@ All 6 tests passed.
 | m1/lycint143_m1irq_late_retrigger_2_dmg08_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m1/lycint_vblankirq_late_retrigger_2_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |
 | m1/lycint_vblankirq_late_retrigger_2_dmg08_cgb04c_out0 [cgb] | got 1, expected 0 |
-| m1/m1irq_disable_1_dmg08_out3_cgb04c_out1 [cgb] | got 3, expected 1 |
-| m1/m1irq_disable_ds_1_cgb04c_out1 [cgb] | got 3, expected 1 |
-| m1/m1irq_enable_after_lyc144_2_dmg08_out1_cgb04c_out3 [dmg] | got 3, expected 1 |
-| m1/m1irq_late_enable_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
+| m1/m1irq_enable_after_lyc144_2_dmg08_out1_cgb04c_out3 [cgb] | got 1, expected 3 |
+| m1/m1irq_late_enable_2_dmg08_out2_cgb04c_out0 [cgb] | got 2, expected 0 |
 | m1/m1irq_late_enable_lcdoffset1_1_cgb04c_out2 [cgb] | got 0, expected 2 |
-| m1/m1irq_m0disable_2_dmg08_out3_cgb04c_out1 [dmg] | got 1, expected 3 |
-| m1/m1irq_m0disable_ds_1_cgb04c_out3 [cgb] | got 1, expected 3 |
+| m1/m1irq_m0disable_2_dmg08_out3_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m1/m1irq_m2disable_lycdisable_2_dmg08_out3_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m1/m1irq_m2disable_lycdisable_3_dmg08_cgb04c_out1 [dmg] | got 3, expected 1 |
 | m1/m1irq_m2disable_lycdisable_3_dmg08_cgb04c_out1 [cgb] | got 3, expected 1 |
@@ -449,32 +443,25 @@ All 6 tests passed.
 | m1/m2m1irq_ifw_2_dmg08_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m1/m2m1irq_ifw_ds_2_cgb04c_out1 [cgb] | got 3, expected 1 |
 
-## m2enable (92/120 passed)
+## m2enable (100/120 passed)
 
-92/120 tests passed, 28 failed:
+100/120 tests passed, 20 failed:
 
 | Test | Result |
 |------|--------|
-| m2enable/disable_1_dmg08_out2_cgb04c_out0 [cgb] | got 2, expected 0 |
-| m2enable/disable_ds_1_cgb04c_out1 [cgb] | got 3, expected 1 |
-| m2enable/disable_ly0_1_dmg08_out2_cgb04c_out0 [cgb] | got 2, expected 0 |
-| m2enable/disable_ly0_ds_1_cgb04c_out1 [cgb] | got 3, expected 1 |
-| m2enable/late_enable_after_lycint_2_dmg08_out0_cgb04c_out2 [dmg] | got 2, expected 0 |
+| m2enable/late_enable_after_lycint_2_dmg08_out0_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m2enable/late_enable_after_lycint_disable_1_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | m2enable/late_enable_after_lycint_disable_1_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
-| m2enable/late_enable_after_lycint_disable_2_dmg08_out0_cgb04c_out2 [dmg] | got 2, expected 0 |
+| m2enable/late_enable_after_lycint_disable_2_dmg08_out0_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m2enable/late_enable_m0disable_1_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | m2enable/late_enable_m0disable_1_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
-| m2enable/late_enable_m0disable_2_dmg08_out0_cgb04c_out2 [dmg] | got 2, expected 0 |
+| m2enable/late_enable_m0disable_2_dmg08_out0_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m2enable/late_enable_m1disable_ly0_2_dmg08_out2_cgb04c_out0 [cgb] | got 2, expected 0 |
-| m2enable/late_m1disable_ly0_2_dmg08_out2_cgb04c_out0 [dmg] | got 0, expected 2 |
-| m2enable/lyc0_late_m2enable_lycdisable_1_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
-| m2enable/lyc0_late_m2enable_lycdisable_1_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
+| m2enable/late_m1disable_ly0_2_dmg08_out2_cgb04c_out0 [cgb] | got 2, expected 0 |
 | m2enable/lyc0_late_m2enable_lycdisable_2_dmg08_out2_cgb04c_out0 [dmg] | got 0, expected 2 |
 | m2enable/lyc0_late_m2enable_lycdisable_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
-| m2enable/lyc1_late_m2enable_lycdisable_1_dmg08_out0_cgb04c_out2 [dmg] | got 2, expected 0 |
+| m2enable/lyc1_late_m2enable_lycdisable_1_dmg08_out0_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m2enable/lyc1_late_m2enable_lycdisable_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
-| m2enable/lyc1_late_m2enable_lycdisable_ds_2_cgb04c_out0 [cgb] | got 2, expected 0 |
 | m2enable/lyc1_m2irq_late_lyc255_2_dmg08_out2_cgb04c_out0 [dmg] | got 0, expected 2 |
 | m2enable/lyc1_m2irq_late_lycdisable_1_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | m2enable/lyc1_m2irq_late_lycdisable_1_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
@@ -482,7 +469,6 @@ All 6 tests passed.
 | m2enable/m2_late_m0disable_1_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | m2enable/m2_late_m0disable_1_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m2enable/m2_late_m0disable_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
-| m2enable/m2_late_m1disable_ly0_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
 
 ## m2int_m0irq (67/72 passed)
 
@@ -512,23 +498,20 @@ All 8 tests passed.
 
 All 44 tests passed.
 
-## miscmstatirq (268/279 passed)
+## miscmstatirq (271/279 passed)
 
-268/279 tests passed, 11 failed:
+271/279 tests passed, 8 failed:
 
 | Test | Result |
 |------|--------|
-| miscmstatirq/lycstatwirq_trigger_ly00_10_50_1_dmg08_cgb04c_outE0 [dmg] | got E2, expected E0 |
-| miscmstatirq/lycstatwirq_trigger_ly00_10_50_1_dmg08_cgb04c_outE0 [cgb] | got E2, expected E0 |
-| miscmstatirq/lycstatwirq_trigger_ly00_10_50_ds_1_cgb04c_outE0 [cgb] | got E2, expected E0 |
+| miscmstatirq/lycstatwirq_trigger_ly00_10_50_lcdoffset3_2_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | miscmstatirq/lycstatwirq_trigger_m0_late_ly44_lyc44_08_40_ds_3_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | miscmstatirq/lycwirq_trigger_m0_late_ly44_lyc45_4_dmg08_cgb04c_outE2 [dmg] | got E0, expected E2 |
 | miscmstatirq/lycwirq_trigger_m0_late_ly44_lyc45_4_dmg08_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | miscmstatirq/lycwirq_trigger_m0_late_ly44_lyc45_ds_3_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | miscmstatirq/m0statwirq_scx2_2_dmg08_out2 [dmg] | got 0, expected 2 |
 | miscmstatirq/m0statwirq_scx5_2_dmg08_out2 [dmg] | got 0, expected 2 |
-| miscmstatirq/m1statwirq_trigger_ly94_lyc94_40_50_2_dmg08_outE0_cgb04c_outE2 [dmg] | got E2, expected E0 |
-| miscmstatirq/m1statwirq_trigger_ly94_lyc94_40_50_ds_1_cgb04c_outE0 [cgb] | got E2, expected E0 |
+| miscmstatirq/m1statwirq_trigger_ly94_lyc94_40_50_2_dmg08_outE0_cgb04c_outE2 [cgb] | got E0, expected E2 |
 
 ## oam_access (54/69 passed)
 
@@ -552,9 +535,9 @@ All 44 tests passed.
 | oam_access/prewrite_ds_2_cgb04c_out0 [cgb] | got 1, expected 0 |
 | oam_access/prewrite_ds_lcdoffset1_2_cgb04c_out0 [cgb] | got 1, expected 0 |
 
-## oamdma (788/802 passed)
+## oamdma (786/802 passed)
 
-788/802 tests passed, 14 failed:
+786/802 tests passed, 16 failed:
 
 | Test | Result |
 |------|--------|
@@ -565,6 +548,8 @@ All 44 tests passed.
 | oamdma/late_sp39x_4_cgb04c_out3 [cgb] | got 0, expected 3 |
 | oamdma/late_sp39x_ds_2_cgb04c_out3 [cgb] | got 0, expected 3 |
 | oamdma/late_sp39y_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
+| oamdma/oamdma_late_halt_stat_1_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
+| oamdma/oamdma_late_halt_stat_1_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | oamdma/oamdma_late_halt_stat_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | oamdma/oamdma_late_halt_stat_2_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | oamdma/oamdma_late_speedchange_stat_2_cgb04c_out3 [cgb] | got 0, expected 3 |
@@ -622,9 +607,9 @@ All 67 tests passed.
 | sound/ch2_late_reset_nr52_2b_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 | sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0 [cgb] | got 2, expected 0 |
 
-## speedchange (188/208 passed)
+## speedchange (192/208 passed)
 
-188/208 tests passed, 20 failed:
+192/208 tests passed, 16 failed:
 
 | Test | Result |
 |------|--------|
@@ -632,8 +617,8 @@ All 67 tests passed.
 | speedchange/speedchange2_ch2_nr52_ds_2a_cgb04c_outF2 [cgb] | got F0, expected F2 |
 | speedchange/speedchange2_tima01_1_cgb04c_out09 [cgb] | got 08, expected 09 |
 | speedchange/speedchange2_tima01_2_cgb04c_out0A [cgb] | got 09, expected 0A |
-| speedchange/speedchange2_tima01_nop_1_cgb04c_out0A [cgb] | got 08, expected 0A |
-| speedchange/speedchange2_tima01_nop_2_cgb04c_out0B [cgb] | got 09, expected 0B |
+| speedchange/speedchange2_tima01_nop_1_cgb04c_out0A [cgb] | got 09, expected 0A |
+| speedchange/speedchange2_tima01_nop_2_cgb04c_out0B [cgb] | got 0A, expected 0B |
 | speedchange/speedchange2_tima02_2a_cgb04c_out03 [cgb] | got 02, expected 03 |
 | speedchange/speedchange2_tima02_2b_cgb04c_out04 [cgb] | got 03, expected 04 |
 | speedchange/speedchange2_tima03_2a_cgb04c_out01 [cgb] | got 00, expected 01 |
@@ -642,12 +627,8 @@ All 67 tests passed.
 | speedchange/speedchange5_ch2_nr52_2a_cgb04c_outF2 [cgb] | got F0, expected F2 |
 | speedchange/speedchange_ch2_nr52_1a_cgb04c_outF2 [cgb] | got F0, expected F2 |
 | speedchange/speedchange_ch2_nr52_2a_cgb04c_outF2 [cgb] | got F0, expected F2 |
-| speedchange/speedchange_tima01_nop_1_cgb04c_out07 [cgb] | got 06, expected 07 |
-| speedchange/speedchange_tima01_nop_2_cgb04c_out08 [cgb] | got 07, expected 08 |
-| speedchange/speedchange_tima02_2a_cgb04c_out03 [cgb] | got 02, expected 03 |
-| speedchange/speedchange_tima02_2b_cgb04c_out04 [cgb] | got 03, expected 04 |
-| speedchange/speedchange_tima03_2a_cgb04c_out01 [cgb] | got 00, expected 01 |
-| speedchange/speedchange_tima03_2b_cgb04c_out02 [cgb] | got 01, expected 02 |
+| speedchange/speedchange_tima00_1a_cgb04c_out80 [cgb] | got 81, expected 80 |
+| speedchange/speedchange_tima00_1b_cgb04c_out81 [cgb] | got 82, expected 81 |
 
 ## sprites (470/476 passed)
 
@@ -668,14 +649,14 @@ All 67 tests passed.
 
 | Test | Result |
 |------|--------|
+| tima/tc00_irq_ds_1_cgb04c_outE0 [cgb] | got E4, expected E0 |
+| tima/tc00_irq_ifw_1_dmg08_cgb04c_outE4 [dmg] | got E0, expected E4 |
+| tima/tc00_irq_ifw_1_dmg08_cgb04c_outE4 [cgb] | got E0, expected E4 |
+| tima/tc00_irq_ifw_ds_1_cgb04c_outE4 [cgb] | got E0, expected E4 |
 | tima/tc00_irq_late_retrigger_2_dmg08_outE4_cgb04c_outE0 [cgb] | got E4, expected E0 |
-| tima/tc00_irq_late_retrigger_3_dmg08_cgb04c_outE0 [dmg] | got E4, expected E0 |
-| tima/tc00_irq_late_retrigger_3_dmg08_cgb04c_outE0 [cgb] | got E4, expected E0 |
 | tima/tc00_irq_late_retrigger_ds_2_cgb04c_outE0 [cgb] | got E4, expected E0 |
-| tima/tc00_late_tc01_5_dmg08_cgb04c_out00 [dmg] | got FF, expected 00 |
-| tima/tc00_late_tc01_5_dmg08_cgb04c_out00 [cgb] | got FF, expected 00 |
-| tima/tc00_late_tc01_7_dmg08_cgb04c_outFF [dmg] | got FE, expected FF |
-| tima/tc00_late_tc01_7_dmg08_cgb04c_outFF [cgb] | got FE, expected FF |
+| tima/tc00_late_tc01_5_dmg08_cgb04c_out00 [dmg] | got FE, expected 00 |
+| tima/tc00_late_tc01_5_dmg08_cgb04c_out00 [cgb] | got FE, expected 00 |
 
 ## undef_ops
 
@@ -709,9 +690,9 @@ All 20 tests passed.
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 
-## window (424/476 passed)
+## window (405/476 passed)
 
-424/476 tests passed, 52 failed:
+405/476 tests passed, 71 failed:
 
 | Test | Result |
 |------|--------|
@@ -736,7 +717,25 @@ All 20 tests passed.
 | window/arg/late_wy_FFto2_ly2_scx2_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_FFto2_ly2_scx3_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/arg/late_wy_FFto2_ly2_scx3_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
+| window/late_disable_1_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/late_disable_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/late_disable_early_scx00_wx0f_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/late_disable_early_scx00_wx11_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/late_disable_early_scx03_wx12_2_dmg08_out0_cgb04c_out3 [dmg] | got 3, expected 0 |
+| window/late_disable_late_scx00_wx0f_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/late_disable_late_scx00_wx10_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/late_disable_late_scx03_wx0f_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/late_disable_late_scx03_wx10_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/late_disable_late_scx03_wx11_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/late_disable_late_scx03_wx12_1_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
+| window/late_disable_late_scx03_wx12_1_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/late_disable_scx2_0_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
+| window/late_disable_scx2_0_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/late_disable_scx2_1_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/late_disable_scx3_1_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/late_disable_scx5_1_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_disable_scx5_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/late_disable_wx0f_1_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_enable_afterVblank_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_enable_afterVblank_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/late_enable_afterVblank_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
@@ -744,6 +743,7 @@ All 20 tests passed.
 | window/late_enable_afterVblank_ds_lcdoffset1_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_enable_afterVblank_lcdoffset1_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_reenable_scx3_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/late_scx_late_disable_1_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_wx_scx3_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_wy_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_wy_ds_lcdoffset1_1_cgb04c_out0 [cgb] | got 3, expected 0 |

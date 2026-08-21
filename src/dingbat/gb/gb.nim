@@ -194,6 +194,71 @@ const STAT_M0_LEAD_T* {.intdefine.} = 2
   ## re-brackets to 0 once it is gone): runner 1063 -> 1089, gambatte
   ## 4484 -> 4495, shootout 261/261, +0.12% of retired instructions on Pokemon
   ## Blue and +0.24% on Crystal.
+const STAT_ENABLE_LATENCY* {.intdefine.} = 0
+  ## Dots after the TOP of its M-cycle at which a STAT write's four
+  ## source-enable bits reach the STAT interrupt line. `4` (a whole M-cycle) is
+  ## the old spelling of this: the whole store held back to the M-cycle
+  ## BOUNDARY (`ppu_write_machinery` / `mem_flush_deferred`). It ships at **0**
+  ## on DMG -- the enable field lands with the byte, like every other write --
+  ## and at `CGB_STAT_ENABLE_LATENCY` on CGB.
+  ##
+  ## ## What made the old boundary spelling look right
+  ##
+  ## It was calibrated against a mode-0 SOURCE that was two dots late. When
+  ## `STAT_M0_LEAD_T = 2` moved the source onto its measured dot, fourteen
+  ## gambatte rows went red with it and they were all one shape --
+  ## `m0enable/disable_scx{1,2,5}_1`, `m0enable/lycdisable_ff4{1,5}_scx{1,2}*`
+  ## -- the same M-cycle seen from the STAT-WRITE side. Those ROMs race a STAT
+  ## write that clears the mode-0 enable against the mode-0 source's rise, one
+  ## M-cycle apart per sibling, and with the source two dots earlier the write
+  ## now loses a race it wins on hardware. The two errors had been cancelling.
+  ##
+  ## ## The whole FIELD moves, not the mode-0 bit
+  ##
+  ## Leading bit 3 alone is worth +9 gambatte rows and breaks three
+  ## `miscmstatirq/lycstatwirq_*` ones, and the reason is instructive: those
+  ## ROMs write `$40` over `$48`, i.e. they drop the mode-0 enable and raise the
+  ## LYC one in the SAME store. The STAT line is a level OR into a rising-edge
+  ## detector, so if bit 3 falls before bit 6 rises the line dips and the LYC
+  ## source then makes a fresh EDGE that hardware never sees. The four enable
+  ## bits are one register and change together. Moving the field instead of the
+  ## bit is +25 rather than +9, and it takes those three rows green as well.
+  ##
+  ## ## The measured grid (gambatte rows, whole suite, from 4497)
+  ##
+  ##     CGB latency ->     4       3       2       1       0
+  ##     DMG 0           4516    4511    4522    4520    4516
+  ##
+  ## DMG's own arm saturates at 0: latencies of 0 and -1 (i.e. any lead past the
+  ## top of the M-cycle) score identically, because there is no earlier dot in
+  ## the M-cycle to reach. That is what makes 0 a structural answer rather than
+  ## a fitted one -- the DMG's enable field simply is not deferred.
+  ##
+  ## In dots, `shr current_speed` at the use site: a double-speed M-cycle is 2
+  ## dots (Pan Docs, "Dots") and a flat dot count would spend the CGB's 2 as a
+  ## whole one. The `_ds_` rows are what catch that.
+const CGB_STAT_ENABLE_LATENCY* {.intdefine.} = 2
+  ## The CGB's value of the constant above. Two dots later than the DMG's, which
+  ## is the same axis every other CGB register write in this tree already has
+  ## (`CGB_SCX_LATENCY`, `CGB_LCDC_LATENCY`, `CGB_WY_LATENCY` -- see the
+  ## write-up at `mem_tick_ppu_latched` in memory.nim), and the same size as
+  ## most of them.
+  ##
+  ## It is a genuine two-sided bracket, not a saturation: at 4 the four
+  ## single-speed `m0enable/disable*_2` CGB rows and
+  ## `lycEnable/lyc0_ff41_disable_ds_2` go red, at 0 nine rows including
+  ## `m0enable/disable_scx{1,2,5}_1` and `m2enable/late_enable_m0disable_1` do.
+  ## The 1 and 3 cells are worse than both of their neighbours, which is the
+  ## shape of a residue that still has the CGB's `lcdoffset` phase axis in it
+  ## (`m1/*_lcdoffset1_*` flips sign across the whole sweep); 2 is the best cell
+  ## of a surface that is not yet flat, not the end of the question.
+
+const STAT_ENABLE_EARLY* = STAT_ENABLE_LATENCY < 4 or CGB_STAT_ENABLE_LATENCY < 4
+  ## Whether either device's enable field lands before the M-cycle boundary,
+  ## i.e. whether any of the machinery above needs to exist. At `4`/`4` the
+  ## whole rule and its GbPpu field compile out and the build is byte-for-byte
+  ## the one that defers everything to the boundary.
+
 const STAT_M0_LEAD_DOMAIN* {.booldefine.} = STAT_IRQ_LEAD != 0 or
                                             STAT_LYC_LEAD != 0
   ## Whether the irq domain's three BOUNDARY hooks (mode 2 -> 3, the line
@@ -4453,6 +4518,13 @@ type
     # serialized: a state is captured at VBlank, where no mode change is inside
     # a read's sampling window, so load_ppu_state just retires the hold.
     stat_chg_dot*:       int32
+    # The dot a deferred STAT write was parked on -- the top of the M-cycle
+    # whose boundary will flush it. `STAT_ENABLE_LATENCY` needs it to tell the
+    # dots of that M-cycle whose enable field has already moved from the ones
+    # before them. Transient per-M-cycle state, never live across an
+    # instruction boundary, so not serialized.
+    when STAT_ENABLE_EARLY:
+      stat_wr_dot*:      int16
     stat_prev_mode*:     uint8
     # ---- Sweep scratch: the STAT interrupt line's own phase ----------------
     # Gone from the shipping build -- the knob that gates it ships at the value
@@ -4471,6 +4543,7 @@ type
       # source's rise, not about the readable field's. Transient per-line
       # state; not serialized, for the reason above.
       irq_chg_dot*:      int16
+      # The dot a deferred STAT WRITE was parked on -- the top of the M-cycle
     # Dots since the last frame was pushed, counted whether or not the PPU is
     # driving the panel. The panel refreshes at a fixed rate regardless, so
     # this is what keeps frame output steady across an LCD that switches off
