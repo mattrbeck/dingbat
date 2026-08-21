@@ -2499,10 +2499,22 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   ppu.lcd_status = (ppu.lcd_status and 0b1111_1100'u8) or mode
   when STAT_IRQ_SPLIT:
     # The irq domain should already be here (it led by STAT_IRQ_LEAD); this is
-    # the catch-up for the paths that do not lead it at all -- the LCD-off
-    # tick, a speed switch that stepped over the lead's dot -- and a no-op
-    # otherwise.
-    ppu.irq_mode = mode
+    # the catch-up for the paths that do not lead it at all -- the FIRST LINE
+    # after an LCD enable (where `m0_source_lead` deliberately hands back a
+    # lead of 0), the LCD-off tick, a speed switch that stepped over the lead's
+    # dot -- and a no-op otherwise.
+    #
+    # `irq_chg_dot` has to be stamped HERE too, not only in ppu_set_irq_mode.
+    # It is the dot `halt_m0_tail_blind` measures the halted CPU's blind window
+    # from, and a catch-up that moved the source without it left the window
+    # measuring against a dot from some earlier line: on the LCD-on line the
+    # trace read `irqchg=0 statchg=252 cc=253`, i.e. an age of 253 where the
+    # real one is 1, so the window never fired and the halted wake came a whole
+    # M-cycle early. `tools/gbfuzz/sameboy_microtest` + the TIMA sled in the
+    # write-up at M0_HALT_BLIND_DOTS bracket that to the M-cycle.
+    if ppu.irq_mode != mode:
+      ppu.irq_mode = mode
+      ppu.irq_chg_dot = int16(ppu.cycle_counter)
   ppu_handle_stat_interrupt(ppu, gb)
   # The HBlank DMA step must run AFTER lcd_status reflects mode 0: the block
   # copy ticks the PPU (mem_tick_components in ppu_copy_hdma_block), and a

@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-21 12:12:00 · commit 4177703 · game-boy-test-roms v7.0*
+*Generated: 2026-08-21 12:24:31 · commit 7ac5983 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1225
-- **Pass:** 1089
-- **Fail:** 136
+- **Pass:** 1093
+- **Fail:** 132
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -22,7 +22,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Acid2 | 2 | 2 |
 | Game Boy - MagenTests | 7 | 7 |
 | Game Boy - Mealybug Tearoom | 73 | 74 |
-| Game Boy - GBMicrotest | 468 | 482 |
+| Game Boy - GBMicrotest | 472 | 482 |
 | Game Boy - AGE | 44 | 89 |
 | Game Boy - Screenshot suites | 13 | 13 |
 | Game Boy - SameSuite | 8 | 8 |
@@ -315,7 +315,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mealybug/dma/hdma_timing-C | CGB | 👀 Mooneye: FAIL |
 | mealybug/mbc/mbc3_rtc | cart | 👌 |
 
-## Game Boy - GBMicrotest (468/482)
+## Game Boy - GBMicrotest (472/482)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -400,14 +400,14 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gbmicrotest/hblank_scx3_int_b | cart | 👌 |
 | gbmicrotest/int_hblank_halt_bug_a | cart | 👌 |
 | gbmicrotest/int_hblank_halt_bug_b | cart | 👌 |
-| gbmicrotest/int_hblank_halt_scx0 | cart | 👀 actual=0x61 expected=0x62 verdict=0xFF |
+| gbmicrotest/int_hblank_halt_scx0 | cart | 👌 |
 | gbmicrotest/int_hblank_halt_scx1 | cart | 👌 |
 | gbmicrotest/int_hblank_halt_scx2 | cart | 👌 |
-| gbmicrotest/int_hblank_halt_scx3 | cart | 👀 actual=0x62 expected=0x63 verdict=0xFF |
-| gbmicrotest/int_hblank_halt_scx4 | cart | 👀 actual=0x62 expected=0x63 verdict=0xFF |
+| gbmicrotest/int_hblank_halt_scx3 | cart | 👌 |
+| gbmicrotest/int_hblank_halt_scx4 | cart | 👌 |
 | gbmicrotest/int_hblank_halt_scx5 | cart | 👌 |
 | gbmicrotest/int_hblank_halt_scx6 | cart | 👌 |
-| gbmicrotest/int_hblank_halt_scx7 | cart | 👀 actual=0x63 expected=0x64 verdict=0xFF |
+| gbmicrotest/int_hblank_halt_scx7 | cart | 👌 |
 | gbmicrotest/int_hblank_incs_scx0 | cart | 👌 |
 | gbmicrotest/int_hblank_incs_scx1 | cart | 👌 |
 | gbmicrotest/int_hblank_incs_scx2 | cart | 👌 |
