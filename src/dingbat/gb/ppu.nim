@@ -2246,19 +2246,18 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
   # one M-cycle ahead of it (gambatte lycint_lycflag times the two apart).
   ppu.coincidence_flag = ppu.ly == ppu.lyc and not settling
   # The snapback's blind window is a READ-path rule and the SOURCE leaves it
-  # `LYC_SRC_RELATCH_LEAD` M-cycles early. Written as a narrowing of `settling`
-  # rather than as a second window so it costs the mode-3 path one compare on
-  # the dots that are settling at all, and nothing on any other: see
-  # lyc_settling on why that matters here.
-  when LYC_SRC_RELATCH_LEAD == 0:
-    let settling_src = settling
-  else:
-    let settling_src = settling and
-                       ppu.cycle_counter < lyc_src_relatch_dot(gb)
+  # `LYC_SRC_RELATCH_LEAD` M-cycles early. Spelled as `not settling or <dot>`
+  # rather than as a second local so nothing extra is live across the source
+  # terms below: ppu_handle_stat_interrupt is inlined into `mode_flag=`, which
+  # is inside the mode 3 dot loop, and that loop sits on clang's inline
+  # threshold (docs/gb_oam_dma_cost.md). See lyc_settling for the same warning.
+  template src_settled(): bool =
+    when LYC_SRC_RELATCH_LEAD == 0: not settling
+    else: not settling or ppu.cycle_counter >= lyc_src_relatch_dot(gb)
   let en = ppu.stat_enables_now(gb)
   let stat_flag =
     (ppu.irq_ly_of == ppu.lyc and (en and 0x40'u8) != 0 and
-     not settling_src) or
+     src_settled()) or
     (ppu.m2_source(gb)        and (en and 0x20'u8) != 0) or
     # The OAM (mode 2) STAT source also asserts at the start of vblank
     # (line 144) — simultaneously with the vblank interrupt on DMG, one
@@ -2281,7 +2280,7 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
       # is answered. Printed as a set, because a handover can raise two at once.
       echo "STATSRC ly=", ppu.ly, " cc=", ppu.cycle_counter,
            " lyc=", (if ppu.irq_ly_of == ppu.lyc and
-                        ppu.coincidence_interrupt_enabled and not settling_src: 1
+                        ppu.coincidence_interrupt_enabled and src_settled(): 1
                      else: 0),
            " m2=", (if ppu.m2_source(gb) and ppu.oam_interrupt_enabled: 1
                     else: 0),
@@ -3181,9 +3180,12 @@ proc ppu_read*(ppu: GbPpu; gb: GB; idx: int): uint8 =
         echo "LY153READ cc=", ppu.cycle_counter, " ly=", ppu.ly,
              " cgb=", gb.cgb_enabled, " spd=", gb.memory.current_speed
     when LY153_READ_SPLIT:
-      let snap = (if gb.cgb_enabled: LY153_READ_SNAP_CGB
-                  else: LY153_READ_SNAP)
-      if ppu.ly == 153'u8 and ppu.cycle_counter >= snap: 0'u8
+      # `ly == 153` first and the device pick inside the `and`: this is every
+      # LY poll a game makes and the branch is taken on 5 dots of 70,224.
+      # Hoisting the pick cost +0.041% of ALL retired instructions on Pokemon
+      # Crystal; short-circuited it is +0.005%.
+      if ppu.ly == 153'u8 and ppu.cycle_counter >=
+           (if gb.cgb_enabled: LY153_READ_SNAP_CGB else: LY153_READ_SNAP): 0'u8
       else: ppu.ly
     else: ppu.ly
   of 0xFF45: ppu.lyc
