@@ -1428,6 +1428,71 @@ const HDMA_BLOCK_OVERHEAD_BUS* {.intdefine.} = 4
   ##     So the residual is not a placement question at ANY granularity. The
   ##     scheduler version was reverted rather than shipped: it ties the simpler
   ##     code while adding an event type and a save-state surface.
+const VDMA_OAM_BUS_CAPTURE* {.intdefine.} = 1
+  ## A VRAM DMA and an OAM DMA running at once: the OAM DMA writes the VRAM
+  ## DMA's byte, at the VRAM DMA's SOURCE address, into OAM. 1 = model it.
+  ##
+  ## Both engines share the one external bus. The OAM DMA unit is not a copier
+  ## with its own path -- it drives an address, samples the data lines one
+  ## M-cycle later, and stores. When a VRAM DMA has taken the bus, the address
+  ## and the data on those lines for that M-cycle are the VRAM DMA's, so the
+  ## OAM DMA stores **the VRAM DMA's byte at `hdma_src and 0xFF`** and its own
+  ## source/destination counters get nothing done for that slot.
+  ##
+  ## **Measured, not argued.** `dma/hdma_transition_oamdma_1` starts an OAM DMA
+  ## from $C000 (which holds $50,$51,...), arms a one-block HBlank DMA four
+  ## M-cycles later with source $0000 (ROM there is $9F,$9E,$9D,...), HALTs, and
+  ## reads OAM back. Patching only the readout address (`LD SP,$FExx` at $1481)
+  ## walks the whole of OAM, and SameBoy -- which passes the row -- answers:
+  ##
+  ##   OAM   00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 ...
+  ##   byte  50 9E 52 9C 54 9A 56 98 58 96 5A 94 5C 92 5E 90 60 61 ...
+  ##
+  ## Every ODD index in $00-$0F holds `ROM[idx]`; every even one holds the OAM
+  ## DMA's own byte; $10 up is clean. Two further patches say which address
+  ## line it is. Setting HDMA4 so the block's DESTINATION low byte is $40
+  ## (same instruction count, `LD A,$40` for one `LDH`) changes **nothing**.
+  ## Setting HDMA2 so the SOURCE is $0040 moves the corruption bodily to OAM
+  ## $41,$43,...,$4F holding `ROM[$41..$4F]`. It is the source address.
+  ##
+  ## The count of injected bytes is the OAM DMA's, not the block's.
+  ## `oamdma/oamdmasrcC000_hdmasrc0000` runs the block against the END of the
+  ## transfer; the same OAM walk gives six injected bytes ($01,$03,...,$0B) and
+  ## six OAM slots that never got written at all ($9A-$9F still hold the $A0
+  ## pre-fill) -- the transfer ran out mid-block, and after that the remaining
+  ## four HDMA bytes had no OAM DMA to write them. Six lost slots for six
+  ## injected bytes, so the OAM DMA slot is CONSUMED, not doubled.
+  ##
+  ## One byte per OAM DMA slot, i.e. one of each PAIR of block bytes in single
+  ## speed: which one is pure phase (the block began mid-M-cycle in both ROMs
+  ## above, so both show the odd one). SameBoy spells that phase as
+  ## `dma_cycles_modulo == 2 || cgb_double_speed` in GB_hdma_run; here it falls
+  ## out of `internal_dma_timer` on its own, and in double speed every block
+  ## byte is a whole OAM DMA slot so every one of them lands.
+const HDMA_OVERHEAD_LEADS* {.intdefine.} = 1
+  ## Charge HDMA_BLOCK_OVERHEAD_BUS BEFORE the transfer's bytes rather than
+  ## after: you take the bus, and THEN you drive it.
+  ##
+  ## The total per-transfer cost is identical either way, so nothing that only
+  ## counts M-cycles can tell the two apart -- the whole 40-row `*_cycles`
+  ## family is unmoved. What tells them apart is anything that watches the bus
+  ## DURING the transfer, and VDMA_OAM_BUS_CAPTURE gives exactly that: with the
+  ## overhead trailing, the block's first byte drives one M-cycle too early
+  ## relative to a concurrent OAM DMA, so the OAM DMA has one more store slot
+  ## left inside the block than it should.
+  ##
+  ## `oamdma/oamdmasrcC000_hdmasrc0000` measures it directly. Walking that
+  ## ROM's readout across the whole of OAM (patch `LD SP,$FE0A` at $10C1) gives
+  ## six injected bytes and six lost OAM DMA slots on SameBoy, and SEVEN of
+  ## each with the overhead trailing; leading it makes dingbat's OAM walk agree
+  ## with SameBoy's byte for byte over all 160 positions. The row is scored on
+  ## exactly the byte that differs.
+  ##
+  ##   whole gambatte suite: trailing 4445, **leading 4446**, nothing lost
+  ##
+  ## It also makes the held-block deadline mean what ppu_copy_hdma_block
+  ## already says it means -- "measured from the LAST transferred byte" -- which
+  ## it did not while an acquire/release M-cycle sat in between.
 const HDMA_VISIBLE_DOTS* {.intdefine.} = 4 + 4 * CGB_HALT_PPU_LEAD
   ## Dots an HBlank DMA block's bytes take to become visible in VRAM.
   ##
@@ -4510,6 +4575,11 @@ type
     # M-cycle, so the M-cycle the CPU wakes on can be charged for the bus
     # hand-back. Scratch, and dead outside a transfer.
     dma_was_halted*:       bool
+    # VDMA_OAM_BUS_CAPTURE only: a VRAM DMA owns the external bus for this
+    # M-cycle, so an OAM DMA slot inside it gets nothing of its own done.
+    # Scratch inside one ppu_copy_hdma_block, which no save state can be taken
+    # inside, so like dma_was_halted it is not serialized.
+    vdma_bus_hold*:        bool
     next_dma_counter*:     uint8
     # Derived from dma_position, maintained by mem_dma_tick: true for exactly
     # the M-cycles in `dma_position in 1 .. 0xA0`, i.e. while the OAM DMA unit
@@ -5517,6 +5587,7 @@ proc mem_tick_components*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true; i
 proc mem_tick_bus*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true) {.hot_bus_inline.}
 proc mem_tick_ppu*(mem: GbMemory; gb: GB; cycles: int; ignore_speed = false) {.hot_bus_inline.}
 proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int)
+proc mem_vdma_bus_capture*(mem: GbMemory; gb: GB; src_lo: uint8; val: uint8)
 proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8
 proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8)
 include ppu

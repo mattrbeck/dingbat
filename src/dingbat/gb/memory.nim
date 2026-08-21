@@ -883,6 +883,25 @@ proc mem_write_word*(mem: GbMemory; gb: GB; idx: int; val: uint16) =
   mem_write(mem, gb, (idx + 1) and 0xFFFF, uint8(val shr 8))
   mem_write(mem, gb, idx,                  uint8(val and 0xFF))
 
+proc mem_vdma_bus_capture*(mem: GbMemory; gb: GB; src_lo: uint8; val: uint8) =
+  ## The OAM DMA unit's write port, driven by a VRAM DMA instead of by the OAM
+  ## DMA itself: an in-flight OAM transfer stores whatever the external bus
+  ## carries at the end of a machine M-cycle, and while a VRAM DMA holds that
+  ## bus what it carries is a block byte at the block's SOURCE address.
+  ##
+  ## Called from ppu_copy_hdma_block rather than from mem_dma_tick because it
+  ## is NOT clocked by the OAM DMA's own bus cycles: gambatte's
+  ## `dma/hdma_transition_oamdma_1` HALTs across the block, so the transfer is
+  ## frozen and loses no slots at all, and the eight bytes still land. See
+  ## VDMA_OAM_BUS_CAPTURE in gb.nim.
+  ##
+  ## `dma_position <= 0xA0` is exactly SameBoy's `GB_is_dma_active`: past the
+  ## end of the transfer there is no port to drive, which is what leaves the
+  ## tail of `oamdma/oamdmasrcC000_hdmasrc0000`'s block with no effect.
+  if mem.dma_position <= 0xA0 and src_lo < 0xA0'u8:
+    mem.dma_latch = val
+    write_byte(mem, gb, 0xFE00 + int(src_lo), val)
+
 proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
   # Idle exit. This runs for every 4 T-cycles of every memory access, and an
   # OAM DMA is in flight for 160 of the ~70000 dots in a frame — the rest of
@@ -899,9 +918,16 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
     # why it is added here rather than left to the caller -- dingbat runs that
     # M-cycle's bus half with `halted` still set. See OAMDMA_HALT_PAUSE.
     if gb.cpu.halted:
-      mem.dma_was_halted = true
-      return
-    if mem.dma_was_halted:
+      # ...unless a VRAM DMA is driving the bus. What stops the unit is the
+      # absence of BUS cycles, not the absence of a CPU, and a VRAM DMA makes
+      # bus cycles: it keeps stepping through the block (storing nothing, since
+      # the lines are not its own -- see VDMA_OAM_BUS_CAPTURE) and comes out of
+      # the HALT that many positions further on. `dma_was_halted` is left set
+      # so the wake still pays for the hand-back.
+      if VDMA_OAM_BUS_CAPTURE == 0 or not mem.vdma_bus_hold:
+        mem.dma_was_halted = true
+        return
+    elif mem.dma_was_halted:
       mem.dma_was_halted = false
       when OAMDMA_HALT_PAUSE == 1: cycles += 4
       when OAMDMA_HALT_PAUSE == 3: return
@@ -953,18 +979,29 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
     if mem.dma_position <= 0xA0:
       if (mem.internal_dma_timer and 3) == 0:
         if mem.dma_position < 0xA0:
-          # The OAM DMA unit drives the external bus directly: on DMG, sources
-          # at or above 0xE000 read WRAM (the echo extends over 0xE000-0xFFFF,
-          # so 0xFE00/0xFF00 sources fetch 0xDE00/0xDF00 — mooneye sources-GS).
-          # The latch is the byte now on the DMA's bus for this M-cycle: what a
-          # colliding CPU read observes in place of its own address.
-          if mem.dma_openbus:
-            mem.dma_latch = 0xFF'u8
-          else:
-            var src = int(mem.current_dma_source) + mem.dma_position
-            if src >= 0xE000: src = src and not 0x2000
-            mem.dma_latch = read_byte(mem, gb, src)
-          write_byte(mem, gb, 0xFE00 + mem.dma_position, mem.dma_latch)
+          # A VRAM DMA holding the external bus for this M-cycle: the OAM DMA
+          # unit's slot still passes and its position counter still steps --
+          # the transfer is 160 slots long however many of them it gets to use
+          # -- but the address and the data on the lines are the VRAM DMA's, so
+          # nothing lands at its own destination. What DOES land, at the VRAM
+          # DMA's source address, is written by mem_vdma_bus_capture from the
+          # block copy itself; the two halves are separate because only this
+          # one is clocked by the OAM DMA's own bus cycles. See
+          # VDMA_OAM_BUS_CAPTURE in gb.nim for the OAM walks that measure both.
+          if VDMA_OAM_BUS_CAPTURE == 0 or not mem.vdma_bus_hold:
+            # The OAM DMA unit drives the external bus directly: on DMG,
+            # sources at or above 0xE000 read WRAM (the echo extends over
+            # 0xE000-0xFFFF, so 0xFE00/0xFF00 sources fetch 0xDE00/0xDF00 —
+            # mooneye sources-GS). The latch is the byte now on the DMA's bus
+            # for this M-cycle: what a colliding CPU read observes in place of
+            # its own address.
+            if mem.dma_openbus:
+              mem.dma_latch = 0xFF'u8
+            else:
+              var src = int(mem.current_dma_source) + mem.dma_position
+              if src >= 0xE000: src = src and not 0x2000
+              mem.dma_latch = read_byte(mem, gb, src)
+            write_byte(mem, gb, 0xFE00 + mem.dma_position, mem.dma_latch)
         inc mem.dma_position
         # dma_position is now >= 1, so this is exactly the old
         # `dma_position > 0 and dma_position <= 0xA0` predicate.

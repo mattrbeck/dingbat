@@ -2234,6 +2234,14 @@ proc ppu_copy_hdma_block*(ppu: GbPpu; gb: GB; in_cpu_cycle = false;
   # Never two blocks in the buffer at once: one is landed HDMA_VISIBLE_DOTS dots
   # into an HBlank and the next is a whole line away. Defensive only.
   if hold: ppu_flush_hdma_bytes(ppu, gb)
+  # The external bus is the VRAM DMA's for the whole of the copy below: an OAM
+  # DMA slot inside it stores the VRAM DMA's byte instead of its own. See
+  # VDMA_OAM_BUS_CAPTURE in gb.nim, which is where that is measured.
+  when VDMA_OAM_BUS_CAPTURE != 0:
+    let vdma_bus_was = gb.memory.vdma_bus_hold
+    gb.memory.vdma_bus_hold = true
+  when HDMA_OVERHEAD_LEADS != 0:
+    if charge_overhead: ppu_charge_hdma_overhead(ppu, gb)
   for byte in 0 ..< 0x10:
     let val = if src_legal: gb.memory.read_byte(gb, src_base + byte) else: 0xFF'u8
     if hold: ppu.hdma_held[byte] = val
@@ -2249,13 +2257,32 @@ proc ppu_copy_hdma_block*(ppu: GbPpu; gb: GB; in_cpu_cycle = false;
     mem_tick_bus(gb.memory, gb, 2 shl int(gb.memory.current_speed),
                  from_cpu = false)
     mem_tick_ppu(gb.memory, gb, 2, ignore_speed = true)
+    # An in-flight OAM DMA's write port latches the external bus at the END of
+    # each machine M-cycle, and a machine M-cycle is four scheduler cycles at
+    # either speed -- so in normal speed one of each PAIR of block bytes lands
+    # in OAM and in double speed every one of them does. The grid is read off
+    # the scheduler rather than off `internal_dma_timer` because that one stops
+    # with the CPU and this does not. See VDMA_OAM_BUS_CAPTURE in gb.nim.
+    when VDMA_OAM_BUS_CAPTURE != 0:
+      if (gb.scheduler.cycles and 3) == 0:
+        mem_vdma_bus_capture(gb.memory, gb, uint8((src_base + byte) and 0xFF),
+                             val)
   # The bus acquire/release either side of the TRANSFER, which is NOT part of
   # the per-byte cost above. Charged after the copies so the hold deadline below
   # is still measured from the last transferred byte. `charge_overhead` is false
   # for every block of a GDMA burst but its last: the CPU never gets the bus
   # back in between, so there is nothing to re-acquire. See
   # HDMA_BLOCK_OVERHEAD_BUS in gb.nim.
-  if charge_overhead: ppu_charge_hdma_overhead(ppu, gb)
+  when HDMA_OVERHEAD_LEADS == 0:
+    if charge_overhead: ppu_charge_hdma_overhead(ppu, gb)
+  when VDMA_OAM_BUS_CAPTURE != 0:
+    # Released only AFTER the acquire/release overhead: that M-cycle is the
+    # VRAM DMA's too, so an OAM DMA still steps through it and still stores
+    # nothing. `dma/hdma_transition_oamdma_2` is what says the ninth M-cycle
+    # counts -- it HALTs across a one-block transfer and reads the DMA latch
+    # afterwards, and answers $5E without the block clocking the unit at all,
+    # $66 with the block's eight M-cycles only, and $67 with this one as well.
+    gb.memory.vdma_bus_hold = vdma_bus_was
   if hold:
     # Armed only now that the block's own dots have run, so the deadline is
     # measured from the LAST transferred byte and the ticks above cannot spend
@@ -2493,9 +2520,10 @@ proc ppu_start_hdma*(ppu: GbPpu; gb: GB; val: uint8) =
       # One acquire and one release for the WHOLE burst, not one per block: a
       # GDMA never hands the bus back to the CPU in between. Charged after the
       # last block so a one-block GDMA is timed exactly as it was.
+      when HDMA_OVERHEAD_LEADS != 0: ppu_charge_hdma_overhead(ppu, gb)
       for _ in 0 .. int(ppu.hdma5):
         if not ppu_copy_hdma_block(ppu, gb, charge_overhead = false): break
-      ppu_charge_hdma_overhead(ppu, gb)
+      when HDMA_OVERHEAD_LEADS == 0: ppu_charge_hdma_overhead(ppu, gb)
       # GDMA is short of the hardware by some amount here, and SHIPS AT ZERO
       # because no constant is that amount. See GDMA_SETUP_MCYCLES in gb.nim
       # for the measurement that rejected every setting of it.
