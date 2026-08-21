@@ -278,7 +278,7 @@ a `--cgb`/model flag here.
 | Mooneye (Gekkio) | `LD B,B` + Fibonacci regs | `tmMooneye`; `manual-only/sprite_priority` is a screenshot |
 | Mooneye (wilbertpol fork) | opcode `0xED` + Fibonacci regs | `--ed-breakpoint`; `utils/` and `logic-analysis/` have no verdict and are skipped |
 | AGE (`age-test-roms`) | `LD B,B` + Fibonacci regs, or screenshot | `--bb-breakpoint`; the `ncm*` (CGB in non-CGB mode) variants are skipped — that device is not modeled |
-| GBMicrotest | HRAM `$FF82` | `--mode=microtest`, 2 frames (30 for `is_if_set_during_ime0`); 31 of the 513 ROMs never write `$FF82` and are skipped (`MicrotestNoVerdict`), so the suite is scored out of 482 |
+| GBMicrotest | HRAM `$FF82` | `--mode=microtest`, 2 frames (30 for `is_if_set_during_ime0`); 31 of the 513 ROMs never write `$FF82` (`MicrotestNoVerdict`) and 2 more assert an expected byte no Game Boy can produce (`MicrotestBrokenExpected`), so the suite is scored out of 480 |
 | Mealybug Tearoom, Acid2, cgb-acid-hell, bully, strikethrough, scribbltests, turtle-tests, little-things-gb, mbc3-tester | framebuffer vs bundled PNG | see below |
 | SameSuite `dma`, `ppu`, `interrupt`, `sgb`, `apu` | `LD B,B` + Fibonacci regs | `tmMooneye`; `--cgb` except `sgb/`, which runs `--sgb`; `apu/` is also reachable alone via `--apu` |
 | rtc3test, CasualPokePlayer MBC3, daid | framebuffer vs shootout PNG | downloaded from the gbdev shootout, scored with **its** tolerance — see below |
@@ -484,7 +484,7 @@ does not touch anything that is red.
 | Acid2 | howto: "probably any GB" / "any GBC" | dmg-acid2 DMG, cgb-acid2 CGB | 2/2 everywhere | correct |
 | MagenTests | CGB-only suite; 3 carts $C0, 4 carts $80 | `cart` → CGB C | 7/7 on all six CGB revisions | correct |
 | Mealybug Tearoom | capture names: `_dmg_blob`, `_cgb_c`, `_cgb_d` | DMG / cgbc / cgbd, one row per capture | **live**: forcing everything to C costs the 7 `_cgb_d` rows, to D or E costs 8 `_cgb_c` rows | correct |
-| GBMicrotest | howto: "checked on real hardware believed to be a DMG-CPU-08 … a DMG-CPU B or C" | `cart`, and **all 513 carts are $0143 = $00**, so DMG at grDmgABC | 478/482 on *all five* DMG revisions — but only 368/513 on a CGB, so the axis mattered and the answer is right | correct |
+| GBMicrotest | howto: "checked on real hardware believed to be a DMG-CPU-08 … a DMG-CPU B or C" | `cart`, and **all 513 carts are $0143 = $00**, so DMG at grDmgABC | 480/480 on *all five* DMG revisions — but only 368/513 on a CGB, so the axis mattered and the answer is right | correct |
 | AGE | howto: DMG-CPU-C, CPU CGB B, C and E; filename names the arms | one row per named revision (`@cgbab`/`@cgbc`/`@cgbe`, `dmgC`) | **44/89 on every revision, even with each row's `--model` overridden.** None of the four `GbQuirks` reaches an AGE row | correct, but see "inert arms" below |
 | Screenshot suites | per-PNG device token (`-dmg`, `-cgb`, `-cgb-dmg`) | the device the PNG names | bully needs cgbAB..cgbE (fails cgb0/agb); cgb-acid-hell needs C or E (fails D — its own `$FEA0` gate) | correct |
 | SameSuite | howto: no compat info for the non-APU groups | dma/ppu/interrupt CGB, `sgb/` with `--sgb` | 8/8 everywhere | correct |
@@ -538,9 +538,13 @@ axis reaches them, so they need model work, not a device flag:
   policy is not the blocker: `-cgb0BC` resolves to grCgbC, which is the
   default, and forcing it to grCgb0 or grCgbAB does not help either.
 - `mealybug/dma/hdma_timing-C` — red on all six CGB revisions.
-- All four red GBMicrotest rows (`halt_op_dupe_delay`, `line_153_ly_c`,
-  `line_153_lyc0_int_inc_sled`, `stat_write_glitch_l154_d`) — red on all five
-  DMG revisions and on all six CGB ones.
+- ~~All four red GBMicrotest rows~~ — **closed 2026-08-21, and the audit's
+  conclusion that the device axis was not the blocker held.** Two were model
+  bugs at the LY 153 -> 0 snapback (`line_153_lyc0_int_inc_sled` and
+  `line_153_ly_c`; see `LYC_SRC_RELATCH_LEAD` and `LY153_READ_SNAP` in
+  `gb/ppu.nim`) and two were ROM defects that SameBoy reproduces byte for byte
+  (`halt_op_dupe_delay`, `stat_write_glitch_l154_d`; see
+  `MicrotestBrokenExpected`). The suite is 480/480.
 - All 45 red AGE rows, per the inertness above.
 
 **One thing this audit changed and one it deliberately did not.** Changed:

@@ -1045,6 +1045,40 @@ const MicrotestNoVerdict = [
   "wave_write_to_0xC003",
 ]
 
+const MicrotestBrokenExpected = [
+  # Two bundled GBMicrotest ROMs whose $FF81 "expected" byte is not a value any
+  # Game Boy can produce. They are not this emulator's failures and they are not
+  # timing questions -- each is a defect in the ROM itself, established against
+  # the SameBoy oracle (tools/gbfuzz/sameboy_microtest) and, for the second,
+  # by construction. Both were red before the skip.
+  #
+  # "halt_op_dupe_delay" -- expects DIV = $55 (85) at a point its own source
+  #   (`xor a / ldh (DIV),a / halt / nop / nops 58 / test_finish_div $55`)
+  #   reaches ~62 M-cycles after resetting DIV. DIV increments every 64
+  #   M-cycles, so it cannot exceed 1 unless HALT blocks for ~5,440 M-cycles,
+  #   which the ROM's own HBlank-every-line setup rules out. $55 is the scratch
+  #   marker `cpu_bus_1.s` and a commented-out block of `400-dma.s` both use.
+  #   Its correctly written sibling `halt_op_dupe` (`xor a / halt / inc a /
+  #   test_finish_a 2`) dingbat passes. SameBoy answers $01 too.
+  #   Full derivation: docs/gb-test-suite-sources.md 8.6.
+  #
+  # "stat_write_glitch_l154_d" -- is missing the `xor a ; ldh ($FF0F),a` its
+  #   three siblings have at $0170, so its IF has not been cleared since $0158,
+  #   which is BEFORE the ROM enables the LCD and runs a 17,549 M-cycle delay
+  #   loop -- one whole frame, VBlank included. It then asserts IF reads $E0.
+  #   Proven both ways on 2026-08-21, with the timing held byte-identical:
+  #     * patch `e0 0f` -> `f0 0f` at $0170 of `_c` (turn its IF CLEAR into an
+  #       IF READ, same 4 M-cycles) and `_c` answers $E1 -- `_d`'s exact byte --
+  #       on dingbat and on SameBoy alike;
+  #     * patch `e0 0f` into `_d`'s sled at $016a and `_d` answers $E0, its own
+  #       expected value, and PASSES on dingbat and on SameBoy alike.
+  #   The leftover VBlank flag is real and both emulators report it correctly.
+  #
+  # Honest suite denominator: 480. Recorded in NotScored.
+  "halt_op_dupe_delay",
+  "stat_write_glitch_l154_d",
+]
+
 proc build_gbmicrotest_tests(dir: string): seq[TestDef] =
   ## aappleby's GBMicrotest: 500+ tiny DMG timing probes. Per the suite's howto
   ## each writes its verdict into HRAM — $FF80 actual, $FF81 expected, $FF82
@@ -1075,6 +1109,9 @@ proc build_gbmicrotest_tests(dir: string): seq[TestDef] =
     let name = rom.splitFile().name
     # ROMs with no verdict byte to read — see MicrotestNoVerdict above.
     if name in MicrotestNoVerdict:
+      continue
+    # ROMs whose expected byte is unreachable — see MicrotestBrokenExpected.
+    if name in MicrotestBrokenExpected:
       continue
     tests.add(TestDef(
       name: "gbmicrotest/" & name,
@@ -1916,6 +1953,17 @@ const NotScored: seq[(string, string)] = @[
     "and these 31 contain neither, so the harness would be scoring " &
     "uninitialised HRAM rather than a result. All 31 were failing rows before " &
     "the skip. The honest suite denominator is 482. " &
+    "(build_gbmicrotest_tests)"),
+  ("gbmicrotest: 2 ROMs whose expected byte is unreachable", "`halt_op_dupe_delay` " &
+    "wants DIV = $55 about 62 M-cycles after resetting DIV, which needs a " &
+    "5,440 M-cycle HALT its own HBlank-every-line setup rules out ($55 is the " &
+    "suite's scratch marker; its sibling `halt_op_dupe` is correctly written " &
+    "and passes). `stat_write_glitch_l154_d` is missing the `xor a ; " &
+    "ldh ($FF0F),a` its three siblings have, so it asserts IF = $E0 across a " &
+    "whole frame of LCD-on time it never cleared VBlank in -- restore that " &
+    "clear and it passes, strip it from `_c` at identical timing and `_c` " &
+    "produces `_d`'s byte, on dingbat and on SameBoy alike. Both are ROM " &
+    "defects, not verdicts. The honest suite denominator is 480. " &
     "(build_gbmicrotest_tests)"),
   ("scribbltests/fairylake, scribbltests/winpos", "ship no reference " &
     "image. (build_small_screenshot_tests)"),

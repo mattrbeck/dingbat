@@ -1553,7 +1553,9 @@ TAC with TIMA = `$FE` and DIV freshly zeroed — suspect the TAC-enable edge pha
 
 ## 8.6 `halt_op_dupe_delay`'s expected value is physically unattainable
 
-**1 dingbat row. Recommendation: do not spend.**
+**RESOLVED 2026-08-21: skipped, `MicrotestBrokenExpected` in the runner.** The
+analysis below stood up — SameBoy answers `$01` too — so the row is not scored
+and the suite denominator is 480.
 
 ```
   xor a
@@ -1571,6 +1573,34 @@ the HBlank-every-line setup rules out. `$55` is also the scratch marker in
 `cpu_bus_1.s` (`ld a, $55`) and in a commented-out block of `400-dma.s`. The
 correctly-written sibling `halt_op_dupe.s` (`xor a / halt / inc a / nop /
 test_finish_a 2`) **dingbat passes**. dingbat's `0x01` is the right answer.
+
+## 8.6b `stat_write_glitch_l154_d` never clears IF, and asserts that it is clear
+
+**RESOLVED 2026-08-21: skipped, `MicrotestBrokenExpected` in the runner.**
+
+`stat_write_glitch_l154_{a,b,c}` each carry TWO `xor a ; ldh ($FF0F),a` pairs —
+one at `$0158`, before the ROM turns the LCD on, and one at `$0170`, after its
+17,543 M-cycle delay loop. `_d` carries only the first. Its delay loop is one
+iteration longer to compensate for the three bytes, so the STAT write and the IF
+read land on exactly the M-cycle the staircase wants; what is gone is the clear.
+
+So `_d` asserts `IF == $E0` at a point 17,684 M-cycles (70,736 dots — one whole
+frame, line 144's VBlank included) after the last time it cleared IF. dingbat
+and SameBoy both answer `$E1`, and the leftover VBlank flag is real.
+
+Proven both ways with the timing held byte-identical (`tools/gbppu` patch, one
+2-byte edit each):
+
+* `e0 0f` -> `f0 0f` at `$0170` of `_c` turns its IF **clear** into an IF
+  **read** — same instruction length, same 4 M-cycles — and `_c` then answers
+  `$E1`, `_d`'s exact byte, on dingbat and on SameBoy alike.
+* `e0 0f` spliced into `_d`'s NOP sled at `$016a` makes `_d` answer `$E0`, its
+  own expected value, and PASS on dingbat and on SameBoy alike.
+
+The other eleven `stat_write_glitch_*` ROMs (l0, l1, l143) have a single clear
+at `$0158` and read IF while still inside the FIRST frame after LCD-on, before
+line 144 — which is why only the l154 family needed the second clear at all, and
+why only `_d` is wrong.
 
 ## 8.7 Why 31 ROMs are unscoreable, in the sources' own terms
 
