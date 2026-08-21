@@ -1660,7 +1660,8 @@ proc m2_line144*(ppu: GbPpu; gb: GB): bool {.inline.} =
 # `cycle_counter > 4` the two renderers already had. It stays where it was, and
 # the table below is why: GBMicrotest's `line_153_ly_c` does want it an M-cycle
 # earlier, but moving it is a whole-suite loss and it is not this dot's
-# question. (It was also swept on its own before this window existed and
+# question -- it is the READ path's, and `LY153_READ_SNAP` below is where that
+# M-cycle went. (It was also swept on its own before this window existed and
 # refused then: gambatte 3614 -> 3606, see docs/gb-failure-triage.md.)
 #
 # LYC_SETTLE_DOTS is new. It is the READ path's rule applied to the same edge:
@@ -1740,17 +1741,16 @@ proc m2_line144*(ppu: GbPpu; gb: GB): bool {.inline.} =
 # and their flip point moves one step either way. Against that: six rows that
 # measure nothing but this dot become exact.
 #
-# One GBMicrotest row disagrees outright, `line_153_lyc0_int_inc_sled`, and it
-# is worth naming precisely because it looks like a counter-example and is not.
-# It arms LYC=0, EIs, and runs 1122 `INC A` -- so it passes iff the interrupt
-# arrives before its last one, a boundary that sits between dots 5 and 9 of
-# line 153 in this tree. Its whole phase chain hangs off an LCD enable 16,300
-# M-cycles earlier, and that phase is a known open ±2 dots (LCD_ON_LINE0_TRIM
-# in gb.nim). Built: at `-d:LCD_ON_LINE0_TRIM=2` the sled PASSES and
-# `line_153_ly_c` with it, while `line_153_lyc0_stat_timing_c` goes red -- the
-# three trade 1:1 against each other on that constant and not on this one, and
-# daid stays pixel-exact through all of it. They are readings of the LCD-on
-# phase, not of the comparator.
+# One GBMicrotest row disagreed outright, `line_153_lyc0_int_inc_sled`, and
+# **it was neither this dot nor the LCD-on phase it was blamed on** -- see
+# LYC_SRC_RELATCH_LEAD below, which is what it was measuring. It arms LYC=0,
+# EIs, and runs 1122 `INC A`, so it passes iff the interrupt arrives before its
+# last one; the interrupt is the SOURCE's edge and the source leaves this
+# window a CPU M-cycle before the readable bit does. The reading recorded here
+# before that was found -- that `-d:LCD_ON_LINE0_TRIM=2` also makes it pass,
+# while breaking `line_153_lyc0_stat_timing_c` -- is a coincidence of two
+# M-cycles and not a diagnosis; LCD_ON_LINE0_TRIM=2 is separately REFUTED at
+# AGE cell resolution (620 -> 818 bad cells).
 # ---- It is NOT device-split, and daid's CGB arm is what asks -----------------
 #
 # daid `ppu_scanline_bgp` is listed above as the fourth witness, exact at 4.
@@ -1784,60 +1784,93 @@ const LYC_SETTLE_DOTS_D {.intdefine: "LYC_SETTLE_DOTS".} = 4
 const LY153_SNAP_DOT* = int32(LY153_SNAP_DOT_D)
 const LYC_SETTLE_DOTS* = int32(LYC_SETTLE_DOTS_D)
 const LYC_RELATCH_DOT* = LY153_SNAP_DOT + LYC_SETTLE_DOTS
-const LY153_SNAP_DOT_READ_D {.intdefine: "LY153_SNAP_DOT_READ".} = LY153_SNAP_DOT_D
-const LY153_SNAP_DOT_READ* = int32(LY153_SNAP_DOT_READ_D)
-  ## EXPERIMENT, shipped INERT (equal to `LY153_SNAP_DOT`, where the whole
-  ## branch in ppu_read compiles out). The dot the READABLE `$FF44` snaps to 0
-  ## on, when that is not the dot the comparator and the STAT source snap on.
+# The dot from which a CPU read of `$FF44` sees the LY 153 -> 0 snapback, when
+# that is not the dot the comparator and the STAT source see it on.
+#
+# **Read the identity value before touching these.** `ppu.cycle_counter` is the
+# NEXT dot the renderer will process, so a read taken on the M-cycle boundary
+# after dot 4 sees `cycle_counter == 5` with `ly` still 153 -- the snap at
+# `LY153_SNAP_DOT = 5` first becomes visible to a read at `cycle_counter == 6`.
+# The identity is therefore `LY153_SNAP_DOT + 1`, and the version of this
+# experiment that shipped "inert" at `LY153_SNAP_DOT` itself was in fact one dot
+# EARLY on every read on both devices. That is the whole of the "a
+# `gb.cgb_enabled` gate does not behave" anomaly this axis was parked on
+# (2026-08-20): DMG-4/CGB-5 and DMG-5/CGB-4 both moved the CGB, because 5 was
+# not the CGB's own value. Verified by construction -- (6, 6) reproduces a
+# no-branch build row for row, 1109 / 4582.
+const LY153_READ_SNAP_D {.intdefine: "LY153_READ_SNAP".} = LY153_SNAP_DOT_D
+const LY153_READ_SNAP_CGB_D {.intdefine: "LY153_READ_SNAP_CGB".} =
+  LY153_SNAP_DOT_D + 1
+const LY153_READ_SNAP* = int32(LY153_READ_SNAP_D)
+const LY153_READ_SNAP_CGB* = int32(LY153_READ_SNAP_CGB_D)
+const LY153_READ_SPLIT* = LY153_READ_SNAP != LY153_SNAP_DOT + 1 or
+                          LY153_READ_SNAP_CGB != LY153_SNAP_DOT + 1
+  ## LANDED 2026-08-21, DMG 5 / CGB 6 (the CGB value is the identity).
   ##
-  ## ## The measurement, which is not in doubt
+  ## ## The measurement
   ##
   ## Read `$FF44` off a NOP sled through the line 152 -> 153 -> 0 turn, in
-  ## dingbat and in SameBoy (`tools/gbfuzz/sameboy_microtest` + `.work/mtsled.py`,
-  ## the probe patched into `line_153_ly_c`'s own body at $0167). Every sled
-  ## position agrees except one:
+  ## dingbat and in SameBoy (`tools/gbfuzz/sameboy_microtest`, the probe patched
+  ## into `line_153_ly_c`'s own body). The suite ships the sled already:
+  ## `line_153_ly_{a,b,c,d}` are one ROM with one extra NOP each.
   ##
-  ##     k          ...4      5        6      7...
-  ##     dingbat     98       99      99      00
-  ##     SameBoy     98       99    **00**    00
+  ##     ROM         a(152)   b(153)   c        d
+  ##     hardware      98       99      00      00
+  ##     dingbat       98       99    **99**    00
   ##
   ## The 152 -> 153 edge is byte-identical, so this is NOT the LCD-on phase
-  ## chain the `line_153_lyc0_int_inc_sled` note below blames for its own
-  ## residue -- a phase error would move both edges. dingbat's readable LY sits
-  ## at 153 for **five dots** (0..4) where hardware gives it four (0..3), which
-  ## is AGE's C1 cluster ("the LY=153 readback window is one M-cycle too wide")
-  ## measured a second way.
+  ## chain -- a phase error would move both edges. dingbat's readable LY sat at
+  ## 153 for one CPU M-cycle too long, which is AGE's C1 cluster ("the LY=153
+  ## readback window is one M-cycle too wide") measured a second way.
   ##
-  ## ## Why it is not landed
+  ## ## Read the identity value before touching these
   ##
-  ## The dot the readable field snaps on and the dot the COMPARATOR snaps on
-  ## cannot both be 4: `LY153_SNAP_DOT = 4` with `LYC_SETTLE_DOTS = 5` (i.e. the
-  ## re-latch held at 9) is **shootout 260** -- `daid/ppu_scanline_bgp-dmg` at
-  ## 20848/23040 pixels -- plus `line_153_lyc153_stat_timing_b`,
-  ## `line_153_lyc_b` and six wilbertpol rows. Note what that corrects in the
-  ## write-up above: with `LYC_SETTLE_HALT_SKIP` on, daid's halted anchor is
-  ## `LY153_SNAP_DOT` itself, NOT the sum `LY153_SNAP_DOT + LYC_SETTLE_DOTS`.
+  ## The version of this experiment that shipped INERT at `LY153_SNAP_DOT` was
+  ## not inert: `cycle_counter` is the NEXT dot to be processed, so a read on
+  ## the M-cycle boundary after dot 4 sees `cycle_counter == 5` with `ly` still
+  ## 153. **The identity is `LY153_SNAP_DOT + 1`.** (6, 6) reproduces a
+  ## no-branch build row for row (1109 / 4582); (5, 5) does not.
   ##
-  ## Splitting them here -- readable field at 4, comparator left at 5 -- is
-  ## **runner 1097 -> 1100, gambatte 4524 -> 4525**, and what it buys and costs
-  ## is a clean list: `+gbmicrotest/line_153_ly_c`,
-  ## `+mooneye-wilbertpol acceptance/gpu/ly_new_frame-GS` (4 arms),
-  ## `+age/ly/ly-dmgC-cgbBC@dmgC`, `+gambatte enable_display/frame1_ly_count_2`
-  ## and `+ly0/lycint152_ly153_3` (both devices), against
-  ## `-age/ly/ly-cgbE`, `-ly_new_frame-C@cgbc`, `-ly_new_frame-C@agb`,
-  ## `-enable_display/frame1_ly_count_ds_1 [cgb]` and
-  ## `-ly0/lycint152_ly153_ds_4 [cgb]`. Every loss is CGB, every gain but two is
-  ## DMG, so a device split is the obvious next move -- and a
-  ## `gb.cgb_enabled` gate on this constant does NOT behave: DMG-4/CGB-5 and
-  ## DMG-5/CGB-4 score the same 1100 and differ from each other on ONE row
-  ## (`lcd_offset/offset1_lyc98int_ly_count_ds_1 [cgb]`), which no reading of
-  ## the gate explains. Not landed until that is understood; the +3 is real but
-  ## unexplained, and a count is not a mechanism.
+  ## That is the whole of the "a `gb.cgb_enabled` gate does not behave" anomaly
+  ## this axis was parked on (2026-08-20): DMG-4/CGB-5 and DMG-5/CGB-4 both
+  ## moved the CGB, because 5 was not the CGB's own value, and the one row they
+  ## differed on (`lcd_offset/offset1_lyc98int_ly_count_ds_1 [cgb]`) was the
+  ## only place the two wrong CGB settings disagreed with each other. With the
+  ## identity known the gate behaves exactly as a gate should.
   ##
-  ## At 1 instead of 4 it is firmly wrong and says why: LY = 153 becomes visible
-  ## for a single dot, so a `cp 153` polling loop cannot see it at all, and the
-  ## twelve `mooneye-wilbertpol acceptance/gpu/ly00_*` rows that sync that way
-  ## go red along with `line_153_ly_b` (the sibling that pins the window OPEN).
+  ## ## The grid, on `4177703` + LYC_SRC_RELATCH_LEAD (baseline 1109 / 4582)
+  ##
+  ##     DMG value     1      2      3      4      5      6 (identity)
+  ##     runner       1094   1119   1119   1119   1119   1109
+  ##     gambatte     4580   4584   4584   4584   4584   4582
+  ##
+  ## CGB held at 6 throughout. 2..5 is a flat plateau exactly four dots wide,
+  ## which is one CPU M-cycle: a read samples once per M-cycle, so every
+  ## threshold inside one sampling interval is the same statement. **The
+  ## content is "one CPU M-cycle earlier on the DMG", not "one dot".** 5 is
+  ## carried as the default because it is the smallest edit to the internal
+  ## snap; 2 would say the same thing.
+  ##
+  ## Two-sided on both ends. At 6 the ten rows below go red; at 1 the readable
+  ## LY = 153 window collapses below one sampling interval and 25 rows go red
+  ## with it, twelve of them the `mooneye-wilbertpol acceptance/gpu/ly00_*`
+  ## family that syncs with a `cp 153` polling loop, plus `line_153_ly_b` (the
+  ## sibling that pins the window OPEN).
+  ##
+  ## ## What it buys, and why the CGB keeps the identity
+  ##
+  ## `+gbmicrotest/line_153_ly_c`, `+mooneye-wilbertpol ly_new_frame-GS` and
+  ## `+ly_lyc_0-GS` (4 arms each), `+age/ly/ly-dmgC-cgbBC@dmgC`,
+  ## `+gambatte enable_display/frame1_ly_count_2 [dmg]` and
+  ## `+ly0/lycint152_ly153_3 [dmg]`. **Nothing goes red.**
+  ##
+  ## Moving the CGB with it (5, 5) costs `age/ly/ly-cgbE`,
+  ## `ly_new_frame-C@cgbc`, `ly_new_frame-C@agb`, and trades
+  ## `enable_display/frame1_ly_count_2 [cgb]` + `ly0/lycint152_ly153_3 [cgb]`
+  ## for their `_ds_` siblings -- so the CGB is asked from both sides and
+  ## answers "the identity". A per-register CGB read/write latency is the
+  ## family this belongs to (`CGB_LCDC_MIXER_LATENCY`, `CGB_MAP_LATENCY`,
+  ## `CGB_SCY_LATENCY`), and this is its `$FF44` member.
 
 proc lyc_settling*(ppu: GbPpu): bool {.noinline.} =
   ## Is the LY=LYC comparator inside the blind window the LY 153 -> 0 snapback
@@ -1860,6 +1893,63 @@ proc lyc_settling*(ppu: GbPpu): bool {.noinline.} =
   ppu.mode_flag == 1'u8 and ppu.ly == 0'u8 and
     ppu.cycle_counter >= LY153_SNAP_DOT and
     ppu.cycle_counter < LYC_RELATCH_DOT
+
+# ---- The snapback's blind window is a READ rule; the SOURCE is not in it ----
+#
+# `LYC_SETTLE_DOTS` above is the four dots between the LY 153 -> 0 snapback and
+# the LY = LYC comparator answering again, and until 2026-08-21 dingbat spent
+# those four dots on BOTH halves of the comparator at once: the readable
+# coincidence bit and the STAT interrupt source came back together at
+# `LYC_RELATCH_DOT`. They do not. Measured on the DMG against SameBoy, with two
+# sleds cut from `line_153_lyc0_stat_timing_c`'s own body at $01CC so both read
+# the same clock (`tools/gbppu/mksled.py`, `--mode=microtest` reports `$FF80`
+# whatever the ROM's own compare does):
+#
+#   probe                                              dingbat      SameBoy
+#   readable STAT bit 2 (`ldh a,($FF41)` at $1CC+k)    k 16 -> 17   k 16 -> 17
+#   dispatch (`ei` + `inc a` ruler, handler stores A)  A = 9        A = 8
+#
+# The flag is exact and the dispatch is one M-cycle late, on one clock, in one
+# pair of ROMs. So on hardware the SOURCE comes back one CPU M-cycle before the
+# readable bit does, and GBMicrotest's `line_153_lyc0_int_inc_sled` -- 1122
+# `inc a` after an `ei`, passing iff the interrupt lands on or before the last
+# one -- is the shipped row that reads it out.
+#
+# That is the same shape as `LY_JUST_CHANGED` in ppu_read, which is a READ-path
+# suppression and always was: the write-up at `LYC_SETTLE_DOTS` derives the
+# window from `lcdon_timing-GS`, and every ROM in that derivation reads the
+# BIT. The one witness that timed the interrupt instead -- daid's
+# `ppu_scanline_bgp` -- is HALTED, and `LYC_SETTLE_HALT_SKIP` (gb.nim) already
+# exempts it, which is why nothing in the tree noticed the source was riding
+# the flag's dot.
+#
+# ---- One CPU M-cycle, not four dots ---------------------------------------
+#
+# The lead is in CPU M-cycles and the window it is subtracted from is in dots,
+# and gambatte's double-speed arms are what separate the two. Spelled as a flat
+# "the source is never blind" (i.e. the source back at LY153_SNAP_DOT, four dots
+# ahead of the flag) the single-speed staircases WIDEN correctly -- both
+# `ly0/lycint152_lyc0irq_1` and `_2` pass on both devices -- while every
+# `_ds_` arm of the same families merely STEPS: `lycint152_lyc0irq_ds_1` ->
+# `_ds_2`, `lyc0int_m0irq_ds_2` -> `_ds_1`, `lycEnable/lyc0_ff41_disable_ds_1`
+# -> `_ds_2`, `lycEnable/lyc0_ff45_disable_ds_1` -> `_ds_2`. Four dots is one
+# M-cycle at normal speed and TWO in double speed, so a flat four overshoots the
+# double-speed arms by exactly the M-cycle they step by. At `LYC_SRC_RELATCH_LEAD
+# = 1` the lead is `4 shr current_speed` dots and both speeds land.
+const LYC_SRC_RELATCH_LEAD* {.intdefine.} = 1
+  ## CPU M-cycles by which the LY = LYC STAT SOURCE comes back out of the
+  ## snapback's blind window before the readable coincidence bit does. 0 is the
+  ## pre-2026-08-21 model (one dot for both) and compiles the whole split out.
+  ## See above.
+
+proc lyc_src_relatch_dot*(gb: GB): int32 {.inline.} =
+  ## The dot of line 153 the LY = LYC STAT source relatches on, which is
+  ## `LYC_SRC_RELATCH_LEAD` CPU M-cycles before the readable bit's
+  ## `LYC_RELATCH_DOT`. Folds to `LYC_RELATCH_DOT` at a lead of 0.
+  when LYC_SRC_RELATCH_LEAD == 0: LYC_RELATCH_DOT
+  else:
+    LYC_RELATCH_DOT -
+      int32(LYC_SRC_RELATCH_LEAD) * int32(4 shr gb.memory.current_speed)
 
 proc lyc_settle_halt_skip(gb: GB): bool {.inline.} =
   ## Is this CPU one the snapback's blind window does not defer? See
@@ -2155,10 +2245,20 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
   # The readable bit follows the readable LY; the SOURCE below follows irq_ly,
   # one M-cycle ahead of it (gambatte lycint_lycflag times the two apart).
   ppu.coincidence_flag = ppu.ly == ppu.lyc and not settling
+  # The snapback's blind window is a READ-path rule and the SOURCE leaves it
+  # `LYC_SRC_RELATCH_LEAD` M-cycles early. Written as a narrowing of `settling`
+  # rather than as a second window so it costs the mode-3 path one compare on
+  # the dots that are settling at all, and nothing on any other: see
+  # lyc_settling on why that matters here.
+  when LYC_SRC_RELATCH_LEAD == 0:
+    let settling_src = settling
+  else:
+    let settling_src = settling and
+                       ppu.cycle_counter < lyc_src_relatch_dot(gb)
   let en = ppu.stat_enables_now(gb)
   let stat_flag =
     (ppu.irq_ly_of == ppu.lyc and (en and 0x40'u8) != 0 and
-     not settling) or
+     not settling_src) or
     (ppu.m2_source(gb)        and (en and 0x20'u8) != 0) or
     # The OAM (mode 2) STAT source also asserts at the start of vblank
     # (line 144) — simultaneously with the vblank interrupt on DMG, one
@@ -2181,7 +2281,7 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
       # is answered. Printed as a set, because a handover can raise two at once.
       echo "STATSRC ly=", ppu.ly, " cc=", ppu.cycle_counter,
            " lyc=", (if ppu.irq_ly_of == ppu.lyc and
-                        ppu.coincidence_interrupt_enabled and not settling: 1
+                        ppu.coincidence_interrupt_enabled and not settling_src: 1
                      else: 0),
            " m2=", (if ppu.m2_source(gb) and ppu.oam_interrupt_enabled: 1
                     else: 0),
@@ -3076,8 +3176,14 @@ proc ppu_read*(ppu: GbPpu; gb: GB; idx: int): uint8 =
   of 0xFF44:
     # Inert at the shipping value -- the branch is not compiled at all. See
     # LY153_SNAP_DOT_READ.
-    when LY153_SNAP_DOT_READ != LY153_SNAP_DOT:
-      if ppu.ly == 153'u8 and ppu.cycle_counter >= LY153_SNAP_DOT_READ: 0'u8
+    when defined(gb_ly153_probe):
+      if ppu.ly == 153'u8 and ppu.cycle_counter >= LY153_SNAP_DOT:
+        echo "LY153READ cc=", ppu.cycle_counter, " ly=", ppu.ly,
+             " cgb=", gb.cgb_enabled, " spd=", gb.memory.current_speed
+    when LY153_READ_SPLIT:
+      let snap = (if gb.cgb_enabled: LY153_READ_SNAP_CGB
+                  else: LY153_READ_SNAP)
+      if ppu.ly == 153'u8 and ppu.cycle_counter >= snap: 0'u8
       else: ppu.ly
     else: ppu.ly
   of 0xFF45: ppu.lyc

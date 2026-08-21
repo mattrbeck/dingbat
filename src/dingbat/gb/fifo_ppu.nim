@@ -4870,11 +4870,18 @@ proc fifo_line153_edge(ppu: GbFifoPpu; gb: GB) {.noinline.} =
     ppu.ly = 0
     when STAT_IRQ_SPLIT: ppu.irq_ly = 0
     ppu_handle_stat_interrupt(ppu, gb)
-  elif ppu.ly == 0 and ppu.cycle_counter == LYC_RELATCH_DOT:
+  elif ppu.ly == 0 and (ppu.cycle_counter == LYC_RELATCH_DOT or
+                        ppu.cycle_counter == lyc_src_relatch_dot(gb)):
     # The far side: the comparator re-latches, so with LYC = 0 this is the dot
     # the match -- and its interrupt -- appears on. `mode 1 with LY 0` is line
     # 153 and nothing else; line 0 is already in mode 2 by the time its own LY
     # reads 0.
+    #
+    # TWO dots in a double-speed build: the SOURCE relatches a CPU M-cycle
+    # before the readable bit (LYC_SRC_RELATCH_LEAD in ppu.nim), and one
+    # M-cycle is two dots there against the window's four. At normal speed the
+    # source's dot IS `LY153_SNAP_DOT` and the branch above already ran it, so
+    # the two compares fold to one; at a lead of 0 they are the same dot.
     ppu_handle_stat_interrupt(ppu, gb)
 
 # Can the mode-0 source's lead ever be LARGER than the retire -> flag hand-off

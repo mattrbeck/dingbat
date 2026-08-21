@@ -253,7 +253,7 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
         ppu.ly = 0
         when STAT_IRQ_SPLIT: ppu.irq_ly = 0
         ppu_handle_stat_interrupt(ppu, gb)
-      elif ppu.ly == 0 and ppu.cycle_counter >= LYC_RELATCH_DOT:
+      elif ppu.ly == 0 and ppu.cycle_counter >= lyc_src_relatch_dot(gb):
         ppu_handle_stat_interrupt(ppu, gb)
   else:
     ppu.cycle_counter = 0
