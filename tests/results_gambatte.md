@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-22 07:15:32*
+*Generated: 2026-08-22 07:27:24*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4611/4996 passed.**
+**4617/4996 passed.**
 
 ## bgen
 
@@ -546,18 +546,9 @@ All 67 tests passed.
 | sound/ch2_late_reset_nr52_2b_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 | sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0 [cgb] | got 2, expected 0 |
 
-## speedchange (202/208 passed)
+## speedchange
 
-202/208 tests passed, 6 failed:
-
-| Test | Result |
-|------|--------|
-| speedchange/speedchange2_ch2_nr52_ds_1a_cgb04c_outF2 [cgb] | got F0, expected F2 |
-| speedchange/speedchange2_ch2_nr52_ds_2a_cgb04c_outF2 [cgb] | got F0, expected F2 |
-| speedchange/speedchange5_ch2_nr52_1a_cgb04c_outF2 [cgb] | got F0, expected F2 |
-| speedchange/speedchange5_ch2_nr52_2a_cgb04c_outF2 [cgb] | got F0, expected F2 |
-| speedchange/speedchange_ch2_nr52_1a_cgb04c_outF2 [cgb] | got F0, expected F2 |
-| speedchange/speedchange_ch2_nr52_2a_cgb04c_outF2 [cgb] | got F0, expected F2 |
+All 208 tests passed.
 
 ## sprites (472/476 passed)
 

@@ -5794,6 +5794,23 @@ type
     # div_skip is pending the two disagree, and div_write_trigger_10 is exactly
     # the test that can tell.
     first_half_of_length_period*: bool
+    # **The DIV-APU tap runs one M-cycle behind after an ODD number of
+    # switches into double speed.** c-sp's `speed-switch/spsw-ch2-lc-delay`
+    # says so in its own comments and measures every clause of it; see
+    # `APU_SPSW_TAP_LAG_T` in timer.nim for the cell-by-cell reading.
+    #
+    # Toggled -- not set -- on each KEY1 switch INTO double speed, and cleared
+    # by an APU power-off. That spelling is forced by the ROM: its
+    # `TEST_DS_NS_DS` row ("the second switch to double speed does not
+    # introduce a 1 m-cycle length counter delay") and `TEST_DS_NS_DS_NS_DS`
+    # row ("ticks are delayed by 1 m-cycle after the THIRD switch") differ in
+    # nothing else -- same back-to-back switch pairs, same 0/1 delays between
+    # them, both measured immediately after a switch into double speed.
+    #
+    # Not serialized, like `div_skip` and `tick_phase` above: it is worth one
+    # M-cycle of length-counter phase, and a state saved mid-run would need a
+    # GB payload revision bump to carry it. See docs/gb-payload-rev.md.
+    spsw_fs_lag*:         bool
     left_enable*:         bool
     left_volume*:         uint8
     right_enable*:        bool
@@ -6907,6 +6924,10 @@ include mbc/mbc6
 include mbc/camera
 include mbc/tama5
 # Audio: the four PSG channels, then the mixer
+# Forward declaration needed by apu.nim (defined in timer.nim, included
+# below): an APU power cycle re-aims the DIV-APU edge, because the lag a speed
+# switch leaves on the tap does not survive the power. See APU_SPSW_TAP_LAG_T.
+proc apu_div_phase*(t: GbTimer; gb: GB): int
 include apu/abstract_channels
 include apu/channel1
 include apu/channel2

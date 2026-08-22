@@ -1,5 +1,43 @@
 # GB APU master (included by gb.nim)
 
+const APU_SPSW_TAP_LAG_T* {.intdefine.} = 4
+  ## **After an odd number of KEY1 switches into double speed, the DIV-APU
+  ## tap's falling edge arrives one M-cycle late.** Divider counts (= raw
+  ## scheduler cycles) added to every re-aim of `etAPUFrameSeq` while
+  ## `GbApu.spsw_fs_lag` is set. 0 compiles the mechanism out.
+  ##
+  ## c-sp's `speed-switch/spsw-ch2-lc-delay-cgbBCE.gb` is the whole
+  ## measurement, and it states each clause in a comment above the macro that
+  ## checks it. Read at cell resolution with `tools/gbppu/agediff.py`, its
+  ## eight scored rows are eight independent questions about this one M-cycle:
+  ##
+  ##   row 0  TEST_DS               ch2 on, ONE switch to DS         DELAYED
+  ##   row 1  TEST_DS_CH2_INIT      ...re-triggering ch2 at DS       DELAYED
+  ##   row 2  TEST_DS_DIV_RESET     ...writing DIV at DS             DELAYED
+  ##   row 3  TEST_DS_ON            APU off across the switch        not
+  ##   row 4  TEST_DS_OFF_ON        APU off/on after the switch      not
+  ##   row 5  TEST_DS_NS_DS         SECOND switch into DS            not
+  ##   row 6  TEST_DS_NS_DS_NS_DS   THIRD switch into DS             DELAYED
+  ##   row 7  TEST_RESET_EDGE_DS    the reset's own immediate step   (see below)
+  ##
+  ## Every row brackets its answer with a pair of delays one M-cycle apart
+  ## (`DELAY 4093` / `DELAY 4094`) and reads NR52's channel-2 bit, so each is a
+  ## two-sided M-cycle measurement rather than a threshold.
+  ##
+  ## Rows 5 and 6 are what force `spsw_fs_lag` to be a TOGGLE and not a flag
+  ## set by the switch: they differ in nothing but the number of switches into
+  ## double speed (two versus three), both end with a back-to-back
+  ## `SWITCH_SPEED ; SWITCH_SPEED` pair, and both are insensitive to the 0/1
+  ## M-cycle delays between the switches -- which the ROM checks by running
+  ## each row four times over those delays. Rows 3 and 4 are what say an APU
+  ## power-off clears it. Rows 1 and 2 are what say nothing else does: neither
+  ## re-triggering the channel nor resetting DIV by hand takes the lag away,
+  ## which is why the lag rides the tap and not the channel.
+  ##
+  ## No mechanism is claimed for the parity. A per-switch half-count of the
+  ## divider's clock would give one, but nothing here measures it, and c-sp's
+  ## own comments stop at the behaviour too.
+
 when defined(emscripten):
   proc appendAudioSample(left, right: float32) {.importc, cdecl.}
 
@@ -492,6 +530,25 @@ proc apu_read*(apu: GbApu; idx: int; gb: GB): uint8 =
   of 0xFF30..0xFF3F: ch3_read(apu.channel3, idx, gb)
   else: 0xFF'u8
 
+proc apu_drop_spsw_lag(apu: GbApu; gb: GB) =
+  ## An APU power transition takes the speed switch's tap lag away, pending
+  ## edge included -- so the flag alone is not enough: the edge already aimed
+  ## with the lag on it has to be re-aimed from the divider's own phase.
+  ##
+  ## Both edges of NR52 bit 7 run this. c-sp `spsw-ch2-lc-delay`'s
+  ## `TEST_DS_OFF_ON` row powers the APU down AFTER the switch and needs the
+  ## off edge; its `TEST_DS_ON` row switches with the APU ALREADY down, so
+  ## nothing happens on the off edge there and only the on edge can see it.
+  ## Both rows expect the undelayed length clock, while the neighbouring
+  ## `TEST_DS_CH2_INIT` / `TEST_DS_DIV_RESET` rows expect the lag to survive a
+  ## channel re-trigger and a hand-written DIV reset. See APU_SPSW_TAP_LAG_T
+  ## in timer.nim for the whole table.
+  when APU_SPSW_TAP_LAG_T != 0:
+    if apu.spsw_fs_lag:
+      apu.spsw_fs_lag = false
+      gb.scheduler.clear(etAPUFrameSeq)
+      gb.scheduler.schedule(apu_div_phase(gb.timer, gb), etAPUFrameSeq)
+
 proc apu_write*(apu: GbApu; idx: int; val: uint8; gb: GB) =
   if not apu.sound_enabled and idx != 0xFF26 and not (idx in 0xFF30..0xFF3F):
     # Pan Docs, Power Control: while the APU is off "all registers ... are
@@ -588,9 +645,11 @@ proc apu_write*(apu: GbApu; idx: int; val: uint8; gb: GB) =
       # that produced it is running. See ch4_steps_to_rise.
       apu.channel4.div_next    = GB_NO_STEP
       apu.channel4.div_counter = 0
+      apu_drop_spsw_lag(apu, gb)
     elif (val and 0x80) != 0 and not apu.sound_enabled:
       apu.sound_enabled = true
       apu.frame_sequencer_stage = 0
+      apu_drop_spsw_lag(apu, gb)
       # The APU's 1 MHz tick grid restarts here; every square-channel trigger
       # from now on is quantized to it. See GbApu.tick_phase.
       apu.tick_phase = gb.scheduler.cycles mod gb_apu_tick(gb)

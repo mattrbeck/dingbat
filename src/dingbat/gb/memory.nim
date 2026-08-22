@@ -1622,6 +1622,15 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
     # array, so rescale them the same way `speed_mode=` rescales events.
     gb.apu.apu_rescale_speed(gb, old_speed, mem.current_speed)
     gb.scheduler.`speed_mode=`(mem.current_speed)
+    # Re-aim the DIV-APU edge from the (just reset) divider at the NEW speed.
+    # `timer_speed_switch_div_reset` above already aimed it, but it ran before
+    # the speed changed, so what it scheduled went through `speed_mode=`'s
+    # rescale — which reproduces the same edge exactly, and would double or
+    # halve the tap's own lag along with it. Aiming again here is a no-op
+    # without that lag and the only correct place for it with one. See
+    # APU_SPSW_TAP_LAG_T in timer.nim.
+    gb.scheduler.clear(etAPUFrameSeq)
+    gb.scheduler.schedule(apu_div_phase(gb.timer, gb), etAPUFrameSeq)
     # The stall — the HALT mode the chart's switch leaf names, with its
     # countdown. `SPEED_SWITCH_STALL_T` T-cycles of real time is
     # `SPEED_SWITCH_STALL_T shl current_speed` cycles of the (new) CPU clock,

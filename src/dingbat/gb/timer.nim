@@ -234,7 +234,16 @@ proc apu_div_phase*(t: GbTimer; gb: GB): int =
   ## Raw cycles until the divider's APU tap next falls. Equals the full period
   ## when the divider sits exactly on an edge boundary.
   let period = apu_div_period(gb)
-  period - (int(t.tdiv) and (period - 1))
+  result = period - (int(t.tdiv) and (period - 1))
+  when APU_SPSW_TAP_LAG_T != 0:
+    # Double speed only -- the lag rides the DOUBLE-speed tap (bit 13), and a
+    # switch back to single speed leaves it behind. gambatte's
+    # `speedchange2_ch2_nr52_{1,2}b` are what say so: they end in SINGLE speed
+    # after one switch each way, so `spsw_fs_lag` is set, and hardware's `F0`
+    # is the UNDELAYED length clock. Ungated they were the only two rows in
+    # the 208-row family this mechanism got wrong (and it fixes six).
+    if gb.apu.spsw_fs_lag and gb.memory.current_speed == 1:
+      result += APU_SPSW_TAP_LAG_T
 
 const SPEED_SWITCH_DIV_RESET_T_SLOW* {.intdefine.} = 4
   ## **The switch reset reaches the divider's SLOW taps one M-cycle before it
@@ -477,6 +486,10 @@ proc timer_speed_switch_div_reset*(t: GbTimer; gb: GB) =
   ##
   ## Ordinary `timer_write($FF04, 0)`, one M-cycle of divider later than the
   ## STOP fetch dingbat charges the opcode as -- see SPEED_SWITCH_DIV_RESET_T.
+  when APU_SPSW_TAP_LAG_T != 0:
+    # Called before memory.nim flips `current_speed`, so "still single" IS
+    # "about to enter double". See APU_SPSW_TAP_LAG_T for why this toggles.
+    if gb.memory.current_speed == 0: gb.apu.spsw_fs_lag = not gb.apu.spsw_fs_lag
   when SPEED_SWITCH_DIV_RESET_T_SLOW != SPEED_SWITCH_DIV_RESET_T:
     timer_speed_switch_div_reset_split(t, gb)
   else:
