@@ -2255,6 +2255,34 @@ const OBJ_WAIT_SUB {.intdefine.} = 3'i32
 # (`window/m2int_wxA6_m3stat_1` and friends read 174 where the unheld fetcher
 # reads 172). The two cases are not the same event: the window restarts the BG
 # fetch, the object does not.
+#
+# ---- What the refund does NOT settle: the CGB's WX = 166 + X = 167 pair -----
+#
+# The one place the walk and the WINDOW's own tail hold meet is a WX = 166
+# restart on the same pixel as an X = 167 object, and on the CGB the two share a
+# slot (`obj_last_px` in fetch_work_pending). The refund takes a dot off that
+# pair too, which moves `window/m2int_wxA6_spxA7_m3stat_2`: its DMG arm goes
+# FAIL -> PASS and its CGB arm PASS -> FAIL. That is not a regression the refund
+# introduced -- the `_4` sibling was ALREADY failing its CGB arm the same way
+# with its DMG arm green, so what changed is that the family is now CONSISTENT
+# (DMG right on both, CGB one dot short on both) where before `_2` passed its
+# CGB arm on a coincidence. Both spellings of "give the CGB pair its dot back"
+# were measured on 2026-08-21 over gambatte window/sprites/m0enable/vram_m3/
+# vramw_m3end/scx_during_m3/oam_access/m0int_m0stat (1427 rows) and BOTH ARE
+# NET ZERO OR WORSE -- they trade the same rows back and forth, which is what a
+# coin flip looks like and not what a mechanism looks like:
+#
+#   * dropping the `not obj_last_px` exception in fetch_work_pending (so the
+#     CGB always waits for the restart): 1316 -> 1313. Buys
+#     `window/m2int_wxA6_spxA7_m3stat_2` [cgb], costs all four
+#     `m0enable/enable_wxA6_2x_spxA7_{1,ds_2,ds_3,ds_4}` [cgb].
+#   * suppressing the refund only when the CGB restart shares the pixel:
+#     1316 -> 1316. Buys the same window row, costs
+#     `m0enable/enable_wxA6_2x_spxA7_ds_2` [cgb]. One for one.
+#
+# So the residue is a genuine two-sided constraint on the CGB shared slot that
+# no dot on THIS object can satisfy, and `_4` says it was there before the
+# refund. Do not re-run either sweep.
 const OBJ_TAIL_WALK_REFUND {.intdefine.} = 1
 
 # ---- LCDC.2 is read ONCE PER BITPLANE, and where the fetch sits in the
