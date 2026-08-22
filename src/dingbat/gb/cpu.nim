@@ -795,6 +795,11 @@ proc tick*(cpu: GbCpu; gb: GB) =
       # Copied at the boundary rather than inside a CPU access's dots (the wake
       # is not one), so nothing here holds the bytes back: see
       # HDMA_VISIBLE_DOTS and `in_cpu_cycle`.
+      when defined(gb_dma_trace):
+        echo "WAKE ly=", gb.ppu.ly, " dot=", gb.ppu.cycle_counter,
+             " due=", (if gb.ppu.hdma_block_due: 1 else: 0),
+             " act=", (if gb.ppu.hdma_active: 1 else: 0),
+             " mode=", (gb.ppu.lcd_status and 3'u8)
       if gb.ppu.hdma_block_due:
         if gb.ppu.hdma_active and (gb.ppu.lcd_status and 3'u8) == 0'u8 and
            (HDMA_WAKE_M0_MARGIN == 0 or
@@ -829,6 +834,14 @@ proc tick*(cpu: GbCpu; gb: GB) =
     # see HDMA_GRANT_FETCH_DOTS in gb.nim.
     if unlikely(gb.ppu.hdma_block_due):
       if gb.ppu.hdma_active and (gb.ppu.lcd_status and 3'u8) == 0'u8:
+        # `high(int32)` = owed to a HALTED CPU and waiting for its wake. Reaching
+        # an opcode fetch means the CPU is running, so that wake has been and
+        # gone without the wake path seeing the block (it can be armed by an
+        # edge the dispatch's own dots drive, after `cpu.halted` is already
+        # false) -- the debt is owed NOW. `hdma_ei_m3halt_m0unhalt_ly_2` is the
+        # row: without this its block waits a whole line.
+        if gb.ppu.hdma_due_deadline == high(int32):
+          gb.ppu.hdma_due_deadline = gb.ppu.cycle_counter
         if gb.ppu.cycle_counter >= gb.ppu.hdma_due_deadline:
           ppu_step_hdma(gb.ppu, gb, in_cpu_cycle = HDMA_GRANT_FETCH_HOLD)
       else:
@@ -859,6 +872,9 @@ proc tick*(cpu: GbCpu; gb: GB) =
     # two-M-cycle `LD A,[HL]`; see HDMA_GRANT_FETCH_DOTS in gb.nim.
     if unlikely(gb.ppu.hdma_block_due):
       if gb.ppu.hdma_active and (gb.ppu.lcd_status and 3'u8) == 0'u8:
+        # See the un-parking note at the fetch grant above.
+        if gb.ppu.hdma_due_deadline == high(int32):
+          gb.ppu.hdma_due_deadline = gb.ppu.cycle_counter
         if gb.ppu.cycle_counter + int32(HDMA_GRANT_FETCH_DOTS -
                                         HDMA_GRANT_BOUNDARY_DOTS) >=
            gb.ppu.hdma_due_deadline:

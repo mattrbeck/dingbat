@@ -2818,6 +2818,10 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
           return
     when HDMA_DISABLE_GRACE_DOTS != 0:
       ppu.hdma_due_dot = ppu.cycle_counter
+    when defined(gb_dma_trace):
+      echo "M0DUE ly=", ppu.ly, " dot=", ppu.cycle_counter,
+           " halted=", (if gb.cpu.halted: 1 else: 0),
+           " seenwas=", hdma_seen_was
     if gb.cpu.halted:
       when HDMA_HALT_M0_BLIND != 0:
         # The CPU halted inside a mode 0 and the detector is still registering
@@ -2826,10 +2830,16 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
       ppu.hdma_block_due = true
       ppu.hdma_due_delay = 0
       when HDMA_GRANT_FETCH_DOTS >= 0:
-        # Same reasoning as the HDMA_STEAL_LEAD_DOTS arm below: a halted CPU
-        # fetches no opcode, so there is no hand-over point to time and the
-        # debt is paid at the wake (cpu.nim). Park the deadline out of reach so
-        # a stale one from the previous transfer cannot take this block early.
+        # A halted CPU has no opcode fetch to hand the bus over on, so the debt
+        # is paid at the WAKE (cpu.nim) and the deadline is parked out of reach
+        # -- a stale one from the previous transfer must not take this block.
+        # `high(int32)` is also the flag cpu.tick's two RUNNING grant points
+        # read as "this block is waiting for a wake that has already happened":
+        # see the un-parking there.
+        #
+        # Giving a halted CPU the same dot deadline as a running one instead
+        # was measured and REFUSED: gambatte 4582 against 4590, the whole
+        # `hdma_*_m0unhalt` / `hdma_transition_*_late_unhalt` family.
         ppu.hdma_due_deadline = high(int32)
       when HDMA_STEAL_LEAD_DOTS >= 0:
         # A halted CPU is not on the bus, so there is no hand-over to time:
