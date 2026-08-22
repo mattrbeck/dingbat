@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-22 07:26:52*
+*Generated: 2026-08-22 07:34:28*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4614/4996 passed.**
+**4627/4996 passed.**
 
 ## bgen
 
@@ -458,18 +458,13 @@ All 44 tests passed.
 | miscmstatirq/m0statwirq_scx5_2_dmg08_out2 [dmg] | got 0, expected 2 |
 | miscmstatirq/m1statwirq_trigger_ly94_lyc94_40_50_2_dmg08_outE0_cgb04c_outE2 [cgb] | got E0, expected E2 |
 
-## oam_access (56/69 passed)
+## oam_access (61/69 passed)
 
-56/69 tests passed, 13 failed:
+61/69 tests passed, 8 failed:
 
 | Test | Result |
 |------|--------|
-| oam_access/10spritesprline_postread_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| oam_access/10spritesprline_postread_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | oam_access/midwrite_2_dmg08_out1_cgb04c_out0 [cgb] | got 1, expected 0 |
-| oam_access/postread_scx2_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| oam_access/postread_scx2_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
-| oam_access/postread_scx3_2_dmg08_xout1_cgb04c_out0 [cgb] | got 3, expected 0 |
 | oam_access/postwrite_2_scx3_dmg08_cgb04c_out1 [dmg] | got 0, expected 1 |
 | oam_access/postwrite_2_scx3_dmg08_cgb04c_out1 [cgb] | got 0, expected 1 |
 | oam_access/preread_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
@@ -587,29 +582,21 @@ All 67 tests passed.
 
 All 20 tests passed.
 
-## vram_m3 (42/50 passed)
+## vram_m3 (48/50 passed)
 
-42/50 tests passed, 8 failed:
+48/50 tests passed, 2 failed:
 
 | Test | Result |
 |------|--------|
-| vram_m3/10spritesprline_postread_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| vram_m3/10spritesprline_postread_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
-| vram_m3/postread_scx2_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| vram_m3/postread_scx2_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
-| vram_m3/postread_scx3_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| vram_m3/postread_scx3_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | vram_m3/preread_lcdoffset2_1_cgb04c_out0 [cgb] | got 3, expected 0 |
 | vram_m3/prewrite_lcdoffset2_1_cgb04c_out1 [cgb] | got 0, expected 1 |
 
-## vramw_m3end (32/36 passed)
+## vramw_m3end (34/36 passed)
 
-32/36 tests passed, 4 failed:
+34/36 tests passed, 2 failed:
 
 | Test | Result |
 |------|--------|
-| vramw_m3end/vramw_m3end_scx3_3_dmg08_cgb04c_out0 [dmg] | got 7, expected 0 |
-| vramw_m3end/vramw_m3end_scx3_3_dmg08_cgb04c_out0 [cgb] | got 7, expected 0 |
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 

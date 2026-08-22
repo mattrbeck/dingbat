@@ -626,7 +626,8 @@ proc mem_read_open(mem: GbMemory; gb: GB; idx: int): uint8 {.inline.} =
     when HDMA_VISIBLE_DOTS != 0:
       if gb.ppu.hdma_bytes_held: ppu_land_hdma_if_due(gb.ppu, gb)
     if not cpu_vram_open(gb.ppu, is_write = false,
-                         cgb = gb.cgb_enabled): return 0xFF'u8
+                         cgb = gb.cgb_enabled,
+                         ds = mem.current_speed != 0): return 0xFF'u8
   read_byte(mem, gb, idx)
 
 const OAMDMA_WRAM_A12* {.intdefine.} = 1

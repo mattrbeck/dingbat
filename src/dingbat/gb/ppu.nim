@@ -560,7 +560,8 @@ const VRAM_READ_LIVE_LOCK* {.intdefine.} = 2
   ## 1 asks it on every device (the rule this replaces), 0 never asks it, 2
   ## asks it on a DMG and not on a CGB. See the bracket in cpu_vram_open.
 
-const VRAM_READ_M0_OPEN_DOTS* {.intdefine.} = 4
+const VRAM_READ_M0_OPEN_DOTS* {.intdefine.} = 2
+const VRAM_READ_M0_OPEN_DOTS_DS* {.intdefine.} = 4
   ## The VRAM read lock's OPEN edge, in PPU DOTS after the mode-3 -> 0 flag
   ## edge. 0 disables the rule and restores the pure `read_mode` snapshot.
   ##
@@ -568,10 +569,10 @@ const VRAM_READ_M0_OPEN_DOTS* {.intdefine.} = 4
   ## M-cycle's first dot is processed, so the lock as spelled by that snapshot
   ## alone opens at the first M-cycle boundary STRICTLY AFTER the edge -- one
   ## whole M-cycle late whenever the edge happens to fall ON a boundary, and
-  ## an M-cycle is 4 dots at normal speed but only 2 in double. Three gambatte
-  ## rows say the real edge is neither of those: it is **4 PPU dots, flat, at
-  ## both speeds**, which is real time on the PPU's clock and not a CPU-cycle
-  ## count.
+  ## an M-cycle is 4 dots at normal speed but only 2 in double. The real edge
+  ## is neither of those: it is a count of PPU DOTS off the flag edge, real
+  ## time on the PPU's clock and not a CPU-cycle count -- **2 dots at single
+  ## speed and 4 in double**, and both are bracketed two-sidedly.
   ##
   ## A read is answered with `cycle_counter` at the END of its M-cycle and
   ## `stat_chg_dot` is the FIRST dot of the new mode (see `mode_flag=`), so
@@ -585,19 +586,35 @@ const VRAM_READ_M0_OPEN_DOTS* {.intdefine.} = 4
   ##   vram_m3/postread_scx5_ds_1         2x     [257,259)      259      2   shut
   ##   vram_m3/postread_scx5_ds_2         2x     [259,261)      261      4   open
   ##
-  ## so the edge is in (2, 4] and 4 is the only value on the M grid. The
-  ## snapshot rule gets the first row wrong (gap 4 = one M-cycle, so the edge
-  ## is not strictly inside the previous M-cycle) and would get the second
-  ## wrong if it were relaxed to a boundary-inclusive test in M-cycles (gap 2
-  ## IS one double-speed M-cycle). Only a flat dot count fits all three.
+  ## The two DOUBLE-SPEED rows bracket that speed two-sidedly at gap in (2, 4],
+  ## i.e. `VRAM_READ_M0_OPEN_DOTS_DS`; the 1x row is a one-sided `<= 4` and was
+  ## read as 4 for parsimony. **It is 2, and AGE brackets it two-sidedly.**
   ##
-  ## It can only ever fire where the snapshot says shut and the gap says open,
-  ## i.e. `gap == 4` exactly with the edge on the M boundary, which needs a
-  ## particular SCX -- and at double speed it cannot fire at all, since a
-  ## `read_mode` of 3 caps the gap at that speed's 2-dot M-cycle. That is the
-  ## whole of the asymmetry the three rows above measure.
+  ## c-sp's `vram/vram-read-*` and `oam/oam-read-*` read at dot 249 + 4*delay
+  ## with the mode-3 end at dot 252 + SCX, so SCX 0..7 x delay 0..4 walks the
+  ## gap over -2..13 and each SCX contributes a two-sided bracket on the FIRST
+  ## delay that reads open. On the ROM's line-1 sample those eight brackets
+  ## are (1,5], (0,4], <=3, <=2, (1,5], (0,4], <=3, <=2, and they intersect at
+  ## **2 exactly**. Ten gambatte rows agree and were red at 4, all of them
+  ## single speed and every one a `_dmg08_cgb04c_out0` whose own filename
+  ## states the answer on both devices: `{oam_access,vram_m3}/postread_scx2_2`
+  ## and `/10spritesprline_postread_2` on both arms, `oam_access` and
+  ## `vram_m3/postread_scx3_2`, and `vramw_m3end/vramw_m3end_scx3_3` on both.
+  ##
+  ## The ROM's LINE-0 sample -- the line the LCD was enabled on -- brackets at
+  ## 4 instead, on the same eight SCX. That is NOT a second value for this
+  ## constant: it is dingbat placing that line's mode-3 edges 2 dots earlier
+  ## than hardware does (the same 2 dots LCD_ON_LINE0_TRIM and friends have
+  ## been chasing in gb.nim), and it is why the `first_line` exemptions below
+  ## still have to be here. With those 2 dots given back, the close edge comes
+  ## out flat too: AGE brackets the mode-3 CLOSE at edge + [-1, 0] on a DMG and
+  ## edge + [3, 4] on a CGB, one rule per device and no line-0 case at all.
+  ## Four AGE rows are held on that, and it is a geometry fix, not a lock one.
+  ##
+  ## `_DS` is the double-speed value and is still 4.
 
-proc cpu_vram_open*(ppu: GbPpu; is_write: bool; cgb = false): bool {.inline.} =
+proc cpu_vram_open*(ppu: GbPpu; is_write: bool; cgb = false;
+                    ds = false): bool {.inline.} =
   if not lcd_enabled(ppu): return true
   if is_write:
     # A write is applied BEFORE its M-cycle's dots (see mem_write), so the live
@@ -607,9 +624,12 @@ proc cpu_vram_open*(ppu: GbPpu; is_write: bool; cgb = false): bool {.inline.} =
     # commit point instead of one M-cycle after it.
     return (ppu.lcd_status and 3'u8) != 3
   if (ppu.read_mode and 3'u8) == 3:
-    when VRAM_READ_M0_OPEN_DOTS != 0:
-      if (ppu.lcd_status and 3'u8) == 0'u8 and ppu.stat_prev_mode == 3'u8 and
-         ppu.cycle_counter - ppu.stat_chg_dot >= int32(VRAM_READ_M0_OPEN_DOTS):
+    when VRAM_READ_M0_OPEN_DOTS != 0 or VRAM_READ_M0_OPEN_DOTS_DS != 0:
+      let want = if ds: int32(VRAM_READ_M0_OPEN_DOTS_DS)
+                 else: int32(VRAM_READ_M0_OPEN_DOTS)
+      if want != 0 and (ppu.lcd_status and 3'u8) == 0'u8 and
+         ppu.stat_prev_mode == 3'u8 and
+         ppu.cycle_counter - ppu.stat_chg_dot >= want:
         return true
     return false
   if ppu.first_line: return true
@@ -699,7 +719,8 @@ proc cpu_cram_open*(ppu: GbPpu; is_write: bool): bool {.inline.} =
   else:
     return (ppu.lcd_status and 3'u8) != 3
 
-const OAM_READ_M0_OPEN_DOTS* {.intdefine.} = 4
+const OAM_READ_M0_OPEN_DOTS* {.intdefine.} = 2
+const OAM_READ_M0_OPEN_DOTS_DS* {.intdefine.} = 4
   ## The OAM read lock's OPEN edge, in PPU DOTS after the mode-3 -> 0 flag
   ## edge -- the same quantity `VRAM_READ_M0_OPEN_DOTS` names for VRAM, and on
   ## the default machine the same VALUE. 0 disables the rule and restores the
@@ -723,13 +744,17 @@ const OAM_READ_M0_OPEN_DOTS* {.intdefine.} = 4
   ##   line 0, delay  2  2  3  3  3  3  4  4     (= 2 + (SCX+2) div 4)
   ##   line 1, delay  2  2  2  2  3  3  3  3     (= 2 + SCX div 4)
   ##
-  ## and dingbat's OAM lock answers the line-0 row as `2 + (SCX+3) div 4`,
-  ## one dot late, because `read_mode` alone cannot open before the first
-  ## M-cycle that STARTS clear of mode 3. The mode-3 end is at dot 252 + SCX
-  ## and the sample at dot 249 + 4*delay, so the eight brackets intersect at
-  ## **open = edge + 4 dots exactly** -- the same flat, speed-independent
-  ## count `VRAM_READ_M0_OPEN_DOTS` is bracketed at by three gambatte rows,
-  ## reached here from a different family and a different lock.
+  ## The line-1 row brackets the edge at 2 dots and the line-0 row at 4; the
+  ## difference is dingbat's line-0 GEOMETRY, not two rules -- see
+  ## VRAM_READ_M0_OPEN_DOTS, where the same split shows up in the same ROM pair
+  ## and the close edge comes out flat once those 2 dots are given back.
+  ##
+  ## and dingbat's OAM lock answered both rows one dot late of the line-0 one,
+  ## because `read_mode` alone cannot open before the first M-cycle that STARTS
+  ## clear of mode 3. The mode-3 end is at dot 252 + SCX and the sample at dot
+  ## 249 + 4*delay, so the eight brackets intersect two-sidedly -- the same
+  ## count `VRAM_READ_M0_OPEN_DOTS` carries, reached here from a different lock
+  ## in a ROM that samples it at the same instant.
   ##
   ## CGB-E is the exception and it is one dot: `oam-read-cgbE` is a separate
   ## file whose table shifts every step of both rows by one SCX
@@ -753,7 +778,7 @@ const OAM_WRITE_M2_TAIL {.intdefine.} = 1
   ## last M-cycle of mode 2 really does still take an OAM write.
 
 proc cpu_oam_open*(ppu: GbPpu; is_write: bool; mcycle_dots: int32 = 0;
-                   open_late = false): bool {.inline.} =
+                   open_late = false; ds = false): bool {.inline.} =
   if not lcd_enabled(ppu): return true
   let live = ppu.lcd_status and 3'u8
   if is_write:
@@ -785,14 +810,15 @@ proc cpu_oam_open*(ppu: GbPpu; is_write: bool; mcycle_dots: int32 = 0;
       return live != 2
   let lag = ppu.read_mode and 3'u8
   if lag == 3:
-    when OAM_READ_M0_OPEN_DOTS != 0:
+    when OAM_READ_M0_OPEN_DOTS != 0 or OAM_READ_M0_OPEN_DOTS_DS != 0:
       # The mode-0 open edge, in dots off the flag edge rather than off the
       # M-cycle grid `read_mode` is sampled on -- see OAM_READ_M0_OPEN_DOTS.
       # `open_late` is CGB-E's one extra dot, which puts the edge back on that
       # grid and so makes this clause inert there.
+      let want = (if ds: int32(OAM_READ_M0_OPEN_DOTS_DS)
+                  else: int32(OAM_READ_M0_OPEN_DOTS)) + int32(ord(open_late))
       if live == 0'u8 and ppu.stat_prev_mode == 3'u8 and
-         ppu.cycle_counter - ppu.stat_chg_dot >=
-           int32(OAM_READ_M0_OPEN_DOTS) + int32(ord(open_late)):
+         ppu.cycle_counter - ppu.stat_chg_dot >= want:
         return true
     return false
   if ppu.first_line: return true
@@ -3422,7 +3448,8 @@ proc ppu_read*(ppu: GbPpu; gb: GB; idx: int): uint8 =
     # (mode 3): reads return 0xFF. See cpu_oam_open for where the two edges sit
     # (mooneye intr_2_oam_ok_timing, lcdon_timing-GS).
     if cpu_oam_open(ppu, is_write = false,
-                    open_late = gb.quirks.oam_read_open_late):
+                    open_late = gb.quirks.oam_read_open_late,
+                    ds = gb.memory.current_speed != 0):
       ppu.sprite_table[idx - 0xFE00]
     else: 0xFF'u8
   of 0xFF40:         ppu.lcd_control
