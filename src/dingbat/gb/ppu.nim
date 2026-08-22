@@ -560,6 +560,41 @@ const VRAM_READ_LIVE_LOCK* {.intdefine.} = 2
   ## 1 asks it on every device (the rule this replaces), 0 never asks it, 2
   ## asks it on a DMG and not on a CGB. See the bracket in cpu_vram_open.
 
+const LCD_ON_LINE0_LOCK_LEAD* {.intdefine.} = 2'i32
+  ## Dots by which every mode edge on the line the LCD was ENABLED on sits
+  ## LATER than this renderer's dot counter puts it, as the CPU's VRAM and OAM
+  ## locks see it.
+  ##
+  ## The counter's line 0 is seeded from `LCD_ON_HEAD_START` and then runs a
+  ## normal 456-dot line, so line 0 and line 1 come out at exactly the same
+  ## phase against the CPU's M-cycle grid -- `-d:gb_dma_trace` on AGE's
+  ## `vram-read` prints the line-0 and line-1 samples at the same dot, the same
+  ## `read_mode` and the same `stat_chg_dot`, for all 40 of its cells. Hardware
+  ## does not: c-sp's `vram/vram-read-*` and `oam/oam-read-*` sample the same
+  ## instant on both lines and answer differently, and the whole of the
+  ## difference is 2 dots. FOUR independent brackets in those ROMs agree on it
+  ## and on nothing else -- the mode-3 OPEN edge and the mode-3 CLOSE edge, each
+  ## on a DMG and on a CGB:
+  ##
+  ##   threshold           normal line      LCD-on line (AGE)   lead
+  ##   ------------------  ---------------  ------------------  ----
+  ##   close, DMG          m3start - 1      [81, 84]            +2
+  ##   close, CGB          m3start + 4      [85, 88]            +2..+4
+  ##   open                m3end + 2        m3end + 4           +2
+  ##   open, CGB-E         m3end + 3        m3end + 5           +2
+  ##
+  ## (m3start is dot 80.) This is the same 2 dots `LCD_ON_LINE0_TRIM`,
+  ## `LCD_ON_LINE1_TRIM` and `M3_END_EARLY` in gb.nim have been chasing since
+  ## 2026-08-03, and the table there is why they are still 0: each of the three
+  ## spends the dots somewhere a fourth family refuses. **This constant spends
+  ## them in the locks only**, which is where AGE measures them, and it leaves
+  ## every STAT read, interrupt and rendered pixel on line 0 exactly where the
+  ## three families that pin those want them. It is deliberately NOT a geometry
+  ## fix: `-d:LCD_ON_LINE0_TRIM=2`, which is the geometry fix, is 1145 -> 955 on
+  ## this tree (measured 2026-08-22, far worse than the -5 it cost in 2026-08).
+  ##
+  ## Set to 0 to restore the pre-2026-08-22 behaviour of both locks on line 0.
+
 const VRAM_READ_M0_OPEN_DOTS* {.intdefine.} = 2
 const VRAM_READ_M0_OPEN_DOTS_DS* {.intdefine.} = 4
   ## The VRAM read lock's OPEN edge, in PPU DOTS after the mode-3 -> 0 flag
@@ -625,8 +660,10 @@ proc cpu_vram_open*(ppu: GbPpu; is_write: bool; cgb = false;
     return (ppu.lcd_status and 3'u8) != 3
   if (ppu.read_mode and 3'u8) == 3:
     when VRAM_READ_M0_OPEN_DOTS != 0 or VRAM_READ_M0_OPEN_DOTS_DS != 0:
-      let want = if ds: int32(VRAM_READ_M0_OPEN_DOTS_DS)
+      var want = if ds: int32(VRAM_READ_M0_OPEN_DOTS_DS)
                  else: int32(VRAM_READ_M0_OPEN_DOTS)
+      when LCD_ON_LINE0_LOCK_LEAD != 0:
+        if ppu.first_line: want += LCD_ON_LINE0_LOCK_LEAD
       if want != 0 and (ppu.lcd_status and 3'u8) == 0'u8 and
          ppu.stat_prev_mode == 3'u8 and
          ppu.cycle_counter - ppu.stat_chg_dot >= want:
@@ -815,8 +852,10 @@ proc cpu_oam_open*(ppu: GbPpu; is_write: bool; mcycle_dots: int32 = 0;
       # M-cycle grid `read_mode` is sampled on -- see OAM_READ_M0_OPEN_DOTS.
       # `open_late` is CGB-E's one extra dot, which puts the edge back on that
       # grid and so makes this clause inert there.
-      let want = (if ds: int32(OAM_READ_M0_OPEN_DOTS_DS)
+      var want = (if ds: int32(OAM_READ_M0_OPEN_DOTS_DS)
                   else: int32(OAM_READ_M0_OPEN_DOTS)) + int32(ord(open_late))
+      when LCD_ON_LINE0_LOCK_LEAD != 0:
+        if ppu.first_line: want += LCD_ON_LINE0_LOCK_LEAD
       if live == 0'u8 and ppu.stat_prev_mode == 3'u8 and
          ppu.cycle_counter - ppu.stat_chg_dot >= want:
         return true
