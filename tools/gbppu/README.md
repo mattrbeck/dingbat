@@ -547,3 +547,43 @@ full write-up, and which of the two is built, is at `M0_HALT_BLIND_DOTS` in
 boot ROM where dingbat skips it, so absolute phase can differ by an M-cycle.
 Everything above is immune to that because every ROM here re-anchors on its own
 `LDH ($40),A` LCD enable, which restarts the PPU in both emulators.
+
+## A wilbertpol `acceptance/gpu` ROM, as its own measurements
+
+Those ROMs report one bit through the Fibonacci registers, and `stat_write_if`
+reports one FAILING SUBTEST INDEX out of 85 or 105. Both carry far more than
+that, and none of it needs a disassembly listing.
+
+* `wilbergpu.py <rom>` — the `ly_lyc*` shape: a sample is
+  `LDH A,($FFxx) ; LD ($C0ss),A` after a NOP run, and the tail packs the slots
+  into AF/BC/DE/HL, spills them to `$C000..$C007` (`LD SP,$C008` + four
+  `PUSH`es, so the frame reads **F A C B E D L H**) and writes the EXPECTED byte
+  for each slot to `$C009..$C010` in the same order. So the ROM states its own
+  expected table and its own per-sample NOP counts, and the tool prints both.
+  `--patch out.gb` rewrites the tail `jp $48xx` — only `$FF` padding follows it —
+  with a loop that sends `$C014..$C01F` to the serial port as ASCII hex, so
+  `dingbat_test --mode serial` reads the raw measurements straight out.
+* `statwif.py <rom>` — `stat_write_if`'s 85/105-entry table, decoded as
+  "pre-STAT, STAT written, which mode of which LY, expect IF or not".
+  `--patch` rewrites every `CP H ; RET Z ; JP <fail>` into
+  `CP H ; CALL <report> ; RET`, which sends `.` or `X` per subtest, so one run
+  prints the whole verdict string instead of stopping at the first failure.
+* `lycwsled.py <rom> [sled delta out.gb]` — the `ly_lyc*_write` ROMs are four
+  sleds that race an LYC store against an LY advance and ship exactly one PAIR
+  of NOP counts each, which brackets the M-cycle without locating it. This
+  slides the store (with the STAT read some sleds glue to it) through its own
+  NOP field without changing the field's length, so the answer reads as a
+  staircase. `--probe $FFxx` replaces the store with a bare register read on the
+  same grid and turns the `EI` into a `NOP`, which LOCATES the edge the store
+  was racing rather than racing it.
+
+The matching oracle is `tools/gbfuzz/sameboy_wram`, which dumps an arbitrary
+memory range out of SameBoy for any model — `dmg mgb sgb sgb2 cgb0 cgba cgbb
+cgbc cgbd cgbe agb`. The per-revision axis is the point: a `revsweep.py`-style
+sweep of DINGBAT's revisions can only find a mismatch dingbat already models,
+and the four `ly_lyc*-C` rows refuted in `docs/gb-failure-triage.md` were red on
+all eleven of them for exactly that reason. Sweep the ORACLE over revisions.
+
+These ROMs re-sync off an LCD off/on and a `wait LY == 1`, so the oracle's
+boot-phase caveat cancels here too: dingbat's DMG arm and SameBoy's DMG agree
+byte for byte on all seven `-GS` builds.

@@ -360,6 +360,75 @@ wrong in the same direction (channel off too early), which is the same shape as 
 gambatte `ch2_nr52` rows above. `spsw-tima`'s table is unmoved by
 `SPEED_SWITCH_DIV_RESET_T` at any value, so it is a third mechanism again.
 
+## 2026-08-21: the wilbertpol `ly_lyc*` cluster — 10 rows closed, 4 refuted, 6 priced
+
+`acceptance/gpu/ly_lyc*` and `stat_write_if` were 20 of the suite's 25 remaining
+failures. Three instruments made them readable and are the reusable part:
+
+* `tools/gbppu/wilbergpu.py` — a wilbertpol `acceptance/gpu` ROM carries its own
+  EXPECTED bytes (written to `$C009..$C010` right before the print routine, in
+  the same order as the `PUSH` frame at `$C000..$C007`) and its own per-sample
+  NOP counts. `--patch` swaps the tail `jp $48xx` for a serial hex dump of
+  `$C014..$C01F`, so `--mode serial` prints the raw measurements.
+* `tools/gbfuzz/sameboy_wram` — the same bytes out of SameBoy, any address
+  range, any model including `cgb0..cgbe` and `agb`.
+* `tools/gbppu/lycwsled.py` — slides the `ly_lyc*_write` LYC store through its
+  own NOP field, turning the ROM's shipped one-M-cycle bracket into a staircase;
+  `--probe $FFxx` swaps the store for a bare register read on the same grid,
+  which locates the EDGE the store is racing.
+
+These ROMs re-sync off an LCD off/on and a `wait LY == 1`, so the post-boot phase
+offset that limits the SameBoy oracle elsewhere **cancels** here. dingbat's DMG
+arm and SameBoy's DMG are byte-identical on all seven `-GS` builds.
+
+### The four things it found
+
+1. **CGB D and later HOLD the LY=LYC comparison a blind window is leaving**
+   instead of clearing it (`quirks.lyc_compare_hold`). +4 rows, `@agb`.
+2. **The line-144 OAM STAT source is a PULSE**, the same width as the per-line
+   one, not a level over the whole line (`M2_144_PULSE`). +6 rows, both device
+   families, +1 gambatte.
+3. **The CGB takes an LYC write one M-cycle later than the DMG**
+   (`CGB_LYC_WRITE_DEFER`, byte half; `CGB_LYC_EDGE_DEFER`, edge half). The byte
+   half ships (+7/-2 gambatte `[cgb]`); the edge half is correct and measured
+   and ships OFF at **+1.08% of retired instructions**, because the edge needs a
+   firing point on every M-cycle and `mem_tick_ppu` is the only one. Turning it
+   on is +6 wilbertpol and +2 gambatte, shootout still 261.
+4. **The `-C` suffix on four of these ROMs overstates the hardware.**
+
+### The refutation, and the method behind it
+
+`ly_lyc-C`, `ly_lyc_0-C`, `ly_lyc_144-C` and `ly_lyc_153-C` assert CGB-D
+behaviour and are labelled `-C`, which mooneye's naming makes a claim about
+every CGB. Their `@cgbc` arms cannot pass. The demonstration is bidirectional
+and per-revision, `$C014..` out of both emulators (`ly_lyc-C`, 8 slots):
+
+    sameboy cgb0/A/B/C  0102C0C6E0E2 C0 C2      <- dingbat cgbc, byte for byte
+    sameboy cgbD/E/AGB  0102C0C6E0E2 C4 C2      <- the ROM's own expected table
+    dingbat cgbc        0102C0C6E0E2 C0 C2
+    dingbat agb         0102C0C6E0E2 C4 C2
+
+and the other three have the identical shape in one slot each. So the flip is a
+single silicon-revision bit, both emulators agree on both sides of it, and
+dingbat is exactly right on the revision the tree defaults to.
+
+**The methodological point is worth more than the four rows.** The
+`revsweep.py` sweep in the section below re-ran every failing self-checking row
+on all eleven revisions dingbat models and concluded "everything else is red on
+all eleven revisions... the remaining 107 failures are real behaviour gaps, not
+mis-assigned machines". That is true and was still misleading: a self-sweep can
+only find a revision mismatch dingbat ALREADY MODELS. These four were red on all
+eleven precisely because the per-revision behaviour they ask about was not in
+the tree at all. **The oracle has to be swept over revisions, not the tree.**
+
+### One divergence left open
+
+On `ly_lyc_0-C` slot 0 (an LY read inside the 153 -> 0 window) SameBoy answers
+`00` on CGB 0/A/B/C and `99` on CGB D and later; dingbat answers `99` on every
+revision. That is SameBoy's `model <= GB_MODEL_CGB_C && !double_speed` early LY
+snapback (Core/display.c), which dingbat does not model. It does not move this
+row -- the ROM expects `99` -- and nothing else in the tree has asked for it.
+
 ## Rows that pass on one revision and fail on another — swept 2026-08-19
 
 Every currently-failing self-checking row (mooneye, wilbertpol, AGE — 113 of

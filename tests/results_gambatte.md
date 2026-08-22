@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-21 19:37:26*
+*Generated: 2026-08-21 20:01:56*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4598/4996 passed.**
+**4609/4996 passed.**
 
 ## bgen
 
@@ -148,37 +148,29 @@ All 8 tests passed.
 | enable_display/ly0_m0irq_scx0_ds_1_cgb04c_outE0 [cgb] | got E2, expected E0 |
 | enable_display/ly0_m0irq_scx1_ds_1_cgb04c_outE0 [cgb] | got E2, expected E0 |
 
-## halt (141/158 passed)
+## halt (150/158 passed)
 
-141/158 tests passed, 17 failed:
+150/158 tests passed, 8 failed:
 
 | Test | Result |
 |------|--------|
-| halt/late_m0int_halt_m0stat_scx2_1a_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
-| halt/late_m0int_halt_m0stat_scx2_2a_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 | halt/late_m0int_halt_m0stat_scx2_3a_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
 | halt/late_m0int_halt_m0stat_scx2_3a_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
-| halt/late_m0int_halt_m0stat_scx2_4a_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 | halt/late_m0int_halt_m0stat_scx3_2b_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | halt/late_m0int_halt_m0stat_scx3_3a_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
 | halt/late_m0int_halt_m0stat_scx3_3a_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 | halt/late_m0int_halt_m0stat_scx3_3b_dmg08_out0_cgb04c_out2 [dmg] | got 2, expected 0 |
-| halt/late_m0irq_halt_m0stat_scx2_1a_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
-| halt/late_m0irq_halt_m0stat_scx2_2a_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 | halt/late_m0irq_halt_m0stat_scx3_2b_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
-| halt/m0int_m0stat_scx2_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
-| halt/m0int_m0stat_scx5_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
-| halt/m0irq_m0stat_scx2_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
-| halt/m0irq_m0stat_scx5_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 | halt/noime_m2irq_m0stat_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 
-## irq_precedence (48/64 passed)
+## irq_precedence (47/64 passed)
 
-48/64 tests passed, 16 failed:
+47/64 tests passed, 17 failed:
 
 | Test | Result |
 |------|--------|
 | irq_precedence/hdma_vs_m0_scx2_cgb04c_out0183 [cgb] | got 1234, expected 0183 |
+| irq_precedence/hdma_vs_m0_scx2_halt_cgb04c_out1234 [cgb] | got 0184, expected 1234 |
 | irq_precedence/late_hdma_vs_ei_scx1_2_cgb04c_out1234 [cgb] | got 102F, expected 1234 |
 | irq_precedence/late_hdma_vs_ie_scx1_2_cgb04c_out1234 [cgb] | got 102F, expected 1234 |
 | irq_precedence/late_hdma_vs_tima_scx1_1_cgb04c_out1234 [cgb] | got 11E9, expected 1234 |
@@ -325,16 +317,15 @@ All 18 tests passed.
 
 All 8 tests passed.
 
-## m0enable (148/167 passed)
+## m0enable (149/167 passed)
 
-148/167 tests passed, 19 failed:
+149/167 tests passed, 18 failed:
 
 | Test | Result |
 |------|--------|
 | m0enable/disable_ds_1_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m0enable/disable_scx5_ds_2_cgb04c_out3 [cgb] | got 1, expected 3 |
 | m0enable/enable_wxA6_2x_spxA7_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
-| m0enable/enable_wxA6_2x_spxA7_ds_2_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m0enable/late_enable_lcdoffset1_1_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m0enable/lycdisable_ff41_2_dmg08_out2_cgb04c_out0 [dmg] | got 0, expected 2 |
 | m0enable/lycdisable_ff41_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
@@ -570,18 +561,16 @@ All 67 tests passed.
 | speedchange/speedchange_ch2_nr52_1a_cgb04c_outF2 [cgb] | got F0, expected F2 |
 | speedchange/speedchange_ch2_nr52_2a_cgb04c_outF2 [cgb] | got F0, expected F2 |
 
-## sprites (470/476 passed)
+## sprites (472/476 passed)
 
-470/476 tests passed, 6 failed:
+472/476 tests passed, 4 failed:
 
 | Test | Result |
 |------|--------|
 | sprites/10spritesPrLine_10xposA7_m0irq_2_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | sprites/10spritesPrLine_10xposA7_m0irq_2_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
-| sprites/10spritesprline_2xposa7overlap8_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | sprites/enable/late_disable_ds_3_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/late_disable_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| sprites/mix_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 
 ## tima (224/232 passed)
 
@@ -680,7 +669,7 @@ All 20 tests passed.
 | window/m2int_wxA6_scx5_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/m2int_wxA6_spxA7_m0irq_2_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | window/m2int_wxA6_spxA7_m0irq_2_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
-| window/m2int_wxA6_spxA7_m3stat_2_dmg08_out0_cgb04c_out3 [dmg] | got 3, expected 0 |
+| window/m2int_wxA6_spxA7_m3stat_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wxA6_spxA7_m3stat_4_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wxA6_vrambusyread_3_dmg08_cgb04c_out5 [cgb] | got 0, expected 5 |
 | window/on_screen/wx17_weoff_wxA5_weon [cgb, png] | 960/23040 pixels differ |

@@ -339,9 +339,9 @@ const CGB_LYC_EDGE_DEFER* {.booldefine.} = false
   ## `CGB_LYC_WRITE_DEFER` above; this is only the part that could not be
   ## spelled cheaply.
   ##
-  ## ## What it buys, from `d7fb190` (runner 1134, gambatte 4598)
+  ## ## What it buys, re-measured on `4a3c2e0b` + this branch (1139 / 4609)
   ##
-  ##   runner   1134 -> 1140      gambatte 4598 -> 4600
+  ##   runner   1139 -> 1145      gambatte 4609 -> 4611
   ##   shootout 261 PASS / 0 FAIL / 3 INFO
   ##
   ## +6 wilbertpol: all six `acceptance/gpu/ly_lyc{,_0,_153}_write-C` arms
@@ -359,8 +359,8 @@ const CGB_LYC_EDGE_DEFER* {.booldefine.} = false
   ##
   ## ## What it costs, and why that is not negotiable at this spelling
   ##
-  ## **+1.10% of ALL retired instructions on cgb-acid-hell** (25.680e9 against
-  ## 25.401e9, `cycles=` identical at 168537600, DINGBAT_BENCH_COUNTERS). Not
+  ## **+1.08% of ALL retired instructions on cgb-acid-hell** (25.680e9 against
+  ## 25.405e9, `cycles=` identical at 168537600, DINGBAT_BENCH_COUNTERS). Not
   ## the work -- the branch is taken a few times a frame. It is the branch: the
   ## edge needs a firing point that exists on EVERY M-cycle, dingbat has exactly
   ## one (`mem_tick_ppu`), and that proc sits on clang's inline threshold for
