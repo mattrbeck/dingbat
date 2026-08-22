@@ -699,6 +699,50 @@ proc cpu_cram_open*(ppu: GbPpu; is_write: bool): bool {.inline.} =
   else:
     return (ppu.lcd_status and 3'u8) != 3
 
+const OAM_READ_M0_OPEN_DOTS* {.intdefine.} = 4
+  ## The OAM read lock's OPEN edge, in PPU DOTS after the mode-3 -> 0 flag
+  ## edge -- the same quantity `VRAM_READ_M0_OPEN_DOTS` names for VRAM, and on
+  ## the default machine the same VALUE. 0 disables the rule and restores the
+  ## pure `read_mode` snapshot, which is what this lock spelled before.
+  ##
+  ## **c-sp's AGE `oam/oam-read-*` and `vram/vram-read-*` are the same ROM with
+  ## one address changed, and that is what makes this measurable without any
+  ## reference to where the CPU's M-cycle grid sits.** Both walk SCX 0..7 x a
+  ## 0..4 M-cycle delay and read at a fixed schedule after an LCD enable; the
+  ## two schedules are M-cycle-for-M-cycle identical (`DELAY 10` then 43
+  ## M-cycles to the mode-0 sample in both). So at every one of the 40 cells
+  ## the OAM read and the VRAM read happen at the SAME instant, and comparing
+  ## the two ROMs' EXPECTED tables compares the two LOCKS with every phase
+  ## question -- head start, line-0 length, boot hand-off -- cancelled.
+  ##
+  ## They are equal. `oam-read-dmgC-cgbBC` and `vram-read-cgbBCE` /
+  ## `vram-read-dmgC` give the mode-0 open edge as the same step function of
+  ## SCX on DMG-C, CGB-B and CGB-C, on the LCD-on line and on line 1 alike:
+  ##
+  ##   SCX            0  1  2  3  4  5  6  7
+  ##   line 0, delay  2  2  3  3  3  3  4  4     (= 2 + (SCX+2) div 4)
+  ##   line 1, delay  2  2  2  2  3  3  3  3     (= 2 + SCX div 4)
+  ##
+  ## and dingbat's OAM lock answers the line-0 row as `2 + (SCX+3) div 4`,
+  ## one dot late, because `read_mode` alone cannot open before the first
+  ## M-cycle that STARTS clear of mode 3. The mode-3 end is at dot 252 + SCX
+  ## and the sample at dot 249 + 4*delay, so the eight brackets intersect at
+  ## **open = edge + 4 dots exactly** -- the same flat, speed-independent
+  ## count `VRAM_READ_M0_OPEN_DOTS` is bracketed at by three gambatte rows,
+  ## reached here from a different family and a different lock.
+  ##
+  ## CGB-E is the exception and it is one dot: `oam-read-cgbE` is a separate
+  ## file whose table shifts every step of both rows by one SCX
+  ## (`2 + (SCX+3) div 4` and `2 + (SCX+1) div 4`), which brackets to
+  ## **open = edge + 5** -- i.e. exactly the un-relaxed `read_mode` rule this
+  ## tree already had. `GbQuirks.oam_read_open_late` carries that dot, and it
+  ## is why the constant is spelled as a base plus the flag rather than two
+  ## constants. The VRAM side has no such split: `vram-read-cgbBCE` states one
+  ## table for B, C and E, so mode 3's LENGTH is revision-flat and the E
+  ## difference is in the OAM lock alone.
+  ##
+  ## CGB-D is not measured by either ROM and is left with the C behaviour.
+
 const OAM_WRITE_M2_TAIL {.intdefine.} = 1
   ## Whether an OAM write is still admitted on the M-cycle mode 2 ends in.
   ##
@@ -708,7 +752,8 @@ const OAM_WRITE_M2_TAIL {.intdefine.} = 1
   ## and takes GBMicrotest 349 -> 347 (oam_write_l1_c and two others), so the
   ## last M-cycle of mode 2 really does still take an OAM write.
 
-proc cpu_oam_open*(ppu: GbPpu; is_write: bool; mcycle_dots: int32 = 0): bool {.inline.} =
+proc cpu_oam_open*(ppu: GbPpu; is_write: bool; mcycle_dots: int32 = 0;
+                   open_late = false): bool {.inline.} =
   if not lcd_enabled(ppu): return true
   let live = ppu.lcd_status and 3'u8
   if is_write:
@@ -739,7 +784,17 @@ proc cpu_oam_open*(ppu: GbPpu; is_write: bool; mcycle_dots: int32 = 0): bool {.i
     else:
       return live != 2
   let lag = ppu.read_mode and 3'u8
-  if lag == 3: return false
+  if lag == 3:
+    when OAM_READ_M0_OPEN_DOTS != 0:
+      # The mode-0 open edge, in dots off the flag edge rather than off the
+      # M-cycle grid `read_mode` is sampled on -- see OAM_READ_M0_OPEN_DOTS.
+      # `open_late` is CGB-E's one extra dot, which puts the edge back on that
+      # grid and so makes this clause inert there.
+      if live == 0'u8 and ppu.stat_prev_mode == 3'u8 and
+         ppu.cycle_counter - ppu.stat_chg_dot >=
+           int32(OAM_READ_M0_OPEN_DOTS) + int32(ord(open_late)):
+        return true
+    return false
   if ppu.first_line: return true
   lag != 2 and live != 2 and live != 3
 
@@ -3366,7 +3421,9 @@ proc ppu_read*(ppu: GbPpu; gb: GB; idx: int): uint8 =
     # OAM is inaccessible to the CPU during OAM scan (mode 2) and drawing
     # (mode 3): reads return 0xFF. See cpu_oam_open for where the two edges sit
     # (mooneye intr_2_oam_ok_timing, lcdon_timing-GS).
-    if cpu_oam_open(ppu, is_write = false): ppu.sprite_table[idx - 0xFE00]
+    if cpu_oam_open(ppu, is_write = false,
+                    open_late = gb.quirks.oam_read_open_late):
+      ppu.sprite_table[idx - 0xFE00]
     else: 0xFF'u8
   of 0xFF40:         ppu.lcd_control
   of 0xFF41:

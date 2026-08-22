@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-22 06:36:09*
+*Generated: 2026-08-22 07:26:52*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4611/4996 passed.**
+**4614/4996 passed.**
 
 ## bgen
 
@@ -458,9 +458,9 @@ All 44 tests passed.
 | miscmstatirq/m0statwirq_scx5_2_dmg08_out2 [dmg] | got 0, expected 2 |
 | miscmstatirq/m1statwirq_trigger_ly94_lyc94_40_50_2_dmg08_outE0_cgb04c_outE2 [cgb] | got E0, expected E2 |
 
-## oam_access (54/69 passed)
+## oam_access (56/69 passed)
 
-54/69 tests passed, 15 failed:
+56/69 tests passed, 13 failed:
 
 | Test | Result |
 |------|--------|
@@ -470,8 +470,6 @@ All 44 tests passed.
 | oam_access/postread_scx2_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | oam_access/postread_scx2_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | oam_access/postread_scx3_2_dmg08_xout1_cgb04c_out0 [cgb] | got 3, expected 0 |
-| oam_access/postread_scx5_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| oam_access/postread_scx5_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | oam_access/postwrite_2_scx3_dmg08_cgb04c_out1 [dmg] | got 0, expected 1 |
 | oam_access/postwrite_2_scx3_dmg08_cgb04c_out1 [cgb] | got 0, expected 1 |
 | oam_access/preread_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
@@ -615,9 +613,9 @@ All 20 tests passed.
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 
-## window (425/476 passed)
+## window (426/476 passed)
 
-425/476 tests passed, 51 failed:
+426/476 tests passed, 50 failed:
 
 | Test | Result |
 |------|--------|
@@ -661,7 +659,6 @@ All 20 tests passed.
 | window/m2int_wxA6_m0irq_2_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | window/m2int_wxA6_m3stat_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/m2int_wxA6_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/m2int_wxA6_oambusyread_2_dmg08_out5_cgb04c_out0 [dmg] | got 0, expected 5 |
 | window/m2int_wxA6_scx3_m3stat_2_dmg08_out0_cgb04c_out3 [dmg] | got 3, expected 0 |
 | window/m2int_wxA6_scx5_m3stat_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/m2int_wxA6_scx5_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |

@@ -4643,6 +4643,22 @@ type
       ## So the `-C` suffix on those four ROMs is a claim wilbertpol's own
       ## hardware does not support at CGB-C, and the `@cgbc` arms of them stay
       ## red on purpose. `@agb` is what this flag is for.
+    oam_read_open_late*: bool
+      ## CGB E. The CPU's OAM READ lock reopens **one dot later** at the end of
+      ## mode 3 than it does on DMG-C, CGB-B and CGB-C -- 5 dots after the flag
+      ## edge rather than 4, which puts it back on the M-cycle grid the
+      ## `read_mode` snapshot alone would have given it.
+      ##
+      ## AGE ships the two sides as two files: `oam/oam-read-dmgC-cgbBC` and
+      ## `oam/oam-read-cgbE` are the same source with `CGB_E` defined, and the
+      ## define moves every step of the ROM's expected table by exactly one
+      ## SCX. Nothing else in the pair moves, and `vram/vram-read-cgbBCE`
+      ## states ONE table for B, C and E, so mode 3's length is revision-flat
+      ## and this dot belongs to the OAM lock. See OAM_READ_M0_OPEN_DOTS in
+      ## ppu.nim for the bracket that fixes the two values at 4 and 5.
+      ##
+      ## CGB-D is not measured by either ROM; it keeps the C behaviour rather
+      ## than being grouped with E on a guess.
     unusable_region*: GbUnusableRegion
       ## What `$FEA0..$FEFF` does on this machine; see GbUnusableRegion, which
       ## carries the Pan Docs quote and the per-member evidence.
@@ -6949,6 +6965,7 @@ proc gb_quirks_for*(rev: GbRevision): GbQuirks =
     pcm_read_edge_zero: rev in {grCgb0, grCgbAB, grCgbC},
     square_freq_backstep_halftick: rev in {grCgbD, grCgbE},
     lyc_compare_hold: rev in {grCgbD, grCgbE, grAgb},
+    oam_read_open_late: rev == grCgbE,
     unusable_region:
       if GB_UNUSABLE_ZERO: urZero
       else:
