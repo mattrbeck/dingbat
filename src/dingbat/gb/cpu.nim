@@ -199,6 +199,40 @@ const IRQ_PUSH_T* {.intdefine.} = 0
   ## interrupt dispatch. Measurement scaffold; see IRQ_SAMPLE_T's last
   ## paragraph.
 
+const IRQ_SAMPLE_T_DS* {.intdefine.} = 16
+  ## `IRQ_SAMPLE_T` for a dispatch taken in DOUBLE speed. Equal to
+  ## `IRQ_SAMPLE_T` it compiles the split out entirely, hot path included,
+  ## which is what ships.
+  ##
+  ## **It is a scaffold with a measured result behind it, and the result is
+  ## worth +10 gambatte rows that this agent did not land** because they fall
+  ## in five families another agent owns this round. Whole gambatte suite, one
+  ## build per cell, on `e0c1939`:
+  ##
+  ##   IRQ_SAMPLE_T / _DS      gambatte     vs shipping
+  ##        16 / 16              4617       (ships)
+  ##        20 / 20              4620       +16 / -13
+  ##        20 / 16              4627       +15 / -5
+  ##
+  ## The +15 are the `_2` arm of SEVEN different `*_late_retrigger` families
+  ## (`irq_precedence/late_m0irq`, `ly0/lycint152_lyc0irq`,
+  ## `ly0/lycint152_lyc153irq`, `lyc153int_m2irq`, `m1/lycint143_m1irq`,
+  ## `m1/lycint_vblankirq`, `serial/start_wait_trigger_int8_read_if`) plus
+  ## `tima/tc00_irq_late_retrigger_3`, on BOTH devices -- so this is not a
+  ## DMG/CGB split and not one source's edge.
+  ##
+  ## What the split says is that the clear is at the START of the fifth
+  ## dispatch M-cycle in double speed and at its END in single speed. The five
+  ## rows it costs are the whole of the counter-evidence and they are worth
+  ## naming: `m2int_m2irq_late_retrigger_1` on both devices, which is the pair
+  ## `IRQ_SAMPLE_T`'s own note calls the direct read-out of the clear;
+  ## `irq_precedence/late_m0irq_retrigger_scx1_1` on both devices, whose
+  ## non-`scx1` twin GAINS; and `serial/start_wait_trigger_int8_read_if_2` on
+  ## DMG, whose CGB arm gains. Two ROMs that differ by one dot of mode 3
+  ## landing on opposite sides is the mode-3 residual, not this constant, and
+  ## `m2int_m2irq` disagreeing with seven other sources about the same instant
+  ## says the difference is in when each SOURCE rises, not in the clear.
+  ## Settle those before flipping this.
 const IRQ_SAMPLE_T* {.intdefine.} = 16
   ## How far into the 5 M-cycle interrupt dispatch, in T-cycles, the IF bit of
   ## the line being taken is cleared.
@@ -325,12 +359,18 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
   cpu.pc = interrupt
   # Run out to the sample point before clearing IF -- see IRQ_SAMPLE_T. The two
   # writes above have already charged 8 of it.
-  when IRQ_SAMPLE_T > 8 + IRQ_PUSH_T:
-    # One call, not one per M-cycle: the PPU's dot loop and the timer are both
-    # granular inside a multi-cycle tick, the two spellings score identically
-    # over the whole gambatte suite, and the M-cycle-at-a-time version inlines
-    # a second copy of the tick pair into this proc for nothing.
-    mem_tick_components(gb.memory, gb, IRQ_SAMPLE_T - 8 - IRQ_PUSH_T)
+  # One call, not one per M-cycle: the PPU's dot loop and the timer are both
+  # granular inside a multi-cycle tick, the two spellings score identically
+  # over the whole gambatte suite, and the M-cycle-at-a-time version inlines a
+  # second copy of the tick pair into this proc for nothing.
+  when IRQ_SAMPLE_T_DS == IRQ_SAMPLE_T:
+    when IRQ_SAMPLE_T > 8 + IRQ_PUSH_T:
+      mem_tick_components(gb.memory, gb, IRQ_SAMPLE_T - 8 - IRQ_PUSH_T)
+  else:
+    let sample_t =
+      if gb.memory.current_speed == 1: IRQ_SAMPLE_T_DS else: IRQ_SAMPLE_T
+    if sample_t > 8 + IRQ_PUSH_T:
+      mem_tick_components(gb.memory, gb, sample_t - 8 - IRQ_PUSH_T)
   clear_interrupt(gb.interrupts, interrupt)
   mem_tick_extra(gb.memory, gb, 20)
 
