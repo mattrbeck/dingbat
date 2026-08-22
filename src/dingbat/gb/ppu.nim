@@ -596,7 +596,7 @@ const LCD_ON_LINE0_LOCK_LEAD* {.intdefine.} = 2'i32
   ## Set to 0 to restore the pre-2026-08-22 behaviour of both locks on line 0.
 
 const VRAM_READ_M0_OPEN_DOTS* {.intdefine.} = 2
-const VRAM_READ_M0_OPEN_DOTS_DS* {.intdefine.} = 4
+const VRAM_READ_M0_OPEN_DOTS_DS* {.intdefine.} = 3
   ## The VRAM read lock's OPEN edge, in PPU DOTS after the mode-3 -> 0 flag
   ## edge. 0 disables the rule and restores the pure `read_mode` snapshot.
   ##
@@ -648,6 +648,28 @@ const VRAM_READ_M0_OPEN_DOTS_DS* {.intdefine.} = 4
   ##
   ## `_DS` is the double-speed value and is still 4.
 
+template lcdon_latched_mode(ppu: GbPpu; ds: bool): uint8 =
+  ## `read_mode` on the LCD-on line, with LCD_ON_LINE0_LOCK_LEAD undone at the
+  ## mode-3 -> 0 edge.
+  ##
+  ## The snapshot is taken at the top of an M-cycle, so it flips to the new mode
+  ## on the first M-cycle whose top is past the flag edge -- `gap = mdots + 1`.
+  ## On the LCD-on line mode 3 has not really ENDED then, so the lock is still
+  ## shut for `LEAD` dots after the snapshot says otherwise. Both locks need
+  ## this and both need it only at THIS edge; the 2 -> 3 edge is handled where
+  ## each lock's close is spelled, which is not the same place for the two of
+  ## them (VRAM's is the latched mode on a CGB and the live one on a DMG; OAM
+  ## is shut by mode 2 on every line but this one).
+  block:
+    var m = ppu.read_mode and 3'u8
+    when LCD_ON_LINE0_LOCK_LEAD != 0:
+      if ppu.first_line and m != 3'u8 and ppu.stat_prev_mode == 3'u8 and
+         (ppu.lcd_status and 3'u8) == 0'u8 and
+         ppu.cycle_counter - ppu.stat_chg_dot <
+           (if ds: 2'i32 else: 4'i32) + 1 + LCD_ON_LINE0_LOCK_LEAD:
+        m = 3'u8
+    m
+
 proc cpu_vram_open*(ppu: GbPpu; is_write: bool; cgb = false;
                     ds = false): bool {.inline.} =
   if not lcd_enabled(ppu): return true
@@ -658,7 +680,7 @@ proc cpu_vram_open*(ppu: GbPpu; is_write: bool; cgb = false;
     # this used to spell as `read_mode != 3`, evaluated at the write's own
     # commit point instead of one M-cycle after it.
     return (ppu.lcd_status and 3'u8) != 3
-  if (ppu.read_mode and 3'u8) == 3:
+  if lcdon_latched_mode(ppu, ds) == 3:
     when VRAM_READ_M0_OPEN_DOTS != 0 or VRAM_READ_M0_OPEN_DOTS_DS != 0:
       var want = if ds: int32(VRAM_READ_M0_OPEN_DOTS_DS)
                  else: int32(VRAM_READ_M0_OPEN_DOTS)
@@ -667,6 +689,30 @@ proc cpu_vram_open*(ppu: GbPpu; is_write: bool; cgb = false;
       if want != 0 and (ppu.lcd_status and 3'u8) == 0'u8 and
          ppu.stat_prev_mode == 3'u8 and
          ppu.cycle_counter - ppu.stat_chg_dot >= want:
+        return true
+    when LCD_ON_LINE0_LOCK_LEAD != 0 and VRAM_READ_LIVE_LOCK != 0:
+      # The CLOSE edge, carrying the same LCD_ON_LINE0_LOCK_LEAD the OPEN edge
+      # above does. The CGB's close is the LATCHED one -- this snapshot -- and
+      # it flips `read_mode` to 3 the first M-cycle whose top is past dot 80,
+      # i.e. at `gap = mdots + 1`; on the LCD-on line mode 3 has not really
+      # started yet then, so those `LEAD` dots are still readable. AGE's
+      # `vram-read-cgbBCE` samples exactly there and says so at BOTH speeds:
+      # its line-0 mode-3 sample is open at gap 5 and shut at gap 9 (1x, dots
+      # 85 and 89) and open at gap 3 and shut at gap 5 (2x, dots 83 and 85),
+      # which is `mdots + 1 + 2` on the nose either way and `mdots + 1` without
+      # the lead. The line-1 sample of the same ROM is shut at both, which is
+      # what says the lead is the LINE and not the constant.
+      #
+      # DMG-side this cannot fire: the DMG's close is the LIVE mode and is
+      # already shut a whole M-cycle before `read_mode` moves, so the lead
+      # would have to be spelled against `lcd_status` instead -- and AGE's
+      # sample grid steps 4 dots on that line, from dot 81 (open, and already
+      # open here through `first_line`) straight to dot 85 (shut on a DMG),
+      # so it never lands inside the DMG's 2 dots and nothing measures them.
+      if cgb and ppu.first_line and (ppu.lcd_status and 3'u8) == 3'u8 and
+         ppu.stat_prev_mode == 2'u8 and
+         ppu.cycle_counter - ppu.stat_chg_dot <
+           (if ds: 2'i32 else: 4'i32) + 1 + LCD_ON_LINE0_LOCK_LEAD:
         return true
     return false
   if ppu.first_line: return true
@@ -757,7 +803,7 @@ proc cpu_cram_open*(ppu: GbPpu; is_write: bool): bool {.inline.} =
     return (ppu.lcd_status and 3'u8) != 3
 
 const OAM_READ_M0_OPEN_DOTS* {.intdefine.} = 2
-const OAM_READ_M0_OPEN_DOTS_DS* {.intdefine.} = 4
+const OAM_READ_M0_OPEN_DOTS_DS* {.intdefine.} = 3
   ## The OAM read lock's OPEN edge, in PPU DOTS after the mode-3 -> 0 flag
   ## edge -- the same quantity `VRAM_READ_M0_OPEN_DOTS` names for VRAM, and on
   ## the default machine the same VALUE. 0 disables the rule and restores the
@@ -805,6 +851,21 @@ const OAM_READ_M0_OPEN_DOTS_DS* {.intdefine.} = 4
   ##
   ## CGB-D is not measured by either ROM and is left with the C behaviour.
 
+const OAM_READ_M3_CLOSE_DOTS* {.intdefine.} = 5'i32
+  ## The OAM read lock's CLOSE edge at the START of mode 3, in PPU dots after
+  ## the mode-2 -> 3 flag edge. Only reachable on the line the LCD was enabled
+  ## on: every other line has mode 2 holding OAM shut long before mode 3
+  ## begins, so mode 3's own close edge is exposed exactly once per enable.
+  ##
+  ## `oam/oam-read-*` samples it at dot 81 and 85 at single speed and at 81, 83
+  ## and 85 in double, and answers open, shut / open, open, shut -- so the edge
+  ## is at gap 5 on BOTH speeds, flat in dots. dingbat had it from the
+  ## `read_mode` snapshot, which is gap `mdots + 1`: 5 at single speed, where it
+  ## agrees by coincidence, and 3 in double, where the dot-83 sample says it is
+  ## wrong on all eight SCX.
+  ##
+  ## 0 restores the snapshot rule.
+
 const OAM_WRITE_M2_TAIL {.intdefine.} = 1
   ## Whether an OAM write is still admitted on the M-cycle mode 2 ends in.
   ##
@@ -845,8 +906,15 @@ proc cpu_oam_open*(ppu: GbPpu; is_write: bool; mcycle_dots: int32 = 0;
       return true
     else:
       return live != 2
-  let lag = ppu.read_mode and 3'u8
+  let lag = lcdon_latched_mode(ppu, ds)
   if lag == 3:
+    when OAM_READ_M3_CLOSE_DOTS != 0:
+      # Mode 3's own close edge, which only the LCD-on line ever reaches (see
+      # OAM_READ_M3_CLOSE_DOTS). `first_line` is load-bearing, not a fit: on
+      # any other line `live` has been 2 since dot 1 and the lock shut there.
+      if ppu.first_line and live == 3'u8 and ppu.stat_prev_mode == 2'u8 and
+         ppu.cycle_counter - ppu.stat_chg_dot < OAM_READ_M3_CLOSE_DOTS:
+        return true
     when OAM_READ_M0_OPEN_DOTS != 0 or OAM_READ_M0_OPEN_DOTS_DS != 0:
       # The mode-0 open edge, in dots off the flag edge rather than off the
       # M-cycle grid `read_mode` is sampled on -- see OAM_READ_M0_OPEN_DOTS.
