@@ -911,6 +911,8 @@ type
     ## Which reverb algorithm a Bon-driver build ships (see gs_bon.nim):
     grmParsedShift   # GS1: seed gains are runtime-patched asr instructions,
                      # live-parsed from the IWRAM code every frame
+    grmByteMatrix    # TLA: byte-domain matrix reverb over the FIFO ring bytes,
+                     # fixed packed-halfword coefficients (live-validated)
 
   GsBonHle* = ref object
     gba* {.cursor.}: GBA
@@ -947,6 +949,29 @@ type
     rev_ring*:   seq[float32]
     rev_slot*:   int        # slot being written this mixer pass
     rev_pos*:    int        # intra-frame sample index within the slot
+    # grmByteMatrix (TLA) state: FIFO byte histories at the render rate —
+    # the packed A-variant left / B-variant left / A-variant right bytes the
+    # taps consume (see gs_bon.nim's TLA reverb notes) — plus the live-parsed
+    # coefficients and pack-bias flag.
+    tla_al*:     seq[int8]
+    tla_bl*:     seq[int8]
+    tla_ar*:     seq[int8]
+    tla_w*:      int        # UNWRAPPED write cursor (mask on ring access): the
+                            # tap arithmetic is anchored on per-frame cursors
+    tla_fstart*: array[32, int]  # write cursor at each mixer-hook (frame start),
+    tla_fidx*:   int             # newest at tla_fidx — taps K frames back read
+                                 # "same intra-frame offset" like the real ring
+    tla_cla*, tla_cra*, tla_clb*, tla_crb*: int32  # seed matrix halfwords
+    tla_wa*, tla_wb*: uint32     # the raw packed coefficient words (the seed
+                                 # multiply replicates the ARM packed-lane
+                                 # mul/mla wraps bit-exactly with these)
+    tla_cross*:  int        # cross-tap extra delay, driver samples (from +0xD30)
+    tla_bias*:   bool       # this frame's +0x40 pack bias (the +0xD1C nibble)
+    tla_rev_ok*: bool       # live validation of the output-loop code succeeded
+    tla_spv*:    int        # samples per frame at driver rate (SoundInfo, 528)
+    tla_acc*:    int        # driver-time accumulator (src_rate per output tick)
+    tla_fpos*:   int        # driver samples rendered since the mixer hook
+    tla_cur*:    array[4, int8]  # latched byte pair [A_l, B_l, A_r, B_r]
     out_delay*:  seq[int16]
     out_delay_w*: int
     db_delay*:   int
