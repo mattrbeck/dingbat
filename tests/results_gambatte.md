@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-21 19:25:44*
+*Generated: 2026-08-21 19:37:26*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4593/4996 passed.**
+**4598/4996 passed.**
 
 ## bgen
 
@@ -254,20 +254,19 @@ All 6 tests passed.
 | lyc153int_m2irq/lyc153int_m2irq_late_retrigger_2_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
 | lyc153int_m2irq/lyc153int_m2irq_late_retrigger_2_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 
-## lycEnable (185/225 passed)
+## lycEnable (189/225 passed)
 
-185/225 tests passed, 40 failed:
+189/225 tests passed, 36 failed:
 
 | Test | Result |
 |------|--------|
 | lycEnable/ff41_disable_2_dmg08_out0_cgb04c_out2 [cgb] | got 0, expected 2 |
-| lycEnable/ff45_disable_2_dmg08_out1_cgb04c_out3 [cgb] | got 1, expected 3 |
 | lycEnable/ff45_enable_weirdpoint_2_dmg08_out3_cgb04c_out1 [cgb] | got 3, expected 1 |
-| lycEnable/ff45_enable_weirdpoint_3_dmg08_out1_cgb04c_out3 [cgb] | got 1, expected 3 |
 | lycEnable/ff45_enable_weirdpoint_ds_2_cgb04c_out1 [cgb] | got 3, expected 1 |
 | lycEnable/ff45_enable_weirdpoint_ds_lcdoffset1_2_cgb04c_out0 [cgb] | got 2, expected 0 |
 | lycEnable/ff45_enable_weirdpoint_ds_lcdoffset1_3_cgb04c_out0 [cgb] | got 2, expected 0 |
 | lycEnable/ff45_enable_weirdpoint_ds_lcdoffset1_4_cgb04c_out2 [cgb] | got 0, expected 2 |
+| lycEnable/ff45_enable_weirdpoint_lcdoffset1_2_cgb04c_out0 [cgb] | got 2, expected 0 |
 | lycEnable/late_ff41_enable_after_m2int_disable_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | lycEnable/late_ff41_enable_after_m2int_disable_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | lycEnable/late_ff41_enable_after_m2int_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
@@ -281,7 +280,6 @@ All 6 tests passed.
 | lycEnable/lcdoff_lycirqen_1_dmg08_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lcdoff_lycirqen_4_dmg08_outE2_cgb04c_outE0 [dmg] | got E0, expected E2 |
 | lycEnable/lyc0_ff41_disable_ds_1_cgb04c_outE0 [cgb] | got E2, expected E0 |
-| lycEnable/lyc0_ff45_disable_2_dmg08_outE0_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lyc0_late_ff45_enable_2_dmg08_outE2_cgb04c_outE0 [cgb] | got E2, expected E0 |
 | lycEnable/lyc0_m1disable_2_dmg08_outE2_cgb04c_outE0 [dmg] | got E0, expected E2 |
 | lycEnable/lyc0_m1disable_ds_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
@@ -290,16 +288,14 @@ All 6 tests passed.
 | lycEnable/lyc153_late_ff41_enable_ds_lcdoffset1_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lyc153_late_ff41_enable_lcdoffset1_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lyc153_late_ff45_enable_2_dmg08_outE2_cgb04c_outE0 [cgb] | got E2, expected E0 |
-| lycEnable/lyc153_late_ff45_enable_3_dmg08_outE0_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lyc153_late_ff45_enable_4_dmg08_outE2_cgb04c_outE0 [cgb] | got E2, expected E0 |
 | lycEnable/lyc153_late_ff45_enable_ds_2_cgb04c_outE0 [cgb] | got E2, expected E0 |
 | lycEnable/lyc153_late_ff45_enable_lcdoffset1_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lyc153_late_m1disable_2_dmg08_outE2_cgb04c_outE0 [dmg] | got E0, expected E2 |
 | lycEnable/lyc153_m1disable_ds_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
-| lycEnable/lyc_ff45_disable2_2_dmg08_out1_cgb04c_out3 [cgb] | got 1, expected 3 |
 | lycEnable/lyc_ff45_trigger_delay_2_dmg08_out0_cgb04c_out2 [cgb] | got 0, expected 2 |
-| lycEnable/lycwirq_trigger_ly00_stat50_2_dmg08_outE0_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lycwirq_trigger_ly00_stat50_ds_lcdoffset1_2_cgb04c_outE2 [cgb] | got E0, expected E2 |
+| lycEnable/lycwirq_trigger_ly00_stat50_lcdoffset1_1_cgb04c_outE0 [cgb] | got E2, expected E0 |
 
 ## lycint_ly
 
@@ -459,16 +455,15 @@ All 8 tests passed.
 
 All 44 tests passed.
 
-## miscmstatirq (271/279 passed)
+## miscmstatirq (272/279 passed)
 
-271/279 tests passed, 8 failed:
+272/279 tests passed, 7 failed:
 
 | Test | Result |
 |------|--------|
 | miscmstatirq/lycstatwirq_trigger_ly00_10_50_lcdoffset3_2_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | miscmstatirq/lycstatwirq_trigger_m0_late_ly44_lyc44_08_40_ds_3_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | miscmstatirq/lycwirq_trigger_m0_late_ly44_lyc45_4_dmg08_cgb04c_outE2 [dmg] | got E0, expected E2 |
-| miscmstatirq/lycwirq_trigger_m0_late_ly44_lyc45_4_dmg08_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | miscmstatirq/lycwirq_trigger_m0_late_ly44_lyc45_ds_3_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | miscmstatirq/m0statwirq_scx2_2_dmg08_out2 [dmg] | got 0, expected 2 |
 | miscmstatirq/m0statwirq_scx5_2_dmg08_out2 [dmg] | got 0, expected 2 |

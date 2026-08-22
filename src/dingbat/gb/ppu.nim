@@ -3661,8 +3661,9 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     # On CGB the same three ROMs say the opposite -- see CGB_LYC_WRITE_DEFER in
     # gb.nim, which is the whole write-up.
     when CGB_LYC_WRITE_DEFER:
-      if gb.cgb_enabled: ppu_defer_machinery_write(ppu, gb, idx, val)
-      else:              ppu.lyc = val
+      if gb.cgb_enabled and (CGB_LYC_WRITE_DEFER_DS or gb.memory.current_speed == 0):
+        ppu_defer_machinery_write(ppu, gb, idx, val)
+      else: ppu.lyc = val
     else:
       ppu.lyc = val
     ppu.stat_write_pending = true

@@ -253,44 +253,100 @@ const CGB_STAT_ENABLE_LATENCY* {.intdefine.} = 2
   ## (`m1/*_lcdoffset1_*` flips sign across the whole sweep); 2 is the best cell
   ## of a surface that is not yet flat, not the end of the question.
 
-const CGB_LYC_WRITE_DEFER* {.booldefine.} = false
+const CGB_LYC_WRITE_DEFER* {.booldefine.} = true
   ## Whether a CPU write to LYC (`$FF45`) reaches the LY comparator at the
   ## M-cycle BOUNDARY on CGB, instead of at the top of its own M-cycle the way
   ## it does on DMG. A one-M-cycle CGB write latency, the same axis as
   ## `CGB_STAT_ENABLE_LATENCY` above and the `CGB_*_LATENCY` family in
-  ## memory.nim, spelled as the boundary rather than as dots because the ROMs
-  ## that measure it are M-cycle sleds and bracket it no finer.
+  ## memory.nim, spelled as the boundary rather than as dots because every ROM
+  ## that measures it is an M-cycle sled and none brackets it finer.
   ##
   ## ## What measures it
   ##
   ## wilbertpol `acceptance/gpu/ly_lyc_write`, `ly_lyc_0_write` and
   ## `ly_lyc_153_write` ship as a `-C` / `-GS` pair each. Both halves are the
-  ## same four-subtest program: sync off an LCD off/on, `EI`, burn N NOPs, write
-  ## LYC on the Nth M-cycle, and count the LYC STAT interrupts the write let
-  ## through (or cancelled). Subtests 1-2 write a NON-matching LYC to cancel a
-  ## match that is about to arrive; 3-4 write a MATCHING one to create it. Each
-  ## pair is one M-cycle apart, so each ROM brackets the write's arrival to the
-  ## M-cycle.
+  ## same four-sled program: sync off an LCD off/on and a `wait LY == 1`, `EI`,
+  ## burn N NOPs, write LYC on the Nth M-cycle, and count the LYC STAT
+  ## interrupts the write let through or cancelled. Sleds 1-2 write a
+  ## NON-MATCHING LYC to cancel a match that is about to arrive; sleds 3-4 write
+  ## a MATCHING one to create one. Each pair is one M-cycle apart, so each ROM
+  ## brackets the write to the M-cycle -- and `tools/gbppu/lycwsled.py` slides
+  ## the store through its own NOP field, which turns the bracket into a
+  ## staircase and locates the step outright.
   ##
-  ## **The `-C` builds' NOP counts are exactly one LESS than the `-GS` builds'
-  ## at every one of the fourteen sleds** (`ly_lyc_write` 98/99/211/212 against
-  ## 99/100/212/213; `ly_lyc_0_write` 98/99/323/324 against 99/100/324/325;
-  ## `ly_lyc_153_write` 96/97/97/98 against 97/98/98/99) and both builds expect
-  ## the same answers. That is the measurement, in the ROM's own source: the
-  ## CGB takes the write one M-cycle later than the DMG, so the author had to
-  ## move the write one M-cycle earlier to land it on the same edge.
+  ## The `-C` builds NOP counts are exactly one LESS than the `-GS` builds at
+  ## every one of the twelve sleds (`ly_lyc_write` 98/99/211/212 against
+  ## 99/100/212/213, `ly_lyc_0_write` 98/99/323/324 against 99/100/324/325,
+  ## `ly_lyc_153_write` 96/97/97/98 against 97/98/98/99) for the same expected
+  ## answers, so the ROM's own source already says the two devices differ by one
+  ## M-cycle. Sweeping ONE file on BOTH devices removes even that inference --
+  ## `ly_lyc_write-C` sled 0, slid by k M-cycles, interrupt count out of SameBoy
+  ## and out of dingbat:
   ##
-  ## Read out with `tools/gbppu/wilbergpu.py` (the ROMs' raw per-subtest bytes
-  ## sit in `$C014..` before the print routine packs them) and cross-checked
-  ## against SameBoy with `tools/gbfuzz/sameboy_wram`. SameBoy answers all three
-  ## `-C` ROMs' interrupt-count slots with the ROM's own expected values on
-  ## every CGB revision it models, 0 through E and AGB; dingbat answered the
-  ## DMG's grid on both devices, i.e. it was right on `-GS` and one M-cycle
-  ## early on `-C`.
+  ##     k          -1   0   +1   +2
+  ##     SameBoy DMG  0   0    0    1
+  ##     SameBoy CGB  0   0    1    1     <- one M-cycle earlier
+  ##     dingbat DMG  0   0    0    1
+  ##     dingbat CGB  0   0    0    1     <- no device step at all
   ##
-  ## The DMG half is NOT this: the same three ROMs' `-GS` builds are green with
-  ## the byte at the top of its M-cycle and go red if it is deferred there too,
-  ## which is what the note at the `$FF45` write site records.
+  ## and sled 3 (the create direction) steps the same way, 1->0 at k = 0 on
+  ## SameBoy's DMG and at k = -1 on its CGB. Meanwhile every PASSIVE probe on
+  ## the same grid -- swap the LYC store for a bare `LDH A,($FF44)`, `($FF41)`
+  ## or `($FF0F)` (`lycwsled.py --probe`) -- is IDENTICAL on both devices in
+  ## both emulators. The LY advance, the STAT mode edge and the LYC interrupt's
+  ## own rise do not move between DMG and CGB. Only the WRITE does, and it moves
+  ## LATER on CGB, which is this constant.
+  ##
+  ## ## What it does NOT fix, and why it ships anyway
+  ##
+  ## Sleds 1-2 (cancel) turn on when the BYTE lands; sleds 3-4 (create) turn on
+  ## when the write's STAT EDGE is taken. dingbat's DMG puts those at two
+  ## different instants -- byte at the top of the M-cycle, edge at the boundary
+  ## (`stat_write_pending`) -- and both are right there. Shifting the CGB by one
+  ## M-cycle therefore needs BOTH to move: byte to the boundary of T, edge to
+  ## the boundary of T+1. This moves the byte and nothing else, because the edge
+  ## has no second stage to move to: `ppu_flush_stat_write` runs from
+  ## `mem_flush_deferred`, which only ever runs on the write path, so an edge
+  ## owed one M-cycle later has nothing guaranteed to take it. So the CANCEL
+  ## half of all three ROMs is now exact and the CREATE half is still one
+  ## M-cycle late, and none of the six `ly_lyc*_write-C` rows flips.
+  ##
+  ## It ships for the gambatte rows it does flip, all `[cgb]` (from 4593):
+  ##
+  ##   +7  lycEnable/ff45_disable_2, ff45_enable_weirdpoint_3,
+  ##       lyc0_ff45_disable_2, lyc153_late_ff45_enable_3, lyc_ff45_disable2_2,
+  ##       lycwirq_trigger_ly00_stat50_2,
+  ##       miscmstatirq/lycwirq_trigger_m0_late_ly44_lyc45_4
+  ##   -2  lycEnable/ff45_enable_weirdpoint_lcdoffset1_2,
+  ##       lycEnable/lycwirq_trigger_ly00_stat50_lcdoffset1_1
+  ##
+  ## `ff45_enable_weirdpoint` is the family named for this M-cycle: four ROMs
+  ## that write LYC = LY+1 one M-cycle apart across the LY advance, expecting no
+  ## interrupt at the step that lands on the boundary -- and gambatte's own
+  ## expectations put that step at index 3 on DMG and index 2 on CGB, which is
+  ## the same one-M-cycle device split the sleds measure, from a third suite.
+  ##
+  ## The two losses are both `lcdoffset1` rows, i.e. the CGB's LCD-on phase axis
+  ## shifted by one dot. That is the axis this constant cannot resolve: the
+  ## boundary spelling is a whole M-cycle and those rows are asking whether the
+  ## real quantity is 4 dots or 2. They are the instrument for that question and
+  ## it is left open.
+const CGB_LYC_WRITE_DEFER_DS* {.booldefine.} = false
+  ## ...and whether the deferral above also applies in DOUBLE SPEED. It does
+  ## NOT, and this is the honest state of that: the three ROMs above are all
+  ## single-speed and say nothing about it, and turning it on for double speed
+  ## as well is **3 gambatte rows worse** (4598 -> 4595). It takes
+  ## `lycEnable/ff45_disable_ds_1`, `ff45_enable_weirdpoint_ds_3`,
+  ## `lyc0_ff45_disable_ds_1`, `lyc153_late_ff45_enable_ds_3`,
+  ## `lyc_ff45_disable2_ds_1` and `lycwirq_trigger_ly00_stat50_ds_1` red for
+  ## `ff45_enable_weirdpoint_ds_lcdoffset1_4` and
+  ## `lycwirq_trigger_ly00_stat50_ds_lcdoffset1_2` green.
+  ##
+  ## A whole M-cycle is 4 dots at single speed and 2 at double, so "one M-cycle"
+  ## is not one quantity across the speed axis; the `CGB_*_LATENCY` family next
+  ## door is in DOTS for exactly that reason, and 4 dots would be TWO
+  ## double-speed M-cycles, which this spelling cannot express either. The
+  ## double-speed half of this constant is unmeasured, not decided.
 
 const STAT_ENABLE_EARLY* = STAT_ENABLE_LATENCY < 4 or CGB_STAT_ENABLE_LATENCY < 4
   ## Whether either device's enable field lands before the M-cycle boundary,
