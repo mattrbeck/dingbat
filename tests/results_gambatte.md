@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-22 07:27:46*
+*Generated: 2026-08-22 07:56:37*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4614/4996 passed.**
+**4619/4996 passed.**
 
 ## bgen
 
@@ -115,9 +115,9 @@ All 8 tests passed.
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_4 [dmg, png] | 1/23040 pixels differ |
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_5 [dmg, png] | 144/23040 pixels differ |
 
-## enable_display (159/184 passed)
+## enable_display (163/184 passed)
 
-159/184 tests passed, 25 failed:
+163/184 tests passed, 21 failed:
 
 | Test | Result |
 |------|--------|
@@ -128,10 +128,8 @@ All 8 tests passed.
 | enable_display/frame0_m0irq_count_scx3_ds_1_cgb04c_out90 [cgb] | got 00, expected 90 |
 | enable_display/frame0_m2irq_count_ds_1_cgb04c_out98 [cgb] | got 90, expected 98 |
 | enable_display/frame0_m2stat_count_ds_1_cgb04c_out91 [cgb] | got 01, expected 91 |
-| enable_display/frame0_m3stat_count_ds_1_cgb04c_out90 [cgb] | got 00, expected 90 |
 | enable_display/frame1_m0irq_count_scx3_ds_1_cgb04c_out90 [cgb] | got 00, expected 90 |
 | enable_display/frame1_m2irq_count_ds_1_cgb04c_out98 [cgb] | got 90, expected 98 |
-| enable_display/frame1_m2stat_count_1_dmg08_cgb04c_out91 [cgb] | got 00, expected 91 |
 | enable_display/frame1_m2stat_count_ds_1_cgb04c_out91 [cgb] | got 01, expected 91 |
 | enable_display/ly0_late_cgbpr_2_cgb04c_outFF [cgb] | got 55, expected FF |
 | enable_display/ly0_late_cgbpr_ds_2_cgb04c_outFF [cgb] | got 55, expected FF |
@@ -139,8 +137,6 @@ All 8 tests passed.
 | enable_display/ly0_late_cgbpw_ds_2_cgb04c_out55 [cgb] | got AA, expected 55 |
 | enable_display/ly0_late_scx7_m3stat_scx0_2_dmg08_out87_cgb04c_out84 [dmg] | got 84, expected 87 |
 | enable_display/ly0_late_scx7_m3stat_scx1_1_dmg08_cgb04c_out87 [cgb] | got 84, expected 87 |
-| enable_display/ly0_late_scx7_m3stat_scx3_1_dmg08_cgb04c_out87 [dmg] | got 84, expected 87 |
-| enable_display/ly0_late_scx7_m3stat_scx3_1_dmg08_cgb04c_out87 [cgb] | got 84, expected 87 |
 | enable_display/ly0_late_vramr_2_dmg08_outFF_cgb04c_out55 [cgb] | got FF, expected 55 |
 | enable_display/ly0_late_vramr_ds_1_cgb04c_out55 [cgb] | got FF, expected 55 |
 | enable_display/ly0_late_vramw_2_dmg08_out55_cgb04c_outAA [cgb] | got 55, expected AA |
@@ -216,13 +212,12 @@ All 8 tests passed.
 
 All 62 tests passed.
 
-## ly0 (89/96 passed)
+## ly0 (90/96 passed)
 
-89/96 tests passed, 7 failed:
+90/96 tests passed, 6 failed:
 
 | Test | Result |
 |------|--------|
-| ly0/lycint152_ly0stat_2_dmg08_cgb04c_outC0 [cgb] | got C1, expected C0 |
 | ly0/lycint152_lyc0flag_ds_3_cgb04c_outC4 [cgb] | got C0, expected C4 |
 | ly0/lycint152_lyc0irq_late_retrigger_2_dmg08_cgb04c_outE0 [dmg] | got E2, expected E0 |
 | ly0/lycint152_lyc0irq_late_retrigger_2_dmg08_cgb04c_outE0 [cgb] | got E2, expected E0 |

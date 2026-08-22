@@ -1172,6 +1172,77 @@ proc `coincidence_flag=`*(ppu: GbPpu; on: bool) {.inline.} =
   else:  ppu.lcd_status = ppu.lcd_status and not 0x04'u8
 proc mode_flag*(ppu: GbPpu): uint8 {.inline.} = ppu.lcd_status and 0x03
 
+const STAT_M0_LEAD_DS_D {.intdefine: "STAT_M0_LEAD_DS".} = STAT_M0_LEAD_T shr 1
+const STAT_M0_LEAD_DS* = int32(STAT_M0_LEAD_DS_D)
+  ## The mode-0 source's lead in DOUBLE SPEED, in dots. Ships at the IDENTITY
+  ## `STAT_M0_LEAD_T shr 1` = 1 -- `STAT_M0_LEAD_T` is T-cycles of the CPU
+  ## clock and a double-speed T-cycle is half a dot, which is the spelling
+  ## gb.nim's note measured against "flat in dots". Verified inert by
+  ## construction: the default reproduces the pre-split tree row for row
+  ## (runner 1155, gambatte 4619, AGE 57).
+  ##
+  ## ## What asking it found: dingbat's DS mode-0 DISPATCH GRID is one dot off
+  ##
+  ## AGE `stat-interrupt/stat-int-dmgC-cgbBCE` fires the mode-0 STAT interrupt
+  ## and reads STAT a fixed number of M-cycles into the handler, at ten SCX and
+  ## in both speeds. Its double-speed half fails here on **SCX 1, 3, 5, 7 and 9
+  ## -- every ODD SCX and no even one** (5 cells; the single-speed half is
+  ## clean), with dingbat's dispatch a whole M-cycle EARLIER than hardware's.
+  ##
+  ## That is exactly what a lead of one dot predicts. A DS M-cycle is 2 dots,
+  ## the mode 3 -> 0 edge is at `252 + (SCX and 7)`, and dispatch lands on the
+  ## first M-cycle boundary at or after the source. With the source at
+  ## `edge - 1` an odd SCX puts it on the same boundary as its even
+  ## predecessor, so dingbat's staircase steps at SCX 2/4/6 where hardware's
+  ## steps at 1/3/5/7. With the source AT the edge the two staircases coincide,
+  ## and `-d:STAT_M0_LEAD_DS=0 -d:CGB_M0_HALT_BLIND_DS_DOTS=0` does exactly
+  ## that: **+3 AGE arms (all three `stat-int` CGB arms go green) and +5
+  ## gambatte, runner 1155 -> 1159, gambatte 4619 -> 4624, shootout still
+  ## 261/261.** The halt-blind dots have to go with it, and that is derivable
+  ## rather than fitted -- the blind window exists because the source leads, so
+  ## with no lead there is nothing to be blind to; at 1 it costs
+  ## `halt/m0int_m0stat_scx2_ds_1` and `halt/m0irq_m0stat_scx2_ds_1`, at 2 more.
+  ##
+  ## ## Why it is NOT SHIPPED
+  ##
+  ## Because SameBoy passes BOTH SIDES, so neither value of this constant can be
+  ## the mechanism. Checked row by row with `tools/gbfuzz/sameboy_gambatte` at
+  ## `SAMEBOY_CGB_MODEL=C` and with `sameboy_wram` over AGE's `TEST_RESULTS`:
+  ##
+  ##   * SameBoy answers AGE `stat-int` with the full expected `80 82 80 82 ...`
+  ##     on cgb0, cgbb, cgbc, cgbd, cgbe and agb -- it PASSES the very DS
+  ##     odd-SCX cells this constant is being moved for;
+  ##   * and it passes all eight gambatte DS rows the move gains
+  ##     (`m0enable/disable_ds_1`, `disable_scx5_ds_2`,
+  ##     `lycdisable_ff4{1,5}_scx1_ds_1`, `m0int_m0stat_scx5_ds_2`,
+  ##     `m2int_m0irq_scx5_ds_1`, `enable_display/frame1_m0irq_count_scx3_ds_1`,
+  ##     `lcd_offset/offset1_lyc99int_m0irq_count_scx2_ds_1`);
+  ##   * and the two it loses
+  ##     (`irq_precedence/late_m0irq_retrigger_scx1_ds_2` -> `E0`,
+  ##     `m2int_m0irq/m2int_m0irq_scx3_ifw_ds_2` -> `00`).
+  ##
+  ## Ten rows, one implementation, all ten right. A lead of 1 gets 2 of 10 and a
+  ## lead of 0 gets 8 of 10, so the quantity that is wrong is not the lead.
+  ##
+  ## What the two staircases actually differ in is the ABSOLUTE dot, not the
+  ## shape: rounding the source UP TO AN ODD DOT reproduces hardware's steps at
+  ## odd SCX *and* keeps every dispatch one dot before where a lead of 0 puts
+  ## it. In other words **dingbat's double-speed CPU-to-PPU dispatch phase is
+  ## one dot late**, and this constant is the wrong place to pay for it -- it
+  ## buys the shape by moving the edge, and the edge is what the two lost rows
+  ## measure. That phase is the `lcd_offset` axis at `mem_tick_ppu_latched`
+  ## (see `CGB_LATENCY_CAP` in gb.nim, which records that only double speed can
+  ## tell those two spellings apart). NEXT MOVE: make the DS dispatch grid
+  ## odd-aligned and re-run this constant at the identity; if AGE `stat-int`
+  ## goes green with the lead untouched, that is the mechanism.
+  ##
+  ## The third row `-d:STAT_M0_LEAD_DS=0` loses,
+  ## `m0enable/enable_wxA6_2x_spxA7_ds_2`, is NOT a regression of this kind:
+  ## SameBoy fails it and its `_ds_1` sibling too (both `00` against an expected
+  ## `2`), and `_ds_1` is already red here, so the move only pulls the second
+  ## member of an already-broken family across. That family is a separate
+  ## mode-3-length defect at WX = $A6 with an object at X = $A7.
+
 proc stat_irq_lead*(gb: GB): int32 {.inline.} =
   ## How far ahead of the mode flag the STAT interrupt line runs, in dots.
   ## STAT_IRQ_LEAD is in CPU M-cycles, and one M-cycle is 4 dots at normal
@@ -1182,7 +1253,8 @@ proc stat_irq_lead*(gb: GB): int32 {.inline.} =
   ## of which one is set rather than a mixture.
   when STAT_IRQ_SPLIT:
     int32(STAT_DOMAIN_LEAD) * int32(4 shr gb.memory.current_speed) +
-      int32(STAT_M0_LEAD_T shr gb.memory.current_speed)
+      (if gb.memory.current_speed == 1'u8: STAT_M0_LEAD_DS
+       else: int32(STAT_M0_LEAD_T))
   else: 0'i32
 static:
   doAssert STAT_M0_LEAD_T == 0 or (STAT_IRQ_LEAD == 0 and STAT_LYC_LEAD == 0),
@@ -1256,6 +1328,61 @@ static:
 # cancelling four dots of dispatch error on those rows, which is why moving
 # either alone looks like a regression.
 
+# ---- The first line after an LCD enable reads its mode bits 2 dots late -----
+#
+# On the first line after `LCDC.7` goes high, and on that line only, a CPU read
+# of STAT returns the mode from two dots FURTHER back than it does on every
+# other line. Nothing else on that line moves: mode 3 starts and ends where it
+# always did, the VRAM and OAM locks open and close where they always did, and
+# the mode-0 STAT source rises where it always did. It is a READ-path lag, the
+# same kind of rule as the `first_line` mode-2-reads-as-0 mask in ppu_read (and
+# it composes with it -- masked mode 2 is what the first line reports for the
+# two dots mode 3 has already started).
+#
+# ## What measures it
+#
+# AGE `stat-mode/*` and its double-speed sibling. Both re-enable the LCD before
+# every one of their 45 runs and then read STAT once per line at a fixed
+# M-cycle offset, so line 0 IS the first line after an enable and lines 1..3,
+# 142..145 and 152..155 are the control. Read at cell resolution
+# (`tools/gbppu/agediff.py`) the residue was exactly, and only, line 0:
+#
+#   * `stat-mode`'s mode-0 rows: hardware still reads `$83` on line 0 at the
+#     M-cycle every other line already reads `$80`, at SCX 2, 3, 6 and 7 and
+#     nowhere else. SCX shifts the mode 3 -> 0 edge one dot at a time, so those
+#     four are the SCX values at which 2 extra dots cross the 4-dot read grid
+#     and the other six are the ones where they do not -- the quantity is
+#     bracketed to 2 by which SCX values move, without a sweep.
+#   * `stat-mode-ds`'s mode-3 rows read on a 2-dot grid and see the OTHER edge
+#     directly: line 0 reads `$80` (mode 2, masked) two dots after every other
+#     line already reads `$83`.
+#
+# Both edges, both directions, one quantity. And `stat-mode`'s own mode-3 rows
+# pass at single speed either way, which is the consistency check: a 2-dot lag
+# is invisible on a 4-dot grid at that phase.
+#
+# ## Why it is the READ and not the pipeline -- measured, not argued
+#
+# The obvious shape is "mode 3 starts 2 dots later on line 0" and it is WRONG.
+# `-d:LCD_ON_M3_LATE=2` in fifo_ppu.nim's `m3_start_dot`, gated on
+# `first_line`, makes all seven AGE `stat-mode` arms pass and costs 32 rows:
+#
+#   * GBMicrotest `oam_read_l0_{b,d}`, `oam_write_l0_{b,d}`,
+#     `vram_read_l0_{b,d}`, `vram_write_l0_{b,d}`, `lcdon_to_oam_unlock_{b,d}`
+#     and mooneye `lcdon_timing-GS`/`lcdon_write_timing-GS` (4 arms each) --
+#     the ACCESS WINDOWS on line 0. Each `_b`/`_d` pair is one M-cycle apart
+#     and BOTH members flip, i.e. the boundary slid by exactly the move.
+#   * GBMicrotest `int_hblank_nops_scx{0,3,4,7}`, `int_hblank_incs_scx{0,3,4,7}`,
+#     `int_hblank_halt_scx{1,2,5,6}`, `hblank_int_l0`, `hblank_int_if_b` -- the
+#     mode-0 STAT SOURCE on line 0, every one of them one M-cycle late.
+#
+# So line 0's real mode-3 window is already right to the dot on three
+# independent instruments, and only the mode bits a CPU READS are late. Runner
+# 1148 -> 1122 for AGE +7; the read lag below is +7 for nothing.
+const LCD_ON_STAT_READ_LAG* {.intdefine.}: int32 = 2
+  ## Dots of extra STAT-read lag on the first line after an LCD enable. See
+  ## above. 0 compiles the branch out and restores the pre-2026-08-22 read.
+
 proc stat_m0_tail(ppu: GbPpu; gb: GB): int32 {.noinline.} =
   ## The 3 -> 0 field tail (`STAT_M0_FIELD_TAIL`), as this particular read sees
   ## it. Charged at the READ and not at the mode change, because two of the
@@ -1302,6 +1429,8 @@ proc stat_read_mode*(ppu: GbPpu; gb: GB): uint8 {.inline.} =
   ## the line wrap rebases it.
   var t = int32(STAT_READ_SAMPLE) +
           int32(STAT_READ_SAMPLE_DS_ADD) * int32(gb.memory.current_speed)
+  when LCD_ON_STAT_READ_LAG != 0:
+    if ppu.first_line: t += LCD_ON_STAT_READ_LAG
   when STAT_M0_TAIL_ANY:
     t += stat_m0_tail(ppu, gb)
   if ppu.cycle_counter - ppu.stat_chg_dot < t: ppu.stat_prev_mode
@@ -3683,13 +3812,23 @@ proc ppu_read*(ppu: GbPpu; gb: GB; idx: int): uint8 =
     # bits are already 00 -- and it is the same shape as the `first_line` rule
     # above, which is mode 2 read as 0 for a whole line after an LCD enable.
     #
-    # Three ROMs from two suites pin it, and they also pin it to DMG:
-    # gbmicrotest poweron_stat_006 (STAT read on exactly that M-cycle, $84 not
-    # $85) and mooneye-wilbertpol ly00_mode0_2-GS and ly00_mode1_0-GS. Its
-    # CGB sibling ly00_mode1_2-C wants the plain lagged value, which is why the
-    # hardware test is here rather than in `live` unconditionally.
+    # Three ROMs from two suites pin it on the DMG: gbmicrotest
+    # poweron_stat_006 (STAT read on exactly that M-cycle, $84 not $85) and
+    # mooneye-wilbertpol ly00_mode0_2-GS and ly00_mode1_0-GS.
+    #
+    # AMENDED 2026-08-22: it is NOT a DMG rule. It is an early-silicon rule --
+    # CGB 0/A/B/C do it too and only CGB D/E/AGB do not, which is
+    # `quirks.m1_end_no_mode0` in gb.nim (see there for AGE's ROM pair and its
+    # per-unit hardware records). The `not gb.cgb_enabled` this used to carry
+    # was fitted to the one CGB witness in reach at the time,
+    # mooneye-wilbertpol ly00_mode1_2-C -- and that ROM's `-C` is this 2016
+    # fork's HARDWARE GROUP `cgb+agb+ags`, i.e. exactly the vocabulary that
+    # cannot express a CGB-C/D split (a781e277 records the same problem for the
+    # four ly_lyc* `-C` arms). Its `@agb` arm is the one that pins the CGB side
+    # and it still passes.
     if (ppu.first_line and rm == 2) or
-       (rm == 1 and not gb.cgb_enabled and (ppu.lcd_status and 3'u8) == 2):
+       (rm == 1 and (ppu.lcd_status and 3'u8) == 2 and
+        not (gb.quirks.m1_end_no_mode0 or gb.memory.current_speed == 1'u8)):
       live and 0b1111_1100'u8
     else:
       live

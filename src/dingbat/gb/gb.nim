@@ -4691,6 +4691,31 @@ type
       ## CGB D and AGB are unmeasured: no ROM in this tree exercises either on
       ## this path, and c-sp verified only B, C and E. They keep the CGB-C
       ## rule rather than being guessed into the CGB-E group.
+    m1_end_no_mode0*: bool
+      ## CGB D / E / AGB. Every earlier machine -- CGB 0/A/B/C and every DMG --
+      ## spends ONE M-cycle reading back mode **0** at the very end of mode 1,
+      ## between vblank ending and line 0's mode 2 coming up: STAT's two mode
+      ## bits do not move together, bit 0 drops as mode 1 ends and bit 1 only
+      ## rises an M-cycle later. CGB D and later move them together, so the
+      ## read goes straight from `$81` to `$82`.
+      ##
+      ## AGE names the byte `M1E` and ships one build per side:
+      ## `stat-mode/stat-mode-dmgC-cgbBC` and `stat-mode/stat-mode-cgbE` are one
+      ## program (`stat-mode.inc`, `IF DEF(CGB_E) DEF M1E EQU $81 ELSE $80`)
+      ## whose expected tables differ in that byte and nothing else that splits
+      ## by revision. Both carry per-unit hardware records in their headers, and
+      ## they are each other's complement: `-cgbBC` is "pass: CPU CGB C
+      ## (CPU-CGB-04), pass: CPU CGB B (CPU-CGB-02), pass: DMG-CPU C, fail: CPU
+      ## CGB E (CPU-CGB-06)" and `-cgbE` is the same four lines with pass and
+      ## fail swapped. `stat-mode-window` ships the same `M1E` byte in the same
+      ## two builds, so it is two ROM pairs, four hardware units.
+      ##
+      ## NO ORACLE AGREES, and that is stated rather than worked around:
+      ## SameBoy answers `$81` on cgb0, cgba, cgbb, cgbc, cgbd, cgbe and agb
+      ## alike (`tools/gbfuzz/sameboy_wram` over `LINE_STATS` at `$C000`, 504
+      ## bytes), i.e. it gives every CGB the CGB-E value and only splits DMG
+      ## from CGB. So it does not model this at all and cannot be used to check
+      ## it; the evidence is AGE's two builds and the units named in them.
     ly_read_edge_late*: bool
       ## CGB D / E / AGB. A CPU read of `$FF44` sees the LY 153 -> 0 snapback
       ## **one CPU M-cycle later** than it does on CGB 0/A/B/C and on every DMG
@@ -7058,6 +7083,7 @@ proc gb_quirks_for*(rev: GbRevision): GbQuirks =
     spsw_div_mid_taps_slow: rev == grCgbE,
     spsw_irq_leaf_hold_short: rev == grCgbE,
     ly_read_edge_late: rev in {grCgbD, grCgbE, grAgb},
+    m1_end_no_mode0: rev in {grCgbD, grCgbE, grAgb},
     unusable_region:
       if GB_UNUSABLE_ZERO: urZero
       else:
