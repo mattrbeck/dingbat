@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-21 19:13:18*
+*Generated: 2026-08-21 19:38:06*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4595/4996 passed.**
+**4603/4996 passed.**
 
 ## bgen
 
@@ -148,37 +148,29 @@ All 8 tests passed.
 | enable_display/ly0_m0irq_scx0_ds_1_cgb04c_outE0 [cgb] | got E2, expected E0 |
 | enable_display/ly0_m0irq_scx1_ds_1_cgb04c_outE0 [cgb] | got E2, expected E0 |
 
-## halt (141/158 passed)
+## halt (150/158 passed)
 
-141/158 tests passed, 17 failed:
+150/158 tests passed, 8 failed:
 
 | Test | Result |
 |------|--------|
-| halt/late_m0int_halt_m0stat_scx2_1a_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
-| halt/late_m0int_halt_m0stat_scx2_2a_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 | halt/late_m0int_halt_m0stat_scx2_3a_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
 | halt/late_m0int_halt_m0stat_scx2_3a_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
-| halt/late_m0int_halt_m0stat_scx2_4a_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 | halt/late_m0int_halt_m0stat_scx3_2b_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | halt/late_m0int_halt_m0stat_scx3_3a_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
 | halt/late_m0int_halt_m0stat_scx3_3a_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 | halt/late_m0int_halt_m0stat_scx3_3b_dmg08_out0_cgb04c_out2 [dmg] | got 2, expected 0 |
-| halt/late_m0irq_halt_m0stat_scx2_1a_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
-| halt/late_m0irq_halt_m0stat_scx2_2a_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 | halt/late_m0irq_halt_m0stat_scx3_2b_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
-| halt/m0int_m0stat_scx2_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
-| halt/m0int_m0stat_scx5_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
-| halt/m0irq_m0stat_scx2_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
-| halt/m0irq_m0stat_scx5_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 | halt/noime_m2irq_m0stat_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 
-## irq_precedence (48/64 passed)
+## irq_precedence (47/64 passed)
 
-48/64 tests passed, 16 failed:
+47/64 tests passed, 17 failed:
 
 | Test | Result |
 |------|--------|
 | irq_precedence/hdma_vs_m0_scx2_cgb04c_out0183 [cgb] | got 1234, expected 0183 |
+| irq_precedence/hdma_vs_m0_scx2_halt_cgb04c_out1234 [cgb] | got 0184, expected 1234 |
 | irq_precedence/late_hdma_vs_ei_scx1_2_cgb04c_out1234 [cgb] | got 102F, expected 1234 |
 | irq_precedence/late_hdma_vs_ie_scx1_2_cgb04c_out1234 [cgb] | got 102F, expected 1234 |
 | irq_precedence/late_hdma_vs_tima_scx1_1_cgb04c_out1234 [cgb] | got 11E9, expected 1234 |

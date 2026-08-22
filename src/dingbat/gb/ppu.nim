@@ -2203,12 +2203,79 @@ proc lyc_settle_halt_skip(gb: GB): bool {.inline.} =
 #   * only the mode-0 EDGE leads. Moving the irq domain's three boundary hooks
 #     with it (`STAT_M0_LEAD_DOMAIN`) makes the source FALL early too and costs
 #     55 gambatte rows SameBoy agrees with on 52.
+#
+# ---- THE BLIND WINDOW IS A DMG RULE. The CGB's halted latch is not blind ----
+#
+# The measurement above was taken on the DMG (`hblank_ly_scx_timing-GS`,
+# `int_hblank_halt_scx*`) and carried to the CGB because nothing in the tree
+# separated them. wilbertpol's `-C` / `-GS` PAIR separates them, and it is the
+# only instrument here that does: the two ROMs ask the same 32 questions of the
+# two devices, and their expected tables are NOT the same table.
+#
+# Both ROMs halt with only the mode-0 STAT source armed, wake, burn a fixed sled
+# and read LY. `tools/gbppu/hbprobe.py` rebuilds that as a ONE-CELL probe -- one
+# SCX, one sled length N, always dump -- so the LY-increment boundary can be
+# bracketed directly instead of read off a pass/fail staircase. Sweeping N over
+# SCX 0..8 gives, as the largest N still reading the old LY:
+#
+#   SCX                    0   1   2   3   4   5   6   7  (8)
+#   hardware -GS  (DMG)   25  24  24  24  24  23  23  23  (25)
+#   dingbat DMG           25  24  24  24  24  23  23  23  (25)   exact
+#   hardware -C   (CGB)   24  24  24  23  23  23  23  22  (24)
+#   dingbat CGB           24  23  23  23  23  22  22  22  (24)   staircase 2 dots off
+#
+# Every row is a clean `k = K - floor((SCX + r) / 4)` staircase, i.e. one dot of
+# mode 3 per unit of SCX quantised onto the CPU's M-cycle grid, so the only free
+# parameter is `r` -- WHERE IN THE M-CYCLE the wake lands. The DMG is exact.
+# The CGB's absolute level is exact too (`k(0) = 24` on both, one M-cycle below
+# the DMG's 25) and only `r` is wrong, by exactly 2 dots: dingbat drops at
+# SCX = 1 and 5 where the CGB drops at 3 and 7.
+#
+# 2 dots is `M0_HALT_BLIND_DOTS`, and dropping it on the CGB reproduces the
+# hardware row cell for cell (24 24 24 23 23 23 23 22). So the halted CGB
+# latches the mode-0 source on its LED dot -- the two halves that cancel on the
+# DMG do not cancel on the CGB.
+#
+# Measured on 6f88d23 (runner 1125, gambatte 4595, shootout 261/261), as
+# (single-speed dots : double-speed dots), the shipping DMG rule being 2:1:
+#
+#   2:1  4595   2:2  4593   1:1  4597   0:0  4601   0:1  4603   0:2  4601
+#
+# Single speed SATURATES at 0 -- there is no earlier dot for the latch to reach
+# -- which makes 0 structural rather than fitted, the same shape as
+# `STAT_ENABLE_LATENCY`'s DMG arm. Double speed is a genuine two-sided bracket
+# at ONE DOT (2 rows worse either side), and it has to be spelled in dots
+# because 0 T-cycles is 0 dots at both speeds: `halt/m0{int,irq}_m0stat_scx3_ds_2`
+# want a dot of blindness that no scaling of a single constant can give them
+# while single speed has none.
+#
+# +11 rows by name: `hblank_ly_scx_timing-C` @cgbc and @agb, and nine gambatte
+# `halt` CGB rows -- `{late_,}m0{int,irq}_{halt_,}m0stat_scx2_*` (7) and
+# `m0{int,irq}_m0stat_scx5_1` (2), all "got 2, expected 0", i.e. all the halted
+# CPU waking an M-cycle late.
+#
+# ONE row by name goes the other way: `irq_precedence/hdma_vs_m0_scx2_halt`
+# (1234 -> 0184). It is not a coincidence that its own non-halted sibling
+# `hdma_vs_m0_scx2` is ALREADY red with `got 1234, expected 0183`, and that
+# `_scx1` and `_scx3` are both green: SCX = 2 is the one cell of that family
+# where hardware's halted and running answers DIFFER, and dingbat gives the
+# same answer for both. Before this the halted arm passed because dingbat's
+# single answer happened to be the halted one; now it is the running one. The
+# defect is the missing halted/running split in the HDMA-vs-mode-0
+# arbitration, it predates this change, and it is not reachable from this
+# constant.
 const M0_HALT_BLIND_DOTS* {.intdefine.} = 2
   ## T-cycles of a halted M-cycle's TAIL in which the mode-0 STAT source's rise
   ## is invisible to the halted CPU's latch. 0 compiles the rule out; 2 is the
-  ## measurement above. Shifted by `current_speed` at the use site.
+  ## measurement above. Shifted by `current_speed` at the use site. **DMG only**
+  ## -- see the block above.
+const CGB_M0_HALT_BLIND_DOTS* {.intdefine.} = 0
+  ## The CGB's single-speed value, in DOTS (not scaled). Saturates at 0.
+const CGB_M0_HALT_BLIND_DS_DOTS* {.intdefine.} = 1
+  ## And the CGB's double-speed value, in DOTS. Bracketed on both sides at 1.
 
-when M0_HALT_BLIND_DOTS > 0:
+when M0_HALT_BLIND_DOTS > 0 or CGB_M0_HALT_BLIND_DOTS > 0 or
+     CGB_M0_HALT_BLIND_DS_DOTS > 0:
   proc halt_m0_tail_blind*(gb: GB): bool {.noinline.} =
     ## Is the interrupt line up ONLY because the mode-0 STAT source rose in the
     ## tail of this halted M-cycle? Then the halted CPU has not latched it yet.
@@ -2258,8 +2325,12 @@ when M0_HALT_BLIND_DOTS > 0:
       let age = ppu.cycle_counter - int32(ppu.irq_chg_dot)
     else:
       let age = ppu.cycle_counter - ppu.stat_chg_dot
-    age >= 1'i32 and
-      age <= int32(M0_HALT_BLIND_DOTS shr gb.memory.current_speed)
+    let blind =
+      if gb.cgb_enabled:
+        if gb.memory.current_speed != 0: int32(CGB_M0_HALT_BLIND_DS_DOTS)
+        else: int32(CGB_M0_HALT_BLIND_DOTS)
+      else: int32(M0_HALT_BLIND_DOTS shr gb.memory.current_speed)
+    age >= 1'i32 and age <= blind
 
 proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
   # While the PPU is off the LY=LYC comparison clock is stopped: the coincidence

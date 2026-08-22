@@ -712,7 +712,8 @@ proc cpu_halt_tick(gb: GB): bool {.inline.} =
     result = interrupt_ready(gb.interrupts)
     when STAT_M2_EARLY and M2_LEAD_HALT_BLIND:
       if result and halt_m2_lead_blind(gb): result = false
-    when M0_HALT_BLIND_DOTS > 0:
+    when M0_HALT_BLIND_DOTS > 0 or CGB_M0_HALT_BLIND_DOTS > 0 or
+         CGB_M0_HALT_BLIND_DS_DOTS > 0:
       # The mode-0 source's own half of the same question. See
       # M0_HALT_BLIND_DOTS in ppu.nim -- it ships at 0 and the note there is
       # the measured map of what still has to move with it.
