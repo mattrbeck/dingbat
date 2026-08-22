@@ -5681,6 +5681,20 @@ type
     #  * OPRI ($FF6C) is not implemented at all. It only matters for a cart
     #    that writes it while the boot ROM is mapped, which no test ROM here
     #    does, but the register reads as unmapped rather than as itself.
+    #  * The odd $0143 bit patterns. devrs.com's GBC-undocumented FAQ says
+    #    `1XXX01XX`, `1XXX10XX` and `1XXX11XX` in the CGB flag byte give
+    #    "strange sprite colors and write-protected palette registers";
+    #    new_gb decodes only $80 (cgbSupport) and $C0 (cgbExclusive) and treats
+    #    every other value as cgbNone. Nothing in any bundled suite exercises
+    #    it, so closing it would need a hand-written probe ROM and there is no
+    #    reference to score one against. Audited 2026-08-21 against that FAQ's
+    #    three sections: everything else it lists is implemented, and in three
+    #    places to a finer standard than it states -- the STAT write glitch is
+    #    Pan Docs' one-M-cycle $FF window placed at the write's own commit
+    #    point (ppu_stat_write_glitch), $FF76/$FF77 are live PCM12/PCM34 rather
+    #    than the FAQ's "read only & set to $00", and the FAQ blames the
+    #    CARTRIDGE for the Road Rash / Xerd no Densetsu incompatibility where
+    #    the console is what decides.
     #  * The APU has no model branch anywhere, and three are documented: wave
     #    RAM is only accessible on the dot CH3 reads it on monochrome consoles
     #    (elsewhere the CPU gets the byte CH3 is on), retriggering CH3 corrupts
