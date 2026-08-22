@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-21 21:27:29 · commit b2a3019e · game-boy-test-roms v7.0*
+*Generated: 2026-08-22 06:36:09 · commit 731ba498 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
-- **Total:** 1223
+- **Total:** 1219
 - **Pass:** 1145
-- **Fail:** 78
+- **Fail:** 74
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -28,7 +28,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - SameSuite | 8 | 8 |
 | Game Boy - SameSuite APU | 70 | 70 |
 | Game Boy - Shootout ROMs | 13 | 13 |
-| Game Boy - Mooneye (wilbertpol) | 180 | 184 |
+| Game Boy - Mooneye (wilbertpol) | 180 | 180 |
 | Game Boy - gambatte | 19 | 48 |
 
 ## Game Boy - Blargg (28/28)
@@ -201,194 +201,9 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 13 tests passed.**
 
-## Game Boy - Mooneye (wilbertpol) (180/184)
+## Game Boy - Mooneye (wilbertpol) (180/180)
 
-| Test | Device | Result |
-|------|--------|--------|
-| mooneye-wilbertpol/acceptance/add_sp_e_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/bits/mem_oam | cart | 👌 |
-| mooneye-wilbertpol/acceptance/bits/reg_f | cart | 👌 |
-| mooneye-wilbertpol/acceptance/bits/unused_hwio-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/bits/unused_hwio-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/bits/unused_hwio-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/bits/unused_hwio-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/boot_hwio-G@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/boot_hwio-G@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/boot_regs-dmg | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/call_cc_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/call_cc_timing2 | cart | 👌 |
-| mooneye-wilbertpol/acceptance/call_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/call_timing2 | cart | 👌 |
-| mooneye-wilbertpol/acceptance/di_timing-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/di_timing-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/di_timing-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/di_timing-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/div_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/ei_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/hblank_ly_scx_timing-C@cgbc | CGB cgbc | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/hblank_ly_scx_timing-C@agb | CGB agb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/hblank_ly_scx_timing-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/hblank_ly_scx_timing-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/hblank_ly_scx_timing-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/hblank_ly_scx_timing-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_variant_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_0_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_1_2_timing-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_1_2_timing-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_1_2_timing-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_1_2_timing-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_1_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_0_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx1_timing_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx2_timing_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx3_timing_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx4_timing_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx5_timing_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx6_timing_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx7_timing_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_scx8_timing_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx1_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx2_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx3_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode0_timing_sprites_scx4_nops | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_mode3_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_oam_ok_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/intr_2_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/lcdon_mode_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_01_mode0_2 | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_mode0_2-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_mode0_2-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_mode0_2-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_mode0_2-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_mode1_0-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_mode1_0-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_mode1_0-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_mode1_0-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_mode1_2-C@cgbc | CGB cgbc | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_mode1_2-C@agb | CGB agb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_mode2_3 | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly00_mode3_0 | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly143_144_145 | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly143_144_152_153 | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly143_144_mode0_1 | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly143_144_mode3_0 | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc-C@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc-C@agb | CGB agb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0-C@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0-C@agb | CGB agb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0_write-C@cgbc | CGB cgbc | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0_write-C@agb | CGB agb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0_write-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0_write-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0_write-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0_write-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_144-C@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_144-C@agb | CGB agb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_144-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_144-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_144-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_144-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-C@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-C@agb | CGB agb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-C@cgbc | CGB cgbc | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-C@agb | CGB agb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_write-C@cgbc | CGB cgbc | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_write-C@agb | CGB agb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_write-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_write-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_write-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_write-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_new_frame-C@cgbc | CGB cgbc | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_new_frame-C@agb | CGB agb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_new_frame-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_new_frame-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_new_frame-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_new_frame-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/stat_irq_blocking | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/stat_write_if-C@cgbc | CGB cgbc | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/stat_write_if-C@agb | CGB agb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/stat_write_if-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/stat_write_if-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/stat_write_if-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/stat_write_if-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/vblank_if_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/vblank_stat_intr-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/vblank_stat_intr-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/vblank_stat_intr-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/vblank_stat_intr-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/halt_ime0_ei | cart | 👌 |
-| mooneye-wilbertpol/acceptance/halt_ime0_nointr_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/halt_ime1_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/halt_ime1_timing2-GS@dmgABC | DMG dmgABC | 👌 |
-| mooneye-wilbertpol/acceptance/halt_ime1_timing2-GS@mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/acceptance/halt_ime1_timing2-GS@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/acceptance/halt_ime1_timing2-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/if_ie_registers | cart | 👌 |
-| mooneye-wilbertpol/acceptance/intr_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/jp_cc_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/jp_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/ld_hl_sp_e_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/oam_dma_restart | cart | 👌 |
-| mooneye-wilbertpol/acceptance/oam_dma_start | cart | 👌 |
-| mooneye-wilbertpol/acceptance/oam_dma_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/pop_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/push_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/rapid_di_ei | cart | 👌 |
-| mooneye-wilbertpol/acceptance/ret_cc_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/ret_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/reti_intr_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/reti_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/rst_timing | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/div_write | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/rapid_toggle | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/tim00 | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/tim00_div_trigger | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/tim01 | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/tim01_div_trigger | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/tim10 | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/tim10_div_trigger | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/tim11 | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/tim11_div_trigger | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/tima_reload | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/tima_write_reloading | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/timer_if | cart | 👌 |
-| mooneye-wilbertpol/acceptance/timer/tma_write_reloading | cart | 👌 |
-| mooneye-wilbertpol/emulator-only/mbc1_rom_4banks | cart | 👌 |
-| mooneye-wilbertpol/madness/mgb_oam_dma_halt_sprites | DMG mgb | 👌 |
-| mooneye-wilbertpol/manual-only/sprite_priority | DMG | 👌 |
-| mooneye-wilbertpol/misc/bits/unused_hwio-C@cgbc | CGB cgbc | 👌 |
-| mooneye-wilbertpol/misc/bits/unused_hwio-C@agb | CGB agb | 👌 |
-| mooneye-wilbertpol/misc/boot_hwio-C@cgbc | CGB cgbc | 👌 |
-| mooneye-wilbertpol/misc/boot_hwio-C@agb | CGB agb | 👌 |
-| mooneye-wilbertpol/misc/boot_hwio-S@sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/misc/boot_hwio-S@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/misc/boot_regs-A | CGB agb | 👌 |
-| mooneye-wilbertpol/misc/boot_regs-cgb | CGB cgbc | 👌 |
-| mooneye-wilbertpol/misc/boot_regs-mgb | DMG mgb | 👌 |
-| mooneye-wilbertpol/misc/boot_regs-sgb | SGB sgb | 👌 |
-| mooneye-wilbertpol/misc/boot_regs-sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/misc/gpu/vblank_stat_intr-C@cgbc | CGB cgbc | 👌 |
-| mooneye-wilbertpol/misc/gpu/vblank_stat_intr-C@agb | CGB agb | 👌 |
+**All 180 tests passed.**
 
 ## Game Boy - gambatte (19/48)
 
@@ -458,6 +273,7 @@ Everything skipped on purpose, with the reason and the builder that skips it. If
 - **mooneye/wilbertpol `ags` arms** — `ags` is AGB silicon in a different package — the suite's own README says so — and dingbat models one AGB, so a `-C`/`-A` token's `ags` member folds into its `agb` arm rather than inventing a machine. Everything else those tokens name IS run: see mooneye_machines_for. (build_mooneye_tests / build_wilbertpol_tests)
 - **mooneye/wilbertpol revision 0 inside a bare model token** — `-cgb` and `-dmg` fan out across the revisions dingbat models but deliberately stop short of revision 0, which the suite treats as its own machine and ships separate `-cgb0`/`-dmg0` ROMs for precisely because it diverges. Those separate ROMs ARE scored. (build_mooneye_tests)
 - **age `ncm*` rows** — CGB running in non-CGB mode, a device this harness does not model. (build_age_tests)
+- **mooneye-wilbertpol `acceptance/gpu/ly_lyc{,_0,_144,_153}-C` (4 arms)** — they assert a CGB LY=LYC behaviour that both dingbat and SameBoy produce only from CPU CGB D onward, for a `-C` group this 2016 fork's README defines as `cgb+agb+ags` with NO revision axis -- so the claim is as precise as its vocabulary allowed, not a statement about revision C. Upstream mooneye later ADDED that axis (it ships boot_div-cgb0 beside boot_div-cgbABCDE), now benches all six CGB revisions separately, and ships no ly_lyc* at all -- keeping hblank_ly_scx_timing-GS while dropping its -C half. Inference from a deletion, not proof: SameBoy is the only scriptable oracle and this rests on its C/D gates. WEAKEST SKIP IN THIS FILE, revisit with a third revision-modelling emulator or a hardware probe. The `_write` arms of the same family pass and ARE scored. (build_wilbertpol_tests)
 - **gambatte `oamdma_src{FE00,FF00}_*read*` DMG rows (9)** — their verdict is a byte of uninitialised WRAM. That source fetches through the echo, so it reads $DE00/$DF00, and a colliding CPU read gets the DMA's latch rather than its own byte -- Pan Docs says WRAM is random on power-up and GB_POWERUP_WRAM_PATTERN honours that, so these encode gambatte's capture rig, not hardware. The non-colliding members of the same family (`busyread8000`, `busyreadFF4B`) and every CGB arm ARE scored. (build_gambatte_rows / gambatte_row_reads_powerup_wram)
 - **gambatte `_outaudio0/1` rows (220) + the AGB column** — audio-register sampling and the AGB device are not scored; see results_gambatte.md's source notes. (build_gambatte_rows)
 - **gbmicrotest: 31 ROMs that never write the $FF82 verdict byte** — scanned all 513 bundled ROMs for `ldh ($82),a` / `ld ($ff82),a`; 482 contain one and these 31 contain neither, so the harness would be scoring uninitialised HRAM rather than a result. All 31 were failing rows before the skip. The honest suite denominator is 482. (build_gbmicrotest_tests)

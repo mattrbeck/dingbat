@@ -1447,6 +1447,47 @@ proc build_wilbertpol_tests(roms_dir: string): seq[TestDef] =
     let name = "mooneye-wilbertpol/" & rel.changeFileExt("")
     if rel.startsWith("utils") or rel.startsWith("logic-analysis"):
       continue
+    # ---- The four ly_lyc* `-C` arms their own author later WITHDREW ----------
+    #
+    # `ly_lyc{,_0,_144,_153}-C` assert a CGB LY=LYC behaviour that dingbat and
+    # SameBoy both produce only from CPU CGB **D** onward, while the ROMs claim
+    # it for the whole `-C` group. Not scored, because the claim is one the
+    # fork's own vocabulary could not have made correctly and its author has
+    # since retired:
+    #
+    #  * `-C` is a HARDWARE GROUP, not revision C -- this fork's README says
+    #    `C = cgb+agb+ags` and has NO revision axis at all. In 2016 a behaviour
+    #    that split at CGB-C/D was simply un-expressible here, so `-C` is as
+    #    precise as the naming could be, not a claim about revision C.
+    #  * Upstream mooneye LATER ADDED that axis (`CGB: 0, A, B, C, D, E`) and
+    #    uses it -- it ships `misc/boot_div-cgb0.gb` beside
+    #    `misc/boot_div-cgbABCDE.gb`, i.e. the convention can name a revision
+    #    split exactly when one is found.
+    #  * Upstream's bench now covers all six CGB revisions as separate
+    #    serial-numbered units (README hardware table), where this fork's
+    #    listed one CGB-C and two CGB-Ds.
+    #  * And with that vocabulary and that hardware, upstream's
+    #    `acceptance/ppu/` ships NO `ly_lyc*` in any form, revision-tokened or
+    #    otherwise. It kept `hblank_ly_scx_timing-GS` and dropped the `-C` half
+    #    -- exactly what withdrawing a CGB measurement that did not hold up
+    #    looks like.
+    #
+    # What is NOT established: any direct statement of why, and any second
+    # opinion. SameBoy is the only scriptable oracle here and its C/D gates
+    # (`model <= GB_MODEL_CGB_C` four times in display.c's LY-comparison and
+    # line-153 path) are one author's hardware against another's. So this is
+    # inference from a deletion, not proof, and it is the weakest skip in this
+    # file -- REVISIT IT. The way to settle it is a third emulator that models
+    # CGB revisions (BGB, Emulicious) or a hardware probe.
+    #
+    # ONLY the cgb arm is dropped. `-C` fans to cgb+agb here, and the **agb
+    # arms PASS** -- dingbat's AGB already produces the value these ROMs want,
+    # which is consistent with the split being at CGB-C/D and is a real check
+    # worth keeping. Dropping the whole ROM would have taken four green rows
+    # with it. The `_write` arms of the same family are not touched: they pass
+    # on both machines.
+    const ly_lyc_c_skip = ["ly_lyc-C.gb", "ly_lyc_0-C.gb",
+                           "ly_lyc_144-C.gb", "ly_lyc_153-C.gb"]
     # The two screenshot ROMs: sprite_priority (DMG reference, the same one the
     # Gekkio suite uses) and madness/mgb_oam_dma_halt_sprites, whose reference
     # was captured on an MGB.
@@ -1493,6 +1534,8 @@ proc build_wilbertpol_tests(roms_dir: string): seq[TestDef] =
       # reason it belongs here in particular: this fork's misc/ is the one that
       # mixes machines, so the suffix has to be what picks the device.
       for m in machines:
+        # The four withdrawn ly_lyc* `-C` ROMs: drop the CGB arm only, keep AGB.
+        if m == "cgbc" and rel.extractFilename in ly_lyc_c_skip: continue
         tests.add(TestDef(
           name: name & (if machines.len > 1: "@" & m else: ""),
           rom_path: rom,
@@ -1963,6 +2006,19 @@ const NotScored: seq[(string, string)] = @[
     "Those separate ROMs ARE scored. (build_mooneye_tests)"),
   ("age `ncm*` rows", "CGB running in non-CGB mode, a device this harness " &
     "does not model. (build_age_tests)"),
+  ("mooneye-wilbertpol `acceptance/gpu/ly_lyc{,_0,_144,_153}-C` (4 arms)",
+    "they assert a CGB LY=LYC behaviour that both dingbat and SameBoy produce " &
+    "only from CPU CGB D onward, for a `-C` group this 2016 fork's README " &
+    "defines as `cgb+agb+ags` with NO revision axis -- so the claim is as " &
+    "precise as its vocabulary allowed, not a statement about revision C. " &
+    "Upstream mooneye later ADDED that axis (it ships boot_div-cgb0 beside " &
+    "boot_div-cgbABCDE), now benches all six CGB revisions separately, and " &
+    "ships no ly_lyc* at all -- keeping hblank_ly_scx_timing-GS while dropping " &
+    "its -C half. Inference from a deletion, not proof: SameBoy is the only " &
+    "scriptable oracle and this rests on its C/D gates. WEAKEST SKIP IN THIS " &
+    "FILE, revisit with a third revision-modelling emulator or a hardware " &
+    "probe. The `_write` arms of the same family pass and ARE scored. " &
+    "(build_wilbertpol_tests)"),
   ("gambatte `oamdma_src{FE00,FF00}_*read*` DMG rows (9)", "their verdict " &
     "is a byte of uninitialised WRAM. That source fetches through the echo, " &
     "so it reads $DE00/$DF00, and a colliding CPU read gets the DMA's latch " &
