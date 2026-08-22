@@ -4659,6 +4659,13 @@ type
       ##
       ## CGB-D is not measured by either ROM; it keeps the C behaviour rather
       ## than being grouped with E on a guess.
+    spsw_irq_leaf_hold_short*: bool
+      ## CGB E. Half the oscillator-restart hold on the aborted-halt speed
+      ## switch leaf -- one M-cycle where CGB B and C lose two. See
+      ## `SPEED_SWITCH_IRQ_LEAF_HOLD_T` in memory.nim for both measurements;
+      ## it is the same silicon difference c-sp's `spsw-interrupts.inc`
+      ## encodes as `OFS_B`, and CGB D and AGB are unmeasured for the same
+      ## reason as `spsw_div_mid_taps_slow` below.
     spsw_div_mid_taps_slow*: bool
       ## CGB E. The KEY1 speed switch's DIV reset reaches the divider's
       ## **middle** TIMA taps (bit 5 = 65 KHz, bit 7 = 16 KHz) at the same
@@ -4972,6 +4979,13 @@ type
     bit_for_tima*: int
     previous_bit*: bool
     countdown*:    int
+    hold_t*:       int
+      ## T-cycles the divider owes before it starts counting again -- the
+      ## oscillator restart on the aborted-halt speed switch leaf, and the only
+      ## thing that arms it. See SPEED_SWITCH_IRQ_LEAF_HOLD_T in memory.nim.
+      ##
+      ## Not serialized, like GbApu.div_skip: it is nonzero for at most two
+      ## M-cycles inside one instruction, and nothing can save a state there.
 
   # ---- Joypad ----
   GbJoypad* = ref object
@@ -7013,6 +7027,7 @@ proc gb_quirks_for*(rev: GbRevision): GbQuirks =
     lyc_compare_hold: rev in {grCgbD, grCgbE, grAgb},
     oam_read_open_late: rev == grCgbE,
     spsw_div_mid_taps_slow: rev == grCgbE,
+    spsw_irq_leaf_hold_short: rev == grCgbE,
     unusable_region:
       if GB_UNUSABLE_ZERO: urZero
       else:

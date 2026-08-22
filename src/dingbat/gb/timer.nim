@@ -102,6 +102,52 @@ const TAC_SELECT_LEAD_T* {.intdefine.} = 4
   ## latch in front of the whole M-cycle, timer included) costs thirteen `tima`
   ## rows while the serial-only version costs none. Do not re-run either cell.
 
+const SPEED_SWITCH_IRQ_LEAF_HOLD_T* {.intdefine.} = 8
+  ## **The aborted-halt leaf leaves the divider two M-cycles behind the CPU**
+  ## -- the oscillator restart the halt exists to wait out, seen through a ROM
+  ## that refuses to wait. T-cycles the divider owes before it counts again
+  ## (`GbTimer.hold_t`); CGB E owes half
+  ## (`GbQuirks.spsw_irq_leaf_hold_short`). 0 compiles it out.
+  ##
+  ## It has to be the DIVIDER that stops and not the CPU: inserting real time
+  ## with the whole CPU-clock domain frozen was tried first and is exactly a
+  ## no-op here, because every quantity these ROMs read is counted in CPU
+  ## M-cycles between the reset and the read, and frozen time adds none.
+  ##
+  ## This is the leaf where an interrupt is ALREADY pending when STOP is
+  ## fetched, so the switch's halt never starts. c-sp's own
+  ## `speed-switch/caution/WARNING.md` is the mechanism: "The roms in this
+  ## folder prematurely terminate the HALT mode period that follows STOP when
+  ## switching the CPU speed. Purpose of that HALT mode period is to allow for
+  ## oscillation stabilization before returning control to the CPU", and he
+  ## records his own CPU CGB E going unstable for a while after running them.
+  ## So the quantity here is not a tuning constant looking for a home: it is
+  ## how much divider the oscillator loses when the wait is skipped, and the
+  ## revision split is the same silicon difference the ROM's own `OFS_B`
+  ## encodes.
+  ##
+  ## Measured off `spsw-interrupts`' second and third blocks, which are
+  ## anchored on the STOP itself rather than on a divider event, with a
+  ## `-d:gb_div_read_trace` build printing the divider at each `$FF04`/`$FF05`
+  ## read:
+  ##
+  ##   CGB B/C, `IMMEDIATE_INTERRUPT_DIV` at DELAY $31 / $32
+  ##       hardware  DIV = $00 / $01   => divider < 256 then >= 256
+  ##       dingbat   260 / 264         => 5..8 T too high, i.e. 2 M-cycles
+  ##   CGB E, the same test at DELAY $30 / $31
+  ##       dingbat   256 / 260         => 1..4 T too high, i.e. 1 M-cycle
+  ##
+  ## and the `IMMEDIATE_INTERRUPT_TIMA` block agrees cell for cell on both,
+  ## with no freedom left: it reads TIMA off a 16 KHz tap, so the same shift
+  ## has to move the reads across a 256-count boundary in the same direction.
+  ##
+  ## **Why this is invisible on the stall leaf.** Everything `spsw-interrupts`'
+  ## FIRST block reads is anchored on a TIMA overflow -- a divider event -- so
+  ## holding the divider moves the whole chain in real time and leaves every
+  ## reading at the same divider value. `spsw-div` is anchored on the
+  ## instruction stream and WOULD see it, which is why the hold is on this leaf
+  ## only and `spsw-div` stays green either way.
+
 proc timer_reload_tima(t: GbTimer; gb: GB) =
   when defined(gb_phase_trace):
     echo "TIMIRQ t=", gb_phase, "/", gb_ticklen
@@ -152,6 +198,16 @@ proc apu_div_bit(gb: GB): int {.inline.} =
 
 proc timer_tick_slow(t: GbTimer; gb: GB; cycles: int) =
   let serial = gb.serial
+  var cycles = cycles
+  when SPEED_SWITCH_IRQ_LEAF_HOLD_T != 0:
+    if t.hold_t > 0:
+      # The divider owes time (SPEED_SWITCH_IRQ_LEAF_HOLD_T): the CPU clock is
+      # running for the caller but not yet for this unit, so consume the span
+      # without counting, serial shifter included.
+      let n = min(t.hold_t, cycles)
+      t.hold_t -= n
+      cycles   -= n
+      if cycles == 0: return
   when defined(gb_phase_trace):
     gb_phase = -1
     gb_ticklen = int32(cycles)
@@ -185,7 +241,8 @@ proc timer_tick*(t: GbTimer; gb: GB; cycles: int) {.inline.} =
   # entry — every path that changes tdiv, TAC or the tap runs
   # timer_check_edge — so no edge means TIMA cannot move, and all that is left
   # is to advance the counter and re-latch the bit. Bit-identical to the loop.
-  if t.countdown < 0 and not serial.shifting:
+  const no_hold = SPEED_SWITCH_IRQ_LEAF_HOLD_T == 0
+  if t.countdown < 0 and (no_hold or t.hold_t == 0) and not serial.shifting:
     let t0 = uint32(t.tdiv)
     let t1 = t0 + uint32(cycles)
     let cur = t.enabled and ((t.tdiv and (1'u16 shl t.bit_for_tima)) != 0)
@@ -367,6 +424,16 @@ const SPEED_SWITCH_DIV_RESET_T* {.intdefine.} = 8
   ## TAC setting by the same amount.
 
 proc timer_read*(t: GbTimer; idx: int): uint8 =
+  when defined(gb_div_read_trace):
+    # Diagnostic (tools only; compiled out of every shipping build). The full
+    # 16-bit divider behind each DIV/TIMA read, which is what turns a ROM that
+    # prints one byte per measurement into a ruler with T-cycle resolution:
+    # DIV only shows the high byte and TIMA only shows the tap's edge count,
+    # so a row that is one M-cycle wrong and a row that is 255 counts wrong
+    # look identical on screen. This is how SPEED_SWITCH_IRQ_LEAF_HOLD_T's
+    # 5..8 T bracket was read off c-sp's spsw-interrupts.
+    if idx == 0xFF04: echo "DIVREAD tdiv=", t.tdiv
+    if idx == 0xFF05: echo "TIMAREAD tima=", t.tima, " tdiv=", t.tdiv
   case idx
   of 0xFF04: uint8(t.tdiv shr 8)
   of 0xFF05: t.tima

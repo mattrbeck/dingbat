@@ -1697,6 +1697,14 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
     # divider is frozen. Lift it over the stall and re-aim it from the (reset,
     # still zero) divider afterwards, which is exactly Pan Docs' "`DIV` does
     # not tick, so *some* audio events are not processed".
+    when SPEED_SWITCH_IRQ_LEAF_HOLD_T != 0:
+      if irq_pending:
+        # The oscillator restart on the aborted-halt leaf. The CPU runs; the
+        # divider owes these T-cycles. See SPEED_SWITCH_IRQ_LEAF_HOLD_T.
+        let hold =
+          if gb.quirks.spsw_irq_leaf_hold_short: SPEED_SWITCH_IRQ_LEAF_HOLD_T div 2
+          else: SPEED_SWITCH_IRQ_LEAF_HOLD_T
+        gb.timer.hold_t = hold
     if not irq_pending:
       # The stall, in cycles of the CPU clock the switch lands in — which is
       # the domain the scheduler counts in, so no shift is needed. See
