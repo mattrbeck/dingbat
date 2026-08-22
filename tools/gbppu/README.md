@@ -110,6 +110,47 @@ Exit status is nonzero if any cell disagrees. This is the instrument that
 settled the OBJ fetch phase; a whole-frame mealybug percentage cannot, because
 it averages eighteen different measurements together.
 
+### The RIGHT edge of that table, which `objtab.py` never reached
+
+    python3 tools/gbppu/objtab2.py ./dt_m3len 140 172
+
+`ppu_spritex_vs_scx` sweeps OAM X = 0..16 only, so X = 17..167 was scored by
+nothing. `objtab2.py` is the same measurement over any X range, against Pan
+Docs' own periodic formula. It found the table exact from X = 140 to X = 166 and
+**one dot long at X = 167 on all nine SCX** — the object whose trigger pixel is
+the LAST one, which is the only thing that can make the shifter walk past
+`m3_retire_lx` and so get charged for the tail burst twice. See
+`OBJ_TAIL_WALK_REFUND` in `fifo_ppu.nim`.
+
+## wilbertpol's sprite ROMs at cell resolution
+
+    ./dt_m3len <rom> --mode screenshot --frames 140 --screenshot /dev/null \
+      --dmg --nosave 2>&1 | grep -E '^M3(IN|LEN)' > /tmp/m3.log
+    python3 tools/gbppu/wpsprites.py <rom> /tmp/m3.log <scx>
+
+`intr_2_mode0_timing_sprites{,_nops,_scx1..4_nops}` are ~129 independent
+measurements each — an OAM list of 1..10 objects, a fixed SCX, and a nop sled
+tuned so mode 0 arrives on the first STAT poll and not the second — and the ROM
+stops at the first failing one and prints its index **in hex**. `wpsprites.py`
+reads the whole table out of the ROM and crosses it against an `M3IN`/`M3LEN`
+log keyed on the object-X list, fitting the nops-to-dots offset once over the
+table and scoring every cell against the 4-dot bracket it implies. That turned
+one boolean into 129 datapoints and left exactly one disagreeing cell.
+
+## The halted mode-0 wake, bracketed to the M-cycle per SCX
+
+    python3 tools/gbppu/hbprobe.py <hblank_ly_scx_timing-C.gb> <scx> <N> out.gb
+
+`hblank_ly_scx_timing-{C,GS}` halt with only the mode-0 STAT source armed, wake,
+burn a fixed sled and read LY — 32 fixed yes/no questions that stop at the first
+miss. `hbprobe.py` keeps the ROM's own sync/halt path and failure dump and
+replaces the body with ONE cell: one SCX, one sled length `N`, always dump. So
+sweeping `N` reads the LY-increment boundary directly, and the DMG and CGB grids
+become two comparable staircases instead of two pass/fail verdicts. Every arm is
+a clean `k = K - floor((SCX + r) / 4)`, so the only free parameter is where in
+the M-cycle the wake lands — which is what showed the mode-0 halt blind window
+to be a DMG rule (`M0_HALT_BLIND_DOTS` / `CGB_M0_HALT_BLIND_DOTS` in `ppu.nim`).
+
 ## GBMicrotest without a runner pass
 
     tools/gbppu/mtscore.sh win
