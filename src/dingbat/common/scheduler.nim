@@ -69,6 +69,10 @@ type
     # at compile time — a reorder fails the build there, not a user's state.
     # Drives the Game Boy Camera's capture countdown.
     etCameraDone
+    # A CGB LYC write's owed STAT edge, one M-cycle after the byte lands.
+    # See CGB_LYC_EDGE_DEFER in gb/gb.nim -- a one-shot timer rather than a
+    # per-M-cycle poll, which is what made it affordable.
+    etGbLycEdge
 
   Event* = object
     cycles*: CycleCount
@@ -126,7 +130,11 @@ proc schedule*(s: Scheduler; cycles: int; kind: EventType) =
 
 proc schedule_gb*(s: Scheduler; cycles: int; kind: EventType) =
   var c = cycles
-  if kind != etIME:
+  # See `speed_mode=`: etIME and etGbLycEdge are counted in M-cycles, which
+  # are 4 CPU cycles at either speed, so neither is scaled. Both are booked
+  # with plain `schedule` today; the exemption is here so the two spellings
+  # cannot disagree if one ever moves.
+  if kind != etIME and kind != etGbLycEdge:
     c = c shl s.current_speed
   s.schedule(c, kind)
 
@@ -311,7 +319,11 @@ proc `speed_mode=`*(s: Scheduler; speed: uint8) =
   if speed == old: return
   s.current_speed = speed
   for i in 0 ..< s.nevents:
-    if s.evbuf[i].kind != etIME:
+    # etIME and etGbLycEdge are the two kinds whose delay is counted in
+    # M-CYCLES rather than in real time, and an M-cycle is 4 CPU cycles at
+    # both speeds — so their remaining delay must NOT be rescaled. They are
+    # the same two that `schedule_gb` leaves unscaled going in.
+    if s.evbuf[i].kind != etIME and s.evbuf[i].kind != etGbLycEdge:
       # Real-time events (APU) are stored in CPU cycles, which run twice as
       # fast in double speed: entering double speed doubles the remaining
       # delay, leaving it halves it. The old code shifted right with an
