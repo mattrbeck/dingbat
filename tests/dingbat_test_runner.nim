@@ -1303,15 +1303,23 @@ proc age_models_for(device: string): seq[string] =
   ## An unrecognised character falls back to the single-token behaviour rather
   ## than guessing, because dingbat_test QUITS on a token it cannot parse.
   ##
-  ## MEASURED 2026-08-21, whole suite, every row's `--model` overridden to one
-  ## revision at a time: **44/89 at cgb0, cgbAB, cgbC, cgbD, cgbE and agb** —
-  ## identical. So none of the four `GbQuirks` members reaches an AGE ROM and
-  ## the 25 `@cgbab` / 25 `@cgbc` / 25 `@cgbe` arms are three copies of one
-  ## measurement today. Keep them: AGE's filenames make a per-revision claim
-  ## and these rows are what will check it once a quirk an AGE ROM can see
-  ## lands. But do NOT read an AGE delta as evidence about a revision, and do
-  ## not go looking for a device-scoring explanation for the 45 red rows —
-  ## there isn't one.
+  ## Measured 2026-08-21, whole suite, every row's `--model` overridden to one
+  ## revision at a time: 44/89 at cgb0, cgbAB, cgbC, cgbD, cgbE and agb —
+  ## identical, so no `GbQuirks` member reached an AGE ROM and the `@cgbab` /
+  ## `@cgbc` / `@cgbe` arms were three copies of one measurement. That was the
+  ## reason to keep them, and **it stopped being true on 2026-08-22**: the
+  ## `speed-switch` cluster is where AGE's per-revision claim first bites.
+  ##
+  ## Two of them are the same test built twice with c-sp's own `OFS` / `OFS_B`
+  ## flipped — `spsw-tima-cgbBC.gb` vs `spsw-tima-cgbE.gb`, and
+  ## `caution/spsw-interrupts-cgbBC.gb` vs `-cgbE.gb` — with headers
+  ## recording CGB B and C passing one build and CPU CGB E the other. They are
+  ## served by `GbQuirks.spsw_div_mid_taps_slow` and
+  ## `spsw_irq_leaf_hold_short`, and running either file on the wrong revision
+  ## fails it, which is exactly what these arms exist to check. So an AGE delta
+  ## CAN now be evidence about a revision — but only on those four ROMs;
+  ## everywhere else the arms are still three copies of one measurement, and
+  ## the remaining red rows still have no device-scoring explanation.
   let d = device.toLowerAscii()
   if d.startsWith("ncm"): return @[]        # CGB in non-CGB mode: not modelled
   if not d.startsWith("cgb") or d.len <= 3:
