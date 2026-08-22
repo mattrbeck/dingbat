@@ -4691,6 +4691,35 @@ type
       ## CGB D and AGB are unmeasured: no ROM in this tree exercises either on
       ## this path, and c-sp verified only B, C and E. They keep the CGB-C
       ## rule rather than being guessed into the CGB-E group.
+    ly_read_edge_late*: bool
+      ## CGB D / E / AGB. A CPU read of `$FF44` sees the LY 153 -> 0 snapback
+      ## **one CPU M-cycle later** than it does on CGB 0/A/B/C and on every DMG
+      ## -- i.e. the readable `LY = 153` window is one M-cycle WIDER on late
+      ## silicon. Single speed only: at double speed every CGB revision takes
+      ## the late edge, which is why this is a flag consulted at the read site
+      ## together with the speed and not a plain revision compare. See
+      ## `LY153_READ_SNAP_CGB` in ppu.nim, which is the dot the flag selects.
+      ##
+      ## AGE's `ly/ly-dmgC-cgbBC` and `ly/ly-cgbE` are ONE program with one
+      ## byte different in its expected table (`ly/ly.inc`, `DEF L99`): the
+      ## `-cgbE` build defines `EXTEND_L99` and therefore expects `$99` in the
+      ## single-speed slot the `-cgbBC` build expects `$00` in. That slot is a
+      ## `$FF44` read taken one M-cycle after the read the row above it takes,
+      ## so the two ROMs are a two-sided bracket on exactly one M-cycle, and
+      ## the suite ships one build per side because both machines exist. The
+      ## `L99` substitution appears ONCE, in the single-speed half -- the
+      ## double-speed half is byte-identical in both builds, which is the
+      ## ROM's own statement that double speed does not split by revision.
+      ##
+      ## Cross-checked against SameBoy per revision with `tools/gbfuzz/
+      ## sameboy_wram` (the ROM answers in WRAM at `$C000`, 72 bytes): `dmg`,
+      ## `cgb0`, `cgbb` and `cgbc` answer `$00` in that slot and `cgbd`, `cgbe`
+      ## and `agb` answer `$99`, with all seven byte-identical everywhere else
+      ## including the whole double-speed half. SameBoy spells the mechanism as
+      ## an early store of `LY = 0` two T-cycles into line 153's snapback
+      ## sequence, gated `model <= GB_MODEL_CGB_C && !cgb_double_speed`
+      ## (Core/display.c, the "Lines 153" block) -- the same gate shape as its
+      ## `ly_for_comparison` split, which is `lyc_compare_hold` above.
     unusable_region*: GbUnusableRegion
       ## What `$FEA0..$FEFF` does on this machine; see GbUnusableRegion, which
       ## carries the Pan Docs quote and the per-member evidence.
@@ -7028,6 +7057,7 @@ proc gb_quirks_for*(rev: GbRevision): GbQuirks =
     oam_read_open_late: rev == grCgbE,
     spsw_div_mid_taps_slow: rev == grCgbE,
     spsw_irq_leaf_hold_short: rev == grCgbE,
+    ly_read_edge_late: rev in {grCgbD, grCgbE, grAgb},
     unusable_region:
       if GB_UNUSABLE_ZERO: urZero
       else:

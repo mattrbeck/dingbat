@@ -2152,6 +2152,92 @@ const LY153_READ_SPLIT* = LY153_READ_SNAP != LY153_SNAP_DOT + 1 or
   ## answers "the identity". A per-register CGB read/write latency is the
   ## family this belongs to (`CGB_LCDC_MIXER_LATENCY`, `CGB_MAP_LATENCY`,
   ## `CGB_SCY_LATENCY`), and this is its `$FF44` member.
+  ##
+  ## ## AMENDED 2026-08-22: the CGB keeps the identity on LATE SILICON ONLY
+  ##
+  ## "the CGB is asked from both sides and answers the identity" was measured
+  ## with a single blanket CGB value, and that is what hid the split: the two
+  ## sides are two different MACHINES. `gb.quirks.ly_read_edge_late`
+  ## (`grCgbD, grCgbE, grAgb`) now picks `_CGB`, and everything earlier -- CGB
+  ## 0/A/B/C -- takes the DMG value, at SINGLE SPEED ONLY. At double speed
+  ## every CGB revision takes `_CGB`, which is what stopped the blanket move:
+  ## `age/ly/ly-dmgC-cgbBC`'s own double-speed half wants the late edge on the
+  ## very revision whose single-speed half wants the early one, so a
+  ## speed-blind CGB constant cannot satisfy that one ROM, never mind the pair.
+  ##
+  ## The full evidence -- the `L99` bracket the two AGE builds form, and the
+  ## seven-revision SameBoy dump that separates them -- is on
+  ## `GbQuirks.ly_read_edge_late` in gb.nim.
+
+# ---- The LY counter is READ WHILE IT RIPPLES: `$FF44` = old AND new --------
+#
+# A `$FF44` read taken on the dot LY advances on does not see the old value or
+# the new one. It sees **`LY_old AND LY_new`** -- the counter's bits are
+# sampled while the increment's carry is still propagating, so only the bits
+# that are high on BOTH sides of the edge come back. AGE names it in the ROM
+# that measures it: `lcd-align-ly.inc`, `; glitch: LY & (LY + 1)`.
+#
+# `and (ly + 1)` clears LY's trailing run of 1 bits, so the glitch is INVISIBLE
+# on every even LY and shows up only where the carry runs: 1 -> 2 reads `$00`,
+# 3 -> 4 reads `$00`, 143 -> 144 reads `$80`, 153 -> 0 reads `$00`. That is why
+# it took `lcd-align-ly` to find: it is the only ROM here that walks the CPU's
+# M-cycle grid past the line edge one dot at a time, which it does by turning
+# the LCD on at four different sub-M-cycle phases (its "lcd alignment offset")
+# and sampling five consecutive M-cycles at each.
+#
+# ## The window, measured
+#
+# `lcd-align-ly` reads `$FF44` at eight fixed points per run and repeats the
+# run at 45 (alignment, delay) pairs; the dot each of those reads lands on was
+# read straight out of dingbat with `-d:gb_lyread_probe`, and the ROM's own
+# `EXPECTED_LY_VALUES` says which of the 45 hardware glitches on. Lining the two
+# up (`ppu.cycle_counter` at the read, single speed unless marked ds):
+#
+#     alignment/speed   read dots            hardware glitches on
+#     0  ns             453  457  461 ...    none
+#     1  ds             455  457  459 ...    none
+#     1  ns             454  458  462 ...    none
+#     2  ds             454  456  458 ...    456
+#     2  ns             451  455  459 ...    455   <- CGB 0/A/B/C ONLY
+#     3  ds             455  457  459 ...    none
+#     3  ns             452  456  460 ...    456
+#     4  ds             454  456  458 ...    456
+#     4  ns             453  457  461 ...    none
+#
+# So the window is the single dot `cycle_counter == gb_line_end` -- with ONE
+# exception, the `455` row, which is a glitch on CGB 0/A/B/C and NOT on CGB E.
+# The suite states that split itself: `lcd-align-ly-cgbBC` and
+# `lcd-align-ly-cgbE` are one program built twice, and one of the two bytes
+# their expected tables differ in is exactly that row (the other is the `E99`
+# byte, which is `ly_read_edge_late`'s other site). And every double-speed row
+# that lands on 455 -- alignments 1 and 3 -- does NOT glitch on either build.
+#
+# That is the same shape as `LY153_READ_SNAP_CGB`, on the same register, in the
+# same direction: **early silicon's readable LY moves one dot sooner, at single
+# speed only**. One flag carries both.
+#
+# Neither SameBoy nor dingbat modelled this before 2026-08-22 -- SameBoy answers
+# `lcd-align-ly-cgbBC`'s four glitch rows with a clean pre-edge value the same
+# way dingbat did (checked per revision with `tools/gbfuzz/sameboy_wram` over
+# `LY_VALUES` at `$C000`), so this is the ROM against both emulators, not an
+# oracle copy.
+const LY_EDGE_AND_D {.intdefine: "LY_EDGE_AND".} = 1
+const LY_EDGE_AND* = LY_EDGE_AND_D != 0
+  ## Compile the ripple out for an A/B. At 0 the four `lcd-align-ly` glitch
+  ## cells come back and nothing else in the tree moves.
+
+proc ly_edge_rippling*(ppu: GbPpu; gb: GB): bool {.inline.} =
+  ## Is this `$FF44` read landing on the dot LY advances on? See above.
+  ##
+  ## Kept branch-light because every LY poll a game makes comes through here:
+  ## the common answer is a single compare against a constant 456, and the
+  ## revision/speed pick is only reached on the two dots that can be true.
+  when not LY_EDGE_AND: false
+  else:
+    ppu.cycle_counter >= gb_line_end(ppu) - 1'i32 and
+      (ppu.cycle_counter == gb_line_end(ppu) or
+       not (gb.cgb_enabled and (gb.quirks.ly_read_edge_late or
+                                gb.memory.current_speed == 1'u8)))
 
 proc lyc_settling*(ppu: GbPpu): bool {.noinline.} =
   ## Is the LY=LYC comparator inside the blind window the LY 153 -> 0 snapback
@@ -3616,14 +3702,25 @@ proc ppu_read*(ppu: GbPpu; gb: GB; idx: int): uint8 =
       if ppu.ly == 153'u8 and ppu.cycle_counter >= LY153_SNAP_DOT:
         echo "LY153READ cc=", ppu.cycle_counter, " ly=", ppu.ly,
              " cgb=", gb.cgb_enabled, " spd=", gb.memory.current_speed
+    when defined(gb_lyread_probe):
+      if ppu.cycle_counter < 12'i32 or
+         ppu.cycle_counter > gb_line_end(ppu) - 12'i32:
+        echo "LYREAD cc=", ppu.cycle_counter, " ly=", ppu.ly,
+             " jc=", (ppu.read_mode and LY_JUST_CHANGED) != 0,
+             " spd=", gb.memory.current_speed
     when LY153_READ_SPLIT:
       # `ly == 153` first and the device pick inside the `and`: this is every
       # LY poll a game makes and the branch is taken on 5 dots of 70,224.
       # Hoisting the pick cost +0.041% of ALL retired instructions on Pokemon
       # Crystal; short-circuited it is +0.005%.
       if ppu.ly == 153'u8 and ppu.cycle_counter >=
-           (if gb.cgb_enabled: LY153_READ_SNAP_CGB else: LY153_READ_SNAP): 0'u8
+           (if gb.cgb_enabled and (gb.quirks.ly_read_edge_late or
+                                   gb.memory.current_speed == 1'u8):
+              LY153_READ_SNAP_CGB
+            else: LY153_READ_SNAP): 0'u8
+      elif ly_edge_rippling(ppu, gb): ppu.ly and (ppu.ly + 1'u8)
       else: ppu.ly
+    elif ly_edge_rippling(ppu, gb): ppu.ly and (ppu.ly + 1'u8)
     else: ppu.ly
   of 0xFF45: ppu.lyc
   of 0xFF46: 0xFF'u8  # DMA (write-only, return 0xFF)

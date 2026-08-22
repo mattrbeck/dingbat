@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-22 07:53:16*
+*Generated: 2026-08-22 07:27:46*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4617/4996 passed.**
+**4614/4996 passed.**
 
 ## bgen
 
@@ -115,9 +115,9 @@ All 8 tests passed.
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_4 [dmg, png] | 1/23040 pixels differ |
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_5 [dmg, png] | 144/23040 pixels differ |
 
-## enable_display (158/184 passed)
+## enable_display (159/184 passed)
 
-158/184 tests passed, 26 failed:
+159/184 tests passed, 25 failed:
 
 | Test | Result |
 |------|--------|
@@ -129,7 +129,6 @@ All 8 tests passed.
 | enable_display/frame0_m2irq_count_ds_1_cgb04c_out98 [cgb] | got 90, expected 98 |
 | enable_display/frame0_m2stat_count_ds_1_cgb04c_out91 [cgb] | got 01, expected 91 |
 | enable_display/frame0_m3stat_count_ds_1_cgb04c_out90 [cgb] | got 00, expected 90 |
-| enable_display/frame1_ly_count_2_dmg08_cgb04c_out9A [cgb] | got 00, expected 9A |
 | enable_display/frame1_m0irq_count_scx3_ds_1_cgb04c_out90 [cgb] | got 00, expected 90 |
 | enable_display/frame1_m2irq_count_ds_1_cgb04c_out98 [cgb] | got 90, expected 98 |
 | enable_display/frame1_m2stat_count_1_dmg08_cgb04c_out91 [cgb] | got 00, expected 91 |
@@ -187,16 +186,15 @@ All 8 tests passed.
 | irq_precedence/late_m0irq_vs_tima_scx3_halt_1_dmg08_cgb04c_out4 [dmg] | got 2, expected 4 |
 | irq_precedence/late_m0irq_vs_tima_scx3_halt_1_dmg08_cgb04c_out4 [cgb] | got 2, expected 4 |
 
-## lcd_offset (42/62 passed)
+## lcd_offset (43/62 passed)
 
-42/62 tests passed, 20 failed:
+43/62 tests passed, 19 failed:
 
 | Test | Result |
 |------|--------|
 | lcd_offset/offset1_lyc8fint_m1stat_1_cgb04c_outC4 [cgb] | got C1, expected C4 |
 | lcd_offset/offset1_lyc98int_ly_count_1_cgb04c_out99 [cgb] | got 00, expected 99 |
 | lcd_offset/offset1_lyc98int_ly_count_2_cgb04c_out9A [cgb] | got 99, expected 9A |
-| lcd_offset/offset1_lyc98int_ly_count_ds_2_cgb04c_out9A [cgb] | got 02, expected 9A |
 | lcd_offset/offset1_lyc99int_m0irq_count_scx2_ds_1_cgb04c_out90 [cgb] | got 00, expected 90 |
 | lcd_offset/offset1_lyc99int_m0stat_count_scx2_1_cgb04c_out90 [cgb] | got 00, expected 90 |
 | lcd_offset/offset1_lyc99int_m0stat_count_scx3_1_cgb04c_out90 [cgb] | got 00, expected 90 |
@@ -218,14 +216,13 @@ All 8 tests passed.
 
 All 62 tests passed.
 
-## ly0 (88/96 passed)
+## ly0 (89/96 passed)
 
-88/96 tests passed, 8 failed:
+89/96 tests passed, 7 failed:
 
 | Test | Result |
 |------|--------|
 | ly0/lycint152_ly0stat_2_dmg08_cgb04c_outC0 [cgb] | got C1, expected C0 |
-| ly0/lycint152_ly153_3_dmg08_cgb04c_out00 [cgb] | got 99, expected 00 |
 | ly0/lycint152_lyc0flag_ds_3_cgb04c_outC4 [cgb] | got C0, expected C4 |
 | ly0/lycint152_lyc0irq_late_retrigger_2_dmg08_cgb04c_outE0 [dmg] | got E2, expected E0 |
 | ly0/lycint152_lyc0irq_late_retrigger_2_dmg08_cgb04c_outE0 [cgb] | got E2, expected E0 |
@@ -546,9 +543,18 @@ All 67 tests passed.
 | sound/ch2_late_reset_nr52_2b_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 | sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0 [cgb] | got 2, expected 0 |
 
-## speedchange
+## speedchange (202/208 passed)
 
-All 208 tests passed.
+202/208 tests passed, 6 failed:
+
+| Test | Result |
+|------|--------|
+| speedchange/speedchange2_ch2_nr52_ds_1a_cgb04c_outF2 [cgb] | got F0, expected F2 |
+| speedchange/speedchange2_ch2_nr52_ds_2a_cgb04c_outF2 [cgb] | got F0, expected F2 |
+| speedchange/speedchange5_ch2_nr52_1a_cgb04c_outF2 [cgb] | got F0, expected F2 |
+| speedchange/speedchange5_ch2_nr52_2a_cgb04c_outF2 [cgb] | got F0, expected F2 |
+| speedchange/speedchange_ch2_nr52_1a_cgb04c_outF2 [cgb] | got F0, expected F2 |
+| speedchange/speedchange_ch2_nr52_2a_cgb04c_outF2 [cgb] | got F0, expected F2 |
 
 ## sprites (472/476 passed)
 
