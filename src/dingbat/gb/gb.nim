@@ -4659,6 +4659,31 @@ type
       ##
       ## CGB-D is not measured by either ROM; it keeps the C behaviour rather
       ## than being grouped with E on a guess.
+    spsw_div_mid_taps_slow*: bool
+      ## CGB E. The KEY1 speed switch's DIV reset reaches the divider's
+      ## **middle** TIMA taps (bit 5 = 65 KHz, bit 7 = 16 KHz) at the same
+      ## early point it reaches the high ones, instead of one M-cycle later
+      ## with the low tap. In `timer.nim` terms this drops
+      ## `SPEED_SWITCH_DIV_SLOW_BIT` from 9 to 5 -- see the sweep table at
+      ## `SPEED_SWITCH_DIV_RESET_T_SLOW` for what the two sample points are and
+      ## how the CGB-C boundary at bit 9 was pinned.
+      ##
+      ## The witness is c-sp's own pair, and it is the only per-revision claim
+      ## in the AGE suite that any ROM in this tree can currently see:
+      ## `speed-switch/spsw-tima-cgbBC.gb` and `spsw-tima-cgbE.gb` are the same
+      ## test built twice, differing only in `DEF OFS EQU 1` (spsw-tima.inc),
+      ## which moves the 65 KHz and 16 KHz "trigger immediate increment by DIV
+      ## reset" delays one M-cycle later and leaves the 262 KHz (tap 3) and
+      ## 4 KHz (tap 9) delays alone. c-sp's headers record CGB B and C passing
+      ## the first and failing the second and CPU CGB E the reverse. A delay
+      ## one M-cycle LATER is a sample point 4 T-cycles EARLIER (the sampled
+      ## divider value grows by 4 per unit of delay), which is exactly the
+      ## slow point the high taps already use -- so this is not a new constant,
+      ## it is the same two-point split with its boundary moved.
+      ##
+      ## CGB D and AGB are unmeasured: no ROM in this tree exercises either on
+      ## this path, and c-sp verified only B, C and E. They keep the CGB-C
+      ## rule rather than being guessed into the CGB-E group.
     unusable_region*: GbUnusableRegion
       ## What `$FEA0..$FEFF` does on this machine; see GbUnusableRegion, which
       ## carries the Pan Docs quote and the per-member evidence.
@@ -6966,6 +6991,7 @@ proc gb_quirks_for*(rev: GbRevision): GbQuirks =
     square_freq_backstep_halftick: rev in {grCgbD, grCgbE},
     lyc_compare_hold: rev in {grCgbD, grCgbE, grAgb},
     oam_read_open_late: rev == grCgbE,
+    spsw_div_mid_taps_slow: rev == grCgbE,
     unusable_region:
       if GB_UNUSABLE_ZERO: urZero
       else:

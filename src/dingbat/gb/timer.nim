@@ -438,8 +438,31 @@ proc timer_speed_switch_div_reset_split(t: GbTimer; gb: GB) =
   timer_tick(t, gb, SPEED_SWITCH_DIV_RESET_T_SLOW)
   let apu_slow  = ((t.tdiv shr apu_div_bit(gb)) and 1) == 1
   let tima_slow = t.enabled and ((t.tdiv and (1'u16 shl t.bit_for_tima)) != 0)
+  # CGB E moves the boundary down to the 65 KHz tap; see
+  # `GbQuirks.spsw_div_mid_taps_slow`.
+  let slow_bit  = if gb.quirks.spsw_div_mid_taps_slow: 5
+                  else: SPEED_SWITCH_DIV_SLOW_BIT
+  let slow_tap  = t.bit_for_tima >= slow_bit
+  # A slow tap is LATCHED at the slow point: the divider's own crossing of that
+  # tap between here and the reset is the ripple lag itself and so is invisible
+  # to it. Gating the tap off for the remaining T-cycles is what says that.
+  #
+  # Restoring `previous_bit = tima_slow` afterwards without gating -- which is
+  # what this did until 2026-08-22 -- lets the SAME fall be counted twice when
+  # it lands in the window: once by the tick, and again by the reset, whose
+  # pre-level has just been forced back up. The window is exactly one M-cycle
+  # wide, so it is one delay value in an AGE sweep and nothing else in the
+  # tree reaches it: c-sp `speed-switch/spsw-tima-cgbBC`'s "right on the 1->0
+  # edge of the respective DIV bit" cell (TEST_INC_EDGE 238, TAC $04, tap 9)
+  # read $82/$83 for hardware's $81/$82, while 237 and 239 either side were
+  # already exact. See SPEED_SWITCH_DIV_RESET_T_SLOW.
+  let was_enabled = t.enabled
+  if slow_tap:
+    t.enabled      = false
+    t.previous_bit = false
   timer_tick(t, gb, SPEED_SWITCH_DIV_RESET_T - SPEED_SWITCH_DIV_RESET_T_SLOW)
-  if t.bit_for_tima >= SPEED_SWITCH_DIV_SLOW_BIT:
+  if slow_tap:
+    t.enabled      = was_enabled
     t.previous_bit = tima_slow
   let old_tdiv = t.tdiv
   t.tdiv = 0

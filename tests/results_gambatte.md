@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-22 07:51:42*
+*Generated: 2026-08-22 07:15:32*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4630/4996 passed.**
+**4611/4996 passed.**
 
 ## bgen
 
@@ -115,12 +115,13 @@ All 8 tests passed.
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_4 [dmg, png] | 1/23040 pixels differ |
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_5 [dmg, png] | 144/23040 pixels differ |
 
-## enable_display (161/184 passed)
+## enable_display (158/184 passed)
 
-161/184 tests passed, 23 failed:
+158/184 tests passed, 26 failed:
 
 | Test | Result |
 |------|--------|
+| enable_display/enable_display_ly0_oambusy_read_ds_1_cgb04c_out0 [cgb] | got 7, expected 0 |
 | enable_display/enable_display_ly0_sprites_m0stat_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | enable_display/enable_display_ly0_sprites_m0stat_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | enable_display/frame0_m0irq_count_scx2_ds_1_cgb04c_out90 [cgb] | got 00, expected 90 |
@@ -141,6 +142,8 @@ All 8 tests passed.
 | enable_display/ly0_late_scx7_m3stat_scx1_1_dmg08_cgb04c_out87 [cgb] | got 84, expected 87 |
 | enable_display/ly0_late_scx7_m3stat_scx3_1_dmg08_cgb04c_out87 [dmg] | got 84, expected 87 |
 | enable_display/ly0_late_scx7_m3stat_scx3_1_dmg08_cgb04c_out87 [cgb] | got 84, expected 87 |
+| enable_display/ly0_late_vramr_2_dmg08_outFF_cgb04c_out55 [cgb] | got FF, expected 55 |
+| enable_display/ly0_late_vramr_ds_1_cgb04c_out55 [cgb] | got FF, expected 55 |
 | enable_display/ly0_late_vramw_2_dmg08_out55_cgb04c_outAA [cgb] | got 55, expected AA |
 | enable_display/ly0_m0irq_scx0_ds_1_cgb04c_outE0 [cgb] | got E2, expected E0 |
 | enable_display/ly0_m0irq_scx1_ds_1_cgb04c_outE0 [cgb] | got E2, expected E0 |
@@ -455,13 +458,20 @@ All 44 tests passed.
 | miscmstatirq/m0statwirq_scx5_2_dmg08_out2 [dmg] | got 0, expected 2 |
 | miscmstatirq/m1statwirq_trigger_ly94_lyc94_40_50_2_dmg08_outE0_cgb04c_outE2 [cgb] | got E0, expected E2 |
 
-## oam_access (61/69 passed)
+## oam_access (54/69 passed)
 
-61/69 tests passed, 8 failed:
+54/69 tests passed, 15 failed:
 
 | Test | Result |
 |------|--------|
+| oam_access/10spritesprline_postread_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
+| oam_access/10spritesprline_postread_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | oam_access/midwrite_2_dmg08_out1_cgb04c_out0 [cgb] | got 1, expected 0 |
+| oam_access/postread_scx2_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
+| oam_access/postread_scx2_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
+| oam_access/postread_scx3_2_dmg08_xout1_cgb04c_out0 [cgb] | got 3, expected 0 |
+| oam_access/postread_scx5_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
+| oam_access/postread_scx5_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | oam_access/postwrite_2_scx3_dmg08_cgb04c_out1 [dmg] | got 0, expected 1 |
 | oam_access/postwrite_2_scx3_dmg08_cgb04c_out1 [cgb] | got 0, expected 1 |
 | oam_access/preread_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
@@ -579,27 +589,35 @@ All 67 tests passed.
 
 All 20 tests passed.
 
-## vram_m3 (48/50 passed)
+## vram_m3 (42/50 passed)
 
-48/50 tests passed, 2 failed:
+42/50 tests passed, 8 failed:
 
 | Test | Result |
 |------|--------|
+| vram_m3/10spritesprline_postread_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
+| vram_m3/10spritesprline_postread_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
+| vram_m3/postread_scx2_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
+| vram_m3/postread_scx2_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
+| vram_m3/postread_scx3_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
+| vram_m3/postread_scx3_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | vram_m3/preread_lcdoffset2_1_cgb04c_out0 [cgb] | got 3, expected 0 |
 | vram_m3/prewrite_lcdoffset2_1_cgb04c_out1 [cgb] | got 0, expected 1 |
 
-## vramw_m3end (34/36 passed)
+## vramw_m3end (32/36 passed)
 
-34/36 tests passed, 2 failed:
+32/36 tests passed, 4 failed:
 
 | Test | Result |
 |------|--------|
+| vramw_m3end/vramw_m3end_scx3_3_dmg08_cgb04c_out0 [dmg] | got 7, expected 0 |
+| vramw_m3end/vramw_m3end_scx3_3_dmg08_cgb04c_out0 [cgb] | got 7, expected 0 |
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 
-## window (426/476 passed)
+## window (425/476 passed)
 
-426/476 tests passed, 50 failed:
+425/476 tests passed, 51 failed:
 
 | Test | Result |
 |------|--------|
@@ -643,6 +661,7 @@ All 20 tests passed.
 | window/m2int_wxA6_m0irq_2_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | window/m2int_wxA6_m3stat_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/m2int_wxA6_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
+| window/m2int_wxA6_oambusyread_2_dmg08_out5_cgb04c_out0 [dmg] | got 0, expected 5 |
 | window/m2int_wxA6_scx3_m3stat_2_dmg08_out0_cgb04c_out3 [dmg] | got 3, expected 0 |
 | window/m2int_wxA6_scx5_m3stat_3_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/m2int_wxA6_scx5_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
