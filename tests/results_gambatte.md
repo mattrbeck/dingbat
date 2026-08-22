@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-21 19:17:27*
+*Generated: 2026-08-21 19:25:44*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4592/4996 passed.**
+**4593/4996 passed.**
 
 ## bgen
 
@@ -371,9 +371,9 @@ All 4 tests passed.
 
 All 6 tests passed.
 
-## m1 (142/170 passed)
+## m1 (143/170 passed)
 
-142/170 tests passed, 28 failed:
+143/170 tests passed, 27 failed:
 
 | Test | Result |
 |------|--------|
@@ -384,7 +384,6 @@ All 6 tests passed.
 | m1/ly143_late_m2enable_ds_lcdoffset1_2_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m1/lyc143_late_m2enable_lycdisable_2_dmg08_cgb04c_out1 [dmg] | got 3, expected 1 |
 | m1/lyc143_late_m2enable_lycdisable_2_dmg08_cgb04c_out1 [cgb] | got 3, expected 1 |
-| m1/lyc143_late_m2enable_lycdisable_3_dmg08_out3_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m1/lyc143_late_m2enable_lycdisable_ds_2_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m1/lycint143_m1irq_late_retrigger_2_dmg08_cgb04c_out1 [dmg] | got 3, expected 1 |
 | m1/lycint143_m1irq_late_retrigger_2_dmg08_cgb04c_out1 [cgb] | got 3, expected 1 |

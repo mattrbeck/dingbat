@@ -5561,6 +5561,16 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             when LY_BLIND_SCOPE >= 0: ly_advance_line(ppu, gb)
             else:                     ppu.`mode_flag=`(2'u8, gb)
       of 1:  # V-Blank
+        # The line-144 OAM pulse's FALLING edge (M2_144_PULSE / m2_144_fall_dot
+        # in ppu.nim). Same arrangement as the CGB pulse's RISE in the mode-0
+        # branch above: the source is level-triggered off the dot counter and
+        # nothing else happens on this dot, so the edge detector has to be run
+        # here explicitly or the STAT line stays latched high for the rest of
+        # the line. No extra stop is needed in fifo_skip_target -- the idle
+        # skip already opts out of a mode-1 line's first LYC_RELATCH_DOT dots.
+        when M2_144_PULSE:
+          if ppu.ly == 144'u8 and ppu.cycle_counter == m2_144_fall_dot(gb):
+            ppu_handle_stat_interrupt(ppu, gb)
         # The one vblank line whose successor scans OAM is 153, handing over
         # to line 0 -- and the suite says line 0's pulse does NOT lead, so
         # m2_early answers false here unless STAT_M2_EARLY_LY0 is on. The stop

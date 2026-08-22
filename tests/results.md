@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-21 19:17:27 · commit 648143f4 · game-boy-test-roms v7.0*
+*Generated: 2026-08-21 19:25:44 · commit f74dddce · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1223
-- **Pass:** 1128
-- **Fail:** 95
+- **Pass:** 1134
+- **Fail:** 89
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -28,7 +28,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - SameSuite | 8 | 8 |
 | Game Boy - SameSuite APU | 70 | 70 |
 | Game Boy - Shootout ROMs | 13 | 13 |
-| Game Boy - Mooneye (wilbertpol) | 163 | 184 |
+| Game Boy - Mooneye (wilbertpol) | 169 | 184 |
 | Game Boy - gambatte | 19 | 48 |
 
 ## Game Boy - Blargg (28/28)
@@ -201,7 +201,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 13 tests passed.**
 
-## Game Boy - Mooneye (wilbertpol) (163/184)
+## Game Boy - Mooneye (wilbertpol) (169/184)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -325,12 +325,12 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mooneye-wilbertpol/acceptance/gpu/ly_new_frame-GS@sgb | SGB sgb | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly_new_frame-GS@sgb2 | SGB sgb2 | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/stat_irq_blocking | cart | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/stat_write_if-C@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/stat_write_if-C@agb | CGB agb | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/stat_write_if-GS@dmgABC | DMG dmgABC | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/stat_write_if-GS@mgb | DMG mgb | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/stat_write_if-GS@sgb | SGB sgb | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/stat_write_if-GS@sgb2 | SGB sgb2 | 👀 Mooneye: FAIL |
+| mooneye-wilbertpol/acceptance/gpu/stat_write_if-C@cgbc | CGB cgbc | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/stat_write_if-C@agb | CGB agb | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/stat_write_if-GS@dmgABC | DMG dmgABC | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/stat_write_if-GS@mgb | DMG mgb | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/stat_write_if-GS@sgb | SGB sgb | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/stat_write_if-GS@sgb2 | SGB sgb2 | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/vblank_if_timing | cart | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/vblank_stat_intr-GS@dmgABC | DMG dmgABC | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/vblank_stat_intr-GS@mgb | DMG mgb | 👌 |
@@ -421,7 +421,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/m0int_m0irq | per-ROM | 👌 4/4 passed |
 | gambatte/m0int_m0stat | per-ROM | 👀 11/12 passed |
 | gambatte/m0int_m3stat | per-ROM | 👌 6/6 passed |
-| gambatte/m1 | per-ROM | 👀 142/170 passed |
+| gambatte/m1 | per-ROM | 👀 143/170 passed |
 | gambatte/m2enable | per-ROM | 👀 101/120 passed |
 | gambatte/m2int_m0irq | per-ROM | 👀 67/72 passed |
 | gambatte/m2int_m0stat | per-ROM | 👌 6/6 passed |

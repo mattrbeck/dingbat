@@ -1637,6 +1637,57 @@ proc m2_source*(ppu: GbPpu; gb: GB): bool {.inline.} =
     ppu.irq_mode_of == 2 and ppu.cycle_counter < int32(4 shr gb.memory.current_speed)
   else: ppu.irq_mode_of == 2 and ppu.cycle_counter <= int32(STAT_M2_PULSE)
 
+const M2_144_PULSE* {.booldefine.} = true
+  ## Whether the line-144 assertion of the OAM STAT source is a PULSE of the
+  ## same width as the per-line one (`STAT_M2_PULSE`), rather than a level held
+  ## for the whole of line 144.
+  ##
+  ## It is the same source and the same event -- "a line is starting" -- so one
+  ## width is the structural answer; the level was only ever the shape the code
+  ## started with, and like the per-line level before it (see STAT_M2_PULSE's
+  ## write-up above) nothing had contradicted it, because every ROM that had
+  ## reached it only ever saw the source's RISING edge.
+  ##
+  ## wilbertpol `acceptance/gpu/stat_write_if` is the ROM that samples the
+  ## source PART-WAY THROUGH line 144. It is 85 (`-C`) / 105 (`-GS`) subtests of
+  ## "sit at the top of one mode, clear IF, write STAT, did bit 1 come up?", and
+  ## `tools/gbppu/statwif.py` reads all of them out at once. With the level, the
+  ## failures are exactly the mode-1 rows whose answer depends on the OAM source
+  ## still being high some 40-70 dots into line 144:
+  ##
+  ##   `-C`  9, 29 -- write OAM-enable at the top of mode 1, expect NO
+  ##                 interrupt; the level makes one.
+  ##   `-C` 68     -- OAM already enabled, write VBlank-enable, expect an
+  ##                 interrupt; the level is holding the line high already, so
+  ##                 no edge.
+  ##   `-GS` 66-70 -- OAM already enabled, any STAT write at the top of mode 1,
+  ##                 expect an interrupt (the DMG write glitch). The level has
+  ##                 the line high, and ppu_stat_write_glitch correctly refuses
+  ##                 to raise an edge on a line that is already high.
+  ##
+  ## All eight are the same fact from three directions, and all eight are green
+  ## with the pulse. SameBoy spells the same thing even more sharply: entering
+  ## vblank it poke `IF |= 2` directly if the OAM enable is set and the line is
+  ## low, and only then sets `mode_for_interrupt = 1` -- i.e. width zero, no
+  ## level at all (Core/display.c, "Entering VBlank state triggers the OAM
+  ## interrupt").
+proc m2_144_within_pulse(ppu: GbPpu; gb: GB): bool {.inline.} =
+  when not M2_144_PULSE: true
+  elif STAT_M2_PULSE == -1: true
+  elif STAT_M2_PULSE == -2:
+    ppu.cycle_counter < int32(4 shr gb.memory.current_speed)
+  else: ppu.cycle_counter <= int32(STAT_M2_PULSE)
+
+template m2_144_fall_dot*(gb: GB): int32 =
+  ## The dot of line 144 the pulse above ends ON, i.e. the first dot the source
+  ## is low again. Nothing else happens on it, so the renderer has to run the
+  ## edge detector there explicitly -- the same arrangement `M2_144_EARLY_DOT`
+  ## already has for the pulse's RISE. It costs no extra stop in the idle skip:
+  ## the skip already opts out of the first `LYC_RELATCH_DOT` dots of every
+  ## mode-1 line for the LY 153 -> 0 snapback, and this dot is inside that.
+  when STAT_M2_PULSE == -2: int32(4 shr gb.memory.current_speed)
+  else: int32(STAT_M2_PULSE) + 1
+
 proc m2_line144*(ppu: GbPpu; gb: GB): bool {.inline.} =
   ## Is the mode 2 (OAM) STAT source asserted by the *start of vblank*?
   ##
@@ -1685,7 +1736,7 @@ proc m2_line144*(ppu: GbPpu; gb: GB): bool {.inline.} =
   ## pinned to the vblank interrupt, which does not lead, and on DMG it is
   ## measured to coincide with it exactly.
   if ppu.ly == 144:
-    ppu.mode_flag == 1
+    ppu.mode_flag == 1 and m2_144_within_pulse(ppu, gb)
   elif ppu.ly == 143:
     ppu.mode_flag == 0 and ppu.cycle_counter >= M2_144_EARLY_DOT and
       (when M2_144_EARLY_DMG and M2_144_EARLY_DMG_HALT:
