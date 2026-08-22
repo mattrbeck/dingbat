@@ -4414,6 +4414,37 @@ type
       ## model takes, and D/E drop the parity test. Its TODO there says the
       ## hardware behaviour being approximated is "the countdown should change
       ## to the old length, but the current sample should not change".
+    lyc_compare_hold*: bool
+      ## CGB D / E / AGB. The M-cycle in which LY advances reads STAT back with
+      ## the LY=LYC coincidence bit HOLDING the comparison against the PREVIOUS
+      ## LY, instead of forced clear. Every earlier revision -- and every DMG --
+      ## clears it; see the `LY_JUST_CHANGED` branch in `ppu_read`, which is
+      ## where the clear lives and what this flag qualifies.
+      ##
+      ## The two rules differ only where the OLD LY matched LYC, which is
+      ## exactly what wilbertpol's `acceptance/gpu/ly_lyc*-C` ROMs sample. Each
+      ## one reads STAT on the M-cycle of an LY advance out of a matching line:
+      ## `ly_lyc` at 215 NOPs (LY 2 -> 3, LYC = 2), `ly_lyc_144`, `ly_lyc_153`
+      ## and `ly_lyc_0` at their own line. All four expect bit 2 SET there, and
+      ## all four also sample the M-cycle of an advance INTO a matching line
+      ## (`ly_lyc` at 101 NOPs, LY 1 -> 2) and expect it CLEAR -- so a
+      ## one-M-cycle-stale copy of the bit is what they measure, and a
+      ## suppression window is not.
+      ##
+      ## Read out with `tools/gbppu/wilbergpu.py` and checked against SameBoy
+      ## per revision with `tools/gbfuzz/sameboy_wram`: on `cgb0`, `cgba`,
+      ## `cgbb` and `cgbc` SameBoy answers all four ROMs with the CLEAR bit --
+      ## byte for byte what dingbat answers, so the two agree completely on the
+      ## revision this tree defaults to -- and on `cgbd`, `cgbe` and `agb` it
+      ## answers with the HELD bit, which is the ROM's own expected value. The
+      ## split is `gb->ly_for_comparison != -1 || (model <= GB_MODEL_CGB_C &&
+      ## !double_speed)` in SameBoy's `GB_STAT_update` (Core/display.c): the
+      ## blind window writes the bit on early silicon and skips writing it on
+      ## late silicon.
+      ##
+      ## So the `-C` suffix on those four ROMs is a claim wilbertpol's own
+      ## hardware does not support at CGB-C, and the `@cgbc` arms of them stay
+      ## red on purpose. `@agb` is what this flag is for.
     unusable_region*: GbUnusableRegion
       ## What `$FEA0..$FEFF` does on this machine; see GbUnusableRegion, which
       ## carries the Pan Docs quote and the per-member evidence.
@@ -6706,6 +6737,7 @@ proc gb_quirks_for*(rev: GbRevision): GbQuirks =
     scy_fetch_latch: rev in {grCgbD, grCgbE},
     pcm_read_edge_zero: rev in {grCgb0, grCgbAB, grCgbC},
     square_freq_backstep_halftick: rev in {grCgbD, grCgbE},
+    lyc_compare_hold: rev in {grCgbD, grCgbE, grAgb},
     unusable_region:
       if GB_UNUSABLE_ZERO: urZero
       else:

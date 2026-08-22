@@ -2369,6 +2369,16 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
   # The readable bit follows the readable LY; the SOURCE below follows irq_ly,
   # one M-cycle ahead of it (gambatte lycint_lycflag times the two apart).
   ppu.coincidence_flag = ppu.ly == ppu.lyc and not settling
+  # CGB D and later HOLD the comparison a blind window is leaving instead of
+  # clearing it (quirks.lyc_compare_hold, and the `LY_JUST_CHANGED` branch in
+  # ppu_read for the ordinary-advance half of the same rule). The snapback's
+  # window is leaving LY = 153, so the held bit is `LYC == 153` -- and
+  # wilbertpol `ly_lyc_153-C` reads STAT on exactly that M-cycle and wants it
+  # set. `settling` first and the quirk last: the flag is false on every
+  # shipping revision, and this must not put a field read in front of the
+  # branch the mode-3 dot loop pays for (see lyc_settling).
+  if settling and ppu.lyc == 153'u8 and gb.quirks.lyc_compare_hold:
+    ppu.coincidence_flag = true
   # The snapback's blind window is a READ-path rule and the SOURCE leaves it
   # `LYC_SRC_RELATCH_LEAD` M-cycles early. Spelled as `not settling or <dot>`
   # rather than as a second local so nothing extra is live across the source
@@ -3323,6 +3333,13 @@ proc ppu_read*(ppu: GbPpu; gb: GB; idx: int): uint8 =
     # this is a suppression window, not a one-M-cycle-stale copy of the bit.
     if (ppu.read_mode and LY_JUST_CHANGED) != 0:
       live = live and not 0b0000_0100'u8
+      # ...on CGB C and earlier, and on every DMG. Later silicon HOLDS the
+      # comparison against the LY the window is leaving instead of clearing it,
+      # which is only visible where that LY matched. See quirks.lyc_compare_hold
+      # in gb.nim for the four ROMs and the per-revision SameBoy check.
+      if gb.quirks.lyc_compare_hold and
+         ppu.lyc == (if ppu.ly == 0'u8: 153'u8 else: ppu.ly - 1'u8):
+        live = live or 0b0000_0100'u8
     # Leaving vblank, DMG's two mode bits do not move together: bit 0 drops as
     # mode 1 ends and bit 1 only comes up an M-cycle later, so the M-cycle the
     # 1 -> 2 transition falls inside reads back as mode 0. Nothing else in the
