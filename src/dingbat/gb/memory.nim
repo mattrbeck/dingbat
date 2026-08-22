@@ -147,8 +147,33 @@ proc skip_boot*(mem: GbMemory; gb: GB) =
   mem.write_byte(gb, 0xFF43, 0x00)
   mem.write_byte(gb, 0xFF45, 0x00)
   mem.write_byte(gb, 0xFF47, 0xFC)
-  mem.write_byte(gb, 0xFF48, 0xFF)
-  mem.write_byte(gb, 0xFF49, 0xFF)
+  # OBP0/OBP1 and the DMA register are the three bytes NO boot ROM writes: the
+  # value the cart sees is the SILICON's power-on state, so it splits on the
+  # MACHINE (`boot_model`, the same axis the P1 split below uses) and not on
+  # anything the cart says: `boot_hwio-C` itself has cartridge byte $0143 = $00,
+  # i.e. it runs in DMG-compatibility mode, and still expects the CGB values,
+  # because the silicon under it is a CGB either way.
+  #
+  #   * DMA -- Pan Docs "Console state after boot ROM hand-off" states it
+  #     outright: $FF on DMG0/DMG/MGB/SGB/SGB2, $00 on CGB/AGB.
+  #   * OBP0/OBP1 -- Pan Docs leaves these as `??` ("left entirely
+  #     uninitialized ... most often $00 or $FF"), so the two-sided evidence is
+  #     hardware, not the spec. Both witnesses agree and they split the same way
+  #     DMA does: `mooneye-wilbertpol misc/boot_hwio-C` asserts $00 for all three
+  #     on cgb+agb (Gekkio's later build of the same test dropped the three
+  #     checks rather than changing them -- see the table diff in the report),
+  #     and SameBoy resets exactly this trio to `GB_is_cgb() ? 0x00 : 0xFF`,
+  #     commented "not deterministic, but 00 (CGB) and FF (DMG) are the most
+  #     common initial values by far".
+  #
+  # Verified against SameBoy's own boot-ROM hand-off with tools/gbfuzz/
+  # sameboy_bootio: dmg/mgb hand off $FF/$FF/$FF, cgb0/cgbA/cgbC/cgbE/agb hand
+  # off $00/$00/$00, and every OTHER byte of $FF00-$FF7F already matched.
+  let cgb_silicon = gb.boot_model in {bmCgb0, bmCgbABCDE, bmAgb}
+  let obp_boot = if cgb_silicon: 0x00'u8 else: 0xFF'u8
+  mem.write_byte(gb, 0xFF48, obp_boot)
+  mem.write_byte(gb, 0xFF49, obp_boot)
+  mem.dma = obp_boot
   mem.write_byte(gb, 0xFF4A, 0x00)
   mem.write_byte(gb, 0xFF4B, 0x00)
   if gb.cgb_enabled:
