@@ -7318,3 +7318,84 @@ where the rest respond with period 4.
 * `tools/gbppu/sm83dis.py` — enough SM83 to read a gambatte ROM's straight-line
   body. Written because bucket 13's whole geometry (how many switches, in which
   direction, with what between them) is in the ROMs and in nothing else.
+
+---
+
+## 2026-08-22: AGE's STAT/LY half at cell resolution — three rules landed, two characterised
+
+`tools/gbppu/{agetable,agecells,agediff}.py` turn each AGE ROM's own printed
+failure table into per-cell expected-vs-got, and every finding below came out of
+reading those cells rather than sweeping. Render with
+`--mode=screenshot --timeout=600` and **not** `--bb-breakpoint` (the breakpoint
+stops the ROM before it draws its table; the runner passes it because AGE has no
+failure signature).
+
+### Landed
+
+1. **`GbQuirks.ly_read_edge_late`** (`grCgbD, grCgbE, grAgb`) — the readable LY
+   moves one CPU M-cycle sooner on CGB 0/A/B/C than on late silicon, at SINGLE
+   SPEED only, and it has two sites: the LY 153 -> 0 snapback (`LY153_READ_SNAP`)
+   and the ripple window below. AGE ships `ly/ly-dmgC-cgbBC` and `ly/ly-cgbE` as
+   one program with one byte different (`DEF L99`), and the byte is in the
+   single-speed half only. `tools/gbfuzz/sameboy_wram` over `$C000` splits the
+   same way on all seven revisions.
+2. **`$FF44` read on the LY-advance dot returns `LY & (LY + 1)`**
+   (`ly_edge_rippling`, `LY_EDGE_AND=0` compiles it out). AGE names it in
+   `lcd-align-ly.inc`. Invisible on every even LY. Window measured from the dots
+   the reads land on (`-d:gb_lyread_probe`) against the ROM's own 45-entry
+   expected table: the dot `cycle_counter == gb_line_end`, plus one dot earlier
+   on early silicon at single speed. Neither SameBoy nor dingbat modelled it.
+3. **`GbQuirks.m1_end_no_mode0`** — the one M-cycle of mode 0 between mode 1
+   ending and line 0's mode 2 is an early-silicon rule (CGB <= C and every DMG),
+   not a DMG rule, and single speed only. AGE's `M1E` byte plus gambatte's own
+   `ly0/lycint152_ly0stat_2` (`dmg08_cgb04c_out<one value>`) versus its `_ds_`
+   sibling, which expects the opposite.
+4. **`LCD_ON_STAT_READ_LAG = 2`** — on the first line after an LCD enable, and
+   only there, a STAT read returns the mode from two dots further back. Nothing
+   else on that line moves. The pipeline spelling of the same 2 dots
+   (`m3_start_dot + 2` on `first_line`) costs 32 rows: ten GBMicrotest
+   `*_l0_{b,d}` access-window pairs plus mooneye `lcdon_{,write_}timing-GS`, and
+   fourteen `int_hblank_*` mode-0 SOURCE rows. Two-sided at 1/2/3/4.
+
+### Characterised, NOT landed
+
+**A. dingbat's DOUBLE-SPEED mode-0 dispatch grid is one dot late.**
+AGE `stat-interrupt`'s double-speed half fails on **every odd SCX and no even
+one**, with dispatch a whole M-cycle early — exactly what a one-dot source lead
+predicts on a 2-dot M-cycle grid. `-d:STAT_M0_LEAD_DS=0
+-d:CGB_M0_HALT_BLIND_DS_DOTS=0` is +3 AGE arms and +5 gambatte (runner
+1155 -> 1159, gambatte 4619 -> 4624, shootout still 261/261) and is NOT shipped,
+because SameBoy passes **both** sides with one implementation: it answers AGE
+`stat-int` with the full expected table on cgb0..E and agb, passes all eight
+gambatte rows the move gains, and passes the two it loses
+(`irq_precedence/late_m0irq_retrigger_scx1_ds_2`,
+`m2int_m0irq/m2int_m0irq_scx3_ifw_ds_2`). Ten rows, one implementation, all ten
+right — so the lead is not the quantity that is wrong. Rounding the source up to
+an ODD dot reproduces hardware's staircase *and* keeps the absolute edge, which
+says the CPU-to-PPU dispatch phase in double speed is what to move
+(`mem_tick_ppu_latched`; see `CGB_LATENCY_CAP`). Full write-up on
+`STAT_M0_LEAD_DS` in ppu.nim.
+
+**B. the window's mode-3 penalty is flat to WX 166 and dingbat's is not.**
+AGE `stat-mode-window{,-ds}` sweeps WX over 0..9 and 162..167 with the window
+enabled, setting `SCX = LY` in its own mode-2 handler so each printed row is an
+SCX 0..7 sweep. Its expected table is **byte-identical for WX 1 through 166** —
+hardware charges the same 6-dot window restart however close to the right edge
+the trigger lands — and only WX 0 and WX 167 differ. dingbat, read with
+`-d:gb_m3_len`:
+
+    WX        1..163   164          165      166             167
+    CGB       178+SCX  178/179+SCX  179+SCX  180+SCX         172+SCX
+    DMG       178+SCX  178/179+SCX  179+SCX  173+SCX         172+SCX
+    hardware  178+SCX  178+SCX      178+SCX  178+SCX         172+SCX
+
+So the CGB overcharges by 1 dot at WX 165 and 2 at WX 166, and the DMG
+overcharges by 1 at WX 165 and UNDERCHARGES by 5 at WX 166. That is 7 rows
+(`stat-mode-window-cgbBCE` x3, `-dmgC`, `-ds-cgbBCE` x3) and the whole residue of
+both ROMs — every other WX and every other cell is clean. It is not attempted
+here because the WX = 166 edge is `CGB_WIN_TAIL_LAST` /
+`DMG_WIN_LAST_PX_CARRY` / `win_start_reaches_pixels` in fifo_ppu.nim, pinned by
+14 gambatte `window/on_screen/wxA6_*` reference frames to the pixel and by
+`window/m2int_wxA6_m3stat_1` to the dot. **Whatever reconciles them has to keep
+those; AGE is a third witness that says the flat answer is right for both
+devices, and the three have not been read against each other.**

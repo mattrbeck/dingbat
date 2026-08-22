@@ -486,6 +486,24 @@ they are: the same measurement with two expected tables, one per silicon family.
 Clone `github.com/c-sp/age-test-roms` for the sources — every ROM is a few dozen
 lines of RGBDS with the devices it was verified on in a header comment.
 
+**Render with `--mode=screenshot --timeout=600` and NOT `--bb-breakpoint`.** The
+breakpoint stops the ROM before it draws its table, and the whole frame comes
+back as "0 table rows"; the runner passes it because AGE has no failure
+signature and a failing ROM would otherwise burn its timeout.
+
+**A ROM whose expected table you have rewritten is a 1-of-N READOUT.**
+`compact_results` stores the index of the first byte that disagreed, so
+overwriting the ROM's own expected array with candidate bytes and re-reading the
+printed cell recovers what the emulator actually measured, byte by byte, for
+every line in the table at once — no disassembly, no serial patch, and the same
+file can be handed to SameBoy. Fix the header checksum at `$014D` (sum of
+`$0134..$014C`, each byte subtracted, minus 1) and nothing else. That is how
+`lcd-align-ly`'s raw `LY_VALUES` were recovered on the dingbat side to find the
+`LY & (LY + 1)` ripple; the SameBoy side needed no patch at all, because
+`tools/gbfuzz/sameboy_wram` reads the ROM's WRAM scratch directly (`$C000` for
+every ROM in this suite, and it takes a `model` argument, so one command gives
+the whole revision axis).
+
 ## Asking SameBoy a GBMicrotest question — the oracle reaches further than it looks
 
     export SAMEBOY_GAMBATTE=~/code/dingbat/tools/gbfuzz/sameboy_gambatte
