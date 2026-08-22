@@ -1446,7 +1446,8 @@ const SPEED_SWITCH_STALL_RUNS_CPU_CLOCK* {.intdefine.} = 1
   ## pixels) while gaining the same 4 `speedchange` rows, which is the shape of
   ## a constant being fitted to a suite past the ROM that measures it.
 
-proc mem_tick_stalled(mem: GbMemory; gb: GB; cycles: int) =
+proc mem_tick_stalled(mem: GbMemory; gb: GB; cycles: int;
+                      first_chunk = true) =
   ## mem_tick_components for the speed-switch stall, where the CPU clock is
   ## off. Pan Docs splits the machine into exactly the two domains this needs:
   ## the CPU, "Timer and Divider Registers", the Serial Port and OAM DMA all
@@ -1470,7 +1471,10 @@ proc mem_tick_stalled(mem: GbMemory; gb: GB; cycles: int) =
     when SPEED_SWITCH_FREEZES_OAM_DMA == 0:
       mem_dma_tick(mem, gb, cycles)
     elif SPEED_SWITCH_OAM_DMA_HANDBACK_T != 0:
-      mem_dma_tick(mem, gb, SPEED_SWITCH_OAM_DMA_HANDBACK_T)
+      # Once per stall, not once per chunk: the hand-back is what the DMA gets
+      # AT the grant and then it freezes. See SPEED_SWITCH_STALL_ENDS_ON_IRQ,
+      # which is what can split the stall into chunks at all.
+      if first_chunk: mem_dma_tick(mem, gb, SPEED_SWITCH_OAM_DMA_HANDBACK_T)
   # `current_speed` is already the speed being switched TO, so this picks the
   # extra by DIRECTION: 1 is a switch that ended in double speed.
   const extra_single =
@@ -1478,7 +1482,8 @@ proc mem_tick_stalled(mem: GbMemory; gb: GB; cycles: int) =
       SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE
     else: SPEED_SWITCH_PPU_EXTRA_DOTS
   let extra =
-    if mem.current_speed == 1: SPEED_SWITCH_PPU_EXTRA_DOTS else: extra_single
+    if not first_chunk: 0
+    elif mem.current_speed == 1: SPEED_SWITCH_PPU_EXTRA_DOTS else: extra_single
   let ppu_cycles = (cycles shr mem.current_speed) + extra
   if gb.fifo_ppu != nil: fifo_tick(gb.fifo_ppu, gb, ppu_cycles)
   else: gb.ppu.tick(gb, ppu_cycles)
@@ -1492,6 +1497,51 @@ proc mem_tick_stalled(mem: GbMemory; gb: GB; cycles: int) =
       mem.lyc_edge_owed = false
       ppu_handle_stat_interrupt(gb.ppu, gb)
 
+
+const SPEED_SWITCH_STALL_ENDS_ON_IRQ* {.intdefine.} = 1
+  ## **An interrupt arriving DURING the speed-switch stall ends it**, exactly
+  ## as it ends any other HALT. Returns the cycles actually spent.
+  ##
+  ## The stall leaf is a HALT with a countdown -- stop_instr's own chart says
+  ## so, and the sibling leaf (an interrupt already pending when STOP is
+  ## fetched) has always skipped the stall for that reason. What was missing is
+  ## the same rule for an interrupt that becomes ready while the countdown is
+  ## running.
+  ##
+  ## Measured by c-sp's `speed-switch/caution/spsw-interrupts-*`, whose
+  ## `.speed_switch_with_timer_interrupt` starts a 262 KHz timer that "will
+  ## overflow during the speed switch" and then reads DIV, TIMA and IF on the
+  ## far side. Hardware answers **DIV = $10**; a stall that runs to completion
+  ## can only answer $00, because `SPEED_SWITCH_STALL_CPU` is 2^17 and the
+  ## divider is 16 bits (which is why `spsw-div`'s own headline -- "rDIV always
+  ## reads 0 right after speed switching" -- passes either way and cannot see
+  ## this). $10 is 4096 divider counts, which is where that timer overflows
+  ## from zero, plus the interrupt latency: the wake is the IRQ, not the
+  ## countdown. The ROM's `.timer_int{1,2,3}` handlers bracket it to the
+  ## M-cycle from inside the handler (DIV = $0F, $0F after 6 more M-cycles,
+  ## $10 after 7).
+proc mem_stall_until_irq(mem: GbMemory; gb: GB; stall_cycles: int): int =
+  ## The stall, in M-cycle steps, stopping as soon as an interrupt is ready.
+  ## Only the first step carries the once-per-stall work -- the PPU's advance
+  ## across the switch (`SPEED_SWITCH_PPU_EXTRA_DOTS`) and OAM DMA's hand-back
+  ## at the grant (`SPEED_SWITCH_OAM_DMA_HANDBACK_T`) -- because both model the
+  ## switch itself, not per-M-cycle drift.
+  const step = 4
+  # Nothing can wake a stall with every enable bit clear, and the whole stall
+  # is then one call again — which matters, because 2^17 cycles is 32768 steps
+  # and most games switch speed with IE = 0.
+  let irq = gb.interrupts
+  if not (irq.vblank_enabled or irq.lcd_stat_enabled or irq.timer_enabled or
+          irq.serial_enabled or irq.joypad_enabled):
+    mem_tick_stalled(mem, gb, stall_cycles)
+    return stall_cycles
+  var done = 0
+  while done < stall_cycles:
+    let n = min(step, stall_cycles - done)
+    mem_tick_stalled(mem, gb, n, first_chunk = done == 0)
+    done += n
+    if interrupt_ready(gb.interrupts): break
+  done
 
 proc mem_tick_stopped*(mem: GbMemory; gb: GB) =
   ## One step of the emulator while the CPU is in STOP mode (see stop_instr).
@@ -1654,17 +1704,21 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
       let stall_cycles =
         when SPEED_SWITCH_STALL_CPU != 0: SPEED_SWITCH_STALL_CPU
         else: SPEED_SWITCH_STALL_T shl mem.current_speed
+      var spent = stall_cycles
       when SPEED_SWITCH_STALL_RUNS_CPU_CLOCK != 0:
         # The divider runs, so the DIV-APU tap needs no lifting: the frame
         # sequencer is clocked by the same counter every other event is.
-        mem_tick_stalled(mem, gb, stall_cycles)
+        when SPEED_SWITCH_STALL_ENDS_ON_IRQ != 0:
+          spent = mem_stall_until_irq(mem, gb, stall_cycles)
+        else:
+          mem_tick_stalled(mem, gb, stall_cycles)
       else:
         gb.scheduler.clear(etAPUFrameSeq)
         mem_tick_stalled(mem, gb, stall_cycles)
         gb.scheduler.schedule(apu_div_phase(gb.timer, gb), etAPUFrameSeq)
       # The stall is not part of the STOP opcode's own 4 T-cycles: charge it to
       # the instruction so mem_tick_extra does not try to make it up again.
-      mem.cycle_tick_count += stall_cycles
+      mem.cycle_tick_count += spent
     return
 
   # No button, no speed switch: the two STOP-mode leaves. DIV is reset on both.
