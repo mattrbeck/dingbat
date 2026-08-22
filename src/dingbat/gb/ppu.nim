@@ -3100,6 +3100,12 @@ proc ppu_write_machinery*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     ppu_handle_stat_interrupt(ppu, gb)
   of 0xFF55:
     ppu_start_hdma(ppu, gb, val)
+  of 0xFF45:
+    # CGB only, and only reachable at all when CGB_LYC_WRITE_DEFER is on -- the
+    # DMG's LYC byte lands at the top of its M-cycle and never enters the slot.
+    # The STAT edge is `stat_write_pending`'s, taken right after this by
+    # mem_flush_deferred, so nothing here has to raise it.
+    when CGB_LYC_WRITE_DEFER: ppu.lyc = val
   else: discard
 
 proc ppu_defer_machinery_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
@@ -3583,7 +3589,14 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     # own M-cycle. That row is RED on main and green with the byte committed at
     # the top of the M-cycle; deferring it puts it back to red and takes
     # gambatte lycEnable 166 -> 163. Only the STAT edge is held back.
-    ppu.lyc = val
+    #
+    # On CGB the same three ROMs say the opposite -- see CGB_LYC_WRITE_DEFER in
+    # gb.nim, which is the whole write-up.
+    when CGB_LYC_WRITE_DEFER:
+      if gb.cgb_enabled: ppu_defer_machinery_write(ppu, gb, idx, val)
+      else:              ppu.lyc = val
+    else:
+      ppu.lyc = val
     ppu.stat_write_pending = true
     gb.memory.write_deferred = true
   of 0xFF46: discard  # handled by memory DMA

@@ -34,6 +34,12 @@ cc -O2 -std=gnu11 -I"$SAMEBOY" -D_GNU_SOURCE -DGB_VERSION='"1.0.3"' \
    "$SAMEBOY/build/lib/libsameboy.a" \
    -lm -o tools/gbfuzz/sameboy_microtest
 
+echo "== sameboy_wram"
+cc -O2 -std=gnu11 -I"$SAMEBOY" -D_GNU_SOURCE -DGB_VERSION='"1.0.3"' \
+   tools/gbfuzz/sameboy_wram.c \
+   "$SAMEBOY/build/lib/libsameboy.a" \
+   -lm -o tools/gbfuzz/sameboy_wram
+
 echo "== sameboy_ssdump"
 cc -O2 -std=gnu11 -I"$SAMEBOY" -D_GNU_SOURCE -DGB_VERSION='"1.0.3"' \
    tools/gbfuzz/sameboy_ssdump.c \

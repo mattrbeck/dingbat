@@ -253,6 +253,45 @@ const CGB_STAT_ENABLE_LATENCY* {.intdefine.} = 2
   ## (`m1/*_lcdoffset1_*` flips sign across the whole sweep); 2 is the best cell
   ## of a surface that is not yet flat, not the end of the question.
 
+const CGB_LYC_WRITE_DEFER* {.booldefine.} = false
+  ## Whether a CPU write to LYC (`$FF45`) reaches the LY comparator at the
+  ## M-cycle BOUNDARY on CGB, instead of at the top of its own M-cycle the way
+  ## it does on DMG. A one-M-cycle CGB write latency, the same axis as
+  ## `CGB_STAT_ENABLE_LATENCY` above and the `CGB_*_LATENCY` family in
+  ## memory.nim, spelled as the boundary rather than as dots because the ROMs
+  ## that measure it are M-cycle sleds and bracket it no finer.
+  ##
+  ## ## What measures it
+  ##
+  ## wilbertpol `acceptance/gpu/ly_lyc_write`, `ly_lyc_0_write` and
+  ## `ly_lyc_153_write` ship as a `-C` / `-GS` pair each. Both halves are the
+  ## same four-subtest program: sync off an LCD off/on, `EI`, burn N NOPs, write
+  ## LYC on the Nth M-cycle, and count the LYC STAT interrupts the write let
+  ## through (or cancelled). Subtests 1-2 write a NON-matching LYC to cancel a
+  ## match that is about to arrive; 3-4 write a MATCHING one to create it. Each
+  ## pair is one M-cycle apart, so each ROM brackets the write's arrival to the
+  ## M-cycle.
+  ##
+  ## **The `-C` builds' NOP counts are exactly one LESS than the `-GS` builds'
+  ## at every one of the fourteen sleds** (`ly_lyc_write` 98/99/211/212 against
+  ## 99/100/212/213; `ly_lyc_0_write` 98/99/323/324 against 99/100/324/325;
+  ## `ly_lyc_153_write` 96/97/97/98 against 97/98/98/99) and both builds expect
+  ## the same answers. That is the measurement, in the ROM's own source: the
+  ## CGB takes the write one M-cycle later than the DMG, so the author had to
+  ## move the write one M-cycle earlier to land it on the same edge.
+  ##
+  ## Read out with `tools/gbppu/wilbergpu.py` (the ROMs' raw per-subtest bytes
+  ## sit in `$C014..` before the print routine packs them) and cross-checked
+  ## against SameBoy with `tools/gbfuzz/sameboy_wram`. SameBoy answers all three
+  ## `-C` ROMs' interrupt-count slots with the ROM's own expected values on
+  ## every CGB revision it models, 0 through E and AGB; dingbat answered the
+  ## DMG's grid on both devices, i.e. it was right on `-GS` and one M-cycle
+  ## early on `-C`.
+  ##
+  ## The DMG half is NOT this: the same three ROMs' `-GS` builds are green with
+  ## the byte at the top of its M-cycle and go red if it is deferred there too,
+  ## which is what the note at the `$FF45` write site records.
+
 const STAT_ENABLE_EARLY* = STAT_ENABLE_LATENCY < 4 or CGB_STAT_ENABLE_LATENCY < 4
   ## Whether either device's enable field lands before the M-cycle boundary,
   ## i.e. whether any of the machinery above needs to exist. At `4`/`4` the
