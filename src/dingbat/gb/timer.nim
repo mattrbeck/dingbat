@@ -114,6 +114,17 @@ const SPEED_SWITCH_IRQ_LEAF_HOLD_T* {.intdefine.} = 8
   ## no-op here, because every quantity these ROMs read is counted in CPU
   ## M-cycles between the reset and the read, and frozen time adds none.
   ##
+  ## **It costs 0.34% of the GB core**, and that is the whole reason the
+  ## compile-out exists. `timer_tick`'s fast-path guard is on the hottest path
+  ## in the emulator (~16% of a CGB profile) and this adds one load and one
+  ## test to it: measured with `tools/gbgate/build.sh HEAD HEAD` +
+  ## `tools/gbppu/counters.sh` on Pokemon Crystal, 2400 frames, identical
+  ## `cycles=` on both arms, 24,739,466,028 retired instructions at
+  ## `-d:SPEED_SWITCH_IRQ_LEAF_HOLD_T=0` against 24,822,560,287 shipping.
+  ## Folding `hold_t` into `countdown`'s sign to get the test back for free was
+  ## considered and rejected: `countdown` is serialized and a $FF05 write
+  ## clears it, so the hold would inherit both.
+  ##
   ## This is the leaf where an interrupt is ALREADY pending when STOP is
   ## fetched, so the switch's halt never starts. c-sp's own
   ## `speed-switch/caution/WARNING.md` is the mechanism: "The roms in this
