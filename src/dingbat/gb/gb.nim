@@ -331,15 +331,20 @@ const CGB_LYC_WRITE_DEFER* {.booldefine.} = true
   ## boundary spelling is a whole M-cycle and those rows are asking whether the
   ## real quantity is 4 dots or 2. They are the instrument for that question and
   ## it is left open.
-const CGB_LYC_EDGE_DEFER* {.booldefine.} = false
+const CGB_LYC_EDGE_DEFER* {.booldefine.} = true
   ## The SECOND stage of `CGB_LYC_WRITE_DEFER`: the CGB LYC write's STAT EDGE
   ## taken at the boundary of the M-cycle AFTER the one its byte lands on,
-  ## rather than at the same boundary as the byte. **It is CORRECT, it is
-  ## MEASURED, and it ships OFF on its cost.** The whole of the evidence is at
-  ## `CGB_LYC_WRITE_DEFER` above; this is only the part that could not be
-  ## spelled cheaply.
+  ## rather than at the same boundary as the byte. The whole of the evidence
+  ## for the behaviour is at `CGB_LYC_WRITE_DEFER` above; this constant is only
+  ## the part that could not, for a while, be spelled cheaply.
   ##
-  ## ## What it buys, re-measured on `4a3c2e0b` + this branch (1139 / 4609)
+  ## **It shipped OFF for one round on its cost and it is ON now**, unchanged
+  ## in behaviour, because the edge turned out not to need a poll at all: it is
+  ## a one-shot timer, and dingbat has a scheduler. See "What it costs" below --
+  ## the cost went from +1.08% of all retired instructions to +0.16% on the
+  ## same benchmark and to nothing measurable on either real game.
+  ##
+  ## ## What it buys, re-measured on `b88d143e` (1139 / 4609)
   ##
   ##   runner   1139 -> 1145      gambatte 4609 -> 4611
   ##   shootout 261 PASS / 0 FAIL / 3 INFO
@@ -357,23 +362,59 @@ const CGB_LYC_EDGE_DEFER* {.booldefine.} = false
   ##       m0enable/{lycdisable_ff45_scx1_1, lycdisable_ff45_scx2_1},
   ##       m2enable/lyc1_m2irq_late_lyc255_1
   ##
-  ## ## What it costs, and why that is not negotiable at this spelling
+  ## ## What it costs
   ##
-  ## **+1.08% of ALL retired instructions on cgb-acid-hell** (25.680e9 against
-  ## 25.405e9, `cycles=` identical at 168537600, DINGBAT_BENCH_COUNTERS). Not
-  ## the work -- the branch is taken a few times a frame. It is the branch: the
-  ## edge needs a firing point that exists on EVERY M-cycle, dingbat has exactly
-  ## one (`mem_tick_ppu`), and that proc sits on clang's inline threshold for
-  ## the ~160 opcode bodies that reach it. Same cliff as `docs/gb_oam_dma_cost.md`
-  ## and the reason `ly_advance_open` is spelled as the enable bit.
+  ## Retired instructions, `DINGBAT_BENCH_COUNTERS=1 DINGBAT_NO_WAITLOOP=1`,
+  ## 2400 frames after 300 warmup, min of 4, `cycles=` identical in every arm
+  ## (168,537,600 / 168,515,104). Against the same build with the constant off:
   ##
-  ## Three cheaper spellings were built and measured, and all three are worse:
+  ##   |                | scheduler (ships) | the poll it replaced |
+  ##   |----------------|-------------------|----------------------|
+  ##   | cgb-acid-hell  | **+0.159%**       | +1.083%              |
+  ##   | Pokemon Crystal| **-0.0005%**      | +1.164%              |
+  ##   | Pokemon Blue   | **+0.005%**       | +1.178%              |
+  ##
+  ## Read the DMG column first, because it is the whole argument. Pokemon Blue
+  ## cannot reach one line of this constant -- it is CGB-only -- and the poll
+  ## still charged it **+1.18%**. That is what a per-M-cycle poll IS: a tax on
+  ## every machine, forever, for a rule that fires on one register on one
+  ## device. The scheduler charges the LYC WRITE and nothing else, so the two
+  ## games pay nothing and cgb-acid-hell, which rewrites LYC on every scanline
+  ## (**366,114 edges in 2400 frames**, against **1** for Pokemon Crystal),
+  ## pays 110 instructions per write for the book-and-dispatch.
+  ##
+  ## ## Why the poll was expensive, since the number is not obvious
+  ##
+  ## The branch is taken ~150 times a frame; the cost was never the work. Both
+  ## halves of it are visible by diffing `mem_tick_components` between the two
+  ## builds:
+  ##
+  ##   * the test itself (`ldrb` / `cmp` / `b.eq` on `mem.lyc_edge_owed`), and
+  ##   * **the tail call it destroys**. Without it the proc's last act is
+  ##     `b _fifo_tick` -- registers already restored, no return to make. A
+  ##     test after the tick forces `bl` plus a full epilogue on every M-cycle.
+  ##
+  ## Together ~7 instructions per M-cycle, which is exactly the measured delta
+  ## (302M over 168.5M emulated cycles = 1.8/cycle = 7.2/M-cycle). Isolating it
+  ## confirms the same thing from the other side: a build that keeps the field,
+  ## the deferral and the arming and compiles ONLY the poll out is **-0.105%**
+  ## against the constant-off build, i.e. inside layout noise.
+  ##
+  ## `{.noinline.}` on the consumer -- the fix that works on this kind of cliff,
+  ## see `mem_land_hdma_due` next to it -- was tried FIRST and bought **zero**
+  ## (25.6803e9 against 25.6797e9). `ppu_handle_stat_interrupt` was not being
+  ## inlined there to begin with. This one was not the inline cliff of
+  ## `docs/gb_oam_dma_cost.md` at all: the total code-size delta between the two
+  ## builds is 1,048 bytes, of which the ~160 opcode bodies account for 280.
+  ##
+  ## ## Spellings that were built and measured, and are worse
   ##
   ##   * the same test at the top of `fifo_tick` (a 2-count, since that runs
-  ##     BEFORE the dots): **+2.87%**, and 3 gambatte rows worse than this one
+  ##     BEFORE the dots): **+2.87%**, and 3 gambatte rows worse than the poll
   ##     because `mem_tick_ppu_latched` splits an M-cycle into several
   ##     `fifo_tick` calls and the counter loses a step.
   ##   * the flag on `GbPpu` instead of `GbMemory`: +1.25%.
+  ##   * `{.noinline.}` on the consumer, above: +0.00%, i.e. no help at all.
   ##   * no poll at all -- drop the pending edge when the LY advance falls
   ##     inside the M-cycle it would be carried across, and let the advance's
   ##     own STAT evaluation be the edge. Free, and WRONG: it fixes sled 3 on
@@ -383,10 +424,55 @@ const CGB_LYC_EDGE_DEFER* {.booldefine.} = false
   ##     `old_stat_flag` honest) changes none of those three, so the advance's
   ##     evaluation is NOT the same event as the write's own edge.
   ##
-  ## One more thing to settle before it could ship even at that price:
-  ## `GbMemory.lyc_edge_owed` CAN be live across an instruction boundary, unlike
-  ## `write_deferred` and `stat_write_pending` next to it, so it needs a GB
-  ## payload rev -- see the batched-bump note in docs.
+  ## ## The two are the SAME MODEL, and that is measured, not argued
+  ##
+  ## Built both ways and run the whole tree: `tests/results.md` (1223 rows) and
+  ## `tests/results_gambatte.md` (4996 rows) are **byte-identical** between the
+  ## poll and the scheduler apart from their timestamp lines. `CGB_LYC_EDGE_POLL`
+  ## keeps the poll compilable so that comparison can be re-run.
+  ##
+  ## ## Save state
+  ##
+  ## The pending edge lives in the scheduler's own event array, which was
+  ## already serialized -- so **no GB payload revision is needed**, which the
+  ## `GbMemory.lyc_edge_owed` spelling did need (it CAN be live across an
+  ## instruction boundary, unlike `write_deferred` and `stat_write_pending`
+  ## next to it). `etGbLycEdge` is appended at ordinal 22 and pinned in
+  ## `tests/savestate_compat_test.nim`; the usual append consequence applies,
+  ## that a state carrying one is rejected by an older build. Verified with
+  ## `nimble test_savestate_compat`, with `--mode stateroundtrip` on
+  ## cgb-acid-hell at eight consecutive warmup frames, and with the rewind
+  ## ring's byte-exact re-serialize on the same ROM at one snapshot per frame
+  ## (600 snapshots, 0 mismatches).
+const CGB_LYC_EDGE_POLL* {.booldefine.} = false
+  ## Which SPELLING of the deferral above to compile: the per-M-cycle poll in
+  ## `mem_tick_ppu` (true) or the scheduler one-shot (false, shipping). Only
+  ## meaningful with `CGB_LYC_EDGE_DEFER` on.
+  ##
+  ## Kept compilable rather than deleted for one reason: it is the evidence
+  ## that the cheap spelling is the SAME MODEL. The two builds' `results.md`
+  ## and `results_gambatte.md` are byte-identical, and that check is worth
+  ## being able to re-run if either the scheduler's dispatch point or
+  ## `mem_tick_ppu` moves. The poll also brings `GbMemory.lyc_edge_owed` and
+  ## its `noinline` consumer back with it; neither exists in a shipping build.
+const CGB_LYC_EDGE_SCHED_T* {.intdefine.} = 8
+  ## The one-shot's delay, in scheduler cycles (CPU T-cycles; 4 to an M-cycle
+  ## at BOTH speeds, which is why this is `schedule` and not `schedule_gb` --
+  ## the quantity is M-cycles, not real time, exactly as `etIME`'s is).
+  ##
+  ## 8, not 4, and the arithmetic is worth writing down. The event is booked
+  ## from `mem_flush_deferred`, which runs at the END of the write's M-cycle N,
+  ## by which time `mem_tick_bus` has already advanced the scheduler to the
+  ## start of N+1. The scheduler dispatches from `mem_tick_bus`, i.e. at the
+  ## TOP of an M-cycle, before its PPU dots -- so a delay of 4 fires at the top
+  ## of N+1, before N+1's dots, and a delay of 8 fires at the top of N+2, which
+  ## is the same PPU instant the poll took at the BOTTOM of N+1's dots.
+  ##
+  ## Measured, because "one M-cycle" reads like 4: **at 4 the constant buys
+  ## nothing.** Runner 1139 (none of the six wilbertpol arms flips) and
+  ## gambatte 4610 -- +1 row, `lycEnable/lyc_ff45_trigger_delay_2`, out of the
+  ## +6/-4 the real instant moves. Four dots early is a different model, not a
+  ## rounding of this one.
 const CGB_LYC_WRITE_DEFER_DS* {.booldefine.} = false
   ## ...and whether the deferral above also applies in DOUBLE SPEED. It does
   ## NOT, and this is the honest state of that: the three ROMs above are all
@@ -5759,16 +5845,18 @@ type
     # across an instruction boundary, so it is not serialized.
     deferred_reg*:         uint16
     deferred_val*:         uint8
-    when CGB_LYC_EDGE_DEFER:
+    when CGB_LYC_EDGE_DEFER and CGB_LYC_EDGE_POLL:
       # A CGB LYC write's STAT edge, owed one M-cycle boundary past the one its
-      # byte landed on (CGB_LYC_EDGE_DEFER). On GbMemory rather than on GbPpu
-      # because `mem_tick_ppu` -- the one hook that runs on EVERY M-cycle, and
-      # so the only place this edge can be taken -- already has `mem` in hand
-      # and is on clang's inline threshold; reaching through `gb.ppu` for it
-      # instead measured 0.15% worse. Unlike `write_deferred` next door this one
-      # CAN be live across an instruction boundary (the write may be an
-      # instruction's last M-cycle), so it would have to be serialized before it
-      # could ship.
+      # byte landed on -- the POLL spelling of CGB_LYC_EDGE_DEFER, which does
+      # not ship and exists only so the two can be diffed row for row. On
+      # GbMemory rather than on GbPpu because `mem_tick_ppu` -- the hook that
+      # runs on EVERY M-cycle, and so the only place a POLLED edge can be
+      # taken -- already has `mem` in hand and is on clang's inline threshold;
+      # reaching through `gb.ppu` for it instead measured 0.15% worse. Unlike
+      # `write_deferred` next door this one CAN be live across an instruction
+      # boundary (the write may be an instruction's last M-cycle), so it would
+      # have needed a GB payload rev to ship. The shipping spelling parks the
+      # edge in the scheduler's event array, which is already serialized.
       lyc_edge_owed*:      bool
     when CGB_WRITE_LATENCY_ANY:
       # The other direction: a CGB pipeline-register store that lands PART WAY
@@ -7047,6 +7135,13 @@ proc gb_dispatch(gb: GB): proc(kind: EventType) {.closure.} =
       elif gb.cartridge of Tama5: Tama5(gb.cartridge).tama5_rtc_tick()
     of etCameraDone:
       if gb.cartridge of PocketCamera: PocketCamera(gb.cartridge).camera_done()
+    of etGbLycEdge:
+      # A CGB LYC write's STAT edge, owed one M-cycle past the boundary its
+      # byte landed on. Booked as a one-shot timer at the write; see
+      # CGB_LYC_EDGE_DEFER, and CGB_LYC_EDGE_POLL for the spelling this
+      # replaced and what it cost.
+      when CGB_LYC_EDGE_DEFER and not CGB_LYC_EDGE_POLL:
+        ppu_handle_stat_interrupt(gb.ppu, gb)
     else: discard
 
 proc post_init*(gb: GB) =

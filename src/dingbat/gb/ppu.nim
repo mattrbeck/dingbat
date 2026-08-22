@@ -3166,10 +3166,15 @@ proc ppu_write_machinery*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     # DMG's LYC byte lands at the top of its M-cycle and never enters the slot.
     # The STAT edge is `stat_write_pending`'s, taken right after this by
     # mem_flush_deferred -- or, with CGB_LYC_EDGE_DEFER, one M-cycle further on
-    # again, which is what the flag armed here is for.
+    # again, which is what the one-shot booked here is for. A scheduler event
+    # and not a flag polled per M-cycle: the poll taxed every machine, DMG
+    # included, for a rule only a CGB can reach. See CGB_LYC_EDGE_SCHED_T for
+    # why the delay is 8 and CGB_LYC_EDGE_DEFER for what the poll cost.
     when CGB_LYC_WRITE_DEFER:
       ppu.lyc = val
-      when CGB_LYC_EDGE_DEFER: gb.memory.lyc_edge_owed = true
+      when CGB_LYC_EDGE_DEFER:
+        when CGB_LYC_EDGE_POLL: gb.memory.lyc_edge_owed = true
+        else: gb.scheduler.schedule(CGB_LYC_EDGE_SCHED_T, etGbLycEdge)
   else: discard
 
 proc ppu_defer_machinery_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =

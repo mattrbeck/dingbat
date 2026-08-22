@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-21 20:01:56 · commit 9cd3a320 · game-boy-test-roms v7.0*
+*Generated: 2026-08-21 21:27:29 · commit b2a3019e · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1223
-- **Pass:** 1139
-- **Fail:** 84
+- **Pass:** 1145
+- **Fail:** 78
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -28,7 +28,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - SameSuite | 8 | 8 |
 | Game Boy - SameSuite APU | 70 | 70 |
 | Game Boy - Shootout ROMs | 13 | 13 |
-| Game Boy - Mooneye (wilbertpol) | 174 | 184 |
+| Game Boy - Mooneye (wilbertpol) | 180 | 184 |
 | Game Boy - gambatte | 19 | 48 |
 
 ## Game Boy - Blargg (28/28)
@@ -201,7 +201,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 13 tests passed.**
 
-## Game Boy - Mooneye (wilbertpol) (174/184)
+## Game Boy - Mooneye (wilbertpol) (180/184)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -288,8 +288,8 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_0-GS@mgb | DMG mgb | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_0-GS@sgb | SGB sgb | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_0-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0_write-C@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0_write-C@agb | CGB agb | 👀 Mooneye: FAIL |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0_write-C@cgbc | CGB cgbc | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_0_write-C@agb | CGB agb | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_0_write-GS@dmgABC | DMG dmgABC | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_0_write-GS@mgb | DMG mgb | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_0_write-GS@sgb | SGB sgb | 👌 |
@@ -306,14 +306,14 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-GS@mgb | DMG mgb | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-GS@sgb | SGB sgb | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_153-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-C@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-C@agb | CGB agb | 👀 Mooneye: FAIL |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-C@cgbc | CGB cgbc | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-C@agb | CGB agb | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-GS@dmgABC | DMG dmgABC | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-GS@mgb | DMG mgb | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-GS@sgb | SGB sgb | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_153_write-GS@sgb2 | SGB sgb2 | 👌 |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_write-C@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
-| mooneye-wilbertpol/acceptance/gpu/ly_lyc_write-C@agb | CGB agb | 👀 Mooneye: FAIL |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_write-C@cgbc | CGB cgbc | 👌 |
+| mooneye-wilbertpol/acceptance/gpu/ly_lyc_write-C@agb | CGB agb | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_write-GS@dmgABC | DMG dmgABC | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_write-GS@mgb | DMG mgb | 👌 |
 | mooneye-wilbertpol/acceptance/gpu/ly_lyc_write-GS@sgb | SGB sgb | 👌 |
@@ -410,7 +410,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/ly0 | per-ROM | 👀 88/96 passed |
 | gambatte/lyc0int_m0irq | per-ROM | 👌 6/6 passed |
 | gambatte/lyc153int_m2irq | per-ROM | 👀 14/16 passed |
-| gambatte/lycEnable | per-ROM | 👀 189/225 passed |
+| gambatte/lycEnable | per-ROM | 👀 192/225 passed |
 | gambatte/lycint_ly | per-ROM | 👌 6/6 passed |
 | gambatte/lycint_lycflag | per-ROM | 👀 11/12 passed |
 | gambatte/lycint_lycirq | per-ROM | 👌 4/4 passed |
@@ -422,7 +422,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/m0int_m0stat | per-ROM | 👀 11/12 passed |
 | gambatte/m0int_m3stat | per-ROM | 👌 6/6 passed |
 | gambatte/m1 | per-ROM | 👀 143/170 passed |
-| gambatte/m2enable | per-ROM | 👀 101/120 passed |
+| gambatte/m2enable | per-ROM | 👀 100/120 passed |
 | gambatte/m2int_m0irq | per-ROM | 👀 67/72 passed |
 | gambatte/m2int_m0stat | per-ROM | 👌 6/6 passed |
 | gambatte/m2int_m2irq | per-ROM | 👌 18/18 passed |

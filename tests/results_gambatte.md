@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-21 20:01:56*
+*Generated: 2026-08-21 21:27:29*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4609/4996 passed.**
+**4611/4996 passed.**
 
 ## bgen
 
@@ -246,9 +246,9 @@ All 6 tests passed.
 | lyc153int_m2irq/lyc153int_m2irq_late_retrigger_2_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
 | lyc153int_m2irq/lyc153int_m2irq_late_retrigger_2_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 
-## lycEnable (189/225 passed)
+## lycEnable (192/225 passed)
 
-189/225 tests passed, 36 failed:
+192/225 tests passed, 33 failed:
 
 | Test | Result |
 |------|--------|
@@ -265,14 +265,13 @@ All 6 tests passed.
 | lycEnable/late_ff41_enable_after_m2int_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | lycEnable/late_ff41_enable_ds_1_cgb04c_out3 [cgb] | got 1, expected 3 |
 | lycEnable/late_ff41_enable_lcdoffset1_1_cgb04c_out2 [cgb] | got 0, expected 2 |
-| lycEnable/late_ff45_enable_2_dmg08_out3_cgb04c_out1 [cgb] | got 3, expected 1 |
 | lycEnable/late_ff45_enable_ds_2_cgb04c_out1 [cgb] | got 3, expected 1 |
 | lycEnable/late_ff45_enable_ds_lcdoffset1_2_cgb04c_out0 [cgb] | got 2, expected 0 |
+| lycEnable/late_ff45_enable_lcdoffset1_1_cgb04c_out2 [cgb] | got 0, expected 2 |
 | lycEnable/lcdoff_lycirqen_1_dmg08_cgb04c_outE2 [dmg] | got E0, expected E2 |
 | lycEnable/lcdoff_lycirqen_1_dmg08_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lcdoff_lycirqen_4_dmg08_outE2_cgb04c_outE0 [dmg] | got E0, expected E2 |
 | lycEnable/lyc0_ff41_disable_ds_1_cgb04c_outE0 [cgb] | got E2, expected E0 |
-| lycEnable/lyc0_late_ff45_enable_2_dmg08_outE2_cgb04c_outE0 [cgb] | got E2, expected E0 |
 | lycEnable/lyc0_m1disable_2_dmg08_outE2_cgb04c_outE0 [dmg] | got E0, expected E2 |
 | lycEnable/lyc0_m1disable_ds_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lyc153_late_enable_m1disable_2_dmg08_outE2_cgb04c_outE0 [dmg] | got E0, expected E2 |
@@ -280,12 +279,10 @@ All 6 tests passed.
 | lycEnable/lyc153_late_ff41_enable_ds_lcdoffset1_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lyc153_late_ff41_enable_lcdoffset1_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lyc153_late_ff45_enable_2_dmg08_outE2_cgb04c_outE0 [cgb] | got E2, expected E0 |
-| lycEnable/lyc153_late_ff45_enable_4_dmg08_outE2_cgb04c_outE0 [cgb] | got E2, expected E0 |
 | lycEnable/lyc153_late_ff45_enable_ds_2_cgb04c_outE0 [cgb] | got E2, expected E0 |
 | lycEnable/lyc153_late_ff45_enable_lcdoffset1_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lyc153_late_m1disable_2_dmg08_outE2_cgb04c_outE0 [dmg] | got E0, expected E2 |
 | lycEnable/lyc153_m1disable_ds_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
-| lycEnable/lyc_ff45_trigger_delay_2_dmg08_out0_cgb04c_out2 [cgb] | got 0, expected 2 |
 | lycEnable/lycwirq_trigger_ly00_stat50_ds_lcdoffset1_2_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lycwirq_trigger_ly00_stat50_lcdoffset1_1_cgb04c_outE0 [cgb] | got E2, expected E0 |
 
@@ -335,12 +332,12 @@ All 8 tests passed.
 | m0enable/lycdisable_ff41_scx2_1_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | m0enable/lycdisable_ff41_scx2_1_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m0enable/lycdisable_ff41_scx3_2_dmg08_out2_cgb04c_out0 [dmg] | got 0, expected 2 |
-| m0enable/lycdisable_ff45_2_dmg08_out2_cgb04c_out0 [cgb] | got 2, expected 0 |
 | m0enable/lycdisable_ff45_3_dmg08_out2_cgb04c_out0 [dmg] | got 0, expected 2 |
+| m0enable/lycdisable_ff45_scx1_1_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m0enable/lycdisable_ff45_scx1_2_dmg08_out2_cgb04c_out0 [dmg] | got 0, expected 2 |
 | m0enable/lycdisable_ff45_scx1_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
+| m0enable/lycdisable_ff45_scx2_1_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m0enable/lycdisable_ff45_scx2_2_dmg08_out2_cgb04c_out0 [dmg] | got 0, expected 2 |
-| m0enable/lycdisable_ff45_scx3_2_dmg08_out2_cgb04c_out0 [cgb] | got 2, expected 0 |
 
 ## m0int_m0irq
 
@@ -392,9 +389,9 @@ All 6 tests passed.
 | m1/m2m1irq_ifw_2_dmg08_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m1/m2m1irq_ifw_ds_2_cgb04c_out1 [cgb] | got 3, expected 1 |
 
-## m2enable (101/120 passed)
+## m2enable (100/120 passed)
 
-101/120 tests passed, 19 failed:
+100/120 tests passed, 20 failed:
 
 | Test | Result |
 |------|--------|
@@ -410,6 +407,7 @@ All 6 tests passed.
 | m2enable/lyc0_late_m2enable_lycdisable_2_dmg08_out2_cgb04c_out0 [cgb] | got 2, expected 0 |
 | m2enable/lyc1_late_m2enable_lycdisable_1_dmg08_out0_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m2enable/lyc1_late_m2enable_lycdisable_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
+| m2enable/lyc1_m2irq_late_lyc255_1_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m2enable/lyc1_m2irq_late_lyc255_2_dmg08_out2_cgb04c_out0 [dmg] | got 0, expected 2 |
 | m2enable/lyc1_m2irq_late_lycdisable_1_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | m2enable/lyc1_m2irq_late_lycdisable_1_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
