@@ -2833,9 +2833,10 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
         # A halted CPU has no opcode fetch to hand the bus over on, so the debt
         # is paid at the WAKE (cpu.nim) and the deadline is parked out of reach
         # -- a stale one from the previous transfer must not take this block.
-        # `high(int32)` is also the flag cpu.tick's two RUNNING grant points
-        # read as "this block is waiting for a wake that has already happened":
-        # see the un-parking there.
+        # `high(int32)` is also the flag `hdma_grant`'s two RUNNING call sites
+        # read as "this block is waiting for a wake that has already happened"
+        # (see the un-parking there), and what keeps cpu_halt's own hand-over
+        # from taking a block that is not its to take.
         #
         # Giving a halted CPU the same dot deadline as a running one instead
         # was measured and REFUSED: gambatte 4582 against 4590, the whole

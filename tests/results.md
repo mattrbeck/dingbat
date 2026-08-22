@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-08-21 16:29:21 · commit ead1c4d3 · game-boy-test-roms v7.0*
+*Generated: 2026-08-21 17:41:46 · commit 6003c053 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1223
-- **Pass:** 1123
-- **Fail:** 100
+- **Pass:** 1124
+- **Fail:** 99
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -21,7 +21,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | GBA - FuzzARM | 5 | 5 |
 | Game Boy - Acid2 | 2 | 2 |
 | Game Boy - MagenTests | 7 | 7 |
-| Game Boy - Mealybug Tearoom | 73 | 74 |
+| Game Boy - Mealybug Tearoom | 74 | 74 |
 | Game Boy - GBMicrotest | 480 | 480 |
 | Game Boy - AGE | 45 | 89 |
 | Game Boy - Screenshot suites | 13 | 13 |
@@ -83,84 +83,9 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 7 tests passed.**
 
-## Game Boy - Mealybug Tearoom (73/74)
+## Game Boy - Mealybug Tearoom (74/74)
 
-| Test | Device | Result |
-|------|--------|--------|
-| mealybug/m2_win_en_toggle | DMG | 👌 |
-| mealybug-cgb/m2_win_en_toggle | CGB cgbc | 👌 |
-| mealybug-cgbd/m2_win_en_toggle | CGB cgbd | 👌 |
-| mealybug/m3_bgp_change | DMG | 👌 |
-| mealybug-cgb/m3_bgp_change | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_bgp_change | CGB cgbd | 👌 |
-| mealybug/m3_bgp_change_sprites | DMG | 👌 |
-| mealybug-cgb/m3_bgp_change_sprites | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_bgp_change_sprites | CGB cgbd | 👌 |
-| mealybug/m3_lcdc_bg_en_change | DMG | 👌 |
-| mealybug-cgb/m3_lcdc_bg_en_change | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_lcdc_bg_en_change | CGB cgbd | 👌 |
-| mealybug-cgb/m3_lcdc_bg_en_change2 | CGB cgbc | 👌 |
-| mealybug/m3_lcdc_bg_map_change | DMG | 👌 |
-| mealybug-cgb/m3_lcdc_bg_map_change | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_lcdc_bg_map_change | CGB cgbd | 👌 |
-| mealybug-cgb/m3_lcdc_bg_map_change2 | CGB cgbc | 👌 |
-| mealybug/m3_lcdc_obj_en_change | DMG | 👌 |
-| mealybug-cgb/m3_lcdc_obj_en_change | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_lcdc_obj_en_change | CGB cgbd | 👌 |
-| mealybug/m3_lcdc_obj_en_change_variant | DMG | 👌 |
-| mealybug-cgb/m3_lcdc_obj_en_change_variant | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_lcdc_obj_en_change_variant | CGB cgbd | 👌 |
-| mealybug/m3_lcdc_obj_size_change | DMG | 👌 |
-| mealybug-cgb/m3_lcdc_obj_size_change | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_lcdc_obj_size_change | CGB cgbd | 👌 |
-| mealybug/m3_lcdc_obj_size_change_scx | DMG | 👌 |
-| mealybug-cgb/m3_lcdc_obj_size_change_scx | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_lcdc_obj_size_change_scx | CGB cgbd | 👌 |
-| mealybug/m3_lcdc_tile_sel_change | DMG | 👌 |
-| mealybug-cgb/m3_lcdc_tile_sel_change | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_lcdc_tile_sel_change | CGB cgbd | 👌 |
-| mealybug-cgb/m3_lcdc_tile_sel_change2 | CGB cgbc | 👌 |
-| mealybug/m3_lcdc_tile_sel_win_change | DMG | 👌 |
-| mealybug-cgb/m3_lcdc_tile_sel_win_change | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_lcdc_tile_sel_win_change | CGB cgbd | 👌 |
-| mealybug-cgb/m3_lcdc_tile_sel_win_change2 | CGB cgbc | 👌 |
-| mealybug/m3_lcdc_win_en_change_multiple | DMG | 👌 |
-| mealybug-cgb/m3_lcdc_win_en_change_multiple | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_lcdc_win_en_change_multiple | CGB cgbd | 👌 |
-| mealybug/m3_lcdc_win_en_change_multiple_wx | DMG | 👌 |
-| mealybug/m3_lcdc_win_map_change | DMG | 👌 |
-| mealybug-cgb/m3_lcdc_win_map_change | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_lcdc_win_map_change | CGB cgbd | 👌 |
-| mealybug-cgb/m3_lcdc_win_map_change2 | CGB cgbc | 👌 |
-| mealybug/m3_obp0_change | DMG | 👌 |
-| mealybug-cgb/m3_obp0_change | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_obp0_change | CGB cgbd | 👌 |
-| mealybug/m3_scx_high_5_bits | DMG | 👌 |
-| mealybug-cgb/m3_scx_high_5_bits | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_scx_high_5_bits | CGB cgbd | 👌 |
-| mealybug-cgb/m3_scx_high_5_bits_change2 | CGB cgbc | 👌 |
-| mealybug/m3_scx_low_3_bits | DMG | 👌 |
-| mealybug-cgb/m3_scx_low_3_bits | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_scx_low_3_bits | CGB cgbd | 👌 |
-| mealybug/m3_scy_change | DMG | 👌 |
-| mealybug-cgb/m3_scy_change | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_scy_change | CGB cgbd | 👌 |
-| mealybug-cgb/m3_scy_change2 | CGB cgbc | 👌 |
-| mealybug/m3_window_timing | DMG | 👌 |
-| mealybug-cgb/m3_window_timing | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_window_timing | CGB cgbd | 👌 |
-| mealybug/m3_window_timing_wx_0 | DMG | 👌 |
-| mealybug-cgb/m3_window_timing_wx_0 | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_window_timing_wx_0 | CGB cgbd | 👌 |
-| mealybug/m3_wx_4_change | DMG | 👌 |
-| mealybug/m3_wx_4_change_sprites | DMG | 👌 |
-| mealybug-cgb/m3_wx_4_change_sprites | CGB cgbc | 👌 |
-| mealybug-cgbd/m3_wx_4_change_sprites | CGB cgbd | 👌 |
-| mealybug/m3_wx_5_change | DMG | 👌 |
-| mealybug/m3_wx_6_change | DMG | 👌 |
-| mealybug/dma/hdma_during_halt-C | CGB cgbc | 👌 |
-| mealybug/dma/hdma_timing-C | CGB cgbc | 👀 Mooneye: FAIL |
-| mealybug/mbc/mbc3_rtc | cart | 👌 |
+**All 74 tests passed.**
 
 ## Game Boy - GBMicrotest (480/480)
 
@@ -475,7 +400,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/cgbpal_m3 | per-ROM | 👀 33/44 passed |
 | gambatte/display_startstate | per-ROM | 👀 10/14 passed |
 | gambatte/div | per-ROM | 👌 8/8 passed |
-| gambatte/dma | per-ROM | 👀 186/229 passed |
+| gambatte/dma | per-ROM | 👀 190/229 passed |
 | gambatte/dmgpalette_during_m3 | per-ROM | 👀 9/17 passed |
 | gambatte/enable_display | per-ROM | 👀 158/184 passed |
 | gambatte/halt | per-ROM | 👀 141/158 passed |

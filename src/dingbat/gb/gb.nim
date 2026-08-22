@@ -1540,7 +1540,19 @@ const HDMA_STEAL_LEAD_DOTS* {.intdefine.} = -1
   ##   n           0   1   2   3   4   5   6   8
   ##   wrong/48    5   4   3   2   0   2   3   6
   ##
-  ## ---- The contradiction, stated exactly, because it is the deliverable ----
+  ## ---- RESOLVED 2026-08-21: it was a parameterisation error ---------------
+  ##
+  ## **Everything from here to the end of this note is superseded.** Both
+  ## derivations above measure the landing by the dot the CPU's READ M-cycle
+  ## starts on, and the two suites read with instructions of different LENGTH
+  ## -- gambatte's `LD A,[HL]` reads on M-cycle 2, mealybug's
+  ## `LDH A,[rHDMA5]` on M-cycle 3. Re-derived against the OPCODE FETCH, all
+  ## eight witnesses agree at `edge + 4`, uniquely and two-sidedly, at both
+  ## speeds. See HDMA_GRANT_FETCH_DOTS, which ships that model; the "4 PPU
+  ## dots at both speeds" below is one M-cycle of LDH and nothing else, and
+  ## the HALT lead the last paragraph hands on is not involved.
+  ##
+  ## ---- The contradiction, as it was stated when it was one -----------------
   ##
   ## **gambatte pins n = 0, mealybug pins n = 4, and the gap is 4 PPU DOTS at
   ## BOTH speeds** -- one M-cycle at normal speed and two in double. It is
@@ -1678,14 +1690,46 @@ const HDMA_STEAL_LEAD_DOTS* {.intdefine.} = -1
   ## the buffer directly and prints `verdict=F`), and the two DIV-duration
   ## groups are exact at every setting of this constant.
 
-const HDMA_GRANT_FETCH_DOTS* {.intdefine.} = -1
+const HDMA_GRANT_FETCH_DOTS* {.intdefine.} = 4
   ## Dots after the mode 3 -> 0 edge at which an owed HBlank block raises its
-  ## bus request, when the CPU hands the bus over at the END OF ITS NEXT OPCODE
-  ## FETCH. `-1` = OFF; `0` is a real setting.
+  ## bus request. The CPU hands the bus over at the END OF ITS NEXT OPCODE
+  ## FETCH; the other two hand-over points are the instruction BOUNDARY
+  ## (HDMA_GRANT_BOUNDARY_DOTS, one dot earlier in request terms) and the HALT
+  ## instruction, and there is none on an instruction's operand or data
+  ## M-cycles. **`4` ships since 2026-08-21**; `-1` = OFF is the control build
+  ## and reproduces the previous tree row for row (runner 1123 / gambatte 4588,
+  ## the same 408 failing rows); `0` is a real setting, not a synonym for off.
   ##
   ## This is the third spelling of the hand-over and the only one that fits
   ## every witness at once. The other two are HDMA_STEAL_DELAY_M (instruction
-  ## BOUNDARIES, which ships) and HDMA_STEAL_LEAD_DOTS (any M-cycle boundary).
+  ## boundaries only, the incumbent, compiled out while this is on) and
+  ## HDMA_STEAL_LEAD_DOTS (any M-cycle boundary, never shipped).
+  ##
+  ## Ledger: runner **1123 -> 1124** and gambatte **4588 -> 4592**, with the
+  ## shootout 261 PASS / 0 FAIL / 3 INFO on both sides. The runner row is
+  ## `mealybug/dma/hdma_timing-C`, which had been the last red row of that
+  ## suite and is now 0/48 cells wrong. gambatte gains
+  ## `hdma_start_{ds,scx5,scx5_ds}_2` -- which makes the whole fourteen-ROM
+  ## `hdma_start*` family green -- plus `hdma_late_if_and_ie_halt_2`,
+  ## `hdma_late_m3speedchange_hdma5_scx1_3` and
+  ## `hdma_late_m3speedchange_ly_scx1_6`, and loses
+  ## `hdma_late_m3speedchange_{hdma5,read_hdmadst00}_scx2_ds_2`. Those two are
+  ## a RESHUFFLE inside a family that is 12 rows red before and after: the
+  ## `read_hdmadst00_*_2` group had three of its four members red already, with
+  ## the identical `got 00, expected 9F`, and the fourth joins them -- the
+  ## family becomes uniformly wrong instead of inconsistently wrong, which is
+  ## the STOP/speed-switch residual and not this rule. HDMA_SPEEDSWITCH_KILL_W
+  ## was re-swept at the new landing and is unmoved (see below).
+  ##
+  ## Cost, retired instructions, min of three, `cycles=` equal on both sides:
+  ## Pokemon Blue **+0.132%**, Pokemon Crystal +0.288%, cgb-acid-hell +0.515%.
+  ## The running CPU pays one flag load and a not-taken branch at each of its
+  ## two hand-over points; the HALTED CPU pays NOTHING, because the halt's
+  ## hand-over is charged once at halt entry rather than per halted M-cycle
+  ## (cpu_halt). Spelling it per halted M-cycle instead was measured at +0.51%
+  ## of ALL retired instructions on Pokemon Blue for a row-for-row identical
+  ## tree, so the entry form is not a shortcut -- it is the same measurement
+  ## for a fifth of the price.
   ##
   ## ---- The 4-dot "contradiction" was a parameterisation error --------------
   ##
@@ -1744,15 +1788,42 @@ const HDMA_GRANT_FETCH_DOTS* {.intdefine.} = -1
   ## -- after the fetch, before the rest of the instruction -- with `hdma_on`
   ## raised from the display state machine a fixed sleep after the mode-0 STAT
   ## update, never at the update itself.
-const HDMA_GRANT_BOUNDARY_DOTS* {.intdefine.} = HDMA_GRANT_FETCH_DOTS
+const HDMA_GRANT_BOUNDARY_DOTS* {.intdefine.} = 3
   ## The same request dot for the OTHER hand-over point, the instruction
-  ## boundary. Defaults to HDMA_GRANT_FETCH_DOTS; swept separately because the
-  ## eight witnesses above do not pin the two together.
+  ## BOUNDARY -- where the incumbent HDMA_STEAL_DELAY_M pays, and one M-cycle
+  ## ahead of the fetch grant above.
+  ##
+  ## It is ONE DOT smaller than the fetch's, and that is measured from both
+  ## sides rather than fitted. The eight witnesses above pin the FETCH
+  ## threshold and leave this one free, because in each of them the boundary
+  ## grant either fires before the reading instruction starts or not at all:
+  ##
+  ##   * from BELOW, `n_b >= 2`, by mealybug `hdma_timing-C` itself. At
+  ##     `n_b = 1` the SCX=2 double-speed nops-110 cell flips to `$FF`: its
+  ##     edge is 254, its LDH starts on the boundary at 255, and a grant there
+  ##     runs the block before the instruction and pushes a read hardware says
+  ##     runs. One cell wrong out of 48; `n_b >= 2` is clean.
+  ##   * from ABOVE, `n_b <= 3`, by gambatte `irq_precedence`
+  ##     `late_hdma_vs_{ei,ie}_scx2_2` and `late_hdma_vs_tima_scx2_1`. Their
+  ##     edge is 254 and the boundary they need the grant on is 257 -- one dot
+  ##     inside `edge + 4`. At `n_b = 4` all three answer the interrupt
+  ##     dispatch's pushed PC where hardware answers the DMA's.
+  ##
+  ## Whole suite: `n_b = 1` 4592 but `hdma_timing-C` red, `n_b = 2` 4592,
+  ## `n_b = 3` 4592, `n_b = 4` 4589. **2 and 3 are row-for-row identical** and
+  ## the tree cannot separate them; 3 ships because it is the one M-cycle grid
+  ## the fetch threshold already lives on. The dot between the two thresholds
+  ## is real and unexplained -- no reading of "the request is sampled at dot X
+  ## of the M-cycle" makes them equal, because the fetch M-cycle and the
+  ## instruction's last M-cycle are both ends of M-cycles and would take the
+  ## same threshold. Left as two numbers with two brackets rather than as one
+  ## number with a fudge.
 const HDMA_GRANT_FETCH_HOLD* {.booldefine.} = false
-  ## Whether a block granted at the fetch still holds its bytes back
-  ## HDMA_VISIBLE_DOTS dots (`in_cpu_cycle`). It should not: the grant is
-  ## BETWEEN two CPU accesses, not inside one, so there is no half-sampled read
-  ## for the hold to protect. Swept anyway, see the note above.
+  ## Whether a block granted at a hand-over point still holds its bytes back
+  ## HDMA_VISIBLE_DOTS dots (`in_cpu_cycle`). It should not, and does not: the
+  ## grant is BETWEEN two CPU accesses, not inside one, so there is no
+  ## half-sampled read for the hold to protect. Measured anyway -- `true`
+  ## scores gambatte 4584 against 4590 at the time it was swept.
 const HDMA_WRITE_DEFER_LO* {.intdefine.} = 0xFF00
 const HDMA_WRITE_DEFER_HI* {.intdefine.} = 0xFFFF
   ## Address window in which a CPU WRITE beats an owed HBlank block to the bus
@@ -1788,6 +1859,16 @@ const HDMA_STEAL_DELAY_M* {.intdefine.} = 1
   ## CPU instruction boundaries an HBlank DMA block waits after the mode-0 edge
   ## before it takes the bus. 0 = take it on the edge itself, which is what
   ## dingbat has always done.
+  ##
+  ## **SUPERSEDED, and compiled out of a default build since 2026-08-21**: see
+  ## HDMA_GRANT_FETCH_DOTS above, which keeps this constant's instruction
+  ## boundary as one of THREE hand-over points and adds the opcode fetch and
+  ## the HALT. The derivation below is still the derivation of the boundary
+  ## point -- it is why that point exists at all and why it is paid ahead of
+  ## handle_interrupts -- but the boundary alone cannot separate mealybug's
+  ## three-M-cycle reader from gambatte's two-M-cycle one, which is what the
+  ## fetch point is for. Live again with `-d:HDMA_GRANT_FETCH_DOTS=-1`, the
+  ## control build.
   ##
   ## mealybug `dma/hdma_timing-C` says the edge is too early. Its `sub_test`
   ## macro arms a one-block transfer and then reads a register after a given
@@ -2052,9 +2133,23 @@ const HDMA_WAKE_M0_MARGIN* {.intdefine.} = 8
   ## on an HBlank that is about to end -- but neither 7 nor 11 dots is room for
   ## one, so the real rule is something else that happens to split this pair
   ## here. Treat it as a bracket to re-derive, not as a mechanism.
-const HDMA_OVERHEAD_LEADS* {.intdefine.} = 1
+const HDMA_OVERHEAD_LEADS* {.intdefine.} =
+  (if HDMA_GRANT_FETCH_DOTS >= 0: 0 else: 1)
   ## Charge HDMA_BLOCK_OVERHEAD_BUS BEFORE the transfer's bytes rather than
   ## after: you take the bus, and THEN you drive it.
+  ##
+  ## **The default follows HDMA_GRANT_FETCH_DOTS, and that is the same
+  ## measurement read twice, not a second knob.** What this constant really
+  ## fixes is the ABSOLUTE dot the block's first byte drives on, relative to a
+  ## concurrent OAM DMA; the acquire M-cycle is just how that dot was spelt
+  ## against the incumbent grant. The fetch grant is itself one M-cycle later
+  ## than the instruction-boundary grant it replaces, so leading the overhead
+  ## on top of it would put the first byte one M-cycle past where SameBoy's OAM
+  ## walk puts it -- and `oamdma/oamdmasrcC000_hdmasrc0000`, the row that
+  ## derived this constant, says exactly that: green at `1` under the boundary
+  ## grant, green at `0` under the fetch grant, red at the other pairing in
+  ## both directions. Under the fetch grant the grant IS the acquire.
+  ## (gambatte 4591 -> 4592, that one row, nothing else moves.)
   ##
   ## The total per-transfer cost is identical either way, so nothing that only
   ## counts M-cycles can tell the two apart -- the whole 40-row `*_cycles`

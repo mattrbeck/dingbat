@@ -80,6 +80,31 @@ proc cpu_inc_pc*(cpu: GbCpu) =
   else:
     cpu.pc = cpu.pc + 1
 
+when HDMA_GRANT_FETCH_DOTS >= 0:
+  proc hdma_grant(gb: GB; slack: int32) {.noinline.} =
+    ## An owed HBlank block taking the bus at one of the CPU's three hand-over
+    ## points -- the end of an opcode fetch, an instruction boundary, or a
+    ## HALT. `slack` is the dots of allowance the point gets over the request
+    ## dot: 0 at the fetch, `HDMA_GRANT_FETCH_DOTS - HDMA_GRANT_BOUNDARY_DOTS`
+    ## at a boundary, the whole lead at a HALT. `noinline`, and behind one
+    ## `unlikely` flag test at each site, so a running CPU pays one load and a
+    ## not-taken branch per hand-over point and nothing else.
+    let ppu = gb.ppu
+    if ppu.hdma_active and (ppu.lcd_status and 3'u8) == 0'u8:
+      # `high(int32)` = owed to a HALTED CPU and waiting for its wake. Reaching
+      # an opcode fetch or an instruction boundary means the CPU is RUNNING, so
+      # that wake has been and gone without the wake path seeing the block --
+      # it can be armed by an edge the interrupt dispatch's own dots drive,
+      # after `cpu.halted` is already false. The debt is owed NOW.
+      # `hdma_ei_m3halt_m0unhalt_ly_2` is the row: without this its block waits
+      # a whole line.
+      if ppu.hdma_due_deadline == high(int32):
+        ppu.hdma_due_deadline = ppu.cycle_counter
+      if ppu.cycle_counter + slack >= ppu.hdma_due_deadline:
+        ppu_step_hdma(ppu, gb, in_cpu_cycle = HDMA_GRANT_FETCH_HOLD)
+    else:
+      ppu.hdma_block_due = false
+
 proc cpu_halt*(cpu: GbCpu; gb: GB) =
   ## Pan Docs, "Halt Bug": with IME = 0 and `IF & IE != 0` the CPU does not
   ## halt, and the PC fails to increment for the instruction after the HALT.
@@ -109,6 +134,31 @@ proc cpu_halt*(cpu: GbCpu; gb: GB) =
     cpu.halted   = false
   else:
     cpu.halted = true
+    when HDMA_GRANT_FETCH_DOTS >= 0:
+      # The third hand-over point, and the only one a HALT has: a CPU that is
+      # about to stop using the bus gives it up to a block already owed to it.
+      #
+      # Charged HERE, at the HALT's own fetch, rather than on the halted
+      # M-cycle the request dot falls in -- the two are at most 4 dots apart
+      # (the deadline is `edge + HDMA_GRANT_FETCH_DOTS` and the block can only
+      # be owed to a RUNNING CPU here, so the edge is already behind us), and
+      # the whole gambatte + mealybug tree is row-for-row identical either way.
+      # The per-halted-M-cycle spelling costs **0.51% of ALL retired
+      # instructions on Pokemon Blue**, which idles its main loop in HALT;
+      # this one costs a HALT-idling title nothing at all, and takes the whole
+      # constant's price on that title from +0.64% to +0.13%. It is the same
+      # "decide at halt ENTRY rather than per halted M-cycle" shape
+      # CGB_HALT_PPU_LEAD's note asks for and has not had.
+      #
+      # A block owed to an ALREADY halted CPU carries a `high(int32)` deadline
+      # and is paid at the WAKE instead, so it must not be taken here -- which
+      # is what the deadline test excludes. `hdma_late_m3halt_m2unhalt_scx2_2`
+      # is the row this exists for: it halts in the four-dot window between the
+      # boundary grant and the request, and without a hand-over here its block
+      # waits for a wake that arrives in mode 2 and is dropped a line late.
+      if unlikely(gb.ppu.hdma_block_due) and
+         gb.ppu.hdma_due_deadline != high(int32):
+        hdma_grant(gb, int32(HDMA_GRANT_FETCH_DOTS))
     when HDMA_HALT_M0_BLIND != 0:
       # The dot the VRAM DMA's HBlank edge detector stops being clocked on.
       # See HDMA_HALT_M0_BLIND / HDMA_HALT_BLIND_LAG in gb.nim.
@@ -739,22 +789,6 @@ proc tick*(cpu: GbCpu; gb: GB) =
       if cpu.stopped: cpu_stop_tick(cpu, gb)
       else:           mem_tick_extra(gb.memory, gb, 4)
       return
-    when HDMA_GRANT_FETCH_DOTS >= 0:
-      # The third hand-over point, and the only one a HALTED CPU has: it is not
-      # on the bus, so an owed block whose request has come up takes it on the
-      # dot rather than waiting for an opcode fetch that is not coming.
-      #
-      # Only reachable when the CPU halted AFTER the mode-0 edge and before the
-      # grant -- a block owed to an already-halted CPU has its deadline parked
-      # at `high(int32)` by `mode_flag=` and is paid at the WAKE instead. That
-      # window is four dots wide and gambatte's `hdma_late_m3halt_m2unhalt_*`
-      # pair falls straight into it: the `_2` member halts between the boundary
-      # at 257 and the request at 258, and without this the block waits for a
-      # wake in mode 2 and is dropped a whole line later.
-      if unlikely(gb.ppu.hdma_block_due) and
-         gb.ppu.cycle_counter >= gb.ppu.hdma_due_deadline and
-         gb.ppu.hdma_active and (gb.ppu.lcd_status and 3'u8) == 0'u8:
-        ppu_step_hdma(gb.ppu, gb)
     # handle_interrupts, opened up. The halt ends on IF & IE whether or not IME
     # lets an interrupt be taken, and that is the exact M-cycle the question
     # below has to be asked on -- asking it on every halted M-cycle instead
@@ -832,20 +866,7 @@ proc tick*(cpu: GbCpu; gb: GB) =
     # data M-cycles in between. That is the whole of what separates gambatte's
     # two-M-cycle `LD A,[HL]` from mealybug's three-M-cycle `LDH A,[rHDMA5]`;
     # see HDMA_GRANT_FETCH_DOTS in gb.nim.
-    if unlikely(gb.ppu.hdma_block_due):
-      if gb.ppu.hdma_active and (gb.ppu.lcd_status and 3'u8) == 0'u8:
-        # `high(int32)` = owed to a HALTED CPU and waiting for its wake. Reaching
-        # an opcode fetch means the CPU is running, so that wake has been and
-        # gone without the wake path seeing the block (it can be armed by an
-        # edge the dispatch's own dots drive, after `cpu.halted` is already
-        # false) -- the debt is owed NOW. `hdma_ei_m3halt_m0unhalt_ly_2` is the
-        # row: without this its block waits a whole line.
-        if gb.ppu.hdma_due_deadline == high(int32):
-          gb.ppu.hdma_due_deadline = gb.ppu.cycle_counter
-        if gb.ppu.cycle_counter >= gb.ppu.hdma_due_deadline:
-          ppu_step_hdma(gb.ppu, gb, in_cpu_cycle = HDMA_GRANT_FETCH_HOLD)
-      else:
-        gb.ppu.hdma_block_due = false
+    if unlikely(gb.ppu.hdma_block_due): hdma_grant(gb, 0)
   when STAT_M0_TAIL_MAX_MC != 0:
     # The instruction an IO read belongs to, so stat_read_mode can tell a read
     # on its instruction's second M-cycle from one on its third. Guarded, so a
@@ -871,16 +892,7 @@ proc tick*(cpu: GbCpu; gb: GB) =
     # separates mealybug's three-M-cycle `LDH A,[rHDMA5]` from gambatte's
     # two-M-cycle `LD A,[HL]`; see HDMA_GRANT_FETCH_DOTS in gb.nim.
     if unlikely(gb.ppu.hdma_block_due):
-      if gb.ppu.hdma_active and (gb.ppu.lcd_status and 3'u8) == 0'u8:
-        # See the un-parking note at the fetch grant above.
-        if gb.ppu.hdma_due_deadline == high(int32):
-          gb.ppu.hdma_due_deadline = gb.ppu.cycle_counter
-        if gb.ppu.cycle_counter + int32(HDMA_GRANT_FETCH_DOTS -
-                                        HDMA_GRANT_BOUNDARY_DOTS) >=
-           gb.ppu.hdma_due_deadline:
-          ppu_step_hdma(gb.ppu, gb, in_cpu_cycle = HDMA_GRANT_FETCH_HOLD)
-      else:
-        gb.ppu.hdma_block_due = false
+      hdma_grant(gb, int32(HDMA_GRANT_FETCH_DOTS - HDMA_GRANT_BOUNDARY_DOTS))
   when HDMA_STEAL_DELAY_M != 0 and HDMA_STEAL_LEAD_DOTS < 0 and
        HDMA_GRANT_FETCH_DOTS < 0:
     # A block that came due on a mode-0 edge takes the bus at this instruction
