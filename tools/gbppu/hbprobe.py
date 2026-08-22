@@ -21,12 +21,13 @@ and CGB grids directly comparable instead of two pass/fail staircases.
 N here is the ROM's own units: the shipped -C ROM's `call $0497` sled is 22 nops
 and its per-cell tail is 2 or 3 more, so N = 24 is its "2 nops" cell.
 
-  hbprobe.py <hblank_ly_scx_timing-C.gb> <scx> <N> <out.gb>
+  hbprobe.py <hblank_ly_scx_timing-C.gb> <scx> <N> <out.gb> [line=$41]
 """
 import sys
 
 rom = bytearray(open(sys.argv[1], "rb").read())
 scx = int(sys.argv[2]); n = int(sys.argv[3]); out = sys.argv[4]
+line = int(sys.argv[5], 0) if len(sys.argv) > 5 else 0x41
 
 # The shipped -C ROM's own addresses (see tools/gbppu/sm83dis.py on it).
 SYNC, DUMP, SLED = 0x04AE, 0x03FC, 0x3F00
@@ -37,8 +38,8 @@ body = bytes([
     0x3E, 0x08, 0xE0, 0x41,        # ld a,$08 ; ldh ($ff41),a
     0x3E, 0x02, 0xE0, 0xFF,        # ld a,$02 ; ldh ($ffff),a
     0x3E, scx & 0xFF, 0xE0, 0x43,  # ld a,scx ; ldh ($ff43),a
-    0x16, 0x41,                    # ld d,$41
-    0x1E, 0x42,                    # ld e,$42
+    0x16, line,                    # ld d,<line>
+    0x1E, (line + 1) & 0xFF,       # ld e,<line>+1
     0xCD, SYNC & 0xFF, SYNC >> 8,  # call sync
     0xCD, SLED & 0xFF, SLED >> 8,  # call sled
     0x7E,                          # ld a,(hl)

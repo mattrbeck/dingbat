@@ -2236,6 +2236,17 @@ proc lyc_settle_halt_skip(gb: GB): bool {.inline.} =
 # latches the mode-0 source on its LED dot -- the two halves that cancel on the
 # DMG do not cancel on the CGB.
 #
+# The oracle agrees at cell resolution and DISAGREES at ROM resolution, which is
+# worth recording because it is the opposite way round from the usual trap:
+# SameBoy's own answer to the probe is 24 24 24 23 23 23 23 22 on line $41 and
+# the same again on line $42 -- the hardware table exactly -- and yet SameBoy
+# FAILS the shipped `-C` ROM. Force-dumping both checks of the cell its failure
+# register dump names (SCX = 0, line $41) shows SameBoy answering both of them
+# correctly, so whatever it trips on is a sequencing effect across the ROM's 36
+# chained checks and not a disagreement about this quantity. A shared ROM-level
+# failure is NOT evidence about the ROM when the two emulators agree cell for
+# cell on what the ROM measures.
+#
 # Measured on 6f88d23 (runner 1125, gambatte 4595, shootout 261/261), as
 # (single-speed dots : double-speed dots), the shipping DMG rule being 2:1:
 #
