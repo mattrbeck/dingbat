@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-08-21 18:52:25*
+*Generated: 2026-08-21 19:06:05*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4592/4996 passed.**
+**4595/4996 passed.**
 
 ## bgen
 
@@ -329,16 +329,15 @@ All 18 tests passed.
 
 All 8 tests passed.
 
-## m0enable (148/167 passed)
+## m0enable (149/167 passed)
 
-148/167 tests passed, 19 failed:
+149/167 tests passed, 18 failed:
 
 | Test | Result |
 |------|--------|
 | m0enable/disable_ds_1_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m0enable/disable_scx5_ds_2_cgb04c_out3 [cgb] | got 1, expected 3 |
 | m0enable/enable_wxA6_2x_spxA7_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
-| m0enable/enable_wxA6_2x_spxA7_ds_2_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m0enable/late_enable_lcdoffset1_1_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m0enable/lycdisable_ff41_2_dmg08_out2_cgb04c_out0 [dmg] | got 0, expected 2 |
 | m0enable/lycdisable_ff41_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
@@ -576,18 +575,16 @@ All 67 tests passed.
 | speedchange/speedchange_ch2_nr52_1a_cgb04c_outF2 [cgb] | got F0, expected F2 |
 | speedchange/speedchange_ch2_nr52_2a_cgb04c_outF2 [cgb] | got F0, expected F2 |
 
-## sprites (470/476 passed)
+## sprites (472/476 passed)
 
-470/476 tests passed, 6 failed:
+472/476 tests passed, 4 failed:
 
 | Test | Result |
 |------|--------|
 | sprites/10spritesPrLine_10xposA7_m0irq_2_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | sprites/10spritesPrLine_10xposA7_m0irq_2_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
-| sprites/10spritesprline_2xposa7overlap8_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | sprites/enable/late_disable_ds_3_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/late_disable_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| sprites/mix_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 
 ## tima (224/232 passed)
 
@@ -686,7 +683,7 @@ All 20 tests passed.
 | window/m2int_wxA6_scx5_m3stat_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/m2int_wxA6_spxA7_m0irq_2_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | window/m2int_wxA6_spxA7_m0irq_2_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
-| window/m2int_wxA6_spxA7_m3stat_2_dmg08_out0_cgb04c_out3 [dmg] | got 3, expected 0 |
+| window/m2int_wxA6_spxA7_m3stat_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wxA6_spxA7_m3stat_4_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wxA6_vrambusyread_3_dmg08_cgb04c_out5 [cgb] | got 0, expected 5 |
 | window/on_screen/wx17_weoff_wxA5_weon [cgb, png] | 960/23040 pixels differ |

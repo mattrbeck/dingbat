@@ -2217,6 +2217,46 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
 const OBJ_FETCH_DOTS {.intdefine.} = 6'i32
 const OBJ_WAIT_SUB {.intdefine.} = 3'i32
 
+# ---- The one X the table above never reached: OAM X = 167 ------------------
+#
+# `ppu_spritex_vs_scx` sweeps OAM X = 0..16 only, so the RIGHT edge of the line
+# was scored by nothing. `tools/gbppu/objtab2.py` runs the same measurement over
+# any X range and finds the whole table exact from X = 150 to X = 166 and **+1
+# dot at X = 167, on every one of SCX 0..8** -- nine cells, one shape.
+#
+# X = 167 is the object whose trigger pixel is the LAST one, `lx` = 159. With a
+# nonzero `M3_PIPE_DELAY` the fetcher retires at `m3_retire_lx` (= 158) and
+# `fifo_burst_tail` emits the remaining pixels for free on that dot: the dots
+# they would have cost were skipped at the HEAD of the line by `m3_delay`. An
+# object at X = 167 is the one thing that can make the shifter walk PAST the
+# retire point -- `fetch_work_pending` keeps the fetcher alive for it -- and
+# each pixel of that walk is a real dot AND one fewer pixel for the burst to
+# emit. It is charged twice, which is the +1.
+#
+# So the walk is refunded out of the object's own stall, once a line: the second
+# and later objects at X = 167 trigger with `lx` already at 159 and do no
+# walking (dingbat reads 66 dots for ten of them where 12 + 9*6 predicts 66 and
+# 11 + 9*6 predicts 65 -- the extra dot appears once, not ten times), so the
+# refund is gated on `obj_last_px`, which already means "an object has triggered
+# on the last pixel this line" and is already cleared per line.
+#
+# The hardware witness is wilbertpol `acceptance/gpu/
+# intr_2_mode0_timing_sprites_scx1_nops` test $55: ten objects, five at X = 7
+# and five at X = 167, SCX = 1, bracketed to one M-cycle. Its 129 tests were
+# crossed against `-d:gb_m3_len` (`tools/gbppu/wpsprites.py`) and that ONE cell
+# disagreed -- 244 dots against a bracket of 240..243 -- with the other 85
+# reachable cells exact. Pan Docs' own algorithm agrees: the penalty is periodic
+# in `(X + SCX) mod 8`, X = 167 is residue 7 like X = 7 and X = 15, and those
+# two are already exact here. SameBoy passes the ROM.
+#
+# The WINDOW walks into the tail the same way (WX = 166 restarts at `lx` = 159)
+# and is deliberately NOT refunded: there hardware DOES pay the extra dots, and
+# `CGB_WIN_TAIL_LAST` / `DMG_WIN_LAST_PX_CARRY` are the rows that measure it
+# (`window/m2int_wxA6_m3stat_1` and friends read 174 where the unheld fetcher
+# reads 172). The two cases are not the same event: the window restarts the BG
+# fetch, the object does not.
+const OBJ_TAIL_WALK_REFUND {.intdefine.} = 1
+
 # ---- LCDC.2 is read ONCE PER BITPLANE, and where the fetch sits in the
 # ---- penalty decides which dots those two reads land on --------------------
 #
@@ -3207,6 +3247,23 @@ const LY0_PIPE_ANY = LY0_PIPE_MCYCLES != 0 or M3_PIPE_AHEAD != 0 or
 const M3_PIPE_LEAD_ANY = M3_PIPE_MCYCLES != 0 or M3_PIPE_DELAY != 0 or
                          M3_END_EARLY != 0 or LY0_PIPE_ANY
 
+template m3_retire_lx(ppu: GbFifoPpu): int32 =
+  ## The FIRST `lx` at which the BG fetcher can be retired -- `m3_lead` pixels
+  ## short of the last one, because `fifo_burst_tail` emits that tail on the
+  ## retire dot. This is `fetcher_retired`'s own opening test, factored out
+  ## because the mode-0 STAT lookahead has to be measured from the same point:
+  ## the hook used to count back from `GB_WIDTH`, which is `m3_lead` dots after
+  ## the loop it lives in has already exited (see `fifo_irq_m0_ready`).
+  ##
+  ## The lead is only speed-dependent through its M-cycle term; with that term
+  ## off it is a compile-time constant, and this is on the mode 3 dot loop (it
+  ## runs for every one of a line's ~170 dots), so spell the constant case out
+  ## rather than load the field: the field form loads and subtracts where this
+  ## one folds to an immediate.
+  when M3_PIPE_MCYCLES == 0: int32(GB_WIDTH - M3_PIPE_DELAY - M3_END_EARLY)
+  else: int32(GB_WIDTH) - ppu.m3_lead
+
+
 # The held-pair ring has to name every pixel a register write can still reach:
 # the deepest mixer stage, plus the pixels the tail burst decided ahead of
 # their own dot. Both are compile-time here, so this is a compile-time check --
@@ -4070,6 +4127,11 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
        # per-dot prune and costs the dot loop nothing.
        not fifo_obj_walked_past(ppu):
       ppu.fetching_sprite = true
+      # Is this the FIRST object of the line to trigger inside the tail burst?
+      # See OBJ_TAIL_WALK_REFUND -- read before the store below sets the flag.
+      when OBJ_TAIL_WALK_REFUND != 0:
+        let tail_walk =
+          if ppu.obj_last_px: 0'i32 else: max(0'i32, ppu.lx - ppu.m3_retire_lx)
       when CGB_WIN_TAIL_LAST != 0:
         # One store, on the object trigger and nowhere else (a handful of dots
         # a line). See fetch_work_pending: on the last pixel this fetch and a
@@ -4110,6 +4172,11 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
         # a special case.
         let sub = if ppu.sprites[0].x == 0: 0'i32 else: idx and 7
         pen += max(0'i32, (7 - sub) - (OBJ_WAIT_SUB - 1))
+      when OBJ_TAIL_WALK_REFUND != 0:
+        # The dots the shifter spent walking INTO the tail burst to reach this
+        # object were already paid for at the head of the line. See
+        # OBJ_TAIL_WALK_REFUND.
+        pen -= tail_walk
       ppu.obj_penalty = pen
       when OBJ_ABORT_LATE:
         # The last dot of the object's own FETCH, for the abort that arrives
@@ -4340,22 +4407,6 @@ proc fetch_work_pending(ppu: GbFifoPpu): bool {.inline.} =
        ppu.window_trigger and window_enabled(ppu) and
        int(ppu.wx) == GB_WIDTH + 6: return true
   false
-
-template m3_retire_lx(ppu: GbFifoPpu): int32 =
-  ## The FIRST `lx` at which the BG fetcher can be retired -- `m3_lead` pixels
-  ## short of the last one, because `fifo_burst_tail` emits that tail on the
-  ## retire dot. This is `fetcher_retired`'s own opening test, factored out
-  ## because the mode-0 STAT lookahead has to be measured from the same point:
-  ## the hook used to count back from `GB_WIDTH`, which is `m3_lead` dots after
-  ## the loop it lives in has already exited (see `fifo_irq_m0_ready`).
-  ##
-  ## The lead is only speed-dependent through its M-cycle term; with that term
-  ## off it is a compile-time constant, and this is on the mode 3 dot loop (it
-  ## runs for every one of a line's ~170 dots), so spell the constant case out
-  ## rather than load the field: the field form loads and subtracts where this
-  ## one folds to an immediate.
-  when M3_PIPE_MCYCLES == 0: int32(GB_WIDTH - M3_PIPE_DELAY - M3_END_EARLY)
-  else: int32(GB_WIDTH) - ppu.m3_lead
 
 proc fetcher_retired(ppu: GbFifoPpu): bool {.inline.} =
   ## Has the BG fetcher run out of work for this line? That -- not the last
