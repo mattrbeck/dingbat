@@ -301,6 +301,17 @@ proc mem_tick_ppu*(mem: GbMemory; gb: GB; cycles: int; ignore_speed = false) {.h
   # the method table (see GB.fifo_ppu).
   if gb.fifo_ppu != nil: fifo_tick(gb.fifo_ppu, gb, ppu_cycles)
   else: gb.ppu.tick(gb, ppu_cycles)
+  when CGB_LYC_EDGE_DEFER:
+    # A CGB LYC write's STAT edge, taken one M-cycle boundary after the one its
+    # byte landed on. This is the only hook in the tree that runs on EVERY
+    # M-cycle, and it has to be one of those: `ppu_flush_stat_write` runs from
+    # `mem_flush_deferred`, which only ever runs on a CPU WRITE, so an edge owed
+    # across an arbitrary next M-cycle has nothing guaranteed to take it.
+    # See CGB_LYC_EDGE_DEFER in gb.nim for what it buys and what it costs here.
+    if unlikely(mem.lyc_edge_owed):
+      mem.lyc_edge_owed = false
+      ppu_handle_stat_interrupt(gb.ppu, gb)
+
 
 proc mem_tick_components*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true; ignore_speed = false) {.inline.} =
   ## Both halves, in the order every caller but mem_write wants them.
@@ -1471,6 +1482,17 @@ proc mem_tick_stalled(mem: GbMemory; gb: GB; cycles: int) =
   let ppu_cycles = (cycles shr mem.current_speed) + extra
   if gb.fifo_ppu != nil: fifo_tick(gb.fifo_ppu, gb, ppu_cycles)
   else: gb.ppu.tick(gb, ppu_cycles)
+  when CGB_LYC_EDGE_DEFER:
+    # A CGB LYC write's STAT edge, taken one M-cycle boundary after the one its
+    # byte landed on. This is the only hook in the tree that runs on EVERY
+    # M-cycle, and it has to be one of those: `ppu_flush_stat_write` runs from
+    # `mem_flush_deferred`, which only ever runs on a CPU WRITE, so an edge owed
+    # across an arbitrary next M-cycle has nothing guaranteed to take it.
+    # See CGB_LYC_EDGE_DEFER in gb.nim for what it buys and what it costs here.
+    if unlikely(mem.lyc_edge_owed):
+      mem.lyc_edge_owed = false
+      ppu_handle_stat_interrupt(gb.ppu, gb)
+
 
 proc mem_tick_stopped*(mem: GbMemory; gb: GB) =
   ## One step of the emulator while the CPU is in STOP mode (see stop_instr).

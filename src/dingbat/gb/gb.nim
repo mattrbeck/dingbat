@@ -331,6 +331,62 @@ const CGB_LYC_WRITE_DEFER* {.booldefine.} = true
   ## boundary spelling is a whole M-cycle and those rows are asking whether the
   ## real quantity is 4 dots or 2. They are the instrument for that question and
   ## it is left open.
+const CGB_LYC_EDGE_DEFER* {.booldefine.} = false
+  ## The SECOND stage of `CGB_LYC_WRITE_DEFER`: the CGB LYC write's STAT EDGE
+  ## taken at the boundary of the M-cycle AFTER the one its byte lands on,
+  ## rather than at the same boundary as the byte. **It is CORRECT, it is
+  ## MEASURED, and it ships OFF on its cost.** The whole of the evidence is at
+  ## `CGB_LYC_WRITE_DEFER` above; this is only the part that could not be
+  ## spelled cheaply.
+  ##
+  ## ## What it buys, from `d7fb190` (runner 1134, gambatte 4598)
+  ##
+  ##   runner   1134 -> 1140      gambatte 4598 -> 4600
+  ##   shootout 261 PASS / 0 FAIL / 3 INFO
+  ##
+  ## +6 wilbertpol: all six `acceptance/gpu/ly_lyc{,_0,_153}_write-C` arms
+  ## (`@cgbc` and `@agb`), whose raw per-sled bytes go from `00 01 01 01` to
+  ## `00 01 01 00` -- the ROM's own expected values, and SameBoy's answer on
+  ## every CGB revision.
+  ##
+  ## gambatte, all `[cgb]`:
+  ##   +6  lycEnable/{late_ff45_enable_2, lyc0_late_ff45_enable_2,
+  ##       lyc153_late_ff45_enable_4, lyc_ff45_trigger_delay_2},
+  ##       m0enable/{lycdisable_ff45_2, lycdisable_ff45_scx3_2}
+  ##   -4  lycEnable/late_ff45_enable_lcdoffset1_1,
+  ##       m0enable/{lycdisable_ff45_scx1_1, lycdisable_ff45_scx2_1},
+  ##       m2enable/lyc1_m2irq_late_lyc255_1
+  ##
+  ## ## What it costs, and why that is not negotiable at this spelling
+  ##
+  ## **+1.10% of ALL retired instructions on cgb-acid-hell** (25.680e9 against
+  ## 25.401e9, `cycles=` identical at 168537600, DINGBAT_BENCH_COUNTERS). Not
+  ## the work -- the branch is taken a few times a frame. It is the branch: the
+  ## edge needs a firing point that exists on EVERY M-cycle, dingbat has exactly
+  ## one (`mem_tick_ppu`), and that proc sits on clang's inline threshold for
+  ## the ~160 opcode bodies that reach it. Same cliff as `docs/gb_oam_dma_cost.md`
+  ## and the reason `ly_advance_open` is spelled as the enable bit.
+  ##
+  ## Three cheaper spellings were built and measured, and all three are worse:
+  ##
+  ##   * the same test at the top of `fifo_tick` (a 2-count, since that runs
+  ##     BEFORE the dots): **+2.87%**, and 3 gambatte rows worse than this one
+  ##     because `mem_tick_ppu_latched` splits an M-cycle into several
+  ##     `fifo_tick` calls and the counter loses a step.
+  ##   * the flag on `GbPpu` instead of `GbMemory`: +1.25%.
+  ##   * no poll at all -- drop the pending edge when the LY advance falls
+  ##     inside the M-cycle it would be carried across, and let the advance's
+  ##     own STAT evaluation be the edge. Free, and WRONG: it fixes sled 3 on
+  ##     all three ROMs and breaks sled 1 of `ly_lyc_0_write` (2 interrupts
+  ##     where hardware has 1), sled 2 of `ly_lyc_153_write` and the counter
+  ##     slot of `ly_lyc_write`. Recording the level without the IF bit (to keep
+  ##     `old_stat_flag` honest) changes none of those three, so the advance's
+  ##     evaluation is NOT the same event as the write's own edge.
+  ##
+  ## One more thing to settle before it could ship even at that price:
+  ## `GbMemory.lyc_edge_owed` CAN be live across an instruction boundary, unlike
+  ## `write_deferred` and `stat_write_pending` next to it, so it needs a GB
+  ## payload rev -- see the batched-bump note in docs.
 const CGB_LYC_WRITE_DEFER_DS* {.booldefine.} = false
   ## ...and whether the deferral above also applies in DOUBLE SPEED. It does
   ## NOT, and this is the honest state of that: the three ROMs above are all
@@ -5703,6 +5759,17 @@ type
     # across an instruction boundary, so it is not serialized.
     deferred_reg*:         uint16
     deferred_val*:         uint8
+    when CGB_LYC_EDGE_DEFER:
+      # A CGB LYC write's STAT edge, owed one M-cycle boundary past the one its
+      # byte landed on (CGB_LYC_EDGE_DEFER). On GbMemory rather than on GbPpu
+      # because `mem_tick_ppu` -- the one hook that runs on EVERY M-cycle, and
+      # so the only place this edge can be taken -- already has `mem` in hand
+      # and is on clang's inline threshold; reaching through `gb.ppu` for it
+      # instead measured 0.15% worse. Unlike `write_deferred` next door this one
+      # CAN be live across an instruction boundary (the write may be an
+      # instruction's last M-cycle), so it would have to be serialized before it
+      # could ship.
+      lyc_edge_owed*:      bool
     when CGB_WRITE_LATENCY_ANY:
       # The other direction: a CGB pipeline-register store that lands PART WAY
       # THROUGH this M-cycle's PPU dots rather than at either end of them. Same

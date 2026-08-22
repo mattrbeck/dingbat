@@ -3165,8 +3165,11 @@ proc ppu_write_machinery*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     # CGB only, and only reachable at all when CGB_LYC_WRITE_DEFER is on -- the
     # DMG's LYC byte lands at the top of its M-cycle and never enters the slot.
     # The STAT edge is `stat_write_pending`'s, taken right after this by
-    # mem_flush_deferred, so nothing here has to raise it.
-    when CGB_LYC_WRITE_DEFER: ppu.lyc = val
+    # mem_flush_deferred -- or, with CGB_LYC_EDGE_DEFER, one M-cycle further on
+    # again, which is what the flag armed here is for.
+    when CGB_LYC_WRITE_DEFER:
+      ppu.lyc = val
+      when CGB_LYC_EDGE_DEFER: gb.memory.lyc_edge_owed = true
   else: discard
 
 proc ppu_defer_machinery_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
@@ -3660,13 +3663,18 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     #
     # On CGB the same three ROMs say the opposite -- see CGB_LYC_WRITE_DEFER in
     # gb.nim, which is the whole write-up.
+    var edge_here = true
     when CGB_LYC_WRITE_DEFER:
       if gb.cgb_enabled and (CGB_LYC_WRITE_DEFER_DS or gb.memory.current_speed == 0):
         ppu_defer_machinery_write(ppu, gb, idx, val)
+        # With the second stage on, the edge belongs one M-cycle further on
+        # again and ppu_write_machinery arms it when the byte actually lands.
+        # See CGB_LYC_EDGE_DEFER.
+        when CGB_LYC_EDGE_DEFER: edge_here = false
       else: ppu.lyc = val
     else:
       ppu.lyc = val
-    ppu.stat_write_pending = true
+    if edge_here: ppu.stat_write_pending = true
     gb.memory.write_deferred = true
   of 0xFF46: discard  # handled by memory DMA
   # The three DMG palettes are pure mixer reads -- nothing else in the PPU looks
