@@ -6,34 +6,25 @@ type
   Mbc5Rumble* = ref object of Mbc5
     rumble*: bool  # transient motor state; deliberately not serialized
 
-const NintendoLogo = [
-  0xCE'u8, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B, 0x03, 0x73, 0x00, 0x83,
-  0x00, 0x0C, 0x00, 0x0D, 0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E,
-  0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDD, 0xD9, 0x99, 0xBB, 0xBB, 0x67, 0x63,
-  0x6E, 0x0E, 0xEC, 0xCC, 0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E]
-
-proc has_nintendo_logo(rom: seq[uint8]; base: int): bool =
-  if base < 0 or base + NintendoLogo.len > rom.len: return false
-  for i in 0 ..< NintendoLogo.len:
-    if rom[base + i] != NintendoLogo[i]: return false
-  true
+proc header_checksum_ok(rom: seq[uint8]; base: int): bool =
+  ## Does a cartridge header whose $0100 entry point sits at `base` carry a
+  ## valid header checksum (Pan Docs, "The Cartridge Header", $014D) and a
+  ## sane ROM-size code ($0148)?
+  if base < 0 or base + 0x50 > rom.len: return false
+  var x = 0'u8
+  for i in 0x34 .. 0x4C: x = x - rom[base + i] - 1
+  x == rom[base + 0x4D] and rom[base + 0x48] <= 0x08
 
 proc is_mbc1_multicart(rom: seq[uint8]): bool =
-  ## MBC1M multicarts (e.g. Mortal Kombat I&II, Bomberman Collection) are 8 Mbit
-  ## carts wiring only 4 bits of the BANK1 register, with BANK2 driving ROM
-  ## address lines 18-19. There is no header flag; like mooneye-gb, detect them
-  ## by counting Nintendo logos at the 256 KiB game boundaries (>= 3 of 4).
+  ## MBC1M multicarts (Pan Docs, "MBC1M"): 8 Mbit carts wiring only 4 bits of
+  ## BANK1, with BANK2 on ROM address lines 18-19. There is no header flag;
+  ## each 256 KiB quarter holds a complete game with its own header, so count
+  ## valid headers at the quarter boundaries (>= 3 of 4).
   if rom.len != 0x100000: return false
-  var logos = 0
+  var headers = 0
   for page in 0 ..< 4:
-    let base = page * 0x40000 + 0x104
-    var match = true
-    for i in 0 ..< NintendoLogo.len:
-      if rom[base + i] != NintendoLogo[i]:
-        match = false
-        break
-    if match: inc logos
-  logos >= 3
+    if header_checksum_ok(rom, page * 0x40000 + 0x100): inc headers
+  headers >= 3
 
 method mbc_read*(cart: Mbc; idx: int): uint8 {.base.} = 0xFF'u8
 method mbc_write*(cart: Mbc; idx: int; val: uint8) {.base.} = discard
@@ -139,7 +130,7 @@ proc load_cartridge*(rom_path: string): Mbc =
   if cart_type in [0x0B'u8, 0x0C, 0x0D]:
     mmm01_rotate = 0x8000
   elif rom.len > 0x8000 and rom[rom.len - 0x8000 + 0x0147] in [0x0B'u8, 0x0C, 0x0D] and
-       has_nintendo_logo(rom, rom.len - 0x8000 + 0x0104):
+       header_checksum_ok(rom, rom.len - 0x8000 + 0x0100):
     hdr_base  = rom.len - 0x8000
     cart_type = rom[hdr_base + 0x0147]
 
@@ -237,10 +228,8 @@ proc load_cartridge*(rom_path: string): Mbc =
     c.tama5_seed_clock()
     cart = c
   of 0xFE:
-    # HuC3's battery backs the clock as well as the RAM, so the clock needs a
-    # starting point even when there is no .sav to load one from: SameBoy powers
-    # up with the counters at zero and the timestamp at the host's current
-    # second, which is what makes the first minute tick land where it does.
+    # HuC3's battery backs the clock as well as the RAM, so with no .sav the
+    # clock starts at zero, stamped with the host's current second.
     let c = Huc3(rom: rom, ram: newSeq[uint8](ram_sz),
                  sav_path: sav_path, has_battery: has_battery,
                  rom_bank_num: 1, last_second: gb_rtc_now())
