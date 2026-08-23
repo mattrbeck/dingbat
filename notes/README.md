@@ -1,10 +1,8 @@
-# dingbat Notes
+# dingbat notes
 
-This directory contains development notes for the dingbat GBA emulator — a Crystal→Nim rewrite of [crab](https://github.com/mattrberry/crab).
+Working notes for dingbat, a Crystal→Nim rewrite of [crab](https://github.com/mattrberry/crab).
 
-## Files
-
-- `README.md` — this file, index of notes
-- `progress.md` — work completed and current status
-- `todo.md` — known TODOs, unimplemented features, and known issues
-- `architecture.md` — project structure, key design decisions, Nim-specific patterns
+- `architecture.md` — project structure, the include-hub composition model, directory map
+- `progress.md` — current state of each subsystem
+- `todo.md` — open items and deliberate gaps
+- `samesuite-apu.md` — what the SameSuite APU sources assert and how the GB APU models it

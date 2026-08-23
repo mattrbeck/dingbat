@@ -8,31 +8,27 @@
 
 ## Highlights
 
-**Link cable.** Trade and battle with your friends, both over the internet and on the
-local network. → [Multiplayer guide](docs/link-usage.md)
+**Link cable.** Trade and battle over the internet or on one machine. → [Multiplayer guide](docs/link-usage.md)
 
-**Enhanced MP2K audio.** Music in games using Nintendo's MP2K/M4A sound engine is
+**Enhanced MP2K audio.** Music in games using Nintendo's MP2K/M4A sound engine can be
 re-rendered per note, above the hardware's native mix rate. Optional.
 
-**Cross-device sync.** Your games, saves, and save states sync through Google Drive, so
-you can put a game down on one device and pick it up on another.
+**Cross-device sync.** Games, saves, and save states sync through Google Drive.
 
-**Accuracy.** 6910 of 7008 mGBA test-suite cases, all of jsmolka's gba-tests, the AGS
-aging cartridge, blargg, mooneye, dmg-acid2, and cgb-acid2 all pass.
+**Accuracy.** Scored every CI run against the mGBA suite, jsmolka's gba-tests, the AGS
+aging cartridge, blargg, mooneye, mealybug, SameSuite, gambatte, GBMicrotest, AGE and the
+acid2 ROMs — current tallies in [tests/results.md](tests/results.md).
 
-**No BIOS file required.** An HLE BIOS is built in, though you can supply a real BIOS
-dump instead.
+**No BIOS file required.** An HLE BIOS is built in; a real dump can be supplied instead.
 
 **Everything else.** Nine save-state slots with thumbnails, rewind, fast forward, cheats,
 hq4x / xBR upscaling, per-panel LCD color correction, and a cycle-accurate Game Boy FIFO
-PPU for games like Prehistorik Man.
+PPU.
 
 ## Documentation
 
-- [**Downloads**](docs/downloads.md) — prebuilt desktop binaries for Linux, macOS, and
-  Windows
-- [**Features**](docs/features.md) — everything both front-ends and both systems support,
-  plus remaining work
+- [**Downloads**](docs/downloads.md) — prebuilt desktop binaries for Linux, macOS, Windows
+- [**Features**](docs/features.md) — what both front-ends and both systems support
 - [**Usage**](docs/usage.md) — loading ROMs, BIOS files, save files, GB renderer choice
 - [**Multiplayer**](docs/link-usage.md) — local 2P, online room codes, native TCP
 - [**Building**](docs/building.md) — native, WebAssembly, and Windows cross-builds

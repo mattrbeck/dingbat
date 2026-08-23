@@ -1,249 +1,83 @@
-# The three hardware experiments, read in three emulators
+# GB probe carts: what each measures, dingbat's prediction, hardware status
 
-**2026-08-11.** `docs/gb-failure-triage.md` ends with three experiments the
-mode-3 campaign specified and could not run, because each of them needs a real
-Game Boy. A flashcart is on order. This document is what the three experiments
-say when the probe ROMs that were written for them are run in the three
-emulators we have — dingbat, SameBoy and DocBoy — while we wait.
-
-Read the standing of that evidence before the numbers. **SameBoy and DocBoy are
-behavioural oracles.** We run a ROM in them and read the pixels out; nothing is
-copied from either implementation. Three oracles agreeing is corroborating
-evidence — good enough to justify building a mechanism behind a flag pending the
-photograph — and it is never itself the citable derivation. Two oracles
-agreeing *against* dingbat is a reason to go and look, not a reason to change
-the renderer, and nothing in dingbat's renderer was changed for this document.
-
-The probes and the harness are `tools/gbprobe/`. The ROMs report raw values and
-contain no expectation anywhere; they render their results on screen as well as
-to WRAM, and their cartridge headers are correct, so the identical `.gb` files
-that produced every table below go to the flashcart when it arrives and
-`tools/gbprobe/readout.py` reads the photograph.
-
----
-
-## (a) Does the STAT mode field report differently to two read idioms?
-
-`probe_a_statidiom.gb`. BG only, objects off, window parked, `SCY = 0`, one
-halt anchor per measurement on line `$47`. Two read idioms, with their **IO
-cycles equalised** — `LD A,(C)` reads on its M2 and `LDH A,($41)` on its M3, so
-the `LD A,(C)` arm carries one more preceding NOP and the two sample the same
-PPU dot. `SCX = 3` is the measurement, `SCX = 0` the control. The sweep is 16
-M-cycle steps about the mode-0 boundary; the table is the step `N` at which
-each column first reads mode 0.
-
-| engine | model | `LD A,(C)` @3 | `LDH` @3 | `LD A,(C)` @0 | `LDH` @0 |
-|---|---|---|---|---|---|
-| dingbat | DMG | **0A** | 09 | 09 | 09 |
-| dingbat | CGB 0 / AB / C / D / E, AGB | 09 | 09 | 09 | 09 |
-| SameBoy | DMG | 09 | 09 | 09 | 09 |
-| SameBoy | CGB 0 / A / C / D / E, AGB | 08 | 08 | 08 | 08 |
-| DocBoy | DMG | 09 | 09 | 09 | 09 |
-| DocBoy | CGB | 08 | 08 | 08 | 08 |
-
-**The control validates the instrument.** In every row where an engine has no
-per-idiom rule, the two idioms flip at the *same* step — which is exactly what
-equalised IO cycles predict, and it is what would break first if the
-equalisation were off by one. So the one cell that differs is a statement about
-the model, not about the ROM.
-
-**Verdict.** Two of three oracles say the idiom does **not** matter: SameBoy and
-DocBoy return the same STAT byte to both instructions at every dot, on every
-model. dingbat's `STAT_M0_FIELD_TAIL` shows up in exactly one cell of the whole
-table — DMG, `SCX = 3` — and disappears at `SCX = 0` and on every CGB revision.
-
-That is a narrower footprint than the rule's write-up implies, and it is the
-first direct evidence that the rule is confounded rather than real: idiom and
-suite are perfectly confounded in every existing test ROM (every `LD A,(C)`
-witness is gambatte's, every `LDH A,($41)` witness is GBMicrotest's), and this
-is the first ROM that separates them.
-
-**What the hardware photo will settle.** If both columns flip at the same `N` on
-silicon, `STAT_M0_TAIL_MAX_MC` should be deleted and the field tail with it, and
-the sixty-odd rows it reconciles go back to being open. Note that this outcome
-is what *both* oracles already predict.
-
-**A second reading, free.** Both oracles put the CGB's mode-0 boundary one
-M-cycle EARLIER than the DMG's (08 against 09), on the same ROM, at the same
-`SCX`. dingbat puts them at the same dot. That DMG/CGB split is a separate,
-cleanly bracketed question this probe answers as a by-product, and probe (b)
-below reproduces it independently (flip column 3 against 4).
-
----
-
-## (b) How much does a mid-line SCX store lengthen mode 3?
-
-`probe_b_scxm3.gb`. `SCX = 7` written during mode 2 so the line latches a fine
-scroll of 7. Then, from one anchor: a slide of `BASE_M + M` NOPs, the store
-(`ld a,$05` / `ldh [c],a` with `C = LOW(rSCX)`), a slide, and a `LDH A,($41)`.
-
-One refinement over the doc's sketch: the post-store slide carries a `(7 - M)`
-term, so the READ lands on the same dot for every row while the STORE walks.
-Without it the read would walk along with the store and the late rows would be
-past the boundary before their sweep began — the top of the grid would carry no
-information at all.
-
-The table is the sweep step `N` at which each row first reads mode 0. Rows are
-store positions `M = 0..7`; row `$07` is the control that stores the value SCX
-**already holds**; row `none` is the control with no store at all.
-
-`BASE_M = 16`, i.e. the store's write cycle walks dots ~= 79 -> 107:
-
-| engine | model | M0 | M1 | M2 | M3 | M4 | M5 | M6 | M7 | ctl `$07` | none |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| dingbat | DMG | 4 | 4 | 4 | 4 | **6** | 4 | 4 | 4 | 4 | 4 |
-| dingbat | CGB C/D/E | 4 | 4 | 4 | **6** | 4 | 4 | 4 | 4 | 4 | 4 |
-| SameBoy | DMG | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 |
-| SameBoy | CGB C/D/E | 3 | 3 | **5** | 3 | 3 | 3 | 3 | 3 | 3 | 3 |
-| DocBoy | DMG | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 4 |
-| DocBoy | CGB | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 |
-
-(dingbat here is main at `64b445c`, "ship the live fine-scroll latch and the
-slot-counter wrap". That commit landed while this probe was being written, and
-it is what puts an extension in the dingbat rows at all: measured against the
-commit before it, every dingbat row is flat. So the probe's first job was
-already done -- it saw a mechanism ship.)
-
-The store window was then walked over the rest of the line by rebuilding at
-other `BASE_M` (the read dot is held fixed automatically, see the ROM's
-comment). Every engine that moves at all moves in exactly one place:
-
-| `BASE_M` | store write dots | dingbat DMG | dingbat CGB | SameBoy CGB | others |
-|---|---|---|---|---|---|
-| 8 | 47 -> 75 | -- | -- | -- | -- |
-| 12 | 63 -> 91 | -- | **M7** | **M6** | -- |
-| 16 | 79 -> 107 | **M4** | **M3** | **M2** | -- |
-| 20 | 95 -> 123 | **M0** | -- | -- | -- |
-| 24 | 111 -> 139 | -- | -- | -- | -- |
-
-Each engine's two hits are the *same dot* reached from two different builds,
-which is the check that the sweep is measuring a dot of the line and not an
-artefact of the slide: dingbat DMG at 95, dingbat CGB at 91, SameBoy CGB at 87.
-
-**Verdict.** The extension is not a growing function of how late the store
-lands. In every engine that has one it is a **single one-M-cycle-wide window**
-worth exactly **+2 M-cycles = 8 dots**, and it fires **only when the store
-changes the value** -- the `$07 -> $07` control never extends anything, in any
-engine, at any position. That is a far smaller and far more testable shape than
-"grows with how late the store lands", which is how the campaign's bracket
-described it.
-
-Where the engines disagree is the window's POSITION and which machines have one:
-
-| | DMG | CGB C/D/E |
-|---|---|---|
-| dingbat | +8 dots at store dot 95 | +8 dots at store dot 91 |
-| SameBoy | none | +8 dots at store dot 87 |
-| DocBoy | none | none |
-
-So dingbat and SameBoy now agree on the magnitude and the shape and differ by
-**one M-cycle** on where the window sits on CGB, and dingbat has a DMG window
-SameBoy does not. The 8 dots sit inside gambatte's CGB bracket of 7-10. Neither
-oracle reaches gambatte's DMG bracket of 11-14, and DocBoy has no extension at
-all on either machine.
-
-**What dingbat does at these points, and what to do about it.** dingbat's live
-fine-scroll latch produces the right magnitude out of a derived mechanism
-rather than a fitted constant, which is the outcome the campaign wanted. The
-open quantity is now one M-cycle of position on CGB and the existence of the
-DMG window -- both of which this ROM measures directly on silicon, in one
-photograph, without any of the four rounds' machinery.
-
----
-
-## (c) acid-hell against daid, on one frame
-
-`probe_c_arbitrate.gb` (plus `_scx3` and `_scx7`). One halt anchor at
-`LY = LYC = 0`, then a loop whose body is exactly 115 M-cycles — one dot more
-than a scanline — so each iteration starts four dots later in its line than the
-last. Each iteration puts two features on its own line:
-
-* one **BGP write** against a flat background, so the resulting band **edge**'s
-  column reads out emission's phase — daid's ruler;
-* one **LCDC.4 pulse** eight dots wide over a map whose tile index reads back
-  different data in the two addressing modes, so the glitched bitplane fetch
-  shows up as a column that is unambiguously the other mode's data —
-  acid-hell's residue.
-
-Two staircases descend across the frame. The measurement is not either
-staircase's absolute position — both carry the halt-wake latency, which no two
-engines have to share — it is the **map from one to the other within a single
-frame**, which is the whole reason the two features are on one frame.
-
-Band edge → glitch-column start, lines 2..9, `SCX = 0`:
-
-| model | line 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
-|---|---|---|---|---|---|---|---|---|
-| DMG | 5→56 | 9→56 | 13→64 | 17→64 | 21→72 | 25→72 | 29→80 | 33→80 |
-| CGB-D, CGB-E, DocBoy-CGB | 9→56 | 13→64 | 17→64 | 21→72 | 25→72 | 29→80 | 33→80 | 37→88 |
-| CGB-C | 10→56 | 14→64 | 18→64 | 22→72 | 26→72 | 30→80 | 34→80 | 38→88 |
-
-**Every engine produces exactly these numbers.** dingbat, SameBoy and DocBoy
-are identical, cell for cell, at every model and at `SCX = 0`, `3` and `7`
-(the `SCX = 3` and `SCX = 7` frames are the `SCX = 0` frame with both staircases
-shifted left by 3 and by 7 — the fetch grid and the emission grid move together
-with the fine scroll, in all three engines).
-
-**The probe's resolution is demonstrated inside its own results.** CGB-C puts
-the band edge one pixel further right than CGB-D/E — 10 against 9 — with the
-glitched column *unchanged* at 56. That is a one-dot separation between
-emission and the fetch grid, it is revision-specific, and dingbat and SameBoy
-reproduce it independently and exactly. So a four-dot separation would be
-unmissable on this frame.
-
-**Verdict.** None of the three oracles separates emission from the fetch grid
-by four dots on one frame. All three place the band edge and the glitched
-column on one grid, and dingbat is already in that agreement. If the hardware
-photograph shows the same relationship, then acid-hell and daid cannot both be
-describing this machine out of the same anchor, the 2-pixel `cgb-acid-hell`
-residue is a **reference** question rather than a model one, and the renderer
-should not be asked to express a split that no device produces. If the
-photograph shows the two staircases four pixels apart where all three engines
-put them together, then the split is real, and this frame is the derivation the
-four rounds of constants could not supply.
-
-That is the whole value of the experiment: for the first time the two sides of
-the contradiction are a single measurement with a single number, and the
-oracles have committed to a prediction before the answer arrives.
-
----
+The probe carts in `tools/gbprobe/` report raw values and contain no
+expectation; each renders its result on screen and to WRAM, and
+`tools/gbprobe/readout.py` / `arbread.py` / `read_probe_e.py` read the
+photograph. This is the table of probe → dingbat prediction → hardware. Rows
+pinned only by comparison with another emulator are kept to one line each and
+listed in the oracle side-file; the hardware column is the evidence.
 
 ## Summary
 
-| experiment | dingbat | SameBoy | DocBoy | what the photo decides |
-|---|---|---|---|---|
-| (a) idiom | idiom matters, DMG @ SCX=3 only | idiom never matters | idiom never matters | whether `STAT_M0_FIELD_TAIL` survives at all |
-| (a) DMG/CGB boundary | same dot on both | CGB one M-cycle earlier | CGB one M-cycle earlier | a split dingbat does not model |
-| (b) SCX extension | +8 dots, one dot wide, at store dot 95 (DMG) / 91 (CGB) | none on DMG; +8 dots at store dot 87 on CGB | none | where the window sits, and whether a DMG has one |
-| (c) arbitration | emission and fetch on one grid | same | same | whether the 4-dot split exists at all |
+| probe | measures | dingbat | hardware |
+|---|---|---|---|
+| (a) `probe_a_statidiom.gb` | whether `LD A,(C)` and `LDH A,($41)` report the STAT mode field differently at the mode-0 edge (`STAT_M0_FIELD_TAIL`) | idiom matters on DMG at SCX=3 only (`LD A,(C)` flips one step later); never on CGB | **unrun on a DMG** (the SP arm only checks the CGB-side zero) |
+| (b) `probe_b_scxm3.gb` | how a mid-line SCX store lengthens mode 3 | +8 dots in a single one-M-cycle window at store dot 95 (DMG) / 91 (CGB); the `$07→$07` control never extends | photographed on GBA SP (IMG_3807), **not machine-read** — `photowarp.py` registration too coarse for a 4-dot reading |
+| (c) `probe_c_arbitrate.gb` (+`_scx3`, `_scx7`) | emission phase (BGP band edge) vs fetch-grid phase (LCDC.4 glitch column) on one frame | band edge and glitch column on one grid (table below) | photographed on GBA SP (IMG_3804–3806), **cannot be registered**: black background, no frame edge; needs corner marks in the ROM and a re-shoot |
+| (d) `probe_d_tdsel_*.gb` | CGB TILE_SEL arrival (`CGB_TDSEL_LATENCY`) | — | unrun |
+| (e) `g1_scx0.gb`, `g1_scx4.gb` | halt-wake PPU phase (`CGB_HALT_PPU_LEAD`), anchor line 16 | SCX 0 `32 40 40 48 …` (lead 0) / `40 40 48 48 …` (lead 1); SCX 4 `28 36 …` / `36 36 …` | **GBA SP: SCX 0 `24 32 32 40 40 48 48 56 56 64 64 71 71 79`; SCX 4 `20 28 28 36 36 45 45 53 53 61 61 69 69 77`** — dingbat 2 M out at lead 0, 4 M at lead 1 (docs/hwprobe-questions.md, g1) |
 
-Three things to carry forward whatever the photograph says. First, (a) and (b)
-each hand back a **DMG/CGB boundary split** that two oracles agree on and
-dingbat does not model — that is a separate, cheap, independently testable
-finding. Second, (b)'s extension is now a *one-dot window* worth 8 dots, not a ramp,
-in both engines that have one -- a far smaller thing to model than "grows with
-how late the store lands", and the residual disagreement with SameBoy is one
-M-cycle of position rather than a mechanism.
-Third, (c) has been reduced from two irreconcilable reference frames to one
-photograph with one number on it.
+## (a) STAT read idiom
 
-## Caveats
+BG only, objects off, window parked, SCY = 0, one halt anchor per measurement
+on line `$47`. The two idioms have their IO cycles equalised (`LD A,(C)` reads
+on M2, `LDH A,($41)` on M3, so the `LD A,(C)` arm carries one more NOP) and
+sample the same PPU dot. SCX = 3 is the measurement, SCX = 0 the control; the
+sweep is 16 M-cycle steps about the mode-0 boundary and the readout is the step
+at which each column first reads mode 0.
 
-* Probe (c) carries **no CGB flag**, so on a CGB it runs in DMG-compatibility
-  mode. This is forced, not a shortcut: BGP is the emission ruler and BGP is
-  dead in true CGB mode, where colour comes from CRAM and CRAM is not writable
-  during mode 3. DMG-compat is the machine `daid/ppu_scanline_bgp` itself runs
-  on, so the ruler is the reference frame's ruler; but a mechanism that exists
-  only in true CGB mode would be invisible to this frame.
-* Probe (c)'s LCDC.4 pulse is eight dots wide, which is the shortest gap two
-  2-M-cycle stores can leave, so it always redirects **both** bitplane reads of
-  one fetch. A half-glitched fetch — one plane from each address — is what
-  acid-hell's finest residue is about, and this ROM cannot produce one. The
-  colour indices are laid out so that a half-glitch would read out as index 1 or
-  2 if a machine ever produced one.
-* DocBoy has no CGB revision axis (`ENABLE_CGB` is compile-time), so its CGB
-  column is one number for C, D and E by construction, not by measurement.
-* The DMG legs are byte-comparable across all three engines; the CGB legs are
-  not, because DocBoy stores RGB565 where the other two keep RGB555. Every
-  comparison above is structural — which column, which step — and none of it
-  depends on a colour value.
+dingbat: DMG `0A / 09 / 09 / 09` (`LD A,(C)`@3, `LDH`@3, `LD A,(C)`@0,
+`LDH`@0); every CGB revision and AGB `09` in all four. A hardware photo in which
+both columns flip at the same step deletes `STAT_M0_FIELD_TAIL` and
+`STAT_M0_TAIL_MAX_MC` and reopens the ~60 rows they reconcile. Oracle
+comparisons also predict the CGB mode-0 boundary one M-cycle earlier than the
+DMG's (dingbat: same dot) — pinned only by comparison; the photo arbitrates.
+
+## (b) SCX mode-3 extension
+
+SCX = 7 written in mode 2 so the line latches fine scroll 7; then from one
+anchor a slide of `BASE_M + M` NOPs, the store (`ld a,$05` / `ldh [c],a`), a
+slide carrying a `(7 − M)` term so the read lands on the same dot for every
+row, and `LDH A,($41)`. Rows are store positions M = 0..7, row `$07` stores
+the value SCX already holds, row `none` stores nothing. Readout is the sweep
+step at which each row first reads mode 0.
+
+dingbat (`BASE_M = 16`, store walking dots ~79→107): DMG `4 4 4 4 6 4 4 4 | 4 | 4`,
+CGB `4 4 4 6 4 4 4 4 | 4 | 4`. Walking `BASE_M` over 8/12/16/20/24 hits the same
+dot from two builds (DMG 95, CGB 91), which checks the sweep measures a dot of
+the line: the extension is one M-cycle wide, worth exactly +2 M = 8 dots, and
+fires only when the store changes the value. That is inside gambatte's CGB
+bracket of 7–10 dots; gambatte's DMG bracket is 11–14 and no emulator
+reproduces it. Open on hardware: the window's position on CGB and whether a
+DMG has one at all.
+
+## (c) emission vs fetch grid on one frame
+
+One halt anchor at `LY = LYC = 0`, then a loop body of exactly 115 M-cycles so
+each iteration starts four dots later in its line. Per line: one BGP write
+against a flat background (band edge = emission phase, daid's ruler) and one
+8-dot LCDC.4 pulse over a map whose tile index reads different data in the two
+addressing modes (glitched column = fetch grid, acid-hell's residue). The
+measurement is the map from one staircase to the other within a frame, not
+either one's absolute position.
+
+dingbat, band edge → glitch-column start, lines 2..9, SCX = 0:
+
+| model | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+|---|---|---|---|---|---|---|---|---|
+| DMG | 5→56 | 9→56 | 13→64 | 17→64 | 21→72 | 25→72 | 29→80 | 33→80 |
+| CGB-D, CGB-E | 9→56 | 13→64 | 17→64 | 21→72 | 25→72 | 29→80 | 33→80 | 37→88 |
+| CGB-C | 10→56 | 14→64 | 18→64 | 22→72 | 26→72 | 30→80 | 34→80 | 38→88 |
+
+SCX 3 and 7 shift both staircases left together. CGB-C puts the band edge one
+pixel right of CGB-D/E with the glitch column unchanged — a one-dot
+emission/fetch separation the probe resolves, so a four-dot one would be
+unmissable. If hardware shows the staircases together, acid-hell and daid
+cannot both be read out of one anchor; if four apart, the split is real and
+this frame is its derivation. The g1 result (2 M between an emission-exact and
+a fetch-grid-measured path on the same machine) makes this the next shot.
+
+Caveats: probe (c) carries no CGB flag (BGP is inert in native CGB mode, where
+CRAM is not writable in mode 3), so on a CGB it runs in compat mode — the
+machine daid's ROM runs on. Its 8-dot pulse always redirects both bitplane
+reads of one fetch; a half-glitched fetch would read out as index 1 or 2.

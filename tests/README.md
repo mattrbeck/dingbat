@@ -1,17 +1,14 @@
 # tests/
 
-The test entry points and their gotchas. Verify commands against the sources
-cited; this file summarizes, it is not the authority.
+The test entry points and their gotchas. This file summarises; the sources it cites are
+the authority.
 
-## Building: `-d:test_harness` is a LINK flag first
+## Building: `-d:test_harness` is a link flag first
 
-Every headless binary here builds with `-d:test_harness`. Its real job is not
-the harness-only code it gates (APU capture, `common/test_output.nim`,
-savestate test hooks) — it is what stops `nim.cfg` from appending the GUI's
-SDL2/OpenGL link flags (`@if not test_harness:` at the top of `nim.cfg`; the
-comment above the per-suite tasks in `dingbat.nimble` spells this out).
-Without it a headless binary links fine on a dev Mac with Homebrew SDL2 and
-fails to link on every CI runner. Leave the flag on for any new test binary.
+Every headless binary builds with `-d:test_harness`. Besides gating harness-only code
+(APU capture, `common/test_output.nim`, savestate hooks) it stops `nim.cfg` from
+appending the GUI's SDL2/OpenGL link flags (`@if not test_harness:`). Without it a
+headless binary links on a dev Mac with Homebrew SDL2 and fails on every CI runner.
 
 ```
 nimble test_build    # -> ./dingbat_test  ./dingbat_test_runner
@@ -24,748 +21,289 @@ nimble bench_build   # -> ./dingbat_bench
 ./dingbat_test <rom> [rom2] --mode=<mode> [options]
 ```
 
-Modes (the authority is the arg parsing at the bottom of `dingbat_test.nim`):
-`serial`, `sram`, `mooneye`, `mgba`, `mgba-suite`, `jsmolka`, `fuzzarm`,
-`magen-green`, `magen-nored`, `gambatte`, `microtest`,
-`screenshot`, `stateroundtrip`, `rewindtest`, `linktest`, `normlinktest`,
-`norm32linktest`, `attachtest`, `netlink`, `speclink`, `speclinkbench`,
-`rollback`, `rollbacknet`, `gblinktest`.
+Modes (authority: the arg parsing at the bottom of `dingbat_test.nim`): `serial`,
+`sram`, `mooneye`, `mgba`, `mgba-suite`, `jsmolka`, `fuzzarm`, `magen-green`,
+`magen-nored`, `gambatte`, `microtest`, `screenshot`, `stateroundtrip`, `rewindtest`,
+`linktest`, `normlinktest`, `norm32linktest`, `attachtest`, `netlink`, `speclink`,
+`speclinkbench`, `rollback`, `rollbacknet`, `gblinktest`.
 
 Options: `--timeout=<frames>`, `--frames=<warmup>`, `--screenshot=<path.ppm>`,
-`--max-fails=<n>` (fuzzarm),
-`--color`, `--cgb`, `--model=<dmg0|mgb|sgb|...>` (mooneye boot-state tables),
-`--nosave`, `--ed-breakpoint`, `--bb-breakpoint`, `--screen-check`,
-`--bios=<path>`,
+`--max-fails=<n>` (fuzzarm), `--color`, `--dmg`, `--cgb`, `--sgb`, `--cgb-rev=<0|A|B|C|D|E>`,
+`--model=<dmg0|mgb|sgb|cgb0|...>` (boot table + `GbQuirks` revision), `--nosave`,
+`--ed-breakpoint`, `--bb-breakpoint`, `--screen-check`, `--bios=<path>`,
 `--sio=null|loopback`, and for the link modes `--listen`, `--connect`,
-`--netlink-delay-ms`, `--link-contract=multi|normal|normal32`,
-`--attach-after`.
+`--netlink-delay-ms`, `--link-contract=multi|normal|normal32`, `--attach-after`.
 
-These four GB flags exist because different suites end a run differently, and
-each is opt-in so it cannot change how another suite is scored on the same
-binary:
+Four GB flags exist because suites end a run differently; each is opt-in so it cannot
+change how another suite is scored:
 
-- `--nosave` blanks cart RAM and detaches the `.sav`. Battery-backed suite
-  ROMs otherwise drop a save next to the ROM **in the shared cache dir**, and
-  the next run loads it back as power-on state — non-reproducible locally, and
-  in CI the `actions/cache` would carry one run's SRAM into the next.
-- `--ed-breakpoint` makes the undefined opcode `0xED` end the run with the
-  mooneye verdict. That was mooneye-gb's magic breakpoint in 2016, which is
-  what wilbertpol's fork is built against.
-- `--screen-check` adds one assertion about the panel to a run that is
-  otherwise scored without looking at it: within 240 frames of the verdict the
-  framebuffer must go 10 frames unchanged, and it must not be a single flat
-  colour. It is deliberately *not* a glyph check — see "blargg's on-screen text
-  is NOT an oracle" below for why one would be wrong. The runner turns it on
-  for the eleven `blargg/cpu_instrs` rows.
-- `--bb-breakpoint` makes `LD B,B` end the run whatever the registers hold.
-  AGE signals failure as "any register values other than the Fibonacci ones",
-  with no dedicated failure signature — without this a failing AGE ROM never
-  stops and burns its whole timeout. It must stay opt-in: blargg executes
-  `LD B,B` mid-test as an ordinary instruction.
+- `--nosave` blanks cart RAM and detaches the `.sav`. Battery-backed suite ROMs otherwise
+  drop a save in the shared cache dir and the next run loads it as power-on state (in CI
+  `actions/cache` would carry it between runs).
+- `--ed-breakpoint` makes undefined opcode `0xED` end the run with the mooneye verdict
+  (mooneye-gb's 2016 magic breakpoint, which wilbertpol's fork targets).
+- `--screen-check` asserts the panel settles (10 unchanged frames within 240 of the
+  verdict) and is not one flat colour. Deliberately not a glyph check — see "blargg's
+  on-screen text is not an oracle". On for the eleven `blargg/cpu_instrs` rows.
+- `--bb-breakpoint` makes `LD B,B` end the run whatever the registers hold. AGE signals
+  failure as "registers not Fibonacci" with no failure signature, so a failing AGE ROM
+  otherwise burns its timeout. Must stay opt-in: blargg executes `LD B,B` mid-test.
 
-`--mode=microtest` scores GBMicrotest: run `--timeout` frames, then read the
-Game Boy's HRAM — `$FF80` actual, `$FF81` expected, `$FF82` verdict
-(`$01` pass / `$FF` fail). Only `$FF82` is scored, per the suite's howto: some
-of its tests leave `$FF80 == $FF81` on a failure. There is no completion
-signal at all — the ROMs write their result and keep running — so the frame
-count is the exit condition.
+`--mode=microtest` runs `--timeout` frames then reads HRAM `$FF82` (`$01` pass / `$FF`
+fail; `$FF80`/`$FF81` are actual/expected but the howto says only `$FF82` is reliable).
+The ROMs never stop, so the frame count is the exit condition.
 
-Typical single run (mGBA suite, ~1.5 s when waitloop detection is healthy,
-~70 s when it is broken):
+### mGBA suite
 
 ```
 ./dingbat_test /tmp/dingbat-test-roms/mgba-suite.gba --mode=mgba-suite --timeout=36000
 ```
 
-`DINGBAT_NO_WAITLOOP=1` turns idle-loop fast-forward off here as it does in
-`dingbat_bench`. The fast-forward SNAPS `scheduler.cycles` to the next pending
-event, so any suite row that measures a *spin loop* (the Misc "H-blank bit
-start" flips poll DISPSTAT and time the gaps with TM0) reads back the skip's
-sampling resolution, not the emulator's timing. Set it before concluding a row
-is a timing bug.
+~1.5 s with waitloop detection healthy, ~70 s without. `DINGBAT_NO_WAITLOOP=1` turns
+idle-loop fast-forward off. The fast-forward snaps `scheduler.cycles` to the next pending
+event, so any row that times a spin loop (the Misc "H-blank bit start" flips poll DISPSTAT
+and time gaps with TM0) reads back the skip's sampling resolution; set it before
+concluding a row is a timing bug. With the skip off the six flips' residuals are
+non-uniform in sign, so the remainder is real DISPSTAT/H-blank timing error, unattributed.
+`-d:gbaskipcap=<n>` bounds the skip by a constant instead of the PSG's next deadline.
 
-### Reading mGBA-suite rows: the columns are swapped in ONE section
+**Argument order differs in one section.** Every section prints failures through a local
+`doResult()` (`mattrbeck/mgba-suite-auto`, one per `src/*.c`). `src/misc-edge.c` passes
+`(expected, measured)`, so in the **Misc** section `Got X vs Y` means X is the hardware
+constant and Y dingbat's value. Everywhere else — including Timing, where rows are a cycle
+or two apart — `Got` is dingbat's measurement and `vs` the hardware constant.
+`results_mgba_suite.md`'s Actual/Expected columns are parsed from these lines and inherit
+the asymmetry.
 
-Every section prints its failures through a local `doResult()`, and they do
-**not** agree on argument order. Checked against the suite sources
-(`mattrbeck/mgba-suite-auto`, one `doResult` per `src/*.c`):
+**Known-unpassable rows.** The runner fetches `mattrbeck/mgba-suite-auto`'s
+`releases/latest`, guarded by `MgbaSuiteSha1` so a new upstream release is reported
+rather than silently re-baselined. That build carries the upstream fixture fixes
+(`mgba-emu/suite@8c97f2c9` volatile `dmaPrefetch` source, `@a58437f3` re-measured
+"H-blank bit start" constants, `@2a8eca1`, `@fbe6156`/`@aac98dc`). "DMA Prefetch Break"
+expects `0x10000000 + 4 * iterations` with the count set by where gcc placed the loop, so
+nobody passes it.
 
-- **`src/misc-edge.c` is swapped.** Its signature is
-  `(preface, testName, value, expected)`, and its caller — the only one in the
-  suite that does this — passes `(activeTest->expected[j], currentTest[j])`.
-  So for the **Misc** section, and only there, `Got 0xAAA vs 0xBBB` means
-  **"Got" is the ROM's hardcoded hardware constant and "vs" is what dingbat
-  measured.**
-- **Everywhere else the natural reading is correct.** `timing.c` takes
-  `(preface, testName, value, calibration, expected)` and prints
-  `Got (value - calibration) vs expected`; `memory.c`, `dma.c`, `bios-math.c`,
-  `carry.c` and the rest all pass `(measured, expected)`. So in the **Timing**
-  section — the one where this matters most, since its rows are cycle counts a
-  cycle or two apart — **"Got" is dingbat's measurement and "vs" is the
-  hardware constant.** `timing.c` has had that order since `6d3651f`; it was
-  never swapped.
+### jsmolka, FuzzARM, MagenTests
 
-The same asymmetry reaches the Actual/Expected columns of
-`results_mgba_suite.md`, which are parsed from these lines. Get it backwards in
-Timing and every "we are one cycle short" becomes "we are one cycle long",
-which points any fix in the opposite direction.
-
-### The suite ROM's known-unpassable rows
-
-**The release bump described below has already happened.** `dingbat_test_runner`
-no longer pins v1.0: it fetches `mattrbeck/mgba-suite-auto`'s
-`releases/latest` and guards it with `MgbaSuiteSha1`, so a new upstream release
-is reported loudly rather than silently re-baselining (see the comment above
-that constant). The ROM in the cache is the post-fix build — Misc is 12 rows,
-not 10, and it carries the re-measured "H-blank bit start" constants. What
-follows is kept because it still explains *which* rows can never pass and why.
-
-The two upstream fixture fixes, both now present:
-
-- `mgba-emu/suite@8c97f2c9` changed `dmaPrefetch`'s source array from `u32 a[8]`
-  to `vu32 a[8]`. Without `volatile` a modern gcc dead-store-eliminates the
-  initializer (its address only escapes into a volatile store), so the DMA
-  moves stack garbage and "DMA Prefetch Read" can never equal `0xDEAD0000`.
-- `mgba-emu/suite@a58437f3` re-measured the "H-blank bit start" constants for
-  modern gcc codegen: `{0x4D1, 0x85, 0x3EC, 0xE4, 0x3EC, 0xE4, 0x3F5}` became
-  `{0x4D0, 0x87, 0x3EC, 0xE5, 0x3EB, 0xE3, 0x3F3}`. v1.0 carries the old
-  constants with new codegen.
-
-The shipped ROM also carries `mgba-emu/suite@2a8eca1` (de-flakes two DMA0
-wrap-around tests, DMA 1256 -> 1244 rows) and `@fbe6156`/`@aac98dc` (adds a
-"DMA count latching" test, Misc 10 -> 12 rows). "DMA Prefetch Break" remains
-unpassable by anyone: it expects `0x10000000 + 4 * iterations` where the
-iteration count is decided by where gcc happened to put the loop, so it is not
-comparable across builds at all.
-
-**Score Misc with `DINGBAT_NO_WAITLOOP=1` — but it is worth one row, not six.**
-Measured 2026-08-03 on `151b952` against the ROM the runner actually fetches:
-default fast-forward **4/12**, `DINGBAT_NO_WAITLOOP=1` **5/12** (only "Flip 5"
-recovers). An earlier note in this file claimed 11/12 for a no-waitloop run;
-that figure was taken against an unpublished local candidate build and **does
-not reproduce against the published ROM** — do not use it as a target. The
-mechanism below is real, but it accounts for **one** row, not six. The six
-"H-blank bit start" flips spin on DISPSTAT and time the gaps with TM0, so the
-skip's granularity does contaminate what they report — and turning the skip off
-recovers exactly one of them. The other six rows' residuals, measured with the
-skip off, are `+3, -7, +1, -2, +8, -10` cycles: **non-uniform in sign**, which a
-sampling-resolution artefact cannot be. So the remainder is real DISPSTAT /
-H-blank timing error and is still unattributed. Do not write these off as "just
-the waitloop".
-`-d:gbaskipcap=<n>` bounds the skip by a constant instead of by the PSG's
-next deadline (see `cpu.tick`); `n = 15` recovers two of the six. Turning that
-into a real fix means bounding the skip by the **loop's own period** — a spin
-loop cannot observe a change before its next poll — which `analyze_loop`
-currently does not measure. That is unstarted work, not a knob to turn.
-
-`--mode=jsmolka` scores jsmolka/gba-tests. Every ROM in that suite reports
-through one protocol (`lib/macros.inc`): the verdict lives in `r12`, the ROM
-branches to a common `eval` on the **first** failing check with `r12` = that
-check's number, and then spins in `b idle`. The mode runs until the PC stops
-moving and reads `r12` — "All tests passed" or "Failed test N", matching what
-the ROM prints on screen. It also detaches the battery file, because
-`save/sram.gba`'s first check reads an untouched chip. All-or-nothing per ROM
-by construction: nothing after check N runs.
+`--mode=jsmolka`: every ROM reports through `lib/macros.inc` — the verdict is in `r12`,
+the ROM branches to a common `eval` on the first failing check and spins in `b idle`. The
+mode runs until the PC stops moving and reads `r12`. It detaches the battery file because
+`save/sram.gba` reads an untouched chip. All-or-nothing per ROM.
 
 ```
-./dingbat_test /tmp/dingbat-test-roms/gba-tests-a6447c5/gba-tests-<rev>/arm/arm.gba \
-  --mode=jsmolka --timeout=600
+./dingbat_test /tmp/dingbat-test-roms/gba-tests-a6447c5/gba-tests-<rev>/arm/arm.gba --mode=jsmolka --timeout=600
 ```
 
-`--mode=fuzzarm` scores DenSinH/FuzzARM (GPL-3.0), five prebuilt ROMs of
-10 000 **randomly generated** ARM/Thumb tests each — data processing with every
-shift type and shift amount, multiplies, load/stores — run from arbitrary
-starting CPSR flags. Unlike jsmolka's hand-written checks this ROM does not
-stop at the first failure: it reports one, waits for a button, and continues.
-The mode drives that gate (holding A for one frame, releasing it the next) so
-**every** failing test is reported, and reads each verdict out of the ROM's own
-structured 16-word dump at `0x02000000` — state (ARM/Thumb), the opcode +
-shift text, the inputs, and got-vs-expected `r3` (the shifted operand), `r4`
-(the result) and CPSR. No BIOS, no PPU and no pinned frame hash sit between the
-CPU and the score. "Done" is the ROM's `b .` self-branch, located by scanning
-the image for its unique `0xEAFFFFFE`; do **not** substitute "PC unchanged for
-two frames" (the jsmolka mode's signal) — this ROM never waits on vblank, so a
-repeated frame-boundary PC is common and silently truncates the run.
-
-Per-failure lines and a rollup by failure class (state + opcode + which of
-r3/r4/CPSR disagreed, and for CPSR which flags) go to **stderr**; stdout is a
-single `FUZZARM: N/10000 passed` line, which is what the runner puts in
-`results.md` (it merges the two streams — unread, stderr is both lost and a
-deadlock once the triage outgrows the pipe buffer — and finds the verdict by
-that marker, never by position, since a block-buffered stdout can flush after
-an unbuffered stderr). On a failure the runner replays the triage into its own
-log.
-`--max-fails=<n>` (default 500) caps the report — each failure costs two
-emulated frames of button-ack.
+`--mode=fuzzarm`: five DenSinH/FuzzARM ROMs of 10 000 randomly generated ARM/Thumb tests.
+The ROM reports a failure, waits for a button and continues; the mode drives that gate and
+reads each verdict out of the ROM's 16-word dump at `0x02000000`. "Done" is the ROM's
+`b .` self-branch, found by scanning for `0xEAFFFFFE` — not "PC unchanged for two
+frames", which this ROM (never waiting on vblank) trips early. Per-failure triage goes to
+stderr; stdout is one `FUZZARM: N/10000 passed` line the runner finds by marker.
+`--max-fails=<n>` (default 500) caps the report.
 
 ```
-./dingbat_test /tmp/dingbat-test-roms/fuzzarm-a675329-ARM_Any.gba \
-  --mode=fuzzarm --timeout=20000
+./dingbat_test /tmp/dingbat-test-roms/fuzzarm-a675329-ARM_Any.gba --mode=fuzzarm --timeout=20000
 ```
 
-`--mode=magen-green` / `--mode=magen-nored` score alloncm/MagenTests (MIT), CGB
-ROMs whose verdict is the **screen colour**, not a reference image:
-`src/common.asm` fixes WHITE `$FFFF`, RED `$001F`, GREEN `$03E0`, BLUE `$7C00`,
-and each test's README entry says what they mean ("the screen should be all
-green"; for `hblank_vram_dma`, red = the HBlank HDMA never ran, blue = it ran
-while the CPU was halted). `magen-green` requires every pixel green;
-`magen-nored` requires zero red pixels, which is `bg_oam_priority`'s stated
-criterion ("... with no red lines") and is the weaker of the two by design.
-Both print a mealybug-style `N% correct (...)` line with the full colour
-histogram, so a failure names its own cause.
+`--mode=magen-green` / `magen-nored`: alloncm/MagenTests, CGB ROMs whose verdict is the
+screen colour (`src/common.asm`: WHITE `$FFFF`, RED `$001F`, GREEN `$03E0`, BLUE `$7C00`).
+`magen-green` requires every pixel green; `magen-nored` zero red pixels
+(`bg_oam_priority`'s stated criterion). Not run through `--mode=screenshot`: the repo
+ships no 160x144 reference. `oam_internal_priority` is skipped (prose-only criterion).
 
-This is deliberately **not** run through `--mode=screenshot`: the repo ships no
-160x144 reference frame (`images/` is a 641x574 upscale, a 318x295 SameBoy
-window grab, two 15x17 swatches and a photo of real hardware), and a pinned
-frame hash would be a golden of dingbat's own output with nothing behind it.
-`oam_internal_priority` is not run for the same reason — its only stated
-criterion is prose, and red is a legitimate colour in it.
-
-`--mode=gambatte` is the odd one out: it is **batched**, taking a list of tests
-rather than a ROM (see the gambatte section below).
+`--mode=gambatte` is batched — a list, not a ROM (see "The gambatte suite").
 
 ```
 ./dingbat_test --mode=gambatte --list=/tmp/gam.tsv [--gambatte-frames=15] [--dump-tiles=N]
 ```
 
-Gotcha: piping through `tail`/`head` masks the exit code — a segfault (139)
-looks like success. Check `$?` on the harness itself, or use `set -o pipefail`.
+Piping through `tail`/`head` masks the exit code (a segfault looks like success): check
+`$?` on the harness or use `set -o pipefail`.
 
 ## `dingbat_test_runner` — full suite
 
-Shells out to **`./dingbat_test` in the current working directory**
-(`getCurrentDir()`, see `main()` in `dingbat_test_runner.nim`) — run it from
-the repo root right after `nimble test_build`, or it quits with
-"dingbat_test not found".
+Shells out to `./dingbat_test` in the current directory; run from the repo root after
+`nimble test_build`.
 
-- Downloads external suites into `$DINGBAT_ROM_CACHE` (default
-  `/tmp/dingbat-test-roms`): game-boy-test-roms v7.0 (Blargg, Mooneye and the
-  wilbertpol fork, Mealybug, SameSuite, gambatte, GBMicrotest, age-test-roms
-  and the small screenshot suites), dmg-acid2 v1.0, cgb-acid2 v1.1, the mGBA
-  suite ROM from `mattrbeck/mgba-suite-auto`, and `jsmolka/gba-tests` pinned to
-  the commit in `JsmolkaRev` (the upstream repo ships assembled `.gba`s, so
-  nothing is built), and the five `DenSinH/FuzzARM` ROMs pinned to the commit
-  in `FuzzArmRev` (`a675329cd57da48e3e406216ba2d79dd7e09ee20`; that repo has
-  no release tag, so the ROMs come from raw.githubusercontent at that SHA),
-  and ~30 individual files from `gbdev/GBEmulatorShootout`'s committed
-  `testroms/` tree at `ShootoutRev` (rtc3test, CasualPokePlayer, daid — see
-  "The gbdev shootout's own ROMs" below).
-  **FuzzARM's tests are randomly generated at build time**, so the committed
-  pass/fail baseline is only meaningful for the pinned SHA — bumping it means
-  a different 10 000 tests and a re-baseline, not a regression. Seven
-  `alloncm/MagenTests` `.gbc`s also come down, from the release tag in
-  `MagenRelease`. CI backs this dir with
-  `actions/cache` (`.github/workflows/test.yml`) so a flaky fetch can't fail
-  the run; the cache key must be bumped when a URL/version changes.
-- Flags: `--bios=<path>` (mGBA suite only — the other suites are HLE/boot
-  -table only in this harness), `--apu` / `--suite=apu` (fast-iteration
-  filter: runs ONLY Blargg dmg_sound/cgb_sound + SameSuite APU and prints
-  tallies without rewriting results files; the same three suites are also in
-  the default run and in `results.md`).
+Downloads into `$DINGBAT_ROM_CACHE` (default `/tmp/dingbat-test-roms`): game-boy-test-roms
+v7.0 (Blargg, Mooneye + wilbertpol fork, Mealybug, SameSuite, gambatte, GBMicrotest, AGE,
+the small screenshot suites), dmg-acid2, cgb-acid2, the mGBA suite ROM, `jsmolka/gba-tests`
+at `JsmolkaRev`, FuzzARM at `FuzzArmRev` (tests are generated at build time, so bumping the
+SHA is a re-baseline), MagenTests at `MagenRelease`, and ~30 shootout files at
+`ShootoutRev`. CI backs the dir with `actions/cache`; bump the key when a URL changes.
 
-### Which suites run, and how each one is scored
+Flags: `--bios=<path>` (mGBA suite only), `--apu` (runs only Blargg dmg_sound/cgb_sound +
+SameSuite APU and prints tallies without rewriting results files).
 
-Every one of these is bundled in the single game-boy-test-roms v7.0 download,
-so adding them cost nothing at fetch time. **Each suite ships its own
-`game-boy-test-roms-howto.md` next to its ROMs, and that file is the authority
-on device, exit condition and verdict** — check it before changing a timeout or
-a `--cgb`/model flag here.
+### Which suites run, and how each is scored
+
+Each suite ships a `game-boy-test-roms-howto.md` beside its ROMs; that file is the
+authority on device, exit condition and verdict.
 
 | Suite | Verdict | Notes |
 |---|---|---|
 | Blargg `cpu_instrs`, `mem_timing` | serial text | `tmSerial` |
-| Blargg `instr_timing`, `mem_timing-2`, `oam_bug`, `halt_bug`, `interrupt_time` | `$A000` status + `DEB061` | `tmSram`; `interrupt_time` is CGB-only (`--cgb`), `oam_bug` needs ~21 emulated seconds |
-| Mooneye (Gekkio) | `LD B,B` + Fibonacci regs | `tmMooneye`; `manual-only/sprite_priority` is a screenshot |
-| Mooneye (wilbertpol fork) | opcode `0xED` + Fibonacci regs | `--ed-breakpoint`; `utils/` and `logic-analysis/` have no verdict and are skipped |
-| AGE (`age-test-roms`) | `LD B,B` + Fibonacci regs, or screenshot | `--bb-breakpoint`; the `ncm*` (CGB in non-CGB mode) variants are skipped — that device is not modeled |
-| GBMicrotest | HRAM `$FF82` | `--mode=microtest`, 2 frames (30 for `is_if_set_during_ime0`); 31 of the 513 ROMs never write `$FF82` (`MicrotestNoVerdict`) and 2 more assert an expected byte no Game Boy can produce (`MicrotestBrokenExpected`), so the suite is scored out of 480 |
-| Mealybug Tearoom, Acid2, cgb-acid-hell, bully, strikethrough, scribbltests, turtle-tests, little-things-gb, mbc3-tester | framebuffer vs bundled PNG | see below |
-| SameSuite `dma`, `ppu`, `interrupt`, `sgb`, `apu` | `LD B,B` + Fibonacci regs | `tmMooneye`; `--cgb` except `sgb/`, which runs `--sgb`; `apu/` is also reachable alone via `--apu` |
-| rtc3test, CasualPokePlayer MBC3, daid | framebuffer vs shootout PNG | downloaded from the gbdev shootout, scored with **its** tolerance — see below |
-| MagenTests | screen colour | `--mode=magen-green` / `--mode=magen-nored`, see above |
-| gambatte | glyph OCR of the on-screen result | batched via `--mode=gambatte --list=`; aggregated one row per subdirectory, see below |
-| mGBA suite, jsmolka gba-tests, FuzzARM | GBA; unchanged | see above |
+| Blargg `instr_timing`, `mem_timing-2`, `oam_bug`, `halt_bug`, `interrupt_time` | `$A000` status + `DEB061` | `tmSram`; `interrupt_time` is CGB-only; `oam_bug` needs ~21 emulated seconds |
+| Mooneye (Gekkio) | `LD B,B` + Fibonacci regs | `manual-only/sprite_priority` is a screenshot |
+| Mooneye (wilbertpol) | opcode `0xED` + Fibonacci regs | `--ed-breakpoint`; `utils/`, `logic-analysis/` have no verdict |
+| AGE | `LD B,B` + Fibonacci regs, or screenshot | `--bb-breakpoint`; `ncm*` (CGB in non-CGB mode) skipped |
+| GBMicrotest | HRAM `$FF82` | 2 frames (30 for `is_if_set_during_ime0`); 31 ROMs never write `$FF82` (`MicrotestNoVerdict`), 2 assert a byte no Game Boy produces (`MicrotestBrokenExpected`); scored out of 480 |
+| Mealybug, Acid2, cgb-acid-hell, bully, strikethrough, scribbltests, turtle-tests, little-things-gb, mbc3-tester | framebuffer vs bundled PNG | exact match; see below |
+| SameSuite `dma`, `ppu`, `interrupt`, `sgb`, `apu` | `LD B,B` + Fibonacci regs | `--cgb` except `sgb/` (`--sgb`); `apu/` alone via `--apu` |
+| rtc3test, CasualPokePlayer MBC3, daid | framebuffer vs shootout PNG | scored with the shootout's tolerance, see below |
+| MagenTests | screen colour | see above |
+| gambatte | glyph OCR of the on-screen result | batched; one row per subdirectory |
+| mGBA suite, jsmolka, FuzzARM | GBA | see above |
 
-#### blargg's on-screen text is NOT an oracle — score these on serial only
+**The device each suite is scored on** (`Device` column in `results.md`): `cart` = the
+cart header picks (DMG-ABC for `$0143 = $00`, CPU CGB C for `$80`/`$C0`); a trailing
+token is a specific `--model`. A ROM whose name declares several machines (AGE's
+`ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` pair, mooneye's `-GS` family) gets one
+row per revision. SameSuite APU rows default to **cgbE** (its README states CGB-E passes
+everything and CGB-C fails most channel 1/2/4 tests — `GbQuirks.pcm_read_edge_zero`), with
+a `-cgb0B`/`-cgbDE`/`-A` filename token resolving to its highest member. Mealybug's
+`dma/*-C` rows carry `model: "cgbc"`. gambatte's `dmg08`/`cgb04c` tags name capture
+provenance (a DMG-CPU-08 board, CPU CGB C), which are the runner's defaults; no `--model`
+axis exists for that mode.
 
-Blargg's suites are scored by their serial output, and it is tempting to add a
-screenshot check on top ("the ROM prints the same string to both, so the screen
-must say Passed too"). **It does not, and hardware agrees.** Measured
-2026-08-02 against SameBoy (CGB-E, real CGB boot ROM, `tools/gbfuzz`
-`sameboy_runner` plus an execution-callback probe):
+The local runner's default CGB is CPU CGB C (gambatte's references are `cgb04c`); the
+gbdev shootout adapter passes `--cgb-rev=E` (`cgb-acid-hell` and
+`daid/ppu_scanline_bgp.gbc.png` pull in opposite directions across the C/D boundary and
+only E clears both; the split is `GbQuirks.mixer_write_immediate`). Every reference that
+names a revision is scored at that revision, so there is nothing to reconcile.
 
-- Blargg's runtime switches the CGB to **double speed** during init
-  (`init_crc` calls `set_double_speed` and never switches back), so everything
-  the console prints afterwards is printed at double speed.
-- The console's "wait for VBlank" is a **bounded** poll — `ld bc,$FB1E` /
-  `inc bc` / `ldh a,($44)` / `cp $90`, 1250 iterations of 14 M-cycles. At
-  single speed that budget is 70 000 T-cycles, marginally more than one
-  70 224-dot frame, so it effectively always succeeds. At double speed the same
-  1250 iterations are only **35 000 dots — half a frame** — so it times out
-  whenever the print is entered in the wrong half, and the console then blits
-  its 20-byte row straight into the tile map with the LCD on, straddling
-  mode 3.
-- Those writes are then correctly refused (Pan Docs: VRAM is not CPU-accessible
-  in mode 3). **SameBoy loses them too**: on `06-ld r,r` it drops 28 of the
-  160 blitted cells, on `03-op sp,hl` it drops 32 including the `P`, `a` and
-  `s` of "Passed" — that ROM's result line never reaches the screen on SameBoy
-  at all, at any frame count.
-- *Which* cells are lost is decided by the sub-scanline phase of the console
-  blit, so it differs between any two emulators that are not bit-identical in
-  timing. A screen check would therefore fail on correct emulation, and it can
-  be "fixed" by any constant that nudges the phase — which is exactly the trap.
+#### blargg's on-screen text is not an oracle — score on serial only
 
-There is consequently **no honest in-repo oracle for the blargg screen**: a
-captured golden would be a golden of our own behaviour, and comparing the glyph
-area to the serial text asserts something hardware does not do. What the runner
-does assert is the weaker thing that *is* true regardless of the race: the
-panel settles and is not blank (`--screen-check`, above).
-
-The real gate for this class of bug is cross-emulator: `tools/gbfuzz` for the
-full library, `tools/gbgate` for a two-build framebuffer diff, and for blargg
-specifically, `sameboy_runner <rom> <bootdir> <prefix> "" 1200` against
-`dingbat_test --mode=screenshot --timeout=1200 --bios=<cgb_boot.bin>`. At the
-current `SPEED_SWITCH_STALL_T` dingbat's frame is pixel-identical to SameBoy's
-on all eleven `cpu_instrs` ROMs; that comparison is what caught the stall being
-eight times short, and it is the check to re-run after any GB timing change.
+Blargg's runtime switches the CGB to double speed during init (`init_crc` calls
+`set_double_speed` and never switches back) and its "wait for VBlank" is a bounded poll
+(1250 iterations of 14 M-cycles) that covers a frame at single speed but half a frame at
+double, so it times out whenever a print starts in the wrong half and the console blits
+its row into the tile map with the LCD on, straddling mode 3. Those writes are refused
+(Pan Docs, "Accessing VRAM and OAM"), and which cells are lost depends on the sub-scanline
+phase of the blit — a screen check fails on correct emulation and can be "fixed" by any
+constant that nudges the phase. The runner asserts only `--screen-check`. The gate for
+this class of bug is cross-emulator (`tools/gbfuzz`, `tools/gbgate`,
+`tools/gbppu/blargg_canary.sh`); `SPEED_SWITCH_STALL_T` was pinned by that comparison.
 
 Screenshot notes:
 
-- The reference PNGs already match what `write_ppm` produces (DMG shades
-  `#000000/#555555/#AAAAAA/#FFFFFF`, CGB channels expanded `(X<<3)|(X>>2)`),
-  so no palette work is needed. A screenshot suite comparing at ~0% is a frame
-  count, a device, or a **PNG format** problem, not a color one —
-  `png_reader.nim` covers greyscale (1/2/4/8-bit), greyscale+alpha, RGB, RGBA
-  and indexed, and anything outside that now raises rather than silently
-  decoding to noise.
-- "CGB compatibility mode" references (a CGB booting a non-CGB cart: the AGE
-  `ncm*` images, `mbc3-tester-cgb`) use a third palette and are **not** scored —
-  dingbat has no such device mode. The palette is fixed and documented in
-  mealybug's own howto: background `#000000/#0063C6/#7BFF31/#FFFFFF`, objects
-  `#000000/#943939/#FF8484/#FFFFFF`, which makes such an image identifiable on
-  sight.
+- Reference PNGs already match `write_ppm` (DMG `#000000/#555555/#AAAAAA/#FFFFFF`, CGB
+  channels `(X<<3)|(X>>2)`). A suite comparing at ~0% is a frame count, a device, or a PNG
+  format problem — `png_reader.nim` raises on anything it cannot decode.
+- CGB-compatibility-mode references (a CGB booting a non-CGB cart) use mealybug's
+  documented palette: background `#000000/#0063C6/#7BFF31/#FFFFFF`, objects
+  `#000000/#943939/#FF8484/#FFFFFF`. Every mealybug cart is DMG-flagged, so its `_cgb_c`
+  captures are this mode; the 27 `_cgb_c` rows run as `mealybug-cgb/*` and the `_cgb_d`
+  set as its own arm. Two daid "GBC" rows are really compat mode and are skipped.
+- `strikethrough` and `bully` are `$80` carts; `--mode=screenshot` reads the absence of
+  `--cgb` as "run on a DMG", so their `-dmg` references are scored too.
+- Not integrated: `little-things-gb/tellinglys` (needs a scripted button press);
+  `scribbltests` `fairylake`/`winpos` and Mooneye's `logic-analysis/` (no reference).
 
-  **Mealybug's `_cgb_c` / `_cgb_d` references are exactly this**: every
-  mealybug cart is DMG-flagged (`$143 = $00`), so those captures are a CGB in
-  compatibility mode — measured 2026-08-03, all 47 images across both
-  revisions contain only the six compat colours above and not one native-CGB
-  colour. Compat mode IS modelled now, and the 27 `_cgb_c` rows are wired as
-  `mealybug-cgb/*` (see `build_mealybug_tests`); the `_cgb_d` set stays held
-  out — it captures a later CGB revision, measured 17/20 pixel-exact under
-  `--cgb-rev=D` (see the builder comment and `results.md`'s "Deliberately not
-  scored"). The compat trap still kills two of daid's "GBC" rows — see
-  `build_shootout_tests`, where one of them would have gone in **green**
-  while asserting nothing.
+#### The gbdev shootout's ROMs and its tolerance
 
-  dingbat's CGB PPU is also measured natively: gambatte's `cgb04c` rows are
-  native-CGB and there are thousands of them.
-- `strikethrough` and `bully` are `$80` CGB-capable carts. They used to boot CGB
-  from the header alone, so their `-dmg` references were unreachable; since
-  `--mode=screenshot` reads the *absence* of `--cgb` as "run it on a DMG" the
-  device is named per row and both of strikethrough's references are scored.
+`build_shootout_tests` fetches `ax6/rtc3test`, CasualPokePlayer's MBC3 tests and daid's
+STOP/speed-switch tests file by file at `ShootoutRev`. Their references are scored with
+the shootout's rule (`util.py: compareImage`: 8-bit luma, every pixel within 50) because
+they are screen captures carrying an emulator's colour correction — rtc3test's green is
+`#009100`, unreachable from `(X<<3)|(X>>2)`. `grey_tolerance` on `TestDef` implements it;
+everything else stays exact, so a shootout row's percentage is not comparable to a
+mealybug or gambatte row's. Skipped with a stated reason: `acid/which.gb` and
+`daid/rom_and_ram.gb` (no reference; the shootout scores them INFO), `cpp/sgb-ext-test`
+(needs SGB packet coverage the model lacks), and the compat-mode daid rows.
 
-Not integrated: `little-things-gb/tellinglys` needs a scripted button press and
-`dingbat_test` has no input scripting — only `dingbat_bench` does, via its
-`"600:START,700:A"` script format. `scribbltests` `fairylake`/`winpos` and
-Mooneye's `logic-analysis/` ship no reference at all.
+### Exit code, baselines, hazards
 
-**`rtc3test` no longer needs that parser.** Upstream it is one ROM with a
-three-way menu picked by A / ↓A / ↓↓A, which is why it was listed here as
-blocked on input scripting. The gbdev shootout ships three separate 32 KB
-builds with the menu resolved at build time, so the runner takes those instead
-and the input problem disappears. That is real MBC3 RTC coverage, on native-CGB
-references, and nothing else in the runner exercises the RTC.
-
-### The gbdev shootout's own ROMs, and its tolerance
-
-`build_shootout_tests` fetches four suites that exist nowhere else as a
-distributable artifact — `ax6/rtc3test` (the split builds above),
-CasualPokePlayer's MBC3 tests and daid's STOP/speed-switch tests — file by file
-from `raw.githubusercontent` at the commit in `ShootoutRev`, the way FuzzARM is
-fetched. That is ~30 files under a megabyte, against a 32 MB `testroms/`
-archive; the cache key in `.github/workflows/test.yml` carries the SHA.
-
-**These references are scored with the shootout's tolerance, not exact
-equality**, and that is a real difference in kind from every other screenshot
-suite here. gbdev's `util.py: compareImage` converts both frames to 8-bit luma
-and passes while every pixel is within 50. It has to: its images are screen
-captures of a running emulator, not framebuffer dumps, so they carry that
-emulator's CGB colour correction. rtc3test's green is `#009100`, and the raw
-5-to-8-bit expansion `(X<<3)|(X>>2)` cannot produce it at all — it emits
-`#00CE00`. Exact matching would fail a correct frame, so `grey_tolerance` on
-`TestDef` implements the suite's own rule and `rtc3test-2` passes at 100%.
-Everything else in the tree stays exact, because everything else ships raw
-dumps. Note the consequence when reading `results.md`: a shootout row's
-percentage is *not* comparable to a mealybug or gambatte row's.
-
-Skipped from the shootout, each for a stated reason in the code AND in
-`results.md`'s "Deliberately not scored" section: `acid/which.gb` and
-`daid/rom_and_ram.gb` ship no reference at all (the shootout itself scores
-them INFO, not pass/fail); `cpp/sgb-ext-test` needs SGB packet coverage the
-adapter model does not have; and the daid rows whose "GBC" half is really CGB
-compatibility mode, discussed above.
-
-**Exit-code pitfall:** the runner exits non-zero only on *regressions* —
-tests that pass in the committed `tests/results.md` and fail now. Exit 0 does
-**not** mean everything passed: the baseline carries a lot of known failures
-(see the Summary table at the top of the committed `results.md` for the
-current per-suite tallies; most failures are the PPU-timing suites added on
-purpose to measure them). 48 of those rows are
-aggregated gambatte subdirectories, standing for 2,632/5,005 individual tests
-passing — and those 48 gate on the pass COUNT, not just the pass/fail bit. All 13 jsmolka rows, all 5 FuzzARM rows
-and 6 of the 7 MagenTests rows are green in it, so any of them going red *is* a
-CI failure. `magen/hblank_vram_dma` is baselined failing: dingbat runs the
-HBlank VRAM DMA while the CPU is halted.
-
-The regression key is the **full** test name — `blargg/oam_bug/1-lcd_sync`,
-not `1-lcd_sync` — matching the row exactly as `results.md` writes it. With
-several forks of the same suite in here (mooneye vs mooneye-wilbertpol,
-`mem_timing` vs `mem_timing-2`) anything shorter collides across suites and
-silently mis-keys the gate. A name absent from the baseline is simply not
-gated, which is why adding suites means regenerating and committing
-`results.md` in the same change.
-
-**Parallel-agent hazard:** the runner shards the gambatte batch through
-`$TMPDIR/dingbat-gambatte` and wipes that directory on entry. Two runners going
-at once in different worktrees therefore delete each other's shard output, and
-the victim scores every not-yet-flushed row 0 ("harness produced no verdict").
-Run with a private `TMPDIR` if anything else may be running the suite.
-
-`$DINGBAT_ROM_CACHE` is the same hazard one level up, and it is quieter because
-it does not fail — it re-baselines. The runner reuses any already-present file
-by name, so a session that drops a *different* build at a cached path silently
-changes what every later run scores. Observed 2026-08-03: `mgba-suite.gba` was
-replaced mid-session with the rebuilt master candidate, which moved "Misc. edge
-case tests" from 1/10 to 4/12 — a row-count change, in a GBA suite, in a commit
-that touched only GB code. Set a private `DINGBAT_ROM_CACHE` before generating
-a baseline you intend to commit, and check `git diff tests/results.md` for rows
-your change has no business touching.
-
-**Results-file shape:** `results.md` opens with a provenance line (timestamp,
-commit, ROM-bundle version), a Summary (global tallies + a per-suite table),
-then one section per suite with `| Test | Device | Result |` rows — the Device
-column names the hardware the row is scored on (`cart` = the header picks;
-see the legend in the file) — and closes with a "Deliberately not scored"
-section listing every intentional skip with its reason. Failing rows always
-carry their harness output in the Result cell.
-
-**Results-file caveat:** `tests/results.md`, `tests/results_mgba_suite.md` and
-`tests/results_gambatte.md` are committed baselines, and every run **rewrites
-all three in place** (that is also where the regression comparison reads
-from). After a local run, `git checkout -- tests/results.md
-tests/results_mgba_suite.md tests/results_gambatte.md` unless you are
-intentionally updating the baseline.
-
-`tests/golden/` holds per-row mGBA-suite captures (passing *and* failing
-rows) for diff-based timing work — see `tests/golden/README.md`.
-
-### The device axis: which silicon every suite is actually scored on
-
-Audited suite by suite on 2026-08-21 against `90accfd5`, because a suite scored
-on the wrong machine has rows that are impossible by construction and no amount
-of constant-sweeping can reach them. Method: for each suite, read what the ROMs
-/ their filenames / the bundle's per-suite `game-boy-test-roms-howto.md` claim,
-then **measure** — the whole runner re-scored on every revision dingbat models,
-one device axis at a time, with `gb_set_revision` applied before `post_init` so
-the boot table *and* `GbQuirks` move together.
-
-**The result, first, because it is the useful part: no currently-failing row is
-failing because of the machine it is scored on.** Every one of the 123 red rows
-in the committed baseline is red on all five DMG revisions and all six CGB
-revisions. The revision axis is far from inert — see the tables below — it just
-does not touch anything that is red.
-
-| suite | what the ROMs/refs claim | what dingbat runs | revision axis measured | verdict |
-|---|---|---|---|---|
-| Blargg | howto: DMG-C and CGB-B/E tables | 19 rows `cart` ($0143 = $80 → CGB C), `oam_bug` forced DMG, `interrupt_time`/`cgb_sound` CGB, `dmg_sound` DMG | all 19 `cart` rows PASS on **both** devices; `mgb`/`sgb2` cost `oam_bug/combined` (a timeout, not a verdict) | correct |
-| Blargg dmg_sound | howto: DMG-C | DMG, grDmgABC | 12/12 on every DMG revision | correct |
-| Blargg cgb_sound | howto: ❌ CGB-B, ✅ CGB-C, ✅ CGB-E | CGB, default grCgbC | 12/12 at C/D/E; **11/12 at cgb0 and cgbAB, and the row it drops is `03-trigger`** — which is the howto's own footnote ("test case 3 fails with code 04" on CGB-B) reproduced | correct, and the axis is validated by it |
-| Mooneye | README "Test naming": suffix = the machines it passes on | 81 `cart` (all carts $0143 = $00 → DMG ABC) + one row per machine the suffix names | dmgABC is the max (151); dmg0 148, and cgbC/agb split `misc/boot_hwio-C` | correct |
-| Acid2 | howto: "probably any GB" / "any GBC" | dmg-acid2 DMG, cgb-acid2 CGB | 2/2 everywhere | correct |
-| MagenTests | CGB-only suite; 3 carts $C0, 4 carts $80 | `cart` → CGB C | 7/7 on all six CGB revisions | correct |
-| Mealybug Tearoom | capture names: `_dmg_blob`, `_cgb_c`, `_cgb_d` | DMG / cgbc / cgbd, one row per capture | **live**: forcing everything to C costs the 7 `_cgb_d` rows, to D or E costs 8 `_cgb_c` rows | correct |
-| GBMicrotest | howto: "checked on real hardware believed to be a DMG-CPU-08 … a DMG-CPU B or C" | `cart`, and **all 513 carts are $0143 = $00**, so DMG at grDmgABC | 480/480 on *all five* DMG revisions — but only 368/513 on a CGB, so the axis mattered and the answer is right | correct |
-| AGE | howto: DMG-CPU-C, CPU CGB B, C and E; filename names the arms | one row per named revision (`@cgbab`/`@cgbc`/`@cgbe`, `dmgC`) | **44/89 on every revision, even with each row's `--model` overridden.** None of the four `GbQuirks` reaches an AGE row | correct, but see "inert arms" below |
-| Screenshot suites | per-PNG device token (`-dmg`, `-cgb`, `-cgb-dmg`) | the device the PNG names | bully needs cgbAB..cgbE (fails cgb0/agb); cgb-acid-hell needs C or E (fails D — its own `$FEA0` gate) | correct |
-| SameSuite | howto: no compat info for the non-APU groups | dma/ppu/interrupt CGB, `sgb/` with `--sgb` | 8/8 everywhere | correct |
-| SameSuite APU | apu/README states the result per revision: CGB-C "passes the channel 3 tests and non-channel-specific tests, most other tests fail", CGB-D all but `channel_1_sweep_restart_2`, **CGB-E all**; nine ROMs additionally carry a `-cgb0B`/`-cgb0`/`-cgbB`/`-cgb0BC`/`-cgbDE`/`-A` token | token → `--model`, a range resolving to its highest member; **everything else → `cgbE`, not the tree's default cgbC** | **both halves confirmed by measurement**: `-cgb0B` passes at cgb0 *and* cgbAB and nowhere else, and the `-cgb0`/`-cgbB` pair passes at exactly one revision each. Whole suite forced to one revision: 46/70 at cgb0 and cgbAB, **42/70 at cgbC**, 63/70 at D/E/agb — the C column is the README's own sentence, and it is `GbQuirks.pcm_read_edge_zero` (the PCM12 read-on-a-rising-step glitch that CGB D fixed) that produces it. With the tokens and the cgbE default: 70/70 | correct |
-| Shootout ROMs | the shootout's own device column | mirrors it; `daid/ppu_scanline_bgp-gbc` pinned to `cgbe` | see the two-harness note below | correct |
-| Mooneye (wilbertpol) | same naming scheme as Gekkio's | 76 `cart` (all $00 → DMG ABC) + per-machine arms | same shape as Mooneye | correct |
-| gambatte | `dmg08` / `cgb04c` are capture provenance, not a selector | defaults grDmgABC / grCgbC | dmgABC 4567 vs dmg0 4443; cgbC 4567 vs cgbD 4542 / cgbE 4516 / agb 4534 | correct — see the full write-up below |
-
-**The two harnesses run different CGB silicon, and that is deliberate.** The
-local runner's default CGB is **CPU CGB C**; the 261-ROM gbdev shootout drives
-`dingbat_test` with `--cgb-rev=E` (`emulators/dingbat.py`). Both are at their
-own measured maximum and the disagreement is exactly two references:
-
-```
-shootout, forced to one revision      local runner, default CGB moved
-  cgbE  261  <- what it ships           cgbC  1102  <- what it ships
-  cgbD  260   (loses cgb-acid-hell)     cgbE  1101  (gambatte 4567 -> 4516:
-  cgbC  260   (loses ppu_scanline_bgp)                25 scy + 26 oamdma)
-  cgbAB 259                             cgbD  1100
-  cgb0  257    DMG axis: dmgABC 261     cgb0  1099
-  agb   257                mgb    260   agb   1100
-                           dmg0   234
-```
-
-CGB-E is the *unique* shootout maximum because `cgb-acid-hell` and
-`daid/ppu_scanline_bgp.gbc.png` pull in opposite directions across the C/D
-boundary and only E clears both; CGB-C is the local maximum because gambatte's
-4,996 rows are `cgb04c` captures. There is no contradiction to resolve: every
-reference that names a revision is already scored at that revision (mealybug's
-`_cgb_c`/`_cgb_d` pair, `daid/ppu_scanline_bgp-gbc` at `cgbe`), and the split
-is one modelled quirk, `mixer_write_immediate`. Re-measured per revision on
-2026-08-21, `ppu_scanline_bgp.gbc.png` is **0 px at cgbD and cgbE and 576 px at
-cgb0/cgbAB/cgbC/agb**.
-
-**AGE's per-revision arms are inert and stay anyway.** Scoring the suite with
-every row forced to one revision gives 44/89 at cgb0, cgbAB, cgbC, cgbD, cgbE
-*and* agb — so the 25 `@cgbab` / 25 `@cgbc` / 25 `@cgbe` arms are today three
-copies of one measurement. That is not an argument for deleting them: AGE's
-filenames make a per-revision claim, the rows are what check it, and the day a
-CGB quirk lands that an AGE ROM can see, 50 of these rows stop being copies.
-It IS an argument against reading an AGE delta as evidence about a revision.
-
-**Rows that are impossible as currently scored** — i.e. no revision on either
-axis reaches them, so they need model work, not a device flag:
-
-- `same-suite/apu/channel_1/channel_1_freq_change_timing-cgb0BC` and `-cgbDE`.
-  The suite ships this test three times, once per silicon family, and dingbat
-  passes only the `-A` (AGB) build — on *every* revision, including cgb0. No
-  member of `GbQuirks` distinguishes the CGB families' PCM12 duty edge from
-  the AGB's, so both rows are unreachable until one does. The range-token
-  policy is not the blocker: `-cgb0BC` resolves to grCgbC, which is the
-  default, and forcing it to grCgb0 or grCgbAB does not help either.
-- `mealybug/dma/hdma_timing-C` — red on all six CGB revisions.
-- ~~All four red GBMicrotest rows~~ — **closed 2026-08-21, and the audit's
-  conclusion that the device axis was not the blocker held.** Two were model
-  bugs at the LY 153 -> 0 snapback (`line_153_lyc0_int_inc_sled` and
-  `line_153_ly_c`; see `LYC_SRC_RELATCH_LEAD` and `LY153_READ_SNAP` in
-  `gb/ppu.nim`) and two were ROM defects that SameBoy reproduces byte for byte
-  (`halt_op_dupe_delay`, `stat_write_glitch_l154_d`; see
-  `MicrotestBrokenExpected`). The suite is 480/480.
-- All 45 red AGE rows, per the inertness above.
-
-**One thing this audit changed and one it deliberately did not.** Changed:
-mealybug's two `dma/*-C` rows were the only rows in the runner whose filename
-named a device and whose row did not, so they now carry `model: "cgbc"` (no
-verdict moves — the default already was grCgbC). Not changed: the `agb` half of
-that `-C` token, and CGB arms for the three scribbltests whose reference is
-named `-cgb-dmg`. Both were measured and both would be pure row inflation —
-`hdma_during_halt-C` passes and `hdma_timing-C` fails on cgbc and agb alike,
-and `lycscx`, `lycscy` and `statcount-auto` are already 0 wrong pixels on a CGB
-as well as on the DMG they are scored on.
-
-**How to re-run this.** `--model=` reaches every mode except `--mode=gambatte`
-(the batch quits before that block), so sweeping the whole runner needs a
-temporary hook in `dingbat_test.nim` that calls `gb_set_revision` before
-`post_init`. Two traps, both hit during this audit: a cleanup that runs
-`git checkout -- tests/` between sweeps reverts the hook along with the results
-files (restore only `tests/results*.md`), and the shootout adapter passes
-`--cgb-rev=E` itself, so a hook that defers to an explicit `--model` does
-nothing there and every cell reads identical. **Always run a control that must
-fail** — feed the hook a bogus revision name and check that it aborts.
+- The runner exits non-zero only on **regressions**: rows that pass in the committed
+  `tests/results.md` and fail now. Exit 0 does not mean everything passed. Aggregated
+  gambatte rows gate on the pass **count** (`load_previous_counts`), so 223 → 222 is a
+  regression on a red row.
+- The regression key is the full name (`blargg/oam_bug/1-lcd_sync`); anything shorter
+  collides across forks. A name absent from the baseline is not gated, so adding a suite
+  means regenerating and committing `results.md` in the same change.
+- `magen/hblank_vram_dma` is baselined failing: dingbat runs the HBlank VRAM DMA while
+  the CPU is halted.
+- Parallel runners delete each other's gambatte shard output (`$TMPDIR/dingbat-gambatte`
+  is wiped on entry) and the victim scores every unflushed row 0. Use a private `TMPDIR`.
+- `$DINGBAT_ROM_CACHE` reuses any present file by name, so a different build dropped at a
+  cached path silently changes what later runs score. Use a private cache before
+  generating a baseline to commit, and check `git diff tests/results.md` for rows the
+  change has no business touching.
+- `results.md`, `results_mgba_suite.md` and `results_gambatte.md` are committed baselines
+  and every run rewrites all three; `git checkout -- tests/results*.md` after a local run
+  unless you mean to update them. `results.md` ends with a "Deliberately not scored"
+  section listing each intentional skip with its reason.
+- `tests/golden/` holds per-row mGBA-suite captures for diff-based timing work
+  (`tests/golden/README.md`).
 
 ## The gambatte suite
 
-3,524 ROMs inside the same game-boy-test-roms bundle as Blargg/Mooneye/
-Mealybug/SameSuite (no extra download, no cache-key bump), expanding to
-**5,005 scored rows**. Default-on in the runner. Verdict mechanism, per the
-bundle's own `gambatte/game-boy-test-roms-howto.md` and gambatte-core's
-`test/testrunner.cpp`:
+3,524 ROMs in the game-boy-test-roms bundle, expanding to 5,005 scored rows. Verdict
+mechanism per the bundle's howto and gambatte-core's `test/testrunner.cpp`:
 
-- **Fixed exit condition.** Every ROM runs exactly **15 LCD frames**
-  (1,053,360 clocks, ~252 ms emulated) from the post-boot state, then the
-  frame is read. Not "run until something happens". The suite is insensitive
-  to the exact count — 14, 16 and 30 frames all score identically — because
-  every ROM has settled and holds its result.
-- **The device is in the filename.** `dmg08` = run as a DMG, `cgb04c` = run as
-  a CGB; most ROMs carry both tags and are two rows. Nearly all of them ship a
-  CGB cart header even for their DMG half, which is why `new_gb` grew
-  `force_dmg` (gambatte selects the device from its loader flag, not the
-  header).
-- **The expected value is in the filename too**, as `_out<hex>` (1 to 20 hex
-  digits), and can differ per device
-  (`..._dmg08_out2_cgb04c_out0.gbc`). The ROM draws that hex string as 8×8
-  glyphs along the top-left row of the screen; scoring compares those tiles
-  against the glyph table in `dingbat_test.nim`. An `x` in front of a tag
-  (`_xout0`, `_xdmg08`) means "not a test" and is skipped.
-- **Some ROMs ship a reference PNG** instead, named `<rom>_dmg08.png` /
-  `_cgb04c.png` / `_dmg08_cgb04c.png`, scored on the whole 160×144 frame.
-  Colours are compared the way gambatte compares them: masked to 0xF8F8F8
-  (the top 5 bits per channel — exactly what a BGR555 framebuffer carries),
-  with gambatte's CGB colour-correction formulae applied on the CGB side and
-  the plain `#000000/#555555/#AAAAAA/#FFFFFF` shades on the DMG side.
+- Every ROM runs exactly 15 LCD frames from the post-boot state, then the frame is read
+  (14, 16 and 30 score identically; every ROM has settled).
+- The device is in the filename: `dmg08` = DMG, `cgb04c` = CGB; most ROMs are two rows.
+  Nearly all ship a CGB header even for the DMG half, hence `new_gb`'s `force_dmg`.
+- The expected value is in the filename as `_out<hex>`, per device
+  (`..._dmg08_out2_cgb04c_out0.gbc`); the ROM draws it as 8x8 glyphs on the top row and
+  scoring compares those tiles with `GambatteGlyphs`. An `x` prefix (`_xout0`) means "not
+  a test".
+- Some ROMs ship a reference PNG (`<rom>_dmg08.png` etc.), scored on the whole frame,
+  masked to 0xF8F8F8 with gambatte's CGB colour-correction formulae on the CGB side.
 
-**Debugging a `png` row.** Its verdict is a single integer, so set
-`DINGBAT_GAM_DUMP=<dir>` to also write every scored frame as a PPM in the
-comparison's own colour space, and diff that against the bundled reference.
-For the mid-scanline-write families (`bgtiledata`, `bgtilemap`,
-`scx_during_m3`, `scy`) pair it with `-d:gb_m3_trace -d:GB_TRACE_LY=<n>`,
-which prints one line per mode-3 dot of line `n`, the LCDC and SCX writes
-landing inside it, and the dot the fine-scroll latch fires on: the reference
-tells you which pixel a write reached, the trace tells you which fetcher step
-consumed it, and the two together give the pipeline's phase against the CPU.
-For the OBJ families (`sprites`, and the `_sprites` mealybug rows) the useful
-instrument is `-d:gb_m3_len`, which prints one line per drawn scanline: the
-inputs Pan Docs' "Mode 3 length" section says decide the duration next to the
-measured duration. `tools/gbppu/` scores that against the rules, scores one
-gambatte subdirectory in seconds, and reads a mealybug reference as a per-line
-dot count; see `tools/gbppu/README.md`.
+`GambatteGlyphs` was harvested, not vendored (gambatte-core is GPL-2.0): `--dump-tiles=N`
+prints the top-row tiles, and a few hundred ROMs whose names state their digits resolve
+all 16 shapes by majority vote.
 
-`-d:M3_PIPE_DELAY=<n>` then sweeps that phase in dots and
-`-d:M3_PIPE_MCYCLES=<n>` in CPU M-cycles — which is the one that scales with
-double speed. Both are declared, with the staircase measurement, in
-`src/dingbat/gb/fifo_ppu.nim`, and **both ship at 0 and should stay there**:
-the M-cycle that staircase found belonged to the CPU write, not to the
-pipeline, and `mem_write` now commits a write's byte at the start of its
-M-cycle (where the write's own VRAM/OAM lock is already decided) instead of
-after that M-cycle's dots. Turning `M3_PIPE_MCYCLES` up now counts the same
-M-cycle twice.
+Not scored: the 220 `_outaudio0/1` rows (gambatte decides them on whether all 35,112
+samples of the final frame are identical at 2 MHz; dingbat's APU emits at 32,768 Hz) and
+gambatte's AGB column (its own runner marks it "FIXME" and feeds it CGB expectations).
 
-**Only what the pipeline reads moves.** The compensation above is wrong for
-every other consumer inside the PPU, because only the pipeline was out of
-phase. `ppu_write_machinery` in `ppu.nim` carries the three-way split and the
-ROMs that settle each case: pipeline registers move; STAT's source enables and
-`FF55` wait for the M-cycle boundary, because they *gate* a PPU event and
-committing them early lets the CPU suppress an interrupt (gambatte
-`m0enable/disable_*`) or a HBlank block (`dma/hdma_late_disable_*`) that
-hardware still delivers; LYC and IF move, because the PPU updates their
-counterpart rather than reading them (`ly_lyc_write-GS`, gbmicrotest
-`vblank_int_if_c`). Getting that boundary wrong is worth 6 `m0enable` rows and
-2 `dma` rows and is invisible on a run that only checks the total, so re-check
-those two families after any change to `mem_write`'s shape.
+Rows are sharded across `countProcessors()` processes, each a `--mode=gambatte --list=`
+batch with a fresh `GB` per row (~7 s). `results.md` carries one row per subdirectory;
+per-test detail is in `results_gambatte.md`.
 
-**Debugging a STAT-timing row.** The `m2int_*`, `m0int_*`, `lycm2int`,
-`m2enable` and `halt` families all have the same shape: a STAT interrupt as
-the anchor, a run of NOPs in the handler, one `LD A,(FF00+C)` on STAT or IF,
-and a sibling ROM whose NOP count differs by one. So a *family* brackets the
-boundary to the M-cycle, and the useful question is never "what did this row
-print" but "which M-cycle did the read land in, and what was the mode then".
-`-d:gb_stat_read_trace` answers both: it prints `ly`/`cycle_counter` plus the
-latched and live modes at every `$FF41` read, and one line per STAT interrupt
-raised. Note `cycle_counter` is the dot being *entered*, so a read printed at
-`cc=85` belongs to the tick that just covered dots 81..84 — reads happen after
-`mem_read` has already ticked the M-cycle. Pair it with the ROM itself: these
-are hand-written, the vector at `$0048` is a `JP`, and the handler is a run of
-`$00`s ending in `F2` — `d.find(b'\xf2', 0x1000) - 0x1000` is the NOP count,
-which is the whole difference between the siblings.
+### Debugging a row
 
-The constants that shape those rows are all in `src/dingbat/gb/ppu.nim`, and
-all are `intdefine`s, so re-deriving any of them is a build flag rather than an
-edit:
+`DINGBAT_GAM_DUMP=<dir>` writes every scored frame as a PPM in the comparison's colour
+space. Build-time traces (`nim c -d:test_harness -d:release --path:src -d:<flag>
+-o:dt tests/dingbat_test.nim`), all in `src/dingbat/gb/`:
 
-- `STAT_READ_LAG` (L) — how far back from the last dot of the reading M-cycle
-  STAT's mode bits are sampled — and `STAT_IRQ_LEAD` (D) — how far the STAT
-  interrupt line's copy of the mode and LY runs *ahead* of the ones the CPU
-  reads. The `m2int_*` families ask for `4D + L = 4`; the write-up above them
-  carries the measured 2x5 grid for that pair and why every cell of it,
-  including both solutions of that equation, is worse than the shipping
-  `(0, 3)`. **Read the table before re-running the experiment.**
-- `LCD_ON_HEAD_START`, `CGB_BOOT_PHASE`, `DMG_BOOT_PHASE` — where each boot
-  path leaves the PPU's dot grid against the CPU's M-cycle grid. Every one of
-  them is pinned by ROMs that read STAT, so all three want re-sweeping whenever
-  the STAT read model moves. One command each:
-  `nim c -d:test_harness -d:release --path:src -d:<CONST>=<n> -o:dingbat_test
-  tests/dingbat_test.nim && ./dingbat_test_runner`.
+- `-d:gb_m3_trace -d:GB_TRACE_LY=<n>` — one line per mode-3 dot of line `n`, the LCDC/SCX
+  writes inside it, and the fine-scroll latch dot (mid-scanline families: `bgtiledata`,
+  `bgtilemap`, `scx_during_m3`, `scy`).
+- `-d:gb_m3_len` — per drawn scanline, the inputs Pan Docs' "Mode 3 length" names and the
+  measured duration (OBJ families: `sprites`, mealybug `_sprites`).
+- `-d:gb_stat_read_trace` — `ly`/`cycle_counter` plus latched and live mode at every
+  `$FF41` read, and each STAT interrupt raised. `cycle_counter` is the dot being entered,
+  so a read printed at `cc=85` belongs to the tick covering dots 81..84. The `m2int_*`,
+  `m0int_*`, `lycm2int`, `m2enable` and `halt` families are a STAT interrupt, a NOP run,
+  one STAT/IF read, and a sibling differing by one NOP — `d.find(b'\xf2', 0x1000) - 0x1000`
+  is the NOP count.
+- `-d:gb_irq_trace`, `-d:gb_if_trace`, `-d:gb_halt_trace` — dispatch, `$FF0F` reads, and
+  halt exits (`HALTWAKE`).
 
-**What `dmg08` and `cgb04c` actually select — and why the tree runs the defaults.**
-Those tags name the **silicon the reference was captured on**, not a device the runner
-has to be told about. gambatte-core's own `test/testrunner.cpp` proves it: the tags are
-matched only to pick which `_out<hex>` value to score against, and the sole flags it
-passes to `GB::load` are `CGB_MODE`, `GBA_FLAG` and `NO_BIOS` — **no revision parameter
-exists on that path at all**. The bundle's own howto reads the names the same way, as a
-guess at provenance: `dmg08` = a DMG-CPU-08 mainboard, `cgb04c` = CGB-CPU-04, i.e.
-**CPU CGB C**.
+`tools/gbppu/` wraps these into per-family instruments (`tools/gbppu/README.md`).
 
-dingbat constructs those rows at its defaults (`gb.nim`'s `new_gb`: `grCgbC` for a CGB,
-`grDmgABC` for a DMG), and `cgb04c` and `grCgbC` are the same machine. **Measured
-2026-08-21 on `64fe90a`, sweeping one device axis at a time over the whole suite with
-`gb_set_revision` applied before `post_init`** (which re-resolves the boot table *and*
-`GbQuirks`, so it is the real machine and not just a relabelling):
+Register writes and the PPU: `mem_write` commits a write's byte at the start of its
+M-cycle. `ppu_write_machinery` in `ppu.nim` carries the three-way split and the ROMs that
+settle each case (pipeline registers move with the write; STAT source enables and `FF55`
+wait for the M-cycle boundary — gambatte `m0enable/disable_*`, `dma/hdma_late_disable_*`;
+LYC and IF move — `ly_lyc_write-GS`, gbmicrotest `vblank_int_if_c`). Re-check those
+families after any change to `mem_write`. `M3_PIPE_DELAY` / `M3_PIPE_MCYCLES`
+(`fifo_ppu.nim`) ship at 0 and should stay there; raising them counts the write's M-cycle
+twice. The STAT constants in `ppu.nim` (`STAT_READ_LAG`, `STAT_IRQ_LEAD`,
+`LCD_ON_HEAD_START`, `CGB_BOOT_PHASE`, `DMG_BOOT_PHASE`) are `intdefine`s with their
+measured grids in the source; re-sweep the boot-phase three whenever the STAT read model
+moves.
 
-```
-DMG axis, CGB held at C     CGB axis, DMG held at ABC
-  dmgABC   4484  <- ships     cgbAB   4484
-  mgb      4484               cgbC    4484  <- ships
-  sgb      4476               cgb0    4477
-  sgb2     4476               cgbD    4459
-  dmg0     4353               agb     4451
-                              cgbE    4433
-```
-
-So **both defaults are already at the maximum**, and the axis is far from inert — the
-wrong CGB revision costs up to 51 rows and the wrong DMG revision up to 131. The two
-ties are not ambiguities: `mgb` is a Game Boy Pocket rather than a DMG, and `cgbAB` is
-older silicon than the `cgb04c` the references name, so in both cases the tag picks the
-member the suite actually measured. This is worth knowing before adding a `--model` axis
-to the gambatte rows: there is nothing to gain, and the revision the tags name is the
-revision already in use.
-
-Note `--model=` is parsed but **not plumbed into `--mode=gambatte`** (the batch quits
-before that block), which is correct for the above and is why the sweep needed a
-temporary hook rather than a flag.
-
-**A SameBoy oracle for this suite: `tools/gbfuzz/sameboy_gambatte`.** Scoring dingbat
-tells you a row is wrong; it does not tell you what a *correct* emulator does with a ROM
-you have just modified, which is the whole method for pinning one of these families to an
-M-cycle. That runner runs a gambatte ROM under SameBoy and prints the same decoded hex
-string `--mode=gambatte` reads off the screen:
-
-```
-tools/gbfuzz/sameboy_gambatte <bootdir> --rom <dmg|cgb> <rom.gb> [frames]
-tools/gbfuzz/sameboy_gambatte <bootdir> <list.tsv> [frames]   # dev in col 1, ROM last
-```
-
-The device comes from the list, never from the cart header — nearly every ROM here ships
-a CGB header even for its DMG half, so scoring by header answers the wrong machine's
-question on ~1,700 rows. `SAMEBOY_CGB_MODEL=0|A|B|C|D|E` picks the CGB revision, and
-**C is the default because that is what gambatte's `cgb04c` tag means**: measured
-2026-08-20 over all 4,674 hex rows, rev C scores 4,216 and rev E only 4,187.
-
-**Its one caveat, and it is load-bearing.** SameBoy has no skip-boot API, so this runner
-plays the real boot ROM and counts frames from its end, while gambatte and dingbat both
-skip boot. Measured on `oamdma/late_sp00x_{1,2}`, whose expected values are `0` then `3`
-(the siblings are one M-cycle of NOPs apart): SameBoy answers `0` for **both** and
-dingbat answers `3` for **both**. That is a one-M-cycle post-boot phase offset, opposite
-in sign on the two emulators — not a disagreement about the mechanism. So SameBoy
-*passing* a row is strong evidence; SameBoy *failing* one by exactly the sibling's
-expected value is the phase artefact and says nothing. The trustworthy use is
-**differential**: modify the ROM and ask whether SameBoy's answer moves the way the model
-predicts, because a constant offset cancels.
-
-**Glyph table provenance.** gambatte-core is GPL-2.0 and this tree is MIT, so
-its table is not ours to vendor. `GambatteGlyphs` was *harvested* instead:
-`--dump-tiles=N` prints the raw top-row tiles, and running it over a few
-hundred ROMs whose filenames name the digits they display resolves all 16
-shapes by majority vote. Regenerate that way if a future bundle changes the
-font (only 4 rows out of 5,005 currently decode to an unrecognised glyph).
-
-**Not scored:** the 220 `_outaudio0/1` rows and gambatte's AGB column. Gambatte
-decides an audio row by asking whether all 35,112 samples of the final frame
-are identical — a 2 MHz stream, one sample per two clocks — and several of
-those ROMs turn on a difference lasting a handful of clocks. dingbat's APU
-emits at 32,768 Hz, 64× coarser, so a faithful verdict is not available from
-the sample path as it stands. gambatte's own runner marks the AGB column
-"FIXME: Actual AGB results" and feeds it the CGB expectations.
-
-**Batching.** One `dingbat_test` process per ROM would cost more than the
-emulation (each row is 15 frames, a few ms). The runner shards the rows
-round-robin across `countProcessors()` processes, each running one
-`--mode=gambatte --list=...` batch in-process with a fresh `GB` per row. The
-whole suite is ~34 s in one process, ~7 s sharded, and adds ~7 s to the full
-runner (8 s → 15 s here). Independence was verified two ways: a shuffled list
-reproduces every verdict *and every detail string* exactly, and the sharded
-run's totals match the single-process run's.
-
-**Reporting.** 5,005 rows would drown `results.md`, so it carries one row per
-gambatte subdirectory (`| oamdma | 👀 223/811 passed |`) and the per-test
-detail goes to `tests/results_gambatte.md`. Those aggregated rows gate on the
-pass **count**, not just the pass/fail bit — `load_previous_counts` parses
-`N/M passed` back out of the committed `results.md`, so 223 → 222 is a
-regression even though the row was already red. (`always_detail` on
-`TestResult` is what keeps the count in the file for rows that pass.)
+A second-emulator scorer exists for this suite: `tools/gbfuzz/sameboy_gambatte` runs a
+gambatte ROM under SameBoy and prints the same decoded hex (`--rom <dmg|cgb> <rom>` or a
+list; `SAMEBOY_CGB_MODEL=0|A|B|C|D|E`, C by default). It plays the real boot ROM where
+dingbat skips it, which is a one-M-cycle post-boot phase offset; use it differentially
+(modify the ROM and ask whether the answer moves as the model predicts).
 
 ## `dingbat_bench` — headless benchmark
 
@@ -773,89 +311,42 @@ regression even though the row was already red. (`always_detail` on
 ./dingbat_bench <rom> [frames] [warmup_frames] [input_script]
 ```
 
-Input scripts drive the keypad (`"600:START,700:A,900:RIGHT:120"`). Env vars
-(see the top of `dingbat_bench.nim` for the full, commented list):
-`DINGBAT_BENCH_HASH=1` (per-frame FNV framebuffer hash for pixel-exact A/B),
-`DINGBAT_BENCH_BIOS`, `DINGBAT_BENCH_STATE` (start from a save state),
-`DINGBAT_NO_WAITLOOP=1` (hold waitloop fast-forward constant when A/B-ing
-scheduler changes), `DINGBAT_MP2K*` (audio-HLE experiments).
+Input scripts drive the keypad (`"600:START,700:A,900:RIGHT:120"`). Env vars (full list
+at the top of `dingbat_bench.nim`): `DINGBAT_BENCH_HASH=1` (per-frame framebuffer hash for
+pixel-exact A/B), `DINGBAT_BENCH_COUNTERS=1` (retired instructions), `DINGBAT_BENCH_BIOS`,
+`DINGBAT_BENCH_STATE`, `DINGBAT_NO_WAITLOOP=1`, `DINGBAT_MP2K*`.
 
 ## Nimble tasks (`dingbat.nimble`)
 
-`test_build`, `bench_build`, plus compile-and-run per-suite tasks (each is
-also a CI step with a rationale comment in `.github/workflows/test.yml`):
+`test_build`, `bench_build`, `statefuzz_build`, plus compile-and-run tasks, each also a
+CI step: `test_timestretch` (WSOLA), `test_ppucomposite` (GBA compositor invariants),
+`test_ppubgunpack` (4bpp SWAR unpack vs scalar; `DINGBAT_BG4_EXHAUSTIVE=1` for the full
+sweep), `test_ppuobjlist`, `test_savestate_compat` (loads `tests/states/` and pins
+EventType ordinals / payload revisions), `test_cheats`, `test_rewind`, `test_clipreplay`
+(clip-capture replay determinism with two negative controls), `test_printer`,
+`test_lcdresponse`, `test_sgb`. The link-acceptance battery (`linktest`, `speclink`,
+`netlink`, `rollback` modes over `tests/roms/*.gba`) is invoked directly in
+`.github/workflows/test.yml`.
 
-- `test_timestretch` — WSOLA unit test.
-- `test_ppucomposite` — GBA compositor invariants (self-comparing, no ROMs).
-- `test_ppubgunpack` — 4bpp BG SWAR unpack vs scalar oracle
-  (`DINGBAT_BG4_EXHAUSTIVE=1` for the full 2^32 sweep).
-- `test_ppuobjlist` — per-line OBJ candidate list differential fuzz.
-- `test_savestate_compat` — loads the reference states in `tests/states/`
-  and pins EventType ordinals / payload revisions at compile time.
-- `test_cheats` — cheat engine unit + integration tests.
-- `test_rewind` — rewind-ring properties: `snapshot_at(k)` byte-equal to the
-  k-th chain walk at every depth (through eviction and across a pop/push
-  seam), keyframe seeks reproducing the walk, thumbnails evicted in lockstep
-  with their snapshots, `mem_used` covering the side tables. No ROMs.
-- `test_clipreplay` — clip-capture replay determinism: run a core live,
-  hash every frame's whole serialized state, then rebuild an interior range
-  out of a compressed anchor + the input log and assert every frame matches.
-  Three committed ROMs, chosen so the two negative controls (wrong anchor,
-  one wrong button bit) both bite. This is the gate on "the clip is of what
-  actually happened"; nothing else in the suite would notice a divergence.
-
-Not in tasks but in CI: the link-acceptance battery (`linktest`,
-`speclink`, `netlink`, `rollback` modes over `tests/roms/*.gba`) — copy the
-exact invocations from `.github/workflows/test.yml`.
-
-## `tests/roms/hwverified/` — self-judging hardware proof ROMs
-
-Eleven single-behavior GBA ROMs distilled from the AGS-001 gbaedge
-sessions, each carrying its hardware-verified expected values: wrong
-cells render inverted and a verdict block lands in the bottom-right
-corner — green pass, red fail, white means it hung before finishing.
-
-```
-python3 tests/roms/hwverified/run.py
-```
-
-runs the committed `.gba`s through `dingbat_test --mode=screenshot` and
-samples pixel (239,159) per ROM. `--color` is load-bearing there: the
-default greyscale PPM folds green and red to the same grey. Jittery
-poll-count cells are range-checked, not exact, so real hardware cannot
-false-fail. Local runner only, not in CI. Details and per-ROM notes in
-`tests/roms/hwverified/README.md`; the sparse-comment PR-facing copies
-of the same ROMs live on the NBA fork's `hwprobe-test-roms` branch.
+`tests/roms/hwverified/`: eleven GBA ROMs carrying hardware-verified expected values with
+a self-painted verdict pixel; `python3 tests/roms/hwverified/run.py` (local only).
 
 ## Where test ROMs come from
 
-- `tests/roms/` — committed homebrew ROMs **with their sources**: GBA `.s`
-  files (build line in each header: `arm-none-eabi-as` + `objcopy`; they run
-  headerless under the HLE BIOS) and GB `.py` generators (hand-assembled
-  SM83, no toolchain needed — run the script to regenerate the ROM next to
-  it).
-- External suites — never committed; downloaded/cached by the runner as
-  above. CI's cache and key rules are in `.github/workflows/test.yml`.
-- Official BIOS/boot ROMs are **never** in the repo (.gitignore blocks them);
-  pass paths via `--bios=`.
+- `tests/roms/` — committed homebrew ROMs with sources: GBA `.s` (build line in each
+  header) and GB `.py` generators (hand-assembled SM83, no toolchain).
+- External suites are never committed; the runner downloads them as above.
+- Official BIOS/boot ROMs are never in the repo (`.gitignore`); pass `--bios=`.
 
 ## Web test suite
 
-Runs from the repo root, no npm install needed for the unit tier:
-
 ```
-node --test web/tests/*.test.mjs   # node:vm harness over the REAL web/index.js
+node --test web/tests/*.test.mjs   # node:vm harness over the real web/index.js
 ```
 
-`web/tests/helpers.mjs` evaluates the unmodified `index.js` with stubbed
-browser globals. **Stub rule:** any new module-scope browser global used by
-`index.js` must be stubbed in `helpers.mjs`, or every test in the suite dies
-at eval time. Details + the fake-IndexedDB/fetch approach:
-`web/tests/README.md`.
-
-The static gate: `npx tsc -p web/types/tsconfig.{main,embed,sw}.json` checks
-the shipped JS as-is (JSDoc + checkJs); `node web/types/gen-emdts.mjs
---check` fails if `em.d.ts` is stale against `src/dingbat_wasm.nim`'s
-`{.exportc.}` exports. Browser-only tiers (`web/render.test.mjs`,
-`web/manualpair.test.mjs` via Playwright Chromium, `web/uv.test.mjs`,
-`web/signaling/server.test.mjs`) — invocations in the workflow file.
+`web/tests/helpers.mjs` evaluates the unmodified `index.js` with stubbed browser globals;
+any new module-scope browser global in `index.js` must be stubbed there or every test
+dies at eval time (`web/tests/README.md`). Static gate: `npx tsc -p
+web/types/tsconfig.{main,embed,sw}.json`, and `node web/types/gen-emdts.mjs --check` for
+a stale `em.d.ts`. Browser-only tiers (`web/render.test.mjs`, `web/manualpair.test.mjs`,
+`web/uv.test.mjs`, `web/signaling/server.test.mjs`) — invocations in the workflow file.

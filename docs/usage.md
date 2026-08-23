@@ -2,52 +2,38 @@
 
 ## Loading games
 
-In the browser, drop a ROM onto the page or pick one from the home screen's
-library grid. Games you've loaded before stay available offline. If you're signed in to
-Google Drive, the grid is your library across every device — a game you only have
-elsewhere shows as a dashed tile and downloads when you tap it.
+Browser: drop a ROM onto the page or pick one from the home-screen library grid. Games
+you have loaded before stay available offline; signed in to Google Drive, the grid is your
+library across devices (a game held only elsewhere shows as a dashed tile and downloads on
+tap).
 
-With the native build, run the `dingbat` executable. To open a specific ROM directly,
-pass it as an argument (`./dingbat /path/to/rom`) or drag the file onto the window.
+Native: run `dingbat`, pass a ROM path (`./dingbat /path/to/rom`), or drag a file onto
+the window.
 
-Zipped ROMs work in both: the first `.gba` / `.gb` / `.gbc` file in the archive is loaded.
+Zipped ROMs work in both: the first `.gba` / `.gb` / `.gbc` in the archive is loaded.
 
 ## BIOS
 
-No GBA BIOS file is needed — an HLE BIOS is built in and used by default.
-
-If you have a real BIOS dump and prefer it, select it through the UI, or place it at:
-
-| Platform | Path |
-|---|---|
-| Linux / macOS | `~/.config/dingbat/bios.bin` |
-| Windows | `%APPDATA%\dingbat\bios.bin` |
-
-The web build offers the same choice through the settings panel.
+No GBA BIOS file is needed; the built-in HLE BIOS is the default. To use a real dump,
+select it in the settings panel or place it at `~/.config/dingbat/bios.bin`
+(Linux / macOS) or `%APPDATA%\dingbat\bios.bin` (Windows).
 
 ## Save files
 
-Native builds write `.sav` files next to the ROM. The browser keeps a save file per ROM
-in IndexedDB; "Manage ROMs and Saves" lets you reset a game's save data or delete the game
-outright. Both mirror to Drive when you're signed in, and stay local when you aren't.
+Native builds write `.sav` next to the ROM. The browser keeps one save per ROM in
+IndexedDB; "Manage ROMs and Saves" resets a game's save or deletes the game. Both mirror
+to Drive when signed in. Game Boy saves are plain SRAM images, interchangeable with other
+emulators.
 
-Game Boy save files are compatible with other emulators such as BGB, so you can move a
-save between them.
+Save states are separate: nine slots per ROM with thumbnails, plus Quick Save / Quick Load.
 
-Save states are separate from save files: nine slots per ROM, each with a thumbnail,
-plus Quick Save and Quick Load.
+## Game Boy renderer
 
-## Picking a Game Boy renderer
+Two PPU implementations, chosen in settings (takes effect on the next load or reset):
 
-The GB / GBC PPU has two implementations:
-
-- **FIFO** (default) — cycle-accurate. Required by games like Prehistorik Man that
-  depend on precise PPU timing.
-- **Scanline** — faster, and fine for the large majority of games.
-
-Choose one in the settings window. The change takes effect on the next ROM load or reset.
+- **FIFO** (default) — cycle-accurate; needed by games such as Prehistorik Man.
+- **Scanline** — faster; fine for the large majority of games.
 
 ## Multiplayer
 
-Link cable play — local 2P, online room codes, and native TCP — is covered in
-[link-usage.md](link-usage.md).
+See [link-usage.md](link-usage.md).

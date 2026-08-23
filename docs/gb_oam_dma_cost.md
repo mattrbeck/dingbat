@@ -1,135 +1,67 @@
-# What the GB OAM-DMA bus-conflict model actually costs
+# Benchmarking the GB CPU bus hot path
 
-`28ae07e` ("gb: model OAM DMA bus conflicts") took gambatte's `oamdma`
-directory from 223/811 to 681/811. It was reported as costing **-2.0%** on
-Link's Awakening (DMG) and **-1.5%** on Pokemon Crystal (CGB), measured by
-wall-clock fps.
+`mem_read`/`mem_write` sit on clang's inline-cost threshold with ~160
+generated opcode bodies calling them. This is how to measure a change there,
+and why wall-clock fps cannot.
 
-Re-measured with retired-instruction counts instead of wall clock, its true
-marginal cost on the CPU bus hot path is **+0.37% of retired instructions**,
-and the companion refactor `4fbbbe8` makes the DMA half of that path *cheaper*
-than what `main` did. The -2.0% was not the model.
+## Use retired instructions, not fps
 
-## Why wall clock could not answer this
+Two builds that differ only in code the benchmark never executes measure
+~1.3 % apart in fps from link layout alone; layout error is systematic, so no
+sample count averages it out. `dingbat_bench` reports hardware counters under
+`DINGBAT_NO_WAITLOOP=1 DINGBAT_BENCH_COUNTERS=1 ./dingbat_bench rom.gb 2400 300`
+(`proc_pid_rusage(RUSAGE_INFO_V4)` around the measured window; no root, no
+Xcode), printing `cycles=`, `instructions=` and `hwcycles=`:
 
-Two builds that differ only in code the benchmark ROM never executes measure
-~1.3% apart on this machine, purely from where the linker put things. The
-effect being measured is smaller than that, so fps cannot resolve it at any
-sample count -- layout error is systematic, not random, and does not average
-out across runs of the same binary.
+- `instructions` reproduces to 0.002 % run to run on an idle machine.
+  `ri_instructions` includes kernel work charged to the process, so a
+  contended run reads high (0.5 % at load average ~100, correlated with the
+  run's own fps). Check `uptime`; take the minimum of four or more runs per
+  arm and require the minima to agree to ~0.01 %.
+- `cycles=` (emulated) is the control: both arms must report the same count
+  or they did different work.
 
-`dingbat_bench` therefore reports hardware counters under
-`DINGBAT_BENCH_COUNTERS=1`, read from `proc_pid_rusage(RUSAGE_INFO_V4)` around
-the measured window only. No root, and no Xcode (`xctrace` needs a full Xcode
-install, which a plain command-line-tools box does not have).
+## The inline cliff
 
-```
-DINGBAT_NO_WAITLOOP=1 DINGBAT_BENCH_COUNTERS=1 ./dingbat_bench rom.gb 2400 300
-  zelda: 2400 frames in 1.164s = 2062.1 fps
-    cycles=168395236 mcps=144.69
-    instructions=23146620157 hwcycles=3920335108 ins_per_emucycle=137.45413
-```
+Adding or removing one compare on `mem_read`/`mem_write` flips whether clang
+inlines them into a large, arbitrary subset of the opcode bodies
+(`colonanonymous` 108 → 324 bytes, `cb_set` 156 → 320; 123–162 functions
+changed size between builds meant to differ by three instructions). That
+flip is worth ~0.9 % of all retired instructions, more than the OAM-DMA
+bus-conflict model and the PPU VRAM/OAM lock combined, and every edit here
+re-tosses it. `hot_bus_inline` (`gb.nim`) pins it: `always_inline` on clang
+(−0.84 % DMG / −0.93 % CGB for +568 bytes of `__text`), plain `inline` on gcc,
+where a failed `always_inline` is a hard error the CI builds cannot be proven
+to avoid. Pinned, feature costs are additive: the PPU lock (+0.353 %) and the
+DMA flag (+0.370 %) sum to the measured +0.722 % on Link's Awakening.
 
-Retired instructions reproduce to **0.002%** run to run, against 1.3% for fps.
-`cycles=` (emulated cycles) is the control: an A/B is only meaningful when both
-arms report the same emulated cycle count, i.e. both did the same work.
+## What the OAM-DMA model costs, and why not less
 
-**That 0.002% is an idle-machine number and it does not degrade gracefully.**
-`ri_instructions` counts kernel work charged to the process as well as the
-process's own, so a contended run reads HIGH: measured 2026-08-03 during the
-mode 3 lead work, five runs of one binary on one ROM spread **0.49%** at load
-average ~100, and the spread correlates with each run's own fps -- the slower
-the run, the more instructions it reports. That is larger than most things worth
-measuring on this path, and single-shot numbers taken under it are worse than
-useless because they are *systematically* wrong rather than noisy. Take the
-**minimum of four or more runs** per arm and check the minima agree to ~0.01%
-before believing a delta. `uptime` first.
+- +0.37 % of retired instructions: three instructions (`ldrb`/`cmp`/`b.ne`)
+  on the cached `dma_busy` flag per bus access. The cold handlers
+  (`mem_read_busy`/`mem_write_busy`) take ~5 of 10 300 profiler samples:
+  1.07 % of accesses land during a transfer, and games busy-wait in HRAM,
+  which is on no bus.
+- A DMA owns whole buses (cart+SRAM+WRAM, or VRAM, or CGB WRAM), so unlike the
+  PPU lock it cannot be gated on the address first. Merging `dma_busy` into
+  one "slow path" flag with the PPU lock was rejected: VRAM is locked ~40 %
+  of every scanline, so ~40 % of all reads would go out of line to re-test an
+  address that is almost never VRAM (Link's Awakening: zero CPU VRAM reads in
+  28.9 M). Address test first, state test second.
+- A bus access retires ~771 instructions, mostly the per-dot FIFO PPU, so the
+  residue is small; removing it outright needs a page-pointer read path
+  instead of the `case idx` dispatch, a core rewrite for a third of a percent.
 
-## The measurement trap: an inline-cost cliff
+## Rules
 
-The first factorial run produced impossible numbers -- a build with *both*
-hot-path checks removed retired 186M **more** instructions than one that kept
-the OAM-DMA check. Diffing per-function code sizes between the two binaries
-explains it: removing one compare shrinks `mem_read`/`mem_write` past clang's
-inline-cost threshold, and they are then inlined into a large, arbitrary subset
-of the ~160 generated opcode bodies (`colonanonymous` 108 -> 324 bytes,
-`cb_set` 156 -> 320, ...). 123-162 functions changed size in builds that were
-supposed to differ by three instructions.
-
-So a one-compare edit to this path moves ~0.9% of all retired instructions by
-flipping an inlining coin, on top of the ~1.3% layout noise in fps. That, not
-the bus-conflict model, is what -2.0% measured.
-
-**Pin the inlining decision before A/B-ing anything on this path.** With
-`mem_read`/`mem_write` forced `noinline`, the only functions that change size
-between variants are the four intended ones, and the costs become additive:
-
-| variant (Link's Awakening, 2400 frames) | instructions | vs none |
-|---|---|---|
-| neither check | 23,187,255,713 | - |
-| PPU CPU VRAM/OAM lock only (`944cd30`) | 23,269,082,883 | +81.8M (+0.353%) |
-| OAM-DMA cached flag only (`4fbbbe8`+`28ae07e`) | 23,273,005,538 | +85.7M (+0.370%) |
-| both (current HEAD) | 23,354,704,547 | +167.4M (+0.722%) |
-| `main`'s old inline OAM predicate only | 23,290,841,856 | +103.6M (+0.447%) |
-
-81.8 + 85.7 = 167.5 against 167.4 measured. **The two features are additive;
-there is no interaction.** The leading hypothesis -- that the -2.0% came from
-`944cd30` and `28ae07e` colliding on one hot path -- is dead.
-
-Predicted from first principles and confirmed: the DMA check is 3 instructions
-(`ldrb`/`cmp`/`b.ne`) over 30,028,939 bus accesses = 90.1M, measured 85.7M.
-
-## The answers
-
-* **OAM-DMA model, marginal cost: +0.37%** of retired instructions (both ROMs).
-  The cold handler is genuinely cold -- `mem_read_busy` takes 5 samples out of
-  ~10,300 in a Time Profiler run, because only 1.07% of bus accesses land
-  during a transfer.
-* **`4fbbbe8` is a real but small win**: the cached `dma_busy` flag costs 85.7M
-  where `main`'s three-term predicate cost 103.6M, so it is **+0.077% faster**,
-  not the +1.55% originally reported (also an artifact of the cliff).
-* **Net vs `main`'s shape**, PPU lock included, HEAD retires *fewer*
-  instructions: -28.0M on DMG, -12.8M on CGB.
-* **The single biggest lever on this path is not either feature.** Pinning the
-  inlining decision to always-inline is worth **-0.84% (DMG) / -0.93% (CGB)**
-  of retired instructions for +568 bytes of `__text` -- more than twice the
-  entire cost of the bus-conflict model.
-
-## Why the model cannot be made much cheaper
-
-The hot path is already 3 instructions, and it has to answer a question only
-runtime state can answer: a DMA owns whole *buses* (cart+SRAM+WRAM, or VRAM, or
-CGB WRAM), so unlike the PPU's VRAM/OAM lock it cannot be gated on the address
-first. Folding `dma_busy` into a combined "slow path needed" flag alongside the
-PPU lock was evaluated and rejected: VRAM is locked for roughly 40% of every
-scanline, so a merged state flag would divert ~40% of *all* reads into an
-out-of-line handler to re-test an address that is almost never VRAM (Link's
-Awakening: **zero** CPU VRAM reads in 28.9M reads, and 89,096 VRAM writes out
-of 30.0M accesses). Address test first, state test second is already the right
-order.
-
-The remaining 3 instructions are ~0.37% because dingbat spends most of a bus
-access elsewhere: 771 retired instructions per access, dominated by the per-dot
-FIFO PPU (`tick_shifter` alone is 28% of a Time Profiler run, `mem_tick_components`
-15%). Eliminating the DMA check outright -- gambatte's approach, where the
-conflict is folded into a swapped memory-map pointer so the fast path is
-untouched -- would win at most that 0.37% here, because dingbat's read path is
-a `case idx` range dispatch rather than a page-pointer table. Converting it is a
-core rewrite, for a third of a percent.
-
-## Rules for the next person benchmarking this path
-
-1. Use `DINGBAT_BENCH_COUNTERS=1` and compare **instructions**, not fps.
-2. Check `cycles=` matches between arms first, or the arms did different work.
-3. Diff per-function sizes between the two binaries before believing any
-   result. If more than the functions you edited changed size, you measured an
-   inlining decision, not your change.
-4. `uptime` before trusting even the counter numbers, for wall-clock claims
-   **and for the counters** — see the load-average paragraph above. Take the
-   minimum of four or more runs per arm; one run is not a measurement.
-5. Build both arms **the same way**. Two builds of identical source in
-   different directories differ by up to **0.25%** of retired instructions
-   here: the nimcache path reaches the generated C, and the `_uNNNN` symbol
-   renumbering goes with it. Two `tools/gbgate/build.sh` slots, or two trees
-   built by the same script, are comparable; a number carried over from an
-   arm somebody else built is not.
+1. Compare **instructions** under `DINGBAT_BENCH_COUNTERS=1`, not fps.
+2. Check `cycles=` matches between arms first.
+3. Diff per-function sizes between the two binaries. If more than the
+   functions you edited changed size, you measured an inlining decision.
+4. `uptime` first; minimum of four or more runs per arm.
+5. Build both arms the same way (`tools/gbgate/build.sh` slots, or two trees
+   built by one script): identical source in different directories differs
+   by up to 0.25 % (the nimcache path reaches the generated C and renumbers
+   `_uNNNN` symbols). A failed `nim c` leaves the previous binary in place,
+   so a stale slot reports the previous revision (`tools/gbppu/counters.sh`
+   guards this).

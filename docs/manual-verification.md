@@ -1,111 +1,58 @@
 # Manual verification list
 
 Things that shipped with unit-test coverage but still need a hands-on check
-against the real world (live Google account, deployed https build, multiple
-devices) that the harnesses can't provide. Check an item off — or just delete
-it — once it's been seen working; add a dated entry whenever something lands
-that needs the same treatment.
+the harnesses cannot provide (live Google account, deployed https build,
+real devices). Delete an item once it has been seen working; add one
+whenever something lands that needs the same treatment.
 
-## "Clip that!" — range-based clip export (2026-08-14)
+## "Clip that!" — range-based clip export
 
-Retroactive clip capture grew from a hardcoded trailing 10 s to a picked range
-over a ~60 s rolling window, on the rewind scrubber's film strip with two
-markers. The replay's determinism has a real gate
-(`tests/clip_replay_test.nim`, three ROMs, whole-machine-state hashes) and the
-range arithmetic has one (`web/tests/clip-range.test.mjs`), but neither
-harness has a MediaRecorder, a canvas, or a GPU — so everything about the
-FILE is unproven, and so is the strip as a touch control.
+Gated: replay determinism (`tests/clip_replay_test.nim`), range arithmetic
+(`web/tests/clip-range.test.mjs`). Not gated: the FILE, the strip as touch.
 
-- [ ] **The file is the range.** Pick a range with a recognisable event in it
-      (a level transition works well), save, and play the .webm back. Expect
-      the clip to start on the frame the in marker sat on and end on the out
-      marker's — no leading frames of the live moment (`drawGame()` before
-      `captureStream` is what prevents that), no tail running on to "now".
-- [ ] **Audio is in it, and in sync.** Same clip: sound present from the first
-      frame, still lined up at the end of a 60 s export.
-- [ ] **A full minute exports.** "Everything" on a GBA game after a minute or
-      more of play. Expect a ~60 s file, the banner counting to 100%, controls
-      inert throughout, and the game resuming exactly where it was left.
-- [ ] **On a phone (LAN https).** Drag each marker; they must not swap, the
-      film must not carry momentum after the finger lifts, and tapping the
-      strip must move the NEARER marker. Check portrait and landscape, and
-      rotate with the picker open (the strip re-rasterises on resize).
-- [ ] **Safari.** The recorder there produces .mp4 rather than .webm; confirm
-      the file plays and the audio track is present.
-- [ ] **Rewind OFF.** Turn rewind off in Settings (and/or turn speed mode on,
-      which suspends it) and confirm the clip picker still shows a full strip.
-      This is the case the clip ring's own thumbnails exist for.
-- [ ] **iOS memory.** Play for several minutes on the phone with the 6 MB clip
-      cap and confirm no tab reload / JIT demotion, and that the picker's
-      oldest frame is still roughly a minute back on a GB game.
-- [ ] **The rewind scrubber still behaves.** It was refactored onto the shared
-      film-strip component; re-check the drag, the tap, the two-stage confirm
-      and the save-loss warning.
-## Input display overlay (2026-08-14)
+- [ ] **The file is the range.** Pick a range around a level transition;
+      the .webm starts on the in marker's frame and ends on the out marker's,
+      no leading live frames, no tail to "now".
+- [ ] **Audio in sync** through a 60 s export; **a full minute exports**
+      (banner to 100 %, controls inert, game resumes where it was).
+- [ ] **Phone (LAN https).** Markers never swap, no momentum after lift, a
+      tap moves the NEARER marker; portrait, landscape, rotate with the
+      picker open.
+- [ ] **Safari** produces .mp4; confirm it plays with audio.
+- [ ] **Rewind off** (or speed mode on): the picker still shows a full strip.
+- [ ] **iOS memory**: several minutes with the 6 MB clip cap, no reload or
+      JIT demotion; oldest frame still ~a minute back on a GB game.
+- [ ] **Rewind scrubber** (shared film-strip component): drag, tap,
+      two-stage confirm, save-loss warning.
 
-Settings → Controls → "Show inputs on screen" (or the `I` key): a DOM
-controller pinned to the bottom-left of the stage that lights each button
-while it is held. Every input path is unit-tested at the chokepoint
-(`web/tests/input-display.test.mjs`, 16 tests) and the layout was screenshot
-in headless Chromium across three themes plus a touch viewport; what no
-harness can answer is how it looks and feels on real hardware and in a real
-capture.
+## Input display overlay
 
-- [ ] **iPhone LAN test** (the standing rule for any mobile/PWA UI change).
-      Serve the worktree's `web/` over the LAN and load it on the phone.
-      Portrait and landscape, with the touch controls up: the overlay must be
-      completely absent — no reserved space, no seam, and the touch buttons
-      unchanged in size and spacing. Then pair a Bluetooth controller (which
-      hides the touch controls) and confirm the overlay appears bottom-left,
-      inside the safe area, and does not sit under the notch/home indicator.
-- [ ] **OBS capture.** Add the browser tab as a Window Capture / Browser
-      Source and confirm the overlay is in the captured image (it should be),
-      then record a clip from the app's own Record Clip and confirm the
-      overlay is NOT in the clip (canvas.captureStream — deliberate).
-- [ ] **Legibility at stream size.** At 1080p downscaled to a typical stream
-      view, check the SELECT/START lettering is still readable and the lit
-      state is obvious at a glance over both a bright and a dark game.
-- [ ] **Device themes.** The overlay borrows the `--pad-*` / `--btn-ab-*` /
-      `--pill-*` tokens, so device themes (Famicom, atomic purple, daiei…)
-      recolour it for free — spot-check two of the loudest ones for a pressed
-      state that still reads.
-- [ ] **A real GBA vs GB game.** L/R must be present for a `.gba` title and
-      gone for GB/GBC (`body.gb-mode`), with the overlay getting shorter
-      rather than leaving a gap.
+Settings → Controls → "Show inputs on screen" (`I` key);
+`web/tests/input-display.test.mjs`.
 
-## Drive sync: renames (2026-08-14, `3f9370a`)
+- [ ] **iPhone LAN test.** With touch controls up the overlay is absent — no
+      reserved space, touch buttons unchanged. Pair a Bluetooth controller:
+      overlay bottom-left inside the safe area.
+- [ ] **OBS capture** shows the overlay; the app's own Record Clip does not
+      (canvas.captureStream — deliberate).
+- [ ] **Legible at stream size**; **device themes** (`--pad-*` /
+      `--btn-ab-*` / `--pill-*` tokens) spot-checked on two loud ones.
+- [ ] **L/R present for .gba, gone for GB/GBC** with no gap.
 
-Renames now mirror to Drive as in-place metadata renames, and a `ren` marker
-in the shared library migrates other devices. All engine paths are
-unit-tested (`web/tests/sync.test.mjs`, `rename.test.mjs`); what's unproven
-is the real Drive API + two real devices.
+## Drive sync: renames
 
-- [ ] **Drive-only rename.** On a device that does NOT hold a game's bytes
-      (Drive-only tile), rename it from Manage ROMs. Expect: rename succeeds
-      immediately, the tile shows the new name, and after the sync flush the
-      game still downloads on tap — under the new name, saves intact.
-- [ ] **Two-device migration.** Rename a game on device A that device B holds
-      locally (with a battery save). On B's next sync expect: a toast
-      ("…renamed on another device"), NO "removed on another device" delete
-      modal, and B's ROM/saves/states/cheats all answering to the new name.
-- [ ] **No re-upload.** Rename a large downloaded ROM and watch the sync
-      indicator: the flush should be near-instant (metadata PATCHes only),
-      not a multi-MB upload.
-- [ ] **Rename while playing elsewhere** (hardened 2026-08-15 after the first
-      field test failed). Rename on A while B is mid-game on the same title,
-      then switch back to B's tab. B's very next sync should migrate live:
-      the game keeps running and now answers to the new name, the grid shows
-      one installed tile, and the quick save survives — never an
-      "uninstalled" tile over stranded old-name data.
-- [ ] **The failed field flow, re-run.** Install + quick save in browser 1
-      (leave the game open), rename from browser 2 where it was never
-      downloaded, return to browser 1 and sync/reload. Expect one installed
-      game under the new name with the quick save present, and no old-name
-      files left on Drive afterwards.
+Engine paths unit-tested (`web/tests/sync.test.mjs`, `rename.test.mjs`).
 
-## Drive sync: original ship (2026-07-23, `a023c79`) — still open
+- [ ] **Drive-only rename**: immediate, still downloads after the flush,
+      saves intact. **No re-upload**: a large ROM's rename flushes instantly.
+- [ ] **Two-device migration**: rename on A; B's next sync toasts "renamed
+      on another device", no delete modal, ROM/saves/states/cheats answer to
+      the new name.
+- [ ] **Rename while playing elsewhere**: B mid-game, A renames; B's next
+      sync migrates live — one installed tile, quick save intact, no
+      old-name files left on Drive.
+
+## Drive sync: original ship
 
 - [ ] **Two-device delete/tombstone round-trip** against a live account:
-      delete on A, confirm B shows the "removed on another device" modal and
-      that Restore really does re-upload. Unit-tested since day one, never
-      seen live.
+      delete on A, B shows "removed on another device", Restore re-uploads.

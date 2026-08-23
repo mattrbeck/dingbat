@@ -1,214 +1,70 @@
-# Speculative rollback — investigation handoff
+# Speculative rollback over the network link
 
-Status as of the end of the multiplayer-phase3b speculation work. Read this
-before continuing; it captures what works, the open problem, how the engine is
-built, and where to look next.
+`src/dingbat/gba/netcore.nim`. Off by default; `netlink_set_speculative` /
+`?speculative=1` on the web. Bench: `tests/roms/speclinkbench.gba` with
+`--mode=speclinkbench` (in CI); correctness gate `--mode=speclink`.
 
-## UPDATE 2026-07-13 — root cause found + fixed (predictor + two rollback bugs)
+## Why
 
-The open problem below is largely resolved. Summary of what changed
-(`src/dingbat/gba/netcore.nim`, `tests/`, wasm rebuilt):
+The blocking link stalls the initiator one round-trip per transfer. Cable
+Club handshakes poll continuously, so under real latency a trade crawls
+(~1 fps at 50 ms). Speculation predicts the responder's word, continues, and
+rolls back on a mismatch — GGPO's trick applied to SIO rounds.
 
-1. **Root cause of the crawl = rollback thrash from a weak predictor.** The old
-   `predict` ("same word the peer last sent") mispredicts on every change in
-   Emerald's cyclic handshake; each miss re-emulates up to *latency-worth of
-   frames* of CPU (frame-granular checkpoints), so the master runs far under
-   realtime and the responder — bounded-lead-pinned to the master's delayed
-   CLOCK — crawls with it. The `--mode=speclink` test hid this because its speed
-   proxy counts **steps/stalls**, which do NOT include rollback re-emulation.
-2. **Echo predictor (the fix).** In a symmetric Cable Club "all players ready"
-   sync the responder mirrors us, so once it has echoed us a couple of rounds
-   `predict` returns our own `round_out`. On the new benchmark: **hits 198/200,
-   2 rollbacks** @delay50 vs the old **99/200, 101 rollbacks** — ~60× less
-   re-emulation, still bit-identical. Default ON.
-3. **Honest benchmark:** `tests/roms/speclinkbench.gba` + `--mode=speclinkbench`
-   (in CI) — a 200-round symmetric handshake reporting `replay_cyc` (cycles
-   re-emulated), `overrun`, and cpu-ms. This is the metric the old proxy missed.
-4. **Two rollback CRASH bugs it exposed** (both from a round *straddling a frame
-   boundary*, which 16 rounds never aligned — these would abort the wasm, i.e.
-   *actually* prevent entering the trade room, not merely slow it):
-   - checkpoint for an in-flight straddling round got pruned → `advance_confirmed`
-     now clamps `confirmed_cycle` to the in-flight round's start;
-   - log entry for a round straddling the oldest checkpoint got pruned but still
-     re-fired → retain the log back to `replay_start(checkpoints[0])`.
-5. **Known residual (old predictor only):** extreme thrash (101 rollbacks) trips
-   `replay_overrun>0` (lossy idle-latch → divergence). The echo predictor keeps
-   overrun=0 at delays 0/50; `replay_overruns()` telemetry now detects it. A
-   deeper rollback fix (rollback-during-replay / checkpoint-regen) is the next
-   step if a real asymmetric trade pushes the echo predictor into many rollbacks.
+## How it is built
 
-The rest of this document is the original pre-fix handoff, kept for context.
+Only the **initiator** speculates (`has_mastered`, set in `master_start`;
+the responder never blocks on a reply).
 
----
+* `master_complete` with no REPLY yet: if within the window, `predict()` the
+  word, latch it, append to `round_log` marked predicted, continue instead
+  of `reply_wait`.
+* `predict(mode)`: the **echo predictor** — once the responder has mirrored
+  us `ECHO_CONFIRM` rounds in a row for that mode (`peer_echo`), predict our
+  own outgoing word; otherwise the responder's last word for that mode.
+  Symmetric "all players ready" syncs echo, so this hits 198/200 rounds
+  where last-word hit 99/200. `echo_predict` is a bench hook; `force_wrong`
+  a test hook.
+* Checkpoints at each `try_advance` `naFrame`: `(cycle, state_payload,
+  round snapshot)`. Frame-granular because `state_payload` is valid only at
+  frame boundaries.
+* `feed` → `lmReply`: match the `round_log` entry by cycle **order**, not
+  exact cycle (intra-frame timing drifts a few cycles across a restore).
+  Match → `advance_confirmed`; mismatch → `rollback_and_replay`: restore the
+  newest checkpoint ≤ that round and re-emulate, re-supplying logged words
+  and replaying `input_log` (host input routes through `note_input`).
+* Window: `SPEC_WINDOW_FRAMES = 8` (~130 ms). Past it, `window_wait` parks in
+  the blocking `reply_wait`, so the worst case is the blocking path. The lead
+  while speculating is `window_cycles + FRAME_CYCLES` (`effective_lead`).
+* Two invariants, each once a crash: `advance_confirmed` clamps
+  `confirmed_cycle` to an in-flight round's start so its checkpoint is not
+  pruned; the log is retained back to `replay_start(checkpoints[0])` so a
+  round straddling the oldest checkpoint can re-fire.
+* `replay_overrun` counts replays that ran past the log (the lossy
+  idle-latch fallback → divergence). The echo predictor keeps it at 0 at
+  delays 0 and 50; `replay_overruns()` exposes it.
 
+Telemetry: `Module._netlink_debug()` / `pred_stats()` →
+`spec[hits misses rollbacks ckpts log window_wait confirmed]`. Read it on
+**both** sides before changing anything: hit rate, rollback growth,
+`window_wait`, and the advance rate of `now` (realtime = 16.78e6 cycles/s).
 
-## TL;DR
+## What the tests measure
 
-The GBA network link works and is correct. Under real latency the *blocking*
-path is unusably slow (per-round round-trip stall). We built GGPO-style
-**speculative rollback** to fix that; it is **proven bit-identical to the
-blocking path in a synthetic native test**, but in a **real Pokémon Emerald
-trade under latency it does NOT recover the frame rate** — with
-`?speculative=1&linkdelay=50` the trade still crawls (~1 fps), same as blocking.
-That regression-in-the-real-world-but-pass-in-the-test gap is the open problem.
+`--mode=speclink` proves bit-identity with the blocking path (ON reproduces
+the EWRAM log exactly at delays 0–50 for multi / normal-8 / normal-32, and a
+forced-misprediction predictor still matches) but its speed proxy counts
+steps/stalls, **not** rollback re-emulation — which is how a predictor that
+rolled back every third round of a cyclic handshake looked fine.
+`speclinkbench` reports `replay_cyc`, `overrun` and cpu-ms over a 200-round
+symmetric handshake; that is the number to watch.
 
-## What is proven / works
+## Open
 
-- **Base link (blocking + adaptive lead):** two Emerald saves complete a real
-  trade on localhost (no latency) at full speed. Correct.
-- **Adaptive lead** (`netcore.effective_lead`, commit `2f6f2e7`): tightens the
-  bounded lead while a serial link mode is active so the Cable Club handshake
-  converges. Without it the handshake never entered the Trade Center.
-- **Speculation engine** (commit `e2d1395`): native `--mode=speclink` test
-  passes — speculation ON reproduces the blocking-path EWRAM log **exactly**
-  across delays 0/20/30/40/50 for multi / normal-8 / normal-32, and a
-  forced-misprediction predictor rolls back every round and *still* matches.
-  So the mechanism is correct.
-- **Native host/guest link** (commits `ad7efe5` CLI, `289a5e5` in-app ImGui
-  Host/Join window). Speculation is **not** wired into the native app (blocking
-  path only), so native online play is slow under real latency.
-- **Browser input wiring + opt-in** (commit `9b752a4`): host input routes
-  through `note_input` so rollback replays it; speculation is off by default,
-  enabled with `?speculative=1`.
-
-## The open problem
-
-`?speculative=1&linkdelay=50` in the browser Emerald Trade Center does not
-recover fps — it still crawls. The user confirmed:
-- `linkdelay=50` **without** `speculative` → ~1 fps (expected: blocking stall).
-- `speculative=1&linkdelay=50` → speculation "doesn't seem to work" (still slow).
-
-Meanwhile the native `speclink` test shows ON ≫ OFF under the same delay. So
-something about the *real, continuous* Emerald trade differs from the *short*
-synthetic test. **That is the thing to explain.**
-
-## How speculation is built (src/dingbat/gba/netcore.nim)
-
-Only the **initiator** speculates (`has_mastered = true`, set in `master_start`;
-the responder keeps the tight `lead_active` and never blocks on a reply anyway).
-
-- `master_complete` (transfer done, no REPLY yet): if `speculative` and within
-  the window, `predict()` the responder's word, latch it, append to
-  `round_log` (marked `predicted`), and **continue** instead of `reply_wait`.
-- `predict(mode)`: returns `last_reply[mode and 7]` — **the same word the
-  responder last actually sent for that mode.** Rationale: handshakes send runs
-  of identical/slowly-changing words. `force_wrong` is a test hook.
-- Checkpoints: at each `try_advance` `naFrame` boundary, push
-  `(cycle, state_payload(gba), <netcore round snapshot>)`. Frame-granular
-  because `state_payload` is only valid at frame boundaries.
-- `feed` → `lmReply`: locate the `round_log` entry by cycle-order cursor
-  (NOT by exact cycle — intra-frame timing drifts a few cycles across a restore,
-  so matching is by order). Predicted+match → `advance_confirmed`. Predicted+
-  mismatch → `rollback_and_replay(m.cycle)`: restore newest checkpoint ≤ that
-  round, re-emulate forward re-supplying logged words + replaying `input_log`.
-- Window: `SPEC_WINDOW_FRAMES = 8` (~130 ms). When
-  `now() - confirmed_cycle > window_cycles`, park in `window_wait` = fall back
-  to the blocking `reply_wait`. Worst case == today's behavior.
-- Lead while speculating: `window_cycles + FRAME_CYCLES` (see `effective_lead`,
-  ~line 250), so the master may run the window ahead.
-
-Telemetry (`debug_state`, also `pred_stats()`):
-`spec[hits=H misses=M rollbacks=R ckpts=C log=L window_wait=B confirmed=…]`
-
-## FIRST STEP: gather telemetry from the real failing trade
-
-Do this before changing anything. In the browser, with
-`?speculative=1&linkdelay=50`, get both tabs into the Trade Center, then in each
-tab's console read `Module._netlink_debug()` a few times over a couple seconds.
-Note, for BOTH host (unit 0, the speculator) and guest (unit 1):
-- `hits` vs `misses` → the **prediction hit rate**.
-- `rollbacks` growth rate → how often it re-emulates.
-- `window_wait` → whether it fell back to blocking.
-- `now` advance rate → each side's actual speed (cycles/sec; realtime = 16.78e6).
-
-That single measurement disambiguates the hypotheses below.
-
-## Hypotheses (ranked)
-
-1. **Low hit rate → rollback thrash (most likely).** The captured Emerald
-   handshake cycles words `0x961e, 0xcafe, 0x11, 0x00, 0x00, …`
-   (see `tests/local-emerald-link/`). "Same as last" mispredicts on each change
-   (~3 of 8 rounds ≈ 37% miss). Each miss rolls back to the *frame-start*
-   checkpoint and re-emulates up to a whole frame (~12 rounds). A miss every ~3
-   rounds ⇒ the master re-runs each frame several times ⇒ **more** work than
-   blocking. The native speclink test hides this: it is only **16 rounds total**,
-   so the per-frame re-emulation cost never compounds the way a continuous trade
-   does. Confirm via `hits/misses/rollbacks`.
-2. **Window fills → back-pressure to blocking.** If rollbacks keep holding
-   `confirmed_cycle` back, `now - confirmed > window_cycles` trips and
-   `window_wait` engages → blocking. Check `window_wait=true`.
-3. **Rollback re-emulation cost dominates.** `rollback_and_replay` re-runs whole
-   frames (280896 cycles) on the CPU; frequent rollbacks = N× CPU work. Same
-   root as #1.
-4. **The responder (unit 1) is the bottleneck.** Speculation only helps unit 0.
-   Unit 1's advance is gated by receiving the master's latency-delayed
-   TRANSFERs; the two are coupled (the master's window can't confirm without the
-   responder's REPLYs). Measure BOTH sides — if unit 1 crawls, master-only
-   speculation can't win.
-5. **Input replay overhead.** Long shot; `input_log` replay on each rollback.
-
-## Concrete next experiments
-
-1. **Measure (above).** Decide which hypothesis holds before coding.
-2. **Better predictor** (if hit rate is low — `predict` is one small proc):
-   - Predict the master's *own* outgoing word (the responder frequently echoes;
-     in the capture the two matched exactly because same trainer).
-   - Or a short pattern/history predictor (last-N, or per-round-index).
-   Re-measure hit rate. A high hit rate should make rollbacks rare and recover
-   fps without touching the rollback machinery.
-3. **Cheaper rollback** (if cost dominates): checkpoint more often than
-   per-frame (a lighter per-round snapshot of just the mutated state?), or
-   re-emulate only the affected rounds instead of the whole frame. Hard —
-   `state_payload` is frame-only, so this may need a new lighter snapshot path.
-4. **Reproduce natively.** The speclink test is too short. Extend it (or drive
-   the local Emerald replay in `tests/local-emerald-link/`) into a **continuous,
-   hundreds-of-rounds** multi-mode exchange with a *cyclic* data pattern like
-   Emerald's, and confirm ON is NOT faster than OFF — then debug natively
-   instead of fighting the flaky browser harness.
-5. **Consider responder-side speculation** only if #4 is confirmed.
-
-## Reproduction
-
-Browser (the real failing case):
-1. `cp ~/Downloads/PokemonEmeraldShiny*.{gba,sav} web/`
-2. `nim c -d:emscripten src/dingbat_wasm.nim`
-3. `python3 web/serve.py &` and `(cd web/signaling && node server.js &)`
-4. Two tabs at `http://localhost:8765/?speculative=1&linkdelay=50`; drop the ROM
-   in each and seed its `.sav` into IndexedDB (`save:<romname>`); connect via
-   **Link Cable → Host / Join**; walk both to the attendant → Trade Center.
-   (See `tests/local-emerald-link/README.md` for the detailed recipe and the
-   captured wire trace.)
-
-Native (correct, fast — but short; extend it to reproduce the slowdown):
-`nim c -d:test_harness -d:release --path:src -o:/tmp/dt tests/dingbat_test.nim`
-`/tmp/dt tests/roms/linktest.gba --mode=speclink --timeout=7200`
-
-## Files & commits (branch multiplayer-phase3b, unpushed)
-
-- `src/dingbat/gba/netcore.nim` — the engine: `predict`, `master_complete`,
-  `feed`(lmReply), `rollback_and_replay`, `advance_confirmed`, `try_advance`
-  (window/lead), `debug_state`/`pred_stats`, `note_input`.
-- `src/dingbat_wasm.nim` — `setInput`→`note_input`; `specEnabled` +
-  `netlink_set_speculative`.
-- `web/netplay.js` — `NET_SPECULATIVE` (`?speculative=1`) + setter call.
-- `src/dingbat.nim` — native link (CLI `--listen/--connect` + ImGui window). No
-  speculation.
-- `tests/dingbat_test.nim` — `--mode=speclink`.
-- `tests/local-emerald-link/` — **gitignored** (via `.git/info/exclude`):
-  README recipe, captured wire trace (`emerald-cable-club-sync-trace.json`),
-  and `replay_smoke.nim`. Needs the local (uncommitted) Emerald ROMs+saves in
-  `~/Downloads/PokemonEmeraldShiny{1,2}.{gba,sav}`.
-
-Commits: `2f6f2e7` adaptive lead · `e2d1395` speculation engine · `ad7efe5`
-native CLI link · `289a5e5` native link window · `9b752a4` input wiring +
-opt-in speculation.
-
-## Key insight for whoever picks this up
-
-The synthetic test passes because it is **short and adversarial-but-tiny** (16
-rounds). The real trade is **long and cyclic**. The most likely failure is that
-"same word as last" mispredicts on every word-change in Emerald's repeating
-handshake, and frame-granular rollback re-emulates a full frame per miss — so
-speculation does more work than it saves. **Measure the hit/miss/rollback
-telemetry in the real trade first**; if the hit rate is low, fix the predictor
-before touching the rollback machinery.
+* A real asymmetric trade may push the echo predictor into many rollbacks;
+  the next step is rollback-during-replay / checkpoint regeneration, or
+  sub-frame checkpoints (`state_payload` is frame-only, so that needs a
+  lighter snapshot path).
+* The native app links blocking-only; speculation is wasm-side.
+* Responder-side speculation only if measurement shows unit 1 is the
+  bottleneck (its advance is gated by the master's delayed TRANSFERs).
