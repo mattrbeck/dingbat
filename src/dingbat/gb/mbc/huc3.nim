@@ -24,19 +24,10 @@
 # Only bits 6-0 of the window reach the chip at all — D7 is not wired — so the
 # top bit of every read is the floating bus, which sits high.
 #
-# dingbat runs the command the moment the semaphore is cleared and reports ready
-# immediately after, so the busy window real hardware has (the MCU picks the
-# command up on its next pass round its event loop) does not exist here. Games
-# poll for ready, which a permanently-ready semaphore satisfies.
-#
-# Not modelled: the tone generator. The cartridge drives a piezo transducer of
-# its own through a resistor ladder, which is outside the Game Boy's audio path
-# entirely and has nowhere to go in dingbat; extended command 0xE is accepted
-# and dropped. Games use it for alarm chimes and downloadable ringtones, so the
-# effect of leaving it out is silence where a cartridge would beep.
-
-# The register map and the clock that lives in it are in gb.nim, next to the
-# MBC3 clock; this file is the protocol that reaches them.
+# Commands run the moment the semaphore is cleared and ready is reported at
+# once; the MCU's busy window is not modelled (games poll for ready). Not
+# modelled: the tone generator (a piezo on the cartridge; extended command 0xE
+# is accepted and dropped). The register map and the clock in it are in gb.nim.
 
 proc huc3_exec_extended(cart: Huc3; arg: uint8) =
   ## Command 0x6's argument selects one of the MCU's higher-level operations.
@@ -45,9 +36,8 @@ proc huc3_exec_extended(cart: Huc3; arg: uint8) =
     for i in 0 ..< HUC3_CLOCK_LEN:
       cart.regs[HUC3_SNAPSHOT + i] = cart.regs[HUC3_CLOCK + i]
   of 0x1:  # copy the snapshot back onto the running clock
-    # Setting the clock must not let a player skip a wait: the event time is a
-    # deadline the game has already committed to, so the MCU shifts it by the
-    # same amount the clock moved and the remaining duration survives.
+    # The MCU shifts the event deadline by the amount the clock moved, so
+    # setting the clock cannot skip a wait.
     let before = cart.huc3_now_minutes()
     for i in 0 ..< HUC3_CLOCK_LEN:
       cart.regs[HUC3_CLOCK + i] = cart.regs[HUC3_SNAPSHOT + i]
@@ -60,8 +50,7 @@ proc huc3_exec_extended(cart: Huc3; arg: uint8) =
         cart.set_nyb3(HUC3_EVENT + 3, (shifted div MINUTES_PER_DAY) mod HUC3_DAY_WRAP)
     cart.ram_dirty = true
   of 0x2:
-    # A status word the games demand before they will boot at all: Robot Poncots
-    # spins on 0x62 until the response nibble comes back 1.
+    # Robot Poncots spins on 0x62 until the response nibble is 1.
     cart.response = 1
   else: discard  # 0xE is the tone generator; the rest are unobserved
 
@@ -92,9 +81,8 @@ proc huc3_window_read(cart: Huc3; idx: int): uint8 =
     # bits 3-0 are the answer the last executed command left.
     0x80'u8 or (cart.mailbox and 0x70) or (cart.response and 0x0F)
   of 0x0D:
-    # Bit 0 is the semaphore, set while the MCU is ready for a command. The bits
-    # between it and the floating top bit are not a separate register: they are
-    # the mailbox showing through (endrift, on hardware).
+    # Bit 0 is the semaphore (set = MCU ready); bits 6-2 are the mailbox
+    # showing through (endrift, on hardware).
     0x80'u8 or (cart.mailbox and 0x7C) or 1'u8
   of 0x0E: 0xC0'u8  # IR, as HuC1: no light seen, and nothing here to see it from
   of 0x00, 0x0A:
@@ -111,8 +99,7 @@ proc huc3_window_write(cart: Huc3; val: uint8): bool =
     true
   of 0x0C: true   # response mailbox: read-only
   of 0x0D:
-    # Clearing the semaphore is the request to execute; setting it is the MCU's
-    # job, so a write with bit 0 set has nothing to do. Games write 0xFE.
+    # Clearing the semaphore requests execution; setting it is the MCU's job.
     if (val and 1) == 0: cart.huc3_execute()
     true
   of 0x0E:
@@ -136,8 +123,7 @@ method mbc_write*(cart: Huc3; idx: int; val: uint8) =
   case idx
   of 0x0000..0x1FFF:
     let m = val and 0x0F
-    # Steering the window off RAM is this mapper's equivalent of an MBC3 RAM
-    # disable, and the same place to flush the battery file
+    # Steering the window off RAM is this mapper's RAM disable: flush here.
     if cart.mode == 0x0A and m != 0x0A: mbc_save(cart)
     cart.mode = m
   of 0x2000..0x3FFF: cart.rom_bank_num = val and 0x7F

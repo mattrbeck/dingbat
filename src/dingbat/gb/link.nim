@@ -1,48 +1,32 @@
-# In-process lockstep link between two GB/GBC cores — the Game Boy analog
-# of gba/link.nim (see there for the full design rationale).
-#
-# The two cores are stepped in bounded, interleaved slices so neither's
-# emulated clock gets ahead of the other by more than roughly LINK_SLICE
-# cycles plus one instruction of overshoot. A serial transfer is resolved
-# byte-at-a-time: the master (internal clock) shifts its 8 bits off its own
-# DIV-derived serial clock exactly as a lone unit would (bit engine in
-# serial.nim), and when the 8th shift lands the coordinator advances the
-# peer to that emulated time and exchanges bytes full-duplex — the same
-# deferred-completion discipline as the GBA lockstep link, and the same
-# run_to() boundary a network transport would replace.
-#
-# Clock caveat: cross-core "global time" compares scheduler cycles, which
-# count CPU cycles — a CGB core in double speed advances its scheduler 2x
-# per wall-second. Two linked games track each other's speed mode in
-# practice (both Pokemon GSC sides run the same code), so the skew bound
-# only degrades by that factor during brief mismatched-speed windows.
+# In-process lockstep link between two GB/GBC cores (the GB analogue of
+# gba/link.nim). The cores are stepped in interleaved LINK_SLICE-bounded
+# slices; a serial transfer is resolved byte-at-a-time: the master shifts its
+# 8 bits off its own DIV-derived clock (serial.nim), and on the 8th shift the
+# coordinator advances the peer to that emulated time and exchanges bytes
+# full-duplex. run_to() is the boundary a network transport would replace.
+# Global time compares scheduler cycles, which count CPU cycles, so a
+# double-speed CGB core skews the bound by 2x while the speeds differ.
 
 import ../common/scheduler
 import gb
 
 const
   LINK_SLICE = 512
-    ## Interleave granularity in cycles: well below one serial byte at the
-    ## normal clock (8 x 512 = 4096 cycles) so the slave always gets its
-    ## staging window between rounds, and equal to one bit period so data
-    ## latched "now" from a slightly-ahead peer is within a bit of
-    ## hardware truth. CGB-fast transfers (128 cycles) are shorter than
-    ## the slice; their data still exchanges at the exact completion cycle
-    ## because run_to drives the peer forward before latching.
+    ## Interleave granularity in cycles: one bit period at the normal clock,
+    ## so the slave gets its staging window between rounds. CGB-fast
+    ## transfers are shorter than the slice; run_to still drives the peer to
+    ## the exact completion cycle before latching.
 
 type
   GbLink* = ref object
     cores*: seq[GB]
-    # Global-time bookkeeping: global(i) = offsets[i] + scheduler.cycles,
-    # updated with each core's per-frame rebase.
+    # global(i) = offsets[i] + scheduler.cycles, updated per-frame rebase.
     offsets: seq[int64]
-    # Re-entrancy guard: true while core i is being advanced up-stack.
+    # Re-entrancy guard: core i is being advanced up-stack.
     active: seq[bool]
     frame_done: seq[bool]
-    # Monotonic count of serial transfers completed over the cable. Games
-    # drive transfers continuously while the link is in use and stop when
-    # they close it, so "count not advancing" is a game-agnostic idle
-    # signal (same contract as gba/link.nim).
+    # Completed transfers; "not advancing" is the game-agnostic idle signal
+    # (same contract as gba/link.nim).
     transfers*: int
 
   LockstepGbSerialDriver* = ref object of GbSerialDriver
@@ -55,9 +39,8 @@ proc now(link: GbLink; i: int): int64 =
   link.offsets[i] + int64(link.cores[i].scheduler.cycles)
 
 proc run_to(link: GbLink; i: int; target: int64) =
-  ## Advance core i until its global clock reaches `target`. This is the
-  ## network-transport boundary: for a remote peer it becomes "block until
-  ## peer i confirms it has reached `target` and hand over its SB/SC".
+  ## Advance core i until its global clock reaches `target` (the network
+  ## transport boundary).
   if link.active[i]: return  # already being advanced up-stack
   let gb = link.cores[i]
   link.active[i] = true
@@ -90,15 +73,12 @@ proc step_frame*(link: GbLink) =
       link.frame_done[best] = true
   for i in 0 ..< link.cores.len:
     link.cores[i].ppu.frame = false
-    # gb_rebase, not scheduler.rebase: the APU channels' deadlines are
-    # absolute cycles held outside the event array (see gb/apu.nim).
+    # gb_rebase, not scheduler.rebase: the APU deadlines live outside the
+    # event array (gb/apu.nim).
     link.offsets[i] += int64(link.cores[i].gb_rebase())
 
 when defined(gbLinkTrace):
-  # Debug hook (-d:gbLinkTrace): one call per completed transfer with the
-  # master id, the bytes exchanged, and whether the slave was ready. The
-  # harness prints these to reconstruct the link protocol. Compiled out
-  # of normal builds.
+  # Debug hook: one call per completed transfer (compiled out normally).
   var onGbTransfer*: proc(master: int; master_out, slave_out: uint8;
                           slave_sc: uint8; slave_got_irq: bool) = nil
   var bothInternalCount*: int = 0  # transfers where the peer was also internal-clock
@@ -112,11 +92,9 @@ proc peer_of(link: GbLink; m: int): int =
   -1
 
 proc complete_transfer(link: GbLink; m: int) =
-  # Core m's internally-clocked transfer shifted its 8th bit. Advance the
-  # peer to this emulated time, then exchange bytes full-duplex: the
-  # master's clock shifts both shift registers whether or not the slave
-  # set its enable bit — the slave only gets completion semantics (SC.7
-  # clear + serial IRQ) if it had started with the external clock.
+  # Core m's internally-clocked transfer shifted its 8th bit: advance the
+  # peer to this time and exchange bytes. The slave only gets completion
+  # (SC.7 clear + IRQ) if it had started with the external clock.
   let master = link.cores[m]
   let p = link.peer_of(m)
   if p < 0:
@@ -125,18 +103,14 @@ proc complete_transfer(link: GbLink; m: int) =
   link.run_to(p, link.now(m))
   inc link.transfers
   let slave = link.cores[p]
-  # Captured before the exchange below rewrites SB; read only by the
-  # gbLinkTrace hook at the bottom.
+  # Captured before the exchange rewrites SB; for the gbLinkTrace hook.
   let master_out {.used.} = master.serial.out_latch
   var slave_out = 0xFF'u8
   var slave_got_irq = false
-  # A transfer exchanges bytes only when the peer is a LISTENING external-
-  # clock slave (SC bit0=0 external, bit7=1 transfer enabled). An unarmed
-  # peer — not started, or clocking its own transfer — isn't driving its
-  # SO line, so the master clocks in idle-high 1s (0xFF), exactly as on
-  # hardware. Feeding the master the peer's latched SB while it wasn't
-  # listening was the desync bug: it let a game latch a role/handshake byte
-  # from a peer that never actually sent it that cycle.
+  # Bytes are exchanged only with a LISTENING external-clock slave (SC.0 = 0,
+  # SC.7 = 1). An unarmed peer is not driving SO, so the master clocks in
+  # 0xFF; feeding it the peer's latched SB instead let games latch a
+  # handshake byte the peer never sent (desync).
   let slave_listening = (slave.serial.sc and 0x81) == 0x80
   if slave_listening:
     slave_out = slave.serial.sb
@@ -157,9 +131,8 @@ proc complete_transfer(link: GbLink; m: int) =
 # ---------------- driver ----------------
 
 method serial_peer_committed*(drv: LockstepGbSerialDriver): bool =
-  ## complete_transfer has already swapped bytes with the other core and
-  ## finished the transfer on BOTH, so this side cannot be rewound alone. See
-  ## the base method in serial.nim.
+  ## complete_transfer finished the transfer on BOTH cores, so this side
+  ## cannot be rewound alone (base method in serial.nim).
   true
 
 method serial_complete*(drv: LockstepGbSerialDriver; gb: GB) =
@@ -178,25 +151,16 @@ proc new_gb_link*(cores: seq[GB]): GbLink =
   )
   for i, core in cores:
     core.set_serial_driver(LockstepGbSerialDriver(link: result, id: i))
-  # NOTE on perfect symmetry: two cores fed BYTE-IDENTICAL state AND input
-  # both choose the internal-clock master role on the same cycle and deadlock
-  # (every transfer "both-internal", neither establishes) — real hardware
-  # avoids this only because two units' independent oscillators drift. This
-  # never happens in practice: distinct saves diverge immediately, and the
-  # frontend drives the two players' input separately (browser click-to-focus
-  # gives one core input at a time), which is enough asymmetry. Handled at the
-  # input layer, deliberately not with an artificial in-core clock skew that
-  # would perturb single-core-accurate timing.
+  # Two cores with byte-identical state AND input both pick the master role
+  # on the same cycle and deadlock (hardware escapes via oscillator drift).
+  # Distinct saves and per-player input are enough asymmetry; deliberately
+  # not an artificial in-core clock skew.
 
-# ---------------- rollback support (GGPO-style input rollback) ----------------
+# ---------------- rollback support ----------------
 #
-# The whole link runs locally on both peers; only the two players' INPUTS cross
-# the network. Snapshots are valid at FRAME BOUNDARIES only (where state_payload
-# is defined and where step_frame lands both cores). Simpler than the GBA link:
-# GB serial has no multi-mode receive latches, and its entire in-flight transfer
-# state (SB/SC/bits/clock_history) is already inside each core's state_payload
-# (savestate GB_SEC_SER), so a snapshot is just the two payloads + the cross-core
-# clock offsets.
+# Snapshots are valid at frame boundaries only. GB in-flight serial state is
+# already inside each core's state_payload (GB_SEC_SER), so a snapshot is the
+# two payloads plus the cross-core clock offsets.
 
 type
   GbLinkSnapshot* = object
@@ -206,8 +170,7 @@ type
                             # doesn't jump backwards across a rollback)
 
 proc capture_state*(link: GbLink): GbLinkSnapshot =
-  ## Snapshot both cores plus the cross-core clock state. Frame-boundary only.
-  ## `active`/`frame_done` are transient within step_frame, so omitted.
+  ## Frame-boundary only; `active`/`frame_done` are transient in step_frame.
   result.payloads = newSeq[string](link.cores.len)
   for i, c in link.cores:
     result.payloads[i] = c.state_payload()
@@ -223,11 +186,8 @@ proc restore_state*(link: GbLink; s: GbLinkSnapshot) =
   link.transfers = s.transfers
 
 proc state_checksum*(link: GbLink): uint64 =
-  ## Cheap FNV-1a over both cores' serialized state — the value peers exchange
-  ## periodically to DETECT a desync before it corrupts a trade. Covers only the
-  ## cores: `offsets` are a LOCAL clock-rebase bias (they can differ between peers
-  ## without changing what either core emulates), so folding them in would flag
-  ## false desyncs.
+  ## FNV-1a over both cores' state, exchanged to detect a desync. `offsets`
+  ## are a local rebase bias that differs between peers, so they are excluded.
   result = 0xCBF29CE484222325'u64
   for c in link.cores:
     for ch in c.state_payload():

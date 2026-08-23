@@ -6,10 +6,8 @@
 # from endrift's thread https://gbdev.gg8.se/forums/viewtopic.php?id=544) and
 # the Nintendo Power GB Memory documentation it points at for the flash part
 # (https://iceboy.a-singer.de/doc/np_gb_memory.html), whose chip differs only in
-# part number. SameBoy has no MBC6 — cart type 0x20 is not in its
-# GB_cart_defs table at all — so, like TAMA5, none of this has been compared
-# against another emulator, and the game itself was not obtainable. It is
-# implemented from the documents and is UNTESTED against a real title.
+# part number. The game was not obtainable: implemented from the documents and
+# untested against a real title.
 #
 # Everything unusual about MBC6 follows from it having two of everything. The
 # 0x4000-0x7FFF ROM region is split into two independently banked 8 KiB windows
@@ -206,11 +204,8 @@ method mbc_write*(cart: Mbc6; idx: int; val: uint8) =
   of 0x0800..0x0BFF: cart.ram_bank_b = val and 0x07
   of 0x0C00..0x0FFF: cart.flash_enabled = (val and 1) != 0
   of 0x1000..0x1FFF:
-    # Pan Docs gives this one a bare address ("### 1000 — Flash Write Enable")
-    # rather than a range. The neighbouring decodes are 0x400 apart and the next
-    # named register does not start until 0x2000, so the whole 0x1000-0x1FFF
-    # block is treated as this register; nothing documents a finer decode, and
-    # no other register is documented as living in the gap.
+    # Pan Docs gives a bare address ("1000 — Flash Write Enable"); nothing
+    # documents a finer decode before 0x2000, so the whole block is it.
     cart.flash_write_enabled = (val and 1) != 0
   of 0x2000..0x27FF: cart.rom_bank_a = val and 0x7F
   of 0x2800..0x2FFF: cart.flash_select_a = val == 0x08   # "00 selects the ROM and 08 selects the flash"

@@ -27,18 +27,14 @@ proc rtc_write(cart: Mbc3; reg: int; val: uint8) =
   else: discard
 
 proc mbc3_ram_bank_top(cart: Mbc3): uint8 {.inline.} =
-  ## MBC30 is an MBC3 with one more RAM address line: banks 0-7 all map RAM.
-  ## Pan Docs (cartridge header): "MBC3 with 64 KiB of SRAM refers to MBC30"
-  ## — the header's RAM size is the only signal the cart gives, and JP Pokemon
-  ## Crystal (the one retail MBC30 title) is exactly the $10 type + $05 RAM
-  ## combination. Its PC boxes live in banks 4-7. Plain MBC3 keeps the
-  ## measured 0-3-else-open-bus map (rtc-invalid-banks capture, mbc_write).
+  ## MBC30 has one more RAM address line, banks 0-7 (Pan Docs, cartridge
+  ## header: "MBC3 with 64 KiB of SRAM refers to MBC30"; JP Pokemon Crystal).
+  ## Plain MBC3 keeps 0-3, else open bus (CasualPokePlayer rtc-invalid-banks).
   if cart.ram.len >= 0x2000 * 8: 0x07'u8 else: 0x03'u8
 
 proc mbc3_rom_mask(cart: Mbc3): uint8 {.inline.} =
-  ## Same line count on the ROM side: MBC30 drives 8 ROM-bank bits (4 MiB)
-  ## where MBC3 drives 7. Keyed off the actual image so a 2 MiB MBC30 cart
-  ## (JP Crystal) behaves identically either way.
+  ## MBC30 drives 8 ROM-bank bits where MBC3 drives 7; keyed off the image
+  ## size so a 2 MiB MBC30 cart behaves identically either way.
   if cart.rom.len > 0x4000 * 128: 0xFF'u8 else: 0x7F'u8
 
 method mbc_rom_map*(cart: Mbc3): (int, int) =
@@ -74,33 +70,14 @@ method mbc_write*(cart: Mbc3; idx: int; val: uint8) =
     cart.rom_bank_num = val and cart.mbc3_rom_mask()
     if cart.rom_bank_num == 0: cart.rom_bank_num = 1
   of 0x4000..0x5FFF:
-    # RAMB is FOUR bits wide, not eight. CasualPokePlayer's rtc-invalid-banks
-    # README: "The RAMB register for MBC3+RTC is a 4 bit register. The upper 4
-    # bits do not affect the bank selected. […] there are only 9 possible valid
-    # combinations […] 'banks' 04-07 and 0D-0F never map to anything […] the
-    # invalid banks appear to produce open bus behavior." Its capture is that
-    # statement drawn: the 16-entry pattern 00 01 02 03 FF FF FF FF 08 09 0A 0B
-    # 00 FF FF FF repeated sixteen times across e = $00..$FF. Without the mask
-    # every e >= $10 falls through to the open-bus arm below instead of
-    # aliasing, so only the first sixteen entries are right.
+    # RAMB is four bits wide: values >= $10 alias, and banks 04-07 / 0D-0F
+    # read open bus (CasualPokePlayer rtc-invalid-banks hardware capture).
     cart.ram_bank_num = val and 0x0F
   of 0x6000..0x7FFF:
-    # Latch Clock Data. Pan Docs documents the canonical "$00 then $01"
-    # sequence, but that is how software is expected to drive the pin, not the
-    # condition the MBC latches on: the latch is level-insensitive and fires on
-    # ANY write to this range.
-    #
-    # The evidence is CasualPokePlayer's latch-rtc-test, which writes ONE
-    # random byte per iteration (51 unrolled `call rand / ld [$6000],a` blocks
-    # at $404F..$444B) and prints the latched registers each time. Its own PRNG
-    # is a 32-bit adder chain at $00DF seeded to zero at $4005, so the byte
-    # sequence is reproducible outside the emulator; replaying it against the
-    # suite's hardware capture matches all 51 five-byte reports exactly under
-    # "every write latches", and misses 28 of 51 under a bit-0 edge/level rule
-    # and 51 of 51 under "reads are always live". An edge rule cannot be right
-    # in any case: with uniformly random bytes it would re-latch about a
-    # quarter of the time, and the capture shows 50 consecutive distinct
-    # reports with no repeat at all.
+    # Latch Clock Data. Pan Docs documents the "$00 then $01" sequence, but
+    # that is how software drives the pin, not the latch condition: ANY write
+    # to this range latches (CasualPokePlayer latch-rtc-test hardware capture,
+    # 51/51 under every-write-latches vs 23/51 under a bit-0 edge rule).
     if cart.has_rtc:
       cart.rtc_latched = cart.rtc_live
       # Retained only so the save-state payload keeps its shape; nothing reads

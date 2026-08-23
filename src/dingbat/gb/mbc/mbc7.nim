@@ -1,9 +1,7 @@
 # MBC7 cartridge (included by gb.nim)
 #
-# Written from Pan Docs (gbdev.io/pandocs/MBC7.html) and the 93LC56 datasheet
-# it cites; SameBoy is used only as a behavioural cross-check to verify the
-# result frame-for-frame. Two things about it are unlike every other GB
-# cartridge:
+# Pan Docs "MBC7" and the 93LC56 datasheet it cites. Two things about it are
+# unlike every other GB cartridge:
 #
 #   * The 0xA000 window is gated twice. 0x0000-0x1FFF must see exactly 0x0A and
 #     0x4000-0x5FFF exactly 0x40; either one alone leaves the window reading
@@ -13,17 +11,14 @@
 #     The save data lives in a 93LC56 EEPROM reached one bit at a time through
 #     register 0x8, so a "RAM write" there is a clock edge, not a store.
 
-# Pan Docs: the 16-bit reading is "centered at the value 81D0" and "Earth's
-# gravity affects the value by roughly $70". The centre matters beyond taste:
-# Kirby integrates the difference from it, so a centre off by even a few units
-# sends the ball drifting on its own.
+# Pan Docs: "centered at the value 81D0", gravity "roughly $70". Kirby
+# integrates the difference from the centre, so an offset makes the ball drift.
 const
   MBC7_ACCEL_CENTER = 0x81D0
   MBC7_ACCEL_SCALE  = 0x70
 
 # 256 bytes as 128 16-bit words (Pan Docs: "data is addressed 16 bits at a
-# time"). `ram` holds them little-endian, which also happens to match the
-# battery files SameBoy writes, so .sav files interchange between the two.
+# time"), held little-endian in `ram`, the interchangeable .sav layout.
 proc ee_word(cart: Mbc7; index: int): uint16 =
   uint16(cart.ram[index * 2]) or (uint16(cart.ram[index * 2 + 1]) shl 8)
 
@@ -43,8 +38,8 @@ proc eeprom_clock(cart: Mbc7) =
   cart.read_bits = (cart.read_bits shl 1) or 1'u16
 
   if cart.argument_bits_left == 0:
-    # Shifting in a command. The register is 11 bits wide, so the leading start
-    # bit reaches 0x400 exactly when the last address bit has arrived.
+    # Shifting in a command: 11 bits, so the start bit reaches 0x400 when the
+    # last address bit has arrived.
     cart.eeprom_command = ((cart.eeprom_command shl 1) or
                            (if cart.eeprom_di: 1'u16 else: 0'u16)) and 0x7FF'u16
     if (cart.eeprom_command and 0x400'u16) != 0:
@@ -93,9 +88,7 @@ proc eeprom_clock(cart: Mbc7) =
       if (cart.eeprom_command and 0x100'u16) != 0:
         cart.ee_or_word(int(cart.eeprom_command and 0x7F'u16), bit)
       else:
-        # WRAL fills the whole chip, all 128 words (Pan Docs: "fill EEPROM with
-        # value"). Neither game uses it for anything but blanking, so the last
-        # word is not observable in them either way.
+        # WRAL fills all 128 words (Pan Docs: "fill EEPROM with value").
         for i in 0 ..< 0x80: cart.ee_or_word(i, bit)
       cart.ram_dirty = true
     if cart.argument_bits_left == 0:
@@ -131,8 +124,7 @@ proc mbc7_reg_write(cart: Mbc7; idx: int; val: uint8) =
       cart.y_latch = 0x8000
   of 1:
     # Pan Docs: "you cannot re-latch the accelerometer value without first
-    # erasing it; attempts to do so yield no change" — so the 0xAA only takes a
-    # sample when a 0x55 has armed it.
+    # erasing it", so 0xAA only samples when a 0x55 has armed it.
     if val == 0xAA and cart.latch_ready:
       cart.latch_ready = false
       cart.x_latch = uint16((MBC7_ACCEL_CENTER +

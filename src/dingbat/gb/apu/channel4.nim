@@ -4,65 +4,27 @@ proc new_channel4*(gb: GB): GbChannel4 =
   GbChannel4(enabled: false, dac_enabled: false, length_counter: 0,
              next_step: GB_NO_STEP, div_next: GB_NO_STEP)
 
-# ---------------------------------------------------------------------------
-# The two-stage frequency timer
-#
-# NR43's `divisor << shift` is a formula for the LFSR's PERIOD, not a
-# description of the counter that produces it. SameSuite channel_4_freq_change
-# is the test that tells the two apart: it plays the same two periods (4 and 16
-# M-cycles) through four different NR43 encodings of them -- $18/$09 for the
-# short one, $38/$1a for the long -- switches between them mid-note at two
-# trigger phases, and reads PCM34 one M-cycle at a time to find the next LFSR
-# shift. If the timer were a single counter with one deadline, all four
-# encodings of a switch would land that shift on the same cycle. They do not:
-# its 64 bytes need eight different answers, so the write is re-interpreting
-# state that already exists rather than restarting a timer.
-#
-# What fits all 64 (and leaves the twelve channel_4 rows that were already
-# green untouched) is the obvious hardware shape:
-#
-#   * a DIVISOR STAGE that increments a counter every `4` T-cycles for divisor
-#     code 0 and every `8 * code` T-cycles otherwise -- exactly HALF the
-#     "divisor" the period formula quotes;
-#   * a free-running COUNTER whose bit `clock_shift` clocks the LFSR on its
-#     RISING edge, i.e. once every 2^(shift+1) increments.
-#
-# The two multiply back to the documented period -- `4 * 2^(shift+1)` = `8 <<
-# shift` for code 0, `8c * 2^(shift+1)` = `16c << shift` otherwise -- and the
-# halving is what the divisor-code-0 carve-out in gb_noise_deadline has been
-# describing all along: code 0 increments once per APU tick (1 MHz), every
-# other code increments on a 512 kHz grid, which is why only code 0 escapes it.
-#
-# An NR43 write then re-interprets both stages instead of restarting them:
-#
-#   * `clock_shift` selects a different BIT of the same counter, so the next
-#     shift is however far that bit's next rising edge is from the count the
-#     channel has already reached -- not half a period, not a whole one;
-#   * the divisor stage's countdown is left running, and only reloads with the
-#     new divisor when it expires. The one exception is a write that lands on
-#     the exact cycle an increment does: that increment consumes the countdown,
-#     so the reload is the new divisor -- rounded UP to the 512 kHz grid,
-#     because a code != 0 stage can only be reloaded on a grid edge.
-#
-# The rounding is the whole difference between the test's two trigger phases on
-# the rows that switch INTO divisor code 2 ($1a): one nop moves the write off
-# the grid and the first shift lands an M-cycle later.
-# ---------------------------------------------------------------------------
+# Two-stage frequency timer. NR43's `divisor << shift` is the LFSR period, not
+# the counter: SameSuite channel_4_freq_change switches between two encodings
+# of the same period mid-note and gets different answers, so an NR43 write
+# re-interprets existing state. Model: a divisor stage that increments a
+# counter every 4 T-cycles for code 0 and every 8*code otherwise (half the
+# quoted divisor), and a free-running counter whose bit `clock_shift` clocks
+# the LFSR on its rising edge. A write selects a different bit of the same
+# counter and leaves the stage's countdown running; only a write landing on
+# the cycle of an increment reloads with the new divisor, rounded up to the
+# 512 kHz grid (a code != 0 stage can only reload on a grid edge).
 
 proc ch4_lfsr_frozen(ch: GbChannel4): bool {.inline.} =
-  ## NR43 clock shifts 14 and 15 tap a counter bit the divisor stage does not
-  ## have: the LFSR receives no clocks at all (Pan Docs NR43, "shift being
-  ## equal to 14 or 15 stops the channel from being clocked entirely") and the
-  ## output holds whatever bit it was on. Modelled by parking `next_step` at
-  ## GB_NO_STEP while the divisor stage keeps counting, so a later NR43 write
-  ## that lowers the shift resumes from the count the hardware would hold.
-  ## Caveat shared with ch4_resync_divisor: a state saved while frozen loses
-  ## the divisor count, so the resume phase after a load is a reconstruction.
+  ## Shifts 14 and 15 tap a bit the counter does not have, so the LFSR is never
+  ## clocked (Pan Docs, NR43). next_step parks at GB_NO_STEP while the divisor
+  ## stage keeps counting, so a later NR43 write that lowers the shift resumes
+  ## from the held count. A state saved while frozen loses that count
+  ## (ch4_resync_divisor).
   ch.clock_shift >= 14'u8
 
 proc ch4_frequency_timer(ch: GbChannel4): uint32 =
-  ## The full LFSR period in T-cycles: 2^(shift+1) increments of the stage
-  ## below.
+  ## Full LFSR period in T-cycles.
   (if ch.divisor_code == 0: 8'u32 else: uint32(ch.divisor_code) shl 4) shl ch.clock_shift
 
 proc ch4_period(ch: GbChannel4; gb: GB): CycleCount {.inline.} =
@@ -74,9 +36,8 @@ proc ch4_inc_period(ch: GbChannel4; gb: GB): CycleCount {.inline.} =
     gb.scheduler.speed
 
 proc ch4_steps_to_rise(counter: uint16; shift: uint8): uint32 =
-  ## Increments from `counter` until bit `shift` of it goes 0 -> 1. Always in
-  ## 1 .. 2^(shift+1), so a counter sitting exactly ON the edge waits a full
-  ## period rather than firing twice.
+  ## Increments until bit `shift` of `counter` rises; 1 .. 2^(shift+1), so a
+  ## counter sitting on the edge waits a full period.
   let m = 1'u32 shl (int(shift) + 1)
   let t = 1'u32 shl int(shift)
   let c = uint32(counter) and (m - 1)
@@ -96,17 +57,11 @@ proc ch4_grid_up(gb: GB; t: CycleCount; divisor_code: uint8): CycleCount {.inlin
   t + ((tick + gb.apu.noise_phase + half - (t mod half)) mod half)
 
 proc ch4_advance_divisor(ch: GbChannel4; gb: GB) =
-  ## Run the divisor stage up to the current cycle without touching the LFSR.
-  ##
-  ## This is the whole reason ch4_catchup_slow does not have to: `div_next` is
-  ## exact at every point the increment period could have changed (trigger,
-  ## NR43 write, speed switch), so however many shifts have gone by since, the
-  ## increments in between are one division away. Callers must have run
-  ## ch4_catchup first, which leaves the next rising edge strictly in the
-  ## future -- so nothing here can have needed to clock the LFSR.
-  ##
-  ## apu_rebase calls it once a frame, which is also what keeps `now -
-  ## div_next` from growing without bound.
+  ## Run the divisor stage to the current cycle without touching the LFSR.
+  ## `div_next` is exact at every point the increment period could have
+  ## changed, so the increments since are one division away. Callers must have
+  ## run ch4_catchup first (next rising edge strictly in the future).
+  ## apu_rebase calls it once a frame, bounding `now - div_next`.
   if ch.div_next == GB_NO_STEP: return
   let now = gb.scheduler.cycles
   if ch.div_next > now: return
@@ -128,46 +83,32 @@ proc ch4_catchup_slow(ch: GbChannel4; gb: GB; observer_period: uint32) =
   let ticks  = ch4_frequency_timer(ch)
   let period = CycleCount(ticks) shl gb.scheduler.speed
   let steps = gb_steps_due(now - ch.next_step, period, ticks > observer_period)
-  # steps == 0 means the tie went to the observer, so nothing has happened yet
-  # -- checking `enabled` before this would park the channel a step early.
+  # steps == 0: the tie went to the observer; checking `enabled` first would
+  # park the channel a step early.
   if steps == 0: return
-  # A disabled channel's chain dies after ONE more step: the old ch4_step did
-  # the shift unconditionally and only the RESCHEDULE was gated on `enabled`.
-  # Every path that clears ch4.enabled (length_step via the frame sequencer,
-  # write_NRx2's DAC check, NR52 power-off) catches this channel up first, so
-  # next_step is always past the moment of disabling when we get here.
+  # A disabled channel shifts once more, then parks. Every path that clears
+  # `enabled` catches this channel up first, so next_step is past the moment
+  # of disabling.
   if not ch.enabled:
     ch4_shift(ch)
     ch.next_step = GB_NO_STEP
     ch.div_next  = GB_NO_STEP
     return
-  # The LFSR has no cheap closed form (Gambatte exploits reg^(reg>>1) == 15
-  # shifts; not worth the divergence risk here), so this still iterates. The
-  # win is that it iterates in a tight loop instead of paying a scheduler
-  # insert + heap pop + closure dispatch per shift. Bounded because
-  # apu_catchup_all runs at every frame boundary, so at most one frame of
-  # shifts (<= 8778 at the shortest divisor) can accumulate -- exactly the
-  # number the old event chain would have run anyway.
-  #
-  # The divisor stage costs NOTHING here. Its increment period only ever
-  # changes at an NR43 write, a trigger or a speed switch, and each of those
-  # settles it first, so the count between two of them is a division away from
-  # `div_next` whenever somebody asks -- see ch4_advance_divisor. Doing it here
-  # instead measured +0.14% of retired instructions on Pokemon Crystal, paid on
-  # every sample of every noise-using title to serve a register write.
+  # No cheap closed form for the LFSR, so this iterates; bounded by the
+  # per-frame apu_catchup_all (<= 8778 shifts at the shortest divisor). The
+  # divisor stage is not advanced here: it only changes at NR43 writes,
+  # triggers and speed switches, each of which settles it
+  # (ch4_advance_divisor); advancing it per sample would cost every sample.
   for _ in 0 ..< steps: ch4_shift(ch)
   ch.next_step += steps * period
 
 proc ch4_resync_divisor*(ch: GbChannel4; gb: GB) =
-  ## Rebuild the two stages from `next_step` alone. The counter and the divisor
-  ## deadline are not in the save-state payload (see GbChannel4.div_counter), so
-  ## a loaded state gets the one reconstruction that asserts nothing it cannot
-  ## know: the counter one increment short of the rising edge, and that
-  ## increment due exactly on the deadline. Every LFSR shift then lands where
-  ## the state said it would; only an NR43 write inside the first period after
-  ## the load could tell the difference. Written as an assignment rather than
-  ## `next_step - (steps - 1) * inc` so it cannot underflow on a state whose
-  ## deadline is nearer the origin than one period.
+  ## Rebuild the two stages from `next_step` alone after a state load (the
+  ## counter and divisor deadline are not serialized, see
+  ## GbChannel4.div_counter): counter one increment short of the rising edge,
+  ## that increment due on the deadline. Only an NR43 write inside the first
+  ## period after the load could tell. An assignment, not a subtraction, so it
+  ## cannot underflow.
   if ch.next_step == GB_NO_STEP:
     ch.div_next = GB_NO_STEP
     ch.div_counter = 0
@@ -209,15 +150,13 @@ proc ch4_write*(ch: GbChannel4; idx: int; val: uint8; gb: GB) =
   of 0xFF21:
     write_NRx2(ch, val)
   of 0xFF22:
-    # apu_write has already caught the channel up, so no rising edge is
-    # pending; bring the divisor stage the rest of the way so the write sees
-    # the count it is about to re-interpret.
+    # apu_write caught the channel up (no rising edge pending); bring the
+    # divisor stage the rest of the way.
     let old_inc = ch4_inc_period(ch, gb)
     ch4_advance_divisor(ch, gb)
     let running = ch.div_next != GB_NO_STEP
-    # `== old_inc` is "an increment landed on this very cycle": the catch-up
-    # consumed it, so the countdown is sitting at a fresh reload rather than
-    # part-way through one, and this is the write the reload rule applies to.
+    # `== old_inc`: an increment landed on this very cycle, so the countdown
+    # sits at a fresh reload and the reload rule applies.
     let on_reload = running and ch.div_next - gb.scheduler.cycles == old_inc
     ch.clock_shift   = val shr 4
     ch.width_mode    = (val and 0x08) shr 3
@@ -226,15 +165,14 @@ proc ch4_write*(ch: GbChannel4; idx: int; val: uint8; gb: GB) =
       if on_reload:
         ch.div_next = ch4_grid_up(gb, gb.scheduler.cycles + ch4_inc_period(ch, gb),
                                   ch.divisor_code)
-      # A shift of 14/15 freezes the LFSR chain (see ch4_lfsr_frozen); the
-      # divisor stage above keeps running so a later write can thaw it.
+      # Shift 14/15 parks the LFSR (ch4_lfsr_frozen); the divisor stage keeps
+      # running so a later write can thaw it.
       ch.next_step = if ch4_lfsr_frozen(ch): GB_NO_STEP
                      else: ch4_next_shift(ch, gb)
   of 0xFF23:
     let len_enable = (val and 0x40) != 0
-    # `or gb.quirks.length_clock_any_nrx4` is the CGB 0 / CGB A-B extra-length
-    # clocking rule, which drops the requirement that the write turn the
-    # length counter ON; see GbQuirks in gb.nim.
+    # length_clock_any_nrx4: CGB 0 / A-B clock length on any NRx4 write, not
+    # only one turning it on (GbQuirks).
     if gb.apu.first_half_of_length_period and not ch.length_enable and
        (len_enable or gb.quirks.length_clock_any_nrx4) and ch.length_counter > 0:
       dec ch.length_counter
@@ -247,24 +185,16 @@ proc ch4_write*(ch: GbChannel4; idx: int; val: uint8; gb: GB) =
         ch.length_counter = 0x40
         if ch.length_enable and gb.apu.first_half_of_length_period:
           dec ch.length_counter
-      # Noise has its own startup rule -- half a period plus two ticks, off a
-      # 512 kHz grid that only divisor code 0 escapes, and a full period instead
-      # of a half one when the channel was already running. All three parts, and
-      # the reason the tests' own "sample length + 3 M-cycles" is a special case
-      # of the first, are derived at gb_noise_deadline.
+      # Noise startup: half a period plus two ticks off the 512 kHz grid, a
+      # full period on a restart; see gb_noise_deadline.
       let deadline = gb_noise_deadline(gb, ch4_period(ch, gb),
                                        ch.divisor_code, was_enabled)
-      # A trigger with shift 14/15 starts the divisor stage but the LFSR tap
-      # never fires (ch4_lfsr_frozen): output holds the reset LFSR's bit.
+      # Shift 14/15: the divisor stage starts but the LFSR never fires.
       ch.next_step = if ch4_lfsr_frozen(ch): GB_NO_STEP else: deadline
-      # Split that one deadline back into the two stages it is the product of.
-      # The counter is what carries the trigger's two cases: a fresh start
-      # leaves it at 0, half a period from the next rising edge, and a restart
-      # of a running channel leaves it sitting ON the edge it just produced, a
-      # full period from the next -- which is the same "the flip-flop is not
-      # cleared twice" statement gb_noise_deadline derives, expressed as state
-      # instead of as a special case. Both put the first increment at the same
-      # place, so the subtraction below is exact and cannot underflow.
+      # Split the deadline into its two stages: a fresh start leaves the
+      # counter at 0 (half a period from the rising edge), a restart leaves it
+      # on the edge it just produced (a full period). Both put the first
+      # increment at the same place, so the subtraction is exact.
       ch.div_counter = (if was_enabled: 1'u16 shl int(ch.clock_shift) else: 0'u16)
       ch.div_next = deadline -
         CycleCount(ch4_steps_to_rise(ch.div_counter, ch.clock_shift) - 1) *

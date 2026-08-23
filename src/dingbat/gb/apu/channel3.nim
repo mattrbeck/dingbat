@@ -15,9 +15,7 @@ proc ch3_catchup_slow(ch: GbChannel3; gb: GB; observer_period: uint32) =
   let period = CycleCount(ticks) shl gb.scheduler.speed
   let steps = gb_steps_due(now - ch.next_step, period, ticks > observer_period)
   if steps == 0: return
-  # Only the LAST read matters: wave_ram is immutable between catch-ups
-  # (0xFF30-0xFF3F accesses catch up first), so the intermediate sample-buffer
-  # loads a per-period loop would do are all overwritten.
+  # Only the last fetch matters: wave_ram is immutable between catch-ups.
   ch.wave_ram_position = uint8((int(ch.wave_ram_position) + int(steps mod 32)) mod 32)
   ch.wave_fetched = true
   ch.wave_ram_sample_buffer = ch.wave_ram[ch.wave_ram_position div 2]
@@ -32,42 +30,29 @@ proc ch3_catchup*(ch: GbChannel3; gb: GB) {.inline.} =
   ch3_catchup_at(ch, gb, GB_OBS_CPU)
 
 const GB_WAVE_ACCESS_WINDOW = 2
-  ## Half of CH3's 1 MHz sample cycle, in T-cycles: the wave pointer is clocked
-  ## at 2 MHz, so each sample cycle splits into a fetch half and a half in which
-  ## the fetched byte is simply held. Both ch3_wave_open and ch3_wave_fetching
-  ## are one of those halves. Scaled by the speed shift at each use, as every
-  ## other APU delay is.
+  ## Half of CH3's 1 MHz sample cycle in T-cycles: the pointer is clocked at
+  ## 2 MHz, so each sample cycle has a fetch half and a hold half.
+  ## Speed-shifted at each use.
 
 proc ch3_wave_open*(ch: GbChannel3; gb: GB): bool {.inline.} =
-  ## Whether a CPU access to 0xFF30-0xFF3F resolves at all. Callers must have
-  ## caught the wave pointer up to the current cycle first, so the last fetch
-  ## was at (next_step - period) and this is a question about how long ago that
-  ## was.
-  ##
-  ## While CH3 is off, wave RAM is plain memory on every model ("Wave RAM can be
-  ## accessed normally even if the DAC is on, as long as the channel is not
-  ## active"). While it is on, the CGB always resolves the access against the
-  ## byte being played, and the DMG only lets it through in the half of the
-  ## sample cycle that follows a completed fetch. That asymmetry is the whole
-  ## difference between blargg's cgb_sound 09/10/12 and dmg_sound 09/10/12.
+  ## Whether a CPU access to 0xFF30-0xFF3F resolves. Callers must have caught
+  ## the pointer up. While CH3 is off wave RAM is plain memory; while on, CGB
+  ## resolves the access against the byte being played and DMG only lets it
+  ## through in the half-cycle after a completed fetch (blargg cgb_sound vs
+  ## dmg_sound 09/10/12).
   if not ch.enabled:  return true
   if gb.cgb_enabled:  return true
   if not ch.wave_fetched: return false
   if ch.next_step == GB_NO_STEP: return true
   let period = CycleCount(ch3_frequency_timer(ch)) shl gb.scheduler.speed
   let window = CycleCount(GB_WAVE_ACCESS_WINDOW) shl gb.scheduler.speed
-  # next_step - now is in (0, period] after the catch-up, so
-  # (period - (next_step - now)) is how long ago the fetch was.
+  # next_step - now is in (0, period] after the catch-up.
   period - (ch.next_step - gb.scheduler.cycles) < window
 
 proc ch3_wave_fetching*(ch: GbChannel3; gb: GB): bool {.inline.} =
-  ## Whether CH3's own wave-RAM fetch is IN FLIGHT on this cycle -- the two
-  ## T-cycles that end at next_step, when the pointer steps and the new byte is
-  ## latched. Distinct from ch3_wave_open, which is the slot the CPU gets and
-  ## which blargg's dmg_sound 09/12 place immediately AFTER a completed fetch:
-  ## the two are adjacent halves of the same 1 MHz cycle, and separating them is
-  ## what makes 09/12 and 10 agree at once. Used only for the DMG restart
-  ## corruption; the CGB has none.
+  ## Whether CH3's own fetch is in flight on this cycle (the two T-cycles
+  ## ending at next_step): the half-cycle adjacent to ch3_wave_open's CPU slot
+  ## (blargg dmg_sound 09/10/12). DMG restart corruption only.
   if ch.next_step == GB_NO_STEP: return false
   let window = CycleCount(GB_WAVE_ACCESS_WINDOW) shl gb.scheduler.speed
   ch.next_step - gb.scheduler.cycles <= window
@@ -87,8 +72,8 @@ proc ch3_get_amplitude*(ch: GbChannel3): float32 =
   if ch.dac_enabled: GB_DAC_LUT[ch.ch3_dac_input()] else: 0.0'f32
 
 proc ch3_read*(ch: GbChannel3; idx: int; gb: GB): uint8 =
-  # 0xFF30-0xFF3F while enabled returns the byte CH3 is currently playing, so
-  # apu_read catches the wave pointer up before calling this.
+  # 0xFF30-0xFF3F while enabled returns the byte being played; apu_read
+  # catches the pointer up first.
   case idx
   of 0xFF1A: 0x7F'u8 or (if ch.dac_enabled: 0x80'u8 else: 0'u8)
   of 0xFF1B: 0xFF'u8
@@ -107,15 +92,10 @@ proc ch3_write*(ch: GbChannel3; idx: int; val: uint8; gb: GB) =
     ch.dac_enabled = (val and 0x80) != 0
     if not ch.dac_enabled:
       ch.enabled = false
-      # ...and the sample buffer goes with it. SameSuite
-      # channel_3_restart_stop_delay: "starting a pulse after stopping a
-      # previous one behaves the same as just starting a pulse" -- the restart
-      # emits silence for the whole startup delay, where a restart WITHOUT the
-      # NR30 stop keeps emitting the old sample (channel_3_restart_delay, which
-      # is the test that says the buffer survives a plain trigger). The only
-      # difference between the two is this write, so it is this write that
-      # clears the buffer. Same register-level event Pan Docs describes on a
-      # power-on, since powering off writes NR30 = 0 through here.
+      # The sample buffer clears with the DAC: SameSuite
+      # channel_3_restart_stop_delay (restart after an NR30 stop is silent
+      # through the startup delay) vs channel_3_restart_delay (a plain restart
+      # keeps the old sample). Power-off reaches here through NR30 = 0.
       ch.wave_ram_sample_buffer = 0
   of 0xFF1B:
     ch.length_load    = val
@@ -133,39 +113,13 @@ proc ch3_write*(ch: GbChannel3; idx: int; val: uint8; gb: GB) =
   of 0xFF1E:
     ch.frequency = (ch.frequency and 0x00FF'u16) or ((uint16(val) and 0x07'u16) shl 8)
     let len_enable = (val and 0x40) != 0
-    # `or gb.quirks.length_clock_any_nrx4` is the CGB 0 / CGB A-B extra-length
-    # clocking rule, which drops the requirement that the write turn the
-    # length counter ON; see GbQuirks in gb.nim.
-    #
-    # CGB A/B defer the SWITCH-OFF by one clock, and only on the wave channel.
-    # SameSuite ships `channel_3_extra_length_clocking` twice -- `-cgb0` and
-    # `-cgbB` -- and the two ROMs are byte-identical apart from their 32-byte
-    # expected tables, so the wave channel is the one place where CGB-0 and
-    # CGB-B disagree about this path (channel_1/2/4 ship a single `-cgb0B` ROM
-    # each, i.e. those three channels agree across the pair, and they still
-    # pass unchanged). The ROM is four groups of eight cells, each group a
-    # 1-M-cycle ladder over (initial length, number of NRx4 writes with bit 6
-    # clear); with `p` the ladder position at which the DIV-APU bit is already
-    # set (p = 2 here), the two tables read:
-    #
-    #   group   NR31   writes   CGB-0            CGB-B
-    #   A       $FF=1  1        F4 F4 F0*6       F4*8
-    #   B       $FF=1  2        F0*8             F4 F4 F0*6
-    #   C       $FE=2  2        F4 F4 F0*6       F4*8
-    #   D       $FE=2  3        F0*8             F4 F4 F0*6
-    #
-    # Every CGB-B cell is the CGB-0 answer for ONE FEWER write, on all 32 --
-    # i.e. the decrement still happens on the clock that reaches zero, but the
-    # channel keeps running until the NEXT such clock finds the counter already
-    # there. `enabled and length_counter == 0` is reachable by no other path
-    # (an NRx1 write cannot store 0, a trigger reloads 0 to $100, and the frame
-    # sequencer's length_step switches off at zero), so the pending switch-off
-    # needs no state of its own.
-    #
-    # This is NOT a port: SameBoy has no CGB-0 gate anywhere in Core/apu.c's
-    # length handling -- its `model <= GB_MODEL_CGB_B` NRx4 gate is the
-    # `length_clock_any_nrx4` rule dingbat already has -- so it answers one of
-    # this ROM pair wrong. Derived from the tables above instead.
+    # length_clock_any_nrx4: CGB 0 / A-B clock length on any NRx4 write, not
+    # only one turning it on (GbQuirks). CGB A/B additionally defer the
+    # switch-off by one such clock, on the wave channel only: SameSuite
+    # channel_3_extra_length_clocking-cgb0 and -cgbB differ only in their
+    # expected tables, and every CGB-B cell is the CGB-0 answer for one fewer
+    # write. `enabled and length_counter == 0` is reachable by no other path,
+    # so the pending switch-off needs no state of its own.
     let defer_off = gb.revision == grCgbAB
     if gb.apu.first_half_of_length_period and not ch.length_enable and
        (len_enable or gb.quirks.length_clock_any_nrx4) and
@@ -177,20 +131,13 @@ proc ch3_write*(ch: GbChannel3; idx: int; val: uint8; gb: GB) =
         if ch.length_counter == 0 and not defer_off: ch.enabled = false
     ch.length_enable = len_enable
     if (val and 0x80) != 0:
-      # Pan Docs, Wave RAM: "on monochrome consoles, if CH3 is restarted while
-      # it's reading wave RAM, and within a specific window, then the first four
-      # bytes of wave RAM will be corrupted: if the byte CH3 is currently
-      # reading is within the first four bytes of wave RAM, the first byte is
-      # replaced by that byte; otherwise the first four bytes are replaced by
-      # the four-byte-aligned group of four containing the byte being read."
-      # "Within a specific window" is the half of the sample cycle in which
-      # the fetch is actually in flight -- NOT the half a CPU access gets. See
-      # ch3_wave_fetching.
+      # Pan Docs, Wave RAM: a DMG restart while CH3 is reading wave RAM
+      # corrupts the first four bytes (byte 0 from the byte being read if it is
+      # in the first four, else the aligned group of four). The window is the
+      # half-cycle in which the fetch is in flight: ch3_wave_fetching.
       if ch.enabled and not gb.cgb_enabled and ch3_wave_fetching(ch, gb):
-        # The byte "CH3 is currently reading" is the one the in-flight fetch is
-        # about to latch, i.e. the position it is stepping TO -- which is what
-        # makes blargg's dmg_sound 10 land its corruption one iteration earlier
-        # than the position counter alone would suggest.
+        # The byte being read is the one the fetch is about to latch (blargg
+        # dmg_sound 10).
         let byte_idx = ((int(ch.wave_ram_position) + 1) mod 32) div 2
         if byte_idx < 4:
           ch.wave_ram[0] = ch.wave_ram[byte_idx]
@@ -202,13 +149,11 @@ proc ch3_write*(ch: GbChannel3; idx: int; val: uint8; gb: GB) =
         ch.length_counter = 0x100
         if ch.length_enable and gb.apu.first_half_of_length_period:
           dec ch.length_counter
-      # Same as clear(etAPUChannel3) + schedule_gb(period + 6). The +6 is
-      # inside the speed shift, as schedule_gb had it.
+      # Period plus a 6 T-cycle startup, inside the speed shift.
       ch.next_step = gb.scheduler.cycles +
         (CycleCount(ch3_frequency_timer(ch) + 6) shl gb.scheduler.speed)
-      # Index resets, but wave_ram_sample_buffer deliberately does NOT: the
-      # last byte read keeps being output until CH3 next reads one (Pan Docs),
-      # so the pre-trigger buffer is observable and has to be materialized.
+      # wave_ram_sample_buffer is not reset: the last byte read keeps being
+      # output until the next fetch (Pan Docs).
       ch.wave_ram_position = 0
       ch.wave_fetched = false
   of 0xFF30..0xFF3F:

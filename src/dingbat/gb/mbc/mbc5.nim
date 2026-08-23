@@ -18,10 +18,8 @@ method mbc_read*(cart: Mbc5; idx: int): uint8 =
 method mbc_write*(cart: Mbc5; idx: int; val: uint8) =
   case idx
   of 0x0000..0x1FFF:
-    # Low nibble decides, like every other MBC here: Pan Docs (MBC5) says
-    # "actual MBCs actually enable RAM when writing any value whose bottom 4
-    # bits equal $A". The exact-$0A compare this used to carry matched an
-    # older revision of that page.
+    # Low nibble decides (Pan Docs, MBC5: "actual MBCs actually enable RAM
+    # when writing any value whose bottom 4 bits equal $A").
     let enabling = (val and 0x0F) == 0x0A
     if cart.ram_enabled and not enabling: mbc_save(cart)
     cart.ram_enabled = enabling

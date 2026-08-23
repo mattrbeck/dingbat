@@ -11,9 +11,7 @@
 #
 # with operand rrr = B C D E H L (HL) A.
 
-# ---------------------------------------------------------------------------
-# CB rotate/shift helper procs
-# ---------------------------------------------------------------------------
+# Rotate/shift helpers
 
 proc cb_rlc(cpu: GbCpu; val: uint8): uint8 =
   cpu.fc = (val shr 7) != 0
@@ -56,15 +54,9 @@ proc cb_srl(cpu: GbCpu; val: uint8): uint8 =
   result = val shr 1
   cpu.fz = result == 0; cpu.fn = false; cpu.fh = false
 
-# ---------------------------------------------------------------------------
-# Generic handlers, parameterized on the decode-grid fields
-# ---------------------------------------------------------------------------
-# Cycle counts:
-#   Register ops (non-(HL)): 8  (4 CB fetch + 4 sub-opcode fetch)
-#   (HL) read-only (BIT):   12  (4 + 4 + 4 HL-read)
-#   (HL) read+write ops:    16  (4 + 4 + 4 HL-read + 4 HL-write)
-#
-# Each handler calls cpu_inc_pc(cpu) to advance past the CB sub-opcode byte.
+# Generic handlers on the decode-grid fields. Cycles: register ops 8 (CB fetch
+# + sub-opcode fetch), (HL) BIT 12 (+ read), (HL) read-modify-write 16
+# (+ read + write). Each handler advances PC past the sub-opcode byte.
 
 template operand(cpu: GbCpu; gb: GB; r: static int): uint8 =
   when r == 0: cpu.b
@@ -116,9 +108,7 @@ proc cb_set[n, r: static int](cpu: GbCpu; gb: GB): int =
   `operand=`(cpu, gb, r, operand(cpu, gb, r) or (1'u8 shl n))
   when r == 6: 16 else: 8
 
-# ---------------------------------------------------------------------------
-# CB-prefixed dispatch table
-# ---------------------------------------------------------------------------
+# Dispatch table
 
 macro cbLutBuilder(): untyped =
   result = newTree(nnkBracket)

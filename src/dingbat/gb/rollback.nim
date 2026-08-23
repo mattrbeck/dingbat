@@ -1,17 +1,9 @@
 # Input-rollback netplay session for GB/GBC (GGPO-style) over the local 2-core
-# GB link. The GB analog of gba/rollback.nim — see there for the full rationale.
-#
-# Both peers run BOTH GB cores locally (link.nim resolves the serial cable at
-# full speed); only the two players' button inputs cross the network. Each peer
-# owns one RollbackSession: it drives its GbLink one frame at a time, feeding the
-# local player's real input and a PREDICTION of the remote player's input, and
-# rolls back + re-simulates when a late remote input arrives mispredicted.
-#
-# Transport-agnostic: the transport calls `tick(localBits)` once per display
-# frame and ships the returned frame's input to the peer, and calls
-# `feed_remote(frame, bits)` as peer inputs arrive. Determinism prerequisites:
-# identical build + ROM + save on both sides (the RTC — MBC3 — is already
-# deterministic in the GB core).
+# GB link; the GB analogue of gba/rollback.nim. Both peers run both cores;
+# only button inputs cross the network. The transport calls `tick(localBits)`
+# once per display frame and ships the returned frame's input, and calls
+# `feed_remote(frame, bits)` as peer inputs arrive. Requires identical build,
+# ROM and save on both sides.
 
 import ../common/input
 import link
@@ -64,8 +56,7 @@ proc grow(sess: GbRollbackSession; f: int) =
     sess.usedRemote.setLen(n)
 
 proc apply_inputs(sess: GbRollbackSession; f: int) =
-  # Remote word: the real input if we have it (even ahead of the confirmed
-  # frontier), else predict "same as the last confirmed remote input".
+  # Real remote input if known, else predict "same as the last confirmed".
   let lb = sess.localIn[f]
   let rb =
     if sess.remoteKnown[f]: sess.remoteIn[f]
@@ -90,8 +81,7 @@ proc load_ckpt(sess: GbRollbackSession; f: int) =
   sess.link.restore_state(sess.ring[idx])
 
 proc sim(sess: GbRollbackSession; f: int) =
-  # Snapshot the state ENTERING frame f, apply that frame's inputs, advance one
-  # video frame.
+  # Snapshot the state entering frame f, apply its inputs, advance one frame.
   sess.store_ckpt(f)
   sess.apply_inputs(f)
   sess.link.step_frame()
@@ -143,5 +133,4 @@ proc checksum*(sess: GbRollbackSession): uint64 =
   ## at a CONFIRMED frame; a mismatch means a determinism gap.
   sess.link.state_checksum()
 
-# Rendering is the transport's job: it reads sess.link.cores[player] and converts
-# the 160x144 BGR555 framebuffer to RGBA. A peer shows its OWN player (sess.local).
+# Rendering is the transport's job; a peer shows its own player (sess.local).

@@ -3,12 +3,9 @@
 # Cart type 0xFC. The mapper IC is Nintendo's MAC-GBD; the image sensor on its
 # own daughterboard is a Mitsubishi M64282FP "retina" chip.
 #
-# Written from Pan Docs "Game Boy Camera" (gbdev.io/pandocs/Gameboy_Camera.html),
-# which is Antonio Niño Díaz's reverse engineering of the cartridge
-# (https://github.com/AntonioND/gbcam-rev-engineer) and carries the sample
-# capture pipeline from his emulator GiiBiiAdvance. Everything below that is not
-# obvious comes from that page; the divergences from SameBoy are called out at
-# the point they occur.
+# Pan Docs, "Game Boy Camera" (Antonio Niño Díaz's reverse engineering,
+# https://github.com/AntonioND/gbcam-rev-engineer); the capture pipeline
+# follows that page's sample code.
 #
 # Banking is MBC3-shaped: a 6-bit ROM bank at 0x2000-0x3FFF and a RAM bank at
 # 0x4000-0x5FFF. What makes it a camera is bit 4 of the RAM bank register: set
@@ -35,12 +32,9 @@ const
   CAM_IMAGE_LEN      = 14 * 16 * 16
 
 # ---------------------------------------------------------------------------
-# Sensor image source. This is the seam: there is no camera, so a deterministic
-# synthetic scene stands in for one. A frontend that does have a camera replaces
-# it with set_camera_source, which takes sensor coordinates (0..127, 0..119) and
-# returns an 8-bit grey level — the same interface SameBoy's
-# GB_set_camera_get_pixel_callback offers, so a frontend written against either
-# needs no rework. Nothing downstream of here knows where the pixels came from.
+# Sensor image source: a deterministic synthetic scene unless a frontend
+# installs one with set_camera_source (sensor coordinates 0..127, 0..119 ->
+# 8-bit grey). Nothing downstream knows where the pixels came from.
 # ---------------------------------------------------------------------------
 
 proc camera_test_pattern(x, y: int): uint8 =
@@ -82,12 +76,9 @@ proc cam_matrix_process(cart: PocketCamera; value, x, y: int): int =
 
 proc camera_capture(cart: PocketCamera) =
   ## Run the sensor and the MAC-GBD over one frame and leave the result in RAM.
-  # Pan Docs describes the real cartridge as writing each pixel to RAM as it is
-  # clocked out of the sensor, so a capture interrupted by a power cut leaves a
-  # half-new image behind. That is collapsed to a single instant here, exactly
-  # as the Pan Docs sample code does (GB_CameraTakePicture writes the whole
-  # buffer and only *then* sets the countdown): the RAM window is unreadable for
-  # the whole of the capture anyway, so no running program can tell.
+  # The real cartridge writes pixels to RAM as the sensor clocks them out;
+  # collapsed to one instant as the Pan Docs sample code does, since the RAM
+  # window is unreadable for the whole capture.
   if cart.ram.len < CAM_IMAGE_OFFSET + CAM_IMAGE_LEN: return
 
   # --- sensor configuration ---
@@ -112,15 +103,9 @@ proc camera_capture(cart: PocketCamera) =
   var tmp: array[CAM_SENSOR_W, array[CAM_SENSOR_H, int]]
 
   # --- exposure and level shift ---
-  # Pan Docs is explicit that the sensor's gain and level control should NOT be
-  # emulated ("trying to emulate that will probably break the image"), because a
-  # real capture source has an automatic exposure of its own. Only the exposure
-  # register is applied, scaled against the value the page names as its
-  # reference point, then squeezed into the sensor's roughly 3.1 V of 5 V swing.
-  # SameBoy instead applies a 32-entry gain table indexed by the low five bits
-  # of register 1 and divides the exposure by 0x1000 rather than 0x300; that is
-  # a different curve entirely, and one the documentation argues against, so the
-  # documented pipeline is what runs here.
+  # Pan Docs: the sensor's gain and level control are deliberately NOT
+  # emulated (a real capture source has its own auto-exposure). Only the
+  # exposure register is applied, as the Pan Docs sample code does.
   for i in 0 ..< CAM_SENSOR_W:
     for j in 0 ..< CAM_SENSOR_H:
       var v = camera_pixel(cart, i, j)
@@ -136,9 +121,8 @@ proc camera_capture(cart: PocketCamera) =
     for j in 0 ..< CAM_SENSOR_H: buf[i][j] = buf[i][j] - 128   # make signed
 
   # --- edge processing ---
-  # The mode is a four-bit combination of N, the two VH bits and E3. Only the
-  # four cases below are documented as reachable; anything else leaves the image
-  # untouched, which is what the Pan Docs sample code does too.
+  # Mode = N, the two VH bits and E3. Only the four cases below are
+  # documented; anything else passes the image through, as the sample code does.
   case (n_bit shl 3) or (vh_bits shl 1) or e3_bit
   of 0x0:   # plain 1-D filter
     for i in 0 ..< CAM_SENSOR_W:
@@ -159,12 +143,9 @@ proc camera_capture(cart: PocketCamera) =
         let mw = buf[max(0, i - 1)][j]
         let me = buf[min(i + 1, CAM_SENSOR_W - 1)][j]
         let px = buf[i][j]
-        # The Pan Docs sample clamps this intermediate to 0..255 even though the
-        # buffer it feeds is signed -128..127 (the 2-D case two branches down
-        # clamps to -128..127, as one would expect). Reproduced as published
-        # rather than "corrected", because nothing documents which is right and
-        # the Game Boy Camera ROM uses the 2-D mode, not this one — so no title
-        # here can settle it. Flagged for a reviewer.
+        # The Pan Docs sample clamps this intermediate to 0..255 though the
+        # buffer is signed (the 2-D case clamps to -128..127). Reproduced as
+        # published; the Camera ROM uses the 2-D mode, so no title settles it.
         tmp[i][j] = clamp(int(float(px) + float(2 * px - mw - me) * alpha), 0, 255)
     for i in 0 ..< CAM_SENSOR_W:
       for j in 0 ..< CAM_SENSOR_H:
@@ -189,9 +170,7 @@ proc camera_capture(cart: PocketCamera) =
     for i in 0 ..< CAM_SENSOR_W:
       for j in 0 ..< CAM_SENSOR_H: buf[i][j] = tmp[i][j]
   of 0x1:
-    # "In my GB Camera cartridge this is always the same color. The datasheet of
-    # the sensor doesn't have this configuration documented. Maybe this is a
-    # bug?" — Antonio Niño Díaz. Flat output it is.
+    # Pan Docs: "In my GB Camera cartridge this is always the same color."
     for i in 0 ..< CAM_SENSOR_W:
       for j in 0 ..< CAM_SENSOR_H: buf[i][j] = 0
   else: discard   # undocumented combination: pass the image through unfiltered
@@ -217,23 +196,16 @@ proc camera_capture(cart: PocketCamera) =
 
 proc camera_capture_cycles(cart: PocketCamera): int =
   ## How long the cartridge holds the RAM bus, in Game Boy T-cycles.
-  # Pan Docs, in M-cycles: CYCLES = 32446 + (N ? 0 : 512) + 16 * exposure, from
-  # a per-phase breakdown that adds up to 16223 sensor clocks with the sensor
-  # clocked at half PHI. SameBoy uses 32448 M-cycles for the constant (129792
-  # T-cycles) plus a 0-or-4 alignment term; nothing documents either, and the
-  # Pan Docs figure is the one with a derivation behind it, so 32446 is used.
+  # Pan Docs, in M-cycles: CYCLES = 32446 + (N ? 0 : 512) + 16 * exposure.
   let exposure = (int(cart.regs[2]) shl 8) or int(cart.regs[3])
   let n_term = if (cart.regs[1] and 0x80) != 0: 0 else: 512
   4 * (32446 + n_term + 16 * exposure)
 
 proc camera_schedule(cart: PocketCamera) =
   cart.gb_ref.scheduler.clear(etCameraDone)
-  # Scheduled in raw scheduler cycles, not schedule_gb: the PHI pin the
-  # cartridge clocks itself from doubles along with the CPU in CGB double speed
-  # (Pan Docs: "the values used for exposure time should be doubled"), so a
-  # capture is a fixed number of CPU cycles rather than a fixed wall time. The
-  # Game Boy Camera is a DMG cartridge and never sees double speed, so the
-  # rescaling the scheduler would do on a speed switch never happens.
+  # Raw scheduler cycles, not schedule_gb: the cartridge clocks itself from
+  # PHI, which doubles with the CPU in double speed (Pan Docs: "the values
+  # used for exposure time should be doubled").
   cart.gb_ref.scheduler.schedule(cart.capture_cycles_left, etCameraDone)
 
 proc camera_done*(cart: PocketCamera) =
@@ -254,20 +226,14 @@ proc camera_reg_write(cart: PocketCamera; idx: int; val: uint8) =
     if (v and 1) != 0 and not was_busy:
       cart.regs[0] = v
       if cart.capture_cycles_left == 0:
-        # A fresh capture: freeze the parameters by running the whole pipeline
-        # now, then hold the bus for as long as the real one would.
+        # Fresh capture: run the whole pipeline now, then hold the bus.
         cart.camera_capture()
         cart.capture_cycles_left = cart.camera_capture_cycles()
-      # else: resuming a capture that was stopped part-way. Pan Docs: "it will
-      # continue the previous capture process with the old capture parameters,
-      # even if the registers are changed in between" — which is exactly what
-      # not recomputing anything gives.
+      # else: resuming a stopped capture with the old parameters (Pan Docs).
       cart.camera_schedule()
     elif (v and 1) == 0 and was_busy:
-      # Stopping a capture. SameBoy refuses this outright and logs; Pan Docs
-      # documents it as supported, along with the resume above, so it is honored
-      # here. What is not modelled is the partially-written image a real
-      # cartridge would leave behind: this one wrote the whole frame up front.
+      # Stopping a capture (Pan Docs documents stop and resume). The partially
+      # written image a real cartridge leaves is not modelled.
       let s = cart.gb_ref.scheduler
       var remaining = cart.capture_cycles_left
       for ev in s.events:

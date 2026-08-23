@@ -1,22 +1,11 @@
 # HuC1 cartridge (included by gb.nim)
 #
-# Hudson's own mapper, documented in Pan Docs "HuC1" and in jrra's teardown that
-# Pan Docs cites (https://jrra.zone/blog/huc1.html). The received wisdom that it
-# is "MBC1-like" is wrong in the two places that matter:
-#
-#   * There is no RAM enable. 0xA000-0xBFFF is live from power-on for reads and
-#     writes alike, so gating it the way MBC1 does leaves a game's save RAM
-#     reading 0xFF forever. Games do still write 0x0A and 0x00 to 0x0000-0x1FFF
-#     as if it were an enable; those writes simply select RAM, which is where
-#     the window already was.
-#   * 0x0000-0x1FFF is a window selector instead: writing 0x0E routes
-#     0xA000-0xBFFF to the cartridge's infrared transceiver, and any other value
-#     routes it back to RAM.
-#
-# Neither bank register is masked here. Pan Docs pins them only as "at least 6
-# bits" (ROM) and "at least 2 bits" (RAM), so the true widths are unknown; every
-# candidate width behaves identically once the shared bank helpers wrap the
-# result over a power-of-two ROM or RAM, which is every real cartridge.
+# Pan Docs "HuC1" and jrra's teardown (https://jrra.zone/blog/huc1.html).
+# Unlike MBC1 there is no RAM enable: 0xA000-0xBFFF is live from power-on, and
+# 0x0000-0x1FFF is a window selector (0x0E routes the window to the IR
+# transceiver, anything else back to RAM). Gating RAM like MBC1 leaves save
+# RAM reading 0xFF. Bank registers are unmasked: Pan Docs gives only minimum
+# widths, and the shared helpers wrap over the real ROM/RAM size anyway.
 
 method mbc_rom_map*(cart: Huc1): (int, int) =
   (0, mbc_rom_bank_offset(cart, int(cart.bank_low)))
@@ -29,8 +18,7 @@ method mbc_read*(cart: Huc1; idx: int): uint8 =
     cart.rom[mbc_rom_bank_offset(cart, int(cart.bank_low)) + mbc_rom_offset(idx)]
   of 0xA000..0xBFFF:
     if cart.ir_mode:
-      # Pan Docs: 0xC1 when the receiver sees light, 0xC0 when it does not.
-      # dingbat has no IR peer to see light from, so this is a constant.
+      # Pan Docs: 0xC1 with light, 0xC0 without; there is no IR peer.
       0xC0'u8
     elif cart.ram.len > 0:
       cart.ram[mbc_ram_bank_offset(cart, int(cart.bank_high)) + mbc_ram_offset(cart, idx)]

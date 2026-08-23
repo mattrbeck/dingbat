@@ -1,39 +1,30 @@
-# Game Boy Printer, attached like a link-cable peer (a GbSerialDriver — see
-# serial.nim's device seam). Every solo GB session keeps one plugged in:
-# games that never print are unaffected (they send no packets), and games
-# that do print just work on the first attempt. The alternative — detecting
-# print intent and asking first — cannot win: the opening INIT completes in
-# ~8 ms, inside a single frame, so any frontend prompt arrives after the
-# game has already read "no printer" and errored (Game Boy Camera Gold does
-# exactly this). The printer is a pure byte-echo state machine:
-# it emits its reply for slot k while receiving byte k, so feed() computes
-# the reply from the state BEFORE consuming the incoming byte.
+# Game Boy Printer, a GbSerialDriver (serial.nim). Every solo GB session
+# keeps one plugged in: games that never print send no packets, and asking
+# first cannot win because the opening INIT completes in ~8 ms, inside one
+# frame, before any prompt (Game Boy Camera Gold errors out). Pure byte-echo
+# state machine: the reply for slot k goes out while byte k is received, so
+# feed() computes the reply from the state BEFORE consuming the byte.
 #
-# Written from Pan Docs (gbdev.io/pandocs/Gameboy_Printer.html); SameBoy's
-# printer.c used as a cross-check for the status-byte sequencing only.
-#
-# Packet framing (GB -> printer), replies in parentheses:
+# Pan Docs, "Gameboy Printer". Packet framing (GB -> printer), replies in
+# parentheses:
 #   0x88 0x33 (0,0) | cmd (0) | compression (0) | len lo,hi (0,0) |
 #   payload xN (0 xN) | checksum lo,hi (0,0) | dummy (0x81) | dummy (STATUS)
-# Checksum = 16-bit sum of cmd + compression + len bytes + payload (the
-# magic bytes are excluded). Any non-0x88 byte outside a packet keeps the
-# parser in MAGIC1, which is what makes state loads / mid-packet aborts
-# self-healing without serializing anything.
+# Checksum = 16-bit sum of cmd + compression + len + payload. Any non-0x88
+# byte outside a packet keeps the parser in MAGIC1, so mid-packet aborts and
+# state loads self-heal.
 #
-# Status bits: 0 checksum error, 1 printing, 2 image-buffer/print done,
-# 3 unprocessed data present. Observed sequence (SameBoy): 0x00 idle ->
-# 0x08 data buffered -> 0x06 printing -> 0x04 done -> 0x00 once the game
-# has seen the 0x04.
+# Status bits: 0 checksum error, 1 printing, 2 print done, 3 unprocessed data
+# present. Sequence: 0x00 idle -> 0x08 data buffered -> 0x06 printing -> 0x04
+# done -> 0x00 once the game has seen the 0x04. Assumed; no ROM pins this.
 
 import gb
 
 const
   PRN_MAX_IMAGE   = 160 * 200 div 4      # 8 KiB printer RAM
   PRN_BAND_TILES  = 40                    # DATA bands are 20x2 tiles
-  # Rows-proportional print time. The reference works out to ~7.5 frames per
-  # pixel row (a full 160x144 photo ~= 18 s), which is also what a real
-  # thermal printer feels like; GB Camera animates a progress display off the
-  # status polls for exactly that long.
+  # Print time, ~7.5 frames per pixel row (a 160x144 photo ~18 s); GB Camera
+  # animates its progress display off the status polls for that long.
+  # Assumed; no ROM pins this.
   PRN_FRAMES_PER_ROW_NUM = 15
   PRN_FRAMES_PER_ROW_DEN = 2
   # Paper-feed jobs print a few blank rows to eject the sheet. They are not
@@ -104,13 +95,10 @@ const PRN_TIMEOUT_FRAMES = 6  # 100 ms at 59.7 fps
 
 proc tick_frame*(prn: GbPrinter) =
   ## Advance the print countdown; call once per emulated frame.
-  # Pan Docs: "The printer has a timeout of 100ms for packets. If no packet
-  # is received within that time, the printer will return to an initialized
-  # state (meaning the link and graphics buffers are reset)." An aborted
-  # mid-packet stream self-heals here, and graphics buffered longer than the
-  # window are dropped. An ACTIVE print is deliberately left to finish: the
-  # game is only polling status while the motor runs, and aborting a print on
-  # a slow poll would re-break the Hello Kitty case documented below.
+  # Pan Docs: a 100 ms packet timeout returns the printer to its initialized
+  # state (link and graphics buffers reset). An active print is left to
+  # finish: the game only polls status while the motor runs, and aborting on
+  # a slow poll re-breaks Hello Kitty Pocket Camera (see below).
   inc prn.idle_frames
   if prn.idle_frames >= PRN_TIMEOUT_FRAMES and prn.print_left == 0 and
      (prn.state != psMagic1 or prn.buffer.len > 0):
@@ -120,13 +108,9 @@ proc tick_frame*(prn: GbPrinter) =
   if prn.print_left > 0:
     dec prn.print_left
     if prn.print_left == 0:
-      # Completion latches "done" (bit 2) and LEAVES it latched: the
-      # reference implementation (SameBoy printer.c) assigns status 4 at
-      # completion and clears it only on a later INIT or DATA — never on a
-      # status read. That distinction matters: three clear-on-read variants
-      # were tried against a real cart and all left Hello Kitty Pocket
-      # Camera re-PRINTing forever, because a second poll reported idle and
-      # the game concluded its print never happened.
+      # "Done" (bit 2) stays latched until a later INIT or DATA, never cleared
+      # by a status read: clear-on-read leaves Hello Kitty Pocket Camera
+      # re-PRINTing forever because a second poll reports idle.
       prn.status = 0x04
       if prn.feed_after:
         prn.emit_strip()
@@ -173,18 +157,15 @@ proc exec_command(prn: GbPrinter) =
       prn.status = 0x06          # printing
   of 0x04:  # DATA: append a band (empty payload = the conventional flush)
     let chunk = if prn.compressed: rle_decode(prn.payload) else: prn.payload
-    # Only a full band counts, matching the reference: a short/zero-length
-    # packet (the conventional flush) is ignored and leaves the status be.
+    # Only a full band counts: a short/zero-length packet (the conventional
+    # flush) is ignored and leaves the status be. Assumed; no ROM pins this.
     if chunk.len == PRN_BAND_TILES * 16:
       if prn.buffer.len + chunk.len <= PRN_MAX_IMAGE:
         prn.buffer.add(chunk)
-      # Overflow drops the band and sets NO bit: bit 2 must only ever mean
-      # "print complete". Synthesizing it here latched a false done that
-      # only an INIT could clear.
-      # ASSIGNMENT, not `or`: this is what clears a latched done from the
-      # previous job. ORing left bit 2 set, so every packet in a second
-      # job's DATA phase reported 0x0C where hardware reports 0x08 — Game
-      # Boy Camera Gold polls that phase and sat on "transferring…" forever.
+      # Overflow drops the band and sets no bit: bit 2 must only ever mean
+      # "print complete". Assignment, not `or`: this clears a latched done
+      # from the previous job; ORing reported 0x0C where hardware reports
+      # 0x08 and Game Boy Camera Gold sat on "transferring" forever.
       prn.status = 0x08                  # unprocessed data present
   of 0x08:  # BREAK: abort
     prn.print_left = 0
@@ -250,20 +231,16 @@ proc feed*(prn: GbPrinter; b: uint8): uint8 =
     prn.state = psAck
   of psAck:
     result = 0x81                # device id / alive
-    # Latch the status reply NOW, before the command runs. Hardware (and
-    # SameBoy) shift the status byte out of a register captured during this
-    # ACK transfer and only execute the command afterwards, so a packet
-    # always reports the status as of BEFORE its own command. Executing
-    # first made PRINT ack 0x06 ("printing") where hardware acks 0x08
-    # ("unprocessed data present") — and Game Boy Camera Gold reads that as
-    # "my data was never consumed" and re-PRINTs forever. Verified causally:
-    # forcing exactly this byte inside SameBoy reproduces the loop (885
-    # PRINTs vs 2), and restoring it fixes ours.
+    # Latch the status reply NOW, before the command runs: the status byte is
+    # captured during this ACK transfer and the command executes afterwards,
+    # so a packet reports the status as of before its own command. Executing
+    # first makes PRINT ack 0x06 where hardware acks 0x08, and Game Boy
+    # Camera Gold re-PRINTs forever.
     if prn.chk_recv != prn.chk:
       prn.status = prn.status or 0x01
     else:
       prn.status = prn.status and not 0x01'u8
-    # INIT's status slot always reads 0x00 on hardware ("games expect INIT
+    # INIT's status slot always reads 0x00 (Pan Docs: "games expect INIT
     # commands to return 0"), whatever was latched before it.
     prn.reply = if (prn.cmd and 0x0F) == 0x01: 0'u8 else: prn.status
     prn.state = psStatus
@@ -278,9 +255,9 @@ proc feed*(prn: GbPrinter; b: uint8): uint8 =
 
 proc copy_into*(src, dst: GbPrinter) =
   ## Field-wise copy for run-ahead: lookahead frames feed the printer bytes
-  ## the canonical timeline hasn't sent yet, so the shim snapshots before
-  ## the lookahead and restores after (outbox included — a lookahead frame
-  ## must not emit a phantom print).
+  ## the canonical timeline has not sent yet, so the shim snapshots before and
+  ## restores after (outbox included, or a lookahead frame emits a phantom
+  ## print).
   dst.state = src.state
   dst.cmd = src.cmd
   dst.compressed = src.compressed
@@ -306,21 +283,12 @@ proc clone*(prn: GbPrinter): GbPrinter =
 # ---- rewind ---------------------------------------------------------------
 
 proc resync*(prn: GbPrinter) =
-  ## Return the link protocol to idle, dropping any half-received packet.
-  ##
-  ## The printer is a peripheral: none of it is in the GB save state, so a
-  ## rewind moves the core back in time and leaves the printer where it was —
-  ## typically part-way through a packet whose remaining bytes the core will
-  ## now never send, which would make the NEXT genuine packet parse as
-  ## garbage. Resetting the state machine is the "unplug and replug it"
-  ## outcome, which is exactly what physically happened from the printer's
-  ## point of view.
-  ##
-  ## Printer RAM, the strip being assembled and the outbox all survive: a
-  ## photo that already came out of the printer is real user output and does
-  ## not un-print. The cost is that rewinding back across a completed print
-  ## and letting the game print again yields the photo twice — the right way
-  ## round, since the alternative loses one.
+  ## Return the link protocol to idle, dropping any half-received packet. The
+  ## printer is not in the GB save state, so a rewind leaves it mid-packet
+  ## with bytes the core will never send; resetting is what an unplug/replug
+  ## does. Printer RAM, the strip and the outbox survive: a photo that came
+  ## out does not un-print (rewinding across a print and printing again
+  ## yields it twice).
   prn.state = psMagic1
   prn.cmd = 0
   prn.compressed = false

@@ -35,12 +35,9 @@ proc scanline_get_sprites*(ppu: GbScanlinePpu; gb: GB): seq[GbSprite] =
     )
     if sprite_on_line(s, ppu.ly, sprite_height(ppu)):
       if not gb.cgb_native:
-        # DMG (and DMG-compatibility mode): sort by X ascending, ties keep OAM
-        # order — the array is PRIORITY order, highest first. do_scanline walks
-        # it front to back and the first opaque sprite pixel CLAIMS its column
-        # (Pan Docs, OAM "Drawing priority": smaller X wins; the claim also
-        # masks lower-priority sprites even when the winner hides behind the
-        # background). The fifo PPU's sprite_merge_planes is the reference.
+        # DMG and compatibility mode: sort by X ascending, ties keep OAM order.
+        # The array is priority order; do_scanline's first opaque pixel claims
+        # its column (Pan Docs, OAM "Drawing priority").
         var idx = 0
         while idx < result.len and s.x >= result[idx].x:
           inc idx
@@ -61,9 +58,9 @@ proc do_scanline*(ppu: GbScanlinePpu; gb: GB) =
   let tile_row      = (int(ppu.ly) + int(ppu.scy)) and 7
 
   for x in 0 ..< GB_WIDTH:
-    # No live `ly >= wy` term: the WY comparator is a per-frame LATCH
-    # (window_trigger) and a later WY write cannot retract it — the fifo
-    # PPU's fetcher_retired documents the gambatte late_wy_1toFF_* evidence.
+    # No live `ly >= wy` term: the WY comparator is a per-frame latch
+    # (window_trigger) and a later WY write cannot retract it (gambatte
+    # window/arg/late_wy_*).
     if window_enabled(ppu) and x + 7 >= int(ppu.wx) and ppu.window_trigger:
       should_increment_window_line = true
       let tn_addr = window_map + ((x + 7 - int(ppu.wx)) shr 3) +
@@ -131,9 +128,8 @@ proc do_scanline*(ppu: GbScanlinePpu; gb: GB) =
   if should_increment_window_line: inc ppu.current_window_line
 
   if sprite_enabled(ppu):
-    # First opaque pixel in priority order claims the column; a claim sticks
-    # even when the winner loses to the background, which is what masks
-    # lower-priority sprites behind a BG-over-OBJ one (see the list builder).
+    # First opaque pixel in priority order claims the column, even when the
+    # winner loses to the background.
     var claimed: array[GB_WIDTH, bool]
     for s in scanline_get_sprites(ppu, gb):
       let (b_lo, b_hi) = sprite_tile_bytes(s, ppu.ly, sprite_height(ppu))
@@ -158,8 +154,7 @@ proc do_scanline*(ppu: GbScanlinePpu; gb: GB) =
             if sprite_priority(s) == 0 or ppu.scanline_color_vals[x].color == 0:
               let palette = if sprite_dmg_palette(s) == 0: ppu.obp0 else: ppu.obp1
               if ppu.sgb_attr != nil:
-                # SGB colour is per SCREEN cell, shared by BG and OBJ -- see
-                # the same rule in fifo_ppu's emit.
+                # SGB colour is per screen cell, shared by BG and OBJ.
                 ppu.framebuffer[GB_WIDTH * int(ppu.ly) + x] =
                   sgb_screen_color(ppu, x, palette[color])
               else:
@@ -168,18 +163,15 @@ proc do_scanline*(ppu: GbScanlinePpu; gb: GB) =
                   cast[ptr uint16](unsafeAddr ppu.obj_pram[pal_idx])[]
 
 method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
-  # Snapshot the mode as observed by a CPU read that samples during this M-cycle
-  # (read_byte runs after this whole tick advances the PPU). See GbPpu.read_mode.
+  # Snapshot the mode as a CPU read sampling this M-cycle sees it (read_byte
+  # runs after this tick). See GbPpu.read_mode.
   ppu.read_mode = ppu.mode_flag
   # This renderer restarts cycle_counter at every mode boundary and advances a
-  # whole M-cycle at a time, so neither the per-line dot the STAT read hold
-  # keys off nor the sub-M-cycle lead the interrupt line wants exists here: it
-  # runs both domains together, which is what the mode flag alone gives. It is
-  # the opt-in fast path (GB.fifo) and is not scored against the STAT-timing
-  # suites; `mode_flag=` keeps irq_mode in step for it, and the assignments
-  # below keep irq_ly in step.
+  # whole M-cycle at a time, so the STAT read hold and the sub-M-cycle irq lead
+  # do not exist here. It is the opt-in fast path (GB.fifo) and is not scored
+  # against the STAT-timing suites.
   ppu.stat_chg_dot = STAT_NO_HOLD
-  # See the FIFO renderer: the panel's refresh clock runs on both paths.
+  # The panel's refresh clock runs on both paths (see the FIFO renderer).
   ppu.dots_since_frame += int32(cycles)
   when defined(gb_dot_counter): gb_total_dots += uint64(cycles)
   ppu.cycle_counter += int32(cycles)
@@ -193,13 +185,9 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
       if ppu.cycle_counter >= 172:
         ppu.cycle_counter -= 172
         ppu.`mode_flag=`(0'u8, gb)
-        # Speed-mode frameskip: decide once per frame at LY 0 (fs_counter == 0
-        # renders, so the first frame after enabling paints), then skip the
-        # whole frame's do_scanline calls. Everything CPU-visible — the mode
-        # transition above, LY/STAT/IRQs, HDMA — already happened or lives
-        # elsewhere in this proc, and do_scanline's only cross-line state
-        # (current_window_line) resets at its own LY-0 call, so a skipped
-        # frame leaves nothing stale for the next rendered one.
+        # Speed-mode frameskip, decided once per frame at LY 0 (fs_counter == 0
+        # renders). Everything CPU-visible still happens; do_scanline's only
+        # cross-line state (current_window_line) resets at its own LY-0 call.
         if ppu.ly == 0:
           if ppu.frameskip > 0:
             ppu.forced_skip = ppu.fs_counter != 0
@@ -215,9 +203,8 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
         ppu.cycle_counter -= 204
         ppu.ly += 1
         when STAT_IRQ_SPLIT: ppu.irq_ly = ppu.ly
-        # The comparator's blind window across an LY advance, at the same scope
-        # the FIFO renderer opens it (see ly_advance_close and LY_BLIND_SCOPE):
-        # rendered lines and vblank-to-vblank, not the entry into vblank.
+        # The comparator's blind window across an LY advance, at the scope the
+        # FIFO renderer opens it (ly_advance_close, LY_BLIND_SCOPE).
         if int(ppu.ly) == GB_HEIGHT:
           ppu.`mode_flag=`(1'u8, gb)
           gb.interrupts.vblank_interrupt = true
@@ -225,8 +212,7 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
           when defined(gb_dot_counter): inc gb_frame_normal
           ppu.dots_since_frame = 0
           if ppu.lcd_on_first_frame:
-            # Same rule as the fifo renderer: the first drawn frame after
-            # LCD-on is not displayed. See GbPpu.lcd_on_first_frame.
+            # The first drawn frame after LCD-on is not displayed (lcd_on_first_frame).
             ppu.lcd_on_first_frame = false
             ppu_blank_frame(ppu, gb)
         else:
@@ -242,13 +228,9 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
           when STAT_IRQ_SPLIT: ppu.irq_ly = ppu.ly
           ppu_handle_stat_interrupt(ppu, gb)
           ppu.`mode_flag=`(2'u8, gb)
-      # Same edge as the FIFO renderer's (see fifo_line153_edge): LY changing is
-      # what the STAT line's comparator watches, so the detector runs on it.
-      # This renderer steps in whole PPU events rather than dots, so it cannot
-      # be relied on to land inside the settling window at all; it asks on every
-      # tick of the line from LY153_SNAP_DOT on instead, which costs nothing --
-      # the detector is idempotent, it fires on a rising edge of a level it
-      # recomputes from scratch.
+      # LY changing is what the STAT comparator watches (fifo_line153_edge).
+      # This renderer steps in whole events, so it asks on every tick from
+      # LY153_SNAP_DOT on; the detector is idempotent.
       if ppu.ly == 153 and ppu.cycle_counter >= LY153_SNAP_DOT:
         ppu.ly = 0
         when STAT_IRQ_SPLIT: ppu.irq_ly = 0

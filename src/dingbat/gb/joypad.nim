@@ -16,9 +16,7 @@ proc new_gb_joypad*(): GbJoypad =
   GbJoypad(prev_lines: 0x0F)
 
 proc joypad_sync*(j: GbJoypad) =
-  ## Re-seed the edge detector without raising an interrupt. For state loads:
-  ## states are written at a frame boundary, where the pins have settled, so
-  ## the previous value is just the current one.
+  ## Re-seed the edge detector without raising an interrupt (state loads).
   j.prev_lines = joypad_lines(j)
 
 proc joypad_update*(j: GbJoypad; gb: GB) =
@@ -36,21 +34,17 @@ proc joypad_read*(j: GbJoypad; gb: GB): uint8 =
     (if j.button_keys:    0'u8 else: 0x20'u8) or
     (if j.direction_keys: 0'u8 else: 0x10'u8) or
     joypad_lines(j)
-  # SGB multiplayer. With both groups DEselected the low nibble is not the
-  # (all-high) key lines but the joypad ID of the player whose turn it is:
-  # 0xF, 0xE, 0xD, 0xC for players 1..4 (Pan Docs, "Reading Multiple
-  # Controllers"). In one-player mode cur_player is pinned at 0, so this
-  # yields the same 0xF a handheld reads and the path is inert.
+  # SGB multiplayer: with both groups deselected the low nibble is the joypad
+  # ID of the current player, 0xF..0xC for players 1..4 (Pan Docs, "Reading
+  # Multiple Controllers"); one-player mode pins cur_player at 0.
   if gb.sgb != nil and not j.button_keys and not j.direction_keys:
     result = (result and 0xF0'u8) or (0x0F'u8 - gb.sgb.cur_player)
 
 proc joypad_write*(j: GbJoypad; gb: GB; val: uint8) =
   j.button_keys    = ((val shr 5) and 0x1) == 0
   j.direction_keys = ((val shr 4) and 0x1) == 0
-  # The SGB command-packet stream rides on these same two select lines, and
-  # the ICD2 watches them without disturbing the joypad: selecting a button
-  # group still works exactly as it does on a handheld (Pan Docs, "Command
-  # Packet Transfers"). Hence the receiver runs alongside, not instead of.
+  # The SGB command-packet stream rides on the same two select lines without
+  # disturbing the joypad (Pan Docs, "Command Packet Transfers").
   if gb.sgb != nil: sgb_p1_write(gb, val)
   joypad_update(j, gb)
 
