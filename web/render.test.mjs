@@ -1,26 +1,12 @@
-// Layer 1 — end-to-end WebGL2 GL-readback guard (the real guard).
+// WebGL2 readback guard: compiles the shipped present shaders (via
+// glshaders.mjs) in headless Chromium, uploads a corner-distinguishable
+// 240x160 pattern exactly as glRenderer.draw() does (R16UI BGR555), and
+// asserts each canvas corner shows the right source corner. Catches quadrant
+// sampling, Y-flips, scale errors and wrong upload dims. Needs WebGL2
+// (GLSL ES 300, usampler2D), so Playwright's Chromium, not headless-gl.
 //
-// Compiles the ACTUAL present shaders from web/index.js (VERT + FRAG, extracted
-// via glshaders.mjs — NOT reimplemented) in HEADLESS CHROMIUM, uploads a
-// corner-distinguishable pattern into the native 240x160 source texture exactly
-// as glRenderer.draw() does (R16UI BGR555, RED_INTEGER/UNSIGNED_SHORT, the same
-// three-vertex fullscreen-triangle draw), reads the rendered canvas back, and
-// asserts every canvas corner shows the correct source corner in the correct
-// place. That single assertion catches the whole class of bug that shipped:
-//   - quadrant sampling (the shipped `v_uv = p*0.5` -> canvas is all one color)
-//   - Y-flips (top/bottom swap)
-//   - scale errors (corners smear / wrong)
-//   - wrong upload dims / broken readback
-//
-// WebGL2 is REQUIRED (GLSL ES 300, usampler2D/texelFetch): node's headless-gl is
-// WebGL1-only, so we drive Playwright's bundled Chromium (SwiftShader in CI).
-//
-// Source pattern (native 240x160, texture row 0 = TOP of the image):
-//   top-left RED   top-right GREEN
-//   bottom-left BLUE  bottom-right WHITE   center YELLOW
-//
-// A PNG of the correct filter=none render is written to the OS temp dir so the
-// owner can eyeball it; the path is printed at the end.
+// Pattern (texture row 0 = top): TL red, TR green, BL blue, BR white,
+// center yellow. A PNG of the filter=none render is written to the temp dir.
 //
 // Run:  node web/render.test.mjs   (after: npx playwright install chromium)
 
@@ -47,7 +33,7 @@ function assert(cond, msg) {
   console.error(`  FAIL: ${msg}`);
 }
 
-// --- BGR555 pattern (matches the core's raw framebuffer format) --------------
+// BGR555 pattern, the core's raw framebuffer format.
 const NW = 240, NH = 160;                 // native GBA resolution
 const CW = 480, CH = 320;                 // canvas: 2x, so scaling is exercised
 const RED = 0x001f, GREEN = 0x03e0, BLUE = 0x7c00, WHITE = 0x7fff, YELLOW = 0x03ff;
@@ -61,17 +47,14 @@ function buildPattern() {
       px[y * NW + x] = top ? (left ? RED : GREEN) : (left ? BLUE : WHITE);
     }
   }
-  // Distinct YELLOW center block so the middle sample can't be confused with a
-  // quadrant color (and so a center-only smear is visible).
   for (let y = hy - 12; y < hy + 12; y++)
     for (let x = hx - 12; x < hx + 12; x++)
       px[y * NW + x] = YELLOW;
   return Array.from(px); // Playwright serializes plain arrays reliably
 }
 
-// Runs inside the page: compile the real shaders, upload the pattern, draw,
-// read back. Returns corner/center RGBA samples (canvas TOP-LEFT origin) and,
-// when asked, a PNG data URL of the rendered canvas.
+// Runs inside the page. Returns corner/center RGBA samples (canvas top-left
+// origin) and, when asked, a PNG data URL.
 function renderInPage(cfg) {
   const { VERT, FRAG, cw, ch, nw, nh, pattern, opts, wantPng } = cfg;
   const canvas = document.getElementById("c");
@@ -96,7 +79,7 @@ function renderInPage(cfg) {
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS))
     throw new Error("link: " + gl.getProgramInfoLog(prog));
 
-  // Same upload as glRenderer.draw(): R16UI integer texture, NEAREST, clamp.
+  // Same upload as glRenderer.draw().
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -121,8 +104,7 @@ function renderInPage(cfg) {
       : opts.filter === "xbrz" ? 3 : 0);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-  // Read the whole framebuffer. readPixels row 0 is the BOTTOM row, so convert
-  // a top-left-origin (fx,fy in [0,1]) sample to GL coordinates.
+  // readPixels row 0 is the bottom row; samples are given top-left origin.
   const buf = new Uint8Array(cw * ch * 4);
   gl.readPixels(0, 0, cw, ch, gl.RGBA, gl.UNSIGNED_BYTE, buf);
   const sample = (fx, fy) => {
@@ -143,7 +125,6 @@ function renderInPage(cfg) {
   return out;
 }
 
-// --- assertion helpers -------------------------------------------------------
 const isRed = (p) => p[0] > 200 && p[1] < 55 && p[2] < 55;
 const isGreen = (p) => p[1] > 200 && p[0] < 55 && p[2] < 55;
 const isBlue = (p) => p[2] > 200 && p[0] < 55 && p[1] < 55;
@@ -166,8 +147,8 @@ async function run() {
       { VERT, FRAG, cw: CW, ch: CH, nw: NW, nh: NH, pattern, opts, wantPng });
 
   try {
-    // 1) The core guard: filter=none, color-correct OFF, grid OFF -> the
-    //    mapping is pure, so corners must be EXACTLY the source corners.
+    // filter=none, color-correct off, grid off: the mapping is pure, so
+    // corners must be exactly the source corners.
     console.log("filter=none, plain: canvas corners map 1:1 to source corners:");
     const base = await render({ colorCorrect: false, grid: false, filter: "none" }, true);
     assert(!base.error, `WebGL2 context created${base.error ? " -- " + base.error : ""}`);
@@ -177,15 +158,12 @@ async function run() {
     assert(isBlue(base.bottomLeft), `canvas BOTTOM-LEFT is BLUE  (${base.bottomLeft})`);
     assert(isWhite(base.bottomRight), `canvas BOTTOM-RIGHT is WHITE  (${base.bottomRight})`);
     assert(isYellow(base.center), `canvas CENTER is YELLOW  (${base.center})`);
-    // Interior quadrant samples too (robustness against edge-only tricks).
     assert(isRed(base.q_tl), `interior top-left quadrant RED  (${base.q_tl})`);
     assert(isGreen(base.q_tr), `interior top-right quadrant GREEN  (${base.q_tr})`);
     assert(isBlue(base.q_bl), `interior bottom-left quadrant BLUE  (${base.q_bl})`);
     assert(isWhite(base.q_br), `interior bottom-right quadrant WHITE  (${base.q_br})`);
 
-    // Save the correct render for eyeballing. Best-effort only: this is a
-    // human-diagnostic artifact, so a failed write (e.g. tmpdir ENOENT on a CI
-    // runner) must NOT fail a test whose assertions above all passed.
+    // Best-effort diagnostic PNG: a failed write must not fail the test.
     try {
       const pngPath = join(tmpdir(), "dingbat-render-correct.png");
       writeFileSync(pngPath, Buffer.from(base.png.split(",")[1], "base64"));
@@ -194,8 +172,7 @@ async function run() {
       console.log(`  (skipped correct-render PNG dump: ${e.message})`);
     }
 
-    // 2) Alternate paths must still produce a FULL-FRAME image: all four
-    //    corners non-black and mutually distinct (not pixel-exact).
+    // Other paths: full-frame only (corners non-black and distinct).
     const structural = async (label, opts) => {
       console.log(`${label}: full-frame (corners non-black + distinct):`);
       const r = await render(opts);

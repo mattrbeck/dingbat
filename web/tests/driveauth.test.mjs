@@ -1,6 +1,5 @@
-// driveFetch's 401 retry: one silent token re-grant and replay; on re-grant
-// failure the user is signed out locally. Uses a fake GIS (`google`) object
-// injected into the vm context so the real gdriveAcquireToken runs.
+// driveFetch's 401 retry and the gesture-gated token renewal, with a fake
+// GIS (`google`) object injected so the real gdriveAcquireToken runs.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -55,8 +54,7 @@ test("driveFetch drops the dead token when the silent re-grant fails", async () 
   installFakeGis(app, { grant: false });
   app.setFetch(async () => jsonRes({}, 401));
 
-  // The message is not "sign in again" on purpose: the account is still
-  // linked, the queue is still on disk, and the next gesture re-grants.
+  // Not "sign in again": the account stays linked and the next gesture re-grants.
   await assert.rejects(
     () => app.api.driveFetch("https://www.googleapis.com/drive/v3/files/x"),
     /Drive is reconnecting — your changes are saved/,
@@ -65,9 +63,8 @@ test("driveFetch drops the dead token when the silent re-grant fails", async () 
 });
 
 // --- Gesture-gated renewal -------------------------------------------------
-// The GIS token flow issues ~1h tokens with no refresh token, and its re-grant
-// needs a user gesture (popup). These cover the machinery that renews BEFORE
-// expiry instead of hard-signing-out on the first background 401.
+// GIS issues ~1h tokens with no refresh token, and a re-grant needs a user
+// gesture (popup); renewal happens before expiry on the next gesture.
 
 const connected = async (app) => {
   app.api.syncState = { ...app.api.syncState, connected: true };
@@ -113,14 +110,13 @@ test("update buttons don't spend the renewal gesture (popup would be orphaned)",
   app.setFetch(async () => jsonRes({ files: [] }));
   app.api.syncPollTick();
 
-  // A tap on the update button is exempt: still armed, no token request.
+  // The update button is exempt.
   await app.dispatchWin("pointerdown", {
     target: { closest: (sel) => sel.includes("#update-btn") },
   });
   await settle();
   assert.equal(calls.length, 0, "update tap must not trigger the renewal");
 
-  // The next ordinary tap pays as usual.
   await app.dispatchWin("pointerdown", { target: { closest: () => null } });
   await settle();
   assert.equal(calls.length, 1, "ordinary tap still renews");
@@ -139,7 +135,6 @@ test("the gesture renewal re-arms, so a second expiry also renews", async () => 
   await settle();
   assert.equal(calls.length, 1);
 
-  // Simulate the renewed token ageing into the renew window again.
   app.api.gdriveTokenExp = Date.now() + 60 * 1000;
   app.api.syncPollTick();
   await app.dispatchWin("keydown");
@@ -236,12 +231,9 @@ test("driveFetch turns any non-ok status into a thrown error", async () => {
 });
 
 // --- Naming the account: login_hint ----------------------------------------
-// Google's token model shows an account chooser on a re-grant whenever it has
-// no login_hint and the browser is signed in to more than one Google account.
-// That chooser IS the "why does it keep asking me to sign in" complaint: the
-// token flow was working perfectly and still put a Google page on screen every
-// hour. The email came back with the very first token (the scope includes
-// "email"), so every re-grant names the account and the chooser is skipped.
+// Without login_hint a re-grant shows an account chooser whenever the browser
+// is signed in to more than one Google account; the email from the first
+// token (scope includes "email") names the account on every re-grant.
 
 test("a re-grant names the account, so no chooser can appear", async () => {
   const app = await loadApp();
@@ -297,11 +289,9 @@ test("signing out forgets the account, so the next sign-in is free to differ", a
 });
 
 // --- One popup at a time ---------------------------------------------------
-// The GIS client is one object whose `callback` is overwritten per request, so
-// two overlapping requests orphan the first popup and leave its promise
-// unsettled forever. That is reachable for real: the window-level renewal
-// listener runs in the capture phase, i.e. a beat BEFORE the Sign in button's
-// own handler on the very same tap.
+// The GIS client's `callback` is overwritten per request, so overlapping
+// requests orphan the first popup. Reachable: the window-level renewal
+// listener (capture phase) runs before the Sign in button's own handler.
 test("overlapping token requests share one popup", async () => {
   const app = await loadApp();
   await connected(app);
@@ -314,7 +304,6 @@ test("overlapping token requests share one popup", async () => {
   assert.equal(calls.length, 1, "one window, not two");
   assert.equal(app.api.gdriveToken, "fresh-token");
 
-  // ...and the latch clears, so a later expiry can still renew.
   await app.api.gdriveAcquireToken("");
   assert.equal(calls.length, 2);
 });
@@ -330,7 +319,6 @@ test("changes made without a token still queue, and flush when one arrives", asy
     "the save is remembered even with no way to send it");
   assert.equal(app.api.driveLinked(), true, "and the account is still linked");
 
-  // A token comes back and the queued work drains.
   installFakeGis(app, { grant: true });
   app.api.gdriveToken = "fresh-token";
   const uploads = [];

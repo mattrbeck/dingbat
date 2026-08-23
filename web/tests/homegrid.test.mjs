@@ -1,7 +1,5 @@
-// Home recents grid rendering (web/index.js refreshHomeRecent), via the vm
-// harness. The first-sign-in flow fires refreshHomeRecent several times
-// back-to-back (library merge, per-game downloads); overlapping calls must
-// not each append a full tile set — that doubled every game in the grid.
+// refreshHomeRecent: overlapping calls (the first-sign-in flow fires several
+// back-to-back) must not each append a full tile set.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -24,8 +22,7 @@ test("overlapping refreshHomeRecent calls render the grid once", async () => {
   ]);
   app.idb.set("rom:A.gba", { name: "A.gba", data: new Uint8Array([1]) });
 
-  // Fire two renders without awaiting the first — the second starts (and
-  // clears the grid) while the first is parked on its dbKeys() await.
+  // The second render starts while the first is parked on its dbKeys() await.
   const p1 = app.api.refreshHomeRecent();
   const p2 = app.api.refreshHomeRecent();
   await p1; await p2; await settle();
@@ -48,14 +45,9 @@ test("sequential refreshHomeRecent still renders every game", async () => {
 });
 
 // --- Scroll preservation ----------------------------------------------------
-// #home is the scroll container. A render that empties the grid first collapses
-// its scrollHeight to the viewport, and the browser clamps scrollTop to 0 — the
-// tiles arriving a tick later don't bring the offset back. So the grid must go
-// from the old tiles to the new ones in ONE atomic swap, never through an empty
-// state. There's no layout in the vm harness, so the test asserts the invariant
-// that causes the jump: the number of children never dips.
+// An empty grid collapses #home's scrollHeight and the browser clamps
+// scrollTop to 0, so the swap must be atomic: the child count never dips.
 
-// Records the grid's child count after every mutation the app makes.
 const watchGrid = (app) => {
   const grid = app.document.getElementById("home-recent");
   const sizes = [];
@@ -74,8 +66,7 @@ const watchGrid = (app) => {
   return sizes;
 };
 
-// Serves just enough Drive for downloadGame: the file list and one alt=media
-// fetch per file.
+// Enough Drive for downloadGame: the list and one alt=media fetch per file.
 const driveWith = (names) => async (url) => {
   url = String(url);
   if (url.includes("spaces=appDataFolder")) {
@@ -122,7 +113,6 @@ test("bulk downloads keep the grid whole through every render", async () => {
   await settle();
 
   const sizes = watchGrid(app);
-  // Overlapping downloads, the way tapping several glyphs in a row behaves.
   await Promise.all(games.map((g) => app.api.downloadGame(g)));
   await settle();
 

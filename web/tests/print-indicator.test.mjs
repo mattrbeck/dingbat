@@ -1,13 +1,7 @@
-// The new-photo indicator: one dot repeated on the hamburger, the Capture row
-// and the Printed Photos row, and the conditional rule for what the print
-// toast's "View" does with them.
-//
-// The whole point of the conditional is that it turns on a "has ever" flag,
-// which is exactly the shape that rots silently: a refactor that sets
-// everOpenedFromMenu from the toast route, or that clears the dots on any
-// gallery open, still passes every obvious test and quietly destroys the only
-// thing teaching people where the gallery lives. So each rule below is pinned
-// from BOTH sides — what clears, and what deliberately does not.
+// The new-photo dots (hamburger, Capture row, Printed Photos row) and what
+// the print toast's "View" does with them. The rule turns on a "has ever"
+// flag (everOpenedFromMenu), so each case is pinned from both sides: what
+// clears, and what deliberately does not.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { loadApp, settle } from "./helpers.mjs";
@@ -15,7 +9,6 @@ import { loadApp, settle } from "./helpers.mjs";
 const photo = (n = 1) => ({ w: 160, h: 144, png: "data:image/png;base64,x" + n,
                             ts: 1700000000000 + n, game: "demo.gb" });
 
-// Named after the element each dot rides on.
 const dots = (app) => ({
   menu: app.document.getElementById("menu-btn").classList.contains("has-new-photo"),
   capture: app.document.getElementById("capture-toggle").classList.contains("has-new-photo"),
@@ -24,16 +17,14 @@ const dots = (app) => ({
 const ALL_LIT = { menu: true, capture: true, gallery: true };
 const NONE_LIT = { menu: false, capture: false, gallery: false };
 
-// The action pill the print toast mounts, if it is still live.
 const viewPill = (app) => app.toastEl.children.find((c) =>
   c.classList.contains("has-action") && !c.classList.contains("leaving"));
 
-// Open the menu the way a finger does: through #menu-btn's own click handler.
 const openMenu = async (app) => {
   app.document.getElementById("menu-dropdown").hidden = true;
   await app.document.getElementById("menu-btn").dispatch("click");
 };
-// Expand Capture through its own handler (it toggles, so start collapsed).
+// Toggles, so start collapsed.
 const expandCapture = async (app) => {
   app.document.getElementById("capture-sub").hidden = true;
   await app.document.getElementById("capture-toggle").dispatch("click");
@@ -129,7 +120,6 @@ test("both the dots and the has-ever flag survive a reload", async () => {
   await settle();
   assert.deepEqual(dots(first), { menu: false, capture: true, gallery: true });
 
-  // Same IndexedDB contents, fresh app.
   const second = await loadApp();
   second.idb.clear();
   for (const [k, v] of first.idb) second.idb.set(k, v);
@@ -142,7 +132,6 @@ test("both the dots and the has-ever flag survive a reload", async () => {
   assert.equal(second.api.photoDots.everOpenedFromMenu, true,
     "nor must Case B silently become Case A again");
 
-  // And the reloaded session is still in Case B.
   await printOne(second, 3);
   viewPill(second).onclick();
   await settle();
@@ -154,9 +143,8 @@ test("a dot never outlives the photos it points at", async () => {
   await first.api.loadPrinterPhotos();
   await printOne(first, 1);
 
-  // The photo record is gone but the dot record is not — an old install, or a
-  // gallery emptied by another tab. The row hides, so a lit dot would point
-  // at nothing.
+  // Photo record gone, dot record not (old install, or a gallery emptied by
+  // another tab): the row hides, so the dot must too.
   const second = await loadApp();
   second.idb.clear();
   for (const [k, v] of first.idb) second.idb.set(k, v);
@@ -179,11 +167,8 @@ test("a print that lands in an already-open gallery raises nothing", async () =>
 });
 
 test("photos survive a reload at all", async () => {
-  // loadPrinterPhotos was never called on the boot path, so printerPhotos
-  // started every session empty: the gallery read "Nothing printed yet" over
-  // a full store, and the next print wrote a one-element array back over
-  // every earlier photo. The dots and the menu row are both counted off this
-  // array now, so the regression would be silent twice over.
+  // Pins loadPrinterPhotos on the boot path: without it the next print
+  // writes a one-element array over every earlier photo.
   const first = await loadApp();
   await first.api.loadPrinterPhotos();
   await printOne(first, 1);

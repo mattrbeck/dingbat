@@ -1,17 +1,10 @@
-// GameShark-family save containers (web/saveimport.js) through the real
-// import flow: a picked/dropped .sps/.xps/.gsv is unwrapped to its raw save
-// bytes before anything is written, misnamed files are sniffed by content,
-// and a file that claims a container extension but parses as neither is
-// refused WITHOUT touching the existing save. The synthetic builders below
-// mirror VBA-M's CPUWriteGSASnapshot byte for byte (the de-facto format
-// spec — see the header comment in saveimport.js).
+// GameShark-family containers (web/saveimport.js) through the real import
+// flow. The synthetic builders follow the layouts in saveimport.js's header.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 import { loadApp, u8, eq, settle, fakeFile } from "./helpers.mjs";
 
-// Drive the pickFile flow: click #load-save, then feed the created
-// <input type=file> a fake file. (Same shape as import-save.test.mjs.)
 const importSav = async (app, name, bytes) => {
   await app.elements.get("load-save").dispatch("click");
   const input = app.document.body.children.at(-1);
@@ -33,15 +26,13 @@ const bootFakeGame = (app) => {
 const strBytes = (s) => [...s].map((c) => c.charCodeAt(0));
 const u32le = (v) => [v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255];
 
-// A recognizable non-trivial save payload.
 const patternSave = (len) => {
   const b = new Uint8Array(len);
   for (let i = 0; i < len; i++) b[i] = (i * 7 + 13) & 0xff;
   return b;
 };
 
-// Byte-for-byte what VBA-M's CPUWriteGSASnapshot emits (modulo its CRC's
-// signed-char sign extension, which the importer ignores anyway).
+// SharkPortSave container; the CRC is not validated by the importer.
 const buildSps = (save, opts = {}) => {
   const {
     title = "Pokemon Test (U)",
@@ -63,7 +54,7 @@ const buildSps = (save, opts = {}) => {
   let crc = 0;
   for (const b of inner) crc = (crc + ((b << crc % 0x18) >>> 0)) >>> 0;
   for (const b of save) crc = (crc + ((b << crc % 0x18) >>> 0)) >>> 0;
-  // Assemble without spreading `save` (spreading 128 KiB+ overflows the stack).
+  // Spreading 128 KiB+ overflows the stack.
   const file = new Uint8Array(out.length + inner.length + save.length + 4);
   file.set(out, 0);
   file.set(inner, out.length);
@@ -72,8 +63,7 @@ const buildSps = (save, opts = {}) => {
   return file;
 };
 
-// The fixed GameShark SP layout: name at 0x0C, "xV4\x12" tag at 0x42C,
-// save data from 0x430.
+// GameShark SP: name at 0x0C, "xV4\x12" tag at 0x42C, save data from 0x430.
 const buildGsv = (save, name = "TESTGAME 12C") => {
   const out = new Uint8Array(0x430 + save.length);
   out.set(strBytes(name).slice(0, 12), 0x0c);
@@ -146,7 +136,7 @@ test("GSV round-trip, including the 128 KiB cap on oversized files", async () =>
   assert.equal(r.title, "TESTGAME 12C");
   eq(r.bytes, save);
 
-  // Trailing junk past 128 KiB is dropped, matching VBA's fixed-size read.
+  // Trailing junk past 128 KiB is dropped.
   const long = app.sandbox.SaveImport.unwrap(
     buildGsv(patternSave(0x20000 + 64)), "file.gsv");
   assert.equal(long.bytes.length, 0x20000);

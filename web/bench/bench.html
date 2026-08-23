@@ -14,19 +14,15 @@
 <canvas id="sdl-canvas" width="960" height="640" hidden aria-hidden="true"></canvas>
 <pre id="out">booting…</pre>
 <script>
-// NOTE: em.js declares plenty of short top-level names (`out`, `err`, `log`…).
-// Everything here is scoped inside an IIFE / on `window` to avoid colliding.
-// The app's service worker precaches ./em.js and ./em.wasm by fixed name at
-// root scope, so it also controls /bench/. Benchmarking two builds by swapping
-// those two files on disk then silently measures whichever one the SW cached
-// FIRST — an A/B that always comes out a dead heat, with matching framebuffer
-// hashes to "confirm" it. Unregister before anything loads, and check the
-// build identity with benchBuildId() below.
+// em.js declares short top-level names (`out`, `err`, `log`); everything here
+// is scoped in an IIFE / on `window`. The app's service worker controls
+// /bench/ too and would serve whichever em.wasm it cached first (an A/B that
+// is always a dead heat): unregister before anything loads, and check the
+// build identity with benchBuildId().
 if (navigator.serviceWorker) {
   navigator.serviceWorker.getRegistrations?.().then((rs) => rs.forEach((r) => r.unregister()));
 }
-// Byte length of the em.wasm this page actually loaded. Two builds differ in
-// size, so this is a positive identification of which one is being measured.
+// Byte length of the em.wasm actually loaded: identifies the build measured.
 window.benchBuildId = () => {
   const e = performance.getEntriesByType("resource")
     .filter((r) => r.name.endsWith("em.wasm")).pop();
@@ -44,7 +40,7 @@ var Module = {
   onRuntimeInitialized: () => { window.benchRuntimeUp = true; },
 };
 
-// Fetch ROM + state before the module boots so preRun can plant the ROM in FS.
+// Fetched before the module boots so preRun can plant the ROM in FS.
 const romP = fetch("PokemonFireRed.gba").then(r => r.arrayBuffer());
 const stP  = fetch("PokemonFireRed.state").then(r => r.arrayBuffer());
 
@@ -58,10 +54,9 @@ window.benchInit = async () => {
   return { rom: ROM.length, state: STATE.length };
 };
 
-// Load the save state into the live core.
 window.benchLoadState = () => {
   const p = Module._malloc(STATE.length);
-  // Build the heap view AFTER _malloc — growth can detach the old buffer.
+  // Heap view after _malloc: growth can detach the old buffer.
   new Uint8Array(Module.memory.buffer, p, STATE.length).set(STATE);
   const ok = Module._wasm_load_state(p, STATE.length);
   Module._free(p);
@@ -75,8 +70,8 @@ window.benchSetHle = (on) => {
 
 window.benchHleActive = () => Module._wasm_hle_audio_active();
 
-// Run `frames` frames of pure emulation, return fps. Audio buffer is drained
-// so the wasm-side ring doesn't grow without bound across a long run.
+// fps over `frames` frames; the audio buffer is drained so the wasm ring
+// doesn't grow without bound.
 window.benchRun = (frames) => {
   const t0 = performance.now();
   Module._benchFrames(frames);
@@ -85,10 +80,8 @@ window.benchRun = (frames) => {
   return { frames, ms, fps: frames * 1000 / ms };
 };
 
-// Bit-exactness gate for an A/B of two builds: reload the state, run `frames`
-// frames, and hash the framebuffer. `_wasm_fb_ptr` is a pure LUT conversion of
-// the raw BGR555 buffer, so an identical hash means an identical framebuffer.
-// FNV-1a in 32-bit chunks (JS has no cheap u64 mul).
+// Bit-exactness gate for an A/B: reload the state, run `frames`, hash the
+// framebuffer (FNV-1a in 32-bit chunks).
 window.benchHash = (frames) => {
   window.benchLoadState();
   Module._benchFrames(frames);
@@ -103,9 +96,8 @@ window.benchHash = (frames) => {
   return { frames, hash: h.toString(16) };
 };
 
-// Rewind cost end to end: benchFramesFull runs what loop_tick runs per frame
-// (clip note + rewind push + frame prepare), so the fps difference between
-// mask 0 and mask 1 IS what the rewind ring costs in the shipping loop.
+// benchFramesFull runs what loop_tick runs per frame, so the fps difference
+// between mask 0 and mask 1 is the rewind ring's cost in the shipping loop.
 window.benchRewind = (frames = 600, reps = 7) => {
   if (!Module._benchFramesFull) return "build has no -d:defaultsprobe";
   window.benchSetHle(false);
@@ -127,10 +119,8 @@ window.benchRewind = (frames = 600, reps = 7) => {
          " fps  -> rewind costs " + ((mOff-mOn)/mOff*100).toFixed(2) + "%";
 };
 
-// Rewind-delta codec bake-off (-d:codecbench builds only). Runs the same
-// candidates over the same deltas as the native harness, prints the table on
-// screen, and reports it back through the dev server's log — which is how
-// Safari, which cannot be driven from the shell, delivers its numbers.
+// Rewind-delta codec bake-off (-d:codecbench builds only); same candidates
+// and deltas as the native harness.
 window.benchCodecs = (pushes = 24, interval = 10, reps = 3) => {
   if (!Module._wasm_codec_bench) return "build has no -d:codecbench";
   window.benchLoadState();
@@ -139,17 +129,15 @@ window.benchCodecs = (pushes = 24, interval = 10, reps = 3) => {
   return "deltas=" + n + "\n" + txt;
 };
 
-// Median-of-N trial for stable numbers.
 window.benchTrial = (frames, reps) => {
   const r = [];
   for (let i = 0; i < reps; i++) r.push(window.benchRun(frames).fps);
   r.sort((a, b) => a - b);
   return { median: r[(r.length / 2) | 0], min: r[0], max: r[r.length - 1], all: r };
 };
-// Self-reporting mode for browsers that cannot be driven from the shell
-// (Safari, and any device browser): open bench.html?auto=1 and the page runs
-// the trial itself and prints the numbers on screen, large enough to read off
-// a photo or a screenshot. ?frames= and ?reps= override the defaults.
+// bench.html?auto=1: the page runs the trial itself and prints the numbers
+// on screen, for browsers that cannot be driven from the shell (Safari, any
+// device browser). ?frames= and ?reps= override the defaults.
 window.benchAuto = async () => {
   const q = new URLSearchParams(location.search);
   const frames = Number(q.get("frames") || 600);
@@ -160,8 +148,7 @@ window.benchAuto = async () => {
   await window.benchInit();
   bLog("UA: " + navigator.userAgent);
   bLog("build: " + JSON.stringify(window.benchBuildId()));
-  // Which GPU-timing instrument this browser offers, so a settings sweep knows
-  // whether present-path costs are measurable here at all.
+  // Which GPU-timing instrument this browser offers.
   try {
     const g = document.createElement("canvas").getContext("webgl2");
     bLog("webgl2=" + !!g + " timerQuery=" +
@@ -182,18 +169,14 @@ window.benchAuto = async () => {
   }
   bLog("HASH(400) = " + window.benchHash(400).hash);
   bLog("DONE");
-  // Report back through the dev server's request log, so a browser that
-  // cannot be driven from the shell (Safari: Apple Events to it need Develop
-  // > "Allow JavaScript from Apple Events", which is off by default) still
-  // delivers its numbers somewhere readable. The 404 is expected; the query
-  // string is the payload.
+  // Report through the dev server's request log; the 404 is expected, the
+  // query string is the payload.
   try {
     await fetch("/__benchresult?" +
                 encodeURIComponent(bOut.textContent.replace(/\n/g, " | ")));
   } catch (e) { /* reporting is best-effort */ }
 };
-// ?codecs=1 runs the rewind-delta codec bake-off instead of the throughput
-// trial, on the same self-reporting path, so Safari can produce the table.
+// ?codecs=1 runs the codec bake-off on the same self-reporting path.
 window.benchCodecAuto = async () => {
   const q = new URLSearchParams(location.search);
   bOut.style.fontSize = "15px";

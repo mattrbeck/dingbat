@@ -1,5 +1,4 @@
-// Drive file-name mapping: the real parseDriveFileName
-// from web/index.js. Drive file names mirror IndexedDB keys one-to-one.
+// parseDriveFileName: Drive file names mirror IndexedDB keys one-to-one.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -20,23 +19,19 @@ test("parseDriveFileName tolerates colons and quotes inside game names", async (
   eq(api.parseDriveFileName('save:Zelda: Oracle "of" Ages.gbc'),
     { game: 'Zelda: Oracle "of" Ages.gbc', kind: "save" });
   eq(api.parseDriveFileName("rom:a:b:c.gba"), { game: "a:b:c.gba", kind: "rom" });
-  // A name that merely contains "-p2" mid-string is not a P2 save
   eq(api.parseDriveFileName("save:x-p2.gba"), { game: "x-p2.gba", kind: "save" });
 });
 
 test("parseDriveFileName folds save-state slots + metadata into the base game", async () => {
   const { api } = await loadApp();
-  // Slot 0 keeps the legacy keys/kinds.
   eq(api.parseDriveFileName("state:A.gba"), { game: "A.gba", kind: "state" });
   eq(api.parseDriveFileName("statemeta:A.gba"), { game: "A.gba", kind: "statemeta" });
-  // Slots 1..8 fold into the base game (no phantom "A.gba:slotN" game).
+  // Slots 1..8 fold into the base game, not a phantom "A.gba:slotN" game.
   eq(api.parseDriveFileName("state:A.gba:slot3"), { game: "A.gba", kind: "state:3" });
   eq(api.parseDriveFileName("statemeta:A.gba:slot7"),
     { game: "A.gba", kind: "statemeta:7" });
-  // "statemeta:" is distinguished from "state:" even though it starts the same.
   eq(api.parseDriveFileName("statemeta:A.gba:slot3"),
     { game: "A.gba", kind: "statemeta:3" });
-  // A game name that merely contains ":slot" mid-string is not a slot suffix.
   eq(api.parseDriveFileName("state:my:slot machine.gba"),
     { game: "my:slot machine.gba", kind: "state" });
 });

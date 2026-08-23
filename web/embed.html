@@ -13,9 +13,8 @@
     <div id="wrapper">
       <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
 
-      <!-- SDL still creates a (now invisible) WebGL context for its window init;
-           Module.canvas points here so the visible #canvas is free for our own
-           WebGL2 game-presentation context. Nothing is ever shown on it. -->
+      <!-- SDL's window init owns a WebGL context here (Module.canvas) so
+           #canvas is free for the WebGL2 presenter. Nothing is shown on it. -->
       <canvas id="sdl-canvas" width="960" height="640" hidden aria-hidden="true"></canvas>
 
       <div id="overlay">

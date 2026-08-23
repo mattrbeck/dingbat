@@ -1,17 +1,15 @@
-// Test harness: evaluates the REAL web/index.js inside a node:vm context with
+// Test harness: evaluates the real web/index.js in a node:vm context with
 // stubbed browser globals (fake DOM, Map-backed fake IndexedDB, controllable
-// fetch), then harvests the app's top-level functions out of the context's
-// global lexical scope. Tests exercise the actual app code — nothing is
-// reimplemented here. If web/index.js behavior changes, these tests break.
+// fetch) and harvests its top-level functions from the global lexical scope.
+// A browser global index.js newly touches at module scope must be stubbed
+// here, or every web test dies with the same ReferenceError.
 
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import assert from "node:assert/strict";
 
-// index.js calls createGlRenderer() at top-level eval; that helper lives in
-// glpresent.js (loaded as a separate <script> before index.js in index.html),
-// so the vm context needs it prepended too. saveimport.js likewise: the save
-// import flow reads its SaveImport global.
+// glpresent.js (createGlRenderer) and saveimport.js load before index.js in
+// index.html, so they are prepended here too.
 const SOURCE =
   readFileSync(new URL("../glpresent.js", import.meta.url), "utf8") + "\n" +
   readFileSync(new URL("../saveimport.js", import.meta.url), "utf8") + "\n" +
@@ -31,8 +29,7 @@ class FakeClassList {
   contains(c) { return this._set.has(c); }
 }
 
-// The shape `new ImageData(data, w, h)` produces, which index.js constructs
-// directly (bgr555ToImageData) and reads back from a 2D context.
+// The shape of `new ImageData(data, w, h)`.
 class FakeImageData {
   constructor(data, width, height) {
     this.data = data;
@@ -62,9 +59,7 @@ class FakeElement {
     this._listeners[type] = (this._listeners[type] || []).filter((f) => f !== fn);
   }
   async dispatch(type, ev = {}) {
-    // `type` is not decoration: handlers registered for several event names at
-    // once (the rewind button's pointerup/pointerleave/pointercancel) branch on
-    // it, and a real Event always carries it.
+    // Handlers registered for several event names branch on `type`.
     ev.type ??= type;
     ev.target ??= this;
     ev.preventDefault ??= () => {};
@@ -72,11 +67,8 @@ class FakeElement {
     for (const f of this._listeners[type] || []) await f(ev);
   }
   appendChild(c) { this.children.push(c); return c; }
-  // Variadic sibling of appendChild (showActionToast, the prints gallery).
   append(...cs) { for (const c of cs) this.children.push(c); }
-  // Head insertion — how the toast stack mounts its newest pill (pushToast).
   prepend(...cs) { this.children.unshift(...cs); }
-  // Atomic swap — how the home grid commits a render (see refreshHomeRecent).
   replaceChildren(...cs) { this.children = cs; }
   removeChild(c) { this.children = this.children.filter((x) => x !== c); }
   replaceChild(n, o) {
@@ -97,11 +89,8 @@ class FakeElement {
     return { width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0, x: 0, y: 0 };
   }
   getContext() {
-    // Permissive 2D-context stand-in: any method call is a no-op, EXCEPT the
-    // two that are read from rather than drawn into. The film-strip scrubber
-    // bakes its desaturated copy by reading pixels back out
-    // (getImageData().data), so a no-op there is not "nothing happens" — it is
-    // `undefined.data`, which takes the whole module eval down with it.
+    // 2D-context stand-in: every method is a no-op except the two that are
+    // read from (getImageData().data would otherwise be `undefined.data`).
     const self = this;
     return new Proxy({}, {
       get: (_t, p) => {
@@ -120,10 +109,7 @@ class FakeElement {
   }
   set innerHTML(v) { this._innerHTML = v; if (v === "") this.children = []; }
   get innerHTML() { return this._innerHTML; }
-  // className and classList are two views of one set, as in a real DOM. They
-  // used to be unrelated here, so `el.className = "toast-msg"` left
-  // classList.contains("toast-msg") false — invisible until something tried
-  // to find an element by the class another line had just assigned.
+  // className and classList are two views of one set, as in a real DOM.
   set className(v) {
     this.classList._set = new Set(String(v).split(/\s+/).filter(Boolean));
   }
@@ -132,19 +118,11 @@ class FakeElement {
 
 // --- Fake IndexedDB (Map-backed, real async request shape) ------------------
 
-// A transaction, with the two properties web/index.js's dbMoveKeys depends on:
-// `oncomplete` fires once every request issued on it has settled (including
-// requests issued from inside another request's onsuccess, which is how a
-// multi-key move keeps one transaction alive), and an abort rolls the store
-// back to what it held before the transaction touched it.
-//
-// Writes are applied to the store immediately rather than buffered until
-// commit, because every existing test reads the raw Map straight after
-// awaiting a dbPut. Atomicity is provided by an undo log instead: a real
-// IndexedDB would simply not have made the writes visible yet.
-//
-// `state.idbFail(op, key)` (op: "get" | "put" | "delete") makes that one
-// request fail, which is how a test simulates a rename dying half-way.
+// A transaction with what dbMoveKeys depends on: `oncomplete` fires once
+// every request issued on it (including from another request's onsuccess)
+// has settled, and an abort rolls the store back. Writes hit the Map
+// immediately (tests read it straight after awaiting dbPut); atomicity is an
+// undo log. `state.idbFail(op, key)` makes that one request fail.
 const makeFakeTx = (store, state) => {
   let pending = 0;
   let settled = false;
@@ -191,7 +169,7 @@ const makeFakeTx = (store, state) => {
     get: (k) => req("get", k, () => store.get(k)),
     put: (v, k) => req("put", k, () => { remember(k); store.set(k, v); }),
     delete: (k) => req("delete", k, () => { remember(k); store.delete(k); }),
-    // Real IndexedDB returns keys in ascending key order
+    // Ascending key order, as real IndexedDB.
     getAllKeys: () => req("getAllKeys", null, () => [...store.keys()].sort()),
   });
   return tx;
@@ -226,10 +204,9 @@ class FakeFileReader {
   addEventListener(type, fn) { (this["_" + type] ??= []).push(fn); }
 }
 
-// A fake picked File for FakeFileReader.
 export const fakeFile = (name, bytes) => ({ name, _bytes: bytes });
 
-// In-memory Emscripten-FS stand-in (writeToFS / persistSave / resetLoadedGameSave).
+// Emscripten-FS stand-in.
 const makeFakeFS = () => {
   const files = new Map();
   return {
@@ -247,8 +224,6 @@ const makeFakeFS = () => {
 
 // --- App loader -------------------------------------------------------------
 
-// Evaluates web/index.js in a fresh vm context and returns handles to the real
-// functions plus the fakes backing it.
 export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
                                 touch = false, mediaDevices = true,
                                 serviceWorker = false } = {}) => {
@@ -260,32 +235,24 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
 
   const state = {
     confirmResult,
-    // Tests replace this to control Drive responses.
     fetchImpl: async () => ({ ok: false, status: 599, text: async () => "", json: async () => ({}) }),
-    // navigator.storage.persist() fake: already-persisted flag, grant result,
-    // and a call counter tests assert on.
+    // navigator.storage.persist() fake.
     persisted: false,
     persistGrant: true,
     persistCalls: 0,
-    // matchMedia() queries that should report matches:true (e.g.
-    // "(display-mode: standalone)"). Everything else reports false.
+    // matchMedia() queries that report matches:true; all others false.
     mediaMatches: {},
-    // location.reload() call count — the observable "the update actually
-    // landed" signal for the service-worker update-flow tests.
+    // location.reload() call count (the SW update-flow tests' signal).
     reloads: 0,
-    // Body of registration.update() in the fake SW container; tests replace
-    // it to plant a waiting/installing worker before it resolves.
+    // registration.update() body; tests replace it to plant a worker.
     swUpdateImpl: async () => {},
   };
 
   // --- Fake service worker container (opt-in: loadApp({ serviceWorker })) ---
-  // index.js guards its whole SW block with `"serviceWorker" in navigator`,
-  // so the key is only present when a test asks for it and every other test
-  // keeps skipping that block. `serviceWorker: true` boots the page
-  // UNCONTROLLED (first visit / shift-reload shape);
-  // `serviceWorker: { controlled: true }` boots it controlled (the everyday
-  // returning-visitor shape). Workers are inert records: tests flip `.state`
-  // and fire events themselves, mirroring what a real browser would do.
+  // index.js guards its SW block with `"serviceWorker" in navigator`, so the
+  // key exists only when asked for. `true` boots uncontrolled (first visit);
+  // `{ controlled: true }` boots controlled. Workers are inert records: tests
+  // flip `.state` and fire events themselves.
   const makeSWWorker = (state0 = "installed") => {
     const listeners = {};
     return {
@@ -326,8 +293,7 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
       },
       dispatch(type, ev = {}) { for (const f of (containerListeners[type] || []).slice()) f(ev); },
     };
-    // What a real handover looks like from the page: the new worker becomes
-    // the controller, then controllerchange fires on the container.
+    // A handover as the page sees it: new controller, then controllerchange.
     sw = {
       registration, container, makeWorker: makeSWWorker,
       takeControl(worker = makeSWWorker("activated")) {
@@ -345,8 +311,7 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
   };
 
   const elements = new Map();
-  // Document-level listeners are recorded (not just swallowed) so tests can
-  // dispatch synthetic events — e.g. the global Escape-closes-modals handler.
+  // Document-level listeners are recorded so tests can dispatch to them.
   const docListeners = {};
   const document = {
     getElementById(id) {
@@ -362,10 +327,9 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     },
     elementFromPoint: () => null,
     visibilityState: "visible",
-    // Held at "loading" so index.js's early-boot block registers its
-    // DOMContentLoaded listener (which we never fire) instead of kicking off
-    // initStorage — tests drive openDB/migrations/refreshHomeRecent
-    // explicitly, and an auto-boot racing them would be nondeterministic.
+    // Held at "loading" so index.js registers a DOMContentLoaded listener
+    // (never fired) instead of auto-booting initStorage, which would race
+    // the tests' explicit openDB/migrations/refreshHomeRecent.
     readyState: "loading",
     body: new FakeElement("body"),
     head: new FakeElement("head"),
@@ -373,8 +337,7 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
   };
 
   const sandbox = {
-    // Realm-unification: pass host intrinsics so `instanceof Uint8Array` etc.
-    // inside the vm matches bytes created by tests and by host Blob/Response.
+    // Host intrinsics so `instanceof Uint8Array` etc. match across realms.
     Uint8Array, ArrayBuffer, Blob, TextDecoder, TextEncoder,
     URLSearchParams, Response,
     Uint8ClampedArray, ImageData: FakeImageData,
@@ -392,27 +355,22 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
       return state.fetchImpl(url, opts);
     },
     location: { search: "", reload() { state.reloads++; } },
-    // `serviceWorker` key only when opted in: index.js guards its whole SW
-    // block with `"serviceWorker" in navigator`.
     navigator: {
       ...(sw ? { serviceWorker: sw.container } : {}),
       platform: "TestPlatform",
-      // `touch` flips the module-scope `touchDevice` const (and the tilt
-      // code's own touch test), which decides whether phone-only affordances
-      // — device-tilt, front/back camera flipping — are offered at all.
+      // `touch` flips the module-scope `touchDevice` const (phone-only
+      // affordances: tilt, camera flipping).
       maxTouchPoints: touch ? 5 : 0,
       userAgent: "node-test",
-      // getUserMedia's mere existence is what the camera code reads as "a
-      // camera is possible here"; `mediaDevices: false` is the insecure-origin
-      // shape, where the API is absent entirely. Nothing here ever resolves —
-      // tests that need a stream drive the state variables directly.
+      // getUserMedia's existence is what the camera code reads as "a camera
+      // is possible"; `mediaDevices: false` is the insecure-origin shape. It
+      // never resolves: tests drive the state variables directly.
       ...(mediaDevices
         ? { mediaDevices: { getUserMedia: () => new Promise(() => {}),
                             enumerateDevices: async () => [] } }
         : {}),
-      // Transient activation, as the Drive token code reads it before opening
-      // a popup. Tests default to "a gesture is live"; flip isActive to false
-      // to model the background-timer case.
+      // Transient activation, read before opening the Drive popup; flip
+      // isActive to false for the background-timer case.
       userActivation: { get isActive() { return state.userActivation !== false; } },
       storage: {
         estimate: async () => ({ usage: 12345 }),
@@ -420,10 +378,7 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
         persist: async () => { state.persistCalls++; return state.persistGrant; },
       },
     },
-    // index.js evaluates matchMedia("(display-mode: standalone)") at module
-    // scope, so a missing stub is not a soft failure — it aborts the whole
-    // eval and every test in the suite. Reports "not matching" for any query;
-    // `state.mediaMatches` lets a test opt a query into matching.
+    // Evaluated at module scope, so a missing stub aborts every test.
     matchMedia: (query) => ({
       media: String(query),
       matches: !!state.mediaMatches[String(query)],
@@ -432,10 +387,8 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
       addListener() {}, removeListener() {},
       dispatchEvent: () => false,
     }),
-    // The tilt code reads screen.orientation.angle to rotate device-frame
-    // motion into screen space, and subscribes to its change event at module
-    // scope. Same rule as matchMedia: a missing stub aborts the whole eval.
-    // `state.screenAngle` lets a test pretend the device is rotated.
+    // screen.orientation is subscribed at module scope (same rule as
+    // matchMedia); `state.screenAngle` rotates the device.
     screen: {
       get orientation() {
         return {
@@ -449,9 +402,7 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     },
     URL: { createObjectURL: () => "blob:fake", revokeObjectURL() {} },
     ResizeObserver: class { observe() {} unobserve() {} disconnect() {} },
-    // index.js watches the menu dropdown's `hidden` attribute at module scope
-    // to mirror it into aria-expanded; inert here (no attribute mutations in
-    // the fake DOM anyway).
+    // Observed at module scope; inert here.
     MutationObserver: class { observe() {} disconnect() {} takeRecords() { return []; } },
     FileReader: FakeFileReader,
     requestAnimationFrame: () => 0,
@@ -462,18 +413,14 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     FS: makeFakeFS(),
     caches: { keys: async () => [], delete: async () => true },
   };
-  // Window-level listeners are recorded (like document's) so tests can fire
-  // synthetic events — e.g. the one-shot pointerdown that triggers the
-  // gesture-gated Drive token renewal.
+  // Window-level listeners are recorded, like document's.
   const winListeners = {};
   sandbox.addEventListener = (type, fn) => { (winListeners[type] ??= []).push(fn); };
   sandbox.removeEventListener = (type, fn) => {
     winListeners[type] = (winListeners[type] || []).filter((f) => f !== fn);
   };
-  // updateCanvasScaling reads stage padding via getComputedStyle; "" keeps
-  // parseFloat() NaN-free callers happy enough (NaN paddings are tolerated —
-  // the canvas just gets no explicit size in tests) and getPropertyValue("")
-  // matches the CSS-variable reads.
+  // updateCanvasScaling reads stage padding via getComputedStyle; NaN
+  // paddings are tolerated (the canvas just gets no explicit size).
   sandbox.getComputedStyle = () =>
     new Proxy({}, { get: (_t, p) => (p === "getPropertyValue" ? () => "" : "0") });
   sandbox.devicePixelRatio = 1;
@@ -484,21 +431,15 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
   sandbox.globalThis = sandbox;
 
   // --- Toast observation ----------------------------------------------------
-  // #toast is a STACK container: showToast/showActionToast build one
-  // .toast-item per message and prepend it (web/index.js, pushToast). So the
-  // faithful observation point is "a pill was mounted into the live region" —
-  // exactly the moment its text becomes visible — not the old
-  // #toast.textContent setter, which the stack never touches.
-  //
-  // Wired BEFORE index.js is evaluated so a toast fired during module-scope
-  // eval or early boot is recorded too.
+  // #toast is a stack (pushToast prepends one .toast-item per message), so
+  // the observation point is a pill being mounted. Wired before index.js is
+  // evaluated so early-boot toasts are recorded too.
   const toastEl = document.getElementById("toast");
   const toastMsgOf = (node) => {
     const span = (node.children || []).find((c) => c.classList?.contains("toast-msg"));
     if (!span) {
-      // Loud on purpose. If the toast DOM shape in web/index.js changes and
-      // this silently returned "", every toast assertion in the suite would
-      // start passing/failing against an empty list instead of real behavior.
+      // Loud: a changed toast DOM shape must not silently empty every
+      // toast assertion in the suite.
       throw new Error(
         "web/tests/helpers.mjs: a <" + node.tagName + "> was mounted into " +
         "#toast with no .toast-msg child. The toast DOM shape in " +
@@ -515,8 +456,7 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
       return real(...cs);
     };
   }
-  // What is on screen right now, as opposed to `toasts` (the whole history).
-  // .leaving pills are mid-fade and already retired, so they don't count.
+  // On screen now (vs `toasts`, the history); .leaving pills are retired.
   const liveToasts = () =>
     toastEl.children
       .filter((c) => !c.classList.contains("leaving"))
@@ -526,17 +466,15 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
   try {
     vm.runInContext(SOURCE, context, { filename: "web/index.js" });
   } catch (e) {
-    // A browser global index.js newly touches at module scope (matchMedia,
-    // screen, visualViewport, ...) aborts the eval, and every test in every
-    // file then fails with the same bare ReferenceError. Say what to do.
+    // A browser global newly touched at module scope aborts the eval for
+    // every test; say what to do.
     const missing = /^(\w+) is not defined$/.exec(e?.message || "")?.[1];
     if (missing) {
       const message =
         `${e.message} — web/index.js uses the browser global \`${missing}\` ` +
         `at module scope, but the node:vm sandbox in web/tests/helpers.mjs ` +
         `does not stub it. Add a \`${missing}\` stub to \`sandbox\` there.`;
-      // The reporter prints .stack, which embeds the original message, so
-      // rewrite both — otherwise the hint is invisible in CI logs.
+      // The reporter prints .stack, so rewrite both.
       const frames = String(e.stack || "").split("\n").slice(1).join("\n");
       e.message = message;
       e.stack = `${e.name}: ${message}\n${frames}`;
@@ -544,9 +482,8 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     throw e;
   }
 
-  // Harvest the app's top-level lexical bindings. Scripts run in the same
-  // context share the global lexical environment, so const/let function
-  // declarations from index.js are visible here.
+  // Scripts run in the same context share the global lexical environment,
+  // so index.js's const/let bindings are visible here.
   const api = vm.runInContext(`({
     openDB, dbGet, dbPut, dbDelete, dbKeys,
     migrateFromLocalStorage, migrateRecentFormat,
@@ -615,16 +552,12 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     get runaheadFrames() { return runaheadFrames; },
   })`, context);
 
-  // Bring the app's IndexedDB handle up (real openDB against the fake indexedDB).
   await api.openDB();
 
-  // No wasm runtime ever initializes inside the vm, but launch paths
-  // (launchRom / handleRomFile / launchLinkRom) now await it before touching
-  // FS/Module. Mark it ready so those paths run to completion in tests.
+  // No wasm runtime initializes in the vm; launch paths await it, so mark
+  // it ready.
   vm.runInContext("markRuntimeReady()", context);
 
-  // Fire every recorded document-level listener of `type` with a stub-filled
-  // event, awaiting async handlers (mirrors FakeElement.dispatch).
   const dispatchDoc = async (type, ev = {}) => {
     ev.type ??= type;
     ev.preventDefault ??= () => {};
@@ -633,7 +566,6 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     for (const f of docListeners[type] || []) await f(ev);
   };
 
-  // Same, for window-level listeners.
   const dispatchWin = async (type, ev = {}) => {
     ev.type ??= type;
     ev.preventDefault ??= () => {};
@@ -651,7 +583,6 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
   };
 };
 
-// JSON Response helper for fake Drive endpoints.
 export const jsonRes = (obj, status = 200) => ({
   ok: status >= 200 && status < 300,
   status,
@@ -671,11 +602,9 @@ export const bytesRes = (bytes, status = 200) => ({
 
 export const u8 = (...vals) => new Uint8Array(vals);
 
-// Wait for queued microtasks (fake-IDB request callbacks) to settle.
 export const settle = () => new Promise((r) => setTimeout(r, 0));
 
-// Structural deep-equality that tolerates vm-realm prototypes (objects created
-// inside the evaluated web/index.js have the context's Object.prototype, which
-// assert.deepStrictEqual would reject).
+// Deep equality tolerant of vm-realm prototypes (assert.deepStrictEqual
+// rejects the context's Object.prototype).
 export const eq = (actual, expected, msg) =>
   assert.deepStrictEqual(structuredClone(actual), structuredClone(expected), msg);

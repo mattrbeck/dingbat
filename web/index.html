@@ -11,20 +11,14 @@
     />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <!-- Deliberately NO apple-mobile-web-app-status-bar-style. black-translucent
-         offsets the standalone viewport UP by the status-bar height without
-         growing it — that offset is the bottom "chin gap". Omitting it (the
-         default style) lets iOS reserve the status bar and fill BOTH safe areas
-         from the theme-color meta below, which index.js keeps in step with the
-         chrome theme — so the strips match the app instead of a static dark bar. -->
-    <!-- Start the em.wasm download NOW, in parallel with the scripts — without
-         this it can't begin until em.js has downloaded and executed (~330 ms
-         into a cold load) even though it's ~65% of the payload. The credentials
-         mode must match em.js's own fetch (fetch(url, {credentials:
-         "same-origin"}) → mode "cors" + same-origin credentials) or the
-         browser refuses to reuse the preload and downloads em.wasm twice;
-         `crossorigin` (anonymous) is that exact pairing. Same bare URL as
-         em.js fetches, so the service worker's cache-first match hits too. -->
+    <!-- No apple-mobile-web-app-status-bar-style: black-translucent offsets
+         the standalone viewport up by the status-bar height without growing
+         it (the bottom "chin gap"). The default lets iOS fill both safe areas
+         from the theme-color meta, which index.js keeps in step with the theme. -->
+    <!-- Preload em.wasm (~65% of the payload) in parallel with the scripts.
+         `crossorigin` must match em.js's own fetch (mode "cors" + same-origin
+         credentials) or the browser downloads it twice; same bare URL so the
+         service worker's cache-first match hits. -->
     <link rel="preload" href="em.wasm" as="fetch" crossorigin />
     <link rel="icon" type="image/png" href="favicon-96x96.png" sizes="96x96" />
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
@@ -67,33 +61,10 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
         </button>
         <div id="menu-dropdown" hidden>
-          <!-- Quick actions: the four things reached for mid-game, as a strip
-               of four icon tiles instead of four full-width rows.
-
-               These four go without captions because not one of them can cost
-               you anything. A quick save is fine to overwrite. A quick load
-               offers an Undo. Rewind opens a modal you can close. Slow motion
-               toggles off as easily as on. The earlier bare-icon row (option
-               F) mixed destructive and non-destructive actions, which is what
-               made an unreadable glyph expensive there and cheap here — the
-               worst case is one tap you take back. Nothing else in this menu
-               passes that test, so nothing else loses its label.
-
-               title and aria-label are now the ONLY text on these buttons.
-               Do not drop them: they are the desktop tooltip and the
-               accessible name, and there is nothing else left to read.
-
-               Glyphs, and why:
-               * Save / Load are a deliberate pair — the same floppy, with an
-                 arrow reading out of the second one.
-               * Rewind is a film strip because the modal it opens literally
-                 IS a film strip you drag, so the icon previews the
-                 destination. A triple back arrow was the alternative and it
-                 was rejected for colliding with #rewind in the top bar, which
-                 is the OTHER rewind (hold to scrub backwards live).
-               * Slow Motion is a turtle. It used to be a clock, which at this
-                 size is a near-twin of any other round glyph and says
-                 "time" rather than "slower". -->
+          <!-- Quick actions: four caption-less icon tiles, all non-destructive
+               (overwritable quick save, quick load with Undo, a closable modal,
+               a toggle). title and aria-label are the only text: they are the
+               tooltip and the accessible name. -->
           <div class="menu-quickrow" role="group" aria-label="Quick actions">
             <button type="button" class="menu-item" id="save-state" title="Quick Save" aria-label="Quick Save">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h11l3 3v11H5zM8 5v4h7V5M8 19v-6h8v6"/></svg>
@@ -135,23 +106,13 @@
               <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/></svg>
               <span>Record</span>
             </button>
-            <!-- Retroactive capture: the thing already happened, and this pulls
-                 it back out of the rolling history rather than asking you to
-                 have been recording. Opens the range picker pre-set to the last
-                 10 seconds, so the reflex use is still two taps and the picker
-                 is there for when the moment was longer, or a few seconds ago.
-                 Named for what you say, not for what it does. -->
+            <!-- Retroactive capture from the rolling history; opens the range
+                 picker pre-set to the last 10 seconds. -->
             <button type="button" class="menu-item menu-subitem" id="clip-last">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4z"/><path d="M9 6v12M15 6v12"/></svg>
               <span>Clip that!</span>
             </button>
-            <!-- Printed Photos moved in here from the menu's top level, and
-                 starts hidden: the Game Boy Printer is emulated for every solo
-                 GB cart, but most people will never print anything, and an
-                 always-present row for a gallery that is always empty is the
-                 worst kind of menu weight. refreshPrintsMenuItem() unhides it
-                 the moment the first print lands and re-hides it if the last
-                 one is deleted. -->
+            <!-- Hidden until the first print lands (refreshPrintsMenuItem). -->
             <button type="button" class="menu-item menu-subitem" id="open-prints" hidden>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V4h12v5M6 15h12v5H6zM6 9h12a2 2 0 0 1 2 2v4H4v-4a2 2 0 0 1 2-2z"/></svg>
               <span>Printed Photos</span>
@@ -179,12 +140,8 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8a4 4 0 0 1 8 0v2a4 4 0 0 1-8 0zM12 12v7M6 10H3M6 14H3M18 10h3M18 14h3M8 7 6 5M16 7l2-2"/></svg>
             <span>Report a Bug</span>
           </button>
-          <!-- Force Update and Toggle Log now live in Settings ▸ General ▸
-               Troubleshooting: month-scale actions that were each paying for a
-               permanent menu row, plus a heading and a separator between them.
-               Report a Bug stays here on purpose — it is the one thing you
-               reach for while the bug is on screen, and burying it behind
-               Settings is a step you would not take mid-crash. -->
+          <!-- Report a Bug stays in the menu: it is reached for while the bug
+               is on screen. Force Update / Toggle Log are in Settings. -->
         </div>
       </div>
 
@@ -210,25 +167,17 @@
         </button>
       </div>
 
-      <!-- Online link disconnect: a SEPARATE top-bar action (NOT a transport
-           control), so it stays disjoint from the segmented playback bar on
-           mobile. Shown only in rollback mode, where the speed/state controls
-           are hidden (they'd desync the pair). -->
+      <!-- Online link disconnect: separate from the segmented playback bar on
+           mobile; shown only in rollback mode. -->
       <button type="button" id="rb-disconnect" aria-label="Disconnect link cable">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8V6a2 2 0 0 1 2-2h1v6H9a2 2 0 0 1-2-2zM17 16v2a2 2 0 0 1-2 2h-1v-6h1a2 2 0 0 1 2 2zM10 8h4M10 16h4M12 8v8"/></svg>
         <span>Disconnect<span class="rb-dc-suffix"> Link Cable</span></span>
       </button>
 
-      <!-- Cartridge-specific top-bar actions. Only ever ONE of these shows:
-           no cart is both a tilt cart and a camera cart, so they share a
-           single slot. Like #rb-disconnect they carry icon + wording on wide
-           viewports and collapse to the bare icon on phones.
-           Each has TWO jobs, swapped by the .needs-enable class: while the
-           sensor it drives is not switched on it is the way IN (the load-time
-           offer toast is easy to miss and impossible to summon back), and once
-           frames are flowing it becomes the ongoing control. Two icons ride in
-           each button because a phone shows nothing but the glyph — the label
-           cannot be the only thing that changes. -->
+      <!-- Cartridge-specific actions share one slot (no cart is both tilt and
+           camera). .needs-enable swaps each button's job: the way in while its
+           sensor is off, the ongoing control once frames flow. Two icons per
+           button because phones show only the glyph. -->
       <!-- Tilt carts: turns on device-motion tilt, then re-baselines neutral -->
       <button type="button" class="icon-btn cart-btn" id="tilt-recenter" hidden
               title="Recenter tilt" aria-label="Recenter tilt">
@@ -246,11 +195,8 @@
 
       <div id="topbar-spacer"></div>
 
-      <!-- Drive sync state. This slot used to hold a colour-coded run/pause/
-           sleep LED whose meaning was opaque; it now carries something
-           actionable instead. Deliberately muted (never the accent — that's
-           the enhanced-audio indicator's job). Phones show the icon alone and
-           reveal the wording on tap. -->
+      <!-- Drive sync state. Muted, never the accent (that is the enhanced-audio
+           indicator's). Phones show the icon alone and the wording on tap. -->
       <div id="status" aria-live="polite">
         <button type="button" id="sync-indicator" hidden></button>
         <span id="fps" aria-hidden="true"></span>
@@ -260,9 +206,8 @@
         <span class="update-dot" aria-hidden="true"></span><span id="update-label">Update</span>
       </button>
 
-      <!-- Enhanced-audio indicator: lights up when a sound-engine HLE (MP2K /
-           Golden Sun "Bon" driver) is enabled in settings AND actually detected
-           and substituting audio right now. Informational, not a control. -->
+      <!-- Enhanced-audio indicator: lit while a sound-engine HLE is enabled
+           and actually substituting audio. Informational, not a control. -->
       <div id="hle-indicator" role="status" hidden
            title="Enhanced audio active — high-quality sound-engine emulation"
            aria-label="Enhanced audio active">
@@ -287,12 +232,9 @@
       </button>
     </header>
 
-    <!-- Retroactive-capture status: while a clip replays, controls are
-         inert and this banner is the only live UI. Deliberately a sibling of
-         the top bar, NOT a child: mobile landscape gives #topbar a transform,
-         and a transformed ancestor becomes the containing block for its
-         position:fixed descendants, so the banner's offsets resolved against
-         the sliding bar and it animated in and out with it. -->
+    <!-- Capture banner. A sibling of #topbar, not a child: mobile landscape
+         transforms the bar, and a transformed ancestor is the containing block
+         of its position:fixed descendants. -->
     <div id="clip-banner" hidden>Capturing…</div>
 
     <!-- Mobile-landscape handle: slides the (off-screen) top bar in/out -->
@@ -306,21 +248,14 @@
            frame, blurred up by CSS behind the screen -->
       <canvas id="glow-canvas" width="24" height="16" hidden aria-hidden="true"></canvas>
 
-      <!-- tabindex="-1": programmatically focusable (returnFocusToGame parks
-           focus here after a pointer-activated chrome control) but never in the
-           tab order, so keyboard traversal of the chrome is unchanged. -->
+      <!-- tabindex="-1": returnFocusToGame parks focus here; never in the
+           tab order. -->
       <canvas id="canvas" tabindex="-1" aria-label="Game screen" oncontextmenu="event.preventDefault()"></canvas>
 
-      <!-- Input display (Settings -> Controls -> "Show inputs on screen", or
-           the I shortcut). A DOM overlay pinned to the bottom-left of the
-           stage that lights each button as it is pressed, for stream viewers
-           and for debugging. Deliberately NOT drawn on #canvas: clip capture
-           is canvas.captureStream, so clips stay clean while an OBS window /
-           browser-source capture picks the overlay up.
-           aria-hidden + pointer-events:none — it is a mirror of input the user
-           just made, never a control and never news to a screen reader.
-           The shoulder row is dropped for GB/GBC by body.gb-mode, the same
-           class the touch strip's #lr row uses. -->
+      <!-- Input display overlay. A DOM overlay, not drawn on #canvas: clip
+           capture is canvas.captureStream, so clips stay clean while a window
+           capture picks it up. aria-hidden + pointer-events:none (a mirror of
+           input, never a control). body.gb-mode drops the shoulder row. -->
       <div id="input-overlay" aria-hidden="true">
         <div id="io-shoulders">
           <span class="io-btn io-sh" id="io-l">L</span>
@@ -345,10 +280,8 @@
         </div>
       </div>
 
-      <!-- SDL still owns a (now invisible) WebGL context for its window/renderer
-           init; we point Module.canvas here so #canvas is free for our own
-           WebGL2 game-presentation context. Nothing is ever shown on it —
-           game video is drawn on #canvas, input and audio are JS-driven. -->
+      <!-- SDL's window/renderer init owns a WebGL context here (Module.canvas)
+           so #canvas is free for the WebGL2 presenter. Nothing is shown on it. -->
       <canvas id="sdl-canvas" width="960" height="640" hidden aria-hidden="true"></canvas>
 
       <!-- 2P link mode: two linked cores, one canvas per player -->
@@ -366,17 +299,14 @@
       <!-- Home / empty state (shown until a ROM is loaded) -->
       <section id="home">
         <div id="home-inner">
-          <!-- Brand sits first in the DOM so the logo/wordmark is above the
-               frozen-frame card and Resume button on desktop, mirroring the
-               mobile paused layout. Touch layout reorders via flex `order`
-               (see the pointer:coarse home block in styles.css). -->
+          <!-- Brand first in the DOM (above the paused card on desktop); the
+               touch layout reorders via flex `order` in styles.css. -->
           <div id="home-brand">
             <img src="favicon.svg" alt="" id="home-logo" />
             <h1>dingbat</h1>
             <p id="home-tagline">a game boy &amp; game boy advance emulator</p>
           </div>
-          <!-- Paused-game card: frozen frame of the game Resume returns to.
-               JS fills the canvas from the wasm framebuffer on Main Menu. -->
+          <!-- Paused-game card: JS fills the canvas from the framebuffer on Main Menu. -->
           <div id="home-paused" hidden>
             <button type="button" id="home-paused-shot" title="Resume game">
               <canvas id="home-paused-canvas" width="240" height="160"></canvas>
@@ -387,23 +317,19 @@
             </button>
             <button type="button" id="home-paused-close" title="Close game &mdash; your save is kept" aria-label="Close game">&times;</button>
           </div>
-          <!-- On touch devices (pointer: coarse) this wrapper becomes a
-               side-by-side row of Resume + "Load a game"; on desktop it is
-               display:contents so the layout is unchanged. -->
+          <!-- pointer:coarse: a row of Resume + "Load a game"; desktop:
+               display:contents. -->
           <div id="home-actions">
             <button type="button" id="home-resume">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></svg>
               <span>Resume game</span>
             </button>
-            <!-- Mobile-only replacement for the big drop target below (no
-                 drag-and-drop on touch); hidden on desktop. -->
+            <!-- Mobile-only replacement for the drop target; hidden on desktop. -->
             <button type="button" id="home-load" class="button button-primary">Load a game</button>
           </div>
 
-          <!-- Wasm-boot progress: a thin indeterminate strip shown while the
-               emulator runtime is still downloading/compiling (the home grid
-               now renders before it). CSS delays its fade-in so cached/fast
-               loads never flash it; body.runtime-ready hides it for good. -->
+          <!-- Wasm-boot progress. CSS delays its fade-in so fast loads never
+               flash it; body.runtime-ready hides it. -->
           <div id="boot-progress" aria-hidden="true"><span></span></div>
 
           <div id="home-recent-wrap" hidden>
@@ -411,9 +337,7 @@
               <span class="home-recent-label">Recent</span>
               <span class="home-recent-meta">
                 <span id="storage-info"></span>
-                <!-- One slot, two states: signed in shows Sync, signed out
-                     shows Sign in, so reaching Drive never requires opening
-                     Manage ROMs and Saves first. -->
+                <!-- One slot: Sync when signed in, Sign in otherwise. -->
                 <button type="button" class="home-manage-link" id="home-signin" hidden>Sign in</button>
                 <button type="button" class="home-manage-link" id="home-sync" hidden>Sync</button>
                 <button type="button" class="home-manage-link" id="manage-roms">Manage ROMs and Saves</button>
@@ -445,11 +369,9 @@
         <span aria-hidden="true">&#8987;</span> waiting for peer
       </div>
 
-      <!-- A stack, not a slot: showToast/showActionToast append one
-           .toast-item per message so a later toast can never destroy an
-           earlier offer. aria-atomic="false" (role="status" defaults to
-           true) so a new toast announces only itself, not a re-read of
-           every toast still on screen. -->
+      <!-- A stack: one .toast-item per message, so a later toast never
+           destroys an earlier offer. aria-atomic="false" so a new toast
+           announces only itself. -->
       <div id="toast" role="status" aria-live="polite" aria-atomic="false"></div>
     </main>
 
@@ -539,12 +461,9 @@
       </div>
     </div>
 
-    <!-- Rewind scrubber. An ordinary centred modal, and the scrub box inside
-         it is the Report-a-Bug scrubber's box (.report-scrub / -head / -label /
-         -when / -preview / -slider) rather than a lookalike — it is the same
-         component with a film strip added. The strip is one canvas, not N
-         elements, drawn from thumbnails the rewind ring captured at push
-         time. -->
+    <!-- Rewind scrubber: the Report-a-Bug scrubber's box (.report-scrub etc.)
+         with a film strip added. The strip is one canvas drawn from the
+         thumbnails the rewind ring captured at push time. -->
     <div id="rewind-modal" class="modal-overlay">
       <div class="modal modal-scrub" role="dialog" aria-modal="true" aria-labelledby="rewind-modal-title">
         <button type="button" class="modal-close" id="rewind-scrub-close" aria-label="Close">&times;</button>
@@ -555,11 +474,9 @@
             <span class="report-label">Rewind to</span>
             <span id="rewind-when" class="report-when" aria-live="polite">now</span>
           </div>
-          <!-- aria-hidden: both canvases are pictures of the moment named in
-               #rewind-when, and the range input below is the control a screen
-               reader drives. Announcing two unlabelled canvases adds nothing.
-               .film-preview only drops .report-preview's hardcoded 3:2 —
-               GB/GBC frames are 10:9 and would otherwise stretch. -->
+          <!-- aria-hidden: pictures of the moment named in #rewind-when; the
+               range input is the control. .film-preview drops .report-preview's
+               3:2 (GB/GBC frames are 10:9). -->
           <canvas id="rewind-preview" class="report-preview film-preview" width="120" height="80" aria-hidden="true"></canvas>
           <div class="film-strip-wrap" id="rewind-strip-wrap" aria-hidden="true">
             <canvas id="rewind-strip" class="film-strip"></canvas>
@@ -579,13 +496,9 @@
       </div>
     </div>
 
-    <!-- Save a Clip. The SAME modal shape and the SAME film strip as Rewind
-         above (.modal-scrub / .report-scrub / .film-strip-wrap, driven by
-         createFilmStrip in index.js) — the only difference is that this one
-         hangs two markers on the strip instead of one, because a clip is a
-         range and a rewind is a point. Its history is the clip ring's, not the
-         rewind ring's: rewind can be switched off (and speed mode suspends it)
-         while clip capture keeps running. -->
+    <!-- Save a Clip: the same modal and film strip as Rewind (createFilmStrip
+         in index.js) with two markers instead of one. Its history is the clip
+         ring's, which keeps running when rewind is off. -->
     <div id="clip-modal" class="modal-overlay">
       <div class="modal modal-scrub" role="dialog" aria-modal="true" aria-labelledby="clip-modal-title">
         <button type="button" class="modal-close" id="clip-scrub-close" aria-label="Close">&times;</button>
@@ -596,12 +509,10 @@
             <span class="report-label">Clip</span>
             <span id="clip-when" class="report-when" aria-live="polite">the last 10s</span>
           </div>
-          <!-- aria-hidden: the canvases are pictures of the moment named in
-               #clip-when, and the two knobs of the range slider below are the
-               controls a screen reader drives. -->
+          <!-- aria-hidden: pictures of the moment named in #clip-when; the
+               range knobs are the controls. -->
           <canvas id="clip-preview" class="report-preview film-preview" width="120" height="80" aria-hidden="true"></canvas>
-          <!-- One preview, two markers: without this it is not knowable which
-               end of the range the picture belongs to. -->
+          <!-- Which end of the range the preview shows. -->
           <p class="clip-preview-label" id="clip-preview-label" aria-live="polite">first frame of the clip</p>
           <div class="film-strip-wrap compact" id="clip-strip-wrap" aria-hidden="true">
             <canvas id="clip-strip" class="film-strip"></canvas>
@@ -612,16 +523,10 @@
             <span id="clip-oldest" class="film-scale-end">oldest</span>
             <span class="film-scale-end">now</span>
           </div>
-          <!-- One track, two knobs: the same range the two brackets above
-               enclose, read as a single span instead of as a "Start" bar and
-               an "End" bar that have to be held in your head together.
-               A native range input has one thumb, so this is the standard
-               two-overlaid-inputs pattern - each knob keeps its own focus and
-               its own arrow keys for free, and the rail plus the highlighted
-               span between them are drawn underneath (.dual-range in
-               styles.css). Pointer presses are routed by #clip-range itself,
-               to the NEARER knob, which is why the inputs take no pointer
-               events of their own: see clipGrabKnob in index.js. -->
+          <!-- Two overlaid range inputs (each keeps its own focus and arrow
+               keys); rail and span drawn underneath (.dual-range). #clip-range
+               routes pointer presses to the nearer knob, so the inputs take no
+               pointer events of their own: see clipGrabKnob in index.js. -->
           <div class="dual-range" id="clip-range">
             <div class="dual-range-rail" aria-hidden="true">
               <span class="dual-range-fill" id="clip-range-fill"></span>
@@ -710,11 +615,10 @@
       </div>
     </div>
 
-    <!-- Settings. One markup tree, two layouts (web/styles.css, "Settings
-         surface"): at >=760px the rail and the content pane sit side by side
-         in a fixed 900x640 frame; below it the same two children become the
-         root list and the pushed detail screen of a bottom sheet. The frame is
-         a fixed size in both, and .settings-scroll is the only scroller. -->
+    <!-- Settings: one markup tree, two layouts (styles.css "Settings
+         surface"). >=760px: rail + content pane in a fixed 900x640 frame;
+         below: root list + pushed detail screen of a bottom sheet.
+         .settings-scroll is the only scroller. -->
     <div id="settings-modal" class="modal-overlay">
       <div class="modal modal-settings" id="settings-frame" role="dialog" aria-modal="true" aria-labelledby="modal-settings-title">
         <div class="settings-grab" aria-hidden="true"><span></span></div>
@@ -757,10 +661,8 @@
                   <svg class="settings-row-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
                 </button>
               </div>
-              <!-- Reference information, not a setting. Desktop pins it to the
-                   foot of the rail (pushed down by margin-top:auto); the sheet
-                   uses .settings-foot below instead, and hides this one. Click
-                   to copy. -->
+              <!-- Desktop: pinned to the foot of the rail; the sheet uses
+                   .settings-foot instead. Click to copy. -->
               <p class="settings-version" id="settings-version" tabindex="0" role="button" title="Copy the build identity"></p>
             </div>
           </div>
@@ -813,11 +715,8 @@
                     <span class="switch-track"></span>
                   </label>
                 </div>
-                <!-- row-flow: see styles.css. The control moves INTO the text flow
-                     (bottom right, last line) instead of standing beside it, so the
-                     description gets the full width of the panel. The wrapper <div>
-                     these rows used to carry is gone — the float has to be a sibling
-                     of the text it flows around, not of a block containing it. -->
+                <!-- row-flow (styles.css): the control floats into the text flow.
+                     The float must be a sibling of the text, not of a wrapper. -->
                 <div class="modal-toggle-row row-flow">
                   <span class="modal-row-label">Touch direction input</span>
                   <div id="control-style-picker" class="chip-row row-flow-ctl" role="radiogroup" aria-label="Touch direction input">
@@ -1102,30 +1001,13 @@
                   <button type="button" class="theme-chip" data-theme-name="famicom" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Famicom</button>
                 </div>
                 <div class="modal-subhead">Emulation</div>
-                <!-- Rewind is ON by default and stays that way for everyone who
-                     never opens this tab: the "system" record written before this
-                     switch existed has no rewindOn key, and a missing key resolves
-                     to on (see loadSystemSettings).
-
-                     Turning it off is not cosmetic. The ring is dropped, nothing is
-                     pushed, and the snapshot + thumbnail cost goes back to the game
-                     (~0.8 ms per push, 6 pushes/s — measured at 8% of loop_tick on
-                     the Good Boy Galaxy demo in Chrome/M-series; a heavier game
-                     dilutes the share but not the absolute cost). That is the only
-                     reason to offer the switch at all. Every rewind control in
-                     the app disappears with it (body.rewind-off in styles.css); a
-                     visible-but-dead control is worse than no control. -->
-                <!-- Speed mode: the low-end-device preset. One switch instead of
-                     asking a struggling phone's owner to hunt five settings: the
-                     GBA skips every other rendered frame and underclocks the
-                     emulated CPU 2x; a GB game loads the cheaper scanline
-                     renderer and skips every other rendered frame too (the
-                     scanline PPU's mode/LY/STAT timing is analytic, so the skip
-                     is timing-neutral); rewind / HLE audio / audio interpolation /
-                     ambient glow / run-ahead are suspended (their stored
-                     preferences come back when this goes off). Honestly labeled
-                     as less accurate: CPU-heavy games drop internal frames, and
-                     the 30 Hz output breaks flicker-based transparency. -->
+                <!-- Rewind defaults on: a missing rewindOn key resolves to on
+                     (loadSystemSettings). Off drops the ring entirely and hides
+                     every rewind control (body.rewind-off). -->
+                <!-- Speed mode: GBA skips every other rendered frame and
+                     underclocks 2x; GB loads the scanline renderer and skips
+                     too; rewind / HLE audio / interpolation / glow / run-ahead
+                     are suspended, their stored preferences restored on off. -->
                 <div class="modal-toggle-row">
                   <div>
                     <span class="modal-row-label">Speed mode</span>
@@ -1156,19 +1038,8 @@
                   </select>
                   <span class="modal-toggle-sub">Cuts the delay between pressing a button and seeing it happen, by guessing the next frame. Costs extra CPU; ignored at 2&times; speed and in multiplayer</span>
                 </div>
-                <!-- Force Update and Toggle Log, moved out of the kebab menu. Same
-                     element IDs, so every existing handler is untouched.
-
-                     Folded, and folded by default on every open, because these are
-                     month-scale actions: nobody arrives in Settings wanting them,
-                     and the two people a year who do will happily open one group.
-                     Same disclosure affordance as the Capture accordion in the
-                     menu — chevron on the right, rotating a quarter turn — so it is
-                     recognisably the same gesture in both places.
-
-                     It sits ABOVE Reset all settings on purpose: reset is the last
-                     thing on the tab and should stay the last thing, not get pushed
-                     up the page by a group most people never open. -->
+                <!-- Folded by default on every open; same disclosure affordance
+                     as the Capture accordion. Stays above Reset all settings. -->
                 <button type="button" class="settings-disclosure" id="advanced-toggle"
                         aria-expanded="false" aria-controls="advanced-sub">
                   Advanced
@@ -1195,11 +1066,8 @@
             </div>
           </div>
         </div>
-        <!-- Sheet only: a fixed footer BELOW the scroller, on the list and on
-             every detail screen alike, so the build identity is always at the
-             bottom edge of the sheet. Its bottom padding is what the home
-             indicator lands on. Hidden at >=760px, where the rail's copy above
-             is the one that shows. -->
+        <!-- Sheet only: fixed footer below the scroller; its bottom padding is
+             what the home indicator lands on. Hidden at >=760px. -->
         <div class="settings-foot">
           <p class="settings-version" id="settings-version-sheet" tabindex="0" role="button" title="Copy the build identity"></p>
         </div>
@@ -1228,19 +1096,15 @@
         </div>
 
         <!-- ===== Manual code exchange ===== -->
-        <!-- Shown instead of the connect view when the network is up but the
-             signaling server is unreachable, or via the footer toggle: each
-             side copies its code to the other (any messenger works), pastes
-             the friend's, and confirms. -->
+        <!-- Shown when the signaling server is unreachable, or via the footer
+             toggle: each side sends its code, pastes the friend's, confirms. -->
         <div id="net-manual-view" hidden>
           <p>Trade codes with your friend — any messenger works.
              Same Wi-Fi is the most reliable.</p>
-          <!-- No visible code box: the code is minted invisibly and kept fresh
-               (re-gathered while unshared) so Share/Copy always send a young
-               one — NAT mappings behind a code decay in under a minute. The
-               buttons split the row evenly; where Share is hidden (no Web
-               Share API — netplay.js reveals it on touch devices), Copy
-               fills it alone. Short captions so both fit an SE-width modal. -->
+          <!-- No visible code box: the code is minted invisibly and re-minted
+               while unshared (NAT mappings decay within a minute). Share is
+               revealed by netplay.js on touch devices; Copy fills the row alone
+               otherwise. -->
           <div class="net-join-row net-manual-out-row">
             <button type="button" class="button" id="net-manual-share" hidden
                     disabled>Share code</button>
@@ -1262,9 +1126,8 @@
     </div>
 
     <!-- ====================== On-screen gamepad ======================
-         aria-hidden: the pads are pointer-driven press-and-hold surfaces a
-         screen reader's tap gesture can't operate; keyboard bindings are the
-         accessible input path. Hiding them beats announcing stray "L R A B". -->
+         aria-hidden: press-and-hold surfaces a screen reader's tap cannot
+         operate; keyboard bindings are the accessible input path. -->
     <div id="controls" aria-hidden="true">
       <div id="lr">
         <div id="l" class="pad-btn pad-shoulder" data-inputs="8">L</div>

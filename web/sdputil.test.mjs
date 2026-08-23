@@ -1,24 +1,13 @@
-// Tests for the compact SDP codec (web/sdputil.js) used by the serverless
-// manual code exchange. The codec throws away the constant boilerplate of a
-// WebRTC data-channel SDP and keeps only what the peers actually need to connect
-// (fingerprint, ICE ufrag/pwd, candidates). A round-trip therefore is NOT
-// byte-identical — so we compare the SEMANTIC fields (parse both sides, compare
-// fingerprint / ufrag / pwd / setup / candidate set), assert the encoded string
-// stays short enough to trade by hand, and check that malformed input fails
-// cleanly.
-//
-// Zero dependencies, mirroring web/signaling/server.test.mjs: a plain assert()
-// helper, a single run(), non-zero exit on any failure. sdputil.js is a CommonJS
-// UMD script; ESM default-import interop pulls in its module.exports here.
+// Tests for web/sdputil.js. A round-trip is not byte-identical, so the
+// semantic fields (fingerprint / ufrag / pwd / setup / candidate set) are
+// compared instead.
 //
 // Run:  node web/sdputil.test.mjs
 
 import SDPCodec from "./sdputil.js";
 
-// Real offer + answer SDPs captured from Chrome's RTCPeerConnection with this
-// app's exact config (one ordered DataChannel, STUN-only, full non-trickle
-// gather). The public IP has been masked to a documentation address; the shape
-// (mDNS host candidate + srflx candidate) is verbatim.
+// Offer + answer captured from Chrome with this app's config (one ordered
+// DataChannel, STUN-only, full gather); public IP masked, shape verbatim.
 const OFFER =
   "v=0\r\no=- 3116375424838376079 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n" +
   "a=group:BUNDLE 0\r\na=extmap-allow-mixed\r\na=msid-semantic: WMS\r\n" +
@@ -39,7 +28,7 @@ const ANSWER =
   "a=fingerprint:sha-256 73:43:4F:62:52:00:00:3C:48:6A:6D:02:81:38:6C:05:C5:2A:8A:20:43:54:38:D6:54:0E:9C:74:59:65:D3:E4\r\n" +
   "a=setup:active\r\na=mid:0\r\na=sctp-port:5000\r\na=max-message-size:262144\r\n";
 
-// A candidate set that also exercises a literal IPv4 host candidate (mDNS off).
+// Exercises a literal IPv4 host candidate (mDNS off).
 const LITERAL_HOST =
   OFFER.replace(
     "76a8c416-5273-4154-85e7-82c648cd35ac.local",
@@ -78,7 +67,6 @@ async function run() {
     sameFields(OFFER, dec.sdp, "offer");
     console.log(`  (encoded ${enc.length} chars, ${Math.ceil(enc.length * 6 / 8)} raw bytes)`);
     assert(enc.length <= CODE_BUDGET, `offer encoded ${enc.length} <= ${CODE_BUDGET} char code budget`);
-    // The rebuilt SDP must be independently parseable back to the same fields.
     assert(dec.sdp.includes("UDP/DTLS/SCTP webrtc-datachannel"), "rebuilt SDP has the datachannel m-line");
   }
 
@@ -141,7 +129,6 @@ async function run() {
       SDPCodec.fields(asClient.sdp).setup === "passive",
       "requested setup role lands in a=setup (passive)"
     );
-    // Everything the connection needs survives the reinterpretation.
     sameFields(
       OFFER.replace("a=setup:actpass", "a=setup:active"),
       asServer.sdp,
@@ -159,8 +146,7 @@ async function run() {
     const dec = SDPCodec.decode(enc);
     assert(dec && typeof dec.mintedAt === "number", "decode surfaces mintedAt");
     assert(dec.mintedAt >= before && dec.mintedAt <= after, "mintedAt is the encode moment");
-    // A code WITHOUT the trailing timestamp (an older encoder) still decodes;
-    // age just reads unknown. Strip the last 4 payload bytes to simulate.
+    // A code without the trailing timestamp (older encoder) still decodes.
     const raw = Buffer.from(enc.replace(/-/g, "+").replace(/_/g, "/"), "base64");
     const stripped = Buffer.from(raw.subarray(0, raw.length - 4))
       .toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -172,7 +158,6 @@ async function run() {
   console.log("version byte guards forward compatibility:");
   {
     const enc = SDPCodec.encode({ type: "offer", sdp: OFFER });
-    // Flip the version byte (first byte of the payload) and confirm reject.
     const bad = "Z" + enc.slice(1); // corrupt first base64url char -> different version byte
     const dec = SDPCodec.decode(bad);
     assert(dec === null || dec.type === "offer", "corrupt version byte does not crash");

@@ -1,13 +1,6 @@
-// "Remove from this device" (web/index.js removeGameFromDevice + the Manage
-// ROMs row that offers it). The inverse of downloadGame: it frees this
-// device's ROM bytes and nothing else — no tombstone, no Drive delete, and
-// the save data stays put.
-//
-// The interesting half is the guard. Removing local bytes for a game that
-// isn't actually on Drive would destroy the user's only copy, so this file
-// pins down both layers of it: the button doesn't render unless this device
-// has a record of the ROM being on Drive, and the action itself re-checks the
-// live listing before deleting anything.
+// removeGameFromDevice: frees this device's ROM bytes and nothing else. The
+// guard has two layers, both pinned: the button renders only with a record
+// of the ROM being on Drive, and the action re-checks the live listing.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -15,8 +8,6 @@ import { loadApp, jsonRes, bytesRes, u8, eq, settle } from "./helpers.mjs";
 
 const FILES_URL = "https://www.googleapis.com/drive/v3/files";
 
-// Minimal appDataFolder: a listing plus alt=media downloads. Uploads and
-// deletes are accepted so the assertions below can count them.
 const makeDrive = (names = []) => {
   const files = new Map(names.map((n, i) => [n, { id: "f" + i, name: n }]));
   const fetch = async (url, opts = {}) => {
@@ -38,7 +29,6 @@ const signIn = (app, sigs = {}) => {
     { queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [], sigs, rmt: {}, connected: true };
 };
 
-// One local game: ROM bytes, box art, a battery save and a save state.
 const seedLocal = (app, name, romBytes = u8(1, 2, 3, 4, 5, 6, 7, 8)) => {
   app.idb.set("recent", [{ name, ts: 100 }]);
   app.idb.set("rom:" + name, { name, data: romBytes });
@@ -47,9 +37,7 @@ const seedLocal = (app, name, romBytes = u8(1, 2, 3, 4, 5, 6, 7, 8)) => {
   app.idb.set("state:" + name, u8(6));
 };
 
-// navigator.storage.estimate() is a fixed number in the harness; make it
-// report the fake IndexedDB's real byte weight so "did the storage figure
-// drop?" is an honest question.
+// Make navigator.storage.estimate() report the fake IndexedDB's byte weight.
 const meterStorage = (app) => {
   const weigh = (v) => {
     if (!v) return 0;
@@ -64,15 +52,13 @@ const meterStorage = (app) => {
   };
 };
 
-// The manage list's sort control lives in a wrapper the row code hides for
-// short lists; the fake DOM has no parent links, so supply one.
+// The sort control's wrapper: the fake DOM has no parent links.
 const openManageList = async (app) => {
   app.document.getElementById("roms-sort").parentElement = { hidden: false };
   await app.api.refreshRomsManageList();
   await settle();
 };
 
-// Labels of the buttons on the row for `name`, in render order.
 const rowButtons = (app, name) => {
   const list = app.document.getElementById("roms-manage-list");
   for (const row of list.children) {
@@ -105,7 +91,6 @@ test("removeGameFromDevice frees the ROM and art, and nothing else", async () =>
 
   assert.equal(app.idb.get("rom:A.gba"), undefined, "ROM bytes freed");
   assert.equal(app.idb.get("art:A.gba"), undefined, "box art freed too");
-  // The whole point: this is a local eviction, not a deletion.
   eq(app.idb.get("save:A.gba"), u8(7), "battery save kept");
   eq(app.idb.get("state:A.gba"), u8(6), "save state kept");
   eq(app.api.syncState.tomb, [], "no tombstone — other devices keep the game");
@@ -143,7 +128,6 @@ test("the storage figure reflects the reclaim", async () => {
   assert.ok(after < before - 60000,
     `the ROM's bytes must actually be gone (${before} -> ${after})`);
 
-  // And the label the user reads is refreshed from that estimate.
   await app.api.refreshHomeRecent();
   await settle();
   assert.equal(app.document.getElementById("storage-info").textContent,
@@ -164,9 +148,7 @@ test("the removed game re-renders as a Drive-only tile", async () => {
   assert.equal(grid.children.length, 2);
   assert.ok(!grid.children[0].className.includes("home-tile-cloud"));
 
-  // Watch every commit: the grid must go straight from the old tiles to the
-  // new ones. An empty moment collapses #home's scrollHeight and throws the
-  // user back to the top of their library.
+  // An empty moment collapses #home's scrollHeight (see homegrid.test.mjs).
   const sizes = [];
   const proto = Object.getPrototypeOf(grid);
   grid.replaceChildren = (...cs) => {
@@ -182,7 +164,6 @@ test("the removed game re-renders as a Drive-only tile", async () => {
   assert.equal(grid.children.length, 2, "the game keeps its place in the library");
   assert.ok(grid.children[0].className.includes("home-tile-cloud"),
     "and now renders exactly like any other Drive-only game");
-  // Same shape as a never-downloaded game: a download glyph, no 2P button.
   const controls = grid.children[0].children.map((c) => c.className);
   assert.ok(controls.some((c) => c.includes("home-tile-dl")), "download glyph");
   assert.ok(!controls.some((c) => c.includes("home-tile-link")), "no 2P button");
@@ -192,8 +173,8 @@ test("the removed game re-renders as a Drive-only tile", async () => {
 
 test("a game Drive does not hold is kept and queued instead of removed", async () => {
   const app = await loadApp();
-  // sigs claims the ROM was uploaded, but the listing disagrees — exactly what
-  // a wiped app folder or a different signed-in Google account looks like.
+  // sigs claims an upload but the listing disagrees (a wiped app folder, or
+  // a different Google account).
   const drive = makeDrive(["save:A.gba"]);
   app.setFetch(drive.fetch);
   signIn(app, { "rom:A.gba": "stale-sig" });
@@ -234,9 +215,8 @@ test("signed out, removeGameFromDevice is refused outright", async () => {
 test("Remove is offered only for a local game Drive already has", async () => {
   const app = await loadApp();
   app.setFetch(makeDrive(["rom:Backed.gba"]).fetch);
-  // Backed.gba: local + a sig  -> removable.
-  // Fresh.gba:  local, upload still queued (no sig) -> NOT removable.
-  // Cloud.gba:  on Drive only, no local bytes -> nothing to remove.
+  // Backed: local + sig -> removable. Fresh: upload queued (no sig) -> not.
+  // Cloud: Drive only -> nothing to remove.
   signIn(app, { "rom:Backed.gba": "sig" });
   app.api.syncState.queueUp.push("rom:Fresh.gba");
   app.idb.set("recent", [
@@ -249,8 +229,7 @@ test("Remove is offered only for a local game Drive already has", async () => {
 
   await openManageList(app);
   eq(rowButtons(app, "Backed.gba"), ["Reset", "Delete", "Remove from device"]);
-  // A game whose only copy is still local must not be evictable — the slot
-  // renders (locality decides the label) but greyed, with the reason on tap.
+  // The only copy still local: the slot renders greyed, reason on tap.
   eq(rowButtons(app, "Fresh.gba"), ["Reset", "Delete", "Remove from device"]);
   const inert = rowButton(app, "Fresh.gba", "Remove from device");
   assert.equal(inert.getAttribute("aria-disabled"), "true");
@@ -286,8 +265,7 @@ test("signed out, a Drive-only residue row offers Delete alone", async () => {
   app.idb.set("recent", [{ name: "Cloud.gba", ts: 1 }]);
 
   await openManageList(app);
-  // Reset always renders; with no local saves and no Drive session it sits
-  // greyed with "No saves to reset" instead of vanishing.
+  // Reset always renders; greyed with "No saves to reset" when there are none.
   eq(rowButtons(app, "Cloud.gba"), ["Reset", "Delete"],
     "no Drive session: nothing to sync from, Reset present but inert");
   assert.equal(
@@ -342,7 +320,6 @@ test("Sign out while the modal is open withdraws Remove from the rows", async ()
   app.idb.set("recent", [{ name: "A.gba", ts: 1 }]);
   app.idb.set("rom:A.gba", { name: "A.gba", data: u8(1) });
 
-  // The modal is open (openManageList renders what openRomsModal would).
   app.document.getElementById("roms-modal").classList.add("open");
   await openManageList(app);
   eq(rowButtons(app, "A.gba"), ["Reset", "Delete", "Remove from device"]);
@@ -394,7 +371,6 @@ test("two taps on Remove free the ROM; one tap only arms it", async () => {
   eq(app.idb.get("save:A.gba"), u8(7), "save kept");
   assert.ok(app.toasts.some((t) => /save kept/i.test(t)),
     "the toast says the save survived: " + app.toasts.join(" | "));
-  // The row re-renders without Remove — there is nothing local left to free —
-  // and, being Drive-only now, offers the way back instead.
+  // Drive-only now: the row offers the way back instead of Remove.
   eq(rowButtons(app, "A.gba"), ["Reset", "Delete", "Sync to device"]);
 });

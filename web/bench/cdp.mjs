@@ -1,8 +1,6 @@
-// Drive a *visible* Chrome (normal foreground QoS -> performance cores) over
-// CDP and run the dingbat throughput bench. Headless Chrome renderers get
-// background QoS on Apple Silicon and land on E-cores, which roughly halves
-// the numbers -- so any measurement meant to match what a user sees has to
-// come from a real window.
+// Drive a visible Chrome over CDP and run the throughput bench. Headless
+// renderers get background QoS on Apple Silicon (E-cores, roughly half the
+// numbers), so user-matching measurements need a real window.
 //
 // Usage: node cdp.mjs '<js expression returning a JSON-serializable value>'
 
@@ -35,8 +33,7 @@ const send = (method, params) =>
     ws.send(JSON.stringify({ id: i, method, params }));
   });
 
-// CDP_THROTTLE=<n> slows the renderer by n x (Emulation.setCPUThrottlingRate),
-// a rough stand-in for older hardware. Reset to 1 when done.
+// CDP_THROTTLE=<n>: Emulation.setCPUThrottlingRate, a stand-in for older hardware.
 const throttle = Number(process.env.CDP_THROTTLE || 1);
 if (throttle !== 1) await send("Emulation.setCPUThrottlingRate", { rate: throttle });
 
@@ -45,7 +42,7 @@ const r = await send("Runtime.evaluate", {
   expression: expr,
   awaitPromise: true,
   returnByValue: true,
-  // Long benches block the renderer; don't let CDP give up early.
+  // Long benches block the renderer.
   timeout: 600000,
 });
 if (r.result?.exceptionDetails) {

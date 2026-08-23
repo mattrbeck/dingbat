@@ -1,16 +1,9 @@
-// Keyboard-navigation escape hatch: when focus is in the top bar, menu, or an
-// open modal, Tab must keep moving focus. This runs on window in the CAPTURE
-// phase and is registered before em.js executes, so it outranks both the SDL
-// runtime's key grab (which preventDefaults Tab app-wide once a game runs) and
-// the fast-forward shortcut. Stopping propagation leaves the browser's default
-// focus traversal intact. keydown only: keyup flows through so a held
-// fast-forward always gets its release.
-//
-// Modal case: stopping at window capture means the event never reaches the
-// overlay's own Tab-wrap trap either (capture stops downward propagation),
-// so invoke the active trap handler directly to keep focus cycling inside
-// the dialog. (modalTrapHandler is defined further down; events only fire
-// after the whole script has run.)
+// Tab escape hatch: with focus in the chrome or a modal, Tab keeps moving
+// focus. Window capture phase, registered before em.js, so it outranks the
+// SDL runtime's key grab (which preventDefaults Tab app-wide once a game
+// runs) and the fast-forward shortcut. keydown only, so a held fast-forward
+// always gets its keyup. Stopping at window capture also hides the event
+// from the modal's own Tab trap, so that handler is invoked directly.
 window.addEventListener("keydown", (e) => {
   if (e.code !== "Tab" || !e.target || !(/** @type {Element} */ (e.target).closest)) return;
   const t = /** @type {Element} */ (e.target);
@@ -22,16 +15,12 @@ window.addEventListener("keydown", (e) => {
   }
 }, true);
 
-// Typing escape hatch: once a core runs, the SDL runtime's key handlers
-// (window, BUBBLE phase — they observably consume after target-phase
-// dispatch) preventDefault page-wide, which silently ate every character
-// typed into a text field (the cheat inputs only accepted paste). This guard
-// also sits at window-bubble, registered before em.js so it runs first
-// there, and stops text-field events from reaching SDL. Bubble, not capture:
-// listeners attached to the fields themselves (the room-code input submits
-// on its own Enter keydown) must still see the event in the target phase.
-// Tab belongs to the hook above; Escape must keep flowing to the
-// close-all-modals handler. No preventDefault anywhere here.
+// Typing escape hatch: the SDL runtime's window-bubble key handlers
+// preventDefault page-wide once a core runs. This sits at window-bubble too,
+// registered before em.js so it runs first, and stops text-field events
+// there. Bubble, not capture: the fields' own listeners must still see the
+// target phase. Tab belongs to the hook above; Escape must keep flowing to
+// the close-all-modals handler.
 {
   const typingGuard = (e) => {
     if (e.code === "Tab" || e.code === "Escape") return;
@@ -45,18 +34,11 @@ window.addEventListener("keydown", (e) => {
   }
 }
 
-// Browser-chord escape hatch: on the home screen (body lacks `running`)
-// modifier chords belong to the browser — Cmd/Ctrl+R must reload, Alt+Left
-// must navigate back. Once a core has run, the SDL runtime preventDefaults
-// keydown app-wide and gameKeyHandler swallows bound keys without checking
-// modifiers, so those chords stayed dead even after returning to the menu.
-// Window capture runs before every app handler (document-capture and
-// window-bubble alike); stopping propagation hides the chord from all of
-// them while the browser's default action still fires — no preventDefault
-// here. Text fields are left alone so their own listeners keep working;
-// typingGuard already shields them from SDL. In the running-game view the
-// guard stands down: swallowing chords there is deliberate (an accidental
-// Cmd+R mid-game would drop unsaved progress).
+// Browser-chord escape hatch: on the home screen modifier chords belong to
+// the browser (Cmd/Ctrl+R, Alt+Left), which SDL's app-wide preventDefault
+// and gameKeyHandler would otherwise swallow. Window capture hides the chord
+// from every app handler while the default action still fires. Stands down
+// in the running-game view: swallowing chords there is deliberate.
 window.addEventListener("keydown", (e) => {
   if (!e.metaKey && !e.ctrlKey && !e.altKey) return;
   if (document.body.classList.contains("running")) return;
@@ -73,36 +55,25 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js").then((reg) => {
     if (!reg) return; // SW-blocked contexts (test harnesses) resolve undefined
     swRegistration = reg;
-    // A new version already installed on a previous visit and is waiting
     if (reg.waiting) showUpdateButton();
-    // A new version is discovered while this page is open (the browser
-    // checks sw.js on navigation, so this fires on the first load after
-    // a deploy)
+    // The browser checks sw.js on navigation, so this fires on the first
+    // load after a deploy.
     reg.addEventListener("updatefound", () => {
       let sw = reg.installing;
       sw.addEventListener("statechange", () => {
-        // Ignore the very first install, when nothing controls the page yet
         if (sw.state === "installed" && navigator.serviceWorker.controller) {
           showUpdateButton();
         }
       });
     });
   });
-  // Reload when a NEW service worker takes over from an old one (the Update
-  // flow). On the very first visit the install's clients.claim() also fires
-  // controllerchange — reloading then flashes the page mid-boot, aborts the
-  // in-flight em.wasm fetch, and on a slow connection can land after the user
-  // already started a game and kill it. An uncontrolled page simply starts
-  // using the new SW without a reload.
-  //
-  // hadController can't be a load-time constant: a session that begins
-  // uncontrolled (first visit, shift-reload, the load after a Re-download
-  // reset) becomes controlled by the first claim, and a later Update click
-  // must still reload — the old latch made that click silently activate the
-  // new worker and visibly do nothing. So it flips to true after any
-  // controllerchange (the page is controlled from then on), and appUpdating
-  // covers the shift-reload shape where the update handover IS the first
-  // claim this page ever sees.
+  // Reload when a new worker takes over from an old one. The first visit's
+  // clients.claim() also fires controllerchange; reloading then would abort
+  // the em.wasm fetch mid-boot. hadController flips after any
+  // controllerchange (not a load-time constant: a session that begins
+  // uncontrolled becomes controlled by the first claim and a later Update
+  // click must still reload); appUpdating covers the handover being the
+  // first claim this page sees.
   let hadController = !!navigator.serviceWorker.controller;
   let refreshing = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
@@ -114,9 +85,7 @@ if ("serviceWorker" in navigator) {
   });
 }
 
-// The per-tile "2P" local link-cable launcher is a debugging aid (test a link
-// trade with two cores of the same ROM). It's hidden by default; add `?2p` to
-// the URL to reveal it — a `debug-2p` body class the CSS keys off of.
+// ?2p reveals the per-tile local link-cable launcher (body.debug-2p).
 if (new URLSearchParams(location.search).has("2p")) {
   document.body.classList.add("debug-2p");
 }
@@ -136,13 +105,9 @@ const showUpdateButton = () => {
 
 const checkForUpdate = async () => {
   try {
-    // current: the version.txt in the running build's cache. latest: a fresh
-    // version.txt. deployed: the CACHE_VERSION stamped in a fresh sw.js.
-    // version.txt alone can't gate the button — Pages' CDN propagates
-    // per-object after a deploy, so version.txt can be new while sw.js and
-    // the assets still serve the previous build; clicking Update then finds
-    // nothing to install and the button "does nothing". Only show the button
-    // once sw.js and version.txt agree on the same new version, i.e. the
+    // current: the cached version.txt; latest: a fresh one; deployed: the
+    // CACHE_VERSION in a fresh sw.js. Pages' CDN propagates per-object, so
+    // the button only shows once sw.js and version.txt agree, i.e. the
     // update is actually fetchable.
     let [cachedRes, networkRes, swRes] = await Promise.all([
       fetch("version.txt"),
@@ -157,8 +122,7 @@ const checkForUpdate = async () => {
       if (deployed === latest) {
         showUpdateButton();
       } else {
-        // Deploy still propagating through the CDN: skip stamping the check
-        // time so the next tab-visibility change retries soon
+        // Still propagating: skip the stamp so the next visibility change retries.
         return;
       }
     }
@@ -174,18 +138,14 @@ const maybeCheckForUpdate = () => {
   }
 };
 
-// Check on page load
 maybeCheckForUpdate();
 
-// Check when user returns to the tab
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") maybeCheckForUpdate();
 });
 
-// Full reset: drop every cache AND unregister the workers, then reload.
-// Deleting caches alone is worse than useless — the old worker stays in
-// control with an empty cache it will never repopulate (install only runs
-// once), so the next load mixes browser-HTTP-cached assets instead.
+// Full reset: caches and workers both. Deleting caches alone leaves the old
+// worker in control of an empty cache it never repopulates.
 const fullResetReload = async () => {
   if (typeof caches !== "undefined") {
     let keys = await caches.keys();
@@ -198,23 +158,18 @@ const fullResetReload = async () => {
   location.reload();
 };
 
-// True once an update reload is committed. The Drive token renewal checks
-// this: starting a GIS popup that the imminent reload will orphan only loses
-// the token (see armDriveRenewOnGesture's update-button exemption).
+// True once an update reload is committed; the Drive token renewal must not
+// start a popup the reload will orphan.
 var appUpdating = false;
 
 const applyUpdate = async () => {
   appUpdating = true;
-  // Busy state until the reload lands: the new worker's install downloads
-  // every asset (em.wasm included), which can take seconds on a slow
-  // connection — without feedback the click looks inert, and a second click
-  // would race a competing update. Never un-set: every path out of here ends
-  // in a reload.
+  // Busy until the reload lands (the install downloads every asset). Never
+  // un-set: every path out of here ends in a reload.
   updateBtn.disabled = true;
   updateBtn.classList.add("updating");
   document.getElementById("update-label").textContent = "Updating…";
   closeUpdateModal();
-  // Use the same service worker update flow
   if (swRegistration) {
     try {
       await swRegistration.update();
@@ -225,15 +180,13 @@ const applyUpdate = async () => {
       }
       let installing = swRegistration.installing;
       if (installing) {
-        // Activate it as soon as it finishes installing; controllerchange
-        // then reloads the page
+        // controllerchange then reloads the page.
         installing.addEventListener("statechange", () => {
           if (installing.state === "installed") {
             installing.postMessage({ type: "skipWaiting" });
           } else if (installing.state === "redundant") {
-            // Install failed (one bad asset fetch fails the whole install by
-            // design) — without this the click dies silently and the button
-            // never does anything again. Recover with the clean-slate path.
+            // Install failed (one bad asset fetch fails the whole install):
+            // recover with the clean-slate path.
             fullResetReload();
           }
         });
@@ -241,7 +194,7 @@ const applyUpdate = async () => {
       }
     } catch {}
   }
-  // No new worker found (e.g. deploy propagation lag): full clean slate
+  // No new worker found (propagation lag): full clean slate.
   await fullResetReload();
 };
 
@@ -267,13 +220,9 @@ updateModal.addEventListener("click", (e) => {
   if (e.target === updateModal) closeUpdateModal();
 });
 
-// Force update: ask the live worker to re-download every asset straight from
-// origin (nonce-busted URLs skip stale CDN edges AND the browser HTTP cache
-// — Pages serves assets with multi-hour max-age) and reload into the result.
-// This works even while the CDN still serves the previous build's sw.js,
-// which is exactly when the normal update flow can't find anything to
-// install. Falls back to the old nuke-everything reset when no worker is in
-// control or the reinstall doesn't ack.
+// Force update: the live worker re-downloads every asset under a nonce
+// (skips stale CDN edges and the browser HTTP cache), which works while the
+// CDN still serves the previous sw.js. Falls back to the full reset.
 const forceUpdate = async () => {
   const ctrl = navigator.serviceWorker?.controller;
   if (ctrl) {
@@ -330,11 +279,8 @@ const log = (message, level = "info") => {
   if (shouldScroll) logDiv.scroll({ top: logDiv.scrollHeight });
 };
 
-// Viewport diagnostics for the iOS portrait layout bug (frame not full
-// width + dead space under the controls): dump every quantity that
-// determines the app column's height, so a copied device log pinpoints
-// where the missing height goes. Logged at boot, on ROM load, and after
-// orientation changes.
+// Viewport diagnostics: every quantity that determines the app column's
+// height, for device logs. Logged at boot, ROM load, orientation changes.
 const logViewportDiag = (tag) => {
   try {
     const probe = document.createElement("div");
@@ -378,9 +324,8 @@ window.addEventListener("orientationchange", () =>
   setTimeout(() => logViewportDiag("rotate"), 1000)
 );
 
-// Mirror the console into the log view: the emulator core's own messages
-// (save-state rejections, backup-type detection, ...) arrive via
-// emscripten's default print -> console.log, which is invisible on phones
+// Mirror the console into the log view: the core's messages arrive via
+// emscripten's print -> console.log, invisible on phones.
 for (const level of ["log", "warn", "error"]) {
   const orig = console[level].bind(console);
   console[level] = (...args) => {
@@ -402,21 +347,15 @@ window.addEventListener("unhandledrejection", (e) => {
   log("REJECT: " + ((e.reason && e.reason.stack) || e.reason), "error");
 });
 
-// One line of environment context, refreshed each time the log opens —
-// exactly the details needed to make sense of remote bug reports
+// One line of environment context, refreshed each time the log opens.
 const logContext = async () => {
   let version = "unknown";
   try {
-    // Cache-first on purpose: this is the version of the build the tab is
-    // actually EXECUTING, which is the only one worth reporting. A new worker
-    // stays waiting until Update is pressed, so the origin can be several
-    // deploys ahead of the running code.
+    // Cache-first: the build the tab is actually executing.
     version = (await (await fetch("version.txt")).text()).trim().slice(0, 12);
   } catch {}
-  // ...and the origin's version, via a probe sw.js passes to the network, so a
-  // stale running build is visible in the log instead of having to be deduced.
-  // Measuring performance against the wrong build is otherwise invisible: the
-  // page looks current because every network check reports the new version.
+  // ...and the origin's version (no-store bypasses sw.js), so a stale
+  // running build is visible in the log.
   let originVersion = "";
   try {
     const fresh = (await (await fetch("version.txt", { cache: "no-store" })).text())
@@ -428,12 +367,8 @@ const logContext = async () => {
     : version;
   const sw = navigator.serviceWorker && navigator.serviceWorker.controller
     ? "sw:controlled" : "sw:none";
-  // Vibration diagnostic: support + a live test call so real-device haptic
-  // debugging is one log-read away. vibrate(0) cancels any pulse and returns
-  // true when supported AND sticky activation exists (returns/logs a block
-  // otherwise) — the log is opened by a click, so activation is present here
-  // and the return reflects genuine device support. `act` is the page's sticky
-  // activation state; `firstAct` is the event that first granted it (or none).
+  // Vibration diagnostic: vibrate(0) returns true when supported and sticky
+  // activation exists (the log is opened by a click, so it does).
   const vibSupported = "vibrate" in navigator;
   let vibTest = "n/a";
   if (vibSupported) {
@@ -441,9 +376,7 @@ const logContext = async () => {
   }
   const act = navigator.userActivation
     ? String(navigator.userActivation.hasBeenActive) : "?";
-  // hblk: running count of in-game haptic() calls whose vibrate() returned
-  // false (blocked) over total calls — read after pressing a few buttons to
-  // see whether pulses are being swallowed on this device.
+  // hblk: haptic() calls whose vibrate() returned false, over total.
   const vib = `vibrate:${vibSupported} test:${vibTest} act:${act} firstAct:${firstActivationEvent || "none"} hblk:${hapticBlocked}/${hapticCalls}`;
   return `dingbat ${versionField} | ${sw} | ${window.innerWidth}x${window.innerHeight}@${devicePixelRatio} | ${vib} | ${navigator.userAgent}`;
 };
@@ -470,8 +403,7 @@ document.getElementById("log-copy").addEventListener("click", async () => {
     if (navigator.clipboard) {
       await navigator.clipboard.writeText(text);
     } else {
-      // navigator.clipboard only exists on secure origins; dev serves over
-      // LAN http land here. The deprecated execCommand path still works.
+      // navigator.clipboard only exists on secure origins.
       const ta = document.createElement("textarea");
       ta.value = text;
       ta.style.position = "fixed";
@@ -488,8 +420,7 @@ document.getElementById("log-copy").addEventListener("click", async () => {
   }
 });
 
-// --- Modal focus management (open: focus first control + trap Tab; close:
-// restore focus to the element that opened it) ---
+// --- Modal focus management ---
 
 let modalReturnFocus = null;
 let modalTrapHandler = null;
@@ -500,9 +431,8 @@ const modalFocusables = (overlay) =>
     overlay.querySelectorAll("button, input, select, textarea, [tabindex]")
   ).filter(
     (n) => !n.disabled && n.offsetParent !== null && n.getAttribute("tabindex") !== "-1"
-      // An `inert` subtree is unreachable by Tab, so it must be unreachable by
-      // the trap too: the settings sheet keeps its off-stage screen mounted
-      // (and painted, mid-slide) but inert.
+      // An `inert` subtree (the settings sheet's off-stage screen) is
+      // unreachable by Tab, so by the trap too.
       && !n.closest?.("[inert]")
   );
 
@@ -528,20 +458,15 @@ const trapFocus = (overlay) => {
 };
 
 const releaseFocus = (overlay) => {
-  // Only the overlay that owns the trap may release it. The global Escape
-  // handler calls every modal's closer blindly; without this check the first
-  // closer in that list would null the handler/focus state on behalf of a
-  // different, actually-open modal (leaking its Tab-trap listener and
-  // restoring focus prematurely).
+  // Only the owning overlay may release the trap: the global Escape handler
+  // calls every modal's closer blindly.
   if (modalTrapOverlay !== overlay) return;
   modalTrapOverlay = null;
   if (modalTrapHandler) overlay.removeEventListener("keydown", modalTrapHandler);
   modalTrapHandler = null;
   try {
-    // The return target may be gone or display:none by now (a modal opened
-    // from the menu records the menu item, and the dropdown has since been
-    // hidden — focusing it silently fails and keyboard focus falls to body).
-    // Fall back to the menu button so focus stays in the chrome.
+    // The return target may be display:none by now (a hidden menu item);
+    // fall back to the menu button so focus stays in the chrome.
     if (modalReturnFocus && modalReturnFocus.focus) {
       if (modalReturnFocus.isConnected && modalReturnFocus.offsetParent !== null) {
         modalReturnFocus.focus();
@@ -553,53 +478,33 @@ const releaseFocus = (overlay) => {
   modalReturnFocus = null;
 };
 
-// --- Give focus back to the game after a pointer-activated chrome control ---
-//
-// Clicking a top-bar control (Pause, Reset, a menu item…) leaves DOM focus
-// sitting on that button. Every keyboard shortcut afterwards is then aimed at
-// the focus ring instead of the emulator — most visibly Tab, which the
-// window-capture hook at the top of this file deliberately keeps as focus
-// traversal while focus is in the chrome, so "click Pause, hold Tab to
-// fast-forward" just walked the top bar. Hand focus back to the game surface
-// instead.
-//
-// POINTER activations only. A keyboard user who tabs to a button and presses
-// Enter/Space gets a click too, and stealing focus there would dump them at the
-// top of the tab order with no visible ring. The two are told apart by
-// `detail`: a real mouse/touch click carries its click count (>= 1), while a
-// keyboard-synthesised click (and el.click()) reports 0.
+// Give focus back to the game after a pointer-activated chrome control,
+// else Tab walks the top bar instead of fast-forwarding. Pointer only: a
+// keyboard-synthesised click (and el.click()) reports detail 0, and
+// stealing focus there would dump the user at the top of the tab order.
 const returnFocusToGame = (/** @type {any} */ ctl) => {
   if (ctl && typeof ctl.blur === "function") ctl.blur();
-  // The canvas carries tabindex="-1": programmatically focusable, never in the
-  // tab order. preventScroll matters — #home is a scroll container and the
-  // default scroll-into-view would jump the library. If the surface isn't
-  // focusable right now (no game loaded, so it's display:none) the blur above
-  // has already done the important half.
+  // preventScroll: #home is a scroll container and scroll-into-view would
+  // jump the library. If the canvas is display:none, the blur above suffices.
   if (canvasEl && typeof canvasEl.focus === "function") {
     try { canvasEl.focus({ preventScroll: true }); } catch { try { canvasEl.focus(); } catch {} }
   }
 };
 
-// Bubble phase on document, so a control's own handler has already run (and,
-// where it opens a modal synchronously, anyModalOpen() below already sees it).
+// Document bubble phase, so a control's own handler has already run (and a
+// modal it opened is visible to anyModalOpen()).
 document.addEventListener("click", (e) => {
   if (!e || e.detail === 0) return; // keyboard/programmatic activation
   const t = /** @type {any} */ (e.target);
-  // Duck-typed: the click target is often the button's inner <svg>, and the
-  // test harness dispatches bare event objects.
+  // Duck-typed: the target is often an inner <svg>, and tests dispatch bare objects.
   if (!t || typeof t.closest !== "function") return;
-  // Modals and the menu run their own focus management (trapFocus /
-  // releaseFocus); pulling focus to the canvas underneath them would break the
-  // trap and the restore-on-close.
+  // Modals and the menu run their own focus management.
   if (t.closest(".modal-overlay")) return;
-  // Scoped to the main chrome. Home-screen controls (Load a game, the library
-  // tiles) are a normal document flow where keeping focus is correct.
   if (!t.closest("#topbar, #topbar-handle")) return;
   if (anyModalOpen()) return;
   const ctl = t.closest("button, [href], [tabindex]");
-  // Text fields and range inputs keep focus: typing and arrow-key nudging are
-  // the whole point of them, and the SDL typing escape hatch at the top of this
-  // file depends on the field still being document.activeElement.
+  // Text fields and range inputs keep focus (the typing escape hatch depends
+  // on the field being document.activeElement).
   const tag = ctl && ctl.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" ||
       (ctl && ctl.isContentEditable)) return;
@@ -650,26 +555,13 @@ const dbKeys = () => new Promise((resolve, reject) => {
   req.onerror = () => reject(req.error);
 });
 
-// Move a set of keys — and write a set of unrelated records — as ONE
-// transaction. This exists for renaming a game, where every record is keyed by
-// the name (see perGameKeys): a half-finished rename would orphan a battery
-// save from its ROM, which is data loss wearing a rename's clothing.
-//
-// Everything lives in the single "blobs" store, so one readwrite transaction
-// covers the whole migration: the copies, the deletes, the recents index that
-// points at them and the Drive queue that mirrors them all commit together or
-// none of them do. That is strictly stronger than write-new/verify/delete-old,
-// which can still be interrupted between its phases.
-//
-// `pairs` is [[from, to], ...]; a `from` that holds nothing is skipped (the
-// per-game key list is a superset of what any one game actually stores). A
-// `to` that already holds something aborts the whole transaction rather than
-// overwriting it — collisions are refused, never merged — unless
-// `skipCollisions` is set, in which case that one pair is left in place (both
-// copies kept) and reported instead: the caller applying a rename it didn't
-// initiate must salvage every key it can, not strand them all behind the one
-// that collided. `puts` is [[key, value], ...] applied in the same
-// transaction. Resolves { moved, skipped }, each a list of [from, to] pairs.
+// Move keys and write unrelated records in one readwrite transaction (a
+// game rename: a half-finished one would orphan a save from its ROM).
+// `pairs` is [[from, to], ...]; an empty `from` is skipped. An occupied
+// `to` aborts the whole transaction (collisions are refused, never merged)
+// unless `skipCollisions`, in which case that pair is left in place and
+// reported. `puts` is [[key, value], ...] in the same transaction.
+// Resolves { moved, skipped }.
 const dbMoveKeys = (pairs, puts = [], { skipCollisions = false } = {}) =>
   new Promise((resolve, reject) => {
   let tx = db.transaction("blobs", "readwrite");
@@ -683,8 +575,8 @@ const dbMoveKeys = (pairs, puts = [], { skipCollisions = false } = {}) =>
     try { tx.abort(); } catch {}
   };
   for (let [from, to] of pairs) {
-    // Read the destination first: the guard has to see the same snapshot the
-    // writes land in, and inside one transaction it does.
+    // Read the destination inside the transaction so the guard sees the same
+    // snapshot the writes land in.
     let dest = store.get(to);
     dest.onsuccess = () => {
       if (failure) return;
@@ -693,7 +585,6 @@ const dbMoveKeys = (pairs, puts = [], { skipCollisions = false } = {}) =>
           fail("Something is already stored under that name (" + to + ").");
           return;
         }
-        // Only a real collision (both sides occupied) is worth reporting.
         let src = store.get(from);
         src.onsuccess = () => {
           if (!failure && src.result !== undefined && src.result !== null) {
@@ -702,8 +593,8 @@ const dbMoveKeys = (pairs, puts = [], { skipCollisions = false } = {}) =>
         };
         return;
       }
-      // Issued from a request callback, so it is still inside this
-      // transaction — an `await` here would end it instead.
+      // Issued from a request callback to stay inside the transaction; an
+      // `await` here would end it.
       let src = store.get(from);
       src.onsuccess = () => {
         if (failure) return;
@@ -720,7 +611,6 @@ const dbMoveKeys = (pairs, puts = [], { skipCollisions = false } = {}) =>
   tx.onerror = () => reject(failure || tx.error || new Error("The move failed."));
 });
 
-// Migrate localStorage data to IndexedDB on first run
 const migrateFromLocalStorage = async () => {
   const decodeBase64 = (b64) => {
     let binary = atob(b64);
@@ -729,7 +619,6 @@ const migrateFromLocalStorage = async () => {
     return bytes;
   };
 
-  // Migrate GBA BIOS
   let gbaBios = localStorage.getItem("dingbat_bios");
   if (gbaBios) {
     let name = localStorage.getItem("dingbat_bios_name") || null;
@@ -738,7 +627,6 @@ const migrateFromLocalStorage = async () => {
     localStorage.removeItem("dingbat_bios_name");
   }
 
-  // Migrate GBC bootrom
   let gbcBootrom = localStorage.getItem("dingbat_gbc_bootrom");
   if (gbcBootrom) {
     let name = localStorage.getItem("dingbat_gbc_bootrom_name") || null;
@@ -747,8 +635,8 @@ const migrateFromLocalStorage = async () => {
     localStorage.removeItem("dingbat_gbc_bootrom_name");
   }
 
-  // Migrate recent ROMs (straight into the per-ROM layout: rom:<name>
-  // records first, then the metadata-only "recent" index)
+  // Recent ROMs go straight into the per-ROM layout: rom:<name> records
+  // first, then the metadata-only index.
   let recentRaw = localStorage.getItem("dingbat_recent_roms");
   if (recentRaw) {
     try {
@@ -766,7 +654,6 @@ const migrateFromLocalStorage = async () => {
     localStorage.removeItem("dingbat_recent_roms");
   }
 
-  // Migrate saves
   let savesRaw = localStorage.getItem("dingbat_saves");
   if (savesRaw) {
     try {
@@ -779,12 +666,9 @@ const migrateFromLocalStorage = async () => {
   }
 };
 
-// Migrate the old single-record recents format (one "recent" record holding
-// every ROM's bytes inline: [{ name, data, art? }]) to the per-ROM layout.
-// ROM/art records are written before the index is rewritten, so an interrupted
-// run leaves the old record intact and a re-run just overwrites the same
-// per-ROM records — idempotent either way. Entries without .data (already the
-// new metadata format) mean there is nothing to do.
+// Old single-record recents ([{ name, data, art? }] inline) -> per-ROM
+// layout. ROM/art records are written before the index is rewritten, so an
+// interrupted run is re-runnable.
 const migrateRecentFormat = async () => {
   let list = await dbGet("recent");
   if (!Array.isArray(list) || !list.some((r) => r && r.data)) return;
@@ -800,14 +684,9 @@ const migrateRecentFormat = async () => {
   await dbPut("recent", meta);
 };
 
-// Sweep up auto-resume snapshots orphaned by builds whose Delete didn't know
-// about them (they were the one per-game record no destructive path removed).
-// A snapshot whose game is neither stored here nor listed in the library can
-// never be offered — nothing can launch it — so it is dead weight worth a whole
-// save state each. Scoped to "stateauto:" on purpose: it is the only per-game
-// record the app regenerates by itself, so deleting one loses nothing. Records
-// the user authored (cheats) are left alone even when orphaned; they cost bytes
-// and would be missed if a re-import found them gone.
+// Sweep auto-resume snapshots whose game is neither stored nor in the
+// library. "stateauto:" only: the one per-game record the app regenerates
+// itself; user-authored records (cheats) are left alone even when orphaned.
 const sweepOrphanedAutoStates = async () => {
   let keys = await dbKeys();
   let known = new Set();
@@ -841,10 +720,8 @@ const loadBiosFromStorage = async () => {
 const menuBtn = document.getElementById("menu-btn");
 const menuDropdown = document.getElementById("menu-dropdown");
 
-// Show the bottom scrim only while more items sit below the fold, so it never
-// permanently fades the last item (Report a Bug) in windows tall enough that
-// the menu doesn't scroll. Re-checked on open/scroll/resize; scrollHeight
-// reads 0 while hidden, so the open-time call does the first real measurement.
+// Bottom scrim only while items sit below the fold. scrollHeight reads 0
+// while hidden, so the open-time call does the first real measurement.
 const updateMenuScrollHint = () => {
   menuDropdown.classList.toggle(
     "can-scroll-down",
@@ -857,15 +734,13 @@ menuBtn.addEventListener("click", (e) => {
   e.stopPropagation();
   menuDropdown.hidden = !menuDropdown.hidden;
   if (!menuDropdown.hidden) {
-    // Fresh open starts with the Capture group folded (defined later;
-    // guarded for the pre-parse window)
+    // Fresh open starts with Capture folded (guarded for the pre-parse window).
     if (typeof collapseCaptureSub === "function") collapseCaptureSub();
     updateMenuScrollHint();
   }
 });
 
-// aria-expanded tracks the dropdown wherever it gets closed (many sites set
-// menuDropdown.hidden directly), so a screen reader always hears the truth.
+// aria-expanded tracks `hidden` wherever the dropdown gets closed.
 new MutationObserver(() =>
   menuBtn.setAttribute("aria-expanded", String(!menuDropdown.hidden))
 ).observe(menuDropdown, { attributes: true, attributeFilter: ["hidden"] });
@@ -877,10 +752,8 @@ document.addEventListener("click", () => {
   menuDropdown.hidden = true;
 });
 
-// Screen-reader names for every settings switch: the visible text lives in a
-// sibling div, not the wrapping <label>, so assistive tech read each one as a
-// bare "checkbox". Link input -> row label (and description) once at boot;
-// this covers every .modal-toggle-row in the static HTML, present and future.
+// The switches' visible text lives in a sibling div, not the <label>, so
+// link input -> row label (and description) once at boot.
 for (const row of document.querySelectorAll(".modal-toggle-row")) {
   const label = row.querySelector(".modal-row-label");
   const input = row.querySelector("input, select");
@@ -894,7 +767,7 @@ for (const row of document.querySelectorAll(".modal-toggle-row")) {
   }
 }
 
-// --- Settings modal (tabbed: Controls / Game Boy / GBA / Video) ---
+// --- Settings modal ---
 
 const settingsModal = document.getElementById("settings-modal");
 const gbaBiosStatus = document.getElementById("gba-bios-status");
@@ -909,12 +782,8 @@ const updateBiosStatusText = async () => {
   gbaBiosStatus.textContent = gba ? gba.name || "Set" : "Not set";
   let gbc = await dbGet("bios:gbc");
   gbcBootromStatus.textContent = gbc ? gbc.name || "Set" : "Not set";
-  // Both of the settings below the file row are answers to "what should the
-  // BIOS do", and with no BIOS there is nothing to answer: the intro cannot
-  // play and both real-BIOS call modes silently fall back to software. They
-  // keep showing their stored values rather than resetting — the choice is
-  // remembered and comes back the moment a file is set — but they are inert
-  // until then, and the hint underneath says why.
+  // With no BIOS file the intro and call-mode rows are inert but keep their
+  // stored values.
   const noBios = !gba;
   gbaRunBiosToggle.disabled = noBios;
   gbaRunBiosRow.classList.toggle("row-disabled", noBios);
@@ -929,13 +798,11 @@ const IS_IOS = /iP(hone|ad|od)/.test(navigator.platform) ||
 const pickFile = (accept, callback) => {
   let input = document.createElement("input");
   input.type = "file";
-  // iOS Safari greys out (makes unselectable) any file whose extension it can't
-  // map to a known type — ".sav"/".state"/".bin" have no UTI, so the save file
-  // can't be picked at all. Skip the filter on iOS; the extension isn't needed
-  // functionally (the target save name is derived from the loaded ROM).
+  // iOS Safari greys out any file whose extension has no UTI (.sav/.state/
+  // .bin), so the accept filter is skipped there.
   if (accept && !IS_IOS) input.accept = accept;
-  // iOS Safari needs the input attached to the DOM and NOT display:none for the
-  // picker to open — hide it off-screen instead.
+  // iOS Safari needs the input in the DOM and not display:none for the
+  // picker to open.
   input.style.position = "fixed";
   input.style.left = "-9999px";
   input.style.opacity = "0";
@@ -955,16 +822,9 @@ const pickFile = (accept, callback) => {
 };
 
 // --- Settings navigation ----------------------------------------------------
-//
-// Which layout is on screen is CSS's business (styles.css, "Settings
-// surface"): >=760px is a fixed 900x640 modal with a section rail, below it an
-// 88dvh sheet whose rail becomes a drill-down list. This half owns which
-// section is showing, which screen the sheet is on, and the navigation that
-// only exists on the sheet — push/pop, the header stepper, hardware back.
-//
-// Order is fixed and never most-recently-used: reordering would mean the item
-// you want is somewhere new each time, which is the original complaint on a
-// different axis.
+// Layout is CSS's (styles.css "Settings surface"); this owns which section
+// shows, which screen the sheet is on, and the sheet-only navigation
+// (push/pop, stepper, hardware back). Section order is fixed.
 const SETTINGS_SECTIONS = ["controls", "gb", "gba", "video", "audio", "general"];
 const SETTINGS_LAST_KEY = "settings-section";
 
@@ -979,14 +839,11 @@ const settingsSectionTitle = document.getElementById("settings-section-title");
 const settingsBackBtn = document.getElementById("settings-back");
 const settingsPrevBtn = document.getElementById("settings-prev");
 const settingsNextBtn = document.getElementById("settings-next");
-// Two copies of the build identity, one per layout — the rail's foot on
-// desktop, the sheet's fixed footer below the scroller. CSS displays exactly
-// one; both carry the same text and the same click-to-copy.
+// Two copies of the build identity, one per layout; CSS displays one.
 const settingsVersionEls = Array.from(
   /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".settings-version")));
 
-// Width only, never pointer type or user-agent: an iPad at 1024 gets the rail,
-// and (pointer: coarse) grows its rows rather than handing it a second layout.
+// Width only, never pointer type: an iPad at 1024 gets the rail.
 const settingsSheetQuery = window.matchMedia("(max-width: 759px)");
 const settingsIsSheet = () => settingsSheetQuery.matches;
 
@@ -1007,26 +864,23 @@ const selectSettingsTab = (name) => {
     const on = t.dataset.tab === name;
     t.classList.toggle("active", on);
     t.setAttribute("aria-selected", on ? "true" : "false");
-    // Roving tabindex: one stop for the whole list, arrows move within it.
+    // Roving tabindex.
     t.setAttribute("tabindex", on ? "0" : "-1");
     const pane = document.getElementById("settings-pane-" + t.dataset.tab);
     if (pane) pane.hidden = !on;
   }
   settingsSectionTitle.textContent = settingsName(name);
-  // Name the destination, not the direction.
   settingsPrevBtn.setAttribute(
     "aria-label", "Previous section: " + settingsName(settingsStep(name, -1)));
   settingsNextBtn.setAttribute(
     "aria-label", "Next section: " + settingsName(settingsStep(name, 1)));
-  // Always top, never a restored per-section offset: landing mid-list reads as
-  // the wrong section having loaded.
+  // Always top, never a restored per-section offset.
   settingsScroll.scrollTop = 0;
   try { localStorage.setItem(SETTINGS_LAST_KEY, name); } catch {}
 };
 
-// The off-stage sheet screen is still painted (it is mid-slide for 200ms) but
-// must not be reachable by Tab or by the modal focus trap. `inert` says both
-// things at once; modalFocusables skips anything inside one.
+// The off-stage sheet screen is still painted mid-slide; `inert` keeps it
+// out of Tab and the focus trap (modalFocusables skips inert subtrees).
 const applySettingsScreen = () => {
   const sheet = settingsIsSheet();
   settingsFrame.classList.toggle("on-detail", sheet && settingsOnDetail);
@@ -1037,10 +891,8 @@ const applySettingsScreen = () => {
   }
 };
 
-// One history entry per level, so Android's back gesture matches the sheet:
-// back from a detail returns to the list, back from the list closes the sheet.
-// Entries are only pushed in the sheet layout — a browser Back that closed a
-// desktop dialog would be a surprise.
+// One history entry per sheet level, so Android's back gesture matches.
+// Sheet layout only.
 const settingsHistOk = typeof history !== "undefined" && !!history.pushState;
 let settingsHistDepth = 0;   // our entries still on the stack
 let settingsHistSkip = 0;    // popstate events we caused ourselves
@@ -1052,8 +904,7 @@ const settingsHistPush = () => {
   catch { settingsHistDepth--; }
 };
 
-// Drop n of OUR entries. history.go() fires exactly one popstate however far
-// it travels, so one skip covers the whole unwind.
+// Drop n of our entries; history.go() fires one popstate however far it goes.
 const settingsHistDrop = (n) => {
   if (!settingsHistOk || settingsHistDepth <= 0 || n <= 0) return;
   n = Math.min(n, settingsHistDepth);
@@ -1077,13 +928,9 @@ const openSettingsSection = (name) => {
   settingsOnDetail = true;
   settingsHistPush();
   applySettingsScreen();
-  // preventScroll is load-bearing, not a nicety. Back lives inside the detail
-  // screen, which is still translated 100% off to the right at this instant,
-  // so a plain focus() makes the browser scroll .settings-body to reveal it —
-  // 275px on a 375pt phone, even though the container is overflow:hidden and
-  // scrollWidth == clientWidth. Both panes lurch sideways for a few frames and
-  // then unwind as the transform lands, which reads as the pane flying off
-  // screen and coming back. Same reason in showSettingsList.
+  // preventScroll is required: Back is inside the detail screen, still
+  // translated off to the right, and a plain focus() scrolls .settings-body
+  // to reveal it even though it is overflow:hidden. Same in showSettingsList.
   settingsBackBtn.focus({ preventScroll: true });
   settingsBody.scrollLeft = 0;
 };
@@ -1096,9 +943,8 @@ window.addEventListener("popstate", () => {
   else closeSettingsModal(true);
 });
 
-// Layout can change under an open dialog (rotation, a resized window). The
-// sheet always shows a section rather than the bare list in that case, which
-// is where a desktop reader already was.
+// Layout can change under an open dialog (rotation); the sheet then shows
+// the section a desktop reader was already on.
 settingsSheetQuery.addEventListener?.("change", () => {
   if (settingsIsSheet() && settingsModal.classList.contains("open")) {
     settingsOnDetail = true;
@@ -1113,9 +959,8 @@ for (const t of settingsTabs) {
   });
 }
 
-// Rail keyboard: up/down between sections, Home/End to the ends. On the rail
-// the move selects, because the pane beside it is the thing being labelled; on
-// the sheet's list it only moves focus, because entering is a separate act.
+// Rail keyboard: on the rail a move selects; on the sheet's list it only
+// moves focus.
 document.getElementById("settings-tabs").addEventListener("keydown", (e) => {
   const keys = { ArrowUp: -1, ArrowDown: 1, Home: 0, End: 0 };
   if (!(e.key in keys)) return;
@@ -1131,23 +976,14 @@ settingsBackBtn.addEventListener("click", () => showSettingsList());
 settingsPrevBtn.addEventListener("click", () => selectSettingsTab(settingsStep(settingsSection, -1)));
 settingsNextBtn.addEventListener("click", () => selectSettingsTab(settingsStep(settingsSection, 1)));
 
-// Swipe down to dismiss the sheet, from the chrome OR from anywhere in the
-// content — the latter only when its scroller is already at the top, which is
-// the rule every native bottom sheet uses. The sheet's HEIGHT is never dragged
-// (there is no half-height detent), only its offset, and only far enough to
-// read as a dismissal.
-//
-// Two states, because the two starting places want different commitments. On
-// the chrome there is nothing else the gesture could mean, so it drags on
-// contact. In the content it could equally be a scroll, so it stays PENDING
-// until the finger has moved far enough, and downward enough, to be sure —
-// and is abandoned the moment it looks like a scroll or a sideways drag.
+// Swipe down to dismiss, from the chrome or from content whose scroller is
+// at the top. From the chrome it drags on contact; in the content it stays
+// pending until the move is clearly downward, and is abandoned the moment
+// it looks like a scroll.
 const SHEET_DRAG_SLOP = 8;     // px before a content drag commits
 const SHEET_DRAG_CLOSE = 90;   // px of travel that counts as a dismissal
 const SHEET_DRAG_EXPAND = 40;  // px UP on the chrome that fills the screen
-// Below this much spare room there is nothing to expand into, so the gesture
-// is not offered: a phone in landscape is already 100dvh, and an SE gains a
-// sliver not worth a detent.
+// Below this much spare room the expand gesture is not offered.
 const SHEET_EXPAND_MIN_GAIN = 80;
 let sheetDragFrom = 0;
 let sheetDragX0 = 0;
@@ -1182,20 +1018,15 @@ const endSheetDrag = () => {
   sheetDragOnChrome = false;
   settingsFrame.classList.remove("sheet-dragging");
   settingsFrame.style.transform = "";
-  // Upward, from the chrome: take the whole screen. Only from the chrome —
-  // an upward drag in the content is a scroll, and the pending logic has
-  // already refused it long before this.
+  // Upward, from the chrome only: take the whole screen.
   if (dy <= -SHEET_DRAG_EXPAND && onChrome) {
     if (sheetCanExpand()) setSheetExpanded(true);
     return;
   }
   if (dy > SHEET_DRAG_CLOSE) {
     if (!sheetExpanded) { closeSettingsModal(); return; }
-    // Expanded, the pull has two outcomes and the distance picks between them:
-    // a short one steps back down to the normal height, and one past halfway
-    // dismisses outright rather than making you swipe twice. Halfway is
-    // measured off the frame, so it is half of whatever the screen actually
-    // is rather than a number that only suits one device.
+    // Expanded: a short pull steps back to normal height, one past halfway
+    // (of the frame) dismisses outright.
     const half = settingsFrame.getBoundingClientRect().height / 2;
     if (dy >= half) closeSettingsModal();
     else setSheetExpanded(false);
@@ -1218,9 +1049,8 @@ settingsFrame.addEventListener("pointerdown", (e) => {
     commitSheetDrag();
     return;
   }
-  // Anywhere else: only if the thing under the finger is scrolled to the top.
-  // A control still works — a drag needs SHEET_DRAG_SLOP of travel, and a tap
-  // never gets there.
+  // In content: only if the scroller under the finger is at the top. A tap
+  // never reaches SHEET_DRAG_SLOP, so controls still work.
   const scroller = sheetScrollerFor(target);
   if (!scroller || scroller.scrollTop > 0) return;
   sheetDragScroller = scroller;
@@ -1230,8 +1060,7 @@ settingsFrame.addEventListener("pointerdown", (e) => {
 settingsFrame.addEventListener("pointermove", (e) => {
   const dy = e.clientY - sheetDragFrom;
   if (sheetDragPending) {
-    // Scrolled away under the finger, or the gesture turned upward or
-    // sideways: it was a scroll after all.
+    // It was a scroll after all.
     if ((sheetDragScroller && sheetDragScroller.scrollTop > 0) ||
         dy < -2 || Math.abs(e.clientX - sheetDragX0) > Math.abs(dy)) {
       sheetDragPending = false;
@@ -1243,17 +1072,13 @@ settingsFrame.addEventListener("pointermove", (e) => {
   }
   if (sheetDragDy === null) return;
   sheetDragDy = dy;
-  // Only the downward half is previewed. An upward drag cannot be shown by
-  // translating — the sheet is anchored to the bottom edge, so it would lift
-  // off and leave a gap under it — and growing its height every frame is the
-  // one thing this layout refuses to do. The expansion lands on release.
+  // Only the downward half is previewed: translating upward would lift the
+  // bottom-anchored sheet off its edge. Expansion lands on release.
   settingsFrame.style.transform = "translateY(" + Math.max(0, dy) + "px)";
 });
 
-// Non-passive, and the only reason it exists: once the drag is committed the
-// scroller underneath must stop rubber-banding, or iOS bounces the content
-// against the sheet's own translation. Pointer events cannot preventDefault
-// the touch scroll after the fact, so this does it.
+// Non-passive: once the drag is committed the scroller must stop
+// rubber-banding, and pointer events cannot preventDefault the touch scroll.
 settingsFrame.addEventListener("touchmove", (e) => {
   if (sheetDragDy !== null && e.cancelable) e.preventDefault();
 }, { passive: false });
@@ -1261,7 +1086,6 @@ settingsFrame.addEventListener("touchmove", (e) => {
 settingsFrame.addEventListener("pointerup", endSheetDrag);
 settingsFrame.addEventListener("pointercancel", endSheetDrag);
 
-// Anyone reading the build identity is about to retype it into a bug report.
 const copySettingsVersion = async () => {
   const text = (settingsVersionEls[0]?.textContent || "").trim();
   if (!text) return;
@@ -1282,8 +1106,7 @@ for (const el of settingsVersionEls) {
 
 const openSettingsModal = () => {
   menuDropdown.hidden = true;
-  // Build identity: version.txt fetched through the SW cache = the running
-  // build's commit, so a device can be matched to a deploy at a glance
+  // version.txt through the SW cache = the running build's commit.
   fetch("version.txt")
     .then((r) => (r.ok ? r.text() : ""))
     .then((v) => {
@@ -1295,27 +1118,19 @@ const openSettingsModal = () => {
   kbSelection = -1;
   kbPreset.value = detectPreset(activeBindings);
   renderKbBindings();
-  // Fresh open starts with Advanced folded (defined below the modal helpers;
-  // guarded for the pre-parse window, as the menu does for Capture)
+  // Fresh open starts with Advanced folded (guarded for the pre-parse window).
   if (typeof collapseAdvanced === "function") collapseAdvanced();
-  // The remembered section is still selected, so the rail restores it on
-  // desktop and the sheet's list marks where you were — but the SHEET always
-  // opens on the list rather than drilled into that section. The spec argued
-  // the other way (open on the section, list one tap back); testing on a phone
-  // said otherwise, and landing inside Controls when you meant to browse is
-  // the more annoying of the two mistakes.
+  // The remembered section stays selected, but the sheet always opens on
+  // the list rather than drilled into it.
   let last = null;
   try { last = localStorage.getItem(SETTINGS_LAST_KEY); } catch {}
   selectSettingsTab(last || SETTINGS_SECTIONS[0]);
   settingsOnDetail = false;
   applySettingsScreen();
-  // One entry for the list level, so a back gesture closes the sheet.
   if (settingsIsSheet()) settingsHistPush();
   settingsModal.classList.add("open");
-  // Both input handlers stand down while this modal is up (gameKeyHandler
-  // returns early, pollGamepads diverts to settingsGamepadNav and absorbs the
-  // edges), so a button held across the open would never see its release —
-  // put the input-display lights out rather than leave one stuck on.
+  // Both input handlers stand down while this modal is up, so a button held
+  // across the open never sees its release: clear the input display.
   clearInputDisplay();
   document.addEventListener("keydown", kbKeyHandler, true);
   trapFocus(settingsModal);
@@ -1326,9 +1141,7 @@ const closeSettingsModal = (fromHistory) => {
   if (!fromHistory) settingsHistDrop(settingsHistDepth);
   settingsHistDepth = 0;
   settingsOnDetail = false;
-  // Expansion is a gesture for the session you are in, not a preference. It
-  // starts collapsed every time, so the sheet always opens the size it was
-  // designed to open at.
+  // Expansion is not a preference; the sheet starts collapsed every time.
   setSheetExpanded(false);
   settingsModal.classList.remove("open");
   document.removeEventListener("keydown", kbKeyHandler, true);
@@ -1340,17 +1153,13 @@ for (const id of ["settings-close", "settings-close-list"]) {
   document.getElementById(id).addEventListener("click", () => closeSettingsModal());
 }
 
-// Force Update and Toggle Log live in Settings ▸ General ▸ Advanced now. Each
-// one hands the screen to something else (the log overlay, a reload), so
-// Settings has to step aside first. Registered here, ahead of each button's
-// own handler further down the file, so the close happens before the takeover.
+// Force Update and Toggle Log hand the screen to something else, so Settings
+// closes first; registered ahead of each button's own handler.
 for (const id of ["force-update", "show-log"]) {
   document.getElementById(id).addEventListener("click", () => closeSettingsModal());
 }
 
-// Advanced is a disclosure, and it refolds on every open of Settings rather
-// than remembering: nobody opens Settings wanting it, so its resting state is
-// the only one worth persisting.
+// Advanced refolds on every open of Settings.
 const advancedToggle = document.getElementById("advanced-toggle");
 const advancedSub = document.getElementById("advanced-sub");
 const collapseAdvanced = () => {
@@ -1366,8 +1175,8 @@ settingsModal.addEventListener("click", (e) => {
   if (e.target === settingsModal) closeSettingsModal();
 });
 
-// BIOS / bootrom files apply immediately: the FS copy and the IndexedDB copy
-// are updated on pick, and the next core construction reads the FS file.
+// BIOS / bootrom files update FS and IndexedDB on pick; the next core
+// construction reads the FS file.
 document.getElementById("pick-gba-bios").addEventListener("click", () => {
   pickFile(".bin", async (bytes, name) => {
     writeToFS("bios.bin", bytes);
@@ -1396,7 +1205,7 @@ document.getElementById("remove-gbc-bootrom").addEventListener("click", async ()
   updateBiosStatusText();
 });
 
-// --- Manage Saves modal (state + battery-save import/export) ---
+// --- Manage Saves modal ---
 
 const savesModal = document.getElementById("saves-modal");
 
@@ -1419,13 +1228,11 @@ savesModal.addEventListener("click", (e) => {
 });
 
 // --- Cheats modal ---
-// JS owns the cheat list (array of {name, codes, enabled, error}); the Nim
-// core owns the parsed/applied form. On any edit we serialize to the shared
-// ".cht" text format, push it into the core via load_cheats (which returns
-// parse errors), and persist it per-game in IndexedDB under
-// "cheats:<originalName>". Adds are validated up front (a cheat that doesn't
-// parse is rejected, never inserted); `error` is only ever non-empty on
-// entries persisted by older builds, whose rows are badged "Invalid".
+// JS owns the list ({name, codes, enabled, error}); the core owns the parsed
+// form. Every edit serializes to ".cht", pushes via load_cheats (returns
+// parse errors) and persists under "cheats:<originalName>". Adds are
+// validated up front; `error` is only non-empty on entries persisted by
+// older builds.
 
 const cheatsModal = document.getElementById("cheats-modal");
 const cheatsListEl = document.getElementById("cheats-list");
@@ -1472,22 +1279,17 @@ const pushCheatsToCore = (text) => {
   return Module.ccall("load_cheats", "string", ["string"], [text]) || "";
 };
 
-// Probe-parse one cheat by itself. Core parsing is per-cheat and all-or-nothing
-// within a cheat (any bad line fails that whole cheat, other cheats are
-// unaffected), so parsing the candidate alone gives the same verdict it would
-// get inside the full list. load_cheats REPLACES the core's cheat set, so the
-// caller must re-push the real list afterwards.
+// Probe-parse one cheat alone (core parsing is per-cheat, so the verdict is
+// the same as inside the full list). load_cheats replaces the core's set,
+// so the caller must re-push the real list afterwards.
 const validateCheat = (c) => {
   const err = pushCheatsToCore(serializeCheats([c]));
-  // The core prefixes each error with the cheat's name; next to the form (or
-  // row) that named the cheat, the prefix is noise — strip it.
+  // Strip the core's cheat-name prefix.
   const prefix = (c.name || "?") + ": ";
   return err.startsWith(prefix) ? err.slice(prefix.length) : err;
 };
 
-// The error line under the add form. It only ever describes the add form's
-// current text: it is set when an add is rejected and cleared as soon as the
-// user edits the inputs or an add succeeds.
+// The add form's error line: describes its current text only.
 const showCheatError = (err) => {
   if (err && err.length) {
     cheatErrorEl.textContent = err;
@@ -1524,8 +1326,7 @@ const renderCheatList = () => {
     nm.className = "cheat-row-name";
     nm.textContent = c.name || "Cheat " + (i + 1);
     if (c.error) {
-      // Entries persisted by older builds could be saved without validation;
-      // the core skips them, so say so instead of showing a dead checkbox.
+      // Unvalidated legacy entries: the core skips them, so say so.
       row.classList.add("cheat-row-invalid");
       cb.checked = false;
       cb.disabled = true;
@@ -1556,10 +1357,8 @@ const renderCheatList = () => {
 const applyCheats = async () => {
   const text = serializeCheats(cheatList);
   if (currentOriginalName) {
-    // Every entry was validated when it was added (or badged by restoreCheats),
-    // so this can't produce new errors — and any legacy invalid entry is
-    // already marked on its row, not under the add form. The core skips
-    // entries it can't parse.
+    // Every entry was validated on add or badged by restoreCheats, so this
+    // cannot produce new errors for the add form.
     pushCheatsToCore(text);
     if (cheatList.length) await dbPut(CHEATS_KEY(currentOriginalName), text);
     else await dbDelete(CHEATS_KEY(currentOriginalName));
@@ -1567,16 +1366,14 @@ const applyCheats = async () => {
   renderCheatList();
 };
 
-// Called from loadRom after the core is built: pull this game's saved cheats
-// from IndexedDB and push them into the fresh core.
+// From loadRom after the core is built.
 const restoreCheats = async () => {
   cheatList = [];
   if (currentOriginalName) {
     const text = await dbGet(CHEATS_KEY(currentOriginalName));
     if (typeof text === "string" && text) cheatList = parseCheats(text);
   }
-  // Entries saved by builds that accepted unvalidated adds may not parse;
-  // probe each one so its row can be badged "Invalid".
+  // Probe each entry so legacy unvalidated ones can be badged "Invalid".
   for (const c of cheatList) c.error = validateCheat(c);
   pushCheatsToCore(serializeCheats(cheatList));
   renderCheatList();
@@ -1609,9 +1406,8 @@ document.getElementById("cheat-add").addEventListener("click", () => {
   const candidate = { name, codes, enabled: true, error: "" };
   const err = validateCheat(candidate);
   if (err) {
-    // Reject the add outright: the list stays untouched (re-push its copy —
-    // the probe replaced the core's set) and the user's text stays in the
-    // form so it can be fixed in place.
+    // Reject: re-push the untouched list (the probe replaced the core's set)
+    // and leave the text in the form.
     pushCheatsToCore(serializeCheats(cheatList));
     showCheatError(err);
     return;
@@ -1623,22 +1419,13 @@ document.getElementById("cheat-add").addEventListener("click", () => {
   applyCheats();
 });
 
-// A rejected add's error describes the form's current text; clear it the
-// moment that text changes.
 cheatNameEl.addEventListener("input", () => showCheatError(""));
 cheatCodesEl.addEventListener("input", () => showCheatError(""));
 
-// --- Delete save data (per-ROM), shared by the home "Manage ROMs and Saves"
-// list and the in-game "Reset save file" action ---
-// "Save data" for a ROM is spread across the "blobs" store under keys derived
-// from its original file name: "save:<name>" (battery), "state:<name>" (the
-// single save-state slot), and "save:<name>-p2" (the 2P-link partner's
-// battery). Deleting a game wipes all three so it truly boots fresh.
+// --- Delete save data (per-ROM) ---
 
-// Two-step inline confirm button (the app has no shared confirm dialog): the
-// first tap arms the button (swaps to "Confirm?" and turns red), a second tap
-// within 3.5s runs onConfirm. Returns the <button>; `disarm()` is exposed so a
-// caller can reset a sibling when another button in the same row is armed.
+// Two-step inline confirm button: first tap arms, a second within 3.5s runs
+// onConfirm. `disarm()` lets a caller reset a sibling.
 /** @param {{label: string, confirmLabel?: string, className?: string,
  *          onConfirm: () => any, onArm?: () => any}} opts */
 const makeConfirmButton = ({
@@ -1677,8 +1464,6 @@ const makeConfirmButton = ({
   return btn;
 };
 
-// A greyed-out button used when an action can't be taken right now (e.g. the
-// game is live), mirroring the "In use" pattern in the delete lists.
 const makeDisabledButton = (label, className, title) => {
   let btn = document.createElement("button");
   btn.type = "button";
@@ -1689,9 +1474,8 @@ const makeDisabledButton = (label, className, title) => {
   return btn;
 };
 
-// Like makeDisabledButton, but still tappable: mobile has no hover, so a
-// truly disabled button can't explain itself there. Greyed via .is-inert,
-// the reason doubles as the desktop tooltip and a toast on tap.
+// Like makeDisabledButton but still tappable: mobile has no hover, so the
+// reason is a toast on tap as well as the tooltip.
 const makeInertButton = (label, className, reason) => {
   let btn = document.createElement("button");
   btn.type = "button";
@@ -1703,7 +1487,6 @@ const makeInertButton = (label, className, reason) => {
   return btn;
 };
 
-// Collect the set of ROM identities (original names) that have any save data.
 const romsWithSaveData = async () => {
   let names = new Set();
   for (let k of await dbKeys()) {
@@ -1713,39 +1496,26 @@ const romsWithSaveData = async () => {
       if (n.endsWith("-p2")) n = n.slice(0, -3); // fold P2 link save into base
       names.add(n);
     } else if (k.startsWith("state:")) {
-      // Fold numbered slots ("state:<name>:slotN") into the base ROM identity.
+      // Fold numbered slots into the base ROM identity.
       names.add(k.slice(6).replace(/:slot\d+$/, ""));
     }
   }
   return [...names].sort((a, b) => a.localeCompare(b));
 };
 
-// True when this ROM is the game currently held in memory (running or paused
-// at the home screen) — deleting its stored save would just be re-persisted
-// by the next autosave flush, so this case needs special handling.
+// The game held in memory: deleting its stored save would be re-persisted
+// by the next autosave flush.
 const isRomLoaded = (name) =>
   (!!currentOriginalName && currentOriginalName === name) ||
   (linkMode && !!linkRomEntry && linkRomEntry.name === name);
 
-// THE inventory of everything this app stores for ONE game. Every destructive
-// path below works from this function and nothing else, so a per-game record
-// added later is deleted by all of them the moment it is listed here — and a
-// record that is NOT listed here is, by construction, a record that survives a
-// delete and haunts the user (that is exactly how the auto-resume snapshot
-// came to outlive its game and keep offering "Resume").
-//
-// The groups exist because the two destructive paths take different subsets:
-//   bytes    ROM image + box art. Bulk, and the ROM is re-downloadable from
-//            Drive, which is what makes "Remove from device" safe at all.
-//   saves    battery saves (P1 + the 2P link partner's) and the nine manual
-//            save-state slots with their thumbnails. Irreplaceable user
-//            progress, and the only group Drive mirrors besides the ROM.
-//   session  the auto-resume snapshot. A full save state, but captured behind
-//            the user's back on every tab switch and re-made next session;
-//            never synced. Disposable by design.
-//   prefs    per-game settings the user typed in — currently the cheat list.
-//            Bytes, never synced, so dropping it can only lose work and can
-//            never free space worth having.
+// The inventory of everything stored for one game. Every destructive path
+// works from this; a record not listed here survives a delete.
+//   bytes    ROM image + box art (re-downloadable from Drive)
+//   saves    battery saves (P1 + 2P partner) and the nine state slots with
+//            their meta; the only group Drive mirrors besides the ROM
+//   session  the auto-resume snapshot; regenerated, never synced
+//   prefs    the cheat list; never synced
 const perGameKeys = (name) => {
   let saves = ["save:" + name, "save:" + name + "-p2"];
   // Slot 0 is the legacy un-suffixed "state:<name>" / "statemeta:<name>" pair.
@@ -1760,70 +1530,51 @@ const perGameKeys = (name) => {
   };
 };
 
-// Flattened: everything, i.e. what "this game is gone" means on this device.
 const allPerGameKeys = (name) => Object.values(perGameKeys(name)).flat();
 
 const deleteKeys = async (keys) => {
   for (let k of keys) await dbDelete(k);
 };
 
-// Remove all stored save data for one ROM: both battery saves, all nine
-// save-state slots with their thumbnails, and the auto-resume snapshot. The
-// snapshot has to go with them — it is itself a full save state, so leaving it
-// behind lets a one-tap "Resume" drop the player straight back into the
-// progress they just asked us to wipe.
+// Remove one ROM's save data. The auto-resume snapshot goes with it: it is
+// a full save state, and "Resume" would restore the wiped progress.
 const deleteSaveData = async (name) => {
   let k = perGameKeys(name);
   await deleteKeys([...k.saves, ...k.session]);
 };
 
-// Remove every trace of one game from THIS device — the ROM, its art, all save
-// data, the resume snapshot, the cheats. Drive is untouched here; the callers
-// decide whether only this device is forgetting the game (a tombstone that
-// arrived from another device) or all of them (deleteGameEverywhere).
+// Remove every trace of one game from this device. Drive is untouched here.
 const deleteGameLocalData = async (name) => {
   await deleteKeys(allPerGameKeys(name));
 };
 
-// Wipe the running game's battery save and reboot it as a fresh cartridge. The
-// save-state slot is left untouched — it's managed separately by the modal's
-// Export/Import state actions.
+// Wipe the running game's battery save and reboot it; state slots stay.
 const resetCurrentSaveFile = async () => {
   if (!currentOriginalName) return;
   await dbDelete("save:" + currentOriginalName);
   await dbDelete("save:" + currentOriginalName + "-p2");
-  // The auto-resume snapshot holds the very progress we just erased, and the
-  // reboot below ends in offerAutoResume — without this, "Save reset — starting
-  // fresh" is followed immediately by an offer to un-reset it. Manual slots
-  // still survive on purpose (Export/Import state manages those).
+  // The reboot ends in offerAutoResume, which would offer to un-reset.
   await deleteKeys(perGameKeys(currentOriginalName).session);
-  // Mirror rule: a local save deletion propagates to Drive (no-op if not synced).
   markDelete("save:" + currentOriginalName);
   markDelete("save:" + currentOriginalName + "-p2");
-  // resetLoadedGameSave drops the in-memory FS .sav and reboots the core, so the
-  // 5s autosave interval can't re-flush the just-deleted save over the top.
+  // Drops the FS .sav and reboots, so the autosave cannot re-flush it.
   resetLoadedGameSave();
 };
 
-// Reboot the currently-loaded single-player game with no battery save. Called
-// only after its stored save has been removed from IndexedDB.
+// Reboot the loaded game with no battery save (after its stored save is gone).
 const resetLoadedGameSave = () => {
   if (!currentRomName || !currentOriginalName) return;
   let romName = currentRomName;
   let originalName = currentOriginalName;
-  // Drop the in-memory FS .sav so the fresh core doesn't reload it.
   try { FS.unlink(stripExt(romName) + ".sav"); } catch {}
-  // Null these first so loadRom's "persist previous save" step is skipped —
-  // otherwise it would write the old in-memory save straight back to the key
-  // we just deleted. loadRom then restoreSave()s nothing, booting clean.
+  // Null these first so loadRom's "persist previous save" step is skipped,
+  // else it writes the old save straight back to the deleted key.
   currentRomName = null;
   currentOriginalName = null;
   loadRom(romName, originalName);
 };
 
-// "Reset save file" action in the in-game Manage Saves modal. A persistent
-// two-step confirm button (like Reset all settings): armed on first click,
-// wipes + reboots on the second.
+// "Reset save file": a persistent two-step confirm button.
 const resetSaveSlot = document.getElementById("reset-save-slot");
 if (resetSaveSlot) {
   const resetSaveBtn = makeConfirmButton({
@@ -1832,8 +1583,7 @@ if (resetSaveSlot) {
     className: "button button-sm saves-reset-btn",
     onConfirm: async () => {
       await resetCurrentSaveFile();
-      // Reboots the game rather than re-rendering the button; re-enable and
-      // disarm it so it works again next time the modal is opened.
+      // The button persists across the reboot: re-enable and disarm it.
       resetSaveBtn.disabled = false;
       resetSaveBtn.disarm();
       closeSavesModal();
@@ -1843,22 +1593,17 @@ if (resetSaveSlot) {
   resetSaveSlot.appendChild(resetSaveBtn);
 }
 
-// --- Manage ROMs and Saves modal (home-screen game library) ---
-// One row per stored game: the recents entries first (most-recently-played
-// order, matching the home grid), then any ROM whose save data outlived its
-// recents entry (evicted past the 20-item cap) so its leftovers can still be
-// cleaned up. Each row offers "Delete Save File" (wipe battery + state + P2
-// save) and "Delete Everything" (that plus removing the ROM from this browser).
+// --- Manage ROMs and Saves modal ---
+// One row per stored game: recents first, then any ROM whose save data
+// outlived its recents entry.
 
 const romsModal = document.getElementById("roms-modal");
 const romsManageList = document.getElementById("roms-manage-list");
 const romsManageEmpty = document.getElementById("roms-manage-empty");
-// The intro's Remove sentence — hidden while signed out, when the per-row
-// Remove button it describes doesn't render (see romOnDrive below).
+// Hidden while signed out, when the per-row Remove button doesn't render.
 const romsHintRemove = document.getElementById("roms-hint-remove");
-// Sign-in state the rows were last rendered under, so renderGdriveSection can
-// re-render them only when that state actually flips (a routine repaint must
-// not disarm a row's armed confirm button).
+// Sign-in state the rows were last rendered under: a routine repaint must
+// not disarm an armed confirm button.
 let romsRowsSignedIn = null;
 
 const openRomsModal = () => {
@@ -1880,9 +1625,7 @@ romsModal.addEventListener("click", (e) => {
   if (e.target === romsModal) closeRomsModal();
 });
 
-// How the manage list is ordered. "recent" is the play order the grid uses;
-// "alpha" is for auditing a long library, where recency tells you nothing about
-// where a given game sits.
+// "recent" is the grid's play order; "alpha" for auditing a long library.
 let romsSort = "recent";
 const romsSortBtn = document.getElementById("roms-sort");
 
@@ -1908,10 +1651,8 @@ if (romsSortBtn) {
   });
 }
 
-// Ordered rows for the manage list: recents first (already most-recent-first),
-// then orphaned save-only games sorted by name. { name, inRecent }.
-// Under "alpha" the two groups merge into one A–Z list, since the recent /
-// orphan split is only meaningful when the order is recency.
+// Rows: recents first, then orphaned save-only games by name; under "alpha"
+// one merged A-Z list. { name, inRecent }.
 const romsForManagement = async () => {
   let recents = await getRecentMeta();
   let seen = new Set();
@@ -1930,9 +1671,7 @@ const romsForManagement = async () => {
   return rows;
 };
 
-// The rename affordance, one per row. Stroked with currentColor so it takes
-// the button's own colour (and its hover/disabled states) rather than carrying
-// a palette of its own.
+// The rename pencil; currentColor so it follows the button's states.
 const PENCIL_ICON =
   '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
   '<path d="M4 20.5h4.2L19 9.7a2.4 2.4 0 0 0-3.4-3.4L4.8 17.1v3.4z"/>' +
@@ -1941,13 +1680,9 @@ const PENCIL_ICON =
 const refreshRomsManageList = async () => {
   if (!db) return;
   romsRowsSignedIn = driveLinked();
-  // Keep the intro copy and the rows telling the same story: signed out there
-  // is no Remove button, so the sentence describing it goes too.
   romsHintRemove.hidden = !driveLinked();
   let rows = await romsForManagement();
-  // A remote-only entry (on Drive, nothing stored here) has no local save to
-  // Reset — it's "just deletable", so those rows show only Delete. Work out
-  // what this device actually holds.
+  // What this device actually holds decides each row's buttons.
   let keys = await dbKeys();
   let localRoms = new Set();
   for (let k of keys) {
@@ -1957,21 +1692,17 @@ const refreshRomsManageList = async () => {
   romsManageList.innerHTML = "";
   romsManageEmpty.hidden = rows.length > 0;
   syncRomsSortButton();
-  // Sorting an empty or single-game list is noise.
   if (romsSortBtn) romsSortBtn.parentElement.hidden = rows.length < 2;
 
   for (let { name, inRecent } of rows) {
     let row = document.createElement("div");
     row.className = "roms-manage-row";
 
-    // A live 2P link has two cores writing this ROM's saves; deleting under it
-    // would corrupt state, so both actions are blocked until link mode exits.
-    // Renaming is blocked for the same reason — it moves those same saves.
+    // A live 2P link has two cores writing this ROM's saves: delete, reset
+    // and rename are all blocked until link mode exits.
     let linkRunning = linkMode && linkRomEntry && linkRomEntry.name === name;
 
-    // The name, and the pencil that renames it. This wrapper keeps the row's
-    // first child, the .roms-manage-name class and the full-name title exactly
-    // where they were: the title is how the rest of the app identifies a row.
+    // The title on .roms-manage-name is how the rest of the app identifies a row.
     let label = document.createElement("div");
     label.className = "roms-manage-name";
     label.title = name; // full filename (with extension) for disambiguation
@@ -1982,12 +1713,10 @@ const refreshRomsManageList = async () => {
     let renameBtn = document.createElement("button");
     renameBtn.type = "button";
     renameBtn.className = "roms-rename-btn";
-    // An icon-only control with no text of its own; the accessible name says
-    // which game it belongs to, since a list of them is otherwise identical.
+    // Icon-only: the accessible name says which game.
     renameBtn.setAttribute("aria-label", "Rename " + displayName(name));
     renameBtn.innerHTML = PENCIL_ICON;
-    // Drive-only rows rename too: Drive renames its files in place (a
-    // metadata PATCH), so the bytes never need to be on this device.
+    // Drive-only rows rename too (a metadata PATCH needs no bytes here).
     if (linkRunning) {
       renameBtn.disabled = true;
       renameBtn.title = "Exit link mode to rename this game";
@@ -2001,31 +1730,20 @@ const refreshRomsManageList = async () => {
     let actions = document.createElement("div");
     actions.className = "roms-manage-actions";
 
-    // The single-player game currently in memory (running or paused at home)
-    // needs no special-casing for "Delete Everything" anymore: its confirm
-    // handler unloads the game first via unloadGame(), which detaches it from
-    // the autosave flush before the stored save is deleted.
+    // "Delete Everything" on the game in memory unloads it first (unloadGame
+    // detaches it from the autosave flush).
 
-    // Buttons in a row coordinate: arming one disarms any other still armed.
+    // Arming one button disarms any other in the row.
     let siblings = [];
     const disarmOthers = (except) => {
       for (let b of siblings) if (b !== except && b.disarm) b.disarm();
     };
 
-    // Reset  = wipe this game's save data, keep the ROM.
-    // Remove from device = free this device's ROM bytes, keep the save data
-    //          and the Drive copy; the game becomes a Drive-only tile. Needs a
-    //          Drive copy to come back from, so it is gated hard — see below.
-    // Sync to device = the inverse of Remove: pull a Drive-only game's ROM
-    //          and saves onto this device (same path as the grid's download
-    //          glyph). Drive-only rows only, signed in only.
-    // Delete = remove the game outright (ROM + save data).
-    // When signed in these mirror to Drive (Delete also tombstones the game so
-    // every device drops it); signed out they are purely local.
-    // Reset renders on EVERY row — a row whose action set shifts with sync
-    // minutiae reads as a bug — but it only arms when there is something to
-    // wipe: local save data, or (signed in) save/state files recorded in the
-    // last Drive listing. Otherwise it sits greyed with the reason.
+    // Reset = wipe save data, keep the ROM. Remove from device = free this
+    // device's ROM bytes, keep saves and the Drive copy. Sync to device =
+    // the inverse (downloadGame). Delete = ROM + saves, tombstoned on Drive
+    // when signed in. Reset renders on every row but only arms when there
+    // is something to wipe; otherwise greyed with the reason.
     let driveOnly = !localRoms.has(name);
     let stateKeyOfGame = (k) =>
       k === "state:" + name || k.startsWith("state:" + name + ":slot");
@@ -2054,7 +1772,7 @@ const refreshRomsManageList = async () => {
         onConfirm: async () => {
           await resetGameSaves(name);
           if (isRomLoaded(name)) {
-            // Reboot the loaded game clean, else its in-memory save re-flushes.
+            // Else the in-memory save re-flushes.
             resetLoadedGameSave();
             closeRomsModal();
             showToast("Save data deleted — starting fresh");
@@ -2068,30 +1786,17 @@ const refreshRomsManageList = async () => {
     }
     if (saveBtn) siblings.push(saveBtn);
 
-    // Remove = free THIS device's copy of the ROM and leave the game in the
-    // Drive library — the inverse of the grid's download glyph. Three
-    // conditions, all required, because getting this wrong destroys someone's
-    // only copy of a game:
-    //   1. signed in to Drive — otherwise there is nowhere to re-download from
-    //      and this is just a silent delete;
-    //   2. the bytes are actually here — nothing to free otherwise, and a
-    //      Drive-only row already offers Download in the grid instead;
-    //   3. Drive has the ROM — sigs["rom:<name>"] is this device's record of
-    //      having put exactly these bytes on Drive (written on upload AND on
-    //      download), and nothing queued to delete them again.
-    // (3) is what makes the dangerous case unreachable: a game imported a
-    // moment ago whose upload is still sitting in queueUp has no sig, so it
-    // gets no button at all. You cannot evict what exists only here. The sig
-    // can still go stale (wiped app folder, different account), so
-    // removeGameFromDevice re-checks the live Drive listing before deleting.
+    // Remove needs: signed in, bytes here, and Drive has the ROM
+    // (sigs["rom:<name>"] with no delete queued). A just-imported game whose
+    // upload is still queued has no sig, so it gets no button: the only copy
+    // is never evictable. Sigs can go stale, so removeGameFromDevice
+    // re-checks the live listing before deleting.
     let romOnDrive = driveLinked() && !!syncState.sigs[romKey(name)] &&
       !syncState.queueDel.includes(romKey(name));
     let freeBtn = null;
     if (localRoms.has(name) && driveLinked() && !romOnDrive) {
-      // Signed in but Drive can't be confirmed to hold this ROM (upload still
-      // queued or failing, imported while signed out, lost sig). Locality
-      // decides the SLOT — a local row always shows Remove — but eligibility
-      // shows as a greyed button with the reason, not a silent absence.
+      // Drive cannot be confirmed to hold this ROM: greyed with the reason,
+      // not a silent absence.
       freeBtn = makeInertButton(
         "Remove from device",
         "button button-sm roms-manage-btn",
@@ -2100,9 +1805,7 @@ const refreshRomsManageList = async () => {
       siblings.push(freeBtn);
     } else if (localRoms.has(name) && romOnDrive) {
       if (isRomLoaded(name)) {
-        // Covers link mode too (isRomLoaded folds linkRomEntry in). Unlike
-        // Delete we don't unload the game for the user: "free some space" is
-        // no reason to close what they're playing.
+        // Unlike Delete, the loaded game is not unloaded for the user.
         freeBtn = makeDisabledButton(
           "Remove from device",
           "button button-sm roms-manage-btn",
@@ -2130,9 +1833,8 @@ const refreshRomsManageList = async () => {
       siblings.push(freeBtn);
     }
 
-    // Sync to device = downloadGame, the same pull the home grid's download
-    // glyph does. Not a confirm button — it destroys nothing — but clicking
-    // it disarms any armed sibling so a half-armed Delete can't linger.
+    // Sync to device = downloadGame. Not a confirm button, but it disarms
+    // any armed sibling.
     let downBtn = null;
     if (driveOnly && driveLinked()) {
       downBtn = document.createElement("button");
@@ -2171,11 +1873,8 @@ const refreshRomsManageList = async () => {
         onArm: () => disarmOthers(allBtn),
         onConfirm: async () => {
           if (isRomLoaded(name)) {
-            // Unload the in-memory game BEFORE deleting: unloadGame nulls
-            // currentRomName/currentOriginalName, which is what the 5s
-            // autosave interval keys on — so the in-memory save can't be
-            // re-flushed over the freshly deleted key. No final flush
-            // (flushSave: false); we are deleting this save on purpose.
+            // Unload before deleting: nulling currentRomName keeps the
+            // autosave from re-flushing over the deleted key. No final flush.
             if (!(await unloadGame({ flushSave: false }))) {
               showToast("Exit the online session first");
               return;
@@ -2192,8 +1891,6 @@ const refreshRomsManageList = async () => {
     }
     siblings.push(allBtn);
 
-    // Order: the two save-data actions first (Reset, Delete), then the
-    // device-transfer action (Remove from device / Sync to device) last.
     if (saveBtn) actions.appendChild(saveBtn);
     actions.appendChild(allBtn);
     if (freeBtn) actions.appendChild(freeBtn);
@@ -2203,49 +1900,23 @@ const refreshRomsManageList = async () => {
   }
 };
 
-// --- Google Drive backup (prototype) ---
-// Backs up battery saves, save states, and ROMs to the hidden per-app
-// "appDataFolder" in the user's Google Drive, and restores them on another
-// device. Pure client-side OAuth via Google Identity Services' token flow:
-// no backend, no client secret, and the access token lives in memory only
-// (never localStorage/IndexedDB) — it expires after ~1h and is silently
-// re-requested on a 401.
+// --- Google Drive backup ---
+// Battery saves, save states and ROMs in the hidden appDataFolder, via the
+// GIS token flow (no backend, no client secret). Drive file names mirror
+// the IndexedDB keys one-to-one; the folder listing is the index (no
+// manifest), matched by name client-side.
 //
-// Drive file names mirror the IndexedDB keys one-to-one:
-//   save:<rom name>       battery save        (overwritten on every backup)
-//   save:<rom name>-p2    2P link partner save
-//   state:<rom name>      save-state blob
-//   rom:<rom name>        ROM image           (skipped when Drive already has
-//                                              one with the same byte size —
-//                                              ROMs are immutable)
-// There is no manifest file: the appDataFolder listing itself is the index,
-// and files are matched by name client-side from a full listing, which also
-// sidesteps escaping quotes in ROM names inside Drive `q` queries.
-
-// The OAuth client ID below is PUBLIC BY DESIGN and safe in source: this is
-// the GIS token (implicit) flow, which has no client secret. What actually
-// protects the client is the "Authorized JavaScript origins" allowlist in the
-// Cloud Console — a token is only ever issued to a page served from a
-// registered origin — plus the drive.appdata scope, which can reach nothing
-// but this app's own hidden folder.
-//
-// Adding a new origin (each deployment, and each dev port):
-//   console.cloud.google.com → Google Auth Platform → Clients → this client →
-//   Authorized JavaScript origins. Scheme + host (+ port), no path, no
-//   trailing slash. Must be https unless it's localhost — Google rejects raw
-//   IP addresses, so an http://192.168.x.x LAN origin can never work.
-//   No redirect URIs are needed for the token flow.
-//
-// The localStorage override lets a dev point a build at a different client
-// without editing source: localStorage.setItem("gdrive_client_id", "<id>").
-// If this were ever emptied, the Drive section degrades to a "not configured"
-// note and the GIS script is never loaded.
+// The client ID is public by design (the token flow has no secret): the
+// "Authorized JavaScript origins" allowlist in the Cloud Console and the
+// drive.appdata scope are the protection. New origins go in Google Auth
+// Platform > Clients > this client > Authorized JavaScript origins: scheme +
+// host (+ port), https unless localhost (raw IPs are rejected), no redirect
+// URIs. localStorage "gdrive_client_id" overrides it for dev; empty means
+// the Drive section degrades to "not configured".
 const GDRIVE_CLIENT_ID = localStorage.getItem("gdrive_client_id") ||
   "44914400148-bkh9oiu6ian098gbg5jecns4js5d849f.apps.googleusercontent.com";
 
-// drive.appdata = access to the hidden app folder only (no other Drive
-// files); "email" lets the UI show which account is connected (via the
-// tokeninfo endpoint).
+// drive.appdata = the hidden app folder only; "email" names the account.
 const GDRIVE_SCOPE = "https://www.googleapis.com/auth/drive.appdata email";
 
 const GDRIVE_FILES = "https://www.googleapis.com/drive/v3/files";
@@ -2256,13 +1927,9 @@ let gdriveTokenExp = 0;       // epoch ms the access token stops being valid
 let gdriveEmail = null;       // best-effort display of the signed-in account
 let gdriveTokenClient = null; // GIS token client, created after script load
 
-// Persist the access token + expiry so a reload within its lifetime (~1h)
-// resumes with NO popup. The token model gives no refresh token and its
-// re-grant is a gesture-gated popup, so without this every reload — and every
-// app update, which force-reloads — lands signed out until the user interacts.
-// The token is short-lived, scoped to drive.appdata + email, and same-origin;
-// storing it beside the other Drive state is an acceptable trade for not
-// dropping the session on every update.
+// Persist the access token + expiry so a reload within its ~1h lifetime
+// resumes with no popup (there is no refresh token, and a re-grant is a
+// gesture-gated popup).
 const persistDriveToken = () => {
   syncState.token = gdriveToken;
   syncState.tokenExp = gdriveTokenExp;
@@ -2276,9 +1943,7 @@ const clearDriveToken = () => {
   saveSyncState();
 };
 
-// The signed-in account's email, remembered across reloads purely so re-grants
-// can carry a login_hint (see gdriveAcquireToken). It is not a credential and
-// it never leaves this origin except back to Google, which already knows it.
+// The account email, kept so re-grants can carry a login_hint.
 const rememberDriveEmail = (email) => {
   gdriveEmail = email || null;
   if (syncState.email === gdriveEmail) return;
@@ -2286,8 +1951,7 @@ const rememberDriveEmail = (email) => {
   saveSyncState();
 };
 
-// The GIS script loads lazily on first interaction so normal page loads
-// never touch Google's servers.
+// The GIS script loads lazily so normal page loads never touch Google.
 let gisScriptPromise = null;
 const loadGisScript = () => {
   gisScriptPromise ??= new Promise((resolve, reject) => {
@@ -2304,26 +1968,15 @@ const loadGisScript = () => {
   return gisScriptPromise;
 };
 
-// One token request may be in flight at a time. The GIS client is a single
-// object whose `callback` is overwritten per request, so two overlapping
-// requestAccessToken() calls orphan the first one's popup AND leave its promise
-// unsettled forever. That happened for real: a background 401 clears the token
-// and paints "Sign in", the user taps it, and the window-level renewal listener
-// (capture phase, so it runs first) fires a silent re-grant a beat before the
-// button's own interactive one. Sharing the in-flight promise makes the second
-// caller wait for the first result instead of racing it.
+// One token request in flight at a time: the GIS client's `callback` is
+// overwritten per request, so overlapping calls orphan the first popup and
+// its promise (reachable: the window-level renewal listener runs in capture
+// a beat before the Sign in button's own handler).
 let gdriveTokenInFlight = null;
 
-// Request an access token. promptMode "" = silent refresh (no UI when the
-// Google session and a prior grant still stand); undefined = the normal
-// account-chooser/consent popup.
-//
-// login_hint is the difference between "a window flashes" and "an account
-// chooser appears". Google's docs are explicit that with it "account selection
-// is skipped" — without it, a browser signed in to more than one Google account
-// shows the chooser on EVERY re-grant, which is exactly what a user experiences
-// as "it keeps making me sign in". We know the account (the email scope told us
-// at connect time and it is persisted), so every renewal names it.
+// promptMode "" = silent refresh; undefined = the account-chooser popup.
+// login_hint skips account selection: without it a browser signed in to
+// more than one Google account shows the chooser on every re-grant.
 const gdriveAcquireToken = (promptMode, hint = syncState.email) => {
   if (gdriveTokenInFlight) return gdriveTokenInFlight;
   gdriveTokenInFlight = (async () => {
@@ -2340,8 +1993,7 @@ const gdriveAcquireToken = (promptMode, hint = syncState.email) => {
           return;
         }
         gdriveToken = resp.access_token;
-        // expires_in is seconds; keep a 60s margin so we never send a token that
-        // expires mid-request.
+        // 60s margin so a token never expires mid-request.
         gdriveTokenExp = Date.now() + ((Number(resp.expires_in) || 3600) - 60) * 1000;
         persistDriveToken();
         resolve();
@@ -2358,19 +2010,16 @@ const gdriveAcquireToken = (promptMode, hint = syncState.email) => {
       gdriveTokenClient.requestAccessToken(opts);
     });
   })();
-  // Settled either way: the next caller starts a fresh request.
   return gdriveTokenInFlight.finally(() => { gdriveTokenInFlight = null; });
 };
 
-// A token request always opens a popup, so it can only succeed while the tab
-// still holds transient user activation. Asking anyway from a background timer
-// doesn't just fail — some browsers answer a refused popup with a "pop-up
-// blocked" bar, i.e. the background does something visible AND useless. Where
-// the browser will tell us (Chrome 72+, Safari 16.4+), don't try.
+// A token request opens a popup, so it needs transient user activation; a
+// refused popup can show a "pop-up blocked" bar. Where the browser will
+// tell us (Chrome 72+, Safari 16.4+), don't try.
 const hasUserActivation = () =>
   !navigator.userActivation || navigator.userActivation.isActive;
 
-// Best-effort: only works because GDRIVE_SCOPE includes "email".
+// Works because GDRIVE_SCOPE includes "email".
 const gdriveFetchEmail = async () => {
   try {
     let res = await fetch(
@@ -2381,15 +2030,10 @@ const gdriveFetchEmail = async () => {
   } catch {}
 };
 
-// Authenticated fetch against the Drive API. On a 401 (token expired), one
-// silent re-grant is attempted and the request replayed.
-//
-// That re-grant only succeeds when this call chain started from a user gesture
-// (the GIS popup needs transient activation). Most 401s arrive on the
-// background poll instead, where it can only fail — so a failure here does NOT
-// sign the user out. It drops the dead token and hands off to the gesture-armed
-// renewal, which retries on the user's next tap; only after DRIVE_RENEW_MAX_FAILS
-// of those does the UI fall back to signed-out.
+// Authenticated fetch; on a 401 one silent re-grant and replay. The re-grant
+// needs a user gesture, and most 401s arrive on the background poll, so a
+// failure here does not sign out: it drops the token and hands off to the
+// gesture-armed renewal.
 const driveFetch = async (url, opts = {}) => {
   const send = () => fetch(url, {
     ...opts,
@@ -2404,9 +2048,8 @@ const driveFetch = async (url, opts = {}) => {
       clearDriveToken();
       armDriveRenewOnGesture();
       renderGdriveSection();
-      // Not "sign in again": the account is still linked and the queue is
-      // still on disk. This aborts one request; the next gesture (or the next
-      // Sync) picks up a token and the work drains.
+      // Not "sign in again": the account stays linked, the next gesture
+      // picks up a token.
       throw new Error("Drive is reconnecting — your changes are saved");
     }
     res = await send();
@@ -2415,9 +2058,7 @@ const driveFetch = async (url, opts = {}) => {
   return res;
 };
 
-// Everything in the app's hidden folder. Prototype limitation: a single page
-// of up to 1000 files, no nextPageToken paging (20 games × 4 files is far
-// below that).
+// A single page of up to 1000 files, no nextPageToken paging.
 const driveListAll = async () => {
   let url = GDRIVE_FILES + "?spaces=appDataFolder&pageSize=1000&fields=" +
     encodeURIComponent("files(id,name,size,modifiedTime)");
@@ -2425,8 +2066,8 @@ const driveListAll = async () => {
   return (await res.json()).files || [];
 };
 
-// Create + upload a small file in one atomic multipart request. The bytes go
-// into the body as a raw Uint8Array inside a Blob — never string-converted.
+// Create + upload in one multipart request; bytes go in as a Blob, never
+// string-converted.
 const driveCreateMultipart = (name, bytes) => {
   let boundary = "dingbat" + Math.random().toString(36).slice(2);
   let body = new Blob([
@@ -2459,8 +2100,8 @@ const driveUpdateContent = (fileId, bytes) =>
     body: new Blob([bytes]),
   });
 
-// Drive caps multipart bodies at 5 MB, so big files (ROMs) go as a bare
-// metadata create followed by a media-only content PATCH instead.
+// Drive caps multipart bodies at 5 MB, so big files go as metadata create
+// + media PATCH.
 const driveUploadFile = async (name, bytes, existingId) => {
   if (existingId) return driveUpdateContent(existingId, bytes);
   if (bytes.length <= 4 * 1024 * 1024) return driveCreateMultipart(name, bytes);
@@ -2472,16 +2113,11 @@ const driveDownload = async (fileId) => {
   return new Uint8Array(await res.arrayBuffer());
 };
 
-// Map a Drive file name back to { game, kind }; null for anything a future
-// version might add. `kind` is the per-game grouping key (unique within a game)
-// and self-describes both the category and, for save states, the slot: slot 0
-// keeps the legacy kind ("state"/"statemeta"), slots 1..8 append ":slotN".
-// Mirrors romsWithSaveData's ":slotN" and "-p2" folding so numbered save-state
-// slots fold into the base game rather than becoming phantom "game" rows.
+// Drive file name -> { game, kind }; null for anything unknown. `kind` is
+// unique within a game: slot 0 keeps "state"/"statemeta", slots 1..8 append
+// ":slotN". Mirrors romsWithSaveData's ":slotN" and "-p2" folding.
 const parseDriveFileName = (n) => {
   if (n.startsWith("rom:")) return { game: n.slice(4), kind: "rom" };
-  // Check "statemeta:" before "state:" for clarity (they don't actually
-  // collide: "statemeta:"[5] is 'm', so it fails startsWith("state:")).
   for (let [prefix, cat] of [["statemeta:", "statemeta"], ["state:", "state"]]) {
     if (n.startsWith(prefix)) {
       let g = n.slice(prefix.length);
@@ -2500,7 +2136,7 @@ const parseDriveFileName = (n) => {
   return null;
 };
 
-// --- Drive section UI (rendered into #gdrive-body in the roms modal) ---
+// --- Drive section UI (#gdrive-body in the roms modal) ---
 
 const gdriveBody = document.getElementById("gdrive-body");
 
@@ -2520,8 +2156,7 @@ const gdriveSignOut = () => {
   rememberDriveEmail(null); // no hint left behind: the next sign-in may be another account
   syncState.connected = false;
   clearDriveToken(); // also drops the persisted token + saves
-  // Stand down background sync. Queued work stays on disk rather than being
-  // dropped: sign back in and it flushes then.
+  // Queued work stays on disk; it flushes on the next sign-in.
   if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; }
   if (syncCapTimer) { clearTimeout(syncCapTimer); syncCapTimer = null; }
   setSyncStatus("idle");
@@ -2533,11 +2168,8 @@ const gdriveSignOut = () => {
 
 const renderGdriveSection = () => {
   if (!gdriveBody) return;
-  // The manage rows and the intro's Remove sentence are sign-in gated too:
-  // every path that morphs this section between "Sign in with Google" and the
-  // connected view (sign-in, Sign out, token expiry) lands here, so an open
-  // modal re-renders its rows on a real state flip — and only on a flip, so
-  // routine repaints can't disarm an armed confirm button.
+  // Re-render the manage rows on a real sign-in flip only, so routine
+  // repaints cannot disarm an armed confirm button.
   if (romsModal.classList.contains("open") && romsRowsSignedIn !== driveLinked()) {
     refreshRomsManageList();
   }
@@ -2553,8 +2185,6 @@ const renderGdriveSection = () => {
   }
 
   if (!driveLinked()) {
-    // No sub-caption here: the static hint right above this section already
-    // says exactly what signing in does — repeating it read as a glitch.
     let btn = makeGdriveButton("Sign in with Google", false, async () => {
       btn.disabled = true;
       try { await gdriveConnect(); }
@@ -2567,10 +2197,7 @@ const renderGdriveSection = () => {
   let n = pendingCount();
   let status = document.createElement("p");
   status.className = "gdrive-status";
-  // Linked but between access tokens is NOT signed out — the account, the
-  // library and the queue are all still here, and the next Sync (or the next
-  // tap anywhere) buys a token. Saying "Sign in with Google" at that moment is
-  // what made an hourly token rollover feel like being logged out.
+  // Linked but between tokens is not signed out; the next Sync buys a token.
   status.textContent =
     (gdriveEmail || "Connected to Google Drive") +
     " · " + (!gdriveToken ? "reconnects when you next sync"
@@ -2590,34 +2217,16 @@ const renderGdriveSection = () => {
 };
 
 // ============================================================================
-// Google Drive SYNC
-// ----------------------------------------------------------------------------
-// Signing in IS turning sync on — there is no mode, no opt-in prompt. Signed
-// out, none of this runs and the app behaves exactly as it always has.
-//
-// The library (which games exist, which were deleted, which were renamed)
-// lives in ONE Drive file, "library":
+// Google Drive sync. Signing in is turning sync on. The library lives in
+// one Drive file, "library":
 //     { recents: [{ name, ts }], tomb: [{ name, ts }], ren: [{ from, to, ts }] }
-// `recents` is the merged cross-device play history — it drives the home grid,
-// so the grid is your library across every device. `tomb` are tombstones:
-// games explicitly deleted, recorded so a plain union-merge can't resurrect
-// them. Re-uploading a game clears its tombstone (re-upload supersedes).
-// `ren` are rename markers, the tombstone's constructive sibling: a rename on
-// one device records { from, to, ts } so every other device migrates its own
-// records for `from` over to `to` on its next sync — instead of a tombstone
-// deleting them and the old name re-uploading from whoever still holds it.
-// A newer recents entry under `from` supersedes the marker (a fresh import
-// legitimately re-using the freed-up name must never be renamed after it).
-//
-// ROMs are NEVER bulk-downloaded. A merged-recents entry whose rom: record is
-// missing locally renders as a "Drive-only" tile with a download affordance;
-// tapping it fetches that one game (ROM + its saves/states) on demand.
-//
-// Uploads are queued and coalesced: a dirty event (ROM import, truly-dirty
-// save, save-state write/delete, delete) pushes a key onto a PERSISTED queue,
-// flushed 2s after the last change and at most 10s after the first — so
-// hammering save states costs one upload of the final state, and a queue that
-// couldn't be sent (offline, reload) survives to the next opportunity.
+// `recents` is the merged cross-device play history (the home grid). `tomb`
+// are tombstones, so a union-merge cannot resurrect a deleted game; a
+// re-upload supersedes one. `ren` are rename markers: every other device
+// migrates its records for `from` to `to` on its next sync; a newer recents
+// entry under `from` supersedes the marker. ROMs are never bulk-downloaded
+// (Drive-only tiles download on demand). Uploads go through a persisted
+// queue, flushed 2s after the last change and at most 10s after the first.
 // ============================================================================
 
 const LIBRARY_FILE = "library";
@@ -2625,13 +2234,9 @@ const SYNC_DEBOUNCE_MS = 2000;   // quiet period before a flush
 const SYNC_MAX_WAIT_MS = 10000;  // ...but never sit on changes longer than this
 const SYNC_POLL_MS = 3 * 60 * 1000;
 
-// Persisted under "gdrive_sync". queueUp/queueDel/queueRen/tomb/ren survive
-// reloads so an offline edit still reaches Drive later. sigs = last agreed
-// content signature per Drive file; rmt = the remote modifiedTime we last saw
-// for it. queueRen = pending remote file renames [{ from, to }]; ren = this
-// device's game-rename markers [{ from, to, ts }], the rename counterpart of
-// tombstones (published through the shared library so other devices migrate
-// their local records instead of re-uploading the old name).
+// Persisted under "gdrive_sync". sigs = last agreed content signature per
+// Drive file; rmt = its last seen modifiedTime; queueRen = pending remote
+// renames [{ from, to }]; ren = this device's rename markers.
 let syncState = { queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [],
                   sigs: {}, rmt: {}, email: null };
 let syncBusy = false;
@@ -2639,7 +2244,7 @@ let syncTimer = null;
 let syncCapTimer = null;
 let syncPollTimer = null;
 let syncDoneTimer = null;
-// Games currently being pulled on demand (drives the per-tile spinner).
+// Games being pulled on demand (the per-tile spinner).
 let syncDownloading = new Set();
 
 const loadSyncState = async () => {
@@ -2663,19 +2268,9 @@ const loadSyncState = async () => {
 };
 const saveSyncState = () => dbPut("gdrive_sync", syncState);
 
-// Two different questions, and conflating them was the source of most of the
-// "it keeps signing me out" feeling:
-//
-//   driveLinked()  — has the user connected Drive at all? Survives token
-//                    expiry, reloads, being offline. This is what the UI and
-//                    the upload queue key off, so an hour-old access token
-//                    changes nothing the user can see.
-//   syncActive()   — can we talk to the Drive API *right now*? Only true with
-//                    a live access token, so it gates actual network work.
-//
-// A token gap is therefore a quiet, recoverable state: changes keep queueing,
-// the library keeps showing its Drive games, and the re-grant happens on the
-// next gesture (or lazily, when the user asks for something that needs Drive).
+// driveLinked(): has the user connected Drive at all (survives token expiry);
+// what the UI and the queue key off. syncActive(): a live token right now;
+// gates network work. A token gap is a quiet, recoverable state.
 const driveLinked = () => !!GDRIVE_CLIENT_ID && !!syncState.connected;
 const syncActive = () => !!gdriveToken;
 
@@ -2697,7 +2292,7 @@ const prettyName = (name) => {
 };
 
 // --- Local <-> Drive byte plumbing --------------------------------------
-// Drive file names ARE the IndexedDB keys, so parseDriveFileName classifies
+// Drive file names are the IndexedDB keys, so parseDriveFileName classifies
 // local keys too.
 const localSyncFiles = async () => {
   let out = new Map();
@@ -2713,13 +2308,9 @@ const localFilesForGame = async (game) => {
   for (let [k, p] of await localSyncFiles()) if (p.game === game) names.push(k);
   return names;
 };
-// Does this device hold the ROM bytes for a game?
 const hasLocalRom = async (game) => !!(await dbGet(romKey(game)))?.data?.length;
-// Any local trace of a game at all (ROM or save data)?
 const hasLocalData = async (game) => (await localFilesForGame(game)).length > 0;
-// Same question, but over EVERY per-game record — including the ones Drive
-// never mirrors (box art, cheats, the resume snapshot), which a rename
-// arriving from another device must still migrate.
+// Over every per-game record, including the ones Drive never mirrors.
 const hasAnyLocalRecord = async (game) => {
   for (let k of allPerGameKeys(game)) if ((await dbGet(k)) != null) return true;
   return false;
@@ -2758,11 +2349,8 @@ const writeSyncBytes = async (name, bytes) => {
 const driveDelete = (fileId) =>
   driveFetch(GDRIVE_FILES + "/" + fileId, { method: "DELETE" });
 
-// Rename one Drive file in place — a metadata-only PATCH, no content
-// transfer, which is what lets a whole game rename without its bytes ever
-// being on this device. Asks for modifiedTime back so rmt can track the bump
-// the rename itself causes (otherwise the next pull re-downloads the file
-// once just to learn its content didn't change).
+// Metadata-only PATCH. Asks for modifiedTime back so rmt tracks the bump
+// the rename causes (else the next pull re-downloads the file once).
 const driveRenameFile = (fileId, newName) =>
   driveFetch(GDRIVE_FILES + "/" + fileId +
              "?fields=" + encodeURIComponent("id,name,modifiedTime"), {
@@ -2793,9 +2381,8 @@ const writeDriveLibrary = async (lib, remote) => {
   await driveUploadFile(LIBRARY_FILE, bytes, remote.get(LIBRARY_FILE)?.id);
 };
 
-// Union by name keeping the newest timestamp, carry rename markers across the
-// entries they name, then drop anything tombstoned more recently than the
-// entry itself (a re-upload bumps ts, so it wins).
+// Union by name keeping the newest ts, apply rename markers, then drop
+// anything tombstoned more recently than the entry itself.
 const mergeLibrary = (a, b) => {
   let byName = new Map();
   for (let e of [...(a.recents || []), ...(b.recents || [])]) {
@@ -2803,7 +2390,7 @@ const mergeLibrary = (a, b) => {
     let prev = byName.get(e.name);
     if (!prev || (e.ts || 0) > (prev.ts || 0)) byName.set(e.name, { name: e.name, ts: e.ts || 0 });
   }
-  // Rename markers: tombstone-like, newest marker per old name wins.
+  // Newest marker per old name wins.
   let ren = new Map();
   for (let r of [...(a.ren || []), ...(b.ren || [])]) {
     if (!r?.from || !r?.to || r.from === r.to) continue;
@@ -2812,9 +2399,8 @@ const mergeLibrary = (a, b) => {
       ren.set(r.from, { from: r.from, to: r.to, ts: r.ts || 0 });
     }
   }
-  // Apply them to the merged entries oldest-first, so a chain (A→B, then
-  // B→C) lands on C. An entry moves only when the marker is newer than it; a
-  // renamed entry keeps its own recency (a rename is not a play).
+  // Oldest-first so a chain (A->B, B->C) lands on C. An entry moves only
+  // when the marker is newer than it, and keeps its own recency.
   for (let r of [...ren.values()].sort((x, y) => (x.ts || 0) - (y.ts || 0))) {
     let e = byName.get(r.from);
     if (e && (e.ts || 0) < r.ts) {
@@ -2822,9 +2408,8 @@ const mergeLibrary = (a, b) => {
       let t = byName.get(r.to);
       if (!t || (t.ts || 0) < (e.ts || 0)) byName.set(r.to, { name: r.to, ts: e.ts || 0 });
     }
-    // Any entry still standing under the old name is newer than the marker: a
-    // fresh import re-using the freed-up name. The marker is spent — drop it,
-    // or it would rename the newcomer on every device that syncs.
+    // An entry newer than the marker under the old name is a fresh import
+    // re-using the name: the marker is spent.
     if (byName.has(r.from)) ren.delete(r.from);
   }
   let tomb = new Map();
@@ -2851,20 +2436,15 @@ const localLibrary = async () => ({
   ren: syncState.ren.slice(),
 });
 
-// --- Sync status indicator (lives in the retired status-LED slot) ---------
-// Deliberately subtle: muted text colour, never the accent (that's the HLE
-// indicator's job). Desktop shows icon + word; phones show the icon alone and
-// reveal the wording on tap.
+// --- Sync status indicator ---------
 const SYNC_ICONS = {
   syncing: '<svg class="sync-spin" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v3.5h-3.5"/></svg>',
   done: '<svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>',
-  // A COMPLETE cloud plus a slash. The usual "cloud-off" glyph omits the
-  // cloud's right shoulder so the slash can pass through, which just reads as
-  // a broken shape at 15px.
+  // A complete cloud plus a slash (the usual "cloud-off" glyph reads as a
+  // broken shape at 15px).
   offline: '<svg viewBox="0 0 24 24"><path d="M17.5 18.5H7.2A4.2 4.2 0 0 1 6.5 10.1a5.8 5.8 0 0 1 11.1 1 3.8 3.8 0 0 1-.1 7.4z"/><path d="M4.5 4.5l15 15"/></svg>',
 };
-// Same cloud-with-a-slash: from the user's side "no connection" and "no token"
-// are the same fact — Drive is out of reach and their changes are waiting.
+// "no connection" and "no token" are the same fact to the user.
 SYNC_ICONS.paused = SYNC_ICONS.offline;
 const SYNC_WORDS = { syncing: "Syncing", done: "Synced", offline: "Offline",
                      paused: "Paused" };
@@ -2872,9 +2452,7 @@ const SYNC_DESCS = {
   syncing: "Syncing your games with Google Drive…",
   done: "All changes are synced to Google Drive",
   offline: "Offline — your changes will sync when you reconnect",
-  // Linked, online, but out of access token and out of silent retries. Said
-  // once, quietly, instead of a sign-in prompt: nothing is lost, and tapping
-  // Sync (or the indicator) is all it takes.
+  // Out of token and out of silent retries: said quietly, not a sign-in prompt.
   paused: "Tap Sync to reconnect to Google Drive — your changes are saved",
 };
 let syncStatus = "idle"; // idle | syncing | done | offline | paused
@@ -2890,12 +2468,10 @@ const renderSyncIndicator = () => {
   syncIndicator.className = "sync-" + s;
   syncIndicator.title = SYNC_DESCS[s] || "";
   syncIndicator.setAttribute("aria-label", SYNC_DESCS[s] || "");
-  // Label first, icon last: this sits in the right-aligned cluster, so keeping
-  // the icon outermost holds it still as the word changes length.
+  // Icon outermost so it holds still as the word changes length.
   syncIndicator.innerHTML =
     '<span class="sync-label">' + SYNC_WORDS[s] + "</span>" + SYNC_ICONS[s];
 };
-// "Synced" is a momentary confirmation, not a permanent badge.
 const setSyncStatus = (s) => {
   if (syncDoneTimer) { clearTimeout(syncDoneTimer); syncDoneTimer = null; }
   syncStatus = s;
@@ -2913,18 +2489,14 @@ const setSyncStatus = (s) => {
   }
 };
 if (syncIndicator) {
-  // Phones hide the word; tapping explains what the icon means.
   syncIndicator.addEventListener("click", () => {
     if (syncStatus !== "idle") showToast(SYNC_DESCS[syncStatus]);
   });
 }
 const pendingCount = () =>
   syncState.queueUp.length + syncState.queueDel.length + syncState.queueRen.length;
-// Pending and in-flight both read as "Syncing" — a bare number confuses more
-// than it informs, especially icon-only on a phone.
 const refreshSyncStatus = () => {
   if (!driveLinked()) { setSyncStatus("idle"); return; }
-  // Out of token AND out of silent retries: stop claiming to be syncing.
   if (!syncActive() && driveRenewFails >= DRIVE_RENEW_MAX_FAILS && pendingCount()) {
     setSyncStatus("paused");
     return;
@@ -2935,16 +2507,13 @@ const refreshSyncStatus = () => {
 };
 
 // --- Dirty queue ---------------------------------------------------------
-// Queueing is keyed off driveLinked(), not a live token: a save made while the
-// access token is between grants must still reach Drive later. (flushSync
-// itself still requires a token — it just finds the work waiting when one
-// arrives.) Before this, an expired token meant those writes were silently
-// never queued, and only a manual full sync ever noticed.
+// Keyed off driveLinked(), not a live token: a save made between grants must
+// still reach Drive later.
 const scheduleFlush = () => {
   if (!driveLinked()) return;
   if (syncTimer) clearTimeout(syncTimer);
   syncTimer = setTimeout(flushSync, SYNC_DEBOUNCE_MS);
-  // First change in a burst arms the ceiling so a busy stretch still lands.
+  // The first change in a burst arms the ceiling.
   if (!syncCapTimer) syncCapTimer = setTimeout(flushSync, SYNC_MAX_WAIT_MS);
   refreshSyncStatus();
 };
@@ -2971,34 +2540,28 @@ const markGameUpload = (game) => {
     scheduleFlush();
   });
 };
-// Mirror a local save-data wipe to Drive. Only the "saves" group: the resume
-// snapshot deleted alongside it locally was never uploaded (parseDriveFileName
-// rejects "stateauto:"), so there is nothing on Drive to delete.
+// Mirror a local save-data wipe to Drive ("saves" group only; the resume
+// snapshot was never uploaded).
 const queueSaveDataDeletes = (name) => {
   for (let k of perGameKeys(name).saves) markDelete(k);
 };
 
-// Drive operations run one at a time, but a busy engine must DEFER work, never
-// drop it. An earlier version returned early while another op was in flight,
-// which raced on mobile: returning from the sign-in sheet fires
-// visibilitychange, whose flush+pull collided with gdriveConnect's own
-// runFullSync, and whichever lost silently skipped its push or its pull — so a
-// freshly signed-in phone showed an empty grid until the 3-minute poll bailed
-// it out. Queueing instead makes sign-in deterministic.
+// Drive operations run one at a time; a busy engine defers work, never
+// drops it (returning from the sign-in sheet fires visibilitychange, whose
+// flush+pull collides with gdriveConnect's own sync).
 let syncChain = Promise.resolve();
 const runExclusive = (fn) => {
   const run = syncChain.then(() => fn());
   syncChain = run.catch(() => {}); // a failed op must not poison the chain
   return run;
 };
-// One pending pull is enough; extra triggers while one is queued collapse.
+// Extra pull triggers while one is queued collapse.
 let pullQueued = false;
 
-// Push the queue. Anything that fails stays queued for the next attempt, so a
-// dropped connection degrades to "syncs later" rather than losing data.
+// Push the queue; anything that fails stays queued.
 const flushSync = (...a) => {
-  // Disarm at call time, not when the queued flush finally runs — otherwise a
-  // flush waiting behind a long pull leaves the debounce armed and re-queues.
+  // Disarm at call time: a flush waiting behind a long pull would otherwise
+  // leave the debounce armed and re-queue.
   if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; }
   if (syncCapTimer) { clearTimeout(syncCapTimer); syncCapTimer = null; }
   return runExclusive(() => flushSyncInner());
@@ -3013,9 +2576,7 @@ const flushSyncInner = async () => {
   setSyncStatus("syncing");
   try {
     let remote = await driveListMap();
-    // Renames first: every later step (the deletes, the uploads, the library
-    // publish) speaks in new names, so the remote files must answer to them
-    // before any of it runs.
+    // Renames first: every later step speaks in new names.
     for (let r of syncState.queueRen.slice()) {
       let f = remote.get(r.from);
       if (f && !remote.has(r.to)) {
@@ -3027,15 +2588,12 @@ const flushSyncInner = async () => {
           syncState.rmt[r.to] = meta.modifiedTime;
         }
       } else if (f) {
-        // The renamed file already exists (another device raced us with the
-        // same rename): the old file is a duplicate now, not the only copy.
+        // Another device raced us with the same rename: the old file is a duplicate.
         await driveDelete(f.id);
         remote.delete(r.from);
       } else if (!remote.has(r.to) && !syncState.queueUp.includes(r.to) &&
                  (await readSyncBytes(r.to))) {
-        // Drive holds neither name, but this device holds the bytes (the
-        // rename got here before the first upload ever did): upload rather
-        // than quietly leaving the file off Drive.
+        // Drive holds neither name but this device holds the bytes: upload.
         syncState.queueUp.push(r.to);
       }
       syncState.queueRen = syncState.queueRen.filter((x) => x !== r);
@@ -3052,12 +2610,9 @@ const flushSyncInner = async () => {
       if (bytes) {
         let r = remote.get(name);
         let sig = sigOfBytes(bytes);
-        // The listing is the truth about what Drive holds; sigs only remember
-        // what THIS device once uploaded. A queued file that's missing
-        // remotely uploads regardless of its sig — otherwise a wiped app
-        // folder or a different signed-in account never receives it. When
-        // the file IS present: ROMs are immutable (presence is enough) and
-        // anything else re-uploads only when its bytes changed.
+        // The listing is the truth; sigs only remember what this device once
+        // uploaded. A file missing remotely uploads regardless of its sig.
+        // Present: ROMs are immutable, anything else re-uploads on change.
         if (!r || (!name.startsWith("rom:") && sig !== syncState.sigs[name])) {
           await driveUploadFile(name, bytes, r?.id);
           syncState.sigs[name] = sig;
@@ -3065,8 +2620,6 @@ const flushSyncInner = async () => {
       }
       syncState.queueUp = syncState.queueUp.filter((n) => n !== name);
     }
-    // Publish the library (recents + any tombstones or rename markers raised
-    // locally).
     let lib = mergeLibrary(await readDriveLibrary(remote), await localLibrary());
     await writeDriveLibrary(lib, await driveListMap());
     syncState.tomb = lib.tomb;
@@ -3082,33 +2635,18 @@ const flushSyncInner = async () => {
   }
 };
 
-// Apply a rename that happened on ANOTHER device to this device's records:
-// the local half of renameGame, driven by a ren marker out of the merged
-// library. Nothing here uploads or deletes on Drive — the device that renamed
-// already renamed the remote files — so the job is moving every local record
-// and letting the sync bookkeeping (sigs/rmt) follow its files to their new
-// names.
-//
-// Collisions are handled per key, unlike renameGame's all-or-nothing refusal:
-// this rename already happened, the user isn't here to pick a different name,
-// and refusing wholesale would strand every record under the old name (the
-// exact shape of "the quick save vanished": a new-name copy gets downloaded,
-// then the migration aborts forever). So each key that CAN move does; a
-// colliding key keeps both copies, and when they hold identical bytes the
-// old-name one is dropped as the duplicate it is. Anything genuinely
-// different stays put, visible in Manage ROMs as an old-name row rather than
-// silently lost. Returns { moved, leftover } counts, or null when the
-// transaction itself failed.
+// Apply a rename from another device: move every local record and let
+// sigs/rmt follow. Nothing uploads or deletes on Drive. Collisions are per
+// key (unlike renameGame): every key that can move does; a colliding key
+// keeps both copies unless they hold identical bytes, in which case the
+// old-name one is dropped. Returns { moved, leftover }, or null when the
+// transaction failed.
 const applyRemoteRename = async (from, to) => {
   let fromKeys = allPerGameKeys(from);
   let toKeys = allPerGameKeys(to);
-  // The game may be open right now — this pull often fires on the tab
-  // becoming visible again, seconds after the rename happened elsewhere. Do
-  // what renameGame does for its own live rename: flush the pending save
-  // under the old name, detach the session so no write path recreates an old
-  // key behind the move, and reattach under the new name after. Only a
-  // link/online session can't be migrated under (a second core and a peer
-  // hold the name); the caller defers that case.
+  // The game may be open: flush the pending save under the old name,
+  // detach the session so no write path recreates an old key, reattach
+  // after. A link/online session cannot be migrated under; the caller defers.
   if (isRomLoaded(from) && (linkMode || rollbackMode || netActive())) return null;
   let loaded = isRomLoaded(from) && !!currentRomName;
   if (loaded) {
@@ -3128,11 +2666,8 @@ const applyRemoteRename = async (from, to) => {
     if (f in sigs) { sigs[t] = sigs[f]; delete sigs[f]; }
     if (f in rmt) { rmt[t] = rmt[f]; delete rmt[f]; }
   });
-  // Work queued under the old names keeps its intent under the new ones: a
-  // dirty save made offline still uploads (as the new name), a pending
-  // delete still deletes (the file it aimed at was renamed remotely too).
-  // Without this the flush would look the old keys up, find nothing, and
-  // silently drop the work.
+  // Queued work keeps its intent under the new names, else the flush
+  // looks the old keys up, finds nothing, and drops it.
   let mapKey = (k) => {
     let i = fromKeys.indexOf(k);
     return i >= 0 ? toKeys[i] : k;
@@ -3165,11 +2700,8 @@ const applyRemoteRename = async (from, to) => {
     currentOriginalName = to;
     if (homePausedCard && !homePausedCard.hidden) updatePausedCard();
   }
-  // Collided pairs: identical bytes mean the same file twice, so the old-name
-  // copy goes; anything else is kept (and counted, so the caller knows the
-  // migration has a remainder). Compared by content signature — the kinds
-  // readSyncBytes can't serialize (art, cheats, the resume snapshot) just
-  // stay put.
+  // Collided pairs: identical bytes drop the old-name copy; anything else
+  // is kept and counted. Kinds readSyncBytes cannot serialize stay put.
   let leftover = 0;
   for (let [f, t] of res.skipped) {
     let a = await readSyncBytes(f);
@@ -3196,13 +2728,8 @@ const pullSyncInner = async ({ silent = true } = {}) => {
     let remote = await driveListMap();
     let lib = mergeLibrary(await readDriveLibrary(remote), await localLibrary());
 
-    // Renames made on another device — migrate this device's records to the
-    // new name BEFORE the tombstone pass, so anything still sitting under an
-    // old name is genuinely deleted data and never a just-renamed game.
-    // Oldest-first, so a chain of renames replays in the order it happened.
-    // A game merely open right now migrates live (applyRemoteRename does the
-    // same session dance renameGame does); only a link/online session, or a
-    // failed transaction, defers to a later sync.
+    // Remote renames before the tombstone pass, so anything still under an
+    // old name is genuinely deleted data. Oldest-first so chains replay in order.
     let renPending = new Set();
     for (let r of [...(lib.ren || [])].sort((x, y) => (x.ts || 0) - (y.ts || 0))) {
       if (!(await hasAnyLocalRecord(r.from))) continue;
@@ -3211,11 +2738,8 @@ const pullSyncInner = async ({ silent = true } = {}) => {
         renPending.add(r.from);
         continue;
       }
-      // Old-name files still on Drive are uploads that raced the rename
-      // (this device's own pre-rename flush, typically): queue their
-      // in-place renames so the remote side converges too — the same rule
-      // as everywhere else, the flush deletes one only if the renamed copy
-      // already exists.
+      // Old-name files still on Drive raced the rename: queue their in-place
+      // renames so the remote side converges.
       let fk = allPerGameKeys(r.from);
       let tk = allPerGameKeys(r.to);
       for (let i = 0; i < fk.length; i++) {
@@ -3232,13 +2756,12 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       }
     }
 
-    // Tombstones: anything deleted elsewhere that this device still holds.
     let pending = [];
     for (let t of lib.tomb) if (await hasLocalData(t.name)) pending.push(t.name);
     if (pending.length) {
       let keep = await confirmTombstones(pending);
       if (keep === "restore") {
-        // Un-delete: drop the tombstones and re-upload what we still have.
+        // Un-delete: drop the tombstones and re-upload.
         lib.tomb = lib.tomb.filter((t) => !pending.includes(t.name));
         let now = Date.now();
         for (let g of pending) {
@@ -3249,15 +2772,14 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       } else {
         for (let g of pending) {
           if (isRomLoaded(g)) continue; // never yank the game being played
-          // Same local wipe Delete performs — a game deleted on another device
-          // must not leave its cheats or resume snapshot behind here either.
+          // The same local wipe Delete performs.
           await deleteGameLocalData(g);
           gridDirty = true;
         }
       }
     }
 
-    // Pull saves/states for games this device actually holds (progress sync).
+    // Pull saves/states for games this device holds.
     let local = await localSyncFiles();
     for (let [name, f] of remote) {
       if (name === LIBRARY_FILE) continue;
@@ -3276,17 +2798,13 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       local.delete(name);
     }
 
-    // Reconcile upward: queue anything this device holds that the listing
-    // lacks. sigs only remember what was once uploaded — if the app folder
-    // was wiped or a different account signed in, every local game is
-    // "already synced" by sig yet absent from Drive, and nothing would ever
-    // re-upload it. Tombstoned games stay deleted.
+    // Reconcile upward: queue anything held here that the listing lacks
+    // (sigs only remember what was once uploaded). Tombstoned games stay deleted.
     for (let [name, p] of local) {
       if (remote.has(name)) continue;
       if (lib.tomb.some((t) => t.name === p.game)) continue;
-      // A game whose rename couldn't be applied yet still holds files under
-      // the OLD name; re-uploading those would resurrect the names the
-      // renaming device just retired.
+      // A deferred rename still holds files under the old name; re-uploading
+      // them would resurrect the retired names.
       if (renPending.has(p.game)) continue;
       if (!syncState.queueUp.includes(name)) {
         syncState.queueUp.push(name);
@@ -3294,17 +2812,11 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       }
     }
 
-    // Adopt the merged library locally.
     syncState.tomb = lib.tomb;
     syncState.ren = lib.ren;
-    // A rename this device could not apply yet keeps its OLD name on the
-    // local grid: the tile must keep pointing at the data actually held here.
-    // Adopting the new name early would render an "on Drive only" tile for a
-    // game sitting right on this device — which reads as uninstalled, and
-    // whose download affordance forks the library. The shared library keeps
-    // the new name; only this device's copy of the index is held back, with
-    // ts pinned under the marker so the entry still folds forward (and can
-    // never supersede the rename) on the next merge.
+    // A deferred rename keeps its old name on the local grid (else a
+    // "Drive only" tile for a local game, whose download forks the library),
+    // with ts pinned under the marker so it still folds forward next merge.
     let recents = lib.recents;
     if (renPending.size) {
       let back = new Map();
@@ -3314,10 +2826,8 @@ const pullSyncInner = async ({ silent = true } = {}) => {
         return m ? { name: m.from, ts: Math.min(e.ts || 0, (m.ts || 1) - 1) } : e;
       });
     }
-    // The merged library is the grid — do NOT cap it at MAX_RECENT, or every
-    // game past the 20th silently vanishes with no way to see or download it.
-    // MAX_RECENT still bounds how many ROMs this device keeps bytes for
-    // (bumpRecentIndex), which just turns the rest into Drive-only tiles.
+    // Do not cap at MAX_RECENT: games past the 20th would vanish with no
+    // way to download them. MAX_RECENT only bounds locally held bytes.
     await dbPut("recent", recents);
     await writeDriveLibrary(lib, remote);
     await saveSyncState();
@@ -3330,16 +2840,12 @@ const pullSyncInner = async ({ silent = true } = {}) => {
   }
   syncBusy = false;
   refreshSyncStatus();
-  // Queued-missing files flush on the normal debounce (after syncBusy clears
-  // — flushes are serialized behind this pull anyway).
   if (queuedMissing) scheduleFlush();
   if (gridDirty) refreshHomeRecent();
 };
 
-// Sign-in / manual "Sync now": push everything local, then pull.
 const runFullSync = async ({ label } = /** @type {{label?: string}} */ ({})) => {
   if (!syncActive()) return;
-  // Queue every local file so a first sign-in backs the device up.
   let names = [...(await localSyncFiles()).keys()];
   for (let n of names) if (!syncState.queueUp.includes(n)) syncState.queueUp.push(n);
   await saveSyncState();
@@ -3349,11 +2855,8 @@ const runFullSync = async ({ label } = /** @type {{label?: string}} */ ({})) => 
 
 // --- On-demand download of one Drive-only game ---------------------------
 const downloadGame = async (game) => {
-  // Called straight from a tap in the manage list as well as behind the home
-  // tile's own ensureDriveSignedIn, so it re-auths for itself: a token that
-  // aged out between opening the modal and pressing the button must not turn
-  // into "sign in first". An account that was never linked still is refused —
-  // there is nothing on Drive to fetch.
+  // Re-auths for itself (a token can age out between opening the modal and
+  // the tap); a never-linked account is refused.
   if (!driveLinked()) { showToast("Sign in to Google Drive first"); return false; }
   if (!(await ensureDriveSignedIn())) return false;
   if (syncDownloading.has(game)) return false;
@@ -3387,31 +2890,14 @@ const downloadGame = async (game) => {
 };
 
 // --- "Remove from this device" (the inverse of downloadGame) --------------
-// Frees this device's copy of a game's ROM (plus the two things that are only
-// meaningful while those bytes are here: the box art and the auto-resume
-// snapshot). Nothing leaves Drive: no tombstone, no Drive delete, and the
-// recents entry stays put, so the game keeps its place in the merged library
-// and simply re-renders as a Drive-only tile that one tap brings back. That is
-// the whole difference from deleteGameEverywhere, which raises a tombstone
-// precisely so every OTHER device drops the game too.
-//
-// Save data is deliberately KEPT. It is kilobytes next to a multi-megabyte
-// ROM, so it isn't what a user reclaiming space came for, and it is the one
-// thing here that can be irreplaceable — a battery save that hasn't reached
-// Drive yet would be gone for good, with no "download it again". Keeping it
-// also matches the MAX_RECENT eviction rule (bumpRecentIndex has always
-// dropped ROM bytes and never saves), and what's left is still wipeable from
-// this same row via Reset. On the way out we queue the leftovers for upload,
-// so the copy that stays behind is also a copy Drive has.
+// Frees the ROM bytes, box art and auto-resume snapshot. No tombstone, no
+// Drive delete; the game re-renders as a Drive-only tile. Save data is kept
+// (it may be irreplaceable) and queued for upload on the way out.
 const removeGameFromDevice = async (game) => {
   if (!driveLinked()) { showToast("Sign in to Google Drive first"); return false; }
   if (!(await ensureDriveSignedIn())) return false;
-  // Never take the last copy. The button is already gated on this device's
-  // record of the upload (syncState.sigs), but that record can lie: a wiped
-  // app folder, or a different Google account signed in, leaves stale sigs
-  // pointing at files Drive no longer holds. The live listing is the only
-  // authority, so re-check it here, immediately before the bytes go — and if
-  // the ROM genuinely isn't backed up, back it up instead of deleting it.
+  // Never take the last copy: sigs can be stale (wiped app folder, different
+  // account), so re-check the live listing and back up instead if needed.
   let remote;
   try {
     remote = await driveListMap();
@@ -3425,13 +2911,7 @@ const removeGameFromDevice = async (game) => {
     showToast("Not backed up yet — kept here and queued for Drive");
     return false;
   }
-  // bytes + session. The resume snapshot goes with the ROM because it is a
-  // snapshot OF that ROM: with the bytes gone the game can't be launched, so
-  // the only thing it can do here is sit there weighing as much as a save state
-  // until the game is downloaded again — at which point the battery save we
-  // kept resumes the player anyway. Everything irreplaceable (both battery
-  // saves, all nine manual slots, the cheat list) stays; see the group comment
-  // on perGameKeys and the long note above.
+  // bytes + session; saves and prefs stay (see perGameKeys).
   let keys = perGameKeys(game);
   await deleteKeys([...keys.bytes, ...keys.session]);
   markGameUpload(game); // the ROM is gone, so this queues the saves we kept
@@ -3439,8 +2919,6 @@ const removeGameFromDevice = async (game) => {
 };
 
 // --- Deletion (Manage ROMs) ----------------------------------------------
-// Reset = wipe save data, keep the ROM. Delete = remove the game entirely and
-// tombstone it so every device drops it. Both are local-only when signed out.
 const resetGameSaves = async (game) => {
   await deleteSaveData(game);
   if (driveLinked()) queueSaveDataDeletes(game);
@@ -3449,10 +2927,7 @@ const deleteGameEverywhere = async (game) => {
   await deleteGameLocalData(game);
   await dbPut("recent", (await getRecentMeta()).filter((r) => r.name !== game));
   if (driveLinked()) {
-    // Queue the whole inventory: markDelete drops anything Drive doesn't hold
-    // (parseDriveFileName rejects art:/stateauto:/cheats:), so passing every
-    // key means a per-game record added to perGameKeys later starts mirroring
-    // its deletion the day it starts syncing, with no second list to update.
+    // Queue the whole inventory: markDelete drops what Drive doesn't hold.
     for (let n of allPerGameKeys(game)) markDelete(n);
     syncState.tomb = syncState.tomb.filter((t) => t.name !== game);
     syncState.tomb.push({ name: game, ts: Date.now() });
@@ -3462,32 +2937,21 @@ const deleteGameEverywhere = async (game) => {
 };
 
 // --- Rename (Manage ROMs) -------------------------------------------------
-// A game's name is not a label on this record — it IS the record's address.
-// Every key in perGameKeys is built from it, the Drive file names are those
-// same keys one-for-one, the recents index refers to the game by name, and a
-// printed photo carries the name of the game that printed it. So a rename is a
-// migration of the whole record, and the only honest shape for it is
-// all-or-nothing: dbMoveKeys does the lot in one IndexedDB transaction.
+// Every per-game key, Drive file name, recents entry and printed photo is
+// addressed by the name, so a rename is an all-or-nothing migration
+// (dbMoveKeys, one transaction).
 
-// Long enough for any real title, short enough that the name still fits an
-// export file name and a Drive listing row.
 const RENAME_MAX_LEN = 100;
 
-// Split a stored name into the part the user may edit and the extension we
-// keep for them. The extension is not up for editing: it decides the system
-// (systemOf), the file loadRom writes into the Emscripten FS, and the name of
-// an exported save — retyping it wrongly would silently turn a GBA game into a
-// Game Boy one. Kept verbatim (not extOf's lowercased form) so "ZELDA.GB"
-// stays "ZELDA.GB".
+// The extension is not editable: it decides the system (systemOf). Kept
+// verbatim, not extOf's lowercased form.
 const splitRomName = (name) => {
   let s = String(name);
   let i = s.lastIndexOf(".");
   return i > 0 ? { base: s.slice(0, i), ext: s.slice(i) } : { base: s, ext: "" };
 };
 
-// Every name the library already knows: the recents index (which includes
-// Drive-only games) plus any game whose save data outlived its entry. This is
-// the set a rename must not land on.
+// Every name the library knows: the set a rename must not land on.
 const libraryNames = async () => {
   let s = new Set();
   for (let r of await getRecentMeta()) if (r?.name) s.add(r.name);
@@ -3495,11 +2959,8 @@ const libraryNames = async () => {
   return s;
 };
 
-// What the user typed, resolved to a full stored name. Two liberties are taken
-// with the input, both of them visible: it is trimmed, and a typed-out copy of
-// the extension is not doubled ("Zelda.gb" while renaming a .gb game means
-// "Zelda.gb", not "Zelda.gb.gb"). The confirmation screen shows the result, so
-// neither happens behind the user's back.
+// Typed name -> full stored name: trimmed, and a typed-out extension is
+// not doubled.
 const renameFullName = (base, oldName) => {
   let { ext } = splitRomName(oldName);
   let t = String(base).trim();
@@ -3509,8 +2970,7 @@ const renameFullName = (base, oldName) => {
   return t + ext;
 };
 
-// Why this name can't be used, or null when it can. `taken` is libraryNames()
-// with the game's own name removed.
+// Why this name cannot be used, or null. `taken` excludes the game's own name.
 const renameNameError = (base, oldName, taken) => {
   let t = String(base).trim();
   if (!t) return "Enter a name.";
@@ -3518,13 +2978,10 @@ const renameNameError = (base, oldName, taken) => {
     return "Keep the name to " + RENAME_MAX_LEN + " characters or fewer.";
   if (/[\u0000-\u001f\u007f]/.test(t)) return "Names can't contain control characters.";
   if (/[/\\]/.test(t)) return "Names can't contain / or \\ — they'd break the exported file name.";
-  // ":" separates a key from its slot suffix ("state:<name>:slot3"), so a name
-  // containing one could parse back out as a different game.
+  // ":" separates a key from its slot suffix.
   if (t.includes(":")) return "Names can't contain a colon.";
   let full = renameFullName(base, oldName);
-  // "save:<name>-p2" is the 2P link partner's save, so a name ending in "-p2"
-  // would read back as another game's link save. Only reachable when the name
-  // has no extension to sit after it.
+  // "save:<name>-p2" is the 2P partner's save (only reachable with no extension).
   if (full.endsWith("-p2")) return "Names can't end in “-p2” — that ending is reserved for 2-player link saves.";
   if (full === oldName) return "That's already this game's name.";
   if (taken && taken.has(full))
@@ -3532,9 +2989,7 @@ const renameNameError = (base, oldName, taken) => {
   return null;
 };
 
-// What a rename would move, counted, so the confirmation can enumerate it
-// instead of asking "are you sure?". Counts, not key names: what the user
-// recognises is "3 save states", not "state:<name>:slot4".
+// What a rename would move, counted, for the confirmation.
 const renameInventory = async (name) => {
   const has = async (k) => (await dbGet(k)) != null;
   let states = 0;
@@ -3555,7 +3010,6 @@ const renameInventory = async (name) => {
   };
 };
 
-// The user-facing lines for that inventory, most valuable first.
 const renameInventoryLines = (inv) => {
   let out = [];
   if (inv.rom) out.push(inv.art ? "The ROM file and its box art" : "The ROM file");
@@ -3568,19 +3022,15 @@ const renameInventoryLines = (inv) => {
   return out;
 };
 
-// Rename one game and everything stored with it. Returns { ok: true, moved }
-// or { ok: false, error } — the error is shown verbatim, so it says what
-// happened AND that nothing changed.
+// Returns { ok: true, moved } or { ok: false, error } (shown verbatim).
 const renameGame = async (oldName, newName) => {
   if (!db) return { ok: false, error: "Storage isn't ready yet — try again in a moment." };
   if (oldName === newName) return { ok: false, error: "That's already this game's name." };
-  // A live link/online session has a second core writing this game's saves and
-  // a peer that agreed on the name; renaming under it would corrupt both.
+  // A link/online session has a second core writing these saves.
   if (isRomLoaded(oldName) && (linkMode || rollbackMode || netActive())) {
     return { ok: false, error: "Close the link or online session before renaming this game." };
   }
-  // Collisions are refused, never merged. Two questions, both asked: is the
-  // name in the library, and does ANY record already sit under it?
+  // Collisions are refused, never merged: library name, or any record.
   let existing = new Set((await dbKeys()).filter((k) => typeof k === "string"));
   let taken = await libraryNames();
   if (taken.has(newName) || allPerGameKeys(newName).some((k) => existing.has(k))) {
@@ -3588,29 +3038,19 @@ const renameGame = async (oldName, newName) => {
              error: "“" + displayName(newName) + "” already exists in your library. Nothing was changed." };
   }
 
-  // The game in memory: flush whatever it has pending under the OLD name, then
-  // detach it. With currentOriginalName null every write path (the 5s autosave,
-  // the tab-switch snapshot, the cheat list, the state slots) skips this game,
-  // so nothing can re-create an old key behind the transaction's back — and
-  // nothing can land on a new key before the transaction claims it, which
-  // would abort the move as a collision.
+  // The game in memory: flush under the old name, then detach so no write
+  // path recreates an old key or lands on a new one mid-transaction.
   let loaded = isRomLoaded(oldName) && !!currentRomName;
   if (loaded) {
     await persistSave(currentRomName, oldName);
     currentOriginalName = null;
   }
 
-  // Records that are not per-game keys but do name the game. All written in
-  // the same transaction as the move, so the pointers can never disagree with
-  // the data they point at.
+  // Records that name the game, written in the same transaction.
   let puts = [];
 
-  // The library index. The renamed entry goes to the front with a fresh
-  // timestamp rather than keeping its place, and that is a correctness
-  // requirement, not a flourish: mergeLibrary drops any entry older than a
-  // tombstone of the same name, so a new name that some other device once
-  // deleted would vanish from the merged library (and its tombstone would
-  // offer to delete the freshly renamed game) unless this entry outranks it.
+  // The renamed entry gets a fresh timestamp: mergeLibrary drops any entry
+  // older than a tombstone of the same name.
   let recents = await getRecentMeta();
   if (recents.some((r) => r?.name === oldName)) {
     let list = recents.filter((r) => r?.name !== oldName);
@@ -3618,46 +3058,30 @@ const renameGame = async (oldName, newName) => {
     puts.push(["recent", list]);
   }
 
-  // Printed photos carry the name of the game that printed them (it names the
-  // exported PNG), so they are re-tagged rather than left pointing at a game
-  // that no longer exists.
+  // Printed photos carry the game's name (it names the exported PNG).
   let prints = await dbGet(PRINTER_PHOTOS_KEY);
   if (Array.isArray(prints) && prints.some((p) => p?.game === oldName)) {
     puts.push([PRINTER_PHOTOS_KEY,
                prints.map((p) => (p?.game === oldName ? { ...p, game: newName } : p))]);
   }
 
-  // The move list. Every per-game key is offered, not only the ones that exist:
-  // dbMoveKeys skips a source that holds nothing, and reading the truth inside
-  // the transaction beats trusting a list taken before it.
+  // Every per-game key is offered; dbMoveKeys skips empty sources.
   let fromKeys = allPerGameKeys(oldName);
   let toKeys = allPerGameKeys(newName);
   let pairs = fromKeys.map((k, i) => [k, toKeys[i]]);
 
-  // Drive. The remote file names ARE these keys, and Drive renames a file in
-  // place with a metadata PATCH — no content moves — so the remote
-  // consequence of a local rename is exactly: rename the files, whether or
-  // not this device holds their bytes. That is what lets a Drive-only game
-  // rename from here, and it is why nothing is deleted or re-uploaded: the
-  // only copy is never touched, only re-addressed.
-  //
-  // The queue is written INSIDE the move transaction. That is what makes a
-  // tab closed mid-rename safe: the records and the list of what still has to
-  // happen on Drive commit together, so there is no instant where the data
-  // has moved and Drive doesn't know, or vice versa. A failed flush leaves
-  // the queue entries in place for the next attempt.
+  // Drive: rename the files in place (metadata PATCH), whether or not this
+  // device holds their bytes. The queue is written inside the move
+  // transaction, so a tab closed mid-rename leaves records and queue consistent.
   let nextSync = null;
   if (driveLinked()) {
-    // Every syncable key is offered, held locally or not — the flush skips
-    // any name Drive doesn't hold. The exception is a key already queued for
-    // remote deletion: its remote file is condemned, and renaming it would
-    // resurrect it under the new name.
+    // Every syncable key, held locally or not, except one already queued
+    // for remote deletion (renaming it would resurrect it).
     let mirrored = pairs.filter(([f]) => !!parseDriveFileName(f) &&
                                          !syncState.queueDel.includes(f));
     let oldKeys = mirrored.map(([f]) => f);
     let newKeys = mirrored.map(([, t]) => t);
-    // What Drive holds under the old names it will hold, unchanged, under the
-    // new ones — the signatures and modified-times follow their files.
+    // Signatures and modified-times follow their files.
     let sigs = { ...syncState.sigs };
     let rmt = { ...syncState.rmt };
     for (let [f, t] of mirrored) {
@@ -3668,23 +3092,18 @@ const renameGame = async (oldName, newName) => {
       ...syncState,
       sigs,
       rmt,
-      // A pending upload under an old name still has bytes to deliver; they
-      // deliver under the new name now (its sig moved with it, so a truly
-      // dirty save still uploads, and a clean one still doesn't).
+      // A pending upload delivers under the new name (its sig moved too).
       queueUp: [...new Set(syncState.queueUp.map((n) => {
         let i = oldKeys.indexOf(n);
         return i >= 0 ? newKeys[i] : n;
       }))],
-      // A delete aimed at a NEW name is stale by definition — see the
-      // tombstone rule below: this game exists now.
+      // A delete aimed at a new name is stale: this game exists now.
       queueDel: syncState.queueDel.filter((n) => !newKeys.includes(n)),
       queueRen: [...syncState.queueRen,
                  ...mirrored.map(([from, to]) => ({ from, to }))],
-      // No tombstone for the old name: the ren marker is what tells the other
-      // devices, and unlike a tombstone it migrates their local records to
-      // the new name instead of deleting them. Stale markers and tombstones
-      // on either name are cleared — this game exists here, now, whatever
-      // some older delete or rename said.
+      // No tombstone for the old name (the ren marker migrates other
+      // devices instead of deleting); stale markers/tombstones on either
+      // name are cleared.
       tomb: syncState.tomb.filter((t) => t?.name !== oldName && t?.name !== newName),
       ren: [
         ...syncState.ren.filter((r) => r?.from !== oldName && r?.from !== newName),
@@ -3698,14 +3117,13 @@ const renameGame = async (oldName, newName) => {
   try {
     ({ moved } = await dbMoveKeys(pairs, puts));
   } catch (e) {
-    // Nothing moved: the transaction either committed whole or rolled back
-    // whole, so the game is exactly as it was. Put the session back on it.
+    // Rolled back whole: put the session back.
     if (loaded) currentOriginalName = oldName;
     return { ok: false, error: (e?.message || "The rename could not be completed.") +
                               " Nothing was changed." };
   }
 
-  // Committed. Everything from here is in-memory bookkeeping catching up.
+  // Committed; in-memory bookkeeping catches up.
   if (nextSync) {
     syncState = nextSync;
     scheduleFlush();
@@ -3713,27 +3131,19 @@ const renameGame = async (oldName, newName) => {
   if (Array.isArray(printerPhotos)) {
     for (let p of printerPhotos) if (p?.game === oldName) p.game = newName;
   }
-  // The two "undo the last state load" buffers are keyed by game name.
   if (stateUndoName === oldName) stateUndoName = newName;
   if (rwUndoName === oldName) rwUndoName = newName;
   if (loaded) {
     currentOriginalName = newName;
-    // The paused-at-home card prints the game's name; refresh it only if it is
-    // actually on screen (it re-shows itself otherwise).
     if (homePausedCard && !homePausedCard.hidden) updatePausedCard();
   }
   return { ok: true, moved: moved.length };
 };
 
-// --- Rename modal ---------------------------------------------------------
-// Three panes in one overlay: name it, confirm it, and (only when something
-// goes wrong) say what happened. The confirmation is not a speed bump — it is
-// where the user learns that a rename moves their saves too, so it enumerates
-// what is about to move, with counts, and says what Drive will do about it.
+// --- Rename modal: name it, confirm it (enumerating what moves), report ---
 
-// Opening reads storage before the overlay exists, so without this a double
-// tap (a phone fires touch AND click) stacks two overlays — the second taking
-// the focus trap and the first left behind when it is dismissed.
+// Opening reads storage before the overlay exists; a double tap (touch +
+// click) would stack two overlays without this.
 let renameModalOpen = false;
 
 const openRenameModal = async (oldName) => {
@@ -3752,9 +3162,8 @@ const openRenameModal = async (oldName) => {
   }
   let wasLoaded = isRomLoaded(oldName);
 
-  // The Manage modal stays open behind this one, so hand the Tab trap over
-  // rather than running two of them (trapFocus keeps one handler, and the
-  // overlay that took it is the one allowed to give it back).
+  // The Manage modal stays open behind; hand the Tab trap over rather than
+  // running two.
   let reopen = romsModal.classList.contains("open");
   if (reopen) releaseFocus(romsModal);
 
@@ -3764,8 +3173,6 @@ const openRenameModal = async (oldName) => {
     m.dismiss();
     if (reopen && romsModal.classList.contains("open")) trapFocus(romsModal);
   };
-  // hint: null — this modal's intro line changes per pane, so it is rendered
-  // into the body rather than fixed in the header.
   m = buildSyncModal({ title: "Rename game", hint: null, onDismiss: close });
 
   const pane = () => { m.body.innerHTML = ""; return m.body; };
@@ -3815,9 +3222,7 @@ const openRenameModal = async (oldName) => {
     input.setAttribute("aria-label", "New name for " + displayName(oldName));
     body.appendChild(input);
 
-    // One live line, doing double duty: the resulting file name while the
-    // input is valid, the reason it isn't while it isn't. aria-live so a
-    // screen reader hears the refusal without hunting for it.
+    // The resulting name while valid, the reason while not; aria-live.
     let note = para(body, "modal-toggle-sub", "");
     note.setAttribute("aria-live", "polite");
 
@@ -3889,8 +3294,6 @@ const openRenameModal = async (oldName) => {
         "This game has no saved data on this device yet — only its place in your library moves.");
     }
 
-    // One line covers the whole remote story, including the Drive-only case
-    // (where the list above is empty and this is the only thing that moves).
     if (driveLinked()) {
       para(body, "modal-toggle-sub",
         "Copies on Google Drive are renamed on the next sync, and your other " +
@@ -3916,10 +3319,8 @@ const openRenameModal = async (oldName) => {
     });
   };
 
-  // --- Pane 3: it didn't happen ---
-  // A failed rename has to say two things: what went wrong, and whether
-  // anything moved. Because the move is one transaction, the second answer is
-  // always "no", and saying so is the point of this pane.
+  // --- Pane 3: it didn't happen (and, the move being one transaction,
+  // nothing moved) ---
   const showErrorStep = (newName, message) => {
     let body = pane();
     let p = para(body, "cheat-error", message);
@@ -3935,9 +3336,7 @@ const openRenameModal = async (oldName) => {
   showNameStep();
 };
 
-// --- "Removed on another device" modal ------------------------------------
-// Resolves "continue" (drop the local copies) or "restore" (keep them and put
-// them back on Drive). Continue is the primary action, bottom-right.
+// --- "Removed on another device" modal: resolves "continue" or "restore" ---
 const confirmTombstones = (games) =>
   new Promise((resolve) => {
     let m;
@@ -4045,16 +3444,10 @@ const gdriveConnect = async () => {
   refreshHomeRecent();
 };
 
-// Ensure we hold a Drive session before doing Drive work. Already holding a
-// live token → true. Otherwise this is the LAZY re-auth path: callers invoke it
-// from a click, so the popup has the activation it needs.
-//
-// Two cases, deliberately different. An already-linked account only needs a
-// re-grant, so it gets the silent prompt:"" one carrying login_hint — with the
-// Google session and the prior grant standing, that is a window that opens and
-// closes with nothing in it, and the user's tap does what they asked. Only a
-// genuinely new (or revoked) connection falls through to the full
-// account-chooser flow with its "Connected to Google Drive" toast and full sync.
+// Ensure a Drive session before Drive work; the lazy re-auth path, called
+// from a click so the popup has activation. A linked account gets the
+// silent prompt:"" re-grant with login_hint; only a new or revoked
+// connection falls through to the full account-chooser flow.
 const ensureDriveSignedIn = async () => {
   if (syncActive()) return true;
   if (driveLinked()) {
@@ -4066,8 +3459,7 @@ const ensureDriveSignedIn = async () => {
       refreshHomeRecent();
       return true;
     } catch {
-      // Grant really is gone (or the popup was blocked): fall through and ask
-      // properly rather than leaving the user's tap doing nothing.
+      // Grant gone or popup blocked: ask properly.
     }
   }
   try { await gdriveConnect(); }
@@ -4076,32 +3468,17 @@ const ensureDriveSignedIn = async () => {
 };
 
 // --- Keeping the session alive -------------------------------------------
-// The GIS token flow hands out ~1h access tokens and NO refresh token, and its
-// re-grant — even the silent prompt:"" one — goes through a popup window, so
-// it needs transient user activation or the popup blocker kills it. That makes
-// renewal a scheduling problem: we must find a user gesture BEFORE the token
-// dies, not react to the 401 afterwards from a background timer (which has no
-// activation and can only fail).
-//
-// So: whenever the token is missing or near expiry, arm a one-shot listener
-// that does the silent re-grant on the very next pointerdown/keydown/touchstart.
-// An emulator user supplies one within seconds. With the Google session and the
-// prior grant still standing, that popup opens and closes with no visible
-// chooser and the session rolls over invisibly.
-//
-// Renewal starts this long before the token actually expires, so there are
-// several poll ticks' worth of chances to catch a gesture while the current
-// token still works.
+// ~1h tokens, no refresh token, and even the silent re-grant is a popup
+// needing transient activation. So when the token is missing or near
+// expiry, a one-shot listener does the silent re-grant on the next
+// pointerdown/keydown/touchstart. Renewal starts this long before expiry.
 const DRIVE_RENEW_LEAD_MS = 10 * 60 * 1000;
-// Consecutive silent-renew rejections before we conclude the grant is really
-// gone (revoked, or the Google session ended) and show the signed-out UI. Each
-// attempt costs a popup, so this is deliberately small.
+// Consecutive silent-renew rejections before the signed-out UI; each costs a popup.
 const DRIVE_RENEW_MAX_FAILS = 3;
 
 let driveRenewArmed = false;
 let driveRenewFails = 0;
 
-// True when we should be hunting for a gesture to renew on.
 const driveTokenStale = () =>
   !gdriveToken || gdriveTokenExp - Date.now() < DRIVE_RENEW_LEAD_MS;
 
@@ -4112,51 +3489,39 @@ const armDriveRenewOnGesture = () => {
   driveRenewArmed = true;
   const events = ["pointerdown", "keydown", "touchstart"];
   const onGesture = (e) => {
-    // The update controls must never spend the renewal gesture: applyUpdate
-    // reloads the page moments later, which orphans the GIS popup
-    // mid-negotiation and loses the token it was fetching — the user just
-    // sees Update inexplicably open a Google sign-in window. Stay armed;
-    // the next ordinary gesture (or the post-reload boot resume) pays.
-    // (Duck-typed rather than `instanceof Element`: text nodes lack closest,
-    // and the test harness dispatches bare event objects.)
+    // The update controls must not spend the gesture: the reload orphans
+    // the popup and loses the token. (Duck-typed: text nodes lack closest.)
     const t = e && e.target;
     if (t && typeof t.closest === "function" &&
         t.closest("#update-btn, #update-confirm, #force-update")) return;
     events.forEach((ev) => window.removeEventListener(ev, onGesture, true));
-    // Cleared before the attempt so the *next* expiry can arm again — the old
-    // one-shot latch was never reset, which meant a session could be resumed at
-    // most once per page load.
+    // Cleared before the attempt so the next expiry can arm again.
     driveRenewArmed = false;
     renewDriveToken();
   };
   events.forEach((e) => window.addEventListener(e, onGesture, true));
 };
 
-// Silent re-grant. Safe to call with a live token (rollover) or none (resume).
+// Silent re-grant, with a live token (rollover) or none (resume).
 const renewDriveToken = async () => {
   if (!GDRIVE_CLIENT_ID || !syncState.connected) return;
   if (appUpdating) return; // reload imminent: a popup now would be orphaned
   if (navigator.onLine === false) { armDriveRenewOnGesture(); return; }
   const wasSignedOut = !gdriveToken;
 
-  // Loading Google's script is a network call, not a consent decision: a
-  // failure here (offline, blocked) must not count against the fail budget or
-  // an offline session would be signed out for no reason.
+  // A script-load failure (offline) must not count against the fail budget.
   try { await loadGisScript(); }
   catch { armDriveRenewOnGesture(); return; }
 
-  // The gesture may have aged out while the script loaded (activation lasts
-  // about five seconds). A popup now is refused, and — worse — that refusal
-  // would spend one of the three strikes that decide whether the grant is
-  // really gone. Wait for a fresh gesture instead.
+  // Activation lasts about five seconds and may have aged out while the
+  // script loaded; a refused popup would spend a strike, so wait.
   if (!hasUserActivation()) { armDriveRenewOnGesture(); return; }
 
   try {
     await gdriveAcquireToken("");
   } catch {
-    // Popup blocked (no activation after all) or the grant is gone. Try again
-    // on the next gesture until the budget runs out; only then does the user
-    // actually see a signed-out UI and have to click Sign in.
+    // Popup blocked or grant gone: retry on the next gesture until the
+    // budget runs out.
     if (++driveRenewFails >= DRIVE_RENEW_MAX_FAILS) {
       clearDriveToken();
       renderGdriveSection();
@@ -4177,21 +3542,12 @@ const renewDriveToken = async () => {
   await pullSync();
 };
 
-// Boot resume. If the persisted access token is still within its lifetime,
-// reuse it directly — no popup, no gesture — so a reload or app update doesn't
-// drop the session. The token is confirmed live via the tokeninfo endpoint (a
-// plain fetch, never a popup), so a revoked token falls back to the
-// gesture-gated re-grant instead of flashing a blocked popup. Only when there's
-// no usable token do we arm the first-gesture re-grant.
+// Boot resume: reuse a persisted token within its lifetime, confirmed via
+// tokeninfo (a plain fetch); otherwise arm the first-gesture re-grant.
 const resumeDriveOnBoot = async () => {
   if (!GDRIVE_CLIENT_ID || !syncState.connected || gdriveToken) return;
-  // Warm the GIS script now, for an account that already uses Drive. A gesture
-  // only carries transient activation for about five seconds (measured: still
-  // live at 1.2s, gone at 5.2s, in both WebKit and Chromium), and fetching
-  // accounts.google.com/gsi/client cold on a phone can eat that whole budget —
-  // so a renewal armed on the first tap after launch could lose its popup to a
-  // script download. Loading it off the gesture path removes that failure mode.
-  // Signed-out users still never touch Google's servers.
+  // Warm the GIS script for a linked account: transient activation lasts
+  // ~5s, and a cold script fetch on a phone can eat that whole budget.
   loadGisScript().catch(() => {});
   if (syncState.token && syncState.tokenExp > Date.now() + 5000) {
     gdriveToken = syncState.token;
@@ -4205,16 +3561,14 @@ const resumeDriveOnBoot = async () => {
       live = r.ok;
       if (live) rememberDriveEmail((await r.json()).email);
     } catch {
-      // Offline at boot: keep the token rather than signing out; the normal
-      // sync path retries and its 401 handling covers a genuinely dead token.
+      // Offline at boot: keep the token; the sync path's 401 handling covers it.
       live = true;
     }
     if (live) {
       refreshSyncUI();
       refreshHomeRecent();
       pullSync();
-      // A restored token can be minutes from expiry; start hunting for a
-      // gesture now rather than waiting for the first poll tick.
+      // A restored token can be minutes from expiry.
       if (driveTokenStale()) armDriveRenewOnGesture();
       return;
     }
@@ -4224,17 +3578,11 @@ const resumeDriveOnBoot = async () => {
 };
 
 // --- Sync triggers --------------------------------------------------------
-// No push channel exists, so pull on the moments that matter and poll gently.
-// The poll also retries a stuck flush: queued changes normally drain via the
-// debounce timers or the `online` event, but when Drive is unreachable while
-// the browser still considers itself online (Drive outage, blocking proxy)
-// no `online` event will ever fire — without this, "Offline — your changes
-// will sync when you reconnect" held until the user made another change or
-// switched tabs.
+// No push channel: pull on the moments that matter and poll gently. The poll
+// also retries a stuck flush (Drive unreachable while navigator stays
+// online fires no `online` event).
 const syncPollTick = () => {
-  // Before the syncActive() gate: this is also the heartbeat that notices an
-  // expiring (or already-expired) token and arms the gesture-gated renewal, and
-  // it has to keep running once the token is gone.
+  // Before the syncActive() gate: this heartbeat also arms the renewal.
   if (GDRIVE_CLIENT_ID && syncState.connected && driveTokenStale()) {
     armDriveRenewOnGesture();
   }
@@ -4256,30 +3604,21 @@ window.addEventListener("offline", () => {
 });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return;
-  // Coming back to a phone that was asleep for an hour is the single most
-  // likely moment to be holding a dead token — arm the renewal now rather than
-  // waiting up to three minutes for the poll to notice.
+  // Returning to a phone asleep for an hour: arm the renewal now.
   if (driveLinked() && driveTokenStale()) armDriveRenewOnGesture();
   if (syncActive()) flushSync().then(() => pullSync());
 });
 
 // --- Sync UI surfaces -----------------------------------------------------
 const homeSyncBtn = /** @type {HTMLButtonElement} */ (document.getElementById("home-sync"));
-// Same slot as Sync, shown in its place while signed out. Without it the only
-// route into Drive from a populated library was Manage ROMs and Saves → Sign in
-// with Google, which nothing on the home screen hinted at.
+// Same slot as Sync, shown while signed out.
 const homeSignInBtn = /** @type {HTMLButtonElement} */ (document.getElementById("home-signin"));
 
-// The grid's own sync affordance doubles as its progress readout: while a sync
-// is running the "Sync" link becomes a spinner + "Syncing…" and stops being
-// clickable, so activity is visible right where the games are.
+// The grid's Sync link doubles as its progress readout.
 const refreshHomeSyncButton = () => {
-  // Exactly one of the two is ever visible. Signed out is the Sign-in state;
-  // a build with no client ID has no Drive at all, so neither shows.
+  // Exactly one is visible; a build with no client ID shows neither.
   if (homeSignInBtn) {
     homeSignInBtn.hidden = !GDRIVE_CLIENT_ID || driveLinked();
-    // A failed/cancelled sign-in re-enables the control here rather than in the
-    // click handler's tail, so every path back to "signed out" is clickable.
     if (!homeSignInBtn.hidden) homeSignInBtn.disabled = false;
   }
   if (!homeSyncBtn) return;
@@ -4299,69 +3638,47 @@ const refreshSyncUI = () => {
 };
 if (homeSyncBtn) {
   homeSyncBtn.addEventListener("click", async () => {
-    // Doubles as the reconnect affordance: linked but tokenless, this is the
-    // gesture that buys a new token, and then it syncs as asked.
+    // Linked but tokenless: this gesture buys the new token.
     if (!(await ensureDriveSignedIn())) return;
     runFullSync({ label: "Syncing" });
   });
 }
 if (homeSignInBtn) {
-  // gdriveConnect() must be reached with the click's transient activation still
-  // live or Google's OAuth popup is blocked ("Sign-in was cancelled"). The body
-  // of an async function runs synchronously up to its first await, so the
-  // assignment above it is free — but nothing may be awaited BEFORE the call.
+  // gdriveConnect() must be reached with the click's activation live, so
+  // nothing may be awaited before the call.
   homeSignInBtn.addEventListener("click", async () => {
     homeSignInBtn.disabled = true;
     try { await gdriveConnect(); }
     catch (e) { showToast(e.message); }
-    // gdriveConnect's success path already ran refreshSyncUI (which hides this
-    // button); on failure this is what makes it clickable again.
     refreshHomeSyncButton();
   });
 }
-// The markup starts both buttons hidden, and nothing else paints this slot
-// until an auth transition. Signed-out is the boot state, so seed it here.
+// The markup starts both buttons hidden; seed the signed-out boot state.
 refreshHomeSyncButton();
 
-// --- Core-construction settings (GB renderer, GBA BIOS behavior) ---
-// JS mirrors of the wasm-side option vars; they take effect the next time a
-// core is constructed (ROM load / reset), matching the desktop config.
+// --- Core-construction settings ---
+// JS mirrors of the wasm-side option vars; effective at the next core construction.
 
 var gbFifo = true;
 var gbaBiosMode = 0; // 0 = HLE, 1 = real BIOS, 2 = real BIOS boot + HLE calls
 var gbaRunBios = true;
-// Presentation-side only (the RAF loop polls _wasm_rumble and reacts here),
-// so unlike its siblings it has no wasm setter in applySystemSettings.
+// Presentation-side only: no wasm setter in applySystemSettings.
 var gbRumble = true;
-// Rewind, on by default — matching the native `rewind` config default, and
-// matching what every existing web install already does (the ring used to be
-// allocated unconditionally). A "system" record written before this setting
-// existed has no rewindOn key, and loadSystemSettings leaves this `true`
-// rather than reading `undefined`, so nobody loses rewind by upgrading.
-//
-// Off is a real saving, not a hidden button: the wasm side stops allocating
-// the ring, so loop_tick's per-interval snapshot + thumbnail never runs.
-// Measured at ~0.8 ms per push (one per 10 frames), i.e. 8% of loop_tick on
-// the Good Boy Galaxy demo — see the bench note in the settings markup.
+// Rewind, on by default; a "system" record with no rewindOn key stays on
+// (loadSystemSettings). Off stops allocating the wasm ring.
 var rewindOn = true;
 
-// Speed mode, off by default: a low-end-device preset that trades accuracy
-// and quality for host CPU. Core side (wasm_set_speed_mode): the GBA renders
-// every other frame and the emulated CPU runs at half its real clock, and a
-// GB game loaded while it is on uses the cheaper scanline renderer. JS side:
-// rewind, MP2K HLE, FIFO interpolation, ambient glow and run-ahead are
-// SUSPENDED (not overwritten — the stored preferences return untouched when
-// it is switched off). Advertised as less accurate/compatible on purpose.
+// Speed mode: wasm_set_speed_mode (GBA renders every other frame at half
+// clock; GB loads the scanline renderer), and rewind / MP2K HLE / FIFO
+// interpolation / glow / run-ahead are suspended, not overwritten.
 var speedMode = false;
 
 const gbaRunBiosToggle = /** @type {HTMLInputElement} */ (document.getElementById("gba-run-bios-toggle"));
 const gbRumbleToggle = /** @type {HTMLInputElement} */ (document.getElementById("gb-rumble-toggle"));
 const rewindToggle = /** @type {HTMLInputElement} */ (document.getElementById("rewind-toggle"));
 
-// Every rewind affordance is hidden by one body class (see body.rewind-off in
-// styles.css) so there is a single place to add the next one to. Turning it
-// off mid-session also has to shut the film strip if it happens to be open —
-// the ring behind it is about to go away.
+// body.rewind-off hides every rewind affordance; turning it off also shuts
+// an open film strip, since its ring is about to go.
 const applyRewindUI = () => {
   document.body.classList.toggle("rewind-off", !rewindOn);
   if (!rewindOn) {
@@ -4370,14 +3687,8 @@ const applyRewindUI = () => {
   }
 };
 
-// Super Game Boy. sgbEnable is OFF by default -- a fresh install plays
-// monochrome carts as a Game Boy, and the adapter is something you go and turn
-// on. An existing "system" record predating this feature has no sgbEnable key,
-// so loadSystemSettings leaves it off too: nobody silently gains it.
-// sgbBorder defaults on because it is not a second opt-in; once you have asked
-// for the adapter, the border is most of what it does.
-// Both are only consulted by the core at ROM load (the cart header has the
-// final say after that), so changing sgbEnable applies to the next game.
+// Super Game Boy: sgbEnable off by default, sgbBorder on. Both are read by
+// the core at ROM load, so sgbEnable applies to the next game.
 var sgbEnable = false;
 var sgbBorder = true;
 const sgbToggle = /** @type {HTMLInputElement} */ (document.getElementById("sgb-toggle"));
@@ -4390,15 +3701,12 @@ const applySystemSettings = () => {
   if (Module._wasm_set_gba_bios_mode) Module._wasm_set_gba_bios_mode(gbaBiosMode);
   if (Module._wasm_set_gba_run_bios) Module._wasm_set_gba_run_bios(gbaRunBios ? 1 : 0);
   if (Module._wasm_sgb_enable) Module._wasm_sgb_enable(sgbEnable ? 1 : 0);
-  // The border switch IS live — it only hides a layer the core already has.
+  // The border switch is live: it only hides a layer the core has.
   if (Module._wasm_sgb_border_show) Module._wasm_sgb_border_show(sgbBorder ? 1 : 0);
-  // Live in both directions: off drops the ring now, on allocates a fresh
-  // (empty) one for the session already running. No reload, so no
-  // "takes effect next launch" note is owed here. Speed mode suspends it.
+  // Live in both directions; speed mode suspends it.
   if (Module._setRewindEnabled) Module._setRewindEnabled((rewindOn && !speedMode) ? 1 : 0);
   if (Module._wasm_set_speed_mode) Module._wasm_set_speed_mode(speedMode ? 1 : 0);
-  // Speed mode suspends every perf-relevant audio nicety; re-push their
-  // effective values whenever it flips (their own appliers factor it in too).
+  // Re-push the suspended audio settings' effective values on a flip.
   applyMp2kHle();
   applyFifoInterp();
   applyPitchCorrectFF();
@@ -4423,17 +3731,12 @@ const syncSystemSettingsUI = () => {
   if (sgbBorderRow) sgbBorderRow.classList.toggle("row-disabled", !sgbEnable);
   const sm = /** @type {HTMLInputElement} */ (document.getElementById("speed-mode-toggle"));
   if (sm) sm.checked = speedMode;
-  // Rewind and run-ahead are suspended while speed mode is on (the frame
-  // loop gates useRunahead on !speedMode); show that rather than
-  // live-looking controls that do nothing. Stored preferences are untouched.
+  // Show suspended controls as suspended; stored preferences are untouched.
   rewindToggle.checked = rewindOn;
   rewindToggle.disabled = speedMode;
   const ra = /** @type {HTMLSelectElement} */ (document.getElementById("runahead-select"));
   if (ra) ra.disabled = speedMode;
-  // Same for the audio settings the mode suspends (interpolation, HLE,
-  // analog filter, pitch-correct fast-forward) and the video costs it
-  // suspends (upscale filter, ambient glow, LCD response). Volume/mute,
-  // scanlines and color correction stay live — measured free or ~0.2%.
+  // Volume/mute, scanlines and color correction stay live (free or ~0.2%).
   for (const id of ["fifo-interp-toggle", "mp2k-hle-toggle",
                     "audio-lowpass-toggle", "pitch-correct-ff-toggle",
                     "upscale-filter-select", "ambient-glow-toggle",
@@ -4491,7 +3794,7 @@ if (sgbToggle) sgbToggle.addEventListener("change", () => {
 if (sgbBorderToggle) sgbBorderToggle.addEventListener("change", () => {
   sgbBorder = sgbBorderToggle.checked;
   saveSystemSettings();
-  // Live: the canvas changes shape the moment the layer is shown or hidden.
+  // The canvas changes shape the moment the layer is shown or hidden.
   updateCanvasScaling();
   presentDirty = true;
 });
@@ -4507,9 +3810,7 @@ rewindToggle.addEventListener("change", () => {
     speedMode = sm.checked;
     saveSystemSettings();
     syncSystemSettingsUI();
-    // The video stack reads speedMode live (effectiveFilter, glow, LCD
-    // response) — refresh layout (the RGB look changes the backing-store
-    // scale) and the frame so the flip shows immediately.
+    // Refresh layout (the RGB look changes the backing-store scale) and the frame.
     if (typeof updateCanvasScaling === "function") updateCanvasScaling();
     if (typeof drawGame === "function") drawGame();
     if (speedMode && currentRomName) {
@@ -4527,9 +3828,7 @@ const loadSystemSettings = async () => {
     if (typeof s.gbRumble === "boolean") gbRumble = s.gbRumble;
     if (typeof s.sgbEnable === "boolean") sgbEnable = s.sgbEnable;
     if (typeof s.sgbBorder === "boolean") sgbBorder = s.sgbBorder;
-    // Deliberately only assigns for a real boolean: a record saved before this
-    // setting existed leaves rewindOn at its `true` default instead of
-    // becoming undefined, so upgrading never silently turns rewind off.
+    // Only a real boolean: a record predating the setting leaves the default.
     if (typeof s.rewindOn === "boolean") rewindOn = s.rewindOn;
     if (typeof s.speedMode === "boolean") speedMode = s.speedMode;
   }
@@ -4538,28 +3837,18 @@ const loadSystemSettings = async () => {
 };
 
 // --- Recent ROMs ---
-// Storage layout (per-ROM, so the home grid never loads ROM bytes):
-//   "recent"      metadata index only: [{ name, ts }], most-recent-first,
-//                 capped at MAX_RECENT
-//   "rom:<name>"  { name, data: Uint8Array } — the ROM image, fetched only
-//                 at launch/backup time
-//   "art:<name>"  Blob — optional box art (from a zip), fetched lazily by
-//                 the grid without touching the ROM bytes
-// Keeping bytes out of the index (and out of tile closures) is an iOS
-// Safari memory-pressure fix: a handful of GBA ROMs held in the JS heap was
-// enough to get the wasm JIT demoted.
+//   "recent"      metadata index: [{ name, ts }], most-recent-first, capped
+//   "rom:<name>"  { name, data: Uint8Array }, fetched only at launch/backup
+//   "art:<name>"  Blob, fetched lazily by the grid
+// Bytes stay out of the index and tile closures: a few GBA ROMs in the JS
+// heap get the wasm JIT demoted on iOS Safari.
 
 const MAX_RECENT = 20;
 
 const romKey = (name) => "rom:" + name;
 const artKey = (name) => "art:" + name;
 
-// Drop this device's copy of a game's bytes: the ROM record and its box art,
-// which together are effectively all of a game's footprint. Save data is
-// never touched here — it is the small, irreplaceable half, and the callers
-// that only want space back (the MAX_RECENT eviction below, "Remove from this
-// device") must not take it. Callers that really are deleting the game wipe
-// the saves themselves, alongside this.
+// Drop the ROM record and its box art; save data is never touched here.
 const evictLocalRom = async (name) => {
   await dbDelete(romKey(name));
   await dbDelete(artKey(name));
@@ -4569,7 +3858,6 @@ const getRecentMeta = async () => {
   return (await dbGet("recent")) || [];
 };
 
-// Fetch one ROM's bytes on demand. Returns null when the record is missing.
 const getRomBytes = async (name) => {
   let rec = await dbGet(romKey(name));
   let d = rec?.data ?? null;
@@ -4579,40 +3867,28 @@ const getRomBytes = async (name) => {
 
 const getRomArt = async (name) => (await dbGet(artKey(name))) || null;
 
-// Move `name` to the front of the metadata index (adding it if new) and
-// evict past the cap — an evicted game loses its stored ROM + art records,
-// but never its saves (romsForManagement still lists it for cleanup).
+// Move `name` to the front of the index and evict past the cap (ROM + art
+// only, never saves).
 const bumpRecentIndex = async (name, { fresh = false } = {}) => {
   let list = (await getRecentMeta()).filter((r) => r.name !== name);
   let ts = Date.now();
-  // Relaunching a game whose name a not-yet-applied rename marker points away
-  // from must not stamp the entry newer than the marker: the library merge
-  // reads a newer entry under an old name as "a different game claimed this
-  // name" and cancels the rename for every device. Playing the old-name copy
-  // is not that — so its recency pins just under the marker until the
-  // migration lands. A genuine re-import (addRecentRom, fresh: true) is
-  // exactly the claim-the-name case and keeps its full timestamp.
+  // A relaunch under a not-yet-applied rename marker must not outrank it
+  // (the merge would read that as a new claim on the name): pin recency
+  // just under the marker. A real re-import (fresh: true) is a new claim.
   if (!fresh) {
     let m = syncState.ren.find((r) => r?.from === name);
     if (m?.ts && ts >= m.ts) ts = m.ts - 1;
   }
   list.unshift({ name, ts });
-  // Past MAX_RECENT this device stops holding ROM bytes. Signed in, the entry
-  // stays in the index and simply becomes a Drive-only tile — the bytes are
-  // re-downloadable, so the library stays whole. Signed out there'd be nothing
-  // to come back to, so the entry is dropped as before.
+  // Past MAX_RECENT: signed in, the entry becomes a Drive-only tile; signed
+  // out it is dropped.
   for (let i = MAX_RECENT; i < list.length; i++) await evictLocalRom(list[i].name);
   if (!driveLinked()) list = list.slice(0, MAX_RECENT);
   await dbPut("recent", list);
 };
 
-// Ask the browser to exempt this origin's storage — the ROM library and every
-// save — from automatic eviction under disk pressure ("best-effort" storage
-// can be silently wiped). Chromium and Safari decide silently from engagement
-// heuristics, but Firefox shows a permission prompt, so the request is tied to
-// the moments the user just entrusted us with data (a ROM import, a battery-
-// save flush) rather than fired at page load, and made at most once per
-// session so a dismissed prompt never nags.
+// navigator.storage.persist(): Firefox shows a prompt, so request it on a
+// ROM import or save flush, at most once per session.
 let persistAsked = false;
 const requestPersistentStorage = () => {
   if (persistAsked || !navigator.storage?.persist) return;
@@ -4625,29 +3901,23 @@ const requestPersistentStorage = () => {
 };
 
 const addRecentRom = async (name, bytes, art) => {
-  // Bytes first, index second: an interruption leaves at worst an orphaned
-  // rom: record, never an index entry pointing at nothing.
+  // Bytes first, index second: an interruption leaves at worst an orphan.
   await dbPut(romKey(name), { name, data: new Uint8Array(bytes) });
   if (art) await dbPut(artKey(name), art); // Blob (box art from a zip)
   await bumpRecentIndex(name, { fresh: true });
   refreshHomeRecent();
   requestPersistentStorage();
-  // Back the freshly-imported game up to Drive soon (no-op unless it syncs).
   markGameUpload(name);
 };
 
-// Recency bump for a ROM whose bytes are already stored (relaunch paths) —
-// no multi-MB rewrite of the rom: record.
+// Recency bump without rewriting the rom: record.
 const touchRecent = async (name) => {
   await bumpRecentIndex(name);
   refreshHomeRecent();
 };
 
-// Launch a ROM by name, fetching its bytes from IndexedDB only now.
 const launchRom = async (name) => {
-  // The grid renders before the wasm runtime is up; a tile tapped in that
-  // window waits here (with a "Starting…" toast) instead of crashing in
-  // writeToFS/loadRom below.
+  // The grid renders before the wasm runtime is up; wait here.
   await ensureRuntimeReady();
   let data = await getRomBytes(name);
   if (!data) {
@@ -4661,18 +3931,14 @@ const launchRom = async (name) => {
   loadRom(romFile, name);
 };
 
-// Home-screen recent grid — this is the app's game library (it replaces the
-// old Recent modal: launch, remove, and storage usage all live here).
+// Home-screen recent grid: the game library.
 const homeRecentWrap = document.getElementById("home-recent-wrap");
 const homeRecentHead = document.getElementById("home-recent-head");
 const homeRecent = document.getElementById("home-recent");
 const storageInfo = document.getElementById("storage-info");
 
-// Empty-library placeholder. Its whole reason for existing beyond "you have no
-// games" is Drive: on a fresh device this is the ONLY way to reach sign-in
-// (the Manage-ROMs link that normally hosts it lives in the recents header,
-// which is hidden when the library is empty). So configured-but-signed-out
-// users get a direct sign-in button here; already-connected users get a pull.
+// Empty-library placeholder: on a fresh device the only way to reach Drive
+// sign-in (the recents header is hidden when the library is empty).
 const buildEmptyLibraryCard = () => {
   let card = document.createElement("div");
   card.className = "home-empty";
@@ -4729,32 +3995,23 @@ const deleteRecent = async (name) => {
   refreshHomeRecent();
 };
 
-// Object URLs for box-art thumbnails, revoked and rebuilt each render
+// Box-art object URLs, revoked and rebuilt each render.
 let homeArtUrls = [];
-// Render generation: a lazy art fetch that resolves after a newer render
-// must not touch (or leak URLs into) the fresh grid.
+// Render generation: a lazy art fetch resolving after a newer render must
+// not touch the fresh grid.
 let homeRenderGen = 0;
 
-// The grid is rebuilt off-DOM and swapped in with ONE replaceChildren at the
-// very end — never emptied first. #home is the scroll container, so the moment
-// the grid holds no tiles its scrollHeight collapses to the viewport and the
-// browser clamps scrollTop to 0; the tiles coming back a tick later don't
-// bring the scroll offset back. The rebuild awaits dbKeys() between "clear"
-// and "refill", so that collapse was guaranteed to be laid out — clearing
-// early threw the user to the top of their library on every render, most
-// painfully when downloading Drive-only games one after another (each
-// download refreshes twice: busy spinner, then result).
+// Rebuilt off-DOM and swapped in with one replaceChildren, never emptied
+// first: #home is the scroll container, and an empty grid collapses its
+// scrollHeight so the browser clamps scrollTop to 0.
 const refreshHomeRecent = async () => {
   if (!db) return;
   let roms = await getRecentMeta(); // metadata only — no ROM bytes
   let gen = ++homeRenderGen;
-  // Art URLs minted by THIS render — they only become homeArtUrls (the set the
-  // next render revokes) once this render commits. Nothing is minted before
-  // the commit point below, so a superseded render leaves none behind.
+  // Art URLs minted by this render become homeArtUrls only on commit.
   let artUrls = [];
   if (roms.length === 0) {
-    // Keep the section visible (empty state) so Drive sign-in stays reachable,
-    // but drop the "Recent"/Manage header since there's nothing to manage yet.
+    // Keep the section (Drive sign-in lives in the empty state), drop the header.
     homeRecentWrap.hidden = false;
     if (homeRecentHead) homeRecentHead.hidden = true;
     storageInfo.textContent = "";
@@ -4766,16 +4023,11 @@ const refreshHomeRecent = async () => {
   if (homeRecentHead) homeRecentHead.hidden = false;
   homeRecentWrap.hidden = false;
   updateStorageInfo();
-  // The grid is the merged cross-device library, so some entries are games this
-  // device doesn't hold bytes for. Those render as "Drive-only" download tiles —
-  // whether or not we're signed in. Signed out, a game that lives on Drive but
-  // isn't downloaded here must still read as "needs download" (tap prompts
-  // sign-in) rather than masquerading as a stored game whose launch then fails.
+  // Entries without local bytes render as Drive-only download tiles, signed
+  // in or not (a tap prompts sign-in).
   let localRoms = new Set();
   let keys = await dbKeys();
-  // A newer render may have started during that await; committing ours too
-  // would show a stale grid (and, before the off-DOM rebuild, doubled every
-  // game). The art callbacks below re-check gen the same way.
+  // A newer render may have started during that await.
   if (gen !== homeRenderGen) return;
   for (let k of keys) {
     if (typeof k === "string" && k.startsWith("rom:")) localRoms.add(k.slice(4));
@@ -4796,10 +4048,8 @@ const refreshHomeRecent = async () => {
                                  : " — on Drive, tap to sign in and download")
       : romName;
 
-    // The system chip is the game's identity slot: one place, one signal (it
-    // replaced the cartridge glyph + duplicate corner badge). Box art, when a
-    // game has any, takes the same slot — its Blob lives in its own record so
-    // this never deserializes ROM bytes just to draw the grid.
+    // The system chip is the identity slot; box art takes the same slot
+    // (its Blob lives in its own record, so no ROM bytes are deserialized).
     let icon = document.createElement("span");
     icon.className = "sys-chip badge-" + system.toLowerCase();
     icon.textContent = system;
@@ -4820,9 +4070,7 @@ const refreshHomeRecent = async () => {
 
     launch.appendChild(icon);
     launch.appendChild(name);
-    // Clicking anywhere on the tile body downloads (signing in first if needed)
-    // and launches. The download glyph is a separate target (below) that
-    // downloads without launching.
+    // The tile body downloads and launches; the glyph downloads only.
     launch.addEventListener("click", async () => {
       if (!driveOnly) { launchRom(romName); return; }
       if (syncDownloading.has(romName)) return;
@@ -4833,10 +4081,6 @@ const refreshHomeRecent = async () => {
     tile.appendChild(launch);
 
     if (driveOnly) {
-      // Its own click target: hitting exactly the download glyph downloads the
-      // ROM + saves WITHOUT launching (grab it for later), while a click on the
-      // rest of the tile downloads and launches. Sits where the 2P/remove
-      // controls would be on a local tile, so the tile never carries both.
       let dl = document.createElement("button");
       dl.type = "button";
       dl.className = "home-tile-dl" + (busy ? " is-busy" : "");
@@ -4854,8 +4098,7 @@ const refreshHomeRecent = async () => {
       });
       tile.appendChild(dl);
     } else {
-      // 2-player local link cable: two linked cores of this ROM, one per
-      // player. Trading needs both — this is how you test a link trade here.
+      // Local 2P link: two linked cores of this ROM.
       let link2p = document.createElement("button");
       link2p.type = "button";
       link2p.className = "home-tile-link";
@@ -4873,27 +4116,19 @@ const refreshHomeRecent = async () => {
       });
       tile.appendChild(link2p);
     }
-    // No remove button here by design: the grid is a library view, and all
-    // deletion (Reset / Delete) lives in Manage ROMs and Saves.
     tiles.push(tile);
   }
-  // The one and only DOM commit. Atomic: the grid goes straight from the old
-  // tiles to the new ones with no zero-height moment in between, so an
-  // unchanged tile count leaves scrollTop exactly where the user put it.
+  // The one DOM commit, atomic: no zero-height moment.
   homeRecent.replaceChildren(...tiles);
   homeArtUrls.forEach(URL.revokeObjectURL);
   homeArtUrls = artUrls;
 };
 
-// Close any open modal on Escape. Every modal belongs here (the net modal is
-// the one exception — netplay.js owns its dismissal, which also abandons a
-// pending session). Backdrop click and the × button already cover all of
-// them; Escape must stay in step or a modal reads as "stuck".
+// Escape closes every modal (the net modal's dismissal is netplay.js's).
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     menuDropdown.hidden = true; // the dropdown must not outlive Escape either
-    // Don't close settings if we're rebinding a key — the capture handler
-    // cancels the capture and eats the event before this handler runs
+    // Rebinding a key: the capture handler eats the event first.
     if (!settingsModal.classList.contains("open") || kbSelection < 0) {
       closeSettingsModal();
     }
@@ -4911,11 +4146,8 @@ document.addEventListener("keydown", (e) => {
 
 // --- Save state persistence ---
 
-// Cheap change detector so the 5s autosave doesn't structured-clone the save
-// and hit IndexedDB when nothing was written (the common case) — that write
-// occasionally landed on a frame and cost a visible stutter. FNV-1a over the
-// bytes (+ length) is a few hundred K ops on the largest saves, far cheaper
-// than the clone + IDB transaction it lets us skip.
+// Change detector so the 5s autosave skips the clone + IDB write when
+// nothing changed (that write cost a visible stutter).
 let lastSaveSig = null;
 let lastSaveSigKey = null;
 const saveSignature = (data) => {
@@ -4930,8 +4162,6 @@ const persistSave = async (romName, originalName) => {
     let data = FS.readFile(savName);
     if (data && data.length > 0) {
       const sig = saveSignature(data);
-      // Unchanged since the last persist for this game: the copy is already in
-      // IndexedDB, so skip the write entirely.
       if (lastSaveSigKey === originalName && sig === lastSaveSig) return;
       lastSaveSig = sig;
       lastSaveSigKey = originalName;
@@ -4956,7 +4186,6 @@ document.getElementById("export-save").addEventListener("click", async () => {
     alert("No ROM is loaded.");
     return;
   }
-  // Persist latest save data first
   await persistSave(currentRomName, currentOriginalName);
   let data = await dbGet("save:" + currentOriginalName);
   if (!data || data.length === 0) {
@@ -4973,17 +4202,11 @@ document.getElementById("export-save").addEventListener("click", async () => {
 });
 
 const stripExt = (name) => name.substring(0, name.lastIndexOf("."));
-// What the library UI shows for a game: the filename without its extension
-// (the GB/GBA chip already says what kind of cartridge it is; full filename
-// stays in tooltips). Falls back to the raw name if there's no extension.
+// Display name: the filename without its extension.
 const displayName = (name) => stripExt(name) || name;
 
-// Overwrite the current game's battery save with imported bytes (with the
-// same name-mismatch guard as the "Import save file" button), then reboot the
-// core so the game reloads from it. Shared by that button and by a dropped
-// save file. Assumes a game is loaded (callers check currentOriginalName).
-// GameShark-family containers (.sps/.xps/.gsv — see saveimport.js) are
-// unwrapped to their raw save bytes first; .srm and .sav are already raw.
+// Overwrite the loaded game's battery save with imported bytes and reboot.
+// GameShark-family containers are unwrapped first (saveimport.js).
 const applyImportedSave = async (bytes, fileName) => {
   const unwrapped = SaveImport.unwrap(bytes, fileName);
   if (!unwrapped.ok) {
@@ -5012,42 +4235,25 @@ document.getElementById("load-save").addEventListener("click", () => {
     alert("No ROM is loaded.");
     return;
   }
-  // pickFile() must run synchronously in this tap handler: on iOS Safari a
-  // preceding confirm()/alert() consumes the transient user activation, so
-  // input.click() no longer opens the file picker. Do the overwrite prompts
-  // AFTER a file is chosen (inside the callback), not before opening the picker.
+  // pickFile() must run synchronously in the tap: on iOS Safari a preceding
+  // confirm() consumes the activation and input.click() no longer opens.
   pickFile(".sav,.srm,.sps,.xps,.gsv", (bytes, fileName) => applyImportedSave(bytes, fileName));
 });
 
 // --- Save states ---
-// State images come from the core's wasm_state_size/wasm_state_data/
-// wasm_load_state exports and are stored in IndexedDB keyed by the same
-// per-ROM identity the library uses ("state:" + original file name, next to
-// "save:" battery saves). The bytes are byte-compatible with the desktop
-// emulator's ~/.config/dingbat/states/*.state files, so exported states can
-// move between web and desktop. All calls happen from event handlers, which
-// run between requestAnimationFrame ticks — i.e. at a frame boundary.
+// wasm_state_size/wasm_state_data/wasm_load_state images, keyed "state:" +
+// original name; byte-compatible with the desktop .state files. All calls
+// happen from event handlers, i.e. at a frame boundary.
 
 // --- Toasts -----------------------------------------------------------------
-// #toast is a STACK, not a single slot. It used to be one element whose text
-// each new message overwrote, which meant a routine toast could silently
-// destroy an offer the user still needed: the Game Boy Camera's "use your
-// real camera?" prompt — the only way to enable the webcam — was wiped by the
-// auto-resume "Last session saved" toast 98 ms later, and Reset's "Undo"
-// collided with the same offer. Toasts now coexist; nothing destroys anything.
-//
-// Newest is PREPENDED, so it renders on top and the container (anchored to the
-// viewport bottom) grows upward. The oldest toast therefore never moves once
-// it is on screen, which matters because these carry tap targets ("Enable
-// camera", "Undo", "Resume") — a pill that jumps out from under a committed
-// thumb is worse than no pill. The cap keeps the stack from creeping up over
-// the game and the touch controls; the oldest retires first.
+// #toast is a stack: newest is prepended and the bottom-anchored container
+// grows upward, so a toast (which may carry a tap target) never moves once
+// on screen. The cap retires the oldest first.
 const TOAST_MAX = 3;
 const TOAST_FADE_MS = 220; // keep in sync with .toast-item.leaving in styles.css
 const toastHost = document.getElementById("toast");
-// Live toasts, newest first — mirrors toastHost's children. Each entry is a
-// record { el, msg, label, timer, gone } rather than bookkeeping hung off the
-// element as expandos, which the types/ typecheck rejects on HTMLDivElement.
+// Live toasts, newest first: { el, msg, label, timer, gone } records
+// (expandos on the element fail the types/ typecheck).
 let toastItems = [];
 
 const dismissToast = (rec) => {
@@ -5057,13 +4263,11 @@ const dismissToast = (rec) => {
   const i = toastItems.indexOf(rec);
   if (i >= 0) toastItems.splice(i, 1);
   rec.el.classList.add("leaving");
-  // Unmount after the fade so the stack's height settles in one step. Guarded
-  // by rec.gone, so removeChild runs exactly once while it is still a child.
+  // Unmount after the fade; rec.gone guards removeChild running once.
   setTimeout(() => toastHost.removeChild(rec.el), TOAST_FADE_MS);
 };
 
-// Auto-dismiss is per toast, not one shared timer: a 2.2 s status message
-// arriving next to an 8 s offer must not shorten (or extend) the offer.
+// Auto-dismiss is per toast, not one shared timer.
 const armToastTimer = (rec, ms) => {
   clearTimeout(rec.timer);
   rec.timer = setTimeout(() => dismissToast(rec), ms);
@@ -5072,9 +4276,8 @@ const armToastTimer = (rec, ms) => {
 // `action` is null for a plain toast, or { label, fn } for a tappable one.
 const pushToast = (msg, ms, action) => {
   msg = String(msg);
-  // Duplicates don't pile up. A repeated plain message just gets its life
-  // extended in place; a repeated offer is replaced outright so the freshest
-  // closure is what the tap runs (the old one may close over a stale game).
+  // A repeated plain message extends in place; a repeated offer is replaced
+  // so the freshest closure runs.
   for (const live of toastItems.slice()) {
     if (live.msg !== msg) continue;
     if (!action && !live.label) {
@@ -5108,15 +4311,9 @@ const pushToast = (msg, ms, action) => {
     });
     item.append(btn, close);
     item.classList.add("has-action");
-    // The ENTIRE pill is the tap target — on phones the labeled button alone
-    // is small and missable, and users tap the text anyway.
-    //
-    // fn() runs SYNCHRONOUSLY in this handler, with nothing awaited before it.
-    // Several callers (enableOrientationTilt, enableWebcam) use this tap to
-    // satisfy iOS's user-gesture requirement for
-    // DeviceOrientationEvent.requestPermission() and getUserMedia(); any
-    // await, timer, or re-dispatch here breaks the activation chain and the
-    // permission prompt never appears.
+    // The whole pill is the tap target. fn() runs synchronously with nothing
+    // awaited before it: callers use this tap for iOS's user-gesture
+    // requirement (requestPermission / getUserMedia).
     const fn = action.fn;
     item.onclick = () => {
       item.onclick = null;
@@ -5125,7 +4322,7 @@ const pushToast = (msg, ms, action) => {
     };
   }
 
-  // Prepend: newest on top, older ones hold still (see the note above).
+  // Prepend: newest on top.
   toastHost.prepend(item);
   toastItems.unshift(rec);
   while (toastItems.length > TOAST_MAX) dismissToast(toastItems[toastItems.length - 1]);
@@ -5135,46 +4332,32 @@ const pushToast = (msg, ms, action) => {
 
 const showToast = (msg) => pushToast(msg, 2200, null);
 
-// Toast with a single action (e.g. "Resume", "Undo"). Lingers longer than a
-// plain toast, and coexists with anything that arrives afterwards.
+// Toast with a single action; lingers longer than a plain toast.
 const showActionToast = (msg, label, fn, ms = 8000) =>
   pushToast(msg, ms, { label, fn });
 
 const stateKey = (name) => "state:" + name;
 
-// Serialize the running core's state; returns a Uint8Array copy or null.
 const captureStateBytes = () => {
   if (typeof Module === "undefined" || !Module._wasm_state_size) return null;
   let len = Module._wasm_state_size();
   if (len <= 0) return null;
   let ptr = Module._wasm_state_data();
   if (!ptr) return null;
-  // Copy out of WASM memory immediately: the buffer is only retained until
-  // the next wasm_state_size call (and the heap can move when memory grows).
+  // Copy out immediately: the buffer lives until the next wasm_state_size
+  // call, and the heap can move.
   return new Uint8Array(Module.memory.buffer, ptr, len).slice();
 };
 
-// wasm_load_state only reports accept/reject (the specific reason is echoed
-// to the console), so sniff the header magic here to tell "this isn't a
-// dingbat save state at all" apart from "real state image the core rejected"
-// (different game, newer dingbat version, or corruption). Header layout is
-// documented in src/dingbat/common/serialize.nim (STATE_MAGIC = "DGBSTATE").
+// Sniff the header magic (STATE_MAGIC in src/dingbat/common/serialize.nim)
+// to tell "not a save state" from "a state the core rejected".
 const STATE_MAGIC = "DGBSTATE";
 const looksLikeStateFile = (bytes) =>
   !!bytes && bytes.length >= STATE_MAGIC.length &&
   [...STATE_MAGIC].every((c, i) => bytes[i] === c.charCodeAt(0));
 
-// Toast copy for a state image the core refused to load. The core knows
-// exactly why — wrong ROM, written by a newer build, a corrupt section — and
-// now says WHICH via wasm_state_error_kind(). "State didn't match this game"
-// used to be the answer to all of them, and it is actively wrong for four of
-// the five: it sent people hunting for the wrong problem when the real answer
-// was "your dingbat is older than the one that wrote this".
-//
-// StateRejectKind ordinals, from src/dingbat/common/serialize.nim. The core
-// classifies the refusal; this table turns each cause into a sentence that
-// says what to DO about it, because "wrong game" and "damaged file" are
-// different problems and used to render as the same toast.
+// Toast copy per StateRejectKind (src/dingbat/common/serialize.nim, via
+// wasm_state_error_kind): one sentence per cause saying what to do.
 const SRK = {
   NONE: 0, NOT_A_STATE: 1, WRONG_CORE: 2, WRONG_ROM: 3,
   TOO_NEW: 4, TRUNCATED: 5, CORRUPT: 6, NO_FILE: 7,
@@ -5191,10 +4374,7 @@ const STATE_REJECT_COPY = {
     "That save state file is incomplete — the download or copy was cut short. Try getting the file again.",
   [SRK.CORRUPT]:
     "That save state is damaged and can't be loaded. The game is still running and nothing was changed.",
-  // Only the native build loads from a path, so this one cannot arrive here
-  // today. It is in the table anyway: the ordinals are a shared contract with
-  // the core, and a missing entry would silently fall through to the raw
-  // exception text the moment anything does surface it.
+  // Native-only today; kept so the ordinals stay a complete contract.
   [SRK.NO_FILE]: "There's no save state in that slot yet.",
 };
 
@@ -5223,21 +4403,18 @@ const stateRejectMessage = (bytes) => {
   if (copy) return copy;
   const why = stateRejectDetail();
   if (!why) return "That save state couldn't be loaded.";
-  // Fall back to the core's own wording (it is written for a person), just
-  // sentence-cased so it sits in a toast.
+  // Fall back to the core's own wording, sentence-cased.
   return why.charAt(0).toUpperCase() + why.slice(1).replace(/\.$/, "");
 };
 
-// Validate + apply a state image; returns true when the core accepted it.
-// keepRewind is for undoing a rewind-scrubber commit and nothing else: that
-// state belongs to the same timeline the ring already holds, so the core keeps
-// its rewind history instead of starting over. Every other load starts a new
-// timeline and drops the ring (see wasm_load_state).
+// Apply a state image; true when accepted. keepRewind is only for undoing
+// a rewind-scrubber commit (same timeline as the ring); every other load
+// drops the ring.
 const applyStateBytes = (bytes, keepRewind = false) => {
   if (typeof Module === "undefined" || !Module._wasm_load_state) return false;
   let ptr = Module._malloc(bytes.length);
   if (!ptr) return false;
-  // Build the heap view after _malloc: growth can detach the old buffer
+  // Heap view after _malloc: growth can detach the old buffer.
   new Uint8Array(Module.memory.buffer, ptr, bytes.length).set(bytes);
   let ok = Module._wasm_load_state(ptr, bytes.length, keepRewind ? 1 : 0) === 1;
   Module._free(ptr);
@@ -5245,12 +4422,8 @@ const applyStateBytes = (bytes, keepRewind = false) => {
 };
 
 // --- Save-state slots ---
-// Nine per-ROM slots. Slot 0 is the "Quick" slot and keeps the historical
-// "state:<name>" key so existing quick-saves (and Drive sync) keep working;
-// slots 1..8 add a ":slotN" suffix. The state blob stays a raw Uint8Array
-// under that key (unchanged); a small thumbnail + timestamp are stored
-// separately under "statemeta:..." so the state blobs and Drive sync are
-// untouched.
+// Nine per-ROM slots. Slot 0 ("Quick") keeps the legacy "state:<name>" key;
+// slots 1..8 add ":slotN". Thumbnail + timestamp live under "statemeta:...".
 const NUM_STATE_SLOTS = 9;
 const slotStateKey = (name, slot) =>
   "state:" + name + (slot === 0 ? "" : ":slot" + slot);
@@ -5267,10 +4440,8 @@ const fmtStateTime = (ts) => {
   }
 };
 
-// Grab the current framebuffer as a small thumbnail dataURL (or null). Reads
-// the wasm framebuffer pointer (color-corrected, produced off the hot path),
-// so it works whether the game is running or paused and doesn't need the
-// canvas to have preserveDrawingBuffer.
+// Thumbnail dataURL from the wasm framebuffer pointer (works paused; needs
+// no preserveDrawingBuffer).
 const captureThumbnail = () => {
   if (typeof Module === "undefined" || !Module._wasm_fb_ptr) return null;
   const ptr = Module._wasm_fb_ptr();
@@ -5300,7 +4471,6 @@ const captureThumbnail = () => {
   }
 };
 
-// Save the running core into a slot (state blob + thumbnail/timestamp meta).
 const saveToSlot = async (slot) => {
   if (!currentOriginalName) return false;
   const bytes = captureStateBytes();
@@ -5321,10 +4491,8 @@ const saveToSlot = async (slot) => {
   }
 };
 
-// Undo buffer for the last state load: the state of the game the moment
-// before the load replaced it. In-memory only — survives until the next
-// load or a ROM switch. Saves the day when F8 lands a fraction after an
-// unintended F5, or a slot tap loads hours-old progress.
+// Undo buffer for the last state load; in-memory, until the next load or
+// ROM switch.
 var stateUndoBytes = null;
 var stateUndoName = null;
 
@@ -5336,9 +4504,8 @@ const undoStateLoad = () => {
   }
 };
 
-// Apply a slot's state to the running game. The core validates the image
-// (version, core kind, ROM checksum, payload hash) and leaves itself untouched
-// when it doesn't match — e.g. a state saved for a different ROM.
+// Apply a slot's state; the core validates and leaves itself untouched on
+// a mismatch.
 const loadFromSlot = async (slot) => {
   if (!currentOriginalName) return false;
   let bytes = null;
@@ -5365,10 +4532,8 @@ const loadFromSlot = async (slot) => {
 };
 
 // --- Auto save-state (session resume) ---
-// Captured when the page is hidden or closed, offered back as a one-tap
-// "Resume" when the same game is next launched. Local-only by design: it is
-// a convenience snapshot, not user data — keeping it out of Drive sync
-// avoids an upload every tab switch.
+// Captured when the page is hidden or closed; local-only (an upload every
+// tab switch otherwise).
 const autoStateKey = (name) => "stateauto:" + name;
 
 const persistAutoState = () => {
@@ -5388,8 +4553,7 @@ const fmtAgo = (ts) => {
   return Math.round(h / 24) + "d ago";
 };
 
-// Offer to restore the auto state for the game that just launched. The state
-// header check inside the core keeps a stale/mismatched snapshot harmless.
+// The core's header check keeps a stale/mismatched snapshot harmless.
 const offerAutoResume = async () => {
   const name = currentOriginalName;
   if (!name) return;
@@ -5416,7 +4580,7 @@ document.getElementById("load-state").addEventListener("click", async () => {
   await loadFromSlot(0);
 });
 
-// --- Save States modal (9-slot grid with thumbnails) ---
+// --- Save States modal ---
 const statesModal = document.getElementById("states-modal");
 const statesGrid = document.getElementById("states-grid");
 const statesSaveBtn = /** @type {HTMLButtonElement} */ (document.getElementById("states-save"));
@@ -5446,7 +4610,6 @@ const selectSlot = (s) => {
 const renderStatesGrid = async () => {
   const name = currentOriginalName;
   statesEmpty.hidden = !!name;
-  // The "Tap a slot…" instructions only make sense when slots are rendered.
   statesHint.hidden = !name;
   statesGrid.hidden = !name;
   statesGrid.innerHTML = "";
@@ -5524,14 +4687,9 @@ statesDeleteBtn.addEventListener("click", async () => {
 });
 
 // --- Report a Bug modal ---
-// Builds a downloadable report bundle {title, description, diagnostics, save
-// state} entirely client-side — nothing is transmitted. The save state carries
-// only emulator RAM/registers + a screenshot, never the ROM. A scrubber lets
-// the user pick the moment the bug happened from the rewind history: slider 0
-// is "now" (live state), 1..N are rewind samples (0..N-1, newest first).
-// The samples come straight out of the rewind ring, which captured each
-// thumbnail when its snapshot was pushed — opening this modal copies a strip,
-// it does not re-render history (that used to cost 1.4 s on a full ring).
+// A downloadable bundle {title, description, diagnostics, save state},
+// client-side only; the state carries RAM/registers + a screenshot, never
+// the ROM. The scrubber picks the moment from the rewind ring's thumbnails.
 const reportModal = document.getElementById("report-modal");
 const reportTitle = /** @type {HTMLInputElement} */ (document.getElementById("report-title"));
 const reportDesc = /** @type {HTMLTextAreaElement} */ (document.getElementById("report-desc"));
@@ -5582,8 +4740,8 @@ const drawReportSamplePreview = (sample) => {
   reportPreview.getContext("2d").putImageData(img, 0, 0);
 };
 
-// Slider runs 0..N with the RIGHT end (max) = "now"; sliding left goes back in
-// time. back = 0 is the live frame, back = 1..N are rewind samples 0..N-1.
+// Slider 0..N, max = "now"; back = 0 is the live frame, 1..N are rewind
+// samples 0..N-1.
 const reportSliderBack = () => reportSamples - Number(reportSlider.value);
 
 const updateReportPreview = () => {
@@ -5604,10 +4762,8 @@ reportSlider.addEventListener("input", updateReportPreview);
 const openReportModal = () => {
   menuDropdown.hidden = true;
   reportWasPaused = paused;
-  // Freeze emulation so the strip on screen stays the ring's contents. A
-  // sample the ring evicts anyway is not dangerous — samples are addressed by
-  // absolute snapshot ID, so an evicted one yields nothing rather than
-  // silently sliding onto a different moment — but it would go blank.
+  // Freeze so the strip stays the ring's contents (samples are addressed
+  // by snapshot ID, so an evicted one goes blank rather than sliding).
   paused = true;
   reportSamples = 0;
   reportThumbs = null;
@@ -5624,9 +4780,7 @@ const openReportModal = () => {
   reportSlider.max = String(reportSamples); // 0..N; right end (max) = now
   reportSlider.value = String(reportSamples);
   reportScrub.classList.toggle("disabled", !currentOriginalName);
-  // The timeline itself is hidden by body.rewind-off; the hint takes over and
-  // says why, instead of leaving a slider that can only sit at "now" and an
-  // invitation to enable a setting from a modal that cannot reach it.
+  // body.rewind-off hides the timeline; the hint says why.
   reportScrubHint.textContent = rewindOn
     ? "Slide left to go further back in time. Enable Rewind in Settings to capture a longer timeline."
     : "Rewind is off, so only this moment can be attached. Turn Rewind on in Settings to pick an earlier one.";
@@ -5637,9 +4791,8 @@ const openReportModal = () => {
 };
 
 const closeReportModal = () => {
-  // Guard: the global Escape handler calls every modal's closer blindly, and
-  // this one has side effects — restoring `paused` from a stale
-  // reportWasPaused would silently unpause a game the user paused later.
+  // The global Escape handler calls every closer blindly; a stale
+  // reportWasPaused would unpause a game paused later.
   if (!reportModal.classList.contains("open")) return;
   reportModal.classList.remove("open");
   releaseFocus(reportModal);
@@ -5689,7 +4842,7 @@ document.getElementById("report-download").addEventListener("click", async () =>
     game: currentOriginalName,
     savedFrom,
     diagnostics: await logContext(),
-    // Emulator save state (RAM/registers + screenshot). Never the ROM.
+    // Never the ROM.
     state: stateBytes ? base64FromBytes(stateBytes) : null,
   };
   const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
@@ -5704,56 +4857,24 @@ document.getElementById("report-download").addEventListener("click", async () =>
 });
 
 // --- Film strip (shared scrubber component) --------------------------------
-// One draggable strip of thumbnails with N markers on it. Two features use it:
-// Rewind (one marker — "cut here") and Save a Clip (two — "record from here to
-// here"). They were one implementation with the second one's needs bolted on
-// for about an hour, which is how it became this: the differences between them
-// are exactly two callbacks, and everything else — frame sizing, rasterising
-// the strip, the scroll/clamp rule, the drag, the tap, DPR handling — is the
-// same code or it is two subtly different scrubbers.
-//
-// What a caller supplies: the canvas + wrapper elements, one element per
-// marker, and a `paint` callback that says how the strip is shaded around
-// those markers (Rewind greys everything the cut discards; Clip greys
-// everything outside the selection). What it gets back: marker values in
-// "samples back from newest", already clamped, ordered and snapped.
-//
-// Thumbnails come from wasm as packed little-endian BGR555 (the same layout
-// the save-state trailer uses), newest sample first.
+// One draggable strip of thumbnails with N markers: Rewind (one) and Save a
+// Clip (two). The caller supplies the canvas + wrapper, one element per
+// marker, and a `paint` callback for the shading; it gets marker values in
+// samples back from newest, clamped, ordered and snapped. Thumbnails arrive
+// from wasm as packed little-endian BGR555, newest first.
 
 const STRIP_GAP = 2;             // px between frames in the strip
 const STRIP_TAP_SLOP = 5;        // px of travel below which a drag counts as a tap
 
-// Frames keep their native aspect, but the size is driven by how many should
-// be VISIBLE rather than by the strip's height: a GBA frame is 3:2, so filling
-// a 76px strip makes each one ~110px and a phone shows three — a peephole, and
-// half a minute of history then takes ten swipes to cross.
-//
-// Sizing from the strip's own width instead of a fixed pixel target is what
-// makes one rule serve a 208px strip inside a modal on a 320pt phone and a
-// 400px one on desktop: both show the same amount of history, the phone just
-// shows it smaller. The clamp keeps frames recognisable at the low end and
-// stops them ballooning at the high end.
-//
-// The default suits picking ONE moment. A range picker wants a wider view —
-// both of its markers have to be on screen at once for the control to read as
-// a selection at all — so it overrides these (see the clip strip), trading
-// frame size for span. That is the right way round there: the strip is what
-// you navigate with, and the preview above it is what you identify the chosen
-// frame from.
-//
-// One thing frameWMin cannot do is make a SELECTION fit. It is a floor, so on
-// a narrow wrap it makes frames bigger, i.e. it pushes a range picker's second
-// bracket further off the end — and "visible frames" is counted in frames, not
-// in pitches, so even the unclamped width is a gap per frame short of the span
-// it implies. A caller that must show a whole range at once therefore states
-// the span it needs (`fitFrames`, counted in pitches) and the fit wins, down
-// to STRIP_FRAME_W_FLOOR.
+// Frame size is driven by how many should be visible across the strip's
+// own width (a 208px phone strip and a 400px desktop one show the same
+// history), clamped at both ends. A range picker overrides these for span,
+// and states the span it needs in pitches (`fitFrames`); the fit wins over
+// frameWMin, down to STRIP_FRAME_W_FLOOR.
 const STRIP_VISIBLE_FRAMES = 5.5;
 const STRIP_FRAME_W_MIN = 38;
 const STRIP_FRAME_W_MAX = 72;
-// Below this a thumbnail stops being a picture at all, so the fit rule gives
-// up rather than shrinking further and the bracket goes off-strip honestly.
+// Below this the fit rule gives up and the bracket goes off-strip.
 const STRIP_FRAME_W_FLOOR = 16;
 
 /**
@@ -5795,11 +4916,8 @@ const createFilmStrip = ({
     let tw = Math.round(
       Math.min(frameWMax, Math.max(frameWMin, stripW / visibleFrames))
     );
-    // `fitFrames` pitches have to land inside the strip's width. A bracket
-    // that opens off the end reads as "the clip ends here", which is the one
-    // thing this control must not lie about — so on a narrow wrap the fit
-    // beats frameWMin. A smaller frame is still a picture, and the preview
-    // above the strip is what the chosen frame is identified from anyway.
+    // `fitFrames` pitches must land inside the width: a bracket off the end
+    // reads as "the clip ends here". The fit beats frameWMin.
     if (fitFrames > 0) {
       tw = Math.max(frameWFloor,
                     Math.min(tw, Math.floor(stripW / fitFrames) - STRIP_GAP));
@@ -5812,11 +4930,8 @@ const createFilmStrip = ({
     return { tw, th };
   };
 
-  // Both strips are built once per open. Painting the greyed region by
-  // filtering at draw time would be the obvious approach, but
-  // CanvasRenderingContext2D.filter only arrived in Safari 17 and this app
-  // still supports iOS 15 — so the desaturated copy is baked here instead, and
-  // drawing is two clipped blits.
+  // The desaturated copy is baked once per open: CanvasRenderingContext2D
+  // .filter only arrived in Safari 17 and iOS 15 is supported.
   const build = () => {
     stripColor = null;
     stripDim = null;
@@ -5840,8 +4955,7 @@ const createFilmStrip = ({
     const top = Math.round((stripH - th) / 2);
     for (let s = 0; s < samples; s++) {
       sctx.putImageData(bgr555ToImageData(thumbs, s * stride, thumbW, thumbH), 0, 0);
-      // Newest on the RIGHT — same direction as the report slider, and the
-      // direction a film strip runs.
+      // Newest on the right.
       const x = (samples - 1 - s) * pitch + Math.floor(STRIP_GAP / 2);
       cctx.drawImage(scratch, 0, 0, thumbW, thumbH, x, top, tw, th);
     }
@@ -5854,40 +4968,24 @@ const createFilmStrip = ({
     const img = dctx.getImageData(0, 0, total, stripH);
     const px = img.data;
     for (let i = 0; i < px.length; i += 4) {
-      // Rec.601 luma, then halved: the greyed frames must stay readable as
-      // pictures (you are choosing where to cut, so you need to see what goes)
-      // while never being mistaken for the live side of a marker.
+      // Rec.601 luma, halved: readable, never mistaken for the live side.
       const y = (px[i] * 77 + px[i + 1] * 150 + px[i + 2] * 29) >> 9;
       px[i] = px[i + 1] = px[i + 2] = y;
     }
     dctx.putImageData(img, 0, 0);
   };
 
-  // Where a marker falls, in strip-bitmap pixels. "trail" is the right-hand
-  // edge of the selected frame — the selected moment is the last one kept, so
-  // it belongs entirely on the colour side of the line, and a marker through
-  // its middle would show the frame you are keeping as half-discarded. "lead"
-  // is the mirror of that for a marker whose frame is the FIRST one kept.
+  // Marker x in strip-bitmap pixels. "trail" = the selected frame's right
+  // edge (it is the last one kept, wholly on the colour side); "lead" the
+  // mirror for a frame that is the first one kept.
   const edgeX = (index, edge) =>
     edge === "lead" ? (samples - 1 - index) * pitch : (samples - index) * pitch;
 
-  // Where the film sits and where the markers sit, for the current selection.
-  //
-  // The focus rides the middle and the film scrolls under it — until the film
-  // runs out of slack at either end, at which point the film stops and the
-  // markers travel the rest of the way. Without that clamp the newest frame can
-  // only ever reach the middle, so half the strip is permanently empty at the
-  // "now" end — which is where these modals open, so the control's first
-  // impression is of being broken. The cost is that inside those end regions
-  // the markers move opposite the finger for a few dozen pixels; the film
-  // staying put is the stronger cue, and it is what a video timeline does.
-  //
-  // The focus is the whole selection whenever it fits on screen, and the
-  // dragged marker when it does not. With one marker those are the same thing
-  // (lo === hi), so this is exactly the rewind rule; with two it is what keeps
-  // BOTH brackets visible for a normal-length clip. A bracket pinned to the
-  // strip's edge because it is really off-screen reads as "the clip ends
-  // here", which is the one thing this control must not lie about.
+  // Film and marker placement. The focus rides the middle and the film
+  // scrolls under it until the film runs out of slack, then the markers
+  // travel (else half the strip is empty at the "now" end, where these
+  // modals open). The focus is the whole selection when it fits, else the
+  // dragged marker.
   const placement = (cssW) => {
     const filmW = samples * pitch;
     const xsFilm = markers.map((m, i) => edgeX(values[i], m.edge));
@@ -5914,16 +5012,9 @@ const createFilmStrip = ({
     ctx.clearRect(0, 0, cssW, cssH);
     if (!stripColor) return;
     const { off, xs } = placement(cssW);
-    // A marker can legitimately land on the film's outer edge (nothing
-    // discarded at "now"), where its own width would put half of it outside
-    // the clipped wrapper and leave it looking like a border. Nudge it just
-    // inside.
-    //
-    // A marker that is genuinely off-screen — a range longer than the strip
-    // can show — is a different case, and pinning it to the edge would claim
-    // the selection stops there. Mark it and let the CSS drop the line
-    // entirely: the coloured region then simply runs off the edge, which is
-    // what is actually true.
+    // A marker on the film's outer edge is nudged just inside (half of it
+    // would be clipped). A genuinely off-screen marker is marked instead,
+    // and the CSS drops its line: pinning it would claim the selection ends there.
     markers.forEach((m, i) => {
       m.el.style.left = Math.min(Math.max(xs[i], 2), cssW - 2) + "px";
       m.el.classList.toggle("offscreen", xs[i] < -1 || xs[i] > cssW + 1);
@@ -5931,9 +5022,7 @@ const createFilmStrip = ({
     paint(ctx, { cssW, cssH, off, xs, color: stripColor, dim: stripDim });
   };
 
-  // Colour inside [x0, x1), greyed-and-darkened outside it. Both callers'
-  // shading is this with different bounds, so it lives here rather than being
-  // written twice against the raw context.
+  // Colour inside [x0, x1), greyed outside.
   const shadeBetween = (ctx, g, x0, x1) => {
     const bands = [[0, x0], [x1, g.cssW]];
     ctx.save();
@@ -5956,13 +5045,9 @@ const createFilmStrip = ({
     }
   };
 
-  // Every path that moves a marker goes through here, so callers can't forget
-  // to disarm a confirm or re-render. `snap` settles onto a whole frame (drag
-  // end, tap, slider); a live drag passes false so motion stays smooth.
-  //
-  // `bounds` keeps a two-marker selection from crossing over: each marker is
-  // clamped against its neighbours, so dragging the start past the end pushes
-  // it up against the end instead of inverting the range.
+  // Every marker move goes through here. `snap` settles onto a whole frame;
+  // a live drag passes false. `bounds` clamps each marker against its
+  // neighbours so a two-marker selection cannot invert.
   const setValue = (i, v, snap, bounds) => {
     let lo = 0;
     let hi = Math.max(0, samples - 1);
@@ -5978,17 +5063,13 @@ const createFilmStrip = ({
     return true;
   };
 
-  // Pointer-driven, not a scroll container: native horizontal scrolling on iOS
-  // carries momentum, and a scrubber that keeps gliding after the finger lifts
-  // selects a frame the player never chose.
+  // Pointer-driven, not a scroll container: iOS scroll momentum would
+  // select a frame the player never chose.
   let dragging = false;
   let lastX = 0;
   let travel = 0;
 
-  // Which marker a press grabs: the nearest one on screen. With one marker
-  // this is unconditional (the whole strip drags it, as it always did); with
-  // two it is what makes each handle reachable without drawing hit targets
-  // people have to aim at.
+  // A press grabs the nearest marker on screen.
   const grabNearest = (clientX) => {
     if (markers.length === 1) return 0;
     const rect = wrap.getBoundingClientRect();
@@ -6008,11 +5089,9 @@ const createFilmStrip = ({
     get thumbH() { return thumbH; },
     get thumbs() { return thumbs; },
     values,
-    /** Whole-frame value of marker `i` (the values array may hold a fraction
-     *  mid-drag). */
+    /** Whole-frame value of marker `i` (fractional mid-drag). */
     at(i) { return Math.round(values[i]); },
-    /** Adopt a freshly captured strip. `data` is a copy — the wasm heap it
-     *  came from can move under us on the next allocation. */
+    /** Adopt a captured strip. `data` is a copy: the wasm heap can move. */
     load(data, w, h, n) {
       thumbs = data;
       thumbW = w;
@@ -6021,9 +5100,7 @@ const createFilmStrip = ({
       stripColor = null;
       stripDim = null;
     },
-    /** Drop everything on close: a strip is tens of thumbnails, and on the
-     *  phones that run the small caps that is real memory to hold onto for a
-     *  modal nobody has open. */
+    /** Drop everything on close (tens of thumbnails). */
     release() {
       thumbs = null;
       stripColor = null;
@@ -6049,8 +5126,7 @@ const createFilmStrip = ({
       el.getContext("2d").putImageData(
         bgr555ToImageData(thumbs, s * stride, thumbW, thumbH), 0, 0);
     },
-    /** Bind the drag/tap gesture. `bounds(i)` (optional) returns the clamp for
-     *  marker i at the moment of the move. */
+    /** Bind the drag/tap gesture. `bounds(i)` returns marker i's clamp. */
     attach(bounds) {
       const boundsFor = (i) => (bounds ? bounds(i) : undefined);
       wrap.addEventListener("pointerdown", (e) => {
@@ -6068,8 +5144,7 @@ const createFilmStrip = ({
         const dx = e.clientX - lastX;
         lastX = e.clientX;
         travel += Math.abs(dx);
-        // Dragging the film to the RIGHT pulls older frames under the marker,
-        // which is the same gesture as physically winding a reel back.
+        // Dragging right pulls older frames under the marker.
         api.setValue(active, values[active] + dx / pitch, false, boundsFor(active));
       });
       const endDrag = (e) => {
@@ -6077,10 +5152,8 @@ const createFilmStrip = ({
         dragging = false;
         if (wrap.hasPointerCapture?.(e.pointerId)) wrap.releasePointerCapture(e.pointerId);
         if (travel <= STRIP_TAP_SLOP && e.type === "pointerup") {
-          // A tap moves the nearest marker to the frame literally under the
-          // finger — resolved through the same placement the draw used, so it
-          // stays correct in the clamped region where the film is not centred
-          // on the marker.
+          // A tap moves the nearest marker to the frame under the finger,
+          // resolved through the draw's own placement.
           const rect = wrap.getBoundingClientRect();
           const { off } = placement(rect.width);
           const filmX = e.clientX - rect.left - off;
@@ -6100,25 +5173,14 @@ const createFilmStrip = ({
 };
 
 // --- Rewind scrubber -------------------------------------------------------
-// Hold-to-rewind is fine for a second and useless for a minute; this is the
-// map. Same preview-cheap / reconstruct-once split as the bug-report scrubber
-// above: dragging only ever paints thumbnails the ring captured at push time,
-// and a real emulator state is built exactly once, on commit.
-//
-// Two things separate it from the report scrubber: it is DESTRUCTIVE (the
-// future is gone, hence the two-tap confirm), and it may cost the player their
-// in-game battery save (hence the third tap, when it actually would).
-//
-// It presents as an ordinary modal — same overlay, panel, close button, focus
-// trap and Escape handling as Save States or Report a Bug — and it reuses that
-// scrubber's .report-scrub box outright rather than a private variant of it.
-// The strip itself is the shared film-strip component above, with one marker.
+// Dragging paints the ring's thumbnails; a real state is built once, on
+// commit. Destructive (two-tap confirm), and a third tap when it would cost
+// the battery save. An ordinary modal on the film-strip component above.
 
 const rewindModal = document.getElementById("rewind-modal");
 const rwStripCanvas = /** @type {HTMLCanvasElement} */ (document.getElementById("rewind-strip"));
-// By id, not selector: the test harness's fake DOM resolves getElementById
-// (and a module-scope global that comes back null aborts the whole sandbox,
-// taking every web test with it).
+// By id: the test harness's fake DOM resolves getElementById, and a null
+// module-scope global aborts every web test.
 const rwStripWrap = document.getElementById("rewind-strip-wrap");
 const rwPreview = /** @type {HTMLCanvasElement} */ (document.getElementById("rewind-preview"));
 const rwSlider = /** @type {HTMLInputElement} */ (document.getElementById("rewind-slider"));
@@ -6129,10 +5191,8 @@ const rwWarn = document.getElementById("rewind-warn");
 const rwCommitBtn = /** @type {HTMLButtonElement} */ (document.getElementById("rewind-commit"));
 const rwHint = document.getElementById("rewind-scrub-hint");
 
-// How many thumbnails to pull out of the ring. Each one is a full BGR555 copy
-// (19 KB on GBA, 26 KB on GB), so this is a real memory number on the phones
-// that run the 16 MB ring; 96 covers a minute and a half at the ring's one
-// thumbnail per second and costs ~2.5 MB transiently.
+// Thumbnails pulled from the ring: each is a full BGR555 copy (19 KB GBA,
+// 26 KB GB); 96 covers a minute and a half at ~2.5 MB transiently.
 const RW_MAX_SAMPLES = 96;
 
 let rwStage = 0;              // 0 pick, 1 confirm discard, 2 confirm save loss
@@ -6140,8 +5200,7 @@ let rwWasPaused = false;
 let rwUndoBytes = null;
 let rwUndoName = null;
 
-// "2m 14s" / "8.4s". Sub-minute keeps a decimal because at the shallow end a
-// whole second is a big fraction of what is being discarded.
+// "2m 14s" / "8.4s".
 const fmtDuration = (tenths) => {
   const s = tenths / 10;
   if (s < 60) return (s < 10 ? s.toFixed(1) : Math.round(s)) + "s";
@@ -6158,14 +5217,10 @@ const rwStrip = createFilmStrip({
   canvas: rwStripCanvas,
   wrap: rwStripWrap,
   markers: [{ el: rwPlayhead, edge: "trail" }],
-  // Past and present in colour up to the cut; the discarded future greyed
-  // beyond it. The boundary is the marker by construction, so the doomed
-  // region grows as the strip is dragged back without anything having to
-  // track how much of it there is.
+  // Colour up to the cut; the discarded future greyed beyond it.
   paint: (ctx, g) => rwStrip.shadeBetween(ctx, g, 0, g.xs[0]),
   onChange: () => {
-    // The confirm has to be about the moment the player is looking at, so any
-    // movement of the playhead disarms it.
+    // Any playhead movement disarms the confirm.
     rwStage = 0;
     rwRefresh();
   },
@@ -6174,8 +5229,7 @@ rwStrip.attach();
 
 const rwSelected = () => rwStrip.at(0);
 
-// Stages 1 and 2 are the two confirmations, each stated in terms of what it
-// costs.
+// Stages 1 and 2 are the two confirmations.
 const rwRefreshActions = () => {
   const sel = rwSelected();
   const cost = fmtDuration(rwTenthsAt(sel));
@@ -6216,8 +5270,7 @@ const rwRefresh = () => {
   rwRefreshActions();
 };
 
-// The coarse range input is the keyboard and screen-reader path onto the same
-// state; it is not a second source of truth.
+// The range input is the keyboard path onto the same state, not a second truth.
 rwSlider.addEventListener("input", () => {
   rwStrip.setValue(0, rwStrip.samples - 1 - Number(rwSlider.value), true);
 });
@@ -6228,9 +5281,7 @@ const openRewindScrubber = () => {
   if (!currentOriginalName || !speedControlsOk()) return;
   if (typeof Module === "undefined" || !Module._wasm_rewind_scrub_generate) return;
   rwWasPaused = paused;
-  // Freeze the core: the strip on screen must stay the ring's contents while
-  // it is being read, and a running game would push new snapshots (and evict
-  // old ones) out from under the playhead.
+  // Freeze the core so the ring stays what the strip shows.
   paused = true;
   rwStage = 0;
   rwStrip.release();
@@ -6251,15 +5302,14 @@ const openRewindScrubber = () => {
   rwOldest.textContent = n > 1 ? fmtDuration(rwTenthsAt(n - 1)) + " ago" : "";
   rewindModal.classList.add("open");
   trapFocus(rewindModal);
-  // After .open, so the strip has a laid-out height to size frames against.
+  // After .open, so the strip has a laid-out height.
   rwStrip.build();
   rwRefresh();
 };
 
 const closeRewindScrubber = () => {
-  // Guard: the global Escape handler calls every closer blindly and this one
-  // has side effects — restoring `paused` from a stale rwWasPaused would
-  // silently unpause a game the user paused later.
+  // The global Escape handler calls every closer blindly; a stale
+  // rwWasPaused would unpause a game paused later.
   if (!rewindModal.classList.contains("open")) return;
   rewindModal.classList.remove("open");
   releaseFocus(rewindModal);
@@ -6270,10 +5320,7 @@ const closeRewindScrubber = () => {
 
 const rwUndoCommit = () => {
   if (!rwUndoBytes || rwUndoName !== currentOriginalName) return;
-  // keepRewind: this is the same timeline the ring still holds — everything in
-  // it really did happen before this state. There is a gap where the committed
-  // window used to be (those snapshots are gone for good), but the frames are
-  // the player's own past, not another save's.
+  // keepRewind: the same timeline the ring still holds.
   if (applyStateBytes(rwUndoBytes, true)) {
     rwUndoBytes = null;
     showToast("Back to where you were");
@@ -6300,10 +5347,8 @@ const rwCommit = () => {
   }
 };
 
-// The commit button IS the confirmation, switching in place rather than
-// stacking a second dialog on top of this one. Stage 2 only ever appears when
-// the rewind really would cost a save — asking every time is how a warning
-// stops being read.
+// The commit button is the confirmation, in place. Stage 2 only when the
+// rewind would cost a save.
 rwCommitBtn.addEventListener("click", () => {
   const sel = rwSelected();
   if (sel <= 0) return;
@@ -6332,9 +5377,8 @@ rewindModal.addEventListener("click", (e) => {
 });
 document.getElementById("open-rewind-scrub").addEventListener("click", openRewindScrubber);
 
-// The strip bitmaps are rasterised for one strip height and one frame size,
-// both of which change across the phone/desktop breakpoint — a rotation with
-// the modal open would otherwise scale a stale bitmap.
+// The strip bitmaps are rasterised for one strip height and frame size,
+// which change across the phone/desktop breakpoint.
 window.addEventListener("resize", () => {
   if (!rewindModal.classList.contains("open")) return;
   rwStrip.build();
@@ -6358,8 +5402,7 @@ document.getElementById("export-state").addEventListener("click", () => {
   URL.revokeObjectURL(a.href);
 });
 
-// Apply an imported .state image to the running game (not persisted — use Save
-// State to keep it). Shared by the "Import state" button and a dropped .state.
+// Apply an imported .state to the running game (not persisted).
 const applyImportedState = (bytes) => {
   showToast(applyStateBytes(bytes) ? "State loaded" : stateRejectMessage(bytes));
 };
@@ -6451,8 +5494,7 @@ muteBtn.addEventListener("click", toggleMute);
 syncVolumeUI();
 
 // --- Color correction (LCD gamma) toggle ---
-// The wasm core keeps a single BGR555->RGBA lookup table used by every present
-// path; _wasm_set_color_correction rebuilds it. Default on, matching desktop.
+// _wasm_set_color_correction rebuilds the core's BGR555->RGBA LUT. Default on.
 var colorCorrect = true;
 const ccToggle = /** @type {HTMLInputElement} */ (document.getElementById("color-correct-toggle"));
 
@@ -6477,9 +5519,7 @@ const loadColorCorrect = async () => {
 };
 
 // --- Pitch-correct fast-forward (WSOLA time-stretch at 2x) ---
-// Local audio preference persisted in the "audio" IDB record alongside
-// volume/mute. When on, the core time-stretches 2x audio so it keeps its pitch
-// instead of jumping an octave; independent of the rollback-synced 2x state.
+// Persisted in the "audio" record; independent of the rollback-synced 2x state.
 var pitchCorrectFF = false;
 const pcffToggle = /** @type {HTMLInputElement} */ (document.getElementById("pitch-correct-ff-toggle"));
 
@@ -6498,13 +5538,9 @@ if (pcffToggle) {
   });
 }
 
-// --- GBA audio interpolation ("Audio interpolation") ---
-// True-phase cubic reconstruction of the DirectSound FIFO stream, on by
-// default: strictly removes the noise point-sampling the held DAC latch
-// manufactures, touches nothing musical. Off is the hardware-accurate mode —
-// bit-true DAC output, including the grit real hardware has on headphones.
-// The wasm side remembers the preference for future cores and applies it to
-// the live core. Persisted in the "audio" IDB record.
+// --- GBA audio interpolation ---
+// Cubic reconstruction of the DirectSound FIFO stream, on by default; off is
+// bit-true DAC output. The wasm side remembers it for future cores.
 var fifoInterp = true;
 const fifoInterpToggle = /** @type {HTMLInputElement} */ (document.getElementById("fifo-interp-toggle"));
 
@@ -6523,12 +5559,9 @@ if (fifoInterpToggle) {
   });
 }
 
-// --- MP2K sound-engine HLE ("Improve audio quality in supported titles") ---
-// Experimental opt-in: re-renders GBA music above the FIFO's ~13 kHz when the
-// runtime detection recognizes Nintendo's MP2K/m4a engine in the loaded game.
-// The wasm side remembers the preference for future cores (make_gba) and
-// applies it to the live core, so this only needs to push on change / init.
-// Persisted in the "audio" IDB record alongside volume/mute/pitchCorrectFF.
+// --- MP2K sound-engine HLE ---
+// Opt-in: re-renders GBA music above the FIFO's ~13 kHz when the MP2K/m4a
+// engine is detected. The wasm side remembers it for future cores.
 var mp2kHle = false;
 const mp2kHleToggle = /** @type {HTMLInputElement} */ (document.getElementById("mp2k-hle-toggle"));
 
@@ -6547,10 +5580,8 @@ if (mp2kHleToggle) {
   });
 }
 
-// --- Analog low-pass filter (optional AudioContext BiquadFilter) ---
-// Models the GBA speaker's cap/analog smoothing; off by default (routed out
-// of the graph → bit-identical to no filter). Persisted in the "audio" IDB
-// record alongside volume/mute/pitchCorrectFF.
+// --- Analog low-pass filter (optional BiquadFilter) ---
+// Off by default: routed out of the graph, bit-identical to no filter.
 var audioLowpass = false;
 const lowpassToggle = /** @type {HTMLInputElement} */ (document.getElementById("audio-lowpass-toggle"));
 
@@ -6566,50 +5597,30 @@ if (lowpassToggle) {
   });
 }
 
-// --- Video effects (integer scaling, scanline overlay) ---
-// Integer scaling pins the canvas's CSS size to a whole multiple of the
-// emulated resolution. The scanline overlay is a separate element JS keeps
-// aligned over the canvas (a WebGL canvas can't carry pseudo-elements), with
-// background-size set so one line lands on each emulated pixel row.
+// --- Video effects ---
 
 var integerScale = false;
-// LCD response: a plain on/off switch over the panel-response model in
-// src/dingbat/common/lcd_response.nim. On, the core resolves the panel from
-// the machine it is running (DMG / CGB / AGB-001, and nothing under a Super
-// Game Boy) — the panel is never picked here. Two older shapes of this
-// setting are still out there in stored records: the "Motion blur" 50/50
-// interframe blend it replaced, and the six-way panel picker it shipped as.
-// See loadVideoSettings for both migrations.
+// LCD response: on/off over src/dingbat/common/lcd_response.nim; the core
+// resolves the panel from the running machine. Two older stored shapes
+// ("Motion blur", a panel picker) migrate in loadVideoSettings.
 var lcdResponse = false;
-// Every panel name the picker could store. All of them mean ON now: someone
-// who chose a panel was asking for that machine's response, and the switch
-// gives it to them. Anything not in here (a newer build's name, a corrupted
-// record) falls back to off rather than sliding a bad value into wasm.
+// Every panel name the old picker could store; all mean on. Anything else
+// falls back to off rather than sliding a bad value into wasm.
 const LCD_LEGACY_ON = ["auto", "on", "true", "yes",
                        "dmg", "cgb", "gbc", "agb", "agb001", "gba",
                        "ags", "ags101", "sp"];
 var ambientGlow = false;
-// The Filter selector: one look for the picture. The smoothing filters
-// ("hq4x" | "xbr" | "xbrz") and the screen-structure looks ("grid" | "rgb")
-// live in the same select because exactly one can be active — that is what
-// retired the separate Scanlines toggle and its suspend/grey-out dance ("LCD
-// grid" is that toggle's successor: seams on both axes, the way the real
-// panels look, instead of CRT-style rows). The screen looks are not u_filter
-// values in the shader; drawGame translates them to their own uniforms.
-// Integer scaling composes with all of them.
+// The Filter selector: smoothing filters ("hq4x" | "xbr" | "xbrz") and
+// screen looks ("grid" | "rgb") in one select, since exactly one is active.
+// The screen looks are not u_filter values; drawGame maps them to their own
+// uniforms.
 var upscaleFilter = "none";
-// Speed mode suspends the whole Filter selector — smoothing filters and
-// screen looks alike (hq4x +0.16 ms / xBR +0.58 ms per present even on a
-// fast GPU, and the RGB look additionally inflates the backing store).
-// Every consumer goes through this; the stored preference is untouched.
+// Speed mode suspends the whole selector; every consumer goes through this.
 const effectiveFilter = () => (speedMode ? "none" : upscaleFilter);
 
-// #canvas backing store = native resolution * glScale(). The game texture is
-// sampled NEAREST, so this is a crisp integer upscale (identical pixels to the
-// old SDL logical-size scaling) that also keeps screenshots at their prior
-// size. The RGB-subpixel look bumps the multiple to 6: each native pixel then
-// gets two whole backing pixels per stripe, where the default 4 would give
-// 4/3 px per stripe and alias into moiré.
+// Backing store = native * glScale(); NEAREST sampling makes it a crisp
+// integer upscale. The RGB look needs 6: two whole backing pixels per
+// stripe, where 4 gives 4/3 and aliases into moire.
 const glScale = () => (effectiveFilter() === "rgb" ? 6 : 4);
 
 const canvasEl = /** @type {HTMLCanvasElement} */ (document.getElementById("canvas"));
@@ -6621,11 +5632,8 @@ const lcdResponseToggle = /** @type {HTMLInputElement} */ (document.getElementBy
 const ambientGlowToggle = /** @type {HTMLInputElement} */ (document.getElementById("ambient-glow-toggle"));
 const upscaleFilterSelect = /** @type {HTMLSelectElement} */ (document.getElementById("upscale-filter-select"));
 
-// The presented picture's native size. The core is authoritative: it is the
-// only thing that knows a Super Game Boy border has appeared and made the
-// picture 256x224 instead of 160x144. The filename check stays as the
-// bootstrap answer for the window before the core exists (updateCanvasScaling
-// runs during load), and as the answer for GBA, which never changes shape.
+// Native picture size. The core is authoritative (an SGB border makes it
+// 256x224); the filename check covers the window before the core exists.
 const nativeRes = () => {
   if (typeof Module !== "undefined" && Module._wasm_out_w && currentRomName) {
     const w = Module._wasm_out_w(), h = Module._wasm_out_h();
@@ -6634,28 +5642,20 @@ const nativeRes = () => {
   return currentRomName && extOf(currentRomName) !== ".gba" ? [160, 144] : [240, 160];
 };
 
-// The size of the buffer _wasm_fb_ptr / _wasm_game_fb_ptr point at, which is
-// always the console's own framebuffer -- 160x144 even when a Super Game Boy
-// border makes the PRESENTED picture 256x224. Everything that reads those
-// pointers (thumbnails, the ambient-glow sampler, the paused card, the
-// bug-report preview) must use this and not nativeRes(), or it walks off the
-// end of the heap view. Those surfaces also look better without the border: a
-// 160px-wide thumbnail of a bordered frame is mostly border.
+// Size of the buffer _wasm_fb_ptr / _wasm_game_fb_ptr point at: the
+// console's own framebuffer (160x144 even under an SGB border). Readers of
+// those pointers must use this, not nativeRes(), or they walk off the heap view.
 const gameRes = () =>
   currentRomName && extOf(currentRomName) !== ".gba" ? [160, 144] : [240, 160];
 
-// True while the running cart actually has an SGB adapter. Used to explain
-// why the shade palette is inert rather than leaving a dead control.
+// True while the running cart has an SGB adapter (the shade palette is inert).
 const sgbActive = () =>
   !!(typeof Module !== "undefined" && Module._wasm_sgb_active &&
      currentRomName && Module._wasm_sgb_active());
 
 const updateCanvasScaling = () => {
-  // WebGL2 present: WE own the #canvas backing store now (SDL renders to the
-  // hidden #sdl-canvas). Pin it to the native resolution * glScale() — NEAREST
-  // texture sampling makes that a crisp integer upscale, and the extra pixels
-  // keep screenshots at their previous size. Only touch it when it actually
-  // changes: assigning canvas.width/height resets the GL drawing buffer.
+  // Backing store = native * glScale(). Only assign on change: assigning
+  // canvas.width/height resets the GL drawing buffer.
   presentDirty = true; // resize can wipe the backing — repaint on the next tick
   const running0 =
     document.body.classList.contains("running") && !!currentRomName;
@@ -6666,13 +5666,9 @@ const updateCanvasScaling = () => {
     if (canvasEl.width !== bw) canvasEl.width = bw;
     if (canvasEl.height !== bh) canvasEl.height = bh;
   }
-  // Size the canvas box in JS from two live measurements: the stage's actual
-  // box and the canvas backing store's actual shape (native per system:
-  // GBA 3:2, GB 10:9). CSS alone cannot do this safely — with
-  // aspect-ratio, a max-height clamp squashes the picture instead of
-  // shrinking it, which stretched GB games on phone portrait where the
-  // in-flow touch controls leave the stage short. The --game-ar variable is
-  // still published for the stylesheet's pre-JS fallback rules.
+  // Size the canvas box from the stage's box and the backing store's shape.
+  // CSS aspect-ratio alone cannot: a max-height clamp squashes instead of
+  // shrinking. --game-ar is still published for the pre-JS fallback.
   if (canvasEl.width > 0 && canvasEl.height > 0) {
     canvasEl.style.setProperty("--game-ar", /** @type {*} */ (canvasEl.width / canvasEl.height));
   }
@@ -6682,9 +5678,8 @@ const updateCanvasScaling = () => {
       : 1.5;
   const running =
     document.body.classList.contains("running") && !!currentRomName;
-  // Available box = stage content box: clientWidth/Height include padding,
-  // and the tablet-landscape tier reserves the control-rail width as stage
-  // padding — the frame must yield to the rails, never sit under them.
+  // Stage content box: the tablet-landscape tier reserves the rail width as
+  // stage padding, and the frame must yield to the rails.
   const stageCS = getComputedStyle(stageEl);
   const availW =
     stageEl.clientWidth -
@@ -6698,7 +5693,7 @@ const updateCanvasScaling = () => {
     canvasEl.style.width = k * w + "px";
     canvasEl.style.height = k * h + "px";
   } else if (running) {
-    // Contain-fit: as large as the stage allows without changing shape
+    // Contain-fit.
     const w = Math.min(availW, availH * ar);
     canvasEl.style.width = w + "px";
     canvasEl.style.height = w / ar + "px";
@@ -6706,11 +5701,8 @@ const updateCanvasScaling = () => {
     canvasEl.style.width = "";
     canvasEl.style.height = "";
   }
-  // Scanlines are now drawn by the WebGL2 shader (uniform-gated), not a DOM
-  // overlay — nothing to position here. Ambient glow stays a separate blurred
-  // canvas behind the game; keep it pinned to the canvas rect.
-  // Speed mode suspends the glow entirely (sampler + canvas), so hide it —
-  // a visible canvas would show a stale, never-repainted glow.
+  // Keep the glow canvas pinned to the canvas rect; speed mode suspends it
+  // (a visible canvas would show a stale glow).
   const singleCore = running && !linkMode && !rollbackMode && !speedMode;
   if (ambientGlow && singleCore) {
     const c = canvasEl.getBoundingClientRect();
@@ -6723,10 +5715,8 @@ const updateCanvasScaling = () => {
   glowCanvas.hidden = !(ambientGlow && singleCore);
 };
 
-// Sample a coarse grid from the wasm-side presented framebuffer into the glow
-// canvas. Called from the RAF loop but throttled to ~10 Hz; each sample is
-// blended over the previous one so the glow eases between scenes instead of
-// flickering. The buffer is stale-while-paused/static, which reads correctly.
+// Sample a coarse grid from the presented framebuffer into the glow canvas
+// at ~10 Hz, blended over the previous sample.
 const glowBuf = document.createElement("canvas");
 glowBuf.width = glowCanvas.width;
 glowBuf.height = glowCanvas.height;
@@ -6735,7 +5725,7 @@ let glowImage = null;
 let glowTick = 0;
 let glowFresh = true; // first sample after enabling paints at full alpha
 
-// Pack a "#rrggbb" into the ABGR word the sampler compares against.
+// "#rrggbb" -> the ABGR word the sampler compares against.
 const glowPackHex = (c) => {
   const n = parseInt(String(c).replace("#", ""), 16) || 0;
   return (0xff000000 | ((n & 0xff) << 16) | (n & 0xff00) | ((n >> 16) & 0xff)) >>> 0;
@@ -6747,11 +5737,8 @@ const updateGlow = () => {
   if (glowTick++ % 6 !== 0) return;
   const gw = glowCanvas.width;
   const gh = glowCanvas.height;
-  // The core composites and samples: it owns the colour LUT and the SGB
-  // border, and it only touches the gw*gh cells we ask for instead of running
-  // the whole frame through the LUT the way _wasm_fb_ptr does. See
-  // wasm_glow_sample for what is deliberately NOT sampled (upscale filters,
-  // scanlines, letterbox bars).
+  // The core samples (it owns the LUT and the SGB border) and touches only
+  // the gw*gh cells asked for. See wasm_glow_sample for what is not sampled.
   const pal = gbMonoPanel && !sgbActive() ? gbPaletteColors() : null;
   const remap = !!(pal && pal.length === 4);
   const ptr = Module._wasm_glow_sample(
@@ -6767,9 +5754,8 @@ const updateGlow = () => {
       const si = (y * gw + x) * 4;
       const di = si;
       const r = heap[si], g = heap[si + 1], b = heap[si + 2];
-      // Saturation boost, folded in here (384 px) so the CSS filter is just the
-      // blur — one compositor pass instead of blur + saturate. Uint8ClampedArray
-      // clamps + rounds the assignment. Luma-preserving, matches saturate(1.5).
+      // Saturation folded in here so the CSS filter is just the blur (one
+      // compositor pass). Luma-preserving, matches saturate(1.5).
       const luma = 0.299 * r + 0.587 * g + 0.114 * b;
       d[di] = luma + (r - luma) * 1.5;
       d[di + 1] = luma + (g - luma) * 1.5;
@@ -6783,45 +5769,27 @@ const updateGlow = () => {
   glowFresh = false;
 };
 
-// --- WebGL2 game presentation ---
-// Our own WebGL2 context on #canvas draws the single-core game view (SDL is no
-// longer the visual path). The wasm core hands us the RAW BGR555 framebuffer
-// (Module._wasm_game_fb_ptr); we upload it to an R16UI integer texture and a
-// GLSL ES 300 fragment shader unpacks the 5-bit channels and applies the LCD
-// color-correction (same math as the desktop shader / the old CPU LUT) plus
-// scanlines — both uniform-gated. This removes the per-frame CPU color LUT the
-// core used to run and replaces the DOM scanline overlay. Link / rollback modes
-// keep their own 2D-canvas blit path (deferred — see notes below).
-// WebGL2 game presenter (shared with the embed — see web/glpresent.js).
+// --- WebGL2 game presentation (web/glpresent.js, shared with the embed) ---
+// The raw BGR555 framebuffer (Module._wasm_game_fb_ptr) goes to an R16UI
+// texture; the fragment shader unpacks it and applies LCD colour correction
+// and scanlines. Link / rollback modes keep their own 2D-canvas blit path.
 const glRenderer = createGlRenderer(canvasEl, nativeRes, log);
 
-// Present one game frame via WebGL2. No-op in link / rollback modes (they blit
-// their own 2D canvases) and when no game is loaded.
-// True when the next RAF tick must present even if emulation stepped no new
-// frame (first paint, resize wiped the canvas backing, a display setting
-// changed). Cleared after each present.
+// True when the next RAF tick must present even without a new frame (first
+// paint, resize, a display setting changed).
 var presentDirty = true;
 var presentSkip = false;
 var presentSkips = 0;
 
-// True while the running game is a MONOCHROME Game Boy title. Only those have
-// a four-shade screen to recolour: a Game Boy Color game draws from its own
-// full-colour palettes and must come out exactly as the game intended, so the
-// shade palette is gated on this and not merely on "the GB core is running".
-// detectMonoPanel (loadRom) sets it; see there for how it is decided.
+// True while the running game is a monochrome Game Boy title (the shade
+// palette's gate). Set by detectMonoPanel.
 var gbMonoPanel = false;
 
-// Decide it exactly the way the core does (new_gb in src/dingbat/gb/gb.nim):
-// the screen is colour if the cartridge header's CGB flag is set (0x80
-// CGB-enhanced, 0xC0 CGB-only) OR a CGB boot ROM is installed, because that
-// boot ROM colourises monochrome carts itself and the result is no longer a
-// four-shade image. GBA never applies.
-//
-// Reading the header here rather than exporting a flag from wasm is what keeps
-// this whole feature inside the presentation layer: no Nim, no new core export,
-// nothing that could touch emulated state. The shader is belt-and-braces on top
-// — it substitutes only exact DMG shade values, so even a wrong answer here
-// could not repaint a colour game's artwork.
+// Decided as the core does (new_gb in src/dingbat/gb/gb.nim): colour if the
+// header's CGB flag is set (0x80 / 0xC0) or a CGB boot ROM is installed
+// (it colourises monochrome carts itself). Read here, not exported from
+// wasm, so the feature stays in the presentation layer; the shader
+// substitutes only exact DMG shade values anyway.
 const detectMonoPanel = (romFile) => {
   gbMonoPanel = false;
   if (extOf(romFile) === ".gba") return;
@@ -6831,17 +5799,14 @@ const detectMonoPanel = (romFile) => {
     if ((rom[0x143] & 0x80) !== 0) return;      // CGB-enhanced or CGB-only
   } catch (e) { return; }
   try {
-    // Matches the core's own test: present and larger than the 0x100-byte
-    // DMG boot ROM (i.e. a real CGB boot ROM).
+    // The core's test: larger than the 0x100-byte DMG boot ROM.
     if (FS.readFile("bootrom.bin").length > 0x100) return;
   } catch (e) { /* no boot ROM installed — monochrome stays monochrome */ }
   gbMonoPanel = true;
 };
 
-// The output size an SGB border changes mid-session. Watched here rather than
-// pushed from the core, because it is the presenter that has to react: the
-// canvas backing store, --game-ar and the integer-scale/contain-fit maths all
-// key off nativeRes().
+// An SGB border changes the output size mid-session; the presenter watches
+// for it, since the backing store, --game-ar and the fit all key off nativeRes().
 var lastOutW = 0, lastOutH = 0;
 
 const drawGame = () => {
@@ -6854,17 +5819,14 @@ const drawGame = () => {
   }
   glRenderer.draw({
     colorCorrect,
-    // Under SGB colour the framebuffer no longer holds the four DMG shade
-    // values the shader substitutes, so the palette would silently no-op.
-    // Gate it here and say so in the UI (syncGbPaletteUI).
+    // Under SGB colour the framebuffer no longer holds DMG shade values, so
+    // the palette would no-op; gate it and say so (syncGbPaletteUI).
     dmgPalette: gbMonoPanel && !sgbActive() ? gbPaletteColors() : null,
     panelGbc: Module._wasm_panel_gbc
       ? Module._wasm_panel_gbc() === 1
       : extOf(currentRomName) !== ".gba",
-    // The screen-structure looks are Filter choices in the UI but their own
-    // uniforms in the shader; the smoothing values pass through as-is and
-    // glpresent maps anything else to u_filter 0. All of it reads the
-    // effective filter, so speed mode suspends the whole selector at once.
+    // Screen looks are their own uniforms; smoothing values pass through and
+    // glpresent maps anything else to u_filter 0.
     grid: effectiveFilter() === "grid",
     subpixel: effectiveFilter() === "rgb",
     filter: effectiveFilter(),
@@ -6877,8 +5839,7 @@ const saveVideoSettings = () => {
 
 const applyLcdResponse = () => {
   if (typeof Module !== "undefined" && Module._wasm_set_lcd_response) {
-    // Suspended (not overwritten) while speed mode is on — the panel model
-    // is per-pixel CPU work on every presented frame.
+    // Suspended (not overwritten) while speed mode is on.
     Module._wasm_set_lcd_response((lcdResponse && !speedMode) ? 1 : 0);
   }
 };
@@ -6914,22 +5875,17 @@ const loadVideoSettings = async () => {
   let v = await dbGet("video");
   if (v) {
     integerScale = !!v.integerScale;
-    // Two migrations, oldest first. "Motion blur" (a 50/50 interframe blend)
-    // became the LCD response model; anyone who had it on wanted panel
-    // ghosting, so the feature stays on for them rather than vanishing. The
-    // model then shipped briefly as a six-way panel picker, which stored a
-    // name here; every name it could store means on (LCD_LEGACY_ON), because
-    // asking for a panel is asking for that machine's response.
+    // Two migrations, oldest first: "Motion blur" on means LCD response on;
+    // a stored panel name (LCD_LEGACY_ON) means on.
     if (typeof v.lcdResponse === "boolean") lcdResponse = v.lcdResponse;
     else if (typeof v.lcdResponse === "string")
       lcdResponse = LCD_LEGACY_ON.includes(v.lcdResponse);
     else lcdResponse = !!v.motionBlur;
     ambientGlow = !!v.ambientGlow;
     if (typeof v.upscaleFilter === "string") upscaleFilter = v.upscaleFilter;
-    // Scanlines grew into the LCD grid: the old boolean toggle AND the
-    // short-lived "scanlines" dropdown value both land on "grid". The old
-    // toggle only migrates when no smoothing filter was stored — the old UI
-    // made the filter win by suspending scanlines, so it keeps winning here.
+    // The old scanlines toggle and "scanlines" dropdown value both land on
+    // "grid"; the toggle only migrates when no smoothing filter was stored
+    // (the old UI let the filter win).
     if (upscaleFilter === "scanlines") upscaleFilter = "grid";
     if (v.scanlines && upscaleFilter === "none") upscaleFilter = "grid";
   }
@@ -6944,29 +5900,20 @@ const loadVideoSettings = async () => {
 window.addEventListener("resize", updateCanvasScaling);
 
 // --- iOS rotation settle ---
-// Rotating landscape -> portrait on iPhone can leave the touch-control
-// strip's PAINTED pixels out of sync with where WebKit hit-tests them (the
-// targets land above the buttons): the layout tier tears down the landscape
-// position:fixed layers and re-resolves vw/cq/safe-area units, but iOS fires
-// its resize events mid-rotation with stale numbers and may never re-raster
-// the strip's composited layer. Hit-testing here is entirely DOM-based (no
-// cached rects anywhere), so the fix is to force a fresh layout + composite
-// AFTER the rotation settles: coalesced double-rAF plus a 350ms follow-up,
-// re-running canvas scaling, nudging the strip's layer (the reflow read
-// alone is often not enough on iOS), and releasing a mid-rotation joystick
-// hold so no direction sticks.
+// Rotating on iPhone can leave the touch strip's painted pixels out of sync
+// with where WebKit hit-tests them: resize fires mid-rotation with stale
+// numbers and the composited layer may never re-raster. Force a fresh
+// layout + composite after the rotation settles (double-rAF plus a 350ms
+// follow-up), nudge the strip's layer, release a mid-rotation joystick hold.
 {
   let settleTimer = null;
   const settleNow = () => {
-    // Phantom scroll is the classic cause of "touch targets sit ABOVE the
-    // painted buttons": iOS sometimes leaves the (position:fixed!) document
-    // scrolled by a few dozen px after a rotation round-trip, and native
-    // touch hit-testing follows the scroll while fixed-position paint does
-    // not. Log it (visible via Toggle Log on-device), then zero it.
+    // Phantom scroll: iOS can leave the position:fixed document scrolled by
+    // a few dozen px after a rotation, and hit-testing follows the scroll
+    // while fixed-position paint does not. Log it, then zero it.
     const vv = window.visualViewport;
-    // Not phantom: pinch-zoom sets vv.offsetTop legitimately (resetting
-    // would yank the user's pan), and the iOS keyboard scrolls the page
-    // while a field is focused (resetting would fight the caret).
+    // Not phantom: pinch-zoom sets vv.offsetTop, and the iOS keyboard
+    // scrolls the page while a field is focused.
     const zoomed = vv && vv.scale && vv.scale > 1.01;
     const typing = document.activeElement &&
       (document.activeElement.tagName === "INPUT" ||
@@ -6980,18 +5927,15 @@ window.addEventListener("resize", updateCanvasScaling);
       document.documentElement.scrollTop = 0;
       document.body.scrollTop = 0;
     }
-    // Publish the MEASURED app height for the standalone body sizing:
-    // visualViewport.height has none of 100vh's post-rotation staleness.
-    // Skip while it's the on-screen KEYBOARD shrinking the visual viewport
-    // (vv well below innerHeight) — the app must not resize under typing.
+    // Publish the measured app height (visualViewport.height has none of
+    // 100vh's post-rotation staleness). Skip while the keyboard is up.
     if (vv && vv.height > 0 && vv.height >= window.innerHeight - 1) {
       document.documentElement.style.setProperty(
         "--app-h", Math.round(vv.height) + "px");
     }
     updateCanvasScaling();
-    // Nudge the layers WebKit is most likely to have stale after rotation:
-    // the control strip AND the fixed body root (landscape creates/destroys
-    // fixed tiers on both).
+    // Nudge the layers WebKit is most likely to have stale: the control
+    // strip and the fixed body root.
     for (const el of [document.getElementById("controls"), document.body]) {
       if (!el) continue;
       void el.offsetHeight;                 // force reflow
@@ -7017,10 +5961,8 @@ window.addEventListener("resize", updateCanvasScaling);
 }
 new ResizeObserver(updateCanvasScaling).observe(stageEl);
 
-// WebKit applies the SDL window resize to the canvas attributes a beat AFTER
-// initFromEmscripten returns (Chromium is synchronous), so the sizing pass in
-// loadRom can run against the previous system's backing shape. Watch for the
-// late change from the RAF loop and re-fit when it lands.
+// WebKit applies the SDL window resize to the canvas a beat after
+// initFromEmscripten returns (Chromium is synchronous); re-fit when it lands.
 let seenCanvasW = 0;
 let seenCanvasH = 0;
 const watchCanvasBacking = () => {
@@ -7035,7 +5977,7 @@ const watchCanvasBacking = () => {
 
 const INPUT_NAMES = ["Up", "Down", "Left", "Right", "A", "B", "Select", "Start", "L", "R"];
 
-// event.code → SDL keycode mapping (covers common bindable keys)
+// event.code -> SDL keycode mapping.
 const JS_TO_SDL = (() => {
   const m = {
     ArrowUp: 0x40000052, ArrowDown: 0x40000051,
@@ -7054,14 +5996,12 @@ const JS_TO_SDL = (() => {
     ControlLeft: 0x400000E0, ControlRight: 0x400000E4,
     AltLeft: 0x400000E2, AltRight: 0x400000E6,
   };
-  // Letter keys: KeyA-KeyZ → 97-122
   for (let i = 0; i < 26; i++) {
     m["Key" + String.fromCharCode(65 + i)] = 97 + i;
   }
   return m;
 })();
 
-// Reverse: SDL keycode → display name
 const SDL_TO_NAME = (() => {
   const m = {
     0x40000052: "\u2191", 0x40000051: "\u2193",
@@ -7075,7 +6015,7 @@ const SDL_TO_NAME = (() => {
   return m;
 })();
 
-// Presets: array of 10 SDL keycodes indexed by Input enum order
+// Presets: 10 SDL keycodes indexed by Input enum order.
 const PRESET_DEFAULT = [
   0x40000052, 0x40000051, 0x40000050, 0x4000004F, // Up Down Left Right
   122, 120, 8, 13, 97, 115 // Z X Backspace Return A S
@@ -7085,15 +6025,12 @@ const PRESET_HOMEROW = [
   107, 106, 108, 59, 119, 114 // K J L ; W R
 ];
 
-// Current active keybindings (SDL keycodes indexed by input ID)
 var activeBindings = [...PRESET_DEFAULT];
 
-// Build reverse lookup: event.code → input ID (for JS-side keyboard handling)
 var codeLookup = {};
 const rebuildLookup = () => {
   codeLookup = {};
   for (let i = 0; i < activeBindings.length; i++) {
-    // Find the event.code that maps to this SDL keycode
     for (let [code, sdl] of Object.entries(JS_TO_SDL)) {
       if (sdl === activeBindings[i]) {
         codeLookup[code] = i;
@@ -7104,33 +6041,18 @@ const rebuildLookup = () => {
 };
 rebuildLookup();
 
-// Online input-rollback mode: this player's currently-held buttons as a
-// bitmask (bit i = input id i). Captured from every input source so the RAF
-// loop can hand it to rollback_tick and ship it to the peer each frame.
+// Rollback mode: this player's held buttons as a bitmask (bit i = input id
+// i), handed to rollback_tick and shipped to the peer each frame.
 var rollbackMode = false;
 var localButtons = 0;
 var rbWasLinked = false;  // the games have actually communicated over the link
 var rbLastTransfers = 0;  // last-seen SIO transfer count (activity probe)
 var rbLastActivity = 0;   // timestamp of the last transfer-count change
-// The ONLY signal used to auto-end an online link is hardware activity on the
-// emulated serial cable (_rollback_transfers = completed SIO byte-transfers).
-// No game-specific knowledge — no memory addresses, ROM/title detection, or
-// protocol sniffing — so this behaves the same for any linked GB/GBC/GBA title.
-//
-// Knowing when a link is "done" is a judgement call because games pace the
-// cable very differently, so we adapt to observed activity with two windows:
-//  - QUIET: before the cable has seen sustained use, stay lenient. A game can
-//    hold a link open yet idle for a long time before real traffic flows (e.g.
-//    a player walking to an in-game link terminal), so a short window here would
-//    cut the link before it is ever used.
-//  - ACTIVE: once a meaningful amount of traffic has crossed (rbLinkWasActive),
-//    tighten up. A game that is genuinely linking keeps the cable busy — every
-//    frame, or in periodic bursts — so any transfer keeps resetting the timer;
-//    the window only elapses once the cable truly falls silent (the players
-//    ended the link / walked away), and then it disconnects promptly.
-// Both windows reset on every transfer, so neither fires mid-activity. Erring
-// long is harmless: a late auto-disconnect just leaves an already-idle link up
-// a little longer, and the manual disconnect button is always available.
+// Auto-end of an online link keys only off serial-cable activity
+// (_rollback_transfers), never game knowledge. Two windows, both reset on
+// every transfer: QUIET (lenient, before the cable has seen sustained use;
+// a game can hold a link open idle for a long time) and ACTIVE (tight, once
+// meaningful traffic has crossed: a linking game keeps the cable busy).
 var rbLinkWasActive = false; // the cable has seen a sustained burst of traffic
 const RB_IDLE_QUIET_MS  = 90000; // silence tolerated before the link is used
 const RB_IDLE_ACTIVE_MS = 20000; // silence tolerated after real traffic flowed
@@ -7140,34 +6062,22 @@ const noteLocalButton = (inputId, down) => {
   else localButtons &= ~(1 << inputId);
 };
 
-// --- Input display overlay (stream aid / debugging) -------------------------
-// A DOM controller pinned over the stage that lights each button while it is
-// held. Two rules keep it honest:
-//
-//  1. ONE notify chokepoint. Every LOCAL input source funnels through
-//     noteInputDisplay: routeP1Input covers keyboard and touch (and the
-//     tilt-cart d-pad, which is still a real press), pollGamepads calls it on
-//     each edge it detects. So keyboard, gamepad and touch light the overlay
-//     identically and it cannot drift from what the core was told.
-//  2. LOCAL input only. A netplay peer's buttons arrive as a rollback input
-//     word, never through here — the overlay is "what this player is doing",
-//     which is what a stream viewer is watching for. 2P local link is the one
-//     ambiguous case (two consoles, one overlay), so CSS hides it there.
-//
-// It is deliberately DOM and not painted on #canvas: clip recording is
-// canvas.captureStream, so clips stay clean while OBS window / browser-source
-// capture — the actual use case — picks the overlay up.
+// --- Input display overlay -------------------------
+// Every local input source funnels through noteInputDisplay (routeP1Input
+// for keyboard/touch, pollGamepads per edge), so it cannot drift from what
+// the core was told. Local only: a peer's buttons never pass here, and CSS
+// hides it in 2P local link. DOM, not #canvas: clip recording is
+// canvas.captureStream, so clips stay clean while a window capture picks it up.
 const inputOverlay = document.getElementById("input-overlay");
 const inputDisplayToggle = /** @type {HTMLInputElement} */ (document.getElementById("input-display-toggle"));
-// Indexed by core input id, in the order setInput uses (see PRESET_DEFAULT):
-// 0-3 Up/Down/Left/Right, 4 A, 5 B, 6 Select, 7 Start, 8 L, 9 R.
+// Indexed by core input id (setInput order): 0-3 Up/Down/Left/Right, 4 A,
+// 5 B, 6 Select, 7 Start, 8 L, 9 R.
 const IO_CELLS = ["io-up", "io-down", "io-left", "io-right", "io-a", "io-b",
                   "io-select", "io-start", "io-l", "io-r"]
   .map((id) => document.getElementById(id));
 var inputDisplay = false;
-// Held buttons as a bitmask. Tracked even while the overlay is OFF so that
-// switching it on mid-hold cannot leave a cell wrong, and so a repeat keydown
-// (the browser fires those while a game key is held) costs no DOM work.
+// Held buttons as a bitmask, tracked even while the overlay is off (so
+// switching it on mid-hold is right, and repeat keydowns cost no DOM work).
 var inputDisplayHeld = 0;
 
 const noteInputDisplay = (inputId, down) => {
@@ -7178,8 +6088,8 @@ const noteInputDisplay = (inputId, down) => {
   if (inputDisplay) IO_CELLS[inputId]?.classList.toggle("io-on", !!down);
 };
 
-// Nothing may stay lit through a toggle, a game unload, or a window blur that
-// swallowed the keyup (the same reason releaseKbHolds exists).
+// Nothing may stay lit through a toggle, an unload, or a blur that
+// swallowed the keyup.
 const clearInputDisplay = () => {
   inputDisplayHeld = 0;
   for (const el of IO_CELLS) el?.classList.remove("io-on");
@@ -7188,14 +6098,12 @@ const clearInputDisplay = () => {
 const applyInputDisplay = (on) => {
   inputDisplay = on;
   inputDisplayToggle.checked = on;
-  // CSS decides where it may actually appear (running games only, never in 2P
-  // link, never while the touch controls are on screen — see styles.css).
+  // CSS decides where it may appear (styles.css).
   inputOverlay.classList.toggle("on", on);
   clearInputDisplay();
 };
 
-// The switch and the I shortcut are one setting, so both go through here and
-// neither can skip the persist.
+// The switch and the I shortcut both go through here.
 const setInputDisplay = async (on) => {
   applyInputDisplay(on);
   await dbPut("input-display", on);
@@ -7210,15 +6118,12 @@ const loadInputDisplayFromStorage = async () => {
   applyInputDisplay(!!(await dbGet("input-display")));
 };
 
-// Route player-1 input (keyboard, touch controls) to the right core: the
-// single running core normally, core 0 in 2P link mode, or — in online
-// rollback mode — captured into localButtons (the RAF loop feeds the core).
+// Route P1 input: the single core, core 0 in 2P link, or localButtons in
+// rollback mode.
 const routeP1Input = (inputId, down) => {
   noteInputDisplay(inputId, down);
-  // Tilt cart: the D-pad (keyboard or touch) doubles as a tilt source — the
-  // held directions become the tilt target, smoothed toward in updateTilt so
-  // digital input still gives controllable analog motion. The real D-pad
-  // press goes through too (menus use it; gameplay ignores it).
+  // Tilt cart: the D-pad doubles as a tilt source (smoothed in updateTilt);
+  // the real press goes through too for menus.
   if (tiltActive && inputId <= 3) {
     kbTiltDirs[inputId] = down;
     tiltTargetY = (kbTiltDirs[0] ? -TILT_KB_RANGE : 0) + (kbTiltDirs[1] ? TILT_KB_RANGE : 0);
@@ -7227,21 +6132,17 @@ const routeP1Input = (inputId, down) => {
   if (rollbackMode) {
     noteLocalButton(inputId, down);
   } else if (linkMode) {
-    // Keyboard drives whichever linked screen has focus (click to switch);
-    // a gamepad, if present, always drives P2.
+    // Keyboard drives the focused linked screen; a gamepad always drives P2.
     if (Module._link_input) Module._link_input(linkFocus, inputId, down ? 1 : 0);
   } else {
     Module._setInput(inputId, down ? 1 : 0);
   }
 };
 
-// JS-side keyboard handler: intercepts bound keys before Emscripten's SDL layer
-// and calls _setInput directly. This is authoritative for keyboard input.
+// Intercepts bound keys before the SDL layer and calls _setInput directly.
 const gameKeyHandler = (e, down) => {
   if (settingsModal.classList.contains("open")) return;
-  // Don't hijack keystrokes while the user is typing in a text field (e.g. the
-  // room-code input): letters like A/S/Z/X are default game-input keys, and
-  // preventDefault here would swallow them before they reach the field.
+  // Not while typing in a text field.
   const t = e.target;
   if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
   let inputId = codeLookup[e.code];
@@ -7276,8 +6177,6 @@ const renderKbBindings = () => {
     btn.type = "button";
     btn.className = "kb-btn" + (kbSelection === i ? " active" : "");
     btn.textContent = sdlName(activeBindings[i]);
-    // The visible label ("Z") only names the key; tell screen readers which
-    // action this button rebinds.
     btn.setAttribute("aria-label", INPUT_NAMES[i] + ": " + sdlName(activeBindings[i]));
     btn.addEventListener("click", () => {
       kbSelection = i;
@@ -7296,7 +6195,6 @@ const applyKeybindings = (bindings) => {
   rebuildLookup();
 };
 
-// Rebinds commit immediately: apply to the live bindings and persist
 const commitBindings = (bindings) => {
   applyKeybindings(bindings);
   if (db) dbPut("keybindings", activeBindings);
@@ -7307,9 +6205,8 @@ const commitBindings = (bindings) => {
 const kbKeyHandler = (e) => {
   if (kbSelection < 0) return;
   if (e.code === "Escape") {
-    // Cancel the capture. Escape must never become a game binding: bound
-    // keys pre-empt shortcuts, so a bound Escape stops closing every modal
-    // app-wide with no visible cause.
+    // Escape must never become a binding: bound keys pre-empt shortcuts, so
+    // it would stop closing every modal.
     kbSelection = -1;
     renderKbBindings();
     e.preventDefault();
@@ -7321,13 +6218,11 @@ const kbKeyHandler = (e) => {
   e.preventDefault();
   e.stopImmediatePropagation();
   let bindings = [...activeBindings];
-  // Remove any existing binding for this key
   for (let i = 0; i < bindings.length; i++) {
     if (bindings[i] === sdl) bindings[i] = -1;
   }
   bindings[kbSelection] = sdl;
-  // One key per click: ending capture here (no auto-advance) keeps a stray
-  // extra keystroke from silently rebinding the next button in the list.
+  // No auto-advance: a stray keystroke must not rebind the next button.
   kbSelection = -1;
   commitBindings(bindings);
 };
@@ -7335,12 +6230,12 @@ const kbKeyHandler = (e) => {
 const loadKeybindingsFromStorage = async () => {
   let stored = await dbGet("keybindings");
   if (stored && stored.length === INPUT_NAMES.length) {
-    // Heal profiles saved before Escape became unbindable (see kbKeyHandler)
+    // Heal profiles saved before Escape became unbindable.
     applyKeybindings(stored.map((k) => (k === 27 ? -1 : k)));
   }
 };
 
-// --- Large on-screen controls (bigger d-pad for touch) ---
+// --- Large on-screen controls ---
 const largeControlsToggle = /** @type {HTMLInputElement} */ (document.getElementById("large-controls-toggle"));
 
 const applyLargeControls = (on) => {
@@ -7357,7 +6252,7 @@ const loadLargeControlsFromStorage = async () => {
   applyLargeControls(!!(await dbGet("large-controls")));
 };
 
-// --- Opaque controls in landscape (solid instead of see-through buttons) ---
+// --- Opaque controls in landscape ---
 const opaqueControlsToggle = /** @type {HTMLInputElement} */ (document.getElementById("opaque-controls-toggle"));
 
 const applyOpaqueControls = (on) => {
@@ -7374,9 +6269,9 @@ const loadOpaqueControlsFromStorage = async () => {
   applyOpaqueControls(!!(await dbGet("opaque-controls")));
 };
 
-// --- Hide touch controls while a game controller is connected (default on) ---
-// pollGamepads maintains body.gamepad-hides-touch from the live connected
-// state; the CSS gate only bites in the touch layout, so desktop is unaffected.
+// --- Hide touch controls while a game controller is connected ---
+// pollGamepads maintains body.gamepad-hides-touch; the CSS gate only bites
+// in the touch layout.
 const hideTouchOnGamepadToggle = /** @type {HTMLInputElement} */ (document.getElementById("hide-touch-on-gamepad-toggle"));
 var hideTouchOnGamepad = true;
 
@@ -7384,7 +6279,6 @@ const applyHideTouchOnGamepad = (on) => {
   hideTouchOnGamepad = on;
   hideTouchOnGamepadToggle.checked = on;
   if (!on) document.body.classList.remove("gamepad-hides-touch");
-  // (re-enable happens on the next pollGamepads tick)
 };
 
 hideTouchOnGamepadToggle.addEventListener("change", async () => {
@@ -7397,11 +6291,9 @@ const loadHideTouchOnGamepadFromStorage = async () => {
   applyHideTouchOnGamepad(typeof v === "boolean" ? v : true);
 };
 
-// --- Touch direction input: d-pad (default) vs joystick + joystick behavior ---
-// Two IndexedDB keys: "control-style" ("dpad" | "joystick") and
-// "joystick-mode" ("fixed" | "floating"). body.joystick-controls swaps the
-// on-screen d-pad for the joystick; the behavior row only shows while the
-// joystick is selected.
+// --- Touch direction input: d-pad vs joystick ---
+// "control-style" ("dpad" | "joystick") and "joystick-mode" ("fixed" |
+// "floating"); body.joystick-controls swaps the d-pad for the joystick.
 let controlStyle = "dpad";
 let joystickMode = "fixed";
 const controlStyleChips = Array.from(/** @type {NodeListOf<HTMLElement>} */ (
@@ -7423,7 +6315,7 @@ const applyControlStyle = (style) => {
   document.body.classList.toggle("joystick-controls", controlStyle === "joystick");
   syncChipGroup(controlStyleChips, controlStyle);
   joystickModeRow.classList.toggle("hidden", controlStyle !== "joystick");
-  // Swapping styles mid-touch must not leave direction bits stuck down
+  // Swapping styles mid-touch must not leave direction bits stuck down.
   joystickForceRelease();
 };
 
@@ -7451,13 +6343,9 @@ const loadControlStyleFromStorage = async () => {
   applyJoystickMode(await dbGet("joystick-mode"));
 };
 
-// --- Run-ahead (latency reduction, opt-in) ---
-// 0 = off (default): the tick loop calls plain loop_tick, the identical
-// path that exists without this feature — zero cost until someone opts in.
-// N > 0 swaps the single-core step for runahead_tick(N) (see the algorithm
-// notes in docs/run-ahead.md). Deliberately not engaged during
-// fast-forward/2x (N+1x the work for no latency benefit) and never in the
-// frame-synced link modes.
+// --- Run-ahead (opt-in) ---
+// 0 = off: plain loop_tick, zero cost. N > 0 swaps in runahead_tick(N)
+// (docs/run-ahead.md). Not during fast-forward/2x, never in the link modes.
 let runaheadFrames = 0;
 const runaheadSelect = /** @type {HTMLSelectElement} */ (
   document.getElementById("runahead-select"));
@@ -7478,90 +6366,48 @@ const loadRunaheadFromStorage = async () => {
 };
 
 // --- Game Boy shade palette ---------------------------------------------
-// Recolours the four shades of a MONOCHROME Game Boy game. Purely a
-// presentation setting: the substitution happens in the WebGL presenter's
-// fragment shader (web/glpresent.js), never in the core, so the emulated
-// framebuffer, save states, rewind and netplay are bit-for-bit unaffected by
-// it. See GB_HW_SHADES below for why an exact substitution is possible.
-//
-// Three sources of shades are mutually exclusive, so they are ONE setting with
-// a mode rather than two toggles that could contradict each other:
-//   "default" — the shades the core itself produces (LCD colour model applied)
-//   "theme"   — derived from the current app theme (GB_THEME_PALETTES)
-//   "custom"  — four colours the user picked
-// Its own Reset restores all of that (mode + the four custom colours) without
-// touching any other preference — "Reset all settings" is a separate path.
+// Recolours a monochrome game's four shades in the glpresent.js fragment
+// shader, never in the core. One setting with a mode: "default" (the core's
+// shades), "theme" (GB_THEME_PALETTES), "custom" (four picked colours).
 
-// The four BGR555 values the GB core writes for DMG shades 0..3 — the literal
-// contents of DMG_COLORS in src/dingbat/gb/gb.nim, expanded 5->8 bits. A
-// monochrome game's framebuffer contains ONLY these four values (the DMG has
-// no other colours to draw with), which is what makes recolouring an exact
-// 4-way substitution in the shader instead of a fuzzy image filter. They are
-// also the starting point for a custom palette, so "Custom" opens on what the
-// user was already looking at.
-// NOTE: these are the RAW hardware values; in "default" mode they additionally
-// go through the CGB panel colour model, so the custom seed is very slightly
-// more saturated than the default screen until the user edits it.
+// DMG_COLORS from src/dingbat/gb/gb.nim, expanded 5->8 bits: the only four
+// values a monochrome framebuffer holds, which makes the shader's
+// substitution exact. Also the seed for a custom palette (raw hardware
+// values, so slightly more saturated than "default", which adds the panel
+// colour model).
 const GB_HW_SHADES = ["#fff7d6", "#ffad73", "#ef6b6b", "#7b3a5a"];
 
-// One four-shade ramp per app theme, lightest (shade 0) to darkest (shade 3).
-//
-// The rules these follow, in order:
-//  1. The theme's own main colour appears VERBATIM as one of the four — not a
-//     tint of it. It is shade 1 everywhere except `light` (shade 2, because a
-//     light theme's ink has to be the dark end), `famicom` (shade 1 is the
-//     Famicom gold chrome, its identity colour) and `dmg` (see rule 5).
-//  2. Themes that own several distinct colours spend them instead of inventing
-//     tints: `dmg` uses the LCD paper, the shell grey, the magenta A/B buttons
-//     and the near-black d-pad; `famicom` uses the cream faceplate, the gold
-//     chrome, the garnet button ring and the charcoal buttons.
-//  3. Everything else fills the remaining steps with tints/shades of the main
-//     colour, ending on the theme's own --bg so the darkest shade belongs to
-//     the same world as the chrome around the screen.
-//  4. Every ramp is monotonically darkening with no two steps closer than
-//     ~1.5:1 contrast — a collapsed pair is what makes a game unreadable.
-//  5. …and no two ADJACENT steps more than ~45 CIEDE2000 apart. Monotonic
-//     luminance is not enough: two shades can darken correctly and still be so
-//     far apart in hue that dithering one against the other vibrates instead
-//     of blending. Games spend most of a busy frame alternating shades 1 and 2
-//     at the pixel level, so that pair in particular has to be near in hue.
-//     This is what cost `dmg` its pea-green: green at shade 1 against magenta
-//     at shade 2 measured 74 dE — twice the worst of any other ramp — and on
-//     dithered art (Prehistorik Man's rock face is ~73% those two shades) it
-//     read as a broken display. The shell grey costs the ramp nothing and
-//     brings the pair down to 36, inside the band the other ten occupy.
+// One four-shade ramp per app theme, lightest to darkest. Rules (pinned by
+// web/tests/gb-palette.test.mjs): the theme's main colour appears verbatim;
+// themes with several distinct colours spend them (dmg, famicom); the rest
+// fill with tints ending on --bg; monotonically darkening with no two steps
+// closer than ~1.5:1 contrast; no two adjacent steps more than ~45 CIEDE2000
+// apart, since games dither shades 1 and 2 against each other and a hue
+// gap shimmers instead of blending (dmg's pea-green against magenta was 74).
 const GB_THEME_PALETTES = {
-  // Amber phosphor on near-black: pale amber, the accent itself, a deep amber
-  // and an almost-black ember.
+  // Amber phosphor on near-black.
   amber:           ["#fff0d6", "#ffb04d", "#8f5312", "#1a1206"],
-  // Same amber ink, but the darkest shade is the theme's true #000 (OLED).
+  // Same amber ink, darkest shade the theme's #000.
   black:           ["#fff0d6", "#ffb04d", "#7a4a0f", "#000000"],
-  // The one light theme: paper white -> gold -> the burnt-amber accent ->
-  // the theme's own text ink.
+  // Paper white -> gold -> the burnt-amber accent -> the text ink.
   light:           ["#f3f4f8", "#d88a1f", "#9c5400", "#1d2433"],
   // Blue-violet accent verbatim, then a darkened shell purple, then --bg.
   indigo:          ["#cdc7f0", "#7f6ae7", "#55497f", "#0d0b17"],
-  // Dusty rose accent verbatim; the shell rose is too close in luminance to
-  // sit next to it, so shade 2 is a darkened version of it.
+  // Dusty rose accent verbatim; shade 2 is the shell rose darkened.
   fuchsia:         ["#f0ccd8", "#e8739a", "#7e4560", "#170a0f"],
   // Periwinkle accent verbatim; shade 2 is the shell grey-blue darkened.
   glacier:         ["#ccd9f0", "#769be5", "#3c4a6b", "#0b0e16"],
-  // The bright kiwi shell green verbatim. It is so luminous that shade 0 has
-  // to be a very pale green for the two to separate at all.
+  // Kiwi shell green verbatim; shade 0 must be very pale to separate from it.
   kiwi:            ["#effbea", "#6ee126", "#2d7a1f", "#0c170b"],
-  // Four DISTINCT DMG colours: the pale LCD, the shell grey the console is
-  // moulded in, the magenta A/B buttons, the near-black d-pad. The one theme
-  // whose --accent (the pea-green #9cc954) is deliberately NOT in its ramp —
-  // see rule 5. The magenta stays because shade 2 is a small share of flat
-  // art, where it lands on exactly the details the artist accented.
+  // Four distinct DMG colours: LCD, shell grey, magenta A/B, d-pad black.
+  // The pea-green --accent is deliberately absent (the CIEDE2000 rule).
   dmg:             ["#eaf3de", "#b4aca9", "#6f6a6d", "#262828"],
   // Orchid accent verbatim; shade 2 is the shell violet darkened.
   "atomic-purple": ["#e7cbf0", "#c36ee7", "#6a3d80", "#120b16"],
   // Burnt-orange accent verbatim; shade 2 is the shell orange darkened.
   daiei:           ["#f2d2b0", "#eb7c33", "#8c3d18", "#160f0b"],
-  // Four DISTINCT Famicom colours: cream faceplate, gold chrome, the garnet
-  // A/B ring, the charcoal buttons. (The --accent #e0635c is the ring red
-  // lightened; the ring itself is used because it keeps the ramp separated.)
+  // Four distinct Famicom colours: cream faceplate, gold chrome, garnet A/B
+  // ring, charcoal buttons.
   famicom:         ["#e6d9bf", "#b99c68", "#b44148", "#25272b"],
 };
 
@@ -7575,19 +6421,16 @@ const gbPaletteResetBtn = document.getElementById("gb-palette-reset");
 const gbPaletteInputs = [0, 1, 2, 3].map((i) =>
   /** @type {HTMLInputElement} */ (document.getElementById("gb-palette-shade-" + i)));
 
-// The theme the palette derives from. Read off the root element rather than
-// out of localStorage: <html data-theme> is what applyTheme actually put in
-// force (and what the pre-paint boot script set), so this can never disagree
-// with the chrome on screen — including on the paths that change the theme
-// without writing it back, like Reset all settings.
+// Read off <html data-theme>, not localStorage, so this never disagrees
+// with the chrome on screen (Reset all settings changes the theme without
+// writing it back).
 const currentThemeName = () => {
   const n = document.documentElement.getAttribute("data-theme") || "amber";
   return GB_THEME_PALETTES[n] ? n : "amber";
 };
 
-// The four shades in force right now, or null for "leave the core's own
-// colours alone" — which is both the "default" mode and every non-monochrome
-// game, whatever the mode says.
+// The four shades in force, or null (the "default" mode, and every
+// non-monochrome game whatever the mode).
 const gbPaletteColors = () => {
   if (gbPaletteMode === "theme") return GB_THEME_PALETTES[currentThemeName()];
   if (gbPaletteMode === "custom") return gbPaletteCustom;
@@ -7599,20 +6442,15 @@ const gbPaletteSgbNote = document.getElementById("gb-palette-sgb-note");
 const syncGbPaletteUI = () => {
   if (gbPaletteSelect) gbPaletteSelect.value = gbPaletteMode;
   if (gbPaletteCustomRow) gbPaletteCustomRow.hidden = gbPaletteMode !== "custom";
-  // Under SGB colour the shader has nothing to substitute (the framebuffer no
-  // longer holds DMG shade values), so the control is disabled with a reason
-  // rather than left live and inert.
+  // Under SGB colour the shader has nothing to substitute: disabled with a reason.
   const sgb = sgbActive();
   if (gbPaletteSelect) gbPaletteSelect.disabled = sgb;
   if (gbPaletteSgbNote) gbPaletteSgbNote.hidden = !sgb;
-  // The In-use swatches and the Reset button belong to the same control.
   for (const r of document.querySelectorAll(".gb-palette-row"))
     r.classList.toggle("row-disabled", sgb);
   for (let i = 0; i < 4; i++) {
     if (gbPaletteInputs[i]) gbPaletteInputs[i].value = gbPaletteCustom[i];
   }
-  // The preview is the only place "theme" mode shows its colours, and it is
-  // also what tells a user on a colour game that nothing is being recoloured.
   if (gbPalettePreview) {
     const shades = gbPaletteColors() || GB_HW_SHADES;
     gbPalettePreview.replaceChildren(...shades.map((c) => {
@@ -7627,7 +6465,7 @@ const syncGbPaletteUI = () => {
 
 const applyGbPalette = () => {
   syncGbPaletteUI();
-  // Shader uniform: repaint even if emulation is paused / stepped no frame.
+  // Repaint even if paused.
   presentDirty = true;
   if (typeof drawGame === "function") drawGame();
 };
@@ -7652,9 +6490,7 @@ const loadGbPalette = async () => {
   applyGbPalette();
 };
 
-// Reset THIS setting only. Deliberately its own button rather than a corner of
-// "Reset all settings": undoing a palette experiment should not cost you your
-// keybindings.
+// Reset this setting only.
 const resetGbPalette = () => {
   gbPaletteMode = "default";
   gbPaletteCustom = GB_HW_SHADES.slice();
@@ -7683,19 +6519,16 @@ gbPaletteInputs.forEach((input, i) => {
 
 if (gbPaletteResetBtn) gbPaletteResetBtn.addEventListener("click", resetGbPalette);
 
-// --- Chrome theme (background / buttons / menus color scheme) ---
-// Persisted in localStorage — NOT IndexedDB — so the inline <head> script can
-// apply it synchronously before first paint (no flash of the wrong theme).
-// "amber" is the default and maps to no data-theme attribute at all.
+// --- Chrome theme ---
+// Persisted in localStorage, not IndexedDB, so the inline <head> script can
+// apply it before first paint. "amber" = no data-theme attribute.
 const THEME_KEY = "dingbat_theme";
 const THEME_NAMES = ["amber", "black", "light", "dmg", "kiwi", "atomic-purple",
   "indigo", "fuchsia", "glacier", "daiei", "famicom"];
-// "emerald" was renamed to "kiwi" (the GBC's original color name). Migrate any
-// value persisted under the old name so it doesn't fall back to Amber.
+// "emerald" was renamed "kiwi"; migrate the persisted value.
 const migrateTheme = (name) => (name === "emerald" ? "kiwi" : name);
 const themeChips = Array.from(/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("#theme-picker .theme-chip")));
-// Present in every mode now (the boot script keeps it): iOS fills the standalone
-// safe areas from it, and browser tabs tint their chrome with it.
+// iOS fills the standalone safe areas from this; browser tabs tint their chrome.
 const themeColorMeta = /** @type {HTMLMetaElement} */ (document.querySelector('meta[name="theme-color"]'));
 
 const applyTheme = (name) => {
@@ -7708,19 +6541,15 @@ const applyTheme = (name) => {
     chip.classList.toggle("selected", on);
     chip.setAttribute("aria-checked", on ? "true" : "false");
   }
-  // The theme-color meta is what iOS fills the standalone safe areas (status bar
-  // + home-indicator strip) with, and what tints browser chrome in a tab. Match
-  // --bg (the page / controls-deck bottom) so the bottom strip blends into the
-  // app under every theme. Derived from the live token so CSS stays the single
-  // source of truth (the boot-script map is only a pre-CSS hint).
+  // Match --bg so the bottom strip blends in; derived from the live token
+  // (the boot-script map is only a pre-CSS hint).
   if (themeColorMeta) {
     const cs = getComputedStyle(document.documentElement);
     themeColorMeta.content =
       (cs.getPropertyValue("--bg").trim() ||
        cs.getPropertyValue("--topbar-top").trim());
   }
-  // "Match the app theme" is derived, not stored — a theme switch has to
-  // re-derive it and repaint the screen.
+  // "Match the app theme" is derived, not stored: re-derive and repaint.
   applyGbPalette();
 };
 
@@ -7731,7 +6560,7 @@ themeChips.forEach((chip) =>
   })
 );
 
-// Sync the picker + theme-color meta with whatever the boot script applied
+// Sync the picker + theme-color meta with what the boot script applied.
 {
   let storedTheme = "amber";
   try { storedTheme = localStorage.getItem(THEME_KEY) || "amber"; } catch (e) {}
@@ -7743,11 +6572,8 @@ themeChips.forEach((chip) =>
 }
 
 // --- Reset all settings ---
-// Wipes ONLY the settings keys from IndexedDB — NOT ROMs, saves, states, BIOS,
-// box art, recents, or link saves — then restores every in-memory setting to its
-// default and re-runs each subsystem's sync/apply so the UI and the running core
-// reflect defaults immediately, no reload. Defaults are taken from the same
-// initial values each loader falls back to, kept in one place at the var decls.
+// Wipes only the settings keys, then restores every in-memory default and
+// re-runs each subsystem's apply. No reload.
 const SETTINGS_KEYS = [
   "system", "audio", "colorCorrect", "video",
   "keybindings", "large-controls", "opaque-controls",
@@ -7816,22 +6642,18 @@ const resetAllSettings = async () => {
   // Run-ahead -> off
   applyRunahead(0);
 
-  // Game Boy shade palette -> default shades, custom colours back to hardware.
-  // (The dbDelete above already removed the record; this restores the live
-  // state, exactly as its own Reset button would.)
+  // Game Boy shade palette -> default, custom colours back to hardware.
   gbPaletteMode = "default";
   gbPaletteCustom = GB_HW_SHADES.slice();
   applyGbPalette();
 
-  // Super Game Boy -> on, border shown (the "system" record was already
-  // deleted above; this restores the live state and pushes it into the core).
+  // Super Game Boy -> defaults, pushed into the core.
   sgbEnable = false;
   sgbBorder = true;
   applySystemSettings();
   syncSystemSettingsUI();
 
-  // Chrome theme -> Amber (lives in localStorage, not IndexedDB — see the
-  // theme section: the <head> boot script needs a synchronous read)
+  // Chrome theme -> Amber (localStorage).
   try { localStorage.removeItem(THEME_KEY); } catch (e) {}
   applyTheme("amber");
 };
@@ -7844,8 +6666,7 @@ if (resetSettingsSlot) {
     className: "button button-sm reset-settings-btn",
     onConfirm: async () => {
       await resetAllSettings();
-      // Persistent button (unlike the delete lists it isn't re-rendered away),
-      // so re-enable and disarm it for reuse.
+      // Persistent button: re-enable and disarm it for reuse.
       resetBtn.disabled = false;
       resetBtn.disarm();
     },
@@ -7868,9 +6689,8 @@ var speed2x = false;
 var slowMotion = false;
 var rewindHeld = false;
 var lastRewindPop = 0;
-// Tilt cart (MBC7 — Kirby Tilt 'n' Tumble): when the running cart has an
-// accelerometer, gamepad stick / keyboard-touch D-pad / device orientation
-// feed a smoothed tilt vector to wasm_set_tilt each RAF tick.
+// Tilt cart: gamepad stick / D-pad / device orientation feed a smoothed
+// tilt vector to wasm_set_tilt each RAF tick.
 var tiltActive = false;
 var tiltTargetX = 0, tiltTargetY = 0;   // where input wants the tilt to be
 var tiltX = 0, tiltY = 0;               // smoothed value actually sent
@@ -7881,12 +6701,8 @@ var kbTiltDirs = [false, false, false, false]; // held U/D/L/R while tilting
 var tiltKind = 0;                       // 1 = accelerometer cart, 2 = gyro cart
 
 // --- Screen Wake Lock ---
-// Keep the device awake while emulation is actively stepping (any mode: single,
-// 2P link, online rollback — including fast-forward/2x/rewind, since they all
-// run through the RAF loop). Released the instant we pause or return to the
-// menu. No UI: release-on-pause is the user's control. The browser auto-drops
-// the lock when the tab is hidden, so syncWakeLock() (driven every frame from
-// the main loop, and on visibilitychange) re-acquires when we're visible again.
+// Held while emulation is stepping, released on pause. The browser drops
+// it when the tab is hidden, so syncWakeLock() re-acquires on return.
 let wakeSentinel = null;
 let wakeRequesting = false;
 const emulationActive = () =>
@@ -7900,8 +6716,7 @@ const syncWakeLock = () => {
       .request("screen")
       .then((s) => {
         wakeRequesting = false;
-        // A pause/hide may have raced in while the request was pending; if we no
-        // longer want it, drop it immediately.
+        // A pause/hide may have raced in while the request was pending.
         if (!emulationActive() || document.visibilityState !== "visible") {
           s.release().catch(() => {});
           return;
@@ -7912,7 +6727,7 @@ const syncWakeLock = () => {
         });
       })
       .catch(() => {
-        // request() rejects on e.g. low battery or a hidden document — ignore.
+        // request() rejects on low battery or a hidden document.
         wakeRequesting = false;
       });
   } else if (!want && wakeSentinel) {
@@ -7929,21 +6744,15 @@ const fastForwardButton = document.getElementById("fast-forward");
 const speed2xButton = document.getElementById("speed-2x-btn");
 const rewindButton = document.getElementById("rewind");
 
-// Performance/memory telemetry for the on-page log (diagnosing iOS "slow
-// until force-quit" = wasm JIT demotion under memory pressure). _benchFrames
-// steps the LIVE core without presenting, i.e. it advances the game by n
-// frames — so it must only run right after initFromEmscripten, before any
-// gameplay (it just trims ~1s off the boot intro), and never in link/net/
-// rollback modes (loadRom is the single-core path; benchFrames itself also
-// refuses under an online link). Periodic runs would skip a second of real
-// gameplay, so the 5-minute interval below logs heap size only.
+// Performance/memory telemetry for the on-page log (iOS wasm JIT demotion
+// under memory pressure). _benchFrames advances the live core by n frames,
+// so it runs only right after initFromEmscripten, never in the link modes;
+// the 5-minute interval logs heap size only.
 const wasmHeapBytes = () =>
   (Module.HEAPU8?.buffer || Module.memory?.buffer)?.byteLength || 0;
 
-// Pure-JS spin (~10-20ms on a healthy phone). Scales with raw CPU speed:
-// if this is slow too, the whole CPU is throttled (Low Power Mode, thermal
-// or low-battery management); if it's normal while the wasm bench is slow,
-// the problem is wasm-specific (JIT demotion / tiering).
+// Pure-JS spin: slow here too = the whole CPU is throttled; normal while
+// the wasm bench is slow = JIT demotion.
 const jsBench = () => {
   const t0 = performance.now();
   let x = 0;
@@ -7958,8 +6767,7 @@ const benchReport = (label) => {
     const t0 = performance.now();
     Module._benchFrames(60);
     const ms = performance.now() - t0;
-    // The benched frames queued ~1s of audio in the wasm buffer; drop it so
-    // the first real pushAudio doesn't schedule a stale backlog.
+    // Drop the ~1s of audio the benched frames queued.
     if (Module._clearAudioBuffer) Module._clearAudioBuffer();
     const mb = Math.round(wasmHeapBytes() / (1024 * 1024));
     log(
@@ -7969,8 +6777,8 @@ const benchReport = (label) => {
   } catch {}
 };
 
-// Average rAF interval over 20 frames: ~16.7ms on a 60Hz panel; ~33ms means
-// the display loop is halved — Low Power Mode's signature on iOS.
+// Average rAF interval: ~33ms means the display loop is halved (iOS Low
+// Power Mode).
 const rafProbe = () =>
   new Promise((resolve) => {
     const times = [];
@@ -7990,23 +6798,18 @@ window.addEventListener("load", () =>
 );
 
 const loadRom = async (romName, originalName, opts = {}) => {
-  // A capture or recording spanning a ROM switch would splice two games
+  // A capture spanning a ROM switch would splice two games.
   if (typeof abortRetroClip === "function") abortRetroClip();
   if (typeof stopClipRecording === "function") stopClipRecording();
-  // Leaving 2P link mode: flush and persist both players' saves first
   if (linkMode) await exitLinkMode();
-  // Leaving online link mode: say BYE to the peer and drop the channel
   if (typeof netShutdown === "function" && netMode) await netShutdown();
-  // Persist save from previous ROM before switching
   if (currentRomName && currentOriginalName) {
     await persistSave(currentRomName, currentOriginalName);
   }
   currentRomName = romName;
   currentOriginalName = originalName || romName;
-  // Before `paused` is reset below: a scrubber left open across a ROM switch
-  // would scrub the old game's strip against the new game's core, and closing
-  // it restores the paused state it captured — which must land on the OLD
-  // session's value and then be overwritten, not the other way round.
+  // Before `paused` is reset: closing a scrubber restores the paused state
+  // it captured, which must land on the old session's value.
   closeRewindScrubber();
   closeClipScrubber();
   paused = false;
@@ -8023,11 +6826,9 @@ const loadRom = async (romName, originalName, opts = {}) => {
   fastForwardButton.classList.remove("active");
   speed2xButton.classList.remove("active");
   rewindButton.classList.remove("active");
-  // GB/GBC has no shoulder buttons: flag CSS to drop the L/R row so the
-  // frame gets that vertical space back (see body.gb-mode rules).
+  // body.gb-mode drops the L/R row.
   document.body.classList.toggle("gb-mode", systemOf(romName) !== "GBA");
   document.body.classList.add("has-game", "running");
-  // Restore save for the new ROM
   await restoreSave(romName, currentOriginalName);
   Module.ccall("initFromEmscripten", null, ["string"], [romName]);
   await restoreCheats();  // fresh core: re-apply this game's saved cheats
@@ -8041,8 +6842,7 @@ const loadRom = async (romName, originalName, opts = {}) => {
   rwUndoBytes = null;     // ...as does the rewind-commit undo
   benchReport("load");
   updateCanvasScaling();
-  // async: "Resume last session?" toast if one exists (the reset button
-  // opts out — it shows its own Undo toast for the state it just discarded)
+  // The reset button opts out: it shows its own Undo toast.
   if (!opts.skipResumeOffer) offerAutoResume();
   setTimeout(() => logViewportDiag("romload"), 500);
 };
@@ -8065,16 +6865,14 @@ const mimeForImg = (e) =>
   ({ ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
      ".webp": "image/webp", ".gif": "image/gif" }[e] || "image/png");
 
-// --- Minimal in-browser ZIP reader ---
-// Reads the central directory and inflates entries with the platform's
-// DecompressionStream (deflate-raw) — no external library, works under COEP.
+// --- Minimal ZIP reader (central directory + DecompressionStream deflate-raw) ---
 
 const unzip = async (arrayBuffer) => {
   const view = new DataView(arrayBuffer);
   const bytes = new Uint8Array(arrayBuffer);
   const len = arrayBuffer.byteLength;
 
-  // Find End Of Central Directory (scan the tail; comment is at most 64 KB)
+  // End Of Central Directory: the comment is at most 64 KB.
   let eocd = -1;
   const scanStart = Math.max(0, len - 65557);
   for (let i = len - 22; i >= scanStart; i--) {
@@ -8122,26 +6920,13 @@ const unzip = async (arrayBuffer) => {
 const usable = (e) => !e.name.startsWith("__MACOSX/") && !e.name.endsWith("/");
 
 // --- ROM header sanity check ---
-// A garbage file with a plausible extension used to "play" as a silent black
-// screen and then get enshrined in the Recent library, so sniff the header
-// before accepting a ROM. The cores themselves never validate any of this,
-// and lots of homebrew is raw objcopy output with NO Nintendo logo and an
-// unfixed checksum (this repo's own tests/roms/*.gba are exactly that, some
-// smaller than the 0xC0-byte GBA header) — so the rule is deliberately
-// any-signal-matches, and a failed check only asks, never blocks:
-//   .gba — valid if byte 3 is 0xEA (the cartridge entry point is an ARM
-//          branch instruction — true of every licensed ROM and of raw
-//          objcopy homebrew alike, and the only signal tests/roms/*.gba
-//          carry), OR the Nintendo logo bitmap at 0x004 matches, OR the
-//          header checksum at 0xBD is the complement-sum over 0xA0-0xBC
-//          (per GBATEK).
-//   .gb/.gbc — valid if the Nintendo logo at 0x104 matches (the same bytes
-//          the emulator's own multicart detection keys on, src/dingbat/gb/
-//          mbc/mbc.nim), OR the header checksum at 0x14D matches Pan Docs'
-//          sum over 0x134-0x14C. rgbfix fixes the checksum even on logo-less
-//          homebrew — this repo's tests/roms/*.gb(c) pass via that arm.
-// An 8-byte prefix of each logo is checked — already a 2^64 signal, and it
-// keeps the constants short.
+// Any-signal-matches (homebrew is often raw objcopy output with no logo and
+// an unfixed checksum), and a failed check only asks, never blocks:
+//   .gba     byte 3 is 0xEA (ARM branch entry), OR the Nintendo logo at
+//            0x004, OR the header checksum at 0xBD (GBATEK).
+//   .gb/.gbc the Nintendo logo at 0x104, OR the header checksum at 0x14D
+//            (Pan Docs); rgbfix fixes the checksum on logo-less homebrew.
+// An 8-byte prefix of each logo is checked.
 const GBA_LOGO_PREFIX = [0x24, 0xff, 0xae, 0x51, 0x69, 0x9a, 0xa2, 0x21];
 const GB_LOGO_PREFIX = [0xce, 0xed, 0x66, 0x66, 0xcc, 0x0d, 0x00, 0x0b];
 const bytesMatchAt = (bytes, offset, ref) =>
@@ -8164,9 +6949,7 @@ const looksLikeValidRom = (bytes, ext) => {
   return bytes[0x14d] === chk;
 };
 
-// Ask before loading a file that failed the sanity check. Resolves true to
-// proceed, false to drop the file (nothing loads, nothing enters the
-// library). Cancel, ×, backdrop and Escape all decline.
+// Ask before loading a file that failed the check; false drops the file.
 const romWarnModal = document.getElementById("rom-warn-modal");
 let romWarnResolve = null;
 
@@ -8178,7 +6961,6 @@ const settleRomWarn = (proceed) => {
   if (resolve) resolve(proceed);
 };
 
-// Called blindly by the global Escape handler; a no-op while not open.
 const closeRomWarnModal = () => {
   if (romWarnResolve) settleRomWarn(false);
 };
@@ -8214,7 +6996,7 @@ const handleZipFile = async (file) => {
     alert("No .gba, .gb or .gbc ROM was found inside that zip.");
     return;
   }
-  // Largest embedded image is almost always the box art
+  // The largest embedded image is almost always the box art.
   let imgEntry = zip.entries
     .filter((e) => usable(e) && IMG_EXTS.includes(extOf(e.name)))
     .sort((a, b) => b.uncompSize - a.uncompSize)[0];
@@ -8266,12 +7048,8 @@ let handleRomFile = (file) => {
   reader.readAsArrayBuffer(file);
 };
 
-// A dropped file is usually a ROM/zip to load, but a dropped save (raw .sav/
-// .srm or a GameShark-family container) or .state is imported into the running
-// game instead — the same flows as the Manage Saves "Import save file" /
-// "Import state" buttons. A save/state can only target a running single-player
-// game, so reject it with a specific reason otherwise (rather than falling
-// through to the ROM loader's generic "unsupported file").
+// A dropped save (.sav/.srm or a GameShark container) or .state is imported
+// into the running single-player game; anything else is a ROM/zip to load.
 const SAVE_IMPORT_EXTS = new Set([".sav", ".srm", ".sps", ".xps", ".gsv"]);
 const handleDroppedFile = (file) => {
   let ext = extOf(file.name);
@@ -8301,10 +7079,8 @@ const openRomPicker = () => {
   menuDropdown.hidden = true;
   let input = document.createElement("input");
   input.type = "file";
-  // iOS Safari greys out (makes unselectable) files whose extension it can't
-  // map to a known type — .gba/.gb/.gbc — as soon as a known type like .zip
-  // is listed, so the filter is desktop-only. handleRomFile validates the
-  // extension itself either way.
+  // iOS Safari greys out .gba/.gb/.gbc as soon as a known type like .zip is
+  // listed, so the accept filter is desktop-only.
   if (!IS_IOS) input.accept = ROM_EXTS.join(",") + ",.zip";
   input.addEventListener("input", () => {
     if (input.files?.length > 0) handleRomFile(input.files[0]);
@@ -8312,8 +7088,7 @@ const openRomPicker = () => {
   input.click();
 };
 
-// Mobile home: compact "Load a game" button shown where the drop target is
-// hidden (touch devices — no drag-and-drop there).
+// Mobile "Load a game" button (no drag-and-drop on touch).
 document.getElementById("home-load").addEventListener("click", openRomPicker);
 
 let dropOverlay = document.getElementById("drop-overlay");
@@ -8351,23 +7126,20 @@ const togglePause = (fromRemote) => {
   pauseButton.classList.toggle("active", paused);
   pauseButton.title = paused ? "Resume" : "Pause";
   document.body.classList.toggle("paused", paused);
-  // While linked online, pause freezes BOTH sides — same reasoning as 2x: a
-  // one-sided pause just stalls the peer at the prediction limit with no
-  // explanation on their screen. Relay unless this change came FROM them.
+  // Linked online, pause freezes both sides (a one-sided pause stalls the
+  // peer at the prediction limit); relay unless it came from them.
   if (!fromRemote && rollbackMode && typeof window.rbSendPause === "function") {
     window.rbSendPause(paused);
   }
 };
-// The peer paused/resumed; match it without echoing back.
+// The peer paused/resumed: match without echoing back.
 window.applyRemotePause = (on) => {
   if (paused !== on) togglePause(true);
 };
 
-// iOS suppresses the synthesized `click` for a SECOND finger while the first
-// is held on the (preventDefaulted) touch controls — which made Pause dead
-// exactly when someone held A to frame-step. Drive it from pointerup, and
-// keep the click listener (programmatic .click() callers, keyboards) behind
-// a short lockout so a pointer-handled tap can't double-toggle.
+// iOS suppresses the synthesized click for a second finger while the first
+// is held on the touch controls, so Pause runs from pointerup; the click
+// listener (programmatic callers, keyboards) sits behind a short lockout.
 var pausePointerTs = 0;
 {
   let armed = false; // require the press to START on the button: a finger
@@ -8397,10 +7169,8 @@ resetButton.addEventListener("click", async () => {
     return;
   }
   if (!currentRomName) return;
-  // Reset with a way back: snapshot the state being thrown away and offer
-  // it on a toast, exactly like loading a save state does. The auto-resume
-  // offer is suppressed for this reload — right after a deliberate reset it
-  // is stale noise, and it would race this toast for the shared slot.
+  // Snapshot the state being thrown away and offer it on a toast; the
+  // auto-resume offer is suppressed for this reload.
   const undo = captureStateBytes();
   const name = currentOriginalName;
   await loadRom(currentRomName, currentOriginalName, { skipResumeOffer: true });
@@ -8414,9 +7184,7 @@ resetButton.addEventListener("click", async () => {
   }
 });
 
-// 2x speed and unbounded fast forward are radio-style: fast forward would
-// silently dominate 2x (it ignores pacing entirely), so enabling either
-// clears the other.
+// 2x and unbounded fast forward are radio-style (fast forward ignores pacing).
 const setSpeed2x = (on, fromRemote) => {
   speed2x = on;
   speed2xButton.classList.toggle("active", on);
@@ -8424,17 +7192,15 @@ const setSpeed2x = (on, fromRemote) => {
   if (typeof Module !== "undefined" && Module._wasm_set_turbo) {
     Module._wasm_set_turbo(on ? 1 : 0);
   }
-  // Re-push the pitch-correct preference alongside turbo: rollback_init builds
-  // fresh cores that never saw it (solo cores get it at loadRom), so without
-  // this a linked 2x plays pitched-up until the settings toggle re-applies it.
+  // Re-push pitch-correct alongside turbo: rollback_init builds fresh cores
+  // that never saw it (pinned by web/tests/pitch-correct-2x.test.mjs).
   applyPitchCorrectFF();
-  // While linked online, 2x must drive BOTH cores or the pair desyncs — relay
-  // our toggle to the peer (unless this change *came* from the peer).
+  // Linked online, 2x must drive both cores: relay unless it came from the peer.
   if (!fromRemote && rollbackMode && typeof window.rbSendSpeed === "function") {
     window.rbSendSpeed(on);
   }
 };
-// The peer toggled 2x; apply it here without echoing back (fromRemote = true).
+// The peer toggled 2x: apply without echoing back.
 window.applyRemoteSpeed2x = (on) => setSpeed2x(on, true);
 const setFastForward = (on) => {
   fastForward = on;
@@ -8442,11 +7208,9 @@ const setFastForward = (on) => {
   if (on) setSlowMotion(false);
 };
 
-// Slow motion (0.5x): the tick loop doubles the per-frame wall-clock step
-// while the wasm shim fills the sample gap — doubled samples (octave-down)
-// normally, or a WSOLA 1:2 stretch when pitch-correct fast-forward is on
-// (see wasm_set_slowmo/appendAudioSample). Radio-exclusive with FF/2x.
-// Toggled from the kebab menu item or Shift+`.
+// Slow motion (0.5x): the tick loop doubles the wall-clock step and the
+// wasm shim fills the sample gap (doubled samples, or WSOLA 1:2 under
+// pitch-correct). Radio-exclusive with FF/2x.
 const slowMotionItem = document.getElementById("slow-motion");
 const setSlowMotion = (on) => {
   if (slowMotion === on) return; // no toast spam from the radio-clear paths
@@ -8463,12 +7227,11 @@ const setSlowMotion = (on) => {
   showToast(on ? "Slow motion on (0.5x)" : "Slow motion off");
 };
 
-// The three speed flags are radio-exclusive, so they collapse to one value.
-// Momentary speed keys (hold Tab) snapshot it on press and put it back on
-// release, which is what makes a hold an overlay rather than a mode switch.
+// The three speed flags collapse to one value; momentary keys snapshot it
+// on press and restore it on release.
 const currentSpeedMode = () =>
   fastForward ? "ffw" : speed2x ? "2x" : slowMotion ? "slow" : "normal";
-// Order matters: the setters clear each other, so the wanted one goes last.
+// The setters clear each other, so the wanted one goes last.
 const applySpeedMode = (mode) => {
   if (mode !== "slow") setSlowMotion(false);
   setFastForward(mode === "ffw");
@@ -8487,17 +7250,14 @@ fastForwardButton.addEventListener("click", () => {
   if (fastForward) setSpeed2x(false);
 });
 
-// 2x speed: the core drops every other audio sample (pitched-up realtime
-// audio) while the tick loop halves its per-frame time step
+// 2x: the core drops every other audio sample while the tick loop halves
+// its time step.
 speed2xButton.addEventListener("click", () => {
   setSpeed2x(!speed2x);
   if (speed2x) setFastForward(false);
 });
 
-// Frame advance: while paused, run exactly one emulated frame and present
-// it. The frame's audio sliver is discarded (13ms of sound per press is
-// noise). Reached from the top-bar step button (which replaces 2x/FFW while
-// paused) and the "." key; key-repeat and press-and-hold both crawl.
+// Frame advance while paused; the frame's audio sliver is discarded.
 const frameAdvance = () => {
   if (typeof Module === "undefined" || !Module._loop_tick) return;
   if (!paused || !currentRomName || !speedControlsOk()) return;
@@ -8506,14 +7266,11 @@ const frameAdvance = () => {
   drawGame();
 };
 
-// --- Retroactive clip capture ("Clip that!") ---
-// The wasm side keeps a rolling window: one state anchor per second plus a
-// 2-byte-per-frame input log (see the clip_* block in dingbat_wasm.nim).
-// clip_begin rewinds the core to the anchor before the range you picked and
-// silently re-emulates up to its first frame; the tick loop then steps
-// clip_tick at realtime — a deterministic replay of what the player just
-// did — while a MediaRecorder captures the canvas and the master-gain audio
-// tap. At the range's end the live state is restored and the file saves.
+// --- Retroactive clip capture ---
+// The wasm side keeps one state anchor per second plus a per-frame input
+// log (clip_* in dingbat_wasm.nim). clip_begin rewinds to the anchor before
+// the range and re-emulates to its first frame; clip_tick then replays at
+// realtime while a MediaRecorder captures the canvas and the audio tap.
 var clipReplayActive = false;
 var clipRecorder = null;
 var clipChunks = [];
@@ -8556,9 +7313,7 @@ const updateClipBanner = (left) => {
 };
 
 /**
- * Replay [startAgo, endAgo) — both in FRAMES before now — into a video file.
- * The one export path: the ten-second menu item and the range picker differ
- * only in where the two numbers come from.
+ * Replay [startAgo, endAgo), both in frames before now, into a video file.
  * @param {number} startAgo
  * @param {number} endAgo
  * @param {string} slug   filename infix, e.g. "last10s"
@@ -8571,11 +7326,8 @@ const startClipExport = (startAgo, endAgo, slug, label) => {
   if (!mime) { showToast("Video recording isn't supported in this browser"); return false; }
   const frames = Module._clip_begin ? Module._clip_begin(startAgo, endAgo) : 0;
   if (frames <= 0) { showToast("Not enough gameplay history yet"); return false; }
-  // clip_begin has already wound the core back and re-emulated the pre-roll,
-  // so the framebuffer now holds the clip's FIRST frame. Push it to the canvas
-  // before captureStream attaches: without this the recorder's opening frames
-  // are the live moment the player was looking at, which is the end of the
-  // clip, spliced onto the front of it.
+  // The framebuffer now holds the clip's first frame: push it to the canvas
+  // before captureStream attaches, or the recorder opens on the live moment.
   drawGame();
   let stream;
   try {
@@ -8625,22 +7377,12 @@ const startClipExport = (startAgo, endAgo, slug, label) => {
   return true;
 };
 
-// What the picker opens on, and what the reflex use of the feature gets: the
-// last ten seconds, ending now. Anything else is a drag away, but nothing has
-// to be dragged to get the common answer.
+// The last ten seconds, ending now.
 const CLIP_QUICK_SECONDS = 10;
 
 // --- Clip range picker -----------------------------------------------------
-// The same export with an in/out point in front of it, on the same film strip
-// the rewind scrubber uses (createFilmStrip, above) — two markers instead of
-// one, because a clip is a range and a rewind is a point.
-//
-// The strip's thumbnails come from the CLIP ring, not the rewind ring. That is
-// the whole reason the clip ring carries pictures at all: rewind is the app's
-// one expensive default and can be switched off (speed mode suspends it
-// outright), and a clip picker that went blank whenever it was would be a
-// feature that quietly stops working for the people most likely to be
-// recording something.
+// The same export with an in/out point, on createFilmStrip with two markers.
+// Thumbnails come from the clip ring, not the rewind ring, which can be off.
 
 const clipModal = document.getElementById("clip-modal");
 const clipStripCanvas =
@@ -8657,36 +7399,26 @@ const clipStartSlider =
   /** @type {HTMLInputElement} */ (document.getElementById("clip-slider-start"));
 const clipEndSlider =
   /** @type {HTMLInputElement} */ (document.getElementById("clip-slider-end"));
-// The knobs' shared track, and the highlighted span drawn between them.
 const clipRangeWrap = document.getElementById("clip-range");
 const clipRangeFill = document.getElementById("clip-range-fill");
 const clipSaveBtn =
   /** @type {HTMLButtonElement} */ (document.getElementById("clip-save"));
 
-// Same budget as the rewind strip: each thumbnail is a full BGR555 copy
-// (19 KB GBA / 26 KB GB) held in JS while the modal is open, and the clip ring
-// stores one per second — so 96 covers the whole window with room to spare.
+// Same budget as the rewind strip; the clip ring stores one per second.
 const CLIP_MAX_SAMPLES = 96;
 
 let clipAgo = [];             // frames-ago of each strip sample, newest first
 let clipWasPaused = false;
 let clipActiveMarker = 0;     // which marker the preview is showing
 
-// Markers, in strip samples back from the newest: [0] is the IN point (older),
-// [1] the OUT point (newer). Their `edge` differs because the in point's frame
-// is the first one KEPT (line on its left) and the out point's is the last one
-// kept (line on its right) — the pair has to bracket the selection, not sit in
-// the middle of the two end frames.
+// Markers in samples back from newest: [0] the in point (first frame kept,
+// line on its left), [1] the out point (last kept, line on its right).
 const clipStrip = createFilmStrip({
   canvas: clipStripCanvas,
   wrap: clipStripWrap,
-  // Twice the rewind strip's span at roughly half the frame width, and — the
-  // part that actually decides it — a hard requirement that the DEFAULT
-  // selection fit. The anchors are one a second, and the brackets sit on the
-  // outer edges of the end frames, so the quick range is one pitch wider than
-  // its seconds. Without fitFrames the strip sizes frames to a floor instead
-  // and the "now" bracket opens off the end of a phone-width wrap, which reads
-  // as a line with a stray arrow stuck at the edge rather than as a range.
+  // Twice the rewind strip's span, and the default selection must fit: the
+  // quick range is one pitch wider than its seconds (brackets sit on the
+  // end frames' outer edges), else the "now" bracket opens off a phone wrap.
   visibleFrames: 11,
   frameWMin: 26,
   frameWMax: 40,
@@ -8697,38 +7429,26 @@ const clipStrip = createFilmStrip({
   ],
   paint: (ctx, g) => clipStrip.shadeBetween(ctx, g, g.xs[0], g.xs[1]),
   onChange: (i) => {
-    // The strip scrolls to follow its ACTIVE marker, and a drag is the only
-    // path that sets that itself. The slider knobs and the presets move a
-    // marker from the outside, so adopt whichever one just moved here —
-    // otherwise the view keeps following the marker the last drag happened to
-    // grab and a knob ends up nudging something that is off-screen.
+    // The strip follows its active marker; a knob or preset move must adopt
+    // the marker it moved or nudge something off-screen.
     clipSetActive(i);
     clipRefresh();
   },
 });
 
-// The preview shows one marker and the strip scrolls to follow one marker, and
-// they are the same marker: whichever the player last acted on. Every path
-// that acts on one from outside a drag goes through here so the two cannot
-// drift apart.
+// The preview and the strip follow the same marker: the last one acted on.
 const clipSetActive = (i) => {
   clipActiveMarker = i;
   clipStrip.setActive(i);
 };
-// A marker may never cross its neighbour. BLOCKING, not pushing: dragging the
-// in point past the out point pins it one frame short of it, rather than
-// shoving the out point along ahead of it. Pushing would silently rewrite the
-// end of a range that had already been chosen, and it is not what the strip's
-// brackets do — one rule, written once, used by the strip, the knobs and the
-// presets alike.
+// Blocking, not pushing: a marker driven into its neighbour pins one frame
+// short. One rule for the strip, the knobs and the presets.
 const clipBoundsFor = (i) =>
   i === 0 ? { min: clipStrip.at(1) + 1 } : { max: clipStrip.at(0) - 1 };
 clipStrip.attach(clipBoundsFor);
 
-// Frames-ago of a marker. Sample 0 is special: it is the newest ANCHOR, which
-// is up to a second old, and treating it as the out point would silently drop
-// the most recent second — the part you most likely wanted. At the newest
-// sample the out point means "now".
+// Frames-ago of a marker. Sample 0 is the newest anchor, up to a second
+// old; as the out point it means "now".
 const clipAgoAt = (sample, isOut) => {
   if (isOut && sample <= 0) return 0;
   return clipAgo[Math.min(Math.max(sample, 0), clipAgo.length - 1)] || 0;
@@ -8741,35 +7461,23 @@ const clipRangeFrames = () => {
 };
 
 // --- The range slider: one track, two knobs --------------------------------
-// #clip-range is two <input type="range"> stacked on one rail (.dual-range in
-// styles.css), because a native range has exactly one thumb and the selection
-// here is a span — the same span the two brackets on the strip above enclose.
-// Two REAL inputs rather than a hand-rolled widget: that is what makes each
-// knob a tab stop with working arrow keys, Home/End and an announceable value,
-// none of which is worth reimplementing.
-//
-// They are not a second source of truth. Every move goes through the same
-// clipStrip.setValue a drag does, and clipRefresh writes them back from the
-// strip afterwards — so a move clamped away against the other knob snaps back
-// to where the marker really is.
+// Two <input type="range"> on one rail (.dual-range): each knob keeps its
+// tab stop, arrow keys, Home/End and announceable value. Not a second source
+// of truth: every move goes through clipStrip.setValue and clipRefresh
+// writes them back from the strip.
 const clipKnobs = [clipStartSlider, clipEndSlider];
 
-// Must match .dual-range-rail's inset (half a knob at each end) in styles.css:
-// a native thumb's centre travels the rail, not the full width of the box.
+// Must match .dual-range-rail's inset in styles.css.
 const CLIP_KNOB_W = 22;
 
-// Where knob i sits, as a fraction of its travel. Start is the LEFT knob — its
-// slot counts up towards "now" — so start is always below end. With no history
-// there is no travel and both knobs sit at the left, which is where a native
-// range puts a thumb whose min equals its max; the span between them is then
-// empty, and an empty selection is the truth in that state.
+// Knob i as a fraction of its travel; start is the left knob. With no
+// history both sit at the left and the span is empty.
 const clipKnobPct = (i) => {
   const max = Number(clipKnobs[i].max) || 0;
   return max > 0 ? Number(clipKnobs[i].value) / max : 0;
 };
 
-// How much travel a knob has left AWAY from its neighbour: the start knob runs
-// left towards the oldest frame, the end knob right towards "now".
+// Travel a knob has left away from its neighbour.
 const clipKnobRoom = (i) => {
   const max = Number(clipKnobs[i].max) || 0;
   return i === 0 ? Number(clipKnobs[i].value) : max - Number(clipKnobs[i].value);
@@ -8781,20 +7489,16 @@ const clipTrackGeom = () => {
            span: Math.max(1, rect.width - CLIP_KNOB_W) };
 };
 
-// The highlighted span, and which knob is drawn on top. Positioned in % of the
-// RAIL — i.e. of the knobs' own travel — so the ends of the fill stay under the
-// knob centres at both extremes, where an un-inset track would drift off them.
+// The highlighted span (in % of the rail, i.e. of the knobs' travel) and
+// which knob is on top.
 const clipPaintTrack = () => {
   clipRangeFill.style.left = clipKnobPct(0) * 100 + "%";
   clipRangeFill.style.right = 100 - clipKnobPct(1) * 100 + "%";
-  // The knob being moved goes over its neighbour, so an overlapped pair still
-  // shows the one that is going somewhere. Stacking order is presentation
-  // ONLY: which knob a press grabs is decided by distance in clipGrabKnob.
+  // Stacking order is presentation only; clipGrabKnob decides by distance.
   clipKnobs.forEach((el, i) => el.classList.toggle("on-top", i === clipActiveMarker));
 };
 
-// What a screen reader says in place of a slot index. Spelled out in words:
-// the visible readouts say "8.4s", and a lone "s" is read as a letter.
+// aria-valuetext in words: a lone "s" is read as a letter.
 const clipSpokenAgo = (frames) => {
   if (frames <= 0) return "now";
   const s = Math.max(1, Math.round(frames / 60));
@@ -8824,9 +7528,7 @@ const clipRefresh = () => {
   clipStrip.preview(clipPreviewCanvas, clipStrip.at(clipActiveMarker));
   clipPreviewLabel.textContent =
     clipActiveMarker === 0 ? "first frame of the clip" : "last frame of the clip";
-  // A minute of 8 Mbit/s video is ~60 MB, and the browser puts it straight in
-  // the downloads folder with no further prompt — worth saying out loud before
-  // the button is pressed rather than after.
+  // A minute of 8 Mbit/s video is ~60 MB, straight into downloads.
   const seconds = len / 60;
   clipEstimate.textContent =
     len > 0
@@ -8836,41 +7538,31 @@ const clipRefresh = () => {
   clipSaveBtn.disabled = len <= 0;
 };
 
-// Move marker i to the slot knob i is asking for. The one funnel: the keyboard
-// path (an input event) and the pointer path below both land here.
+// Move marker i to the slot knob i asks for; keyboard and pointer both land here.
 const clipKnobMove = (i, slot) => {
-  // Claim the marker first: the strip scrolls to follow it, so a knob that
-  // moved one without claiming it would act on a marker that is off screen.
+  // Claim the marker first so the strip follows it.
   clipSetActive(i);
-  // setValue only reports back when the value actually moved, and the knob has
-  // to redraw either way — the active marker changed, and a move clamped away
-  // against the other knob still has to snap the input back.
+  // Redraw either way: a move clamped against the other knob must snap the
+  // input back.
   if (!clipStrip.setValue(i, clipStrip.samples - 1 - slot, true, clipBoundsFor(i)))
     clipRefresh();
 };
 clipKnobs.forEach((el, i) =>
   el.addEventListener("input", () => clipKnobMove(i, Number(el.value))));
 
-// Pointer and touch are handled by the TRACK, not by the inputs (which are
-// pointer-events: none). That is the fix for the failure every stacked-inputs
-// dual slider eventually hits: once the two knobs overlap, whichever input is
-// stacked on top swallows the press and the knob underneath can never be
-// grabbed again. Routing the press by distance instead — the film strip's own
-// rule, so the two halves of this modal behave alike — makes the overlap a
-// non-event, and leaves stacking order free to be purely about visibility.
+// The track handles pointer input (the inputs are pointer-events: none):
+// with stacked inputs the top one would swallow every press where they
+// overlap. Routed by distance, the film strip's own rule.
 const clipGrabKnob = (clientX) => {
   const { left, span } = clipTrackGeom();
   const px = clientX - left;
   const d = clipKnobs.map((_, i) => Math.abs(clipKnobPct(i) * span - px));
-  // A dead heat means the two knobs are exactly on top of each other. Take the
-  // one with somewhere to go, so a pair pinned together — which is what the
-  // no-cross clamp leaves you at either end of the track — can always be
-  // pulled back apart.
+  // A dead heat takes the knob with somewhere to go, so a pinned pair can
+  // be pulled apart.
   if (d[0] === d[1]) return clipKnobRoom(0) >= clipKnobRoom(1) ? 0 : 1;
   return d[0] < d[1] ? 0 : 1;
 };
 
-// The slot under the pointer, on the knobs' own travel.
 const clipTrackSlot = (clientX) => {
   const { left, span } = clipTrackGeom();
   return Math.round(((clientX - left) / span) * (Number(clipKnobs[0].max) || 0));
@@ -8882,18 +7574,15 @@ clipRangeWrap.addEventListener("pointerdown", (e) => {
   e.preventDefault();
   clipDragKnob = clipGrabKnob(e.clientX);
   clipRangeWrap.setPointerCapture?.(e.pointerId);
-  // The inputs take no pointer events of their own, so focus has to be moved
-  // by hand — otherwise a tap on one knob would leave the arrow keys driving
-  // whichever knob happened to be focused last.
+  // The inputs take no pointer events, so move focus by hand.
   clipKnobs[clipDragKnob].focus();
   clipKnobMove(clipDragKnob, clipTrackSlot(e.clientX));
 });
 clipRangeWrap.addEventListener("pointermove", (e) => {
   if (clipDragKnob >= 0) clipKnobMove(clipDragKnob, clipTrackSlot(e.clientX));
 });
-// Named, not inline: an inline listener registered through a `string` event
-// name is contextually typed as taking a bare Event, and `e.pointerId` then
-// fails the JSDoc typecheck.
+// Named: an inline listener under a `string` event name is typed as a bare
+// Event and `e.pointerId` fails the typecheck.
 const clipEndKnobDrag = (e) => {
   if (clipDragKnob < 0) return;
   if (clipRangeWrap.hasPointerCapture?.(e.pointerId))
@@ -8904,10 +7593,8 @@ for (const ev of ["pointerup", "pointercancel", "pointerleave"]) {
   clipRangeWrap.addEventListener(ev, clipEndKnobDrag);
 }
 
-// The sample whose age is closest to `seconds` back. Searched rather than
-// computed as `seconds` samples: the strip is a sampled view of the ring, so
-// one sample only equals one second while the ring holds fewer anchors than
-// the strip shows.
+// The sample closest to `seconds` back (searched: one sample is only one
+// second while the ring holds fewer anchors than the strip shows).
 const clipNearestSample = (seconds) => {
   if (clipAgo.length === 0) return 0;
   if (seconds <= 0) return clipAgo.length - 1;   // "everything"
@@ -8919,8 +7606,7 @@ const clipNearestSample = (seconds) => {
   return best;
 };
 
-// Presets set the in point to that sample and pin the out point to now — the
-// common shapes, without a drag.
+// Presets set the in point and pin the out point to now.
 const clipSetPreset = (seconds) => {
   if (clipStrip.samples <= 0) return;
   clipStrip.setValue(1, 0, true);
@@ -8935,10 +7621,8 @@ document.getElementById("clip-preset-all").addEventListener("click", () => clipS
 const openClipScrubber = () => {
   menuDropdown.hidden = true;
   if (!currentRomName || !speedControlsOk()) return;
-  // A build whose EXPORTED_FUNCTIONS list is missing the scrub API cannot
-  // open the picker — and this exact guard once shipped, so the menu item did
-  // nothing at all and said nothing about it. Say it: silence here is a build
-  // bug, never a state the player can be in.
+  // A build missing the scrub API from EXPORTED_FUNCTIONS: say so (this
+  // guard once shipped silent; see web/tests/wasm-exports.test.mjs).
   if (typeof Module === "undefined" || !Module._clip_scrub_generate) {
     console.error("clip: the scrub API is missing from this build " +
                   "(check EXPORTED_FUNCTIONS in src/dingbat_wasm.nims)");
@@ -8947,9 +7631,7 @@ const openClipScrubber = () => {
   }
   if (clipReplayActive) return;
   clipWasPaused = paused;
-  // Freeze the core while the picker is open: the ring is still rolling, and
-  // a strip captured a second ago would point at anchors that have since aged
-  // out from under the markers.
+  // Freeze the core so the anchors cannot age out from under the markers.
   paused = true;
   clipStrip.release();
   clipAgo = [];
@@ -8961,8 +7643,7 @@ const openClipScrubber = () => {
     clipStrip.load(new Uint8Array(Module.memory.buffer, ptr, n * w * h * 2).slice(), w, h, n);
     for (let i = 0; i < n; i++) clipAgo.push(Module._clip_scrub_frames_ago(i));
   }
-  // Open on the quick action's range, so confirming without touching anything
-  // gives the same clip the one-tap item would have.
+  // Open on the quick action's range.
   clipStrip.values[1] = 0;
   clipStrip.values[0] = Math.max(1, Math.min(n - 1, clipNearestSample(CLIP_QUICK_SECONDS)));
   clipSetActive(0);
@@ -8977,15 +7658,14 @@ const openClipScrubber = () => {
     n > 1 ? fmtDuration(Math.round((clipAgo[n - 1] * 10) / 60)) + " ago" : "";
   clipModal.classList.add("open");
   trapFocus(clipModal);
-  // After .open, so the strip has a laid-out height to size frames against.
+  // After .open, so the strip has a laid-out height.
   clipStrip.build();
   clipRefresh();
 };
 
 const closeClipScrubber = () => {
-  // Guard: the global Escape handler calls every closer blindly and this one
-  // has side effects — restoring `paused` from a stale clipWasPaused would
-  // silently unpause a game the user paused later.
+  // The global Escape handler calls every closer blindly; a stale
+  // clipWasPaused would unpause a game paused later.
   if (!clipModal.classList.contains("open")) return;
   clipModal.classList.remove("open");
   releaseFocus(clipModal);
@@ -9010,23 +7690,18 @@ clipModal.addEventListener("click", (e) => {
 });
 clipLastItem.addEventListener("click", openClipScrubber);
 
-// Same reason as the rewind strip's: the bitmaps are rasterised for one strip
-// height and one frame size, both of which change across the phone/desktop
-// breakpoint, so a rotation with the modal open would scale a stale bitmap.
+// As the rewind strip: the bitmaps are rasterised for one breakpoint.
 window.addEventListener("resize", () => {
   if (!clipModal.classList.contains("open")) return;
   clipStrip.build();
   clipRefresh();
 });
 
-// Frame-step is fully pointer-driven: tap = one frame, press-and-hold
-// repeats at 10/s (the touch analogue of holding "."). Pointer events, not
-// click — iOS won't synthesize click for a second finger while a game
-// button is held, and stepping WHILE holding a button is the whole point.
-// --- Forward clip recording (the Record menu item) ---
-// MediaRecorder over the game canvas (shader output included) plus the
-// master-gain audio tap; saves .webm (.mp4 where that's what the browser
-// records — Safari). Single-core modes only (CSS hides the item elsewhere).
+// Frame-step: tap = one frame, hold repeats at 10/s. Pointer events, not
+// click: iOS won't synthesize click for a second finger while a game
+// button is held.
+// --- Forward clip recording ---
+// MediaRecorder over the canvas plus the audio tap; .webm (.mp4 on Safari).
 var recRecorder = null;
 var recChunks = [];
 var recStopTimer = null;
@@ -9096,8 +7771,7 @@ recordClipItem.addEventListener("click", () => {
   else startClipRecording();
 });
 
-// Capture accordion: Screenshot / Record / Clip that! live under
-// one expandable "Capture" entry so the menu's top level stays short.
+// Capture accordion.
 const captureToggle = document.getElementById("capture-toggle");
 const captureSub = document.getElementById("capture-sub");
 const collapseCaptureSub = () => {
@@ -9105,8 +7779,7 @@ const collapseCaptureSub = () => {
   captureToggle.setAttribute("aria-expanded", "false");
 };
 captureToggle.addEventListener("click", (e) => {
-  // The document-level click handler closes the dropdown on any click that
-  // bubbles to it — right for leaf items, wrong for an accordion header.
+  // The document click handler would close the dropdown.
   e.stopPropagation();
   captureSub.hidden = !captureSub.hidden;
   captureToggle.setAttribute("aria-expanded", captureSub.hidden ? "false" : "true");
@@ -9146,59 +7819,34 @@ const frameStepButton = document.getElementById("frame-step");
   for (const ev of ["pointerleave", "pointercancel"]) {
     frameStepButton.addEventListener(ev, () => { armed = false; stopHold(); });
   }
-  // Programmatic .click() (and any browser that skips pointer events)
+  // Programmatic .click().
   frameStepButton.addEventListener("click", () => {
     if (performance.now() - stepPointerTs < 350) return;
     frameAdvance();
   });
 }
 
-// Rewind: hold to step history backward (the tick loop pops snapshots at a
-// fixed cadence while held)
-// Gated here rather than at each caller: the button gesture, the ` key and
-// netplay's teardown all funnel through this, and with rewind off there is no
-// ring to pop from — the tick loop would burn 30 pops a second on nothing.
-// Only turning it ON is refused; turning it off always works.
+// Hold-to-rewind. Gated here for every caller: with rewind off there is no
+// ring to pop. Only turning it on is refused.
 const setRewindHeld = (on) => {
   rewindHeld = on && rewindOn;
   rewindButton.classList.toggle("active", rewindHeld);
 };
 
-// The button's first job is the hold, and the hold is instant: pointerdown
-// rewinds, full stop. Nothing is delayed, buffered or classified first — an
-// earlier design that waited to see whether a second press was coming made
-// every rewind feel late, and lateness is the one thing this control cannot
-// afford.
-//
-// The film strip is layered on top as a DOUBLE TAP, recognised only after the
-// fact so it can never hold the rewind up. Two quick taps: the first rewinds a
-// fraction of a second and that simply stands (nothing is rolled forward
-// again), the second opens the strip. A press held longer than a tap is a
-// deliberate rewind and never counts towards the gesture, so hold, release,
-// hold again behaves exactly as it always did. The menu item stays; this is a
-// shortcut to it, not its only door.
-//
-// Recognised from POINTER events, not `dblclick`. dblclick belongs to the
-// compatibility mouse-event family, and the preventDefault() below — which
-// this button needs so a press does not turn into a text selection or a
-// scroll — is entitled to suppress that family. Measured against this build:
-// WebKit fires neither click nor dblclick on this button, and Chromium fires
-// click but not dblclick. A dblclick handler would have been dead code on
-// every platform. One pointer path covers mouse, touch and pen instead, with
-// no UA guessing and no synthesised second opening to defend against.
-//
-// The platform is already out of the way: `body { touch-action: none }` in
-// styles.css means there is no double-tap-to-zoom to fight and no legacy
-// 300 ms click delay to sit behind, so the windows below are the gesture's
-// own numbers rather than something inherited.
+// pointerdown rewinds instantly; nothing waits to see whether a second
+// press is coming. The film strip is a double tap recognised after the
+// fact (the first tap's fraction of a second of rewind stands); a press
+// held longer than a tap never counts towards it. Pointer events, not
+// `dblclick`: the preventDefault() this button needs suppresses the
+// compatibility mouse-event family (WebKit fires neither click nor
+// dblclick here). body { touch-action: none } means no double-tap-to-zoom
+// and no 300 ms click delay, so the windows below are the gesture's own.
 const RW_TAP_MAX_MS = 250;    // a press longer than this is a hold, never a tap
 const RW_DBLTAP_MS = 300;     // from the first tap's release to the second's press
 const RW_DBLTAP_SLOP = 28;    // px a press may travel, and the two taps may differ by
 {
-  // One pointer owns the hold. A second finger arriving while the first is
-  // down is ignored outright: it does not re-arm the hold, it does not count
-  // as a tap, and — the part that used to bite — its release no longer stops a
-  // rewind the other finger is still asking for.
+  // One pointer owns the hold; a second finger neither re-arms, counts as a
+  // tap, nor stops the rewind on release.
   let holdId = null;
   let downTs = 0;
   let downX = 0;
@@ -9221,9 +7869,8 @@ const RW_DBLTAP_SLOP = 28;    // px a press may travel, and the two taps may dif
     setRewindHeld(true);      // first statement that matters, and it is not gated
   });
 
-  // pointerup is the only release that can complete a tap. pointerleave and
-  // pointercancel mean the press went somewhere else (dragged off the button,
-  // stolen by a system gesture) and just end the hold.
+  // Only pointerup can complete a tap; pointerleave/pointercancel just end
+  // the hold.
   const endPress = (e) => {
     if (holdId === null || (e.pointerId !== undefined && e.pointerId !== holdId)) return;
     holdId = null;
@@ -9232,15 +7879,12 @@ const RW_DBLTAP_SLOP = 28;    // px a press may travel, and the two taps may dif
     const x = e.clientX || 0;
     const y = e.clientY || 0;
     const now = performance.now();
-    // A tap: short, and it ended where it started (a press dragged across the
-    // top bar is a mis-hit, not half a gesture).
+    // A tap: short, and ended where it started.
     if (now - downTs > RW_TAP_MAX_MS || !near(x, y, downX, downY, RW_DBLTAP_SLOP)) {
       tapTs = 0;
       return;
     }
-    // Second of a pair? The window is measured from the first tap's release to
-    // this one's PRESS, so a slow-but-deliberate second tap is not penalised
-    // for how long the finger stayed down.
+    // The window runs from the first tap's release to this one's press.
     if (tapTs && downTs - tapTs <= RW_DBLTAP_MS && near(x, y, tapX, tapY, RW_DBLTAP_SLOP)) {
       tapTs = 0;              // a third tap starts a fresh pair, not another open
       openRewindScrubber();
@@ -9256,44 +7900,36 @@ const RW_DBLTAP_SLOP = 28;    // px a press may travel, and the two taps may dif
 }
 
 // --- Desktop keyboard shortcuts ---
-// Mirrors the native app's conventions (src/dingbat.nim): Tab holds unbounded
-// fast-forward, Shift+Tab toggles 2x, backquote holds rewind. Registered
-// after gameKeyHandler (same capture phase, later registration), which
-// consumes bound game keys with stopImmediatePropagation — and the codeLookup
-// check below also covers the window before the wasm module is ready.
+// As the native app (src/dingbat.nim): Tab holds fast-forward, Shift+Tab
+// toggles 2x, backquote holds rewind. Registered after gameKeyHandler, which
+// consumes bound game keys with stopImmediatePropagation.
 
 const saveStateItem = document.getElementById("save-state");
 const loadStateItem = document.getElementById("load-state");
 
 const anyModalOpen = () => !!document.querySelector(".modal-overlay.open");
-// netplay.js loads after index.js, so its netMode global may not exist yet
+// netplay.js loads after index.js, so netMode may not exist yet.
 const netActive = () => typeof netMode !== "undefined" && !!netMode;
-// The speed/rewind/state controls are hidden in the linked modes because
-// they desync the pair; the shortcuts follow the same gating. 2x is the one
-// exception: it stays available in rollback mode (it's relayed to the peer).
+// The shortcuts follow the linked modes' control gating; 2x stays available
+// in rollback mode (relayed to the peer).
 const speedControlsOk = () => !linkMode && !rollbackMode && !netActive();
 
-// Which holds the KEYBOARD owns, so losing the keyup (window blur, a modal
-// opening mid-hold) releases them without touching a button-initiated hold.
+// Holds the keyboard owns, so a lost keyup releases them without touching
+// a button-initiated hold.
 var kbFastForward = false;
 var kbRewindHeld = false;
-// The speed that was latched when the fast-forward key went down. Releasing
-// restores it, so Tabbing through a cutscene while parked at 2x (or slow
-// motion) lands back there instead of dumping the player at 1x.
+// The speed latched when the fast-forward key went down; release restores it.
 var kbSpeedBeforeHold = "normal";
 const endKbFastForward = () => {
   if (!kbFastForward) return;
   kbFastForward = false;
-  // Something else claimed the speed while the key was down (clicked 2x,
-  // slow motion from the menu — both clear fast-forward): that choice is
-  // newer than the snapshot, so leave it standing.
+  // Something else claimed the speed while the key was down: leave it.
   if (!fastForward) return;
   applySpeedMode(kbSpeedBeforeHold);
 };
 const releaseKbHolds = () => {
   endKbFastForward();
-  // A blur eats the keyup, so every lit cell would stick on. (The core has the
-  // same hole for game keys; this at least stops the overlay lying about it.)
+  // A blur eats the keyup, so every lit cell would stick on.
   clearInputDisplay();
   if (kbRewindHeld) {
     kbRewindHeld = false;
@@ -9303,15 +7939,13 @@ const releaseKbHolds = () => {
 window.addEventListener("blur", releaseKbHolds);
 
 const shortcutKeyHandler = (e, down) => {
-  // A retroactive-capture replay owns the machine: no state loads, speed
-  // changes or pauses until it finishes (game keys still pass — the wasm
-  // side records them as the post-replay held state).
+  // A capture replay owns the machine: no state loads, speed changes or
+  // pauses (game keys still pass as the post-replay held state).
   if (typeof clipReplayActive !== "undefined" && clipReplayActive) return;
   if (codeLookup[e.code] !== undefined) return; // game bindings always win
   if (e.ctrlKey || e.metaKey || e.altKey) return; // browser/OS chords
 
-  // Releases skip the modal/typing guards: a hold must not stay stuck on
-  // when a modal opens (or focus lands in a field) before the keyup.
+  // Releases skip the modal/typing guards so a hold cannot stick.
   if (!down) {
     if ((e.code === "Tab" && kbFastForward) ||
         (e.code === "Backquote" && kbRewindHeld)) {
@@ -9328,7 +7962,7 @@ const shortcutKeyHandler = (e, down) => {
   }
 
   if (anyModalOpen()) return;
-  // Same guard as gameKeyHandler: don't hijack typing in text fields
+  // Not while typing in a text field.
   const t = e.target;
   if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
 
@@ -9342,11 +7976,8 @@ const shortcutKeyHandler = (e, down) => {
       break;
     case "Tab":
       if (!gameLoaded) break; // leave Tab to focus navigation otherwise
-      // (Tab with focus in the top bar / menu never reaches this handler —
-      // the window-capture hook at the top of the file keeps it as focus
-      // traversal so keyboard users can operate the chrome during play.)
+      // (Tab with focus in the chrome never reaches this handler.)
       if (e.shiftKey) {
-        // Toggle 2x — radio with fast-forward, same as the buttons
         if (linkMode || netActive()) break;
         if (!e.repeat) {
           setSpeed2x(!speed2x);
@@ -9354,10 +7985,8 @@ const shortcutKeyHandler = (e, down) => {
         }
         handled = true;
       } else {
-        // Hold for unbounded fast-forward, restoring the previous speed on
-        // release. Holding the key for the speed you are ALREADY in reads as
-        // "turn this off", so a latched fast-forward restores to 1x — the
-        // same place a second click of the button would leave you.
+        // Hold for fast-forward, restoring the previous speed on release;
+        // holding the key for the speed already in force restores to 1x.
         if (!speedControlsOk()) break;
         if (!kbFastForward) {
           kbFastForward = true;
@@ -9371,13 +8000,11 @@ const shortcutKeyHandler = (e, down) => {
     case "Backquote":
       if (!gameLoaded || !speedControlsOk()) break;
       if (e.shiftKey) {
-        // Shift+` toggles slow motion — the inverse of Shift+Tab's 2x
         if (!e.repeat) setSlowMotion(!slowMotion);
         handled = true;
         break;
       }
-      // With rewind switched off the key is not ours: fall through unhandled
-      // rather than swallowing ` for a feature that is not running.
+      // With rewind off the key is not ours.
       if (!rewindOn) break;
       if (!kbRewindHeld) {
         kbRewindHeld = true;
@@ -9386,9 +8013,8 @@ const shortcutKeyHandler = (e, down) => {
       handled = true;
       break;
     case "Period":
-      // Frame advance, mGBA-style: first press pauses, further presses (key
-      // repeat included) step one frame each. Single-core only — loop_tick
-      // is a no-op in the linked modes and would desync them anyway.
+      // Frame advance: first press pauses, further presses step one frame.
+      // Single-core only.
       if (e.shiftKey || !currentRomName || !speedControlsOk()) break;
       if (!paused) {
         if (!e.repeat) pauseButton.click();
@@ -9439,24 +8065,19 @@ document.addEventListener("keydown", (e) => shortcutKeyHandler(e, true), true);
 document.addEventListener("keyup", (e) => shortcutKeyHandler(e, false), true);
 
 // --- 2P local link mode ---
-// Two GBA cores running the same ROM over the emulated link cable (lockstep,
-// in-process), rendered side by side on their own 2D canvases. Keyboard and
-// touch controls drive P1, a connected gamepad drives P2. Each player has an
-// independent battery save: the same ROM bytes are written to two FS paths,
-// so core 2's .sav lands in its own file, persisted under "save:<name>-p2".
-// Rewind / 2x / fast-forward / save states are disabled in this mode — any
-// of them would desync the pair (their controls are hidden by CSS).
+// Two cores of the same ROM over the emulated cable, lockstep, on their own
+// 2D canvases. Keyboard/touch drive P1, a gamepad P2. Each player has its
+// own battery save: the ROM is written to two FS paths, core 2's .sav
+// persisted under "save:<name>-p2".
 
 var linkMode = false;
-// { name, data } for the live 2P session only — kept for reset + save
-// persistence while linked, and released (bytes and all) on exitLinkMode so
-// no ROM bytes outlive their session in the JS heap.
+// { name, data } for the live 2P session; released on exitLinkMode so no
+// ROM bytes outlive the session.
 var linkRomEntry = null;
 var linkIsGb = false;    // true while the linked pair is GB/GBC (160x144)
 var linkFocus = 0;       // which core the keyboard drives (click a screen to switch)
 
-// Point the keyboard at player `p`'s core. Clears held buttons on both cores
-// first so a key held during the switch doesn't stick on the other player.
+// Point the keyboard at player `p`; clear held buttons first so none stick.
 const setLinkFocus = (p) => {
   if (!linkMode) return;
   if (Module._link_input) {
@@ -9474,14 +8095,12 @@ const setLinkFocus = (p) => {
   }
 };
 
-// ROM lives at two FS paths so each core derives its own .sav; the extension
-// follows the launched ROM's system so the wasm side picks GB vs GBA.
+// Two FS paths so each core derives its own .sav; the extension picks GB vs GBA.
 let LINK_FS_ROMS = ["linkrom1.gba", "linkrom2.gba"];
 const LINK_FS_SAVS = ["linkrom1.sav", "linkrom2.sav"];
 const linkSaveKey = (name, player) =>
   "save:" + (player === 0 ? name : name + "-p2");
 
-// Backing-store dimensions of each player's canvas, set per launch.
 const linkDims = () => (linkIsGb ? [160, 144] : [240, 160]);
 
 let linkCtx = [null, null];
@@ -9507,13 +8126,13 @@ const blitLinkCanvases = () => {
     if (!linkCtx[p] || !Module._link_fb_ptr) continue;
     let ptr = Module._link_fb_ptr(p);
     if (!ptr) continue;
-    // Build the heap view fresh each blit: memory growth detaches buffers
+    // Fresh heap view each blit: memory growth detaches buffers.
     linkImg[p].data.set(new Uint8Array(Module.memory.buffer, ptr, w * h * 4));
     linkCtx[p].putImageData(linkImg[p], 0, 0);
   }
 };
 
-// Online rollback shows only THIS player's core, on link-canvas-0.
+// Online rollback shows only this player's core, on link-canvas-0.
 const blitRollbackCanvas = () => {
   if (!linkCtx[0] || !Module._rollback_fb_ptr) return;
   let ptr = Module._rollback_fb_ptr();
@@ -9523,9 +8142,7 @@ const blitRollbackCanvas = () => {
   linkCtx[0].putImageData(linkImg[0], 0, 0);
 };
 
-// Debug: from the browser console during an online link session, run
-// `dumpLinkStates()` to download both linked cores' save states (core0.state /
-// core1.state). Used to capture a stuck-trade repro for offline debugging.
+// Debug: `dumpLinkStates()` from the console downloads both cores' states.
 window.dumpLinkStates = () => {
   if (!Module._rollback_dump_size) return "no dump export in this build";
   for (let p = 0; p < 2; p++) {
@@ -9541,12 +8158,9 @@ window.dumpLinkStates = () => {
   return "downloaded core0.state + core1.state";
 };
 
-// Enter/leave online input-rollback mode. netplay.js calls these once the
-// RollbackSession is initialized (enter) and on teardown (leave). The core is
-// driven by the RAF loop's rollbackMode branch.
+// Enter/leave rollback mode (called by netplay.js).
 window.enterRollbackMode = () => {
-  // Always (re)init: sizes the canvas backing store to the session's system
-  // (linkIsGb is set by rbConnect), which may differ from a prior session.
+  // Always (re)init: the session's system (linkIsGb) may differ from before.
   initLinkCanvases();
   localButtons = 0;
   gpPrev.fill(false);
@@ -9557,8 +8171,7 @@ window.enterRollbackMode = () => {
   rbLastActivity = performance.now();
   paused = false;
   document.body.classList.remove("paused");
-  // The Link Cable click froze the game and lit the pause button (openNetConnect);
-  // now that the linked session is running, clear that indicator to match.
+  // openNetConnect froze the game and lit the pause button; clear it.
   pauseButton.classList.remove("paused", "active");
   pauseButton.title = "Pause";
   document.body.classList.toggle("link-gb", linkIsGb);
@@ -9566,9 +8179,7 @@ window.enterRollbackMode = () => {
   if (typeof window.setNetConnectLabel === "function") window.setNetConnectLabel(true);
   updateCanvasScaling();
 };
-// Clear the JS-side rollback flags. The wasm side (promote-to-single vs exit)
-// is handled by the caller (netplay's rbTeardown) so the local game can keep
-// playing solo after a disconnect.
+// JS-side flags only; the wasm side is netplay's rbTeardown.
 window.leaveRollbackMode = () => {
   if (!rollbackMode) return;
   rollbackMode = false;
@@ -9578,8 +8189,7 @@ window.leaveRollbackMode = () => {
   updateCanvasScaling();
 };
 
-// Persist both players' battery saves (the core flushes dirty saves to the
-// FS .sav files once per frame, same as single-player)
+// Persist both players' battery saves.
 const persistLinkSaves = async () => {
   if (!linkRomEntry) return;
   for (let p = 0; p < 2; p++) {
@@ -9604,27 +8214,22 @@ const exitLinkMode = async () => {
 };
 
 const launchLinkRom = async (rom) => {
-  // Same runtime gate as launchRom: the 2P button exists on tiles that render
-  // before the wasm runtime is up.
+  // Same runtime gate as launchRom.
   await ensureRuntimeReady();
-  // Flush whatever was running before
   if (linkMode) {
     await exitLinkMode();
   } else if (currentRomName && currentOriginalName) {
     await persistSave(currentRomName, currentOriginalName);
   }
-  // FS ROM extension follows the ROM's system so the wasm link_init picks the
-  // GB lockstep path for .gb/.gbc and the GBA path otherwise.
+  // The FS extension makes link_init pick the GB or GBA path.
   const ext = extOf(rom.name) === ".gba" ? ".gba" : extOf(rom.name) || ".gb";
   linkIsGb = ext !== ".gba";
   LINK_FS_ROMS = ["linkrom1" + ext, "linkrom2" + ext];
   document.body.classList.toggle("link-gb", linkIsGb);
-  // Same ROM bytes at two FS paths: each core derives its own .sav file
   writeToFS(LINK_FS_ROMS[0], rom.data);
   writeToFS(LINK_FS_ROMS[1], rom.data);
-  // Restore both players' saves (never leave a previous game's .sav behind).
-  // P2 starts from a copy of P1's save the first time, so both sides hold a
-  // viable game — trading needs two playable saves.
+  // P2 starts from a copy of P1's save the first time (trading needs two
+  // playable saves).
   for (let sav of LINK_FS_SAVS) {
     try { FS.unlink(sav); } catch {}
   }
@@ -9633,7 +8238,6 @@ const launchLinkRom = async (rom) => {
   if (!s2 && s1) s2 = s1;
   if (s1) writeToFS(LINK_FS_SAVS[0], s1);
   if (s2) writeToFS(LINK_FS_SAVS[1], s2);
-  // None of the speed/rewind toggles exist in link mode
   setFastForward(false);
   setSpeed2x(false);
   setRewindHeld(false);
@@ -9657,10 +8261,8 @@ const launchLinkRom = async (rom) => {
   await touchRecent(rom.name); // bytes are already stored — recency bump only
 };
 
-// --- Main Menu (return to the home screen without terminating the game) ---
+// --- Main Menu ---
 
-// Show the home screen over the paused-but-still-loaded game. The emulator
-// keeps its state; Resume (or loading another ROM) picks up where it left off.
 const showMainMenu = () => {
   menuDropdown.hidden = true;
   if (!currentRomName && !linkMode) return;
@@ -9686,20 +8288,16 @@ const resumeGame = () => {
 document.getElementById("main-menu").addEventListener("click", showMainMenu);
 document.getElementById("home-resume").addEventListener("click", resumeGame);
 
-// --- Paused-game card (home screen) ---
-// A frozen frame of the paused game shown beside Resume, so it's clear which
-// game Resume returns to. Pixels come from the wasm-side presented
-// framebuffer, exactly like the ambient glow sampler — the game canvas is a
-// WebGL context without preserveDrawingBuffer, so reading the canvas itself
-// after pausing yields nothing.
+// --- Paused-game card ---
+// Pixels come from the wasm framebuffer: the canvas is a WebGL context
+// without preserveDrawingBuffer, so reading it after pausing yields nothing.
 const homePausedCard = document.getElementById("home-paused");
 const homePausedCanvas = /** @type {HTMLCanvasElement} */ (document.getElementById("home-paused-canvas"));
 const homePausedName = document.getElementById("home-paused-name");
 
 const updatePausedCard = () => {
   homePausedCard.hidden = true;
-  // Single-core sessions only (the glow sampler's condition): 2P/online modes
-  // render to their own canvases, not the shared framebuffer.
+  // Single-core only: the link modes render to their own canvases.
   if (!currentRomName || linkMode || rollbackMode || netActive()) return;
   if (typeof Module === "undefined" || !Module._wasm_fb_ptr) return;
   const ptr = Module._wasm_fb_ptr();
@@ -9711,8 +8309,7 @@ const updatePausedCard = () => {
   const ctx = homePausedCanvas.getContext("2d");
   const img = ctx.createImageData(w, h);
   img.data.set(heap);
-  // The wasm fb's alpha channel is not meaningful; force opaque (as the glow
-  // sampler does).
+  // The wasm fb's alpha is not meaningful; force opaque.
   for (let i = 3; i < img.data.length; i += 4) img.data[i] = 255;
   ctx.putImageData(img, 0, 0);
   homePausedName.textContent = displayName(currentOriginalName);
@@ -9722,32 +8319,20 @@ const updatePausedCard = () => {
 
 document.getElementById("home-paused-shot").addEventListener("click", resumeGame);
 
-// Close the paused game from the home screen: flush its save once, detach it
-// from every later flush path, and return the home screen to its fresh-boot
-// state. The orphaned core simply stays frozen in wasm memory (`paused` gates
-// the RAF loop, and every unpause path — Resume, Space, the pause button — is
-// gated on a loaded game); the next loadRom re-inits over it, which is the
-// same thing loading a second ROM over a live core has always done.
-// Returns false when there is nothing to unload (or an online/link session is
-// up, which has its own teardown paths).
+// Close the paused game: flush its save once, detach it from every later
+// flush path. The core stays frozen in wasm memory until the next loadRom
+// re-inits over it. False when there is nothing to unload or a link session is up.
 const unloadGame = async ({ flushSave = true } = {}) => {
   if (!currentRomName || linkMode || rollbackMode || netActive()) return false;
   const romName = currentRomName;
   const originalName = currentOriginalName;
-  // Detach FIRST: once these are null, the 5s autosave interval and the
-  // beforeunload/pagehide flushes all skip this game, so nothing can
-  // re-persist its save after the single flush below (or after a caller
-  // deletes the stored save).
+  // Detach first: once null, no flush path can re-persist this game's save.
   currentRomName = null;
   currentOriginalName = null;
   if (flushSave) await persistSave(romName, originalName);
-  // Drop the FS-side .sav so a later load can't pick up battery data that
-  // IndexedDB no longer agrees with.
+  // Drop the FS .sav so a later load cannot pick up stale battery data.
   try { FS.unlink(stripExt(romName) + ".sav"); } catch {}
-  // The cheat list belongs to the game that just left. Holding it would leave
-  // the Cheats modal listing a game that is closed — or, after the Manage-ROMs
-  // Delete (which unloads first, then deletes), listing a game that no longer
-  // exists. loadRom's restoreCheats refills this for the next game.
+  // The cheat list belongs to the game that left; restoreCheats refills it.
   cheatList = [];
   renderCheatList();
   paused = true; // keep the orphaned core frozen
@@ -9755,9 +8340,7 @@ const unloadGame = async ({ flushSave = true } = {}) => {
   pauseButton.title = "Pause";
   document.body.classList.remove("has-game", "running", "paused", "gb-mode");
   clearInputDisplay();   // no cart, no held buttons
-  // No cart, no sensor: drop the camera rather than leaving the recording
-  // light on — and the button with it, since "Enable camera" over the home
-  // screen would enable it for nothing.
+  // No cart, no sensor: drop the camera and its button.
   stopWebcam();
   camNoticeShown = null;
   homePausedCard.hidden = true;
@@ -9771,9 +8354,8 @@ document.getElementById("home-paused-close").addEventListener("click", async () 
 });
 
 // --- Screenshot ---
-// The GBA canvas is a WebGL context without preserveDrawingBuffer, so its
-// pixels are only valid within the render task. captureCanvas() is therefore
-// called from the main loop right after a fresh frame is drawn.
+// No preserveDrawingBuffer: pixels are only valid within the render task,
+// so captureCanvas() runs from the main loop right after a frame is drawn.
 let pendingShot = false;
 
 const captureCanvas = () => {
@@ -9792,7 +8374,7 @@ const takeScreenshot = () => {
   menuDropdown.hidden = true;
   if (!currentRomName || typeof Module === "undefined" || !Module._loop_tick) return;
   if (paused) {
-    // Paused loop isn't rendering; draw one frame, then grab it in the same task
+    // Paused: draw one frame, then grab it in the same task.
     Module._loop_tick();
     drawGame();
     captureCanvas();
@@ -9809,7 +8391,7 @@ const fullscreenBtn = document.getElementById("fullscreen-btn");
 const fsRoot = document.documentElement;
 const requestFs = fsRoot.requestFullscreen || fsRoot.webkitRequestFullscreen;
 if (!requestFs) {
-  // iOS Safari can't fullscreen arbitrary elements
+  // iOS Safari cannot fullscreen arbitrary elements.
   fullscreenBtn.hidden = true;
 } else {
   fullscreenBtn.addEventListener("click", () => {
@@ -9830,23 +8412,18 @@ if (!requestFs) {
 }
 
 // --- Mobile-landscape top bar handle ---
-// In landscape on phones the top bar sits off-screen (CSS); this small
-// handle at the top edge slides it in and out.
 document.getElementById("topbar-handle").addEventListener("click", () => {
   document.body.classList.toggle("topbar-open");
 });
 
-// --- Gamepad support (polled each frame from the main loop) ---
+// --- Gamepad support (polled each frame) ---
 
 // Input IDs: 0 Up, 1 Down, 2 Left, 3 Right, 4 A, 5 B, 6 Select, 7 Start, 8 L, 9 R
 const gpPrev = new Array(10).fill(false);
 const GP_DEADZONE = 0.4;
 
-// Gamepad inside Settings. Worth wiring given the product: the shoulder
-// buttons cycle sections in the same fixed order and with the same wrapping as
-// the sheet's stepper, the d-pad walks the pane's controls, A activates and B
-// goes back or closes. Everything it reads is consumed — with the dialog up,
-// no button reaches the game.
+// Gamepad inside Settings: shoulders cycle sections, d-pad walks controls,
+// A activates, B goes back. Everything is consumed; nothing reaches the game.
 const settingsGamepadNav = (want) => {
   const hit = (i) => want[i] && !gpPrev[i];
   if (hit(8)) selectSettingsTab(settingsStep(settingsSection, -1)); // L
@@ -9896,9 +8473,8 @@ const pollGamepads = () => {
     if (ay > GP_DEADZONE) want[1] = true;
     if (ax < -GP_DEADZONE) want[2] = true;
     if (ax > GP_DEADZONE) want[3] = true;
-    // Tilt cart: the left stick doubles as the accelerometer (full analog
-    // range). Only claims the tilt target while deflected so the keyboard /
-    // device-orientation sources aren't fought over a centered stick.
+    // Tilt cart: the left stick is the accelerometer; claims the target only
+    // while deflected.
     if (tiltActive && !settingsOpen) {
       if (Math.abs(ax) > 0.1 || Math.abs(ay) > 0.1) {
         padTiltLive = true;
@@ -9916,19 +8492,16 @@ const pollGamepads = () => {
   if (!anyConnected) return;
   if (settingsOpen) {
     settingsGamepadNav(want);
-    // Absorb the edges: a button held across the close must not arrive at the
-    // game as a fresh press.
+    // A button held across the close must not arrive as a fresh press.
     for (let i = 0; i < 10; i++) gpPrev[i] = want[i];
     return;
   }
   for (let i = 0; i < 10; i++) {
     if (want[i] !== gpPrev[i]) {
-      // Input display: the gamepad does not pass through routeP1Input, so it
-      // notifies the overlay itself. Skipped in 2P link mode, where the pad is
-      // the OTHER console's controller (the overlay is hidden there anyway).
+      // The gamepad does not pass through routeP1Input, so it notifies the
+      // overlay itself; not in 2P link, where it is the other console's.
       if (!linkMode) noteInputDisplay(i, want[i]);
-      // In 2P link mode the gamepad is player 2's controller; in online
-      // rollback it is this player's controller (captured into localButtons).
+      // 2P link: player 2's controller; rollback: this player's.
       if (rollbackMode) {
         noteLocalButton(i, want[i]);
       } else if (linkMode) {
@@ -9941,13 +8514,10 @@ const pollGamepads = () => {
   }
 };
 
-// --- Tilt cart input (MBC7: Kirby Tilt 'n' Tumble) ---
-// Three sources feed a shared target: gamepad left stick (analog, best),
-// keyboard/touch D-pad (digital, smoothed), and the phone's real orientation
-// sensor. The target is eased toward each RAF tick so digital input rolls
-// the ball rather than teleporting the tilt. iOS requires the motion
-// permission be requested from a user gesture, so the offer is an action
-// toast shown at game load — tapping it is the gesture.
+// --- Tilt cart input ---
+// Gamepad stick, D-pad and device orientation feed a shared target, eased
+// toward each RAF tick. iOS requires the motion permission from a user
+// gesture: the offer toast's tap is the gesture.
 const TILT_KB_RANGE = 0.65;   // full keyboard deflection (playable, not violent)
 const TILT_SMOOTHING = 0.18;  // per-tick ease factor toward the target
 const TILT_ORIENT_RANGE = 25; // degrees of physical tilt = full deflection
@@ -9966,27 +8536,22 @@ const detectTiltCart = () => {
   }
 };
 
-// Jolt channel: Kirby's jump is a sharp FLICK of the device, which the game
-// detects as an out-of-range acceleration transient. Orientation alone
-// underreports it, so devicemotion's linear acceleration rides on top, and
-// decays fast so a jolt is a spike rather than a lean.
+// Jolt channel: a flick is an out-of-range acceleration transient that
+// orientation alone underreports; devicemotion's linear acceleration rides
+// on top and decays fast.
 var tiltJoltX = 0, tiltJoltY = 0;
 
 const updateTilt = () => {
   if (!tiltActive || typeof Module === "undefined" || !Module._wasm_set_tilt) return;
   if (tiltOrientationOn) {
     if (Date.now() < tiltGlideUntil) {
-      // Glide across a discontinuity WE introduced — a recenter, or the
-      // re-baseline after a rotation. The cart derives acceleration from the
-      // sensor value, so stepping that value instantly is indistinguishable
-      // from a violent flick, and Kirby jumps. Easing over a few hundred ms
-      // keeps the same destination without the transient. Only the step is
-      // smoothed; steady-state motion below still passes raw.
+      // Glide across a discontinuity we introduced (recenter, re-baseline):
+      // the cart derives acceleration from the sensor value, so a step is a
+      // flick. Only the step is smoothed.
       tiltX += (tiltTargetX - tiltX) * TILT_GLIDE_RATE;
       tiltY += (tiltTargetY - tiltY) * TILT_GLIDE_RATE;
     } else {
-      // Real sensor: pass raw. Easing every sample would low-pass away
-      // exactly the flick transient the jump detector needs.
+      // Real sensor: raw, or the flick transient is low-passed away.
       tiltX = tiltTargetX;
       tiltY = tiltTargetY;
     }
@@ -9995,11 +8560,9 @@ const updateTilt = () => {
     tiltY += (tiltTargetY - tiltY) * TILT_SMOOTHING;
   }
   const clamp3 = (v) => Math.max(-3, Math.min(3, v)); // flicks may exceed 1g;
-  // the MBC7 latch (center 0x81D0, 0x70/g) has headroom to ±3g without wrap
-  // Negated at this single send point (all sources agree): on hardware the
-  // ball rolls INTO the tilt — marble on a tray — and the phone test showed
-  // the raw mapping ran backwards. GBATEK notes the sensor axes mirror
-  // between console form factors, so the sign was always empirical.
+  // the MBC7 latch (center 0x81D0, 0x70/g) has headroom to +/-3g
+  // Negated at this single send point: the ball rolls into the tilt. GBATEK
+  // notes the sensor axes mirror between form factors; the sign is empirical.
   Module._wasm_set_tilt(clamp3(-(tiltX + tiltJoltX)), clamp3(-(tiltY + tiltJoltY)));
   tiltJoltX *= 0.55;
   tiltJoltY *= 0.55;
@@ -10008,25 +8571,17 @@ const updateTilt = () => {
 const motionJoltHandler = (e) => {
   if (!tiltActive) return;
   if (tiltKind === 2) {
-    // Gyro cart: the sensor measures rotation RATE around the screen
-    // normal. 180 deg/s = the hard-rotation extreme.
+    // Gyro cart: rotation rate around the screen normal; 180 deg/s = extreme.
     const rr = e.rotationRate;
     if (rr && rr.alpha != null) {
       tiltTargetX = Math.max(-1, Math.min(1, rr.alpha / 180));
     }
     return;
   }
-  // Detect the turn from the motion itself, not from orientationchange.
-  // That event fires only once the OS has decided the orientation changed —
-  // by then the turn's acceleration has already been fed to the core and
-  // Kirby has jumped. rotationRate.alpha is rotation about the screen
-  // normal, exactly the portrait<->landscape axis, and it is live DURING
-  // the turn.
-  //
-  // Integrate it SIGNED. A turn is ~90 degrees sustained one way; a jump
-  // flick twists the wrist and twists straight back, so it nets near zero
-  // however hard it was thrown. An absolute integral counts both halves of
-  // that flick and trips on it — which is what made jumping feel harder.
+  // Detect the turn from rotationRate.alpha (live during the turn), not
+  // orientationchange (too late: the acceleration already reached the
+  // core). Integrated signed: a flick twists and twists back, netting near
+  // zero, while a turn is ~90 degrees one way.
   const rr = e.rotationRate;
   const now = Date.now();
   const dt = tiltSpinAt ? Math.min(0.2, (now - tiltSpinAt) / 1000) : 0;
@@ -10039,30 +8594,24 @@ const motionJoltHandler = (e) => {
   if (tiltSettling()) { tiltJoltX = tiltJoltY = 0; return; } // turning != flick
   const ax = e.acceleration.x, ay = e.acceleration.y;
   if (ax == null || ay == null) return;
-  // Linear acceleration (gravity excluded), in g, rotated into screen space
-  // like the orientation channel — a flick must stay a flick in landscape.
-  // Only spikes matter: below ~0.4g it's hand tremor and must not disturb
-  // the tilt.
+  // Linear acceleration in g, rotated into screen space. Below ~0.4g is
+  // hand tremor.
   const [gx, gy] = toScreenFrame(ax / 9.81, ay / 9.81);
   if (Math.abs(gx) > 0.4) tiltJoltX = Math.max(-3, Math.min(3, gx * 1.5));
   if (Math.abs(gy) > 0.4) tiltJoltY = Math.max(-3, Math.min(3, gy * 1.5));
 };
 
-// beta/gamma (and devicemotion's acceleration) are expressed against the
-// device's NATURAL orientation, not the current one. Rotate them into screen
-// space or landscape play is wrong twice over: the game's left/right axis
-// becomes the phone's pitch, and the comfortable hold angle turns into a
-// large constant lean.
+// beta/gamma and devicemotion are against the device's natural orientation;
+// rotate into screen space or landscape play maps left/right to pitch.
 const screenAngle = () => {
   const so = screen.orientation;
   if (so && typeof so.angle === "number") return ((so.angle % 360) + 360) % 360;
-  // Legacy iOS (pre-16.4): window.orientation is the NEGATIVE of the
-  // standard angle, so landscape-left reports +90 where the spec says 270.
+  // Legacy iOS (pre-16.4): window.orientation is the negative of the
+  // standard angle.
   const w = typeof window.orientation === "number" ? -window.orientation : 0;
   return ((w % 360) + 360) % 360;
 };
 
-// Device frame -> screen frame: rotate by -angle.
 const toScreenFrame = (x, y) => {
   const rad = (screenAngle() * Math.PI) / 180;
   const c = Math.cos(rad), s = Math.sin(rad);
@@ -10073,32 +8622,22 @@ const orientationTiltHandler = (e) => {
   if (!tiltActive || tiltKind === 2) return; // gyro carts use rotation RATE
   if (e.beta == null || e.gamma == null) return;
   if (tiltSettling()) {
-    // Mid-rotation: FREEZE at the last value rather than tracking a pose the
-    // player is only passing through. Snapping to level here would be its own
-    // step change, which is exactly what makes the cart read a flick.
-    // tiltNeutral stays null so the first settled reading defines neutral.
+    // Mid-rotation: freeze at the last value (snapping to level would be a
+    // step, i.e. a flick). tiltNeutral stays null until settled.
     return;
   }
   const [sx, sy] = toScreenFrame(e.gamma, e.beta);
-  // First reading after a (re)baseline defines neutral: people play holding
-  // the phone at ~30-50°, not flat on a table. Baselining BOTH axes in
-  // screen space is what makes every orientation behave the same — in
-  // landscape the hold angle lands on x instead of y.
+  // The first reading after a (re)baseline defines neutral, both axes in
+  // screen space.
   if (tiltNeutral === null) tiltNeutral = { x: sx, y: sy };
   const clamp = (v) => Math.max(-1, Math.min(1, v));
   tiltTargetX = clamp((sx - tiltNeutral.x) / TILT_ORIENT_RANGE);
   tiltTargetY = clamp((sy - tiltNeutral.y) / TILT_ORIENT_RANGE);
 };
 
-// Rotating the device changes which physical axis is "left/right" AND the
-// pose the player is holding, so the old neutral is meaningless. Re-baseline
-// once the phone has stopped moving — sampling mid-rotation would capture a
-// pose nobody is holding. Applies to MBC7 and GBA tilt alike (same handler).
-// Turning the phone IS a large linear acceleration, and the jolt channel
-// cannot tell it from the sharp flick that makes Kirby jump — so rotating
-// made him jump. Motion input is therefore frozen at neutral across the
-// rotation and only resumes once the phone has settled, which also stops the
-// wild mid-rotation orientation readings from lurching the tilt.
+// Rotation changes the axis and the pose: re-baseline once the phone has
+// settled. Motion input is frozen at neutral across the rotation, since a
+// turn is a large linear acceleration the jolt channel would read as a flick.
 const TILT_REBASE_MS = 450;   // when the stale neutral is dropped
 const TILT_SETTLE_MS = 650;   // when motion input starts counting again
 const TILT_GLIDE_MS = 380;   // how long a re-baseline takes to settle in
@@ -10131,10 +8670,8 @@ if (screen.orientation && screen.orientation.addEventListener) {
 const enableOrientationTilt = async () => {
   if (tiltOrientationOn) return;
   try {
-    // iOS 13+: permission gate (non-standard static, hence the cast), must
-    // be called from a user gesture — the action toast's tap and the top-bar
-    // button's click both provide it, which is why neither route awaits
-    // anything before reaching this line.
+    // iOS 13+ permission gate, must be called from a user gesture: neither
+    // route awaits anything before this line.
     const doe = /** @type {*} */ (
       typeof DeviceOrientationEvent !== "undefined" ? DeviceOrientationEvent : null);
     if (doe && typeof doe.requestPermission === "function") {
@@ -10144,8 +8681,7 @@ const enableOrientationTilt = async () => {
         return;
       }
     }
-    // Motion (the jump-flick channel) shares the same iOS permission sheet;
-    // request explicitly where the API exists, best-effort elsewhere.
+    // Motion shares the iOS permission sheet; best-effort elsewhere.
     const dme = /** @type {*} */ (
       typeof DeviceMotionEvent !== "undefined" ? DeviceMotionEvent : null);
     if (dme && typeof dme.requestPermission === "function") {
@@ -10158,25 +8694,19 @@ const enableOrientationTilt = async () => {
     showToast("Device tilt enabled — hold your comfortable angle now");
   } catch {
   } finally {
-    // Granted or refused, the button has to re-read the world: on success it
-    // becomes Recenter, on refusal it stays the way back in.
+    // Granted or refused, the button re-reads the world.
     tiltCartBtnUpdate();
   }
 };
 
-// Device tilt is only offered where it could possibly work: a phone or tablet
-// with an orientation sensor. On a desktop the D-pad and stick are the whole
-// story, and an "Enable tilt" button there would be a dead end.
+// Device tilt is only offered where an orientation sensor could exist.
 const tiltCanOrient = () =>
   typeof DeviceOrientationEvent !== "undefined" &&
   ("ontouchstart" in window || navigator.maxTouchPoints > 0);
 
-// The top-bar cart button, in its two states. Before the orientation listener
-// is attached it is the way IN — a permanent affordance, because the load-time
-// offer toast is easy to miss and there is no way to ask for it again. Once
-// tilt is running it is Recenter, which is what a player actually needs mid-
-// game. "Not yet on" is the real listener state, never a guess: nothing sets
-// tiltOrientationOn but the branch that succeeded in attaching the handlers.
+// The top-bar cart button: "Enable tilt" until the orientation listener is
+// attached (only the branch that attached it sets tiltOrientationOn), then
+// Recenter.
 const tiltCartBtnUpdate = () => {
   if (!tiltActive) {
     tiltRecenterBtn.hidden = true;
@@ -10191,24 +8721,19 @@ const tiltCartBtnUpdate = () => {
   tiltRecenterBtn.hidden = needsEnable && !tiltCanOrient();
 };
 
-// Recenter: whatever angle the phone is at RIGHT NOW becomes neutral —
-// tilt games are unplayable after shifting in a chair without this.
+// Recenter: the current angle becomes neutral.
 const tiltRecenterBtn = document.getElementById("tilt-recenter");
 const tiltRecenterLabel = document.getElementById("tilt-recenter-label");
 tiltRecenterBtn.addEventListener("click", () => {
-  // Straight off the click with nothing awaited first: iOS grants the motion
-  // permission only from inside a real user gesture, and a single `await`
-  // ahead of requestPermission() is enough to lose it.
+  // Nothing awaited first: a single `await` ahead of requestPermission()
+  // loses the iOS user gesture.
   if (!tiltOrientationOn) { enableOrientationTilt(); return; }
   tiltNeutral = null; tiltGlideUntil = Date.now() + TILT_GLIDE_MS; // next orientation reading re-baselines
   tiltJoltX = tiltJoltY = 0;
   showToast("Tilt recentered");
 });
 
-// On touch devices a tilt cart offers real device-tilt via a tappable toast
-// (the permission request needs a user gesture on iOS). Elsewhere (or if
-// dismissed) the D-pad/stick fallbacks just work with no setup. The toast is
-// now only a nudge — the top-bar button above is the durable route in.
+// The offer toast is a nudge; the top-bar button is the durable route in.
 const maybeOfferOrientationTilt = () => {
   if (tiltOrientationOn || !tiltCanOrient()) return false;
   showActionToast("Play by tilting your device?", "Enable tilt", enableOrientationTilt);
@@ -10216,14 +8741,9 @@ const maybeOfferOrientationTilt = () => {
 };
 
 // --- Game Boy Printer ---
-// Solo GB cores run with a print-intent sniffer attached to the serial
-// port; the first time a game sends the printer-packet magic, offer to
-// connect. Finished strips arrive via the wasm outbox and save as PNGs —
-// hardware-matched timing means the in-game "printing" screens play out.
-// A printer is always plugged into a solo GB core (see gb/printer.nim):
-// games that never print send no packets, and games that do print just work
-// on the first attempt. Finished prints are stored in the photo gallery and
-// announced with a toast; nothing to connect, nothing to time.
+// A printer is always plugged into a solo GB core (gb/printer.nim); finished
+// strips arrive via the wasm outbox, go to the gallery, and are announced
+// with a toast.
 var printerPhotos = [];       // {ts, w, h, png} newest-first, capped
 const PRINTER_MAX_PHOTOS = 30;
 const PRINTER_PHOTOS_KEY = "prints";
@@ -10239,23 +8759,11 @@ const loadPrinterPhotos = async () => {
 };
 
 // --- New-photo indicator ---------------------------------------------------
-// A dot at each step of the path to a photo you have not seen: the hamburger,
-// the Capture row, the Printed Photos row. Each clears when its OWN element is
-// used, so the trail shortens as you walk it.
-//
-// The one conditional bit is what "View" on the print toast does, and it turns
-// on whether the gallery has ever been opened from the menu:
-//
-//   * Never opened from the menu. View shows the photo and changes NOTHING —
-//     all three dots stay lit. The trail is the only way this person is going
-//     to find out that the gallery exists at a fixed address in the menu, and
-//     a toast they will never see again cannot teach them that.
-//   * Opened from the menu before. View clears all three. They already know
-//     where the gallery lives, so the dots have no lesson left to give and
-//     would just be an unread badge over a photo they have already seen.
-//
-// So `everOpenedFromMenu` is set by the menu row and by nothing else — not by
-// the toast, which is exactly the route that does not teach the address.
+// A dot at each step (hamburger, Capture row, Printed Photos row); each
+// clears when its own element is used. "View" on the print toast clears all
+// three only if the gallery has ever been opened from the menu
+// (`everOpenedFromMenu`, set by the menu row and nothing else), since the
+// trail is what teaches where the gallery lives.
 const PRINTER_DOTS_KEY = "prints-seen";
 var photoDots = {
   everOpenedFromMenu: false, // has the gallery ever been opened FROM THE MENU
@@ -10279,13 +8787,11 @@ const loadPhotoDots = async () => {
     const rec = await dbGet(PRINTER_DOTS_KEY);
     if (rec && typeof rec === "object") photoDots = { ...photoDots, ...rec };
   } catch {}
-  // A dot with nothing behind it is a dead end: if the photos are gone (an
-  // old record, a cleared gallery) the trail goes with them.
+  // If the photos are gone the trail goes with them.
   if (!printerPhotos.length) photoDots.menu = photoDots.capture = photoDots.gallery = false;
   applyPhotoDots();
 };
 
-// on=true lights the whole trail (a photo arrived); on=false retires it.
 const setPhotoDots = (on) => {
   photoDots.menu = photoDots.capture = photoDots.gallery = on;
   applyPhotoDots();
@@ -10299,7 +8805,6 @@ const clearPhotoDot = (which) => {
   savePhotoDots();
 };
 
-// The Printed Photos row exists only once there is something behind it.
 const refreshPrintsMenuItem = () => {
   printsItem.hidden = printerPhotos.length === 0;
 };
@@ -10331,24 +8836,21 @@ const downloadPrint = (photo) => {
   a.click();
 };
 
-// Everything a finished print does once it is pixels: store it, put the menu
-// row up, light the trail, offer the shortcut. Split out of collectPrint so
-// the parts that need no wasm can be driven directly (web/tests).
+// What a finished print does once it is pixels; split from collectPrint so
+// tests can drive it without wasm.
 const storePrint = async (photo) => {
   printerPhotos.unshift(photo);
   if (printerPhotos.length > PRINTER_MAX_PHOTOS) printerPhotos.length = PRINTER_MAX_PHOTOS;
   try { await dbPut(PRINTER_PHOTOS_KEY, printerPhotos); } catch {}
   refreshPrintsMenuItem(); // the first print is what puts the row in the menu
   if (printsModal.classList.contains("open")) {
-    // The gallery is open and the photo lands in it. Nothing unseen, so
-    // nothing to point at and nothing to offer.
+    // The gallery is open: nothing unseen.
     renderPrintsGrid();
     return;
   }
   setPhotoDots(true);
   showActionToast("Photo printed", "View", () => {
-    // See "New-photo indicator" above: the toast only retires the trail for
-    // someone who already knows where the trail leads.
+    // The toast only retires the trail for someone who knows where it leads.
     if (photoDots.everOpenedFromMenu) setPhotoDots(false);
     openPrintsModal();
   }, 6000);
@@ -10395,8 +8897,7 @@ const renderPrintsGrid = () => {
     del.addEventListener("click", async () => {
       printerPhotos.splice(idx, 1);
       try { await dbPut(PRINTER_PHOTOS_KEY, printerPhotos); } catch {}
-      // Deleting the last photo takes the menu row with it, and any dot still
-      // pointing at that row would then point at nothing.
+      // Deleting the last photo takes the menu row and its dots.
       refreshPrintsMenuItem();
       if (!printerPhotos.length) setPhotoDots(false);
       renderPrintsGrid();
@@ -10419,9 +8920,7 @@ const closePrintsModal = () => {
   releaseFocus(printsModal);
 };
 
-// The menu row is the ONE route that sets everOpenedFromMenu — it is the only
-// one that teaches where the gallery lives, which is the whole thing the
-// indicator exists to teach.
+// The menu row is the one route that sets everOpenedFromMenu.
 printsItem.addEventListener("click", () => {
   photoDots.everOpenedFromMenu = true;
   photoDots.gallery = false;
@@ -10430,9 +8929,7 @@ printsItem.addEventListener("click", () => {
   openPrintsModal();
 });
 
-// Each of the other two dots clears when its own element is used, and only
-// then — opening the menu says nothing about whether you found Capture, and
-// expanding Capture says nothing about whether you opened the gallery.
+// Each dot clears only when its own element is used.
 menuBtn.addEventListener("click", () => {
   if (!menuDropdown.hidden) clearPhotoDot("menu");
 });
@@ -10446,12 +8943,9 @@ printsModal.addEventListener("click", (e) => {
 });
 
 // --- GB Camera webcam source ---
-// The Pocket Camera cart's sensor is fully emulated; opting in points it at
-// real getUserMedia frames: a hidden <video> is drawn cover-cropped and
-// selfie-mirrored into a 128x120 canvas ~15x/s, converted to luminance, and
-// copied into the wasm-side buffer the sensor proc reads. The emulated
-// exposure/dither pipeline then Game-Boy-ifies it authentically. Requires a
-// secure context (HTTPS), same as tilt.
+// A hidden <video> is drawn cover-cropped and mirrored into a 128x120
+// canvas ~15x/s, converted to luminance, and copied into the wasm buffer the
+// sensor proc reads. Needs a secure context.
 const CAM_W = 128, CAM_H = 120;
 var camStream = null;
 var camVideo = null;
@@ -10470,11 +8964,9 @@ var camNoticeShown = null;   // which notice the sensor is currently carrying
 const camFlipBtn = document.getElementById("cam-flip");
 const camFlipLabel = document.getElementById("cam-flip-label");
 
-// "Do we have usable frames right now?" A non-null camStream is not the same
-// thing: iOS ends the tracks whenever the page is backgrounded or another app
-// takes the camera, and an ended track's <video> goes black rather than
-// throwing — so the pump keeps copying black into the sensor. Every decision
-// below keys off live tracks, never off camStream being set.
+// Usable frames right now. A non-null camStream is not enough: iOS ends the
+// tracks on backgrounding and an ended track's <video> goes black rather
+// than throwing.
 const camLive = () =>
   !!camStream && camStream.getVideoTracks().some((t) => t.readyState === "live");
 
@@ -10484,17 +8976,12 @@ const camCartLoaded = () =>
 
 const camUsable = () => !!navigator.mediaDevices?.getUserMedia;
 
-// What the top-bar button says when there is no stream yet — and, because two
-// of the viewfinder notices below tell the player to look for that button BY
-// NAME, the one place either wording is written. Rename it here and the
-// emulated viewfinder renames it too; there is no second copy to forget.
+// The button's label with no stream; the viewfinder notices name it via
+// this constant.
 const CAM_ENABLE_LABEL = "Enable camera";
 
-// The top-bar button has two jobs. Before a stream is attached it is the way
-// IN — a permanent affordance, because the one-shot offer toast is easy to
-// miss and impossible to summon back. Once frames are flowing it becomes the
-// front/back switch, shown only when there is more than one camera to switch
-// between.
+// The top-bar button: "Enable camera" before a stream is attached, then
+// the front/back switch (only with more than one camera).
 const camCartBtnUpdate = () => {
   if (!camCartLoaded()) {
     camFlipBtn.hidden = true;
@@ -10506,52 +8993,32 @@ const camCartBtnUpdate = () => {
   camFlipBtn.title = label;
   camFlipBtn.setAttribute("aria-label", label);
   camFlipLabel.textContent = needsEnable ? CAM_ENABLE_LABEL : "Camera";
-  // Nothing to enable without getUserMedia (insecure origin, ancient browser),
-  // and nothing to switch to with a single camera.
+  // Nothing to enable without getUserMedia; nothing to switch to with one camera.
   camFlipBtn.hidden = needsEnable ? !camUsable() : camDevices.length < 2;
 };
 
 // --- What the emulated viewfinder says when there is no camera ---
-// With no sensor attached the cart falls back to camera.nim's synthetic scene
-// (ramp + checkerboard + disc), which players read as a badly corrupted
-// picture — one reported it as exactly that. The sensor is only a 128x120
-// 8-bit grey buffer, so a rendered TEXT frame goes in through the same door
-// real webcam frames do, and the viewfinder can say what is actually wrong.
-//
-// This survives the cart far better than it sounds like it should. The
-// MAC-GBD's 2-D edge enhancement multiplies a black/white boundary by up to
-// 5x before the 4x4 dither matrix quantises it, so large high-contrast type
-// comes out with hard, clean edges — verified in-game against gbcamera.gb,
-// including a five-line sentence. Small type would still turn to mush, which
-// is why each line is auto-fitted to the full 128px width rather than set at
-// a fixed size.
-//
-// Each notice is ONE string: "/" is the line break, and two placeholders keep
-// it honest — {tap} is the verb for the pointing device, {label} is the
-// top-bar button's own label (CAM_ENABLE_LABEL, so the viewfinder cannot go on
-// naming a button that has been renamed). Editing a message is a one-line
-// change; `node tools/cammsg.mjs` renders and fit-checks any candidate before
-// it lands. Keep lines to ~14 characters: past that the fitter shrinks them
-// below the 17.6px floor measured off these five (the smallest type known to
-// survive the cart's dither), and they turn to mush.
+// A rendered text frame goes into the 128x120 8-bit sensor buffer like a
+// webcam frame would (camera.nim's synthetic scene reads as corruption).
+// The MAC-GBD's edge enhancement keeps large high-contrast type clean
+// through the dither; each line is auto-fitted to the full 128px width.
+// One string per notice: "/" is the line break, {tap} the pointing verb,
+// {label} CAM_ENABLE_LABEL. Keep lines to ~14 characters (below the 17.6px
+// floor they turn to mush); `node tools/cammsg.mjs` fit-checks a candidate.
 const CAM_NOTICES = {
-  // Never asked. The button this points at is the thing the player missed.
+  // Never asked.
   prompt: "{tap} / {label} / in the top bar",
-  // getUserMedia rejected with NotAllowedError, or the Permissions API said
-  // "denied" before we ever asked.
+  // NotAllowedError, or the Permissions API said "denied".
   blocked: "Camera is / currently / restricted / by the / browser.",
-  // Asked and granted, but the hardware isn't there (NotFoundError).
+  // NotFoundError.
   missing: "No camera / found on / this device",
-  // Had live frames, then the track ended by itself: iOS backgrounding the
-  // tab, another app taking the camera, a USB webcam unplugged.
+  // The track ended by itself (backgrounding, another app, unplugged).
   ended: "Camera / stopped. / {tap} / {label}",
-  // No getUserMedia at all — a plain-http origin is the common case.
+  // No getUserMedia at all (a plain-http origin).
   insecure: "Camera needs / a secure / connection",
 };
 
-// A notice's text, split into the lines the viewfinder will draw. `touch`
-// exists so tools/cammsg.mjs can preview the Tap and Click wordings without a
-// touchscreen; the app never passes it.
+// A notice's lines. `touch` lets tools/cammsg.mjs preview both wordings.
 const camNoticeLines = (kind, touch = touchDevice) =>
   (CAM_NOTICES[kind] || "").split("/")
     .map((s) => s.trim()
@@ -10559,9 +9026,7 @@ const camNoticeLines = (kind, touch = touchDevice) =>
       .replace(/\{label\}/g, CAM_ENABLE_LABEL))
     .filter((s) => s !== "");
 
-// Which notice belongs in the viewfinder right now, or null when real frames
-// are flowing. Ordered most-certain first; every branch is a fact we observed
-// rather than an inference.
+// Which notice belongs in the viewfinder, or null when frames are flowing.
 const camNoticeFor = () => {
   if (camLive()) return null;
   if (!camUsable()) return "insecure";
@@ -10571,16 +9036,13 @@ const camNoticeFor = () => {
   return "prompt";
 };
 
-// Lay the lines out across the 112 sensor rows the MAC-GBD actually keeps
-// (it discards CAM_SENSOR_EXTRA/2 = 4 rows at each end, so rows 0-3 and
-// 116-119 are never seen), each line scaled down only if it would overflow
-// 128px. White on black: the cart's edge filter keys off boundaries, and the
-// heaviest weight available gives it the most to bite on.
+// Lay the lines out across the 112 sensor rows the MAC-GBD keeps (it
+// discards CAM_SENSOR_EXTRA/2 = 4 rows at each end). White on black, the
+// heaviest weight: the cart's edge filter keys off boundaries.
 const CAM_VIEW_TOP = 4, CAM_VIEW_H = 112;
 
-// The whole of the layout arithmetic, separated from the painting so that
-// tools/cammsg.mjs can report the size a line will actually render at without
-// keeping a second, driftable copy of these numbers. Uses ctx only to measure.
+// Layout arithmetic, separate from painting so tools/cammsg.mjs can report
+// render sizes. Uses ctx only to measure.
 const camFitLines = (ctx, lines) => {
   const slot = CAM_VIEW_H / lines.length;
   return lines.map((text, i) => {
@@ -10604,23 +9066,21 @@ const camDrawNotice = (ctx, lines) => {
   }
 };
 
-// RGBA canvas pixels -> the 8-bit grey the MAC-GBD sensor hands the cart.
-// Shared by the notice writer and the live webcam pump so a preview rendered
-// by tools/cammsg.mjs is the same bytes the cart will see.
+// RGBA canvas pixels -> the sensor's 8-bit grey; shared by the notice
+// writer and the webcam pump.
 const camToGrey = (img, dst) => {
   for (let i = 0, p = 0; i < dst.length; i++, p += 4) {
     dst[i] = (img[p] * 299 + img[p + 1] * 587 + img[p + 2] * 114) / 1000;
   }
 };
 
-// Push one still frame into the sensor. Nothing repaints it: the cart re-reads
-// the buffer on every capture, so one write holds until the camera starts or
-// the notice changes.
+// Push one still frame into the sensor; the cart re-reads the buffer on
+// every capture.
 const camShowNotice = (kind) => {
   if (camNoticeShown === kind) return;
   if (!CAM_NOTICES[kind] || typeof Module === "undefined" ||
       !Module._wasm_camera_attach) return;
-  // Attaching also takes the cart off its synthetic scene, which is the point.
+  // Attaching takes the cart off its synthetic scene.
   if (!Module._wasm_camera_attach()) return;
   const ptr = Module._wasm_camera_frame_ptr();
   if (!ptr) return;
@@ -10630,13 +9090,12 @@ const camShowNotice = (kind) => {
   const ctx = cnv.getContext("2d", { willReadFrequently: true });
   camDrawNotice(ctx, camNoticeLines(kind));
   const img = ctx.getImageData(0, 0, CAM_W, CAM_H).data;
-  // Fresh heap view every copy: memory growth detaches cached buffers
+  // Fresh heap view every copy: memory growth detaches cached buffers.
   camToGrey(img, new Uint8Array(Module.memory.buffer, ptr, CAM_W * CAM_H));
   camNoticeShown = kind;
 };
 
-// One place that re-reads the world: the button's two states and the
-// viewfinder's notice always agree because they are decided together.
+// The button's state and the viewfinder's notice are decided together.
 const camRefresh = () => {
   camCartBtnUpdate();
   if (!camCartLoaded()) return;
@@ -10645,12 +9104,8 @@ const camRefresh = () => {
   else camNoticeShown = null;   // live frames are overwriting it anyway
 };
 
-// The Permissions API can tell us the camera is blocked WITHOUT prompting, so
-// a player who denied the site months ago gets the honest message instead of
-// "tap Enable camera" followed by an invisible failure. Chromium-only in
-// practice: WebKit rejects the "camera" query outright, which is why a failed
-// probe leaves camDenied alone rather than clearing it — only a real
-// getUserMedia rejection can decide it there.
+// The Permissions API can report "denied" without prompting. WebKit rejects
+// the "camera" query, so a failed probe leaves camDenied alone.
 const camProbePermission = async () => {
   if (camPermProbed) return;   // one status object per session, one listener
   camPermProbed = true;
@@ -10659,8 +9114,7 @@ const camProbePermission = async () => {
       /** @type {*} */ ({ name: "camera" }));
     if (st.state === "denied") camDenied = true;
     else if (st.state === "granted") camDenied = false;
-    // Flipping the site permission in browser settings does not reload the
-    // page; re-decide when it happens so the viewfinder stops lying.
+    // Flipping the site permission does not reload the page.
     st.onchange = () => {
       camDenied = st.state === "denied";
       if (!camLive()) camRefresh();
@@ -10689,8 +9143,7 @@ const camConstraints = () => {
   return { facingMode: "user", ...size };
 };
 
-// (Re)open the camera with the current facing/device choice; reused by the
-// flip button, so it swaps the stream under the running pump.
+// (Re)open the camera; the flip button swaps the stream under the pump.
 const openCamStream = async () => {
   const stream = await navigator.mediaDevices.getUserMedia({ video: camConstraints() });
   if (camStream) for (const t of camStream.getTracks()) t.stop();
@@ -10701,11 +9154,9 @@ const openCamStream = async () => {
     camVideo.playsInline = true;
   }
   camVideo.srcObject = stream;
-  // A track that ends on its own (iOS backgrounding the tab, the OS handing
-  // the camera to another app, a USB webcam unplugged) has to tear the pump
-  // down, or it spends the rest of the session copying black frames into the
-  // sensor. The guard keeps a *deliberate* swap — switchCamera stops the old
-  // tracks after the new stream is live — from tripping it.
+  // A track that ends on its own must tear the pump down (else it copies
+  // black frames); the guard keeps switchCamera's deliberate swap from
+  // tripping it.
   for (const t of stream.getVideoTracks()) {
     t.addEventListener("ended", () => {
       if (camLive()) return;
@@ -10716,13 +9167,11 @@ const openCamStream = async () => {
     });
   }
   await camVideo.play().catch(() => {});
-  // Selfie-mirror the front camera (and desktop webcams — they face the
-  // user); the back camera shows the world and must not be flipped.
+  // Mirror the front camera and desktop webcams, not the back camera.
   camMirror = touchDevice ? camFacing === "user" : true;
 };
 
-// Flip: phones toggle front/back; desktops cycle the device list and name
-// each camera as it's chosen. Only offered when >1 camera exists.
+// Flip: phones toggle front/back; desktops cycle the device list.
 const switchCamera = async () => {
   if (!camLive()) return;
   if (touchDevice) {
@@ -10742,27 +9191,22 @@ const switchCamera = async () => {
   }
   camRefresh();
 };
-// One button, two meanings — see camCartBtnUpdate. Both branches run straight
-// off the click, with nothing awaited first, so the getUserMedia call still
-// carries the user gesture iOS requires.
+// Both branches run straight off the click with nothing awaited, so
+// getUserMedia still carries the iOS user gesture.
 camFlipBtn.addEventListener("click", () =>
   camLive() ? switchCamera() : enableWebcam());
 
 const enableWebcam = async () => {
   if (camPending || camLive() || !camUsable()) return;
-  // Retrying after the stream died: drop the corpse first, or the second
-  // enable stacks another pump interval on top of the first one.
+  // Drop a dead stream first, or a second pump interval stacks on the first.
   if (camStream) stopWebcam();
   camPending = true;
   try {
     await openCamStream();
     camDenied = camMissing = camEnded = false;
   } catch (e) {
-    // Say which failure it was. NotAllowedError is the browser refusing
-    // (denied, or blocked by permissions policy); NotFoundError means the
-    // constraint matched no device. Anything else is a camera that exists but
-    // would not open — another app holding it, a driver fault — and gets the
-    // same "no camera to show you" treatment rather than a wrong accusation.
+    // NotAllowedError = refused; NotFoundError = no device; anything else
+    // is a camera that would not open.
     const name = e && e.name;
     if (name === "NotAllowedError" || name === "SecurityError") camDenied = true;
     else camMissing = true;
@@ -10776,13 +9220,13 @@ const enableWebcam = async () => {
   }
   const len = Module._wasm_camera_attach();
   if (!len) { stopWebcam(); camRefresh(); return; }
-  // Post-grant, enumerateDevices yields the real camera list (labels
-  // included); two or more video inputs earn the flip button.
+  // Post-grant, enumerateDevices yields labels; two or more inputs earn
+  // the flip button.
   try {
     const devs = await navigator.mediaDevices.enumerateDevices();
     camDevices = devs.filter((d) => d.kind === "videoinput").map((d) => d.deviceId);
-    // The default open is (approximately) the first device: seed the cycle
-    // there so the first flip actually reaches a DIFFERENT camera.
+    // Seed the cycle at the first device so the first flip reaches a
+    // different camera.
     if (camDeviceIdx < 0) camDeviceIdx = 0;
   } catch {}
   camRefresh();
@@ -10794,7 +9238,7 @@ const enableWebcam = async () => {
     if (!camVideo || camVideo.readyState < 2) return;
     const vw = camVideo.videoWidth, vh = camVideo.videoHeight;
     if (!vw || !vh) return;
-    // cover-crop the source into 128x120; mirror only when facing the user
+    // Cover-crop into 128x120; mirror only when facing the user.
     const scale = Math.max(CAM_W / vw, CAM_H / vh);
     const sw = CAM_W / scale, sh = CAM_H / scale;
     const sx = (vw - sw) / 2, sy = (vh - sh) / 2;
@@ -10808,7 +9252,7 @@ const enableWebcam = async () => {
     const img = ctx.getImageData(0, 0, CAM_W, CAM_H).data;
     const ptr = Module._wasm_camera_frame_ptr();
     if (!ptr) return;
-    // Fresh heap view every copy: memory growth detaches cached buffers
+    // Fresh heap view every copy: memory growth detaches cached buffers.
     camToGrey(img, new Uint8Array(Module.memory.buffer, ptr, CAM_W * CAM_H));
   }, 66);
   camNoticeShown = null;
@@ -10817,9 +9261,8 @@ const enableWebcam = async () => {
 
 const detectCameraCart = () => {
   camNoticeShown = null;   // a fresh cart's sensor carries nothing yet
-  // Both of these describe a moment, not a standing decision — a webcam can
-  // be plugged in between games — so a fresh load is a fresh chance. Only
-  // camDenied survives: that one is the browser's answer, and it holds.
+  // A fresh load is a fresh chance; only camDenied (the browser's answer)
+  // survives.
   camMissing = camEnded = false;
   if (!camCartLoaded()) {
     stopWebcam(); // a non-camera game must not hold the camera open
@@ -10827,11 +9270,8 @@ const detectCameraCart = () => {
     return;
   }
   if (camLive()) {
-    // Same session, fresh core (Restart, or loading this cart again): the
-    // new cartridge object has no sensor callback, so the emulated camera
-    // falls back to its synthetic scene — which reads as a corrupted
-    // viewfinder. Keep the stream and re-point the new cart at the live
-    // frame buffer instead of asking for permission all over again.
+    // A fresh core has no sensor callback: re-point it at the live stream
+    // instead of asking for permission again.
     Module._wasm_camera_attach();
     camCartBtnUpdate();
     return;
@@ -10844,15 +9284,10 @@ const detectCameraCart = () => {
     CAM_ENABLE_LABEL, enableWebcam);
 };
 
-// --- MBC5 rumble (GB cart types 0x1C-0x1E) ---
-// The RAF loop polls _wasm_rumble each tick while a single-core GB game runs
-// (link/net/rollback modes are GBA-only, and _wasm_rumble itself returns 0
-// for anything but a single GB core). Motor-on drives three presentation-side
-// effects, all gated by the gbRumble setting:
-//  - gamepad vibration, re-triggered every ~50 ms with 60 ms effects so they
-//    chain into a continuous buzz instead of spamming one per frame
-//  - navigator.vibrate on touch devices, same throttle
-//  - a body.rumbling class animating a small transform-only canvas shake
+// --- MBC5 rumble ---
+// _wasm_rumble is polled each tick. Motor-on drives gamepad vibration
+// (re-triggered every ~50 ms with 60 ms effects so they chain),
+// navigator.vibrate, and a body.rumbling canvas shake; all gated by gbRumble.
 const RUMBLE_RETRIGGER_MS = 50;
 const touchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
 let rumbling = false;
@@ -10878,34 +9313,26 @@ const updateRumble = (timestamp) => {
     } catch {}
   }
   if (touchDevice) {
-    // 45 ms (> the 25 ms button tick, < the 50 ms retrigger) reads as a
-    // distinct, near-continuous rumble rather than a light press tick.
+    // 45 ms: above the 25 ms button tick, below the 50 ms retrigger.
     try { navigator.vibrate?.(45); } catch {}
   }
 };
 
 // --- Early (pre-wasm) boot -------------------------------------------------
-// The home grid reads only IndexedDB metadata, so it must not wait for the
-// wasm (~65% of the payload) to download+compile. initStorage runs at
-// DOMContentLoaded — after every script tag has executed, typically while
-// em.wasm is still in flight — and onRuntimeInitialized awaits storageReady
-// before its wasm-dependent work. The vm test harness (web/tests/helpers.mjs)
-// keeps document.readyState at "loading" and never fires DOMContentLoaded, so
-// tests still drive openDB/migrations/refreshHomeRecent explicitly.
+// initStorage runs at DOMContentLoaded so the home grid never waits on the
+// wasm; onRuntimeInitialized awaits storageReady. The test harness keeps
+// readyState at "loading" and drives openDB/migrations/refreshHomeRecent itself.
 
-// Resolved once the wasm runtime is initialized. Launch paths touch FS and
-// Module (writeToFS, ccall), so a ROM tile tapped before the runtime exists
-// must wait here instead of crashing. The test harness calls
-// markRuntimeReady() itself — no runtime ever initializes inside the vm.
+// Resolved once the wasm runtime is initialized; launch paths wait here.
+// The test harness calls markRuntimeReady() itself.
 let runtimeReady = false;
 let markRuntimeReady = () => {};
 const runtimeReadyPromise = new Promise((resolve) => {
   markRuntimeReady = () => { runtimeReady = true; resolve(); };
 });
 
-// Queue an FS/Module-touching user action behind runtime init. When the wait
-// is real — a tile tapped during a cold load on a slow connection — say so
-// once, subtly; the queued action proceeds the moment the runtime lands.
+// Queue an FS/Module-touching action behind runtime init, with a toast
+// when the wait is real.
 const ensureRuntimeReady = () => {
   if (runtimeReady) return Promise.resolve();
   showToast("Starting the emulator…");
@@ -10914,14 +9341,12 @@ const ensureRuntimeReady = () => {
 
 const initStorage = async () => {
   await openDB();
-  // Migrations strictly before anything renders from the records they rewrite.
+  // Migrations before anything renders from the records they rewrite.
   await migrateFromLocalStorage();
   await migrateRecentFormat();
-  // loadBiosFromStorage is deliberately NOT here: it writes into the
-  // Emscripten FS, which doesn't exist yet. onRuntimeInitialized runs it.
-  // Every load below only reads IndexedDB and sets JS vars / DOM state; their
-  // apply* helpers guard each Module export and no-op without the runtime
-  // (onRuntimeInitialized re-pushes the wasm-side mirrors).
+  // loadBiosFromStorage is not here: the FS doesn't exist yet. The loads
+  // below only set JS vars / DOM; their apply* helpers no-op without the
+  // runtime and onRuntimeInitialized re-pushes the wasm-side mirrors.
   await loadKeybindingsFromStorage();
   await loadLargeControlsFromStorage();
   await loadOpaqueControlsFromStorage();
@@ -10934,24 +9359,18 @@ const initStorage = async () => {
   await loadSystemSettings();
   await loadVideoSettings();
   await loadGbPalette();
-  // Was never called at all, which meant printerPhotos started every session
-  // empty: the gallery showed "Nothing printed yet" over a full store, and the
-  // next print dbPut a one-element array back over every earlier photo. It is
-  // load-bearing now for a second reason — the Capture ▸ Printed Photos row
-  // and the new-photo dots are both driven off the photo count. It has to run
-  // before anything can print, for the same reason it exists at all.
+  // Must run before anything can print: storePrint writes the whole array
+  // back (web/tests/printer-photos.test.mjs), and the menu row and dots are
+  // driven off the count.
   await loadPrinterPhotos();
   await loadSyncState();
   await loadRomsSort();
   refreshSyncUI();
   startSyncTriggers();
-  // Resume Drive: reuse a still-valid persisted token with no popup (so an
-  // app update / reload keeps the session), else re-grant on the first user
-  // gesture (the token popup is gesture-gated). See resumeDriveOnBoot.
+  // Resume Drive (see resumeDriveOnBoot).
   resumeDriveOnBoot();
   refreshHomeRecent();
-  // Deliberately not awaited and last: nothing renders from it, so it must not
-  // sit on the boot path (it costs one extra key listing).
+  // Not awaited: nothing renders from it.
   sweepOrphanedAutoStates().catch(() => {});
 };
 
@@ -10961,62 +9380,46 @@ const storageReady = new Promise((resolve, reject) => {
   storageReadyResolve = resolve;
   storageReadyReject = reject;
 });
-// onRuntimeInitialized awaits storageReady, so a failed openDB aborts the
-// boot there exactly as it did when these calls lived inline. But if the wasm
-// never arrives, nobody awaits it — don't let the rejection also surface as
-// an unhandled one on top of the real failure.
+// If the wasm never arrives nobody awaits storageReady; keep the rejection
+// from surfacing as unhandled on top of the real failure.
 storageReady.catch(() => {});
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", () => {
     initStorage().then(storageReadyResolve, storageReadyReject);
   }, { once: true });
 } else {
-  // Scripts at the end of <body> always execute before DOMContentLoaded, but
-  // if this file is ever loaded differently (defer/dynamic), boot anyway.
+  // If this file is ever loaded defer/dynamic, boot anyway.
   initStorage().then(storageReadyResolve, storageReadyReject);
 }
 
 /** @type {EmscriptenModule} */
 var Module = {
-  // SDL renders (invisibly) to a dedicated hidden canvas so its WebGL context
-  // doesn't collide with the WebGL2 context we own on the visible #canvas. A
-  // canvas can hold only one context type; game input (_setInput) and audio
-  // (Web Audio) are JS-driven, so SDL's canvas is never seen or interacted with.
+  // SDL renders to a hidden canvas: a canvas holds one context type, and
+  // the visible #canvas carries our WebGL2 context.
   canvas: /** @type {HTMLCanvasElement} */ ((() => document.getElementById("sdl-canvas"))()),
   onRuntimeInitialized: async () => {
-    // iOS Safari kills (or JIT-demotes) tabs under process memory pressure;
-    // shrink the rewind ring's cap from 64 MB before any core exists — the
-    // ring is created at ROM load (initFromEmscripten), so setting it here
-    // covers every session.
+    // iOS Safari kills or JIT-demotes tabs under memory pressure: shrink the
+    // rewind ring's cap before any core exists.
     if (IS_IOS && Module._setRewindCapBytes) {
       Module._setRewindCapBytes(16 * 1024 * 1024);
     }
-    // Same reasoning for the clip ring's separate, much smaller budget (12 MB;
-    // see CLIP_CAP_BYTES). It is bounded in time as well as bytes, so on the
-    // phone the cap only bites on a game whose states compress unusually badly
-    // — and then it shortens the minute of history rather than growing the
-    // footprint, which is the right way round on iOS.
+    // Same for the clip ring's separate budget (CLIP_CAP_BYTES); bounded in
+    // time as well, so the cap shortens history rather than growing the footprint.
     if (IS_IOS && Module._setClipCapBytes) {
       Module._setClipCapBytes(6 * 1024 * 1024);
     }
-    // Storage boot (openDB, migrations, settings, home grid) started at
-    // DOMContentLoaded so the library rendered without waiting on this
-    // runtime (see initStorage). Everything below reads what it loads, and a
-    // storage failure must keep aborting the boot exactly as it did when the
-    // calls lived inline here.
+    // Storage boot started at DOMContentLoaded (initStorage); a storage
+    // failure must still abort the boot here.
     await storageReady;
-    // The FS exists only now — the BIOS/bootrom files can't be written early.
+    // The FS exists only now.
     await loadBiosFromStorage();
-    // Re-push the wasm-side mirrors of settings loaded while there was no
-    // runtime to receive them (each apply* no-ops without its Module export;
-    // the early loads only set the JS vars + UI).
+    // Re-push the wasm-side mirrors of settings loaded before the runtime.
     applySystemSettings();
     applyColorCorrect();
     applyPitchCorrectFF();
     applyMp2kHle();
     applyLcdResponse();
-    // Unblock queued launches (a ROM tile tapped mid-boot) and retire the
-    // home screen's wasm-boot progress strip.
+    // Unblock queued launches and retire the boot progress strip.
     markRuntimeReady();
     document.body.classList.add("runtime-ready");
     let frameCount = 0;
@@ -11026,22 +9429,16 @@ var Module = {
     let lastFrameTime = 0;
     let accumulator = 0;
 
-    // Web Audio API push-based playback (binjgb approach).
-    // Audio samples are produced by the emulator at SAMPLE_RATE and scheduled
-    // for playback at precise times. The browser handles resampling to the
-    // output device rate natively, so no custom resampler is needed.
+    // Push-based Web Audio playback: samples at SAMPLE_RATE scheduled at
+    // precise times; the browser resamples to the device rate.
     let audioCtx = null;
     let gainNode = null;
     let lowpassNode = null;
     let playTime = 0;
 
-    // Optional analog-output low-pass (~12 kHz), modeling the GBA speaker's
-    // cap/analog smoothing. Off by default → gain routes straight to the
-    // destination (no filter node in the path). Mirrors the native IIR.
-    // Clip recording tap: while a capture runs, the master gain ALSO feeds a
-    // MediaStreamDestination whose audio tracks the MediaRecorder consumes.
-    // Held here because gainNode lives in this closure; routeOutput
-    // re-attaches it across lowpass toggles.
+    // Optional ~12 kHz low-pass (off = no filter node in the path). Clip
+    // recording tap: the master gain also feeds a MediaStreamDestination;
+    // routeOutput re-attaches it across lowpass toggles.
     let clipTapNode = null;
     let clipTapActive = false;
 
@@ -11063,8 +9460,7 @@ var Module = {
       if (clipTapActive && clipTapNode) gainNode.connect(clipTapNode);
     };
     window.updateAudioLowpass = () => routeOutput();
-    // Recorder-side hooks (recording code lives at module scope, outside
-    // this closure). Return the tap's MediaStream, or null pre-audio-unlock.
+    // Recorder-side hooks; the tap's MediaStream, or null pre-unlock.
     window.acquireClipAudio = () => {
       if (!audioCtx || !gainNode) return null;
       if (!clipTapNode) clipTapNode = audioCtx.createMediaStreamDestination();
@@ -11076,37 +9472,29 @@ var Module = {
       clipTapActive = false;
       if (audioCtx && gainNode) routeOutput();
     };
-    // Audio can only play at realtime rate. When unbounded fast-forward runs the
-    // core many frames per rAF, we play the frames that fit within this much
-    // queued lead and drop the rest (see the fastForward branch), keeping FF
-    // audio realtime-rate instead of piling into overlapping buffers.
+    // Under fast-forward, play the frames that fit within this much queued
+    // lead and drop the rest (audio can only play at realtime rate).
     const FF_MAX_AUDIO_LEAD = 0.15; // seconds of audio allowed queued ahead
-    // Cap on scheduled lead in ALL play modes. Steady state keeps only a few
-    // frames (<100 ms) queued, so a healthy session never comes near this;
-    // it exists for when audioCtx.currentTime stalls while state stays
-    // "running" (iOS route changes / interruptions) — without a cap, one
-    // AudioBufferSourceNode per frame accumulates at 60/s until the tab is
-    // killed. Generous vs FF_MAX_AUDIO_LEAD so 2x/catch-up bursts (which
-    // legitimately schedule a few frames at once) are never clipped.
+    // Cap on scheduled lead: when audioCtx.currentTime stalls while state
+    // stays "running" (iOS route changes), source nodes would otherwise
+    // accumulate at 60/s. Generous so 2x/catch-up bursts are never clipped.
     const MAX_AUDIO_LEAD = 0.25;
-    // Audio scheduling-lead servo (see pushAudio): immediate floor restored
-    // after a spend, and the target the micro-rate servo holds the lead near.
+    // Lead servo (see pushAudio): the floor restored after a spend, and the
+    // target the rate servo holds the lead near.
     const AUDIO_LEAD_FLOOR = 0.008;
     const AUDIO_TARGET_LEAD = 0.030;
 
     const initAudio = () => {
       if (audioCtx) return;
-      // Request "playback" audio session so iOS ignores the silent switch.
-      // This is the official WebKit API (Safari 17+).
+      // "playback" audio session so iOS ignores the silent switch (Safari 17+).
       if (navigator.audioSession) {
         navigator.audioSession.type = "playback";
       }
       try {
         audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
       } catch (e) {
-        // Old WebKit can reject the sampleRate option outright. Fall back to
-        // the hardware rate: createBuffer() tags each buffer 32768 Hz and Web
-        // Audio resamples on playback, so scheduling stays correct.
+        // Old WebKit can reject the sampleRate option; createBuffer() tags
+        // each buffer 32768 Hz and Web Audio resamples.
         audioCtx = new AudioContext();
       }
       gainNode = audioCtx.createGain();
@@ -11116,29 +9504,22 @@ var Module = {
       playTime = 0;
     };
 
-    // Expose gain update for the volume control
     window.updateGain = () => {
       if (gainNode) gainNode.gain.value = effectiveGain();
     };
 
-    // Resume audio context on first user interaction (browser autoplay policy).
-    // On iOS Safari, we also play a brief silent buffer through the AudioContext
-    // and an <audio> element to ensure the audio session is fully activated.
+    // Resume on first user interaction (autoplay policy); on iOS also play a
+    // silent buffer and an <audio> element to activate the session.
     let audioUnlocked = false;
-    // Pre-audioSession iOS (≤16): Web Audio output obeys the ringer (silent)
-    // switch unless an <audio> element is actively playing, which promotes
-    // the whole session to "playback". A one-shot blip isn't enough — the
-    // promotion only lasts while the element plays — so those devices keep a
-    // silent element looping for the life of the page. Modern iOS is handled
-    // by navigator.audioSession in initAudio; nobody else needs any of this.
+    // iOS <= 16: Web Audio obeys the silent switch unless an <audio> element
+    // is playing, so a silent element loops for the life of the page.
     let silentLoopEl = null;
     const needsSilentLoop = () =>
       !navigator.audioSession &&
       (/iPhone|iPad|iPod/.test(navigator.userAgent) ||
         (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
     const silentWavURL = () => {
-      // 0.25 s of 8 kHz mono 8-bit silence (0x80), built inline — looping a
-      // microscopic file (like the 1-sample one-shot below) would be churn.
+      // 0.25 s of 8 kHz mono 8-bit silence, built inline.
       const n = 2000;
       const buf = new Uint8Array(44 + n).fill(0x80, 44);
       const dv = new DataView(buf.buffer);
@@ -11152,24 +9533,19 @@ var Module = {
     };
     const resumeAudio = () => {
       initAudio();
-      // Not just "suspended": iOS Safari parks the context in a non-standard
-      // "interrupted" state after phone calls / Siri, which also needs an
-      // explicit resume(). Attempt it for any non-running state.
+      // iOS Safari parks the context in a non-standard "interrupted" state
+      // after calls / Siri; resume() for any non-running state.
       if (audioCtx.state !== "running") audioCtx.resume().catch(() => {});
-      // Outside the unlock branch on purpose: retried until it sticks. On old
-      // iOS the touchstart listener runs this first and its play() is refused
-      // (see the touchend note below); pagehide also pauses the loop, and
-      // pageshow funnels back through here.
+      // Outside the unlock branch: retried until it sticks (old iOS refuses
+      // the touchstart play(); pagehide pauses the loop).
       if (silentLoopEl && silentLoopEl.paused) silentLoopEl.play().catch(() => {});
       if (!audioUnlocked) {
         audioUnlocked = true;
-        // Play a silent buffer through the AudioContext to fully unlock it
         let silentBuf = audioCtx.createBuffer(1, 1, SAMPLE_RATE);
         let src = audioCtx.createBufferSource();
         src.buffer = silentBuf;
         src.connect(audioCtx.destination);
         src.start(0);
-        // Also play through an <audio> element to activate the audio session
         if (needsSilentLoop()) {
           silentLoopEl = new Audio(silentWavURL());
           silentLoopEl.loop = true;
@@ -11183,18 +9559,14 @@ var Module = {
     document.addEventListener("click", resumeAudio, { once: false });
     document.addEventListener("keydown", resumeAudio, { once: false });
     document.addEventListener("touchstart", resumeAudio, { once: false });
-    // Old iOS WebKit only counts touchEND (and the click it synthesizes) as a
-    // user gesture for media playback, and the touch controls preventDefault
-    // so taps on them never synthesize a click. Without this, a player who
-    // only ever touches the d-pad/buttons would never unlock audio there.
+    // Old iOS WebKit only counts touchend as a media gesture, and the touch
+    // controls preventDefault so they never synthesize a click.
     document.addEventListener("touchend", resumeAudio, { once: false });
 
     const pushAudio = () => {
       if (!audioCtx || audioCtx.state !== "running") {
-        // Audio is locked (no user gesture yet) or suspended: discard the
-        // samples from this tick. Letting them accumulate grows WASM-side
-        // memory without bound, and the first unlock would schedule the
-        // whole stale backlog, leaving audio permanently behind the video.
+        // Locked or suspended: discard this tick's samples, else the first
+        // unlock schedules the whole stale backlog behind the video.
         if (typeof Module !== "undefined" && Module._clearAudioBuffer) {
           Module._clearAudioBuffer();
         }
@@ -11205,19 +9577,12 @@ var Module = {
       const ptr = Module._getAudioBufferPtr();
       if (!ptr) return;
       const now = audioCtx.currentTime;
-      // A spent cushion means a gap already happened (nothing was scheduled
-      // to cover this instant). Restore a small floor immediately so the very
-      // next hitch doesn't click too — 6 ms is enough to absorb jitter and
-      // costs 6 ms of audio latency only right after a spend; the rate servo
-      // below then walks the lead back to its target gradually.
-      // (docs/research_web_audio_gaps.md: the naive 12 ms floor alone cost
-      // ~18 ms because nothing contained the upward drift; the servo does.)
+      // A spent cushion means a gap already happened: restore a small floor
+      // so the next hitch doesn't click too; the rate servo walks the lead
+      // back to its target (docs/web_audio_pacing.md).
       if (playTime < now + AUDIO_LEAD_FLOOR) playTime = now + AUDIO_LEAD_FLOOR;
-      // Scheduled too far ahead (the audio clock stalled): drop this frame's
-      // samples — same pattern embed.js uses — instead of stacking source
-      // nodes without bound. With the rate servo containing the lead this is
-      // a should-never-fire backstop, not the steady-state resync it was
-      // (reaching it dropped a whole audible frame every 3-4 minutes).
+      // The audio clock stalled: drop this frame's samples rather than stack
+      // source nodes. A backstop; the rate servo keeps it from firing.
       if (playTime - now > MAX_AUDIO_LEAD) {
         Module._clearAudioBuffer();
         return;
@@ -11227,27 +9592,20 @@ var Module = {
       const buffer = audioCtx.createBuffer(2, frames, SAMPLE_RATE);
       const left = buffer.getChannelData(0);
       const right = buffer.getChannelData(1);
-      // Read interleaved float32 samples directly from WASM memory
       const heap = new Float32Array(Module.memory.buffer, ptr, stereoSamples);
       for (let i = 0; i < frames; i++) {
         left[i] = heap[i * 2];
         right[i] = heap[i * 2 + 1];
       }
       Module._clearAudioBuffer();
-      // Schedule playback at the correct time (playTime was clamped to the
-      // current clock above, before the lead-cap check)
       const source = audioCtx.createBufferSource();
       source.buffer = buffer;
       source.connect(gainNode);
-      // Micro playback-rate servo: hold the scheduling lead near its target
-      // from BOTH directions. Above target the buffer plays marginally fast
-      // (drains the ~1.1 ms/s production drift that used to climb to
-      // MAX_AUDIO_LEAD and drop a frame); below target it plays marginally
-      // slow, stretching real audio to rebuild the cushion a hitch spent —
-      // no samples are ever skipped or dropped. Clamped to ±0.4% (±7 cents),
-      // and the steady-state correction is ~0.1% (~2 cents): inaudible.
-      // Consecutive buffers stay gapless because the cursor advances by the
-      // buffer's *consumed* duration (duration / rate).
+      // Playback-rate servo: hold the lead near its target from both
+      // directions (above: marginally fast, draining production drift;
+      // below: marginally slow, rebuilding the cushion). Clamped to +/-0.4%
+      // (7 cents); steady state ~0.1%. Gapless because the cursor advances
+      // by the consumed duration (duration / rate).
       const excess = playTime - now - AUDIO_TARGET_LEAD;
       const rate = 1 + Math.max(-0.004, Math.min(0.004, excess * 0.15));
       source.playbackRate.value = rate;
@@ -11256,11 +9614,8 @@ var Module = {
     };
 
     const fpsDiv = document.getElementById("fps");
-    // The counter is a diagnostic: it only appears when the frame rate is
-    // UNUSUAL for the current mode. Expected rates — 0 while paused or
-    // rewinding (rewind pops don't count as frames), ~120 at 2x, ~60
-    // otherwise — hide it; fast-forward is unbounded, so whatever rate it
-    // reaches is the interesting number and always shows.
+    // The counter appears only when the frame rate is unusual for the mode
+    // (0 paused/rewinding, ~120 at 2x, ~60 otherwise); fast-forward always shows.
     let lastFpsMode = "";
     setInterval(() => {
       if (sleepVisible) {
@@ -11274,29 +9629,24 @@ var Module = {
         : mode === "normal" ? 59.7 : null;
       const usual = expected !== null &&
         Math.abs(frameCount - expected) <= Math.max(3, expected * 0.05);
-      // A mode switch mid-window yields a blended count; don't flash it
+      // A mode switch mid-window yields a blended count.
       if (usual || mode !== lastFpsMode) {
         fpsDiv.textContent = "";
       } else {
-        // The unit rides in its own span so phones can drop it: at 375pt the
-        // top bar has no room for " fps" once the sync + audio indicators are
-        // both up, and the number alone is unambiguous there.
+        // The unit rides in its own span so phones can drop it.
         fpsDiv.innerHTML = frameCount + '<span class="fps-unit"> fps</span>';
       }
       lastFpsMode = mode;
       frameCount = 0;
     }, 1000);
 
-    // Periodic memory telemetry. The frame bench can't run here (benchReport
-    // explains why: _benchFrames advances the live game), so while a game is
-    // up just track wasm heap growth every 5 minutes.
+    // Periodic memory telemetry (the frame bench cannot run mid-game).
     setInterval(() => {
       if (!currentRomName && !linkMode) return;
       const mb = Math.round(wasmHeapBytes() / (1024 * 1024));
       if (mb) log(`heap ${mb}MB`);
     }, 5 * 60 * 1000);
 
-    // Persist save data to IndexedDB every 5 seconds
     setInterval(() => {
       if (linkMode) {
         persistLinkSaves();
@@ -11305,11 +9655,9 @@ var Module = {
       }
     }, 5000);
 
-    // Also persist on page unload
     window.addEventListener("beforeunload", () => {
-      // Closing the tab mid-online-game: get the BYE out so the peer sees a
-      // clean exit instead of a dead channel (the sync parts run before the
-      // page dies; the await inside is best-effort)
+      // Get the BYE out so the peer sees a clean exit (the sync parts run
+      // before the page dies).
       if (netMode && typeof netShutdown === "function") netShutdown();
       if (linkMode) {
         persistLinkSaves();
@@ -11319,18 +9667,14 @@ var Module = {
       }
     });
 
-    // Mobile browsers routinely kill backgrounded tabs without pagehide ever
-    // firing again — capture the resume snapshot the moment we're hidden.
+    // Mobile browsers kill backgrounded tabs without pagehide: snapshot on hide.
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) persistAutoState();
     });
 
-    // iOS Safari frequently skips beforeunload entirely; pagehide is the
-    // reliable end-of-life signal there (it also fires when the page enters
-    // the back/forward cache). Do the same persistence work, and suspend the
-    // AudioContext so a bfcached page doesn't hold the device audio session.
-    // Note the existing visibilitychange listener (top of file) only checks
-    // for updates — nothing else suspends audio, so there's no conflict.
+    // iOS Safari often skips beforeunload; pagehide is the reliable signal
+    // (also on bfcache entry). Suspend the AudioContext so a bfcached page
+    // doesn't hold the audio session.
     window.addEventListener("pagehide", () => {
       if (netMode && typeof netShutdown === "function") netShutdown();
       if (linkMode) {
@@ -11342,19 +9686,15 @@ var Module = {
       if (audioCtx && audioCtx.state === "running") {
         audioCtx.suspend().catch(() => {});
       }
-      // The legacy-iOS silent loop holds the audio session too; resumeAudio
-      // (via pageshow) restarts it.
+      // The legacy-iOS silent loop holds the session too; pageshow restarts it.
       if (silentLoopEl) silentLoopEl.pause();
     });
-    // Restored from the back/forward cache (e.persisted) with a game up:
-    // resume the context we suspended in pagehide, else the game comes back
-    // silent. resumeAudio is a no-op beyond resume() once already unlocked.
+    // Restored from bfcache: resume the context suspended in pagehide.
     window.addEventListener("pageshow", (e) => {
       if (e.persisted && (currentRomName || linkMode)) resumeAudio();
     });
 
-    // "SLEEPING" indicator while the GBA is in Stop mode, shown in place of
-    // the FPS counter (which isn't meaningful while sleeping)
+    // "SLEEPING" in place of the FPS counter while the GBA is in Stop mode.
     let sleepVisible = false;
     const updateSleepOverlay = () => {
       const sleeping = !!(Module._isStopped && Module._isStopped());
@@ -11365,10 +9705,8 @@ var Module = {
       }
     };
 
-    // "Enhanced audio" note: lit when a sound-engine HLE (MP2K / Golden Sun
-    // "Bon" driver) is enabled in settings AND detected+substituting right now.
-    // Two-stage toggle so the CSS opacity/scale transition plays: unhide first,
-    // then add .on on the next frame.
+    // Enhanced-audio indicator. Two-stage so the CSS transition plays:
+    // unhide, then .on on the next frame.
     const hleIndicator = document.getElementById("hle-indicator");
     let hleActive = false;
     const updateHleIndicator = () => {
@@ -11379,7 +9717,7 @@ var Module = {
       hleActive = on;
       if (on) {
         hleIndicator.hidden = false;
-        // reflow so the class add animates from the hidden state
+        // reflow so the class add animates
         void hleIndicator.offsetWidth;
         hleIndicator.classList.add("on");
       } else {
@@ -11388,12 +9726,9 @@ var Module = {
       }
     };
 
-    // Advance the online-link core by whatever the shared `accumulator`
-    // affords, capped so a long stall can't later burst. Called from the RAF
-    // loop (after accumulator is topped up with real elapsed time) AND from
-    // netplay.js on every inbound DataChannel message — the latter drains
-    // any debt a stall left behind the moment the peer's data arrives, which
-    // is what keeps link-heavy screens near full speed. Re-entrancy guarded.
+    // Advance the online-link core by what `accumulator` affords, capped.
+    // Called from the RAF loop and from netplay.js on every inbound message
+    // (draining a stall's debt the moment the peer's data arrives).
     let netPumping = false;
     const driveNet = () => {
       if (!netMode || netPumping) return;
@@ -11434,12 +9769,9 @@ var Module = {
       accumulator += timestamp - lastFrameTime;
       lastFrameTime = timestamp;
       if (rollbackMode) {
-        // Online input-rollback: both cores run locally at full speed; only
-        // this player's per-frame buttons cross the network. rollback_tick
-        // returns the frame just simulated (ship it) or -1 when stalled at the
-        // prediction window. 2x is allowed because it's synchronized — both
-        // peers halve the step together (see setSpeed2x/RB_SPEED), so the frame
-        // numbering stays aligned; rewind/unbounded fast-forward still can't.
+        // Rollback: rollback_tick returns the frame just simulated (ship it)
+        // or -1 when stalled at the prediction window. 2x is allowed because
+        // both peers halve the step together (RB_SPEED).
         const rbStep = speed2x ? FRAME_TIME / 2 : FRAME_TIME;
         const rbCap = speed2x ? 4 : 2;
         let framesRun = 0;
@@ -11454,14 +9786,9 @@ var Module = {
         }
         if (accumulator > FRAME_TIME * 2) accumulator = 0;
         blitRollbackCanvas();
-        // Auto-end via serial-cable INACTIVITY (see the RB_IDLE_* block above for
-        // the QUIET vs ACTIVE window rationale). Once the games have linked and
-        // then stop transferring for long enough, assume the link is done and
-        // disconnect (each side continues solo). One extra guard:
-        //  - Skip while the tab is HIDDEN. A backgrounded tab's rAF is throttled
-        //    so the emulator barely advances and transfers naturally pause — that
-        //    is NOT "link done", and counting it once dropped a peer's link mid-
-        //    session. Reset the activity clock so the timer restarts on return.
+        // Auto-end via serial-cable inactivity (the RB_IDLE_* windows). Skip
+        // while the tab is hidden: throttled rAF pauses transfers, which is
+        // not "link done"; reset the clock so the timer restarts on return.
         if (Module._rollback_transfers) {
           const t = Module._rollback_transfers();
           const idleLimit = rbLinkWasActive ? RB_IDLE_ACTIVE_MS : RB_IDLE_QUIET_MS;
@@ -11479,15 +9806,11 @@ var Module = {
           }
         }
       } else if (netMode) {
-        // Online link: driveNet consumes the shared accumulator. It is ALSO
-        // called from netplay.js the instant a DataChannel message arrives,
-        // so a frame stalled on the peer's reply resumes at network speed
-        // instead of waiting a whole 16 ms RAF interval — without that, the
-        // trade handshake (hundreds of round-trips) crawls at a few fps.
+        // Online link: driveNet consumes the accumulator (also called from
+        // netplay.js on every message, so a stall resumes at network speed).
         driveNet();
       } else if (linkMode) {
-        // 2P link: fixed-rate frames only — rewind/turbo would desync the
-        // pair, so their branches (and controls) don't exist here
+        // 2P link: fixed-rate frames only.
         let framesRun = 0;
         while (accumulator >= FRAME_TIME && framesRun < 2) {
           Module._link_tick();
@@ -11499,10 +9822,8 @@ var Module = {
         if (accumulator > FRAME_TIME * 2) accumulator = 0;
         blitLinkCanvases();
       } else if (clipReplayActive) {
-        // Retroactive capture: step the deterministic replay at realtime
-        // (the MediaRecorder captures the canvas + audio as it plays back).
-        // clip_tick presents each frame and returns -1 when the log is
-        // exhausted — the wasm side has already restored the live state.
+        // Capture replay: clip_tick presents each frame and returns -1 when
+        // the log is exhausted (the live state is already restored).
         let framesRun = 0;
         let done = false;
         while (accumulator >= FRAME_TIME && framesRun < 2) {
@@ -11517,23 +9838,17 @@ var Module = {
         if (accumulator > FRAME_TIME * 2) accumulator = 0;
         if (done) finishRetroClip(true);
       } else if (rewindHeld) {
-        // Pop ~30 snapshots/s (10 frames each ≈ 5x realtime backward); the
-        // pop presents the restored frame itself, and no audio is queued so
-        // the scheduled lead just drains
+        // Pop ~30 snapshots/s (10 frames each, ~5x realtime backward); the
+        // pop presents the frame itself and queues no audio.
         if (timestamp - lastRewindPop >= 33) {
           lastRewindPop = timestamp;
           if (Module._wasm_rewind_pop) Module._wasm_rewind_pop();
         }
         accumulator = 0;
       } else if (fastForward) {
-        // Run as many frames as fit in a ~16ms wall-clock budget. Audio can't
-        // play faster than realtime, so instead of the old approach (reset
-        // playTime to now every rAF, then schedule ~8 full frames of audio —
-        // which re-piled 8x too much into 10-30 OVERLAPPING buffers, garbling
-        // and clipping the sound), we keep playTime continuous and only play
-        // frames whose audio fits within FF_MAX_AUDIO_LEAD of realtime; the rest
-        // are dropped. Result: clean realtime-rate audio that skips ahead with
-        // the video (to mute FF entirely, drop the pushAudio call).
+        // As many frames as fit in a ~16ms budget. playTime stays continuous
+        // and only frames whose audio fits within FF_MAX_AUDIO_LEAD play;
+        // the rest are dropped, so audio stays realtime-rate.
         const budget = 16;
         const start = performance.now();
         while (performance.now() - start < budget) {
@@ -11548,15 +9863,10 @@ var Module = {
         }
         accumulator = 0;
       } else {
-        // Run as many frames as needed to catch up, capped to avoid spiral.
-        // At 2x speed each frame consumes half the wall-clock step (the core
-        // decimates audio to match).
+        // Catch up, capped. At 2x each frame consumes half the step.
         const step = speed2x ? FRAME_TIME / 2 : slowMotion ? FRAME_TIME * 2 : FRAME_TIME;
         const maxFrames = speed2x ? 4 : 2;
-        // Run-ahead engages only at normal speed: at 2x/slow-mo the (N+1)x
-        // per-frame cost buys nothing (latency is dominated by the speed
-        // change itself), and with it off this line picks the identical
-        // loop_tick call that predates the feature — zero cost while off.
+        // Run-ahead only at normal speed; off, this is plain loop_tick.
         const useRunahead = runaheadFrames > 0 && !speed2x && !slowMotion &&
           !speedMode && typeof Module._runahead_tick === "function";
         let framesRun = 0;
@@ -11568,22 +9878,14 @@ var Module = {
           accumulator -= step;
           framesRun++;
         }
-        // Bound the debt if the tab was backgrounded or a long hitch struck —
-        // but KEEP two frames of it rather than zeroing: zeroing silently
-        // deleted the audio for those frames (the click at every big hitch,
-        // docs/research_web_audio_gaps.md); a clamped debt is produced over
-        // the next ticks instead, and two frames of catch-up is imperceptible.
+        // Bound the debt but keep two frames of it: zeroing deletes those
+        // frames' audio (a click at every big hitch, docs/web_audio_pacing.md).
         if (accumulator > step * 2) accumulator = step * 2;
-        // Emulation is 60 fps but RAF follows the display: on a 120 Hz screen
-        // every other tick steps zero frames, and re-presenting the identical
-        // frame would double the texture-upload + shader cost (noticeable
-        // with xBR on phones). Settings/resize paths set presentDirty to
-        // force a repaint even without a new frame.
+        // On a 120 Hz display every other tick steps zero frames; don't
+        // re-present (doubles the upload + shader cost). presentDirty forces one.
         presentSkip = framesRun === 0 && !presentDirty;
       }
-      // Present the freshly-stepped frame through WebGL2 (single-core / online
-      // link / rewind / fast-forward paths; 2P link & rollback blit their own
-      // canvases and drawGame no-ops for them).
+      // Present through WebGL2 (2P link and rollback blit their own canvases).
       if (!presentSkip) {
         drawGame();
         presentDirty = false;
@@ -11591,8 +9893,7 @@ var Module = {
         presentSkips++; // diagnostics: ticks that reused the shown frame
       }
       presentSkip = false;
-      // Screenshot: draw one guaranteed-fresh frame and grab it in this task
-      // (the WebGL2 context has no preserveDrawingBuffer).
+      // Screenshot: grab it in this task (no preserveDrawingBuffer).
       if (pendingShot) {
         Module._loop_tick();
         drawGame();
@@ -11616,8 +9917,7 @@ const setInputs = (inputs, down) => {
   for (let id of inputs) routeP1Input(id, down);
 };
 
-// Map each direction input id to the cardinal d-pad cell that visually
-// represents it. A diagonal cell (e.g. up-left "0 2") lights BOTH arms.
+// Direction input id -> d-pad cell; a diagonal cell lights both arms.
 const ARM_CELL_ID = { 0: "up", 1: "down", 2: "left", 3: "right" };
 const setArms = (inputs, on) => {
   for (let id of inputs) {
@@ -11627,18 +9927,10 @@ const setArms = (inputs, on) => {
 };
 
 // --- Vibration / haptic ---
-// navigator.vibrate needs *sticky* user activation in Chromium. Crucially,
-// touchstart does NOT grant activation (only touchend/pointerup/mousedown/
-// keydown / mouse-pointerdown do), yet our in-game buttons fire haptic() from
-// touchstart for input latency. So if the very first interaction on the page
-// is an in-game touchstart (e.g. a PWA launched straight into a game), Chrome
-// drops that first pulse and logs "Blocked call to navigator.vibrate...". Any
-// normal menu/home-screen tap sets the sticky bit before gameplay, so in
-// practice at most one pulse in a rare touch-first flow is ever at risk. We
-// bind a one-time capture-phase listener on the activation-granting events so
-// the sticky bit is established at the earliest gesture, and record which
-// event did it purely so the diagnostic log can confirm, on a real device,
-// that activation existed by the time buttons were pressed.
+// navigator.vibrate needs sticky user activation in Chromium, and touchstart
+// (which the game buttons fire haptic() from) does not grant it. A one-time
+// capture listener on the granting events establishes it at the earliest
+// gesture, and records which event did it for the diagnostic log.
 let firstActivationEvent = null;
 const noteActivation = (e) => {
   if (firstActivationEvent) return;
@@ -11649,16 +9941,11 @@ const noteActivation = (e) => {
 for (const ev of ["touchend", "pointerup", "mousedown", "keydown"])
   window.addEventListener(ev, noteActivation, true);
 
-// Short haptic tick for touch controls (no-op where unsupported). 8 ms was
-// below the spin-up threshold of most Android vibration motors, so presses
-// felt dead; ~25 ms is the perceptible floor for a subtle "tick" without
-// reading as a notification buzz. iOS/WebKit never shipped vibrate and Firefox
-// removed it in 129 — the optional-chain + try make those silent no-ops.
+// Haptic tick: ~25 ms is the perceptible floor for Android motors. iOS
+// never shipped vibrate and Firefox removed it in 129; silent no-ops there.
 const HAPTIC_MS = 25;
-// Diagnostic counters surfaced in the debug-log context line as
-// hblk:<blocked>/<total>. A call counts as blocked only when vibrate()
-// exists and returns false (Chromium's "no sticky activation" / policy
-// block) — unsupported platforms (iOS, Firefox 129+) stay 0/n by design.
+// hblk:<blocked>/<total> in the debug log; blocked = vibrate() exists and
+// returned false.
 let hapticCalls = 0;
 let hapticBlocked = 0;
 const haptic = () => {
@@ -11705,9 +9992,7 @@ const dpadTouchMove = (event) => {
   let element = document.elementFromPoint(touch.clientX, touch.clientY);
   if (element == currentDpadElement) return;
   let oldInputs = getInputs(currentDpadElement);
-  // Only treat the hit element as a d-pad cell if it's actually inside #dpad.
-  // Face buttons (A/B/L/R/Select/Start) also carry data-inputs, so sliding onto
-  // them must NOT press them. A null element (finger off-viewport) is "off pad".
+  // Only cells inside #dpad count: face buttons also carry data-inputs.
   if (element && element.closest("#dpad") && element.hasAttribute("data-inputs")) {
     let newInputs = getInputs(element);
     for (let id of oldInputs) {
@@ -11723,9 +10008,7 @@ const dpadTouchMove = (event) => {
     currentDpadElement = element;
     haptic();
   } else {
-    // Slide-off tolerance: keep the current direction held while the finger is
-    // only just past the pad's edge — a common cause of dropped inputs mid-hold.
-    // Release only when it moves clearly away, or slides onto another control.
+    // Slide-off tolerance: keep the direction held just past the pad's edge.
     const onOtherControl = element && element.hasAttribute("data-inputs");
     if (currentDpadElement && !onOtherControl) {
       const r = dpadEl.getBoundingClientRect();
@@ -11761,8 +10044,7 @@ document.getElementById("dpad").addEventListener("touchmove", dpadTouchMove);
 document.getElementById("dpad").addEventListener("touchend", dpadTouchEnd);
 document.getElementById("dpad").addEventListener("touchcancel", dpadTouchEnd);
 
-// Standalone buttons (A/B/L/R/Select/Start). D-pad children are handled by the
-// dedicated d-pad handlers above, so they're excluded here.
+// Standalone buttons; d-pad children are handled above.
 document
   .querySelectorAll("#l, #r, #a, #b, #select, #start")
   .forEach((element) => {
@@ -11780,13 +10062,10 @@ document
     element.addEventListener("touchcancel", release);
   });
 
-// --- Joystick touch controls (body.joystick-controls swaps out the d-pad) ---
-// The finger's vector from the stick center is quantized to the SAME 8-way
-// carving the gamepad analog path uses (pollGamepads): past a radial
-// deadzone, a direction bit goes down when its normalized axis component
-// exceeds 0.4. At full deflection each cardinal spans ~133 degrees with ~43
-// degree diagonal-overlap windows, so a 45-degree drag reliably presses both
-// bits. Only press/release DELTAS are routed, like the d-pad handlers.
+// --- Joystick touch controls ---
+// The finger's vector is quantized like the gamepad analog path: past a
+// radial deadzone, a direction bit goes down when its normalized axis
+// component exceeds 0.4. Only press/release deltas are routed.
 const JOY_DEADZONE = 0.35;    // radial deadzone, fraction of the base radius
 const JOY_AXIAL = 0.4;        // same axis threshold as GP_DEADZONE
 const JOY_KNOB_TRAVEL = 0.6;  // knob-center clamp, fraction of the radius
@@ -11811,7 +10090,6 @@ const joyClampCenter = () => {
     : Math.min(joyBounds.bottom, Math.max(joyBounds.top, joyCenter.y));
 };
 
-// Route only the bits that changed; haptic + rim/knob feedback on changes.
 const joyApplyBits = (want) => {
   let changed = false;
   for (let i = 0; i < 4; i++) {
@@ -11825,8 +10103,7 @@ const joyApplyBits = (want) => {
   joystickEl.classList.toggle("active", any);
   joyKnobEl.classList.toggle("pressed", any);
   if (any) {
-    // The rim arc points at the QUANTIZED direction actually being sent
-    // (0deg = up, clockwise), not the raw finger angle.
+    // The rim arc points at the quantized direction (0deg = up, clockwise).
     const rx = (joyBits[3] ? 1 : 0) - (joyBits[2] ? 1 : 0);
     const ry = (joyBits[1] ? 1 : 0) - (joyBits[0] ? 1 : 0);
     joyRimEl.style.transform =
@@ -11841,9 +10118,8 @@ const joyTrack = (cx, cy) => {
   let mag = Math.hypot(dx, dy);
   const r = joyHome.r;
   if (joystickMode === "floating" && mag > r) {
-    // Finger crossed the rim: drag the base along behind it (classic
-    // follow), but never out of the touch region — a runaway base would
-    // slide under Select/Start and the face buttons.
+    // Finger crossed the rim: drag the base along, but never out of the
+    // touch region.
     const pull = (mag - r) / mag;
     joyCenter.x += dx * pull;
     joyCenter.y += dy * pull;
@@ -11861,8 +10137,7 @@ const joyTrack = (cx, cy) => {
     if (ux < -JOY_AXIAL) want[2] = true;
     if (ux > JOY_AXIAL) want[3] = true;
   }
-  // Base rides at its floating offset; knob chases the finger, clamped near
-  // the rim. Transform-only, no layout.
+  // Transform-only, no layout.
   joyBaseEl.style.transform =
     `translate(${joyCenter.x - joyHome.x}px, ${joyCenter.y - joyHome.y}px)`;
   const lim = r * JOY_KNOB_TRAVEL;
@@ -11878,7 +10153,7 @@ const joystickTouchStart = (event) => {
   joyTouchId = touch.identifier;
   joyBaseEl.classList.remove("homing");
   joyKnobEl.classList.remove("homing");
-  // Measure the home geometry from the untranslated base
+  // Measure the home geometry from the untranslated base.
   joyBaseEl.style.transform = "";
   const rect = joyBaseEl.getBoundingClientRect();
   joyHome = {
@@ -11887,8 +10162,7 @@ const joystickTouchStart = (event) => {
     r: rect.width / 2,
   };
   if (joystickMode === "floating") {
-    // The base spawns under the finger, clamped so it stays inside the
-    // (generous) touch region — spawn and follow share the same clamp box.
+    // Spawn under the finger; spawn and follow share the same clamp box.
     const region = joystickEl.getBoundingClientRect();
     joyBounds = {
       left: region.left + joyHome.r,
@@ -11911,9 +10185,8 @@ const joystickTouchMove = (event) => {
   if (touch != null) joyTrack(touch.clientX, touch.clientY);
 };
 
-// Clear all bits and animate base + knob back home ("homing" enables the
-// transform transition just for the return trip; the next touchstart strips
-// it so live tracking stays transition-free).
+// Clear all bits and animate home ("homing" enables the transition for the
+// return trip only).
 const joystickRelease = () => {
   joyApplyBits([false, false, false, false]);
   joyBaseEl.classList.add("homing");
@@ -11928,7 +10201,7 @@ const joystickTouchEnd = (event) => {
   if (getTouch(event.changedTouches, joyTouchId) != null) joystickRelease();
 };
 
-// Safety valve for style/mode switches while a touch is live
+// Safety valve for style/mode switches while a touch is live.
 const joystickForceRelease = () => {
   if (joyTouchId != null) joystickRelease();
 };

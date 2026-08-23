@@ -1,23 +1,17 @@
-// Holding the fast-forward key is an OVERLAY, not a mode switch: releasing it
-// puts back whatever speed was latched before the hold (2x, slow motion, 1x),
-// while the buttons stay plain toggles. The one exception is holding the key
-// for the speed you are already in — that reads as "turn this off" and lands
-// on 1x, exactly like a second click of the fast-forward button.
+// Holding the fast-forward key is an overlay: release restores the latched
+// speed. Holding the key for the speed already in force lands on 1x.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 import { loadApp } from "./helpers.mjs";
 
-// A running single-core game: gameLoaded true, speedControlsOk true (the
-// linked modes hide the speed controls entirely).
 const withGame = async () => {
   const app = await loadApp();
   app.runIn(`currentRomName = "game.gba"; currentOriginalName = "game.gba";`);
   return app;
 };
 
-// The three speed flags are radio-exclusive; read them raw rather than through
-// the app's own helper so the test doesn't grade the code with its own ruler.
+// Read the three speed flags raw, not through the app's own helper.
 const speed = (app) =>
   app.runIn(`fastForward ? "ffw" : speed2x ? "2x" : slowMotion ? "slow" : "normal"`);
 
@@ -95,7 +89,6 @@ test("the speed buttons stay toggles", async () => {
   await click(app, "speed-2x-btn");
   assert.equal(speed(app), "normal");
 
-  // ...and they stay radio-exclusive with each other.
   await click(app, "speed-2x-btn");
   await click(app, "fast-forward");
   assert.equal(speed(app), "ffw");

@@ -1,18 +1,9 @@
 /*
- * dingbat pacing probe — diagnostic overlay, loaded only with ?probe in the URL.
- *
- * Measures what a "frame + audio hiccup at the same time" actually is:
- *   - audio scheduling lead (how far ahead of the audio clock each buffer is
- *     queued) and underruns (buffers scheduled at/behind the clock = a gap)
- *   - frame cadence via rAF deltas (>20ms / >33ms ticks = dropped frames)
- *   - main-thread long tasks (PerformanceObserver)
- *   - JS-heap GC cadence (Chrome only; Safari/iOS doesn't expose it)
- *
- * The key control is "I felt it": tap it the instant you perceive a hiccup and
- * it snapshots the worst frame time and lowest audio lead in the ±2s window
- * around that moment. Aggregates hide a once-a-minute glitch; a felt-marker
- * catches it. Starts collapsed and out of the way so you can play normally;
- * "Copy report" puts everything on the clipboard. No effect without ?probe.
+ * Pacing probe: diagnostic overlay, loaded only with ?probe in the URL.
+ * Records audio scheduling lead and underruns (buffers scheduled at/behind
+ * the clock), rAF deltas, long tasks, and JS-heap GC cadence (Chrome only).
+ * "I felt it" snapshots the ±2s window around a perceived hiccup, since
+ * aggregates hide a once-a-minute glitch.
  */
 (() => {
   if (window.__pacingProbe) return;
@@ -40,7 +31,7 @@
   const cap = (a, n) => { if (a.length > n) a.splice(0, a.length - n); };
   const prune = (a, now) => { while (a.length && now - a[0].t > 6000) a.shift(); };
 
-  // --- audio: patch scheduling to record lead + underruns ---
+  // Patch AudioBufferSourceNode.start to record lead + underruns.
   const P = window.AudioBufferSourceNode && AudioBufferSourceNode.prototype;
   if (P && !P.__pp) {
     const orig = P.start;
@@ -60,7 +51,6 @@
     P.__pp = true;
   }
 
-  // --- long tasks ---
   try {
     new PerformanceObserver((l) => {
       const now = performance.now();
@@ -69,7 +59,6 @@
     }).observe({ entryTypes: ["longtask"] });
   } catch (e) {}
 
-  // --- frame cadence ---
   let last = 0;
   (function raf(t) {
     if (last) {
@@ -83,10 +72,8 @@
     requestAnimationFrame(raf);
   })(performance.now());
 
-  // --- heap / GC (Chrome only) ---
   setInterval(() => { if (performance.memory) { S.heap.push(performance.memory.usedJSHeapSize / 1e6); cap(S.heap, 3000); } }, 100);
 
-  // --- stats + report ---
   const pct = (a, p) => { if (!a.length) return NaN; const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))]; };
   const f = (x, d = 0) => (Number.isFinite(x) ? x.toFixed(d) : "-");
   const stats = () => {
@@ -124,7 +111,6 @@
   };
   window.__pacingReport = report;
 
-  // Snapshot the ±WIN window around "now" when the user reports feeling a hiccup.
   const markFelt = () => {
     const now = performance.now();
     const nf = S.recentF.filter((x) => Math.abs(x.t - now) <= WIN);
@@ -140,7 +126,6 @@
     });
   };
 
-  // --- on-screen panel: collapsed pill (out of the way) + "I felt it" ---
   const build = () => {
     const box = document.createElement("div");
     box.setAttribute("style", [

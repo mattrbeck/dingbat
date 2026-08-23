@@ -1,14 +1,7 @@
-// The Game Boy shade palette (Settings → General).
-//
-// Three sources of shades — the core's own, the app theme, and four colours the
-// user picked — are ONE setting with a mode, so the interesting properties are
-// (a) exactly one source is ever in force, (b) the mode and the custom colours
-// both survive a reload, (c) the palette's own Reset undoes the palette and
-// NOTHING else, and (d) the whole thing stays off for colour games.
-//
-// The substitution itself happens in the WebGL presenter's shader
-// (web/glpresent.js); there is no GL context in this harness, so what is pinned
-// here is the decision — which four colours, and whether they apply at all.
+// The Game Boy shade palette: one setting with a mode (core / theme /
+// custom). The substitution happens in the glpresent.js shader; with no GL
+// context here, what is pinned is the decision: which four colours, and
+// whether they apply at all.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -28,16 +21,13 @@ const contrast = (a, b) => {
 };
 
 // --- CIEDE2000, for the "a ramp must not vibrate" test ----------------------
-// Contrast alone cannot see the failure it is paired with here: two shades can
-// darken correctly, be far apart in luminance, and still be a different HUE —
-// and a game that dithers them against each other pixel by pixel then shimmers
-// instead of blending. Perceptual difference is what notices that.
+// Two shades can step down in luminance correctly and still differ in hue,
+// which shimmers when a game dithers them; contrast alone cannot see that.
 const toLab = (hex) => {
   const [R, G, B] = [1, 3, 5].map((i) => {
     const v = parseInt(hex.slice(i, i + 2), 16) / 255;
     return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
   });
-  // D65 white point.
   let x = (0.4124 * R + 0.3576 * G + 0.1805 * B) / 0.95047;
   let y = 0.2126 * R + 0.7152 * G + 0.0722 * B;
   let z = (0.0193 * R + 0.1192 * G + 0.9505 * B) / 1.08883;
@@ -76,8 +66,7 @@ const deltaE2000 = (c1, c2) => {
     + Rt * (dC / Sc) * (dH / Sh));
 };
 
-// A cartridge header just real enough for detectMonoPanel: only byte 0x143
-// (the CGB flag) is read, but the length check needs a full header.
+// detectMonoPanel reads only byte 0x143 (CGB flag) but length-checks a full header.
 const cart = (cgbFlag) => {
   const b = new Uint8Array(0x200);
   b[0x143] = cgbFlag;
@@ -109,8 +98,7 @@ test("only one source is ever in force", async () => {
   h.api.gbPaletteMode = "custom";
   eq(h.api.gbPaletteColors(), custom);
 
-  // Switching to "theme" does not blend with, or lose, the custom colours —
-  // they are simply not the source any more.
+  // Switching to "theme" does not lose the custom colours.
   h.api.gbPaletteMode = "theme";
   eq(h.api.gbPaletteColors(), h.api.GB_THEME_PALETTES.amber);
   eq(h.api.gbPaletteCustom, custom);
@@ -133,8 +121,8 @@ test("theme mode tracks the app theme, live", async () => {
 });
 
 test("theme mode survives a theme this build no longer has", async () => {
-  // "emerald" was renamed to "kiwi"; a stale stored value has to resolve
-  // through the same migration the picker uses, not fall through to undefined.
+  // "emerald" was renamed "kiwi"; a stale stored value must resolve through
+  // the picker's migration, not fall through to undefined.
   const h = await loadApp({ localStorageSeed: { dingbat_theme: "emerald" } });
   h.api.gbPaletteMode = "theme";
   eq(h.api.gbPaletteColors(), h.api.GB_THEME_PALETTES.kiwi);
@@ -150,7 +138,6 @@ test("the mode select drives the setting", async () => {
   await sel.dispatch("change");
   assert.equal(h.api.gbPaletteMode, "theme");
 
-  // Anything unexpected in the control falls back to the safe mode.
   sel.value = "nonsense";
   await sel.dispatch("change");
   assert.equal(h.api.gbPaletteMode, "default");
@@ -193,7 +180,6 @@ test("mode and custom colours survive a reload", async () => {
   assert.equal(stored.mode, "custom");
   assert.equal(stored.custom[0], "#abcdef");
 
-  // Second boot: a fresh app reading the same store.
   const h2 = await loadApp();
   h2.idb.set("gb-palette", stored);
   await h2.api.loadGbPalette();
@@ -223,7 +209,6 @@ test("the palette record is a settings key", async () => {
 
 test("the palette's own Reset undoes the palette and nothing else", async () => {
   const h = await loadApp();
-  // Set the palette AND an unrelated setting, then reset only the palette.
   const sel = h.elements.get("gb-palette-mode");
   sel.value = "custom";
   await sel.dispatch("change");
@@ -286,8 +271,8 @@ test("only a monochrome cartridge gets a shade palette", async () => {
 test("a CGB boot ROM colourises mono carts, so the palette stands down", async () => {
   const h = await loadApp();
   h.sandbox.FS.files.set("rom.gb", cart(0x00));
-  // The core's own rule: bigger than the 256-byte DMG boot ROM => it is a CGB
-  // boot ROM, which runs its own colourisation over a monochrome game.
+  // The core's rule: bigger than the 256-byte DMG boot ROM = a CGB boot ROM,
+  // which colourises a monochrome game itself.
   h.sandbox.FS.files.set("bootrom.bin", new Uint8Array(0x900));
   h.api.detectMonoPanel("rom.gb");
   assert.equal(h.api.gbMonoPanel, false);
@@ -324,41 +309,30 @@ test("every theme palette is a usable four-shade ramp", async () => {
     assert.equal(pal.length, 4, name);
     for (const c of pal) assert.match(c, /^#[0-9a-f]{6}$/, name + ": " + c);
 
-    // Monotonically darkening: shade 0 is the "off" pixel and shade 3 the ink.
-    // A ramp that wanders inverts sprites against their own backgrounds.
+    // Monotonically darkening: a ramp that wanders inverts sprites against
+    // their backgrounds.
     const L = pal.map(relLum);
     for (let i = 1; i < 4; i++) {
       assert.ok(L[i] < L[i - 1],
         `${name}: shade ${i} is not darker than shade ${i - 1}`);
     }
 
-    // The failure mode that makes a game unreadable is two adjacent shades
-    // collapsing into each other. 1.4:1 is a floor drawn just under the real
-    // hardware ramp's tightest step (1.64:1) — anything below it is a bug.
+    // 1.4:1 floor, just under the hardware ramp's tightest step (1.64:1).
     for (let i = 1; i < 4; i++) {
       const c = contrast(pal[i - 1], pal[i]);
       assert.ok(c >= 1.4,
         `${name}: shades ${i - 1}/${i} collapse (${c.toFixed(2)}:1)`);
     }
-    // …and the two ends must be far enough apart to read as black on white.
     const ends = contrast(pal[0], pal[3]);
     assert.ok(ends >= 7, `${name}: ends only ${ends.toFixed(2)}:1 apart`);
   }
 });
 
 test("no two adjacent shades are too far apart to dither together", async () => {
-  // The other half of "a usable ramp", and the half the contrast floor above
-  // cannot see. Games render half-tones by alternating two adjacent shades
-  // pixel by pixel: a busy frame is mostly shades 1 and 2 mixed at 50%. That
-  // only works if the pair reads as one intermediate tone. Two shades that
-  // step down in luminance correctly but sit in different HUES do not blend —
-  // they shimmer, and the screen reads as a fault rather than as a palette.
-  //
-  // The ceiling is drawn just above the widest step any shipped ramp takes
-  // (`light`, 40.1 dE from its burnt amber to its navy ink, which is fine
-  // because it is the 2->3 step and `light` is not a dithering-heavy look).
-  // The ramp this caught was dmg's original pea-green -> magenta at 74 dE,
-  // nearly double the worst of the other ten and unmistakable on screen.
+  // Games dither adjacent shades pixel by pixel, which only blends if the
+  // pair reads as one tone. Ceiling just above the widest shipped step
+  // (`light`, 40.1 dE on its 2->3 step); the pea-green -> magenta ramp this
+  // caught was 74 dE.
   const MAX_ADJACENT_DE = 45;
   const h = await loadApp();
   for (const [name, pal] of Object.entries(h.api.GB_THEME_PALETTES)) {
@@ -372,15 +346,9 @@ test("no two adjacent shades are too far apart to dither together", async () => 
 });
 
 test("each theme palette actually contains one of its theme's colours", async () => {
-  // The rule these were built to: the theme's main colour appears verbatim,
-  // not as a tint. Spot-checked against web/styles.css tokens so a future
-  // theme tweak that orphans its palette shows up here.
-  //
-  // dmg is pinned to its magenta A/B buttons (--btn-ab-top) rather than to its
-  // --accent, because it is the one theme whose accent is deliberately absent:
-  // the pea-green LCD colour cannot sit next to the magenta without the pair
-  // vibrating when a game dithers them (see the adjacent-dE test). Its ramp is
-  // still four of the console's own colours, just not that one.
+  // The theme's main colour appears verbatim, checked against styles.css
+  // tokens. dmg is pinned to --btn-ab-top, not --accent: its pea-green accent
+  // vibrates against the magenta when dithered (the adjacent-dE test).
   const h = await loadApp();
   const mainColorOf = {
     amber: "#ffb04d", black: "#ffb04d", light: "#9c5400",

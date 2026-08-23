@@ -1,19 +1,12 @@
-// The home-screen Drive slot holds Sync for a linked account and Sign in for an
-// unlinked one, so reaching Google Drive never requires opening Manage ROMs and
-// Saves. The swap must ride the app's existing auth-state notifications
-// (refreshSyncUI), in both directions.
-//
-// "Linked" is deliberately NOT "holds a live access token": Google's token
-// model hands out ~1h tokens, so keying this slot on the token made an hourly
-// rollover look like being logged out. It follows syncState.connected instead,
-// and Sync re-auths lazily when it needs to.
+// The home-screen Drive slot: Sync when linked, Sign in otherwise, swapped
+// by refreshSyncUI. "Linked" follows syncState.connected, not the ~1h token:
+// keyed on the token, an hourly rollover looked like a logout.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 import { loadApp, jsonRes, settle } from "./helpers.mjs";
 
-// Same fake GIS the driveauth tests use: a token client whose
-// requestAccessToken resolves (or rejects) synchronously, recording its opts.
+// Fake GIS, as in driveauth.test.mjs.
 const installFakeGis = (app, { grant = true } = {}) => {
   app.runIn("gisScriptPromise = Promise.resolve()");
   const calls = [];
@@ -52,8 +45,6 @@ test("the slot swaps to Sync when the account links, and back when it goes", asy
   const app = await loadApp();
   const { signin, sync } = slot(app);
 
-  // Auth state changes are announced through refreshSyncUI — the same call
-  // every real sign-in path (connect, boot resume, silent renewal) makes.
   app.api.syncState = { ...app.api.syncState, connected: true };
   app.api.gdriveToken = "a-token";
   app.runIn("refreshSyncUI()");
@@ -66,11 +57,8 @@ test("the slot swaps to Sync when the account links, and back when it goes", asy
   assert.equal(sync.hidden, true);
 });
 
-// Spending the renewal budget used to drop the slot back to "Sign in with
-// Google", which is how an ordinary token rollover advertised itself as a
-// logout. The token is still dropped (a dead one must never be sent) but the
-// account stays linked, so the slot keeps offering Sync — and Sync is what buys
-// the new token, at a moment the user chose.
+// Spending the renewal budget drops the token but keeps the account linked;
+// Sync buys the new token at a moment the user chose.
 test("a spent renewal budget keeps Sync, not Sign in", async () => {
   const app = await loadApp();
   const { signin, sync } = slot(app);
@@ -97,9 +85,8 @@ test("clicking Sign in asks Google for a token and then shows Sync", async () =>
   app.setFetch(async () => jsonRes({ files: [] }));
 
   const done = signin.dispatch("click");
-  // The handler must reach gdriveConnect() on the click itself — Google's OAuth
-  // popup needs the transient activation. Nothing may be awaited before it, so
-  // the body has run (and disabled the control) by the time dispatch returns.
+  // gdriveConnect() must run on the click itself (the OAuth popup needs the
+  // transient activation): nothing may be awaited before it.
   assert.equal(signin.disabled, true, "the control is busy from the click on");
   await done;
   await settle();

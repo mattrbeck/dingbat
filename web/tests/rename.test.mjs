@@ -1,11 +1,6 @@
-// Renaming a game (web/index.js renameGame + the Manage ROMs pencil).
-//
-// A rename is not a label change: every record this app stores for a game is
-// keyed by its name, so this is a migration of the whole record and is tested
-// like one. The assertions are written as "here is every key stored for the
-// game; after the rename these exact keys exist and no others", so a per-game
-// record that nobody taught the rename about shows up here as an orphan
-// instead of quietly staying behind pointing at a game that no longer exists.
+// renameGame: every per-game record is keyed by name, so a rename is a
+// migration. Assertions enumerate every key before and after, so a record
+// the rename doesn't know about shows up as an orphan.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -13,10 +8,8 @@ import { loadApp, u8, eq, settle } from "./helpers.mjs";
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 
-// Every IndexedDB key web/index.js writes FOR one game, spelled out here rather
-// than imported: these tests are the independent statement of the contract.
-// (game-delete.test.mjs keeps the same list for the destructive paths; the
-// "index.js agrees with this list" test below ties the two together.)
+// Every per-game IndexedDB key, spelled out rather than imported (same list
+// as game-delete.test.mjs); the "index.js agrees" test ties them together.
 const perGameKeys = (n) => [
   "rom:" + n,
   "art:" + n,
@@ -29,8 +22,7 @@ const perGameKeys = (n) => [
     ["state:" + n + ":slot" + s, "statemeta:" + n + ":slot" + s]),
 ];
 
-// The subset Drive mirrors — parseDriveFileName recognises these and only
-// these, so they are the ones a rename can queue remote work for.
+// The subset Drive mirrors (what parseDriveFileName recognises).
 const syncableKeys = (n) =>
   perGameKeys(n).filter((k) =>
     !k.startsWith("art:") && !k.startsWith("stateauto:") && !k.startsWith("cheats:"));
@@ -43,15 +35,13 @@ const seedValue = (key, name) => {
   return u8(7, 7);
 };
 
-// One game with EVERY kind of per-game data attached, plus its recents entry.
 const seedGame = (app, name, ts = 100) => {
   for (const k of perGameKeys(name)) app.idb.set(k, seedValue(k, name));
   const recents = app.idb.get("recent") || [];
   app.idb.set("recent", [...recents, { name, ts }]);
 };
 
-// A sparser game: ROM + one battery save + two save states, which is what a
-// real library row usually looks like.
+// A sparser game: ROM + one battery save + two save states.
 const seedTypicalGame = (app, name, ts = 100) => {
   app.idb.set("rom:" + name, { name, data: u8(1, 2, 3, 4) });
   app.idb.set("save:" + name, u8(9, 9));
@@ -182,8 +172,7 @@ test("a name whose only trace is leftover save data still counts as taken", asyn
 test("a record under the new name that the library cannot see still blocks the move", async () => {
   const app = await loadApp();
   seedGame(app, OLD);
-  // cheats: is not part of romsWithSaveData, so only the key-level check sees
-  // it. Overwriting it would silently hand one game another's cheat list.
+  // cheats: is not in romsWithSaveData; only the key-level check sees it.
   app.idb.set("cheats:" + NEW, "someone else's codes");
 
   const res = await app.api.renameGame(OLD, NEW);
@@ -199,8 +188,7 @@ test("a write that fails half-way leaves the original whole", async () => {
   seedGame(app, OLD);
   const before = new Map([...app.idb.entries()]);
 
-  // Fail the tenth write of the transaction: several keys have already been
-  // copied and their originals deleted by then.
+  // The tenth write: several keys are already copied and their originals deleted.
   let writes = 0;
   app.state.idbFail = (op) => op === "put" && ++writes === 10;
 
@@ -270,7 +258,7 @@ test("the queue survives the tab: it is written in the same transaction as the m
 
   await app.api.renameGame(OLD, NEW);
 
-  // Not "the in-memory object was updated" — what a reload will find on disk.
+  // What a reload finds on disk.
   const persisted = app.idb.get("gdrive_sync");
   assert.ok(persisted.queueRen.some(
     (r) => r.from === "save:" + OLD && r.to === "save:" + NEW));
@@ -287,10 +275,8 @@ test("files this device does not hold still get their remote rename", async () =
   await app.api.renameGame(OLD, NEW);
   const s = app.api.syncState;
 
-  // Every syncable key is offered, held here or not: the rename is an
-  // in-place metadata change on Drive, so a remote file with no local copy
-  // renames instead of being stranded under the old name (the flush skips
-  // the names Drive doesn't hold).
+  // Every syncable key is offered, held locally or not: a remote file with
+  // no local copy renames in place instead of being stranded.
   eq(s.queueRen.map((r) => r.from).sort(), syncableKeys(OLD).sort());
   eq(s.queueDel, []);
   eq(s.queueUp, []);
@@ -298,8 +284,7 @@ test("files this device does not hold still get their remote rename", async () =
 
 test("a Drive-only game renames without its bytes ever being here", async () => {
   const app = await loadApp();
-  // The shape "Remove from this device" leaves behind: saves here, ROM only on
-  // Drive. The remote ROM renames in place, so its only copy is never touched.
+  // The "Remove from this device" shape: saves here, ROM only on Drive.
   app.idb.set("recent", [{ name: OLD, ts: 100 }]);
   app.idb.set("save:" + OLD, u8(9, 9));
   signIn(app, { sigs: { ["rom:" + OLD]: "s" } });
@@ -356,9 +341,8 @@ test("the pencil is enabled on a Drive-only row", async () => {
 test("a stale tombstone on the new name is cleared, not left to delete the game", async () => {
   const app = await loadApp();
   seedTypicalGame(app, OLD);
-  // Another device deleted a game of this name last year; the tombstone is
-  // still in the merged library. Without clearing it, the very next pull would
-  // offer to delete the game we just renamed.
+  // A stale tombstone under the new name would make the next pull offer to
+  // delete the renamed game.
   signIn(app, { tomb: [{ name: NEW, ts: Date.now() }] });
 
   await app.api.renameGame(OLD, NEW);
@@ -470,8 +454,7 @@ test("characters that would break a key or a file name are refused", async () =>
   assert.match(err(app, "state:slot1"), /colon/);
   assert.match(err(app, "a\u0007b"), /control characters/);
   assert.match(err(app, "Link Save-p2", "no-extension"), /-p2/);
-  // With an extension after it, "-p2" is harmless: the reserved key shape is
-  // "save:<full name>-p2", and the full name ends in ".gb".
+  // "-p2" before an extension is harmless: the reserved shape is "save:<full name>-p2".
   assert.equal(err(app, "Link Save-p2"), null);
 });
 
@@ -479,12 +462,9 @@ test("a name is trimmed, not mangled, and keeps its extension", async () => {
   const app = await loadApp();
   assert.equal(app.api.renameFullName("  Pocket Monster  ", OLD), "Pocket Monster.gb");
   assert.equal(err(app, "  Pocket Monster  "), null);
-  // Typing the extension out is not punished with a doubled one.
   assert.equal(app.api.renameFullName("Pocket Monster.gb", OLD), "Pocket Monster.gb");
   assert.equal(app.api.renameFullName("Pocket Monster.GB", OLD), "Pocket Monster.gb");
-  // An extensionless game stays extensionless.
   assert.equal(app.api.renameFullName("Thing", "Nameless"), "Thing");
-  // Unusual but legal: spaces, brackets, unicode.
   assert.equal(err(app, "ゼルダの伝説 (J) [!]"), null);
 });
 
@@ -524,8 +504,6 @@ test("every row carries a rename button that names its game", async () => {
     assert.equal(btn.disabled, false);
     assert.ok(btn.innerHTML.includes("<svg"), "it is the pencil");
   }
-  // The row's shape is unchanged for everything else: name first, then the
-  // action buttons.
   assert.ok(rowFor(app, OLD).children[1].className.includes("roms-manage-actions"));
 });
 

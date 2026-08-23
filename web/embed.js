@@ -1,27 +1,18 @@
-// Keyboard-navigation escape hatch (same trick as index.js): the SDL runtime
-// preventDefaults keydown app-wide once it initializes, which kills Tab and
-// makes the whole embed keyboard-inoperable. This runs on window in the
-// CAPTURE phase and embed.js executes before em.js, so it outranks SDL's key
-// grab. Stopping propagation leaves the browser's default focus traversal
-// intact. The embed binds nothing to Tab, so it is unconditional here.
+// Tab escape hatch: the SDL runtime preventDefaults keydown app-wide once
+// it initializes. Window capture phase, registered before em.js, so it runs
+// first; stopping propagation leaves the browser's focus traversal intact.
 window.addEventListener("keydown", (e) => {
   if (e.code === "Tab") e.stopImmediatePropagation();
 }, true);
-
-// --- Query parameters ---
 
 const params = new URLSearchParams(window.location.search);
 const integerScaling = params.get("integer-scaling") !== "false";
 const demoMode = params.has("demo");
 
-// --- Integer scaling toggle ---
-
 const canvasEl = /** @type {HTMLCanvasElement} */ (document.getElementById("canvas"));
 if (!integerScaling) {
   canvasEl.classList.add("fill");
 }
-
-// --- Emulator state ---
 
 var volume = 0;
 var paused = false;
@@ -29,13 +20,10 @@ var fastForward = false;
 var currentRomName = null;
 var currentOriginalName = null;
 
-// --- WebGL2 game presentation ---
-// SDL no longer paints the game (commit 4c4a3e9): the core hands us a raw
-// BGR555 framebuffer and JS uploads it to a WebGL2 texture + shader. We own the
-// visible #canvas; SDL was pointed at the hidden #sdl-canvas. Same presenter as
-// the main page — see web/glpresent.js. The embed exposes no video toggles, so
-// the uniforms are fixed at the defaults index.js ships with (LCD color
-// correction on, no screen look, no upscale filter).
+// Presentation: the core hands over a raw BGR555 framebuffer and JS uploads
+// it to WebGL2 (web/glpresent.js) on the visible #canvas; SDL paints the
+// hidden #sdl-canvas. No video toggles here, so uniforms are index.js's
+// defaults (LCD color correction on, no screen look, no filter).
 const GL_SCALE = 4; // #canvas backing store = native resolution * GL_SCALE
 
 const isGbc = () =>
@@ -43,9 +31,8 @@ const isGbc = () =>
     ? Module._wasm_panel_gbc() === 1
     : !!(currentRomName && currentRomName !== "rom.gba");
 
-// The presented picture's native size. The core is authoritative -- a Super
-// Game Boy border makes it 256x224 -- with the panel check as the bootstrap
-// answer for the frame before the core exists.
+// Native picture size. The core is authoritative (an SGB border makes it
+// 256x224); the panel check covers the frame before the core exists.
 const nativeRes = () => {
   if (typeof Module !== "undefined" && Module._wasm_out_w && currentRomName) {
     const w = Module._wasm_out_w(), h = Module._wasm_out_h();
@@ -58,8 +45,8 @@ const glRenderer = createGlRenderer(canvasEl, nativeRes, (m) =>
   console.log(m)
 );
 
-// Pin the #canvas backing store to native * GL_SCALE. NEAREST sampling makes
-// that a crisp integer upscale; CSS (embed.css) sizes the displayed element.
+// Backing store = native * GL_SCALE (NEAREST sampling gives a crisp integer
+// upscale); embed.css sizes the displayed element.
 const resizeCanvas = () => {
   const [nw, nh] = nativeRes();
   const bw = nw * GL_SCALE,
@@ -78,15 +65,11 @@ const drawGame = () => {
   });
 };
 
-// --- FS helper ---
-
 const writeToFS = (filename, bytes) => {
   let stream = FS.open(filename, "w+");
   FS.write(stream, bytes, 0, bytes.length, 0);
   FS.close(stream);
 };
-
-// --- ROM loading (drag-and-drop only) ---
 
 const loadRom = (romName, originalName) => {
   currentRomName = romName;
@@ -96,8 +79,7 @@ const loadRom = (romName, originalName) => {
   updatePauseIcon();
   fastForwardButton.classList.remove("active");
   Module.ccall("initFromEmscripten", null, ["string"], [romName]);
-  // Now that the core is up, wasm_panel_gbc() reports the right system: size the
-  // backing store and present the first frame immediately.
+  // The core is up, so nativeRes() is right: size and present immediately.
   resizeCanvas();
   drawGame();
 };
@@ -114,8 +96,6 @@ const handleRomFile = (file) => {
   });
   reader.readAsArrayBuffer(file);
 };
-
-// --- Drop zone ---
 
 const dropOverlay = document.getElementById("drop-overlay");
 let dragCounter = 0;
@@ -146,8 +126,6 @@ document.addEventListener("drop", (e) => {
   if (e.dataTransfer.files?.length > 0) handleRomFile(e.dataTransfer.files[0]);
 });
 
-// --- Playback controls ---
-
 const pauseButton = document.getElementById("pause");
 const resetButton = document.getElementById("reset");
 const fastForwardButton = document.getElementById("fast-forward");
@@ -161,9 +139,7 @@ const updatePauseIcon = () => {
   iconPlay.style.display = paused ? "" : "none";
   pauseButton.setAttribute("aria-label", paused ? "Play" : "Pause");
   pauseButton.title = paused ? "Play" : "Pause";
-  // Pin the overlay open while paused so the user can see the play button
   overlay.classList.toggle("pinned", paused);
-  // When unpausing on mobile, start auto-hide; when pausing, cancel timer
   if (paused) {
     clearTimeout(overlayTimer);
   } else if (overlay.classList.contains("visible")) {
@@ -187,8 +163,6 @@ fastForwardButton.addEventListener("click", () => {
   fastForwardButton.setAttribute("aria-pressed", String(fastForward));
 });
 
-// --- Volume slider ---
-
 const volTrack = document.getElementById("vol-track");
 const volFill = document.getElementById("vol-fill");
 const volKnob = document.getElementById("vol-knob");
@@ -202,13 +176,11 @@ const updateVolumeUI = () => {
   volKnob.style.left = pct;
   iconMuted.style.display = volume === 0 ? "" : "none";
   iconVol.style.display = volume === 0 ? "none" : "";
-  // Keep the a11y state in sync for every input path (pointer, keyboard, mute)
   volTrack.setAttribute("aria-valuenow", String(volume));
   volIconBtn.setAttribute("aria-label", volume === 0 ? "Unmute" : "Mute");
   if (typeof updateGain === "function") updateGain();
 };
 
-// Single setter shared by the pointer, keyboard and mute paths
 const setVolume = (v) => {
   volume = Math.round(Math.max(0, Math.min(100, v)));
   updateVolumeUI();
@@ -220,7 +192,6 @@ const setVolumeFromTrack = (clientX) => {
   setVolume(ratio * 100);
 };
 
-// Click on track to jump
 volTrack.addEventListener("mousedown", (e) => {
   setVolumeFromTrack(e.clientX);
   const onMove = (ev) => setVolumeFromTrack(ev.clientX);
@@ -232,7 +203,6 @@ volTrack.addEventListener("mousedown", (e) => {
   document.addEventListener("mouseup", onUp);
 });
 
-// Touch support for volume slider
 volTrack.addEventListener("touchstart", (e) => {
   e.preventDefault();
   setVolumeFromTrack(e.touches[0].clientX);
@@ -242,10 +212,8 @@ volTrack.addEventListener("touchmove", (e) => {
   setVolumeFromTrack(e.touches[0].clientX);
 });
 
-// Keyboard support: the track is a role="slider" div (tabindex in embed.html).
-// Window CAPTURE phase, like the Tab hatch at the top of this file: while the
-// slider is focused the arrows must adjust volume, not reach the SDL runtime
-// as game input, and this listener is registered before em.js loads.
+// Slider keys: window capture, registered before em.js, so arrows adjust
+// volume instead of reaching the SDL runtime as game input.
 window.addEventListener("keydown", (e) => {
   if (document.activeElement !== volTrack) return;
   let v;
@@ -272,7 +240,6 @@ window.addEventListener("keydown", (e) => {
   setVolume(v);
 }, true);
 
-// Toggle mute via icon
 let volumeBeforeMute = 50;
 volIconBtn.addEventListener("click", () => {
   if (volume > 0) {
@@ -283,10 +250,7 @@ volIconBtn.addEventListener("click", () => {
   }
 });
 
-// Initialize volume UI
 updateVolumeUI();
-
-// --- Touch overlay (YouTube-style show/hide) ---
 
 const wrapper = document.getElementById("wrapper");
 
@@ -303,14 +267,12 @@ const hideOverlay = () => {
   overlay.classList.remove("visible");
 };
 
-// Tapping the canvas shows the overlay
 wrapper.addEventListener("touchstart", (e) => {
   if (e.target === document.getElementById("canvas")) {
     showOverlay();
   }
 }, { passive: true });
 
-// Tapping empty space in the overlay dismisses it
 overlay.addEventListener("touchstart", (e) => {
   if (e.target === overlay || e.target === document.getElementById("controls") || e.target === document.getElementById("volume")) {
     e.preventDefault();
@@ -318,7 +280,6 @@ overlay.addEventListener("touchstart", (e) => {
   }
 });
 
-// Reset the auto-hide timer when interacting with controls
 const resetOverlayTimer = () => {
   if (overlay.classList.contains("visible") && !paused) {
     clearTimeout(overlayTimer);
@@ -330,11 +291,8 @@ const resetOverlayTimer = () => {
   (el) => el.addEventListener("touchstart", resetOverlayTimer, { passive: true })
 );
 
-// --- Emscripten Module ---
-
 /** @type {EmscriptenModule} */
 var Module = {
-  // SDL renders into this hidden canvas; the visible #canvas is ours (WebGL2).
   canvas: /** @type {HTMLCanvasElement} */ ((() => document.getElementById("sdl-canvas"))()),
   onRuntimeInitialized: () => {
     const SAMPLE_RATE = 32768;
@@ -344,7 +302,6 @@ var Module = {
     let accumulator = 0;
     let frameCount = 0;
 
-    // --- Web Audio ---
     let audioCtx = null;
     let gainNode = null;
     let playTime = 0;
@@ -368,9 +325,8 @@ var Module = {
     let audioUnlocked = false;
     const resumeAudio = () => {
       initAudio();
-      // Not just "suspended": iOS Safari parks the context in a non-standard
-      // "interrupted" state after phone calls / Siri, which also needs an
-      // explicit resume(). Attempt it for any non-running state.
+      // iOS Safari parks the context in a non-standard "interrupted" state
+      // after calls / Siri; resume() for any non-running state.
       if (audioCtx.state !== "running") audioCtx.resume().catch(() => {});
       if (!audioUnlocked) {
         audioUnlocked = true;
@@ -388,20 +344,16 @@ var Module = {
     document.addEventListener("touchstart", resumeAudio, { once: false });
 
     const MAX_AUDIO_LEAD = 0.04; // max seconds audio can be scheduled ahead
-    // Scheduling-lead servo, mirroring index.js pushAudio: a small floor
-    // restored after a hitch spends the cushion, and a target the micro
-    // playback-rate servo holds the lead near (both directions, ±0.4% —
-    // pitch-inaudible). Kills the click at every cushion spend and the
-    // audio silently deleted at the MAX_AUDIO_LEAD drop.
+    // Lead servo, as in index.js pushAudio: a floor restored after a hitch
+    // spends the cushion, and a target the ±0.4% playback-rate servo holds
+    // the lead near (pitch-inaudible).
     const AUDIO_LEAD_FLOOR = 0.008;
     const AUDIO_TARGET_LEAD = 0.020;
 
     const pushAudio = () => {
       if (!audioCtx || audioCtx.state !== "running") {
-        // Audio is locked (no user gesture yet) or suspended: discard the
-        // samples from this tick. Letting them accumulate grows WASM-side
-        // memory without bound, and the first unlock would schedule the
-        // whole stale backlog, leaving audio permanently behind the video.
+        // Locked or suspended: discard this tick's samples, else the first
+        // unlock schedules the whole stale backlog behind the video.
         if (typeof Module !== "undefined" && Module._clearAudioBuffer) {
           Module._clearAudioBuffer();
         }
@@ -413,7 +365,7 @@ var Module = {
       if (!ptr) return;
       const now = audioCtx.currentTime;
       if (playTime < now + AUDIO_LEAD_FLOOR) playTime = now + AUDIO_LEAD_FLOOR;
-      // Drop audio if we've scheduled too far ahead (e.g. RAF throttled in iframe)
+      // Too far ahead (e.g. rAF throttled in an iframe): drop.
       if (playTime - now > MAX_AUDIO_LEAD) {
         Module._clearAudioBuffer();
         return;
@@ -439,7 +391,6 @@ var Module = {
       playTime += buffer.duration / rate;
     };
 
-    // --- Demo ROM auto-load ---
     if (demoMode) {
       fetch("goodboy-demo-en.gba")
         .then((res) => {
@@ -454,7 +405,6 @@ var Module = {
         .catch((err) => console.error("Demo ROM load failed:", err));
     }
 
-    // --- Game loop ---
     const tick = (timestamp) => {
       if (paused) {
         lastFrameTime = 0;
@@ -484,12 +434,11 @@ var Module = {
           accumulator -= FRAME_TIME;
           framesRun++;
         }
-        // Keep (bounded) debt instead of zeroing it: zeroing deleted the
-        // audio for the missed frames — the click at every big hitch.
+        // Keep bounded debt: zeroing it deletes the missed frames' audio
+        // (a click at every big hitch).
         if (accumulator > FRAME_TIME * 2) accumulator = FRAME_TIME * 2;
       }
-      // Present once per RAF (SDL no longer paints — see the WebGL2 section
-      // above). Paused returns early, so the last frame stays on the canvas.
+      // Present once per rAF; paused returns early, keeping the last frame.
       drawGame();
       requestAnimationFrame(tick);
     };

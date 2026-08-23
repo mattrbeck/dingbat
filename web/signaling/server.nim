@@ -1,47 +1,29 @@
-## Signaling server for dingbat online link play (multiplayer phase 3b).
+## Signaling server for online link play; protocol twin of server.js (keep
+## the two in sync). Zero dependencies: the WebSocket handshake and RFC 6455
+## framing are inline on stdlib async sockets.
 ##
-## This is a byte-for-byte protocol twin of `server.js`, meant for deployment on
-## a tiny VPS where Node's ~40-60 MB baseline RSS is the dominant cost. Compiled
-## with `nim c -d:release --opt:size` (ideally against musl for a static binary),
-## it runs in single-digit-MB RSS with no runtime dependency: one scp-able file.
+##   ./server [port]        # default 8790 (or $PORT)
 ##
-## Zero third-party dependencies — the WebSocket handshake and RFC 6455 framing
-## are implemented inline on Nim's stdlib async sockets (the same approach
-## server.js takes on node's http server). Options:
-##
-##   ./server [port]        # default 8790
-##
-## Wire protocol (JSON text messages) — IDENTICAL to server.js, see netplay.js:
+## Wire protocol (JSON text messages; client side in netplay.js):
 ##   client -> server: {"t":"rendezvous","code":"PIKA"}  both peers send the code
 ##   server -> client: {"t":"waiting"}                   first arrival holds a room
 ##                     {"t":"paired","role":"host"}      first arrival's role
 ##                     {"t":"paired","role":"guest"}     second arrival's role
 ##                     {"t":"peer-closed"}               the other side is gone
 ##                     {"t":"error","msg":"..."}         then the socket closes
-##   after "paired", ONLY {"t":"sdp",...} and {"t":"ice",...} envelopes are
-##   relayed (their payloads are never inspected). Anything else — any other
-##   type, non-JSON, or exceeding the per-room relay byte budget — closes the
-##   room: this server connects peers and is structurally incapable of
-##   carrying game/save/ROM bytes.
+##   After "paired", only {"t":"sdp"} and {"t":"ice"} envelopes are relayed,
+##   payloads uninspected, within a per-room byte budget; anything else closes
+##   the room, so the server cannot carry game/save/ROM bytes.
 ##
-## TLS: none here by design. In production the browser connects to `wss://<host>/
-## signal` (netplay.js), so a reverse proxy (Caddy/nginx) terminates TLS and
-## forwards plain ws:// to this process. The path is ignored, so proxying any
-## path here works.
+## No TLS: a reverse proxy terminates wss:// and forwards plain ws://. The
+## request path is ignored.
 ##
-## Abuse hardening (all mirrored in server.js — keep the twins in sync):
-##   - Per-IP limits (rendezvous rate, concurrent sockets, waiting rooms) are
-##     keyed on the direct peer address, EXCEPT when the direct peer is
-##     localhost (the reverse-proxy case): then the LAST entry of
-##     X-Forwarded-For — the one appended by our trusted local proxy — is used.
-##     Earlier entries are client-supplied and forgeable, so they are ignored.
-##   - SIGNAL_ALLOWED_ORIGINS (comma-separated) rejects WebSocket upgrades whose
-##     Origin header is not listed. Unset = allow all (LAN/dev). A MISSING
-##     Origin is always allowed: non-browser clients don't send one and the
-##     header is trivially forgeable outside a browser anyway — this check is
-##     CSWSH protection for browsers, nothing more.
-##   - The health line is static; SIGNAL_STATS=1 restores the live room count
-##     (used by the test harness; don't set it on a public deployment).
+## Per-IP limits key on the direct peer address, except when that is localhost
+## (reverse proxy): then the last X-Forwarded-For entry, the one the trusted
+## proxy appended. SIGNAL_ALLOWED_ORIGINS (comma-separated) rejects upgrades
+## from other Origins; a missing Origin is allowed (non-browser clients), so
+## this is CSWSH protection only. SIGNAL_STATS=1 puts the live room count in
+## the health line (test harness only).
 
 import std/[asyncdispatch, asyncnet, nativesockets, tables, sets, json,
             strutils, times, os, hashes, sha1, base64]
@@ -56,28 +38,15 @@ const
   MaxConns = 2000            # total live sockets; reject the upgrade past this
   MaxRooms = 1000            # total live rooms; reject new-room rendezvous past this
   MinCodeLen = 3             # short enough to say aloud, long enough to not collide
-  # Per-IP quotas: one address must not be able to sweep the code space (codes
-  # are user-chosen and short, so pairing is first-come) or eat the global caps.
+  # Per-IP quotas: codes are short and user-chosen (pairing is first-come), so
+  # one address must not be able to sweep the code space or eat the global caps.
   MaxConnsPerIp = 8          # concurrent live sockets per client IP
   MaxWaitingPerIp = 4        # unclaimed waiting rooms held per client IP
   RzWindowSec = 60.0         # rendezvous rate-limit window (fixed window)
   MaxRzPerWindow = 10        # rendezvous attempts per IP per window
-  # Post-pair relay policy. The server's ONLY job after pairing is to carry
-  # the WebRTC handshake; it must be structurally incapable of relaying game,
-  # save, or ROM bytes (those belong on the peers' DataChannel). Two layers:
-  #   1. Envelope allowlist: only {"t":"sdp"} / {"t":"ice"} messages are
-  #      relayed. netplay.js sends nothing else post-pair ("rendezvous" is
-  #      pre-pair only). Payloads are never inspected — the gate is the
-  #      envelope type, so the server stays oblivious to what SDP/ICE mean.
-  #   2. A cumulative per-room relayed-byte budget (both directions,
-  #      lifetime). A real handshake is tiny: one SDP offer + answer (a few
-  #      KB each) plus up to dozens of trickled ICE candidates (~200 B each)
-  #      — well under 32 KB in practice. 256 KB is ~10x headroom for
-  #      pathological SDP yet makes sustained data tunneling through
-  #      allowlisted envelopes useless.
-  # Violating either closes the room in the standard error style (error to
-  # the sender, peer-closed to the peer): a peer sending non-signaling
-  # traffic is either a bug or abuse, never something to relay.
+  # Post-pair relay: envelope allowlist plus a lifetime per-room byte budget
+  # (both directions). A real handshake is well under 32 KB; 256 KB leaves
+  # headroom yet makes tunneling data through allowlisted envelopes useless.
   RelayTypes = ["sdp", "ice"]
   MaxRelayBytesPerRoom = 256 * 1024
 
@@ -95,9 +64,9 @@ type
     hsXff: string          # X-Forwarded-For header seen during the handshake
     ip: string             # effective client IP (directIp, or trusted XFF)
     ipCounted: bool        # true once this conn is counted in ipConns
-    # Last frame decoded by readFrame. Kept as fields (not an async tuple return)
-    # because a string-bearing tuple returned across `await` miscompiles under
-    # Nim's async on this toolchain (use-after-free in the future completion).
+    # Last frame decoded by readFrame. Fields, not an async tuple return: a
+    # string-bearing tuple returned across `await` miscompiles (use-after-free
+    # in the future completion).
     frFin: bool
     frOp: int
     frPayload: string
@@ -127,8 +96,6 @@ let allowedOrigins = block:
     if p.len > 0: s.incl p
   s
 
-# ---------------- per-IP bookkeeping ----------------
-
 proc bumpIp(t: var Table[string, int], ip: string) =
   t[ip] = t.getOrDefault(ip) + 1
 
@@ -139,10 +106,9 @@ proc dropIp(t: var Table[string, int], ip: string) =
 proc isLocalPeer(ip: string): bool =
   ip == "127.0.0.1" or ip == "::1" or ip == "::ffff:127.0.0.1"
 
-# The address per-IP limits key on. Behind the production reverse proxy every
-# direct peer is localhost, so honor X-Forwarded-For then — but ONLY then, and
-# only its LAST entry (the one appended by our trusted proxy; earlier entries
-# are client-supplied and would let an attacker dodge the limits).
+# Behind the reverse proxy every direct peer is localhost; honor
+# X-Forwarded-For only then, and only its last entry (the proxy's; earlier
+# entries are client-supplied).
 proc effectiveIp(c: Conn): string =
   if c.directIp.len == 0: return "?"
   if isLocalPeer(c.directIp) and c.hsXff.len > 0:
@@ -150,19 +116,15 @@ proc effectiveIp(c: Conn): string =
     if last.len > 0: return last
   c.directIp
 
-# Fold a user-typed code to the canonical form both peers must match on.
 proc normalizeCode(raw: string): string =
   for ch in raw:
     if ch in {'A'..'Z', '0'..'9'}: result.add ch
     elif ch in {'a'..'z'}: result.add chr(ch.ord - 32)
 
-# RFC 6455 handshake accept key: base64(SHA1(clientKey + GUID)). Kept as a
-# plain (non-async) proc so the SHA1 digest temporary never lives in an async
-# environment frame.
+# RFC 6455 accept key. Non-async so the digest temporary never lives in an
+# async environment frame.
 proc wsAccept(key: string): string =
   base64.encode(Sha1Digest(secureHash(key & WsGuid)))
-
-# ---------------- WebSocket framing ----------------
 
 proc sendFrame(c: Conn, opcode: int, payload: string) {.async.} =
   if c.closed: return
@@ -186,7 +148,6 @@ proc sendFrame(c: Conn, opcode: int, payload: string) {.async.} =
 
 proc sendText(c: Conn, s: string): Future[void] = c.sendFrame(0x1, s)
 
-# Ensure at least `n` bytes sit in c.buf, pulling from the socket as needed.
 proc need(c: Conn, n: int): Future[bool] {.async.} =
   while c.buf.len < n:
     let chunk = await c.sock.recv(4096)
@@ -195,8 +156,8 @@ proc need(c: Conn, n: int): Future[bool] {.async.} =
     c.lastRecv = epochTime()
   return true
 
-# Decode one frame into c.frFin/c.frOp/c.frPayload; returns false at EOF / on a
-# protocol violation (the caller then disconnects).
+# Decodes one frame into c.frFin/c.frOp/c.frPayload; false at EOF or on a
+# protocol violation.
 proc readFrame(c: Conn): Future[bool] {.async.} =
   if not await c.need(2): return false
   let b0 = c.buf[0].ord
@@ -233,14 +194,12 @@ proc readFrame(c: Conn): Future[bool] {.async.} =
   c.frPayload = payload
   return true
 
-# ---------------- connection + room teardown ----------------
-
 proc closeSock(c: Conn) =
   if c.closed: return
   c.closed = true
   conns.excl c
-  # Every disconnect path funnels through here exactly once (the c.closed guard
-  # above), so this is the single place the per-IP socket count is released.
+  # Every disconnect path funnels through here once: the single place the
+  # per-IP socket count is released.
   if c.ipCounted:
     c.ipCounted = false
     dropIp(ipConns, c.ip)
@@ -251,7 +210,6 @@ proc notifyClosed(o: Conn) {.async.} =
   await o.sendText("""{"t":"peer-closed"}""")
   closeSock(o)
 
-# Called whenever a connection goes away: free its room and warn the survivor.
 proc teardown(c: Conn) =
   if c.code.len > 0 and rooms.hasKey(c.code):
     let room = rooms[c.code]
@@ -268,20 +226,15 @@ proc fail(c: Conn, msg: string) {.async.} =
   await c.sendText("""{"t":"error","msg":"""" & msg & "\"}")
   teardown(c)
 
-# ---------------- signaling state machine ----------------
-
 proc onText(c: Conn, text: string) {.async.} =
   if c.peer != nil:
-    # Paired: relay ONLY allowlisted signaling envelopes, within the room's
-    # lifetime byte budget (see RelayTypes above). fail() tears the room down
-    # and peer-closes the other side — the standard room-death funnel.
     if not rooms.hasKey(c.code): return  # room already torn down; drop
     rooms[c.code].relayed += text.len
     if rooms[c.code].relayed > MaxRelayBytesPerRoom:
       await c.fail("signaling byte budget exceeded")
       return
-    # Parse just the envelope type, into a plain local string (never a
-    # string-bearing tuple across `await` — see the Conn field comment).
+    # Plain local string, never a string-bearing tuple across `await` (see
+    # the Conn field comment).
     var relayT = ""
     try:
       relayT = parseJson(text){"t"}.getStr("")
@@ -304,10 +257,7 @@ proc onText(c: Conn, text: string) {.async.} =
   if t != "rendezvous":
     await c.fail("expected rendezvous")
     return
-  # Per-IP rendezvous rate limit (counted before any validation): codes are
-  # short and user-chosen, so an attacker sweeping the code space — or racing
-  # a legitimate guest for the peer slot — needs many quick attempts, while
-  # real use is ~one per session.
+  # Per-IP rendezvous rate limit, counted before any validation.
   let rzNow = epochTime()
   var w = rzWindows.getOrDefault(c.ip, (start: rzNow, count: 0))
   if rzNow - w.start >= RzWindowSec: w = (start: rzNow, count: 0)
@@ -324,7 +274,6 @@ proc onText(c: Conn, text: string) {.async.} =
     await c.fail("code too short")
     return
   if not rooms.hasKey(code):
-    # First to arrive with this code: host it and wait for the peer.
     if rooms.len >= MaxRooms:
       await c.fail("server busy — try again shortly")
       return
@@ -338,8 +287,7 @@ proc onText(c: Conn, text: string) {.async.} =
   else:
     var room = rooms[code]
     if room.guest == nil:
-      # Second arrival: pair as guest. Two peers per code, no more. The host
-      # (first arrival) is the WebRTC offerer / SIO multi-mode parent.
+      # The host (first arrival) is the WebRTC offerer / SIO multi-mode parent.
       room.guest = c
       room.expireAt = Inf
       rooms[code] = room
@@ -351,8 +299,6 @@ proc onText(c: Conn, text: string) {.async.} =
       await c.sendText("""{"t":"paired","role":"guest"}""")
     else:
       await c.fail("that code is already in use — pick another")
-
-# ---------------- HTTP upgrade + per-connection loop ----------------
 
 proc handshake(c: Conn): Future[bool] {.async.} =
   while true:
@@ -373,9 +319,8 @@ proc handshake(c: Conn): Future[bool] {.async.} =
         elif name == "upgrade" and val.toLowerAscii().contains("websocket"):
           isWs = true
       if key.len == 0 or not isWs:
-        # Not a WebSocket upgrade: answer the health probe and hang up. The
-        # body is static — a live room count is a (mild) recon gift, so it is
-        # only reported when SIGNAL_STATS=1 (test harness / private ops).
+        # Not a WebSocket upgrade: health probe. The room count is only
+        # reported under SIGNAL_STATS=1 (a live count is a recon gift).
         let body = if statsEnabled:
                      "dingbat signaling server: " & $rooms.len &
                        " live room(s). Connect via WebSocket.\n"
@@ -386,9 +331,7 @@ proc handshake(c: Conn): Future[bool] {.async.} =
             "Content-Length: " & $body.len & "\r\nConnection: close\r\n\r\n" & body)
         except CatchableError: discard
         return false
-      # Optional CSWSH guard: when an allowlist is configured, reject browser
-      # upgrades from foreign origins. A missing Origin is deliberately allowed
-      # (non-browser clients; see the header comment).
+      # CSWSH guard; a missing Origin is allowed (see the header comment).
       if allowedOrigins.len > 0 and origin.len > 0 and
           origin.toLowerAscii() notin allowedOrigins:
         try:
@@ -415,10 +358,9 @@ proc handleClient(c: Conn) {.async.} =
     if not await handshake(c):
       closeSock(c)
       return
-    # Per-IP concurrent-socket cap. Counted only after the handshake (the
-    # effective IP may come from the proxy's X-Forwarded-For header, so it is
-    # not known earlier); pre-handshake sockets are bounded by MaxConns and
-    # the handshake timeout. Released in closeSock, once, on every path.
+    # Per-IP socket cap, counted after the handshake (the effective IP may
+    # come from X-Forwarded-For); pre-handshake sockets are bounded by
+    # MaxConns and the handshake timeout. Released once, in closeSock.
     c.ip = c.effectiveIp()
     if ipConns.getOrDefault(c.ip) >= MaxConnsPerIp:
       await c.fail("too many connections from your address — try again shortly")
@@ -444,9 +386,8 @@ proc handleClient(c: Conn) {.async.} =
     discard
   teardown(c)
 
-# ---------------- liveness reaper ----------------
-# Reap sockets gone silent (a half-open TCP the OS hasn't noticed), nudge quiet
-# ones with a ping, drop sockets that never rendezvous, and expire waiting rooms.
+# Reaps silent sockets (half-open TCP), pings quiet ones, drops sockets that
+# never rendezvous, expires waiting rooms.
 proc reaper() {.async.} =
   while true:
     await sleepAsync(int(PingInterval * 1000))
@@ -470,20 +411,16 @@ proc reaper() {.async.} =
       dropIp(ipWaiting, host.ip)      # expired while guestless -> was counted
       asyncCheck (proc(): Future[void] {.async.} =
         await host.fail("nobody joined — try again"))()
-    # Rate-limit windows older than the window length are dead weight; prune
-    # them here so the table can't grow without bound under an IP-hopping scan.
+    # Prune stale rate windows so the table cannot grow under an IP-hopping scan.
     var staleIps: seq[string]
     for ip, w in rzWindows:
       if now - w.start >= RzWindowSec: staleIps.add ip
     for ip in staleIps: rzWindows.del ip
 
-# ---------------- listen loop ----------------
-
 proc serve(port: Port) {.async.} =
-  # buffered = false: we do our own framing buffer (Conn.buf), and asyncnet's
-  # buffered read path corrupts a send that follows a recv on the same accepted
-  # socket (observed on Nim 2.2.x / macOS) — the exact request/response shape
-  # every connection here uses. Unbuffered sidesteps it and suits us anyway.
+  # buffered = false: Conn.buf does the framing, and asyncnet's buffered read
+  # path corrupts a send that follows a recv on the same accepted socket
+  # (Nim 2.2.x / macOS).
   var server = newAsyncSocket(buffered = false)
   server.setSockOpt(OptReuseAddr, true)
   server.bindAddr(port)
@@ -495,10 +432,8 @@ proc serve(port: Port) {.async.} =
     if conns.len >= MaxConns:
       sock.close()                          # shed load rather than grow unbounded
       continue
-    # TCP_NODELAY: relay setup promptly. The level must be given explicitly —
-    # setSockOpt defaults to SOL_SOCKET, where TCP_NODELAY's value decodes as
-    # SO_DEBUG: a silent no-op on macOS, but EPERM without CAP_NET_ADMIN on
-    # Linux, killing the server on the first accepted connection.
+    # The level must be explicit: at the default SOL_SOCKET, TCP_NODELAY's
+    # value decodes as SO_DEBUG, which is EPERM on Linux without CAP_NET_ADMIN.
     sock.setSockOpt(OptNoDelay, true, level = cint(IPPROTO_TCP))
     var peerIp = ""
     try: peerIp = sock.getPeerAddr()[0]

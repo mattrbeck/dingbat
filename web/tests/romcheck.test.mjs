@@ -1,6 +1,6 @@
-// ROM header sanity check: garbage bytes behind a .gba/.gb/.gbc extension
-// must prompt before loading (and never enter the library on decline), while
-// real ROMs AND this repo's own headerless homebrew test ROMs load silently.
+// ROM header check: garbage behind a ROM extension prompts (and never
+// enters the library on decline); real ROMs and this repo's headerless test
+// ROMs load silently.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -9,8 +9,7 @@ import { loadApp, u8, eq, settle, fakeFile } from "./helpers.mjs";
 
 const readRom = (rel) => new Uint8Array(readFileSync(new URL(rel, import.meta.url)));
 
-// A commercial-shaped GBA header: correct logo prefix + correct checksum,
-// but NO 0xEA branch at byte 3 (exercises the header arms independently).
+// Correct logo prefix + checksum, no 0xEA branch at byte 3.
 const gbaWithHeader = ({ breakLogo = false, breakChecksum = false } = {}) => {
   const rom = new Uint8Array(0xc0 + 16).fill(0x11);
   rom[3] = 0x00; // deliberately not an ARM branch
@@ -36,23 +35,20 @@ test("looksLikeValidRom: rule matrix", async () => {
   const app = await loadApp();
   const ok = (bytes, ext) => app.api.looksLikeValidRom(bytes, ext);
 
-  // GBA: each arm alone is sufficient
   assert.ok(ok(u8(0, 0, 0, 0xea), ".gba"), "ARM branch entry alone");
   assert.ok(ok(gbaWithHeader({ breakChecksum: true }), ".gba"), "logo alone");
   assert.ok(ok(gbaWithHeader({ breakLogo: true }), ".gba"), "checksum alone");
-  // GBA: garbage fails all arms
   assert.ok(!ok(gbaWithHeader({ breakLogo: true, breakChecksum: true }), ".gba"));
   assert.ok(!ok(new TextEncoder().encode("this is not a rom, just some text"), ".gba"));
   assert.ok(!ok(u8(1, 2), ".gba"), "too short for anything");
 
-  // GB/GBC: checksum arm (logo deliberately wrong), and garbage fails
+  // GB/GBC: checksum arm (logo deliberately wrong).
   assert.ok(ok(gbWithChecksum(), ".gb"));
   assert.ok(!ok(new Uint8Array(0x150).fill(0x22), ".gbc"), "no logo, bad checksum");
   assert.ok(!ok(u8(1, 2, 3), ".gb"), "shorter than the header");
 
-  // This repo's own test ROMs: raw objcopy output, no logo, unfixed checksum.
-  // The .gba ones pass ONLY via the ARM-branch-entry arm; the .gb/.gbc ones
-  // pass via the rgbfix'd header checksum. Real dumps pass every arm.
+  // Raw objcopy output: .gba passes only via the ARM-branch arm, .gb/.gbc
+  // via the rgbfix'd checksum.
   assert.ok(ok(readRom("../../tests/roms/linktest.gba"), ".gba"));
   assert.ok(ok(readRom("../../tests/roms/inputrec.gba"), ".gba"), "56-byte ROM");
   assert.ok(ok(readRom("../../tests/roms/gblinktest.gb"), ".gb"));

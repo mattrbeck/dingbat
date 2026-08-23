@@ -1,11 +1,7 @@
 #!/bin/sh
-# Native throughput bench with noise rejection.
-#
-# Background load on a desktop (WindowServer, Spotlight, browsers) only ever
-# steals cycles, so the contention noise is one-sided: the FASTEST run of N is
-# the least-contaminated estimate of true throughput, while a mean or median
-# drifts with whatever else is happening. Report best-of-N and also the spread
-# so a genuinely unstable measurement is visible rather than hidden.
+# Native throughput bench. Contention noise is one-sided (background load
+# only steals cycles), so best-of-N is the estimate; the spread is reported
+# so an unstable measurement is visible.
 #
 # Usage: nbench.sh <binary> <rom> [reps] [frames] [warmup]
 #   DINGBAT_BENCH_STATE / DINGBAT_MP2K are passed through from the environment.

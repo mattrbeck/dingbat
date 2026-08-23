@@ -1,23 +1,8 @@
-// Signaling-resilience tests for web/netplay.js — the connect flow's contract
-// with the linking server. On top of helpers.mjs (which evaluates the real
-// index.js), this evaluates sdputil.js + netplay.js in the same vm context,
-// mirroring index.html's script order, with a test-scripted WebSocket and a
-// manual fake clock so the 2s fallback / 1-2-4s redial ladder / 20s RTC
-// deadline run instantly and deterministically.
-//
-// Pinned behavior (regression: the server's "waiting" reply used to be
-// mistaken for an unresponsive server, yanking the first peer to the manual
-// code exchange — and releasing its room — after 2s):
-//   - any server reply disarms the "didn't respond" fallback; a solo peer
-//     waits indefinitely and can still be paired much later
-//   - a rendezvous the server never answers still falls back at ~2s
-//   - a socket that drops mid-wait is redialed and re-registers the same
-//     code; a server reply refills the redial budget
-//   - a server that stays dead gets exactly three spaced redials, then the
-//     manual code exchange — and is never dialed again
-//   - cancelling while waiting closes the socket without redialing
-//   - a mid-handshake socket drop does NOT redial; a pairing whose
-//     DataChannel never opens fails at the 20s deadline instead of hanging
+// Signaling resilience for web/netplay.js: sdputil.js + netplay.js are
+// evaluated in the helpers.mjs vm context in index.html's script order, with
+// a scripted WebSocket and a manual clock so the fallback / redial ladder /
+// RTC deadline run deterministically. Pins: the server's "waiting" reply is
+// not an unresponsive server.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -35,23 +20,18 @@ const setup = async (opts = {}) => {
   const app = await loadApp();
   const { sandbox } = app;
 
-  // The Share button ships hidden in index.html and netplay.js only ever
-  // reveals it; fake-DOM elements default to hidden=false, so mirror the
-  // markup's starting state before the script evaluates.
+  // Share ships hidden in index.html; fake-DOM elements default to hidden=false.
   app.document.getElementById("net-manual-share").hidden = true;
   const shares = []; // every payload handed to navigator.share
   if (opts.mobileShare) {
     app.state.mediaMatches["(pointer: coarse)"] = true;
     sandbox.navigator.share = (data) => { shares.push(data); return Promise.resolve(); };
   }
-  // Screen wake lock: count acquires/releases so tests can pin the modal's
-  // hold-while-open behavior.
   const wakeLocks = { acquired: 0, released: 0 };
   sandbox.navigator.wakeLock = {
     request: async () => { wakeLocks.acquired++; return { release: async () => { wakeLocks.released++; } }; },
   };
 
-  // Scripted WebSocket: the test plays the server's side of every socket.
   const sockets = [];
   class FakeWebSocket {
     static CONNECTING = 0; static OPEN = 1; static CLOSING = 2; static CLOSED = 3;
@@ -63,17 +43,14 @@ const setup = async (opts = {}) => {
     }
     send(data) { this.sent.push(JSON.parse(data)); }
     close() { if (this.readyState === 3) return; this.readyState = 3; this.onclose?.(); }
-    // Test-side controls:
     open() { this.readyState = 1; this.onopen?.(); }              // dial succeeded
     refuse() { this.onerror?.(); this.readyState = 3; this.onclose?.(); } // dial failed
     serverDrop() { this.readyState = 3; this.onclose?.(); }       // live socket dies
     reply(obj) { this.onmessage?.({ data: JSON.stringify(obj) }); }
   }
 
-  // Inert RTCPeerConnection: enough surface for startRtc and manualPrepare;
-  // it never gathers ICE and its channel never opens (that's the point of the
-  // deadline tests). The offer SDP is shaped well enough for SDPCodec.encode
-  // to mint a real code from it, so the Share/Copy/freshness flows run whole.
+  // Inert RTCPeerConnection: never gathers ICE, channel never opens (the
+  // deadline tests). The offer SDP is enough for SDPCodec.encode to mint a code.
   const FAKE_SDP = [
     "v=0",
     "a=ice-ufrag:testUFRG",
@@ -96,9 +73,8 @@ const setup = async (opts = {}) => {
     close() { this.closed = true; }
   }
 
-  // Inert BroadcastChannel: the same-browser local path stays present but
-  // quiet, as in every current browser — its presence keeps a failed redial
-  // on sigConnect's resolve(false) path (status note) instead of netFail.
+  // Inert BroadcastChannel: its presence keeps a failed redial on
+  // sigConnect's resolve(false) path instead of netFail.
   class FakeBroadcastChannel {
     postMessage() {}
     addEventListener() {}
@@ -106,10 +82,8 @@ const setup = async (opts = {}) => {
     close() {}
   }
 
-  // Manual clock. netplay.js resolves setTimeout/clearTimeout through the vm
-  // global at call time, so swapping the sandbox's is enough; index.js timers
-  // already scheduled during loadApp stay on the host clock and never fire
-  // into these tests.
+  // Manual clock: netplay.js resolves setTimeout through the vm global at
+  // call time; index.js timers already scheduled stay on the host clock.
   let now = 0, seq = 0;
   const timers = new Map();
   sandbox.setTimeout = (fn, ms = 0) => { const id = ++seq; timers.set(id, { at: now + ms, fn }); return id; };
@@ -140,17 +114,14 @@ const setup = async (opts = {}) => {
 
   vm.runInContext(NET_SOURCE, app.context, { filename: "web/netplay.js" });
 
-  // netplay.js probes server liveness at module scope; complete it as "up" so
-  // opening the modal takes the normal shared-code path.
+  // Complete the module-scope liveness probe as "up".
   assert.equal(sockets.length, 1, "module-scope liveness probe dialed once");
   sockets[0].open();
 
   const el = (id) => app.document.getElementById(id);
   const api = vm.runInContext(`({ openNetConnect, get net() { return net; } })`, app.context);
 
-  // Open the modal and start a connect attempt. Returns the click-handler
-  // promise, pending until the test settles the dial (open/refuse); the
-  // rendezvous dial socket exists as soon as this settles a flush.
+  // Returns the click-handler promise, pending until the test settles the dial.
   const connect = async (code) => {
     await api.openNetConnect(true);
     el("net-code-input").value = code;
@@ -181,7 +152,6 @@ test("a solo peer parked on 'waiting' outlives the 2s fallback and still pairs",
   assert.equal(el("net-join-go").textContent, "Cancel", "still in the connecting state");
   const dials = sockets.length;
 
-  // The friend finally arrives: pairing proceeds normally on the same socket.
   ws.reply({ t: "paired", role: "host" });
   await flush();
   assert.equal(el("net-status").textContent, "Friend found — connecting…");
@@ -278,9 +248,8 @@ test("cancelling while waiting tears down without redialing", async () => {
 });
 
 test("a late WebKit error after a successful probe doesn't mark the server down", async () => {
-  // iOS Safari fires `error` on a socket we close right after it opens; the
-  // probe's verdict must latch on the first outcome or every successful probe
-  // immediately re-flags the server as down and the modal opens onto manual.
+  // iOS Safari fires `error` on a socket closed right after it opens; the
+  // probe's verdict must latch on the first outcome.
   const { el, api, sockets } = await setup();
   const probe = sockets[0]; // opened during setup
   probe.onerror?.(); // the late error Safari delivers after our own close

@@ -1,5 +1,4 @@
-// Recent-ROM library: add/evict/delete against the real addRecentRom /
-// bumpRecentIndex / deleteRecent / getRomBytes from web/index.js.
+// Recent-ROM library: addRecentRom / bumpRecentIndex / deleteRecent / getRomBytes.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -16,7 +15,6 @@ test("addRecentRom stores rom:, art: and the metadata index", async () => {
   eq(app.idb.get("recent").map((r) => r.name), ["A.gba"]);
   eq(await app.api.getRomBytes("A.gba"), u8(1, 2, 3));
 
-  // Home grid unhides without a reload
   assert.equal(app.elements.get("home-recent-wrap").hidden, false);
 });
 
@@ -44,7 +42,7 @@ test("21st ROM evicts the oldest rom:+art: records but keeps its saves", async (
   eq(app.idb.get("save:Game0.gba"), u8(9, 9), "save survives eviction");
   eq(app.idb.get("state:Game0.gba"), u8(8), "state survives eviction");
 
-  // The evicted game is still reachable through the manage list as an orphan
+  // An evicted game stays reachable through the manage list as an orphan.
   const rows = await app.api.romsForManagement();
   const orphan = rows.find((r) => r.name === "Game0.gba");
   assert.ok(orphan && orphan.inRecent === false);
@@ -60,8 +58,8 @@ test("deleteRecent removes index + rom + art but never save data", async () => {
   assert.equal(app.idb.get("rom:A.gba"), undefined);
   assert.equal(app.idb.get("art:A.gba"), undefined);
   eq(app.idb.get("save:A.gba"), u8(5));
-  // An empty library keeps the section visible (empty-state card, which hosts
-  // the Drive sign-in entry point) but drops the "Recent"/Manage header.
+  // An empty library keeps the section (the empty-state card hosts the
+  // Drive sign-in) but drops the header.
   await settle();
   assert.equal(app.elements.get("home-recent-wrap").hidden, false);
   assert.equal(app.elements.get("home-recent-head").hidden, true);
@@ -87,7 +85,6 @@ test("getRomBytes returns null for missing or empty records", async () => {
   assert.equal(await app.api.getRomBytes("Nope.gba"), null);
   app.idb.set("rom:Empty.gba", { name: "Empty.gba", data: u8() });
   assert.equal(await app.api.getRomBytes("Empty.gba"), null);
-  // ArrayBuffer-stored data is converted
   app.idb.set("rom:Buf.gba", { name: "Buf.gba", data: u8(1, 2).buffer });
   eq(await app.api.getRomBytes("Buf.gba"), u8(1, 2));
 });
@@ -105,7 +102,7 @@ test("handleRomFile rejects .sav/.state files — no path stores a mismatched-na
 test("handleRomFile stores an accepted ROM under its full original file name", async () => {
   const app = await loadApp();
   app.runIn("Module.ccall = () => {}"); // stub the wasm boot
-  // Byte 3 = 0xEA: an ARM branch at the entry point passes the header check
+  // Byte 3 = 0xEA: an ARM branch at the entry point passes the header check.
   app.api.handleRomFile(fakeFile("Some Game (U).gba", u8(1, 2, 3, 0xea)));
   await settle();
   await settle();

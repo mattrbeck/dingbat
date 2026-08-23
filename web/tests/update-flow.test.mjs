@@ -1,12 +1,6 @@
-// The service-worker Update flow: clicking Update must always visibly land
-// (reload into the new version) or visibly fail — never silently activate.
-//
-// Regression: the controllerchange reload used to be gated on a hadController
-// CONSTANT captured at page load. A session that begins uncontrolled (first
-// visit, shift-reload, the load right after a Re-download reset) becomes
-// controlled by the first claim, but the latch stayed false — so a later
-// Update click activated the new worker and then... nothing. The button
-// stayed lit and only a second click (via the full-reset fallback) worked.
+// The SW Update flow: Update must visibly land (reload) or visibly fail.
+// Pins: a session that begins uncontrolled becomes controlled by the first
+// claim, and a later Update click must still reload.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -14,15 +8,13 @@ import { loadApp } from "./helpers.mjs";
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
-// Click Update with a waiting worker planted, and check the page told it to
-// skipWaiting. Returns the waiting worker so the caller can activate it.
+// Returns the waiting worker so the caller can activate it.
 const clickUpdateWithWaiting = async (app) => {
   const waiting = app.sw.makeWorker("installed");
   app.sw.registration.waiting = waiting;
   await app.elements.get("update-btn").dispatch("click");
   await settle(); // applyUpdate runs detached from the click handler
-  // Field compare, not deepEqual: the payload object is born inside the vm
-  // realm, whose Object.prototype deepStrictEqual treats as foreign.
+  // Field compare: the payload is born in the vm realm.
   assert.equal(waiting.messages.length, 1);
   assert.equal(waiting.messages[0].type, "skipWaiting");
   return waiting;
@@ -51,7 +43,6 @@ test("session that began uncontrolled: Update click after the first claim reload
   app.sw.takeControl(); // first install claims the page; no reload
   await settle();
   assert.equal(app.state.reloads, 0);
-  // A deploy lands later in the same session and the user clicks Update.
   const waiting = await clickUpdateWithWaiting(app);
   app.sw.takeControl(waiting);
   await settle();
@@ -59,8 +50,7 @@ test("session that began uncontrolled: Update click after the first claim reload
 });
 
 test("shift-reload shape: Update handover is this page's first claim, still reloads", async () => {
-  // Uncontrolled page over a live registration: no claim ever fires until
-  // the Update click's new worker activates.
+  // Uncontrolled page: no claim fires until the Update click's worker activates.
   const app = await loadApp({ serviceWorker: true });
   await settle();
   const waiting = await clickUpdateWithWaiting(app);
@@ -92,7 +82,6 @@ test("clicking Update shows the busy state while the install runs", async () => 
 test("failed install (redundant worker) falls back to the clean-slate reset", async () => {
   const app = await loadApp({ serviceWorker: { controlled: true } });
   await settle();
-  // update() discovers a new worker still installing
   const installing = app.sw.makeWorker("installing");
   app.state.swUpdateImpl = async () => { app.sw.registration.installing = installing; };
   await app.elements.get("update-btn").dispatch("click");

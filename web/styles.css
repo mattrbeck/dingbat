@@ -6,14 +6,9 @@
  */
 
 :root {
-  /* ----------------------------------------------------------
-   * The color tokens below are grouped so a theme can override
-   * :root wholesale (e.g. body[data-theme="…"]). Every chrome
-   * color in this file derives from one of these — search the
-   * file and you'll find no bare palette literal outside a
-   * pure-black/white shadow. Keep each `*-rgb` triplet in sync
-   * with the solid token it mirrors.
-   * -------------------------------------------------------- */
+  /* Color tokens: a theme overrides :root wholesale. No bare palette literal
+     outside a pure-black/white shadow; keep each `*-rgb` triplet in sync
+     with the solid token it mirrors. */
 
   /* ---- Base surfaces (opaque) ---- */
   --bg: #0c0e16;
@@ -124,10 +119,8 @@
      dark UI look so amber/black/light are unchanged. */
   --chrome-ink: var(--text);
   --chrome-ink-dim: var(--text-dim);
-  /* Top-bar status text (fps readout): must contrast with the BAR, which on
-     device themes is the light shell, not the dark surface --text-dim is
-     tuned for (it measured 1.0-2.1:1 there). Per-theme overrides below;
-     mid-tone shells (atomic-purple, daiei) carry their max achievable. */
+  /* Top-bar status text: must contrast with the bar, which on device themes
+     is the light shell, not the dark surface --text-dim is tuned for. */
   --status-ink: var(--chrome-ink-dim);
   --chrome-btn-top: var(--surface-2);
   --chrome-btn-bottom: var(--surface-2-lo);
@@ -157,11 +150,10 @@
 /*
  * ==========================================================
  * Chrome themes
- * Selected in Settings → Video → App theme; persisted to
- * localStorage ("dingbat_theme") and applied as
- * <html data-theme="…"> by an inline script in <head> before
- * first paint. Amber (above) is the default — no attribute.
- * Each block overrides only the tokens that differ.
+ * Persisted to localStorage ("dingbat_theme") and applied as
+ * <html data-theme="…"> by an inline <head> script before first
+ * paint. Amber is the default (no attribute). Each block
+ * overrides only the tokens that differ.
  * ==========================================================
  */
 
@@ -201,12 +193,9 @@
   --net-stall-bg: rgba(10, 8, 4, 0.75);
 }
 
-/* OLED black: let the ambient glow bleed out of the stage and fade behind the
-   top bar and control strip. Their fills (and the stage's own) go transparent
-   so the true #000 body background is the sole backdrop and the halo reads as
-   one continuous wash. The glow drops to a negative layer so it sits behind the
-   chrome and the game screen, and the stage stops clipping it at its edges.
-   Scoped to this theme — the other themes keep their tinted chrome gradients. */
+/* OLED black: chrome and stage fills go transparent so the ambient glow
+   bleeds behind them on the #000 body; the glow drops to a negative layer
+   and the stage stops clipping it. */
 :root[data-theme="black"] #stage {
   overflow: visible;
   background: transparent;
@@ -431,8 +420,7 @@
 }
 
 /* ---- Glacier: milky translucent clear-blue GBA shell, icy periwinkle accent.
-       Hue/accent sampled from a real glacier GBA (H~222) — periwinkle-blue,
-       not the cyan it used to be. ---- */
+       Hue/accent sampled from a real glacier GBA (H~222). ---- */
 :root[data-theme="glacier"] {
   --bg: #0b0e16;
   --stage: #040608;
@@ -890,38 +878,27 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* iOS installed-to-home-screen (standalone): size to 100vh (the actual viewport
-   height), NOT 100% / 100dvh. Per the r/PWA "chin gap" findings, 100% measures
-   the containing block and can fall short of the real viewport, leaving a bottom
-   gap; 100vh is the stable full height. We no longer send black-translucent (it
-   offset the viewport up and WAS the chin gap) — with the default status-bar
-   style iOS reserves the status bar and fills both safe areas from the
-   theme-color meta. Browser tabs keep the inset sizing above. */
+/* iOS standalone: 100vh, not 100% / 100dvh. 100% measures the containing
+   block and can fall short of the viewport (the bottom "chin gap"). With the
+   default status-bar style iOS fills both safe areas from theme-color. */
 @media (display-mode: standalone) {
   body {
-    /* --app-h is published by the rotation-settle handler in index.js from
-       visualViewport.height: iOS resolves 100vh from the PRE-rotation
-       orientation for a layout pass after a rotation round-trip, which left
-       the bottom-anchored control strip painted where it no longer
-       hit-tests. The measured value has no such lag; 100vh is only the
-       pre-JS fallback. */
+    /* --app-h is published by index.js from visualViewport.height: iOS
+       resolves 100vh from the pre-rotation orientation for a layout pass
+       after a rotation, leaving the control strip painted where it no
+       longer hit-tests. 100vh is only the pre-JS fallback. */
     height: var(--app-h, 100vh);
   }
-  /* Legacy status-bar iPhones (home-button class, e.g. SE 1st gen on iOS 15):
-     the standalone webview sits BELOW the opaque 20pt status bar instead of
-     under an overlaying one, so 100vh (the full screen) overhangs the screen
-     bottom by exactly those 20pt — clipping Select/Start. Detect the case by
-     its signature, safe-area-inset-top = 0 (notch devices report >= 44px and
-     the max() zeroes the correction). iOS-only via -webkit-touch-callout so
-     Android/desktop PWAs (where inset-top is also 0 but 100vh is already the
-     window height) keep the plain sizing; ditto legacy landscape, where iOS
-     hides the status bar. */
+  /* Legacy status-bar iPhones (SE 1st gen on iOS 15): the standalone
+     webview sits below the opaque 20pt status bar, so 100vh overhangs by
+     20pt and clips Select/Start. Signature: safe-area-inset-top = 0 (notch
+     devices report >= 44px, and max() zeroes the correction). iOS-only via
+     -webkit-touch-callout so Android/desktop PWAs keep plain sizing. */
   @supports (-webkit-touch-callout: none) {
     @media (orientation: portrait) {
       body {
-        /* The 20pt correction is part of the pre-JS FALLBACK only: the
-           measured --app-h is already the true webview height on legacy
-           status-bar devices, so subtracting again would double-correct. */
+        /* Pre-JS fallback only: the measured --app-h is already the true
+           webview height, so subtracting again would double-correct. */
         height: var(--app-h, calc(100vh - max(0px, 20px - env(safe-area-inset-top, 0px))));
       }
     }
@@ -1036,26 +1013,19 @@ button {
   animation: menu-in 0.13s ease-out;
 }
 
-/* Bottom scrim while the dropdown scrolls (phone landscape): a sticky fade
-   pinned to the scrollport's bottom edge, so the clipped item visibly
-   dissolves instead of reading as the end of the menu. Sticky keeps it
-   anchored while scrolling. It overlays the final item, so it only paints
-   (opacity 1) while more items actually sit below the fold — the
-   .can-scroll-down class is toggled from JS on open/scroll/resize, exactly
-   like the settings tab-bar scrims. Kept in layout at opacity 0 the rest of
-   the time (not display:none) so its presence can't shift the overflow
-   measurement that decides whether to show it. */
+/* Bottom scrim while the dropdown scrolls: a sticky fade over the last
+   item, painted only while .can-scroll-down (toggled from JS on
+   open/scroll/resize). Kept in layout at opacity 0, not display:none, so
+   its presence cannot shift the overflow measurement that decides it. */
 #menu-dropdown::after {
   content: "";
   display: block;
   position: sticky;
   bottom: 0;
   height: 26px;
-  /* Overlay the last item with a net-zero footprint: the -26px top margin
-     cancels the 26px height so the scrim adds nothing to scrollHeight, and
-     bottom:0 (not a negative offset) keeps it from extending the scroll
-     region. A non-zero bottom offset here made the menu perpetually 6px
-     scrollable, which pinned the fade over the last item forever. */
+  /* Net-zero footprint: the -26px top margin cancels the 26px height so
+     the scrim adds nothing to scrollHeight; bottom:0, not a negative
+     offset, or the menu is perpetually scrollable and the fade pins. */
   margin-top: -26px;
   pointer-events: none;
   background: linear-gradient(to bottom, rgba(0, 0, 0, 0), var(--surface-1) 85%);
@@ -1155,10 +1125,8 @@ body.running #main-menu-sep {
   display: block;
 }
 
-/* Save actions, screenshot, Save States, Slow Motion and Link Cable only
-   make sense once a game is loaded (every mode — single, 2P link, rollback,
-   net — sets body.has-game, so Link Cable's connected "Disconnect" state
-   stays reachable) */
+/* Game-only items. Every mode (single, 2P link, rollback, net) sets
+   body.has-game, so Link Cable's "Disconnect" state stays reachable. */
 #save-state,
 #load-state,
 #manage-saves,
@@ -1187,10 +1155,9 @@ body.has-game #net-connect {
   display: flex;
 }
 
-/* #open-prints is no longer in this list: it lives inside #capture-sub now,
-   which is already has-game-gated, and its own visibility is the photo count
-   (refreshPrintsMenuItem). .menu-item's display:flex would otherwise beat the
-   UA sheet's [hidden] rule and the row would never actually hide. */
+/* #open-prints is gated by photo count (refreshPrintsMenuItem) inside the
+   has-game-gated #capture-sub; .menu-item's display:flex would otherwise
+   beat the UA [hidden] rule. */
 .menu-item[hidden] {
   display: none;
 }
@@ -1200,11 +1167,8 @@ body.has-game #net-connect {
   color: var(--accent);
 }
 
-/* Frame step exists only while a running game is paused: 2x and fast-forward
-   are dead controls in that state, so it takes their spot (the paused RAF
-   loop steps nothing; each press runs exactly one frame). Swapped via CSS so
-   every layout — including the narrow-phone segmented bar, which styles
-   #playback-controls .icon-btn generically — picks it up for free. */
+/* Frame step takes 2x/fast-forward's spot while a running game is paused.
+   Swapped via CSS so every layout, including the segmented bar, picks it up. */
 #frame-step {
   display: none;
 }
@@ -1231,27 +1195,11 @@ body.has-game #save-sep {
 }
 
 /* --- Quick-action row ---------------------------------------------------
-   Quick Save / Quick Load / Rewind / Slow Motion as one strip of four icon
-   tiles instead of four full-width rows (four 36px rows -> one 48px strip).
-
-   WHY THESE FOUR ARE ALLOWED TO GO UNLABELLED, when the earlier bare-icon row
-   was rejected: every one of them is consequence-free. A quick save is fine to
-   overwrite. A quick load offers an Undo (loadFromSlot's action toast). Rewind
-   opens a modal you can close without committing. Slow motion toggles off as
-   easily as on. The rejected row mixed destructive and non-destructive actions
-   in one undifferentiated strip; this one cannot cost you anything, so the
-   worst outcome of a misread glyph is one tap you undo. Nothing in the rest of
-   the menu qualifies, which is why the pattern stops here.
-
-   title and aria-label are now the ONLY textual affordance on these tiles.
-   They are load-bearing — a hover tooltip on desktop, the accessible name
-   everywhere — so they must never be dropped as "duplicated by the caption".
-
-   No captions means no width pressure: the dropdown is back to its plain
-   210px, which at 6px padding leaves 198px of content, minus 18px of gaps =
-   45px per tile against a 48px tile height. Both axes clear the 44pt tap
-   minimum, so the has-game widening the captioned version needed (304px) is
-   gone entirely. */
+   Quick Save / Quick Load / Rewind / Slow Motion as four caption-less icon
+   tiles (all consequence-free actions). title and aria-label are the only
+   textual affordance (tooltip + accessible name): never drop them. 198px of
+   content minus 18px of gaps = 45px per tile against 48px tall; both axes
+   clear the 44pt tap minimum. */
 .menu-quickrow {
   display: flex;
   gap: 4px;
@@ -1263,18 +1211,14 @@ body.has-game #save-sep {
   min-width: 0;
   justify-content: center;
   align-items: center;
-  /* 48 x 45px: over the 44pt tap minimum in both axes, which matters more
-     here than in a full-width row — shrinking a 198px-wide target to a 45px
-     one is the row's real cost. */
+  /* 48 x 45px: over the 44pt tap minimum in both axes. */
   padding: 10px 2px;
   background: var(--surface-2);
   border: 1px solid var(--border);
 }
 
-/* 26px, not the menu's usual 18px: with the caption gone the glyph is the
-   whole control, and it gets the space the caption used to take. Stroke stays
-   at the menu's 1.7 rather than scaling with it — a heavier stroke at this
-   size closes up the film strip's sprocket holes and the turtle's shell. */
+/* 26px glyph (no caption). Stroke stays at 1.7: heavier closes up the film
+   strip's sprocket holes and the turtle's shell. */
 .menu-quickrow .menu-item svg {
   width: 26px;
   height: 26px;
@@ -1297,11 +1241,8 @@ body.has-game #save-sep {
   stroke: var(--accent);
 }
 
-/* Each tile is gated on its own ID above (has-game) and by the link /
-   rollback / net rules further down, all of which use display:none. The
-   wrapper has to go with them or an empty padded strip is left behind. In net
-   mode three of the four are already hidden and hold-rewind is too, so the
-   row goes as a unit rather than leaving one stretched tile. */
+/* The wrapper must hide with its tiles (has-game and the link/rollback/net
+   rules) or an empty padded strip is left behind. */
 body:not(.has-game) .menu-quickrow,
 body.link-mode .menu-quickrow,
 body.rollback-mode .menu-quickrow,
@@ -1355,17 +1296,15 @@ body.running #status {
   display: inline-flex;
 }
 
-/* Declutter the top bar on phones: the top-bar volume slider gives way to the
-   mute toggle; a full slider lives in the menu instead. (Home-screen mobile
-   compaction lives in its own block after the home rules — see end of file.) */
+/* Phones: the top-bar volume slider gives way to the mute toggle; a full
+   slider lives in the menu instead. */
 @media (max-width: 560px) {
   #vol-slider {
     display: none;
   }
 }
 
-/* ...and the in-menu volume slider is only for phones (top bar has one on
-   wider screens), so it doesn't duplicate the top-bar slider on desktop. */
+/* ...and the in-menu slider is phone-only. */
 @media (min-width: 561px) {
   #menu-volume {
     display: none;
@@ -1534,9 +1473,8 @@ body.running #status {
   border-color: rgba(var(--accent-rgb), 0.55);
 }
 
-/* Busy while the new version installs (applyUpdate): label reads
-   "Updating…", the pulsating dot goes away, and the button stops inviting
-   clicks. Same specificity as :hover — must come after it to win. */
+/* Busy while the new version installs (applyUpdate). Same specificity as
+   :hover, so it must come after it. */
 #update-btn:disabled {
   cursor: default;
   background: rgba(var(--accent-rgb), 0.08);
@@ -1588,9 +1526,7 @@ body.fs #fullscreen-btn .ico-collapse {
   display: flex;
   align-items: center;
   justify-content: center;
-  /* Flat: the old static radial gradient read as a permanent "glow" behind
-     the game frame even with Ambient glow off. The glow feature paints its
-     own canvas when enabled, so the surround stays flat here. */
+  /* Flat: a gradient here reads as a permanent glow with Ambient glow off. */
   background: var(--stage);
   overflow: hidden;
 }
@@ -1609,12 +1545,9 @@ body.fs #fullscreen-btn .ico-collapse {
   z-index: 0;
 }
 
-/* The CSS box must always be the same shape as the canvas backing store or
-   the picture distorts (GB is 10:9, GBA is 3:2, and the wasm resizes the
-   backing per system on ROM load). JS pins --game-ar to the LIVE backing
-   ratio (updateCanvasScaling), so the two can never disagree — even if a
-   cached frontend meets a newer wasm build, the worst case is letterboxing
-   inside the canvas, never a stretch. */
+/* The CSS box must match the canvas backing store's shape (GB 10:9, GBA
+   3:2) or the picture distorts. JS pins --game-ar to the live backing
+   ratio (updateCanvasScaling), so the worst case is letterboxing. */
 #canvas {
   position: relative;
   z-index: 1;
@@ -1628,10 +1561,8 @@ body.fs #fullscreen-btn .ico-collapse {
   display: none;
 }
 
-/* The canvas is a tabindex="-1" script-focus parking spot (returnFocusToGame),
-   never something the user navigated to, so it must never draw a focus ring.
-   :focus-visible already wouldn't fire for programmatic focus in Chrome/Safari;
-   this covers the engines that ring plain :focus too. */
+/* tabindex="-1" script-focus parking spot (returnFocusToGame): never a
+   focus ring, including on engines that ring plain :focus. */
 #canvas:focus {
   outline: none;
 }
@@ -1639,10 +1570,7 @@ body.fs #fullscreen-btn .ico-collapse {
 body.running #canvas {
   display: block;
   border-radius: 4px;
-  /* Just a crisp 1px edge: the old 18px/50px drop shadow + accent glow read
-     as a permanent gradient behind the frame even with Ambient glow off. The
-     glow feature paints its own canvas, so the frame sits flat on the
-     background here. */
+  /* A crisp 1px edge only; a drop shadow reads as a permanent glow. */
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
 }
 
@@ -1661,30 +1589,20 @@ body.running #canvas {
   filter: blur(32px);
   opacity: 0.8;
   border-radius: 28px;
-  /* The sampled bitmap is opaque edge-to-edge, so blur() alone yields a blurred
-     rectangle. A radial mask feathers the halo to nothing before its outer edge
-     so it reads as a soft elliptical glow rather than a hard box. The scale is
-     bumped a touch to compensate for the halo the mask trims away. */
+  /* The sampled bitmap is opaque edge-to-edge, so blur() alone yields a
+     blurred rectangle; the radial mask feathers it to a soft ellipse. */
   -webkit-mask-image: radial-gradient(ellipse at center, black 40%, transparent 78%);
   mask-image: radial-gradient(ellipse at center, black 40%, transparent 78%);
 }
 
-/* Scanlines are now drawn by the WebGL2 fragment shader (uniform-gated), not a
-   DOM overlay — the old #scanline-overlay element and its sizing are gone. */
+/* Scanlines are drawn by the WebGL2 fragment shader, not a DOM overlay. */
 
 /*
  * ==========================================================
  * Input display overlay (Settings -> Controls, or the I key)
- * ----------------------------------------------------------
- * A miniature controller pinned to the bottom-left of the stage that lights
- * each button while it is held — for stream viewers, and as a debugging aid.
- *
- * Themes: this borrows the SAME --pad-* / --btn-ab-* / --pill-* tokens the
- * on-screen touch controls use, and the same accent pressed treatment, so
- * every chrome AND device theme colours it correctly with no new per-theme
- * rules. Do not introduce literals here.
- *
- * Sizing is in --io-u (one "unit"), so the whole thing scales from one number.
+ * Uses the same --pad-* / --btn-ab-* / --pill-* tokens as the
+ * touch controls, so every theme colours it with no per-theme
+ * rules: do not introduce literals here. Sizing is in --io-u.
  * ========================================================== */
 #input-overlay {
   --io-u: 11px;
@@ -1718,12 +1636,9 @@ body.link-mode #input-overlay.on {
   display: none;
 }
 
-/* On touch layouts the on-screen buttons ALREADY show every press, and in
-   landscape they are drawn over the stage — so the overlay stands down
-   whenever the touch controls are actually on screen. A connected controller
-   takes those away again (gamepad-hides-touch, the default), and that is
-   exactly when the overlay earns its keep. Mirrors the #controls display
-   rules so the two can never both claim the corner. */
+/* Stands down whenever the touch controls are on screen (they already show
+   every press); mirrors the #controls display rules so the two never both
+   claim the corner. */
 @media (pointer: coarse) {
   body.running #input-overlay.on {
     display: none;
@@ -1954,14 +1869,9 @@ body.has-game #home-resume {
   display: inline-flex;
 }
 
-/* Wrapper around Resume + the mobile-only "Load a game" button. On desktop it
-   is transparent to layout (display: contents) and the mobile button doesn't
-   render, so the home column is pixel-identical to before. The touch layout
-   lives in the (pointer: coarse) home block near the mobile compaction rules. */
-/* Load a game / Resume row. On every viewport the home screen shows a simple
-   "Load a game" button rather than a big drop target — drag-and-drop still
-   works document-wide (see #drop-overlay), and this keeps the recents grid on
-   screen instead of pushing it below the fold. */
+/* Resume + the mobile-only "Load a game" button. Desktop: display: contents;
+   the touch layout is in the (pointer: coarse) home block. Drag-and-drop
+   still works document-wide (#drop-overlay). */
 #home-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2110,10 +2020,8 @@ body.has-game #home-load:hover {
   letter-spacing: 0.01em;
 }
 
-/* Wasm-boot progress: thin indeterminate strip above the Recent grid, shown
-   only while the emulator runtime is still arriving (the grid renders before
-   the wasm now). The 400 ms fade-in delay keeps cached/fast boots from ever
-   flashing it; index.js adds body.runtime-ready to remove it. */
+/* Wasm-boot progress strip. The 400 ms fade-in delay keeps fast boots from
+   flashing it; body.runtime-ready removes it. */
 #boot-progress {
   width: min(320px, 70%);
   height: 2px;
@@ -2466,42 +2374,27 @@ body.debug-2p .home-tile-link {
   color: var(--accent);
 }
 
-/* --- Toasts (save-state feedback, sync notices, camera/tilt offers) ---
- *
- * #toast is the STACK CONTAINER, not the pill: each message is its own
- * .toast-item child, so several coexist and nothing overwrites anything.
- * (It used to be a single element whose text every new toast overwrote —
- * which is how the Game Boy Camera's "use your real camera?" offer, the only
- * route to enabling the webcam, got wiped by the auto-resume toast 98 ms
- * later.)
+/* --- Toasts ---
+ * #toast is the stack container, not the pill: each message is its own
+ * .toast-item, so several coexist and nothing overwrites anything.
  */
 
 #toast {
   /* Fixed to the viewport, not absolute in #stage: on phones the stage is
-     only the top portion of the screen (touch controls fill the rest), so an
-     absolute bottom-anchored toast landed mid-viewport — right across the
-     save-state grid when a modal was open. The viewport bottom + safe area
-     is out of the way everywhere. */
+     only the top of the screen, so a stage-anchored toast lands mid-viewport. */
   position: fixed;
-  /* Above .modal-overlay (500): toasts fired while a modal is open (Quick
-     Save's confirmation, sync notices) must not render dimmed behind the
-     overlay's backdrop. */
+  /* Above .modal-overlay (500). */
   z-index: 600;
-  /* Centred by the left/right/margin-auto trick rather than left:50% +
-     translateX: the container now has to WRAP its text, so it needs a real
-     width to wrap inside, and the insets keep it clear of the notch/home
-     indicator in landscape. `margin: 0 auto` centres it inside that band. */
+  /* left/right + margin auto rather than left:50% + translateX: the
+     container must wrap its text, so it needs a real width. */
   left: calc(8px + var(--safe-l));
   right: calc(8px + var(--safe-r));
   bottom: calc(20px + var(--safe-b));
   margin: 0 auto;
   max-width: 480px;
   display: flex;
-  /* Newest is prepended, so newest renders on top. The container is anchored
-     at the bottom, so the stack grows UPWARD and the older toasts below it
-     never move. That stability is the point: these pills carry tap targets
-     ("Enable camera", "Undo"), and one that slides out from under a committed
-     thumb is worse than no pill at all. */
+  /* Newest is prepended and the stack grows upward, so older pills (which
+     carry tap targets) never move. */
   flex-direction: column;
   align-items: center;
   gap: 8px;
@@ -2514,9 +2407,7 @@ body.debug-2p .home-tile-link {
 .toast-item {
   max-width: 100%;
   padding: 8px 16px;
-  /* 16px is visually the old 999px pill at single-line height (~33px tall),
-     but a wrapped 2- or 3-line toast keeps sane corners instead of bulging
-     two huge arcs into its own text. */
+  /* 16px: a pill at single-line height, sane corners when wrapped. */
   border-radius: 16px;
   background: linear-gradient(180deg, var(--surface-3), var(--surface-2));
   border: 1px solid var(--border-2);
@@ -2526,9 +2417,8 @@ body.debug-2p .home-tile-link {
   line-height: 1.35;
   text-align: center;
   pointer-events: none;
-  /* Enter via animation, not a .show class toggled on the next frame: the
-     class dance needed a rAF hop, and one per toast is a race worth not
-     having. `both` holds the final frame. */
+  /* Enter via animation, not a .show class: that needs a rAF hop per toast.
+     `both` holds the final frame. */
   animation: toast-in 0.2s ease both;
 }
 
@@ -2551,25 +2441,17 @@ body.debug-2p .home-tile-link {
   to { opacity: 1; }
 }
 
-/* Wrap, don't clip. The single-slot toast was nowrap + ellipsis, which on a
-   375pt phone truncated over half the real strings in this app ("This game's
-   ROM is no longer stored — load the file again" and friends). break-word
-   rather than `anywhere` — iOS 15.0-15.3 does not know the `anywhere`
-   value and would silently fall back to no breaking at all. */
+/* Wrap, don't clip. break-word, not `anywhere`: iOS 15.0-15.3 does not
+   know `anywhere` and falls back to no breaking at all. */
 .toast-msg {
   min-width: 0;
   white-space: normal;
   overflow-wrap: break-word;
 }
 
-/* Action toasts ("Resume", "Undo") carry one tappable button; the base pill
-   is pointer-events: none so it never blocks the game, so the interactive
-   variant re-enables hit-testing. (Class-based rather than :has() — iOS
-   15.0-15.3 lacks :has support.)
-   Flex layout with the message in its own flexible span: the buttons are
-   flex-shrink:0 so they always survive, and the text wraps instead of
-   shoving them off the pill. The whole pill is also click-armed in JS — one
-   big tap target — with the × opting out via stopPropagation. */
+/* Action toasts re-enable hit-testing (the base pill is pointer-events:
+   none). Class-based, not :has(): iOS 15.0-15.3 lacks :has. Buttons are
+   flex-shrink:0 so the text wraps instead of shoving them off the pill. */
 .toast-item.has-action {
   display: flex;
   align-items: center;
@@ -2595,9 +2477,8 @@ body.debug-2p .home-tile-link {
   cursor: pointer;
 }
 
-/* Manual dismissal, offered only where a toast is interactive anyway: a
-   plain toast stays pointer-events:none so it can never eat a tap meant for
-   the game. Square so the tap target stays honest at this size. */
+/* Dismiss, only on interactive toasts: a plain toast stays pointer-events:
+   none so it can never eat a tap meant for the game. */
 .toast-close {
   flex-shrink: 0;
   width: 24px;
@@ -2683,9 +2564,8 @@ body.debug-2p .home-tile-link {
   pointer-events: none;
 }
 
-/* A disabled primary must not glow full-brightness amber (it read as the
-   call-to-action even when inert, e.g. Save States with no game loaded).
-   Drop it to the neutral button surface; opacity above does the rest. */
+/* A disabled primary drops to the neutral surface: full amber reads as the
+   call-to-action even when inert. */
 .button-primary:disabled {
   color: var(--text-faint);
   background: linear-gradient(180deg, var(--surface-3), var(--surface-2));
@@ -2759,8 +2639,7 @@ body.debug-2p .home-tile-link {
   }
 }
 
-/* Modal titles are <h2> (the page has one <h1>, so h3 titles tripped axe's
-   heading-order); the size below keeps the old h3 look. */
+/* <h2>, not h3 (axe heading-order: the page has one <h1>). */
 .modal h2 {
   margin: 0 0 16px;
   font-size: 17px;
@@ -2786,8 +2665,7 @@ body.debug-2p .home-tile-link {
   opacity: 0.45;
 }
 
-/* The switch has to fade with its label. A dimmed row beside a fully lit
-   amber track reads as a bug rather than as "not available yet". */
+/* The switch fades with its label. */
 .switch input:disabled + .switch-track {
   opacity: 0.4;
 }
@@ -2796,10 +2674,8 @@ body.debug-2p .home-tile-link {
   cursor: default;
 }
 
-/* Same idea for a whole radio group whose question has no answer yet — the
-   GBA call modes with no BIOS file. The rows keep showing which one is
-   stored; they just cannot be changed. Not on the subhead above it: fading a
-   heading takes its divider with it and reads as a rendering fault. */
+/* A radio group with no answer yet (GBA call modes with no BIOS). Not on
+   the subhead: fading a heading takes its divider with it. */
 .radio-group.row-disabled {
   opacity: 0.45;
 }
@@ -2826,11 +2702,8 @@ body.debug-2p .home-tile-link {
 
 .states-grid {
   display: grid;
-  /* minmax(0, 1fr), not bare 1fr: a bare 1fr track has an auto minimum, so a
-     slot holding a thumbnail <img> widens its whole column to the image's
-     min-content width while empty columns stay narrow — the 3x3 grid ends up
-     with unequal tiles. Clamping the minimum to 0 keeps every track equal and
-     lets the thumb scale down inside its cell instead. */
+  /* minmax(0, 1fr), not bare 1fr: a bare 1fr track has an auto minimum, so
+     a thumbnail <img> widens its column and the 3x3 grid goes unequal. */
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin: 14px 0 18px;
@@ -2861,10 +2734,8 @@ body.debug-2p .home-tile-link {
   background: rgba(var(--accent-rgb), 0.14);
 }
 
-/* Keyboard focus must not read as a second selection: selection is the flush
-   amber border above, focus is a thin offset halo in the text color (near-
-   white on dark shells, near-black on light ones — distinct from amber in
-   both), so a focused empty slot and the selected slot stay tellable apart. */
+/* Focus must not read as a second selection: selection is the flush amber
+   border, focus a thin offset halo in the text colour. */
 .state-slot:focus-visible {
   outline: 2px solid var(--text);
   outline-offset: 2px;
@@ -2944,44 +2815,32 @@ body.debug-2p .home-tile-link {
 }
 
 /* ---- Film-strip scrubber (Rewind, Save a Clip) ---- */
-/* An ordinary .modal-overlay/.modal, and the box inside it is the Report-a-Bug
-   scrubber's .report-scrub — so everything below is only what a film strip
-   adds to that component. Nothing about the strip's geometry lives in CSS: the
-   canvas sizes itself from its own client rect, which is what lets one drawing
-   path serve a 320pt phone and a desktop panel.
-
-   Two features wear this: Rewind (one marker, "cut here") and Save a Clip (two,
-   "record from here to here"). They share the markup and the JS component
-   (createFilmStrip in index.js); .film-marker.range is the only thing the
-   two-marker case adds. */
+/* The Report-a-Bug scrubber's .report-scrub plus a film strip. The strip's
+   geometry is not in CSS: the canvas sizes itself from its client rect.
+   Rewind (one marker) and Save a Clip (two) share the markup and
+   createFilmStrip in index.js; .film-marker.range is all the second adds. */
 
 .modal-scrub {
   max-width: 460px;
 }
 
-/* .report-preview hardcodes aspect-ratio: 3/2 for the GBA panel. A scrubber
-   preview draws whichever core is running, and a GB frame is 10:9, so the
-   ratio has to come from the canvas's own width/height instead of being
-   imposed. Everything else is inherited from .report-preview.
-   Qualified by .modal-scrub on purpose: .report-preview is declared further
-   down this file, so at equal specificity it would win. */
+/* .report-preview hardcodes 3/2; a GB frame is 10:9, so the ratio comes
+   from the canvas's own width/height. Qualified by .modal-scrub on purpose:
+   .report-preview is declared further down and would win at equal specificity. */
 .modal-scrub .film-preview {
   width: 200px;
   aspect-ratio: auto;
   margin-bottom: 10px;
 }
 
-/* The strip's own scroll containment: the drag handler is pointer-based (no
-   native scrolling, so no momentum — the frame under the finger is the point),
-   and these stop a horizontal drag from chaining out to the page behind. */
+/* The drag is pointer-based (no native momentum); these stop a horizontal
+   drag from chaining out to the page behind. */
 .film-strip-wrap {
   position: relative;
   height: 72px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-2);
-  /* Darker than any panel surface: GBA frames are 3:2 and letterbox inside the
-     strip, and the margins have to read as film leader rather than as a pale
-     band framing the pictures. */
+  /* Darker than any panel surface, so letterbox margins read as film leader. */
   background: var(--screen-off);
   overflow: hidden;
   overscroll-behavior-x: contain;
@@ -2989,12 +2848,8 @@ body.debug-2p .home-tile-link {
   cursor: ew-resize;
 }
 
-/* The range picker's strip shows twice as many frames (visibleFrames: 11), so
-   each one is about half as wide — and at a fixed 3:2 the default height then
-   letterboxes them into a black band with a row of stamps in the middle. Shrink
-   the strip to fit the frames rather than the other way round; it stays a
-   comfortable drag target, and the picture you are actually judging is the
-   200px preview above it. */
+/* The range picker shows twice as many frames (visibleFrames: 11), so the
+   strip shrinks to fit them rather than letterboxing a row of stamps. */
 .film-strip-wrap.compact {
   height: 40px;
 }
@@ -3006,11 +2861,9 @@ body.debug-2p .home-tile-link {
   image-rendering: pixelated;
 }
 
-/* A hairline the eye can align against, inside a 44px pointer target (the
-   whole strip is draggable, so this only has to be visually findable — but it
-   stays wide enough to grab on its own). `left` is set from JS: the active
-   marker rides the centre while the film can scroll under it, and slides out to
-   the ends when the film has run out of slack (see createFilmStrip). */
+/* A hairline inside a 44px pointer target. `left` is set from JS: the
+   active marker rides the centre until the film runs out of slack
+   (createFilmStrip). */
 .film-marker {
   position: absolute;
   top: -1px;
@@ -3044,12 +2897,8 @@ body.debug-2p .home-tile-link {
 .film-marker::before { top: 0; }
 .film-marker::after { bottom: 0; transform: rotate(180deg); }
 
-/* Range markers (Save a Clip). Two lines instead of one, and each one has to
-   say which SIDE of itself is being kept — with a symmetric marker at each end
-   of a selection there is nothing to tell you whether you are looking at the
-   in point or the out point, and getting that backwards means exporting the
-   wrong ten seconds. The arrowheads point INTO the selection, so the pair reads
-   as brackets around it. */
+/* Range markers (Save a Clip): the arrowheads point into the selection, so
+   each marker says which side is kept. */
 .film-marker.range::before,
 .film-marker.range::after {
   width: 9px;
@@ -3070,9 +2919,8 @@ body.debug-2p .home-tile-link {
 }
 .film-marker.range::after { transform: none; }
 
-/* Scrolled out of view: the selection really does continue past the edge, so
-   showing nothing there is the honest rendering — the colour running off the
-   strip says "more of this" on its own. Set from JS (createFilmStrip's draw). */
+/* Off-strip: the selection continues past the edge, so draw nothing. Set
+   from createFilmStrip's draw. */
 .film-marker.offscreen {
   background: none;
 }
@@ -3081,8 +2929,7 @@ body.debug-2p .home-tile-link {
   display: none;
 }
 
-/* Which end of the range the preview above is showing. Muted and small: it is
-   a caption, and the picture is the thing. */
+/* Which end of the range the preview shows. */
 .clip-preview-label {
   margin: -4px 0 10px;
   text-align: center;
@@ -3090,24 +2937,13 @@ body.debug-2p .home-tile-link {
   color: var(--text-faint);
 }
 
-/* The clip range slider: ONE track, TWO knobs (#clip-range). It is the same
-   selection the two brackets on the film strip above enclose, so it is drawn
-   as one span — a "Start" bar and an "End" bar make you hold two numbers in
-   your head to see a range that is right there on the strip.
-
-   Mechanically it is two <input type="range"> stacked on one rail. A native
-   range has exactly one thumb, and two real inputs is what buys each knob its
-   own tab stop, its own arrow keys and its own aria-valuetext for free. The
-   inputs contribute nothing but their thumbs: their own tracks are
-   transparent, and the rail plus the highlighted span between the knobs are
-   the two elements underneath them.
-
-   pointer-events: none on the inputs is deliberate, and is the whole fix for
-   the classic dual-slider failure — with two live inputs over one track,
-   whichever is stacked on top swallows every press where they overlap and the
-   knob underneath becomes unreachable. Here the wrapper does the hit-testing
-   (clipGrabKnob, nearest knob by distance — the same rule the film strip
-   uses), so the stacking order is only ever about what you can SEE. */
+/* The clip range slider (#clip-range): two <input type="range"> stacked on
+   one rail, each keeping its own tab stop, arrow keys and aria-valuetext.
+   The inputs contribute only their thumbs; the rail and span are drawn
+   underneath. pointer-events: none on the inputs is the fix for the
+   dual-slider failure (the top input swallows every press where they
+   overlap): the wrapper hit-tests by distance (clipGrabKnob), so stacking
+   order is only about what is seen. */
 .dual-range {
   position: relative;
   height: 44px;         /* a comfortable touch target, and the WHOLE box is it */
@@ -3115,10 +2951,8 @@ body.debug-2p .home-tile-link {
   touch-action: none;   /* the drag is ours; it must not scroll the modal */
 }
 
-/* Inset by one knob radius at each end, because that is the only stretch a
-   native thumb's centre can travel. Without the inset the highlighted span's
-   ends drift off the knobs at the extremes, which is exactly where the
-   picker opens. */
+/* Inset by one knob radius at each end: the stretch a native thumb's
+   centre can travel. */
 .dual-range-rail {
   position: absolute;
   top: 50%;
@@ -3199,9 +3033,7 @@ body.debug-2p .home-tile-link {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
 }
 
-/* The inputs clear the native outline, so keyboard focus needs the ring the
-   switches and the other sliders use: a focused knob that looks identical to
-   an unfocused one makes the keyboard path unusable. */
+/* The inputs clear the native outline, so keyboard focus needs a ring. */
 .dual-range-knob:focus {
   outline: none;
 }
@@ -3214,9 +3046,7 @@ body.debug-2p .home-tile-link {
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
-/* Length presets. The picker opens on the last 10 seconds, so the reflex use
-   never touches these — they are here so the other common lengths do not need
-   a drag either. */
+/* Length presets. */
 .clip-presets {
   display: flex;
   flex-wrap: wrap;
@@ -3224,9 +3054,7 @@ body.debug-2p .home-tile-link {
   margin-top: 12px;
 }
 
-/* Estimated size / length readout under the presets — a clip is a video file
-   the browser hands straight to the downloads folder, and 60 seconds of it is
-   not a small one. */
+/* Estimated size / length readout. */
 .clip-estimate {
   margin: 10px 0 0;
   font-size: 12px;
@@ -3234,9 +3062,7 @@ body.debug-2p .home-tile-link {
   color: var(--text-faint);
 }
 
-/* The two ends of the film, under the strip. The selected moment is NOT here —
-   it goes in .report-scrub-head, the slot the bug-report scrubber already uses
-   for exactly that readout. */
+/* The two ends of the film; the selected moment goes in .report-scrub-head. */
 .film-scale {
   display: flex;
   align-items: baseline;
@@ -3246,9 +3072,7 @@ body.debug-2p .home-tile-link {
   color: var(--text-faint);
 }
 
-/* The "you can't come back" and "this eats your save" prompts. Same slot, two
-   severities — the save one is the louder of the pair because it is the only
-   one that costs the player something outside this session. */
+/* The two confirm prompts; the save one is louder. */
 .rewind-warn {
   margin: 10px 0 0;
   padding: 9px 11px;
@@ -3266,11 +3090,8 @@ body.debug-2p .home-tile-link {
   border-color: rgba(var(--danger-rgb), 0.45);
 }
 
-/* .states-actions is a right-aligned row; the commit button takes the slack
-   because its label carries the cost ("· discards 2m 14s"). At 320pt that
-   label wraps to two lines rather than being truncated — the duration is the
-   whole point of showing it — so the row is aligned to the block rather than
-   to a single text baseline. */
+/* The commit button's label carries the cost ("· discards 2m 14s") and
+   wraps rather than truncates at 320pt, so the row aligns to the block. */
 .rewind-actions {
   margin-top: 14px;
   align-items: stretch;
@@ -3451,20 +3272,15 @@ body.debug-2p .home-tile-link {
 }
 
 /* --- Settings surface -----------------------------------------------------
-   One markup tree, two layouts. The rule underneath both, and the whole point
-   of the redesign: THE FRAME IS A FIXED SIZE AND EXACTLY ONE ELEMENT SCROLLS
-   (.settings-scroll). Nothing here is derived from the active section, so the
-   header and the section list stay put when Audio (3 rows) is swapped for
-   General (20). Never animate the frame's width or height.
+   One markup tree, two layouts. The frame is a fixed size and exactly one
+   element scrolls (.settings-scroll); nothing derives from the active
+   section. Never animate the frame's width or height.
 
    >= 760px  a centred 900x640 modal, .settings-rail beside .settings-content.
-   <  760px  an 88dvh bottom sheet where the same two children are the root
-             list and a pushed detail screen.
+   <  760px  an 88dvh bottom sheet: root list + pushed detail screen.
 
-   760 is derived, not chosen: 200 rail + 460 minimum readable content column
-   + 48 internal gutters + 52 slack. It switches on WIDTH ONLY — an iPad at
-   1024 gets the rail, and the coarse-pointer block below is what makes its
-   rows clear 44px, not a second layout. */
+   760 = 200 rail + 460 content column + 48 gutters + 52 slack. Width only:
+   an iPad at 1024 gets the rail; the coarse-pointer block grows its rows. */
 .modal-settings {
   width: min(900px, 100vw - 64px);
   max-width: none;
@@ -3494,12 +3310,8 @@ body.debug-2p .home-tile-link {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  /* One step off the content pane so the rail reads as its own column. The
-     mockup and the spec both say "darker"; in this theme system the step away
-     from --surface-1 is --surface-2, which is LIGHTER in the dark themes and
-     in the light ones alike. Going the other way would mean reaching past the
-     modal's own surfaces for --bg, so the direction is left as the token
-     system has it. The frame's overflow:hidden clips the fill to the radius. */
+  /* One token step off the content pane (--surface-2, which is lighter in
+     every theme); the frame's overflow:hidden clips the fill to the radius. */
   background: var(--surface-2);
   border-right: 1px solid var(--border);
 }
@@ -3553,8 +3365,7 @@ body.debug-2p .home-tile-link {
   cursor: pointer;
 }
 
-/* Neutral fill, no motion and no transform: a rail row that moves under the
-   cursor is the same complaint this redesign exists to fix, in miniature. */
+/* Neutral fill, no motion, no transform. */
 .settings-tab:hover {
   color: var(--text);
   background: rgba(var(--hi-rgb), 0.06);
@@ -3566,8 +3377,7 @@ body.debug-2p .home-tile-link {
   font-weight: 600;
 }
 
-/* The sheet moves focus to Back on every push, so the ring is seen often
-   enough that the UA's blue would read as a different app's control. */
+/* The sheet moves focus to Back on every push, so the ring is seen often. */
 .settings-tab:focus-visible,
 .settings-back:focus-visible,
 .settings-stepper button:focus-visible,
@@ -3623,9 +3433,8 @@ body.debug-2p .home-tile-link {
   flex: 0 0 auto;
 }
 
-/* The one scroll container in the dialog. scrollbar-gutter keeps short
-   sections from shifting the content sideways by the scrollbar's width when
-   the bar disappears — the second, quieter jump in the old build. */
+/* The one scroll container. scrollbar-gutter keeps short sections from
+   shifting sideways when the bar disappears. */
 .settings-scroll {
   flex: 1 1 auto;
   min-height: 0;
@@ -3648,16 +3457,12 @@ body.debug-2p .home-tile-link {
 }
 
 /* --- Settings rows -------------------------------------------------------
-   Two columns: label + description left, control right-aligned and
-   top-aligned across both text rows, 28px between them. Explicit grid areas
-   rather than auto-placement because the panes carry two row shapes — some
-   wrap label and description in a <div>, some list them flat beside the
-   control — and both have to land the same way. */
+   Explicit grid areas, not auto-placement: some rows wrap label +
+   description in a <div>, some list them flat, and both must land alike. */
 .settings-pane .modal-toggle-row,
 .settings-pane .settings-reset-row,
-/* Out-specify the .row-flow float treatment further down the sheet: inside
-   the settings pane the content column is wide enough for the control to
-   stand beside the description rather than float into it. */
+/* Out-specifies the .row-flow float treatment: here the column is wide
+   enough for the control to stand beside the description. */
 .settings-pane .modal-toggle-row.row-flow:not(.hidden),
 .settings-pane .settings-reset-row.row-flow {
   display: grid;
@@ -3734,12 +3539,8 @@ body.debug-2p .home-tile-link {
 }
 
 /* --- Version string ------------------------------------------------------
-   Reference information someone goes looking for while filing a bug, not
-   something read while changing a setting: one fixed place, invisible the
-   rest of the time. Two copies, one per layout, because the two layouts put
-   it under different parents: desktop pins it to the foot of the rail with a
-   flex spacer, the sheet gives it a fixed footer below the scroller. Exactly
-   one is ever displayed. */
+   Two copies, one per layout (rail foot on desktop, fixed footer below the
+   sheet's scroller); exactly one is ever displayed. */
 .settings-version {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -3809,10 +3610,8 @@ body.debug-2p .home-tile-link {
   stroke-linejoin: round;
 }
 
-/* The stepper is what makes drill-down viable: the next section is one tap
-   away in a position that never moves. Vertical chevrons on purpose — a
-   horizontal pair would read as the same axis as Back, i.e. as going deeper,
-   and this is a sideways move at the same depth. */
+/* The stepper: next section one tap away in a fixed position. Vertical
+   chevrons, so it does not read as Back's axis. */
 .settings-stepper {
   flex: 0 0 auto;
   border: 1px solid var(--border-2);
@@ -3852,9 +3651,7 @@ body.debug-2p .home-tile-link {
   color: var(--text-faint);
 }
 
-/* --- Touch on wide screens (3.5) -----------------------------------------
-   Same layout, bigger targets. Width decides the layout; the pointer only
-   decides how tall a row is. */
+/* --- Touch on wide screens: same layout, bigger targets --- */
 @media (pointer: coarse) {
   .settings-tab {
     padding-top: 13px;
@@ -3878,13 +3675,9 @@ body.debug-2p .home-tile-link {
   }
 }
 
-/* A wide but very short viewport — a phone in landscape is 812x375, and the
-   layout switches on width only, so it lands here rather than on the sheet.
-   3.4 says the frame stops shrinking at 420 and the page behind it clips; at
-   375 that would put the close button and the rail's title off-screen, so the
-   frame is allowed to fit instead and the rail is compacted to keep its six
-   rows visible without scrolling, which is what the 420 floor was protecting.
-   After the coarse-pointer block on purpose: fitting beats 44px here. */
+/* A phone in landscape (812x375) lands here, not on the sheet: the frame
+   fits the height and the rail compacts to keep its rows visible. After
+   the coarse-pointer block on purpose: fitting beats 44px here. */
 @media (min-width: 760px) and (max-height: 479px) {
   .modal-settings {
     min-height: 0;
@@ -3922,46 +3715,22 @@ body.debug-2p .home-tile-link {
   #settings-modal {
     padding: 0;
     align-items: flex-end;
-    /* The sheet's bottom edge must be the bottom of the VISIBLE viewport, and
-       `inset: 0` alone does not promise that: where a UA sizes the fixed
-       positioning containing block to the large viewport (URL bar retracted),
-       flex-end lands the sheet a URL-bar's height below what you can see. An
-       explicit height in dvh is what pins it — with `top` and `bottom` both 0
-       a specified height wins and `bottom` is dropped, so the overlay spans
-       [0, 100dvh] whichever viewport the ICB was sized to. dvh includes the
-       area under the home indicator (viewport-fit=cover), which is why the
-       footer's bottom padding below carries the safe-area inset. */
+    /* `inset: 0` alone can land the sheet a URL-bar's height below the
+       visible viewport (the fixed ICB may be the large viewport). An
+       explicit 100dvh height wins over `bottom`, pinning the overlay to
+       [0, 100dvh]. dvh includes the home-indicator area, hence the footer's
+       safe-area padding. */
     height: 100dvh;
   }
 
   .modal-settings {
     width: 100%;
-    /* dvh is required, not a preference: with vh, Safari's collapsing URL bar
-       resizes the sheet mid-scroll and reintroduces exactly the movement this
-       redesign removes. 88 and not 100 so the strip of app above the sheet
-       stays as the tap-to-close affordance.
-
-       The cap is what stops a tall phone or a small tablet from opening 400px
-       of empty sheet under six rows: an iPad mini in portrait was 997 and a
-       15 Pro Max 820, against a root list that needs 606.
-
-       714 is the 13 mini's own 88dvh, picked because that is the proportion
-       that reads right — not the list's measured 606. Fitting the content
-       exactly was tried and is too short: the sheet stops looking like a
-       surface the app slid up and starts looking like a dialog that happens
-       to touch the bottom edge. The ~108px under the last row is doing a job.
-
-       88dvh still wins on anything shorter, so an SE is untouched at 500 and
-       its list scrolls exactly as before.
-
-       It caps the WHOLE sheet, not just the list. Sizing the list to content
-       and leaving detail screens at 88dvh would resize the frame on every
-       drill-in, which is the movement this redesign exists to remove. The
-       trade is real and deliberate: a detail pane on a big phone now scrolls
-       sooner, and in exchange the sheet sits under your thumb.
-
-       If a seventh section is ever added, the list simply starts scrolling —
-       raise this by one row height (72px) if that is not wanted. */
+    /* dvh, not vh: Safari's collapsing URL bar would resize the sheet
+       mid-scroll. 88 leaves the strip above as the tap-to-close affordance.
+       The 714px cap (a 13 mini's 88dvh) stops tall phones and small tablets
+       opening 400px of empty sheet; it caps the whole sheet, not just the
+       list, so the frame never resizes on drill-in. A seventh section makes
+       the list scroll; raise this by one row (72px) if unwanted. */
     height: min(88dvh, 714px);
     min-height: 0;
     border-radius: 20px 20px 0 0;
@@ -3979,12 +3748,8 @@ body.debug-2p .home-tile-link {
     touch-action: none;
   }
 
-  /* Swipe UP on the chrome and the sheet takes the whole screen. The cap that
-     makes the sheet a comfortable size on a big phone is also the thing that
-     wastes half an iPad mini when you are actually reading a long section, so
-     this is the escape hatch — a second detent, entered and left deliberately.
-     The height animates ONLY here: everywhere else the frame's size is fixed,
-     and this is a gesture whose whole point is the size changing. */
+  /* Swipe up on the chrome: a second detent, the whole screen. The height
+     animates only here. */
   .modal-settings {
     transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.3, 1),
                 height 0.22s cubic-bezier(0.2, 0.8, 0.3, 1);
@@ -3995,10 +3760,8 @@ body.debug-2p .home-tile-link {
     border-radius: 0;
   }
 
-  /* Expanded, there is no backdrop left to tap, so the detail screen needs its
-     close button back — the same trade the landscape block makes for the same
-     reason. The grab handle stays, unlike landscape: it is how you get back
-     down. */
+  /* Expanded, no backdrop is left to tap, so the close button returns; the
+     grab handle stays (it is how you get back down). */
   .modal-settings.sheet-expanded .settings-head .modal-close {
     display: flex;
   }
@@ -4063,9 +3826,7 @@ body.debug-2p .home-tile-link {
     padding: 10px 12px 12px;
   }
 
-  /* List rows: name, a one-line description that is the reason this beats a
-     tab strip for finding things, and a chevron. One line only — truncated,
-     never wrapped, so every row is the same height. */
+  /* List rows: one-line description, truncated, so every row is the same height. */
   .settings-tab {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
@@ -4106,11 +3867,8 @@ body.debug-2p .home-tile-link {
     background: rgba(var(--hi-rgb), 0.06);
   }
 
-  /* The list marks nothing. `active` still rides on a row — the rail needs a
-     current section on desktop, and the stepper and roving tabindex need one
-     here — but a drill-down list is a set of destinations, not a set of
-     choices, and highlighting the one you just backed out of only draws the
-     eye to where you have already been. */
+  /* The list marks nothing; `active` still rides on a row for the stepper
+     and roving tabindex. */
   .settings-tab.active {
     color: inherit;
     background: none;
@@ -4128,10 +3886,7 @@ body.debug-2p .home-tile-link {
     background: var(--border);
   }
 
-  /* The build identity is the sheet's footer, not the last thing in the root
-     list's scroll content: same fixed place on the list and on every detail
-     screen, always at the bottom edge. It costs ~50px of sheet, and buys a
-     version string that is where you left it whichever screen you are on. */
+  /* The build identity is the sheet's fixed footer, on every screen. */
   .settings-rail .settings-version {
     display: none;
   }
@@ -4140,24 +3895,19 @@ body.debug-2p .home-tile-link {
     display: flex;
     flex: 0 0 auto;
     justify-content: flex-end;
-    /* 22px of bottom padding, or the home indicator's inset plus the 12px the
-       top edge gets — whichever is larger. The indicator sits on this, which
-       is the whole reason it is here. */
+    /* The home indicator sits on this padding. */
     padding: 12px 18px max(22px, calc(12px + var(--safe-b)));
     border-top: 1px solid var(--border);
   }
 
-  /* Root list only. This is deliberately a hybrid of the two source documents
-     and not an oversight: the mockup's placement (a footer pinned to the
-     bottom, outside the scroller) with the spec's scope (§5 — "does not appear
-     on detail screens"). A detail screen has better uses for 53px, which at
-     667x375 is 14% of the viewport. Do not "fix" this back to both screens. */
+  /* Root list only, deliberately: a detail screen has better uses for the
+     53px. Do not "fix" this back to both screens. */
   #settings-frame.on-detail .settings-foot {
     display: none;
   }
 
-  /* Detail header: back, title, stepper. No close — back and the stepper own
-     that space, and swipe-down plus a backdrop tap still dismiss. */
+  /* Detail header: back, title, stepper. No close (swipe-down and the
+     backdrop still dismiss). */
   .settings-head {
     padding: 8px 14px 14px;
   }
@@ -4226,10 +3976,8 @@ body.debug-2p .home-tile-link {
   }
 }
 
-/* Under a very narrow sheet a select or a chip pair beside the description
-   leaves it about twenty characters wide. Below 420px those controls go back
-   to floating into the last line of the text (the .row-flow treatment
-   documented further down), which is what that treatment was built for. */
+/* Below 420px wide controls float back into the last line of the text
+   (.row-flow). */
 @media (max-width: 419px) {
   .settings-pane .modal-toggle-row.row-flow:not(.hidden),
   .settings-pane .settings-reset-row.row-flow {
@@ -4301,10 +4049,8 @@ body.debug-2p .home-tile-link {
   color: var(--text-dim);
 }
 
-/* The Capture accordion's chevron, same glyph and same quarter turn, so the
-   gesture is recognisably one gesture in both places. It cannot literally
-   share .capture-chevron's rules: those inherit their stroke and size from
-   .menu-item svg, and there is no .menu-item here. */
+/* Same chevron as the Capture accordion; cannot share .capture-chevron's
+   rules, which inherit from .menu-item svg. */
 .settings-chevron {
   width: 15px;
   height: 15px;
@@ -4330,15 +4076,9 @@ body.debug-2p .home-tile-link {
   color: var(--text-faint);
 }
 
-/* Game Boy shade palette (General tab): the live four-shade preview, the
-   custom colour pickers, and the palette's own Reset. Deliberately compact —
-   it hangs off the "Shade palette" select above it rather than reading as
-   three more settings. */
-/* The shade palette while a Super Game Boy is drawing its own colours: the
-   control is genuinely `disabled`, and has to look it. A <select> with the
-   attribute set is not reliably dimmed by the UA inside a dark theme, and
-   "reads enabled but does nothing" is exactly the state the SGB note is
-   there to prevent. The In-use swatches and Reset go with it. */
+/* Game Boy shade palette: preview, custom pickers, its own Reset. */
+/* Under a Super Game Boy the control is `disabled` and must look it: the UA
+   does not reliably dim a disabled <select> inside a dark theme. */
 .kb-select:disabled {
   opacity: 0.4;
   cursor: not-allowed;
@@ -4484,10 +4224,8 @@ body.debug-2p .home-tile-link {
   color: var(--text-faint);
 }
 
-/* App theme picker (Video tab): one chip per chrome theme, with a
-   swatch showing that theme's background + accent. Swatch colors are
-   fixed per chip (they preview a theme, they don't follow the active
-   one), so they're set below rather than derived from tokens. */
+/* App theme picker: swatch colours are fixed per chip (they preview a
+   theme), so they are not derived from tokens. */
 #theme-picker {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
@@ -4499,10 +4237,7 @@ body.debug-2p .home-tile-link {
   display: flex;
   align-items: center;
   gap: 8px;
-  /* A button centres its text by UA default, so a name long enough to wrap
-     ("Atomic Purple" at desktop scale) centres its second line against the
-     first. The swatch pins the left edge, so centred wrapping reads as a
-     typo; align to the start instead. */
+  /* A wrapped name ("Atomic Purple") must not centre its second line. */
   text-align: start;
   padding: 7px 9px;
   font-size: 12.5px;
@@ -4529,43 +4264,13 @@ body.debug-2p .home-tile-link {
 }
 
 /* --- Settings rows whose control sits IN the text, not beside it ----------
-   The default settings row is a flex pair: description on the left, control
-   on the right. That is right for a switch — 42px wide, and a column of them
-   down the right edge is what makes the list scannable — and wrong for a
-   dropdown, a chip pair or a button, which take 100-155px off EVERY line of
-   the description for the sake of one. "Shade palette" lost a third of its
-   measure to a select that only needed the last line.
-
-   So the wide controls float to the bottom right and the text runs around
-   them:
-
-       Shade palette
-       The four shades a black-and-white Game
-       Boy game is drawn in. Color titles are
-       never affected.     [Game Boy default]
-
-   Mechanically that is a plain right float placed AFTER all the text in
-   source order: a float may not sit higher than the top of the last line box
-   generated before it, so it lands on the final line and that line shortens
-   around it. No shape-outside, no measuring. If the last line's words no
-   longer fit beside it the float simply takes a line of its own, which is the
-   right answer at 320pt and is what happens to Run-ahead there.
-
-   Two consequences worth stating:
-   * The float has to be a SIBLING of the text, so these rows lost the
-     wrapping <div> that used to hold label + description. index.js's
-     aria-labelledby pass reads them with querySelector, so it is unaffected.
-   * The row has to establish a block formatting context or the float hangs
-     down into the next setting.
-
-   Switch rows are deliberately NOT in this set. A 42px switch costs little
-   width, and its vertical alignment with the label is what lets you run an
-   eye down the column; moving nineteen switches to the bottom right to buy
-   half a word per line would be a bad trade twice over.
-
-   :not(.hidden) rather than source order — #joystick-mode-row is shown and
-   hidden by that class, and this rule has the same specificity as the one
-   that hides it. */
+   Wide controls (select, chip pair, button) float to the bottom right and
+   the description runs around them: a right float placed after all the text
+   cannot sit higher than the last line box, so it lands on the final line.
+   The float must be a sibling of the text (no wrapper <div>), and the row
+   must establish a block formatting context or the float hangs into the
+   next setting. Switch rows stay beside their label. :not(.hidden) because
+   #joystick-mode-row is hidden by that class at the same specificity. */
 .modal-toggle-row.row-flow:not(.hidden),
 .settings-reset-row.row-flow {
   display: flow-root;
@@ -4576,12 +4281,9 @@ body.debug-2p .home-tile-link {
   margin-bottom: 2px;
 }
 
-/* One continuous run of inline text for the float to sit in. As a block it
-   would generate its own line boxes and the float would clear it entirely.
-   The control is also placed BEFORE this text in the markup: a float only
-   displaces content that follows it, so a control written after the
-   description can never rise into it and drops onto its own line instead —
-   which is the wasted row this whole treatment exists to remove. */
+/* One inline run for the float to sit in (a block would clear it). The
+   control precedes this text in the markup: a float only displaces content
+   that follows it. */
 .row-flow > .modal-toggle-sub {
   display: inline;
   margin-top: 0;
@@ -4594,22 +4296,15 @@ body.debug-2p .home-tile-link {
   margin: 2px 0 0 14px;
 }
 
-/* The floated controls are 29-31px tall, which is fine under a cursor and
-   under the 44pt minimum under a thumb. They are the widest targets in
-   Settings and the easiest to grow, so on a touch device they grow; the
-   float means the extra height costs the row nothing it was not already
-   spending on two lines of description. */
+/* The floated controls grow to 44pt on touch devices. */
 @media (pointer: coarse) {
   .row-flow > .row-flow-ctl,
   .row-flow > .row-flow-ctl > .button {
     min-height: 44px;
   }
 
-  /* min-height does not reach a <select>. WebKit draws a default-appearance
-     select as a native popup button with a fixed intrinsic height — it
-     ignores .kb-select's padding and min-height alike, and measures 21px no
-     matter what. An explicit height is the one thing it honours, and Chromium
-     is happy with it too. */
+  /* WebKit draws a default-appearance <select> at a fixed intrinsic height,
+     ignoring padding and min-height; an explicit height is honoured. */
   .row-flow > select.row-flow-ctl {
     height: 44px;
   }
@@ -4745,13 +4440,8 @@ body.debug-2p .home-tile-link {
   overflow-y: auto;
 }
 
-/* Fit the whole modal within the screen with the ROM list as the ONLY scroll
-   region, so the header and the Drive sign-in stay visible. Previously the
-   list had its own 60vh scroller AND the modal scrolled, so on a phone you
-   scrolled the list, then the modal itself scrolled to reveal Drive. Now it's
-   a flex column against the shared .modal max-height: the list flexes into the
-   leftover space (min-height:0 lets it shrink below its content and scroll),
-   while everything above and the Drive section below hold their place. */
+/* The ROM list is the only scroll region: a flex column against the shared
+   .modal max-height, with min-height:0 letting the list shrink and scroll. */
 #roms-modal .modal {
   display: flex;
   flex-direction: column;
@@ -4828,9 +4518,7 @@ body.debug-2p .home-tile-link {
   cursor: default;
 }
 
-/* Under a thumb the 28px square is below the 44pt minimum. The button grows
-   to 44px there without moving the name: it is the only flex item that can,
-   and the row is already taller than that from its buttons. */
+/* Under a thumb the button grows to 44px without moving the name. */
 @media (pointer: coarse) {
   .roms-rename-btn {
     width: 44px;
@@ -4887,9 +4575,8 @@ body.debug-2p .home-tile-link {
   margin: 3px 0;
 }
 
-/* Wrapping: arming a confirm button swaps its label for a whole question
-   ("Remove from this device?"), which on a phone can outgrow the line — the
-   buttons after it drop to the next line instead of clipping. */
+/* An armed confirm label ("Remove from this device?") can outgrow the line
+   on a phone; later buttons wrap instead of clipping. */
 .roms-manage-actions {
   min-width: 0;
   display: flex;
@@ -5044,11 +4731,8 @@ body.debug-2p .home-tile-link {
   display: none;
   padding: 14px calc(16px + var(--safe-r)) calc(16px + var(--safe-b))
     calc(16px + var(--safe-l));
-  /* Two optional pinstripes (--panel-stripe, transparent by default) run the
-     full width just through the bottom of the d-pad / A-B cluster — the
-     Famicom faceplate's double line. Lengths from the bottom clear the
-     Select/Start row (34px) + bottom padding + gap. No border-top: the strip
-     sits directly on the stage. */
+  /* Two optional pinstripes (--panel-stripe) through the bottom of the
+     d-pad / A-B cluster; offsets clear the Select/Start row + padding + gap. */
   background:
     linear-gradient(var(--panel-stripe), var(--panel-stripe)) 0
       calc(100% - var(--safe-b) - 112px) / 100% 4px no-repeat,
@@ -5417,17 +5101,9 @@ body.large-controls .pad-pill {
   #joystick {
     --dpad-size: min(32cqi, 158px, 76cqb);
   }
-  /* The joystick region spans the full row height so floating mode has room,
-     but with the row bottom-aligned (align-items: flex-end) the d-pad rests
-     low while a base centered at top:50% would float up to mid-height — the
-     reported "joystick sits too high". Bottom-anchor the base so its resting
-     center matches the bottom-aligned d-pad's center. Same story on the x
-     axis: the region is the whole left half of the row, so a base centered
-     at left:50% rests ~25% of the screen width in — far from where the d-pad
-     (a flex child hugging the row's left edge) sits. Left-anchor it so the
-     resting center matches the d-pad's landscape center. JS re-measures
-     joyHome/joyBounds from the rendered rect, so floating spawn + clamp
-     follow the new resting position automatically. */
+  /* The region spans the row, but the base must rest where the
+     bottom-aligned, left-hugging d-pad would: anchor it bottom-left, not
+     centred. JS re-measures joyHome/joyBounds from the rendered rect. */
   #joystick-base {
     top: auto;
     bottom: 0;
@@ -5445,13 +5121,8 @@ body.large-controls .pad-pill {
     justify-self: center;
     gap: 14px;
   }
-  /*
-   * Large-controls in landscape: the portrait large-mode rules would blow the
-   * d-pad up to ~330px (most of a phone's height) while shrinking A/B and the
-   * shoulders — incoherent for the side-rail layout. Instead, "large" here
-   * restores the pre-2026-07 landscape default sizes, one comfortable step up
-   * from the shrunken default above.
-   */
+  /* Large-controls in landscape: one step up from the default above, not
+     the portrait large-mode sizes (a ~330px d-pad). */
   body.large-controls #main-controls {
     height: 100%;
   }
@@ -5487,12 +5158,8 @@ body.link-gb #controls {
 }
 
 /*
- * Short-portrait compression (4-inch class: iPhone SE 1st gen / 5s, 320x568).
- * The control strip's fixed rows otherwise squeeze the stage below what an
- * edge-to-edge 3:2 canvas needs (~213px at 320 wide), letterboxing the game.
- * Compress the chrome rows and gutters — NOT the d-pad/face buttons — to hand
- * ~30px back to the stage. Taller phones (667px-class and up) already reach
- * full width and keep the roomier default spacing.
+ * Short-portrait compression (320x568 class): compress the chrome rows and
+ * gutters, not the d-pad/face buttons, so an edge-to-edge 3:2 canvas fits.
  */
 @media (pointer: coarse) and (orientation: portrait) and (max-height: 620px) {
   #controls {
@@ -5509,17 +5176,11 @@ body.link-gb #controls {
 }
 
 /*
- * Container-query fallback (iOS 15 / pre-Safari-16). Container units (cqi/cqb)
- * parse fine inside custom properties on old WebKit — custom props accept any
- * token stream — so the cq declarations above still win the cascade there and
- * then fail at var() substitution, collapsing the d-pad and face buttons to
- * intrinsic size. A plain "fallback line above" therefore can't work; this
- * @supports-not block (skipped entirely by cq-capable browsers) re-declares
- * the sizes in viewport units, approximating the container's geometry:
- * #main-controls spans the viewport width minus strip padding (cqi ≈ vw) and
- * its height is capped well above what the px caps below allow, so dropping
- * the 100cqb terms is safe. The fixed-size tablet tier (min-height: 501px,
- * later in source) still overrides these on old iPads.
+ * Container-query fallback (iOS 15 / pre-Safari-16). cqi/cqb parse inside
+ * custom properties on old WebKit and only fail at var() substitution, so a
+ * fallback line above cannot work; this @supports-not block re-declares the
+ * sizes in viewport units (cqi ~ vw here). The tablet tier later in source
+ * still overrides these.
  */
 @supports not (width: 1cqi) {
   #dpad,
@@ -5560,11 +5221,8 @@ body.link-gb #controls {
   }
 }
 
-/*
- * Mobile home-screen compaction. Placed after the base home rules so these
- * win on source order (equal specificity) — the logo + wordmark must never be
- * clipped behind the load box on short phones.
- */
+/* Mobile home-screen compaction; after the base home rules so it wins on
+   source order. */
 @media (max-width: 560px) {
   #home {
     padding: 16px;
@@ -5638,9 +5296,8 @@ body.running.rollback-mode.link-gb .link-pane canvas {
   width: min(100%, calc((100dvh - var(--bar-h) - 24px) * 1.111));
 }
 
-/* "Disconnect Link Cable" button — squared to match the other top-bar
-   .icon-btn controls, occupying the space the hidden speed/state controls left
-   so it's clear why they're gone. Shown only in rollback mode. */
+/* "Disconnect Link Cable": in the space the hidden speed/state controls
+   left. Rollback mode only. */
 #rb-disconnect {
   display: none;
   align-items: center;
@@ -5744,13 +5401,9 @@ body.link-gb .link-pane canvas {
   }
 }
 
-/* Anything that would desync the linked pair is hidden in link mode:
-   rewind and the speed toggles change one clock, save states and .sav
-   import/export target a single core, and the screenshot path captures
-   the (hidden) single-core canvas. Pause/reset stay: they act on both.
-   Exception: in online rollback mode #speed-2x-btn stays visible — its 2x is
-   relayed to the peer (RB_SPEED) so both cores fast-forward in lockstep.
-   Unbounded #fast-forward has no such sync, so it stays hidden everywhere. */
+/* Anything that would desync the pair is hidden in link mode; pause/reset
+   act on both. In rollback mode #speed-2x-btn stays: its 2x is relayed to
+   the peer (RB_SPEED). Unbounded #fast-forward has no such sync. */
 body.link-mode #open-rewind-scrub,
 body.rollback-mode #open-rewind-scrub,
 body.link-mode #rewind,
@@ -5784,23 +5437,12 @@ body.rollback-mode #save-sep {
   display: none !important;
 }
 
-/* Rewind turned off in Settings: every rewind affordance GOES, rather than
-   greying out. The setting's whole promise is that the feature is not there —
-   nothing is being recorded, so a rewind control could only ever fail, and an
-   inert-but-visible control is the failure mode this app has been bitten by
-   before. Same display:none !important treatment as the link modes above, and
-   for the same reason: these live in a segmented bar and a quick-action grid
-   whose layouts already cope with members disappearing.
-
-   The list, and what each one is:
+/* Rewind off: every rewind affordance goes (nothing is recorded, so a
+   control could only fail). Applied live by applyRewindUI().
      #rewind             top-bar hold-to-rewind (and its double-tap)
      #open-rewind-scrub  the menu's rewind-scrubber quick action
-     #kb-shortcut-rewind the "Rewind (hold) `" row in the shortcuts list
-     #report-slider      Report-a-Bug's timeline, which can only address
-                         snapshots the ring would have held (its hint stays,
-                         and says so — see openReportModal)
-   Applied live by applyRewindUI(); no reload, because the ring itself is
-   allocated and dropped live too (setRewindEnabled in dingbat_wasm.nim). */
+     #kb-shortcut-rewind the shortcuts-list row
+     #report-slider      Report-a-Bug's timeline (its hint stays) */
 body.rewind-off #rewind,
 body.rewind-off #open-rewind-scrub,
 body.rewind-off #kb-shortcut-rewind,
@@ -5859,14 +5501,9 @@ body.rewind-off #report-slider {
   }
 }
 
-/* 320pt phones (SE 1st gen / iPhone 5-class). The block above is tuned for
-   375pt and lands at EXACTLY 320px there — zero slack — so the moment a
-   cartridge button joins the bar the fullscreen control is pushed off the
-   right edge. Cart buttons used to be rare (a tilt cart with motion already
-   enabled, or a second camera); now every camera and tilt cart shows one from
-   the first frame, so this has to fit rather than nearly fit.
-   The 26px comes out of spacing, not tap targets: the icon buttons keep their
-   36px box, and only the fused playback segments give up 2px each. */
+/* 320pt phones: the 375pt block lands at exactly 320px, so a cartridge
+   button would push fullscreen off the edge. The 26px comes out of
+   spacing, not tap targets. */
 @media (max-width: 360px) {
   #topbar {
     gap: 4px;
@@ -5987,9 +5624,7 @@ body.rewind-off #report-slider {
     border-color: rgba(var(--accent-rgb), 0.7);
     box-shadow: 0 0 14px -4px var(--accent-glow);
   }
-  /* Opaque-controls opt-out: restore the solid portrait look for the buttons
-     that the transparency rules above dimmed. Higher specificity than the
-     bare-selector rules above, and later in source order, so it wins. */
+  /* Opaque-controls opt-out; higher specificity and later, so it wins. */
   body.opaque-controls .pad-btn {
     background: linear-gradient(180deg, var(--surface-3), var(--surface-1));
     border-color: var(--border-2);
@@ -6038,10 +5673,8 @@ body.rewind-off #report-slider {
   }
 }
 
-/* Light theme, landscape translucent pads: the white outlines above are
-   nearly invisible on the light stage — flip outline/glyph dark. Kept after
-   (and re-asserting) the pressed rules because these selectors outrank them;
-   the opaque-controls opt-out is excluded (its solid look themes correctly). */
+/* Light theme, translucent pads: flip outline/glyph dark. After (and
+   re-asserting) the pressed rules, which these selectors outrank. */
 @media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
   :root[data-theme="light"] body:not(.opaque-controls) .pad-btn,
   :root[data-theme="light"] body:not(.opaque-controls) #dpad > #dpad-center {
@@ -6059,24 +5692,13 @@ body.rewind-off #report-slider {
  * ==========================================================
  * Tablet touch layouts
  * ==========================================================
- * Big touchscreens break both phone assumptions: the portrait strip's
- * flex-stretched shoulders grow to half the screen width, and the
- * landscape side rails only existed under max-height: 500px, so tablets
- * fell back to the stacked phone layout with the game squeezed small.
- * The rule here is reachability: a tablet is gripped by its side edges,
- * so every control pins to the bottom side corners at a FIXED physical
- * size (px caps, not viewport units) — as the screen grows the buttons
- * stay where thumbs are, and only the frame gains. Frequency orders the
- * stack: face buttons under the thumb, shoulders just above, the rare
- * Select/Start above those.
+ * Every control pins to the bottom side corners at a fixed physical size
+ * (px caps, not viewport units): as the screen grows only the frame gains.
+ * Face buttons under the thumb, shoulders above, Select/Start above those.
  */
 
-/* Landscape tablets: the shared landscape grid above already pins the
-   d-pad / A-B clusters to the bottom side corners; this tier keeps the
-   top bar and the opaque tactile look (the slide-away bar and translucent
-   pads are phone-cramp compromises), sizes the pads GBA-like for big
-   screens, and stacks shoulder + pill above each cluster instead of
-   leaving them at the far top corners / dead center. */
+/* Landscape tablets: keep the top bar and opaque pads, size the pads
+   GBA-like, stack shoulder + pill above each cluster. */
 @media (pointer: coarse) and (orientation: landscape) and (min-height: 501px) {
   body.running {
     /* Width reserved at each side for the control rail: pad size + outer
@@ -6181,11 +5803,8 @@ body.rewind-off #report-slider {
   }
 }
 
-/* Portrait tablets: the stacked strip already pushes d-pad / A-B to the
-   side edges, but the flex-stretched shoulders balloon to half the screen
-   width and Select/Start sit in the unreachable dead center. Shoulders
-   pin to the strip's edges at fixed widths; Select/Start sit inboard of
-   the clusters on the bottom row, matching the landscape rails. */
+/* Portrait tablets: shoulders pin to the strip's edges at fixed widths;
+   Select/Start sit inboard of the clusters on the bottom row. */
 @media (pointer: coarse) and (orientation: portrait) and (min-width: 700px) {
   #lr {
     justify-content: space-between;
@@ -6237,8 +5856,6 @@ body.rewind-off #report-slider {
   margin-top: 10px;
 }
 
-/* The code field fills the row; the spinner overlays its right edge while
-   connecting, so no separate waiting line is needed. */
 .net-input-wrap {
   position: relative;
   flex: 1 1 auto;
@@ -6267,8 +5884,7 @@ body.rewind-off #report-slider {
   border-color: var(--accent);
 }
 
-/* Connecting: the field is locked (read-only) and dimmed, with the spinner at
-   its right — the read-only cursor + spinner + "Cancel" button convey waiting. */
+/* Connecting: the field is read-only and dimmed. */
 #net-code-input:read-only {
   color: var(--text-dim);
   border-color: var(--accent);
@@ -6276,8 +5892,7 @@ body.rewind-off #report-slider {
   cursor: default;
 }
 
-/* Only errors land here now (the wait is shown in-field), so it takes no space
-   until it has something to say — no empty gap under the button. */
+/* Errors only; takes no space until it has something to say. */
 .net-status {
   margin: 0;
   font-size: 13px;
@@ -6342,9 +5957,8 @@ body.rewind-off #report-slider {
 }
 .net-manual-code:focus { outline: none; border-color: var(--accent); }
 
-/* Footer toggle between the shared-code and manual-exchange views: a quiet
-   text link (same treatment as .home-manage-link), centered under the form.
-   A button (not an input) — small text here doesn't trigger iOS focus zoom. */
+/* Footer toggle between the two views. A button, so small text does not
+   trigger iOS focus zoom. */
 .net-view-toggle {
   display: block;
   margin: 16px auto 0;
@@ -6482,9 +6096,8 @@ body.net-mode #saves-modal .modal-toggle-row:has(#reset-save-slot) {
 }
 
 /* ───────────────────────── Google Drive sync ───────────────────────── */
-/* Sync status indicator — occupies the retired status-LED slot. Muted on
-   purpose: the accent belongs to the enhanced-audio indicator, and this should
-   read as ambient state, not an alert. */
+/* Sync status indicator. Muted: the accent belongs to the enhanced-audio
+   indicator. */
 #sync-indicator {
   display: inline-flex;
   align-items: center;
@@ -6527,9 +6140,8 @@ body.net-mode #saves-modal .modal-toggle-row:has(#reset-save-slot) {
 body.sync-shown #status {
   display: inline-flex;
 }
-/* Phones: icon only — tapping it toasts the description. The fps unit goes
-   too: with sync + enhanced-audio both showing, "48 fps" overflows the bar at
-   375pt, and the bare number reads fine. */
+/* Phones: icon only (tap toasts the description). The fps unit goes too:
+   with both indicators up, "48 fps" overflows the bar at 375pt. */
 @media (max-width: 560px) {
   #sync-indicator .sync-label,
   .fps-unit {
@@ -6573,8 +6185,7 @@ body.sync-shown #status {
   display: none;
 }
 
-/* Tile system chip — one identity slot per tile (replaced the cartridge glyph
-   and the duplicate corner badge). Box art takes the same slot when present. */
+/* Tile system chip: one identity slot per tile; box art takes the same slot. */
 .sys-chip {
   flex: 0 0 auto;
   width: 34px;
@@ -6803,13 +6414,9 @@ body.sync-shown #status {
  * ==========================================================
  * Reduced motion
  * ==========================================================
- * Last in the file on purpose: the overrides are same-specificity as the
- * rules they cancel, so source order is what makes them win. Pure opacity
- * fades (overlay-in, toast/indicator fades, the update-dot pulse) are kept —
- * they don't move anything — and so are the sub-0.1s press-feedback
- * transforms and the gameplay-state opacity fades on the touch controls,
- * which are functional. The .net-spinner slowdown lives with its component
- * (~line 4272).
+ * Last in the file: the overrides are same-specificity as the rules they
+ * cancel, so source order makes them win. Pure opacity fades and the
+ * sub-0.1s press-feedback transforms are kept.
  */
 @media (prefers-reduced-motion: reduce) {
   /* Entrance animations (slide/scale): show the settled state immediately.
@@ -6876,16 +6483,9 @@ body.sync-shown #status {
 }
 
 /* --- New-photo indicator -------------------------------------------------
-   One dot repeated at each step of the path to a photo you have not seen:
-   hamburger -> Capture -> Printed Photos. Each one clears when ITS OWN
-   element is used, so the trail shortens as you walk it and the last dot is
-   still lit when you arrive — that is what teaches where the gallery lives.
-   The state machine, including when tapping "View" on the print toast does
-   and does not clear them, is in index.js under "New-photo indicator".
-
-   On the two menu rows the dot rides inline, immediately after the label, so
-   it reads as part of the row rather than as a separate control; Capture's
-   chevron keeps its margin-left:auto and stays pinned right. */
+   One dot at each step of hamburger -> Capture -> Printed Photos; each
+   clears when its own element is used (state machine in index.js). On the
+   menu rows the dot rides inline after the label. */
 #capture-toggle.has-new-photo > span::after,
 #open-prints.has-new-photo > span::after {
   content: "";
@@ -6919,10 +6519,8 @@ body.sync-shown #status {
   position: relative;
 }
 
-/* The badge points at Capture ▸ Printed Photos. In every state where that
-   path is not on screen — no game, and the link / rollback / net modes that
-   hide #capture-toggle outright — it would point at nothing, so it does not
-   paint. The class stays on: the dot returns intact when the path does. */
+/* Not painted while the Capture path is off screen (no game, or the
+   link / rollback / net modes); the class stays on. */
 body:not(.has-game) #menu-btn.has-new-photo::after,
 body.link-mode #menu-btn.has-new-photo::after,
 body.rollback-mode #menu-btn.has-new-photo::after,
@@ -6941,10 +6539,9 @@ body.clip-replaying #controls {
   opacity: 0.45;
 }
 
-/* Sits just under the top bar. Kept a body-level sibling of #topbar (see
-   index.html) so the landscape bar transform can't capture it. The safe-t
-   term is not optional: the bar is (bar-h + safe-t) tall, so without it the
-   banner drew ON TOP of the bar on notched phones in portrait. */
+/* Just under the top bar; a body-level sibling of #topbar so the landscape
+   transform cannot capture it. The bar is (bar-h + safe-t) tall, so the
+   safe-t term is required. */
 #clip-banner {
   position: fixed;
   z-index: 550;
@@ -6962,14 +6559,8 @@ body.clip-replaying #controls {
 }
 
 /* --- Cartridge-specific top-bar actions (#tilt-recenter, #cam-flip) ---
-   Real top-bar buttons rather than chips floating over the stage: they used
-   to be position:fixed children of #topbar, which mobile landscape transforms
-   — so their `top` resolved against the slid-away bar and they landed on the
-   R shoulder button. They are .icon-btn first (chrome look, [hidden], hover
-   and clip-replay inerting all come free) and widen to hold a label, the same
-   icon+wording→icon-only trade #rb-disconnect makes.
-   Only ever ONE is visible: no cartridge is both a tilt cart and a camera
-   cart, so this is a single slot in the bar, not two. */
+   .icon-btn controls in the bar, not position:fixed chips (the landscape
+   transform of #topbar would capture those). Only one is ever visible. */
 .cart-btn {
   width: auto;
   gap: 7px;
@@ -6985,12 +6576,8 @@ body.clip-replaying #controls {
   height: 17px;
 }
 
-/* Two icons per button, one shown at a time. .needs-enable is the "the sensor
-   this drives is not on yet" state — the label changes with it, but a phone
-   shows no label at all, so the glyph has to carry the difference on its own.
-   Kept as a class swap rather than swapping innerHTML from JS: replacing the
-   markup would drop the <span> the 480px rule keys off, and re-parsing SVG on
-   every state change is more machinery than a class toggle. */
+/* Two icons per button: .needs-enable swaps them, since a phone shows no
+   label. A class swap, not innerHTML: the 480px rule keys off the <span>. */
 .cart-btn .cart-ico-enable {
   display: none;
 }
@@ -7003,10 +6590,8 @@ body.clip-replaying #controls {
   display: inline-block;
 }
 
-/* Narrow phones: the bar is already at capacity with the segmented playback
-   cluster, fps, mute and fullscreen — drop the wording and keep the glyph
-   (title/aria-label still carry the meaning). Matches the 480px breakpoint
-   the segmented bar and #rb-disconnect use. */
+/* Narrow phones: glyph only (title/aria-label carry the meaning). Same
+   480px breakpoint as the segmented bar and #rb-disconnect. */
 @media (max-width: 480px) {
   .cart-btn {
     width: var(--sz);
@@ -7016,10 +6601,8 @@ body.clip-replaying #controls {
   .cart-btn .cart-btn-label {
     display: none;
   }
-  /* 320pt-class phones have ~14px to spare once a cart action joins the bar,
-     and the fps/sync readout is the one variable-width item left. Let it
-     shrink (it already has min-width: 0) so a rare pile-up clips a diagnostic
-     rather than shoving the mute button past the right edge. */
+  /* The fps/sync readout is the one variable-width item; let it shrink so
+     a pile-up clips a diagnostic rather than pushing mute off the edge. */
   #status {
     flex: 0 1 auto;
     overflow: hidden;
@@ -7063,10 +6646,7 @@ body.clip-replaying #controls {
  * ==========================================================
  * Rewind scrubber on a phone
  * ==========================================================
- * The modal itself needs no phone variant — it is the same centred panel every
- * other modal uses, and .modal already handles a 320pt viewport. Only the two
- * controls that are DRAGGED rather than tapped get bigger, because a 28px
- * strip and a hairline range thumb are fine with a mouse and not with a thumb.
+ * Only the two dragged controls get bigger (.modal already handles 320pt).
  */
 @media (pointer: coarse) {
   .film-strip-wrap {
@@ -7082,10 +6662,8 @@ body.clip-replaying #controls {
   }
 }
 
-/* Short viewports (a 4"-5" phone, or any phone in landscape): the modal scrolls
-   like every other one, but the preview is the block worth shrinking first —
-   it is the same picture the strip already shows at the playhead, just bigger,
-   so trading its size keeps the confirm row above the fold for longer. */
+/* Short viewports: shrink the preview first to keep the confirm row above
+   the fold. */
 @media (max-height: 700px) {
   .modal-scrub .film-preview {
     width: 140px;

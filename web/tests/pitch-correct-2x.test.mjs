@@ -1,16 +1,10 @@
-// Linked (online rollback) 2x must honor the pitch-correct audio preference.
-// rollback_init builds FRESH cores that never saw the JS-side preference (solo
-// cores get it pushed at loadRom), so setSpeed2x re-pushes it alongside turbo —
-// otherwise a linked 2x plays pitched-up until the settings toggle happens to
-// re-apply it. These tests spy on the two wasm exports and drive the real
-// toggle paths (local button, peer relay).
+// rollback_init builds fresh cores that never saw the pitch-correct
+// preference (solo cores get it at loadRom), so setSpeed2x must re-push it.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 import { loadApp } from "./helpers.mjs";
 
-// Install spies on the wasm audio exports inside the vm; returns a reader for
-// the recorded calls, in order, as [name, arg] pairs.
 const spyAudioExports = (app) => {
   app.runIn(`
     var __audioCalls = [];
@@ -23,8 +17,7 @@ const spyAudioExports = (app) => {
 test("a peer's 2x toggle re-pushes pitch-correct onto the cores", async () => {
   const app = await loadApp();
   const calls = spyAudioExports(app);
-  // A live linked session whose user has pitch-correct ON. The rollback cores
-  // are fresh (rollback_init) — the wasm side has NOT seen the preference.
+  // A live linked session with pitch-correct on and fresh rollback cores.
   app.runIn("pitchCorrectFF = true; rollbackMode = true;");
   app.runIn("window.applyRemoteSpeed2x(true)");
   assert.deepEqual(calls(), [["turbo", 1], ["pcff", 1]],

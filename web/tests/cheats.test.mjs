@@ -1,18 +1,7 @@
-// Cheats modal add/validate UX (web/index.js), via the vm harness:
-//   - an add whose codes the core can't parse is REJECTED: nothing is inserted,
-//     the core's cheat set is restored, and the user's text stays in the form
-//     with the error shown next to it;
-//   - the form error clears when the user edits either input and on the next
-//     successful add — no stranded stale errors;
-//   - core parsing is per-cheat and all-or-nothing, so a multi-line add mixing
-//     valid and invalid lines is rejected as a whole;
-//   - legacy persisted entries that no longer parse (saved by builds that
-//     accepted unvalidated adds) are badged "Invalid" with a disabled checkbox,
-//     and list operations (toggle/delete) never route errors into the add form.
-//
-// The fake core mirrors load_cheats' contract: takes the serialized ".cht"
-// blob, returns "" or newline-separated `name: "line": message` errors, one
-// per failed cheat, first bad line wins. A line is "valid" iff it's 8+8 hex.
+// Cheats modal add/validate UX (web/index.js), via the vm harness. The fake
+// core mirrors load_cheats' contract: takes the serialized ".cht" blob,
+// returns "" or newline-separated `name: "line": message` errors, one per
+// failed cheat, first bad line wins. A line is valid iff it is 8+8 hex.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -57,8 +46,8 @@ const setup = async () => {
   app.sandbox.Module = core;
   app.api.currentOriginalName = "game.gba";
   const el = (id) => app.document.getElementById(id);
-  // The real markup ships `<p id="cheat-error" hidden>`; the fake DOM's
-  // default is hidden=false, so mirror the initial attribute here.
+  // The real markup ships `<p id="cheat-error" hidden>`; the fake DOM
+  // defaults to hidden=false.
   el("cheat-error").hidden = true;
   const add = async (name, codes) => {
     el("cheat-name").value = name;
@@ -79,9 +68,7 @@ test("valid add inserts an enabled cheat, clears the form, persists", async () =
   assert.equal(el("cheat-error").hidden, true);
   assert.equal(el("cheat-name").value, "");
   assert.equal(el("cheat-codes").value, "");
-  // Persisted under the per-game key.
   assert.match(String(app.idb.get("cheats:game.gba")), /Rare Candy/);
-  // The final core push holds the full (one-entry) list.
   assert.equal(core.calls[core.calls.length - 1],
     app.api.serializeCheats(app.api.cheatList));
 });
@@ -89,17 +76,13 @@ test("valid add inserts an enabled cheat, clears the form, persists", async () =
 test("invalid add is rejected: no insert, error at form, text kept, core restored", async () => {
   const { app, core, el, add } = await setup();
   await add("", "NOTACODE");
-  // Nothing inserted, nothing persisted.
   assert.equal(app.api.cheatList.length, 0);
   assert.equal(app.idb.has("cheats:game.gba"), false);
-  // Error is visible, names the offending line, and the codes input is
-  // flagged so the styling ties the message to the form.
   assert.equal(el("cheat-error").hidden, false);
   assert.match(el("cheat-error").textContent, /NOTACODE/);
   assert.equal(el("cheat-codes").getAttribute("aria-invalid"), "true");
-  // The user's text stays in the form for fixing.
   assert.equal(el("cheat-codes").value, "NOTACODE");
-  // The probe replaced the core's set; the empty real list was re-pushed.
+  // The probe replaced the core's set, so the real list must be re-pushed.
   assert.equal(core.calls[core.calls.length - 1], "");
 });
 
@@ -119,7 +102,6 @@ test("editing either input clears the form error", async () => {
   await el("cheat-codes").dispatch("input");
   assert.equal(el("cheat-error").hidden, true);
   assert.equal(el("cheat-codes").getAttribute("aria-invalid"), null);
-  // Same for the name input.
   await add("", "NOTACODE");
   assert.equal(el("cheat-error").hidden, false);
   await el("cheat-name").dispatch("input");
@@ -145,7 +127,7 @@ test("restoreCheats badges legacy entries that no longer parse", async () => {
   assert.equal(list.length, 2);
   assert.equal(list[0].error, "");
   assert.match(list[1].error, /NOTACODE/);
-  // Rendered rows: [checkbox, info, delete]; the broken one is marked.
+  // Rendered rows: [checkbox, info, delete].
   const rows = el("cheats-list").children;
   assert.equal(rows.length, 2);
   assert.equal(rows[0].classList.contains("cheat-row-invalid"), false);
@@ -166,15 +148,14 @@ test("list operations never route errors into the add form", async () => {
   await app.api.restoreCheats();
   assert.equal(el("cheat-error").hidden, true,
     "restoring a legacy broken entry must not light up the add form");
-  // Toggle the good entry: applyCheats runs, form error stays clear even
-  // though the pushed blob still contains the broken legacy entry.
+  // The pushed blob still contains the broken legacy entry; its error must
+  // not land in the add form.
   const cb = el("cheats-list").children[0].children[0];
   cb.checked = false;
   await cb.dispatch("change");
   await settle();
   assert.equal(el("cheat-error").hidden, true);
-  // And a live form error survives list operations: it describes the text
-  // still sitting in the form, which the toggle didn't change.
+  // A live form error survives list operations.
   await add("", "NOTACODE");
   assert.equal(el("cheat-error").hidden, false);
   const cb2 = el("cheats-list").children[0].children[0];

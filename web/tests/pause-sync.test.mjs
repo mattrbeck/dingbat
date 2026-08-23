@@ -1,8 +1,5 @@
-// Linked (online rollback) pause must freeze BOTH sides, exactly like 2x
-// drives both cores: a one-sided pause just stalls the peer at the rollback
-// prediction limit with nothing on their screen explaining why. These tests
-// drive the real togglePause paths (local button, peer relay) in the vm
-// harness, mirroring pitch-correct-2x.test.mjs.
+// Linked pause must freeze both sides (a one-sided pause stalls the peer at
+// the prediction limit). Drives the real togglePause paths.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -14,8 +11,7 @@ test("a local pause relays to the peer while linked", async () => {
     var __relayed = [];
     window.rbSendPause = (on) => __relayed.push(on);
     rollbackMode = true;
-    // The click path has a 350ms lockout vs the pointerup handler; a fresh vm's
-    // performance.now() is still inside it, so back-date the pointer stamp.
+    // The click path has a 350ms lockout vs pointerup; back-date the stamp.
     pausePointerTs = -10000;
   `);
   await app.document.getElementById("pause").dispatch("click");

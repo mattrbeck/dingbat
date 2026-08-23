@@ -1,19 +1,8 @@
-// End-to-end guard for the SYMMETRIC manual code exchange (netplay.js falls
-// back to it when the signaling server is unreachable but the network is up).
-//
-// The exchange has no server and no second round trip: BOTH sides create a
-// WebRTC offer, encode it with SDPCodec, and paste each other's single code.
-// Standard WebRTC can't take two offers, so each side locally rewrites the
-// peer's blob into an answer (SDPCodec.answerFrom) with complementary DTLS
-// roles picked by comparing the two code strings — the exact algorithm
-// netplay.js runs on Confirm. That both-sides-offer trick is the risky part
-// of the feature (ICE role conflict + munged a=setup + role-partitioned DCEP
-// stream ids), so this test drives it against REAL RTCPeerConnections in
-// headless Chromium and asserts the host's DataChannel opens on both sides
-// and a message round-trips.
-//
-// No STUN servers: host candidates only, so the test needs no network at all
-// (which also mirrors the same-LAN-without-internet case the fallback serves).
+// End-to-end guard for the symmetric manual code exchange: both sides offer,
+// each rewrites the peer's code into an answer (SDPCodec.answerFrom) with the
+// DTLS role netplay.js picks on Confirm. Drives real RTCPeerConnections in
+// headless Chromium (no STUN: host candidates only, so no network needed) and
+// asserts the host's DataChannel opens on both sides and a message round-trips.
 //
 // Run:  node web/manualpair.test.mjs   (after: npx playwright install chromium)
 
@@ -62,8 +51,8 @@ const run = async () => {
           setTimeout(finish, 3500);
         });
 
-      // Each side does exactly what netplay's manualPrepare does: offer PC with
-      // a pre-created (not yet wired) channel, full gather, encode.
+      // As netplay's manualPrepare: offer with a pre-created channel, full
+      // gather, encode.
       const mkSide = async () => {
         const pc = new RTCPeerConnection({ iceServers: [] });
         const chan = pc.createDataChannel("link", { ordered: true });
@@ -81,10 +70,8 @@ const run = async () => {
       if (!A.code || !B.code) throw new Error("encode failed");
       out.steps.push("encoded both offers");
 
-      // netplay's Confirm: deterministic role from the code strings; the host
-      // (DTLS server) rewrites the peer's blob with setup:active, the guest
-      // with setup:passive; host wires its own channel, guest takes
-      // ondatachannel.
+      // As netplay's Confirm: role from the code strings; host rewrites the
+      // peer's blob with setup:active, guest with setup:passive.
       const aIsHost = A.code > B.code;
       const host = aIsHost ? A : B;
       const guest = aIsHost ? B : A;
@@ -120,7 +107,6 @@ const run = async () => {
       ]);
       out.steps.push("host channel open on both sides");
 
-      // Round-trip a message both ways over the host's channel.
       const echoed = new Promise((resolve) => {
         gChan.onmessage = (e) => gChan.send("pong:" + e.data);
       });

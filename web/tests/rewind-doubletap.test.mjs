@@ -1,24 +1,15 @@
-// The rewind button carries two gestures on one target, and the whole point is
-// that they do not interfere: hold rewinds IMMEDIATELY (nothing is delayed
-// while the code waits to see whether a second press is coming), and a double
-// tap opens the film-strip scrubber after the fact. These tests pin both
-// directions — that a single tap opens nothing, and that a hold is never
-// mistaken for half a double tap.
+// Two gestures on the rewind button: hold rewinds immediately (nothing waits
+// for a possible second press), double tap opens the scrubber after the fact.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 import { loadApp } from "./helpers.mjs";
 
-// Timings, kept next to the app's own so a change there is visible here.
-// RW_TAP_MAX_MS = 250 (a press longer than this is a hold, never a tap) and
-// RW_DBLTAP_MS = 300 (the gap between the two taps), in web/index.js.
+// RW_TAP_MAX_MS = 250 and RW_DBLTAP_MS = 300 in web/index.js.
 const RW_HOLD_MS = 320;            // comfortably a hold, not a tap
 const RW_WINDOW_OVERSHOOT = 360;   // comfortably outside the double-tap window
 
-// openRewindScrubber() needs a game and a wasm module. The stub reports an
-// EMPTY rewind ring (0 samples), which is the cheapest state that still runs
-// the real open path end to end — the modal opens and shows its "no history
-// yet" hint. What is under test here is the gesture, not the strip.
+// An empty rewind ring is the cheapest state that still runs the real open path.
 const withGame = async () => {
   const app = await loadApp();
   app.runIn(`
@@ -38,7 +29,6 @@ const down = (app, ev = {}) => button(app).dispatch("pointerdown", { ...POINT, .
 const up = (app, ev = {}) => button(app).dispatch("pointerup", { ...POINT, ...ev });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// A tap: press and release with nothing between them.
 const tap = async (app, ev = {}) => {
   await down(app, ev);
   await up(app, ev);
@@ -50,7 +40,6 @@ test("a single tap rewinds and opens nothing", async () => {
   assert.equal(held(app), true, "the press must rewind on pointerdown, not later");
   await up(app);
   assert.equal(held(app), false);
-  // Long past any double-tap window: one tap is one tap forever.
   await sleep(RW_WINDOW_OVERSHOOT);
   assert.equal(modalOpen(app), false, "a single tap must not open the scrubber");
 });
@@ -66,8 +55,7 @@ test("a double tap opens the scrubber", async () => {
 
 test("the hold is never delayed by the gesture", async () => {
   const app = await withGame();
-  // The invariant that killed the earlier long-press design: the very first
-  // pointerdown must have started rewinding by the time it returns.
+  // The first pointerdown must have started rewinding by the time it returns.
   await down(app);
   assert.equal(held(app), true);
   await sleep(RW_HOLD_MS);

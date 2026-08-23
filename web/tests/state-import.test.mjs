@@ -1,21 +1,7 @@
-// Save-state import toast copy.
-//
-// Two rules, and the second one is newer:
-//
-//  1. A file that isn't a dingbat save state at all must NOT be reported as a
-//     rejected state. That distinction is a JS-side sniff of the "DGBSTATE"
-//     header magic (src/dingbat/common/serialize.nim), because wasm_load_state
-//     only returns a boolean.
-//  2. A state the core DID recognise and refuse must say WHICH refusal it was.
-//     "State didn't match this game" used to be the answer to every one of
-//     them, and it is actively wrong for four of the five — it sent people
-//     hunting for the wrong problem when the real answer was "your dingbat is
-//     older than the one that wrote this". The core now classifies the refusal
-//     (StateRejectKind, exposed as wasm_state_error_kind) and the UI writes a
-//     sentence per cause that says what to do about it.
-//
-// These assertions are the contract for that copy. If the wording changes,
-// change it here too — but do not collapse two causes back onto one string.
+// Save-state import toast copy. A non-state file is told apart by a JS-side
+// sniff of the "DGBSTATE" magic (wasm_load_state only returns a boolean); a
+// refused state names its cause (StateRejectKind via wasm_state_error_kind),
+// one sentence each. Do not collapse two causes onto one string.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -29,8 +15,6 @@ const SRK = {
   TOO_NEW: 4, TRUNCATED: 5, CORRUPT: 6, NO_FILE: 7,
 };
 
-// A fake Emscripten Module whose _wasm_load_state returns `result` and whose
-// _wasm_state_error_kind returns `kind`.
 const fakeModule = (result, kind = SRK.NONE, detail = "") => ({
   _malloc: () => 8,
   _free() {},
@@ -105,8 +89,7 @@ test("a damaged state reassures that the running game is untouched", async () =>
   app.sandbox.Module = fakeModule(0, SRK.CORRUPT);
   app.api.applyImportedState(realState());
   assert.match(app.toasts.at(-1), /damaged/);
-  // The core restores its pre-load payload on any failure; saying so is the
-  // difference between a scary message and an informative one.
+  // The core restores its pre-load payload on any failure; say so.
   assert.match(app.toasts.at(-1), /nothing was changed/);
 });
 
@@ -123,8 +106,7 @@ test("every cause gets a distinct sentence", async () => {
 });
 
 test("an unclassified refusal still says something useful", async () => {
-  // Older wasm builds have no _wasm_state_error_kind at all; the UI must not
-  // fall back to a blank toast or to a raw exception string.
+  // Older wasm builds have no _wasm_state_error_kind.
   const app = await loadApp();
   app.sandbox.Module = {
     _malloc: () => 8, _free() {}, _wasm_load_state: () => 0,

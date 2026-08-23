@@ -1,26 +1,15 @@
-// Shared test helper: pulls the REAL WebGL2 present shaders out of
-// web/glpresent.js so both the pure-JS UV unit test (uv.test.mjs) and the
-// headless-Chromium GL readback test (render.test.mjs) exercise the exact GLSL
-// that ships — not a reimplementation. A future edit to createGlRenderer's
-// VERT/FRAG in glpresent.js is therefore what is under test: change the shader
-// and these tests move with it. (The shaders lived in index.js until they were
-// factored into glpresent.js, shared by the main page and the embed.)
-//
-// Motivation: a vertex-shader UV bug (`v_uv = p*0.5`, the fullscreen-triangle
-// UVs halved) made every ROM render as only the bottom-left quadrant zoomed 2x
-// and SHIPPED, because nothing asserted the rendered pixels matched the source
-// frame. Fixed in bb7561b (`v_uv = vec2(p.x, 1.0 - p.y)`). These helpers make
-// that whole class (quadrant / Y-flip / scale / wrong upload dims) catchable.
-//
-// Zero runtime dependencies; reads glpresent.js as text at import time.
+// Test helper: extracts the shipped VERT/FRAG from web/glpresent.js so
+// uv.test.mjs and render.test.mjs exercise the real GLSL, not a copy. Pins
+// the halved-UV regression (`v_uv = p*0.5` rendered only the bottom-left
+// quadrant at 2x; fixed bb7561b) and its class: quadrant, Y-flip, scale,
+// wrong upload dims.
 
 import { readFileSync } from "node:fs";
 
 const PRESENT_JS = new URL("./glpresent.js", import.meta.url);
 
-// Extract the first backtick-delimited template literal assigned to `name`.
-// The shader literals contain no nested backticks, so a non-greedy match to the
-// next backtick is exact.
+// The shader literals contain no nested backticks, so a non-greedy match
+// to the next backtick is exact.
 function extractLiteral(src, name) {
   const re = new RegExp("const\\s+" + name + "\\s*=\\s*`([\\s\\S]*?)`");
   const m = src.match(re);
@@ -33,16 +22,11 @@ export function readShaders() {
   return { VERT: extractLiteral(src, "VERT"), FRAG: extractLiteral(src, "FRAG"), src };
 }
 
-// --- Pure-JS mirror of the vertex-shader UV math (Layer 2 tripwire) ----------
-//
-// The GLSL builds a fullscreen triangle from gl_VertexID and assigns v_uv from
-// `p`. We evaluate the ACTUAL `v_uv = <expr>;` expression pulled from index.js
-// (not a hardcoded copy) so the buggy `p*0.5` form and the correct
-// `vec2(p.x, 1.0 - p.y)` form give genuinely different results here.
+// Pure-JS mirror of the vertex shader's UV math. The `v_uv = <expr>;`
+// expression is evaluated from the extracted source, not a hardcoded copy.
 
-// p per vertex id: vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)).
-// This is the standard fullscreen-triangle position; it was never the bug and
-// is not what these tests guard, so it is reproduced directly.
+// p per vertex id: vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)),
+// the standard fullscreen-triangle position.
 export function pForVertex(id) {
   return [(id << 1) & 2, id & 2];
 }
@@ -60,8 +44,7 @@ export function uvExpr(vert) {
   return m[1].trim();
 }
 
-// Split a top-level comma-separated arg list (no nested parens in our exprs,
-// but handle them anyway for robustness).
+// Split a top-level comma-separated arg list (paren-aware).
 function splitTopComma(s) {
   const out = [];
   let depth = 0, start = 0;
@@ -85,10 +68,8 @@ function evalScalar(expr, px, py) {
   return Function(`"use strict";return (${js});`)();
 }
 
-// Evaluate the v_uv expression for a given vertex, returning [u, v].
-// Handles the two shapes the shader has taken:
-//   vec2(A, B)   — component form (the fixed shader)
-//   p * S  / p   — whole-vector form applied per component (the p*0.5 bug)
+// [u, v] for a vertex. Handles both shapes: vec2(A, B) (component form) and
+// a whole-vector expression in p (the p*0.5 bug), applied per component.
 export function uvForVertexFromExpr(expr, id) {
   const [px, py] = pForVertex(id);
   const vec = expr.match(/^vec2\(([\s\S]*)\)$/);
@@ -106,11 +87,9 @@ export function uvForVertexFromExpr(expr, id) {
   return [comp(px), comp(py)];
 }
 
-// Interpolate v_uv at an arbitrary clip-space point using barycentric weights of
-// the fullscreen triangle. w=1 for every vertex, so linear (affine) interpolation
-// is exact — no perspective divide. This reproduces what the GPU rasterizer does
-// for the fragment at that clip position, giving us the texture UV the visible
-// screen corner samples.
+// v_uv at a clip-space point by barycentric interpolation over the
+// fullscreen triangle. w=1 at every vertex, so affine interpolation is exact
+// (what the rasterizer does for that fragment).
 export function uvAtClip(expr, clipPt) {
   const A = clipForVertex(0), B = clipForVertex(1), C = clipForVertex(2);
   const uvA = uvForVertexFromExpr(expr, 0);

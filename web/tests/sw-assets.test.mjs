@@ -1,18 +1,13 @@
-// Tripwire: every static file index.html actually loads must be in the
-// service worker's precache ASSETS list. The production SW is cache-first
-// with no runtime caching, so any script/stylesheet missing from ASSETS is
-// served from the network only — and offline, its load fails and index.js
-// dies at the first use of the missing script's globals. This shipped once:
-// glpresent.js was added to index.html (b92e72e) but not to sw.js, so the
-// deployed PWA half-booted offline ("createGlRenderer is not defined").
+// Every static file index.html loads must be in sw.js's ASSETS: the
+// production SW is cache-first with no runtime caching, so a missing script
+// fails offline and index.js dies at its first global (b92e72e shipped that).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const read = (f) => readFileSync(new URL("../" + f, import.meta.url), "utf8");
 
-// The SW ASSETS entries, normalized to bare file names ("./" -> index.html's
-// navigation entry, kept as "").
+// ASSETS normalized to bare file names ("./" kept as "").
 const swAssets = () => {
   const m = read("sw.js").match(/const ASSETS = \[([^\]]+)\]/);
   assert.ok(m, "ASSETS list not found in sw.js");
@@ -21,10 +16,8 @@ const swAssets = () => {
   );
 };
 
-// Static, same-origin, unconditionally-loaded references in index.html.
-// Conditional loads (pacing-probe.js behind ?probe) and icons that only
-// matter at install/bookmark time (favicons, touch icons) are not offline-
-// critical, so only <script src> and stylesheet/manifest links are enforced.
+// Only <script src> and stylesheet/manifest links are enforced; conditional
+// loads (?probe) and icons are not offline-critical.
 const htmlRefs = () => {
   const html = read("index.html");
   const refs = [];
@@ -58,7 +51,7 @@ test("wasm module files are precached", () => {
 test("precached files all exist on disk", () => {
   for (const f of swAssets()) {
     if (f === "") continue; // "./" navigation entry
-    // em.js / em.wasm are emscripten build outputs, absent in a fresh checkout
+    // em.js / em.wasm are build outputs, absent in a fresh checkout.
     if (f === "em.js" || f === "em.wasm") continue;
     assert.doesNotThrow(() => read(f), f + " is in ASSETS but not on disk");
   }

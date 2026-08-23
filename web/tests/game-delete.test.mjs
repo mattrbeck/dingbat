@@ -1,16 +1,7 @@
-// "Delete everything for this game" — the completeness half of the two
-// destructive paths in the Manage ROMs modal.
-//
-// saves.test.mjs / sync.test.mjs / remove-from-device.test.mjs already pin
-// WHICH path does what to Drive. This file pins WHAT is left behind, because
-// that is where the bug was: the auto-resume snapshot ("stateauto:<game>") and
-// the cheat list ("cheats:<game>") were not in any delete path, so a deleted
-// game kept offering "Last session saved 2m ago — Resume" and kept its cheats.
-//
-// The assertions are deliberately written as "here is every key the app stores;
-// after the delete, these exact ones remain" rather than spot-checks of a few
-// keys — a new per-game record that nobody taught the delete paths about shows
-// up here as residue instead of quietly surviving in production.
+// "Delete everything for this game": pins what is left behind. Assertions
+// enumerate every key the app stores and the exact set that remains, so a
+// new per-game record the delete paths don't know about shows up as residue
+// (as stateauto:<game> and cheats:<game> once did).
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -18,9 +9,7 @@ import { loadApp, jsonRes, bytesRes, u8, eq, settle } from "./helpers.mjs";
 
 // ── The inventory ───────────────────────────────────────────────────────────
 
-// Every IndexedDB record web/index.js writes that is NOT tied to one game:
-// the library index and its sort order, the Drive sync state, the two BIOS
-// blobs, the printer gallery, and the settings blobs (SETTINGS_KEYS).
+// Every IndexedDB record web/index.js writes that is not tied to one game.
 const GLOBAL_KEYS = [
   "recent", "roms_sort", "gdrive_sync", "prints", "bios:gba", "bios:gbc",
   "system", "audio", "colorCorrect", "video", "keybindings", "large-controls",
@@ -28,11 +17,8 @@ const GLOBAL_KEYS = [
   "runahead", "gb-palette",
 ];
 
-// Every IndexedDB key web/index.js writes FOR one game. Spelled out here rather
-// than imported from index.js on purpose: these tests are the independent
-// statement of the contract. The "index.js agrees with this list" test below
-// ties the two together, so a per-game record added to the app without being
-// added here (or vice versa) fails loudly.
+// Every IndexedDB key web/index.js writes for one game. Spelled out, not
+// imported: the "index.js agrees with this list" test ties the two together.
 const perGameKeys = (n) => [
   "rom:" + n,                 // the ROM image
   "art:" + n,                 // box art pulled out of the zip it arrived in
@@ -40,21 +26,18 @@ const perGameKeys = (n) => [
   "save:" + n + "-p2",        // the 2P link partner's battery save
   "stateauto:" + n,           // auto-resume snapshot ("Resume" toast)
   "cheats:" + n,              // this game's cheat list
-  // Nine manual save-state slots + their thumbnail/timestamp records. Slot 0
-  // is the legacy un-suffixed key pair.
+  // Nine save-state slots; slot 0 is the legacy un-suffixed key pair.
   "state:" + n, "statemeta:" + n,
   ...[1, 2, 3, 4, 5, 6, 7, 8].flatMap((s) =>
     ["state:" + n + ":slot" + s, "statemeta:" + n + ":slot" + s]),
 ];
 
-// Keys of a game that Drive mirrors — parseDriveFileName recognises these and
-// only these, so they are the ones a Delete can queue for remote deletion.
+// The keys Drive mirrors (what parseDriveFileName recognises).
 const syncableKeys = (n) =>
   perGameKeys(n).filter((k) =>
     !k.startsWith("art:") && !k.startsWith("stateauto:") && !k.startsWith("cheats:"));
 
-// A plausible stored value for each key shape, so nothing downstream chokes on
-// the fixture (statemeta is an object, cheats is text, the rest are bytes).
+// A plausible stored value per key shape (statemeta object, cheats text, bytes).
 const seedValue = (key, name) => {
   if (key.startsWith("rom:")) return { name, data: u8(1, 2, 3, 4, 5, 6, 7, 8) };
   if (key.startsWith("statemeta:")) return { thumb: "data:image/png;base64,AA==", ts: 1000 };
@@ -63,12 +46,10 @@ const seedValue = (key, name) => {
   return u8(7, 7);
 };
 
-// One game with EVERY kind of per-game data attached.
 const seedGame = (app, name) => {
   for (const k of perGameKeys(name)) app.idb.set(k, seedValue(k, name));
 };
 
-// The globals, plus a recents index listing the games given.
 const seedGlobals = (app, games) => {
   for (const k of GLOBAL_KEYS) app.idb.set(k, { stub: k });
   app.idb.set("recent", games.map((n, i) => ({ name: n, ts: 10 - i })));
@@ -81,7 +62,6 @@ const sorted = (a) => [...a].sort();
 
 const FILES_URL = "https://www.googleapis.com/drive/v3/files";
 
-// appDataFolder stand-in: lists, downloads, accepts uploads, records deletes.
 const makeDrive = (seed = {}) => {
   const byName = new Map();
   let idc = 0;
@@ -124,11 +104,9 @@ const signIn = (app, sigs = {}) => {
 
 test("index.js's perGameKeys is exactly the per-game inventory this file pins", async () => {
   const app = await loadApp();
-  // allPerGameKeys is what BOTH destructive paths enumerate from, so this is
-  // the join between the app's idea of "everything for one game" and ours.
+  // allPerGameKeys is what both destructive paths enumerate from.
   eq(sorted(app.runIn("allPerGameKeys('A.gba')")), sorted(perGameKeys("A.gba")));
 
-  // And the groups the two paths differ on are what their comments claim.
   const groups = app.runIn("perGameKeys('A.gba')");
   eq(sorted(groups.bytes), ["art:A.gba", "rom:A.gba"]);
   eq(groups.session, ["stateauto:A.gba"], "the resume snapshot is its own group");
@@ -177,18 +155,16 @@ test("a deleted game offers no Resume, no cheats, and no save states", async () 
   seedGame(app, "A.gba");
   app.api.currentOriginalName = "A.gba";
 
-  // #toast is a stack of .toast-item pills; an "offer" is one carrying a
-  // tappable action, and .leaving ones are already retired (mid-fade).
+  // An "offer" is a .toast-item with a tappable action; .leaving ones are retired.
   const toast = app.document.getElementById("toast");
   const offer = () => {
     const pill = toast.children.find((c) =>
       c.classList.contains("has-action") && !c.classList.contains("leaving"));
     return pill ? pill.children.map((c) => c.textContent).join(" ") : null;
   };
-  // Retire the whole stack through the app's own path, as its timers would.
   const clearToast = () => app.runIn("toastItems.slice().forEach(dismissToast)");
 
-  // Positive control: with the game's data present, all three fire.
+  // Positive control.
   await app.runIn("offerAutoResume()");
   assert.match(offer() || "", /Resume/, "the Resume offer appears while the data exists");
   await app.api.restoreCheats();
@@ -200,8 +176,7 @@ test("a deleted game offers no Resume, no cheats, and no save states", async () 
   await app.api.deleteGameEverywhere("A.gba");
   await settle();
 
-  // The game is gone but still "loaded" — the harshest case, since every one
-  // of these reads keys off currentOriginalName.
+  // Gone but still "loaded": every offer reads keys off currentOriginalName.
   await app.runIn("offerAutoResume()");
   assert.equal(offer(), null, "no Resume offer for a deleted game");
   await app.api.restoreCheats();
@@ -223,8 +198,7 @@ test("Delete mirrors to Drive: every synced key queued, tombstone raised", async
 
   eq(sorted(app.api.syncState.queueDel), sorted(syncableKeys("A.gba")),
     "exactly the keys Drive holds are queued for remote deletion");
-  // The local-only three must NOT be queued — markDelete drops them anyway,
-  // but a queue entry Drive can never satisfy would sit there forever.
+  // The local-only three must not be queued: Drive could never satisfy them.
   for (const k of ["art:A.gba", "stateauto:A.gba", "cheats:A.gba"]) {
     assert.ok(!app.api.syncState.queueDel.includes(k), k + " is not a Drive file");
   }
@@ -235,7 +209,6 @@ test("Delete mirrors to Drive: every synced key queued, tombstone raised", async
 
 test("a game deleted on another device is wiped just as completely here", async () => {
   const app = await loadApp();
-  // Drive says A.gba was deleted (tombstone newer than our recents entry).
   const drive = makeDrive({
     library: new TextEncoder().encode(JSON.stringify({
       recents: [{ name: "B.gb", ts: 9 }],
@@ -249,8 +222,7 @@ test("a game deleted on another device is wiped just as completely here", async 
   seedGame(app, "B.gb");
 
   const pull = app.api.pullSync({ silent: true });
-  // The "Games removed on another device" modal defaults to Continue (drop
-  // the local copies) when dismissed.
+  // The "removed on another device" modal defaults to Continue on dismiss.
   for (let i = 0; i < 50; i++) {
     if (app.document.body.children.some(
       (c) => String(c.className).includes("sync-modal"))) break;
@@ -270,10 +242,8 @@ test("a game deleted on another device is wiped just as completely here", async 
 });
 
 // ── Remove from device ──────────────────────────────────────────────────────
-//
-// A DIFFERENT operation: free this device's copy, leave the Drive library
-// alone so one tap brings the game back. It must therefore keep everything
-// irreplaceable, and must not touch Drive at all.
+// Frees this device's copy only: keeps everything irreplaceable, never
+// touches Drive.
 
 test("Remove from device frees the ROM-shaped data and keeps every save", async () => {
   const app = await loadApp();
@@ -287,8 +257,6 @@ test("Remove from device frees the ROM-shaped data and keeps every save", async 
   assert.equal(await app.api.removeGameFromDevice("A.gba"), true);
   await settle();
 
-  // Gone: the ROM bytes, the art that only decorates them, and the resume
-  // snapshot of a game this device can no longer launch.
   const freed = ["rom:A.gba", "art:A.gba", "stateauto:A.gba"];
   const kept = perGameKeys("A.gba").filter((k) => !freed.includes(k));
   eq(keysLeft(app),
@@ -318,8 +286,7 @@ test("Remove from device leaves the Drive side completely intact", async () => {
   eq(app.api.syncState.queueDel, [], "and nothing is queued to delete remotely");
   eq((app.idb.get("recent") || []).map((r) => r.name), ["A.gba"],
     "the library entry stays, so the game still has a (Drive-only) tile");
-  // The saves that stayed behind are pushed up, so the local copy is also a
-  // backed-up copy.
+  // The saves that stay are pushed up first.
   for (const k of ["save:A.gba", "save:A.gba-p2", "state:A.gba"]) {
     assert.ok(app.api.syncState.queueUp.includes(k), k + " queued for backup");
   }

@@ -1,22 +1,14 @@
-// The two cartridge-specific top-bar buttons each have an "Enable" state.
-// Before its sensor is switched on, #cam-flip is "Enable camera" and
-// #tilt-recenter is "Enable tilt" — the durable way in, because the load-time
-// offer toast is easy to miss and there is no way to summon it back. Once
-// frames (or orientation readings) are flowing they become Switch camera and
-// Recenter.
-//
-// Every decision keys off genuine liveness rather than a non-null handle: a
-// MediaStream whose video track has ended is NOT live (iOS ends tracks when
-// the page is backgrounded), and tilt is only on once the orientation listener
-// is actually attached.
+// The cartridge top-bar buttons' "Enable" state (#cam-flip, #tilt-recenter)
+// keys off genuine liveness, not a non-null handle: a MediaStream whose video
+// track has ended is not live (iOS ends tracks on backgrounding), and tilt is
+// on only once the orientation listener is attached.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 import { loadApp } from "./helpers.mjs";
 
-// Pretend a Game Boy Camera cart is running. _wasm_camera_attach reports a
-// buffer but _wasm_camera_frame_ptr stays null, so the notice path stops
-// before it needs a real 2D canvas.
+// A Game Boy Camera cart whose _wasm_camera_frame_ptr stays null, so the
+// notice path stops before it needs a real 2D canvas.
 const armCameraCart = (app, { hasCamera = 1 } = {}) =>
   app.runIn(`
     globalThis.Module = {
@@ -74,31 +66,26 @@ test("without getUserMedia the page itself is the problem", async () => {
 test("every notice is short lines of real text", async () => {
   const app = await loadApp();
   for (const kind of ["prompt", "blocked", "missing", "ended", "insecure"]) {
-    // Both pointing-device wordings: "Tap" and "Click" are different lengths.
     for (const touch of [false, true]) {
       const lines = app.runIn(`camNoticeLines("${kind}", ${touch})`);
       assert.ok(Array.isArray(lines) && lines.length >= 2 && lines.length <= 5,
         `${kind}: expected 2-5 lines, got ${JSON.stringify(lines)}`);
       for (const l of lines) {
         assert.equal(typeof l, "string");
-        // Anything longer gets auto-shrunk below the size the cart's dither
-        // matrix can hold together. tools/cammsg.mjs measures this properly
-        // (in a real browser, in px); this is the cheap standing guard.
+        // Longer text auto-shrinks below what the cart's dither matrix can
+        // hold together; tools/cammsg.mjs measures this properly.
         assert.ok(l.length > 0 && l.length <= 14, `${kind}: "${l}" is too long`);
       }
     }
   }
 });
 
-// The two notices that name the top-bar button must keep naming the button
-// that exists. Both wordings come from CAM_ENABLE_LABEL via the {label}
-// placeholder, so this fails the moment someone renames one and not the other.
+// The notices that name the top-bar button take it from CAM_ENABLE_LABEL via
+// the {label} placeholder; fails if one is renamed and not the other.
 test("the notices quote the button's real label", async () => {
   const app = await loadApp();
   armCameraCart(app);
   app.runIn("camCartBtnUpdate()");
-  // What the button renders IS the shared constant — not a copy that happens
-  // to match today.
   const label = camLabel(app).textContent;
   assert.equal(label, app.runIn("CAM_ENABLE_LABEL"));
   assert.equal(camBtn(app).title, app.runIn("CAM_ENABLE_LABEL"));
@@ -106,13 +93,11 @@ test("the notices quote the button's real label", async () => {
     const raw = app.runIn(`CAM_NOTICES["${kind}"]`);
     assert.ok(raw.includes("{label}"),
       `${kind} must name the button through {label}, not a literal: ${raw}`);
-    // The placeholder resolves to the button's own wording, both wordings.
     for (const touch of [false, true]) {
       assert.ok(app.runIn(`camNoticeLines("${kind}", ${touch})`).includes(label),
         `${kind} should render the button's actual label`);
     }
   }
-  // No notice may spell the label out for itself — that is the drift.
   for (const kind of ["prompt", "blocked", "missing", "ended", "insecure"]) {
     assert.ok(!app.runIn(`CAM_NOTICES["${kind}"]`).includes(label),
       `${kind} hardcodes "${label}" instead of using {label}`);
@@ -183,10 +168,9 @@ test("tapping the un-enabled button asks for the camera, not a switch",
     const app = await loadApp();
     armCameraCart(app);
     app.runIn("camCartBtnUpdate()");
-    // Deliberately not awaited: the harness's getUserMedia never settles, and
-    // that is exactly what lets the in-flight state be observed. camPending
-    // still being set is proof the request went out from the click itself —
-    // there is no await between the two, which is what iOS requires.
+    // Not awaited: the harness's getUserMedia never settles, which is what
+    // lets the in-flight state be observed. camPending set proves the request
+    // went out from the click itself, with no await before it (iOS requires this).
     camBtn(app).dispatch("click");
     await new Promise((r) => setImmediate(r));
     assert.equal(app.runIn("camPending"), true);

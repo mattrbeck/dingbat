@@ -1,25 +1,14 @@
-// The input-display overlay (Settings -> Controls -> "Show inputs on screen",
-// or the I key): a DOM controller over the stage that lights each button while
-// it is held, for stream viewers and for debugging.
-//
-// The thing worth guarding is the CHOKEPOINT. Keyboard, touch and gamepad
-// reach the core by three different routes, and the overlay is only ever
-// trustworthy if all three notify it — an overlay that agrees with the core
-// for two sources out of three is worse than no overlay, because it looks
-// authoritative while dropping presses. So these tests drive the REAL entry
-// points (a synthetic keydown through the document handler, setInputs as the
-// touch buttons call it, routeP1Input) and assert on the cells, never on a
-// convenience function invented for the test.
-//
-// The harness is node:vm with a fake DOM, so nothing here asserts on pixels —
-// only on which cell carries the lit class, and on what was persisted.
+// The input-display overlay. Keyboard, touch and gamepad reach the core by
+// three routes and all three must notify the overlay, so these drive the
+// real entry points (document keydown, setInputs, routeP1Input) and assert
+// on which cell carries the lit class.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { loadApp, settle, eq } from "./helpers.mjs";
 
-// Core input ids, in the order setInput uses (src/dingbat_wasm.nim).
+// Core input ids in setInput order (src/dingbat_wasm.nim).
 const UP = 0, DOWN = 1, LEFT = 2, RIGHT = 3, A = 4, B = 5, SELECT = 6,
       START = 7, L = 8, R = 9;
 
@@ -28,7 +17,7 @@ const CELL = ["io-up", "io-down", "io-left", "io-right", "io-a", "io-b",
 
 const boot = async ({ on = true } = {}) => {
   const app = await loadApp();
-  // A core has to look present or gameKeyHandler declines to route anything.
+  // gameKeyHandler routes nothing without a core present.
   app.runIn(`globalThis.setInputCalls = [];
              globalThis.Module = { _setInput: (id, d) => setInputCalls.push([id, d]) };`);
   if (on) await app.runIn("setInputDisplay(true)");
@@ -51,8 +40,7 @@ test("a press lights exactly its own cell, and the release puts it out", async (
 
 test("the keyboard path lights the overlay — the same event that reaches the core", async () => {
   const app = await boot();
-  // The real handler, via the real document listener: KeyZ is the default
-  // binding for A, so this is what a player pressing Z actually produces.
+  // KeyZ is the default binding for A.
   await app.dispatchDoc("keydown", { code: "KeyZ", target: app.document.body });
   assert.deepEqual(lit(app), [A]);
   eq(app.runIn("setInputCalls"), [[A, 1]],
@@ -71,7 +59,7 @@ test("held-key repeats do not churn, and the cell stays lit", async () => {
 
 test("the touch path lights the overlay too (setInputs, as the buttons call it)", async () => {
   const app = await boot();
-  // A diagonal touch cell carries two ids; both arms have to light.
+  // A diagonal touch cell carries two ids.
   app.runIn(`setInputs([${UP}, ${LEFT}], true)`);
   assert.deepEqual(lit(app), [UP, LEFT]);
   app.runIn(`setInputs([${UP}, ${LEFT}], false)`);
@@ -80,7 +68,7 @@ test("the touch path lights the overlay too (setInputs, as the buttons call it)"
 
 test("the gamepad path lights the overlay (it never touches routeP1Input)", async () => {
   const app = await boot();
-  // Standard-mapping indices: 9 = Start, 5 = RB -> R shoulder.
+  // Standard-mapping indices: 9 = Start, 5 = RB.
   app.runIn(`
     globalThis.padDown = new Set();
     navigator.getGamepads = () => [{
@@ -117,9 +105,8 @@ test("with the overlay off nothing lights, but switching it on mid-hold is hones
   app.runIn(`routeP1Input(${START}, true)`);
   assert.deepEqual(lit(app), [], "off means off");
   await app.runIn("setInputDisplay(true)");
-  // Deliberate: a toggle clears rather than back-fills. The alternative is a
-  // cell that lights for a button whose keyup already went missing, and a
-  // stuck-on cell is the one failure a viewer would notice.
+  // A toggle clears rather than back-fills: a stuck-on cell is the one
+  // failure a viewer would notice.
   assert.deepEqual(lit(app), []);
   app.runIn(`routeP1Input(${START}, false)`);
   app.runIn(`routeP1Input(${START}, true)`);
@@ -158,9 +145,8 @@ test("the I shortcut toggles the setting and persists it", async () => {
 
 test("a game key bound to I still wins over the shortcut", async () => {
   const app = await boot({ on: false });
-  // 105 == SDL keycode for 'i'. Rebinding A to I makes KeyI a game key, and a
-  // game key must never be eaten by a shortcut (the rule the whole shortcut
-  // handler opens with).
+  // 105 == SDL keycode for 'i'. A bound game key must never be eaten by a
+  // shortcut.
   const bindings = app.runIn("activeBindings.slice()");
   bindings[A] = 105;
   app.runIn(`applyKeybindings(${JSON.stringify(Array.from(bindings))})`);
@@ -206,8 +192,7 @@ test("Reset all settings turns it back off and forgets the key", async () => {
 });
 
 test("the markup carries every cell the code looks up, and the L/R row is gated", async () => {
-  // The fake DOM invents an element for any id asked of it, so a typo'd id
-  // would go unnoticed here forever. Read the real HTML/CSS instead.
+  // The fake DOM invents an element for any id, so read the real HTML/CSS.
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   for (const id of CELL)
     assert.ok(html.includes(`id="${id}"`), `#${id} is missing from index.html`);

@@ -1,24 +1,14 @@
-// --- Online link play (multiplayer phase 3b) ---
-// Two browsers, one emulated link cable: a WebRTC DataChannel
-// (reliable+ordered) carries the linkproto wire frames between this page's
-// wasm core (netlink_* exports) and the peer's. Peers find each other
-// through the room-code signaling server (web/signaling/server.js), which
-// only relays the SDP offer/answer + ICE candidates — game traffic is
-// always peer-to-peer.
-//
-// Loaded after index.js (shares its top-level bindings: Module, writeToFS,
-// showToast, currentRomName, ...). The RAF loop in index.js calls netStep/
-// netAfterTick while netMode is set, exactly like the linkMode branch.
+// Online link play: a reliable+ordered WebRTC DataChannel between two
+// browsers. The room-code signaling server (web/signaling/server.js) relays
+// only SDP + ICE; game traffic is peer-to-peer. Loaded after index.js and
+// shares its top-level bindings; the index.js RAF loop calls netStep /
+// netAfterTick while netMode is set.
 
-// ?signal=ws://... overrides the signaling server (dev/self-hosted);
-// ?linkdelay=50 adds N ms of artificial latency to every outgoing message
-// (internet simulation, mirrors the native --netlink-delay-ms knob).
-// Loopback, RFC 1918 LAN, and mDNS .local origins are dev serves: they talk
-// to a signaling server on the same host (:8790, plain ws). Everything else
-// defaults to the production endpoint (the static site is on GitHub Pages,
-// which can't proxy WebSockets, so a same-origin /signal path can never work
-// there). An https dev serve needs ?signal= — ws: from https: is blocked as
-// mixed content.
+// ?signal=ws://... overrides the signaling server; ?linkdelay=N adds N ms of
+// latency to every outgoing message. Loopback, RFC 1918 and .local origins
+// use a same-host server on :8790 (plain ws); everything else the production
+// endpoint (GitHub Pages cannot proxy WebSockets). An https dev serve needs
+// ?signal=, since ws: from https: is mixed content.
 const NET_PARAMS = new URLSearchParams(location.search);
 const NET_LOCAL_HOST =
   location.hostname === "localhost" ||
@@ -34,20 +24,14 @@ const NET_SIGNAL_URL =
     ? "ws://" + location.hostname + ":8790"
     : "wss://signal.dingbat.gg/signal");
 const NET_LINK_DELAY = parseInt(NET_PARAMS.get("linkdelay") || "0", 10) || 0;
-// SIO-word speculation is DISABLED — it is unsafe for a real trade. It predicts
-// the peer's reply and puts the *next* transfer (built from that prediction) on
-// the wire; when the master's outgoing word depends on the received word (true
-// in any real trade) a misprediction ships wrong bytes the guest already
-// consumed and can't be recalled → the guest's game raises "link error". Proven
-// with tests/roms/speclinkdep.gba. Superseded by input-level rollback (run both
-// cores locally, network only keypresses). `?speculative=1` is now a no-op.
+// SIO-word speculation is off: when the master's outgoing word depends on the
+// received word (any real trade) a misprediction ships bytes the guest has
+// already consumed (tests/roms/speclinkdep.gba raises "link error").
 const NET_SPECULATIVE = false;
-// Input-rollback online play (the fast path): both cores run locally, only
-// per-frame inputs cross the network, prediction+rollback hides latency. This
-// is the default; `?rollback=0` falls back to the (slow, RTT-bound) SIO path.
+// Input rollback: both cores run locally, only per-frame inputs cross the
+// network. `?rollback=0` falls back to the RTT-bound SIO path.
 const NET_ROLLBACK = NET_PARAMS.get("rollback") !== "0";
-// STUN-only for v1: most home NATs connect; symmetric NAT/strict CGNAT
-// pairs fail with a clear error (a TURN relay is a future option).
+// STUN only; symmetric NAT / strict CGNAT pairs fail with a clear error.
 const NET_ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
 const NET_BUF_CAP = 16384; // wasm-side shuttle buffer (frames are tiny)
 
@@ -64,9 +48,6 @@ const netSpinner = document.getElementById("net-spinner");
 
 const netModalOpen = () => netModal.classList.contains("open");
 
-// Reflect the "connecting" state on the entry form: lock the code field with
-// the amber spinner pinned inside its right edge, and turn Connect into Cancel.
-// This is the whole waiting indicator now — no separate status line/spinner.
 const netSetConnecting = (on) => {
   if (netSpinner) netSpinner.hidden = !on;
   netCodeInput.readOnly = on;
@@ -76,21 +57,16 @@ const netSetConnecting = (on) => {
 const netSetStatus = (msg, isError) => {
   netStatusDiv.textContent = msg;
   netStatusDiv.classList.toggle("net-error", !!isError);
-  // An error ends the waiting state; unlock the form so the code can be fixed.
   if (isError) netSetConnecting(false);
-  // The whole post-connect pipeline (channel open, ROM/state transfer, session
-  // start, failures) reports through here — but this element lives in the
-  // shared-code view. When the MANUAL view is up, mirror the message there,
-  // or a healthy manual link shows "Connecting…" from confirm until the game
-  // swaps in (40+ seconds of apparent hang on a cross-network transfer).
+  // The post-connect pipeline reports here, but this element is in the
+  // shared-code view: mirror into the manual view when that is up.
   if (netManualView && !netManualView.hidden && typeof manualSetStatus === "function") {
     manualSetStatus(msg, isError);
   }
 };
 
-// A fresh pending session. `attach` = bind to the already-running core with no
-// reboot (the only path today; the game is up and we plug the cable in).
-// isHost is unknown until the signaling server pairs us and names a role.
+// A fresh pending session. `attach` = bind to the already-running core with
+// no reboot (the only path today).
 const makeSession = (attach) => ({
   attach,
   isHost: null,         // decided by the "paired" role (arrival order)
@@ -115,22 +91,17 @@ const makeSession = (attach) => ({
   stallSince: 0,
 });
 let netAttach = true;   // attach mode of the current/last pending session (for retry)
-// Timer that switches the modal to the manual code exchange when the signaling
-// server hasn't answered a rendezvous within ~2s (armed each time one is sent;
-// disarmed by ANY server reply — a peer waiting alone on "waiting" is a healthy
-// state, not an unresponsive server).
+// Switches the modal to the manual code exchange when the server has not
+// answered a rendezvous in time; disarmed by any server reply (a lone peer
+// on "waiting" is healthy).
 let manualFallbackTimer = 0;
 const MANUAL_FALLBACK_DELAY = 2000;
-// Reconnect pacing for a server socket that drops after the server answered at
-// least once (deploy restart, proxy idling the connection out, network blip):
-// a few spaced dials, then give up into the manual exchange. Any server reply
-// refills the budget, so an arbitrarily long wait survives repeated drops while
-// never dialing faster than this schedule.
+// Redial schedule for a server socket that drops after answering at least
+// once; then give up into the manual exchange. Any server reply refills it.
 const SIG_REDIAL_DELAYS = [1000, 2000, 4000];
-// Backstop from "paired" to the DataChannel opening. Signaling lost mid-relay
-// can leave ICE without the far side's candidates — a state browsers sit in
-// forever without reaching 'failed'. Generous: real cross-network ICE with a
-// slow STUN round can legitimately take 10s+.
+// "paired" to DataChannel-open backstop: ICE starved of the far side's
+// candidates sits in checking forever without reaching 'failed'. Generous,
+// since a slow STUN round can legitimately take 10s+.
 const RTC_CONNECT_DEADLINE = 20000;
 
 const closeNetModal = () => {
@@ -142,14 +113,9 @@ const closeNetModal = () => {
   releaseFocus(netModal);
 };
 
-// ---------------- signaling server liveness probe ----------------
-// Dialed on the same cadence as index.js's update check (page load + the tab
-// becoming visible, plus every modal open), so the link modal can skip the
-// doomed shared-code attempt and open STRAIGHT to the manual code exchange
-// when the server was last seen down. Real connect attempts also feed the
-// flag, so it stays current without extra dials. Unlike the update check's
-// 24h stamp, liveness goes stale in minutes — the throttle only smooths
-// rapid tab-switch flapping.
+// Liveness probe (page load, tab visible, modal open) so the link modal can
+// open straight onto the manual exchange when the server was last seen down.
+// Real dials also feed the flag.
 let sigServerUp = null; // null = never probed; otherwise last known liveness
 let sigProbeAt = 0;
 const SIG_PROBE_MIN_INTERVAL = 30000;
@@ -159,10 +125,8 @@ const probeSignalServer = () => {
   const now = Date.now();
   if (now - sigProbeAt < SIG_PROBE_MIN_INTERVAL) return;
   sigProbeAt = now;
-  // Every outcome is logged with its timing: this probe decides whether the
-  // link modal even offers the shared-code flow, and it used to fail silently
-  // — "the modal opens straight to code trading and the log says nothing" was
-  // undiagnosable from the device.
+  // Every outcome is logged with timing: this decides which flow the modal
+  // offers, and must be diagnosable from the device.
   const t0 = performance.now();
   const ms = () => Math.round(performance.now() - t0) + "ms";
   let ws;
@@ -173,11 +137,8 @@ const probeSignalServer = () => {
     log("netplay: probe " + NET_SIGNAL_URL + " failed to construct: " + (e?.message || e), "warn");
     return;
   }
-  // First outcome wins. iOS Safari fires a LATE error event on a socket we
-  // close right after it opens — without the latch, every successful probe
-  // immediately overwrote its own verdict with "down" on WebKit (seen on an
-  // iPhone as "probe ok in 537ms" followed by "errored after 667ms"), and the
-  // link modal opened onto the manual exchange on a perfectly healthy server.
+  // First outcome wins: iOS Safari fires a late error event on a socket
+  // closed right after it opens, which would overwrite an "up" verdict.
   let settled = false;
   const timer = setTimeout(() => {
     settled = true;
@@ -207,11 +168,10 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") probeSignalServer();
 });
 
-// Open the single shared-code entry modal and stage a pending session. Both
-// players type the SAME code; the signaling server makes whoever arrives first
-// the host. No Host/Join choice — just like plugging in a link cable.
 // True while the connect modal froze the running game (so cancel can thaw it).
 let netFrozeGame = false;
+
+// Both players type the same code; the server makes the first arrival host.
 
 const openNetConnect = async (attach) => {
   if (netMode || net) await netShutdown();
@@ -227,49 +187,36 @@ const openNetConnect = async (attach) => {
   netModal.classList.add("open");
   trapFocus(netModal);
   acquireWakeLock(); // keep the screen (and our sockets/mappings) alive while waiting
-  // Server known-down from the last probe: no point walking into the shared-code
-  // flow — open straight onto the manual exchange (re-probing in the background
-  // so a recovered server puts the next open back on the normal path).
+  // Server last seen down: open straight onto the manual exchange, re-probing
+  // so a recovered server puts the next open back on the normal path.
   if (sigServerUp === false && navigator.onLine) {
     log("netplay: last probe saw the server down — opening onto the manual exchange", "warn");
     probeSignalServer();
     manualEnter();
   }
-  // Freeze the running game the moment this modal opens and keep it frozen
-  // through code entry, pairing, and the ROM/state transfer. The modal covers
-  // the emulation frame anyway, and letting the game keep running lets its OWN
-  // single-player link handshake ("Please wait", "Your friend is not ready")
-  // time out before the peer connects. Thawed on cancel (netShutdown) or when
-  // the session starts (launchNetRom / enterRollbackMode via rbStartIfReady).
+  // Freeze the game for the whole of code entry, pairing and transfer: left
+  // running, its own link handshake times out before the peer connects.
+  // Thawed by netShutdown or when the session starts.
   netFrozeGame = !!currentRomName && !paused;
   if (netFrozeGame) {
     paused = true;
     document.body.classList.add("paused");
     pauseButton.classList.add("paused", "active");
   }
-  // Drop the cursor straight in the field so the code can be typed immediately
-  // (the friend's-code field when we opened onto the manual exchange).
   setTimeout(() => {
     (netManualView && !netManualView.hidden ? manualIn : netCodeInput)?.focus();
   }, 0);
 };
 
-// --- "Link Cable" menu button ---
-// Opens the connect modal bound to the already-running game (attach mode).
-// Online link is GBA-only, so guard other cores.
 const netConnectLabel = document.querySelector("#net-connect span");
-// Reflect connection state on the menu item: connect vs disconnect.
 window.setNetConnectLabel = (connected) => {
   if (netConnectLabel) netConnectLabel.textContent = connected ? "Disconnect" : "Link Cable";
 };
 
 document.getElementById("net-connect").addEventListener("click", () => {
   menuDropdown.hidden = true;
-  // Already linked → this is the disconnect action.
+  // Already linked: two-step disconnect (a mis-tap ends the session for both).
   if (net?.started || net?.rb?.inited) {
-    // Two-step, like the delete lists' armed buttons: the first tap turns the
-    // item red ("Are you sure?") and keeps the menu open; a second within
-    // 3.5s disconnects. A mis-tap here ends the session for both players.
     menuDisconnectArm.fire();
     return;
   }
@@ -278,19 +225,15 @@ document.getElementById("net-connect").addEventListener("click", () => {
     showToast("Link cable needs a GB, GBC, or GBA game");
     return;
   }
-  // GBA and GB/GBC both use the online (two-browser) input-rollback link now.
   openNetConnect(true);
 });
-
-// ---------------- signaling ----------------
 
 const sigSend = (obj) => {
   if (net?.ws?.readyState === WebSocket.OPEN) net.ws.send(JSON.stringify(obj));
 };
 
 const netFail = (msg) => {
-  // Setup-phase failure: report in the modal (if open) and toast, then tear
-  // down. If the game already started this is a peer-gone case instead.
+  // Setup-phase failure; once the game has started it is a peer-gone case.
   if (net?.started) {
     netPeerGone(msg);
     return;
@@ -298,8 +241,7 @@ const netFail = (msg) => {
   log("netplay: " + msg, "warn");
   netSetStatus(msg, true);
   netShutdown({ keepModal: true });
-  // Setup failed but the modal is still up: re-arm a pending session so the
-  // player can fix the code and hit Connect again without reopening.
+  // Modal still up: re-arm so Connect works again without reopening.
   if (netModalOpen()) {
     net = makeSession(netAttach);
     netJoinGo.disabled = false;
@@ -316,11 +258,8 @@ const sigConnect = () =>
       return resolve(false);
     }
     net.ws = ws;
-    // A dead/closing server is only fatal when nothing else can carry the
-    // session: no same-browser peer listening (bc), not already linked locally
-    // (dc), and not already running (rtcConnected/started). The same-browser
-    // path runs in parallel for every connect, so a down server must never tear
-    // a session down while that path is still live or has already won.
+    // A dead server is only fatal when no other path can carry the session
+    // (the same-browser path runs in parallel and may have already won).
     const hasAltPath = () => !!(net && (net.bc || net.dc || net.rtcConnected || net.started));
     let opened = false;
     ws.onopen = () => {
@@ -333,8 +272,6 @@ const sigConnect = () =>
       sigServerUp = false;
       log("netplay: dial " + NET_SIGNAL_URL + " errored before opening", "warn");
       if (hasAltPath()) {
-        // Only note it while we're still waiting on the local peer; once linked
-        // (dc set) the server is simply irrelevant.
         if (net.bc && !net.dc) {
           netSetStatus("Server unavailable — a second tab of this browser can still link");
         }
@@ -345,13 +282,10 @@ const sigConnect = () =>
       resolve(false);
     };
     ws.onclose = () => {
-      // Fires for every socket end, so sort them: our own teardowns null `net`
-      // (netShutdown) or `net.ws` (wireChannel, manualEnter) before closing and
-      // fail the first guard; a linked session no longer needs the server; a
-      // pairing already in flight is the RTC deadline's to resolve (the room
-      // died with the socket, so redialing mid-handshake helps nobody). What
-      // remains is the server — or the path to it — dropping us while we dial
-      // or wait for a friend: reconnect and re-rendezvous, with backoff.
+      // Our own teardowns null `net` or `net.ws` before closing; a linked
+      // session no longer needs the server; a pairing in flight is the RTC
+      // deadline's to resolve. What remains is a drop while dialing or
+      // waiting: redial with backoff.
       if (!net || net.ws !== ws) return;
       if (net.rtcConnected || net.started) return;
       if (net.pc) return;
@@ -368,12 +302,7 @@ const sigConnect = () =>
     };
   });
 
-// Arm (or re-arm) the response deadline for a just-sent rendezvous: if the
-// signaling server hasn't answered within ~2s, treat it as unreachable and
-// flip the modal to the manual code exchange (its base text becomes "Trade
-// codes with your friend"). Racing a slow-but-alive server any longer isn't
-// worth it: the exchange also works same-LAN with no internet. Any server
-// reply disarms this (onSigMessage) — waiting for a friend is not a timeout.
+// Response deadline for a just-sent rendezvous; any server reply disarms it.
 const armManualFallback = (session) => {
   clearTimeout(manualFallbackTimer);
   manualFallbackTimer = setTimeout(() => {
@@ -384,21 +313,16 @@ const armManualFallback = (session) => {
   }, MANUAL_FALLBACK_DELAY);
 };
 
-// The server answered at least once and its socket then died mid-wait. The
-// room died with it on the server, so reconnect and re-rendezvous with the
-// same code — both peers ride this same path, so a server restart re-pairs
-// them as each side re-registers. A handful of spaced dials, then the same
-// give-up as a server that never answered. The budget refills only when the
-// server actually replies (onSigMessage), so a flapping server is retried at
-// this schedule's pace at worst, never hammered.
+// The server socket died mid-wait; the room died with it, so reconnect and
+// re-rendezvous with the same code (both peers do, so a restart re-pairs).
 const sigRedial = () => {
   const session = net;
   if (!session || !session.code) return;
   if (!navigator.onLine) {
-    manualEnter(true); // no interface at all — redialing can't help; say so now
+    manualEnter(true);
     return;
   }
-  clearTimeout(manualFallbackTimer); // the redial chain owns the give-up now
+  clearTimeout(manualFallbackTimer);
   const attempt = session.redials++;
   if (attempt >= SIG_REDIAL_DELAYS.length) {
     sigServerUp = false;
@@ -413,29 +337,25 @@ const sigRedial = () => {
     if (await sigConnect()) {
       if (net !== session || session.dc) return;
       sigSend({ t: "rendezvous", code: session.code });
-      armManualFallback(session); // a fresh socket must earn a reply too
+      armManualFallback(session);
     }
-    // else: that dial's onclose lands back in sigRedial for the next attempt
+    // else: that dial's onclose lands back in sigRedial
   }, SIG_REDIAL_DELAYS[attempt]);
 };
 
 const onSigMessage = async (msg) => {
   if (!net) return;
-  // Any reply is proof of life: a solo peer parked on "waiting" is a healthy
-  // server, not an unresponsive one. Disarm the manual-exchange fallback and
-  // refill the redial budget, so an arbitrarily long wait survives any number
-  // of well-spaced socket drops.
+  // Any reply is proof of life: disarm the fallback, refill the redial budget.
   clearTimeout(manualFallbackTimer);
   net.redials = 0;
   sigServerUp = true;
   try {
     switch (msg.t) {
       case "waiting":
-        // The in-field spinner + "Cancel" button convey the wait; no text line.
         netSetStatus("");
         break;
       case "paired":
-        // Arrival order picked our role: host = WebRTC offerer = unit 0.
+        // host = WebRTC offerer = unit 0.
         net.isHost = msg.role === "host";
         netSetStatus("Friend found — connecting…");
         await startRtc(net.isHost);
@@ -456,8 +376,6 @@ const onSigMessage = async (msg) => {
         if (!net.rtcConnected) netFail("The other side left");
         break;
       case "error":
-        // The server's messages ("that code is already in use…", "code too
-        // short") are already player-friendly; show them as-is.
         netFail(msg.msg || "Connection error");
         break;
     }
@@ -466,16 +384,11 @@ const onSigMessage = async (msg) => {
   }
 };
 
-// ---------------- WebRTC ----------------
-
 const startRtc = async (isOfferer) => {
   const session = net;
   const pc = new RTCPeerConnection({ iceServers: NET_ICE_SERVERS });
   session.pc = pc;
-  // Paired, but the DataChannel never opens: signaling dying mid-relay starves
-  // ICE of the far side's candidates, and a checking phase that never starts
-  // won't reach 'failed' on its own — without a deadline the modal would show
-  // "Friend found — connecting…" forever.
+  // A checking phase that never starts never reaches 'failed' on its own.
   clearTimeout(session.rtcDeadline);
   session.rtcDeadline = setTimeout(() => {
     if (net === session && !net.rtcConnected && !net.started) {
@@ -499,7 +412,6 @@ const startRtc = async (isOfferer) => {
     }
   };
   if (isOfferer) {
-    // The host offers; it is also unit 0 (the multi-mode parent).
     wireChannel(pc.createDataChannel("link", { ordered: true }));
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
@@ -510,26 +422,22 @@ const startRtc = async (isOfferer) => {
 };
 
 const wireChannel = (dc) => {
-  // Two connect paths race (local BroadcastChannel vs. server+WebRTC); the first
-  // to hand us a channel wins and the loser is torn down here.
+  // Local BroadcastChannel and server+WebRTC race; the loser is torn down here.
   if (net.dc) {
     try {
-      dc.close?.(true); // silent: discarding the losing channel, don't signal "bye"
+      dc.close?.(true); // silent: don't signal "bye"
     } catch {}
     return;
   }
   net.dc = dc;
-  if (net.abortLocal && dc !== net.localChan) net.abortLocal(); // WebRTC won → drop BC
+  if (net.abortLocal && dc !== net.localChan) net.abortLocal();
   net.abortLocal = null;
   dc.binaryType = "arraybuffer";
   dc.onopen = () => {
     net.rtcConnected = true;
     clearTimeout(net.rtcDeadline);
-    // Linked (WebRTC peer, or a same-browser BroadcastChannel): the signaling
-    // server's job is done. Closing the socket also RELEASES our room on the
-    // server at once — so when two same-browser tabs pair locally, whichever had
-    // registered a code frees it immediately instead of holding it for the TTL.
-    // (web/signaling/server.test.mjs pins this room-freeing contract.)
+    // Linked: closing the socket also releases our room on the server at
+    // once instead of after the TTL (pinned by web/signaling/server.test.mjs).
     try {
       net.ws?.close();
     } catch {}
@@ -546,36 +454,27 @@ const wireChannel = (dc) => {
   dc.onclose = () => {
     if (!net) return;
     if (net.started) netPeerGone("Peer disconnected");
-    // Dropped mid-handshake (the ROM/state exchange can take seconds): don't
-    // leave this peer frozen behind the modal — surface it and re-arm.
+    // Dropped mid-handshake: surface it rather than leave the game frozen.
     else if (net.rb && !net.rb.inited) netFail("Connection lost during setup");
   };
 };
 
-// ---------------- same-browser fast path (no signaling, no WebRTC) ----------------
-// Two tabs/windows of the SAME browser can link with zero infrastructure: no
-// signaling server and no WebRTC at all. They rendezvous on a BroadcastChannel
-// keyed by the shared code and then carry the exact same wire traffic a
-// DataChannel would. LocalChannel below mimics just the RTCDataChannel surface
-// wireChannel()/rbSend*()/rbDrain() touch, so everything downstream is unchanged.
-//
-// Scope: BroadcastChannel only reaches same-origin contexts in the SAME browser
-// profile. Different browsers (Chrome↔Safari) or different devices are sandboxed
-// from each other and still take the signaling + WebRTC path.
+// Same-browser path: two tabs of one browser profile rendezvous on a
+// BroadcastChannel keyed by the code and carry the same wire traffic a
+// DataChannel would. LocalChannel mimics only the RTCDataChannel surface
+// wireChannel()/rbSend*()/rbDrain() touch.
 
 const LOCAL_PREFIX = "dingbat-link-"; // BroadcastChannel name = prefix + code
 
 const netRandId = () => {
   const a = new Uint32Array(1);
   crypto.getRandomValues(a);
-  return a[0] || 1; // 0 is reserved as "unset"; re-roll to any nonzero
+  return a[0] || 1; // 0 is reserved as "unset"
 };
 
-// A BroadcastChannel-backed stand-in for an RTCDataChannel. Exposes only what
-// the transport actually uses: send(), onmessage (e.data = ArrayBuffer, matching
-// binaryType="arraybuffer"), readyState, close/onclose, and a faked bufferedAmount
-// so rbSendRom's backpressure loop yields between bursts instead of blocking the
-// main thread on a multi-MB synchronous flood (BroadcastChannel has no send buffer).
+// bufferedAmount is faked so rbSendRom's backpressure loop yields between
+// bursts (BroadcastChannel has no send buffer; a multi-MB synchronous flood
+// would block the main thread).
 class LocalChannel {
   constructor(bc) {
     this.bc = bc;
@@ -604,13 +503,12 @@ class LocalChannel {
   }
   send(buf) {
     if (this.readyState !== "open") return;
-    // The caller reuses/frees its buffer, so hand postMessage a standalone copy.
+    // The caller reuses its buffer: postMessage gets a standalone copy.
     const ab =
       buf instanceof ArrayBuffer
         ? buf.slice(0)
         : buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
     this.bc.postMessage({ ch: "link", t: "data", buf: ab });
-    // Fake enough backpressure that rbSendRom's loop awaits rbDrain and yields.
     this.bufferedAmount += ab.byteLength;
     if (!this._flushing) {
       this._flushing = true;
@@ -637,30 +535,26 @@ class LocalChannel {
   }
 }
 
-// Start listening for another tab of this browser on `code`. Runs CONCURRENTLY
-// with the signaling + WebRTC path (see the connect handler): whichever pairs
-// first wins and wireChannel() tears the other down. Unlike a one-shot probe,
-// this keeps listening until a peer appears, WebRTC wins, or the user cancels —
-// so the two players don't have to hit Connect at the same instant. When no
-// server is reachable at all, this is the only path, and same-browser still links.
+// Listens for another tab on `code` until a peer appears, WebRTC wins, or
+// the user cancels, so the two players need not hit Connect at once.
 const startLocalLink = (code) => {
   const session = net;
   let bc;
   try {
     bc = new BroadcastChannel(LOCAL_PREFIX + code);
   } catch {
-    return; // no BroadcastChannel support → WebRTC path carries on alone
+    return; // no BroadcastChannel support
   }
-  session.bc = bc; // reachable for Cancel/shutdown
+  session.bc = bc;
   const myId = netRandId();
 
   const onMsg = (e) => {
-    if (net !== session || net.dc) return; // torn down, or the other path won
+    if (net !== session || net.dc) return;
     const m = e.data;
     if (!m || m.ch !== "hello") return;
     if (m.t === "hi") {
-      // A peer announced. Answer so it learns us — it may have opened after our
-      // own announce, which it never saw (BroadcastChannel keeps no history).
+      // Answer so the peer learns us: it may have opened after our own
+      // announce (BroadcastChannel keeps no history).
       try {
         bc.postMessage({ ch: "hello", t: "yo", id: myId, to: m.id });
       } catch {}
@@ -670,16 +564,14 @@ const startLocalLink = (code) => {
     }
   };
 
-  // Higher nonce = host (unit 0 / the multi-mode parent, the WebRTC offerer).
-  // Both tabs compute the same winner, so roles never collide.
+  // Higher nonce = host; both tabs compute the same winner.
   const pair = (peerId) => {
-    if (net !== session || net.dc || peerId === myId) return; // won elsewhere, or a tie
-    bc.removeEventListener("message", onMsg); // hello handshake done
+    if (net !== session || net.dc || peerId === myId) return;
+    bc.removeEventListener("message", onMsg);
     session.isHost = myId > peerId;
     const chan = new LocalChannel(bc);
     session.localChan = chan; // marks the local path as the winner in wireChannel
     wireChannel(chan);
-    // No async "channel open": the cable is live the instant both tabs agree.
     chan.onopen?.();
   };
 
@@ -697,39 +589,18 @@ const startLocalLink = (code) => {
   } catch {}
 };
 
-// ---------------- Manual code exchange (server unreachable) ----------------
-// Fallback when the network is up but the signaling server isn't: the modal's
-// text flips to "Trade codes with your friend." and each side shows ONE compact
-// code (SDPCodec, sdputil.js) to send over any messenger, pastes the friend's,
-// and confirms. This reuses the exact same post-connect flow — wireChannel() →
-// rbConnect() — so once the DataChannel opens it is identical to the server
-// path.
-//
-// Why it differs from the server path:
-//  1. NON-TRICKLE gathering — the server path trickles ICE candidates one by one
-//     as they arrive; here there is no channel to trickle over, so we wait for
-//     ICE gathering to COMPLETE and bundle one full localDescription.
-//  2. COMPRESSION — a raw data-channel SDP is ~600–900 bytes of boilerplate.
-//     SDPCodec strips it to ~130 bytes (fingerprint + ufrag/pwd + candidates).
-//  3. SYMMETRIC one-shot exchange — no host/guest choice and no second round
-//     trip. BOTH sides encode an offer; each side locally rewrites the peer's
-//     blob into the answer to its own offer (SDPCodec.answerFrom), with
-//     complementary DTLS roles picked by comparing the two code strings. The
-//     comparison winner ("host", also unit 0) wires its own pre-created
-//     DataChannel; the other side takes ondatachannel. Pinned end-to-end
-//     against real browser PCs in web/manualpair.test.mjs.
-//
-// Same-LAN reachability (Wi-Fi without internet) rides on the mDNS host
-// candidate (uuid.local): both Chrome and Safari resolve a peer's .local
-// candidate over the local network, so two phones connect even with no STUN
-// reflexive path between them.
+// Manual code exchange (server unreachable): each side shows one compact
+// code (SDPCodec) and pastes the friend's; the post-connect flow is then the
+// server path's. Differences: ICE gathering runs to completion and one
+// bundled description is encoded (nothing to trickle over); the exchange is
+// symmetric, both sides offer and each rewrites the peer's blob into the
+// answer to its own offer (SDPCodec.answerFrom) with DTLS roles from a code
+// string comparison (pinned by web/manualpair.test.mjs). Same-LAN pairing
+// rides on the mDNS host candidate, which Chrome and Safari both resolve.
 
 const MANUAL_GATHER_TIMEOUT = 3500; // ms cap on ICE gathering once a public address is in hand
-// A code minted without a server-reflexive (STUN/public) candidate can only
-// pair on its own LAN — across the internet the peer sees nothing but an
-// unresolvable mDNS name and sits in "Connecting…" forever. When STUN is
-// merely slow (cellular CGNAT), wait longer before settling for a LAN-only
-// code; gathering completion still resolves early on fast networks.
+// Without a srflx candidate a code can only pair on its own LAN, so wait
+// longer when STUN is merely slow (cellular CGNAT).
 const MANUAL_GATHER_EXTENDED = 8000;
 
 const netConnectView = document.getElementById("net-connect-view");
@@ -745,10 +616,8 @@ const manualSetStatus = (msg, isError) => {
   manualStatusDiv.classList.toggle("net-error", !!isError);
 };
 
-// Wait for full ICE gathering so ONE bundled description carries every candidate.
-// Resolves on the 'complete' state (or the null-candidate sentinel), with a
-// timeout so a stuck STUN server can't hang the flow — the host mDNS candidate
-// is usually already present and is what carries a same-LAN link anyway.
+// Resolves on gathering 'complete' (or the null-candidate sentinel), with
+// timeouts so a stuck STUN server cannot hang the flow.
 const manualGather = (pc) =>
   new Promise((resolve) => {
     if (pc.iceGatheringState === "complete") return resolve();
@@ -766,12 +635,8 @@ const manualGather = (pc) =>
     setTimeout(finish, MANUAL_GATHER_EXTENDED);
   });
 
-// Connection-state handler (mirrors startRtc's). A pre-start failure means the
-// traded codes are spent (the PC is dead), so put a FRESH code up along with
-// the error — both sides fail together, so both regenerate together.
-// Compact ICE candidate-pair dump for a dead manual pairing: which pairs
-// formed, and whether checks went unanswered (sent>0 got=0 = our packets
-// vanish into a NAT) or never went out at all.
+// Candidate-pair dump for a dead pairing: sent>0 got=0 means our checks
+// vanish into a NAT; no pairs means nothing could be built from the remote list.
 const logIcePairs = async (pc) => {
   try {
     const stats = await pc.getStats();
@@ -794,11 +659,13 @@ const manualConnState = (pc) => () => {
   const st = pc.connectionState;
   log("netplay: manual pc " + st + " ice=" + pc.iceConnectionState);
   if (st === "failed") {
-    logIcePairs(pc); // best-effort: the teardown below races the snapshot
+    logIcePairs(pc); // best-effort: the teardown below races it
     if (net.rtcConnected) {
       netFail("Peer connection lost");
       return;
     }
+    // The traded codes are spent with the PC; both sides fail together, so
+    // both regenerate together.
     netFail("Couldn't connect with those codes");
     if (netModalOpen() && netManualView && !netManualView.hidden) {
       manualSetStatus("Couldn't connect — trade these fresh codes and try again", true);
@@ -809,22 +676,16 @@ const manualConnState = (pc) => () => {
   }
 };
 
-// Build this side's offer and hold its code invisibly for Share/Copy. The
-// DataChannel must exist before the offer (its m-line), but which side WIRES
-// its channel isn't known until the friend's code arrives, so it waits unwired
-// in net.manualChan.
-//
-// Freshness: the NAT mappings behind a code decay in under a minute once
-// idle, so an unshared code is silently re-minted on a timer and whenever
-// the page returns to the foreground — a Share/Copy tap then always sends a
-// young one. (Minting AT the tap would be fresher still, but gathering takes
-// seconds and iOS voids the tap's user activation before navigator.share may
-// run.) Once shared the code is pinned — the friend holds it — and a stale
-// return surfaces a re-share notice instead (see the visibility handler).
+// The DataChannel must exist before the offer (its m-line), but which side
+// wires it is unknown until the friend's code arrives, so it waits unwired in
+// net.manualChan. NAT mappings behind a code decay in under a minute idle, so
+// an unshared code is re-minted on a timer and on return to the foreground
+// (minting at the tap is too slow: iOS voids the user activation before
+// navigator.share may run). A shared code is pinned, since the friend holds it.
 const MANUAL_CODE_MAX_AGE = 45000;
 let manualFreshTimer = 0;
 
-// "srflx/v4 host/mdns …" — the candidate mix of an SDP, for the log.
+// Candidate mix of an SDP ("srflx/v4 host/mdns"), for the log.
 const candKinds = (sdp) =>
   SDPCodec.fields(sdp).candidates.map((c) => {
     const [type, addr] = c.split("|");
@@ -843,7 +704,6 @@ const manualPrepare = async (opts) => {
   session.codeShared = false;
   clearTimeout(manualFreshTimer);
   manualButtonsEnabled(false);
-  // A refresh replaces the pending offer wholesale; drop the old pc quietly.
   try { session.pc?.close(); } catch {}
   if (!opts?.keepFriendBox) {
     if (manualIn) { manualIn.value = ""; manualIn.readOnly = false; }
@@ -854,8 +714,7 @@ const manualPrepare = async (opts) => {
     const pc = new RTCPeerConnection({ iceServers: NET_ICE_SERVERS });
     session.pc = pc;
     pc.onconnectionstatechange = manualConnState(pc);
-    // STUN/TURN failures surface here and nowhere else; without this a dead
-    // STUN path just looks like a code that never got its public address.
+    // STUN/TURN failures surface here and nowhere else.
     pc.addEventListener("icecandidateerror", (/** @type {*} */ e) => {
       log("netplay: ICE candidate error " + (e.errorCode || "?") + " " +
           (e.errorText || "") + (e.url ? " via " + e.url : ""), "warn");
@@ -864,15 +723,12 @@ const manualPrepare = async (opts) => {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     await manualGather(pc);
-    if (net !== session || session.pc !== pc) return; // torn down while gathering
+    if (net !== session || session.pc !== pc) return;
     const enc = SDPCodec.encode(pc.localDescription);
     if (!enc) throw new Error("couldn't encode the offer");
     session.manualCode = enc;
     manualButtonsEnabled(true);
-    // What the code carries decides where it can pair: srflx = internet-capable
-    // (NAT permitting), mDNS-host only = this LAN only. Logged with the mint
-    // duration so a cross-network "stuck at Connecting…" — or a slow STUN
-    // path — is diagnosable from the device.
+    // srflx = internet-capable; mDNS-host only = this LAN only.
     const kinds = candKinds(pc.localDescription.sdp);
     log("netplay: manual code minted in " + Math.round(performance.now() - mintT0) +
         "ms: " + (kinds.join(" ") || "no candidates"));
@@ -887,34 +743,23 @@ const manualPrepare = async (opts) => {
   }
 };
 
-// While the code is unshared and the friend's box is empty, re-mint on a
-// timer so it never grows stale on the shelf. Stops the moment it's shared
-// (the friend holds that exact code) or the exchange starts.
 const manualArmFresh = (session) => {
   clearTimeout(manualFreshTimer);
   manualFreshTimer = setTimeout(() => {
     if (net !== session || session.codeShared || session.rtcConnected) return;
     if (!netManualView || netManualView.hidden) return;
-    if (manualIn?.value || manualIn?.readOnly) return; // exchange underway
+    if (manualIn?.value || manualIn?.readOnly) return;
     manualPrepare({ keepFriendBox: true });
   }, MANUAL_CODE_MAX_AGE);
 };
 
-// Switch the modal from the shared-code view to the manual exchange. Two ways
-// in: openNetConnect() jumps here straight away when the last liveness probe
-// saw the server down, and the connect flow lands here when a live shared-code
-// attempt finds the server unreachable (outright error, silent for ~2s, or
-// gone mid-wait and still dead after the redial budget) —
-// `attemptFailed` distinguishes the latter so the player is told their attempt
-// failed rather than the view just silently changing shape. Cancels the
-// in-progress server/local attempts (this is a distinct rendezvous) but keeps
-// the session.
+// Switch to the manual exchange. `attemptFailed`: a live attempt found the
+// server unreachable, so say so. Cancels the server/local attempts (a
+// distinct rendezvous) but keeps the session.
 const manualEnter = (attemptFailed) => {
   if (!netModalOpen() || !net) return;
-  if (netManualView && !netManualView.hidden) return; // already trading codes
+  if (netManualView && !netManualView.hidden) return;
   if (!navigator.onLine) {
-    // No network interface at all — trading codes can't help; WebRTC has
-    // nothing to connect over either.
     netSetStatus("No network connection — join the same Wi-Fi as your friend and retry", true);
     return;
   }
@@ -924,9 +769,8 @@ const manualEnter = (attemptFailed) => {
   if (attemptFailed) {
     log("netplay: server attempt failed — switching to the manual code exchange", "warn");
   }
-  // Drop any in-progress server attempt WITHOUT tripping its teardown: detach
-  // the socket handlers first, else ws.onclose fires netFail (no alt path yet)
-  // and destroys the session we're keeping for the manual rendezvous.
+  // Detach the socket handlers before closing, else ws.onclose fires netFail
+  // and destroys the session being kept.
   const ws = net.ws;
   if (ws) {
     try { ws.onopen = ws.onclose = ws.onerror = ws.onmessage = null; ws.close(); } catch {}
@@ -945,9 +789,7 @@ const manualEnter = (attemptFailed) => {
   manualPrepare();
 };
 
-// Return from the manual exchange to the shared-code view (the footer link).
-// The prepared offer is abandoned — codes are cheap to regenerate — and a
-// fresh pending session re-arms so Connect works immediately.
+// Back to the shared-code view; the prepared offer is abandoned.
 const manualBack = () => {
   if (!net || net.dc || net.rtcConnected || net.started) return;
   try { net.pc?.close(); } catch {}
@@ -959,7 +801,6 @@ const manualBack = () => {
   setTimeout(() => netCodeInput?.focus(), 0);
 };
 
-// Restore the shared-code view (called from modal open / close / shutdown).
 const manualReset = () => {
   if (netManualView) netManualView.hidden = true;
   if (netConnectView) netConnectView.hidden = false;
@@ -970,9 +811,8 @@ const manualReset = () => {
   manualSetStatus("");
 };
 
-// Confirm: interpret the friend's code as the answer to our offer (see the
-// section comment — both sides do this; the code-string comparison assigns the
-// complementary DTLS roles and the host/unit-0 seat).
+// Confirm: the friend's code becomes the answer to our offer (both sides do
+// this; the code comparison assigns DTLS roles and the host seat).
 const manualConfirmGo = async () => {
   const session = net;
   if (!session?.pc || !session.manualCode) return;
@@ -982,9 +822,8 @@ const manualConfirmGo = async () => {
     manualSetStatus("That's your own code — paste your friend's", true);
     return;
   }
-  // Diagnostic: what the friend's code carries and how old it is — a
-  // cross-network pairing lives on their srflx being fresh (mappings decay
-  // in under a minute; age comes from the mint timestamp newer codes carry).
+  // Log the friend's candidate mix and code age (a cross-network pairing
+  // lives on their srflx being fresh).
   try {
     const fd = SDPCodec.decode(friendCode);
     if (fd) {
@@ -995,8 +834,7 @@ const manualConfirmGo = async () => {
     }
   } catch {}
   const isHost = session.manualCode > friendCode;
-  // Our peer takes the opposite DTLS role: if we're the server ("host"), their
-  // synthesized answer must say active, and vice versa.
+  // The peer takes the opposite DTLS role.
   const remote = SDPCodec.answerFrom(friendCode, isHost ? "active" : "passive");
   if (!remote) {
     manualSetStatus("That code didn't read cleanly — recopy it and try again", true);
@@ -1017,10 +855,7 @@ const manualConfirmGo = async () => {
   if (manualIn) manualIn.readOnly = true;
   if (manualConfirm) manualConfirm.disabled = true;
   manualSetStatus("Connecting…");
-  // Progress heartbeat while pairing: one compact line every 5s (ICE state,
-  // pair count, checks sent vs answered) — sent>0 got=0 is checks vanishing
-  // into a NAT; pairs=0 is a remote list nothing could be built from. Self-
-  // clears on success, teardown, or the deadline replacing the session.
+  // Pairing heartbeat for the log; self-clears on success or teardown.
   const progress = setInterval(async () => {
     if (net !== session || session.rtcConnected || session.started || !session.pc) {
       clearInterval(progress);
@@ -1040,10 +875,8 @@ const manualConfirmGo = async () => {
     log("netplay: pairing… ice=" + session.pc.iceConnectionState +
         " pairs=" + pairs + " sent=" + sent + " got=" + got);
   }, 5000);
-  // A remote list with no routable candidate (mDNS-only, or a stale NAT
-  // mapping) leaves ICE in checking forever without ever reaching 'failed' —
-  // "Connecting…" for eternity. Bound it like the server path's pairing
-  // deadline, with the same fresh-codes recovery as a hard ICE failure.
+  // A remote list with no routable candidate leaves ICE in checking forever;
+  // bound it like the server path, with the same fresh-codes recovery.
   clearTimeout(session.rtcDeadline);
   session.rtcDeadline = setTimeout(async () => {
     if (net !== session || session.rtcConnected || session.started) return;
@@ -1060,21 +893,18 @@ const manualConfirmGo = async () => {
 };
 
 manualConfirm?.addEventListener("click", manualConfirmGo);
-// Confirm goes live only once there's something in the friend's-code box.
 manualIn?.addEventListener("input", () => {
   manualConfirm.disabled = manualIn.readOnly || manualIn.value.trim().length === 0;
 });
 manualCopyBtn?.addEventListener("click", async () => {
   const code = net?.manualCode;
   if (!code) return;
-  if (net) net.codeShared = true; // pinned: the friend will hold this code
+  if (net) net.codeShared = true;
   clearTimeout(manualFreshTimer);
   try {
     await navigator.clipboard.writeText(code);
   } catch {
-    // Clipboard API needs a secure context (and can be denied); fall back to a
-    // selectable temp element + execCommand. The code box itself is disabled,
-    // so it can't be selected directly.
+    // Clipboard API needs a secure context (and can be denied).
     const ta = document.createElement("textarea");
     ta.value = code;
     document.body.appendChild(ta);
@@ -1085,9 +915,8 @@ manualCopyBtn?.addEventListener("click", async () => {
   showToast("Code copied");
 });
 
-// Native share sheet for the code — the natural mobile flow, where the code
-// is headed to a messenger anyway. Revealed only where the Web Share API
-// exists and the primary pointer is a finger; desktop keeps just Copy.
+// Share sheet: only where the Web Share API exists and the primary pointer
+// is a finger.
 const manualShareBtn = /** @type {HTMLButtonElement} */ (document.getElementById("net-manual-share"));
 if (manualShareBtn && navigator.share && matchMedia("(pointer: coarse)").matches) {
   manualShareBtn.hidden = false;
@@ -1095,27 +924,24 @@ if (manualShareBtn && navigator.share && matchMedia("(pointer: coarse)").matches
 manualShareBtn?.addEventListener("click", async () => {
   const code = net?.manualCode;
   if (!code) return;
-  if (net) net.codeShared = true; // pinned: the friend will hold this code
+  if (net) net.codeShared = true;
   clearTimeout(manualFreshTimer);
   try {
-    // The bare code, no prose: whatever the friend pastes back must decode.
+    // Bare code, no prose: whatever the friend pastes back must decode.
     await navigator.share({ text: code });
   } catch {
-    // A dismissed share sheet rejects with AbortError; nothing to report.
+    // A dismissed sheet rejects with AbortError.
   }
 });
 
-// ---------------- screen wake lock + return-to-foreground freshness --------
-// While the link modal is up somebody is usually WAITING — on a friend to
-// join the code, or mid manual exchange. iOS auto-locks the screen after
-// ~30s idle, which suspends Safari and silently kills the NAT mappings and
-// the signaling socket behind that wait. Hold a screen wake lock while the
-// modal is open; the OS drops it on backgrounding, so it re-arms on return.
+// Screen wake lock while the modal is up: iOS auto-lock suspends Safari and
+// kills the NAT mappings and signaling socket behind the wait. The OS drops
+// the lock on backgrounding, so it re-arms on return.
 let screenLock = null;
 const acquireWakeLock = async () => {
   try {
     screenLock = (await navigator.wakeLock?.request("screen")) || null;
-  } catch {} // denied (low power mode etc.) — the wait just risks auto-lock
+  } catch {} // denied (low power mode etc.)
 };
 const releaseWakeLock = () => {
   try { screenLock?.release(); } catch {}
@@ -1129,14 +955,12 @@ document.addEventListener("visibilitychange", () => {
     return;
   }
   if (!netModalOpen()) return;
-  acquireWakeLock(); // released by the OS while we were backgrounded
-  // Manual-view code freshness on return: an unshared code re-mints
-  // silently (nobody holds it). A shared one is pinned — but if we were
-  // away long enough for its NAT mappings to have died, mint a fresh one
-  // and say so, since the friend needs the replacement anyway.
+  acquireWakeLock();
+  // An unshared code re-mints silently; a shared one only after being away
+  // long enough for its NAT mappings to have died, and says so.
   if (!net || !netManualView || netManualView.hidden) return;
   if (net.rtcConnected || net.started || manualIn?.readOnly) return;
-  if (!net.manualCode) return; // still minting
+  if (!net.manualCode) return;
   if (!net.codeShared) {
     manualPrepare({ keepFriendBox: true });
   } else if (Date.now() - modalHiddenAt > MANUAL_CODE_MAX_AGE) {
@@ -1144,10 +968,8 @@ document.addEventListener("visibilitychange", () => {
     manualSetStatus("Away a while — your code was refreshed, share the new one");
   }
 });
-// Keep the emulator's key handlers from swallowing input; Enter confirms.
-// Escape must still dismiss the modal: stopping propagation here means the
-// document-level Escape handler below never sees it while this field has
-// focus (which it always does — the modal focuses it on open).
+// Stop propagation so the SDL key handlers never see the field; that also
+// hides Escape from the document handler, so dismiss here directly.
 manualIn && ["keydown", "keypress", "keyup"].forEach((t) =>
   manualIn.addEventListener(t, (/** @type {KeyboardEvent} */ e) => {
     if (t === "keydown" && e.key === "Enter" && !manualConfirm.disabled) manualConfirmGo();
@@ -1156,8 +978,7 @@ manualIn && ["keydown", "keypress", "keyup"].forEach((t) =>
   })
 );
 
-// ---------------- input-rollback online play ----------------
-// Wire protocol over the DataChannel (binary frames, first byte = kind):
+// Input-rollback wire protocol over the DataChannel (first byte = kind):
 //   0 hello        : [0][epoch u32][romHash u32]  (host's epoch is the shared clock)
 //   1 input        : [1][frame i32][bits u16]      (this peer's buttons for a frame)
 //   2 state-begin  : [2][len u32]                  (full save-state, chunked)
@@ -1166,34 +987,26 @@ manualIn && ["keydown", "keypress", "keyup"].forEach((t) =>
 //   5 rom-chunk    : [5][bytes…]
 //   6 ready        : [6]                           (cores built + states loaded)
 //   7 speed        : [7][on u8]                     (2x fast-forward toggle — both cores)
-// Both peers run BOTH cores; core 0 = host's game, core 1 = guest's. To CONTINUE
-// from exactly where each player was (no reboot), we exchange each running
-// core's full SAVE-STATE and load it into the matching core, then network only
-// per-frame inputs (prediction + rollback in the wasm RollbackSession). The
-// local game freezes during the brief sync so it doesn't drift past its snapshot.
-//
-// CROSS-GAME trades (Emerald↔Ruby): each peer only owns ITS game's ROM, but both
-// peers must simulate BOTH cores identically. So when the hello hashes differ we
-// also stream each peer's ROM to the other (rom-begin/chunk) — after which both
-// peers hold the same {host ROM, guest ROM} pair and boot core 0/1 from it. The
-// large transfer uses DataChannel backpressure; a final "ready" barrier keeps
-// either peer from ticking (and shipping inputs) until BOTH have booted.
+//   8 pause        : [8][on u8]
+// Both peers run both cores (core 0 = host's game, core 1 = guest's): each
+// side's save-state is exchanged and loaded into the matching core, then only
+// inputs cross the network. When the hello hashes differ (cross-game trade)
+// each peer also streams its ROM so both hold the same {host, guest} pair.
+// The "ready" barrier keeps either peer from ticking until both have booted.
 
 const RB_HELLO = 0, RB_INPUT = 1, RB_STATE_BEGIN = 2, RB_STATE_CHUNK = 3;
 const RB_ROM_BEGIN = 4, RB_ROM_CHUNK = 5, RB_READY = 6, RB_SPEED = 7;
 const RB_PAUSE = 8;
 const RB_CHUNK = 16384; // DataChannel-safe chunk size for state + ROM frames
-// Keep at most this much queued in the DataChannel send buffer while streaming a
-// ROM; pause until it drains below. Well under Chrome's ~16 MB hard cap (a send()
-// over which throws → a dropped chunk → a corrupt ROM), so we never hit it.
+// Send-buffer high water while streaming a ROM; well under Chrome's ~16 MB
+// cap, past which send() throws and the dropped chunk corrupts the ROM.
 const RB_SEND_HIGH_WATER = 4 * 1024 * 1024;
 const RB_ROM_MAX = 48 * 1024 * 1024; // sanity cap on an announced ROM length
-// FS extension for the session's ROMs (.gba / .gb / .gbc); set at rbConnect and
-// used for the FS names so the wasm's rollback_init dispatches to the right core.
+// FS extension of the session's ROMs; rollback_init dispatches GB/GBA on it.
 let rbExt = ".gba";
 
 const rbHash = (bytes) => {
-  // FNV-1a over the first 1 MB — enough to tell ROM versions apart cheaply.
+  // FNV-1a over the first 1 MB: enough to tell ROM versions apart.
   let h = 0x811c9dc5 >>> 0;
   const n = Math.min(bytes.length, 1 << 20);
   for (let i = 0; i < n; i++) h = Math.imul(h ^ bytes[i], 0x01000193) >>> 0;
@@ -1213,15 +1026,11 @@ const rbSendInput = (frame, bits) => {
   v.setUint8(0, RB_INPUT);
   v.setInt32(1, frame);
   v.setUint16(5, bits);
-  // ?linkdelay=NN simulates internet latency on the input stream, for testing.
   if (NET_LINK_DELAY > 0) setTimeout(() => rbSend(buf), NET_LINK_DELAY);
   else rbSend(buf);
 };
 
-// Tell the peer to match our 2x fast-forward. Both cores must run at the same
-// rate: a one-sided 2x would race its frame head past the rollback prediction
-// window and just stall waiting for the (still-1x) peer's inputs. So the toggle
-// drives BOTH — whoever taps 2x fast-forwards the pair together.
+// 2x drives both peers: a one-sided 2x just stalls at the prediction window.
 const rbSendSpeed = (on) => {
   const buf = new ArrayBuffer(2);
   const v = new DataView(buf);
@@ -1230,9 +1039,7 @@ const rbSendSpeed = (on) => {
   rbSend(buf);
 };
 
-// Tell the peer to match our pause. Same reasoning as 2x: a one-sided pause
-// just stalls the other player at the prediction limit with no explanation —
-// whoever pauses freezes the pair, visibly, on both screens.
+// Pause drives both peers too, so the freeze shows rather than reads as a stall.
 const rbSendPause = (on) => {
   const buf = new ArrayBuffer(2);
   const v = new DataView(buf);
@@ -1241,7 +1048,7 @@ const rbSendPause = (on) => {
   rbSend(buf);
 };
 
-// Snapshot the running single core (same bytes as a .state file).
+// Same bytes as a .state file.
 const rbCaptureState = () => {
   if (!Module._wasm_state_size) return new Uint8Array(0);
   const size = Module._wasm_state_size();
@@ -1264,9 +1071,7 @@ const rbSendState = (bytes) => {
   }
 };
 
-// Resolve once the DataChannel's send buffer has drained to/under its low-water
-// threshold. Re-checks synchronously in case it already drained before we
-// listened (the bufferedamountlow event only fires on a fresh crossing).
+// Checks synchronously too: bufferedamountlow only fires on a fresh crossing.
 const rbDrain = (dc) =>
   new Promise((resolve) => {
     const check = () => {
@@ -1279,9 +1084,7 @@ const rbDrain = (dc) =>
     check();
   });
 
-// Stream a whole ROM to the peer with backpressure so the send buffer never
-// overflows (a silently-dropped chunk would corrupt the ROM). `onProgress(sent)`
-// tracks bytes acknowledged into the buffer. Returns false if the channel dies.
+// Streams a ROM with backpressure. Returns false if the channel dies.
 const rbSendRom = async (bytes, onProgress) => {
   const dc = net?.dc;
   if (!dc || dc.readyState !== "open") return false;
@@ -1303,13 +1106,11 @@ const rbSendRom = async (bytes, onProgress) => {
   return true;
 };
 
-// Combined transfer progress across both directions (upload our ROM + download
-// theirs); both must finish before either peer boots, so show the joint percent.
+// Joint progress over both directions; both must finish before either boots.
 const rbShowXferProgress = () => {
   const rb = net?.rb;
   if (!rb || !rb.needRom) return;
-  // Estimate the peer's ROM at our own size until its rom-begin lands (gen-3
-  // ROMs match), so the joint bar doesn't lurch when the real length arrives.
+  // Estimate the peer's ROM at our own size until its rom-begin lands.
   const total = (rb.romLen || 0) + (rb.remoteRomLen || rb.romLen || 0);
   if (total <= 0) return;
   const done = (rb.romSent || 0) + (rb.remoteRomGot || 0);
@@ -1317,8 +1118,6 @@ const rbShowXferProgress = () => {
   netSetStatus("Transferring games… " + pct + "%");
 };
 
-// Kick off sending our ROM to the peer once (both peers do this on hello
-// mismatch), updating progress as it drains.
 const rbSendOurRom = () => {
   const rb = net?.rb;
   if (!rb || rb.romSendStarted) return;
@@ -1329,19 +1128,15 @@ const rbSendOurRom = () => {
   }).catch(() => {});
 };
 
-// Capture the running game's state + ROM, freeze it, and start the handshake.
 const rbConnect = async () => {
   const oext = extOf(currentOriginalName || "");
   if (oext !== ".gba" && oext !== ".gb" && oext !== ".gbc")
     throw new Error("link cable needs a GB/GBC/GBA game");
-  // Both peers must be the same system; the FS ROM extension drives the wasm's
-  // GB-vs-GBA dispatch in rollback_init. Also flags the GB canvas dimensions.
   rbExt = oext === ".gba" ? ".gba" : oext;
   linkIsGb = rbExt !== ".gba";
   const localState = rbCaptureState();
-  // Freeze the local game AT the snapshot so it doesn't run past it during the
-  // exchange (no overlay — the modal shows the sync status). enterRollbackMode
-  // unfreezes into the session, so the transition is seamless.
+  // Freeze at the snapshot so the game cannot run past it; enterRollbackMode
+  // unfreezes into the session.
   paused = true;
   const romBytes = FS.readFile(currentRomName);
   net.rb = {
@@ -1355,17 +1150,16 @@ const rbConnect = async () => {
     stateBuf: null,
     stateGot: 0,
     remoteHello: false,
-    // Cross-game ROM transfer (set when the peer's hello hash differs).
+    // Cross-game ROM transfer (when the peer's hello hash differs).
     needRom: false,
     remoteRomHash: 0,
     remoteRomLen: 0,
-    remoteRom: null, // assembled peer ROM (or reuse of ours when same-version)
+    remoteRom: null,
     romBuf: null,
     romGot: 0,
     romSent: 0,
     remoteRomGot: 0,
     romSendStarted: false,
-    // Readiness barrier: neither peer ticks/ships inputs until both have booted.
     localReady: false,
     remoteReady: false,
     inited: false,
@@ -1396,14 +1190,12 @@ const rbMessage = (data) => {
     return;
   }
   if (kind === RB_SPEED) {
-    // Peer toggled 2x — match it (without echoing back) so both cores run at
-    // the same rate and stay in rollback sync.
+    // Match without echoing back.
     window.applyRemoteSpeed2x?.(v.getUint8(1) === 1);
     return;
   }
   if (kind === RB_PAUSE) {
-    // Peer paused/resumed — mirror it (without echoing back) so the freeze
-    // shows on both screens instead of reading as a stall.
+    // Mirror without echoing back.
     window.applyRemotePause?.(v.getUint8(1) === 1);
     return;
   }
@@ -1411,8 +1203,6 @@ const rbMessage = (data) => {
     rb.remoteRomHash = v.getUint32(5);
     if (!net.isHost) rb.epoch = v.getUint32(1); // guest adopts the host's clock
     rb.remoteHello = true;
-    // Different game versions → each peer streams its ROM to the other so both
-    // can boot the same {host, guest} pair. Same version → keep the fast path.
     if (rb.remoteRomHash !== rb.romHash) {
       rb.needRom = true;
       rbShowXferProgress();
@@ -1443,8 +1233,7 @@ const rbMessage = (data) => {
     rb.remoteRomGot = rb.romGot;
     rbShowXferProgress();
     if (rb.romGot >= rb.romBuf.length) {
-      // Integrity: length + version hash must match what the hello promised
-      // (reliable ordered channel, so this only guards a genuine mismatch).
+      // The channel is reliable+ordered, so this only guards a real mismatch.
       if (rbHash(rb.romBuf) !== rb.remoteRomHash) {
         netFail("Game transfer was corrupted — try again");
         return;
@@ -1456,8 +1245,6 @@ const rbMessage = (data) => {
   rbTryInit();
 };
 
-// Load a full save-state into a rollback core, so it continues where the player
-// was rather than rebooting.
 const rbLoadState = (player, bytes) => {
   const p = Module._malloc(bytes.length);
   if (!p) return false;
@@ -1467,18 +1254,14 @@ const rbLoadState = (player, bytes) => {
   return ok === 1;
 };
 
-// Once we have the peer's hello (→ shared epoch), full state, and — for a
-// cross-game trade — its ROM, boot both cores, load each player's snapshot, and
-// announce readiness. The session doesn't actually START until both peers are
-// ready (rbStartIfReady), so no inputs are shipped before either has booted.
+// With the peer's hello, state and (cross-game) ROM in hand: boot both
+// cores, load each player's snapshot, announce readiness.
 const rbTryInit = () => {
   const rb = net.rb;
   if (!rb || rb.inited || !rb.remoteHello || !rb.remoteState) return;
-  if (rb.needRom && !rb.remoteRom) return; // still receiving the peer's ROM
+  if (rb.needRom && !rb.remoteRom) return;
   rb.inited = true;
-  // core 0 = host's game, core 1 = guest's — both peers write the SAME pair.
-  // Same version: our bytes drive both. Cross version: our ROM fills our own
-  // slot, the peer's ROM the other, matching the host/guest state assignment.
+  // Both peers write the same {host, guest} pair.
   const localRom = rb.romBytes;
   const remoteRom = rb.needRom ? rb.remoteRom : rb.romBytes;
   const hostRom = net.isHost ? localRom : remoteRom;
@@ -1496,28 +1279,23 @@ const rbTryInit = () => {
     netFail("Couldn't start the rollback session");
     return;
   }
-  // Core 0 = host's snapshot, core 1 = guest's; both peers load the same pair,
-  // so each game resumes from exactly where its player was.
   const hostState = net.isHost ? rb.localState : rb.remoteState;
   const guestState = net.isHost ? rb.remoteState : rb.localState;
   if (!rbLoadState(0, hostState) || !rbLoadState(1, guestState)) {
     netFail("Couldn't sync game state — are you both on the same emulator build?");
     return;
   }
-  // Booted. Tell the peer, and start once they've told us the same.
   rb.localReady = true;
   rbSend(new Uint8Array([RB_READY]));
   netSetStatus(rb.needRom ? "Ready — waiting for your friend…" : "");
   rbStartIfReady();
 };
 
-// Both peers have booted their cores → unfreeze into the live session. Gated so
-// neither peer ticks (or ships an input the other would drop) before both boot.
 const rbStartIfReady = () => {
   const rb = net?.rb;
   if (!rb || !rb.inited || !rb.localReady || !rb.remoteReady || net.started) return;
   net.started = true;
-  netFrozeGame = false; // the session unfreezes below; not ours to thaw anymore
+  netFrozeGame = false; // the session unfreezes below
   netMode = false; // rollback drives its own RAF branch, not the SIO netStep path
   closeNetModal();
   window.rbSendInput = rbSendInput;
@@ -1525,8 +1303,7 @@ const rbStartIfReady = () => {
   window.rbSendPause = rbSendPause;
   window.enterRollbackMode(); // unfreezes into the session
   showToast(net.isHost ? "Player 2 connected — full speed" : "Connected — full speed");
-  // The ROMs + states now live in wasm/MEMFS; drop the JS-side copies (up to
-  // ~32 MB for a cross-game pair) so they don't linger for the whole session.
+  // The ROMs + states now live in MEMFS; drop the JS copies (up to ~32 MB).
   rb.romBytes = null;
   rb.remoteRom = null;
   rb.romBuf = null;
@@ -1536,8 +1313,7 @@ const rbStartIfReady = () => {
 };
 
 // Leave the session but keep playing: promote our core to the single-player
-// core (continues from the post-trade moment, no reboot), repoint currentRomName
-// at it so battery saves persist to our own slot, and persist now.
+// core and repoint currentRomName at it so battery saves persist to our slot.
 const rbTeardown = async () => {
   if (!net?.rb?.inited) return;
   window.rbSendInput = null;
@@ -1546,8 +1322,7 @@ const rbTeardown = async () => {
   const kept =
     Module._rollback_exit_to_single && Module._rollback_exit_to_single() === 1;
   if (kept) {
-    // The running solo core now lives at rbrom<player><ext> / .sav; keep the
-    // original display name so its save persists under the real game's slot.
+    // The solo core now lives at rbrom<player><ext>; the display name stays.
     currentRomName = "rbrom" + net.rb.localPlayer + rbExt;
   } else if (Module._rollback_exit) {
     Module._rollback_exit();
@@ -1560,13 +1335,10 @@ const rbTeardown = async () => {
   }
 };
 
-// ---------------- wasm byte shuttle ----------------
-
 const netReceive = (bytes) => {
   if (!net) return;
   if (!net.started) {
-    // The peer's channel can open (and its HELLO arrive) before our own ROM
-    // setup finishes; hold the bytes until the core exists.
+    // The peer's HELLO can arrive before our core exists.
     net.rxQueue.push(bytes);
     return;
   }
@@ -1583,10 +1355,8 @@ const netFeedNow = (bytes) => {
     netPeerGone("Link error: " + Module.UTF8ToString(Module._netlink_error_msg()));
     return;
   }
-  // This message may carry the REPLY a stalled transfer is parked on.
-  // Advance the core right now (driveNet resolves the stall at network
-  // speed) and push whatever we produced back out immediately — without
-  // this, every link round-trip would cost a whole 16 ms RAF interval.
+  // Advance the core now and push the reply out: otherwise every link
+  // round-trip costs a whole RAF interval.
   if (typeof window.driveNet === "function") window.driveNet();
   netFlush();
 };
@@ -1611,69 +1381,52 @@ const netFlush = () => {
   }
 };
 
-// ---------------- session lifecycle ----------------
-
-// Connect: normalize the shared code and hand it to the signaling server. Both
-// peers send the same code; the server pairs them and hands back a role.
 netJoinGo.addEventListener("click", async () => {
-  // Once connecting, the same button reads "Cancel" and tears the attempt down.
+  // While connecting the same button reads "Cancel".
   if (net?.ws || net?.bc) {
     netDismissModal();
     return;
   }
-  if (!net) net = makeSession(netAttach); // re-arm if a prior attempt tore down
+  if (!net) net = makeSession(netAttach);
   const session = net;
   const code = netCodeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
   if (code.length < 3) {
     netSetStatus("Pick a code of at least 3 letters/numbers", true);
     return;
   }
-  session.code = code; // kept on the session so a redial can re-rendezvous
+  session.code = code;
   netSetConnecting(true);
   netSetStatus("Connecting…");
   armManualFallback(session);
-  // Two paths race. Same-browser tabs pair instantly over a BroadcastChannel with
-  // no server and no WebRTC; everyone else goes through the signaling server. The
-  // first to connect wins (wireChannel tears the loser down). Running both means a
-  // second browser tab links even with the server down, while a phone across the
-  // network still connects — no Host/Join choice, just a shared code either way.
+  // Same-browser BroadcastChannel and signaling server race; the first to
+  // connect wins (wireChannel tears the loser down).
   startLocalLink(code);
   if (await sigConnect()) {
-    // Paired locally (net.dc set) or cancelled (net swapped) while dialing?
-    if (net !== session || net.dc) return;
+    if (net !== session || net.dc) return; // paired locally or cancelled
     sigSend({ t: "rendezvous", code });
   } else if (net === session && !net.dc && !net.rtcConnected) {
-    // The server was unreachable outright — switch to the fallback immediately.
     clearTimeout(manualFallbackTimer);
     manualEnter(true);
   }
 });
 
-// Keep the emulator from swallowing what's typed here. Emscripten's SDL layer
-// registers key handlers on `window` (bubble phase) and calls preventDefault()
-// on keypress, which otherwise blocks text entry into every input on the page.
-// Stopping propagation at the field keeps those keystrokes from ever reaching
-// it. keydown also submits on Enter.
+// Stop propagation at the field so SDL's window-level handlers (which
+// preventDefault keypress) never see it; Escape is then dismissed here.
 ["keydown", "keypress", "keyup"].forEach((type) =>
   netCodeInput.addEventListener(type, (/** @type {KeyboardEvent} */ e) => {
     if (type === "keydown" && e.key === "Enter") netJoinGo.click();
-    // Same Escape carve-out as the manual-code input: propagation stops here,
-    // so dismiss directly instead of relying on the document handler.
     if (type === "keydown" && e.key === "Escape") netDismissModal();
     e.stopPropagation();
   })
 );
 
-// The DataChannel is open: bring the local core online. Two paths —
-// attach binds the network cable to the already-running game with no
-// reboot (from the in-game badge); the fresh path boots the ROM into a
-// linked session from the player's OWN battery save (from the tiles).
-// Trading from your real save is the point either way.
+// SIO path: attach binds the cable to the running game; the fresh path boots
+// the ROM into a linked session from the player's own battery save.
 const launchNetRom = async () => {
   setFastForward(false);
   setSpeed2x(false);
   setRewindHeld(false);
-  netFrozeGame = false; // the session takes over the game clock now
+  netFrozeGame = false;
   paused = false;
   document.body.classList.remove("paused");
   pauseButton.classList.remove("paused", "active");
@@ -1684,7 +1437,6 @@ const launchNetRom = async () => {
   }
 
   if (net.attach) {
-    // The game is already running its own save; just plug the cable in.
     const ok = Module.ccall(
       "netlink_attach",
       "number",
@@ -1721,8 +1473,7 @@ const launchNetRom = async () => {
   netSetStatus("Linked — starting…");
 };
 
-// One emulated frame attempt; called from the RAF loop in index.js.
-// Returns the netlink_tick status (1 = frame ran).
+// Called from the index.js RAF loop; returns the netlink_tick status.
 const netStep = () => {
   if (!netMode || !net?.started) return 4;
   const st = Module._netlink_tick();
@@ -1730,17 +1481,14 @@ const netStep = () => {
   return st;
 };
 
-// Post-tick housekeeping: handshake completion (incl. the cross-version ROM
-// confirm), the stall badge, peer-departure and error surfacing.
 const netAfterTick = (st) => {
   if (!netMode || !net) return;
   if (!net.helloDone && (st === 1 || st === 2)) {
     net.helloDone = true;
     closeNetModal();
     if (Module._netlink_crc_mismatch()) {
-      // Different ROM bytes on the two sides. Cross-version pairs
-      // (Ruby<->Sapphire) are fully link-compatible and half the point of
-      // Pokémon trading, so this is a confirm, not a rejection.
+      // Cross-version pairs (Ruby<->Sapphire) are link-compatible, so this
+      // is a confirm, not a rejection.
       const stay = confirm(
         "You and your friend are running different ROMs (different bytes, " +
         "e.g. two game versions or regions). Compatible games can still " +
@@ -1764,8 +1512,7 @@ const netAfterTick = (st) => {
     netPeerGone("Your friend left the game");
     return;
   }
-  // "Waiting for peer": shown only for sustained stalls so routine
-  // per-transfer waits don't flicker the badge.
+  // Badge only for sustained stalls, so per-transfer waits don't flicker it.
   if (st === 2) {
     const now = performance.now();
     if (!net.stallSince) net.stallSince = now;
@@ -1776,9 +1523,7 @@ const netAfterTick = (st) => {
   }
 };
 
-// The peer is gone (BYE, channel closed, ICE failure) or the stream broke:
-// tell the player and keep the local game running — the game itself sees a
-// yanked link cable.
+// Peer gone: keep the local game running (it sees a yanked cable).
 const netPeerGone = (msg) => {
   if (!net) return;
   const started = net.started;
@@ -1790,9 +1535,7 @@ const netPeerGone = (msg) => {
   }
 };
 
-// Tear the session down. The local game (if one started) keeps running
-// unlinked: index.js's normal single-core RAF branch takes over as soon as
-// netMode is false.
+// The local game keeps running unlinked once netMode is false.
 const netShutdown = async (opts) => {
   netStallBadge.hidden = true;
   clearTimeout(manualFallbackTimer);
@@ -1802,8 +1545,7 @@ const netShutdown = async (opts) => {
     clearTimeout(s.redialTimer);
     clearTimeout(s.rtcDeadline);
   }
-  // Cancelling the connect modal (or any teardown) thaws the game we froze when
-  // the modal opened — even if the handshake never got as far as creating rb.
+  // Thaw the game frozen at modal open, even if rb was never created.
   if (netFrozeGame) {
     netFrozeGame = false;
     paused = false;
@@ -1812,8 +1554,6 @@ const netShutdown = async (opts) => {
     pauseButton.title = "Pause";
   }
   if (s?.rb) {
-    // We froze the local game during the handshake; always unfreeze on teardown
-    // (whether the session ran or the handshake failed).
     paused = false;
     document.body.classList.remove("paused");
     if (s.rb.inited) {
@@ -1827,7 +1567,7 @@ const netShutdown = async (opts) => {
       if (netMode && Module._netlink_exit) {
         Module._netlink_exit(); // queues BYE, unbinds the cable, flushes .sav
         if (s.ptr && s.dc?.readyState === "open") {
-          // Deliver the BYE so the peer exits cleanly rather than timing out
+          // Deliver the BYE so the peer exits cleanly
           for (;;) {
             const n = Module._netlink_drain(s.ptr, NET_BUF_CAP);
             if (n <= 0) break;
@@ -1848,7 +1588,7 @@ const netShutdown = async (opts) => {
       s.ws?.close();
     } catch {}
     try {
-      s.bc?.close(); // discovery-phase channel (before it became s.dc)
+      s.bc?.close(); // discovery-phase channel
     } catch {}
     if (s.ptr) Module._free(s.ptr);
   }
@@ -1862,17 +1602,13 @@ const netShutdown = async (opts) => {
   if (!opts?.keepModal) closeNetModal();
 };
 
-// Modal dismissal = abandoning the pending session (or nothing once the
-// game is already running — then the modal is long closed anyway).
 const netDismissModal = () => {
   if (net && !net.started) netShutdown();
   else closeNetModal();
 };
 
-// The prominent in-toolbar disconnect button (shown only in rollback mode).
-// Two-step confirm on an EXISTING element, mirroring index.js's
-// makeConfirmButton semantics (armed class + label swap + 3.5s auto-disarm):
-// the first activation arms, a second within the window runs the action.
+// Two-step confirm on an existing element (index.js makeConfirmButton
+// semantics: armed class + label swap + 3.5s auto-disarm).
 const armedAction = (el, setLabel, action) => {
   let armed = false;
   let timer = 0;
@@ -1903,8 +1639,7 @@ const menuDisconnectArm = armedAction(
   (armed) => {
     if (!netConnectLabel) return;
     if (armed) netConnectLabel.textContent = "Are you sure?";
-    // Restore through the normal label logic: the session may have died
-    // remotely while armed, in which case this reads "Link Cable" again.
+    // The session may have died remotely while armed.
     else window.setNetConnectLabel(!!(net?.started || net?.rb?.inited));
   },
   () => {
@@ -1915,8 +1650,7 @@ const menuDisconnectArm = armedAction(
 );
 
 const rbDisconnectBtn = document.getElementById("rb-disconnect");
-// The label span holds "Disconnect<span class=rb-dc-suffix> Link Cable</span>";
-// remember the markup so disarming restores the responsive suffix.
+// Disarming must restore the responsive suffix markup, not just the text.
 const rbDcSpan = rbDisconnectBtn?.querySelector?.("span");
 const rbDcHTML = rbDcSpan ? rbDcSpan.innerHTML : "";
 const rbDisconnectArm = armedAction(
@@ -1935,9 +1669,6 @@ rbDisconnectBtn.addEventListener("click", () => {
   if (net?.started || net?.rb?.inited) rbDisconnectArm.fire();
 });
 
-// Footer links: switch between the shared-code and manual-exchange views.
-// Entering the manual exchange cancels any in-progress server attempt
-// (manualEnter's normal semantics); going back re-arms a fresh session.
 document.getElementById("net-to-manual").addEventListener("click", () => {
   manualEnter();
   if (netManualView && !netManualView.hidden) {

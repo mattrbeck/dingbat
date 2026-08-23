@@ -1,25 +1,14 @@
-// Layer 2 — fast pure-JS UV-math tripwire (no browser).
+// Pure-JS UV tripwire (no browser) for the present vertex shader in
+// web/glpresent.js: evaluates the shipped `v_uv = ...;` expression (via
+// glshaders.mjs), interpolates it at the four visible clip corners as the
+// rasterizer would, and asserts the screen maps to the full [0,1] texture
+// with row 0 at the top. Pins the halved-UV bug (`v_uv = p*0.5`, bb7561b).
 //
-// Guards the WebGL2 present vertex shader in web/index.js against the class of
-// bug that shipped: the fullscreen-triangle UVs were halved (`v_uv = p*0.5`),
-// so the visible screen sampled only the bottom-left quadrant of the source
-// frame zoomed 2x. Fixed in bb7561b to `v_uv = vec2(p.x, 1.0 - p.y)`.
-//
-// This test pulls the ACTUAL `v_uv = ...;` expression out of index.js (via
-// glshaders.mjs) and evaluates it, then interpolates v_uv at the four VISIBLE
-// clip-space corners the same way the GPU rasterizer would. It asserts the
-// visible screen maps to the FULL [0,1] texture with row 0 at the TOP:
-//
-//     clip corner        screen position     expected v_uv
-//     (-1,-1)  bottom-left                    (0, 1)
-//     ( 1,-1)  bottom-right                   (1, 1)
-//     (-1, 1)  top-left                       (0, 0)   <- row 0 at top (Y-flip)
-//     ( 1, 1)  top-right                      (1, 0)
-//
-// Run against the buggy `p*0.5` shader this FAILS; against the fix it PASSES.
-//
-// Zero dependencies, mirroring web/sdputil.test.mjs / signaling/server.test.mjs:
-// a plain assert() helper, a single run(), non-zero exit on any failure.
+//     clip corner   screen        expected v_uv
+//     (-1,-1)       bottom-left   (0, 1)
+//     ( 1,-1)       bottom-right  (1, 1)
+//     (-1, 1)       top-left      (0, 0)
+//     ( 1, 1)       top-right     (1, 0)
 //
 // Run:  node web/uv.test.mjs
 
@@ -37,7 +26,6 @@ function assertClose(a, b, msg) {
   assert(Math.abs(a - b) < EPS, `${msg} (got ${a}, want ${b})`);
 }
 
-// The four visible clip-space corners and the UV each must sample.
 const CORNERS = [
   { name: "bottom-left  (-1,-1)", clip: [-1, -1], uv: [0, 1] },
   { name: "bottom-right ( 1,-1)", clip: [1, -1], uv: [1, 1] },
@@ -71,16 +59,13 @@ async function run() {
     assertClose(u, c.uv[0], `${c.name}: u`);
     assertClose(v, c.uv[1], `${c.name}: v`);
   }
-  // Center of the screen samples the center of the texture.
   {
     const [u, v] = uvAtClip(expr, [0, 0]);
     assertClose(u, 0.5, "center clip (0,0): u = 0.5");
     assertClose(v, 0.5, "center clip (0,0): v = 0.5");
   }
 
-  // Red/green proof, in-test: the same assertion evaluated against the KNOWN
-  // buggy expressions must FAIL. This documents that the test actually catches
-  // the shipped bug, independent of the live index.js contents.
+  // The same assertion against the known-buggy expressions must fail.
   console.log("\nregression witnesses (these buggy shaders MUST NOT pass):");
   {
     const shipped = checkExpr(expr, "shipping index.js");

@@ -96,19 +96,15 @@ test("persistSave skips the IndexedDB write when the save is unchanged", async (
   await app.api.persistSave("rom.gba", "A.gba");
   eq(app.idb.get("save:A.gba"), u8(1, 2, 3));
 
-  // Tamper with the stored copy out of band: an unchanged FS save must NOT
-  // rewrite it (the dirty-check skips the clone + IDB write), so the tampered
-  // value survives.
+  // An unchanged FS save must not rewrite the stored copy (dirty-check).
   app.idb.set("save:A.gba", u8(9, 9, 9));
   await app.api.persistSave("rom.gba", "A.gba");
   eq(app.idb.get("save:A.gba"), u8(9, 9, 9));
 
-  // A real change to the FS save is persisted again.
   app.sandbox.FS.files.set("rom.sav", u8(1, 2, 4));
   await app.api.persistSave("rom.gba", "A.gba");
   eq(app.idb.get("save:A.gba"), u8(1, 2, 4));
 
-  // A different game (different key) always writes the first time.
   await app.api.persistSave("rom.gba", "B.gba");
   eq(app.idb.get("save:B.gba"), u8(1, 2, 4));
 });

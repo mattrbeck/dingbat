@@ -1,13 +1,6 @@
-// The toast stack. #toast used to be a single element that every new message
-// overwrote, and that one slot cost real features: the Game Boy Camera's
-// "use your real camera?" offer — the only route to enabling the webcam —
-// was destroyed by the auto-resume "Last session saved" toast 98 ms later,
-// leaving the user with a corrupted-looking synthetic viewfinder and no way
-// out. Reset's "Undo" offer collided with the same prompt. So the invariant
-// under test is simply: no toast may silently destroy another.
-//
-// Strings here are the genuine longest/most-collided ones from web/index.js,
-// not invented copy.
+// The toast stack: no toast may silently destroy another (the camera offer
+// was once wiped by the auto-resume toast 98 ms later). Strings are the
+// real ones from web/index.js.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { eq, loadApp } from "./helpers.mjs";
@@ -18,7 +11,6 @@ const LONGEST = "This game's ROM is no longer stored — load the file again";
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Fire an action toast whose callback records into a vm-side array.
 const armed = (app, msg, label, ms) => app.runIn(
   `showActionToast(${JSON.stringify(msg)}, ${JSON.stringify(label)},` +
   ` () => globalThis.__taps.push(${JSON.stringify(label)})` +
@@ -30,13 +22,11 @@ const setup = async () => {
   return app;
 };
 
-// The pill carrying an action, newest first, ignoring ones already retired.
 const offerPill = (app) => app.toastEl.children.find((c) =>
   c.classList.contains("has-action") && !c.classList.contains("leaving"));
 
 test("the harness still sees what the app shows", async () => {
-  // Guard on the guard: every other toast assertion in the suite reads
-  // `app.toasts`, so a silently-empty list would turn them all into no-ops.
+  // Every toast assertion in the suite reads `app.toasts`.
   const app = await setup();
   app.runIn(`showToast(${JSON.stringify(LONGEST)})`);
   assert.deepEqual(app.toasts, [LONGEST]);
@@ -47,14 +37,12 @@ test("two toasts coexist", async () => {
   const app = await setup();
   app.runIn(`showToast(${JSON.stringify(LONGEST)})`);
   app.runIn('showToast("State loaded")');
-  // Newest first: the stack is bottom-anchored and grows upward, so the
-  // older pill keeps the position it already occupies.
+  // Newest first: the stack grows upward, so older pills keep their position.
   assert.deepEqual(app.liveToasts(), ["State loaded", LONGEST]);
 });
 
 test("an action toast survives a plain toast arriving after it", async () => {
-  // The reported bug, exactly: the camera offer, then the auto-resume toast
-  // 98 ms later. Both must be on screen, and the offer must still be armed.
+  // The camera offer, then the auto-resume toast 98 ms later.
   const app = await setup();
   armed(app, CAMERA, "Enable camera");
   await wait(100);
@@ -71,7 +59,6 @@ test("an action toast survives a plain toast arriving after it", async () => {
 });
 
 test("an action toast survives another action toast", async () => {
-  // Reset's "Undo" and the camera offer fire in the same millisecond.
   const app = await setup();
   armed(app, CAMERA, "Enable camera");
   armed(app, "Game reset", "Undo");
@@ -85,10 +72,8 @@ test("tapping an action toast runs its callback, synchronously", async () => {
   const pill = offerPill(app);
 
   pill.onclick();
-  // Read the flag with nothing awaited in between. Several callers use this
-  // tap to satisfy iOS's user-gesture requirement for
-  // DeviceOrientationEvent.requestPermission() / getUserMedia(), so anything
-  // asynchronous between the click and fn() would break the activation chain.
+  // Nothing may be awaited between the click and fn(): callers use this tap
+  // for iOS's user-gesture requirement (requestPermission / getUserMedia).
   eq(app.runIn("__taps.slice()"), ["Enable camera"],
     "the callback ran in the click's own task");
 
@@ -142,8 +127,7 @@ test("a repeated offer keeps the freshest callback", async () => {
 });
 
 test("auto-dismiss timers are per toast", async () => {
-  // One shared timer meant a 2.2 s status message could cut an 8 s offer
-  // short (or the offer could hold the status message on screen).
+  // One shared timer would let a 2.2 s status cut an 8 s offer short.
   const app = await setup();
   armed(app, "Photo printed", "View", 5000);
   armed(app, CAMERA, "Enable camera", 30);

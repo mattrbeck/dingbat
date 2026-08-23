@@ -1,23 +1,10 @@
-// --- Compact SDP codec for the manual code exchange (serverless WebRTC) ---
-// The normal online path (netplay.js) trickles ICE candidates through the
-// signaling server one at a time, so a full SDP never has to fit anywhere small.
-// The manual fallback (server unreachable) has NO server: the whole description
-// travels as a copy-pasted string. A raw WebRTC data-channel SDP is ~600–900
-// bytes of mostly-boilerplate — too big and unwieldy to trade by hand.
-//
-// This codec throws away everything that is CONSTANT for this app's single fixed
-// configuration (one ordered DataChannel, DTLS/SCTP, no media) and keeps only the
-// parts that actually differ between peers:
-//   - the DTLS setup role (actpass / active / passive)
-//   - the SHA-256 certificate fingerprint (32 bytes)
-//   - the ICE ufrag + pwd (the shared-secret credentials)
-//   - the udp ICE candidates (host mDNS + server-reflexive), each as
-//     type + priority + port + address
-// decode() rebuilds a VALID SDP from a fixed template plus those fields. The
-// reconstruction is not byte-identical to the original (foundations, the o= line
-// session id, and the m=/c= placeholder ports are regenerated) but it is
-// SEMANTICALLY equivalent: same fingerprint, same credentials, same candidates —
-// which is all WebRTC needs to establish the connection.
+// Compact SDP codec for the manual (serverless) code exchange, where the whole
+// description travels as a copy-pasted string. Everything constant for this
+// app's single configuration (one ordered DataChannel, DTLS/SCTP, no media) is
+// dropped; only what differs between peers is kept: DTLS setup role, SHA-256
+// fingerprint, ICE ufrag/pwd, udp ICE candidates. decode() rebuilds a valid SDP
+// from a fixed template: not byte-identical (foundations, o= session id and
+// placeholder ports are regenerated) but semantically equivalent.
 //
 // Wire format (then base64url-encoded, no padding):
 //   u8   version (1)
@@ -35,8 +22,7 @@
 //     addr: IPv4 = 4 bytes, IPv6 = 16 bytes, mDNS = 16-byte UUID,
 //           hostname = u8 length + UTF-8 bytes
 //
-// Loads as a plain classic script in the browser (sets window.SDPCodec) and as a
-// CommonJS module under Node for the unit tests (module.exports = SDPCodec).
+// Classic script in the browser (window.SDPCodec); CommonJS module under Node.
 
 (function (root) {
   "use strict";
@@ -48,7 +34,6 @@
   const CTYPE_NAME = ["host", "srflx", "prflx", "relay"];
   const A_V4 = 0, A_V6 = 1, A_MDNS = 2, A_HOST = 3;
 
-  // ---- tiny growable byte writer / reader -------------------------------
   class Writer {
     constructor() { this.b = []; }
     u8(v) { this.b.push(v & 0xff); }
@@ -77,7 +62,6 @@
     let s = ""; for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]); return s;
   };
 
-  // ---- base64url (no padding) -------------------------------------------
   const b64urlEncode = (u8) => {
     let bin = "";
     for (let i = 0; i < u8.length; i++) bin += String.fromCharCode(u8[i]);
@@ -90,7 +74,6 @@
     const b64 = s.replace(/-/g, "+").replace(/_/g, "/");
     let bin;
     if (typeof atob !== "undefined") {
-      // atob tolerates missing padding in practice, but pad to be safe.
       const pad = b64.length % 4 ? "=".repeat(4 - (b64.length % 4)) : "";
       bin = atob(b64 + pad);
     } else {
@@ -101,10 +84,8 @@
     return out;
   };
 
-  // ---- SDP field extraction ---------------------------------------------
   const firstMatch = (sdp, re) => { const m = sdp.match(re); return m ? m[1] : null; };
 
-  // Parse "AB:CD:..:66" hex-colon fingerprint into raw bytes.
   const fpToBytes = (hex) => {
     const parts = hex.trim().split(":");
     const out = new Uint8Array(parts.length);
@@ -140,7 +121,6 @@
   const v4ToBytes = (h) => Uint8Array.from(h.split(".").map((x) => parseInt(x, 10) & 0xff));
   const bytesToV4 = (u8) => `${u8[0]}.${u8[1]}.${u8[2]}.${u8[3]}`;
   const v6ToBytes = (h) => {
-    // Expand :: and per-group into 16 bytes.
     let head, tail;
     if (h.includes("::")) {
       const [a, b] = h.split("::");
@@ -159,8 +139,7 @@
     return groups.join(":"); // uncompressed but valid
   };
 
-  // Parse a single "a=candidate:..." line body (everything after "candidate:").
-  // Returns null for candidates we don't carry (non-udp, or unparseable).
+  // Body of one "a=candidate:" line. null for non-udp or unparseable.
   const parseCandidate = (body) => {
     // foundation component transport priority address port typ TYPE ...
     const t = body.trim().split(/\s+/);
@@ -176,9 +155,8 @@
     return { type, priority, address, port };
   };
 
-  // ------------------------------ encode ---------------------------------
-  // desc: an RTCSessionDescription-like { type, sdp }. Returns a base64url
-  // string, or null if the SDP lacks the fields WebRTC needs.
+  // desc: { type, sdp }. Returns a base64url string, or null if the SDP lacks
+  // the fields WebRTC needs.
   function encode(desc) {
     try {
       if (!desc || !desc.sdp) return null;
@@ -222,11 +200,9 @@
         if (addrKind === A_HOST) w.str(hostStr);
         else w.bytes(addrBytes);
       }
-      // Mint timestamp (epoch seconds), appended AFTER the v1 payload: the
-      // v1 decoder reads exactly its declared fields and ignores trailing
-      // bytes, so older clients still accept these codes — only a new
-      // decoder surfaces the age (diagnostic: the NAT mappings behind a
-      // code decay in under a minute, so age ≈ viability cross-network).
+      // Mint timestamp (epoch seconds) after the v1 payload: v1 decoders
+      // ignore trailing bytes, so old clients still accept the code. NAT
+      // mappings behind a code decay within a minute, so age ~ viability.
       w.u32(Math.floor(Date.now() / 1000));
       return b64urlEncode(w.out());
     } catch {
@@ -234,8 +210,7 @@
     }
   }
 
-  // ------------------------------ decode ---------------------------------
-  // str: a base64url string from encode(). Returns { type, sdp } or null.
+  // Returns { type, sdp, mintedAt } or null.
   function decode(str) {
     try {
       if (typeof str !== "string" || str.length === 0) return null;
@@ -261,8 +236,8 @@
         else if (addrKind === A_V6) addr = bytesToV6(r.bytes(16));
         else if (addrKind === A_MDNS) addr = bytesToUuid(r.bytes(16));
         else addr = r.str();
-        // Foundation is regenerated (the remote never needs it to match); use a
-        // stable per-index value. srflx/relay carry a template raddr/rport.
+        // Foundation regenerated per index (the remote never matches it);
+        // srflx/relay get a placeholder raddr/rport.
         const rel = (ctype === "srflx" || ctype === "relay") ? " raddr 0.0.0.0 rport 0" : "";
         candLines.push(
           `a=candidate:${i + 1} 1 udp ${priority} ${addr} ${port} typ ${ctype}${rel} generation 0`
@@ -270,7 +245,6 @@
       }
       if (!ufrag || !pwd || candLines.length === 0) return null;
 
-      // Fixed session id: constant is fine, the remote doesn't correlate it.
       const sdp =
         "v=0\r\n" +
         "o=- 4611686018427387904 2 IN IP4 127.0.0.1\r\n" +
@@ -290,7 +264,7 @@
         "a=mid:0\r\n" +
         "a=sctp-port:5000\r\n" +
         "a=max-message-size:262144\r\n";
-      // Trailing mint timestamp (newer encoders append it; absent = unknown).
+      // Trailing mint timestamp; absent = unknown.
       const mintedAt = r.left() >= 4 ? r.u32() : null;
       return { type: kind, sdp, mintedAt };
     } catch {
@@ -298,22 +272,14 @@
     }
   }
 
-  // Reinterpret a peer's encoded OFFER as the ANSWER to our own local offer.
-  //
-  // The manual code exchange is SYMMETRIC: both sides independently create an
-  // offer, encode it, and hand the string to the other side (no server, no
-  // second round trip). Standard WebRTC can't take two offers — so each side
-  // locally rewrites the peer's blob into a valid answer: same fingerprint,
-  // same ICE credentials, same candidates (which is everything the connection
-  // actually needs), but type "answer" and a concrete DTLS role in a=setup.
-  // The roles must complement each other, so the caller picks `setup` from a
-  // deterministic comparison both sides can compute (e.g. of the two code
-  // strings): the side that will be the DTLS server passes "active" (the PEER
-  // acts as client), the other passes "passive". Both peers having created
-  // data channels and both ICE agents starting out "controlling" is fine: ICE
-  // role conflicts resolve via the RFC 8445 tie-breaker, and DCEP stream ids
-  // are role-partitioned (client even / server odd) so the channels can't
-  // collide. Verified end-to-end in web/manualpair.test.mjs.
+  // Reinterpret a peer's encoded offer as the answer to our own offer. The
+  // manual exchange is symmetric (both sides offer; WebRTC cannot take two
+  // offers), so the peer's blob is rewritten as an answer with a concrete
+  // DTLS role. The caller picks `setup` from a comparison both sides can
+  // compute: the side that will be the DTLS server passes "active", the other
+  // "passive". Two "controlling" ICE agents resolve via the RFC 8445
+  // tie-breaker; DCEP stream ids are role-partitioned (client even / server
+  // odd), so the two data channels cannot collide. Pinned by manualpair.test.mjs.
   function answerFrom(code, setup) {
     if (setup !== "active" && setup !== "passive") return null;
     const d = decode(code);
@@ -321,7 +287,7 @@
     return { type: "answer", sdp: d.sdp.replace(/a=setup:\S+/, "a=setup:" + setup) };
   }
 
-  // Parse the semantic fields back out of an SDP, for tests / comparison.
+  // Semantic fields of an SDP, for tests / comparison.
   function fields(sdp) {
     const cands = [];
     const re = /a=candidate:(.+)/g;
