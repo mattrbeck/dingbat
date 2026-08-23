@@ -27,8 +27,9 @@
 ## reseed, fill-lists, nested if-blocks, and true code hooks (op1>>24==0xC4 —
 ## these execute injected ARM, which a per-frame poke engine cannot do).
 ##
-## Algorithms follow mGBA verbatim (src/gb/cheats.c, src/gba/cheats/gameshark.c,
-## src/gba/cheats/parv3.c, include/mgba/internal/gba/cheats.h).
+## Formats: Pan Docs "Game Genie/Shark Cheats" (GB), Frohwein's Game Genie
+## page (GB compare-byte encoding), GBATEK "GBA Cheat Devices" (PARv3 opcode
+## layout); the PARv3 cipher is TEA with the published PARv3 seeds.
 
 import std/[strutils, tables]
 
@@ -97,9 +98,6 @@ proc new_cheat_engine*(platform: CheatPlatform): CheatEngine =
 # Small hex helpers
 # ---------------------------------------------------------------------------
 
-proc ror32(v: uint32; n: int): uint32 {.inline.} =
-  (v shr uint32(n)) or (v shl uint32(32 - n))
-
 proc parse_hex_exact(s: string; want: int; ok: var bool): uint32 =
   ## Parse exactly `want` hex digits (no more, no less). Sets ok=false on any
   ## non-hex character or wrong length.
@@ -123,38 +121,40 @@ proc strip_code(s: string): string =
     if c notin {' ', '\t'}: result.add c
 
 # ---------------------------------------------------------------------------
-# GB Game Genie  (ROM patch)   -- mGBA GBCheatAddGameGenieLine
+# GB Game Genie (ROM patch). Code ABC-DEF-GHI: AB = replacement byte,
+# CDE = address bits 11..0, F = address bits 15..12 complemented, GI = the
+# compare byte encoded as ((x xor $FF) ror 2) xor $45, H = check digit.
+# Reference: Jeff Frohwein, "Game Genie for GameBoy Technical Page"
+# (devrs.com/gb/files/gg.html).
 # ---------------------------------------------------------------------------
 
 proc parse_gb_game_genie(code: string; op: var CheatOp): string =
-  ## code is like "AAA-BBB-CCC" or "AAA-BBB". Returns "" on success.
+  ## "AAA-BBB" or "AAA-BBB-CCC"; returns "" on success.
   let parts = code.split('-')
   if parts.len != 2 and parts.len != 3:
     return "Game Genie code needs 2 or 3 groups (AAA-BBB[-CCC])"
   var ok: bool
-  let op1 = parse_hex_exact(parts[0], 3, ok)
+  let abc = parse_hex_exact(parts[0], 3, ok)
   if not ok: return "bad hex in group 1"
-  let op2 = parse_hex_exact(parts[1], 3, ok)
+  let def = parse_hex_exact(parts[1], 3, ok)
   if not ok: return "bad hex in group 2"
-  var address = (op1 and 0xF) shl 8
-  address = address or ((op2 shr 4) and 0xFF)
-  address = address or (((op2 and 0xF) xor 0xF) shl 12)
+  let nib_c = abc and 0xF
+  let nib_f = def and 0xF
   op.action = caRomPatch
-  op.address = address
-  op.value = op1 shr 4
+  op.address = ((nib_f xor 0xF) shl 12) or (nib_c shl 8) or (def shr 4)
+  op.value = abc shr 4
   op.compare = -1
   if parts.len == 3:
-    let op3 = parse_hex_exact(parts[2], 3, ok)
+    let ghi = parse_hex_exact(parts[2], 3, ok)
     if not ok: return "bad hex in group 3"
-    var v = ((op3 and 0xF00) shl 20) or (op3 and 0xF)
-    v = ror32(v, 2)
-    v = v or (v shr 24)
-    v = v xor 0xBA
-    op.compare = int(v and 0xFF)
+    let enc = ((ghi shr 8) shl 4) or (ghi and 0xF)
+    let inv = (enc xor 0xFF) and 0xFF
+    let rot = ((inv shr 2) or (inv shl 6)) and 0xFF
+    op.compare = int(rot xor 0x45)
   return ""
 
 # ---------------------------------------------------------------------------
-# GB GameShark  (per-frame RAM write)   -- mGBA GBCheatAddGameShark
+# GB GameShark (per-frame RAM write). Pan Docs, "Game Genie/Shark Cheats".
 # ---------------------------------------------------------------------------
 
 proc parse_gb_gameshark(code: string; op: var CheatOp): string =
@@ -165,8 +165,7 @@ proc parse_gb_gameshark(code: string; op: var CheatOp): string =
   # The leading two digits are the SRAM bank (Pan Docs, Shark Cheats:
   # `010238CD` = bank $01, value $02, address $CD38). GB addresses are 16-bit,
   # so the bank rides bits 16-23 of `address` for the core's write hook to
-  # decode — only an $A000-BFFF target consults it. mGBA drops the byte
-  # entirely; Pan Docs is the spec here.
+  # decode — only an $A000-BFFF target consults it.
   op.action = caWrite8
   op.address = ((raw and 0xFF) shl 8) or ((raw shr 8) and 0xFF) or
                (((raw shr 24) and 0xFF) shl 16)
@@ -175,8 +174,8 @@ proc parse_gb_gameshark(code: string; op: var CheatOp): string =
   return ""
 
 # ---------------------------------------------------------------------------
-# GBA Action Replay v3 / GameShark v3 (PARv3)
-# Cipher: mGBA GBACheatDecryptGameShark (TEA). Opcodes: parv3.c + cheats.h.
+# GBA Action Replay v3 / GameShark v3 (PARv3): TEA-encrypted 64-bit codes,
+# opcode layout per GBATEK "GBA Cheat Devices".
 # ---------------------------------------------------------------------------
 
 # PARv3 (the common Pokémon-era format) uses these fixed seeds. A code list's
@@ -201,7 +200,7 @@ proc gba_gs_encrypt*(op1, op2: var uint32; seeds: array[4, uint32]) =
     op1 = op1 + (((op2 shl 4) + seeds[0]) xor (op2 + sum) xor ((op2 shr 5) + seeds[1]))
     op2 = op2 + (((op1 shl 4) + seeds[2]) xor (op1 + sum) xor ((op1 shr 5) + seeds[3]))
 
-# PARv3 opcode masks (include/mgba/internal/gba/cheats.h)
+# PARv3 opcode fields of the decrypted first word (GBATEK "GBA Cheat Devices")
 const
   PAR3_COND       = 0x38000000'u32
   PAR3_WIDTH_MASK = 0x06000000'u32
@@ -279,8 +278,8 @@ proc par3_interpret(op1, op2: uint32; op: var CheatOp): string =
   of PAR3_BASE_ADD:
     op.action = caAdd
   of PAR3_BASE_INDIRECT:
-    # Write to *[address] + offset. mGBA packs the offset in op2's high bytes:
-    # offset = (op2 >> (width*8)) * width for width<4, else 0.
+    # Write to *[address] + offset; the offset rides op2's bytes above the
+    # value: offset = (op2 >> (width*8)) * width for width < 4, else 0.
     op.action = caIndirect
     op.offset = (if width < 4: (op2 shr uint32(width * 8)) * uint32(width) else: 0'u32)
   else:                        # OTHER(IO) — not honoured by a poke engine
