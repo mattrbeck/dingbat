@@ -1,5 +1,5 @@
 @ iomap.s — WHAT: what unused and write-only IO registers return on
-@ reads — zero or open bus?  Emulators guess differently per register.
+@ reads — zero or open bus?
 @
 @ HOW: 16 halfword reads in table order, stored raw, before ANYTHING
 @ writes IO (so write-only registers still hold boot values and the
@@ -15,9 +15,8 @@
 @ registers 0x10/0x28/0x40/0x4C/0x54 and the unused 0x4E/0x56, plus
 @ 0x110 (timer gap) and 0x12C — returns open bus.
 @
-@ PROVENANCE: verified on GBA SP AGS-001 (session 2, gbaedge page 16
-@ IORW, slot CRC 626A — dingbat matched it byte-for-byte on the day);
-@ see docs/hwprobe-results-agb.md.
+@ PROVENANCE: verified on GBA SP AGS-001 (gbaedge page 16 IORW, slot
+@ CRC 626A); see docs/hwprobe-results-agb.md.
     .arm
     .text
     .global _start

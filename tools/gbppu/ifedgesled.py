@@ -18,13 +18,8 @@ or fails, so `--mode=microtest` reports it either way:
 
     ./dingbat_test <out>/oam_int_if_edge_a_k3.gb --mode=microtest --timeout=60
 
-Measured 2026-08-20 (tail 0x233, k = 0..8), `$E2` window per device:
-
-    hardware (from the four shipped members)   k = 1, 2, 3
-    dingbat, DMG                               k = 2, 3, 4     <- one M late
-    dingbat, CGB (STAT_M2_LEAD_CGB = 1)        k = 1, 2, 3     <- exact
-
-See STAT_M2_LEAD in gb/ppu.nim for what that measures and what it is blocked on.
+The four shipped members (tail 0x233) put hardware's `$E2` window at k = 1..3.
+See STAT_M2_LEAD in gb/ppu.nim.
 """
 import os
 import sys

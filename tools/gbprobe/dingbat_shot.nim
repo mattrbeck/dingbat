@@ -6,20 +6,13 @@
 ##          | cgb (= cgbc, dingbat's shipping CGB default) | agb
 ##
 ## Same contract as sameboy_shot and docboy_shot: one ROM, one model, N frames
-## from power-on, one P6 PPM out. The whole point of the uniform contract is
-## that `cmp` on two PPMs is a meaningful question.
+## from power-on, one P6 PPM out, so `cmp` on two PPMs is meaningful. DMG
+## frames are normalised to the shared four-shade grey ramp; CGB frames are
+## the raw RGB555 expanded to 8 bits per channel.
 ##
-## DMG frames are normalised to the shared four-shade grey ramp, exactly as the
-## other two legs do, so a DMG picture is byte-comparable across engines. CGB
-## frames are the raw RGB555 expanded to 8 bits per channel.
-##
-## dingbat runs skip-boot (no boot ROM), which is its shipping default and is
-## also what DocBoy does; the SameBoy leg burns the boot animation off to reach
-## the same point. The probe ROMs re-anchor on an LYC=0 STAT interrupt every
-## frame, so no residual power-on phase difference between the three legs can
-## reach the measurement.
-##
-## Build: see build.sh.
+## Runs skip-boot. The probe ROMs re-anchor on an LYC=0 STAT interrupt every
+## frame, so power-on phase differences between the legs do not reach the
+## measurement. Build: see build.sh.
 
 import std/[os, strutils]
 import dingbat/gb/gb
@@ -48,10 +41,9 @@ proc write_ppm(path: string; buf: seq[uint16]; dmg: bool) =
   f.write("P6\n160 144\n255\n")
   for pixel in buf:
     if dmg:
-      # In DMG mode palette RAM only ever holds DMG_COLORS, so the shade index
-      # is recoverable. An unknown value means the PPU emitted a colour it
-      # should not have; fall through so it shows up as a difference rather
-      # than being quantised away.
+      # In DMG mode palette RAM only holds DMG_COLORS, so the shade index is
+      # recoverable; an unknown value falls through so it shows as a
+      # difference rather than being quantised away.
       var shade = -1
       for i, c in DMG_COLORS:
         if c == pixel: shade = i; break

@@ -1,70 +1,52 @@
-; probe_e_objgrid -- what does an object at a small X do to the FETCH GRID?
+; probe_e_objgrid -- what does an object at a small X do to the fetch grid?
 ;
-; THE QUESTION. probe (d) settled, on silicon, that dingbat's LCDC.4 latency
-; and fetch-grid phase are right on a line with nothing on it: every
-; fine-scroll residue 0-7, CGB and DMG-compat, all read #2#2#2#2#2#2#2#2.
-; `cgb-acid-hell`'s two disputed pixels therefore do not come from either.
-; What its line 68 has and probe (d)'s lines do not is an OBJECT AT OAM X = 1,
-; triggering at dot 90 -- inside the fine-scroll discard, before the first
-; pixel is emitted.
-;
-; That is exactly where Pan Docs contradicts itself. `Rendering.md`: an object
-; at X = 0 "always incurs an 11-dot penalty, regardless of SCX".
-; `pixel_fifo.md`: when SCX & 7 > 0 the penalty is "whatever the lower 3 bits
-; of SCX are". dingbat implements the flat 11 and applies it at X = 0 exactly,
-; because its evidence -- GBMicrotest `ppu_spritex_vs_scx`, 153/153 cells --
-; only ever places the object at 0. acid-hell's object is at 1, and every
-; X in 1..7 also triggers left of the first on-screen pixel.
+; An object at OAM X = 1 triggers at dot 90, inside the fine-scroll discard,
+; before the first pixel is emitted. Pan Docs disagrees with itself there:
+; Rendering.md says an object at X = 0 "always incurs an 11-dot penalty,
+; regardless of SCX"; pixel_fifo.md says when SCX & 7 > 0 the penalty is
+; "whatever the lower 3 bits of SCX are". GBMicrotest ppu_spritex_vs_scx only
+; ever places the object at X = 0.
 ;
 ; HOW IT MEASURES. probe (d)'s bar, with objects added ahead of it. The bar's
-; COLUMN is the readout, not just its shade: an object that stalls the fetcher
-; for N dots pushes every later fetch N dots later, so the bar moves N pixels
-; right of where the same build puts it with objects off. Sweep the object's X
-; and the bar's column traces the penalty function directly -- and the X = OFF
-; setting is the baseline, which is probe (d) exactly.
+; COLUMN is a readout as well as its shade: an object that stalls the fetcher
+; N dots pushes every later fetch N dots later, so the bar moves N pixels
+; right of where the same build puts it with objects off. Sweep the object's
+; X and the bar's column traces the penalty function; X = OFF is the baseline
+; and is probe (d) exactly.
 ;
-; Eight 8x16 objects at Y = 32, 48, ... 144 put one object -- and only one --
-; on every measured line, all at the same X. Their tile is blank, so they
-; cost their fetch without drawing anything: the penalty is the whole effect.
-; At every X this probe offers (0..15) the object's own pixels are left of
-; column 8, far from the bar.
+; Eight 8x16 objects at Y = 32, 48, ... 144 put exactly one object on every
+; measured line, all at the same X. Their tile is blank, so they cost their
+; fetch and draw nothing. At every X offered (0..15) the object's own pixels
+; are left of column 8, far from the bar.
 ;
-; ONE ROM, PAGED. Everything that was a separate build of probe (d) is a
-; runtime parameter here, because a flash cart's boot cycle is the slowest
-; part of a hardware session:
+; ONE ROM, PAGED (a flash cart's boot cycle is the slow part of a session):
 ;
 ;   LEFT / RIGHT   SCX 0..7          (the fine-scroll residue)
 ;   UP / DOWN      object X: OFF, then 0..15
 ;
 ; The current setting is printed at the top of the screen as two hex bytes --
-; SCX, then the object X ($FF = objects off) -- so a photograph is
-; self-describing and cannot be filed under the wrong setting.
+; SCX, then the object X ($FF = objects off) -- so a photograph names its own
+; setting.
 ;
 ; READING IT. Fourteen bands below the header, each eight identical scanlines
-; plus a blank separator, exactly as probe (d): the shade says which bitplane
-; the LCDC.4 write reached, and the column says where the fetch grid was.
-; Photograph one frame per setting; `tools/gbprobe/read_probe_d_photo.py`
-; reads both out.
+; plus a blank separator, as in probe (d): the shade says which bitplane the
+; LCDC.4 write reached, the column says where the fetch grid was. One frame
+; per setting; tools/gbprobe/read_probe_d_photo.py reads both out.
 
 INCLUDE "hw.inc"
 
 DEF HEADER_LINES EQU 16          ; two tile rows for the parameter readout
 
-; Which line the halt anchor parks on. 16 is the shipping value (the bands
-; start below the header). ANCHOR_LINE=0 exists to separate two things probe
-; (d) and probe (e) confounded: probe (d) anchors on LINE 0, which dingbat
-; special-cases (LY0_PIPE_MCYCLES, the 153->0 snapback, first_line), and its
-; columns matched hardware exactly; probe (e) anchors on a normal line and its
-; baseline sits 8 dots off. If dingbat's own column moves between the two
-; anchors, the difference lives in the wake, not in the object path.
+; Which line the halt anchor parks on. 16 ships (the bands start below the
+; header). ANCHOR_LINE=0 anchors on line 0 as probe (d) does, which is the
+; LY 153 -> 0 snapback wake, to separate the wake from the object path.
 IF !DEF(ANCHOR_LINE)
 DEF ANCHOR_LINE EQU HEADER_LINES
 ENDC
 DEF BANDS        EQU 14          ; 14 * 9 = 126 lines, ending at 141
 DEF BANDLINES    EQU 8
 
-; Same line arithmetic as probe (d), and it has to hold exactly or the bands
-; stop meaning one offset each: a line is 114 M-cycles, the body spends
+; Same line arithmetic as probe (d): a line is 114 M-cycles, the body spends
 ; BASE+k + 2 + 2 + TAIL-k + 1 + 4, so BASE + TAIL = 105 whatever k is. PAD is
 ; the band's ninth line: leaving the loop costs 1 M less than going round it
 ; and the next counter costs 2, so 7*114 + 113 + 2 + PAD = 9*114.
@@ -76,9 +58,8 @@ DEF PAD  EQU 113
 
 DEF OBJ_OFF EQU $FF
 
-; Runtime paging is for the hardware session; these are for generating
-; dingbat's predictions, one build per setting, since the screenshot harness
-; has no way to press a button.
+; Build-time defaults, one build per setting, for the screenshot harness,
+; which cannot press a button.
 IF !DEF(SCX_DEFAULT)
 DEF SCX_DEFAULT EQU 0
 ENDC
@@ -178,24 +159,17 @@ ENDC
     ldh [rBGP], a
     ldh [rOBP0], a
 
-    ; The window, for the acid-hell corner. WIN_LIVE brings it up part-way
-    ; across the line -- the same shape as acid-hell's ly 68, which has the
-    ; window live from x = 26 while the LCDC pulses run. WIN_PULSE then puts
-    ; WINDOW-ENABLE INTO THE PULSE ITSELF, so LCDC.4 and LCDC.5 change on one
-    ; dot. That pair is what is left unexplained: mealybug moves tile-select
-    ; alone (m3_lcdc_tile_sel_change) and has a window without pulsing both
-    ; bits (m3_lcdc_tile_sel_win_change), and acid-hell does both at once.
-    ;
-    ; The two builds are a DIFFERENTIAL: same anchor, same bands, same window,
-    ; differing only in whether bit 5 rides the pulse. Whatever probe (e)'s
-    ; STAT-LYC anchor contributes is therefore common to both and cancels --
-    ; which matters here, because the anchor is itself under suspicion.
+    ; The window, for the acid-hell corner. WIN_LIVE has the window live
+    ; part-way across the line while the LCDC pulses run (acid-hell's ly 68
+    ; shape). WIN_PULSE puts window-enable into the pulse itself, so LCDC.4
+    ; and LCDC.5 change on one dot, which acid-hell does and mealybug never
+    ; does (m3_lcdc_tile_sel_change, m3_lcdc_tile_sel_win_change move them
+    ; separately). The two builds differ only in whether bit 5 rides the
+    ; pulse, so whatever the anchor contributes is common to both.
 IF DEF(WIN_LIVE) || DEF(WIN_PULSE)
-    ; x = 8, i.e. LEFT of every band's bar, so each bar is measured INSIDE the
-    ; window rather than across its edge. acid-hell's failing pixel is at x = 80
-    ; against a window live from x = 26 -- deep inside it -- and a bar sitting on
-    ; the boundary measures the boundary instead, which is what the first cut of
-    ; this arm did.
+    ; x = 8, left of every band's bar, so each bar is measured inside the
+    ; window rather than across its edge (acid-hell's pixel is at x = 80 with
+    ; the window live from x = 26).
     ld a, 8 + 7                  ; window's leftmost pixel at x = 8
     ldh [rWX], a
     xor a
@@ -203,9 +177,8 @@ IF DEF(WIN_LIVE) || DEF(WIN_PULSE)
 ENDC
 
     ; Bring the LCD up once, here. ApplyParams runs in VBlank from now on and
-    ; never touches LCDC.7: toggling the LCD off and on per frame would reset
-    ; the PPU every frame, and a frame grabbed during the off period is blank
-    ; -- which is exactly what the first cut of this ROM produced.
+    ; never touches LCDC.7: toggling the LCD per frame resets the PPU, and a
+    ; frame grabbed during the off period is blank.
 IF DEF(WIN_LIVE) || DEF(WIN_PULSE)
     ld a, LCDCF_ON | LCDCF_BGON | LCDCF_OBJ16 | LCDCF_WINON
 ELSE
@@ -226,19 +199,11 @@ Frame:
     ld a, [wLcdcB]
     ld e, a
 IF DEF(ANCHOR_POLL)
-    ; The same line, reached WITHOUT the halt. The measured disagreement
-    ; between dingbat and SameBoy is a pure time offset -- 2 M-cycles on CGB,
-    ; 1 the other way on DMG -- and a time offset can live on either side of
-    ; the CPU/PPU boundary: in the STAT-LYC halt's wake, or in the pixel
-    ; pipeline's phase. Every mealybug `tile_sel` row passes, which argues
-    ; against the pipeline; this build is what separates them. If the offset
-    ; survives here it is the pipeline. If it vanishes, it is the halt.
-    ;
-    ; The poll's exit phase is not the halt's, so the bar's absolute column
-    ; moves -- but it moves the same way in every emulator running this build,
-    ; and what is being compared is the difference between two of them. Two
-    ; stages so the wait always crosses a line boundary rather than returning
-    ; instantly on a line it was already sitting on.
+    ; The same line, reached without the halt: separates a time offset in the
+    ; STAT-LYC halt's wake from one in the pixel pipeline. The poll's exit
+    ; phase differs from the halt's, so the bar's absolute column moves, but
+    ; it moves the same way for every machine running this build. Two stages
+    ; so the wait always crosses a line boundary.
 .pollPrev:
     ldh a, [rLY]
     cp ANCHOR_LINE - 1
@@ -331,8 +296,7 @@ ENDC
 
     ; Header: the two parameters as hex, so the photo names its own setting.
     ; NOHEADER builds omit it, so a band can be anchored on line 0 without the
-    ; glyphs sitting on top of it (used to separate the wake from the object
-    ; path -- see ANCHOR_LINE).
+    ; glyphs on top of it (see ANCHOR_LINE).
 IF !DEF(NOHEADER)
     ld d, 0
     ld e, 0

@@ -1,11 +1,6 @@
-/* Headless SameBoy oracle for the gambatte suite.
- *
- * The gambatte ROMs draw their answer as hex glyphs along the top-left row of
- * the screen, and the expected value is in the filename. Scoring dingbat tells
- * you a row is wrong; it does not tell you what a *correct* emulator does with
- * a ROM you have just modified. This runner closes that loop: it runs a ROM
- * under SameBoy and prints the same hex string dingbat's `--mode=gambatte`
- * decodes, so a tweaked ROM can be put to an oracle that passes the row.
+/* Headless SameBoy oracle (links libsameboy) for the gambatte suite: runs a
+ * ROM and prints the same hex string dingbat's `--mode=gambatte` decodes off
+ * the top-left row of the screen, so a modified ROM can be put to both.
  *
  * Usage:
  *   sameboy_gambatte <bootromdir> <list.tsv> [frames]
@@ -18,15 +13,12 @@
  * order. `?` in the hex string is a tile that matched no glyph.
  *
  * The device comes from the list, never from the cart header: nearly every
- * gambatte ROM ships a CGB header even for its DMG half (gambatte picks the
- * device from its loader flag), so scoring by header answers the wrong
- * machine's question on ~1,700 rows.
+ * gambatte ROM ships a CGB header even for its DMG half.
  *
- * Frame count: gambatte's own runner reads the frame after exactly 15 LCD
- * frames from the post-boot state. SameBoy has no skip-boot API, so this runs
- * the real boot ROM to completion first and counts from there. That is the
- * more faithful timeline, not a compromise — and the suite is insensitive to
- * the count anyway (its ROMs have settled and hold their result).
+ * Frame count: the suite reads the frame after 15 LCD frames from the
+ * post-boot state. There is no skip-boot API, so the real boot ROM runs to
+ * completion first and frames are counted from there; the ROMs hold their
+ * result, so the exact count does not matter.
  *
  * Build: see build.sh.
  */
@@ -63,10 +55,7 @@ static const uint8_t GLYPHS[16][8] = {
 };
 
 /* gambatte's device tags name a silicon revision: `cgb04c` is a CGB rev C and
- * `dmg08` a DMG-B. Getting the CGB revision wrong is not cosmetic — the CGB-E
- * PPU differs from the CGB-C one on exactly the mid-mode-3 and OAM-DMA rows
- * this oracle exists to arbitrate. SAMEBOY_CGB_MODEL / SAMEBOY_DMG_MODEL
- * override for a deliberate cross-revision comparison. */
+ * `dmg08` a DMG-B. SAMEBOY_CGB_MODEL / SAMEBOY_DMG_MODEL override. */
 static GB_model_t g_cgb_model = GB_MODEL_CGB_C;
 static GB_model_t g_dmg_model = GB_MODEL_DMG_B;
 
@@ -99,8 +88,7 @@ static void log_cb(GB_gameboy_t* gb, const char* s, GB_log_attributes_t a) {
 
 /* One glyph column of the top row, as a bit-per-pixel mask. A tile holding
  * anything but pure black and pure white comes back all-ones, which no glyph
- * can equal — the same rule dingbat's gambatte_tile uses, so "?" means the
- * same thing on both sides. */
+ * can equal (the same rule as dingbat's gambatte_tile). */
 static int decode_tile(const uint32_t* fb, int col, char* out) {
   uint8_t bits[8];
   for (int y = 0; y < 8; ++y) {

@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """objtab.py with a caller-chosen OAM-X range, for the RIGHT edge of the line.
 
-objtab.py only ever swept X = 0..16 (that is the span GBMicrotest's
-ppu_spritex_vs_scx asserts). wilbertpol's intr_2_mode0_timing_sprites* ROMs also
-place objects at X = 160..169, i.e. the last on-screen tile and past it, and that
-half of the table has never been scored.
+objtab.py sweeps X = 0..16 (the span GBMicrotest's ppu_spritex_vs_scx
+asserts); wilbertpol's intr_2_mode0_timing_sprites* ROMs also place objects
+at X = 160..169, the last on-screen tile and past it.
 """
 import os, re, subprocess, sys
 CACHE = os.environ.get("DINGBAT_ROM_CACHE", "/tmp/dingbat-test-roms")

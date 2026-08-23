@@ -1,8 +1,7 @@
-@ dmabyte.s — WHAT: the DMA CNT_H byte-write anomaly.  Rumor said a
-@ byte write of 0x80 to the WRONG byte of DMA3CNT_H can still enable
-@ the DMA (bus byte-mirroring); hardware says the truth is stranger:
-@ the anomaly is BIT7-GRANULAR, not a byte-lane mirror, and session 4
-@ confirmed it on ALL FOUR channels (DMA0/1/2/3 alike).
+@ dmabyte.s — WHAT: the DMA CNT_H byte-write anomaly.  Can a byte write
+@ of 0x80 to the WRONG byte of DMA3CNT_H still enable the DMA (bus
+@ byte-mirroring)?  Hardware: the anomaly is BIT7-GRANULAR, not a
+@ byte-lane mirror, and holds on ALL FOUR channels (DMA0/1/2/3 alike).
 @
 @ HOW: before each poke DMA3 is primed with a valid ROM source, an
 @ EWRAM destination whose first word is cleared as a marker, and a
@@ -10,7 +9,7 @@
 @ marker says whether a transfer ran and DMA3CNT_H is read back
 @ (de_verdict).  Seven pokes: 0x80 to the upper byte (0x040000DF,
 @ where the enable bit lives), 0x80 to the lower byte (0x040000DE),
-@ 0x44 to each byte as bit7-clear controls, then the session-4
+@ 0x44 to each byte as bit7-clear controls, then the granularity
 @ discriminators: 0xC0 to the upper byte, 0xC0 to the lower byte, and
 @ 0x40 to the upper byte as a bit7-clear control.
 @
@@ -30,10 +29,9 @@
 @ high-side and is dropped when written low-side; every other bit
 @ behaves like a normal masked byte write.
 @
-@ PROVENANCE: verified on GBA SP AGS-001 (sessions 2-4, gbaedge pages
-@ 21 DMAEDGE, 27 IOBYTE and 30 DMABYTE2 — session 4's DMABYTE2 ran the
-@ 0x80 row on DMA0/1/2 and the 0xC0/0x40 rows on DMA3, byte-perfect
-@ against dingbat); see docs/hwprobe-results-agb.md.
+@ PROVENANCE: verified on GBA SP AGS-001 (gbaedge pages 21 DMAEDGE, 27
+@ IOBYTE and 30 DMABYTE2 — the 0x80 row on DMA0/1/2 and the 0xC0/0x40
+@ rows on DMA3); see docs/hwprobe-results-agb.md.
     .arm
     .text
     .global _start

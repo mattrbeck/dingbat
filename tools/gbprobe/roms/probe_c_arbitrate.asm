@@ -1,49 +1,30 @@
-; probe_c_arbitrate -- acid-hell against daid, on ONE frame.
+; probe_c_arbitrate -- are pixel emission and the BG fetch grid the same grid?
 ;
-; docs/gb-failure-triage.md, hardware experiment (c), and the oldest
-; pixel-level contradiction in the tree. `cgb-acid-hell` needs the CPU's writes
-; aligned to the BG FETCH grid where they are; `daid/ppu_scanline_bgp` needs
-; them four dots later relative to pixel EMISSION. Run on separate frames the
-; two are two measurements of two things. Run on ONE frame they arbitrate,
-; because the fetch grid and the emission grid are then the same grid.
+; From one halt anchor at LY = LYC = ANCHORLINE, a loop whose body is 115
+; M-cycles -- one more than a scanline -- so each iteration starts four dots
+; later in its line and both features below walk right by four pixels per
+; line. Each iteration, on its own line:
 ;
-; What the frame contains. From one halt anchor at LY = LYC = 0, a loop whose
-; body is exactly 115 M-cycles -- one dot MORE than a scanline's 114 -- so each
-; iteration starts four dots later in its line than the last, and both features
-; below walk right by four pixels per line. Each iteration does two things on
-; its own line:
+;   * ONE BGP write against a flat background: the band EDGE's column reads
+;     out emission's phase.
+;   * ONE LCDC.4 pulse eight dots wide ($91 -> $81 -> $91) over a map whose
+;     tile index reads back different data in the two addressing modes: the
+;     glitched bitplane fetch shows as a column of the other mode's data.
 ;
-;   * ONE BGP write, against a flat background, so the resulting band EDGE's
-;     column reads out emission's phase. This is daid's ruler.
-;   * ONE LCDC.4 pulse eight dots wide ($91 -> $81 -> $91), over a map whose
-;     tile index reads back DIFFERENT DATA in the two addressing modes, so the
-;     glitched bitplane fetch shows up as a column that is unambiguously the
-;     other mode's data. This is acid-hell's residue.
+; Reading it. Two staircases descend across the frame. The measurement is the
+; HORIZONTAL DISTANCE between them on one line; the absolute position depends
+; on the halt-wake latency and is not comparable between machines. If
+; emission and the fetch grid are one grid the distance is fixed by the code
+; at (glitch slide - band slide) dots; a four-dot separation between them
+; shows as four pixels.
 ;
-; Reading it. Two staircases descend across the frame. The measurement is not
-; either staircase's absolute position -- that depends on the halt-wake latency
-; and is not comparable between machines -- it is the HORIZONTAL DISTANCE
-; between them on the same line, which is internal to one photograph. If
-; emission and the fetch grid are the same grid, that distance is fixed by the
-; code and equals (glitch slide - band slide) in dots. If hardware separates
-; emission from the fetch grid by four dots, the distance is four pixels off,
-; in the same photograph, with nothing else changed.
+; DMG cart on purpose: the emission ruler is BGP, which is dead on a CGB
+; running a CGB-flagged cart (colour comes from CRAM, not writable in mode 3).
+; DMG-compatibility mode on a CGB has CGB silicon with BGP live; a DMG runs
+; the same cart natively and is the control.
 ;
-; WHY THIS IS A DMG CART, and it is the one design decision worth arguing with.
-; The doc says "Setup. CGB." The emission ruler it names is BGP -- and on a CGB
-; running a CGB-flagged cartridge BGP is dead, colour comes from CRAM, and CRAM
-; is not writable during mode 3, so there is NO mid-line emission ruler in true
-; CGB mode at all. The only way to put daid's ruler and acid-hell's residue on
-; one frame is the machine daid itself runs on: a CGB executing a cartridge
-; with no CGB flag, i.e. DMG-compatibility mode, where the PPU is CGB silicon
-; and BGP is live. So this cart carries no CGB flag, which also means it runs
-; natively on a DMG for free, and the DMG column is a control rather than an
-; extra build.
-;
-; SCX is a build-time define (mk.sh probe_c_arbitrate -DSCXVAL=3), because the
-; campaign's one solid new structural result (SCX_FINE_BORROW) says the fetch
-; grid's column carries a borrow off the fine scroll, and no reference frame in
-; existence exercises that. SCXVAL 0, 3 and 7 are the three worth having.
+; SCX is a build-time define (mk.sh probe_c_arbitrate -DSCXVAL=3). SCXVAL 0,
+; 3 and 7 are three different fetch-grid phases against the CPU.
 
 INCLUDE "hw.inc"
 
@@ -55,34 +36,26 @@ IF !DEF(ANCHORLINE)
 DEF ANCHORLINE EQU 0
 ENDC
 
-; The two BGP values. Identity, and its exact reverse, so EVERY colour index is
-; distinguishable in both states -- which matters because a half-glitched fetch
-; (one bitplane redirected, not both) lands on index 1 or 2, and that is itself
-; a reading, not noise.
+; Identity and its exact reverse, so every colour index is distinguishable in
+; both states: a half-glitched fetch (one bitplane redirected) lands on index
+; 1 or 2, which is a reading, not noise.
 DEF BGP_A EQU %11100100
 DEF BGP_B EQU %00011011
 
-; LCDC with BG tile data at $8000, and the same with bit 4 cleared. Both keep
-; the LCD on and the BG enabled; objects and the window are off throughout, so
-; nothing but the BG fetcher is on the line.
+; LCD on, BG on, objects and window off; tile data at $8000 and at $8800.
 DEF LCDC_ON8000 EQU LCDCF_ON | LCDCF_BG8000 | LCDCF_BGON   ; $91
 DEF LCDC_ON8800 EQU LCDCF_ON | LCDCF_BGON                  ; $81
 
-; Slide lengths, in M-cycles, inside the 115-M-cycle body. Derived in the
-; header comment's terms: the wake lands within a few dots of the line start,
-; the loop's lead-in is 4 M-cycles, and mode 3 begins at dot 80.
-;   S1  puts the BGP write at about dot 79 on the first line, so its band edge
-;       enters at column 0 and walks right by 4 per line.
-;   S2  puts the LCDC.4 pulse 40 dots later, so the glitched column enters at
-;       about column 39 -- far enough from the band edge that the two never
-;       overlap while both are on screen.
-;   S3  puts the BGP restore past the end of the visible line, so the band
-;       reaches the right-hand edge of the screen instead of stopping short.
-;   S4  is the remainder; the four must sum to 99 for the body to be 115.
-; All three are overridable (mk.sh probe_c_arbitrate -DS2=9), because on real
-; hardware the halt-wake latency is the one number this ROM cannot know in
-; advance, and moving S1 walks both staircases across the screen until they
-; are where a camera can see them.
+; Slide lengths, in M-cycles, inside the 115-M-cycle body (wake within a few
+; dots of line start, 4 M-cycles of lead-in, mode 3 from dot 80):
+;   S1  BGP write at about dot 79 on the first line: the band edge enters at
+;       column 0 and walks right by 4 per line.
+;   S2  LCDC.4 pulse 40 dots later: the glitched column enters at about
+;       column 39 and never overlaps the band edge on screen.
+;   S3  BGP restore past the visible line, so the band reaches the right edge.
+;   S4  the remainder.
+; Overridable (mk.sh probe_c_arbitrate -DS2=9): the halt-wake latency is the
+; one number the ROM cannot know, and S1 walks both staircases into view.
 IF !DEF(S1)
 DEF S1 EQU 14
 ENDC
@@ -115,12 +88,10 @@ Start:
 
     call InitVideo
 
-    ; The background: map entry $01 everywhere, whose DATA differs by
-    ; addressing mode. In $8000 mode tile $01 is at $8010 and is all colour
-    ; index 0 (already zero from the VRAM clear). In $8800 mode tile $01 is
-    ; signed +1, at $9010, and is all index 3. A fetch that reads the wrong
-    ; one is therefore unmistakable, and a fetch that reads one bitplane from
-    ; each lands on index 1 or 2, which says WHICH plane was redirected.
+    ; Map entry $01 everywhere. In $8000 mode tile $01 is at $8010, all index
+    ; 0 (VRAM is already clear); in $8800 mode it is signed +1 at $9010, all
+    ; index 3. One bitplane from each lands on index 1 or 2, which says WHICH
+    ; plane was redirected.
     ld hl, $9010
     ld b, 16
     ld a, $FF
@@ -154,13 +125,8 @@ Frame:
     ld c, LOW(rBGP)
     ld d, LCDC_ON8800
     ld e, LCDC_ON8000
-    ; ANCHORLINE is a build-time define (2026-08-18). 0 ships, and 0 is what
-    ; every reading before that date used -- but 0 is also the LY 153 -> 0
-    ; SNAPBACK, which is the one wake CGB_HALT_LEAD_SKIP_LYC0 exempts and which
-    ; dingbat special-cases in several other places. probe (c) at LYC 0
-    ; reproduces SameBoy exactly (both rulers) while probe (e) at LYC 16 is 8
-    ; pixels out, so the anchor line is the surviving difference between them
-    ; and it has to be a parameter before that can be tested.
+    ; ANCHORLINE is a build-time define; 0 ships. Line 0 is the LY 153 -> 0
+    ; snapback wake, so a non-zero value anchors on an ordinary line instead.
     ANCHOR ANCHORLINE
     ; ---- anchor: 4 M-cycles of lead-in, then the body, forever at 115 each
     ld b, LINES            ; 2 M

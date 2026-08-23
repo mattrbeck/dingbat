@@ -6,11 +6,10 @@ PPU's mode 3 -> 0 transition fires ppu_step_hdma on nearly every visible line.
 The ROM never terminates; the harness runs it for a fixed frame count in
 screenshot mode and passes iff the process survives (exit 0).
 
-Regression guard for the Pokemon Crystal boot crash (native segfault / web
-"Maximum call stack size exceeded"): the HDMA block copy ticks the PPU, and if
-`mode_flag=` triggers the copy BEFORE lcd_status reflects mode 0, a nested tick
-in the FIFO renderer still observes mode 3, re-enters its level-triggered
-`lx >= GB_WIDTH` mode-0 transition, and recurses until the stack overflows.
+Guards the HDMA recursion: the block copy ticks the PPU, and if `mode_flag=`
+triggers the copy BEFORE lcd_status reflects mode 0, a nested tick in the FIFO
+renderer still sees mode 3, re-enters its mode-0 transition and recurses until
+the stack overflows (the Pokemon Crystal boot crash).
 
 Run: ./dingbat_test tests/roms/gbhdmatest.gbc --mode=screenshot --timeout=120 \
        --screenshot=/tmp/gbhdmatest.ppm

@@ -3,9 +3,7 @@
 
     ppmdiff.py A.ppm B.ppm [--png REFERENCE.png]
 
-Written for arbitrating dingbat against SameBoy on a whole test ROM rather
-than a probe: a suite verdict says "this row fails", and this says which
-scanline and which x, which is what a trace needs to be pointed at.
+A suite verdict says "this row fails"; this says which scanline and which x.
 """
 import sys
 import zlib
@@ -34,10 +32,8 @@ def read_ppm(path):
 
 
 def read_png(path):
-    # Enough PNG to read the two shapes the reference frames actually come in:
-    # 8-bit truecolour, and the indexed 1/2/4/8-bit form every acid reference
-    # ships as. Nothing here needs Pillow, and a test harness that pulls in an
-    # image library to compare 160x144 frames has bought a dependency for it.
+    # Enough PNG for the reference frames: 8-bit truecolour and indexed
+    # 1/2/4/8-bit (the acid references). No Pillow.
     raw = open(path, 'rb').read()
     pos, idat, plte, w, h, depth, ctype = 8, b'', b'', 0, 0, 8, 2
     while pos < len(raw):

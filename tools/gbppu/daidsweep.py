@@ -1,51 +1,28 @@
 #!/usr/bin/env python3
-"""Perturb daid's ppu_scanline_bgp source and ask which dingbat build SameBoy agrees with.
+"""Perturb daid's ppu_scanline_bgp source and run it through two dingbat
+builds and the sameboy_runner.
 
-The ROM is 91 lines. It takes ONE STAT LYC interrupt out of `halt`, discards the
-return address and free-runs a 114-M loop (10 BGP writes 4 M apart + 70 nops +
-jp) that stays scanline-locked for the whole frame, so its 1440 band edges are a
-ruler for the palette write's phase against ONE anchor.
-
-Two knobs, both one line of source:
+The ROM takes one STAT LYC interrupt out of `halt`, discards the return
+address and free-runs a 114-M loop (10 BGP writes 4 M apart + 70 nops + jp)
+for the whole frame, so its band edges rule the palette write's phase against
+one anchor. Two knobs, both one line of source:
 
   --lyc N   which line the anchor fires on. 0 (shipped) is the LY 153 -> 0
-            SNAPBACK, which dingbat special-cases; anything else is a normal
-            line, which is what cgb-acid-hell's 144 anchors are. This is the
-            candidate discriminator between the two ROMs.
-  k         M-cycles of delay before the loop, spent as the count of nops
-            between statInt's `ei` and `ld hl, data` (shipped: 1). Unlike
-            acid-hell this ROM is not full and has no raw-address jumps, so
-            these can simply be inserted or removed.
+            snapback; anything else is a normal line.
+  k         nops between statInt's `ei` and `ld hl, data` (shipped: 1). The
+            ROM is not full and has no raw-address jumps, so nops can simply
+            be inserted or removed.
 
-Prints, per config, which of dingbat-lead-off / dingbat-lead-on reproduces
-SameBoy exactly. SameBoy is run with GBFUZZ_MODEL=cgb because the cart is
-DMG-flagged and the machine under test is a CGB in COMPATIBILITY mode; it
-reproduces daid's own reference pixel-exactly there. (That env var was added to
-tools/gbfuzz/sameboy_runner.c for this: the runner otherwise picks its model off
-byte $143 and would answer a DMG's question. Setting the CGB flag in the header
-instead boots CGB-NATIVE, which is a third machine and not the one captured.)
+The oracle runs with GBFUZZ_MODEL=cgb: the cart is DMG-flagged and the
+captured machine is a CGB in compatibility mode (a CGB header flag would boot
+native mode, a different machine).
 
-The answer it gave, 2026-08-18:
-
-    LYC = 0  (the LY 153 -> 0 snapback)   lead OFF exact, lead ON 2304 px
-    LYC = 1, 8, 40, 100 (normal lines)    lead ON exact, lead OFF 1920-2304 px
-
-which is what put CGB_HALT_LEAD_SKIP_LYC0 in gb.nim, and what reconciled this
-ROM with cgb-acid-hell.
-
----- Getting the source to build ----------------------------------------------
-
-It ships WITH the shootout, at testroms/daid/. Copy ppu_scanline_bgp.asm,
-common.inc, hardware.inc and font.bin into $DAID_SRC, then apply the same
-pre-0.6-rgbds fixes cgb-acid-hell needs (see hellsrc.py) plus, in BOTH the .asm
-and common.inc, `ld a, [rXX]` / `ld [rXX], a` -> `ldh ...`: old rgbasm optimised
-those to the two-byte form automatically and modern rgbasm emits the three-byte
-LD A,(nn), which is a whole extra M-cycle per access. With those and the
-halt-nops the rebuild is byte-exact, md5 16ec1c02eaed01bf16616e268428d4a8 --
-check that before trusting any number out of this script.
-
-Unlike acid-hell this ROM is not full and has no raw-address jumps, so nops here
-can simply be inserted or deleted.
+Building the source: it ships with the shootout at testroms/daid/. Copy
+ppu_scanline_bgp.asm, common.inc, hardware.inc and font.bin into $DAID_SRC,
+apply the pre-0.6-rgbds fixes listed in hellsrc.py, and in BOTH the .asm and
+common.inc rewrite `ld a, [rXX]` / `ld [rXX], a` as `ldh` (modern rgbasm no
+longer shortens them, and the long form costs an M-cycle per access). The
+rebuild must be byte-exact: md5 16ec1c02eaed01bf16616e268428d4a8.
 """
 import os, re, subprocess, sys, shutil
 

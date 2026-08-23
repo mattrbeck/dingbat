@@ -1,23 +1,17 @@
 #!/usr/bin/env python3
 """The OBJ penalty table, in dots, against hardware.
 
-GBMicrotest's `ppu_spritex_vs_scx.gb` is 306 assertions -- one object at OAM
-X = 0..16 crossed with SCX = 0..8, two per cell bracketing the end of mode 3 to
-one M-cycle -- and it is the only direct measurement of Pan Docs' "OBJ penalty
-algorithm" in the tree. The runner cannot score it: it never writes the $FF82
-verdict byte, it stops at the first failing assertion, and it reports pass/fail
-by storing $55 or $FF into VRAM $8000 in a loop. So it reads as "18 black lines"
-and says nothing about WHICH cell failed.
+GBMicrotest's `ppu_spritex_vs_scx.gb` is 306 assertions (one object at OAM
+X = 0..16 crossed with SCX = 0..8, two per cell bracketing the end of mode 3
+to one M-cycle), but it stops at the first failing assertion and never writes
+the $FF82 verdict byte, so the runner cannot say which cell failed.
 
-This gets the whole table out instead. It patches a sibling ROM
-(`ppu_sprite0_scx3_b.gb`, whose prologue is one `load_sprite` and one SCX write
-at fixed offsets) to put a single object at (Y=16, X) with a given SCX, runs the
-`-d:gb_m3_len` build, and takes line 0's mode-3 length. The PENALTY is that
-length minus the same build's length with the object parked off screen, so
-whatever constant offset this tree's mode 3 edge carries cancels and only the
-per-object cost is compared. (That offset is real and separate -- GBMicrotest's
-`ppu_sprite0_scx*` rows put dingbat's mode-0 STAT flag 3 dots late with no
-object involved at all.)
+This gets the whole table out instead: it patches a sibling ROM
+(`ppu_sprite0_scx3_b.gb`, whose prologue is one `load_sprite` and one SCX
+write at fixed offsets) to put a single object at (Y=16, X) with a given SCX,
+runs the `-d:gb_m3_len` build, and takes line 0's mode-3 length. The penalty
+is that length minus the same build's length with the object parked off
+screen, so any constant offset in the mode 3 edge cancels.
 
   nim c -d:test_harness -d:release -d:gb_m3_len --path:src \\
     -o:dt_m3len tests/dingbat_test.nim

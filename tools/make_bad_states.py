@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Deliberately corrupted save states, one per refusal cause.
 
-Every state error the UI can show has to be reachable by hand, or the copy
-never gets looked at again. This makes one file per cause from a known-good
-.state.
+Makes one file per StateRejectKind from a known-good .state, so every
+refusal message the UI can show is reachable by hand.
 
     nimble statefuzz_build
     ./statefuzz web/goodboy-demo-en.gba dump /tmp/good.state 600
@@ -12,11 +11,9 @@ never gets looked at again. This makes one file per cause from a known-good
         ./statefuzz web/goodboy-demo-en.gba reject "$f"
     done
 
-The two interesting ones are `wildbus` and `wildsched`. They re-seal the FNV
-payload hash the way an attacker would — the hash is an integrity check, not a
-security control — so they get PAST the header and reach the field readers,
-which is where the crashes used to be. Before the range guards those two took
-the emulator down with an OverflowDefect; now they are refused by name.
+`wildbus` and `wildsched` re-seal the FNV payload hash (an integrity check,
+not a security control) so they get past the header and reach the field
+readers' range guards.
 """
 import os
 import struct

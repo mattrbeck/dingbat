@@ -1,36 +1,17 @@
-## Clip-capture replay determinism.
+## Clip-capture replay determinism. The clip exporter (clip_* in
+## src/dingbat_wasm.nim) keeps one compressed state anchor per second plus a
+## 2-byte-per-frame input log and RE-EMULATES a requested range, which is
+## only a clip of what happened if the replay is bit-identical. Run a core
+## live hashing every frame, replay an interior range from the anchor+input
+## log, and require every frame to match on the whole SERIALIZED MACHINE
+## STATE (a pixel-only check misses a RAM/CPU divergence until it surfaces).
+## Two negative controls (wrong anchor; one flipped button bit on an
+## input-sensitive ROM) stop it passing vacuously.
 ##
-## The retroactive clip exporter (the clip_* block in src/dingbat_wasm.nim)
-## does not record video while you play. It keeps one compressed state anchor
-## per second plus a 2-byte-per-frame input log, and when you ask for a range
-## it RE-EMULATES it: apply the anchor at or before the start, feed the logged
-## buttons back frame by frame, and record what comes out.
-##
-## That is only a clip of what happened if the re-emulation is bit-identical to
-## the original run. It is the one assumption the whole feature rests on, and
-## its failure mode is quiet — a clip that diverges looks like gameplay, just
-## not the gameplay you asked for, and only a frame-by-frame comparison against
-## the original would ever show it. Hence this: run a core live, keep a hash of
-## every frame, then replay an interior range out of the anchor+input log and
-## assert every single frame matches.
-##
-## The comparison is over the whole SERIALIZED MACHINE STATE, not just the
-## picture. A probe ROM can hold the same image across a divergence in RAM or
-## the CPU, and a pixel-only check calls that a match right up until it
-## surfaces seconds later — which is exactly the bug this is here to catch.
-##
-## Two negative controls stop the whole thing passing vacuously: replaying from
-## the WRONG anchor (a shifted timeline) must be detected on every ROM, and on
-## an input-sensitive ROM one flipped button bit must be too. Both were
-## confirmed to fail when the thing they describe is broken.
-##
-## The wasm frontend's clip_* procs cannot be built natively (they are behind
-## -d:emscripten and pull in SDL), so this exercises the MECHANISM against the
-## same core APIs those procs call — state_payload / apply_state_payload /
-## handle_input / step_frame — in the same order and with the same off-by-one
-## convention: the anchor at frame F is the state BEFORE frame F steps, and
-## inputs[F] is the mask held DURING frame F. Anchors are stored deflated here
-## too, so the compressed form is proven to round-trip to a loadable payload.
+## The wasm clip_* procs cannot be built natively, so this exercises the same
+## core APIs in the same order with the same convention: the anchor at frame
+## F is the state BEFORE frame F steps, inputs[F] is the mask held DURING
+## frame F, and anchors are stored deflated.
 ##
 ## Build/run: nimble test_clipreplay
 
@@ -78,16 +59,10 @@ proc scriptMask(frame: int): uint16 =
   if (frame div 29) mod 6 == 0: m = m or (1'u16 shl ord(Input.SELECT))
   m
 
-# The two cores are separate types with the same surface and no common base to
-# name, so this is a generic: Nim resolves `emu.ppu.framebuffer` and friends
-# per instantiation. (A template would be the other way to write it, and its
-# hygiene rules put every local out of reach of strformat's `&`.)
-#
-# `hasPicture` — the ROM animates, so the framebuffer comparison constrains
-#                something. Off for a ROM that computes with a blank screen.
-# `readsInput` — the ROM's state depends on WHICH buttons are held, so the
-#                wrong-input negative control is meaningful. Off for a viewer
-#                that idles until one specific key.
+# The two cores are separate types with no common base, so this is a generic.
+# `hasPicture`: the ROM animates, so the framebuffer comparison constrains
+# something. `readsInput`: the ROM's state depends on WHICH buttons are
+# held, so the wrong-input control is meaningful.
 proc clipCase[T](lbl: string; emu: T; hasPicture, readsInput: bool) =
   emu.test_output = new_test_output()
   emu.post_init()
@@ -131,10 +106,8 @@ proc clipCase[T](lbl: string; emu: T; hasPicture, readsInput: bool) =
         &"{lbl}: only {distinctStates} distinct machine states over {Frames} " &
         "frames — the state comparison is not constraining much")
 
-  # --- negative controls: prove the comparison CAN fail --------------------
-  # 1. Wrong anchor. Replaying the newest anchor's frames out of the PREVIOUS
-  #    anchor is a shifted history, and every ROM whose state evolves must be
-  #    caught. If this ever passes, every "matched" below means nothing.
+  # Negative control 1: replaying from the PREVIOUS anchor is a shifted
+  # history and must be caught on every ROM whose state evolves.
   block:
     let probe = anchors[anchors.high]
     let wrong = anchors[anchors.high - 1]
@@ -150,9 +123,8 @@ proc clipCase[T](lbl: string; emu: T; hasPicture, readsInput: bool) =
           &"{lbl}: NEGATIVE CONTROL — replaying from the WRONG anchor still " &
           "matched the live run, so this test cannot detect divergence")
 
-  # 2. Wrong input, on a ROM that reads the keypad. This is the control that
-  #    proves the input log is load-bearing rather than decorative: a replay
-  #    that ignored inputs entirely would still pass control 1.
+  # Negative control 2: one wrong button bit, on a ROM that reads the keypad;
+  # proves the input log is load-bearing.
   if readsInput:
     let probe = anchors[anchors.high]
     emu.apply_state_payload(uncompress(probe.packed, dfZlib))
@@ -206,9 +178,8 @@ proc clipCase[T](lbl: string; emu: T; hasPicture, readsInput: bool) =
   check(compared >= RangeEnd - RangeStart,
         &"{lbl}: replay only covered {compared} frames")
 
-  # --- and the restore that ends it ---------------------------------------
-  # clip_tick puts the live state back when the range runs out. If that were
-  # lossy the player would silently resume from a moment in the past.
+  # clip_tick restores the live state when the range runs out; if that were
+  # lossy the player would silently resume from the past.
   emu.apply_state_payload(liveStash)
   check(emu.state_payload() == liveStash,
         &"{lbl}: live-state restore did not round-trip")
@@ -221,16 +192,13 @@ proc clipCase[T](lbl: string; emu: T; hasPicture, readsInput: bool) =
 
 let roms = currentSourcePath().parentDir / "roms"
 
-# gbaedge is the hardware-probe viewer: it animates (so the framebuffer
-# comparison bites) but idles waiting for START, so a stray UP changes nothing
-# and the input control would be a false alarm on it.
+# gbaedge animates but idles waiting for START, so a stray UP changes
+# nothing and the input control would be a false alarm.
 clipCase("GBA gbaedge", new_gba("", roms / "gbaedge.gba", run_bios = false,
                                 use_hle = true),
          hasPicture = true, readsInput = false)
-# inputrec is the opposite ROM, and is why it is here: it folds every KEYINPUT
-# sample into a time-weighted accumulator, so its state depends on the exact
-# input TIMELINE — the same property rollback netplay's replay needs, and the
-# one a clip replay needs. It draws nothing.
+# inputrec folds every KEYINPUT sample into a time-weighted accumulator, so
+# its state depends on the exact input timeline. It draws nothing.
 clipCase("GBA inputrec", new_gba("", roms / "inputrec.gba", run_bios = false,
                                  use_hle = true),
          hasPicture = false, readsInput = true)

@@ -1,42 +1,16 @@
-## Differential fuzz for the GBA per-line OBJ candidate list.
-##
-## Why this exists: `render_sprites` used to look at all 128 OAM entries on
-## every scanline. It now walks a per-line 128-bit candidate bitmap instead
-## (`ppu.obj_line_mask`), rebuilt only when OAM has changed. That is a pure
-## performance change and MUST be pixel-for-pixel invisible.
-##
-## Its failure mode is a sprite configuration no real ROM happens to produce:
-## a double-size affine sprite whose base box misses the line but whose drawn
-## box covers it, a sprite parked past Y=160 that wraps to the top of the
-## screen, an OBJ-window sprite that contributes only to the window mask, a
-## sprite dropped by the per-line OBJ cycle budget. A boot sweep of commercial
-## games is a bad instrument for those, so this file attacks them directly:
-## thousands of randomized OAM tables, biased hard towards the boundaries,
-## rendered BOTH ways and compared byte for byte.
-##
-## Two comparisons run on every table:
-##
-##  1. `render_sprites(force_scan = true)` (the reference 128-entry scan, still
-##     compiled in as the rebuild-storm fallback) vs the candidate-list path.
-##     All 240 `sprite_pixels` -- priority, palette, blend flag AND the OBJ
-##     window flag -- plus the two per-line flags must match on all 160 lines.
-##
-##  2. The candidate bitmap against an independently written predicate. This is
-##     tighter than (1): the scan body re-tests the y/x rejects, so an
-##     over-inclusive mask is invisible to (1) even though it is a real
-##     performance bug, and this catches it. The predicate below is derived
-##     from the register layout, not by calling `obj_geometry`, so it is a
-##     genuine second opinion rather than a restatement.
-##
-## Plus: mid-frame OAM writes through the real bus paths (the invalidation
-## story), the rebuild-storm fallback, and coverage counters that FAIL if a
-## hazard class never fired -- a fuzz that never generates an OBJ-window
-## sprite proves nothing about OBJ-window sprites.
-##
-## And a negative control: the comparison is deliberately fed a corrupted mask
-## and asserted to notice. Without that, "all tests pass" could just mean the
-## harness is comparing nothing.
-##
+## Differential fuzz for the GBA per-line OBJ candidate list
+## (`ppu.obj_line_mask`, rebuilt only when OAM changes) against the full
+## 128-entry scan (`render_sprites(force_scan = true)`, still the
+## rebuild-storm fallback). Thousands of randomized OAM tables biased onto
+## the boundaries: double-size affine sprites whose base box misses the line,
+## sprites past Y=160 wrapping to the top, OBJ-window sprites, sprites
+## dropped by the per-line OBJ cycle budget. Per table: (1) all 240
+## `sprite_pixels` plus the two per-line flags must match on all 160 lines;
+## (2) the candidate bitmap must match an independent predicate written
+## from the register layout (the scan re-tests y/x rejects, so an
+## over-inclusive mask is invisible to (1)). Plus mid-frame OAM writes via
+## the real bus paths, the rebuild-storm fallback, coverage counters that
+## FAIL if a hazard class never fired, and a negative control.
 ## Run with: nimble test_ppuobjlist
 
 import std/[os, strutils]
@@ -63,11 +37,8 @@ proc below(n: int): int = int(nxt() mod uint32(n))
 proc pick[T](xs: openArray[T]): T = xs[below(xs.len)]
 proc reseed(s: uint64) = rng = s
 
-# ---------------------------------------------------------------------------
-# Emulator under test. The OBJ renderer reads OAM, OBJ VRAM (0x10000 up) and
-# DISPCNT/MOSAIC only, all of which the tests overwrite, so the ROM contents
-# are irrelevant -- it exists purely so new_cartridge has a file to open.
-# ---------------------------------------------------------------------------
+# The OBJ renderer reads OAM, OBJ VRAM (0x10000 up) and DISPCNT/MOSAIC only,
+# all overwritten here; the ROM only gives new_cartridge a file to open.
 proc make_emu(): GBA =
   let rom_path = getTempDir() / "dingbat_ppuobjlist_synthetic.gba"
   if not fileExists(rom_path):
@@ -77,17 +48,12 @@ proc make_emu(): GBA =
   result = new_gba("", rom_path, run_bios = false, use_hle = true)
   result.post_init()
 
-# ---------------------------------------------------------------------------
-# The independent predicate.
-#
-# Written from the register layout rather than from obj_geometry, so that a
-# wrong sign extension or a forgotten double-size doubling shows up as a
-# disagreement instead of being copied into both sides.
-#
+# The independent predicate, from the register layout rather than
+# obj_geometry, so a wrong sign extension or a forgotten double-size
+# doubling shows up as a disagreement.
 # attr0: bits 0-7 Y, bit 8 rot/scale, bit 9 double-size (or "disabled" when
 #        bit 8 is clear), bits 14-15 shape
 # attr1: bits 0-8 X, bits 14-15 size
-# ---------------------------------------------------------------------------
 proc expected_covers(oam: seq[byte]; s_idx, line: int): bool =
   let o = s_idx * 8
   let attr0 = uint16(oam[o]) or (uint16(oam[o + 1]) shl 8)
@@ -112,14 +78,11 @@ proc expected_covers(oam: seq[byte]; s_idx, line: int): bool =
   if x + w < 0: return false                        # entirely off the left edge
   y <= line and line < y + h
 
-# ---------------------------------------------------------------------------
-# OAM generators. Each returns the name of the hazard class it emphasises so
-# the coverage assertions can prove the class was actually produced.
-# ---------------------------------------------------------------------------
+# OAM generators; each emphasises one hazard class so the coverage
+# assertions can prove the class was produced.
 
-# Y values that sit on every boundary the wrap logic has: 0, the last visible
-# line, the 159/160 signed-model threshold, and the region that wraps to the
-# top of the screen.
+# Y values on every boundary of the wrap logic (0, last visible line, the
+# 159/160 threshold, the region that wraps to the top).
 const HOT_Y = [0, 1, 7, 8, 63, 64, 128, 129, 152, 153, 158, 159, 160, 161,
                168, 191, 192, 200, 224, 240, 248, 250, 252, 254, 255]
 # X values around 0, the right edge, the 239/240 signed threshold, and the
@@ -176,10 +139,9 @@ proc fill_oam(oam: var seq[byte]; class: string) =
     oam[o + 6] = uint8(nxt() and 0xFF); oam[o + 7] = uint8(nxt() and 0xFF)
 
 proc fill_oam_crowd(oam: var seq[byte]; line: int) =
-  ## 128 sprites all covering one line, most of them 64 wide, so the per-line
-  ## OBJ cycle budget runs out partway down OAM and later entries are dropped.
-  ## This is the Famicom Mini masking-sprite behaviour; the candidate list must
-  ## reproduce the identical cutoff point.
+  ## 128 sprites all covering one line, most 64 wide, so the per-line OBJ
+  ## cycle budget runs out partway down OAM (the Famicom Mini masking-sprite
+  ## case); the candidate list must reproduce the identical cutoff.
   for s in 0 ..< 128:
     let o = s * 8
     var a0 = uint16(max(0, line - below(8))) and 0xFF'u16
@@ -202,9 +164,7 @@ proc rand_dispcnt(): uint16 =
   if below(4) == 0: d = d or 0x0010'u16        # display_frame_select
   d
 
-# ---------------------------------------------------------------------------
 # Rendering one line each way and comparing.
-# ---------------------------------------------------------------------------
 type LineResult = object
   pixels: array[240, SpritePixel]
   objwin: bool
@@ -294,9 +254,7 @@ proc obj_budget_exhausted(ppu: PPU; oam: seq[byte]; line: int): bool =
     else: budget -= w
   false
 
-# ---------------------------------------------------------------------------
 # 1. The main differential sweep.
-# ---------------------------------------------------------------------------
 proc test_differential(emu: GBA; tables: int) =
   echo "Differential: candidate list vs full 128-entry scan"
   let ppu = emu.ppu
@@ -344,9 +302,7 @@ proc test_differential(emu: GBA; tables: int) =
         "candidate bitmap matches the independent coverage predicate",
         first_mask_detail)
 
-# ---------------------------------------------------------------------------
 # 2. The OBJ cycle budget cutoff.
-# ---------------------------------------------------------------------------
 proc test_budget(emu: GBA; tables: int) =
   echo "OBJ cycle budget: the drop point must be identical"
   let ppu = emu.ppu
@@ -373,15 +329,10 @@ proc test_budget(emu: GBA; tables: int) =
         "the budget cutoff actually fired (" & $exhausted & " lines)",
         "the crowding generator is not crowding")
 
-# ---------------------------------------------------------------------------
-# 3. Mid-frame OAM writes through the real bus paths.
-#
-# This is the invalidation story. OAM byte writes are discarded by hardware,
-# so halfword and word writes are the only two entries -- and DMA and the
-# cheat engine both funnel through them. Writing through
-# write_half_internal/write_word_internal here means the test exercises the
-# same hook a game does, not a direct poke into the seq.
-# ---------------------------------------------------------------------------
+# 3. Mid-frame OAM writes through the real bus paths. OAM byte writes are
+# discarded by hardware, so halfword and word writes are the only entries
+# (DMA and the cheat engine funnel through them); writing through
+# write_half_internal/write_word_internal exercises the same hook a game does.
 proc test_midframe(emu: GBA; frames: int) =
   echo "Mid-frame OAM writes: invalidation via the bus write paths"
   let ppu = emu.ppu
@@ -414,9 +365,8 @@ proc test_midframe(emu: GBA; frames: int) =
           bus.write_word_internal(addr32 and not 3'u32,
                                   uint32(lo) or (uint32(hi) shl 16))
         inc writes
-      # The candidate path runs FIRST, so it sees whatever mask state the
-      # writes left behind. force_scan never touches the mask, so the
-      # reference cannot repair a stale one.
+      # The candidate path runs FIRST so it sees whatever mask state the writes
+      # left; force_scan never touches the mask, so it cannot repair a stale one.
       let listed = render_line(ppu, line, false)
       let scanned = render_line(ppu, line, true)
       let d = diff(listed, scanned)
@@ -427,13 +377,9 @@ proc test_midframe(emu: GBA; frames: int) =
         "OAM rewritten between scanlines (" & $writes & " writes): identical",
         detail)
 
-# ---------------------------------------------------------------------------
-# 4. The rebuild-storm fallback.
-#
-# Past OBJ_LIST_REBUILD_LIMIT rebuilds in one frame the renderer stops
-# trusting the mask and scans. That path must be (a) correct and (b) actually
-# reachable -- a guard that never engages is a guard that was never tested.
-# ---------------------------------------------------------------------------
+# 4. The rebuild-storm fallback: past OBJ_LIST_REBUILD_LIMIT rebuilds in one
+# frame the renderer stops trusting the mask and scans. Must be correct AND
+# reachable.
 proc test_rebuild_guard(emu: GBA) =
   echo "Rebuild-storm fallback"
   let ppu = emu.ppu
@@ -462,20 +408,10 @@ proc test_rebuild_guard(emu: GBA) =
         "rebuilds capped at OBJ_LIST_REBUILD_LIMIT (" & $rebuilds_seen & ")",
         "guard did not engage")
 
-# ---------------------------------------------------------------------------
-# 4b. The two OAM mutation paths that are NOT bus writes.
-#
-# Reading the code turns up two more writers besides write_half_internal and
-# write_word_internal: the HLE RegisterRamReset SWI's OAM clear phase, and
-# save-state load. Neither is reachable from a bus write, and -- measured --
-# NEITHER IS EXERCISED by any of 71 local ROMs booted for 120 frames under the
-# -d:objListVerify cross-check, so nothing else in the tree would notice if
-# their hooks were dropped. Hence these.
-#
-# The assertion in both cases: after the mutation the cached mask must either
-# still be marked dirty, or agree with a fresh rebuild. A missing hook leaves
-# it clean AND stale, which is exactly what fails here.
-# ---------------------------------------------------------------------------
+# 4b. OAM writers that are NOT bus writes: the HLE RegisterRamReset SWI's
+# OAM clear and save-state load. After the mutation the cached mask must
+# either still be marked dirty or agree with a fresh rebuild; a missing hook
+# leaves it clean AND stale.
 proc mask_is_consistent(ppu: PPU): bool =
   if ppu.obj_list_dirty: return true
   let cached = ppu.obj_line_mask
@@ -524,13 +460,8 @@ proc test_nonbus_writers(emu: GBA) =
         "save-state load invalidated the candidate list",
         "stale mask survived a state load")
 
-# ---------------------------------------------------------------------------
-# 5. Negative control.
-#
-# Everything above is a comparison, and a comparison that cannot fail proves
-# nothing. Corrupt the mask by hand and confirm both detectors notice: the
-# pixel diff (a dropped sprite) and the predicate check (a wrong bit).
-# ---------------------------------------------------------------------------
+# 5. Negative control: corrupt the mask by hand and confirm both detectors
+# notice, the pixel diff (a dropped sprite) and the predicate (a wrong bit).
 proc test_negative_control(emu: GBA) =
   echo "Negative control: a deliberately broken mask must be caught"
   let ppu = emu.ppu
@@ -570,9 +501,7 @@ proc test_negative_control(emu: GBA) =
         "clearing a candidate bit disagrees with the predicate",
         "the mask comparison is vacuous")
 
-# ---------------------------------------------------------------------------
 # 6. Coverage assertions.
-# ---------------------------------------------------------------------------
 proc test_coverage() =
   echo "Hazard-class coverage (a fuzz that never hits a case proves nothing)"
   check(cov_candidates > 100000,
@@ -604,16 +533,12 @@ proc test_coverage() =
 
 when isMainModule:
   let heavy = getEnv("OBJLIST_HEAVY") == "1"
-  # 5000 tables x 160 lines is ~3.4 s and ~800k compared scanlines -- cheap
-  # enough for every CI run. OBJLIST_HEAVY=1 raises it to 20000 (~14 s, 3.2M
-  # scanlines), which is what a change to the geometry or invalidation logic
-  # should be run under locally.
+  # 5000 tables x 160 lines is ~3.4 s; OBJLIST_HEAVY=1 raises it to 20000
+  # (~14 s), for a change to the geometry or invalidation logic.
   let tables = if heavy: 20000 else: 5000
   let emu = make_emu()
-  # OBJ character data: 32K of OBJ VRAM at 0x10000. Random, then biased so a
-  # good share of 4bpp nibbles are index 0 (transparent) and the priority /
-  # first-writer-wins logic in sprite_pixels is actually exercised rather than
-  # every sprite being fully opaque.
+  # OBJ VRAM: random, then biased so many 4bpp nibbles are index 0
+  # (transparent) and the priority / first-writer-wins logic is exercised.
   reseed(0x243F6A8885A308D3'u64)
   for i in 0 ..< emu.ppu.vram.len: emu.ppu.vram[i] = uint8(nxt())
   for i in 0x10000 ..< emu.ppu.vram.len:

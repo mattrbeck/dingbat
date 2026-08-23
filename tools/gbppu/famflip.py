@@ -21,13 +21,9 @@ for line in open(path):
     if not m:
         continue
     rom, dev = m.group(1), m.group(2)
-    # strip the device/expectation tags the runner encodes in the file name
-    # The expectation tag is `_out` + 1 to 20 hex digits (tests/README.md), so
-    # the digit run has to be `+`. With a single-character class the tail of a
-    # multi-digit expectation stayed glued to the family name -- and since
-    # siblings differ precisely in that value, exactly the families that
-    # contain a flip were split into one family per step, which is the case
-    # this instrument exists to show. Recovers 276 rows into 74 families.
+    # Strip the device/expectation tags. `_out` takes 1-20 hex digits
+    # (tests/README.md): a single-digit match leaves the tail glued to the
+    # family name and splits every family that contains a flip.
     base = re.sub(r'_(dmg08|cgb04c|dmg08_cgb04c)(_out[0-9a-fA-F]+)?', '', rom)
     base = re.sub(r'_out[0-9a-fA-F]+', '', base)
     mm = re.match(r'^(.*?)_(\d+)$', base)

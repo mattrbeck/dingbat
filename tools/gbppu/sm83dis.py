@@ -3,10 +3,8 @@
 
     tools/gbppu/sm83dis.py <rom> [start_hex] [len]
 
-Written for the speed-switch / lcd_offset work (bucket 13): those ROMs are a
-straight-line preamble of `LDH ($4D),A ; STOP` pairs and a hand-counted read,
-so what matters is seeing the instruction stream, not perfect coverage of CB
-prefixes or illegal opcodes.
+Enough for the straight-line preambles of the speed-switch / lcd_offset ROMs;
+no coverage of illegal opcodes.
 """
 import sys
 

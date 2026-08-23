@@ -1,12 +1,8 @@
-/* Headless SameBoy oracle for GBMicrotest.
+/* Headless SameBoy oracle (links libsameboy) for GBMicrotest.
  *
  * GBMicrotest ROMs answer in HRAM -- $FF80 actual, $FF81 expected, $FF82
- * verdict ($01 pass / $FF fail) -- and there is no completion signal at all:
- * they write their result and keep running, so the frame count is the exit
- * condition. Every SameBoy runner in this tree reads the SCREEN, so until now
- * "does a correct emulator agree with this GBMicrotest row?" could not be asked
- * directly; the workaround was to rebuild the question as a gambatte-format ROM
- * (tools/gbppu/gam_patchrun.py). This asks it directly.
+ * verdict ($01 pass / $FF fail) -- with no completion signal: they write their
+ * result and keep running, so the frame count is the exit condition.
  *
  * Usage:
  *   sameboy_microtest <bootromdir> <rom.gb> [frames] [dmg|cgb]
@@ -17,15 +13,11 @@
  *
  *   MT <ff80> <ff81> <ff82> <PASS|FAIL> <rom>
  *
- * scored the way dingbat's --mode=microtest scores it: on $FF82 alone, per the
- * suite's own howto, because some of its tests leave $FF80 == $FF81 on a
- * failure. $FF80/$FF81 are printed too because when the verdict is FAIL those
- * two are the actual-vs-expected pair the row's residual is measured from.
+ * scored as dingbat's --mode=microtest scores it: on $FF82 alone, per the
+ * suite's howto (some tests leave $FF80 == $FF81 on a failure).
  *
- * The device follows the cart header (GBMicrotest ships DMG carts), which is
- * what dingbat's `cart` Device column means; the optional last argument forces
- * one. Model defaults to DMG-B / CGB-C -- CGB-C because that is the revision
- * this tree scores and the one gambatte's `cgb04c` names.
+ * The device follows the cart header (dingbat's `cart` Device column); the
+ * optional last argument forces one. Models: DMG-B / CGB-C.
  *
  * Build: see build.sh.
  */
@@ -46,9 +38,7 @@ static uint32_t rgb_encode(GB_gameboy_t* gb, uint8_t r, uint8_t g, uint8_t b) {
 }
 
 static int run_one(const char* bootdir, const char* rom, int frames, int force) {
-  /* Determinism: GB_init seeds RAM/OAM through GB_random(), whose generator is
-   * seeded from the wall clock by a library constructor. A GBMicrotest ROM that
-   * reads a byte before writing it would otherwise answer differently per run. */
+  /* Determinism: GB_init seeds RAM/OAM through the clock-seeded GB_random(). */
   GB_random_set_enabled(false);
   GB_random_seed(0);
 
@@ -86,8 +76,7 @@ static int run_one(const char* bootdir, const char* rom, int frames, int force) 
   GB_set_vblank_callback(&gb, vblank);
   GB_set_rendering_disabled(&gb, false);
 
-  /* Play the real boot ROM, then count from its end -- the same timeline the
-   * other runners here use. These ROMs settle long before the frame budget. */
+  /* Play the real boot ROM, then count from its end, as the other runners do. */
   for (int i = 0; i < 1000 && !gb.boot_rom_finished; ++i) GB_run_frame(&gb);
   if (!gb.boot_rom_finished) {
     fprintf(stderr, "MT ?? ?? ?? BOOTHUNG %s\n", rom);

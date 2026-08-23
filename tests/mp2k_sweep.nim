@@ -55,11 +55,9 @@ proc main() =
   emu.post_init()
   emu.mp2k_hle = getEnv("DINGBAT_NOHLE") != "1"
 
-  # Ground truth: every m4a/MP2K build embeds ID_NUMBER 0x68736D53 in a literal
-  # pool (SoundInit stores it to SoundInfo.ident; the constant must live in the
-  # image). Scan the ROM bytes for its little-endian form. The pow2 padding is
-  # the address-derived open-bus pattern (consecutive +1 halfwords), which can
-  # never spell the constant, so scanning the whole buffer is safe.
+  # Every m4a/MP2K build embeds ID_NUMBER 0x68736D53 in a literal pool, so
+  # scan the ROM bytes for its little-endian form. The pow2 padding is the
+  # open-bus pattern, which can never spell the constant.
   var rom_magic = false
   block:
     let rom = addr emu.cartridge.rom

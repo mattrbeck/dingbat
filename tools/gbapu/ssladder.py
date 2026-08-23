@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Sweep `channel_1_freq_change_timing`'s delay ladder past the end of its own
-sixteen rungs, on every CGB revision, dingbat against SameBoy.
+sixteen rungs, on every CGB revision, dingbat against the sameboy_ssdump
+runner.
 
     tools/gbapu/ssladder.py [lo] [hi]        # rungs lo..hi-1, default 0..20
 
-WHAT THE ROM DOES.  Each of sixteen blocks powers the APU off and on (which is
+The ROM: each of sixteen blocks powers the APU off and on (which is
 the only thing that resets a square channel's duty position), sets NR11 = $00
 (duty 12.5%, so exactly one of eight steps is high), NR12 = $F8, NR13 = $FC,
 triggers with NR14 = $87 -- frequency $7FC, i.e. a duty step every 4 M-cycles
@@ -14,23 +15,20 @@ after that write.  It stores `(read1 << 4) | read2`.  Blocks 0-7 run at single
 speed; block 7 is followed by a `STOP` into double speed and blocks 8-15 run
 there.
 
-WHY IT IS SWEEPABLE.  The wait is `call $7FFx`, and $7FFF is a lone `ret` with
+The wait is `call $7FFx`, and $7FFF is a lone `ret` with
 plain $00 nops all the way back to $0878, so the call's low byte IS the delay:
 target $7FFF - n runs n nops.  CALL1[k] holds block k's first delay (which moves
 the NR14 write and both reads together, changing the write's phase against the
 free-running duty counter) and CALL2[k] its second (which moves read2 alone,
 tracing the channel's output as a function of time after the write).  The
-shipped ladder is n = 0..7 single speed and n = 0..7 double speed; this sweeps
-whatever range you ask for, so a per-revision difference can be seen as a shift
-of a staircase rather than as one odd cell.
+shipped ladder is n = 0..7 single speed and n = 0..7 double speed.
 
-READ THE OUTPUT AS TWO EDGES.  The high nibble is read1, taken 2 M-cycles after
-the write, and it is the one that can catch a duty step in the act.  The low
-nibble is read2, taken 21 M-cycles later, by which time the channel has frozen,
-so it reports WHICH duty index the freeze landed on.  A revision that differs in
-the high nibble alone differs about what a read ON a step sees
-(GbQuirks.pcm_read_edge_zero); one that differs in the low nibble differs about
-whether the step happened at all (GbQuirks.square_freq_backstep_halftick).
+Output: the high nibble is read1, 2 M-cycles after the write (can catch a duty
+step in the act); the low nibble is read2, 21 M-cycles later, after the
+channel has frozen (which duty index the freeze landed on). A high-nibble
+difference is about what a read on a step sees (GbQuirks.pcm_read_edge_zero);
+a low-nibble one is about whether the step happened at all
+(GbQuirks.square_freq_backstep_halftick).
 
 The patched ROMs are written to $TMPDIR, never to the shared ROM cache: the
 runner reuses any file already present there by name.

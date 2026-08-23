@@ -1,5 +1,5 @@
 @ msrtbit.s — WHAT: where execution resumes after `msr CPSR_c` sets the
-@ Thumb bit from ARM state (an UNPREDICTABLE case emulators guess at).
+@ Thumb bit from ARM state (UNPREDICTABLE per the ARM ARM).
 @
 @ HOW: a 24-byte block is copied to IWRAM: an ARM `msr` at A+0, then four
 @ Thumb `adds r7, #imm` breadcrumbs at A+4/A+6/A+8/A+10 with distinct
@@ -21,8 +21,8 @@
 @ Slot: +0 breadcrumb r7 = 04, +1 phase = 01, +2 control r7 = 0F,
 @ +3 CPSR low byte at recovery = 1F (System, ARM), +4 marker word = 4.
 @
-@ PROVENANCE: verified on GBA SP AGS-001 (sessions 1+3, gbaedge page 8
-@ MSRTBIT); see docs/hwprobe-results-agb.md and tests/roms/gbaedge.s.
+@ PROVENANCE: verified on GBA SP AGS-001 (gbaedge page 8 MSRTBIT); see
+@ docs/hwprobe-results-agb.md and tests/roms/gbaedge.s.
     .arm
     .text
     .global _start

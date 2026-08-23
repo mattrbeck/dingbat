@@ -1,11 +1,7 @@
-## Unit tests for the LCD response model (src/dingbat/common/lcd_response.nim).
-##
-## These are the invariants the feature has to hold to be a panel model rather
-## than a smear: static content must come out bit-exact, every transition must
-## actually finish, the two directions must differ in the direction real TN
-## cells differ, and an alternate-frame flicker must settle to something close
-## to its average instead of strobing.
-
+## Unit tests for the LCD response model (src/dingbat/common/lcd_response.nim):
+## static content bit-exact, every transition finishes, the two directions
+## differ the way real TN cells differ, and an alternate-frame flicker
+## settles near its average instead of strobing.
 import std/[math, strutils, strformat]
 import dingbat/common/lcd_response
 
@@ -50,8 +46,8 @@ block:
       r.reset()
     check(exact, &"{panel}: a static frame is bit-exact for all 32 codes")
 
-    # Every transition must land exactly on the target, both ways, and in a
-    # bounded number of frames — an exponential that rounds to a zero step
+    # Every transition must land exactly on the target, both ways, in a
+    # bounded number of frames: an exponential that rounds to a zero step
     # would leave a permanent fractional ghost.
     var worst = 0
     var stuck = -1
@@ -83,12 +79,10 @@ block:
 # ─────────────────────────── the asymmetry ───────────────────────────
 echo "=== asymmetry: relaxing toward light is the slow direction ==="
 block:
-  # Datasheet-style: a transition counts as arrived when the displayed value
-  # crosses 90% of the step in LINEAR LIGHT (TR/TF are specified 10%-90%).
-  # Waiting for the exact 5-bit code instead would let gamma hide the tail —
-  # near white one code spans ~14% of linear light, so a correctly-rounded
-  # display snaps the last code early in both directions and the exact-code
-  # frame counts collapse to a tie on the fast panels.
+  # Datasheet-style: arrived when the displayed value crosses 90% of the step
+  # in LINEAR LIGHT (TR/TF are specified 10%-90%). Waiting for the exact
+  # 5-bit code would let gamma hide the tail (near white one code spans ~14%
+  # of linear light) and collapse the fast panels to a tie.
   proc lum(c: uint16): float = pow(float(c and 31) / 31.0, 2.2)
   for panel in [lpDmg, lpCgb, lpAgb, lpAgs]:
     var r: LcdResponse
@@ -155,17 +149,15 @@ block:
 # ─────────────── a scene cut is not a symmetric double exposure ───────────────
 echo "=== scene cut ==="
 block:
-  # A 50/50 blend puts BOTH directions at exactly 15/31 one frame after a cut:
-  # a literal double exposure, and the same one whichever way the cut went.
-  # The panel does not do that. Measure how far each direction has left to go
-  # in light terms — darkening should be the one that is nearly finished.
+  # A 50/50 blend would put BOTH directions at exactly 15/31 one frame after
+  # a cut, a double exposure. The panel does not: measure how far each
+  # direction has left to go in light; darkening should be nearly finished.
   var r: LcdResponse
   r.set_panel(lpDmg)
   var white = mk(rgb(31, 31, 31))
   var black = mk(rgb(0, 0, 0))
-  # Progress has to be read in LIGHT, not in codes: the display gamma squashes
-  # the bright end, so a code halfway between black and white is nowhere near
-  # halfway in photons.
+  # Read progress in LIGHT, not codes: display gamma squashes the bright
+  # end.
   proc light(code: int): float = pow(float(code) / 31.0, 2.2)
   r.reset(); discard r.push(white)
   let dark_done = 1.0 - light(int(r.push(black) and 31))
@@ -182,7 +174,7 @@ block:
 
 echo "=== display gamma follows the correction chain ==="
 block:
-  # With GBA color correction on, everything after the model raises codes to
+  # With GBA color correction on, the chain after the model raises codes to
   # the 4th power instead of 2.2, so the AGB table is built at gamma 4.0.
   # Same guarantees as the default table:
   var r: LcdResponse
@@ -208,11 +200,9 @@ block:
       if n >= 400: stuck = true
   check(not stuck, "agb@4.0: every code-to-code transition reaches its target")
 
-  # The point of the parameter: both tables must deliver the same PHOTONS.
-  # Map each table's displayed code through its own chain's code->photon
-  # curve and compare the black->white settle trajectories. They can only
-  # disagree by quantization, which is coarsest at the top of the gamma-4
-  # curve (one code there spans ~12% of full light).
+  # Both tables must deliver the same PHOTONS: map each displayed code
+  # through its own chain's curve and compare the black->white trajectories.
+  # They can only disagree by quantization (one top-end gamma-4 code ~12%).
   var r22: LcdResponse
   r22.set_panel(lpAgb)
   var white = mk(rgb(31, 31, 31))

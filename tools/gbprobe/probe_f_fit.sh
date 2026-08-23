@@ -1,20 +1,12 @@
 #!/usr/bin/env bash
-# probe_f_fit -- score a build's WINDOWED staircase against the oracle, SCX 0..7.
-#
-# SameBoy is allowed to stand in for the GBA SP here for the same reason as in
-# probe (e), and with its own evidence: all EIGHT probe (f) photographs
-# (IMG_3833-3840, 2026-08-18) reproduce its prediction, five of them byte for
-# byte and the rest differing only where the photograph's own perspective drift
-# is worth a pixel. dingbat matches none of them.
+# probe_f_fit -- score ./dingbat_test's windowed probe (f) staircase against
+# the oracle in absolute columns, SCX 0..7.
 #
 #   tools/gbprobe/probe_f_fit.sh [--verbose]
 set -uo pipefail
 cd "$(dirname "$0")/../.."
-# SameBoy's runner is hardcoded to GB_MODEL_CGB_E, and dingbat defaults
-# to CGB-C. Every comparison here must therefore force rev E or it is
-# measuring the CGB-C/CGB-D palette-step split on top of whatever it
-# meant to measure -- which is exactly what happened, unnoticed, to every
-# probe number in this tree until 2026-08-18. SB_REV overrides.
+# The runner is built for CGB-E and dingbat defaults to CGB-C; force rev E
+# or the C/D palette-step split lands in the count. SB_REV overrides.
 SB_REV=${SB_REV:---cgb-rev=E}
 T=${TMPDIR:-/tmp}/probe_f_fit
 mkdir -p "$T"

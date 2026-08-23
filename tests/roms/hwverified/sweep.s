@@ -1,5 +1,5 @@
-@ sweep.s — WHAT: PSG channel 1 sweep-unit corners no test suite pins:
-@ divider-zero behavior and the trigger-time frequency checks.
+@ sweep.s — WHAT: PSG channel 1 sweep-unit corners: divider-zero
+@ behavior and the trigger-time frequency checks.
 @
 @ HOW: with the PSG master on and channel 1 routed, each row programs
 @ NR10-style sweep parameters, triggers the channel with a chosen
@@ -20,11 +20,11 @@
 @     exactly 2048, which also survives — the second check only fails
 @     ABOVE 2048), so the note lives until the first sweep tick, whose
 @     written-back 1500 re-check (1500+750 = 2250) kills it.  The poll
-@     count is timing-jittery (hardware saw 0xF75 and 0xF9A on the two
-@     sessions), so it is RANGE-checked 0x800..0x1800: below the band
+@     count is timing-jittery (hardware saw 0xF75 and 0xF9A on two
+@     runs), so it is RANGE-checked 0x800..0x1800: below the band
 @     means wrongly dead at trigger, above means dead too late.
 @
-@ WHY the session-4 discriminator rows (+16..+28, all sweep period 2;
+@ WHY the discriminator rows (+16..+28, all sweep period 2;
 @ each row is preceded by a full APU reset — master off clears every
 @ PSG register — so the sweep divider phase at trigger is deterministic;
 @ all four are RANGE-checked, with the bands set at the midpoints
@@ -42,15 +42,14 @@
 @   freq 940, shift 1: survives the trigger — a trigger second check
 @     that RECALCULATED the offset would compute 1410+705 = 2115 and
 @     kill it; the same-offset form computes 1410+470 = 1880 and spares
-@     it (third anchor for session 2's same-offset conclusion) — then
+@     it (third anchor for the same-offset conclusion) — then
 @     dies at tick 1 (hw 0x1138).
 @   freq 2033, shift 7: the FIRST trigger calc is exactly 2048 — dies
 @     at the trigger under either strictness (consistency row; the band
 @     is near-zero, hardware counted 0x0002 before the flag read clear).
 @
-@ PROVENANCE: verified on GBA SP AGS-001 (sessions 2-4, gbaedge pages
-@ 23 SWEEPQ and 31 SWEEP2 — session 4's SWEEP2 carried the four
-@ discriminator rows and bucket-matched dingbat on all of them); see
+@ PROVENANCE: verified on GBA SP AGS-001 (gbaedge pages 23 SWEEPQ and 31
+@ SWEEP2, the latter carrying the four discriminator rows); see
 @ docs/hwprobe-results-agb.md.
     .arm
     .text

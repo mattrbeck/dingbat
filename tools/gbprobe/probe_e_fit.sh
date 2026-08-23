@@ -1,29 +1,17 @@
 #!/usr/bin/env bash
-# probe_e_fit -- score a dingbat build against the oracle over the whole
-# probe (e) matrix, in ABSOLUTE columns.
-#
-# WHY ABSOLUTE, AND WHY THE WHOLE MATRIX. Scoring the per-SCX *shift* against
-# each emulator's own objects-off baseline hides the biggest disagreement
-# there is, because the baseline is itself part of the law: at SCX 0 both
-# emulators only ever produce column 24 or 32, and the objects-off case is
-# SameBoy's 24 against dingbat's 32. Read as shifts that inverts the sign of
-# every object cell and reads like two unrelated bugs; read as absolute
-# columns it is one table with cells in the wrong places. 8 SCX x 17 object
-# settings = 136 cells is also a strong enough fitness signal that a knob
-# cannot fit it by accident, which nine settings was not.
+# probe_e_fit -- score ./dingbat_test against the oracle over the whole
+# probe (e) matrix (8 SCX x 17 object settings = 136 cells) in absolute
+# columns: the objects-off baseline is part of the law, so scoring per-SCX
+# shifts against each emulator's own baseline would hide a baseline error.
 #
 #   tools/gbprobe/probe_e_fit.sh [--dmg] [--verbose]
 #
 # The ROM matrix and the oracle's table are built once and cached under
-# TMPDIR: assembling 136 ROMs is the slow part (a dingbat frame is 0.12s), so
-# a knob sweep re-runs only the emulator.
+# TMPDIR; a knob sweep re-runs only the emulator.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
-# SameBoy's runner is hardcoded to GB_MODEL_CGB_E, and dingbat defaults
-# to CGB-C. Every comparison here must therefore force rev E or it is
-# measuring the CGB-C/CGB-D palette-step split on top of whatever it
-# meant to measure -- which is exactly what happened, unnoticed, to every
-# probe number in this tree until 2026-08-18. SB_REV overrides.
+# The runner is built for CGB-E and dingbat defaults to CGB-C; force rev E
+# or the C/D palette-step split lands in the count. SB_REV overrides.
 SB_REV=${SB_REV:---cgb-rev=E}
 SB=${SAMEBOY_RUNNER:-tools/gbfuzz/sameboy_runner}
 BR=${SAMEBOY_BOOTROMS:-$HOME/code/SameBoy/build/bin/BootROMs}
@@ -49,7 +37,7 @@ col0() {
     | sed -n 's/^  bar *0 .*x= *\([0-9]*\)-.*/\1/p' | head -1
 }
 
-# --- the ROM matrix, once ---------------------------------------------------
+# the ROM matrix, once
 if [ ! -f "$ROMS/.done" ]; then
   echo "building the $MODEL ROM matrix (once)..." >&2
   for S in $SCXS; do
@@ -63,7 +51,7 @@ if [ ! -f "$ROMS/.done" ]; then
   touch "$ROMS/.done"
 fi
 
-# --- the oracle's table, once -----------------------------------------------
+# the oracle's table, once
 if [ ! -f "$ORACLE" ]; then
   [ -x "$SB" ] || { echo "no SameBoy runner at $SB (tools/gbfuzz/build.sh)" >&2; exit 1; }
   echo "reading the oracle (once)..." >&2
@@ -78,7 +66,7 @@ if [ ! -f "$ORACLE" ]; then
   done
 fi
 
-# --- this build's table -----------------------------------------------------
+# this build's table
 [ -x ./dingbat_test ] || { echo "no ./dingbat_test" >&2; exit 1; }
 hit=0; miss=0; missing_cells=""
 [ -n "$VERBOSE" ] && printf '%-4s %-4s %s\n' SCX who "OFF  00  01  02  03  04  05  06  07  08  09  0A  0B  0C  0D  0E  0F"

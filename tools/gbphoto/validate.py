@@ -3,24 +3,19 @@
 
 Three tests, in increasing order of how much they prove:
 
-1. **Read-back.**  Recover the panel with no hypothesis at all and count cells
-   that disagree with the reference PNG.  On a row the emulator already passes,
-   reference and hardware are agreed by construction, so every disagreement is
-   the pipeline's own error.  Reported both overall and restricted to cells
-   whose 3x3 neighbourhood is uniform, because an isolated pixel is smeared by
-   the panel and the lens and can never be read back as reliably as the inside
-   of a run.
+1. Read-back: recover the panel with no hypothesis and count cells that
+   disagree with the reference PNG. On a row the emulator already passes,
+   every disagreement is the pipeline's own error. Reported overall and
+   restricted to cells whose 3x3 neighbourhood is uniform (an isolated pixel
+   is smeared by the panel and lens).
 
-2. **Hold-out.**  Refit with a set of synthetic horizontal runs excluded from
-   the illumination correction - the same shape and coverage a real disputed
-   region has - then score only inside those runs.  This is what says the
-   correction is not quietly memorising the answer.
+2. Hold-out: refit with synthetic horizontal runs excluded from the
+   illumination correction, then score only inside those runs, to show the
+   correction is not memorising the answer.
 
-3. **Adjudication power.**  Manufacture a plausible wrong emulator output by
-   sliding a band of scanlines one pixel sideways, then ask ``adjudicate`` to
-   choose between the truth and the fake.  This exercises the actual decision
-   procedure on the actual kind of error at stake, and its accuracy is the
-   number that should be quoted when the tool testifies about a failing row.
+3. Adjudication power: slide a band of scanlines one pixel sideways to make a
+   plausible wrong frame, then ask ``adjudicate`` to choose between truth and
+   fake. Its accuracy is the number to quote for a failing row.
 
 Usage:  validate.py <photos-dir> <expected-dir> [name ...]
 """
@@ -44,11 +39,8 @@ def holdout_mask(shape, rng, runlen=8, coverage=0.06):
 
 
 def fake_shift(ref, rng, bands=6, height=6, dx=1):
-    """A plausible wrong frame: whole scanline bands slid sideways by one pixel.
-
-    Every mealybug failure this tool is pointed at has this shape - a mid-mode-3
-    register write landing one dot early or late slides a run of pixels along
-    the scanline - so it is the right null to test against.
+    """A plausible wrong frame: whole scanline bands slid sideways by one pixel
+    (the shape of a mid-mode-3 register write landing one dot early or late).
     """
     got = ref.copy()
     for _ in range(bands):

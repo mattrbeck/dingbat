@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """Per-row diff harness for the mGBA test suite.
 
-Phase-0 safety net for the prefetch-model rewrite (docs/prefetch-model-rewrite.md).
 The suite ROM prints one `PASS: <name>` or `FAIL: <name>` line per test row, and a
 `<label>: Got <ours> vs <expected>: FAIL` reason line after each failure. This tool
-normalizes that raw stdout into a stable, machine-readable per-row table so any change
-to the timing model can be judged by `diff` against a golden capture — the only way to
-catch a silent regression among the ~3200 Timing+DMA rows (never trust the aggregate
-END: pass/total line).
+normalizes that raw stdout into a stable per-row table so a timing-model change can
+be judged by `diff` against a golden capture; the aggregate END: pass/total line
+hides silent regressions among the ~3200 Timing+DMA rows.
 
 Every row is captured (passing AND failing), for EVERY suite, keyed by
 (suite, ordinal-within-suite) so the key is stable even when a model change flips a

@@ -1,10 +1,7 @@
 #!/bin/bash
-# Score daid's three speed-switch frames with a given dingbat_test binary and
-# print the wrong-pixel count of each against its reference PNG. These are the
-# only pixel witnesses in the tree for the PPU's advance across a KEY1 switch,
-# and they are top-level GREEN results.md rows: any speed-switch change has to
-# leave all three at 0. `strikethrough-cgb` rides along because it is the row
-# `CGB_HALT_PPU_LEAD` is held back by, and that constant moves with these.
+# Score daid's three speed-switch frames (the only pixel witnesses for the
+# PPU's advance across a KEY1 switch; all three must stay at 0) and the two
+# strikethrough frames, which move with the same constants.
 #
 #   tools/gbppu/daidswitch.sh [<dingbat_test>]
 cd "$(dirname "$0")/../.."

@@ -1,31 +1,17 @@
-/* The SameBoy half of tools/gbapu — dump a SameSuite APU ROM's result buffer
- * ($C000 onwards) after N frames, on a chosen CGB revision or on an AGB.
+/* The oracle half of tools/gbapu (links libsameboy): dump a SameSuite APU
+ * ROM's result buffer ($C000 onwards) after N frames, on a chosen CGB
+ * revision or on an AGB. $CFFE (offset $0FFE) is the ROM's own verdict byte:
+ * $50 pass, $46 fail.
  *
  *   sameboy_ssdump <rom.gb> <0|A|B|C|D|E|agb> <bootromdir> [frames] [count]
  *
- * Why a fifth runner rather than a flag on sameboy_runner: this one has to
- * select the CGB REVISION (SameBoy models six of them and the SameSuite APU
- * sub-suite splits on four), which sameboy_runner deliberately does not — it
- * pins CGB-E so that its screenshots are comparable.
+ * Caveat: there is no skip-boot API, so this plays the boot ROM while dingbat
+ * skips it, and the two start on different APU tick phases; a staircase can
+ * shift by a cell or two without either being wrong. Compare the verdict
+ * byte, or sweep a delay and compare differentially.
  *
- * The buffer is the whole point. `sameboy_gambatte` reads a decoded hex string
- * off the SCREEN, which for these ROMs is a rendering of $C000 and no more
- * informative; reading WRAM skips the font table and works before the ROM has
- * finished drawing. $CFFE (offset $0FFE) is the ROM's own verdict byte: $50
- * pass, $46 fail.
- *
- * THE CAVEAT, and it is not the same one sameboy_gambatte carries. SameBoy has
- * no skip-boot API, so this plays the boot ROM while dingbat skips it, and for
- * these ROMs that is not a constant offset in TIME but a different APU tick
- * phase at the moment the test starts. On `channel_1_duty` it moves SameBoy's
- * whole staircase two cells relative to dingbat's. So compare the VERDICT byte
- * across revisions, or compare a ladder DIFFERENTIALLY (sweep a delay and ask
- * whether the answer moves the way the model predicts) — do not read a buffer
- * mismatch as a disagreement about behaviour.
- *
- * Build: see build.sh. Boot ROMs: SameBoy's own `make bootroms` output has the
- * cgb0/agb pair this needs, which the two-file bootdir the other runners use
- * does not.
+ * Build: see build.sh. Boot ROMs: `make bootroms` in the SameBoy tree has the
+ * cgb0/agb pair this needs, which the two-file bootdir does not.
  */
 #define GB_INTERNAL
 #include <Core/gb.h>
@@ -62,8 +48,8 @@ int main(int argc, char **argv) {
   else if (!strcmp(m, "agb")) { model = GB_MODEL_AGB_A; bootname = "agb_boot.bin"; }
   else { fprintf(stderr, "model must be 0, A, B, C, D, E or agb\n"); return 2; }
 
-  /* Same reason as sameboy_runner: GB_init seeds RAM through a clock-seeded
-   * generator, and these ROMs read $C000 back. */
+  /* GB_init seeds RAM through the clock-seeded GB_random(); these ROMs read
+   * $C000 back. */
   GB_random_set_enabled(false);
   GB_random_seed(0);
 

@@ -6,12 +6,11 @@
 @ round N's transfer is a function of round N-1's reply. The child streams an
 @ independent counter (0x2000|round), so predictions miss and rollbacks fire.
 @
-@ Why it matters: under speculation the master predicts the child's reply, keeps
-@ running, and SENDS the next transfer built from that prediction. If the guess
-@ was wrong the master rolls back locally — but the wrong transfer is already on
-@ the wire and cannot be un-sent. rollback's `round_out == out_word` check is
-@ meant to catch exactly this; here it must fire (native) / silently desync
-@ (wasm -d:danger). This ROM is the reproduction of the in-game "link error".
+@ Under speculation the master predicts the child's reply, keeps running, and
+@ SENDS the next transfer built from that prediction; a wrong guess rolls back
+@ locally but the wrong transfer is already on the wire. rollback's
+@ `round_out == out_word` check must fire here (native) / silently desync
+@ (wasm -d:danger). Reproduction of the in-game "link error".
 @
 @ Same EWRAM contract as linktest (200 rounds): SIOMULTI0 -> 0x02000000+2k,
 @ SIOMULTI1 -> 0x02000400+2k, IRQ at 0x02000808, done 0xCAFE at 0x02000800.

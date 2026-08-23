@@ -1,10 +1,9 @@
-@ gbaedge.s — GBA hardware edge-case probe ROM (see gbaedge.py, which
-@ builds this and documents the philosophy; docs/hwprobe.md catalogs every
-@ page).  Probes store RAW observed values into 32-byte slots at
-@ 0x02000000; the viewer pages through them as hex.  Real hardware is the
-@ oracle — nothing here encodes an expected value.
+@ gbaedge.s — GBA hardware edge-case probe ROM (built by gbaedge.py;
+@ docs/hwprobe.md catalogs every page).  Probes store RAW observed values
+@ into 32-byte slots at 0x02000000; the viewer pages through them as hex.
+@ Real hardware is the oracle — nothing here encodes an expected value.
 @
-@ Page/slot order (viewer order == slot index, run order differs so the
+@ Page/slot order (viewer order == slot index; run order differs so the
 @ BIOS open-bus probes execute before the first SWI dirties the latch and
 @ IORW reads the write-only IO before any probe writes it):
 @   0 IDENT     1 OPENBUS   2 BIOSPROT  3 SWITIME  4 TIMERS   5 DMALATCH
@@ -19,12 +18,10 @@
 @  executing near-BX encodings) and can require a power cycle, though a
 @  timer-IRQ watchdog tries to recover first)
 @
-@ Pages 16-24 target behaviors emulators are known to guess at rather
-@ than measure (and dingbat's own v4 open questions) — the question list
-@ lives in docs/hwprobe-questions.md.  Pages 28-36 (v6) isolate the
-@ behaviors the three AGS-001 sessions could NOT discriminate (see the
-@ 2026-08-10 amendments in docs/hwprobe-results-agb.md): each page's
-@ comment block carries the discriminator math.
+@ The question list is docs/hwprobe-questions.md; results are in
+@ docs/hwprobe-results-agb.md.  Pages 28-36 each isolate a model split the
+@ earlier pages could not separate; their comment blocks carry the
+@ discriminator math.
 @
 @ Build: python3 gbaedge.py   (as -> ld -Ttext=0x08000000 -> objcopy,
 @ then the Nintendo logo + complement are patched in)
@@ -156,7 +153,7 @@ main:
     strb r0, [r8, #31]
 .ifdef MSRBOOT                     @ debug builds: run them unattended
     bl  run_msr_probe
-    bl  run_bxdecode               @ v2 runs one candidate per call
+    bl  run_bxdecode               @ one candidate per call
     bl  run_bxdecode
     bl  run_bxdecode
     bl  run_bxdecode
@@ -611,8 +608,8 @@ tphase_loop:
     .ltorg
 
 @ ── slot 5: DMALATCH — DMA bus latch & restricted sources ────────────────
-@ +0  word at 0x10000000 right after a DMA3 ROM->EWRAM (the DMA latch is
-@     what open bus returns now — emulators split on this)
+@ +0  word at 0x10000000 right after a DMA3 ROM->EWRAM (is the DMA latch
+@     what open bus returns now?)
 @ +4  word at 0x01000000 at the same moment
 @ +8  cycles stolen by a 16-word EWRAM->EWRAM DMA3 (halfword count)
 @ +12 dest word after DMA3 from 0x00000000 (BIOS: protected source)
@@ -754,7 +751,7 @@ ldm_empty_join:
 
 @ ── slot 7: MULFLAGS — the "meaningless" carry after MUL family ──────────
 @ ARM7TDMI destroys C with a value derived from the early-termination
-@ logic; deterministic on silicon, guessed-at by emulators.  8 operand
+@ logic; deterministic on silicon.  8 operand
 @ pairs, flags nibble stored per run: +0..7 with C preset 1, +8..15 with
 @ C preset 0, +16..19 UMULLS/SMULLS pairs, +20..23 unaligned LDRH/LDRSH
 @ low halves (overflow from LDMSTM's slot).
@@ -1029,10 +1026,9 @@ rom_nopsled:
     bx  lr
 
 @ ── slot 12: PFPHASE — the prefetch dead-cycle phase rule ────────────────
-@ dingbat's bus model decides whether a ROM data access pays an extra
-@ cycle from `elapsed mod s == s-1` — a rule fitted per-row to the mGBA
-@ suite's CPU column, and docs/prefetch-model-rewrite.md proves no rule of
-@ that shape fits the DMA rows.  This page reads the rule off silicon:
+@ Whether a ROM data access pays an extra prefetch cycle depends on bus
+@ phase (dingbat's bus model: `elapsed mod s == s-1`, fitted to the mGBA
+@ suite's CPU column).  This page reads the rule off silicon:
 @ k = 0..7 sequential ROM fetches (nops) after a fixed non-sequential
 @ point, then one timer-bracketed ROM data read.  The cost-vs-k pattern
 @ IS the phase rule, at two waitstate settings.
@@ -1070,8 +1066,8 @@ probe_pfphase:
     .ltorg
 
 @ ── slot 13: SWIREGION — HLE timing oracles the suite never measured ─────
-@ dingbat's SWI_HLE_BASE / refill residual are calibrated against the mGBA
-@ suite's IWRAM column only, and its Sqrt cost is a 3-point piecewise fit.
+@ SWI costs by caller region and operand size (dingbat's SWI_HLE_BASE is
+@ calibrated on the mGBA suite's IWRAM column only).
 @ +0..+7   Sqrt cycle counts for r0 = 0x10 / 0x1000 / 0x100000 /
 @          0x40000000 (halfwords — bit-length sweep between the fit's
 @          calibration points)
@@ -1161,12 +1157,11 @@ swi_stubs:
 sqrt_inputs:
     .word 0x10, 0x1000, 0x100000, 0x40000000
 
-@ ── slot 14: CONTEND — PPU/CPU memory contention, which dingbat models ───
-@ NOT AT ALL (bus.nim's ACCESS_TIMING_TABLE charges PRAM/VRAM/OAM a
-@ constant regardless of rendering).  Hardware stalls the CPU when the
-@ renderer owns the bus.  Every access here is on-die, so the EverDrive
-@ cannot influence a single byte of this page.  Rendering load: mode 3
-@ bitmap + OBJ enabled (mode3 streams VRAM continuously).
+@ ── slot 14: CONTEND — PPU/CPU memory contention ─────────────────────────
+@ Hardware stalls the CPU when the renderer owns the bus (bus.nim's
+@ ACCESS_TIMING_TABLE charges PRAM/VRAM/OAM a constant).  Every access
+@ here is on-die, so the flashcart cannot influence this page.  Rendering
+@ load: mode 3 bitmap + OBJ enabled (mode3 streams VRAM continuously).
 @ +0..7   16x ldrh from PRAM/VRAM/OAM/EWRAM, mid-line visible (halfwords)
 @ +8..15  the same four under FORCED BLANK (the free-access baseline)
 @ +16..21 8x ldrh PRAM/VRAM/OAM inside hblank
@@ -1250,9 +1245,8 @@ probe_contend:
     .ltorg
 
 @ ── slot 15: IRQLAT — IRQ recognition latency per source ─────────────────
-@ dingbat posits IRQ_SYNC_DELAY=3 for timers/DMA/keypad and a separate
-@ HBLANK_IRQ_SYNC_DELAY=6 (the midpoint of an admitted 5-cycle plateau),
-@ each fitted to one mGBA-suite row.  Here every IRQ entry is timestamped
+@ dingbat's IRQ_SYNC_DELAY / HBLANK_IRQ_SYNC_DELAY are each fitted to one
+@ mGBA-suite row.  Here every IRQ entry is timestamped
 @ against free-running TM0 by the handler itself; the trigger instant is
 @ timestamped by the arming code.  The per-source (entry - trigger)
 @ deltas share every fixed cost (BIOS dispatch, pipeline), so the
@@ -1304,7 +1298,7 @@ probe_irqlat:
     str r0, [r5]
     irq_arm 0x20                   @ IE: timer 2 (macro CLOBBERS r5 —
     ldr r5, =0x04000108            @ reload it, or the arming word lands
-                                   @ on IME: sessions 1-3 measured that bug)
+                                   @ on IME)
     ldr r0, =0x00C00000            @ reload 0: one overflow 65536 cycles
     str r0, [r5]                   @ in (enable + IRQ); TM0 wraps too, so
                                    @ the mod-2^16 delta is still the latency
@@ -1478,16 +1472,15 @@ msr_block:
     .word 0xE12FFF15               @ A+20
     .ltorg
 
-@ ═══════ pages 16-24: guessed-at-behavior probes (see hwprobe-questions) ═
+@ ═══════ pages 16-24 (question list: docs/hwprobe-questions.md) ══════════
 
 .equ CAPDST,   0x02008000          @ CAPDMA destination ring
 .equ BXBLOCK,  0x03000300          @ BXDECODE candidate block (IWRAM copy)
 .equ PCWB2BLK, 0x02005000          @ PCWB2 candidate block (EWRAM copy)
 
 @ ── slot 16: IORW — write-only / unused IO read map ──────────────────────
-@ Whether write-only and unused IO reads return zero or open bus is
-@ guessed differently across emulators.  16 halfword reads in table
-@ order, stored raw.  Runs BEFORE any probe writes IO, so
+@ Do write-only and unused IO reads return zero or open bus?  16 halfword
+@ reads in table order, stored raw.  Runs BEFORE any probe writes IO, so
 @ write-only registers still hold boot values and the answer is purely
 @ "what does a read return".
 probe_iorw:
@@ -1523,8 +1516,8 @@ iorw_offsets:
 
 @ ── slot 17: CPSRBITS — which CPSR/SPSR bits are actually writable ───────
 @ Which CPSR/SPSR bits are physically writable, and what an SPSR read
-@ returns in a mode that has none — no suite measures either.  All-ones
-@ writes per MSR field, raw mrs readback.
+@ returns in a mode that has none.  All-ones writes per MSR field, raw
+@ mrs readback.
 @ +0  CPSR after msr CPSR_f, 0xFF000000
 @ +4  CPSR after msr CPSR_s, 0x00FF0000
 @ +8  CPSR after msr CPSR_x, 0x0000FF00
@@ -1571,9 +1564,8 @@ probe_cpsrbits:
     .ltorg
 
 @ ── slot 18: THUMBPC — r15 as operand: stored values + the CMP theory ────
-@ One emulator theory holds that Thumb CMP with rd=r15 loads SPSR into
-@ CPSR (like the ARM S-suffix r15 forms); plus the classic stored-PC
-@ offsets emulators disagree on.
+@ Does Thumb CMP with rd=r15 load SPSR into CPSR (like the ARM S-suffix
+@ r15 forms)?  Plus the stored-PC offsets.
 @ +0  byte: (value stored by `str pc`) - instruction address
 @ +1  byte: same for `stmia r4, {pc}`
 @ +2  byte: same for the pc entry of `stmia r4, {lr, pc}`
@@ -1652,8 +1644,8 @@ probe_thumbpc:
 
 @ ── slot 19: LDMUSER — user-bank transfers with banked bases ─────────────
 @ User-bank transfers with a banked base register, and the SPSR read in
-@ the cycle after an LDM^ (one theory: it comes back OR'd with CPSR) —
-@ both unmeasured corners.  All experiments from IRQ mode, IRQs masked,
+@ the cycle after an LDM^ (does it come back OR'd with CPSR?).  All
+@ experiments from IRQ mode, IRQs masked,
 @ with sp_irq pointed at scratch; user r13 is parked on a marker value and
 @ restored afterwards (system mode shares the user bank).
 @ +0  word stored by `stmia r4, {r13}^`  (user r13 marker = CAFE0001?)
@@ -1717,9 +1709,9 @@ probe_ldmuser:
 
 @ ── slot 20: IRQWIN — when are IME / I-bit / IE sampled? ─────────────────
 @ What takes priority when an IRQ asserts in the same cycle IE/IF/IME
-@ are written, and when CPSR.I and the IRQ line are actually sampled —
-@ emulators model these with guessed constants.  A TM2 overflow is
-@ parked in IF, then one gate at a time is opened with an 8-instruction
+@ are written, and when CPSR.I and the IRQ line are actually sampled.
+@ A TM2 overflow is parked in IF, then one gate at a time is opened with
+@ an 8-instruction
 @ breadcrumb sled right behind the opening store; the IRQ handler records
 @ the interrupted return address, i.e. HOW MANY sled instructions ran
 @ before dispatch.
@@ -1839,14 +1831,14 @@ iw3:
     .ltorg
 
 @ ── slot 21: DMAEDGE — byte writes to DMA3CNT and disable-before-start ───
-@ A byte-sized write of 0x80 to the wrong DMA3CNT byte allegedly can
-@ still enable the DMA (bus byte-mirroring rumor — and does it affect
-@ all bits?); disable-before-start behavior is equally unmeasured.  DMA3 is primed with valid
-@ src/dst/len before each poke; the destination marker says if it ran.
+@ Can a byte-sized write of 0x80 to the wrong DMA3CNT byte still enable
+@ the DMA (bus byte-mirroring), and does it affect all bits?  Plus
+@ disable-before-start.  DMA3 is primed with valid src/dst/len before
+@ each poke; the destination marker says if it ran.
 @ +0  byte: transfer ran after strb 0x80 -> 0x040000DF (the enable byte)
 @ +2  halfword: DMA3CNT_H readback after that
 @ +4  byte: transfer ran after strb 0x80 -> 0x040000DE (LOW byte — enable
-@           lives in the OTHER byte; 1 here = the byte-mirroring rumor)
+@           lives in the OTHER byte; 1 here = byte-mirroring)
 @ +6  halfword: DMA3CNT_H readback after that
 @ +8  byte: transfer ran after strb 0x80 -> 0x040000DD (CNT_L high byte)
 @ +10 halfword: DMA3CNT_H readback after that
@@ -1920,21 +1912,19 @@ probe_dmaedge:
     .ltorg
 
 @ ── slot 22: CAPDMA — does video-capture DMA3 run every other frame? ─────
-@ Video-capture DMA3 allegedly runs only every other frame (screen
-@ polarity inversion?) — an unverified rumor emulators either copy or
-@ ignore.  DMA3 is armed in
-@ Special timing with repeat from a fixed ROM word into an incrementing
-@ EWRAM ring; the written-word count is snapshotted after each of three
-@ frames.  Per-frame deltas of ~160*4 mean every frame/line; alternating
-@ deltas mean the rumor is true; 0 means Special DMA3 needs something
-@ emulators don't model.
+@ Does video-capture DMA3 run only every other frame (screen polarity
+@ inversion)?  DMA3 is armed in Special timing with repeat from a fixed
+@ ROM word into an incrementing EWRAM ring; the written-word count is
+@ snapshotted after each of three frames.  Per-frame deltas of ~160*4
+@ mean every frame/line; alternating deltas mean every other frame; 0
+@ means Special DMA3 needs something this setup lacks.
 @ +0/+4/+8  word counts after frames 1/2/3     +12  DMA3CNT_H readback
-@ Session-2 hardware: one armed frame transfers 160 triggers then the
-@ enable SELF-CLEARS — so the every-other-frame rumor can only apply to
-@ the pattern games actually use, re-arming every vblank.  v5 adds that:
+@ Hardware: one armed frame transfers 160 triggers then the enable
+@ SELF-CLEARS, so the question only applies to the pattern games actually
+@ use, re-arming every vblank:
 @ +16/+20/+24  cumulative word counts after re-arming at three successive
-@ vblanks (equal steps = every re-armed frame captures; a flat step = the
-@ rumor)                                        +28  final CNT_H readback
+@ vblanks (equal steps = every re-armed frame captures; a flat step =
+@ every other frame)                            +28  final CNT_H readback
 probe_capdma:
     push {r4-r7, lr}
     ldr r8, =SLOTS + 22*SLOTSZ
@@ -1965,7 +1955,7 @@ probe_capdma:
     strh r0, [r8, #12]
     mov r0, #0
     strh r0, [r4, #10]
-    @ v5: the game pattern — re-arm at each vblank, count per frame
+    @ the game pattern — re-arm at each vblank, count per frame
     mov r7, #16
 2:  bl  wait_vblank                @ frame boundary: arm for this frame
     ldr r0, =0xB700
@@ -1995,11 +1985,10 @@ capdma_count:                      @ -> r0 = nonzero words in the ring
 
 @ ── slot 23: SWEEPQ — PSG sweep-unit specifics, CPU-visible via the ch1
 @ active flag ─────────────────────────────────────────────────────────────
-@ Sweep-unit corners no suite pins: divider==0 behavior, the immediate
-@ recalc on trigger, the second not-written-back recalc, and mid-note
-@ divider changes.  Each row
-@ is "poll iterations until SOUNDCNT_X bit0 dropped" (word, capped) — the
-@ competing models predict different death times.
+@ Sweep-unit corners: divider==0 behavior, the immediate recalc on
+@ trigger, the second not-written-back recalc, and mid-note divider
+@ changes.  Each row is "poll iterations until SOUNDCNT_X bit0 dropped"
+@ (word, capped) — the competing models predict different death times.
 @ +0  freq 1024, shift 1, period 0: period-0-acts-as-8 vs never-ticks
 @ +4  freq 1400, shift 1, period 2: the IMMEDIATE trigger recalc already
 @     overflows -> near-zero count if it exists
@@ -2010,8 +1999,8 @@ capdma_count:                      @ -> r0 = nonzero words in the ring
 @ +16 freq 1024, shift 1, period 7 -> period rewritten to 1 mid-note:
 @     immediate reload vs next-reload
 @ +20 control: length-63 death, no sweep (cross-check with PSGSTAT)
-@ Session-2 hardware killed +16 INSTANTLY and +20 in 75 polls — both
-@ suspicious enough to decompose before believing them (v5):
+@ Hardware killed +16 INSTANTLY and +20 in 75 polls; +24/+28 decompose
+@ those:
 @ +24 the +16 experiment but rewriting NR10 with the SAME value 0x71:
 @     separates "any NR10 write kills mid-note" from "the period change"
 @ +28 the +20 length control re-run after two idle frames: separates a
@@ -2084,7 +2073,7 @@ probe_sweepq:
     cmp r6, r7
     blt 4b
 5:  str r6, [r8, #20]
-    @ v5 +24: mid-note rewrite with the SAME sweep value
+    @ +24: mid-note rewrite with the SAME sweep value
     ldr r0, =0x71
     strh r0, [r4]
     ldr r0, =0xF000
@@ -2105,7 +2094,7 @@ probe_sweepq:
     cmp r6, r7
     blt 7b
 8:  str r6, [r8, #24]
-    @ v5 +28: length control again after two idle frames
+    @ +28: length control again after two idle frames
     bl  wait_vblank
     bl  wait_vblank
     mov r0, #0
@@ -2129,9 +2118,9 @@ probe_sweepq:
     .ltorg
 
 @ ── slot 24: BXDECODE — near-BX encodings: BX, no-op, or undefined? ──────
-@ Encodings NEAR BX (SBO fields violated, the ARMv5 BLX word, BX r15)
-@ may be falsely decoded as BX by table-driven emulators.  Interactive (START on this page): candidates run from IWRAM with
-@ the TM3 watchdog armed, breadcrumbs decide what actually executed.
+@ Encodings NEAR BX (SBO fields violated, the ARMv5 BLX word, BX r15).
+@ Interactive (START on this page): candidates run from IWRAM with the
+@ TM3 watchdog armed; breadcrumbs decide what actually executed.
 @ Block layout per candidate (copied to BXBLOCK):
 @   C+0  the candidate word, with r1 = thumb-pad address | 1
 @   C+4  ARM fallthrough:  add r7, #2
@@ -2142,10 +2131,9 @@ probe_sweepq:
 @ candidate branched to $+8 (BX r15).  Watchdog phase byte 2 = it wedged
 @ and the timer diverted the return.
 @
-@ v2: hardware session 2 proved a candidate can wedge the console beyond
-@ the IRQ watchdog's reach (exception entry masks IRQs), which lost every
-@ candidate's data.  Now each START press runs ONE candidate and the page
-@ redraws between presses; SELECT skips the next candidate (result byte
+@ A candidate can wedge the console beyond the IRQ watchdog's reach
+@ (exception entry masks IRQs), so each START press runs ONE candidate
+@ and the page redraws between presses; SELECT skips the next candidate (result byte
 @ 0xDD) so a power cycle + skip harvests the survivors and the wedger is
 @ identified by which press froze.
 @ +0..+3  r7 per candidate (0xDD = skipped)   +4..+7  phase byte each
@@ -2283,7 +2271,7 @@ bx_candidates:
 .endm
 
 @ ── slot 25: THUMBPC2 — scope of the r15 SPSR-load + r15 writeback ───────
-@ Session 2 proved Thumb `cmp pc, r0` loads SPSR FLAGS into CPSR but
+@ THUMBPC showed Thumb `cmp pc, r0` loading SPSR FLAGS into CPSR but
 @ pinned SPSR's mode to the current mode.  Here SPSR = 0x9000009F (SYSTEM
 @ mode, I set, N|V flags) while executing in IRQ mode, so the readback
 @ mode bits say whether the restore is full-CPSR or flags-only; the
@@ -2448,7 +2436,7 @@ tw_rec3:
 
 @ ── slot 26: IRQWIN2 — the gate windows in CYCLES, and the same-cycle
 @ IF-ack race ──────────────────────────────────────────────────────────────
-@ Session 2 gave the windows in uniform-width instructions (3/3/2).  Here
+@ IRQWIN gave the windows in uniform-width instructions (3/3/2).  Here
 @ each gate's dispatch is TM0-timestamped (pre-store stamp vs the
 @ handler's entry stamp), an EWRAM-load sled re-measures the IME window
 @ with multi-cycle instructions (instructions-vs-cycles disambiguation),
@@ -2640,12 +2628,11 @@ probe_iobyte:
     pop {r4-r8, pc}
     .ltorg
 
-@ ═══ pages 28-36 (v6): the discrimination pages — each isolates a model
-@ split the three AGS-001 sessions could not separate (amendments in
-@ docs/hwprobe-results-agb.md) ═══════════════════════════════════════════
+@ ═══ pages 28-36: the discrimination pages — each isolates a model split
+@ the earlier pages could not separate ═══════════════════════════════════
 
 @ ── slot 28: LDMUSER2 — the post-ldm^ SPSR read, with DISJOINT flags ─────
-@ Session 2's LDMUSER row could not falsify the OR-with-CPSR theory:
+@ LDMUSER's +20 row could not falsify the OR-with-CPSR theory:
 @ CPSR's set flag bits were a subset of the SPSR pattern, so "unchanged"
 @ and "OR'd" read identically.  Here SPSR flags = N|V (0x90000000) and
 @ CPSR flags = Z|C (0x60000000) — disjoint — in IRQ mode, then
@@ -2702,7 +2689,7 @@ probe_ldmuser2:
     .ltorg
 
 @ ── slot 29: PCWB2 — the r15-writeback FUNCTIONAL FORM ───────────────────
-@ Session 3 measured only offset +4 post-indexed, which cannot separate
+@ THUMBPC2 measured only offset +4 post-indexed, which cannot separate
 @ "PC := writeback address (+4 extra for ldr)" from "PC := base+4 (str) /
 @ base+8 (ldr) fixed".  Five candidates run from EWRAM under the TM3
 @ watchdog, each inside a breadcrumb block with pads BEFORE and AFTER:
@@ -2799,7 +2786,7 @@ pcwb_blk:
     .word 0xE12FFF15               @ B+36: safety
 
 @ ── slot 30: DMABYTE2 — the CNT_H byte-write anomaly, generalized ────────
-@ Session 2/3 pinned DMA3: an upper-byte strb 0x80 mirrors bit7 into BOTH
+@ DMAEDGE/IOBYTE pinned DMA3: an upper-byte strb 0x80 mirrors bit7 into BOTH
 @ bytes, a lower-byte strb 0x80 stores NOTHING, yet a lower-byte 0x44
 @ stores fine — bit7 is the anomaly, not the byte lane.  Open: does the
 @ same hold on DMA0/1/2, and is the mirror whole-value or bit7-only?
@@ -2869,15 +2856,15 @@ probe_dmabyte2:
     .ltorg
 
 @ ── slot 31: SWEEP2 — pinning the sweep model's writeback and boundary ───
-@ Session 2/3 model so far: an immediate check at trigger; a SECOND
+@ SWEEPQ's model so far: an immediate check at trigger; a SECOND
 @ trigger check re-using the SAME offset, failing strictly ABOVE 2048
 @ (that strictness rests on the single freq-1024 anchor: 1536+512=2048
 @ survived).  Unknown: does the trigger recalc WRITE BACK, and what is
 @ the tick-path second-check offset/boundary?  All rows: ch1, increment,
-@ sweep period 2 (~1 tick = 2/128 s = ~0xF75 polls in earlier sessions),
+@ sweep period 2 (~1 tick = 2/128 s = ~0xF75 polls),
 @ poll count until the NR52 ch1 bit drops (word, capped 0x80000).
-@ NOTE: the task's nominal "freq 2046/2047 shift 10" rows are not
-@ encodable (shift is 3 bits) — freq 2018/2033 shift 7 preserve the
+@ NOTE: "freq 2046/2047 shift 10" rows are not encodable (shift is 3
+@ bits) — freq 2018/2033 shift 7 preserve the
 @ discriminators exactly (second check = 2048 / first calc = 2048).
 @ +0  freq 512, shift 1: death tick decodes writeback x tick-2nd-check:
 @       tick 2 = writeback-at-trigger + tick-2nd-check
@@ -2891,7 +2878,7 @@ probe_dmabyte2:
 @                   everywhere)
 @ +8  freq 940, shift 1 (calc1 1410; same-offset 2nd = 1880, recalc'd
 @     2nd = 2115): 0 polls = the trigger 2nd check RECALCULATES the
-@     offset; ~2 ticks = same-offset model (extra anchor for session 2's
+@     offset; ~2 ticks = same-offset model (extra anchor for SWEEPQ's
 @     same-offset conclusion)
 @ +12 freq 2033, shift 7 (calc1 exactly 2048, calc2 2063): consistency —
 @     dies at trigger under EITHER strictness; surviving to a tick
@@ -2925,7 +2912,7 @@ probe_sweep2:
     .ltorg
 
 @ ── slot 32: IRQWIN3 — is the dispatch window CYCLE-based? ───────────────
-@ Session 3: after an IME store, dispatch lands 3 uniform ROM adds or 2
+@ IRQWIN2: after an IME store, dispatch lands 3 uniform ROM adds or 2
 @ EWRAM loads into the sled (hw deltas 81/81/84 cycles) — width-dependent,
 @ so the window looks cycle-counted.  Here the IME-gate sled instruction
 @ cost is varied further; instructions-executed x per-instruction cost
@@ -2941,7 +2928,7 @@ probe_sweep2:
 @ +8..+15  ack-race bytes, one-shot TM2 overflow swept COARSELY across
 @     the IF-ack store: reload 0xFFF8 - 4k (overflow (8+4k)+latency
 @     cycles after enable, k=0..7 — the previous 2-cycle sweep at
-@     0xFFFC-2k landed entirely before the ack on both machines).
+@     0xFFFC-2k landed entirely before the ack on hardware).
 @     bit0 = IF set right after the ack, bit1 = IF set 8 nops later
 probe_irqwin3:
     push {r4-r11, lr}
@@ -3049,10 +3036,9 @@ iw3c:
     .ltorg
 
 @ ── slot 33: IRQLAT2 — the TM2 IRQ-latency row, r5-clobber-fixed ─────────
-@ Session 1's IRQLAT TM2 row was invalid: irq_arm clobbers r5, so the
-@ arming word hit IME and both machines read a stale stamp.  The macro
-@ call sites now reload r5 (IRQLAT itself is fixed too); this page
-@ re-measures the row plus arming-shape variants.  Layout per row is the
+@ IRQLAT's TM2 row as first built was invalid (irq_arm clobbers r5, so
+@ the arming word hit IME and the stamp was stale); this page re-measures
+@ the row plus arming-shape variants.  Layout per row is the
 @ IRQLAT pair: trigger-side TM0 stamp / handler-entry TM0 stamp (the
 @ mod-2^16 delta is the latency; TM0 free-runs from tm_start).
 @ +0/+2   TM2 reload 0, enable+IRQ in ONE word (the retracted row —
@@ -3074,7 +3060,7 @@ probe_irqlat2:
     ldr r5, =0x04000108            @ TM2
     str r0, [r5]
     irq_arm 0x20                   @ IE: timer 2 (clobbers r5!)
-    ldr r5, =0x04000108            @ ...reload it — THE session-1 bug
+    ldr r5, =0x04000108            @ ...reload it (irq_arm clobbers r5)
 .if \twowrite
     ldr r0, =\armlo
     strh r0, [r5]                  @ reload halfword first
@@ -3111,9 +3097,9 @@ probe_irqlat2:
     .ltorg
 
 @ ── slot 34: IOBYTE2 — DISPSTAT byte writes, falsifiably this time ───────
-@ Session 3's IOBYTE used payload 0x44, whose only storable DISPSTAT bit
-@ is 6 — "byte writes ignored" and "bits 6-7 don't exist" were
-@ indistinguishable (dingbat now models the latter).  0x38 hits bits 3-5
+@ IOBYTE used payload 0x44, whose only storable DISPSTAT bit is 6, so
+@ "byte writes ignored" and "bits 6-7 don't exist" were
+@ indistinguishable.  0x38 hits bits 3-5
 @ — the REAL IRQ-enable bits — so the two models finally split.  All
 @ rows right after wait_vblank (status bits deterministic: bit0 set).
 @ +0  halfword: readback after strb 0x38 -> DISPSTAT low byte
@@ -3159,7 +3145,7 @@ probe_iobyte2:
 
 @ ── slot 35: THUMBPC3 — the cmp-pc restore at a HALFWORD boundary, and in
 @ a mode with no SPSR ──────────────────────────────────────────────────────
-@ Session 3 proved Thumb `cmp pc, r0` performs a full CPSR:=SPSR restore —
+@ THUMBPC2 showed a full CPSR:=SPSR restore on Thumb `cmp pc, r0`,
 @ measured only at a word-aligned address with a T-set SPSR.  (a) runs it
 @ at A with A%4==2 and SPSR.T=0 (N set, IRQ mode, I clear): the resume
 @ address candidates A&~3 (=W) and (A+2)&~3 = (A+4)&~3 (=W+4) collapse to
@@ -3176,7 +3162,7 @@ probe_iobyte2:
 @ scratch=0 & r6=2 -> resumed ARM at W+4 ((A+2)&~3); scratch=0 & r6=0 ->
 @ stayed Thumb (no restore — dingbat's model); CPSR word confirms which
 @ (0x800000xx = restored SPSR, 0x200000xx = compare flags).  Watchdogged.
-@ Session 4 answered (a) with an outcome the key did not list: scratch=0
+@ Hardware answered (a) with an outcome the key did not list: scratch=0
 @ AND r6=0 with a clean phase — hardware resumed ARM past BOTH overlay
 @ words, at A+10 (the bx escape) or A+14 (the safety), which that block
 @ could not tell apart.  (c) reruns the experiment with the ladder
@@ -3319,7 +3305,7 @@ tp3c_blk:                          @ W (word-aligned), the (c) ladder
     .word 0xE12FFF15               @ W+24: safety
 
 @ ── slot 36: MSRTBIT2 — the T-bit quirk: immediate form, and mode+T ──────
-@ Session 1 verified the register-form `msr CPSR_c, r0` T-set quirk
+@ MSRTBIT verified the register-form `msr CPSR_c, r0` T-set quirk
 @ (resume A+8, SKIP A+10) from System mode.  Two scope questions remain:
 @ does the IMMEDIATE form share the quirk, and does a write that sets T
 @ AND switches mode in the same instruction behave identically (and does

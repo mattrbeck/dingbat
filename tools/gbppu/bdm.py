@@ -1,44 +1,24 @@
 #!/usr/bin/env python3
-"""Run a ROM in Beaten Dying Moon Simple and capture its screen.
+"""Run a ROM in Beaten Dying Moon Simple (BDM) and capture its screen.
 
-BDM is Matt Currie's emulator — the same author as mealybug-tearoom-tests,
-cgb-acid2 and cgb-acid-hell — and it selects the SoC directly (`-dev dmgC`,
-`-dev mgb`, `-dev cgbE`, ...), which makes it the only third opinion in reach
-for the per-revision questions this tree keeps running into. SameBoy is the
-other, and the two disagreeing is itself information.
-
-WHAT THIS CAN AND CANNOT DO, measured 2026-08-20:
-
-  * BDM Simple has NO screenshot option, NO headless mode, and NO frame limit.
-    `strings` on the binary shows exactly five flags (-scale, -soft,
-    -disable_high_dpi, -turbo, -ignore_boot_roms) plus the device selectors.
-  * It prints NOTHING to stdout except errors like "ROM not found". Serial
-    output is not echoed: verified with blargg/instr_timing (which writes text
-    to serial) and a mooneye ROM (which sends the Fibonacci bytes) — both
-    silent.
-  * So the SCREEN is the only channel, and reading it needs macOS Screen
-    Recording permission for whatever process runs this script. Without it
-    `screencapture` fails with "could not create image from display" and this
-    harness says so rather than writing an empty file.
-
-Grant it under System Settings -> Privacy & Security -> Screen Recording, for
-the terminal (or Claude Code) that runs this. Until then, run BDM by hand and
-photograph the window — the ROM and device arguments below are the same either
-way.
+BDM selects the SoC directly (-dev dmgC, mgb, cgbE, ...), which makes it a
+per-revision reference. It has no screenshot or headless mode and echoes
+nothing (not even serial), so the screen is the only channel: `screencapture`
+needs macOS Screen Recording permission for the process running this script.
 
 Usage:
     bdm.py <rom> [-dev DEV] [-wait SECONDS] [-out FILE] [-scale N] [-full]
+The BDM binary is $BDM (default <repo>/reference/bdms).
 
-`-wait` is how long to let the ROM run before capturing; BDM never exits on its
-own, so the process is always killed on that deadline. `-turbo` is always on, so
-a few seconds of wall clock is a great many emulated frames.
-
-By default the capture is cropped to BDM's window if it can be located, and
-`-full` keeps the whole screen instead.
+`-wait` is how long to let the ROM run before capturing; BDM never exits on
+its own, so it is always killed on that deadline (-turbo is always on). The
+capture is cropped to BDM's window when it can be located; `-full` keeps the
+whole screen.
 """
 import argparse, os, signal, subprocess, sys, time
 
-BDM = "/Users/matt/code/dingbat/reference/bdms"
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+BDM = os.environ.get("BDM", os.path.join(ROOT, "reference", "bdms"))
 
 DEVICES = ("dmg0", "dmgA", "dmgB", "dmgC", "mgb", "sgb", "sgb2",
            "cgb0", "cgbA", "cgbB", "cgbC", "cgbD", "cgbE", "agb0",
@@ -46,7 +26,7 @@ DEVICES = ("dmg0", "dmgA", "dmgB", "dmgC", "mgb", "sgb", "sgb2",
 
 
 def window_bounds(pid):
-    """BDM's window rect via CoreGraphics, or None. Used only to crop."""
+    """BDM's window rect via CoreGraphics, or None."""
     try:
         import Quartz
     except Exception:
@@ -69,8 +49,7 @@ def run(rom, dev="dmgC", wait=4.0, out="bdm.png", scale=3, full=False):
         sys.exit("unknown -dev %r; one of: %s" % (dev, ", ".join(DEVICES)))
 
     cmd = [BDM, "-dev", dev, "-turbo", "-scale", str(scale), os.path.abspath(rom)]
-    # start_new_session so the whole process group can be killed: BDM ignores
-    # a plain terminate once SDL has the window.
+    # Process group, so the kill below reaches BDM once SDL owns the window.
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                          cwd=os.path.dirname(BDM), start_new_session=True)
     time.sleep(wait)

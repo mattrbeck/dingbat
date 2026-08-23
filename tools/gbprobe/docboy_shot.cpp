@@ -1,30 +1,19 @@
-/* gbprobe's DocBoy leg.
+/* gbprobe's DocBoy leg: built inside DocBoy's devtools as a black-box
+ * reference (build.sh copies this file into the scratch checkout).
  *
  *   docboy_shot <rom> <frames> <out.ppm>
  *
- * DocBoy ships devtools/runtakeframebuffer.cpp, which does almost this job,
- * but two things make it the wrong tool here:
+ * Not DocBoy's own runtakeframebuffer: that links `testutils`, which needs
+ * BUILD_TESTS=ON and compiles the emulator with ENABLE_TESTS, and it counts
+ * ticks rather than frames (Core::frame() gives the frame-exact contract).
  *
- *   - it links `testutils`, which only exists when the tree is configured with
- *     BUILD_TESTS=ON, and that flag compiles the whole emulator with
- *     ENABLE_TESTS. An oracle has to be the emulator as it ships, not the
- *     emulator with its test hooks compiled in;
- *   - it counts TICKS, not frames. Core::frame() is right there and gives the
- *     same frame-exact contract the other two legs have.
+ * DMG: a non-CGB build carries a 4-entry palette, so the shade index is
+ * recoverable; the same four RGB565 values the other legs normalise to are
+ * installed and mapped back to the shared grey ramp on output.
  *
- * DMG note: in a non-CGB build DocBoy's LCD carries a 4-entry palette, so the
- * shade index is recoverable exactly. We install the same four RGB565 values
- * the harness's other legs normalise to, and map them straight back to the
- * shared grey ramp on the way out; DMG output is then byte-comparable across
- * all three engines.
- *
- * CGB note: DocBoy stores the framebuffer as RGB565, so a CGB colour has been
- * through 555 -> 565 by the time we see it. That is lossy against dingbat's
- * and SameBoy's raw 555, so CGB frames are compared by structure (which column
- * changes colour where), never byte for byte. The probe ROMs are written with
- * that in mind: every colour they use survives the round trip distinctly.
- *
- * Built by build.sh, which copies this file into the scratch DocBoy checkout.
+ * CGB: the framebuffer is RGB565, so colours have been through 555 -> 565 and
+ * are lossy against the other legs' raw 555; CGB frames compare by structure,
+ * never byte for byte.
  */
 #include <cstdint>
 #include <cstdio>
@@ -81,9 +70,8 @@ int main(int argc, char** argv) {
             }
         }
 #ifdef ENABLE_CGB
-        /* A CGB frame can legitimately contain the four grey values, so the
-         * snap is DMG-only; on CGB every pixel goes through the generic 565
-         * expansion. */
+        /* The grey snap is DMG-only: a CGB frame can contain the four grey
+         * values legitimately. */
         shade = -1;
 #endif
         if (shade >= 0) {

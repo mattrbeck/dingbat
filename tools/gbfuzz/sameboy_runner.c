@@ -1,4 +1,5 @@
-/* Headless SameBoy runner for cross-emulator screenshot comparison (GB/GBC).
+/* Headless SameBoy runner (links libsameboy as a black-box oracle) for
+ * cross-emulator screenshot comparison (GB/GBC).
  *
  * Usage: sameboy_runner <rom.gb> <bootromdir> <outprefix> <script> <shots>
  *   script: comma-separated FRAME:KEY[:HOLD] (empty string for none),
@@ -6,24 +7,19 @@
  *   shots:  comma-separated frame numbers; writes <outprefix>.f<frame>.ppm
  *
  * All three runners play the boot ROM by default and count frame 0 from
- * power-on, so a difference in where an emulator's skip-boot shortcut lands
- * cannot show up as animation-phase drift. GBFUZZ_SKIP_BIOS=1 selects the
- * skip-boot timeline instead (dingbat's shipping default); SameBoy has no
- * skip-boot API, so it reaches the same point by burning the boot animation.
+ * power-on. GBFUZZ_SKIP_BIOS=1 selects the skip-boot timeline instead
+ * (dingbat's shipping default); there is no skip-boot API, so the boot
+ * animation is burned to reach the same point.
  *
- * GBFUZZ_BATTERY=<path> loads and re-saves a battery save around the run, for
- * comparing what a title does on a second boot.
+ * GBFUZZ_BATTERY=<path> loads and re-saves a battery save around the run.
  *
  * GBFUZZ_PCM=<path> with GBFUZZ_PCM_FRAMES=<N> dumps N frames of audio as raw
- * s16le stereo at 32768 Hz -- the same bytes dingbat's DINGBAT_GB_AUDIO_DUMP
- * writes, for tools/pcmdiff.py. See the block in main() for the knobs. Sample
- * equality with dingbat is not achievable: SameBoy band-limits each channel
- * and models DAC charge/discharge, dingbat emits the raw DAC mix. Use
- * pcmdiff.py --correlate for this pair.
+ * s16le stereo at 32768 Hz, the byte format dingbat's DINGBAT_GB_AUDIO_DUMP
+ * writes, for tools/pcmdiff.py (knobs in main()). Sample-exact equality is
+ * not expected; use pcmdiff.py --correlate.
  *
  * Model follows the cartridge CGB flag: DMG-only carts run on a DMG-B, CGB
- * carts on a CGB-E. SGB is never selected — its 256x224 bordered output is
- * not comparable with the other runners' 160x144.
+ * carts on a CGB-E. SGB is never selected (256x224 bordered output).
  *
  * Build: see build.sh (links ~/code/SameBoy/build/lib/libsameboy.a)
  */
@@ -47,9 +43,8 @@ static int g_nev;
 static int g_shots[MAX_SHOT];
 static int g_nshots;
 
-/* Shared four-shade DMG ramp, darkest first (SameBoy indexes colors[3] as
- * shade 0). Every value survives the 8->5->8 bit round trip that mGBA applies
- * to its DMG palette, so all three runners emit identical bytes. */
+/* Shared four-shade DMG ramp, darkest first (colors[3] is shade 0). Every
+ * value survives an 8->5->8 bit round trip, so all runners emit equal bytes. */
 static const GB_palette_t GREY4 = {{
     {0x00, 0x00, 0x00}, {0x52, 0x52, 0x52}, {0xAD, 0xAD, 0xAD},
     {0xFF, 0xFF, 0xFF}, {0xFF, 0xFF, 0xFF},
@@ -79,8 +74,7 @@ static void parse_script(char* s) {
 }
 
 /* GBFUZZ_DUMP: alongside each shot, write the PPU-visible memory that produced
- * it — OAM, both VRAM banks and the two palette blocks — so a divergence can be
- * traced to whichever of them differs rather than guessed at from pixels. */
+ * it: OAM, both VRAM banks and the two palette blocks. */
 static void write_dump(const char* path, GB_gameboy_t* gb) {
   FILE* f = fopen(path, "wb");
   if (!f) { perror(path); return; }
@@ -92,8 +86,7 @@ static void write_dump(const char* path, GB_gameboy_t* gb) {
   }
   fwrite(gb->background_palettes_data, 1, 0x40, f);
   fwrite(gb->object_palettes_data, 1, 0x40, f);
-  /* Work RAM and HRAM too: when VRAM diverges but OAM and the palettes do not,
-   * the CPU computed different data, and this is where it computed it. */
+  /* Work RAM and HRAM too. */
   fwrite(gb->ram, 1, gb->ram_size, f);
   if (gb->ram_size < 0x8000) {          /* pad DMG's 8K to the CGB 32K layout */
     static const uint8_t zero[0x8000] = {0};
@@ -177,17 +170,10 @@ int main(int argc, char** argv) {
   if (got < sizeof hdr) { fprintf(stderr, "rom too small: %s\n", rom); return 3; }
   int is_cgb = (hdr[0x143] & 0x80) != 0;
 
-  /* GBFUZZ_MODEL=cgb|dmg overrides that. Needed for the one case the header
-   * cannot express: a DMG-FLAGGED cart on a CGB, i.e. CGB COMPATIBILITY MODE.
-   * daid's ppu_scanline_bgp is exactly that -- $143 = $00, and its .gbc.png
-   * reference is a compat capture (its only colours come from the compat
-   * background palette) -- so without this the oracle runs it as a DMG and
-   * answers a different machine's question. Setting the CGB flag in the header
-   * instead would NOT do: that boots CGB-native, which is a third machine. */
-  /* `agb` additionally selects GB_MODEL_AGB_A and the AGB boot ROM. The AGB
-   * boot ROM is the CGB one with a handful of conditionals (SameBoy builds it
-   * from cgb_boot.asm with DEF AGB=1), so it is a genuinely different handoff
-   * and the only way to ask this oracle an AGB-vs-CGB question. */
+  /* GBFUZZ_MODEL=cgb|dmg overrides that, for the case the header cannot
+   * express: a DMG-flagged cart on a CGB (compatibility mode, e.g. daid's
+   * ppu_scanline_bgp). Setting the header flag instead would boot CGB-native.
+   * `agb` selects GB_MODEL_AGB_A and the AGB boot ROM (a different handoff). */
   int is_agb = 0;
   int is_mgb = 0;
   const char* mdl = getenv("GBFUZZ_MODEL");
@@ -195,21 +181,15 @@ int main(int argc, char** argv) {
     if (!strcmp(mdl, "cgb")) is_cgb = 1;
     else if (!strcmp(mdl, "dmg")) is_cgb = 0;
     else if (!strcmp(mdl, "agb")) { is_cgb = 1; is_agb = 1; }
-    /* `mgb` is the Game Boy Pocket. It matters because mooneye's
-     * madness/mgb_oam_dma_halt_sprites is an MGB capture and its header records
-     * FOUR different answers by machine, so asking the oracle on the wrong one
-     * answers a different question. */
+    /* `mgb` is the Game Boy Pocket (mooneye madness/mgb_oam_dma_halt_sprites
+     * is an MGB capture with per-machine answers). */
     else if (!strcmp(mdl, "mgb")) { is_cgb = 0; is_mgb = 1; }
     else { fprintf(stderr, "GBFUZZ_MODEL must be cgb, dmg, agb or mgb\n"); return 3; }
   }
 
-  /* Determinism, and it has to come first: GB_init seeds RAM, OAM and the CGB
-   * palettes through GB_random(), whose generator is seeded from time(NULL) by
-   * a library constructor. Disabling it afterwards leaves that one power-up
-   * fill drawn from the wall clock, so every run of the same ROM starts from
-   * different uninitialised memory and any game that reads it before writing
-   * it diverges non-reproducibly. Disabled, GB_random() returns 0, which is
-   * also what the other two emulators power up with. */
+  /* Determinism, before GB_init: GB_init seeds RAM, OAM and the CGB palettes
+   * through GB_random(), which is clock-seeded by a library constructor.
+   * Disabled, it returns 0, which is what the other runners power up with. */
   GB_random_set_enabled(false);
   GB_random_seed(0);
   GB_gameboy_t gb;
@@ -233,10 +213,8 @@ int main(int argc, char** argv) {
   }
 
   /* GBFUZZ_BATTERY=<path>: load that battery save before running and write it
-   * back afterwards. Off by default — a sweep must not carry state between
-   * runs — but battery-backed behaviour (does the title find its save on the
-   * second boot?) cannot be compared without it. dingbat's runner does the
-   * same implicitly, via the .sav it keeps beside the ROM. */
+   * back afterwards. Off by default so a sweep carries no state between runs
+   * (dingbat's runner does the same via the .sav beside the ROM). */
   const char* battery = getenv("GBFUZZ_BATTERY");
   if (battery && battery[0]) GB_load_battery(&gb, battery);
 

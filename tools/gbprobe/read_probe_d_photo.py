@@ -57,11 +57,10 @@ def blobs(path):
 def by_band_grid(path, skip_top=0):
     """Read one bar per band off a grid derived from the first bar.
 
-    Pure connected components merge a band's bar with its neighbour's
-    whenever the two overlap in x and touch across the separator, which is
-    common once an object shifts the columns (it collapsed 14 bars to 7).
-    Bands are exactly 9 rows apart, so anchoring that pitch on the topmost
-    bar found gives one reading per band and cannot merge."""
+    Pure connected components merge a band's bar with its neighbour's when
+    the two overlap in x and touch across the separator. Bands are exactly
+    9 rows apart, so anchoring that pitch on the topmost bar found gives one
+    reading per band and cannot merge."""
     body, _ = (None, None)
     if path.endswith('.ppm'):
         d = open(path, 'rb').read()

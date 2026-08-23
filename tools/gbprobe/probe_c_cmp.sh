@@ -1,26 +1,17 @@
 #!/usr/bin/env bash
-# probe_c_cmp -- probe (c)'s two staircases, dingbat against SameBoy, in the
-# EMULATORS. No photograph and therefore no registration problem, which is what
-# blocks reading the hardware shots of this probe (it draws on black, so the
-# frame has no visible border -- see docs/hwprobe-questions.md).
-#
-# probe (c) puts BOTH rulers on one frame: a BGP band edge (EMISSION) and an
-# LCDC.4 pulse's glitched column (the FETCH GRID). Neither column means anything
-# alone -- both carry the halt-wake latency -- but `glit - band` is internal to
-# the frame, so it is exactly the emission-vs-fetch separation.
-#
-# SameBoy needs ~400 frames on this ROM where dingbat is settled by 200 (it
-# reads blank before that), so both are taken at 400.
-#
-# The cart carries no CGB flag on purpose (BGP is dead in CGB-native mode), so
-# this is CGB COMPATIBILITY mode: dingbat gets --cgb, SameBoy needs
-# GBFUZZ_MODEL=cgb since it otherwise picks its model off the cart flag.
+# probe_c_cmp -- probe (c)'s two staircases (BGP band edge = emission, LCDC.4
+# glitch column = fetch grid; only `glit - band` is meaningful, see
+# arbread.py), dingbat against the sameboy_runner. Both are shot at frame 400
+# (the runner reads blank on this ROM before that). The cart has no CGB flag
+# (BGP is dead in CGB-native mode), so this is compatibility mode: dingbat
+# gets --cgb and the runner GBFUZZ_MODEL=cgb (it otherwise picks its model
+# off the cart flag).
 #
 #   tools/gbprobe/probe_c_cmp.sh [SCXVAL] [-d:KNOB=V ...]
 set -uo pipefail
 cd "$(dirname "$0")/../.."
-# SameBoy's runner is hardcoded to GB_MODEL_CGB_E and dingbat defaults to
-# CGB-C, so every CGB comparison must force rev E. SB_REV overrides.
+# The runner is built for CGB-E and dingbat defaults to CGB-C; force rev E.
+# SB_REV overrides.
 SB_REV=${SB_REV:---cgb-rev=E}
 T=${TMPDIR:-/tmp}
 SCXV=${1:-0}; shift || true

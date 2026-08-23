@@ -1,49 +1,23 @@
 #!/usr/bin/env python3
-"""Move daid's `ppu_scanline_bgp` anchor off the LY 153 -> 0 snapback, and ask
-SameBoy which dingbat build is right on the DMG.
+"""Move daid's `ppu_scanline_bgp` anchor off the LY 153 -> 0 snapback and
+compare each given dingbat build against the sameboy_runner frame on the DMG.
 
-WHY THIS EXISTS
----------------
-`daid/ppu_scanline_bgp` is the only instrument in the tree that pins the mode-3
-pixel pipeline's phase against something other than the mode 2 interrupt. It
-takes ONE STAT `LYC = 0` interrupt out of `ei ; halt`, pops the return address
-and never returns, then free-runs a 114-M-cycle loop of BGP writes -- exactly
-one scanline -- for the whole frame. One anchor, 144 lines of ruler.
-
-That makes it two measurements welded together: the pipeline's phase AND the
-dot its anchor fires on. For two rounds its DMG frame was read as a refusal of
-`M3_PIPE_AHEAD = 1`, and it is not one -- it is the snapback wake that is out.
-Separating them needs nothing more than arming a different LYC.
-
-`daidsweep.py` next door does the same thing by rebuilding the cart from source
-with rgbds. This does it with ONE PATCHED BYTE and no toolchain:
+The ROM takes one STAT LYC=0 interrupt out of `ei ; halt`, never returns, and
+free-runs a 114-M-cycle loop of BGP writes for the whole frame, so its frame
+is the pipeline phase AND the snapback wake welded together. Re-arming LYC
+separates them, and needs one patched byte (daidsweep.py rebuilds from source
+instead):
 
     ld a, IEF_LCDC | IEF_VBLANK   ; 3E 03   <- A is $03 from here
     ldh [rIE], a                  ; E0 FF
     xor a                         ; AF      <- $178, the byte we patch
     ldh [rLYC], a                 ; E0 45
 
-so `AF` -> `3C` (`inc a`) arms LYC = 4 and `AF` -> `3D` (`dec a`) arms LYC = 2,
-both ordinary lines, with the instruction length, the header checksum and every
-other cycle of the ROM untouched. Nothing else in the cart reads A there.
+`AF` -> `3C` (`inc a`) arms LYC = 4, `AF` -> `3D` (`dec a`) arms LYC = 2, with
+the instruction length and header checksum untouched.
 
-WHAT IT ANSWERED, 2026-08-20 (dingbat DMG, wrong pixels vs SameBoy)
-
-    anchor                  M3_PIPE_AHEAD=0    =1     =1 + LYC_SETTLE_HALT_SKIP
-    LYC = 0  (snapback)         0            2656              0
-    LYC = 2  (normal line)   2655               0              0
-    LYC = 4  (normal line)   2655               0              0
-
-SameBoy reproduces the shootout's own `ppu_scanline_bgp_1.dmg.png` exactly at
-LYC = 0, so the oracle is anchored to the reference before it is asked anything.
-
-TWO THINGS TO KNOW BEFORE READING A NUMBER OUT OF THIS
-------------------------------------------------------
-* SameBoy's DMG panel colours are $FF/$AD/$52/$00 and the reference PNGs' are
-  $FF/$AA/$55/$00. Compare SHADE RANK, not RGB, or every pixel differs.
-* dingbat's `dmg0` boot table is a different machine and matches neither the
-  reference nor the oracle (928 px at LYC = 0). `dmgABC` (the default) and
-  `mgb` are identical to each other and are what the shootout scores.
+Frames are compared by shade rank, not RGB (the two panels' greys differ).
+Score dmgABC/mgb, not dmg0: its boot table is a different machine.
 
 USAGE
     tools/gbppu/daidanchor.py <dingbat_test> [<dingbat_test> ...]

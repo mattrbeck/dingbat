@@ -1,14 +1,13 @@
 @ Cross-version link-timing reproduction ROM (tests/dingbat_test.nim --mode=linktest).
 @
 @ Identical to linktest.s EXCEPT the child stages its outgoing SIOMLT_SEND word
-@ LATE: not during the inter-round gap, but only AFTER the round has already
-@ started (busy bit set). This mimics a partner game whose serial IRQ (where it
-@ writes its next word) retires late — precisely what happens when two DIFFERENT
-@ Gen-3 games run at different cycle offsets. The word is still staged inside the
-@ transfer window, so a completion-time latch (link.nim complete_multi) samples
-@ the FRESH word (0xB000|round) and this ROM passes the standard linktest
-@ contract; a start-time latch samples the STALE previous word and it FAILS.
-@ This is the regression guard for the "communication error" cross-version bug.
+@ LATE: only AFTER the round has started (busy bit set), as a partner game
+@ whose serial IRQ retires late does (two different Gen-3 games at different
+@ cycle offsets). The word is still staged inside the transfer window, so a
+@ completion-time latch (link.nim complete_multi) samples the FRESH word
+@ (0xB000|round) and the standard linktest contract passes; a start-time
+@ latch samples the STALE previous word and FAILS. Regression guard for the
+@ cross-version "communication error".
 @
 @ Build (devkitARM):
 @   arm-none-eabi-as -mcpu=arm7tdmi -o linkskew.o linkskew.s

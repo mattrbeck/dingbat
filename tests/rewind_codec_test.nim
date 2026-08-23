@@ -4,18 +4,12 @@
 ##          -o:rewind_codec tests/rewind_codec_test.nim
 ## Usage: rewind_codec <rom> [frames] [warmup] [state] [input_script]
 ##
-## Runs a real game, takes a snapshot every REWIND_INTERVAL frames exactly as
-## common/rewind.nim does, and for every consecutive pair reports:
-##
-##   * what the XOR delta actually looks like — zero fraction, run lengths,
-##     dirty 4 KB pages / 64 B blocks, and which payload SECTION the non-zero
-##     bytes live in (that is what -d:deltachar's offset table is for)
-##   * every candidate codec's compressed size and encode/decode time, with a
-##     bit-exact round-trip assertion on every single delta
-##
-## Correctness is a hard gate here: a codec that does not reproduce the delta
-## byte for byte is not a candidate, it is a bug, and the run aborts.
-
+## Runs a real game, snapshots every REWIND_INTERVAL frames as
+## common/rewind.nim does, and for every consecutive pair reports the XOR
+## delta's shape (zero fraction, run lengths, dirty pages/blocks, which
+## payload SECTION the non-zero bytes live in via -d:deltachar's offset
+## table) and every candidate codec's size and encode/decode time. A codec
+## that does not round-trip byte for byte aborts the run.
 import std/[os, strutils, times, monotimes, algorithm, math, bitops]
 import zippy
 import dingbat/gba/gba
@@ -52,10 +46,7 @@ proc add(s: var Stat; v: float) =
 proc mean(s: Stat): float = (if s.n > 0: s.total / s.n.float else: 0.0)
 
 # ---------------------------------------------------------------- codecs
-#
-# Every codec is (name, encode, decode). Sizes are bytes of the encoded form;
-# times are measured around encode and decode separately.
-
+# Every codec is (name, encode, decode); sizes are encoded bytes.
 type Codec = object
   name: string
   enc: proc(src: string): string {.nimcall.}
@@ -71,16 +62,11 @@ proc encDeflate(src: string): string = compress(src, BestSpeed, dfDeflate)
 proc decDeflate(src: string; hint: int): string = uncompress(src, dfDeflate)
 
 # --- sparse block codec -------------------------------------------------
-#
-# The delta is an XOR, so "unchanged" is literally a zero byte. A bitmap of
-# which fixed-size blocks contain ANY non-zero byte, followed by those blocks
-# raw, costs 1 bit per block and skips the rest entirely — where zlib has to
-# scan every zero to rediscover it is a zero.
-#
-# Format: u32 original length, u32 block size, then ceil(nblocks/8) bitmap
-# bytes, then the payload of each set block back to back. The final block may
-# be short; its length falls out of the original length.
-
+# The delta is an XOR, so "unchanged" is a zero byte: a bitmap of which
+# fixed-size blocks contain ANY non-zero byte, then those blocks raw.
+# Format: u32 original length, u32 block size, ceil(nblocks/8) bitmap bytes,
+# then the payload of each set block back to back (the final block may be
+# short; its length falls out of the original length).
 proc sparseEncode(src: string; bs: int): string =
   let n = src.len
   let nblocks = (n + bs - 1) div bs
@@ -143,8 +129,6 @@ proc encSparse4k(s: string): string = sparseEncode(s, 4096)
 proc decSparse4k(s: string; hint: int): string = sparseDecode(s)
 
 # --- sparse block, then zlib on the packed body -------------------------
-# The bitmap removes the zeros; zlib then still gets to exploit whatever
-# redundancy is left inside the changed blocks.
 proc encSparse64Zlib(s: string): string = compress(sparseEncode(s, 64), BestSpeed, dfZlib)
 proc decSparse64Zlib(s: string; hint: int): string = sparseDecode(uncompress(s, dfZlib))
 proc encSparse256Zlib(s: string): string = compress(sparseEncode(s, 256), BestSpeed, dfZlib)

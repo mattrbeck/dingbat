@@ -1,22 +1,17 @@
 #!/bin/bash
-# Exact pass/fail for the six rows CGB_TDSEL_LATENCY=5 costs, without paying for
-# a full runner pass and without colour-correction worries: stock PASSES all of
-# them, so a candidate whose frame is byte-identical to stock's still passes,
-# and any differing pixel is the row moving. Comparing emulator-to-emulator with
-# one colour pipeline sidesteps the mealybug palette question entirely.
+# Pass/fail for the six mealybug rows a CGB_TDSEL_LATENCY change can move,
+# without a full runner pass: stock passes all six, so a candidate frame that
+# is byte-identical to stock's still passes and any differing pixel is the row
+# moving. Emulator-to-emulator with one colour pipeline, so no palette worries.
 #
 #   ./atrisk.sh --bless              render the stock reference frames
 #   ./atrisk.sh KNOB=V[,KNOB=V ...]  score candidates against them
-# The REPO ROOT, not this script's directory. It was `dirname "$0"` until
-# 2026-08-18, which put every `nim c` below in tools/gbppu, where they all died
-# on "cannot open 'tests/dingbat_test.nim'" -- into a redirected log, with no
-# exit check. So the tool never built anything: it scored whatever stale
-# binaries happened to be in $T, and every candidate came back "moved: <the same
-# four rows>", including a knob set to its own shipping value. Both build sites
-# are now guarded so that can never be silent again.
+# ROMs come from $DINGBAT_ROM_CACHE (default /tmp/dingbat-test-roms); builds
+# and frames go to $GBPPU_TMP (default <repo>/.scratch/gbppu).
+# Runs from the repo root: the `nim c` lines below need tests/dingbat_test.nim.
 cd "$(dirname "$0")/../.."
-T=/Users/matt/.claude/jobs/e4d5536b/tmp
-C=$T/romcache/game-boy-test-roms
+T=${GBPPU_TMP:-$PWD/.scratch/gbppu}
+C=${DINGBAT_ROM_CACHE:-/tmp/dingbat-test-roms}/game-boy-test-roms
 REF=$T/atrisk
 mkdir -p "$REF"
 
@@ -38,11 +33,9 @@ render() { # $1 = binary, $2 = output dir
 }
 
 if [ "${1:-}" = "--bless" ]; then
-  # Its OWN nimcache. Sharing one with the candidate build below made a no-op
-  # knob report all four tile_sel rows "moved" -- 1340 differing pixels between
-  # two binaries built from identical source and defines -- so every candidate
-  # scored the same and the tool was pure noise. Same rule as
-  # .github/scripts/build-tests.sh: one nimcache per output binary.
+  # One nimcache per output binary (as in .github/scripts/build-tests.sh):
+  # sharing it with the candidate build makes identical sources produce
+  # differing frames.
   nim c --nimcache:$T/nc-ar-stock -d:test_harness -d:release --path:src \
       -o:$T/dt_ar_stock tests/dingbat_test.nim >$T/ar.log 2>&1 || {
     echo "bless build FAILED"; tail -5 $T/ar.log; exit 1; }

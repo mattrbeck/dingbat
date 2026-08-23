@@ -23,8 +23,7 @@ whole table and then every cell is scored against it.
   python3 tools/gbppu/wpsprites.py <rom> /tmp/m3.log <scx>
 
 Prints the fitted offset, the agreement count and one line per disagreeing cell
-with the bracket it missed. This is what found `OBJ_TAIL_WALK_REFUND`: 85 of the
-86 reachable cells were exact and the 86th was one dot out.
+with the bracket it missed.
 
 Note the log only covers the cells the ROM REACHED, so patch the first failing
 cell's `nopsA` (or fix the emulator) and re-run to see the rest.

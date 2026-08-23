@@ -11,9 +11,7 @@ timing, a DMG picture, and the boot ROM's fallback compatibility palette. Seven
 of the ROMs (the `*2.gb` variants) ship a CGB reference and no DMG one, so the
 two devices do not cover the same row set.
 
-`$MBROOT` overrides the suite directory (as `$GAMROOT` does for gamlist.py), so
-a session with a private `$DINGBAT_ROM_CACHE` scores its own copy -- see the
-parallel-agent hazard in tests/README.md.
+`$MBROOT` overrides the suite directory (as `$GAMROOT` does for gamlist.py).
 """
 import glob, os, subprocess, sys, tempfile, zlib, struct
 

@@ -1,4 +1,5 @@
-/* Headless NanoBoyAdvance runner for cross-emulator screenshot comparison.
+/* Headless NanoBoyAdvance runner (links its static libs as a black-box
+ * reference) for cross-emulator screenshot comparison.
  *
  * Usage: nba_runner <rom.gba> <bios.bin> <outprefix> <script> <shots>
  * Same CLI contract as mgba_runner.c / dingbat_nav.nim.
@@ -92,8 +93,8 @@ int main(int argc, char** argv) {
   auto config = std::make_shared<nba::Config>();
   auto video = std::make_shared<CaptureVideo>();
   config->video_dev = video;
-  /* skip the boot logo so frame 0 is the first game frame in every emulator,
-   * unless ROMFUZZ_RUN_BIOS is set (full-BIOS timing experiments) */
+  /* Skip the boot logo so frame 0 is the first game frame in every runner,
+   * unless ROMFUZZ_RUN_BIOS is set. */
   config->skip_bios = getenv("ROMFUZZ_RUN_BIOS") == nullptr;
 
   auto core = nba::CreateCore(config);

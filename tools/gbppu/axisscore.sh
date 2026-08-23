@@ -1,16 +1,11 @@
 #!/usr/bin/env bash
-# axisscore -- the two ROMs that pull the CGB halt phase in opposite directions,
-# scored together against their own references, for one knob set per line.
-#
-# `cgb-acid-hell` wants the PPU advanced after a STAT/LYC wake (it draws its
-# LCDC writes 20-50 M-cycles after the halt); `strikethrough` refuses the same
-# advance 112 M-cycles later, where it moves the OAM DMA's start dot and an
-# object reads the wrong byte off the DMA bus. Both are silicon references and
-# both fail on LINE 68. Any candidate for CGB_HALT_PPU_LEAD has to be read on
-# both at once or it is only half a measurement -- which is what
-# docs/gb-failure-triage.md means by "the consumers may not share one phase".
+# axisscore -- the three hardware-referenced frames that constrain the CGB
+# halt-wake phase (CGB_HALT_PPU_LEAD), scored together for one knob set per
+# line: cgb-acid-hell and strikethrough pull it in opposite directions, and
+# daid's ppu_scanline_bgp anchors on the LY 153->0 snapback.
 #
 #   tools/gbppu/axisscore.sh "KNOB=V[,KNOB=V ...]" ...
+# ROMs from $DINGBAT_ROM_CACHE (default /tmp/dingbat-test-roms).
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 T=${TMPDIR:-/tmp}
@@ -34,18 +29,11 @@ for KV in "$@"; do
       --screenshot=$T/ax_h.ppm >/dev/null 2>&1
   $T/dt_axis "$ST.gb" --mode=screenshot --cgb --color --timeout=120 \
       --screenshot=$T/ax_c.ppm >/dev/null 2>&1
-  # daid's ppu_scanline_bgp on a CGB in COMPATIBILITY mode -- a DMG-flagged cart
-  # forced to --cgb, at the revision its capture is of. It is the third side of
-  # this axis and the one the local runner missed until 2026-08-18: it takes ONE
-  # STAT LYC=0 interrupt out of `halt` on the LY 153->0 snapback and then
-  # free-runs a scanline-locked loop of BGP writes, so a single M-cycle at that
-  # wake moves all 1440 of its band edges.
+  # daid's ppu_scanline_bgp: a DMG-flagged cart captured on a CGB in
+  # compatibility mode, so --cgb at the captured revision.
   $T/dt_axis "$DAID.gb" --mode=screenshot --cgb --model=cgbe --color \
       --timeout=600 --screenshot=$T/ax_g.ppm >/dev/null 2>&1
-  # CGB only. The DMG arm of strikethrough needs the runner's own device/palette
-  # handling to score at all (rendered here it differs in all 23040 pixels,
-  # which is a colour-pipeline artefact and not a result), and the phase under
-  # test is CGB-specific anyway.
+  # CGB only: strikethrough's DMG arm needs the runner's palette handling.
   printf '%-46s acid-hell %4s px   strike-cgb %4s px   daid-gbc %5s px\n' \
     "$KV" "$(px $T/ax_h.ppm $HELL.png)" "$(px $T/ax_c.ppm $ST-cgb.png)" \
     "$(px $T/ax_g.ppm $DAID.gbc.png)"

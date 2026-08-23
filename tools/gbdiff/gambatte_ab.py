@@ -11,13 +11,11 @@ encoded in the ROM's filename. The filename is the ground truth -- neither
 emulator is. That makes the output a four-way verdict:
 
     BOTH_PASS    nothing to see
-    DINGBAT_ONLY dingbat right, docboy wrong    -- a docboy bug; no action here
-    DOCBOY_ONLY  docboy right, dingbat wrong    -- the valuable column: correct
-                 behaviour is demonstrably reachable, so investigate dingbat
-    BOTH_FAIL    neither matches hardware. If the ROM belongs to a _1/_2/_3
-                 bracketing family and the two emulators give the family's
-                 two different answers, they BRACKET the hardware transition
-                 point and neither can be used to correct the other.
+    DINGBAT_ONLY dingbat right, docboy wrong
+    DOCBOY_ONLY  docboy right, dingbat wrong: investigate dingbat
+    BOTH_FAIL    neither matches. If the ROM belongs to a _1/_2/_3 bracketing
+                 family and the two emulators give the family's two answers,
+                 they bracket the transition and neither corrects the other.
 
 `--frames` takes two frame numbers; a row is only scored if the reading is the
 same at both, so a ROM whose display is still settling is reported UNSTABLE

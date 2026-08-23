@@ -10,7 +10,7 @@ of mechanism -- two drivers on one wire, resolving to a bitwise OR (or its
 wired-AND dual) -- is what the CGB TILE_SEL glitch does, instead of the clean
 single substitution source `CGB_TDSEL_GLITCH` ships.
 
-It answers in two places, and they agree:
+It answers in two places:
 
   * over the whole 408-cell corpus, by scoring every composite of the shipping
     source with each other candidate byte, in both polarities.  The column that
@@ -20,10 +20,7 @@ It answers in two places, and they agree:
     cell that could see it.
   * on `cgb-acid-hell`'s two disputed planes, which are NOT in the corpus (in
     the shipping world neither read is glitched at all).  Passing the traced
-    binary re-reads them off the frame: they demand OPPOSITE polarities of each
-    other, which kills any fixed-polarity composite on its own.
-
-See the 2026-08-10 BGP/OR entry in docs/gb-failure-triage.md for the verdict.
+    binary re-reads them off the frame.
 """
 import collections, json, os, sys
 

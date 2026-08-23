@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
-# hellsweep -- cgb-acid-hell's pixel count for a list of knob sets, and nothing
-# else. hwscore.sh builds two binaries and runs three instruments; when the
-# question is only "does this move the 2 px", that is 10x the work.
-#
-# The 2 px are ONE black pixel drawn one scanline early (see
-# tools/gbppu/hellpx.py): dingbat puts it at x = 80 on ly 68, hardware on ly 69.
+# hellsweep -- cgb-acid-hell's wrong-pixel count for a list of knob sets (the
+# one-instrument subset of hwscore.sh; see hellpx.py to look at the pixels).
 #
 #   tools/gbppu/hellsweep.sh "KNOB=V" "KNOB=V,KNOB2=W" ...
 set -uo pipefail

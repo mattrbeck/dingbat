@@ -6,11 +6,8 @@
 # <name> is a file in roms/ without the .asm, and the outputs are
 # build/<name>.{o,gb,sym} plus a copy of the .gb beside the sources.
 #
-# The header flags are not decoration. These ROMs are meant to be burned to a
-# flash cartridge, so the global and header checksums have to be right or a
-# real Game Boy refuses to boot them; and the CGB flag decides which MACHINE
-# the probe measures, which for probe (c) is the whole experiment (see its
-# header comment).
+# The checksums must be right or a real Game Boy refuses to boot the cart,
+# and the CGB flag decides which machine the probe measures.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
@@ -21,16 +18,13 @@ NAME="$1"; shift
 OUT="${GBPROBE_OUT:-$NAME}"
 mkdir -p "$HERE/build"
 
-# GBPROBE_CGB overrides the flag: 0 = no CGB flag (the cart runs a CGB in
-# DMG-COMPATIBILITY mode), 1 = CGB-aware. Which mode a probe wants is part of
-# its experiment, not a property of its name, so it is settable per build.
+# GBPROBE_CGB overrides the flag: 0 = no CGB flag (a CGB runs the cart in
+# DMG-compatibility mode), 1 = CGB-aware.
 if [ -n "$GBPROBE_CGB" ]; then
   [ "$GBPROBE_CGB" = "0" ] && CGBFLAG="" || CGBFLAG="-c"
 else
   case "$NAME" in
-    # probe (c) must run the CGB's PPU in DMG-COMPATIBILITY mode, because BGP --
-    # daid's emission ruler -- is only live there. A cart with no CGB flag is
-    # what selects that mode, and the same cart runs natively on a DMG.
+    # probe (c) reads BGP, which is only live in DMG-compatibility mode.
     probe_c_*) CGBFLAG="" ;;
     *)         CGBFLAG="-c" ;;
   esac

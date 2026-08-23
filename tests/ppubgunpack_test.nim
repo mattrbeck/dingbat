@@ -1,71 +1,32 @@
-## Equivalence tests for the SWAR 4bpp BG tile-row unpacker.
+## Equivalence tests for the SWAR 4bpp BG tile-row unpacker
+## (`unpack_bg4_span`) against its scalar fallback
+## (`unpack_bg4_span_scalar`), enumerated rather than sampled: the
+## transformation is pure and its input space is small.
 ##
-## `render_reg_bg` used to shift eight nibbles out of a 4bpp tile row one at a
-## time. It now expands all eight at once into a uint64 and stores them with a
-## single 8-byte store (`unpack_bg4_span`), falling back to the old per-pixel
-## loop (`unpack_bg4_span_scalar`) for the partial spans at the two line edges.
-##
-## The point of this file is that "byte-identical on the ROMs we happened to
-## test" is not good enough for a change to the pixel path. The transformation
-## is pure and its input space is small enough to enumerate, so it is enumerated
-## here.
-##
-## THE INPUT SPACE, AND WHY THE ENUMERATION BELOW IS COMPLETE
-## ----------------------------------------------------------
 ## `unpack_bg4_span(dst, col, row, x_in_tile, span, flip_x_mask, bank)` is a
-## pure function of five values (dst/col only select where the result lands):
+## pure function of five values:
+##   * `row`         one aligned uint32 = 8 nibbles. 2^32.
+##   * `bank`        palette bank already shifted into the high nibble: 16.
+##   * `flip_x_mask` `7 * bit`: exactly 0 or 7.
+##   * `x_in_tile`   `effective_col and 7`: 0..7.
+##   * `span`        `min(8 - x_in_tile, 240 - col)`: 1 <= span <= 8-x_in_tile;
+##                   pairs outside that triangle are unreachable and out of
+##                   contract (the nibble index would leave 0..7).
+## Vertical flip, tile_id, screen_size, the screen-entry fetch and BG
+## wraparound resolve BEFORE this function; what remains lives in
+## `render_reg_bg` (tile_base >= 0x10000, 8bpp, mosaic, wraparound,
+## screen_size) and part 2 covers it by rendering scanlines three ways.
 ##
-##   * `row`      — the 4bpp tile row, one aligned uint32 = 8 nibbles. 2^32.
-##   * `bank`     — the palette bank already shifted into the high nibble, so
-##                  16 values: 0x00, 0x10, ... 0xF0. `screen_entry` bits 12..15
-##                  can be anything, so all 16 are reachable.
-##   * `flip_x_mask` — `7 * bit`, so exactly TWO values: 0 and 7. No other value
-##                  is constructible at the call site.
-##   * `x_in_tile` — `effective_col and 7`, so 0..7.
-##   * `span`     — `min(8 - x_in_tile, 240 - col)`, so 1 <= span <= 8-x_in_tile.
-##                  Pairs outside that triangle are unreachable AND would be
-##                  out of contract: the nibble index (x_in_tile + k) would
-##                  leave 0..7 and shift `row` by more than 28.
+## EXHAUSTIVE: 1.1 shapes x flip x bank; 1.2 single-nibble sweep; 1.3
+## adjacent-pair sweep (carry propagation); 1.4 each 16-bit half x bank x
+## flip; 2.1 screen_size x depth x character_base_block x all 512 BGHOFS;
+## 3 the full 2^32 x 16 x 2 sweep (DINGBAT_BG4_EXHAUSTIVE=1, ~20 min
+## single-threaded; DINGBAT_BG4_SHARDS/SHARD split it). SAMPLED: 1.5
+## whole-word fuzz; the tile maps and character data behind 2.x, plus
+## vcount/BGVOFS/screen_base_block.
 ##
-## Vertical flip, tile_id, screen_size, the screen-entry fetch and the BG
-## wraparound all resolve BEFORE this function — they only choose which `row`,
-## `bank` and `flip_x_mask` it sees, and every combination of those is covered
-## below. That is why this decomposition loses nothing.
-##
-## The remaining inputs live one level up, in `render_reg_bg` itself: the
-## `tile_base >= 0x10000` case (the BG unit cannot fetch character data from
-## OBJ VRAM, so such tiles render transparent), 8bpp, horizontal mosaic, BG
-## wraparound at the 256/512 boundary, and the four `screen_size` values. Part 2
-## covers those by rendering real scanlines three ways and diffing.
-##
-## WHAT IS EXHAUSTIVE AND WHAT IS SAMPLED — read this before quoting coverage
-## --------------------------------------------------------------------------
-## EXHAUSTIVE (every value, no sampling):
-##   1.1 flip x bank x (x_in_tile, span) shape        — all 2 x 16 x 36 shapes
-##   1.2 single-nibble sweep: all 8 positions x 16 values x 16 banks x 2 flips,
-##       against 14 fixed contexts for the other seven nibbles
-##   1.3 adjacent-pair sweep: all 7 adjacencies x 256 pair values x 16 banks
-##       x 2 flips, against 6 contexts — this is the carry-propagation test
-##   1.4 half-word sweep: all 65536 values of each 16-bit half x 16 banks
-##       x 2 flips x 3 contexts for the other half
-##   2.1 the renderer sweep is exhaustive over screen_size (4), colour depth
-##       (2), character_base_block (4) and BGHOFS (all 512 values, i.e. every
-##       tile alignment and both sides of both wrap boundaries)
-##   3   the FULL 2^32 x 16 x 2 sweep, opt-in via DINGBAT_BG4_EXHAUSTIVE=1
-##       (too slow for CI at ~20 min single-threaded; DINGBAT_BG4_SHARD lets it
-##       be split across cores)
-##
-## SAMPLED (a random or fixed subset, NOT exhaustive — do not describe as such):
-##   1.5 whole-word fuzz — random (row, bank, flip) triples
-##   2.x the tile MAPS and CHARACTER data behind the renderer sweep are PRNG
-##       fill, and vcount/BGVOFS/screen_base_block are sampled, not enumerated
-##
-## The oracle is `unpack_bg4_span_scalar` itself — the shipping fallback, not a
-## copy of it — so part 1 compares against real behaviour. Part 2 adds a third,
-## independent model written from the register layout rather than from the
-## renderer's structure, so a shared misreading of the tile format would still
-## have to survive two disagreeing implementations.
-##
+## Part 1's oracle is the shipping scalar fallback; part 2 adds an
+## independent model written from the register layout.
 ## Run with: nimble test_ppubgunpack
 
 import std/[os, strutils]
@@ -95,11 +56,9 @@ proc reseed(s: uint64) = rng = s
 
 const SENTINEL = 0xCC'u8
 
-# Both buffers are 16 bytes with the span written at offset 4, so an unpacker
-# that wrote outside [4, 4+span) — before it, after it, or 8 bytes when it was
-# asked for 3 — leaves the sentinel disturbed and is caught. That matters: the
-# SWAR path always stores 8 bytes, and the whole reason it is gated on span == 8
-# is that layer_palettes rows are exactly 240 bytes and sit next to each other.
+# Both buffers are 16 bytes with the span at offset 4, so a store outside
+# [4, 4+span) disturbs the sentinel. The SWAR path always stores 8 bytes and
+# is gated on span == 8 because layer_palettes rows are adjacent 240-byte rows.
 const OFS = 4
 
 var buf_fast: array[16, uint8]
@@ -120,10 +79,8 @@ proc describe(row: uint32; x_in_tile, span, flip: int; bank: uint8): string =
   " flip=" & $flip & " bank=" & toHex(bank, 2) &
   "\n    fast=" & $buf_fast & "\n    ref =" & $buf_ref
 
-# --- 1.1 every reachable (x_in_tile, span) shape ------------------------------
-# EXHAUSTIVE over shapes and over bank/flip; the rows are a fixed adversarial
-# set plus PRNG. This is the test that says the fast path fires only where it is
-# allowed to and that the fallback dispatch is not off by one.
+# 1.1 every reachable (x_in_tile, span) shape, exhaustive over shapes, bank
+# and flip; rows are a fixed adversarial set plus PRNG.
 proc test_shapes() =
   echo "every reachable (x_in_tile, span) shape, both flips, all 16 banks"
   reseed(0x9E3779B97F4A7C15'u64)
@@ -143,26 +100,19 @@ proc test_shapes() =
   check(shapes == 36, "36 reachable shapes enumerated", "got " & $shapes)
   check(bad.len == 0, "all shapes agree with the scalar fallback", bad)
 
-# --- contexts -----------------------------------------------------------------
-# The "context" is what the OTHER nibbles hold while one nibble is swept. It is
-# fixed rather than random because the interesting failures are carry-driven:
-# 0xFFFFFFFF is the maximum-carry input for `v + 0x0F0F..`, 0x00000000 the
-# minimum, and the alternating patterns put a maximal nibble next to a zero one
-# in both phases.
+# The "context" is what the OTHER nibbles hold while one is swept. Fixed,
+# because the interesting failures are carry-driven: 0xFFFFFFFF is the
+# maximum-carry input for `v + 0x0F0F..`, 0 the minimum, and the alternating
+# patterns put a maximal nibble next to a zero one in both phases.
 const CONTEXTS: array[6, uint32] = [
   0x00000000'u32, 0xFFFFFFFF'u32, 0x0F0F0F0F'u32,
   0xF0F0F0F0'u32, 0x88888888'u32, 0x11111111'u32]
 
 proc nib_mask(i: int): uint32 = 0xF'u32 shl (4 * i)
 
-# --- 1.2 single-nibble sweep --------------------------------------------------
-# EXHAUSTIVE over (nibble position 0..7) x (nibble value 0..15) x (bank 0..15)
-# x (flip 0/7), against 14 contexts (the 6 fixed ones plus 8 PRNG words).
-#
-# This is the enumeration that pins the transparency rule: palette index 0 must
-# NOT take the bank offset, in every bank, at every position, under both flips.
-# n = 0 is a value in the sweep like any other, so a SWAR path that OR'd the
-# bank in unconditionally fails 8 x 15 x 2 of these cases.
+# 1.2 single-nibble sweep: every (position, value, bank, flip) against 14
+# contexts. Pins the transparency rule: palette index 0 must NOT take the
+# bank offset, so a SWAR path that ORs the bank in unconditionally fails.
 proc test_single_nibble() =
   echo "every nibble value at every position, all banks, both flips"
   reseed(0xBB67AE8584CAA73B'u64)
@@ -182,18 +132,12 @@ proc test_single_nibble() =
               if bad.len == 0: bad = describe(row, 0, 8, flip, b shl 4)
   check(bad.len == 0, "all " & $cases & " single-nibble cases agree", bad)
 
-# --- 1.3 adjacent-pair sweep --------------------------------------------------
-# EXHAUSTIVE over (adjacency 0..6) x (all 256 pair values) x (bank) x (flip),
-# against 6 contexts.
-#
-# This is the carry test, and it is the one that would fail if the SWAR
-# arithmetic were wrong. Only two operations in the fast path can move
-# information between byte lanes: `v + 0x0F0F0F0F0F0F0F0F` and `nz * bank`.
-# Both are claimed carry-free — every byte of `v` is 0x00..0x0F so the sum is at
-# most 0x1E, and `nz` is 0x00 or 0x10 per byte so the product is at most
-# 0x10 * 15 = 0xF0. Carries out of a byte can only reach the byte immediately
-# above it, so sweeping every adjacent pair exhaustively is what falsifies that
-# claim if it is false.
+# 1.3 adjacent-pair sweep: every (adjacency, pair value, bank, flip) against
+# 6 contexts. Only two fast-path operations can move information between
+# byte lanes, `v + 0x0F0F0F0F0F0F0F0F` (each byte <= 0x0F, sum <= 0x1E) and
+# `nz * bank` (nz is 0x00 or 0x10, product <= 0xF0), and a carry can only
+# reach the byte immediately above, so sweeping every adjacent pair is what
+# falsifies the carry-free claim if it is false.
 proc test_adjacent_pairs() =
   echo "every adjacent nibble pair, all banks, both flips (carry propagation)"
   var bad = ""
@@ -211,13 +155,9 @@ proc test_adjacent_pairs() =
               if bad.len == 0: bad = describe(row, 0, 8, flip, b shl 4)
   check(bad.len == 0, "all " & $cases & " adjacent-pair cases agree", bad)
 
-# --- 1.4 half-word sweep ------------------------------------------------------
-# EXHAUSTIVE over all 65536 values of each 16-bit half (i.e. every combination
-# of four consecutive nibbles) x 16 banks x 2 flips, with the other half held
-# at three contexts. Four-nibble interactions are covered completely; only
-# interactions that need SPECIFIC values in BOTH halves at once fall outside it,
-# and part 3 closes that gap for anyone who wants it closed by machine rather
-# than by the carry argument above.
+# 1.4 half-word sweep: all 65536 values of each 16-bit half x bank x flip
+# with the other half at three contexts. Only interactions needing specific
+# values in BOTH halves at once fall outside it; part 3 closes that gap.
 proc test_halfword_sweep() =
   echo "all 65536 values of each 16-bit half, all banks, both flips"
   var bad = ""
@@ -254,16 +194,11 @@ proc test_fuzz(iters: int) =
 # =============================================================================
 # PART 2 — the whole renderer: SWAR vs scalar vs an independent model
 # =============================================================================
-#
-# Part 1 cannot see anything above the span unpacker. This part renders real
-# scanlines with `render_reg_bg` (SWAR) and `render_reg_bg_scalar` (the same
-# renderer with the fast path compiled out — a `static bool` instantiation, so
-# it is the SAME source, not a copy), and also against `model_render_reg_bg`
-# below, which is written from the register layout rather than from the
-# renderer's span structure.
-#
-# It is what covers: tile_base >= 0x10000, 8bpp, horizontal mosaic, BG
-# wraparound at the 256/512 boundary, and all four screen_size values.
+# `render_reg_bg` (SWAR) vs `render_reg_bg_scalar` (the same source with the
+# fast path compiled out via a `static bool` instantiation) vs
+# `model_render_reg_bg`, written from the register layout. Covers
+# tile_base >= 0x10000, 8bpp, horizontal mosaic, BG wraparound at the
+# 256/512 boundary and all four screen_size values.
 
 proc model_render_reg_bg(ppu: PPU; bg: int; dst: var array[240, uint8]) =
   ## Independent per-pixel model. Deliberately written the naive way — one
@@ -424,15 +359,11 @@ proc test_renderer(emu: GBA) =
   reseed(0x510E527FADE682D1'u64)
   seed_vram(ppu)
 
-  # EXHAUSTIVE over screen_size x colour depth x character_base_block x every
-  # BGHOFS value 0..511. BGHOFS is swept whole because it is what selects
-  # x_in_tile for the leading partial span AND where the 256/512 wrap lands
-  # inside the line; 0..511 covers both wrap boundaries from both sides and
-  # every one of the eight tile alignments.
-  #
-  # character_base_block is swept because block 3 (0xC000) plus a high tile_id
-  # pushes tile_base past 0x10000 — that is how the "BG cannot fetch from OBJ
-  # VRAM, render transparent" path gets exercised, in both depths.
+  # Exhaustive over screen_size x depth x character_base_block x every BGHOFS
+  # 0..511: BGHOFS selects x_in_tile for the leading partial span and where
+  # the 256/512 wrap lands in the line. character_base_block 3 (0xC000) plus
+  # a high tile_id pushes tile_base past 0x10000, exercising the "BG cannot
+  # fetch from OBJ VRAM, render transparent" path in both depths.
   for size in 0'u16 .. 3'u16:
     for eight in [false, true]:
       for cbb in 0'u16 .. 3'u16:
@@ -450,11 +381,9 @@ proc test_renderer(emu: GBA) =
           ppu.vcount = uint16(nxt() mod 160)
           render_three_ways(emu, bg, cov, bad_fast, bad_model)
 
-  # Mosaic. The horizontal mosaic pass runs AFTER the span loop and rewrites the
-  # line from its own output, so it can only be broken by the fast path writing
-  # the wrong bytes — but it is the interaction the change is most likely to be
-  # accused of, so it is swept: all 16 horizontal sizes x all 16 vertical sizes
-  # (EXHAUSTIVE over the MOSAIC register's BG fields), both depths.
+  # Mosaic: the horizontal pass runs after the span loop over its own output,
+  # so it can only break if the fast path wrote wrong bytes, but it is swept
+  # anyway: all 16 x 16 MOSAIC BG sizes, both depths.
   for h in 0'u16 .. 15'u16:
     for v in 0'u16 .. 15'u16:
       for eight in [false, true]:
@@ -515,12 +444,9 @@ proc test_renderer(emu: GBA) =
   check(card(cov.banks_seen) == 16, "all 16 palette banks were exercised")
   check(card(cov.screen_sizes_seen) == 4, "all four screen_size values were exercised")
 
-# --- 8bpp is untouched --------------------------------------------------------
-# The 8bpp branch of render_reg_bg is not modified by this change, so the
-# SWAR-vs-scalar diff above is necessarily vacuous for it — the two
-# instantiations share that source. What is NOT vacuous is 8bpp against the
-# independent model, which is what this asserts separately so a regression there
-# cannot hide inside the combined counters above.
+# The 8bpp branch is shared by both instantiations, so SWAR-vs-scalar is
+# vacuous for it; 8bpp against the independent model is asserted separately
+# so a regression there cannot hide in the combined counters.
 proc test_8bpp_unchanged(emu: GBA) =
   echo "8bpp output is unchanged (checked against the independent model)"
   let ppu = emu.ppu
@@ -554,15 +480,9 @@ proc test_8bpp_unchanged(emu: GBA) =
 # =============================================================================
 # PART 3 — the full 2^32 sweep, opt-in
 # =============================================================================
-#
-# DINGBAT_BG4_EXHAUSTIVE=1 sweeps EVERY 32-bit tile row against EVERY palette
-# bank and both flips: 2^32 x 16 x 2 = 1.37e11 comparisons. That is the entire
-# reachable input space of the fast path with nothing sampled and no appeal to
-# the carry argument. It takes roughly 20 minutes single-threaded on an M2 at
-# -d:danger, which is why it is not in CI.
-#
-# DINGBAT_BG4_SHARDS=n / DINGBAT_BG4_SHARD=i split the row space into n
-# contiguous ranges so it can be run across cores.
+# DINGBAT_BG4_EXHAUSTIVE=1: every 32-bit row x every bank x both flips,
+# 1.37e11 comparisons (~20 min single-threaded at -d:danger), so not in CI.
+# DINGBAT_BG4_SHARDS=n / DINGBAT_BG4_SHARD=i split the row space.
 proc test_exhaustive() =
   let shards = parseInt(getEnv("DINGBAT_BG4_SHARDS", "1"))
   let shard  = parseInt(getEnv("DINGBAT_BG4_SHARD", "0"))

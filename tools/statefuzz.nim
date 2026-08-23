@@ -1,24 +1,18 @@
-## Hostile-input fuzzer for the save-state loader.
+## Hostile-input fuzzer for the save-state loader. The FNV-1a payload hash is
+## an integrity check, not a security control, so mutants are re-sealed
+## (payload_len/payload_hash rewritten) to get past parse_state_payload and
+## into the per-subsystem readers.
 ##
-## The threat model is "a stranger's file": save states get shared, and the
-## format's FNV-1a payload hash is an INTEGRITY check, not a security
-## control — an attacker recomputes it trivially — so this fuzzer does exactly
-## that: mutate the payload, then rewrite payload_len/payload_hash so the
-## mutant sails through parse_state_payload and reaches the per-subsystem
-## readers, which is where the interesting code is.
-##
-## Two phases per iteration:
-##   1. load  — does apply_state_payload survive the mutant?
-##   2. run   — does the emulator survive N frames afterwards? A state that
-##              loads cleanly and then faults 3 frames later is the same bug.
+## Per iteration: load (does apply_state_payload survive?) then run N frames
+## (a state that loads and faults later is the same bug).
 ##
 ## Build (or `nimble statefuzz_build`):
 ##   nim c -d:test_harness -d:release --path:src -o:statefuzz tools/statefuzz.nim
 ##
-## The audit that matters is the SWEEP, which sets every payload byte in turn:
+## `sweep` sets every payload byte in turn and exits non-zero on any
+## uncontained Defect, so it is usable as a gate:
 ##   ./statefuzz roms/some.gb  sweep 255
 ##   ./statefuzz roms/some.gba sweep 255
-## It exits non-zero on any uncontained Defect, so it is usable as a gate.
 
 import std/[os, strutils, random, strformat]
 import dingbat/common/serialize
@@ -30,8 +24,7 @@ proc patch_le32(s: var string; pos: int; v: uint32) =
   for i in 0 .. 3: s[pos + i] = char(uint8(v shr (8 * i)))
 
 proc reseal(image: var string) =
-  ## Recompute payload_hash over the (mutated) payload, exactly as an attacker
-  ## would. payload_len is left alone unless the mutation changed the length.
+  ## Recompute payload_len/payload_hash over the mutated payload.
   let payload_len = image.len - STATE_HEADER_SIZE
   patch_le32(image, 24, uint32(payload_len))
   patch_le32(image, 28, fnv1a(image[STATE_HEADER_SIZE ..< image.len]))
@@ -64,10 +57,9 @@ when isMainModule:
   let is_gba = rom.splitFile().ext.toLowerAscii() in [".gba", ".bin"]
 
   if args[1] == "reject":
-    # Offer a file to the core and report WHICH refusal came back — the same
-    # classification each frontend turns into a sentence. Pair it with
-    # tools/make_bad_states.py, which builds one deliberately broken state per
-    # cause, to check that every sentence is still reachable by hand.
+    # Offer a file to the core and report which refusal came back (the
+    # classification each frontend turns into a sentence). Pairs with
+    # tools/make_bad_states.py.
     if args.len < 3:
       echo "usage: statefuzz <rom> reject <state-file>"
       quit 2
@@ -92,8 +84,7 @@ when isMainModule:
     quit(if ok: 0 else: 1)
 
   if args[1] == "dump":
-    # A pristine .state for this ROM, so tools/make_bad_states.py has something
-    # to corrupt without needing a frontend to have written one first.
+    # A pristine .state for this ROM, for tools/make_bad_states.py to corrupt.
     if args.len < 3:
       echo "usage: statefuzz <rom> dump <out.state> [frames]"
       quit 2
@@ -137,9 +128,8 @@ when isMainModule:
     base = e.state_bytes()
 
   if args[1] == "poke":
-    # Reproduce one sweep finding exactly: set payload byte `seed` to `post`.
-    # Built with --stacktrace:on this names the line that actually faults,
-    # which is what turns "offset 298 crashes" into "bound THIS field".
+    # Reproduce one sweep finding: set payload byte `seed` to `post`. Build
+    # with --stacktrace:on to get the faulting line.
     let off = STATE_HEADER_SIZE + seed
     var mutant = base
     mutant[off] = char(uint8(post and 0xFF))
@@ -165,11 +155,9 @@ when isMainModule:
     quit 0
 
   if sweep_mode:
-    # Systematic single-byte sweep: set EVERY payload byte in turn to `seed`
-    # (used as the byte value, default 0xFF) and see whether the loader — or
-    # the emulator four frames later — survives. This is the audit that answers
-    # "is a hostile file containable", because it visits every length, index
-    # and enum field in the format exactly once instead of hoping to hit one.
+    # Single-byte sweep: set every payload byte in turn to `seed` (the byte
+    # value, default 0xFF) and check the loader and four frames of emulation
+    # survive. Visits every length, index and enum field exactly once.
     let bval = char(uint8(seed and 0xFF))
     var bad = 0
     var refused = 0

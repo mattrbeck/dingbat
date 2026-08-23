@@ -1,12 +1,11 @@
 @ Input-timeline recorder (tests/dingbat_test.nim --mode=rollback).
 @
-@ A tiny, input-SENSITIVE ROM used to validate GGPO-style input rollback over
-@ the local 2-core link. It samples KEYINPUT in a tight loop and folds each
-@ sample together with a monotonic counter, so the final accumulator depends on
-@ WHICH iterations each button was held — i.e. the exact input TIMELINE, not
-@ just the set of buttons. That is precisely the property a rollback must
-@ preserve: predicting the peer's input wrong and later rolling back + replaying
-@ the corrected input must reproduce the same accumulator as knowing it upfront.
+@ Input-SENSITIVE ROM for validating input rollback over the local 2-core
+@ link: it samples KEYINPUT in a tight loop and folds each sample with a
+@ monotonic counter, so the final accumulator depends on WHICH iterations
+@ each button was held — the input TIMELINE, not just the set of buttons.
+@ A rollback + replay of corrected input must reproduce the same
+@ accumulator as knowing it upfront.
 @
 @ EWRAM: 0x02000000 = accumulator (fold of key*counter), 0x02000004 = counter.
 @ No SIO — the two cores run independently, each driven by its own player's

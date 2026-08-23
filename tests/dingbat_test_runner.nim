@@ -3,9 +3,8 @@ import zippy/ziparchives
 import png_reader
 
 let RomCacheDir =
-  # CI sets DINGBAT_ROM_CACHE to a stable, actions/cache-backed path so the test
-  # ROMs survive between runs (no re-download, no per-run network dependency).
-  # Locally it falls back to a temp dir.
+  # CI points DINGBAT_ROM_CACHE at an actions/cache-backed dir so the ROMs
+  # survive between runs; locally a temp dir.
   block:
     let env = getEnv("DINGBAT_ROM_CACHE")
     if env.len > 0: env
@@ -23,36 +22,23 @@ type
     mode: TestMode
     timeout: int
     expected_png: string  # for screenshot mode
-    alt_pngs: seq[string] # screenshot mode: additional references that are
-                          # ALSO a pass. Hardware itself is non-deterministic
-                          # for a few tests (daid's ppu_scanline_bgp ships
-                          # three legitimate DMG outcomes), so the verdict is
-                          # "matches any listed reference", not "matches one".
+    alt_pngs: seq[string] # screenshot mode: references that are ALSO a pass
+                          # (daid's ppu_scanline_bgp has three legitimate DMG
+                          # outcomes)
     expected_hash: string # screenshot mode, alternative to expected_png:
                           # FNV-1a of the PPM, for ROMs that ship no reference
                           # image (see build_jsmolka_tests)
-    grey_tolerance: int   # screenshot mode. 0 (the default) = every pixel must
-                          # match the reference exactly, which is right for
-                          # every suite that ships raw framebuffer dumps.
-                          # Above 0, the comparison instead converts both sides
-                          # to luma and allows that much difference per pixel —
-                          # the gbdev shootout's own `compareImage` rule, and
-                          # the only honest way to score ITS reference images,
-                          # which are screen captures of a running emulator
-                          # rather than framebuffer dumps and so carry that
-                          # emulator's CGB colour correction. Measured: their
-                          # green is #009100, which the raw 5-to-8-bit
-                          # expansion `(X<<3)|(X>>2)` cannot even produce (it
-                          # emits #00CE00 for that channel value). Exact
-                          # matching would mark a correct frame wrong, so the
-                          # suite's own tolerance is the mechanism to copy.
+    grey_tolerance: int   # screenshot mode. 0 = exact match (right for raw
+                          # framebuffer dumps). >0 = 8-bit luma per pixel
+                          # within this tolerance, the gbdev shootout's own
+                          # `compareImage` rule: its references are emulator
+                          # screen captures carrying CGB colour correction
+                          # (#009100, which (X<<3)|(X>>2) cannot produce).
     color: bool           # true = RGB comparison, false = greyscale
     cgb: bool             # force CGB mode (DMG cart on CGB hardware tests)
-    dmg: bool             # force DMG mode (--dmg) for a row whose cart carries a
-                          # CGB header but whose suite verified it on a DMG. The
-                          # cart header is the default device everywhere else;
-                          # this is the per-row override for the rows where the
-                          # suite's own howto names the hardware instead.
+    dmg: bool             # force DMG mode (--dmg): the cart header picks the
+                          # device by default; this is for rows whose suite
+                          # names the hardware instead.
     sgb: bool             # run the cart in a Super Game Boy (--sgb)
     model: string         # mooneye per-model boot table (--model=...); "" = default
     no_save: bool         # blank cart RAM + detach the .sav (battery-backed ROMs)
@@ -68,9 +54,8 @@ type
     passed: bool
     output: string
     timed_out: bool
-    always_detail: bool  # keep `output` in results.md even when the row passes
-                         # (aggregated rows carry their pass COUNT there, and
-                         # the count is what the regression gate compares)
+    always_detail: bool  # keep `output` in results.md even on a pass
+                         # (aggregated rows carry their pass COUNT there)
     device: string       # what lands in the results.md Device column: the
                          # hardware the row was scored on ("" renders as an
                          # em-dash, used for the GBA suites)
@@ -101,13 +86,9 @@ proc has_rom_files(dir: string): bool =
   false
 
 proc download_file(url, path: string) =
-  ## Fetch `url` to `path`, retrying transient network failures. CI runners
-  ## intermittently fail to reach github.com (curl exit 28, "Failed to connect
-  ## ... after 21015 ms"), which used to abort the whole suite and fail dozens of
-  ## unrelated ROM tests. --retry-all-errors makes curl itself ride those out
-  ## (connection errors included, not just HTTP 5xx); --fail avoids saving an
-  ## error page as a ROM. A genuine outage still fails hard, but only after the
-  ## retries are exhausted.
+  ## Fetch `url` to `path`. curl retries transient failures itself
+  ## (--retry-all-errors covers connection errors, not just HTTP 5xx); --fail
+  ## keeps an error page from being saved as a ROM.
   let cmd = "curl -L --fail --show-error --silent " &
     "--retry 5 --retry-all-errors --retry-delay 3 " &
     "--connect-timeout 30 --max-time 600 " &
@@ -190,10 +171,9 @@ proc read_ppm_rgb(path: string): seq[uint8] =
   pixels
 
 proc ensure_rom_download(url, filename: string; expect_sha = ""): string =
-  ## Download a single ROM file if not already cached. When expect_sha is given
-  ## the cached file's SHA-1 is checked against it and a mismatch is reported —
-  ## for a URL that tracks "latest" this is what keeps a new upstream build from
-  ## silently re-baselining a whole suite while looking like an emulator change.
+  ## Download a ROM if not cached. With expect_sha the cached file's SHA-1 is
+  ## checked and a mismatch reported, so a URL that tracks "latest" cannot
+  ## silently re-baseline a suite while looking like an emulator change.
   let path = RomCacheDir / filename
   if not fileExists(path):
     echo &"Downloading {filename}..."
@@ -249,8 +229,8 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
     if run_code != 0:
       return TestResult(name: test.name, passed: false, output: run_output.strip())
     if test.expected_hash.len > 0:
-      # No reference image ships with these ROMs, so the gate is a pinned hash
-      # of the rendered frame (see build_jsmolka_tests for where it came from).
+      # No reference image ships with these ROMs; the gate is a pinned frame
+      # hash (build_jsmolka_tests).
       var h = 0xCBF29CE484222325'u64
       for c in readFile(tmp_ppm):
         h = (h xor uint64(uint8(c))) * 0x100000001B3'u64
@@ -262,35 +242,18 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
         output: if got == test.expected_hash: "frame hash " & got
                 else: &"frame hash {got}, expected {test.expected_hash}",
       )
-    # Read actual pixels from PPM
     let actual = if test.color: read_ppm_rgb(tmp_ppm) else: read_ppm_greyscale(tmp_ppm)
     removeFile(tmp_ppm)
     proc score_against(png_path: string): tuple[matched, total: int, err: string] =
       ## Pixels matching `png_path`, or a non-empty `err` if it is unusable.
-      ##
-      ## `--color` sets the *capture* format, but the reference decides the
-      ## comparison. Reference sets really do mix PNG formats within one suite —
-      ## daid's three legitimate `ppu_scanline_bgp` outcomes are two truecolour
-      ## images and one indexed, and mealybug's `_cgb_c` set mixes indexed with
-      ## 1-bit greyscale, because a frame that came out black-and-white was
-      ## saved as such. So both sides are brought to a common channel count
-      ## before any comparison runs; every reference here stores greys as
-      ## R=G=B, so nothing is lost.
-      ##
-      ## Note which side moves in the colour-vs-greyscale case: the REFERENCE
-      ## is widened to RGB, rather than the capture being narrowed to its R
-      ## channel. That keeps all three channels under test, so a frame that is
-      ## actually coloured is a real mismatch instead of passing on R alone.
-      ## Without this branch at all, a colour capture against a greyscale
-      ## reference fails as an opaque "size mismatch", which the results writer
-      ## drops as an unrecognised detail string — a silently blank row, and a
-      ## blank row reads as a pass at a glance. Seven of mealybug's `_cgb_c`
-      ## references are 1-bit greyscale and hit exactly this.
+      ## `--color` sets the capture format; the reference decides the
+      ## comparison, since suites mix PNG formats (mealybug `_cgb_c` has 1-bit
+      ## greyscale files). A greyscale reference is widened to RGB rather than
+      ## the capture narrowed to R, so a wrongly coloured frame still fails.
       var expected = read_png(png_path)
       if not test.color and expected.channels == 3:
-        # Greyscale capture vs RGB reference (e.g. mooneye's
-        # sprite_priority-dmg.png stores grey shades as R=G=B truecolor):
-        # collapse the reference to one byte per pixel via the R channel.
+        # Greyscale capture vs RGB reference (mooneye's sprite_priority-dmg.png
+        # stores greys as R=G=B truecolor): collapse the reference to R.
         var grey = newSeq[uint8](expected.pixels.len div 3)
         for i in 0 ..< grey.len:
           grey[i] = expected.pixels[i * 3]
@@ -311,10 +274,8 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
       let total_pixels = actual.len div bytes_per_pixel
       var diff_count = 0
       if test.grey_tolerance > 0:
-        # The shootout's own criterion (util.py `compareImage`): convert both
-        # frames to 8-bit luma and accept while every pixel is within a
-        # tolerance. See `grey_tolerance` on TestDef for why these references
-        # need it.
+        # The shootout's own rule (util.py `compareImage`): 8-bit luma per
+        # pixel within a tolerance. See `grey_tolerance` on TestDef.
         proc luma(p: openArray[uint8]; base, n: int): int =
           if n == 1: int(p[base])
           else: (299 * int(p[base]) + 587 * int(p[base + 1]) +
@@ -325,7 +286,6 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
                  luma(expected.pixels, base, bytes_per_pixel)) > test.grey_tolerance:
             inc diff_count
       else:
-        # Count differing pixels (for RGB, compare 3 bytes at a time)
         for px in 0 ..< total_pixels:
           let base = px * bytes_per_pixel
           var differs = false
@@ -386,20 +346,17 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
       cmd.add(" --bb-breakpoint")
     if test.screen_check:
       cmd.add(" --screen-check")
-    # fuzzarm writes its per-failure triage to stderr and one summary line to
-    # stdout. execCmdEx only ever reads the child's stdout pipe, so stderr must
-    # be merged in: unread, it is both lost and a deadlock waiting to happen
-    # once the triage outgrows the pipe buffer (500 failures is ~100 KB).
+    # fuzzarm writes its triage to stderr. execCmdEx reads only stdout, so
+    # stderr must be merged: unread, it is lost and deadlocks once the triage
+    # outgrows the pipe buffer (500 failures is ~100 KB).
     let opts = if test.mode == tmFuzzArm: {poUsePath, poStdErrToStdOut}
                else: {poUsePath}
     let (output, code) = execCmdEx(cmd, options = opts)
     var text = output.strip()
     if test.mode == tmFuzzArm:
-      # Keep only the "FUZZARM: " verdict for results.md — the triage would
-      # otherwise become a multi-line table cell. Match on the marker, not on
-      # position: the two streams interleave unpredictably once merged. Echo
-      # everything else when the ROM failed, so what broke lands in the
-      # runner's log where a CI failure can actually be read.
+      # Keep only the "FUZZARM: " verdict for results.md. Match on the marker,
+      # not position: the merged streams interleave unpredictably. Echo the
+      # rest on failure so the triage lands in the runner's log.
       const Marker = "FUZZARM: "
       var verdict = ""
       for line in text.splitLines():
@@ -411,10 +368,8 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
           if s.len > 0 and not s.startsWith(Marker): echo line
       if verdict.len > 0: text = verdict
     if test.mode == tmMicrotest:
-      # Keep only the one line that carries the $FF80/$FF81/$FF82 triple: it is
-      # what makes a failing row actionable in results.md, and a verdict of
-      # 0x00 (the ROM never wrote one) reads very differently from 0xFF (the
-      # ROM ran and reported a mismatch).
+      # Keep only the $FF80/$FF81/$FF82 line: a verdict of 0x00 (never
+      # written) reads very differently from 0xFF (ran and mismatched).
       for line in text.splitLines():
         if line.startsWith("MICROTEST actual"):
           text = line[len("MICROTEST ") .. ^1]
@@ -437,11 +392,9 @@ proc build_blargg_tests(repo_dir: string): seq[TestDef] =
         rom_path: rom,
         mode: tmSerial,
         timeout: 1800,
-        # These eleven are the runner's only GB rows that run a whole ROM to a
-        # verdict with nothing looking at the screen at all, which is how a PPU
-        # change that blanked or wedged the panel could once merge green. The
-        # check is weak on purpose; the reason it cannot assert the text is in
-        # tests/README.md.
+        # The only GB rows that run a whole ROM to a verdict with nothing
+        # looking at the screen. Deliberately weak: tests/README.md explains
+        # why blargg's on-screen text is not an oracle.
         screen_check: true,
       ))
   let instr_timing = repo_dir / "instr_timing" / "instr_timing.gb"
@@ -462,39 +415,19 @@ proc build_blargg_tests(repo_dir: string): seq[TestDef] =
         mode: tmSerial,
         timeout: 1800,
       ))
-  # The rest of the bundled Blargg suites. They all report through the newer
-  # framework's SRAM protocol that tmSram already reads ($A000 status byte +
-  # "DEB061" signature + text), so wiring them up is just naming the paths.
-  #
-  # oam_bug wants ~21 emulated seconds per the suite howto (~1260 frames) —
-  # hence the larger timeout. It only costs anything for a ROM that never
-  # reports, since tmSram stops the moment the status byte lands.
-  #
-  # oam_bug also has to run on a DMG, and its carts do not say so: all eight
-  # carry $0143 = $80, so the header-picks-the-device default runs them on a
-  # CGB. The suite names the hardware instead — blargg's `readme.txt` opens
-  # with "Verifies OAM corruption bug on DMG", the bundle's
-  # `blargg/game-boy-test-roms-howto.md` lists `oam_bug` in its DMG-C table and
-  # in NEITHER CGB one, and the shootout's `blargg.py` marks only
-  # `interrupt_time` as `model=CGB`, so every other blargg row there is a DMG
-  # row. The bug is DMG silicon (Pan Docs: "Game Boy Color and Advance are not
-  # affected by this bug, even when running monochrome software"), which the
-  # core models by gating on the console, so on the CGB these rows were being
-  # scored against hardware that cannot pass them.
+  # The remaining Blargg suites report through the SRAM protocol tmSram reads.
+  # oam_bug wants ~21 emulated seconds (suite howto). Its carts carry
+  # $0143 = $80, but the bug is DMG silicon (Pan Docs: CGB and AGB are not
+  # affected) and the howto lists oam_bug only in its DMG table, so the rows
+  # are forced --dmg rather than left to the header.
   for (subdir, secs) in [("oam_bug", 21), ("mem_timing-2", 4)]:
     let singles = repo_dir / subdir / "rom_singles"
     if not dirExists(singles): continue
     for rom in find_roms(singles, ".gb"):
-      # Standalone 7-timing_effect is a broken BUILD, not a hard test: its
-      # verbose per-timing output overruns the $A004..$BFFF text window into
-      # the $C000 copy of its own code (the standalone builds copy themselves
-      # to WRAM; the combined ROM runs from ROM and is immune), so it blanks
-      # out before ever writing a result block. Confirmed unreportable on a
-      # real DMG (Docheinstein/docboy#33, Everdrive X7: "stucks with a blank
-      # screen there as well"), and the shootout's blargg.py comments it out
-      # as "This test is broken." The same test logic is scored through the
-      # combined oam_bug.gb row below, which reports 07:ok against the same
-      # $7D792E7C CRC.
+      # Standalone 7-timing_effect is a broken build: its verbose output
+      # overruns the $A004..$BFFF text window into the $C000 copy of its own
+      # code and it never reports, on real DMG hardware too
+      # (Docheinstein/docboy#33). Test 7 is scored via the combined ROM below.
       if subdir == "oam_bug" and rom.splitFile().name == "7-timing_effect":
         continue
       tests.add(TestDef(
@@ -504,9 +437,8 @@ proc build_blargg_tests(repo_dir: string): seq[TestDef] =
         timeout: max(1800, secs * 70),
         dmg: subdir == "oam_bug",
       ))
-  # The combined oam_bug.gb: same eight tests, but built NO_COPY (runs from
-  # ROM), which is what makes test 7 reportable at all — see the skip above.
-  # Runs in well under its budget because tmSram stops on the status byte.
+  # The combined oam_bug.gb is built NO_COPY (runs from ROM), which is what
+  # makes test 7 reportable.
   let oam_bug_all = repo_dir / "oam_bug" / "oam_bug.gb"
   if fileExists(oam_bug_all):
     tests.add(TestDef(
@@ -524,12 +456,8 @@ proc build_blargg_tests(repo_dir: string): seq[TestDef] =
       mode: tmSram,
       timeout: 1800,
     ))
-  # interrupt_time is a CGB-only ROM (the howto records DMG-C failing it with
-  # checksum 7F8F4AAF: "this is a CGB-only rom, so failure was expected"), so
-  # it runs on a CGB. `cgb = true` is belt-and-braces, not a correction: the
-  # cart carries $0143 = $C0 (CGB EXCLUSIVE, verified 2026-08-21), so the
-  # header already picks a CGB. An earlier version of this comment called the
-  # cart DMG-flagged; it is not, and neither is cgb_sound's.
+  # interrupt_time is CGB-only (the howto records DMG-C failing it). The cart
+  # is $0143 = $C0, so `cgb = true` only restates what the header picks.
   let interrupt_time = repo_dir / "interrupt_time" / "interrupt_time.gb"
   if fileExists(interrupt_time):
     tests.add(TestDef(
@@ -542,22 +470,10 @@ proc build_blargg_tests(repo_dir: string): seq[TestDef] =
   tests
 
 proc build_blargg_sound_tests(sound_dir, suite: string; cgb: bool): seq[TestDef] =
-  ## blargg's dmg_sound / cgb_sound APU suites (rom_singles). Unlike cpu_instrs
-  ## these print nothing to the serial port: they report through the newer
-  ## framework's SRAM protocol ($A000 status byte + "DEB061" signature + text),
-  ## which is what tmSram reads. cgb_sound asserts CGB APU behavior and runs on
-  ## a CGB (cgb = true); its carts are $0143 = $C0, CGB-exclusive, so that flag
-  ## agrees with the header rather than overriding it. dmg_sound's are $00 and
-  ## the flag agrees there too, but it is still forced (`dmg = true`) rather
-  ## than left to the cart header after the oam_bug lesson: the suite names the
-  ## hardware, the header does not. Part of the default run; --apu runs only
-  ## the APU suites.
-  ##
-  ## The revision matters here and the suite's own howto says which one:
-  ## `cgb_sound` is ❌ on CPU CGB B ("test case 3 fails with code 04") and ✅ on
-  ## CGB C and CGB E. dingbat runs the default grCgbC and scores 12/12; forced
-  ## onto CGB-AB it scores 11/12 and the row it drops is `03-trigger`, which is
-  ## that howto entry reproduced (measured 2026-08-21).
+  ## blargg's dmg_sound / cgb_sound (rom_singles), reporting through the SRAM
+  ## protocol tmSram reads. The suite names the hardware, so the device is
+  ## forced rather than left to the header. The howto records cgb_sound
+  ## failing on CPU CGB B (03-trigger) and passing on C and E.
   var tests: seq[TestDef]
   let singles = sound_dir / "rom_singles"
   if not dirExists(singles):
@@ -576,42 +492,12 @@ proc build_blargg_sound_tests(sound_dir, suite: string; cgb: bool): seq[TestDef]
   tests
 
 proc samesuite_model_for(base: string): string =
-  ## SameSuite names its per-revision ROMs the way mooneye and AGE do: a
-  ## trailing `-<devices>` token listing the revisions the ROM's own
-  ## `CorrectResults` table was taken on — `channel_1_extra_length_clocking-cgb0B`,
-  ## `channel_3_extra_length_clocking-cgb0` / `-cgbB`,
-  ## `channel_1_freq_change_timing-A` / `-cgb0BC` / `-cgbDE`. EIGHT of the 70
-  ## APU ROMs carry one.
-  ##
-  ## Without this the runner scores every one of them on the default revision,
-  ## where most of them CANNOT pass by construction: `-cgb0B` asserts the
-  ## extra-length-clocking rule that CPU CGB C fixed, so a green default row
-  ## would mean the default was wrong. Passing the token through to
-  ## `--model=` is what makes "this ROM passes on revision X" expressible; the
-  ## harness resolves it with the same gb_revision_from_name the emulator uses.
-  ##
-  ## `gb_revision_from_name` resolves a RANGE to its highest member, and that
-  ## policy was checked here by measurement on 2026-08-21 — every one of these
-  ## eight run on all six CGB revisions:
-  ##
-  ##   channel_{1,2,4}_extra_length_clocking-cgb0B  pass at cgb0 AND cgbAB only
-  ##   channel_3_extra_length_clocking-cgb0         pass at cgb0 only
-  ##   channel_3_extra_length_clocking-cgbB         pass at cgbAB only
-  ##   channel_1_freq_change_timing-A               pass on ALL SIX
-  ##   channel_1_freq_change_timing-cgb0BC          fail on ALL SIX
-  ##   channel_1_freq_change_timing-cgbDE           fail on ALL SIX
-  ##
-  ## So the `-cgb0B` -> grCgbAB choice is right (AB is where the ROM's claim
-  ## still holds, and it is the newest such revision), and the `-cgb0`/`-cgbB`
-  ## pair is exactly why "highest member" must not collapse to grCgb0. The two
-  ## red `freq_change_timing` rows are NOT a token problem: `-cgb0BC` already
-  ## resolves to grCgbC, which IS the default, and no revision reaches either
-  ## row. dingbat produces the AGB answer on every machine because nothing in
-  ## `GbQuirks` distinguishes the CGB families' PCM12 duty edge from the AGB's.
-  ##
-  ## Only tokens after the LAST '-' are considered, and only if they look like
-  ## a device list, so `channel_1_freq_change` (no suffix) and
-  ## `div_write_trigger_10` are left on the default.
+  ## SameSuite's trailing `-<devices>` token (`-cgb0B`, `-cgbDE`, `-A`), passed
+  ## through to `--model=` so a ROM is scored on a revision its CorrectResults
+  ## table was taken on. gb_revision_from_name resolves a range to its highest
+  ## member, which is right here: the `-cgb0B` rows pass at cgb0 and cgbAB
+  ## only, and `-cgb0` / `-cgbB` must stay distinct. Only a token after the
+  ## LAST '-' that looks like a device list counts.
   if '-' notin base: return ""
   let tok = base.rsplit('-', maxsplit = 1)[1]
   if tok.len == 0: return ""
@@ -622,37 +508,12 @@ proc samesuite_model_for(base: string): string =
   ""
 
 proc build_samesuite_apu_tests(samesuite_dir: string): seq[TestDef] =
-  ## SameSuite's sample-accurate APU tests. They signal the verdict with
-  ## mooneye's magic LD B,B breakpoint (registers = fibonacci 3/5/8/13/21/34 on
-  ## pass), so tmMooneye reads them as-is. Every one of them samples the CGB-only
-  ## PCM12/PCM34 registers, so they all run on CGB hardware (per the suite's
-  ## README, pre-CGB devices only pass the div_write_trigger pair). Opt-in, see
-  ## --apu in main().
-  ##
-  ## The DEFAULT for this sub-suite is CPU CGB E, not the tree's default CGB C,
-  ## and `same-suite/apu/README.md` is why -- it states the per-revision result
-  ## outright:
-  ##
-  ##   * CPU-CGB-C - passes the channel 3 tests and non-channel-specific tests.
-  ##     Most other tests fail (see To Do)
-  ##   * CPU-CGB-D - passes all tests, except `channel_1_sweep_restart_2`
-  ##   * CPU-CGB-E - passes all tests
-  ##
-  ## and names the cause in its To Do list: "A quirk in CPU-CGB revisions C and
-  ## older makes registers PCM12 and PCM34 report a glitched PCM amplitude for
-  ## channels 1, 2 and 4 if they're read in the same M-cycle they change. ...
-  ## This quirk is what causes tests testing those channels fail."
-  ##
-  ## dingbat models that quirk (GbQuirks.pcm_read_edge_zero), so scoring these
-  ## on CGB C now asks 21 of them a question their tables were not captured to
-  ## answer, exactly the way `channel_1_extra_length_clocking-cgb0B` would be
-  ## asked the wrong question on the default. Measured 2026-08-21 over the whole
-  ## 70 ROM x 6 revision grid (each ROM's own `$CFFE` verdict byte, dingbat
-  ## against SameBoy): 375 of the 420 verdicts agree, and in particular BOTH
-  ## emulators fail channel_1's and channel_2's align, delay, duty, restart,
-  ## stop, sweep and freq_change on CGB 0, A/B and C and pass every one of them
-  ## on CGB D, E and AGB. See docs/gb-failure-triage.md for the 45 that differ.
-  ## The filename tokens keep overriding this for the eight ROMs that carry one.
+  ## SameSuite's sample-accurate APU tests: mooneye LD B,B + Fibonacci verdict,
+  ## all CGB (they read PCM12/PCM34). The default revision is CPU CGB E, not
+  ## the tree's CGB C: `same-suite/apu/README.md` states CGB C fails most
+  ## channel 1/2/4 tests through the PCM12/34 same-M-cycle read glitch
+  ## (GbQuirks.pcm_read_edge_zero) and D/E pass all. A filename device token
+  ## still overrides. Opt-in via --apu, see main().
   var tests: seq[TestDef]
   let apu_dir = samesuite_dir / "apu"
   if not dirExists(apu_dir):
@@ -672,21 +533,10 @@ proc build_samesuite_apu_tests(samesuite_dir: string): seq[TestDef] =
   tests
 
 proc build_samesuite_core_tests(samesuite_dir: string): seq[TestDef] =
-  ## SameSuite's non-APU groups: `dma` (4), `ppu` (1) and `interrupt` (1).
-  ## They come down in the same game-boy-test-roms bundle as the APU half and
-  ## use the same mooneye LD B,B + Fibonacci verdict, so they cost nothing to
-  ## fetch and nothing to interpret — they were simply never wired up, because
-  ## `build_samesuite_apu_tests` globs only `apu/`.
-  ##
-  ## Unlike the APU half these are NOT sample-accurate audio tests, so they
-  ## belong in the default run rather than behind --apu. All of them are CGB
-  ## (GBC HDMA/GDMA, CGB palette-index blocking, CGB interrupt timing).
-  ##
-  ## `sgb/` is the exception: those two ROMs test the Super Game Boy packet
-  ## protocol, so they name a DEVICE the way the shootout does and run with
-  ## --sgb rather than --cgb (an SGB has no CGB in it, and a CGB ignores the
-  ## packet stream, so scoring them on a CGB would score a different machine —
-  ## the same reason the AGE `ncm*` (CGB-in-non-CGB-mode) images are skipped).
+  ## SameSuite's dma/ppu/interrupt groups (same LD B,B verdict), all CGB and
+  ## in the default run. `sgb/` tests the SGB packet protocol and runs --sgb:
+  ## a CGB ignores the packet stream, so scoring it there would score a
+  ## different machine.
   var tests: seq[TestDef]
   for group in ["dma", "ppu", "interrupt", "sgb"]:
     let dir = samesuite_dir / group
@@ -706,13 +556,9 @@ proc build_samesuite_core_tests(samesuite_dir: string): seq[TestDef] =
   tests
 
 proc mooneye_model_for(base: string): string =
-  ## The boot_regs/boot_div/boot_hwio ROMs each target one specific hardware
-  ## revision, encoded as the filename suffix after the last '-' (e.g.
-  ## boot_regs-mgb, boot_div-S, misc/boot_regs-A). Map that suffix to the
-  ## harness --model flag so the right boot table is applied. Only boot_* ROMs
-  ## are model-scoped; everything else uses the default boot state. The
-  ## default-model suffixes (dmgABC, dmgABCmgb, cgb, cgbABCDE, C) are left
-  ## unmapped so their long-standing passing behavior is untouched.
+  ## boot_* ROMs name one hardware revision as the suffix after the last '-'
+  ## (boot_regs-mgb, boot_div-S); map it to --model. The default-model
+  ## suffixes (dmgABC, dmgABCmgb, cgb, cgbABCDE, C) stay unmapped.
   if not base.startsWith("boot_") or '-' notin base:
     return ""
   case base.rsplit('-', maxsplit = 1)[1]
@@ -726,39 +572,18 @@ proc mooneye_model_for(base: string): string =
   else: ""
 
 proc is_cgb_model(m: string): bool =
-  ## Which --model tokens name a machine that boots as a CGB. AGB/AGS are CGB
-  ## silicon in a different package (the suite's README says so outright), so
-  ## they run with --cgb like any other.
+  ## --model tokens that boot as a CGB. AGB/AGS are CGB silicon in another
+  ## package (suite README), so they run with --cgb.
   m.startsWith("cgb") or m == "agb" or m == "ags"
 
 proc mooneye_machines_for(base: string): seq[string] =
-  ## Every `--model` a mooneye/wilbertpol ROM's own filename says it should pass
-  ## on. Straight out of the suite's README.markdown, "Test naming":
-  ##
-  ##     G = dmg+mgb    S = sgb+sgb2    C = cgb+agb+ags    A = agb+ags
-  ##     "a test with GS in the name is expected to pass on dmg+mgb+sgb+sgb2"
-  ##
-  ## so a group token is the UNION of its letters and every member deserves a
-  ## run. Before this, all nine of Gekkio's `-GS` ROMs and all seventeen of
-  ## wilbertpol's scored on exactly one machine (the default DMG-ABC), and the
-  ## MGB/SGB/SGB2 thirds of the claim were never checked at all.
-  ##
-  ## Revisions fan out only where the FILENAME names revisions — `cgbABCDE`
-  ## becomes four rows, `dmgABCmgb` becomes two. A token that names only a
-  ## model (`cgb`, or the `C` group) gets ONE representative revision, the
-  ## default CGB-C, because the ROM is not making a per-revision claim for a
-  ## row to check. That line was drawn by measurement, not taste: fanning `C`
-  ## across all four modelled CGB revisions was tried on 2026-08-19 and every
-  ## one of the seventeen `-C` tests returned the same verdict on all four,
-  ## for 51 extra rows and no information — while the ONE thing that fan-out
-  ## did find (`misc/boot_hwio-C` passing on CGB and failing on AGB) is a
-  ## MODEL difference that the cgb+agb pair still catches.
-  ##
-  ## Revision 0 is never in a fan-out: the suite treats it as its own machine
-  ## and ships separate `-dmg0`/`-cgb0` ROMs precisely because it diverges.
-  ##
-  ## `ags` collapses into `agb` — same SoC in a different package, again per the
-  ## README — rather than inventing a machine dingbat does not model.
+  ## Every `--model` a mooneye/wilbertpol ROM's filename claims (README, "Test
+  ## naming": G = dmg+mgb, S = sgb+sgb2, C = cgb+agb+ags, A = agb+ags; a group
+  ## token is the union of its letters). Revisions fan out only where the
+  ## name lists them (`cgbABCDE` -> four rows); a bare model token gets one
+  ## representative revision, the default CGB-C, since the ROM makes no
+  ## per-revision claim. Revision 0 is never in a fan-out: the suite ships
+  ## separate `-dmg0`/`-cgb0` ROMs. `ags` folds into `agb` (same SoC).
   if '-' notin base:
     return @[]
   let tok = base.rsplit('-', maxsplit = 1)[1]
@@ -797,17 +622,12 @@ proc build_mooneye_tests(roms_dir: string): seq[TestDef] =
   for rom in find_roms_recursive(mooneye_dir, ".gb"):
     let rel = rom.relativePath(mooneye_dir)
     let name = "mooneye/" & rel.changeFileExt("")
-    # utils/ holds tools, not tests — the same skip the wilbertpol builder
-    # makes. `bootrom_dumper` waits for a boot ROM to dump and can only ever
-    # time out (docs/gb-failure-triage.md calls it unrecoverable), and
-    # `dump_boot_hwio` is the opposite trap: it ends in `quit_dump_mem`, which
-    # sets the success byte `ld d, $00` unconditionally, so its green row was
-    # a gate that could not fail. Both are recorded in NotScored.
+    # utils/ holds tools, not tests: bootrom_dumper can only time out and
+    # dump_boot_hwio sets the success byte unconditionally. Both in NotScored.
     if rel.startsWith("utils"):
       continue
-    # manual-only/sprite_priority has no serial pass/fail signal — mooneye
-    # ships a reference image instead. Run it as a screenshot comparison
-    # against the bundled DMG reference (same convention as mealybug/acid2).
+    # sprite_priority has no serial verdict; mooneye ships a DMG reference
+    # image, so it is a screenshot row like mealybug/acid2.
     if rel == "manual-only" / "sprite_priority.gb":
       tests.add(TestDef(
         name: name,
@@ -817,13 +637,9 @@ proc build_mooneye_tests(roms_dir: string): seq[TestDef] =
         expected_png: rom.parentDir / "sprite_priority-dmg.png",
       ))
       continue
-    # madness/mgb_oam_dma_halt_sprites is the suite's other screenshot ROM: it
-    # ships `mgb_oam_dma_halt_sprites_expected.png` beside it and targets an
-    # MGB, so scoring it as a serial test on a default DMG was wrong twice and
-    # produced nothing but a 1800-frame timeout. Same treatment as the
-    # wilbertpol fork's row of the same name — the two bundles' ROMs are NOT
-    # byte-identical (md5s differ), though their expected PNGs are, so both
-    # rows are legitimate and they happen to agree today.
+    # The suite's other screenshot ROM: ships `_expected.png` beside it and
+    # targets an MGB. The wilbertpol bundle's ROM of the same name differs
+    # (md5) but shares the reference, so both rows are legitimate.
     if rel == "madness" / "mgb_oam_dma_halt_sprites.gb":
       tests.add(TestDef(
         name: name,
@@ -831,25 +647,12 @@ proc build_mooneye_tests(roms_dir: string): seq[TestDef] =
         mode: tmScreenshot,
         timeout: 120,
         expected_png: rom.parentDir / "mgb_oam_dma_halt_sprites_expected.png",
-        # Its reference PNG uses a DIFFERENT grey ramp from every other
-        # mooneye reference: 255/176/104 where `sprite_priority-dmg.png` (and
-        # dingbat, and the rest of the suite) use 255/170/85. Compared exactly,
-        # all 23023 non-white pixels count as wrong and the row reports 0.1%,
-        # which is badly misleading triage. The tolerance has to absorb the
-        # ramp and nothing else, so it is bounded from BOTH sides and every
-        # bound is a measured number:
-        #
-        #   shade 0  255 vs 255   delta  0
-        #   shade 1  176 vs 170   delta  6
-        #   shade 2  104 vs  85   delta 19   <- the objects this row is about
-        #
-        # and the reference's own smallest step between two DIFFERENT shades is
-        # 176 - 104 = 72. So any tolerance in [19, 71] is exactly shade-index
-        # equality on these two ramps, and 32 sits in the middle of it. 8 was
-        # BELOW the shade-2 offset: it absorbed the checkerboard and then
-        # scored a correctly drawn object as 18 wrong pixels, which is the same
-        # count a MISSING object scores and is why the row read as unchanged
-        # while the model under it changed completely.
+        # This reference uses grey ramp 255/176/104 where the rest of mooneye
+        # (and dingbat) use 255/170/85; compared exactly every non-white pixel
+        # is wrong. Shade deltas are 0/6/19 and the ramp's smallest step is
+        # 72, so any tolerance in [19, 71] is shade-index equality; 32 is
+        # mid-band (8 was below the shade-2 delta and scored correct objects
+        # as wrong).
         grey_tolerance: 32,
         model: "mgb",
       ))
@@ -868,11 +671,8 @@ proc build_mooneye_tests(roms_dir: string): seq[TestDef] =
         model: mooneye_model_for(base),
       ))
     else:
-      # One row per machine the filename claims. The device comes from the
-      # TOKEN, not the directory: every ROM under Gekkio's misc/ carries a
-      # CGB/AGB suffix anyway, so this agrees with the old `startsWith("misc")`
-      # on all eight of them while also being right for the fork below, whose
-      # misc/ mixes SGB and MGB ROMs in with the CGB ones.
+      # One row per machine the TOKEN names, not the directory: the
+      # wilbertpol fork's misc/ mixes SGB and MGB ROMs in with CGB ones.
       for m in machines:
         tests.add(TestDef(
           name: name & (if machines.len > 1: "@" & m else: ""),
@@ -885,40 +685,11 @@ proc build_mooneye_tests(roms_dir: string): seq[TestDef] =
   tests
 
 proc build_mealybug_tests(mealybug_dir: string): seq[TestDef] =
-  ## Both devices. Every one of these ROMs is a DMG cart, and the suite ships a
-  ## `_dmg_blob.png` for what it draws on a DMG and a `_cgb_c.png` for what the
-  ## same cart draws on a CPU CGB C — which is DMG-compatibility mode: CGB
-  ## timing driving a DMG picture through the boot ROM's fallback palette. The
-  ## two reference sets do NOT cover the same ROMs (the seven `*2.gb` variants
-  ## are CGB-only, `m3_wx_4/5/6_change` are DMG-only), which is the suite
-  ## telling you where it thinks the models diverge.
-  ##
-  ## The CGB half is the only mid-mode-3 CGB oracle in the tree apart from
-  ## gambatte. Its author's own note is the reason it is worth having: "These
-  ## tests examine very specific PPU behaviour/timings, so produce different
-  ## results on a DMG compared to a CGB." A change that moves the fetcher can
-  ## now be read on both devices instead of one.
-  ##
-  ## The `cgb: true` rows are scored on the DEFAULT revision, which is `grCgbC`
-  ## — the same device the `_cgb_c` captures are of. That is not a coincidence
-  ## any more: as of 2026-08-10 the default was moved to CGB C partly because
-  ## these references are what the tree is scored against.
-  ##
-  ## `_cgb_d.png` (CPU CGB D) is wired for ALL twenty ROMs that ship one, as of
-  ## 2026-08-19. Thirteen of those captures are pixel-identical to their
-  ## `_cgb_c` twin, and running them anyway is the point: "these two revisions
-  ## draw this the same" is a claim, and a row is how it gets checked.
-  ##
-  ## The old reason for holding all twenty out — "~20 rows for an axis no
-  ## shipping frontend can reach" — was a bad trade and it cost something real.
-  ## With nothing scoring `_cgb_d`, and the shootout's own RevC/RevD mealybug
-  ## variants absent from its active list, the entire revision axis was
-  ## unobserved by every harness in play. `m3_scy_change` was sitting in that
-  ## gap: dingbat renders the CGB-C picture at C, D **and** E and misses
-  ## `_cgb_d` by 6217 pixels — a different palette attribute on 855 of them and
-  ## different tile rows on the rest, so a whole revision's worth of mid-line
-  ## SCY behaviour that is simply not modelled. Seven rows is a cheap price for
-  ## seeing that class of defect at all.
+  ## Every mealybug ROM is a DMG cart; the suite ships `_dmg_blob.png` (DMG)
+  ## and `_cgb_c.png` / `_cgb_d.png` (the same cart on CPU CGB C / D in
+  ## compatibility mode: CGB timing, boot-ROM fallback palette). The sets do
+  ## not cover the same ROMs (`*2.gb` are CGB-only, `m3_wx_4/5/6_change`
+  ## DMG-only). Each capture is scored at the revision it names.
   var tests: seq[TestDef]
   let ppu_dir = mealybug_dir / "ppu"
   if not dirExists(ppu_dir):
@@ -945,29 +716,14 @@ proc build_mealybug_tests(mealybug_dir: string): seq[TestDef] =
         expected_png: cgb_png,
         color: true,
         cgb: true,
-        # Pinned rather than left to the default. The default IS grCgbC today,
-        # so this changes no verdict — but a `_cgb_c` capture is a photograph of
-        # one specific revision, and a row scored against it should name that
-        # revision instead of inheriting whatever the default happens to be. It
-        # also makes the Device column say "CGB cgbc" rather than a bare "CGB".
+        # Pinned to the revision the `_cgb_c` capture is of rather than
+        # inherited from the default; also labels the Device column.
         model: "cgbc",
         no_save: true,
       ))
-    # ...and the CGB-D capture, at CGB-D. ALL twenty of them, including the
-    # thirteen whose picture is identical to their `_cgb_c` twin.
-    #
-    # Those thirteen were held out until 2026-08-19 on the grounds that a row
-    # which can only restate what the `_cgb_c` row already says is pure
-    # duplication. That reasoning was about the REFERENCE and it should have
-    # been about the MACHINE: "CGB-C and CGB-D draw this identically" is a claim
-    # the suite is making, and the only way to have coverage of it is to run
-    # BOTH revisions and check. An identical capture is not a reason to skip the
-    # second run — it is the expected result OF the second run, and a revision
-    # that quietly stopped agreeing would otherwise go unnoticed. The seven
-    # differing pairs catch a defect by disagreeing; the thirteen matching ones
-    # catch a defect by ceasing to agree, and both need the row to exist.
-    #
-    # Still gated on the reference file existing, so the set tracks the bundle.
+    # The `_cgb_d` capture at CGB-D, for all twenty ROMs that ship one.
+    # Thirteen are pixel-identical to their `_cgb_c` twin; running them checks
+    # that claim. Gated on the file existing so the set tracks the bundle.
     let cgb_d_png = ppu_dir / test_name & "_cgb_d.png"
     if fileExists(cgb_d_png):
       tests.add(TestDef(
@@ -981,32 +737,13 @@ proc build_mealybug_tests(mealybug_dir: string): seq[TestDef] =
         model: "cgbd",
         no_save: true,
       ))
-  # The bundle's other two mealybug directories, `dma/` and `mbc/`, ship no
-  # reference image and upstream ships none either (its `expected/` tree is
-  # ppu-only, and so is `photos/`) — which is why they were never scored. They
-  # do not need one: unlike the ppu ROMs they are built WITHOUT
-  # DISPLAY_RESULTS_ONLY, so `inc/base.asm` runs CompareResults against the
-  # `CorrectResults` table each one carries and then falls into `Quit`, which
-  # sets mooneye's Fibonacci registers (3/5/8/13/21/34) on a pass, $42 across
-  # the board on a failure, and ends on LD B,B. That is exactly what tmMooneye
-  # reads, so these are self-checking rows in the plainest sense.
-  #
-  # Both `dma/` ROMs declare REQUIRES_CGB and bail out with "CGB Required"
-  # otherwise; `mbc/mbc3_rtc` is device-independent. All three run --nosave:
-  # mbc3_rtc is battery-backed with an RTC, so without it the next run starts
-  # from the previous run's clock, and it costs the other two nothing.
-  #
-  # The two `dma/` ROMs carry mooneye's `-C` device token (README, "Test
-  # naming": C = cgb+agb+ags), and until 2026-08-21 they were the only rows in
-  # the runner whose FILENAME named a device and whose row did not — every
-  # other suite passes its token through to `--model`, so their Device column
-  # read a bare "CGB" and claimed whatever the default happened to be. Naming
-  # `cgbc` fixes the label; it changes no verdict, because the default already
-  # IS grCgbC. The other half of `-C` (the `agb` arm the mooneye builder fans
-  # out to) is deliberately NOT added: measured across all six CGB revisions on
-  # 2026-08-21, `hdma_during_halt-C` passes on every one and `hdma_timing-C`
-  # fails on every one, so an AGB arm would be two rows of no information — the
-  # same trade `mooneye_machines_for` documents rejecting for the `C` group.
+  # `dma/` and `mbc/` ship no reference image and need none: they are built
+  # without DISPLAY_RESULTS_ONLY, so inc/base.asm compares against the ROM's
+  # CorrectResults table and ends on LD B,B with the Fibonacci registers,
+  # which tmMooneye reads. Both dma/ ROMs REQUIRE CGB and carry mooneye's
+  # `-C` token, named here as `cgbc`; an agb arm would add no information
+  # (hdma_during_halt-C passes and hdma_timing-C fails on every revision).
+  # --nosave: mbc3_rtc is battery-backed with an RTC.
   for (group, name, cgb, model) in [("dma", "hdma_during_halt-C", true, "cgbc"),
                                     ("dma", "hdma_timing-C", true, "cgbc"),
                                     ("mbc", "mbc3_rtc", false, "")]:
@@ -1024,20 +761,10 @@ proc build_mealybug_tests(mealybug_dir: string): seq[TestDef] =
   tests
 
 const MicrotestNoVerdict = [
-  # The 31 bundled GBMicrotest ROMs that never write $FF82 at all — the byte
-  # `--mode=microtest` scores. With nothing written, the harness reads
-  # uninitialised HRAM and the row can only ever be red: they are not failures
-  # of this emulator, they are ROMs with no verdict to read.
-  #
-  # Method (docs/gb-failure-triage.md, "First, shrink the denominator"): every
-  # one of the 513 bundled ROMs was scanned for the two encodings that can
-  # write that address with an immediate operand — `E0 82` (`ldh ($82),a`) and
-  # `EA 82 FF` (`ld ($ff82),a`). 482 contain one, these 31 contain neither, and
-  # all 31 were already failing rows (no passing row is in this list, so the
-  # scan is not hiding a green one). Listed by name rather than re-scanned at
-  # runtime so the skip stays reviewable in the diff.
-  #
-  # Honest suite denominator: 482, not 513. Recorded in NotScored.
+  # The 31 bundled GBMicrotest ROMs that never write $FF82, the verdict byte
+  # --mode=microtest reads: none contains `E0 82` (`ldh ($82),a`) or
+  # `EA 82 FF` (`ld ($ff82),a`), so the row could only read uninitialised
+  # HRAM. Listed by name so the skip stays reviewable. Denominator 482.
   "000-oam_lock",
   "000-write_to_x8000",
   "001-vram_unlocked",
@@ -1072,61 +799,26 @@ const MicrotestNoVerdict = [
 ]
 
 const MicrotestBrokenExpected = [
-  # Two bundled GBMicrotest ROMs whose $FF81 "expected" byte is not a value any
-  # Game Boy can produce. They are not this emulator's failures and they are not
-  # timing questions -- each is a defect in the ROM itself, established against
-  # the SameBoy oracle (tools/gbfuzz/sameboy_microtest) and, for the second,
-  # by construction. Both were red before the skip.
-  #
-  # "halt_op_dupe_delay" -- expects DIV = $55 (85) at a point its own source
-  #   (`xor a / ldh (DIV),a / halt / nop / nops 58 / test_finish_div $55`)
-  #   reaches ~62 M-cycles after resetting DIV. DIV increments every 64
-  #   M-cycles, so it cannot exceed 1 unless HALT blocks for ~5,440 M-cycles,
-  #   which the ROM's own HBlank-every-line setup rules out. $55 is the scratch
-  #   marker `cpu_bus_1.s` and a commented-out block of `400-dma.s` both use.
-  #   Its correctly written sibling `halt_op_dupe` (`xor a / halt / inc a /
-  #   test_finish_a 2`) dingbat passes. SameBoy answers $01 too.
-  #   Full derivation: docs/gb-test-suite-sources.md 8.6.
-  #
-  # "stat_write_glitch_l154_d" -- is missing the `xor a ; ldh ($FF0F),a` its
-  #   three siblings have at $0170, so its IF has not been cleared since $0158,
-  #   which is BEFORE the ROM enables the LCD and runs a 17,549 M-cycle delay
-  #   loop -- one whole frame, VBlank included. It then asserts IF reads $E0.
-  #   Proven both ways on 2026-08-21, with the timing held byte-identical:
-  #     * patch `e0 0f` -> `f0 0f` at $0170 of `_c` (turn its IF CLEAR into an
-  #       IF READ, same 4 M-cycles) and `_c` answers $E1 -- `_d`'s exact byte --
-  #       on dingbat and on SameBoy alike;
-  #     * patch `e0 0f` into `_d`'s sled at $016a and `_d` answers $E0, its own
-  #       expected value, and PASSES on dingbat and on SameBoy alike.
-  #   The leftover VBlank flag is real and both emulators report it correctly.
-  #
-  # Honest suite denominator: 480. Recorded in NotScored.
+  # Two GBMicrotest ROMs whose $FF81 "expected" byte no Game Boy can produce.
+  # `halt_op_dupe_delay` expects DIV = $55 about 62 M-cycles after resetting
+  # DIV (DIV steps every 64 M-cycles; $55 is the suite's scratch marker; the
+  # sibling `halt_op_dupe` is correctly written and passes). Derivation:
+  # docs/gb-test-suite-sources.md 8.6.
+  # `stat_write_glitch_l154_d` lacks the `xor a ; ldh ($FF0F),a` its three
+  # siblings have at $0170, so it asserts IF = $E0 across a whole frame of
+  # LCD-on time in which VBlank was never cleared. Restoring that clear makes
+  # it pass; removing it from `_c` at identical timing yields `_d`'s byte.
+  # Denominator 480.
   "halt_op_dupe_delay",
   "stat_write_glitch_l154_d",
 ]
 
 proc build_gbmicrotest_tests(dir: string): seq[TestDef] =
-  ## aappleby's GBMicrotest: 500+ tiny DMG timing probes. Per the suite's howto
-  ## each writes its verdict into HRAM — $FF80 actual, $FF81 expected, $FF82
-  ## $01/$FF pass/fail — and then keeps running, so there is no completion
-  ## signal: the harness runs a fixed number of frames and reads $FF82 out (see
-  ## --mode=microtest). "Running the emulation for two frames should be
-  ## sufficient", with one documented exception that needs ~380 ms.
-  ##
-  ## Two frames per ROM is why 500 processes cost about as much as one mGBA
-  ## suite run; the whole suite is ~2 s wall clock.
-  ##
-  ## THE DEVICE, since these rows are 482 of the runner's 659 `cart` rows and
-  ## `cart` means "the header picks". Verified 2026-08-21: **all 513 bundled
-  ## carts carry $0143 = $00**, so every one of them runs as a DMG at the
-  ## default grDmgABC — which is exactly what the suite's howto asks for
-  ## ("checked on real hardware believed to be a DMG-CPU-08 … a DMG-CPU B or a
-  ## DMG-CPU C"). The axis is not decorative: the same 513 ROMs score 368 on a
-  ## CGB against 478 on the DMG, so getting this wrong would cost ~110 rows.
-  ## Within the DMG family it is flat — 478/482 on dmg0, dmgABC, mgb, sgb and
-  ## sgb2 alike — and all four red rows are red on every one of those five and
-  ## on all six CGB revisions too, so none of them is a device-scoring
-  ## artefact.
+  ## aappleby's GBMicrotest. Each ROM writes $FF80 actual, $FF81 expected,
+  ## $FF82 $01/$FF and keeps running, so the harness runs a fixed frame count
+  ## and reads $FF82 (--mode=microtest); the howto says two frames suffice,
+  ## bar one ROM needing ~380 ms. All 513 carts carry $0143 = $00 and run as
+  ## a DMG, which is what the howto asks for; on a CGB ~110 rows fail.
   var tests: seq[TestDef]
   if not dirExists(dir):
     echo "  Warning: gbmicrotest directory not found"
@@ -1152,48 +844,32 @@ proc build_gbmicrotest_tests(dir: string): seq[TestDef] =
 
 proc shot(name, rom, png: string; timeout: int; color = false; cgb = false;
           no_save = false): TestDef =
-  ## One screenshot-comparison TestDef. The bundled reference PNGs use the same
-  ## palette conventions the harness already renders (DMG shades
-  ## #000000/#555555/#AAAAAA/#FFFFFF, CGB channels expanded (X<<3)|(X>>2)),
-  ## which is why acid2 and mealybug compare cleanly and these need no new
-  ## color work.
+  ## One screenshot TestDef. The bundled references use the palettes the
+  ## harness renders (DMG #00/#55/#AA/#FF, CGB channels (X<<3)|(X>>2)).
   TestDef(name: name, rom_path: rom, mode: tmScreenshot, timeout: timeout,
           expected_png: png, color: color, cgb: cgb, no_save: no_save)
 
 proc build_small_screenshot_tests(roms_dir: string): seq[TestDef] =
-  ## The bundle's small screenshot suites, wired from an explicit table rather
-  ## than by globbing: each one has its own exit condition (from its howto) and
-  ## its own device story, and the reference PNG names encode which device the
-  ## image was captured on. Only DMG and CGB-native references are used — the
-  ## "-ncm"/"CGB compatibility mode" images are a third device (a CGB booting a
-  ## non-CGB cart) with its own palette, which this harness does not model.
-  ##
-  ## Frame counts come from the howtos: half a second (~30 frames) for bully,
-  ## strikethrough and turtle-tests; ~10 frames for most scribbltests but ~270
-  ## for statcount-auto; 40 for mbc3-tester. Where a ROM signals mooneye's
-  ## LD B,B breakpoint (cgb-acid-hell) the run stops there anyway and the frame
-  ## count is only an upper bound.
+  ## The bundle's small screenshot suites, from an explicit table: each has
+  ## its own exit condition (from its howto) and device, and the reference
+  ## name encodes the capture device. "-ncm" / CGB-compatibility images are a
+  ## third device not modelled here. Frame counts are the howtos' run times;
+  ## a ROM that signals LD B,B (cgb-acid-hell) stops there anyway.
   var tests: seq[TestDef]
   template add_if(name, rom, png: string; timeout: int; color = false;
                   cgb = false; no_save = false) =
     if fileExists(rom) and fileExists(png):
       tests.add(shot(name, rom, png, timeout, color, cgb, no_save))
 
-  # BullyGB (Hacktix) — broad hardware-behavior torture test. The one bundled
-  # reference is a CGB capture (the howto records the author's own DMG-C
-  # failing it with "Bad Echo RAM Reads"); the cart's CGB flag is $80, so it
-  # used to boot CGB from the header alone. --mode=screenshot now takes the
-  # absence of --cgb as "run it on a DMG", so the device has to be named.
+  # BullyGB (Hacktix). The only bundled reference is a CGB capture, and
+  # --mode=screenshot treats a missing --cgb as DMG, so the device is named.
   let bully = roms_dir / "bully"
   add_if("bully/bully", bully / "bully.gb", bully / "bully.png", 120,
          color = true, cgb = true)
 
-  # strikethrough (Hacktix) — OAM DMA behavior. Also a $80 (CGB-capable) cart.
-  # BOTH devices are scored. The picture is one line of forty objects crossed
-  # with a running OAM DMA (see obj_oam_dma_read in fifo_ppu.nim) and the two
-  # references differ only in palette, so a device-specific break would show on
-  # one row and not the other — which is exactly what makes the pair worth two
-  # rows rather than the CGB one this table used to carry alone.
+  # strikethrough (Hacktix): forty objects crossed by a running OAM DMA
+  # (obj_oam_dma_read in fifo_ppu.nim). Both devices scored; the references
+  # differ only in palette, so a device-specific break shows on one row.
   let strike = roms_dir / "strikethrough"
   add_if("strikethrough/strikethrough-dmg", strike / "strikethrough.gb",
          strike / "strikethrough-dmg.png", 60)
@@ -1221,23 +897,19 @@ proc build_small_screenshot_tests(roms_dir: string): seq[TestDef] =
     add_if("turtle-tests/" & name, turtle / name / (name & ".gb"),
            turtle / name / (name & ".png"), 60)
 
-  # cgb-acid-hell (mattcurrie) — CGB PPU torture test, the companion to the
-  # cgb-acid2 already scored above. Finishes on LD B,B.
+  # cgb-acid-hell (mattcurrie). Finishes on LD B,B.
   let hell = roms_dir / "cgb-acid-hell"
   add_if("cgb-acid-hell/cgb-acid-hell", hell / "cgb-acid-hell.gbc",
          hell / "cgb-acid-hell.png", 120, color = true, cgb = true)
 
-  # little-things-gb (pinobatch). Only firstwhite is scoreable here: tellinglys
-  # needs a scripted button press per its howto, and dingbat_test has no input
-  # scripting yet.
+  # little-things-gb (pinobatch). tellinglys needs a scripted button press,
+  # which dingbat_test cannot do.
   let little = roms_dir / "little-things-gb"
   add_if("little-things-gb/firstwhite", little / "firstwhite.gb",
          little / "firstwhite-dmg-cgb.png", 60)
 
-  # MBC3 bank tester — a mapper test, so it is device-independent; the CGB
-  # reference is a CGB-compatibility-mode capture, which is not modeled, so
-  # only the DMG one is scored. Battery-backed: --nosave keeps a .sav from
-  # leaking into the next run.
+  # MBC3 bank tester: device-independent; the CGB reference is a compat-mode
+  # capture, so only the DMG row is scored. Battery-backed, hence --nosave.
   let mbc3 = roms_dir / "mbc3-tester"
   add_if("mbc3-tester/mbc3-tester", mbc3 / "mbc3-tester.gb",
          mbc3 / "mbc3-tester-dmg.png", 60, no_save = true)
@@ -1259,26 +931,10 @@ proc age_device_tokens(base: string): seq[string] =
       break
 
 proc age_model_for(device: string): string =
-  ## The `--model=` token for one AGE device token, or "" to leave the row on
-  ## the default revision.
-  ##
-  ## AGE names the devices a test was verified on, and some of those names are
-  ## a single revision family (`-cgbE`, `-cgbBC`, `-dmgC`) that the emulator
-  ## can actually be set to. Passing it through means a row named `cgbE` is
-  ## scored on a CPU CGB E instead of on whatever the default happens to be —
-  ## which is CPU CGB C, so today the Device column was claiming a machine the
-  ## row's own name contradicts.
-  ##
-  ## MEASURED 2026-08-13: this changes no verdict anywhere in the suite (the
-  ## five failing `-cgbE` rows still fail under `--model=cgbE`, `ly-cgbE` still
-  ## passes, and the three `-dmgC` screenshot rows are pixel-identical either
-  ## way). It is a labelling fix that pre-positions the rows for the day the
-  ## C-vs-E differences are modelled.
-  ##
-  ## The accepted set mirrors gb_revision_from_name (src/dingbat/gb/gb.nim) and
-  ## must stay a subset of it: dingbat_test *quits* on a token it cannot parse,
-  ## so a name like `cgbBCE` — a span with no single revision behind it — is
-  ## deliberately left empty rather than guessed at.
+  ## `--model=` token for one AGE device token, or "" for the default. The
+  ## accepted set mirrors gb_revision_from_name and must stay a subset of it:
+  ## dingbat_test quits on a token it cannot parse, so a span like `cgbBCE`
+  ## is left to age_models_for rather than guessed at.
   case device.toLowerAscii()
   of "dmg0", "dmg", "dmga", "dmgb", "dmgc", "dmgabc", "mgb",
      "cgb0", "cgb0b", "cgba", "cgbab", "cgbb", "cgbc", "cgb0bc", "cgbbc",
@@ -1286,40 +942,13 @@ proc age_model_for(device: string): string =
   else: ""
 
 proc age_models_for(device: string): seq[string] =
-  ## Every DISTINCT dingbat revision an AGE device token names.
-  ##
-  ## AGE writes the devices a test was verified on as a span — `cgbBCE` means
-  ## "B, C and E" — and `age_model_for` above can only answer with a single
-  ## `--model=` token, so a span got none and the row silently ran on the
-  ## default machine (CPU CGB C) while its name claimed three. That is a real
-  ## coverage hole: the revision the row is scored on is the one thing its name
-  ## is most explicit about.
-  ##
-  ## dingbat models five CGB revisions (`grCgb0, grCgbAB, grCgbC, grCgbD,
-  ## grCgbE`), so `cgbBCE` covers three of them and becomes three rows. The DMG
-  ## side needs no expansion: dingbat models `grDmg0` and `grDmgABC`, so a DMG
-  ## span already IS one machine.
-  ##
-  ## An unrecognised character falls back to the single-token behaviour rather
-  ## than guessing, because dingbat_test QUITS on a token it cannot parse.
-  ##
-  ## Measured 2026-08-21, whole suite, every row's `--model` overridden to one
-  ## revision at a time: 44/89 at cgb0, cgbAB, cgbC, cgbD, cgbE and agb —
-  ## identical, so no `GbQuirks` member reached an AGE ROM and the `@cgbab` /
-  ## `@cgbc` / `@cgbe` arms were three copies of one measurement. That was the
-  ## reason to keep them, and **it stopped being true on 2026-08-22**: the
-  ## `speed-switch` cluster is where AGE's per-revision claim first bites.
-  ##
-  ## Two of them are the same test built twice with c-sp's own `OFS` / `OFS_B`
-  ## flipped — `spsw-tima-cgbBC.gb` vs `spsw-tima-cgbE.gb`, and
-  ## `caution/spsw-interrupts-cgbBC.gb` vs `-cgbE.gb` — with headers
-  ## recording CGB B and C passing one build and CPU CGB E the other. They are
-  ## served by `GbQuirks.spsw_div_mid_taps_slow` and
-  ## `spsw_irq_leaf_hold_short`, and running either file on the wrong revision
-  ## fails it, which is exactly what these arms exist to check. So an AGE delta
-  ## CAN now be evidence about a revision — but only on those four ROMs;
-  ## everywhere else the arms are still three copies of one measurement, and
-  ## the remaining red rows still have no device-scoring explanation.
+  ## Every distinct dingbat revision an AGE span names: `cgbBCE` -> cgbab,
+  ## cgbc, cgbe, one row each. DMG spans need no expansion (only grDmg0 and
+  ## grDmgABC are modelled). An unrecognised character falls back to the
+  ## single-token form rather than guessing, because dingbat_test quits on a
+  ## token it cannot parse. The arms matter for the speed-switch ROMs
+  ## (`spsw-tima-cgbBC` vs `-cgbE`, `caution/spsw-interrupts-*`), served by
+  ## GbQuirks.spsw_div_mid_taps_slow / spsw_irq_leaf_hold_short.
   let d = device.toLowerAscii()
   if d.startsWith("ncm"): return @[]        # CGB in non-CGB mode: not modelled
   if not d.startsWith("cgb") or d.len <= 3:
@@ -1339,13 +968,9 @@ proc age_models_for(device: string): seq[string] =
     if name notin result: result.add(name)
 
 proc build_age_tests(age_dir: string): seq[TestDef] =
-  ## c-sp's own AGE test roms. Two verdicts, both already implemented here:
-  ## most ROMs end on LD B,B with the mooneye Fibonacci registers (tmMooneye),
-  ## and the handful that cannot self-verify ship reference PNGs named
-  ## `<rom>-<device>.png` next to the ROM (tmScreenshot).
-  ##
-  ## Coverage is concentrated on mid-scanline PPU timing (m3-bg-*, stat-mode,
-  ## lcd-align-ly), OAM/VRAM access windows and CGB speed switching.
+  ## c-sp's AGE test roms. Most end on LD B,B with the mooneye Fibonacci
+  ## registers (tmMooneye); the rest ship `<rom>-<device>.png` references
+  ## beside the ROM (tmScreenshot).
   var tests: seq[TestDef]
   if not dirExists(age_dir):
     echo "  Warning: age-test-roms directory not found"
@@ -1382,17 +1007,9 @@ proc build_age_tests(age_dir: string): seq[TestDef] =
     let cgb = devices.anyIt(it.startsWith("cgb"))
     if not dmg and not cgb:
       continue   # ncm-only: CGB in non-CGB mode, which this harness cannot run
-    # ONE ROW PER MACHINE THE NAME DECLARES. `ei-halt-dmgC-cgbBCE` is verified
-    # on four machines and now runs on four; before, it ran on ONE (DMG at the
-    # default revision) and the other three tokens were decoration. Both halves
-    # of that were wrong: the CGB arm was never run at all, and the CGB span
-    # got no `--model` because it names three revisions and `age_model_for`
-    # can only answer with one — so the row silently used CPU CGB C while its
-    # name claimed B, C and E.
-    #
-    # Failing AGE rows stop at LD B,B rather than burning the 1800-frame
-    # timeout (see bb_breakpoint below), so the extra arms cost little wall
-    # clock.
+    # One row per machine the name declares (`ei-halt-dmgC-cgbBCE` runs on
+    # four). Failing rows stop at LD B,B (bb_breakpoint), so the extra arms
+    # cost little.
     var arms: seq[(bool, string)]   # (run as CGB, --model token)
     for d in devices:
       if d.startsWith("ncm"): continue     # CGB in non-CGB mode: not modelled
@@ -1407,44 +1024,22 @@ proc build_age_tests(age_dir: string): seq[TestDef] =
         mode: tmMooneye,
         timeout: 1800,
         cgb: arm_cgb,
-        # A DMG ARM HAS TO SAY SO. 8 of AGE's 47 ROMs carry a `$80` CGB flag at
-        # $0143 -- `CART_COMPATIBLE_DMG_GBC`, "runs on a CGB, still works on a
-        # DMG" -- and for those the absence of `--cgb`/`--dmg` let the HEADER
-        # pick the machine, so every one of their `-dmgC` arms ran on a CGB
-        # while the Device column read "DMG dmgC" (the column is computed from
-        # `--model`, which only picks a boot table). The arms affected are
-        # halt/*, ly-dmgC-cgbBC, oam-read-dmgC-cgbBC, oam-write-dmgC,
-        # stat-int-dmgC-cgbBCE, stat-mode-sprites-dmgC-cgbBCE,
-        # stat-mode-dmgC-cgbBC and vram-read-dmgC.
-        #
-        # It changes ONE verdict today and the direction is the tell:
-        # `stat-mode-sprites-dmgC-cgbBCE@dmgC` was a PASS and is a real DMG
-        # FAIL (39 of its 80 cells wrong -- tools/gbppu/agediff.py). It was
-        # passing because it was being scored on the machine its three CGB arms
-        # already cover. Every other affected arm fails either way.
+        # A DMG arm must say so: 8 AGE ROMs carry a `$80` CGB flag, and
+        # without --dmg the header would run their `-dmgC` arm on a CGB while
+        # the Device column (computed from --model) said DMG.
         dmg: not arm_cgb,
         model: m,
-        # AGE signals failure with "any register values other than the Fibonacci
-        # ones", not with a dedicated failure signature, so LD B,B has to end the
-        # run unconditionally. Without this a failing ROM never stops and burns
-        # the whole 1800-frame timeout — which, with most of this suite red
-        # today, was the single biggest chunk of the runner's wall clock.
+        # AGE signals failure with non-Fibonacci registers, not a signature,
+        # so LD B,B must end the run or a failing ROM burns the whole timeout.
         bb_breakpoint: true,
       ))
   tests
 
 proc build_wilbertpol_tests(roms_dir: string): seq[TestDef] =
-  ## wilbertpol's fork of the Mooneye suite. Same Fibonacci-register verdict as
-  ## Gekkio's, but built against mooneye-gb as it stood in 2016, when the magic
-  ## breakpoint was the undefined opcode 0xED rather than LD B,B — hence
-  ## ed_breakpoint (see the 0xED handler in src/dingbat/gb/opcodes.nim).
-  ##
-  ## Roughly 80% of the content overlaps the Gekkio suite scored above, so the
-  ## rows are namespaced `mooneye-wilbertpol/` and never collide with it.
-  ##
-  ## Not every directory is scoreable: `utils/` holds a dump tool rather than a
-  ## test, and `logic-analysis/` ROMs are meant to be observed on a logic
-  ## analyzer and have no pass/fail signal at all.
+  ## wilbertpol's fork of the Mooneye suite, built against 2016 mooneye-gb
+  ## whose breakpoint was the undefined opcode 0xED (ed_breakpoint; see the
+  ## 0xED handler in gb/opcodes.nim). Namespaced `mooneye-wilbertpol/`.
+  ## `utils/` is a dump tool; `logic-analysis/` ROMs have no verdict.
   var tests: seq[TestDef]
   let dir = roms_dir / "mooneye-test-suite-wilbertpol"
   if not dirExists(dir):
@@ -1455,76 +1050,31 @@ proc build_wilbertpol_tests(roms_dir: string): seq[TestDef] =
     let name = "mooneye-wilbertpol/" & rel.changeFileExt("")
     if rel.startsWith("utils") or rel.startsWith("logic-analysis"):
       continue
-    # ---- The four ly_lyc* `-C` arms their own author later WITHDREW ----------
-    #
-    # `ly_lyc{,_0,_144,_153}-C` assert a CGB LY=LYC behaviour that dingbat and
-    # SameBoy both produce only from CPU CGB **D** onward, while the ROMs claim
-    # it for the whole `-C` group. Not scored, because the claim is one the
-    # fork's own vocabulary could not have made correctly and its author has
-    # since retired:
-    #
-    #  * `-C` is a HARDWARE GROUP, not revision C -- this fork's README says
-    #    `C = cgb+agb+ags` and has NO revision axis at all. In 2016 a behaviour
-    #    that split at CGB-C/D was simply un-expressible here, so `-C` is as
-    #    precise as the naming could be, not a claim about revision C.
-    #  * Upstream mooneye LATER ADDED that axis (`CGB: 0, A, B, C, D, E`) and
-    #    uses it -- it ships `misc/boot_div-cgb0.gb` beside
-    #    `misc/boot_div-cgbABCDE.gb`, i.e. the convention can name a revision
-    #    split exactly when one is found.
-    #  * Upstream's bench now covers all six CGB revisions as separate
-    #    serial-numbered units (README hardware table), where this fork's
-    #    listed one CGB-C and two CGB-Ds.
-    #  * And with that vocabulary and that hardware, upstream's
-    #    `acceptance/ppu/` ships NO `ly_lyc*` in any form, revision-tokened or
-    #    otherwise. It kept `hblank_ly_scx_timing-GS` and dropped the `-C` half
-    #    -- exactly what withdrawing a CGB measurement that did not hold up
-    #    looks like.
-    #
-    # What is NOT established: any direct statement of why, and any second
-    # opinion. SameBoy is the only scriptable oracle here and its C/D gates
-    # (`model <= GB_MODEL_CGB_C` four times in display.c's LY-comparison and
-    # line-153 path) are one author's hardware against another's. So this is
-    # inference from a deletion, not proof, and it is the weakest skip in this
-    # file -- REVISIT IT. The way to settle it is a third emulator that models
-    # CGB revisions (BGB, Emulicious) or a hardware probe.
-    #
-    # ONLY the cgb arm is dropped. `-C` fans to cgb+agb here, and the **agb
-    # arms PASS** -- dingbat's AGB already produces the value these ROMs want,
-    # which is consistent with the split being at CGB-C/D and is a real check
-    # worth keeping. Dropping the whole ROM would have taken four green rows
-    # with it. The `_write` arms of the same family are not touched: they pass
-    # on both machines.
+    # `ly_lyc{,_0,_144,_153}-C`: the CGB arm is not scored. The ROMs assert a
+    # CGB LY=LYC behaviour dingbat produces only from CPU CGB D onward, and
+    # this fork's `-C` (README: cgb+agb+ags) has no revision axis to say
+    # otherwise; upstream mooneye later gained that axis and ships no ly_lyc*
+    # at all. Inference from a deletion, not proof; a hardware probe would
+    # settle it. The agb arms pass and are kept, as are the `_write` siblings.
     const ly_lyc_c_skip = ["ly_lyc-C.gb", "ly_lyc_0-C.gb",
                            "ly_lyc_144-C.gb", "ly_lyc_153-C.gb"]
-    # The two screenshot ROMs: sprite_priority (DMG reference, the same one the
-    # Gekkio suite uses) and madness/mgb_oam_dma_halt_sprites, whose reference
-    # was captured on an MGB.
+    # The two screenshot ROMs: sprite_priority (same DMG reference as Gekkio's)
+    # and madness/mgb_oam_dma_halt_sprites (MGB capture).
     if rel == "manual-only" / "sprite_priority.gb":
       tests.add(shot(name, rom, rom.parentDir / "sprite_priority-dmg.png", 120))
       continue
     if rel == "madness" / "mgb_oam_dma_halt_sprites.gb":
       var t = shot(name, rom, rom.parentDir / "mgb_oam_dma_halt_sprites_expected.png", 120)
-      # See the Gekkio builder above: this reference's grey ramp is 255/176/104
-      # where the rest of the suite uses 255/170/85, so an exact compare scores
-      # every non-white pixel wrong. 32 is the middle of the [19, 71] band that
-      # is shade-index equality for those two ramps; 8 was below the shade-2
-      # offset and scored a correctly drawn object as wrong.
+      # Same 255/176/104 grey ramp as the Gekkio row of this name; see there.
       t.grey_tolerance = 32
       t.model = "mgb"
       tests.add(t)
       continue
     let base = rom.splitFile().name
-    # Device suffix after the last '-': -C/-A are CGB/AGB tests, -G/-S/-GS are
-    # DMG/SGB.
-    #
-    # The suffix is the ONLY thing that picks the device, including under misc/.
-    # Gekkio's misc/ really is a CGB-only directory, but this fork's is not: it
-    # also holds `boot_hwio-S`, `boot_regs-mgb`, `boot_regs-sgb` and
-    # `boot_regs-sgb2`. Blanketing the directory with --cgb ran those four as a
-    # CGB wearing an SGB/MGB boot table — a machine that does not exist, and it
-    # printed as such in the Device column ("CGB sgb"). `boot_hwio-S` failed
-    # purely because of it (the Gekkio builder passes the same ROM name with
-    # model=sgb and no --cgb, and it passes there).
+    # The suffix after the last '-' is the only thing that picks the device,
+    # including under misc/: this fork's misc/ also holds boot_hwio-S and
+    # boot_regs-mgb/sgb/sgb2, which a directory-wide --cgb ran as a CGB
+    # wearing an SGB boot table.
     let suffix = if '-' in base: base.rsplit('-', maxsplit = 1)[1] else: ""
     let machines = mooneye_machines_for(base)
     if machines.len == 0:
@@ -1538,9 +1088,7 @@ proc build_wilbertpol_tests(roms_dir: string): seq[TestDef] =
         ed_breakpoint: true,
       ))
     else:
-      # Same per-machine fan-out as the Gekkio builder above, and the same
-      # reason it belongs here in particular: this fork's misc/ is the one that
-      # mixes machines, so the suffix has to be what picks the device.
+      # Same per-machine fan-out as the Gekkio builder.
       for m in machines:
         # The four withdrawn ly_lyc* `-C` ROMs: drop the CGB arm only, keep AGB.
         if m == "cgbc" and rel.extractFilename in ly_lyc_c_skip: continue
@@ -1596,23 +1144,13 @@ proc build_acid2_tests(): seq[TestDef] =
 const ShootoutRev = "38b926bdbc26993d1b4c43e97979ecc66287bf02"
 
 const ShootoutTolerance = 50
-  ## The per-pixel luma tolerance gbdev's own runner uses for these reference
-  ## images (`util.py: compareImage`, "if color > 50: return False"). Scoring
-  ## its images by any tighter rule than the one it publishes them under would
-  ## measure our colour conversion rather than the emulator; see
-  ## `grey_tolerance` on TestDef.
+  ## The per-pixel luma tolerance gbdev's own runner uses for its references
+  ## (`util.py: compareImage`, "if color > 50"); see `grey_tolerance`.
 
 proc ensure_shootout_file(rel: string): string =
-  ## One file out of gbdev/GBEmulatorShootout's committed `testroms/` tree,
-  ## pinned to ShootoutRev.
-  ##
-  ## Four of the shootout's suites exist nowhere else as a distributable
-  ## artifact — daid's and CasualPokePlayer's ROMs are only ever published in
-  ## that repo, `which.gb` likewise, and its rtc3test ROMs are custom builds
-  ## (see build_shootout_tests). So they are fetched file-by-file from
-  ## raw.githubusercontent at a fixed commit, exactly as FuzzARM is: ~30 small
-  ## files totalling under a megabyte, which is far cheaper than the repo's
-  ## 32 MB `testroms/` archive and pins the reference images just as tightly.
+  ## One file from gbdev/GBEmulatorShootout's `testroms/` tree at ShootoutRev.
+  ## daid's, CasualPokePlayer's, `which.gb` and the pre-split rtc3test builds
+  ## exist nowhere else, so they are fetched file-by-file (~30 small files).
   let dir = RomCacheDir / ("shootout-" & ShootoutRev[0 ..< 7])
   let path = dir / rel
   if fileExists(path):
@@ -1623,45 +1161,26 @@ proc ensure_shootout_file(rel: string): string =
   path
 
 proc build_shootout_tests(): seq[TestDef] =
-  ## The suites the gbdev shootout runs that are not in any bundle we already
-  ## download. Every one is scored the way the shootout scores everything: the
-  ## frame after a fixed run, against a committed reference image.
-  ##
-  ## Frame counts are the shootout's own `runtime=` seconds x 60, which is what
-  ## its `Test` objects feed each emulator.
+  ## The shootout's suites that are in no bundle already downloaded, scored
+  ## the way the shootout scores everything: the frame after a fixed run
+  ## against a committed reference. Frame counts are its `runtime=` x 60.
   var tests: seq[TestDef]
   echo "Downloading shootout test ROMs..."
 
-  # --- ax6/rtc3test (MBC3 RTC) -------------------------------------------
-  # rtc3test upstream is ONE ROM with a three-way menu picked by button input
-  # (A / down-A / down-down-A), which is why it was previously listed as
-  # unscoreable here: dingbat_test has no input scripting. The shootout ships
-  # three separate 32 KB builds, one per sub-test, with the menu resolved at
-  # build time — so the input problem simply does not arise and no parser needs
-  # porting from dingbat_bench. This is real MBC3 RTC coverage, which dingbat
-  # implements and nothing else in the runner exercises.
-  #
-  # The shootout runs all three as CGB, and these carts are CGB-capable
-  # ($143 = $80) so they boot CGB from the header anyway — `cgb` here is
-  # belt-and-braces. Their references are genuinely native-CGB captures (they
-  # contain #009100, which is not in the CGB-compatibility palette), so unlike
-  # mealybug's CGB set these really do measure dingbat's CGB.
+  # ax6/rtc3test (MBC3 RTC). Upstream is one ROM with a button-picked menu;
+  # the shootout ships three pre-split builds, one per sub-test. Carts are
+  # $143 = $80 and the references are native-CGB captures (they contain
+  # #009100, outside the compat palette).
   for (n, secs) in [(1, 9.5), (2, 7.5), (3, 20.0)]:
     tests.add(TestDef(
       name: &"rtc3test/rtc3test-{n}",
       rom_path: ensure_shootout_file(&"ax6/rtc3test-{n}.gb"),
       mode: tmScreenshot,
       grey_tolerance: ShootoutTolerance,
-      # The shootout's OWN budget, not `secs`. emulator.py polls until
-      # `test.runtime / speed + self.startup_time + 5.0` seconds have passed,
-      # and emulators/dingbat.py turns that into frames as
-      # `(runtime + startup_time + 5.0) * 59.7275` with startup_time = 1.0.
-      # Scoring these images by `runtime` alone is a TIGHTER rule than gbdev
-      # publishes them under — the same mistake the ShootoutTolerance comment
-      # warns about from the other direction — and it is why rtc3test-1 and -3
-      # were red here while the shootout itself scores dingbat 261/261
-      # including them. dingbat reaches rtc3test-1's reference at frame 720; the
-      # real budget is 925 and the one used here was 570.
+      # The shootout's own budget: emulator.py polls for
+      # `runtime + startup_time(1.0) + 5.0` seconds and emulators/dingbat.py
+      # turns that into frames at 59.7275. `runtime` alone is a tighter rule
+      # than gbdev's and fails rtc3test-1/-3.
       timeout: int((secs + 6.0) * 59.7275),
       expected_png: ensure_shootout_file(&"ax6/rtc3test-{n}.png"),
       cgb: true,
@@ -1671,11 +1190,9 @@ proc build_shootout_tests(): seq[TestDef] =
       no_save: true,
     ))
 
-  # --- CasualPokePlayer's MBC3 tests -------------------------------------
-  # More MBC3 corners: invalid RTC bank numbers, the single-write latch, and
-  # the width of the RAM-enable register. DMG, half a second each.
-  # `sgb-ext-test` is skipped — it is an SGB packet-protocol test and the
-  # shootout runs it on an SGB, which dingbat does not model.
+  # CasualPokePlayer's MBC3 tests: invalid RTC banks, single-write latch,
+  # RAM-enable width. DMG, half a second each. `sgb-ext-test` is an SGB
+  # packet-protocol test the shootout runs on an SGB; skipped.
   for name in ["rtc-invalid-banks-test", "latch-rtc-test", "ramg-mbc3-test"]:
     tests.add(TestDef(
       name: "cpp/" & name,
@@ -1687,54 +1204,15 @@ proc build_shootout_tests(): seq[TestDef] =
       no_save: true,
     ))
 
-  # --- daid's tests ------------------------------------------------------
-  # STOP-instruction and speed-switch behaviour, plus a mid-scanline BGP probe.
-  #
-  # Only the rows worth gating on are wired up. The shootout also runs
-  # `ppu_scanline_bgp`, `stop_instr` and `stop_instr_gbc_mode3` "on GBC", but
-  # all three carts are DMG-flagged ($143 = $00), so that is a CGB in
-  # **compatibility mode** — the same mode the mealybug `_cgb_c` references
-  # capture. That mode IS modelled here (see `cgb_native` in gb.nim, and
-  # build_mealybug_tests, which scores 27 rows against it), so the first two are
-  # skipped as redundant rather than as unmodellable: mealybug covers the same
-  # machine far more precisely. `ppu_scanline_bgp.gbc.png` is visibly a compat
-  # capture — its only colours are #0063C6/#7BFF31/#FFFFFF, straight out of the
-  # compat background palette. The third, `stop_instr_gbc_mode3`, IS wired —
-  # see below.
-  #
-  # "The same machine" was measured in 2026-08-09 and it is NOT the same
-  # machine, which was the reason for leaving `ppu_scanline_bgp` "(GBC)" out.
-  # Run it `--cgb --color` and every band of the frame is exactly 3 pixels
-  # early against that PNG (92.50%), and the 3 decompose as one M-cycle at the
-  # handler's entry MINUS one dot of palette write step — and that one dot is
-  # the CGB-C/CGB-D revision split, which mealybug ships both sides of:
-  # `CGB_MIXER_LATENCY=1` is pixel-exact on `m3_bgp_change_cgb_c.png` and `=0`
-  # is pixel-exact on `_cgb_d.png`, and only `=0` can reach daid's capture.
-  #
-  # **That reason expired when the revision axis landed, and the row is wired
-  # now (2026-08-18).** It does not put two references for one register on
-  # opposite sides of a revision any more, because the row NAMES its revision:
-  # `--cgb --model=cgbe` is exactly what the shootout's adapter passes, and at
-  # it the frame is pixel-exact while the 27 mealybug rows keep scoring the
-  # default CGB-C. Leaving it out had a cost that showed up the day it
-  # mattered: `CGB_HALT_PPU_LEAD=1` was measured, run through the whole local
-  # suite with NO regressions, committed and pushed — and it takes this row
-  # from 0 px to 2304 at every one of the six revisions. It is a silicon
-  # reference the shootout scores and nothing here gated it. See
-  # docs/gb-failure-triage.md and CGB_HALT_PPU_LEAD in gb.nim.
-  #
-  # `stop_instr` "(GBC)" is the trap worth naming, because it would have gone
-  # in GREEN for the wrong reason. Its reference is an all-black frame, which is
-  # also what a blanked panel produces however STOP got there, so the row cannot
-  # distinguish a correct implementation from several wrong ones. A gate that
-  # cannot fail is worse than no gate.
-  #
-  # `rom_and_ram.gb` is skipped for a different reason: it ships no reference
-  # image at all (the shootout classes it INFO, not pass/fail).
-  #
+  # daid's tests: STOP / speed-switch behaviour and a mid-scanline BGP probe.
+  # `ppu_scanline_bgp`, `stop_instr` and `stop_instr_gbc_mode3` are
+  # DMG-flagged carts the shootout runs "on GBC", i.e. CGB compatibility
+  # mode. `stop_instr` (GBC) is not scored: its reference is an all-black
+  # frame, which a blanked panel matches however STOP got there.
+  # `rom_and_ram.gb` ships no reference (the shootout classes it INFO).
   # Mid-scanline BGP writes have three legitimate DMG outcomes (old palette,
-  # new palette, or their OR — which one you get is per-console), so the
-  # shootout accepts any of the three images and so does this row.
+  # new, or their OR, per console); the shootout accepts any, and so does
+  # this row.
   tests.add(TestDef(
     name: "daid/ppu_scanline_bgp-dmg",
     rom_path: ensure_shootout_file("daid/ppu_scanline_bgp.gb"),
@@ -1745,20 +1223,11 @@ proc build_shootout_tests(): seq[TestDef] =
     alt_pngs: @[ensure_shootout_file("daid/ppu_scanline_bgp_1.dmg.png"),
                 ensure_shootout_file("daid/ppu_scanline_bgp_2.dmg.png")],
   ))
-  # The same ROM on a CGB in compatibility mode, at the revision its capture is
-  # of. One reference, no alternates: unlike the DMG arm this frame has a single
-  # legitimate outcome. `model: "cgbe"` is the passthrough and `--cgb
-  # --cgb-rev=E` is what the shootout adapter runs (emulators/dingbat.py).
-  #
-  # Re-measured per revision 2026-08-21 (tools/gbppu/pngdiff.py against
-  # `ppu_scanline_bgp.gbc.png`): **0 px at cgbD and cgbE, 576 px at cgb0,
-  # cgbAB, cgbC and agb.** So the split is `quirks.mixer_write_immediate`, which
-  # is D-and-later, and an earlier version of this comment was wrong twice —
-  # the row is exact on TWO revisions, not one, and the miss is 576 px, not
-  # 2304. It is still the ONLY row in either harness that separates CGB-C from
-  # CGB-E: forcing the whole 261-ROM shootout onto CGB-C scores 260 and this is
-  # the single row it loses. See the note above for why it was held out until
-  # 2026-08-18 and what leaving it out cost.
+  # The same ROM on a CGB in compatibility mode at the revision its capture
+  # is of (`--cgb --cgb-rev=E` is what the shootout adapter runs). Exact at
+  # cgbD and cgbE, 576 px off at cgb0/AB/C/agb: the split is
+  # quirks.mixer_write_immediate. The only row in either harness that
+  # separates CGB-C from CGB-E.
   tests.add(TestDef(
     name: "daid/ppu_scanline_bgp-gbc",
     rom_path: ensure_shootout_file("daid/ppu_scanline_bgp.gb"),
@@ -1779,17 +1248,10 @@ proc build_shootout_tests(): seq[TestDef] =
     timeout: 30,
     expected_png: ensure_shootout_file("daid/stop_instr.dmg.png"),
   ))
-  # The mode-3 sibling is the one GBC daid row that IS worth gating on, and the
-  # exception to the paragraph above. Same DMG-flagged cart on a CGB, but its
-  # reference is not a blank panel: the ROM prints "LCD on: PASS" and only then
-  # spins until STAT reads mode 3 before executing STOP, and daid's own note
-  # says a mode-3 STOP on a CGB "will keep the screen displaying the same data,
-  # as the PPU keeps running, and during mode3 it can access VRAM". So the
-  # reference is the text still on screen, and an implementation that blanks the
-  # panel — the DMG behaviour, and the one `stop_instr.gbc.png` cannot tell
-  # apart — scores 1.1% against it. Measured 2026-08-13: dingbat is pixel-exact
-  # here even at tolerance 0, so unlike `ppu_scanline_bgp` (GBC) there is no
-  # CGB-revision split hiding in it. See docs/gb-test-suite-sources.md §1.5.
+  # The one GBC daid row worth gating: the ROM prints "LCD on: PASS", spins
+  # until STAT reads mode 3, then STOPs; daid's note says a mode-3 STOP on a
+  # CGB keeps displaying because the PPU keeps running. An implementation
+  # that blanks the panel scores 1.1%.
   tests.add(TestDef(
     name: "daid/stop_instr_gbc_mode3",
     rom_path: ensure_shootout_file("daid/stop_instr_gbc_mode3.gb"),
@@ -1800,10 +1262,8 @@ proc build_shootout_tests(): seq[TestDef] =
     color: true,
     cgb: true,
   ))
-  # The speed-switch trio: a STOP-driven double-speed switch must reset DIV,
-  # and must land LY and STAT where hardware does. These three ARE native CGB
-  # carts ($143 = $C0), so unlike the rest of daid's set they measure the
-  # machine dingbat actually implements.
+  # Speed-switch trio: a STOP-driven switch must reset DIV and land LY/STAT
+  # where hardware does. Native CGB carts ($143 = $C0).
   for which in ["div", "ly", "stat"]:
     tests.add(TestDef(
       name: "daid/speed_switch_timing_" & which,
@@ -1817,10 +1277,7 @@ proc build_shootout_tests(): seq[TestDef] =
       cgb: true,
     ))
 
-  # `acid/which.gb` is deliberately absent. The shootout lists it twice (DMG
-  # and CGB) but ships no reference image for it, so its own `Test` scores it
-  # INFO rather than PASS/FAIL — it exists to be eyeballed in the results table,
-  # and there is nothing here to gate on.
+  # `acid/which.gb` ships no reference image; the shootout scores it INFO.
   tests
 
 # jsmolka/gba-tests. Pinned to a commit so a CI run is reproducible and the
@@ -1851,19 +1308,10 @@ proc ensure_jsmolka_test_roms(): string =
   inner
 
 proc build_jsmolka_tests(dir: string): seq[TestDef] =
-  ## Two kinds of ROM live in this suite.
-  ##
-  ## The self-checking ones (arm, thumb, memory, bios, save/*, unsafe) report
-  ## through the shared r12 protocol that --mode=jsmolka reads; each is
-  ## all-or-nothing and names the FIRST check it failed, because the ROM stops
-  ## there. Timeouts are generous but the ROMs finish in a handful of frames.
-  ##
-  ## The ppu/ and nes/ ROMs have no self-check at all — they just draw. They
-  ## still make good render regressions, so they are gated on a pinned hash of
-  ## the frame instead. Those hashes are not self-generated goldens: each was
-  ## confirmed byte-identical against BOTH mGBA and NanoBoyAdvance (via
-  ## tools/romfuzz's headless runners) before being written down, so a change
-  ## here means dingbat moved away from two independent implementations.
+  ## arm, thumb, memory, bios, save/*, unsafe report through the r12 protocol
+  ## --mode=jsmolka reads, all-or-nothing, naming the first failed check. The
+  ## ppu/ and nes/ ROMs only draw and ship no reference, so they are gated on
+  ## a pinned hash of the frame.
   var tests: seq[TestDef]
   for (group, rom) in [("arm", "arm"), ("thumb", "thumb"), ("memory", "memory"),
                        ("bios", "bios"), ("save", "none"), ("save", "sram"),
@@ -1890,25 +1338,19 @@ proc build_jsmolka_tests(dir: string): seq[TestDef] =
     ))
   tests
 
-# DenSinH/FuzzARM (GPL-3.0). Five prebuilt ROMs are committed to the repo's
-# master branch; there is no release tag, so the download is pinned to a commit
-# the same way jsmolka is. Bump this SHA and the ROM cache key in
-# .github/workflows/test.yml together.
-#
-# The ROMs are *randomly generated at build time*: the instruction mix, the
-# operands and therefore the expected values are all specific to this SHA. A
-# new SHA means a different 10000 tests, so the committed pass/fail baseline in
-# tests/results.md is only meaningful for this pin. Re-baseline on a bump.
+# DenSinH/FuzzARM (GPL-3.0). Five prebuilt ROMs on the master branch, no
+# release tag, so the download is pinned to a commit; bump it and the ROM
+# cache key in .github/workflows/test.yml together. The ROMs are randomly
+# generated at build time, so a new SHA is a different 10000 tests and the
+# baseline in tests/results.md must be regenerated.
 const FuzzArmRev = "a675329cd57da48e3e406216ba2d79dd7e09ee20"
 
 const FuzzArmRoms = ["ARM_DataProcessing", "ARM_Any",
                      "THUMB_DataProcessing", "THUMB_Any", "FuzzARM"]
 
 proc ensure_fuzzarm_test_roms(): seq[string] =
-  ## Fetch (and cache) the five prebuilt FuzzARM ROMs at the pinned commit.
-  ## They live at the repo root, not in a release archive, so each is pulled
-  ## individually from raw.githubusercontent.com — no zip, nothing to build.
-  ## The short SHA is in the cached filename so a bump can't reuse stale ROMs.
+  ## The five FuzzARM ROMs at the pinned commit, pulled individually from
+  ## raw.githubusercontent.com. The short SHA is in the cached filename.
   var paths: seq[string]
   for rom in FuzzArmRoms:
     paths.add(ensure_rom_download(
@@ -1919,13 +1361,9 @@ proc ensure_fuzzarm_test_roms(): seq[string] =
 
 proc build_fuzzarm_tests(paths: seq[string]): seq[TestDef] =
   ## Each ROM is 10000 randomized instruction tests. --mode=fuzzarm drives the
-  ## ROM's own "press a button to continue" gate so it reports EVERY failing
-  ## test, not just the first, and reads the verdict out of the structured
-  ## 16-word dump the ROM leaves at the base of eWRAM — so no BIOS, no PPU and
-  ## no pinned frame hash sits between the CPU and the score. The per-failure
-  ## detail (instruction, shift, operands, got vs expected r3/r4/CPSR) and a
-  ## rollup by failure class go to stderr; stdout is the one-line tally that
-  ## lands in results.md.
+  ## ROM's "press a button to continue" gate so every failing test is
+  ## reported, reading the 16-word dump at the base of eWRAM. Per-failure
+  ## detail goes to stderr; stdout is the one-line tally for results.md.
   var tests: seq[TestDef]
   for i, rom in FuzzArmRoms:
     tests.add(TestDef(
@@ -1938,24 +1376,17 @@ proc build_fuzzarm_tests(paths: seq[string]): seq[TestDef] =
     ))
   tests
 
-# alloncm/MagenTests (MIT). Tagged releases ship the assembled .gbc files, so
-# this pins a release tag rather than a commit. Covers CGB corners nothing else
-# dingbat runs touches: HBlank VRAM DMA (including that it must stop while the
-# CPU is halted), the KEY0 lock after boot, STAT's reported mode while the PPU
-# is off, and MBC1/3/5 out-of-bounds SRAM addressing.
+# alloncm/MagenTests (MIT). Releases ship the assembled .gbc files, so a
+# release tag is pinned. CGB corners nothing else here touches: HBlank VRAM
+# DMA (must stop while halted), KEY0 lock, STAT while the PPU is off, MBC
+# out-of-bounds SRAM.
 const MagenRelease = "0.5.0"
 
 proc build_magen_tests(): seq[TestDef] =
-  ## Verdict is the screen colour, per src/common.asm's palette and each
-  ## test's README entry — see the mode comment in dingbat_test.nim for why
-  ## this is NOT a screenshot comparison (the repo ships no 160x144 reference
-  ## image; images/ is upscales, swatches and a photo of real hardware).
-  ##
-  ## oam_internal_priority is deliberately absent: it draws a pattern whose
-  ## only stated criterion is prose ("2 pairs of rectangles connected or
-  ## touching each other"), red is a legitimate colour in it, and the only
-  ## reference is a 318x295 SameBoy window grab. There is nothing to score it
-  ## against that would not just be a golden of dingbat's own output.
+  ## Verdict is the screen colour per src/common.asm's palette and each
+  ## test's README entry; the repo ships no 160x144 reference image (see the
+  ## mode comment in dingbat_test.nim). oam_internal_priority is absent: its
+  ## only criterion is prose and red is a legitimate colour in it.
   var tests: seq[TestDef]
   for rom in ["hblank_vram_dma", "key0_lock_after_boot", "mbc_oob_sram_mbc1",
               "mbc_oob_sram_mbc3", "mbc_oob_sram_mbc5", "ppu_disabled_state",
@@ -1975,13 +1406,10 @@ proc build_magen_tests(): seq[TestDef] =
     ))
   tests
 
-# Deliberately a seq, not a fixed-size array: it used to be `array[16, ...]`
-# and every entry added or removed here meant editing the bound too, which is
-# a compile error waiting to happen for no benefit.
+# A seq, not a fixed-size array, so an added entry needs no bound edit.
 const NotScored: seq[(string, string)] = @[
-  # The page's own record of every deliberate skip, so "why isn't X here?"
-  # is answerable from the page itself instead of from runner comments.
-  # Keep in sync with the skip sites (each entry names its builder).
+  # Every deliberate skip, so "why isn't X here?" is answerable from the
+  # results page. Keep in sync with the skip sites (each names its builder).
   ("blargg/oam_bug/7-timing_effect", "broken standalone build: its verbose " &
     "output overruns the $A004..$BFFF text window into the $C000 copy of its " &
     "own code, so it never reports — on real DMG hardware too (docboy#33). " &
@@ -2015,17 +1443,11 @@ const NotScored: seq[(string, string)] = @[
   ("age `ncm*` rows", "CGB running in non-CGB mode, a device this harness " &
     "does not model. (build_age_tests)"),
   ("mooneye-wilbertpol `acceptance/gpu/ly_lyc{,_0,_144,_153}-C` (4 arms)",
-    "they assert a CGB LY=LYC behaviour that both dingbat and SameBoy produce " &
-    "only from CPU CGB D onward, for a `-C` group this 2016 fork's README " &
-    "defines as `cgb+agb+ags` with NO revision axis -- so the claim is as " &
-    "precise as its vocabulary allowed, not a statement about revision C. " &
-    "Upstream mooneye later ADDED that axis (it ships boot_div-cgb0 beside " &
-    "boot_div-cgbABCDE), now benches all six CGB revisions separately, and " &
-    "ships no ly_lyc* at all -- keeping hblank_ly_scx_timing-GS while dropping " &
-    "its -C half. Inference from a deletion, not proof: SameBoy is the only " &
-    "scriptable oracle and this rests on its C/D gates. WEAKEST SKIP IN THIS " &
-    "FILE, revisit with a third revision-modelling emulator or a hardware " &
-    "probe. The `_write` arms of the same family pass and ARE scored. " &
+    "they assert a CGB LY=LYC behaviour dingbat models from CPU CGB D onward, " &
+    "for a `-C` group this 2016 fork's README defines as `cgb+agb+ags` with " &
+    "no revision axis. Upstream mooneye later added that axis and dropped " &
+    "ly_lyc* entirely. Assumed, not hardware-proven: no probe pins the C/D " &
+    "split. The `_write` arms of the same family pass and ARE scored. " &
     "(build_wilbertpol_tests)"),
   ("gambatte `oamdma_src{FE00,FF00}_*read*` DMG rows (9)", "their verdict " &
     "is a byte of uninitialised WRAM. That source fetches through the echo, " &
@@ -2052,7 +1474,7 @@ const NotScored: seq[(string, string)] = @[
     "ldh ($FF0F),a` its three siblings have, so it asserts IF = $E0 across a " &
     "whole frame of LCD-on time it never cleared VBlank in -- restore that " &
     "clear and it passes, strip it from `_c` at identical timing and `_c` " &
-    "produces `_d`'s byte, on dingbat and on SameBoy alike. Both are ROM " &
+    "produces `_d`'s byte. Both are ROM " &
     "defects, not verdicts. The honest suite denominator is 480. " &
     "(build_gbmicrotest_tests)"),
   ("scribbltests/fairylake, scribbltests/winpos", "ship no reference " &
@@ -2074,9 +1496,8 @@ const NotScored: seq[(string, string)] = @[
 ]
 
 proc provenance_line(): string =
-  ## One line of "what produced this file": timestamp, the commit the runner
-  ## ran at (best-effort — absent outside a git checkout), and the ROM-bundle
-  ## version, so a stale page is recognizable as stale.
+  ## Timestamp, commit (absent outside a git checkout) and ROM-bundle version,
+  ## so a stale page is recognizable.
   result = "*Generated: " & now().format("yyyy-MM-dd HH:mm:ss")
   let (sha, code) = execCmdEx("git rev-parse --short HEAD", options = {poUsePath})
   if code == 0 and sha.strip().len > 0:
@@ -2085,11 +1506,8 @@ proc provenance_line(): string =
 
 proc row_detail(r: TestResult): string =
   ## The Result-cell text after the emoji. Aggregated rows always carry their
-  ## pass count (the regression gate compares it); every other failing row
-  ## carries its harness output — flattened to one bounded line so the table
-  ## survives — because a bare eyes-emoji row gives a reader nothing to act
-  ## on, and output that used to be silently dropped ("size mismatch: ...")
-  ## made a failing row look no different from a healthy one.
+  ## pass count (the gate compares it); other failing rows carry their harness
+  ## output flattened to one bounded line.
   if r.always_detail:
     return " " & r.output
   if r.passed:
@@ -2140,19 +1558,10 @@ proc generate_results_md(suites: seq[SuiteResults]): string =
     lines.add("## " & suite.suite_name & " (" & $p & "/" &
       $suite.results.len & ")")
     lines.add("")
-    # A section where everything passes says so in one line instead of
-    # hundreds of identical thumbs-up rows — most of this file was that.
-    #
-    # Nothing is lost to the regression gate. load_previous_results reads the
-    # `(<pass>/<total>)` in the header line directly above and records the
-    # section as all-passing, and run_suite treats "absent from the baseline
-    # but in a section that was all-passing" as "was passing" rather than as
-    # "new, therefore ungated". Aggregated rows are safe here too: they only
-    # ever pass at 100% (`67/67 passed`), so in an all-pass section every count
-    # is already at its maximum and any drop turns the row red, which the
-    # boolean gate catches even though the collapsed section carries no counts
-    # for load_previous_counts to read. The moment ONE row fails, the whole
-    # table comes back and every row is individually keyed again.
+    # An all-pass section collapses to one line. The gate loses nothing:
+    # load_previous_results records the `(<pass>/<total>)` header under
+    # suite_allpass_key and was_passing treats absence there as "was green";
+    # aggregated rows only pass at 100%, so any drop flips the boolean.
     if suite.results.len > 0 and p == suite.results.len:
       lines.add("**All " & $p & " tests passed.**")
     else:
@@ -2161,11 +1570,9 @@ proc generate_results_md(suites: seq[SuiteResults]): string =
       for r in suite.results:
         let emoji = if r.passed: "\xF0\x9F\x91\x8C" else: "\xF0\x9F\x91\x80"
         let dev = if r.device.len > 0: r.device else: "\xE2\x80\x94"
-        # The row name is the FULL test name, suite prefix included. It is the
-        # key the regression comparison reads back (load_previous_results), and
-        # with ~20 suites in here — several of them forks of each other, e.g.
-        # mooneye vs mooneye-wilbertpol, blargg/mem_timing vs mem_timing-2 —
-        # anything shorter collides across suites and silently mis-keys the gate.
+        # The FULL test name, suite prefix included: it is the key the gate
+        # reads back, and forks of suites (mooneye vs mooneye-wilbertpol)
+        # would collide on anything shorter.
         lines.add("| " & r.name & " | " & dev & " | " & emoji & row_detail(r) & " |")
     if suite.suite_name == "GBA - mGBA Test Suite":
       lines.add("")
@@ -2190,42 +1597,25 @@ proc generate_results_md(suites: seq[SuiteResults]): string =
 
 proc suite_allpass_key(suite_name: string): string =
   ## Key under which load_previous_results records "this whole section was
-  ## passing in the baseline". It lives in the same table as the per-test
-  ## entries rather than in a second one so that every existing run_suite call
-  ## site keeps working unchanged; the NUL prefix is what keeps it from ever
-  ## colliding with a real test name, which cannot contain one.
+  ## passing". Same table as the per-test entries; the NUL prefix cannot
+  ## collide with a real test name.
   "\0suite-all-passed\0" & suite_name
 
 proc was_passing(previous: Table[string, bool];
                  suite_name, test_name: string): bool =
-  ## Did the committed baseline have this row green?
-  ##
-  ## A name the baseline does not carry is normally ungated — that is how a
-  ## newly added suite avoids reporting every row as a regression on its first
-  ## run. The exception is a section the baseline COLLAPSED because everything
-  ## in it passed: there, absence means "was green", not "unknown".
-  ##
-  ## Every regression gate in this file must go through here. There are four of
-  ## them and they do NOT share a code path (run_suite, run_microtest_suite,
-  ## run_mgba_suite and the gambatte group loop each roll their own), so fixing
-  ## only the obvious one leaves the other three silently disarmed for exactly
-  ## the sections that collapse. That was the state this proc was written to
-  ## end, and it was caught by faking an all-pass GBMicrotest baseline and
-  ## watching 52 real failures come back as zero regressions.
+  ## Did the committed baseline have this row green? A name absent from the
+  ## baseline is ungated (new suites), EXCEPT inside a section the baseline
+  ## collapsed as all-passing, where absence means "was green". Every
+  ## regression gate must go through here: run_suite, run_microtest_suite,
+  ## run_mgba_suite and the gambatte loop do not share a code path.
   if test_name in previous: previous[test_name]
   else: previous.getOrDefault(suite_allpass_key(suite_name))
 
 proc load_previous_results(path: string): Table[string, bool] =
-  ## The committed baseline, keyed by the full test name exactly as
-  ## generate_results_md writes it. A name that is not in the table (a suite
-  ## added since the baseline was committed) is simply not gated — which is why
-  ## the baseline has to be regenerated and committed whenever suites are added.
-  ##
-  ## Sections that were entirely green are collapsed to "All N tests passed."
-  ## and have no rows to read, so their `## <name> (<pass>/<total>)` header is
-  ## the record instead: it is stored under suite_allpass_key and run_suite
-  ## falls back to it. Without that, collapsing a section would quietly turn
-  ## its regression gate off — the opposite of what a green section deserves.
+  ## The committed baseline keyed by full test name as generate_results_md
+  ## writes it; a name not present is not gated, so the baseline must be
+  ## regenerated when suites are added. Collapsed all-green sections have no
+  ## rows, so their `## <name> (<pass>/<total>)` header is recorded instead.
   result = initTable[string, bool]()
   if not fileExists(path):
     return
@@ -2261,11 +1651,9 @@ proc load_previous_results(path: string): Table[string, bool] =
         result[name] = passed
 
 proc load_previous_counts(path: string): Table[string, int] =
-  ## Pass COUNTS from a committed results.md, for the rows that report
-  ## "<passes>/<total> passed" (the aggregated suites). A row that goes from
-  ## 1974/2020 to 1970/2020 is a regression even though its pass/fail bit
-  ## never changed, so the aggregated suites gate on this rather than on
-  ## load_previous_results' boolean.
+  ## Pass COUNTS for the aggregated "<passes>/<total> passed" rows: a drop
+  ## from 1974/2020 to 1970/2020 is a regression even though the pass/fail
+  ## bit never changed.
   result = initTable[string, int]()
   if not fileExists(path):
     return
@@ -2289,19 +1677,14 @@ proc load_previous_counts(path: string): Table[string, int] =
             break cells
 
 proc device_label(t: TestDef): string =
-  ## The results.md Device column: which hardware the row is scored on.
-  ## "cart" means no override — the cart header picks the device, which
-  ## resolves to DMG-ABC for a DMG cart and CPU CGB C for a CGB one (see
-  ## gb_set_revision). A --model token rides along after the base, so the
-  ## column also exposes contradictions (a row asking for --cgb AND an SGB
-  ## boot table prints as "CGB sgb"). GBA rows have no device axis.
+  ## The results.md Device column. "cart" = no override, the header picks
+  ## (DMG-ABC for a DMG cart, CPU CGB C for a CGB one, see gb_set_revision).
+  ## A --model token rides along, which also exposes contradictions ("CGB
+  ## sgb"). GBA rows have no device axis.
   if t.mode in {tmMgba, tmMgbaSuite, tmJsmolka, tmFuzzArm}:
     return ""
-  # ...and neither does a GBA ROM scored by SCREENSHOT. jsmolka's ppu/ and nes/
-  # ROMs are compared by frame hash rather than by its own pass protocol, so
-  # they arrive here as tmScreenshot and used to fall into the DMG fallback
-  # below — printing "DMG" against four .gba rows. The mode does not identify
-  # the machine; the ROM does.
+  # Nor does a GBA ROM scored by screenshot (jsmolka's ppu/ and nes/ rows):
+  # the mode does not identify the machine, the ROM does.
   if t.rom_path.endsWith(".gba"):
     return ""
   result =
@@ -2346,24 +1729,15 @@ proc run_suite(name: string; tests: seq[TestDef]; harness: string;
 
 proc run_sharded_batch(harness, mode, work_name, prefix: string;
                        list_lines: seq[string]): seq[string] =
-  ## Runs `list_lines` through one `--mode=<mode> --list=<file>` process per
-  ## core and returns, per input line, the verdict its shard reported — the
-  ## remainder of the `<prefix> <local index> <...>` line the harness wrote,
-  ## or "" if no verdict came back for it.
+  ## One `--mode=<mode> --list=<file>` process per core; returns, per input
+  ## line, the verdict its shard wrote (`<prefix> <local index> <...>`) or ""
+  ## if none came back. Rows build a fresh emulator each and write no files,
+  ## so sharding cannot change a verdict.
   ##
-  ## This exists because two suites (gambatte, GBMicrotest) are thousands of
-  ## runs whose per-ROM emulation is far cheaper than a fork/exec. Splitting
-  ## them cannot change a verdict: every list entry builds a fresh emulator and
-  ## none of them write files.
-  ##
-  ## Spawn rule, which is the whole reason this is one shared proc: real argv,
-  ## no shell, no redirection, and `--out` so the CHILD opens its own verdict
-  ## file. Do NOT rebuild this as a command string ending in `> out.txt 2>&1`.
-  ## Nim's poEvalCommand is `/bin/sh -c` on POSIX but goes straight to
-  ## CreateProcessW on Windows, where those tokens are not redirection but
-  ## three more argv entries — the verdicts then land in a pipe that nothing
-  ## drains, every shard blocks on a full buffer, and the job hangs until it is
-  ## killed. That cost the Windows CI job six hours a push (see 23dcae4).
+  ## Spawn with real argv and `--out`, never a command string ending in
+  ## `> out.txt 2>&1`: poEvalCommand is not a shell on Windows, the tokens
+  ## become argv, the verdicts land in an undrained pipe and every shard
+  ## blocks (23dcae4).
   result = newSeq[string](list_lines.len)
   if list_lines.len == 0: return
   let work_dir = getTempDir() / work_name
@@ -2416,11 +1790,8 @@ proc split_verdict(v: string): tuple[passed: bool; detail: string] =
 proc run_microtest_suite(name: string; tests: seq[TestDef]; harness: string;
                          previous: Table[string, bool];
                          regressions: var seq[string]): SuiteResults =
-  ## GBMicrotest, batched. 513 ROMs that each run for two frames: a process
-  ## apiece made spawn+load the whole cost (11.2s of the runner's 31s locally,
-  ## and process creation is dearer on Windows). Same rows, same verdicts, one
-  ## process per core. These ROMs are `no_save` and write nothing, so there is
-  ## no state for concurrent entries to race.
+  ## GBMicrotest, batched one process per core: spawn+load dominated a
+  ## process-per-ROM run. The ROMs are no_save and write nothing.
   echo &"\n=== {name} ==="
   var list_lines: seq[string]
   for t in tests: list_lines.add($t.timeout & "\t" & t.rom_path)
@@ -2441,26 +1812,13 @@ proc run_mgba_suite(harness: string; previous: Table[string, bool];
                     detail: var seq[MgbaSuiteDetail];
                     bios_path: string = ""): SuiteResults =
   echo &"\n=== GBA - mGBA Test Suite ==="
-  # The suite ROM tracks mattrbeck/mgba-suite-auto's LATEST release rather than
-  # a pinned tag, at the maintainer's request. That URL is a moving target, so
-  # the sha1 below is what tests/results_mgba_suite.md was baselined against
-  # and a mismatch is reported loudly — otherwise a new upstream release would
-  # silently re-baseline the whole section and look like an emulator change.
-  # It is a warning, not a failure: the runner still scores the ROM it got.
-  #
-  # When it does move, rebaselining is part of the same commit as the bump
-  # here, and the row COUNT can change as well as the scores (going from v1.0
-  # to this build, DMA went 1256 -> 1244 as two DMA0 wrap-around tests were
-  # de-flaked, and Misc 10 -> 12 as "DMA count latching" was added). Also bump
-  # `suite<n>` in the rom-cache `key:` in .github/workflows/test.yml — that key
-  # is exact-match, so a stale key serves the OLD ROM from cache and the change
-  # looks like a no-op.
-  #
-  # Note the Misc "H-blank bit start" Flip rows measure dingbat's idle-loop
-  # SKIP RESOLUTION, not its PPU timing: they spin on DISPSTAT and the waitloop
-  # fast-forward resolves the edge at whatever bound it was given, so they move
-  # by a whole quantum whenever anything shifts the loop's phase. The "Hblank"
-  # row is different and is a real defect — see docs/mgba-suite-verdicts.md.
+  # The suite ROM tracks mattrbeck/mgba-suite-auto's LATEST release, so the
+  # sha1 is what tests/results_mgba_suite.md was baselined on; a mismatch is
+  # a loud warning, not a failure. On a bump, rebaseline in the same commit
+  # (row counts can change too) and bump `suite<n>` in the rom-cache key in
+  # .github/workflows/test.yml, or the stale key serves the old ROM.
+  # The Misc "H-blank bit start" Flip rows measure the waitloop skip
+  # resolution, not PPU timing (docs/mgba-suite-verdicts.md).
   const MgbaSuiteSha1 = "00480cf1d95de6236ddcbf7026fc6e11c384528a"
   let rom_path = ensure_rom_download(
     "https://github.com/mattrbeck/mgba-suite-auto/releases/latest/download/suite.gba",
@@ -2521,11 +1879,9 @@ proc run_mgba_suite(harness: string; previous: Table[string, bool];
         if reason.startsWith("Got ") and reason.contains(" vs "):
           let inner = reason[4 .. ^1]  # strip "Got "
           let vs_pos = inner.find(" vs ")
-          # misc-edge.c is the one suite source whose doResult call passes
-          # (expected, value) where every other file passes (value, expected),
-          # so for this section alone the ROM's own constant is printed as
-          # "Got" and OUR measurement as "vs". Un-swap it here rather than
-          # print the table backwards (see docs/mgba-suite-verdicts.md).
+          # misc-edge.c alone passes (expected, value) to doResult where every
+          # other suite source passes (value, expected); un-swap it here
+          # (docs/mgba-suite-verdicts.md).
           let swapped = current_suite.startsWith("Misc")
           current_tests[^1].actual =
             if swapped: inner[vs_pos + 4 .. ^1] else: inner[0 ..< vs_pos]
@@ -2589,33 +1945,17 @@ proc generate_mgba_detail_md(details: seq[MgbaSuiteDetail]): string =
   lines.join("\n")
 
 # ==================== gambatte ====================
-#
-# sinamas' gambatte suite, shipped inside the same game-boy-test-roms bundle as
-# Blargg/Mooneye/Mealybug/SameSuite — 3,524 ROMs, no extra download. The rules
-# for turning a filename into a test are the bundle's own
-# gambatte/game-boy-test-roms-howto.md; --mode=gambatte in dingbat_test.nim
-# carries the long-form explanation and does the scoring. In brief:
-#
-#   * `dmg08` in the name = a DMG test, `cgb04c` = a CGB test. Most ROMs carry
-#     both and are two rows here.
-#   * `_out<hex>` is the expected value, per device, rendered on screen as hex
-#     glyphs. `_outaudio0/1` is an audio test (see below). An `x` in front of a
-#     tag disables it.
-#   * a <rom>_dmg08.png / _cgb04c.png / _dmg08_cgb04c.png next to the ROM makes
-#     it a full-frame screenshot test instead.
-#
-# NOT scored: the 220 `_outaudio0/1` rows. Gambatte decides them by asking
-# whether all 35,112 samples of the final frame are identical — that is a
-# 2 MHz sample stream, one sample per two clocks, and several of those ROMs
-# turn on a difference lasting a handful of clocks (ch1_duty0_pos6_to_pos7_*).
-# dingbat's APU emits at 32,768 Hz, 64x coarser, so a faithful verdict is not
-# available from the sample path as it stands and a coarse one would be
-# scored noise. Also not scored: gambatte's AGB column, which its own runner
-# marks "FIXME: Actual AGB results" and gives the CGB expectations.
-#
-# Reporting is per-subdirectory (`| oamdma | 800/884 passed |`), like the mGBA
-# suite: 5,005 individual rows would drown results.md. The per-test detail
-# goes to tests/results_gambatte.md.
+# sinamas' gambatte suite, in the game-boy-test-roms bundle. Filename rules
+# per gambatte/game-boy-test-roms-howto.md (scoring in --mode=gambatte):
+#   * `dmg08` = a DMG test, `cgb04c` = a CGB test; most ROMs carry both.
+#   * `_out<hex>` is the expected value per device, drawn as hex glyphs;
+#     `_outaudio0/1` is an audio test; an `x` prefix disables a tag.
+#   * a <rom>_dmg08.png / _cgb04c.png / _dmg08_cgb04c.png beside the ROM
+#     makes it a screenshot test.
+# Not scored: the 220 `_outaudio0/1` rows (the verdict needs a 2 MHz sample
+# stream; dingbat's APU emits at 32,768 Hz) and the AGB column (gambatte's
+# runner marks it FIXME). Reported per subdirectory; detail in
+# tests/results_gambatte.md.
 
 type
   GambatteRow = object
@@ -2633,34 +1973,19 @@ type
     failures: seq[(string, string)]  # (row name, detail)
 
 proc gambatte_hex_prefix(tail: string): string =
-  ## The leading run of hex digits, which is exactly what gambatte's runner
-  ## reads: it walks the filename tail glyph by glyph and stops at the first
-  ## character that is not 0-9/A-F (the '.' of the extension, or the '_' that
-  ## starts the other device's tag).
+  ## The leading run of hex digits: gambatte's runner walks the tail glyph by
+  ## glyph and stops at the first non-hex character.
   for c in tail:
     if c in {'0'..'9', 'a'..'f', 'A'..'F'}: result.add(c)
     else: break
 
 proc gambatte_row_reads_powerup_wram(stem: string): bool =
-  ## True for the gambatte `oamdma` rows whose DMG verdict is a byte of
-  ## UNINITIALISED WRAM, which nothing spec-correct can score.
-  ##
-  ## An OAM DMA source at or above $E000 fetches through the echo, so a $FE00
-  ## or $FF00 source reads $DE00 / $DF00 (the mapping mooneye
-  ## `oam_dma/sources-GS` pins, and which dingbat passes). A CPU read that
-  ## COLLIDES with that transfer's bus gets the DMA's latch instead of its own
-  ## byte -- so on DMG these rows print whatever the capture rig happened to
-  ## leave in high WRAM, and Pan Docs says outright not to rely on it
-  ## ("The console's WRAM and HRAM are random on power-up"). See
-  ## GB_POWERUP_WRAM_PATTERN in gb.nim: zeroing just those two pages buys all
-  ## of them back and is deliberately not done, because it fits gambatte's rig
-  ## rather than hardware.
-  ##
-  ## The collision is what decides it, not the source: the same family's
-  ## `busyread8000` (video bus) and `busyreadFF4B` (IO) rows do NOT collide,
-  ## are scoreable, and are scored. Nor does the CGB arm -- there a source at
-  ## or above $E000 is driven onto the external bus, where nothing answers, so
-  ## the byte is a defined $FF.
+  ## gambatte `oamdma` rows whose DMG verdict is a byte of uninitialised WRAM.
+  ## A $FE00/$FF00 source fetches through the echo ($DE00/$DF00, mooneye
+  ## oam_dma/sources-GS) and a colliding CPU read gets the DMA's latch; Pan
+  ## Docs says WRAM is random on power-up (GB_POWERUP_WRAM_PATTERN). The
+  ## non-colliding `busyread8000`/`busyreadFF4B` rows and the CGB arm (source
+  ## on the external bus, reads $FF) are scored.
   if not (stem.startsWith("oamdma_srcFE00_") or
           stem.startsWith("oamdma_srcFF00_")): return false
   for target in ["read0000", "readA000", "readC000", "readFE00", "readFE45"]:
@@ -2733,11 +2058,8 @@ proc run_gambatte_suite(harness: string; previous: Table[string, bool];
     echo "  Warning: gambatte directory held no scorable ROMs"
     return SuiteResults(suite_name: "Game Boy - gambatte")
 
-  # One process per ROM would cost more than the emulation: each row is 15
-  # frames (a few ms), and there are thousands of them. run_sharded_batch puts
-  # them through one --mode=gambatte process per core. Rows are independent —
-  # each builds a fresh GB — so the split cannot change a verdict;
-  # `tests/README.md` records how that was verified.
+  # Sharded one --mode=gambatte process per core (run_sharded_batch); rows
+  # are independent, so the split cannot change a verdict.
   var list_lines: seq[string]
   for r in rows:
     list_lines.add(r.dev & "\t" & r.kind & "\t" & r.expected & "\t" & r.rom)
@@ -2778,11 +2100,9 @@ proc run_gambatte_suite(harness: string; previous: Table[string, bool];
       # each ROM's own filename), so the aggregate has no single device.
       device: "per-ROM",
     ))
-    # Regression on either bit: a group that used to be all-green going red, or
-    # a group whose pass COUNT dropped. Key on `short_name`, the FULL row name:
-    # that is what generate_results_md writes and what load_previous_results /
-    # load_previous_counts read back. Keying on the bare group name here reads
-    # an empty table and silently ungates all 48 rows.
+    # Regression on either bit: an all-green group going red, or a pass COUNT
+    # dropping. Key on `short_name`, the FULL row name, which is what the
+    # baseline loaders read back; the bare group name ungates every row.
     if was_passing(previous, "Game Boy - gambatte", short_name) and not all_pass:
       regressions.add(short_name)
     elif previous_counts.hasKey(short_name) and g.passes < previous_counts[short_name]:
@@ -2856,11 +2176,8 @@ proc main() =
           quit(1)
       else: discard
 
-  # --apu (or --suite=apu) is a fast-iteration filter: it runs ONLY the GB APU
-  # suites and prints tallies without touching any results file. The same
-  # three suites are also part of the default run below — they used to be
-  # opt-in-only, which meant 94 cases (blargg dmg_sound/cgb_sound, SameSuite
-  # apu/) never ran in CI and had no written record at all.
+  # --apu (or --suite=apu): run ONLY the GB APU suites and print tallies
+  # without touching any results file. They are also in the default run.
   if apu_only:
     let gb_roms = ensure_gameboy_test_roms()
     let no_previous = initTable[string, bool]()
@@ -2939,10 +2256,7 @@ proc main() =
   let mealybug_tests = build_mealybug_tests(gb_test_roms_dir / "mealybug-tearoom-tests")
   all_suites.add(run_suite("Game Boy - Mealybug Tearoom", mealybug_tests, harness, previous, regressions))
 
-  # GBMicrotest (HRAM verdict byte)
-  # Batched rather than a process per ROM — see run_microtest_suite. Same rows
-  # and same verdicts as run_suite would produce, which is gated by results.md
-  # coming back byte-identical.
+  # GBMicrotest (HRAM verdict byte), batched; see run_microtest_suite.
   all_suites.add(run_microtest_suite("Game Boy - GBMicrotest",
     build_gbmicrotest_tests(gb_test_roms_dir / "gbmicrotest"),
     harness, previous, regressions))
@@ -2952,13 +2266,11 @@ proc main() =
     build_age_tests(gb_test_roms_dir / "age-test-roms"),
     harness, previous, regressions))
 
-  # The bundle's small screenshot suites (bully, strikethrough, scribbltests,
-  # turtle-tests, cgb-acid-hell, little-things-gb, mbc3-tester)
+  # The bundle's small screenshot suites
   all_suites.add(run_suite("Game Boy - Screenshot suites",
     build_small_screenshot_tests(gb_test_roms_dir), harness, previous, regressions))
 
-  # SameSuite dma/ppu/interrupt (mooneye-style verdict); these do not need
-  # the audio path at all.
+  # SameSuite dma/ppu/interrupt (mooneye-style verdict)
   all_suites.add(run_suite("Game Boy - SameSuite",
     build_samesuite_core_tests(gb_test_roms_dir / "same-suite"),
     harness, previous, regressions))
@@ -2968,8 +2280,7 @@ proc main() =
     build_samesuite_apu_tests(gb_test_roms_dir / "same-suite"),
     harness, previous, regressions))
 
-  # The gbdev shootout's own ROMs: rtc3test, CasualPokePlayer's MBC3 tests and
-  # daid's STOP/speed-switch tests (screenshot comparison)
+  # The gbdev shootout's own ROMs (screenshot comparison)
   all_suites.add(run_suite("Game Boy - Shootout ROMs",
     build_shootout_tests(), harness, previous, regressions))
 

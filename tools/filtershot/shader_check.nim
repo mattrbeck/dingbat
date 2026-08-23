@@ -1,8 +1,6 @@
 ## Compile-checks the desktop GL 3.3 present shader (src/dingbat.nim FRAG_SRC)
-## against a real GL context, from a hidden SDL window — no visible UI. The web
-## twin of the shader is exercised by web/render.test.mjs in headless Chromium;
-## this closes the same gap for the native copy, whose only other compile check
-## is launching the app.
+## in a real GL context from a hidden SDL window (web/render.test.mjs does the
+## same for the web twin).
 ##
 ## Build: nim c -d:release --path:src -o:tools/filtershot/shader_check \
 ##          tools/filtershot/shader_check.nim

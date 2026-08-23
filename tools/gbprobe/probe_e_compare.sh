@@ -1,29 +1,17 @@
 #!/usr/bin/env bash
-# probe_e_compare -- dingbat against SameBoy on probe (e), settings by settings.
+# probe_e_compare -- dingbat against the sameboy_runner on probe (e), setting
+# by setting (docs/hwprobe.md records the runner's validation against the
+# GBA SP photographs for this probe).
 #
-# WHY SAMEBOY IS ALLOWED TO BE THE ORACLE HERE. It normally is not: Pan Docs
-# and datasheets are the spec, and other emulators are cross-checks. But for
-# this one probe SameBoy was measured against the GBA SP on all eight
-# photographed settings and reproduced the staircase column for column -- five
-# of the eight byte for byte, the other three differing only in the last band,
-# where the photograph's own perspective drift is worth a pixel. That is a
-# stronger agreement than any single photograph can establish on its own, and
-# it means the rest of the sweep no longer needs a hardware session: a setting
-# SameBoy and dingbat disagree on is a setting worth a photograph, and one they
-# agree on is not.
-#
-#   tools/gbprobe/probe_e_compare.sh [--dmg] [SCX ...]
+#   tools/gbprobe/probe_e_compare.sh [--dmg] [--quiet] [SCX ...]
 #
 # Sweeps object X = OFF, 0..7 at each SCX given (default 0 4 7) and prints the
 # two staircases wherever they differ. Build dingbat_test with whatever knob is
 # under test first; this script only reads it.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
-# SameBoy's runner is hardcoded to GB_MODEL_CGB_E, and dingbat defaults
-# to CGB-C. Every comparison here must therefore force rev E or it is
-# measuring the CGB-C/CGB-D palette-step split on top of whatever it
-# meant to measure -- which is exactly what happened, unnoticed, to every
-# probe number in this tree until 2026-08-18. SB_REV overrides.
+# The runner is built for CGB-E and dingbat defaults to CGB-C; force rev E
+# or the C/D palette-step split lands in the count. SB_REV overrides.
 SB_REV=${SB_REV:---cgb-rev=E}
 T=${TMPDIR:-/tmp}/probe_e_cmp
 mkdir -p "$T"

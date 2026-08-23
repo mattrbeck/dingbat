@@ -2,11 +2,10 @@
 @
 @ Unlike linktest.s, which latches its parent/child role ONCE at boot, this
 @ ROM re-reads the SI pin on every iteration, so it can be launched with NO
-@ cable attached (both units read SI=1 from the no-cable driver and simply
-@ wait) and have the link plugged in LATER — exactly the browser's mid-game
-@ "link cable detected" attach flow. The harness boots two cores cable-less,
-@ lets them spin in the negotiate loop, attaches the lockstep link, and then
-@ requires the rounds to complete.
+@ cable attached (both units read SI=1 and wait) and have the link plugged
+@ in LATER — the browser's mid-game attach flow. The harness boots two cores
+@ cable-less, attaches the lockstep link, then requires the rounds to
+@ complete.
 @
 @ Once attached, unit 0 reads SI=0 -> becomes the multi-mode parent (sends
 @ 0xA000|round); unit 1 reads SI=1 -> stays the child (answers 0xB000|round).

@@ -1,12 +1,13 @@
-@ capdma.s — WHAT: video-capture DMA3 (Special timing).  Rumor said it
-@ only runs every other frame (screen polarity inversion?); and does
-@ hardware clear the enable bit itself?
+@ capdma.s — WHAT: video-capture DMA3 (Special timing).  Does it run
+@ only every other frame (screen polarity inversion?), and does hardware
+@ clear the enable bit itself?
 @
 @ HOW: DMA3 is armed at a vblank in Special timing with repeat, a fixed
 @ nonzero ROM source and an incrementing EWRAM destination ring that
 @ was zeroed first.  After each of three frames the ring's nonzero-word
 @ count is snapshotted (capdma_count) — per-frame deltas of 160*4 mean
-@ it triggered on every line; alternating deltas would mean the rumor.
+@ it triggered on every line; alternating deltas would mean every other
+@ frame.
 @ Then the enable readback answers the self-clear question, and the
 @ second half re-arms at each of three successive vblanks — the pattern
 @ games actually use — counting again.
@@ -18,8 +19,8 @@
 @ count stays 0x280 because a re-enable reloads the internal
 @ destination from DAD, overwriting the ring in place.
 @
-@ PROVENANCE: verified on GBA SP AGS-001 (sessions 2+3, gbaedge page 22
-@ CAPDMA, slot CRC F9B7); see docs/hwprobe-results-agb.md.
+@ PROVENANCE: verified on GBA SP AGS-001 (gbaedge page 22 CAPDMA, slot
+@ CRC F9B7); see docs/hwprobe-results-agb.md.
     .arm
     .text
     .global _start

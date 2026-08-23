@@ -116,18 +116,14 @@ proc main() =
   check(a.head == frames and b.head == frames, "peers did not both reach the end")
   check(a.confirmed == frames - 1 and b.confirmed == frames - 1, "peers did not fully confirm")
   check(a.rollbacks > 0 and b.rollbacks > 0, "no rollbacks — test would be vacuous")
-  # THE netplay correctness bar: the two peers — each rolling back independently
-  # at its own latency — must converge to BYTE-IDENTICAL state. This is what
-  # keeps a real trade in sync; it is verified even under asymmetric latency
-  # (--delay vs --delay2) with different per-peer rollback counts.
+  # The netplay correctness bar: both peers, rolling back independently at
+  # their own latency, must converge to byte-identical state.
   check(a.checksum() == b.checksum(), "the two peers disagree (DESYNC — trade would corrupt)")
-  # Informational: parity with a NON-rollback straight run. Identical while the
-  # games aren't linking; once serial transfers are in flight, the lockstep
-  # coordinator's run_to advances a peer to a sub-cycle-different point during a
-  # re-simulated frame than during a first-time frame, so the rollback path
-  # differs infinitesimally from a straight run. Both peers share that
-  # difference IDENTICALLY (the A==B check above proves it), so the trade is
-  # unaffected — this line is a heads-up, not a failure.
+  # Informational: parity with a straight (non-rollback) run. Once serial
+  # transfers are in flight the lockstep coordinator's run_to advances a peer
+  # to a sub-cycle-different point during a re-simulated frame, so the
+  # rollback path can differ from a straight run; both peers share that
+  # difference (the A==B check), so it is a heads-up, not a failure.
   let truthParity = a.checksum() == want and b.checksum() == want
   echo "  peers agree (A==B): ", a.checksum() == b.checksum(),
        " | straight-run parity: ", truthParity,

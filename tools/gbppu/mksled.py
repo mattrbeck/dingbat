@@ -18,18 +18,14 @@ ROM's own compare does, so a probe that just stores A is enough:
     e0 82  ldh ($FF82),a      ; verdict = PASS so the harness prints it
     18 fe  jr  $-2
 
-Two probes that paid for themselves on 2026-08-21, both cut from
-`line_153_lyc0_stat_timing_c` at $01CC so they share one clock:
+Example probes (cut from `line_153_lyc0_stat_timing_c` at $01CC):
 
-  READ the STAT flag          f0 41 <store A>          k 16 -> 17, both emulators
-  CATCH the IF rising edge    af e0 0f f0 0f <store A> a 3-M window: $E2 in, $E0 out
+  READ the STAT flag          f0 41 <store A>
+  CATCH the IF rising edge    af e0 0f f0 0f <store A>   3-M window: $E2 in, $E0 out
   RULE the dispatch           3e 02 e0 ff af e0 0f fb af <400 x 3c> <store A>
 
-The third is the sharpest of the three and needs no sled at all: `ei` with IF
-just cleared, then a run of `inc a`, and a handler at $0048 that stores A.  The
-byte it reports IS the M-cycle the interrupt was dispatched on, at 1-M-cycle
-resolution, with no aperture to cancel -- dingbat read $09 against SameBoy's
-$08 there, and that one byte is the whole of `LYC_SRC_RELATCH_LEAD`.
+The third needs no sled: `ei` with IF just cleared, a run of `inc a`, and a
+handler at $0048 that stores A, so the byte reported is the dispatch M-cycle.
 
 Run both sides with `tools/gbfuzz/sameboy_microtest <bootdir> <rom> 15 dmg` and
 `./dingbat_test <rom> --mode=microtest --timeout=2 --nosave`.

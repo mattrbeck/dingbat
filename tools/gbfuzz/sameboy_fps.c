@@ -1,5 +1,5 @@
-/* Frames-per-emulated-second probe for SameBoy — the reference half of the
- * frame-pacing comparison; dingbat_gb_fps.nim is the other half.
+/* Frames-per-emulated-second probe for SameBoy (links libsameboy); the
+ * reference half of the frame-pacing comparison, dingbat_gb_fps.nim the other.
  *
  * Usage: sameboy_fps <rom> <bootromdir> <frames> [skipframes] [script] [window]
  *
@@ -12,9 +12,7 @@
  *
  * script is the gbfuzz nav format: FRAME:KEY[:HOLD],... over the whole run
  * (frame numbers counted from power-on, i.e. including the skipped ones).
- * window>0 prints an fps line every <window> frames instead of one total —
- * use it to find the LCD-toggling stretches, which is where the two models
- * would diverge if they were going to.
+ * window>0 prints an fps line every <window> frames instead of one total.
  *
  * Emulated time is accumulated from GB_run()'s return value, which is in fixed
  * 8 MHz units regardless of CGB double-speed. cycles/2 = 4194304 Hz dots.
@@ -22,10 +20,8 @@
  * which GB_timing_sync zeroes from inside the vblank callback in turbo mode,
  * so the value it hands back is always 0.
  *
- * mGBA is deliberately not part of this comparison: it does not push a frame
- * on an LCD off/on transition at all, it lets the frame it is in run long (a
- * single 666480-dot "frame" on Link's Awakening), so its presents-per-second
- * is a different quantity rather than a second opinion on the same one.
+ * mGBA is not part of this comparison: it does not present a frame on an LCD
+ * off/on transition, so its presents-per-second is a different quantity.
  *
  * Build: see build.sh.
  */

@@ -3,9 +3,8 @@
 dingbat, screenshot at checkpoints, diff perceptually, verify divergences
 against reference bursts to cancel frame skew.
 
-SameBoy is the authority: a checkpoint passes only when dingbat matches it.
-mGBA is run and reported alongside as context — agreeing with mGBA where
-SameBoy differs tells you the shape of a divergence, but it is not a pass.
+A checkpoint passes only when dingbat matches the SameBoy frame; mGBA is
+reported alongside as context, not as a pass.
 
 Usage: sweep.py <workdir> [--jobs N] [--titles substr] [--selected f] [--out f]
   workdir needs: selected_roms.json (title -> rom basename), roms/<basename>,
@@ -27,19 +26,14 @@ RUNNERS = {
     'dingbat': [os.path.join(HERE, 'dingbat_gb_nav')],
 }
 REFS = ('sameboy', 'mgba')
-# Start, then A repeatedly: the generic "get through the title screen and the
-# first menus" pattern. Checkpoints sit between input bursts so each shot lands
-# on a different stage of the game. Frame 0 is power-on and every runner plays
-# the boot ROM, so the first input waits out the CGB boot animation (~200
-# frames; the DMG one is ~60).
+# Start, then A repeatedly, with checkpoints between input bursts. Frame 0 is
+# power-on with the boot ROM, so the first input waits out the CGB boot
+# animation (~200 frames).
 SCRIPT = '260:START,420:A,600:START,800:A,1000:A,1250:START,1500:A'
 SHOTS = [350, 700, 1150, 1650]
-# Verification window around a checkpoint: dense near zero, coarse far out.
-# Wide because a cutscene one emulator lets run a second longer than another
-# puts the scripted A press on a different screen, and that offset dwarfs the
-# frame-or-two of lag skew a narrow window cancels. Dense because water and
-# fire animations cycle every few frames, so a coarse step walks straight past
-# the matching phase and reports a scene difference that isn't one.
+# Verification window around a checkpoint: wide, because a cutscene that runs
+# a second longer moves the scripted press to another screen; dense near zero,
+# because water/fire animations cycle every few frames.
 BURST = sorted(set(list(range(-12, 13)) + list(range(-150, 151, 10))))
 AUTO_NOINPUT = False   # for flagged titles, also compare a no-input run
 PRUNE_CLEAN = False    # delete run artifacts for clean titles (bulk mode)
@@ -111,11 +105,9 @@ def sweep_title(workdir, title, rom_base):
                     if ref in live_refs else dict(MARK))
             result['shots'][f] = shot
         # Final verdict: dingbat must match SameBoy. When the direct comparison
-        # fails, re-check against a burst of SameBoy frames around the
-        # checkpoint to cancel lag-frame skew — emulators accumulate different
-        # lag, so a scripted press can land on a different screen without
-        # anything being rendered wrong. mGBA gets the same burst treatment
-        # purely so the report can say whether dingbat lines up with it.
+        # fails, re-check against a burst of frames around the checkpoint to
+        # cancel lag-frame skew. mGBA gets the same burst so the report can say
+        # whether dingbat lines up with it.
         for f in SHOTS:
             shot = result['shots'][f]
             authority = shot['dingbat_vs_sameboy']['verdict']

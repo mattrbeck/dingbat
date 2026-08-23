@@ -4,11 +4,8 @@
 Usage: readout.py <shot.ppm> [--glyphs N] [--ascii]
 
 gambatte's test ROMs render their result as hex glyphs in the top-left corner,
-and the expected value is in the ROM's own filename (`..._cgb04c_out3`), so a
-screenshot plus a filename is a self-adjudicating test -- no second emulator
-required. This turns the screenshot back into the value, so a divergence can
-be stated as "dingbat says 3, docboy says 0, the ROM name says 0" instead of
-as a pixel count.
+and the expected value is in the ROM's own filename (`..._cgb04c_out3`). This
+turns the screenshot back into the value.
 
 The glyphs are the 8x8 tiles at the top-left, drawn as seven-segment figures.
 Segments are sampled at fixed positions inside each tile and matched against
@@ -64,8 +61,7 @@ def read_ppm(path):
 
 def glyphs(path, nglyphs):
     """Decode the first `nglyphs` result glyphs. Importable so a sweep does
-    not pay a process spawn per screenshot -- four spawns per ROM dominated
-    the runtime of a 1,500-ROM sweep."""
+    not pay a process spawn per screenshot."""
     w, h, body = read_ppm(path)
 
     def dark(x, y):

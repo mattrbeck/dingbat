@@ -20,15 +20,10 @@ import dingbat/common/lcd_response
 type InputEvent = tuple[frame: int, key: Input, pressed: bool]
 
 # ---- Frame-sequence dump (DINGBAT_BENCH_DUMP_SEQ=<first>:<count>) ----
-#
-# Writes `count` consecutive framebuffers to DUMP_PATH as one file, which is
-# what an alternate-frame flicker has to be looked at through: a single
-# screenshot cannot show whether a sprite is strobing or sitting at a steady
-# half-tone. DINGBAT_BENCH_LCD=<off|on|dmg|cgb|agb|ags> runs the frames
-# through the shipping panel model on the way out (the same code the frontends
-# present through), so an on/off pair of dumps is a like-for-like comparison.
-# `off`/`on` are what the frontends expose; the four panel names force one
-# panel regardless of the machine, which is the only way to compare panels.
+# Writes `count` consecutive framebuffers to DUMP_PATH as one file (an
+# alternate-frame flicker cannot be judged from one screenshot).
+# DINGBAT_BENCH_LCD=<off|on|dmg|cgb|agb|ags> runs them through the shipping
+# panel model; the four panel names force one panel regardless of machine.
 type SeqDump = object
   first, count: int
   fh: File
@@ -79,19 +74,12 @@ proc fnv(h: uint64; buf: seq[uint16]): uint64 =
     result = (result xor uint64(v)) * 0x100000001B3'u64
 
 # ---- Hardware counters (macOS) ----
-#
-# Wall-clock fps cannot resolve a percent-level A/B on this machine: two builds
-# that differ only in code the benchmark ROM never executes still measure ~1.3%
-# apart, purely from where the linker put things. Instructions-retired is
-# immune to that -- it counts work done, not where the work lives -- so a
-# hot-path change that adds a compare per bus access shows up as an exact
-# instruction delta whatever the layout luck.
-#
-# proc_pid_rusage(RUSAGE_INFO_V4) exposes the CPU's own retired-instruction and
-# cycle counters for the calling process, with no root and no Xcode (xctrace
-# needs a full Xcode install, which CI and a plain command-line-tools box do
-# not have). Sampled around the measured window only, so ROM load and warmup
-# are excluded. DINGBAT_BENCH_COUNTERS=1 turns the extra line on.
+# Wall-clock fps cannot resolve a percent-level A/B: two builds differing
+# only in code the ROM never executes measure ~1.3% apart from link layout.
+# Instructions-retired counts work done, not where it lives.
+# proc_pid_rusage(RUSAGE_INFO_V4) exposes the retired-instruction and cycle
+# counters for the calling process without root or Xcode. Sampled around
+# the measured window only. DINGBAT_BENCH_COUNTERS=1 turns the line on.
 when defined(macosx):
   proc proc_pid_rusage(pid: cint; flavor: cint; buf: pointer): cint
     {.importc, header: "<libproc.h>".}
@@ -99,10 +87,8 @@ when defined(macosx):
   proc getpid(): cint {.importc, header: "<unistd.h>".}
 
   # RUSAGE_INFO_V4 is 296 bytes / 37 u64 slots; ri_instructions and ri_cycles
-  # are slots 31 and 32. Read as raw u64s rather than a transcribed struct so
-  # nothing here has to track the rest of <sys/resource.h>; the two constants
-  # are what `offsetof(struct rusage_info_v4, ri_instructions)/8` reports and
-  # are asserted below against the struct's own size.
+  # are slots 31 and 32 (`offsetof(struct rusage_info_v4, ri_instructions)/8`).
+  # Read as raw u64s so nothing here tracks the rest of <sys/resource.h>.
   const RiInstructionsSlot = 31
   const RiCyclesSlot = 32
 
@@ -117,16 +103,12 @@ else:
 
 
 # ---- Rewind capture cost ----
-#
-# DINGBAT_BENCH_REWIND selects what the frontends actually do:
-#   off     no ring at all (the baseline)
-#   native  maybe_push(payload) — src/dingbat.nim passes NO thumbnail proc,
-#           so the native ring never captures the scrubber strip
-#   web     maybe_push(payload, thumb) — src/dingbat_wasm.nim does, and its
-#           ring is allocated unconditionally at both ROM-load sites
-# DINGBAT_BENCH_REWIND_CAP overrides the ring cap in bytes (the web build uses
-# 16 MB on iOS via setRewindCapBytes, 64 MB elsewhere).
-# DINGBAT_BENCH_REWIND_INTERVAL overrides frames-between-snapshots.
+# DINGBAT_BENCH_REWIND selects what the frontends do:
+#   off     no ring (the baseline)
+#   native  maybe_push(payload): src/dingbat.nim passes no thumbnail proc
+#   web     maybe_push(payload, thumb): src/dingbat_wasm.nim does
+# DINGBAT_BENCH_REWIND_CAP overrides the ring cap in bytes (web: 16 MB on
+# iOS, 64 MB elsewhere); DINGBAT_BENCH_REWIND_INTERVAL the snapshot interval.
 const SCRUB_THUMB_W = 120
 const GBA_SCRUB_THUMB_H = SCRUB_THUMB_W * 160 div 240
 const GB_SCRUB_THUMB_H = SCRUB_THUMB_W * 144 div 160
@@ -183,21 +165,17 @@ proc main() =
     let emu = new_gba(bios, rom_path, run_bios = false, use_hle = bios.len == 0)
     emu.test_output = test_out
     emu.post_init()
-    # DINGBAT_BENCH_STATE loads a .state image before the warmup, so a
-    # benchmark can measure a specific in-game scene (a busy overworld or
-    # battle) instead of whatever the boot intro happens to be showing. The
-    # image must come from the same ROM — load_state_bytes rejects mismatches.
+    # DINGBAT_BENCH_STATE loads a .state image before the warmup, to measure
+    # a specific in-game scene; it must come from the same ROM.
     let state_path = getEnv("DINGBAT_BENCH_STATE")
     if state_path.len > 0:
       if not emu.load_state_bytes(readFile(state_path)):
         echo "bench: state load REJECTED (ROM/version mismatch): ", state_path
         quit(1)
-    # DINGBAT_NO_WAITLOOP=1 turns off idle-loop fast-forwarding. The waitloop
-    # path SNAPS scheduler.cycles to the next pending event and discards the
-    # loop body's own cycles, so which events happen to be pending changes the
-    # exact cycle a spin loop exits on. That makes it the one thing that can
-    # move emulated timing when a change only REMOVES scheduler events — set
-    # this on both builds to A/B a scheduler change with that variable held.
+    # DINGBAT_NO_WAITLOOP=1 turns off idle-loop fast-forwarding, which snaps
+    # scheduler.cycles to the next pending event and so moves emulated timing
+    # when a change only REMOVES scheduler events. Set it on both builds to
+    # A/B a scheduler change.
     if getEnv("DINGBAT_NO_WAITLOOP") == "1":
       emu.cpu.attempt_waitloop_detection = false
     # Speed-mode knobs, for bucket-by-bucket A/B measurement
@@ -211,9 +189,9 @@ proc main() =
       emu.mp2k_hle = true
       emu.mp2k.skip = true
     if getEnv("DINGBAT_MP2K_DUMP") == "1":
-      # EXPLORATORY: verify MP2K detection + SoundInfo reading. Detection is
+      # Exploratory: MP2K detection + SoundInfo dump. Detection is
       # runtime-learned (mp2k.nim), so hook_addr stays 0xFFFFFFFF until the
-      # engine's first mixer pass; the post-run summary prints the final value.
+      # engine's first mixer pass.
       emu.mp2k_hle = true
       for f in 0 ..< warmup:
         for ev in script:
@@ -302,11 +280,9 @@ proc main() =
     if getEnv("DINGBAT_BENCH_COUNTERS") == "1":
       echo "  instructions=", ins1 - ins0, " hwcycles=", cyc1 - cyc0
     report_rewind(rw, frames, elapsed)
-    # DINGBAT_BENCH_REWIND_VERIFY=1 proves the ring restores bit-exactly on a
-    # REAL game rather than on synthetic payloads: pop every retained snapshot,
-    # apply it to the live core, re-serialize, and require the bytes back.
-    # That covers the codec, the delta chain and the core's own load path in
-    # one gate.
+    # DINGBAT_BENCH_REWIND_VERIFY=1: pop every retained snapshot, apply it to
+    # the live core, re-serialize and require the bytes back; covers the
+    # codec, the delta chain and the core's load path on a real game.
     if rw != nil and getEnv("DINGBAT_BENCH_REWIND_VERIFY") == "1":
       var checked = 0
       var bad = 0
@@ -349,10 +325,8 @@ proc main() =
           echo toHex(0x03000000'u32 + uint32(b) * 1024, 8), ": ", gba.prof_iwram[b], "  ",
             formatFloat(gba.prof_iwram[b].float * 100.0 / tot.float, ffDecimal, 2), "%"
   else:
-    # DINGBAT_BENCH_RENDERER selects the GB pixel pipeline: "fifo" (the
-    # shipping default, per-dot) or "scanline" (per-line). Anything else is
-    # rejected rather than silently falling back, so a typo can't quietly
-    # benchmark the wrong renderer.
+    # DINGBAT_BENCH_RENDERER: "fifo" (the shipping per-dot default) or
+    # "scanline". Anything else is rejected rather than silently falling back.
     let renderer = getEnv("DINGBAT_BENCH_RENDERER", "fifo")
     if renderer notin ["fifo", "scanline"]:
       echo "bench: DINGBAT_BENCH_RENDERER must be fifo or scanline, got: ", renderer
@@ -361,9 +335,8 @@ proc main() =
                      headless = true, run_bios = false)
     emu.test_output = test_out
     emu.post_init()
-    # As on the GBA path: load an in-game scene rather than measuring whatever
-    # the boot intro happens to be showing. A title screen exercises almost
-    # none of the PPU or CPU that gameplay does.
+    # As on the GBA path: load an in-game scene; a title screen exercises
+    # almost none of the PPU or CPU that gameplay does.
     let state_path = getEnv("DINGBAT_BENCH_STATE")
     if state_path.len > 0:
       if not emu.load_state_bytes(readFile(state_path)):
@@ -373,10 +346,8 @@ proc main() =
     if getEnv("DINGBAT_BENCH_FRAMESKIP").len > 0:
       emu.ppu.frameskip = parseInt(getEnv("DINGBAT_BENCH_FRAMESKIP"))
 
-    # The GB core emits frames while the LCD is off (see lcd_off_frame), so a
-    # fixed frame count is NOT a fixed amount of work: a build that changes
-    # frame-emission behaviour does different work for the same frame count.
-    # Stepping the frame by hand (rather than through step_frame) lets the
+    # The GB core emits frames while the LCD is off (lcd_off_frame), so a fixed
+    # frame count is not a fixed amount of work. Stepping by hand lets the
     # rebase return value be summed into an exact emulated-cycle total, which
     # IS comparable across builds.
     var total_cycles = 0'u64
@@ -388,9 +359,8 @@ proc main() =
         emu.cpu.tick(emu)
       emu.ppu.frame = false
       # gb_rebase, not scheduler.rebase: it also catches the lazily-advanced
-      # APU channels up and moves their deadlines with the events, which is
-      # what step_frame does. Calling the raw scheduler rebase here would
-      # leave the channel deadlines pointing at pre-rebase cycles.
+      # APU channels up and moves their deadlines with the events, as
+      # step_frame does.
       total_cycles += uint64(emu.gb_rebase())
 
     if getEnv("DINGBAT_BENCH_HASH") == "1":

@@ -1,10 +1,7 @@
-## Minimal PNG reader for test comparison.
-## Supports greyscale (1/2/4/8-bit), greyscale+alpha, truecolor RGB and RGBA
-## (8-bit), and indexed color (PLTE); non-interlaced only. Alpha is dropped —
-## every reference image in the test suites is fully opaque, and the harness
-## compares opaque framebuffers.
-## Requires the 'zippy' nimble package for zlib decompression.
-
+## Minimal PNG reader for test comparison: greyscale (1/2/4/8-bit),
+## greyscale+alpha, RGB and RGBA (8-bit), indexed (PLTE); non-interlaced
+## only. Alpha is dropped (every reference image is opaque). Needs the
+## 'zippy' package for zlib.
 import std/streams
 import zippy
 
@@ -90,13 +87,10 @@ proc read_png*(path: string): PngImage =
   var curr_row = newSeq[uint8](stride)
 
   if color_type in [0'u8, 2, 4, 6] and bit_depth == 8:
-    # 8-bit sample formats: greyscale (0), truecolor (2), greyscale+alpha (4),
-    # RGBA (6). One unfilter loop covers all four — the only thing that changes
-    # is `bpp`, the byte distance the sub/paeth filters look back. The reference
-    # images in the bundled suites are a mix of all of these (mealybug ships
-    # RGB, the scribbltests/turtle-tests/little-things images ship RGBA), and a
-    # format that falls through to the wrong branch does not error, it silently
-    # compares as ~0% match.
+    # 8-bit formats: greyscale (0), truecolor (2), greyscale+alpha (4), RGBA
+    # (6). One unfilter loop; only `bpp` (the sub/paeth look-back) changes.
+    # The suites mix all four (mealybug RGB; scribbltests/turtle-tests/
+    # little-things RGBA), and a wrong branch silently compares as ~0% match.
     let bpp = case color_type
       of 0: 1
       of 2: 3

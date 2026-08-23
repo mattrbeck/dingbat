@@ -1,43 +1,30 @@
 # ============================================================================
-# GB/GBC link-trade reproduction harness  (MANUAL regression tool)
+# GB/GBC link-trade reproduction harness (MANUAL regression tool)
 # ============================================================================
 #
-# WHAT THIS TESTS
-#   Drives two REAL Game Boy Color ROMs (e.g. two Pokemon Crystal carts) wired
-#   together through the in-process lockstep GB link (gb/link.nim), so the
-#   serial cable is resolved locally with no network. It exercises the same
-#   byte-duplex serial path that gblinktest.gb proves in the abstract, but
-#   under a real game's link protocol.
+# Drives two REAL Game Boy Color ROMs through the in-process lockstep GB link
+# (gb/link.nim), the same byte-duplex serial path gblinktest.gb proves in
+# the abstract, under a real game's link protocol.
 #
-#   Two sub-modes:
-#
-#     --mode=stability   Boot both cores from power-on, drive an identical
-#         input script into each, and step them under the lockstep
-#         coordinator for <frames>. Because the two cores run identical code
-#         on identical input they must stay bit-for-bit identical; the harness
-#         checksums both every frame and fails on the first divergence. This
-#         needs no save files and proves the link coordinator interleaves two
-#         real ROMs without desync or crash. It does NOT reach an in-game
-#         trade (Gen 2 gates the Cable Club behind owning Pokemon).
-#
-#     --mode=trade   The real thing. REQUIRES two battery saves (siblings
-#         <rom>.sav) already positioned at the Cable Club Trade Center table,
-#         plus a per-core nav script that walks each player onto the table and
-#         through the trade. Runs both cores linked and reports whether the
-#         serial handshake completed (link.transfers advancing) without the
-#         game tearing the link down. Because the saves cannot ship (they
-#         require the real, copyrighted ROMs), this mode is MANUAL — like the
-#         GBA tests/trade_repro.nim it mirrors, it is not part of CI.
+#   --mode=stability   Boot both cores from power-on with an identical input
+#       script and step them under the lockstep coordinator for <frames>;
+#       they must stay bit-identical (checksummed every frame). Needs no
+#       saves; does not reach an in-game trade (Gen 2 gates the Cable Club
+#       behind owning Pokemon).
+#   --mode=trade   REQUIRES two battery saves (siblings <rom>.sav) positioned
+#       at the Cable Club Trade Center table plus a per-core nav script.
+#       Reports whether the serial handshake completed (link.transfers
+#       advancing) without the game tearing the link down. The saves need
+#       the copyrighted ROMs, so this is MANUAL, not CI (like
+#       tests/trade_repro.nim).
 #
 # BUILD
 #   nim c -d:test_harness -d:release --path:src -o:gb_trade_repro \
 #     tests/gb_trade_repro.nim
-#
 # RUN
 #   ./gb_trade_repro --mode=stability <rom> <frames> [--shots=DIR]
 #   ./gb_trade_repro --mode=trade <rom1> <rom2> <nav1.txt> <nav2.txt> \
 #     <frames> [--shots=DIR]
-#
 #   Nav line: "<frame> <tok...>" sets that core's HELD buttons from <frame>
 #   onward. Tokens: A B UP DOWN LEFT RIGHT START SELECT NONE(-).
 # ============================================================================
@@ -116,8 +103,7 @@ proc stability(rom: string; frames: int; shotdir: string): int =
   ## Two identical cores, identical input, stepped under the lockstep
   ## coordinator. They must stay bit-identical; fail on first divergence.
   let link = new_gb_link(@[make_gb(rom), make_gb(rom)])
-  # A tiny scripted poke so both cores actually run game logic past the
-  # title (mash A). Identical on both, so determinism must hold.
+  # Mash A identically on both cores so game logic runs past the title.
   var press = false
   for f in 0 ..< frames:
     # toggle A every 20 frames on BOTH cores

@@ -1,24 +1,20 @@
 #!/usr/bin/env python3
-"""Band-energy comparison of GBA audio dumps (dingbat vs dingbat, dingbat vs NBA).
+"""Band-energy comparison of GBA audio dumps (dingbat vs dingbat, dingbat vs
+a NanoBoyAdvance core-mixer dump).
 
 Inputs (32768 Hz stereo, all optional beyond the first):
     *.s16   dingbat DINGBAT_GBA_AUDIO_DUMP — s16le at DAC scale +/-512 (/512 to
             normalize; the dump taps get_sample BEFORE the *32 output scaling)
-    *.f32   NBA NBA_AUDIO_DUMP (uncommitted patch in ~/code/NanoBoyAdvance) —
-            f32le already normalized (+/-1.0 = full DAC)
+    *.f32   NBA_AUDIO_DUMP (a local patch to NanoBoyAdvance) — f32le already
+            normalized (+/-1.0 = full DAC)
 
 Prints Welch band powers per file over a chosen window. Two dingbat runs of the
 same ROM/frames are deterministic and sample-aligned, so `--diff a b` writes
-their exact difference (isolated injected noise) and its RMS. Cross-emulator
-alignment is deliberately NOT attempted: undriven boots progress differently
-(Golden Sun diverged by ~7.5 s vs NBA and wandered), so compare band statistics
-of matching musical passages instead, or listen to the WAVs.
+their exact difference and its RMS. Cross-emulator alignment is not attempted
+(undriven boots drift apart); compare band statistics of matching passages.
 
     --wav out.wav FILE      render a window of FILE to a listenable WAV
     --start S --dur D       analysis window (default 30 s + 20 s)
-
-The method + findings from the 2026-08-13 Golden Sun investigation live in
-README.md next to this script.
 """
 import argparse
 import wave

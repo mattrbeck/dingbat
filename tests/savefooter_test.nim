@@ -1,14 +1,10 @@
 ## Unit tests for GB battery-save RTC/mapper footers (src/dingbat/gb/gb.nim).
-##
-## The loaders must hold two properties at once:
-##  - a footer dingbat (or BGB/VBA/mGBA — same MBC3 layout) wrote round-trips
-##    exactly, and a dumped-then-idle clock catches up by the wall time that
-##    passed;
-##  - anything after the RAM that is NOT a known footer — an imported forum
-##    save padded out to a power of two, a foreign emulator's layout — is
-##    ignored, because parsing padding as a clock walks the RTC through five
-##    decades of "catch-up" and sets the sticky day-overflow flag (this is the
-##    exact failure the exact-length checks exist to prevent).
+## A footer in the MBC3 layout dingbat writes (shared with the VBA/BGB save
+## format) must round-trip exactly and catch up by the wall time since the
+## dump; anything after the RAM that is NOT a known footer (a save padded to
+## a power of two, a foreign layout) must be ignored, because parsing
+## padding as a clock walks the RTC through five decades of catch-up and
+## sets the sticky day-overflow flag.
 
 import std/[os, strformat, tempfiles]
 import dingbat/gb/gb

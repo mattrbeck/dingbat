@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Perturb ONE scanline of cgb-acid-hell's source and compare the two emulators.
+"""Perturb one scanline of cgb-acid-hell's source and compare dingbat with the
+sameboy_runner frame.
 
 The ROM is fully unrolled: one block per scanline, each of which sets rLYC,
 clears rIF, HALTs on the STAT LYC interrupt, writes rSCY, idles 17 nops and then
@@ -13,10 +14,9 @@ read directly off the screen.
     hellsrc.py <ly> <k> [--scy HEX]
 
 Builds, runs both emulators, prints the block x=72..96 for ly-4..ly+4 from each.
-See hellall.py for the whole-frame version, which is the one that measured the
-constant.
+See hellall.py for the whole-frame version.
 
----- Getting the source to build ----------------------------------------------
+Getting the source to build:
 
 `git clone https://github.com/mattcurrie/cgb-acid-hell` into $ACID_HELL_SRC
 (default $TMPDIR/cgb-acid-hell). It is an mgbdis disassembly written for a
@@ -30,21 +30,15 @@ experiment below meaningful:
   2. hardware.inc's bare `X EQU y` / `X SET y` -> `DEF X EQU y` / `DEF X = y`.
   3. `ld [c], a` / `ld a, [c]` -> `ldh ...`, and `ldh a, [$34]` -> the full
      `ldh a, [$ff34]`.
-  4. **A `nop` after every one of the 136 `halt`s.** Old rgbasm inserted it
-     automatically and modern rgbasm does not. Miss it and the ROM is one byte
-     short per halt -- which on this ROM is 4 dots of PPU phase per line, i.e.
-     exactly the quantity under study.
+  4. A `nop` after every one of the 136 `halt`s. Old rgbasm inserted it
+     automatically and modern rgbasm does not; without it the ROM is one byte
+     (4 dots of PPU phase per line) short per halt.
 
----- Why the perturbation is a SUBSTITUTION and not an insertion --------------
-
-ROM0 is exactly full ($4000) so nothing can be added, and the disassembly
-carries 29 raw-address jumps (`jp $0150`), so nothing can be moved either --
-delete one nop and the whole frame goes blank in BOTH emulators, which is what a
-shifted `jp` target looks like. So k M-cycles of delay are bought by rewriting k
-of a block's 17 idle `nop`s ($00, one byte, one M-cycle) as `ld a, [hl]` ($7E,
-one byte, TWO). `a` is dead there -- it last carried SCY and is not read again
-until the `ld a, $xx` that ends the block -- and `hl` is $ff40, so the read is of
-LCDC and has no side effect.
+The perturbation is a substitution, not an insertion: ROM0 is exactly full and
+the disassembly carries 29 raw-address jumps, so k M-cycles of delay are
+bought by rewriting k of a block's 17 idle `nop`s ($00, one M-cycle) as
+`ld a, [hl]` ($7E, one byte, two M-cycles). `a` is dead there and `hl` is
+$ff40, so the read has no side effect.
 """
 import os, re, subprocess, sys, shutil
 

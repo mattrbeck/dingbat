@@ -1,8 +1,7 @@
 @ ldmuser.s — WHAT: user-bank block transfers (`stm {..}^`) with a
 @ BANKED base register — which bank supplies the base address, which
 @ bank's value is stored, and which bank receives the writeback?  Plus:
-@ does an SPSR read in the shadow of an `ldm^` come back OR'd with CPSR
-@ (a theory some emulators implement)?
+@ does an SPSR read in the shadow of an `ldm^` come back OR'd with CPSR?
 @
 @ HOW: from IRQ mode with IRQs masked, user r13 is parked on the marker
 @ 0xCAFE0001 (System mode shares the user bank, so it is set before the
@@ -23,8 +22,8 @@
 @ that point happen to be a subset of the pattern, so this row cannot
 @ by itself falsify the OR theory — it does pin the observable value.)
 @
-@ PROVENANCE: verified on GBA SP AGS-001 (session 2, gbaedge page 19
-@ LDMUSER, slot CRC 856D); see docs/hwprobe-results-agb.md.
+@ PROVENANCE: verified on GBA SP AGS-001 (gbaedge page 19 LDMUSER, slot
+@ CRC 856D); see docs/hwprobe-results-agb.md.
     .arm
     .text
     .global _start

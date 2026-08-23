@@ -1,19 +1,8 @@
-; wramscan — photograph the power-up contents of work RAM.
+; wramscan -- photograph the power-up contents of work RAM.
 ;
-; WHY. BullyGB's first test, InitRAMTest, walks $C000-$DFFF and reports
-; "Uninitialized RAM not randomized" if every byte is $00 — which is exactly
-; dingbat's power-up state, so bully stops there and its other eight tests
-; (bootreg, divtest, dmabusconflict, echoram, initvram_dmg, undoc_regs,
-; unused_io) have never run in this emulator. Filling WRAM with a fixed
-; xorshift makes bully print "All tests OK!", but it costs gambatte's
-; oamdma_srcFE00_*/srcFF00_* rows, which read WRAM back through the echo
-; region and therefore encode SOME power-up convention. Zeroes are wrong and
-; that xorshift is wrong; nobody in the tree knows what is right.
-;
-; This asks the console. Run it on a COLD boot (battery out / power off for a
-; few seconds, not a reset) and photograph the screen.
-;
-; WHAT IT SHOWS
+; BullyGB's InitRAMTest and gambatte's oamdma_srcFE00_*/srcFF00_* rows both
+; depend on the power-up WRAM pattern. Run this on a COLD boot (power off for
+; a few seconds, not a reset) and photograph the screen.
 ;
 ;   line 0    three 4-digit counts over all 8192 bytes of $C000-$DFFF:
 ;               ZEROS   how many bytes are $00
@@ -26,16 +15,9 @@
 ;             Cell (col, row) covers $C000 + (row*16 + col) * 32, reading
 ;             left to right then top to bottom.
 ;
-; The map is what makes this worth photographing rather than just counting:
-; real WRAM is not uniform noise, it is STRUCTURED — typically banded, with
-; runs of one value and boundaries at regular addresses — and the shape of the
-; banding is what an emulator would have to reproduce for the gambatte rows to
-; keep passing.
-;
-; CRITICAL: this ROM writes NOTHING to WRAM before it has finished measuring
-; it. The stack lives in HRAM ($FFFE), the three counters live in HRAM, and
-; everything drawn goes straight to VRAM. Adding a single `ld [$C000], a`
-; anywhere above the scan would destroy the thing being measured.
+; Writes NOTHING to WRAM before it has finished measuring it: the stack and
+; the three counters live in HRAM and everything drawn goes straight to VRAM.
+; A single `ld [$C000], a` above the scan would destroy the measurement.
 
 INCLUDE "hw.inc"
 

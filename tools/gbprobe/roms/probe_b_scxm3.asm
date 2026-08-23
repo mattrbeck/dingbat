@@ -1,42 +1,24 @@
 ; probe_b_scxm3 -- how much does a mid-line SCX store lengthen mode 3, and
 ; does the amount depend on where in mode 3 the store lands?
 ;
-; docs/gb-failure-triage.md, hardware experiment (b). This is the campaign's
-; largest single unexplained quantity: gambatte's two rows bracket hardware at
-; 11-14 dots on DMG and 7-10 on CGB for a store that LOWERS `SCX and 7`, and
-; the extension grows with how late the store lands. dingbat extends mode 3 by
-; zero. Nothing derived in four rounds produces that number, so this ROM stops
-; deriving and measures the law directly.
-;
 ; Method. SCX = 7 is written during mode 2, so the line latches a fine scroll
 ; of 7 and mode 3 is 172 + 7 dots long. Then, from one anchor:
 ;
 ;     <BASE_M + M nops>  ld a,$05 / ldh [c],a   ; C = LOW(rSCX): the store
 ;     <(7-M) + BASE_N + N nops>  ldh a,[rSTAT]  ; the read
 ;
-; and the STAT byte is kept. M walks the STORE across the head of mode 3; N
-; walks the READ across the mode-3 -> mode-0 boundary.
+; M walks the STORE across the head of mode 3; N walks the READ across the
+; mode-3 -> mode-0 boundary. The (7-M) term keeps the read on the same dot for
+; every row, so a grid column is one dot of the line.
 ;
-; The (7-M) term is the one deliberate refinement over the doc's sketch. Left
-; out, the read's dot would be BASE + M + N, so the read would walk right along
-; with the store and the M = 7 row would be four M-cycles past the boundary
-; before its N sweep even started -- the top rows of the grid would carry no
-; information at all. With it, the read lands on the SAME dot for every row, so
-; a column of the grid is one dot of the line and the grid reads directly as
-; "for each store position, at which read dot has mode 0 arrived".
+; Controls:
+;   row 8  M = 2, store $07 -- the value SCX already holds. Must not extend.
+;   row 9  M = 2, no store (four NOPs in its place). The zero of the grid.
 ;
-; Rows 8 and 9 are the two controls the doc asks for:
-;   row 8  M = 2, but the store writes $07 -- the value SCX ALREADY holds.
-;          A store that does not change the fine scroll must not extend
-;          anything. If it does, the mechanism is the store and not the value.
-;   row 9  M = 2, and no store at all: four NOPs in its place, so the read dot
-;          is identical. This is the zero of the whole measurement.
-;
-; Reading it. Each cell is the low nibble of STAT, so 7 is mode 3 and 4 is
-; mode 0 (bit 2 is the LYC coincidence flag, set on the anchor line). Along a
-; row, the first column showing 4 is the dot mode 0 arrived. Row 9 is the
-; unextended boundary; every row above it that flips LATER is extended, and by
-; how many columns is how many M-cycles.
+; Reading it. Each cell is the low nibble of STAT: 7 is mode 3, 4 is mode 0
+; (bit 2 is the LYC coincidence flag, set on the anchor line). Along a row the
+; first column showing 4 is the dot mode 0 arrived. Row 9 is the unextended
+; boundary; a row that flips N columns later is extended by N M-cycles.
 ;
 ; Screen layout (20x18 tiles)
 ;   row 0        BASE_M, BASE_N, ANCHOR line, all in hex
@@ -46,26 +28,18 @@ INCLUDE "hw.inc"
 
 DEF ANCHOR_LINE EQU $47
 
-; Store position. The store's write cycle lands at roughly
-; (wake + 4*(BASE_M + M + 3)) dots, and mode 3 begins at dot 80, so BASE_M = 16
-; starts the sweep just before mode 3 and walks it to about dot 107 at M = 7 --
-; across the seven-dot fine-scroll discard and out the far side of it.
-; Overridable from the command line (mk.sh probe_b_scxm3 -DBASE_M=8) so the
-; store can be walked over a wider stretch of the line than one build covers,
-; without the grid getting too big to photograph.
+; Store position. The write cycle lands at about wake + 4*(BASE_M + M + 3)
+; dots and mode 3 begins at dot 80, so 16 walks the store from just before
+; mode 3 to about dot 107 at M = 7, across the fine-scroll discard.
+; Overridable (mk.sh probe_b_scxm3 -DBASE_M=8) to walk a wider stretch.
 IF !DEF(BASE_M)
 DEF BASE_M EQU 16
 ENDC
 
-; Read position. Calibrated against probe (a), which put the halt wake within a
-; few dots of the line start: this places N = 0 about sixteen dots before the
-; SCX=7 boundary at dot 259, and N = 9 about twenty-eight dots after it, so an
-; extension anywhere in the measured 7..14 range is inside the window with
-; room on both sides.
-; The read's dot is (BASE_M + BASE_N + 14 + N) M-cycles from the wake, so the
-; two bases are one quantity: BASE_N defaults to whatever keeps the READ where
-; it is when BASE_M moves the STORE. Override BASE_M alone and the store walks
-; while the boundary stays put, which is the sweep this experiment wants.
+; Read position: N = 0 lands about sixteen dots before the SCX=7 boundary at
+; dot 259 (probe (a) put the halt wake within a few dots of line start). The
+; read's dot is (BASE_M + BASE_N + 14 + N) M-cycles from the wake, so the
+; default keeps the read where it is when BASE_M moves the store.
 IF !DEF(BASE_N)
 DEF BASE_N EQU 47 - BASE_M
 ENDC

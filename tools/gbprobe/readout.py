@@ -3,15 +3,10 @@
 
     readout.py <shot.ppm> <rom.gb> [--sym rom.sym]
 
-The numeric probes paint their results on screen as hex digits, because the
-permanent job of these ROMs is to be photographed on real hardware. That makes
-the screen the interface, so the harness reads the screen rather than poking at
-any engine's memory: exactly the same code path will read a photo of a real
-Game Boy once the cartridge arrives.
-
-The glyphs are not hardcoded here. They are lifted out of the ROM image itself
-(the FontTiles label in the .sym) and decoded from 2bpp, so the reader can
-never disagree with what the ROM drew.
+The numeric probes paint their results as hex digits so the same reader
+works on an emulator frame and on a photowarp'd photo of real hardware. The
+glyphs are lifted out of the ROM image (the FontTiles label in the .sym) and
+decoded from 2bpp, so the reader cannot disagree with what the ROM drew.
 
 Prints a 20x18 grid of characters, '.' for blank and '?' for unmatched.
 """

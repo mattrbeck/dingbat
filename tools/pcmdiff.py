@@ -9,21 +9,17 @@ signed 16-bit L,R frames, no header:
     GBFUZZ_PCM=<path>              tools/gbfuzz/sameboy_runner (32768 Hz)
 
 Default mode is the strict gate: byte equality, and when that fails, where and
-how badly. Use it to compare two dingbat builds -- the same core must produce
-bit-identical audio for the same ROM and frame count, so any difference at all
-is a real behaviour change. This is the audio equivalent of a byte-identical
-screenshot check.
+how badly. Two dingbat builds must produce bit-identical audio for the same
+ROM and frame count, so any difference is a behaviour change (the audio
+equivalent of a byte-identical screenshot check).
 
---correlate is the loose gate, for comparing dingbat against a *different*
-emulator (SameBoy). Bit equality is impossible there: SameBoy band-limits each
-channel and models DAC charge/discharge while dingbat emits the raw DAC mix, so
-even a perfectly accurate dingbat would differ in every sample. The two also
-run on independently drifting clocks -- measured tens of ms apart over 50 s --
-so sample-level cross-correlation is not stable enough to gate on either. It is
-printed as a diagnostic, and the gate is instead the Pearson correlation of the
-per-100ms RMS envelope, which is insensitive to waveform shape and phase drift
-but still catches wrong tempo, a track that only one side plays, and channel
-dropouts. It cannot certify sample accuracy.
+--correlate is the loose gate for comparing against a different emulator,
+where bit equality is impossible (a different mixer, and clocks that drift
+tens of ms apart over 50 s, so sample-level cross-correlation is only printed
+as a diagnostic). The gate is the Pearson correlation of the per-100ms RMS
+envelope: insensitive to waveform shape and phase drift, still catches wrong
+tempo, a track only one side plays, and channel dropouts. It cannot certify
+sample accuracy.
 
 numpy is used when importable, purely for speed; there is a stdlib fallback.
 
@@ -212,13 +208,9 @@ def _best_lag(x, y, lag_max):
 
 
 def _pearson(x, y):
-    """Centred correlation of two equal-length series.
-
-    Centring matters: the uncentred cosine similarity of two all-positive RMS
-    envelopes is high for *any* pair of noisy audio files (two unrelated ROMs
-    score ~0.83), so it cannot discriminate. Pearson separates cleanly --
-    measured on a 50 s window, same ROM across dingbat and SameBoy scores
-    +0.87, while dingbat playing two different ROMs scores -0.19 and +0.11.
+    """Centred correlation of two equal-length series. Centring matters: the
+    uncentred cosine of two all-positive RMS envelopes is high for any pair
+    of audio files and cannot discriminate.
     """
     n = min(len(x), len(y))
     if n == 0:

@@ -1,5 +1,8 @@
 #!/bin/bash
-# Build the three headless runners for cross-emulator screenshot comparison.
+# Build the three headless runners for cross-emulator screenshot comparison:
+# mgba_runner (libmgba) and nba_runner (NanoBoyAdvance static libs) as
+# black-box references, dingbat_nav for this tree. MGBA / NBA point at the
+# source checkouts (built headless) — edit below if yours differ.
 set -e
 cd "$(dirname "$0")/../.."
 MGBA=~/code/mgba-ref-src

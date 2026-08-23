@@ -1,36 +1,20 @@
 #!/usr/bin/env bash
 # probe_e_penalty -- the object penalty as a function of object X and SCX,
-# read off the oracle rather than off dingbat.
-#
-# Pan Docs contradicts itself here. Rendering.md: an object at X = 0 "always
-# incurs an 11-dot penalty, regardless of SCX". pixel_fifo.md: when SCX & 7 > 0
-# the penalty is "whatever the lower 3 bits of SCX are". probe (e) measures it
-# directly -- an object that stalls the fetcher for N dots pushes every later
-# fetch N dots later, so the staircase's COLUMN moves by N against the same
-# SCX's objects-off baseline.
-#
-# SameBoy stands in for the GBA SP: it reproduced all eight photographed
-# settings (see docs/probe-e-plan.md), which is what makes a full sweep
-# affordable at all -- 136 settings is not a hardware session.
+# read off the oracle (or, with --dingbat, off ./dingbat_test). An object
+# that stalls the fetcher N dots moves the staircase's column by N against
+# the same SCX's objects-off baseline. Pan Docs gives two rules (Rendering.md:
+# X = 0 always costs 11 dots regardless of SCX; pixel_fifo.md: SCX & 7 when
+# nonzero); this measures it.
 #
 # Prints one row per SCX: the objects-off baseline column, then the shift each
-# object X causes. A shift is negative (the bar moves LEFT) when the object
-# delays the fetcher, since a later grid means an earlier tile is under the
-# write.
+# object X causes. A shift is negative (the bar moves left) when the object
+# delays the fetcher.
 #
 #   tools/gbprobe/probe_e_penalty.sh [--dingbat] [--dmg]
-#
-# --dingbat reads the same table out of ./dingbat_test instead, so the two
-# laws can be compared as laws rather than setting by setting -- which is what
-# says whether a candidate model change has the right SHAPE before anyone
-# counts dots.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
-# SameBoy's runner is hardcoded to GB_MODEL_CGB_E, and dingbat defaults
-# to CGB-C. Every comparison here must therefore force rev E or it is
-# measuring the CGB-C/CGB-D palette-step split on top of whatever it
-# meant to measure -- which is exactly what happened, unnoticed, to every
-# probe number in this tree until 2026-08-18. SB_REV overrides.
+# The runner is built for CGB-E and dingbat defaults to CGB-C; force rev E
+# or the C/D palette-step split lands in the count. SB_REV overrides.
 SB_REV=${SB_REV:---cgb-rev=E}
 T=${TMPDIR:-/tmp}/probe_e_pen
 mkdir -p "$T"

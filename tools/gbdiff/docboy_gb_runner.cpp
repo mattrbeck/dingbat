@@ -1,52 +1,37 @@
-/* Headless docboy runner for cross-emulator screenshot comparison (GB/GBC).
+/* Headless docboy runner (links docboy's library as a black-box oracle, via
+ * the public Core/Lcd interface only) for cross-emulator screenshot comparison.
  *
  * Usage: docboy_gb_runner <rom.gb> <bootromdir> <outprefix> <script> <shots>
  *   script: comma-separated FRAME:KEY[:HOLD] (empty string for none),
  *           KEY in A,B,SELECT,START,RIGHT,LEFT,UP,DOWN; HOLD defaults 10
  *   shots:  comma-separated frame numbers; writes <outprefix>.f<frame>.ppm
  *
- * Deliberately the SAME CLI contract as tools/gbfuzz/sameboy_runner.c and
- * tools/gbfuzz/dingbat_gb_nav.nim, and the same frame loop: for each frame,
- * apply that frame's input events, step one frame, then shoot. A shot named
- * frame N is therefore the display after N+1 frames have been stepped, in
- * every runner. This file is built against docboy's own library; it exists so
- * docboy can be driven as a black-box oracle, and it reads nothing out of
- * docboy that is not on the public Core/Lcd interface.
+ * Same CLI contract and frame loop as tools/gbfuzz/sameboy_runner.c and
+ * dingbat_gb_nav.nim: per frame, apply that frame's input events, step one
+ * frame, then shoot, so shot N is the display after N+1 stepped frames in
+ * every runner. All runners play the boot ROM out of <bootromdir> and count
+ * frame 0 from power-on; docboy's boot ROM support is compile-time
+ * (ENABLE_BOOTROM), so there is no skip-boot mode here.
  *
- * Boot ROM parity is the point. All runners play the boot ROM out of
- * <bootromdir> and count frame 0 from power-on, because each emulator's
- * skip-boot shortcut lands on a different cycle and the resulting animation
- * phase drift swamps every real difference. docboy's boot ROM support is
- * compile-time (ENABLE_BOOTROM), so there is no skip-boot mode here at all.
+ * Model selection is compile-time too (ENABLE_CGB): build.sh produces two
+ * binaries and the driver picks on the cartridge CGB flag (0x143 bit 7).
  *
- * Model selection is also compile-time in docboy (ENABLE_CGB), so build.sh
- * produces two binaries and the driver picks between them on the cartridge
- * CGB flag at 0x143 bit 7 -- the same rule the other three runners apply.
- *
- * Palette normalisation, so bytes are comparable rather than merely similar:
- *   DMG build   Lcd's palette has one entry per shade, so it is set to the
- *               identity and the shade index comes back out of the
- *               framebuffer untouched; this writes the shared GREY4 ramp for
- *               it. No emulator's idea of "what a DMG screen looks like" gets
- *               into the comparison.
- *   CGB build   Lcd's palette is a 32768-entry RGB555 -> output LUT, so it is
- *               set to the identity too and the framebuffer word is the raw
- *               CGB palette word (red in the low 5 bits, keep_bits<15>),
- *               which is bit-for-bit the layout dingbat's framebuffer uses.
- *               The 5->8 expansion below is the one in tools/gbgate/fb2png.py.
+ * Palette normalisation, so bytes are comparable:
+ *   DMG build   Lcd's palette is one entry per shade; set to the identity so
+ *               the shade index comes out untouched, then mapped to GREY4.
+ *   CGB build   Lcd's palette is a 32768-entry RGB555 LUT; set to the
+ *               identity so the framebuffer word is the raw CGB palette word
+ *               (red in the low 5 bits), the layout dingbat's framebuffer
+ *               uses. The 5->8 expansion is the one in tools/gbgate/fb2png.py.
  *
  * Environment:
  *   GBDIFF_DUMP=1   alongside each shot, write <prefix>.f<frame>.mem: OAM,
  *                   both VRAM banks, work RAM and HRAM, in the layout
- *                   sameboy_runner.c and dingbat_gb_nav.nim already use, so a
- *                   divergence can be traced to whichever of them differs
- *                   instead of guessed at from pixels. The palette blocks the
- *                   other two dump are omitted: they are private to docboy's
- *                   Ppu and reaching into them would mean building against its
- *                   test-only friend declarations.
+ *                   sameboy_runner.c and dingbat_gb_nav.nim use, minus their
+ *                   palette blocks (private to docboy's Ppu).
  *
  * Build: see build.sh (added to the docboy tree as an extra frontend target,
- * so it inherits the exact compile definitions libdocboy was built with).
+ * so it inherits the compile definitions libdocboy was built with).
  */
 
 #include <cstdint>
@@ -66,9 +51,8 @@ constexpr int W = 160;
 constexpr int H = 144;
 
 /* Shared four-shade DMG ramp, lightest first, matching dingbat_gb_nav.nim's
- * GREY4 and sameboy_runner.c's (which lists it darkest first because SameBoy
- * indexes colors[3] as shade 0). Every value survives the 8->5->8 bit round
- * trip mGBA applies to its DMG palette, so all four runners emit equal bytes. */
+ * GREY4 (sameboy_runner.c lists it darkest first). Every value survives an
+ * 8->5->8 bit round trip, so all four runners emit equal bytes. */
 constexpr uint8_t GREY4[4] = {0xFF, 0xAD, 0x52, 0x00};
 
 struct Ev {
@@ -217,10 +201,8 @@ int main(int argc, char** argv) {
         g_shots.push_back(atoi(tok));
     }
 
-    /* Cartridge CGB flag, the same rule the other runners use -- but here it
-     * can only be checked, not acted on: docboy picks its model at compile
-     * time, so the driver is what routes a ROM to the right binary. Failing
-     * loudly beats silently comparing a CGB title running as a DMG. */
+    /* Cartridge CGB flag can only be checked here, not acted on: the model
+     * is compile-time, so the driver routes a ROM to the right binary. */
     FILE* rf = fopen(rom, "rb");
     if (!rf) {
         perror(rom);
@@ -245,9 +227,7 @@ int main(int argc, char** argv) {
         return 4;
     }
 
-    /* Identity palette: see the header comment. This is the only place the
-     * runner touches how docboy turns pixels into colours, and it is set to a
-     * no-op so the comparison sees the PPU's own output. */
+    /* Identity palette: see the header comment. */
     Appearance appearance {};
 #ifdef ENABLE_CGB
     for (uint32_t i = 0; i < Appearance::NUM_COLORS; ++i) {

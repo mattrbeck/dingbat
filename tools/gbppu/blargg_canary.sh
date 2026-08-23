@@ -1,8 +1,7 @@
 #!/bin/bash
-# blargg canary: all eleven cpu_instrs frames pixel-identical to SameBoy at
-# frame 1200, with the real CGB boot ROM on both sides. See tests/README.md
-# ("blargg's on-screen text is NOT an oracle") for why this comparison, and not
-# a glyph check, is the gate after a GB timing change.
+# blargg canary: the eleven cpu_instrs frames, compared pixel-for-pixel against
+# the sameboy_runner frame at 1200 with the same CGB boot ROM on both sides
+# (tests/README.md: blargg's on-screen text is not a pass criterion).
 #
 #   tools/blargg_canary.sh [<dingbat_test>] [<sameboy_runner>] [<bootdir>]
 cd "$(dirname "$0")/../.."

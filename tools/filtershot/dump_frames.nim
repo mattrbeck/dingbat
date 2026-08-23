@@ -10,12 +10,10 @@
 ##           <outprefix>.f<frame>.rgb555 — raw little-endian uint16 pixels,
 ##           row-major from the top-left, exactly the buffer the presenters
 ##           upload. Prints "W H" once so the renderer knows the shape.
-##   panel:  off (default) | auto | dmg | cgb | agb | ags — drive the LCD
-##           response model alongside and ALSO write the responded frame at
-##           each shot as <outprefix>.f<frame>.ghost.rgb555 (the model advances
-##           every frame, exactly as the frontends run it, so a shot's ghost
-##           state reflects the whole run up to it). The pair feeds
-##           render.mjs's ghost modes for old-vs-new order comparisons.
+##   panel:  off (default) | auto | dmg | cgb | agb | ags — also run the LCD
+##           response model (advanced every frame, as the frontends do) and
+##           write the responded frame at each shot as
+##           <outprefix>.f<frame>.ghost.rgb555, for render.mjs's ghost modes.
 ##
 ## Build: nim c -d:test_harness -d:release --path:src \
 ##          -o:tools/filtershot/dump_frames tools/filtershot/dump_frames.nim
@@ -65,9 +63,8 @@ proc main() =
   for s in shots: max_frame = max(max_frame, s)
   var resp: LcdResponse
 
-  # One loop body serves both cores: step, feed the response model (its state
-  # must advance EVERY frame, exactly as the frontends run it, not only at
-  # shots), and dump the clean/responded pair.
+  # One loop body for both cores; the response model must advance every
+  # frame, not only at shots.
   template run(emu: untyped; w, h: int) =
     for f in 0 .. max_frame:
       for ev in script:

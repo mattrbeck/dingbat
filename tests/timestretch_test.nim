@@ -1,12 +1,9 @@
 ## Unit tests for the WSOLA time-stretch helper (src/dingbat/common/timestretch).
 ## Run: nim c -r --path:src tests/timestretch_test.nim
-##
-## Covers the two invariants the audio pacing depends on:
-##  (a) count-exactness — pulling exactly half as many frames as pushed is
-##      sustainable indefinitely with no drift and only a one-time warm-up gap;
-##  (b) pitch-preservation — a sine's dominant frequency is preserved, NOT
-##      doubled the way the old decimation path pitched it up an octave.
-## Plus finiteness/no-clip and mono/stereo correctness.
+## (a) count-exactness: pulling exactly half as many frames as pushed is
+##     sustainable with no drift and a one-time warm-up gap; (b) pitch is
+##     preserved, not doubled as plain decimation would; plus finiteness and
+##     mono/stereo correctness.
 
 import std/[math, strformat]
 import dingbat/common/timestretch
@@ -21,11 +18,8 @@ proc check(cond: bool; msg: string) =
     echo "  FAIL: ", msg
     inc failures
 
-# ---------------------------------------------------------------------------
-# (a) Count-exactness / no-drift: feed a continuous sine in fixed-size buffers,
-# pull exactly half after each, and confirm the output FIFO neither underflows
-# (after warm-up) nor grows without bound — i.e. production is exactly 2:1.
-# ---------------------------------------------------------------------------
+# (a) Feed a continuous sine in fixed buffers, pull exactly half after each:
+# the output FIFO must neither underflow after warm-up nor grow.
 block count_exactness:
   echo "test: count-exactness (2:1, no drift)"
   let ts = new_time_stretch()
@@ -64,10 +58,7 @@ block count_exactness:
   check(totalReal == expectedReal,
         &"produced real frame count is exact ({totalReal} == {expectedReal})")
 
-# ---------------------------------------------------------------------------
-# (b) Pitch-preservation: dominant frequency of the output ~= input frequency,
-# measured by zero-crossing rate. Naive decimation would double it.
-# ---------------------------------------------------------------------------
+# (b) Dominant output frequency ~= input frequency, by zero-crossing rate.
 proc zeroCrossFreq(samples: seq[float32]; nFrames: int): float =
   var crossings = 0
   for i in 1 ..< nFrames:
@@ -112,10 +103,8 @@ block pitch_preservation:
           &"output ~{f:.0f} Hz preserved (measured {measured:.0f} Hz, ratio {ratio:.3f}), " &
           &"NOT doubled ({2.0*f:.0f} Hz)")
 
-# ---------------------------------------------------------------------------
-# (d) Mono/stereo: identical L/R in => identical L/R out; distinct channels
-# stay distinct and finite.
-# ---------------------------------------------------------------------------
+# (d) Identical L/R in => identical L/R out; distinct channels stay
+# distinct and finite.
 block mono_stereo:
   echo "test: mono/stereo handling"
   block mono:

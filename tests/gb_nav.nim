@@ -2,24 +2,20 @@
 # GB scripted navigation driver (MANUAL tool, not part of CI)
 # ============================================================================
 #
-# Drives a single GB/GBC core with a per-frame held-button script and dumps
-# screenshots — the tool used to build the Pokemon Crystal Cable Club save
-# for the GB link-trade harness (gb_trade_repro.nim), one look-and-extend
-# iteration at a time. Deterministic: every run replays the script from
-# power-on, so the script itself is the whole state.
+# Drives one GB/GBC core with a per-frame held-button script and dumps
+# screenshots; used to build the Cable Club saves for gb_trade_repro.nim.
+# Deterministic: every run replays the script from power-on.
 #
-# Nav line: "<frame> <core> <tok...>" sets HELD buttons from <frame> onward
-# (persists until the next line). <core> is ignored here (single core) but
-# kept format-compatible with trade_repro nav scripts. Tokens: A B UP DOWN
-# LEFT RIGHT START SELECT NONE(-).
+# Nav line: "<frame> <core> <tok...>" sets HELD buttons from <frame> onward.
+# <core> is ignored (single core) but kept format-compatible with trade_repro
+# scripts. Tokens: A B UP DOWN LEFT RIGHT START SELECT NONE(-).
 #
 # BUILD
 #   nim c -d:test_harness -d:release --path:src -o:gb_nav tests/gb_nav.nim
 # RUN
 #   ./gb_nav <rom> <script.txt> <frames> <shotdir> [--shots=N]
-#
 # The cart's battery save (.sav next to the ROM) is loaded at boot and
-# flushed on exit — run against a COPY of the ROM to control save state.
+# flushed on exit; run against a COPY of the ROM.
 # ============================================================================
 
 import std/[os, strutils]

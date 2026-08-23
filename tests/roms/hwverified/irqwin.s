@@ -1,7 +1,6 @@
 @ irqwin.s — WHAT: when a pending IRQ is unblocked by a store to IME or
 @ IE, or by an `msr` clearing CPSR.I, how many more instructions execute
-@ before the dispatch?  Emulators model this window with guessed
-@ constants.
+@ before the dispatch?
 @
 @ HOW: a TM2 overflow is parked in IF (iw_prime: run the timer once,
 @ poll until IF shows the bit, timer off — the bit stays).  Then one
@@ -29,10 +28,9 @@
 @ at +12 and it is RANGE-checked (6..10) rather than exact-checked — a
 @ false red on real hardware would be worse than a loose band.
 @
-@ PROVENANCE: verified on GBA SP AGS-001 (sessions 2-4, gbaedge pages
-@ 20 IRQWIN, 26 IRQWIN2 and 32 IRQWIN3 — session 4's IRQWIN3 carried
-@ the mul/ROM-load/mixed sleds and matched dingbat byte-perfect); see
-@ docs/hwprobe-results-agb.md.
+@ PROVENANCE: verified on GBA SP AGS-001 (gbaedge pages 20 IRQWIN, 26
+@ IRQWIN2 and 32 IRQWIN3 — the latter carries the mul/ROM-load/mixed
+@ sleds); see docs/hwprobe-results-agb.md.
     .arm
     .text
     .global _start

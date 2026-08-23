@@ -5,28 +5,19 @@
 
 Per scanline it reports two columns:
 
-  band   the BGP band edge -- the first column whose colour differs from
-         column 0's. This is where EMISSION had got to when the CPU's BGP
-         write landed, so it is daid's ruler.
-  glit   the start of the glitched run -- the first column after the band
-         edge whose colour differs from the post-edge colour. This is the tile
-         the BG FETCHER was working on when LCDC.4 pulsed, so it is
-         acid-hell's residue.
+  band   the BGP band edge: the first column whose colour differs from
+         column 0's (where emission had got to when the BGP write landed).
+  glit   the start of the glitched run: the first column after the band edge
+         whose colour differs from the post-edge colour (the tile the BG
+         fetcher was on when LCDC.4 pulsed).
 
-Neither number means anything on its own: both carry the halt-wake latency,
-which is not a property any two engines have to share. The MEASUREMENT is the
-map from one to the other -- given a band edge at column E, where is G -- and
-that map is internal to a single frame, which is why the two features are on
-one frame in the first place.
+Both carry the halt-wake latency, so only the map from one to the other is
+the measurement. `glit` steps in eights (a fetch), `band` in fours (the CPU's
+quantum), so a four-dot emission-vs-fetch separation is one step of the finer
+staircase.
 
-`glit` steps in eights because a fetch is eight dots wide; `band` steps in
-fours because that is the CPU's quantum. The phase between the two staircases
-is therefore the whole reading, and a four-dot separation between emission and
-the fetch grid moves it by exactly one step of the finer staircase.
-
-Colour is compared by equality only, never by value: on a CGB this cart runs in
-DMG-compatibility mode and the boot ROM picks the palette, so the hues differ
-between machines while the geometry does not.
+Colour is compared by equality only: in DMG-compatibility mode the boot ROM
+picks the palette, so hues differ between machines while geometry does not.
 """
 import sys
 

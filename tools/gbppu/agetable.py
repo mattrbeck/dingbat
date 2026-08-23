@@ -1,16 +1,10 @@
 #!/usr/bin/env python3
 """Read an AGE test ROM's own failure table out of a rendered frame.
 
-AGE's ROMs are scored through the Mooneye protocol (`LD B,B` with the Fibonacci
-registers), which collapses a whole test to one bit -- and several of them never
-reach that instruction at all, so the harness reports a timeout that says
-nothing.  But every AGE ROM *draws its own result*: a "TEST FAILED!" banner over
-a table of 8-bit values, one row per 8 offsets, with each MISMATCHING cell drawn
-inverted (light glyph on a dark cell) instead of normal (dark on light).
-
-That turns an opaque pass/fail into a per-cell map of exactly which
-sub-measurements disagree, which is the resolution these families actually need.
-This reads that map back:
+The Mooneye protocol scores an AGE ROM as one bit (and some never reach the
+`LD B,B`), but every AGE ROM draws its result: a "TEST FAILED!" banner over a
+table of 8-bit values, one row per 8 offsets, each mismatching cell inverted
+(light glyph on dark). This reads that map back:
 
     dingbat_test <rom> --mode=screenshot --timeout=600 --nosave \
         [--dmg|--cgb] [--model=<tok>] --screenshot=f.ppm
@@ -20,10 +14,8 @@ Output is one line per table row -- the row's offset label, its eight cells, and
 `<` markers under the inverted ones -- plus a summary listing every mismatching
 offset.  `--json` emits {offset: {"text":..., "bad":bool}} for scripting a sweep.
 
-Inversion is detected from the cell's BACKGROUND (the majority shade of an 8x8
-tile), not from the glyph, so it does not depend on reading the font at all.
-The glyph text is decoded when it can be, and left as `??` when it cannot; the
-inversion map is the part that matters and it is always available.
+Inversion is the majority shade of the 8x8 tile, independent of the glyph;
+glyph text is `??` when undecodable.
 """
 import json
 import sys

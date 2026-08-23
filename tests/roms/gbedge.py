@@ -206,8 +206,7 @@ class Asm:
                 self.rom[addr + 1] = off & 0xFF
 
 
-# `dec bc` is 2 M-cycles; keep the delay() math honest with a self-check
-# against a tiny interpreter? No — the counts above are the documented ones:
+# delay() cycle counts are the documented ones, not self-checked:
 # ld rr,nn=3, dec rr=2, ld r,r=1, or r=1, jr taken=3 / not=2, nop=1.
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -716,8 +715,7 @@ def t_divphase(a, slot, p):
     00-0F  run k (k = 56..71): `xor a / ldh (DIV),a`, wait k M-cycles, read
            DIV.  The 00->01 transition column pins the reset-to-increment
            distance at 1 M-cycle resolution (expected near 64 M, i.e. k=61
-           +/- the sub-instruction write/read offsets — WHICH offsets is the
-           interesting part, emulators disagree on both).
+           +/- the sub-instruction write/read offsets).
     10-17  run k (k = 10..17): TAC=05 (16-T period), reset DIV, TIMA=0,
            wait k, read TIMA.  Pins the mux-bit phase TIMA ticks on.
     """
@@ -755,8 +753,8 @@ def t_timaglitch(a, slot, p):
     10-13  k = 0..3, TAC written 05->06 while running (frequency switch
            glitch: old-bit/new-bit selection differs between models).
     14-17  rate sanity at each TAC frequency: TIMA after 256 M-cycles
-           (expected 01/40/10/04 hex — a calibration row for reading the
-           rest, and wrong-by-2x emulator clocks show here instantly).
+           (expected 01/40/10/04 hex; a calibration row for reading the
+           rest).
     """
     for i, k in enumerate(range(8)):
         a.ld_r_n("a", 0x05)
@@ -835,7 +833,7 @@ def t_timareload(a, slot, p):
 
     00-0B  k = 7..18: read TIMA k M-cycles after an aligned overflow run.
            Expect FF FF ... 00 55 55: the position and WIDTH of the 00
-           column is the reload delay every emulator hand-tunes.
+           column is the reload delay.
     0C-0F  k = 8..11: write TIMA=AA in the window, read back 4 M later.
            Whether AA survives or the 55 reload wins, per cycle.
     10-13  k = 8..11: write TMA=99 in the window instead — which reload
@@ -1205,11 +1203,9 @@ def t_ifvblank(a, slot, p):
     0C-17  the same window sampled at +8 dots (10-dot effective resolution)
     18-1D  LY sampled with the identical alignment, to anchor the window
 
-    dingbat currently raises vblank a shade early (an open gbfuzz finding);
-    SameBoy/gambatte deviate from each other here too.  The IF column pins
-    it against silicon.  Anchored on an LY=143 poll (8 M-cycle granularity,
-    constant for an implementation) rather than absolute LCD-on delays, so
-    per-emulator first-frame length quirks can't move the window.
+    Anchored on an LY=143 poll (8 M-cycle granularity, constant for an
+    implementation) rather than absolute LCD-on delays, so first-frame
+    length quirks cannot move the window.
     """
     def anchored(reg, dest, n, phase):
         wait_line(a, f"{p}_a{reg}_{dest & 0xFF}_{phase}", 143)
@@ -1234,10 +1230,8 @@ def t_statseq(a, slot, p):
     """STAT mode bits swept across one whole visible line (line 40).
 
     00-17  24 samples, 20 dots apart, SCX=0: the 2->3 and 3->0 edges land
-           in here, and their sample positions are the emulator's whole
-           mode-timing model in one row — including what a mid-mode STAT
-           read RETURNS, the exact thing the recent cc-2 sampling work
-           tuned.
+           in here, and their sample positions are the whole mode-timing
+           model in one row, including what a mid-mode STAT read RETURNS.
     18-1F  8 samples straddling the 3->0 edge with SCX=5: the fine-scroll
            mode-3 stretch.
     """
@@ -1259,11 +1253,9 @@ def t_ly153(a, slot, p):
            phase offsets 0/1/2/3 M-cycles: together they tile the boundary
            at 4-dot resolution, so the handful of dots LY actually reads
            153 for MUST land in some cell.  How many cells show 153 (and
-           where the 0 begins) splits DMG revisions from CGB — and
-           emulators from each other.
+           where the 0 begins) splits DMG revisions from CGB.
     18-1F  8 STAT samples across the boundary with LYC=153: the LYC
-           coincidence flag's rise/fall around the phantom line.  (dingbat
-           currently never shows the flag here at all.)
+           coincidence flag's rise/fall around the phantom line.
     """
     for ph in range(4):
         a.call("lcd_off_safe")
@@ -1282,8 +1274,7 @@ def t_lcdon(a, slot, p):
 
     00-17  24 STAT samples starting immediately after the enabling write:
            hardware starts line 0 in mode 0 (not 2) and skips the first
-           OAM scan; the exact mode string here is one of the least-agreed
-           sequences in GB emulation.
+           OAM scan.
     18-1F  8 LY samples across the first line boundary: is the first line
            full-length?
     """
@@ -1394,10 +1385,9 @@ def t_oamdma(a, slot, p):
     +4  ECHO $E010 read mid-DMA      +5/6/7  OAM $00/$10/$9F after
 
     Reads on the bus the DMA source occupies return the in-flight DMA
-    byte on DMG; which buses conflict (and what the CGB returns — it has
-    a separate WRAM bus) is a live inter-emulator split.  The ECHO-source
-    group doubles as "what does DMA from $E000 copy" — barely documented
-    anywhere.  Executed from HRAM with no stack use.
+    byte on DMG; which buses conflict, and what the CGB returns (it has a
+    separate WRAM bus), is per-model.  The ECHO-source group doubles as
+    "what does DMA from $E000 copy".  Executed from HRAM with no stack use.
     """
     # the HRAM routine, emitted here then copied up.  entry: a = source
     # page, c = HRAM_BUF low byte, hl = return address.
@@ -1472,7 +1462,7 @@ def t_oamcorrupt(a, slot, p):
     dec hl / inc de (pointer $FE30) at three offsets inside line 30's OAM
     scan; run 4 is the vblank control (must stay clean).  CGB should show
     all four clean; WHICH rows DMG trashes, and with what values, varies
-    by revision — silicon data worth having.
+    by revision.
     """
     runs = [("inc_hl", 6), ("dec_hl", 12), ("inc_de", 18), ("ctl", 0)]
     for i, (kind, extra) in enumerate(runs):
@@ -1791,8 +1781,8 @@ def t_hdma(a, slot, p):
 
 @test("PCMPSG")
 def t_pcmpsg(a, slot, p):
-    """PCM12 ($FF76) as a scope on channel 1 — the CGB/AGB-only digital
-    readback the SameSuite APU work leans on.  (EE at +1F = not CGB/AGB.)
+    """PCM12 ($FF76) as a scope on channel 1, the CGB/AGB-only digital
+    readback SameSuite's APU tests use.  (EE at +1F = not CGB/AGB.)
 
     00-17  24 PCM12 samples, 5 M-cycles apart, right after triggering ch1
            (duty 50%, vol F, period 8 M): trigger-to-first-output latency
@@ -1858,9 +1848,8 @@ def t_dstat(a, slot, p):
     """STAT/LY sampling in DOUBLE SPEED, where a CPU M-cycle is 2 dots.
 
     00-17  24 STAT samples across line 40, now only 10 dots apart: twice
-           the resolution on the same mode edges as STATSEQ, and the
-           direct hardware check on WHERE inside a read the mode bits are
-           sampled (the recent cc-2-not-cc-5 change).
+           the resolution on the same mode edges as STATSEQ, and WHERE
+           inside a read the mode bits are sampled.
     18-1F  8 LY samples across the line-153 quirk at 10-dot cadence.
     (EE at +1F = not a CGB.)
     """
@@ -1922,10 +1911,9 @@ def t_speed(a, slot, p):
 
 @test("M1STAT")
 def t_m1stat(a, slot, p):
-    """Bucket 18 (docs/gb-failure-triage.md): does the mode-1 STAT source
-    assert at all on entering vblank, and how does it overlap the vblank IF
-    bit?  42 gambatte `m1` rows are value (not phase) failures on exactly
-    this, and no STAT phase experiment has ever touched it.
+    """Does the mode-1 STAT source assert at all on entering vblank, and
+    how does it overlap the vblank IF bit?  (gambatte's `m1` rows turn on
+    exactly this.)
 
     00-17  four 6-sample sweeps of IF across the line 143->144 boundary at
            phase offsets 0/1/2/3 M-cycles, STAT=$10 (mode-1 source ONLY)
@@ -1960,11 +1948,10 @@ def t_m1stat(a, slot, p):
 
 @test("HALTPHASE")
 def t_haltphase(a, slot, p):
-    """Bucket 24: GBMicrotest (TIMA oracle) and mooneye (LY oracle) disagree
-    about where a halt-woken handler stands relative to the mode-0 edge, on
-    the same device at the same SCX — the arithmetic says they can't both be
-    right, and resolving it gates the STAT_M2_LEAD work (~21 runner rows).
-    This page runs BOTH shapes with BOTH oracles.
+    """GBMicrotest (TIMA oracle) and mooneye (LY oracle) disagree about
+    where a halt-woken handler stands relative to the mode-0 edge on the
+    same device at the same SCX; this page runs BOTH shapes with BOTH
+    oracles.
 
     Layout per SCX in {0, 3} (16 bytes each, at +00 / +10):
     +0..3   halt arm: TIMA at STAT-mode-0 handler entry, with the TIMA
@@ -2049,11 +2036,9 @@ def t_haltphase(a, slot, p):
 
 @test("WYLATCH")
 def t_wylatch(a, slot, p):
-    """The late_wy anomaly: 13 of 14 gambatte late_wy families expect
-    DIFFERENT values per device, all shifted so that the CGB samples WY
-    SOONER than the DMG — the opposite direction of every other CGB write
-    latency.  dingbat models no device split at all (~26 late_wy rows +
-    the 51-row WY-LATCH pipeline sub-bucket).
+    """The WY sample point per device: gambatte's late_wy families expect
+    the CGB to sample WY SOONER than the DMG, the opposite direction of
+    every other CGB write latency.
 
     Oracle: the window starting on a line stretches that line's mode 3, so
     the mode-0 STAT IRQ arrives measurably later.  Sweep WHEN WY is written
@@ -2136,11 +2121,9 @@ def t_wylatch(a, slot, p):
 
 @test("CGBWRAM")
 def t_cgbwram(a, slot, p):
-    """Bucket 16 — the triage doc's single most explicit hardware request
-    (64 gambatte oamdma rows, 'Declined pending hardware: dump WRAM on a
-    real CGB after LDH ($70),$02; if $CFFF != $DFFF these rows are
-    permanently unreachable').  Does the $D000 window really bank, and
-    does any SVBK value alias it onto bank 0 ($C000 window)?
+    """Does the $D000 window really bank, and does any SVBK value alias it
+    onto bank 0 ($C000 window)?  (Decides gambatte's oamdma rows that read
+    $D000-window WRAM.)
 
     Straight-line code only — the stack lives in the $D000 window, so no
     call/push may execute while SVBK is switched.  Marker cell $D500 was
@@ -2152,7 +2135,7 @@ def t_cgbwram(a, slot, p):
     08     SVBK readback after writing 7 (upper-bit mask)
     09     the $C500 sentinel afterwards (5C = no alias hit bank 0)
     0A     SVBK=2, write 77 to $D500: $C500 read under the same SVBK
-           (bucket 16's exact question: 77 here = $D000 aliases $C000)
+           (77 here = $D000 aliases $C000)
     0B     back on SVBK=1: $D500 (B1 = bank 2 write stayed in bank 2)
     0C     boot SVBK value (as this probe found it)
     0D     $D500 read on a DMG-class machine ends up B7 here (control)
@@ -2201,7 +2184,7 @@ def t_divtaps(a, slot, p):
     If that is true, sweeping the counter phase must shift every
     subsystem's event times by exactly the swept amount, and the tap bit
     indices fall out of the staircase periods.  Any subsystem that does
-    NOT follow the sweep is not a tap (or dingbat's model of it isn't).
+    NOT follow the sweep is not a tap.
 
     00-07  serial: poll-iterations until an internal-clock transfer
            completes, started 8*k M-cycles (k=0..7) after a DIV reset —
@@ -2269,14 +2252,13 @@ def t_divtaps(a, slot, p):
 
 @test("SWEEP")
 def t_sweep(a, slot, p):
-    """The ch1 sweep unit's TRIGGER checks — does CGB run the AGB second one?
+    """The ch1 sweep unit's TRIGGER checks: does CGB run the AGB second one?
 
     AGB silicon (AGS-001, gbaedge SWEEPQ/SWEEP2) runs the trigger's overflow
     check twice: the familiar shadow + (shadow >> s), then the LINEAR
     shadow + 2*(shadow >> s), which kills strictly above $800.  blargg's
-    dmg_sound/cgb_sound 04-06 CRCs say GB silicon does NOT (porting the
-    second check regressed 8 suite rows, 2026-08-11) — this page is the
-    raw-value re-anchor at the exact AGB anchor frequencies.  All rows:
+    dmg_sound/cgb_sound 04-06 CRCs say GB silicon does NOT; this page
+    re-anchors the raw values at the AGB anchor frequencies.  All rows:
     ch1, increment, vol F, duty 2, no length; the page cycles the APU OFF
     then ON (resetting the frame-sequencer step) and a DIV reset just
     before each trigger anchors the tap phase, so the counts do not depend
@@ -2286,8 +2268,8 @@ def t_sweep(a, slot, p):
     so "~1 tick" is roughly $400-$500 polls.
     00-01  freq 1300 ($514) shift 1: calc1 1950 passes; AGB's second check
            1300+2*650=2600 kills AT TRIGGER.  0 polls = CGB runs the AGB
-           second check; ~1 tick = single check (tick recalc 2925 kills) —
-           the emulated/blargg-derived expectation
+           second check; ~1 tick = single check (tick recalc 2925 kills),
+           the blargg-derived expectation
     02-03  freq 940 ($3AC) shift 1: linear second = 1880 survives, but a
            RECALCULATED second (1410+705=2115) kills at trigger.  0 polls =
            recalculated second check; ~1 tick = linear-or-none (tick recalc

@@ -1,43 +1,29 @@
-; rtcrate — measure the MBC3 RTC against the frame clock, on real hardware.
+; rtcrate -- measure the MBC3 RTC against the frame clock, on real hardware.
 ;
-; WHY. dingbat walks ax6/rtc3test's battery ~25% slower than whatever emulator
-; the GBEmulatorShootout captured its reference images with: rtc3test-1 needs
-; 720 frames where the shootout allots 570 (testroms/ax6.py, runtime=9.5), and
-; -3 needs >1500 where it allots 1200. Every sub-test PASSES and dingbat's
-; final frame is a 100.0% pixel match to the reference, so the BEHAVIOUR is
-; right and only the PACING is disputed. Nothing in the tree can settle that,
-; because both candidates are emulators. This asks silicon.
-;
-; Four measurements, all in FRAMES (LY 143->144 edges), printed as four hex
-; digits each:
+; Six rows, four hex digits each; rows 0-3 are in FRAMES (LY 143->144 edges):
 ;
 ;   row 0   frames for EIGHT RTC seconds   (divide by 8 for the rate)
 ;   row 1   frames from a SECONDS-register write to the next tick
 ;   row 2   frames from a MINUTES-register write to the next tick
 ;   row 3   frames from halt -> resume to the next tick
+;   row 4   raw DH ($0C) in the high byte, raw SECONDS in the low
+;   row 5   raw bytes at $A000/$A001 with RAM bank 0 selected
 ;
-; Row 0 is the rate: one GB second is 4194304 T and a frame is 70224 T, so a
-; correct clock gives 8 seconds ~= 478 frames = $01DE, and anything near $0258
-; (8 * 75) would be a clock running a quarter slow.
+; Row 0: one GB second is 4194304 T and a frame is 70224 T, so 8 seconds ~=
+; 478 frames = $01DE.
 ;
-; Rows 1-3 are the sub-second divider rule, which is what actually decides the
-; dispute. rtc3test's own tests.md says writing SECONDS resets the divider to a
-; FULL second (RTCS/500 and RTCS/900 both expect 1000ms) while writing MINUTES
-; leaves the remaining time alone (RTCM/50 expects 50ms). Each write here lands
-; 30 frames (~half a second) after a tick, so:
+; Rows 1-3 are the sub-second divider rule. rtc3test's tests.md says writing
+; SECONDS resets the divider to a full second (RTCS/500 and RTCS/900 expect
+; 1000ms) while writing MINUTES leaves the remainder alone (RTCM/50 expects
+; 50ms). Each write here lands 30 frames (~half a second) after a tick, so
+; row 1 ~= $3C if a seconds write resets the divider and row 2 ~= $1E if a
+; minutes write does not.
 ;
-;   row 1 ~= 60 frames ($3C)   if a seconds write resets the divider
-;   row 2 ~= 30 frames ($1E)   if a minutes write does not
+; $EEEE = that measurement never completed; $FFFF = it ran and timed out.
 ;
-; If row 1 comes back ~30 instead, the divider is NOT reset and dingbat is
-; spending a whole extra second on every seconds write that rtc3test makes —
-; which would be the entire 25%.
-;
-; No CGB flag on purpose: the RTC is on the CARTRIDGE, so this measures its
-; crystal against the console's frame clock and wants the plainest machine.
-; Runs on DMG/MGB/SGB/CGB/AGB alike. NEEDS AN MBC3+TIMER CART — see build.sh,
-; which fixes the header to $10 (MBC3+TIMER+RAM+BATTERY) rather than mk.sh's
-; ROM-only default.
+; No CGB flag: the RTC is on the cartridge and this runs on any console.
+; NEEDS AN MBC3+TIMER CART -- see build.sh, which sets the header to $10
+; (MBC3+TIMER+RAM+BATTERY) rather than mk.sh's ROM-only default.
 
 INCLUDE "hw.inc"
 
@@ -50,8 +36,7 @@ hIsCgb: db
 SECTION "vars", WRAM0
 wResults: DS ROWS * 2
 wRow:     DS 1
-wDrawRow: DS 1   ; DrawResults' own counter: it must NOT consume wRow,
-                 ; which StoreResult uses to decide where to write
+wDrawRow: DS 1   ; DrawResults' own counter; StoreResult owns wRow
 
 SECTION "entry", ROM0[$100]
     nop
@@ -86,13 +71,8 @@ ReadSeconds:
     ret
 
 ; Wait for SECONDS to change; BC = frames waited, or $FFFF if the clock never
-; ticked within TICK_CAP frames.
-;
-; The cap is not defensive padding, it is the whole difference between a probe
-; and a brick: v1 of this ROM waited forever, so on a cart whose MBC3 has no RTC
-; it sat on a blank screen and reported nothing at all. A cart that cannot tick
-; is a RESULT -- it should print $FFFF and move on, and rows 4-5 below then say
-; whether the $A000 window responds at all.
+; ticked within TICK_CAP frames. A cart that cannot tick is a result ($FFFF,
+; then rows 4-5 say whether the $A000 window responds), not a hang.
 WaitTick:
     call ReadSeconds
     ld d, a
@@ -142,10 +122,8 @@ StoreResult:
     ld a, [wRow]
     inc a
     ld [wRow], a
-    ; Redraw immediately. A probe that shows nothing until it is completely
-    ; finished cannot be told apart from a probe that is not running at all --
-    ; which is exactly what "still a white screen" reported. Now each row lands
-    ; as it is measured, and the $EEEE placeholders below say "running".
+    ; Redraw as each row lands, so a running probe is distinguishable from a
+    ; dead one.
     push bc
     call DrawResults
     pop bc
@@ -176,9 +154,7 @@ Start:
     ld [$A000], a
 
     ; Seed every row with $EEEE and paint it BEFORE any measurement, so the
-    ; very first frame proves the cart runs this ROM at all. A row still
-    ; reading EEEE at the end means that measurement never completed; FFFF
-    ; means it ran and timed out.
+    ; first frame proves the cart runs this ROM at all.
     ld hl, wResults
     ld b, ROWS
 .seed
@@ -273,10 +249,8 @@ Start:
     jr .done
 
 DrawResults:
-    ; PutByte clobbers B and C (it does `ld c, a` internally) and preserves
-    ; only D and E, so neither the loop counter nor the second half of a
-    ; result can live in a register across a call. The counter lives in wRow
-    ; and each result is re-read from WRAM between the two halves.
+    ; PutByte clobbers B and C and preserves only D and E, so the counter
+    ; lives in wDrawRow and each result is re-read from WRAM between halves.
     call LcdOff
     xor a
     ld [wDrawRow], a

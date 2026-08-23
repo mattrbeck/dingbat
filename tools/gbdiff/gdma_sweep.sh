@@ -1,14 +1,9 @@
 #!/usr/bin/env bash
 # Read gambatte's gdma_cycles_* family out at each setting of
-# GDMA_SETUP_MCYCLES, so the family measures the constant instead of the
-# constant being guessed at.
-#
-# Every member of the family is a pair that differs by a single inserted NOP
-# ahead of `LDH A,($41)`, so the pair reads STAT one M-cycle apart and its two
-# expected values put the mode 3 -> 0 edge between them. A setting is only
-# correct if EVERY pair lands on the right side of its own flip point at that
-# one setting; a value that fixes the `_2` members by pushing the `_1` members
-# past their edge has not measured anything.
+# GDMA_SETUP_MCYCLES. Each member is a pair differing by one NOP ahead of
+# `LDH A,($41)`, so the pair's two expected values put the mode 3 -> 0 edge
+# between them; a setting is correct only if every pair lands on the right
+# side of its own flip point at once.
 #
 # Usage: tools/gbdiff/gdma_sweep.sh [max-mcycles]   (default 8)
 set -uo pipefail

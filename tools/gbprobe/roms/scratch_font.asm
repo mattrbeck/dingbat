@@ -1,10 +1,6 @@
 ; Not a probe: a one-screen smoke test for the shared video/readout path, so a
-; blank screen out of a real probe can be told apart from a broken font, map or
-; palette. It exists because that was the failure mode that cost the most time
-; while these ROMs were being written, and it will be the failure mode that
-; costs the most time when they are first run off a flash cartridge.
-;
-; Expected: "AB" at the top-left corner, "37" at row 2, column 5.
+; blank screen from a real probe can be told apart from a broken font, map or
+; palette. Expected: "AB" at the top-left corner, "37" at row 2, column 5.
 INCLUDE "hw.inc"
 
 SECTION "entry", ROM0[$100]

@@ -2,54 +2,45 @@
 """photogrid — recover a 160x144 grid of DMG shade indices from a photograph of
 a real Game Boy screen.
 
-Why this exists
----------------
-The mealybug-tearoom-tests `expected/` PNGs that every emulator scores against
-are the *author's own emulator* output ("screenshots from my Game Boy emulator
-(which I believe to be correct)" — mealybug README).  The only actual hardware
-evidence shipped with the suite is `photos/<device>/*.jpg`, "blurry photos of
-the ROMs running on real devices".  This tool turns those photos into something
-a diff can be run against, so a disagreement between dingbat and the reference
-can be adjudicated by hardware instead of by another emulator.
+The mealybug-tearoom-tests `expected/` PNGs are the author's emulator output
+(mealybug README); the suite's hardware evidence is `photos/<device>/*.jpg`.
+This turns those photos into something a diff can be run against.
 
-The pipeline
-------------
-1. **Locate the panel.**  A DMG photo is a green-yellow rectangle inside an
+The pipeline:
+1. Locate the panel.  A DMG photo is a green-yellow rectangle inside an
    orange-yellow bezel; ``g - r`` separates them cleanly (the screen is green
    dominant, the bezel red dominant).  Otsu on a heavily blurred ``g - r``,
    largest connected component, fill holes, then the four extreme points along
    the +-45 degree diagonals give a rough quadrilateral.
 
-2. **Refine the homography.**  The rough quad is out by several device pixels,
+2. Refine the homography.  The rough quad is out by several device pixels,
    which at ~14 photo pixels per Game Boy pixel is fatal.  The 8 corner
    coordinates are refined by maximising the normalised cross-correlation
-   between the sampled grid and a *neutral* template: the shades on which the
-   reference PNG and the emulator frame already **agree**, with every disputed
-   pixel masked out.  The registration therefore cannot be pulled toward either
-   hypothesis - it only ever sees the pixels both sides call the same.
+   between the sampled grid and a neutral template: the shades on which the
+   reference PNG and the emulator frame already agree, with every disputed
+   pixel masked out, so registration cannot be pulled toward either hypothesis.
 
-3. **Sample.**  Each cell is the median of the photo inside a box around the
+3. Sample.  Each cell is the median of the photo inside a box around the
    cell centre (default 50% of the cell), which rejects the inter-pixel grid
    lines of the LCD and most of the JPEG ringing.
 
-4. **Flat-field.**  Illumination across a hand-held photo of a reflective STN
+4. Flat-field.  Illumination across a hand-held photo of a reflective STN
    panel varies by more than the gap between two adjacent shades, so an
    absolute threshold is hopeless.  Instead a smooth model
 
        L(x, y) ~ a(x, y) * m[s] + b(x, y)
 
    is fitted, with ``a`` and ``b`` low-order 2-D polynomials and ``m[s]`` four
-   free shade levels, **using only the agreeing pixels**.  Classification of a
+   free shade levels, using only the agreeing pixels.  Classification of a
    cell is then "which m[s] does the flat-fielded value sit closest to".
 
-5. **Adjudicate.**  For every disputed pixel the fitted model predicts the
+5. Adjudicate.  For every disputed pixel the fitted model predicts the
    luminance the reference's shade and the emulator's shade would each produce;
    whichever is closer wins, and the margin (in units of the local shade
    spacing) is reported as the confidence.
 
-Validation is the point, not an afterthought - see ``validate`` below and
-``README.md``.  A pipeline that cannot reproduce a row dingbat already passes
-has no business testifying about one it fails.
+See ``validate`` below and README.md: a pipeline that cannot reproduce a row
+dingbat already passes cannot testify about one it fails.
 
 Usage:
     photogrid.py recover  <photo.jpg> --ref REF.png [--got GOT.png] [-o out.png]
@@ -167,10 +158,8 @@ def _fit_line(t, u):
 def rough_corners(mask, shape):
     """Fit the four panel edges as lines and intersect them.
 
-    Extreme points along the diagonals (the obvious method) are set by a single
-    pixel of mask noise and were routinely several device pixels out, which at
-    ~13 photo pixels per Game Boy pixel is most of a pixel of registration error
-    before refinement even starts.  Fitting a robust line to each edge uses
+    Extreme points along the diagonals are set by a single pixel of mask noise
+    and come out several device pixels wrong; a robust line per edge uses
     hundreds of boundary samples instead of one.
     """
     ys, xs = np.nonzero(mask)
@@ -303,9 +292,8 @@ def coarse_align(gray, corners, template, mask, ntop=4):
     """Grid-search scale and rotation; find translation by cross-correlation.
 
     The geometric quad can be a couple of Game Boy pixels out in scale, and a
-    local optimiser started there walks into the wrong basin - which is exactly
-    what produced the five rows that came back at NCC ~0.1 with the mask-only
-    initialisation.  Because translating the quad by a whole cell is the same as
+    local optimiser started there walks into the wrong basin.  Because
+    translating the quad by a whole cell is the same as
     rolling the sampled grid, every translation can be scored at once with one
     FFT per (scale, rotation) pair, so a 21x21x5 grid costs a few hundred
     samplings rather than a few hundred thousand.
@@ -328,10 +316,9 @@ def coarse_align(gray, corners, template, mask, ntop=4):
                 dv = ((int(dv) - GB_H + 1 + GB_H // 2) % GB_H) - GB_H // 2
                 du = ((int(du) - GB_W + 1 + GB_W // 2) % GB_W) - GB_W // 2
                 cands.append((v, sx, sy, th, du, dv))
-    # Mealybug frames are tile-based and so strongly 8-pixel periodic that the
-    # correlation surface has near-equal aliases at scale errors around 8/160 =
-    # 5%.  Returning only the argmax picked the alias on several rows, so hand
-    # back the best few well-separated peaks and let the caller refine each.
+    # Mealybug frames are so strongly 8-pixel periodic that the correlation
+    # surface has near-equal aliases at scale errors around 8/160 = 5%; the
+    # argmax alone picks the alias, so return the best few separated peaks.
     cands.sort(key=lambda t: -t[0])
     out = []
     for v, sx, sy, th, du, dv in cands:
@@ -488,7 +475,7 @@ class ShadeModel:
       lens adds its own blur, and JPEG adds more; the net effect is that an
       isolated one-pixel feature reaches nothing like its true shade.  Without a
       PSF term a photo of a page of 1-pixel-stroke glyphs misclassifies ~20% of
-      cells no matter how good the alignment is - measured, not assumed.
+      cells no matter how good the alignment is.
 
     Fitted by alternating least squares.  Each of the three sub-problems is
     linear given the other two, and the whole thing converges in ~15 sweeps from

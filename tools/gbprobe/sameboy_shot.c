@@ -1,26 +1,16 @@
-/* gbprobe's SameBoy leg.
+/* gbprobe's SameBoy leg: links libsameboy.a as a black-box reference.
  *
  *   sameboy_shot <rom> <model> <frames> <out.ppm>
  *
  *   model: dmg | cgb0 | cgbA | cgbB | cgbC | cgbD | cgbE | cgb (=cgbE) | agb
  *
- * SameBoy always executes a boot ROM — there is no skip-boot entry point — so
- * the harness builds SameBoy's own boot ROMs with the same RGBDS it assembles
- * the probes with and points us at them through GBPROBE_BOOTROMS. The boot
- * animation is then burned off before frame counting starts, which puts this
- * leg on the same post-boot timeline as dingbat's and DocBoy's skip-boot.
+ * SameBoy has no skip-boot entry point, so build.sh assembles its boot ROMs
+ * and points here through GBPROBE_BOOTROMS; the boot animation is burned off
+ * before frame counting starts, matching the other legs' skip-boot timeline.
  *
- * SameBoy is an ORACLE here. We read its pixels; we copy nothing out of it.
- *
- * Two settings matter for byte-comparability and both are set below:
- *   - colour correction OFF, so a CGB frame is the raw 555 the PPU produced
- *     rather than SameBoy's screen simulation;
- *   - the shared four-shade DMG ramp, so a DMG frame is byte-identical to the
- *     other two legs' output for the same picture.
- *
- * Determinism: GB_init seeds RAM/OAM/palettes through GB_random(), which a
- * library constructor seeds from the wall clock. Disabling it BEFORE GB_init
- * makes power-up memory all zero, which is what the other two engines do.
+ * For byte-comparability: colour correction off (raw 555 out) and the shared
+ * four-shade DMG ramp. GB_random must be disabled BEFORE GB_init so power-up
+ * memory is all zero like the other legs.
  */
 #define GB_INTERNAL
 #include <Core/gb.h>
@@ -33,8 +23,8 @@
 #define W 160
 #define H 144
 
-/* Darkest first: SameBoy indexes colors[3] as shade 0. Every value survives an
- * 8->5->8 round trip, so no engine's internal depth can move it. */
+/* Darkest first: colors[3] is shade 0. Every value survives an 8->5->8
+ * round trip. */
 static const GB_palette_t GREY4 = {{
     {0x00, 0x00, 0x00}, {0x52, 0x52, 0x52}, {0xAD, 0xAD, 0xAD},
     {0xFF, 0xFF, 0xFF}, {0xFF, 0xFF, 0xFF},
@@ -111,8 +101,7 @@ int main(int argc, char** argv) {
     GB_set_palette(&gb, &GREY4);
     GB_set_rendering_disabled(&gb, false);
 
-    /* Burn the boot animation, bounded, so frame 0 means the same instant here
-     * as it does on the two skip-boot legs. */
+    /* Burn the boot animation, bounded. */
     for (int i = 0; i < 1000 && !gb.boot_rom_finished; ++i) GB_run_frame(&gb);
     if (!gb.boot_rom_finished) {
         fprintf(stderr, "boot rom never finished\n");

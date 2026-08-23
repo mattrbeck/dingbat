@@ -3,10 +3,9 @@
 
     tools/gbppu/hellpx.py <dingbat.ppm> <reference.png> [x0 x1 y0 y1]
 
-Two pixels is a small enough disagreement that the SHAPE of it decides what
-kind of bug it is, and a count cannot show that: a horizontal phase error and a
-swapped pair of scanlines both read as "2 px". So print the block around them
-from both frames, as palette indices, and let the eye do it.
+Prints the block around the disputed pixels from both frames as palette
+indices: a horizontal phase error and a swapped pair of scanlines both count
+as "2 px" and only the shape tells them apart.
 """
 import sys, zlib, struct
 

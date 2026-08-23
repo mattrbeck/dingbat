@@ -13,10 +13,8 @@ sync/halt path and failure dump byte-for-byte and replaces the body with:
     ld a,(hl)            ; read LY
     jp <dump>            ; always dump: B = the LY read, A = SCX
 
-so one run reports the LY the CPU sees N M-cycles after the mode-0 STAT wake.
-Sweeping N brackets the LY increment against the wake to one M-cycle, for any
-SCX, on any emulator that can be screenshotted -- which is what makes the DMG
-and CGB grids directly comparable instead of two pass/fail staircases.
+so one run reports the LY the CPU sees N M-cycles after the mode-0 STAT wake,
+and sweeping N brackets the LY increment against the wake to one M-cycle.
 
 N here is the ROM's own units: the shipped -C ROM's `call $0497` sled is 22 nops
 and its per-cell tail is 2 or 3 more, so N = 24 is its "2 nops" cell.

@@ -6,13 +6,11 @@
     python3 tools/gbppu/tdselcells.py ./dt_px [workdir]
 
 Every glitched background bitplane read of the four CGB `m3_lcdc_tile_sel*`
-references and of `cgb-acid-hell` is one CELL, and the reference PNG says which
-byte HARDWARE returned for it. That turns "which substitution source does the
-silicon use" into an offline score with no rebuild between hypotheses, which is
-what `CGB_TDSEL_GLITCH` and `CGB_TDSEL_IDX_DOTS` in `gb/gb.nim` are derived
-from. A whole-frame percentage cannot do this job: a cell under an object, or
-in a palette whose four entries are the same colour, is invisible in the
-picture and still votes here.
+references and of `cgb-acid-hell` is one cell, and the reference PNG says
+which byte hardware returned for it, so substitution-source hypotheses
+(CGB_TDSEL_GLITCH, CGB_TDSEL_IDX_DOTS in gb/gb.nim) score offline with no
+rebuild. A cell under an object or in a single-colour palette is invisible in
+the picture and still votes here.
 
 How a cell gets its hardware byte, with no VRAM dump and no palette table:
 
@@ -28,17 +26,13 @@ How a cell gets its hardware byte, with no VRAM dump and no palette table:
   * A pixel is only used where no object covered it and its palette is the
     pushed tile's, so what is left is the BG bitplane pair, bit for bit.
 
-The self-check is the point of trusting any of it: for every plane whose eight
-bits the reference pins, dingbat's own byte must equal the reconstructed one
-wherever the frame is pixel-exact. All five frames report 0 mismatches on a
-passing tree; a nonzero count on the four mealybug frames means the parser
-drifted, not that hardware disagrees.
+Self-check: wherever the frame is pixel-exact, dingbat's own byte must equal
+the reconstructed one for every fully pinned plane. A nonzero mismatch count
+on the four mealybug frames means the parser drifted, not that hardware
+disagrees.
 
-Cell census depends on the pinning convention and there is no canonical one:
-this tool counts a cell whenever at least ONE bit is pinned (415 cells, 223 SET
-and 192 RESET) and also reports the strict all-eight-bits subset (335, 151 and
-184). Scoring is per pinned bit either way, so the inclusive census is the
-harder gate and the one the tables in `gb.nim` quote.
+A cell is counted when at least one bit is pinned; the strict all-eight-bits
+subset is reported too. Scoring is per pinned bit either way.
 """
 import collections, json, os, re, subprocess, sys, tempfile
 

@@ -1,26 +1,15 @@
 #!/usr/bin/env bash
-# hwscore -- score a build against the instruments whose expectations came from
-# SILICON, with no emulator's opinion in the number.
+# hwscore -- score a build against the instruments whose expectations come
+# from hardware rather than from the gambatte suite's recorded output:
 #
-# WHY THIS IS SEPARATE FROM THE RUNNER. Passing a row is not evidence that the
-# model matches hardware; it is evidence that it matches whatever produced the
-# row's expectation. gambatte's 5,005 rows are gambatte's output, and this tree
-# already disagrees with ~800 of them, so a change that moves gambatte by
-# hundreds has said nothing until you know which way the hardware-anchored
-# instruments moved. Those are:
+#   objtab      GBMicrotest ppu_spritex_vs_scx: 153 cells of OBJ penalty in
+#               dots (mode 3 length), transcribed from the ROM's `cp` operands.
+#   probe (e)   tools/gbprobe probe_e_objgrid: 136 cells of fetch-grid position
+#               (docs/hwprobe.md).
+#   acid-hell   cgb-acid-hell against its reference PNG.
 #
-#   objtab      GBMicrotest ppu_spritex_vs_scx -- 153 cells of OBJ penalty in
-#               dots, expectations transcribed from the ROM's own `cp` operands.
-#               Mode 3's LENGTH. Ships 0/153 and must stay there.
-#   probe (e)   136 cells of fetch-grid POSITION against SameBoy, which
-#               reproduced the GBA SP on all eight photographed settings.
-#               Ships 68/136 -- this one is WRONG and is the open problem.
-#   acid-hell   cgb-acid-hell against its reference, which SameBoy renders
-#               pixel-exact. Ships at 2 px.
-#
-# mealybug is the fourth such instrument -- its references are captures of real
-# DMG/CGB silicon -- but it is only scored colour-correctly by the full runner,
-# so it is not in here; run the runner for it and read the mealybug rows.
+# mealybug's references are hardware captures too, but only the full runner
+# scores them colour-correctly, so they are not here.
 #
 #   tools/gbppu/hwscore.sh [-d:KNOB=V ...]
 set -uo pipefail

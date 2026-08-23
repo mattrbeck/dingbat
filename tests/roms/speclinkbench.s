@@ -1,13 +1,12 @@
 @ Speculation benchmark ROM (tests/dingbat_test.nim --mode=speclinkbench).
 @
-@ A LONG, SYMMETRIC multi-mode exchange that stands in for a Pokémon Cable Club
-@ "all players ready" sync: both linked units send the SAME cyclic handshake
-@ word each round (table[round & 15], a pattern with runs of repeats and a few
-@ transitions per cycle, like the real 0x961e/0xcafe/0x11/0x00 cadence). Because
-@ the responder mirrors the master, the echo-aware predictor nails it while the
-@ old "same as last" guess mispredicts on every transition — the exact regime
-@ that made the real trade crawl under latency. 200 rounds so rollback
-@ re-emulation cost compounds the way 16 rounds never could.
+@ A LONG, SYMMETRIC multi-mode exchange standing in for a Pokémon Cable Club
+@ "all players ready" sync: both units send the SAME cyclic handshake word
+@ each round (table[round & 15]: runs of repeats and a few transitions per
+@ cycle, like the real 0x961e/0xcafe/0x11/0x00 cadence). Because the
+@ responder mirrors the master, an echo-aware predictor gets every round
+@ while a "same as last" guess misses every transition. 200 rounds so
+@ rollback re-emulation cost compounds.
 @
 @ Same EWRAM contract as linktest so the harness can hash final state and prove
 @ speculation stays bit-identical: SIOMULTI0 -> 0x02000000+2k, SIOMULTI1 ->

@@ -1,22 +1,14 @@
-/* Dump the IO register file ($FF00-$FF7F) exactly as the cartridge sees it on
- * its first instruction -- i.e. the state the BOOT ROM hands off.
+/* Dump the IO register file ($FF00-$FF7F) as the cartridge sees it on its
+ * first instruction, i.e. the state the boot ROM hands off (links libsameboy).
  *
  *   sameboy_bootio <bootromdir> <dmg|mgb|sgb|sgb2|cgb0|cgbA..E|agb> [rom.gb]
  *
- * Why this and not sameboy_runner: mooneye's boot_hwio ROMs report only their
- * FIRST mismatch, so one disagreement (P1, which the SameBoy runner reads back
- * as $CF) masks every later register. Reading the file directly answers the
- * whole table at once, and per model.
+ * mooneye's boot_hwio ROMs report only their first mismatch; this answers the
+ * whole table at once, per model. The model is an argument, not the cart
+ * header (mooneye's `-C` ROMs carry $0143 = $00).
  *
- * It also sidesteps a trap in sameboy_runner, which picks the model from the
- * cartridge's CGB flag: mooneye's `-C` ROMs (cgb+agb) carry $0143 = $00, so
- * that runner plays them on a DMG-B and they "fail at $FF00 with $CF" -- the
- * DMG's P1 hand-off value, and a statement about the runner, not the ROM.
- * Here the model is an argument.
- *
- * Reads go through GB_safe_read_memory, so what is printed is the value a
- * `LDH A,(n)` would return -- read masks and all -- not SameBoy's internal
- * io_registers[] backing store.
+ * Reads go through GB_safe_read_memory, so what is printed is what a
+ * `LDH A,(n)` would return, read masks and all.
  *
  * With no ROM argument a 32 KiB stub that loops at $0150 is synthesised, so the
  * dump is a property of the boot ROM and the model alone. Pass a real ROM to

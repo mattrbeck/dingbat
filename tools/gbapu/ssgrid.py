@@ -1,25 +1,17 @@
 #!/usr/bin/env python3
-"""Every SameSuite APU ROM x every CGB revision + AGB, dingbat beside SameBoy.
+"""Every SameSuite APU ROM x every CGB revision + AGB, dingbat beside the
+sameboy_ssdump runner.
 
     tools/gbapu/ssgrid.py            # the 70 x 6 grid, then a disagreement list
     tools/gbapu/ssgrid.py ding       # dingbat only (no SameBoy build needed)
 
-`.` = the ROM's own `$CFFE` says PASS, `X` = FAIL.  Reading the verdict byte
-rather than diffing result buffers is what makes SameBoy usable here at all:
-SameBoy plays the boot ROM and dingbat skips it, which leaves the two on
-different APU tick phases, and on some of these ROMs that shifts the whole
-staircase by a cell or two without either emulator being wrong.
+`.` = the ROM's own `$CFFE` says PASS, `X` = FAIL. The verdict byte is
+compared rather than the result buffers: the runner plays the boot ROM and
+dingbat skips it, so the two start on different APU tick phases and some
+staircases shift by a cell without either being wrong.
 
-This is the instrument that decides which MACHINE a row should be scored on.
-`same-suite/apu/README.md` states the answer -- CGB-C fails most of the
-channel 1/2/4 tests because of the PCM12/PCM34 read glitch, CGB-E passes all of
-them -- and this grid is that paragraph, measured.  It is why
-`build_samesuite_apu_tests` defaults the sub-suite to cgbE.
-
-Baseline, 2026-08-21: dingbat forced to one revision scores 46/70 at cgb0 and
-cgbAB, 42/70 at cgbC, 63/70 at cgbD, cgbE and agb; with the filename tokens and
-the cgbE default, 70/70.  375 of the 420 dingbat/SameBoy verdicts agree; the 45
-that do not are listed at GbQuirks.pcm_read_edge_zero in gb.nim.
+same-suite/apu/README.md: CGB-C fails most channel 1/2/4 tests (PCM12/PCM34
+read glitch), CGB-E passes all; `build_samesuite_apu_tests` defaults to cgbE.
 """
 import glob
 import os

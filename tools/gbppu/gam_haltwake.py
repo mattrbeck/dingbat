@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Halted vs running mode-0 STAT wake, differentially, in dingbat AND SameBoy.
+"""Halted vs running mode-0 STAT wake, differentially, in dingbat and the
+sameboy_gambatte runner.
 
     tools/gbppu/gam_haltwake.py <wait_lines> <dmg|cgb>
 
@@ -8,22 +9,10 @@ Two programs identical except that one waits in a NOP sled and the other in
 tick per 16 T). Sweeping SCX walks the mode 3 -> 0 edge across the grid a dot
 at a time, so a staircase that steps two SCX later is a wake two dots later.
 
-This is GBMicrotest's `int_hblank_{nops,halt}_scx0..7` pair -- which ships both
-arms and whose hardware answers disagree (61/62/62/62/62/63/63/63 running
-against 62/62/62/63/63/63/63/64 halted) -- rebuilt in gambatte's output format
-so the oracle can be asked too.
-
-Measured 2026-08-21 on 65bcb71, DMG:
-
-    W=0     nops ding 12 13 13 13 13 13 13 13   halt ding 12 13 13 13 ...
-            nops samb 12 13 13 13 13 13 13 13   halt samb 13 13 13 13 ...
-              -> line 0: running exact, halted 2 dots EARLY in dingbat
-    W=1140  nops ding 2F 30 30 30 30 30 30 30   halt ding 2F 30 30 30 ...
-            nops samb 2F 2F 2F 30 30 30 30 30   halt samb 2F 30 30 30 ...
-              -> steady state: running 2 dots LATE, halted exact
-
-Two 2-dot errors that cancel for a halted CPU on any line but the first after
-an LCD enable. See M0_HALT_BLIND_DOTS in gb/ppu.nim.
+This is GBMicrotest's `int_hblank_{nops,halt}_scx0..7` pair, whose hardware
+expectations differ between the arms (61/62/62/62/62/63/63/63 running against
+62/62/62/63/63/63/63/64 halted), rebuilt in gambatte's output format. See
+M0_HALT_BLIND_DOTS in gb/ppu.nim.
 """
 import sys
 import os

@@ -1,31 +1,17 @@
 #!/usr/bin/env bash
-# probe_f_shape -- probe (f) scored the way the finding is actually stated.
+# probe_f_shape -- probe (f) scored modulo one uniform column offset per SCX:
+# the offset most bands agree on is found and the row passes if all bands
+# agree on it, i.e. the two staircases have the same shape once shifted. This
+# separates the window path from the uniform offset the plain arm carries too.
 #
-# probe_f_fit.sh compares ABSOLUTE columns, so the uniform 8-dot offset that
-# dingbat carries in the plain arm too (probe (e), 68/136) pins it at 0/8 no
-# matter what the window path does. That offset is a separate bug, and holding
-# the two together means neither can be worked on. This script takes it out and
-# scores what is left: for each SCX it finds the single uniform column offset
-# that most bands agree on, and asks whether ALL of them agree on it -- i.e.
-# whether the two staircases have the same SHAPE once shifted.
-#
-# The silicon-confirmed law at the top of this work was
-# `dingbat(s) = oracle(s+1) + 8` -- a constant offset AND a one-unit SCX slip.
-# This scores the slip alone. Stock is 3/8.
-#
-# --dmg builds the cart with no CGB flag, which makes BOTH sides a DMG: the
-# SameBoy runner picks GB_MODEL_DMG_B off byte 0x143 and dingbat is told --dmg.
-# That is the differential that matters for anything touching the window
-# restart, because the row such a change historically costs is mealybug DMG.
+# --dmg builds the cart with no CGB flag, making both sides a DMG (the runner
+# picks GB_MODEL_DMG_B off byte 0x143; dingbat is told --dmg).
 #
 #   tools/gbprobe/probe_f_shape.sh [--dmg] [-d:KNOB=V ...]
 set -uo pipefail
 cd "$(dirname "$0")/../.."
-# SameBoy's runner is hardcoded to GB_MODEL_CGB_E, and dingbat defaults
-# to CGB-C. Every comparison here must therefore force rev E or it is
-# measuring the CGB-C/CGB-D palette-step split on top of whatever it
-# meant to measure -- which is exactly what happened, unnoticed, to every
-# probe number in this tree until 2026-08-18. SB_REV overrides.
+# The runner is built for CGB-E and dingbat defaults to CGB-C; force rev E
+# or the C/D palette-step split lands in the count. SB_REV overrides.
 SB_REV=${SB_REV:---cgb-rev=E}
 T=${TMPDIR:-/tmp}/probe_f_fit          # share probe_f_fit's ROM/oracle cache
 mkdir -p "$T"

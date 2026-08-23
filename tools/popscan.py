@@ -7,35 +7,21 @@ signed 16-bit L,R frames, no header, 32768 Hz by default:
     DINGBAT_GB_AUDIO_DUMP=<path>   dingbat GB core
     GBFUZZ_PCM=<path>              tools/gbfuzz/sameboy_runner
 
-WHY NOT A RAW SAMPLE-DELTA THRESHOLD
-------------------------------------
-A Game Boy square wave IS a sequence of full-scale sample-to-sample jumps: at
-a 32768 Hz sample-and-hold of an un-band-limited DAC mix, ordinary music has
-|delta| at full scale thousands of times a second. Counting large deltas
-therefore measures how much square wave is playing, not how much popping.
-It also cannot be compared against SameBoy, which band-limits each channel
-and so has small deltas everywhere by construction.
+A raw sample-delta threshold does not work: a Game Boy square wave is a
+sequence of full-scale sample-to-sample jumps, so large deltas count how much
+square wave is playing, not how much popping.
 
-WHAT A POP ACTUALLY IS
-----------------------
-The artefact is a step in the signal's *local mean* -- the DC level. A square
-wave oscillates about a stable mean, so the mean is flat while a note plays
-and no matter how loud it is. But a Game Boy channel's DAC does not idle at
-the middle of its range: an enabled channel emitting digital 0 sits at the
-bottom rail, while a disabled channel contributes nothing at all. So every
-channel enable, disable, DAC on and DAC off shifts the mix's DC level by a
-constant, instantly. Real hardware puts a DC-blocking capacitor after the
-mixer, which turns that step into a decaying transient and removes the
-sustained offset; an emulator without one passes the raw step through, and a
-step in the DC level is exactly what a speaker reproduces as a click.
+A pop is a step in the signal's local mean (DC level). A square wave
+oscillates about a stable mean, but a channel's DAC does not idle mid-range:
+an enabled channel emitting 0 sits at the bottom rail and a disabled one
+contributes nothing, so every channel/DAC enable or disable shifts the mix's
+DC level instantly. Hardware's DC-blocking capacitor after the mixer turns
+that step into a decaying transient; an emulator without one passes the step
+through, which a speaker reproduces as a click. So: track the local mean over
+a short window and count moves larger than a threshold in one window --
+insensitive to waveform, frequency, phase and volume.
 
-So the measurement here is: track the local mean over a short window, and
-count the places where it moves further than a threshold in one window. That
-is insensitive to waveform shape, frequency, phase and volume, and it is
-directly comparable between two emulators.
-
-METRICS
--------
+Metrics:
   dc_steps      count of window-to-window local-mean jumps above --dc-thresh
   dc_range      peak-to-peak excursion of the local mean over the whole run
   dc_rms        RMS of the local mean (a healthy DC-blocked signal is ~0)

@@ -3,29 +3,15 @@
 
     read_probe_e.py <photo.jpg|frame.ppm> [--debug]
 
-WHY THIS EXISTS, and it is not redundant with read_probe_d_photo.py. That
-reader gives each bar's ABSOLUTE column in the warped 160x144 frame, which
-is only as good as the registration: a warp whose left edge is a few photo
-pixels out translates every column by the same amount, and the staircase's
-spacing — the thing that looks right — does not change at all. So a pure
-registration error is indistinguishable from a real phase difference, and
-the first probe (e) reading turned up exactly such an offset (8 px on the
-objects-off baseline) that had to be one or the other.
-
-probe (e) prints its parameter header at a FIXED position — the glyphs
-start at GB x = 0, tile column 0 — so the header is a ruler lying in the
-same frame as the thing being measured. Reporting
+read_probe_d_photo.py gives each bar's absolute column in the warped frame,
+and a registration error translates every column uniformly, which is
+indistinguishable from a phase difference. probe (e) prints its parameter
+header at a fixed position (glyphs start at GB x = 0), so
 
     bar column  -  header's left edge
 
-cancels any translation the registration introduced, because both terms
-move together. That is a genuinely independent methodology: the two
-readers share only the warp, and this one is immune to the warp's dominant
-error mode.
-
-Prints, per band, the raw column and the header-relative one, plus the
-header's own left edge so a registration problem is visible rather than
-silently absorbed.
+cancels any translation the warp introduced. Prints, per band, the raw and
+header-relative columns plus the header's own left edge.
 """
 import sys
 import os

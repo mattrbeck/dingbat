@@ -1,23 +1,8 @@
-## Regression tests for the GBA PPU compositor.
-##
-## Why this exists: the compositor was rewritten into window spans with three
-## specialized inner loops (opaque / alpha / brighten-darken), the opaque and
-## shade loops instantiated per layer-walk length. That is a lot of open-coded
-## duplication — the layer walk now appears four times — and until this file
-## there was NO in-tree test of it at all. The rewrite was verified once, by
-## throwaway scratch code diffing against the previous revision, which is not
-## something the next edit can lean on.
-##
-## Deliberately NOT a golden-hash test. A checked-in framebuffer hash would be
-## the broadest possible net, but it would also have to be identical on every
-## architecture CI runs on, and it would have to be regenerated for any
-## intentional behaviour fix — turning a real accuracy improvement into a
-## mysterious test failure. Everything below is instead *self-checking*: each
-## test renders two configurations that must agree for a stated reason and
-## compares them to each other. That is portable, needs no maintenance, and
-## when it fails it says which invariant broke.
-##
-## Run with: nimble test_ppucomposite
+## Regression tests for the GBA PPU compositor (window spans with three
+## inner loops: opaque / alpha / brighten-darken). Not a golden-hash test: a
+## hash would have to match on every CI architecture and be regenerated for
+## every intentional fix. Each test renders two configurations that must
+## agree for a stated reason. Run with: nimble test_ppucomposite
 
 import std/[os, strutils]
 import dingbat/gba/gba
@@ -41,18 +26,10 @@ proc nxt(): uint32 =
 
 proc reseed(s: uint64) = rng = s
 
-# ---------------------------------------------------------------------------
-# 1. The saturation-removal proof.
-#
-# brighten/darken call bgr16_pack, which masks each lane to 5 bits instead of
-# saturating. That is only legal if no lane can ever exceed 0x1F, which holds
-# because every evy_coefficient read is clamped to 16. Prove it over the whole
-# reachable domain rather than asserting it at runtime (a doAssert in the pixel
-# loop measured 1.0-7.3% on -d:release, so it is not affordable there).
-#
-# This is what catches a future edit that reads evy_coefficient unclamped: at
-# EVY = 17 the identity below genuinely breaks, so the property is not vacuous.
-# ---------------------------------------------------------------------------
+# 1. bgr16_pack masks each lane to 5 bits instead of saturating, which is
+# only legal because every evy_coefficient read is clamped to 16. Proved over
+# the whole domain (a doAssert in the pixel loop cost 1-7% on -d:release);
+# EVY = 17 must break it, or the clamp is not load-bearing.
 proc test_pack_domain() =
   echo "bgr16_pack vs bgr16_pack_sat over the reachable domain"
   var mismatches = 0
@@ -91,18 +68,16 @@ proc test_pack_domain() =
       if ((v shr (16 * lane)) and 0xFFFF'u64) > 0x1F'u64: overflow_at_17 = true
   check(overflow_at_17, "EVY = 17 really does overflow (so the clamp matters)")
 
-# --- a GBA instance with a synthetic cartridge -------------------------------
-# The compositor reads only VRAM/PRAM/OAM and the register block, all of which
-# the tests overwrite, so the ROM's contents are irrelevant — it exists purely
-# so new_cartridge has a file to open. Written to a temp path, never the repo.
+# A GBA with a synthetic cartridge: the compositor reads only VRAM/PRAM/OAM
+# and registers, all overwritten here, so the ROM only gives new_cartridge a
+# file to open.
 proc make_emu(): GBA =
   let rom_path = getTempDir() / "dingbat_ppucomposite_synthetic.gba"
   if not fileExists(rom_path):
     var rom = newString(0x8000)
     for i in 0 ..< rom.len: rom[i] = char((i * 7 + 13) and 0xFF)
     writeFile(rom_path, rom)
-  # Built WITHOUT -d:test_harness, so there is no test_output field to set —
-  # nothing here runs the CPU, so nothing needs one.
+  # Built without -d:test_harness; nothing here runs the CPU.
   result = new_gba("", rom_path, run_bios = false, use_hle = true)
   result.post_init()
 
@@ -110,10 +85,8 @@ proc seed_memory(ppu: PPU; transparent_bias: bool) =
   for i in 0 ..< ppu.vram.len: ppu.vram[i] = uint8(nxt())
   for i in 0 ..< ppu.pram.len: ppu.pram[i] = uint8(nxt())
   for i in 0 ..< ppu.oam.len:  ppu.oam[i]  = uint8(nxt())
-  # render_sprites walks a per-line candidate list that is rebuilt when OAM is
-  # reported dirty. Poking the seq behind the bus write paths skips that
-  # report; scanline() force-rebuilds on line 0 so these tests would pass
-  # anyway, but say it explicitly rather than leaning on that.
+  # render_sprites rebuilds its per-line candidate list when OAM is reported
+  # dirty; poking the seq directly skips that report.
   ppu.oam_touched()
   if transparent_bias:
     # Push a lot of tile data to palette index 0 so the layer walk falls
@@ -122,19 +95,10 @@ proc seed_memory(ppu: PPU; transparent_bias: bool) =
       if (nxt() and 3) != 0: ppu.vram[i] = 0
 
 proc render(ppu: PPU; mask: uint16 = 0xFFFF): uint64 =
-  ## 160 visible scanlines, hashed. vcount is driven directly so no CPU runs.
-  ##
-  ## `mask` exists for one reason. BGR555 occupies bits 0..14 and bit 15 is
-  ## unused, but the two write paths treat it differently: a pixel that takes no
-  ## colour effect is copied straight out of PRAM with bit 15 intact, while one
-  ## that goes through blend/brighten/darken is rebuilt by bgr16_spread (which
-  ## masks the three 5-bit channels) and comes back with bit 15 cleared. So the
-  ## same visual colour can land in the framebuffer as two different words.
-  ##
-  ## That is pre-existing — the old compositor's bgr16_pack_sat masked exactly
-  ## the same way — and harmless as long as consumers ignore bit 15, which is
-  ## what hardware does. But it means any test comparing an effect path against
-  ## a non-effect path has to compare the 15 bits that are actually colour.
+  ## 160 visible scanlines, hashed; vcount is driven directly so no CPU runs.
+  ## `mask`: BGR555 is bits 0..14, but a pixel copied straight from PRAM keeps
+  ## bit 15 while one rebuilt by bgr16_spread has it cleared, so a test that
+  ## compares an effect path against a non-effect path must mask to 0x7FFF.
   result = 0xCBF29CE484222325'u64
   for row in 0'u16 .. 159'u16:
     ppu.vcount = row
@@ -144,14 +108,8 @@ proc render(ppu: PPU; mask: uint16 = 0xFFFF): uint64 =
   for v in ppu.framebuffer:
     result = (result xor uint64(v and mask)) * 0x100000001B3'u64
 
-# ---------------------------------------------------------------------------
-# 2. Coefficient clamping, through the real compositor.
-#
-# EVA/EVB/EVY are 5-bit fields, so software can write 17..31, and hardware
-# treats everything above 16 as 16. If a future edit drops a clamp, these stop
-# matching — which is the behavioural guard that replaces the rejected runtime
-# assert in bgr16_pack.
-# ---------------------------------------------------------------------------
+# 2. EVA/EVB/EVY are 5-bit fields; hardware treats 17..31 as 16. This is the
+# behavioural guard on the clamp, through the real compositor.
 proc test_coefficient_clamping(emu: GBA) =
   echo "EVA/EVB/EVY clamp at 16"
   let ppu = emu.ppu
@@ -178,16 +136,10 @@ proc test_coefficient_clamping(emu: GBA) =
     check(at16 == at17 and at16 == at31, name & " = 16, 17 and 31 agree",
           toHex(at16) & " / " & toHex(at17) & " / " & toHex(at31))
 
-# ---------------------------------------------------------------------------
-# 3. Fast path vs slow path.
-#
-# composite() takes a cheap path when no window is active and no colour math
-# can apply, and a per-span path otherwise. A window covering the whole screen,
-# with WININ/WINOUT enabling every layer and the colour-effect bit clear, is
-# visually a no-op — so the two paths must produce identical output. This is
-# the closest thing to an in-tree differential oracle: it compares two
-# independent implementations of the same pixel decision against each other.
-# ---------------------------------------------------------------------------
+# 3. composite() takes a cheap path when no window is active and no colour
+# math can apply, and a per-span path otherwise. A full-screen window with
+# every layer enabled inside and out and no colour effect is visually a
+# no-op, so the two paths must agree.
 proc test_fast_slow_agree(emu: GBA) =
   echo "the windowed slow path agrees with the unwindowed fast path"
   let ppu = emu.ppu
@@ -220,22 +172,11 @@ proc test_fast_slow_agree(emu: GBA) =
     check(fast == slow, "mode " & $bg_mode & ": fast path == full-screen window",
           toHex(fast) & " vs " & toHex(slow))
 
-# ---------------------------------------------------------------------------
-# 4. Disabled BGs' line buffers are never read.
-#
-# This is the invariant behind skipping their per-scanline clear. Poison the
-# line buffers of every DISPCNT-disabled BG each scanline: if anything reads
-# them, the output changes.
-#
-# On its own that would be a test that can pass for the wrong reason — if the
-# poison were simply overwritten before compositing, "output unchanged" would
-# prove nothing. (An earlier version of this test poisoned ENABLED BGs as a
-# control and saw no change either, precisely because scanline() clears those
-# buffers on entry.) So the second check confirms the poison was still in place
-# when compositing ran, by finding it intact afterwards: a disabled BG's buffer
-# is neither cleared (that is the optimization) nor written (every renderer
-# returns on the same enable bit), so 0xA5 must survive the scanline.
-# ---------------------------------------------------------------------------
+# 4. Disabled BGs' line buffers are never read (the invariant behind
+# skipping their per-scanline clear). Poison them each scanline: the output
+# must not change, AND the poison must still be intact afterwards, otherwise
+# "unchanged" only means the buffer was overwritten before compositing (an
+# earlier version poisoned ENABLED BGs and saw no change for that reason).
 proc test_disabled_bg_buffers_unread(emu: GBA) =
   echo "disabled BGs' line buffers are never read"
   let ppu = emu.ppu
@@ -251,11 +192,9 @@ proc test_disabled_bg_buffers_unread(emu: GBA) =
       ppu.vcount = row
       ppu.render_dirty = true
       ppu.skip_render = false
-      # Churn the enable bits AND the bg mode per line. The mode matters: a
-      # regular BG's renderer writes all 240 columns, so for those the clear is
-      # redundant anyway and poisoning proves nothing — it is the affine and
-      # bitmap modes, whose sampling can leave columns untouched, where a
-      # missing clear actually shows through.
+      # Churn the enable bits AND the bg mode per line: a regular BG writes
+      # all 240 columns, so only the affine and bitmap modes, whose sampling
+      # can leave columns untouched, show a missing clear.
       ppu[0x001] = uint8(nxt())
       ppu[0x000] = (ppu[0x000] and 0xF8'u8) or uint8(nxt() mod 6)
       var poisoned_bgs: set[0..3] = {}
@@ -282,18 +221,13 @@ proc test_disabled_bg_buffers_unread(emu: GBA) =
   check(poison_survived,
         "the poison was still intact when compositing ran (so the above is meaningful)",
         "no disabled BG kept its 0xA5 - the poison never reached the compositor")
-  # And ENABLED BGs must be unaffected too — not because they are unread, but
-  # because scanline() clears them on entry. This is the check that fails if the
-  # clear is ever skipped for a BG that IS in the walk, which the poison test
-  # above cannot see (it only touches buffers nothing reads).
+  # Enabled BGs must be unaffected too, because scanline() clears them on
+  # entry; this is what fails if that clear is ever skipped.
   check(clean == poisoned_on,
         "poisoning ENABLED BGs' buffers changes nothing (they are cleared)",
         toHex(clean) & " vs " & toHex(poisoned_on))
 
-# ---------------------------------------------------------------------------
-# 5. Determinism. Cheap, and it protects every test above: if rendering were
-# state-dependent across runs, all the comparisons would be meaningless.
-# ---------------------------------------------------------------------------
+# 5. Determinism; every comparison above depends on it.
 proc test_determinism(emu: GBA) =
   echo "rendering the same configuration twice gives the same output"
   let ppu = emu.ppu
@@ -308,27 +242,14 @@ proc test_determinism(emu: GBA) =
   let b = once()
   check(a == b, "two identical renders agree", toHex(a) & " vs " & toHex(b))
 
-# ---------------------------------------------------------------------------
-# 6. The three inner loops agree where the colour math is an identity.
-#
-# This is the test with real teeth, and the reason it exists is instructive:
-# test 3 above compares the windowed and unwindowed paths, but BOTH of them
-# funnel into the same composite_span, so it only validates the window plumbing
-# — not the loops. Verified by mutation: flipping the OBJ-vs-BG priority
-# comparison (`sprio <= w.prio[i]` -> `<`) inside composite_span_opaque passes
-# every other test in this file.
-#
-# The fix is to route one visual result through different loops and require
-# agreement, using configurations where the colour math is provably an
-# identity:
+# 6. Test 3 compares the windowed and unwindowed paths, but both funnel into
+# the same composite_span, so it only validates window plumbing (a flipped
+# OBJ-vs-BG priority comparison in composite_span_opaque passes every other
+# test here). Route one visual result through different loops where the
+# colour math is an identity and require agreement:
 #   * brighten/darken with EVY = 0   -> shade loop, s + 0 = s
 #   * alpha with EVA = 16, EVB = 0   -> alpha loop, (top*16 + bot*0)/16 = top
-# Both must equal blend mode 0, which takes the opaque loop. So a bug in any
-# one of the three loops breaks the agreement, and a bug in the layer walk
-# common to all three still shows up as long as it is not replicated
-# identically in every copy — which, since the walk is now open-coded four
-# times, is exactly the failure mode worth guarding.
-# ---------------------------------------------------------------------------
+# Both must equal blend mode 0, which takes the opaque loop.
 proc test_loops_agree_on_identities(emu: GBA) =
   echo "the opaque, shade and alpha loops agree where colour math is identity"
   let ppu = emu.ppu
@@ -367,26 +288,14 @@ proc test_loops_agree_on_identities(emu: GBA) =
     check(plain == alpha, "mode " & $bg_mode & ": alpha EVA=16 EVB=0 == no effect",
           toHex(plain) & " vs " & toHex(alpha))
 
-# ---------------------------------------------------------------------------
-# 7. The blend BOTTOM search actually selects the right layer.
-#
-# Test 6 leaves this unguarded: it pins the alpha loop with EVB = 0, which makes
-# the bottom contribute nothing, so the bottom search's result cannot affect the
-# output. Confirmed by mutation — flipping `bsprio <= w.prio[bidx]` to `<` in
-# the bottom walk survives every other test here.
-#
-# The construction below makes the choice observable. BG0 (priority 0) is the
-# top and the only 1st target. OBJ and BG1 both sit at priority 2, and only OBJ
-# is a 2nd target. With EVA = 0 / EVB = 16 the blended result is purely the
-# bottom, so:
-#   * correct — OBJ ties with BG1 and, per GBATEK, an OBJ sits in front of a BG
-#     of equal priority, so OBJ is the bottom, is a valid 2nd target, and the
-#     pixel blends. Output differs from the unblended top.
-#   * broken — BG1 is taken as the bottom instead; BG1 is not a 2nd target, so
-#     no blend occurs and the output collapses back to the plain top.
-# So "did anything blend at all" is a sufficient oracle, and no reference
-# implementation of the blend is needed.
-# ---------------------------------------------------------------------------
+# 7. The blend BOTTOM search selects the right layer. Test 6 pins EVB = 0, so
+# the bottom cannot affect its output (flipping `bsprio <= w.prio[bidx]` to
+# `<` survives every other test). Here BG0 (priority 0) is the top and the
+# only 1st target; OBJ and BG1 both sit at priority 2 and only OBJ is a 2nd
+# target; EVA = 0 / EVB = 16 makes the result purely the bottom. Correct:
+# an OBJ sits in front of an equal-priority BG (GBATEK), so OBJ is the
+# bottom and the pixel blends. Broken: BG1 is taken, no blend occurs, and
+# the output collapses to the plain top. So "did anything blend" suffices.
 proc test_blend_bottom_selection(emu: GBA) =
   echo "the blend-bottom search picks OBJ over an equal-priority BG"
   let ppu = emu.ppu
@@ -423,21 +332,12 @@ proc test_blend_bottom_selection(emu: GBA) =
         "OBJ is selected as the blend bottom (blending is observable)",
         "both " & toHex(blended) & " - the bottom search never reached OBJ")
 
-# ---------------------------------------------------------------------------
-# 8. The line really is split into spans on the colour-effect flag.
-#
-# Every other window test here uses a window state that is uniform across the
-# line, so the span splitter is never asked to produce more than one span and a
-# splitter that ignores `line_effects` entirely passes them all (verified by
-# mutation: dropping `ppu.line_effects[e] == eff` from the run-length loop
-# survives tests 1-7).
-#
-# So: put WIN0 over the left half with the colour-special-effect bit SET inside
-# and CLEAR outside, and brighten at full strength. The left half must then match
-# a whole-screen brightened render and the right half a whole-screen unbrightened
-# one — compared per pixel against those two references rather than by hash, so
-# the two halves can be checked independently.
-# ---------------------------------------------------------------------------
+# 8. The line really is split into spans on the colour-effect flag. Every
+# other window test uses a line-uniform window state, so a splitter that
+# ignores `line_effects` passes them. WIN0 over the left half with the
+# effect bit SET inside and CLEAR outside, brighten at full strength: the
+# left half must match a whole-screen brightened render and the right half a
+# plain one, compared per pixel.
 proc test_effect_spans(emu: GBA) =
   echo "spans split on the per-column colour-effect flag"
   let ppu = emu.ppu
@@ -490,23 +390,13 @@ proc test_effect_spans(emu: GBA) =
   check(left_ok, "inside WIN0 (effects on) matches the brightened reference")
   check(right_ok, "outside WIN0 (effects off) matches the plain reference")
 
-# ---------------------------------------------------------------------------
-# 9. The uniform-window fast path.
-#
-# composite() may skip compute_line_enables entirely and composite the whole
-# line as one span when it can prove from the registers alone that all 240
-# columns would receive the same (enable mask, colour-effect flag) pair. That
-# proof lives in window_cover / uniform_window_state, and it is the only place
-# in the renderer where a *predicate* decides whether a whole scanline's window
-# resolution happens. If the predicate is ever wrong in the permissive
-# direction, a line is composited with the wrong layer set — so the tests below
-# are all soundness tests: whenever the fast path claims uniformity, the
-# general path must agree, byte for byte.
-#
-# ppu.disable_uniform_window forces the general path, which is what makes the
-# frame-level halves of this a true A/B of two implementations rather than a
-# self-comparison.
-# ---------------------------------------------------------------------------
+# 9. The uniform-window fast path. composite() may skip compute_line_enables
+# and composite the line as one span when window_cover /
+# uniform_window_state prove from the registers that all 240 columns get the
+# same (enable mask, effect flag). A predicate wrong in the permissive
+# direction composites a line with the wrong layer set, so these are
+# soundness tests: whenever the fast path claims uniformity, the general
+# path must agree. ppu.disable_uniform_window forces the general path.
 
 # Registers are built as raw halfwords and cast, the same way savestate.nim
 # reads them back, so the tests can reach values software can write but the
@@ -528,18 +418,10 @@ proc set_dispcnt_windows(ppu: PPU; w0, w1, ow: bool) =
   if ow: d = d or 0x8000'u16
   ppu.dispcnt = cast[DISPCNT](d)
 
-# ---------------------------------------------------------------------------
-# 9a. window_cover, proved exhaustively over its ENTIRE domain.
-#
-# window_cover(x1, x2) -> {empty, partial, full} is the subtle part: WIN0H's
-# two halves are independent 8-bit values, so x1 > x2 (hardware wraps around
-# the right edge), x2 > 240 and x1 > 240 (both clamped) are all reachable, and
-# combinations of them are what a naive `x1 <= col < x2` gets wrong.
-#
-# There are only 65536 of them, so don't sample: check every one against what
-# fill_window_cols actually writes, via compute_line_enables with a window
-# whose bits differ from the outside bits.
-# ---------------------------------------------------------------------------
+# 9a. window_cover(x1, x2) -> {empty, partial, full}, exhaustively: WIN0H's
+# halves are independent bytes, so x1 > x2 (wraps around the right edge),
+# x2 > 240 and x1 > 240 (clamped) are all reachable. Check all 65536 against
+# what fill_window_cols writes.
 proc test_window_cover_exhaustive(emu: GBA) =
   echo "window_cover agrees with fill_window_cols over all 65536 (x1, x2)"
   let ppu = emu.ppu
@@ -585,14 +467,9 @@ proc test_window_cover_exhaustive(emu: GBA) =
         "all three classes are actually reachable",
         "full=" & $n_full & " empty=" & $n_empty & " partial=" & $n_partial)
 
-# ---------------------------------------------------------------------------
-# 9b. Vertical ranges: every (y1, y2) against every scanline.
-#
-# WIN0V/WIN1V wrap the same way WIN0H does, and y2 > 160 is clamped by nothing
-# at all — the comparator just never matches above 159. 256 x 256 x 160 is
-# 10.5M combinations, which is affordable because the check is O(1): the
-# vertical decision must not depend on anything the horizontal one does.
-# ---------------------------------------------------------------------------
+# 9b. WIN0V/WIN1V wrap like WIN0H, and y2 > 160 is clamped by nothing (the
+# comparator never matches above 159). Every (y1, y2) x every scanline:
+# 10.5M cases, affordable because the check is O(1).
 proc test_vertical_ranges(emu: GBA) =
   echo "WIN0V/WIN1V vertical ranges, every (y1, y2) x every scanline"
   let ppu = emu.ppu
@@ -627,31 +504,20 @@ proc test_vertical_ranges(emu: GBA) =
       (200, 255, 80, false, "a range entirely below the screen covers nothing"),
       (200, 100, 80, true,  "a wrapped range y1>y2 covers the middle"),
       (200, 100, 150, false, "...but not line 150"),
-      # A wrapped range's upper half extends past the last visible line, so the
-      # comparator says "inside" for rows the screen does not have. That is the
-      # comparator being a comparator; nothing ever asks it about row 210.
+      # A wrapped range's upper half extends past the last visible line; the
+      # comparator is still "inside" there and nothing ever asks about it.
       (200, 100, 210, true, "...and is still inside at the nonexistent row 210")]:
     ppu.win0v = winv(y1, y2)
     ppu.vcount = uint16(row)
     check(ppu.line_window_flags().win0 == want, name)
 
-# ---------------------------------------------------------------------------
-# 9c. The differential fuzz: randomize the whole window register space and
-# assert the fast path's verdict against the general path's 240 entries.
-#
-# Every class the fast path has to reason about is deliberately weighted into
-# the generator: boundary x/y values, wrapped ranges, both windows on at once,
-# every DISPCNT window-enable combination, WININ/WINOUT masks that sometimes
-# agree and sometimes do not, the colour-effect bits varied independently of
-# the layer masks, a debug layer mask that can zero bits after the AND, and an
-# OBJ window covering none / some / all columns.
-#
-# Two properties are checked. SOUNDNESS (a hard failure): if the fast path says
-# uniform, all 240 general-path entries must equal the value it returned.
-# COMPLETENESS (reported, not enforced): how often a line really was uniform
-# and the fast path failed to notice. Being conservative is safe; the number is
-# there so "the fast path never fires" cannot pass silently.
-# ---------------------------------------------------------------------------
+# 9c. Differential fuzz over the whole window register space, weighted onto
+# boundary x/y values, wrapped ranges, both windows at once, every DISPCNT
+# window-enable combination, WININ/WINOUT masks that sometimes agree, the
+# effect bits independent of the layer masks, a debug layer mask, and an OBJ
+# window covering none / some / all columns. SOUNDNESS is a hard failure:
+# if the fast path says uniform, all 240 general-path entries must equal its
+# value. COMPLETENESS (uniform lines the fast path missed) is reported only.
 proc test_uniform_window_fuzz(emu: GBA) =
   echo "uniform-window fast path vs compute_line_enables (differential fuzz)"
   let ppu = emu.ppu
@@ -686,9 +552,9 @@ proc test_uniform_window_fuzz(emu: GBA) =
     ppu.win0v = winv(coord(), coord())
     ppu.win1v = winv(coord(), coord())
     ppu.vcount = uint16(int(nxt()) mod 160)
-    # Masks: half the time drawn from a tiny set so different sources collide
-    # (which is what makes the "partial overlay paints what is already there"
-    # branch reachable), half the time fully random.
+    # Masks: half the time from a tiny set so different sources collide
+    # (which makes the "partial overlay paints what is already there" branch
+    # reachable), half the time fully random.
     proc mask(): int =
       if (nxt() and 1) == 0: [0, 0x1F, 0x07][int(nxt()) mod 3] else: int(nxt() and 0x1F)
     proc flag(): bool = (nxt() and 1) == 0
@@ -762,9 +628,8 @@ proc test_uniform_window_fuzz(emu: GBA) =
   check(unsound == 0,
         "no windowed line was composited as uniform when it is not (" &
         $total & " windowed cases, " & $fired & " took the fast path)", first_bad)
-  # A generator that only ever produced uniform or only ever produced
-  # non-uniform lines would make the above vacuous in one direction or the
-  # other, so both have to be present in quantity.
+  # Both kinds of line must be present in quantity, or the check above is
+  # vacuous in one direction.
   check(fired > total div 20 and seen_nonuniform > total div 20,
         "the fuzz produced both kinds of line in quantity",
         "fast=" & $fired & " truly_uniform=" & $truly_uniform &
@@ -774,28 +639,18 @@ proc test_uniform_window_fuzz(emu: GBA) =
         "the fuzz reached both-windows, wrapped-x and partial-OBJ-window cases",
         "both=" & $seen_both_windows & " wrapped=" & $seen_wrapped_h &
         " objwin=" & $seen_objwin_partial)
-  # Conservatism is safe but not free, so the split is printed rather than
-  # asserted. The dominant miss class is a live OBJ window: proving that one is
-  # uniform would need a per-column scan, which is the work being avoided, so
-  # the fast path declines it unless the OBJ-window state equals the outside
-  # state. Real games use the OBJ window for a shaped mask, not a full-screen
-  # one, so this costs essentially nothing outside the fuzz.
+  # Conservative misses are printed, not asserted. The dominant class is a
+  # live OBJ window: proving it uniform needs the per-column scan being
+  # avoided, so the fast path declines unless its state equals the outside.
   echo "    conservative misses (uniform but not detected): ", missed,
        " of ", truly_uniform, " uniform lines (", missed_objwin,
        " of them with a live OBJ window)"
 
-# ---------------------------------------------------------------------------
-# 9d. Frame-level A/B: identical framebuffers with the fast path on and off.
-#
-# 9c proves the predicate agrees with the table. This proves the two code paths
-# through composite() agree on pixels, over real renders with real sprites
-# (including OBJ-window sprites, which the table-level fuzz can only simulate),
-# real blending, and every BG mode.
-#
-# The second half rewrites the window registers at scanline granularity, which
-# is the only way to check that the uniformity decision is made per line with
-# live values rather than latched once per frame.
-# ---------------------------------------------------------------------------
+# 9d. Frame-level A/B with the fast path on and off, over real renders with
+# real sprites (including OBJ-window sprites), real blending and every BG
+# mode. The second half rewrites window registers at scanline granularity,
+# which is the only way to check the decision is made per line with live
+# values rather than latched once per frame.
 proc test_uniform_window_frames(emu: GBA) =
   echo "framebuffers are byte-identical with the fast path on and off"
   let ppu = emu.ppu
@@ -831,10 +686,8 @@ proc test_uniform_window_frames(emu: GBA) =
   proc run(seed: uint64; bg_mode: uint8; objwin, midframe, disable: bool): uint64 =
     setup(seed, bg_mode, objwin)
     ppu.disable_uniform_window = disable
-    # The register rewrites must be identical in both runs, so they are driven
-    # off a private counter rather than the shared RNG (whose call sequence the
-    # two runs would otherwise share anyway, but this makes it impossible to
-    # get wrong).
+    # The register rewrites must be identical in both runs, so they come from
+    # a private counter rather than the shared RNG.
     var lfsr = seed or 1'u64
     result = 0xCBF29CE484222325'u64
     for row in 0'u16 .. 159'u16:
@@ -882,11 +735,9 @@ proc test_uniform_window_frames(emu: GBA) =
         $cases & " randomized frames identical with and without the fast path",
         first_bad)
 
-  # A control: the toggle must actually change which code runs, or the whole
-  # comparison above is one path compared against itself. Count the lines that
-  # take the fast path in a configuration where it certainly should (full-width
-  # WIN0 over the whole screen, no OBJ window) and in one where it certainly
-  # should not (WIN0 over the left half only, with different bits inside).
+  # Control: the toggle must change which code runs. Count fast-path lines in
+  # a configuration that certainly qualifies (full-width WIN0, no OBJ window)
+  # and one that certainly does not (left-half WIN0 with different bits).
   proc count_fast(x1, x2, in_bits, out_bits: int): int =
     ppu.set_dispcnt_windows(w0 = true, w1 = false, ow = false)
     ppu.win0h = winh(x1, x2)

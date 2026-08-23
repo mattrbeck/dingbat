@@ -2,9 +2,9 @@
 ##
 ## Usage: dingbat_gb_fps <rom> <bootromdir|none> <frames> [skip] [script] [window]
 ##
-## Counts step_frame presents against the panel dot clock (4194304 Hz) — the
-## same definition tools/gbfuzz's SameBoy probe uses — so the two emulators'
-## frames-per-emulated-second can be compared directly. Hardware presents
+## Counts step_frame presents against the panel dot clock (4194304 Hz), the
+## same definition sameboy_fps.c uses, so the two can be compared directly.
+## Hardware presents
 ## 4194304 / 70224 = 59.7275 frames per second of emulated time whenever the
 ## LCD stays on for the whole run.
 ##

@@ -19,8 +19,8 @@
 @ branch to the exact operand value: the ADD lands on pad+8 (r7 = 0)
 @ and the MOV operand computes to pad+6, so its r7 = 4.
 @
-@ PROVENANCE: verified on GBA SP AGS-001 (sessions 2+3, gbaedge pages
-@ 18 THUMBPC and 25 THUMBPC2); see docs/hwprobe-results-agb.md.
+@ PROVENANCE: verified on GBA SP AGS-001 (gbaedge pages 18 THUMBPC and
+@ 25 THUMBPC2); see docs/hwprobe-results-agb.md.
     .arm
     .text
     .global _start

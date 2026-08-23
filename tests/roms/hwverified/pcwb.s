@@ -6,10 +6,10 @@
 @ `add r7, r7, #imm` (distinct powers of two) directly behind it, under
 @ the TM3 watchdog.  The candidate sits at C, so the ARM pipeline base
 @ value r15 = C+8.  r7's sum keys the landing site.  The first three
-@ rows (offset +4, the session-3 geometry) use a four-add sled
-@ (1/2/4/8): 15 = fell straight through, 12 = resumed at base+4,
-@ 8 = base+8.  The five session-4 rows use a five-add sled
-@ (1/2/4/8/16 at C+4..C+20): 1F = fell through or landed base-4,
+@ rows (offset +4) use a four-add sled (1/2/4/8): 15 = fell straight
+@ through, 12 = resumed at base+4, 8 = base+8.  The five functional-form
+@ rows use a five-add sled (1/2/4/8/16 at C+4..C+20): 1F = fell through
+@ or landed base-4,
 @ 1C = base+4, 18 = base+8, 10 = base+12.  r1 is zeroed first so the
 @ load rows also show whether the loaded value arrived.
 @
@@ -29,10 +29,9 @@
 @                      the next instruction (r7=1F), like ldm
 @ No watchdog fires (+3 = 0).
 @
-@ PROVENANCE: verified on GBA SP AGS-001 (session 3, gbaedge page 25
-@ THUMBPC2 writeback rows; session 4, gbaedge page 29 PCWB2 — the
-@ functional-form discriminators and the stm row); see
-@ docs/hwprobe-results-agb.md.
+@ PROVENANCE: verified on GBA SP AGS-001 (gbaedge page 25 THUMBPC2
+@ writeback rows; page 29 PCWB2 — the functional-form discriminators and
+@ the stm row); see docs/hwprobe-results-agb.md.
     .arm
     .text
     .global _start
@@ -105,7 +104,7 @@ tw_rec3:
     str r0, [r2, #8]
     strb r7, [r8, #2]
     str r1, [r8, #8]
-    @ ── the session-4 functional-form rows (five-add sleds) ──
+    @ ── the functional-form rows (five-add sleds) ──
     wdg_arm tw_rec4
     mov r7, #0
     mov r1, #0

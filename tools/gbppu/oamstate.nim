@@ -1,9 +1,6 @@
-## Dump OAM and the OAM DMA unit's state after running a ROM.
-##
-## For mooneye madness/mgb_oam_dma_halt_sprites, which halts two M-cycles into
-## an OAM DMA and never wakes: the questions are whether the transfer FROZE
-## (dma_position stuck near 2 with dma_busy still set) or ran to completion
-## (position past $A0, OAM all $FF), and what the first OAM bytes actually hold.
+## Dump OAM, the OAM DMA unit's state, the object registers and a few tile
+## bitmaps after running a ROM. Written for mooneye
+## madness/mgb_oam_dma_halt_sprites (halts two M-cycles into an OAM DMA).
 import std/[os, strutils, strformat]
 import dingbat/gb/gb
 
@@ -31,14 +28,8 @@ proc main() =
   for i in 0 ..< 16:
     line.add(&" {emu.ppu.sprite_table[i]:02X}")
   echo line
-  # The rest of what it takes to turn "which four bytes does the PPU read" into
-  # a PICTURE, which is what closed the row: the object registers, and the tile
-  # bitmaps the candidate tile numbers name. Compare these against the 18 dark
-  # pixels of `mgb_oam_dma_halt_sprites_expected.png` (x 83..88, y 42..47) and
-  # the Y/X/tile/flags are pinned outright -- Y = $38 with the Y-flip in flags
-  # $5A is the only assignment that puts tile $38's rows in the reference's
-  # order, which is how the `& $FC` in the ROM's own comment is measured rather
-  # than taken on trust. See docs/gb-failure-triage.md.
+  # Object registers and candidate tile bitmaps, to compare against the dark
+  # pixels of mgb_oam_dma_halt_sprites_expected.png (x 83..88, y 42..47).
   echo &"  LCDC = 0x{emu.ppu.lcd_control:02X}   BGP = {emu.ppu.bgp}   " &
        &"OBP0 = {emu.ppu.obp0}   OBP1 = {emu.ppu.obp1}"
   let tiles = if args.len > 3: args[3 .. ^1] else: @["0x30", "0x38", "0x3A"]

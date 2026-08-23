@@ -1,14 +1,9 @@
 #!/usr/bin/env python3
 """AGE result table, EXPECTED vs GOT, per cell.
 
-`agecells.py` decodes the values an AGE test ROM printed and which of them the
-ROM drew inverted (= disagreeing with hardware).  That still leaves the more
-useful half unknown: what hardware actually returns.  It is in the ROM.  Each of
-these tests compares its measurements against a stored array of expected bytes,
-and that array can be located without disassembling anything -- it is the only
-place in the ROM where a run of len(table) bytes agrees with every cell the ROM
-did NOT invert and differs at every cell it did.  In practice that pins it
-uniquely.
+agecells.py decodes the printed values and which the ROM drew inverted. The
+expected bytes are in the ROM: the only run of len(table) bytes that agrees
+with every non-inverted cell and differs at every inverted one.
 
     dingbat_test <rom> --mode=screenshot --timeout=600 --nosave \
         [--dmg|--cgb] [--model=<tok>] --screenshot=f.ppm

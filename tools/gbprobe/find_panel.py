@@ -3,13 +3,10 @@
 
     find_panel.py <photo.jpg> [--debug]
 
-photowarp's own detector looks for a lit frame against a dark surround and
-gives up on these GBA SP shots ("no lit frame found at the photo centre"),
-which is the NCC-refinement gap the 2026-08-17 session already hit. It does
-not have to be solved to read THIS probe: probe (e) fills its background with
-tile $01, so the 160x144 area is a single bright near-white rectangle on a
-black letterbox, and a luma threshold plus a row/column profile finds its
-edges directly.
+photowarp's own detector gives up on these GBA SP shots ("no lit frame found
+at the photo centre"). probe (e) fills its background with tile $01, so the
+160x144 area is one bright rectangle on a black letterbox and a luma
+threshold plus a row/column profile finds its edges directly.
 
 Prints the four corners in photowarp's `--corners` order (TL, TR, BR, BL) so
 the reader can be driven with an explicit quad:
@@ -29,18 +26,14 @@ def main():
     def lum(x, y):
         return lumrows[y][x]
 
-    # A global bright-pixel bounding box does NOT work on these shots: the desk
-    # and the laptop lid are bright enough to be in range, so the box spans the
-    # whole photo. The panel has to be found as the largest CONNECTED bright
-    # region instead.
+    # A global bright-pixel bounding box spans the whole photo (desk, laptop
+    # lid); the panel is the largest CONNECTED bright region instead.
     step = max(1, min(w, h) // 300)
     gw, gh = w // step, h // step
     vals = sorted(lum(x * step, y * step) for y in range(gh) for x in range(gw))
 
-    # One threshold does not fit both shots: a dimmer photo lets bezel glare
-    # into the component and a brighter one can split the panel. Sweep the
-    # percentile and keep whichever candidate is closest to the panel's TRUE
-    # aspect -- 160/144 is a strong prior and the wrong blobs miss it badly.
+    # One threshold does not fit every photo (bezel glare vs a split panel):
+    # sweep the percentile and keep the candidate closest to 160/144.
     best_quad, best_err, best_thr = None, 1e9, None
     for pct in (0.80, 0.83, 0.86, 0.88, 0.90, 0.92, 0.94):
         thr = vals[int(len(vals) * pct)]

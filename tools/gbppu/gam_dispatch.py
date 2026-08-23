@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""GBMicrotest's int_hblank_nops / hblank_int, rebuilt so SameBoy can answer.
+"""GBMicrotest's int_hblank_nops / hblank_int, rebuilt in gambatte's output
+format so the sameboy_gambatte runner can run it too.
 
     tools/gbppu/gam_dispatch.py <wait_lines> <dmg|cgb> [scx,list]
 
@@ -10,21 +11,9 @@ SCX walks the mode 3 -> 0 edge across the M-cycle grid a dot at a time, so the
 step positions locate the dispatch to the dot.
 
 `wait_lines` is NOPs between the LCD enable and arming the source: 0 measures
-the first line after the enable, 114 the second, 1140 the eleventh.
-
-Measured 2026-08-21 on 65bcb71, DMG (CGB identical):
-
-    W=0     ding 29 2A 2A 2A 2A 2B 2B 2B   steps at SCX 1 and 5
-            samb 29 2A 2A 2A 2A 2B 2B 2B   the same -- and the same shape as
-                                           GBMicrotest int_hblank_nops_scx*
-    W=114   ding 29 2A 2A 2A 2A 2B 2B 2B
-    /228    samb 29 29 29 2A 2A 2A 2A 2B   steps at 3 and 7 -- dingbat is 2
-    /342                                   dots LATE, and this is the shape
-    /1140                                  GBMicrotest hblank_int_scx* wants
-
-So the first line after an LCD enable is exact and every later one is 2 dots
-late, on every line tested, on both devices. See M0_HALT_BLIND_DOTS in
-gb/ppu.nim for what that is half of.
+the first line after the enable, 114 the second, 1140 the eleventh. The shape
+to compare against is GBMicrotest int_hblank_nops_scx* (line 0) and
+hblank_int_scx* (later lines); see M0_HALT_BLIND_DOTS in gb/ppu.nim.
 """
 import sys
 import os

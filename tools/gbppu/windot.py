@@ -15,8 +15,7 @@ of it next to the filename's `_out<hex>` expectation and dingbat's verdict.
 
 Reading it: a family whose expectations flip between two consecutive write dots
 puts the sampling point between them, and repeating that across the family's
-WX / SCX variants solves for it -- which is how the window-start equality in
-fifo_ppu.nim was placed. Env: PAT (trace filter regex, default `^(WY|WX|LCDC)`),
+WX / SCX variants solves for it. Env: PAT (trace filter regex, default `^(WY|WX|LCDC)`),
 TAIL (trace lines per row, default 2), GAMROOT, DT.
 """
 import glob, os, re, subprocess, sys

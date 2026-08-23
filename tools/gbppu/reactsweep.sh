@@ -1,6 +1,6 @@
 #!/bin/bash
 # Sweep WIN_REACT_PHASE against the three mealybug ROMs that see the window's
-# re-trigger edge, the way the constant was originally pinned.
+# re-trigger edge.
 cd "$(dirname "$0")/../.."
 for n in 0 1 2 3 4 5 6 7; do
   nim c -d:test_harness -d:release --path:src -d:WIN_REACT_PHASE=$n \

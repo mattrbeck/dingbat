@@ -1,6 +1,5 @@
 @ bxdecode.s — WHAT: which near-BX encodings actually execute as BX on
-@ the ARM7TDMI?  Table-driven emulators decode BX loosely and may accept
-@ words silicon rejects — or reject words silicon accepts.
+@ the ARM7TDMI?
 @
 @ HOW: each candidate word is copied to IWRAM at C with r1 pointing at a
 @ Thumb pad (bit0 set) and breadcrumbs behind it: C+4 `add r7, #2`
@@ -20,9 +19,8 @@
 @ ROM: on the real console it wedges the machine beyond any watchdog
 @ (exception entry masks IRQs) and needs a power cycle.
 @
-@ PROVENANCE: verified on GBA SP AGS-001 (session 3, gbaedge page 24
-@ BXDECODE via the one-candidate-per-press flow after session 2's
-@ single-shot version froze the console); see docs/hwprobe-results-agb.md.
+@ PROVENANCE: verified on GBA SP AGS-001 (gbaedge page 24 BXDECODE,
+@ one-candidate-per-press flow); see docs/hwprobe-results-agb.md.
     .arm
     .text
     .global _start

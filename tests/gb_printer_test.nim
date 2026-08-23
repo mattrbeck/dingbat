@@ -55,7 +55,7 @@ echo "data + print lifecycle"
 block:
   let prn = new_gb_printer()
   discard prn.send(build_packet(0x01, @[]))
-  # Replies report the status as of BEFORE the packet's own command runs
+  # Replies report the status from BEFORE the packet's own command runs
   # (hardware latches it during the ACK transfer), so DATA acks the prior
   # idle status and the NEXT packet sees the 0x08 it produced.
   var d: seq[uint8]
@@ -77,7 +77,7 @@ block:
   let s1 = prn.send(build_packet(0x0F, @[]))
   check(s1.last == 0x04, "first inquiry observes done")
   let s2 = prn.send(build_packet(0x0F, @[]))
-  check(s2.last == 0x04, "done LATCHES (SameBoy): repeat polls still read done")
+  check(s2.last == 0x04, "done latches: repeat polls still read done")
   # INIT acks the latched done (pre-execution) and clears it for the next
   let i2 = prn.send(build_packet(0x01, @[]))
   check(i2.last == 0x00, "INIT always acks 0x00, whatever was latched")

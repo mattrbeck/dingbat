@@ -1,15 +1,8 @@
-# Super Game Boy acceptance test.
-#
-# Drives tests/roms/sgbtest.gb (built by tests/roms/sgbtest.py) and checks the
-# whole SGB path end to end: the P1 packet receiver, PAL01/PAL23, ATTR_DIV,
-# ATTR_BLK, the per-cell colorization of the Game Boy screen, and the two VRAM
-# transfers that carry a border (CHR_TRN + PCT_TRN).
-#
-# Every expectation below is recomputed here from the same rules the ROM
-# builder used, so the test fails if either side drifts.
-#
-# With DINGBAT_SGB_PNG=<dir> it also writes screen.png and border.png for
-# eyeballing. That is not part of the assertions.
+# Super Game Boy acceptance test: drives tests/roms/sgbtest.gb (built by
+# tests/roms/sgbtest.py) through the P1 packet receiver, PAL01/PAL23,
+# ATTR_DIV, ATTR_BLK, per-cell colorization and the CHR_TRN + PCT_TRN border.
+# Every expectation is recomputed from the rules the ROM builder used.
+# DINGBAT_SGB_PNG=<dir> also writes screen.png and border.png (not asserted).
 
 import std/[os, strformat, strutils]
 import dingbat/gb/gb
@@ -70,9 +63,8 @@ if not fileExists(ROM):
   quit(1)
 
 var m = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
-# Explicit: the core defaults to no adapter, so every consumer that has not
-# asked for one (the test harnesses, the benchmark, the ROM sweeps) keeps
-# stock Game Boy behaviour.
+# The core defaults to no adapter, so consumers that have not asked for one
+# keep stock Game Boy behaviour.
 m.sgb_requested = true
 m.post_init()
 for _ in 0 ..< 20: m.step_frame()
@@ -197,10 +189,8 @@ block:
   check(GB_PAYLOAD_VERSION == 5'u32, "GB payload revision should be 5 for the SGB section")
 
 # ---- direct packet-injection tests --------------------------------------
-# The synthetic ROM cannot reach every command shape (a 16-byte packet holds
-# only so much), and Pokemon Blue happens to use PAL_TRN + PAL_SET + ATTR_BLK
-# and nothing else. These drive the SAME receiver the cart does -- P1 writes,
-# reset pulse, LSB-first bits, stop bit -- so nothing here bypasses the decode.
+# Command shapes the synthetic ROM cannot reach, driven through the SAME
+# receiver the cart uses (P1 writes, reset pulse, LSB-first bits, stop bit).
 
 proc pulse(gb: GB; group: seq[uint8]) =
   ## Clock a whole command group down P1 the way a cart does.
@@ -264,9 +254,9 @@ block multi_packet_attr_chr:
     if s2.attr[y * 20 + 3] != 1: inc lin_bad
   check(lin_bad == 0, &"ATTR_LIN: {lin_bad} cells wrong")
 
-  # PAL_SET pulls four palettes out of the system palette RAM PAL_TRN fills,
-  # and can apply an attribute file in the same command. Seed both directly
-  # (a real PAL_TRN/ATTR_TRN is a VRAM transfer, covered by the ROM above).
+  # PAL_SET pulls four palettes out of the system palette RAM PAL_TRN fills
+  # and can apply an attribute file; seed both directly (the VRAM transfers
+  # are covered by the ROM above).
   for id in 0 ..< 512:
     for c in 0 ..< 4:
       s2.syspal[id * 4 + c] = uint16((id * 4 + c) and 0x7FFF)
@@ -408,16 +398,13 @@ block cross_config_state:
   check(ok_on, "a non-SGB state must load into a machine with SGB turned on")
 
 # ---- the save/restore shapes the emulator actually uses -----------------
-# Save states are the visible one, but rewind snapshots ~6x a second and
-# run-ahead saves and restores EVERY frame. All three go through the same
-# payload, so a field the SGB section drops shows up here as a divergence
-# from an uninterrupted reference run -- including across the frames where
-# the cart is mid-transfer, which is where the state machine is least idle.
+# Save states, rewind (~6x a second) and run-ahead (every frame) all go
+# through the same payload, so a field the SGB section drops shows up as a
+# divergence from an uninterrupted reference run.
 block state_shapes:
-  # The ROM's own setup runs with the LCD OFF (a VRAM transfer has to be
-  # copied in before the display can show it), and a state is only ever
-  # written at a frame boundary in vblank -- load_ppu_state rejects mode 2 or
-  # 3 outright. So warm up past the setup before saving anything.
+  # The ROM's setup runs with the LCD OFF and states are only written at a
+  # frame boundary in vblank (load_ppu_state rejects mode 2 or 3), so warm
+  # up past the setup before saving.
   const WARM = 40
 
   proc runref(n: int): (seq[uint64], seq[uint64]) =

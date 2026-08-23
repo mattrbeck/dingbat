@@ -1,28 +1,16 @@
 #!/usr/bin/env python3
-"""Decode an AGE test ROM's result table -- offsets, VALUES, and mismatches.
-
-`agetable.py` reads the inversion map (which cells disagree with hardware) out of
-a rendered AGE frame without needing a font.  That answers "which cells are
-wrong" but not "wrong how", and the direction of a disagreement is what brackets
-a timing constant.  This adds the values.
+"""Decode an AGE test ROM's result table -- offsets, values, and mismatches
+(agetable.py gives the inversion map only; this adds the values).
 
     dingbat_test <rom> --mode=screenshot --timeout=600 --nosave \
         [--dmg|--cgb] [--model=<tok>] --screenshot=f.ppm
     tools/gbppu/agecells.py f.ppm [--json]
 
-Layout, measured off the frames (AGE's font is a 5x7 cell drawn one pixel down
-from the tile row): the three offset-label digits sit at x = 2, 10, 18 and the
-sixteen value digits at x = 34, 40, 50, 56, ... (a 16-pixel pitch per byte with
-the two digits 6 pixels apart).  Rows are whole tile rows; the first non-blank
-one is the "TEST FAILED!" banner and is skipped because its left three tiles are
-blank.
-
-Most of the font is learned from the frame itself -- the Nth data row's label is
-always N*8, so the labels are a self-describing training set -- which covers
-every digit that appears in a label.  Digits that never appear in one (in
-practice 9, D, E, F) are pinned in GLYPHS below.  Inversion is read from the
-cell's background shade, independently of the glyph, so the mismatch map is
-always available even when a value cannot be decoded.
+AGE's font is a 5x7 cell drawn one pixel below the tile row; label digits at
+x = 2, 10, 18, value digits at a 16-pixel pitch per byte with the two digits
+6 apart. The first non-blank tile row is the "TEST FAILED!" banner (its left
+three tiles are blank) and is skipped. Inversion is read from the cell's
+background shade, so the mismatch map survives an undecodable glyph.
 """
 import json
 import sys
@@ -31,14 +19,10 @@ W, H = 160, 144
 LABEL_X = (2, 10, 18)
 VAL_X = tuple(34 + 16 * i + 6 * j for i in range(8) for j in range(2))
 
-# The font, as the 7 scanlines of a 5-pixel-wide cell, MSB left.
-#
-# The offset-label column is a self-describing training set -- the Nth data row
-# is labelled N*8 -- and any digit that appears in a label is learned from the
-# frame itself.  But a short table teaches almost nothing (`halt-m0-interrupt`
-# has ONE data row, so its labels only ever spell "000"), so the digits are
-# pinned here as well and the learned ones are only a fallback for a glyph this
-# table does not have.  A, B and C are absent: no AGE table observed prints one.
+# The font, as the 7 scanlines of a 5-pixel-wide cell, MSB left. The Nth data
+# row is labelled N*8, so label glyphs can be learned from the frame, but a
+# one-row table teaches only "000"; the pinned set wins and learned glyphs are
+# the fallback. A, B, C absent: no AGE table seen prints one.
 GLYPHS = {
     "0": "01110110111101111011110111101101110",
     "1": "00110011100011000110001100011000110",

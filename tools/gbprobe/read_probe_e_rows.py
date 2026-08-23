@@ -5,11 +5,10 @@
 
 A fallback for read_probe_e.py, not a replacement: use that one first.
 
-read_probe_e's global threshold collapses on the SCX-4 photo: the SP's LCD
-moire puts a lot of mid-grey into the background, so "dark" either swallows the
-whole frame or nothing. This reads each band's own row instead -- smooth the
-row, then take the first column that is far below THAT ROW's own median -- which
-is immune to a global level shift and to the moire's high-frequency component.
+read_probe_e's global threshold collapses when LCD moire puts mid-grey into
+the background. This reads each band's own row instead (smooth it, then take
+the first column far below that row's own median), which is immune to a
+global level shift and to the moire's high-frequency component.
 """
 import sys
 

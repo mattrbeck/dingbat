@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
-"""Delay EVERY scanline's LCDC writes by k M-cycles and compare whole frames.
-
-If dingbat's disagreement with silicon on cgb-acid-hell is one uniform
-CPU-vs-PPU phase constant, then dingbat's frame with every line delayed by k
-must equal the ORACLE's undelayed frame for the k that cancels it -- on all 144
-lines at once, not just the two that happen to be sensitive. If instead only
-lines 68/69 line up, the 4 dots are specific to those lines and the constant
-theory is dead.
+"""Delay every scanline's LCDC writes in cgb-acid-hell by k M-cycles and
+compare whole frames: a uniform CPU-vs-PPU phase error cancels on all 144
+lines for one k, a line-specific one only on the sensitive lines.
 
     hellall.py <k>            dingbat@k  vs  oracle@0   (and oracle@k as control)
+Env: ACID_HELL_SRC, RGBDS, DINGBAT, SAMEBOY_RUNNER, HELL_TMP, HELL_POS.
 """
 import os, re, subprocess, sys, shutil
 
@@ -30,11 +26,9 @@ def build(k, tag):
     n = 0
     POS = os.environ.get("HELL_POS", "writes")
     for i, l in enumerate(L):
-        # "writes": delay only the 16 LCDC writes (the nops after the rSCY
-        # write). "all": delay EVERYTHING the block does after the halt, by
-        # spending the halt's own trailing nop -- rSCY included. If both give a
-        # pixel-perfect frame the two hypotheses are indistinguishable here; if
-        # only one does, acid-hell has separated them.
+        # HELL_POS "writes": delay only the 16 LCDC writes (the nops after the
+        # rSCY write). "all": delay everything after the halt, rSCY included,
+        # by spending the halt's own trailing nop.
         if POS == "all" and l.strip() == 'halt':
             d, j = k, i + 1
             while d > 0 and j < len(L):

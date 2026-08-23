@@ -1,24 +1,16 @@
 #!/usr/bin/env bash
-# probe_e_base -- probe (e)'s 136 cells, scored at a chosen BASE.
-#
-# WHY. probe_e_fit.sh compares ABSOLUTE columns at the ROM's shipping BASE and
-# ships 68/136, which was read as "the fetch grid is wrong". It is not that
-# simple: probe_f_base.sh, sweeping the write position instead of the model,
-# found that with objects OFF dingbat reproduces the oracle at EVERY fine-scroll
-# residue provided the write is moved by one constant -- BASE 24 on CGB, BASE 27
-# on DMG, 8 dots one way and 4 the other. A constant that large swamps an
-# absolute-column score and looks exactly like a broken grid.
-#
-# So this re-asks probe (e)'s question with that constant taken out: build
-# dingbat's ROM matrix at --base N, hold the oracle at the shipping BASE, and
-# count the cells that then agree. What survives is the part of the object
-# model that a phase constant cannot explain.
+# probe_e_base -- probe (e)'s 136 cells with a phase constant taken out:
+# dingbat's ROM matrix is built at --base N (BASE = M-cycles from the
+# anchor's wake to the LCDC.4 write; one step = 4 dots), the oracle's at the
+# ROM's shipping BASE 26, and the cells that agree are counted. What survives
+# is the part of the object model a phase constant cannot explain.
 #
 #   tools/gbprobe/probe_e_base.sh [--dmg] [--base N] [-d:KNOB=V ...]
+# Default BASE: 24 on CGB, 27 on DMG.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
-# SameBoy's runner is hardcoded to GB_MODEL_CGB_E and dingbat defaults to
-# CGB-C, so every CGB comparison must force rev E. SB_REV overrides.
+# The runner is built for CGB-E and dingbat defaults to CGB-C; force rev E.
+# SB_REV overrides.
 SB_REV=${SB_REV:---cgb-rev=E}
 SB=${SAMEBOY_RUNNER:-tools/gbfuzz/sameboy_runner}
 BR=${SAMEBOY_BOOTROMS:-$HOME/code/SameBoy/build/bin/BootROMs}

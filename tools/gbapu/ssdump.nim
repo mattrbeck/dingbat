@@ -10,13 +10,9 @@
 ## so `count = 4096` and the byte at offset `$0FFE` is a PASS/FAIL that does not
 ## depend on knowing where this particular ROM's table lives.
 ##
-## `frames` must be large enough for the ROM to finish (400 is safe for all 70;
-## 60 is not -- the five `*_volume_div` / `*_speed_change` ROMs are still
-## running). `model` is any `gb_revision_from_name` token: cgb0, cgbAB, cgbC,
-## cgbD, cgbE, agb.
-##
-## See tools/gbapu/README.md, and the SameBoy half in
-## tools/gbfuzz/sameboy_ssdump.c.
+## `frames` must be large enough for the ROM to finish (400 is safe for all
+## 70; 60 is not). `model` is any `gb_revision_from_name` token: cgb0, cgbAB,
+## cgbC, cgbD, cgbE, agb. The oracle half is tools/gbfuzz/sameboy_ssdump.c.
 import std/[os, strutils]
 import dingbat/gb/gb
 

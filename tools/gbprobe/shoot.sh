@@ -19,7 +19,7 @@
 # DocBoy has NO revision axis — CGB support is a compile-time switch and there
 # is one CGB. So every cgb* token gives the same DocBoy binary, and a DocBoy
 # column in a results table is one number for all of C/D/E by construction.
-# SameBoy's DMG-B and dingbat's grDmgABC are the same silicon generation.
+# Boot ROMs for the sameboy leg: $GBPROBE_BOOTROMS (default .scratch/bootroms).
 set -e
 
 HERE="$(cd "$(dirname "$0")" && pwd)"

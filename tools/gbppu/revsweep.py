@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-"""Which currently-FAILING self-checking rows pass on some other revision?
+"""Sweep every failing mooneye / wilbertpol / AGE row in tests/results.md
+across every revision dingbat models, and list the rows that pass somewhere:
+those are per-revision gating defects rather than missing behaviour.
 
-A row that is red on the machine it is scored on but green on another is a
-much smaller problem than one that is red everywhere: the behaviour is
-implemented, it is the per-revision gating that is wrong. This sweeps every
-failing mooneye / wilbertpol / AGE row (all boolean, all self-checking via the
-Fibonacci-register protocol) across every revision dingbat models.
+Usage: revsweep.py   (needs <repo>/dingbat_test; ROMs from $DINGBAT_ROM_CACHE,
+default /tmp/dingbat-test-roms)
 """
 import re, os, subprocess, collections, sys
 
-W = "/Users/matt/code/dingbat/.claude/worktrees/win-hold-zero-fix"
-ROMS = "/Users/matt/.claude/jobs/e4d5536b/tmp/romcache/game-boy-test-roms"
+W = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROMS = os.environ.get("DINGBAT_ROM_CACHE", "/tmp/dingbat-test-roms") + "/game-boy-test-roms"
 PASS = "\N{OK HAND SIGN}"
 
 SUITES = {

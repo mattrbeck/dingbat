@@ -2,17 +2,12 @@
 ##   nim c -r -d:test_harness -d:release --path:src -o:dingbat_rewind_test \
 ##     tests/rewind_test.nim
 ##
-## The dangerous failure mode in this ring is not a crash or a corrupt
-## payload — it is index/eviction bookkeeping that hands back a state from the
-## WRONG MOMENT, byte-perfect and indistinguishable from the right one. So the
-## bar here is byte equality against a reference walk of the delta chain
-## (`snapshots_newest_first`, which knows nothing about IDs or keyframes) at
-## every depth, before and after eviction, with and without keyframes, and
-## across a pop/push seam (where snapshot IDs stop being contiguous).
-##
-## No ROM, no emulator: payloads are synthetic buffers that change a small
-## fraction of their bytes per step, which is what a real state payload does
-## over a 10-frame window and what makes the deltas compress at all.
+## The dangerous failure is bookkeeping that hands back a byte-perfect state
+## from the WRONG MOMENT, so the bar is byte equality against a reference
+## walk of the delta chain (`snapshots_newest_first`, which knows nothing
+## about IDs or keyframes) at every depth, before and after eviction, with
+## and without keyframes, and across a pop/push seam. No ROM: payloads are
+## synthetic buffers that change ~1% of their bytes per step.
 
 import std/[sequtils, strformat]
 import dingbat/common/rewind
@@ -296,11 +291,9 @@ block:
 
 echo "== pop/push seam =="
 block:
-  # Hold-to-rewind pops destructively, then the game resumes and pushes
-  # again. Fresh IDs are NOT the ones just popped (reusing them would let a
-  # stale scrubber selection resolve to a different moment), so the retained
-  # ID sequence has a gap in it — everything that maps ID <-> position has to
-  # survive that.
+  # Hold-to-rewind pops destructively, then the game pushes again. Fresh IDs
+  # are NOT the popped ones (a stale scrubber selection must not resolve to a
+  # different moment), so the retained ID sequence has a gap.
   let rw = new_rewind(cap = 64 * 1024 * 1024, interval = 10, key_every = 9)
   var c = new_core(0x1357_9BDF'u32)
   for _ in 0 ..< 80:
@@ -332,9 +325,8 @@ block:
 # --- 8. rewind_to_id: committing to a moment discards the future ----------
 
 proc built(n: int; seed: uint32): Rewind =
-  ## A ring with `n` pushes on it, keyframed densely enough that a commit has
-  ## to get the keyframe-anchored path right rather than falling back to a
-  ## walk from `latest`.
+  ## A ring with `n` pushes, keyframed densely enough that a commit must get
+  ## the keyframe-anchored path right rather than walking from `latest`.
   result = new_rewind(cap = 64 * 1024 * 1024, interval = 10, key_every = 9)
   var c = new_core(seed)
   for _ in 0 ..< n:
@@ -343,10 +335,9 @@ proc built(n: int; seed: uint32): Rewind =
 
 echo "== rewind_to_id (scrubber commit) =="
 block:
-  # The scrubber's commit has to leave the ring exactly as though the player
-  # had held the rewind button all the way to the chosen moment — same
-  # payload, same remaining history, same ID at the head — but without paying
-  # one inflation per step. Popping is the reference.
+  # The scrubber's commit must leave the ring exactly as though the player
+  # had held rewind to the chosen moment (same payload, history and head ID)
+  # without one inflation per step. Popping is the reference.
   var bad_payload = -1
   var bad_head = -1
   var bad_depth = -1
@@ -381,9 +372,9 @@ block:
         rw.len == before_len and rw.newest_id == before_id
 
 block:
-  # After a commit the ring must still behave like a ring: the discarded
-  # snapshots' thumbnails and keyframes go with them, the ID/index maps stay
-  # consistent, and pushing again works across the new seam.
+  # After a commit the ring must still behave like a ring: discarded
+  # snapshots' thumbnails and keyframes go with them, ID/index maps stay
+  # consistent, and pushing works across the new seam.
   let rw = built(80, 0x7788_99AA'u32)
   let target = rw.id_at_index(25)
   let dropped = toSeq(0 ..< 25).mapIt(rw.id_at_index(it))

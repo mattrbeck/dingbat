@@ -12,10 +12,7 @@
 # Engines, and what each one is:
 #   dingbat   this tree, built straight from src/ (dingbat_shot.nim)
 #   sameboy   LIJI32/SameBoy as a static lib + our own headless main
-#   docboy    Docheinstein/docboy's own devtools/runtakeframebuffer
-#
-# SameBoy and DocBoy are ORACLES. We run ROMs in them and read the pixels back
-# out; no constant and no line of either implementation is copied into dingbat.
+#   docboy    Docheinstein/docboy + our own devtools/docboy_shot.cpp
 set -e
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -78,15 +75,11 @@ build_sameboy() {
 }
 
 # ---------------------------------------------------------------- docboy -----
-# Two things make DocBoy awkward as a harness target, and build.sh handles both:
-#
-#  1. CGB support is a COMPILE-TIME option (ENABLE_CGB), not a runtime model
-#     selector, so DMG and CGB are two separate binaries. There is no
-#     revision axis at all — DocBoy models one CGB, not CGB-C/D/E.
+#  1. CGB support is a compile-time option (ENABLE_CGB), so DMG and CGB are
+#     two binaries and there is no revision axis.
 #  2. third_party/CMakeLists.txt add_subdirectory()s SDL and nativefiledialog
-#     unconditionally, even for a devtools-only build, so a bare checkout will
-#     not configure without those (large) submodules. We guard them behind
-#     BUILD_SDL_FRONTEND in the scratch checkout.
+#     unconditionally, so a bare checkout will not configure without those
+#     submodules; the scratch checkout guards them behind BUILD_SDL_FRONTEND.
 build_docboy() {
   DOCBOY="$SCRATCH/docboy"
   [ -d "$DOCBOY" ] || git clone --depth 50 "$DOCBOY_REPO" "$DOCBOY"
@@ -108,9 +101,7 @@ open(p, 'w').write(
     '\nelse()\n    set(ENABLE_NFD OFF PARENT_SCOPE)\nendif()\n\n' + s[j:])
 PY
 
-  # Our own devtool, rather than DocBoy's runtakeframebuffer: see the header
-  # comment in docboy_shot.cpp for why (testutils forces ENABLE_TESTS, and the
-  # stock tool counts ticks where we want frames).
+  # Our own devtool rather than DocBoy's runtakeframebuffer (see docboy_shot.cpp).
   cp "$HERE/docboy_shot.cpp" "$DOCBOY/devtools/docboy_shot.cpp"
   if ! grep -q docboy_shot "$DOCBOY/devtools/CMakeLists.txt"; then
     cat >> "$DOCBOY/devtools/CMakeLists.txt" <<'CM'
@@ -145,10 +136,7 @@ build_roms() {
   "$HERE/mk.sh" scratch_font
   "$HERE/mk.sh" probe_a_statidiom
   "$HERE/mk.sh" probe_b_scxm3
-  # probe (c) at the three fine scrolls worth having. SCX=0 is the setting the
-  # existing reference frames use; 3 and 7 exist because SCX_FINE_BORROW says
-  # the fetch grid's column carries a borrow off the fine scroll and no
-  # reference frame in existence exercises that.
+  # probe (c) at SCX 0 (the setting the reference frames use), 3 and 7.
   "$HERE/mk.sh" probe_c_arbitrate -DSCXVAL=0
   GBPROBE_OUT=probe_c_arbitrate_scx3 "$HERE/mk.sh" probe_c_arbitrate -DSCXVAL=3
   GBPROBE_OUT=probe_c_arbitrate_scx7 "$HERE/mk.sh" probe_c_arbitrate -DSCXVAL=7

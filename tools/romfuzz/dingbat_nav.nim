@@ -53,22 +53,18 @@ proc main() =
   let want_state = args.len > 5 and args[5] == "--state"
 
   let use_hle = bios == "hle"
-  # run_bios=false skips the boot logo so frame 0 is the first game frame,
-  # matching the skip-bios configs of the mGBA/NBA runners. ROMFUZZ_RUN_BIOS
-  # plays the full boot (needs a real BIOS) for timing experiments.
+  # Skip the boot logo so frame 0 is the first game frame, as the other two
+  # runners do. ROMFUZZ_RUN_BIOS plays the full boot (needs a real BIOS).
   let run_bios = getEnv("ROMFUZZ_RUN_BIOS") != "" and not use_hle
   let emu = new_gba(if use_hle: "" else: bios, rom_path,
                     run_bios = run_bios, use_hle = use_hle)
   emu.test_output = new_test_output()
   emu.post_init()
-  # See tests/dingbat_bench.nim: holds the idle-loop fast-forward out of an A/B
-  # so a scheduler change can be compared with that variable fixed.
+  # Holds the idle-loop fast-forward out of an A/B (see tests/dingbat_bench.nim).
   if getEnv("DINGBAT_NO_WAITLOOP") == "1":
     emu.cpu.attempt_waitloop_detection = false
-  # RTC carts (Pokemon Ruby/Sapphire/Emerald) read the host wall clock, so two
-  # runs of the SAME binary produce different save states. Freeze it when a
-  # comparison needs state files to be reproducible; the framebuffer gate does
-  # not need this, since the clock does not reach the picture in a short run.
+  # RTC carts read the host wall clock, so two runs of the same binary give
+  # different save states; freeze it when state files must be reproducible.
   let rtc_epoch = getEnv("ROMFUZZ_RTC_EPOCH")
   if rtc_epoch.len > 0:
     emu.enable_deterministic_rtc(parseBiggestInt(rtc_epoch))
@@ -81,11 +77,8 @@ proc main() =
       if ev.frame == f: emu.handle_input(ev.key, ev.pressed)
     when defined(psgdim):
       # Force CH3 into 64-step (two-bank) wave mode at a short period so the
-      # bank-flip-on-wrap path in ch3_catchup gets exercised (a trigger resets
-      # the pointer, so re-trigger only occasionally); the
-      # -d:psgverify shadow loop then checks the closed form against the old
-      # per-period stepping. No commercial title in the sweep set uses
-      # dimension=1, so this is the only way to cover it.
+      # bank-flip-on-wrap path in ch3_catchup is exercised under -d:psgverify;
+      # no commercial title in the sweep set uses dimension=1.
       emu.bus[0x04000084'u32] = 0x80'u8            # master sound enable
       emu.bus[0x04000080'u32] = 0x77'u8            # PSG L/R enable + volumes
       emu.bus[0x04000081'u32] = 0x77'u8

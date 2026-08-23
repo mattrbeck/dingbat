@@ -1,5 +1,5 @@
 @ psrmask.s — WHAT: which CPSR/SPSR bits are physically writable on the
-@ ARM7TDMI (no test suite measures this; emulators typically latch all).
+@ ARM7TDMI.
 @
 @ HOW: all-ones MSR writes per field, raw MRS readback after each:
 @ msr CPSR_f/CPSR_s/CPSR_x with 0xFF in the respective byte, then (from
@@ -15,8 +15,8 @@
 @ (2000001F here — the flags are pinned to C-only just before the read
 @ so the row is deterministic and matches the gbaedge transcription).
 @
-@ PROVENANCE: verified on GBA SP AGS-001 (session 2, gbaedge page 17
-@ CPSRBITS, slot CRC F153); see docs/hwprobe-results-agb.md.
+@ PROVENANCE: verified on GBA SP AGS-001 (gbaedge page 17 CPSRBITS, slot
+@ CRC F153); see docs/hwprobe-results-agb.md.
     .arm
     .text
     .global _start

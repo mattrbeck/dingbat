@@ -21,7 +21,7 @@ emulators disagree, not that either is wrong. Adjudicate with the test ROM's
 own bracketing family and Pan Docs -- never by assuming the other emulator is
 right. See README.md.
 
-Hygiene, all of it learned the hard way on this project (see tools/gbgate):
+Hygiene:
   * ROMs are symlinked into a per-emulator directory, never copied, and each
     emulator gets its own. dingbat derives the .sav path from the ROM path, so
     a battery-backed game writes its save next to the *symlink*; separate

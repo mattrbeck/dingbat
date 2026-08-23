@@ -1,4 +1,5 @@
-/* Headless mGBA runner for cross-emulator screenshot comparison.
+/* Headless mGBA runner (links libmgba as a black-box reference) for
+ * cross-emulator screenshot comparison.
  *
  * Usage: mgba_runner <rom.gba> <bios.bin> <outprefix> <script> <shots>
  *   script: comma-separated FRAME:KEY[:HOLD] (empty string for none),
@@ -92,11 +93,10 @@ int main(int argc, char** argv) {
   core->init(core);
   mCoreInitConfig(core, NULL);
   mCoreConfigSetValue(&core->config, "idleOptimization", "ignore");
-  /* skip the boot logo so frame 0 is the first game frame in every emulator,
-   * unless ROMFUZZ_RUN_BIOS is set (full-BIOS timing experiments).
-   * NB: core->loadConfig does NOT map config values into core->opts (that's
-   * mCoreConfigMap, called only by the higher-level mCoreLoadConfig), so set
-   * the opt directly — reset() reads core->opts.skipBios. */
+  /* Skip the boot logo so frame 0 is the first game frame in every runner,
+   * unless ROMFUZZ_RUN_BIOS is set. core->loadConfig does not map config
+   * values into core->opts (only mCoreLoadConfig does), so set the opt
+   * directly — reset() reads core->opts.skipBios. */
   core->opts.skipBios = getenv("ROMFUZZ_RUN_BIOS") == NULL;
   /* keep .sav files next to the outprefix, not the shared ROM dir */
   char savedir[1024];

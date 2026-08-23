@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
-"""P6 PPM -> PNG, with no dependency beyond the standard library.
-
-The three engine legs all emit P6 because it is the format every one of them
-can write in ten lines and `cmp` can compare directly. PNG exists only so a
-frame can be looked at, and so a shot can sit next to a hardware photo in a
-results doc.
+"""P6 PPM -> PNG, stdlib only (the engine legs emit P6 so `cmp` works; PNG
+is for looking at).
 
     ppm2png.py in.ppm out.png [scale]
 """

@@ -3,11 +3,8 @@
 
     tools/gbppu/pngdiff.py <ref.png> <shot.ppm> [label]
 
-Channels are masked to 0xF8 before comparing, which is what a BGR555
-framebuffer actually carries and what the runner's own screenshot rows compare
-(see tests/README.md). Pure stdlib so it runs anywhere the suite does; it is
-the one-row equivalent of the runner's screenshot mode, for sweeping a build
-against a single pixel witness without regenerating any results file.
+Channels are masked to 0xF8 before comparing, as the runner's screenshot
+rows do (tests/README.md). Stdlib only.
 """
 import sys, zlib, struct
 

@@ -5,14 +5,10 @@
       -d:GB_TRACE_LY=-1 --path:src -o:dt_px tests/dingbat_test.nim
     python3 tools/gbppu/tdselphase.py ./dt_px [workdir]
 
-`tdselcells.py` scores the cells where a change lands ON a read (`glitch != 0`
-in the trace) and asks WHICH BYTE hardware substituted. This asks the prior
+`tdselcells.py` scores the cells where a change lands on a read (`glitch != 0`
+in the trace) and asks which byte hardware substituted. This asks the prior
 question: for a change `d` dots away from a read, does hardware disturb that
-read at all -- and if so with what. It exists because `CGB_HALT_PPU_LEAD`
-moves `cgb-acid-hell`'s write burst against the fetch cycle by 4 dots, i.e.
-onto the tile-MAP slot, where the shipping rules fire on nothing; the question
-"what does a change in the map slot do" then has to be answered from the four
-mealybug references, which sweep exactly that offset.
+read at all, and if so with what.
 
 Every background bitplane read whose eight bits the reference pins is a row
 here, bucketed by `(delta, direction)` where `delta = read dot - the dot the
@@ -21,23 +17,12 @@ value the bit changed TO. Per bucket it prints how many reads hardware agrees
 with dingbat on, and how many are explained instead by the tile index, the
 address latch, or the other addressing mode's byte.
 
-The row count per bucket is the honest part: a bucket with no rows says the
-corpus is silent about that offset, which is the whole finding for some of
-them.
-
-What it answered on 2026-08-14, in one line: of 6352 mealybug reads with an
-LCDC.4 change on their own line, hardware disturbs the 408 at `delta = 0` and
-none of the other 5944 -- so at `CGB_HALT_PPU_LEAD=1`, where `cgb-acid-hell`'s
-changes sit 4 dots off its reads, no rule fires and none can be written. The
-last table it prints (`detail`) is the bucket that decides it, split by the
-change BEFORE the last one, which is where the two-sided bracket lives.
-
-One caveat on its `cgb-acid-hell` rows: 16 of that frame's 304 pinned reads
-(lines 136..143, one tile column, `mapoff = none`) report a mismatch on a frame
-that is pixel-exact, because their push is attributed to the wrong pixels. They
-are nowhere near the mechanism and identical in every build; the four mealybug
-frames reconstruct 23680/23680 reads with no mismatch at all, which is what
-says the reconstruction itself is sound.
+A bucket with no rows means the corpus is silent about that offset. The
+`detail` table is the `delta = 0` bucket split by the change before the last
+one. Known artefact: 16 of cgb-acid-hell's pinned reads (lines 136..143, one
+tile column, `mapoff = none`) report a mismatch on a pixel-exact frame because
+their push is attributed to the wrong pixels; the mealybug frames reconstruct
+with no mismatch.
 """
 import collections, json, os, re, subprocess, sys, tempfile
 
@@ -232,11 +217,9 @@ def main():
 
 
 def detail(corpus, want=(0,), planes=(4,), dirs=(-1,)):
-    """The one bucket the LEAD=1 question lives in, split by prior context.
-
-    If a candidate rule is to fire on `cgb-acid-hell` and on nothing else, some
-    column here has to separate its reads from the mealybug ones in the same
-    bucket. Empty separating columns are the result, not a failure.
+    """The `delta = 0` bucket split by prior context: a rule that is to fire
+    on `cgb-acid-hell` and nothing else needs a column here that separates
+    its reads from the mealybug ones. Empty separating columns are a result.
     """
     rows = [r for r in corpus if r["mapoff"] in want
             and r["readoff"] in planes and r["dir"] in dirs]

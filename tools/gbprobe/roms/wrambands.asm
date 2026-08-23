@@ -1,42 +1,20 @@
-; wrambands — measure the BIT BIAS of power-up work RAM, per 256-byte block.
+; wrambands -- the BIT BIAS of power-up work RAM, per 256-byte block.
 ;
-; WHY THIS AND NOT MORE COUNTING. `wramscan` established that power-up WRAM is
-; neither all-zero nor uniform noise: Matt's AGS gave 369 bytes of $00 and 221
-; of $FF out of 8192, where uniform random predicts about 32 of each. That is
-; enough to reject both constant fills and a plain RNG, and not enough to say
-; what the pattern IS. Pan Docs only states the principle — "The console's WRAM
-; and HRAM are random on power-up. Different models tend to exhibit different
-; patterns" — and quantifies nothing.
-;
-; So measure the quantity a rule would have to predict: how many BITS ARE SET
-; in each 256-byte block. Out of 2048 bits per block:
+; Pan Docs says only that WRAM and HRAM are random at power-up and that models
+; differ; wramscan showed it is neither all-zero nor uniform noise. This
+; counts how many of each block's 2048 bits are set:
 ;
 ;   ~0400   uniform random (half the bits set)
-;    >0400  the block is biased towards 1s (an OR-like decay pattern)
-;    <0400  biased towards 0s (an AND-like one)
-;    0000   all zero        0800  all ones
+;    >0400  biased towards 1s        <0400  biased towards 0s
+;    0000   all zero                 0800   all ones
 ;
-; 256 bytes is deliberately the granularity: it is the finest split that still
-; fits the screen, and a bias that ALTERNATES between adjacent blocks is exactly
-; the shape that byte-level counts cannot see. Two numbers per row, so the pair
-; on one line is the even and odd 256-byte half of a 512-byte span — if the
-; console alternates, every row reads high-low (or low-high) and the effect is
-; unmistakable at a glance rather than a statistical argument.
+; Layout: 16 rows, `R  EVEN ODD`, R = row number 0-F in hex. Row R covers
+; $C000 + R*512; EVEN is its first 256 bytes, ODD its second, so a bias that
+; alternates between adjacent blocks reads high-low down every row.
 ;
-; This is OUR measurement of OUR hardware. If the answer happens to agree with
-; what another emulator does, that is corroboration and worth having; it is not
-; where the number came from.
-;
-; Run on a COLD boot, and boot the cart DIRECTLY to the ROM if you can — going
-; through a menu overwrote ~924 bytes with zeroes last time (see
-; flashcart-kit/9's README).
-;
-; Layout: 16 rows. `R  EVEN ODD`, R = row number 0-F in hex. Row R covers
-; $C000 + R*512; the EVEN column is its first 256 bytes, the ODD column its
-; second.
-;
-; Writes NOTHING to WRAM before measuring it: HRAM stack, HRAM scratch,
-; everything drawn straight to VRAM.
+; Run on a COLD boot, booting the cart directly to the ROM (a flashcart menu
+; overwrites part of WRAM). Writes NOTHING to WRAM before measuring it: HRAM
+; stack, HRAM scratch, everything drawn straight to VRAM.
 
 INCLUDE "hw.inc"
 

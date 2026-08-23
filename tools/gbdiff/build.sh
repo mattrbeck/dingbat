@@ -54,11 +54,8 @@ else
 fi
 
 # ENABLE_RTC_SYSTEM_TIME defaults ON and seeds the MBC3 clock from the wall
-# clock, which would make every run of an RTC title differ from the last one
-# and from dingbat. OFF is not a fidelity compromise for this harness; it is
-# what makes a comparison mean anything.
-# ENABLE_AUDIO off: nothing here reads samples, and it is one less thing that
-# can differ between the two builds.
+# clock, which would make every run of an RTC title differ; OFF.
+# ENABLE_AUDIO off: nothing here reads samples.
 build_one() {
   local slot=$1 cgb=$2
   echo "== docboy-gbdiff ($slot)"
@@ -88,10 +85,8 @@ build_one() {
 build_one dmg OFF
 build_one cgb ON
 
-# dingbat's side of the comparison is tools/gbfuzz/dingbat_gb_nav, which
-# already has this exact CLI contract and boot-ROM handling. Reusing it keeps
-# one runner for every cross-emulator sweep in the repo instead of two that
-# can drift apart.
+# dingbat's side is tools/gbfuzz/dingbat_gb_nav, which has the same CLI
+# contract and boot-ROM handling.
 echo "== dingbat_gb_nav"
 nim c -d:release --path:src --hints:off \
   --nimcache:"$(mktemp -d)" \

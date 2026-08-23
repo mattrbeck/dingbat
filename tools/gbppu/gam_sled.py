@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Sled one probe across the dots after an LCD enable, in dingbat AND SameBoy.
+"""Sled one probe across the dots after an LCD enable, in dingbat and the
+sameboy_gambatte runner.
 
     tools/gbppu/gam_sled.py <kmin> <kmax> <scx,list> <dmg|cgb> <probe,list>
                             [if-clear M-cycle]
@@ -20,8 +21,6 @@ of the edge by two dots.
 The optional last argument inserts `xor a ; ldh ($ff0f),a` at that M-cycle, so
 `if` can be swept on a later line than the one that first raised the flag
 (e.g. `... 156 166 0,1,2,3,4,5,6,7 dmg if 120` is line 1).
-
-Measured 2026-08-21 on 65bcb71; see M0_HALT_BLIND_DOTS in gb/ppu.nim.
 """
 import sys
 import os

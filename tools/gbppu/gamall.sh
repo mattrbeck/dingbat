@@ -1,9 +1,7 @@
 #!/bin/bash
-# Score the WHOLE gambatte suite with the local ./dingbat_test, sharded, and
-# print one pass count per subdirectory. Same rows and same verdicts as the
-# runner's gambatte pass, but ~6 s and it does NOT touch tests/results*.md — so
-# it is the loop to iterate a mid-scanline change in, with gamscore.sh for one
-# family and this for "did anything else move".
+# Score the whole gambatte suite with the local ./dingbat_test, sharded, and
+# print one pass count per subdirectory. Same rows and verdicts as the runner's
+# gambatte pass, ~6 s, and it does not touch tests/results*.md.
 #
 #   tools/gbppu/gamall.sh /tmp/g_before      # on main
 #   tools/gbppu/gamall.sh /tmp/g_after       # with the change

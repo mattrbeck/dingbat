@@ -1,67 +1,48 @@
 # ============================================================================
-# Cross-version trade reproduction harness  (MANUAL regression tool)
+# Cross-version trade reproduction harness (MANUAL regression tool)
 # ============================================================================
 #
-# WHAT THIS TESTS
-#   Drives two REAL Pokemon ROMs (FireRed = core 0, Emerald = core 1), each
-#   pre-positioned at the Cable Club, into the cross-version link trade and
-#   verifies the multi-mode SIO exchange completes WITHOUT the "communication
-#   error" teardown. It reproduces the trade over ALL THREE link code paths the
-#   emulator implements, selected with --path=:
+# Drives two REAL Pokemon ROMs (FireRed = core 0, Emerald = core 1), each
+# pre-positioned at the Cable Club, into the cross-version link trade and
+# checks the multi-mode SIO exchange completes without the "communication
+# error" teardown, over each link path (--path=):
+#   lockstep  link.nim: new_link([fr, em]) + step_frame(); SIO resolved
+#             in-process.
+#   netcore   two NetCore peers (netcore.nim) over in-memory queues with a
+#             network delay (--delay), like run_spec_link.
+#   rollback  the browser's default online path (web/netplay.js): one
+#             RollbackSession over a 2-core Link; core 1's inputs arrive
+#             --delay frames late via feed_remote(), so the exchange runs
+#             through re-simulation.
 #
-#     lockstep  link.nim direct: new_link([fr, em]) + step_frame().  Both cores
-#               advance in perfect lockstep; the SIO cable is resolved in-process.
-#     netcore   serial.nim NETCORE online path: two independent NetCore peers
-#               (netcore.nim) shuttling frames through in-memory queues with a
-#               configurable network delay (--delay), like run_spec_link.
-#     rollback  the DEFAULT browser online path (web/netplay.js, NET_ROLLBACK):
-#               ONE RollbackSession over a 2-core Link; core 0 = local player,
-#               core 1's inputs arrive --delay frames late via feed_remote(),
-#               forcing rollbacks so the trade exchange runs THROUGH re-simulation.
-#
-#   All three of these paths were fixed & verified; this tool is the regression
-#   guard that they stay fixed. The three sub-paths share the same driving code
-#   (ROM+save load, nav-script parsing, screenshot dump) and the same comm-error
-#   detector; only the core wiring + per-frame advance differ.
-#
-# REQUIRES THE REAL ROMS  (copyrighted, NOT in the repo)
-#   Positional args point at a FireRed .gba and an Emerald .gba, each with its
-#   battery save as a sibling <rom>.sav (auto-loaded by new_gba). The saves must
-#   already have both players standing at the Cable Club trade table. The trade
-#   performs an in-game save, so RE-COPY the pristine .sav files before each run.
-#   Because the ROMs cannot ship, this is a MANUAL tool — it is NOT part of CI or
-#   the dingbat_test acceptance suite.
+# REQUIRES THE REAL ROMS (copyrighted, not in the repo): a FireRed .gba and
+# an Emerald .gba, each with its battery save as a sibling <rom>.sav, both
+# players standing at the Cable Club trade table. The trade performs an
+# in-game save, so re-copy the pristine .sav files before each run. Not
+# part of CI.
 #
 # BUILD
 #   nim c -d:test_harness -d:release -d:linkTrace --path:src \
 #     -o:trade_repro tests/trade_repro.nim
-#   (-d:linkTrace compiles in the onCoalesce hook used for the optional coalesce
-#    assertion; it is stripped from normal/production builds.)
+#   (-d:linkTrace compiles in the onCoalesce hook for the optional coalesce
+#    assertion.)
 #
 # RUN
 #   ./trade_repro --path=<lockstep|netcore|rollback> \
 #     <fr.gba> <em.gba> <nav.txt> <frames> <shotdir> \
 #     [--delay=N] [--shots=N] [--no-shots]
+#   --path    link path (also env TRADE_PATH). Required.
+#   --delay   latency in frames (netcore & rollback). Run 0 AND a positive
+#             value.
+#   --shots   PPM screenshot of both cores every N frames (default 300).
+#   --no-shots   skip screenshots.
 #
-#   --path    which link path to exercise (also env TRADE_PATH). Required.
-#   --delay   network / remote-input latency in frames (netcore & rollback only;
-#             lockstep ignores it). Run each of 0 AND a positive value.
-#   --shots   dump a PPM screenshot of both cores every N frames (default 300).
-#   --no-shots   skip screenshots entirely.
-#
-# EXAMPLES  (roms/saves/nav under $D)
-#   D=/path/to/tradedrive
-#   ./trade_repro --path=lockstep $D/fr.gba $D/em.gba $D/nav_final.txt 3600 /tmp/ls
-#   ./trade_repro --path=netcore  $D/fr.gba $D/em.gba $D/nav_final.txt 3600 /tmp/nc --delay=4
-#   ./trade_repro --path=rollback $D/fr.gba $D/em.gba $D/nav_final.txt 3600 /tmp/rb --delay=4
-#
-# VERDICT
-#   Each run prints one PASS/FAIL line. PASS = the link negotiation was reached
-#   AND no comm error AND no deadlock. The comm-error signature is FireRed core 0
-#   SIOCNT latching 0x2000 WITH gLinkStatus(@0x03003F20) bit 0x2000 set, OR
-#   gLink.badChecksum(@0x03003FC1) going nonzero. A bare SIOCNT=0x2000 with
-#   gLinkStatus=0 during the early handshake is a benign SIO_MULTI_MODE select,
-#   NOT a failure, and is deliberately ignored.
+# VERDICT: one PASS/FAIL line per run. PASS = link negotiation reached AND
+# no comm error AND no deadlock. Comm error = FireRed core 0 SIOCNT
+# latching 0x2000 WITH gLinkStatus(@0x03003F20) bit 0x2000 set, or
+# gLink.badChecksum(@0x03003FC1) nonzero. A bare SIOCNT=0x2000 with
+# gLinkStatus=0 during the early handshake is a benign SIO_MULTI_MODE
+# select and is ignored.
 # ============================================================================
 
 import std/[os, strutils]
@@ -106,8 +87,7 @@ proc loadScript(path: string): seq[Cmd] =
     result.add Cmd(frame: parseInt(parts[0]), core: parseInt(parts[1]),
                    held: parseButtons(parts[2 .. ^1]))
 
-# Expand the (sorted) command list into per-core, per-frame held-button sets:
-# heldPerFrame[core][f] is what core `core` holds while running frame f.
+# heldPerFrame[core][f] = what core `core` holds while running frame f.
 proc expandHeld(cmds: seq[Cmd]; frames: int): array[2, seq[set[Input]]] =
   for c in 0 .. 1: result[c] = newSeq[set[Input]](frames)
   var held: array[2, set[Input]]
@@ -157,11 +137,9 @@ const
   G_BADCHK = 0x03003FC1   # gLink.badChecksum (nonzero once a checksum mismatch hits)
 
 # Watches FireRed (core 0) for the trade "communication error" teardown. The
-# link is "live" once SIOCNT enters an active multi transfer mode (0x6xxx) or
-# gLinkStatus's low byte is populated — i.e. the Cable Club handshake happened.
-# From then on, a SIOCNT reset to 0x2000 WITH gLinkStatus bit 0x2000, or any
-# nonzero badChecksum, is the real failure. A bare 0x2000 with gLinkStatus=0 is
-# the benign SIO_MULTI_MODE select seen mid-handshake and is ignored.
+# link is "live" once SIOCNT enters an active multi mode (0x6xxx) or
+# gLinkStatus's low byte is populated. From then on, SIOCNT reset to 0x2000
+# WITH a gLinkStatus error bit, or a nonzero badChecksum, is the failure.
 type CommState = object
   linkLive*: bool       ## reached the Cable Club link negotiation
   commError*: bool
@@ -175,10 +153,8 @@ proc observe(cs: var CommState; g0: GBA; f: int) =
   if (sio and 0x6000'u16) == 0x6000'u16 or (st and 0x00FF'u32) != 0:
     cs.linkLive = true
   if cs.commError: return
-  # Any high-16 gLinkStatus bit is a LINK_STAT_ERROR_* (checksum 0x2000 is in
-  # the low half of that error field; lag-master is bit 16). The 2026-08
-  # regression fails with 0x00010368 (LAG_MASTER), which the old 0x2000-only
-  # check missed.
+  # Any high-16 gLinkStatus bit is a LINK_STAT_ERROR_* (checksum 0x2000 is
+  # in the low half; lag-master is bit 16), so test both halves.
   let teardown = cs.linkLive and sio == 0x2000'u16 and
                  ((st and 0x2000'u32) != 0 or (st shr 16) != 0)
   if teardown or bad != 0'u8:

@@ -1,31 +1,20 @@
 #!/usr/bin/env bash
-# probe_f_base -- probe (f) scored by BASE EQUIVALENCE, which is the only
-# unambiguous way to read this staircase.
+# probe_f_base -- probe (f) scored by BASE equivalence. BASE is the M-cycles
+# from the anchor's wake to the LCDC.4 write (one step = 4 dots); it is swept
+# in dingbat with the oracle held at the shipping BASE, and each SCX reports
+# which BASE values reproduce the oracle's columns exactly. One BASE common to
+# every SCX means a pure phase offset; none, or a different one per SCX, means
+# a window-path error. Absolute columns cannot be compared (a uniform offset
+# dominates) and a best-fit offset cannot be subtracted (the staircase is
+# self-similar under shift). Only even offsets land on the column grid (a
+# write is 4 dots, a column 8), so most rows report at most one hit.
 #
-# WHY NOT COMPARE COLUMNS. dingbat carries a uniform column offset in this
-# probe that has nothing to do with the window (the plain arm has it too --
-# probe (e) 68/136), so probe_f_fit.sh's absolute comparison is pinned at 0/8
-# whatever the window path does. Subtracting a best-fit offset instead does not
-# work either: the staircase is SELF-SIMILAR under shift (`24 24 32 32 ...`
-# against `24 32 32 40 ...`), so a metric that is free to slide one against the
-# other calls two genuinely different pairing phases a match.
-#
-# So do what probe (e) did: BASE is the M-cycles from the anchor's wake to the
-# LCDC.4 write, and moving it by one moves the write by 4 dots. Sweep it in
-# DINGBAT, hold the oracle at the shipping BASE, and ask which value -- if any
-# -- reproduces the oracle's columns EXACTLY. A pure phase error answers with
-# one BASE that works at every SCX. A window-path error answers with no BASE at
-# all, or with a different one per SCX, and the spread is the shape of the bug.
-#
-# Only even offsets can land on the oracle's grid at all (a write is 4 dots and
-# a column is 8), which is why the sweep steps by one M and most rows report at
-# most one hit.
-#
-#   tools/gbprobe/probe_f_base.sh [--dmg] [-d:KNOB=V ...]
+#   tools/gbprobe/probe_f_base.sh [--dmg] [--compat] [--plain] [-d:KNOB=V ...]
+# Env: PROBE_F_BASES (default 22..30), PROBE_F_EXTRA, PROBE_F_VERBOSE.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
-# SameBoy's runner is hardcoded to GB_MODEL_CGB_E and dingbat defaults to
-# CGB-C, so every CGB comparison must force rev E. SB_REV overrides.
+# The runner is built for CGB-E and dingbat defaults to CGB-C; force rev E.
+# SB_REV overrides.
 SB_REV=${SB_REV:---cgb-rev=E}
 T=${TMPDIR:-/tmp}/probe_f_fit          # share probe_f_fit's ROM/oracle cache
 mkdir -p "$T"
@@ -37,22 +26,17 @@ MODEL="--cgb $SB_REV"; SUF=cgb; CGBFLAG=1; WIN=-DWIN_LIVE=1
 while :; do
   case "${1:-}" in
     --dmg)   MODEL=--dmg; SUF=dmg; CGBFLAG=0; shift ;;
-    # CGB COMPATIBILITY mode: a cart with no CGB flag, run on a CGB. It is a
-    # third machine, distinct from both --dmg (DMG silicon) and the default
-    # (CGB native), and it is the one daid's ppu_scanline_bgp runs on -- so it
-    # is what separates that ROM from this probe. SameBoy needs GBFUZZ_MODEL to
-    # be told, since it otherwise picks its model off the cart flag.
+    # CGB compatibility mode: a cart with no CGB flag run on a CGB (the
+    # machine daid's ppu_scanline_bgp runs on). GBFUZZ_MODEL tells the runner,
+    # which otherwise picks its model off the cart flag.
     --compat) MODEL="--cgb $SB_REV"; SUF=compat; CGBFLAG=0; export GBFUZZ_MODEL=cgb; shift ;;
-    # The CONTROL arm: same ROM, same anchor, same bands, no window. Whatever
-    # uniform offset this reports is not the window's, and only the difference
-    # between the two arms is.
+    # Control arm: same ROM, no window; only the difference between the two
+    # arms is the window's.
     --plain) WIN=""; SUF=${SUF}-plain; shift ;;
     *) break ;;
   esac
 done
-# PROBE_F_EXTRA changes the ROM, so it must change the oracle cache's name too
-# -- reusing the halt-anchored oracle for a polled-anchor ROM would silently
-# compare two different experiments.
+# PROBE_F_EXTRA changes the ROM, so it must change the oracle cache's name.
 [ -n "${PROBE_F_EXTRA:-}" ] && SUF="$SUF$(echo "$PROBE_F_EXTRA" | tr -cd 'A-Za-z0-9' | tr 'A-Z' 'a-z')"
 ORACLE=$T/oracle-$SUF.txt
 
@@ -103,8 +87,7 @@ for S in 0 1 2 3 4 5 6 7; do
   echo "SCX $S  BASE ->$hits"
 done
 echo "probe (f) base-equivalence $hit / 8 SCX [windowed $SUF]"
-# A model is only right if ONE base explains every SCX; per-SCX hits with no
-# common member are still a window-path bug wearing a phase costume.
+# A model is only right if one BASE explains every SCX.
 common=""
 for B in $BASES; do
   ok=1

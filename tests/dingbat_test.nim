@@ -66,11 +66,9 @@ proc fb_hash(fb: seq[uint16]): uint32 =
     result = (result xor uint32(v and 0xFF)) * 0x01000193'u32
     result = (result xor uint32(v shr 8)) * 0x01000193'u32
 
-# Save/load-state roundtrip: run `warmup` frames, save a state, run 60 more
-# frames and record a framebuffer hash; then reconstruct a fresh emulator,
-# load the state, run 60 frames and compare. Also re-saves both emulators'
-# states and compares the files byte-for-byte, which covers all serialized
-# internal state, not just the visible pixels. Exits 0 iff everything matches.
+# Save/load-state roundtrip: save after `warmup` frames, run 60 more on the
+# original and on a fresh emulator that loaded the state, and compare both
+# the framebuffers and the re-saved state files byte for byte.
 proc state_roundtrip(rom_path, bios_path: string; warmup: int): int =
   const POST_FRAMES = 60
   let state_path  = rom_path & ".roundtrip.state"
@@ -251,10 +249,7 @@ proc link_desc(contract: LinkContract): string =
 
 # Two-core lockstep link acceptance (tests/roms/linktest.s): the multi-mode
 # parent sends 0xA000|round, the child answers 0xB000|round, and each unit
-# logs its four receive latches, SIOCNT role bits, and serial-IRQ count to
-# fixed EWRAM addresses. Runs both cores under the lockstep coordinator and
-# asserts both units observed identical, correct rounds. Exits 0 iff all
-# checks pass.
+# logs its receive latches, SIOCNT role bits and serial-IRQ count to EWRAM.
 proc link_test(rom1, rom2, bios_path: string; timeout: int;
                contract = lcMulti): int =
   let is_hle = bios_path == "hle" or bios_path == ""
@@ -306,14 +301,10 @@ proc gb_link_test(rom1, rom2: string; timeout: int): int =
     result.post_init()
     result.memory.wram[0][0x7FF] = role
   let cores = @[make_gb(rom1, 0), make_gb(rom2, 1)]
-  # The ROM only ever INCREMENTS its serial-IF counter at 0xC808, and WRAM does
-  # not power up zeroed -- 51bd27b randomizes it, which is what bully/bully and
-  # the Screenshot suite need. So the counter has to be read as a DELTA against
-  # the power-on byte; before this it was read as an absolute and reported
-  # "got 192, expected 16" on both units, every run, with the sixteen received
-  # bytes all correct. Fixing it in the ROM instead is not free: the ROM file's
-  # fnv1a is the save-state identity six pinned fixtures in
-  # tests/savestate_compat_test.nim are keyed on.
+  # The ROM only INCREMENTS its serial-IF counter at 0xC808 and WRAM does not
+  # power up zeroed, so read it as a delta from the power-on byte. Not fixed
+  # in the ROM: its fnv1a is the save-state identity of fixtures pinned in
+  # tests/savestate_compat_test.nim.
   let irq_base = @[cores[0].memory.wram[0][0x808], cores[1].memory.wram[0][0x808]]
   let lnk = new_gb_link(cores)
 
@@ -355,12 +346,9 @@ proc gb_link_test(rom1, rom2: string; timeout: int): int =
     1
 
 # Mid-game attach acceptance (tests/roms/attachtest.s): boot two cores with
-# NO link, let them spin in the role-negotiate loop, then plug the lockstep
-# link in mid-run — the deterministic analogue of the browser's "link cable
-# detected -> attach" flow (netlink_attach in the wasm bridge). Because the
-# ROM re-reads SI every pass, it picks up the freshly attached cable and
-# completes the multi-mode rounds; the linktest ROM cannot do this (it
-# latches its role at boot). Asserts with the multi-mode contract.
+# no link, then plug the lockstep link in mid-run (the analogue of the
+# browser's netlink_attach). The ROM re-reads SI every pass, so it picks up
+# the cable; the linktest ROM latches its role at boot and cannot.
 proc attach_test(rom, bios_path: string; timeout, attach_after: int): int =
   let is_hle = bios_path == "hle" or bios_path == ""
   let actual_bios = if is_hle: "" else: bios_path
@@ -404,12 +392,10 @@ proc attach_test(rom, bios_path: string; timeout, attach_after: int): int =
     echo "ATTACHTEST: FAIL (", failures, " failed checks)"
     1
 
-# Networked link acceptance (phase 3a of docs/multiplayer.md): two dingbat
-# processes run the linktest ROM over TCP, one with --listen PORT (unit 0,
-# multi-mode parent candidate) and one with --connect HOST:PORT (unit 1).
-# Each process asserts its own unit's EWRAM log — run both and require PASS
-# from both. --netlink-delay-ms N adds an artificial delay to every message
-# send (internet-latency simulation); the test must still pass, just slower.
+# Networked link acceptance: two dingbat processes run the linktest ROM over
+# TCP, one with --listen PORT (unit 0) and one with --connect HOST:PORT
+# (unit 1); each asserts its own unit's EWRAM log. --netlink-delay-ms N
+# delays every send.
 proc netlink_test(rom, bios_path: string; listen_port: int; connect_to: string;
                   timeout, delay_ms: int; contract = lcMulti): int =
   let is_hle = bios_path == "hle" or bios_path == ""
@@ -491,35 +477,25 @@ proc netlink_test(rom, bios_path: string; listen_port: int; connect_to: string;
     echo "NETLINK LINKTEST: FAIL — ", e.msg
   verdict
 
-# jsmolka's gba-tests (github.com/jsmolka/gba-tests) share one protocol, in
-# lib/macros.inc: every ROM keeps its verdict in r12, branches to a common
-# `eval` on the FIRST failing check with r12 = that check's number, and then
-# spins forever in `idle: b idle`. `m_test_eval` brackets its own work in
-# stmfd/ldmfd {r0-r12}, so r12 still holds the verdict once the spin is
-# reached: 0 = every check passed, N = check N failed (and nothing after it
-# ran — these ROMs abort on first failure by design).
-#
-# Reading r12 rather than OCR-ing the rendered "Failed test NNN" is deliberate:
-# the on-screen report is itself produced by SWI 6 (Div) plus a mode-4 blit, so
-# scoring off pixels makes every result depend on the BIOS and PPU as well as
-# on the thing under test. r12 is the ROM's own verdict.
+# jsmolka's gba-tests share one protocol (lib/macros.inc): r12 holds the
+# verdict, the ROM branches to `eval` on the FIRST failing check with r12 =
+# that check's number, then spins in `idle: b idle`; r12 survives the spin
+# (0 = all passed). Read r12 rather than the rendered "Failed test NNN": the
+# on-screen report goes through SWI 6 and a mode-4 blit, so pixels would
+# make the verdict depend on the BIOS and PPU too.
 proc jsmolka_test(rom_path, bios_path: string; timeout_frames: int): int =
   let is_hle = bios_path == "hle" or bios_path == ""
   let actual_bios = if is_hle: "" else: bios_path
   let emu = new_gba(actual_bios, rom_path, run_bios = false, use_hle = is_hle)
   emu.test_output = new_test_output()
   emu.post_init()
-  # The save/ ROMs check what an *untouched* backup chip reads back (SRAM's
-  # first check wants 0xFF), and every ROM that writes one would otherwise
-  # drop a .sav next to the ROM for the next run to load back as "power-on"
-  # state. Detach the file: new_storage has already applied the power-on fill,
-  # and write_save is a no-op on an empty path.
+  # The save/ ROMs check what an untouched backup chip reads back, so detach
+  # the .sav: new_storage has applied the power-on fill and write_save is a
+  # no-op on an empty path.
   emu.storage.save_path = ""
 
-  # The spin is a one-instruction self-branch, so once it is reached r15 is
-  # constant at every frame boundary. Two frames of a stationary PC is the
-  # done signal; anything still executing (including the m_vsync wait in
-  # `eval`) moves it.
+  # The spin is a one-instruction self-branch, so r15 is constant at frame
+  # boundaries once reached; two stationary frames is the done signal.
   var prev_pc = not 0'u32
   var stable = 0
   var frames = 0
@@ -550,36 +526,26 @@ proc jsmolka_test(rom_path, bios_path: string; timeout_frames: int): int =
 
 # ==================== DenSinH/FuzzARM ====================
 #
-# FuzzARM ships five prebuilt ROMs, each 10000 randomly generated ARM/Thumb
-# instruction tests (data processing with every shift type, multiplies,
-# load/stores). The ROM's own reporting is threefold: a mode-4 render of the
-# failing instruction, a structured 16-word dump at the base of eWRAM, and a
-# "press any button to continue" gate. This mode drives the third and reads
-# the second, so the verdict never depends on the PPU, the BIOS or a pinned
-# frame hash — and, crucially, it can report *every* failing test rather than
-# just the first, which is the whole point of a randomized suite.
+# Five prebuilt ROMs, each 10000 randomly generated ARM/Thumb instruction
+# tests. This mode drives the ROM's "press any button to continue" gate and
+# reads its 16-word eWRAM dump, so every failing test is reported and the
+# verdict never depends on the PPU, the BIOS or a frame hash.
 #
-# The protocol (asm/run_tests.asm upstream):
-#   * on a mismatch the ROM writes 16 words to 0x02000000 and then spins in
-#     `wait_until_keys_up` / `wait_until_key_down`, reading KEYINPUT;
-#   * pressing any button other than L/R resumes at the next test;
-#   * when the last test is done it draws "End of testing" and falls into a
-#     one-instruction self-branch in main.asm.
-# KEYINPUT is the ONLY input register the ROM ever touches (upstream README:
-# "I do not use any SWIs/DMAs/Timers/IRQs/Weird IO registers (Only DISPCNT and
-# KEYINPUT)"), so `keyinput_reads` moving across a frame is an exact "a failure
-# report is on screen right now" signal — no address table, no disassembly.
+# Protocol (asm/run_tests.asm upstream): on a mismatch the ROM writes 16
+# words to 0x02000000 and spins in wait_until_keys_up / wait_until_key_down
+# reading KEYINPUT; any button other than L/R resumes; after the last test
+# it draws "End of testing" and falls into a one-instruction self-branch.
+# KEYINPUT is the only input register the ROM touches, so `keyinput_reads`
+# moving across a frame means a failure report is on screen.
 #
-# eWRAM layout, 16 words at 0x02000000 (upstream README + the store sequence in
-# _test_error). Words 10 and 14 are never stored; they are the documented
-# "0000 0000" padding.
+# eWRAM layout, 16 words at 0x02000000 (words 10 and 14 are padding):
 #   0      'AAAA' / 'TTTT'   ARM or Thumb state
-#   1-3    opcode text, 12 ASCII chars ("tst lsl     ", "smull       ", ...)
+#   1-3    opcode text, 12 ASCII chars
 #   4-6    initial r0, r1, r2      7   initial CPSR
 #   8-9    got r3, r4              11  got CPSR
 #   12-13  expected r3, r4         15  expected CPSR
-# r3 is the shifted operand and r4 the result, so which of the three differs
-# already separates a barrel-shifter bug from an ALU bug from a flag bug.
+# r3 is the shifted operand and r4 the result, so which differs separates a
+# barrel-shifter bug from an ALU bug from a flag bug.
 type
   FuzzArmFail = object
     state: char           # 'A' (ARM) or 'T' (Thumb)
@@ -595,18 +561,11 @@ proc fa_word(b: seq[byte]; off: int): uint32 =
   (uint32(b[off + 2]) shl 16) or (uint32(b[off + 3]) shl 24)
 
 proc fuzzarm_done_addr(rom_path: string): uint32 =
-  ## Address of `mainloop: b mainloop` (main.asm) — the one-instruction self
-  ## branch the ROM falls into after "End of testing". Encoded 0xEAFFFFFE and,
-  ## in all five prebuilt ROMs, the only word in the image with that value (the
-  ## generated test table is random data, so a collision is ~1e-5 likely; the
-  ## uniqueness check below is what keeps this honest anyway).
-  ##
-  ## Do NOT score "finished" as "PC unchanged across two frame boundaries" the
-  ## way the jsmolka mode does. This ROM never waits on vblank, so a frame
-  ## boundary lands at an arbitrary point in a tight drawing loop, and two
-  ## consecutive boundaries landing on the same instruction is common — it
-  ## silently truncated whole runs (ARM_Any scored 10000/10000 while executing
-  ## only a few hundred tests). Returns 0 if the marker is not unique.
+  ## Address of `mainloop: b mainloop` (0xEAFFFFFE), the self-branch the ROM
+  ## falls into after "End of testing"; 0 if the word is not unique in the
+  ## image. Do NOT score "finished" as a PC unchanged across two frame
+  ## boundaries: this ROM never waits on vblank, so boundaries land mid-loop
+  ## and repeat, which silently truncated whole runs.
   let data =
     try: readFile(rom_path)
     except CatchableError: return 0
@@ -622,13 +581,10 @@ proc fuzzarm_done_addr(rom_path: string): uint32 =
   if hits == 1: found else: 0
 
 proc fuzzarm_test_count(rom_path: string): int =
-  ## Recover how many tests the ROM was generated with, straight out of the
-  ## image. `run_tests` opens with `stmdb sp!, {r0-r12, lr}` (0xE92D5FFF),
-  ## then the four-instruction `set_word r11, MEM_ROM + tests` macro, then
-  ## `ldmia r11!, {r12}` — so ORing those four rotated immediates gives the
-  ## address of the count word the ROM itself reads. Returns 0 if the pattern
-  ## is gone (a regenerated ROM whose layout moved); only the printed total
-  ## depends on it, never the verdict.
+  ## The test count, read out of the image: `run_tests` opens with
+  ## `stmdb sp!, {r0-r12, lr}` (0xE92D5FFF) then `set_word r11, tests` (four
+  ## rotated immediates) then `ldmia r11!, {r12}`. 0 if the pattern is gone;
+  ## only the printed total depends on it.
   let data =
     try: readFile(rom_path)
     except CatchableError: return 0
@@ -742,10 +698,8 @@ proc fuzzarm_test(rom_path, bios_path: string; timeout_frames, max_fails: int): 
       stable = 0
       prev_pc = pc
 
-  # Triage rollup, grouped by state + opcode + which of r3/r4/CPSR disagreed
-  # (and for CPSR, which flags). Stderr, not stdout, so the one-line verdict on
-  # stdout stays the last line: the runner keeps only that for results.md and
-  # replays the rest into its own log when a ROM fails.
+  # Triage rollup by state + opcode + which of r3/r4/CPSR (and which flags)
+  # disagreed. Stderr, so the one-line verdict stays the last stdout line.
   if fails.len > 0:
     var groups: seq[(string, int)]
     for f in fails:
@@ -796,27 +750,17 @@ proc fuzzarm_test(rom_path, bios_path: string; timeout_frames, max_fails: int): 
 
 # ==================== alloncm/MagenTests ====================
 #
-# CGB test ROMs (MIT) whose verdict is the screen colour, not a reference
-# image. src/common.asm fixes the palette: WHITE $FFFF, RED $001F,
-# GREEN $03E0, BLUE $7C00, and each ROM's README entry says what they mean.
-#
-# Deliberately NOT scored by screenshot comparison: the repo's images/ holds a
-# 641x574 upscale, a 318x295 SameBoy window grab, two 15x17 swatches and a
-# photo of real hardware — nothing that is a 160x144 frame — so there is no
-# bundled reference to diff against, and a self-generated frame hash would be
-# a golden with nothing behind it. Counting the ROM's own documented colours
-# is the ROM's own contract.
-#
+# CGB test ROMs whose verdict is the screen colour (src/common.asm: WHITE
+# $FFFF, RED $001F, GREEN $03E0, BLUE $7C00; each README entry says what
+# they mean). Not a screenshot comparison: the repo ships no 160x144
+# reference frame, and a self-generated hash would be a golden with nothing
+# behind it.
 #   magen-green: "the screen should be all green"; red and blue are the two
-#     named failure modes (for hblank_vram_dma: red = the HBlank HDMA never
-#     ran, blue = it ran while the CPU was halted).
-#   magen-nored: bg_oam_priority draws a pattern, and its stated result is
-#     "5 green squares and 3 half green and half blue squares with no red
-#     lines" — so the machine-checkable part is the absence of red. Weaker
-#     than the other six by construction. (For the record, dingbat renders
-#     exactly 416 green and 96 blue pixels, which is 5*8*8 + 3*(8*8/2) and
-#     3*(8*8/2) — i.e. the described geometry to the pixel — but the gate
-#     stays on the documented rule rather than baking those counts in.)
+#     named failure modes (hblank_vram_dma: red = the HBlank HDMA never ran,
+#     blue = it ran while the CPU was halted).
+#   magen-nored: bg_oam_priority draws a pattern whose stated result is
+#     "... with no red lines", so the machine-checkable part is the absence
+#     of red.
 proc magen_test(rom_path: string; timeout_frames: int;
                 require_all_green: bool): int =
   const
@@ -849,11 +793,10 @@ proc magen_test(rom_path: string; timeout_frames: int;
        " blue " & $blue & " other " & $other & why & ")"
   if good == total: 0 else: 1
 
-# Rewind verification: run forward taking snapshots exactly like the
-# frontend does, then pop backward and require byte-exact payload
-# reconstruction through the XOR-delta chain — both a few steps back and all
-# the way to the oldest snapshot — and that the emulator resumes from the
-# rewound state. Exits 0 iff everything matches.
+# Rewind verification: snapshot while running forward as the frontend does,
+# then pop backward and require byte-exact payloads through the XOR-delta
+# chain (a few steps back and all the way to the oldest) and a resumable
+# emulator.
 proc rewind_test(rom_path, bios_path: string): int =
   const TOTAL_FRAMES = 300
   let ext = rom_path.splitFile().ext.toLowerAscii()
@@ -905,17 +848,11 @@ proc rewind_test(rom_path, bios_path: string): int =
     emu.post_init()
     drive(emu)
 
-# Speculative-rollback acceptance (docs/multiplayer.md phase 3c): drives two
-# NetCores in-process through a deterministic coordinator that shuttles wire
-# frames between them with a fixed per-message latency (measured in coordinator
-# iterations, not wall-clock, so runs are reproducible and OFF/ON are directly
-# comparable). The committed linktest.gba self-drives 16 multi-mode rounds.
-#
-# The correctness bar is the EWRAM round log (round data + role bits + serial
-# IRQ count) — timing-tolerant by construction, so it isolates *what the games
-# exchanged* from the exact cycle skew the wider speculative lead introduces.
-# Speculation must reproduce it bit-for-bit vs the blocking path, even when the
-# predictor is forced to mispredict (rollback must recover).
+# Speculative-rollback acceptance: two NetCores in-process through a
+# deterministic coordinator with a fixed per-message latency in coordinator
+# iterations (not wall-clock), so OFF/ON runs are directly comparable. The
+# bar is the EWRAM round log, which is timing-tolerant by construction;
+# speculation must reproduce it bit-for-bit even under forced mispredicts.
 
 proc ewram_log_hash(g: GBA): uint32 =
   ## FNV-1a over the EWRAM region the link ROMs log to (0x000..0x810: both
@@ -951,11 +888,8 @@ proc run_spec_link(rom, bios_path: string; contract: LinkContract;
   let g0 = make_gba()
   let g1 = make_gba()
   let crc = crc32(readFile(rom))
-  # Speculation is a master-side feature: only the initiator (unit 0, the
-  # multi-mode parent / normal-mode internal-clock master) predicts. The
-  # responder runs the ordinary blocking path either way, so it stays bit-
-  # identical without the responder-side checkpoint cost — this mirrors how a
-  # real frontend would enable it.
+  # Only the initiator (unit 0) predicts; the responder runs the blocking
+  # path either way, as a real frontend would enable it.
   let nc0 = new_net_core(g0, 0, crc, strict_crc = true, speculative = speculative)
   let nc1 = new_net_core(g1, 1, crc, strict_crc = true, speculative = false)
   nc0.set_echo_predict(echo_predict)
@@ -985,11 +919,9 @@ proc run_spec_link(rom, bios_path: string; contract: LinkContract;
     collect(nc1, q10)
     if r0 == naStalled: inc result.stalls0
     if r1 == naStalled: inc result.stalls1
-    # Terminate once both ROMs are done AND (for speculation) every latched
-    # round has been confirmed by a real REPLY — i.e. the visible state has
-    # settled to the blocking path. Beacons keep flowing forever while the
-    # ROMs spin, so we must NOT wait for the queues to empty; but a reply that
-    # is still in flight keeps all_confirmed false, so we drain those first.
+    # Done once both ROMs finished AND every latched round is confirmed by a
+    # real reply. Beacons flow forever while the ROMs spin, so do not wait
+    # for the queues to empty.
     let settled = (not speculative) or nc0.all_confirmed
     if g0.linktest_finished() and g1.linktest_finished() and settled:
       break
@@ -1067,17 +999,12 @@ proc spec_link_test(rom, bios_path: string; contract: LinkContract;
 
 proc spec_link_bench(rom, bios_path: string; contract: LinkContract;
                      delay, timeout_frames: int): int =
-  ## Honest speculation benchmark. Runs a long, symmetric handshake (the
-  ## speclinkbench ROM) OFF, then ON with the OLD "same as last" predictor and
-  ## ON with the NEW echo-aware predictor, at 0 ms and `delay` latency. Reports
-  ## the metric the SPECLINK speed proxy is blind to: `replay_cyc` (cycles the
-  ## master RE-EMULATED on rollbacks), `overrun` (rollbacks that outran the log
-  ## → lossy divergence), and CPU ms. Hard-asserts the SHIPPED echo predictor
-  ## stays bit-identical to the blocking path AND slashes the re-emulation the
-  ## old "same as last" predictor wastes on the symmetric handshake. The old
-  ## predictor is REPORTED (it is the thing being replaced) — under heavy thrash
-  ## it drives so many deep rollbacks it even loses bit-identity (overrun>0),
-  ## which is itself the argument for a predictor that keeps rollbacks rare.
+  ## Speculation benchmark on the long symmetric speclinkbench handshake:
+  ## OFF, then ON with the old "same as last" predictor and with the shipped
+  ## echo-aware one, at 0 and `delay` latency. Reports `replay_cyc` (cycles
+  ## re-emulated by rollbacks), `overrun` (rollbacks that outran the log) and
+  ## CPU ms; asserts the shipped predictor is bit-identical to the blocking
+  ## path and cuts the old predictor's re-emulation.
   var verdict = 0
   template require(cond: bool; msg: string) =
     if not cond:
@@ -1132,19 +1059,12 @@ proc spec_link_bench(rom, bios_path: string; contract: LinkContract;
   verdict
 
 proc rollback_test(rom, bios_path: string): int =
-  ## Harness for the INPUT-ROLLBACK netplay model (the correct architecture for a
-  ## deterministic 2-player link): run BOTH cores locally, network only the two
-  ## players' inputs, predict the remote input and roll back when a late input
-  ## mispredicts. The SIO cable is resolved locally, so there is no RTT problem
-  ## and no unrecallable speculative bytes (the flaw that desyncs the SIO-word
-  ## scheme, see speclinkdep). Uses inputrec.gba, whose accumulator depends on
-  ## the exact input TIMELINE, so a wrong-then-corrected input must replay
-  ## faithfully or the result differs. Also checks the machinery primitives
-  ## (determinism, capture/restore round-trip, chained restore, frame(-1)
-  ## capture, and restore-older-onto-newer-then-replay — the pattern a rollback
-  ## actually performs). All pass once the bus ROM burst/prefetch timing
-  ## trackers are serialized (savestate v3); before that, a restore mistimed the
-  ## first ROM access by a few cycles and the frame ended off-by-a-few-cycles.
+  ## Input-rollback netplay model: run BOTH cores locally, network only the
+  ## two players' inputs, predict the remote input and roll back when a late
+  ## input mispredicts; the SIO cable is resolved locally. Uses inputrec.gba,
+  ## whose accumulator depends on the exact input timeline. Also checks the
+  ## primitives: determinism, capture/restore, chained restore, frame(-1)
+  ## capture, and restore-older-onto-newer-then-replay.
   const
     FRAMES = 90
     DELAY = 3        # remote input lands this many frames late (predict meanwhile)
@@ -1232,12 +1152,9 @@ proc rollback_test(rom, bios_path: string): int =
     for f in 0 ..< 10: c.apply(script[f][0], script[f][1]); c.step_frame()
     c.apply(script[10][0], script[10][1]); c.step_frame()
     note("restore-older-onto-newer + replay", sumR == c.state_checksum())
-  block: # (6) SIOMULTI0-3 receive latches survive capture/restore. They back the
-    #      game's link reads (serial.nim read path) but are NOT in state_payload
-    #      (savestate refreshes them next transfer), so a rollback that didn't
-    #      snapshot them would replay stale link words — an in-game "communication
-    #      error" mid-trade under real latency (frequent rollbacks). inputrec.gba
-    #      never drives SIO, so set the latches directly to exercise the path.
+  block: # (6) SIOMULTI0-3 receive latches survive capture/restore: they are
+    #      NOT in state_payload, and a rollback that skipped them replays stale
+    #      link words. inputrec.gba never drives SIO, so set them directly.
     let l = make_link()
     l.cores[0].serial.multi_recv = [0x1111'u16, 0x2222, 0x3333, 0x4444]
     l.cores[1].serial.multi_recv = [0xAAAA'u16, 0xBBBB, 0xCCCC, 0xDDDD]
@@ -1249,15 +1166,11 @@ proc rollback_test(rom, bios_path: string): int =
       l.cores[0].serial.multi_recv == [0x1111'u16, 0x2222, 0x3333, 0x4444] and
       l.cores[1].serial.multi_recv == [0xAAAA'u16, 0xBBBB, 0xCCCC, 0xDDDD])
 
-  # Rollback run: player 0 local (always known); player 1 remote, arriving DELAY
-  # frames late, predicted as "repeat last confirmed" until it does.
-  #
-  # The invariant that makes this correct and simple: `confCkpt` is the state at
-  # the confirmed frontier and contains ONLY real inputs, because it is produced
-  # exclusively by replaying real inputs from the previous confCkpt. Predictions
-  # only ever live AHEAD of the frontier; a rollback restores confCkpt (never a
-  # prediction-tainted checkpoint) and replays. This is the crux GGPO gets right
-  # and the naive "roll back to the mispredicted frame" gets wrong.
+  # Rollback run: player 0 local; player 1 remote, arriving DELAY frames
+  # late, predicted as "repeat last confirmed" until it does. Invariant:
+  # `confCkpt` is the state at the confirmed frontier and contains ONLY real
+  # inputs; predictions live ahead of it, and a rollback restores confCkpt
+  # and replays (never a prediction-tainted checkpoint).
   let link = make_link()
   var used1: array[FRAMES, set[Input]]     # p1 input actually applied per frame
   var confirmed = -1                        # highest frame with REAL p1 applied
@@ -1317,12 +1230,10 @@ proc rollback_test(rom, bios_path: string): int =
   1
 
 proc rollback_net_test(rom, bios_path: string): int =
-  ## Two-sided end-to-end test of the RollbackSession (the transport-agnostic
-  ## netplay engine). Two independent sessions — peer A drives player 0, peer B
-  ## drives player 1 — each run their OWN 2-core link, exchange only per-frame
-  ## inputs over a DELAY, predict the peer and roll back on mispredictions. Both
-  ## must converge to the same state as a ground-truth run where every input was
-  ## known upfront, and must agree with each other (the peer desync check).
+  ## Two RollbackSessions, peer A driving player 0 and peer B player 1, each
+  ## with its own 2-core link, exchanging only per-frame inputs over DELAY.
+  ## Both must match a ground-truth run with all inputs known upfront and
+  ## agree with each other.
   const
     FRAMES = 120
     DELAY = 3          # inputs arrive this many coordinator steps late
@@ -1404,44 +1315,25 @@ proc rollback_net_test(rom, bios_path: string): int =
 
 # ==================== gambatte suite (batched) ====================
 #
-# sinamas' gambatte test ROMs, as redistributed in the c-sp/game-boy-test-roms
-# bundle. The scoring rules below are the bundle's own
-# `gambatte/game-boy-test-roms-howto.md`, cross-read against gambatte-core's
-# test/testrunner.cpp (read for its *rules*; no code or data was copied — see
-# GambatteGlyphs).
-#
-#   * Exit condition: every ROM runs exactly 15 LCD frames (1,053,360 clocks,
-#     ~252 ms emulated) from the post-boot state, then the frame is read. Not
-#     "run until something happens".
-#   * The DEVICE is in the filename: `dmg08` = run as a DMG, `cgb04c` = run as
-#     a CGB. Most ROMs carry both tags and are two separate tests. Nearly all
-#     of them ship a CGB cart header even for their DMG half, so the DMG run
-#     needs new_gb's force_dmg.
-#   * The EXPECTED VALUE is in the filename too, as `_out<hex>` (1..20 hex
-#     digits), and may differ per device
-#     (`lycstatwirq_..._dmg08_out2_cgb04c_out0.gbc`). The ROM renders that hex
-#     string as 8x8 glyphs along the top-left row of the screen, one glyph per
-#     digit; scoring compares those tiles. An `x` in front of a tag
-#     (`_xout0`, `_xdmg08`) means "not a test" and is skipped, exactly as
-#     testrunner.cpp's substring search skips it.
-#   * Some ROMs instead ship a reference PNG next to them, named
-#     <rom>_dmg08.png / <rom>_cgb04c.png / <rom>_dmg08_cgb04c.png, and are
-#     scored on the whole 160x144 frame.
-#
-# This mode is BATCHED: it takes a list file and runs every entry in one
-# process. There are ~5,000 scored runs and each only emulates 15 frames, so
-# one fork/exec per ROM would cost more than the emulation.
+# sinamas' gambatte ROMs from the c-sp/game-boy-test-roms bundle, scored by
+# the bundle's `gambatte/game-boy-test-roms-howto.md` rules:
+#   * every ROM runs exactly 15 LCD frames from the post-boot state, then
+#     the frame is read;
+#   * the device is in the filename: `dmg08` = DMG, `cgb04c` = CGB; most
+#     carry both and are two tests. Nearly all ship a CGB header even for
+#     the DMG half, so the DMG run needs force_dmg;
+#   * the expected value is `_out<hex>` (1..20 digits, may differ per
+#     device), rendered as 8x8 glyphs along the top-left row; an `x` prefix
+#     (`_xout0`, `_xdmg08`) means "not a test";
+#   * some ROMs instead ship <rom>_dmg08.png / _cgb04c.png /
+#     _dmg08_cgb04c.png and are scored on the whole frame.
+# Batched: one process scores a whole list file (~5,000 runs of 15 frames).
 
-# Hex-digit glyph bitmaps: 8 rows of 8 pixels, one byte per row, bit 7 =
-# leftmost column, 1 = black, 0 = white.
-#
-# PROVENANCE: harvested from the test ROMs' own rendered output, not copied
-# from gambatte-core. gambatte-core is GPL-2.0 and this tree is MIT, so its
-# table is not ours to vendor; the shapes below were read off dingbat's
-# framebuffer with `--mode=gambatte --dump-tiles` over ROMs whose filenames
-# name the digits they display, one ROM per digit, and cross-checked by the
-# whole suite decoding to sensible values. Regenerate the same way if a future
-# bundle changes the font.
+# Hex-digit glyph bitmaps: 8 rows, one byte per row, bit 7 = leftmost,
+# 1 = black. Harvested from the ROMs' own rendered output with
+# `--mode=gambatte --dump-tiles` over ROMs that name the digit they draw,
+# NOT copied from gambatte-core (GPL-2.0; this tree is MIT). Regenerate the
+# same way if a bundle changes the font.
 const GambatteGlyphs: array[16, array[8, uint8]] = [
   [0x00'u8, 0x7F'u8, 0x41'u8, 0x41'u8, 0x41'u8, 0x41'u8, 0x41'u8, 0x7F'u8],  # 0
   [0x00'u8, 0x08'u8, 0x08'u8, 0x08'u8, 0x08'u8, 0x08'u8, 0x08'u8, 0x08'u8],  # 1
@@ -1464,17 +1356,11 @@ const GambatteGlyphs: array[16, array[8, uint8]] = [
 const GambatteFrames* = 15
 
 proc gambatte_pixel(c: uint16; cgb: bool): uint32 =
-  ## One framebuffer pixel as the 24-bit RGB gambatte's runner compares,
-  ## masked to 0xF8F8F8 — the top 5 bits per channel, which is all the runner
-  ## ever looks at (and exactly the precision a BGR555 framebuffer carries).
-  ##
-  ## CGB: gambatte's documented colour-correction formulae, applied to the raw
-  ## 5-bit palette entry. White (31,31,31) lands on 0xF8F8F8 and only on
-  ## 0xF8F8F8, so glyph matching stays exact.
-  ##
-  ## DMG: gambatte drives the panel with plain #000000/#555555/#AAAAAA/#FFFFFF
-  ## shades; dingbat's DMG palette is the green LCD, so map shade -> grey the
-  ## same way the mealybug/acid2 screenshot path does.
+  ## One pixel as the 24-bit RGB gambatte's runner compares, masked to
+  ## 0xF8F8F8 (top 5 bits per channel). CGB: gambatte's documented
+  ## colour-correction formulae; white lands on 0xF8F8F8 only, so glyph
+  ## matching stays exact. DMG: plain grey shades, mapped as the
+  ## mealybug/acid2 screenshot path does.
   if cgb:
     let r = int(c and 0x1F)
     let g = int((c shr 5) and 0x1F)
@@ -1512,28 +1398,21 @@ proc gambatte_run(rom: string; cgb: bool; frames: int): GB =
                   force_cgb = cgb, force_dmg = not cgb)
   result.test_output = new_test_output()
   result.post_init()
-  # These ROMs are read-only fixtures in a shared cache directory. A battery
-  # file dropped next to one becomes the next run's power-on state (and the
-  # next *agent's*), so detach it before a single frame runs.
+  # Read-only fixtures in a shared cache dir: detach the battery file before
+  # a frame runs, or it becomes the next run's power-on state.
   result.cartridge.sav_path = ""
   for _ in 0 ..< frames: result.step_frame()
 
 proc gambatte_batch(list_path, out_path: string; frames, dump_tiles: int): int =
-  ## Scores a whole list of gambatte tests in one process. Each line is
-  ## tab-separated: `<dmg|cgb>\t<hex|png>\t<expected>\t<rom path>`, where
-  ## `expected` is the hex string for `hex` and the reference PNG's path for
-  ## `png`. One `GAM <index> <PASS|FAIL> <detail>` line comes back per input
-  ## line, in order, so the caller can match results positionally.
+  ## Scores a list of gambatte tests in one process. Each line is
+  ## `<dmg|cgb>\t<hex|png>\t<expected>\t<rom path>`; one
+  ## `GAM <index> <PASS|FAIL> <detail>` line comes back per input, in order.
   ##
-  ## The verdicts go to `--out=<file>` when one is given, and to stdout
-  ## otherwise. The file is not a convenience: the runner launches one shard
-  ## per core and waits for them all, so a shard writing thousands of verdicts
-  ## into an inherited stdout PIPE would block forever once the pipe buffer
-  ## filled, with nobody draining it. Shell redirection cannot stand in for
-  ## this — Nim's poEvalCommand runs through /bin/sh on POSIX but goes straight
-  ## to CreateProcessW on Windows, where `> out.txt 2>&1` is not redirection at
-  ## all, just three more argv entries this parser silently absorbs. That is
-  ## exactly the hang that timed the Windows CI job out at 6h, every push.
+  ## Verdicts go to `--out=<file>` when given. The runner launches one shard
+  ## per core and does not drain their stdout, so thousands of verdicts into
+  ## an inherited pipe block forever; shell redirection cannot substitute,
+  ## because poEvalCommand is not a shell on Windows (`> out.txt 2>&1` becomes
+  ## three argv entries this parser absorbs).
   var out_file: File
   let to_file = out_path.len > 0
   if to_file and not out_file.open(out_path, fmWrite):
@@ -1560,11 +1439,8 @@ proc gambatte_batch(list_path, out_path: string; frames, dump_tiles: int): int =
     try:
       let emu = gambatte_run(rom, cgb, frames)
       let fb = emu.ppu.framebuffer
-      # DINGBAT_GAM_DUMP=<dir> writes each scored frame as a PPM, in the same
-      # colour space the comparison uses. A png row's verdict is one integer
-      # ("1400/23040 pixels differ") and the reference is a PNG, so without
-      # this there is no way to see WHERE a family disagrees -- which for the
-      # mid-scanline-write families is the entire signal.
+      # DINGBAT_GAM_DUMP=<dir> writes each scored frame as a PPM in the
+      # comparison's colour space, to see WHERE a png row disagrees.
       let dump_dir = getEnv("DINGBAT_GAM_DUMP")
       if dump_dir.len > 0:
         var f = open(dump_dir / ($idx & "_" & dev & "_" &
@@ -1621,17 +1497,9 @@ proc gambatte_batch(list_path, out_path: string; frames, dump_tiles: int): int =
 
 # ==================== GBMicrotest (batched) ====================
 #
-# 513 ROMs that each run for TWO frames. The emulation is nothing — ~33 ms of
-# emulated time, well under a millisecond of work — so a process per ROM makes
-# the fork/exec and the ROM load the entire cost: 513 of them took 11.2 s of
-# the runner's 31 s, about 22 ms each, and process spawn is dearer still on
-# Windows. Same shape as the gambatte suite, and the same fix: one process per
-# core over a list, which put 5,005 gambatte runs inside 1 s.
-#
-# Batching is safe for exactly these ROMs. They are `no_save` (blanked cart RAM
-# and a detached .sav, so no two entries can race a battery file), they write
-# no files, and each gets a freshly constructed GB — so nothing carries from
-# one list entry to the next, and the split cannot change a verdict.
+# 513 ROMs of two frames each, so process spawn dominated a process-per-ROM
+# run; one process per core over a list instead. Safe for these ROMs: they
+# are no_save, write no files, and each gets a fresh GB.
 
 proc microtest_run(rom: string; frames: int): GB =
   ## One GBMicrotest ROM, built and stepped exactly as the single-ROM path does
@@ -1648,18 +1516,12 @@ proc microtest_run(rom: string; frames: int): GB =
     result.step_frame()
 
 proc microtest_batch(list_path, out_path: string): int =
-  ## Scores a whole list of GBMicrotest ROMs in one process. Each line is
-  ## `<frames>\t<rom path>`. One
-  ## `MT <index> <PASS|FAIL> actual=0x.. expected=0x.. verdict=0x..` line comes
-  ## back per input line, in order, so the caller can match positionally.
-  ##
-  ## Only $FF82 is scored. $FF80/$FF81 are reported for triage but never
-  ## compared, because some of these ROMs leave actual == expected on a
-  ## failure — the same rule the single-ROM path documents.
-  ##
-  ## `--out` for the same reason gambatte_batch has one: the runner does not
-  ## drain these children's pipes, so verdicts must not go to an inherited
-  ## stdout. See gambatte_batch.
+  ## Scores a list of GBMicrotest ROMs in one process. Each line is
+  ## `<frames>\t<rom path>`; one
+  ## `MT <index> <PASS|FAIL> actual=0x.. expected=0x.. verdict=0x..` line
+  ## comes back per input, in order. Only $FF82 is scored; $FF80/$FF81 are
+  ## reported for triage, since some ROMs leave actual == expected on a
+  ## failure. `--out` for the same reason gambatte_batch has one.
   var out_file: File
   let to_file = out_path.len > 0
   if to_file and not out_file.open(out_path, fmWrite):
@@ -1807,11 +1669,8 @@ proc main() =
         if v.len == 0: p.next(); v = p.key
         model_override = v.toLowerAscii()
       of "cgb-rev":
-        # Spelling sugar over --model for the CGB axis alone: --cgb-rev=D is
-        # --model=cgbd. Same variable, same resolution, so the two cannot
-        # disagree; the bare letter is what the revision is called everywhere
-        # it is discussed (CGB-C, CGB-D), and typing `cgbd` to get it reads
-        # like a boot-table token rather than a silicon one.
+        # Sugar over --model for the CGB axis: --cgb-rev=D is --model=cgbd.
+        # Same variable, so the two cannot disagree.
         var v = p.val
         if v.len == 0: p.next(); v = p.key
         v = v.toLowerAscii()
@@ -1859,9 +1718,8 @@ proc main() =
         if v.len == 0: p.next(); v = p.key
         attach_after = parseInt(v)
       of "max-fails":
-        # fuzzarm mode: stop after this many reported failures. Each one costs
-        # two emulated frames of button-ack, so an emulator that fails most of
-        # the 10000 tests would otherwise take minutes.
+        # fuzzarm: cap on reported failures; each costs two frames of
+        # button-ack.
         var v = p.val
         if v.len == 0: p.next(); v = p.key
         max_fails = parseInt(v)
@@ -1951,11 +1809,9 @@ proc main() =
     let emu = new_gba(actual_bios, rom_path, run_bios = false, use_hle = is_hle)
     emu.test_output = test_out
     emu.post_init()
-    # Same knob as dingbat_bench: idle-loop fast-forward SNAPS scheduler.cycles
-    # to the next pending event, so a spin loop's exit cycle depends on which
-    # events happen to be queued. Turning it off is how you tell a real timing
-    # error apart from fast-forward sampling resolution (e.g. the mGBA suite's
-    # "H-blank bit start" flips, which spin on DISPSTAT and time the gaps).
+    # Same knob as dingbat_bench: idle-loop fast-forward snaps scheduler.cycles
+    # to the next event, so a spin loop's exit cycle depends on what is
+    # queued. Off, a real timing error is separable from sampling resolution.
     if getEnv("DINGBAT_NO_WAITLOOP") == "1":
       emu.cpu.attempt_waitloop_detection = false
     if sio_driver == "loopback":
@@ -1980,32 +1836,21 @@ proc main() =
       echo screenshot_path
       quit(0)
   else:
-    # --mode=screenshot is the mode external screenshot suites drive, and every
-    # one of them names the DEVICE per row, not per cart. `--cgb` says "run
-    # this on a CGB"; the absence of it has to mean "run this on a DMG", or a
-    # row whose cart carries $0143 = $80 silently gets scored on the wrong
-    # hardware — which is what was happening to both ashiepaws ROMs, whose
-    # output was byte-identical under all four flag combinations. This is the
-    # contract --mode=gambatte already has (`force_dmg = not cgb`, and for the
-    # same reason: nearly every gambatte ROM ships a CGB header even for its
-    # dmg08 half). Other modes keep the old behaviour, where the cart header
-    # picks the device unless --dmg says otherwise.
+    # External screenshot suites name the DEVICE per row, so in
+    # --mode=screenshot the absence of --cgb means "run on a DMG", or a cart
+    # with $0143 = $80 is silently scored on the wrong hardware (the same
+    # contract as --mode=gambatte). Other modes let the header pick.
     let dmg = force_dmg or (mode == tmScreenshot and not force_cgb)
     let emu = new_gb("", rom_path, fifo = true, headless = true, run_bios = false,
                      force_cgb = force_cgb, force_dmg = dmg)
     if force_sgb:
-      # --sgb: the row names the DEVICE, same contract as --cgb. This is the
-      # frontends' one knob (src/dingbat.nim's load_rom sets exactly this from
-      # cfg.sgb_enable); the core still header-gates it, so a cart without the
-      # SGB flag pair gets no adapter and runs as a plain DMG. post_init does
-      # the rest, including moving the boot handoff onto the SGB table.
+      # --sgb names the device the way --cgb does; the core still header-gates
+      # it (src/dingbat.nim's load_rom sets this from cfg.sgb_enable), so a
+      # cart without the SGB flag pair runs as a plain DMG.
       emu.sgb_requested = true
     if model_override.len > 0:
-      # One token selects the whole machine: gb_revision_from_name maps it to a
-      # GbRevision and gb_set_revision derives the boot table and the quirk set
-      # from that. Every string the old boot-model-only `case` accepted still
-      # resolves to the same boot table, so the model-scoped mooneye rows are
-      # untouched.
+      # One token selects the whole machine: gb_revision_from_name -> GbRevision,
+      # and gb_set_revision derives the boot table and quirk set from it.
       let (rev, ok) = gb_revision_from_name(model_override)
       if not ok:
         echo "Unknown model: ", model_override
@@ -2014,19 +1859,15 @@ proc main() =
     emu.test_output = test_out
     emu.post_init()
     if no_save:
-      # A battery-backed suite ROM (mbc3-tester, rtc3test) otherwise drops a
-      # .sav next to the ROM in the shared cache dir, and the NEXT run loads it
-      # back as power-on state — the run stops being reproducible, and in CI the
-      # actions/cache would carry one run's SRAM into the next. Blank the RAM
-      # (mbc_load already ran inside new_gb) and detach the file.
+      # A battery-backed suite ROM otherwise drops a .sav next to the ROM in
+      # the shared cache dir and the next run loads it as power-on state.
+      # Blank the RAM (mbc_load already ran in new_gb) and detach the file.
       for i in 0 ..< emu.cartridge.ram.len: emu.cartridge.ram[i] = 0
       emu.cartridge.sav_path = ""
     if mode == tmSram:
-      # blargg's SRAM-reporting ROMs (dmg_sound/cgb_sound/oam_bug/...) must run
-      # against a blank battery and must not leave one behind: a .sav dropped
-      # next to the ROM by an earlier run is loaded back at construction, and
-      # its finished status byte is read as *this* run's verdict before the ROM
-      # has executed an instruction. Wipe the RAM and detach the save file.
+      # blargg's SRAM-reporting ROMs must run against a blank battery: a .sav
+      # from an earlier run is loaded at construction and its finished status
+      # byte would be read as this run's verdict.
       for i in 0 ..< emu.cartridge.ram.len: emu.cartridge.ram[i] = 0
       emu.cartridge.sav_path = ""
     for frame in 0 ..< timeout_frames:
@@ -2053,25 +1894,13 @@ proc main() =
             text.add(char(b))
           test_out.sram_text = text
           test_out.finished = true
-    # --screen-check: the weakest assertion about the GB screen that is still
-    # true no matter how the ROM's own console races the PPU.
-    #
-    # It deliberately does NOT compare glyphs. blargg's console is not an
-    # oracle for what is on screen — it blits its text rows with the LCD on and
-    # only a bounded VBlank wait in front of them, and at CGB double speed
-    # (which its runtime switches into during init and never leaves) that wait
-    # is half a frame and routinely times out. The cells that then land in
-    # mode 3 are correctly refused, on hardware as here: SameBoy drops 28 of
-    # 160 cells on 06-ld r,r and loses "Pas" out of "Passed" on 03-op sp,hl.
-    # Which cells are lost is decided by sub-scanline phase, so any glyph
-    # assertion would fail on correct emulation. The full measurement is in
-    # tests/README.md, "blargg's on-screen text is NOT an oracle".
-    #
-    # What is still true is that the panel must SETTLE and must show something:
-    # a run that ends with a framebuffer still changing frame to frame, or with
-    # one flat colour, is broken however the console's writes landed. That is
-    # what this checks — a screen wedged mid-transfer, a blanked LCD, a
-    # renderer that never reaches a steady state.
+    # --screen-check: the weakest GB screen assertion that holds however the
+    # ROM's console races the PPU. No glyph comparison: blargg's console blits
+    # with the LCD on behind a bounded VBlank wait that routinely times out at
+    # CGB double speed, so cells land in mode 3 and are refused, and which
+    # ones depends on sub-scanline phase (tests/README.md, "blargg's on-screen
+    # text is NOT an oracle"). What must hold: the panel settles and shows
+    # more than one shade.
     if screen_check:
       # The serial verdict arrives before the console has finished drawing it,
       # so give the panel a bounded settling budget rather than sampling
@@ -2107,13 +1936,10 @@ proc main() =
       write_ppm(screenshot_path, emu.ppu.framebuffer, GB_WIDTH, GB_HEIGHT, color_mode)
       echo screenshot_path
       quit(0)
-    # GBMicrotest: aappleby's ROMs write their verdict into HRAM and then just
-    # keep running, so there is no completion signal — the harness runs a fixed
-    # number of frames (--timeout) and reads the result out. Per the suite's
-    # howto, $FF80 is the actual value, $FF81 the expected one, and $FF82 the
-    # verdict ($01 pass / $FF fail) — and ONLY $FF82 is reliable, because some
-    # tests leave $FF80 == $FF81 on a failure. So $FF80/$FF81 are reported for
-    # triage but never scored.
+    # GBMicrotest: the ROM writes $FF80 actual, $FF81 expected, $FF82 verdict
+    # ($01 pass / $FF fail) and keeps running, so run --timeout frames and
+    # read HRAM. Only $FF82 is scored: some tests leave $FF80 == $FF81 on a
+    # failure.
     if mode == tmMicrotest:
       let actual   = emu.memory.hram[0]   # $FF80
       let expected = emu.memory.hram[1]   # $FF81
@@ -2136,15 +1962,10 @@ proc main() =
     passed = output.contains("Passed")
   of tmSram:
     output = test_out.sram_text
-    # `finished` is what says the ROM actually reported: the status byte is only
-    # ever latched out of a valid "DEB061" block, so a run that never got one
-    # leaves sram_status at its 0 initializer -- which is blargg's PASS code.
-    # Without this term a tmSram ROM that hangs, or that outruns its frame
-    # budget, exits 0 and scores as a pass on having said nothing at all.
-    # blargg's own `7-timing_effect` is the one that reaches it: the gbdev
-    # shootout has that ROM commented out as "This test is broken", and on a DMG
-    # it never writes a result block however long it runs (20,000 frames tried),
-    # while the same test inside the combined `oam_bug.gb` reports `07:ok`.
+    # `finished` says the ROM actually reported: sram_status is only latched
+    # out of a valid "DEB061" block and its 0 initializer is blargg's PASS
+    # code, so a ROM that hangs or outruns its budget (blargg's standalone
+    # 7-timing_effect) would otherwise score a pass on saying nothing.
     passed = test_out.finished and test_out.sram_status == 0
   of tmMooneye:
     passed = test_out.mooneye_result == 0

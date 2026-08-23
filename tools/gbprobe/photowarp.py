@@ -1,63 +1,34 @@
 #!/usr/bin/env python3
 """photowarp — turn a photograph of a Game Boy screen into the exact 160x144
-frame, so `hwprobe_ocr.py` / `readout.py` / `arbread.py` read hardware photos
-exactly as they read emulator screenshots.
+frame, so readout.py / arbread.py / read_probe_*.py read hardware photos as
+they read emulator screenshots.
 
-    photowarp.py <photo.jpg|png> <out.ppm> [--refine] [--debug]
+    photowarp.py <photo.jpg|png> <out.ppm> [--refine] [--raw] [--debug]
     photowarp.py <photo> <out.ppm> --corners x0,y0,x1,y1,x2,y2,x3,y3
+    photowarp.py --selftest <photo-dir> <transcript.txt>
 
-Registration (the automatic path) anchors on the FRAME RECTANGLE: a probe
-page whose background fills the frame — every `gbedge.gb` page,
-cgb-acid-hell, anything drawn on a full-screen background — is one
-extreme-luma quadrilateral inside a black letterbox (GBA/SP) or a dark
-bezel, and that quadrilateral *is* the 160x144 frame.  Its four edges are
-fitted as lines from the outermost qualifying pixel of every sampled row
-and column, trimmed of the worst quarter of residuals and refitted, then
-intersected.  Fitting lines rather than taking the extreme points along
-each diagonal is not a nicety: one pixel of mask noise sets an extreme
-point, and at ~4 photo pixels per GB pixel that is most of a GB pixel of
-error before anything else happens.
+Registration anchors on the frame rectangle: a page whose background fills
+the frame is one extreme-luma quadrilateral inside a black letterbox or dark
+bezel, and that quadrilateral is the 160x144 frame. Its four edges are fitted
+as lines from the outermost qualifying pixel of every sampled row and column
+(trimmed of the worst quarter of residuals and refitted), then intersected;
+extreme points alone would let one pixel of mask noise cost most of a GB
+pixel at ~4 photo pixels per GB pixel.
 
-Two things are searched rather than assumed, because both move with the
-photograph and one GB pixel of error at the border is a whole cell of drift
-by the far side: the POLARITY (a backlit SP screen is the brightest thing
-in its photo; a reflective panel under room light is the darkest) and where
-in the border's black-to-white ramp the true edge sits.  Candidates are
-gated on geometry (`plausible`) and the survivor chosen by `grid_score`,
-which asks only whether the sampling grid lands on the photo's own pixel
-grid.
-
-Nothing in that fit looks at the frame's *contents*: glyphs and digits are
-interior holes in the region and cannot move its outer boundary, and no
-expected image is consulted.  That matters because these photos are
-evidence in disputes where an emulator frame is one of the competing
-hypotheses — registering against such a frame would let a hypothesis move
+Two things are searched rather than assumed: the polarity (a backlit screen
+is the brightest thing in its photo; a reflective panel under room light is
+the darkest) and where in the border's black-to-white ramp the true edge
+sits. Candidates are gated on geometry (`plausible`) and chosen by
+`grid_score`, which asks only whether the sampling grid lands on the photo's
+own pixel grid. Nothing in the fit looks at the frame's contents and no
+expected image is consulted, so an emulator frame under dispute cannot move
 its own ruler.
 
-`--corners` takes the four frame corners (top-left, top-right,
-bottom-right, bottom-left, in photo pixels) for photos the anchor cannot
-fit — see the scope note below.
-
-`--raw` skips the illumination flattening; `--refine` adds a grid-lock
-polish of the fitted corners (default on).
-
-SCOPE, measured on the 2026-08-17 session (`--selftest <photo-dir> <txt>`):
-
-  * GBA SP, backlit, 27 gbedge pages: **25 of 27 pages CRC-verified
-    straight from the photographs** — the CRC-16 the ROM computes over each
-    page's 32 result bytes, read off the warp, equal to the independently
-    hand-transcribed value in `tests/roms/expected/gb-agbsp-1.txt`.  A
-    matching CRC means those bytes were recovered exactly.  The two
-    failures are the two blurriest photos of the set.
-  * Game Boy Pocket, reflective panel photographed against a bright
-    surround: **0 of 27** — the frame is neither the brightest nor the
-    darkest region there, so the anchor has nothing to hold.  Use
-    `--corners`, or shoot that panel against a dark surround.
-
-The self-test is also why `grid_score` is trusted on the `probe_*.gb`
-photos, where there is no font to appeal to: on every gbedge photo where
-both can be compared, the threshold it picks is the one the ROM's own font
-agrees with.
+`--corners` takes the four frame corners (TL, TR, BR, BL, photo pixels) for
+photos the anchor cannot fit, e.g. a reflective panel against a bright
+surround, where the frame is neither the brightest nor the darkest region.
+`--raw` skips the illumination flattening; `--refine` adds a grid-lock polish
+of the fitted corners (default on).
 """
 import os
 import subprocess
@@ -149,13 +120,9 @@ def _levels(w, h, lum):
 
 def lit_component(w, h, lum, frac=0.55, debug=False, sign=1):
     """Pixels of the frame: the extreme-luma component covering the centre.
-
-    `sign=+1` takes the bright side, which is the frame on a backlit screen
-    photographed against a darker surround (every GBA/SP session photo:
-    the page is the brightest thing in the picture).  `sign=-1` takes the
-    dark side, which is what a reflective DMG/MGB/GBC panel gives when the
-    room is brighter than the LCD.  Which one is right is not assumed —
-    `auto_quad` fits both and lets the grid score decide."""
+    `sign=+1` takes the bright side (backlit screen, darker surround),
+    `sign=-1` the dark side (reflective panel, brighter room); `auto_quad`
+    fits both and lets the grid score decide."""
     lo, hi = _levels(w, h, lum)
     rng = max(40, hi - lo)
     thr = lo + frac * rng
@@ -346,16 +313,10 @@ def sample(quad, w, h, ch, rows):
 
 
 def flatten(body):
-    """Divide out the photo's illumination field.
-
-    A hand-held photo of an LCD is several shades brighter on one side than
-    the other — more than the gap between two GB shades — and every reader
-    downstream (hwprobe_ocr's ink threshold, arbread's colour equality)
-    compares against ONE global level.  Subtracting a heavily blurred copy
-    of the frame turns "darker than the page" into a local question, which
-    is what those readers assume they are asking.  Radius 12 GB pixels is
-    far wider than any glyph stroke (1px) or band edge, so no feature can
-    flatten itself away.
+    """Divide out the photo's illumination field: a hand-held LCD photo varies
+    by more than a GB shade across the frame and every reader downstream
+    compares against one global level. Radius 12 GB pixels is far wider than
+    any glyph stroke or band edge, so no feature can flatten itself away.
     """
     lum = [[(body[(y*GB_W+x)*3] * 77 + body[(y*GB_W+x)*3+1] * 151 +
              body[(y*GB_W+x)*3+2] * 28) >> 8 for x in range(GB_W)]
@@ -391,27 +352,17 @@ def flatten(body):
     return bytes(out)
 
 
-# Where in the black-to-white ramp at the frame's border the true edge sits
-# is not a constant: it moves with exposure, focus and how far the panel
-# blooms into the letterbox, and one GB pixel of error at the border is a
-# whole cell of drift by the far side.  So the edge is not guessed — a quad
-# is fitted at each threshold on this ladder and the winner chosen by
-# `grid_score`, which asks only whether the sampling grid lands on the
-# photo's own pixel grid.  On the 2026-08-17 session that choice agrees with
-# what the ROM's own font says is correct on every photo where the two can
-# be compared, which is what licenses using it on the probe photos, where
-# there is no font to appeal to.
+# Where in the border's black-to-white ramp the true edge sits moves with
+# exposure, focus and bloom, and one GB pixel at the border is a whole cell
+# by the far side; a quad is fitted at each threshold on this ladder and
+# `grid_score` picks the winner.
 EDGE_FRACS = (0.36, 0.42, 0.48, 0.54, 0.60, 0.66, 0.72, 0.78)
 
 
 def edges_at(w, h, lum, bbox, thr, samples=120, sign=1):
-    """Frame quad at one threshold, from sparse scanlines.
-
-    The flood-fill that locates the screen runs once; re-flooding per
-    threshold costs seconds each and buys nothing, because the edge lines
-    only need a hundred crossings apiece.  Scanning inside the known
-    bounding box also removes the connectivity requirement that the flood
-    was there to provide."""
+    """Frame quad at one threshold, from sparse scanlines inside the flood's
+    bounding box (re-flooding per threshold costs seconds and the edge lines
+    only need ~100 crossings each)."""
     x0, y0, x1, y1 = bbox
     mx = max(4, (x1 - x0) // 20)
     my = max(4, (y1 - y0) // 20)
@@ -450,14 +401,9 @@ def edges_at(w, h, lum, bbox, thr, samples=120, sign=1):
 
 
 def plausible(quad, w, h):
-    """Is this quad shaped like a GB frame in this photo?
-
-    `grid_score` compares how well a sampling grid lands on the photo's
-    pixel grid, and that is only meaningful between quads of comparable
-    size: a quad covering the whole photograph samples smooth backdrop,
-    scores well on both terms and wins for the wrong reason.  So candidates
-    are gated on geometry first — the score never sees a shape that is not
-    a plausible frame."""
+    """Is this quad shaped like a GB frame in this photo? `grid_score` is only
+    meaningful between quads of comparable size (a whole-photo quad samples
+    smooth backdrop and wins for the wrong reason), so geometry gates first."""
     xs = [p[0] for p in quad]
     ys = [p[1] for p in quad]
     bw, bh = max(xs) - min(xs), max(ys) - min(ys)
@@ -537,14 +483,10 @@ def write_ppm(path, body):
 
 
 def selftest(photo_dir, transcript):
-    """Warp every photo in `photo_dir`, OCR it, and check the result against
-    a CRC-verified transcription (tests/roms/expected/gb-*.txt).
-
-    The check that matters is the CRC line: gbedge computes a CRC-16 over
-    each page's 32 result bytes and prints it, so a CRC read off a photo
-    that equals the independently transcribed one says the warp recovered
-    those bytes exactly.  Reported alongside: how many of the page's own
-    data glyphs decoded at all."""
+    """Warp every photo in `photo_dir`, OCR it, and check the CRC line against
+    a CRC-verified transcription (tests/roms/expected/gb-*.txt): gbedge
+    prints a CRC-16 over each page's 32 result bytes, so a matching CRC means
+    the warp recovered those bytes exactly."""
     import glob
     import re
     here = os.path.dirname(os.path.abspath(__file__))

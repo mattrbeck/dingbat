@@ -1,20 +1,13 @@
 #!/usr/bin/env python3
-"""Build a gambatte-format probe ROM, run it through BOTH dingbat and SameBoy.
+"""Build a gambatte-format probe ROM and run it through dingbat
+(`--mode=gambatte`) and the tools/gbfuzz/sameboy_gambatte runner.
 
-The gambatte suite's ROMs all end in `jp $7000`, and everything from $0150 to
-$6FFF of them is NOP padding with a `wait until LY == B` helper parked at
-$7400 and the hex printer at $7000.  That makes any one of them a blank
-program the harness already knows how to read a byte out of: overwrite the
-body, jump to $7000 with the answer in A, and `--mode=gambatte` (dingbat) and
-`tools/gbfuzz/sameboy_gambatte` (SameBoy) both decode it off the screen.
+The gambatte suite's ROMs all end in `jp $7000`; $0150..$6FFF is NOP padding
+with a `wait until LY == B` helper at $7400 and the hex printer at $7000, so
+any of them is a blank program both harnesses can read a byte out of:
+overwrite the body and jump to $7000 with the answer in A.
 
-That is what turns a question this suite cannot ask -- "at exactly which CPU
-M-cycle after an LCD enable does the mode-0 STAT source rise, and does a HALTED
-CPU see it on the same one?" -- into one SameBoy can answer.  GBMicrotest asks
-it, but its answers live in `$FF80` and no SameBoy runner here reads that.
-
-Used by gam_sled.py, gam_dispatch.py and gam_haltwake.py; see the write-up at
-`M0_HALT_BLIND_DOTS` in src/dingbat/gb/ppu.nim for what they measured.
+Used by gam_sled.py, gam_dispatch.py and gam_haltwake.py.
 
 Environment:
   DINGBAT_ROOT     repo/worktree root (default: two levels up from this file)

@@ -52,9 +52,8 @@ def sweep_title(workdir, title, rom_base):
     # isolate save files: each emulator variant gets its own copy of the ROM
     result = {'title': title, 'rom': rom_base, 'slug': slug, 'shots': {}, 'error': None}
     try:
-        # A reference emulator crashing on a ROM (NBA segfaults on Pokemon
-        # Pinball R&S) shouldn't fail the title — fall back to the other
-        # reference and record the crash.
+        # A reference crashing on a ROM does not fail the title: fall back to
+        # the other reference and record the crash.
         ref_crashed = None
         for emu in RUNNERS:
             emudir = os.path.join(rundir, emu)
@@ -83,12 +82,10 @@ def sweep_title(workdir, title, rom_base):
             shot['dhle_vs_nba'] = imgdiff.metrics(paths['nba'], paths['dhle']) if have_nba else dict(MARK)
             shot['dreal_vs_mgba'] = imgdiff.metrics(paths['mgba'], paths['dreal'])
             result['shots'][f] = shot
-        # Final verdict: dingbat passes a checkpoint if it matches EITHER
-        # reference. When both direct comparisons fail, re-check against
-        # reference bursts around the checkpoint to cancel lag-frame skew
-        # (emulators accumulate different lag, so inputs can land on
-        # different screens — mGBA and NBA regularly diverge from each
-        # other this way too).
+        # dingbat passes a checkpoint if it matches either reference. When
+        # both direct comparisons fail, re-check against reference bursts
+        # around the checkpoint to cancel lag-frame skew (different lag puts
+        # the scripted inputs on different screens).
         OK = ('IDENTICAL', 'MINOR')
         RANK = ['IDENTICAL', 'MINOR', 'DIFFERENT', 'MAJOR']
         for f in SHOTS:

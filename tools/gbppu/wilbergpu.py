@@ -17,9 +17,8 @@ and neither needs a disassembly listing to recover.  `--dump` prints them.
 `--patch out.gb` rewrites the final `jp $48xx` (everything after it is $FF
 padding) with a loop that sends the measured bytes to the serial port as ASCII
 hex, so `dingbat_test --mode serial` reads them out.  The patch sits strictly
-after every measurement, so it cannot change what the ROM measures -- which
-means the SAME patched file can be handed to a SameBoy runner that dumps the
-WRAM slots and the two sides are answering about one identical ROM.
+after every measurement, so it cannot change what the ROM measures, and the
+same patched file can be handed to any runner that dumps the WRAM slots.
 """
 import sys
 
@@ -115,9 +114,8 @@ def patch(path, out):
     b = bytearray(open(path, "rb").read())
     tail, stores, delays, exp = scan(b)
     # Always the whole scratch window: some ROMs fill slots the `ldh`/`ld`
-    # scan cannot see (ly_lyc_write counts LYC interrupts in its handler and
-    # stores the total straight from B), and dumping a fixed range keeps the
-    # SameBoy side comparable without a per-ROM address.
+    # scan cannot see (ly_lyc_write stores its handler's count straight from
+    # B), and a fixed range needs no per-ROM address on the WRAM-dumping side.
     first, count = 0x14, 12
     code = patch_bytes(tail, first, count)
     assert all(x == 0xFF for x in b[tail + 3:tail + len(code)]), "patch would clobber code"

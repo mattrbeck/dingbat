@@ -1,12 +1,6 @@
-/* Headless SameBoy oracle that dumps an arbitrary memory range.
- *
- * The wilbertpol mooneye `acceptance/gpu` ROMs answer in WRAM: each one stores
- * a handful of single-register reads to `$C014...` and only then packs them
- * into BCDEHL for the print routine, so the raw measurements are sitting in
- * memory when the ROM stops.  The existing runners here read the SCREEN
- * (sameboy_gambatte) or three fixed HRAM bytes (sameboy_microtest); neither can
- * answer "what did a correct emulator measure in slot 6 of this ROM".  This
- * can, for any address range and any model.
+/* Headless SameBoy oracle (links libsameboy) that dumps an arbitrary memory
+ * range, for ROMs that leave raw measurements in WRAM (wilbertpol mooneye
+ * `acceptance/gpu` stores single-register reads at `$C014...`).
  *
  * Usage:
  *   sameboy_wram <bootromdir> <rom.gb> <addr_hex> <len> [frames] [model]

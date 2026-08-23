@@ -18,9 +18,8 @@ import dingbat/common/input
 
 type InputEvent = tuple[frame: int, key: Input, pressed: bool]
 
-# Shared four-shade DMG ramp (see the C runners): dingbat renders DMG through
-# a green LCD palette, SameBoy and mGBA through their own, so every runner
-# normalises to one ramp and DMG titles can be compared byte-for-byte.
+# Shared four-shade DMG ramp (see the C runners): every runner normalises its
+# DMG palette to this so DMG titles compare byte-for-byte.
 const GREY4 = [0xFF'u8, 0xAD'u8, 0x52'u8, 0x00'u8]
 
 proc parse_script(script: string): seq[InputEvent] =

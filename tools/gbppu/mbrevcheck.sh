@@ -1,23 +1,17 @@
 #!/usr/bin/env bash
-# mbrevcheck -- does dingbat switch CGB revision behaviour where mealybug says
-# it should?
+# mbrevcheck -- for every mealybug ROM whose _cgb_c and _cgb_d references
+# differ, render dingbat at --cgb-rev=C and --cgb-rev=D and check each frame
+# matches its own reference. Rows whose two references are byte-identical
+# carry no revision axis and are skipped. Nothing else in the tree scores
+# the _cgb_d captures.
 #
-# mealybug ships `_cgb_c` and `_cgb_d` captures of two silicon revisions, by the
-# same author as cgb-acid-hell and Beaten Dying Moon, so they are the
-# per-revision ground truth. Only the ROMs whose two references actually DIFFER
-# carry a revision axis; for the rest the pair is byte-identical and any
-# revision passes.
-#
-# NOTHING ELSE IN THE TREE SCORES `_cgb_d`. The local runner wires the 27
-# `_cgb_c` rows only, and the shootout's mealybug CGB rows (which do define
-# RevC/RevD variants in testroms/mealybug.py) are not in its active list at all
-# -- its recorded dingbat run contains zero RevC/RevD rows. So a revision defect
-# is invisible to both harnesses, which is exactly how the one below survived.
-#
-#   tools/gbppu/mbrevcheck.sh
-cd /Users/matt/code/dingbat/.claude/worktrees/win-hold-zero-fix
-T=/Users/matt/.claude/jobs/e4d5536b/tmp
-C=$T/romcache/game-boy-test-roms/mealybug-tearoom-tests/ppu
+#   tools/gbppu/mbrevcheck.sh      (needs ./dingbat_test built in the repo root)
+# ROMs come from $DINGBAT_ROM_CACHE (default /tmp/dingbat-test-roms); scratch
+# frames go to $GBPPU_TMP (default <repo>/.scratch/gbppu).
+cd "$(dirname "$0")/../.."
+T=${GBPPU_TMP:-$PWD/.scratch/gbppu}
+mkdir -p "$T"
+C=${DINGBAT_ROM_CACHE:-/tmp/dingbat-test-roms}/game-boy-test-roms/mealybug-tearoom-tests/ppu
 px() { python3 tools/gbprobe/ppmdiff.py "$1" "$2" \
          | sed -n 's/^\([0-9][0-9]*\) differing pixels.*/\1/p' | head -1; }
 for D in "$C"/*_cgb_d.png; do

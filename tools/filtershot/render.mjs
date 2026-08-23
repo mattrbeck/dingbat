@@ -1,25 +1,19 @@
-// filtershot renderer: push a raw BGR555 frame dump (tools/filtershot/
-// dump_frames.nim) through the REAL web present shader (web/glpresent.js,
-// extracted by web/glshaders.mjs) once per upscale filter, in headless
-// Chromium, and write one PNG per filter. This is the same
-// extract-and-readback method as web/render.test.mjs, so what these PNGs show
-// is exactly what ships.
+// filtershot renderer: push a raw BGR555 frame dump (dump_frames.nim) through
+// the web present shader (web/glpresent.js via web/glshaders.mjs) once per
+// upscale filter in headless Chromium, and write one PNG per filter. Same
+// extract-and-readback method as web/render.test.mjs.
 //
 //   node tools/filtershot/render.mjs <dump.rgb555> <w> <h> <scale> <outdir> <base> [ghost.rgb555]
 //
-// writes <outdir>/<base>.<filter>.png for none / hq4x / xbr / xbrz.
-// Colour correction and scanlines are left OFF: both apply uniformly after the
-// upscale stage, so they would shift every image identically without changing
-// the comparison.
+// writes <outdir>/<base>.<filter>.png for none / hq4x / xbr / xbrz. Colour
+// correction and scanlines stay off: both apply uniformly after the upscale.
 //
-// With a ghost dump (the responded frame dump_frames writes for a shot when a
-// panel is named), each filter renders TWICE instead:
-//   <base>.old.<filter>.png — the pre-fix pipeline: the RESPONDED frame is
-//     what the filter samples (u_tex = ghost, delta off). This is what
-//     shipped before the ghost-delta change.
-//   <base>.new.<filter>.png — the fixed pipeline: the filter samples the
-//     CLEAN frame and the shader re-applies the ghost as a per-cell delta
-//     (u_tex = clean, u_ghost = ghost, u_lcd_ghost on).
+// With a ghost dump each filter renders twice:
+//   <base>.old.<filter>.png — the filter samples the responded frame
+//     (u_tex = ghost, delta off).
+//   <base>.new.<filter>.png — the filter samples the clean frame and the
+//     shader re-applies the ghost as a per-cell delta (u_tex = clean,
+//     u_ghost = ghost, u_lcd_ghost on).
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -29,9 +23,8 @@ import { readShaders } from "../../web/glshaders.mjs";
 const requireWeb = createRequire(new URL("../../web/package.json", import.meta.url));
 const { chromium } = requireWeb("playwright");
 
-// The default set; FILTERSHOT_FILTERS="grid,rgb" overrides. "grid" and
-// "rgb" are the screen-structure looks — their own uniforms, u_filter 0,
-// exactly as index.js drives them.
+// FILTERSHOT_FILTERS="grid,rgb" overrides. "grid"/"rgb" are the
+// screen-structure looks: their own uniforms, u_filter 0, as index.js does.
 const FILTERS = (process.env.FILTERSHOT_FILTERS || "none,hq4x,xbr,xbrz")
   .split(",").map((s) => s.trim()).filter(Boolean);
 
