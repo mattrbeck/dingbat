@@ -2,9 +2,8 @@
 # Collect the three downloaded build artifacts into a flat directory of
 # release-ready files, with a checksum manifest.
 #
-# Used by BOTH the rolling "latest" release (every push to main) and the
-# tagged one, so the two cannot end up shipping differently named or
-# differently assembled files.
+# Shared by the rolling "latest" release and tagged releases so both ship
+# identically named files.
 #
 # Usage: stage-release.sh <artifacts-dir> <out-dir>
 #

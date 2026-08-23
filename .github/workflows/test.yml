@@ -1,6 +1,5 @@
 name: Test Suite
-# workflow_dispatch so a suspected flake can be re-run on demand (gh workflow
-# run "Test Suite") without pushing a dummy commit.
+# workflow_dispatch: re-run a suspected flake without pushing a dummy commit.
 on: [push, pull_request, workflow_dispatch]
 jobs:
   test:
@@ -9,49 +8,32 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    # The default is GitHub's 6h ceiling, which is not a timeout so much as a
-    # way to burn a runner for a working day before anyone is told. A green
-    # Windows job is ~15 min and Linux ~3, so an hour is pure headroom: if a
-    # step wedges, this reports it while the cause is still the last thing
-    # anyone touched. (A gambatte shard deadlocking on an undrained stdout pipe
-    # cost six hours a push before it was caught — see run_gambatte_suite.)
+    # A green job is ~15 min on Windows, ~3 on Linux; an hour is headroom so a
+    # wedged step reports instead of burning the 6h default.
     timeout-minutes: 60
     env:
-      # Stable, cache-backed location for the downloaded test ROMs (read by
-      # tests/dingbat_test_runner.nim). Keeps them across runs so a single flaky
-      # github.com fetch can't fail the suite.
+      # Cached test-ROM dir, read by tests/dingbat_test_runner.nim.
       DINGBAT_ROM_CACHE: ${{ github.workspace }}/rom-cache
     steps:
       - uses: actions/checkout@v4
       - uses: jiro4989/setup-nim-action@v2
       - name: Cache downloaded test ROMs
-        # Exact-key only (no restore-keys on purpose): the runner reuses any
-        # already-present file by name, so a partial-match restore could seed a
-        # STALE ROM after a version bump. Bump the version suffix below whenever
-        # a download URL/version in dingbat_test_runner.nim changes — that misses
-        # the cache and forces a clean re-download of the whole set.
-        #
-        # The `suite<sha>` segment tracks MgbaSuiteSha1 in
-        # dingbat_test_runner.nim, which fetches `releases/latest` rather than a
-        # pinned tag. The two must change in the same commit; leaving this key
-        # behind would serve the old suite.gba from cache and make an upstream
-        # release look like it did nothing.
+        # Exact key, no restore-keys: the runner reuses any present file by
+        # name, so a partial restore could serve a stale ROM. Bump the matching
+        # segment whenever a download URL/version in dingbat_test_runner.nim
+        # changes; `suite<sha>` must track MgbaSuiteSha1 in the same commit.
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/rom-cache
           key: test-roms-${{ runner.os }}-gb7.0-dmg1.0-cgb1.1-suiteda67466e-jsmolka-a6447c5-fuzzarm-a675329-magen0.5.0-shootout38b926b
       - name: Install dependencies
-        # The tests need only zippy. Installing the full dep tree pulls the
-        # GUI-only packages, and imguin's install persistently dies with
-        # "Access is denied" on the Windows runner (then poisons nimble's
-        # solver for retries) — so install the minimum, retry transient
-        # failures, and prove the import actually works before proceeding
+        # Only zippy: the full dep tree pulls GUI-only packages whose install
+        # fails on the Windows runner. Retry, then prove the import works.
         shell: bash
         run: |
           echo 'import zippy/ziparchives' > depcheck.nim
           for i in 1 2 3; do
-            # cd out of the checkout: inside it, nimble resolves the whole
-            # project graph (imguin and friends) even for a single install
+            # cd out of the checkout: inside it nimble resolves the whole graph
             (cd "$RUNNER_TEMP" && nimble install -y zippy) || true
             if nim check --hints:off depcheck.nim; then rm depcheck.nim; exit 0; fi
             echo "dependencies incomplete after attempt $i, retrying"
@@ -59,143 +41,62 @@ jobs:
           done
           exit 1
       - name: Build test binaries (all nine, in parallel)
-        # The harness, the runner, and the seven standalone unit tests are nine
-        # independent `nim c` runs over the same tree. They used to be seven
-        # sequential steps — ~145s of a ~250s Windows job spent with three of
-        # the four cores idle, because Nim's semantic pass is single-threaded
-        # per invocation. Building them together cuts that roughly in half
-        # (measured 52s -> 26s on 8 cores); the steps below now only RUN what
-        # this produced, so a failure still points at one named target.
-        # Rationale for the nimcache and parallelBuild choices, and for
-        # -d:test_harness, lives in the script.
+        # Nine independent `nim c` runs in parallel; the steps below only run
+        # what this built. Flag rationale lives in the script.
         shell: bash
         run: .github/scripts/build-tests.sh
       - name: Run tests
-        # Blargg / Mooneye / mGBA suite / Acid2 / Mealybug / jsmolka gba-tests /
-        # gambatte. gambatte is 5,005 scored runs out of the SAME cached bundle
-        # (no extra download, so no cache-key bump); it batches into one
-        # --mode=gambatte process per core and costs a few seconds.
-        # Exits non-zero only on a REGRESSION against tests/results.md, so the
-        # baseline's known failures don't keep the job red; all 13 jsmolka rows
-        # are green in that baseline, so any of them going red fails CI.
+        # Blargg / Mooneye / mGBA suite / Acid2 / Mealybug / jsmolka / gambatte.
+        # Exits non-zero only on a regression against tests/results.md.
         run: ./dingbat_test_runner
       - name: GBA PPU compositor invariants
-        # The compositor is split into three specialized inner loops with the
-        # layer walk open-coded four times, and the ROM suites above barely
-        # constrain it — a wrong OBJ-vs-BG priority tie in one of those copies
-        # passes every one of them. These checks are self-comparing (no golden
-        # hashes, so nothing to regenerate and nothing to drift per-arch) and
-        # each was confirmed by mutation to actually fail when the thing it
-        # describes is broken. Needs no ROMs.
+        # Self-comparing compositor invariants (no golden hashes, no ROMs).
+        # -d:test_harness gates nothing the compositor touches, so this is the
+        # shipping code.
         shell: bash
-        # Built by the parallel build step above (which is also where the
-        # -d:test_harness link rationale lives). That flag gates
-        # APU/keypad/mmio/savestate only — nothing the compositor touches — so
-        # this checks the same code the GUI build ships.
         run: ./dingbat_ppucomposite_test
       - name: GBA 4bpp BG tile-unpack equivalence
-        # render_reg_bg expands a whole 4bpp tile row with SWAR instead of
-        # shifting out eight nibbles. The transformation is pure and its input
-        # space is small, so this ENUMERATES it rather than trusting a ROM
-        # sweep: every nibble value at every position, every adjacent nibble
-        # pair (the carry test), all 65536 values of each 16-bit half, all 16
-        # palette banks, both flips, and all 36 reachable (x_in_tile, span)
-        # shapes — compared against the scalar loop that is still the shipping
-        # fallback, so the oracle is real code. A second part renders scanlines
-        # three ways (SWAR / scalar / an independent per-pixel model) to cover
-        # the OBJ-VRAM transparent path, 8bpp, mosaic, BG wraparound and all
-        # four screen_size values, with coverage counters asserted non-zero so
-        # it cannot pass vacuously. Every check was confirmed by mutation.
-        # The full 2^32 sweep is opt-in (DINGBAT_BG4_EXHAUSTIVE=1), too slow
-        # for CI. Needs no ROMs. Built above under -d:test_harness, which is
-        # also the only build render_reg_bg_scalar exists in.
+        # Enumerates the SWAR 4bpp unpack against the scalar fallback (which
+        # exists only under -d:test_harness). The full 2^32 sweep is opt-in via
+        # DINGBAT_BG4_EXHAUSTIVE=1. No ROMs.
         shell: bash
         run: ./dingbat_ppubgunpack_test
       - name: GBA per-line OBJ candidate list (differential fuzz)
-        # render_sprites walks a per-line 128-bit candidate bitmap instead of
-        # all 128 OAM entries. That is a pure speedup and must be invisible,
-        # but its failure mode is a sprite configuration no shipped game
-        # produces — a double-size affine box, a Y that wraps off the top, an
-        # OBJ-window sprite, a sprite dropped by the OBJ cycle budget — so a
-        # ROM sweep is a bad instrument for it. This renders thousands of
-        # randomized OAM tables BOTH ways (candidate list and the reference
-        # full scan, which ships as the rebuild-storm fallback) and asserts
-        # byte-identical sprite_pixels, plus the invalidation paths and a
-        # negative control that proves the comparison can fail. Every check
-        # was confirmed by mutating the implementation. Needs no ROMs.
+        # Randomized OAM tables rendered via the candidate list and the full
+        # scan must produce byte-identical sprite_pixels. No ROMs.
         shell: bash
         run: ./dingbat_ppuobjlist_test
       - name: Save-state format compatibility
-        # Users lose save states to routine updates, and nothing used to notice.
-        # This loads a corpus of reference states (tests/states — most of them
-        # written by builds checked out at the commit that shipped that format,
-        # against the committed test ROMs) and asserts they still load AND run,
-        # so both ways of invalidating them fail here first: a payload-revision
-        # bump without a migration, and a field added to a subsystem without a
-        # bump at all. It also pins every EventType ordinal and the legacy
-        # container -> revision table at COMPILE time — the scheduler
-        # serializes events by ordinal, so a reorder silently reinterprets
-        # every pending event in every existing state.
-        # Needs no downloaded ROMs.
+        # Loads the reference states in tests/states and pins every EventType
+        # ordinal (the scheduler serializes events by ordinal) and the legacy
+        # container -> revision table at compile time. No downloaded ROMs.
         shell: bash
         run: ./dingbat_savestate_compat_test
       - name: Rewind ring (IDs, eviction, keyframes, thumbnail strip)
-        # The rewind ring hands the scrubber a state to jump to. Its dangerous
-        # failure is not a crash: it is index/eviction bookkeeping returning a
-        # state from the WRONG MOMENT, which loads perfectly and looks fine.
-        # So this drives a ring to many depths — through eviction at the cap
-        # and across a pop/push seam, where snapshot IDs stop being contiguous
-        # — and asserts byte equality against a plain walk of the delta chain,
-        # which knows nothing about IDs or keyframes. Also covers: keyframe
-        # seeks reproducing the walk exactly, thumbnails evicted in lockstep
-        # with their snapshot (never orphaned, never outliving it), and
-        # mem_used accounting for the side tables so the memory cap stays
-        # honest. Synthetic payloads; needs no ROMs.
+        # Ring eviction/keyframe bookkeeping checked against a plain walk of
+        # the delta chain. Synthetic payloads; no ROMs.
         shell: bash
         run: ./dingbat_rewind_test
       - name: LCD panel-response model invariants
-        # The panel model is a display filter, so its failure mode is silent:
-        # a wrong table smears static content or leaves a permanent fractional
-        # ghost and nothing else notices. These checks are self-comparing —
-        # a static frame must come out bit-exact for all 32 codes, every
-        # code-to-code transition must actually reach its target, relaxing
-        # toward light must be the slow direction on every panel, and a 30 Hz
-        # alternation must settle instead of strobing on the panels games
-        # relied on for it. Needs no ROMs.
+        # Self-comparing panel-model invariants: static frames bit-exact,
+        # transitions reach their target, 30 Hz alternation settles. No ROMs.
         shell: bash
         run: ./dingbat_lcdresponse_test
       - name: GB battery-save RTC/mapper footers
-        # Round-trips dingbat's own MBC3 footer (the BGB/VBA/mGBA-shared
-        # layout) with wall-clock catch-up, and proves that a forum save
-        # padded to a power of two — or any other unknown tail — is NOT
-        # parsed as a clock. The failure mode being guarded: an all-zero
-        # tail reads as "saved January 1970" and catch-up then walks the day
-        # counter through five decades and sets the sticky overflow flag.
-        # Builds its own synthetic ROMs/saves; needs no ROM fixtures.
+        # MBC3 footer round-trip with catch-up; a padded or unknown tail must
+        # not parse as a clock. Synthetic ROMs/saves.
         shell: bash
         run: ./dingbat_savefooter_test
       - name: Clip-capture replay determinism
-        # "Save the last minute" does not record video while you play: it keeps
-        # one compressed state anchor per second plus a per-frame input log and
-        # RE-EMULATES the range you picked while a MediaRecorder watches. If
-        # that replay is not bit-identical to what happened, the clip is of
-        # gameplay that never occurred — and it still looks like gameplay, so
-        # nothing else in the suite would notice. This runs three ROMs live,
-        # hashes every frame's SERIALIZED MACHINE STATE (a probe ROM can hold
-        # the same picture across a divergence in RAM), then replays an
-        # interior range out of the anchor+input log and asserts every frame
-        # matches. Two negative controls — replaying from the wrong anchor, and
-        # one flipped button bit — must be detected, so it cannot pass
-        # vacuously. Committed ROMs only; needs no download.
+        # Replays a range from the anchor+input log and asserts every frame's
+        # serialized state matches the live run; two negative controls must
+        # fail. Committed ROMs only.
         shell: bash
         run: ./dingbat_clipreplay_test
       - name: GB HBlank-DMA re-entrancy (Pokemon Crystal boot crash)
-        # gbhdmatest.gbc re-arms a 128-block HBlank HDMA forever. The block copy
-        # ticks the PPU from inside the mode 3->0 transition; if lcd_status
-        # doesn't reflect mode 0 before the copy runs, the FIFO renderer's
-        # level-triggered transition re-fires and recurses until the stack
-        # overflows (native segfault / web "Maximum call stack size exceeded").
-        # Pass = the process survives the frame run.
+        # gbhdmatest.gbc re-arms HBlank HDMA forever; the block copy ticks the
+        # PPU inside the mode 3->0 transition, which recurses to stack overflow
+        # unless lcd_status shows mode 0 first. Pass = the process survives.
         shell: bash
         run: ./dingbat_test tests/roms/gbhdmatest.gbc --mode=screenshot --timeout=120 --screenshot=hdmatest.ppm
       - name: Link acceptance (in-process lockstep)
@@ -203,28 +104,20 @@ jobs:
         run: |
           set -e
           ./dingbat_test tests/roms/linktest.gba --mode=linktest --timeout=600
-          # Cross-version link timing: the child stages its multi-mode word LATE
-          # (as a different game at a different cycle offset would), so a
-          # start-of-round latch samples a stale word and blows the partner's
-          # link block — the real "communication error" cross-game trades hit.
-          # Passes only with the completion-time latch (link.nim complete_multi).
+          # linkskew: the child stages its multi-mode word late; passes only
+          # with the completion-time latch (link.nim complete_multi).
           ./dingbat_test tests/roms/linkskew.gba --mode=linktest --timeout=600
           ./dingbat_test tests/roms/normlinktest.gba --mode=normlinktest --timeout=600
           ./dingbat_test tests/roms/norm32linktest.gba --mode=norm32linktest --timeout=600
           # Mid-game attach: boot cable-less, plug the link in mid-run, negotiate.
           ./dingbat_test tests/roms/attachtest.gba --mode=attachtest --timeout=1200
-          # Input-rollback (GGPO) foundation for the netplay pivot: both cores
-          # local, predict+rollback the remote input, bit-identical to
-          # inputs-known-upfront. Also guards savestate completeness (the ROM
-          # burst/prefetch timing trackers) against regressions.
+          # Predict+rollback of the remote input must be bit-identical to
+          # inputs known upfront; also guards savestate completeness.
           ./dingbat_test tests/roms/inputrec.gba --mode=rollback
-          # Two-sided end-to-end: two independent RollbackSessions exchange only
-          # inputs over a delay and must both stay bit-identical to ground truth.
+          # Two RollbackSessions exchanging inputs over a delay, both bit-identical.
           ./dingbat_test tests/roms/inputrec.gba --mode=rollbacknet
       - name: Speculative rollback acceptance (bit-identical to the blocking path)
-        # GGPO-style master-side prediction + frame-checkpoint rollback: proves
-        # the speculative link reproduces the blocking path's EWRAM log exactly
-        # (even with forced mispredictions) while collapsing latency stalls.
+        # The speculative link must reproduce the blocking path's EWRAM log.
         shell: bash
         run: |
           set -e
@@ -234,15 +127,12 @@ jobs:
             --link-contract=normal --netlink-delay-ms 30 --timeout=800
           ./dingbat_test tests/roms/norm32linktest.gba --mode=speclink \
             --link-contract=normal32 --netlink-delay-ms 30 --timeout=800
-          # Honest speculation benchmark: a long symmetric handshake where the
-          # echo predictor must stay bit-identical (overrun=0) AND cut the
-          # rollback re-emulation the plain predictor wastes under latency.
+          # Echo predictor must stay bit-identical (overrun=0) and cut re-emulation.
           ./dingbat_test tests/roms/speclinkbench.gba --mode=speclinkbench \
             --netlink-delay-ms 50 --timeout=20000
       - name: Link acceptance (networked, localhost)
-        # Exercises the transport-independent protocol core (netcore.nim, the
-        # same implementation the browser bridge uses) over a real socket.
-        # Linux only: localhost sockets + backgrounding are reliable there.
+        # netcore.nim over a real socket. Linux only: localhost sockets and
+        # backgrounding are reliable there.
         if: runner.os == 'Linux'
         shell: bash
         run: |
@@ -263,26 +153,14 @@ jobs:
           run_net tests/roms/normlinktest.gba normal 7789
           run_net tests/roms/norm32linktest.gba normal32 7790
       - name: Web storage / Drive / SW unit tests (Node, zero deps)
-        # The node:vm harness suite over the REAL web/index.js (fake DOM +
-        # Map-backed IndexedDB + controllable fetch): storage layer, recents,
-        # save import/flush, Drive backup/restore, storage.persist policy —
-        # plus the sw-assets tripwire (every script index.html loads must be
-        # in the service worker's precache list; a miss = broken offline boot,
-        # which shipped once). Zero-dep node:test; Linux is enough since it
-        # exercises no OS surface.
+        # node:vm harness over the real web/index.js, plus the sw-assets
+        # tripwire: every script index.html loads must be in the SW precache.
         if: runner.os == 'Linux'
         run: node --test web/tests/*.test.mjs
       - name: Web JSDoc typecheck (tsc --checkJs)
-        # Types-only gate over the script-tag front-end: tsc checks the REAL
-        # shipped .js files (allowJs+checkJs+noEmit — zero shipped bytes
-        # change; the page still loads the same untouched scripts). One
-        # project per entry point mirrors the HTML's script tags, so a
-        # renamed/removed wasm export or window.* cross-file global fails CI
-        # here instead of dying silently at runtime. gen-emdts --check keeps
-        # the generated wasm-boundary declarations (web/types/em.d.ts) in
-        # lockstep with the {.exportc.} procs in src/dingbat_wasm.nim.
-        # typescript is a pinned devDependency in web/package.json, so npm ci
-        # (retried: it's a network fetch) provides tsc.
+        # tsc over the shipped .js (allowJs+checkJs+noEmit), one project per
+        # entry point. gen-emdts --check keeps web/types/em.d.ts in lockstep
+        # with the {.exportc.} procs in src/dingbat_wasm.nim.
         if: runner.os == 'Linux'
         working-directory: web
         run: |
@@ -293,25 +171,15 @@ jobs:
           npx tsc -p types/tsconfig.sw.json
           node types/gen-emdts.mjs --check
       - name: Signaling server room lifecycle (Node)
-        # The room-code rendezvous server: a code must be FREED the instant its
-        # clients disconnect (e.g. two same-browser tabs that paired locally over
-        # a BroadcastChannel and dropped their signaling sockets), so it never
-        # dangles until the TTL. Zero-dep, spawns its own server on a test port.
+        # A room code must be freed the instant its clients disconnect, not at TTL.
         if: runner.os == 'Linux'
         run: node web/signaling/server.test.mjs
       - name: Web present-shader UV tripwire (pure Node, no browser)
-        # Fast Layer-2 guard for the WebGL2 present vertex shader. Pulls the
-        # LIVE `v_uv = ...` expression out of web/glpresent.js (glshaders.mjs) and
-        # asserts the visible screen maps to the full [0,1] texture with row 0
-        # at the top. This is the cheap tripwire for the halved-UV bug that
-        # shipped (`v_uv = p*0.5` -> only the bottom-left quadrant, zoomed 2x).
-        # Zero deps; runs on every OS.
+        # Asserts the live `v_uv` expression in web/glpresent.js maps the
+        # screen to the full [0,1] texture, row 0 at the top.
         run: node web/uv.test.mjs
       - name: Cache Playwright's Chromium
-        # ~150 MB pulled from playwright's CDN on every run otherwise — the
-        # largest single network dependency in the job. Exact-key only (keyed
-        # on the lockfile): a playwright bump must miss and re-download, and
-        # `playwright install` still re-fetches anything the cache is missing.
+        # Exact key on the lockfile: a playwright bump must miss and re-download.
         if: runner.os == 'Linux'
         uses: actions/cache@v4
         with:
@@ -319,23 +187,12 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
 
       - name: Web browser tests (headless Chromium)
-        # Real-browser guards that can't run in plain Node:
-        #  - render.test.mjs: compiles the ACTUAL present shaders (VERT+FRAG,
-        #    extracted from glpresent.js), uploads a corner-distinguishable frame,
-        #    reads the canvas back and asserts each corner maps to the right
-        #    source corner (catches quadrant / Y-flip / scale / upload-dims /
-        #    readback bugs). WebGL2 + GLSL ES 300 needs a real browser (node's
-        #    headless-gl is WebGL1-only).
-        #  - manualpair.test.mjs: the symmetric manual-code link fallback (both
-        #    sides offer; each rewrites the peer's code into the answer via
-        #    SDPCodec.answerFrom) against real RTCPeerConnections — asserts the
-        #    DataChannel opens and a message round-trips.
-        # Linux-only step that installs ONLY Chromium.
+        # render.test.mjs compiles the real present shaders and checks corner
+        # mapping (needs WebGL2); manualpair.test.mjs round-trips the manual-
+        # code link fallback over real RTCPeerConnections. Installs only Chromium.
         if: runner.os == 'Linux'
         working-directory: web
-        # npm ci and the Chromium download are the two remaining unguarded
-        # network fetches in this job; both are idempotent, so retry them
-        # rather than let a registry blip fail the suite.
+        # npm ci and the Chromium download are idempotent network fetches.
         run: |
           set -e
           ../.github/scripts/retry.sh 3 npm ci

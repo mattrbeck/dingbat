@@ -6,8 +6,7 @@
 #   xcodebuild -project Dingbat.xcodeproj -scheme Dingbat \
 #     -sdk iphonesimulator -configuration Debug CODE_SIGNING_ALLOWED=NO build
 #
-# The bundled goodboy-demo-en.gba resource is the homebrew demo already
-# checked in for the web build (no new ROM binary enters the repo).
+# goodboy-demo-en.gba is the homebrew demo already checked in for the web build.
 name: Dingbat
 options:
   bundleIdPrefix: com.mattrb

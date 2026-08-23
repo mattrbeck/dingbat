@@ -1,30 +1,13 @@
 #!/usr/bin/env bash
-# Build every test binary at once instead of one after another.
+# Build every test binary at once: nine independent `nim c` runs, and Nim's
+# semantic pass is single-threaded per invocation.
 #
-# These are nine independent `nim c` invocations over the same tree, and CI
-# used to run them in series as separate steps. On the Windows runner that was
-# ~145s of a ~250s job with three of the four cores idle the whole time: Nim's
-# semantic pass is single-threaded per invocation, so the only way to use the
-# rest of the machine is to run several compilers at once. Measured on an
-# 8-core box: 52s in series, 26s together.
-#
-# Each target gets its OWN --nimcache. Nim keys the default cache on the
-# project name, and two concurrent builds sharing a directory would interleave
-# writes to the same generated C. (A shared cache is also NOT a shortcut worth
-# taking for its own sake: pointing all five unit tests at one directory saved
-# nothing measurable, because the per-project semantic pass — not the C
-# compile — is what costs.)
-#
-# Do NOT add --parallelBuild:N to stop each compiler from also using every
-# core. Measured, same box: default 26s, --parallelBuild:2 36s,
-# --parallelBuild:1 42s. The C stage is a large enough share that starving it
-# costs more than the oversubscription it avoids.
-#
-# -d:test_harness is what keeps nim.cfg from adding the GUI SDL2/OpenGL link
-# flags, which are `-lGL` on Linux and a hardcoded mingw-cross path to
-# libSDL2.a on Windows — neither exists on a GitHub runner, so without it these
-# never link. They still link on a dev Mac (Homebrew SDL2), which is why that
-# only ever fails in CI. See tests/README.md.
+# Each target gets its own --nimcache: Nim keys the default cache on the
+# project name, and concurrent builds sharing one interleave writes.
+# Do NOT add --parallelBuild:N — starving the C stage costs more than the
+# oversubscription it avoids.
+# -d:test_harness keeps nim.cfg from adding the GUI SDL2/OpenGL link flags,
+# which resolve on a dev Mac but not on a runner. See tests/README.md.
 set -uo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -58,8 +41,7 @@ build lcdresponse     dingbat_lcdresponse_test      tests/lcdresponse_test.nim
 build savefooter      dingbat_savefooter_test       tests/savefooter_test.nim
 build clipreplay      dingbat_clipreplay_test       tests/clip_replay_test.nim
 
-# Wait on every build even after one fails, so a run reports ALL the broken
-# targets rather than whichever happened to be waited on first.
+# Wait on every build even after one fails so all broken targets are reported.
 rc=0
 for i in "${!pids[@]}"; do
   if ! wait "${pids[$i]}"; then

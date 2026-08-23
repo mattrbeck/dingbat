@@ -1,13 +1,8 @@
 name: Release
 
-# Build Linux, macOS and Windows artifacts on a version tag and publish them to
-# the GitHub Releases page. The builds themselves live in build-artifacts.yml,
-# which the per-push Build workflow also calls — so what ships in a release is
-# byte-for-byte the same recipe that has been exercised on every commit, rather
-# than a second copy that only ever runs on tags.
-#
-# Binaries are UNSIGNED — see README for the one-time "open anyway" steps users
-# take on first launch.
+# Build all three desktop artifacts on a version tag and publish a Release.
+# The builds live in build-artifacts.yml, shared with the per-push Build
+# workflow. Binaries are unsigned — see README.
 on:
   push:
     tags: ["v*"]
@@ -30,8 +25,7 @@ jobs:
         with:
           path: artifacts
       - name: Stage + checksum
-        # Same script the rolling "latest" release uses, so a tagged release
-        # ships identically named and assembled files.
+        # Same script as the rolling "latest" release.
         run: .github/scripts/stage-release.sh artifacts release
       - uses: softprops/action-gh-release@v2
         with:

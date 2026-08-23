@@ -25,12 +25,9 @@ task test_build, "Build the test harness":
 task bench_build, "Build the headless benchmark harness":
   exec "nim c -d:test_harness -d:release --path:src -o:dingbat_bench tests/dingbat_bench.nim"
 
-# Every test binary below builds with -d:test_harness. It is not about the
-# harness behaviour these tests don't use — it is what stops nim.cfg from
-# appending the SDL2/OpenGL link flags meant for the GUI app. A headless test
-# that links against them builds only on a machine that happens to have the
-# SDL2/GL dev libraries in the expected place, and fails to link everywhere
-# else (CI included). Leave the flag on when adding a task here.
+# Every test task builds with -d:test_harness: it stops nim.cfg from adding
+# the GUI SDL2/OpenGL link flags, which only resolve on a machine with the
+# SDL2/GL dev libraries installed. Keep it on when adding a task.
 task test_timestretch, "Run the WSOLA time-stretch unit test":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_ts_test tests/timestretch_test.nim"
 
@@ -48,9 +45,8 @@ task test_savestate_compat, "Run the save-state format compatibility guards":
        "-o:dingbat_savestate_compat_test tests/savestate_compat_test.nim"
 
 task statefuzz_build, "Build the hostile-input save-state fuzzer":
-  # Not a `test_` task: the byte sweep is minutes per core, so it is run by
-  # hand (or in a nightly) rather than in the suite. `./statefuzz <rom> sweep
-  # 255` exits non-zero on any uncontained Defect.
+  # Run by hand, not in the suite (minutes per core): `./statefuzz <rom>
+  # sweep 255` exits non-zero on any uncontained Defect.
   exec "nim c -d:test_harness -d:release --path:src -o:statefuzz tools/statefuzz.nim"
 
 task test_rewind, "Run the rewind-ring property tests (IDs, eviction, keyframes)":

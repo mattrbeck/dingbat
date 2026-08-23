@@ -1,17 +1,12 @@
 #!/usr/bin/env bash
-# Run a command, retrying it on failure with exponential backoff.
-#
-# Everything CI fetches over the network is a coin flip we make dozens of times
-# a day: nimble hitting github.com/gitlab.com for package tags (a gitlab 502
-# failed a Windows build), choosenim, npm, playwright's browser download. Each
-# is idempotent, so a retry is always safe and a single transient 5xx/timeout
-# should never be a red build.
+# Run a command, retrying on failure with exponential backoff. For idempotent
+# network fetches only (nimble, choosenim, npm, playwright).
 #
 #   .github/scripts/retry.sh 3 npm ci
 #   RETRY_DELAY=5 .github/scripts/retry.sh 5 curl -fsSL "$url" -o out
 #
-# The first argument is the attempt count; the rest is the command. Delay
-# starts at RETRY_DELAY seconds (default 15) and doubles each attempt.
+# First argument is the attempt count; delay starts at RETRY_DELAY seconds
+# (default 15) and doubles each attempt.
 set -uo pipefail
 
 tries=${1:?usage: retry.sh <attempts> <command>...}

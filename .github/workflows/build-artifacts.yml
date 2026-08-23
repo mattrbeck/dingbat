@@ -1,22 +1,15 @@
 name: Build artifacts
 
-# The three desktop builds, defined once and called by BOTH the per-push Build
-# workflow and by Release on a tag. It is a reusable workflow rather than a
-# copy in each because the two would drift, and a tag is the worst possible
-# moment to discover that the copy which only runs on tags went stale — that is
-# exactly how the Windows build ended up specified twice before this.
-#
-# Every job uploads a downloadable artifact, so any commit's binaries can be
-# pulled from its run page, not just tagged releases.
+# The three desktop builds, defined once and called by both the per-push
+# Build workflow and Release so the two cannot drift. Every job uploads an
+# artifact, so any commit's binaries can be pulled from its run page.
 on:
   workflow_call:
 
 jobs:
   linux:
-    # ubuntu-22.04, NOT ubuntu-latest, deliberately: a glibc-linked binary runs
-    # only on the glibc it was built against or newer. 22.04 gives a GLIBC_2.34
-    # floor (Ubuntu 22.04+, Debian 12+, Fedora 35+); building on 24.04 would
-    # raise it to 2.39 and lock out every currently-supported LTS for nothing.
+    # ubuntu-22.04, not -latest: it sets the glibc floor (2.34 = Ubuntu 22.04+,
+    # Debian 12+, Fedora 35+); 24.04 would raise it to 2.39.
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -26,11 +19,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libsdl2-dev libgl1-mesa-dev
       - name: Install dependencies
-        # Installed one at a time from OUTSIDE the checkout, the same way the
-        # test workflow does it: inside the checkout nimble resolves the whole
-        # project graph, and `nimble install --depsOnly` there currently fails
-        # outright with "Couldnt find a solution for the packages" (nimble
-        # 0.22's resolver). Each is a network fetch, so each is retried.
+        # One at a time from outside the checkout: inside it nimble resolves
+        # the whole project graph and `--depsOnly` fails to solve. Each is
+        # a network fetch, so each is retried.
         shell: bash
         run: |
           set -e
@@ -41,10 +32,8 @@ jobs:
       - name: Build
         run: nim c -d:release -o:dingbat src/dingbat.nim
       - name: Package
-        # Tarred rather than uploaded bare: upload-artifact zips its input, and
-        # the zip GitHub serves back does not carry the executable bit, so a
-        # bare binary arrives mode 644 and will not run until the user chmods
-        # it. The tar inside the zip preserves the mode.
+        # Tarred: upload-artifact's zip drops the executable bit; the tar
+        # inside it preserves the mode.
         run: |
           mkdir -p dist/linux
           cp dingbat dist/linux/dingbat
@@ -61,8 +50,7 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-      # Every fetch below is retried: losing a release build to a transient 5xx
-      # means re-running the whole thing by hand.
+      # Every fetch below is retried.
       - name: Cache the static SDL2 build
         id: sdl2-cache
         uses: actions/cache@v4
@@ -71,22 +59,10 @@ jobs:
           # Keyed on the pinned version below — bump both together.
           key: sdl2-static-${{ runner.os }}-${{ runner.arch }}-2.32.10
       - name: Build SDL2 (static, from source)
-        # NOT `brew install sdl2`. Homebrew's sdl2 formula no longer exists:
-        # the name now resolves to sdl2-compat, a shim that implements SDL2 on
-        # top of SDL3 and ships dylibs only — no libSDL2.a. -d:macdist links
-        # /opt/homebrew/lib/libSDL2.a explicitly, so on a current runner it
-        # cannot link at all.
-        #
-        # This is NOT a regression from wiring macOS into per-push CI: the
-        # release workflow used the same brew install and would have failed
-        # identically on its next tag, silently, at the worst moment. It only
-        # ever worked on machines holding an older real-SDL2 install.
-        #
-        # Building the genuine SDL2 from a pinned release is now the only way
-        # to get a real static library, and it removes the dependency on what
-        # Homebrew happens to call things this month. Installed into
-        # /opt/homebrew because that is where nim.cfg already looks, for both
-        # the static macdist link and the ordinary dynamic dev build.
+        # Not `brew install sdl2`: that name now resolves to sdl2-compat (SDL2
+        # on SDL3, dylibs only, no libSDL2.a), and -d:macdist links
+        # /opt/homebrew/lib/libSDL2.a explicitly. Installed under /opt/homebrew
+        # because that is where nim.cfg looks.
         if: steps.sdl2-cache.outputs.cache-hit != 'true'
         run: |
           set -e
@@ -115,8 +91,7 @@ jobs:
                https://nim-lang.org/choosenim/init.sh | sh -s -- -y'
           echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
       - name: Install dependencies
-        # See the Linux job: --depsOnly is not usable, so install one by one
-        # from outside the checkout.
+        # See the Linux job: one at a time, from outside the checkout.
         shell: bash
         run: |
           set -e
@@ -127,9 +102,8 @@ jobs:
       - name: Build (self-contained)
         run: nim c -d:release -d:macdist -o:dingbat_dist src/dingbat.nim
       - name: Verify no Homebrew dependency
-        # The whole point of -d:macdist. If SDL2 slipped back to a dynamic link
-        # the .dmg would work perfectly on this runner and fail on every
-        # machine without Homebrew, so fail here instead.
+        # If SDL2 slipped back to a dynamic link the .dmg would work on this
+        # runner and fail on every machine without Homebrew.
         run: |
           if otool -L dingbat_dist | tail -n +2 | grep -qiE '/opt/homebrew|libSDL2'; then
             echo "::error::binary still links a non-system dylib — not self-contained"
@@ -158,9 +132,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build cross-compile image
-        # Pulls the nim base image and apt/SDL2 over the network on every run
-        # (no layer cache on the runner), so a transient registry/mirror hiccup
-        # would otherwise be a red build.
+        # No layer cache on the runner: the base image and SDL2 are fetched
+        # every run, so retry network blips.
         run: .github/scripts/retry.sh 3 docker build -t dingbat-win-cross docker/windows-cross
       - name: Build dingbat.exe
         run: |

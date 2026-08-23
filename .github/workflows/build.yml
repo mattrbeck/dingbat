@@ -1,14 +1,7 @@
 name: Build
 
 # Desktop binaries for all three platforms on every push and PR, downloadable
-# from the run's Artifacts section. Previously only Windows was built here and
-# macOS existed solely inside the tag-triggered Release workflow, so there was
-# no way to get a macOS or Linux build of an arbitrary commit — and the Linux
-# desktop target was not built anywhere at all, which is how it stayed broken
-# (see the SDL2 include path in nim.cfg).
-#
-# Artifacts are retained for the repository's default period and are not
-# releases: they are unsigned, and the .dmg reports version 0.0.0 unless built
+# from the run's Artifacts. Unsigned; the .dmg reports 0.0.0 unless built
 # from a tag.
 on:
   push:
@@ -20,15 +13,10 @@ jobs:
   artifacts:
     uses: ./.github/workflows/build-artifacts.yml
 
-  # Publish those same three files to a rolling "Latest build" release, so the
-  # Releases page always offers a current download without anyone cutting a
-  # version tag. A GitHub release must be attached to SOME tag — there is no
-  # tagless release — so `latest` is a moving tag that is force-pushed to the
-  # head of main on every run. It is marked prerelease, which keeps the
-  # "Latest release" badge for real v* tags whenever those start being cut.
-  #
-  # Pull requests build (above) but do not publish: this job is push-to-main
-  # only, and a PR from a fork could not get a write token anyway.
+  # Publish the same files to a rolling "Latest build" prerelease. A release
+  # must hang off a tag, so `latest` is force-pushed to the head of main each
+  # run; prerelease keeps the "Latest release" badge for real v* tags.
+  # Push-to-main only (a fork PR could not get a write token anyway).
   publish-latest:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: artifacts
@@ -43,10 +31,7 @@ jobs:
       - name: Stage + checksum
         run: .github/scripts/stage-release.sh artifacts release
       - name: Move the rolling tag to this commit
-        # Without this the release would keep pointing at whatever commit first
-        # created the tag: action-gh-release creates a missing tag but does not
-        # move an existing one, so the assets would update while the tag and
-        # "source code" links silently went stale.
+        # action-gh-release creates a missing tag but never moves an existing one.
         run: |
           git tag -f latest
           git push -f origin latest
@@ -55,11 +40,9 @@ jobs:
           tag_name: latest
           name: Latest build (main)
           prerelease: true
-          # Same asset names every time, so a bookmark or script pointing at
-          # /releases/download/latest/<name> keeps working across rebuilds.
-          # Note that form — the `latest` TAG. The similar-looking
-          # /releases/latest/download/<name> means "the latest non-prerelease
-          # release" and 404s while this prerelease is the only one.
+          # Stable names so /releases/download/latest/<name> keeps working.
+          # (/releases/latest/download/<name> is the latest NON-prerelease and
+          # 404s while this is the only release.)
           files: release/*
           body: |
             Automatically rebuilt from `main` on every push — these are

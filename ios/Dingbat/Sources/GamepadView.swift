@@ -1,15 +1,11 @@
-// On-screen touch gamepad, recreating the web UI's layout (web/index.html
-// #controls): 8-way d-pad with diagonal corner wedges, A/B face buttons,
-// L/R shoulders, Select/Start pills. Input ids match the web build's
-// data-inputs: 0 UP, 1 DOWN, 2 LEFT, 3 RIGHT, 4 A, 5 B, 6 SELECT, 7 START,
-// 8 L, 9 R.
+// On-screen touch gamepad matching the web UI's layout (web/index.html
+// #controls). Input ids match the web build's data-inputs: 0 UP, 1 DOWN,
+// 2 LEFT, 3 RIGHT, 4 A, 5 B, 6 SELECT, 7 START, 8 L, 9 R.
 //
-// Touch handling mirrors the web's element hit-testing: SwiftUI draws the
-// buttons and reports their frames (in the "pad" coordinate space) via a
-// preference; an invisible UIKit overlay (isMultipleTouchEnabled) hit-tests
-// every active touch against those frames each began/moved/ended, diffs the
-// resulting input set, and forwards changes to the core. Its hitTest only
-// claims points inside a button, so chrome behind/above it stays tappable.
+// SwiftUI draws the buttons and reports their frames in the "pad" coordinate
+// space via a preference; an invisible multi-touch UIKit overlay hit-tests
+// every active touch against those frames and forwards input-set changes to
+// the core. Its hitTest only claims points inside a button.
 
 import SwiftUI
 import UIKit

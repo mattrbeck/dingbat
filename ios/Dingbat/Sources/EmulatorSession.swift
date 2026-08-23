@@ -3,17 +3,13 @@ import AVFoundation
 import QuartzCore
 
 /// Owns a running emulation: the CADisplayLink loop, the audio engine, and
-/// every call into libdingbat.a (all core calls stay on the main thread; the
-/// audio render block only touches the realtime-safe dingbat_audio_* C API).
+/// every call into libdingbat.a. Core calls stay on the main thread; the
+/// audio render block only touches the realtime-safe dingbat_audio_* API.
 ///
-/// Pacing model (mirrors the desktop frontend, see src/dingbat_ios.nim):
-/// the core's APU queues samples into a ring at 32768 Hz as emulation runs,
-/// and the AVAudioSourceNode drains that ring in real time. Each display-link
-/// tick we run frames only while dingbat_audio_ahead() == 0 (bounded by a
-/// small cap), so the audio clock — not the display — paces emulation to
-/// real time; the display just presents whatever frame is current. In
-/// fast-forward the core stops audio-sync (queue is cleared each APU buffer)
-/// and the cap alone bounds speed.
+/// Pacing: the APU fills a 32768 Hz ring as emulation runs and the
+/// AVAudioSourceNode drains it in real time. Each display tick runs frames
+/// only while dingbat_audio_ahead() == 0 (bounded), so the audio clock paces
+/// emulation; fast-forward drops audio-sync and the cap alone bounds speed.
 final class EmulatorSession: NSObject, ObservableObject {
 
     @Published var image: CGImage?
@@ -198,11 +194,9 @@ final class EmulatorSession: NSObject, ObservableObject {
     }
 }
 
-/// AVAudioEngine + AVAudioSourceNode pulling interleaved float32 stereo at
-/// 32768 Hz from the core's ring buffer (the engine resamples to hardware
-/// rate). The render block is realtime-safe: no locks besides the ring's
-/// single short mutex, no allocation, no Objective-C/Swift runtime calls
-/// into the core.
+/// AVAudioSourceNode pulling float32 stereo at 32768 Hz from the core's ring
+/// (the engine resamples). The render block must stay realtime-safe: no
+/// allocation, no locks besides the ring's mutex, no Swift calls into the core.
 final class AudioOutput {
     private let engine = AVAudioEngine()
     private var node: AVAudioSourceNode?

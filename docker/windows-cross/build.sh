@@ -4,14 +4,12 @@
 # C++ runtime are statically linked).
 set -eu
 
-# In CI the checkout is owned by a different uid than the container's root;
-# git refuses to operate on it (and nimble shells out to git) without this
+# CI's checkout is owned by another uid; git (which nimble shells out to)
+# refuses it without this
 git config --global --add safe.directory /src 2>/dev/null || true
 
-# nimble resolves every dependency by querying its git remote for tags, so this
-# one command depends on github.com AND gitlab.com being up (a gitlab 502 on
-# stb_image-Nim has already failed a build). Retry the whole resolve; it is
-# idempotent, and already-installed packages make the retry cheap.
+# nimble resolves deps by querying git remotes (github.com and gitlab.com);
+# the resolve is idempotent, so retry it.
 i=1
 while :; do
   nimble install --depsOnly -y && break
