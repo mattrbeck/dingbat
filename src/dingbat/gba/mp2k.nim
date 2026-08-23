@@ -28,9 +28,9 @@
 #   * agbplay (ipatix) independently documents the same GFDPCM/BDPCM delta LUT
 #     and 33-byte / 64-sample compressed block (corroboration of format facts).
 #   * GBATEK — the DirectSound FIFO hardware sink we substitute for.
-#   * Paul Bourke, "Cubic Interpolation" — the Catmull-Rom resampling formula.
-# The 8-bit-PCM / BDPCM decode, resampler, and reverb are all expressed in our
-# own way; no third-party emulator code was copied.
+# The PCM/BDPCM decode, resampler and reverb are this project's own code
+# written against those documents. (An earlier resampler kernel had been
+# ported from another emulator; it was replaced — see the git history.)
 #
 # Design notes (this PoC's own choices):
 #   * SHADOW mode: the real SoundMainRAM still runs, so we consume the engine's
@@ -997,40 +997,48 @@ proc mp2k_frame_poll*(m: Mp2kHle) =
               m.probe_fails < MP2K_PROBE_MAX_FAILS
   if m.probing: m.probe_sound_info = sip
 
-when defined(mp2kwav):
-  proc mp2k_decode_bdpcm*(data: openArray[byte]; num_samples: int): seq[float32] =
-    ## Standalone reference decode of an m4a BDPCM ("compressed waveform")
-    ## buffer, in raw s8 units. Mirrors bdpcm_decode_block() below (and the
-    ## shipped decoder, SoundMainRAM_Unk2 in pret pokeemerald src/m4a_1.s):
-    ## per 33-byte/64-sample block, sample 0 is the raw s8 base byte, sample 1
-    ## uses the LOW nibble of the first delta byte (its high nibble is unused),
-    ## and each later byte supplies high then low nibble; the accumulator wraps
-    ## at 8 bits. Used by the test harness to validate the block layout against
-    ## hand-computed values.
-    result = newSeq[float32](num_samples)
-    var acc = 0'i8
-    for pos in 0 ..< num_samples:
-      let block_offset  = uint32(pos) and (BDPCM_BLOCK_SAMPS - 1)
-      let block_address = (uint32(pos) shr 6) * BDPCM_BLOCK_BYTES
-      if block_offset == 0'u32:
-        acc = cast[int8](data[block_address])
-      else:
-        var lut = data[block_address + (block_offset shr 1) + 1'u32]
-        if (block_offset and 1'u32) != 0'u32: lut = lut and 0x0F'u8
-        else:                                 lut = lut shr 4
-        acc = cast[int8](int(acc) + int(BDPCM_LUT[lut]))
-      result[pos] = float32(acc)
+proc push_tap(s: ptr Mp2kSampler; v: float32) {.inline.} =
+  ## Shift a decoded source sample into the 4-sample history (tap0 newest).
+  (s.tap3, s.tap2, s.tap1, s.tap0) = (s.tap2, s.tap1, s.tap0, v)
+
+proc catmull_rom(p0, p1, p2, p3, mu: float32): float32 {.inline.} =
+  ## Catmull-Rom spline between p1 and p2 (mu in 0..1); p0/p3 are the
+  ## neighbouring samples.
+  let mu2 = mu * mu
+  0.5'f32 * (2.0'f32 * p1 + (p2 - p0) * mu +
+             (2.0'f32 * p0 - 5.0'f32 * p1 + 4.0'f32 * p2 - p3) * mu2 +
+             (3.0'f32 * p1 - p0 - 3.0'f32 * p2 + p3) * mu2 * mu)
+
+proc advance_cursor(s: ptr Mp2kSampler; step: float32) =
+  ## Move the read cursor by `step` source samples. Whole samples crossed go
+  ## to src_index (and, beyond the first, to hist_gap so the next fetch can
+  ## backfill the tap history); the remainder is the new phase. A looping
+  ## sample wraps modulo its loop length. A one-shot sample — or a reversed
+  ## one, whose driver path never consults the loop registers (pret
+  ## pokeemerald m4a_1.s, SoundMainRAM_Unk1) — holds its last sample until the
+  ## game clears CH_ON.
+  let p = s.phase_frac + step
+  let whole = uint32(p)
+  s.phase_frac = p - float32(whole)
+  if whole == 0'u32: return
+  s.src_index += whole
+  s.need_fetch = true
+  s.hist_gap = min(s.hist_gap + whole - 1'u32, 3'u32)
+  if s.src_index < s.sample_count: return
+  if s.looping and not s.reversed and s.loop_start < s.sample_count:
+    let span = s.sample_count - s.loop_start
+    s.src_index = s.loop_start + (s.src_index - s.sample_count) mod span
+  else:
+    s.src_index = s.sample_count
+    s.need_fetch = false
 
 proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
-  ## Produce one stereo output sample at the APU's rate (32768 Hz). Replaces
-  ## the DirectSound FIFO A/B contribution when engaged. Returns signed values
-  ## roughly in the FIFO latch range (~ -128*2 .. 127*2) so the existing APU
-  ## DirectSound scaling path applies unchanged.
-  ##
-  ## Each channel uses a straightforward forward-stepping polyphase resampler:
-  ## keep a 4-tap sample history plus a fractional phase, decode a fresh source
-  ## sample only when the phase crosses an integer boundary, and interpolate
-  ## (cubic Catmull-Rom per Paul Bourke, or linear).
+  ## One stereo output sample at the APU rate (32768 Hz), replacing the
+  ## DirectSound FIFO A/B contribution while engaged. Values are in the FIFO
+  ## latch range (about -256..254) so the APU's DirectSound scaling applies.
+  ## Per channel: a 4-tap source-sample history plus a fractional phase; a
+  ## new source sample is decoded only when the cursor crosses a sample
+  ## boundary, and the output is interpolated from the history.
   if not m.engaged: return (0'i16, 0'i16)
   var accl = 0.0'f32
   var accr = 0.0'f32
@@ -1055,30 +1063,19 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
         var j = min(s.hist_gap, 3'u32)
         while j >= 1'u32:
           if s.src_index >= j:
-            let bs = m.decode_at(s, rom, rmask, s.src_index - j)
-            s.tap3 = s.tap2; s.tap2 = s.tap1; s.tap1 = s.tap0; s.tap0 = bs
+            s.push_tap(m.decode_at(s, rom, rmask, s.src_index - j))
           dec j
         s.hist_gap = 0
-      let ns = m.decode_src(s, rom, rmask)
-      s.tap3 = s.tap2; s.tap2 = s.tap1; s.tap1 = s.tap0; s.tap0 = ns
+      s.push_tap(m.decode_src(s, rom, rmask))
       s.need_fetch = false
-    let mu = s.phase_frac
     var sample: float32
     if m.resample_mode == 2:
-      sample = s.tap0                       # zero-order hold (matches raw FIFO)
+      sample = s.tap0                       # zero-order hold (raw FIFO parity)
     elif m.resample_mode == 1 or not cubic:
-      sample = s.tap0 * mu + s.tap1 * (1.0'f32 - mu)
-    elif cubic:
-      # Catmull-Rom / cubic (Paul Bourke, "Cubic Interpolation").
-      # tap0 = newest .. tap3 = oldest.
-      let mu2 = mu * mu
-      let a0 = s.tap0 - s.tap1 - s.tap3 + s.tap2
-      let a1 = s.tap3 - s.tap2 - a0
-      let a2 = s.tap1 - s.tap3
-      let a3 = s.tap2
-      sample = a0 * mu * mu2 + a1 * mu2 + a2 * mu + a3
+      sample = s.tap1 + (s.tap0 - s.tap1) * s.phase_frac
     else:
-      sample = s.tap0 * mu + s.tap1 * (1.0'f32 - mu)
+      # One sample of extra latency buys a neighbour on each side of the segment.
+      sample = catmull_rom(s.tap3, s.tap2, s.tap1, s.tap0, s.phase_frac)
     sample = sample / 128.0'f32
     var vl, vr: float32
     case m.env_mode
@@ -1118,27 +1115,7 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
       if rate > float32(APU_SAMPLE_RATE):
         dbgStepDecimN.inc
         dbgStepMax = max(dbgStepMax, rate/float32(APU_SAMPLE_RATE))
-    s.phase_frac += rate / float32(APU_SAMPLE_RATE)
-    if s.phase_frac >= 1.0'f32:
-      let n = uint32(s.phase_frac)
-      s.phase_frac -= float32(n)
-      s.src_index += n
-      s.need_fetch = true
-      if n > 1'u32:
-        # Decimating advance: remember how many source samples were skipped
-        # so the next fetch backfills the tap history with adjacent samples.
-        s.hist_gap = min(s.hist_gap + (n - 1'u32), 3'u32)
-      if s.src_index >= s.sample_count:
-        # Reversed playback is one-shot: the reference driver's REV paths never
-        # consult the loop registers and stop the channel when the sample count
-        # is exhausted (pret pokeemerald m4a_1.s, SoundMainRAM_Unk1).
-        if s.looping and not s.reversed:
-          s.src_index = s.loop_start + n - 1'u32
-        else:
-          # Hold the last decoded sample; the game clears the channel's status
-          # (CH_ON) when the note ends, which deactivates us on the next frame.
-          s.src_index = s.sample_count
-          s.need_fetch = false
+    s.advance_cursor(rate / float32(APU_SAMPLE_RATE))
   m.frame_pos.inc
   if m.frame_len > 0 and m.frame_pos >= m.frame_len: m.frame_pos = m.frame_len
   # --- MP2K reverb: the m4a SoundMainRAM buffer-seed algorithm -----------------
