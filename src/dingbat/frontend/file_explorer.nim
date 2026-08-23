@@ -28,9 +28,7 @@ proc gather_entries(fe: FileExplorer) =
       fe.entries.add(FileEntry(name: name, is_file: is_file, extension: ext, hidden: hidden))
   except:
     discard
-  # Add parent dir entry
   fe.entries.add(FileEntry(name: "..", is_file: false, extension: "", hidden: false))
-  # Sort: dirs first, then alpha
   fe.entries.sort(proc(a, b: FileEntry): int =
     if a.is_file and not b.is_file: 1
     elif not a.is_file and b.is_file: -1
@@ -63,10 +61,8 @@ proc render*(fe: FileExplorer; name: string; open_popup: bool;
                      ImVec2(x: 0.5'f32, y: 0.5'f32))
 
   if igBeginPopupModal(cstring(name), nil, cint(ImGui_WindowFlags_AlwaysAutoResize)):
-    # Breadcrumb navigation
     let sep = $DirSep
     var parts = fe.cfg.explorer_dir.split(sep)
-    # Remove empty parts from root /
     var parts_clean: seq[string] = @[]
     for p in parts:
       if p.len > 0: parts_clean.add(p)
@@ -86,7 +82,6 @@ proc render*(fe: FileExplorer; name: string; open_popup: bool;
         save_config(fe.cfg)
         fe.gather_entries()
 
-    # File list
     var disp_size = ImVec2(x: 800, y: 600)
     let vp2 = igGetMainViewport()
     if vp2 != nil:
@@ -129,7 +124,6 @@ proc render*(fe: FileExplorer; name: string; open_popup: bool;
       fe.gather_entries()
       fe.selected_idx = 0
 
-    # Bottom buttons
     igBeginGroup()
     if igButton("Open", ImVec2(x: 0, y: 0)):
       if fe.selected_idx < fe.entries.len and fe.entries[fe.selected_idx].is_file:

@@ -7,8 +7,7 @@ type
     cfg*:         Config
     gb_renderer*: cint   # 0 = FIFO, 1 = scanline
     filter*:      cint   # VideoFilter ordinal (smoothing + screen looks)
-    lcd_resp*:    bool   # panel-response model on/off (the panel itself is
-                         # resolved from the running machine, not chosen here)
+    lcd_resp*:    bool   # panel-response model on/off (panel resolved from the machine)
     preserve_aspect*: bool
     sgb_enable*:  bool
     sgb_border*:  bool
@@ -39,8 +38,7 @@ proc render*(v: VideoWidget) =
               "subpixels, so there it is a stylised look). None keeps crisp " &
               "nearest-neighbor pixels. Color correction still applies on top.")
   igIndent(106)
-  # Grayed while speed mode is on — the mode suspends the GPU filter; the
-  # choice keeps its state for when the mode turns off.
+  # Speed mode suspends the GPU filter; the choice keeps its state.
   igBeginDisabled(v.cfg.speed_mode)
   discard igRadioButton_IntPtr("None (crisp)", addr v.filter, 0)
   discard igRadioButton_IntPtr("hq4x", addr v.filter, 1)
@@ -56,8 +54,7 @@ proc render*(v: VideoWidget) =
   help_marker("Letterbox the picture instead of stretching it to fill the " &
               "window. Only visible when the window is not an exact multiple " &
               "of the console's resolution — fullscreen, or after a manual resize.")
-  # Grayed while speed mode is on — the panel model is per-pixel CPU work
-  # on every presented frame, which the mode suspends.
+  # Speed mode suspends the panel model (per-pixel CPU work every frame).
   igBeginDisabled(v.cfg.speed_mode)
   discard igCheckbox("LCD response", addr v.lcd_resp)
   igEndDisabled()
@@ -81,10 +78,8 @@ proc render*(v: VideoWidget) =
               "Off by default — stock Game Boy behaviour until you ask for it.")
   igIndent(106)
   discard igCheckbox("Super Game Boy mode", addr v.sgb_enable)
-  # Always visible, not tucked behind the (?) marker: the adapter is chosen
-  # when the cartridge is inserted, so turning this on cannot affect the game
-  # already running and a user who ticks it and sees nothing happen would
-  # reasonably conclude it is broken.
+  # Kept visible: the adapter is chosen at cartridge insertion, so ticking
+  # this changes nothing about the running game.
   igTextDisabled("Applies on the next ROM load or reset.")
   igBeginDisabled(not v.sgb_enable)
   discard igCheckbox("Show SGB border", addr v.sgb_border)

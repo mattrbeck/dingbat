@@ -14,8 +14,7 @@ template bit*(value: untyped, bit: uint32): bool =
 template bits*(value: typed, lo: int, len: int): untyped =
   (value shr lo) and (type(value)((1 shl len) - 1))
 
-# Crystal range-based bits macro: bits(value, lo..hi) => extract hi-lo+1 bits from lo
-# We provide a named proc variant that accepts (lo, count):
+# Range-based extract: bits_range(value, lo, hi) => hi-lo+1 bits from lo
 template bits_range*(value: typed, lo, hi: int): untyped =
   (value shr lo) and (type(value)((1 shl (hi - lo + 1)) - 1))
 
@@ -35,7 +34,7 @@ proc last_set_bit*(n: SomeInteger): int =
   for i in countdown(8 * sizeof(n) - 1, 0):
     if bit(n, i): return i
 
-# Compile-time flags (mirrors Crystal's flag? :trace and flag? :log)
+# Compile-time trace/log flags
 when defined(trace):
   template trace_log*(value: string) = echo value
   template log*(value: string) = discard

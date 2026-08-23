@@ -1,6 +1,5 @@
-# THUMB instruction handlers + LUT (included by gba.nim)
-# All instructions are statically parameterized by bits extracted from the
-# 10-bit LUT index (bits 15-6 of the instruction word, i.e. instr shr 6).
+# THUMB instruction handlers + LUT (included by gba.nim). Handlers are
+# statically parameterized by the 10-bit LUT index (instr shr 6).
 
 proc thumb_long_branch_link*[second_instr: static bool](cpu: CPU; instr: uint32) =
   let offset = bits_range(instr, 0, 10)
@@ -217,33 +216,26 @@ proc thumb_high_reg_branch_exchange*[op: static uint32, h1, h2: static bool](cpu
   elif op == 0b01:
     when h1:
       if rd == 15:
-        # Thumb hi-reg CMP with Rd=pc is not a compare on hardware: it
-        # performs a FULL SPSR->CPSR restore (mode bits included) and
-        # execution continues with no branch (gbaedge THUMBPC/THUMBPC2
-        # pages, AGB SP sessions 2/3: with SPSR=0x9000009F in IRQ mode the
-        # CPSR after reads 0x9000009F - the mode switched to System). In a
-        # mode without an SPSR (user/system) MRS-style SPSR reads return
-        # CPSR, so the restore degenerates to CPSR := CPSR - a no-op.
+        # Thumb hi-reg CMP with Rd=pc is a full SPSR->CPSR restore (mode bits
+        # included), no compare, no branch; in user/system mode it is a no-op
+        # (hardware: gbaedge THUMBPC/THUMBPC2 on AGB SP, docs/hwprobe.md).
         let mode = cast[CpuMode](cpu.cpsr.mode)
         if mode != modeUSR and mode != modeSYS:
           let new_spsr = uint32(cpu.spsr)
           let was_irq_disabled = cpu.cpsr.irq_disable
           cpu.switch_mode(cast[CpuMode](new_spsr and 0x1F'u32))
           cpu.cpsr = cast[PSR](new_spsr)
-          # switch_mode already loaded the destination bank's SPSR when the
-          # mode changed; only the unbanked modes need the CPSR mirror. (Do
-          # NOT reload spsr_banks here when the mode did not change - the
-          # live SPSR is newer than its bank copy.)
+          # switch_mode loaded the destination bank's SPSR; only unbanked modes
+          # need the CPSR mirror. Do not reload spsr_banks when the mode did not
+          # change: the live SPSR is newer than its bank copy.
           if mode_bank(cast[CpuMode](new_spsr and 0x1F'u32)) == 0:
             cpu.spsr = cpu.cpsr
           if was_irq_disabled and not cpu.cpsr.irq_disable:
-            # SPSR-restore path: no gate delay (see exception_return_restore)
+            # SPSR-restore path: no gate delay (see exception_return_restore).
             cpu.gba.interrupts.schedule_interrupt_check()
           if not cpu.cpsr.thumb:
-            # The restore cleared T. On hardware execution resumes in ARM
-            # state at the next word boundary (the THUMBPC/THUMBPC2 probes
-            # continue cleanly into the aligned ARM code right after the
-            # Thumb pad): flush and refill as ARM there.
+            # T cleared: execution resumes in ARM state at the next word boundary
+            # (gbaedge THUMBPC/THUMBPC2).
             discard cpu.set_reg(15, cpu.r[15] and not 3'u32)
             return
       else:
@@ -258,8 +250,8 @@ proc thumb_high_reg_branch_exchange*[op: static uint32, h1, h2: static bool](cpu
     else:
       cpu.cpsr.thumb = false
       discard cpu.set_reg(15, cpu.r[rs])
-  # CMP never writes rd, so rd==15 is not a branch there — the probe ROM's
-  # THUMBPC page (thumb `cmp pc, r0`) hung here without the op==0b01 arm.
+  # CMP never writes rd, so rd==15 is not a branch there (omitting the
+  # op==0b01 arm hangs on `cmp pc, r0`).
   if op == 0b01 or (rd != 15 and op != 0b11): cpu.step_thumb()
 
 proc thumb_alu_operations*[op: static uint32](cpu: CPU; instr: uint32) =
@@ -294,7 +286,7 @@ proc thumb_alu_operations*[op: static uint32](cpu: CPU; instr: uint32) =
   elif op == 0b1100: res = cpu.set_reg(rd, cpu.r[rd] or cpu.r[rs])
   elif op == 0b1101:
     cpu.idle(mul_i_cycles(cpu.r[rd], true))  # thumb mul: Rd is the multiplier
-    # Thumb MUL is MULS: C takes the Booth remainder carry (see arm.nim)
+    # Thumb MUL is MULS: C is the Booth remainder carry (arm.nim).
     cpu.cpsr.carry = mul_booth_carry(mfShort, cpu.r[rs], cpu.r[rd], 0'u64)
     res = cpu.set_reg(rd, cpu.r[rs] * cpu.r[rd])
   elif op == 0b1110: res = cpu.set_reg(rd, cpu.r[rd] and not cpu.r[rs])
@@ -338,9 +330,8 @@ proc thumb_move_shifted_register*[op: static uint32](cpu: CPU; instr: uint32) =
   cpu.step_thumb()
 
 proc thumb_undefined*(cpu: CPU; instr: uint32) =
-  # Genuinely undefined THUMB encodings — 0xE800-0xEFFF (the BLX suffix only
-  # exists on ARMv5), Bcc with cond=0b1110, BX with H1 set, and the unassigned
-  # misc-group slots — take the Undefined Instruction trap on the ARM7TDMI
+  # 0xE800-0xEFFF (ARMv5 BLX suffix), Bcc cond=0b1110, BX with H1 set and
+  # the unassigned misc slots take the Undefined Instruction trap.
   cpu.und()
 
 macro thumbLutBuilder(): untyped =

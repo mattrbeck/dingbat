@@ -24,8 +24,6 @@ proc render_menu_items*(d: GbDebug) =
   discard igMenuItem_BoolPtr("Tiles", nil, addr d.tiles_window, true)
   discard igMenuItem_BoolPtr("BG Maps", nil, addr d.bgmap_window, true)
 
-# ──────────────────────────── Palettes ────────────────────────────
-
 const SWATCH_FLAGS = cint(ImGui_ColorEditFlags_NoAlpha) or
                      cint(ImGui_ColorEditFlags_NoPicker) or
                      cint(ImGui_ColorEditFlags_NoOptions) or
@@ -35,7 +33,7 @@ const SWATCH_FLAGS = cint(ImGui_ColorEditFlags_NoAlpha) or
                      cint(ImGui_ColorEditFlags_NoDragDrop)
 
 proc pram_color(pram: array[64, uint8]; idx: int): uint16 =
-  # Palette RAM is little-endian BGR555 pairs (red in the low 5 bits)
+  # Little-endian BGR555 pairs, red in the low 5 bits.
   uint16(pram[idx * 2]) or (uint16(pram[idx * 2 + 1]) shl 8)
 
 proc swatch(c: uint16; id: cint) =
@@ -43,8 +41,7 @@ proc swatch(c: uint16; id: cint) =
                    y: cfloat((c shr 5) and 0x1F'u16) / 31.0'f32,
                    z: cfloat((c shr 10) and 0x1F'u16) / 31.0'f32,
                    w: 1.0'f32)
-  # An empty desc_id hashes to the window's own ID, which trips an ImGui
-  # assert; push a unique per-swatch ID instead
+  # An empty desc_id hashes to the window's own ID and trips an ImGui assert.
   igPushID_Int(id)
   discard igColorButton("##swatch", col, SWATCH_FLAGS, ImVec2(x: 18, y: 18))
   igPopID()
@@ -70,8 +67,7 @@ proc cgb_palette_grid(title: cstring; pram: array[64, uint8]; id_base: cint) =
   igEndGroup()
 
 proc render_palette_window(d: GbDebug) =
-  # igBegin returns false while collapsed: skip the content (igEnd is
-  # still required)
+  # igBegin is false while collapsed; igEnd is still required.
   if igBegin("Palettes", addr d.palette_window, 0):
     let ppu = d.gb.ppu
     if d.gb.cgb_enabled:
@@ -84,11 +80,9 @@ proc render_palette_window(d: GbDebug) =
       dmg_palette_row("OBP1", ppu.obp1, ppu.obj_pram, 8)
   igEnd()
 
-# ──────────────────────────── Texture helpers ────────────────────────────
-
 proc upload_texture(tex: var GLuint; buf: pointer; w, h: int) =
-  # Preserve the GL_TEXTURE_2D binding: the game render path relies on the
-  # game texture staying bound across frames (it never re-binds)
+  # Preserve the GL_TEXTURE_2D binding: the game render path never re-binds
+  # its texture.
   var prev: GLint
   glGetIntegerv(GL_TEXTURE_BINDING_2D, addr prev)
   if tex == 0:
@@ -115,12 +109,9 @@ proc bgr555_to_rgba8(c: uint16): uint32 =
 const DMG_GREYS = [0xFFFFFFFF'u32, 0xFFAAAAAA'u32, 0xFF555555'u32, 0xFF000000'u32]
 
 proc shade_rgba(d: GbDebug; color: uint8): uint32 =
-  # DMG maps the 2-bit color through BGP; CGB tiles have no single palette,
-  # so show the raw color index as a grey ramp
+  # CGB tiles have no single palette, so show the raw index as a grey ramp.
   if d.gb.cgb_enabled: DMG_GREYS[color]
   else: DMG_GREYS[d.gb.ppu.bgp[color]]
-
-# ──────────────────────────── Tiles ────────────────────────────
 
 const TILE_COLS = 16
 const TILE_ROWS = 24  # 384 tiles per bank
@@ -147,7 +138,6 @@ proc build_tiles(d: GbDebug): (int, int) =
   (w, h)
 
 proc render_tiles_window(d: GbDebug) =
-  # Skip the decode + texture upload while collapsed
   if igBegin("Tiles", addr d.tiles_window, 0):
     let (w, h) = d.build_tiles()
     upload_texture(d.tiles_tex, addr d.tiles_buf[0], w, h)
@@ -157,8 +147,6 @@ proc render_tiles_window(d: GbDebug) =
       igTextUnformatted("Bank 1", nil)
     debug_image(d.tiles_tex, float32(w) * TILES_SCALE, float32(h) * TILES_SCALE)
   igEnd()
-
-# ──────────────────────────── BG maps ────────────────────────────
 
 const MAP_PX = 256
 const MAP_SCALE = 2.0'f32
@@ -192,8 +180,8 @@ proc build_bg_map(d: GbDebug; map_base: int) =
               DMG_GREYS[ppu.bgp[color]]
 
 proc outline_scroll_viewport(d: GbDebug; img_pos: ImVec2) =
-  # SCX/SCY viewport, drawn wrapped: clip to the image and stamp the rect at
-  # the four wrap offsets so the parts that cross the map edge reappear
+  # SCX/SCY viewport drawn wrapped: stamp the rect at the four wrap offsets
+  # so the parts crossing the map edge reappear.
   let ppu = d.gb.ppu
   let side = cfloat(MAP_PX) * MAP_SCALE
   let img_max = ImVec2(x: img_pos.x + side, y: img_pos.y + side)
@@ -207,7 +195,7 @@ proc outline_scroll_viewport(d: GbDebug; img_pos: ImVec2) =
       let p0 = ImVec2(x: x0, y: y0)
       let p1 = ImVec2(x: x0 + 160 * MAP_SCALE, y: y0 + 144 * MAP_SCALE)
       # imguin <= 1.92.4 orders AddRect params (rounding, flags, thickness);
-      # later versions swapped to (rounding, thickness, flags)
+      # later versions (rounding, thickness, flags).
       when compiles(ImDrawList_AddRect(dl, p0, p1, col, 0, 0, 2.0)):
         ImDrawList_AddRect(dl, p0, p1, col, 0, 0, 2.0)
       else:
@@ -232,7 +220,6 @@ proc render_bg_map_tab(d: GbDebug; label: cstring; map_base: int;
     igEndTabItem()
 
 proc render_bgmap_window(d: GbDebug) =
-  # Skip the decode + texture upload while collapsed
   if igBegin("BG Maps", addr d.bgmap_window, 0):
     let ppu = d.gb.ppu
     let bg_map_hi = bg_tile_map(ppu) != 0

@@ -1,27 +1,18 @@
-## WSOLA (Waveform-Similarity Overlap-Add) time compression, shared by the GBA
-## and GB APUs to make 2x fast-forward pitch-preserving instead of octave-up.
+## WSOLA (waveform-similarity overlap-add) 2:1 time compression for
+## pitch-preserving fast-forward, shared by the GBA and GB APUs.
 ##
-## Both APUs pace emulation off the OUTPUT sample count: at 2x they must emit
-## exactly HALF as many output frames per unit game-time as at 1x (today they
-## drop every other sample). WSOLA replaces that decimation: it consumes the
-## FULL-rate stream and re-synthesises it at half length by overlap-adding
-## waveform segments, so the local waveform — and therefore the pitch — is
-## preserved while the timeline is compressed 2:1.
+## Both APUs pace emulation off the output sample count, so at 2x they must
+## emit exactly half as many frames. Count-exactness holds by construction:
+## the analysis pointer advances on a fixed grid of HA input frames per step
+## and each step emits HS = HA/2 output frames; the similarity search only
+## picks which segment to grab within a bounded window and never moves the
+## grid. Callers push every input frame and pull exactly half as many; a short
+## output FIFO absorbs the HS-frame chunking, and the only transient is a
+## ~4 ms warm-up at turbo-on where pull() returns silence. Reset the stretcher
+## when turbo toggles on.
 ##
-## The count-exactness the pacing depends on is guaranteed by construction:
-## the analysis pointer advances on a FIXED grid of HA input frames per step
-## and each step emits exactly HS = HA/2 output frames, so production is
-## exactly 2 input : 1 output regardless of the similarity search (the search
-## offset only picks WHICH segment to grab within a bounded window; it never
-## moves the grid, so it can never make the rates drift). Callers push every
-## input frame and pull exactly half as many; a short output FIFO absorbs the
-## chunked (HS-frame) production, and the only transient mismatch is a one-time
-## ~4 ms warm-up at turbo-on where the FIFO underflows and pull() returns
-## silence. Reset the stretcher when turbo toggles on to avoid stale clicks.
-##
-## Frames are interleaved stereo float32 (L, R). Mono callers pass R = L.
-## This module is presentation-only: it is never on the bit-exact 1x path and
-## is never serialised into save states / LinkSnapshot.
+## Frames are interleaved stereo float32 (mono callers pass R = L).
+## Presentation-only: never on the bit-exact 1x path, never serialised.
 
 import std/math
 
@@ -73,14 +64,13 @@ proc push*(ts: TimeStretch; l, r: float32) {.inline.} =
   inc ts.writePos
 
 proc canProduce(ts: TimeStretch): bool {.inline.} =
-  ## Enough future input buffered to place the segment at the current grid
-  ## position plus its search window and full frame length.
+  ## Enough input buffered for the segment at the grid position plus its
+  ## search window.
   ts.writePos >= ts.anNominal + SEARCH + FRAME
 
 proc bestOffset(ts: TimeStretch): int =
-  ## Search ±SEARCH around the grid position for the segment whose overlap
-  ## region best matches the natural continuation of the previously placed
-  ## segment (normalised cross-correlation on the mono mix). Returns d.
+  ## Search +-SEARCH around the grid position for the segment whose overlap
+  ## best continues the previous one (normalised cross-correlation, mono mix).
   if not ts.started:
     return 0
   # Reference = samples that naturally follow the previous grab by HS.
@@ -107,8 +97,7 @@ proc bestOffset(ts: TimeStretch): int =
   d
 
 proc produceStep(ts: TimeStretch) =
-  ## Overlap-add one windowed segment, emit HS finished frames to the FIFO,
-  ## and advance the fixed analysis grid by HA.
+  ## Overlap-add one windowed segment, emit HS frames, advance the grid by HA.
   let d = ts.bestOffset()
   let grab = ts.anNominal + d
   # Windowed overlap-add of the grabbed FRAME-length segment.
@@ -137,9 +126,8 @@ proc available*(ts: TimeStretch): int {.inline.} =
   ts.outL.len - ts.outHead
 
 proc pull*(ts: TimeStretch): tuple[l, r: float32] {.inline.} =
-  ## Emit one output frame. Produces on demand from buffered input; returns
-  ## silence (0, 0) only during the brief warm-up before the first segment is
-  ## ready. The caller must pull exactly half as many frames as it pushes.
+  ## Emit one output frame; silence only during the warm-up before the first
+  ## segment is ready. The caller must pull exactly half as many as it pushes.
   while ts.outHead >= ts.outL.len and ts.canProduce():
     ts.produceStep()
   if ts.outHead < ts.outL.len:

@@ -33,8 +33,6 @@ proc find_storage_type(rom_path: string): StorageType =
   echo "Backup type could not be identified."
   stSRAM  # fallback
 
-# --- Storage base methods ---
-
 method `[]`*(st: Storage; address: uint32): uint8 {.base.} =
   quit "Storage.[] not implemented for " & $st.type
 
@@ -42,10 +40,8 @@ method `[]=`*(st: Storage; address: uint32; value: uint8) {.base.} =
   quit "Storage.[]= not implemented for " & $st.type
 
 proc write_save*(st: Storage) =
-  # An empty save_path means "this cartridge has no battery file backing it":
-  # the web build owns persistence itself, and test harnesses detach the path
-  # so a run cannot leave a .sav behind for the next one to load back as
-  # power-on state. Keep the dirty flag set so a later rebind still flushes.
+  # Empty save_path = no battery file (web build persists itself; harnesses
+  # detach it so a run leaves no .sav). dirty stays set so a rebind flushes.
   if st.dirty and st.save_path.len > 0:
     writeFile(st.save_path, st.memory)
     st.dirty = false

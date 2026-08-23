@@ -39,13 +39,10 @@ proc update_waitcnt*(bus: Bus; w: WAITCNT) =
     bus.wait32_n[page] = sram
     bus.wait32_s[page] = sram
   bus.prefetch_on = w.gamepack_prefetch_buffer
-  # Speed-mode underclock: every memory access costs 2^underclock times its
-  # real cycles — "the whole bus got slower" — which slows the emulated CPU
-  # against an unchanged video/timer clock at ZERO hot-path cost, because the
-  # scaling lives in these tables rather than in cpu.tick. All prefetch
-  # arithmetic (credit/need/cap and pf_commit below) runs in the same scaled
-  # units, so its invariants hold. int8 tables cap the shift at 2 (worst base
-  # entry is 18; 18 shl 2 = 72).
+  # Speed-mode underclock: every access costs 2^underclock times its real
+  # cycles; scaling these tables keeps the hot path free, and all prefetch
+  # arithmetic runs in the same scaled units. int8 tables cap the shift at 2
+  # (worst entry 18 shl 2 = 72).
   let uc = clamp(bus.gba.underclock, 0, 2)
   if uc > 0:
     for page in 0 .. 0xF:
@@ -64,15 +61,13 @@ proc update_waitcnt*(bus: Bus; w: WAITCNT) =
 
 proc set_underclock*(gba: GBA; n: int) =
   ## Speed-mode knob: 0 = off, 1 = half effective CPU speed, 2 = quarter.
-  ## Purely a data change: rebuilds the waitstate tables and drops the fetch
-  ## cache so the new per-page costs take effect immediately.
+  ## Rebuilds the waitstate tables and drops the fetch cache.
   gba.underclock = clamp(n, 0, 2)
   gba.bus.update_waitcnt(gba.mmio.waitcnt)
   gba.bus.fetch_page = 0xFFFFFFFF'u32
 
 when defined(fetchprof):
-  # EXPLORATORY (branch-only): where the ROM access path actually goes on a
-  # real workload. Indices:
+  # -d:fetchprof: where the ROM access path goes on a real workload. Indices:
   #   0 fetch_half hot   1 fetch_half slow   2 fetch_word hot   3 fetch_word slow
   #   4 rac fetch calls  5 rac data calls
   #   6 rac prefetch-hit 7 rac plain-seq     8 rac nonseq
@@ -85,9 +80,8 @@ proc bus_now(bus: Bus): CycleCount {.inline.} =
   bus.sched.cycles + CycleCount(bus.cycles)
 
 proc rom_cool*(bus: Bus) {.inline.} =
-  # End an unbroken fetch stream: while hot, no cycles can have been added
-  # by anything except the stream itself, so "now" is exactly when the ROM
-  # bus went idle.
+  # End an unbroken fetch stream: while hot, only the stream itself added
+  # cycles, so "now" is exactly when the ROM bus went idle
   if bus.rom_hot:
     bus.rom_hot = false
     bus.rom_free_since = bus.bus_now()
@@ -109,9 +103,8 @@ proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int 
   let contiguous = now == bus.rom_free_since
   var seq: bool
   if bus.dma_active:
-    # DMA: src and dst streams each keep their own burst; no back-to-back
-    # requirement. LRU pair of trackers handles the interleaving. (Hot-bus
-    # accesses are also sequential-timed — the `contiguous` branch below.)
+    # DMA: src and dst streams each keep their own burst (LRU pair of
+    # trackers); no back-to-back requirement
     if address == bus.rom_next_addr:
       seq = true
     elif address == bus.rom_next_addr2:
@@ -119,12 +112,10 @@ proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int 
       bus.rom_next_addr2 = bus.rom_next_addr
       bus.rom_next_addr = address  # promoted; advanced below
     elif contiguous and bus.rom_next_addr != 1:
-      # ROM bus still hot from the previous DMA access (e.g. a ROM-to-ROM
-      # transfer's write right after its read) → sequential. But NOT on the
-      # DMA's very first ROM access: rom_next_addr == 1 is the cold sentinel
-      # seeded at DMA start, and a DMA is a fresh bus master whose first
-      # access to each stream is always non-sequential regardless of how hot
-      # the CPU left the bus.
+      # ROM bus still hot from the previous DMA access (a ROM-to-ROM
+      # transfer's write after its read) is sequential, except on the DMA's
+      # very first ROM access: rom_next_addr == 1 is the cold sentinel seeded
+      # at DMA start, and a fresh bus master's first access is non-sequential
       seq = true
       bus.rom_next_addr2 = bus.rom_next_addr
       bus.rom_next_addr = address
@@ -140,14 +131,11 @@ proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int 
   var new_free_since: CycleCount
   if seq:
     if fetch and bus.prefetch_on and not contiguous:
-      # Prefetch hit: the buffer worked ahead while the ROM bus was free,
-      # one halfword per S-access time (buffer holds up to 8 halfwords).
-      # Leftover credit carries over to the next fetch, so back-to-back
-      # buffer hits stay cheap until the buffer drains.
-      # rom_free_since can sit ahead of `now`: the waitloop fast-forward
-      # discards a partial instruction's cycles after bookkeeping already
-      # anticipated them. Unsigned subtraction would wrap (and crashed
-      # Pokémon FireRed with a RangeDefect); treat it as zero credit.
+      # Prefetch hit: the buffer worked ahead while the ROM bus was free, one
+      # halfword per S-access time (up to 8); leftover credit carries to the
+      # next fetch. rom_free_since can sit ahead of `now` (the waitloop
+      # fast-forward discards a partial instruction's cycles): zero credit,
+      # never an unsigned wrap.
       let s = int(bus.wait16_s[page])
       let credit = if now > bus.rom_free_since:
                      min(int(now - bus.rom_free_since), 8 * s)
@@ -171,20 +159,14 @@ proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int 
     when defined(fetchprof): fetchprof[8].inc
   if not fetch and not contiguous and bus.prefetch_on and not bus.dma_active and
      bus.fetch_page - 0x8 <= 5:
-    # Prefetch hand-off. A CPU *data* access to the gamepak takes the ROM bus
-    # away from the prefetcher, which has been streaming halfwords since
-    # rom_free_since (so it is `elapsed mod s` cycles into the halfword it is
-    # currently fetching). A halfword still in its address/wait phase is
-    # abandoned for free, but one already in its final cycle has its data
-    # committed on the bus and cannot be recalled — the CPU waits that one
-    # cycle out. Once the buffer is full (8 halfwords, 8*s cycles) nothing is
-    # in flight at all. Only fires while the CPU executes from the gamepak:
-    # the prefetcher does not run otherwise. This is the whole of the
-    # mGBA-suite Timing "ROM" prefetch-column shortfall for LDR/LDM (see the
-    # commit message for the per-row derivation); DMA hand-off is a separate,
-    # still-open case.
-    # `elapsed` is 0 when the waitloop fast-forward has pushed rom_free_since
-    # past `now` (same unsigned-wrap guard as the prefetch-hit branch above).
+    # Prefetch hand-off: a CPU data access takes the ROM bus from the
+    # prefetcher, which is `elapsed mod s` cycles into a halfword. A halfword
+    # in its address/wait phase is abandoned free; one in its final cycle has
+    # committed and the CPU waits that cycle out. Nothing is in flight once
+    # the buffer is full (8*s cycles). Only while the CPU executes from the
+    # gamepak. mGBA suite Timing "ROM" prefetch columns for LDR/LDM.
+    # `elapsed` is 0 when the waitloop fast-forward pushed rom_free_since
+    # past `now`.
     let elapsed = if now > bus.rom_free_since: int(now - bus.rom_free_since)
                   else: 0
     let commit =
@@ -196,40 +178,21 @@ proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int 
       cost += 1
       new_free_since += 1
   elif not fetch and bus.dma_active and bus.dma_first_rom:
-    # Prefetch hand-off to a DMA burst — the same arbitration as above, at the
-    # one access where a burst can meet the prefetcher: its FIRST touch of the
-    # ROM bus. From then on the prefetcher is stopped for the burst's duration
-    # (it has no bus to run on), so later accesses in the same burst never
-    # arbitrate again, which is why a 16-unit Short DMA is short by exactly the
-    # same one cycle as a 1-unit Trivial DMA.
-    #
-    # The phase is counted from the grant, NOT from `now - rom_free_since`: a
-    # granted DMA runs inside an event dispatch, where scheduler.tick_slow has
-    # rewound `sched.cycles` to the event's own cycle and still holds the rest
-    # of the CPU's tick quota back. That makes `now` lag the true bus position
-    # by 0..3 cycles, differently for each column of the same test — the reason
-    # the eight (s, elapsed) observations in docs/prefetch-model-rewrite.md came
-    # out mutually inconsistent and were read as "no modular rule can fit".
-    # Against the grant they are consistent: the burst's own elapsed time is
-    # exact, and the grant IS the cycle the ROM bus changed hands (the CPU's
-    # last ROM access had ended; only its next, non-ROM access has been charged
-    # ahead of the dispatch).
-    #
-    # The predicate is `k mod s == 0`, and it is the SAME arbitration as the
-    # CPU rule above, not a second one: a burst asserts its request the cycle
-    # before the access it is requesting, so the prefetch halfword it lands on
-    # is `k - 1` cycles old, and `(k-1) mod s == s-1` — "the halfword is in its
-    # final, uninterruptible cycle" — is exactly `k mod s == 0`. Off a boundary
-    # the prefetcher is still in a halfword's address phase and is dropped free.
-    # Derived from all 32 mGBA-suite DMA/ROM rows: k = 2 (start-up only) for a
-    # burst whose first access is the ROM read, k = 3 (start-up + the IWRAM
-    # read) for one writing to ROM, and those two against s = 2 and s = 3 split
-    # stall/no-stall exactly on this predicate, in both ARM and Thumb.
+    # Prefetch hand-off to a DMA burst: the same arbitration, at the one
+    # access where a burst can meet the prefetcher — its FIRST touch of the
+    # ROM bus (the prefetcher is then stopped for the burst). The phase is
+    # counted from the grant, not `now - rom_free_since`: a granted DMA runs
+    # inside an event dispatch where tick_slow has rewound sched.cycles and
+    # still holds back part of the CPU's tick quota, so `now` lags the bus by
+    # 0..3 cycles. A burst asserts its request the cycle before the access,
+    # so the halfword it lands on is k-1 cycles old and "final cycle"
+    # ((k-1) mod s == s-1) is `k mod s == 0`. Pinned by the 32 mGBA suite
+    # DMA/ROM Timing rows (k = 2 for a ROM-read burst, 3 for a ROM-write one).
     bus.dma_first_rom = false
     if bus.prefetch_on and bus.fetch_page - 0x8 <= 5:
       let s = int(bus.wait16_s[page])
       let k = int(now - bus.dma_grant_now)
-      # Buffer full (8 halfwords) => nothing in flight to arbitrate against.
+      # Buffer full (8 halfwords): nothing in flight to arbitrate against
       let idle = if now > bus.rom_free_since: int(now - bus.rom_free_since)
                  else: 0
       if k mod s == 0 and idle < 8 * s:
@@ -246,22 +209,11 @@ proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int 
 
 proc rom_fetch_cycles(bus: Bus; address: uint32; page: int;
                       is32: static bool): int {.inline.} =
-  ## Fetch-only specialisation of `rom_access_cycles`, for the CPU instruction
-  ## fetch path in `fetch_half`/`fetch_word`.
-  ##
-  ## Why it exists: `rom_access_cycles` is marked {.inline.} but is far too
-  ## large for clang to honour that, so every slow-path instruction fetch pays
-  ## a real call — and it is the single hottest non-inlined leaf in the
-  ## profile (7.9% of all samples on FireRed, 569 of its 600 samples reached
-  ## from `fetch_half`). Two of the three branch clusters in it are dead on a
-  ## fetch: the DMA burst trackers (a DMA is not the CPU, and the caller
-  ## routes `dma_active` back to the general proc) and the prefetch hand-off,
-  ## which is `not fetch` by construction. What is left is small enough to
-  ## inline, and `is32` being static folds the remaining selects away.
-  ##
-  ## This is a *duplicate* of the fetch-relevant half of `rom_access_cycles`,
-  ## not a refactor of it, so the two must be kept in step by hand. The
-  ## framebuffer-hash A/B and the mGBA Timing suite are what catch a drift.
+  ## Fetch-only specialisation of `rom_access_cycles` for the instruction
+  ## fetch path: the general proc is too large for clang to inline, and the
+  ## DMA trackers and prefetch hand-off are dead on a fetch. A duplicate of
+  ## the fetch-relevant half, kept in step by hand; the framebuffer-hash A/B
+  ## and the mGBA Timing suite catch drift.
   let now = bus.bus_now()
   let contiguous = now == bus.rom_free_since
   var cost: int
@@ -269,25 +221,16 @@ proc rom_fetch_cycles(bus: Bus; address: uint32; page: int;
   if address == bus.rom_next_addr and (bus.prefetch_on or contiguous):
     if bus.prefetch_on and not contiguous:
       # Same arithmetic as rom_access_cycles' prefetch-hit branch, with the
-      # `floor` term hoisted into the one case that can actually reach it.
-      #
-      # Write gap = now - rom_free_since and cap = 8*s (a full buffer). The
-      # general form is new_free_since = max(rom_free_since + need, done - cap)
-      # with done = now + cost, and for gap <= cap the max is ALWAYS the first
-      # term:
-      #   gap <  need   cost = need - gap, so done = rom_free_since + need
-      #                 exactly, and done - cap is below it.
-      #   gap >= need   cost = 1, so done - cap = rom_free_since + gap+1-cap,
-      #                 and gap <= cap makes gap+1-cap <= 1 <= need.
-      # Only a gap LONGER than a full buffer — the CPU off the ROM bus long
-      # enough that the prefetcher filled up and stopped — can push the floor
-      # above rom_free_since + need, which is exactly what the term is for.
-      # So the common path drops an add, a compare, a subtract and a max.
+      # `floor` term hoisted into the one case that can reach it: for gap <=
+      # cap, max(rom_free_since + need, done - cap) is always the first term
+      # (gap < need: done == rom_free_since + need; gap >= need: cost = 1 and
+      # gap+1-cap <= 1 <= need). Only a gap longer than a full buffer can
+      # raise the floor.
       let s = int(bus.wait16_s[page])
       let cap = 8 * s
       let need = when is32: 2 * s else: s
       if now <= bus.rom_free_since:
-        # Waitloop fast-forward pushed rom_free_since past `now`: no credit.
+        # Waitloop fast-forward pushed rom_free_since past `now`: no credit
         cost = need
         new_free_since = bus.rom_free_since + CycleCount(need)
       else:
@@ -316,9 +259,8 @@ proc rom_fetch_cycles(bus: Bus; address: uint32; page: int;
 
 proc access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int {.inline.} =
   if bits_range(address, 28, 31) > 0:
-    # Unmapped (open bus): nothing on the external bus responds, so the
-    # access completes in one internal cycle and must not disturb the ROM
-    # burst trackers.
+    # Unmapped (open bus): one internal cycle, and the ROM burst trackers are
+    # left alone
     return 1
   let page = int(bits_range(address, 24, 27))
   if page >= 0x8:
@@ -330,8 +272,7 @@ proc access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int {.in
     else:
       int(bus.wait16_n[page])  # SRAM: 8-bit bus, same cost either way
   else:
-    # Via the bus tables (not ACCESS_TIMING_TABLE directly) so the speed-mode
-    # underclock scaling applies; identical values otherwise.
+    # Via the bus tables so the speed-mode underclock scaling applies
     int(if is32: bus.wait32_n[page] else: bus.wait16_n[page])
 
 proc write_stub_u32(bios: var seq[byte]; offset: int; value: uint32) =
@@ -348,8 +289,7 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
   result.bios       = newSeq[byte](0x4000)
   result.wram_board = newSeq[byte](0x40000)
   result.wram_chip  = newSeq[byte](0x08000)
-  # Cache the ROM base + length (the cartridge is loaded before the bus). The
-  # buffer never moves and is a fixed size, so a raw pointer stays valid.
+  # The ROM buffer never moves and is a fixed size, so a raw pointer is safe
   result.rom_ptr = cast[ptr UncheckedArray[byte]](addr gba.cartridge.rom[0])
   result.rom_len = uint32(gba.cartridge.rom.len)
   if bios_path != "" and fileExists(bios_path):
@@ -359,8 +299,8 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
   else:
     result.stub_bios = true
     # Minimal BIOS stub: IRQ vector at 0x18 branches to the handler at 0x128
-    # (matching the real BIOS layout, so IRQ dispatch costs the same 3-cycle
-    # branch) which dispatches to the user handler at [0x03FFFFFC].
+    # (the real BIOS layout, so dispatch costs the same) which calls the user
+    # handler at [0x03FFFFFC].
     #   0x004: b 0x1C                         EA000004  (UND vector)
     #   0x01C: subs pc, lr, #4                E25EF004
     #   0x018: b 0x128                        EA000042
@@ -371,9 +311,8 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     #   0x138: ldmfd sp!, {r0-r3, r12, lr}    E8BD500F
     #   0x13C: subs  pc, lr, #4               E25EF004
     # UND vector (same word as the real BIOS at 0x04): the real handler's
-    # non-debug path restores SPSR and returns with subs pc, lr, #4 — the
-    # register save/restore nets out, so the stub keeps only the return
-    # (mGBA's HLE BIOS undefBase does the same)
+    # non-debug path nets out to the return, so the stub keeps only
+    # subs pc, lr, #4
     write_stub_u32(result.bios, 0x004, 0xEA000004'u32)
     write_stub_u32(result.bios, 0x01C, 0xE25EF004'u32)
     write_stub_u32(result.bios, 0x018, 0xEA000042'u32)
@@ -387,18 +326,15 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     # pipeline latch reads the same values as the real BIOS leaves
     write_stub_u32(result.bios, 0x140, 0xE92D5800'u32)
     write_stub_u32(result.bios, 0x144, 0xE55EC002'u32)
-    # Reset vector: games jump to 0x00000000 to trigger a warm re-boot
-    # (Earthworm Jim 2's IRQ dispatcher calls a NULL handler slot; on
-    # hardware the BIOS boot re-runs the logo sequence and re-enters the
-    # ROM). The swi traps into the HLE (recognized by pc == 8), which
-    # applies the boot's I/O effects and parks execution in the wait loop
-    # below; a second trap at the end re-enters the ROM (see hle_swi 0x00).
+    # Reset vector: games jump to 0 for a warm re-boot (Earthworm Jim 2's IRQ
+    # dispatcher calls a NULL handler slot). The swi traps into the HLE
+    # (pc == 8), which applies the boot's I/O effects and parks execution in
+    # the wait loop below; a second trap re-enters the ROM (hle_swi 0x00).
     write_stub_u32(result.bios, 0x000, 0xEF000000'u32)  # swi 0 (boot trap)
     # Boot wait loop (r0 = 0x04000000, r2 = vblank count, set by the trap):
-    # count r2 vcount==160 edges, then run to scanline 126, where the real
-    # boot hands control to the ROM. Executing stub code keeps the ~271-frame
-    # wait inside the normal per-frame loop and makes the state
-    # save/rollback-transparent (the whole continuation is PC + r0-r2).
+    # count r2 vcount==160 edges, then run to scanline 126 where the real
+    # boot hands control to the ROM. Executing stub code keeps the wait
+    # inside the per-frame loop and save/rollback-transparent.
     write_stub_u32(result.bios, 0x200, 0xE1D010B6'u32)  # ldrh r1, [r0, #6]
     write_stub_u32(result.bios, 0x204, 0xE35100A0'u32)  # cmp  r1, #160
     write_stub_u32(result.bios, 0x208, 0x1AFFFFFC'u32)  # bne  0x200
@@ -411,15 +347,11 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     write_stub_u32(result.bios, 0x224, 0xE351007E'u32)  # cmp  r1, #126
     write_stub_u32(result.bios, 0x228, 0x1AFFFFFC'u32)  # bne  0x220
     write_stub_u32(result.bios, 0x22C, 0xEF000000'u32)  # swi 0 (boot finish)
-    # SoundGetJumpList (SWI 0x2A) support: the table of 36 sound-driver
-    # function addresses the real BIOS copies to [r0] (BIOS 0x3738), with
-    # the same values as the real BIOS so games that stash or compare the
-    # pointers see the real thing. The stub carries executable code at those
-    # addresses: entry 35 (0x23B0, "channel clear": zeroes 16 words at r0,
-    # preserving r4 via ip like the real routine) is implemented because
-    # Cyberdrive Zoids calls it during sound-driver init; the remaining
-    # entries return immediately (bx lr) — the driver work they would do is
-    # the BIOS-resident MP2K engine, which the HLE does not model.
+    # SoundGetJumpList (SWI 0x2A): the 36 sound-driver function addresses the
+    # real BIOS copies to [r0] (BIOS 0x3738), same values so games that
+    # compare the pointers see the real thing. Entry 35 (0x23B0, channel
+    # clear) is implemented because Cyberdrive Zoids calls it; the rest
+    # return immediately (the BIOS-resident MP2K engine is not modeled).
     const JUMP_LIST = [0x2665'u32, 0x26CF, 0x26EF, 0x2709, 0x271D, 0x2665,
                        0x2665, 0x2665, 0x2665, 0x274B, 0x2755, 0x2769,
                        0x277B, 0x27A9, 0x27BB, 0x27CF, 0x27E3, 0x27F5,
@@ -438,17 +370,13 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
                  0xC01E, 0xC01E, 0xC01E, 0xC01E, 0x4664, 0x4770]:
       result.bios[0x23B0 + i * 2]     = uint8(h and 0xFF)
       result.bios[0x23B0 + i * 2 + 1] = uint8(h shr 8)
-    # SoundDriverMain dispatch (SWI 0x1C jumps here; thumb, at the real
-    # routine's address 0x1DC4): the lock/callback portion of the BIOS
-    # SoundMain — check the SoundInfo ident magic at [0x03007FF0], lock
-    # (ident+1), call the game-registered hooks [info+32]([info+36]) and
-    # [info+40](info) (the ROM-resident music player: Cyberdrive Zoids'
-    # main loop blocks until these have run), unlock and return. The BIOS
-    # PCM mixer that follows in the real routine is not modeled.
-    # The stub runs in SVC mode with the SVC stack and banked lr, like the
-    # real routine under the real dispatcher (hle_swi 0x1C stages the mode
-    # switch); the closing `swi 0` traps are the dispatcher's `movs pc, lr`
-    # exit, which the HLE performs (restore SPSR_svc, return to lr_svc).
+    # SoundDriverMain dispatch (SWI 0x1C, thumb at the real 0x1DC4): the
+    # lock/callback part of the BIOS SoundMain — check the SoundInfo ident at
+    # [0x03007FF0], lock, call the game hooks [info+32]([info+36]) and
+    # [info+40](info) (Cyberdrive Zoids' main loop blocks until they run),
+    # unlock. The PCM mixer is not modeled. Runs in SVC mode like the real
+    # routine (hle_swi 0x1C stages the switch); the closing `swi 0` traps are
+    # the dispatcher's `movs pc, lr` exit, performed by the HLE.
     #   ldr r2, =0x03007FF0; ldr r0, [r2]; ldr r2, =magic; ldr r3, [r0]
     #   cmp r3, r2; bne ret; adds r3, #1; str r3, [r0]      ; lock
     #   push {r4, lr}; adds r4, r0, #0
@@ -470,12 +398,10 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     write_stub_u32(result.bios, 0x1E04, 0x03007FF0'u32)
     write_stub_u32(result.bios, 0x1E08, 0x68736D53'u32)
   result.gpio = new_gpio(gba)
-  # Tilt carts can't be probed at runtime (the game just reads the registers
-  # and believes whatever comes back), so detection is by game code:
+  # Tilt carts cannot be probed at runtime, so detection is by game code:
   # KYG* = Yoshi's Universal Gravitation / Topsy-Turvy, KHPJ = Koro Koro
-  # Puzzle. Note these carts really save to EEPROM; save-type pinning is a
-  # separate change — the tilt window below is intercepted before storage
-  # regardless of what the save heuristic decided.
+  # Puzzle. The tilt window is intercepted before storage regardless of the
+  # save heuristic.
   result.tilt_present = gba.cartridge != nil and
     gba.cartridge.game_code() in ["KYGE", "KYGJ", "KYGP", "KHPJ"]
   result.update_waitcnt(WAITCNT())  # reset-state waitstates
@@ -483,12 +409,12 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
 proc bus_page(address: uint32): int {.inline.} =
   int(bits_range(address, 24, 27))
 
-# ---- Tilt sensor (0x0E008000-0x0E008500, GBATEK "GBA Cart Tilt Sensor") ----
-# Two-step sampling handshake mirroring MBC7's: write 0x55 to 0x8000 to arm,
-# 0xAA to 0x8100 to latch a 12-bit sample per axis. Reads deliver the sample
-# split low byte / high nibble; X's high read carries an ADC-ready flag in
-# bit 7 (always ready here, like mGBA). Everything else in the window reads
-# 0xFF. Centers/range per GBATEK's example calibration.
+# Tilt sensor (0x0E008000-0x0E008500, GBATEK "GBA Cart Tilt Sensor"): write
+# 0x55 to 0x8000 to arm, 0xAA to 0x8100 to latch a 12-bit sample per axis.
+# Reads deliver low byte / high nibble; X's high read carries an ADC-ready
+# flag in bit 7 (always ready here; assumed, no ROM pins this). Everything
+# else in the window reads 0xFF. Centers/range per GBATEK's example
+# calibration.
 
 const
   TILT_X_CENTER = 0x392
@@ -540,10 +466,8 @@ proc write_u16_ptr(buf: var seq[byte]; offset: uint32; val: uint16) {.inline.} =
 proc write_u32_ptr(buf: var seq[byte]; offset: uint32; val: uint32) {.inline.} =
   cast[ptr uint32](addr buf[offset])[] = val
 
-# ---- ROM reads (bounds-checked; past the ROM returns the open-bus pattern) ----
-# The ROM buffer is sized to the next power of two >= the cart, not a flat 32 MB.
-# In-bounds reads (all instruction fetches and virtually all data reads) take the
-# fast path; the branch predicts perfectly, so this is free in practice.
+# ROM reads: the buffer is sized to the next power of two >= the cart; reads
+# past it return the open-bus pattern
 
 proc rom_read8(bus: Bus; address: uint32): uint8 {.inline.} =
   let idx = address and 0x01FFFFFF'u32
@@ -565,20 +489,19 @@ proc rom_read32(bus: Bus; address: uint32): uint32 {.inline.} =
 
 proc read_byte_internal*(bus: Bus; address: uint32): uint8 {.inline.} =
   if bits_range(address, 28, 31) > 0:
-    # 10000000-FFFFFFFF is not decoded by the cartridge/bus at all: reads
-    # return open bus, never a mirror of the low regions. Minish Cap relies
-    # on this (it walks an animation script through a NULL sprite entry into
-    # the BIOS open-bus latch 0xE55EC002 and only escapes the walk because
-    # the bytes it reads there are the non-zero prefetched opcode).
+    # 10000000-FFFFFFFF is not decoded: open bus, never a mirror. Minish Cap
+    # walks an animation script through a NULL entry into the BIOS open-bus
+    # latch and escapes only because the bytes there are the non-zero
+    # prefetched opcode.
     return bus.read_open_bus_value(address)
   case bits_range(address, 24, 27)
   of 0x0:
     if bits_range(bus.gba.cpu.r[15], 24, 27) == 0:
       bus.bios[address and 0x3FFF'u32]
     elif (address and 0x00FFFFFF'u32) >= 0x4000'u32 and not bus.dma_active:
-      # Page-0 out-of-bounds (00004000-00FFFFFF) is unused memory, not BIOS:
-      # a CPU read returns the open-bus value (the prefetched opcode), not the
-      # protected-BIOS latch (GBATEK "Reading from Unused Memory").
+      # Page-0 out-of-bounds (00004000-00FFFFFF) is unused memory: a CPU read
+      # returns open bus, not the BIOS latch (GBATEK "Reading from Unused
+      # Memory")
       bus.read_open_bus_value(address)
     else:
       # BIOS reads are latched to last successful read
@@ -700,8 +623,7 @@ proc read_word_internal*(bus: Bus; address: uint32): uint32 {.inline.} =
   else: raise newException(Exception, "Unmapped bus read_word: " & hex_str(address))
 
 when defined(linkTrace):
-  # Debug watch (trade-repro harness, -d:linkTrace): fires on any IWRAM write
-  # covering `wramWatchOff`. Compiled out entirely in normal builds.
+  # -d:linkTrace debug watch: fires on any IWRAM write covering wramWatchOff
   var onWramChipWrite*: proc(gba: GBA; off: int; val: uint32; width: int) = nil
   var wramWatchOff* = -1
   template chipWatch(bus: Bus; o: uint32; v: uint32; w: int) =
@@ -714,10 +636,9 @@ else:
 proc write_byte_internal*(bus: Bus; address: uint32; value: uint8) =
   if bits_range(address, 28, 31) > 0: return
   # Self-modifying-code pipeline capture: a write landing on the two opcodes
-  # the hardware pipeline has already fetched must not affect execution, so
-  # snapshot the pre-write values. Stand down while a refill is pending (right
-  # after a PC write): nothing has been fetched at the new PC yet, and the
-  # refill must observe the write (Golden Sun TLA's DMA-built stack trampoline)
+  # already fetched must not affect execution, so snapshot them first. Stands
+  # down while a refill is pending: nothing has been fetched at the new PC yet
+  # and the refill must observe the write (Golden Sun TLA's stack trampoline)
   if not bus.gba.cpu.refill_pending and
      address <= bus.gba.cpu.r[15] and address >= bus.gba.cpu.r[15] - 4:
     bus.gba.cpu.fill_pipeline()
@@ -762,8 +683,8 @@ proc write_half_internal*(bus: Bus; address: uint32; value: uint16) =
     chipWatch(bus, address and 0x7FFF'u32, uint32(value), 2)
   of 0x4:
     if (address and 0xFFFFFF'u32) == 0x132'u32:
-      # KEYCNT: keep the 16-bit store atomic so the keypad IRQ check never
-      # observes a half-written transient (see write_keycnt16).
+      # KEYCNT: atomic 16-bit store so the keypad IRQ check never sees a
+      # half-written transient (write_keycnt16)
       bus.gba.keypad.write_keycnt16(value)
     else:
       bus.write_byte_internal(address, uint8(value))
@@ -786,15 +707,11 @@ proc write_half_internal*(bus: Bus; address: uint32; value: uint16) =
     elif bus.gba.storage.eeprom_at(address):
       bus.gba.storage[address] = uint8(value)
   of 0xE, 0xF:
-    # The backup chip is on an 8-bit bus, so a halfword store moves exactly one
-    # byte. STRH drives the halfword onto BOTH halves of the 32-bit data bus,
-    # and the chip latches only the lane its A0 line selects, so the byte that
-    # lands at `orig` is value >> (8 * (orig and 1)): an ODD address stores the
-    # high byte, not the low one. (GBATEK "GBA Cart Backup SRAM/FLASH" — 8-bit
-    # bus; jsmolka save/{sram,flash64,flash128} test 6 asserts both halves.)
-    # Note this is the byte the *device* sees, so it applies to the tilt sensor
-    # sharing the bus as well; every real tilt access is at an even address, so
-    # that arm is unchanged in practice.
+    # The backup chip is on an 8-bit bus: STRH drives the halfword onto both
+    # halves of the data bus and the chip latches the lane A0 selects, so the
+    # byte at `orig` is value >> (8 * (orig and 1)) — an odd address stores
+    # the high byte (GBATEK "GBA Cart Backup SRAM/FLASH"; jsmolka
+    # save/{sram,flash64,flash128} test 6). Applies to the tilt sensor too.
     let b = uint8(value shr (8'u32 * (orig and 1'u32)))
     if bus.tilt_hit(orig): bus.tilt_write(orig, b)
     else: bus.gba.storage[orig] = b
@@ -815,7 +732,7 @@ proc write_word_internal*(bus: Bus; address: uint32; value: uint32) =
   of 0x4:
     if (address and 0xFFFFFF'u32) == 0x130'u32:
       # Word store covering KEYINPUT (read-only) + KEYCNT: commit KEYCNT
-      # atomically (see write_keycnt16).
+      # atomically (write_keycnt16)
       bus.write_byte_internal(address,     uint8(value))
       bus.write_byte_internal(address + 1, uint8(value shr 8))
       bus.gba.keypad.write_keycnt16(uint16(value shr 16))
@@ -842,9 +759,8 @@ proc write_word_internal*(bus: Bus; address: uint32; value: uint32) =
     elif bus.gba.storage.eeprom_at(address):
       bus.gba.storage[address] = uint8(value)
   of 0xE, 0xF:
-    # Same 8-bit-bus lane select as write_half_internal, but STR drives the
-    # word unrotated across all four lanes, so A[1:0] picks the byte:
-    # value >> (8 * (orig and 3)). jsmolka save/* test 8 walks all four.
+    # Same lane select as write_half_internal; STR drives the word across all
+    # four lanes, so A[1:0] picks the byte (jsmolka save/* test 8)
     let b = uint8(value shr (8'u32 * (orig and 3'u32)))
     if bus.tilt_hit(orig): bus.tilt_write(orig, b)
     else: bus.gba.storage[orig] = b
@@ -853,9 +769,8 @@ proc write_word_internal*(bus: Bus; address: uint32; value: uint32) =
 # ---- Instruction-fetch fast path ----
 
 proc install_fetch_cache(bus: Bus; page: uint32): bool =
-  # Only pages whose fetches are plain masked memory reads are cacheable.
-  # BIOS (latch + PC checks), MMIO, open bus, and 0xD (possible EEPROM
-  # mapping) always take the generic path.
+  # Only pages whose fetches are plain masked reads are cacheable; BIOS,
+  # MMIO, open bus and 0xD (possible EEPROM) take the generic path
   case page
   of 0x2:
     bus.fetch_ptr = cast[ptr UncheckedArray[byte]](addr bus.wram_board[0])
@@ -869,9 +784,8 @@ proc install_fetch_cache(bus: Bus; page: uint32): bool =
   else:
     return false
   bus.fetch_page = page
-  # Via the bus tables (not ACCESS_TIMING_TABLE directly) so the speed-mode
-  # underclock scaling applies; identical values otherwise. Only consumed on
-  # the non-ROM (pages 2/3) fetch path.
+  # Via the bus tables so the underclock scaling applies; only consumed on
+  # the non-ROM (pages 2/3) fetch path
   bus.fetch_c16 = int(bus.wait16_n[int(page)])
   bus.fetch_c32 = int(bus.wait32_n[int(page)])
   true
@@ -881,14 +795,12 @@ proc fetch_half*(bus: Bus; address: uint32): uint16 {.inline.} =
   if page == bus.fetch_page or bus.install_fetch_cache(page):
     if page >= 0x8:
       when defined(flatrom):
-        # MEASUREMENT PROBE (-d:flatrom): every ROM fetch is a flat S access,
-        # no burst/prefetch bookkeeping. Sizes the host cost of the faithful
-        # ROM timing model; NOT shippable (emulated timing shifts).
+        # -d:flatrom measurement probe: every ROM fetch is a flat S access;
+        # not shippable
         bus.cycles += int(bus.wait16_s[page])
       else:
-        # Straight-line execution fast path: while the fetch stream is hot
-        # (unbroken), a sequential fetch is a plain S access and needs no
-        # absolute-time bookkeeping at all
+        # While the fetch stream is hot, a sequential fetch is a plain S
+        # access with no absolute-time bookkeeping
         if bus.rom_hot and address == bus.rom_next_addr:
           when defined(fetchprof): fetchprof[0].inc
           when defined(pftrace):
@@ -957,15 +869,11 @@ proc catch_up_slow(bus: Bus) =
 
 proc catch_up(bus: Bus) {.inline.} =
   # Advance the scheduler to the current mid-instruction cycle so MMIO
-  # accesses observe/affect timers, IF flags, etc. at the exact cycle they
-  # happen. Skipped while an event handler runs (handlers must stay pure so
-  # the DMA pump, which runs after dispatch, arbitrates all deferred work).
-  # The accessors below additionally skip it while a DMA burst runs
-  # (dma_active): a transfer must not be preempted between its read and
-  # write — the DMA loop drains due events at transfer boundaries instead
-  # (timer reads stay exact regardless: get_current_tm includes bus.cycles).
-  # The common no-event-due case stays inline; event dispatch takes the
-  # slow path.
+  # accesses observe timers, IF flags etc. exactly. Skipped while an event
+  # handler runs (handlers stay pure; the post-dispatch DMA pump arbitrates
+  # deferred work) and, in the accessors below, while a DMA burst runs (a
+  # transfer must not be preempted between its read and write; the DMA loop
+  # drains due events at transfer boundaries).
   let s = bus.sched
   if s.dispatching: return
   let target = s.cycles + CycleCount(bus.cycles)
@@ -976,17 +884,12 @@ proc catch_up(bus: Bus) {.inline.} =
   else:
     bus.catch_up_slow()
 
-# The dma_pending leg of the catch-up condition (identical in all six
-# accessors below): arming an immediate DMA schedules etDMA a few cycles out
-# (DMA_START_DELAY, dma.nim) and the CPU keeps executing until it fires. An
-# accessor's data effect happens the moment it runs, but its cycles normally
-# reach the scheduler only at instruction end — so an access positioned after
-# the burst's start cycle would land BEFORE the burst (which runs inside this
-# catch_up: the etDMA dispatch latches requests, the post-dispatch pump runs
-# them), inverting the CPU-vs-DMA memory order that hardware's bus takeover
-# enforces. Forcing catch-up on every access during the armed window keeps
-# the interleaving cycle-exact; MMIO (page 0x4) already catches up
-# unconditionally for timer/IF exactness.
+# The dma_pending leg (identical in all six accessors): an immediate DMA
+# fires DMA_START_DELAY cycles after arming while the CPU keeps executing; an
+# accessor's data effect happens when it runs but its cycles reach the
+# scheduler only at instruction end, so an access positioned after the
+# burst's start would otherwise land before it. Forcing catch-up during the
+# armed window keeps the CPU-vs-DMA memory order cycle-exact.
 proc `[]`*(bus: Bus; address: uint32): uint8 =
   bus.rom_cool()
   bus.cycles += bus.access_cycles(address, is32 = false, fetch = false)
@@ -1048,17 +951,15 @@ proc read_word_rotate*(bus: Bus; address: uint32): uint32 =
 proc read_open_bus_value*(bus: Bus; address: uint32): uint8 =
   log("Reading open bus at " & hex_str(address))
   let shift = (address and 3) * 8
-  # A DMA is the last bus master to have driven the data bus: reads of
-  # unmapped space made by the DMA itself, or by the first CPU instruction
-  # after the burst hands the bus back, return the last word the DMA moved
-  # (the CPU prefetcher hasn't overwritten the latch yet). Matches mGBA's
-  # gba->bus / dmaPC model and hardware (GBATEK "Reading from Unused Memory":
-  # "after DMA: recently transferred data").
+  # A DMA is the last bus master to have driven the data bus: unmapped reads
+  # by the DMA itself, or by the first CPU instruction after the burst,
+  # return the last word it moved (GBATEK "Reading from Unused Memory":
+  # after DMA, recently transferred data; the one-instruction window is
+  # assumed, no ROM pins it).
   if bus.dma_active or bus.dma_open_bus_armed:
     return uint8(bus.dma_open_bus shr shift)
   let pc = bus.gba.cpu.r[15]
-  # Guard: if PC is in MMIO, unmapped memory, or otherwise unreadable, avoid
-  # infinite recursion (region 0x1 reads recurse back into this proc)
+  # PC in MMIO/unmapped memory would recurse back into this proc
   let pc_region = bits_range(pc, 24, 27)
   if pc_region == 0x1 or pc_region == 0x4 or pc_region > 0xD or
      bits_range(pc, 28, 31) > 0:  # PC itself in unmapped space would recurse

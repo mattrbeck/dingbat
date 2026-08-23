@@ -1,31 +1,18 @@
 /*
- * iOS audio backend for the dingbat core, compiled into libdingbat.a via a
- * {.compile.} pragma in src/dingbat_ios.nim.
+ * iOS audio backend, compiled in by src/dingbat_ios.nim. The APUs reach audio
+ * only through SDL2 functions declared with `importc` (link-time
+ * dependencies); there is no SDL2 on iOS, so this file provides those symbols
+ * over a mutex-guarded ring buffer, keeping the APU sources identical to the
+ * desktop build.
  *
- * The emulator core's APUs (src/dingbat/gba/apu.nim, src/dingbat/gb/apu.nim)
- * talk to audio exclusively through a handful of SDL2 C functions declared
- * with `importc` — they are *link-time* dependencies, not source ones. On iOS
- * there is no SDL2; instead this file provides those exact symbols, backed by
- * a mutex-guarded ring buffer. That keeps the core sources byte-identical to
- * the desktop build (zero `when defined(ios)` edits in the APUs) while giving
- * the Swift shell a pull-style API for AVAudioSourceNode.
- *
- * Producer: the emulator thread. The GBA APU queues int16 stereo frames and
- * the GB APU queues float32 stereo frames, both at 32768 Hz, via
- * SDL_QueueAudio. The active sample format is whatever the last
- * SDL_OpenAudio() call asked for.
- *
- * Consumer: the CoreAudio render thread calls dingbat_audio_read() from the
- * AVAudioSourceNode render block. It converts to float32 and never touches
- * the Nim runtime, so it is safe off the main thread.
- *
- * Pacing: the core's audio-sync model is "block in get_sample() while more
- * than two APU buffers are queued". The Swift shell avoids ever hitting that
- * blocking loop by checking dingbat_audio_ahead() before each frame (same as
- * the desktop main loop). If the shell misbehaves — or the audio engine stops
- * mid-frame (interruption, route change) — SDL_Delay() self-heals: after
- * ~250 ms without the consumer draining anything it drops the queued audio,
- * so emulation can stall at worst briefly, never deadlock.
+ * Producer: the emulator thread, via SDL_QueueAudio (GBA int16 stereo, GB
+ * float32 stereo, both 32768 Hz; the format is whatever the last
+ * SDL_OpenAudio() asked for). Consumer: the CoreAudio render thread calls
+ * dingbat_audio_read(), which converts to float32 and never touches the Nim
+ * runtime. The shell checks dingbat_audio_ahead() before each frame so the
+ * APU's blocking get_sample() backstop is rarely hit; if the audio engine
+ * stops mid-frame (interruption, route change), SDL_Delay() drops the queue
+ * after ~250 ms so emulation never deadlocks.
  */
 
 #include <stdint.h>
@@ -49,9 +36,8 @@ typedef struct {
 #define AUDIO_S16LSB 0x8010
 #define AUDIO_F32LSB 0x8120
 
-/* 256 KiB ring: ~2 s of s16 stereo or ~1 s of f32 stereo at 32768 Hz.
- * The pacing loop keeps occupancy near two APU buffers (~4-8 KiB), so the
- * capacity is pure headroom; overflow drops the oldest bytes. */
+/* 256 KiB ring: ~2 s of s16 stereo or ~1 s of f32 stereo at 32768 Hz. Pacing
+ * keeps occupancy near two APU buffers; overflow drops the oldest bytes. */
 #define RING_CAP (256 * 1024)
 
 static uint8_t  g_ring[RING_CAP];
@@ -145,9 +131,8 @@ void SDL_ClearQueuedAudio(uint32_t dev) {
 }
 
 void SDL_Delay(uint32_t ms) {
-  /* Only reached from the APUs' audio-sync backstop loops. Self-heal a
-   * stalled consumer (stopped audio engine) by dropping the queue after
-   * 250 ms so the emulator thread can never spin forever. */
+  /* Only reached from the APUs' audio-sync backstop loops. Drop the queue
+   * after 250 ms without a drain so the emulator thread cannot spin forever. */
   usleep(ms * 1000);
   g_stall_ms += (int)ms;
   if (g_stall_ms >= 250) {
@@ -158,10 +143,9 @@ void SDL_Delay(uint32_t ms) {
 
 /* ---- Pull API for the Swift shell (AVAudioSourceNode render block) ---- */
 
-/* Fills dst with up to max_frames interleaved float32 stereo frames.
- * Returns the number of frames written; the caller zero-fills the rest.
- * Realtime-safe: one mutex (uncontended in practice, held only for memcpy)
- * and no allocation, no Nim runtime. */
+/* Fills dst with up to max_frames interleaved float32 stereo frames and
+ * returns the count; the caller zero-fills the rest. Realtime-safe: one
+ * mutex, no allocation, no Nim runtime. */
 int dingbat_audio_read(float *dst, int max_frames) {
   if (dst == NULL || max_frames <= 0) return 0;
   pthread_mutex_lock(&g_lock);

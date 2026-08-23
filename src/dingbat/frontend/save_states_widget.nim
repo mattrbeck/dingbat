@@ -1,12 +1,7 @@
-## ImGui "Save States" window: a 3x3 grid of nine slots, each showing a
-## thumbnail of the saved state (or an "Empty" placeholder). The user clicks a
-## slot to select it, then Save or Load. Slot 0 is the "Quick" slot shared with
-## the Quick Save / Quick Load menu items and hotkeys.
-##
-## The widget owns no core state and does no file or GL work itself: the app
-## supplies each slot's thumbnail texture + metadata via `set_slot`, refreshes
-## on open through `on_open`, and performs the actual save/load in the
-## `on_save` / `on_load` callbacks.
+## ImGui "Save States" window: a 3x3 grid of slots; slot 0 is the Quick slot
+## shared with the Quick Save / Quick Load hotkeys. Owns no core state and does
+## no file or GL work: the app fills slots via `set_slot`, refreshes through
+## `on_open`, and saves/loads in the callbacks.
 
 import imguin/cimgui
 
@@ -22,10 +17,7 @@ type
     window*:   bool
     selected*: int
     have_rom*: bool
-    notice*:   string  ## last load failure, shown under the grid.
-                       ## The core says exactly why a state was
-                       ## refused; before this the native app threw
-                       ## that away and the user saw nothing at all.
+    notice*:   string  ## last load failure (the core's reason), shown under the grid
     slots*:    array[NUM_SLOTS, StateSlot]
     on_open*:   proc() {.closure.}         ## (re)populate slots + textures
     on_save*:   proc(slot: int) {.closure.}
@@ -42,22 +34,18 @@ proc set_slot*(w: SaveStatesWidget; i: int; used: bool; label: string;
   w.slots[i] = StateSlot(used: used, label: label, tex: tex, w: tw, h: th)
 
 proc mark_stale*(w: SaveStatesWidget) =
-  ## Re-run on_open on the next render. Call after a state file changes
-  ## outside the widget (Quick Save writes slot 1 while the window is open,
-  ## which otherwise kept showing "Empty").
+  ## Re-run on_open on the next render; call after a state file changes
+  ## outside the widget (Quick Save while the window is open).
   w.was_open = false
 
 proc dim(): ImVec4 = ImVec4(x: 0.6, y: 0.6, z: 0.6, w: 1.0)
 proc sel_col(): ImVec4 = ImVec4(x: 0.26, y: 0.59, z: 0.98, w: 1.0)
-# Surround for an unselected thumbnail cell: near-black, so the bright blue
-# sel_col ring is unmistakably "selected" (the default Col_Button blue read
-# as a second selection ring around every thumbnail).
+# Near-black surround for unselected thumbnails; the default Col_Button blue
+# read as a selection ring around every cell.
 proc thumb_bg(): ImVec4 = ImVec4(x: 0.09, y: 0.10, z: 0.12, w: 1.0)
 
-# imguin's igCalcTextSize tracks a cimgui signature change: older releases
-# fill an out-pointer, current ones return the ImVec2 by value. CI installs
-# the latest imguin while dev machines may hold the older pin, so support
-# both — the two signatures are disjoint, exactly one branch compiles.
+# imguin's igCalcTextSize changed from an out-pointer to returning ImVec2;
+# CI and dev machines hold different pins, so exactly one branch compiles.
 proc calc_text_size(text: string): ImVec2 =
   when compiles(igCalcTextSize(cstring(text), nil, false, -1.0'f32)):
     let s = igCalcTextSize(cstring(text), nil, false, -1.0'f32)
@@ -68,8 +56,8 @@ proc calc_text_size(text: string): ImVec2 =
     sz
 
 proc fit_caption(text: string; avail: float32): string =
-  ## Truncate `text` with a trailing ".." so it renders within `avail` px.
-  ## Slot captions are plain ASCII (timestamps), so byte truncation is safe.
+  ## Truncate with a trailing ".." to fit `avail` px. Captions are ASCII
+  ## timestamps, so byte truncation is safe.
   if calc_text_size(text).x <= avail: return text
   result = text
   while result.len > 1:
@@ -82,25 +70,19 @@ proc render*(w: SaveStatesWidget) =
   if not w.window:
     w.was_open = false
     return
-  # Refresh slot thumbnails/metadata the moment the window opens.
   if not w.was_open:
     w.was_open = true
     if w.on_open != nil: w.on_open()
 
-  # Tall enough that all three rows AND the action row fit without scrolling
-  # (the old 392 default put Save/Load/Delete below the fold), but never
-  # taller than the app window itself: at the default 3x GBA size the fixed
-  # 580 default overflowed the viewport and clipped the pinned action row
-  # entirely. Uniform one-caption-line cells need ~500px; the grid child
-  # scrolls when even that doesn't fit, the action row stays pinned.
-  # (Position is pinned too: imgui's cascading default of y=60 pushed even a
-  # height-clamped window past the bottom edge.)
+  # Tall enough for three rows plus the action row (~500px) but clamped to
+  # the viewport, so the pinned action row never falls off the app window.
+  # Position is pinned too: imgui's cascading default y=60 pushed even a
+  # height-clamped window past the bottom edge.
   let work_h = igGetMainViewport().WorkSize.y
   igSetNextWindowPos(ImVec2(x: 60, y: 28), cint(ImGui_Cond_FirstUseEver),
                      ImVec2(x: 0, y: 0))
-  # Width 470: 3 x 136px cells + 2 x 10 spacing + window padding + room for
-  # the grid child's scrollbar, which otherwise ate into the third column's
-  # captions whenever the grid had to scroll.
+  # Width 470: 3 x 136px cells + 2 x 10 spacing + padding + room for the grid
+  # child's scrollbar, which otherwise eats the third column's captions.
   igSetNextWindowSize(ImVec2(x: 470, y: min(500.0'f32, work_h - 56.0'f32)),
                       cint(ImGui_Cond_FirstUseEver))
   if igBegin("Save States", addr w.window, 0):
@@ -111,19 +93,15 @@ proc render*(w: SaveStatesWidget) =
       igTextColored(dim(), "Slot 1 is the Quick slot (Quick Save / Quick Load).")
       igSeparator()
 
-      # The slot grid lives in a child region that reserves room for the
-      # action row below, so Save/Load/Delete stay reachable at any window
-      # size — a too-small window scrolls the grid, never the buttons.
+      # The grid child reserves room for the action row: a too-small window
+      # scrolls the grid, never the buttons.
       let footer = igGetFrameHeightWithSpacing() + 10.0'f32
       discard igBeginChild_Str("##slots", ImVec2(x: 0, y: -footer),
                                ImGuiChildFlags(0), ImGuiWindowFlags(0))
-      # Every cell is the same fixed-size button whether it holds a thumbnail
-      # or not — the old code sized ImageButton to the thumbnail's native
-      # framebuffer dimensions (240x160 for GBA), so used slots dwarfed empty
-      # ones and the grid rows fell out of alignment. Thumbnails are drawn
-      # letterboxed and centered inside the cell instead; the small inset
-      # keeps a visible ring of button color around a full-bleed thumb so the
-      # blue selected state still reads.
+      # Every cell is the same fixed-size button, thumbnail or not (sizing to
+      # the thumbnail misaligned the rows). Thumbnails are letterboxed inside
+      # it; the inset leaves a ring of button color so the selected state
+      # still reads.
       const CELL_W = 136.0'f32
       const CELL_H = 90.0'f32   # 3:2 like the GBA screen; GB (10:9) letterboxes
       const THUMB_INSET = 3.0'f32
@@ -143,7 +121,7 @@ proc render*(w: SaveStatesWidget) =
           clicked = igButton("##thumb", ImVec2(x: CELL_W, y: CELL_H))
           var rmin, rmax: ImVec2
           # imguin <= 1.92.4 uses a pOut out-param; later versions return by
-          # value (same drift calc_text_size above absorbs for igCalcTextSize)
+          # value (the same drift calc_text_size absorbs).
           when compiles(igGetItemRectMin(addr rmin)):
             igGetItemRectMin(addr rmin)
             igGetItemRectMax(addr rmax)
@@ -168,15 +146,13 @@ proc render*(w: SaveStatesWidget) =
                               ImVec2(x: 0, y: 0), ImVec2(x: 1, y: 1),
                               0xFFFFFFFF'u32)
         elif slot.used:
-          # State file with no embedded thumbnail (older save format).
+          # State file with no embedded thumbnail (older format).
           clicked = igButton("No preview", ImVec2(x: CELL_W, y: CELL_H))
         else:
           clicked = igButton("Empty", ImVec2(x: CELL_W, y: CELL_H))
-        # Caption: slot number (+ "Quick" tag) on the left, timestamp (or
-        # "empty") right-aligned to the cell's edge — one line per slot, so
-        # every row of cells sits at the same height. The caption must never
-        # exceed CELL_W or it widens the whole group and misaligns the grid
-        # columns, so the timestamp truncates to the space the tag leaves.
+        # One caption line per slot, right-aligned to the cell edge. It must
+        # never exceed CELL_W (that widens the group and misaligns the
+        # columns), so the timestamp truncates to the space the tag leaves.
         let tag = $(i + 1) & (if i == 0: " · Quick" else: "")
         igTextColored(dim(), cstring(tag))
         igSameLine(0, 0)
@@ -201,22 +177,20 @@ proc render*(w: SaveStatesWidget) =
       let sel = w.slots[w.selected]
       const BTN_W = 90.0'f32
       const GAP = 10.0'f32
-      # Delete on the left (disabled when the slot is empty).
       if not sel.used: igBeginDisabled(true)
       if igButton("Delete", ImVec2(x: BTN_W, y: 0)):
         if w.on_delete != nil: w.on_delete(w.selected)
         if w.on_open != nil: w.on_open()
       if not sel.used: igEndDisabled()
-      # Save + Load, right-aligned. Positioned from the window width (a stable
-      # imguin API) rather than igGetContentRegionAvail, whose ImVec2-return
-      # signature differs across imguin versions and broke the Windows build.
+      # Right-aligned from the window width, not igGetContentRegionAvail,
+      # whose return signature differs across imguin versions.
       const PAD = 8.0'f32
       igSameLine(0, 0)
       igSetCursorPosX(max(igGetCursorPosX(),
                           igGetWindowWidth() - (BTN_W * 2 + GAP + PAD)))
       if igButton("Save", ImVec2(x: BTN_W, y: 0)):
         if w.on_save != nil: w.on_save(w.selected)
-        if w.on_open != nil: w.on_open()   # refresh the just-written thumbnail
+        if w.on_open != nil: w.on_open()
       igSameLine(0, GAP)
       if not sel.used: igBeginDisabled(true)
       if igButton("Load", ImVec2(x: BTN_W, y: 0)):

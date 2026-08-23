@@ -1,62 +1,37 @@
-# In-process lockstep link (phase 2 of docs/multiplayer.md).
+# In-process lockstep link (docs/multiplayer.md).
 #
-# A Link owns N GBA cores and steps them in bounded, interleaved slices so
-# no core's emulated clock gets ahead of the laggard by more than roughly
-# LINK_SLICE cycles (plus bounded overshoot: one instruction, one DMA burst,
-# or one halted fast-forward to the next scheduled event — PPU events cap
-# that at ~1232 cycles). SIO transfers are resolved by the LockstepSioDriver
-# bound to each core:
-#
-#  - The initiating core (multi-mode parent, or normal-mode internal-clock
-#    master) schedules its completion through the normal etSerial path, so
-#    completion timing/IRQ on the initiator is exactly the single-core
-#    behavior.
-#  - When that completion fires, the coordinator first advances every peer
-#    core to the initiator's clock (run_to), then latches data and finishes
-#    the transfer on every participating core at the same emulated time.
-#    run_to is the single point a future network transport replaces: for a
-#    remote peer, "advance peer to cycle X" becomes "block until the peer
-#    reports it has reached cycle X".
+# A Link owns N GBA cores and steps them in interleaved slices so no core
+# runs more than ~LINK_SLICE cycles (plus one bounded step) ahead of the
+# laggard. The initiating core of an SIO transfer schedules its completion
+# through the normal etSerial path; when it fires, every peer is advanced
+# to that cycle (run_to) before data latches and the transfer finishes on
+# all cores at the same emulated time.
 #
 # Cross-core clock comparisons use int64 global time = per-core rebase
-# offset + scheduler.cycles; the per-frame rebase (gba.end_frame) feeds the
-# offsets, so comparisons stay valid even though CycleCount is uint32 on
-# wasm. Schedulers stay strictly per-core.
+# offset + scheduler.cycles (CycleCount is uint32 on wasm).
 
 import ../common/[scheduler, util]
 import gba
 
 const
   LINK_SLICE = 512
-    ## Interleave granularity in cycles. Must be comfortably below the
-    ## shortest multi-mode round (16 bits at 115.2 kbps = 2336 cycles) so a
-    ## child is never a full transfer behind the parent when a round starts,
-    ## and small enough that data sampled "now" from a slightly-ahead peer
-    ## is within one round of hardware truth. Normal-mode 8-bit fast
-    ## transfers (72 cycles) are shorter than the window; their data is
-    ## still exchanged at the exact completion cycle because run_to drives
-    ## the peer forward before latching.
+    ## Interleave granularity in cycles. Must stay well below the shortest
+    ## multi-mode round (16 bits at 115.2 kbps = 2336 cycles) so a child is
+    ## never a full round behind the parent when one starts.
 
 type
   Link* = ref object
     cores*: seq[GBA]
-    # Global-time bookkeeping: global(i) = offsets[i] + scheduler.cycles.
-    # Updated with each core's per-frame rebase base.
-    offsets: seq[int64]
-    # Re-entrancy guard: true while core i is being advanced somewhere up
-    # the call stack (its clock is already within the lockstep window, and
-    # re-entering cpu.tick mid-instruction would corrupt it).
+    offsets: seq[int64]   # global(i) = offsets[i] + scheduler.cycles
+    # Re-entrancy guard: core i is being advanced up the call stack, and
+    # re-entering cpu.tick mid-instruction would corrupt it.
     active: seq[bool]
     frame_done: seq[bool]
-    # In-flight multi-mode round: values sampled from each unit's
-    # SIOMLT_SEND at the round's start time (0xFFFF = absent).
     multi_active: bool
-    multi_data: array[4, uint16]
-    # Monotonic count of SIO transfers initiated on the cable. A linked game
-    # drives these continuously (timer-paced) to stay synced and STOPS when it
-    # closes the link — so "count not advancing" is a reliable, game-agnostic
-    # signal that the link is no longer in use (unlike the SIO mode register,
-    # which games leave latched in multi mode after they're done).
+    multi_data: array[4, uint16]  # latched round words (0xFFFF = absent)
+    # Count of SIO transfers initiated. Games drive these continuously while
+    # linked and stop when done, so "not advancing" means the link is idle
+    # (the mode register stays latched in multi mode afterwards).
     transfers*: int
 
   LockstepSioDriver* = ref object of SioDriver
@@ -64,14 +39,10 @@ type
     id: int  # cable position: 0 = multi-mode parent
 
 when defined(linkTrace):
-  # Debug hook (trade-repro harness, -d:linkTrace): one call per completed
-  # multi-mode round with the latched outgoing words and each unit's
-  # participation. Compiled out entirely in normal builds.
+  # Trade-repro harness hooks: per completed multi round; per coalesced
+  # serial IRQ; per single step longer than one multi round (2336 cycles).
   var onMultiRound*: proc(data: array[4, uint16]; multi: array[4, bool]) = nil
   var onCoalesce*: proc(core: int) = nil
-  # Fires when a single bounded step advanced a core's clock by more than one
-  # multi-mode round (2336 cycles) — i.e. the lockstep's bounded-overshoot
-  # assumption was violated (e.g. an atomic HLE SWI charging its full cost).
   var onBigStep*: proc(g: GBA; dc: int; pc: uint32) = nil
 
 # ---------------- clock plumbing ----------------
@@ -80,9 +51,8 @@ proc now(link: Link; i: int): int64 =
   link.offsets[i] + int64(link.cores[i].scheduler.cycles)
 
 proc advance_once(gba: GBA) {.inline.} =
-  # One bounded step: an instruction, or — when halted — a jump to the next
-  # scheduled event. Never uses cpu.tick's halted branch, which drains
-  # events until wake or frame end (unbounded for lockstep purposes).
+  # One bounded step. cpu.tick's halted branch drains events until wake or
+  # frame end, which is unbounded for lockstep purposes, so fast_forward.
   when defined(linkTrace):
     let c0 = int64(gba.scheduler.cycles)
     let pc0 = gba.cpu.r[15]
@@ -98,13 +68,7 @@ proc advance_once(gba: GBA) {.inline.} =
 
 proc run_to(link: Link; i: int; target: int64) =
   ## Advance core i until its global clock reaches `target`.
-  ##
-  ## NETWORK-TRANSPORT BOUNDARY (phase 3): for a remote peer this is the
-  ## one blocking step — "wait until peer i confirms it has reached cycle
-  ## `target` and hand over its SIO state" — everything else in this module
-  ## stays local.
-  if link.active[i]: return  # already being advanced up-stack; its clock is
-                             # within the lockstep window by construction
+  if link.active[i]: return  # already being advanced up-stack
   let gba = link.cores[i]
   link.active[i] = true
   while link.offsets[i] + int64(gba.scheduler.cycles) < target:
@@ -112,11 +76,9 @@ proc run_to(link: Link; i: int; target: int64) =
   link.active[i] = false
 
 proc step_frame*(link: Link) =
-  ## Advance every core by one video frame, interleaved in bounded slices:
-  ## always advance the core with the smallest global clock, so skew never
-  ## exceeds LINK_SLICE plus bounded overshoot. Frame boundaries land at the
-  ## same global cycle on every core (280896 cycles from reset), so no core
-  ## enters the next frame while another still runs the current one.
+  ## Advance every core one video frame, always stepping the core with the
+  ## smallest global clock. Frame boundaries land at the same global cycle
+  ## on every core, so none enters the next frame early.
   for i in 0 ..< link.cores.len:
     link.frame_done[i] = false
     link.cores[i].frame_start_cycles = link.cores[i].scheduler.cycles
@@ -144,9 +106,8 @@ proc step_frame*(link: Link) =
 # ---------------- multi-player (16-bit) mode ----------------
 
 proc start_multi(link: Link; parent: int) =
-  # The parent's start-bit rising edge opens a round: advance the children to
-  # the start cycle and mark them busy. The outgoing words are LATCHED AT
-  # COMPLETION (complete_multi), not here — see there for why.
+  # Parent start-bit rising edge: advance the children to the start cycle
+  # and mark them busy. Words latch at completion (complete_multi).
   if link.multi_active: return  # hardware can't restart a round in flight
   link.multi_active = true
   inc link.transfers
@@ -161,9 +122,8 @@ proc start_multi(link: Link; parent: int) =
   pserial.schedule_sio_completion(pserial.multi_transfer_cycles())
 
 proc complete_multi(link: Link; parent: int) =
-  # The parent's etSerial fired: every peer must reach the completion cycle
-  # before data latches and IRQs fire (deferred-completion discipline; see
-  # run_to for the phase-3 network boundary).
+  # The parent's etSerial fired: every peer reaches the completion cycle
+  # before data latches and IRQs fire.
   let serial = link.cores[parent].serial
   if not link.multi_active:
     # Mode was switched mid-flight; just clear busy on the initiator.
@@ -173,16 +133,9 @@ proc complete_multi(link: Link; parent: int) =
   for i in 0 ..< link.cores.len:
     if i != parent:
       link.run_to(i, done_t)
-  # Latch each unit's outgoing SIOMLT_SEND NOW, at completion — not at the
-  # round's start. No unit rewrites SIOMLT_SEND between start and completion
-  # (each stages its word in the prior serial IRQ, then waits on the round), so
-  # for two units at the same cycle offset the latched value equals the
-  # start-of-round value. But when two units run at different cycle offsets, one
-  # whose prior serial IRQ retires late would be sampled with a stale word if we
-  # latched at the start; advancing it to the completion cycle (the run_to above)
-  # first gives it the whole transfer window to stage its intended word. A stale
-  # word corrupts the partner's reassembled data. Normal mode already samples at
-  # completion (complete_normal); this makes multi-mode consistent.
+  # Latch SIOMLT_SEND at completion, not at the round's start: a unit whose
+  # prior serial IRQ retires late would otherwise be sampled with a stale
+  # word, which corrupts the partner's reassembled data.
   for slot in 0 ..< 4:
     link.multi_data[slot] = 0xFFFF'u16  # absent units read all-1s
   for i in 0 ..< link.cores.len:
@@ -196,19 +149,12 @@ proc complete_multi(link: Link; parent: int) =
         if onCoalesce != nil and core.interrupts.reg_if.serial and
            bit(core.serial.siocnt, 14):
           onCoalesce(idx)
-      # Clears busy and raises the serial IRQ per-core if that core
-      # enabled it — all at the same emulated time.
       core.serial.finish_sio_transfer()
-  # A non-initiator that ran slightly ahead of this completion (bounded
-  # overshoot from a halt/waitloop fast-forward) hasn't serviced the serial IRQ
-  # yet. If the next transfer completes first it overwrites SIOMLT_RECV and re-
-  # sets the (level-triggered) IF bit, so the CPU takes ONE IRQ for several
-  # transfers and the game's SIO handler advances its command index once instead
-  # of per transfer — silently desyncing multi-mode command framing (the cross-
-  # game trade "communication error"). Drain each IRQ-driven peer now so it
-  # reads THIS transfer's word and stages its next before the latch moves on.
-  # Bounded to ~one transfer window (and the frame) so a non-servicing peer
-  # never runs away.
+  # A peer that overshot this completion has not serviced the serial IRQ
+  # yet; if the next transfer completed first the IF bit would merge and the
+  # game's SIO handler would advance its command index once for two words
+  # (the cross-game trade "communication error"). Drain each IRQ-driven peer
+  # now, bounded to one transfer window and the frame.
   for i in 0 ..< link.cores.len:
     if i != parent and link.cores[i].serial.sio_mode() == smMulti and
        link.cores[i].interrupts.reg_ie.serial:
@@ -228,19 +174,16 @@ proc complete_multi(link: Link; parent: int) =
 # ---------------- normal (8/32-bit) mode ----------------
 
 proc normal_peer(link: Link; m: int): int =
-  # A normal-mode cable connects exactly two units; with N=2 the peer is
-  # simply the other core. (>2 cores in normal mode has no hardware analog.)
+  # A normal-mode cable connects exactly two units.
   for i in 0 ..< link.cores.len:
     if i != m: return i
   -1
 
 proc complete_normal(link: Link; m: int) =
-  # The master's internally-clocked transfer completed. Advance the slave to
-  # the completion cycle (deferred completion; network boundary in run_to),
-  # then exchange full-duplex: each unit's outgoing register lands in the
-  # other's. Per GBATEK the master's clock shifts both registers whether or
-  # not the slave set its start bit — the slave only gets busy-clear/IRQ
-  # semantics if it had actually started (SO/SI handshaking is up to games).
+  # Master completion: advance the slave to this cycle, then exchange
+  # full-duplex. GBATEK: the master's clock shifts both registers whether or
+  # not the slave set its start bit; the slave only gets busy-clear/IRQ if
+  # it had started.
   let ms = link.cores[m].serial
   let p = link.normal_peer(m)
   if p < 0:
@@ -272,9 +215,8 @@ proc complete_normal(link: Link; m: int) =
 method sio_siocnt_status*(drv: LockstepSioDriver; serial: Serial; mode: SioMode): uint16 =
   case mode
   of smMulti:
-    # GBATEK "SIO Multi-Player Mode": bit 2 SI = 0 parent / 1 child (cable
-    # position), bit 3 SD = 1 when all units on the bus are ready (in multi
-    # mode), bits 4-5 = this unit's ID, bit 6 error = 0.
+    # GBATEK "SIO Multi-Player Mode": bit 2 SI = 0 parent / 1 child, bit 3
+    # SD = 1 when all units are ready, bits 4-5 = unit ID, bit 6 error = 0.
     var v = uint16(drv.id and 3) shl 4
     if drv.id != 0: v = v or 0x0004'u16
     var all_ready = true
@@ -285,8 +227,7 @@ method sio_siocnt_status*(drv: LockstepSioDriver; serial: Serial; mode: SioMode)
     if all_ready: v = v or 0x0008'u16
     v
   of smNormal8, smNormal32:
-    # Bit 2 SI input = the peer's SO output (SIOCNT bit 3) while the peer
-    # sits in a normal serial mode; otherwise the line floats high.
+    # SI = the peer's SO (SIOCNT bit 3) while it is in a normal mode; else high.
     let p = drv.link.normal_peer(drv.id)
     if p >= 0:
       let ps = drv.link.cores[p].serial
@@ -300,11 +241,9 @@ method sio_siocnt_status*(drv: LockstepSioDriver; serial: Serial; mode: SioMode)
 method sio_start*(drv: LockstepSioDriver; serial: Serial; mode: SioMode) =
   case mode
   of smNormal8, smNormal32:
-    if bit(serial.siocnt, 0):
-      # Internal clock: this unit is the master and drives the exchange.
+    if bit(serial.siocnt, 0):  # internal clock: this unit is the master
       inc drv.link.transfers
       serial.schedule_sio_completion(serial.normal_transfer_cycles())
-    # External clock: the transfer runs when the master starts one.
   of smMulti:
     if drv.id == 0:
       drv.link.start_multi(drv.id)
@@ -323,8 +262,7 @@ method sio_complete*(drv: LockstepSioDriver; serial: Serial; mode: SioMode) =
 # ---------------- construction ----------------
 
 proc new_link*(cores: seq[GBA]): Link =
-  ## Wire already-initialized (post_init) cores into a lockstep link. Core 0
-  ## is the multi-mode parent (head of the cable).
+  ## Wire post_init cores into a lockstep link. Core 0 is the multi-mode parent.
   doAssert cores.len >= 2, "a link needs at least two cores"
   result = Link(
     cores:      cores,
@@ -335,13 +273,9 @@ proc new_link*(cores: seq[GBA]): Link =
   for i, core in cores:
     core.set_sio_driver(LockstepSioDriver(link: result, id: i))
 
-# ---------------- rollback support (GGPO-style input rollback) ----------------
-#
-# The whole link runs locally on both peers; only the two players' INPUTS cross
-# the network. Each peer predicts the other's input, and when a real input
-# arrives late and mispredicted, restores a per-frame snapshot and re-steps with
-# the corrected input. These snapshots are valid at FRAME BOUNDARIES only (that
-# is where state_payload is defined and where step_frame lands every core).
+# ---------------- rollback support (see rollback.nim) ----------------
+# Snapshots are valid at frame boundaries only (where state_payload is
+# defined and where step_frame lands every core).
 
 type
   LinkSnapshot* = object
@@ -352,20 +286,14 @@ type
     multi_recv: seq[array[4, uint16]] # each core's SIOMULTI0-3 receive latches
 
 proc capture_state*(link: Link): LinkSnapshot =
-  ## Snapshot every core plus the cross-core clock/round state. Frame-boundary
-  ## only. `active`/`frame_done` are transient within step_frame, so omitted.
+  ## Frame-boundary only. `active`/`frame_done` are transient, so omitted.
   result.payloads = newSeq[string](link.cores.len)
   result.multi_recv = newSeq[array[4, uint16]](link.cores.len)
   for i, c in link.cores:
-    # state_payload carries the PSG channels' waveform deadlines: savestate.nim
-    # round-trips next_step through the etAPUChannel* events it replaced, so a
-    # rollback restore puts the waveform phase back exactly (unserialized state
-    # here has caused real netplay desyncs before — see multi_recv below).
     result.payloads[i] = c.state_payload()
-    # SIOMULTI0-3 receive latches are NOT in state_payload (savestate treats
-    # them as session state refreshed by the next transfer), but a rollback
-    # re-sim can read them before the frame's round re-latches — so they MUST
-    # be restored or the replay diverges (an in-game "communication error").
+    # SIOMULTI0-3 latches are not in state_payload, but a rollback re-sim
+    # can read them before the frame's round re-latches; without them the
+    # replay diverges (in-game "communication error").
     result.multi_recv[i] = c.serial.multi_recv
   result.offsets = link.offsets
   result.multi_active = link.multi_active
@@ -383,12 +311,9 @@ proc restore_state*(link: Link; s: LinkSnapshot) =
   link.multi_data = s.multi_data
 
 proc state_checksum*(link: Link): uint64 =
-  ## Cheap FNV-1a over every core's serialized state — the value peers exchange
-  ## periodically to DETECT a desync (diverging checksums) before it corrupts a
-  ## trade, instead of discovering it as an in-game "link error". Deliberately
-  ## covers only the cores: the link's `offsets` are a LOCAL clock-rebase bias
-  ## (they can differ between peers, and across a rollback, without changing what
-  ## either core emulates), so folding them in would flag false desyncs.
+  ## FNV-1a over every core's serialized state, exchanged by peers to detect
+  ## a desync. Covers only the cores: `offsets` is a local clock-rebase bias
+  ## that legitimately differs between peers.
   result = 0xCBF29CE484222325'u64
   for c in link.cores:
     for ch in c.state_payload():

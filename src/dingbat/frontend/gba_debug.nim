@@ -59,12 +59,9 @@ proc render_layers(d: GbaDebug) =
       var shown = ((ppu.debug_layer_mask shr i) and 1) != 0
       if igCheckbox(names[i], addr shown):
         ppu.debug_layer_mask = ppu.debug_layer_mask xor (1'u16 shl i)
-        # Re-composite the current frame from live PPU state so the toggle is
-        # visible immediately, even while paused (self-heals next frame if not).
+        # Re-composite now so the toggle shows while paused.
         ppu.rerender_frame()
     igEndTabItem()
-
-# ──────────────────────────── IO register viewer ────────────────────────────
 
 proc tx(s: string) =
   igTextUnformatted(cstring(s), nil)
@@ -73,7 +70,6 @@ proc onoff(b: bool): string =
   if b: "on" else: "off"
 
 proc layer_bits_str(bits: uint16): string =
-  # bits 0-3 = BG0-3, bit 4 = OBJ
   const names = ["BG0", "BG1", "BG2", "BG3", "OBJ"]
   result = ""
   for i in 0 .. 4:
@@ -169,7 +165,7 @@ proc render_io_timers(d: GbaDebug) =
   let tim = d.gba.timer
   const freqs = ["F/1", "F/64", "F/256", "F/1024"]
   for n in 0 .. 3:
-    # Read through the IO handler so the counter reflects elapsed cycles
+    # Read through the IO handler so the counter reflects elapsed cycles.
     let base = 0x100'u32 + uint32(n) * 4
     let count = uint16(tim[base]) or (uint16(tim[base + 1]) shl 8)
     let cnt = tim.tmcnt[n]

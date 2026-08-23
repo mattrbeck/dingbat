@@ -1,11 +1,9 @@
 # GBA save-state serialization (included by gba.nim).
 #
-# States are only ever written at frame boundaries (right after step_frame
-# returns), so no mid-instruction CPU state exists: bus.cycles has just been
-# reset, frame progress is derived from the scheduler, and entered_waitloop is transient
-# within a tick. Deterministic caches (waitloop detection sets, the fetch-page
-# fast path) are rebuilt instead of serialized. The ROM itself is not stored;
-# the header carries a checksum + size so the right ROM must already be loaded.
+# States are written at frame boundaries only, so no mid-instruction CPU
+# state exists. Deterministic caches (waitloop sets, the fetch-page fast
+# path) are rebuilt, not serialized. The ROM is not stored; the header
+# carries its identity.
 
 const
   GBA_SEC_CPU     = 0xC1'u8
@@ -39,11 +37,9 @@ proc save_cpu_state(cpu: CPU; w: var Writer) =
   w.write_u8(uint8(cpu.pipeline.size))
   w.write_bool(cpu.halted)
   w.write_bool(cpu.stopped)
-  # HLE BIOS IntrWait state (the only persistent HLE SWI state)
   w.write_bool(cpu.intr_wait_active)
   w.write_u16(cpu.intr_wait_mask)
   w.write_u32(cpu.intr_wait_resume_addr)
-  # Halt-wake IRQ entry discount + deferred HLE Halt/Stop return charge
   w.write_bool(cpu.halt_wake)
   w.write_u32(cast[uint32](cpu.halt_resume_charge))
   w.write_u32(cpu.halt_resume_addr)
@@ -71,26 +67,17 @@ proc load_cpu_state(cpu: CPU; r: var Reader; rev: uint32) =
     cpu.halt_resume_charge = cast[int32](r.read_u32())
     cpu.halt_resume_addr   = r.read_u32()
   else:
-    # rev 1 charged the BIOS's post-wake return path up front, at SWI call
-    # time, so there is never anything deferred in a rev-1 state: 0 is the
-    # value, not a guess. halt_wake is a transient consumed at the next
-    # instruction boundary; false costs the 2-cycle entry discount on at most
-    # one IRQ, and halt_resume_addr is only read when the charge is nonzero.
+    # rev 1 charged the post-wake return path up front, so nothing is
+    # deferred; halt_wake is a transient consumed at the next instruction.
     cpu.halt_wake = false
     cpu.halt_resume_charge = 0
     cpu.halt_resume_addr = 0
   if rev >= 4:
     cpu.halt_resume_pop = r.read_bool()
   else:
-    # rev <= 3 predates the HLE dispatcher's System-stack frames: its Halt/Stop
-    # never lowered the System sp, so there is nothing for the resume path to
-    # pop. false is exactly right, and it makes the resume leave r2/lr/sp live
-    # — which is precisely what the build that wrote the file did.
-    #
-    # IntrWait is the case that does NOT fall out for free: its resume pops 16
-    # bytes unconditionally, with no flag to switch off. gba_apply_state
-    # retrofits the frame afterwards (see migrate_intr_wait_frame) for the
-    # states where that is provably safe, and refuses the rest.
+    # rev <= 3 Halt/Stop never lowered the System sp, so there is nothing to
+    # pop. IntrWait's resume pops unconditionally; gba_apply_state retrofits
+    # its frame (migrate_intr_wait_frame) where that is safe.
     cpu.halt_resume_pop = false
   cpu.entered_waitloop = false
 
@@ -102,12 +89,9 @@ proc save_bus_state(bus: Bus; w: var Writer) =
   w.write_u32(bus.bios_latch)
   w.write_bytes(bus.wram_board)
   w.write_bytes(bus.wram_chip)
-  # ROM burst / prefetch timing trackers. These PERSIST across frame boundaries
-  # (the CPU keeps fetching from ROM), so unlike the rebuilt fast-path caches
-  # they must be serialized: the first ROM access after a load reads them to
-  # judge sequential-vs-nonsequential and prefetch credit. Omitting them
-  # mistimes that access by a few cycles — invisible in a one-shot load, but it
-  # breaks bit-exact rollback replay (the frame ends a few cycles off).
+  # ROM burst / prefetch trackers persist across frame boundaries; omitting
+  # them mistimes the first ROM access by a few cycles, which breaks
+  # bit-exact rollback replay.
   w.write_u32(bus.rom_next_addr)
   w.write_u32(bus.rom_next_addr2)
   w.write_u64(uint64(bus.rom_free_since))
@@ -116,12 +100,9 @@ proc save_bus_state(bus: Bus; w: var Writer) =
 
 proc load_bus_state(bus: Bus; r: var Reader; rev: uint32) =
   r.expect_tag(GBA_SEC_BUS)
-  # Un-synced cycle debt for the instruction in flight. `catchup` drains it to
-  # 0 constantly, and `bus.now` does `sched.cycles + CycleCount(bus.cycles)` —
-  # an unsigned conversion, so a NEGATIVE value here is an immediate defect,
-  # and a huge positive one overflows the same sum. States are written at
-  # frame boundaries where this is a handful of cycles; the web build can
-  # serialize mid-instruction, so allow a whole scanline's worth and no more.
+  # `bus.now` converts this to unsigned, so a negative value is a defect and
+  # a huge one overflows. The web build can serialize mid-instruction, so
+  # allow one scanline's worth.
   bus.cycles = int(r.read_i32())
   check_range(bus.cycles, 0, 1_232, "bus.cycles")
   bus.bios_latch = r.read_u32()
@@ -134,13 +115,8 @@ proc load_bus_state(bus: Bus; r: var Reader; rev: uint32) =
     bus.rom_hot = r.read_bool()
     bus.dma_active = r.read_bool()
   else:
-    # rev <= 2 didn't carry the burst trackers, so a load left whatever the
-    # live machine happened to hold — i.e. nothing meaningful. Start them cold
-    # instead: rom_next_addr = 1 is the sentinel the DMA and UND paths already
-    # use for "no prior access" (it can never match a halfword-aligned
-    # address), so the first ROM access after the load is judged
-    # non-sequential with no prefetch credit. Costs a few cycles once, which
-    # is exactly what 66a3c42 described as "invisible in a one-shot load".
+    # Start the trackers cold: rom_next_addr = 1 is the "no prior access"
+    # sentinel (never matches a halfword-aligned address).
     bus.rom_next_addr = 1
     bus.rom_next_addr2 = 1
     bus.rom_free_since = 0
@@ -171,8 +147,7 @@ proc load_mmio_state(mmio: MMIO; r: var Reader) =
   mmio.waitcnt = cast[WAITCNT](r.read_u16())
 
 proc save_keypad_state(kp: Keypad; w: var Writer) =
-  # keyinput deliberately stays live: it reflects currently held host keys,
-  # not emulated machine state
+  # keyinput stays live: it reflects currently held host keys
   w.write_tag(GBA_SEC_KEYPAD)
   w.write_u16(cast[uint16](kp.keycnt))
   w.write_bool(kp.prev_irq_condition)
@@ -248,15 +223,10 @@ proc load_dma_state(dma: DMA; r: var Reader; rev: uint32) =
     dma.dmacnt_l[i] = r.read_u16()
     dma.dmacnt_h[i] = cast[DMACNT](r.read_u16())
     dma.latch[i] = r.read_u32()
-    # Pre-v5 states have no latched count, so reconstruct it as the user
-    # register — which IS what those builds ran on, so the state loads into
-    # exactly the machine that wrote it. The two values diverge only for a
-    # channel armed on a hardware trigger whose DMACNT_L was rewritten before
-    # its first burst; a repeat channel reloads the count after every burst,
-    # so between bursts the two always agree.
+    # Pre-v5 states have no latched count; the user register is what those
+    # builds ran on.
     dma.count[i] = if rev >= 5: r.read_u16() else: dma.dmacnt_l[i]
-  # Arbitration state is always idle at frame boundaries (where states are
-  # taken), so it is not serialized — just reset it
+  # Arbitration state is idle at frame boundaries; not serialized
   dma.pending = 0
   dma.current_priority = 4
 
@@ -302,10 +272,7 @@ proc load_gpio_state(gpio: GPIO; r: var Reader; rev: uint32) =
     rtc.deterministic = r.read_bool()
     rtc.epoch = int64(r.read_u64())
   else:
-    # Deterministic RTC arrived with rev 3 and exists only to freeze the clock
-    # across a linked session (enable_deterministic_rtc). A rev <= 2 state was
-    # written by a build that had no such mode, so "off, real local time" is
-    # the state it was in; epoch is ignored while off.
+    # rev <= 2 had no deterministic RTC mode; epoch is ignored while off.
     rtc.deterministic = false
     rtc.epoch = 0
 
@@ -370,15 +337,12 @@ proc load_ppu_state(ppu: PPU; r: var Reader) =
   r.read_bytes(ppu.vram)
   r.read_bytes(ppu.oam)
   r.read_seq_u16_into(ppu.framebuffer)
-  # Per-scanline compositing scratch is recomputed; force a full re-render so
-  # the render-skip optimization can't display stale pre-load pixels
+  # Force a full re-render so render-skip cannot show stale pre-load pixels
   ppu.frame = 0
   ppu.render_dirty = true
   ppu.skip_render = false
   ppu.frame_static = false
-  # OAM was just replaced wholesale, and the per-line OBJ candidate list is
-  # derived scratch that is deliberately not in the payload (so old states
-  # still load) -- rebuild it before the next scanline reads it.
+  # The per-line OBJ candidate list is derived scratch, not in the payload
   ppu.oam_touched()
   ppu.obj_list_rebuilds = 0
 
@@ -529,8 +493,7 @@ proc load_apu_state(apu: APU; r: var Reader) =
       dc.positions[f] = int(r.read_i32())
       dc.sizes[f] = int(r.read_i32())
       dc.latches[f] = r.read_i16()
-  # Restart audio pacing cleanly: drop any half-filled sample buffer and the
-  # SDL queue backlog that belongs to the pre-load timeline
+  # Drop the half-filled sample buffer and the pre-load SDL queue backlog
   apu.buffer_pos = 0
   when not defined(test_harness) and not defined(emscripten):
     if apu.audio_dev != 0:
@@ -572,15 +535,9 @@ proc load_storage_state(st: Storage; r: var Reader) =
     raise newException(StateError, "save state backup type mismatch")
   let mem = r.read_seq_u8()
   if st of EEPROM:
-    # EEPROM buffers are sized lazily (from the first command's DMA length),
-    # so this is the one backup whose length is not fixed by the cart — which
-    # made it the one place a state file could choose it. It cannot be free:
-    # `eeprom.nim`'s write path does
-    #   cast[ptr UncheckedArray[uint64]](unsafeAddr ep.memory[0])[ep.address]
-    # and an UncheckedArray is unchecked at EVERY optimisation level, so an
-    # undersized buffer here is a heap write primitive, and an empty one makes
-    # `unsafeAddr ep.memory[0]` undefined before that. There are exactly two
-    # legal sizes (EepromSize.file_size: 4 Kbit = 0x200, 64 Kbit = 0x2000).
+    # EEPROM buffers are sized lazily, so the file chooses the length. The
+    # write path indexes an UncheckedArray over `memory`, so an undersized
+    # buffer is a heap write primitive: only the two legal sizes pass.
     check_one_of(mem.len, [0x200, 0x2000], "eeprom.memory.len")
     st.memory = mem
   else:
@@ -608,53 +565,34 @@ proc load_storage_state(st: Storage; r: var Reader) =
     check_no_undefined_bits(uint32(est), EepromStateFlag.high.int + 1, "eeprom.state")
     ep.state = cast[set[EepromStateFlag]](est)
     ep.buffer.size = int(r.read_i32())
-    # The command shift register is at most a 64-bit-wide word plus its
-    # address bits; `buffer.value` is a uint64 and `size` counts bits into it.
-    check_range(ep.buffer.size, 0, 64, "eeprom.buffer.size")
+    check_range(ep.buffer.size, 0, 64, "eeprom.buffer.size")  # bits into a u64
     ep.buffer.value = r.read_u64()
     ep.address = r.read_u32()
-    # The runtime masks the address to 10 bits on every command, so a state
-    # may only carry what that mask can produce. Without this the address
-    # reaches the UncheckedArray write above before the next mask does.
+    # The address reaches the UncheckedArray write before the next 10-bit mask
     check_range(int(ep.address), 0, 0x3FF, "eeprom.address")
     ep.ignored_reads = int(r.read_i32())
     ep.read_bits = int(r.read_i32())
     ep.wrote_bits = int(r.read_i32())
-    # read_bits/wrote_bits index a 64-bit word: `base = address * 8 +
-    # wrote_bits div 8` indexes `memory` directly, so an unbounded value walks
-    # off the end of the backup.
+    # address * 8 + wrote_bits div 8 indexes `memory` directly
     check_range(ep.ignored_reads, 0, 4, "eeprom.ignored_reads")
     check_range(ep.read_bits, 0, 64, "eeprom.read_bits")
     check_range(ep.wrote_bits, 0, 64, "eeprom.wrote_bits")
-    # The address is masked to 0x3FF, i.e. up to 0x3FF*8+7 = 8191 bytes, which
-    # a 4 Kbit (0x200-byte) part cannot hold. Reject the combination rather
-    # than let the write land past the end of a legally-sized buffer.
+    # A 10-bit address can exceed a 4 Kbit part
     if int(ep.address) * 8 + 8 > ep.memory.len:
       raise state_error("eeprom address " & $ep.address & " is past the end of a " &
                         $ep.memory.len & "-byte EEPROM")
-    # busy_until (write-settle window, <=115000 cycles) is not in the format;
-    # treat any in-flight programming as settled. States are frame-boundary
-    # only, so at worst a ready-poll observes ready ~0.4 frames early.
+    # busy_until is not in the format: treat in-flight programming as settled
     ep.busy_until = 0
-  # Persist the restored backup memory to the .sav on the next flush
-  st.dirty = true
-
-# ---- Top level ----
+  st.dirty = true  # persist to the .sav on the next flush
 
 # ---- PSG waveform deadlines <-> scheduler events ----
 #
-# The channels' next_step deadlines replaced one etAPUChannel<N> scheduler event
-# per armed channel (see gba/apu.nim). Rather than append four new fields to a
-# positional, unversioned state format, round-trip them through the events they
-# replaced: the payload stays byte-identical to the pre-catch-up format, so a
-# state written here still loads in an older build and vice versa — which is
-# also what keeps rollback and netplay snapshots (link.nim's LinkSnapshot is
-# built from state_payload) carrying the deadlines across a restore.
+# The channels' next_step deadlines replaced one etAPUChannel<N> event per
+# armed channel (gba/apu.nim). They round-trip through those events so the
+# payload stays byte-identical to the older format in both directions.
 
 proc apu_arm_state_events(gba: GBA) =
-  # Deadlines are absolute scheduler cycles, which is what schedule() takes as
-  # a delay from scheduler.cycles; the catch-up guarantees each one is in the
-  # future, so the delay is positive.
+  # The catch-up guarantees each deadline is in the future (positive delay)
   gba.apu.apu_catchup_all()
   template arm(ch: untyped; et: EventType) =
     if ch.next_step != GBA_NO_STEP:
@@ -672,19 +610,15 @@ proc apu_disarm_state_events(gba: GBA) =
 
 proc apu_extract_state_events(gba: GBA) =
   # `et` rather than `kind`: a template parameter named `kind` would be
-  # substituted into `ev.kind` too and turn it into a bogus field access.
+  # substituted into `ev.kind` too.
   template take(ch: untyped; et: EventType; arm: uint32) =
     ch.next_step = GBA_NO_STEP
     for ev in gba.scheduler.events:
       if ev.kind == et: ch.next_step = ev.cycles
     gba.scheduler.clear(et)
-    # arm_delay is the delay the pending step was armed with; a scheduler event
-    # only ever stored its TARGET, so neither this build nor the pre-catch-up
-    # one can recover it from a state file. Rebuilt as the current period, which
-    # is what it is except across a frequency write that has not been followed
-    # by a step. It is read only to break an exact-cycle tie between a waveform
-    # step and the sample/frame-sequencer event, so the worst case is one
-    # channel stepping one sample early or late, once, after a load.
+    # arm_delay is not recoverable from an event's target; the current
+    # period is right except across an unstepped frequency write, and it
+    # only breaks an exact-cycle tie (one sample off, once, after a load).
     ch.arm_delay = arm
   take(gba.apu.channel1, etAPUChannel1, gba.apu.channel1.ch1_frequency_timer())
   take(gba.apu.channel2, etAPUChannel2, gba.apu.channel2.ch2_frequency_timer())
@@ -692,35 +626,19 @@ proc apu_extract_state_events(gba: GBA) =
   take(gba.apu.channel4, etAPUChannel4, gba.apu.channel4.ch4_frequency_timer())
 
 when defined(deltachar):
-  # EXPLORATORY (-d:deltachar): byte offset of each payload section, so a delta
-  # histogram can be attributed to EWRAM / IWRAM / VRAM / framebuffer / save
-  # rather than reported as one 604 KB blob.
+  # -d:deltachar: byte offset of each payload section for delta histograms
   var payloadSections*: seq[(string, int)] = @[]
 
-# ---- The in-process / file boundary -----------------------------------------
+# ---- The in-process / file boundary ----
 #
-# `in_process` = true pads the scheduler section so the payload has a FIXED
-# length (see PAD_RATIONALE in common/scheduler.nim). It is what makes the
-# rewind ring's XOR delta align, and it is worth 8.5x on the delta size.
-#
-# It must be TRUE for payloads that stay in this process (the rewind ring,
-# rollback snapshots) and FALSE for anything that can reach a file, because
-# padded bytes are not the .state format and an older build could not read
-# them. The rule is enforced three ways:
-#
-#   1. The rule is drawn at the API, not per call site: the public
-#      state_payload / apply_state_payload family is ENTIRELY in-process and
-#      passes true. The file family — state_bytes, save_state,
-#      load_state_bytes, state_image — is entirely unpadded and reaches the
-#      private *_state_payload / *_apply_state with the default false. If you
-#      are adding a call and cannot tell which you want, ask whether the bytes
-#      can outlive the process.
-#   2. The default is false, so a new call site is unpadded unless it opts in.
-#   3. A mismatch cannot pass silently: the padding sits immediately before a
-#      section tag, so reading padded bytes as unpadded (or the reverse) trips
-#      expect_tag on the very next section and raises StateError. There is a
-#      dedicated regression test for the boundary in
-#      tests/savestate_compat_test.nim.
+# `in_process` = true pads the scheduler section to a fixed length (see
+# PAD_RATIONALE in common/scheduler.nim) so the rewind ring's XOR delta
+# aligns. It must be true for payloads that stay in this process (rewind
+# ring, rollback snapshots) and false for anything that can reach a file:
+# padded bytes are not the .state format. The public state_payload /
+# apply_state_payload family is in-process; state_bytes / save_state /
+# load_state_bytes / state_image are unpadded. A mismatch trips expect_tag
+# on the next section (tests/savestate_compat_test.nim covers it).
 
 proc gba_state_payload(gba: GBA; in_process = false): string =
   var w = Writer()
@@ -762,46 +680,29 @@ proc gba_state_payload(gba: GBA; in_process = false): string =
   w.write_tag(GBA_SEC_END)
   w.buf
 
-# ---- rev <= 3 -> 4: retrofit the HLE IntrWait System-stack frames ----------
+# ---- rev <= 3 -> 4: retrofit the HLE IntrWait System-stack frames ----
 #
-# 32dd8bb taught the HLE BIOS to model the real dispatcher's stack footprint.
-# Its IntrWait now pushes {r2, lr} (dispatcher) + {r4, lr} (routine) onto the
-# System stack, keeps sp 16 bytes lower for the whole wait, and pops all four
-# words on resume — UNCONDITIONALLY, with no flag to turn off. A rev <= 3 state
-# parked inside IntrWait has an unshifted sp and no frame in memory, so that
-# resume would pop four words of the game's own stack into r4/r2/lr and hand sp
-# back 16 too high. That is why the v5 bump refused old states outright.
+# The HLE IntrWait pushes {r2, lr} (dispatcher) + {r4, lr} (routine) onto
+# the System stack and pops all four unconditionally on resume. A rev <= 3
+# state parked in IntrWait has no frame and an unshifted sp, but its
+# registers still hold the caller's r2/r4/lr_sys (the old build never
+# overwrote them while waiting), so writing them where the pop expects them
+# reproduces the old caller-visible outcome exactly.
 #
-# It does not have to. The old build never overwrote r2/r4/lr_sys while waiting,
-# so a rev <= 3 state still holds the CALLER's values in those registers — which
-# is exactly what the frame is supposed to contain. Writing them where the pop
-# expects them makes the new resume restore the caller's r2/r4/lr and the
-# original sp: byte for byte the same caller-visible outcome the old build's
-# resume produced (it restored nothing and left them live).
-#
-# The 16 bytes land below the System sp, which is dead stack the new build
-# clobbers on every IntrWait anyway — and putting BIOS residue there is the
-# hardware behaviour 32dd8bb added, not a departure from it.
-#
-# Safe only while the CPU is HALTED in the wait loop. If the state was taken
-# with intr_wait_active but not halted, the user IRQ handler is mid-flight on
-# that same System stack: lowering sp under it would move the base its own
-# pushes already used. There is no way to reconstruct that, so those states are
-# refused (see the check in gba_apply_state) rather than silently mis-resumed.
+# Safe only while the CPU is halted in the wait loop: with the user IRQ
+# handler mid-flight on the same stack, lowering sp would move the base its
+# pushes already used, so those states are refused in gba_apply_state.
 proc migrate_intr_wait_frame(gba: GBA) =
   let cpu = gba.cpu
   let usp = cpu.sys_sp()
-  # Dispatcher frame {r2, lr} then routine frame {r4, lr = 0x170}, in the
-  # layout check_intr_wait pops: [usp-16] r4, [usp-12] 0x170, [usp-8] r2,
+  # Layout check_intr_wait pops: [usp-16] r4, [usp-12] 0x170, [usp-8] r2,
   # [usp-4] lr.
   gba.bus.write_word_internal(usp - 4,  cpu.sys_lr())
   gba.bus.write_word_internal(usp - 8,  cpu.r[2])
   gba.bus.write_word_internal(usp - 12, 0x170'u32)
   gba.bus.write_word_internal(usp - 16, cpu.r[4])
   cpu.set_sys_sp(usp - 16)
-  # ...and put the live registers into the halt loop's convention, which is what
-  # this build would be holding had it entered the wait itself (r4 = 1, r2 = the
-  # last mirror read, lr_sys = 0x34C, the bl-return inside the loop).
+  # The halt loop's register convention (see hle_intr_wait)
   cpu.r[4] = 1
   cpu.r[2] = uint32(cpu.read_intr_mirror())
   cpu.set_sys_lr(0x34C'u32)
@@ -818,31 +719,10 @@ proc gba_apply_state(gba: GBA; payload: string; rev: uint32;
   load_bus_state(gba.bus, r, rev)
   r.expect_tag(GBA_SEC_SCHED)
   gba.scheduler.load_from(r, pad = in_process)
-  # The display has to be able to advance. `step_frame` is
-  # `while gba.ppu.frame == 0: gba.cpu.tick()`, and nothing but the PPU event
-  # chain ever increments that counter — each handler schedules the next, so a
-  # running machine always carries exactly one of them. A state that carries
-  # none is a machine whose display is stopped for good: step_frame never
-  # returns, and the emulator hangs with no Defect to catch and no frame to
-  # show. (In the sweep it eventually surfaced as an OverflowDefect, hours of
-  # emulated time later, which is the same hang wearing a different hat.)
-  #
-  # This is not an out-of-range field and no range check can find it. The
-  # event KIND is a one-byte enum, every value of which is legal; the sweep
-  # zeroed one and turned this state's etPPUStartHBlank into a second
-  # etAPUFrameSeq. Nothing was out of range — a required event had simply been
-  # renamed out of existence:
-  #
-  #   [UNCONTAINED] payload offset 295262 := 0x00: over- or underflow
-  #
-  # Only reachable by sweeping 0x00; 0xFF lands past high(EventType) and is
-  # already refused by the kind check inside load_from.
-  #
-  # Cannot refuse a real state: 1500 frame boundaries across three GBA ROMs
-  # carry exactly one PPU event (always etPPUStartHBlank), and all eight GBA
-  # states in tests/states load. Written as "at least one of the chain" rather
-  # than "exactly etPPUStartHBlank" so it keeps holding if the phase a state
-  # is captured at ever changes.
+  # Only the PPU event chain increments ppu.frame, and a running machine
+  # always carries exactly one of its events. A state with none (a corrupt
+  # event kind is still a legal enum value) would hang step_frame forever.
+  # "At least one of the chain" so this holds if the capture phase changes.
   block:
     var has_ppu_event = false
     for ev in gba.scheduler.events:
@@ -868,45 +748,17 @@ proc gba_apply_state(gba: GBA; payload: string; rev: uint32;
   # After the payload, so the stack it writes into is the restored WRAM
   if rev < 4 and gba.cpu.intr_wait_active:
     gba.migrate_intr_wait_frame()
-  # irq_line is derived from IE/IF/IME and not serialized; recompute it so a
-  # pending-but-untaken IRQ at the save point isn't lost. Same for the
-  # WAITCNT-derived bus timing tables.
-  #
-  # check_interrupts is not a pure recompute: it also RESOLVES the halt, and
-  # doing that here runs it early. A peripheral that raises IF schedules the
-  # recognition check IRQ_SYNC_DELAY cycles later (see interrupts.nim), and a
-  # state written at a frame boundary is written the instant vblank raises its
-  # flag — so nearly every state of a game that idles in HALT/IntrWait carries
-  # a pending etInterrupts event that has not fired yet. Calling this
-  # unconditionally fired it, clearing `halted` and setting `halt_wake` three
-  # cycles ahead of the schedule the state itself preserves; the event then
-  # fires on time and does the same work again. The visible symptom was that
-  # save -> load -> save was not idempotent (two payload bytes plus the header
-  # hash), and the same two bytes drifted on every rewind pop, rollback restore
-  # and run-ahead frame, which all reload a payload through here. Take the
-  # derived value and leave the halt to the event that owns it.
-  #
-  # Safe because every path that raises IF schedules that check in the same
-  # breath (dma/keypad/timer/ppu/serial/rtc/hle_bios, and the IE/IF/IME writes
-  # in mmio), so a state with a pending interrupt always carries the event that
-  # will resolve the halt. Nothing else can wake a halted CPU, and nothing else
-  # runs while it is halted, so the pending set cannot change in between.
-  #
-  # irq_line has the same shape of problem and the same answer. It is not a
-  # function of IE/IF/IME alone — it is the RESULT of the last recognition
-  # check, and a raise that has not been checked yet must not show up in it.
-  # Recomputing unconditionally recognised the interrupt up to IRQ_SYNC_DELAY
-  # cycles early, which for a game still executing at the frame boundary (as
-  # opposed to idling in HALT) moves the IRQ one instruction: Golden Sun 1 and
-  # 2 drifted lr_irq, the word the handler pushes at 0x03007F9C, and the user
-  # stack pointer on every restore. So only recompute when no check is in
-  # flight; when one is, the event carries the answer and will deliver it on
-  # schedule.
-  #
-  # The recompute is exact in that case. IF only GAINS bits between checks (the
-  # only way to clear one is a CPU write to IF, which schedules a check), so
-  # "IE & IF != 0 and IME" holding now and no check pending means it held at
-  # the last check too.
+  # irq_line and the WAITCNT timing tables are derived, not serialized.
+  # check_interrupts also resolves the halt, and a frame-boundary state is
+  # written the instant vblank raises IF, so it nearly always carries a
+  # pending etInterrupts event: letting the recompute wake the CPU here
+  # fires that event IRQ_SYNC_DELAY cycles early (save -> load -> save was
+  # not idempotent). Every path that raises IF schedules the check, so the
+  # event owns the wake: keep halted/halt_wake/stopped. Likewise irq_line is
+  # the result of the last check, so with a check pending it must stay
+  # false or the IRQ moves one instruction (Golden Sun drifted lr_irq and
+  # the user sp on every restore). With no check pending the recompute is
+  # exact: IF only gains bits between checks.
   let checkPending = gba.scheduler.has_event(etInterrupts)
   let halted  = gba.cpu.halted
   let wake    = gba.cpu.halt_wake
@@ -917,77 +769,41 @@ proc gba_apply_state(gba: GBA; payload: string; rev: uint32;
   gba.cpu.stopped   = stopped
   if checkPending: gba.cpu.irq_line = false
   gba.bus.update_waitcnt(gba.mmio.waitcnt)
-  # The MP2K HLE shadow mixer's state is deliberately not serialized (state
-  # files stay byte-identical with the HLE on or off); it is rebuilt from the
-  # restored RAM instead. Reset it and re-latch on the next mixer-pass hook.
-  # gba_apply_state is the single funnel for every load path (load_state,
-  # load_state_bytes, apply_state_payload/rollback), so this covers them all.
+  # The audio HLE shadow mixers are not serialized (state files are
+  # byte-identical with the HLE on or off); they re-latch from restored RAM.
   if gba.mp2k != nil:
     gba.mp2k.mp2k_state_loaded()
   if gba.gs_bon != nil:
     gba.gs_bon.gs_state_loaded()
 
-# Canonical value stored in the state-file header's "ROM size" slot. The ROM
-# buffer is now sized to the cart's next power of two (not a flat 32 MB), but
-# this field is only a validation tag; keeping the old 32 MB constant keeps
-# state files backward/forward compatible across the resize. ROM identity comes
-# from gba_rom_checksum, not this field.
+# Header "ROM size" slot: a validation tag only, kept at the historical
+# 32 MB constant across buffer-sizing changes. ROM identity is gba_rom_checksum.
 const GBA_STATE_ROM_TAG = 0x02000000'u32
 
 proc gba_rom_checksum(gba: GBA): uint32 =
-  ## ROM identity: the first 1 MB of the ROM FILE, hashed (cheap, and every
-  ## real cart is larger than the cap so nothing collides on the cap alone).
-  ##
-  ## `rom_size`, NOT `rom.len`. The buffer is padded — up to the next power of
-  ## two, with a small floor, and out to 4 MB for the 1 MB Classic NES carts
-  ## whose image is mirrored 4x (see cartridge.nim). Hashing `rom.len` folds
-  ## that padding into the cart's identity, so any change to the padding RULE
-  ## silently re-identifies every cart smaller than the cap and refuses its
-  ## existing states as "a different ROM". That is exactly what 2dfd27e did
-  ## when it replaced the flat 32 MB open-bus-filled buffer with next_pow2:
-  ## see gba_legacy_rom_checksums, which is what keeps those states loading.
-  ## Hashing the file bytes makes the identity independent of how we allocate.
-  ##
-  ## This value is NOT on any wire. The peer/ROM check netplay does is a
-  ## different quantity with a similar name: `LinkMsg.rom_crc`, a CRC-32 of the
-  ## ROM file sent in HELLO (common/linkproto.nim). Changing this proc cannot
-  ## reject a peer; changing that one can. Keep them separate.
-  ## Read from the cache taken at load (Cartridge.rom_identity), never from the
-  ## live buffer: the cheat engine patches `rom` in place, so hashing it here
-  ## meant toggling a ROM-patching code re-identified the cart and refused
-  ## every state for it.
+  ## ROM identity: hash of the first 1 MB of the ROM file, cached at load
+  ## (Cartridge.rom_identity). Hashing the file rather than the padded
+  ## buffer keeps the identity independent of the allocation rule; reading
+  ## the cache rather than the live buffer keeps cheat patches from
+  ## re-identifying the cart. Not on any wire: netplay's `LinkMsg.rom_crc`
+  ## is a separate quantity.
   gba.cartridge.rom_identity
 
 proc gba_legacy_rom_checksums(gba: GBA): seq[uint32] =
-  ## The identities OLDER builds computed for this same cart, accepted on read
-  ## (never written) so that no user loses a state to the fix above. Both
-  ## variants hashed the same 1 MB window of the ROM *buffer*, so they only
-  ## differ from the current value for carts smaller than 1 MB — every cart
-  ## >= 1 MB, Classic NES included, has an unchanged identity and doesn't even
-  ## reach this code.
-  ##
-  ## Cost is one extra ≤1 MB hash on the load path of a sub-1 MB cart, i.e.
-  ## homebrew and test ROMs; commercial carts return early.
+  ## Identities older builds computed for this cart, accepted on read only.
+  ## Both variants hashed the 1 MB window of the padded buffer, so they
+  ## differ from the current value only for carts under 1 MB.
   let sz = gba.cartridge.rom_size
   if sz <= 0 or sz >= 0x100000: return @[]
   let current = gba.gba_rom_checksum()
 
   proc add_legacy(s: var seq[uint32]; v: uint32) =
-    # A cart whose file length is already a power of two >= 32 KB has no
-    # padding in variant (a), so that variant lands on the current value;
-    # don't list it twice.
     if v != current and v notin s: s.add(v)
 
-  # (a) 2dfd27e .. the commit that added this: next_pow2 buffer (32 KB floor),
-  #     zero-filled past the file.
-  #
-  #     Reconstructed from that RULE, not from cartridge.rom.len. The live
-  #     allocation rule has changed again since (the floor is 0x100 now, so
-  #     that reads back the open-bus pattern at the right address for a tiny
-  #     cart), and reading the current buffer length here would have quietly
-  #     re-derived a *different* "legacy" identity and orphaned every state a
-  #     32 KB-floor build wrote for a sub-32 KB ROM. tests/savestate_compat
-  #     catches exactly this.
+  # (a) next_pow2 buffer with a 32 KB floor, zero-filled past the file.
+  #     Reconstructed from that rule, not from cartridge.rom.len: the live
+  #     floor has since changed, and using it would orphan the states those
+  #     builds wrote (tests/savestate_compat).
   block:
     var pad = 0x8000
     while pad < sz: pad = pad shl 1
@@ -998,12 +814,8 @@ proc gba_legacy_rom_checksums(gba: GBA): seq[uint32] =
       h = (h xor uint32(b)) * 0x01000193'u32
     result.add_legacy(h)
 
-  # (b) before 2dfd27e: a flat 32 MB buffer pre-filled with the open-bus
-  #     address pattern, the file written over the front, and [sz, next_pow2)
-  #     re-zeroed — only when sz was not already a power of two, which is why
-  #     the zero run below is empty in that case. Reconstructed by streaming
-  #     rather than rebuilding the buffer; rom_open_bus is the same generator
-  #     bus.nim uses today, so the two revisions cannot drift apart.
+  # (b) a flat 32 MB buffer pre-filled with the open-bus pattern, the file at
+  #     the front, [sz, next_pow2) zeroed (empty when sz is a power of two).
   var pow2 = 1
   while pow2 < sz: pow2 = pow2 shl 1
   var h = 0x811C9DC5'u32
@@ -1015,24 +827,15 @@ proc gba_legacy_rom_checksums(gba: GBA): seq[uint32] =
   result.add_legacy(h)
 
 proc state_payload*(gba: GBA): string =
-  ## Raw serialized state, no header/validation. For trusted in-process uses
-  ## (the rewind ring buffer). Frame boundaries only.
-  ##
-  ## in_process = true: this payload never reaches a file, so it is padded to
-  ## a fixed length. See the boundary note above.
+  ## Raw in-process payload (padded, no header); frame boundaries only.
   gba.gba_state_payload(in_process = true)
 
 proc apply_state_payload*(gba: GBA; payload: string) =
-  ## Apply a raw payload produced by state_payload. Raises StateError on
-  ## corrupt input; no rollback — trusted callers only. Always this build's
-  ## revision: the rewind ring and rollback snapshots never outlive the process.
+  ## Apply a state_payload. Raises StateError on corrupt input, no rollback.
   gba.gba_apply_state(payload, GBA_PAYLOAD_VERSION, in_process = true)
 
 proc apply_state_payload*(gba: GBA; payload: string; rev: uint32) =
-  ## As above, for a payload known to be in an OLDER revision. Exists so the
-  ## format tests can exercise a migration without a whole state image; normal
-  ## load paths get their revision from the header. In-process like the other
-  ## overload: its callers hand it payloads produced by state_payload.
+  ## As above for an older revision (format tests exercise migrations).
   gba.gba_apply_state(payload, rev, in_process = true)
 
 const GBA_THUMB_W = 120
@@ -1042,9 +845,8 @@ proc gba_thumbnail(gba: GBA): seq[byte] =
   downscale_bgr555(gba.ppu.framebuffer, 240, 160, GBA_THUMB_W, GBA_THUMB_H)
 
 proc state_bytes*(gba: GBA; thumbnail = false): string =
-  ## Full validated state image (header + payload) for in-memory transports
-  ## (web IndexedDB / downloads). Same format as .state files. With thumbnail,
-  ## a downscaled BGR555 screenshot trailer is appended (ignored by old readers).
+  ## Full state image (header + payload), the .state file format. With
+  ## thumbnail, a BGR555 screenshot trailer is appended (old readers ignore it).
   let payload = gba.gba_state_payload()
   if thumbnail:
     make_state_bytes(ckGBA, gba.gba_rom_checksum(), GBA_STATE_ROM_TAG, payload,
@@ -1054,7 +856,6 @@ proc state_bytes*(gba: GBA; thumbnail = false): string =
 
 proc gba_apply_checked(gba: GBA; payload: string; rev: uint32): bool =
   ## Apply a validated payload, restoring the live machine if it fails midway.
-  ## Both load paths go through here so the containment is written once.
   let backup = gba.gba_state_payload()
   try:
     gba.gba_apply_state(payload, rev)
@@ -1064,25 +865,11 @@ proc gba_apply_checked(gba: GBA; payload: string; rev: uint32): bool =
     last_state_error = getCurrentExceptionMsg()
     echo "Load state failed: ", last_state_error
   except Defect as d:
-    # BACKSTOP, not the fix. The fix is the range guards in the readers above
-    # (check_range / check_one_of / check_no_undefined_bits). This catches the
-    # field nobody has bounded yet, and it is here on purpose rather than by
-    # default:
-    #
-    #  - Catching Defect broadly is a bad habit: it hides real bugs. The
-    #    mitigations are that this handler wraps ONE call, that it says in the
-    #    log that reaching it is a bug in dingbat rather than in the file, and
-    #    that tools/statefuzz.nim's byte sweep is a regression gate which
-    #    FAILS on a reachable one instead of letting it be swallowed quietly.
-    #  - Continuing after a Defect is normally indefensible, because the
-    #    program is in an unknown state. It is defensible here, and only here,
-    #    because the next line puts the machine back to a payload this build
-    #    serialized itself moments ago. Nothing half-applied survives.
-    #  - The alternative is worse than the bug it hides. A state file now
-    #    travels — it gets shared, mailed, dropped in a chat — so it can be a
-    #    stranger's, and an uncaught Defect takes the process down: in the wasm
-    #    build it aborts the module, costing the player the game they were
-    #    actually in the middle of, to punish them for opening someone's file.
+    # Backstop for a field no reader has bounded yet (the fix is a range
+    # guard in the reader; tools/statefuzz.nim's byte sweep fails on a
+    # reachable one). Continuing is safe only because the next line restores
+    # a payload this build serialized moments ago; an uncaught Defect would
+    # abort the wasm module over a stranger's file.
     last_state_error = "this save state is damaged"
     last_state_reject_kind = srkCorrupt
     echo "Load state failed: an unbounded field reached a ", d.name,
@@ -1092,18 +879,14 @@ proc gba_apply_checked(gba: GBA; payload: string; rev: uint32): bool =
 
 proc parse_state_image*(gba: GBA; data: string; origin = "state data"):
                        tuple[payload: string; rev: uint32] =
-  ## Header validation for a full state image against THIS cart, including the
-  ## legacy ROM identities older builds wrote for it. Anything that has to ask
-  ## "does this state belong to this ROM" goes through here (load_state_bytes,
-  ## and the format test) rather than assembling the identity itself — the one
-  ## exception is load_state, which needs the file-not-found path and so passes
-  ## the same two values to read_state_payload.
+  ## Header validation against this cart, including legacy ROM identities.
+  ## load_state passes the same values to read_state_payload instead (it
+  ## needs the file-not-found path).
   parse_state_payload(data, ckGBA, gba.gba_rom_checksum(), GBA_STATE_ROM_TAG,
                       origin, gba.gba_legacy_rom_checksums())
 
 proc load_state_bytes*(gba: GBA; data: string): bool =
   ## Validate and apply a full state image. Mirrors load_state's rollback.
-  ## Clears the reject kind first, for the reason written at the GB twin.
   last_state_reject_kind = srkNone
   var image: tuple[payload: string; rev: uint32]
   try:
@@ -1115,9 +898,7 @@ proc load_state_bytes*(gba: GBA; data: string): bool =
   gba.gba_apply_checked(image.payload, image.rev)
 
 proc save_state*(gba: GBA; path: string; thumbnail = false): bool =
-  ## Serialize the full emulator state to path. Must only be called at a
-  ## frame boundary (right after step_frame returns). Returns false and
-  ## echoes a message on failure.
+  ## Write the full state to path; frame boundary only. False on failure.
   try:
     if thumbnail:
       write_state_file(path, ckGBA, gba.gba_rom_checksum(), GBA_STATE_ROM_TAG,
@@ -1132,10 +913,9 @@ proc save_state*(gba: GBA; path: string; thumbnail = false): bool =
     false
 
 proc load_state*(gba: GBA; path: string): bool =
-  ## Restore emulator state from path. Must only be called at a frame
-  ## boundary. On any validation error the emulator is left untouched; if
-  ## applying fails midway the pre-load state is restored.
-  last_state_reject_kind = srkNone   # see the GB load_state_bytes
+  ## Restore state from path; frame boundary only. On a validation error the
+  ## emulator is untouched; if applying fails midway the prior state is restored.
+  last_state_reject_kind = srkNone
   var image: tuple[payload: string; rev: uint32]
   try:
     image = read_state_payload(path, ckGBA, gba.gba_rom_checksum(),

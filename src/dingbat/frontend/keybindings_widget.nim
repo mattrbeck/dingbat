@@ -27,13 +27,11 @@ proc wants_input*(w: KeybindingsWidget): bool =
 proc key_released*(w: KeybindingsWidget; keycode: cint) =
   if w.selection.isSome():
     let sel = w.selection.get()
-    # Remove old binding for this input
     var old_key: cint = -1
     for k, v in w.editing.pairs:
       if v == sel: old_key = k; break
     if old_key >= 0: w.editing.del(old_key)
     w.editing[keycode] = sel
-    # Advance to next input
     let next_ord = ord(sel) + 1
     if next_ord <= ord(high(Input)):
       w.selection = some(Input(next_ord))
@@ -63,10 +61,8 @@ proc render*(w: KeybindingsWidget) =
   for inp in Input:
     let selected = w.selection.isSome() and w.selection.get() == inp
     let keycode  = w.find_key_for_input(inp)
-    # getKeyName returns the printable character for printable keycodes (e.g. ";")
-    # and a word name for non-printable ones (e.g. "Return").
-    # For scancode-masked keycodes (bit 30 set), convert back through the
-    # scancode to get the printable character from the keyboard map.
+    # Scancode-masked keycodes (bit 30) go back through the scancode so
+    # getKeyName yields the keyboard map's printable character.
     let btn_text =
       if keycode < 0: "---"
       elif (keycode and 0x40000000) != 0:

@@ -1,19 +1,13 @@
 # Input-rollback netplay session (GGPO-style) over the local 2-core link.
 #
-# Both peers run BOTH GBA cores locally (link.nim resolves the SIO cable at full
-# speed); only the two players' button inputs cross the network. Each peer owns
-# one RollbackSession: it drives its Link one frame at a time, feeding the local
-# player's real input and a PREDICTION of the remote player's input, and rolls
-# back + re-simulates when a late remote input arrives mispredicted. The result
-# is bit-identical to knowing every input upfront (proven by the --mode=rollback
-# harness), so both peers stay in lockstep with no per-round RTT — latency only
-# delays the remote input, which prediction hides.
-#
-# Transport-agnostic (like netcore): the transport calls `tick(localBits)` once
-# per display frame and ships the returned frame's input to the peer, and calls
-# `feed_remote(frame, bits)` as peer inputs arrive. Determinism prerequisites:
-# identical build + ROM + save on both sides, and a deterministic RTC
-# (enable_deterministic_rtc) — the SIO cable and everything else is local.
+# Both peers run both GBA cores locally (link.nim resolves the SIO cable);
+# only button inputs cross the network. Each frame the session feeds the
+# local input plus a prediction of the remote input, and when a late remote
+# input arrives mispredicted it restores that frame's checkpoint and
+# re-simulates. Transport-agnostic: call `tick(localBits)` once per display
+# frame and ship the returned frame's input; call `feed_remote` as peer
+# inputs arrive. Determinism needs identical build + ROM + save on both
+# sides and a deterministic RTC (enable_deterministic_rtc).
 
 import ../common/input
 import link
@@ -34,8 +28,7 @@ type
     maxAhead*: int               ## head may lead confirmed by at most this (window)
     rollbacks*: int              ## telemetry: rollbacks performed
     stalls*: int                 ## telemetry: ticks that stalled on the window
-    replaying*: bool             ## true while re-simulating rolled-back frames
-                                 ## (the transport suppresses audio/render churn)
+    replaying*: bool             ## re-simulating rolled-back frames (transport mutes audio/render)
     localIn: seq[uint16]         ## local player's input per frame
     remoteIn: seq[uint16]        ## remote player's input per frame (valid iff remoteKnown)
     remoteKnown: seq[bool]
@@ -47,10 +40,9 @@ type
 proc bit(v: uint16; i: int): bool {.inline.} = ((v shr i) and 1) != 0
 
 proc new_rollback_session*(link: Link; local: int; maxAhead = 12): RollbackSession =
-  ## `link` must be a fresh 2-core Link at frame 0 (both cores post_init from the
-  ## two players' ROM+save, deterministic RTC set). `local` is which core this
-  ## peer's buttons drive. `maxAhead` bounds prediction depth — pick it above the
-  ## round-trip in frames (50 ms ≈ 3 frames; 12 leaves comfortable margin).
+  ## `link` must be a fresh 2-core Link at frame 0. `local` is the core this
+  ## peer's buttons drive. `maxAhead` bounds prediction depth; pick it above
+  ## the round-trip in frames.
   doAssert local in {0, 1}, "local player must be 0 or 1"
   doAssert link.cores.len == 2, "rollback session needs exactly two cores"
   let cap = maxAhead + 4
@@ -68,9 +60,8 @@ proc grow(sess: RollbackSession; f: int) =
     sess.usedRemote.setLen(n)
 
 proc apply_inputs(sess: RollbackSession; f: int) =
-  # Remote word: the real input if we have it (even ahead of the confirmed
-  # frontier — it just hasn't been reconciled yet), else predict "same as the
-  # last confirmed remote input" (button states change rarely, so this hits).
+  # Remote word: the real input if known, else the last confirmed remote
+  # input (button states change rarely, so the prediction usually holds).
   let lb = sess.localIn[f]
   let rb =
     if sess.remoteKnown[f]: sess.remoteIn[f]
@@ -95,17 +86,15 @@ proc load_ckpt(sess: RollbackSession; f: int) =
   sess.link.restore_state(sess.ring[idx])
 
 proc sim(sess: RollbackSession; f: int) =
-  # Snapshot the state ENTERING frame f (so a rollback to f restores here), then
-  # apply that frame's inputs and advance one video frame.
+  # Checkpoint the state entering frame f, then apply its inputs and step.
   sess.store_ckpt(f)
   sess.apply_inputs(f)
   sess.link.step_frame()
 
 proc reconcile(sess: RollbackSession) =
-  ## Extend the confirmed frontier over contiguously-known remote frames. If any
-  ## of them was mispredicted, restore the frontier checkpoint and re-simulate
-  ## forward to `head` with the corrected inputs. Only a genuine misprediction
-  ## (the remote player actually changed buttons) costs a rollback.
+  ## Extend the confirmed frontier over contiguously-known remote frames; if
+  ## any was mispredicted, restore the frontier checkpoint and re-simulate to
+  ## `head` with the corrected inputs.
   var g = sess.confirmed
   while g + 1 < sess.head and g + 1 < sess.remoteKnown.len and sess.remoteKnown[g + 1]:
     inc g
@@ -123,9 +112,8 @@ proc reconcile(sess: RollbackSession) =
     sess.replaying = false
 
 proc feed_remote*(sess: RollbackSession; frame: int; bits: uint16) =
-  ## Ingest a remote player's input for `frame` (from the transport). May be for
-  ## a frame we already predicted (→ reconcile/rollback) or a future frame we
-  ## haven't reached yet (→ buffered until we do). Duplicates are ignored.
+  ## Ingest the remote input for `frame`: reconciles an already-predicted
+  ## frame, buffers a future one. Duplicates are ignored.
   if frame < 0: return
   sess.grow(frame)
   if sess.remoteKnown[frame]: return
@@ -134,11 +122,10 @@ proc feed_remote*(sess: RollbackSession; frame: int; bits: uint16) =
   sess.reconcile()
 
 proc tick*(sess: RollbackSession; localBits: uint16): RollbackStatus =
-  ## Simulate one presentation frame with the local input and prediction. If we
-  ## are already `maxAhead` frames past the confirmed remote input, STALL instead
-  ## of predicting deeper (bounds rollback distance) — the transport should just
-  ## re-present the last frame and try again once remote input arrives. On
-  ## rbAdvanced the caller ships (`head-1`, localBits) to the peer.
+  ## Simulate one frame with the local input and a remote prediction. Stalls
+  ## (rbStalled) once `maxAhead` frames past the confirmed remote input; the
+  ## transport re-presents the last frame. On rbAdvanced the caller ships
+  ## (`head-1`, localBits) to the peer.
   if sess.head - sess.confirmed > sess.maxAhead:
     inc sess.stalls
     return rbStalled
@@ -149,11 +136,5 @@ proc tick*(sess: RollbackSession; localBits: uint16): RollbackStatus =
   rbAdvanced
 
 proc checksum*(sess: RollbackSession): uint64 =
-  ## State fingerprint for periodic desync detection between peers. Compare only
-  ## at a CONFIRMED frame (both peers agree there); a mismatch means a
-  ## determinism gap — surface it instead of letting the trade corrupt.
+  ## Desync-detection fingerprint; compare only at a confirmed frame.
   sess.link.state_checksum()
-
-# Rendering is the transport's job: it reads sess.link.cores[player] and
-# converts the native-format framebuffer to RGBA (the wasm layer already does
-# this for local 2P mode). A peer shows its OWN player (sess.local).

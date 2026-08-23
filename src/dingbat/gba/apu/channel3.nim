@@ -44,8 +44,7 @@ proc ch3_catchup_slow(ch: Channel3; observer_period: uint32) =
   # steps land at (pos + N) mod 32 with the bank toggled once per wrap —
   # wraps = (pos + N) div 32, and only its parity matters.
   when defined(psgverify):
-    # Shadow the pre-catch-up per-period loop (the original ch3_step_wave) and
-    # assert the closed form lands on the same pointer, bank and sample buffer.
+    # Per-period loop the closed form must agree with.
     var wpos  = ch.wave_ram_position
     var wbank = ch.wave_ram_bank
     var wbuf  = ch.wave_ram_sample_buffer
@@ -58,10 +57,9 @@ proc ch3_catchup_slow(ch: Channel3; observer_period: uint32) =
   ch.wave_ram_position = uint8(total and 31)
   if ch.wave_ram_dimension and ((total shr 5) and 1) != 0:
     ch.wave_ram_bank = ch.wave_ram_bank xor 1
-  # Only the LAST read matters: wave RAM and the dimension/bank bits are
-  # immutable between catch-ups (every 0x90-0x9F access and every SOUND3CNT
-  # write catches this channel up first), so the intermediate sample-buffer
-  # loads a per-period loop would do are all overwritten anyway.
+  # Only the LAST read matters: wave RAM and the dimension/bank bits cannot
+  # change between catch-ups (every 0x90-0x9F access and SOUND3CNT write
+  # catches this channel up first).
   let full_sample = ch.wave_ram[ch.wave_ram_bank][ch.wave_ram_position div 2]
   ch.wave_ram_sample_buffer =
     (full_sample shr (if (ch.wave_ram_position and 1) == 0: 4 else: 0)) and 0xF
@@ -134,14 +132,12 @@ proc ch3_write*(ch: Channel3; address: uint32; value: uint8) =
     if triggered and ch.dac_enabled: ch.enabled = true
     ch.agb_length_on_nrx4(length_enable, triggered, 0x100)  # AGB order; see abstract_channels
     if triggered:
-      # Same as clear(etAPUChannel3) + schedule(period + 6). The +6 stays
-      # exactly where it was (outside the *4 in ch3_frequency_timer).
+      # Re-arm period + 6 from now (the +6 is outside ch3_frequency_timer's *4).
       let arm3 = ch.ch3_frequency_timer() + 6
       ch.next_step = ch.gba.scheduler.cycles + CycleCount(arm3)
       ch.arm_delay = arm3
-      # The index resets, but wave_ram_sample_buffer deliberately does NOT: the
-      # last nibble read keeps being output until CH3 next reads one (Pan Docs),
-      # so the pre-trigger buffer is observable and must already be current.
+      # The index resets but wave_ram_sample_buffer does NOT: the last nibble
+      # read keeps being output until CH3 next reads one (Pan Docs).
       ch.wave_ram_position = 0
   of 0x76, 0x77: discard
   of WAVE_RAM_LOW..WAVE_RAM_HIGH:

@@ -1,6 +1,6 @@
-# Hand-rolled binary save-state serialization: a little-endian Writer/Reader
-# pair plus the .state file header. Every field is written explicitly per
-# subsystem (no std/marshal — it's JSON + refs and not stable across builds).
+# Binary save-state serialization: a little-endian Writer/Reader pair plus the
+# .state file header. Every field is written explicitly (no std/marshal: JSON +
+# refs, not stable across builds).
 
 import std/[os, strutils]
 
@@ -8,11 +8,8 @@ type
   StateError* = object of CatchableError
 
   StateRejectKind* = enum
-    ## WHY a state was refused, coarse enough for a frontend to write a
-    ## different sentence for each. The detail string (`last_state_error`)
-    ## stays available underneath, but no UI should have to parse it: the
-    ## whole point is that "this is for a different game" and "this file is
-    ## damaged" are different problems with different things to do about them.
+    ## Why a state was refused, coarse enough for a frontend to pick a sentence
+    ## without parsing the detail string (`last_state_error`).
     srkNone            ## nothing was refused
     srkNotAState       ## no DGBSTATE magic — not one of our files at all
     srkWrongCore       ## a Game Boy state offered to the GBA core, or vice versa
@@ -20,9 +17,7 @@ type
     srkTooNew          ## written by a newer dingbat than this one
     srkTruncated       ## the file is short — a partial download or copy
     srkCorrupt         ## hash/marker/range checks failed: the bytes are damaged
-    ## APPEND new causes here. The ordinals cross into JS (web/index.js's SRK
-    ## table reads them off wasm_state_error_kind), so inserting in the middle
-    ## silently renumbers every cause after it.
+    ## APPEND new causes: the ordinals cross into JS (web/index.js's SRK table).
     srkNoFile          ## nothing there to load — an empty slot, a missing path
 
   CoreKind* = enum
@@ -39,28 +34,10 @@ type
 const
   STATE_MAGIC*   = "DGBSTATE"  # 8 bytes
 
-  # ---- Container version vs payload revision --------------------------------
-  #
-  # STATE_VERSION describes the HEADER, not the payloads. It stopped being a
-  # "something changed somewhere" counter at v7.
-  #
-  # v1..v6 were exactly that counter, and it was a bad design: the reader
-  # demanded equality, so every bump refused every state every user had, for
-  # BOTH cores. All five bumps changed exactly one core's payload and threw the
-  # other core's states away for nothing. v6 is the one that did it to Matt:
-  # a single Game Boy PPU field invalidated every GBA state in existence, while
-  # the GBA payload was byte-for-byte unchanged.
-  #
-  # From v7 the header carries a PER-CORE payload revision in byte 13 (the old
-  # always-zero `slot` field), and each core accepts every revision it knows how
-  # to read — see GBA_PAYLOAD_VERSION / GB_PAYLOAD_VERSION and the migrations in
-  # the two savestate.nim files. A change to one core's payload now bumps only
-  # that core's revision and leaves the other core's states alone.
-  #
-  # So: do NOT bump STATE_VERSION for a payload change. Bump the core's payload
-  # revision and add its migration. STATE_VERSION moves only if this 32-byte
-  # header itself changes shape, which also means older builds stop recognising
-  # the file — a much bigger decision than it looks.
+  # STATE_VERSION describes the HEADER only. A payload change bumps that core's
+  # payload revision (header byte 13) and adds a migration in its savestate.nim;
+  # STATE_VERSION moves only if this 32-byte header changes shape, which also
+  # stops older builds recognising the file.
   STATE_VERSION* = 7'u32
 
   # Per-core payload revisions. Bump ONE of these when that core's field
@@ -74,52 +51,35 @@ const
   GB_PAYLOAD_VERSION*  = 5'u32
 
   # magic(8) version(4) core(1) payload_version(1) flags(2) rom_checksum(4)
-  # rom_size(4) payload_len(4) payload_hash(4)
-  #
-  # Byte 13 held `slot`, "reserved for future multi-slot support", and every
-  # writer since v1 wrote a literal 0 there (multi-slot ended up in the file
-  # NAME, not the header). 0 is therefore free as the "pre-v7, derive it"
-  # marker, and revisions start at 1.
+  # rom_size(4) payload_len(4) payload_hash(4). Byte 13 was an always-zero
+  # `slot` before v7, so 0 is the "pre-v7, derive it" marker and revisions
+  # start at 1.
   STATE_HEADER_SIZE* = 32
-  # Optional trailer after the payload, flagged in the header's flags field.
-  # It lives OUTSIDE the hash-validated payload so the per-subsystem serializers
-  # are untouched; readers that don't know about it slice by payload_len and
-  # ignore the extra bytes. Layout: thumb_w(2) thumb_h(2) len(4) BGR555 pixels.
+  # Optional trailer after the payload, flagged in `flags`; outside the
+  # hash-validated payload, so old readers ignore it. Layout: thumb_w(2)
+  # thumb_h(2) len(4) BGR555 pixels.
   STATE_FLAG_THUMBNAIL* = 0x0001'u16
 
 var last_state_reject_kind*: StateRejectKind = srkNone
-  ## Set beside `last_state_error` (below) by every refusal, so a frontend can
-  ## pick a sentence instead of echoing the core's wording. Assigned only from
-  ## inside procs the frontends call — see the note on last_state_error about
-  ## module-scope globals in the wasm build.
+  ## Set beside `last_state_error` by every refusal. Assigned only from procs
+  ## the frontends call (see last_state_error on wasm module-scope globals).
 
 proc state_error*(msg: string; kind = srkCorrupt): ref StateError =
-  ## Default srkCorrupt: an unqualified refusal from deep inside a subsystem
-  ## reader means the bytes did not describe a machine, which is the honest
-  ## thing to tell the user. Callers that know better say so.
+  ## Default srkCorrupt: an unqualified refusal from a subsystem reader means
+  ## the bytes did not describe a machine.
   last_state_reject_kind = kind
   newException(StateError, msg)
 
 # ==================== Field range guards ====================
 #
-# A save state used to be something you made for yourself, so the readers
-# trusted their input and only checked what would obviously break: the section
-# markers, MAX_EVENTS, high(EventType), high(StorageType). A state that arrives
-# that is shared — posted, mailed, dropped in a chat — is a stranger's file,
-# and the gap showed up immediately under a systematic byte sweep — a wild
-# cycle counter faults with an OverflowDefect on the next step_frame, and a
-# Defect is not a CatchableError, so it walked straight out of the loaders'
-# `except CatchableError` and crashed the emulator.
-#
-# The rule these helpers exist to enforce: EVERY field that is later used as an
-# index, a length, or an operand of unchecked arithmetic gets a documented
-# range at load time. They raise StateError, which the loaders already contain
-# and already restore from, so an out-of-range field is a clean rejection with
-# a message rather than a crash.
+# A shared state is a stranger's file: every field later used as an index, a
+# length, or an operand of unchecked arithmetic gets a range check at load time
+# (a wild value otherwise raises a Defect on the next step_frame, which is not
+# a CatchableError and escapes the loaders). These raise StateError, which the
+# loaders already restore from.
 
 proc check_range*(v, lo, hi: int; field: string) =
-  ## Raise unless `lo <= v <= hi`. `field` names the thing for the log; the
-  ## user-facing text comes from the reject KIND, not from this string.
+  ## `field` names the thing for the log; user-facing text comes from the kind.
   if v < lo or v > hi:
     raise state_error("save state field '" & field & "' is out of range (" &
                       $v & " not in " & $lo & ".." & $hi & ")")
@@ -132,26 +92,20 @@ proc check_one_of*(v: int; allowed: openArray[int]; field: string) =
                     $v & ")")
 
 proc check_no_undefined_bits*(v: uint32; width: int; field: string) =
-  ## Raise if any bit at or above `width` is set. For the `cast[set[…]]` reads,
-  ## where a bit with no enumerator behind it makes `for x in theSet` yield a
-  ## value that does not exist.
-  ##
-  ## NOTE the name. `check_bits` is the obvious one, and it is unusable: Nim
-  ## identifiers ignore case and underscores, so `check_bits` IS `checkBits`,
-  ## the macro lut_macros exports. The collision does not report itself here —
-  ## it surfaces as "invalid expression" inside every LUT builder in the tree.
+  ## Raise if any bit at or above `width` is set, for the `cast[set[...]]`
+  ## reads where a bit with no enumerator makes iteration yield a value that
+  ## does not exist. Not named `check_bits`: Nim identifiers ignore case and
+  ## underscores, so that IS the `checkBits` macro lut_macros exports, and the
+  ## collision surfaces as "invalid expression" inside every LUT builder.
   if width < 32 and (v shr width) != 0:
     raise state_error("save state field '" & field &
                       "' has undefined bits set (0x" & toHex(v, 8) & ")")
 
 template restore_backup*(apply: untyped) =
-  ## Put the pre-load machine back after a refused load. `apply` is the core's
-  ## own apply call on a payload IT serialized moments ago, so it cannot fail —
-  ## but "cannot fail" is exactly the claim the field guards above now enforce
-  ## on the way back in, and a raise here would leave the emulator half
-  ## restored AND replace a `false` return with an exception out of a proc
-  ## whose whole contract is the bool. Contain it and say so: there is nothing
-  ## better to do, and it must not be silent.
+  ## Put the pre-load machine back after a refused load. `apply` re-applies a
+  ## payload the core serialized moments ago, so it cannot fail -- but the field
+  ## guards run on the way back in too, and a raise here would leave the
+  ## emulator half restored; contain it and say so.
   try:
     apply
   except CatchableError, Defect:
@@ -253,10 +207,9 @@ proc read_seq_u16_into*(r: var Reader; dest: var openArray[uint16]) =
   for i in 0 ..< n: dest[i] = r.read_u16()
 
 proc peek_tag*(r: Reader): uint8 =
-  ## The next section marker without consuming it, or 0 at end of payload.
-  ## For sections that are conditionally present -- written only when the
-  ## machine has the hardware they describe -- so a reader whose machine does
-  ## NOT have it can still skip past instead of desynchronising.
+  ## Next section marker without consuming it, 0 at end of payload: lets a
+  ## reader skip a conditionally present section (written only when the machine
+  ## has that hardware).
   if r.remaining < 1: 0'u8 else: uint8(r.buf[r.pos])
 
 proc expect_tag*(r: var Reader; tag: uint8) =
@@ -267,17 +220,10 @@ proc expect_tag*(r: var Reader; tag: uint8) =
 # ==================== Hashing ====================
 
 var last_state_error*: string = ""
-  ## Why the most recent state load was refused, in the words parse_state_payload
-  ## already uses ("...belongs to a different ROM", "...written by a newer
-  ## version of dingbat", a corrupt-section message). Every caller of
-  ## load_state_bytes collapses the result to a bool, so without this the user
-  ## is told "State didn't match this game" no matter which of those it was —
-  ## which is actively wrong for a version mismatch and has sent more than one
-  ## person hunting for the wrong problem.
-  ##
-  ## Assigned only from inside procs the frontends call (never at module scope):
-  ## heap globals initialised at module scope dangle in the wasm build once
-  ## main() has returned.
+  ## Why the most recent state load was refused, in parse_state_payload's
+  ## words; every caller of load_state_bytes collapses the result to a bool.
+  ## Assigned only from procs the frontends call: heap globals initialised at
+  ## module scope dangle in the wasm build once main() has returned.
 
 proc fnv1a*(data: openArray[byte]): uint32 =
   result = 0x811C9DC5'u32
@@ -297,8 +243,7 @@ proc current_payload_version*(core: CoreKind): uint32 =
 
 proc legacy_payload_version*(core: CoreKind; container: uint32): uint32 =
   ## Which payload revision a pre-v7 file holds, derived from the old global
-  ## counter. Every container version maps to exactly one layout per core,
-  ## confirmed by walking every commit that touched either savestate.nim:
+  ## counter (one layout per core per container version):
   ##
   ##   container | GBA | GB | what moved
   ##      1      |  1  | 1  | format introduced
@@ -308,11 +253,9 @@ proc legacy_payload_version*(core: CoreKind; container: uint32): uint32 =
   ##      5      |  4  | 2  | GBA CPU halt_resume_pop
   ##      6      |  4  | 3  | GB PPU dots_since_frame
   ##
-  ## The one wrinkle: inside container 4 the GB serial section's 5th byte
-  ## changed meaning (previous_bit -> clock_history, f678d02) at the same width,
-  ## so the LAYOUT is single-valued but that byte's meaning is not. It is the
-  ## serial shift-clock edge history, idle (0) in any state not taken mid-link
-  ## transfer, and both readings of 0 mean the same thing.
+  ## Inside container 4 the GB serial section's 5th byte changed meaning at
+  ## the same width (previous_bit -> clock_history, f678d02); it is 0 in any
+  ## state not taken mid-transfer and both readings of 0 agree.
   case core
   of ckGBA:
     if container <= 1: 1'u32
@@ -340,8 +283,7 @@ proc write_state_header(w: var Writer; core: CoreKind;
 
 proc make_state_bytes*(core: CoreKind; rom_checksum, rom_size: uint32;
                        payload: string): string =
-  ## Full state-file image (header + payload) as bytes, for file storage or
-  ## in-memory transports (web IndexedDB, downloads)
+  ## Full state-file image (header + payload) as bytes.
   var w = Writer()
   write_state_header(w, core, rom_checksum, rom_size, payload, 0'u16)
   w.buf
@@ -349,9 +291,8 @@ proc make_state_bytes*(core: CoreKind; rom_checksum, rom_size: uint32;
 proc make_state_bytes*(core: CoreKind; rom_checksum, rom_size: uint32;
                        payload: string; thumbnail: openArray[byte];
                        thumb_w, thumb_h: uint16): string =
-  ## As above, plus a thumbnail trailer (BGR555 pixels, thumb_w*thumb_h) after
-  ## the payload. The trailer is outside the hash-validated payload; old readers
-  ## ignore it. Falls back to a plain image if the thumbnail is empty/degenerate.
+  ## As above, plus a thumbnail trailer (BGR555, thumb_w*thumb_h) after the
+  ## payload. Falls back to a plain image if the thumbnail is empty/degenerate.
   let has_thumb = thumbnail.len == int(thumb_w) * int(thumb_h) * 2 and
                   thumb_w > 0'u16 and thumb_h > 0'u16
   let flags = if has_thumb: STATE_FLAG_THUMBNAIL else: 0'u16
@@ -380,9 +321,8 @@ proc write_state_file*(path: string; core: CoreKind;
                                    thumbnail, thumb_w, thumb_h))
 
 proc downscale_bgr555*(src: openArray[uint16]; src_w, src_h, dst_w, dst_h: int): seq[byte] =
-  ## Nearest-neighbor downscale of a BGR555 framebuffer, returned as
-  ## little-endian BGR555 bytes (2 per pixel) — the same pixel format the
-  ## thumbnail trailer stores. Cheap and on-demand (never on the hot path).
+  ## Nearest-neighbour downscale of a BGR555 framebuffer to little-endian
+  ## BGR555 bytes, the thumbnail trailer's format.
   result = newSeq[byte](dst_w * dst_h * 2)
   if src_w <= 0 or src_h <= 0 or dst_w <= 0 or dst_h <= 0: return
   for y in 0 ..< dst_h:
@@ -399,28 +339,18 @@ proc parse_state_payload*(data: string; core: CoreKind;
                           origin = "state data";
                           legacy_checksums: seq[uint32] = @[]):
                          tuple[payload: string; rev: uint32] =
-  ## Validates the header of a full state image and returns the payload along
-  ## with the payload revision it is written in; raises StateError with a
-  ## human-readable message on any mismatch. The caller passes `rev` down to its
-  ## per-subsystem loaders, which migrate older layouts (see the two
-  ## savestate.nim files) rather than refusing them.
-  ##
-  ## `legacy_checksums` are ROM identities OLDER builds wrote for *this same
-  ## cart* — a value the identity hash used to produce before it was corrected.
-  ## They are accepted on read and never written, so a state taken by an older
-  ## build keeps loading while everything written from here on carries the
-  ## current identity. The caller derives them from the loaded ROM (see
-  ## gba_legacy_rom_checksums); an empty seq means "this core's identity has
-  ## never moved". Widening acceptance is the whole point: a legacy value is
-  ## still a hash of THIS cart, so a state from a different ROM is refused
-  ## exactly as before.
+  ## Validates the header of a full state image and returns the payload and
+  ## its payload revision (the caller's per-subsystem loaders migrate older
+  ## layouts); raises StateError on any mismatch. `legacy_checksums` are ROM
+  ## identities older builds wrote for this same cart, accepted on read and
+  ## never written (the caller derives them from the loaded ROM, see
+  ## gba_legacy_rom_checksums); a state from a different ROM is still refused.
   if data.len < STATE_HEADER_SIZE or data[0 ..< STATE_MAGIC.len] != STATE_MAGIC:
     raise state_error("not a dingbat save state: " & origin, srkNotAState)
   var r = Reader(buf: data, pos: STATE_MAGIC.len)
   let version = r.read_u32()
   if version > STATE_VERSION:
-    # Only refuse the FUTURE. A newer build may have reshaped this 32-byte
-    # header, so nothing past the magic can be trusted.
+    # Only refuse the future: a newer build may have reshaped the header.
     raise state_error("save state was written by a newer version of dingbat " &
                       "(container " & $version & ", this build reads up to " &
                       $STATE_VERSION & ")", srkTooNew)
@@ -453,9 +383,8 @@ proc parse_state_payload*(data: string; core: CoreKind;
     raise state_error("save state payload hash mismatch (corrupt file)")
 
 proc parse_state_thumbnail*(data: string): tuple[w, h: int; pixels: seq[byte]] =
-  ## Extracts the optional thumbnail trailer (BGR555 pixels). Returns (0,0,@[])
-  ## if absent, and is fully defensive — it never raises, so a malformed trailer
-  ## can't break state loading or a thumbnail grid.
+  ## The optional thumbnail trailer (BGR555), (0,0,@[]) if absent. Never
+  ## raises, so a malformed trailer cannot break state loading.
   result = (0, 0, @[])
   if data.len < STATE_HEADER_SIZE or data[0 ..< STATE_MAGIC.len] != STATE_MAGIC:
     return
@@ -479,9 +408,8 @@ proc read_state_payload*(path: string; core: CoreKind;
                          legacy_checksums: seq[uint32] = @[]):
                         tuple[payload: string; rev: uint32] =
   if not fileExists(path):
-    # Its own kind, not the srkCorrupt default: "there is nothing saved here"
-    # and "what is saved here is damaged" are opposite things to tell someone,
-    # and the empty-slot one is by far the more common.
+    # Its own kind, not srkCorrupt: "nothing saved here" and "damaged" are
+    # opposite things to tell someone.
     raise state_error("no save state found at " & path, srkNoFile)
   parse_state_payload(readFile(path), core, rom_checksum, rom_size, path,
                       legacy_checksums)

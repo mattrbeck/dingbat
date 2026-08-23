@@ -1,9 +1,8 @@
 # EEPROM storage implementation (included by gba.nim)
 
 const EEPROM_SETTLE_CYCLES = 115000
-  ## Programming time after a write command (~6.9 ms; GBATEK gives ~6.5 ms
-  ## max). While settling, the ready-poll read returns 0. Constant matches
-  ## mGBA; NanoBoyAdvance uses 101400.
+  ## Programming time after a write command (~6.9 ms); the ready poll reads 0
+  ## while settling. GBATEK gives ~6.5 ms; value assumed.
 
 proc eeprom_now(ep: EEPROM): CycleCount {.inline.} =
   # Same expression as bus_now (bus.nim is included after this file)
@@ -21,10 +20,10 @@ proc file_size*(sz: EepromSize): int =
 
 proc eeprom_size_from_dma_length*(length: int): EepromSize =
   ## The first EEPROM command DMA reveals the chip's address width via its
-  ## programmed transfer count (each transfer clocks one serial bit):
+  ## transfer count, one serial bit per transfer (GBATEK, "EEPROM"):
   ##   4Kbit  (6-bit addr):  read-setup = 2+6+1  = 9,  write = 2+6+64+1  = 73
   ##   64Kbit (14-bit addr): read-setup = 2+14+1 = 17, write = 2+14+64+1 = 81
-  ## (Same rule as mGBA/NanoBoyAdvance; anything unexpected defaults to 64Kbit.)
+  ## Anything else defaults to 64Kbit.
   if length == 9 or length == 73: eeprom4k else: eeprom64k
 
 # EepromBuffer procs
@@ -53,16 +52,12 @@ proc set_eeprom_size(ep: EEPROM; sz: Option[EepromSize]) =
       ep.memory[i] = 0xFF
 
 proc new_eeprom*(gba: GBA): EEPROM =
-  ## The chip size (4Kbit, 6-bit addresses vs 64Kbit, 14-bit addresses) is NOT
-  ## taken from an existing .sav file: emulators routinely write 8 KB EEPROM
-  ## saves even for 4Kbit chips (mGBA always does), so the file size proves
-  ## nothing about the chip. Sizing from such a file made dingbat expect
-  ## 14-bit addresses from Classic NES Series - Metroid (a 4Kbit/6-bit game),
-  ## its EEPROM protection handshake failed, and the cart's "GAME PAK ERROR"
-  ## anti-emulation screen came up. The real address width is revealed by the
-  ## first command's DMA transfer count (see eeprom_size_from_dma_length), so
-  ## detection is deferred until then; the buffer starts at the largest size
-  ## and is shrunk on detection, keeping data loaded from the .sav.
+  ## The chip size is NOT taken from an existing .sav: emulators write 8 KB
+  ## EEPROM saves even for 4Kbit chips, so the file size proves nothing, and
+  ## sizing from it breaks Classic NES Series - Metroid's protection handshake
+  ## ("GAME PAK ERROR"). Detection waits for the first command's DMA count
+  ## (eeprom_size_from_dma_length); the buffer starts at the largest size and
+  ## shrinks on detection, keeping data loaded from the .sav.
   result = EEPROM(
     state: {esReady},
     address: 0,
@@ -76,10 +71,10 @@ proc new_eeprom*(gba: GBA): EEPROM =
     result.memory[i] = 0xFF
 
 method `[]`*(ep: EEPROM; address: uint32): uint8 =
-  # The EEPROM answers only in the DMA-addressed cart region (0x0D). The SRAM
-  # chip-select region (0x0E/0x0F) hits no chip on an EEPROM-only cart: reads
-  # float high (0xFF, as on mGBA) and must not clock the serial protocol.
-  # Classic NES Series carts probe 0x0E000000 for absent SRAM at boot.
+  # The EEPROM answers only in the 0x0D region. The SRAM chip-select region
+  # (0x0E/0x0F) hits no chip on an EEPROM-only cart: reads float high (0xFF
+  # assumed) and must not clock the serial protocol (Classic NES Series carts
+  # probe 0x0E000000 for absent SRAM at boot).
   if (address shr 24) != 0x0D'u32:
     return 0xFF'u8
   if esReadIgnore in ep.state:
@@ -97,14 +92,12 @@ method `[]`*(ep: EEPROM; address: uint32): uint8 =
       ep.buffer.clear()
       ep.read_bits = 0
     return value
-  # Ready poll: 0 while a previous write command is still programming the
-  # cell (~6.9 ms), 1 once settled (mGBA/NBA model the same busy window)
+  # Ready poll: 0 while a previous write is still programming, 1 once settled.
   return if ep.eeprom_now() < ep.busy_until: 0'u8 else: 1'u8
 
 method `[]=`*(ep: EEPROM; address: uint32; value: uint8) =
-  # Writes outside the 0x0D region (e.g. SRAM-probe pokes at 0x0E000000)
-  # never reach the EEPROM's serial line; dropping them keeps stray bits out
-  # of the command stream.
+  # Writes outside the 0x0D region (SRAM-probe pokes at 0x0E000000) never
+  # reach the serial line.
   if (address shr 24) != 0x0D'u32:
     return
   if ep.state == {esRead} or ep.state == {esReadIgnore}:
@@ -138,8 +131,8 @@ method `[]=`*(ep: EEPROM; address: uint32; value: uint8) =
     let mask = 1'u8 shl bit_pos
     ep.memory[base] = (cur and not mask) or (uint8(v) shl bit_pos)
     ep.dirty = true
-    # Each data bit restarts the programming window, so the chip reads busy
-    # for EEPROM_SETTLE_CYCLES after the LAST bit (mirrors mGBA's dust timer)
+    # Each data bit restarts the programming window: busy for
+    # EEPROM_SETTLE_CYCLES after the LAST bit. Assumed; no ROM pins this.
     ep.busy_until = ep.eeprom_now() + EEPROM_SETTLE_CYCLES
     ep.wrote_bits += 1
     if ep.wrote_bits == 64:

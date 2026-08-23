@@ -1,20 +1,11 @@
 # Waitloop detection (included by gba.nim)
 #
 # A waitloop is a short backward Thumb loop that cannot change its own state:
-# every instruction is read-only (no stores, no PC writes, no calls) and no
-# register read inside the loop was written earlier in it — a loop-carried
-# counter like `subs r2, #1` disqualifies, since such loops terminate by
-# themselves and must run at real speed. analyze_loop runs from
-# thumb_conditional_branch on every conditional branch (only Thumb is hooked;
-# ARM idle loops have only been observed in flash-save polling), gated by the
-# branch_dest handshake below so a body is inspected only once its target
-# repeats. A positive verdict sets cpu.entered_waitloop, which cpu.tick
-# consumes at the end of the instruction: instead of scheduler.tick it calls
-# fast_forward_bounded — bound = the APU channels' soonest deadline; that
-# contract is documented at common/scheduler.nim's fast_forward_bounded — so
-# each loop iteration skips ahead one event's worth of idle time.
-# docs/research_waitloop_tracer.md surveys what this static scheme can and
-# cannot catch.
+# every instruction is read-only and no register read in the loop was
+# written earlier in it (a loop-carried counter like `subs r2, #1` must run
+# at real speed). Only Thumb is hooked (thumb_conditional_branch). A verdict
+# sets cpu.entered_waitloop; cpu.tick then fast-forwards to the next event
+# instead of ticking. docs/research_waitloop_tracer.md surveys the limits.
 
 proc build_waitloop_lut*(): seq[WLInstrKind] =
   result = newSeq[WLInstrKind](256)
@@ -44,7 +35,7 @@ proc build_waitloop_lut*(): seq[WLInstrKind] =
 proc parse_wl_instr*(kind: WLInstrKind; instr: uint16): Option[WLParsed] =
   case kind
   of wlPcRelativeLoad:
-    # ldr rd, [pc, #imm] loads a literal-pool constant, which is loop-invariant
+    # Literal-pool load: loop-invariant.
     let rd = bits_range(instr, 8, 10)
     some(WLParsed(read_only: true, read_bits: 0, write_bits: 1'u16 shl rd))
   of wlConditionalBranch:
@@ -112,13 +103,8 @@ proc parse_wl_instr*(kind: WLInstrKind; instr: uint16): Option[WLParsed] =
     none(WLParsed)
 
 proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
-  # Two-sighting gate: branch_dest holds the target of the previous
-  # conditional branch executed (the defer records this one's target
-  # unconditionally, early returns included), so analysis proceeds only when
-  # the same target arrives twice in a row — the signature of a loop
-  # actually spinning. One-off branches cost a single compare, and a body
-  # containing a second conditional branch (alternating targets) is never
-  # analyzed at all.
+  # Analyze only when the same conditional-branch target arrives twice in a
+  # row (branch_dest; the defer records every call's target).
   defer: cpu.branch_dest = start_addr
   if not cpu.attempt_waitloop_detection: return
   if start_addr != cpu.branch_dest: return
@@ -126,9 +112,7 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
           (end_addr - start_addr) >= 2 and
           (end_addr - start_addr) <= 12):
     return
-  # Only cache classifications for ROM addresses: RAM-resident code can be
-  # overwritten (overlays, copied drivers), so re-analyze it every time and a
-  # stale verdict is impossible. The analysis is only a few halfword reads.
+  # Cache verdicts only for ROM addresses; RAM code can be overwritten.
   let cacheable = cpu.cache_waitloop_results and
                   bits_range(start_addr, 24, 27) in 0x8'u32 .. 0xD'u32
   if cacheable:
@@ -158,10 +142,8 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
       return
     let p = parsed.get
     never_write = never_write or (p.read_bits and not written_bits)
-    # Fold in this instruction's writes before checking: an instruction that
-    # reads and writes the same register (e.g. subs r2, #1) is a loop-carried
-    # dependency — the loop terminates by itself and must not be treated as a
-    # waitloop, or countdown delay loops get fast-forwarded
+    # Fold in this instruction's writes before checking, so a read-modify-
+    # write of one register (subs r2, #1) counts as loop-carried.
     written_bits = written_bits or p.write_bits
     if (written_bits and never_write) > 0:
       if cacheable:

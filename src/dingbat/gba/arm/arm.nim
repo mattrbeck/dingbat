@@ -4,27 +4,18 @@ proc exception_return_restore*(cpu: CPU) =
   ## CPSR <- SPSR after an instruction that loaded r15 with the S bit set
   ## (subs pc, lr, #4 / ldmfd sp!, {..., pc}^). Assumes set_reg(15) already
   ## ran, so the pipeline offset is corrected when returning to thumb.
-  # Returning from IRQ mode completes the entry/return pair the ARM7TDMI data
-  # sheet costs at 2S+1N each. set_reg(15) has already charged two refill
-  # fetches and cpu.irq() charged two cycles of vector overhead, which is one
-  # more than an even split; give it back here so the round trip an interrupted
-  # instruction sees is entry(2S+1N+1) + body + return(2S+1N-1) = the data
-  # sheet's six cycles of overhead. Only IRQ: the SWI entry/return pair is
-  # measured separately (mGBA suite BIOS timing tests) and splits evenly.
-  # EXCEPT when the return refills from the gamepak: restarting the
-  # in-flight gamepak fetch stream costs the cycle back (hardware-anchored,
-  # gbaedge IRQLAT2 page, AGB SP session 4 - the cumulative trigger-stamp
-  # drift across the page's back-to-back IRQ rows is 7 cycles per round
-  # trip on silicon, 6 at the entry + 1 on the return, both
-  # gamepak-context costs; see cpu.irq).
+  # IRQ return gives back the one cycle cpu.irq over-charged beyond an even
+  # split of the data sheet's 2S+1N entry + 2S+1N return, except when the
+  # return refills from the gamepak, where restarting the ROM fetch stream
+  # costs it (hardware: gbaedge IRQLAT2 on AGB SP, docs/hwprobe.md). SWI
+  # entry/return splits evenly (mGBA suite BIOS timing rows).
   if cast[CpuMode](cpu.cpsr.mode) == modeIRQ and
      int(bits_range(cpu.r[15], 24, 27)) notin 8..13:
     cpu.gba.bus.add_cycles(-1)
   if cpu.spsr.thumb:
     cpu.r[15] -= 4
-    # set_reg(15) already refilled the pipeline at ARM width; a return to
-    # thumb refills with two halfword fetches instead. Charge the
-    # difference (zero in IWRAM/BIOS, -6 in EWRAM/default ROM).
+    # set_reg(15) refilled at ARM width; a Thumb return refills with two
+    # halfword fetches, so charge the difference.
     let page = int(bits_range(cpu.r[15], 24, 27))
     cpu.gba.bus.add_cycles(2 * (int(cpu.gba.bus.wait16_s[page]) -
                                 int(cpu.gba.bus.wait32_s[page])))
@@ -36,15 +27,12 @@ proc exception_return_restore*(cpu: CPU) =
   let bank = mode_bank(new_mode)
   cpu.spsr = cast[PSR](if bank == 0: uint32(cpu.cpsr) else: cpu.spsr_banks[bank])
   if was_irq_disabled and not cpu.cpsr.irq_disable:
-    # NO gate delay here: an exception return's SPSR restore re-recognizes a
-    # pending IF fast - the mGBA suite's hardware-measured Timer count-up
-    # rows (multi-IRQ configs where the next overflow is already pending at
-    # handler return) fail by exactly the gate window if it is applied.
-    # The IRQWIN/IRQWIN2 gate evidence covers explicit IME/IE/msr writes.
+    # No IRQ_GATE_DELAY on an exception return's SPSR restore (mGBA suite
+    # multi-IRQ Timer count-up rows); the gate evidence covers IME/IE/msr.
     cpu.gba.interrupts.schedule_interrupt_check()
 
 proc arm_unimplemented*(cpu: CPU; instr: uint32) =
-  # und() writes PC (vector 0x04); stepping past it would skip the vector
+  # und() writes PC; no step.
   cpu.und()
 
 proc arm_unused*(cpu: CPU; instr: uint32) =
@@ -78,19 +66,13 @@ type ArmAluOp* = enum
   TST, TEQ, CMP, CMN,
   ORR, MOV, BIC, MVN
 
-####################
-# Exact ARM7TDMI Booth-multiplier carry model.
-#
-# The "meaningless" C flag after MULS/MLAS/UMULLS/UMLALS/SMULLS/SMLALS is
-# deterministic silicon behavior: it falls out of the multiplier's radix-4
-# Booth recoding + carry-save adder array and its early termination. This is
-# a port of zaydlang/multiplication-algorithm (zlib license), which was
-# fuzzed exhaustively against real ARM7TDMI hardware; it reproduces all 8
-# C-preset-1 MULS rows of the gbaedge MULFLAGS page (hardware nibbles
-# 04 00 00 02 0A 04 08 08, AGB SP session 1) and the UMULLS/SMULLS rows.
-# Only the carry is needed - the product itself is computed natively - and
-# the final carry depends only on the partial-carry accumulator, so the
-# concluding full-adder stage of the original is omitted.
+# ARM7TDMI Booth-multiplier carry model. The "meaningless" C flag after
+# MULS/MLAS/UMULLS/UMLALS/SMULLS/SMLALS is deterministic: radix-4 Booth
+# recoding + carry-save adders with early termination. Port of
+# zaydlang/multiplication-algorithm (zlib license, fuzzed against ARM7TDMI
+# silicon); pinned by the gbaedge MULFLAGS rows on AGB SP (docs/hwprobe.md).
+# Only the carry is computed here, so the original's final full-adder stage
+# is omitted.
 
 type
   MulFlavor* = enum mfShort, mfLongSigned, mfLongUnsigned
@@ -209,8 +191,6 @@ proc arm_multiply*[accumulate, set_cond: static bool](cpu: CPU; instr: uint32) =
   let acc = when accumulate: cpu.r[rn] else: 0'u32
   cpu.idle(mul_i_cycles(cpu.r[rs], true) + (when accumulate: 1 else: 0))
   when set_cond:
-    # C after MULS/MLAS is the Booth multiplier's remainder carry
-    # (deterministic; MULFLAGS page, AGB SP session 1)
     cpu.cpsr.carry = mul_booth_carry(mfShort, cpu.r[rm], cpu.r[rs], uint64(acc))
   discard cpu.set_reg(rd, cpu.r[rm] * cpu.r[rs] + acc)
   when set_cond: cpu.set_neg_and_zero_flags(cpu.r[rd])
@@ -239,9 +219,6 @@ proc arm_multiply_long*[signed, accumulate, set_cond: static bool](cpu: CPU; ins
   when set_cond:
     cpu.cpsr.negative = bit(cpu.r[rdhi], 31)
     cpu.cpsr.zero     = (res == 0)
-    # ARM7TDMI "meaningless" carry: the exact Booth-multiplier model
-    # (replaces the earlier hand-fit heuristic; matches the gbaedge
-    # MULFLAGS UMULLS/SMULLS hardware rows and the mGBA suite)
     cpu.cpsr.carry = mul_booth_carry(
       (when signed: mfLongSigned else: mfLongUnsigned), rm_val, rs_val, acc)
   if rdhi != 15 and rdlo != 15: cpu.step_arm()
@@ -315,11 +292,10 @@ proc arm_single_data_transfer*[imm_flag, pre_addressing, add_offset, byte_quanti
   when pre_addressing:
     when add_offset: address += offset
     else:            address -= offset
-  # Base-writeback with rn=15 is UNPREDICTABLE architecturally; silicon does
-  # three distinct things (gbaedge THUMBPC2 page, AGB SP session 3, probed
-  # with post-indexed offset 4): `str r1, [r15], #4` writes PC := base+4 (the
-  # post-indexed address), `ldr r1, [r15], #4` writes PC := base+8 AND
-  # suppresses the load (rd keeps its old value; the bus read still happens).
+  # Base writeback with rn=15 (architecturally UNPREDICTABLE): `str r1,
+  # [r15], #4` writes PC := base+4, `ldr r1, [r15], #4` writes PC := base+8
+  # and suppresses the load while the bus read still happens (hardware:
+  # gbaedge THUMBPC2 on AGB SP, probed at offset 4 only; docs/hwprobe.md).
   const pc_writeback = write_back or not pre_addressing
   when load:
     let value =
@@ -357,25 +333,20 @@ proc arm_block_data_transfer*[pre_address, add, s_bit, write_back, load: static 
   when s_bit:
     var saved_mode: uint32 = 0
     var user_bank = false
-    # LDM with the S bit and r15 in the list is an exception return: the
-    # registers load into the current mode's banks and CPSR is restored from
-    # SPSR after pc loads. Every other S-bit form transfers the user bank.
+    # LDM^ with r15 in the list is an exception return (current banks, then
+    # CPSR <- SPSR); every other S-bit form transfers the user bank.
     if not (load and bit(list, 15)):
       user_bank = true
       saved_mode = cpu.cpsr.mode
-  # The base address is read from the CURRENT mode's bank BEFORE any user-bank
-  # switch; the transfers - and a writeback, if any - then use the user bank.
-  # Hardware-verified (gbaedge LDMUSER page, AGB SP session 2): from IRQ mode,
-  # `stmia r13!, {r13}^` stores the USER r13 value at the address in the
-  # BANKED r13, and the writeback (base+4) lands in the USER bank's r13 with
-  # the banked r13 unchanged.
+  # The base is read from the CURRENT bank before the user-bank switch; the
+  # transfers and any writeback then use the user bank (hardware: gbaedge
+  # LDMUSER on AGB SP, `stmia r13!, {r13}^` from IRQ mode; docs/hwprobe.md).
   var address  = cpu.r[rn]
   var bits_set = count_set_bits(list)
   if bits_set == 0:
     bits_set = 16
     list = 0x8000'u32
   let step       = when add: 4 else: -4
-  # unread when up-counting without write-back
   let final_addr {.used.} = uint32(int(address) + bits_set * step)
   when s_bit:
     if user_bank:
@@ -398,12 +369,8 @@ proc arm_block_data_transfer*[pre_address, add, s_bit, write_back, load: static 
           cpu.gba.bus.write_word(address, cpu.gba.bus.read_word(address) + 4)
       address += 4
       when write_back:
-        # Block transfers with base r15 perform NO writeback on hardware, in
-        # BOTH directions: `ldmia r15!, {...}` executes as a plain ldm
-        # (gbaedge THUMBPC2 page, AGB SP session 3) and `stmia r15!, {r1}`
-        # stores normally and falls through to the next instruction (gbaedge
-        # PCWB2 page, AGB SP session 4, breadcrumb 1F; dingbat previously
-        # generalized the single-transfer str writeback into a base+8 branch)
+        # Block transfers with base r15 perform no writeback in either direction
+        # (hardware: gbaedge THUMBPC2 and PCWB2 on AGB SP, docs/hwprobe.md).
         if not first_transfer and not (load and bit(list, rn)) and
            rn != 15:
           discard cpu.set_reg(rn, final_addr)
@@ -454,37 +421,27 @@ proc arm_psr_transfer*[imm_flag, spsr, msr: static bool](cpu: CPU; instr: uint32
         cpu.r[int(bits_range(instr, 0, 3))] and mask
     when spsr:
       if has_spsr:
-        # SPSR physical bits (hardware-verified, CPSRBITS page, AGB session
-        # 2/3): only NZCV+I+F+T+mode exist (0xF00000FF) and bit4 of the mode
-        # field is forced high (write 0 -> read 0x10, write 0x0F -> 0x1F).
+        # See PSR_PHYS_MASK; SPSR forces mode bit4 high.
         cpu.spsr = cast[PSR](
           (((uint32(cpu.spsr) and not mask) or value) and PSR_PHYS_MASK) or 0x10'u32)
     else:
       let was_irq_disabled = cpu.cpsr.irq_disable
       if (mask and 0xFF) > 0:
         cpu.switch_mode(cast[CpuMode](value and 0x1F'u32))
-      # CPSR physical bits: bits 8-27 do not latch (hardware-verified,
-      # CPSRBITS page — an all-ones write to any MSR field reads back with
-      # only the NZCV/control bits set).
       cpu.cpsr = cast[PSR]((((uint32(cpu.cpsr) and not mask) or value) and PSR_PHYS_MASK))
       if cpu.cpsr.thumb:
-        # MSR really does write the T bit on ARM7TDMI (architecturally
-        # UNPREDICTABLE, but well-defined on this core and relied on by
-        # commercial software: Pokemon Pinball R/S's decompressor exits via
-        # `msr cpsr, r2` with T set followed by a Thumb `bx r0`). The switch
-        # happens mid-pipeline, so the two words already prefetched as ARM
-        # are reinterpreted (mGBA-verified hardware model): the next opcode
-        # (at A+4) executes as a Thumb nop, then the LOW halfword of the word
-        # at A+8 executes, and fetching resumes at A+12. We stage the two
-        # reinterpreted opcodes in the pipeline buffer; the usual +4 step
-        # below leaves r15 tracking mGBA's PC exactly through the hand-off.
+        # MSR writes the T bit on ARM7TDMI (Pokemon Pinball R/S exits its
+        # decompressor via `msr cpsr, r2` with T set, then a Thumb `bx r0`). The
+        # two words already prefetched as ARM: A+4 executes as a Thumb nop, then
+        # the low halfword of A+8, and fetching resumes at A+12 (hardware: gbaedge
+        # MSRTBIT/MSRTBIT2 on AGB SP, docs/hwprobe.md).
         cpu.pipeline.clear()
         cpu.pipeline.push(0x46C0'u32)  # Thumb nop (mov r8, r8)
         cpu.pipeline.push(cpu.gba.bus.read_word_internal(cpu.r[15]) and 0xFFFF'u32)
       if was_irq_disabled and not cpu.cpsr.irq_disable:
         if cpu.gba.interrupts.irq_deliverable:
-          # msr clearing CPSR.I over a parked IF: late recognition, like the
-          # IME/IE gate stores (gbaedge IRQWIN/IRQWIN2)
+          # msr clearing CPSR.I over a parked IF recognizes late, like the IME/IE
+          # gate stores (gbaedge IRQWIN/IRQWIN2).
           cpu.gba.interrupts.gate_opened()
         else:
           cpu.gba.interrupts.schedule_interrupt_check()
@@ -500,15 +457,10 @@ proc arm_psr_transfer*[imm_flag, spsr, msr: static bool](cpu: CPU; instr: uint32
     cpu.step_arm()
 
 proc arm_branch_exchange*(cpu: CPU; instr: uint32) =
-  # The 12-bit LUT cannot see bits 19-8, so an SBO-violated BX (e.g.
-  # 0xE120FF11) lands here too. On hardware it does NOT execute as BX -
-  # gbaedge BXDECODE candidate 2 wedges the console with IRQs masked, which
-  # is exactly what the un-special-cased decode (MSR CPSR from a register,
-  # all fields) would do. Route it to the PSR-transfer path. The ARMv5
-  # BLX-register word (bits 7-4 = 0011, SBO bits intact) DOES execute as BX
-  # on silicon (candidate 1) and is dispatched here by its own LUT entry;
-  # no link write - ARM7TDMI has no BLX, the loose decode just takes the
-  # branch-exchange path.
+  # The 12-bit LUT cannot see bits 19-8, so an SBO-violated BX (0xE120FF11)
+  # lands here too; on hardware it executes as MSR CPSR from a register
+  # (hardware: gbaedge BXDECODE on AGB SP, docs/hwprobe.md). The ARMv5
+  # BLX-register word arrives via its own LUT entry and executes as BX.
   if bits_range(instr, 4, 7) == 0b0001'u32 and bits_range(instr, 8, 19) != 0xFFF'u32:
     arm_psr_transfer[false, false, true](cpu, instr)
     return

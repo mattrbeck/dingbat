@@ -17,9 +17,8 @@ proc new_dma_channels*(gba: GBA): DMAChannels =
     result.hist[ch]      = [0'i16, 0, 0, 0]
     result.last_update_cycle[ch] = 0
     result.inv_period[ch]        = 0.0'f32
-  # Cubic FIFO reconstruction defaults ON (see the DMAChannels comment). Off =
-  # the raw held latch, which is bit-true to the hardware DAC's output.
-  # DINGBAT_FIFO_INTERP=0 forces it off for A/B captures on a single binary.
+  # Cubic FIFO reconstruction defaults ON; off = the raw held latch, which is
+  # what the hardware DAC outputs. DINGBAT_FIFO_INTERP=0 forces it off.
   result.fifo_interp = true
   when not defined(test_harness) and not defined(emscripten):
     if getEnv("DINGBAT_FIFO_INTERP") == "0":
@@ -30,10 +29,9 @@ proc dma_channels_read*(dc: DMAChannels; address: uint32): uint8 =
 
 proc dma_channels_write*(dc: DMAChannels; address: uint32; value: uint8) =
   let channel = int(bit(address, 2))
-  # MP2K HLE foreign-feeder provenance (see mp2k.nim on_frame): the m4a driver
-  # only feeds the FIFOs via DMA1/2 in special (FIFO) timing. Count bytes
-  # arriving any other way (CPU stores, immediate/other DMA) so the HLE can
-  # tell when a game streams its own audio and must not be substituted.
+  # MP2K HLE provenance (mp2k.nim on_frame): the m4a driver feeds the FIFOs
+  # only via DMA1/2 in FIFO timing; bytes arriving any other way mean the game
+  # streams its own audio and must not be substituted.
   if dc.gba.mp2k != nil:
     let d = dc.gba.dma
     let by_fifo_dma = dc.gba.bus.dma_active and
@@ -50,14 +48,11 @@ proc dma_channels_write*(dc: DMAChannels; address: uint32; value: uint8) =
     log("Writing " & hex_str(value) & " to fifo " & $channel & " but it's already full")
 
 proc push_fifo_sample(dc: DMAChannels; channel: int; sample: int16) {.inline.} =
-  ## Record a newly latched FIFO sample for cubic reconstruction. Called on
-  ## every timer overflow that advances the DAC (including empty-FIFO 0s), so
-  ## the history reflects the true update cadence. The delta between overflow
-  ## event times is the FIFO period in CPU cycles, exact at any rate — this is
-  ## the phase denominator for the reconstruction. (An earlier version counted
-  ## integer 32768 Hz reads instead; at FIFO rates near or above the output
-  ## rate that count degenerates and the interpolator injects broadband noise
-  ## — see tools/nbadiff/README.md.)
+  ## Record a newly latched FIFO sample for cubic reconstruction; called on
+  ## every DAC-advancing timer overflow (including empty-FIFO 0s). The delta
+  ## between overflow cycles is the phase denominator: counting 32768 Hz reads
+  ## instead degenerates at FIFO rates near the output rate and injects
+  ## broadband noise (tools/nbadiff/README.md).
   dc.hist[channel][0] = dc.hist[channel][1]
   dc.hist[channel][1] = dc.hist[channel][2]
   dc.hist[channel][2] = dc.hist[channel][3]
@@ -70,7 +65,6 @@ proc push_fifo_sample(dc: DMAChannels; channel: int; sample: int16) {.inline.} =
 
 proc timer_overflow*(dc: DMAChannels; timer: int) =
   for channel in 0..1:
-    # Access soundcnt_h via gba.apu
     let ch_timer = if channel == 0:
       int(dc.gba.apu.soundcnt_h.dma_sound_a_timer)
     else:
@@ -93,13 +87,10 @@ proc timer_overflow*(dc: DMAChannels; timer: int) =
       dc.gba.dma.trigger_fifo(channel)
 
 proc catmull_rom(y0, y1, y2, y3: int16; mu: float32): int16 {.inline.} =
-  ## Cubic (Catmull-Rom) interpolation between y1 and y2 at fraction mu in
-  ## [0,1], using the neighbours y0 and y3 for the tangents. Formulation
-  ## follows Paul Bourke, "Cubic Interpolation"
-  ## (https://paulbourke.net/miscellaneous/interpolation/). Interpolating the
-  ## y1/y2 segment (rather than the newest pair y2/y3) keeps the filter
-  ## strictly causal — it needs one sample of look-ahead — at the cost of a
-  ## ~1.5-sample (~150 us) group delay, which is inaudible.
+  ## Catmull-Rom interpolation between y1 and y2 at fraction mu (Paul Bourke,
+  ## "Cubic Interpolation", https://paulbourke.net/miscellaneous/interpolation/).
+  ## Interpolating y1/y2 rather than y2/y3 keeps the filter causal at a
+  ## ~1.5-sample (~150 us) group delay.
   let
     f0 = float32(y0)
     f1 = float32(y1)
@@ -113,18 +104,15 @@ proc catmull_rom(y0, y1, y2, y3: int16; mu: float32): int16 {.inline.} =
   int16(clamp(v, -32768.0'f32, 32767.0'f32))
 
 proc dma_channels_get_amplitude*(dc: DMAChannels): tuple[a: int16, b: int16] =
-  ## Called once per 32768 Hz output sample. With reconstruction on, returns
-  ## the cubic-interpolated FIFO value at the current fractional phase between
-  ## timer-driven updates; otherwise the raw held latch (zero-order hold).
+  ## Once per 32768 Hz output sample: the cubic-interpolated FIFO value at the
+  ## current phase between timer updates, or the raw held latch.
   if not dc.fifo_interp:
     return (dc.latches[0], dc.latches[1])
   var res: array[2, int16]
-  # Fractional position between latch updates, from the timer-overflow cycle
-  # timestamps — exact at any FIFO rate.
   let now = int64(dc.gba.scheduler.cycles)
   for ch in 0..1:
     if dc.inv_period[ch] == 0.0'f32:
-      # No period measured yet (fresh boot / FIFO reset): hold the latch.
+      # No period measured yet: hold the latch.
       res[ch] = dc.latches[ch]
     else:
       let mu = clamp(float32(now - dc.last_update_cycle[ch]) *

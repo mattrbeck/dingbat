@@ -1,19 +1,13 @@
 # APU implementation (included by gba.nim)
 
 const APU_CHANNELS*       = 2
-# Queue-push block, in int16s (128 stereo frames = 3.9 ms). Kept small so the
-# SDL queue level — which audio-sync pacing reads — moves in fine steps on the
-# push side as well as the drain side; at the old 512-frame block the paced
-# emulation cadence (and input latency) jittered by most of a frame.
+# Queue-push block in int16s (128 stereo frames = 3.9 ms); small so the SDL
+# queue level that audio-sync pacing reads moves in fine steps
 const APU_BUFFER_SIZE*    = 256
-# Audio-sync pacing levels, in bytes of queued s16 stereo (4 bytes/frame).
-# Deliberately NOT derived from APU_BUFFER_SIZE: these set how much audio
-# stays buffered (latency vs. underrun margin), not the push granularity.
-# 2048 B = 512 frames ≈ 15.6 ms lead. The backstop only exists to stop a
-# runaway queue if the frontend's frame scheduler misbehaves; it sits far
-# above the normal operating range (2-8 KB) because blocking inside
-# get_sample stalls emulation mid-frame — the old 4096 B value was routinely
-# grazed by ordinary in-frame queue peaks and jittered the frame cadence.
+# Audio-sync pacing levels in bytes of queued s16 stereo (4 bytes/frame),
+# independent of the push granularity: 2048 B = 512 frames = 15.6 ms lead.
+# The backstop only stops a runaway queue; it sits far above the normal
+# 2-8 KB range because blocking in get_sample stalls emulation mid-frame.
 const APU_SYNC_AHEAD_BYTES*    = 2048'u32
 const APU_SYNC_BACKSTOP_BYTES* = 16384'u32
 const APU_SAMPLE_RATE*    = 32768
@@ -22,8 +16,7 @@ const APU_SAMPLE_PERIOD*  = CPU_CLOCK_SPEED div APU_SAMPLE_RATE
 const FRAME_SEQ_RATE*     = 512
 const FRAME_SEQ_PERIOD*   = CPU_CLOCK_SPEED div FRAME_SEQ_RATE
 # One-pole low-pass coefficient for the optional analog-output filter:
-# alpha = 1 - exp(-2*pi*fc/fs) with fc ~= 12 kHz, fs = 32768 Hz. Conservative
-# (nearly flat through the mids, a few dB down at the top octave).
+# alpha = 1 - exp(-2*pi*fc/fs) with fc ~= 12 kHz, fs = 32768 Hz
 const AUDIO_LOWPASS_ALPHA* = 0.90'f32
 
 # Minimal SDL2 audio C bindings (SDL2 is already linked via nim.cfg)
@@ -43,9 +36,8 @@ when not defined(test_harness):
 
   const AUDIO_S16LSB  = 0x8010'u16
 
-  # Legacy (default-device) SDL audio API only — this path never opens a
-  # specific device; the queue calls below pass apu.audio_dev, the legacy
-  # API's implicit device.
+  # Legacy (default-device) SDL audio API; apu.audio_dev is its implicit
+  # device
   proc sdl_open_audio(desired: ptr SDL_AudioSpec; obtained: ptr SDL_AudioSpec): cint
     {.importc: "SDL_OpenAudio", cdecl.}
   proc sdl_close_audio()
@@ -62,30 +54,23 @@ when not defined(test_harness):
     {.importc: "SDL_Delay", cdecl.}
 
 when defined(emscripten):
-  # On emscripten, the APU pushes float32 samples to a global buffer
-  # (in dingbat_wasm.nim) that JS consumes via the Web Audio API.
+  # Emscripten: float32 samples go to a global buffer (dingbat_wasm.nim)
+  # that JS consumes via the Web Audio API
   proc appendAudioSample(left, right: float32) {.importc, cdecl.}
 
 when not defined(emscripten):
-  # Debug instrumentation, env-gated and zero-cost when unset (one bool test in
-  # get_sample). Mirrors the GB APU's DINGBAT_GB_AUDIO_DUMP:
-  #   DINGBAT_GBA_AUDIO_DUMP=<path>  writes every mixed sample as raw s16le
-  #   stereo, interleaved L,R, at APU_SAMPLE_RATE (32768 Hz).
-  # Unlike the older DINGBAT_AUDIO_DUMP (which taps the bytes queued to SDL and
-  # so only exists in the native build) this one sits OUTSIDE the test_harness
-  # gate and taps the mixed sample before the output switch, so the headless
-  # test build dumps too -- which is what makes it usable as an APU oracle:
-  # byte-comparing two builds' audio is the audio equivalent of the
-  # byte-identical screenshot gate, and a screenshot gate alone provably does
-  # not catch APU phase errors.
+  # DINGBAT_GBA_AUDIO_DUMP=<path>: every mixed sample as raw s16le stereo,
+  # interleaved L,R, at 32768 Hz. Outside the test_harness gate and before
+  # the output switch, so the headless test build dumps too (the APU
+  # byte-compare oracle).
   var gba_audio_dump_file: File = nil
   var gba_audio_dump_on = false
   var gba_audio_dump_claimed = false
   var gba_audio_dump_pending = 0
 
   proc gba_audio_dump_claim() =
-    ## Called once per APU construction. The first APU created claims the file,
-    ## so a 2P link session dumps player 1 rather than interleaving both.
+    ## The first APU created claims the file, so a 2P link session dumps
+    ## player 1 rather than interleaving both.
     if gba_audio_dump_claimed: return
     gba_audio_dump_claimed = true
     let path = getEnv("DINGBAT_GBA_AUDIO_DUMP")
@@ -98,8 +83,7 @@ when not defined(emscripten):
     frame[0] = left
     frame[1] = right
     discard gba_audio_dump_file.writeBuffer(addr frame[0], sizeof(frame))
-    # stdio buffers the writes; flush about once a second so an interrupted run
-    # still leaves a readable dump
+    # Flush about once a second so an interrupted run leaves a readable dump
     inc gba_audio_dump_pending
     if gba_audio_dump_pending >= APU_SAMPLE_RATE:
       gba_audio_dump_pending = 0
@@ -137,24 +121,17 @@ proc new_apu*(gba: GBA): APU =
       freq:     APU_SAMPLE_RATE.cint,
       format:   AUDIO_S16LSB,
       channels: APU_CHANNELS.uint8,
-      # Device buffer deliberately much smaller than the queue-push block:
-      # the device drains the queue in `samples`-frame steps, and audio-sync
-      # pacing (audio_ahead) can only release the next emulated frame on one
-      # of those steps. At 512 frames (15.6 ms) the emulation cadence -- and
-      # so input latency -- jittered by up to a whole frame; 128 frames
-      # (3.9 ms) keeps the cadence within ~4 ms of the hardware frame rate
-      # and shaves ~12 ms off audio output latency as well.
+      # Device buffer much smaller than the push block: audio-sync pacing
+      # (audio_ahead) can only release the next frame on a device drain step,
+      # and 128 frames (3.9 ms) keeps the cadence within ~4 ms
       samples:  128,
       callback: nil,
       userdata: nil,
     )
     sdl_close_audio()
-    # obtained must be nil: passing a non-nil obtained means
-    # SDL_AUDIO_ALLOW_ANY_CHANGE, and on Windows WASAPI hands back the
-    # mixer's native spec (float32, 44.1/48 kHz) with no conversion. The
-    # device then drains bytes ~2x faster than the APU queues them and
-    # audio-sync paces emulation at ~2x real time. nil makes SDL convert
-    # to exactly the requested spec on every platform.
+    # obtained must be nil: non-nil means SDL_AUDIO_ALLOW_ANY_CHANGE, and
+    # Windows WASAPI then hands back float32 44.1/48 kHz with no conversion,
+    # draining ~2x faster than queued and pacing emulation at ~2x
     if sdl_open_audio(addr desired, nil) == 0:
       result.audio_dev = 1
       sdl_pause_audio(0)
@@ -174,41 +151,34 @@ proc set_master_volume*(apu: APU; volume: int; mute: bool) =
   apu.master_muted = mute
 
 proc set_audio_lowpass*(apu: APU; on: bool) =
-  ## Toggle the optional analog-output low-pass. Resets the filter state on
-  ## the OFF->? edge so a fresh enable never carries stale samples; off leaves
-  ## the native emit path bit-identical to the unfiltered output.
+  ## Toggle the optional analog-output low-pass; the filter state is reset
+  ## when off so a fresh enable never carries stale samples.
   if not on:
     apu.lp_left = 0
     apu.lp_right = 0
   apu.audio_lowpass = on
 
 proc set_fifo_interp*(apu: APU; on: bool) =
-  ## Toggle DirectSound FIFO reconstruction (true-phase cubic). Off is the
-  ## hardware-accurate mode: the raw held latch, bit-true to the DAC output.
-  ## The phase state keeps updating either way (push_fifo_sample), so
-  ## re-enabling mid-game is seamless.
+  ## Toggle DirectSound FIFO reconstruction (cubic). Off emits the raw held
+  ## latch. The phase state keeps updating either way (push_fifo_sample).
   apu.dma_channels.fifo_interp = on
 
 proc set_pitch_correct_ff*(apu: APU; on: bool) =
-  ## Toggle WSOLA pitch-preserving 2x. The stretcher itself resets on the
-  ## stretch-path rising edge in get_sample, so this only flips the flag.
+  ## Toggle WSOLA pitch-preserving 2x; the stretcher resets on the
+  ## stretch-path rising edge in get_sample.
   apu.pitch_correct_ff = on
 
 proc ensure_stretch(apu: APU) {.inline, used.} =  # audio emit paths only, compiled out under test_harness
-  ## Lazily allocate + reset the stretcher exactly when the pitch-correct
-  ## path first engages (turbo AND pitch_correct_ff), so a fresh turbo
-  ## engagement never overlap-adds a stale buffer tail.
+  ## Allocate/reset the stretcher when the pitch-correct path engages, so a
+  ## fresh turbo never overlap-adds a stale buffer tail.
   if not apu.stretch_engaged:
     if apu.stretch == nil: apu.stretch = new_time_stretch()
     else: apu.stretch.reset()
     apu.stretch_engaged = true
 
 proc audio_ahead*(apu: APU): bool =
-  ## True when synced audio is buffered comfortably ahead of playback. The
-  ## frontend main loop uses this to pace emulation instead of blocking in
-  ## get_sample, so the UI keeps running at the display's refresh rate while
-  ## emulation waits for audio to drain. Half of get_sample's block
-  ## threshold, so the blocking wait stays a rarely-hit backstop.
+  ## True when synced audio is buffered comfortably ahead of playback; the
+  ## frontend paces emulation on this instead of blocking in get_sample.
   when defined(test_harness):
     false
   else:
@@ -216,9 +186,8 @@ proc audio_ahead*(apu: APU): bool =
       sdl_get_queued_audio_size(apu.audio_dev) > APU_SYNC_AHEAD_BYTES
 
 when not defined(test_harness) and not defined(emscripten):
-  # Debug instrumentation, env-gated and zero-cost when unset:
-  #   DINGBAT_AUDIO_DUMP=<path>  writes every mixed sample as raw s16le stereo
-  #   (exactly the bytes queued to SDL) for offline waveform comparison
+  # DINGBAT_AUDIO_DUMP=<path>: exactly the bytes queued to SDL, raw s16le
+  # stereo
   var audio_dump_file: File = nil
   var audio_dump_checked = false
 
@@ -234,41 +203,19 @@ when not defined(test_harness) and not defined(emscripten):
     ## Bytes currently queued to the SDL audio device (pacing diagnostics)
     if apu.audio_dev != 0: sdl_get_queued_audio_size(apu.audio_dev) else: 0
 
-# ---------------------------------------------------------------------------
-# Lazy waveform catch-up (the four legacy Game Boy PSG channels)
-#
-# Same design as the GB core: no per-period scheduler events; each channel
-# carries a `next_step` deadline and is advanced in closed form at its
-# observation points. The full rationale, the closed-form math, the
-# mGBA/Gambatte precedent and the numbered observation-point audit live at
-# gb/apu.nim's "Lazy waveform catch-up" header (mGBA's cited GBAudioRun is its
-# GB audio path, shared with its GBA core). GBA-specific deltas only:
-#  * Motivation here: CH4's per-period event was re-armed UNCONDITIONALLY (not
-#    even gated on `enabled`) — one event every 32 cycles forever at the
-#    power-on divisor: 81% of all scheduler events in Pokemon Emerald, 84% in
-#    Mother 3, the same absolute count in every title (fixed by the reset
-#    divisor, not by the game). It also pinned scheduler.next_event 32 cycles
-#    out permanently, defeating scheduler.tick's and bus.catch_up's fast paths
-#    and every HALT/waitloop skip-ahead. Gating the re-arm on `enabled`
-#    measures exactly zero — the m4a driver leaves CH4 genuinely on, so unlike
-#    the GB there is no parked-silent-channel shortcut.
-#  * CH3's closed form adds a bank flip per 32-entry wrap.
-#  * Observation points: the register block is 0x60-0x84 plus wave RAM
-#    0x90-0x9F (`[]`/`[]=` below); SOUNDCNT_X (0x84) writes sync all four
-#    channels, since its power-off arm rewrites every channel register.
-#    get_sample runs 549 samples/frame vs ~8800 channel events here.
-#    RegisterRamReset's sound phase (SWI 0x01, hle_bios.nim) is a GBA-only
-#    point — see apu_park_steps. The per-frame rebase point is gba.end_frame.
-#  * No PCM12/PCM34 register pair exists (GBATEK's sound map runs
-#    4000060h-40000A7h) and no CGB double-speed switch — scheduler.speed is
-#    always 0 here, so the deadlines never need rescaling. The DirectSound
-#    FIFO channels (dma_channels.nim) are timer/DMA driven, no shared PSG state.
-# ---------------------------------------------------------------------------
+# Lazy waveform catch-up (the four PSG channels): no per-period scheduler
+# events; each channel carries a `next_step` deadline advanced in closed form
+# at its observation points (design and math: gb/apu.nim "Lazy waveform
+# catch-up"). GBA deltas: CH3's closed form adds a bank flip per 32-entry
+# wrap; the observation points are the register block 0x60-0x84 plus wave
+# RAM 0x90-0x9F, SOUNDCNT_X writes (sync all four), get_sample,
+# RegisterRamReset's sound phase (apu_park_steps) and the per-frame rebase
+# (gba.end_frame); no PCM12/34 pair and no double-speed switch, so the
+# deadlines never rescale.
 
 proc apu_catchup_all*(apu: APU) {.inline.} =
-  ## Materialize all four channels at the current cycle. Used by the observation
-  ## points that can touch any channel (frame sequencer, SOUNDCNT_X writes, the
-  ## per-frame rebase, save states).
+  ## Materialize all four channels at the current cycle (frame sequencer,
+  ## SOUNDCNT_X writes, the per-frame rebase, save states).
   apu.channel1.ch1_catchup()
   apu.channel2.ch2_catchup()
   apu.channel3.ch3_catchup()
@@ -276,37 +223,32 @@ proc apu_catchup_all*(apu: APU) {.inline.} =
 
 proc apu_next_step*(apu: APU): CycleCount {.inline.} =
   ## Soonest pending waveform step across the four channels, or GBA_NO_STEP.
-  ##
-  ## These deadlines are scheduler events in all but name; they simply no longer
-  ## occupy a slot in evbuf. Anything that skips the clock forward on the
-  ## strength of "nothing is scheduled until X" has to treat them as scheduled —
-  ## see cpu.tick's waitloop path, which is the one place that does.
+  ## These are scheduler events in all but name: anything that skips the
+  ## clock forward on "nothing is scheduled until X" must treat them as
+  ## scheduled (cpu.tick's waitloop path).
   result = apu.channel1.next_step
   if apu.channel2.next_step < result: result = apu.channel2.next_step
   if apu.channel3.next_step < result: result = apu.channel3.next_step
   if apu.channel4.next_step < result: result = apu.channel4.next_step
 
 proc apu_rebase*(apu: APU; base: CycleCount) {.inline.} =
-  ## Shift the channel deadlines down by the same base scheduler.rebase just
-  ## subtracted from every pending event. Callers must have caught the channels
-  ## up first, so each deadline is strictly in the future and cannot underflow.
+  ## Shift the channel deadlines by the base scheduler.rebase just subtracted.
+  ## Callers must have caught the channels up first so nothing underflows.
   template adj(ch: untyped) =
     if ch.next_step != GBA_NO_STEP: ch.next_step -= base
   adj(apu.channel1)
   adj(apu.channel2)
   adj(apu.channel3)
   adj(apu.channel4)
-  # The FIFO latch timestamps live on the same clock as the events; shift them
-  # with the same base (signed, so a timestamp just before the base point may
-  # legitimately go slightly negative).
+  # FIFO latch timestamps are on the same clock (signed: one just before the
+  # base may go slightly negative)
   apu.dma_channels.last_update_cycle[0] -= int64(base)
   apu.dma_channels.last_update_cycle[1] -= int64(base)
 
 proc apu_park_steps*(apu: APU) =
-  ## Drop every pending waveform step without applying it — the exact effect the
-  ## old scheduler.clear(etAPUChannel1..4) had. Only RegisterRamReset's sound
-  ## phase does this; it then rewrites the whole register block, and nothing
-  ## re-arms a channel until the next trigger.
+  ## Drop every pending waveform step without applying it. Only
+  ## RegisterRamReset's sound phase does this; it then rewrites the whole
+  ## register block and nothing re-arms a channel until the next trigger.
   apu.channel1.next_step = GBA_NO_STEP
   apu.channel2.next_step = GBA_NO_STEP
   apu.channel3.next_step = GBA_NO_STEP
@@ -316,8 +258,8 @@ proc timer_overflow*(apu: APU; timer: int) =
   apu.dma_channels.timer_overflow(timer)
 
 proc tick_frame_sequencer*(apu: APU) =
-  # sweep_step rewrites CH1's frequency — i.e. its step period — so every
-  # channel has to be current before any of this runs.
+  # sweep_step rewrites CH1's frequency (its step period), so every channel
+  # has to be current first
   const OBS = uint32(FRAME_SEQ_PERIOD)
   apu.channel1.ch1_catchup_at(OBS)
   apu.channel2.ch2_catchup_at(OBS)
@@ -352,12 +294,10 @@ proc tick_frame_sequencer*(apu: APU) =
   apu.gba.scheduler.schedule(FRAME_SEQ_PERIOD, etAPUFrameSeq)
 
 proc get_sample*(apu: APU) =
-  # Gated on `enabled` because a disabled channel's amplitude is 0 regardless of
-  # phase — its steps simply accumulate until the next thing that CAN see it (a
-  # register write, the frame sequencer, or the end-of-frame rebase), and the
-  # closed form then replays them exactly. NOT gated on channel_mask: that is a
-  # debug mute, and skipping the catch-up would let CH4's shift loop fall
-  # further behind than the once-a-frame bound this relies on.
+  # Gated on `enabled`: a disabled channel's amplitude is 0 regardless of
+  # phase and the closed form replays the skipped steps later. NOT gated on
+  # channel_mask (a debug mute): CH4's shift loop relies on the once-a-frame
+  # bound.
   const OBS = uint32(APU_SAMPLE_PERIOD)
   if apu.channel1.enabled: apu.channel1.ch1_catchup_at(OBS)
   if apu.channel2.enabled: apu.channel2.ch2_catchup_at(OBS)
@@ -367,8 +307,8 @@ proc get_sample*(apu: APU) =
   let ch2 = if apu.channel_mask[1]: apu.channel2.ch2_get_amplitude() else: 0'i16
   let ch3 = if apu.channel_mask[2]: apu.channel3.ch3_get_amplitude() else: 0'i16
   let ch4 = if apu.channel_mask[3]: apu.channel4.ch4_get_amplitude() else: 0'i16
-  # PSG volume: 0=25%, 1=50%, 2=100%; the prohibited value 3 silences the
-  # PSG channels (NanoBoyAdvance and SkyEmu agree; mGBA extrapolates to 200%)
+  # PSG volume: 0=25%, 1=50%, 2=100% (GBATEK SOUNDCNT_H); the prohibited
+  # value 3 is modelled as silence. Assumed; no ROM pins this.
   let psg_muted = apu.soundcnt_h.sound_volume == 3
   let psg_sound =
     if psg_muted: 0'i16
@@ -381,39 +321,30 @@ proc get_sample*(apu: APU) =
   let psg_left  = int32(psg_sound) * int32(apu.soundcnt_l.left_volume) shr shift
   let psg_right = int32(psg_sound) * int32(apu.soundcnt_l.right_volume) shr shift
   var (raw_dma_a, raw_dma_b) = apu.dma_channels.dma_channels_get_amplitude()
-  # MP2K substitution predicate, shared by the capture below: engaged, not
-  # latched foreign, and the engine mixer actually running (mixer_live — a
-  # parked SoundMain cannot be producing the FIFO stream; see mp2k.nim).
+  # MP2K substitution predicate: engaged, not latched foreign, and the
+  # engine mixer actually running (mixer_live, mp2k.nim)
   let mp2k_subst = apu.gba.mp2k_hle and apu.gba.mp2k != nil and
                    apu.gba.mp2k.engaged and not apu.gba.mp2k.fifo_foreign and
                    apu.gba.mp2k.mixer_live
-  # Latched-foreign shadow watch (un-emitted render for the unlatch test).
+  # Latched-foreign shadow watch (un-emitted render for the unlatch test)
   let mp2k_watch = apu.gba.mp2k_hle and apu.gba.mp2k != nil and
                    apu.gba.mp2k.engaged and apu.gba.mp2k.fifo_foreign and
                    apu.gba.mp2k.mixer_live and apu.gba.mp2k.unlatch_watch
   when defined(mp2kwav):
-    # The game's OWN FIFO output, for A/B calibration against the HLE render.
-    # Gated on the same predicate as the HLE/gs_bon capture so both streams
-    # cover the same audio span: capturing REAL from power-on deflated its RMS
-    # with leading silence (the Mother 3 story — see "Why span-matched" in
-    # tests/mp2k_sweep_results/SUMMARY.md). With the HLE disabled (e.g.
-    # DINGBAT_NOHLE=1 reference runs) capture the whole run as before.
+    # The game's own FIFO output for A/B calibration, gated on the same
+    # predicate as the HLE capture so both cover the same span; with the HLE
+    # disabled capture the whole run
     if not (apu.gba.mp2k_hle and apu.gba.mp2k != nil) or mp2k_subst or
        mp2k_watch or (apu.gba.gs_bon != nil and apu.gba.gs_bon.engaged):
       realDmaCapture.add raw_dma_a
       realDmaCapture.add raw_dma_b
-  # EXPLORATORY: MP2K HLE replaces the DirectSound FIFO A/B latches with a
-  # higher-quality mixed sample (L->A, R->B). The existing SOUNDCNT_H DirectSound
-  # routing/volume path below (the GBATEK-documented FIFO sink) then applies
-  # unchanged.
-  # fifo_foreign: the game streams its own audio into pcmBuffer (m4a channels
-  # all idle while the buffer carries sound — see mp2k.nim on_frame); the
-  # shadow mixer cannot render that, so leave the real FIFO stream alone.
+  # MP2K HLE replaces the FIFO A/B latches with its mixed sample (L->A,
+  # R->B); the SOUNDCNT_H routing below then applies unchanged. fifo_foreign:
+  # the game streams its own audio, so the real stream is left alone.
   if mp2k_subst:
     let (hl, hr) = apu.gba.mp2k.render_sample()
-    # Feed the foreign-feeder / overlay energy comparisons (see mp2k.nim
-    # on_frame) with the REAL drained FIFO stream vs the shadow render it
-    # would replace, split per FIFO side.
+    # Real drained FIFO stream vs the shadow render, per side, for the
+    # foreign-feeder / overlay comparisons (mp2k.nim on_frame)
     let m = apu.gba.mp2k
     m.real_abs_a += int64(abs(int(raw_dma_a)))
     m.real_abs_b += int64(abs(int(raw_dma_b)))
@@ -421,15 +352,10 @@ proc get_sample*(apu: APU) =
     m.hle_abs_r  += int64(abs(int(hr)))
     inc m.ab_n
     if m.overlay_hold > 0:
-      # Transient foreign overlay detected (announcer speech / voice-clip
-      # stingers streamed around the engine — see mp2k.nim on_frame): emit
-      # the game's real stream; the shadow above keeps rendering so its
-      # samplers, delay ring and reverb history stay warm for a seamless
-      # return to substitution.
+      # Transient foreign overlay (mp2k.nim on_frame): emit the real stream;
+      # the shadow keeps rendering so it resumes seamlessly
       when defined(mp2kwav):
-        # Keep the capture reflecting what is actually EMITTED (the A/B
-        # metric measures the user-audible stream): render_sample appended
-        # its own output; overwrite with the passthrough values.
+        # The capture reflects what is actually emitted
         if mp2kWavCapture.len >= 2:
           mp2kWavCapture[mp2kWavCapture.len - 2] = raw_dma_a
           mp2kWavCapture[mp2kWavCapture.len - 1] = raw_dma_b
@@ -437,10 +363,9 @@ proc get_sample*(apu: APU) =
       raw_dma_a = hl
       raw_dma_b = hr
   elif mp2k_watch:
-    # Latched-foreign but the engine's channels are ACTIVE: render the shadow
-    # without emitting it and accumulate the same per-side energies, so
-    # on_frame's unlatch test can measure sustained shadow-vs-real agreement
-    # (see mp2k.nim — the EXE3-class boot-clip latch is reversed this way).
+    # Latched-foreign but the engine's channels are active: render the
+    # shadow un-emitted and accumulate the same energies for on_frame's
+    # unlatch test
     let m = apu.gba.mp2k
     let (hl, hr) = m.render_sample()
     m.real_abs_a += int64(abs(int(raw_dma_a)))
@@ -449,14 +374,11 @@ proc get_sample*(apu: APU) =
     m.hle_abs_r  += int64(abs(int(hr)))
     inc m.ab_n
     when defined(mp2kwav):
-      # render_sample appended its (un-emitted) output to the HLE capture;
-      # keep the A/B spans matched by capturing the real stream too, and make
-      # the HLE capture reflect what is actually emitted (the real stream).
+      # The capture reflects what is actually emitted (the real stream)
       if mp2kWavCapture.len >= 2:
         mp2kWavCapture[mp2kWavCapture.len - 2] = raw_dma_a
         mp2kWavCapture[mp2kWavCapture.len - 1] = raw_dma_b
-  # Camelot "Bon" HLE (Golden Sun) — same substitution for its
-  # own engine (structurally never engaged at the same time as the MP2K HLE).
+  # Camelot "Bon" HLE (Golden Sun): same substitution for its own engine
   elif apu.gba.mp2k_hle and apu.gba.gs_bon != nil and apu.gba.gs_bon.engaged:
     let (hl, hr) = apu.gba.gs_bon.gs_render_sample()
     raw_dma_a = hl
@@ -468,26 +390,21 @@ proc get_sample*(apu: APU) =
   let dma_left  = dma_a_scaled * int32(apu.soundcnt_h.dma_sound_a_left)  + dma_b_scaled * int32(apu.soundcnt_h.dma_sound_b_left)
   let dma_right = dma_a_scaled * int32(apu.soundcnt_h.dma_sound_a_right) + dma_b_scaled * int32(apu.soundcnt_h.dma_sound_b_right)
   let bias = int32(apu.soundbias.bias_level)
-  # SOUNDBIAS amplitude_resolution (bits 14-15) selects the DAC bit depth at
-  # 32768<<res Hz: 0=9-bit, 1=8-bit, 2=7-bit, 3=6-bit (GBATEK, SOUNDBIAS). We
-  # honor the depth by masking the low `res` bits of the biased 10-bit DAC
-  # value — leaving ~2 guard bits below the nominal depth (as ares does) so
-  # the truncation adds no audible quantization step. res=0 (the near-
-  # universal default) masks nothing, keeping this path bit-identical.
+  # SOUNDBIAS amplitude_resolution selects the DAC depth: 0=9-bit .. 3=6-bit
+  # (GBATEK SOUNDBIAS), honoured by masking the low `res` bits of the biased
+  # 10-bit value (~2 guard bits below nominal, so the truncation is
+  # inaudible). res=0 masks nothing.
   let dac_mask = int32(0x3FF) and
                  not int32((1 shl int(apu.soundbias.amplitude_resolution)) - 1)
-  # Stop (sleep) mode halts the system clock, so the sound generators stop
-  # advancing and the DAC produces no fresh output (GBATEK: entering Stop
-  # stops sound; games are expected to blank video/sound themselves, but
-  # Golden Sun relies on the clock halt and leaves SOUNDCNT_X enabled). Emit
-  # silence instead of looping the last tone forever. We only gate the output
-  # here — the scheduler keeps running so the keypad wake IRQ is still served.
+  # Stop mode halts the system clock, so the DAC produces no fresh output
+  # (GBATEK: entering Stop stops sound; Golden Sun leaves SOUNDCNT_X enabled
+  # and relies on it). Only the output is gated; the scheduler keeps running
+  # for the keypad wake IRQ.
   let stopped = apu.gba.cpu.stopped
   let total_left  = if stopped: 0'i16 else: int16((max(0, min(0x3FF, psg_left  + dma_left  + bias)) and dac_mask) - bias)
   let total_right = if stopped: 0'i16 else: int16((max(0, min(0x3FF, psg_right + dma_right + bias)) and dac_mask) - bias)
   when not defined(emscripten):
-    # Before the output switch on purpose: the test_harness branch below drops
-    # the sample, and the oracle needs it.
+    # Before the output switch: the test_harness branch drops the sample
     if gba_audio_dump_on: gba_audio_dump_write(total_left, total_right)
   when defined(test_harness):
     discard
@@ -495,13 +412,12 @@ proc get_sample*(apu: APU) =
     let sl = float32(total_left * 32) / 32768.0'f32
     let sr = float32(total_right * 32) / 32768.0'f32
     if not apu.turbo:
-      # 1x: bit-identical passthrough, never routes through the stretcher.
+      # 1x: passthrough, never through the stretcher
       apu.stretch_engaged = false
       appendAudioSample(sl, sr)
     elif apu.pitch_correct_ff:
-      # Pitch-correct 2x: feed every full-rate frame into WSOLA and emit its
-      # half-count output. Pull on every OTHER call — exactly the count the
-      # old decimation emitted, so pacing is unchanged.
+      # Pitch-correct 2x: feed every frame into WSOLA, pull on every other
+      # call so the emitted count (and pacing) matches plain decimation
       apu.ensure_stretch()
       apu.stretch.push(sl, sr)
       apu.turbo_parity = not apu.turbo_parity
@@ -509,8 +425,7 @@ proc get_sample*(apu: APU) =
         let (ol, orr) = apu.stretch.pull()
         appendAudioSample(ol, orr)
     else:
-      # 2x, pitch-correct off: historical every-other-sample decimation
-      # (audio pitched up an octave).
+      # 2x, pitch-correct off: every-other-sample decimation (octave up)
       apu.stretch_engaged = false
       apu.turbo_parity = not apu.turbo_parity
       if apu.turbo_parity:
@@ -519,9 +434,7 @@ proc get_sample*(apu: APU) =
     var out_l = total_left  * 32
     var out_r = total_right * 32
     if apu.audio_lowpass:
-      # Gentle one-pole low-pass (~12 kHz corner at 32768 Hz) modeling the
-      # cap/speaker smoothing on real hardware. alpha = 1 - exp(-2*pi*fc/fs).
-      # Guarded so the disabled path above stays bit-identical.
+      # One-pole low-pass (~12 kHz corner) modeling the cap/speaker smoothing
       apu.lp_left  += AUDIO_LOWPASS_ALPHA * (float32(out_l) - apu.lp_left)
       apu.lp_right += AUDIO_LOWPASS_ALPHA * (float32(out_r) - apu.lp_right)
       out_l = int16(clamp(apu.lp_left,  -32768.0'f32, 32767.0'f32))
@@ -530,10 +443,8 @@ proc get_sample*(apu: APU) =
     apu.buffer[apu.buffer_pos + 1] = out_r
     apu.buffer_pos += 2
     if apu.buffer_pos >= APU_BUFFER_SIZE:
-      # Master volume, applied per buffer at the queue point. Muting still
-      # queues (zeroed) samples: emulation pacing is driven by the SDL queue
-      # depth, so skipping the queue would break frame pacing. At volume 100
-      # unmuted this branch is skipped entirely — bit-identical passthrough.
+      # Master volume at the queue point. Muting still queues zeroed samples:
+      # pacing is driven by the SDL queue depth
       if apu.master_muted:
         for i in 0 ..< APU_BUFFER_SIZE:
           apu.buffer[i] = 0'i16
@@ -541,12 +452,9 @@ proc get_sample*(apu: APU) =
         let vf = apu.master_volume_factor
         for i in 0 ..< APU_BUFFER_SIZE:
           apu.buffer[i] = int16(int32(apu.buffer[i]) * vf shr 8)
-      # 2x speed: emit half the output frames so the queue fills at half rate
-      # and audio-driven pacing runs emulation twice as fast. Two ways to halve:
-      #   pitch_correct_ff on  -> WSOLA time-stretch (pitch preserved)
-      #   pitch_correct_ff off -> keep every other frame (classic octave-up)
-      # Both emit exactly APU_BUFFER_SIZE/2 int16, so pacing is identical.
-      # At normal speed this is skipped entirely (1x bit-identical).
+      # 2x speed: emit half the frames so audio-driven pacing runs emulation
+      # twice as fast — WSOLA (pitch_correct_ff) or every other frame; both
+      # emit exactly APU_BUFFER_SIZE/2 int16
       var queue_len = APU_BUFFER_SIZE
       if apu.turbo:
         if apu.pitch_correct_ff:
@@ -592,9 +500,8 @@ proc get_sample*(apu: APU) =
   apu.gba.scheduler.schedule(APU_SAMPLE_PERIOD, etAPUSample)
 
 proc `[]`*(apu: APU; io_addr: uint32): uint8 =
-  # Only wave RAM needs a sync: 0x90-0x9F resolves against wave_ram_position
-  # while CH3 is enabled. Everything else here reports register bits, or (0x84)
-  # `enabled`, and no catch-up ever writes `enabled`.
+  # Only wave RAM needs a sync (it resolves against wave_ram_position while
+  # CH3 is enabled); no catch-up ever writes `enabled`
   if io_addr >= WAVE_RAM_LOW and io_addr <= WAVE_RAM_HIGH:
     apu.channel3.ch3_catchup()
   if ch1_in_range(io_addr):      apu.channel1.ch1_read(io_addr)
@@ -622,17 +529,15 @@ proc `[]=`*(apu: APU; io_addr: uint32; value: uint8) =
           (io_addr >= 0x82 and io_addr <= 0x89) or
           (io_addr >= WAVE_RAM_LOW and io_addr <= WAVE_RAM_HIGH)):
     return
-  # Materialize the target channel BEFORE the write lands, so any period / duty
-  # / bank / trigger change only affects steps from this cycle on, and so a
-  # wave-RAM write resolves against the right wave_ram_position.
+  # Materialize the target channel BEFORE the write lands, so a period /
+  # duty / bank / trigger change only affects steps from this cycle on
   if ch1_in_range(io_addr):      apu.channel1.ch1_catchup()
   elif ch2_in_range(io_addr):    apu.channel2.ch2_catchup()
   elif ch3_in_range(io_addr):    apu.channel3.ch3_catchup()
   elif ch4_in_range(io_addr):    apu.channel4.ch4_catchup()
   elif io_addr == 0x84:
-    # SOUNDCNT_X. The power-off arm rewrites every channel register (recursing
-    # through the branches above), but sync all four anyway: it is a rare write
-    # and it keeps the power-on reset from depending on that recursion.
+    # SOUNDCNT_X: sync all four so the power-on reset does not depend on the
+    # power-off arm's recursion through the branches above
     apu.apu_catchup_all()
   if ch1_in_range(io_addr):      apu.channel1.ch1_write(io_addr, value)
   elif ch2_in_range(io_addr):    apu.channel2.ch2_write(io_addr, value)

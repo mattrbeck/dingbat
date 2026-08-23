@@ -1,43 +1,23 @@
-# Rewind history: a bounded ring of zlib-compressed XOR deltas between
-# consecutive state snapshots, plus the newest snapshot kept whole.
+# Rewind history: a bounded ring of compressed XOR deltas between consecutive
+# state snapshots, plus the newest snapshot kept whole. Rewind only steps
+# backward from the newest state, so each delta decodes against its successor:
+# prev = inflate(delta) XOR cur. Consecutive snapshots differ in a small
+# fraction of bytes, so deltas deflate to a few percent of the payload.
 #
-# Rewind only ever steps backward from the newest state, so each entry needs
-# to decode against its *successor* only: prev = inflate(delta) XOR cur.
-# Popping is O(delta) with no keyframes, and because consecutive snapshots
-# differ in a small fraction of bytes (most emulator memory is static over a
-# 10-frame window), deltas deflate to a few percent of the ~500 KB payload —
-# that is what makes long histories affordable.
-#
-# Three things exist on top of that chain, all for the scrubber (jump to an
-# arbitrary moment instead of only holding the rewind button):
-#
-#  * Absolute IDs. The deque evicts from the front, so an entry's positional
-#    index shifts under any caller that remembers it — index 900 means a
-#    different moment one second later. Every pushed snapshot gets a
-#    monotonically increasing ID instead, and IDs are never reused, so a stale
-#    ID resolves to "gone" rather than to the wrong moment.
-#  * Thumbnails captured at PUSH time. Rendering a timeline by applying
-#    sampled snapshots to the live core costs a full walk of history (every
-#    delta inflated) for a handful of pictures. The framebuffer is already in
-#    hand at push time, so one downscale there gives the strip for free.
-#  * Keyframes. A delta chain anchored only at `latest` makes reaching the
-#    k-th snapshot O(k) inflations — a second of freeze at the oldest end of a
-#    full ring. A whole compressed payload every `key_every` pushes bounds a
-#    seek to that many inflations.
-#
-# Thumbnails and keyframes are counted in mem_used and evicted with the deltas
-# they belong to. That is not bookkeeping tidiness: the cap is a real memory
-# budget (64 MB, and 16 MB on iOS where process-level pressure gets the wasm
-# JIT demoted), and side tables outside it would silently make the budget a
-# lie on exactly the platform that can least afford it.
+# For the scrubber: absolute snapshot IDs (positional indexes shift under
+# eviction; IDs are never reused, so a stale ID resolves to "gone"), thumbnails
+# captured at push time (rendering the strip from history would walk every
+# delta), and keyframes every `key_every` pushes bounding a seek to that many
+# inflations. Thumbnails and keyframes count toward mem_used and are evicted
+# with the deltas they belong to: the cap is a real budget (16 MB on iOS,
+# where memory pressure gets the wasm JIT demoted).
 
 import std/deques
 import zippy
 
 when defined(rewindprof):
-  # EXPLORATORY (-d:rewindprof): where the per-snapshot cost goes. Nanoseconds
-  # and call counts, printed by tests/dingbat_bench.nim. Pushes happen ~6/s, so
-  # the getMonoTime pairs are far below the noise of what they measure.
+  # -d:rewindprof: per-snapshot cost in nanoseconds and call counts, printed
+  # by tests/dingbat_bench.nim.
   import std/monotimes, std/times
   const
     RpSerialize* = 0   ## the caller's state_payload()
@@ -62,9 +42,8 @@ else:
 
 type
   RewindThumb* = object
-    ## One downscaled frame captured at push time: little-endian BGR555,
-    ## 2 bytes per pixel — the same layout as the save-state thumbnail
-    ## trailer, so the same JS decoder reads both.
+    ## One downscaled frame captured at push time: little-endian BGR555, 2
+    ## bytes per pixel, the save-state thumbnail trailer's layout.
     w*, h*: int
     pixels*: seq[byte]
 
@@ -104,16 +83,11 @@ const
   REWIND_INTERVAL*  = 10  # ~6 snapshots/second
   REWIND_KEY_EVERY* = 60
     ## Snapshots between keyframes: ~10 s of history at the default interval,
-    ## so a seek costs at most ~60 inflations. Measured cost of the extra
-    ## traffic is 8.5 KB/s on GBA (80-86 KB a keyframe) and 0.9 KB/s on GB
-    ## (9.5 KB) — 3.7% and 9% of what those cores' delta streams retain.
+    ## so a seek costs at most ~60 inflations.
 
 proc thumbs_per_second(interval: int): int =
-  ## One thumbnail per second of history. Pushes are `interval` frames apart
-  ## at ~60 fps, so that is every 60/interval pushes (6 at the default).
-  ## Dense enough to scrub against, and the strip is sampled down to ~48 for
-  ## display anyway. Compressed (see push) this costs 2.6-4.1 KB/s on GBA and
-  ## 1.0 KB/s on GB.
+  ## One thumbnail per second of history (pushes are `interval` frames apart
+  ## at ~60 fps); the strip is sampled down to ~48 for display anyway.
   max(1, 60 div max(1, interval))
 
 proc new_rewind*(cap = REWIND_CAP_BYTES; interval = REWIND_INTERVAL;
@@ -143,8 +117,8 @@ proc clear*(rw: Rewind) =
   rw.frame_count = 0
   rw.thumb_due = 0
   rw.key_due = 0
-  # next_id deliberately survives: an ID handed out before the clear must not
-  # come back attached to a different moment.
+  # next_id survives: an ID handed out before the clear must not come back
+  # attached to a different moment.
 
 proc xor_bytes(dst: var string; src: string; k: int) =
   ## dst[0..<k] ^= src[0..<k], in word-sized chunks
@@ -158,34 +132,16 @@ proc xor_bytes(dst: var string; src: string; k: int) =
     dst[i] = char(uint8(dst[i]) xor uint8(src[i]))
 
 
-# --- Sparse-block pre-pass on the delta -----------------------------------
-#
-# This is the ring's codec, not an option.
-#
-# The delta is an XOR, so "unchanged" is literally a zero byte, and after the
-# fixed-length-payload fix it is 99% zeros. zlib still has to walk every one of
-# those zeros to rediscover that it is a zero. A bitmap of which 64-byte blocks
-# contain ANY non-zero byte, followed by only those blocks, costs one bit per
-# block and skips the rest with a word-at-a-time scan.
-#
-# Format: u32 original length, u32 block size, ceil(nblocks/8) bitmap bytes,
-# then the set blocks back to back. The last block may be short; its length
-# falls out of the original length, so nothing else needs storing. The result
-# is then zlib'd as before, which still gets to exploit whatever redundancy
-# survives inside the changed blocks.
-#
-# Measured on Pokemon FireRed from an in-game state, against plain zlib on the
-# same (fixed-length) payloads:
-#   native   4504 B vs 5693 B, encode 0.147 ms vs 0.165 ms, decode 4.3x faster
-#   Chrome   4480 B vs 5678 B, encode 2.7x faster, decode 6.4x faster
-#   Safari   4480 B vs 5678 B, encode 2.5x faster
-# The browsers gain far more than native because zippy's deflate is much
-# slower relative to a flat scan under wasm than it is compiled natively —
-# which is why the candidate bake-off (common/rewind_codecs.nim) was built to
-# run in-page rather than being settled on the desktop.
-#
-# The encoded form is in-process only: the ring never outlives the process and
-# nothing persists or transmits a delta, so this needed no format version.
+# Sparse-block pre-pass on the delta (the ring's codec). The delta is an XOR,
+# so "unchanged" is a zero byte and the payload is ~99% zeros; a bitmap of
+# which 64-byte blocks contain any non-zero byte, followed by only those
+# blocks, skips the rest with a word-at-a-time scan, and zlib then compresses
+# what survives. Format: u32 original length, u32 block size, ceil(nblocks/8)
+# bitmap bytes, then the set blocks back to back (the last may be short; its
+# length follows from the original length). Smaller and faster than plain
+# zlib, by far the most under wasm (the bake-off in common/rewind_codecs.nim
+# runs in-page for that reason). In-process only: nothing persists or
+# transmits a delta, so there is no format version.
 
 const SparseBlock* = 64
 
@@ -241,8 +197,7 @@ proc sparse_decode*(src: string): string =
 
 proc encode_delta(prev, cur: string): string =
   ## Delta body reconstructs `prev` given `cur`: XOR over the overlapping
-  ## prefix, raw tail where prev extends past cur (payload lengths vary
-  ## slightly — e.g. the scheduler's event count)
+  ## prefix, raw tail where prev extends past cur.
   var body = prev
   rp(0 + 1):  # RpXor
     xor_bytes(body, cur, min(prev.len, cur.len))
@@ -264,9 +219,7 @@ proc newest_id*(rw: Rewind): int = rw.latest_id
 
 proc drop_stale_sides(rw: Rewind) =
   ## Thumbnails and keyframes only mean anything while their snapshot is
-  ## reconstructable. Both ends move: eviction raises the oldest ID, pop()
-  ## lowers the newest one, and a side entry surviving either would hand out
-  ## a picture (or an anchor) for a moment the ring can no longer produce.
+  ## reconstructable; eviction raises the oldest ID and pop() lowers the newest.
   let lo = rw.oldest_id
   let hi = rw.latest_id
   while rw.thumbs.len > 0 and rw.thumbs.peekFirst.id < lo:
@@ -284,8 +237,7 @@ proc evict_oldest(rw: Rewind) =
 
 proc push*(rw: Rewind; payload: string; thumb: proc(): RewindThumb = nil) =
   ## Record a new snapshot (frame-boundary payloads only). `thumb` is called
-  ## only on the pushes that actually store one — the caller pays a downscale
-  ## once a second, not once a push.
+  ## only on the pushes that store one.
   let id = rw.next_id
   inc rw.next_id
   if rw.latest.len > 0:
@@ -300,12 +252,9 @@ proc push*(rw: Rewind; payload: string; thumb: proc(): RewindThumb = nil) =
       var t: RewindThumb
       rp(3): t = thumb()
       if t.pixels.len > 0:
-        # Raw BGR555 is 19-26 KB a picture, which on GB is THREE TIMES the
-        # whole delta stream — the strip would have become the ring's biggest
-        # tenant and cut GB history by ~3.6x at the same cap. Game frames are
-        # flat-coloured, so BestSpeed takes them to 4% (GB) / 14-22% (GBA) of
-        # raw for 0.06-0.09 ms once a second, and ~0.03 ms to inflate one when
-        # the strip is read. Measured, both cores.
+        # Raw BGR555 is 19-26 KB a picture, on GB three times the whole delta
+        # stream; game frames are flat-coloured, so BestSpeed takes them to
+        # 4-22% of raw.
         var packed: seq[byte]
         rp(4): packed = compress(t.pixels, BestSpeed, dfZlib)
         rw.thumbs.addLast(ThumbEntry(id: id, w: t.w, h: t.h, packed: packed))
@@ -355,24 +304,20 @@ proc pop*(rw: Rewind): string =
     rw.latest = ""
     rw.latest_id = -1
   rw.drop_stale_sides()
-  # Rewinding discards the newest keyframe/thumbnail along with the snapshots
-  # they belonged to. Re-anchor on the next push rather than finishing the
-  # interrupted countdown, so the gap left behind can't grow past key_every.
+  # Rewinding discards the newest keyframe/thumbnail with their snapshots;
+  # re-anchor on the next push so the gap cannot grow past key_every.
   rw.key_due = 0
   rw.thumb_due = 0
 
-# --- Non-destructive access (scrubber, bug report) ------------------------
-# pop() consumes history; the scrubber needs to look at snapshots without
-# disturbing the ring or the live core, so it can present a timeline and let
-# the user pick one moment. These reconstruct snapshots from a local copy.
+# --- Non-destructive access (scrubber, bug report): reconstruct snapshots
+# without disturbing the ring or the live core.
 
 proc snapshot_interval*(rw: Rewind): int = rw.interval
 
 iterator snapshots_newest_first*(rw: Rewind): string =
-  ## Reconstruct every retained snapshot, newest to oldest, without mutating
-  ## the ring. Snapshot 0 is the newest (== the live frame's last push).
-  ## Walks the raw chain — this is what snapshot_at's keyframe shortcut has
-  ## to agree with, byte for byte.
+  ## Every retained snapshot, newest to oldest, without mutating the ring.
+  ## Walks the raw chain; snapshot_at's keyframe shortcut must agree byte for
+  ## byte.
   if rw.latest.len > 0:
     var cur = rw.latest
     yield cur
@@ -382,9 +327,7 @@ iterator snapshots_newest_first*(rw: Rewind): string =
 
 proc find_delta_pos(rw: Rewind; id: int): int =
   ## Deque position of the delta that reconstructs `id`, or -1. IDs ascend
-  ## across the deque (each push appends the previous latest_id, which is
-  ## larger than every ID already in there), so this can binary search — and
-  ## it must, because a pop/push seam leaves gaps in the ID sequence.
+  ## across the deque but a pop/push seam leaves gaps, so binary search.
   var lo = 0
   var hi = rw.deltas.len - 1
   while lo <= hi:
@@ -409,18 +352,14 @@ proc id_at_index*(rw: Rewind; index: int): int =
   if index == 0: rw.latest_id else: rw.deltas[rw.deltas.len - index].id
 
 proc reconstruct(rw: Rewind; target_pos: int): string =
-  ## Snapshot at deque position `target_pos` (== deltas.len means `latest`),
-  ## rebuilt from the cheapest anchor: `latest` costs one inflation per step
-  ## back, a keyframe costs one inflation plus the steps from there. Both
-  ## produce the same bytes; only the walk length differs.
+  ## Snapshot at deque position `target_pos` (== deltas.len means `latest`)
+  ## from the cheapest anchor: `latest`, or the nearest newer keyframe.
   if target_pos == rw.deltas.len:
     return rw.latest
   var start_pos = rw.deltas.len
   var cur = rw.latest
   if rw.keys.len > 0:
-    # Nearest keyframe at or newer than the target: keys ascend by ID, and
-    # position order follows ID order, so binary search for the first key
-    # whose ID is >= the target's.
+    # Nearest keyframe at or newer than the target (keys ascend by ID)
     let target_id = rw.deltas[target_pos].id
     var lo = 0
     var hi = rw.keys.len - 1
@@ -451,47 +390,31 @@ proc snapshot_at*(rw: Rewind; index: int): string =
   rw.reconstruct(rw.deltas.len - index)
 
 proc snapshot_by_id*(rw: Rewind; id: int): string =
-  ## Same, addressed by absolute ID. Empty string when the ID is no longer
-  ## retained — which is the point: an index would have kept resolving, to
-  ## the wrong moment.
+  ## Same, by absolute ID; empty when the ID is no longer retained.
   let index = rw.index_of_id(id)
   if index < 0: "" else: rw.snapshot_at(index)
 
 proc rewind_to_id*(rw: Rewind; id: int): string =
-  ## Commit to a moment: return `id`'s payload and DISCARD every snapshot
-  ## newer than it, so the ring's newest becomes `id`. That is what makes the
-  ## scrubber's "you cannot move forward again" true at the ring level too —
-  ## after this, hold-to-rewind continues backward from the chosen moment and
-  ## the next push deltas against it, instead of both still reaching into a
-  ## future the player just threw away.
-  ##
-  ## Empty string (and no mutation) when the ID is no longer retained.
-  ##
-  ## Equivalent to popping until latest_id == id, but without paying for it:
-  ## pop() inflates one delta per step, so committing to the far end of a full
-  ## ring would cost thousands of inflations. The payload comes from
-  ## snapshot_by_id (keyframe-anchored, bounded by key_every) and the deltas in
-  ## between are dropped unread — nothing needs to look at what it discards.
+  ## Commit to a moment: return `id`'s payload and discard every newer
+  ## snapshot, so hold-to-rewind continues backward from it and the next push
+  ## deltas against it. Empty string (no mutation) when the ID is gone. Unlike
+  ## popping there, the payload comes keyframe-anchored and the discarded
+  ## deltas are dropped unread.
   let payload = rw.snapshot_by_id(id)
   if payload.len == 0: return ""
-  # Deltas are keyed by the snapshot they RECONSTRUCT, so everything with an
-  # ID >= the target reconstructs a moment at or after it: `id`'s own delta is
-  # redundant once its payload is `latest`, and the newer ones are the future.
+  # Deltas are keyed by the snapshot they reconstruct: `id`'s own is redundant
+  # once its payload is `latest`, and the newer ones are the future.
   while rw.deltas.len > 0 and rw.deltas.peekLast.id >= id:
     rw.total -= rw.deltas.popLast().packed.len
   rw.latest = payload
   rw.latest_id = id
   rw.drop_stale_sides()
-  # Same re-anchoring as pop(): the discarded snapshots took their keyframe
-  # and thumbnail countdowns with them.
+  # Same re-anchoring as pop().
   rw.key_due = 0
   rw.thumb_due = 0
   payload
 
-# --- Thumbnail strip (captured at push time, not rebuilt) ----------------
-# Constant cost per picture, independent of how deep in history it sits —
-# which is the whole point: rendering the strip used to mean walking the
-# entire delta chain.
+# --- Thumbnail strip (captured at push time): constant cost per picture.
 
 proc thumb_count*(rw: Rewind): int = rw.thumbs.len
 
@@ -503,8 +426,7 @@ proc thumb_at*(rw: Rewind; i: int): RewindThumb =
   try:
     RewindThumb(w: e.w, h: e.h, pixels: uncompress(e.packed, dfZlib))
   except CatchableError:
-    # In-process bytes; unreachable. An empty thumbnail drops one sample from
-    # the strip rather than taking the tab down with it.
+    # In-process bytes; unreachable. An empty thumbnail drops one strip sample.
     RewindThumb()
 
 proc thumb_id*(rw: Rewind; i: int): int =

@@ -1,18 +1,10 @@
-# GBA I/O register definitions using packed objects with bitsize pragmas.
-# This file is `include`d by gba.nim; it shares gba.nim's scope.
-# Approach borrowed from reference/gba — uses Nim's native {.packed.} +
-# {.bitsize:N.} instead of a custom macro.
-
-####################
-# CPU mode enum (must come before PSR since it lives in reg.nim now)
+# GBA I/O register definitions as {.packed.} objects with {.bitsize.} fields
+# (included by gba.nim).
 
 type
   CpuMode* = enum
     modeUSR = 0x10, modeFIQ = 0x11, modeIRQ = 0x12, modeSVC = 0x13,
     modeABT = 0x17, modeUND = 0x1B, modeSYS = 0x1F
-
-####################
-# CPU PSR (Program Status Register) — 32-bit
 
 type
   PSR* {.packed.} = object
@@ -30,12 +22,9 @@ converter toU32*(psr: PSR): uint32 = cast[uint32](psr)
 converter toPSR*(v: uint32): PSR   = cast[PSR](v)
 
 const PSR_PHYS_MASK* = 0xF00000FF'u32
-  ## The status bits that physically exist on the ARM7TDMI: N/Z/C/V and
-  ## I/F/T/mode. Bits 8-27 never latch (hardware-verified, gbaedge CPSRBITS
-  ## page, AGB SP sessions 2/3). SPSR additionally forces bit4 high.
-
-####################
-# GBA 16-bit I/O registers
+  ## Status bits that physically exist on the ARM7TDMI (N/Z/C/V, I/F/T,
+  ## mode); bits 8-27 never latch, and SPSR forces bit4 high (hardware:
+  ## gbaedge CPSRBITS on AGB SP, docs/hwprobe.md).
 
 type
   WAITCNT* {.packed.} = object
@@ -246,21 +235,16 @@ type
     irq_enable*    {.bitsize: 1.}: bool
     irq_condition* {.bitsize: 1.}: bool
 
-  # BGREF is 32-bit, handled separately from the GbaReg16 type class
   BGREF* {.packed.} = object
     fraction* {.bitsize:  8.}: uint32
     integer*  {.bitsize: 19.}: uint32
     sign*     {.bitsize:  1.}: bool
     not_used* {.bitsize:  4.}: uint32
 
-  # Type class covering all 16-bit GBA I/O registers
   GbaReg16* = WAITCNT | InterruptReg | SOUNDCNT_L | SOUNDCNT_H | SOUNDBIAS |
               DMACNT | TMCNT | DISPCNT | DISPSTAT | BGCNT | BGOFS | BGAFF |
               WINH | WINV | WININ | WINOUT | MOSAIC | BLDCNT | BLDALPHA | BLDY |
               KEYINPUT | KEYCNT
-
-####################
-# Converters and I/O helpers
 
 converter toU16*(reg: GbaReg16): uint16 = cast[uint16](reg)
 converter toU32*(reg: BGREF): uint32     = cast[uint32](reg)
@@ -288,9 +272,6 @@ proc write*[T: uint16 | uint32](reg: var T; value: uint8; byte_num: SomeInteger)
   let shift = 8 * byte_num
   let mask  = not(0xFF.T shl shift)
   reg = (mask and reg) or (value.T shl shift)
-
-####################
-# Custom procs
 
 proc num*(self: BGAFF): int16 {.inline.} =
   cast[int16](toU16(self))

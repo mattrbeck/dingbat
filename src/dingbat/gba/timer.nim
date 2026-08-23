@@ -3,26 +3,23 @@
 const
   TIMER_PERIODS   = [1, 64, 256, 1024]
   TIMER_EVENT_TYPES* = [etTimer0, etTimer1, etTimer2, etTimer3]
-  # Hardware starts counting 2 cycles after the enable write
+  # Counting starts 2 cycles after the enable write.
   TIMER_START_DELAY = 2
 
 # The prescaler is free-running: a timer with period P ticks at absolute
-# cycles divisible by P, regardless of when it was enabled. Ticks are counted
-# over the half-open interval (anchor, now], so a tick landing exactly on the
-# anchor cycle (enable+delay or the overflow itself) is excluded.
+# cycles divisible by P regardless of when it was enabled. Ticks are counted
+# over (anchor, now], so a tick on the anchor cycle itself is excluded.
 proc ticks_between(anchor, now: CycleCount; period: int): uint32 {.inline.} =
   uint32(now div CycleCount(period) - anchor div CycleCount(period))
 
 proc cycles_until_overflow(tim: Timer; num: int): int =
-  # From the anchor cycle: overflow fires on the (0x10000 - tm)-th tick
   let period = TIMER_PERIODS[tim.tmcnt[num].frequency]
   let anchor = tim.cycle_enabled[num]
   let target = CycleCount(period) * (anchor div CycleCount(period) + CycleCount(0x10000 - int(tim.tm[num])))
   int(target - tim.gba.scheduler.cycles)
 
 proc effective_reload(tim: Timer; num: int): uint16 {.inline.} =
-  # A reload write on the cycle immediately before (or the same cycle as)
-  # this overflow isn't visible to the reload yet
+  # A reload written on the overflow cycle or the one before is not yet visible.
   if tim.gba.scheduler.cycles <= tim.tmd_write_cycle[num] + 1:
     tim.tmd_prev[num]
   else:
@@ -53,14 +50,11 @@ proc new_timer*(gba: GBA): Timer =
 
 proc get_current_tm(tim: Timer; num: int): uint16 =
   if tim.tmcnt[num].enable and not tim.tmcnt[num].cascade:
-    # Include un-ticked bus cycles: normally catch_up has just drained them
-    # (so this adds zero), but a DMA reading the timer runs inside event
-    # dispatch where catch_up is suppressed — each transfer must still see
-    # the live count (the AGS aging cartridge DMA-captures consecutive timer
-    # values to verify bus timing).
+    # Include un-ticked bus cycles: a DMA reading the timer runs inside event
+    # dispatch, where catch_up is suppressed, and each transfer must see the
+    # live count (AGS aging cartridge DMA-captures consecutive timer values).
     let now = tim.gba.scheduler.cycles + CycleCount(tim.gba.bus.cycles)
-    # cycle_enabled can sit up to TIMER_START_DELAY in the future right after
-    # an enable write; the counter hasn't started yet
+    # cycle_enabled sits up to TIMER_START_DELAY in the future after an enable.
     if now <= tim.cycle_enabled[num]: return tim.tm[num]
     tim.tm[num] + uint16(ticks_between(tim.cycle_enabled[num], now,
                                        TIMER_PERIODS[tim.tmcnt[num].frequency]))
@@ -92,19 +86,13 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
       let was_cascade = tim.tmcnt[num].cascade
       write(tim.tmcnt[num], value, 0)
       if num == 0:
-        # Timer 0 has no timer below it to cascade from: the count-up bit is
-        # unimplemented in TM0CNT_H (GBATEK) — writes don't stick and it
-        # reads back 0. Clearing the stored bit covers both the readback
-        # (`[]` returns tmcnt as stored) and every downstream cascade check.
+        # TM0CNT_H's count-up bit is unimplemented and reads back 0 (GBATEK,
+        # "Timer Control").
         tim.tmcnt[0].cascade = false
-      # Transitions below only move anchors and events: the count itself was
-      # snapshotted by update_tm above, and under the free-running prescaler
-      # model (ticks_between) a running timer is fully described by
-      # cycle_enabled plus its scheduled overflow. Cascade mode has neither
-      # (the timer below advances it from its own overflow), so entering it
-      # clears the event; a cold enable anchors TIMER_START_DELAY ahead,
-      # while cascade->prescaler on an already-running timer anchors at the
-      # current cycle.
+      # The count was snapshotted by update_tm; the transitions below only
+      # move the anchor and the overflow event. Cascade mode has no event
+      # (the timer below advances it); a cold enable anchors
+      # TIMER_START_DELAY ahead, cascade->prescaler anchors at the current cycle.
       when defined(pftrace):
         if num == 0:
           if tim.tmcnt[0].enable and not was_enabled:

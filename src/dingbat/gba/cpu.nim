@@ -5,15 +5,11 @@ when defined(gbaskipcap):
     ## Cycles an idle-loop skip may advance at once (see the waitloop path).
 
 proc mode_bank*(m: CpuMode): int =
-  # `m` comes from guest-controlled bits (SPSR mode field on exception return,
-  # MSR CPSR writes), so it can hold any 5-bit pattern, not just the defined
-  # modes: Prince of Tennis 2004 runs into the weeds and executes a data word
-  # as `subs pc, lr` with SPSR mode bits 0x1E. Hardware copies the raw bits
-  # into the CPSR and register banking degrades gracefully; like mGBA's
-  # _ARMSelectBank, map unrecognized patterns to the user bank instead of
-  # trapping on the (previously exhaustive) case.
-  # (Dispatch on the raw ordinal: an exhaustive enum case would treat the
-  # else as unreachable and compile invalid values into a trap.)
+  # `m` is guest-controlled (SPSR mode field, MSR CPSR) and can hold any
+  # 5-bit pattern (Prince of Tennis 2004 returns with SPSR mode 0x1E). Model:
+  # an undefined pattern selects the user bank. Assumed; no ROM pins this.
+  # Dispatch on the raw ordinal: an exhaustive enum case would compile the
+  # else into a trap.
   case uint32(m)
   of uint32(modeUSR), uint32(modeSYS): 0
   of uint32(modeFIQ):                  1
@@ -48,12 +44,11 @@ proc skip_bios*(cpu: CPU) =
   cpu.reg_banks[mode_bank(modeIRQ)][5] = 0x03007FA0'u32
   cpu.reg_banks[mode_bank(modeSVC)][5] = 0x03007FE0'u32
   cpu.r[15] = 0x08000000'u32
-  # Boot handoff I/O state (hardware-verified, gbaedge IDENT page, AGB SP):
-  # the BIOS leaves the display force-blanked and POSTFLG set at ROM entry
+  # At ROM entry the BIOS leaves DISPCNT force-blanked and POSTFLG set
+  # (hardware: gbaedge IDENT on AGB SP, docs/hwprobe.md).
   cpu.gba.ppu.dispcnt = cast[DISPCNT](0x0080'u16)
   cpu.gba.mmio.postflg = 1
-  # BIOS open-bus latch after boot (GBATEK: 0xE129F000, the msr at the end
-  # of the boot sequence)
+  # BIOS open-bus value after boot (GBATEK, "BIOS Memory": 0xE129F000).
   cpu.gba.bus.bios_latch = 0xE129F000'u32
   cpu.clear_pipeline()
 
@@ -71,10 +66,9 @@ proc switch_mode*(cpu: CPU; new_mode: CpuMode) =
   cpu.spsr_banks[old_bank]   = uint32(cpu.spsr)
   cpu.r[13]         = cpu.reg_banks[new_bank][5]
   cpu.r[14]         = cpu.reg_banks[new_bank][6]
-  # Restore the destination mode's banked SPSR. Exception entry (IRQ/UND/SWI)
-  # overwrites it with the interrupted CPSR afterwards; an msr-initiated mode
-  # switch must NOT touch it, or a nested-interrupt handler switching back to
-  # IRQ mode destroys SPSR_irq and the exception return restores garbage
+  # Load the destination mode's banked SPSR and nothing else: an msr mode
+  # switch back into IRQ mode must leave SPSR_irq intact for the pending
+  # exception return (exception entry overwrites it afterwards itself).
   cpu.spsr          = cast[PSR](cpu.spsr_banks[new_bank])
   cpu.cpsr.mode     = uint32(new_mode)
 
@@ -88,38 +82,25 @@ proc irq*(cpu: CPU) =
     cpu.cpsr.irq_disable = true
     discard cpu.set_reg(14, lr)
     discard cpu.set_reg(15, 0x18'u32)
-    # Exception-entry overhead beyond the pipeline refill. The ARM7TDMI data
-    # sheet costs an exception entry at 2S+1N and the matching return (a
-    # data-processing write to r15 with the S bit) at 2S+1N, so the pair costs
-    # six cycles on top of the handler body; the two refills the pipeline model
-    # already charges account for four of them. How the remaining two split
-    # between entry and return is what the mGBA suite pins, and it is not even:
-    # the handler's first instruction runs FOUR cycles after the interrupted
-    # instruction's boundary (Timer IRQ tests; three fails 21 of the 90 rows),
-    # which leaves one cycle - not two - for the return (see
-    # exception_return_restore). Unconditional: this is the vector sequence
-    # itself, so it does not vary with what the CPU was doing beforehand.
+    # Entry/return overhead: the ARM7TDMI data sheet costs exception entry
+    # and the S-bit return at 2S+1N each, six cycles beyond the two pipeline
+    # refills set_reg(15) charges. The split is uneven: entry +2 here (the
+    # handler's first instruction runs 4 cycles after the interrupted
+    # boundary; mGBA suite Timer IRQ rows), return +1 minus one given back in
+    # exception_return_restore.
     cpu.gba.bus.add_cycles(2)
-    # An entry that interrupts code EXECUTING FROM THE GAMEPAK pays for the
-    # in-flight 32-bit gamepak fetch before the vector fetch can own the
-    # bus: +2*S16 cycles (6 at the boot waitstates). Hardware-anchored
-    # (gbaedge IRQLAT2 page, AGB SP session 4): every ROM-loop shape enters
-    # the handler exactly 6 cycles later than the bare 2S+1N accounting
-    # (deltas 0x39/0x143/0x143 on silicon), while the mGBA suite's Timer IRQ
-    # rows - whose interrupted sleds run from IWRAM - pin the no-stall case.
-    # The gbaedge IRQWIN2 stamps (0x81/0x81/0x84, hardware-matched, ROM
-    # sleds) used to carry this 6 as a gate-only entry stall; it is a
-    # context cost, not a gate cost, so it lives here now and the gate path
-    # pays the same total as before. A halt-wake entry fetches nothing from
-    # the gamepak (the halted core isn't executing), so it is exempt.
+    # Interrupting code that executes from the gamepak also pays for the
+    # in-flight 32-bit ROM fetch: +2*S16 (hardware: gbaedge IRQLAT2 and
+    # IRQWIN2 on AGB SP, docs/hwprobe.md; the mGBA suite Timer IRQ rows run
+    # from IWRAM and pin the no-stall case). A halt-wake entry fetches
+    # nothing, so it is exempt.
     if not cpu.halt_wake:
       let page = int(bits_range(lr, 24, 27))
       if page in 8..13:
         cpu.gba.bus.add_cycles(2 * int(cpu.gba.bus.wait16_s[page]))
 
 proc und*(cpu: CPU) =
-  # ARM7TDMI Undefined Instruction trap: LR_und holds the address of the
-  # instruction after the undefined one (PC - 4 in ARM, PC - 2 in THUMB)
+  # Undefined Instruction trap; LR_und = the instruction after the faulting one.
   let lr = cpu.r[15] - (if cpu.cpsr.thumb: 2'u32 else: 4'u32)
   let old_cpsr = cpu.cpsr
   cpu.switch_mode(modeUND)
@@ -158,15 +139,11 @@ proc fill_pipeline*(cpu: CPU) {.inline.} =
 proc clear_pipeline*(cpu: CPU) =
   cpu.pipeline.clear()
   cpu.refill_pending = true
-  # Pipeline refill: two sequential fetches at the branch destination
-  # (1 cycle each in IWRAM/BIOS, waitstate-dependent in EWRAM/ROM)
+  # Refill = two sequential fetches at the destination.
   let page = int(bits_range(cpu.r[15], 24, 27))
   if page < 0x8 or page > 0xD:
-    # Execution left the gamepak: the prefetcher only runs while the CPU
-    # executes from ROM, so the buffered stream is abandoned. Without this
-    # a SWI into the BIOS banks the whole handler's runtime as prefetch
-    # credit and the return fetches come out too cheap (mGBA suite BIOS
-    # timing tests, prefetch columns, under the official BIOS).
+    # The prefetcher only runs while executing from ROM; leaving the gamepak
+    # abandons the buffered stream (mGBA suite BIOS timing, prefetch columns).
     cpu.gba.bus.rom_next_addr = 1
     cpu.gba.bus.rom_hot = false
   if cpu.cpsr.thumb:
@@ -184,9 +161,8 @@ proc read_instr*(cpu: CPU): uint32 {.inline.} =
       let fetch_addr = cpu.r[15] - 4
       let v = uint32(cpu.gba.bus.fetch_half(fetch_addr))
       if bits_range(fetch_addr, 24, 27) == 0:
-        # The latch holds the newest pipeline fetch, which runs two
-        # instructions ahead of execution (hardware-verified: after a SWI
-        # the latch is the opcode 8 bytes past the BIOS's `movs pc, lr`)
+        # The BIOS latch is the newest pipeline fetch, two instructions ahead
+        # of execution (hardware: gbaedge IDENT on AGB SP, docs/hwprobe.md).
         let ahead = uint32(cpu.gba.bus.read_half_internal((fetch_addr + 4) and 0x3FFF'u32))
         cpu.gba.bus.bios_latch = ahead or (ahead shl 16)
       v
@@ -201,13 +177,12 @@ proc read_instr*(cpu: CPU): uint32 {.inline.} =
     cpu.pipeline.shift()
 
 proc idle*(cpu: CPU; n: int) {.inline.} =
-  ## Internal (I) cycles: CPU busy, no bus access
+  ## Internal (I) cycles: no bus access.
   cpu.gba.bus.add_cycles(n)
 
 proc mul_i_cycles*(rs: uint32; signed_early_term: bool): int {.inline.} =
-  ## Booth's algorithm early termination: 1-4 internal cycles depending on
-  ## the magnitude of the multiplier. Signed multiplies also terminate early
-  ## on all-ones (negative) prefixes.
+  ## 1-4 I cycles by multiplier magnitude (ARM7TDMI data sheet); signed
+  ## multiplies also terminate early on all-ones prefixes.
   if rs < 0x100'u32 or (signed_early_term and rs >= 0xFFFFFF00'u32): 1
   elif rs < 0x10000'u32 or (signed_early_term and rs >= 0xFFFF0000'u32): 2
   elif rs < 0x1000000'u32 or (signed_early_term and rs >= 0xFF000000'u32): 3
@@ -245,7 +220,7 @@ proc check_cond*(cpu: CPU; cond: uint32): bool {.inline.} =
   of 0xC: not cpu.cpsr.zero and cpu.cpsr.negative == cpu.cpsr.overflow
   of 0xD: cpu.cpsr.zero or cpu.cpsr.negative != cpu.cpsr.overflow
   of 0xE: true
-  else: false  # NV (never) - ARMv4T reserved, treated as no-op
+  else: false  # NV: reserved on ARMv4T, executes as no-op
 
 proc lsl*(cpu: CPU; word: uint32; bits: uint32; carry_out: ptr bool): uint32 {.inline.} =
   log("lsl - word:" & hex_str(word) & ", bits:" & $bits)
@@ -345,25 +320,18 @@ when defined(pcprofile):
   var prof_iwram*: array[32, uint64]   # per-1KB bucket of IWRAM 0x03000000..0x03007FFF
 
 when defined(gsprobe):
-  # Throwaway Golden Sun probe state (see the gsprobe block in tick).
   var gsProbePc*: array[0x800, uint32]   # halfword-granular PC hit counts, 0x03000000..0xFFF
   var gsProbeLog*: seq[(uint32, uint32, uint32, uint32, uint32, uint32)] = @[]
   var gsProbeIn*: bool
 
 const NO_HLE_HOOK* = 0xFFFFFFFF'u32
-  ## hle_gate value meaning "the MP2K learning probe is running, no hook armed
-  ## yet". A real hook PC is a RAM-resident instruction address and the
-  ## pre-pipeline PC is never 0xFFFFFFFF, so this can never collide.
+  ## hle_gate value for "MP2K learning probe running, no hook armed"; a real
+  ## hook PC can never be 0xFFFFFFFF.
 
 proc refresh_hle_hook*(gba: GBA) =
-  ## Recompute the CPU's collapsed audio-HLE hook sentinel. Called once per
-  ## frame (after the driver frame polls) and again whenever MP2K learns its
-  ## mixer entry mid-frame, so every arm/disarm/re-point is picked up.
-  ##
-  ## One slot serves both drivers because they are mutually exclusive by
-  ## construction: gs_frame_poll refuses to engage once MP2K has learned a
-  ## hook, and MP2K only ever probes on its own SoundInfo ident, which the
-  ## Camelot work area never presents.
+  ## Recompute cpu.hle_gate; called once per frame and whenever MP2K learns
+  ## its mixer entry. One slot serves both drivers: gs_frame_poll does not
+  ## engage once MP2K has a hook, and MP2K only probes its own SoundInfo.
   var pc = NO_HLE_HOOK
   var probing = false
   if gba.mp2k_hle:
@@ -377,8 +345,7 @@ proc refresh_hle_hook*(gba: GBA) =
                      else: 0'u32
 
 proc fire_hle_hook(cpu: CPU; cur: uint32): bool {.noinline.} =
-  ## Run whichever audio-HLE hook is armed at `cur`. Returns true when the
-  ## caller must leave tick immediately because PC was rewritten.
+  ## Run the audio-HLE hook armed at `cur`; true when PC was rewritten.
   let gba = cpu.gba
   let m = gba.mp2k
   if m != nil and cur == m.hook_addr:
@@ -386,97 +353,73 @@ proc fire_hle_hook(cpu: CPU; cur: uint32): bool {.noinline.} =
     m.mixer_hook()
     if m.skip:
       m.dbg_skip_fires.inc
-      # EXPERIMENTAL perf probe: BX LR to skip the real mixer body and
-      # reclaim its CPU cycles. The hook sits at the mixer's entry, BEFORE
-      # any stack push, so r14 still holds the return address and sp is
-      # untouched. NOT correct (the engine's per-frame envelope ramp normally
-      # happens inside this function) — this measures the performance ceiling
-      # of an aggressive HLE only, not a shippable path.
+      # Perf-ceiling probe only, not correct: BX LR past the mixer body (the
+      # hook sits before any stack push, so r14/sp are intact) skips the
+      # engine's per-frame envelope ramp.
       let lr = cpu.r[14]
       cpu.cpsr.thumb = (lr and 1) != 0
       cpu.r[15] = if cpu.cpsr.thumb: lr and not 1'u32 else: lr and not 3'u32
       cpu.clear_pipeline()
       return true
     return false
-  # Camelot "Bon" HLE (Golden Sun) mixer-entry hook — fires once per frame at
-  # the driver's per-channel processing entry. Shadow-only: reads state,
-  # never alters control flow.
+  # Camelot "Bon" (Golden Sun) hook: shadow-only, never alters control flow.
   let g = gba.gs_bon
   if g != nil and g.engaged and cur == g.hook_addr:
     g.gs_mixer_hook()
   false
 
 proc tick*(cpu: CPU) =
-  # Take a pending IRQ before the IntrWait re-halt check: the handler must
-  # run (and set the BIOS mirror flags) or IntrWait would re-halt forever
+  # IRQ before the IntrWait re-halt check: the handler must run (and set the
+  # BIOS mirror flags) or IntrWait re-halts forever.
   if not cpu.halted and cpu.irq_line and not cpu.cpsr.irq_disable:
     cpu.irq()
-  # The halt-wake entry discount only applies to an IRQ taken at the first
-  # boundary after the wake (a wake with the I flag set resumes execution;
-  # any later IRQ is a normal running-state entry)
+  # The halt-wake entry exemption covers only the first boundary after the wake.
   cpu.halt_wake = false
   if cpu.intr_wait_active and not cpu.halted:
-    # Execution is back at the instruction after an IntrWait SWI, meaning the
-    # user IRQ handler (if any) has returned. Re-halt unless satisfied.
+    # Back at the instruction after an IntrWait SWI: re-halt unless satisfied.
     let cur = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
     if cur == cpu.intr_wait_resume_addr:
       cpu.check_intr_wait()
   if cpu.halt_resume_charge != 0 and not cpu.halted:
-    # Execution is back at the instruction after an HLE Halt/Stop SWI; charge
-    # the BIOS return path that the real BIOS executes after the wake
+    # Back at the instruction after an HLE Halt/Stop SWI: charge the BIOS
+    # return path the real BIOS runs after the wake.
     let cur = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
     if cur == cpu.halt_resume_addr:
-      # Pay the parked routine time in interruptible chunks, exactly like the
-      # in-SWI charge: the real BIOS body runs with the caller's IRQ mask, so
-      # a SECOND (third, ...) interrupt must also preempt the residue. Paying
-      # it as one atomic lump deferred every further IRQ by up to the whole
-      # remainder — for a large LZ77UnComp (~240k cycles) that starves the
-      # Gen-3 link master's 9-transfers-per-frame cadence and FireRed/
-      # LeafGreen tear the trade down with LAG_MASTER ("Communication
-      # error..."). If an IRQ becomes deliverable mid-payment the rest stays
-      # parked (same serialized fields) and is resumed on the next return.
+      # Paid in interruptible chunks: the real BIOS body runs under the
+      # caller's IRQ mask, so further IRQs must preempt the residue. One
+      # atomic lump (~240k cycles for a large LZ77UnComp) starves the Gen-3
+      # link master's per-frame transfer cadence and FireRed/LeafGreen abort
+      # the trade with LAG_MASTER. A remainder stays parked for the next return.
       let remain = cpu.hle_charge_units_interruptible(int(cpu.halt_resume_charge))
       cpu.halt_resume_charge = int32(remain)
       if remain != 0: return
-      # The dispatcher's exit path pops the caller's r12 back (staged in its
-      # SVC-stack slot by Halt/Stop and the interruptible decompression
-      # parks alike)
+      # Dispatcher exit path: pop the caller's r12 from its SVC-stack slot.
       cpu.r[12] = cpu.gba.bus.read_word_internal(cpu.svc_sp() - 8)
       if cpu.halt_resume_pop:
-        # Halt/Stop held the dispatcher's {r2, lr} frame live (System sp
-        # shifted down 8; r2 = HALTCNT value, lr = 0x170 while halted) —
-        # pop it back. Decompression parks never shifted sp, so they skip
-        # this (their r2/lr were never touched).
+        # Halt/Stop kept the dispatcher's {r2, lr} frame live on the System
+        # stack; decompression parks never shifted sp and skip this.
         cpu.halt_resume_pop = false
         let usp = cpu.sys_sp() + 8
         cpu.r[2] = cpu.gba.bus.read_word_internal(usp - 8)
         cpu.set_sys_lr(cpu.gba.bus.read_word_internal(usp - 4))
         cpu.set_sys_sp(usp)
   if not cpu.halted:
-    # EXPLORATORY: audio-HLE mixer hooks (MP2K's runtime-learned SoundMainRAM
-    # entry, its bounded learning probe, and the Camelot "Bon" entry). All
-    # three fire at most once per frame but sat on the per-instruction path,
-    # each re-testing its own enable flag + driver pointer + address — more
-    # host time than the mixing itself. They now share one sentinel compare
-    # (see refresh_hle_hook); the work moves out of line into fire_hle_hook.
-    # With HLE off this is a single load and a perfectly-predicted branch.
+    # Audio-HLE hooks share one sentinel compare on the per-instruction path
+    # (refresh_hle_hook); the work is out of line in fire_hle_hook.
     let gate = cpu.hle_gate
     if gate != 0:
       let cur = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
       if cur == gate:
         if cpu.fire_hle_hook(cur): return
       elif gate == NO_HLE_HOOK:
-        # Learning probe (bounded: engine-init to first mixer pass). Inline
-        # prefilter: RAM-region PC and r0 == &SoundInfo; the out-of-line probe
-        # does the lock check and the learn.
+        # MP2K learning probe; inline prefilter is RAM PC and r0 == &SoundInfo.
         let m = cpu.gba.mp2k
         let region = cur shr 24
         if (region == 0x02'u32 or region == 0x03'u32) and
            cpu.r[0] == m.probe_sound_info:
           m.probe_pc(cur)
     when defined(gsprobe):
-      # Throwaway Golden Sun "Bon" mixer probe: histogram of executed IWRAM
-      # PCs + entry events (outside IWRAM -> inside), with caller LR/r0-r3.
+      # Golden Sun "Bon" mixer probe: IWRAM PC histogram + entry events.
       block:
         let cur = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
         let inIw = (cur shr 24) == 0x03'u32 and (cur and 0x7FFF'u32) < 0x1000'u32
@@ -485,7 +428,6 @@ proc tick*(cpu: CPU) =
           if not gsProbeIn and gsProbeLog.len < 4000:
             gsProbeLog.add (cur, cpu.r[14], cpu.r[0], cpu.r[1], cpu.r[2],
                             uint32(cpu.gba.ppu.vcount))
-            # At interesting entries, also snapshot ch0/ch1 status+env+START
             if cur == 0x3000380'u32 or cur == 0x3000659'u32:
               let sip = cpu.gba.bus.read_word_internal(0x03007FF0'u32)
               var packed = 0'u32
@@ -509,10 +451,8 @@ proc tick*(cpu: CPU) =
       cpu.thumb_execute(instr)
     else:
       cpu.arm_execute(instr)
-    # The DMA open-bus latch is visible only until the CPU completes an
-    # instruction (its own fetches/reads then own the bus). Cleared BEFORE
-    # scheduler.tick so a DMA fired at this instruction's boundary arms the
-    # latch for the NEXT instruction.
+    # The DMA open-bus latch lasts one CPU instruction. Cleared before
+    # scheduler.tick so a DMA at this boundary arms it for the next one.
     cpu.gba.bus.dma_open_bus_armed = false
     var remaining = cpu.gba.bus.cycles
     let total = remaining + cpu.gba.bus.synced
@@ -524,28 +464,15 @@ proc tick*(cpu: CPU) =
     cpu.gba.bus.cycles = 0
     cpu.gba.bus.synced = 0
     if cpu.entered_waitloop:
-      # An idle loop only re-reads what it polls once per skip, so the skip
-      # length IS that loop's sampling resolution, and the loop body's own
-      # fetches move absolute-cycle bus state (rom_free_since) whether it polls
-      # a register or RAM. The PSG's waveform deadlines used to be scheduler
-      # events and were holding that resolution at ~32 cycles; moving them out
-      # of evbuf (gba/apu.nim) let a skip run to the next PPU or sample event
-      # instead, and the mGBA suite's "H-blank bit start" flips — which spin on
-      # DISPSTAT and time the gaps with TM0 — went from 3-48 cycles out to
-      # 124-394. They are events in every sense except which array they live in,
-      # so they bound the skip here exactly as they did when they were queued.
-      #
-      # Catching the channels up first is what makes every deadline strictly
-      # ahead of scheduler.cycles, which fast_forward_bounded needs to keep this
-      # loop making progress.
+      # The skip length is the idle loop's polling resolution. The PSG
+      # waveform deadlines are not in evbuf (gba/apu.nim) but must still
+      # bound the skip, or DISPSTAT-polling timing rows drift (mGBA suite
+      # "H-blank bit start"). Catching the channels up first keeps every
+      # deadline strictly ahead of scheduler.cycles, which
+      # fast_forward_bounded needs to make progress.
       when defined(gbaskipcap):
-        # -d:gbaskipcap=N bounds the skip by a stated constant instead of by
-        # whatever the PSG's soonest deadline happens to be. A real Thumb spin
-        # loop resolves ~15 cycles, so a small constant is the physically
-        # defensible resolution; the PSG deadline is an inherited accident that
-        # merely happens to be fine-grained. No catch-up is needed first: the
-        # bound is trivially ahead of `cycles`, and the channels catch up in
-        # closed form at their own observation points regardless.
+        # Bound the skip by a constant instead (a Thumb spin loop resolves
+        # ~15 cycles); no catch-up needed since the bound is already ahead.
         cpu.gba.scheduler.fast_forward_bounded(
           cpu.gba.scheduler.cycles + CycleCount(gbaskipcap))
       else:
@@ -555,7 +482,6 @@ proc tick*(cpu: CPU) =
     else:
       cpu.gba.scheduler.tick(remaining)
   else:
-    # Sleep tight: drain event batches until something wakes the CPU or the
-    # frame ends, without bouncing through step_frame/tick for every event
+    # Halted: drain events until something wakes the CPU or the frame ends.
     while cpu.halted and cpu.gba.ppu.frame == 0:
       cpu.gba.scheduler.fast_forward()

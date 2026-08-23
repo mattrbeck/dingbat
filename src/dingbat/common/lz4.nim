@@ -1,27 +1,14 @@
-## LZ4 block format, compressor and decompressor, in Nim.
+## LZ4 block format, compressor and decompressor. The block format follows the
+## LZ4 spec (lz4.org block format): no frame header, no checksum. Written for
+## the rewind ring's XOR deltas: mostly zeros with the changed bytes clustered,
+## which LZ4 emits as long matches and decodes with a memcpy loop.
 ##
-## Written for the rewind ring (common/rewind.nim), where the thing being
-## compressed is an XOR delta between two save-state payloads: overwhelmingly
-## zeros, with the changed bytes clustered. zlib spends most of its time
-## Huffman-coding runs of zeros that LZ4 emits as a single long match, and LZ4's
-## decoder is a memcpy loop with no entropy stage at all.
-##
-## This is the standard LZ4 *block* format (no frame header, no checksum), so
-## the bytes are interchangeable with any other LZ4 implementation — which
-## matters only in that it is a specification to be correct against rather than
-## a format invented here.
-##
-## Format recap, so the code below can be read against it:
-##   token byte = (literal_len << 4) or (match_len_code)
-##     literal_len 15 means "add the following bytes until one is < 255"
-##     match_len_code likewise; the stored match length is (real length - 4)
-##   then literal_len bytes of literals
-##   then a 2-byte little-endian match offset (distance back)
-##   then the match-length extension bytes
-##   The final sequence is literals only: no offset, no match. The spec
-##   requires the last match to end at least 12 bytes before the end of the
-##   block and the final literal run to be at least 5 bytes, which is what
-##   MfLimit / LastLiterals below enforce.
+## Sequence: token = (literal_len << 4) | match_len_code, each 15 meaning "add
+## the following bytes until one is < 255"; literal_len literal bytes; a 2-byte
+## little-endian match offset; match-length extension bytes (stored length is
+## real length - 4). The final sequence is literals only. The last match must
+## end at least 12 bytes before the end of the block and the final literal run
+## be at least 5 bytes (MfLimit / LastLiterals).
 
 const
   MinMatch = 4
@@ -42,19 +29,16 @@ proc readU64(p: ptr UncheckedArray[byte]; i: int): uint64 {.inline.} =
   cast[ptr uint64](addr p[i])[]
 
 proc hashPos(v: uint32): int {.inline.} =
-  # Knuth multiplicative on the 4-byte sequence, as in the reference encoder.
+  # Knuth multiplicative hash on the 4-byte sequence
   int((v * 2654435761'u32) shr (32 - HashLog))
 
 var lz4Table {.threadvar.}: seq[int32]
-  ## Reused across calls. Deliberately NOT cleared: a stale position from a
-  ## previous buffer is rejected by the `cand < ip` and distance tests below,
-  ## and anything that survives them is a genuine match inside this buffer. A
-  ## 64 KB memset per call was a third of the encode time on the small inputs
-  ## the rewind ring actually hands this.
+  ## Reused across calls and deliberately not cleared: a stale position is
+  ## rejected by the `cand < ip` and distance tests, and a 64 KB memset per
+  ## call was a third of the encode time on the rewind ring's small inputs.
 
 proc lz4Compress*(src: string): string =
-  ## LZ4 block compress. Always succeeds; worst case is slightly larger than
-  ## the input (see lz4CompressBound).
+  ## Always succeeds; worst case is slightly larger than the input.
   let n = src.len
   result = newString(lz4CompressBound(n))
   if n == 0:
@@ -146,9 +130,8 @@ proc lz4Compress*(src: string): string =
   result.setLen(op)
 
 proc lz4Decompress*(src: string; hint = 0): string =
-  ## Decode an lz4Compress block. `hint` sizes the output buffer up front when
-  ## the caller knows the original length (the rewind ring always does); it is
-  ## only an allocation hint, never trusted for bounds.
+  ## `hint` sizes the output buffer up front when the caller knows the original
+  ## length; an allocation hint only, never trusted for bounds.
   let n = src.len
   if n == 0: return ""
   let s = cast[ptr UncheckedArray[byte]](unsafeAddr src[0])
@@ -192,10 +175,9 @@ proc lz4Decompress*(src: string; hint = 0): string =
         if b != 255: break
     mLen += MinMatch
     ensure(mLen)
-    # Overlapping copies are legal and load-bearing (that is how LZ4 encodes a
-    # run), so this can never be memcpy/memmove. When the distance is at least
-    # 8 the 8-byte windows cannot overlap and it can go a word at a time; below
-    # that the byte loop is the semantics, not a slow path.
+    # Overlapping copies are how LZ4 encodes a run, so this cannot be
+    # memcpy/memmove. With distance >= 8 the 8-byte windows cannot overlap;
+    # below that the byte loop is the semantics.
     var m = op - off
     if off >= 8:
       var left = mLen

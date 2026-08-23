@@ -1,54 +1,32 @@
-# Transport-independent network-link state machine (phases 3a/3b of
-# docs/multiplayer.md): the local core runs normally on its own scheduler
-# and the remote peer appears through a RemoteSioDriver, with the wire
-# protocol from common/linkproto (BGB-style timestamped bounded lead).
+# Transport-independent network-link state machine (docs/multiplayer.md).
+# The remote peer appears through a RemoteSioDriver; the wire protocol is
+# common/linkproto (timestamped bounded lead).
 #
-# This module is the ONE protocol implementation. It never blocks and never
-# touches a transport: inbound bytes arrive through `feed`, outbound frames
-# accumulate until the transport collects them with `take_outgoing`, and the
-# emulated clock advances only inside `try_advance`, which returns instead
-# of waiting whenever progress needs the peer. Both transports drive it:
+# Never blocks and never touches a transport: bytes arrive through `feed`,
+# outbound frames are collected with `take_outgoing`, and the emulated clock
+# advances only inside `try_advance`, which returns naStalled instead of
+# waiting. Drivers: native TCP (gba/netlink.nim) and the browser WebRTC
+# bridge (src/dingbat_wasm.nim).
 #
-#  - native TCP (gba/netlink.nim): a socket pump around feed/take_outgoing,
-#    with blocking waits (and a timeout) wrapped around naStalled;
-#  - the browser (src/dingbat_wasm.nim): a WebRTC DataChannel bridge in JS
-#    feeds/drains around requestAnimationFrame ticks, and naStalled renders
-#    a "waiting for peer" indicator while the RAF loop keeps running.
+# Sync model:
+#  - Each side free-runs but never more than the lead ahead of the newest
+#    clock the peer reported (CLOCK beacons: at least once per frame, and
+#    immediately when a side blocks). Past the lead, try_advance stalls.
+#  - SIO transfers are anchored to emulated cycles. The initiator sends
+#    TRANSFER(clock=S, duration=D, data) and schedules its own completion at
+#    S+D through the normal etSerial path. The responder answers REPLY when
+#    its clock reaches the exchange point; if the REPLY has not arrived when
+#    the initiator's completion fires, its clock parks at S+D (reply_wait)
+#    until the REPLY or a BYE lands in feed. Latency slows emulation but
+#    cannot desync it.
+#  - A responder already past S when the TRANSFER arrives (allowed by the
+#    lead bound) samples immediately and runs the D-cycle busy window from
+#    its own clock; otherwise it schedules the exchange for exactly S.
 #
-# Sync model — neither side ever drives the remote core:
-#
-#  - Each side free-runs, but never more than NETLINK_LEAD cycles ahead of
-#    the newest clock the peer has reported (CLOCK beacons flow at least
-#    once per frame and immediately when a side blocks). When a side would
-#    exceed the lead its emulated clock STALLS — try_advance keeps
-#    returning naStalled — until a newer peer clock arrives.
-#  - SIO transfers are anchored to explicit emulated cycles. The initiating
-#    unit (multi-mode parent = unit 0, or a normal-mode internal-clock
-#    master) sends TRANSFER(clock=S, duration=D, data) and schedules its own
-#    completion at S+D through the normal etSerial path — its timing and IRQ
-#    are exactly single-core behavior. The responder answers with REPLY once
-#    its clock reaches the exchange point; the initiator, if the reply has
-#    not arrived when its completion fires, parks the emulated clock at S+D
-#    (reply_wait) until the REPLY (or a BYE) shows up in feed — it never
-#    free-runs past a pending exchange. Latency therefore slows emulation
-#    during link activity but can never desync it.
-#  - Responder skew tolerance: the responder can be up to NETLINK_LEAD
-#    cycles past S when the TRANSFER arrives (that is what the lead bound
-#    permits). It then samples/answers immediately and runs the busy window
-#    from its own clock (still D cycles wide), so the games on both sides
-#    always observe a hardware-plausible transfer; the two timelines differ
-#    by at most the lead. If it is not yet at S, it schedules the exchange
-#    for exactly cycle S — identical to the in-process lockstep semantics.
-#
-# STALL POINTS (frontends surface "waiting for peer" from `stalled`): the
-# lead check at the top of try_advance, and the reply_wait park set inside
-# the master's sio_complete dispatch. cpu.tick dispatches events after the
-# instruction that crossed them, so try_advance observes reply_wait before
-# any further instruction runs — the clock freezes at the completion point.
-#
-# The HELLO handshake is part of the same non-blocking flow: construction
-# queues our HELLO, `hello` reports hsWait until the peer's arrives, and
-# try_advance refuses to run the core before hsDone.
+# cpu.tick dispatches events after the instruction that crossed them, so
+# try_advance observes reply_wait before any further instruction runs.
+# The HELLO handshake is part of the same flow: `hello` reports hsWait until
+# the peer's HELLO arrives, and try_advance refuses to run before hsDone.
 
 import std/deques
 import ../common/[linkproto, scheduler, util, input]
@@ -58,45 +36,32 @@ export linkproto
 
 const
   NETLINK_LEAD* = 16384
-    ## Default max cycles a side may run past the newest peer clock report
-    ## (~1 ms emulated). Right for transports that exchange bytes with
-    ## sub-millisecond cadence (the native TCP pump services the socket
-    ## every 4096-cycle slice). Bounds the responder's sampling skew.
+    ## Max cycles past the newest peer clock report (~1 ms) for transports
+    ## that exchange bytes every slice (the TCP pump). Bounds responder skew.
   NETLINK_LEAD_RAF* = 842688  # 3 × 280896-cycle frames
-    ## Lead for transports that only exchange bytes once per display frame
-    ## (the browser: JS delivers DataChannel messages between
-    ## requestAnimationFrame ticks, never mid-tick). The lead must
-    ## comfortably exceed one RAF interval of emulated time (280896 cycles
-    ## ≈ 16.7 ms) or it becomes the throttle: with a 1 ms lead each side
-    ## may only advance 1 ms of emulated time per real frame (~6% speed).
-    ## Three frames absorbs RAF jitter; transfers stay anchored to exact
-    ## cycles, so the extra lead adds responder-side sampling skew (bounded
-    ## by this constant) but can never desync.
+    ## Lead for transports that exchange bytes once per display frame (the
+    ## browser delivers DataChannel messages between RAF ticks). Must exceed
+    ## one frame of emulated time or it throttles emulation to the lead per
+    ## real frame; three frames absorbs RAF jitter.
   NETLINK_SLICE = 4096
-    ## Local free-run granularity between lead checks: one try_advance
-    ## progress step.
+    ## Cycles run per try_advance progress step between lead checks.
   CLOCK_INTERVAL = 4096
-    ## Send a CLOCK beacon whenever our clock advanced this far since the
-    ## last one (>= once per 280896-cycle frame by construction).
+    ## Send a CLOCK beacon whenever our clock advanced this far.
   FRAME_CYCLES = 280896
-    ## Cycles per GBA video frame; the speculation window is measured in these.
   SPEC_WINDOW_FRAMES* = 8
-    ## Speculative-execution bound: the master may run at most this many frames
-    ## ahead of the newest peer-confirmed round before it back-pressures (falls
-    ## back to today's reply_wait stall). ~8 frames ≈ 130 ms absorbs a
-    ## round-trip while capping unconfirmed rollback work + checkpoint memory
-    ## (one ~600 KB state_payload per frame).
+    ## Speculation bound: frames the master may run ahead of the newest
+    ## peer-confirmed round before it falls back to the reply_wait stall.
+    ## Caps rollback work and checkpoint memory (one state_payload per frame).
   ECHO_MAX = 4
-    ## Saturating cap on the per-mode "responder mirrors us" confidence counter.
+    ## Saturating cap on the per-mode "responder mirrors us" counter.
   ECHO_CONFIRM = 2
-    ## Predict our own outgoing word (not the peer's last) once the responder
-    ## has echoed us this many recent rounds — the symmetric Cable Club sync.
+    ## Predict our own outgoing word once the responder has echoed us this
+    ## many rounds (the symmetric Cable Club sync).
 
 type
   NetPhase = enum
     npIdle
-    npMasterWait    # local transfer scheduled; etSerial completes it (may
-                    # park in reply_wait for the peer's REPLY)
+    npMasterWait    # local transfer scheduled; etSerial completes it
     npSlaveSample   # etSerial at cycle S: sample SIOMLT_SEND, reply, busy
     npSlaveFinish   # etSerial at exchange end: latch data, busy-clear + IRQ
 
@@ -112,9 +77,8 @@ type
     naStalled   ## emulated clock is parked waiting for the peer
 
   RoundEntry = object
-    ## One completed master round latched since `confirmed_cycle`, in cycle
-    ## order. Speculation replays these to re-supply the peer's word during a
-    ## rollback and to confirm/correct them against arriving REPLYs.
+    ## A completed master round since `confirmed_cycle`; replayed during a
+    ## rollback and confirmed/corrected against arriving REPLYs.
     cycle: int64          # transfer start S (the round's key)
     mode: uint8
     peer_data: uint32     # the peer word we latched (predicted or real)
@@ -124,8 +88,8 @@ type
     confirmed: bool        # the real REPLY has validated this round
 
   NetSnapshot = object
-    ## The netcore's own round state at a checkpoint — restored alongside the
-    ## core's state_payload on rollback (the core payload does not carry it).
+    ## Round state at a checkpoint, restored alongside the core's
+    ## state_payload on rollback.
     phase: NetPhase
     round_cycle: int64
     round_duration: int
@@ -137,13 +101,9 @@ type
     got_reply: bool
     reply_wait: bool
     pending_transfers: seq[LinkMsg]
-    multi_recv: array[4, uint16]  # SIOMULTI0-3 receive latches: NOT carried by
-                                  # state_payload (session state refreshed by the
-                                  # next transfer), but a rollback re-sim can read
-                                  # them before the frame's round re-latches, so
-                                  # they MUST be restored or the replay diverges
-                                  # (an in-game "communication error"). Mirrors
-                                  # link.nim's LinkSnapshot.multi_recv fix.
+    multi_recv: array[4, uint16]  # SIOMULTI0-3 latches: not in state_payload,
+                                  # but a replay can read them before the
+                                  # frame's round re-latches (link.nim too)
 
   Checkpoint = object
     cycle: int64          # now() at this frame boundary
@@ -160,20 +120,13 @@ type
     id*: int              # 0 = host/listener (multi-mode unit 0), 1 = joiner
     rom_crc: uint32
     lead: int64           # bounded-lead window while the link is idle
-    lead_active: int64    # tighter bound while a serial link mode is active:
-                          # multi-mode games (e.g. Pokémon Cable Club trades)
-                          # sample each other's SIOMULTI data at explicit
-                          # cycles and only tolerate a small skew, so the wide
-                          # idle lead (a browser needs it for full-speed solo
-                          # play) must tighten the moment either side enters a
-                          # link SIO mode or the handshake never converges.
-    strict_crc: bool      # reject a ROM CRC mismatch (linktest harness);
-                          # relaxed mode accepts and sets crc_mismatch
-                          # (cross-version Pokémon trades have different
-                          # CRCs but are fully link-compatible)
-    # Global emulated clock = offset + scheduler.cycles (offset absorbs the
-    # per-frame rebase, same discipline as link.nim).
-    offset: int64
+    lead_active: int64    # tighter bound while a link SIO mode is active:
+                          # games sample SIOMULTI at explicit cycles and
+                          # tolerate little skew, so the wide idle lead must
+                          # tighten or the handshake never converges
+    strict_crc: bool      # reject a ROM CRC mismatch; relaxed mode sets
+                          # crc_mismatch (cross-version trades link fine)
+    offset: int64         # global clock = offset + scheduler.cycles
     dec: LinkDecoder
     outbox: seq[string]   # encoded frames awaiting the transport
     hello*: HelloState
@@ -193,20 +146,15 @@ type
     round_in: uint32      # the peer's word
     round_listening: bool # peer was in a compatible mode (REPLY flag)
     got_reply: bool
-    # STALL latches. reply_wait: our etSerial completion fired at S+D with
-    # no REPLY yet — the clock parks until feed() delivers it. lead_wait:
-    # the bounded lead is exceeded (re-checked each try_advance).
-    reply_wait: bool
-    lead_wait: bool
-    # TRANSFERs that arrived while a round was still in flight locally (the
-    # peer already started the next one); replayed when phase returns idle.
+    reply_wait: bool      # completion fired at S+D with no REPLY: clock parked
+    lead_wait: bool       # bounded lead exceeded
+    # TRANSFERs that arrived mid-round; replayed when phase returns idle.
     pending_transfers: seq[LinkMsg]
     in_frame: bool        # a frame is underway (try_advance is resumable)
-    # Stall telemetry for frontends ("waiting for peer") and tests
-    stalled*: bool
+    stalled*: bool        # "waiting for peer" telemetry
     stall_count*: int
     # ---- speculative execution (GGPO-style rollback) ----
-    speculative: bool     # OFF: everything below is inert (a pure no-op)
+    speculative: bool     # OFF: everything below is inert
     window_cycles: int64  # bound on how far ahead of confirmed we may run
     has_mastered: bool    # this side initiates transfers (widens its lead)
     round_predicted: bool # the in-flight round's completion was a prediction
@@ -216,17 +164,15 @@ type
     checkpoints: Deque[Checkpoint]  # one frame-boundary snapshot per frame
     round_log: seq[RoundEntry]      # rounds latched since confirmed_cycle
     input_log: seq[InputEvent]      # host keypresses since confirmed_cycle
-    # Indexed by `int(mode) and 7` (see predict/note_reply): sized to the full
-    # 0..7 mask so a corrupt/foreign wire mode field can never index out of
-    # bounds (unchecked under -d:danger). Only slots 0..5 (the defined
-    # LINK_MODE_* values) are ever meaningful.
+    # Indexed by `int(mode) and 7`: sized to the full mask so a corrupt wire
+    # mode can never index out of bounds (unchecked under -d:danger).
     last_reply: array[8, tuple[word: uint32, listening: bool]]  # predictor state
-    echo_predict: bool    # use the echo-aware predictor (default on; a bench hook flips it)
-    peer_echo: array[8, int]  # per-mode saturating "the responder mirrors us" confidence
+    echo_predict: bool    # echo-aware predictor (default on; bench hook flips it)
+    peer_echo: array[8, int]  # per-mode saturating "responder mirrors us" count
     window_wait: bool     # parked because the speculation window is full
-    force_wrong: int      # test hook: mispredict the next N rounds on purpose
+    force_wrong: int      # test hook: mispredict the next N rounds
     pred_hits*, pred_misses*, rollbacks*: int  # telemetry
-    replay_cycles*: int64 # honest cost: total cycles re-emulated by rollbacks
+    replay_cycles*: int64 # total cycles re-emulated by rollbacks
     replay_overrun*: int  # times replay ran past the log (lossy idle-latch fallback)
 
   RemoteSioDriver* = ref object of SioDriver
@@ -238,7 +184,7 @@ proc now(nc: NetCore): int64 =
   nc.offset + int64(nc.gba.scheduler.cycles)
 
 proc wire_mode(m: SioMode): uint8 =
-  # Wire encoding is fixed by the protocol doc, independent of Nim enum order
+  # Wire encoding is fixed by the protocol, independent of Nim enum order
   case m
   of smNormal8: LINK_MODE_NORMAL8
   of smNormal32: LINK_MODE_NORMAL32
@@ -257,16 +203,10 @@ proc peer_in_normal(nc: NetCore): bool =
   nc.peer_mode == WIRE_NORMAL8 or nc.peer_mode == WIRE_NORMAL32
 
 proc effective_lead(nc: NetCore): int64 =
-  ## Tighten the bounded-lead window whenever either side is in a serial link
-  ## mode, so an actively-linking game (which samples the peer's data at exact
-  ## cycles) never drifts past its skew tolerance; fall back to the wide idle
-  ## lead otherwise for full-speed solo play while nominally connected.
-  ##
-  ## Speculation removes the correctness need for a tight lead on the
-  ## *initiating* side: rollback repairs any divergence, so the master may race
-  ## a whole window ahead — that is where the speedup comes from. The responder
-  ## keeps the tight lead so it still samples each transfer near its anchor
-  ## cycle. The real back-pressure is the window bound checked in try_advance.
+  ## The tight lead applies whenever either side is in a link SIO mode; the
+  ## wide idle lead otherwise. A speculating master may instead run a whole
+  ## window ahead (rollback repairs divergence); the responder keeps the
+  ## tight lead so it samples each transfer near its anchor cycle.
   if nc.speculative and nc.has_mastered:
     return nc.window_cycles + int64(FRAME_CYCLES)
   if nc.gba.serial.sio_mode() in {smMulti, smNormal8, smNormal32} or
@@ -276,9 +216,8 @@ proc effective_lead(nc: NetCore): int64 =
     nc.lead
 
 proc send_msg(nc: NetCore; data: string) =
-  # During rollback re-emulation every outgoing frame was already sent on the
-  # original pass (same cycles/data — only the peer's word was mispredicted,
-  # which is purely local latching), so replay must not re-send anything.
+  # Replay must not re-send: every outgoing frame went out on the original
+  # pass (only the peer's word was mispredicted, which is local latching).
   if nc.replaying: return
   nc.outbox.add data
 
@@ -304,17 +243,10 @@ proc send_bye*(nc: NetCore; reason = LINK_BYE_FINISHED) =
 # ---------------- speculation: prediction & round log ----------------
 
 proc predict(nc: NetCore; mode: uint8): tuple[word: uint32, listening: bool] =
-  ## Guess the responder's next REPLY for `mode`. Two signals, cheapest first:
-  ##   * echo-aware: a Pokémon Cable Club "all players ready" sync is symmetric
-  ##     — same-team/same-version peers send the SAME handshake word each round,
-  ##     so once we've watched the responder mirror our output for a few rounds
-  ##     (`peer_echo >= ECHO_CONFIRM`) our OWN outgoing word (`round_out`)
-  ##     predicts its reply far better than its last word does. This is the case
-  ##     that gates the trade room, and where "same as last" mispredicts on every
-  ##     word change in the cycling handshake.
-  ##   * fallback: the same word it last sent (handshakes also hold runs of
-  ##     identical words, and asymmetric bursts have no better cheap guess).
-  ## `force_wrong` is a test hook that deliberately mispredicts.
+  ## Guess the responder's next REPLY for `mode`: our own outgoing word once
+  ## the responder has mirrored us for ECHO_CONFIRM rounds (the symmetric
+  ## Cable Club "all players ready" sync, where "same as last" mispredicts on
+  ## every word change), else the word it last sent.
   let idx = int(mode) and 7
   if nc.force_wrong > 0:
     dec nc.force_wrong
@@ -325,8 +257,7 @@ proc predict(nc: NetCore; mode: uint8): tuple[word: uint32, listening: bool] =
 
 proc note_reply(nc: NetCore; mode: uint8; word: uint32; listening: bool;
                 our_word: uint32) =
-  ## Record the peer's real word so future predictions echo it, and track
-  ## whether the responder is mirroring our output (drives the echo predictor).
+  ## Record the peer's real word and whether it mirrored our output.
   let idx = int(mode) and 7
   nc.last_reply[idx] = (word, listening)
   if word == our_word:
@@ -335,9 +266,7 @@ proc note_reply(nc: NetCore; mode: uint8; word: uint32; listening: bool;
     nc.peer_echo[idx] = max(nc.peer_echo[idx] - 1, 0)
 
 proc log_round(nc: NetCore) =
-  ## Append the just-completed master round (called from master_finish on the
-  ## live pass only). `round_in`/`round_listening` hold whatever we latched —
-  ## a prediction (needs a REPLY to confirm) or a real reply that beat S+D.
+  ## Append the just-completed master round (live pass only).
   nc.round_log.add RoundEntry(
     cycle: nc.round_cycle, mode: nc.round_mode,
     peer_data: nc.round_in, listening: nc.round_listening,
@@ -345,8 +274,7 @@ proc log_round(nc: NetCore) =
     confirmed: not nc.round_predicted)
 
 proc replay_round(nc: NetCore; cycle: int64): int =
-  ## Index of the logged round starting at `cycle` (−1 if none). Used during
-  ## re-emulation to re-supply a round's latched peer word deterministically.
+  ## Index of the logged round starting at `cycle` (−1 if none).
   for i in 0 ..< nc.round_log.len:
     if nc.round_log[i].cycle == cycle: return i
   -1
@@ -366,8 +294,7 @@ proc exit_stall(nc: NetCore) =
 proc handle_remote_transfer(nc: NetCore; m: LinkMsg)
 
 proc round_idle(nc: NetCore) =
-  # A round just finished; if the peer already opened the next one while we
-  # were mid-round, service it now.
+  # Service a TRANSFER the peer opened while we were mid-round.
   nc.phase = npIdle
   if nc.pending_transfers.len > 0:
     let m = nc.pending_transfers[0]
@@ -375,8 +302,7 @@ proc round_idle(nc: NetCore) =
     nc.handle_remote_transfer(m)
 
 proc slave_finish(nc: NetCore) =
-  ## The exchange point (initiator's S+D, or skew-shifted on our timeline)
-  ## on the responding unit.
+  ## The exchange point on the responding unit.
   let serial = nc.gba.serial
   case nc.round_mode
   of WIRE_MULTI:
@@ -385,13 +311,11 @@ proc slave_finish(nc: NetCore) =
       serial.multi_recv[1 - nc.id] = uint16(nc.round_in and 0xFFFF)
       serial.multi_recv[2] = 0xFFFF'u16
       serial.multi_recv[3] = 0xFFFF'u16
-    # busy-clear + serial IRQ (if enabled) at the exchange point; if the
-    # game switched modes mid-round this still clears the stale busy bit.
+    # Also clears a stale busy bit if the game switched modes mid-round.
     serial.finish_sio_transfer()
   of WIRE_NORMAL8, WIRE_NORMAL32:
-    # Normal mode: the whole full-duplex exchange happens at the master's
-    # completion cycle (same as link.nim complete_normal): sample our
-    # outgoing word now, hand it to the master, latch its word.
+    # The whole full-duplex exchange happens at the master's completion
+    # cycle (as in link.nim complete_normal).
     let is32 = nc.round_mode == WIRE_NORMAL32
     let listening = serial.sio_mode() in {smNormal8, smNormal32}
     var mine = 0xFFFFFFFF'u32
@@ -406,8 +330,8 @@ proc slave_finish(nc: NetCore) =
       else:
         serial.siodata8 = (serial.siodata8 and 0xFF00'u16) or
                           uint16(nc.round_in and 0xFF)
-      # Per GBATEK the master's clock shifts both registers whether or not
-      # the slave started; the slave only gets busy-clear/IRQ if it did.
+      # GBATEK: the master's clock shifts both registers whether or not the
+      # slave started; the slave only gets busy-clear/IRQ if it did.
       if started:
         serial.finish_sio_transfer()
   else:
@@ -415,8 +339,8 @@ proc slave_finish(nc: NetCore) =
   nc.round_idle()
 
 proc slave_sample(nc: NetCore) =
-  ## Multi-mode round start on the child: latch our SIOMLT_SEND for the
-  ## round, answer the parent, and show busy for the round's duration.
+  ## Multi-mode round start on the child: latch SIOMLT_SEND, answer the
+  ## parent, show busy for the round's duration.
   let serial = nc.gba.serial
   let listening = serial.sio_mode() == smMulti
   var mine = 0xFFFF'u32
@@ -433,9 +357,8 @@ proc slave_sample(nc: NetCore) =
     nc.round_idle()
 
 proc immediate_reply(nc: NetCore; m: LinkMsg) =
-  # Degenerate overlap (e.g. both units master a normal transfer at once, or
-  # we are parked inside our own completion): answer with our current data
-  # without touching local transfer state — no core advancement, no deadlock.
+  # Degenerate overlap (both units mastering at once, or we are parked in
+  # our own completion): answer with current data, touch no transfer state.
   let serial = nc.gba.serial
   var mine = 0xFFFFFFFF'u32
   var listening = false
@@ -454,14 +377,11 @@ proc immediate_reply(nc: NetCore; m: LinkMsg) =
 
 proc handle_remote_transfer(nc: NetCore; m: LinkMsg) =
   if nc.phase == npMasterWait:
-    # Cross-mastered normal transfers: each side answers the other's
-    # TRANSFER directly; both complete with the peer's REPLY.
+    # Cross-mastered transfers: each side answers the other's directly.
     nc.immediate_reply(m)
     return
   if nc.phase != npIdle:
-    # Still mid-round locally; the peer has already opened the next one.
-    # Queue it — round_idle replays it the moment this round closes.
-    nc.pending_transfers.add(m)
+    nc.pending_transfers.add(m)  # round_idle replays it
     return
   nc.round_cycle = m.clock
   nc.round_duration = int(m.duration)
@@ -471,14 +391,10 @@ proc handle_remote_transfer(nc: NetCore; m: LinkMsg) =
   of WIRE_MULTI:
     let delta = nc.round_cycle - nc.now()
     if delta > 0:
-      # We are behind the round's start: sample at exactly cycle S, like the
-      # in-process lockstep.
-      nc.phase = npSlaveSample
+      nc.phase = npSlaveSample  # sample at exactly cycle S
       nc.gba.serial.schedule_sio_completion(int(delta))
     else:
-      # Bounded-lead skew: we are already past S. Sample now and run the
-      # busy window from our own clock (still `duration` wide).
-      nc.slave_sample()
+      nc.slave_sample()  # already past S: sample now, busy from our clock
   of WIRE_NORMAL8, WIRE_NORMAL32:
     let delta = (nc.round_cycle + int64(nc.round_duration)) - nc.now()
     nc.phase = npSlaveFinish
@@ -492,13 +408,12 @@ proc handle_remote_transfer(nc: NetCore; m: LinkMsg) =
 # ---------------- initiator (master) side ----------------
 
 proc master_start(nc: NetCore; mode: uint8) =
-  ## Local start-bit rising edge: open the exchange on the wire and schedule
-  ## our own completion through the normal etSerial path, so the initiator's
-  ## timing and IRQ are exactly the single-core behavior.
+  ## Local start-bit rising edge: send TRANSFER and schedule our own
+  ## completion through the normal etSerial path.
   let serial = nc.gba.serial
   let dur = if mode == WIRE_MULTI: serial.multi_transfer_cycles()
             else: serial.normal_transfer_cycles()
-  nc.has_mastered = true  # this side initiates → it gets the speculative lead
+  nc.has_mastered = true  # initiators get the speculative lead
   nc.phase = npMasterWait
   nc.round_cycle = nc.now()
   nc.round_duration = dur
@@ -514,11 +429,8 @@ proc master_start(nc: NetCore; mode: uint8) =
   serial.schedule_sio_completion(dur)
 
 proc master_finish(nc: NetCore) =
-  ## Latch the exchange on the initiator: runs from its etSerial dispatch
-  ## when the REPLY already arrived, when we speculate a word at S+D, from
-  ## feed() when a parked REPLY (or a BYE) lands, or from replay re-supplying
-  ## a logged word. `round_in`/`round_listening` hold the word being latched
-  ## (real, predicted, or replayed); `round_predicted` flags which.
+  ## Latch the exchange on the initiator. `round_in`/`round_listening` hold
+  ## the word being latched (real, predicted or replayed).
   let serial = nc.gba.serial
   let listening = nc.round_listening
   case nc.round_mode
@@ -542,17 +454,13 @@ proc master_finish(nc: NetCore) =
   nc.round_idle()
 
 proc replay_master_complete(nc: NetCore) =
-  ## Re-emulation reached a round's completion: re-supply exactly the word we
-  ## latched originally (corrected for confirmed rounds) from the log, so the
-  ## local timeline reproduces. Rounds re-fire in the SAME ORDER they were
-  ## logged, so we consume the log by a cursor rather than by cycle — a
-  ## checkpoint restore reproduces frame-boundary state exactly but not the
-  ## few-cycle intra-frame phase, so round *cycles* can drift by a hair while
-  ## their order and data cannot.
+  ## Re-emulation reached a round's completion: re-supply the logged word.
+  ## The log is consumed by cursor, not by cycle: a checkpoint restore
+  ## reproduces frame-boundary state exactly but round cycles can drift by a
+  ## few cycles, while their order and data cannot.
   if nc.replay_cursor >= nc.round_log.len:
-    # More rounds re-fired than were logged — only possible if corrected peer
-    # data changed local control flow (a genuine divergence). Latch an idle
-    # line so it is at least deterministic; the acceptance test would catch it.
+    # More rounds re-fired than were logged: corrected peer data changed
+    # local control flow. Latch an idle line so it is at least deterministic.
     inc nc.replay_overrun
     nc.round_in = 0xFFFFFFFF'u32
     nc.round_listening = false
@@ -561,8 +469,8 @@ proc replay_master_complete(nc: NetCore) =
     return
   let e = nc.round_log[nc.replay_cursor]
   inc nc.replay_cursor
-  # No-divergence check: a corrected peer word must not have changed our own
-  # outgoing word (that TRANSFER was already sent to the peer).
+  # A corrected peer word must not have changed our own outgoing word (that
+  # TRANSFER was already sent).
   doAssert nc.round_out == e.out_word,
     "speculation divergence: replayed round outgoing word changed (" &
     $nc.round_out & " vs logged " & $e.out_word & ")"
@@ -580,18 +488,15 @@ proc master_complete(nc: NetCore) =
     nc.round_predicted = false
     nc.master_finish()
   elif nc.speculative and nc.now() - nc.confirmed_cycle <= nc.window_cycles:
-    # SPECULATE: predict the peer's word, latch it, and keep emulating past
-    # S+D instead of parking. The real REPLY confirms it (or forces a
-    # rollback) when it lands in feed().
+    # Predict the peer's word and keep emulating; the real REPLY confirms it
+    # or forces a rollback when it lands in feed().
     let p = nc.predict(nc.round_mode)
     nc.round_in = p.word
     nc.round_listening = p.listening
     nc.round_predicted = true
     nc.master_finish()
   else:
-    # Not speculating (feature off, or the window is full → back-pressure).
-    # STALL POINT: park the emulated clock here until the REPLY (or BYE)
-    # arrives — never free-run past a pending exchange.
+    # Park the clock until the REPLY (or BYE) arrives.
     nc.send_clock(blocked = true)
     nc.reply_wait = true
     nc.enter_stall()
@@ -622,48 +527,37 @@ proc restore_snapshot(nc: NetCore; s: NetSnapshot) =
   nc.gba.serial.multi_recv = s.multi_recv
 
 proc take_checkpoint(nc: NetCore) =
-  ## Snapshot the core (state_payload — frame boundaries only) plus our round
-  ## state, for rollback. Called at every frame boundary while speculating.
+  ## Frame-boundary snapshot of the core plus our round state.
   nc.checkpoints.addLast Checkpoint(cycle: nc.now(),
     payload: nc.gba.state_payload(), snap: nc.capture_snapshot())
 
 proc replay_start(cp: Checkpoint): int64 =
-  ## The earliest round-START a rollback to this checkpoint can re-fire: a round
-  ## in flight AS OF the checkpoint (started before the boundary, completes
-  ## after) is the first to re-complete, so its start — not the boundary — is
-  ## the low-water mark. Used both to seed the replay cursor and to decide how
-  ## far back the round log must be retained; the two MUST agree or replay
-  ## re-fires a round with no log entry (a spurious divergence).
+  ## Earliest round start a rollback to this checkpoint can re-fire: a round
+  ## in flight at the checkpoint re-completes first, so its start is the
+  ## low-water mark. Seeds the replay cursor and bounds log retention; the
+  ## two must agree or replay re-fires a round with no log entry.
   if cp.snap.phase == npMasterWait: cp.snap.round_cycle else: cp.cycle
 
 proc advance_confirmed(nc: NetCore) =
-  ## The peer has validated some rounds: recompute confirmed_cycle (the start
-  ## cycle of the oldest still-unconfirmed round, or now() if all confirmed),
-  ## then drop checkpoints/log entries the window no longer needs.
+  ## Recompute confirmed_cycle (start of the oldest unconfirmed round, or
+  ## now()) and drop checkpoints/log entries the window no longer needs.
   var first_unconfirmed = high(int64)
   for e in nc.round_log:
     if not e.confirmed and e.cycle < first_unconfirmed:
       first_unconfirmed = e.cycle
-  # A round in flight (started at round_cycle, not yet completed → not yet in the
-  # log) can still mispredict and demand a rollback to before its START, which
-  # may sit BEFORE the frame boundary we just checkpointed. It must bound
-  # confirmed_cycle too, or its rollback checkpoint gets pruned as "confirmed"
-  # and the later REPLY asserts (no checkpoint at/before its cycle). This only
-  # bites a round straddling a frame boundary — invisible in short exchanges.
+  # A round in flight (not yet logged) can still demand a rollback to before
+  # its start, which may precede the frame boundary just checkpointed; it
+  # must bound confirmed_cycle or its checkpoint gets pruned.
   if nc.phase == npMasterWait and nc.round_cycle < first_unconfirmed:
     first_unconfirmed = nc.round_cycle
   nc.confirmed_cycle =
     if first_unconfirmed == high(int64): nc.now() else: first_unconfirmed
-  # Keep the newest checkpoint at/before confirmed_cycle as the rollback
-  # baseline; older ones can never be a rollback target again.
+  # Keep the newest checkpoint at/before confirmed_cycle as the baseline.
   while nc.checkpoints.len >= 2 and nc.checkpoints[1].cycle <= nc.confirmed_cycle:
     nc.checkpoints.popFirst()
-  # Drop log entries (rounds + host input) baked into the baseline: they are
-  # already in the checkpoint and can never be replayed again.
   if nc.checkpoints.len > 0:
-    # Retain the log back to the OLDEST checkpoint's replay-start (not its
-    # cycle): a round straddling that checkpoint re-fires on a rollback there and
-    # must still have its entry, or replay_master_complete consumes the wrong one.
+    # Retain the log back to the oldest checkpoint's replay-start, not its
+    # cycle: a round straddling it re-fires on a rollback there.
     let baseline = replay_start(nc.checkpoints[0])
     var kept: seq[RoundEntry] = @[]
     for e in nc.round_log:
@@ -676,10 +570,9 @@ proc advance_confirmed(nc: NetCore) =
       nc.input_log = ins
 
 proc rollback_and_replay(nc: NetCore; from_cycle: int64) =
-  ## Restore the newest checkpoint at/before `from_cycle` and deterministically
-  ## re-emulate forward to the current clock, re-supplying each logged round's
-  ## (now-corrected) peer word and replaying host input. The outbox is
-  ## suppressed throughout — the peer already has our originals.
+  ## Restore the newest checkpoint at/before `from_cycle` and re-emulate to
+  ## the current clock, re-supplying each logged round's corrected peer word
+  ## and replaying host input. The outbox is suppressed throughout.
   let target = nc.now()
   var ci = -1
   for i in countdown(nc.checkpoints.len - 1, 0):
@@ -687,18 +580,12 @@ proc rollback_and_replay(nc: NetCore; from_cycle: int64) =
       ci = i; break
   doAssert ci >= 0, "rollback: no checkpoint at/before cycle " & $from_cycle
   let cp = nc.checkpoints[ci]
-  # Honest cost: this rollback re-emulates every cycle from the checkpoint up to
-  # now(). Summed over a run, replay_cycles is the CPU the predictor wasted — the
-  # metric the step/stall speed proxy is blind to (re-emulation is invisible to it).
   nc.replay_cycles += target - cp.cycle
   while nc.checkpoints.len > ci + 1: discard nc.checkpoints.popLast()
   nc.gba.apply_state_payload(cp.payload)
   nc.offset = cp.cycle - int64(nc.gba.scheduler.cycles)
   nc.restore_snapshot(cp.snap)
-  # Point the replay cursor at the first round that re-fires (a round straddling
-  # the checkpoint, else the first starting at/after it). This key is stored
-  # (drift-free), unlike a cycle computed during replay, and matches the
-  # low-water mark advance_confirmed retains the log to.
+  # Cursor at the first round that re-fires (see replay_start).
   let start_cycle = replay_start(cp)
   nc.replay_cursor = 0
   while nc.replay_cursor < nc.round_log.len and
@@ -719,7 +606,7 @@ proc rollback_and_replay(nc: NetCore; from_cycle: int64) =
       gba.cpu.tick()
     if gba.ppu.frame > 0:
       nc.offset += int64(gba.end_frame())
-      nc.take_checkpoint()  # regenerate this frame's (now-corrected) checkpoint
+      nc.take_checkpoint()  # regenerate this frame's corrected checkpoint
   nc.replaying = false
 
 # ---------------- handshake ----------------
@@ -773,12 +660,9 @@ proc handle_msg(nc: NetCore; m: LinkMsg) =
     let listening = (m.flags and LINK_REPLY_LISTENING) != 0
     if nc.speculative:
       let idx = nc.replay_round(m.cycle)
-      # Our outgoing word for the round this REPLY answers: from the log if we
-      # latched it, else the in-flight round's (the reply beat our S+D).
       let our_word = if idx >= 0: nc.round_log[idx].out_word else: nc.round_out
       nc.note_reply(m.mode, m.data, listening, our_word)
       if idx >= 0 and not nc.round_log[idx].confirmed:
-        # A round we already latched (speculatively or live) is being confirmed.
         if not nc.round_log[idx].predicted:
           nc.round_log[idx].confirmed = true  # was latched from a real reply
         elif nc.round_log[idx].peer_data == m.data and
@@ -786,8 +670,7 @@ proc handle_msg(nc: NetCore; m: LinkMsg) =
           nc.round_log[idx].confirmed = true
           inc nc.pred_hits
         else:
-          # Misprediction: correct the logged word and roll back to re-emulate
-          # everything since, with the real data.
+          # Misprediction: correct the log and re-emulate from there.
           inc nc.pred_misses
           inc nc.rollbacks
           nc.round_log[idx].peer_data = m.data
@@ -803,8 +686,7 @@ proc handle_msg(nc: NetCore; m: LinkMsg) =
       nc.round_listening = listening
       nc.got_reply = true
       if nc.reply_wait:
-        # The clock is parked at S+D waiting for exactly this reply: latch
-        # and complete now, at the parked cycle.
+        # Parked at S+D for exactly this reply: complete at the parked cycle.
         nc.reply_wait = false
         nc.exit_stall()
         nc.round_predicted = false
@@ -837,16 +719,14 @@ method sio_siocnt_status*(drv: RemoteSioDriver; serial: Serial; mode: SioMode): 
   let nc = drv.core
   case mode
   of smMulti:
-    # GBATEK: SI = 0 parent / 1 child (cable position), SD = 1 when every
-    # unit on the bus is ready. The peer's readiness comes from its CLOCK
-    # beacons (stale by at most a beacon interval + wire latency).
+    # GBATEK: SI = 0 parent / 1 child, SD = 1 when every unit is ready. The
+    # peer's readiness comes from its CLOCK beacons.
     var v = uint16(nc.id and 3) shl 4
     if nc.id != 0: v = v or 0x0004'u16
     if nc.peer_in_multi: v = v or 0x0008'u16
     v
   of smNormal8, smNormal32:
-    # SI input mirrors the peer's SO output while the peer sits in a normal
-    # serial mode (last reported level); otherwise the line floats high.
+    # SI = the peer's last reported SO while it is in a normal mode; else high.
     if nc.peer_in_normal:
       if nc.peer_so: 0x0004'u16 else: 0x0000'u16
     else:
@@ -858,11 +738,9 @@ method sio_start*(drv: RemoteSioDriver; serial: Serial; mode: SioMode) =
   let nc = drv.core
   case mode
   of smNormal8, smNormal32:
-    if bit(serial.siocnt, 0):
-      # Internal clock: we are the master and drive the exchange.
+    if bit(serial.siocnt, 0):  # internal clock: we are the master
       if nc.phase == npIdle:
         nc.master_start(if mode == smNormal32: WIRE_NORMAL32 else: WIRE_NORMAL8)
-    # External clock: the transfer runs when the remote master starts one.
   of smMulti:
     if nc.id == 0:
       if nc.phase == npIdle:  # hardware can't restart a round in flight
@@ -883,19 +761,16 @@ method sio_complete*(drv: RemoteSioDriver; serial: Serial; mode: SioMode) =
 
 method sio_mode_changed*(drv: RemoteSioDriver; serial: Serial;
                          old_mode, new_mode: SioMode) =
-  # The peer's SD/SI status bits depend on our mode; tell it right away
-  # rather than waiting for the next beacon.
+  # The peer's SD/SI status bits depend on our mode; tell it right away.
   drv.core.send_clock()
 
 # ---------------- the advance loop ----------------
 
 proc try_advance*(nc: NetCore): NetAdvance =
-  ## Advance the local core by up to one slice of emulated time, never
-  ## blocking. Returns naFrame at each video-frame boundary, naProgress
-  ## mid-frame (call again), naStalled with the emulated clock parked on
-  ## the peer (feed() unblocks it), or naHello before the handshake is done.
-  ## The frame loop is resumable: a stall inside a frame picks the frame
-  ## back up on a later call.
+  ## Advance the local core by up to one slice, never blocking: naFrame at a
+  ## frame boundary, naProgress mid-frame, naStalled with the clock parked on
+  ## the peer (feed() unblocks it), naHello before the handshake is done.
+  ## A stall inside a frame resumes that frame on a later call.
   case nc.hello
   of hsWait: return naHello
   of hsFailed: return naHello
@@ -906,24 +781,14 @@ proc try_advance*(nc: NetCore): NetAdvance =
   if not nc.in_frame:
     gba.frame_start_cycles = gba.scheduler.cycles
     nc.in_frame = true
-  # A responder mid-exchange has a serial completion already scheduled whose
-  # dispatch emits the REPLY the initiator is parked (reply_wait) on. If the
-  # bounded-lead / speculation-window stall blocked us from reaching that
-  # completion, and the initiator has frozen its clock waiting for us, NEITHER
-  # side can advance — a deadlock. It bites cross-game multi trades, where the
-  # two ROMs' differing instruction cadence lets the responder fall a whole
-  # round behind in *processing* while its clock races a lead ahead: the
-  # initiator then parks at round N's S+D while we still owe the REPLY for an
-  # earlier round whose completion sits >lead past the initiator's frozen clock.
-  # So while an exchange is in flight locally, DRAIN it (run only to the pending
-  # completion) rather than stalling — sampling already happened at the anchor,
-  # so this changes nothing but *when* the completion/IRQ fire, and it is bounded
-  # by the round duration (and the frame). Once the exchange closes we stop, and
-  # the ordinary lead/window stall applies again with phase idle.
+  # A responder mid-exchange owes the REPLY the initiator is parked on. If
+  # the lead/window stall kept us from reaching that completion while the
+  # initiator's clock is frozen waiting for us, neither side can advance
+  # (cross-game multi trades hit this). So while an exchange is in flight
+  # locally, drain it to the pending completion instead of stalling: sampling
+  # already happened at the anchor, and the drain is bounded by the round.
   let inflight = nc.phase in {npSlaveSample, npSlaveFinish}
   var draining = false
-  # Bounded lead: we may not run further ahead of the peer's newest clock.
-  # The window tightens automatically while a link SIO mode is active.
   if not nc.peer_done and nc.now() > nc.peer_clock + nc.effective_lead:
     if not inflight:
       if not nc.lead_wait:
@@ -935,10 +800,8 @@ proc try_advance*(nc: NetCore): NetAdvance =
   elif nc.lead_wait:
     nc.lead_wait = false
     nc.exit_stall()
-  # Speculation back-pressure: bound how far past the newest peer-confirmed
-  # round we may run. When the window fills, park until arriving REPLYs
-  # confirm rounds (advancing confirmed_cycle) — this is the worst case that
-  # degrades to today's stall behaviour, never worse.
+  # Speculation back-pressure: park when the window fills until REPLYs
+  # advance confirmed_cycle.
   if nc.speculative and not nc.peer_done and
      nc.now() - nc.confirmed_cycle > nc.window_cycles:
     if not inflight:
@@ -962,9 +825,7 @@ proc try_advance*(nc: NetCore): NetAdvance =
     if nc.reply_wait:
       return naStalled  # etSerial parked the clock mid-slice
     if draining and nc.phase == npIdle:
-      # Finished draining the in-flight responder exchange(s) we bypassed the
-      # stall for. Do NOT free-run emulation past the bounded lead — hand
-      # control back so the next call re-evaluates the stall with phase idle.
+      # Drained; hand back so the next call re-evaluates the stall.
       return naProgress
   if gba.ppu.frame > 0:
     nc.send_clock()
@@ -979,10 +840,8 @@ proc try_advance*(nc: NetCore): NetAdvance =
 # ---------------- construction ----------------
 
 proc rebaseline*(nc: NetCore) =
-  ## Reset the link-clock origin to the core's current cycle. Used when
-  ## attaching to an already-running core mid-game so now() starts near zero
-  ## on both sides; the bounded-lead sync then absorbs the residual skew.
-  ## Only valid before the first CLOCK is sent (i.e. right after construction).
+  ## Reset the link-clock origin to the core's current cycle (attaching to a
+  ## running core). Only valid before the first CLOCK is sent.
   nc.offset = -int64(nc.gba.scheduler.cycles)
 
 proc debug_state*(nc: NetCore): string =
@@ -1002,9 +861,7 @@ proc debug_state*(nc: NetCore): string =
 # ---- speculation test/telemetry hooks ----
 
 proc all_confirmed*(nc: NetCore): bool =
-  ## True when no speculated round is still awaiting its peer REPLY — i.e. the
-  ## visible state has settled to what the blocking path would produce. Tests
-  ## drain to this before comparing final state.
+  ## No speculated round is still awaiting its REPLY; tests drain to this.
   for e in nc.round_log:
     if not e.confirmed: return false
   true
@@ -1014,33 +871,21 @@ proc pred_stats*(nc: NetCore): tuple[hits, misses, rollbacks: int] =
 
 proc replay_cost*(nc: NetCore): int64 = nc.replay_cycles
 proc replay_overruns*(nc: NetCore): int = nc.replay_overrun
-  ## Times a rollback re-emulated more rounds than were logged and fell back to
-  ## the lossy idle latch — a nonzero count means speculation could NOT stay
-  ## bit-identical (genuine divergence from control flow the corrected data
-  ## changed). Should be 0 on a healthy predictor.
-  ## Total cycles re-emulated by rollbacks over this run — the honest CPU cost
-  ## the step/stall speed proxy cannot see.
+  ## Nonzero means speculation could not stay bit-identical (corrected data
+  ## changed control flow). Should be 0 on a healthy predictor.
 
 proc set_echo_predict*(nc: NetCore; on: bool) =
-  ## Bench hook: turn the echo-aware predictor off to A/B it against the plain
-  ## "same as last" guess. Production leaves it on.
+  ## Bench hook: A/B the echo-aware predictor against plain "same as last".
   nc.echo_predict = on
 
 proc force_mispredict*(nc: NetCore; n: int) =
-  ## Test hook: make the predictor deliberately return a wrong word for the
-  ## next `n` rounds, to exercise rollback recovery.
+  ## Test hook: mispredict the next `n` rounds to exercise rollback recovery.
   nc.force_wrong = n
 
 proc note_input*(nc: NetCore; input: Input; pressed: bool) =
-  ## Apply a host keypress AND record it on the speculative timeline so a
-  ## rollback can replay it at the same cycle. Frontends should route input
-  ## through this (rather than gba.handle_input) while a speculative link is
-  ## live; with speculation off it is just handle_input. NOTE: the current
-  ## transports still call gba.handle_input directly, so speculative input
-  ## replay is wired but unexercised — the acceptance ROM is self-driving and
-  ## takes no input. A game that reads the keypad under speculation needs this
-  ## call added at the frontends' input path (a follow-up, out of scope here as
-  ## the transports must stay otherwise untouched).
+  ## Apply a host keypress and record it so a rollback replays it at the
+  ## same cycle. The transports still call gba.handle_input directly, so
+  ## speculative input replay is wired but unexercised.
   nc.gba.handle_input(input, pressed)
   if nc.speculative and not nc.replaying:
     nc.input_log.add InputEvent(cycle: nc.now(), input: input, pressed: pressed)
@@ -1049,20 +894,12 @@ proc new_net_core*(gba: GBA; id: int; rom_crc: uint32;
                    strict_crc = true; lead: int64 = NETLINK_LEAD;
                    lead_active: int64 = NETLINK_LEAD;
                    speculative = false): NetCore =
-  ## Wire a post-init core to the protocol state machine and queue our
-  ## HELLO. The transport must then shuttle bytes with feed/take_outgoing;
-  ## try_advance reports naHello until the peer's HELLO validates.
-  ## id 0 = host/listener = multi-mode unit 0. `lead` is this side's idle
-  ## bounded-lead window — pick it to exceed the transport's byte-exchange
-  ## cadence (NETLINK_LEAD for a pumped socket, NETLINK_LEAD_RAF for a
-  ## browser RAF loop); the two sides need not agree. `lead_active` is the
-  ## tighter window used while a link SIO mode is active (defaults to the
-  ## native lead, which real link games tolerate); it caps `lead`.
-  ## `speculative` enables GGPO-style rollback: the master predicts the
-  ## responder's REPLY, keeps emulating, and rolls back to a frame checkpoint
-  ## only on a misprediction. Default off — a no-op that preserves the exact
-  ## blocking-path behaviour. The result is bit-identical either way; it only
-  ## decouples emulation speed from RTT.
+  ## Wire a post-init core to the protocol and queue our HELLO. id 0 =
+  ## host = multi-mode unit 0. `lead` is the idle bounded-lead window (pick
+  ## it to exceed the transport's byte-exchange cadence; the sides need not
+  ## agree); `lead_active` the tighter window while a link SIO mode is
+  ## active. `speculative` enables rollback: the master predicts REPLYs and
+  ## rolls back to a frame checkpoint on a misprediction; off is a no-op.
   doAssert id in {0, 1}, "the network link is 2-player: unit id must be 0 or 1"
   result = NetCore(gba: gba, id: id, rom_crc: rom_crc, strict_crc: strict_crc,
                    lead: lead, lead_active: lead_active, peer_mode: 0xFF,

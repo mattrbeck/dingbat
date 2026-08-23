@@ -3,12 +3,9 @@ import yaml/tojson
 import input
 import lcd_response
 
-# Keycode name ↔ SDL keycode integer table, mirroring Crystal's LibSDL::Keycode
-# enum (ysbaddaden/sdl.cr keycode.cr) so that config files are compatible.
-# Crystal serialises enum members by their lowercased name, e.g. SEMICOLON → "semicolon".
-# SDL's own SDL_GetKeyFromName / SDL_GetScancodeName do NOT produce these word-form names
-# for printable-character keys (they return the raw character, e.g. ";"), so we maintain
-# the table ourselves.
+# Keycode name <-> SDL keycode table, mirroring the Crystal LibSDL::Keycode enum
+# names (lowercased, e.g. "semicolon") so config files stay compatible. SDL's
+# own name functions return the raw character for printable keys.
 const SDLK_SCANCODE_MASK = cint(1 shl 30)
 
 # Scancode values (from ysbaddaden/sdl.cr scancode.cr) used for scancode-masked keycodes.
@@ -119,8 +116,7 @@ proc build_name_to_code(): Table[string, cint] =
   for (name, code) in KEYCODE_TABLE: result[name] = code
 
 proc build_code_to_name(): Table[cint, string] =
-  # Iterate in reverse so the first entry for a given code wins
-  # (handles the DOLLAR/AMPERSAND duplicate at keycode 38).
+  # Reverse so the first entry for a duplicate code wins (DOLLAR/AMPERSAND = 38)
   for i in countdown(KEYCODE_TABLE.high, 0):
     let (name, code) = KEYCODE_TABLE[i]
     result[code] = name
@@ -135,7 +131,6 @@ proc key_code_to_name(code: cint): string =
   CODE_TO_NAME.getOrDefault(code, "")
 
 proc input_from_name(name: string): Input =
-  ## Parse a lowercase input name to the Input enum (e.g. "start" → START).
   case toLowerAscii(name)
   of "up":     Input.UP
   of "down":   Input.DOWN
@@ -149,10 +144,8 @@ proc input_from_name(name: string): Input =
   of "r":      Input.R
   else:        raise newException(ValueError, "Unknown input: " & name)
 
-# Controller button names, indexed by SDL_GameControllerButton ordinal.
-# These match SDL_GameControllerGetStringForButton / FromString exactly, but
-# are kept as a table so config.nim stays SDL-free (the wasm build must not
-# link SDL's controller API).
+# Controller button names by SDL_GameControllerButton ordinal, matching
+# SDL_GameControllerGetStringForButton; a table so the wasm build links no SDL.
 const CONTROLLER_BUTTON_NAMES = [
   "a", "b", "x", "y", "back", "guide", "start", "leftstick", "rightstick",
   "leftshoulder", "rightshoulder", "dpup", "dpdown", "dpleft", "dpright",
@@ -214,8 +207,8 @@ proc config_dir*(): string =
   ## The per-user config/data directory (tilde expanded)
   expandTilde(CONFIG_DIR)
 
-# Default keybindings: SDL keycode → Input (mgba-style)
-# Arrow keys=D-pad, Z=A, X=B, Backspace=SELECT, Return=START, A=L, S=R
+# Default keybindings: arrows = D-pad, Z=A, X=B, Backspace=SELECT,
+# Return=START, A=L, S=R
 proc default_keybindings*(): Table[cint, Input] =
   result = initTable[cint, Input]()
   result[key_name_to_code("up")]        = Input.UP
@@ -244,21 +237,15 @@ proc homerow_keybindings*(): Table[cint, Input] =
 
 type
   VideoFilter* = enum
-    ## GPU upscale filter for the game view (both front-ends). Stored by its
-    ## string value in the config so new filters can be appended without
-    ## churning saved files.
+    ## GPU upscale filter (both front-ends). Stored by string value so new
+    ## filters can be appended without churning saved files.
     vfNone = "none"
     vfHq4x = "hq4x"
     vfXbr  = "xbr"
     vfXbrz = "xbrz"
-    # Screen-structure looks, in the same selector as the smoothing filters:
-    # every option is a way to draw the picture and exactly one can be active,
-    # which is what retired the separate Scanlines toggle (it used to be
-    # suspended whenever a smoothing filter was on — the selector makes that
-    # exclusivity structural). The LCD grid is that toggle's successor: seams
-    # on both axes, the way the real panels look, instead of CRT-style rows.
-    # They are NOT filter_mode values in the shader; the frontends translate
-    # them to their own uniforms.
+    # Screen-structure looks share the selector with the smoothing filters so
+    # exactly one is active (this retired the separate Scanlines toggle). Not
+    # shader filter_mode values; the frontends translate them.
     vfGrid     = "grid"
     vfSubpixel = "rgb"
 
@@ -282,24 +269,19 @@ type
     video_filter*:      VideoFilter  # GPU filter/screen look (VideoFilter)
     lcd_response*:      bool     # panel-response model; the panel follows the machine
     preserve_aspect*:   bool     # letterbox instead of stretching to the window
-    # Super Game Boy. sgb_enable is OFF by default: a fresh install plays
-    # monochrome carts as a Game Boy, which is what they look like everywhere
-    # else, and SGB is something you go and turn on. sgb_border defaults ON
-    # because it is not a second opt-in -- once you have asked for the adapter,
-    # the border is most of what it does.
+    # sgb_enable is OFF by default (a fresh install plays monochrome carts as
+    # a Game Boy); sgb_border defaults ON, being most of what the adapter does.
     sgb_enable*:        bool     # run SGB-flagged DMG carts as a Super Game Boy
     sgb_border*:        bool     # composite the cart's SGB border (256x224)
     rewind*:            bool     # keep rewind history (hold ` to rewind)
     pitch_correct_ff*:  bool     # WSOLA pitch-preserving 2x fast-forward (off = octave-up)
     audio_lowpass*:     bool     # analog-output low-pass on the GBA mix (cap/speaker smoothing)
-    # GBA DirectSound FIFO interpolation (true-phase cubic). ON by default:
-    # strictly removes reconstruction noise, touches nothing musical. OFF is
-    # the hardware-accurate mode — bit-true DAC output including its grit.
+    # GBA DirectSound FIFO interpolation (cubic). ON removes reconstruction
+    # noise; OFF is the bit-true DAC output.
     fifo_interp*:       bool
     mp2k_hle*:          bool     # experimental MP2K sound-engine HLE (auto-engages on detection)
-    # Speed mode for low-end devices: GBA frameskip + 2x emulated-CPU
-    # underclock, GB scanline renderer at next load. Deliberately less
-    # accurate/compatible; other expensive niceties are suspended while on.
+    # Speed mode for low-end devices: GBA frameskip + 2x CPU underclock, GB
+    # scanline renderer at next load; less accurate, other niceties suspended.
     speed_mode*:        bool
 
 proc new_config*(): Config =
@@ -352,28 +334,22 @@ proc parse_config(j: JsonNode): Config =
     except ValueError:
       cfg.video_filter = vfNone
   if j.hasKey("scanlines"):
-    # Scanlines grew into the LCD grid. A config that had the old toggle on
-    # becomes that Filter choice — unless it ALSO named a smoothing filter,
-    # which the old UI made win by suspending scanlines, so the filter keeps
-    # winning here. (A briefly-stored video_filter of "scanlines" fails
-    # parseEnum above and lands on vfNone, where this migration catches a
-    # still-set legacy toggle; that transitional value never shipped.)
+    # Migration: the old scanlines toggle became the LCD grid look, unless a
+    # smoothing filter was also named (the old UI let the filter win). A
+    # transitional "scanlines" video_filter fails parseEnum above and lands here.
     if j["scanlines"].getBool(false) and cfg.video_filter == vfNone:
       cfg.video_filter = vfGrid
   if j.hasKey("lcd_response"):
-    # Two generations of stored value land here. The key held a panel name
-    # while the setting was a six-way picker (off/auto/dmg/cgb/agb/ags), and
-    # holds a bool now that it is a switch; parse_enabled maps every one of
-    # the old names on without changing what anybody asked for.
+    # Two generations of stored value: a panel name from the six-way picker
+    # era, or a bool; parse_enabled maps the old names on.
     cfg.lcd_response =
       if j["lcd_response"].kind == JString:
         parse_enabled(j["lcd_response"].getStr("off"))
       else:
         j["lcd_response"].getBool(false)
   elif j.hasKey("frame_blend"):
-    # Migration: the old interframe blend became the LCD response model, and
-    # anyone who had it on wanted panel ghosting — give them the panel their
-    # machine shipped with rather than silently turning the feature off.
+    # Migration: the old interframe blend became the LCD response model;
+    # anyone who had it on wanted ghosting.
     cfg.lcd_response = j["frame_blend"].getBool(false)
   if j.hasKey("preserve_aspect"):
     cfg.preserve_aspect = j["preserve_aspect"].getBool(true)
@@ -401,8 +377,8 @@ proc parse_config(j: JsonNode): Config =
     if gba.hasKey("hle_after_bios"):
       cfg.hle_after_bios = gba["hle_after_bios"].getBool(false)
   if not hle_key_present:
-    # Legacy configs predate the persisted SWI mode: keep the old behavior
-    # of defaulting to HLE exactly when no BIOS file is configured
+    # Legacy configs predate the persisted SWI mode: HLE exactly when no BIOS
+    # file is configured
     cfg.use_hle = cfg.bios_path.len == 0
   if j.hasKey("gb") and j["gb"].kind == JObject:
     let gb = j["gb"]
@@ -412,8 +388,7 @@ proc parse_config(j: JsonNode): Config =
       cfg.gb_fifo = gb["fifo"].getBool(true)
     if gb.hasKey("rumble") and gb["rumble"].kind == JBool:
       cfg.gb_rumble = gb["rumble"].getBool(true)
-    # No key -> the new_config default, which is OFF. An existing config
-    # predating this feature therefore does NOT silently gain it.
+    # No key -> OFF: a config predating the feature does not silently gain it.
     if gb.hasKey("sgb") and gb["sgb"].kind == JBool:
       cfg.sgb_enable = gb["sgb"].getBool(false)
     if gb.hasKey("sgb_border") and gb["sgb_border"].kind == JBool:
@@ -450,8 +425,8 @@ proc load_config*(): Config =
   except:
     return new_config()
 
-# Produce a YAML string value: quote if the value contains special chars or
-# is empty, so it round-trips cleanly through Crystal's YAML parser.
+# Quote YAML values containing special chars (or empty) so they round-trip
+# through Crystal's YAML parser.
 proc yaml_str(s: string): string =
   if s.len == 0:
     return "''"

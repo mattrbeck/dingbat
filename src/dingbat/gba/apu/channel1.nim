@@ -33,10 +33,8 @@ proc ch1_frequency_timer*(ch: Channel1): uint32 =
 proc ch1_catchup_slow(ch: Channel1; observer_period: uint32) =
   let now    = ch.gba.scheduler.cycles
   let period = CycleCount(ch.ch1_frequency_timer())
-  # next_step is the absolute cycle of the FIRST pending step, so every step
-  # after it is one period apart — which is also true across a mid-flight
-  # frequency write, because the old event would have fired at its already-set
-  # target and only then reloaded with the new period.
+  # next_step is the absolute cycle of the FIRST pending step; every later step
+  # is one CURRENT period apart, even across a frequency write (gba_steps_due).
   let steps = gba_steps_due(now - ch.next_step, period, ch.arm_delay,
                             observer_period)
   if steps == 0: return
@@ -52,13 +50,11 @@ proc ch1_catchup_slow(ch: Channel1; observer_period: uint32) =
   ch.arm_delay = uint32(period)
 
 proc ch1_catchup_at*(ch: Channel1; observer_period: uint32) {.inline.} =
-  ## Bring wave_duty_position up to scheduler.cycles. Closed form: the duty
-  ## counter is a free-running mod-8 counter, so N periods of advance is
-  ## (pos + N) and 7 — no iteration, and cost independent of the frequency.
-  ## Must be called before anything that can observe the duty position or
-  ## change the period; see the observation-point list in apu.nim.
-  ## observer_period is the caller's own period in cycles (GBA_OBS_CPU for an
-  ## MMIO access) and only affects a step landing on this exact cycle.
+  ## Bring wave_duty_position up to scheduler.cycles in closed form (mod-8
+  ## counter: (pos + N) and 7). Must run before anything observes the duty
+  ## position or changes the period (observation points: apu.nim).
+  ## observer_period (GBA_OBS_CPU for MMIO) only matters for a step landing on
+  ## this exact cycle.
   if ch.next_step > ch.gba.scheduler.cycles: return   # not due (or parked)
   ch1_catchup_slow(ch, observer_period)
 
@@ -73,9 +69,8 @@ proc ch1_frequency_calculation*(ch: Channel1): uint16 =
   uint16(calculated)
 
 proc sweep_step*(ch: Channel1) =
-  # The caller (tick_frame_sequencer) has already caught the duty counter up:
-  # this can change frequency_ch1, and the collapsed cycles must be priced with
-  # the period that was actually in force for them.
+  # tick_frame_sequencer caught the duty counter up first: this can change
+  # frequency_ch1, and elapsed cycles must be priced with the old period.
   if ch.sweep_timer > 0: ch.sweep_timer -= 1
   if ch.sweep_timer == 0:
     ch.sweep_timer = if ch.sweep_period > 0: ch.sweep_period else: 8
@@ -123,10 +118,9 @@ proc ch1_write*(ch: Channel1; address: uint32; value: uint8) =
     if triggered and ch.dac_enabled: ch.enabled = true
     ch.agb_length_on_nrx4(length_enable, triggered, 0x40)
     if triggered:
-      # Same as the old clear(etAPUChannel1) + schedule(period): re-arm a full
-      # period from now. The duty POSITION deliberately carries across a trigger
-      # (hardware only resets it when the APU is powered off) — which is why the
-      # phase has to be caught up rather than parked.
+      # Re-arm a full period from now. The duty POSITION carries across a
+      # trigger (Pan Docs: only APU power-off resets it), hence catch-up
+      # rather than park.
       let arm1 = ch.ch1_frequency_timer()
       ch.next_step = ch.gba.scheduler.cycles + CycleCount(arm1)
       ch.arm_delay = arm1
@@ -136,14 +130,10 @@ proc ch1_write*(ch: Channel1; address: uint32; value: uint8) =
       ch.sweep_enabled        = ch.sweep_period > 0 or ch.shift_ch1 > 0
       ch.negate_has_been_used = false
       if ch.shift_ch1 > 0:
-        # Hardware runs the overflow check TWICE at trigger (gbaedge SWEEPQ
-        # page): the first is the usual shadow + (shadow >> shift); the
-        # second applies the SAME offset to that result WITHOUT writing it
-        # back, and kills the channel iff it exceeds 2048 STRICTLY.
-        # Anchors: freq 1400 dies on the first (2100 > 2047); 1300 dies on
-        # the second (1950 ok, 2600 > 2048); 1000 survives both (1500,
-        # 2000) and dies at its first sweep tick; 1024 survives on the
-        # knife edge (1536, 2048 - NOT strictly greater).
+        # The trigger overflow check runs TWICE (hardware: gbaedge SWEEPQ page
+        # on AGS): shadow + offset, then the SAME offset again on that result
+        # without writing it back, killing the channel iff > 2048 STRICTLY
+        # (freq 1024 survives: 1536, 2048).
         let offset = int(ch.frequency_shadow shr ch.shift_ch1)
         let signed_off = if ch.negate: -offset else: offset
         if ch.negate: ch.negate_has_been_used = true

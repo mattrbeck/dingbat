@@ -30,17 +30,15 @@ proc wants_input*(w: ControllerWidget): bool =
 
 proc button_released*(w: ControllerWidget; button: cint) =
   # Buttons past DPAD_RIGHT (paddles, touchpad on newer SDL) have no name in
-  # our table and would not round-trip through the yaml config
+  # the table and would not round-trip through the yaml config.
   if controller_button_name(button).len == 0: return
   if w.selection.isSome():
     let sel = w.selection.get()
-    # Remove old binding for this input
     var old_btn: cint = -1
     for k, v in w.editing.pairs:
       if v == sel: old_btn = k; break
     if old_btn >= 0: w.editing.del(old_btn)
     w.editing[button] = sel
-    # Advance to next input
     let next_ord = ord(sel) + 1
     if next_ord <= ord(high(Input)):
       w.selection = some(Input(next_ord))
@@ -58,8 +56,8 @@ proc controller_connected(): bool =
   false
 
 proc render*(w: ControllerWidget) =
-  # Rumble is not controller-only (it also drives the viewport shake), so it
-  # renders above the no-controller early-out.
+  # Rumble also drives the viewport shake, so it sits above the
+  # no-controller early-out.
   discard igCheckbox("Rumble", addr w.rumble)
   igSameLine(0, -1)
   help_marker("Vibrate the controller and shake the screen while a rumble " &

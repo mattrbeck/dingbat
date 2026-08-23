@@ -1,12 +1,8 @@
-# TCP transport for the network link (phase 3a of docs/multiplayer.md):
-# a socket pump around the transport-independent protocol state machine in
-# gba/netcore.nim. All sync/stall/transfer logic lives there — this module
-# only shuttles bytes, provides the blocking waits a native frontend wants
-# (with timeouts), simulates latency (--netlink-delay-ms), and tears the
+# TCP transport for the network link (docs/multiplayer.md): a socket pump
+# around the protocol state machine in gba/netcore.nim. All sync/stall/
+# transfer logic lives there; this module shuttles bytes, provides blocking
+# waits with timeouts, simulates latency (--netlink-delay-ms) and tears the
 # connection down gracefully.
-#
-# STALL POINTS (frontends surface "waiting for peer"): stall_pump — every
-# blocking wait funnels through it, driven by NetCore's `stalled` flag.
 
 when defined(emscripten):
   {.error: "netlink needs std/net; the wasm build talks to a browser " &
@@ -15,8 +11,6 @@ when defined(emscripten):
 
 import std/[net, nativesockets, monotimes, times, os]
 when not defined(windows):
-  # `from` import: the listed names come in unqualified, and qualified access
-  # (posix.shutdown below) works for everything else.
   from std/posix import EAGAIN, EWOULDBLOCK, EINTR, SHUT_WR
 import netcore
 import gba
@@ -35,14 +29,12 @@ type
     core*: NetCore
     gba: GBA
     sock: Socket
-    # Outgoing delay queue (--netlink-delay-ms latency simulation). Empty
-    # and bypassed when delay_ms == 0.
+    # Outgoing delay queue (--netlink-delay-ms); bypassed when delay_ms == 0.
     delay_ms: int
     outq: seq[tuple[due: MonoTime, data: string]]
-    # Bytes released for sending but not yet accepted by the (nonblocking)
-    # socket. We must NEVER block in send: with both sides emitting beacons,
-    # two blocking sends into full kernel buffers deadlock the pair. Drained
-    # opportunistically on every pump/flush.
+    # Bytes not yet accepted by the nonblocking socket. Never block in send:
+    # with both sides emitting beacons, two blocking sends into full kernel
+    # buffers deadlock the pair.
     wire_out: string
     wire_pos: int
 
@@ -83,8 +75,7 @@ proc try_drain(nl: NetLink) =
     nl.wire_pos = 0
 
 proc flush_outgoing(nl: NetLink) =
-  # Collect frames the core queued since the last flush, subjecting them to
-  # the artificial delay (gameplay traffic only: the handshake is setup).
+  # The artificial delay applies to gameplay traffic only, not the handshake.
   for data in nl.core.take_outgoing():
     if nl.delay_ms <= 0 or nl.core.hello != hsDone:
       nl.wire_out.add data
@@ -121,9 +112,8 @@ proc poll_socket(nl: NetLink; timeout_ms: int): bool =
   true
 
 proc pump(nl: NetLink; timeout_ms = 0) =
-  ## Nonblocking (timeout 0) or bounded-wait socket service: flush delayed
-  ## sends, ingest bytes (the core dispatches every complete message —
-  ## including latching a parked master completion), flush its responses.
+  ## Service the socket once: flush delayed sends, ingest bytes (waiting up
+  ## to timeout_ms), flush the core's responses.
   nl.flush_outgoing()
   discard nl.poll_socket(timeout_ms)
   nl.flush_outgoing()
@@ -132,9 +122,8 @@ proc pump(nl: NetLink; timeout_ms = 0) =
 
 proc step_frame*(nl: NetLink) =
   ## Advance the local core one video frame, servicing the socket between
-  ## slices. STALL POINT: when the core parks (peer lead exceeded, or a
-  ## transfer completion waiting on the peer's REPLY) this blocks — emulated
-  ## clock frozen — until socket traffic unparks it or the timeout expires.
+  ## slices. When the core parks on the peer this blocks until socket traffic
+  ## unparks it or STALL_TIMEOUT_MS expires.
   var stall_deadline: MonoTime
   var stalling = false
   while true:
@@ -163,11 +152,9 @@ proc step_frame*(nl: NetLink) =
 
 proc new_net_link*(gba: GBA; sock: Socket; id: int; rom_crc: uint32;
                    delay_ms = 0; allow_crc_mismatch = false): NetLink =
-  ## Wire a post-init core to a connected TCP socket and perform the HELLO
-  ## handshake (blocking, not subject to the artificial delay — it is setup,
-  ## not gameplay traffic). id 0 = listener = multi-mode unit 0. With
-  ## allow_crc_mismatch, differing ROM CRCs are accepted (cross-version link
-  ## games such as Ruby<->Sapphire trades have distinct CRCs but link fine).
+  ## Wire a post-init core to a connected socket and run the HELLO handshake
+  ## (blocking). id 0 = listener = multi-mode unit 0. allow_crc_mismatch
+  ## accepts differing ROM CRCs (cross-version trades such as Ruby<->Sapphire).
   sock.setSockOpt(OptNoDelay, true, level = cint(IPPROTO_TCP))
   result = NetLink(gba: gba, sock: sock, delay_ms: delay_ms)
   result.core = new_net_core(gba, id, rom_crc,
@@ -184,15 +171,13 @@ proc new_net_link*(gba: GBA; sock: Socket; id: int; rom_crc: uint32;
   result.flush_outgoing()  # BYE on rejection / first CLOCK on acceptance
   if result.core.hello == hsFailed:
     raise newException(NetLinkError, result.core.hello_error)
-  # Handshake done (blocking sends were fine for it); from here on sends must
-  # never block — see wire_out.
+  # From here on sends must never block (see wire_out).
   sock.getFd().setBlocking(false)
 
 proc close*(nl: NetLink) =
-  ## Graceful teardown. Flush our remaining bytes (the peer may still need
-  ## our final BYE), half-close, then drain the peer until EOF: closing with
-  ## unread beacons in the kernel buffer would RST the connection, and an
-  ## RST discards receive queues — the peer could lose our BYE.
+  ## Flush our remaining bytes (the final BYE), half-close, then drain the
+  ## peer until EOF: closing with unread beacons in the kernel buffer would
+  ## RST the connection and the peer could lose our BYE.
   let deadline = getMonoTime() + initDuration(milliseconds = 3000)
   while (nl.outq.len > 0 or nl.wire_pos < nl.wire_out.len or
          nl.core.has_outgoing()) and getMonoTime() < deadline:

@@ -29,9 +29,9 @@ proc new_ppu*(gba: GBA): PPU =
     result.bghofs[i] = BGOFS()
     result.bgvofs[i] = BGOFS()
   for i in 0..1:
-    # PA/PD reset to 1.0 (0x100) on hardware — identity transform (mGBA's
-    # GBAIOInit does the same). Games like Doom rely on this in mode 4
-    # without ever writing the affine registers.
+    # PA/PD reset to 1.0 (0x100), the identity transform; Doom relies on it
+    # in mode 4 without writing the affine registers. Assumed; no ROM pins
+    # this.
     result.bgaff[i][0] = cast[BGAFF](0x100'u16)
     result.bgaff[i][1] = BGAFF()
     result.bgaff[i][2] = BGAFF()
@@ -62,21 +62,13 @@ proc bitmap*(ppu: PPU): bool =
 proc start_line*(ppu: PPU) =
   ppu.gba.scheduler.schedule(960, etPPUStartHBlank)
 
-# The H-blank *signal* — DISPSTAT bit 1 and the interrupt bit 4 enables — is
-# not asserted when drawing ends at dot 240 (cycle 960). GBATEK: "Although the
-# drawing time is only 960 cycles (240*4), the H-Blank flag is '0' for a total
-# of 1006 cycles", i.e. the flag rises 46 cycles into the 272-cycle gap and is
-# high for the remaining 226.
+# GBATEK: "the H-Blank flag is '0' for a total of 1006 cycles", so the flag
+# (and the IRQ it enables) rises 46 cycles after drawing ends at 960.
 const HBLANK_FLAG_DELAY = 46
 
-# Cycles from the H-blank signal to the CPU recognizing the IRQ. Peripherals do
-# not share one path to the interrupt controller: the timers' is IRQ_SYNC_DELAY
-# (3, pinned by the mGBA suite Timer IRQ tests); the video controller's is
-# longer. Pinned by the mGBA suite's "H-blank bit start / Flip 1", which times
-# the H-blank IRQ's halt-wake against the end of the same scanline — the only
-# row that measures this edge, and it holds dingbat's halt-wake path fixed
-# (Timer count-up and SIO timing pin that independently). Flip 1 admits
-# recognition at 1010..1014; 1012 is the middle of that plateau.
+# Cycles from the H-blank signal to IRQ recognition; longer than the timers'
+# IRQ_SYNC_DELAY (3). Pinned by mGBA suite "H-blank bit start / Flip 1",
+# which admits recognition at 1010..1014; 1012 is the middle.
 const HBLANK_IRQ_SYNC_DELAY = 6
 
 proc start_hblank*(ppu: PPU) =
@@ -92,22 +84,17 @@ proc start_hblank*(ppu: PPU) =
 proc set_hblank_flag*(ppu: PPU) =
   ppu.dispstat.hblank = true
   # Flag and IRQ are the same signal (bit 4 enables an interrupt on the bit-1
-  # condition), so they are raised together — as vblank/vcounter already are in
-  # end_hblank. Previously the IRQ fired at 960 while the flag waited until
-  # 1004, which gave H-blank handlers a 272-cycle window instead of hardware's
-  # 226 and put the mGBA suite's Flip 1 48 cycles out.
+  # condition), so they rise together (mGBA suite Flip 1).
   if ppu.dispstat.hblank_irq_enable:
     ppu.gba.interrupts.reg_if.hblank = true
     ppu.gba.interrupts.schedule_interrupt_check(HBLANK_IRQ_SYNC_DELAY)
 
 proc end_hblank*(ppu: PPU) =
-  # Zero-delay event rather than a direct start_line() call: the event's
-  # target is the current cycle and schedule's tie-break (newest same-cycle
-  # event pops first) makes it the very next dispatch — after this handler
-  # returns and after the post-dispatch DMA pump has granted the vblank /
-  # video-capture requests latched below. The next scanline thus anchors at
-  # the same cycle (+960 from an unchanged clock) but strictly after this
-  # line's deferred DMA work.
+  # Zero-delay event rather than a direct call: schedule's tie-break (newest
+  # same-cycle event pops first) makes it the next dispatch, after the
+  # post-dispatch DMA pump has granted the vblank / video-capture requests
+  # latched below, so the next line anchors at the same cycle but strictly
+  # after this line's deferred DMA work.
   ppu.gba.scheduler.schedule(0, etPPUStartLine)
   ppu.dispstat.hblank = false
   ppu.vcount = uint16((int(ppu.vcount) + 1) mod 228)
@@ -129,27 +116,18 @@ proc end_hblank*(ppu: PPU) =
       for ref_num in 0..1:
         ppu.bgref_int[bg_num][ref_num] = ppu.bgref[bg_num][ref_num].num
     ppu.draw()
-  # Only a flag that actually rose here reaches the interrupt controller. A
-  # scheduled etInterrupts event re-evaluates the WHOLE of IE&IF at the cycle
-  # it lands, so scheduling one unconditionally — 228 times a frame, on lines
-  # where the video controller asserted nothing — hands whatever bit another
-  # peripheral raised in the preceding IRQ_SYNC_DELAY window a recognition it
-  # never gets on hardware, at rise+1 instead of that peripheral's own rise+3.
-  # (GBATEK: IF bits 0-2 are driven by the DISPSTAT conditions and their
-  # enables; there is no periodic re-evaluation of the controller.) Every IF
-  # writer schedules its own check, so dropping this one can only ever restore
-  # a flag to its proper delay, never lengthen it. Pinned by the mGBA suite's
-  # Timer count-up "0b, 0x000C 1xv 1d 4i": the stale check pulled that cell's
-  # handler entry one cycle early and the four rigid 121-cycle ISR rounds
-  # carried it to the disable write, reading FFFE for hardware's FFFF.
+  # Only a flag that rose here reaches the interrupt controller: an
+  # unconditional check would re-evaluate all of IE&IF at rise+1 for a bit
+  # another peripheral raised inside its own IRQ_SYNC_DELAY window (GBATEK:
+  # IF bits 0-2 are driven by the DISPSTAT conditions; nothing re-evaluates
+  # periodically). mGBA suite Timer count-up "0b, 0x000C 1xv 1d 4i".
   if raised_if:
     ppu.gba.interrupts.schedule_interrupt_check(IRQ_SYNC_DELAY)
 
 proc draw*(ppu: PPU) =
   inc ppu.frame
-  # True only when every scanline of this frame was skipped: the framebuffer
-  # is bit-identical to the previous frame, so frontends can skip the
-  # texture upload as well. A force-skipped speed-mode frame qualifies too.
+  # True only when every scanline was skipped (framebuffer unchanged), so
+  # frontends can skip the texture upload
   ppu.frame_static = ppu.skip_render or ppu.forced_skip
 
 proc se_address*(ppu: PPU; tx, ty, screen_size: int): int {.inline.} =
@@ -188,54 +166,32 @@ proc bgr16_mul*(a: uint16; coeff: int): uint16 =
 proc sprites_ptr*(ppu: PPU): ptr UncheckedArray[Sprite] =
   cast[ptr UncheckedArray[Sprite]](addr ppu.oam[0])
 
-# --- 4bpp tile-row unpacking ------------------------------------------------
-#
-# A regular BG's 4bpp span writes `span` palette indices from one 4-byte tile
-# row. `unpack_bg4_span_scalar` is the original per-pixel form and is still the
-# real code path for partial spans (the two line edges); `unpack_bg4_span`
-# adds a SWAR whole-tile case for the aligned 8-pixel span, which is what
-# essentially every span is (measured px_per_span: exactly 8.00 on Emerald,
-# FireRed, Kirby and Minish Cap, 7.80 on Golden Sun).
-#
-# Both are exported because tests/ppubgunpack_test.nim compares them against
-# each other over the whole reachable input space — the scalar proc is the
-# oracle, and it is the shipping fallback rather than a copy of it, so the
-# comparison is against real behaviour.
-#
-# Domain (enforced by the caller, relied on by both): x_in_tile in 0..7,
-# 1 <= span <= 8 - x_in_tile, flip_x_mask is 0 or 7, bank is the palette bank
-# already shifted into the high nibble (0x00, 0x10, ... 0xF0). The span bound
-# is what keeps the nibble index (x_in_tile + k) inside 0..7 — a wider span
-# would shift `row` by more than 28 and read outside the tile row.
+# 4bpp tile-row unpacking. `unpack_bg4_span_scalar` is the per-pixel form and
+# the real path for partial spans (the line edges); `unpack_bg4_span` adds a
+# SWAR whole-tile case for the aligned 8-pixel span. Both are exported so
+# tests/ppubgunpack_test.nim can compare them over the whole input space.
+# Domain (enforced by the caller): x_in_tile in 0..7, 1 <= span <= 8 -
+# x_in_tile, flip_x_mask 0 or 7, bank already shifted into the high nibble.
+# A wider span would shift `row` by more than 28 and read outside the row.
 proc unpack_bg4_span_scalar*(dst: ptr UncheckedArray[uint8]; col: int;
                              row: uint32; x_in_tile, span, flip_x_mask: int;
                              bank: uint8) {.inline.} =
   for k in 0 ..< span:
     let x = (x_in_tile + k) xor flip_x_mask
     let p = uint8((row shr (uint32(x) * 4)) and 0xF)
-    # Palette index 0 is transparent in every bank, so it must NOT take the
-    # bank offset.
+    # Palette index 0 is transparent in every bank: no bank offset
     dst[col + k] = p or (if p != 0: bank else: 0'u8)
 
 proc unpack_bg4_span*(dst: ptr UncheckedArray[uint8]; col: int; row: uint32;
                       x_in_tile, span, flip_x_mask: int; bank: uint8) {.inline.} =
   ## Whole-tile SWAR expansion, falling back to the scalar loop otherwise.
-  ##
   ## The three `((v shl s) or v) and M` steps scatter the eight nibbles of
-  ## `row` into the eight bytes of a uint64, low nibble to low byte. Every step
-  ## is built only from shl / or / and-with-a-constant, so it is OR-linear
-  ## (f(x or y) == f(x) or f(y), f(0) == 0) and carries cannot exist: the whole
-  ## expansion is a permutation of 32 input bits into 32 of the 64 output bits.
-  ## That is what makes the byte lanes independent, and the test leans on it.
-  ##
-  ## Horizontal flip is then a byte reverse, because output byte k holds the
-  ## pixel for x_in_tile k and flipping maps k -> 7 - k.
-  ##
-  ## The bank is OR'd in without touching index 0. `v + 0x0F0F..` cannot carry
-  ## between bytes (each byte is 0x00..0x0F, so the sum is at most 0x1E), and
-  ## masking with 0xF0F0.. leaves 0x10 for every non-zero index and 0x00 for
-  ## every zero one. Multiplying that by the bank NIBBLE (0..15) gives at most
-  ## 0x10 * 15 = 0xF0 per byte, so that cannot carry between bytes either.
+  ## `row` into eight bytes, low nibble to low byte; each step is shl/or/and
+  ## only, so it is OR-linear and carry-free (a permutation of 32 bits).
+  ## Flip is then a byte reverse. The bank is OR'd in without touching index
+  ## 0: `v + 0x0F0F..` cannot carry between bytes (each is <= 0x0F) and the
+  ## 0xF0F0.. mask leaves 0x10 per non-zero byte; times the bank nibble that
+  ## is at most 0xF0, so no carry there either.
   const little = cpuEndian == littleEndian
   if little and x_in_tile == 0 and span == 8:
     var v = uint64(row)
@@ -243,12 +199,8 @@ proc unpack_bg4_span*(dst: ptr UncheckedArray[uint8]; col: int; row: uint32;
     v = ((v shl 8)  or v) and 0x00FF00FF00FF00FF'u64
     v = ((v shl 4)  or v) and 0x0F0F0F0F0F0F0F0F'u64
     if flip_x_mask != 0:
-      # bswap64, written out because Nim has no portable byte-swap intrinsic.
-      # Checked in the generated code: clang does NOT emit `rev` here — it
-      # knows the high nibble of every byte is already zero and folds the
-      # three steps into a cheaper nibble-aware swap, then `csel`s between the
-      # flipped and unflipped values so the branch disappears entirely. wasm
-      # has no byte-swap instruction, so there it stays as shifts and masks.
+      # bswap64 written out: Nim has no portable byte-swap intrinsic (clang
+      # folds it to a nibble-aware swap; wasm has no byte-swap anyway)
       v = ((v and 0x00FF00FF00FF00FF'u64) shl 8) or
           ((v shr 8) and 0x00FF00FF00FF00FF'u64)
       v = ((v and 0x0000FFFF0000FFFF'u64) shl 16) or
@@ -256,9 +208,8 @@ proc unpack_bg4_span*(dst: ptr UncheckedArray[uint8]; col: int; row: uint32;
       v = (v shl 32) or (v shr 32)
     let nz = (v + 0x0F0F0F0F0F0F0F0F'u64) and 0xF0F0F0F0F0F0F0F0'u64
     v = v or (nz * (uint64(bank) shr 4))
-    # copyMem, not a cast-to-ptr-uint64 store: `col` is only 8-aligned when
-    # BGHOFS is, so this store is frequently unaligned. clang lowers a fixed
-    # 8-byte copy from an addressable local to one unaligned store.
+    # copyMem, not a ptr-uint64 store: `col` is only 8-aligned when BGHOFS
+    # is, so this store is frequently unaligned
     copyMem(addr dst[col], addr v, 8)
   else:
     unpack_bg4_span_scalar(dst, col, row, x_in_tile, span, flip_x_mask, bank)
@@ -286,13 +237,10 @@ proc render_reg_bg_impl(ppu: PPU; bg: int; swar: static bool) =
   let ty_base         = int(tile_y) * 32
   let ty_extra        = if int(tile_y) >= 32 and bgcnt.screen_size == 0b11: 0x0400 else: 0
   let row_in_tile     = effective_row and 7
-  # Walk the scanline one tile span at a time instead of one pixel at a time.
-  # The old loop recomputed the effective column, re-derived tile_x and tested
-  # it against the previous column's on all 240 pixels to catch the ~30 tile
-  # boundaries that actually matter, then re-tested is_8bpp per pixel. Spans
-  # hoist all of that: a span never crosses a tile boundary (and never wraps,
-  # since bg_width+1 is 256 or 512 — both multiples of 8), so the screen entry,
-  # tile row base, flip mask and palette bank are each computed once per tile.
+  # Walk the scanline one tile span at a time: a span never crosses a tile
+  # boundary (and never wraps, since bg_width+1 is a multiple of 8), so the
+  # screen entry, tile row base, flip mask and palette bank are computed once
+  # per tile.
   let dst = cast[ptr UncheckedArray[uint8]](addr ppu.layer_palettes[bg][0])
   let vram = cast[ptr UncheckedArray[uint8]](addr ppu.vram[0])
   var col = 0
@@ -310,8 +258,7 @@ proc render_reg_bg_impl(ppu: PPU; bg: int; swar: static bool) =
     if is_8bpp:
       let tile_base = character_base + uint32(tile_id) * 0x40 + uint32(y) * 8
       # The BG unit can't fetch character data from OBJ VRAM; such tiles
-      # render transparent (row bases are 4-byte aligned, so checking the
-      # row start suffices)
+      # render transparent
       if tile_base >= 0x10000'u32:
         for k in 0 ..< span: dst[col + k] = 0
       else:
@@ -323,10 +270,8 @@ proc render_reg_bg_impl(ppu: PPU; bg: int; swar: static bool) =
       if tile_base >= 0x10000'u32:
         for k in 0 ..< span: dst[col + k] = 0
       else:
-        # A 4bpp tile row is exactly 4 bytes = 8 nibbles, and tile_base is
-        # 4-byte aligned (character_base, tile stride and row stride are all
-        # multiples of 4), so pull the whole row as one word and expand all
-        # eight nibbles at once (see unpack_bg4_span).
+        # A 4bpp tile row is 4 bytes = 8 nibbles and tile_base is 4-byte
+        # aligned, so pull the row as one word (see unpack_bg4_span)
         let row = cast[ptr uint32](addr vram[tile_base])[]
         when swar:
           unpack_bg4_span(dst, col, row, x_in_tile, span, flip_x_mask, bank)
@@ -344,10 +289,8 @@ proc render_reg_bg*(ppu: PPU; bg: int) {.inline.} =
 
 when defined(test_harness):
   proc render_reg_bg_scalar*(ppu: PPU; bg: int) =
-    ## The same renderer with the SWAR whole-tile case compiled out, so
-    ## tests/ppubgunpack_test.nim can render a scene both ways and diff the
-    ## line buffers. Only exists under -d:test_harness so shipping builds (and
-    ## the wasm bundle) do not carry a second copy.
+    ## The renderer with the SWAR case compiled out, for
+    ## tests/ppubgunpack_test.nim. Only under -d:test_harness.
     render_reg_bg_impl(ppu, bg, false)
 
 proc render_aff_bg*(ppu: PPU; bg: int) =
@@ -392,14 +335,11 @@ proc render_aff_bg*(ppu: PPU; bg: int) =
         ppu.layer_palettes[bg][col] = ppu.layer_palettes[bg][col - col mod h]
 
 proc render_bitmap*(ppu: PPU) =
-  ## Fill the BG2 line buffers for the bitmap modes (3/4/5), honoring the
-  ## BG2 enable bit and mosaic. Modes 3/5 produce direct BGR555 colors;
-  ## mode 4 is paletted and uses the regular layer pipeline.
-  ## BG2 is an AFFINE layer in the bitmap modes: PA/PC and the internal
-  ## reference point apply exactly as in modes 1/2, sampling the bitmap as a
-  ## texture (out-of-range = transparent; the wrap bit has no effect here).
-  ## DBZ Legacy of Goku's intro FMV relies on this, upscaling reduced-height
-  ## video cells to the full screen with PD < 1.0.
+  ## Fill the BG2 line buffers for the bitmap modes (3/4/5). Modes 3/5 are
+  ## direct BGR555; mode 4 is paletted. BG2 is an affine layer here: PA/PC
+  ## and the internal reference point apply as in modes 1/2, sampling the
+  ## bitmap as a texture (out of range = transparent; the wrap bit has no
+  ## effect). DBZ Legacy of Goku's intro FMV upscales with PD < 1.0.
   let mode = int(ppu.dispcnt.bg_mode)
   ppu.bitmap_direct = mode != 4
   for col in 0..239: ppu.bg2_direct_opaque[col] = false
@@ -409,8 +349,7 @@ proc render_bitmap*(ppu: PPU) =
   var int_x = ppu.bgref_int[0][0]
   var int_y = ppu.bgref_int[0][1]
   if ppu.bgcnt[2].mosaic:
-    # Vertical mosaic: reuse the internal coordinates latched on the first
-    # line of the mosaic block (same scheme as render_aff_bg)
+    # Vertical mosaic: same scheme as render_aff_bg
     let v = uint16(ppu.mosaic.bg_mosiac_v_size) + 1
     if ppu.vcount mod v == 0:
       ppu.mosaic_bgref_int[0] = [int_x, int_y]
@@ -451,40 +390,23 @@ proc render_bitmap*(ppu: PPU) =
           ppu.bg2_direct[col] = ppu.bg2_direct[src]
           ppu.bg2_direct_opaque[col] = ppu.bg2_direct_opaque[src]
 
-# Past this many OBJ-list rebuilds in one frame, the rest of the frame falls
-# back to the straight 128-entry scan. Real games need 1.00 rebuild/frame; the
-# limit is for a game that rewrites OAM in every H-blank and would otherwise
-# rebuild 160 times.
-#
-# It turns out not to be load-bearing, and that is worth recording rather than
-# assuming: a build forced to rebuild on EVERY scanline measures −1.2% to
-# +1.5% against the old full-scan code across the five gameplay states, i.e. a
-# wash. One rebuild costs about one line-scan, because it walks the same 128
-# entries once and then only ORs bits. So the guard is insurance, not a fix,
-# and 16 is deliberately generous.
+# Past this many OBJ-list rebuilds in one frame the rest of the frame uses
+# the straight 128-entry scan: a guard for a game that rewrites OAM every
+# H-blank. A rebuild costs about one line-scan, so the limit is generous.
 const OBJ_LIST_REBUILD_LIMIT* = 16
 
 type ObjGeometry = tuple[x, y, ow, oh, w, h: int]
 
 proc obj_geometry(s: Sprite): ObjGeometry {.inline.} =
   ## Screen-space geometry of one OAM entry, shared by the per-line scan and
-  ## the candidate-list rebuild so the two cannot drift apart.
-  ##
-  ## `x`/`y` are the signed top-left corner. OBJ Y is 8 bits and OBJ X is 9,
-  ## and both are treated as wrapping to negative when they exceed the screen:
-  ## a sprite parked at Y=250 hangs off the top of the display, not the bottom.
-  ## (This is the same signed model mGBA and NanoBoyAdvance use. It differs
-  ## from a true mod-256 wrap only for a 64-pixel-tall double-size sprite at
-  ## Y in 129..159, which hardware would also show wrapped around to the top;
-  ## that is pre-existing behaviour and deliberately left alone here.)
-  ##
-  ## `ow`/`oh` are the texture footprint, `w`/`h` the drawn footprint -- twice
-  ## the texture for a double-size affine sprite, which is why the candidate
-  ## test has to use `h` and not `oh`. The double-size bit (attr0.9) only means
-  ## double-size when the affine bit (attr0.8) is set; with affine clear the
-  ## same bit disables the sprite, which the caller rejects before asking.
-  ##
-  ## Prohibited shape 3 has no footprint at all, so it covers no lines.
+  ## the candidate-list rebuild so the two cannot drift apart. `x`/`y` are
+  ## the signed top-left corner: OBJ X (9 bits) and Y (8 bits) wrap negative
+  ## past the screen, so a sprite at Y=250 hangs off the top. This differs
+  ## from a true mod-256 wrap only for a 64-tall double-size sprite at Y in
+  ## 129..159; assumed, no ROM pins it. `ow`/`oh` are the texture footprint,
+  ## `w`/`h` the drawn one (double for affine double-size, so the candidate
+  ## test must use `h`). attr0.9 means double-size only with affine set;
+  ## otherwise it disables the sprite. Prohibited shape 3 has no footprint.
   let shape3 = s.obj_shape == 3
   var x = int(cast[int16](bits_range(s.attr1, 0, 8)))
   var y = int(cast[int16](bits_range(s.attr0, 0, 7)))
@@ -500,14 +422,9 @@ proc obj_geometry(s: Sprite): ObjGeometry {.inline.} =
   (x, y, ow, oh, w, h)
 
 proc rebuild_obj_lines*(ppu: PPU) =
-  ## Rebuild the whole 160-line candidate bitmap from OAM.
-  ##
-  ## An entry is a candidate for line L exactly when render_sprites' own reject
-  ## tests would let it through: not disabled, L within [y, y+h), and not
-  ## entirely off the left edge. Everything downstream of those tests (the OBJ
-  ## cycle charge, prohibited shapes, the bitmap-mode tile floor, pixels) still
-  ## happens in the scan body, so the list changes only *which entries are
-  ## looked at*, never what happens to one that is.
+  ## Rebuild the 160-line candidate bitmap from OAM. An entry is a candidate
+  ## for line L exactly when render_sprites' reject tests would pass it; the
+  ## list changes only which entries are looked at, never what happens to one.
   zeroMem(addr ppu.obj_line_mask[0][0], sizeof(ppu.obj_line_mask))
   let sprites = ppu.sprites_ptr()
   for s_idx in 0 ..< 128:
@@ -526,27 +443,13 @@ proc rebuild_obj_lines*(ppu: PPU) =
   inc ppu.obj_list_rebuilds
 
 proc oam_touched*(ppu: PPU) {.inline.} =
-  ## Invalidate the per-line OBJ candidate list.
-  ##
-  ## MUST be called by every path that mutates ppu.oam. An audit of the tree
-  ## finds exactly three, plus construction:
-  ##
-  ##  * bus.write_half_internal / write_word_internal. Byte writes to OAM are
-  ##    discarded by hardware (`of 0x7: discard`), so there is no third bus
-  ##    entry, and DMA and the cheat engine both funnel through these two.
-  ##  * load_ppu_state -- which also covers the rewind ring, rollback netplay
-  ##    snapshots and 2P link restores, since apply_state_payload reaches OAM
-  ##    only through it.
-  ##  * the HLE RegisterRamReset SWI's OAM clear phase, which writes the seq
-  ##    directly. No local ROM exercises this one; tests/ppuobjlist_test.nim
-  ##    drives it deliberately.
-  ##
-  ## Test code that seeds ppu.oam by hand has to call this too.
-  ##
-  ## Two backstops for the path someone adds later and forgets: scanline()
-  ## force-rebuilds once per frame, bounding the damage to one frame; and
-  ## -d:objListVerify makes every scanline cross-check the list against a full
-  ## scan, which is how a missed call gets found on a real ROM.
+  ## Invalidate the per-line OBJ candidate list. MUST be called by every path
+  ## that mutates ppu.oam: bus.write_half_internal / write_word_internal
+  ## (byte writes to OAM are discarded; DMA and cheats funnel through these),
+  ## load_ppu_state (covers rewind, rollback and link restores), and the HLE
+  ## RegisterRamReset OAM clear. Test code seeding ppu.oam must call it too.
+  ## Backstops: scanline() force-rebuilds once per frame, and -d:objListVerify
+  ## cross-checks the list against a full scan every line.
   ppu.obj_list_dirty = true
 
 proc render_sprites_impl(ppu: PPU; force_scan: bool) =
@@ -554,24 +457,19 @@ proc render_sprites_impl(ppu: PPU; force_scan: bool) =
   let base = 0x10000'u32
   let sprites = ppu.sprites_ptr()
   let bitmap_mode = ppu.dispcnt.bg_mode >= 3
-  # Per-scanline OBJ rendering time budget (hardware sprite cycle limit):
-  # the OBJ engine has 1210 cycles per line, or 954 when DISPCNT's H-Blank
-  # Interval Free bit frees the h-blank gap for CPU OAM access. A regular
-  # sprite on the line costs `width` cycles, an affine sprite 10 + 2*width
-  # (over its double-size footprint); once the budget runs out, later OAM
-  # entries do not render at all. The FDS-generation Famicom Mini carts rely
-  # on this: they park full-width black masking sprites at the end of OAM
-  # behind enough on-line sprites that real hardware never has time to draw
-  # them. Costs and cutoff granularity match mGBA (GBAVideoRendererCleanOAM /
-  # PreprocessSpriteLayer): the sprite that exhausts the budget still draws
-  # fully, subsequent ones are dropped.
+  # Per-line OBJ cycle budget: 1210 cycles, or 954 with DISPCNT's H-Blank
+  # Interval Free bit (GBATEK "LCD OBJ Overview"). A regular sprite costs
+  # `width` cycles, an affine one 10 + 2*width over its drawn footprint; once
+  # the budget is spent, later OAM entries do not render. Model: the sprite
+  # that exhausts the budget still draws fully; hardware likely truncates it
+  # (docs/hwprobe-questions.md row 26, open). The Famicom Mini FDS carts
+  # park full-width masking sprites at the end of OAM that hardware has no
+  # time to draw.
   var obj_cycles = if ppu.dispcnt.hblank_interval_free: 954 else: 1210
   let vc = int(ppu.vcount)
 
-  # One copy of the per-entry work, instantiated by both the candidate-list
-  # walk and the straight scan. `break one_sprite` is what used to be
-  # `continue`; the budget check that used to `break` is hoisted into each
-  # loop header so the two shapes stay literally equivalent.
+  # One copy of the per-entry work for both the candidate-list walk and the
+  # straight scan; the budget check sits in each loop header.
   template obj_entry(s_idx: int) =
     block one_sprite:
       let sprite = sprites[s_idx]
@@ -582,16 +480,13 @@ proc render_sprites_impl(ppu: PPU; force_scan: bool) =
       let width  = g.w
       let height = g.h
       let x_coord = g.x
-      # Re-tested even on the candidate path. The list is only ever allowed to
-      # *narrow* what gets looked at: keeping the rejects here means a stale or
-      # over-inclusive mask can never make a sprite appear where the old code
-      # would not have drawn one.
+      # Re-tested on the candidate path too: the list may only narrow what
+      # is looked at, never make a sprite appear
       if not (g.y <= vc and vc < g.y + height): break one_sprite
-      # Sprites fully outside the 240px window (raw x in [240, 512-width))
-      # never enter the OBJ pipeline: no pixels and no time charged
+      # Sprites fully outside the 240px window never enter the OBJ pipeline:
+      # no pixels and no time charged
       if x_coord + width < 0: break one_sprite
-      # center_{x,y} is the middle of the *drawn* box: x + w/2 covers both the
-      # plain case and the double-size case (x + ow/2 + ow/2).
+      # center_{x,y} is the middle of the *drawn* box
       let center_x = x_coord + (width shr 1)
       let center_y = g.y + (height shr 1)
       let affine = bit(sprite.attr0, 8)
@@ -644,13 +539,13 @@ proc render_sprites_impl(ppu: PPU; force_scan: bool) =
             offset *= 0x20
         offset += tex_x shr 3
         var pal_idx: uint32
-        # OBJ character fetches wrap within the 32K of OBJ VRAM (matches
-        # mGBA's offset mask and NanoBoyAdvance's tile index mask)
+        # OBJ character fetches wrap within the 32K of OBJ VRAM. Assumed; no
+        # ROM pins this.
         if bit(sprite.attr0, 13):  # 8bpp
-          # The attr2 character name always counts 32-byte units. In 1D mapping
-          # an odd name starts fetches half a tile in (32 bytes); only 2D
-          # mapping forces the low bit clear (matches mGBA's `align` mask and
-          # NanoBoyAdvance's CalculateTileNumber8BPP)
+          # The attr2 character name counts 32-byte units: in 1D mapping an
+          # odd name starts half a tile in, only 2D mapping clears the low
+          # bit (GBATEK says bit 0 is ignored in 256-colour mode). Assumed;
+          # no ROM pins this.
           if not ppu.dispcnt.obj_mapping_1d:
             tile_id = tile_id and not 1
           pal_idx = uint32(ppu.vram[base + ((uint32(tile_id) * 0x20 + uint32(offset) * 0x40 + uint32(tile_y) * 8 + uint32(tile_x)) and 0x7FFF)])
@@ -673,9 +568,8 @@ proc render_sprites_impl(ppu: PPU; force_scan: bool) =
             ppu.sprite_pixels[col].blends  = obj_mode == 0b01
             if obj_mode == 0b01: ppu.line_sprite_blend = true
 
-  # Use the candidate list unless the caller asked for the reference scan, the
-  # line is outside the bitmap's range, or this frame has already burned its
-  # rebuild budget (in which case the mask is stale and must not be trusted).
+  # Use the candidate list unless the caller asked for the reference scan or
+  # this frame has burned its rebuild budget (the mask is then stale)
   var use_list = (not force_scan) and vc >= 0 and vc < 160
   if use_list and ppu.obj_list_dirty:
     if ppu.obj_list_rebuilds < OBJ_LIST_REBUILD_LIMIT:
@@ -684,9 +578,8 @@ proc render_sprites_impl(ppu: PPU; force_scan: bool) =
       use_list = false
 
   if use_list:
-    # Set bits in OAM order: word 0 (entries 0-63) before word 1 (64-127), and
-    # low bit first within each. Priority ties break on the lower OAM index, so
-    # the visit order is not an implementation detail.
+    # Visit in OAM order (word 0 then word 1, low bit first): priority ties
+    # break on the lower OAM index
     var m = ppu.obj_line_mask[vc][0]
     while m != 0:
       if obj_cycles <= 0: return
@@ -705,12 +598,9 @@ proc render_sprites_impl(ppu: PPU; force_scan: bool) =
       obj_entry(s_idx)
 
 when defined(objListVerify):
-  # Self-checking build: every scanline renders the OBJ layer twice, once via
-  # the candidate list and once via the reference 128-entry scan, and aborts on
-  # the first difference. This is the instrument that catches an OAM mutation
-  # path that forgot to call oam_touched -- something no synthetic fuzz can see,
-  # because the fuzz drives OAM through the paths it already knows about. Run
-  # real ROMs under it.
+  # Self-checking build: every scanline renders the OBJ layer via the
+  # candidate list and via the reference scan and aborts on a difference.
+  # Catches an OAM mutation path that forgot oam_touched; run real ROMs.
   var objVerifyLines*: int = 0
   proc render_sprites*(ppu: PPU; force_scan = false) =
     let before_pixels = ppu.sprite_pixels
@@ -762,34 +652,28 @@ type WinCover* = enum
   wcEmpty, wcPartial, wcFull
 
 proc window_cover*(winh: WINH): WinCover {.inline.} =
-  ## Reduce a WINH to "none of the line", "all of the line", or "some of it".
-  ##
-  ## This must mirror `fill_window_cols` exactly, including its `min(_, 240)`
-  ## clamps — it is not a model of the hardware, it is a model of the loop
-  ## above. Both x1 and x2 are 8-bit, so either can exceed 240.
+  ## Reduce a WINH to none / all / some of the line. Must mirror
+  ## `fill_window_cols` exactly, clamps included: it models that loop, not
+  ## the hardware. Both x1 and x2 are 8-bit, so either can exceed 240.
   let x1 = int(winh.x1)
   let x2 = int(winh.x2)
   let a  = min(x2, 240)
   if x1 <= x2:
-    # One run, [x1, a). Empty when the clamp (or x1 == x2) collapses it.
+    # One run, [x1, a)
     if x1 == 0 and a == 240: wcFull
     elif x1 >= a: wcEmpty
     else: wcPartial
   else:
-    # Wrapped: [0, a) plus [b, 240). Full when the two runs meet or overlap,
-    # which includes x1 >= 240 <= x2 (both clamps land on 240, so the low run
-    # already covers everything the high run would have).
+    # Wrapped: [0, a) plus [b, 240); full when the runs meet or overlap
     let b = min(x1, 240)
     if a >= b: wcFull
     elif a == 0 and b == 240: wcEmpty
     else: wcPartial
 
 proc line_window_flags*(ppu: PPU): tuple[win0, win1, objwin: bool] {.inline.} =
-  ## Which of the three window sources can affect the current scanline. win0
-  ## and win1 apply only inside their vertical range (a comparator pair, so
-  ## y1 > y2 wraps around the bottom of the screen exactly like x1 > x2 wraps
-  ## around the right edge); the OBJ window applies only when render_sprites
-  ## actually wrote an OBJ-window pixel on this line.
+  ## Which window sources can affect this scanline: win0/win1 only inside
+  ## their vertical range (y1 > y2 wraps like x1 > x2), the OBJ window only
+  ## when render_sprites wrote an OBJ-window pixel on this line.
   let vc = ppu.vcount
   result.win0 = ppu.dispcnt.window_0_display and
                 window_contains(vc, uint16(ppu.win0v.y1), uint16(ppu.win0v.y2))
@@ -799,27 +683,16 @@ proc line_window_flags*(ppu: PPU): tuple[win0, win1, objwin: bool] {.inline.} =
 
 proc uniform_window_state*(ppu: PPU; win0_on, win1_on, objwin_on: bool;
                            ubits: var uint16; ueff: var bool): bool {.inline.} =
-  ## True only when all 240 columns are *provably* going to receive the same
-  ## (enable mask, colour-effect flag) pair from `compute_line_enables`, in
-  ## which case that pair is returned in ubits/ueff. False means "don't know" —
-  ## the caller must build the tables.
-  ##
-  ## It reproduces compute_line_enables' painter's algorithm at whole-line
-  ## granularity: lay down the base (outside, or outside/OBJ-window mixed),
-  ## then overlay win1, then win0. Each overlay either covers the whole line
-  ## (uniform from here on, whatever came before), covers nothing (no change),
-  ## or covers part of it — and a partial overlay preserves uniformity only if
-  ## what it paints is bit-for-bit what is already there.
-  ##
-  ## Called per scanline with live registers, so a mid-frame write to any of
-  ## DISPCNT/WIN0H/WIN1H/WIN0V/WIN1V/WININ/WINOUT is picked up on the next line
-  ## the same way the general path picks it up.
+  ## True only when all 240 columns provably receive the same (enable mask,
+  ## effect flag) pair from compute_line_enables, returned in ubits/ueff.
+  ## Reproduces its painter's algorithm at whole-line granularity: base
+  ## (outside, or outside/OBJ-window mixed), then win1, then win0; a partial
+  ## overlay keeps uniformity only if it paints what is already there.
   let dbg_mask = ppu.debug_layer_mask
   ubits = uint16(ppu.winout.outside_enable_bits) and dbg_mask
   ueff  = ppu.winout.outside_color_special_effect
-  # The base is per-pixel wherever the OBJ window is live, so it is uniform
-  # either because no OBJ-window pixel exists on this line, or because the
-  # OBJ-window state happens to equal the outside state.
+  # The base is uniform if no OBJ-window pixel exists on this line or the
+  # OBJ-window state equals the outside state
   var uni = (not objwin_on) or
             ((uint16(ppu.winout.obj_window_enable_bits) and dbg_mask) == ubits and
              ppu.winout.obj_window_color_special_effect == ueff)
@@ -840,13 +713,11 @@ proc uniform_window_state*(ppu: PPU; win0_on, win1_on, objwin_on: bool;
   uni
 
 proc compute_line_enables*(ppu: PPU) =
-  # Same per-pixel result as checking win0 -> win1 -> obj window -> outside,
-  # but computed once per scanline: paint the lowest-priority source first,
-  # then overlay win1, then win0.
+  # Same per-pixel result as checking win0 -> win1 -> obj window -> outside:
+  # paint the lowest-priority source first, then overlay win1, then win0
   let dbg_mask = ppu.debug_layer_mask
   let obj_active = ppu.dispcnt.obj_window_display
-  # Shared with composite()'s uniformity test, so the two cannot disagree
-  # about which windows are vertically live on this line.
+  # Shared with composite()'s uniformity test so the two cannot disagree
   let flags = ppu.line_window_flags()
   let out_bits = uint16(ppu.winout.outside_enable_bits) and dbg_mask
   let out_eff  = ppu.winout.outside_color_special_effect
@@ -869,11 +740,9 @@ proc compute_line_enables*(ppu: PPU) =
                          ppu.winin.window_0_color_special_effect)
 
 proc compute_layer_walk*(ppu: PPU) =
-  # BGs that can contribute this scanline, flattened into a single list in
-  # compositing order: priority first, then BG index (hardware picks the
-  # lower BG number at equal priority). BGs disabled in DISPCNT never render
-  # (their layer_palettes stay 0), so skip them here. Sprites are merged into
-  # the walk by comparing their per-pixel priority against each entry's.
+  # Contributing BGs in compositing order: priority first, then BG index
+  # (the lower BG number wins at equal priority). Sprites are merged into the
+  # walk by comparing their per-pixel priority against each entry's.
   var n = 0
   for p in 0 .. 3:
     for bg in 0 .. 3:
@@ -891,9 +760,8 @@ proc bgr16_spread*(c: uint16): uint64 {.inline.} =
 
 const BGR_LANE_MASK* = 0xFF'u64 or (0xFF'u64 shl 16) or (0xFF'u64 shl 32)
 
-# Exported alongside bgr16_pack so tests/ppucomposite_test.nim can prove the two
-# agree over the whole reachable domain — that equivalence is the entire licence
-# for brighten/darken skipping the saturation step.
+# Exported with bgr16_pack so tests/ppucomposite_test.nim can prove the two
+# agree, which is what licenses brighten/darken to skip saturation
 proc bgr16_pack_sat*(v: uint64): uint16 {.inline.} =
   # Saturate each lane at 0x1F, then pack back to BGR555
   var r = v and 0xFFFF'u64
@@ -905,25 +773,11 @@ proc bgr16_pack_sat*(v: uint64): uint16 {.inline.} =
   uint16(r or (g shl 5) or (b shl 10))
 
 proc bgr16_pack*(v: uint64): uint16 {.inline.} =
-  ## Pack three 5-bit lanes back to BGR555 WITHOUT saturating. Only valid
-  ## where each lane is already known to be <= 0x1F, which is exactly the
-  ## brighten/darken case: with EVY clamped to 16, darken gives
-  ## s - (s*evy)/16 >= 0 and brighten gives s + ((31-s)*evy)/16 <= 31, so
-  ## neither can leave the 5-bit range and the clamp is dead code.
-  ##
-  ## That precondition is verified exhaustively (all 65536 source colours x
-  ## all 17 reachable EVY values x both directions: every lane lands in
-  ## [0, 0x1F], and the bound is tight — brighten reaches exactly 31 and
-  ## darken exactly 0). EVY = 17 *does* overflow, so the `min(16, ...)` on
-  ## every evy_coefficient read is load-bearing, not decorative.
-  ##
-  ## The safety lives entirely in the callers: an unclamped evy_coefficient
-  ## read would make the lane masks below silently truncate mod 32 — a wrong
-  ## colour, not a crash or a channel bleed. A runtime `doAssert` was measured
-  ## and rejected (3 compares per shaded pixel = 1.0-7.3% on -d:release,
-  ## Metroid Fusion worst); the zero-cost behavioural guard is
-  ## tests/ppucomposite_test.nim driving the real compositor with
-  ## EVY = 16, 17, 31 (`nimble test_ppucomposite`).
+  ## Pack three 5-bit lanes back to BGR555 WITHOUT saturating. Valid only
+  ## where each lane is already <= 0x1F: with EVY clamped to 16, darken gives
+  ## s - (s*evy)/16 >= 0 and brighten s + ((31-s)*evy)/16 <= 31. EVY = 17
+  ## does overflow, so the `min(16, ...)` on every evy_coefficient read is
+  ## load-bearing; tests/ppucomposite_test.nim drives EVY = 16, 17, 31.
   uint16((v and 0x1F'u64) or
          (((v shr 16) and 0x1F'u64) shl 5) or
          (((v shr 32) and 0x1F'u64) shl 10))
@@ -948,23 +802,12 @@ proc blend_colors*(ppu: PPU; top_u16, bot_u16: uint16; blend_mode: int): uint16 
     bgr16_pack_sat(s - (((s * evy) shr 4) and BGR_LANE_MASK))
   else: top_u16
 
-# --- Compositing ---------------------------------------------------------
-#
-# Compositing runs per span of columns that share one window configuration,
-# not per pixel. Everything a span holds constant -- which layers the window
-# enables, their priority order, where each layer's line buffer starts, and
-# whether any colour math can apply at all -- is resolved once at the top of
-# `composite_span` and the inner loop then only walks opaque pixels.
-#
-# The two inner loops differ only in whether colour math is reachable. The
-# no-effect loop is the same "first opaque pixel in priority order wins" logic
-# the old fast path used, and it is what the great majority of real columns
-# take: a window that turns effects off, or a blend configuration whose
-# 1st-target set is empty for the layers this window enables, can never change
-# a pixel, so searching for a second layer or testing BLDCNT per pixel is pure
-# waste. Measured over nine titles, 52-100% of the columns that reach the
-# windowed/blending path fall in that class (Emerald from an in-game save
-# state: 100%).
+# Compositing runs per span of columns that share one window configuration.
+# Everything constant over a span (enabled layers, priority order, row
+# pointers, whether colour math can apply) is resolved once in
+# composite_span; the inner loops then only walk opaque pixels. The
+# no-effect loop ("first opaque pixel in priority order wins") is what most
+# real columns take.
 
 type SpanWalk = object
   ## The layer walk filtered down to one span's enabled layers, with
@@ -980,12 +823,9 @@ type SpanWalk = object
 proc composite_span_opaque(ppu: PPU; w: SpanWalk; row_base: uint32;
                            lo, hi: int; obj_enable: bool) =
   ## Span where no colour math can apply: the first opaque pixel in priority
-  ## order is the answer. Instantiated per walk length -- the walk is at most
-  ## four entries and its length is fixed for the span, so with the trip count
-  ## constant the loop unrolls and each layer's priority and row pointer stays
-  ## in a register instead of being re-loaded per pixel. The bitmap
-  ## direct-colour test is hoisted the same way; it is false in every tile
-  ## mode.
+  ## order wins. Instantiated per walk length so the loop unrolls and each
+  ## layer's priority and row pointer stays in a register; the bitmap
+  ## direct-colour test is hoisted the same way.
   let pram_u16 = cast[ptr UncheckedArray[uint16]](addr ppu.pram[0])
   let fb       = cast[ptr UncheckedArray[uint16]](addr ppu.framebuffer[0])
   let sprites  = cast[ptr UncheckedArray[SpritePixel]](addr ppu.sprite_pixels[0])
@@ -1014,8 +854,8 @@ proc composite_span_opaque(ppu: PPU; w: SpanWalk; row_base: uint32;
           if palette != 0:
             color = pram_u16[palette]
             break found
-        # Every enabled BG was transparent here: a sprite below all of them
-        # in priority still beats the backdrop.
+        # Every enabled BG was transparent: a sprite below all of them still
+        # beats the backdrop
         if sprio < 4:
           color = pram_u16[0x100 + spal]
       fb[row_base + uint32(col)] = color
@@ -1037,10 +877,8 @@ proc composite_span_opaque(ppu: PPU; w: SpanWalk; row_base: uint32;
 proc composite_span_shade(ppu: PPU; w: SpanWalk; row_base: uint32;
                           lo, hi: int; obj_enable: bool) =
   ## Span whose only reachable colour effect is brighten or darken: no
-  ## semi-transparent OBJ pixel can appear and the blend mode is not alpha, so
-  ## the layer under the top one can never matter. That makes the pixel loop
-  ## the opaque walk plus one shade of the winning colour, and it specialises
-  ## on the walk length exactly the same way.
+  ## semi-transparent OBJ pixel and no alpha, so the layer under the top one
+  ## never matters. The opaque walk plus one shade of the winning colour.
   let pram_u16 = cast[ptr UncheckedArray[uint16]](addr ppu.pram[0])
   let fb       = cast[ptr UncheckedArray[uint16]](addr ppu.framebuffer[0])
   let sprites  = cast[ptr UncheckedArray[SpritePixel]](addr ppu.sprite_pixels[0])
@@ -1107,8 +945,8 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
                     enable_bits: uint16; effects: bool) =
   let obj_enable = bit(enable_bits, 4)
   var w: SpanWalk
-  # Layers that can end up on top somewhere in this span. The backdrop always
-  # can (every layer may be transparent); OBJ only when the window enables it.
+  # Layers that can end up on top in this span: the backdrop always, OBJ
+  # only when the window enables it
   var appear = 0x20'u16
   if obj_enable: appear = appear or 0x10'u16
   for i in 0 ..< ppu.walk_n:
@@ -1124,10 +962,9 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
       appear = appear or (1'u16 shl bg)
       w.n = k + 1
 
-  # Can colour math change any pixel in this span? Alpha/brighten/darken all
-  # require the top layer to be a BLDCNT 1st target, and a semi-transparent
-  # OBJ pixel forces alpha regardless of the blend mode -- so if neither is
-  # reachable here, the whole effects apparatus is dead code for this span.
+  # Colour math needs the top layer to be a BLDCNT 1st target, or a
+  # semi-transparent OBJ pixel (which forces alpha regardless of mode); if
+  # neither is reachable the effects apparatus is dead for this span
   let can_blend = effects and
     ((obj_enable and ppu.line_sprite_blend) or
      (ppu.bldcnt.blend_mode != 0 and
@@ -1135,17 +972,15 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
   if not can_blend:
     ppu.composite_span_opaque(w, row_base, lo, hi, obj_enable)
     return
-  # Brighten/darken with no semi-transparent OBJ pixel in play never needs the
-  # layer below the top one, which is the whole reason the general loop below
-  # is shaped the way it is. Split it out.
+  # Brighten/darken with no semi-transparent OBJ pixel never needs the layer
+  # below the top one
   if ppu.bldcnt.blend_mode != 1 and not (obj_enable and ppu.line_sprite_blend):
     ppu.composite_span_shade(w, row_base, lo, hi, obj_enable)
     return
 
-  # Colour math is reachable in this span: find the top layer, then the layer
-  # under it when (and only when) the result can depend on it. Kept in this
-  # proc rather than split out like the opaque loop, so that the walk stays a
-  # plain local the compiler can keep in registers across the pixel loop.
+  # Colour math is reachable: find the top layer, then the layer under it
+  # only when the result can depend on it. Kept in this proc so the walk
+  # stays a plain local the compiler can keep in registers.
   let pram_u16 = cast[ptr UncheckedArray[uint16]](addr ppu.pram[0])
   let fb       = cast[ptr UncheckedArray[uint16]](addr ppu.framebuffer[0])
   let sprites  = cast[ptr UncheckedArray[SpritePixel]](addr ppu.sprite_pixels[0])
@@ -1154,9 +989,7 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
   let bld        = uint16(ppu.bldcnt)
   let blend_mode = int(ppu.bldcnt.blend_mode)
   let backdrop   = pram_u16[0]
-  # BLDALPHA/BLDY are constant for the span, so extract the coefficients once
-  # here instead of re-reading the bitfields inside blend_colors on every
-  # blended pixel.
+  # BLDALPHA/BLDY are constant for the span
   let eva = uint64(min(16, int(ppu.bldalpha.eva_coefficient)))
   let evb = uint64(min(16, int(ppu.bldalpha.evb_coefficient)))
   let evy = uint64(min(16, int(ppu.bldy.evy_coefficient)))
@@ -1182,20 +1015,16 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
   let sel2_obj = bit(bld, 4 + 8)
   let sel2_bd  = bit(bld, 5 + 8)
 
-  # The search for the TOP layer runs on every pixel, so it gets the same
-  # per-walk-length instantiation as the opaque and shade loops. The search
-  # for the bottom does not: it starts at a runtime walk position, and it is
-  # reached on 0-14% of pixels across the benchmark titles, so it stays the
-  # general loop above.
+  # The top-layer search runs on every pixel, so it is instantiated per walk
+  # length; the bottom search starts at a runtime position and stays general
   template blend_loop(NN: static int; DIRECT: static bool) =
     for col in lo ..< hi:
       let sp = sprites[col]
       let spal = int(sp.palette)
       var sprio = 4'i32
       if obj_enable and spal != 0: sprio = int32(sp.priority)
-      # `idx` carries the walk position plus a "OBJ already taken" flag in a
-      # spare bit, so the search for the blend bottom resumes where the top
-      # left off instead of restarting.
+      # `idx` carries the walk position plus an "OBJ already taken" flag so
+      # the bottom search resumes where the top left off
       var idx = NN or SPRITE_TAKEN
       var top_color = backdrop
       var top_blends = false
@@ -1227,9 +1056,8 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
           top_blends = sp.blends
           top_selected = sel1_obj
       var color = top_color
-      # 1st-target = BLDCNT bit `layer`, 2nd-target = bit `layer + 8`. The
-      # second layer is only searched when the result can depend on it: a
-      # semi-transparent OBJ on top, or alpha blending with a selected top.
+      # The second layer is searched only when the result can depend on it:
+      # a semi-transparent OBJ on top, or alpha blending with a selected top
       if top_blends or (top_selected and blend_mode == 1):
         var bsprio = 4'i32
         if (idx and SPRITE_TAKEN) == 0 and obj_enable and spal != 0:
@@ -1286,11 +1114,8 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
 proc composite*(ppu: PPU; row_base: uint32) =
   ppu.compute_layer_walk()
   let dbg_mask = ppu.debug_layer_mask
-  # Which window sources actually apply to THIS line? win0/win1 only inside
-  # their vertical range, the OBJ window only when a sprite wrote an
-  # OBJ-window pixel (tracked in render_sprites, so no per-column scan). When
-  # none of them do, every column shares one enable mask and there is no need
-  # to build (or read back) the per-column tables at all.
+  # When no window source applies to this line, every column shares one
+  # enable mask and the per-column tables are not needed
   let (win0_on, win1_on, objwin_on) = ppu.line_window_flags()
   if not (win0_on or win1_on or objwin_on):
     let any_window = ppu.dispcnt.window_0_display or
@@ -1305,13 +1130,9 @@ proc composite*(ppu: PPU; row_base: uint32) =
                          uint16(ppu.dispcnt.default_enable_bits) and dbg_mask,
                          true)
     return
-  # A window is live on this line, but the line can still resolve to a single
-  # enable mask — a full-width WIN0 is the common case, and both Pokemon games
-  # are in it on every line of real gameplay. Deciding that from the registers
-  # skips writing 240 enable entries and 240 effect flags and reading them all
-  # back to rediscover they are identical. The test in ppucomposite_test.nim
-  # fuzzes this decision against compute_line_enables; disable_uniform_window
-  # is how it runs the general path for comparison.
+  # A live window can still resolve to one enable mask (a full-width WIN0 is
+  # the common case). tests/ppucomposite_test.nim fuzzes this decision against
+  # compute_line_enables via disable_uniform_window.
   var ubits: uint16
   var ueff:  bool
   if not ppu.disable_uniform_window and
@@ -1319,8 +1140,7 @@ proc composite*(ppu: PPU; row_base: uint32) =
     ppu.composite_span(row_base, 0, 240, ubits, ueff)
     return
   ppu.compute_line_enables()
-  # Split the line into runs of identical window state and composite each one
-  # with the enable mask hoisted out of the pixel loop.
+  # Composite each run of identical window state with its mask hoisted
   var col = 0
   while col < 240:
     let bits = ppu.line_enables[col]
@@ -1332,18 +1152,14 @@ proc composite*(ppu: PPU; row_base: uint32) =
     col = e
 
 proc scanline*(ppu: PPU) =
-  # Render skipping: when a full frame passes without any change to VRAM,
-  # PRAM, OAM, or PPU registers, the framebuffer already contains exactly
-  # what each scanline would produce, so skip rendering until something
-  # changes. A mid-frame change only affects lines from that point down;
-  # the untouched lines above still hold correct (identical) pixels.
+  # Render skipping: after a full frame with no change to VRAM/PRAM/OAM/PPU
+  # registers the framebuffer already holds every line, so skip until
+  # something changes (a mid-frame change only affects lines below it)
   if ppu.vcount == 0:
-    # Speed-mode frameskip: force-skip whole frames on a fixed cadence,
-    # regardless of dirtiness. render_dirty is NOT consumed on a skipped
-    # frame, so the next rendered frame repaints everything that changed.
+    # Speed-mode frameskip: render_dirty is NOT consumed on a skipped frame,
+    # so the next rendered frame repaints everything that changed
     if ppu.frameskip > 0:
-      # fs_counter == 0 renders (so the first frame after enabling paints),
-      # the next `frameskip` frames are skipped.
+      # fs_counter == 0 renders, the next `frameskip` frames are skipped
       ppu.forced_skip = ppu.fs_counter != 0
       inc ppu.fs_counter
       if ppu.fs_counter > ppu.frameskip:
@@ -1353,9 +1169,8 @@ proc scanline*(ppu: PPU) =
     if not ppu.forced_skip:
       ppu.skip_render = not ppu.render_dirty
       ppu.render_dirty = false
-    # New frame: the OBJ list's rebuild budget comes back, plus one forced
-    # rebuild as the missed-oam_touched backstop (see oam_touched; cost
-    # measurements at OBJ_LIST_REBUILD_LIMIT).
+    # New frame: rebuild budget comes back, plus one forced rebuild as the
+    # missed-oam_touched backstop
     ppu.obj_list_rebuilds = 0
     ppu.obj_list_dirty = true
   if ppu.forced_skip:
@@ -1374,13 +1189,9 @@ proc scanline*(ppu: PPU) =
   if ppu.dispcnt.forced_blank:
     for c in 0..239: ppu.framebuffer[row_base + uint32(c)] = 0x7FFF'u16
     return
-  # Only the BGs DISPCNT enables are worth clearing. A disabled BG is never
-  # written (every renderer returns on this same bit) and never read
-  # (compute_layer_walk leaves it out of the walk), so its 240 bytes are
-  # cleared purely to be ignored. Games leave 1-2 BGs off most of the time --
-  # measured across nine titles, 0.5% (Mega Man Battle Network) to 57%
-  # (FireRed) of these clears were for BGs not in the walk at all, with most
-  # titles around half.
+  # Only the BGs DISPCNT enables need clearing: a disabled BG is never
+  # written (renderers return on the same bit) nor read (compute_layer_walk
+  # skips it)
   for bg in 0..3:
     if bit(uint16(ppu.dispcnt), 8 + bg):
       for c in 0..239: ppu.layer_palettes[bg][c] = 0
@@ -1412,17 +1223,14 @@ proc scanline*(ppu: PPU) =
     ppu.composite(row_base)
 
 proc rerender_frame*(ppu: PPU) =
-  ## Re-run the visible scanline pipeline against the current PPU memory and
-  ## register state, without advancing emulation, so a paused frame reflects a
-  ## debug_layer_mask change immediately. Faithful for frames whose PPU
-  ## configuration was static all frame (the common paused case); frames that
-  ## used mid-frame HBlank effects re-render from the final line's registers.
-  ## Non-destructive: affine internal references and vcount are restored, so it
-  ## is safe to call even while emulation is running.
+  ## Re-run the visible scanline pipeline against the current PPU state
+  ## without advancing emulation, so a paused frame reflects a
+  ## debug_layer_mask change. Frames with mid-frame HBlank effects re-render
+  ## from the final line's registers. Non-destructive: affine internal
+  ## references and vcount are restored.
   let saved_vcount = ppu.vcount
   var saved_bgref_int = ppu.bgref_int
-  # Start the affine references at their line-0 values (matching the vblank
-  # latch that runs when vcount reaches 160).
+  # Affine references at their line-0 values (the vblank latch)
   for bg in 0..1:
     for r in 0..1:
       ppu.bgref_int[bg][r] = ppu.bgref[bg][r].num
@@ -1436,8 +1244,7 @@ proc rerender_frame*(ppu: PPU) =
       ppu.bgref_int[bg][1] += ppu.bgaff[bg][3].num  # bgy += dmy
   ppu.vcount = saved_vcount
   ppu.bgref_int = saved_bgref_int
-  # Prime the pipeline so the next real frame after unpause still renders, and
-  # force the frontend to re-upload the (now changed) framebuffer.
+  # Make the next real frame render and the frontend re-upload
   ppu.render_dirty = true
   ppu.skip_render = false
   ppu.frame_static = false
@@ -1467,10 +1274,9 @@ proc `[]=`*(ppu: PPU; io_addr: uint32; value: uint8) =
   of 0x000..0x001: write(ppu.dispcnt, value, io_addr and 1)
   of 0x002..0x003: discard  # green swap
   of 0x004:
-    # Writable low-byte bits are 3-5 (the IRQ enables) only: bits 0-2 are
-    # the live flags and bits 6-7 do not latch on hardware - the gbaedge
-    # IOBYTE page's strb 0x44 (bits 2+6) reads back as just the flags,
-    # while dingbat's old 0xF8 mask stored bit 6 (readback 0x0041).
+    # Writable low-byte bits are 3-5 (the IRQ enables): bits 0-2 are the
+    # live flags and bits 6-7 do not latch (gbaedge IOBYTE page: strb 0x44
+    # reads back as just the flags)
     let preserved = uint8(toU16(ppu.dispstat)) and 0x07'u8
     write(ppu.dispstat, (value and 0x38'u8) or preserved, 0)
   of 0x005: write(ppu.dispstat, value, 1)

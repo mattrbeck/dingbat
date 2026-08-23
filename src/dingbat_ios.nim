@@ -1,31 +1,16 @@
-# iOS C API for the dingbat emulator core, the sibling of src/dingbat_wasm.nim.
+# iOS C API for the core (static library, ios/build-core.sh; header
+# ios/include/dingbat.h), the sibling of src/dingbat_wasm.nim.
 #
-# Built as a static library (see ios/build-core.sh) and consumed by the Swift
-# shell in ios/Dingbat via the handwritten header ios/include/dingbat.h. The
-# exported surface mirrors the wasm build where possible; differences:
+# Audio is pull-based: the build omits -d:test_harness/-d:emscripten so the
+# APUs take their desktop SDL2-queue path, and src/dingbat_ios_audio.c provides
+# those SDL2 symbols as a ring buffer drained from an AVAudioSourceNode render
+# block. Pacing is the desktop model: the shell runs frames only while
+# dingbat_audio_ahead() is 0, so the 32768 Hz audio clock paces emulation; the
+# C file breaks get_sample()'s blocking backstop after ~250 ms of stalled
+# playback so the shell cannot deadlock.
 #
-#   - Audio is *pull*-based instead of wasm's push-per-frame model. The build
-#     deliberately omits -d:test_harness/-d:emscripten so the APUs take their
-#     desktop SDL2-queue path — and the SDL2 audio symbols they import are
-#     provided by src/dingbat_ios_audio.c (compiled in below), which implements
-#     them as a ring buffer drained by dingbat_audio_read() from an
-#     AVAudioSourceNode render block.
-#
-#   - Pacing model: identical to the desktop frontend. The APU queues samples
-#     as emulation runs; dingbat_audio_ahead() exposes the core's audio_ahead()
-#     check and the shell runs frames only while audio is NOT comfortably
-#     ahead of playback, so the audio clock (32768 Hz, real time) paces
-#     emulation. The blocking backstop inside get_sample() stays a rarely-hit
-#     safety net, and dingbat_ios_audio.c breaks that backstop after ~250 ms
-#     if playback stalls, so the shell can never deadlock.
-#
-#   - Presentation: dingbat_framebuffer_rgba() applies the same BGR555→RGBA
-#     LCD color-correction LUT the wasm build uses, so the shell can upload
-#     straight to a texture/CGImage without porting the LUT to Swift.
-#
-# All threading happens Swift-side; every function here must be called from a
-# single thread (the shell uses the main thread via CADisplayLink), except the
-# plain-C dingbat_audio_* functions in dingbat_ios_audio.c which are safe from
+# Every function here must be called from one thread (the shell's main thread
+# via CADisplayLink); only the plain-C dingbat_audio_* functions are safe from
 # the CoreAudio render thread.
 
 import std/[os, strutils, math]
@@ -50,8 +35,8 @@ var biosPath:  string  = ""
 
 proc NimMain() {.importc.}
 
-# LCD color correction, identical to dingbat_wasm.nim's build_color_lut:
-# linearize with lcdGamma 4.0, mix channels, re-gamma with outGamma 2.2.
+# LCD color correction, the GBA table of dingbat_wasm.nim's build_color_luts:
+# linearize with gamma 4.0, mix channels, re-gamma with 2.2.
 var colorLut: array[0x8000, uint32]
 var rgbaBuffer: seq[uint32] = @[]
 
@@ -109,18 +94,17 @@ proc load_rom_impl(path, bios: string): cint =
     return -2
 
 proc dingbat_load_rom(rom_path: cstring; bios_path: cstring): cint {.exportc, cdecl.} =
-  ## Load a .gba/.gb/.gbc ROM from a filesystem path. Battery saves are read
-  ## from and written to `<rom minus extension>.sav` next to the ROM, so the
-  ## path should live somewhere writable (the app's Documents dir).
-  ## Returns 0 on success, -1 if missing, -2 on core init failure.
+  ## Battery saves live at `<rom minus extension>.sav` next to the ROM, so the
+  ## path must be writable. Returns 0 on success, -1 if missing, -2 on core
+  ## init failure.
   let bios = if bios_path != nil: $bios_path else: ""
   load_rom_impl($rom_path, bios)
 
 proc dingbat_load_rom_bytes(data: pointer; len: cint; persist_path: cstring;
                             bios_path: cstring): cint {.exportc, cdecl.} =
-  ## Persist a ROM image to persist_path (must be writable; battery saves are
-  ## created alongside it) and load it. Returns dingbat_load_rom's codes, or
-  ## -3 if the bytes could not be written.
+  ## Write the image to persist_path (battery saves go alongside it) and load
+  ## it. Returns dingbat_load_rom's codes, or -3 if the bytes could not be
+  ## written.
   if data == nil or len <= 0 or persist_path == nil: return -3
   var image = newString(int(len))
   copyMem(addr image[0], data, int(len))
@@ -149,8 +133,8 @@ proc dingbat_framebuffer(): ptr uint16 {.exportc, cdecl.} =
   of ekNone: nil
 
 proc dingbat_framebuffer_rgba(): ptr uint32 {.exportc, cdecl.} =
-  ## Color-corrected RGBA8888 (R first in memory) view of the framebuffer,
-  ## converted on call. Valid until the next ROM load. nil when no core runs.
+  ## Color-corrected RGBA8888 (R first in memory), converted on call. Valid
+  ## until the next ROM load; nil when no core runs.
   let fb = dingbat_framebuffer()
   if fb == nil: return nil
   let n = rgbaBuffer.len
@@ -166,7 +150,8 @@ proc dingbat_fb_height(): cint {.exportc, cdecl.} =
   if stateKind == ekGB: GB_H else: GBA_H
 
 proc dingbat_frame_static(): cint {.exportc, cdecl.} =
-  ## 1 if the last GBA frame was unchanged (render skip); shell may skip upload.
+  ## 1 if the last GBA frame was unchanged (render skip), so the shell may
+  ## skip the upload.
   if stateKind == ekGBA and stateGba.ppu.frame_static: 1 else: 0
 
 proc dingbat_set_input(input_id: cint; pressed: cint) {.exportc, cdecl.} =
@@ -185,9 +170,8 @@ proc dingbat_is_stopped(): cint {.exportc, cdecl.} =
   if stateKind == ekGBA and stateGba != nil and stateGba.cpu.stopped: 1 else: 0
 
 proc dingbat_flush_save() {.exportc, cdecl.} =
-  ## Persist battery-backed save RAM now (call on scenePhase background/exit).
-  ## GBA saves also auto-flush once per frame via the core's etSaves event;
-  ## GB saves only flush here or on ROM switch.
+  ## Call on scenePhase background/exit. GBA saves also flush once per frame
+  ## via the core's etSaves event; GB saves only flush here or on ROM switch.
   flush_current_save()
 
 proc dingbat_set_volume(volume: cint; mute: cint) {.exportc, cdecl.} =
@@ -198,17 +182,16 @@ proc dingbat_set_volume(volume: cint; mute: cint) {.exportc, cdecl.} =
   of ekNone: discard
 
 proc dingbat_set_fast_forward(enabled: cint) {.exportc, cdecl.} =
-  ## Disables audio-sync pacing (the APU then clears the queue each buffer, so
-  ## playback keeps only the freshest samples). The shell decides how many
-  ## frames per display tick fast-forward actually runs.
+  ## Disables audio-sync pacing (the APU then keeps only the freshest
+  ## samples); the shell decides how many frames per display tick to run.
   case stateKind
   of ekGBA: stateGba.apu.sync = enabled == 0
   of ekGB:  stateGb.apu.sync = enabled == 0
   of ekNone: discard
 
 proc dingbat_audio_ahead(): cint {.exportc, cdecl.} =
-  ## 1 when synced audio is buffered comfortably ahead of playback; the shell
-  ## should stop running frames this display tick (the core's pacing signal).
+  ## 1 when synced audio is buffered comfortably ahead of playback: the
+  ## shell's pacing signal to stop running frames this display tick.
   let ahead = case stateKind
     of ekGBA: stateGba.apu.audio_ahead()
     of ekGB:  stateGb.apu.audio_ahead()
@@ -216,16 +199,16 @@ proc dingbat_audio_ahead(): cint {.exportc, cdecl.} =
   if ahead: 1 else: 0
 
 # --- Save states ---
-# Single-threaded like the wasm build: the shell only calls these from the
-# same (main) thread that runs dingbat_run_frame, i.e. at frame boundaries.
+# Only valid at frame boundaries: the shell calls these from the thread that
+# runs dingbat_run_frame.
 
-# Retained so the pointer returned by dingbat_state_data stays valid after
-# dingbat_state_size returns (replaced on the next dingbat_state_size call).
+# Retained so the pointer from dingbat_state_data stays valid until the next
+# dingbat_state_size call.
 var stateImage: string = ""
 
 proc dingbat_state_size(): cint {.exportc, cdecl.} =
-  ## Serialize the running core's full state (same bytes as desktop .state
-  ## files) into a retained buffer; returns its length, 0 when no core runs.
+  ## Serialize the full state (same bytes as desktop .state files) into a
+  ## retained buffer; returns its length, 0 when no core runs.
   case stateKind
   of ekGBA: stateImage = stateGba.state_bytes()
   of ekGB:  stateImage = stateGb.state_bytes()
@@ -237,8 +220,8 @@ proc dingbat_state_data(): pointer {.exportc, cdecl.} =
   if stateImage.len > 0: addr stateImage[0] else: nil
 
 proc dingbat_load_state(data: pointer; len: cint): cint {.exportc, cdecl.} =
-  ## Validate and apply a state image. Returns 1 on success; 0 on rejection
-  ## (version/core/ROM mismatch or corruption) with the core untouched.
+  ## Returns 1 on success; 0 on rejection (version/core/ROM mismatch or
+  ## corruption) with the core untouched.
   if data == nil or len <= 0: return 0
   var image = newString(int(len))
   copyMem(addr image[0], data, int(len))

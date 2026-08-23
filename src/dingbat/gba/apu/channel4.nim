@@ -36,17 +36,11 @@ proc ch4_catchup_slow(ch: Channel4; observer_period: uint32) =
   let steps = gba_steps_due(now - ch.next_step, period, ch.arm_delay,
                             observer_period)
   if steps == 0: return
-  # Unlike the other three this is O(steps): the LFSR has no cheap closed form.
-  # The win is that it iterates in a tight loop instead of paying a scheduler
-  # insert + heap pop + closure dispatch per shift — and that the scheduler's
-  # event horizon is no longer pinned at 32 cycles, which is what defeated
-  # HALT/fast_forward and bus.catch_up. Bounded because end_frame catches every
-  # channel up, so at most one frame of shifts (<= 8778 at the power-on
-  # divisor) can accumulate — exactly the number the old event chain ran anyway.
-  #
-  # NOTE the old ch4_step re-armed UNCONDITIONALLY, not gated on `enabled` the
-  # way the GB core's did, so there is no park-when-disabled case to model here:
-  # once triggered, this chain runs until RegisterRamReset or a re-trigger.
+  # O(steps): the LFSR has no cheap closed form. A scheduler event per shift
+  # would pin the event horizon at 32 cycles and defeat HALT/fast_forward.
+  # Bounded because end_frame catches every channel up (<= 8778 shifts per
+  # frame at the power-on divisor). The chain is not gated on `enabled`: once
+  # triggered it runs until RegisterRamReset or a re-trigger.
   for _ in 0 ..< steps: ch4_shift(ch)
   ch.next_step += steps * period
   # The step now pending was armed by the one before it, i.e. one CURRENT
@@ -93,7 +87,7 @@ proc ch4_write*(ch: Channel4; address: uint32; value: uint8) =
     if triggered and ch.dac_enabled: ch.enabled = true
     ch.agb_length_on_nrx4(length_enable, triggered, 0x40)  # AGB order; see abstract_channels
     if triggered:
-      # Same as clear(etAPUChannel4) + schedule(period); see ch1_write.
+      # Re-arm a full period from now; see ch1_write.
       let arm4 = ch.ch4_frequency_timer()
       ch.next_step = ch.gba.scheduler.cycles + CycleCount(arm4)
       ch.arm_delay = arm4

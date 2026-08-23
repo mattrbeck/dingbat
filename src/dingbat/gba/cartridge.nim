@@ -3,29 +3,17 @@
 proc new_cartridge*(rom_path: string): Cartridge =
   result = Cartridge()
   let sz = int(getFileSize(rom_path))
-  # Allocate only the next power of two >= the ROM size (was a flat 32 MB): a
-  # 16 MB game now uses 16 MB, an 8 MB game 8 MB, etc. A power-of-two size lets
-  # the instruction-fetch fast path mask the address (rom_mask) with no bounds
-  # check, and reads past the ROM (which are rare) fall back to the open-bus
-  # address pattern in bus.nim. The [sz, alloc) gap stays zero (newSeq default),
-  # matching the previous non-power-of-two zero-pad behavior.
-  # The floor only has to keep the header in range (game_code lives at 0xAC)
-  # and give rom_ptr something to point at. It must NOT be set to a "typical"
-  # cart size: rom.len is also the address at which reads start returning the
-  # open-bus pattern, and a mask ROM decodes exactly its own power-of-two
-  # window — so a 1.7 KB test ROM has to float from 2 KB up, not from 32 KB.
-  # (GBATEK: the unused gamepak area reads back Address/2 AND FFFFh; jsmolka
-  # unsafe test 2 checks the first 4 KB past next_pow2(rom size).) No real
-  # cart is anywhere near the floor, so nothing about shipped games changes.
+  # Allocate the next power of two >= the ROM size: the fetch fast path masks
+  # with rom_mask, and reads from rom.len upward return the open-bus address
+  # pattern (GBATEK: the unused gamepak area reads Address/2 AND FFFFh; jsmolka
+  # unsafe test 2 checks the first 4 KB past next_pow2(rom size)). The floor
+  # only keeps the header in range: a 1.7 KB test ROM must float from 2 KB.
   var alloc = 0x100
   while alloc < sz: alloc = alloc shl 1
-  # Classic NES Series / Famicom Mini carts are exactly 1 MiB and their mask
-  # ROM decodes 4 MiB of address space: the image appears mirrored 4x, but not
-  # beyond that (reads past 4 MiB float and return the address pattern, same
-  # as any other cart). Metroid's anti-emulation check jumps into the mirrors
-  # and shows "GAME PAK ERROR" if they aren't there. Materialize the mirrors
-  # into the buffer at load time so the read fast path stays branch-free;
-  # matches mGBA's GBALoadROM ("1 MiB ROMs all appear as 4x mirrored").
+  # 1 MiB carts (Classic NES Series / Famicom Mini) decode 4 MiB: the image is
+  # mirrored 4x, then the address pattern. Classic NES Metroid's anti-emulation
+  # check jumps into the mirrors ("GAME PAK ERROR" without them). Materialised
+  # at load so the read path stays branch-free.
   if sz == 0x100000: alloc = 0x400000
   result.rom = newSeq[byte](alloc)
   result.rom_mask = uint32(alloc - 1)
@@ -36,12 +24,9 @@ proc new_cartridge*(rom_path: string): Cartridge =
   if sz == 0x100000:
     for i in 1 .. 3:
       copyMem(addr result.rom[i * sz], addr result.rom[0], sz)
-  # Cart identity, taken once, here, from the bytes exactly as they came off
-  # disk. Nothing may recompute it later: the cheat engine patches `rom` in
-  # place, so a hash of the live buffer changes the moment a ROM-patching code
-  # is toggled and every save state for the game stops loading. Same window as
-  # before (the first 1 MB of the FILE), so the value is unchanged for every
-  # cart -- this moves WHEN it is computed, not WHAT from.
+  # Cart identity is hashed once, from the first 1 MB as loaded, never from the
+  # live buffer: the cheat engine patches `rom` in place, and a changed hash
+  # would stop every save state for the game from loading.
   let idn = min(sz, 0x100000)
   result.rom_identity =
     if idn <= 0: fnv1a(toOpenArray(result.rom, 0, -1))

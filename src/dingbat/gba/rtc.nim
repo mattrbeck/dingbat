@@ -1,10 +1,9 @@
 # RTC implementation (included by gba.nim; std/times comes from its imports)
 
-# Per-minute IRQ poll interval: one emulated second (16.78 MHz CPU clock).
-# The S-3511A asserts /INT at second 00 of every minute, but this RTC reads a
-# live clock instead of counting cycles, so a once-per-emulated-second poll
-# detects the boundary; comparing whole minutes (not `second == 0`) stays
-# correct when emulated time drifts from the wall clock (turbo / slowdown).
+# Per-minute IRQ poll interval: one emulated second. The S-3511A asserts /INT
+# at second 00 of every minute; this RTC reads a live clock, so a once-per-
+# second poll comparing whole minutes (not `second == 0`) finds the boundary
+# even when emulated time drifts from the wall clock (turbo / slowdown).
 const RTC_IRQ_POLL_CYCLES = 1 shl 24
 
 proc rtc_now(rtc: RTC): DateTime =
@@ -22,11 +21,9 @@ proc rtc_minutes(rtc: RTC): int64 =
   else: getTime().toUnix div 60
 
 proc rtc_irq_poll*(gba: GBA) =
-  ## etRtcSecond handler (GBA): scheduled only while the control register's
-  ## per-minute IRQ bit is set. Raises the Game Pak interrupt once per RTC
-  ## minute boundary. In deterministic mode the clock is frozen, so the
-  ## minute never changes and no IRQ can fire — bit-identical on both
-  ## rollback peers (the pending event itself is serialized by savestate).
+  ## etRtcSecond handler: scheduled only while the control register's
+  ## per-minute IRQ bit is set; raises the Game Pak IRQ once per minute
+  ## boundary. In deterministic mode the clock is frozen, so no IRQ fires.
   let rtc = gba.bus.gpio.rtc
   if not rtc.irq: return  # disabled since scheduling; drop the poll chain
   let m = rtc_minutes(rtc)

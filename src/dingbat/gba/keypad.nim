@@ -2,15 +2,14 @@
 
 proc new_keypad*(gba: GBA): Keypad =
   result = Keypad(gba: gba)
-  # Unused bits 10-15 read as 0 on hardware: idle KEYINPUT is 0x03FF, not
-  # 0xFFFF (mGBA stores 0x3FF ^ keys). Games that compute pressed keys as
-  # KEYINPUT ^ 0x03FF would otherwise see bits 10-15 as phantom presses.
+  # Bits 10-15 read as 0 (GBATEK, KEYINPUT): idle is 0x03FF, not 0xFFFF. Games
+  # computing pressed keys as KEYINPUT ^ 0x03FF would otherwise see phantoms.
   result.keyinput = cast[KEYINPUT](0x03FF'u16)
   result.keycnt   = cast[KEYCNT](0x0000'u16)
 
 proc check_keypad_irq(kp: Keypad) =
-  ## Evaluate the KEYCNT interrupt condition and raise the keypad IRQ on a
-  ## rising edge, so a held combination doesn't repeatedly set IF.
+  ## Raises the keypad IRQ on a rising edge of the KEYCNT condition only, so a
+  ## held combination does not repeatedly set IF.
   let mask    = toU16(kp.keycnt) and 0x03FF'u16
   let pressed = not toU16(kp.keyinput) and 0x03FF'u16
   let cond = kp.keycnt.irq_enable and
@@ -38,22 +37,17 @@ proc `[]`*(kp: Keypad; io_addr: uint32): uint8 =
   else: raise newException(Exception, "Unreachable keypad read " & hex_str(uint32(io_addr)))
 
 proc write_keycnt16*(kp: Keypad; value: uint16) =
-  ## Atomic 16-bit KEYCNT store: commit the whole value, then run a single
-  ## IRQ-condition check (hardware/mGBA semantics). Decomposing into two
-  ## byte writes with a check after each would observe a transient the
-  ## hardware never has: KEYCNT 0xC00F -> 0x0000 passes through 0xC000 =
-  ## IRQ enabled, AND condition, empty mask, which matches vacuously with
-  ## no keys held and latches a phantom keypad IRQ. GBA Video carts arm
-  ## KEYCNT=0xC00F (A+B+Select+Start) as a soft-reset combo and boot-loop
-  ## forever on that phantom IRQ. The bus routes 16/32-bit stores covering
-  ## KEYCNT here instead of through the byte path.
+  ## Atomic 16-bit KEYCNT store: commit the whole value, then one IRQ check.
+  ## Two byte writes with a check after each would pass 0xC00F -> 0x0000
+  ## through 0xC000 (IRQ enabled, AND condition, empty mask), which matches
+  ## vacuously and latches a phantom IRQ; GBA Video carts arm 0xC00F as a
+  ## soft-reset combo and boot-loop on it. The bus routes 16/32-bit stores here.
   kp.keycnt = cast[KEYCNT](value)
   kp.keycnt.not_used = 0
   kp.check_keypad_irq()
 
 proc `[]=`*(kp: Keypad; io_addr: uint32; value: uint8) =
-  # Genuine 8-bit stores: one commit of the merged value, one check —
-  # same as hardware's continuous evaluation of the committed register.
+  # Genuine 8-bit stores: one commit of the merged value, one check.
   case io_addr
   of 0x132:
     write(kp.keycnt, value, 0)

@@ -3,7 +3,7 @@
 proc new_mmio*(gba: GBA): MMIO =
   result = MMIO(gba: gba)
   result.waitcnt = WAITCNT()
-  result.memctrl = 0x0D000020'u32  # documented reset default (IDENT page)
+  result.memctrl = 0x0D000020'u32  # GBATEK, "System Control"
 
 proc `[]`*(mmio: MMIO; address: uint32): uint8 =
   let io_addr = 0xFFFFFF'u32 and address
@@ -45,15 +45,15 @@ proc `[]=`*(mmio: MMIO; address: uint32; value: uint8) =
     mmio.postflg = value and 1
   of 0x301:
     mmio.gba.cpu.halted = true
-    mmio.gba.cpu.stopped = bit(value, 7)  # Stop wakes only on keypad/cartridge/SIO
-    # Stop mode blanks the LCD without any memory write; force a re-render
+    mmio.gba.cpu.stopped = bit(value, 7)
+    # Stop blanks the LCD without a memory write.
     if mmio.gba.cpu.stopped:
       mmio.gba.ppu.render_dirty = true
-    # Wake immediately if an enabled interrupt is already pending
+    # Wake immediately if an enabled interrupt is already pending.
     mmio.gba.interrupts.schedule_interrupt_check()
   else:
     if (io_addr and 0xFFFF'u32) in 0x800'u32..0x803'u32:
-      # Internal memory control: stored for readback; effects unimplemented
+      # Internal memory control: readback only; effects unimplemented.
       write(mmio.memctrl, value, io_addr and 3)
       return
     when defined(test_harness):

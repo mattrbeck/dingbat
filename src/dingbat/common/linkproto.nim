@@ -1,26 +1,16 @@
-# Wire protocol for the dingbat network link (phase 3 of docs/multiplayer.md).
+# Wire protocol for the dingbat network link. Transport-agnostic byte
+# conversion: length-prefixed little-endian frames with fixed field layouts
+# (`u32le payload_length`, then the payload; first payload byte is the message
+# type), so any transport and any language produces the same bytes. Field
+# layout is documented in docs/multiplayer.md; keep the two in sync.
 #
-# Transport-agnostic: this module only converts messages to and from bytes.
-# The wire format is deliberately trivial — length-prefixed little-endian
-# binary frames with fixed field layouts — so any transport (TCP today, a
-# browser WebRTC DataChannel tomorrow) and any language (JS included) can
-# produce and consume the same frames byte-for-byte. No host-endianness
-# leaks, no Nim-specific serialization. The full field-by-field layout is
-# documented in docs/multiplayer.md; keep the two in sync.
+# Clock discipline: CLOCK, TRANSFER and REPLY carry the sender's emulated
+# clock (u64le cycles since link start). Each side free-runs but never more
+# than LEAD cycles ahead of the newest peer clock it has heard, stalling until
+# a newer one arrives; transfers are anchored to explicit emulated cycles, so
+# latency slows emulation but never desyncs it.
 #
-# Framing: every message is `u32le payload_length` followed by exactly that
-# many payload bytes. The first payload byte is the message type.
-#
-# Clock discipline (BGB-style timestamped bounded lead): every CLOCK,
-# TRANSFER, and REPLY carries the sender's emulated clock in cycles since
-# link start (u64le). Each side free-runs but never more than LEAD cycles
-# ahead of the newest clock it has heard from the peer; when it would, it
-# stalls its emulated clock until a newer peer clock arrives. Transfers are
-# anchored to explicit emulated cycles so latency can slow emulation but
-# never desync it.
-#
-# This module must stay compilable under emscripten (it is pure byte
-# shuffling); only the socket transport (gba/netlink.nim) is native-only.
+# Must stay compilable under emscripten; only gba/netlink.nim is native-only.
 
 type
   LinkProtoError* = object of CatchableError
@@ -33,9 +23,8 @@ type
     lmBye      = 5
 
   LinkMsg* = object
-    ## Decoded message. Flat rather than a case-object so consumers can
-    ## fill/read fields without variant-branch ceremony; which fields are
-    ## meaningful depends on `kind` (see the encoders below).
+    ## Decoded message, flat rather than a case-object; which fields are
+    ## meaningful depends on `kind` (see the encoders).
     kind*: LinkMsgKind
     version*: uint8   # HELLO
     system*: uint8    # HELLO: 0 = GBA, 1 = GB
@@ -54,9 +43,8 @@ const
   LINK_SYSTEM_GBA* = 0'u8
   LINK_SYSTEM_GB* = 1'u8
 
-  # SIO mode encoding, used both for CLOCK's "sender's current mode" and for
-  # TRANSFER/REPLY's transfer kind (independent of any emulator's internal
-  # enum ordering; documented in docs/multiplayer.md)
+  # SIO mode encoding for CLOCK's mode and TRANSFER/REPLY's transfer kind
+  # (independent of any core's enum ordering)
   LINK_MODE_NORMAL8* = 0'u8
   LINK_MODE_NORMAL32* = 1'u8
   LINK_MODE_MULTI* = 2'u8
@@ -76,8 +64,7 @@ const
   LINK_BYE_SHUTDOWN* = 1'u8  # session torn down
   LINK_BYE_MISMATCH* = 2'u8  # HELLO rejected (version/system/ROM mismatch)
 
-  # Largest legal payload (HELLO/REPLY are the big ones); anything bigger is
-  # a corrupt or foreign stream.
+  # Largest legal payload; anything bigger is a corrupt or foreign stream.
   LINK_MAX_PAYLOAD = 64
 
 # ---------------- little-endian primitives ----------------
@@ -242,18 +229,11 @@ proc next*(d: var LinkDecoder; msg: var LinkMsg): bool =
 
 # ---------------- ROM checksum ----------------
 #
-# WIRE VALUE. This is what a peer compares in HELLO to decide it is running the
-# same game, so its definition is frozen: change what bytes go into it and a
-# patched client stops pairing with an unpatched one. It is taken over the ROM
-# **file** — `crc32(readFile(rom))` natively, `crc32(rom[0 ..< rom_size])` in
-# the wasm build (identical bytes, see dingbat_wasm.nim).
-#
-# Do not conflate it with the save-state ROM identity (`gba_rom_checksum` in
-# gba/savestate.nim). That one is FNV-1a over the first 1 MB, lives only in
-# state-file headers, and is free to change with a legacy accept-list. This one
-# is not: it has no version negotiation of its own beyond LINKPROTO_VERSION,
-# and no accept-list. If it ever has to move, bump LINKPROTO_VERSION and accept
-# both values for a transition period — deliberately, not as a side effect.
+# A WIRE VALUE compared in HELLO, so its definition is frozen: CRC-32 over the
+# ROM file (crc32(readFile(rom)) natively, crc32(rom[0 ..< rom_size]) in wasm).
+# Distinct from the save-state ROM identity (gba_rom_checksum: FNV-1a over the
+# first 1 MB, with a legacy accept-list). If this one ever moves, bump
+# LINKPROTO_VERSION and accept both values for a transition.
 
 const CRC32_TABLE = block:
   var t: array[256, uint32]
@@ -265,8 +245,8 @@ const CRC32_TABLE = block:
   t
 
 proc crc32*(data: openArray[char]): uint32 =
-  ## Standard CRC-32 (IEEE 802.3, the zlib/PNG polynomial) — chosen because
-  ## every language a future bridge might be written in has it on hand.
+  ## Standard CRC-32 (IEEE 802.3, the zlib/PNG polynomial): every language a
+  ## bridge might use has it.
   result = 0xFFFFFFFF'u32
   for c in data:
     result = CRC32_TABLE[int((result xor uint32(uint8(c))) and 0xFF)] xor (result shr 8)

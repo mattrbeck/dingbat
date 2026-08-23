@@ -3,12 +3,9 @@
 const
   DMA_START_DELAY = 3
   DMA_SRC_MASK = [0x07FFFFFF'u32, 0x0FFFFFFF'u32, 0x0FFFFFFF'u32, 0x0FFFFFFF'u32]
-  # DAD keeps all 28 bits on every channel. Channels 0-2 cannot drive the
-  # gamepak bus as a destination: such writes are DROPPED at transfer time
-  # (see run_channel), NOT redirected to the 27-bit-masked internal address —
-  # a mask would land testStoreSRAM's 0x0E000000 writes in VRAM. The mGBA
-  # suite's Memory/DMA (±SRAM) rows distinguish the two: reads through DMA0's
-  # genuinely-27-bit SAD DO hit VRAM, the dropped writes never appear there.
+  # DAD keeps 28 bits on every channel; channels 0-2 DROP gamepak-bus
+  # destinations at transfer time (run_channel) rather than masking them to
+  # 27 bits, which would land them in VRAM (mGBA suite Memory/DMA ±SRAM rows).
   DMA_DST_MASK = [0x0FFFFFFF'u32, 0x0FFFFFFF'u32, 0x0FFFFFFF'u32, 0x0FFFFFFF'u32]
   DMA_LEN_MASK = [0x3FFF'u16,     0x3FFF'u16,     0x3FFF'u16,     0xFFFF'u16    ]
 
@@ -33,8 +30,7 @@ proc new_dma*(gba: GBA): DMA =
 proc run_pending*(dma: DMA)
 
 proc request(dma: DMA; channel: int) {.inline.} =
-  ## Latch a transfer request; run_pending (the scheduler's post-dispatch
-  ## pump) grants it in priority order.
+  ## Latch a request; run_pending grants it in priority order.
   dma.pending = dma.pending or uint8(1 shl channel)
   dma.gba.scheduler.pump_requested = true
 
@@ -71,36 +67,28 @@ proc `[]=`*(dma: DMA; io_addr: uint32; value: uint8) =
     write_reg_byte16(dma.dmacnt_l[channel], reg - 8, value, DMA_LEN_MASK[channel])
   of 10, 11:  # dmacnt_h
     let enabled = dma.dmacnt_h[channel].enable
-    # Genuinely BYTE-sized stores to CNT_H are quirky on hardware around
-    # bit7 of the written byte (gbaedge DMAEDGE/IOBYTE pages, measured on
-    # DMA3, modeled for all channels):
-    # - strb 0x80 to the UPPER byte ran the DMA AND left bit7 of the LOW
-    #   byte set (readback 0x0080), while strb 0x44 to the upper byte left
-    #   the low byte alone (readback 0x4400): the upper-byte store also
-    #   copies ITS bit7 into the low byte's bit7.
-    # - strb 0x80 to the LOW byte stored nothing, yet strb 0x44 stores
-    #   normally: a low-byte store drops bit7.
-    # Halfword/word writes are entirely normal.
+    # Byte stores to CNT_H: an upper-byte store also copies its bit7 into
+    # the low byte's bit7, and a low-byte store drops bit7. Halfword/word
+    # writes are normal (hardware: gbaedge DMAEDGE/IOBYTE on AGB SP, measured
+    # on DMA3, modelled for all channels; docs/hwprobe.md).
     if dma.gba.bus.byte_io_write:
       if (io_addr and 1) == 1:
         let lo = read(dma.dmacnt_h[channel], 0)
         write(dma.dmacnt_h[channel], (lo and 0x7F'u8) or (value and 0x80'u8), 0)
       else:
-        # Low-byte store: bit7 dropped, enable (upper byte) unreachable
         write(dma.dmacnt_h[channel], value and 0x7F'u8, 0)
         return
     write(dma.dmacnt_h[channel], value, io_addr and 1)
     if dma.dmacnt_h[channel].enable and not enabled:
-      # Hardware force-aligns DMA addresses to the transfer size
+      # Addresses are force-aligned to the transfer size (GBATEK, "DMA Transfers").
       let align = if dma.dmacnt_h[channel].xfer_type != 0: not 3'u32 else: not 1'u32
       dma.src[channel] = dma.dmasad[channel] and align
       dma.dst[channel] = dma.dmadad[channel] and align
       dma.count[channel] = dma.dmacnt_l[channel]
       if dma.dmacnt_h[channel].start_timing == 0:  # Immediate
-        # Hardware starts an immediate DMA ~3 cycles after the enable write;
-        # the CPU keeps executing until then (mGBA suite "Trivial DMA").
-        # The event handler re-checks enable, so no pending state is needed:
-        # an immediate DMA always clears its enable bit when it runs.
+        # Starts DMA_START_DELAY cycles after the enable write; the CPU keeps
+        # executing until then (mGBA suite "Trivial DMA"). The event re-checks
+        # enable, so no per-channel pending state is needed.
         dma.gba.bus.dma_pending = true
         dma.gba.scheduler.schedule(DMA_START_DELAY, etDMA)
   else:
@@ -123,32 +111,19 @@ proc trigger_vdma*(dma: DMA) =
       dma.request(channel)
 
 proc trigger_video_capture*(dma: DMA; vcount: uint16) =
-  ## DMA3 special timing = video capture: one transfer per scanline for
-  ## VCOUNT 2..161 of the ARMED frame - 160 triggers of the programmed unit
-  ## - then hardware clears the enable bit at line 162 regardless of
-  ## software; re-arming next vblank repeats this every armed frame, and
-  ## the enable edge reloads the internal dst from DAD (handled in `[]=`).
-  ## Hardware-verified (gbaedge CAPDMA page, AGB SP sessions 2/3: 640
-  ## nonzero words per armed frame, readback 0x3700 both for the
-  ## always-armed and the re-armed-per-vblank patterns). The internal
-  ## active latch makes a channel armed mid-frame (the normal case: games
-  ## arm during vblank) wait for the next frame's line 2 instead of
-  ## catching the current frame's tail and self-clearing 4 words in - the
-  ## bug that made dingbat fire exactly one trigger. The AGS aging
-  ## cartridge verifies the per-line cadence by capturing VCOUNT itself.
+  ## DMA3 special timing = video capture: one transfer per line for VCOUNT
+  ## 2..161 of the frame in which line 2 found the channel armed, then the
+  ## enable bit self-clears at line 162. A channel armed mid-frame waits for
+  ## the next frame's line 2 (hardware: gbaedge CAPDMA on AGB SP,
+  ## docs/hwprobe.md; the AGS aging cartridge pins the per-line cadence).
   if dma.dmacnt_h[3].enable and dma.dmacnt_h[3].start_timing == 3:
     if vcount == 2:
       dma.video_active = true
     if dma.video_active:
       if vcount >= 2 and vcount < 162:
-        # Each line's trigger re-reads the programmed source: the CAPDMA
-        # probe's fixed ROM source yields 160 lines x 4 NONZERO words, which
-        # is impossible if the internal src kept incrementing across lines
-        # (the pattern is followed by zero padding). Model: the per-line
-        # trigger reloads internal src from SAD (the gamepak-ROM
-        # always-increment rule still applies WITHIN each line's burst; a
-        # real camera source is address-fixed so the distinction is
-        # invisible to the intended use).
+        # Each line's trigger reloads the internal src from SAD; the
+        # gamepak always-increment rule still applies within a line's burst
+        # (CAPDMA: a fixed ROM source yields 160 lines of nonzero words).
         let align = if dma.dmacnt_h[3].xfer_type != 0: not 3'u32 else: not 1'u32
         dma.src[3] = dma.dmasad[3] and align
         dma.request(3)
@@ -187,7 +162,7 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
       echo "Prohibited special dma"
 
   # Gamepak ROM sources always increment regardless of the source control
-  # bits (SRAM is not affected)
+  # bits (GBATEK, "DMA Transfers"); SRAM is not affected.
   let src_page = bits_range(dma.src[channel], 24, 27)
   let src_in_rom = src_page >= 0x8 and src_page <= 0xD
   let delta_source = if src_in_rom: word_size
@@ -201,21 +176,15 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
         " hot=" & $dma.gba.bus.rom_hot & " src=" & toHex(dma.src[channel], 8) &
         " dst=" & toHex(dma.dst[channel], 8) & " len=" & $len & " ws=" & $word_size)
 
-  # The cycle the ROM bus changes hands, captured before any of the burst's own
-  # cycles are charged: the prefetch hand-off (bus.rom_access_cycles) counts the
-  # burst's elapsed time forward from here rather than differencing two clocks
-  # that are skewed against each other while an event is dispatching.
+  # The cycle the ROM bus changes hands, before any burst cycles are charged;
+  # the prefetch hand-off (bus.rom_access_cycles) counts forward from here.
   dma.gba.bus.dma_grant_now =
     dma.gba.bus.sched.cycles + CycleCount(dma.gba.bus.cycles)
   dma.gba.bus.dma_first_rom = true
 
-  # DMA internal cycles for the CPU->DMA bus handoff (calibrated against the
-  # mGBA suite DMA timing tests; ROM-to-ROM needs no extra I cycles once its
-  # write is sequential-timed). A channel that preempts another mid-burst
-  # pays nothing: the bus never returns to the CPU, and the AGS aging
-  # cartridge's DMA priority test verifies the switch is seamless (its
-  # timer-capture cadence must continue exactly across both channel
-  # boundaries).
+  # CPU->DMA bus hand-off cost (mGBA suite DMA timing rows). A channel that
+  # preempts another mid-burst pays nothing: the bus never returns to the
+  # CPU (AGS aging cartridge DMA priority test).
   if not nested:
     dma.gba.bus.add_cycles(2)
 
@@ -223,11 +192,9 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
   dma.gba.bus.rom_next_addr = 1  # start both burst trackers cold
   dma.gba.bus.rom_next_addr2 = 1
 
-  # Preemption is only possible while a higher-priority channel is armed on
-  # a hardware trigger (hblank/vblank/special). Only then is the burst run
-  # with mid-burst event drains; otherwise events keep dispatching after the
-  # burst as a whole (identical to the pre-preemption behavior, which the
-  # mGBA suite timing baselines are calibrated against).
+  # Mid-burst event drains only when a higher-priority channel is armed on a
+  # hardware trigger; otherwise events dispatch after the whole burst (the
+  # timing the mGBA suite rows are calibrated against).
   var preemptible = false
   for ch2 in 0 ..< channel:
     if dma.dmacnt_h[ch2].enable and dma.dmacnt_h[ch2].start_timing != 0:
@@ -235,35 +202,26 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
       break
 
   for _ in 0 ..< len:
-    # Preemption point, checked between transfers (a transfer is atomic on
-    # hardware: its read/write pair completes before the bus changes hands).
-    # Drain the accumulated stall cycles so any scheduler event that came due
-    # during the burst dispatches (we run outside `dispatching`, so the drain
-    # is safe). Handlers only latch DMA requests — the pump defers while
-    # dma_active — so a higher-priority request is granted HERE, at the
-    # fully-drained transfer boundary, not at the event's own (earlier)
-    # cycle. Recursion via run_pending implements pause/resume: this loop's
-    # locals hold our progress while the higher-priority burst runs.
+    # Preemption point between transfers (a read/write pair is atomic).
+    # Draining here dispatches events that came due during the burst;
+    # handlers only latch requests, so a higher-priority channel is granted
+    # at this drained boundary and runs nested via run_pending while this
+    # loop's locals hold our progress.
     if preemptible:
       let bus = dma.gba.bus
-      # The PSG's waveform deadlines are events in all but name (gba/apu.nim),
-      # so they gate this drain exactly as they did when they sat in evbuf —
-      # without them the drain fires less often, scheduler.cycles lags the
-      # burst's true position, and anything the burst reaches that calls
-      # scheduler.schedule anchors its delay early.
+      # The PSG waveform deadlines are not in evbuf (gba/apu.nim) but must
+      # gate the drain, or scheduler.cycles lags and schedule() anchors early.
       dma.gba.apu.apu_catchup_all()
       if bus.sched.cycles + CycleCount(bus.cycles) >=
          min(bus.sched.next_event, dma.gba.apu.apu_next_step()):
         bus.catch_up()
       if dma.pending != 0:
         dma.run_pending()
-    # TODO: This accessibility check is a deny-list and may miss unmapped gaps
-    # (e.g. 0x00004000-0x01FFFFFF). Should be replaced with an allow-list of
-    # known-valid regions (0x2-0x7, 0x8-0xD, 0xE-0xF).
+    # TODO: deny-list; misses unmapped gaps such as 0x00004000-0x01FFFFFF.
     let src_region = bits_range(dma.src[channel], 24, 27)
     let src_accessible = src_region != 0x0 and src_region != 0x1 and dma.src[channel] < 0x10000000'u32
-    # Only DMA3 can write to the gamepak bus (pages 8-F); channels 0-2 drop
-    # such writes entirely (no bus access, no redirect). See DMA_DST_MASK.
+    # Only DMA3 can write the gamepak bus; channels 0-2 drop such writes
+    # (no bus access, no redirect). See DMA_DST_MASK.
     let dst_writable = channel == 3 or dma.dst[channel] < 0x08000000'u32
     if word_size == 4:
       if src_accessible:
@@ -276,8 +234,7 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
         dma.latch[channel] = half or (half shl 16)
       if dst_writable:
         dma.gba.bus.write_half(dma.dst[channel], uint16(dma.latch[channel]))
-    # The moved word stays latched on the data bus (open-bus reads see it
-    # until the CPU's own activity replaces it — see Bus.dma_open_bus)
+    # The moved word stays on the data bus for open-bus reads (Bus.dma_open_bus).
     dma.gba.bus.dma_open_bus = dma.latch[channel]
     dma.src[channel] = uint32(int(dma.src[channel]) + delta_source)
     dma.dst[channel] = uint32(int(dma.dst[channel]) + delta_dest)
@@ -288,8 +245,7 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
   if not dma.dmacnt_h[channel].repeat or start_timing == 0:  # not (repeat && not Immediate)
     dma.dmacnt_h[channel].enable = false
   else:
-    # Repeat: the internal count is reloaded from the user register, so a
-    # DMACNT_L write made during the previous burst's lifetime lands here.
+    # Repeat reloads the count from DMACNT_L.
     dma.count[channel] = dma.dmacnt_l[channel]
 
   if dma.dmacnt_h[channel].irq_enable:
@@ -297,35 +253,23 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
     dma.gba.interrupts.schedule_interrupt_check(IRQ_SYNC_DELAY)
 
 proc run_pending*(dma: DMA) =
-  ## DMA arbitration pump: grants latched requests strictly in priority order
-  ## (channel 0 highest). Invoked from two places, always with `dispatching`
-  ## false so bursts can advance the clock and dispatch further events:
-  ## - the scheduler, after each event dispatch, when no burst is running
-  ##   (bus.dma_active gates this so mid-burst grants happen below instead);
-  ## - a running burst's transfer loop, right after its drain, so a
-  ##   higher-priority request is granted at the fully-drained transfer
-  ##   boundary and runs nested to completion (preemption; the outer loop's
-  ##   locals hold its progress).
-  ## A request for a channel numbered >= the burst in progress stays latched
-  ## until the run_pending level that granted that burst loops back around.
+  ## Arbitration pump: grants latched requests in priority order (channel 0
+  ## highest). Called with `dispatching` false, from the scheduler after an
+  ## event dispatch (no burst running) or from a burst's transfer loop after
+  ## its drain (nested preemption). A request for a channel >= the burst in
+  ## progress waits for the level that granted that burst.
   while dma.pending != 0:
     let ch = countTrailingZeroBits(dma.pending)
     if ch >= dma.current_priority:
       break  # waits for the equal/higher-priority burst in progress
     dma.pending = dma.pending and not uint8(1 shl ch)
-    # Re-check enable: a burst that ran between request and grant may have
-    # written this channel's control register
+    # A burst between request and grant may have rewritten this channel's CNT_H.
     if not dma.dmacnt_h[ch].enable: continue
-    # Sound FIFO DMA requests are LEVEL-conditioned on the FIFO state, not
-    # edge-latched: a timer overflow that lands inside this channel's own
-    # in-flight burst (the drain dispatches at a transfer boundary while the
-    # refill is still short of 16 bytes) would latch a second request that
-    # survives the burst — and the extra grant then pushes 16 bytes into an
-    # almost-full FIFO, dropping most of them, i.e. the audio stream skips
-    # forward. Real hardware deasserts the request once the FIFO is refilled,
-    # so re-check the level at grant time. (Observed: ~2% of drains at
-    # 21 kHz vintages — Densetsu no Sutafi 3 lost ~4% of its stream bytes to
-    # these skips, splattering broadband noise over the real FIFO audio.)
+    # FIFO requests are level-conditioned on the FIFO, not edge-latched: a
+    # timer overflow inside this channel's own burst would otherwise latch a
+    # second grant that overfills the FIFO and skips the stream forward
+    # (Densetsu no Sutafi 3 lost ~4% of its stream bytes). Assumed; no ROM
+    # pins this.
     if (ch == 1 or ch == 2) and dma.dmacnt_h[ch].start_timing == 3:
       if dma.gba.apu.dma_channels.sizes[ch - 1] >= 16: continue
     let saved = dma.current_priority
@@ -333,12 +277,11 @@ proc run_pending*(dma: DMA) =
     dma.run_channel(ch, nested = saved < 4)
     dma.current_priority = saved
     let bus = dma.gba.bus
-    # The bus changed masters: the CPU (or a paused outer DMA burst)
-    # continues with a nonsequential access
+    # The CPU (or a paused outer burst) resumes with a nonsequential access.
     bus.dma_active = saved < 4
     if saved == 4:
-      # Bus handed back to the CPU: the first instruction it executes still
-      # sees the DMA's last word on open-bus reads (cleared in cpu.tick)
+      # The CPU's next instruction still sees the DMA's last word on open-bus
+      # reads (cleared in cpu.tick).
       bus.dma_open_bus_armed = true
     when defined(pftrace):
       pft("DMA" & $ch & " END sched=" & $bus.sched.cycles & " busc=" & $bus.cycles &

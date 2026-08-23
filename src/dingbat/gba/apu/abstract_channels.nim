@@ -1,59 +1,36 @@
 # Abstract sound channel base types (included by gba.nim)
 
 const GBA_NO_STEP* = high(CycleCount)
-  ## "no pending waveform step" sentinel for a channel's next_step deadline.
-  ## Every catch-up guard is `next_step > scheduler.cycles`, so this parks a
-  ## channel without a second flag — it matches the old behaviour of simply not
-  ## having an etAPUChannel* event queued, which is the state every channel
-  ## starts in (the old code only armed the chain on the first trigger) and the
-  ## state RegisterRamReset's sound phase put them back into.
+  ## "No pending waveform step" sentinel for next_step: every catch-up guard is
+  ## `next_step > scheduler.cycles`, so this parks a channel without a second
+  ## flag. Channels start parked; RegisterRamReset's sound phase parks them.
 
 const GBA_OBS_CPU* = high(uint32)
-  ## Observer period meaning "a CPU/DMA access, not a scheduler event". See
-  ## gba_steps_due: by the time an MMIO access reaches the APU, bus.catch_up has
-  ## already advanced the scheduler to this exact cycle and dispatched every
-  ## event due at or before it, so a step landing on this cycle has definitely
-  ## happened and must be included.
+  ## Observer period for a CPU/DMA access (not a scheduler event): bus.catch_up
+  ## has already dispatched every event due at this cycle, so a step landing on
+  ## it is included (see gba_steps_due).
 
-# Build with -d:psgverify to shadow every closed-form catch-up with the
-# per-period loop the scheduler events used to run and assert they land on the
-# same state. It costs O(steps) so it is off by default, but it is what proves
-# the closed forms — in particular CH3's bank-flip-per-wrap, which no title in
-# the sweep set exercises (tools/romfuzz/dingbat_nav's -d:psgdim forces it).
+# -d:psgverify shadows every closed-form catch-up with a per-period loop and
+# asserts they agree (O(steps), off by default). CH3's bank-flip-per-wrap is
+# exercised only by tools/romfuzz/dingbat_nav's -d:psgdim.
 
 template gba_steps_due*(d, period: CycleCount; arm_delay: uint32;
                         observer_period: uint32): CycleCount =
-  ## How many waveform steps are due, given d = (now - next_step) >= 0, the step
-  ## period in scheduler cycles, the delay the PENDING step was armed with
-  ## (arm_delay), and the observer's own period.
+  ## Waveform steps due, given d = (now - next_step) >= 0, the step period in
+  ## scheduler cycles, the delay the PENDING step was armed with (arm_delay),
+  ## and the observer's own period.
   ##
-  ## The subtlety is a step landing on EXACTLY the cycle the observer runs on.
-  ## The old per-period channel event and the observing event were then both due
-  ## at that cycle, and Scheduler.schedule breaks the tie in favour of the more
-  ## recently scheduled event: equal-cycle inserts land at the higher index, and
-  ## the highest index pops first. Each self-rescheduling event is armed exactly
-  ## its own delay before it fires, so "more recently scheduled" is "shorter
-  ## delay" — include the step when the channel's delay is the shorter one,
-  ## defer it to the next observation when it is the longer one.
+  ## A step landing EXACTLY on the observer's cycle reproduces the scheduler's
+  ## tie-break for two events due on one cycle: the more recently scheduled
+  ## fires first, and a self-rescheduling event is armed its own delay before
+  ## it fires — so the step is included when the channel's delay is the shorter
+  ## one and deferred when it is the longer. Equal delays include (a period
+  ## equal to the sample interval advances one step per sample).
   ##
-  ## The delay is NOT always the current period, which is why arm_delay exists:
-  ##   - the step at d == 0 was armed either by a trigger (delay = the frequency
-  ##     timer at trigger time, +6 on the wave channel) or by the previous step
-  ##     (delay = the period in force THEN) — and a frequency write since would
-  ##     have changed the period without moving that already-armed step;
-  ##   - every step after it is one CURRENT period apart.
-  ## Modelling this is the difference between "phase-exact" and bit-identical
-  ## output, and only a PCM byte-diff against the pre-catch-up build catches it:
-  ## the framebuffer cannot, and neither can the mGBA suite.
-  ##
-  ## Equal delays are a genuine knife edge — both events were armed on the same
-  ## cycle, so in the old code the winner depended on which was inserted first,
-  ## and for two self-rescheduling events of the same period it alternated. They
-  ## resolve uniformly as "include" here, which is also the more defensible
-  ## answer (a period equal to the sample interval should advance one step per
-  ## sample). Against the 512-cycle sample event that is frequency 0x7E0 on a
-  ## square, 0x7C0 on the wave channel and NR43 = 0x40/0x30/0x21 on the noise
-  ## channel.
+  ## arm_delay exists because the pending step's delay is not always the current
+  ## period: a trigger arms it with the frequency timer at trigger time (+6 on
+  ## the wave channel), and a frequency write since does not move an
+  ## already-armed step; every later step is one CURRENT period apart.
   block:
     let m = d div period
     var s = m + 1
@@ -67,15 +44,11 @@ proc new_sound_channel*(gba: GBA): SoundChannel =
 
 proc agb_length_on_nrx4*(ch: SoundChannel; length_enable, triggered: bool;
                          max_len: int) =
-  ## AGB NRx4 length semantics (hardware-verified, gbaedge SWEEPQ/PSGSTAT
-  ## pages, AGB SP sessions 2/3): the trigger's reload-if-zero happens
-  ## FIRST, then a RISING length-enable clocks length once if the frame
-  ## sequencer is in the length half. A trigger+enable write with one
-  ## length tick remaining therefore kills the note immediately (the
-  ## SWEEPQ length-63 control dies at poll 0), where the DMG order - the
-  ## rising-edge clock before the trigger - lets the trigger reload it to
-  ## a full note. The GB core keeps the DMG order; this helper is
-  ## GBA-only.
+  ## AGB NRx4 order (hardware: gbaedge SWEEPQ/PSGSTAT pages on AGS): the
+  ## trigger's reload-if-zero happens FIRST, then a RISING length-enable clocks
+  ## length once if the frame sequencer is in the length half, so trigger+enable
+  ## with one tick left kills the note at once. The DMG order is the reverse
+  ## (the GB core keeps it); this helper is GBA-only.
   let rising = length_enable and not ch.length_enable
   ch.length_enable = length_enable
   if triggered and ch.length_counter == 0:

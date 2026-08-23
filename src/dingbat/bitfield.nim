@@ -1,17 +1,15 @@
 import macros
 
-# Mimics the Crystal bitfield DSL (github.com/mattrbeck/bitfield).
-# Fields are listed from LSB to MSB.
+# Bitfield DSL after github.com/mattrbeck/bitfield; fields listed LSB first.
 #
-# Usage:
 #   bitfield MyReg, uint32:
 #     num mode, 5
 #     bool thumb
 #     num reserved, 20, read_only = true
 #     bool overflow
 #
-# Generates a `value: T` object plus inline getter/setter procs.
-# Also generates `read_byte` and `write_byte` methods for all types.
+# Generates a `value: T` object, inline getters/setters, and read_byte /
+# write_byte (read_byte hides write_only fields, write_byte ignores read_only).
 
 proc needsQuoting(s: string): bool =
   s in ["type", "end", "begin", "if", "for", "while", "var", "let",
@@ -33,7 +31,6 @@ macro bitfield*(typeName: untyped, baseType: untyped, body: untyped): untyped =
   var readMask  = 0  # bits visible via read_byte  (all except write_only)
   var writeMask = 0  # bits writable via write_byte (all except read_only)
 
-  # Generate the type with a single `value` field.
   result.add(nnkTypeSection.newTree(
     nnkTypeDef.newTree(
       nnkPostfix.newTree(ident"*", typeName),
@@ -65,7 +62,7 @@ macro bitfield*(typeName: untyped, baseType: untyped, body: untyped): untyped =
     var readOnly  = false
     var writeOnly = false
 
-    # Parse field name; handle Crystal's `:keyword` symbol syntax.
+    # Field name; `:keyword` symbol syntax is accepted.
     let rawName = stmt[1]
     let fieldName: NimNode =
       if rawName.kind == nnkPrefix and rawName[0].strVal == ":":
@@ -97,7 +94,7 @@ macro bitfield*(typeName: untyped, baseType: untyped, body: untyped): untyped =
     if not writeOnly: readMask  = readMask  or fieldBits
     bitOffset  += numBits
 
-    # Getter — always generate (write_only fields still need getters for internal use)
+    # Getter (write_only fields still get one for internal use).
     let fn = makeIdent(fieldName.strVal)
     if isBool:
       result.add(quote do:
@@ -110,7 +107,6 @@ macro bitfield*(typeName: untyped, baseType: untyped, body: untyped): untyped =
           `baseType`((self.value shr `offset`) and `baseType`(`mask`))
       )
 
-    # Setter
     if not readOnly:
       let setterName = makeIdent(fieldName.strVal & "=")
       if isBool:
@@ -126,8 +122,6 @@ macro bitfield*(typeName: untyped, baseType: untyped, body: untyped): untyped =
             self.value = (self.value and not(m shl `offset`)) or ((v and m) shl `offset`)
         )
 
-  # Every bitfield type gets read_byte / write_byte helpers.
-  # read_byte masks write_only bits (return 0); write_byte masks read_only bits (ignore writes).
   let readMaskLit  = newLit(readMask)
   let writeMaskLit = newLit(writeMask)
   result.add(quote do:

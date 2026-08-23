@@ -1,40 +1,19 @@
-## PROTOTYPE: candidate codecs for the rewind ring's XOR delta, plus a bake-off
-## that reports size and time for each.
-##
-## Shared by tests/rewind_codec_test.nim (native) and, under -d:codecbench, by
-## src/dingbat_wasm.nim, so that Chrome and Safari run the IDENTICAL code over
-## the IDENTICAL deltas as the native harness. A codec ranking taken on one
-## engine does not necessarily survive the move to another — JavaScriptCore's
-## codegen for byte-shuffling loops is not V8's — and Safari is the engine that
-## decides, because it is the closest available proxy for the oldest device
-## that has to run this.
-##
-## RESEARCH HARNESS, kept deliberately. The winner — sparse64 + zlib — has
-## moved into common/rewind.nim proper and is the ring's codec; what stays here
-## is the bake-off and the losing candidates, because the next person to ask
-## "why not lz4?" or "why not a dirty-page bitmap?" should be able to re-run
-## the comparison in ten minutes on their own hardware and their own games
-## rather than trust a table. The sparse implementation here is a duplicate of
-## rewind.nim's on purpose: the harness must be able to A/B a CHANGED codec
-## against the shipped one without editing the shipped one.
-##
-## Nothing here is on a shipping path.
+## Candidate codecs for the rewind ring's XOR delta, plus a bake-off reporting
+## size and time for each. Shared by tests/rewind_codec_test.nim and, under
+## -d:codecbench, by src/dingbat_wasm.nim so browsers run the identical code
+## over the identical deltas: a codec ranking does not necessarily survive the
+## move from native to JavaScriptCore, and Safari is the closest proxy for the
+## oldest device that has to run this. Kept so "why not lz4?" can be re-run
+## rather than trusted. The sparse codec duplicates rewind.nim's on purpose, so
+## a changed codec can be A/B'd against the shipped one. Nothing here is on a
+## shipping path.
 
 import std/[strutils, times, monotimes]
 import zippy
 import ./lz4
 
-# ---------------------------------------------------------------------------
-# Sparse block codec
-#
-# The delta is an XOR, so "unchanged" is literally a zero byte. A bitmap of
-# which fixed-size blocks contain ANY non-zero byte, followed by those blocks
-# raw, costs one bit per block and never touches the rest — where zlib has to
-# walk every zero to rediscover that it is a zero.
-#
-# Format: u32 original length, u32 block size, ceil(nblocks/8) bitmap bytes,
-# then the set blocks back to back. The last block may be short; its length
-# falls out of the original length, so nothing else needs storing.
+# Sparse block codec (see rewind.nim for the shipped copy and the format): a
+# bitmap of which blocks contain any non-zero byte, then those blocks raw.
 
 proc sparseEncode*(src: string; bs: int): string =
   let n = src.len
@@ -119,8 +98,7 @@ proc rewindCodecs*(): seq[Codec] =
 
 proc bakeoff*(deltas: seq[string]; reps = 1): string =
   ## Run every candidate over `deltas`, verifying a bit-exact round trip on
-  ## every single one, and return a plain-text table. Same code path on native
-  ## and in the browser so the numbers are comparable.
+  ## each, and return a plain-text table.
   var cs = rewindCodecs()
   var lines: seq[string]
   lines.add("deltas=" & $deltas.len & " rawBytes=" &

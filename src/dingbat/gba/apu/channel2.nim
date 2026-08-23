@@ -83,7 +83,7 @@ proc ch2_write*(ch: Channel2; address: uint32; value: uint8) =
     if triggered and ch.dac_enabled: ch.enabled = true
     ch.agb_length_on_nrx4(length_enable, triggered, 0x40)  # AGB order; see abstract_channels
     if triggered:
-      # Same as clear(etAPUChannel2) + schedule(period); see ch1_write.
+      # Re-arm a full period from now; see ch1_write.
       let arm2 = ch.ch2_frequency_timer()
       ch.next_step = ch.gba.scheduler.cycles + CycleCount(arm2)
       ch.arm_delay = arm2
