@@ -72,15 +72,12 @@ void main() {
 #    crush its colors. Both match the wasm build's LUTs and the screenshot
 #    path (bgr555_to_rgb) exactly.
 #
-# The upscale filters (hq4x / xBR / xBRZ) below are CLEAN-ROOM implementations
-# written from published ALGORITHM DESCRIPTIONS — Hyllian's xBR tutorial (the
-# weighted YUV 48:7:6 distance and the wd_red<wd_blue edge rule), the ubitux
-# "Butchering HQX" write-up, Wikipedia's hqx/pixel-art-scaling pages, and
-# Zenju's forum posts describing xBRZ's rules (4x4 corner-dominance test with
-# the checkerboard guard, equal-colour tolerance 30, dominant-gradient
-# threshold 3.6, shallow/steep line threshold 2.2). No GPL/LGPL shader or
-# scaler source was copied; the math is reimplemented in fragment form. The
-# same code is mirrored in web/glpresent.js's GLSL ES 300 shader.
+# Upscale filters. The hq4x-/xBR-style branches follow public algorithm
+# descriptions; the "xBRZ-style" branch is implemented from the written spec in
+# docs/filters.md using its three public ideas: a YCbCr Euclidean colour
+# distance, a corner test weighing the quad's two diagonal cuts over 5x5 support
+# with a dominance ratio, and guards that keep 1-2px features and line ends. No
+# scaler source was consulted. Mirrored in web/glpresent.js's GLSL ES shader.
 const FRAG_SRC = """
 #version 330 core
 in vec2 tex_coord;
@@ -108,6 +105,7 @@ uniform vec3 sgb_backdrop;
 uniform int filter_mode;   // 0 = none, 1 = hq4x, 2 = xBR, 3 = xBRZ
 
 vec3 srctex(vec2 uv) { return texture(input_texture, uv).rgb; }
+vec2 g_px_uv;   // uv extent of one output pixel; set once in main() (uniform flow)
 
 // BT.601 YUV; the perceptual space both filters classify edges in.
 vec3 yuv(vec3 c) {
@@ -125,31 +123,90 @@ bool similar(vec3 a, vec3 b) {
   vec3 d = abs(yuv(a) - yuv(b));
   return d.x <= 48.0/255.0 && d.y <= 7.0/255.0 && d.z <= 6.0/255.0;
 }
-// xBRZ colour distance: Euclidean in YCbCr, kept in 8-bit units so the
-// published constants (equal-colour tolerance 30) apply directly.
-float dz(vec3 a, vec3 b) { return length((yuv(a) - yuv(b)) * 255.0); }
-bool eqz(vec3 a, vec3 b) { return dz(a, b) < 30.0; }
-// The xBRZ corner decision for the (d.x,d.y) corner of the texel at uv:
-// weighted distance sums along the two diagonals of the 2x2 corner quad,
-// taken over the surrounding 4x4 block, with the quad's own diagonals
-// weighted 4x. Returns (own-corner diagonal, crossing diagonal); x < y means
-// an edge runs across this corner and it should blend.
-vec2 corner_dz(vec2 uv, vec2 t, vec2 d) {
-  vec3 f = srctex(uv);
-  vec3 g = srctex(uv + t * vec2(d.x, 0.0));
-  vec3 j = srctex(uv + t * vec2(0.0, d.y));
-  vec3 k = srctex(uv + t * d);
-  float jg = dz(srctex(uv + t * vec2(-d.x, d.y)), f)
-           + dz(f, srctex(uv + t * vec2(d.x, -d.y)))
-           + dz(srctex(uv + t * vec2(0.0, 2.0 * d.y)), k)
-           + dz(k, srctex(uv + t * vec2(2.0 * d.x, 0.0)))
-           + 4.0 * dz(j, g);
-  float fk = dz(srctex(uv + t * vec2(-d.x, 0.0)), j)
-           + dz(j, srctex(uv + t * vec2(d.x, 2.0 * d.y)))
-           + dz(srctex(uv + t * vec2(0.0, -d.y)), g)
-           + dz(g, srctex(uv + t * vec2(2.0 * d.x, d.y)))
-           + 4.0 * dz(f, k);
-  return vec2(jg, fk);
+// ---- xBRZ-style scaler (filter_mode == 3); the rules are in docs/filters.md --
+// Perceptual colour distance: Euclidean in YCbCr on the 8-bit scale (0..~441).
+float yccDist(vec3 a, vec3 b) { return length(yuv(a) - yuv(b)) * 255.0; }
+bool alike(vec3 a, vec3 b) { return yccDist(a, b) < 30.0; }
+
+// Edge strength along each diagonal of the 2x2 quad at corner (sx,sy) of the
+// texel under uv (t = one texel step). The quad is P = that texel, H = its
+// horizontal neighbour across the corner, V = the vertical one, D = the
+// diagonal one. Each strength is the quad's own diagonal pair (x4) plus the
+// four pairs one pixel further out that continue the same direction on either
+// side of the quad (5x5 support):
+//   .x  the H-V pair and its parallels: large when an edge separates H from V
+//   .y  the P-D pair and its parallels: large when an edge separates P from D
+// An edge cuts P's corner (P takes the H/V side's colour there) when .x < .y.
+vec2 cornerDiffs(vec2 uv, vec2 t, float sx, float sy) {
+  vec3 P = srctex(uv);
+  vec3 H = srctex(uv + t * vec2(sx, 0.0));
+  vec3 V = srctex(uv + t * vec2(0.0, sy));
+  vec3 D = srctex(uv + t * vec2(sx, sy));
+  float hv = 4.0 * yccDist(H, V)
+           + yccDist(P, srctex(uv + t * vec2( sx, -sy)))
+           + yccDist(P, srctex(uv + t * vec2(-sx,  sy)))
+           + yccDist(D, srctex(uv + t * vec2(2.0 * sx, 0.0)))
+           + yccDist(D, srctex(uv + t * vec2(0.0, 2.0 * sy)));
+  float pd = 4.0 * yccDist(P, D)
+           + yccDist(H, srctex(uv + t * vec2(0.0, -sy)))
+           + yccDist(H, srctex(uv + t * vec2(2.0 * sx, sy)))
+           + yccDist(V, srctex(uv + t * vec2(-sx, 0.0)))
+           + yccDist(V, srctex(uv + t * vec2(sx, 2.0 * sy)));
+  return vec2(hv, pd);
+}
+
+// Signed distance (texels) from the corner-local position to the cut line;
+// lx, ly run 0.5 at the texel centre .. 1.0 at the active corner, positive is
+// the corner side. Every line passes through the quadrant centre (0.75, 0.75),
+// so the three wedges have equal area and differ only in direction:
+//   slope 0: 45 degrees, through the midpoints of the two corner edges
+//   slope 1: shallow 1:2 (closer to the H axis)      slope 2: steep 2:1
+float cutLineDist(float lx, float ly, int slope) {
+  if (slope == 1) return (0.5 * lx + ly - 1.125) * 0.894427;  // 1/sqrt(1.25)
+  if (slope == 2) return (lx + 0.5 * ly - 1.125) * 0.894427;
+  return (lx + ly - 1.5) * 0.707107;                           // 1/sqrt(2)
+}
+
+// The xBRZ-style rule for one corner: decide whether a diagonal edge cuts it,
+// which neighbour's colour lies across the edge, what slope the edge has, and
+// paint that wedge. aa is half the smoothstep width across the cut, in texels.
+vec3 smoothCorner(vec2 uv, vec2 t, float sx, float sy, float lx, float ly, float aa) {
+  vec3 P = srctex(uv);
+  vec3 H = srctex(uv + t * vec2(sx, 0.0));
+  vec3 V = srctex(uv + t * vec2(0.0, sy));
+  vec3 D = srctex(uv + t * vec2(sx, sy));
+  vec2 e = cornerDiffs(uv, t, sx, sy);
+  if (e.x >= e.y) return P;                                   // no edge here
+  if ((alike(P, H) && alike(V, D)) || (alike(P, V) && alike(H, D)))
+    return P;                                                 // checkerboard / paired 2x2
+  // The pixels diagonally across P's other two corners: beside H away from V,
+  // and beside V away from H.
+  vec3 diagH = srctex(uv + t * vec2( sx, -sy));
+  vec3 diagV = srctex(uv + t * vec2(-sx,  sy));
+  vec3 tint = yccDist(P, H) <= yccDist(P, V) ? H : V;         // colour across the edge
+  if (e.y <= 3.6 * e.x) {                                     // not a dominant edge:
+    // end-of-line guards. A neighbouring corner that is also cut means P is
+    // the tip of a line; a ring of one colour around the quad means P is a
+    // lone dot. Full blending would round those off, so only a small nib at
+    // the corner point is softened.
+    vec2 eh = cornerDiffs(uv, t, sx, -sy);
+    vec2 ev = cornerDiffs(uv, t, -sx, sy);
+    bool lineTip = (eh.x < eh.y && !alike(P, diagH)) || (ev.x < ev.y && !alike(P, diagV));
+    bool loneDot = alike(diagV, V) && alike(V, D) && alike(D, H) && alike(H, diagH)
+                && !alike(P, D);
+    if (lineTip || loneDot) {
+      float r = length(vec2(1.0 - lx, 1.0 - ly));
+      return mix(P, tint, 0.45 * (1.0 - smoothstep(0.25 - aa, 0.25 + aa, r)));
+    }
+  }
+  // Slope. H and diagV are the two ends of a 1:2 segment through the corner,
+  // V and diagH of the 2:1 one. The edge is shallow when the 1:2 ends agree
+  // far better than the 2:1 ends and the V-row pixels on it are not P's colour.
+  float shallowDiff = yccDist(H, diagV), steepDiff = yccDist(V, diagH);
+  int slope = 0;
+  if (2.2 * shallowDiff <= steepDiff && !alike(P, V) && !alike(P, diagV)) slope = 1;
+  else if (2.2 * steepDiff <= shallowDiff && !alike(P, H) && !alike(P, diagH)) slope = 2;
+  return mix(P, tint, smoothstep(-aa, aa, cutLineDist(lx, ly, slope)));
 }
 
 // Sample the source texel-neighborhood around uv and smooth the pixel-art edge
@@ -174,45 +231,11 @@ vec3 upscale(vec2 uv, vec2 tsz) {
       return mix(E, 0.5 * (Ph + Pv), w);
     return E;
   }
-  if (filter_mode == 3) {                    // xBRZ-style
-    vec2 cd = corner_dz(uv, t, vec2(sx, sy));
-    if (cd.x >= cd.y) return E;              // no edge across this corner
-    vec3 C = srctex(uv + t * vec2( sx, -sy));
-    vec3 G = srctex(uv + t * vec2(-sx,  sy));
-    vec3 B = srctex(uv + t * vec2(0.0, -sy));
-    vec3 D = srctex(uv + t * vec2(-sx, 0.0));
-    // Checkerboard guard: both diagonals of the corner quad are same-colour
-    // pairs — that is a fine pattern, not an edge, and blending dissolves it.
-    if ((eqz(E, Ph) && eqz(Pv, X)) || (eqz(E, Pv) && eqz(Ph, X))) return E;
-    bool line_blend = true;
-    if (cd.y <= 3.6 * cd.x) {                // not a dominant gradient: guards
-      // A cut in an adjacent corner of this texel means the line ends here;
-      // full wedge blending would eat insular pixels (sprite eyes), so only
-      // the corner nib is rounded. Same for a solid L-shape around the quad.
-      vec2 tr = corner_dz(uv, t, vec2(sx, -sy));
-      vec2 bl = corner_dz(uv, t, vec2(-sx, sy));
-      if (tr.x < tr.y && !eqz(E, G)) line_blend = false;
-      else if (bl.x < bl.y && !eqz(E, C)) line_blend = false;
-      else if (eqz(G, Pv) && eqz(Pv, X) && eqz(X, Ph) && eqz(Ph, C) &&
-               !eqz(E, X)) line_blend = false;
-    }
-    vec3 px = dz(E, Ph) <= dz(E, Pv) ? Ph : Pv;
-    if (line_blend) {
-      float fg = dz(Ph, G), hc = dz(Pv, C);
-      bool shallow = 2.2 * fg <= hc && !eqz(E, G) && !eqz(D, G);
-      bool steep   = 2.2 * hc <= fg && !eqz(E, C) && !eqz(B, C);
-      // Signed distance from the fragment to the cut line, per candidate
-      // slope, as the AA ramp — this replaces the reference scaler's
-      // per-scale-factor subpixel fill tables and works at any magnification.
-      float wz = smoothstep(-0.18, 0.18, (lx + ly - 1.5) / sqrt(2.0));
-      if (shallow)
-        wz = max(wz, smoothstep(-0.18, 0.18, (lx + 2.0 * ly - 2.0) / sqrt(5.0)));
-      if (steep)
-        wz = max(wz, smoothstep(-0.18, 0.18, (2.0 * lx + ly - 2.0) / sqrt(5.0)));
-      return mix(E, px, wz);
-    }
-    float r = length(vec2(1.0 - lx, 1.0 - ly));   // corner nib only
-    return mix(E, px, 0.45 * (1.0 - smoothstep(0.15, 0.45, r)));
+  if (filter_mode == 3) {                    // xBRZ-style, see docs/filters.md
+    // Half an output pixel in texel units: the anti-alias width across a cut.
+    vec2 fw = g_px_uv * tsz;
+    float aa = clamp(0.5 * max(fw.x, fw.y), 0.01, 0.25);
+    return smoothCorner(uv, t, sx, sy, lx, ly, aa);
   }
   // filter_mode == 2: xBR-lv2 edge-directed interpolation
   vec3 C  = srctex(uv + t * vec2( sx, -sy));
@@ -259,6 +282,7 @@ vec3 gb_layer(vec2 uv) {
 
 void main() {
   vec3 rgb;
+  g_px_uv = fwidth(tex_coord);   // derivatives must be taken in uniform control flow
   if (sgb_border) {
     vec4 b = texture(border_texture, tex_coord);
     if (b.a > 0.5) {
@@ -272,6 +296,7 @@ void main() {
       // result flipped back for the sampler.
       vec2 up = vec2(tex_coord.x, -tex_coord.y) * vec2(256.0, 224.0);
       vec2 guv = (up - vec2(48.0, 40.0)) / vec2(160.0, 144.0);
+      g_px_uv *= vec2(256.0 / 160.0, 224.0 / 144.0);   // pixel extent in guv units
       rgb = (guv.x >= 0.0 && guv.x < 1.0 && guv.y >= 0.0 && guv.y < 1.0)
             ? gb_layer(vec2(guv.x, -guv.y)) : sgb_backdrop;
     }
