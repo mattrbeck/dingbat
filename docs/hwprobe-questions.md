@@ -123,6 +123,27 @@ Zero-code item: run the same gbaedge build on every other GBA-family console
 any probe differs across silicon; MODEL separates BIOS families (DS reads
 `18 80`).
 
+## Probe ROMs still to write
+
+Each closes a row that docs/oracles.md marks `Assumed`, or a disagreement
+found while decoding the session 1–2 captures. Flashcart pages use the
+gbedge / gbaedge page format (tests/roms/gbedge.py) unless noted.
+
+| ROM / page | Rig | Answers |
+|---|---|---|
+| gbedge p02 re-shoot on AGS and on a CGB | GB flashcart | bytes 11–12 (TAC $05→$06 switch glitch) read 02 02 on AGS where the model gives 01 01 — confirms or refutes the model's CGB reload window (`timer.nim` timer_check_edge) |
+| gbedge full run on a GBC (unrun) | GB flashcart | the CGB-C vs CGB-D splits (`GbQuirks.lyc_compare_hold`, `ly_read_edge_late`) that today rest on per-revision comparison runs; the CGB side of the timer reload |
+| gbvis page: LCDC.5 turned on mid-line on the WY line | GB flashcart, photograph | whether the window re-checks WY on the LCDC write (`ppu.nim` ppu_store_lcdc, Assumed; disabling it changes no verdict) |
+| gbvis pages: one register per page (SCX, SCY, WX, BGP, LCDC) written at a known dot | GB flashcart, photograph | the per-register CGB write latencies (`memory.nim`, six independent numbers Assumed; hwprobe row 4's WY LATCH photos are the first of these, undecoded) |
+| gbaedge page: OBJ line budget exhausted mid-sprite | GBA flashcart | whether the sprite that exhausts the per-line budget draws fully or truncates (`gba/ppu.nim` render_sprites) |
+| gbaedge page: 8×8 OBJ at X 448..511 and Y 160..255; a multi-tile 8bpp OBJ named tile 1023 | GBA flashcart | the signed-coordinate thresholds and OBJ VRAM wrap (`obj_geometry`, `render_sprites`) |
+| gbaedge page: open-bus reads by the DMA itself and by instructions 1–3 after a burst | GBA flashcart | how long the last DMA word stays on the bus (`bus.nim` read_open_bus_value; window Assumed) |
+| line-out capture: PSG volume 3 vs 2; SOUNDBIAS resolutions 0–3 on a full-scale tone | GBA + audio capture | whether volume 3 mutes; the DAC resolution mask depth (`gba/apu.nim`) |
+| multiboot probe (sender ROM on the flashcart GBA, link cable to a GBA holding the retail cart): TM0-timed busy poll after an EEPROM block write | retail 64k-EEPROM cart (e.g. Super Mario Advance 2) | the write-settle time (`storage/eeprom.nim`, 108368 cycles from GBATEK) |
+| multiboot probe: tilt status bit poll count; gyro bit order per clock edge | Yoshi Topsy-Turvy; WarioWare Twisted | `bus.nim` tilt_read always-ready; `gpio.nim` gyro edge |
+| multiboot probe: read $08100000 / $08400000 | a Classic NES Series cart | the ROM mirror window (`cartridge.nim`) |
+| playtest only | Kirby Tilt 'n' Tumble on a CGB | MBC7 idle accelerometer value and .sav order (`mbc/mbc7.nim`) — no code path can read it back |
+
 ## Un-probeable or not worth it
 
 - `GB_DC_CHARGE` / mix scale / output filters: analog capture only.
