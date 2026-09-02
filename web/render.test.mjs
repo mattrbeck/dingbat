@@ -100,8 +100,7 @@ function renderInPage(cfg) {
   gl.uniform1f(gl.getUniformLocation(prog, "u_tex_height"), nh);
   gl.uniform2f(gl.getUniformLocation(prog, "u_tex_size"), nw, nh);
   gl.uniform1i(gl.getUniformLocation(prog, "u_filter"),
-    opts.filter === "hq4x" ? 1 : opts.filter === "xbr" ? 2
-      : opts.filter === "xbrz" ? 3 : 0);
+    opts.filter === "hq4x" ? 1 : opts.filter === "xbr" ? 2 : 0);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 
   // readPixels row 0 is the bottom row; samples are given top-left origin.
@@ -192,7 +191,6 @@ async function run() {
     await structural("RGB-subpixel mask ON", { colorCorrect: false, grid: false, subpixel: true, filter: "none" });
     await structural("filter=hq4x", { colorCorrect: false, grid: false, filter: "hq4x" });
     await structural("filter=xBR", { colorCorrect: false, grid: false, filter: "xbr" });
-    await structural("filter=xBRZ", { colorCorrect: false, grid: false, filter: "xbrz" });
   } finally {
     await browser.close();
   }

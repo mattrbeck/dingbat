@@ -5,7 +5,7 @@
 //
 //   node tools/filtershot/render.mjs <dump.rgb555> <w> <h> <scale> <outdir> <base> [ghost.rgb555]
 //
-// writes <outdir>/<base>.<filter>.png for none / hq4x / xbr / xbrz. Colour
+// writes <outdir>/<base>.<filter>.png for none / hq4x / xbr. Colour
 // correction and scanlines stay off: both apply uniformly after the upscale.
 //
 // With a ghost dump each filter renders twice:
@@ -25,7 +25,7 @@ const { chromium } = requireWeb("playwright");
 
 // FILTERSHOT_FILTERS="grid,rgb" overrides. "grid"/"rgb" are the
 // screen-structure looks: their own uniforms, u_filter 0, as index.js does.
-const FILTERS = (process.env.FILTERSHOT_FILTERS || "none,hq4x,xbr,xbrz")
+const FILTERS = (process.env.FILTERSHOT_FILTERS || "none,hq4x,xbr")
   .split(",").map((s) => s.trim()).filter(Boolean);
 
 function renderInPage({ VERT, FRAG, w, h, scale, pixels, ghostPixels, filter }) {
@@ -72,7 +72,7 @@ function renderInPage({ VERT, FRAG, w, h, scale, pixels, ghostPixels, filter }) 
   gl.uniform1f(gl.getUniformLocation(prog, "u_scan_width"), w);
   gl.uniform2f(gl.getUniformLocation(prog, "u_tex_size"), w, h);
   u1i("u_filter", filter === "hq4x" ? 1 : filter === "xbr" ? 2
-    : filter === "xbrz" ? 3 : 0);
+    : 0);
   if (ghostPixels) {
     const gt = gl.createTexture();
     gl.activeTexture(gl.TEXTURE2);

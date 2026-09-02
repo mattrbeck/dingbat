@@ -5610,7 +5610,7 @@ const LCD_LEGACY_ON = ["auto", "on", "true", "yes",
                        "dmg", "cgb", "gbc", "agb", "agb001", "gba",
                        "ags", "ags101", "sp"];
 var ambientGlow = false;
-// The Filter selector: smoothing filters ("hq4x" | "xbr" | "xbrz") and
+// The Filter selector: smoothing filters ("hq4x" | "xbr") and
 // screen looks ("grid" | "rgb") in one select, since exactly one is active.
 // The screen looks are not u_filter values; drawGame maps them to their own
 // uniforms.
@@ -5888,6 +5888,8 @@ const loadVideoSettings = async () => {
     // (the old UI let the filter win).
     if (upscaleFilter === "scanlines") upscaleFilter = "grid";
     if (v.scanlines && upscaleFilter === "none") upscaleFilter = "grid";
+    // "xbrz" was removed; the nearest remaining smoother is xBR.
+    if (upscaleFilter === "xbrz") upscaleFilter = "xbr";
   }
   integerScaleToggle.checked = integerScale;
   lcdResponseToggle.checked = lcdResponse;

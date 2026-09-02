@@ -34,12 +34,8 @@ void main() {
   gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
 }`;
 
-  // Upscale filters. The hq4x-/xBR-style branches follow public algorithm
-  // descriptions; the "xBRZ-style" branch is implemented from the written spec
-  // in docs/filters.md using its three public ideas: a YCbCr Euclidean colour
-  // distance, a corner test weighing the quad's two diagonal cuts over 5x5
-  // support with a dominance ratio, and guards that keep 1-2px features and
-  // line ends. No scaler source was consulted. Mirrors src/dingbat.nim FRAG_SRC.
+  // Upscale filters: the hq4x- and xBR-style branches follow the public
+  // algorithm descriptions. Mirrors src/dingbat.nim FRAG_SRC.
   const FRAG = `#version 300 es
 precision highp float;
 precision highp int;
@@ -58,7 +54,7 @@ uniform float u_scan_height;
 uniform float u_scan_width;
 uniform bool u_subpixel;
 uniform vec2 u_tex_size;        // game texel dimensions (w, h)
-uniform int u_filter;           // 0 = none, 1 = hq4x, 2 = xBR, 3 = xBRZ
+uniform int u_filter;           // 0 = none, 1 = hq4x, 2 = xBR
 // --- Super Game Boy border ---------------------------------------------
 // A 256x224 second layer in the same BGR555 packing as the game framebuffer,
 // with bit 15 = opaque (SNES colour 0 is transparent). The Game Boy window is
@@ -96,7 +92,6 @@ const vec3 DMG_SHADE[4] = vec3[4](vec3(31.0, 30.0, 26.0),   // 0x6BDF
                                   vec3(15.0,  7.0, 11.0));  // 0x2CEF
 
 ivec2 g_max;
-vec2 g_px_uv;   // uv extent of one output pixel; set once in main() (uniform flow)
 vec3 fetchRGB(ivec2 p) {
   uint packed = texelFetch(u_tex, clamp(p, ivec2(0), g_max), 0).r & 0x7FFFu;
   vec3 c = vec3(float(packed & 31u),
@@ -136,91 +131,6 @@ vec3 unpack555(uint packed) {
               float((packed >> 10) & 31u)) / 31.0;
 }
 
-// ---- xBRZ-style scaler (u_filter == 3); the rules are in docs/filters.md ----
-// Perceptual colour distance: Euclidean in YCbCr on the 8-bit scale (0..~441).
-float yccDist(vec3 a, vec3 b) { return length(yuv(a) - yuv(b)) * 255.0; }
-bool alike(vec3 a, vec3 b) { return yccDist(a, b) < 30.0; }
-
-// Edge strength along each diagonal of the 2x2 quad at corner (sx,sy) of
-// texel b. The quad is P = b, H = its horizontal neighbour across the corner,
-// V = the vertical one, D = the diagonal one. Each strength is the quad's own
-// diagonal pair (x4) plus the four pairs one pixel further out that continue
-// the same direction on either side of the quad (5x5 support):
-//   .x  the H-V pair and its parallels: large when an edge separates H from V
-//   .y  the P-D pair and its parallels: large when an edge separates P from D
-// An edge cuts P's corner (P takes the H/V side's colour there) when .x < .y.
-vec2 cornerDiffs(ivec2 b, int sx, int sy) {
-  vec3 P = fetchRGB(b);
-  vec3 H = fetchRGB(b + ivec2(sx, 0));
-  vec3 V = fetchRGB(b + ivec2(0, sy));
-  vec3 D = fetchRGB(b + ivec2(sx, sy));
-  float hv = 4.0 * yccDist(H, V)
-           + yccDist(P, fetchRGB(b + ivec2( sx, -sy)))
-           + yccDist(P, fetchRGB(b + ivec2(-sx,  sy)))
-           + yccDist(D, fetchRGB(b + ivec2(2 * sx, 0)))
-           + yccDist(D, fetchRGB(b + ivec2(0, 2 * sy)));
-  float pd = 4.0 * yccDist(P, D)
-           + yccDist(H, fetchRGB(b + ivec2(0, -sy)))
-           + yccDist(H, fetchRGB(b + ivec2(2 * sx, sy)))
-           + yccDist(V, fetchRGB(b + ivec2(-sx, 0)))
-           + yccDist(V, fetchRGB(b + ivec2(sx, 2 * sy)));
-  return vec2(hv, pd);
-}
-
-// Signed distance (texels) from the corner-local position to the cut line;
-// lx, ly run 0.5 at the texel centre .. 1.0 at the active corner, positive is
-// the corner side. Every line passes through the quadrant centre (0.75, 0.75),
-// so the three wedges have equal area and differ only in direction:
-//   slope 0: 45 degrees, through the midpoints of the two corner edges
-//   slope 1: shallow 1:2 (closer to the H axis)      slope 2: steep 2:1
-float cutLineDist(float lx, float ly, int slope) {
-  if (slope == 1) return (0.5 * lx + ly - 1.125) * 0.894427;  // 1/sqrt(1.25)
-  if (slope == 2) return (lx + 0.5 * ly - 1.125) * 0.894427;
-  return (lx + ly - 1.5) * 0.707107;                           // 1/sqrt(2)
-}
-
-// The xBRZ-style rule for one corner: decide whether a diagonal edge cuts it,
-// which neighbour's colour lies across the edge, what slope the edge has, and
-// paint that wedge. aa is half the smoothstep width across the cut, in texels.
-vec3 smoothCorner(ivec2 b, int sx, int sy, float lx, float ly, float aa) {
-  vec3 P = fetchRGB(b);
-  vec3 H = fetchRGB(b + ivec2(sx, 0));
-  vec3 V = fetchRGB(b + ivec2(0, sy));
-  vec3 D = fetchRGB(b + ivec2(sx, sy));
-  vec2 e = cornerDiffs(b, sx, sy);
-  if (e.x >= e.y) return P;                                   // no edge here
-  if ((alike(P, H) && alike(V, D)) || (alike(P, V) && alike(H, D)))
-    return P;                                                 // checkerboard / paired 2x2
-  // The pixels diagonally across P's other two corners: beside H away from V,
-  // and beside V away from H.
-  vec3 diagH = fetchRGB(b + ivec2( sx, -sy));
-  vec3 diagV = fetchRGB(b + ivec2(-sx,  sy));
-  vec3 tint = yccDist(P, H) <= yccDist(P, V) ? H : V;         // colour across the edge
-  if (e.y <= 3.6 * e.x) {                                     // not a dominant edge:
-    // end-of-line guards. A neighbouring corner that is also cut means P is
-    // the tip of a line; a ring of one colour around the quad means P is a
-    // lone dot. Full blending would round those off, so only a small nib at
-    // the corner point is softened.
-    vec2 eh = cornerDiffs(b, sx, -sy);
-    vec2 ev = cornerDiffs(b, -sx, sy);
-    bool lineTip = (eh.x < eh.y && !alike(P, diagH)) || (ev.x < ev.y && !alike(P, diagV));
-    bool loneDot = alike(diagV, V) && alike(V, D) && alike(D, H) && alike(H, diagH)
-                && !alike(P, D);
-    if (lineTip || loneDot) {
-      float r = length(vec2(1.0 - lx, 1.0 - ly));
-      return mix(P, tint, 0.45 * (1.0 - smoothstep(0.25 - aa, 0.25 + aa, r)));
-    }
-  }
-  // Slope. H and diagV are the two ends of a 1:2 segment through the corner,
-  // V and diagH of the 2:1 one. The edge is shallow when the 1:2 ends agree
-  // far better than the 2:1 ends and the V-row pixels on it are not P's colour.
-  float shallowDiff = yccDist(H, diagV), steepDiff = yccDist(V, diagH);
-  int slope = 0;
-  if (2.2 * shallowDiff <= steepDiff && !alike(P, V) && !alike(P, diagV)) slope = 1;
-  else if (2.2 * steepDiff <= shallowDiff && !alike(P, H) && !alike(P, diagH)) slope = 2;
-  return mix(P, tint, smoothstep(-aa, aa, cutLineDist(lx, ly, slope)));
-}
-
 vec3 upscale(vec2 uv) {
   g_max = ivec2(u_tex_size) - ivec2(1);
   vec2 pos  = uv * u_tex_size;
@@ -241,12 +151,6 @@ vec3 upscale(vec2 uv) {
     if (!similar(E, Ph) && !similar(E, Pv) && similar(Ph, Pv))
       return mix(E, 0.5 * (Ph + Pv), w);
     return E;
-  }
-  if (u_filter == 3) {               // xBRZ-style, see docs/filters.md
-    // Half an output pixel in texel units: the anti-alias width across a cut.
-    vec2 fw = g_px_uv * u_tex_size;
-    float aa = clamp(0.5 * max(fw.x, fw.y), 0.01, 0.25);
-    return smoothCorner(base, sx, sy, lx, ly, aa);
   }
   // u_filter == 2: xBR-lv2
   vec3 C  = fetchRGB(base + ivec2( sx, -sy));
@@ -299,7 +203,6 @@ vec3 shade(vec3 c) {
 
 void main() {
   vec3 rgb;
-  g_px_uv = fwidth(v_uv);   // derivatives must be taken in uniform control flow
   if (u_sgb_border) {
     ivec2 bp = clamp(ivec2(v_uv * vec2(256.0, 224.0)), ivec2(0), ivec2(255, 223));
     uint bw = texelFetch(u_border, bp, 0).r;
@@ -309,7 +212,6 @@ void main() {
       rgb = unpack555(bw & 0x7FFFu);
     } else {
       vec2 guv = (v_uv * vec2(256.0, 224.0) - vec2(48.0, 40.0)) / vec2(160.0, 144.0);
-      g_px_uv *= vec2(256.0 / 160.0, 224.0 / 144.0);   // pixel extent in guv units
       rgb = (guv.x >= 0.0 && guv.x < 1.0 && guv.y >= 0.0 && guv.y < 1.0)
             ? shade(upscale(guv)) : u_sgb_backdrop;
     }
@@ -490,8 +392,7 @@ void main() {
         gl.uniform3f(uSgbBackdrop, (bd & 31) / 31,
           ((bd >> 5) & 31) / 31, ((bd >> 10) & 31) / 31);
       }
-      gl.uniform1i(uFilter, opts.filter === "hq4x" ? 1 : opts.filter === "xbr" ? 2
-        : opts.filter === "xbrz" ? 3 : 0);
+      gl.uniform1i(uFilter, opts.filter === "hq4x" ? 1 : opts.filter === "xbr" ? 2 : 0);
       // opts.dmgPalette: four "#rrggbb" strings (shade 0 -> 3) or null/absent.
       const pal = opts.dmgPalette;
       const remap = !!(pal && pal.length === 4);

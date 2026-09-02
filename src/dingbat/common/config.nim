@@ -242,7 +242,6 @@ type
     vfNone = "none"
     vfHq4x = "hq4x"
     vfXbr  = "xbr"
-    vfXbrz = "xbrz"
     # Screen-structure looks share the selector with the smoothing filters so
     # exactly one is active (this retired the separate Scanlines toggle). Not
     # shader filter_mode values; the frontends translate them.

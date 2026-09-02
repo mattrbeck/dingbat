@@ -10,7 +10,7 @@ is unchanged. Tests: `web/render.test.mjs` (the two delta identities).
 ## The problem
 
 The response model runs on the CPU at native resolution, and its output is
-what the presenter uploads, so the upscale filters (hq4x / xBR / xBRZ)
+what the presenter uploads, so the upscale filters (hq4x / xBR)
 classify edges on an already-ghosted picture. A settling pixel holds an
 in-between colour for a few frames; the classifier reads the transient as
 an edge or misses a real one, and flips frame to frame — moving edges

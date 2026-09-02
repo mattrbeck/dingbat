@@ -29,8 +29,8 @@ proc render*(v: VideoWidget) =
   igSeparator()
   igText("Filter:")
   igSameLine(0, -1)
-  help_marker("One look for the picture, GPU-drawn either way. hq4x, xBR and " &
-              "xBRZ are clean-room implementations of the well-known " &
+  help_marker("One look for the picture, GPU-drawn either way. hq4x and xBR " &
+              "are clean-room implementations of the well-known " &
               "edge-directed smoothers; LCD grid and RGB subpixels draw the " &
               "screen's own structure instead of smoothing (the grid is the " &
               "pixel matrix every Game Boy LCD shows; RGB subpixels imitates " &
@@ -43,9 +43,8 @@ proc render*(v: VideoWidget) =
   discard igRadioButton_IntPtr("None (crisp)", addr v.filter, 0)
   discard igRadioButton_IntPtr("hq4x", addr v.filter, 1)
   discard igRadioButton_IntPtr("xBR", addr v.filter, 2)
-  discard igRadioButton_IntPtr("xBRZ", addr v.filter, 3)
-  discard igRadioButton_IntPtr("LCD grid", addr v.filter, 4)
-  discard igRadioButton_IntPtr("RGB subpixels", addr v.filter, 5)
+  discard igRadioButton_IntPtr("LCD grid", addr v.filter, 3)
+  discard igRadioButton_IntPtr("RGB subpixels", addr v.filter, 4)
   igEndDisabled()
   igUnindent(106)
   igSeparator()
