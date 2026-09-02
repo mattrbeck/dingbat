@@ -45,24 +45,21 @@ block:
 
 echo "== GB Game Genie =="
 block:
-  # Decode via the mGBA formula; op1=first3, op2=next3, op3=last3.
-  # Code 010-178-CE1: op1=0x010 op2=0x178 op3=0xCE1
-  #   value = op1>>4 = 0x01
-  #   address = (op1&0xF)<<8 | (op2>>4)&0xFF | ((op2&0xF)^0xF)<<12
-  #           = 0x000 | 0x17 | (0x8^0xF)<<12 = 0x17 | 0x7000 = 0x7017
-  let (ops, err) = parse_cheat(cpGB, "010-178-CE1")
+  # Jeff Frohwein's published worked example (devrs.com/gb/files/gg.html):
+  # 068-5FF-E66 patches $085F from $03 to $06 ("start with 7 lives").
+  let (ops, err) = parse_cheat(cpGB, "068-5FF-E66")
   check "parses", err.len == 0 and ops.len == 1
   check "action rompatch", ops[0].action == caRomPatch
-  check &"value 0x01 (got {ops[0].value:02X})", ops[0].value == 0x01
-  check &"address 0x7017 (got {ops[0].address:04X})", ops[0].address == 0x7017
-  check "has compare byte", ops[0].compare >= 0
+  check &"value 0x06 (got {ops[0].value:02X})", ops[0].value == 0x06
+  check &"address 0x085F (got {ops[0].address:04X})", ops[0].address == 0x085F
+  check &"compare 0x03 (got {ops[0].compare:02X})", ops[0].compare == 0x03
 
 block:
   # 6-digit (no compare) form still parses.
-  let (ops, err) = parse_cheat(cpGB, "010-178")
+  let (ops, err) = parse_cheat(cpGB, "068-5FF")
   check "6-digit parses", err.len == 0 and ops.len == 1
   check "no compare", ops[0].compare == -1
-  check "same address", ops[0].address == 0x7017
+  check "same address", ops[0].address == 0x085F
 
 echo "== GBA cipher round-trips (PARv3 seeds) =="
 block:

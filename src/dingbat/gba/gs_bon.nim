@@ -8,8 +8,9 @@
 # MP2K HLE consumes are never written: per-side gains come from the raw
 # fields instead (gs_on_frame).
 #
-# Provenance (clean-room; this emulator is MIT): pret m4a_internal.h for the
-# struct layouts; ipatix/gba-hq-mixer (MIT) consulted for facts about this
+# Provenance (clean-room; this emulator is MIT): the stock m4a SoundInfo /
+# SoundChannel layout (see mp2k.nim's header) for the struct offsets;
+# ipatix/gba-hq-mixer (MIT) consulted for facts about this
 # mixer family, no code copied; this project's own runtime probing and
 # disassembly of the game's IWRAM mixer copy for everything below; GBATEK
 # for the DirectSound FIFO/DMA facts. No GPL/LGPL source was used.
@@ -106,10 +107,10 @@ const GS_BUILDS = [
 ]
 
 const
-  # SoundChannel field offsets (stock m4a layout, pret m4a_internal.h):
+  # SoundChannel field offsets (stock m4a layout):
   GSC_STATUS   = 0x00
   GSC_TYPE     = 0x01
-  GSC_VOL_A    = 0x02   # FIFO-A-lane volume (pret names +2 'rightVolume', but
+  GSC_VOL_A    = 0x02   # FIFO-A-lane volume (the stock layout calls +2 rightVolume, but
   GSC_VOL_B    = 0x03   # this driver's packer feeds +2 to the buffer-A lane;
                         # per-side RMS matches the real FIFO A/B this way round)
   GSC_ATTACK   = 0x04

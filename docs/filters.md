@@ -3,11 +3,16 @@
 dingbat's present shaders (`web/glpresent.js` `FRAG`, `src/dingbat.nim`
 `FRAG_SRC`) carry three optional pixel-art scalers, selected by the Filter
 setting: `hq4x`, `xbr` and `xbrz`. This page is the written specification the
-`xbrz` ("xBRZ-style") branch was implemented from. It was written without
-consulting any scaler source; the sections "What the family does" and
-"Required behaviour" are the specification as handed to the implementer, and
-"Implementation choices" records the rules the implementer had to invent where
-the specification left a gap.
+`xbrz` ("xBRZ-style") branch was implemented from, in a two-party clean room.
+The specification was written by someone familiar with xBRZ (Zenju's
+GPL-3 C++ implementation and the shader ports of it), from public
+descriptions of what the algorithm does and its published tuning constants,
+and contains behaviour only, no code. The implementer had never read any
+xBRZ source and was forbidden to consult one; the sections "What the family
+does" and "Required behaviour" are the specification as handed over, and
+"Implementation choices" records the rules the implementer had to invent
+where the specification left a gap. The result is not, and is not meant to
+be, pixel-identical to xBRZ.
 
 ## What the family of "scale by rules" filters does (public knowledge)
 

@@ -579,15 +579,14 @@ type
     output_freq*:       int
 
   # MP2K/M4A sound-engine HLE state (mp2k.nim). Off by default. Field names
-  # follow the pret m4a_internal.h WaveData layout where they name a format
-  # field.
+  # follow the driver's WaveData layout where they name a format field.
   Mp2kSampler* = object
     active*:      bool
     wave_data*:   uint32
     rom_off*:     uint32    # cached ROM byte offset of the sample data (in_rom)
     in_rom*:      bool      # sample bytes live in cartridge ROM (fast path)
-    sample_count*: uint32   # WaveData.size (m4a_internal.h): number of source samples
-    loop_start*:  uint32    # WaveData.loopStart (m4a_internal.h): loop restart index
+    sample_count*: uint32   # WaveData.size: number of source samples
+    loop_start*:  uint32    # WaveData.loopStart: loop restart index
     looping*:     bool
     freq*:        uint32
     compressed*:  bool      # m4a BDPCM ("compressed waveform"): TONEDATA_TYPE_CMP/REV
@@ -595,8 +594,8 @@ type
     use_pcm_rate*: bool     # TONEDATA_TYPE_FIX (type bit3): step at SoundInfo.pcmFreq
     reversed*:    bool      # TONEDATA_TYPE_REV (type bit4): play the sample backward
     start_off*:   uint32    # note-on sample start offset (SoundChannel.count at START)
-    # BDPCM decoded-block cache (the driver's sDecodingBuffer keyed by block
-    # index; SoundMainRAM_Unk2 in pret pokeemerald m4a_1.s):
+    # BDPCM decoded-block cache (the driver also decodes block-at-a-time into
+    # a buffer keyed by block index):
     blk_index*:   uint32    # block number currently decoded in blk (0xFFFFFFFF = none)
     blk*:         array[64, int8]  # decoded s8 samples of that block
     src_index*:   uint32    # integer sample read cursor (block/offset derived from this)
@@ -701,9 +700,9 @@ type
     # 1-frame-delayed shadow no longer renders, which must not count as
     # foreign.
     shadow_quiet_age*: int
-    # Shadow of the engine's pcmBuffer frame ring (s8 pcmBuffer[PCM_DMA_BUF_SIZE
-    # * 2], pret m4a_internal.h): pcmDmaPeriod one-V-blank slots per stereo
-    # half. Algorithm: mp2k.nim render_sample.
+    # Shadow of the engine's pcmBuffer frame ring (two s8 halves, one per
+    # FIFO): pcmDmaPeriod one-V-blank slots per half. Algorithm: mp2k.nim
+    # render_sample.
     reverb_ring*:    seq[float32]  # rev_period slots x MP2K_REV_SLOT_LEN stereo samples
     rev_slot*:       int           # current frame slot (the one being overwritten)
     rev_pos*:        int           # intra-frame sample index within the slot

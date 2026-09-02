@@ -303,7 +303,7 @@ proc parse_gba_line(code: string; raw: bool; op: var CheatOp): string =
 # ---------------------------------------------------------------------------
 # GBA raw CodeBreaker / short GameShark  (TXXXXXXX YYYY, unencrypted)
 # The common Pokémon item/money code form, e.g. 82025840 0044. Type in the top
-# nibble; opcode table = GBACodeBreakerType (include/mgba/internal/gba/cheats.h).
+# nibble; opcode meanings per GBATEK, "GBA Cheat Codes - CodeBreaker".
 # ---------------------------------------------------------------------------
 
 proc parse_gba_cb_raw(code: string; op: var CheatOp): string =
