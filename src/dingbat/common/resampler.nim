@@ -1,5 +1,4 @@
 # Cubic interpolation resampler for audio.
-# Adapted from the author's earlier Nim GBA emulator (github.com/mattrbeck/gba).
 
 type
   Resampler*[T] = object
