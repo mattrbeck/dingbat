@@ -11,7 +11,7 @@ proc bios_arctan(cpu: CPU) =
   let a = cast[int32](cpu.r[0])
   var r1 = mul32(a, a)
   r1 = ashr(r1, 14)
-  r1 = -r1  # neg_a_sq
+  r1 = -r1
   const ARCTAN_COEFFS = [0xA9'i32, 0x0390, 0x091C, 0x0FB6, 0x16AA, 0x2081, 0x3651, 0xA2F9]
   var r3 = mul32(ARCTAN_COEFFS[0], r1)
   r3 = ashr(r3, 14)
@@ -21,6 +21,12 @@ proc bios_arctan(cpu: CPU) =
   cpu.r[0] = cast[uint32](ashr(mul32(r3, a), 16))
   cpu.r[1] = cast[uint32](r1)
   cpu.r[3] = cast[uint32](r3)
+
+proc arctan_cycles(a: uint32): int {.inline.} =
+  ## ArcTan body cost: fixed, plus two multiplies whose multiplier is the
+  ## input (real-BIOS TM0: 127 for 0/1/-1, 129 for 0x100..0xFFFF, 131 for
+  ## 0x10000, net of the dispatch).
+  46 + 2 * mul_i_cycles(a, true)
 
 proc div_align_shifts(n, d: uint32): int {.inline.} =
   ## Taken-branch count of the BIOS divide's alignment loop (0x3C8): r2
@@ -180,11 +186,10 @@ proc check_intr_wait*(cpu: CPU) =
       cpu.set_sys_sp(usp)
     # The IntrWait exit path leaves this opcode in the BIOS open-bus latch
     cpu.gba.bus.bios_latch = 0xE3A02004'u32
-    # Wake-path cost, instruction-counted: bl 0x358 (3) + check/ack
-    # subroutine (15) + beq (1) + pop {r4,lr} (4) + bx lr (3) + dispatcher
-    # restore 0x170-0x184 (12) + movs pc, lr with refill (5). Keeps code
-    # after IntrWait phase-aligned with the timer prescaler (mGBA suite
-    # Timer count-up rows).
+    # Wake-path cost: the check/acknowledge subroutine, its return, the
+    # routine's frame pop and the dispatcher's restore, instruction-counted
+    # from the real BIOS. Keeps code after IntrWait phase-aligned with the
+    # timer prescaler (mGBA suite Timer count-up rows).
     cpu.gba.bus.add_cycles(44)  # INTRWAIT_TUNE
   else:
     # Re-halt with the check subroutine's register state (see hle_intr_wait)
@@ -476,29 +481,20 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     cpu.r[1] = 1
     cpu.hle_intr_wait(true, 1'u16)
   of 0x08:  # Sqrt
-    # BIOS Sqrt at 0x404, disassembled (push {r4} ... pop {r4}; bx lr):
-    #   0x40C  r1 = 1; while (r0 > r1) { r0 >>= 1; r1 <<= 1 }
-    #   0x420  pass: r0 = x; r4 = r1; r3 = 0; r2 = r1
-    #   0x430    while (r2 < x >> 1) r2 <<= 1   (compare before shift: an
-    #            exact hit still doubles once, then falls through)
-    #   0x43C    restoring divide: r3 = 2*r3 + (r0 >= r2), r0 -= r2 if so,
-    #            r2 >>= 1 until r2 == r1
-    #   0x454    r1 = (r1 + r3) >> 1; if (r1 < r4) goto pass
-    #   0x464  r0 = r4
-    # I.e. Newton from above, x_next = (x_n + N / x_n) / 2, stopping at the
-    # first step that fails to decrease; GBATEK SWI 08h documents only the
-    # 16-bit result. The scratch stays in the caller's registers (r2 comes
-    # back from the dispatcher's stack frame): r1 = the rejected average,
-    # r3 = the last quotient. For x = 0 the first pass averages to r1 = 0
-    # < r4 = 1, so a second pass runs with r2 = 0 and its 0/0 step yields
+    # The BIOS routine (0x404) is Newton from above: start from the power
+    # of two at or above sqrt(x), take x_next = (x_n + x / x_n) / 2 with a
+    # restoring shift-subtract divide whose divisor is first doubled while
+    # below x / 2 (an exact hit still doubles once), and stop at the first
+    # step that fails to decrease. GBATEK SWI 08h documents only the 16-bit
+    # result. The scratch stays in the caller's registers: r1 = the
+    # rejected average, r3 = the last quotient. For x = 0 the first pass
+    # averages to 0 < 1, so a second pass runs and its 0/0 step yields
     # quotient 1: r0 = 0, r1 = 0, r3 = 1.
     #
     # Cycles from GBATEK "ARM CPU Instruction Cycle Times" (BIOS is 32-bit,
-    # zero-wait: S = N = 1; taken branch 3, not-taken or failed-condition
-    # 1): a normalize iteration 6; a pass 17 (setup 4, alignment exit 3,
-    # divide exit 6, tail 4) + 5 per alignment doubling + 8 per continuing
-    # divide step + 2 when its `bcc` loops back; a fixed 12 for push {r4},
-    # the normalize exit, mov r0, r4 and pop {r4}, net of the return that
+    # zero-wait: S = N = 1; taken branch 3, not-taken 1): a normalize
+    # iteration 6; a pass 17 + 5 per divisor doubling + 8 per continuing
+    # divide step + 2 when it loops back; a fixed 12 net of the return that
     # SWI_HLE_BASE covers (the datasheet formulas give 10; x = 0 and x = 1
     # measure 2 more, and every other input follows). Hardware anchors:
     # gbaedge SWIREGION (0x10/0x1000/0x100000/0x40000000 -> 0x00CC/0x0118/
@@ -511,7 +507,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       let x = cpu.r[0]
       let half = x shr 1
       var cycles = 12
-      # 0x40C: halve the input and double the estimate until they cross
+      # halve the input and double the estimate until they cross
       var estimate = 1'u32          # r1
       var scaled = x                # r0 during normalization
       while scaled > estimate:
@@ -520,18 +516,18 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
         cycles += 6
       var root = estimate           # r4: the candidate this pass tests
       var quotient = 0'u32          # r3
-      while true:                   # 0x420
+      while true:                   # one Newton pass
         root = estimate
         var remainder = x           # r0
         var divisor = estimate      # r2
         quotient = 0
         cycles += 17
-        while true:                 # 0x430
+        while true:                 # align the divisor
           let again = divisor < half
           if divisor <= half: divisor = divisor shl 1
           if not again: break
           cycles += 5
-        while true:                 # 0x43C
+        while true:                 # restoring divide
           quotient = quotient shl 1
           if remainder >= divisor:
             remainder -= divisor
@@ -539,7 +535,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
           if divisor == estimate: break
           divisor = divisor shr 1
           cycles += 8
-        estimate = (estimate + quotient) shr 1   # 0x454
+        estimate = (estimate + quotient) shr 1
         if estimate >= root: break
         cycles += 2
       cpu.idle(cycles)
@@ -547,73 +543,51 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       cpu.r[1] = estimate
       cpu.r[3] = quotient
   of 0x09:  # ArcTan
-    cpu.idle(48)  # fixed-iteration polynomial
+    cpu.idle(arctan_cycles(cpu.r[0]))
     bios_arctan(cpu)
-  of 0x0A:  # ArcTan2
-    # Full 32-bit signed inputs, the BIOS's branching.
+  of 0x0A:  # ArcTan2(x, y) -> angle, 0x10000 = 2 pi
+    # Behaviour taken from the real BIOS under LLE (77 inputs, values exact):
+    # the ratio handed to ArcTan is the smaller coordinate over the larger,
+    # so it stays inside the polynomial's 1.14 range; ties take the y/x form
+    # except in the third quadrant. Magnitudes come from a 32-bit negate, so
+    # -2^31 stays negative and always counts as the smaller. The numerator is
+    # shifted in 32 bits and wraps for |coordinate| >= 2^17. The result is not
+    # masked: the fourth quadrant's y/x form adds a full turn, so r0 can read
+    # 0x10000 there.
     let x = cast[int32](cpu.r[0])
     let y = cast[int32](cpu.r[1])
-    # Octant fixups + an internal Div of the ratio + the ArcTan polynomial.
-    # Axis cases exact against real-BIOS execution; 69 pinned by gbaedge
-    # SWITIME (0x1234, 0x5678 -> 0x01C1).
-    let atan2_model =
-      if y == 0: 26
-      elif x == 0: 28
-      else:
-        let swap = abs(int64(x)) >= abs(int64(y))
-        let num = cast[int32]((if swap: int64(y) else: int64(x)) shl 14)
-        let den = if swap: x else: y
-        69 + hle_div_body_cost(num, den) + 48
+    var model: int
     if y == 0:
-      if x >= 0:
-        cpu.r[0] = 0
-      else:
-        cpu.r[0] = 0x8000'u32
+      cpu.r[0] = if x >= 0: 0'u32 else: 0x8000'u32
+      model = if x >= 0: 23 else: 26
     elif x == 0:
-      if y >= 0:
-        cpu.r[0] = 0x4000'u32
-      else:
-        cpu.r[0] = 0xC000'u32
+      cpu.r[0] = if y >= 0: 0x4000'u32 else: 0xC000'u32
+      model = if y >= 0: 28 else: 30
     else:
-      if y > 0:
+      let ax = if x < 0: cast[int32](0'u32 - cpu.r[0]) else: x
+      let ay = if y < 0: cast[int32](0'u32 - cpu.r[1]) else: y
+      let flat = if x < 0 and y < 0: ax > ay else: ax >= ay
+      let num = cast[int32](cast[uint32](if flat: y else: x) shl 14)
+      let den = if flat: x else: y
+      let ratio = cast[uint32](uint32((int64(num) div int64(den)) and 0xFFFFFFFF))
+      cpu.r[0] = ratio
+      bios_arctan(cpu)
+      let t = cpu.r[0]
+      # Per-octant fixed cost (real-BIOS TM0 readings around the swi, net of
+      # the divide and polynomial): the quadrant branches differ in length.
+      if flat:
         if x > 0:
-          if x >= y:
-            cpu.r[0] = cast[uint32]((int64(y) shl 14) div int64(x))
-            bios_arctan(cpu)
-          else:
-            cpu.r[0] = cast[uint32]((int64(x) shl 14) div int64(y))
-            bios_arctan(cpu)
-            cpu.r[0] = 0x4000'u32 - cpu.r[0]
-        else: # x < 0
-          if -x >= y:
-            cpu.r[0] = cast[uint32]((int64(y) shl 14) div int64(x))
-            bios_arctan(cpu)
-            cpu.r[0] = cpu.r[0] + 0x8000'u32
-          else:
-            cpu.r[0] = cast[uint32]((int64(x) shl 14) div int64(y))
-            bios_arctan(cpu)
-            cpu.r[0] = 0x4000'u32 - cpu.r[0]
-      else: # y < 0
-        if x > 0:
-          if x >= -y:
-            cpu.r[0] = cast[uint32]((int64(y) shl 14) div int64(x))
-            bios_arctan(cpu)
-            cpu.r[0] = cpu.r[0] + 0x10000'u32
-          else:
-            cpu.r[0] = cast[uint32]((int64(x) shl 14) div int64(y))
-            bios_arctan(cpu)
-            cpu.r[0] = 0xC000'u32 - cpu.r[0]
-        else: # x <= 0
-          if -x > -y:
-            cpu.r[0] = cast[uint32]((int64(y) shl 14) div int64(x))
-            bios_arctan(cpu)
-            cpu.r[0] = cpu.r[0] + 0x8000'u32
-          else:
-            cpu.r[0] = cast[uint32]((int64(x) shl 14) div int64(y))
-            bios_arctan(cpu)
-            cpu.r[0] = 0xC000'u32 - cpu.r[0]
+          if y > 0: (cpu.r[0] = t; model = 65)
+          else: (cpu.r[0] = t + 0x10000'u32; model = 68)
+        else:
+          cpu.r[0] = t + 0x8000'u32
+          model = if y > 0: 68 else: 70
+      else:
+        if y > 0: (cpu.r[0] = 0x4000'u32 - t; model = if x > 0: 67 else: 69)
+        else: (cpu.r[0] = 0xC000'u32 - t; model = if x > 0: 72 else: 68)
+      model += hle_div_body_cost(num, den) + arctan_cycles(ratio)
     cpu.r[3] = 0x170'u32
-    cpu.hle_charge_body(body_t0, atan2_model)
+    cpu.hle_charge_body(body_t0, model)
   of 0x0B:  # CpuSet
     # Routine frame (thumb 0xB4C): push {r4, r5, lr}; the exit pops lr into
     # r3, so r3 = 0x170 on every path (validation-skip too).
@@ -811,9 +785,9 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
             cpu.gba.bus.write_half(0x04000208'u32, 0x0000'u16)  # IME
             # The display is left in forced blank, not zeroed
             cpu.gba.bus.write_half(0x04000000'u32, 0x0080'u16)
-            # The affine parameters are left at the identity, not zero:
-            # Spider-Man: Mysterio's Menace never writes them and its mode-4
-            # viewer relies on it. Assumed from game behaviour; no ROM pins this.
+            # The affine parameters are left at the identity, not zero
+            # (real BIOS under LLE: BG2PA/PD and BG3PA/PD read 0x100 after
+            # the call); Spider-Man: Mysterio's Menace never writes them.
             cpu.gba.bus.write_half(0x04000020'u32, 0x0100'u16)  # BG2PA
             cpu.gba.bus.write_half(0x04000026'u32, 0x0100'u16)  # BG2PD
             cpu.gba.bus.write_half(0x04000030'u32, 0x0100'u16)  # BG3PA

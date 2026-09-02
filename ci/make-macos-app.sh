@@ -17,6 +17,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 cp "$BIN" "$APP/Contents/MacOS/dingbat"
 chmod +x "$APP/Contents/MacOS/dingbat"
+cp LICENSE THIRD_PARTY_NOTICES.md "$APP/Contents/Resources/"
 
 # Build a .icns from the 512px app icon.
 ICONSET="$(mktemp -d)/dingbat.iconset"

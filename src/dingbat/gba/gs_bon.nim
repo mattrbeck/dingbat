@@ -34,28 +34,24 @@
 #   * Synth instruments: WaveData with size==0 && loopStart==0; data[1]
 #     selects 0=duty-modulated square, 1=saw, else triangle; one period =
 #     64 source samples at the channel frequency (32-bit wrapping phase).
-#       - square: +-64 (s8), high while phase < threshold, threshold
-#         recomputed once per frame:
-#           acc  += data[3]                          (u8 step, wraps)
-#           u     = acc + data[5]                    (u8 phase offset)
-#           fold  = u >= 128 ? (255-u)<<16 | 0xFFFF : u<<16   ("mvnmi" fold)
-#           thresh = fold * data[4] + data[2]<<24    (u32, wraps)
-#       - saw: r9 = (p>>24) - 112 - ((p>>26)&31), shaped through
-#         r2 = r9 + (r2 asr 1) at the source rate; s8 amplitude r2/2.
-#       - triangle: p < 2^31 ? (p>>23) - 128 : 384 - (p>>23); s8 +-128.
+#     The square's duty threshold is recomputed once per frame from a
+#     wrapping u8 accumulator (data[3] step, data[5] offset) folded into a
+#     triangle and scaled by data[4] with data[2] as the base; the saw is
+#     shaped through a one-pole IIR run at the source rate; the triangle is
+#     the phase folded at the half period. The generators are in
+#     gs_synth_sample.
 #   * Camelot 4-bit ADPCM (negative WaveData.size; Mario Tennis) is not
 #     handled.
 #   * Reverb (output loop at +0xB60..+0xC78): after clamping, the mixer
 #     packs the 16-bit mix buffer into s8 FIFO bytes, reading the old bytes
 #     it overwrites (pcmDmaPeriod frames ago) first, then seeds the next
 #     frame's mix buffer:
-#       seedL[i] = mixL[i] >> A  +  oldR[i]_as_s15 >> B
-#       seedR[i] = mixR[i] >> A  +  oldL[i]_as_s15 >> B
-#     i.e. a same-side tap one frame back (gain 2^-(A-16)) and a cross-
-#     channel tap pcmDmaPeriod+1 frames back (gain 2^-(B-17)) quantized
-#     through the s8 byte. The shift amounts are runtime-patched code, so
-#     gs_parse_reverb reads them from the live instructions every frame;
-#     unrecognized opcodes disable reverb. SoundInfo.reverb is not consulted.
+#     a same-side tap one frame back (gain 2^-(A-16)) plus a cross-channel
+#     tap pcmDmaPeriod+1 frames back (gain 2^-(B-17)) quantized through the
+#     s8 byte. The shift amounts A and B are runtime-patched into the two
+#     seeding instructions, so gs_parse_reverb reads them from the live code
+#     every frame; unrecognized opcodes disable reverb. SoundInfo.reverb is
+#     not consulted.
 
 const
   GS_SOUNDINFO_PTR_ADDR = 0x03007FF0'u32
@@ -276,10 +272,9 @@ proc gs_env_step(g: GsBonHle; base: uint32; status: uint8): tuple[env: uint8, al
 
 proc gs_parse_reverb(g: GsBonHle) =
   ## Parse the runtime-patched reverb shift amounts from the live seed
-  ## instructions (see header); anything unexpected turns reverb off.
-  ## ARM data-processing, shift immediate at bits 11..7:
-  ##   asrs r6, rX, #A  -> 0xE1B06_44 | A<<7   (mix-halfword tap, gain 2^-(A-16))
-  ##   adds r6, r6, fp, asr #B -> 0xE096604B | B<<7 (old-byte tap, gain 2^-(B-17))
+  ## instructions (see header): two ARM data-processing opcodes whose
+  ## shift-immediate fields (bits 11..7) hold A and B. Anything else turns
+  ## reverb off.
   g.rev_coef_new = 0
   g.rev_coef_old = 0
   if g.rev_insn_addr == 0: return
@@ -492,7 +487,7 @@ proc gs_synth_sample(s: ptr GsBonSampler; src_ratio: float32): float32 {.inline.
   ## oscillator state by one 32768 Hz output sample.
   case s.synth_kind
   of 0'u8:
-    # Square: compare, then step (the driver's cmp/addcc/subcs order)
+    # Square: compare, then step
     result = (if s.phase_u < s.duty_thresh: 64.0'f32 else: -64.0'f32)
     s.phase_u += s.synth_step
   of 1'u8:
@@ -503,8 +498,8 @@ proc gs_synth_sample(s: ptr GsBonSampler; src_ratio: float32): float32 {.inline.
       s.src_carry -= 1.0'f32
       s.phase_u += s.saw_step
       let p = s.phase_u
-      let r9 = int32(p shr 24) - 112'i32 - int32((p shr 26) and 31)
-      s.saw_iir = r9 + ashr(s.saw_iir, 1)
+      let ramp = int32(p shr 24) - 112'i32 - int32((p shr 26) and 31)
+      s.saw_iir = ramp + ashr(s.saw_iir, 1)
     result = float32(s.saw_iir) * 0.5'f32
   else:
     # Triangle

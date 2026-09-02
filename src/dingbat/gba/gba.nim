@@ -532,7 +532,7 @@ type
     # FIFO reconstruction (render-side, not serialized): point-sampling the
     # held latch at 32768 Hz folds zero-order-hold images into the audible
     # band, so the signal between FIFO updates is rebuilt with a causal
-    # Catmull-Rom cubic over hist (index 0 oldest .. 3 newest).
+    # Four-point cubic over hist (index 0 oldest .. 3 newest).
     # last_update_cycle timestamps the newest latch; inv_period is 1/measured
     # update period (0 = none yet: hold the latch). fifo_interp=false emits
     # the raw held latch.

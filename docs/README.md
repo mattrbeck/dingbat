@@ -9,6 +9,7 @@ One line per document: what it is for and who reads it. Scores live only in
 - [usage.md](usage.md) — loading ROMs, BIOS files, saves, GB renderer choice. Players.
 - [features.md](features.md) — what both front-ends and both systems support. Players, contributors.
 - [link-usage.md](link-usage.md) — local 2P, online room codes, native TCP link: the practical guide. Players.
+- [../THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) — licences of everything compiled into the binaries and the two derived models. Whoever ships a release.
 - [building.md](building.md) — native, WebAssembly and Windows cross-builds. Contributors.
 - [speed-mode.md](speed-mode.md) — the one less-accurate switch for low-end devices and what it suspends. Players, web maintainers.
 - [run-ahead.md](run-ahead.md) — the run-ahead latency setting and its cost model. Players, web maintainers.

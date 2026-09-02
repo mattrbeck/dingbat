@@ -46,7 +46,7 @@ proc build_color_lut() =
     let g = pow(float64((i shr 5) and 0x1F) / 31.0, 4.0)
     let b = pow(float64((i shr 10) and 0x1F) / 31.0, 4.0)
     let mixed = [
-      (  0.0 * b +  50.0 * g + 255.0 * r) / 255.0,
+      (  0.0 * b +  50.0 * g + 240.0 * r) / 255.0,
       ( 30.0 * b + 230.0 * g +  10.0 * r) / 255.0,
       (220.0 * b +  10.0 * g +  50.0 * r) / 255.0,
     ]

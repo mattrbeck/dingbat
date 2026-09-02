@@ -99,6 +99,10 @@ scratch_probe
 bench_freq
 scratch_mp2k_boot
 scratch_mc
+scratch_drums
+scratch_mkstate
+scratch_modebits_test
+scratch_stateresync
 dingbat_bench_hle
 # compiled emulator binary emitted next to src/dingbat/gba/gba.nim
 /src/dingbat/gba/gba

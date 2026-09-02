@@ -1550,12 +1550,6 @@ proc ppu_latch_wy*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
     if window_enabled(ppu): ppu.window_trigger_en = true
     if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
 
-proc ppu_store_lcdc_tdsel*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
-  ## LCDC.4 alone: on CGB the tile-data-select bit lands one dot ahead of the
-  ## other six. Assumed; no ROM pins this. Unreachable while
-  ## CGB_LCDC_TDSEL_LATENCY is 0, which is where it ships.
-  ppu.lcd_control = (ppu.lcd_control and not 0x10'u8) or (val and 0x10'u8)
-
 proc ppu_store_lcdc*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   # LCDC.2 is read twice by an object fetch, once per bitplane: the change's
   # dot goes into the history obj_height_at walks, and a fetch whose high

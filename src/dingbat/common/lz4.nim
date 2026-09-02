@@ -115,9 +115,6 @@ proc lz4Compress*(src: string): string =
         d[tokenPos] = tok
       ip = mStart + mLen
       anchor = ip
-      # re-seed the table just past the match so the next sequence can chain
-      if ip < searchLimit:
-        table[hashPos(readU32(s, ip - 2))] = int32(ip - 2 + 1)
 
   # trailing literals
   let litLen = n - anchor

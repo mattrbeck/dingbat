@@ -66,8 +66,8 @@ void main() {
 """
 
 # Color correction has one model per panel (selected by panel_gbc):
-#  - GBA: AGB colour model: linearize γ4.0, mix, re-gamma (Assumed; matches
-#    bgr555_to_rgb and the wasm LUT)
+#  - GBA: the ares colour model (ISC, see THIRD_PARTY_NOTICES.md): linearize
+#    γ4.0, mix, re-gamma. Matches bgr555_to_rgb and the wasm LUT.
 #  - GB/GBC: Pokefan531's "GBC-Color" model. The CGB panel is far less washed
 #    out than the AGB's, so the GBA curve would crush its colors.
 #
@@ -170,7 +170,7 @@ vec3 correct(vec3 c) {
   float lcdGamma = 4.0;
   vec3 lin = pow(c, vec3(lcdGamma));
   return pow(vec3(
-      0.0 * lin.b +  50.0 * lin.g + 255.0 * lin.r,
+      0.0 * lin.b +  50.0 * lin.g + 240.0 * lin.r,
      30.0 * lin.b + 230.0 * lin.g +  10.0 * lin.r,
     220.0 * lin.b +  10.0 * lin.g +  50.0 * lin.r) / 255.0,
     vec3(1.0 / outGamma));
@@ -888,7 +888,7 @@ proc bgr555_to_rgb(px: uint16; correct, gbc: bool): array[3, byte] =
     let r = pow(r5, 4.0)
     let g = pow(g5, 4.0)
     let b = pow(b5, 4.0)
-    let mixed = [(  0.0 * b +  50.0 * g + 255.0 * r) / 255.0,
+    let mixed = [(  0.0 * b +  50.0 * g + 240.0 * r) / 255.0,
                  ( 30.0 * b + 230.0 * g +  10.0 * r) / 255.0,
                  (220.0 * b +  10.0 * g +  50.0 * r) / 255.0]
     for i in 0 .. 2:

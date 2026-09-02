@@ -37,7 +37,8 @@ jobs:
         run: |
           mkdir -p dist/linux
           cp dingbat dist/linux/dingbat
-          tar -C dist/linux -czf dingbat-linux-x64.tar.gz dingbat
+          cp LICENSE THIRD_PARTY_NOTICES.md dist/linux/
+          tar -C dist/linux -czf dingbat-linux-x64.tar.gz dingbat LICENSE THIRD_PARTY_NOTICES.md
       - uses: actions/upload-artifact@v4
         with:
           name: dingbat-linux-x64

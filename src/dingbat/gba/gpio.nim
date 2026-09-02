@@ -8,8 +8,9 @@ proc new_gpio*(gba: GBA): GPIO =
     allow_reads: false,
     rtc: new_rtc(gba),
   )
-  # Gyro carts have no RTC; letting gyro clock edges walk the RTC state
-  # machine on the shared pins would fabricate phantom RTC commands.
+  # Gyro carts (WarioWare: Twisted!, game codes from its ROM headers) have
+  # no RTC; letting gyro clock edges walk the RTC state machine on the
+  # shared pins would fabricate phantom RTC commands.
   result.gyro_present = gba.cartridge != nil and
     gba.cartridge.game_code() in ["RZWE", "RZWJ", "RZWP"]
 

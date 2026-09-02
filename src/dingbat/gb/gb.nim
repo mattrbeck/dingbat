@@ -427,7 +427,6 @@ const CGB_WY_LATENCY*         {.intdefine.} = 4
 const CGB_SCY_LATENCY*        {.intdefine.} = 2
 const CGB_SCX_LATENCY*        {.intdefine.} = 2
 const CGB_LCDC_LATENCY*       {.intdefine.} = 0
-const CGB_LCDC_TDSEL_LATENCY* {.intdefine.} = 0
 const CGB_OBJ_SIZE_LATENCY*   {.intdefine.} = 3
   ## Dots LCDC.2 takes to reach the OBJECT FETCH on CGB over the DMG; separate
   ## from CGB_LCDC_LATENCY because that moves the whole register for every
@@ -452,7 +451,7 @@ const CGB_MAP_LATENCY*        {.intdefine.} = 2
   ## re-sweeping, `-d:` must reach ./dingbat_test, not only the runner.
 const CGB_TDSEL_LATENCY*      {.intdefine.} = 1
   ## Dots LCDC.4 takes to reach the background fetcher's bitplane reads on CGB
-  ## over the DMG. Separate from CGB_LCDC_TDSEL_LATENCY (a write latency that
+  ## over the DMG. Separate from CGB_LCDC_LATENCY (a write latency that
   ## drags the other bits with it through the monotonic `run` chain and costs
   ## gambatte `window` rows). 1, bracketed from both sides by the per-band
   ## decode of mealybug `m3_lcdc_tile_sel_change2`'s CGB reference, whose DMG
@@ -809,7 +808,7 @@ const CGB_LATENCY_CAP*        {.intdefine.} = 1
   ## double speed (a two-dot M-cycle) can tell 0 from 1; the `_ds_` rows in
   ## gambatte scy/scx_during_m3/sprites are the CGB CPU-to-PPU phase axis, and
   ## the cap keeps a register latency from being scored against them.
-const CGB_LCDC_LATENCY_ANY* = CGB_LCDC_LATENCY != 0 or CGB_LCDC_TDSEL_LATENCY != 0
+const CGB_LCDC_LATENCY_ANY* = CGB_LCDC_LATENCY != 0
 const CGB_WY_LATENCY_ANY*   = CGB_WY_LATENCY != 0 or CGB_WY_LATCH_LATENCY != 0
 const CGB_WRITE_LATENCY_ANY* = CGB_WX_LATENCY != 0 or CGB_SCY_LATENCY != 0 or
                                CGB_SCX_LATENCY != 0 or

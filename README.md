@@ -45,6 +45,9 @@ The Game Boy Advance work would not be possible without
 [GBATEK](http://problemkaputt.de/gbatek.htm), [Tonc](https://www.coranac.com/tonc),
 [mGBA](https://mgba.io/), or the wonderful emudev community.
 
+dingbat is MIT licensed; the licences of the components compiled into the binaries are
+listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 A special thanks goes out to those in the emudev community who are always helpful, both
 with insightful feedback and targeted test ROMs:
 [ladystarbreeze](https://github.com/ladystarbreeze),

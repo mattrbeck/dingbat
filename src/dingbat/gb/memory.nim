@@ -206,8 +206,7 @@ when CGB_WRITE_LATENCY_ANY:
       if n > 0: mem_tick_ppu(mem, gb, n, ignore_speed = true)
     case reg
     of 0xFF40:
-      run(CGB_LCDC_TDSEL_LATENCY); ppu_store_lcdc_tdsel(gb.ppu, gb, val)
-      run(CGB_LCDC_LATENCY);       ppu_store_lcdc(gb.ppu, gb, val)
+      run(CGB_LCDC_LATENCY); ppu_store_lcdc(gb.ppu, gb, val)
     of 0xFF42:
       run(CGB_SCY_LATENCY); ppu_store_scy(gb.ppu, gb, val)
     of 0xFF43:

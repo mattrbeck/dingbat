@@ -20,6 +20,7 @@ mkdir -p "$OUT"
 cp "$ARTS/dingbat-linux-x64/dingbat-linux-x64.tar.gz" "$OUT/dingbat-linux-x64.tar.gz"
 cp "$ARTS/dingbat-macos/dingbat-macos.dmg"            "$OUT/dingbat-macos.dmg"
 cp "$ARTS/dingbat-windows-x64/dingbat.exe"            "$OUT/dingbat-windows-x64.exe"
+cp "$(dirname "$0")/../../THIRD_PARTY_NOTICES.md"     "$OUT/THIRD_PARTY_NOTICES.md"
 
 # Checksums are generated from inside the directory so the manifest lists bare
 # filenames — `shasum -c SHA256SUMS.txt` then works wherever a user unpacks it.

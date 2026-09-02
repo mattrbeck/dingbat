@@ -413,8 +413,9 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
   result.gpio = new_gpio(gba)
   # Tilt carts cannot be probed at runtime, so detection is by game code:
   # KYG* = Yoshi's Universal Gravitation / Topsy-Turvy, KHPJ = Koro Koro
-  # Puzzle. The tilt window is intercepted before storage regardless of the
-  # save heuristic.
+  # Puzzle (game codes from the ROM headers; GBATEK names the titles). The
+  # tilt window is intercepted before storage regardless of the save
+  # heuristic.
   result.tilt_present = gba.cartridge != nil and
     gba.cartridge.game_code() in ["KYGE", "KYGJ", "KYGP", "KHPJ"]
   result.update_waitcnt(WAITCNT())  # reset-state waitstates

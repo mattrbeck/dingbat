@@ -22,13 +22,8 @@ while every per-section count stays identical.
 
 ## `Hblank` (out[1]) — a real 3-cycle defect
 
-```c
-Halt();  int calibration = REG_TM0CNT_L;
-Halt();  int value       = REG_TM0CNT_L;
-out[1] = value - calibration;
-```
-
-The TM0 delta between two consecutive HBlank-IRQ halt-wakes at identical
+The test halts twice and reads TM0CNT_L after each wake; the row is the
+difference: the TM0 delta between two consecutive HBlank-IRQ halt-wakes at identical
 code points, so wake-to-read latency cancels and codegen cannot influence
 it. The constant is `0x4D0 = 1232 = 308 dots × 4`, the GBATEK scanline.
 Dingbat reports `0x4D3`, three cycles long, invariant across builds. The
@@ -40,12 +35,7 @@ the HLE `Halt` SWI's `HALT_RETURN_COST` deferral and
 
 ## `Flip 1–6` — the waitloop skip resolution
 
-```c
-while (((bit ^ REG_DISPSTAT) & 2));
-value = REG_TM0CNT_L;
-```
-
-The idle-loop detector fast-forwards that shape, so the edge is seen at
+The test spins on a DISPSTAT bit, then reads TM0CNT_L. The idle-loop detector fast-forwards that shape, so the edge is seen at
 whatever bound `fast_forward_bounded` was given, not where the loop would
 have sampled it. Evidence that the rows are quantized rather than mistimed:
 hardware measures the 226-cycle HBlank-high window (1232 − 1006, both

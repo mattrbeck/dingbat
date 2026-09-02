@@ -86,9 +86,9 @@ proc timer_overflow*(dc: DMAChannels; timer: int) =
     if dc.sizes[channel] < 16:
       dc.gba.dma.trigger_fifo(channel)
 
-proc catmull_rom(y0, y1, y2, y3: int16; mu: float32): int16 {.inline.} =
-  ## Catmull-Rom interpolation between y1 and y2 at fraction mu (Paul Bourke,
-  ## "Cubic Interpolation", https://paulbourke.net/miscellaneous/interpolation/).
+proc cubic4(y0, y1, y2, y3: int16; mu: float32): int16 {.inline.} =
+  ## Four-point cubic through y1 and y2 at fraction mu (Paul Bourke, "Cubic
+  ## Interpolation", https://paulbourke.net/miscellaneous/interpolation/).
   ## Interpolating y1/y2 rather than y2/y3 keeps the filter causal at a
   ## ~1.5-sample (~150 us) group delay.
   let
@@ -117,6 +117,6 @@ proc dma_channels_get_amplitude*(dc: DMAChannels): tuple[a: int16, b: int16] =
     else:
       let mu = clamp(float32(now - dc.last_update_cycle[ch]) *
                      dc.inv_period[ch], 0.0'f32, 1.0'f32)
-      res[ch] = catmull_rom(dc.hist[ch][0], dc.hist[ch][1],
+      res[ch] = cubic4(dc.hist[ch][0], dc.hist[ch][1],
                             dc.hist[ch][2], dc.hist[ch][3], mu)
   (res[0], res[1])

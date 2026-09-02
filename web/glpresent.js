@@ -188,7 +188,7 @@ vec3 shade(vec3 c) {
       float lcdGamma = 4.0;
       vec3 lin = pow(c, vec3(lcdGamma));
       rgb = pow(vec3(
-        0.0 * lin.b +  50.0 * lin.g + 255.0 * lin.r,
+        0.0 * lin.b +  50.0 * lin.g + 240.0 * lin.r,
        30.0 * lin.b + 230.0 * lin.g +  10.0 * lin.r,
       220.0 * lin.b +  10.0 * lin.g +  50.0 * lin.r) / 255.0,
         vec3(1.0 / outGamma));

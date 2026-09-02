@@ -1337,10 +1337,10 @@ const GambatteGlyphs: array[16, array[8, uint8]] = [
 const GambatteFrames* = 15
 
 proc gambatte_pixel(c: uint16; cgb: bool): uint32 =
-  ## One pixel as the 24-bit RGB gambatte's runner compares, masked to
-  ## 0xF8F8F8 (top 5 bits per channel). CGB: gambatte's documented
-  ## colour-correction formulae; white lands on 0xF8F8F8 only, so glyph
-  ## matching stays exact. DMG: plain grey shades, mapped as the
+  ## One pixel as the 24-bit RGB the reference PNGs are encoded in, masked
+  ## to 0xF8F8F8 (top 5 bits per channel). CGB: the bundle's integer
+  ## conversion of the 5-bit channels, which every CGB reference PNG uses;
+  ## white lands on 0xF8F8F8 only, so glyph matching stays exact. DMG: plain grey shades, mapped as the
   ## mealybug/acid2 screenshot path does.
   if cgb:
     let r = int(c and 0x1F)
