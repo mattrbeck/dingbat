@@ -1,100 +1,67 @@
 # =============================================================================
 # MP2K / M4A ("Sappy") sound-engine HLE  (included by gba.nim)
 # =============================================================================
-# High-level-emulate the GBA's common MP2K music mixer: detect the engine at
-# runtime via its SoundInfo work area in guest RAM (no ROM signature — see the
-# "Runtime detection" section below), read the SoundInfo struct each audio
-# frame, and render the DirectSound audio ourselves at a higher quality than
-# the game's ~13 kHz FIFO stream.
+# Re-renders the GBA's common MP2K music mixer at the APU's 32768 Hz instead
+# of the game's ~13 kHz FIFO stream. The engine is detected at runtime from
+# its SoundInfo work area in RAM (no ROM signature — see "Runtime detection"
+# below) and the SoundInfo struct is re-read at every mixer pass.
 #
-# EXPERIMENTAL and OFF BY DEFAULT (gba.mp2k_hle; the "Improve audio quality"
-# setting in both frontends). It is NOT cycle-accurate. Shadow state is
-# deliberately NOT serialized into save states (files are identical with the
-# HLE on or off); every state/rollback load instead calls mp2k_state_loaded
-# to rebuild it from emulated RAM.
+# EXPERIMENTAL and OFF BY DEFAULT (gba.mp2k_hle; "Improve audio quality" in
+# both frontends). Not cycle-accurate. Shadow state is deliberately NOT
+# serialized (save states are identical with the HLE on or off); every
+# state/rollback load calls mp2k_state_loaded to rebuild it from emulated RAM.
 #
 # Provenance / license: this file is this project's own MIT-licensed code. No
-# driver code is reproduced; what it uses are interface facts about the
-# "MusicPlayer2000" (M4A / "Sappy") driver — the layout of the work area it
-# leaves in RAM, its flag bits, the compressed-sample block format and the
-# behaviour of its mixer — obtained by observing the driver running in this
-# emulator and cross-checked against public documentation:
+# driver code is reproduced; it relies on interface facts about the
+# "MusicPlayer2000" (M4A / "Sappy") driver — the layout of its RAM work area,
+# its flag bits, the compressed-sample block format and the behaviour of its
+# mixer — observed by running the driver in this emulator and cross-checked
+# against public documentation:
 #   * loveemu vgmdocs, "Summary of GBA Standard Sound Driver MusicPlayer2000":
 #     https://loveemu.github.io/vgmdocs/Summary_of_GBA_Standard_Sound_Driver_MusicPlayer2000.html
-#     (engine overview, detection, RAM map, "a simple reverb (echo) effect
-#      with fixed delay").
-#   * The SoundInfo / SoundChannel / WaveData field names used in comments
-#     are the ones the pret decompilation headers give those fields; the
-#     byte offsets are what the driver reads and writes at runtime.
+#   * SoundInfo / SoundChannel / WaveData field names are the pret header
+#     names for those fields; the byte offsets are what the driver reads and
+#     writes at runtime.
 #   * agbplay (ipatix, GPL — documentation only, no code) corroborates the
 #     compressed block format.
 #   * GBATEK — the DirectSound FIFO hardware sink we substitute for.
-# The resampler kernel before commit 28be88c7 followed NanoBoyAdvance's
-# (BSD-2-Clause since 2026-06); the present kernel is this project's own.
+# The resampler kernel is this project's own; the kernel before commit
+# 28be88c7 followed NanoBoyAdvance's (BSD-2-Clause since 2026-06).
 #
-# Design notes (this PoC's own choices):
-#   * SHADOW mode: the real SoundMainRAM still runs, so we consume the engine's
-#     already-computed per-channel envelope volumes at +0x0A/+0x0B (which
-#     already fold in masterVolume + pan: SoundChannel envelopeVolumeRight/Left)
-#     rather than reimplementing MP2K's ADSR chain.
-#     Reading them at the hook (m4a updates them in the sequencer, before this
-#     mixer runs) gives no frame lag; we ramp previous->current across a frame.
-#   * Renders at the APU's 32768 Hz output rate.
-#   * DirectSound double-buffer: the real driver mixes each pcmBuffer one frame
-#     ahead of the DMA that drains it to the FIFO, so hardware audio lags the mixer
-#     pass by ~one frame. We render at the mixer pass, so we delay our output by one
-#     frame (init_mp2k / render_sample) to line up with the hardware FIFO.
-#   * 8-bit PCM, looping, AND m4a BDPCM ("compressed waveform", channel.type
-#     bit5) — the latter is decoded to s8 and mixed at PCM parity (not skipped).
-#   * All DirectSound channel.type mode bits are handled: TYPE_FIX (fixed-rate
-#     playback at SoundInfo.pcmFreq), TYPE_REV (reversed, one-shot playback —
-#     e.g. Pokémon faint cries), TYPE_CMP (BDPCM), and their combinations, plus
-#     note-on sample start offsets (SoundChannel.count). See the TYPE_* table
-#     below for the per-flag reference semantics.
+# Design:
+#   * SHADOW mode: the real mixer still runs; we consume the per-channel
+#     envelope volumes it computes (on_frame) instead of reimplementing ADSR.
+#   * Output lags the mixer pass by one frame to match the driver's
+#     DirectSound double-buffering (render_sample).
+#   * 8-bit PCM, looping, BDPCM ("compressed waveform") and every
+#     channel.type mode-bit combination are mixed (TYPE_* table below).
 
 const
-  # ---- Version-independent runtime detection --------------------------------
-  # Every m4a/MP2K build publishes a pointer to its SoundInfo work area at the
-  # fixed IWRAM slot 0x03007FF0 — the driver's SOUND_INFO_PTR, an m4a
-  # convention inside the 0x03007F00..0x03007FFF block GBATEK documents as
-  # reserved system space (the loveemu MP2K summary's RAM data map shows the
-  # sound work area; the slot address is corroborated by the driver's own
-  # behaviour, observed at runtime on every m4a game tested). The first
-  # field of SoundInfo is `ident`, ID_NUMBER = 0x68736D53 ("Smsh" reversed),
-  # which doubles as the driver's lock word. SoundMain takes that lock by incrementing ident to ID_NUMBER+1 for the
-  # duration of its processing — sequencer, CGB update and the SoundMainRAM PCM
-  # mixer — and restores it afterwards. Both values therefore identify the
-  # engine, and the +1 value identifies "a mixer pass is in flight".
-  #
-  # Detection needs no ROM signature at all (the old approach — a CRC-32 of one
-  # specific SoundMain build plus a fixed literal-pool offset — only matched a
-  # single m4a revision): we poll the SOUND_INFO_PTR slot once per frame, and
-  # once the ident magic appears we LEARN the SoundMainRAM entry PC at runtime
-  # (see mp2k_frame_poll / probe_pc below).
+  # ---- Runtime detection constants (mechanism: "Runtime detection" below) --
+  # Every m4a build publishes a pointer to its SoundInfo work area at IWRAM
+  # 0x03007FF0 (inside the 0x03007F00..FF block GBATEK reserves as system
+  # space; the loveemu MP2K summary's RAM map shows the work area). The first
+  # SoundInfo field, ident, is ID_NUMBER = 0x68736D53 ("Smsh" reversed) and
+  # doubles as the lock word: SoundMain holds ID_NUMBER+1 for the whole pass
+  # (sequencer, CGB update, PCM mixer) and restores it afterwards.
   MP2K_SOUNDINFO_PTR_ADDR = 0x03007FF0'u32   # IWRAM slot holding the SoundInfo pointer
   MP2K_IDENT_IDLE         = 0x68736D53'u32   # SoundInfo.ident = ID_NUMBER ("Smsh")
   MP2K_IDENT_LOCK         = 0x68736D54'u32   # ID_NUMBER+1: lock held while SoundMain mixes
-  # The driver's VSyncOff call parks ident at +10 (VSyncOn subtracts it back).
-  # A stock driver's SoundMain refuses to run in that state, but modified m4a
-  # vintages (Mother 3, the bit Generations series) do their own V-blank DMA
-  # maintenance and run the whole engine with ident parked at +10 — the
-  # SoundMain lock dance then happens as +10 <-> +11. Accept both forms
-  # everywhere; for a stock driver the +10 state simply never mixes, so the
-  # widened acceptance can never mislearn from it.
+  # VSyncOff parks ident at +10 (VSyncOn subtracts it back). A stock driver's
+  # SoundMain refuses to run in that state, but modified vintages (Mother 3)
+  # do their own V-blank DMA maintenance and run the whole engine parked, so
+  # their lock dance is +10 <-> +11. Both forms are accepted everywhere; a
+  # stock driver never mixes at +10, so the widening cannot mislearn from it.
   MP2K_IDENT_IDLE_VOFF    = 0x68736D5D'u32   # ID_NUMBER+10: idle, VSync off
   MP2K_IDENT_LOCK_VOFF    = 0x68736D5E'u32   # ID_NUMBER+11: locked, VSync off
   MP2K_PROBE_MAX_FAILS    = 8                # give up learning after this many mislearns
   MP2K_MAX_CHANNELS       = 12
-  # Frames the learned hook may go silent before substitution is suspended
-  # (see mixer_live below). A live SoundMain fires every V-blank, so the stale
-  # counter oscillates 0..1; a few frames of grace tolerate lag-frame skipped
-  # passes without flapping.
+  # Frames the learned hook may go silent before substitution steps aside
+  # (mixer_live). A live SoundMain fires every V-blank, so the stale counter
+  # oscillates 0..1; the grace tolerates lag-frame skipped passes.
   MP2K_HOOK_STALE_MAX     = 4'i32
 
-  # SoundChannel field offsets (layout: see the header):
-  #   statusFlags(0) type(1) rightVolume(2) leftVolume(3) ... envelopeVolume(9)
-  #   envelopeVolumeRight(10) envelopeVolumeLeft(11) ... ct(0x18) fw(0x1C)
-  #   frequency(0x20) wav(0x24) currentPointer(0x28)
+  # SoundChannel field offsets (pret field names; see the header)
   SC_STATUS   = 0x00
   SC_TYPE     = 0x01
   SC_VOL_R    = 0x02
@@ -103,17 +70,14 @@ const
   SC_ENV_VOL {.used.} = 0x09
   SC_ENV_VR   = 0x0A   # envelopeVolumeRight
   SC_ENV_VL   = 0x0B   # envelopeVolumeLeft
-  SC_COUNT    = 0x18   # count/ct: at note-on (START set) this holds the sample
-                       # start offset ply_note stored there; the mixer then
-                       # rewrites it to the source samples remaining until
-                       # sample/loop end (used for save-state resume)
+  SC_COUNT    = 0x18   # count/ct: the note-on sample start offset while START
+                       # is set; afterwards the source samples remaining until
+                       # sample/loop end (position resync + resume: on_frame)
   SC_FREQ     = 0x20   # frequency (per-note playback rate, Hz)
   SC_WAVE     = 0x24   # wav pointer -> WaveData
   SC_SIZE     = 64
 
-  # SoundInfo field offsets (layout: see the header):
-  #   ident(0) pcmDmaCounter(4) reverb(5) maxChans(6) masterVolume(7) ...
-  #   pcmSamplesPerVBlank(0x10) pcmFreq(0x14) ... chans[](0x50)
+  # SoundInfo field offsets
   SI_MAGIC        = 0x00   # ident
   SI_DMA_COUNTER  = 0x04   # pcmDmaCounter: V-blanks left before the DMA restarts
                            # at pcmBuffer start (the V-blank handler reloads it
@@ -126,31 +90,32 @@ const
   SI_PCM_RATE     = 0x14   # pcmFreq (DirectSound base sample rate)
   SI_CHANNELS     = 0x50   # chans[MAX_DIRECTSOUND_CHANNELS]
   SI_PCM_BUFFER {.used.} = 0x350  # s8 pcmBuffer[PCM_DMA_BUF_SIZE*2] — follows the 12
-                           # fixed 64-byte chans slots (0x50 + 12*64), matching
-                           # the DMA1SAD every standard driver programs
+                           # 64-byte chans slots (0x50 + 12*64); the DMA1SAD
+                           # every standard driver programs
 
-  # channel.type bits. The sequencer copies the instrument's type byte verbatim
-  # into SoundChannel.type at note-on, so these are the instrument-type flags:
-  #   TYPE_CGB (0x07): nonzero low bits select a CGB (PSG) channel 1-4; such notes
-  #     are allocated to the CgbChans array and never reach a DirectSound
+  # channel.type bits (the sequencer copies the instrument's type byte verbatim
+  # into SoundChannel.type at note-on). Canonical semantics — the mixer code
+  # below only cross-references this table:
+  #   TYPE_CGB (0x07): nonzero low bits select a CGB (PSG) channel 1-4; such
+  #     notes go to the CgbChans array and never reach a DirectSound
   #     SoundChannel, so a DirectSound channel always has these bits clear.
-  #   TYPE_FIX (0x08): fixed-rate playback — the mixer's phase step is forced to
-  #     1.0 source sample per output sample, i.e. the sample plays at exactly
+  #   TYPE_FIX (0x08): fixed-rate playback — the phase step is forced to 1.0
+  #     source sample per output sample, i.e. the sample plays at exactly
   #     SoundInfo.pcmFreq with channel.frequency ignored.
-  #   TYPE_REV (0x10): reversed playback — the mixer reflects the read pointer to
-  #     the END of the sample data and reads with descending addresses, so the
-  #     last source sample plays first. The reversed paths never consult the loop registers: when
-  #     the sample count is exhausted the channel is stopped (statusFlags = 0),
-  #     so reversed playback is always one-shot.
+  #   TYPE_REV (0x10): reversed playback — the mixer reflects the read pointer
+  #     to the END of the data and reads with descending addresses. The
+  #     reversed paths never consult the loop registers: on count exhaustion
+  #     the channel is stopped (statusFlags = 0), so REV is always one-shot.
   #   TYPE_CMP (0x20): compressed (BDPCM) waveform. CMP or REV route the mixer
-  #     into its special-case renderer; within it, compressed decode is engaged
-  #     only when WaveData.type != 0 (the u16 at wave+0: 1 for DPCM data, 0 for
-  #     plain PCM). All four CMP/REV/FIX combinations are
-  #     valid: CMP+REV plays the compressed stream backward (one-shot), FIX with
-  #     either forces the 1.0 step. Forward CMP playback does support looping.
+  #     into its special-case renderer; within it compressed decode is engaged
+  #     only when WaveData.type != 0 (the u16 at wave+0: 1 = DPCM, 0 = plain
+  #     PCM) — so a CMP-flagged channel with a plain header plays uncompressed
+  #     and a REV-only channel with a DPCM header decodes. All CMP/REV/FIX
+  #     combinations are valid; CMP+REV plays the stream backward (one-shot),
+  #     forward CMP supports looping.
   #   TYPE_SPL (0x40, key split) and TYPE_RHY (0x80, rhythm): instrument-table
-  #     lookup flags consumed by the sequencer when picking the sub-instrument;
-  #     they can remain set in SoundChannel.type but the mixer ignores them.
+  #     lookup flags for the sequencer; they may remain set in
+  #     SoundChannel.type but the mixer ignores them.
   TYPE_CGB {.used.} = 0x07'u8
   TYPE_FIX = 0x08'u8
   TYPE_REV = 0x10'u8
@@ -166,45 +131,39 @@ const
   #   LOOP (0x10): set at note start when WaveData.flags carries the loop bits
   #     (0xC0 at wave+3).
   #   IEC (0x04): pseudo-echo tail — when the release envelope decays below
-  #     SoundChannel.pseudoEchoVolume, the driver holds the envelope at that
-  #     volume and counts pseudoEchoLength down once per frame, killing the
-  #     channel at zero. Shadow mode inherits all of
-  #     this for free: we consume envelopeVolumeRight/Left, which the real
-  #     driver computes AFTER the release/IEC handling each frame.
+  #     SoundChannel.pseudoEchoVolume the driver holds it there and counts
+  #     pseudoEchoLength down once per frame, killing the channel at zero.
+  #     Shadow mode inherits this for free: envelopeVolumeRight/Left are
+  #     computed AFTER the release/IEC handling each frame.
   #   ENV (0x03): envelope phase (3=attack, 2=decay, 1=sustain, 0=release).
   CH_START = 0x80'u8
   CH_STOP {.used.} = 0x40'u8
   CH_ON    = 0xC7'u8   # SOUND_CHANNEL_SF_ON = START|STOP|IEC|ENV — "producing sound"
 
-  # m4a compressed-waveform ("GFDPCM"/BDPCM) 4-bit differential LUT: the 16
-  # signed deltas added to a running s8 accumulator. The format's table is
-  # the squares: nibble n < 8 adds n^2, nibble n >= 8 subtracts (16-n)^2
-  # (agbplay documents the same table).
+  # m4a compressed-waveform (BDPCM) 4-bit differential LUT: 16 signed deltas
+  # added to a running s8 accumulator. The table is the squares: nibble n < 8
+  # adds n^2, n >= 8 subtracts (16-n)^2 (agbplay documents the same table).
   BDPCM_LUT: array[16, int8] = block:
     var t: array[16, int8]
     for n in 0 ..< 16:
       t[n] = (if n < 8: int8(n * n) else: int8(-((16 - n) * (16 - n))))
     t
-  # Compressed blocks are 33 bytes / 64 samples: 1 s8 base byte + 32 nibble
-  # bytes. Per the driver's decoder: sample 0 of a block is the RAW base byte; sample 1 takes the
-  # LOW nibble of the first delta byte (its high nibble is never read); each
-  # subsequent byte then supplies its high nibble followed by its low nibble
-  # (63 used nibbles for samples 1..63). The accumulator wraps at 8 bits (the
-  # driver decodes through strb/ldrsb).
+  # Block format (canonical; bdpcm_decode_block implements it): 33 bytes /
+  # 64 samples = 1 s8 base byte + 32 nibble bytes. Sample 0 is the RAW base
+  # byte; sample 1 takes the LOW nibble of the first delta byte (its high
+  # nibble is never read); each subsequent byte supplies its high nibble then
+  # its low nibble (63 used nibbles for samples 1..63). The accumulator wraps
+  # at 8 bits (the driver decodes through a byte store / signed byte load).
   BDPCM_BLOCK_BYTES  = 33'u32
   BDPCM_BLOCK_SAMPS  = 64'u32
 
-  # Reverb frame-ring slot capacity, in stereo samples at our 32768 Hz render
-  # rate. One engine mixer pass spans one V-blank = 32768 / 59.7275 Hz ~ 549
-  # output samples (the driver derives pcmFreq from the same 59.7275 Hz
-  # refresh). 1024 gives
-  # comfortable headroom for frame-length jitter; samples beyond a pass's
-  # actual length are simply never read back (the taps index by intra-frame
-  # position, and consecutive passes have near-identical lengths).
+  # Reverb frame-ring slot capacity, in stereo samples at the 32768 Hz render
+  # rate. One mixer pass spans one V-blank = 32768 / 59.7275 Hz ~ 549 output
+  # samples; 1024 leaves headroom for frame-length jitter, and cells beyond a
+  # pass's real length are simply never read back (intra-frame indexing).
   MP2K_REV_SLOT_LEN = 1024
 
-# NOTE: Mp2kSampler / Mp2kHle types live in gba.nim's main type section (Nim
-# requires types referenced by the GBA object to be declared before use).
+# Mp2kSampler / Mp2kHle are declared in gba.nim (the GBA object references them).
 
 when defined(mp2kwav):
   import std/[streams, math, strutils]
@@ -262,20 +221,13 @@ proc new_mp2k*(gba: GBA): Mp2kHle =
   Mp2kHle(gba: gba, hook_addr: 0xFFFFFFFF'u32, engaged: false)
 
 proc mixer_live*(m: Mp2kHle): bool =
-  ## True while the engine's mixer is actually running (the learned hook fired
-  ## within the last few frames). SoundMain runs once per V-blank whenever the
-  ## engine is alive — including the modified VSyncOff vintages (Mother 3),
-  ## whose lock dance keeps firing the hook at ident +10/+11. When it STOPS
-  ## (stock m4aSoundVSyncOff parks ident at +10 and SoundMain refuses to run;
-  ## or the engine is torn down without scribbling ident), the engine cannot
-  ## be the producer of any FIFO audio, so the substitution must step aside
-  ## and let the game's own stream through. Observed in the wild: Disney's
-  ## Lilo & Stitch VSyncOffs its idle m4a at the title and streams the entire
-  ## soundtrack via its own DMA1 buffer — with substitution still armed, the
-  ## HLE replaced that music with shadow silence. Unlike the fifo_foreign
-  ## latch this is fully reversible: the next mixer pass re-arms substitution
-  ## (on_frame re-latches all channels from SoundInfo each pass, and the
-  ## ct-based position resync snaps any staleness).
+  ## True while the learned hook fired within MP2K_HOOK_STALE_MAX frames.
+  ## A stopped SoundMain (stock VSyncOff parks ident at +10; or the engine is
+  ## torn down without touching ident) cannot be producing the FIFO stream,
+  ## so substitution steps aside for the game's own stream (Lilo & Stitch
+  ## VSyncOffs its idle m4a at the title and streams the soundtrack through
+  ## its own DMA1 buffer). Unlike fifo_foreign this is fully reversible: the
+  ## next pass re-latches every channel and the ct resync snaps staleness.
   m.hook_stale <= MP2K_HOOK_STALE_MAX
 
 proc rd8(m: Mp2kHle; a: uint32): uint8  {.inline.} = m.gba.bus.read_byte_internal(a)
@@ -290,16 +242,11 @@ proc wave_u8(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte]; rmask: uint32;
 
 proc bdpcm_decode_block(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte];
                         rmask: uint32; blk: uint32) =
-  ## Decode one whole 33-byte/64-sample BDPCM block into the sampler's block
-  ## cache — the same strategy as the real driver, which decodes block-at-a-
-  ## time into a buffer keyed by a cached block index. Nibble order: sample 0
-  ## is the raw s8 base byte; sample 1 uses the LOW nibble of the first delta
-  ## byte (its high nibble is never read); each subsequent byte supplies its
-  ## high nibble then its low nibble. The accumulator wraps at 8 bits, exactly
-  ## like the driver's strb/ldrsb round trip. Decoding whole blocks (rather
-  ## than sample-at-a-time) keeps the stream correct however the resampler
-  ## lands on it: decimating steps that skip source samples, reversed reads,
-  ## and loop wrap-backs all just index into the decoded block.
+  ## Decode one whole BDPCM block into the sampler's block cache (format and
+  ## nibble order: BDPCM_BLOCK_BYTES above). The driver also decodes
+  ## block-at-a-time, keyed by block index. Whole-block decode keeps the
+  ## stream correct however the resampler lands on it: decimating steps,
+  ## reversed reads and loop wrap-backs all just index into the block.
   let base = blk * BDPCM_BLOCK_BYTES
   var acc = cast[int8](m.wave_u8(s, rom, rmask, base))
   s.blk[0] = acc
@@ -312,11 +259,8 @@ proc bdpcm_decode_block(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte];
 
 proc decode_at(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte];
                rmask: uint32; play_pos: uint32): float32 {.inline.} =
-  ## Decode the source sample at an explicit play position, returned in raw
-  ## s8 units (~ -128..127). Reversed channels (TONEDATA_TYPE_REV) read the
-  ## wave back-to-front: the real mixer reflects its read pointer to the
-  ## sample end and reads with descending addresses, so play position p maps
-  ## to source index
+  ## Decode the source sample at an explicit play position, in raw s8 units.
+  ## A reversed channel (TYPE_REV) maps play position p to source index
   ## sample_count-1-p (sample_count already excludes any note start offset;
   ## see on_frame).
   let pos = (if s.reversed: s.sample_count - 1'u32 - play_pos
@@ -334,20 +278,14 @@ proc decode_src(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte];
   m.decode_at(s, rom, rmask, s.src_index)
 
 proc mp2k_state_loaded*(m: Mp2kHle) =
-  ## Save-state / rollback load hook. The shadow mixer's state is deliberately
-  ## NOT serialized (state files are identical with the HLE on or off), so
-  ## everything derived from the pre-load timeline is stale: sampler positions,
-  ## cubic history taps, the DirectSound double-buffer delay ring, and the
-  ## reverb feedback line. Drop it all and mark a resync so the next mixer-pass
-  ## hook re-latches every channel from the engine's SoundInfo in the restored
-  ## RAM — resuming mid-note channels at the engine's own playback position
-  ## (SoundChannel.ct) rather than retriggering them from the sample start.
-  ## Detection state (the learned hook_addr / entry_addr) is kept: states are
-  ## per-ROM, the state restores the IWRAM the mixer was learned from, and if
-  ## the learned PC is somehow stale for the restored timeline the lock
-  ## validation unlearns it and the frame poll re-arms probing (see
-  ## unlearn_hook below). `engaged` is kept, and render_sample simply emits
-  ## silence until the first post-load mixer pass refills the channels.
+  ## Save-state / rollback load hook. Shadow state is not serialized, so
+  ## everything timeline-derived (sampler positions, history taps, the delay
+  ## ring, the reverb line) is dropped and a resync is marked: the next mixer
+  ## pass re-latches every channel from the restored SoundInfo, resuming
+  ## mid-note channels at the engine's own position (on_frame). The learned
+  ## hook_addr is kept — states are per-ROM and restore the IWRAM it was
+  ## learned from, and a stale PC fails the lock validation anyway. `engaged`
+  ## is kept; render_sample emits silence until the first post-load pass.
   for i in 0 ..< MP2K_MAX_CHANNELS:
     m.samplers[i] = Mp2kSampler()      # inactive, zero taps/phase/volumes
   for v in m.out_delay.mitems: v = 0
@@ -360,10 +298,10 @@ proc mp2k_state_loaded*(m: Mp2kHle) =
   m.rev_seed = 0
   m.frame_pos = 0
   m.resync_pending = true
-  # Foreign-feeder detection: the streak/counter baseline are timeline-derived
-  # — drop them. The fifo_foreign LATCH is kept: it describes the ROM's driver
-  # usage, not the timeline, and re-latching would substitute our silence over
-  # the game's streamed music for several frames after every load.
+  # Foreign-feeder streak/baseline are timeline-derived: drop them. The
+  # fifo_foreign LATCH describes the ROM's driver usage, not the timeline, so
+  # it is kept (re-latching would substitute silence over the game's streamed
+  # music for several frames after every load).
   m.foreign_streak = 0
   m.fifo_cpu_last = m.fifo_cpu_bytes
   m.real_abs_a = 0
@@ -374,46 +312,38 @@ proc mp2k_state_loaded*(m: Mp2kHle) =
   m.overlay_hold = 0
   m.unlatch_watch = false   # samplers were just dropped
   m.unlatch_agree = 0
-  m.shadow_quiet_age = 0   # the restored ring may hold pre-load engine audio
-                           # our reset shadow doesn't: give it the tail grace
-  m.hook_stale = 0         # assume the restored engine is live; if it is
-                           # parked, the counter regrows within the grace
+  m.shadow_quiet_age = 0   # the restored pcmBuffer may hold audio our reset
+                           # shadow doesn't: give it the drain-tail grace
+  m.hook_stale = 0         # assume the restored engine is live; a parked one
+                           # regrows the counter within the grace
 
 # =============================================================================
-# Runtime detection: learn the SoundMainRAM entry PC instead of matching a ROM
-# signature.
-#
-# How it works (the SoundInfo layout, the loveemu MP2K summary, and this
-# emulator's own runtime observation of the guest):
-#   * SOUND_INFO_PTR (0x03007FF0) -> SoundInfo, whose ident field is ID_NUMBER
-#     0x68736D53 at rest and ID_NUMBER+1 while SoundMain holds its lock. This
-#     identifies the engine with no ROM pattern whatsoever, on every m4a
-#     revision (custom drivers — e.g. Camelot's — never publish this magic).
-#   * The PCM mixer ("SoundMainRAM", per its name and the loveemu data map) is
+# Runtime detection (canonical; mp2k_frame_poll / probe_pc / mixer_hook /
+# unlearn_hook implement it): learn the SoundMainRAM entry PC instead of
+# matching a ROM signature.
+#   * SOUND_INFO_PTR (0x03007FF0) -> SoundInfo, whose ident is ID_NUMBER at
+#     rest and ID_NUMBER+1 while SoundMain holds its lock (constants above).
+#     That identifies the engine with no ROM pattern on every m4a revision;
+#     custom drivers (e.g. Camelot's) never publish the magic.
+#   * The PCM mixer ("SoundMainRAM", per its name and the loveemu RAM map) is
 #     copied to RAM at init and jumped to from SoundMain while the lock is
-#     held, with the SoundInfo pointer in r0 (verified empirically on multiple
-#     m4a vintages by this project's harnesses; the mixer must receive the
-#     work-area pointer, and r0 is the ABI argument register).
-#   * So: once the ident magic is seen (frame poll), watch execution until an
+#     held, with the SoundInfo pointer in r0 (the ABI argument register;
+#     observed on several m4a vintages by this project's harnesses).
+#   * So: once the frame poll sees the ident magic, watch execution until an
 #     instruction is fetched from RAM (0x02/0x03 region) with r0 == &SoundInfo
-#     while ident == ID_NUMBER+1. The first such PC is the mixer entry — learn
-#     it and hook it every frame from then on, exactly like the old fixed hook.
-#   * Self-validating: the real mixer entry can ONLY execute with the lock
-#     held (SoundMain takes it before jumping). If a learned PC ever fires
-#     without the lock (nested-IRQ dispatcher in IWRAM, engine torn down and
-#     buffer reused...), the learn was wrong: blocklist it and re-learn.
-#
-# Hot-path cost: once learned, the per-instruction work is the same single PC
-# compare the fixed-address hook always did. While probing (from engine init
-# to first mixer pass, typically <2 frames) each RAM-fetched instruction adds
-# one register compare before the out-of-line probe. When HLE is off, nothing
-# runs at all.
+#     while ident == ID_NUMBER+1. The first such PC is the mixer entry; hook
+#     it every frame from then on.
+#   * Self-validating: the real entry can ONLY execute with the lock held, so
+#     a learned PC that fires without it (nested-IRQ dispatcher in IWRAM,
+#     engine torn down and the buffer reused...) is blocklisted and re-learnt.
+# Hot-path cost: once learned, one PC compare per instruction; while probing
+# (engine init to first mixer pass, typically <2 frames) each RAM-fetched
+# instruction adds one register compare. With the HLE off nothing runs.
 # =============================================================================
 
 proc unlearn_hook*(m: Mp2kHle) =
-  ## The learned PC fired without the engine lock held — impossible for the
-  ## real SoundMainRAM entry — so the learn was wrong. Blocklist the PC and
-  ## let the frame poll re-arm probing.
+  ## The learned PC fired without the engine lock — impossible for the real
+  ## mixer entry. Blocklist it and let the frame poll re-arm probing.
   if m.hook_addr != 0xFFFFFFFF'u32 and m.probe_block_n < m.probe_block.len:
     m.probe_block[m.probe_block_n] = m.hook_addr
     inc m.probe_block_n
@@ -424,12 +354,11 @@ proc unlearn_hook*(m: Mp2kHle) =
   for i in 0 ..< MP2K_MAX_CHANNELS: m.samplers[i].active = false
 
 proc on_frame(m: Mp2kHle; sound_info: uint32) =
-  ## Called once per engine audio frame (at the SoundMainRAM hook). Re-reads
-  ## the SoundInfo channel table and refreshes each sampler's parameters and
-  ## envelope endpoints. Shadow mode: envelope_volume_l/r are already computed
-  ## by the real mixer, so we just consume them.
-  # DIAG toggle: master_apply != 0 re-applies SoundInfo.masterVolume on top of the
-  # engine's per-side volumes (WRONG — they already include it). Default 0.
+  ## Called once per mixer pass (at the learned hook, before the real mixer
+  ## runs). Re-reads the SoundInfo channel table and refreshes each sampler's
+  ## parameters and envelope endpoints.
+  # DIAG: master_apply != 0 re-applies SoundInfo.masterVolume on top of the
+  # per-side volumes, which already include it (wrong; default 0).
   let master_mult =
     if m.master_apply != 0:
       float32(int(m.rd8(sound_info + SI_MASTER_VOL)) + 1) / 16.0'f32
@@ -437,16 +366,13 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
       1.0'f32
   var maxc = int(m.rd8(sound_info + SI_MAX_CHANS))
   if maxc > MP2K_MAX_CHANNELS: maxc = MP2K_MAX_CHANNELS
-  # FIFO topology: observe which FIFO(s) the engine actually feeds, from the
-  # live sound-DMA registers (channels 1/2 are the only FIFO-capable ones —
-  # GBATEK). The standard stereo driver runs DMA1->FIFO A (left) and
-  # DMA2->FIFO B (right); some m4a vintages mix MONO instead — one pcmBuffer
-  # through a single FIFO (e.g. Minish Cap: DMA1->FIFO A with SOUNDCNT_H
-  # routing A to both speakers and DMA2 disabled), and a single per-channel
-  # volume in the +0x0A slot with +0x0B unused (observed live: +0x0A ==
-  # envelopeVolume * avg(rightVolume, leftVolume) >> 8, +0x0B always 0).
-  # Keying on the DMA registers is exactly what the real signal path does, so
-  # it is vintage-independent: substitute only the FIFO(s) the driver drives.
+  # FIFO topology, from the live sound-DMA registers (DMA1/2 are the only
+  # FIFO-capable channels — GBATEK). The standard stereo driver runs
+  # DMA1->FIFO A (left) and DMA2->FIFO B (right); some vintages mix MONO — one
+  # pcmBuffer through a single FIFO (Minish Cap: DMA1->FIFO A routed to both
+  # speakers, DMA2 disabled) with a single per-channel volume (see the
+  # volume read below). Keying on the DMA registers is what the real signal
+  # path does, so it is vintage-independent: substitute only the fed FIFO(s).
   block:
     var fed_a = false
     var fed_b = false
@@ -463,30 +389,25 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
   m.dbg_reverb = m.reverb_strength
   m.dbg_pcm_rate = m.pcm_sample_rate
   when defined(mp2kwav): dbgMaster = int(m.rd8(sound_info + SI_MASTER_VOL))
-  # Reverb frame ring — our shadow of the engine's pcmBuffer slot ring (see the
-  # "MP2K reverb" block in render_sample for the seed algorithm and citations).
-  # SoundInfo.pcmDmaPeriod (+0x0B) is the ring length in V-blank frames
-  # (buffer size / pcmSamplesPerVBlank) — 7 in Emerald, 6 in Minish Cap. The
-  # ring is kept ALWAYS (once engaged), not just while
-  # reverb > 0: the real pcmBuffer holds the last pcmDmaPeriod frames of
-  # output unconditionally, so a mid-song reverb-on immediately echoes real
-  # history rather than silence.
+  # Reverb frame ring — the shadow of the engine's pcmBuffer slot ring
+  # (algorithm and rate rationale: the "MP2K reverb" block in render_sample).
+  # pcmDmaPeriod is the ring length in V-blank frames. The ring is maintained
+  # whenever engaged, not just while reverb > 0: the real pcmBuffer holds the
+  # last pcmDmaPeriod frames unconditionally, so a mid-song reverb-on echoes
+  # real history rather than silence.
   m.rev_period = int(m.rd8(sound_info + SI_DMA_PERIOD))
   if m.rev_period < 1: m.rev_period = 1     # degenerate guard; real drivers
   elif m.rev_period > 16: m.rev_period = 16 # use 2..12 (PCM_DMA_BUF_SIZE/spv)
-  # Cells per slot = the engine's own pcmSamplesPerVBlank (the ring runs at
-  # the ENGINE rate — see the Mp2kHle field comments and the render_sample
-  # reverb block).
+  # Cells per slot = pcmSamplesPerVBlank: the ring runs at the ENGINE rate.
   m.rev_spv = int(m.rd16(sound_info + SI_SPV))
   if m.rev_spv < 16: m.rev_spv = 16
   elif m.rev_spv > MP2K_REV_SLOT_LEN: m.rev_spv = MP2K_REV_SLOT_LEN
   if m.reverb_ring.len != m.rev_period * MP2K_REV_SLOT_LEN * 2:
     m.reverb_ring = newSeq[float32](m.rev_period * MP2K_REV_SLOT_LEN * 2)
-  # Slot cursor: derived from the engine's own pcmDmaCounter exactly as
-  # SoundMain derives its pcmBuffer frame cursor (pcmBuffer + pcmSamplesPerVBlank
-  # * (pcmDmaPeriod - (pcmDmaCounter - 1)) when pcmDmaCounter >= 2, else slot 0),
-  # so we track the real ring phase verbatim — including across skipped
-  # mixer passes — rather than assuming one advance per hook fire.
+  # Slot cursor, derived from pcmDmaCounter the way SoundMain derives its
+  # pcmBuffer frame cursor: slot = pcmDmaPeriod - (pcmDmaCounter - 1) when
+  # pcmDmaCounter >= 2, else 0. This tracks the real ring phase verbatim,
+  # including across skipped mixer passes.
   block:
     let cnt = int(m.rd8(sound_info + SI_DMA_COUNTER))
     m.rev_slot = (if cnt <= 1: 0 else: m.rev_period - (cnt - 1))
@@ -514,22 +435,19 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
     if wave == 0 or (wave shr 24) == 0: # null / bogus pointer
       s.active = false
       continue
-    # DirectSound mode bits (see the TYPE_* table above). CMP or REV route the
-    # real mixer into its special-case renderer; inside it, compressed decode is selected by
-    # WaveData.type != 0 (the u16 at wave+0), NOT by the channel bit alone —
-    # so a REV-only channel with a plain wave plays uncompressed backward, and
-    # a CMP-flagged channel with a plain wave header plays uncompressed.
+    # Mode bits: TYPE_* table. Compressed decode is selected by WaveData.type
+    # != 0 under CMP or REV, not by the channel bit alone.
     let reversed   = (ctype and TYPE_REV) != 0
     let compressed = (ctype and (TYPE_CMP or TYPE_REV)) != 0 and
                      m.rd16(wave + 0) != 0'u16
     let loop_status = m.rd16(wave + 2)
     let looping = (loop_status and 0xC000'u16) != 0
     let new_wave_data = wave + 16
-    # A note-on (a fresh drum hit / re-keyed note) is flagged by the START bit
-    # (0x80) in the channel status — the m4a sequencer sets it and the mixer
-    # consumes it. We MUST restart the sample on it: a drum pattern re-keys the
-    # SAME snare sample every beat, so keying on wave_data change alone drops
-    # repeated hits while the previous one is still playing/looping.
+    # Note-on = the START bit in the live status byte: the sequencer sets it
+    # and the mixer consumes it, and this hook runs at the mixer's entry, so
+    # it is still visible here. It MUST restart the sample: a drum pattern
+    # re-keys the SAME sample every beat, so keying on wave_data change alone
+    # would drop repeated hits while the previous one is still sounding.
     var use_start = true
     when defined(mp2kwav):
       var checked {.global.} = false
@@ -538,10 +456,6 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
         checked = true
         envStart = getEnv("DINGBAT_NOSTART") != "1"
       use_start = envStart
-    # A note-on (fresh drum hit / re-keyed note) is flagged by the START bit (0x80)
-    # in the channel status. on_frame runs at the mixer's ENTRY, before the real
-    # mixer consumes and clears START, so the live status byte is the reliable
-    # note-on signal.
     let started = (status and CH_START) != 0
     let retrig = (started and use_start) or
                  not s.active or s.wave_data != new_wave_data or
@@ -564,20 +478,17 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
     var resumed = false
     if retrig:
       if m.resync_pending and not started:
-        # First mixer pass after a save-state / rollback load: this channel was
-        # already mid-note in the engine (CH_ON without the START bit), so it
-        # must NOT restart from the sample start at full volume — that would be
-        # an audible retrigger burst the real hardware doesn't produce. The m4a
-        # SoundChannel exposes its playback position: `ct` (SC_COUNT) holds
-        # the source samples remaining until the
-        # sample (or loop) end. The mixer set count = size - offset at note-on
-        # and decrements it per source sample consumed, so size - ct is the
-        # forward cursor AND (for a reversed channel, whose note start offset
-        # is unrecoverable post-hoc — assume 0) the consumed-sample count our
-        # reversed src_index tracks: one formula covers both directions. Resume
-        # there; the volume endpoints below then ramp from 0 (the freshly reset
-        # vol_*1) to the engine's current volume across this one frame — a
-        # ~16 ms fade-in that also masks the rebuilt interpolation history.
+        # First mixer pass after a state/rollback load: the channel is already
+        # mid-note in the engine (CH_ON without START) and must not restart
+        # from the sample start — an audible burst hardware doesn't produce.
+        # Resume at the engine's own position: the mixer sets ct = size -
+        # offset at note-on and decrements it per source sample consumed, so
+        # size - ct is the forward cursor AND, for a reversed channel (whose
+        # start offset is unrecoverable post-hoc — assume 0), the consumed
+        # count that reversed src_index tracks. The volume endpoints then
+        # ramp from the freshly reset 0 to the engine's current value over
+        # this one frame — a ~16 ms fade-in that also masks the rebuilt
+        # interpolation history.
         s.phase_frac = 0
         s.need_fetch = true
         s.tap0 = 0; s.tap1 = 0; s.tap2 = 0; s.tap3 = 0
@@ -593,10 +504,9 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
         resumed = true
       else:
         # (re)trigger: reset the resampler + decode state to the note's start.
-        # ply_note stores a sample start offset in SoundChannel.count at note-on
-        # and the mixer's START handler consumes it as currentPointer =
-        # wav->data + count, count = wav->size - count, so honor it when the
-        # START bit keyed this retrigger.
+        # At note-on SoundChannel.count holds a sample start offset that the
+        # mixer's START handler consumes as data + count (and count = size -
+        # count), so honour it when START keyed this retrigger.
         var start_off = 0'u32
         if started:
           start_off = m.rd32(base + SC_COUNT)
@@ -613,18 +523,15 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
         s.age = 0
     else:
       s.age.inc
-      # Continuous position resync against the engine's own cursor. Some
-      # driver builds keep MORE than the mixer in RAM (ALttP Four Swords:
-      # SoundMain itself), so the learned hook can fire a stage BEFORE the
-      # sequencer — a note-on then shows a stale SoundChannel.count and our
-      # sampler starts thousands of samples off (missing/garbled notes; the
-      # whole-song RMS sat at ~0.61 of real). The engine's ct (SC_COUNT) is
-      # ground truth on every pass after the note-on: consumed = size - ct
-      # (the mixer sets ct = size - offset at START and decrements per source
-      # sample; the loop reload keeps the same coordinate). Snap only on
-      # gross divergence (> 1024 source samples) so resampler jitter and
-      # loop-wrap transients never trigger it; the snap self-corrects any
-      # stale note-on within one frame, keyed purely on engine state.
+      # Continuous position resync against the engine's cursor. Some driver
+      # builds keep MORE than the mixer in RAM (ALttP Four Swords: SoundMain
+      # itself), so the learned hook can fire a stage BEFORE the sequencer —
+      # a note-on then shows a stale SoundChannel.count and the sampler starts
+      # thousands of samples off. ct is ground truth on every later pass:
+      # consumed = size - ct (same coordinate across the loop reload). Snap
+      # only on gross divergence (> 1024 source samples) so resampler jitter
+      # and loop-wrap transients never trigger it; a stale note-on is then
+      # corrected within one frame, keyed purely on engine state.
       let ctv = m.rd32(base + SC_COUNT)
       let total_sz = m.rd32(wave + 12)
       if ctv >= 1'u32 and ctv <= total_sz:
@@ -644,8 +551,8 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
           s.hist_gap = 0
           s.blk_index = 0xFFFFFFFF'u32
           if s.src_index > 0'u32 and s.src_index < s.sample_count:
-            # Seed the interpolation history from the sample preceding the
-            # new position (same strategy as the save-state resume path).
+            # Seed the interpolation history from the preceding sample (as
+            # the resume path does below).
             let rom0 = addr m.gba.cartridge.rom
             let rmask0 = m.gba.cartridge.rom_mask
             let pv = m.decode_at(s, rom0, rmask0, s.src_index - 1'u32)
@@ -655,81 +562,56 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
     s.reversed    = reversed
     if compressed: m.dbg_compressed_used.inc
     s.use_pcm_rate = (ctype and TYPE_FIX) != 0
-    # Resample rate = the CHANNEL's per-note playback frequency (SoundChannel
-    # +0x20, in Hz), NOT the sample header's base freq at wave+4 (a large
-    # fixed-point value). Using the latter advanced the cursor ~200 samples per
-    # output sample — the high-pitch whine. step = freq / output_rate.
+    # Resample rate = the CHANNEL's per-note playback frequency (Hz), NOT the
+    # sample header's base frequency at wave+4 (a fixed-point value in other
+    # units). step = freq / output_rate.
     s.freq        = m.rd32(base + SC_FREQ)
     s.loop_start  = m.rd32(wave + 8)    # WaveData.loopStart
-    # WaveData.size = number of source samples. A reversed channel covers
-    # [0, size-offset): the real mixer reflects currentPointer to
-    # data + size - offset and walks DOWN to data[0], so its playable length is
-    # size - offset and play position p maps to source index
-    # (size - offset - 1) - p (see decode_src).
+    # WaveData.size = source sample count; a reversed channel plays
+    # size - offset of them (from data + size - offset DOWN to data[0]).
     let total = m.rd32(wave + 12)
     s.sample_count = (if reversed and s.start_off < total: total - s.start_off
                       else: total)
-    # The reference driver's reversed paths never consult the loop registers —
-    # count exhaustion clears statusFlags and silences the channel — so REV is
-    # always one-shot.
-    s.looping     = looping and not reversed
-    # Fast path: cache a direct ROM offset so the per-sample mixer can read the
-    # cartridge buffer without going through the bus address decoder. m4a sample
-    # banks live in ROM (0x08000000..0x0DFFFFFF).
+    s.looping     = looping and not reversed   # REV is one-shot (TYPE_* table)
+    # Fast path: a direct ROM offset lets the per-sample mixer bypass the bus
+    # address decoder. m4a sample banks live in ROM (0x08000000..0x0DFFFFFF).
     let wave_region = new_wave_data shr 24
     s.in_rom = wave_region >= 0x08'u32 and wave_region <= 0x0D'u32
     if s.in_rom:
       s.rom_off = (new_wave_data and 0x01FFFFFF'u32)
     if resumed and s.src_index > 0'u32 and s.src_index < s.sample_count:
-      # Seed the resampler history at the resume point (needs in_rom/rom_off,
-      # so this runs after they are set) with the source sample preceding it
-      # in play order. The block-cache BDPCM decoder (decode_src) lands on a
-      # mid-block position natively — decoding the whole block on demand — so
-      # no differential-accumulator re-seeding is needed.
+      # Seed the resampler history at the resume point with the preceding
+      # source sample (needs in_rom/rom_off, hence after they are set). The
+      # block-cache decoder lands on a mid-block BDPCM position natively.
       let rom = addr m.gba.cartridge.rom
       let rmask = m.gba.cartridge.rom_mask
       s.src_index.dec
       s.tap0 = m.decode_src(s, rom, rmask)
       s.src_index.inc
       s.tap1 = s.tap0; s.tap2 = s.tap0; s.tap3 = s.tap0
-    # SC_ENV_VL/VR (0x0B/0x0A) are the engine's per-side volumes: envelopeVolume
-    # * (leftVolume|rightVolume) >> 8, and leftVolume/rightVolume ALREADY fold in
-    # SoundInfo.masterVolume. So we consume them directly and must NOT re-apply
-    # master (doing so double-applied it, making games with masterVol<15 — e.g.
-    # Pokémon FR/Em at 12/16 — render ~19% too quiet). The real mixer writes these
-    # once per SoundMainRAM pass, so they are a per-frame constant; the hook reads
-    # the value in force for this frame. Shift last frame's endpoint into vol_*0 and
-    # ramp toward this frame's value across the frame, mirroring the real driver's
-    # per-sample volume interpolation from the previous endpoint.
-    # MONO vintages (see the FIFO-topology block above) fold pan away entirely:
-    # the mixer computes ONE volume — envelopeVolume * avg(rV, lV) >> 8 — into
-    # the +0x0A slot and leaves +0x0B at 0. Consume that single volume for both
-    # accumulator sides (they stay identical; the output router below then
-    # feeds the one fed FIFO). Reading +0x0B as "left" there would silence the
-    # mix — that was the Minish Cap "HLE way quieter" bug.
+    # +0x0A/+0x0B are the engine's per-side volumes: envelopeVolume *
+    # (masterVolume+1)/16 * (rightVolume|leftVolume) >> 8 — masterVolume is
+    # folded in here, so consume them as-is and never re-apply it. The mixer
+    # writes them once per pass (a per-frame constant); shift last frame's
+    # value into vol_*0 and ramp toward this frame's, mirroring the driver's
+    # per-sample interpolation from the previous endpoint. MONO vintages fold
+    # pan away: ONE volume, envelopeVolume * avg(rV, lV) >> 8, at +0x0A and
+    # +0x0B left at 0 (observed live) — use it for both sides; the output
+    # router then feeds the one fed FIFO.
     let vr = float32(m.rd8(base + SC_ENV_VR)) / 255.0'f32 * master_mult
     let vl = (if m.mono_mode != 0: vr
               else: float32(m.rd8(base + SC_ENV_VL)) / 255.0'f32 * master_mult)
     if retrig and started and not resumed:
       # Note-on attack frame. The engine computes this pass's envelope INSIDE
-      # SoundMainRAM, AFTER our entry hook reads — so +0x0A/+0x0B still hold
-      # the channel's previous (usually zero/released) values, and using them
-      # silenced the first frame of every note. Short percussive hits carry
-      # most of their energy in that frame — this was the "missing drum
-      # transients" deficit (Densetsu no Sutafi 3, ALttP: real top-1% ~3x the
-      # HLE's). Reproduce the driver's own first attack step instead
-      # (the driver's envelope step: envelopeVolume starts at 0 and gains
-      # `attack` per pass, clamped at 255; the per-side volumes are then
-      # evol * rightVolume/leftVolume >> 8, with rV/lV already folding in
-      # masterVolume), and mix the whole frame FLAT at it — the real pass
-      # mixes at a per-frame-constant envelope, not a ramp from zero. MONO
-      # vintages fold pan away as evol * avg(rV, lV) >> 8 (see the FIFO
-      # topology note above).
-      # Exact first-pass formula, read from the mixer itself (SoundMainRAM
-      # envelope prologue, disassembled from FireRed/Sutafi IWRAM: the START
-      # path zeroes envelopeVolume and falls into the attack add, then
-      # envelopeVolumeRight/Left = env * (masterVolume+1)/16 * rV/lV >> 8 —
-      # masterVolume is folded in HERE, not in rightVolume/leftVolume).
+      # the mixer, after our entry hook reads, so +0x0A/+0x0B still hold the
+      # previous (usually released, zero) values and would silence the first
+      # frame of every note — where a short percussive hit carries most of
+      # its energy. Reproduce the driver's first attack step instead, as
+      # observed from the driver running in this emulator (FireRed): the
+      # START path zeroes envelopeVolume and falls into the attack add
+      # (+attack, clamped 255), then per side = env * (masterVolume+1)/16 *
+      # rV|lV >> 8 (mono: avg(rV, lV)). The pass mixes FLAT at that value,
+      # not a ramp from zero.
       let atk = min(int(m.rd8(base + SC_ATTACK)), 255)
       let mvs = (atk * (int(m.rd8(sound_info + SI_MASTER_VOL)) + 1)) shr 4
       let rvb = int(m.rd8(base + SC_VOL_R))
@@ -750,58 +632,39 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
       s.vol_l1 = vl
       s.vol_r1 = vr
   # --- Foreign FIFO feeder detection -------------------------------------------
-  # Some games ship m4a (SFX/jingles) but stream their MUSIC around the
-  # engine's channel structs (observed: Batman Vengeance, Altered Beast,
-  # Army Men — their streamer fills pcmBuffer just-in-time mid-frame and
-  # erases it after the DMA drains, so no SoundChannel is ever active and any
-  # state poll sees a silent buffer). Substituting our shadow render would
-  # replace their music with silence. Three engine/bus-state signals, each
-  # sustained over consecutive mixer passes, latch substitution off for the
-  # session (never keyed on game ID):
-  #   * FIFO register bytes written by anything but special-timing DMA1/2
-  #     (fifo_cpu_bytes, counted at the FIFO write port) — the m4a driver
-  #     only ever feeds the FIFOs through those DMAs;
+  # Some games ship m4a for SFX but stream their MUSIC around the engine's
+  # channel structs (Batman Vengeance: the streamer fills pcmBuffer
+  # just-in-time mid-frame and erases it after the DMA drains, so no
+  # SoundChannel is ever active and a state poll sees a silent buffer);
+  # substituting the shadow would replace that music with silence. Three
+  # engine/bus-state signals latch substitution off for the session (never
+  # keyed on game ID):
+  #   * FIFO bytes written by anything but special-timing DMA1/2
+  #     (fifo_cpu_bytes) — the driver only feeds the FIFOs through those DMAs;
   #   * a special-timing FIFO DMA sourcing OUTSIDE the SoundInfo work area
-  #     (m4a's pcmBuffer is embedded in SoundInfo at +0x350);
-  #   * the catch-all: the real drained FIFO stream persistently carries
-  #     energy while our shadow render is persistently silent. A genuinely
-  #     engine-owned stream cannot sound while every channel we mirror is
-  #     idle — and if the shadow were ever wrongly silent for another
-  #     reason, falling back to the game's own audio is the right failure
-  #     mode anyway.
-  # Evidence model (foreign audio is BURSTY — Batman's stingers alternate with
-  # silence — so a consecutive-streak rule never accumulates):
-  #   evidence — provenance hit (CPU bytes / bad SAD), or the real stream
-  #     audible while our shadow render is silent;
-  #   refutation — the shadow itself is producing audio with no provenance
-  #     hit (the engine demonstrably owns the stream): reset;
-  #   neutral — both silent: hold the count.
-  # A few evidence passes (frames of un-renderable audible audio) latch
-  # substitution off for the session.
+  #     (pcmBuffer is embedded in SoundInfo at +0x350);
+  #   * the catch-all: the real stream persistently audible while the shadow
+  #     is persistently silent — an engine-owned stream cannot sound while
+  #     every mirrored channel is idle, and if the shadow were wrongly silent
+  #     for another reason the game's own audio is the right fallback anyway.
+  # Foreign audio is BURSTY, so a consecutive-streak rule never accumulates:
+  # evidence = provenance hit or real-audible-while-shadow-silent; refutation
+  # = the shadow producing audio with no provenance hit (reset); neutral =
+  # both silent (hold the count).
   block:
     if m.fifo_foreign:
-      # --- Latched: earn the way back (EXE3-class unlatch) -------------------
-      # The latch fires on a few frames of un-renderable audio — for many
-      # games that is ONE boot-time streamed voice clip played while their
-      # perfectly ordinary m4a engine idles (Rockman EXE 3 latches at the
-      # title screen this way; 49 of the sweep's 75 latched titles show
-      # active m4a channels afterwards). Sacrificing enhancement for the
-      # whole session over that is the wrong trade — but only provably so
-      # once the engine DEMONSTRABLY owns the stream. So while latched, if
-      # any m4a channel is active, apu.get_sample keeps the shadow rendering
-      # (without emitting — see unlatch_watch) and accumulates the same
-      # per-side energies; sustained agreement between the shadow and the
+      # --- Latched: earn the way back ---------------------------------------
+      # For many games the latch was ONE boot-time streamed voice clip played
+      # while an ordinary m4a engine idled (Rockman EXE 3 at its title).
+      # Losing enhancement for the session over that is the wrong trade, but
+      # only provably so once the engine DEMONSTRABLY owns the stream: while
+      # latched with any m4a channel active, apu.get_sample keeps the shadow
+      # rendering un-emitted (unlatch_watch); sustained agreement with the
       # real stream (each side within 2x, real audible, channels active, 60
-      # CONSECUTIVE passes — a full second) proves the engine is the
-      # producer, and substitution is re-armed. Safety:
-      #   * true-foreign games (Batman Vengeance / Altered Beast / Army Men)
-      #     never key an m4a channel, so no pass ever qualifies — they can
-      #     never unlatch, whatever their foreign stream does;
-      #   * a hybrid mid-clip has real >> shadow on some side —
-      #     disagreement, counter resets; unlatch waits for a clean second;
-      #   * if an unlatch is ever wrong, the overlay passthrough covers the
-      #     mismatch within one pass and the standard evidence re-latches —
-      #     bounded to ~a frame of misattributed audio, no flapping.
+      # CONSECUTIVE passes = one second) re-arms substitution. A true-foreign
+      # game never keys an m4a channel, so it never qualifies; a hybrid
+      # mid-clip has real >> shadow on a side and resets the counter; a wrong
+      # unlatch is covered by the overlay passthrough and re-latched.
       var any_active = false
       for i in 0 ..< MP2K_MAX_CHANNELS:
         if m.samplers[i].active: any_active = true
@@ -840,10 +703,9 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
           let sad = m.gba.dma.dmasad[c]
           if sad < sound_info or sad >= sound_info + 0x4000'u32:
             provenance = true
-      # Real-vs-shadow energy over the samples since the last mixer pass
-      # (accumulated in apu.get_sample). Units are FIFO latch units (s8*2):
-      # real avg(|L|+|R|) >= 4 is clearly audible; shadow avg < 0.25 is
-      # genuinely silent (not merely quiet).
+      # Real-vs-shadow energy since the last mixer pass (accumulated in
+      # apu.get_sample), in FIFO latch units (s8*2): real avg(|L|+|R|) >= 4
+      # is clearly audible; shadow avg < 0.25 is genuinely silent.
       var real_loud = false
       var shadow_loud = false
       if m.ab_n > 0:
@@ -855,23 +717,17 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
         real_loud   = real_sum >= int64(m.ab_n) * 4
         shadow_loud = hle_sum >= int64(m.ab_n) div 4
         # --- Transient foreign-overlay passthrough ---------------------------
-        # Hybrid games overlay their OWN stream on top of (or interleaved
-        # with) the engine's output: Kinniku Banzuke 2 streams announcer
-        # speech into the pcmBuffer B half while m4a music plays (real B ~4x
-        # our R while real A tracks our L); Shin Megami Tensei II streams
-        # intro stingers just-in-time while the engine idles (buffer reads
-        # zero even at frame end — invisible to any state poll). Our shadow
-        # cannot render audio that never goes through the SoundChannels, so
-        # substituting replaces it with silence. Per-side detection: a real
-        # FIFO side carrying more than TWICE our shadow's same side plus an
-        # audibility floor cannot be the engine's own mix (the engine writes
-        # both halves from the same channel loop with byte-bounded volumes we
-        # mirror; verified corpus tracks within ~1.35x even in the reverb>=75
-        # cluster). While held, apu.get_sample emits the REAL stream and the
-        # shadow keeps rendering warm underneath — reversible per pass, so a
-        # speech pause flips back to enhanced output ~half a second later and
-        # nothing is permanently sacrificed (unlike fifo_foreign). The hold
-        # spans sentence-cadence gaps so it cannot flap mid-speech.
+        # Hybrid games overlay their OWN stream on the engine's output
+        # (Kinniku Banzuke 2 streams announcer speech into the pcmBuffer B
+        # half while m4a music plays). The shadow cannot render audio that
+        # never passes through the SoundChannels. Per-side test: a real FIFO
+        # side carrying more than TWICE the shadow's same side plus an
+        # audibility floor cannot be the engine's own mix (both halves come
+        # from the same channel loop with byte-bounded volumes we mirror).
+        # While held, apu.get_sample emits the REAL stream and the shadow
+        # keeps rendering underneath — reversible per pass, unlike
+        # fifo_foreign; the 30-pass hold spans sentence-cadence gaps so it
+        # cannot flap mid-speech.
         let over_l = m.real_abs_a >= m.hle_abs_l * 3 + int64(m.ab_n) * 4
         let over_r = m.real_abs_b >= m.hle_abs_r * 3 + int64(m.ab_n) * 4
         if over_l or over_r:
@@ -887,26 +743,23 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
         m.ab_n = 0
       if shadow_loud: m.shadow_quiet_age = 0
       elif m.shadow_quiet_age < 1000: inc m.shadow_quiet_age
-      # Energy evidence requires the engine's channels to be ALL idle: with a
-      # channel active the engine owns whatever is sounding, and any shadow
-      # silence is our own problem (e.g. the one-frame envelope lag at note-on
-      # — which false-latched Densetsu no Sutafi 3's song start), never
-      # foreignness. It also only counts once the shadow has been silent
-      # longer than the real ring could still be draining engine-mixed audio
-      # (the pcmBuffer holds up to pcmDmaPeriod <= 16 frames our shadow's
-      # 1-frame delay line does not): a song-stop drain tail is not foreign.
+      # Energy evidence requires ALL engine channels idle: with one active
+      # the engine owns whatever is sounding, and any shadow silence is our
+      # own problem (e.g. a note-on envelope lag), never foreignness. It also
+      # only counts once the shadow has been silent longer than the real ring
+      # could still be draining engine-mixed audio (pcmBuffer holds up to
+      # pcmDmaPeriod <= 16 frames; our delay line holds 1): a song-stop drain
+      # tail is not foreign.
       var any_active = false
       for i in 0 ..< MP2K_MAX_CHANNELS:
         if m.samplers[i].active: any_active = true
       if provenance or
          (real_loud and not any_active and m.shadow_quiet_age > 16):
         inc m.foreign_streak
-        # 3 evidence passes: an evidence pass is a full frame of clearly
-        # audible foreign audio while our shadow (voices AND reverb tail) is
-        # bit-silent outside any drain-tail window — essentially impossible
-        # for an engine-owned stream, so a few hits suffice. Games with very
-        # sparse foreign stingers (Altered Beast's title hits) still latch
-        # within seconds.
+        # 3 evidence passes suffice: a full frame of clearly audible audio
+        # while the shadow (voices AND reverb tail) is bit-silent outside any
+        # drain-tail window is essentially impossible for an engine-owned
+        # stream, and sparse stingers still latch within seconds.
         if m.foreign_streak >= 3:
           m.fifo_foreign = true
       elif shadow_loud:
@@ -918,14 +771,10 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
   m.resync_pending = false   # one full re-latch pass done; back to normal keying
 
 proc mixer_hook*(m: Mp2kHle) =
-  ## PC-hook entry: called from cpu.tick when r15 reaches the learned
-  ## SoundMainRAM entry. Reads the SoundInfo pointer and, if the engine lock is
-  ## held (ident == ID_NUMBER+1 — always true at the real mixer entry, since
-  ## SoundMain takes the lock before jumping here), refreshes the mixer state.
-  ## The hook fires at the mixer's entry, where the channel status still
-  ## carries the START bit (the real mixer clears it as it processes each
-  ## note-on), so this is where we detect (re)triggers. A fire WITHOUT the
-  ## lock means the learned PC was wrong: unlearn and re-probe.
+  ## PC-hook entry, called from cpu.tick when r15 reaches the learned mixer
+  ## entry. With the engine lock held, refresh the mixer state (the channel
+  ## status still carries START here: on_frame). Without it the learned PC
+  ## was wrong ("Runtime detection"): unlearn and re-probe.
   let sip = m.rd32(MP2K_SOUNDINFO_PTR_ADDR)
   if (sip shr 24) == 0x02'u32 or (sip shr 24) == 0x03'u32:
     let ident = m.rd32(sip + SI_MAGIC)
@@ -936,10 +785,10 @@ proc mixer_hook*(m: Mp2kHle) =
 
 proc probe_pc*(m: Mp2kHle; pc: uint32) {.noinline.} =
   ## Learning probe, called from cpu.tick only while probing is armed and only
-  ## for instructions fetched from RAM with r0 == &SoundInfo (both prefiltered
-  ## inline). If the engine lock is held right now, this PC is the SoundMainRAM
-  ## mixer entry: learn it and run the first shadow pass immediately (the entry
-  ## has not executed yet, so channel state is exactly what the hook would see).
+  ## for RAM-fetched instructions with r0 == &SoundInfo (both prefiltered
+  ## inline). Lock held => this PC is the mixer entry: learn it and run the
+  ## first shadow pass now (the entry has not executed yet, so channel state
+  ## is exactly what the hook would see).
   let ident = m.rd32(m.probe_sound_info + SI_MAGIC)
   inc m.dbg_probe_hits
   m.dbg_probe_ident = ident
@@ -957,10 +806,9 @@ proc probe_pc*(m: Mp2kHle; pc: uint32) {.noinline.} =
 
 proc mp2k_frame_poll*(m: Mp2kHle) =
   ## Once-per-frame presence check (2 IWRAM reads; called from step_frame only
-  ## while mp2k_hle is enabled). Version-independent: follows SOUND_INFO_PTR
-  ## (0x03007FF0) and looks for the SoundInfo ident magic. Arms PC probing
-  ## until the mixer entry is learned; disengages the HLE if the magic ever
-  ## disappears (engine torn down) so stale samplers cannot keep looping.
+  ## while mp2k_hle is enabled). Arms PC probing until the mixer entry is
+  ## learned; disengages the HLE if the ident magic ever disappears (engine
+  ## torn down) so stale samplers cannot keep looping.
   let sip = m.rd32(MP2K_SOUNDINFO_PTR_ADDR)
   var ident = 0'u32
   if (sip shr 24) == 0x02'u32 or (sip shr 24) == 0x03'u32:
@@ -970,10 +818,7 @@ proc mp2k_frame_poll*(m: Mp2kHle) =
        ident != MP2K_IDENT_IDLE_VOFF and ident != MP2K_IDENT_LOCK_VOFF:
       m.engaged = false
       for i in 0 ..< MP2K_MAX_CHANNELS: m.samplers[i].active = false
-    # Mixer liveness (see mixer_live): count the frames since the hook last
-    # fired. on_frame zeroes this, so a running SoundMain holds it at 0..1;
-    # a parked one (stock m4aSoundVSyncOff) lets it grow past the grace and
-    # substitution steps aside until the mixer runs again.
+    # Frames since the hook last fired (mixer_live); on_frame zeroes it.
     if m.engaged and m.hook_stale < 1000'i32: inc m.hook_stale
     return
   # Arm probing only when the engine is at rest (ident == ID_NUMBER, in
@@ -1036,13 +881,10 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
     if not s.active: continue
     # Fetch a fresh source sample into the history when the phase advanced.
     # A decimating advance (step > 1) skipped hist_gap source samples: first
-    # backfill the history with the samples ADJACENT to the new position, so
-    # the interpolation below always spans neighbouring source samples — the
-    # real mixer point-samples at the exact stride position (its linear
-    # interpolation is between adjacent samples).
-    # Interpolating stride-spaced fetches instead acted as a triangle lowpass
-    # over the stride and gutted bright decimated voices (Densetsu no Sutafi
-    # 3's 44-93 kHz notes lost 10-30x of their >2 kHz energy).
+    # backfill the history with the samples ADJACENT to the new position so
+    # the interpolation always spans neighbouring source samples, as the real
+    # mixer's does. Interpolating stride-spaced fetches would act as a
+    # triangle lowpass over the stride and gut bright decimated voices.
     if s.need_fetch and s.src_index < s.sample_count:
       if s.hist_gap > 0'u32:
         var j = min(s.hist_gap, 3'u32)
@@ -1088,11 +930,8 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
         dbgAttackSq += float64(cl)*float64(cl) + float64(cr)*float64(cr)
         dbgAttackPk = max(dbgAttackPk, max(abs(cl), abs(cr)))
         dbgAttackN.inc
-    # Advance the resample phase; step = playback-rate / output-rate. A
-    # TYPE_FIX channel plays at exactly SoundInfo.pcmFreq — the real mixer
-    # forces its step to 1.0 source sample per pcmFreq output sample and
-    # ignores channel.frequency entirely — so its rate here is the engine's
-    # pcmFreq, not the per-note frequency.
+    # Advance the resample phase; step = playback-rate / output-rate, where a
+    # TYPE_FIX channel's playback rate is pcmFreq (TYPE_* table).
     let rate = (if s.use_pcm_rate: float32(m.pcm_sample_rate) else: float32(s.freq))
     when defined(mp2kwav):
       dbgStepN.inc
@@ -1102,43 +941,40 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
     s.advance_cursor(rate / float32(APU_SAMPLE_RATE))
   m.frame_pos.inc
   if m.frame_len > 0 and m.frame_pos >= m.frame_len: m.frame_pos = m.frame_len
-  # --- MP2K reverb: the driver's buffer-seed echo -------------------------------
-  # Behaviour of the driver's mixer, observed at runtime (loveemu's summary
-  # calls it "a simple reverb (echo) effect with fixed delay"). pcmBuffer is
-  # two s8 halves, one per FIFO, each a ring of pcmDmaPeriod one-V-blank
-  # slots; the slot the mixer is about to fill holds the audio mixed
-  # pcmDmaPeriod V-blanks ago, the frame the DMA just finished playing (slot
-  # cursor: see on_frame). Before any voice is mixed the driver seeds that
-  # slot, sample by sample: it sums the four signed bytes at the same index in
-  # both halves of the slot being overwritten and of the following slot (one
-  # frame younger, wrapping to slot 0), scales the sum by reverb/512, rounds
-  # negative results one LSB toward zero, and stores the one mono result to
-  # both halves. Voices are then accumulated on top, so the stored slot is
-  # the wet frame and the seed is the feedback path: a two-tap (P and P-1
-  # frames) feedback comb with gain reverb/512 per sample pair. reverb <= 127
-  # keeps the total feedback below 1, so it is stable. With reverb == 0 the
-  # slot is zero-filled and simply holds the dry mix.
+  # --- MP2K reverb: the driver's buffer-seed echo (canonical) -------------------
+  # Driver behaviour, observed at runtime (loveemu's summary: "a simple
+  # reverb (echo) effect with fixed delay"). pcmBuffer is two s8 halves, one
+  # per FIFO, each a ring of pcmDmaPeriod one-V-blank slots; the slot the
+  # mixer is about to fill holds the audio mixed pcmDmaPeriod V-blanks ago —
+  # the frame the DMA just finished playing (slot cursor: on_frame). Before
+  # any voice is mixed the driver seeds that slot, sample by sample: it sums
+  # the four signed bytes at the same index in both halves of the slot being
+  # overwritten and of the following slot (one frame younger, wrapping to
+  # slot 0), scales the sum by reverb/512, rounds negative results one LSB
+  # toward zero, and stores the one mono result to both halves. Voices are
+  # accumulated on top, so the stored slot is the wet frame and the seed is
+  # the feedback path: a two-tap (P and P-1 frames) feedback comb with gain
+  # reverb/512 per sample pair, stable for reverb <= 127. With reverb == 0
+  # the slot is zero-filled and holds the dry mix.
   #
-  # Mapping to this HLE's 32768 Hz render: the seed addressing is per-slot
-  # and intra-frame-indexed (sample i of this pass pairs with sample i of the
+  # Mapping to the 32768 Hz render: the seed addressing is per-slot and
+  # intra-frame-indexed (sample i of this pass pairs with sample i of the
   # passes P and P-1 V-blanks ago), not a fixed sample-count delay, and the
-  # buffer runs at the ENGINE's pcmFreq. reverb_ring is therefore kept at that
-  # rate: rev_period slots of rev_spv (pcmSamplesPerVBlank) stereo cells.
-  # rev_phase advances pcmFreq/32768 cells per output sample; on cell entry
-  # the seed is computed from the same cell of the P- and (P-1)-pass-old slots
-  # and this pass's wet output is point-sampled into the cell, then the seed
-  # is held across the cell's remaining output samples — the zero-order hold
-  # the DMA/DAC replay applies to the drained buffer. The ring must run at
-  # pcmFreq: the seed sums two consecutive frames, so the buffer's band-limited
-  # self-correlation is the loop gain, and a 32768 Hz ring under-echoes
-  # (FireRed forced-reverb A/B). Our floats are in s8-buffer/128 units (a
-  # voice contributes sample/128 * envelopeVolume/255, the driver's byte-lane
-  # accumulation scale), so the seed is sum_f * reverb / 512. Deviations,
-  # each sub-LSB on the s8 scale: the negative nudge and the s8 store
-  # quantization/wrap are omitted. MONO vintages (see on_frame; e.g. Minish
-  # Cap) keep the same formula: both accumulator sides are identical there,
-  # so the four-read sum degrades to 2*(cur + next) with the same /512
-  # (verified against the real FIFO by A/B RMS).
+  # buffer runs at the ENGINE's pcmFreq. reverb_ring is therefore kept at
+  # that rate: rev_period slots of rev_spv stereo cells. rev_phase advances
+  # pcmFreq/32768 cells per output sample; on cell entry the seed is computed
+  # from the same cell of the P- and (P-1)-pass-old slots and this pass's wet
+  # output is point-sampled into the cell, then the seed is held across the
+  # cell's remaining output samples — the zero-order hold the DMA/DAC replay
+  # applies. The ring MUST run at pcmFreq: the seed sums two consecutive
+  # frames, so the buffer's band-limited self-correlation is the loop gain,
+  # and a 32768 Hz ring under-echoes (FireRed forced-reverb A/B against the
+  # real FIFO). Floats are in s8-buffer/128 units (a voice contributes
+  # sample/128 * envelopeVolume/255, the driver's byte-lane scale), so the
+  # seed is sum_f * reverb / 512. Omitted, each sub-LSB on the s8 scale: the
+  # negative nudge and the s8 store quantization/wrap. MONO vintages keep the
+  # same formula: both sides are identical, so the four-read sum degrades to
+  # 2*(cur + next) with the same /512 (A/B RMS against the real FIFO).
   var outl_f = accl
   var outr_f = accr
   if m.reverb_ring.len > 0:
@@ -1147,9 +983,9 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
     if i >= m.rev_spv: i = m.rev_spv - 1
     let cur  = (m.rev_slot * cap + i) * 2
     if i != m.rev_cell:
-      # Cell entry: compute this cell's seed from the old ring content, then
-      # store this pass's wet value (the cell's first output sample — the
-      # point-sampling the engine's own pcmFreq mixing implies).
+      # Cell entry: seed from the old ring content, then store this pass's
+      # wet value (the cell's first output sample = the point-sampling the
+      # engine's pcmFreq mixing implies).
       let nxts = (if m.rev_slot + 1 >= m.rev_period: 0 else: m.rev_slot + 1)
       let nxt  = (nxts * cap + i) * 2
       if m.reverb_strength > 0'u8:
@@ -1158,10 +994,8 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
         m.rev_seed = sum * float32(m.reverb_strength) * (1.0'f32 / 512.0'f32)
       else:
         m.rev_seed = 0
-      # reverb == 0 must stay bit-identical to the no-reverb path: rev_seed is
-      # 0 above, and this store only maintains the (dry) history — matching
-      # the real NoReverb zero-fill + voice accumulation, after which the
-      # pcmBuffer holds the dry frame.
+      # With reverb == 0 rev_seed is 0 and this store only maintains the dry
+      # history (the driver's zero-fill + voice accumulation).
       m.reverb_ring[cur]     = accl + m.rev_seed
       m.reverb_ring[cur + 1] = accr + m.rev_seed
       m.rev_cell = i
@@ -1169,13 +1003,9 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
     outr_f = accr + m.rev_seed
     m.rev_phase += float32(m.pcm_sample_rate) * (1.0'f32 / float32(APU_SAMPLE_RATE))
     m.rev_pos.inc
-  # Scale to the DirectSound latch range the APU expects. With the master-volume
-  # double-apply fixed (see on_frame), the per-side envelope volumes already carry
-  # the full engine gain, so this makeup is close to the pure linear ÷256 mixer
-  # scale (~2.0). Recalibrated 2.1 -> 2.025 after the 2026-07 sweep fixes
-  # (attack frames, position resync, FIFO-drop repair cleaned the REAL
-  # reference): the 738-game archive A/B put the median HLE/REAL RMS at 1.037
-  # with 2.1, so 2.1/1.037 centres the corpus at 1.0 (IQR 0.96..1.03).
+  # Scale to the DirectSound latch range the APU expects. Makeup gain 2.025:
+  # centres the HLE/real RMS A/B at 1.0 (the pure ÷256 mixer scale would be
+  # ~2.0). `makeup` overrides it for diagnostics.
   let MP2K_MAKEUP_GAIN = (if m.makeup > 0'f32: m.makeup else: 2.025'f32)
   let li = int32(outl_f * 127.0'f32 * MP2K_MAKEUP_GAIN)
   let ri = int32(outr_f * 127.0'f32 * MP2K_MAKEUP_GAIN)
@@ -1183,21 +1013,19 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
   m.dbg_out_count.inc
   var outl = int16(clamp(li, -512, 511))
   var outr = int16(clamp(ri, -512, 511))
-  # Route to the FIFO(s) the engine actually feeds (see on_frame). render_sample
-  # returns (FIFO A, FIFO B). A mono driver drives a single FIFO; the other one
-  # never receives data on real hardware, so it must be substituted with
-  # silence — injecting our second accumulator there would add sound on a FIFO
-  # the game may still have routed to a speaker.
+  # Route to the FIFO(s) the engine feeds (on_frame); the result is (FIFO A,
+  # FIFO B). A mono driver's other FIFO never receives data on hardware, so
+  # it gets silence — the game may still have it routed to a speaker.
   case m.mono_mode
   of 1: outr = 0            # mono via FIFO A (outl == outr already; B silent)
   of 2: outl = 0            # mono via FIFO B
   else: discard
-  # DirectSound double-buffer: emit the sample from db_delay samples ago so the HLE
-  # stream lags the mixer pass by one frame, exactly as the real driver's DMA lags
-  # its pcmBuffer fill. Without this the HLE leads the hardware FIFO by ~one frame
-  # (measured: best HLE/real cross-correlation sits at a one-frame lag). A plain
-  # ring of db_delay stereo slots: the slot we are about to overwrite holds the
-  # value written db_delay samples earlier.
+  # DirectSound double-buffer (canonical): the driver mixes each pcmBuffer
+  # frame one V-blank ahead of the DMA that drains it, so hardware audio lags
+  # the mixer pass by one frame (the HLE/real cross-correlation peaks at a
+  # one-frame lag). Emit the sample from db_delay samples ago to match: the
+  # ring slot about to be overwritten holds the value written db_delay
+  # samples earlier.
   var eoutl = outl
   var eoutr = outr
   if m.db_delay > 0 and m.out_delay.len >= 2:
@@ -1215,13 +1043,11 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
   (eoutl, eoutr)
 
 proc init_mp2k*(m: Mp2kHle) =
-  ## Initialise mixer state. Detection is fully runtime-driven (see
-  ## mp2k_frame_poll / probe_pc): nothing to scan here — the hook address is
-  ## learned once the game's sound engine initialises and runs its first pass.
+  ## Initialise mixer state. Nothing to scan: the hook is learned at runtime
+  ## ("Runtime detection").
   m.frame_len = APU_SAMPLE_RATE div 60
   m.use_cubic = true   # cubic (Catmull-Rom, per Paul Bourke) resampling by default
-  # One output frame of DirectSound double-buffer latency (see render_sample). A
-  # ring of frame_len stereo slots delays the HLE stream by exactly frame_len.
+  # One frame of double-buffer latency (render_sample).
   m.db_delay = m.frame_len
   m.out_delay = newSeq[int16](m.frame_len * 2)
   m.out_delay_w = 0

@@ -114,7 +114,6 @@ proc new_apu*(gba: GBA): APU =
   when defined(test_harness):
     result.audio_dev = 0
   elif defined(emscripten):
-    # No SDL audio on emscripten — JS handles playback via Web Audio API
     result.audio_dev = 0
   else:
     var desired = SDL_AudioSpec(
@@ -321,12 +320,13 @@ proc get_sample*(apu: APU) =
   let psg_left  = int32(psg_sound) * int32(apu.soundcnt_l.left_volume) shr shift
   let psg_right = int32(psg_sound) * int32(apu.soundcnt_l.right_volume) shr shift
   var (raw_dma_a, raw_dma_b) = apu.dma_channels.dma_channels_get_amplitude()
-  # MP2K substitution predicate: engaged, not latched foreign, and the
-  # engine mixer actually running (mixer_live, mp2k.nim)
+  # MP2K HLE (mp2k.nim): substitute the shadow render for the FIFO A/B
+  # latches (L->A, R->B) while the engine mixer is live and owns the stream;
+  # SOUNDCNT_H routing below applies unchanged. mp2k_watch renders un-emitted
+  # for on_frame's unlatch test; both accumulate the real-vs-shadow energies.
   let mp2k_subst = apu.gba.mp2k_hle and apu.gba.mp2k != nil and
                    apu.gba.mp2k.engaged and not apu.gba.mp2k.fifo_foreign and
                    apu.gba.mp2k.mixer_live
-  # Latched-foreign shadow watch (un-emitted render for the unlatch test)
   let mp2k_watch = apu.gba.mp2k_hle and apu.gba.mp2k != nil and
                    apu.gba.mp2k.engaged and apu.gba.mp2k.fifo_foreign and
                    apu.gba.mp2k.mixer_live and apu.gba.mp2k.unlatch_watch
@@ -338,13 +338,8 @@ proc get_sample*(apu: APU) =
        mp2k_watch or (apu.gba.gs_bon != nil and apu.gba.gs_bon.engaged):
       realDmaCapture.add raw_dma_a
       realDmaCapture.add raw_dma_b
-  # MP2K HLE replaces the FIFO A/B latches with its mixed sample (L->A,
-  # R->B); the SOUNDCNT_H routing below then applies unchanged. fifo_foreign:
-  # the game streams its own audio, so the real stream is left alone.
   if mp2k_subst:
     let (hl, hr) = apu.gba.mp2k.render_sample()
-    # Real drained FIFO stream vs the shadow render, per side, for the
-    # foreign-feeder / overlay comparisons (mp2k.nim on_frame)
     let m = apu.gba.mp2k
     m.real_abs_a += int64(abs(int(raw_dma_a)))
     m.real_abs_b += int64(abs(int(raw_dma_b)))
@@ -352,8 +347,7 @@ proc get_sample*(apu: APU) =
     m.hle_abs_r  += int64(abs(int(hr)))
     inc m.ab_n
     if m.overlay_hold > 0:
-      # Transient foreign overlay (mp2k.nim on_frame): emit the real stream;
-      # the shadow keeps rendering so it resumes seamlessly
+      # Overlay passthrough (on_frame): emit the real stream, keep rendering
       when defined(mp2kwav):
         # The capture reflects what is actually emitted
         if mp2kWavCapture.len >= 2:
@@ -363,9 +357,6 @@ proc get_sample*(apu: APU) =
       raw_dma_a = hl
       raw_dma_b = hr
   elif mp2k_watch:
-    # Latched-foreign but the engine's channels are active: render the
-    # shadow un-emitted and accumulate the same energies for on_frame's
-    # unlatch test
     let m = apu.gba.mp2k
     let (hl, hr) = m.render_sample()
     m.real_abs_a += int64(abs(int(raw_dma_a)))
