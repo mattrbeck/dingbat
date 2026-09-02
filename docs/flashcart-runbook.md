@@ -96,7 +96,7 @@ MGB vs dingbat `--model mgb`: 22 of 26 content pages byte-identical. Mismatches:
 
 | page | hardware | dingbat |
 |---|---|---|
-| P06 SERIAL bytes 00/02/03 | 64/63/46 | 5D/64/40 (`start_wait_*` cluster) |
+| P06 SERIAL bytes 00/02/03 | 64/63/46 | 64/63/46 — matches since the master-edge rewrite; all 8 scored bytes identical on MGB and AGS (decoded 2026-09-01) |
 | P0F UNUSED bytes 1C/1D | 50 | 51 |
 | P15 M1STAT byte 08 / 1B | E0 / E2 (identical on the SP, CRC F5C8) | E3 / E3 |
 | P19 DIVTAPS bytes 08/09 | 88 00 (identical on the SP) | 00 20 |

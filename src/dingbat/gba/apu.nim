@@ -306,8 +306,8 @@ proc get_sample*(apu: APU) =
   let ch2 = if apu.channel_mask[1]: apu.channel2.ch2_get_amplitude() else: 0'i16
   let ch3 = if apu.channel_mask[2]: apu.channel3.ch3_get_amplitude() else: 0'i16
   let ch4 = if apu.channel_mask[3]: apu.channel4.ch4_get_amplitude() else: 0'i16
-  # PSG volume: 0=25%, 1=50%, 2=100% (GBATEK SOUNDCNT_H); the prohibited
-  # value 3 is modelled as silence. Assumed; no ROM pins this.
+  # PSG volume, GBATEK SOUNDCNT_H bits 0-1: "0=25%, 1=50%, 2=100%,
+  # 3=Prohibited". Value 3 is modelled as silence: Assumed (prohibited value).
   let psg_muted = apu.soundcnt_h.sound_volume == 3
   let psg_sound =
     if psg_muted: 0'i16
@@ -381,10 +381,11 @@ proc get_sample*(apu: APU) =
   let dma_left  = dma_a_scaled * int32(apu.soundcnt_h.dma_sound_a_left)  + dma_b_scaled * int32(apu.soundcnt_h.dma_sound_b_left)
   let dma_right = dma_a_scaled * int32(apu.soundcnt_h.dma_sound_a_right) + dma_b_scaled * int32(apu.soundcnt_h.dma_sound_b_right)
   let bias = int32(apu.soundbias.bias_level)
-  # SOUNDBIAS amplitude_resolution selects the DAC depth: 0=9-bit .. 3=6-bit
-  # (GBATEK SOUNDBIAS), honoured by masking the low `res` bits of the biased
-  # 10-bit value (~2 guard bits below nominal, so the truncation is
-  # inaudible). res=0 masks nothing.
+  # SOUNDBIAS bits 14-15 "Amplitude Resolution/Sampling Cycle" (GBATEK):
+  # "0 9bit/32.768kHz, 1 8bit/65.536kHz, 2 7bit/131.072kHz, 3 6bit/262.144kHz".
+  # Modelled by masking the low `res` bits of the biased 10-bit sum (res=0
+  # masks nothing); GBATEK's 9-bit output is that sum halved, so the model
+  # keeps one more bit than the table at each step. Assumed (inaudible).
   let dac_mask = int32(0x3FF) and
                  not int32((1 shl int(apu.soundbias.amplitude_resolution)) - 1)
   # Stop mode halts the system clock, so the DAC produces no fresh output

@@ -23,26 +23,45 @@ proc bios_arctan(cpu: CPU) =
   cpu.r[3] = cast[uint32](r3)
 
 proc div_align_shifts(n, d: uint32): int {.inline.} =
-  ## Iteration count of the BIOS divide's alignment loop (0x3C8): r2 starts
-  ## at |denom| and doubles while r2 < |numer| >> 1; the unwind loop runs one
-  ## more pass, so the input-dependent cost is 13 cycles per shift. Closed
-  ## form hb(n)-hb(d), minus one when d << (s-1) >= n >> 1 stops the loop early.
+  ## Taken-branch count of the BIOS divide's alignment loop (0x3C8): r2
+  ## starts at |denom| and doubles while r2 < |numer| >> 1; the unwind loop
+  ## runs one more pass, so the input-dependent cost is 13 cycles per shift.
+  ## Closed form hb(n)-hb(d), minus one when d << (s-1) >= n >> 1 stops the
+  ## loop early.
   if n shr 1 <= d: return 0
   let s = countLeadingZeroBits(d) - countLeadingZeroBits(n)  # >= 1 here
   if (d shl (s - 1)) >= (n shr 1): s - 1 else: s
 
+proc div_body_cycles(n, d: uint32): int {.inline.} =
+  ## Cycles of the BIOS divide body (0x3B4) for |numer| n, |denom| d, beyond
+  ## the fixed dispatch. 19 + 13 per alignment shift; +8 when the last
+  ## alignment compare lands exactly equal (the loop's `lslls` doubles r2
+  ## once more without branching back, so the unwind runs one extra pass).
+  ## d = 0 exits the alignment loop at once (only reachable for |n| <= 1;
+  ## see hle_div). Measured against the real BIOS with TM0 around the swi:
+  ## Div(2,1) 106, Div(-2^31,-1) 496, Div(2^31,2^30) 483 vs 98/488/475 for
+  ## the neighbouring inputs; 33 more pairs cycle-exact.
+  if d == 0: return 19
+  let t = div_align_shifts(n, d)
+  result = 19 + t * 13
+  if (d shl t) == (n shr 1): result += 8
+
 proc hle_div(cpu: CPU; numer_reg, denom_reg: int) =
   let numer = int64(cast[int32](cpu.r[numer_reg]))
   let denom = int64(cast[int32](cpu.r[denom_reg]))
-  # 19 + 13 per alignment shift: mGBA suite "BIOS Division" timing rows
-  block:
-    let n = uint32(abs(numer) and 0xFFFFFFFF)
-    let d = uint32(abs(denom) and 0xFFFFFFFF)
-    if d != 0:
-      cpu.idle(19 + div_align_shifts(n, d) * 13)
+  # Body cost (div_body_cycles) on top of the dispatch: mGBA suite "BIOS
+  # Division" timing rows plus the real-BIOS TM0 measurements noted there
+  cpu.idle(div_body_cycles(uint32(abs(numer) and 0xFFFFFFFF),
+                           uint32(abs(denom) and 0xFFFFFFFF)))
   if denom == 0:
-    # Div by zero: the BIOS would hang; we return ±1 / numerator / 1 instead
-    # so the game continues. Not hardware behaviour.
+    # Div by zero. The real BIOS's alignment loop (0x3C8: r2 = |denom| = 0
+    # doubles "while r2 < |numer| >> 1") exits at once when |numer| <= 1 and
+    # never when |numer| >= 2. When it exits, the unwind pass with r2 = 0
+    # yields quotient 1 (signed like the numerator), remainder = numerator,
+    # |quotient| = 1 — measured under the real BIOS for numerators 0, 1, -1
+    # (Div and DivArm): r0 = +1/+1/-1, r1 = 0/1/-1, r3 = 1, 98 cycles. For
+    # |numer| >= 2 the real BIOS hangs; the HLE returns the same
+    # (+-1, numerator, 1) so the game keeps running (Assumed).
     cpu.r[0] = if numer < 0: 0xFFFFFFFF'u32 else: 1'u32
     cpu.r[1] = uint32(numer and 0xFFFFFFFF)
     cpu.r[3] = 1'u32
@@ -283,10 +302,8 @@ proc hle_charge_body_interruptible(cpu: CPU; t0: int64; model: int) =
 proc hle_div_body_cost(numer, denom: int32): int {.inline.} =
   ## The divide loop cost from hle_div, separate so ArcTan2 can price its
   ## internal Div.
-  let n = uint32(abs(int64(numer)) and 0xFFFFFFFF)
-  let d = uint32(abs(int64(denom)) and 0xFFFFFFFF)
-  if d == 0: return 19
-  19 + div_align_shifts(n, d) * 13
+  div_body_cycles(uint32(abs(int64(numer)) and 0xFFFFFFFF),
+                  uint32(abs(int64(denom)) and 0xFFFFFFFF))
 
 proc hle_swi*(cpu: CPU; swi_num: uint32) =
   ## HLE BIOS SWI dispatch; used when no BIOS image is provided.
@@ -448,7 +465,9 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     cpu.gba.ppu.render_dirty = true  # Stop blanks the LCD with no memory write
     cpu.gba.interrupts.schedule_interrupt_check()
   of 0x06: hle_div(cpu, 0, 1)  # Div
-  of 0x07: hle_div(cpu, 1, 0)  # DivArm (swapped inputs)
+  of 0x07:  # DivArm: three `mov`s (0x3A8) swapping the inputs, then Div
+    cpu.idle(3)  # real BIOS: +3 cycles over Div on every input measured
+    hle_div(cpu, 1, 0)
   of 0x04:  # IntrWait(discard_flags, intr_flags)
     cpu.hle_intr_wait(cpu.r[0] != 0, uint16(cpu.r[1]))
   of 0x05:  # VBlankIntrWait = IntrWait(1, 1)
@@ -462,12 +481,21 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     # per-loop costs per phase (normalize / quotient-align / divide-step).
     # Pinned by hardware: gbaedge SWIREGION (0x10/0x1000/0x100000/0x40000000
     # -> 0x00CC/0x0118/0x0164/0x01C3), SWITIME (0x7FFFFFFF -> 0x0519) and
-    # the mGBA suite's three timing rows (0, 0xFF, 0x12345678).
+    # the mGBA suite's three timing rows (0, 0xFF, 0x12345678). The loop
+    # structure is the real BIOS routine at 0x404; r0 and the cycle count
+    # matched it on 37 inputs (0..4, 15, 16, 0xFF, 0xFFFF, 0x10000, the
+    # gbaedge points, 0x7FFFFFFF, 0xFFFFFFFF, 20 randoms).
+    # The routine leaves its scratch in the caller-visible registers: r1 =
+    # the rejected average (bound + quotient) >> 1, r3 = the last quotient
+    # (for 0: r1 = 0, r3 = 1, from a second pass with bound 0). r2 is
+    # preserved by the dispatcher. Measured on the same 37 inputs.
     block:
       let x = cpu.r[0]
       if x == 0:
         cpu.idle(48)
         cpu.r[0] = 0
+        cpu.r[1] = 0
+        cpu.r[3] = 1
       else:
         var body = 15
         var upper = x
@@ -497,6 +525,8 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
           let old_bound = bound
           bound = (bound + accum) shr 1
           if bound >= old_bound:
+            cpu.r[1] = bound
+            cpu.r[3] = accum
             bound = old_bound
             break
         cpu.idle(body - 5)

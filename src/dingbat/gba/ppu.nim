@@ -29,9 +29,10 @@ proc new_ppu*(gba: GBA): PPU =
     result.bghofs[i] = BGOFS()
     result.bgvofs[i] = BGOFS()
   for i in 0..1:
-    # PA/PD reset to 1.0 (0x100), the identity transform; Doom relies on it
-    # in mode 4 without writing the affine registers. Assumed; no ROM pins
-    # this.
+    # PA/PD start at 1.0 (0x100), PB/PC at 0: GBATEK lists BG2PA-PD as
+    # write-only with no reset value, and the real BIOS writes exactly this
+    # identity to BG2/BG3 during boot (observed under LLE), so it is what a
+    # game inherits when it never writes the affine registers (Doom, mode 4).
     result.bgaff[i][0] = cast[BGAFF](0x100'u16)
     result.bgaff[i][1] = BGAFF()
     result.bgaff[i][2] = BGAFF()
@@ -400,10 +401,12 @@ type ObjGeometry = tuple[x, y, ow, oh, w, h: int]
 proc obj_geometry(s: Sprite): ObjGeometry {.inline.} =
   ## Screen-space geometry of one OAM entry, shared by the per-line scan and
   ## the candidate-list rebuild so the two cannot drift apart. `x`/`y` are
-  ## the signed top-left corner: OBJ X (9 bits) and Y (8 bits) wrap negative
-  ## past the screen, so a sprite at Y=250 hangs off the top. This differs
-  ## from a true mod-256 wrap only for a 64-tall double-size sprite at Y in
-  ## 129..159; assumed, no ROM pins it. `ow`/`oh` are the texture footprint,
+  ## the signed top-left corner. GBATEK "LCD OBJ - OAM Attributes": X is 9
+  ## bits (0-511), Y 8 bits (0-255), and a 128-tall OBJ "located at Y>128
+  ## will be treated as at Y>-128 ... NOT displayed at the bottom", ie. past
+  ## the screen the coordinate goes negative rather than wrapping mod 256.
+  ## The exact thresholds (X>239, Y>159) are assumed. `ow`/`oh` are the
+  ## texture footprint,
   ## `w`/`h` the drawn one (double for affine double-size, so the candidate
   ## test must use `h`). attr0.9 means double-size only with affine set;
   ## otherwise it disables the sprite. Prohibited shape 3 has no footprint.
@@ -460,9 +463,9 @@ proc render_sprites_impl(ppu: PPU; force_scan: bool) =
   # Per-line OBJ cycle budget: 1210 cycles, or 954 with DISPCNT's H-Blank
   # Interval Free bit (GBATEK "LCD OBJ Overview"). A regular sprite costs
   # `width` cycles, an affine one 10 + 2*width over its drawn footprint; once
-  # the budget is spent, later OAM entries do not render. Model: the sprite
-  # that exhausts the budget still draws fully; hardware likely truncates it
-  # (docs/hwprobe-questions.md row 26, open). The Famicom Mini FDS carts
+  # the budget is spent, later OAM entries do not render. The sprite that
+  # exhausts the budget still draws fully: Assumed; hardware likely truncates
+  # it (docs/hwprobe-questions.md, GBA table). The Famicom Mini FDS carts
   # park full-width masking sprites at the end of OAM that hardware has no
   # time to draw.
   var obj_cycles = if ppu.dispcnt.hblank_interval_free: 954 else: 1210
@@ -542,10 +545,10 @@ proc render_sprites_impl(ppu: PPU; force_scan: bool) =
         # OBJ character fetches wrap within the 32K of OBJ VRAM. Assumed; no
         # ROM pins this.
         if bit(sprite.attr0, 13):  # 8bpp
-          # The attr2 character name counts 32-byte units: in 1D mapping an
-          # odd name starts half a tile in, only 2D mapping clears the low
-          # bit (GBATEK says bit 0 is ignored in 256-colour mode). Assumed;
-          # no ROM pins this.
+          # GBATEK "LCD OBJ - OAM Attributes", OBJ Tile Number: in 256-colour
+          # mode "the lower bit of the tile number should be zero (in
+          # 2-dimensional mapping mode, the bit is completely ignored)", so
+          # only 2D clears it; in 1D an odd name starts half a tile in.
           if not ppu.dispcnt.obj_mapping_1d:
             tile_id = tile_id and not 1
           pal_idx = uint32(ppu.vram[base + ((uint32(tile_id) * 0x20 + uint32(offset) * 0x40 + uint32(tile_y) * 8 + uint32(tile_x)) and 0x7FFF)])

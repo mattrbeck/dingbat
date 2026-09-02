@@ -24,12 +24,13 @@ proc gpio_rumble*(gpio: GPIO): bool =
   (gpio.direction and 0x8'u8) != 0 and (gpio.data and 0x8'u8) != 0
 
 proc gyro_update(gpio: GPIO; pins: uint8) =
-  ## GBATEK: bit 0 high = start/reload conversion, bit 1 = serial clock,
-  ## bit 2 = data out. The ADC shifts the next bit out on the FALLING clock
-  ## edge (the game samples before driving the clock low; shifting on the
-  ## rising edge halves every reading). Assumed; no ROM pins this. Neutral
-  ## 0x6C0, ±0x323 ≈ the hard-rotation extremes; 0x000/0xFFF mean "no
-  ## sensor", hence the clamp to [1, 0xFFE].
+  ## GBATEK "GBA Cart Gyro Sensor": bit 0 = start conversion, bit 1 = serial
+  ## clock, bit 2 = serial data; "4 dummy bits ... followed by 12 data bits".
+  ## Its read loop samples data, drops the clock, then raises it, so it does
+  ## not fix the edge: shifting on the FALLING edge is Assumed (WarioWare
+  ## Twisted plays; rising-edge shifting halves every reading). Neutral 0x6C0,
+  ## ±0x323 ≈ the hard-rotation extremes; 0x000/0xFFF mean "no sensor", hence
+  ## the clamp to [1, 0xFFE].
   if (pins and 1'u8) != 0:
     let v = max(1, min(0xFFE, 0x6C0 + int(gpio.gyro_z * float(0x323))))
     gpio.gyro_sample = uint16(v)

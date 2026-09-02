@@ -1,8 +1,9 @@
 # EEPROM storage implementation (included by gba.nim)
 
-const EEPROM_SETTLE_CYCLES = 115000
-  ## Programming time after a write command (~6.9 ms); the ready poll reads 0
-  ## while settling. GBATEK gives ~6.5 ms; value assumed.
+const EEPROM_SETTLE_CYCLES = 108368
+  ## Programming time after a write, GBATEK "GBA Cart Backup EEPROM": "it'll
+  ## take ca. 108368 clock cycles (ca. 6.5ms) until the old data is erased and
+  ## new data is programmed". The ready poll reads 0 while settling.
 
 proc eeprom_now(ep: EEPROM): CycleCount {.inline.} =
   # Same expression as bus_now (bus.nim is included after this file)
@@ -92,7 +93,8 @@ method `[]`*(ep: EEPROM; address: uint32): uint8 =
       ep.buffer.clear()
       ep.read_bits = 0
     return value
-  # Ready poll: 0 while a previous write is still programming, 1 once settled.
+  # Ready poll (GBATEK: read "until Bit 0 of the returned data becomes 1
+  # (Ready)"): 0 while a previous write is still programming, 1 once settled.
   return if ep.eeprom_now() < ep.busy_until: 0'u8 else: 1'u8
 
 method `[]=`*(ep: EEPROM; address: uint32; value: uint8) =
@@ -132,7 +134,8 @@ method `[]=`*(ep: EEPROM; address: uint32; value: uint8) =
     ep.memory[base] = (cur and not mask) or (uint8(v) shl bit_pos)
     ep.dirty = true
     # Each data bit restarts the programming window: busy for
-    # EEPROM_SETTLE_CYCLES after the LAST bit. Assumed; no ROM pins this.
+    # EEPROM_SETTLE_CYCLES after the LAST bit. Assumed; GBATEK times only the
+    # whole write and no ROM pins where the window starts.
     ep.busy_until = ep.eeprom_now() + EEPROM_SETTLE_CYCLES
     ep.wrote_bits += 1
     if ep.wrote_bits == 64:

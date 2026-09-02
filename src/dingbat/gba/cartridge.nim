@@ -10,10 +10,12 @@ proc new_cartridge*(rom_path: string): Cartridge =
   # only keeps the header in range: a 1.7 KB test ROM must float from 2 KB.
   var alloc = 0x100
   while alloc < sz: alloc = alloc shl 1
-  # 1 MiB carts (Classic NES Series / Famicom Mini) decode 4 MiB: the image is
-  # mirrored 4x, then the address pattern. Classic NES Metroid's anti-emulation
-  # check jumps into the mirrors ("GAME PAK ERROR" without them). Materialised
-  # at load so the read path stays branch-free.
+  # 1 MiB carts (Classic NES Series / Famicom Mini) mirror the image: GBATEK
+  # "GBA Cart Protections" lists "ROM mirrors (instead of the usual increasing
+  # numbers in unused ROM area)" for them, and Classic NES Metroid jumps into
+  # the mirrors ("GAME PAK ERROR" without). 4x in a 4 MiB window, then the
+  # address pattern, is assumed. Materialised at load so the read path stays
+  # branch-free.
   if sz == 0x100000: alloc = 0x400000
   result.rom = newSeq[byte](alloc)
   result.rom_mask = uint32(alloc - 1)

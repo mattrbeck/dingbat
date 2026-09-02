@@ -174,7 +174,10 @@ const DOTS_PER_FRAME* = 70224   # 154 lines x 456 dots
 # Frontend pacing, not hardware: with the LCD off there is no refresh, and a
 # re-enable restarts at line 0 so the next VBlank is 65664 dots away. Push a
 # frame at the enable once this much time has passed since the last present,
-# so a frame-paced frontend does not see a dropped frame on every toggle.
+# so a frame-paced frontend does not see a dropped frame on every toggle. No
+# hardware quantity corresponds to the threshold (nothing is displayed while
+# the LCD is off); any value up to one frame period paces the same, and ten
+# lines is an arbitrary choice. No test ROM scores it.
 const LCD_ON_FRAME_DOTS* = 10 * 456
 
 when defined(gb_dot_counter):
@@ -1566,7 +1569,9 @@ proc ppu_store_lcdc*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
            " mode=", (ppu.lcd_status and 3'u8), " val=", toHex(val, 2)
   ppu.lcd_control = val
   # LCDC.5 turning on is the third event that can make "WY match while
-  # enabled" newly true. Assumed; no ROM pins this.
+  # enabled" newly true. Assumed; no ROM pins this: with the re-check removed
+  # every verdict in the tree (mooneye, AGE, gambatte, mealybug, shootout
+  # frames) is unchanged. Pan Docs states the WY condition per line only.
   if (moved and val and 0x20'u8) != 0 and ppu.ly == ppu.wy and
      (ppu.lcd_status and 3'u8) != 1'u8 and ppu.lcd_enabled:
     ppu.window_trigger_en = true

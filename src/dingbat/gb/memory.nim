@@ -179,8 +179,12 @@ when CGB_WRITE_LATENCY_ANY:
   # M-cycle's dots run in pieces with the store between them. One phase offset
   # cannot do it: gambatte window/late_disable_{0,1,2} and
   # window/late_disable_early_scx03_wx12_* flip in opposite directions between
-  # DMG and CGB. Not in Pan Docs. Every latency ships at 0 (CGB_WX_LATENCY in
-  # gb.nim); CGB_LATENCY_CAP keeps one from filling a 2-dot double-speed M-cycle.
+  # DMG and CGB. Not in Pan Docs. Each value is bracketed on its own by the
+  # rows named at the CGB_*_LATENCY knobs (gb.nim: gambatte window/arg/late_wy_*
+  # for WY, mealybug m3_scy/scx_change _cgb_c for SCY/SCX, gambatte window/*
+  # for LCDC); that they are six independent numbers rather than one delay
+  # per bus is Assumed. CGB_LATENCY_CAP keeps one from filling a 2-dot
+  # double-speed M-cycle.
   proc mem_tick_ppu_latched(mem: GbMemory; gb: GB) {.noinline.} =
     ## This M-cycle's PPU dots with a parked pipeline store landing part way
     ## through them. Cold path.
@@ -707,15 +711,20 @@ const SPEED_SWITCH_FREEZES_OAM_DMA* {.intdefine.} = 1
   ## The OAM DMA unit does not step through a speed-switch stall: it is
   ## clocked by bus cycles and there are none while the CPU clock is off (as
   ## at HALT, OAMDMA_HALT_PAUSE). The timer is a separate domain and keeps
-  ## counting. gambatte oamdma/oamdmasrcC0_speedchange_readC000 and
-  ## dma/hdma_transition_speedchange_oamdma.
+  ## counting. Pinned by gambatte oamdma/oamdmasrcC0_speedchange_readC000
+  ## (exact; 0 reads $00 for $11) and bracketed by
+  ## dma/hdma_transition_speedchange_oamdma (1 lands one byte off at $72 for
+  ## $71, 0 runs the transfer out to $A0).
 const SPEED_SWITCH_OAM_DMA_HANDBACK_T* {.intdefine.} = 4
   ## Bus cycles the unit is still clocked for across the stall: the hand-back
   ## M-cycle, the one OAMDMA_HALT_PAUSE charges at a HALT wake. 4 and 8 each
   ## satisfy one of the two rows above; 4 is the HALT path's value.
 const SPEED_SWITCH_STALL_T* {.intdefine.} = 65548
-  ## The speed-switch stall in T-cycles of the 4.194304 MHz base clock (real
-  ## time). Superseded by SPEED_SWITCH_STALL_CPU when that is nonzero (shipping).
+  ## Dead fallback: the stall in T-cycles of the 4.194304 MHz base clock, used
+  ## only when SPEED_SWITCH_STALL_CPU is 0. Selecting it (any value, 65547 to
+  ## 65549 tried) loses daid speed_switch_timing_{div,ly,stat}, every AGE
+  ## speed-switch row and ~90 gambatte speedchange rows, so nothing pins the
+  ## number itself.
 
 const SPEED_SWITCH_STALL_CPU* {.intdefine.} = 131072
   ## The stall in cycles of the CPU clock at the speed switched TO; nonzero
@@ -723,7 +732,11 @@ const SPEED_SWITCH_STALL_CPU* {.intdefine.} = 131072
   ## +128 TIMA ticks at TAC=$04 across one switch; speedchange2_tima00_* show
   ## the to-single switch costs the same count of a half-rate clock (twice the
   ## real time); speedchange2_*_ly_1 wants the two directions' dots added.
-  ## Pan Docs ("FF4D — KEY1") says 2050 M-cycles; these rows measure 2^17.
+  ## Two-sided to one M-cycle: 2^17-4 loses daid speed_switch_timing_ly, 2^17+4
+  ## loses daid speed_switch_timing_stat, and either side loses AGE
+  ## spsw-{tima,div,mode0,ch2-lc-delay} + lcd-align-ly and ~85 gambatte
+  ## speedchange rows. Pan Docs ("FF4D — KEY1") says 2050 M-cycles; these rows
+  ## measure 2^17.
 
 const SPEED_SWITCH_PPU_EXTRA_DOTS* {.intdefine.} = 12 - 4 * CGB_HALT_PPU_LEAD
   ## Dots the PPU advances across the stall beyond the CPU clock's own count.
@@ -732,7 +745,10 @@ const SPEED_SWITCH_PPU_EXTRA_DOTS* {.intdefine.} = 12 - 4 * CGB_HALT_PPU_LEAD
   ## Those ROMs each HALT once before the STOP, so the 12 is 8 for the switch
   ## plus the halt-exit M-cycle CGB_HALT_PPU_LEAD (gb.nim) owns; the gambatte
   ## speedchange*_ly44_m3* switch-count ladder, which never halts, measures
-  ## 8 alone. Tied to the lead so the two move together.
+  ## 8 alone. Tied to the lead so the two move together. Two-sided to one
+  ## dot: 7 and 9 each lose AGE lcd-align-ly + spsw-mode0 and ~200 gambatte
+  ## rows (speedchange, scy, m2int_m3stat); 7 also loses daid
+  ## speed_switch_timing_ly.
 
 const SS_EXTRA_SINGLE_SAME* = -9999
   ## Sentinel for SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE, outside any legal dot

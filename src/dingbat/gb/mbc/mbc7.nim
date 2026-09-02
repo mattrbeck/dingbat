@@ -13,12 +13,16 @@
 
 # Pan Docs: "centered at the value 81D0", gravity "roughly $70". Kirby
 # integrates the difference from the centre, so an offset makes the ball drift.
+# That a flat, still cart reads exactly the centre is Assumed (no ROM in the
+# tree scores it; a real MBC7 cart on a flashcart-less session would).
 const
   MBC7_ACCEL_CENTER = 0x81D0
   MBC7_ACCEL_SCALE  = 0x70
 
 # 256 bytes as 128 16-bit words (Pan Docs: "data is addressed 16 bits at a
-# time"), held little-endian in `ram`, the interchangeable .sav layout.
+# time"; the 93LC56 datasheet gives the 128 x 16 organisation), held
+# little-endian in `ram`. The byte order is a .sav interchange choice, not a
+# hardware fact: the EEPROM is only ever reached one bit at a time. Assumed.
 proc ee_word(cart: Mbc7; index: int): uint16 =
   uint16(cart.ram[index * 2]) or (uint16(cart.ram[index * 2 + 1]) shl 8)
 

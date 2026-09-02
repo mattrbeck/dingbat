@@ -310,9 +310,22 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     #   0x134: ldr   pc, [r0, #-4]            E510F004
     #   0x138: ldmfd sp!, {r0-r3, r12, lr}    E8BD500F
     #   0x13C: subs  pc, lr, #4               E25EF004
-    # UND vector (same word as the real BIOS at 0x04): the real handler's
-    # non-debug path nets out to the return, so the stub keeps only
-    # subs pc, lr, #4
+    # UND vector (same word as the real BIOS at 0x04: `b 0x1C`). The real
+    # handler at 0x1C, hand-decoded from the BIOS image: ldr sp, =0x03007FF0;
+    # push {r12, lr}; mrs r12, spsr; mrs lr, cpsr; push {r12, lr}; then it
+    # tests the cartridge header's debug flag (ldrb [0x0800009C] == 0xA5,
+    # GBATEK "Cartridge Header" entry 09Ch) and, only if set, calls the
+    # ROM's debug handler at 0x09FE2000 / 0x09FFC000 (header byte 0B4h bit 7
+    # picks one). Otherwise: ldr sp, =0x03007FE0; pop {r12, lr}; msr spsr,
+    # r12; pop {r12, lr}; subs pc, lr, #4. Since lr_und is the undefined
+    # instruction + 4, the return lands on the faulting instruction again
+    # (ARM) or one halfword before it (Thumb) and the exception loops for
+    # ever; the `subs pc` restores CPSR from SPSR either way, so IRQs still
+    # break in at the boundary. Games without the debug flag (all retail
+    # ROMs) observe only that loop. Left out of the stub: the push/pop
+    # scribble at 0x03007FE0-0x03007FEF (between the SVC stack top and the
+    # BIOS variables, written by nothing else) and sp_und, neither of which a
+    # game can see while it hangs — the stub keeps only subs pc, lr, #4.
     write_stub_u32(result.bios, 0x004, 0xEA000004'u32)
     write_stub_u32(result.bios, 0x01C, 0xE25EF004'u32)
     write_stub_u32(result.bios, 0x018, 0xEA000042'u32)
@@ -411,10 +424,14 @@ proc bus_page(address: uint32): int {.inline.} =
 
 # Tilt sensor (0x0E008000-0x0E008500, GBATEK "GBA Cart Tilt Sensor"): write
 # 0x55 to 0x8000 to arm, 0xAA to 0x8100 to latch a 12-bit sample per axis.
-# Reads deliver low byte / high nibble; X's high read carries an ADC-ready
-# flag in bit 7 (always ready here; assumed, no ROM pins this). Everything
-# else in the window reads 0xFF. Centers/range per GBATEK's example
-# calibration.
+# Reads deliver low byte / high nibble. GBATEK's register table:
+#   "E008300h (R) Upper 4 bits of X axis, and Bit7: ADC Status (0=Busy,
+#    1=Ready)"
+# and its sampling procedure begins "wait until [E008300h].Bit7=1 or until
+# timeout". The conversion time is not documented and the ready bit is
+# always set here: Assumed (no cart on the rig). Everything else in the
+# window reads 0xFF. Centres per GBATEK's calibration ("X ranged between
+# 0x2AF to 0x477, center at 0x392", "Y ... 0x2C3 to 0x480, center at 0x3A0").
 
 const
   TILT_X_CENTER = 0x392
@@ -953,9 +970,17 @@ proc read_open_bus_value*(bus: Bus; address: uint32): uint8 =
   let shift = (address and 3) * 8
   # A DMA is the last bus master to have driven the data bus: unmapped reads
   # by the DMA itself, or by the first CPU instruction after the burst,
-  # return the last word it moved (GBATEK "Reading from Unused Memory":
-  # after DMA, recently transferred data; the one-instruction window is
-  # assumed, no ROM pins it).
+  # return the last word it moved. GBATEK "GBA Unpredictable Things",
+  # Reading from Unused Memory: unused memory "returns the recently
+  # pre-fetched opcode", and, of that value, "Theoretically, this might also
+  # change if a DMA transfer occurs" — GBATEK says no more. The mGBA suite
+  # pins the existence of the latch: Misc "DMA Prefetch Read" is the one
+  # row that flips (PASS -> FAIL, 4/12 -> 3/12) when this branch is removed
+  # (measured on the 2026-09-01 audit build); the DMA section's R+0x10
+  # rows and Misc "DMA Prefetch Break" (still red) do not depend on it.
+  # The exact window — the DMA's own reads plus exactly one CPU instruction
+  # after the burst — is Assumed; no ROM pins its length. Hello Kitty
+  # Collection: Miracle Fashion Maker's boot needs at least this much.
   if bus.dma_active or bus.dma_open_bus_armed:
     return uint8(bus.dma_open_bus shr shift)
   let pc = bus.gba.cpu.r[15]

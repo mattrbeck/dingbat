@@ -27,7 +27,7 @@ i.e. against the same bus model.
 | 4 | Where do DMG and CGB sample WY, and why does CGB sample it earlier (the only backwards CGB latency)? `late_wy_*`: 13/14 families expect different values per device | `gb.nim` WY notes ("a negative latency is not expressible here") | **[p17 WYLATCH]** the k-transition per device is the sample dot | photographed MGB + AGS, not decoded |
 | 5 | `HALT_IF_SAMPLE_T`: the halted CPU samples IF at T=2 or T=4 (tree ships 4 on one mooneye row + perf) | `cpu.nim` | **[p16 HALTPHASE]** | as row 2 |
 | 6 | `STAT_READ_SAMPLE` at both speeds: the cc−2 constant and the double-speed "+1" half-dot phase | `gb.nim`, `ppu.nim` STAT read | **[p08 STATSEQ + p13 DSTAT]** | photographed; DSTAT ran for real on the SP; not decoded |
-| 7 | Serial tap DMG=4 / CGB=2, pinned only by the gambatte serial plateau, entangled with the boot DIV seed | `serial.nim` | **[p06 SERIAL]** | **MGB: bytes 00/02/03 read 64/63/46, dingbat 5D/64/40** (`start_wait_*` cluster); AGS bytes 02/05/06 differ from MGB — decode pending |
+| 7 | Serial tap DMG=4 / CGB=2, pinned only by the gambatte serial plateau, entangled with the boot DIV seed | `serial.nim` | **[p06 SERIAL]** | **Closed 2026-09-01:** all 8 scored bytes identical on MGB (64 FF 63 46 0F FF FE 5A) and AGS (64 FF 03 46 0F FD FC 5A); byte 00 pins the half-rate toggle, 02 the CGB fast tap, 03 the DIV-reset interplay |
 | 8 | Boot DIV seeds are sweep-window centres; the SGB seed is a line through two points | `timer.nim` | **[p00 IDENT]** | MGB page matches dingbat; AGS values recorded (DIV $1F, LY $91, STAT $81); SGB/DMG0 unrun |
 | 9 | Boot LCD phases: DMG0's 624 is the midpoint of a 168-dot window; CGB's 161 borrows the DMG sub-M-cycle argument | `ppu.nim` | **[p00/p0A LCDON]** | DMG0 hardware unavailable |
 | 10 | The 2-dot CPU↔PPU grid residual: line 0, line 1 and steady state disagree; `LCD_ON_LINE0_TRIM=2` / `LINE1_TRIM=-2` fit but nothing derives them | `gb.nim`, `fifo_ppu.nim` | **[p0A]** partial; **open**: an H-Blank-IRQ count-at-N-lines-after-enable page | |
@@ -43,7 +43,9 @@ i.e. against the same bus model.
 Other MGB-vs-dingbat deltas from the same session, undecoded: **P0F UNUSED**
 bytes 1C/1D read 50 (dingbat 51); **P19 DIVTAPS** bytes 08/09 read 88 00
 (dingbat 00 20), identical on AGS. Model splits captured on AGS and awaiting
-decode: P02 TIMAGLITCH bytes 10–13 (the CGB TAC-disable family), P0B STATWBUG
+decode: P02 TIMAGLITCH bytes 10–13 (the CGB TAC-disable family — decoded
+2026-09-01: bytes 00–0F identical on MGB and AGS; AGS bytes 11–12, the TAC
+$05→$06 switch glitch, read 02 02 where the model gives 01 01, open), P0B STATWBUG
 (DMG-only glitch absent), P0D OAMDMA, P0F (`$FEA0` echo `AA..FF`), P10
 VRAMLOCK, P13/P14 double-speed pages. AGS IDENT port bytes: SC = $7C, SVBK =
 $F8, RP = $3E, VBK $FE, KEY1 $7E, FF75 $8F, OPRI $FE. **P1 = $CF on that page

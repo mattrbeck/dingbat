@@ -81,7 +81,10 @@ proc serial_prime_history*(serial: GbSerial; gb: GB) =
 
 proc serial_master_edge(serial: GbSerial; gb: GB) =
   ## One falling edge of the divider tap: flips the half-rate master clock,
-  ## and only the flip that takes it LOW shifts (gambatte serial/*).
+  ## and only the flip that takes it LOW shifts. gbedge p06 SERIAL (no-cable
+  ## duration, SC=$83 on both clocks, DIV reset mid-transfer, mid-shift SB/SC)
+  ## matches all eight scored bytes on MGB and on AGS; gambatte serial/* pin
+  ## the phase against the tap.
   when SERIAL_CPU_SAMPLE_T < 4:
     # Snapshot the pre-edge state for a CPU access in this M-cycle: the edge is
     # on its last T-cycle and runs at the top. See SERIAL_CPU_SAMPLE_T (gb.nim).

@@ -61,12 +61,14 @@ proc timer_reload_tima(t: GbTimer; gb: GB) =
 
 proc timer_check_edge(t: GbTimer; gb: GB; on_write = false) =
   ## `on_write`: the edge came from a register write (DIV reset, TAC change).
-  ## A glitch overflow reloads through the same one-M-cycle window as a natural
-  ## one (Pan Docs, "Timer Obscure Behaviour"); a write commits after its
-  ## M-cycle's ticks, so the immediate reload here IS that window. Arming the
-  ## countdown instead fails mooneye acceptance/timer/rapid_toggle. The window's
-  ## interior (TIMA reading $00, TIMA-write-ignore) is not modelled
-  ## (docs/pandocs-audit.md A6).
+  ## The detector itself (DIV-write and TAC-disable glitch increments) matches
+  ## gbedge p02 TIMAGLITCH bytes 00-0F on MGB and AGS. A glitch overflow
+  ## reloads through the same one-M-cycle window as a natural one (Pan Docs,
+  ## "Timer Obscure Behaviour"); a write commits after its M-cycle's ticks, so
+  ## the immediate reload here IS that window. Arming the countdown instead
+  ## fails mooneye acceptance/timer/rapid_toggle (DMG); the CGB side of the
+  ## reload is Assumed. The window's interior (TIMA reading $00,
+  ## TIMA-write-ignore) is not modelled (docs/pandocs-audit.md A6).
   let current_bit = t.enabled and ((t.tdiv and (1'u16 shl t.bit_for_tima)) != 0)
   if t.previous_bit and not current_bit:
     t.tima = t.tima + 1
@@ -178,10 +180,11 @@ const SPEED_SWITCH_DIV_RESET_T* {.intdefine.} = 8
   ## reset goes with the second byte, one M-cycle after the fetch dingbat
   ## charges the opcode as. Only the divider moves: the M-cycle is already
   ## inside the stall, and ticking the whole machine breaks the gambatte
-  ## speedchange ly44_m3* rows. Pinned by gambatte
-  ## speedchange[2]_tima0N_{1a,1b,2a,2b}. The value is relative to the
-  ## TIMER_IRQ_RUN_LEAD anchor and to mem_read's access phase; re-derive
-  ## after either moves.
+  ## speedchange ly44_m3* rows. Pinned to the M-cycle [8, 11]: 7 and 12 each
+  ## lose AGE spsw-tima-cgbBC/-cgbE and 12-14 gambatte
+  ## speedchange[2]_tima0N_{1a,1b,2a,2b} rows; 8 through 11 score alike. The
+  ## value is relative to the TIMER_IRQ_RUN_LEAD anchor and to mem_read's
+  ## access phase; re-derive after either moves.
 
 proc timer_read*(t: GbTimer; idx: int): uint8 =
   when defined(gb_div_read_trace):

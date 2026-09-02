@@ -289,10 +289,11 @@ type
     # Open-bus latch left by DMA: the last word a DMA moved stays on the data
     # bus, so an unmapped read by the DMA itself or by the first CPU
     # instruction after the burst sees that word instead of the CPU prefetch
-    # (GBATEK "GBA Unpredictable Things": after DMA, recently transferred
-    # data). Armed when a burst hands the bus back, cleared at the next
-    # instruction boundary (cpu.tick); the one-instruction window is assumed,
-    # no ROM pins it. Hello Kitty Collection: Miracle Fashion Maker's boot
+    # (GBATEK "GBA Unpredictable Things" only says the value "might also
+    # change if a DMA transfer occurs"). Armed when a burst hands the bus
+    # back, cleared at the next instruction boundary (cpu.tick); the
+    # one-instruction window is assumed. mGBA suite Misc "DMA Prefetch Read"
+    # fails without it. Hello Kitty Collection: Miracle Fashion Maker's boot
     # terminates only when a sound-FIFO DMA's final zero word shows up here.
     dma_open_bus*:       uint32
     dma_open_bus_armed*: bool
