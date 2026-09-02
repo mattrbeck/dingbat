@@ -5,7 +5,7 @@ expectation; each renders its result on screen and to WRAM, and
 `tools/gbprobe/readout.py` / `arbread.py` / `read_probe_e.py` read the
 photograph. This is the table of probe → dingbat prediction → hardware. Rows
 pinned only by comparison with another emulator are kept to one line each and
-listed in the oracle side-file; the hardware column is the evidence.
+listed in [`docs/oracles.md`](oracles.md); the hardware column is the evidence.
 
 ## Summary
 
@@ -29,9 +29,10 @@ at which each column first reads mode 0.
 dingbat: DMG `0A / 09 / 09 / 09` (`LD A,(C)`@3, `LDH`@3, `LD A,(C)`@0,
 `LDH`@0); every CGB revision and AGB `09` in all four. A hardware photo in which
 both columns flip at the same step deletes `STAT_M0_FIELD_TAIL` and
-`STAT_M0_TAIL_MAX_MC` and reopens the ~60 rows they reconcile. Oracle
-comparisons also predict the CGB mode-0 boundary one M-cycle earlier than the
-DMG's (dingbat: same dot) — pinned only by comparison; the photo arbitrates.
+`STAT_M0_TAIL_MAX_MC` and reopens the ~60 rows they reconcile. A CGB mode-0
+boundary one M-cycle earlier than the DMG's is a refuted model in
+`docs/gb-failure-triage.md` (40 device-equal gambatte families; dingbat: same
+dot); the photo is the hardware word on it.
 
 ## (b) SCX mode-3 extension
 
@@ -46,9 +47,9 @@ dingbat (`BASE_M = 16`, store walking dots ~79→107): DMG `4 4 4 4 6 4 4 4 | 4 
 CGB `4 4 4 6 4 4 4 4 | 4 | 4`. Walking `BASE_M` over 8/12/16/20/24 hits the same
 dot from two builds (DMG 95, CGB 91), which checks the sweep measures a dot of
 the line: the extension is one M-cycle wide, worth exactly +2 M = 8 dots, and
-fires only when the store changes the value. That is inside gambatte's CGB
-bracket of 7–10 dots; gambatte's DMG bracket is 11–14 and no emulator
-reproduces it. Open on hardware: the window's position on CGB and whether a
+fires only when the store changes the value. That is inside the gambatte
+ROMs' CGB bracket of 7–10 dots; their DMG bracket is 11–14, which dingbat does
+not reproduce. Open on hardware: the window's position on CGB and whether a
 DMG has one at all.
 
 ## (c) emission vs fetch grid on one frame

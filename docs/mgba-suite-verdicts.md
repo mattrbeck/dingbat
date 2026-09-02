@@ -1,7 +1,7 @@
 # The mGBA suite's failing rows: per-row verdicts
 
-Current state is the Summary in `tests/results_mgba_suite.md` (6990/6998;
-the 8 failures are all in "Misc. edge case"). This file says why each
+Current state is the Summary in `tests/results_mgba_suite.md` (every
+remaining failure is in "Misc. edge case"). This file says why each
 remaining row fails and what would close it, and records the verdicts on
 the rows that were closed so they are not re-derived.
 

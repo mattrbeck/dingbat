@@ -3,8 +3,10 @@
 Probe ROMs for the open GB PPU questions in `docs/gb-failure-triage.md` and
 `docs/hwprobe-questions.md`, plus a harness that runs any GB ROM through dingbat and two
 black-box oracle engines (SameBoy via `sameboy_shot.c`, DocBoy via `docboy_shot.cpp`) and
-reads the answer off the screen. No constant from either oracle is copied into dingbat;
-three engines agreeing justifies a mechanism behind a flag pending a hardware photo.
+reads the answer off the screen. No constant from either engine is copied into dingbat,
+and three engines agreeing is a comparison, not evidence: a mechanism built on it ships
+behind a flag and is listed in [`docs/oracles.md`](../../docs/oracles.md) until a
+hardware photo settles it.
 
 The ROMs are the permanent artifact: they report raw values, contain no expectation,
 render results as hex and store them to WRAM, and carry correct cartridge headers, so the

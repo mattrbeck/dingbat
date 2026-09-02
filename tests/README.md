@@ -183,8 +183,9 @@ its row into the tile map with the LCD on, straddling mode 3. Those writes are r
 (Pan Docs, "Accessing VRAM and OAM"), and which cells are lost depends on the sub-scanline
 phase of the blit — a screen check fails on correct emulation and can be "fixed" by any
 constant that nudges the phase. The runner asserts only `--screen-check`. The gate for
-this class of bug is cross-emulator (`tools/gbfuzz`, `tools/gbgate`,
-`tools/gbppu/blargg_canary.sh`); `SPEED_SWITCH_STALL_T` was pinned by that comparison.
+this class of bug is differential (`tools/gbfuzz`, `tools/gbgate`,
+`tools/gbppu/blargg_canary.sh`); the constant it guards, `SPEED_SWITCH_STALL_T`, is
+ROM-bracketed but not ROM-pinned (`docs/oracles.md`).
 
 Screenshot notes:
 
@@ -211,7 +212,8 @@ they are screen captures carrying an emulator's colour correction — rtc3test's
 everything else stays exact, so a shootout row's percentage is not comparable to a
 mealybug or gambatte row's. Skipped with a stated reason: `acid/which.gb` and
 `daid/rom_and_ram.gb` (no reference; the shootout scores them INFO), `cpp/sgb-ext-test`
-(needs SGB packet coverage the model lacks), and the compat-mode daid rows.
+(no `--sgb` row is built for it; the adapter in `docs/sgb.md` passes it byte-exact outside
+the runner, so the skip is a runner gap, not a model gap), and the compat-mode daid rows.
 
 ### Exit code, baselines, hazards
 
@@ -268,36 +270,11 @@ per-test detail is in `results_gambatte.md`.
 ### Debugging a row
 
 `DINGBAT_GAM_DUMP=<dir>` writes every scored frame as a PPM in the comparison's colour
-space. Build-time traces (`nim c -d:test_harness -d:release --path:src -d:<flag>
--o:dt tests/dingbat_test.nim`), all in `src/dingbat/gb/`:
-
-- `-d:gb_m3_trace -d:GB_TRACE_LY=<n>` — one line per mode-3 dot of line `n`, the LCDC/SCX
-  writes inside it, and the fine-scroll latch dot (mid-scanline families: `bgtiledata`,
-  `bgtilemap`, `scx_during_m3`, `scy`).
-- `-d:gb_m3_len` — per drawn scanline, the inputs Pan Docs' "Mode 3 length" names and the
-  measured duration (OBJ families: `sprites`, mealybug `_sprites`).
-- `-d:gb_stat_read_trace` — `ly`/`cycle_counter` plus latched and live mode at every
-  `$FF41` read, and each STAT interrupt raised. `cycle_counter` is the dot being entered,
-  so a read printed at `cc=85` belongs to the tick covering dots 81..84. The `m2int_*`,
-  `m0int_*`, `lycm2int`, `m2enable` and `halt` families are a STAT interrupt, a NOP run,
-  one STAT/IF read, and a sibling differing by one NOP — `d.find(b'\xf2', 0x1000) - 0x1000`
-  is the NOP count.
-- `-d:gb_irq_trace`, `-d:gb_if_trace`, `-d:gb_halt_trace` — dispatch, `$FF0F` reads, and
-  halt exits (`HALTWAKE`).
-
-`tools/gbppu/` wraps these into per-family instruments (`tools/gbppu/README.md`).
-
-Register writes and the PPU: `mem_write` commits a write's byte at the start of its
-M-cycle. `ppu_write_machinery` in `ppu.nim` carries the three-way split and the ROMs that
-settle each case (pipeline registers move with the write; STAT source enables and `FF55`
-wait for the M-cycle boundary — gambatte `m0enable/disable_*`, `dma/hdma_late_disable_*`;
-LYC and IF move — `ly_lyc_write-GS`, gbmicrotest `vblank_int_if_c`). Re-check those
-families after any change to `mem_write`. `M3_PIPE_DELAY` / `M3_PIPE_MCYCLES`
-(`fifo_ppu.nim`) ship at 0 and should stay there; raising them counts the write's M-cycle
-twice. The STAT constants in `ppu.nim` (`STAT_READ_LAG`, `STAT_IRQ_LEAD`,
-`LCD_ON_HEAD_START`, `CGB_BOOT_PHASE`, `DMG_BOOT_PHASE`) are `intdefine`s with their
-measured grids in the source; re-sweep the boot-phase three whenever the STAT read model
-moves.
+space. The `-d:gb_*` trace builds and the per-family readers that wrap them are catalogued
+in [`tools/gbppu/README.md`](../tools/gbppu/README.md) ("Trace flags"). For the `m2int_*`,
+`m0int_*`, `lycm2int`, `m2enable` and `halt` families — a STAT interrupt, a NOP run, one
+STAT/IF read, and a sibling differing by one NOP — `d.find(b'\xf2', 0x1000) - 0x1000` is
+the NOP count.
 
 A second-emulator scorer exists for this suite: `tools/gbfuzz/sameboy_gambatte` runs a
 gambatte ROM under SameBoy and prints the same decoded hex (`--rom <dmg|cgb> <rom>` or a

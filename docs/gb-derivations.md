@@ -62,8 +62,8 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
 - Evidence: mealybug `m3_bgp_change` (no objects) pins the 2-dot lead;
   `m3_scy_change` reads the 4 + 8 split off directly
   (`docs/gb-mealybug-sources.md` §3.4); GBMicrotest `ppu_spritex_vs_scx`
-  (read back with `tools/gbppu/objtab.py`) was a dot over in 79/153 cells on
-  the old phase.
+  (read back with `tools/gbppu/objtab.py`) is exact in all 153 cells at this
+  phase and a dot over in 79 of them at the next.
 - Cost: the lead is arrangement, not work; the per-dot machinery is
   `when M3_PIPE_DELAY == 0`-guarded. See `docs/gb_oam_dma_cost.md` for how it
   was measured.
@@ -85,21 +85,19 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
 - Evidence: daid `ppu_scanline_bgp.gbc` is exact only with this trio plus
   `--cgb-rev=D` (band-edge pairing shows the trio is worth exactly +4 dots
   and rev D exactly −1); gambatte `m2int_m3stat`, `m2int_m0stat`,
-  `m2int_m2stat` reach 100 % and `window` gains 80 rows. `STAT_M2_LEAD` and
+  `m2int_m2stat` and most of `window` want it. `STAT_M2_LEAD` and
   `LY0_PIPE_MCYCLES` are the compensation that keeps the M2-synced mealybug
   frames still while the pipeline moves; neither moves daid on its own.
 
-### The SCX&3 split in GBMicrotest `hblank_int_scx0..7` is one uniform 2-dot error
-- Ships: `M3_END_EARLY = 0` (`fifo_ppu.nim`) — the instrument, not a fix.
-- Claim: the eight ROMs differ only in SCX, so they sample one uniform offset
-  at eight residues; `c + (SCX&7)` fits all eight at c = 170, not 172. A
-  per-residue table cannot carry more information than that.
-- Open: at `M3_END_EARLY = 2` GBMicrotest gains 20 rows and mooneye
-  `hblank_ly_scx_timing-GS`, wilbertpol `intr_2_mode0_scx{1,2,5,6}_timing_nops`
-  and 150 gambatte rows break: the same residues measured from the other
-  side. The suite's own header is also built against two overhead rows (DMG
-  `0 1 1 1 1 2 2 2`, AGS `0 0 0 1 1 1 1 2`) — see
-  `docs/gb-hardware-revisions.md` §4.
+### `M3_END_EARLY` is an instrument, not a fix
+- Ships: `M3_END_EARLY = 0` (`fifo_ppu.nim`). It moves the mode 3 -> 0 edge
+  uniformly, so a family that differs only in SCX (GBMicrotest
+  `hblank_int_scx0..7`) samples one offset at eight residues through it.
+- Refuted at 2: mooneye `hblank_ly_scx_timing-GS`, wilbertpol
+  `intr_2_mode0_scx{1,2,5,6}_timing_nops` and 150 gambatte rows measure the
+  same residues from the other side (`docs/gb-failure-triage.md`, "Refuted
+  models"). GBMicrotest's own header states two overhead rows for the SCX
+  family — `docs/gb-test-suite-sources.md`, "GBMicrotest".
 
 ### STAT reads the coincidence bit clear in the M-cycle LY advances
 - Site: bit 7 of the `read_mode` latch (`ppu.nim`).
@@ -176,7 +174,7 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
 - The BG fetcher runs during the wait and stops for the object's six dots
   (one address bus). Running it through the object fetch too costs no dots
   but moves every later BG VRAM read on the line; eleven mealybug `m3_*` rows
-  refuse it (`m3_scy_change` 92.6 % → 78.3 %).
+  refuse it, `m3_scy_change` most sharply.
 
 ### Reading a mealybug `m3_*` frame as eighteen measurements
 - `m3_scy_change`'s OAM table is Y = 16 + 8k, X = k, so each 8-line band is one
@@ -199,8 +197,8 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
 - SCY/SCX 2: Pan Docs, "Scrolling" → "Mid-frame behavior" gives the CGB a
   2-T-cycle SCY delay; mealybug `m3_scy_change*`, `m3_scx_high_5_bits*`
   (`_cgb_c`) and gambatte `enable_display/ly0_late_scx7_m3stat_scx0_274` pin
-  it once the object-fetch phase (§3) is right. Before that fix the same rows
-  measured 1, which was the fetch phase being absorbed.
+  it, given the object-fetch phase of §3 (with that phase wrong the same rows
+  read 1: the fetch phase absorbs a dot of latency).
 - WY 4: gambatte `window/arg/late_wy_*` expect the CGB step one M-cycle
   earlier than DMG in 13 of 14 families; the sweep saturates from 3 up.
 - WX 0: no instrument in the tree moves.
@@ -342,8 +340,8 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
   `--screen-check` asserts only that it settles and is not flat). The 12-dot
   extra and its 8/3 split are the `ly44_m3` switch-count ladder (five rungs,
   two unknowns; all 55 rows green at (8, 3), 20 lost at B = 4, 14 at B = 2).
-  The 2^16 + 4 seed was first taken by comparison; the gambatte rows pin the
-  region.
+  The gambatte rows pin the region; the exact 2^16 + 4 within it is not
+  ROM-pinned (`docs/oracles.md`, `SPEED_SWITCH_STALL_T`).
 - Open: the `lcd_offset` family wants A + B ≡ 0 (mod 4) where the ladder says
   11, and contradicts itself at that resolution (`offset1_lyc99int_m0stat_*`
   vs `_m0irq_*`): the known one-dot-early mode-0 STAT raise seen from inside
@@ -449,24 +447,10 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
 
 ## 10. Instruments
 
-All compiled out or off by default.
-
-- `-d:gb_m3_trace -d:GB_TRACE_LY=n` (−1 = every line): per-dot mode-3 trace
-  with register writes and the object trigger's penalty terms.
-- `-d:gb_win_trace`: window start/re-trigger dots and the `WYLATCH` level;
-  `tools/gbppu/windot.py` prints the dot each ROM's write lands on next to
-  the filename's expected value.
-- `-d:gb_stat_read_trace`: STAT read dots for the `m2int_*` families.
-- `DINGBAT_GAM_DUMP=<dir>`: gambatte frames as PPM in the comparison's colour
-  space (the staircase method for `bgtiledata`/`bgtilemap`).
-- `tools/gbppu/objtab.py`: reads all 153 cells of GBMicrotest
-  `ppu_spritex_vs_scx` back as dots (the ROM never writes $FF82, so the runner
-  cannot score it).
-- `tools/gbppu/cgbsweep.sh`, `famflip.py`, `reactsweep.sh`, `counters.sh`:
-  knob sweeps against a baseline row file, per-family flip points with both
-  devices side by side, the `WIN_REACT_PHASE` re-pin, and the retired-
-  instruction A/B (rules in `docs/gb_oam_dma_cost.md`).
-- Two concurrent runner passes must not share `TMPDIR`: `run_sharded_batch`
-  removes `getTempDir()/dingbat-gambatte` on entry, and the loser reports
-  every gambatte row as "no verdict". Each world also needs its own
-  directory holding both `dingbat_test` and `dingbat_test_runner`.
+The trace builds (`-d:gb_m3_trace`, `gb_win_trace`, `gb_stat_read_trace`, …),
+`DINGBAT_GAM_DUMP`, the readers (`objtab.py`, `famflip.py`, `windot.py`) and
+the sweep scripts are catalogued in
+[`tools/gbppu/README.md`](../tools/gbppu/README.md); runner hazards (shared
+`TMPDIR`, one binary pair per world) in [`tests/README.md`](../tests/README.md),
+"Exit code, baselines, hazards"; the retired-instruction A/B rules in
+`docs/gb_oam_dma_cost.md`.

@@ -1,7 +1,6 @@
 # SameSuite APU: what its sources assert, and how the GB APU models it
 
-Status: SameSuite APU 70/70, blargg dmg_sound 12/12, cgb_sound 12/12 (`tests/results.md`).
-Rows whose filename names a revision (`-cgb0B`, `-cgbDE`, `-A`, …) are scored on that
+Scores: `tests/results.md`. Rows whose filename names a revision (`-cgb0B`, `-cgbDE`, `-A`, …) are scored on that
 revision via `--model`; the rest on CGB E, the revision the suite's README says passes
 everything (`tests/README.md`, device axis; `docs/gb-hardware-revisions.md`).
 
@@ -72,7 +71,7 @@ every test here.
 | `channel_1_stop_restart` | stopping keeps the phase; only NR52 off resets it | `ch1_catchup_at` parks `next_step` while disabled |
 | `channel_1_volume_div` | envelope ticks after 8 × (NR12 & 7) DIV-APU ticks | matches |
 | `channel_1_nrx2_speed_change` | envelope speed changes apply after the next tick; enabling the envelope triggers an extra envelope tick on the next **even** DIV-APU tick | `env_extra_tick`. Hardware's "even" is dingbat's odd `frame_sequencer_stage` (the counter increments before the step); the other parity passes tests 3/4/5 and fails 6/7 |
-| `channel_1_nrx2_glitch`, `channel_1_volume`, `channel_1_restart_nrx2_glitch` | the NRx2 write ("zombie mode") glitch | the three-column table below |
+| `channel_1_nrx2_glitch`, `channel_1_volume`, `channel_1_restart_nrx2_glitch` | the NRx2 write ("zombie mode") glitch | one three-column table keyed on the value written, at `write_NRx2`; the table and its derivation are in `docs/gb-hardware-revisions.md` §4 |
 | `channel_1_stop_div` | like channel 3 with a smaller length range | follows from the DIV-APU work |
 | `channel_1_sweep`, `_sweep_restart`, `_sweep_restart_2` | sweep overflow timing, restarts during sweep | below |
 | `channel_1_extra_length_clocking-cgb0B` | on CGB ≤ B the extra length clock needs only a previously-disabled counter; fixed on CGB C | `GbQuirks.length_clock_any_nrx4`, on `--model=cgb0B` only |
@@ -111,22 +110,6 @@ exists), and onto the sweep unit, which writes the same register pair from the o
 outside `ch1_write`: `channel_1_sweep_restart` round 1 runs at `$7ff` (one M-cycle per
 step) so its sweep tick always lands on a reload, and without the rule every step after
 it sits one M-cycle early. `ch1_reload_is_now` is the discriminator.
-
-**Zombie mode.** The Pan Docs rule (+1 when the old period was 0 and the envelope still
-updating, else +2 when the old direction was decrease) is one column of a three-column
-table selected by the value being **written**. Solved from `channel_1_volume`'s 128-byte
-table and cross-checked on `channel_1_nrx2_glitch` (write 1024 M-cycles after trigger,
-old periods 2 and 7):
-
-|  | new dec, per 0 | new dec, per ≠ 0 | new inc |
-|---|---|---|---|
-| old per 0, dec | 0 | −1 | +1 |
-| old per ≠ 0, dec | 0 | 0 | +2 |
-| old per 0, inc | 0 | +1 | +1 |
-| old per ≠ 0, inc | 0 | 0 | 0 |
-
-The table is at `write_NRx2`. It is not revision-dependent on CGB E, which is what the
-suite's README documents.
 
 ### Channel 3
 

@@ -123,12 +123,12 @@ pins; channel 4 is not pinned by any ROM in the tree.
 `revision`, `quirks` and `GbMemory.unusable` are not serialized; `boot_model`
 never was (all are construction-time properties of the machine a state is
 loaded into). A state saved on `--model=cgb0` and loaded by a default process
-runs on a CGB C, silently, and since 2026-08 that costs a pixel (the palette
-dot) and 96 bytes of `$FEA0–$FEFF`. Reachable today only from the test
+runs on a CGB C, silently, which costs a pixel (the palette dot) and 96 bytes
+of `$FEA0–$FEFF`. Reachable today only from the test
 harness, which does not save states. The fix is one byte, `revision`, next to
 `cgb_enabled` in `GB_SEC_MEM`, older states reading back the default, going
 through `gb_set_revision` on load; it rides the batched GB payload bump listed
-in `notes/samesuite-apu.md` "Unserialized state".
+in `docs/samesuite-apu.md` "Unserialized state".
 
 ## 4. What a revision does not fix
 
@@ -156,15 +156,10 @@ in `notes/samesuite-apu.md` "Unserialized state".
   `m3_lcdc_win_en_change_multiple_wx`, the only two) differ from `_dmg_blob`
   by 228 px and 3 px; dingbat's error on the same rows is 2193 px and
   4215 px. Not a revision problem.
-- **GBMicrotest's SCX family** is assembled against two overhead rows in its
-  own header (`tests/500-scx-timing.s`: DMG `0 1 1 1 1 2 2 2`, AGS
-  `0 0 0 1 1 1 1 2`) while every ROM is built `-DDMG`: `int_hblank_incs_scx*`
-  and `int_hblank_nops_scx*` follow the DMG row (8/8 each),
-  `int_hblank_halt_scx*` and `hblank_int_scx*` (and their `_if_d`/`_nops_*`
-  siblings, 20 rows) follow the AGS row. Passing them means running half the
-  suite as an AGS on ROMs that declare DMG — per-ROM fitting. Do not spend.
-  (`hblank_int_scx*_if_b`, red at all eight SCX values, is a separate
-  defect.)
+- **GBMicrotest's SCX family** carries two overhead rows (DMG and AGS) in
+  its own header while every ROM is built `-DDMG`; the split is not a
+  revision axis but the halt-woken versus running reader of one edge —
+  `docs/gb-test-suite-sources.md`, "GBMicrotest".
 - **`channel_1_freq_change_timing-A` and `-cgbDE`** share one expected table;
   both are red on the default, so that is a default-machine bug, ahead of
   any revision work.

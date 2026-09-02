@@ -6,7 +6,7 @@ Dated work logs live in git history. This is where each subsystem stands.
 
 | Subsystem | State |
 |---|---|
-| CPU (ARM/THUMB) | Complete; jsmolka gba-tests 13/13, FuzzARM 5/5, armwrestler |
+| CPU (ARM/THUMB) | Complete; jsmolka gba-tests, FuzzARM, armwrestler (`tests/results.md`) |
 | Bus | Cycle-counted waitstates, prefetch, open bus; mGBA suite tallies in `tests/results_mgba_suite.md` |
 | PPU | Modes 0–5, sprites, windows, blending, mosaic; compositing per window span |
 | APU | PSG 1–4 lazily caught up in closed form (observation points listed above `apu_catchup_all` in `gba/apu.nim`); Direct Sound FIFO with true-phase cubic reconstruction (`fifo_interp`), bit-true DAC mode available |
@@ -24,7 +24,7 @@ Dated work logs live in git history. This is where each subsystem stands.
 |---|---|
 | CPU | SM83, all 512 opcodes |
 | PPU | Scanline and FIFO renderers; CGB palettes, HDMA, compat mode, SGB; revision axis (`docs/gb-hardware-revisions.md`) |
-| APU | Channels 1–4 with closed-form lazy catch-up; DC-blocked output; SameSuite APU 70/70, blargg dmg_sound 12/12, cgb_sound 12/12 (`notes/samesuite-apu.md`) |
+| APU | Channels 1–4 with closed-form lazy catch-up; DC-blocked output; SameSuite APU and blargg sound suites (`docs/samesuite-apu.md`) |
 | Timer / serial / joypad | Complete; closed-form TIMA between events |
 | MBC | ROM, MBC1/1M, MBC2, MBC3+RTC, MBC5+rumble, MBC6, MBC7, MMM01, HuC1, HuC3, TAMA5, Camera; flat-ROM window devirtualised (`-d:mbc_map_check` verifies) |
 | Link | In-process, printer, online via rollback |

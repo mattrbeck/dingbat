@@ -62,7 +62,7 @@ needs hardware first.
 - **Plain-access OAM corruption** — a ROM sweeping plain reads/writes and
   `$FEA0-$FEFF` in mode 2; blargg `oam_bug` is green either way.
 - **Window glitch insert/replace + arming**; **OAM-DMA vs mode-2 scan lock** —
-  hwprobe rows 19 and 18.
+  hwprobe rows 18 and 17.
 
 ## 3. Deferred implementation work
 

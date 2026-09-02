@@ -35,7 +35,7 @@ read before trusting any per-revision conclusion from the -04 board), 1A
 SWEEP (GBC page vs GBA page).
 
 **2. windesync** — nitro2k01's window-glitch ROM (SameBoy issue #278; D-pad
-menu, hold A + direction). Run on GBP and GBC (hwprobe row 19): (1) arming —
+menu, hold A + direction). Run on GBP and GBC (hwprobe row 18): (1) arming —
 window never enabled, WX=$07/WY=$00 over the pattern: any glitch column? then
 enable-once-and-disable via the LYC toggles; (2) insert vs replace — with the
 glitch over `%01000111`, does everything right of it shift one pixel?
@@ -46,7 +46,7 @@ Docs' CGB note: clearing LCDC.5 resets the frame's Y condition — if true the
 lower toggled bands differ from the DMG reference).
 
 **3. strikethrough.gb** — GBC and GBP. Whole frame, then close-up of **LY 68,
-x 71..78** (OAM entry 39; hwprobe row 18).
+x 71..78** (OAM entry 39; hwprobe row 17).
 
 **4. rapid_toggle.gb** — mooneye, prints its verdict. GBP and GBC; with gbedge
 p02 this pins the CGB TAC-disable tick. A CGB "fail" screen is data —
@@ -130,10 +130,33 @@ panel; the fix is four white corner tiles in the ROM and a re-shoot.
 
 ### g1, GBA SP (`flashcart-kit/9-halt-lead/IMG_g1_scx0.jpg`, `IMG_g1_scx4.jpg`)
 
-SCX 0: `24 32 32 40 40 48 48 56 56 64 64 71 71 79`; SCX 4:
-`20 28 28 36 36 45 45 53 53 61 61 69 69 77`. dingbat is 8 px (2 M) out with
-`CGB_HALT_PPU_LEAD=0` and 16 px (4 M) with it on. Analysis in
-docs/hwprobe-questions.md, g1.
+Read with `tools/gbprobe/read_g1.sh`. SCX 0: `24 32 32 40 40 48 48 56 56 64
+64 71 71 79`; SCX 4: `20 28 28 36 36 45 45 53 53 61 61 69 69 77` (trailing
++1s are perspective drift). dingbat predicts `32 40 40 48 …` / `28 36 …` at
+lead 0 and `40 40 48 …` / `36 36 …` at lead 1: 8 px (2 M) out with
+`CGB_HALT_PPU_LEAD=0` and 16 px (4 M) with it on, so the long-standing 2–3 M
+offset of probe (e) is a dingbat defect. It does not unship the lead:
+`cgb-acid-hell`'s reference is hardware-correct on the same console
+(IMG_3803) and daid's is a silicon capture; both are exact only with the
+lead, and an instrument 2 M wrong cannot arbitrate a 1 M answer.
+
+What is known about the 2 M (`tools/gbprobe/probe_f_base.sh --plain`, target
+BASE 26, dingbat 24 at lead 0):
+
+- Not the halt: `-DANCHOR_POLL` (reach the anchor by polling `rLY`, no `halt`)
+  is still 3 M out.
+- Not `CGB_TDSEL_LATENCY` (1→24, 5→23, 9→22, 13→22) nor `CGB_PIPE_MCYCLES`
+  (1→24, 2→23; 0 gives no common BASE across SCX). Both move BASE down as they
+  grow; the fix must retard the PPU against the CPU.
+- Machine axis: DMG BASE 27 (1 M early), CGB compat 24, CGB native 24 (2 M
+  late) — a DMG/CGB split, not native/compat.
+- Not the VBlank header drawing (`-DNOHEADER` unchanged).
+- Hypothesis: daid's ruler is BGP (emission) and is exact on the same machine;
+  probe (e)'s is LCDC.4 (the fetch grid). A 2 M separation between emission and
+  the fetch grid is the axis `docs/gb-failure-triage.md` names. Probe (c) puts
+  both rulers on one frame; its SP photos (IMG_3804–3806) cannot be registered
+  because the ROM draws on black — add four white corner tiles (no timing
+  change) and re-shoot.
 
 ### wramscan, GBA SP
 

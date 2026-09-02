@@ -7,6 +7,24 @@ Assumes `nimble test_build` from the repo root and a populated `$DINGBAT_ROM_CAC
 (default `/tmp/dingbat-test-roms`). Trace builds below are
 `nim c -d:test_harness -d:release --path:src -d:<flag> -o:<bin> tests/dingbat_test.nim`.
 
+## Trace flags
+
+The one list. Each is a `-d:` define on a `tests/dingbat_test.nim` build, compiled out
+otherwise; the sites are in `src/dingbat/gb/`.
+
+| define | prints |
+|---|---|
+| `gb_m3_trace` (+ `GB_TRACE_LY=<n>`, −1 = every line) | one line per mode-3 dot of line `n`: fetcher position, the LCDC/SCX/SCY writes inside it, the fine-scroll latch dot, the object trigger's penalty terms, `WINHIT` |
+| `gb_px_trace` | pipeline events: `FTILE`, `FDATA` (with every candidate byte), `PUSH`, `SPR`, `PX` |
+| `gb_m3_len` | per drawn scanline: SCX, WX/WY, LCDC, the OBJ X list, the measured mode-3 length (`M3IN`/`M3LEN`) |
+| `gb_win_trace` | WY/WX/LCDC writes with line and dot, `WINSTART`, `WYLATCH`, each mode-3 end |
+| `gb_stat_read_trace` | `ly`/`cycle_counter` plus latched and live mode at every `$FF41` read, and each STAT interrupt raised (`cycle_counter` is the dot being entered: `cc=85` belongs to the tick covering dots 81..84) |
+| `gb_stat_src_trace` | the source named on every rising edge of the STAT line |
+| `gb_irq_trace`, `gb_if_trace`, `gb_halt_trace` | dispatch; `IFREAD` per `$FF0F` read with dot and byte; `HALTWAKE` at every halt exit |
+| `gb_dma_trace` | FF55 writes, `HDMABLOCK`, `MODE`, `REGREAD` per dot; the VRAM/OAM lock decisions |
+| `gb_lcdc2_trace`, `gb_lyread_probe`, `gb_ly153_probe`, `gb_div_read_trace`, `gb_serial_trace`, `gb_oam_trace`, `gb_ss_trace`, `gb_phase_trace` | LCDC.2 reads; `$FF44` reads; the line-153 snapback; DIV reads; serial shifts; OAM scan; speed switch; CPU/PPU phase |
+| `DINGBAT_GAM_DUMP=<dir>` (env, no rebuild) | every scored gambatte frame as a PPM in the comparison's colour space |
+
 ## Scoring gambatte
 
     tools/gbppu/gamscore.sh sprites              # one or more subdirectories; rows in /tmp/gamout.txt
@@ -114,9 +132,9 @@ wake lands (`M0_HALT_BLIND_DOTS` / `CGB_M0_HALT_BLIND_DOTS` in `ppu.nim`).
 `HALTWAKE` lines: LY, dot, mode, `IF`, `IME` at every halt exit — the one thing
 `gb_irq_trace` (dispatch) cannot show for the `IME = 0` members of gambatte's `halt/`
 families. It also identifies ROMs anchored to a single halt: `strikethrough` takes one
-wake a frame at LY 67, daid's `speed_switch_timing_{ly,stat}` one each at LY 144.
-`CGB_HALT_PPU_LEAD` (`gb/gb.nim`) and `SPEED_SWITCH_STALL_T` (`gb/memory.nim`) were
-measured with it.
+wake a frame at LY 67, daid's `speed_switch_timing_{ly,stat}` one each at LY 144. It is
+the instrument for `CGB_HALT_PPU_LEAD` (`gb/gb.nim`) and `SPEED_SWITCH_STALL_T`
+(`gb/memory.nim`).
 
     tools/gbppu/daidswitch.sh [<dingbat_test>]
 
@@ -139,8 +157,8 @@ prints every WY/WX/LCDC write with its line and dot, each `WINSTART`, each per-f
 per device. If the write dot and the window-start dot match on both devices, whatever
 decides the row is not in this file (`late_wy_FFto2_ly2_3` diverges a frame earlier, in
 the ROM's vblank wait). A gambatte window family is one write moved one M-cycle at a time,
-so the dot turns the family into an equation for the sampling dot — that is how
-`83 + WX + (SCX and 7)` fell out of `late_wy_*`. `reactsweep.sh` re-pins
+so the dot turns the family into an equation for the sampling dot (`late_wy_*` solves to
+`83 + WX + (SCX and 7)`, `docs/gb-derivations.md` §2). `reactsweep.sh` re-pins
 `WIN_REACT_PHASE` against the mealybug rows that see the window's re-trigger edge; re-run
 it whenever the shifter's window rules or the fetcher's phase move, because the fetcher
 parks on `fsPushPixel` and a phase is not portable between two points in the dot. `WINHIT`
@@ -151,8 +169,8 @@ position and FIFO depth.
 
 `-d:gb_stat_read_trace` (STAT source rose), `-d:gb_irq_trace` (CPU vectored),
 `-d:gb_if_trace` (`IFREAD` per `$FF0F` read, with dot and byte) turn a gambatte `_ifw` /
-`_late_retrigger` / `lcdirq_precedence` row into three dots on one line. That is how
-`IRQ_SAMPLE_T` (`gb/cpu.nim`) was bracketed. For the `*_m3stat_{1,2}` pairs (one NOP
+`_late_retrigger` / `lcdirq_precedence` row into three dots on one line — the instrument
+for `IRQ_SAMPLE_T` (`gb/cpu.nim`). For the `*_m3stat_{1,2}` pairs (one NOP
 apart), pair `-d:gb_m3_len` with `-d:gb_stat_read_trace` to get the read's
 `cycle_counter` beside the line's mode-3 length, independent of how STAT reports it.
 
@@ -218,10 +236,8 @@ overwrites the body, re-checksums, and runs it through dingbat and
 question (which otherwise reports only in `$FF80`). The harnesses reproduce GBMicrotest's
 own hardware staircases (`int_hblank_nops_scx0..7`, `hblank_int_scx0..7`). The steady-state
 and LCD-on-line measurements both re-anchor on the ROM's own `LDH ($40),A`, so the
-second emulator's boot-ROM phase offset cancels. Finding recorded with these: dingbat's
-mode-0 edge is 2 dots late on lines after the first post-LCD-on line when running, and
-2 dots early on the first line when halted, two errors that cancel in the halted steady
-state (`M0_HALT_BLIND_DOTS` in `ppu.nim`).
+second emulator's boot-ROM phase offset cancels. What they currently say about the
+mode-0 edge is recorded in `docs/gb-failure-triage.md` (A5).
 
 ## wilbertpol `acceptance/gpu` ROMs as measurements
 
@@ -246,8 +262,9 @@ can only find a mismatch it already models.
     tools/gbppu/counters.sh /tmp/gb_ab <rom.gb>                   # retired instructions over a tools/gbgate pair
     tools/gbppu/blargg_canary.sh [<dingbat_test>] [<sameboy_runner>] [<bootdir>]
 
-`sm83dis.py` is how `lcd_offset`'s `offsetN` numbering was read (`offset1` = 2 switches,
-`offset2` = 4, `offset3` = 2 plus a NOP). `counters.sh` wraps `DINGBAT_BENCH_COUNTERS=1`
+`sm83dis.py` disassembles enough of a test ROM's body to read its preamble (`lcd_offset`'s
+`offsetN`: `offset1` = 2 speed switches, `offset2` = 4, `offset3` = 2 plus a NOP).
+`counters.sh` wraps `DINGBAT_BENCH_COUNTERS=1`
 around both slots of a `tools/gbgate` build; `docs/gb_oam_dma_cost.md` is the authority
 (fps cannot resolve this path; `cycles=` must match between arms; check the build's exit
 code, since a failed `nim c` leaves the previous binary in place). One extra branch in

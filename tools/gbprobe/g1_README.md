@@ -3,7 +3,8 @@
 Two ROMs, two photographs. They arbitrate `CGB_HALT_PPU_LEAD` (`gb/gb.nim`): the CGB's
 PPU running an M-cycle ahead of the CPU after a STAT/LYC halt wake, except on the LY
 153→0 snapback. `cgb-acid-hell` and daid's `ppu_scanline_bgp` agree with it; probe (e),
-this ROM, does not, and carries an unexplained 2–3 M offset against the oracle.
+this ROM, does not, and carries a 2 M offset against hardware (`docs/flashcart-runbook.md`,
+"g1, GBA SP").
 
 ## What to do
 
@@ -18,10 +19,10 @@ The picture is a staircase of vertical bars; what matters is each bar's x column
 read relative to the header glyphs in the same frame, so a hand-held shot is fine. Three
 candidates, 8 pixels apart (`predicted-*.png` in this folder at 3x):
 
-| SCX | `CGB_HALT_PPU_LEAD=0` | `=1` (ships) | oracle prediction |
+| SCX | `CGB_HALT_PPU_LEAD=0` | `=1` (ships) | hardware (GBA SP) |
 |---|---|---|---|
 | 0 | `32 40 40 48 48 56 ...` | `40 40 48 48 56 56 ...` | `24 32 32 40 40 48 ...` |
-| 4 | `28 36 36 44 44 52 ...` | `36 36 44 44 52 52 ...` | `20 28 28 36 36 44 ...` |
+| 4 | `28 36 36 44 44 52 ...` | `36 36 44 44 52 52 ...` | `20 28 28 36 36 45 ...` |
 
 - reads 24 / 20 — both dingbat builds are wrong on this probe; chase probe (e)'s baseline.
 - reads 32 / 28 — lead 0 is right; revert the constant and take `cgb-acid-hell` back to 2 px.

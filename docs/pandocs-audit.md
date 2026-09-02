@@ -7,7 +7,7 @@ docs/pandocs-upstream.md §1; items that need hardware are its §2. Rows that
 were fixed to agree with Pan Docs are not listed — git history has them.
 
 Excluded: the Star Trek window insertion glitch (docs/hwprobe-questions.md
-row 19), Pan Docs sections marked TODO, SM83 instruction pages (blargg green),
+row 18), Pan Docs sections marked TODO, SM83 instruction pages (blargg green),
 analog-only matters.
 
 ## A — Pan Docs may be right; dingbat differs and nothing pins it
@@ -59,7 +59,7 @@ Each of these is a candidate Pan Docs correction (docs/pandocs-upstream.md).
 | Interrupts: IF bit cleared at dispatch step 1 | IF clears at the end of dispatch (T ∈ (15,19]) | gambatte `*_late_retrigger` families. Dispatch M-cycle order (pushes first vs waits first) is suite-undecidable — Pan Docs' SonoSooS order is plausible; hardware-able |
 | MBC3: latch on `$00` then `$01` | any write to `$6000-$7FFF` latches | CasualPokePlayer `latch-rtc-test` capture: 51/51 reports under "any write", 28/51 under the bit-0 edge |
 | CGB_Registers HDMA5: early-termination readback = remaining blocks − 1 | the terminating write's own low 7 bits land in the register | SameSuite `dma/hdma_lcd_off` |
-| OAM_DMA_Transfer: the PPU reads $FF during OAM DMA | the PPU reads the DMA unit's bus byte | `strikethrough.gb` pixel-exact (the mode-2 scan lock is hwprobe row 18) |
+| OAM_DMA_Transfer: the PPU reads $FF during OAM DMA | the PPU reads the DMA unit's bus byte | `strikethrough.gb` pixel-exact (the mode-2 scan lock is hwprobe row 17) |
 | STAT: the DMG STAT-write glitch fires in "OAM scan" | mode 2 excluded (only the hblank→mode-2 edge) | GBMicrotest `stat_write_glitch_l0_c/l1_d/l154_c`; −11 gambatte rows to put it back |
 | OAM: writes blocked throughout mode 2 | admitted in mode 2's last M-cycle | mooneye `lcdon_write_timing-GS`, GBMicrotest `oam_write_l1_c` |
 | pixel_fifo.md: X=0 object penalty depends on SCX (Rendering.md says flat 11) | flat 11 dots | GBMicrotest `ppu_spritex_vs_scx` (153/153 cells) |

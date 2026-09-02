@@ -12,74 +12,24 @@ comment carries the derivation; `[dmg]`/`[cgb]` is the device a gambatte row
 is scored on; `_ds_` is double speed; `@cgbc` etc. is the revision arm of a
 row whose ROM names several machines.
 
-## Scoreboard
+## Where the numbers and the instruments live
 
-| suite | pass | of | open buckets |
-|---|---|---|---|
-| Blargg (+ dmg_sound, cgb_sound) | 52 | 52 | — |
-| Mooneye | 152 | 152 | — |
-| Mooneye (wilbertpol) | 178 | 180 | G |
-| Acid2, MagenTests, Screenshot suites, Shootout ROMs | 35 | 35 | — |
-| Mealybug Tearoom | 74 | 74 | — |
-| GBMicrotest | 480 | 480 | — |
-| SameSuite, SameSuite APU | 78 | 78 | — |
-| AGE | 57 | 89 | A1, B1, C2, C8, E1 |
-| gambatte (rows) | 4619 | 4996 | everything below |
-
-The gbdev shootout scores 261/261 (`tests/README.md`, "The gbdev shootout's
-own ROMs"). It runs CGB-E; the local runner's default CGB is CGB-C, and both
-are at their measured maximum — see "The device axis" in `tests/README.md`.
-
-## Rows that are deliberately not scored
-
-The runner's `NotScored` list (`tests/dingbat_test_runner.nim`) is the
-ledger and is printed at the bottom of `tests/results.md`. The GB entries:
-
-* GBMicrotest: 31 ROMs that never write the `$FF82` verdict byte, and two
-  whose expected byte is unreachable (`halt_op_dupe_delay`,
-  `stat_write_glitch_l154_d`; `docs/gb-test-suite-sources.md` §8.6, §8.6b).
-  Denominator 480.
-* gambatte: the 220 `_outaudio*` rows, the AGB column, and nine
-  `oamdma_src{FE00,FF00}_*read*` DMG rows whose verdict is uninitialised WRAM.
-* wilbertpol: `acceptance/gpu/ly_lyc{,_0,_144,_153}-C@cgbc` — see G.
-* AGE `ncm*` (CGB in non-CGB mode), mooneye `ags` arms (fold into `agb`),
-  `daid/ppu_scanline_bgp (GBC)` on the local runner's CGB-C (its reference is
-  a CGB-D-or-later palette dot; the shootout arm at CGB-E is green).
-
-## Reading the instruments
-
-* **gambatte families.** `name_1`, `name_2`, … are one ROM with one write
-  moved one CPU M-cycle per member, so the member the expected value flips on
-  is the measurement. The filename carries the expected value per device
-  (`_dmg08_out2_cgb04c_out3`); one value means both devices agree.
-  `lcdoffset{1,2,3}` members run 2/4/2 speed switches in their preamble to
-  offset the PPU dot grid from the CPU's M-cycle grid — the suite's only
-  sub-M-cycle ruler (B1). `tools/gbppu/gamall.sh` writes the 4996-row verdict
-  file; `tools/gbppu/famflip.py` reads flip points off it (check a family with
-  `cmp -l` first: it merges non-contiguous ladders).
-* **AGE.** Each ROM draws its own expected-vs-got table; a cell is the index
-  of the first mismatching sample in a run of them, and the sample is named in
-  the ROM's `EXPECTED_*` table. `tools/gbppu/agetable.py`, `agecells.py`,
-  `agediff.py` read it back (render with `--mode=screenshot --timeout=600`,
-  not `--bb-breakpoint`, which stops the ROM before it draws). Source:
-  `github.com/c-sp/age-test-roms`, with the silicon each table was taken on in
-  the ROM header.
-* **wilbertpol `acceptance/gpu`.** `tools/gbppu/wilbergpu.py` prints the raw
-  samples (`--patch`); `lycwsled.py` slides a store through its NOP field.
-* **PNG rows.** `tools/gbppu/pngdiff.py` (per-scanline diff);
-  `tools/gbphoto/` reads mealybug's hardware photographs.
-* **Traces** (`-d:`, tools only): `gb_m3_trace`, `gb_px_trace`, `gb_m3_len`,
-  `gb_dma_trace`, `gb_stat_read_trace`, `gb_stat_src_trace`, `gb_halt_trace`,
-  `gb_lcdc2_trace`, `gb_lyread_probe`.
-* **Sweeps.** `tools/gbppu/sssweep.sh` (one build per define set, sharded),
-  `daidswitch.sh` (the five pixel gates for any halt/speed-switch change),
-  `revsweep.py` (every failing self-checking row on all eleven revisions).
-* **Perf.** `tools/gbppu/counters.sh`; retired instructions with
-  `DINGBAT_BENCH_COUNTERS=1`, `cycles=` equal between arms. Wall clock lies
-  below ~1.3% (`docs/gb_oam_dma_cost.md`).
-* **Environment.** `TMPDIR`, `DINGBAT_ROM_CACHE` and the nimcache are shared
-  across worktrees; use private ones. `tests/results*.md` are committed
-  baselines every runner pass rewrites.
+* Per-suite tallies: [`tests/results.md`](../tests/results.md); per-row
+  gambatte verdicts: [`tests/results_gambatte.md`](../tests/results_gambatte.md).
+  This file names buckets, not counts. The local runner scores CGB rows on
+  CPU CGB C and the gbdev shootout adapter on CGB E; both are at the model's
+  maximum for their revision ("The device each suite is scored on",
+  [`tests/README.md`](../tests/README.md)).
+* Rows deliberately not scored: the runner's `NotScored` ledger, printed as
+  "Deliberately not scored" at the end of `tests/results.md`. Bucket G below
+  is the one skip with a mechanism story.
+* Reading a row as a dot count — gambatte family ladders, AGE cell tables,
+  wilbertpol sample dumps, PNG diffs, the `-d:gb_*` trace builds, sweeps and
+  the retired-instruction A/B:
+  [`tools/gbppu/README.md`](../tools/gbppu/README.md). The gambatte
+  filename convention is in `tests/README.md` ("The gambatte suite");
+  runner hazards (shared `TMPDIR`, ROM cache, rewritten baselines) in its
+  "Exit code, baselines, hazards".
 
 ---
 
@@ -108,12 +58,13 @@ mode 3 -> 0 flag by 2 T-cycles of the CPU clock, single speed exact;
 **To close.** `-d:STAT_M0_LEAD_DS=0 -d:CGB_M0_HALT_BLIND_DS_DOTS=0` takes the
 AGE arms and five gambatte rows but loses
 `irq_precedence/late_m0irq_retrigger_scx1_ds_2` and
-`m2int_m0irq/m2int_m0irq_scx3_ifw_ds_2`, and a single implementation is known
-to pass all ten, so the lead is not the quantity that is wrong (pinned only
-by comparison; see the note at `STAT_M0_LEAD_DS`). Rounding the source to an
-odd dot reproduces the staircase and keeps the edge, which points at the
-CPU-to-PPU dispatch phase in double speed (`mem_tick_ppu_latched`,
-`CGB_LATENCY_CAP`) rather than at the source.
+`m2int_m0irq/m2int_m0irq_scx3_ifw_ds_2`: the two sides bracket the same mode
+3 -> 0 edge from opposite directions, so the lead is not the quantity that is
+wrong. `STAT_M0_LEAD_DS` ships at the identity `STAT_M0_LEAD_T shr 1` (a
+double-speed T-cycle is half a dot; its comment in `ppu.nim`). Rounding the
+source to an odd dot reproduces the staircase and keeps the edge, which
+points at the CPU-to-PPU dispatch phase in double speed
+(`mem_tick_ppu_latched`, `CGB_LATENCY_CAP`) rather than at the source.
 
 ### A2. The dispatch's IF clear against a source rising inside it
 
@@ -239,7 +190,14 @@ rule: DMG-only, or doubled up with the CGB halt lead.
 **To close.** The residual is the SCX-dependent mode-0 edge (A1) read through
 a halt, not a halt constant: every scalar here has been swept
 (`CGB_HALT_PPU_LEAD_DOTS` 1..4, `CGB_HALT_EXIT_MCYCLES`, `HALT_IF_SAMPLE_T`)
-and none separates `scx2_3a` from `scx3_2b`.
+and none separates `scx2_3a` from `scx3_2b`. One lead, from a differential
+run of the GBMicrotest question through `tools/gbppu/gam_dispatch.py` and
+`gam_haltwake.py` (a second-emulator harness, so a comparison and not
+evidence — `docs/oracles.md` policy): dingbat's mode-0 edge reads 2 dots late
+on steady-state lines when running and 2 dots early on the first post-LCD-on
+line when halted, two errors that cancel in the halted steady state
+(`M0_HALT_BLIND_DOTS`). Hardware arbitration is hwprobe rows 2 and 10
+(`docs/hwprobe-questions.md`).
 
 ---
 
@@ -458,7 +416,8 @@ dot 85 counts one window line too many on the first reactivated line only
 144 wrong pixels = one per line, or 1.
 
 **Behaviour.** A DMG BGP write reaches the pixel two dots back as
-`old or new` for one pixel (SameBoy issue #65 photographs, mattcurrie 2018;
+`old or new` for one pixel (hardware photographs in SameBoy issue #65,
+mattcurrie 2018;
 mealybug `m3_bgp_change` samples BGP once per dot and is exact with it;
 daid `ppu_scanline_bgp_1.dmg.png`). It is instance-dependent: daid ships
 three accepted DMG references (`_0` old value, `_1` OR, `_2` new value —
@@ -601,8 +560,8 @@ its own M-cycle's tap edge (`SERIAL_CPU_SAMPLE_T = 0`; gambatte
 `boot_sclk_align-dmgABCmgb` pinning the DMG. Re-seeding the boot divider
 instead is refused by GBMicrotest `timer_tima_phase_*` and gambatte `div`.
 
-**Residue.** The CGB's fast-clock arms and the `trigger_int8` ordering; the
-whole tap/sample space was swept (24 builds, commit `90accfd5`) and no phase
+**Residue.** The CGB's fast-clock arms and the `trigger_int8` ordering; no
+point of the tap/sample space (`SERIAL_TAP_*` × `SERIAL_CPU_SAMPLE_T`)
 reaches them, so it is not a phase.
 
 ### F2. TIMA reload against a read
@@ -637,17 +596,18 @@ vs `stat-mode-cgbE`, the `M1E` byte); CGB D+ hold the LY=LYC comparison the
 blind window is leaving (`lyc_compare_hold`). wilbertpol's `-C` is the 2016
 fork's hardware GROUP `cgb+agb+ags` with no revision axis, so its four
 `ly_lyc*-C` ROMs assert the D+ behaviour for revision C; upstream mooneye
-later added the axis and ships no `ly_lyc*` at all (commit `a781e277`).
-The C/D placement of `ly_lyc*` is pinned only by comparison; the two
-scored rows are the same vocabulary problem and fail for the same reason.
+later added the axis and ships no `ly_lyc*` at all.
+No ROM in the tree pins the C/D placement of `ly_lyc*`
+(`docs/oracles.md`, `lyc_compare_hold`); the two scored rows are the same
+vocabulary problem and fail for the same reason.
 
 ---
 
 ## Hardware experiments that would close buckets
 
 The ROMs exist in `tools/gbprobe/` (raw values, no baked expectation,
-on-screen hex); what they say in three emulators is in
-`docs/gb-probe-oracle-results-2026-08-11.md`, and the catalogue of every
+on-screen hex); dingbat's prediction and the hardware status per probe are
+in `docs/gb-probe-oracle-results-2026-08-11.md`, and the catalogue of every
 hardware question with its priority is `docs/hwprobe-questions.md`.
 
 * **(a)** Does the STAT mode field report differently to `LD A,(C)` and
@@ -659,8 +619,8 @@ hardware question with its priority is `docs/hwprobe-questions.md`.
   of where it lands? C3. `probe_b_scxm3.gb`.
 * **(c)** `cgb-acid-hell`'s LCDC.4 toggle and daid's BGP band edge on ONE
   frame: does emission separate from the fetch grid by four dots?
-  `probe_c_arbitrate*.gb`; the g1 session in `docs/hwprobe-questions.md`
-  ("g1 RESULT") read the frame on a GBA SP.
+  `probe_c_arbitrate*.gb`; the g1 session (`docs/flashcart-runbook.md`,
+  "g1, GBA SP") read the frame on a GBA SP.
 * **(d)** The DMG BGP transition pixel on as many DMGs as can be borrowed,
   with mainboard/CPU markings per unit — C7. The sample size is the
   experiment; no single unit can answer it.
@@ -740,98 +700,91 @@ tried again as a knob.
 
 ## Closed buckets
 
-One line each; the knob or commit carries the derivation.
+One line each; the knob's own comment carries the derivation.
 
-* Line 0's pipeline one M-cycle ahead (125 PNG rows): `LY0_PIPE_MCYCLES`,
-  later subsumed by `STAT_M2_LEAD = 1` + `M3_PIPE_AHEAD = 1` (the OAM
-  source rises one CPU M-cycle before its line, and the pipeline with it;
-  `a554e7fc`, `f95f47f2`).
+* Line 0's pipeline one M-cycle ahead (the PNG rows): `STAT_M2_LEAD = 1` +
+  `M3_PIPE_AHEAD = 1` (the OAM source rises one CPU M-cycle before its line,
+  and the pipeline with it); `LY0_PIPE_MCYCLES` is what it subsumed.
 * `$FEA0-$FEFF` is RAM on CGB 0-D (`addr and not $18` on 0-C), nibble echo
-  on E: `GbUnusableRegion`, `d7e34678`; `cgb-acid-hell`'s own readback gate
-  pins the mask.
-* HDMA source outside cartridge/WRAM moves `$FF`: `a7b6355`,
-  `dma_hiram_read_result`.
+  on E: `GbUnusableRegion`; `cgb-acid-hell`'s own readback gate pins the mask.
+* HDMA source outside cartridge/WRAM moves `$FF`: `dma_hiram_read_result`.
 * The dispatch's IF clear at T = 16: `IRQ_SAMPLE_T` (A2 is what it left).
 * The LY=LYC comparator blind while LY changes, at every line edge and the
-  vblank entry: `ly_advance_close`, `LY_BLIND_SCOPE = 2` (`60b13d59`,
-  `044129ca`).
+  vblank entry: `ly_advance_close`, `LY_BLIND_SCOPE = 2`.
 * A `$FF0F` read's sample point inside its M-cycle: `IF_READ_SAMPLE_T`
-  (`36e0bcc1`; now spelled in `irq_read`, interrupts.nim).
-* The VRAM read lock's live-mode clause is DMG-only: `VRAM_READ_LIVE_LOCK =
-  2` (`689cf7e3`).
+  (spelled in `irq_read`, interrupts.nim).
+* The VRAM read lock's live-mode clause is DMG-only: `VRAM_READ_LIVE_LOCK = 2`.
 * STAT readback samples the mode at `cc - 2` (`cc - 3` in double speed):
-  `STAT_READ_SAMPLE`, `STAT_READ_SAMPLE_DS_ADD`; GBMicrotest 404 -> 430 and
-  the `NspritesPrLine` family with it.
+  `STAT_READ_SAMPLE`, `STAT_READ_SAMPLE_DS_ADD`; the `NspritesPrLine` family
+  with it.
 * The mode-0 STAT source's 2 dots in the retire -> flag hand-off:
-  `STAT_M0_LEAD_T = 2` (`12be5e40`); AGE `halt-m0-interrupt` and `stat-int`
-  (single speed) with it.
-* The OAM scan against an OAM DMA: `OAM_SCAN_DMA_LOCK`, `OAM_SCAN_DMA_HOLD`
-  (`f426688b`, then the hold); `strikethrough` kept.
+  `STAT_M0_LEAD_T = 2`; AGE `halt-m0-interrupt` and `stat-int` (single speed)
+  with it.
+* The OAM scan against an OAM DMA: `OAM_SCAN_DMA_LOCK`, `OAM_SCAN_DMA_HOLD`;
+  `strikethrough` kept.
 * The speed switch's two clocks and the PPU's 8/3 re-alignment:
-  `SPEED_SWITCH_STALL_CPU`, `SPEED_SWITCH_PPU_EXTRA_DOTS{,_SINGLE}`
-  (`6668e5e5`, `47b3c223`); landed with `CGB_HALT_PPU_LEAD = 1`
-  (`bc9afb1c`), which also closed `cgb-acid-hell` and the shootout's 261st
-  row. The DIV reset one M-cycle after the STOP fetch, and its slow-tap
-  split: `SPEED_SWITCH_DIV_RESET_T{,_SLOW}` (`c1b05bb6`, `fa813824`).
-* The CGB OAM DMA drives the address bus (A12 into WRAM): `OAMDMA_WRAM_A12`
-  (`6668e5e5`), the 64 `busypush`/`busypop` rows.
-* HBlank DMA bytes land 4 dots late: `HDMA_VISIBLE_DOTS` (`23f9e672`); the
-  hand-off at the fetch grant: `HDMA_GRANT_FETCH_DOTS` (`3b6e34e7`), mealybug
-  `dma/*` green; a halted CPU's blind mode-0 edge: `HDMA_HALT_M0_BLIND`.
+  `SPEED_SWITCH_STALL_CPU`, `SPEED_SWITCH_PPU_EXTRA_DOTS{,_SINGLE}`; the DIV
+  reset one M-cycle after the STOP fetch and its slow-tap split:
+  `SPEED_SWITCH_DIV_RESET_T{,_SLOW}`.
+* A halted CGB's PPU one M-cycle behind, given back at the wake, absent on
+  the LY 153 -> 0 snapback: `CGB_HALT_PPU_LEAD = 1`, `CGB_HALT_LEAD_SKIP_LYC0`;
+  `cgb-acid-hell` and daid `ppu_scanline_bgp` with it.
+* The CGB OAM DMA drives the address bus (A12 into WRAM): `OAMDMA_WRAM_A12`,
+  the `busypush`/`busypop` rows.
+* HBlank DMA bytes land 4 dots late: `HDMA_VISIBLE_DOTS`; the hand-off at the
+  fetch grant: `HDMA_GRANT_FETCH_DOTS` (mealybug `dma/*`); a halted CPU's
+  blind mode-0 edge: `HDMA_HALT_M0_BLIND`.
 * The LY 153 -> 0 snapback's LYC = 0 edge, blind window and read snap:
-  `LYC_SETTLE_DOTS`, `LYC_SRC_RELATCH_LEAD`, `LY153_READ_SNAP` (`8b099948`);
-  GBMicrotest 480/480 (`bbf916af`), daid `ppu_scanline_bgp` DMG exact.
+  `LYC_SETTLE_DOTS`, `LYC_SRC_RELATCH_LEAD`, `LY153_READ_SNAP`; the last
+  GBMicrotest rows and daid `ppu_scanline_bgp` (DMG) with it.
 * The readable LY edge splits at CGB C/D; `$FF44` on the advance dot reads
   `LY & (LY + 1)`; the mode-0 M-cycle at the end of mode 1 is CGB <= C too:
-  `ly_read_edge_late`, `LY_EDGE_AND`, `m1_end_no_mode0` (`351e82ac`,
-  `08d34522`). AGE `ly`, `lcd-align-ly`, `stat-mode` green.
+  `ly_read_edge_late`, `LY_EDGE_AND`, `m1_end_no_mode0`; AGE `ly`,
+  `lcd-align-ly`, `stat-mode`.
 * The line-144 OAM STAT source is a pulse; CGB D+ hold the LY=LYC
-  comparison; the CGB takes an LYC write one M-cycle later:
-  `M2_144_PULSE`, `lyc_compare_hold`, `CGB_LYC_WRITE_DEFER` (`31a683e4`,
-  `84ca126c`, `79612ed5`, `731ba498`); wilbertpol `ly_lyc*` cluster.
-* A halted OAM DMA drives the OAM bus: `OAMDMA_FREEZE_BUS` (`6766b0be`);
-  mooneye 152/152.
-* SameSuite APU 70/70: `pcm_read_edge_zero` (CGB <= C), `square_freq_
-  backstep_halftick` (CGB D/E), the suite scored on CGB-E as its README
-  says (`f0e64749`).
-* The mealybug DMG set, every row: `OBJ_BG_RUN = 4` (the object fetch takes
-  a tile boundary the object picks), `M3_THROWAWAY_DOTS = 4`,
-  `MIXER_PALETTE_OR`, `MIXER_TAIL_HBLANK`, `MIXER_TAIL_DOTS`,
-  `MIXER_HEAD_LINGER`, `BG_EN_AT_MIX`, `WIN_LINE_START_WX = 6`,
-  `WIN_START_PRE_PIXEL`, `WIN_HEAD_ABSORB`, `WIN_LINE_START_LATCH`,
-  `WIN_WX0_PHASE`, `WIN_PRE_PX_PHASE`, `WIN_EN_ABORT`, `WIN_REACT_PHASE`,
-  `obj_yields_to_window`, `OBJ_PLANE1_LAG` (LCDC.2 read once per bitplane),
-  `fifo_obj_abort`. The CGB set: `CGB_TDSEL_LATENCY`, `CGB_TDSEL_GLITCH`
-  (reset = tile index, set = the bus address latch), `CGB_TDSEL_IDX_DOTS`,
-  `CGB_MAP_LATENCY = 2` (`a75fb13e`), `CGB_OBJ_SIZE_LATENCY`,
+  comparison; the CGB takes an LYC write one M-cycle later: `M2_144_PULSE`,
+  `lyc_compare_hold`, `CGB_LYC_WRITE_DEFER`; the wilbertpol `ly_lyc*` cluster.
+* A halted OAM DMA drives the OAM bus: `OAMDMA_FREEZE_BUS`; the last mooneye
+  row.
+* SameSuite APU: `pcm_read_edge_zero` (CGB <= C), `square_freq_backstep_
+  halftick` (CGB D/E), the suite scored on CGB E as its README says
+  (`docs/samesuite-apu.md`).
+* The mealybug DMG set: `OBJ_BG_RUN = 4` (the object fetch takes a tile
+  boundary the object picks), `M3_THROWAWAY_DOTS = 4`, `MIXER_PALETTE_OR`,
+  `MIXER_TAIL_HBLANK`, `MIXER_TAIL_DOTS`, `MIXER_HEAD_LINGER`, `BG_EN_AT_MIX`,
+  `WIN_LINE_START_WX = 6`, `WIN_START_PRE_PIXEL`, `WIN_HEAD_ABSORB`,
+  `WIN_LINE_START_LATCH`, `WIN_WX0_PHASE`, `WIN_PRE_PX_PHASE`, `WIN_EN_ABORT`,
+  `WIN_REACT_PHASE`, `obj_yields_to_window`, `OBJ_PLANE1_LAG` (LCDC.2 read
+  once per bitplane), `fifo_obj_abort`. The CGB set: `CGB_TDSEL_LATENCY`,
+  `CGB_TDSEL_GLITCH` (reset = tile index, set = the bus address latch),
+  `CGB_TDSEL_IDX_DOTS`, `CGB_MAP_LATENCY = 2`, `CGB_OBJ_SIZE_LATENCY`,
   `CGB_MIXER_LATENCY` / `mixer_write_immediate` (the C/D palette dot).
   Per-test account: `docs/gb-mealybug-sources.md`.
-* `scx_during_m3` 49 -> 131: `SCX_FINE_BORROW{,_DMG_LEAD}`,
+* Most of `scx_during_m3`: `SCX_FINE_BORROW{,_DMG_LEAD}`,
   `SCX_FINE_LATCH_WRAP` (C3 is the rest).
 * The DMG's last-pixel window start owed to the next line:
   `DMG_WIN_LAST_PX_CARRY`, `WIN_CARRY_TILE`, `WIN_CARRY_REACT_LINES`
-  (`76009b29`); `window/on_screen` 34/36.
+  (C6 is the rest of `window/on_screen`).
 * The OAM scan reads LCDC.2 once per object, two dots apart, and the CGB
   takes a second look one M-cycle earlier: `OBJ_SCAN_DOT_ADJ`,
-  `CGB_OBJ_SCAN_LEAD` (`4c7764dc`); all 24 `sprites/late_sizechange*`.
-* The arriving TAC tap read a cycle early; `EI; HALT` with `IF & IE`
-  arms the halt bug: `TAC_SELECT_LEAD_T`, `ime_set_cycle` (`35751364`).
+  `CGB_OBJ_SCAN_LEAD`; every `sprites/late_sizechange*`.
+* The arriving TAC tap read a cycle early; `EI; HALT` with `IF & IE` arms
+  the halt bug: `TAC_SELECT_LEAD_T`, `ime_set_cycle`.
 * A TIMA overflow reaches a running CPU one M-cycle before a halted one:
-  `TIMER_IRQ_RUN_LEAD` (`3f4670d8`).
+  `TIMER_IRQ_RUN_LEAD`.
 * The serial shift clock is a half-rate toggle the SC write reseeds, and a
   CPU access meets it before its own tap edge: `SERIAL_TAP_*`,
-  `SERIAL_CPU_SAMPLE_T` (`e20afbbf`).
+  `SERIAL_CPU_SAMPLE_T`.
 * The CGB window start is revocable; the DMG revokes for one dot:
-  `CGB_WIN_REVOKE_LAG`, `DMG_WIN_EN_REVOKE` (`ed9fe0f6`, `32854ba7`).
+  `CGB_WIN_REVOKE_LAG`, `DMG_WIN_EN_REVOKE`.
 * The OAM X = 167 object charged for the tail walk twice:
-  `OBJ_TAIL_WALK_REFUND` (`04c6f808`).
-* GBMicrotest's 31 verdict-less ROMs and 2 broken expectations, mooneye
-  `utils/`, `bootrom_dumper`: skipped by name, in `NotScored`.
+  `OBJ_TAIL_WALK_REFUND`.
+* GBMicrotest's verdict-less ROMs and broken expectations, mooneye `utils/`,
+  `bootrom_dumper`: skipped by name, in `NotScored`.
 * AGE's DMG arms were running on a CGB (the cart header picked the machine):
-  `dmg: not arm_cgb` in `build_age_tests` (`0fe22983`). The same trap cost
-  the blargg `oam_bug` rows earlier (`--dmg`).
-* `rtc3test-1`/`-3`: the local harness now uses the shootout's own frame
-  budget (`93b49768`).
-* `mooneye/misc/boot_hwio-C@agb`: the AGB boot table (`8774472a`).
-* The CGB revision axis at runtime (`--cgb-rev`, `GbQuirks`): `d7e34678`;
-  design in `docs/gb-hardware-revisions.md`.
+  `dmg: not arm_cgb` in `build_age_tests`; blargg `oam_bug` needs `--dmg` for
+  the same reason.
+* `rtc3test-1`/`-3`: the local harness uses the shootout's own frame budget.
+* `mooneye/misc/boot_hwio-C@agb`: the AGB boot table.
+* The CGB revision axis at runtime (`--cgb-rev`, `GbQuirks`): design in
+  `docs/gb-hardware-revisions.md`.

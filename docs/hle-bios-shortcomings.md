@@ -38,8 +38,8 @@ it deliberately does not model:
   start counts that vblank.
 * **`IntrWait(discard=0)` returns without halting when a masked flag is
   already set.** The real routine halts at least once, and its first halt
-  uses the caller's stale r12 for the HALTCNT store. Pinned only by oracle
-  comparison.
+  uses the caller's stale r12 for the HALTCNT store. No ROM in the tree
+  exercises the difference; Assumed.
 * **Handler-visible r2/r4/lr/r11 during a wait** keep caller values (real:
   mirror value / 1 / BIOS return address / spsr scratch). No known convention
   reads them. r12 = 0x04000000 is modelled (the devkitARM crt0 IntrWait ack).

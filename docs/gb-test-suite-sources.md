@@ -34,37 +34,14 @@ license; the column above is from the upstream repositories where one exists.
 
 ## How the runner scores each suite
 
-`tests/dingbat_test_runner.nim`, `TestMode`:
-
-| Mode | Verdict | Suites |
-|---|---|---|
-| `tmMooneye` | `LD B,B` with B/C/D/E/H/L = 3/5/8/13/21/34 (pass) or `$42` ×6 (fail) | mooneye, SameSuite, AGE (most), mealybug `dma/` and `mbc/` |
-| `tmMooneye` + `ed_breakpoint` | same registers, breakpoint is opcode `$ED` | mooneye-wilbertpol |
-| `tmSerial` | blargg text over the serial port | blargg `cpu_instrs`, `instr_timing`, `mem_timing` |
-| `tmSram` | `$A000` status byte behind a `DEB061` signature | blargg `oam_bug`, `dmg_sound`, `cgb_sound`, `halt_bug`, `interrupt_time` |
-| `tmMicrotest` | `$FF80` actual, `$FF81` expected, `$FF82` = `$01`/`$FF`, read after a fixed frame count | GBMicrotest |
-| `tmScreenshot`, `grey_tolerance = 0` | pixel-exact against the bundled reference PNG(s); `alt_pngs` lists additional legitimate outcomes | mealybug, acid, bully, strikethrough, firstwhite, mbc3-tester, scribbltests, turtle-tests, AGE screenshot rows |
-| `tmScreenshot`, `grey_tolerance = ShootoutTolerance` (50) | both sides converted to luma, each pixel within 50 — the shootout's own `util.py compareImage` | shootout-fetched rows (daid, cpp, ax6, ashiepaws) |
-| gambatte rows | per-ROM expected byte encoded in the file name, `_outaudio*` rows unscored | gambatte |
-
-Conventions the references depend on (mealybug `README.md`; the runner
-implements all three): capture on `LD B,B`; DMG shades are exactly
-`$00/$55/$AA/$FF`; CGB 5-bit components expand as `(r << 3) | (r >> 2)`.
-
-Device selection: the suite names the hardware, not the cart header. blargg
-`oam_bug` and `dmg_sound` are forced DMG (`--dmg`) although their carts carry
-`$0143 = $80`; `cgb_sound` runs CGB C; SameSuite APU runs CPU CGB E because
-`apu/README.md` states only D/E pass everything; SameSuite `sgb/` and
-`cpp/sgb-ext-test` name an SGB; GBMicrotest carts are all `$0143 = $00` and run
-as DMG. mealybug is scored on both devices: `_dmg_blob.png` for the DMG row and
-`_cgb_c.png` / `_cgb_d.png` for the two CGB rows (the suite ships no CGB
-reference for `m3_wx_4/5/6_change`, and the seven `*2` variants exist only in
-the CGB sets).
-
-The shootout scores 264 rows of which three ship no reference PNG and are
-classed `INFO` (`acid/which.gb` on DMG and CGB, `daid/rom_and_ram.gb`); the
-denominator is 261. Its mealybug list is `all = dmgs` — only the 24 DMG rows
-carry shootout weight.
+The verdict mechanism per suite (`TestMode` in `tests/dingbat_test_runner.nim`),
+the device each suite is scored on and the screenshot conventions are in
+[`tests/README.md`](../tests/README.md), "Which suites run, and how each is
+scored". One fact about the shootout's own list belongs here: it scores 264
+rows of which three ship no reference PNG and are classed `INFO`
+(`acid/which.gb` on DMG and CGB, `daid/rom_and_ram.gb`), so its denominator is
+261, and its mealybug list is `all = dmgs` — only the 24 DMG rows carry
+shootout weight.
 
 ## Which silicon each suite was verified on
 
@@ -107,85 +84,26 @@ DMG/MGB/SGB/SGB2, so not all tests pass on CGB/AGB/AGS."
 
 ## Rows deliberately not scored
 
-The runner's `NotScored` ledger is the record; each entry names its builder.
-Summary, with the reason in the sources' own terms:
+The runner's `NotScored` ledger is the record, printed as "Deliberately not
+scored" at the end of [`tests/results.md`](../tests/results.md); each entry
+names its reason and its builder. Two things it does not say:
 
-| row(s) | why |
-|---|---|
-| `blargg/oam_bug/7-timing_effect` (standalone) | broken build: it copies itself to `$C000` and streams ~10 KB of text through the `$A004..$BFFF` window, overrunning its own code before `check_crc`; hangs on real DMG too (Docheinstein/docboy#33); the shootout comments it out. Test 7 is scored through `blargg/oam_bug/combined` (`07:ok`, same `$7D792E7C` CRC). |
-| `daid/stop_instr (GBC)` | reference is a uniform black frame (147-byte PNG); a blanked panel matches however STOP got there. `daid/stop_instr_gbc_mode3` has content and IS scored. |
-| `daid/ppu_scanline_bgp (GBC)` | its reference is a CGB-D-or-later palette-write dot; the tree scores CPU CGB C, which mealybug's compat-mode rows pin from the other side. |
-| `daid/rom_and_ram`, `acid/which` | ship no reference image; the shootout classes them `INFO`. `which.gb` prints the SoC revision the emulator claims (`DMG-CPU A/B/C`, `CPU CGB C`, …) and is useful as a sanity check of the boot-model table. |
-| `cpp/sgb-ext-test`, `samesuite/sgb/*` | Super Game Boy packet-protocol rows; see "SGB" below. |
-| GBMicrotest, 31 ROMs | never write `$FF82`; `dma_basic.s` and `400-dma.s` assemble HRAM code at `$FF80` (the "result" bytes `$E0,$46,$18,$FE` are `ldh ($46),a ; jr -2`), `cpu_bus_1.s` writes its `$55` scratch marker there forever. Denominator 482. |
-| GBMicrotest `halt_op_dupe_delay` | `MicrotestBrokenExpected`: expects DIV = `$55` ~62 M-cycles after `xor a ; ldh (DIV),a`; DIV increments every 64 M-cycles, so the value needs a ~5,440 M-cycle HALT that the ROM's HBlank-every-line setup rules out. `$55` is the suite's scratch marker. Its sibling `halt_op_dupe` (`xor a / halt / inc a / test_finish_a 2`) is correctly written and passes. |
-| GBMicrotest `stat_write_glitch_l154_d` | `MicrotestBrokenExpected`: lacks the second `xor a ; ldh ($FF0F),a` at `$0170` that `_a/_b/_c` carry, so it asserts `IF = $E0` one full frame (VBlank included) after its last clear. Patching the clear in makes it pass; patching `_c`'s clear into a read makes `_c` produce `_d`'s `$E1`. Denominator 480. |
-| mooneye-wilbertpol `acceptance/gpu/ly_lyc{,_0,_144,_153}-C` | assert a CGB LY=LYC behaviour dingbat produces only from CPU CGB D, for a `-C` group the 2016 fork defines as `cgb+agb+ags` with no revision axis; upstream mooneye later added the axis and dropped `ly_lyc*`. Pinned only by oracle comparison — the weakest skip in the runner. The `_write` arms pass and are scored. |
-| mooneye `utils/`, wilbertpol `utils/`, `logic-analysis/` | tools, not tests; `dump_boot_hwio` sets its success byte unconditionally. |
-| mooneye/wilbertpol `ags` arms, bare-token revision 0 | `ags` folds into `agb`; `-cgb`/`-dmg` fan out over modelled revisions but not revision 0, which ships as its own ROM. |
-| AGE `ncm*` | CGB in non-CGB mode, a device the harness does not model. |
-| gambatte `oamdma_src{FE00,FF00}_*read*` DMG rows | verdict is uninitialised WRAM (the source fetches through echo RAM and a colliding CPU read gets the DMA latch); Pan Docs says WRAM is random at power-up. Non-colliding members and every CGB arm are scored. |
-| gambatte `_outaudio0/1`, AGB column | audio-register sampling and the AGB device are not scored. |
-| scribbltests `fairylake`, `winpos`; `little-things-gb/tellinglys`; mbc3-tester CGB reference; rtc3test upstream single ROM | no reference image / needs scripted input / CGB compat-mode capture / needs menu input (the shootout's three pre-split builds are scored instead). |
-| `magen/oam_internal_priority` | criterion is prose only. |
-
-Not a skip, but easy to misread: GBMicrotest `hblank_int_scx{1,2,5,6}` and
-`int_hblank_halt_scx{0,3,4,7}` fail because the suite contradicts itself (see
-"GBMicrotest" below).
+* The SGB rows. `samesuite/sgb/*` are scored (on `--sgb`; the adapter is
+  `docs/sgb.md`). `cpp/sgb-ext-test` is not built as a row: its `NotScored`
+  entry predates the adapter, and `docs/sgb.md` records the adapter passing
+  it byte-exact outside the runner. Wiring it in is a runner change.
+* Not a skip, but easy to misread: GBMicrotest's `hblank_int_scx*` and
+  `int_hblank_halt_scx*` families encode a different overhead row from their
+  `_incs`/`_nops` siblings (see "GBMicrotest" below).
 
 ## Mealybug: what the sources assert
 
-`the-comprehensive-game-boy-ppu-documentation.md` and the `src/ppu/*.asm`
-headers. dingbat's mechanism is named where it models the claim.
-
-**Window enable cleared during mode 3** (`m3_lcdc_win_en_change_multiple.asm`,
-LCDC bit 5 section, on DMG): the fetcher returns to background tiles "at the
-start of the next tile fetcher cycle"; the background resumes on a tile
-boundary and the low 3 bits of SCX have no effect; re-enabling on the same line
-does nothing unless WX has moved to a pixel not yet drawn; a re-trigger draws
-the *next* window row. dingbat: `fetching_window` is cleared on the disable
-path and `current_window_line` increments inside `fifo_reset_bg` only when a
-window fetch is active (`m2_win_en_toggle.asm`: "the current window line is
-only incremented when the window is actually activated").
-
-**Window startup** (`m3_window_timing.asm`): a 6 T-cycle window startup fetch;
-a palette write landing inside it shows as the stair pattern. dingbat restarts
-the fetcher at step 1 so the push lands six dots in (Pan Docs, "Window").
-
-**WX = 0 with SCX > 0** (`m3_window_timing_wx_0.asm`): the window activates one
-T-cycle later. dingbat: `fifo_sample_smooth_scroll`, the `wx == 0 and (scx and
-7) > 0` clause.
-
-**Window reactivation pixels** (`m3_wx_4_change.asm`, `m3_wx_5_change.asm`,
-`m3_wx_4_change_sprites.asm`): zero pixels appear when the window is already
-active and the reactivation pixel coincides with the window nametable read;
-priority-bit sprites show through them. dingbat: `window_reactivate` inserts a
-colour-0 BG pixel behind the FIFO head. The fetcher phase at which this
-applies (`WIN_REACT_PHASE`) was swept, not derived; Assumed beyond the three
-ROMs. Nothing outside mealybug pins WX 4/5/6 — gambatte's `window/` family
-probes only `m2int_wx00_*` and `m2int_wx07_*`.
-
-**SCY sampling** (SCY section): DMG and CGB ≤ C read SCY at fetch stages B, 0
-and 1 (bitplane mixing possible); CGB D and AGB read it only at B. dingbat reads
-it at all three (`fsGetTile`, `fsGetTileDataLow/High`), which is the `_cgb_c`
-reference's behaviour. The same document's "writes take effect 2 T-cycles
-later on CGB" claim is `CGB_SCY_LATENCY` in `gb.nim`.
-
-**SCX** (`m3_scx_high_5_bits.asm`, `m3_scx_low_3_bits.asm`): the high 5 bits
-are read at the start of each tile fetch; the low 3 bits "appear to be read at
-the start of the B of the first B01s read cycle". dingbat: map offset computed
-fresh in `fsGetTile`; fine scroll latched at the first real tile's `B` after a
-4-dot discarded fetch (`M3_THROWAWAY_DOTS`, derivation at `tick_bg_fetcher`;
-`m3_scy_change`'s eighteen bands place the first map read one 2-dot slot after
-the discard, which is what fixes the discard at `B0` rather than `B01`).
-
-**CGB TILE_SEL glitches** (LCDC bit 4 section): on all CGB revisions, setting
-TILE_SEL on the same T-cycle as a bitplane read substitutes bitplane data from
-the most recently drawn sprite or tile; clearing it substitutes the tile index
-as the bitplane (all except CPU CGB D), or on CPU CGB D reads bitplane 1 from
-bitplane 0's address. dingbat models none of this; it re-reads
-`bg_window_tile_data` per stage, which is the DMG behaviour ("mixing tile
-bitplane data from two different tile patterns").
+Per claim (window enable cleared in mode 3, the 6-dot window startup, WX = 0
+with SCX > 0, the WX 4/5/6 reactivation pixel, SCY sampling per revision, the
+SCX high/low split, the CGB TILE_SEL glitches) and per test, with the dingbat
+mechanism named against each:
+[`docs/gb-mealybug-sources.md`](gb-mealybug-sources.md) ("The suite's PPU
+documentation" and "Per-test: what the source asserts").
 
 ## Mooneye: header claims that are not in the file name
 
@@ -227,34 +145,12 @@ mooneye Fibonacci registers and `ld b,b` (`include/base.inc`). Only `apu/` has
 a README; `dma/`, `ppu/`, `sgb/` and `interrupt/` are documented solely by
 per-file headers.
 
-`apu/README.md`, per revision: pre-CGB passes only `div_write_trigger` and
-`div_write_trigger_10` (the rest read the CGB-only PCM12/PCM34); CPU CGB C
-passes channel 3 and the non-channel-specific tests; CPU CGB D passes all but
-`channel_1_sweep_restart_2`; CPU CGB E passes all. The C-and-older quirk:
-PCM12/PCM34 "report a glitched PCM amplitude for channels 1, 2 and 4 if they're
-read in the same M-cycle they change."
-
-Claims dingbat's APU is built on:
+The `apu/` sub-suite — its per-revision README, every ROM's stated claim
+and the model built on it — is [`docs/samesuite-apu.md`](samesuite-apu.md).
+The non-APU claims dingbat is built on:
 
 | test | claim, quoted | dingbat |
 |---|---|---|
-| `div_write_trigger` | "writing to DIV while bit 4 is set triggers a DIV-APU event" | `timer.nim` DIV write: falling edge on the APU tap steps the frame sequencer |
-| `div_write_trigger_10` | "starting the APU while bit 4 of the DIV register is set causes the APU to skip the first DIV-APU event" | NR52 power-on samples the tap and arms a one-shot skip |
-| `channel_4_delay` | "the delay is sample length + 3 M-cycles, but it might be one M-cycle more or less" | trigger deadline carries the addend |
-| `channel_4_frequency_alignment`, `channel_4_equivalent_frequencies` | NR43 encodings with equal periods (`$09` vs `$18`, `$0a` vs `$28`) land the first sample on different dots; "identical frequencies that are expressed differently generate the same output, other than a potential off-by-one sample caused by the start delay" | the noise timer is two counters (divisor stage, then shift stage), not their product; `channel_4_freq_change` is the only test that separates them |
-| `channel_4_align` | header says "channel 1" but the test writes NR42/NR43/NR44 and reads PCM34 — a typo, it is channel 4 | |
-| `channel_4_volume_div` | header names NR12; the test writes NR42 | |
-| `channel_4_lfsr*` | `lfsr_restart`: "the contents of the LFSR register are cleared on restart"; `lfsr_15_7` / `7_15`: contents "retained correctly when switching" widths | dingbat's LFSR is stored complemented: `new_bit = bit0 xor bit1; lfsr >>= 1; lfsr |= new_bit shl 14`, output `not lfsr and 1`, reset to `$7FFF` on trigger (the complement of 0); width switches force bit 6 per shift without truncating. Do not "fix" the polarity. |
-| `channel_3_first_sample` | "skips the very first wave sample and starts with the second (after the sample-long delay)" | `wave_ram_position = 0` on trigger, advanced before the first sample |
-| `channel_3_restart_delay` | "The previous sample remains playing until the first 'phantom' sample finishes" | the sample buffer is not cleared on trigger (Pan Docs, "Sound Channel 3") |
-| `channel_3_shift_delay`, `channel_3_stop_delay` | shift and NR30 stop "affect PCM34 instantly" | applied live |
-| `channel_3_shift_skip_delay` | "the delay cannot be skipped or shortened by modifying the shift value" | shift write does not touch the deadline |
-| `channel_3_freq_change_delay` | "cannot shorten or extend the length of the currently playing sample" | absolute deadline |
-| `channel_3_wave_ram_locked_write` | "The byte is written at the offset CH3 is currently reading. Except on AGB, where the write is simply ignored." | |
-| `channel_3_and_glitch` | "Channel 3 is not affected by the PCM34 AND glitch" | no PCM glitch modelled |
-| `channel_3_stop_div` | "stops instantly in the same cycle DIV's bit 5 turns from 1 to 0 (bit 4 in single speed). The length of the sound is ((255 - NR31) * 2 + 1) DIV-APU ticks." | speed-aware tap (`apu_div_bit`) |
-| `channel_3_delay` | "(wavelength / 32) + 3 ticks from the moment channel 3 is enabled until PCM34 is affected. (The read operation itself takes 2 cycles)" | |
-| `channel_3_restart_during_delay` | no header; expected table only | |
 | `dma/gdma_addr_mask` | "Addresses written to HDMA1-4 are masked. The lowest 4 bits of addresses are always ignored" | `hdma_dst and 0x1FF0` (Pan Docs, "HDMA") |
 | `dma/hdma_lcd_off` (header copied verbatim into `hdma_mode0`, which enables the LCD) | "A single tile should get copied, and the count should decrement once"; HDMA5 reads `$02` then `$80` after `$00` | |
 | `dma/gbc_dma_cont` | "partially initializing a new GDMA after the previous one ends normally" | |
@@ -262,9 +158,10 @@ Claims dingbat's APU is built on:
 
 ## SGB
 
-No SGB packet layer exists in `src/dingbat/gb/` beyond the `bmSgb`/`bmSgb2`
-boot models and the SGB boot-DIV model in `timer.nim`. The three rows that need
-one:
+The SGB adapter (`src/dingbat/gb/sgb.nim`, `docs/sgb.md`) implements the
+packet transport and `MLT_REQ`; the three ROMs below pin what Pan Docs leaves
+open, and `docs/sgb.md` "Transport" and "`MLT_REQ` joypad IDs" carry the
+rules read off them:
 
 - `samesuite/sgb/command_mlt_req.asm`: "Initial value always reads out as
   controller 1"; `MLT_REQ_1` "increments the player 5 times before it gets
@@ -275,7 +172,7 @@ one:
   `$00,$30` yes. Expected `$FE,$FE,$FF,$FF,$FE,$FF,$FE,$FF`.
 - `cpp/sgb-ext-test` (`src/intro.asm`): 25 malformed `MLT_REQ` sends
   (corrupt STOP bit, skipped `$30`, first bit driven through intermediate P1
-  values), each followed by a pad-count read-back; the oracle is only the
+  values), each followed by a pad-count read-back; the verdict is only the
   reference PNG (256 bytes rendered as bits). The README publishes no
   conclusion.
 
@@ -298,9 +195,11 @@ it.** `500-scx-timing.s` / `minimal.s` header:
 
 (extra M-cycles of mode 3 for SCX = 0..7). `int_hblank_incs_scx*` and
 `int_hblank_nops_scx*` encode the DMG row; `int_hblank_halt_scx*` and
-`hblank_int_scx*` encode the AGS row, in ROMs assembled `-DDMG`. dingbat
-implements the DMG row, so `hblank_int_scx{1,2,5,6}` and
-`int_hblank_halt_scx{0,3,4,7}` fail by construction.
+`hblank_int_scx*` (with their `_if_d`/`_nops_*` siblings) encode the AGS row,
+in ROMs all assembled `-DDMG`. dingbat implements the DMG row; the AGS-row
+families pass on it because a halt-woken reader meets the mode-0 edge at a
+different point of its M-cycle from a running one (`M0_HALT_BLIND_DOTS`,
+`docs/gb-failure-triage.md` A5), not because half the suite runs as an AGS.
 
 **Line 153** (`line_153_ly_{a..d}.s`): LY reads 152 at `nops 4`, 153 at
 `nops 5`, and at `nops 6` `.ifdef DMG / RESULT 0 / .else / RESULT 153` — on

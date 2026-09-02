@@ -32,6 +32,7 @@ PPU.
 - [**Usage**](docs/usage.md) — loading ROMs, BIOS files, save files, GB renderer choice
 - [**Multiplayer**](docs/link-usage.md) — local 2P, online room codes, native TCP
 - [**Building**](docs/building.md) — native, WebAssembly, and Windows cross-builds
+- [**Everything else**](docs/README.md) — the index of every reference doc: hardware derivations, test-suite sources and triage, hardware-probe catalogue, tool kits
 
 ## Acknowledgements
 

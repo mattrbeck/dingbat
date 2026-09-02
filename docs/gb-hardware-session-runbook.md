@@ -35,7 +35,8 @@ renders raw hex and bakes no expectation.
   `STAT_M0_TAIL_MAX_MC` (gb.nim), reopening ~60 rows; `LD A,(C)` one step
   later → the rule stands. Run on DMG/MGB.
 - **(b)** the extension window's position (dingbat CGB dot 91) and whether a
-  DMG has one (gambatte's 11–14-dot DMG bracket is reproduced by no engine).
+  DMG has one (the gambatte ROMs bracket a DMG window at 11–14 dots; dingbat
+  has none).
 - **(c)** band edge and glitch column together → acid-hell and daid cannot be
   read from one anchor; four dots apart → the emission/fetch-grid split is
   real. Needs corner registration marks in the ROM first.
