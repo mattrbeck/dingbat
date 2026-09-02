@@ -66,11 +66,10 @@ void main() {
 """
 
 # Color correction has one model per panel (selected by panel_gbc):
-#  - GBA: mGBA-style AGB model (linearize with lcdGamma 4.0, mix, re-gamma)
-#  - GB/GBC: Pokefan531's hardware-measured "GBC-Color" model — the CGB
-#    panel is far less washed out than the AGB's, so the GBA curve would
-#    crush its colors. Both match the wasm build's LUTs and the screenshot
-#    path (bgr555_to_rgb) exactly.
+#  - GBA: AGB colour model: linearize γ4.0, mix, re-gamma (Assumed; matches
+#    bgr555_to_rgb and the wasm LUT)
+#  - GB/GBC: Pokefan531's "GBC-Color" model. The CGB panel is far less washed
+#    out than the AGB's, so the GBA curve would crush its colors.
 #
 # Upscale filters: the hq4x- and xBR-style branches follow the public
 # algorithm descriptions. Mirrored in web/glpresent.js's GLSL ES shader.
@@ -428,9 +427,7 @@ type AppState = ref object
   pending_save:    bool
   pending_load:    bool
   pending_step:    bool  # frame advance: run exactly one frame while paused
-  # A refused save state used to be an echo to stdout and a screen that did not
-  # change — the user pressed Load and nothing happened. This is what the app
-  # says instead; render_state_notice draws it and it clears on dismissal.
+  # Set when a save state is refused; render_state_notice draws it.
   state_notice:      string
   state_notice_hint: string
   rewind:          Rewind
@@ -441,16 +438,13 @@ type AppState = ref object
   # so the socket stays pumped and the two sides stay in sync; rewind, frame
   # advance, turbo and save-state load are suppressed (they would desync).
   netlink:         NetLink
-  # UI-driven link setup (ImGui "Link Cable" window). No CLI port needed:
-  # the user picks Host or Join at runtime; establishment is non-blocking so
-  # the UI keeps rendering while waiting for a peer.
+  # ImGui "Link Cable" window; establishment is non-blocking so the UI keeps
+  # rendering while waiting for a peer.
   link_window:     bool
   link_window_prev: bool   # previous frame's link_window, to detect open/close
   link_setup:      LinkSetup
-  # Zero-config auto-pairing: opening the Link Cable window immediately probes
-  # 127.0.0.1 and, failing that, hosts — alternating until a peer appears. The
-  # underlying socket phase is still tracked by link_setup; this flag just marks
-  # that the connect/listen alternation is being driven automatically.
+  # Zero-config auto-pairing: probe 127.0.0.1, failing that host, alternating
+  # until a peer appears. link_setup still tracks the socket phase.
   link_auto:       bool
   link_server:     Socket
   link_client:     Socket
@@ -464,14 +458,11 @@ type AppState = ref object
 
 var app: AppState
 
-# Emulated-frames FPS, updated once a second by update_fps_title and shown in
-# the debug overlay alongside the ImGui (UI) framerate
+# Emulated-frames FPS (not the UI framerate), updated once a second
 var emu_fps = 0.0
 
-# LCD response (common/lcd_response.nim): the per-pixel panel model that
-# replaced interframe blending. Presentation-only — emulation state is
-# untouched, so the setting is safe to change live. The cell state is dropped
-# on ROM load, so a stale ghost can't smear across cores.
+# LCD response (common/lcd_response.nim): per-pixel panel model,
+# presentation-only, so safe to change live. Cell state is dropped on ROM load.
 var lcd_resp: LcdResponse
 
 # MBC5 rumble (GB cart types 0x1C-0x1E): update_rumble polls the cart's motor
@@ -519,15 +510,13 @@ proc extract_zip_rom(zip_path: string): string =
     ""
 
 proc apply_color_correction() =
-  ## Push the config's color-correction flag into the game shader uniform
   glUseProgram(app.game_shader)
   let loc = glGetUniformLocation(app.game_shader, "color_correct")
   glUniform1i(loc, GLint(if app.cfg.color_correction: 1 else: 0))
 
 proc sgb_border_active(): bool =
-  ## Should this present composite a Super Game Boy border? Four conditions,
-  ## and the last one is the one that keeps the window from resizing for a
-  ## cart that colours its screen but ships no border art.
+  ## The last condition keeps the window from resizing for a cart that
+  ## colours its screen but ships no border art.
   app.emu_kind == ekGB and app.gb_emu != nil and
     app.cfg.sgb_enable and app.cfg.sgb_border and app.gb_emu.sgb_has_border()
 
@@ -548,14 +537,8 @@ proc resize_to_output() =
   setSize(app.window, cint(w * app.scale), cint(h * app.scale))
 
 proc game_viewport(): (GLint, GLint, GLint, GLint) =
-  ## The letterboxed rect the game quad is drawn into.
-  ##
-  ## dingbat used to stretch the quad across the whole window, which is
-  ## invisible as long as the window keeps the size load_rom gave it and
-  ## obviously wrong the moment it does not -- fullscreen on a 16:9 panel
-  ## stretched a 10:9 Game Boy picture by 1.6x horizontally. It matters more
-  ## now: an SGB border switches the picture from 10:9 to 8:7 part way into a
-  ## session, so a window sized for one aspect has to letterbox the other.
+  ## The letterboxed rect the game quad is drawn into. An SGB border switches
+  ## the picture from 10:9 to 8:7 mid-session, so one window must fit both.
   var ww, wh: cint
   getSize(app.window, ww, wh)
   let (ow, oh) = output_size()
@@ -591,7 +574,6 @@ proc apply_master_volume() =
     app.gb_emu.apu.set_master_volume(app.cfg.volume, app.cfg.mute)
 
 proc apply_pitch_correct_ff() =
-  # Suspended (not overwritten) while speed mode is on
   let eff = app.cfg.pitch_correct_ff and not app.cfg.speed_mode
   if app.gba_emu != nil:
     app.gba_emu.apu.set_pitch_correct_ff(eff)
@@ -600,25 +582,20 @@ proc apply_pitch_correct_ff() =
 
 proc apply_audio_lowpass() =
   # Analog-output low-pass models the GBA's cap/speaker smoothing; only the
-  # GBA DirectSound path has the FIFO imaging it targets. Suspended (not
-  # overwritten) while speed mode is on.
+  # GBA DirectSound path has the FIFO imaging it targets.
   if app.gba_emu != nil:
     app.gba_emu.apu.set_audio_lowpass(app.cfg.audio_lowpass and
                                       not app.cfg.speed_mode)
 
 proc apply_mp2k_hle() =
-  # Experimental MP2K sound-engine HLE. Arming the flag costs nothing on its
-  # own — the HLE only engages when the runtime detection recognizes the
-  # engine in the loaded game (mp2k.nim), so this is safe to leave on.
+  # Arming costs nothing: the HLE engages only when mp2k.nim's runtime
+  # detection recognizes the engine in the loaded game.
   if app.gba_emu != nil:
-    # Suspended (not overwritten) while speed mode is on
     app.gba_emu.mp2k_hle = app.cfg.mp2k_hle and not app.cfg.speed_mode
 
 proc apply_fifo_interp() =
-  # DirectSound FIFO interpolation (true-phase cubic reconstruction). Off is
-  # the hardware-accurate mode — bit-true DAC output including its grit.
+  # DirectSound FIFO interpolation (cubic). Off is bit-true DAC output.
   if app.gba_emu != nil:
-    # Suspended (not overwritten) while speed mode is on
     app.gba_emu.apu.set_fifo_interp(app.cfg.fifo_interp and
                                     not app.cfg.speed_mode)
 
@@ -633,7 +610,8 @@ proc apply_speed_mode() =
     # Honored only by the scanline renderer (forced at the next ROM load
     # while the mode is on); the FIFO renderer ignores the field.
     app.gb_emu.ppu.frameskip = if app.cfg.speed_mode: 1 else: 0
-  # The audio niceties read speed_mode through their own apply procs
+  # The audio niceties are suspended (not overwritten) while speed mode is
+  # on; each apply proc reads speed_mode itself
   apply_mp2k_hle()
   apply_fifo_interp()
   apply_pitch_correct_ff()
@@ -680,7 +658,6 @@ proc load_rom(path: string) =
     setSize(app.window, cint(GBA_W * app.scale), cint(GBA_H * app.scale))
     app.dbg = new_gba_debug(app.gba_emu)
     app.gb_dbg = nil
-  # Cheats: attach the widget to this core's engine and load the sidecar.
   app.cheats.attach(current_cheat_engine(),
                     if app.emu_kind == ekGBA: cpGBA else: cpGB)
   app.cheats.on_change = on_cheats_changed
@@ -704,7 +681,6 @@ proc load_rom(path: string) =
   let (tw, th) = if app.emu_kind == ekGBA: (GBA_W, GBA_H) else: (GB_W, GB_H)
   glTexImage2D(GL_TEXTURE_2D, 0, GLint(GL_RGB5), GLsizei(tw), GLsizei(th), 0,
                GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, nil)
-  # Update recents
   var recs = app.cfg.recents
   let idx = recs.find(path)
   if idx >= 0: recs.delete(idx)
@@ -804,9 +780,8 @@ proc load_state_slot(slot: int): bool =
   if result: echo "State loaded: ", path
 
 proc state_reject_sentence(): string =
-  ## One sentence per refusal cause, saying what to do about it. The core
-  ## classifies the refusal (StateRejectKind); this never echoes raw exception
-  ## text at the user, and never collapses two causes onto one message.
+  ## One sentence per StateRejectKind, saying what to do about it; never raw
+  ## exception text, never two causes on one message.
   case last_state_reject_kind
   of srkNotAState:
     "That file isn't a dingbat save state."
@@ -825,9 +800,7 @@ proc state_reject_sentence(): string =
     "That save state is damaged and can't be loaded. The game is still " &
     "running and nothing was changed."
   of srkNoFile:
-    # The common one, now that Quick Load reports at all: pressing the key
-    # before ever saving used to do nothing, and telling that person their
-    # file is damaged would be worse than saying nothing.
+    # The common one: Quick Load before any Quick Save. Not "damaged".
     "There's no save state in that slot yet."
   of srkNone:
     "That save state couldn't be loaded."
@@ -887,9 +860,6 @@ proc process_pending_state() =
     app.save_states.mark_stale()
   if app.pending_load:
     app.pending_load = false
-    # Quick Load is a keypress with no widget behind it, so a discarded bool
-    # here meant the user pressed the key and NOTHING happened — not even a
-    # line they would see. It is the one outcome a refusal must never produce.
     if not load_state_slot(0):
       app.state_notice = state_reject_sentence()
       app.state_notice_hint = last_state_error
@@ -929,9 +899,8 @@ proc bgr555_to_rgb(px: uint16; correct, gbc: bool): array[3, byte] =
     result[2] = byte(round(b5 * 255.0))
 
 proc save_screenshot() =
-  ## Write the current frame to config_dir/screenshots/<rom>-<timestamp>.png.
-  ## Applies LCD color correction to match the on-screen image when the
-  ## setting is enabled — parity with the web front-end's screenshot button.
+  ## Write the current frame to config_dir/screenshots/<rom>-<timestamp>.png,
+  ## colour-corrected when the setting is on so it matches the screen.
   if app.emu_kind == ekNone: return
   let border = sgb_border_active()
   let (w, h) = output_size()
@@ -948,8 +917,7 @@ proc save_screenshot() =
   if border:
     # Same composite the shader does: backdrop, Game Boy window at (48, 40),
     # then opaque border pixels on top. The border is native SNES art, so it
-    # does NOT get the LCD colour-correction curve — matching what is on
-    # screen is the whole point of this path.
+    # does NOT get the LCD colour-correction curve.
     let s = app.gb_emu
     let bp = cast[ptr UncheckedArray[uint16]](s.sgb_border_ptr())
     let backdrop = s.sgb_backdrop()
@@ -1078,14 +1046,10 @@ proc render_game() =
   if app.emu_kind != ekNone:
     glUseProgram(app.game_shader)
     glBindTexture(GL_TEXTURE_2D, app.game_texture)
-    # Pushed every present (like the logo uniforms): the Settings window's
-    # Apply has no callback into this module, so a cached value could go stale.
-    # The LCD grid and the RGB-subpixel mask are choices of the same Filter
-    # selector now (mutually exclusive with the smoothing filters by
-    # construction), but they stay separate shader stages: filter_mode only
-    # carries the smoothing algorithms. Speed mode suspends the whole
-    # selector — smoothing and screen looks alike (xBR measured +1.01 ms GPU
-    # at 2160p); the choice keeps its state for when the mode turns off.
+    # Pushed every present: the Settings window's Apply has no callback into
+    # this module, so a cached value could go stale. The grid and subpixel
+    # looks are separate shader stages; filter_mode only carries the
+    # smoothing algorithms. Speed mode suspends the whole selector.
     let vf = if app.cfg.speed_mode: vfNone else: app.cfg.video_filter
     glUniform1i(glGetUniformLocation(app.game_shader, "lcd_grid"),
                 GLint(if vf == vfGrid: 1 else: 0))
@@ -1162,10 +1126,8 @@ proc render_game() =
       glViewport(nx, ny, GLsizei(nw), GLsizei(nh))
     upload_frame(addr app.gb_emu.ppu.framebuffer[0], GB_W, GB_H)
     if rumble_on:
-      # ±1 px viewport jitter, alternating per present, while the cart's
-      # rumble motor runs. Only the viewport origin moves (the quad and
-      # texture are untouched), and it's restored right after the draw so
-      # ImGui renders unshaken.
+      # ±1 px viewport jitter, alternating per present; restored right after
+      # the draw so ImGui renders unshaken.
       rumble_flip = not rumble_flip
       let off: GLint = if rumble_flip: 1 else: -1
       let (jx, jy, jw, jh) = game_viewport()
@@ -1187,11 +1149,9 @@ proc show_menu_bar(): bool =
 proc render_link_window()  # defined below, near the network-link procs
 
 proc render_state_notice() =
-  ## What the app says when a save state is refused. Before this, a refused
-  ## Quick Load was an echo to stdout and a screen that did not change: the
-  ## user pressed the key and nothing happened, which is the worst outcome
-  ## available. Modal on purpose — it is always the direct result of something
-  ## the user just did, so it never appears unbidden.
+  ## What the app says when a save state is refused (a silent refusal reads
+  ## as "nothing happened"). Modal on purpose: it is always the direct result
+  ## of something the user just did, so it never appears unbidden.
   if app.state_notice.len == 0: return
   const POPUP = "State##notice"
   if not igIsPopupOpen_Str(POPUP, 0):
@@ -1214,12 +1174,9 @@ proc render_state_notice() =
     igTextUnformatted(cstring(app.state_notice), nil)
     if app.state_notice_hint.len > 0:
       igSpacing()
-      # The detail line is for someone reporting a bug, not for reading first:
-      # dimmed, below, and never the whole message. Through "%s" and not as the
-      # format string itself: this is the one igTextDisabled call in the tree
-      # whose text is not a literal — it carries core wording built from the
-      # FILE's own bytes, and a '%' in there would read arguments that were
-      # never pushed.
+      # Through "%s", not as the format string: the hint carries core wording
+      # built from the FILE's own bytes, and a '%' in there would read
+      # arguments that were never pushed.
       igTextDisabled("%s", cstring(app.state_notice_hint))
     igPopTextWrapPos()
     igSpacing()
@@ -1247,10 +1204,8 @@ proc render_imgui() =
      (app.gb_dbg == nil or not app.gb_dbg.any_window_open) and
      not app.link_window and not app.cheats.window and
      not app.save_states.window and
-     # A refused Quick Load is a keypress, and the menu bar hides itself after
-     # three idle seconds — exactly the state the keyboard is used in. Without
-     # this the notice would be skipped and the refusal would be silent again,
-     # which is the whole bug it exists to fix.
+     # The menu bar hides after three idle seconds, exactly the state a Quick
+     # Load keypress lands in; the notice must still be drawn then.
      app.state_notice.len == 0:
     return
 
@@ -1263,7 +1218,6 @@ proc render_imgui() =
 
   if menu_visible:
     if igBeginMainMenuBar():
-      # File menu
       if igBeginMenu("File", true):
         if igMenuItem_Bool("Open ROM", nil, false, true):
           open_rom = true
@@ -1296,7 +1250,6 @@ proc render_imgui() =
           app.running = false
         igEndMenu()
 
-      # Emulation menu
       if igBeginMenu("Emulation", true):
         var should_reset = false
         discard igMenuItem_BoolPtr(cstring("Reset  " & MOD_KEY_STR & "+R"),
@@ -1311,9 +1264,8 @@ proc render_imgui() =
           if not app.cfg.rewind:
             app.rewind.clear()  # free the history when disabled
           save_config(app.cfg)
-        # Speed mode: the low-end preset — GBA frameskip + 2x emulated-CPU
-        # underclock, GB scanline renderer at next load, rewind suspended.
-        # Advertised as less accurate on purpose.
+        # Speed mode: GBA frameskip + 2x emulated-CPU underclock, GB scanline
+        # renderer at next load, rewind suspended.
         if igMenuItem_BoolPtr("Speed mode (less accurate)", nil,
                               addr app.cfg.speed_mode, true):
           if app.cfg.speed_mode:
@@ -1345,19 +1297,15 @@ proc render_imgui() =
         if should_reset and app.cfg.recents.len > 0:
           load_rom(app.cfg.recents[0])
         igSeparator()
-        # Cheats live here, not under Debug: they're a first-class feature (the
-        # web UI agrees) and users look for them next to the other things that
-        # change a running game.
+        # Cheats live here, not under Debug: a first-class feature, next to
+        # the other things that change a running game.
         discard igMenuItem_BoolPtr("Cheats", nil, addr app.cheats.window,
                                    app.emu_kind != ekNone)
-        # Network link: opens the Host/Join window (GBA only). No CLI port
-        # needed — the user picks a role and address at runtime.
         if igMenuItem_Bool("Link Cable...", nil, app.link_window,
                            app.emu_kind == ekGBA):
           app.link_window = not app.link_window
         igEndMenu()
 
-      # Audio/Video menu
       if igBeginMenu("Audio/Video", true):
         var vol = cint(app.cfg.volume)
         igSetNextItemWidth(120.0)
@@ -1370,36 +1318,29 @@ proc render_imgui() =
         if igMenuItem_BoolPtr("Mute", nil, addr app.cfg.mute, true):
           apply_master_volume()
           save_config(app.cfg)
-        # WSOLA time-stretch keeps 2x audio at normal pitch (instead of the
-        # classic octave-up). Off by default; slightly more CPU at 2x.
-        # All the audio niceties below (and Rewind above) gray out while
-        # speed mode is on: the mode suspends them, and a live-looking
-        # control that does nothing is worse than a disabled one.
+        # WSOLA time-stretch keeps 2x audio at normal pitch. The audio
+        # niceties below (and Rewind above) gray out while speed mode is on:
+        # a live-looking control that does nothing is worse than a disabled one.
         if igMenuItem_BoolPtr("Pitch-correct fast-forward", nil,
                               addr app.cfg.pitch_correct_ff,
                               not app.cfg.speed_mode):
           apply_pitch_correct_ff()
           save_config(app.cfg)
-        # DirectSound FIFO interpolation. ON (default): reconstructs the
-        # waveform between hardware samples (cleaner treble). OFF: bit-true
-        # GBA DAC output, including its characteristic grit. GBA only.
+        # ON: reconstructs the waveform between FIFO samples. OFF: bit-true
+        # GBA DAC output, grit included.
         if igMenuItem_BoolPtr("Audio interpolation", nil,
                               addr app.cfg.fifo_interp,
                               app.emu_kind == ekGBA and not app.cfg.speed_mode):
           apply_fifo_interp()
           save_config(app.cfg)
-        # Gentle analog-output low-pass modeling the GBA's output filter.
         # Pair with interpolation off for the closest real-hardware sound.
-        # Off by default → output bit-identical to unfiltered. GBA only.
         if igMenuItem_BoolPtr("Analog filter", nil,
                               addr app.cfg.audio_lowpass,
                               app.emu_kind == ekGBA and not app.cfg.speed_mode):
           apply_audio_lowpass()
           save_config(app.cfg)
-        # Sound-engine HLE: re-renders supported games' music engines at
-        # higher quality; changes the mix character, and supersedes
-        # interpolation for the music stream when engaged. Auto-engages
-        # per-game on detection, other games unaffected. Off by default.
+        # Sound-engine HLE: changes the mix character and supersedes
+        # interpolation for the music stream when engaged (per-game detection).
         if igMenuItem_BoolPtr("Enhanced music synthesis (HLE)", nil,
                               addr app.cfg.mp2k_hle, not app.cfg.speed_mode):
           apply_mp2k_hle()
@@ -1437,7 +1378,6 @@ proc render_imgui() =
           igEndMenu()
         igEndMenu()
 
-      # Debug menu
       if igBeginMenu("Debug", true):
         discard igMenuItem_BoolPtr("Overlay", nil, addr app.enable_overlay, true)
         igSeparator()
@@ -1457,16 +1397,13 @@ proc render_imgui() =
       overlay_h += win_size.y
       igEndMainMenuBar()
 
-  # File explorer
   app.fe.render("ROM", open_rom, ["gba", "gb", "gbc", "zip"], proc(path: string) =
     load_rom(path))
 
   render_state_notice()
 
-  # Config editor
   app.ce.render()
 
-  # Overlay
   if app.enable_overlay:
     igSetNextWindowPos(ImVec2(x: 10, y: overlay_h), cint(ImGui_Cond_Always),
                        ImVec2(x: 0, y: 0))
@@ -1566,7 +1503,6 @@ proc emu_pad_input(inp: Input; pressed: bool) =
   of ekNone: discard
 
 proc bound_button_held(inp: Input): bool =
-  # Is any controller button that maps to `inp` currently held?
   for btn, v in app.cfg.controller_bindings.pairs:
     if v == inp:
       for pad in controllers.values:
@@ -1593,12 +1529,9 @@ proc set_fast_forward(held: bool) =
   of ekNone: discard
 
 proc update_rumble() =
-  ## Poll the cart's rumble motor — GB MBC5 rumble carts, or GBA GPIO rumble
-  ## carts (Drill Dozer, WarioWare: Twisted!) — and drive controller
-  ## vibration: 80 ms effects re-triggered every 50 ms chain into a
-  ## continuous buzz while the motor stays on. render_game reads rumble_on
-  ## for the viewport shake. Effects die out on their own, but stopping
-  ## explicitly on the off edge keeps short pulses crisp.
+  ## 80 ms effects re-triggered every 50 ms chain into a continuous buzz
+  ## while the motor stays on; stopping explicitly on the off edge keeps
+  ## short pulses crisp.
   let was_on = rumble_on
   let motor_on =
     case app.emu_kind
@@ -1670,10 +1603,9 @@ proc handle_input() =
         if app.cfg.keybindings.hasKey(sym):
           app.gba_emu.handle_input(app.cfg.keybindings[sym], pressed)
         elif sym == K_TAB and pressed and app.netlink == nil:
-          # Turbo/fast-forward are suppressed while linked (they would run
-          # ahead of the peer). Shift+Tab = 2x speed, Tab = unbounded fast
-          # forward; the two are
-          # mutually exclusive (fast forward would silently dominate 2x)
+          # Suppressed while linked (would run ahead of the peer). Shift+Tab
+          # = 2x, Tab = unbounded; mutually exclusive, since fast forward
+          # would silently dominate 2x
           if (mods and KMOD_SHIFT_MASK) != 0:
             app.gba_emu.apu.turbo = not app.gba_emu.apu.turbo
             if app.gba_emu.apu.turbo: app.gba_emu.apu.sync = true
@@ -1695,7 +1627,6 @@ proc handle_input() =
             app.gb_emu.apu.toggle_sync()
             if not app.gb_emu.apu.sync: app.gb_emu.apu.turbo = false
         elif pressed and sym >= K_1 and sym <= K_4:
-          # Feedback is visible in the Audio/Video > Channels submenu
           let ch = int(sym) - int(K_1)
           app.gb_emu.apu.channel_mask[ch] = not app.gb_emu.apu.channel_mask[ch]
 
@@ -1772,7 +1703,7 @@ var fps_last_time = getTime()
 var fps_second    = getTime().toUnix() mod 60
 
 proc update_fps_title(emulated: bool) =
-  # Count emulated frames only: the main loop now iterates at the display's
+  # Count emulated frames only: the main loop iterates at the display's
   # refresh rate even when emulation is paced slower by audio sync
   if emulated: inc fps_frames
   let now = getTime()
@@ -1791,8 +1722,6 @@ proc update_fps_title(emulated: bool) =
     fps_frames = 0
     fps_us     = 0
     fps_second = cur_sec
-
-# ──────────────────────────── GL proc loader ────────────────────────────
 
 proc gl_loader(name: cstring): pointer = glGetProcAddress(name)
 
@@ -1821,8 +1750,7 @@ const LINK_AUTO_CONNECT_TRIES = 3
 proc finish_link(sock: Socket; id: int; delay_ms = 0): bool =
   ## Run the HELLO handshake over an already-connected socket; on success bind
   ## the link to the local core (and drop rewind history, which would desync).
-  ## Shared by the CLI flags and the ImGui "Link Cable" window. Returns false
-  ## (closing the socket) on a rejected handshake.
+  ## Returns false (closing the socket) on a rejected handshake.
   try:
     app.netlink = new_net_link(app.gba_emu, sock, id,
                                crc32(readFile(current_rom_path())),
@@ -1832,9 +1760,9 @@ proc finish_link(sock: Socket; id: int; delay_ms = 0): bool =
     app.rewind.clear()
     app.rewinding = false
     app.link_status = "Linked as " & (if id == 0: "host (unit 0)" else: "guest (unit 1)")
-    app.link_auto = false  # auto-pair, if it was running, is done
-    # Leave app.link_window as-is: keep the window open so it shows the paired
-    # status and Disconnect control (the user closes it when they're done).
+    app.link_auto = false
+    # app.link_window stays as-is so the window shows the paired status and
+    # Disconnect control.
     true
   except NetLinkError as e:
     echo "NETLINK: handshake failed: ", e.msg
@@ -1845,10 +1773,9 @@ proc finish_link(sock: Socket; id: int; delay_ms = 0): bool =
 
 proc establish_netlink(rom_path: string; listen_port: int; connect_to: string;
                        delay_ms: int): NetLink =
-  ## Open a TCP link for the desktop app and run the HELLO handshake, mirroring
-  ## the test harness. `--listen` becomes unit 0 (host); `--connect HOST:PORT`
-  ## unit 1 (guest). Returns nil (printing the reason) on any failure so the
-  ## caller falls back to normal single-player. GBA-only; ROM already loaded.
+  ## `--listen` becomes unit 0 (host); `--connect HOST:PORT` unit 1 (guest).
+  ## Returns nil (printing the reason) on any failure so the caller falls
+  ## back to single-player.
   if app.emu_kind != ekGBA or app.gba_emu == nil:
     echo "NETLINK: link mode needs a GBA ROM; continuing single-player"
     return nil
@@ -1904,7 +1831,6 @@ proc establish_netlink(rom_path: string; listen_port: int; connect_to: string;
     result = nil
 
 proc link_ready(): bool =
-  ## The link menu/window is only usable with a running GBA core.
   app.emu_kind == ekGBA and app.gba_emu != nil
 
 proc link_cancel_setup() =
@@ -1920,9 +1846,8 @@ proc link_cancel_setup() =
   app.link_setup = lsNone
 
 proc link_auto_start() =
-  ## Begin zero-config auto-pairing on localhost. Start by probing for an
-  ## existing host on 127.0.0.1:LINK_DEFAULT_PORT (reusing the non-blocking
-  ## connect machinery); service_link_setup flips to hosting if nobody answers.
+  ## Probe for an existing host on 127.0.0.1:LINK_DEFAULT_PORT first;
+  ## service_link_setup flips to hosting if nobody answers.
   if not link_ready() or app.netlink != nil or app.link_auto or
      app.link_setup != lsNone:
     return
@@ -1934,8 +1859,6 @@ proc link_auto_start() =
   echo "NETLINK: auto-pair — probing 127.0.0.1:", LINK_DEFAULT_PORT
 
 proc link_auto_stop() =
-  ## Cancel auto-pairing and tear down any listening/connecting socket exactly
-  ## as the manual Cancel path does. No-op once a link is established.
   if not app.link_auto: return
   link_cancel_setup()
   app.link_auto = false
@@ -2033,9 +1956,8 @@ proc service_link_setup() =
   of lsNone: discard
 
 proc render_link_advanced() =
-  ## The manual Host/Join controls, unchanged in behavior, tucked behind a
-  ## collapsed "Advanced" header. Either button first cancels auto-pairing so a
-  ## manual action behaves exactly as it did before zero-config existed.
+  ## Manual Host/Join behind a collapsed "Advanced" header; either button
+  ## first cancels auto-pairing.
   if igCollapsingHeader_TreeNodeFlags("Advanced", 0):
     igSetNextItemWidth(120)
     discard igInputInt("Port", addr app.link_port, 1, 100, 0)
@@ -2151,8 +2073,6 @@ proc main() =
         capture_after = parseInt(parts[0])
         capture_path  = if parts.len > 1: parts[1] else: "capture.png"
       of "link-auto":
-        # Debug/verification: kick off the same zero-config auto-pair the Link
-        # Cable window does, without touching the GUI. Mirrors opening it.
         link_auto = true
       else: echo "Unknown option: --" & p.key; system.quit(1)
     of cmdArgument:
@@ -2178,7 +2098,6 @@ proc main() =
       cfg.use_hle = false
   if cli_run_bios: cfg.run_bios = true
 
-  # SDL2 init
   when defined(windows):
     # Per-monitor DPI awareness (SDL >= 2.24): render at native pixels
     # instead of letting DWM bitmap-stretch the window on scaled displays
@@ -2187,7 +2106,6 @@ proc main() =
     echo "SDL2 init failed: ", $sdl2.getError(); system.quit(1)
   defer: sdl2.quit()
 
-  # Set GL attributes before window creation
   when defined(macosx):
     discard glSetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG)
   discard glSetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE)
@@ -2213,11 +2131,9 @@ proc main() =
   defer: glDeleteContext(gl_ctx)
   discard glSetSwapInterval(0)  # disable vsync
 
-  # Load OpenGL function pointers
   if not gladLoadGL(gl_loader):
     echo "Failed to load OpenGL extensions"; system.quit(1)
 
-  # GL setup
   glClearColor(60.0'f32/255, 61.0'f32/255, 107.0'f32/255, 1.0'f32)
   let game_tex = setup_game_texture()
   let border_tex = setup_border_texture()
@@ -2229,7 +2145,6 @@ proc main() =
   glEnable(GL_BLEND)
   glUseProgram(logo_shader)
 
-  # ImGui setup
   discard igCreateContext(nil)
   igStyleColorsDark(nil)
   let io_ptr = igGetIO_Nil()
@@ -2237,7 +2152,6 @@ proc main() =
                                         cast[pointer](gl_ctx))
   discard ImGui_Impl_opengl3_Init("#version 330")
 
-  # Frontend objects
   let fe = new_file_explorer(cfg)
   let ce = new_config_editor(cfg, fe)
   # "Reset to Defaults" changes color-correction and volume, which no widget
@@ -2282,12 +2196,8 @@ proc main() =
   app.save_states.on_open = proc() = refresh_state_slots()
   app.save_states.on_save = proc(slot: int) = discard save_state_slot(slot)
   app.save_states.on_load = proc(slot: int) =
-    # Surface WHY a load was refused. The core distinguishes a wrong ROM
-    # from a newer-build file from a corrupt section; discarding the bool
-    # left the user with a silently unchanged screen.
     if not load_state_slot(slot):
-      # Same sentence-per-cause table the Quick Load path uses, instead of the
-      # core's raw wording. The detail stays available in the log.
+      # Same sentence-per-cause table as Quick Load; raw wording goes to the log.
       app.save_states.notice = state_reject_sentence()
       if last_state_error.len > 0:
         echo "Slot load refused: ", last_state_error
@@ -2313,8 +2223,8 @@ proc main() =
       app.netlink = establish_netlink(rom_path, listen_port, connect_to,
                                       netlink_delay)
     elif link_auto:
-      # Mirror opening the Link Cable window: open it so update_link_auto's
-      # open-edge detection kicks off zero-config auto-pairing.
+      # Opening the window is what update_link_auto's open-edge detection
+      # keys on.
       if link_ready():
         app.link_window = true
       else:
@@ -2339,19 +2249,9 @@ proc main() =
      display_mode.refresh_rate > 0:
     present_interval = uint32(1000 div display_mode.refresh_rate)
   var last_present = getTicks()
-  # Pacing diagnostics (env-gated): DINGBAT_PACING_LOG=1 prints one line per
-  # second with emulated-frame counts and SDL audio queue depth bounds, for
-  # verifying that audio-sync pacing holds the hardware frame rate (59.7275)
-  # without draining the queue (qmin=0 would mean an underrun)
-  # ── Wall-clock frame scheduler (normal-speed play) ──────────────────────
-  # Releasing frames purely on audio-queue depth tied the emulation cadence to
-  # the queue's push/drain granularity, which jittered frame spacing (and so
-  # input latency) by most of a frame. Normal play instead runs each frame on
-  # a fixed 16.743 ms wall-clock slot (280896 cycles / 16.777216 MHz; the GB
-  # frame is the same period) and uses the audio queue only as a bounds check:
-  # refill immediately when it nears underrun, hold the slot if it ran away.
-  # Turbo (2x) and fast-forward keep pure audio pacing — their frame rate is
-  # intentionally not the hardware rate.
+  # Normal play: fixed 16.743 ms wall-clock slot (280896 cycles / 16.777216
+  # MHz; the GB frame is the same period); the audio queue is a bounds check
+  # only. Turbo and fast-forward keep pure audio pacing.
   let sched_freq = getPerformanceFrequency()
   let frame_ticks = sched_freq * 280896'u64 div 16777216'u64
   var next_frame_due = getPerformanceCounter()
@@ -2365,11 +2265,9 @@ proc main() =
       # backlog of missed slots
       next_frame_due = now
     if queued > high: return false  # queue ran away: hold until it drains
-    # Underrun guard with hysteresis: once the queue dips below `low`, burst
-    # frames until it reaches `target`. Stopping at `low` itself would park
-    # the steady-state level right on the threshold, so every frame would
-    # re-trigger an early refill and the cadence would follow the audio
-    # drain granularity again instead of the wall clock.
+    # Hysteresis: below `low`, burst until `target`. Stopping at `low` would
+    # park the steady state on the threshold and the cadence would follow the
+    # audio drain granularity instead of the wall clock.
     if queued < low: sched_refilling = true
     if sched_refilling:
       if queued < target: return true
@@ -2404,6 +2302,8 @@ proc main() =
     # f32 stereo is 8 B/frame: the same time bounds are 2048/6144/16384 B
     scheduler_frame_due(apu.audio_queued_bytes(), 2048, 6144, 16384)
 
+  # DINGBAT_PACING_LOG=1: one line per second with emulated-frame counts and
+  # audio queue depth bounds (qmin=0 would mean an underrun)
   let pacing_log = getEnv("DINGBAT_PACING_LOG").len > 0
   var pace_frames = 0
   var pace_total  = 0
@@ -2411,13 +2311,11 @@ proc main() =
   var pace_max_q  = 0'u32
   var pace_start  = 0'u32
   var pace_last   = 0'u32
-  # Input-latency self-test (env-gated): DINGBAT_LATENCY_TEST=<trials> injects
-  # a synthetic UP press at the same point in the loop where polled SDL key
-  # events are applied, then measures wall-clock time until (a) the emulated
-  # framebuffer first differs — the core rendered the response — and (b) that
-  # framebuffer reaches glSwapWindow. Needs a GBA ROM whose screen is static
-  # until a keypress and responds on the next frame (tonc m7_demo.gba works:
-  # UP moves the camera). Prints per-trial lines and a summary, then quits.
+  # DINGBAT_LATENCY_TEST=<trials>: inject a synthetic UP press where polled
+  # SDL keys are applied and measure wall-clock time until (a) the framebuffer
+  # first differs and (b) that frame reaches glSwapWindow. Needs a GBA ROM
+  # that is static until a keypress and responds next frame (tonc m7_demo.gba:
+  # UP moves the camera).
   var lat_trials = 0
   try: lat_trials = parseInt(getEnv("DINGBAT_LATENCY_TEST", "0"))
   except ValueError: discard
@@ -2569,16 +2467,14 @@ proc main() =
           pace_max_q = 0
     handle_input()
     update_rumble()
-    update_link_auto()    # start/stop zero-config auto-pair on window open/close
-    service_link_setup()  # non-blocking accept/connect for the Link window
+    update_link_auto()
+    service_link_setup()
     let now = getTicks()
     var presented = false
-    # A freshly emulated frame is presented immediately while emulation runs
-    # at realtime (audio sync on, no turbo): holding it for the next interval
-    # slot added up to a display period of input latency and beat against the
-    # emulation cadence. The interval throttle still bounds present rate when
-    # emulation outruns the display (turbo / fast-forward), and keeps the UI
-    # refreshing when nothing was emulated (paused, menus, audio ahead).
+    # A paced frame is presented immediately: holding it for the next interval
+    # slot would add up to a display period of input latency. The interval
+    # throttle bounds present rate under turbo and keeps the UI refreshing
+    # when nothing was emulated.
     if (emulated and is_paced()) or now - last_present >= present_interval:
       last_present = now
       # Black behind a game so the letterbox bars read as bezel; the brand

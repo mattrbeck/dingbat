@@ -282,7 +282,6 @@ proc wasm_sgb_enable(on: cint) {.exportc.} =
   sgbRequested = on != 0
 
 proc wasm_sgb_active(): cint {.exportc.} =
-  ## 1 when the running core has an SGB adapter.
   if stateKind == ekGB and stateGb != nil and stateGb.sgb_active(): 1 else: 0
 
 proc wasm_sgb_border(): cint {.exportc.} =
@@ -330,13 +329,10 @@ proc wasm_panel_gbc(): cint {.exportc.} =
   if stateKind == ekGB: 1 else: 0
 
 # --- Ambient-glow sampler ---
-# The glow samples what the user SEES, so this composites the way the
-# presenter does (border over Game Boy window over backdrop); it lives here
-# rather than in JS because the colour LUT lives here. It deliberately skips
-# upscale filters (invisible behind the blur), scanlines (a point sample on a
-# dark row would flicker the halo) and letterbox bars (not the picture). The
-# DMG shade palette is passed in, not stored: a presentation choice that never
-# reaches the core, which keeps states, rewind and netplay byte-identical.
+# Composites the way the presenter does (border over Game Boy window over
+# backdrop), skipping upscale filters and scanlines (a point sample on a dark
+# row would flicker the halo). The DMG shade palette is passed in, not
+# stored: it never reaches the core, so states, rewind and netplay stay identical.
 
 var glowBuffer: seq[uint32]
 
@@ -428,7 +424,7 @@ var audioSuppressed = false
 
 # Slow motion: JS doubles the wall-clock step, so the core makes half the
 # samples the AudioContext consumes; emitting each twice restores the rate an
-# octave down (a WSOLA pitch-preserving variant sounded worse).
+# octave down.
 var slowmoStretch = false
 
 proc appendAudioSample(left, right: float32) {.exportc.} =
@@ -548,7 +544,6 @@ proc benchFrames(n: cint) {.exportc.} =
   of ekNone: discard
 
 proc isStopped(): cint {.exportc.} =
-  ## 1 while the GBA is in Stop mode (sleeping), used by the JS frontends
   if stateKind == ekGBA and stateGba != nil and stateGba.cpu.stopped: 1 else: 0
 
 proc wasm_rumble(): cint {.exportc.} =
@@ -570,8 +565,8 @@ proc wasm_set_tilt(x, y: cdouble) {.exportc.} =
       stateGba.bus.tilt_in_x = float(x)
       stateGba.bus.tilt_in_y = float(y)
     elif stateGba.bus.gpio.gyro_present:
-      # Gyro carts are rate sensors: x is the rotation rate (CW positive);
-      # y is unused.
+      # Gyro carts are rate sensors: x is the rotation rate (CW positive,
+      # Assumed); y is unused.
       stateGba.bus.gpio.gyro_z = float(x)
 
 proc wasm_cart_has_tilt(): cint {.exportc.} =
@@ -592,12 +587,9 @@ const GB_SCRUB_THUMB_H  = SCRUB_THUMB_W * GB_H  div GB_W   # 10:9 -> 120x108
 # --- Retroactive clip capture ---
 # A rolling ring of state anchors (one per second) plus a per-frame input log;
 # deterministic replay from the anchor at or before the chosen start rebuilds
-# the frames the player saw while JS records the canvas. Single-core only,
-# never serialized. Its own store rather than a reader of the rewind ring:
-# rewind may be off, it steps backward from the newest state, and it keeps no
-# inputs. Anchors are zlib'd whole payloads; the byte cap below bounds a game
-# that compresses badly by shortening the window. Known divergence: the GBA
-# RTC reads wall clock, so a replayed clock can differ by the clip length.
+# the frames the player saw while JS records the canvas. Separate from the
+# rewind ring: rewind may be off and keeps no inputs. Known divergence: the
+# GBA RTC reads wall clock, so a replayed clock can differ by the clip length.
 
 # Anchors double as the scrubber strip, so one cadence serves both.
 const CLIP_SNAP_INTERVAL = 60          # anchor + thumbnail cadence (frames)
@@ -1051,7 +1043,6 @@ proc loop_tick() {.exportc.} =
                        GB_W * GB_H)
   of ekNone:
     return
-  # JS uploads gamePtr to WebGL2 once per RAF turn (drawGame in web/index.js).
 
 # Run-ahead: each tick runs one canonical frame (audio kept), snapshots,
 # silently runs N more with the same input, presents that future frame and
@@ -1149,7 +1140,6 @@ proc wasm_rewind_pop(): cint {.exportc.} =
       return 0
   except CatchableError:
     return 0
-  # JS draws the restored frame after this returns.
   1
 
 # --- Rewind scrubber (bug-report timeline) ---
@@ -1182,8 +1172,6 @@ proc wasm_rewind_scrub_generate(maxSamples: cint): cint {.exportc.} =
   if rewindHistory == nil or stateKind == ekNone: return 0
   let count = rewindHistory.thumb_count
   if count == 0: return 0
-  # Evenly spaced picks spanning the whole strip; a fixed stride never
-  # reaches the oldest thumbnail when the count doesn't divide.
   let n = min(max(1, int(maxSamples)), count)
   for s in 0 ..< n:
     let i = if n == 1: 0 else: s * (count - 1) div (n - 1)

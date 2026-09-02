@@ -152,7 +152,6 @@ proc check_linktest_unit(g: GBA; unit: int; prefix: string): int =
   check role == expected_role,
     who & " SIOCNT role bits: got 0x" & toHex(role, 2) &
     ", expected 0x" & toHex(expected_role, 2)
-  # The unit must have seen every round's SIOMULTI0/1 slots.
   for k in 0 ..< LINKTEST_ROUNDS:
     let slot0 = g.ew16(k * 2)
     let slot1 = g.ew16(0x400 + k * 2)
@@ -185,7 +184,6 @@ proc check_normlink_unit(g: GBA; unit: int; prefix: string): int =
   let expected_ictl = (if unit == 0: 0x0001'u16 else: 0x0000'u16)
   check ictl == expected_ictl,
     who & " internal-clock bit: got " & $ictl & ", expected " & $expected_ictl
-  # Full-duplex swap: the master receives the slave's byte and vice-versa.
   for k in 0 ..< NORMLINK_ROUNDS:
     let got = g.ew16(k * 2)
     let expected = (if unit == 0: 0xD0'u16 else: 0xC0'u16) or uint16(k)
@@ -357,15 +355,12 @@ proc attach_test(rom, bios_path: string; timeout, attach_after: int): int =
     result.test_output = new_test_output()
     result.post_init()
   let cores = @[make_gba(), make_gba()]
-  # Phase 1: run cable-less (each core keeps its default no-cable driver) —
-  # the ROM sits in its negotiate loop, both units reading SI=1 and waiting.
+  # Cable-less: the ROM sits in its negotiate loop, both units reading SI=1.
   for _ in 0 ..< attach_after:
     for g in cores:
       g.step_frame()
-  # Phase 2: plug the cable in mid-run. new_link rebinds each core's SIO
-  # driver to the lockstep coordinator without touching CPU/memory state.
+  # new_link rebinds each core's SIO driver without touching CPU/memory state.
   let lnk = new_link(cores)
-  # Phase 3: run linked until both finish.
   var frames = 0
   while frames < timeout and
         not (cores[0].linktest_finished() and cores[1].linktest_finished()):
@@ -814,18 +809,15 @@ proc rewind_test(rom_path, bios_path: string): int =
         if snapshots == 20: ref_mid = emu.state_payload()
     echo "REWIND history:    ", rw.len, " snapshots in ", rw.mem_used(),
          " bytes (", ref_mid.len, " bytes/full snapshot)"
-    # Pop back to snapshot 20 (pops return newest first)
     var popped = ""
     for _ in 1 .. (snapshots - 19):
       popped = rw.pop()
     let mid_ok = popped == ref_mid
     echo "REWIND mid-chain:  ", (if mid_ok: "MATCH" else: "MISMATCH")
-    # Apply and make sure the emulator resumes from there
     emu.apply_state_payload(popped)
     let apply_ok = emu.state_payload() == ref_mid
     for _ in 1 .. 10: emu.step_frame()
     echo "REWIND apply:      ", (if apply_ok: "MATCH" else: "MISMATCH")
-    # Walk the rest of the chain to the oldest snapshot
     var last = ""
     while true:
       let s = rw.pop()
@@ -1096,14 +1088,13 @@ proc rollback_test(rom, bios_path: string): int =
       link.cores[0].handle_input(inp, inp in s0)
       link.cores[1].handle_input(inp, inp in s1)
 
-  # Ground truth: every input known upfront.
   let truth = make_link()
   for f in 0 ..< FRAMES:
     truth.apply(script[f][0], script[f][1])
     truth.step_frame()
   let want_sum = truth.state_checksum()
 
-  # Foundation checks — the rollback machinery primitives (all pass today).
+  # Foundation checks: the rollback machinery primitives.
   var foundation = true
   proc note(name: string; ok: bool) =
     echo "ROLLBACK ", (if ok: "ok  " else: "FAIL"), " ", name
@@ -1262,7 +1253,6 @@ proc rollback_net_test(rom, bios_path: string): int =
     if f mod 9 == 0: s1.incl UP
     p0[f] = mask(s0); p1[f] = mask(s1)
 
-  # Ground truth: one link, both inputs applied every frame.
   proc applyMask(link: Link; f: int) =
     for i in 0 ..< 10:
       link.cores[0].handle_input(Input(i), ((p0[f] shr i) and 1) != 0)
@@ -1289,9 +1279,9 @@ proc rollback_net_test(rom, bios_path: string): int =
       if m[0] <= step: a.feed_remote(m[1], m[2]) else: keepBA.add m
     q_ba = keepBA
     if a.head < FRAMES and a.tick(p0[a.head]) == rbAdvanced:
-      q_ab.add((step + DELAY, a.head - 1, p0[a.head - 1]))  # A ships player-0 input
+      q_ab.add((step + DELAY, a.head - 1, p0[a.head - 1]))
     if b.head < FRAMES and b.tick(p1[b.head]) == rbAdvanced:
-      q_ba.add((step + DELAY, b.head - 1, p1[b.head - 1]))  # B ships player-1 input
+      q_ba.add((step + DELAY, b.head - 1, p1[b.head - 1]))
 
   var ok = true
   template check(cond: bool; msg: string) =
@@ -1315,19 +1305,10 @@ proc rollback_net_test(rom, bios_path: string): int =
 
 # ==================== gambatte suite (batched) ====================
 #
-# sinamas' gambatte ROMs from the c-sp/game-boy-test-roms bundle, scored by
-# the bundle's `gambatte/game-boy-test-roms-howto.md` rules:
-#   * every ROM runs exactly 15 LCD frames from the post-boot state, then
-#     the frame is read;
-#   * the device is in the filename: `dmg08` = DMG, `cgb04c` = CGB; most
-#     carry both and are two tests. Nearly all ship a CGB header even for
-#     the DMG half, so the DMG run needs force_dmg;
-#   * the expected value is `_out<hex>` (1..20 digits, may differ per
-#     device), rendered as 8x8 glyphs along the top-left row; an `x` prefix
-#     (`_xout0`, `_xdmg08`) means "not a test";
-#   * some ROMs instead ship <rom>_dmg08.png / _cgb04c.png /
-#     _dmg08_cgb04c.png and are scored on the whole frame.
-# Batched: one process scores a whole list file (~5,000 runs of 15 frames).
+# sinamas' gambatte ROMs from the c-sp/game-boy-test-roms bundle; scoring
+# rules (15 frames, device token, `_out<hex>` glyphs or a PNG) are in
+# tests/README.md. Nearly all ship a CGB header even for the DMG half, so the
+# DMG run needs force_dmg. Batched: one process scores a whole list file.
 
 # Hex-digit glyph bitmaps: 8 rows, one byte per row, bit 7 = leftmost,
 # 1 = black. Harvested from the ROMs' own rendered output with
@@ -1408,11 +1389,10 @@ proc gambatte_batch(list_path, out_path: string; frames, dump_tiles: int): int =
   ## `<dmg|cgb>\t<hex|png>\t<expected>\t<rom path>`; one
   ## `GAM <index> <PASS|FAIL> <detail>` line comes back per input, in order.
   ##
-  ## Verdicts go to `--out=<file>` when given. The runner launches one shard
-  ## per core and does not drain their stdout, so thousands of verdicts into
-  ## an inherited pipe block forever; shell redirection cannot substitute,
-  ## because poEvalCommand is not a shell on Windows (`> out.txt 2>&1` becomes
-  ## three argv entries this parser absorbs).
+  ## Verdicts go to `--out=<file>` when given: the runner does not drain shard
+  ## stdout, so thousands of verdicts into an inherited pipe block forever,
+  ## and shell redirection is no substitute (poEvalCommand is not a shell on
+  ## Windows; see run_sharded_batch in the runner).
   var out_file: File
   let to_file = out_path.len > 0
   if to_file and not out_file.open(out_path, fmWrite):
@@ -1830,7 +1810,6 @@ proc main() =
           test_out.finished = true
       if mode == tmMgbaSuite and test_out.mgba_debug_output.contains("ALL DONE"):
         test_out.finished = true
-    # Screenshot mode: write the 240x160 GBA framebuffer as PPM after running
     if mode == tmScreenshot and screenshot_path.len > 0:
       write_ppm(screenshot_path, emu.ppu.framebuffer, 240, 160, color_mode)
       echo screenshot_path
@@ -1894,13 +1873,10 @@ proc main() =
             text.add(char(b))
           test_out.sram_text = text
           test_out.finished = true
-    # --screen-check: the weakest GB screen assertion that holds however the
-    # ROM's console races the PPU. No glyph comparison: blargg's console blits
-    # with the LCD on behind a bounded VBlank wait that routinely times out at
-    # CGB double speed, so cells land in mode 3 and are refused, and which
-    # ones depends on sub-scanline phase (tests/README.md, "blargg's on-screen
-    # text is NOT an oracle"). What must hold: the panel settles and shows
-    # more than one shade.
+    # --screen-check: the panel settles and shows more than one shade. No
+    # glyph comparison: which of blargg's console cells land depends on
+    # sub-scanline phase (tests/README.md, "blargg's on-screen text is NOT
+    # an oracle").
     if screen_check:
       # The serial verdict arrives before the console has finished drawing it,
       # so give the panel a bounded settling budget rather than sampling
@@ -1931,15 +1907,10 @@ proc main() =
       # Silent on success: this line would otherwise land in every cpu_instrs
       # row's output column in results.md.
 
-    # Screenshot mode: write framebuffer as PPM after running
     if mode == tmScreenshot and screenshot_path.len > 0:
       write_ppm(screenshot_path, emu.ppu.framebuffer, GB_WIDTH, GB_HEIGHT, color_mode)
       echo screenshot_path
       quit(0)
-    # GBMicrotest: the ROM writes $FF80 actual, $FF81 expected, $FF82 verdict
-    # ($01 pass / $FF fail) and keeps running, so run --timeout frames and
-    # read HRAM. Only $FF82 is scored: some tests leave $FF80 == $FF81 on a
-    # failure.
     if mode == tmMicrotest:
       let actual   = emu.memory.hram[0]   # $FF80
       let expected = emu.memory.hram[1]   # $FF81

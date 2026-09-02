@@ -1159,7 +1159,6 @@ for (const id of ["force-update", "show-log"]) {
   document.getElementById(id).addEventListener("click", () => closeSettingsModal());
 }
 
-// Advanced refolds on every open of Settings.
 const advancedToggle = document.getElementById("advanced-toggle");
 const advancedSub = document.getElementById("advanced-sub");
 const collapseAdvanced = () => {
@@ -1284,7 +1283,6 @@ const pushCheatsToCore = (text) => {
 // so the caller must re-push the real list afterwards.
 const validateCheat = (c) => {
   const err = pushCheatsToCore(serializeCheats([c]));
-  // Strip the core's cheat-name prefix.
   const prefix = (c.name || "?") + ": ";
   return err.startsWith(prefix) ? err.slice(prefix.length) : err;
 };
@@ -1905,14 +1903,10 @@ const refreshRomsManageList = async () => {
 // GIS token flow (no backend, no client secret). Drive file names mirror
 // the IndexedDB keys one-to-one; the folder listing is the index (no
 // manifest), matched by name client-side.
-//
 // The client ID is public by design (the token flow has no secret): the
-// "Authorized JavaScript origins" allowlist in the Cloud Console and the
-// drive.appdata scope are the protection. New origins go in Google Auth
-// Platform > Clients > this client > Authorized JavaScript origins: scheme +
-// host (+ port), https unless localhost (raw IPs are rejected), no redirect
-// URIs. localStorage "gdrive_client_id" overrides it for dev; empty means
-// the Drive section degrades to "not configured".
+// Cloud Console's "Authorized JavaScript origins" allowlist and the
+// drive.appdata scope are the protection. localStorage "gdrive_client_id"
+// overrides it for dev; empty degrades the Drive section to "not configured".
 const GDRIVE_CLIENT_ID = localStorage.getItem("gdrive_client_id") ||
   "44914400148-bkh9oiu6ian098gbg5jecns4js5d849f.apps.googleusercontent.com";
 
@@ -2381,8 +2375,6 @@ const writeDriveLibrary = async (lib, remote) => {
   await driveUploadFile(LIBRARY_FILE, bytes, remote.get(LIBRARY_FILE)?.id);
 };
 
-// Union by name keeping the newest ts, apply rename markers, then drop
-// anything tombstoned more recently than the entry itself.
 const mergeLibrary = (a, b) => {
   let byName = new Map();
   for (let e of [...(a.recents || []), ...(b.recents || [])]) {
@@ -2399,8 +2391,7 @@ const mergeLibrary = (a, b) => {
       ren.set(r.from, { from: r.from, to: r.to, ts: r.ts || 0 });
     }
   }
-  // Oldest-first so a chain (A->B, B->C) lands on C. An entry moves only
-  // when the marker is newer than it, and keeps its own recency.
+  // Oldest-first so a chain (A->B, B->C) lands on C.
   for (let r of [...ren.values()].sort((x, y) => (x.ts || 0) - (y.ts || 0))) {
     let e = byName.get(r.from);
     if (e && (e.ts || 0) < r.ts) {
@@ -2408,8 +2399,7 @@ const mergeLibrary = (a, b) => {
       let t = byName.get(r.to);
       if (!t || (t.ts || 0) < (e.ts || 0)) byName.set(r.to, { name: r.to, ts: e.ts || 0 });
     }
-    // An entry newer than the marker under the old name is a fresh import
-    // re-using the name: the marker is spent.
+    // A newer entry under the old name is a fresh import: the marker is spent.
     if (byName.has(r.from)) ren.delete(r.from);
   }
   let tomb = new Map();
@@ -3101,9 +3091,7 @@ const renameGame = async (oldName, newName) => {
       queueDel: syncState.queueDel.filter((n) => !newKeys.includes(n)),
       queueRen: [...syncState.queueRen,
                  ...mirrored.map(([from, to]) => ({ from, to }))],
-      // No tombstone for the old name (the ren marker migrates other
-      // devices instead of deleting); stale markers/tombstones on either
-      // name are cleared.
+      // No tombstone for the old name: the ren marker migrates other devices.
       tomb: syncState.tomb.filter((t) => t?.name !== oldName && t?.name !== newName),
       ren: [
         ...syncState.ren.filter((r) => r?.from !== oldName && r?.from !== newName),
@@ -3123,7 +3111,6 @@ const renameGame = async (oldName, newName) => {
                               " Nothing was changed." };
   }
 
-  // Committed; in-memory bookkeeping catches up.
   if (nextSync) {
     syncState = nextSync;
     scheduleFlush();
@@ -4202,7 +4189,6 @@ document.getElementById("export-save").addEventListener("click", async () => {
 });
 
 const stripExt = (name) => name.substring(0, name.lastIndexOf("."));
-// Display name: the filename without its extension.
 const displayName = (name) => stripExt(name) || name;
 
 // Overwrite the loaded game's battery save with imported bytes and reboot.
@@ -4322,7 +4308,6 @@ const pushToast = (msg, ms, action) => {
     };
   }
 
-  // Prepend: newest on top.
   toastHost.prepend(item);
   toastItems.unshift(rec);
   while (toastItems.length > TOAST_MAX) dismissToast(toastItems[toastItems.length - 1]);
@@ -4791,8 +4776,7 @@ const openReportModal = () => {
 };
 
 const closeReportModal = () => {
-  // The global Escape handler calls every closer blindly; a stale
-  // reportWasPaused would unpause a game paused later.
+  // Escape calls every closer blindly; a stale reportWasPaused would unpause a later pause.
   if (!reportModal.classList.contains("open")) return;
   reportModal.classList.remove("open");
   releaseFocus(reportModal);
@@ -4858,19 +4842,14 @@ document.getElementById("report-download").addEventListener("click", async () =>
 
 // --- Film strip (shared scrubber component) --------------------------------
 // One draggable strip of thumbnails with N markers: Rewind (one) and Save a
-// Clip (two). The caller supplies the canvas + wrapper, one element per
-// marker, and a `paint` callback for the shading; it gets marker values in
-// samples back from newest, clamped, ordered and snapped. Thumbnails arrive
+// Clip (two). Marker values are samples back from newest. Thumbnails arrive
 // from wasm as packed little-endian BGR555, newest first.
 
 const STRIP_GAP = 2;             // px between frames in the strip
 const STRIP_TAP_SLOP = 5;        // px of travel below which a drag counts as a tap
 
-// Frame size is driven by how many should be visible across the strip's
-// own width (a 208px phone strip and a 400px desktop one show the same
-// history), clamped at both ends. A range picker overrides these for span,
-// and states the span it needs in pitches (`fitFrames`); the fit wins over
-// frameWMin, down to STRIP_FRAME_W_FLOOR.
+// Frame width follows how many frames fit the strip's own width (a 208px
+// phone strip and a 400px desktop one show the same history), clamped.
 const STRIP_VISIBLE_FRAMES = 5.5;
 const STRIP_FRAME_W_MIN = 38;
 const STRIP_FRAME_W_MAX = 72;
@@ -4981,11 +4960,10 @@ const createFilmStrip = ({
   const edgeX = (index, edge) =>
     edge === "lead" ? (samples - 1 - index) * pitch : (samples - index) * pitch;
 
-  // Film and marker placement. The focus rides the middle and the film
-  // scrolls under it until the film runs out of slack, then the markers
-  // travel (else half the strip is empty at the "now" end, where these
-  // modals open). The focus is the whole selection when it fits, else the
-  // dragged marker.
+  // The focus (the whole selection when it fits, else the dragged marker)
+  // rides the middle and the film scrolls under it until the film runs out
+  // of slack; then the markers travel, else half the strip is empty at the
+  // "now" end, where these modals open.
   const placement = (cssW) => {
     const filmW = samples * pitch;
     const xsFilm = markers.map((m, i) => edgeX(values[i], m.edge));
@@ -5308,8 +5286,7 @@ const openRewindScrubber = () => {
 };
 
 const closeRewindScrubber = () => {
-  // The global Escape handler calls every closer blindly; a stale
-  // rwWasPaused would unpause a game paused later.
+  // Escape calls every closer blindly; a stale rwWasPaused would unpause a later pause.
   if (!rewindModal.classList.contains("open")) return;
   rewindModal.classList.remove("open");
   releaseFocus(rewindModal);
@@ -5417,12 +5394,10 @@ document.getElementById("import-state").addEventListener("click", () => {
 
 var volume = 100;
 var muted = false;
-// Both the top-bar slider (hidden on phones) and the in-menu slider
 const volSliders = Array.from(/** @type {NodeListOf<HTMLInputElement>} */ (document.querySelectorAll(".vol-range")));
 const muteBtn = document.getElementById("mute-btn");
 const menuVolume = document.getElementById("menu-volume");
 
-// Effective gain applied to the audio graph (0..1), respecting mute.
 const effectiveGain = () => (muted ? 0 : volume / 100);
 
 const syncVolumeUI = () => {
@@ -5436,7 +5411,6 @@ const syncVolumeUI = () => {
   muteBtn.title = muted ? "Unmute" : "Mute";
 };
 
-// Persist volume/mute to IndexedDB, debounced so slider drags don't hammer it
 let audioSaveTimer = null;
 const saveAudioSettings = () => {
   if (!db) return;
@@ -5525,7 +5499,6 @@ const pcffToggle = /** @type {HTMLInputElement} */ (document.getElementById("pit
 
 const applyPitchCorrectFF = () => {
   if (typeof Module !== "undefined" && Module._wasm_set_pitch_correct_ff) {
-    // Suspended (not overwritten) while speed mode is on
     Module._wasm_set_pitch_correct_ff((pitchCorrectFF && !speedMode) ? 1 : 0);
   }
 };
@@ -5546,7 +5519,6 @@ const fifoInterpToggle = /** @type {HTMLInputElement} */ (document.getElementByI
 
 const applyFifoInterp = () => {
   if (typeof Module !== "undefined" && Module._wasm_set_fifo_interp) {
-    // Suspended (not overwritten) while speed mode is on
     Module._wasm_set_fifo_interp((fifoInterp && !speedMode) ? 1 : 0);
   }
 };
@@ -5567,7 +5539,6 @@ const mp2kHleToggle = /** @type {HTMLInputElement} */ (document.getElementById("
 
 const applyMp2kHle = () => {
   if (typeof Module !== "undefined" && Module._wasm_set_mp2k_hle) {
-    // Suspended (not overwritten) while speed mode is on
     Module._wasm_set_mp2k_hle((mp2kHle && !speedMode) ? 1 : 0);
   }
 };
@@ -5770,9 +5741,7 @@ const updateGlow = () => {
 };
 
 // --- WebGL2 game presentation (web/glpresent.js, shared with the embed) ---
-// The raw BGR555 framebuffer (Module._wasm_game_fb_ptr) goes to an R16UI
-// texture; the fragment shader unpacks it and applies LCD colour correction
-// and scanlines. Link / rollback modes keep their own 2D-canvas blit path.
+// Link / rollback modes keep their own 2D-canvas blit path.
 const glRenderer = createGlRenderer(canvasEl, nativeRes, log);
 
 // True when the next RAF tick must present even without a new frame (first
@@ -5839,7 +5808,6 @@ const saveVideoSettings = () => {
 
 const applyLcdResponse = () => {
   if (typeof Module !== "undefined" && Module._wasm_set_lcd_response) {
-    // Suspended (not overwritten) while speed mode is on.
     Module._wasm_set_lcd_response((lcdResponse && !speedMode) ? 1 : 0);
   }
 };
@@ -6373,43 +6341,26 @@ const loadRunaheadFromStorage = async () => {
 // shades), "theme" (GB_THEME_PALETTES), "custom" (four picked colours).
 
 // DMG_COLORS from src/dingbat/gb/gb.nim, expanded 5->8 bits: the only four
-// values a monochrome framebuffer holds, which makes the shader's
-// substitution exact. Also the seed for a custom palette (raw hardware
-// values, so slightly more saturated than "default", which adds the panel
-// colour model).
+// values a monochrome framebuffer holds. Also the seed for a custom palette.
 const GB_HW_SHADES = ["#fff7d6", "#ffad73", "#ef6b6b", "#7b3a5a"];
 
-// One four-shade ramp per app theme, lightest to darkest. Rules (pinned by
-// web/tests/gb-palette.test.mjs): the theme's main colour appears verbatim;
-// themes with several distinct colours spend them (dmg, famicom); the rest
-// fill with tints ending on --bg; monotonically darkening with no two steps
-// closer than ~1.5:1 contrast; no two adjacent steps more than ~45 CIEDE2000
-// apart, since games dither shades 1 and 2 against each other and a hue
-// gap shimmers instead of blending (dmg's pea-green against magenta was 74).
+// One four-shade ramp per app theme, lightest to darkest. The rules (theme
+// colour verbatim, monotonic darkening, a minimum contrast per step, and a
+// CIEDE2000 cap between adjacent shades because games dither shades 1 and 2
+// against each other) are pinned by web/tests/gb-palette.test.mjs.
 const GB_THEME_PALETTES = {
-  // Amber phosphor on near-black.
   amber:           ["#fff0d6", "#ffb04d", "#8f5312", "#1a1206"],
-  // Same amber ink, darkest shade the theme's #000.
   black:           ["#fff0d6", "#ffb04d", "#7a4a0f", "#000000"],
-  // Paper white -> gold -> the burnt-amber accent -> the text ink.
   light:           ["#f3f4f8", "#d88a1f", "#9c5400", "#1d2433"],
-  // Blue-violet accent verbatim, then a darkened shell purple, then --bg.
   indigo:          ["#cdc7f0", "#7f6ae7", "#55497f", "#0d0b17"],
-  // Dusty rose accent verbatim; shade 2 is the shell rose darkened.
   fuchsia:         ["#f0ccd8", "#e8739a", "#7e4560", "#170a0f"],
-  // Periwinkle accent verbatim; shade 2 is the shell grey-blue darkened.
   glacier:         ["#ccd9f0", "#769be5", "#3c4a6b", "#0b0e16"],
-  // Kiwi shell green verbatim; shade 0 must be very pale to separate from it.
+  // Shade 0 must be very pale to separate from the shell green.
   kiwi:            ["#effbea", "#6ee126", "#2d7a1f", "#0c170b"],
-  // Four distinct DMG colours: LCD, shell grey, magenta A/B, d-pad black.
   // The pea-green --accent is deliberately absent (the CIEDE2000 rule).
   dmg:             ["#eaf3de", "#b4aca9", "#6f6a6d", "#262828"],
-  // Orchid accent verbatim; shade 2 is the shell violet darkened.
   "atomic-purple": ["#e7cbf0", "#c36ee7", "#6a3d80", "#120b16"],
-  // Burnt-orange accent verbatim; shade 2 is the shell orange darkened.
   daiei:           ["#f2d2b0", "#eb7c33", "#8c3d18", "#160f0b"],
-  // Four distinct Famicom colours: cream faceplate, gold chrome, garnet A/B
-  // ring, charcoal buttons.
   famicom:         ["#e6d9bf", "#b99c68", "#b44148", "#25272b"],
 };
 
@@ -6587,14 +6538,12 @@ const resetAllSettings = async () => {
   for (const k of SETTINGS_KEYS) await dbDelete(k);
   try { localStorage.removeItem(UPDATE_CHECK_KEY); } catch (e) {}
 
-  // System (GB renderer / GBA BIOS mode + intro / rumble)
   gbFifo = true; gbaBiosMode = 0; gbaRunBios = true; gbRumble = true;
   rewindOn = true;
   speedMode = false;
   syncSystemSettingsUI();   // also re-applies the rewind-off body class
   applySystemSettings();
 
-  // Audio (volume / mute / pitch-correct fast-forward)
   volume = 100; muted = false;
   syncVolumeUI();
   if (typeof updateGain === "function") updateGain();
@@ -6607,16 +6556,14 @@ const resetAllSettings = async () => {
   fifoInterp = true;
   if (fifoInterpToggle) fifoInterpToggle.checked = true;
   applyFifoInterp();
-  audioLowpass = false;   // (was previously missed by reset)
+  audioLowpass = false;
   if (lowpassToggle) lowpassToggle.checked = false;
   applyAudioLowpass();
 
-  // Color correction
   colorCorrect = true;
   ccToggle.checked = colorCorrect;
   applyColorCorrect();
 
-  // Video effects
   integerScale = false; lcdResponse = false; ambientGlow = false;
   upscaleFilter = "none";
   integerScaleToggle.checked = false;
@@ -6627,13 +6574,11 @@ const resetAllSettings = async () => {
   applyLcdResponse();
   updateCanvasScaling();
 
-  // Keybindings -> default preset (the same path the "Default" preset uses)
   kbSelection = -1;
   applyKeybindings(PRESET_DEFAULT);
   kbPreset.value = "default";
   renderKbBindings();
 
-  // Touch controls
   applyLargeControls(false);
   applyOpaqueControls(false);
   applyControlStyle("dpad");
@@ -6641,21 +6586,17 @@ const resetAllSettings = async () => {
   applyHideTouchOnGamepad(true);
   applyInputDisplay(false);
 
-  // Run-ahead -> off
   applyRunahead(0);
 
-  // Game Boy shade palette -> default, custom colours back to hardware.
   gbPaletteMode = "default";
   gbPaletteCustom = GB_HW_SHADES.slice();
   applyGbPalette();
 
-  // Super Game Boy -> defaults, pushed into the core.
   sgbEnable = false;
   sgbBorder = true;
   applySystemSettings();
   syncSystemSettingsUI();
 
-  // Chrome theme -> Amber (localStorage).
   try { localStorage.removeItem(THEME_KEY); } catch (e) {}
   applyTheme("amber");
 };
@@ -7379,7 +7320,6 @@ const startClipExport = (startAgo, endAgo, slug, label) => {
   return true;
 };
 
-// The last ten seconds, ending now.
 const CLIP_QUICK_SECONDS = 10;
 
 // --- Clip range picker -----------------------------------------------------
@@ -7623,8 +7563,7 @@ document.getElementById("clip-preset-all").addEventListener("click", () => clipS
 const openClipScrubber = () => {
   menuDropdown.hidden = true;
   if (!currentRomName || !speedControlsOk()) return;
-  // A build missing the scrub API from EXPORTED_FUNCTIONS: say so (this
-  // guard once shipped silent; see web/tests/wasm-exports.test.mjs).
+  // A build missing the scrub API from EXPORTED_FUNCTIONS (web/tests/wasm-exports.test.mjs).
   if (typeof Module === "undefined" || !Module._clip_scrub_generate) {
     console.error("clip: the scrub API is missing from this build " +
                   "(check EXPORTED_FUNCTIONS in src/dingbat_wasm.nims)");
@@ -7666,8 +7605,7 @@ const openClipScrubber = () => {
 };
 
 const closeClipScrubber = () => {
-  // The global Escape handler calls every closer blindly; a stale
-  // clipWasPaused would unpause a game paused later.
+  // Escape calls every closer blindly; a stale clipWasPaused would unpause a later pause.
   if (!clipModal.classList.contains("open")) return;
   clipModal.classList.remove("open");
   releaseFocus(clipModal);
@@ -7699,9 +7637,6 @@ window.addEventListener("resize", () => {
   clipRefresh();
 });
 
-// Frame-step: tap = one frame, hold repeats at 10/s. Pointer events, not
-// click: iOS won't synthesize click for a second finger while a game
-// button is held.
 // --- Forward clip recording ---
 // MediaRecorder over the canvas plus the audio tap; .webm (.mp4 on Safari).
 var recRecorder = null;
@@ -7978,7 +7913,6 @@ const shortcutKeyHandler = (e, down) => {
       break;
     case "Tab":
       if (!gameLoaded) break; // leave Tab to focus navigation otherwise
-      // (Tab with focus in the chrome never reaches this handler.)
       if (e.shiftKey) {
         if (linkMode || netActive()) break;
         if (!e.repeat) {
@@ -8420,7 +8354,6 @@ document.getElementById("topbar-handle").addEventListener("click", () => {
 
 // --- Gamepad support (polled each frame) ---
 
-// Input IDs: 0 Up, 1 Down, 2 Left, 3 Right, 4 A, 5 B, 6 Select, 7 Start, 8 L, 9 R
 const gpPrev = new Array(10).fill(false);
 const GP_DEADZONE = 0.4;
 
@@ -9369,7 +9302,6 @@ const initStorage = async () => {
   await loadRomsSort();
   refreshSyncUI();
   startSyncTriggers();
-  // Resume Drive (see resumeDriveOnBoot).
   resumeDriveOnBoot();
   refreshHomeRecent();
   // Not awaited: nothing renders from it.
@@ -9943,8 +9875,8 @@ const noteActivation = (e) => {
 for (const ev of ["touchend", "pointerup", "mousedown", "keydown"])
   window.addEventListener(ev, noteActivation, true);
 
-// Haptic tick: ~25 ms is the perceptible floor for Android motors. iOS
-// never shipped vibrate and Firefox removed it in 129; silent no-ops there.
+// Haptic tick: ~25 ms is the perceptible floor for Android motors (Assumed).
+// iOS never shipped vibrate and Firefox removed it in 129; silent no-ops there.
 const HAPTIC_MS = 25;
 // hblk:<blocked>/<total> in the debug log; blocked = vibrate() exists and
 // returned false.

@@ -79,7 +79,6 @@ type
 
 
 proc has_rom_files(dir: string): bool =
-  ## Check if a directory tree contains at least one .gb ROM file.
   for path in walkDirRec(dir):
     if path.endsWith(".gb"):
       return true
@@ -151,7 +150,7 @@ proc skip_ppm_header(data: string): int =
   pos
 
 proc read_ppm_greyscale(path: string): seq[uint8] =
-  ## Read a P6 PPM and return one greyscale byte per pixel (R channel, since R=G=B).
+  ## R channel only: the harness writes greys as R=G=B.
   let data = readFile(path)
   var pos = skip_ppm_header(data)
   var pixels: seq[uint8]
@@ -161,7 +160,6 @@ proc read_ppm_greyscale(path: string): seq[uint8] =
   pixels
 
 proc read_ppm_rgb(path: string): seq[uint8] =
-  ## Read a P6 PPM and return all RGB bytes (3 per pixel).
   let data = readFile(path)
   var pos = skip_ppm_header(data)
   var pixels: seq[uint8]
@@ -189,7 +187,6 @@ proc ensure_rom_download(url, filename: string; expect_sha = ""): string =
   path
 
 proc ensure_png_download(url, filename: string): string =
-  ## Download a reference PNG if not already cached.
   let path = RomCacheDir / filename
   if fileExists(path):
     return path
@@ -260,7 +257,6 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
         expected.pixels = grey
         expected.channels = 1
       elif test.color and expected.channels == 1:
-        # RGB capture vs greyscale reference: widen the reference to R=G=B.
         var rgb = newSeq[uint8](expected.pixels.len * 3)
         for i in 0 ..< expected.pixels.len:
           rgb[i * 3] = expected.pixels[i]
@@ -321,7 +317,6 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
       return TestResult(name: test.name, passed: false, output: last_err)
     let pct = 100.0 * float(best_matched) / float(best_total)
     let passed = best_matched == best_total
-    # Only name the reference when there was a choice to make.
     let which = if test.alt_pngs.len > 0: " vs " & best_name.extractFilename else: ""
     return TestResult(
       name: test.name,
@@ -647,12 +642,9 @@ proc build_mooneye_tests(roms_dir: string): seq[TestDef] =
         mode: tmScreenshot,
         timeout: 120,
         expected_png: rom.parentDir / "mgb_oam_dma_halt_sprites_expected.png",
-        # This reference uses grey ramp 255/176/104 where the rest of mooneye
-        # (and dingbat) use 255/170/85; compared exactly every non-white pixel
-        # is wrong. Shade deltas are 0/6/19 and the ramp's smallest step is
-        # 72, so any tolerance in [19, 71] is shade-index equality; 32 is
-        # mid-band (8 was below the shade-2 delta and scored correct objects
-        # as wrong).
+        # This reference uses grey ramp 255/176/104 where mooneye (and dingbat)
+        # use 255/170/85. Shade deltas are 0/6/19 and the ramp's smallest step
+        # is 72, so any tolerance in [19, 71] is shade-index equality.
         grey_tolerance: 32,
         model: "mgb",
       ))
@@ -825,10 +817,8 @@ proc build_gbmicrotest_tests(dir: string): seq[TestDef] =
     return tests
   for rom in find_roms(dir, ".gb"):
     let name = rom.splitFile().name
-    # ROMs with no verdict byte to read — see MicrotestNoVerdict above.
     if name in MicrotestNoVerdict:
       continue
-    # ROMs whose expected byte is unreachable — see MicrotestBrokenExpected.
     if name in MicrotestBrokenExpected:
       continue
     tests.add(TestDef(
@@ -1072,9 +1062,8 @@ proc build_wilbertpol_tests(roms_dir: string): seq[TestDef] =
       continue
     let base = rom.splitFile().name
     # The suffix after the last '-' is the only thing that picks the device,
-    # including under misc/: this fork's misc/ also holds boot_hwio-S and
-    # boot_regs-mgb/sgb/sgb2, which a directory-wide --cgb ran as a CGB
-    # wearing an SGB boot table.
+    # including under misc/, which in this fork also holds boot_hwio-S and
+    # boot_regs-mgb/sgb/sgb2.
     let suffix = if '-' in base: base.rsplit('-', maxsplit = 1)[1] else: ""
     let machines = mooneye_machines_for(base)
     if machines.len == 0:
@@ -1088,9 +1077,7 @@ proc build_wilbertpol_tests(roms_dir: string): seq[TestDef] =
         ed_breakpoint: true,
       ))
     else:
-      # Same per-machine fan-out as the Gekkio builder.
       for m in machines:
-        # The four withdrawn ly_lyc* `-C` ROMs: drop the CGB arm only, keep AGB.
         if m == "cgbc" and rel.extractFilename in ly_lyc_c_skip: continue
         tests.add(TestDef(
           name: name & (if machines.len > 1: "@" & m else: ""),
@@ -1105,7 +1092,6 @@ proc build_wilbertpol_tests(roms_dir: string): seq[TestDef] =
 
 proc build_acid2_tests(): seq[TestDef] =
   var tests: seq[TestDef]
-  # DMG Acid2
   let dmg_rom = ensure_rom_download(
     "https://github.com/mattcurrie/dmg-acid2/releases/download/v1.0/dmg-acid2.gb",
     "dmg-acid2.gb")
@@ -1120,7 +1106,6 @@ proc build_acid2_tests(): seq[TestDef] =
     expected_png: dmg_ref,
     color: false,
   ))
-  # CGB Acid2
   let cgb_rom = ensure_rom_download(
     "https://github.com/mattcurrie/cgb-acid2/releases/download/v1.1/cgb-acid2.gbc",
     "cgb-acid2.gbc")
@@ -1224,8 +1209,8 @@ proc build_shootout_tests(): seq[TestDef] =
                 ensure_shootout_file("daid/ppu_scanline_bgp_2.dmg.png")],
   ))
   # The same ROM on a CGB in compatibility mode at the revision its capture
-  # is of (`--cgb --cgb-rev=E` is what the shootout adapter runs). Exact at
-  # cgbD and cgbE, 576 px off at cgb0/AB/C/agb: the split is
+  # is of (`--cgb --cgb-rev=E` is what the shootout adapter runs). Passes at
+  # cgbD and cgbE, refused at cgb0/AB/C/agb: the split is
   # quirks.mixer_write_immediate. The only row in either harness that
   # separates CGB-C from CGB-E.
   tests.add(TestDef(
@@ -1239,7 +1224,8 @@ proc build_shootout_tests(): seq[TestDef] =
     cgb: true,
     model: "cgbe",
   ))
-  # STOP blanks the DMG panel, because the PPU stops with it.
+  # Pan Docs ("Using the STOP Instruction"): STOP turns the DMG's LCD off, so
+  # the reference is a blank panel.
   tests.add(TestDef(
     name: "daid/stop_instr-dmg",
     rom_path: ensure_shootout_file("daid/stop_instr.gb"),
@@ -1250,8 +1236,8 @@ proc build_shootout_tests(): seq[TestDef] =
   ))
   # The one GBC daid row worth gating: the ROM prints "LCD on: PASS", spins
   # until STAT reads mode 3, then STOPs; daid's note says a mode-3 STOP on a
-  # CGB keeps displaying because the PPU keeps running. An implementation
-  # that blanks the panel scores 1.1%.
+  # CGB keeps displaying because the PPU keeps running. Refused by an
+  # implementation that blanks the panel.
   tests.add(TestDef(
     name: "daid/stop_instr_gbc_mode3",
     rom_path: ensure_shootout_file("daid/stop_instr_gbc_mode3.gb"),
@@ -1737,7 +1723,7 @@ proc run_sharded_batch(harness, mode, work_name, prefix: string;
   ## Spawn with real argv and `--out`, never a command string ending in
   ## `> out.txt 2>&1`: poEvalCommand is not a shell on Windows, the tokens
   ## become argv, the verdicts land in an undrained pipe and every shard
-  ## blocks (23dcae4).
+  ## blocks.
   result = newSeq[string](list_lines.len)
   if list_lines.len == 0: return
   let work_dir = getTempDir() / work_name
@@ -1945,17 +1931,10 @@ proc generate_mgba_detail_md(details: seq[MgbaSuiteDetail]): string =
   lines.join("\n")
 
 # ==================== gambatte ====================
-# sinamas' gambatte suite, in the game-boy-test-roms bundle. Filename rules
-# per gambatte/game-boy-test-roms-howto.md (scoring in --mode=gambatte):
-#   * `dmg08` = a DMG test, `cgb04c` = a CGB test; most ROMs carry both.
-#   * `_out<hex>` is the expected value per device, drawn as hex glyphs;
-#     `_outaudio0/1` is an audio test; an `x` prefix disables a tag.
-#   * a <rom>_dmg08.png / _cgb04c.png / _dmg08_cgb04c.png beside the ROM
-#     makes it a screenshot test.
-# Not scored: the 220 `_outaudio0/1` rows (the verdict needs a 2 MHz sample
-# stream; dingbat's APU emits at 32,768 Hz) and the AGB column (gambatte's
-# runner marks it FIXME). Reported per subdirectory; detail in
-# tests/results_gambatte.md.
+# sinamas' gambatte suite from the game-boy-test-roms bundle; filename rules
+# and scoring in tests/README.md. Not scored: `_outaudio0/1` rows (the verdict
+# needs a 2 MHz sample stream; dingbat's APU emits at 32,768 Hz) and the AGB
+# column. Reported per subdirectory; detail in tests/results_gambatte.md.
 
 type
   GambatteRow = object
@@ -2058,8 +2037,6 @@ proc run_gambatte_suite(harness: string; previous: Table[string, bool];
     echo "  Warning: gambatte directory held no scorable ROMs"
     return SuiteResults(suite_name: "Game Boy - gambatte")
 
-  # Sharded one --mode=gambatte process per core (run_sharded_batch); rows
-  # are independent, so the split cannot change a verdict.
   var list_lines: seq[string]
   for r in rows:
     list_lines.add(r.dev & "\t" & r.kind & "\t" & r.expected & "\t" & r.rom)
@@ -2210,14 +2187,11 @@ proc main() =
   var all_suites: seq[SuiteResults]
   var regressions: seq[string]
 
-  # All GB tests come from the game-boy-test-roms release
   let gb_test_roms_dir = ensure_gameboy_test_roms()
 
-  # Blargg tests
   let blargg_tests = build_blargg_tests(gb_test_roms_dir / "blargg")
   all_suites.add(run_suite("Game Boy - Blargg", blargg_tests, harness, previous, regressions))
 
-  # Blargg APU suites (also reachable alone via --apu)
   all_suites.add(run_suite("Game Boy - Blargg dmg_sound",
     build_blargg_sound_tests(gb_test_roms_dir / "blargg" / "dmg_sound", "dmg_sound", cgb = false),
     harness, previous, regressions))
@@ -2225,76 +2199,60 @@ proc main() =
     build_blargg_sound_tests(gb_test_roms_dir / "blargg" / "cgb_sound", "cgb_sound", cgb = true),
     harness, previous, regressions))
 
-  # Mooneye tests
   let mooneye_tests = build_mooneye_tests(gb_test_roms_dir)
   all_suites.add(run_suite("Game Boy - Mooneye", mooneye_tests, harness, previous, regressions))
 
-  # mGBA Test Suite (GBA)
   var mgba_detail: seq[MgbaSuiteDetail]
   let mgba_results = run_mgba_suite(harness, previous, regressions, mgba_detail, bios_path)
   all_suites.add(mgba_results)
 
-  # jsmolka gba-tests (GBA)
   let jsmolka_tests = build_jsmolka_tests(ensure_jsmolka_test_roms())
   all_suites.add(run_suite("GBA - jsmolka gba-tests", jsmolka_tests, harness,
                            previous, regressions))
 
-  # DenSinH/FuzzARM randomized ARM/Thumb tests (GBA)
   let fuzzarm_tests = build_fuzzarm_tests(ensure_fuzzarm_test_roms())
   all_suites.add(run_suite("GBA - FuzzARM", fuzzarm_tests, harness,
                            previous, regressions))
 
-  # Acid2 tests (screenshot comparison)
   let acid2_tests = build_acid2_tests()
   all_suites.add(run_suite("Game Boy - Acid2", acid2_tests, harness, previous, regressions))
 
-  # MagenTests CGB corners (colour verdict)
   all_suites.add(run_suite("Game Boy - MagenTests", build_magen_tests(), harness,
                            previous, regressions))
 
-  # Mealybug Tearoom tests (screenshot comparison)
   let mealybug_tests = build_mealybug_tests(gb_test_roms_dir / "mealybug-tearoom-tests")
   all_suites.add(run_suite("Game Boy - Mealybug Tearoom", mealybug_tests, harness, previous, regressions))
 
-  # GBMicrotest (HRAM verdict byte), batched; see run_microtest_suite.
   all_suites.add(run_microtest_suite("Game Boy - GBMicrotest",
     build_gbmicrotest_tests(gb_test_roms_dir / "gbmicrotest"),
     harness, previous, regressions))
 
-  # AGE test roms (mooneye-style verdict + screenshot comparison)
   all_suites.add(run_suite("Game Boy - AGE",
     build_age_tests(gb_test_roms_dir / "age-test-roms"),
     harness, previous, regressions))
 
-  # The bundle's small screenshot suites
   all_suites.add(run_suite("Game Boy - Screenshot suites",
     build_small_screenshot_tests(gb_test_roms_dir), harness, previous, regressions))
 
-  # SameSuite dma/ppu/interrupt (mooneye-style verdict)
   all_suites.add(run_suite("Game Boy - SameSuite",
     build_samesuite_core_tests(gb_test_roms_dir / "same-suite"),
     harness, previous, regressions))
 
-  # SameSuite apu/ — sample-accurate APU tests (also reachable alone via --apu)
   all_suites.add(run_suite("Game Boy - SameSuite APU",
     build_samesuite_apu_tests(gb_test_roms_dir / "same-suite"),
     harness, previous, regressions))
 
-  # The gbdev shootout's own ROMs (screenshot comparison)
   all_suites.add(run_suite("Game Boy - Shootout ROMs",
     build_shootout_tests(), harness, previous, regressions))
 
-  # Mooneye suite, wilbertpol fork (0xED breakpoint)
   all_suites.add(run_suite("Game Boy - Mooneye (wilbertpol)",
     build_wilbertpol_tests(gb_test_roms_dir), harness, previous, regressions))
 
-  # gambatte (aggregated per subdirectory; detail in results_gambatte.md)
   var gambatte_groups: seq[GambatteGroup]
   all_suites.add(run_gambatte_suite(harness, previous, previous_counts,
                                     regressions, gambatte_groups,
                                     gb_test_roms_dir))
 
-  # Write results
   createDir(getCurrentDir() / "tests")
   writeFile(results_path, generate_results_md(all_suites))
   let mgba_detail_path = getCurrentDir() / "tests" / "results_mgba_suite.md"
@@ -2307,7 +2265,6 @@ proc main() =
   if gambatte_groups.len > 0:
     echo &"gambatte detail written to {gambatte_detail_path}"
 
-  # Summary
   var total = 0
   var pass_count = 0
   for suite in all_suites:

@@ -1,9 +1,7 @@
 // --- Shared WebGL2 game presenter ---
 // The single place that turns the wasm core's raw BGR555 framebuffer into
-// pixels on a canvas. Both the main page (index.js) and the embed (embed.js)
-// call this so the embed can never silently fall behind the main renderer
-// again (it did: commit 4c4a3e9 moved presentation off SDL into JS but only
-// wired up index.js, leaving the embed a black frame).
+// pixels on a canvas. Both index.js and embed.js call this so the embed
+// cannot lag the main renderer.
 //
 // Deps are injected so this file has no DOM/globals of its own beyond the
 // wasm Module: canvasEl is the VISIBLE canvas we own a WebGL2 context on
