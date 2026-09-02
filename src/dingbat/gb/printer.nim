@@ -240,8 +240,8 @@ proc feed*(prn: GbPrinter; b: uint8): uint8 =
       prn.status = prn.status or 0x01
     else:
       prn.status = prn.status and not 0x01'u8
-    # INIT's status slot always reads 0x00 (Pan Docs: "games expect INIT
-    # commands to return 0"), whatever was latched before it.
+    # INIT's status slot always reads 0x00, whatever was latched before it
+    # (Assumed; Pocket Camera and Camera Gold rely on it).
     prn.reply = if (prn.cmd and 0x0F) == 0x01: 0'u8 else: prn.status
     prn.state = psStatus
   of psStatus:

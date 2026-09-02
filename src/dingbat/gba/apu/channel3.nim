@@ -80,14 +80,20 @@ proc ch3_catchup_at*(ch: Channel3; observer_period: uint32) {.inline.} =
 proc ch3_catchup*(ch: Channel3) {.inline.} =
   ch3_catchup_at(ch, GBA_OBS_CPU)
 
-const CH3_VOLUME_TABLE = [0, 4, 2, 1]
-
 proc ch3_get_amplitude*(ch: Channel3): int16 =
-  if ch.enabled and ch.dac_enabled:
-    let vol_mult = if ch.volume_force: 3 else: CH3_VOLUME_TABLE[ch.volume_code]
-    int16(int(ch.wave_ram_sample_buffer) - 8) * 4 * int16(vol_mult)
-  else:
-    0'i16
+  ## The current nibble, centred, at the SOUND3CNT_H output level: bits 13-14
+  ## select mute / 100% / 50% / 25%, and bit 15 overrides them with 75%
+  ## (GBATEK). Full scale is +-128 (a multiple of 16), so the quarters below
+  ## divide exactly.
+  if not (ch.enabled and ch.dac_enabled): return 0'i16
+  let full = (int(ch.wave_ram_sample_buffer) - 8) * 16
+  let quarter = full div 4
+  if ch.volume_force: return int16(full - quarter)
+  case ch.volume_code
+  of 0'u8: 0'i16
+  of 1'u8: int16(full)
+  of 2'u8: int16(quarter * 2)
+  else:    int16(quarter)
 
 proc ch3_read*(ch: Channel3; address: uint32): uint8 =
   # 0x90-0x9F while enabled returns the byte CH3 is currently playing, so apu[]

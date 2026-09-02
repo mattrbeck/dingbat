@@ -84,10 +84,90 @@ block:
   check "master parses with no error", err.len == 0
   # Both lines are verification/game-id -> recognised, no-op (not a write).
   check "master is inert (no writes)", ops.allIt(it.action == caUnsupported)
+  const seeds = [0x7AA9648F'u32, 0x7FAE6994'u32, 0xC0EFAAD5'u32, 0x42712C57'u32]
+  var a = 0xA47FB2DC'u32
+  var b = 0x1AF3CA86'u32
+  gba_gs_decrypt(a, b, seeds)
+  check &"ID line decrypts to 'BPRE' 001DC0DE (got {a:08X} {b:08X})",
+    a == 0x45525042'u32 and b == 0x001DC0DE'u32
+  a = 0x72BC6DFB'u32
+  b = 0xE9CA5465'u32
+  gba_gs_decrypt(a, b, seeds)
+  check &"hook line decrypts to C40005F0 00008401 (got {a:08X} {b:08X})",
+    a == 0xC40005F0'u32 and b == 0x00008401'u32
+
+echo "== Real published codes (documented effect -> decoded op) =="
+block:
+  # Pokémon Emerald (U) master code, as published everywhere: decrypts to a
+  # hook at 080005EC + the 'BPEE' game ID, so it must parse as two inert
+  # lines with no error.
+  const seeds = [0x7AA9648F'u32, 0x7FAE6994'u32, 0xC0EFAAD5'u32, 0x42712C57'u32]
+  var a = 0xA86CDBA5'u32
+  var b = 0x19BA49B3'u32
+  gba_gs_decrypt(a, b, seeds)
+  check &"Emerald ID line = 'BPEE' 001DC0DE (got {a:08X} {b:08X})",
+    a == 0x45455042'u32 and b == 0x001DC0DE'u32
+  let (ops, err) = parse_cheat(cpGBA, "D8BAE4D9 4864DCE5\nA86CDBA5 19BA49B3")
+  check "Emerald master parses, inert", err.len == 0 and ops.len == 2 and
+    ops.allIt(it.action == caUnsupported)
+block:
+  # Pokémon Emerald walk-through-walls (published two-liner): a ROM patch
+  # "00000000 18049603 / 00002000 00000000" = [8000000+049603*2] = 2000.
+  let (ops, err) = parse_cheat(cpGBA, "7881A409 E2026E0C\n8E883EFF 92E9660D")
+  check "Emerald WTW parses", err.len == 0 and ops.len == 1
+  check "is a ROM patch", ops.len == 1 and ops[0].action == caRomPatch
+  check &"patch addr 0x08092C06 (got {ops[0].address:08X})", ops[0].address == 0x08092C06'u32
+  check &"patch value 0x2000 width 2 (got {ops[0].value:04X}/{ops[0].width})",
+    ops[0].value == 0x2000 and ops[0].width == 2
+block:
+  # Pokémon Emerald "max money" (published): 32-bit write of 999999 (0F423F)
+  # to 02025E90, the money field of the save block.
+  let (ops, err) = parse_cheat(cpGBA, "C051CCF6 975E8DA1")
+  check "Emerald money parses", err.len == 0 and ops.len == 1
+  check "write32", ops[0].action == caWrite32
+  check &"addr 0x02025E90 (got {ops[0].address:08X})", ops[0].address == 0x02025E90'u32
+  check &"value 999999 (got {ops[0].value})", ops[0].value == 999_999
+block:
+  # Pokémon FireRed "max money" (published): 999999 to 020257BC.
+  let (ops, err) = parse_cheat(cpGBA, "29C78059 96542194")
+  check "FireRed money parses", err.len == 0 and ops.len == 1
+  check "write32 @ 0x020257BC = 999999", ops[0].action == caWrite32 and
+    ops[0].address == 0x020257BC'u32 and ops[0].value == 999_999
+block:
+  # GBATEK's own worked example: "ii=18h+02h+40h=5Ah, produces
+  # IF [a0aaaaa]<zzzz THEN next 2 codes" (signed <, 16-bit, next two).
+  let (ops, err) = parse_cheat(cpGBA, "5A201000 00000064", cfGbaRaw)
+  check "GBATEK 5A example parses", err.len == 0 and ops.len == 1
+  check "IF [02001000] <s 0064 THEN next 2", ops[0].action == caCond and
+    ops[0].cmp == ccLtS and ops[0].width == 2 and ops[0].skip == 2 and
+    ops[0].address == 0x02001000'u32 and ops[0].value == 0x64
+block:
+  # GBATEK CodeBreaker "D0000020 yyyy  IF [joypad] AND yyyy = 0 THEN (next
+  # code)": a KEYINPUT gate on the buttons in yyyy (active low).
+  let (ops, err) = parse_cheat(cpGBA, "D0000020 0300")
+  check "CB joypad gate parses", err.len == 0 and ops.len == 1
+  check "gate on L+R", ops[0].action == caIfButtons and ops[0].value == 0x0300 and
+    ops[0].skip == 1
+block:
+  # Pokémon Emerald 99 Rare Candies in PC (published CodeBreaker):
+  # "82005274 0044" = 16-bit write of item id 0044 to 02005274.
+  let (ops, err) = parse_cheat(cpGBA, "82005274 0044")
+  check "Emerald rare candy parses", err.len == 0 and ops.len == 1
+  check "write16 @ 0x02005274 = 0x44", ops[0].action == caWrite16 and
+    ops[0].address == 0x02005274'u32 and ops[0].value == 0x44
+block:
+  # Pan Docs' own example: "010238CD switches to SRAM bank $01, and writes
+  # $02 at address $CD38".
+  let (ops, err) = parse_cheat(cpGB, "010238CD")
+  check "Pan Docs example parses", err.len == 0 and ops.len == 1
+  check "bank 01, value 02, address CD38", ops[0].action == caWrite8 and
+    (ops[0].address shr 16) == 0x01 and (ops[0].address and 0xFFFF) == 0xCD38 and
+    ops[0].value == 0x02
 
 echo "== GBA PARv3 raw opcode interpretation =="
 block:
-  # 8-bit assign to 0x02001234 = 0x63.  op1 encodes region+offset via _parAddr.
+  # 8-bit assign to 0x02001234 = 0x63: the first word's top digit of the
+  # 24-bit field is the region digit of the 28-bit address ([a0aaaaa]).
   let (ops, err) = parse_cheat(cpGBA, "00201234 00000063", cfGbaRaw)
   check "8-bit parses", err.len == 0 and ops.len == 1
   check "action write8", ops[0].action == caWrite8

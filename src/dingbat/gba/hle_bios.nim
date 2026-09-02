@@ -476,61 +476,76 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     cpu.r[1] = 1
     cpu.hle_intr_wait(true, 1'u16)
   of 0x08:  # Sqrt
-    # The BIOS routine: shift-subtract division of the input by the current
-    # bound, averaging bound and quotient until convergence (Newton), with
-    # per-loop costs per phase (normalize / quotient-align / divide-step).
-    # Pinned by hardware: gbaedge SWIREGION (0x10/0x1000/0x100000/0x40000000
-    # -> 0x00CC/0x0118/0x0164/0x01C3), SWITIME (0x7FFFFFFF -> 0x0519) and
-    # the mGBA suite's three timing rows (0, 0xFF, 0x12345678). The loop
-    # structure is the real BIOS routine at 0x404; r0 and the cycle count
-    # matched it on 37 inputs (0..4, 15, 16, 0xFF, 0xFFFF, 0x10000, the
-    # gbaedge points, 0x7FFFFFFF, 0xFFFFFFFF, 20 randoms).
-    # The routine leaves its scratch in the caller-visible registers: r1 =
-    # the rejected average (bound + quotient) >> 1, r3 = the last quotient
-    # (for 0: r1 = 0, r3 = 1, from a second pass with bound 0). r2 is
-    # preserved by the dispatcher. Measured on the same 37 inputs.
+    # BIOS Sqrt at 0x404, disassembled (push {r4} ... pop {r4}; bx lr):
+    #   0x40C  r1 = 1; while (r0 > r1) { r0 >>= 1; r1 <<= 1 }
+    #   0x420  pass: r0 = x; r4 = r1; r3 = 0; r2 = r1
+    #   0x430    while (r2 < x >> 1) r2 <<= 1   (compare before shift: an
+    #            exact hit still doubles once, then falls through)
+    #   0x43C    restoring divide: r3 = 2*r3 + (r0 >= r2), r0 -= r2 if so,
+    #            r2 >>= 1 until r2 == r1
+    #   0x454    r1 = (r1 + r3) >> 1; if (r1 < r4) goto pass
+    #   0x464  r0 = r4
+    # I.e. Newton from above, x_next = (x_n + N / x_n) / 2, stopping at the
+    # first step that fails to decrease; GBATEK SWI 08h documents only the
+    # 16-bit result. The scratch stays in the caller's registers (r2 comes
+    # back from the dispatcher's stack frame): r1 = the rejected average,
+    # r3 = the last quotient. For x = 0 the first pass averages to r1 = 0
+    # < r4 = 1, so a second pass runs with r2 = 0 and its 0/0 step yields
+    # quotient 1: r0 = 0, r1 = 0, r3 = 1.
+    #
+    # Cycles from GBATEK "ARM CPU Instruction Cycle Times" (BIOS is 32-bit,
+    # zero-wait: S = N = 1; taken branch 3, not-taken or failed-condition
+    # 1): a normalize iteration 6; a pass 17 (setup 4, alignment exit 3,
+    # divide exit 6, tail 4) + 5 per alignment doubling + 8 per continuing
+    # divide step + 2 when its `bcc` loops back; a fixed 12 for push {r4},
+    # the normalize exit, mov r0, r4 and pop {r4}, net of the return that
+    # SWI_HLE_BASE covers (the datasheet formulas give 10; x = 0 and x = 1
+    # measure 2 more, and every other input follows). Hardware anchors:
+    # gbaedge SWIREGION (0x10/0x1000/0x100000/0x40000000 -> 0x00CC/0x0118/
+    # 0x0164/0x01C3), SWITIME (0x7FFFFFFF -> 0x0519), the mGBA suite's
+    # three Sqrt timing rows (0, 0xFF, 0x12345678); r0/r1/r3 and TM0
+    # cycle-exact against the real BIOS on 37 inputs (0..4, 15, 16, 0xFF,
+    # 0xFFFF, 0x10000, the gbaedge points, 0x7FFFFFFF, 0xFFFFFFFF, 20
+    # randoms).
     block:
       let x = cpu.r[0]
-      if x == 0:
-        cpu.idle(48)
-        cpu.r[0] = 0
-        cpu.r[1] = 0
-        cpu.r[3] = 1
-      else:
-        var body = 15
-        var upper = x
-        var bound = 1'u32
-        while bound < upper:
-          upper = upper shr 1
-          bound = bound shl 1
-          body += 6
-        while true:
-          body += 6
-          upper = x
-          var accum = 0'u32
-          var lower = bound
-          while true:
-            body += 5
-            let old_lower = lower
-            if lower <= upper shr 1: lower = lower shl 1
-            if old_lower >= upper shr 1: break
-          while true:
-            body += 8
-            accum = accum shl 1
-            if upper >= lower:
-              accum += 1
-              upper -= lower
-            if lower == bound: break
-            lower = lower shr 1
-          let old_bound = bound
-          bound = (bound + accum) shr 1
-          if bound >= old_bound:
-            cpu.r[1] = bound
-            cpu.r[3] = accum
-            bound = old_bound
-            break
-        cpu.idle(body - 5)
-        cpu.r[0] = bound
+      let half = x shr 1
+      var cycles = 12
+      # 0x40C: halve the input and double the estimate until they cross
+      var estimate = 1'u32          # r1
+      var scaled = x                # r0 during normalization
+      while scaled > estimate:
+        scaled = scaled shr 1
+        estimate = estimate shl 1
+        cycles += 6
+      var root = estimate           # r4: the candidate this pass tests
+      var quotient = 0'u32          # r3
+      while true:                   # 0x420
+        root = estimate
+        var remainder = x           # r0
+        var divisor = estimate      # r2
+        quotient = 0
+        cycles += 17
+        while true:                 # 0x430
+          let again = divisor < half
+          if divisor <= half: divisor = divisor shl 1
+          if not again: break
+          cycles += 5
+        while true:                 # 0x43C
+          quotient = quotient shl 1
+          if remainder >= divisor:
+            remainder -= divisor
+            quotient += 1
+          if divisor == estimate: break
+          divisor = divisor shr 1
+          cycles += 8
+        estimate = (estimate + quotient) shr 1   # 0x454
+        if estimate >= root: break
+        cycles += 2
+      cpu.idle(cycles)
+      cpu.r[0] = root
+      cpu.r[1] = estimate
+      cpu.r[3] = quotient
   of 0x09:  # ArcTan
     cpu.idle(48)  # fixed-iteration polynomial
     bios_arctan(cpu)

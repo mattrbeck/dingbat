@@ -444,8 +444,41 @@ proc gs_mixer_hook*(g: GsBonHle) =
   # else: stale hook; the frame poll's liveness check will disengage.
 
 # ---- Rendering: one stereo sample per APU tick at 32768 Hz ----
-# Forward-stepping resampler with a 4-tap history and Catmull-Rom cubic
-# interpolation (Paul Bourke, "Cubic Interpolation"), as in the MP2K HLE.
+# Forward-stepping resampler, the MP2K HLE's shape: per channel a 4-sample
+# history of decoded source samples plus a fractional phase; a source sample
+# is fetched only when the cursor crosses a sample boundary, and the output
+# is mp2k.nim's catmull_rom through the history (Paul Bourke's closed form).
+# The cursor helpers are gs_bon's own because GsBonSampler has no backfill
+# history (a decimating step here just skips source samples).
+
+proc gs_push_tap(s: ptr GsBonSampler; v: float32) {.inline.} =
+  ## Shift a decoded source sample into the 4-sample history (tap0 newest).
+  (s.tap3, s.tap2, s.tap1, s.tap0) = (s.tap2, s.tap1, s.tap0, v)
+
+proc gs_advance(s: ptr GsBonSampler) =
+  ## Move the read cursor one output sample forward (freq_step source
+  ## samples). Whole samples crossed go to src_index, the remainder is the new
+  ## phase, and any crossing schedules a fetch. A looping sample wraps modulo
+  ## its loop length; a one-shot one parks at its end and stops fetching.
+  let p = s.phase_frac + s.freq_step
+  let whole = uint32(p)
+  s.phase_frac = p - float32(whole)
+  if whole == 0'u32: return
+  s.src_index += whole
+  s.need_fetch = true
+  if s.src_index < s.sample_count: return
+  if s.looping and s.loop_start < s.sample_count:
+    let span = s.sample_count - s.loop_start
+    s.src_index = s.loop_start + (s.src_index - s.sample_count) mod span
+  else:
+    s.src_index = s.sample_count
+    s.need_fetch = false
+
+proc gs_ramp(last, now, t: float32): float32 {.inline.} =
+  ## Per-side gain at frame position t (0..1): a linear ramp from last
+  ## frame's endpoint to this frame's value, so per-frame envelope steps do
+  ## not zipper.
+  last + (now - last) * t
 
 proc gs_wave_s8(g: GsBonHle; s: ptr GsBonSampler; rom: ptr seq[byte];
                 rmask: uint32; idx: uint32): float32 {.inline.} =
@@ -501,41 +534,23 @@ proc gs_render_sample*(g: GsBonHle): tuple[l: int16, r: int16] =
         sample = gs_synth_sample(s, src_ratio)
       else:
         if s.need_fetch and s.src_index < s.sample_count:
-          let ns = g.gs_wave_s8(s, rom, rmask, s.src_index)
-          s.tap3 = s.tap2; s.tap2 = s.tap1; s.tap1 = s.tap0; s.tap0 = ns
+          s.gs_push_tap(g.gs_wave_s8(s, rom, rmask, s.src_index))
           s.need_fetch = false
-        let mu = s.phase_frac
         when defined(gslinear):
           # Diagnostic: the real mixer's linear interpolation
-          sample = s.tap2 + (s.tap1 - s.tap2) * mu
+          sample = s.tap2 + (s.tap1 - s.tap2) * s.phase_frac
         else:
-          # Catmull-Rom cubic, tap0 newest .. tap3 oldest
-          let mu2 = mu * mu
-          let a0 = s.tap0 - s.tap1 - s.tap3 + s.tap2
-          let a1 = s.tap3 - s.tap2 - a0
-          let a2 = s.tap1 - s.tap3
-          let a3 = s.tap2
-          sample = a0 * mu * mu2 + a1 * mu2 + a2 * mu + a3
-        s.phase_frac += s.freq_step
-        if s.phase_frac >= 1.0'f32:
-          let n = uint32(s.phase_frac)
-          s.phase_frac -= float32(n)
-          s.src_index += n
-          s.need_fetch = true
-          if s.src_index >= s.sample_count:
-            if s.looping and s.loop_start < s.sample_count:
-              s.src_index = s.loop_start +
-                ((s.src_index - s.sample_count) mod (s.sample_count - s.loop_start))
-            else:
-              s.src_index = s.sample_count
-              s.need_fetch = false
+          # One sample of extra latency buys a neighbour on each side of the
+          # segment (tap2 -> tap1).
+          sample = catmull_rom(s.tap3, s.tap2, s.tap1, s.tap0, s.phase_frac)
+        s.gs_advance()
       sample = sample / 128.0'f32
       when defined(gsstepvol):
         let vl = s.vol_l1   # diagnostic: per-frame stepped volumes, like the real mixer
         let vr = s.vol_r1
       else:
-        let vl = s.vol_l0 * (1.0'f32 - t) + s.vol_l1 * t
-        let vr = s.vol_r0 * (1.0'f32 - t) + s.vol_r1 * t
+        let vl = gs_ramp(s.vol_l0, s.vol_l1, t)
+        let vr = gs_ramp(s.vol_r0, s.vol_r1, t)
       accl += sample * vl
       accr += sample * vr
     g.frame_pos.inc

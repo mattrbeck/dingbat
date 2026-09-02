@@ -6,14 +6,14 @@
 ## Sequence: token = (literal_len << 4) | match_len_code, each 15 meaning "add
 ## the following bytes until one is < 255"; literal_len literal bytes; a 2-byte
 ## little-endian match offset; match-length extension bytes (stored length is
-## real length - 4). The final sequence is literals only. The last match must
-## end at least 12 bytes before the end of the block and the final literal run
-## be at least 5 bytes (MfLimit / LastLiterals).
+## real length - 4). The final sequence is literals only. The spec's end-of-
+## block rules: the last 5 bytes of a block are always literals, and the last
+## match must start at least 12 bytes before the end of the block.
 
 const
-  MinMatch = 4
-  LastLiterals = 5
-  MfLimit = 12          # last match must start this far before the end
+  MinMatchLen = 4       # a match is never shorter than this; lengths are stored minus it
+  EndLiterals = 5       # the block's last 5 bytes are always literals
+  LastMatchGuard = 12   # the last match starts at least this far before the end
   HashLog = 14          # 16 K entries — 64 KB of table, L2-resident
   HashSize = 1 shl HashLog
   MaxDistance = 65535
@@ -29,8 +29,13 @@ proc readU64(p: ptr UncheckedArray[byte]; i: int): uint64 {.inline.} =
   cast[ptr uint64](addr p[i])[]
 
 proc hashPos(v: uint32): int {.inline.} =
-  # Knuth multiplicative hash on the 4-byte sequence
-  int((v * 2654435761'u32) shr (32 - HashLog))
+  # Xorshift-multiply mix of the 4-byte window (one murmur3 finaliser step),
+  # keeping the top HashLog bits. Any mixing function works here: the table
+  # only proposes candidates, which are always verified byte for byte.
+  var h = v xor (v shr 16)
+  h = h * 0x85EBCA6B'u32
+  h = h xor (h shr 13)
+  int(h shr (32 - HashLog))
 
 var lz4Table {.threadvar.}: seq[int32]
   ## Reused across calls and deliberately not cleared: a stale position is
@@ -58,9 +63,9 @@ proc lz4Compress*(src: string): string =
       d[op] = 255'u8; op.inc; rest -= 255
     d[op] = uint8(rest); op.inc
 
-  if n >= MfLimit + MinMatch:
-    let matchLimit = n - LastLiterals
-    let searchLimit = n - MfLimit
+  if n >= LastMatchGuard + MinMatchLen:
+    let matchLimit = n - EndLiterals
+    let searchLimit = n - LastMatchGuard
     while ip < searchLimit:
       let h = hashPos(readU32(s, ip))
       let cand = int(table[h]) - 1
@@ -76,7 +81,7 @@ proc lz4Compress*(src: string): string =
         mStart.dec; mCand.dec
       let litLen = mStart - anchor
       # measure the match forward
-      var mLen = MinMatch
+      var mLen = MinMatchLen
       while mStart + mLen + 8 <= matchLimit and
             readU64(s, mCand + mLen) == readU64(s, mStart + mLen):
         mLen += 8
@@ -100,7 +105,7 @@ proc lz4Compress*(src: string): string =
       d[op] = uint8(off and 0xFF); d[op + 1] = uint8((off shr 8) and 0xFF)
       op += 2
       # match length
-      let mCode = mLen - MinMatch
+      let mCode = mLen - MinMatchLen
       if mCode >= 15:
         tok = tok or 0x0F'u8
         d[tokenPos] = tok
@@ -173,7 +178,7 @@ proc lz4Decompress*(src: string; hint = 0): string =
         let b = s[ip]; ip.inc
         mLen += int(b)
         if b != 255: break
-    mLen += MinMatch
+    mLen += MinMatchLen
     ensure(mLen)
     # Overlapping copies are how LZ4 encodes a run, so this cannot be
     # memcpy/memmove. With distance >= 8 the 8-byte windows cannot overlap;

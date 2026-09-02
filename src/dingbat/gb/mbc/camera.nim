@@ -5,7 +5,8 @@
 #
 # Pan Docs, "Game Boy Camera" (Antonio Niño Díaz's reverse engineering,
 # https://github.com/AntonioND/gbcam-rev-engineer); the capture pipeline
-# follows that page's sample code.
+# follows that page's sample code, which Pan Docs publishes under CC0 (the
+# same author's GiiBiiAdvance is where Pan Docs says the sample came from).
 #
 # Banking is MBC3-shaped: a 6-bit ROM bank at 0x2000-0x3FFF and a RAM bank at
 # 0x4000-0x5FFF. What makes it a camera is bit 4 of the RAM bank register: set
