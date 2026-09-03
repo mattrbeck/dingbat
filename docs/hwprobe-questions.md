@@ -123,11 +123,12 @@ Zero-code item: run the same gbaedge build on every other GBA-family console
 any probe differs across silicon; MODEL separates BIOS families (DS reads
 `18 80`).
 
-## Probe ROMs still to write
+## Probe ROMs written, awaiting hardware
 
 Each closes a row that docs/oracles.md marks `Assumed`, or a disagreement
-found while decoding the session 1–2 captures. Flashcart pages use the
-gbedge / gbaedge page format (tests/roms/gbedge.py) unless noted.
+found while decoding the session 1–2 captures. All but the first two rows
+were written on 2026-09-03 with dingbat's prediction beside each ROM; the
+kit and its READMEs are listed in docs/flashcart-runbook.md "Session 3 kit".
 
 | ROM / page | Rig | Answers |
 |---|---|---|

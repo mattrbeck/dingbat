@@ -1,4 +1,4 @@
-.equ NPAGES, 37
+.equ NPAGES, 40
 
 .global font_data
 font_data:
@@ -82,6 +82,9 @@ name_table:
     .byte 19,25,12,35,30,15,3,0,0,0   @ IOBYTE2
     .byte 30,18,31,23,12,26,13,4,0,0   @ THUMBPC3
     .byte 23,29,28,30,12,19,30,3,0,0   @ MSRTBIT2
+    .byte 25,12,20,12,31,14,17,15,30,0   @ OBJBUDGET
+    .byte 25,12,20,17,15,25,23,0,0,0   @ OBJGEOM
+    .byte 14,23,11,25,26,15,24,12,31,29   @ DMAOPENBUS
 .global str_title
 str_title:
     .byte 17,12,11,15,14,17,15,0,32,2
@@ -106,4 +109,64 @@ str_press:
 str_ran:
     .byte 28,11,24,37,29,15,15,0,1,1
 .equ str_ran_len, 10
+.global str_fill
+str_fill:
+    .byte 16,19,22,22
+.equ str_fill_len, 4
+.global str_test
+str_test:
+    .byte 30,15,29,30
+.equ str_test_len, 4
+.global str_next
+str_next:
+    .byte 24,15,34,30
+.equ str_next_len, 4
+.global str_ruler
+str_ruler:
+    .byte 1,2,3,4,5,6,7,8
+.equ str_ruler_len, 8
+.global str_ystair
+str_ystair:
+    .byte 35,3,5,9,37,3,6,6
+.equ str_ystair_len, 8
+.global str_y200
+str_y200:
+    .byte 35,3,1,1
+.equ str_y200_len, 4
+.global str_xstair
+str_xstair:
+    .byte 34,6,1,5,37,6,2,2
+.equ str_xstair_len, 8
+.global str_dbl
+str_dbl:
+    .byte 35,2,4,1,0,14,12,22
+.equ str_dbl_len, 8
+.global str_t1020
+str_t1020:
+    .byte 30,2,1,3,1
+.equ str_t1020_len, 5
+.global str_lg_t0
+str_lg_t0:
+    .byte 30,1
+.equ str_lg_t0_len, 2
+.global str_lg_b0
+str_lg_b0:
+    .byte 12,1
+.equ str_lg_b0_len, 2
+.global str_lg_bl
+str_lg_bl:
+    .byte 12,22
+.equ str_lg_bl_len, 2
+.global str_lg_bm
+str_lg_bm:
+    .byte 12,23
+.equ str_lg_bm_len, 2
+.global str_flip
+str_flip:
+    .byte 16,22,19,26
+.equ str_flip_len, 4
+.global str_ctrl
+str_ctrl:
+    .byte 13,30,28,22
+.equ str_ctrl_len, 4
 .align 2

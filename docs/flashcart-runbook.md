@@ -175,3 +175,19 @@ One folder of photos per console. gbedge pages: `tests/roms/hwprobe_ocr.py`
 reads dingbat screenshots of the same build for the diff side; photos are
 compared by eye. File each delta as a row in docs/hwprobe-questions.md or
 docs/pandocs-upstream.md §2 — each names the knob or model it moves.
+
+## Session 3 kit (ROMs written 2026-09-03, unrun)
+
+Each ROM below carries dingbat's prediction next to it; the photo or
+recording is compared against that prediction, and a difference names the
+knob in the ROM's README.
+
+| Folder | ROMs | Rig | README |
+|---|---|---|---|
+| gb-latency | `tools/gbprobe/probe_h_{scx,scy,wx,bgp,lcdc4,lcdc3}.gb` | GB flashcart on DMG, CGB, GBC, AGS; photograph each page | tools/gbprobe/README.md "Photograph pages" |
+| gb-window | `tools/gbprobe/probe_g_wy{0,1}.gb`, `probe_i_oamdma.gb` | same | same |
+| gba-pages | `tests/roms/gbaedge.gba` pages 37–39 (OBJBUDGET, OBJGEOM visual; DMAOPENBUS hex) | GBA flashcart; photograph | tests/roms/README-probes-gba.md |
+| gba-audio | `tests/roms/psgbias.gba` | GBA flashcart, line-out to a recorder; count the tones first | tests/roms/README-probes-gba.md |
+| multiboot | `tests/roms/mbprobe/build/sender.gba` (payloads embedded) | flashcart GBA + link cable + second GBA with the retail cart (SMA2 or any EEPROM title; Yoshi Topsy-Turvy; WarioWare Twisted; a Classic NES cart) | tests/roms/mbprobe/README.md |
+
+Predictions: `tools/gbprobe/expected/*.png` (per model), `tests/roms/expected/predicted-2026-09/`, and the tables in `tests/roms/mbprobe/README.md`.

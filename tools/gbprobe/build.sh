@@ -140,6 +140,34 @@ build_roms() {
   "$HERE/mk.sh" probe_c_arbitrate -DSCXVAL=0
   GBPROBE_OUT=probe_c_arbitrate_scx3 "$HERE/mk.sh" probe_c_arbitrate -DSCXVAL=3
   GBPROBE_OUT=probe_c_arbitrate_scx7 "$HERE/mk.sh" probe_c_arbitrate -DSCXVAL=7
+  # Photograph pages (README "Photograph pages"): the WY re-check on LCDC.5,
+  # the per-register CGB write latencies, the OAM-DMA scan.
+  GBPROBE_OUT=probe_g_wy0 "$HERE/mk.sh" probe_g_wyrecheck -DVARIANT=0
+  GBPROBE_OUT=probe_g_wy1 "$HERE/mk.sh" probe_g_wyrecheck -DVARIANT=1
+  GBPROBE_OUT=probe_h_scx   "$HERE/mk.sh" probe_h_latency -DPAGE=0
+  GBPROBE_OUT=probe_h_scy   "$HERE/mk.sh" probe_h_latency -DPAGE=1
+  GBPROBE_OUT=probe_h_wx    "$HERE/mk.sh" probe_h_latency -DPAGE=2
+  # BGP is dead on a CGB running a CGB-flagged cart: compatibility-mode header.
+  GBPROBE_CGB=0 GBPROBE_OUT=probe_h_bgp "$HERE/mk.sh" probe_h_latency -DPAGE=3
+  GBPROBE_OUT=probe_h_lcdc4 "$HERE/mk.sh" probe_h_latency -DPAGE=4
+  GBPROBE_OUT=probe_h_lcdc3 "$HERE/mk.sh" probe_h_latency -DPAGE=5
+  "$HERE/mk.sh" probe_i_oamdma
+}
+
+# The photograph pages' dingbat predictions, one PNG per page and model,
+# under expected/ -- what a hardware photo is compared against.
+build_expected() {
+  build_dingbat
+  mkdir -p "$HERE/expected"
+  for rom in probe_g_wy0 probe_g_wy1 probe_h_scx probe_h_scy probe_h_wx \
+             probe_h_bgp probe_h_lcdc4 probe_h_lcdc3 probe_i_oamdma; do
+    for model in dmg cgbc cgbd agb; do
+      "$HERE/bin/dingbat_shot" "$HERE/$rom.gb" "$model" 40 "$HERE/expected/$rom.$model.ppm"
+      python3 "$HERE/ppm2png.py" "$HERE/expected/$rom.$model.ppm" \
+                                 "$HERE/expected/$rom.$model.png"
+      rm "$HERE/expected/$rom.$model.ppm"
+    done
+  done
 }
 
 case "${1:-all}" in
@@ -148,7 +176,8 @@ case "${1:-all}" in
   docboy)  build_docboy ;;
   sameboy) build_sameboy ;;
   dingbat) build_dingbat ;;
+  expected) build_roms; build_expected ;;
   all)     build_roms; build_dingbat; build_sameboy; build_docboy ;;
-  *) echo "usage: build.sh [all|roms|engines|dingbat|sameboy|docboy]"; exit 2 ;;
+  *) echo "usage: build.sh [all|roms|engines|dingbat|sameboy|docboy|expected]"; exit 2 ;;
 esac
 echo "ok"

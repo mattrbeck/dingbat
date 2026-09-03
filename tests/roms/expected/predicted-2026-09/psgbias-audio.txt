@@ -1,0 +1,35 @@
+dingbat PREDICTION for psgbias-auto.gba: DINGBAT_GBA_AUDIO_DUMP, left
+channel, s16le 32768 Hz.  Tone segments are found by the 15-frame silence
+gaps the ROM puts before every step, and the middle 60% of each is
+measured.  Hardware is the oracle; this is the hypothesis on trial.
+
+Segments found: 11 for 12 steps.
+
+THE HEADLINE: dingbat emits nothing at all for step 1 (PSG volume 3), so
+the 12 steps produce only 11 tones and every later segment is one step
+further on than its position suggests.  Count the segments in the
+hardware recording FIRST: 11 means volume 3 mutes on silicon too, 12
+means it does not and the whole table below re-aligns.
+
+seg   step / setting                 rms   peak    min    max  levels
+  0   0 PSG V2 R0 (100%)             105.0    105   -105    105      2
+  1   2 PSG V1 R0 (50%)               52.5     53    -53     52      2
+  2   3 PSG V0 R0 (25%)               26.5     27    -27     26      2
+  3   4 DS SQ R0                     401.9    658   -256    658     49
+  4   5 DS SQ R1                     401.9    658   -256    658     47
+  5   6 DS SQ R2                     401.7    656   -256    656     40
+  6   7 DS SQ R3                     399.8    656   -256    656     38
+  7   8 DS TRI R0                     36.1     64    -64     62     64
+  8   9 DS TRI R1                     36.2     64    -64     62     64
+  9   10 DS TRI R2                    36.2     64    -64     60     32
+ 10   11 DS TRI R3                    36.4     64    -64     56     16
+
+Reading it: PSG 100%/50%/25% come out 105/52/26 (clean 2:1 steps).  The
+full-scale DirectSound square is ASYMMETRIC, +658 against -256 — the
+negative half clips, because dma_channels.nim scales a FIFO byte `shl 1`
+before the SOUNDCNT_H volume shift.  A symmetric hardware recording says
+that scaling is 2x too large.  On the triangle the resolution mask only
+bites at R2 and R3 (64/64/32/16 distinct levels), because the waveform's
+own step is already 4 LSB wide and the FIFO cubic interpolation smooths
+the staircase: dingbat's level counts are a LOWER bound on how visible
+the mask is.

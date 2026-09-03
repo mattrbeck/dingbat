@@ -12,7 +12,9 @@
 @  18 THUMBPC  19 LDMUSER  20 IRQWIN   21 DMAEDGE 22 CAPDMA  23 SWEEPQ
 @  24 BXDECODE* 25 THUMBPC2 26 IRQWIN2 27 IOBYTE  28 LDMUSER2 29 PCWB2
 @  30 DMABYTE2 31 SWEEP2   32 IRQWIN3  33 IRQLAT2 34 IOBYTE2 35 THUMBPC3
-@  36 MSRTBIT2
+@  36 MSRTBIT2  37 OBJBUDGET† 38 OBJGEOM† 39 DMAOPENBUS
+@ (†visual: the page is a picture drawn with OBJs in mode 0, not a hex
+@  dump — tests/roms/README-probes-gba.md says what to photograph)
 @ (*interactive: runs when START is pressed on its page — these two
 @  deliberately provoke UNPREDICTABLE behavior (MSR setting T from ARM /
 @  executing near-BX encodings) and can require a power cycle, though a
@@ -82,9 +84,9 @@ main:
 
     @ zero every slot, and the IRQ scratch block (EWRAM boots as noise)
     ldr r0, =SLOTS
-    mov r1, #(NPAGES * SLOTSZ / 4)
-    mov r2, #0
-1:  str r2, [r0], #4
+    mov r1, #(37 * SLOTSZ / 4)     @ the session-4 slot count: the v7 slots
+    mov r2, #0                     @ are zeroed in probe_tail so the frame
+1:  str r2, [r0], #4               @ phase PPUSTAT/IRQLAT see is unchanged
     subs r1, r1, #1
     bne 1b
     ldr r0, =SCRATCH + 0x40
@@ -138,7 +140,8 @@ main:
     bl  probe_irqlat2
     bl  probe_iobyte2
     bl  probe_thumbpc3
-    bl  probe_msrtbit2
+    bl  probe_tail                 @ msrtbit2 + the v7 pages (37-39): one
+                                   @ call so no earlier byte moves
     @ MSRTBIT + BXDECODE: interactive only — mark the slots so the pages
     @ say so
     ldr r8, =SLOTS + 8*SLOTSZ
@@ -168,7 +171,7 @@ viewer:
     ldr r0, =0x03FF
     str r0, [r4, #4]               @ prev keys (none pressed: bits high)
     mov r0, #0
-    bl  draw_page
+    bl  draw_page2                 @ v7: hex page, or a visual page (37/38)
 view_loop:
     bl  wait_vblank
     ldr r4, =VPAGE
@@ -221,7 +224,7 @@ page_store:
 page_redraw:
     ldr r4, =VPAGE
     ldr r0, [r4, #0]
-    bl  draw_page
+    bl  draw_page2
     b   view_loop
     .ltorg
 
@@ -3619,3 +3622,610 @@ affine_src:
     .hword 0x0000                   @ (alignment pad)
 
     .include "gbaedge_gen.inc"
+
+    .arm
+    .align 2
+@ ═══════ pages 37-39 (v7): OBJ budget, OBJ geometry, DMA open bus ════════
+@ Hooked in through probe_tail so every byte before this point sits where
+@ session 4 measured it (main's `bl` changes only its target offset).
+@ Pages 37/38 are VISUAL: the boot-time probe only stamps the slot with
+@ the OAM configuration it will draw; the picture itself is drawn by the
+@ viewer (vis_objbudget_page / vis_objgeom_page below draw_page) each time
+@ the page is selected — mode 0, BG0 text, OBJ layer on.
+.equ DOBSTUB,  0x03000400          @ DMAOPENBUS stubs (IWRAM copy)
+.equ DOBSRC,   0x02006000          @ DMA0 source, 4 words, last = marker
+.equ DOBDST,   0x02006100          @ DMA0 destination
+.equ DOBDST3,  0x02006200          @ DMA3 (open-bus source) destination
+.equ VISCHR,   0x06008000          @ BG0 char base 2: font, mark, swatches
+.equ VISMAP,   0x0600C000          @ BG0 screen base 24 (32x32 map)
+.equ OBJVRAM,  0x06010000
+.equ OAM,      0x07000000
+.equ PALBG,    0x05000000
+.equ PALOBJ,   0x05000200
+
+probe_tail:
+    push {lr}
+    bl  probe_msrtbit2
+    ldr r0, =SLOTS + 37*SLOTSZ     @ zero the v7 slots (EWRAM boots as noise)
+    mov r1, #0
+    mov r2, #(3 * SLOTSZ / 4)
+    bl  fill_words
+    bl  probe_objbudget
+    bl  probe_objgeom
+    bl  probe_dmaopenbus
+    pop {pc}
+
+@ ── slot 37: OBJBUDGET (visual) — the per-line OBJ cycle budget running
+@ out INSIDE a sprite ─────────────────────────────────────────────────────
+@ GBATEK "LCD OBJ Overview": 1210 OBJ cycles per line (954 with DISPCNT.5),
+@ a normal sprite costs its width.  Three bands of 64x32 sprites, OAM
+@ order left to right:
+@   FILL  18 identical light-grey sprites stacked at X=8 (18*64 = 1152)
+@   TEST  one sprite at X=88: rows 0-15 a colour ramp (column c mod 8 ->
+@         palette 1..8: black red blue green yellow magenta cyan grey),
+@         rows 16-31 solid black; a 0-7 ruler sits under each 8px group
+@   NEXT  one solid blue sprite at X=168 (OAM after TEST)
+@ Band A (Y=16): the budget left for TEST is 1210-1152 = 58 cycles.
+@ Band B (Y=56): the same, TEST horizontally flipped.
+@ Band C (Y=96): control — the same three sprites with ONE filler, so
+@ every pixel fits; what a complete TEST/NEXT look like.
+@ Outcomes on bands A/B: TEST complete + NEXT missing = the exhausting
+@ sprite still draws fully (dingbat); TEST cut after column 58 (ruler
+@ group 7, black+red, then nothing) = hardware truncates at the cycle;
+@ the cut column - 0 IS the remaining budget, so any other cut pins the
+@ budget itself; band B says whether a flipped sprite is cut on its
+@ screen-left or texture-left side; NEXT present = no budget at all.
+@ Slot: +0 56h, +1 filler count, +2 sprite width, +3 DISPCNT.5, +4..+9
+@ TEST attr0/1/2, +10 DISPCNT while shown — configuration, not results.
+.equ OB_FILL_A0, 0x4010            @ Y=16, horizontal shape
+.equ OB_FILL_A1, 0xC008            @ X=8, 64x32
+.equ OB_FILL_A2, 512               @ grey tiles
+.equ OB_TEST_A1, 0xC058            @ X=88
+.equ OB_TEST_A2, 544
+.equ OB_NEXT_A1, 0xC0A8            @ X=168
+.equ OB_NEXT_A2, 576
+.equ VIS_DISPCNT, 0x1140           @ mode 0, BG0, OBJ, 1D mapping
+probe_objbudget:
+    ldr r8, =SLOTS + 37*SLOTSZ
+    mov r0, #0x56
+    strb r0, [r8, #0]
+    mov r0, #18
+    strb r0, [r8, #1]
+    mov r0, #64
+    strb r0, [r8, #2]
+    mov r0, #0
+    strb r0, [r8, #3]
+    ldr r0, =OB_FILL_A0
+    strh r0, [r8, #4]
+    ldr r0, =OB_TEST_A1
+    strh r0, [r8, #6]
+    ldr r0, =OB_TEST_A2
+    strh r0, [r8, #8]
+    ldr r0, =VIS_DISPCNT
+    strh r0, [r8, #10]
+    bx  lr
+    .ltorg
+
+@ ── slot 38: OBJGEOM (visual) — signed OBJ coordinates and OBJ VRAM wrap ─
+@ X 504..511 (screen x = -8..-1): eight 8x8 sprites at Y = 40+8k, X = 504+k
+@   (k = 0..7) with a column-ramp tile: k columns show at the LEFT edge on
+@   rows 40+8k (a staircase; nothing for k=0).
+@ Y 248..255 (y = -8..-1): eight 8x8 at X = 40+8k, Y = 248+k with a
+@   row-ramp tile: k rows show at the TOP edge (staircase).
+@ Y200: a 32x64 sprite at X=112, Y=200, texture rows 56-63 yellow, the
+@   rest black: rows 0-7 of the screen show the yellow strip under every
+@   wrap model (control for "Y wraps into the top at all").
+@ Y130 DBL: a 32x64 texture in a 64x128 affine double-size box (2x scale,
+@   pa=pd=0x80) at X=160, Y=130; texture rows 0-15 cyan, 16-47 black,
+@   48-63 green.  The box spans lines 130..257:
+@     cyan at rows 130-159 only        = y>159 -> y-256 (dingbat)
+@     cyan at 130-159 AND green rows 0-1 = (line - Y) mod 256 < height
+@     green rows 0-1 only              = GBATEK's "treated as Y>-128" note
+@ T1020: a 16x32 8bpp sprite (1D mapping) at X=192, Y=40 named tile 1020.
+@   An 8bpp tile is 64 bytes but tile numbers count 32, so its four tile
+@   rows sit at byte 1020*32 + 64*row: rows 0-15 (tiles 1020-1023) are the
+@   last 256 bytes of OBJ VRAM and are filled yellow; rows 16-31 address
+@   0x8000-0x80FF, past the 32K end.  Legend swatches:
+@     T0 green   = wrapped to OBJ tile 0 (dingbat: offset and 0x7FFF)
+@     B0 red     = read the FIRST 4K of BG VRAM (0x06000000)
+@     BL blue    = read the LAST 4K of BG VRAM (0x0600F000)
+@     BM magenta = read some other BG VRAM (everything else is magenta)
+@     white      = transparent / not fetched
+@ Slot: +0 56h, +1 staircase count, +2..+7 DBL attr0/1/2, +8..+13 T1020
+@ attr0/1/2, +14/+16 pa/pd — configuration, not results.
+.equ OG_DBL_A0,  0x8382            @ Y=130, affine, double, vertical shape
+.equ OG_DBL_A1,  0xC0A0            @ X=160, size 3 (32x64), param group 0
+.equ OG_DBL_A2,  96
+.equ OG_WRAP_A0, 0xA028            @ Y=40, 8bpp, vertical shape
+.equ OG_WRAP_A1, 0x80C0            @ X=192, size 2 (16x32)
+.equ OG_WRAP_A2, 1020
+probe_objgeom:
+    ldr r8, =SLOTS + 38*SLOTSZ
+    mov r0, #0x56
+    strb r0, [r8, #0]
+    mov r0, #8
+    strb r0, [r8, #1]
+    ldr r0, =OG_DBL_A0
+    strh r0, [r8, #2]
+    ldr r0, =OG_DBL_A1
+    strh r0, [r8, #4]
+    ldr r0, =OG_DBL_A2
+    strh r0, [r8, #6]
+    ldr r0, =OG_WRAP_A0
+    strh r0, [r8, #8]
+    ldr r0, =OG_WRAP_A1
+    strh r0, [r8, #10]
+    ldr r0, =OG_WRAP_A2
+    strh r0, [r8, #12]
+    mov r0, #0x80
+    strh r0, [r8, #14]
+    strh r0, [r8, #16]
+    bx  lr
+    .ltorg
+
+@ ── slot 39: DMAOPENBUS — how long the last DMA word stays on the bus ────
+@ dingbat (bus.nim read_open_bus_value): an unmapped read by the DMA
+@ itself, or by the ONE CPU instruction after the burst, returns the last
+@ word the DMA moved; the window length is Assumed.  Every stub below runs
+@ from IWRAM (32-bit, zero wait: one cycle per fetch, so the spacing is
+@ exact) with r4 = DMA0 regs, r5 = 0x10000000 (unmapped; OPENBUS +12 shows
+@ its idle value), r0 = DMA0CNT word.  DMA0 copies 4 words EWRAM->EWRAM,
+@ the last one C0FFEE42; a value that is an instruction encoding instead
+@ is the prefetch ([$+8] of the reading ldr, i.e. the ldr two below it).
+@ Cycle count from the enabling store's data cycle t0 (str = 1S+1N, ldr =
+@ 1S+1N+1I, nop = 1S; GBATEK: the DMA takes the bus 2 cycles after the
+@ enable, stalling the CPU until the burst ends — the ldr's data cycle at
+@ t0+2 either slips in before the grant or is the first access after it):
+@ +0  word read by `ldr` #1, data cycle t0+2   (stub 0)
+@ +4  `ldr` #2, t0+5 (+burst)   +8  #3, t0+8   +12  #4, t0+11
+@ +16 stub 1: one nop between the store and `ldr` #1: t0+3
+@ +20 stub 1 `ldr` #2: t0+6
+@ +24/+28 stub 2: a DMA3 whose SOURCE is 0x10000000 (2 words -> EWRAM) is
+@         enabled by the instruction right after DMA0's enable (its data
+@         cycle at t0+2).  DMA3's own latch is primed with A5A5A5A5 by a
+@         1-word EWRAM->EWRAM DMA3 just before, so the two words it writes
+@         name the model outright:
+@           C0FFEE42 = the DMA reads the shared bus latch (DMA0's word)
+@           A5A5A5A5 = each channel repeats ITS own last word
+@           00000000 = an unmapped DMA read delivers zero
+@         (anything else is the value the gamepak/bus really drove).
+@         Priming also makes the row independent of which earlier probe
+@         last used DMA3.
+probe_dmaopenbus:
+    push {r4-r9, lr}
+    ldr r8, =SLOTS + 39*SLOTSZ
+    ldr r0, =DOBSRC
+    ldr r1, =0x11111111
+    str r1, [r0]
+    ldr r1, =0x22222222
+    str r1, [r0, #4]
+    ldr r1, =0x33333333
+    str r1, [r0, #8]
+    ldr r1, =0xC0FFEE42
+    str r1, [r0, #12]
+    ldr r0, =DOBDST
+    mov r1, #0
+    mov r2, #4
+    bl  fill_words
+    ldr r0, =DOBDST3
+    mov r1, #0
+    mov r2, #4
+    bl  fill_words
+    ldr r0, =dob_stubs             @ copy the stubs into IWRAM
+    ldr r1, =DOBSTUB
+    mov r2, #(dob_stubs_end - dob_stubs) / 4
+1:  ldr r3, [r0], #4
+    str r3, [r1], #4
+    subs r2, r2, #1
+    bne 1b
+    ldr r4, =0x040000B0            @ DMA0 SAD/DAD/CNT
+    ldr r0, =DOBSRC
+    str r0, [r4]
+    ldr r0, =DOBDST
+    str r0, [r4, #4]
+    ldr r5, =0x10000000
+    @ stub 0: four back-to-back reads
+    mov r6, r8
+    ldr r0, =0x84000004            @ enable, 32-bit, count 4
+    ldr r1, =DOBSTUB               @ dob_stub0
+    mov lr, pc
+    bx  r1
+    @ stub 1: one nop first
+    add r6, r8, #16
+    ldr r0, =0x84000004
+    ldr r1, =DOBSTUB + 28          @ dob_stub1 (checked below)
+    mov lr, pc
+    bx  r1
+    @ prime DMA3's own latch with A5A5A5A5 (1 word, EWRAM -> EWRAM)
+    ldr r7, =0x040000D4            @ DMA3 SAD/DAD/CNT
+    ldr r0, =DOBSRC + 16
+    ldr r1, =0xA5A5A5A5
+    str r1, [r0]
+    str r0, [r7]
+    ldr r0, =DOBSRC + 20
+    str r0, [r7, #4]
+    ldr r0, =0x84000001
+    str r0, [r7, #8]
+    nop
+    @ stub 2: DMA3 reading open bus, enabled by the very next instruction
+    ldr r0, =0x10000000
+    str r0, [r7]
+    ldr r0, =DOBDST3
+    str r0, [r7, #4]
+    ldr r0, =0x84000004
+    ldr r1, =0x84000002            @ DMA3: enable, 32-bit, count 2
+    ldr r2, =DOBSTUB + 52          @ dob_stub2
+    mov lr, pc
+    bx  r2
+    ldr r0, =DOBDST3
+    ldr r1, [r0]
+    str r1, [r8, #24]
+    ldr r1, [r0, #4]
+    str r1, [r8, #28]
+    pop {r4-r9, pc}
+    .ltorg
+dob_stubs:
+dob_stub0:
+    str r0, [r4, #8]               @ DMA0 go            t0 = its data cycle
+    ldr r1, [r5]                   @ #1  data cycle t0+2
+    ldr r2, [r5]                   @ #2  t0+5
+    ldr r3, [r5]                   @ #3  t0+8
+    ldr r9, [r5]                   @ #4  t0+11
+    stmia r6, {r1, r2, r3, r9}
+    bx  lr
+dob_stub1:
+    str r0, [r4, #8]
+    nop
+    ldr r1, [r5]                   @ #1  t0+3
+    ldr r2, [r5]                   @ #2  t0+6
+    stmia r6, {r1, r2}
+    bx  lr
+dob_stub2:
+    str r0, [r4, #8]               @ DMA0 go
+    str r1, [r7, #8]               @ DMA3 go (data cycle t0+2)
+    nop
+    nop
+    bx  lr
+dob_stubs_end:
+.if (dob_stub1 - dob_stubs) != 28 || (dob_stub2 - dob_stubs) != 52
+    .error "DMAOPENBUS stub offsets moved"
+.endif
+
+@ r0 = dst (word aligned), r1 = value, r2 = word count
+fill_words:
+1:  str r1, [r0], #4
+    subs r2, r2, #1
+    bne 1b
+    bx  lr
+
+
+@ v7 dispatcher for the viewer: the hex viewer's mode 3 first (a visual
+@ page leaves mode 0 + OBJ on), then the picture routine or draw_page.
+@ Lives after the include so draw_page and the data keep their addresses.
+draw_page2:
+    push {r4-r9, lr}
+    mov r9, r0
+    ldr r1, =IOBASE
+    ldr r0, =0x0403
+    strh r0, [r1]
+    cmp r9, #37
+    beq vis_objbudget_page
+    cmp r9, #38
+    beq vis_objgeom_page
+    mov r0, r9
+    bl  draw_page
+    pop {r4-r9, pc}
+    .ltorg
+
+@ ═══════════════════ VISUAL PAGES (mode 0, BG0 text + OBJ) ══════════════
+@ Canvas: BG0 (priority 3, 4bpp) with the font converted to tiles 0-38 at
+@ VISCHR, tile 39 = corner registration mark (drawn in all four corners:
+@ photowarp-style tools need a known frame), tiles 40-47 = solid swatches
+@ of palette 1..8.  BG palette entry 0 (backdrop) is white, 1 black, then
+@ red blue green yellow magenta cyan grey — the OBJ palette is the same
+@ table, so a swatch is the same colour as the OBJ pixels it explains.
+@ Text rows 17-19 (x < 160): "CRC xxxx ALL xxxx", the page name, the
+@ title + page number, exactly the hex viewer's values.
+
+vis_palette:
+    .hword 0x7FFF, 0x0000, 0x001F, 0x7C00, 0x03E0, 0x03FF, 0x7C1F, 0x7FE0
+    .hword 0x5AD6, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000
+corner_mark:
+    .byte 0xFF, 0x81, 0xBD, 0xBD, 0xBD, 0xBD, 0x81, 0xFF
+    .align 2
+
+@ r0 = 1bpp tiles (8 bytes each), r1 = 4bpp destination, r2 = tile count;
+@ set bits become palette index 1
+tiles_1bpp_to_4bpp:
+    push {r4-r6, lr}
+    mov r3, r2, lsl #3             @ rows
+1:  ldrb r4, [r0], #1
+    mov r5, #0
+    mov r6, #0                     @ x
+2:  mov r12, #0x80
+    mov r12, r12, lsr r6
+    tst r4, r12
+    mov r12, r6, lsl #2            @ nibble x = bits 4x..4x+3
+    mov r2, #1
+    orrne r5, r5, r2, lsl r12
+    add r6, r6, #1
+    cmp r6, #8
+    blt 2b
+    str r5, [r1], #4
+    subs r3, r3, #1
+    bne 1b
+    pop {r4-r6, pc}
+
+@ r0 = cell x, r1 = cell y, r2 = tile -> BG0 map entry
+vis_glyph:
+    ldr r3, =VISMAP
+    add r3, r3, r1, lsl #6
+    add r3, r3, r0, lsl #1
+    strh r2, [r3]
+    bx  lr
+    .ltorg
+
+@ r0 = x, r1 = y, r2 = string (font tile bytes), r3 = length
+vis_str:
+    push {r4-r7, lr}
+    mov r4, r0
+    mov r5, r1
+    mov r6, r2
+    mov r7, r3
+1:  ldrb r2, [r6], #1
+    mov r0, r4
+    mov r1, r5
+    bl  vis_glyph
+    add r4, r4, #1
+    subs r7, r7, #1
+    bne 1b
+    pop {r4-r7, pc}
+
+@ r0 = x, r1 = y, r2 = byte
+vis_hex8:
+    push {r4-r6, lr}
+    mov r4, r0
+    mov r5, r1
+    mov r6, r2
+    mov r2, r6, lsr #4
+    and r2, r2, #0xF
+    add r2, r2, #1
+    bl  vis_glyph
+    and r2, r6, #0xF
+    add r2, r2, #1
+    add r0, r4, #1
+    mov r1, r5
+    bl  vis_glyph
+    pop {r4-r6, pc}
+
+.macro vis_text x, y, lbl
+    mov r0, #\x
+    mov r1, #\y
+    ldr r2, =\lbl
+    mov r3, #\lbl\()_len
+    bl  vis_str
+.endm
+.macro vis_tile x, y, tile
+    mov r0, #\x
+    mov r1, #\y
+    mov r2, #\tile
+    bl  vis_glyph
+.endm
+.macro vis_fill dst, val, words
+    ldr r0, =\dst
+    ldr r1, =\val
+    ldr r2, =\words
+    bl  fill_words
+.endm
+.macro oam_put a0, a1, a2          @ r4 -> OAM entry, advances
+    ldr r0, =((\a0) & 0xFFFF) | (((\a1) & 0xFFFF) << 16)
+    str r0, [r4], #4
+    ldr r0, =((\a2) & 0xFFFF)
+    str r0, [r4], #4
+.endm
+
+@ mode-0 canvas: BG0 text, palettes, VRAM reference fills, OAM all
+@ disabled, corner marks.  Leaves the screen in forced blank; the page
+@ routine writes VIS_DISPCNT when its OAM is in place.
+vis_setup:
+    push {r4-r7, lr}
+    mov r4, #IOBASE
+    mov r0, #0x80                  @ forced blank while VRAM is rewritten
+    strh r0, [r4]
+    ldr r0, =0x180B                @ BG0: prio 3, char base 2, screen base 24
+    strh r0, [r4, #8]
+    mov r0, #0
+    strh r0, [r4, #0x10]           @ BG0HOFS
+    strh r0, [r4, #0x12]           @ BG0VOFS
+    strh r0, [r4, #0x4C]           @ MOSAIC
+    strh r0, [r4, #0x50]           @ BLDCNT off
+    ldr r0, =vis_palette           @ BG palette 0 and OBJ palette 0
+    ldr r1, =PALBG
+    ldr r2, =PALOBJ
+    mov r3, #8
+1:  ldr r5, [r0], #4
+    str r5, [r1], #4
+    str r5, [r2], #4
+    subs r3, r3, #1
+    bne 1b
+    @ BG VRAM reference fills: the OBJ VRAM wrap probe is an 8bpp sprite,
+    @ so a fetched byte IS the palette index — these are indices 6/2/3
+    @ (magenta / red / blue), not 4bpp bit patterns.
+    vis_fill VRAM, 0x06060606, 0x4000          @ BG VRAM: magenta ...
+    vis_fill VRAM, 0x02020202, 0x400           @ ... first 4K red
+    vis_fill VRAM+0xF000, 0x03030303, 0x400    @ ... last 4K blue
+    vis_fill OBJVRAM, 0, 0x2000                @ OBJ VRAM transparent
+    vis_fill VISMAP, 0, 0x200                  @ map: all blank
+    ldr r0, =font_data                         @ font -> tiles 0..38
+    ldr r1, =VISCHR
+    mov r2, #39
+    bl  tiles_1bpp_to_4bpp
+    ldr r0, =corner_mark                       @ tile 39
+    ldr r1, =VISCHR + 39*32
+    mov r2, #1
+    bl  tiles_1bpp_to_4bpp
+    ldr r5, =VISCHR + 40*32                    @ tiles 40..47: swatches
+    ldr r6, =0x11111111
+    mov r7, #8
+2:  mov r0, r5
+    mov r1, r6
+    mov r2, #8
+    bl  fill_words
+    add r5, r5, #32
+    ldr r0, =0x11111111
+    add r6, r6, r0
+    subs r7, r7, #1
+    bne 2b
+    ldr r0, =OAM                               @ every OBJ disabled
+    ldr r1, =0x00000200
+    mov r2, #0
+    mov r3, #128
+3:  str r1, [r0], #4
+    str r2, [r0], #4
+    subs r3, r3, #1
+    bne 3b
+    vis_tile 0, 0, 39
+    vis_tile 29, 0, 39
+    vis_tile 0, 19, 39
+    vis_tile 29, 19, 39
+    pop {r4-r7, pc}
+    .ltorg
+
+@ r9 = page: rows 17-19, x < 160
+vis_footer:
+    push {r4-r8, lr}
+    vis_text 1, 17, str_crc
+    ldr r0, =SLOTS
+    mov r1, #SLOTSZ
+    mla r0, r9, r1, r0
+    bl  crc16
+    mov r8, r0
+    mov r0, #5
+    mov r1, #17
+    mov r2, r8, lsr #8
+    bl  vis_hex8
+    mov r0, #7
+    mov r1, #17
+    and r2, r8, #0xFF
+    bl  vis_hex8
+    vis_text 10, 17, str_all
+    ldr r0, =SLOTS
+    mov r1, #(NPAGES * SLOTSZ)
+    bl  crc16
+    mov r8, r0
+    mov r0, #14
+    mov r1, #17
+    mov r2, r8, lsr #8
+    bl  vis_hex8
+    mov r0, #16
+    mov r1, #17
+    and r2, r8, #0xFF
+    bl  vis_hex8
+    mov r0, #1
+    mov r1, #18
+    ldr r2, =name_table
+    mov r3, #10
+    mla r2, r9, r3, r2
+    bl  vis_str
+    vis_text 1, 19, str_title
+    vis_tile 12, 19, 26            @ 'P'
+    mov r0, #13
+    mov r1, #19
+    mov r2, r9
+    bl  vis_hex8
+    pop {r4-r8, pc}
+    .ltorg
+
+@ ── page 37 picture (layout in probe_objbudget's comment) ────────────────
+vis_objbudget_page:
+    bl  vis_setup
+    vis_fill OBJVRAM+512*32, 0x88888888, 256 @ FILL: 32 grey tiles
+    vis_fill OBJVRAM+544*32, 0x87654321, 128 @ TEST rows 0-15: ramp
+    vis_fill OBJVRAM+560*32, 0x11111111, 128 @ TEST rows 16-31: black
+    vis_fill OBJVRAM+576*32, 0x33333333, 256 @ NEXT: blue
+    ldr r4, =OAM
+    .rept 18                                   @ band A: OAM 0-17 fill
+    oam_put OB_FILL_A0, OB_FILL_A1, OB_FILL_A2
+    .endr
+    oam_put OB_FILL_A0, OB_TEST_A1, OB_TEST_A2 @ OAM 18 test
+    oam_put OB_FILL_A0, OB_NEXT_A1, OB_NEXT_A2 @ OAM 19 next
+    .rept 18                                   @ band B (Y=56): OAM 20-37
+    oam_put OB_FILL_A0+40, OB_FILL_A1, OB_FILL_A2
+    .endr
+    oam_put OB_FILL_A0+40, OB_TEST_A1|0x1000, OB_TEST_A2  @ 38, hflip
+    oam_put OB_FILL_A0+40, OB_NEXT_A1, OB_NEXT_A2           @ 39
+    oam_put OB_FILL_A0+80, OB_FILL_A1, OB_FILL_A2   @ band C (Y=96): one
+    oam_put OB_FILL_A0+80, OB_TEST_A1, OB_TEST_A2   @ filler, test, next
+    oam_put OB_FILL_A0+80, OB_NEXT_A1, OB_NEXT_A2
+    vis_text 1, 0, str_fill
+    vis_text 11, 0, str_test
+    vis_text 21, 0, str_next
+    vis_text 11, 6, str_ruler                  @ under band A
+    vis_text 11, 11, str_ruler                 @ under band B
+    vis_text 1, 11, str_flip
+    vis_text 11, 16, str_ruler                 @ under band C
+    vis_text 1, 16, str_ctrl
+    bl  vis_footer
+    mov r1, #IOBASE
+    ldr r0, =VIS_DISPCNT
+    strh r0, [r1]
+    pop {r4-r9, pc}
+    .ltorg
+
+@ ── page 38 picture (layout in probe_objgeom's comment) ──────────────────
+vis_objgeom_page:
+    bl  vis_setup
+    vis_fill OBJVRAM, 0x04040404, 128          @ 8bpp tiles 0-15: green
+    vis_fill OBJVRAM+32*32, 0x87654321, 8    @ tile 32: column ramp
+    ldr r5, =OBJVRAM + 33*32                   @ tile 33: row ramp
+    ldr r6, =0x11111111
+    mov r7, #8
+1:  str r6, [r5], #4
+    ldr r0, =0x11111111
+    add r6, r6, r0
+    subs r7, r7, #1
+    bne 1b
+    vis_fill OBJVRAM+64*32, 0x11111111, 224  @ Y200: rows 0-55 black
+    vis_fill OBJVRAM+92*32, 0x55555555, 32   @       rows 56-63 yellow
+    vis_fill OBJVRAM+96*32, 0x77777777, 64   @ DBL: rows 0-15 cyan
+    vis_fill OBJVRAM+104*32, 0x11111111, 128 @      rows 16-47 black
+    vis_fill OBJVRAM+120*32, 0x44444444, 64  @      rows 48-63 green
+    vis_fill OBJVRAM+1020*32, 0x05050505, 64 @ T1020 rows 0-15: yellow
+    ldr r4, =OAM
+    .irp k, 0, 1, 2, 3, 4, 5, 6, 7             @ OAM 0-7: X staircase
+    oam_put 40+8*\k, 0x1F8+\k, 32
+    .endr
+    .irp k, 0, 1, 2, 3, 4, 5, 6, 7             @ OAM 8-15: Y staircase
+    oam_put 248+\k, 40+8*\k, 33
+    .endr
+    oam_put 0x80C8, 0xC070, 64                 @ OAM 16: Y200 32x64
+    oam_put OG_DBL_A0, OG_DBL_A1, OG_DBL_A2    @ OAM 17: Y130 DBL
+    oam_put OG_WRAP_A0, OG_WRAP_A1, OG_WRAP_A2 @ OAM 18: T1020
+    ldr r4, =OAM                               @ affine group 0: 2x scale
+    mov r0, #0x80
+    strh r0, [r4, #6]                          @ pa
+    mov r0, #0
+    strh r0, [r4, #14]                         @ pb
+    strh r0, [r4, #22]                         @ pc
+    mov r0, #0x80
+    strh r0, [r4, #30]                         @ pd
+    vis_text 5, 2, str_ystair
+    vis_text 14, 2, str_y200
+    vis_text 1, 4, str_xstair
+    vis_text 24, 4, str_t1020
+    vis_text 25, 9, str_lg_t0
+    vis_tile 28, 9, 43                         @ green swatch
+    vis_text 25, 10, str_lg_b0
+    vis_tile 28, 10, 41                        @ red
+    vis_text 25, 11, str_lg_bl
+    vis_tile 28, 11, 42                        @ blue
+    vis_text 25, 12, str_lg_bm
+    vis_tile 28, 12, 45                        @ magenta
+    vis_text 20, 15, str_dbl
+    bl  vis_footer
+    mov r1, #IOBASE
+    ldr r0, =VIS_DISPCNT
+    strh r0, [r1]
+    pop {r4-r9, pc}
+    .ltorg
+

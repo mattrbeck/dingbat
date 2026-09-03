@@ -166,3 +166,7 @@ flashcart-kit/
 # Personal ROM list consumed by tools/gbgate/sweep.sh (supplied locally)
 tools/gbgate/roms.txt
 /dingbat_clipreplay_test
+
+# Regenerable multiboot-probe outputs (tests/roms/mbprobe/build.py)
+tests/roms/mbprobe/build/*.sav
+tests/roms/mbprobe/build/payload_mirror_cart.gba

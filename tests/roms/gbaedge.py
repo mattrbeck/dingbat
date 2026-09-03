@@ -28,7 +28,10 @@ PAGES = ["IDENT", "OPENBUS", "BIOSPROT", "SWITIME", "TIMERS", "DMALATCH",
          "THUMBPC", "LDMUSER", "IRQWIN", "DMAEDGE", "CAPDMA", "SWEEPQ",
          "BXDECODE", "THUMBPC2", "IRQWIN2", "IOBYTE", "LDMUSER2", "PCWB2",
          "DMABYTE2", "SWEEP2", "IRQWIN3", "IRQLAT2", "IOBYTE2", "THUMBPC3",
-         "MSRTBIT2"]
+         "MSRTBIT2",
+         # v7: two VISUAL pages (a picture, not a hex dump — see
+         # README-probes-gba.md) and one hex page
+         "OBJBUDGET", "OBJGEOM", "DMAOPENBUS"]
 
 # The compressed Nintendo logo every bootable cart carries at 0x04-0x9F.
 LOGO = bytes.fromhex(
@@ -57,7 +60,16 @@ def gen_inc():
     for label, text in (("str_title", "GBAEDGE V1"), ("str_crc", "CRC "),
                         ("str_all", "ALL "), ("str_model", "MODEL "),
                         ("str_press", "PRESS START"),
-                        ("str_ran", "RAN-SEE 00")):
+                        ("str_ran", "RAN-SEE 00"),
+                        # visual-page labels (font has no '+': ranges use '-')
+                        ("str_fill", "FILL"), ("str_test", "TEST"),
+                        ("str_next", "NEXT"), ("str_ruler", "01234567"),
+                        ("str_ystair", "Y248-255"), ("str_y200", "Y200"),
+                        ("str_xstair", "X504-511"), ("str_dbl", "Y130 DBL"),
+                        ("str_t1020", "T1020"), ("str_lg_t0", "T0"),
+                        ("str_lg_b0", "B0"), ("str_lg_bl", "BL"),
+                        ("str_lg_bm", "BM"), ("str_flip", "FLIP"),
+                        ("str_ctrl", "CTRL")):
         lines.append(f".global {label}")
         lines.append(f"{label}:")
         lines.append("    .byte " +
