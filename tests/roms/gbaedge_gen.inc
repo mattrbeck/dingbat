@@ -1,4 +1,4 @@
-.equ NPAGES, 40
+.equ NPAGES, 50
 
 .global font_data
 font_data:
@@ -85,6 +85,16 @@ name_table:
     .byte 25,12,20,12,31,14,17,15,30,0   @ OBJBUDGET
     .byte 25,12,20,17,15,25,23,0,0,0   @ OBJGEOM
     .byte 14,23,11,25,26,15,24,12,31,29   @ DMAOPENBUS
+    .byte 19,28,27,14,15,13,25,23,26,0   @ IRQDECOMP
+    .byte 13,25,24,30,15,24,14,3,0,0   @ CONTEND2
+    .byte 23,31,22,30,19,23,15,0,0,0   @ MULTIME
+    .byte 30,19,23,26,18,11,29,15,0,0   @ TIMPHASE
+    .byte 26,29,17,26,18,11,29,15,0,0   @ PSGPHASE
+    .byte 23,15,23,13,30,22,0,0,0,0   @ MEMCTL
+    .byte 14,23,11,30,19,23,15,0,0,0   @ DMATIME
+    .byte 19,33,13,35,13,22,15,0,0,0   @ IWCYCLE
+    .byte 14,23,11,16,19,16,25,0,0,0   @ DMAFIFO
+    .byte 31,24,14,23,25,14,15,0,0,0   @ UNDMODE
 .global str_title
 str_title:
     .byte 17,12,11,15,14,17,15,0,32,2

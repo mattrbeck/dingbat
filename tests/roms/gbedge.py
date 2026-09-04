@@ -2329,6 +2329,588 @@ def t_sweep(a, slot, p):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# APU probe helpers (the 2026-09 pages)
+# ═══════════════════════════════════════════════════════════════════════════
+# Every page below is built out of the same four moves, so that the whole
+# history of a row is the M-cycle count this file writes down and nothing
+# else.  The value of these probes is entirely in those counts.
+#
+#   apu_power_cycle  NR52 $00 -> $80.  Zeroes NR10-NR51, parks every
+#                    frequency timer, resets both squares' duty position and
+#                    CH3's wave pointer to 0, restarts the APU's 1 MHz tick
+#                    grid and sets the frame-sequencer stage to 0.  Wave RAM
+#                    survives it.
+#   div_anchor       `xor a / ldh (DIV),a`.  CYCLE 0 of every count on these
+#                    pages is the M-cycle that write lands on: the internal
+#                    divider restarts there, so the DIV-APU tap (internal bit
+#                    12, 8192 T) falls 2048 M later and every 2048 M after.
+#                    With the sequencer stage zeroed just before, the events
+#                    are: #1 at 2048 = stage 0, #2 at 4096 = stage 1, ...
+#                      length  stages 0/2/4/6 = events 1,3,5,7 = 2048 M then
+#                              every 4096 M
+#                      sweep   stages 2/6     = events 3,7,11 = 6144 M then
+#                              every 8192 M
+#                      envelope stage 7       = event 8       = 16384 M then
+#                              every 16384 M
+#   wait_reg_w       delay, then `ld a,n / ldh (r),a` so the bus WRITE lands
+#                    on a named cycle (the write is the 3rd M-cycle of the
+#                    ldh, i.e. the 5th of the pair).
+#   wait_pcm         delay, then `ldh a,($76/$77)` so the bus READ lands on a
+#                    named cycle (the read is the 3rd M-cycle of the ldh).
+#
+# A write and a read named for the same cycle are the same M-cycle of the
+# bus; where a probe sweeps k it is sweeping that cycle by one M at a time.
+
+
+def reg_w(a, reg, val):
+    """`ld a,val / ldh (reg),a`: 5 M-cycles, the bus write on the 5th."""
+    a.ld_r_n("a", val)
+    a.ldh_n_a(reg)
+    return 5
+
+
+def apu_off(a):
+    a.xor_r("a")
+    a.ldh_n_a(0x26)
+
+
+def div_anchor(a):
+    """`xor a / ldh (DIV),a`.  The divider reset is the 4th M-cycle and is
+    cycle 0 of the counts in the probes below."""
+    a.xor_r("a")
+    a.ldh_n_a(DIV)
+
+
+def wait_reg_w(a, m, target, reg, val):
+    """Delay, then write `val` to FF00+reg so the write lands on `target`
+    M-cycles after the div_anchor.  Returns the new cycle count."""
+    d = target - m - 5
+    assert d >= 0, f"wait_reg_w underflow {d} (m={m} target={target})"
+    a.delay(d)
+    a.ld_r_n("a", val)
+    a.ldh_n_a(reg)
+    return target
+
+
+def wait_pcm(a, m, target, dest, reg=0x76):
+    """Delay, then read FF00+reg so the READ lands on cycle `target`, and
+    store it at `dest`.  Returns the cycle count after the store."""
+    d = target - m - 3
+    assert d >= 0, f"wait_pcm underflow {d} (m={m} target={target})"
+    a.delay(d)
+    a.ldh_a_n(reg)
+    a.ld_nn_a(dest)
+    return target + 4
+
+
+def pcm_or8(a, m, target, dest, reg=0x76):
+    """Delay, then OR eight PCM reads 5 M-cycles apart, the first landing on
+    `target`, and store the OR at `dest`.  With one square running at an 8 M
+    duty-step period the eight reads span five duty periods, so the OR is
+    that channel's VOLUME whatever the duty phase — the amplitude readout
+    the envelope pages want, independent of where the waveform sits."""
+    d = target - m - 5                 # ld c,0 (2) + the ldh's 3rd M (3)
+    assert d >= 0, f"pcm_or8 underflow {d}"
+    a.delay(d)
+    a.ld_r_n("c", 0)
+    for _ in range(8):
+        a.ldh_a_n(reg)                 # 3
+        a.or_r("c")                    # 1
+        a.ld_r_r("c", "a")             # 1
+    a.ld_r_r("a", "c")
+    a.ld_nn_a(dest)
+    return target + 40
+
+
+def poll_nr52_16(a, tag, dest, cap_hi=0x20):
+    """Poll NR52 bit 0 every 15 M-cycles until it clears; store the 16-bit
+    count (lo, hi) at dest.  Capped at cap_hi*256 polls; the first read is 6
+    M-cycles after the row's last write."""
+    a.ld_rr_nn("bc", 0)                # 3
+    a.label(f"{tag}_p")
+    a.ldh_a_n(0x26)                    # 3
+    a.and_n(0x01)                      # 2
+    a.jr(f"{tag}_d", "z")              # 2 not taken
+    a.inc_rr("bc")                     # 2
+    a.ld_r_r("a", "b")                 # 1
+    a.cp_n(cap_hi)                     # 2
+    a.jr(f"{tag}_p", "c")              # 3 taken  => 15 M per poll
+    a.label(f"{tag}_d")
+    a.ld_r_r("a", "c")
+    a.ld_nn_a(dest)
+    a.ld_r_r("a", "b")
+    a.ld_nn_a(dest + 1)
+
+
+NR52_UNIT_INNER = 75
+NR52_UNIT_M = 17 + 4 * NR52_UNIT_INNER      # 317 M-cycles per poll
+
+
+def poll_nr52_coarse(a, tag, dest, cap=0xFF):
+    """Poll NR52 bit 0 every NR52_UNIT_M (317) M-cycles until it clears;
+    store the count as one saturating byte at dest.  $00 = the channel was
+    already off on the first poll (6 M-cycles after the row's last write),
+    `cap` = it was still on cap*317 M-cycles later.  One byte per row buys
+    the rows these sweeps need; 317 M is ~1/26 of a sweep step, which is the
+    resolution the sweep pages actually use.  `cap` is per row and is also
+    the row's cost: a row that never dies takes cap*317 M-cycles of boot
+    time, so pages that only need "did it die at all" pass a small one."""
+    a.ld_r_n("b", 0)                   # 2
+    a.label(f"{tag}_p")
+    a.ldh_a_n(0x26)                    # 3
+    a.and_n(0x01)                      # 2
+    a.jr(f"{tag}_d", "z")              # 2 not taken
+    a.inc_r("b")                       # 1
+    a.ld_r_r("a", "b")                 # 1
+    a.cp_n(cap)                        # 2
+    a.jr(f"{tag}_d", "z")              # 2 not taken
+    a.ld_r_n("c", NR52_UNIT_INNER)     # 2
+    a.label(f"{tag}_i")
+    a.dec_r("c")                       # 1
+    a.jr(f"{tag}_i", "nz")             # 3 taken, 2 on the last  => 4*n - 1
+    a.jr(f"{tag}_p")                   # 3
+    a.label(f"{tag}_d")
+    a.ld_r_r("a", "b")
+    a.ld_nn_a(dest)
+
+
+@test("CH2PHASE")
+def t_ch2phase(a, slot, p):
+    """Channel 2's trigger phase: the channel-1 PCMPSG measurement mirrored.
+
+    `ch2_pcm_edge_zero` and `ch2_reload_is_now` (apu/channel2.nim) are
+    channel 1's constants copied across with "no channel_2 build of the ROM
+    measures it. Assumed" — this page is that build.  PCM12 ($FF76) carries
+    CH1 in the low nibble and CH2 in the high one, and a power cycle leaves
+    CH1's DAC off, so every byte reads x0 and x IS channel 2's output.
+    (EE at +1F = not CGB/AGB: no PCM readback.)
+
+    Each row is its own run, from its own APU power cycle (duty position
+    back to 0): NR21 duty 2, NR22 volume $F with no envelope, NR23 = $F8
+    (freq 2040 => one duty step every 8 M-cycles), then the NR24 trigger.
+
+    00-0F  k = 0..15: PCM12 read k+3 M-cycles after the trigger write, the
+           channel starting from OFF.  Duty 3 is low only on the position a
+           power cycle leaves behind, so the FIRST duty step is the first
+           non-zero byte and its k is gb_trigger_deadline's "2 extra ticks"
+           start-up delay at 1 M resolution.  dingbat: 00 x8 then F0 x8, so
+           the step lands 11 M-cycles after the write — 8 M of period, 2
+           ticks of start-up and 1 M for the write to reach the APU's 1 MHz
+           grid (gb_apu_edge).  A byte reading 00 where both neighbours
+           read F0 is the CGB 0/A/B/C PCM read glitch on the channel-2 side
+           — GbQuirks.pcm_read_edge_zero via ch2_pcm_edge_zero, which is
+           off from CGB D: photograph this page on a CGB-C and a CGB-E.
+    10-1D  k = 0..13, but a SECOND NR24 trigger is written 68 M-cycles
+           after the first (leaving the duty position on the step before
+           the high run) and k counts from that one: a restart of a running
+           channel, which gb_trigger_deadline gives 1 extra tick instead of
+           2, and across which the duty position and the latched sample are
+           supposed to carry.  dingbat: 00 x7 then F0 x7 — one M-cycle
+           earlier than 00-0F, and that difference of exactly 1 between the
+           two rows' edges IS the extra tick.
+    1E     NR52 after the last row ($x2 = channel 2 still on)
+    """
+    cgb_gate(a, slot, p)
+    for k in range(16):
+        apu_off(a)
+        reg_w(a, 0x26, 0x80)           # APU on
+        reg_w(a, 0x25, 0xFF)           # NR51 everything, both sides
+        reg_w(a, 0x24, 0x77)           # NR50 max, no VIN
+        reg_w(a, 0x16, 0xC0)           # NR21 duty 3 (75%), length 0
+        reg_w(a, 0x17, 0xF0)           # NR22 volume $F, envelope off
+        reg_w(a, 0x18, 0xF8)           # NR23 freq $7F8 -> 8 M per duty step
+        reg_w(a, 0x19, 0x87)           # NR24 trigger, length disabled
+        a.delay(k)                     # the read lands at trigger + k + 3
+        a.ldh_a_n(0x76)
+        a.ld_nn_a(slot + k)
+    for k in range(14):
+        apu_off(a)
+        reg_w(a, 0x26, 0x80)
+        reg_w(a, 0x25, 0xFF)
+        reg_w(a, 0x24, 0x77)
+        reg_w(a, 0x16, 0xC0)
+        reg_w(a, 0x17, 0xF0)
+        reg_w(a, 0x18, 0xF8)
+        reg_w(a, 0x19, 0x87)           # first trigger
+        a.delay(63)                    # + 5 M of the write below = 68 M
+        reg_w(a, 0x19, 0x87)           # restart, 68 M after the first
+        a.delay(k)
+        a.ldh_a_n(0x76)
+        a.ld_nn_a(slot + 0x10 + k)
+    a.ldh_a_n(0x26)
+    a.ld_nn_a(slot + 0x1E)
+    apu_off(a)
+
+
+@test("SWPPHASE")
+def t_swpphase(a, slot, p):
+    """The two sweep phases channel1.nim marks "Assumed; no ROM pins this",
+    and with them the sweep-delay split of hwprobe row 14.
+
+    dingbat splits the 8 M-cycles SameSuite channel_1_sweep* measures into
+    GB_SWEEP_SHADOW_DELAY (2 M, trigger -> shadow loaded),
+    GB_SWEEP_CHECK_DELAY (7 M, writeback -> the second overflow check) and
+    GB_SWEEP_STOP_DELAY (1 M, check -> the stop visible in NR52), and states
+    at channel1.nim:242 that a pending stop does NOT survive a restart
+    ("only reachable when the trigger lands on the calculation's cycle").
+    Rows 00-0E land a restart on each of the 15 M-cycles that window spans.
+
+    Every row: APU power cycle, DIV anchor (cycle 0), NR10 = $11 (pace 1,
+    increment, shift 1), duty 2, volume $F, freq 1024 ($400), triggered on
+    cycle 40 — well before the first sweep step.  The trigger's own check
+    calculates 1024 + 512 = 1536 and passes.  The sweep step on cycle 6144
+    calculates 1536, writes it back, and its trailing check calculates
+    1536 + 768 = 2304 > $7FF: THAT is what stops the channel, ~8 M later.
+    The restart is NR13 = $00 followed 5 M later by NR14 = $80, so the
+    restarted channel's frequency — and therefore its sweep shadow — is 0
+    however that pair straddles the writeback (1536 = $600 also has a zero
+    low byte, so the writeback cannot smuggle a non-zero frequency in).  A
+    shadow of 0 calculates 0 forever, so nothing the restarted channel does
+    can ever stop it again: whether it is alive afterwards is exactly
+    whether the pending stop survived the restart.
+
+    00-0E  k = 0..14: the restart's NR14 write lands on cycle 6139+k, i.e.
+           5 M before the sweep calculation through 9 M after it (past the
+           trailing check at 6151 and the stop at 6152).  Byte = poll count
+           in units of 317 M-cycles until NR52 bit 0 clears, from 6 M after
+           the restart, capped at 8 (a restart row only has to answer "did
+           it die at all"): 08 = still on 2536 M later, 00/01 = it died.
+           dingbat predicts 08 in all 15 — a restart before the check
+           re-arms the check with the zero shadow, a restart between the
+           check and the stop clears the pending stop, and one after the
+           stop re-enables the dead channel.  Any byte below the cap on
+           hardware is a stop that a trigger could not cancel, and its k is
+           the cycle the stop becomes irrevocable.
+    0F     the same row with NO restart, polled from cycle 45 with a cap of
+           40: the control that says the sweep really does stop this
+           channel.  dingbat: $14 (20 polls ~ cycle 6152).
+    10-1E  j = 0..14 (CGB/AGB only): where the duty step sits across a sweep
+           writeback.  NR10 = $1F (pace 1, DECREMENT, shift 7) and freq
+           $7FE, so the duty step period is 2 M-cycles until the sweep step
+           on cycle 6144 writes back $7EF and stretches it to 17 M — the
+           waveform visibly freezes.  Byte = PCM12 read on cycle 6140+j (1
+           M-cycle apart, so this is the waveform itself at CPU
+           resolution).  The last 2 M edge before the freeze pins the cycle
+           the new period takes effect on: the `reload_now` race in
+           sweep_step (channel1.nim ~147), which is the race
+           channel1.nim:212 assumes for a frequency write and no ROM pins.
+           dingbat: 0F 0F then 00 in all thirteen — the waveform's high
+           step ends on cycle 6138, and the writeback on 6144 freezes the
+           position it lands on, so the high step an unfrozen 2 M waveform
+           would show again on 6146 never arrives.
+    1F     EE = not CGB/AGB (rows 10-1E are blank there; 00-0F still ran)
+    """
+    for k in range(16):
+        apu_off(a)
+        div_anchor(a)
+        m = reg_w(a, 0x26, 0x80)       # 5   APU on (tap bit clear: no skip)
+        m += reg_w(a, 0x25, 0xFF)      # 10
+        m += reg_w(a, 0x24, 0x77)      # 15
+        m += reg_w(a, 0x10, 0x11)      # 20  NR10 pace 1, add, shift 1
+        m += reg_w(a, 0x11, 0x80)      # 25  NR11 duty 2
+        m += reg_w(a, 0x12, 0xF0)      # 30  NR12 volume $F
+        m += reg_w(a, 0x13, 0x00)      # 35  NR13 freq lo (1024 = $400)
+        m += reg_w(a, 0x14, 0x84)      # 40  NR14 trigger, freq hi 4
+        if k < 15:
+            restart = 6144 - 5 + k
+            m = wait_reg_w(a, m, restart - 5, 0x13, 0x00)
+            m = wait_reg_w(a, m, restart, 0x14, 0x80)
+        # a restart row only has to answer "did it die at all" — the death is
+        # 8 M after the sweep step, so 8 polls is a generous cap and keeps a
+        # surviving row down to 2536 M of boot time.  The control row has to
+        # COUNT to the death and gets 40.
+        poll_nr52_coarse(a, f"{p}a{k}", slot + k, 8 if k < 15 else 40)
+    apu_off(a)
+    cgb_gate(a, slot, p)
+    for j in range(15):
+        apu_off(a)
+        div_anchor(a)
+        m = reg_w(a, 0x26, 0x80)       # 5
+        m += reg_w(a, 0x25, 0xFF)      # 10
+        m += reg_w(a, 0x24, 0x77)      # 15
+        m += reg_w(a, 0x10, 0x1F)      # 20  NR10 pace 1, negate, shift 7
+        m += reg_w(a, 0x11, 0x80)      # 25  NR11 duty 2
+        m += reg_w(a, 0x12, 0xF0)      # 30  NR12 volume $F
+        m += reg_w(a, 0x13, 0xFE)      # 35  freq $7FE -> 2 M per duty step
+        m = wait_reg_w(a, m, 54, 0x14, 0x87)   # trigger on cycle 54: puts
+        # the duty position on 4 (a low step, with a high one 2 M behind it)
+        # when the sweep writeback lands, so the window below holds an edge
+        # of the running waveform AND the freeze the writeback causes
+        m = wait_pcm(a, m, 6136 + j, slot + 0x10 + j)
+    apu_off(a)
+
+
+@test("NOISEWAVE")
+def t_noisewave(a, slot, p):
+    """hwprobe row 14's other two halves: the noise divisor codes no test
+    ROM reaches, and DMG's wave-RAM access window.
+
+    00-0F  divisor codes 0-7 (lo, hi per code).  gb_noise_deadline
+           (apu/abstract_channels.nim) says "Codes 5-7 are not exercised by
+           any test and follow the >= 2 case", and ch4_frequency_timer makes
+           the LFSR period (8 T for code 0, else 16*code T) << shift.  Each
+           row: APU power cycle, NR42 = $F0, NR43 = $40 | code (shift 4,
+           15-bit), NR44 = $80 trigger, then poll PCM34 ($FF77) every 14
+           M-cycles until its HIGH nibble (channel 4) goes non-zero, 16-bit
+           count (capped at $0400).  A trigger loads the LFSR with $7FFF and
+           the output is the INVERTED bit 0, so the channel starts silent
+           and goes loud on exactly the 15th shift: the count is
+           14.5 periods + the trigger delay, i.e. a direct ruler of the
+           divisor.  Codes 1-4 (measured by SameSuite) calibrate it; 5, 6
+           and 7 must sit at 5:6:7 against them if the divisor really is
+           16*code.
+           On DMG/MGB $FF77 reads $FF, so every row reads 00 00 — that is
+           the "no PCM readback" fingerprint, not a measurement.
+    10-1F  k = 0..15: DMG's wave-RAM access window.  Wave RAM is loaded once
+           with $01 $12 $23 ... $EF $00 (no byte is $FF) while CH3 is off,
+           then each row power-cycles the APU, sets NR30 = $80, NR32 = $20
+           (100%), NR33/NR34 = freq $7FD, triggers, and reads $FF30 k+3
+           M-cycles later.  $7FD steps the wave pointer every 6 T-cycles,
+           deliberately NOT a whole M-cycle: the fetch grid and the CPU's
+           coincide only every 12 T, which is what makes a window tied to
+           the fetch reachable at all.  ch3_wave_open (apu/channel3.nim,
+           GB_WAVE_ACCESS_WINDOW = 2 T) says DMG lets the CPU through only
+           in the half-cycle after a completed fetch, so dingbat predicts
+           every third byte readable and the rest $FF:
+           01 FF FF 12 FF FF 23 FF FF 34 FF FF 45 FF FF 56.  The pattern's
+           PHASE is the window's position and how many bytes of each three
+           are readable is its width; sixteen $FF means the window is
+           narrower than 2 T or does not line up this way at all, sixteen
+           wave bytes means DMG has no window.  On CGB/AGB the access
+           always resolves, so all 16 are wave data and the row shows the
+           pointer walking instead.
+    """
+    for code in range(8):
+        apu_off(a)
+        reg_w(a, 0x26, 0x80)
+        reg_w(a, 0x25, 0xFF)
+        reg_w(a, 0x24, 0x77)
+        reg_w(a, 0x20, 0x00)           # NR41 length load 0 (length off)
+        reg_w(a, 0x21, 0xF0)           # NR42 volume $F, envelope off
+        reg_w(a, 0x22, 0x40 | code)    # NR43 shift 4, 15-bit, divisor code
+        reg_w(a, 0x23, 0x80)           # NR44 trigger, length disabled
+        a.ld_rr_nn("hl", 0xFF77)
+        a.ld_rr_nn("bc", 0)            # 3
+        a.label(f"{p}_n{code}")
+        a.ld_r_r("a", "hl")            # 2   PCM34
+        a.and_n(0xF0)                  # 2   channel 4's nibble
+        a.jr(f"{p}_nd{code}", "nz")    # 2 not taken
+        a.inc_rr("bc")                 # 2
+        a.ld_r_r("a", "b")             # 1
+        a.cp_n(0x04)                   # 2   cap $0400 (14336 M)
+        a.jr(f"{p}_n{code}", "c")      # 3 taken  => 14 M per poll
+        a.label(f"{p}_nd{code}")
+        a.ld_r_r("a", "c")
+        a.ld_nn_a(slot + 2 * code)
+        a.ld_r_r("a", "b")
+        a.ld_nn_a(slot + 2 * code + 1)
+    apu_off(a)
+    a.ld_r_n("a", 0x00)
+    a.ldh_n_a(0x1A)                    # NR30 DAC off: wave RAM is plain RAM
+    for i in range(16):
+        reg_w(a, 0x30 + i, (i * 0x11 + 1) & 0xFF)
+    for k in range(16):
+        apu_off(a)
+        reg_w(a, 0x26, 0x80)
+        reg_w(a, 0x25, 0xFF)
+        reg_w(a, 0x24, 0x77)
+        reg_w(a, 0x1A, 0x80)           # NR30 DAC on
+        reg_w(a, 0x1B, 0x00)           # NR31 length load 0
+        reg_w(a, 0x1C, 0x20)           # NR32 volume 100%
+        reg_w(a, 0x1D, 0xFD)           # NR33 freq $7FD -> 6 T per sample
+        reg_w(a, 0x1E, 0x87)           # NR34 trigger, length disabled
+        a.delay(k)                     # the read lands at trigger + k + 3
+        a.ldh_a_n(0x30)
+        a.ld_nn_a(slot + 0x10 + k)
+    apu_off(a)
+
+
+@test("ENVPHASE")
+def t_envphase(a, slot, p):
+    """Pan Docs audit A9: does the envelope timer get +1 when a trigger
+    lands just before an envelope step?
+
+    dingbat's init_volume_envelope sets timer = period unconditionally, so
+    an envelope step one M-cycle after a trigger still counts.  Pan Docs
+    says the freshly loaded timer is one longer, which moves the first
+    volume change a whole envelope period (16384 M) later.  With DIV
+    anchored and the sequencer stage zeroed the envelope steps are at 16384
+    and 32768.  Both rows answer the SAME question with the same encoding —
+    "did the step at 16384 count?", 02 = yes, 01 = no — and read the volume
+    ONCE, as the OR of eight PCM12 reads, so the answer does not depend on
+    where the duty phase happens to be.  (EE at +1F = not CGB/AGB.)
+
+    00-07  k = 0..7, NR12 = $19 (start volume 1, increment, period 1): the
+           trigger's NR14 write lands on cycle 16380+k, i.e. 4 M-cycles
+           either side of the envelope step at 16384, and the volume is read
+           on cycle 16896.  Counted => the volume already stepped to 2; not
+           counted => still 1.  The k the byte steps from 02 to 01 is the
+           arming boundary at 1 M resolution; an all-01 row is Pan Docs' +1.
+    0F     NR52 after row 00-07 ($x1 = channel 1 still on)
+    10-13  k = 0..3 with NR12 = $1A (period 2) and the volume read on cycle
+           33280, where the same question moves the first volume change a
+           whole envelope period instead of landing on the next one: the
+           step at 16384 counted => 2, else 1.  Two different periods
+           disagreeing the same way is what says the TIMER moved and not the
+           step.  Four rows, because at two envelope periods each row costs
+           twice the boot time of one in 00-07.
+    1F     EE = not CGB/AGB
+    """
+    cgb_gate(a, slot, p)
+    for nr12, base, first, count, read_at in ((0x19, 0x00, 16380, 8, 16896),
+                                              (0x1A, 0x10, 16382, 4, 33280)):
+        for k in range(count):
+            apu_off(a)
+            div_anchor(a)
+            m = reg_w(a, 0x26, 0x80)   # 5   APU on
+            m += reg_w(a, 0x25, 0xFF)  # 10
+            m += reg_w(a, 0x24, 0x77)  # 15
+            m += reg_w(a, 0x10, 0x00)  # 20  NR10 no sweep
+            m += reg_w(a, 0x11, 0x80)  # 25  NR11 duty 2, length 0
+            m += reg_w(a, 0x12, nr12)  # 30  NR12 start vol 1, increment
+            m += reg_w(a, 0x13, 0xF8)  # 35  NR13 freq $7F8 -> 8 M steps
+            m = wait_reg_w(a, m, first + k, 0x14, 0x87)
+            m = pcm_or8(a, m, read_at, slot + base + k)
+        if base == 0:
+            a.ldh_a_n(0x26)
+            a.ld_nn_a(slot + 0x0F)
+    apu_off(a)
+
+
+@test("NR10PACE")
+def t_nr10pace(a, slot, p):
+    """Pan Docs audit A10: does writing a non-zero pace into NR10 while the
+    pace is 0 RELOAD the sweep timer?
+
+    dingbat's NR10 write stores the fields only, so the timer keeps the
+    count it has been running since the trigger — with pace 0 that count
+    started at 8 (channel1.nim: `if sweep_period > 0: sweep_period else: 8`)
+    and reaches 0 on the EIGHTH sweep step whatever the write does.  Pan
+    Docs' reload puts the first calculation `pace` sweep steps after the
+    WRITE instead.  The two disagree by up to seven sweep steps, and they
+    disagree in shape: a descending staircase against a flat row, and a
+    dependence on the new pace against none.
+
+    Every row: APU power cycle, DIV anchor, NR10 = $01 (pace 0, increment,
+    shift 1), duty 2, volume $F, freq 1000 ($3E8), triggered on cycle 2560
+    (between sequencer events, far from any sweep step).  Sweep steps are at
+    6144 + 8192n.  The first calculation that runs writes back 1500 and its
+    trailing check calculates 2250 > $7FF, so the channel dies ~8 M after
+    the sweep step that runs it; the trigger's own check (1500) is safe.
+    Bytes are poll counts in units of 317 M-cycles from 6 M after the NR10
+    write (00-02, 08-09) or after the trigger (10-12).
+    dingbat predicts death on cycle 63496 in every row of 00-09, so each of
+    those rows costs 3.6 frames of boot time and there are deliberately only
+    five of them: two j values would answer A10, three make the staircase a
+    staircase.
+
+    00-02  j = 0, 3, 6: pace written as $11 on cycle 6656 + 8192j (half a
+           sweep step after the trigger, then three sweep steps later per
+           row).  dingbat: B4 66 19 = 180, 102, 25 — a descending staircase,
+           one and the same death seen from a start that moves three sweep
+           steps per row.  Pan Docs' reload: ~24 in all three (one sweep
+           step after the write, wherever the write is).
+    08-09  j = 0 and 6 again with pace 7 ($71).  dingbat: B4 19 — the same
+           two bytes as 00 and 02, because the running count does not care
+           what the new pace is.  Pan Docs: ~179 in both (seven sweep steps
+           after the write).  So 00-02 answers "does the write reload?" by
+           its shape and 08-09 answers it again by whether the pace matters,
+           and neither answer needs the absolute counts to be right.
+    10-12  calibration: pace 1, 2, 4 written BEFORE the trigger, polled from
+           the trigger.  Death is then `pace` sweep steps after it: dingbat
+           predicts 0C 26 59 = 12, 38, 89 — the ruler that turns every other
+           byte on this page into sweep steps (one step is ~26 polls).
+    1C     NR52 at the end of the page ($F0 = the channel really is dead)
+    """
+    def row(tag, dest, nr10_first, write_at, nr10_second, poll_from_trigger):
+        apu_off(a)
+        div_anchor(a)
+        m = reg_w(a, 0x26, 0x80)       # 5   APU on
+        m += reg_w(a, 0x25, 0xFF)      # 10
+        m += reg_w(a, 0x24, 0x77)      # 15
+        m += reg_w(a, 0x10, nr10_first)  # 20  NR10
+        m += reg_w(a, 0x11, 0x80)      # 25  NR11 duty 2
+        m += reg_w(a, 0x12, 0xF0)      # 30  NR12 volume $F
+        m += reg_w(a, 0x13, 0xE8)      # 35  NR13 freq lo (1000 = $3E8)
+        m = wait_reg_w(a, m, 2560, 0x14, 0x83)     # trigger on cycle 2560
+        if not poll_from_trigger:
+            m = wait_reg_w(a, m, write_at, 0x10, nr10_second)
+        # 200 polls = 63400 M covers the death this page is waiting for; a
+        # row that somehow never dies stops there instead of at $FF.
+        poll_nr52_coarse(a, tag, dest, 200)
+
+    for i, j in enumerate((0, 3, 6)):
+        row(f"{p}a{j}", slot + i, 0x01, 6656 + 8192 * j, 0x11, False)
+    for i, j in enumerate((0, 6)):
+        row(f"{p}b{j}", slot + 8 + i, 0x01, 6656 + 8192 * j, 0x71, False)
+    for i, pace in enumerate((1, 2, 4)):
+        row(f"{p}c{i}", slot + 0x10 + i, (pace << 4) | 0x01, 0, 0, True)
+    a.ldh_a_n(0x26)
+    a.ld_nn_a(slot + 0x1C)
+    apu_off(a)
+
+
+@test("SEQRESET")
+def t_seqreset(a, slot, p):
+    """Does an NR52 master off->on reset the DIV-APU frame sequencer, and
+    what does it leave `first_half_of_length_period` at?
+
+    dingbat zeroes the sequencer STAGE on power-on but keeps its TIMING on
+    DIV (apu.nim), and sets first_half_of_length_period = div_skip, where
+    div_skip is SameSuite div_write_trigger_10's rule: powering the APU up
+    while the DIV-APU tap bit is already set makes the first event do
+    nothing.  So the length-expiry time after a power-on should be a sawtooth
+    in the power-on phase, not a constant — a constant would mean the
+    sequencer's clock restarts with the power.
+
+    Every row: APU off, DIV anchor (cycle 0), APU on at cycle 128 + 256d,
+    then NR51/NR50/NR11/NR12/NR13 and an NR14 = $C4 trigger (with length
+    enabled) 30 M later, then a 15 M poll of NR52 bit 0, 16-bit, cap $0200
+    (the longest real count on this page is 399 polls and four rows never
+    die at all; at the $2000 cap those four alone would cost 28 frames of
+    boot time).  Length steps are at 2048 then every 4096 M; a skipped first event pushes
+    them to 4096 and every 4096 M.
+
+    00-0F  d = 0..7 (lo, hi per d), NR11 = $BF => length counter 1, so the
+           channel dies on the FIRST length step.  dingbat predicts 126,
+           109, 92, 75 polls for d = 0..3 — the step at 2048 approached 256
+           M (17 polls) closer each row, which is the whole point: a flat
+           row would mean the power-on restarts the sequencer's CLOCK and
+           not just its stage.  For d = 4..7 it predicts the $0200 cap:
+           with the tap bit already set at power-on
+           first_half_of_length_period is true, the trigger's own
+           length-enable write clocks the counter from 1 to 0, and the
+           trigger then reloads the zeroed counter to 64, so the channel
+           outlives the poll ($0200 = the cap, not a measurement).  Where
+           the row turns to the cap IS the tap bit (M-cycle 1024 = internal
+           bit 12).
+    10-1F  the same eight power-on phases with NR11 = $BE => counter 2, so
+           the trigger-time clock cannot kill it and the expiry is always
+           measurable: dingbat predicts ~399, 374, 348, 323 for d = 0..3
+           (dying at 6144, the second length step) and ~194, 169, 143, 118
+           for d = 4..7 (the first event skipped, the trigger's clock spent
+           one count, so it dies at 4096).  The two halves together separate
+           "the event was skipped" from "the counter was clocked early".
+    """
+    for row, (nr11, base) in enumerate(((0xBF, 0x00), (0xBE, 0x10))):
+        for d in range(8):
+            apu_off(a)
+            div_anchor(a)
+            m = wait_reg_w(a, 0, 128 + 256 * d, 0x26, 0x80)   # APU on
+            m += reg_w(a, 0x25, 0xFF)
+            m += reg_w(a, 0x24, 0x77)
+            m += reg_w(a, 0x11, nr11)  # NR11 duty 0, length load
+            m += reg_w(a, 0x12, 0xF0)  # NR12 volume $F, envelope off
+            m += reg_w(a, 0x13, 0x00)  # NR13 freq $400 -> 1024 M per step
+            m += reg_w(a, 0x14, 0xC4)  # NR14 trigger + LENGTH ENABLE
+            # cap $0200: the longest real count on this page is 399 polls,
+            # and four rows of row 1 never die at all — at the $2000 cap
+            # those four alone would cost 28 frames of boot time.
+            poll_nr52_16(a, f"{p}r{row}d{d}", slot + base + 2 * d, 0x02)
+    apu_off(a)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # program assembly
 # ═══════════════════════════════════════════════════════════════════════════
 

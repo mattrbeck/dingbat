@@ -13,8 +13,12 @@
 @  24 BXDECODE* 25 THUMBPC2 26 IRQWIN2 27 IOBYTE  28 LDMUSER2 29 PCWB2
 @  30 DMABYTE2 31 SWEEP2   32 IRQWIN3  33 IRQLAT2 34 IOBYTE2 35 THUMBPC3
 @  36 MSRTBIT2  37 OBJBUDGET† 38 OBJGEOM† 39 DMAOPENBUS
+@  40 IRQDECOMP 41 CONTEND2 42 MULTIME  43 TIMPHASE 44 PSGPHASE
+@  45 MEMCTL   46 DMATIME  47 IWCYCLE  48 DMAFIFO  49 UNDMODE‡
 @ (†visual: the page is a picture drawn with OBJs in mode 0, not a hex
 @  dump — tests/roms/README-probes-gba.md says what to photograph)
+@ (‡UNDMODE writes an undefined CPSR mode number: HOLD SELECT AT POWER-ON
+@  to skip it, since a console that wedges there shows no page at all)
 @ (*interactive: runs when START is pressed on its page — these two
 @  deliberately provoke UNPREDICTABLE behavior (MSR setting T from ARM /
 @  executing near-BX encodings) and can require a power cycle, though a
@@ -3653,6 +3657,8 @@ probe_tail:
     bl  probe_objbudget
     bl  probe_objgeom
     bl  probe_dmaopenbus
+    bl  probe_tail3                @ v8 (pages 40-49): one more call at the
+                                   @ very end, so no earlier byte moves
     pop {pc}
 
 @ ── slot 37: OBJBUDGET (visual) — the per-line OBJ cycle budget running
@@ -4229,3 +4235,1717 @@ vis_objgeom_page:
     pop {r4-r9, pc}
     .ltorg
 
+
+@ ═════════ pages 40-49 (v8): the nine open GBA rows ══════════════════════
+@ Hooked in through probe_tail -> probe_tail3, after every byte of the v1-v7
+@ build, so pages 0-39 transcribe unchanged (verified by capturing both
+@ binaries through hwprobe_capture.py and diffing).  Layouts, and the
+@ instruction spacing every number depends on, are in the comment block
+@ above each probe; tests/roms/README-probes-gba.md says what to photograph
+@ and what each outcome pins.
+.equ V8SCR,    0x02001080          @ v8 scratch: IRQ counters
+.equ V8STUB,   0x03000500          @ v8 IWRAM stubs
+.equ V8SRC,    0x0200A000          @ v8 EWRAM source area (16K)
+.equ V8DST,    0x0200E000          @ v8 EWRAM destination area
+.equ V8VSTUB,  0x06014000          @ v8 VRAM-resident stub (OBJ VRAM, past
+                                   @ the mode-3 framebuffer; the viewer's
+                                   @ vis_setup rewrites it before any visual
+                                   @ page uses that address)
+.equ TM0BASE,  0x04000100
+.equ TM2BASE,  0x04000108
+.equ TM3BASE,  0x0400010C
+.equ IEADDR,   0x04000200          @ +2 = IF, +8 = IME
+.equ HALTCNT,  0x04000301
+
+probe_tail3:
+    push {lr}
+    ldr r0, =SLOTS + 40*SLOTSZ     @ v8 slots (EWRAM boots as noise)
+    mov r1, #0
+    mov r2, #(10 * SLOTSZ / 4)
+    bl  fill_words
+    ldr r0, =V8SCR
+    mov r1, #0
+    mov r2, #16
+    bl  fill_words
+    ldr r0, =MARKER                @ the watchdog "probe in flight" word is
+    mov r1, #0                     @ EWRAM noise until run_msr_probe sets it
+    str r1, [r0, #8]
+    bl  probe_irqdecomp
+    bl  probe_contend2
+    bl  probe_multime
+    bl  probe_timphase
+    bl  probe_psgphase
+    bl  probe_memctl
+    bl  probe_dmatime
+    bl  probe_iwcycle
+    bl  probe_dmafifo
+    bl  probe_undmode
+    pop {pc}
+    .ltorg
+
+@ r0 = src, r1 = dst, r2 = word count
+v8_copy:
+1:  ldr r3, [r0], #4
+    str r3, [r1], #4
+    subs r2, r2, #1
+    bne 1b
+    bx  lr
+
+@ TM2 + TM3 cascade: a second 32-bit cycle counter, for the page that needs
+@ TM0 for something else (DMAFIFO drives the sound FIFO from TM0).  Same
+@ shape as tm_start/tm_stop, so its fixed overhead is constant too.
+v8_tm23_start:
+    ldr r3, =TM2BASE
+    mov r2, #0
+    str r2, [r3]
+    str r2, [r3, #4]
+    ldr r1, =0x00840000            @ TM3: enable + cascade
+    str r1, [r3, #4]
+    ldr r2, =0x00800000            @ TM2: enable, prescaler 1
+    str r2, [r3]
+    bx  lr
+v8_tm23_stop:                      @ -> r0 = 32-bit elapsed
+    ldr r3, =TM2BASE
+    ldrh r0, [r3]
+    ldrh r1, [r3, #4]
+    mov r2, #0
+    str r2, [r3]
+    str r2, [r3, #4]
+    orr r0, r0, r1, lsl #16
+    bx  lr
+    .ltorg
+
+@ ── slot 40: IRQDECOMP — the IRQ delivery pipeline, decomposed ───────────
+@ IRQLAT/IRQLAT2 produced one number per source, and the constants fitted to
+@ them (IRQ_SYNC_DELAY 3, HBLANK_IRQ_SYNC_DELAY 6) are one-row fits; session
+@ 1 still had dingbat +18 on DMA3, +7/+31 on hblank and +12/+18 on vblank.
+@ Every number below is (the handler's TM0 entry stamp) - (a TM0 stamp taken
+@ by the instruction immediately before the arming store), so the BIOS
+@ dispatch, the pipeline refill and the handler's own two instructions are
+@ the same constant in every row and the DIFFERENCES between rows are the
+@ pipeline.  TM0 free-runs at prescaler 1 for the whole page; the shared
+@ irq_handler stamps only the first entry after SCRATCH+0x4C is cleared.
+@
+@ The timer rows use TM2 at prescaler 1, so the reload states the delay
+@ exactly: reload FFF0 overflows 16 ticks after the enable, reload 0000
+@ 65536 ticks (TM0 wraps in the same 65536, so the mod-2^16 delta is the
+@ latency itself) and reload 0001 one tick sooner again.  A reload that
+@ moves a row by anything other than its own arithmetic is the reload
+@ reaching into the delivery path.
+@ +0  (h) TM2 reload FFF0, ONE 32-bit CNT write, CPU running
+@ +2  (h) the same armed as TWO halfword writes (CNT_L reload, then CNT_H)
+@ +4  (h) TM2 reload 0000, one write   +6  (h) TM2 reload 0001, one write
+@ +8  (h) TM2 reload FFF0, one write, then HALTCNT two instructions later
+@ +10 (h) hblank, running     +12 (h) hblank, halted
+@ +14 (h) vblank, running     +16 (h) vblank, halted
+@ +18 (h) DMA3 complete, running       +20 (h) DMA3 complete, halted
+@   The hblank and vblank rows are anchored: IME is off while the code waits
+@   for the hblank flag to fall (a line start) or for VCOUNT to reach 158,
+@   IF is acked, TM0 is stamped, and the IME write IS the arming store.  So
+@   an hblank row is ~1006 cycles + latency, a vblank row ~2 lines +
+@   latency, and (halted - running) is the halt-exit cost on its own.
+@ +22..+29 (8 b) IF (low byte) read one instruction after `strh 0xFFFF,[IF]`
+@   raced against a TM2 overflow, from an IWRAM stub (32-bit, zero wait: one
+@   cycle per instruction).  The ack write's data cycle sits at
+@   t0 + 2 + 3 + (24 - 2j) + 1 for j = 0..7 — t0+30 down to t0+16 — and the
+@   overflow is near t0+18: the byte reads 20 while the ack lands before the
+@   request and 00 after it.  A 00 too early, or a 20 too late, is the ack
+@   winning (or losing) a same-cycle race with a fresh request.
+@ +30 (b) progress marker: the row index, written before each halting row;
+@         FF once the page finished
+@ +31 (b) rows whose interrupt never arrived (the bounded spin gave up)
+.macro id_clear
+    mov r0, #0
+    str r0, [r7, #0x4C]
+.endm
+@ r5 = trigger stamp; bounded spin, then the delta -> [r8, #off]
+.macro id_delta off
+    ldr r6, =0x00080000
+9:  ldr r0, [r7, #0x4C]
+    cmp r0, #0
+    bne 7f
+    subs r6, r6, #1
+    bne 9b
+    ldrb r0, [r8, #31]             @ never arrived: count it
+    add r0, r0, #1
+    strb r0, [r8, #31]
+7:  ldrh r0, [r7, #0x48]
+    sub r0, r0, r5
+    strh r0, [r8, #\off]
+.endm
+.macro id_ie bits
+    ldr r0, =IEADDR
+    ldr r1, =\bits
+    strh r1, [r0]
+    ldr r1, =0x3FFF
+    strh r1, [r0, #2]              @ ack everything stale
+.endm
+.macro id_ime v
+    ldr r0, =IEADDR
+    mov r1, #\v
+    strh r1, [r0, #8]
+.endm
+.macro id_mark n
+    mov r0, #\n
+    strb r0, [r8, #30]
+.endm
+.macro id_halt
+    ldr r0, =HALTCNT
+    mov r1, #0
+    strb r1, [r0]
+.endm
+.macro id_anchor_hb
+    id_ime 0
+    ldrh r0, [r4, #4]
+    orr r0, r0, #0x10              @ DISPSTAT: hblank IRQ enable
+    strh r0, [r4, #4]
+1:  ldrh r0, [r4, #4]
+    tst r0, #2
+    beq 1b                         @ wait for the hblank flag HIGH
+2:  ldrh r0, [r4, #4]
+    tst r0, #2
+    bne 2b                         @ ... then its FALL: a line start
+    id_clear
+    id_ie 0x0042                   @ IE: hblank + the timer-3 watchdog
+.endm
+.macro id_anchor_vb
+    id_ime 0
+    ldrh r0, [r4, #4]
+    orr r0, r0, #0x08              @ DISPSTAT: vblank IRQ enable
+    strh r0, [r4, #4]
+1:  ldrh r0, [r4, #6]
+    cmp r0, #157
+    bne 1b
+2:  ldrh r0, [r4, #6]
+    cmp r0, #158
+    bne 2b
+    id_clear
+    id_ie 0x0041                   @ IE: vblank + the timer-3 watchdog
+.endm
+.macro id_dma3
+    ldr r6, =0x040000D4            @ DMA3: SAD, DAD, CNT
+    ldr r0, =rom_pattern
+    str r0, [r6]
+    ldr r0, =EWDST
+    str r0, [r6, #4]
+    id_clear
+    id_ie 0x0840                   @ IE: DMA3 + the timer-3 watchdog
+    id_ime 1
+    ldr r1, =0xC4000004            @ enable + IRQ, word, count 4
+.endm
+
+@ The page installs its OWN interrupt handler.  The shared irq_handler
+@ leaves the source running, and a TM2 reload of FFF0 re-overflows every 16
+@ cycles — faster than the BIOS dispatcher can return — so the console
+@ makes no forward progress at all.  This one stamps TM0 in its first two
+@ instructions (exactly as irq_handler does, so the fixed entry cost is the
+@ same constant in every row), then kills IME and TM2 so each row takes
+@ exactly one interrupt.  irq_handler is put back at the end of the page.
+v8_id_handler:
+    ldr r0, =TM0BASE
+    ldrh r1, [r0]                  @ entry stamp: the first thing, always
+    ldr r0, =IEADDR
+    mov r2, #0
+    strh r2, [r0, #8]              @ IME off: one interrupt per row
+    ldrh r2, [r0, #2]              @ IF
+    strh r2, [r0, #2]              @ ... acknowledged
+    ldr r0, =TM2BASE
+    mov r2, #0
+    str r2, [r0]                   @ TM2 off, so a 16-cycle reload cannot
+    ldr r0, =SCRATCH               @ storm the dispatcher
+    ldr r2, [r0, #0x4C]
+    cmp r2, #0
+    streqh r1, [r0, #0x48]
+    moveq r2, #1
+    streq r2, [r0, #0x4C]
+    bx  lr
+    .ltorg
+
+@ TM2 armed by one 32-bit CNT write, and the delta recorded
+.macro id_timer_row cnt, off, halt
+    mov r0, #0
+    str r0, [r9]                   @ TM2 off, so the enable reloads
+    id_clear
+    id_ie 0x0060                   @ IE: timer 2 + the timer-3 watchdog
+    id_ime 1
+    ldr r1, =\cnt
+    ldrh r5, [r10]
+    str r1, [r9]
+.if \halt
+    id_halt
+.endif
+    id_delta \off
+    mov r0, #0
+    str r0, [r9]
+.endm
+
+probe_irqdecomp:
+    push {r4-r11, lr}
+    ldr r8, =SLOTS + 40*SLOTSZ
+    ldr r7, =SCRATCH
+    mov r4, #IOBASE
+    ldr r9, =TM2BASE
+    ldr r10, =TM0BASE
+    ldr r11, =TM3BASE
+    ldr r0, =0x03007FFC            @ our own handler for the whole page
+    ldr r1, =v8_id_handler
+    str r1, [r0]
+    bl  tm_start                   @ TM0 free-runs as the session clock
+    mov r0, #0                     @ watchdog: TM3 at prescaler 64, reload 0
+    str r0, [r11]                  @ = 4.2M cycles, far longer than any row,
+    ldr r0, =0x00C10000            @ so it only ever ends a stuck halt
+    str r0, [r11]
+
+    @ ── timer rows ──
+    id_mark 0
+    id_timer_row 0x00C0FFF0, 0, 0  @ reload FFF0: overflow 16 ticks out
+    id_mark 1
+    mov r0, #0                     @ the same arm as two halfword writes
+    str r0, [r9]
+    id_clear
+    id_ie 0x0060
+    id_ime 1
+    ldr r1, =0xFFF0
+    mov r2, #0xC0                  @ CNT_H: enable + IRQ, prescaler 1
+    ldrh r5, [r10]
+    strh r1, [r9]                  @ CNT_L first ...
+    strh r2, [r9, #2]              @ ... then CNT_H
+    id_delta 2
+    mov r0, #0
+    str r0, [r9]
+    id_mark 2
+    id_timer_row 0x00C00000, 4, 0  @ reload 0000: 65536 ticks
+    id_mark 3
+    id_timer_row 0x00C00001, 6, 0  @ reload 0001: one tick sooner
+    id_mark 4                      @ from here the row halts the CPU
+    id_timer_row 0x00C0FFF0, 8, 1
+
+    @ ── hblank rows ──
+    id_mark 5
+    id_anchor_hb
+    ldr r0, =IEADDR
+    mov r1, #1
+    ldrh r5, [r10]
+    strh r1, [r0, #8]              @ the IME write is the arming store
+    id_delta 10
+
+    id_mark 6
+    id_anchor_hb
+    ldr r0, =IEADDR
+    mov r1, #1
+    ldrh r5, [r10]
+    strh r1, [r0, #8]
+    id_halt
+    id_delta 12
+    ldrh r0, [r4, #4]
+    bic r0, r0, #0x10
+    strh r0, [r4, #4]
+
+    @ ── vblank rows ──
+    id_mark 7
+    id_anchor_vb
+    ldr r0, =IEADDR
+    mov r1, #1
+    ldrh r5, [r10]
+    strh r1, [r0, #8]
+    id_delta 14
+
+    id_mark 8
+    id_anchor_vb
+    ldr r0, =IEADDR
+    mov r1, #1
+    ldrh r5, [r10]
+    strh r1, [r0, #8]
+    id_halt
+    id_delta 16
+    ldrh r0, [r4, #4]
+    bic r0, r0, #0x08
+    strh r0, [r4, #4]
+
+    @ ── DMA3-complete rows ──
+    id_mark 9
+    id_dma3
+    ldrh r5, [r10]
+    str r1, [r6, #8]
+    id_delta 18
+
+    id_mark 10
+    id_dma3
+    ldrh r5, [r10]
+    str r1, [r6, #8]
+    id_halt
+    id_delta 20
+
+    id_ime 0
+    id_ie 0
+    mov r0, #0
+    str r0, [r11]                  @ watchdog off
+    str r0, [r9]
+
+    @ ── the IF acknowledge race (IME stays off: only IF moves) ──
+    id_mark 11
+    ldr r0, =v8_race_stub
+    ldr r1, =V8STUB
+    mov r2, #(v8_race_end - v8_race_stub) / 4
+    bl  v8_copy
+    mov r11, #0                    @ j
+1:  mov r0, #0
+    str r0, [r9]                   @ TM2 off, so the enable reloads
+    ldr r0, =IEADDR
+    ldr r1, =0x3FFF
+    strh r1, [r0, #2]              @ ack every stale flag
+    ldr r0, =0x00C0FFF0            @ enable + IRQ (so IF moves), reload FFF0
+    mov r1, r9
+    ldr r2, =0x04000202
+    ldr r3, =0xFFFF
+    mov r6, r11, lsl #3            @ two nops of sled per step
+    ldr r12, =V8STUB
+    mov lr, pc
+    bx  r12
+    add r0, r8, #22
+    strb r5, [r0, r11]
+    add r11, r11, #1
+    cmp r11, #8
+    blt 1b
+    mov r0, #0
+    str r0, [r9]
+    ldr r0, =IEADDR
+    ldr r1, =0x3FFF
+    strh r1, [r0, #2]
+
+    bl  tm_stop
+    ldr r0, =0x03007FFC            @ hand the shared handler back
+    ldr r1, =irq_handler
+    str r1, [r0]
+    id_mark 0xFF
+    pop {r4-r11, pc}
+    .ltorg
+
+@ Runs from IWRAM (32-bit, zero wait: one cycle per instruction, so the
+@ spacing is exact).  r0 = TM2 CNT word, r1 = TM2 base, r2 = IF address,
+@ r3 = FFFF, r6 = sled byte offset -> r5 = IF read back.
+@ str = 1S+1N (2), add pc = 2S+1N (3), nop = 1S.
+v8_race_stub:
+    str r0, [r1]                   @ t0: TM2 armed, overflow 16 ticks later
+    add pc, pc, r6                 @ pc reads as the first sled nop
+    nop
+    .rept 24
+    nop
+    .endr
+    strh r3, [r2]                  @ IF = FFFF: acknowledge everything
+    ldrh r5, [r2]                  @ ... and read it straight back
+    bx  lr
+v8_race_end:
+
+@ ── slot 41: CONTEND2 — contention with the renderer fully loaded ────────
+@ CONTEND (slot 14) measured an idle-ish machine and dingbat matched it
+@ exactly; bus.nim charges PRAM/VRAM/OAM a constant and models no renderer
+@ contention at all, so this page loads the PPU as hard as the hardware
+@ allows and re-measures.  Load: 128 OBJs of 64x64 at Y=40, X = 0..127, all
+@ overlapping the sampled line, plus every background the mode has.
+@ Each row is 16 back-to-back `ldrh` from one region, TM0/TM1-bracketed,
+@ begun at the top of the visible part of line 40 (VCOUNT has just become
+@ 40; 16 reads fit easily inside the 960-cycle visible window).  The IWRAM
+@ rows are controls: the PPU never touches IWRAM, so movement there is
+@ measurement drift, not contention.
+@ +0/+2/+4/+6     PRAM / VRAM / OAM / IWRAM, mode 0, BG0-3 + OBJ, 128 OBJs
+@ +8/+10/+12/+14  the same in mode 2 (affine BG2 + BG3) + OBJ, 128 OBJs
+@ +16/+18/+20     PRAM / VRAM / OAM, mode 0, BG0-3, OBJ layer off
+@ +22             the same 16 reads (of IWRAM) EXECUTED from a stub in VRAM,
+@                 mode 0 + 128 OBJs: code-fetch contention, not data
+@ +24/+26         VRAM / OAM with hblank-interval-free (DISPCNT.5) set
+@ +28/+30         VRAM / IWRAM under forced blank: the free-access baseline
+.equ C2_M0,    0x1F40              @ mode 0, BG0-3 + OBJ, 1D OBJ mapping
+.equ C2_M2,    0x1C42              @ mode 2, BG2 + BG3 + OBJ, 1D
+.equ C2_M0NO,  0x0F40              @ mode 0, BG0-3, no OBJ layer
+.equ C2_HBF,   0x1F60              @ C2_M0 + hblank-interval-free
+.equ C2_BLANK, 0x1F80              @ forced blank
+.macro c2_row cfg, base, off
+    ldr r0, =\cfg
+    strh r0, [r4]
+    wait_line40
+    bl  tm_start
+    ldr r2, =\base
+    .rept 16
+    ldrh r3, [r2]
+    .endr
+    bl  tm_stop
+    strh r0, [r8, #\off]
+.endm
+probe_contend2:
+    push {r4-r9, lr}
+    ldr r8, =SLOTS + 41*SLOTSZ
+    mov r4, #IOBASE
+    mov r0, #0x80                  @ forced blank while OAM is rewritten
+    strh r0, [r4]
+    ldr r0, =OAM                   @ 128 OBJs, 64x64, Y = 40, X = 0..127
+    mov r1, #0
+1:  mov r2, #40                    @ attr0: Y = 40, square, normal, 4bpp
+    orr r3, r1, #0xC000            @ attr1: X = k, size 3 (64x64)
+    orr r2, r2, r3, lsl #16
+    str r2, [r0], #4
+    mov r2, #0                     @ attr2: tile 0, priority 0
+    str r2, [r0], #4
+    add r1, r1, #1
+    cmp r1, #128
+    blt 1b
+    mov r0, #0x100                 @ affine BG2/BG3: identity scale, so the
+    strh r0, [r4, #0x20]           @ mode-2 rows fetch a real texture
+    strh r0, [r4, #0x26]
+    strh r0, [r4, #0x30]
+    strh r0, [r4, #0x36]
+    ldr r0, =v8_vram_stub          @ the VRAM-resident copy of the read row
+    ldr r1, =V8VSTUB
+    mov r2, #(v8_vram_end - v8_vram_stub) / 4
+    bl  v8_copy
+
+    c2_row C2_M0,   0x05000000, 0
+    c2_row C2_M0,   0x06000000, 2
+    c2_row C2_M0,   0x07000000, 4
+    c2_row C2_M0,   0x03000000, 6
+    c2_row C2_M2,   0x05000000, 8
+    c2_row C2_M2,   0x06000000, 10
+    c2_row C2_M2,   0x07000000, 12
+    c2_row C2_M0NO, 0x05000000, 16
+    c2_row C2_M0NO, 0x06000000, 18
+    c2_row C2_M0NO, 0x07000000, 20
+
+.macro c2_vrun cfg, off                @ the same sixteen reads, fetched
+    ldr r0, =\cfg                      @ from the VRAM-resident stub
+    strh r0, [r4]
+    wait_line40
+    bl  tm_start
+    ldr r2, =0x03000000
+    ldr r1, =V8VSTUB
+    mov lr, pc
+    bx  r1
+    bl  tm_stop
+    strh r0, [r8, #\off]
+.endm
+    c2_vrun C2_M0,    22
+    c2_vrun C2_BLANK, 14
+
+    c2_row C2_HBF,   0x06000000, 24
+    c2_row C2_HBF,   0x07000000, 26
+    c2_row C2_BLANK, 0x06000000, 28
+    c2_row C2_BLANK, 0x03000000, 30
+
+    mov r0, #0x80                  @ park every OBJ again: vis_setup disables
+    strh r0, [r4]                  @ them all, but nothing else would
+    ldr r0, =OAM
+    ldr r1, =0x00000200            @ attr0 bit 9 with bit 8 clear = disabled
+    mov r2, #0
+    mov r3, #128
+2:  str r1, [r0], #4
+    str r2, [r0], #4
+    subs r3, r3, #1
+    bne 2b
+    ldr r0, =0x0403                @ restore the viewer's DISPCNT
+    strh r0, [r4]
+    pop {r4-r9, pc}
+    .ltorg
+v8_vram_stub:                      @ r2 = base; fetched from VRAM (16-bit)
+    .rept 16
+    ldrh r3, [r2]
+    .endr
+    bx  lr
+v8_vram_end:
+
+@ ── slot 42: MULTIME — the MUL family's carry, and early termination ─────
+@ MULFLAGS (slot 7) caught hardware CLEARING C where dingbat sets it, on six
+@ of eight operand pairs; one op and eight pairs cannot fit the function.
+@ Here six ops run the SAME sixteen (Rm, Rs) pairs and only the C bit is
+@ kept — one bit per pair, LSB = pair 0 — so a 16-pair carry matrix costs
+@ two bytes a row.  Pairs 0-7 are MULFLAGS' table byte for byte (slot 7
+@ therefore cross-checks this page); pairs 8-15 hold Rm at 12345678 and
+@ sweep Rs through every early-termination class, which is the axis a fit
+@ needs.
+@   pair  Rm        Rs             pair  Rm        Rs
+@   0     00000000  00000000       8     12345678  00000001
+@   1     FFFFFFFF  FFFFFFFF       9     12345678  000000FF
+@   2     000000FF  FF00FF00       10    12345678  00000100
+@   3     12345678  9ABCDEF0       11    12345678  0000FFFF
+@   4     0000FFFF  0000FFFF       12    12345678  00010000
+@   5     80000000  00000002       13    12345678  00FFFFFF
+@   6     FFFFFF00  00000100       14    12345678  01000000
+@   7     00000001  FFFFFFFF       15    12345678  FFFFFFFF
+@ The carry preset is pinned by `subs r10, r6, #0` (C := 1, no borrow) or
+@ `adds r10, r6, #0` (C := 0, no carry out) immediately before the multiply,
+@ and the accumulating ops start from zero in both halves.
+@ +0  (h) MULS,   C preset 1      +2  (h) MULS,   C preset 0
+@ +4  (h) MLAS,   C preset 1      +6  (h) MLAS,   C preset 0
+@ +8  (h) UMULLS, C preset 1      +10 (h) SMULLS, C preset 1
+@ +12 (h) UMLALS, C preset 1      +14 (h) SMLALS, C preset 1
+@ +16..+31 (8 h) the early-termination sweep: cycles for sixteen back-to-
+@   back `muls r0, r1, r2` with r1 = 12345678 fixed and r2 stepping through
+@   00000012 / 00001234 / 00123456 / 12345678 and their negatives
+@   FFFFFFEE / FFFFEDCC / FFEDCBAA / EDCBA988 — the four magnitude classes,
+@   and the all-ones-above forms Booth termination is supposed to treat as
+@   the same class.  The timed window also holds tm_start, tm_stop and two
+@   `mov`s, the same constant in all eight rows, so (row - row) / 16 is the
+@   m-cycle step between classes.
+.macro mt_vec preset, off, op:vararg
+    mov r6, #0                     @ pair index
+    mov r9, #0                     @ carry bit vector
+    ldr r7, =mul16_ops
+1:  add r0, r7, r6, lsl #3
+    ldr r1, [r0]                   @ Rm
+    ldr r2, [r0, #4]               @ Rs
+    mov r3, #0                     @ MLA accumulator
+    mov r4, #0                     @ RdHi / accumulate high half
+    mov r0, #0                     @ RdLo / accumulate low half
+.if \preset
+    subs r10, r6, #0               @ C := 1
+.else
+    adds r10, r6, #0               @ C := 0
+.endif
+    \op
+    mrs r10, CPSR
+    mov r11, #0
+    tst r10, #0x20000000
+    movne r11, #1
+    orr r9, r9, r11, lsl r6
+    add r6, r6, #1
+    cmp r6, #16
+    blt 1b
+    strh r9, [r8, #\off]
+.endm
+probe_multime:
+    push {r4-r11, lr}
+    ldr r8, =SLOTS + 42*SLOTSZ
+    mt_vec 1, 0,  muls r0, r1, r2
+    mt_vec 0, 2,  muls r0, r1, r2
+    mt_vec 1, 4,  mlas r0, r1, r2, r3
+    mt_vec 0, 6,  mlas r0, r1, r2, r3
+    mt_vec 1, 8,  umulls r0, r4, r1, r2
+    mt_vec 1, 10, smulls r0, r4, r1, r2
+    mt_vec 1, 12, umlals r0, r4, r1, r2
+    mt_vec 1, 14, smlals r0, r4, r1, r2
+
+    mov r6, #0
+    ldr r7, =mt_sweep
+2:  ldr r5, =0x12345678
+    ldr r4, [r7, r6, lsl #2]
+    bl  tm_start                   @ clobbers r1-r3; r4-r7 survive
+    mov r1, r5
+    mov r2, r4
+    .rept 16
+    muls r0, r1, r2
+    .endr
+    bl  tm_stop
+    add r3, r8, #16
+    add r3, r3, r6, lsl #1
+    strh r0, [r3]
+    add r6, r6, #1
+    cmp r6, #8
+    blt 2b
+    pop {r4-r11, pc}
+    .ltorg
+mul16_ops:
+    .word 0x00000000, 0x00000000
+    .word 0xFFFFFFFF, 0xFFFFFFFF
+    .word 0x000000FF, 0xFF00FF00
+    .word 0x12345678, 0x9ABCDEF0
+    .word 0x0000FFFF, 0x0000FFFF
+    .word 0x80000000, 0x00000002
+    .word 0xFFFFFF00, 0x00000100
+    .word 0x00000001, 0xFFFFFFFF
+    .word 0x12345678, 0x00000001
+    .word 0x12345678, 0x000000FF
+    .word 0x12345678, 0x00000100
+    .word 0x12345678, 0x0000FFFF
+    .word 0x12345678, 0x00010000
+    .word 0x12345678, 0x00FFFFFF
+    .word 0x12345678, 0x01000000
+    .word 0x12345678, 0xFFFFFFFF
+mt_sweep:
+    .word 0x00000012, 0x00001234, 0x00123456, 0x12345678
+    .word 0xFFFFFFEE, 0xFFFFEDCC, 0xFFEDCBAA, 0xEDCBA988
+
+@ ── slot 43: TIMPHASE — is the prescaler one divider, and is it shared? ──
+@ TIMERS (slot 4) found a staircase (hw 07 07 07 06 06 06) when TM2 is
+@ enabled k cycles later against a moving sample point: the prescaler is not
+@ reset by the enable, it free-runs.  What that cannot say is whether the
+@ four timers share ONE divider.  Every row here comes out of the same IWRAM
+@ stub, which enables TM2, enables TM3 two cycles later, and samples both
+@ after an identical delay — entered at eight sled offsets 12 cycles apart,
+@ 96 cycles of stagger in all, one and a half prescaler-64 periods.
+@   one shared divider  -> the TM2 and TM3 staircases step at the SAME sled
+@                          offset and the counts never differ by more than 1
+@   a divider per timer -> the two staircases step at unrelated offsets
+@ +0..+7   (8 b) TM2 (prescaler 64) count, sled offsets j = 0..7
+@ +8..+15  (8 b) TM3 (prescaler 64) count at those same instants
+@ +16..+23 (8 b) TM2 count, same staircase, with `strh reload, [TM2CNT_L]`
+@   executed one instruction behind the enable: a divider the reload write
+@   realigns flattens this staircase against +0..+7
+@ +24..+27 (4 b) TM2 at prescaler 256, sled offsets j = 0, 2, 4, 6 — the 256
+@   tap of the same chain, which should staircase at four times the period
+@ +28 (b) TM2's count when TM3 was ALREADY running at prescaler 64 (the stub
+@   rewrites TM3's CNT with enable already set, which does not reload it)
+@ +29 (b) TM3's count at that same instant: equal counts mean the freshly
+@   enabled timer inherited the running one's phase
+@ +30 (b) marker 54
+@ +31 (b) TM0 (prescaler 1) low byte at the j = 0 sample: the absolute phase
+@   anchor everything above is measured against
+.macro tp_run stuboff, cnt2, cnt3, j, dst
+    ldr r0, =\cnt2
+    ldr r1, =TM2BASE
+    ldr r3, =\cnt3
+    mov r2, #(48 * \j)
+    mov r6, #100                   @ delay iterations (~400 cycles)
+    ldr r12, =V8STUB
+    add r12, r12, #\stuboff
+    mov lr, pc
+    bx  r12
+    strb r4, [r8, #\dst]
+.endm
+probe_timphase:
+    push {r4-r11, lr}
+    ldr r8, =SLOTS + 43*SLOTSZ
+    ldr r0, =v8_tp_stubs
+    ldr r1, =V8STUB
+    mov r2, #(v8_tp_end - v8_tp_stubs) / 4
+    bl  v8_copy
+    ldr r9, =TM2BASE
+    mov r0, #0
+    str r0, [r9]
+    str r0, [r9, #4]
+
+    .irp j, 0, 1, 2, 3, 4, 5, 6, 7
+    mov r0, #0
+    str r0, [r9]
+    str r0, [r9, #4]
+    tp_run 0, 0x00810000, 0x00810000, \j, (\j)
+    strb r5, [r8, #(8 + \j)]
+    .if \j == 0
+    ldr r0, =TM0BASE               @ the prescaler-1 phase anchor
+    ldrh r0, [r0]
+    strb r0, [r8, #31]
+    .endif
+    .endr
+
+    .irp j, 0, 1, 2, 3, 4, 5, 6, 7
+    mov r0, #0
+    str r0, [r9]
+    str r0, [r9, #4]
+    tp_run (v8_tp_reload - v8_tp_stubs), 0x00810000, 0x0000FFF0, \j, (16 + \j)
+    .endr
+
+    .irp j, 0, 2, 4, 6
+    mov r0, #0
+    str r0, [r9]
+    str r0, [r9, #4]
+    tp_run 0, 0x00820000, 0x00820000, \j, (24 + (\j / 2))
+    .endr
+
+    mov r0, #0                     @ TM3 already running, TM2 enabled into it
+    str r0, [r9]
+    str r0, [r9, #4]
+    ldr r0, =0x00810000
+    str r0, [r9, #4]
+    mov r0, #40
+1:  subs r0, r0, #1
+    bne 1b
+    tp_run 0, 0x00810000, 0x00810000, 0, 28
+    strb r5, [r8, #29]
+    mov r0, #0
+    str r0, [r9]
+    str r0, [r9, #4]
+    mov r0, #0x54
+    strb r0, [r8, #30]
+    pop {r4-r11, pc}
+    .ltorg
+
+@ IWRAM stubs.  r0 = TM2 CNT word, r1 = TM2 base, r2 = sled byte offset,
+@ r3 = TM3 CNT word (or, in the second stub, the reload halfword), r6 =
+@ delay iterations -> r4 = TM2 count, r5 = TM3 count.  One cycle per
+@ instruction, so a sled offset of 48 is exactly 12 cycles of stagger.
+v8_tp_stubs:
+    add pc, pc, r2
+    nop
+    .rept 96
+    nop
+    .endr
+    str r0, [r1]                   @ TM2 enable
+    str r3, [r1, #4]               @ TM3 enable, two cycles later
+    mov r7, r6
+1:  subs r7, r7, #1
+    bne 1b
+    ldrh r4, [r1]
+    ldrh r5, [r1, #4]
+    bx  lr
+v8_tp_reload:
+    add pc, pc, r2
+    nop
+    .rept 96
+    nop
+    .endr
+    str r0, [r1]                   @ TM2 enable ...
+    strh r3, [r1]                  @ ... and a reload write right behind it
+    mov r7, r6
+1:  subs r7, r7, #1
+    bne 1b
+    ldrh r4, [r1]
+    mov r5, #0
+    bx  lr
+v8_tp_end:
+
+@ ── slot 44: PSGPHASE — length expiry against the frame sequencer ────────
+@ PSGSTAT (slot 10) polled ch1's active flag down from a length-63 trigger:
+@ hardware took 2E1E iterations, dingbat 283A — 14 % early.  One number
+@ cannot say whether dingbat's length clock runs fast or merely starts at
+@ the wrong phase, because the 256 Hz length tick belongs to a free-running
+@ frame sequencer and a trigger lands somewhere inside its period.  Every
+@ row below is that same poll count (one `ldrh SOUNDCNT_X`, a test and an
+@ increment per iteration; ~5.5 cycles on hardware), from triggers placed at
+@ four offsets inside one 256 Hz period, with and without a SOUNDCNT_X
+@ master off/on in front of the trigger.
+@   master off/on RESETS the sequencer -> +0..+6 are equal, +8..+14 stagger
+@   the sequencer free-runs regardless -> both blocks stagger alike
+@ The delays are loop iterations, not cycles (a ROM `subs`/`bne` pair), and
+@ the four of them span roughly one 65536-cycle length step.
+@ +0/+2/+4/+6    (4 h) ch1 length 63, master off then on, the trigger
+@   delayed 0 / 4000 / 8000 / 12000 iterations after the master-on write
+@ +8/+10/+12/+14 (4 h) the same four delays, master left on throughout
+@ +16 (h) length 62 (two 256 Hz steps), master toggled, no delay
+@ +18 (h) length 60 (four steps), master toggled, no delay
+@ +20 (h) ch1 length 63 with ch2 triggered by the very next store and both
+@   polled in one loop: this is the ch1 count ...
+@ +26 (h) ... and this is (ch2's count - ch1's count).  0 means one length
+@   clock stands behind both channels.
+@ +22 (h) ch1 length 63 retriggered while the previous tone is still running
+@ +24 (b) SOUNDCNT_X right after the +0 trigger
+@ +25 (b) SOUNDCNT_X right after that row's expiry
+@ +28 (h) ch1 length 63 after SOUNDCNT_X was toggled off/on/off/on
+@ +30 (b) marker 50    +31 (b) rows that hit the poll cap
+.macro pp_init                     @ (re)program the PSG after a master-off
+    mov r0, #0x80
+    strh r0, [r4, #0x84]           @ SOUNDCNT_X: master on
+    ldr r0, =0x1177
+    strh r0, [r4, #0x80]           @ ch1 + ch2 both sides, full volume
+    mov r0, #2
+    strh r0, [r4, #0x82]           @ PSG ratio 100 %
+.endm
+.macro pp_delay n
+.if \n
+    ldr r0, =\n
+1:  subs r0, r0, #1
+    bne 1b
+.endif
+.endm
+probe_psgphase:
+    push {r4-r11, lr}
+    ldr r8, =SLOTS + 44*SLOTSZ
+    mov r4, #IOBASE
+    mov r9, #0                     @ poll-cap hits
+
+    .irp d, 0, 4000, 8000, 12000
+    mov r0, #0
+    strh r0, [r4, #0x84]           @ master OFF (clears every PSG register)
+    pp_init
+    pp_delay \d
+    ldr r0, =0xF0BF                @ envelope 15, duty 2, length 63
+    ldr r1, =0xC400                @ trigger + length enable
+    bl  v8_ch1_wait
+    strh r3, [r8, #(0 + (\d / 4000) * 2)]
+    .if \d == 0
+    strb r6, [r8, #24]
+    strb r7, [r8, #25]
+    .endif
+    .endr
+
+    mov r0, #0                     @ master left on across the next four
+    strh r0, [r4, #0x84]
+    pp_init
+    .irp d, 0, 4000, 8000, 12000
+    pp_delay \d
+    ldr r0, =0xF0BF
+    ldr r1, =0xC400
+    bl  v8_ch1_wait
+    strh r3, [r8, #(8 + (\d / 4000) * 2)]
+    .endr
+
+    mov r0, #0
+    strh r0, [r4, #0x84]
+    pp_init
+    ldr r0, =0xF0BE                @ length 62
+    ldr r1, =0xC400
+    bl  v8_ch1_wait
+    strh r3, [r8, #16]
+
+    mov r0, #0
+    strh r0, [r4, #0x84]
+    pp_init
+    ldr r0, =0xF0BC                @ length 60
+    ldr r1, =0xC400
+    bl  v8_ch1_wait
+    strh r3, [r8, #18]
+
+    @ ch1 and ch2 triggered back to back, both length 63, polled together
+    mov r0, #0
+    strh r0, [r4, #0x84]
+    pp_init
+    ldr r0, =0xF0BF
+    strh r0, [r4, #0x62]           @ ch1 NR11/NR12
+    strh r0, [r4, #0x68]           @ ch2 NR21/NR22
+    ldr r1, =0xC400
+    strh r1, [r4, #0x64]           @ ch1 trigger
+    strh r1, [r4, #0x6C]           @ ch2 trigger
+    ldr r2, =0x00060000
+    mov r3, #0                     @ iterations while ch1 was still active
+    mov r5, #0                     @ iterations until ch2 dropped
+1:  ldrh r0, [r4, #0x84]
+    tst r0, #1
+    addne r3, r3, #1
+    tst r0, #2
+    beq 2f
+    add r5, r5, #1
+    subs r2, r2, #1
+    bne 1b
+    add r9, r9, #1
+2:  strh r3, [r8, #20]
+    sub r0, r5, r3
+    strh r0, [r8, #26]
+
+    @ retrigger while the tone is still running
+    mov r0, #0
+    strh r0, [r4, #0x84]
+    pp_init
+    ldr r0, =0xF0BF
+    strh r0, [r4, #0x62]
+    ldr r1, =0xC400
+    strh r1, [r4, #0x64]
+    mov r0, #200
+3:  subs r0, r0, #1
+    bne 3b
+    ldr r0, =0xF0BF
+    ldr r1, =0xC400
+    bl  v8_ch1_wait
+    strh r3, [r8, #22]
+
+    @ two master toggles in a row
+    mov r0, #0
+    strh r0, [r4, #0x84]
+    mov r0, #0x80
+    strh r0, [r4, #0x84]
+    mov r0, #0
+    strh r0, [r4, #0x84]
+    pp_init
+    ldr r0, =0xF0BF
+    ldr r1, =0xC400
+    bl  v8_ch1_wait
+    strh r3, [r8, #28]
+
+    mov r0, #0
+    strh r0, [r4, #0x84]           @ leave the APU off, as PSGSTAT does
+    mov r0, #0x50
+    strb r0, [r8, #30]
+    strb r9, [r8, #31]
+    pop {r4-r11, pc}
+    .ltorg
+
+@ r4 = IOBASE, r0 = NR11/NR12 word, r1 = NR14 word -> r3 = poll iterations,
+@ r6 = SOUNDCNT_X right after the trigger, r7 = SOUNDCNT_X after the drop;
+@ r9 += 1 when the cap is hit.
+v8_ch1_wait:
+    strh r0, [r4, #0x62]
+    strh r1, [r4, #0x64]
+    ldrh r6, [r4, #0x84]
+    ldr r2, =0x00060000
+    mov r3, #0
+1:  ldrh r0, [r4, #0x84]
+    tst r0, #1
+    beq 2f
+    add r3, r3, #1
+    subs r2, r2, #1
+    bne 1b
+    add r9, r9, #1
+2:  ldrh r7, [r4, #0x84]
+    bx  lr
+    .ltorg
+
+@ ── slot 45: MEMCTL — 0x04000800, the internal memory control ────────────
+@ IDENT read 0D000020 on hardware; mmio.nim keeps the value for readback and
+@ implements none of its effects.  Only the documented WS field (bits 24-27)
+@ is written here, and only through a read-modify-write, so bit 0 (disable
+@ WRAM) and bit 4 (enable the 256K WRAM) keep whatever the console booted
+@ with.  WS = 14 is one wait, the well-known EWRAM overclock; WS = 4 is slow
+@ but legal; WS = 15 locks the console up and is never written.
+@ Each timing row is 16 back-to-back `ldr` from EWRAM, TM0/TM1-bracketed,
+@ with the loop itself fetched from ROM, so only the data side moves.
+@ +0  (w) 0x04000800 read at probe time
+@ +4  (w) the same register through its +64K mirror at 0x04010800
+@ +8  (w) and through 0x04FF0800
+@ +12 (h) halfword read at 0x04000800   +14 (h) halfword at 0x04000802
+@ +16..+19 (4 b) byte reads at 0x04000800..803 (GBATEK warns that 8- and
+@   16-bit accesses to this register may not work: these four say whether)
+@ +20 (h) 16 EWRAM word reads at the boot WS   +22 (h) the same at WS = 14
+@ +24 (h) the same at WS = 4
+@ +26 (b) the register's top byte read back after writing WS = 14
+@ +27 (b) after writing WS = 4      +28 (b) after writing the boot value
+@ +29 (b) the top byte at 0x04000800 after the boot value went in through
+@   the 0x04010800 mirror (0D = the mirror really is the register)
+@ +30 (b) progress marker: 01 before the first non-default write, FF at the
+@   end   +31 (b) the register's low byte at the end (20 = restored)
+.macro mc_time off
+    bl  tm_start
+    ldr r2, =V8DST
+    .rept 16
+    ldr r3, [r2]
+    .endr
+    bl  tm_stop
+    strh r0, [r8, #\off]
+.endm
+probe_memctl:
+    push {r4-r9, lr}
+    ldr r8, =SLOTS + 45*SLOTSZ
+    ldr r5, =0x04000800
+    ldr r6, [r5]                   @ the value to restore
+    str r6, [r8, #0]
+    ldr r1, =0x04010800
+    ldr r0, [r1]
+    str r0, [r8, #4]
+    ldr r1, =0x04FF0800
+    ldr r0, [r1]
+    str r0, [r8, #8]
+    ldrh r0, [r5]
+    strh r0, [r8, #12]
+    ldrh r0, [r5, #2]
+    strh r0, [r8, #14]
+    ldrb r0, [r5]
+    strb r0, [r8, #16]
+    ldrb r0, [r5, #1]
+    strb r0, [r8, #17]
+    ldrb r0, [r5, #2]
+    strb r0, [r8, #18]
+    ldrb r0, [r5, #3]
+    strb r0, [r8, #19]
+
+    str r6, [r5]                   @ the boot value, written back explicitly
+    mc_time 20
+    mov r0, #1
+    strb r0, [r8, #30]             @ marker: the field writes start here
+    bic r0, r6, #0x0F000000        @ WS := 14 (one wait; 15 would lock up)
+    orr r0, r0, #0x0E000000
+    str r0, [r5]
+    mc_time 22
+    ldr r0, [r5]
+    mov r0, r0, lsr #24
+    strb r0, [r8, #26]
+    bic r0, r6, #0x0F000000        @ WS := 4 (slow, legal)
+    orr r0, r0, #0x04000000
+    str r0, [r5]
+    mc_time 24
+    ldr r0, [r5]
+    mov r0, r0, lsr #24
+    strb r0, [r8, #27]
+    str r6, [r5]                   @ restore
+    ldr r0, [r5]
+    mov r0, r0, lsr #24
+    strb r0, [r8, #28]
+    ldr r1, =0x04010800            @ the same value, through the mirror
+    str r6, [r1]
+    ldr r0, [r5]
+    mov r0, r0, lsr #24
+    strb r0, [r8, #29]
+    str r6, [r5]
+    mov r0, #0xFF
+    strb r0, [r8, #30]
+    ldrb r0, [r5]
+    strb r0, [r8, #31]
+    pop {r4-r9, pc}
+    .ltorg
+
+@ ── slot 46: DMATIME — start delay, per-region cost, trigger instant ─────
+@ +0  (h) TM0 read by the instruction right after the store that enables a
+@   1-word immediate DMA0 (EWRAM -> EWRAM), counted from tm_start
+@ +2  (h) the identical instruction stream with the enable bit CLEAR: the
+@   baseline, so (+0 - +2) is the stall the enable cost the CPU
+@ +4  (h) the same for 4 words     +6  (h) the same for 16 words
+@ +8..+18 (6 h) tm_start/tm_stop around a 16-word DMA3 with source and
+@   destination both in EWRAM (+8), IWRAM (+10), VRAM (+12), palette (+14),
+@   OAM (+16), and ROM -> EWRAM (+18)
+@ +20 (b) DISPSTAT low byte at the moment an hblank-started DMA's word was
+@   first seen in memory      +21 (b) VCOUNT at that moment
+@ +22/+23 (b,b) the same pair for a vblank-started DMA
+@ +24 (h) TM0 cycles from the polled rise of the hblank flag to that word
+@   appearing   +26 (h) the same for the vblank flag.  A DMA that fires on
+@   the DISPSTAT edge itself reads near zero plus the poll granularity; one
+@   that waits for the renderer reads longer.
+@ +28 (h) (the handler's TM0 entry stamp) - (the TM0 stamp taken by the
+@   instruction after the enabling store) for a 16-word DMA3 with IRQ:
+@   positive means the CPU resumed first and the interrupt landed later
+@ +30 (b) 1 if the LAST destination word was already in memory when the
+@   instruction after the enabling store read it, else 0
+@ +31 (b) marker 44
+.macro dt_burst src, dst, off
+    ldr r0, =\src
+    str r0, [r6]
+    ldr r0, =\dst
+    str r0, [r6, #4]
+    bl  tm_start
+    ldr r1, =0x84000010            @ enable, 32-bit, count 16
+    str r1, [r6, #8]
+    bl  tm_stop
+    strh r0, [r8, #\off]
+.endm
+.macro dt_start cnt, off
+    ldr r0, =V8SRC
+    str r0, [r5]
+    ldr r0, =V8DST
+    str r0, [r5, #4]
+    bl  tm_start
+    ldr r1, =\cnt
+    str r1, [r5, #8]
+    ldrh r9, [r10]                 @ TM0 the instant the CPU came back
+    bl  tm_stop
+    strh r9, [r8, #\off]
+.endm
+probe_dmatime:
+    push {r4-r11, lr}
+    ldr r8, =SLOTS + 46*SLOTSZ
+    ldr r7, =SCRATCH
+    mov r4, #IOBASE
+    ldr r10, =TM0BASE
+    ldr r5, =0x040000B0            @ DMA0
+    ldr r6, =0x040000D4            @ DMA3
+    ldr r0, =V8SRC
+    ldr r1, =0xC0FFEE46
+    mov r2, #64
+    bl  fill_words
+
+    dt_start 0x84000001, 0
+    dt_start 0x04000001, 2         @ the same stream, enable bit clear
+    dt_start 0x84000004, 4
+    dt_start 0x84000010, 6
+
+    dt_burst V8SRC,      V8DST,      8
+    dt_burst 0x03001000, 0x03001100, 10
+    dt_burst 0x06010000, 0x06010100, 12
+    dt_burst 0x05000000, 0x05000100, 14
+    dt_burst 0x07000000, 0x07000100, 16
+    dt_burst rom_pattern, V8DST,     18
+
+    @ hblank-started DMA into a watched cell
+    ldr r11, =V8DST + 0x400
+    mov r0, #0
+    str r0, [r11]
+    ldr r0, =V8SRC
+    str r0, [r6]
+    str r11, [r6, #4]
+1:  ldrh r0, [r4, #4]              @ park at a line start first
+    tst r0, #2
+    beq 1b
+2:  ldrh r0, [r4, #4]
+    tst r0, #2
+    bne 2b
+    ldr r0, =0xA4000001            @ enable, hblank timing, word, count 1
+    str r0, [r6, #8]
+    bl  tm_start
+3:  ldrh r0, [r4, #4]              @ the hblank flag's rise
+    tst r0, #2
+    beq 3b
+    ldrh r9, [r10]                 @ stamp the rise
+4:  ldr r0, [r11]                  @ ... and the word landing
+    cmp r0, #0
+    beq 4b
+    ldrh r1, [r10]
+    sub r1, r1, r9
+    ldrh r2, [r4, #4]
+    strb r2, [r8, #20]
+    ldrh r2, [r4, #6]
+    strb r2, [r8, #21]
+    strh r1, [r8, #24]
+    bl  tm_stop
+
+    @ vblank-started DMA
+    mov r0, #0
+    str r0, [r11]
+    ldr r0, =V8SRC
+    str r0, [r6]
+    str r11, [r6, #4]
+1:  ldrh r0, [r4, #6]              @ park well before line 160
+    cmp r0, #100
+    bne 1b
+    ldr r0, =0x94000001            @ enable, vblank timing, word, count 1
+    str r0, [r6, #8]
+    bl  tm_start
+2:  ldrh r0, [r4, #4]              @ the vblank flag's rise
+    tst r0, #1
+    beq 2b
+    ldrh r9, [r10]
+3:  ldr r0, [r11]
+    cmp r0, #0
+    beq 3b
+    ldrh r1, [r10]
+    sub r1, r1, r9
+    ldrh r2, [r4, #4]
+    strb r2, [r8, #22]
+    ldrh r2, [r4, #6]
+    strb r2, [r8, #23]
+    strh r1, [r8, #26]
+    bl  tm_stop
+
+    @ the completion interrupt against the CPU's own resume
+    ldr r0, =V8DST
+    mov r1, #0
+    mov r2, #16
+    bl  fill_words
+    mov r0, #0
+    str r0, [r7, #0x4C]
+    ldr r0, =IEADDR
+    mov r1, #0x0800                @ IE: DMA3
+    strh r1, [r0]
+    ldr r1, =0x3FFF
+    strh r1, [r0, #2]
+    mov r1, #1
+    strh r1, [r0, #8]              @ IME on
+    ldr r0, =V8SRC
+    str r0, [r6]
+    ldr r0, =V8DST
+    str r0, [r6, #4]
+    ldr r12, =V8DST + 60           @ the burst's LAST destination word
+    bl  tm_start
+    ldr r1, =0xC4000010            @ enable + IRQ, word, count 16
+    str r1, [r6, #8]
+    ldrh r9, [r10]                 @ the CPU's own resume stamp
+    ldr r11, [r12]                 @ ... and what is in memory by then
+    ldr r6, =0x00080000
+5:  ldr r0, [r7, #0x4C]
+    cmp r0, #0
+    bne 6f
+    subs r6, r6, #1
+    bne 5b
+6:  ldrh r0, [r7, #0x48]
+    sub r0, r0, r9
+    strh r0, [r8, #28]
+    ldr r3, =0xC0FFEE46
+    cmp r11, r3
+    moveq r0, #1
+    movne r0, #0
+    strb r0, [r8, #30]
+    bl  tm_stop
+    ldr r0, =IEADDR
+    mov r1, #0
+    strh r1, [r0, #8]
+    strh r1, [r0]
+    mov r0, #0x44
+    strb r0, [r8, #31]
+    pop {r4-r11, pc}
+    .ltorg
+
+@ ── slot 47: IWCYCLE — IntrWait's return path and the 03007FF8 protocol ──
+@ hle_bios.nim rebuilds the BIOS IntrWait by hand, down to a hard-coded
+@ 44-cycle wake path (INTRWAIT_TUNE) and a reconstructed register protocol.
+@ This page runs the same calls against the real BIOS.  It installs its own
+@ IRQ handler — the shared one never touches the BIOS flag mirror, and
+@ IntrWait cannot return without a handler that does — and puts the shared
+@ one back at the end.  Every wait is masked with the timer-3 watchdog bit
+@ as well as the source under test, so a wait that would hang returns
+@ anyway and +12 names the source that ended it (0001 = vblank, 0040 = the
+@ watchdog rescued the row).
+@ +0  (h) TM0 cycles for `swi 4` with r0 = 0, r1 = 0001 and the mirror
+@   pre-set to 0001: the pure return path, with no halt at all
+@ +2  (h) the mirror right after that call: which bits the BIOS cleared
+@ +4  (h) r0 it returned      +6  (h) r3 it returned
+@ +8  (h) the mirror after the same call with the mirror pre-set to FFFF:
+@   does the BIOS clear only the bits it matched?
+@ +10 (h) cycles for `swi 4` r0 = 1 (discard), r1 = 0041, entered two lines
+@   before vblank      +12 (h) r0 it returned
+@ +14 (h) cycles for `swi 5` (VBlankIntrWait) from the same anchor, run only
+@   if +12 showed the vblank path working     +16 (h) the mirror after it
+@ +18 (h) (the TM0 stamp taken by the instruction after the +10 call
+@   returned) - (the handler's own entry stamp): the return path measured
+@   from inside the interrupt, which is what INTRWAIT_TUNE models
+@ +20 (h) the same for the `swi 5` at +14
+@ +22 (h) low half of (sp after - sp before) across the +10 call (0 = the
+@   BIOS popped both of its frames)
+@ +24 (h) low half of r12 after that call (pre-set to 1234: the BIOS is
+@   documented to hand the caller's r12 back)
+@ +26 (h) low half of r2 after it (documented residue)
+@ +28 (h) cycles for `swi 4` r0 = 0, r1 = 0041, mirror pre-set to 0, same
+@   anchor: it must halt, so (+28 - +10) isolates the discard path
+@ +30 (b) IME read back after the immediate-return call at +0
+@ +31 (b) progress marker; 49 once the page finished
+.macro iw_anchor
+1:  ldrh r0, [r4, #6]
+    cmp r0, #157
+    bne 1b
+2:  ldrh r0, [r4, #6]
+    cmp r0, #158
+    bne 2b
+.endm
+.macro iw_mirror v
+    ldr r0, =0x03007FF8
+    ldr r1, =\v
+    strh r1, [r0]
+.endm
+.macro iw_wd on
+    ldr r0, =TM3BASE
+    mov r1, #0
+    str r1, [r0]
+.if \on
+    ldr r1, =0x00C00000            @ enable + IRQ, prescaler 1, reload 0
+    str r1, [r0]
+.endif
+.endm
+probe_iwcycle:
+    push {r4-r11, lr}
+    ldr r8, =SLOTS + 47*SLOTSZ
+    ldr r7, =SCRATCH
+    mov r4, #IOBASE
+    ldr r10, =TM0BASE
+    mov r0, #1
+    strb r0, [r8, #31]
+    ldr r0, =0x03007FFC            @ our own handler, restored at the end
+    ldr r1, =v8_iw_handler
+    str r1, [r0]
+    ldrh r0, [r4, #4]
+    orr r0, r0, #0x08              @ DISPSTAT: vblank IRQ enable
+    strh r0, [r4, #4]
+    iw_wd 0
+    ldr r0, =IEADDR
+    ldr r1, =0x0041                @ IE: vblank + timer 3
+    strh r1, [r0]
+    ldr r1, =0x3FFF
+    strh r1, [r0, #2]
+    mov r1, #1
+    strh r1, [r0, #8]              @ IME on
+
+    @ ── the immediate return: the flag is already in the mirror ──
+    mov r0, #2
+    strb r0, [r8, #31]
+    iw_mirror 0x0001
+    bl  tm_start
+    mov r0, #0
+    mov r1, #1
+    swi 0x040000
+    mov r5, r0
+    mov r6, r3
+    bl  tm_stop
+    strh r0, [r8, #0]
+    ldr r0, =0x03007FF8
+    ldrh r0, [r0]
+    strh r0, [r8, #2]
+    strh r5, [r8, #4]
+    strh r6, [r8, #6]
+    ldr r0, =IEADDR
+    ldrh r0, [r0, #8]
+    strb r0, [r8, #30]
+    iw_mirror 0xFFFF
+    mov r0, #0
+    mov r1, #1
+    swi 0x040000
+    ldr r0, =0x03007FF8
+    ldrh r0, [r0]
+    strh r0, [r8, #8]
+
+    @ ── a real wait: discard, masking vblank and the watchdog ──
+    mov r0, #3
+    strb r0, [r8, #31]
+    iw_anchor                      @ (vblank IRQs fire during the anchor, so
+    iw_mirror 0                    @  the mirror is cleared AFTER it)
+    mov r0, #0
+    str r0, [r7, #0x4C]
+    iw_wd 1
+    mov r9, sp
+    ldr r12, =0x1234
+    bl  tm_start
+    mov r0, #1
+    ldr r1, =0x0041
+    swi 0x040000
+    ldrh r11, [r10]                @ stamp the return
+    mov r5, r0
+    mov r6, r2
+    strh r12, [r8, #24]
+    sub r9, sp, r9
+    bl  tm_stop
+    strh r0, [r8, #10]
+    strh r5, [r8, #12]
+    strh r9, [r8, #22]
+    strh r6, [r8, #26]
+    ldrh r0, [r7, #0x48]           @ the handler's entry stamp
+    sub r0, r11, r0
+    strh r0, [r8, #18]
+    iw_wd 0
+
+    @ ── VBlankIntrWait, only once the vblank path proved itself ──
+    cmp r5, #1
+    bne 9f
+    mov r0, #4
+    strb r0, [r8, #31]
+    iw_anchor
+    iw_mirror 0
+    mov r0, #0
+    str r0, [r7, #0x4C]
+    bl  tm_start
+    swi 0x050000
+    ldrh r11, [r10]
+    bl  tm_stop
+    strh r0, [r8, #14]
+    ldr r0, =0x03007FF8
+    ldrh r0, [r0]
+    strh r0, [r8, #16]
+    ldrh r0, [r7, #0x48]
+    sub r0, r11, r0
+    strh r0, [r8, #20]
+9:
+    @ ── the same wait without the discard ──
+    mov r0, #5
+    strb r0, [r8, #31]
+    iw_anchor
+    iw_mirror 0
+    iw_wd 1
+    bl  tm_start
+    mov r0, #0
+    ldr r1, =0x0041
+    swi 0x040000
+    bl  tm_stop
+    strh r0, [r8, #28]
+    iw_wd 0
+
+    ldr r0, =IEADDR
+    mov r1, #0
+    strh r1, [r0, #8]
+    strh r1, [r0]
+    ldrh r0, [r4, #4]
+    bic r0, r0, #0x08
+    strh r0, [r4, #4]
+    ldr r0, =0x03007FFC            @ hand the shared handler back
+    ldr r1, =irq_handler
+    str r1, [r0]
+    mov r0, #0x49
+    strb r0, [r8, #31]
+    pop {r4-r11, pc}
+    .ltorg
+
+@ What IntrWait needs from a user handler: stamp the first entry,
+@ acknowledge IF, and OR the serviced bits into the BIOS flag mirror at
+@ 0x03007FF8 (devkitARM's crt0 does the same with `strh r0, [ip, #-8]`).
+@ Entered from the BIOS dispatcher, which has already saved r0-r3, r12, lr.
+v8_iw_handler:
+    ldr r0, =TM0BASE
+    ldrh r1, [r0]
+    ldr r0, =SCRATCH
+    ldr r2, [r0, #0x4C]
+    cmp r2, #0
+    streqh r1, [r0, #0x48]
+    moveq r2, #1
+    streq r2, [r0, #0x4C]
+    ldr r0, =IEADDR
+    ldrh r1, [r0, #2]              @ IF
+    strh r1, [r0, #2]              @ acknowledge
+    ldr r0, =0x03007FF8
+    ldrh r2, [r0]
+    orr r2, r2, r1
+    strh r2, [r0]
+    bx  lr
+    .ltorg
+
+@ ── slot 48: DMAFIFO — is a FIFO request level-conditioned or latched? ───
+@ dma.nim's run_pending drops a FIFO grant whose FIFO already holds 16 bytes
+@ ("FIFO requests are level-conditioned on the FIFO, not edge-latched ...
+@ Assumed; no ROM pins this") — a rule that came out of Densetsu no Sutafi 3
+@ losing stream bytes, not out of hardware.  A FIFO destination cannot be
+@ read back and DMA1SAD is write-only, so the observable here is the bus:
+@ every row times the SAME 256-iteration ROM loop with the TM2/TM3 cascade
+@ while DMA1 feeds FIFO A from EWRAM, and the cycles the loop lost are the
+@ transfers that happened.  Timer 0 drives the FIFO, and its reload sets how
+@ many overflows fall inside one 4-word burst — a burst is ~16-20 cycles, so
+@ reload FFF8 (8 cycles an overflow) already puts two inside it and FFFC
+@ four.  If a grant is edge-latched, those extra overflows queue extra
+@ bursts and the loop loses far more cycles than the level-conditioned model
+@ allows; if it is level-conditioned, the rows saturate.
+@ +0  (h) loop cycles, TM0 reload FC00 (1024 cycles an overflow)
+@ +2  (h) reload FF00 (256)     +4  (h) reload FFC0 (64)
+@ +6  (h) reload FFF0 (16)      +8  (h) reload FFF8 (two per burst)
+@ +10 (h) reload FFFC (four per burst)
+@ +12 (h) the same loop with DMA1 disabled and TM0 still at reload FFFC:
+@   the timer's own cost, to be subtracted from +10
+@ +14 (h) the loop with DMA1 disabled and TM0 stopped: the bare loop
+@ +16 (h) loop cycles for a single-shot (repeat off) DMA1 at reload FFFC —
+@   one burst, unless a second grant was latched behind it
+@ +18 (h) DMA1CNT_H read back after that row (8000 set = still enabled)
+@ +20 (h) DMA1-complete interrupts counted over one loop at reload FFC0
+@ +22 (h) the same at reload FC00.  These two are deliberately SLOW: one
+@   interrupt per burst at reload FFF8 arrives every ~128 cycles, which is
+@   less than a ROM handler plus the BIOS dispatcher costs, and the console
+@   makes no forward progress at all.  They calibrate interrupts-per-burst
+@   at a rate the CPU survives; the fast rows above are read off the bus.
+@ +24 (h) loop cycles for the same experiment on DMA2 / FIFO B driven by
+@   timer 1 at reload FFF8
+@ +26 (h) SOUNDCNT_H read back: the configuration these rows ran under
+@ +28 (h) loop cycles at reload FFF8 with the DMA source in ROM instead of
+@   EWRAM — a different cost per word, so +8 and +28 together give the
+@   cycles-per-transfer scale the counts are read off
+@ +30 (b) marker 46   +31 (b) OR of every IF bit the counting handler saw
+.equ DF_SOUNDH,   0x0306           @ PSG 100 %, DSA 100 %, DSA L+R, timer 0
+.equ DF_SOUNDH_B, 0x7306           @ + DSB L+R, DSB timer 1
+.equ DF_CNT,      0xB6400004       @ enable, special timing, 32-bit, repeat,
+                                   @ destination fixed, count 4
+.equ DF_CNT_IRQ,  0xF6400004       @ ... + IRQ on completion
+.equ DF_CNT_ONCE, 0xB4400004       @ ... without repeat
+.macro df_loop                     @ -> r0 = cycles
+    bl  v8_tm23_start
+    mov r3, #256
+1:  subs r3, r3, #1
+    bne 1b
+    bl  v8_tm23_stop
+.endm
+.macro df_row src, reload, cnt     @ -> r0 = cycles
+    ldr r0, =\src                  @ DMA1: SAD, DAD, CNT
+    str r0, [r5]
+    ldr r0, =0x040000A0            @ FIFO A
+    str r0, [r5, #4]
+    mov r0, #0
+    str r0, [r6]                   @ TM0 off
+    ldr r0, =\cnt
+    str r0, [r5, #8]
+    ldr r0, =0x00800000 + \reload
+    str r0, [r6]                   @ TM0 on, prescaler 1
+    df_loop
+    mov r11, r0
+    mov r0, #0
+    str r0, [r5, #8]               @ DMA1 off
+    str r0, [r6]                   @ TM0 off
+    mov r0, r11
+.endm
+probe_dmafifo:
+    push {r4-r11, lr}
+    ldr r8, =SLOTS + 48*SLOTSZ
+    mov r4, #IOBASE
+    ldr r5, =0x040000BC            @ DMA1 SAD
+    ldr r6, =TM0BASE
+    ldr r0, =V8SRC
+    ldr r1, =0x10203040
+    mov r2, #2048
+    bl  fill_words
+    mov r0, #0x80
+    strh r0, [r4, #0x84]           @ SOUNDCNT_X: master on
+    ldr r0, =DF_SOUNDH | 0x8800    @ ... resetting both FIFOs once
+    strh r0, [r4, #0x82]
+    ldr r0, =DF_SOUNDH
+    strh r0, [r4, #0x82]
+
+    df_row V8SRC, 0xFC00, DF_CNT
+    strh r0, [r8, #0]
+    df_row V8SRC, 0xFF00, DF_CNT
+    strh r0, [r8, #2]
+    df_row V8SRC, 0xFFC0, DF_CNT
+    strh r0, [r8, #4]
+    df_row V8SRC, 0xFFF0, DF_CNT
+    strh r0, [r8, #6]
+    df_row V8SRC, 0xFFF8, DF_CNT
+    strh r0, [r8, #8]
+    df_row V8SRC, 0xFFFC, DF_CNT
+    strh r0, [r8, #10]
+
+    mov r0, #0                     @ DMA1 off, the timer still hammering
+    str r0, [r5, #8]
+    ldr r0, =0x0080FFFC
+    str r0, [r6]
+    df_loop
+    strh r0, [r8, #12]
+    mov r0, #0
+    str r0, [r6]
+    df_loop                        @ ... and the bare loop
+    strh r0, [r8, #14]
+
+    df_row V8SRC, 0xFFFC, DF_CNT_ONCE
+    strh r0, [r8, #16]
+    ldrh r0, [r5, #10]             @ DMA1CNT_H
+    strh r0, [r8, #18]
+
+    @ ── the same rows counted as completion interrupts ──
+    ldr r0, =0x03007FFC
+    ldr r1, =v8_cnt_handler
+    str r1, [r0]
+    ldr r7, =V8SCR
+    ldr r0, =IEADDR
+    mov r1, #0x0200                @ IE: DMA1
+    strh r1, [r0]
+    ldr r1, =0x3FFF
+    strh r1, [r0, #2]
+    mov r1, #1
+    strh r1, [r0, #8]              @ IME on
+    mov r0, #0
+    str r0, [r7]
+    df_row V8SRC, 0xFFC0, DF_CNT_IRQ
+    ldr r0, [r7]
+    strh r0, [r8, #20]
+    mov r0, #0
+    str r0, [r7]
+    df_row V8SRC, 0xFC00, DF_CNT_IRQ
+    ldr r0, [r7]
+    strh r0, [r8, #22]
+    ldr r0, =IEADDR
+    mov r1, #0
+    strh r1, [r0, #8]
+    strh r1, [r0]
+    ldr r0, =0x03007FFC
+    ldr r1, =irq_handler
+    str r1, [r0]
+
+    @ ── FIFO B on DMA2, driven by timer 1 ──
+    ldr r0, =DF_SOUNDH_B
+    strh r0, [r4, #0x82]
+    ldr r0, =V8SRC
+    ldr r1, =0x040000C8            @ DMA2 SAD
+    str r0, [r1]
+    ldr r0, =0x040000A4            @ FIFO B
+    str r0, [r1, #4]
+    mov r0, #0
+    str r0, [r6, #4]               @ TM1 off
+    ldr r0, =DF_CNT
+    str r0, [r1, #8]
+    ldr r0, =0x0080FFF8
+    str r0, [r6, #4]               @ TM1 on
+    df_loop
+    strh r0, [r8, #24]
+    mov r0, #0
+    ldr r1, =0x040000C8
+    str r0, [r1, #8]
+    str r0, [r6, #4]
+    ldrh r0, [r4, #0x82]
+    strh r0, [r8, #26]
+
+    @ ── the cycles-per-transfer scale: the same row from a ROM source ──
+    df_row rom_pattern, 0xFFF8, DF_CNT
+    strh r0, [r8, #28]
+
+    mov r0, #0
+    strh r0, [r4, #0x82]
+    strh r0, [r4, #0x84]           @ the APU off again
+    ldr r7, =V8SCR
+    ldr r0, [r7, #4]
+    strb r0, [r8, #31]
+    mov r0, #0x46
+    strb r0, [r8, #30]
+    pop {r4-r11, pc}
+    .ltorg
+
+@ Counts entries, and remembers every IF bit it ever saw.
+v8_cnt_handler:
+    ldr r0, =IEADDR
+    ldrh r1, [r0, #2]
+    strh r1, [r0, #2]
+    ldr r0, =V8SCR
+    ldr r2, [r0]
+    add r2, r2, #1
+    str r2, [r0]
+    ldr r2, [r0, #4]
+    orr r2, r2, r1
+    str r2, [r0, #4]
+    bx  lr
+    .ltorg
+
+@ ── slot 49: UNDMODE — which bank an undefined CPSR mode selects ─────────
+@ cpu.nim's mode_bank sends every pattern that is not one of the seven ARM
+@ modes to the user bank ("Assumed; no ROM pins this"), and its comment
+@ names the game that gets there: Prince of Tennis 2004 returns with SPSR
+@ mode 1E.  Each banked r13 is loaded with a constant that names its bank,
+@ then CPSR_c is written with an undefined mode number and r13 read straight
+@ back, so the value IS the answer:
+@   51515151 user/system   52525252 FIQ   53535353 abort   54545454 undefined
+@   03007Fxx = one of the BIOS's own stacks (IRQ or supervisor)
+@ Interrupts stay unmasked across the mode change, with TM3 armed as a
+@ watchdog through the same MARKER protocol run_msr_probe uses, so an
+@ interrupt can divert execution to und_recover if a pattern wedges the
+@ pipeline; the progress byte at +28 is written before each mode write.
+@ HOLD SELECT AT POWER-ON TO SKIP THIS PAGE — a console that dies here shows
+@ nothing at all, and the other 49 pages are worth more than this one.
+@ +0  (w) r13 read in mode 15   +4 (b) CPSR low byte there  +5 (b) r14 low
+@ +8  (w) r13 read in mode 1A   +12 (b) CPSR low byte  +13 (b) r14 low byte
+@ +16 (w) r13 read in mode 1E   +20 (b) CPSR low byte  +21 (b) r14 low byte
+@ +24 (w) r13 read back in system mode afterwards (51515151 = the round trip
+@   left the system bank alone)
+@ +28 (b) progress marker: the last step started
+@ +29 (b) the in-flight word as the recovery found it: 1 = the page
+@   walked out on its own, 2 = the watchdog had to divert it
+@ +30 (b) AA once the page ran to the end
+@ +31 (b) EE, with 99 at +0, means SELECT was held and nothing ran
+.macro un_probe mode, off, step
+    mov r0, #\step
+    strb r0, [r8, #28]
+    msr CPSR_c, #\mode             @ undefined pattern, interrupts unmasked
+    mov r6, sp                     @ r13 of whatever bank that selected
+    mov r7, lr                     @ r14 of the same bank
+    mrs r3, CPSR
+    msr CPSR_c, #0xDF              @ system mode, interrupts masked again
+    str r6, [r8, #\off]
+    strb r3, [r8, #(\off + 4)]
+    strb r7, [r8, #(\off + 5)]
+.endm
+probe_undmode:
+    push {r4-r11, lr}
+    ldr r8, =SLOTS + 49*SLOTSZ
+    ldr r0, =0x04000130
+    ldrh r0, [r0]
+    tst r0, #4                     @ SELECT held (0 = pressed): skip
+    bne 1f
+    mov r0, #0x99
+    strb r0, [r8, #0]
+    mov r0, #0xEE
+    strb r0, [r8, #31]
+    pop {r4-r11, pc}
+1:  mrs r4, CPSR                   @ the CPSR to put back
+    mov r5, sp                     @ the real system stack pointer
+    ldr r9, =MARKER
+    str r5, [r9, #12]
+    ldr r0, =und_recover
+    str r0, [r9, #20]              @ where the watchdog should divert to
+    mov r0, #1
+    str r0, [r9, #8]               @ in-flight flag the watchdog looks at
+    ldr r0, =TM3BASE
+    mov r1, #0
+    str r1, [r0]
+    ldr r1, =0x00C00000            @ enable + IRQ, prescaler 1, reload 0
+    str r1, [r0]
+    ldr r0, =IEADDR
+    mov r1, #0x40                  @ IE: timer 3
+    strh r1, [r0]
+    ldr r1, =0x3FFF
+    strh r1, [r0, #2]
+    mov r1, #1
+    strh r1, [r0, #8]              @ IME on
+
+    ldr r0, =0x52525252            @ name every bank before reading any
+    msr CPSR_c, #0xD1              @ FIQ (which banks r8-r12: touch none)
+    mov sp, r0
+    msr CPSR_c, #0xDF
+    ldr r0, =0x53535353
+    msr CPSR_c, #0xD7              @ abort
+    mov sp, r0
+    msr CPSR_c, #0xDF
+    ldr r0, =0x54545454
+    msr CPSR_c, #0xDB              @ undefined
+    mov sp, r0
+    msr CPSR_c, #0xDF
+    ldr r0, =0x51515151            @ system: r5 puts the real one back
+    mov sp, r0
+
+    un_probe 0x15, 0, 1
+    un_probe 0x1A, 8, 2
+    un_probe 0x1E, 16, 3
+    mov r0, #4
+    strb r0, [r8, #28]
+    mov r6, sp
+    str r6, [r8, #24]
+und_recover:
+    ldr r9, =MARKER
+    ldr r0, [r9, #8]
+    strb r0, [r8, #29]
+    mov r0, #0
+    str r0, [r9, #8]
+    ldr r0, =IEADDR
+    mov r1, #0
+    strh r1, [r0, #8]
+    strh r1, [r0]
+    ldr r0, =TM3BASE
+    str r1, [r0]
+    ldr sp, [r9, #12]              @ the real system stack pointer
+    msr CPSR_c, r4
+    mov r0, #0xAA
+    strb r0, [r8, #30]
+    pop {r4-r11, pc}
+    .ltorg

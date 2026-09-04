@@ -152,17 +152,42 @@ build_roms() {
   GBPROBE_OUT=probe_h_lcdc4 "$HERE/mk.sh" probe_h_latency -DPAGE=4
   GBPROBE_OUT=probe_h_lcdc3 "$HERE/mk.sh" probe_h_latency -DPAGE=5
   "$HERE/mk.sh" probe_i_oamdma
+  # probe (j): the window restart's cost, and the halt wake's phase on an
+  # ordinary line against the LY 153 -> 0 snapback.
+  "$HERE/mk.sh" probe_j_winrestart
+  "$HERE/mk.sh" probe_j_haltlead
+  # probe (k): the four pages that need a whole sweep before they draw.
+  "$HERE/mk.sh" probe_k_serialdiv
+  "$HERE/mk.sh" probe_k_lcdon
+  "$HERE/mk.sh" probe_k_oamclass
+  # hwprobe row 18: one ROM per arming regime, plus the SCX axis.
+  GBPROBE_OUT=probe_k_winglitch_a0 "$HERE/mk.sh" probe_k_winglitch -DARM=0 -DAXIS=0
+  GBPROBE_OUT=probe_k_winglitch_a1 "$HERE/mk.sh" probe_k_winglitch -DARM=1 -DAXIS=0
+  GBPROBE_OUT=probe_k_winglitch_a2 "$HERE/mk.sh" probe_k_winglitch -DARM=2 -DAXIS=0
+  GBPROBE_OUT=probe_k_winglitch_scx "$HERE/mk.sh" probe_k_winglitch -DARM=1 -DAXIS=1
 }
 
 # The photograph pages' dingbat predictions, one PNG per page and model,
 # under expected/ -- what a hardware photo is compared against.
+#
+# Frame count per page: the probe (g), (h), (i) and (j) pages redraw the whole
+# screen every frame, so any count past the first does; the probe (k) pages run
+# a SWEEP first (up to 96 LCD enables) and only then draw themselves once, so
+# each carries the count its sweep needs plus headroom.
 build_expected() {
   build_dingbat
   mkdir -p "$HERE/expected"
-  for rom in probe_g_wy0 probe_g_wy1 probe_h_scx probe_h_scy probe_h_wx \
-             probe_h_bgp probe_h_lcdc4 probe_h_lcdc3 probe_i_oamdma; do
+  for entry in probe_g_wy0:40 probe_g_wy1:40 probe_h_scx:40 probe_h_scy:40 \
+               probe_h_wx:40 probe_h_bgp:40 probe_h_lcdc4:40 probe_h_lcdc3:40 \
+               probe_i_oamdma:40 probe_j_winrestart:40 probe_j_haltlead:40 \
+               probe_k_winglitch_a0:40 probe_k_winglitch_a1:40 \
+               probe_k_winglitch_a2:40 probe_k_winglitch_scx:40 \
+               probe_k_serialdiv:60 probe_k_oamclass:100 probe_k_lcdon:200; do
+    rom="${entry%%:*}"
+    frames="${entry##*:}"
     for model in dmg cgbc cgbd agb; do
-      "$HERE/bin/dingbat_shot" "$HERE/$rom.gb" "$model" 40 "$HERE/expected/$rom.$model.ppm"
+      "$HERE/bin/dingbat_shot" "$HERE/$rom.gb" "$model" "$frames" \
+                               "$HERE/expected/$rom.$model.ppm"
       python3 "$HERE/ppm2png.py" "$HERE/expected/$rom.$model.ppm" \
                                  "$HERE/expected/$rom.$model.png"
       rm "$HERE/expected/$rom.$model.ppm"
