@@ -215,7 +215,7 @@ def main():
     for n in (only if only is not None else range(len(PAGES))):
         ppm = os.path.join(outdir, f"p{n:02d}.ppm")
         frame = est + period * (n - last_n)
-        for attempt in range(24):
+        for attempt in range(64):  # late pages drift a page-width or more
             shoot(dingbat, rom, frame, ppm, bios)
             rows = ocr(ppm)
             got = title_page(rows)

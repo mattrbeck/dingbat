@@ -138,6 +138,11 @@ proc hle_intr_wait(cpu: CPU; discard_old: bool; mask: uint16) =
       cpu.write_intr_mirror(mirror and not hit)
       cpu.r[0] = uint32(hit)
       cpu.r[3] = 0
+      # The no-halt path still runs the check subroutine, the acknowledge
+      # and both frame pops: 192 cycles from the caller's swi to its next
+      # instruction on the real BIOS (hardware: gbaedge IWCYCLE on AGB SP,
+      # docs/hwprobe-results-agb.md), 32 beyond the dispatch cost.
+      cpu.gba.bus.add_cycles(32)
       return
   # The caller's r12 goes in the dispatcher's SVC-stack slot (push {fp, ip,
   # lr} at 0x140 puts ip at [sp_svc - 8]); it survives the wait and travels
