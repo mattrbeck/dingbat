@@ -69,8 +69,13 @@ const HBLANK_FLAG_DELAY = 46
 
 # Cycles from the H-blank signal to IRQ recognition; longer than the timers'
 # IRQ_SYNC_DELAY (3). Pinned by mGBA suite "H-blank bit start / Flip 1",
-# which admits recognition at 1010..1014; 1012 is the middle.
-const HBLANK_IRQ_SYNC_DELAY = 6
+# which admits recognition at 1010..1014; 1012 is the middle, and gbaedge
+# IRQDECOMP's running-CPU row (AGB SP) is exact at 6. The same page's
+# halted row wakes 19 cycles later on hardware than here, and this constant
+# cannot supply it: 0/6/25/60 give 964/970/972/1007 against 989 while the
+# running row leaves 957 (docs/hwprobe-results-agb.md). An intdefine for
+# that bracket.
+const HBLANK_IRQ_SYNC_DELAY {.intdefine.} = 6
 
 proc start_hblank*(ppu: PPU) =
   ppu.gba.scheduler.schedule(272, etPPUEndHBlank)
