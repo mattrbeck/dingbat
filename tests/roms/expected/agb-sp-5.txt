@@ -1,0 +1,56 @@
+# gbaedge.gba hardware transcription — session 5 (the v7/v8 pages, 37-49)
+# GBA SP (AGS-001, clear purple) + EverDrive GBA, 2026-09-04
+# 50-page manual build @ ad6af27a, photos IMG_4016-4028
+# Plain viewer run (SELECT not held): LEFT/RIGHT + photo per page. Every hex
+# page below re-checks against its on-screen CRC-16 (poly 1021, init FFFF).
+# Pages 25 OBJBUDGET (crc 155A) and 26 OBJGEOM (crc 5C75) are visual: both
+# match dingbat's predicted-2026-09/p37.png and p38.png (same picture, same
+# per-page CRC). The console survived page 31 UNDMODE.
+platform: gba
+console: GBA SP AGS-001, EverDrive GBA, 2026-09-04
+all: 05C6
+model: 18 7F
+
+page 27 DMAOPENBUS crc 2CB2
+00 30 95 E5 00 90 95 E5 0E 02 86 E8 1E FF 2F E1
+42 EE FF C0 1E FF 2F E1 A5 A5 A5 A5 A5 A5 A5 A5
+
+page 28 IRQDECOMP crc F533
+7C 00 85 00 72 00 72 00 87 00 BD 03 DD 03 89 09
+74 09 B2 00 AC 00 00 00 00 00 00 00 20 00 FF 00
+
+page 29 CONTEND2 crc 9365
+E7 00 F6 00 E6 00 E6 00 E7 00 2A 04 E6 00 DC 00
+E6 00 F8 00 E6 00 DD 00 F6 00 E6 00 E6 00 E6 00
+
+page 2A MULTIME crc 149C
+18 28 18 28 18 28 18 28 12 28 18 28 12 28 18 28
+DC 00 EC 00 FC 00 0C 01 DC 00 EC 00 FC 00 0C 01
+
+page 2B TIMPHASE crc 13BB
+07 06 06 06 07 06 06 07 07 06 06 06 07 06 06 07
+06 06 07 06 06 06 06 06 02 02 01 02 06 19 54 27
+
+page 2C PSGPHASE crc 59B0
+00 00 00 00 00 00 00 00 00 00 00 00 C3 03 1F 01
+00 00 00 00 00 00 FA 01 80 80 E6 01 00 00 50 00
+
+page 2D MEMCTL crc B63F
+20 00 00 0D 20 00 00 0D 20 00 00 0D 20 00 00 0D
+20 00 00 0D 41 01 21 01 61 02 0E 04 0D 0D FF 20
+
+page 2E DMATIME crc 8367
+38 00 2A 00 67 00 F7 00 1C 01 7C 00 B1 00 9C 00
+7C 00 1E 01 02 4A 01 A0 25 00 25 00 6D 00 01 44
+
+page 2F IWCYCLE crc 48F4
+C0 00 00 00 01 00 00 00 FE FF 55 0A 01 00 6F 0A
+00 00 03 01 03 01 00 00 34 12 00 00 5D 0A 01 49
+
+page 30 DMAFIFO crc FE03
+78 1A 58 1A 16 1B E5 1D B0 22 90 33 38 1A 38 1A
+38 1A 00 00 0A 00 00 00 B0 22 06 73 80 23 46 00
+
+page 31 UNDMODE crc EFA2
+00 00 00 00 15 00 00 00 00 00 00 00 1A 00 00 00
+00 00 00 00 1E 00 00 00 51 51 51 51 04 01 AA 00
