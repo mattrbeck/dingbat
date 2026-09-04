@@ -25,7 +25,8 @@ proc exception_return_restore*(cpu: CPU) =
   cpu.switch_mode(new_mode)
   cpu.cpsr = cast[PSR](old_spsr)
   let bank = mode_bank(new_mode)
-  cpu.spsr = cast[PSR](if bank == 0: uint32(cpu.cpsr) else: cpu.spsr_banks[bank])
+  cpu.spsr = cast[PSR](if bank in {0, UNDEF_BANK}: uint32(cpu.cpsr)
+                       else: cpu.spsr_banks[bank])
   if was_irq_disabled and not cpu.cpsr.irq_disable:
     # No IRQ_GATE_DELAY on an exception return's SPSR restore (mGBA suite
     # multi-IRQ Timer count-up rows); the gate evidence covers IME/IE/msr.

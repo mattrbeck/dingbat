@@ -325,7 +325,7 @@ type
     # (Golden Sun TLA DMAs a `bx pc` trampoline onto the stack and branches
     # to it before the transfer has run)
     refill_pending*: bool
-    reg_banks*:   array[6, array[7, uint32]]
+    reg_banks*:   array[7, array[7, uint32]]  # [6] = UNDEF_BANK, see cpu.nim
     spsr_banks*:  array[6, uint32]
     halted*:      bool
     stopped*:     bool  # Stop mode: halted, and only keypad/cartridge/SIO IRQs wake
@@ -871,6 +871,12 @@ proc add*(cpu: CPU; operand_1, operand_2: uint32; set_conditions: bool): uint32 
 proc adc*(cpu: CPU; operand_1, operand_2: uint32; set_conditions: bool): uint32 {.inline.}
 proc clear_pipeline*(cpu: CPU)
 proc read_instr*(cpu: CPU): uint32 {.inline.}
+# The bank an undefined CPSR mode pattern selects: r13 and r14 read 0 there
+# and the mode field holds the pattern (hardware: gbaedge UNDMODE on AGB SP,
+# patterns 15/1A/1E, docs/hwprobe-results-agb.md). It is zeroed on entry,
+# so nothing written in it survives; r8-r12 and the SPSR are unprobed and
+# follow the user bank. Never serialized (always empty at a boundary).
+const UNDEF_BANK* = 6
 proc mode_bank*(m: CpuMode): int
 
 # Textual includes: the whole GBA core compiles as one module so the C

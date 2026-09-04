@@ -6,8 +6,7 @@ when defined(gbaskipcap):
 
 proc mode_bank*(m: CpuMode): int =
   # `m` is guest-controlled (SPSR mode field, MSR CPSR) and can hold any
-  # 5-bit pattern (Prince of Tennis 2004 returns with SPSR mode 0x1E). Model:
-  # an undefined pattern selects the user bank. Assumed; no ROM pins this.
+  # 5-bit pattern (Prince of Tennis 2004 returns with SPSR mode 0x1E).
   # Dispatch on the raw ordinal: an exhaustive enum case would compile the
   # else into a trap.
   case uint32(m)
@@ -17,7 +16,7 @@ proc mode_bank*(m: CpuMode): int =
   of uint32(modeSVC):                  3
   of uint32(modeABT):                  4
   of uint32(modeUND):                  5
-  else:                                0  # invalid pattern: no banked registers
+  else:                                UNDEF_BANK
 
 proc new_cpu*(gba: GBA): CPU =
   result = CPU(
@@ -57,19 +56,25 @@ proc switch_mode*(cpu: CPU; new_mode: CpuMode) =
   if new_mode == old_mode: return
   let new_bank  = mode_bank(new_mode)
   let old_bank  = mode_bank(old_mode)
+  # r8-r12 and the SPSR of the empty bank are the user bank's (UNDEF_BANK)
+  let new_high  = if new_bank == UNDEF_BANK: 0 else: new_bank
+  let old_high  = if old_bank == UNDEF_BANK: 0 else: old_bank
   if new_mode == modeFIQ or old_mode == modeFIQ:
     for idx in 0..4:
-      cpu.reg_banks[old_bank][idx] = cpu.r[8 + idx]
-      cpu.r[8 + idx] = cpu.reg_banks[new_bank][idx]
+      cpu.reg_banks[old_high][idx] = cpu.r[8 + idx]
+      cpu.r[8 + idx] = cpu.reg_banks[new_high][idx]
   cpu.reg_banks[old_bank][5] = cpu.r[13]
   cpu.reg_banks[old_bank][6] = cpu.r[14]
-  cpu.spsr_banks[old_bank]   = uint32(cpu.spsr)
+  cpu.spsr_banks[old_high]   = uint32(cpu.spsr)
+  if new_bank == UNDEF_BANK:
+    cpu.reg_banks[UNDEF_BANK][5] = 0
+    cpu.reg_banks[UNDEF_BANK][6] = 0
   cpu.r[13]         = cpu.reg_banks[new_bank][5]
   cpu.r[14]         = cpu.reg_banks[new_bank][6]
   # Load the destination mode's banked SPSR and nothing else: an msr mode
   # switch back into IRQ mode must leave SPSR_irq intact for the pending
   # exception return (exception entry overwrites it afterwards itself).
-  cpu.spsr          = cast[PSR](cpu.spsr_banks[new_bank])
+  cpu.spsr          = cast[PSR](cpu.spsr_banks[new_high])
   cpu.cpsr.mode     = uint32(new_mode)
 
 proc irq*(cpu: CPU) =
