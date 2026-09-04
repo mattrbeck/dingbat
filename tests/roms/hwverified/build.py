@@ -9,13 +9,17 @@ photo of real hardware and an emulator screenshot are directly
 comparable.
 
 Build recipe follows gbaedge.py: arm-none-eabi-as -mcpu=arm7tdmi,
-ld -Ttext=0x08000000, objcopy -O binary, then the Nintendo logo, title
-and header complement are patched in.
+ld -Ttext=0x08000000, objcopy -O binary, then the title
+and header complement are patched in and gbafix writes the logo.
 
 Requires arm-none-eabi-{as,ld,objcopy}.
 """
 import os
 import subprocess
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import romfix  # noqa: E402
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -26,13 +30,6 @@ ROMS = [
 ]
 
 # The compressed Nintendo logo every bootable cart carries at 0x04-0x9F.
-LOGO = bytes.fromhex(
-    "24ffae51699aa2213d84820a84e409ad11248b98c0817f21a352be199309ce"
-    "2010464a4af82731ec58c7e83382e3cebf85f4df94ce4b09c194568ac01372"
-    "a7fc9f844d73a3ca9a615897a327fc039876231dc7610304ae56bf38840040"
-    "a70efdff52fe036f9530f197fbc08560d68025a963be03014e38e2f9a234ff"
-    "bb3e0344780090cb88113a9465c07c6387f03cafd625e48b380aac7221d4f8"
-    "07")
 
 FONT_ORDER = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-/."
 
@@ -55,7 +52,6 @@ def build(name):
     subprocess.run(["arm-none-eabi-objcopy", "-O", "binary", elf, gba],
                    check=True, cwd=HERE)
     rom = bytearray(open(gba, "rb").read())
-    rom[0x04:0xA0] = LOGO
     title = name.upper().encode().ljust(12, b"\0")[:12]
     rom[0xA0:0xAC] = title
     rom[0xAC:0xB0] = b"AHWP"
@@ -66,6 +62,7 @@ def build(name):
         c = (c - rom[i]) & 0xFF
     rom[0xBD] = (c - 0x19) & 0xFF
     open(gba, "wb").write(rom)
+    romfix.gba_logo(gba)
     os.unlink(o)
     os.unlink(elf)
     print(f"{gba}: {len(rom)} bytes")

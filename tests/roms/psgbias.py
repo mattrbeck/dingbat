@@ -40,7 +40,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from gbedge import font_1bpp, tile_of        # noqa: E402
-from gbaedge import LOGO                     # noqa: E402
+import romfix                                # noqa: E402
 
 STRINGS = [
     ("str_step", "STEP"),
@@ -93,7 +93,6 @@ def build(auto):
     subprocess.run(["arm-none-eabi-objcopy", "-O", "binary", elf, gba],
                    check=True, cwd=HERE)
     rom = bytearray(open(gba, "rb").read())
-    rom[0x04:0xA0] = LOGO
     rom[0xA0:0xAC] = b"PSGBIAS\0\0\0\0\0"
     rom[0xAC:0xB0] = b"APSB"
     rom[0xB0:0xB2] = b"01"
@@ -103,6 +102,7 @@ def build(auto):
         c = (c - rom[i]) & 0xFF
     rom[0xBD] = (c - 0x19) & 0xFF
     open(gba, "wb").write(rom)
+    romfix.gba_logo(gba)
     os.unlink(o)
     os.unlink(elf)
     print(f"{gba}: {len(rom)} bytes")

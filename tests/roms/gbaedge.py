@@ -8,7 +8,7 @@ variant flips pages every 64 frames for input-less screenshot harnesses.
 The assembly lives in gbaedge.s; this script generates the font/name-table
 include from gbedge.py's glyph set (so ocr.py can read both platforms'
 screenshots), assembles with arm-none-eabi-as, links at 0x08000000, and
-patches a valid cart header (Nintendo logo + complement) so the ROM boots
+patches a valid cart header (complement here, logo via gbafix) so the ROM boots
 on real hardware from a flash cart.
 
 Requires arm-none-eabi-{as,ld,objcopy} (Homebrew: gcc-arm-embedded or
@@ -21,6 +21,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from gbedge import FONT_ORDER, font_1bpp, tile_of        # noqa: E402
+import romfix                                            # noqa: E402
 
 PAGES = ["IDENT", "OPENBUS", "BIOSPROT", "SWITIME", "TIMERS", "DMALATCH",
          "LDMSTM", "MULFLAGS", "MSRTBIT", "PPUSTAT", "PSGSTAT", "WAITSTATE",
@@ -33,14 +34,6 @@ PAGES = ["IDENT", "OPENBUS", "BIOSPROT", "SWITIME", "TIMERS", "DMALATCH",
          # README-probes-gba.md) and one hex page
          "OBJBUDGET", "OBJGEOM", "DMAOPENBUS"]
 
-# The compressed Nintendo logo every bootable cart carries at 0x04-0x9F.
-LOGO = bytes.fromhex(
-    "24ffae51699aa2213d84820a84e409ad11248b98c0817f21a352be199309ce"
-    "2010464a4af82731ec58c7e83382e3cebf85f4df94ce4b09c194568ac01372"
-    "a7fc9f844d73a3ca9a615897a327fc039876231dc7610304ae56bf38840040"
-    "a70efdff52fe036f9530f197fbc08560d68025a963be03014e38e2f9a234ff"
-    "bb3e0344780090cb88113a9465c07c6387f03cafd625e48b380aac7221d4f8"
-    "07")
 
 
 def gen_inc():
@@ -93,7 +86,6 @@ def build(auto):
     subprocess.run(["arm-none-eabi-objcopy", "-O", "binary", elf, gba],
                    check=True, cwd=HERE)
     rom = bytearray(open(gba, "rb").read())
-    rom[0x04:0xA0] = LOGO
     rom[0xA0:0xAC] = b"GBAEDGE\0\0\0\0\0"
     rom[0xAC:0xB0] = b"AGBE"
     rom[0xB0:0xB2] = b"01"
@@ -103,6 +95,7 @@ def build(auto):
         c = (c - rom[i]) & 0xFF
     rom[0xBD] = (c - 0x19) & 0xFF
     open(gba, "wb").write(rom)
+    romfix.gba_logo(gba)         # the header logo, via gbafix
     os.unlink(o)
     os.unlink(elf)
     print(f"{gba}: {len(rom)} bytes, {len(PAGES)} pages")

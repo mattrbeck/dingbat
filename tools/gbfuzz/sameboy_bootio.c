@@ -31,7 +31,9 @@ static void logcb(GB_gameboy_t *gb, const char *s, GB_log_attributes_t a) {
 
 int main(int argc, char **argv) {
   if (argc < 3) {
-    fprintf(stderr, "usage: %s <bootromdir> <dmg|mgb|sgb|sgb2|cgb0|cgbA..E|agb> [rom.gb]\n", argv[0]);
+    fprintf(stderr, "usage: %s <bootromdir> <dmg|mgb|sgb|sgb2|cgb0|cgbA..E|agb> [rom.gb]\n"
+                    "  without rom.gb a header-only stub cart is used; its logo is copied\n"
+                    "  from GBFUZZ_LOGO_ROM (any bootable .gb, default tests/roms/gbedge.gb)\n", argv[0]);
     return 2;
   }
   const char *bootdir = argv[1], *m = argv[2];
@@ -64,14 +66,18 @@ int main(int argc, char **argv) {
   if (rom) {
     if (GB_load_rom(&gb, rom)) { fprintf(stderr, "rom load failed: %s\n", rom); return 3; }
   } else {
-    /* A stub with a valid Nintendo logo (the boot ROM refuses to hand off
-     * without one) and `jr .` at $0150. */
+    /* A stub with a valid header logo (the boot ROM refuses to hand off
+     * without one) and `jr .` at $0150. The logo bytes are not kept in this
+     * tree; they are copied from the header of any bootable ROM. */
     static uint8_t stub[0x8000];
-    static const uint8_t logo[48] = {
-      0xCE,0xED,0x66,0x66,0xCC,0x0D,0x00,0x0B,0x03,0x73,0x00,0x83,0x00,0x0C,0x00,0x0D,
-      0x00,0x08,0x11,0x1F,0x88,0x89,0x00,0x0E,0xDC,0xCC,0x6E,0xE6,0xDD,0xDD,0xD9,0x99,
-      0xBB,0xBB,0x67,0x63,0x6E,0x0E,0xEC,0xCC,0xDD,0xDC,0x99,0x9F,0xBB,0xB9,0x33,0x3E};
-    memcpy(stub + 0x104, logo, 48);
+    const char *donor = getenv("GBFUZZ_LOGO_ROM");
+    if (!donor) donor = "tests/roms/gbedge.gb";
+    FILE *df = fopen(donor, "rb");
+    if (!df || fseek(df, 0x104, SEEK_SET) || fread(stub + 0x104, 1, 48, df) != 48) {
+      fprintf(stderr, "logo donor ROM unreadable: %s (set GBFUZZ_LOGO_ROM)\n", donor);
+      return 3;
+    }
+    fclose(df);
     stub[0x143] = 0x80;                     /* CGB-compatible */
     stub[0x100] = 0x00; stub[0x101] = 0xC3; /* nop; jp $0150 */
     stub[0x102] = 0x50; stub[0x103] = 0x01;

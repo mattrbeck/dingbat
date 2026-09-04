@@ -32,6 +32,8 @@ assembler (below) because this suite is ~2000 instructions, not 40.
 import os
 import sys
 
+import romfix
+
 AUTOPAGE = "--autopage" in sys.argv
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2787,13 +2789,7 @@ def build(autopage, out_name):
     emit_program(a, autopage)
 
     # header
-    NINTENDO_LOGO = bytes([
-        0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B, 0x03, 0x73, 0x00, 0x83,
-        0x00, 0x0C, 0x00, 0x0D, 0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E,
-        0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDD, 0xD9, 0x99, 0xBB, 0xBB, 0x67, 0x63,
-        0x6E, 0x0E, 0xEC, 0xCC, 0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E])
     a.rom[0x100:0x104] = bytes([0x00, 0xC3, 0x50, 0x01])      # nop; jp $0150
-    a.rom[0x104:0x134] = NINTENDO_LOGO
     a.rom[0x134:0x144] = b"GBEDGE\0\0\0\0\0\0\0\0\0\0"
     a.rom[0x143] = 0x80                # CGB-enhanced, DMG-compatible
     a.rom[0x147] = 0x00                # ROM only
@@ -2806,6 +2802,7 @@ def build(autopage, out_name):
 
     out = os.path.join(os.path.dirname(os.path.abspath(__file__)), out_name)
     open(out, "wb").write(a.rom)
+    romfix.gb_logo(out)          # the header logo, via rgbfix
     code_end = max(addr for addr, byte in enumerate(a.rom) if byte) + 1
     print(f"{out}: {len(TESTS)} pages, image used {code_end:#x} bytes")
 

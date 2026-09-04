@@ -29,6 +29,7 @@ Run this script to regenerate sgbtest.gb next to it (no toolchain
 dependency — the program is assembled by the mini-assembler below).
 """
 import os
+import romfix
 
 ROM_SIZE = 0x8000
 rom = bytearray(ROM_SIZE)
@@ -339,15 +340,9 @@ assert a.pc < 0x4000, hex(a.pc)
 
 rom[0x100:0x104] = bytes([0x00, 0xC3, 0x50, 0x01])   # nop; jp 0x0150
 
-# The Nintendo logo. Required by real hardware (and by the SGB, which will not
-# unlock its functions for a cart that fails the boot check).
-LOGO = bytes([
-    0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B, 0x03, 0x73, 0x00, 0x83,
-    0x00, 0x0C, 0x00, 0x0D, 0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E,
-    0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDD, 0xD9, 0x99, 0xBB, 0xBB, 0x67, 0x63,
-    0x6E, 0x0E, 0xEC, 0xCC, 0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E,
-])
-rom[0x104:0x134] = LOGO
+# The header logo (required by real hardware and by the SGB, which will not
+# unlock its functions for a cart that fails the boot check) is written by
+# rgbfix after the file is complete: romfix.gb_logo below.
 
 title = b"SGBTEST"
 rom[0x134:0x134 + len(title)] = title
@@ -366,5 +361,6 @@ rom[0x14D] = chk
 out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sgbtest.gb")
 with open(out, "wb") as f:
     f.write(rom)
+romfix.gb_logo(out)
 print("wrote", out, len(rom), "bytes; program ends at", hex(a.pc))
 print("packets:", {k: hex(v) for k, v in PACKET_ADDR.items()})

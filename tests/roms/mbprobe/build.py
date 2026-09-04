@@ -13,10 +13,9 @@
                                 exactly 1 MiB so dingbat materialises its
                                 4x mirror window.
 
-The Nintendo logo is imported from ../gbaedge.py (single source in the repo);
-every header (cart and multiboot) is patched with it plus the 0xA0-0xBC
-complement, which the slave BIOS verifies for the multiboot header too
-(GBATEK "Multiboot Slave Header").
+Every header (cart and multiboot) gets the 0xA0-0xBC complement here and the
+logo from gbafix (../romfix.py) once the file is written; the slave BIOS
+verifies both on the multiboot header too (GBATEK "Multiboot Slave Header").
 
 Requires arm-none-eabi-{as,ld,objcopy} on PATH.
 """
@@ -26,7 +25,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-from gbaedge import LOGO                                   # noqa: E402
+import romfix                                              # noqa: E402
 
 BUILD = os.path.join(HERE, "build")
 PAYLOADS = ["eeprom", "tilt", "gyro", "mirror"]
@@ -138,7 +137,6 @@ def patch_header(rom, title, code):
     """Cart/multiboot header per GBATEK "GBA Cartridge Header": logo at
     0x04-0x9F, title 0xA0, game code 0xAC, maker 0xB0, fixed 0x96 at 0xB2,
     zeros to 0xBC, complement at 0xBD = -(sum(0xA0..0xBC) + 0x19)."""
-    rom[0x04:0xA0] = LOGO
     rom[0xA0:0xAC] = title.encode("ascii").ljust(12, b"\0")
     rom[0xAC:0xB0] = code
     rom[0xB0:0xB2] = b"01"
@@ -179,6 +177,7 @@ def build_payload(name):
     patch_header(img, f"MBP{name.upper()}"[:12], CART_CODE[name])
     check_mb_header(img, name)
     open(mb, "wb").write(img)
+    romfix.gba_logo(mb)                              # before the sender .incbins it
     # cart-boot twin at 0x08000000 for dingbat
     cart = os.path.join(BUILD, f"payload_{name}_cart.gba")
     img = assemble(src, cart, 0x08000000, ["CARTBOOT=1"])
@@ -186,6 +185,7 @@ def build_payload(name):
         img += bytes(0x100000 - len(img))          # exactly 1 MiB
     patch_header(img, f"MBP{name.upper()}"[:12], CART_CODE[name])
     open(cart, "wb").write(img)
+    romfix.gba_logo(cart)
     print(f"{mb}: {n} bytes; {cart}: {len(img)} bytes")
 
 
@@ -194,6 +194,7 @@ def build_sender():
     img = assemble("sender.s", out, 0x08000000)
     patch_header(img, "MBPROBE", CART_CODE["sender"])
     open(out, "wb").write(img)
+    romfix.gba_logo(out)
     print(f"{out}: {len(img)} bytes")
 
 
