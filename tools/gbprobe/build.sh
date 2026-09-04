@@ -7,6 +7,7 @@
 #
 #   ./build.sh            # everything
 #   ./build.sh roms       # just re-assemble the probe ROMs
+#   ./build.sh probes_all # just probes_all.gb, the eighteen pages on one cart
 #   ./build.sh engines    # just the three runners
 #
 # Engines, and what each one is:
@@ -165,6 +166,78 @@ build_roms() {
   GBPROBE_OUT=probe_k_winglitch_a1 "$HERE/mk.sh" probe_k_winglitch -DARM=1 -DAXIS=0
   GBPROBE_OUT=probe_k_winglitch_a2 "$HERE/mk.sh" probe_k_winglitch -DARM=2 -DAXIS=0
   GBPROBE_OUT=probe_k_winglitch_scx "$HERE/mk.sh" probe_k_winglitch -DARM=1 -DAXIS=1
+  # ... and the same eighteen pages on one cart, for the flashcart.
+  build_probes_all
+}
+
+# ------------------------------------------------------------ probes_all ----
+# The eighteen photograph pages on ONE MBC5 cart behind a menu, so a flashcart
+# session needs one burn instead of eighteen (roms/probes_all.asm).
+#
+# Each page is assembled a second time with GBPROBE_COMBINED: its $100/$150
+# cartridge layout and its copy of common.inc drop out (the launcher holds the
+# only copy), its code becomes a floating ROM0 block beside the launcher, and
+# its unrolled frame -- where it has one -- takes the switchable bank named
+# here. Pages with no frame ride bank 1; the menu selects a bank either way.
+#
+#   tag : source : bank : extra -D
+PROBES_ALL_PAGES="\
+gwy0:probe_g_wyrecheck:1:-DVARIANT=0
+gwy1:probe_g_wyrecheck:1:-DVARIANT=1
+hscx:probe_h_latency:1:-DPAGE=0
+hscy:probe_h_latency:2:-DPAGE=1
+hwx:probe_h_latency:3:-DPAGE=2
+hbgp:probe_h_latency:4:-DPAGE=3
+hlcdc4:probe_h_latency:5:-DPAGE=4
+hlcdc3:probe_h_latency:6:-DPAGE=5
+ioamdma:probe_i_oamdma:1:
+jwinrestart:probe_j_winrestart:7:
+jhaltlead:probe_j_haltlead:8:
+kserialdiv:probe_k_serialdiv:1:
+kwing0:probe_k_winglitch:9:-DARM=0 -DAXIS=0
+kwing1:probe_k_winglitch:10:-DARM=1 -DAXIS=0
+kwing2:probe_k_winglitch:11:-DARM=2 -DAXIS=0
+kwingscx:probe_k_winglitch:12:-DARM=1 -DAXIS=1
+klcdon:probe_k_lcdon:1:
+koamclass:probe_k_oamclass:13:"
+
+# GBPROBE_CGB=0 builds the same cart with NO CGB flag, as probes_all_compat.gb.
+# A cart has one flag and page 33 (the BGP ruler) is the one page whose own .gb
+# is compat-flagged, so that build is the optional second burn for page 33 and
+# is wrong for the other seventeen on a CGB. See README.
+build_probes_all() {
+  build_rgbds
+  if [ "${GBPROBE_CGB:-1}" = "0" ]; then
+    ALLNAME=probes_all_compat; ALLCGB=""
+  else
+    ALLNAME=probes_all;        ALLCGB="-c"
+  fi
+  echo "== $ALLNAME"
+  RGBDS="$ROOT/.scratch/rgbds"
+  OBJDIR="$HERE/build/probes_all"
+  rm -rf "$OBJDIR"; mkdir -p "$OBJDIR"
+  OBJS="$OBJDIR/probes_all.o"
+  "$RGBDS/rgbasm" -I "$HERE/roms" -o "$OBJDIR/probes_all.o" \
+                  "$HERE/roms/probes_all.asm"
+  while IFS=: read -r tag src bank defs; do
+    [ -n "$tag" ] || continue
+    "$RGBDS/rgbasm" -I "$HERE/roms" -DGBPROBE_COMBINED=1 \
+                    -DGBPROBE_TAG="$tag" -DGBPROBE_BANK="$bank" $defs \
+                    -o "$OBJDIR/$tag.o" "$HERE/roms/$src.asm"
+    OBJS="$OBJS $OBJDIR/$tag.o"
+  done <<EOF
+$PROBES_ALL_PAGES
+EOF
+  "$RGBDS/rgblink" -o "$HERE/$ALLNAME.gb" -n "$HERE/$ALLNAME.sym" \
+                   -p 0xFF $OBJS
+  # MBC5 (the pages need switchable banks), and -v fixes the logo and both
+  # checksums exactly as mk.sh does for the standalone builds. The CGB flag is
+  # $80: seventeen of the eighteen pages are built CGB-aware, and a cart has
+  # only one flag (see README, "One ROM for the flashcart").
+  "$RGBDS/rgbfix" -v $ALLCGB -p 0xFF -m 0x19 -r 0 -k 00 -l 0x33 \
+                  -t "$(echo "$ALLNAME" | tr 'a-z_' 'A-Z ' | cut -c1-11)" \
+                  "$HERE/$ALLNAME.gb"
+  echo "$HERE/$ALLNAME.gb"
 }
 
 # The photograph pages' dingbat predictions, one PNG per page and model,
@@ -197,12 +270,13 @@ build_expected() {
 
 case "${1:-all}" in
   roms)    build_roms ;;
+  probes_all) build_probes_all ;;
   engines) build_dingbat; build_sameboy; build_docboy ;;
   docboy)  build_docboy ;;
   sameboy) build_sameboy ;;
   dingbat) build_dingbat ;;
   expected) build_roms; build_expected ;;
   all)     build_roms; build_dingbat; build_sameboy; build_docboy ;;
-  *) echo "usage: build.sh [all|roms|engines|dingbat|sameboy|docboy|expected]"; exit 2 ;;
+  *) echo "usage: build.sh [all|roms|probes_all|engines|dingbat|sameboy|docboy|expected]"; exit 2 ;;
 esac
 echo "ok"

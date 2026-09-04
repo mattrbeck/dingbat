@@ -136,15 +136,11 @@ DEF LCDC_REST EQU LCDCF_ON | LCDCF_WIN9C | LCDCF_WINON | LCDCF_BG8000 | \
                   LCDCF_BGON | LCDCF_OBJON
 DEF LCDC_TEST EQU LCDC_REST ^ LCDCF_BG8000      ; bit 4 off: 8800 mode
 
-SECTION "entry", ROM0[$100]
-    nop
-    jp Start
-    ds $150 - @, $00
+    PROBE_HEADER
 
-SECTION "hram", HRAM
-hIsCgb: db
+    PROBE_HRAM
 
-SECTION "main", ROM0[$150]
+    PROBE_MAIN
 
 Start:
     di
@@ -295,7 +291,7 @@ CornerTile:
 INCLUDE "common.inc"
 
 ; ---------------------------------------------------------------- frame ----
-SECTION "frame", ROMX[$4000], BANK[1]
+    PROBE_ROMX
 
 ; SLOT_PARAMS k -- everything line k needs, as assembler variables:
 ;   soff   extra lead M-cycles (0 in bands 0..7, 1 in bands 8..15)
@@ -320,6 +316,7 @@ MACRO SLOT_PARAMS
 ENDM
 
 Frame:
+    PROBE_POLL               ; cart only: START returns to the menu
     ld c, LOW(rLCDC)
     ANCHOR 0
     ; wake: line 153, LY already reading 0. Slot 0 begins LEAD M later.

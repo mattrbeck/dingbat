@@ -123,22 +123,18 @@ MACRO WAITM
     ENDC
 ENDM
 
-SECTION "entry", ROM0[$100]
-    nop
-    jp Start
-    ds $150 - @, $00
+    PROBE_HEADER
 
-SECTION "hram", HRAM
-hIsCgb: db
+    PROBE_HRAM
 
-SECTION "results", WRAM0[$C000]
+    PROBE_WRAM $C000
 wRes: ds LINES * NMAX * SMAX  ; 1 = STAT read mode 0, 0 = mode 3 still running
 wL:   db
 wN:   db
 wS:   db
 wTmp: db
 
-SECTION "main", ROM0[$150]
+    PROBE_MAIN
 
 Start:
     di

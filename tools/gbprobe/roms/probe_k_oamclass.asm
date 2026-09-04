@@ -106,23 +106,19 @@ DEF SPADDR  EQU $FE20        ; push/pop's stack pointer
 DEF T_CELL   EQU $01         ; solid black
 DEF T_CORNER EQU $06
 
-SECTION "entry", ROM0[$100]
-    nop
-    jp Start
-    ds $150 - @, $00
+    PROBE_HEADER
 
-SECTION "hram", HRAM
-hIsCgb: db
+    PROBE_HRAM
 hDma:   ds 8                 ; ldh [rDMA],a / ld b,40 / dec b / jr nz / ret
 
-SECTION "oamcopy", WRAM0[$C000]
+    PROBE_WRAM $C000
 wOam:   ds 160               ; the pristine pattern, byte i = i
 
-SECTION "results", WRAM0[$C100]
+    PROBE_WRAM $C100
 wDiff:  ds BANDS * OAMROWS
 wSaveSp: dw                  ; push/pop's bands move SP into OAM and back
 
-SECTION "main", ROM0[$150]
+    PROBE_MAIN
 
 Start:
     di
@@ -351,7 +347,7 @@ CornerTile:
 INCLUDE "common.inc"
 
 ; ---------------------------------------------------------------- sweep ----
-SECTION "sweep", ROMX[$4000], BANK[1]
+    PROBE_ROMX
 
 ; CLASS b -- the nop lead and the one instruction for band b. The lead is
 ; J minus the index of the instruction's FIRST OAM-bus M-cycle, so every band

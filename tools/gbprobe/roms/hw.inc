@@ -61,6 +61,80 @@ DEF _SCRN1    EQU $9C00
 DEF LCDC_MEASURE EQU LCDCF_ON | LCDCF_BG8000 | LCDCF_BGON
 
 ; ---------------------------------------------------------------------------
+; The combined cart (probes_all.gb).
+;
+; GBPROBE_COMBINED lifts a probe out of the fixed $100/$150 cartridge layout so
+; eighteen pages fit on one MBC5 cart behind a menu. A standalone build defines
+; nothing and every one of these macros expands to exactly what the source used
+; to spell out, so the standalone .gb files stay byte-for-byte the same.
+;
+; In the cart a probe keeps its code in ROM0 (the launcher's bank) and gets one
+; switchable bank of its own for the big unrolled frame; GBPROBE_TAG names its
+; sections and GBPROBE_BANK numbers that bank. The launcher owns hIsCgb and the
+; common.inc routines, and every probe's RAM is unioned onto the same bytes
+; because only one page ever runs.
+
+; PROBE_HEADER -- the cart header and the jump to Start. The cart has its own.
+MACRO PROBE_HEADER
+IF !DEF(GBPROBE_COMBINED)
+SECTION "entry", ROM0[$100]
+    nop
+    jp Start
+    ds $150 - @, $00
+ENDC
+ENDM
+
+; PROBE_HRAM -- opens the probe's HRAM at $FF80, hIsCgb first. In the cart that
+; byte is the launcher's (it survives the page, and holds the boot A the
+; launcher hands back), so the probe only reserves it.
+MACRO PROBE_HRAM
+IF DEF(GBPROBE_COMBINED)
+SECTION UNION "probe_hram", HRAM[$FF80]
+    ds 1
+ELSE
+SECTION "hram", HRAM[$FF80]
+hIsCgb: db
+ENDC
+ENDM
+
+; PROBE_WRAM $Cxxx -- opens a fixed WRAM0 block, unioned across pages.
+MACRO PROBE_WRAM
+IF DEF(GBPROBE_COMBINED)
+SECTION UNION "probe_wram_\1", WRAM0[\1]
+ELSE
+SECTION "probe_wram_\1", WRAM0[\1]
+ENDC
+ENDM
+
+; PROBE_MAIN -- the probe's code. $150 standalone, a floating ROM0 block in the
+; cart; nothing here is timing-critical (every measurement re-anchors on LYC).
+MACRO PROBE_MAIN
+IF DEF(GBPROBE_COMBINED)
+SECTION "main_{GBPROBE_TAG}", ROM0
+ProbeStart_{GBPROBE_TAG}::     ; the menu's entry point for this page
+ELSE
+SECTION "main", ROM0[$150]
+ENDC
+ENDM
+
+; PROBE_ROMX -- the probe's own $4000 bank for the unrolled frame.
+MACRO PROBE_ROMX
+IF DEF(GBPROBE_COMBINED)
+SECTION "romx_{GBPROBE_TAG}", ROMX[$4000], BANK[GBPROBE_BANK]
+ELSE
+SECTION "frame", ROMX[$4000], BANK[1]
+ENDC
+ENDM
+
+; PROBE_POLL -- one START poll, at the top of a page's redraw loop. Costs a
+; handful of M-cycles before the loop's own ANCHOR, which re-syncs anyway.
+MACRO PROBE_POLL
+IF DEF(GBPROBE_COMBINED)
+    call ProbePoll
+ENDC
+ENDM
+
+; ---------------------------------------------------------------------------
 ; NOPS n -- n nop instructions, the slide every probe is built out of.
 ; n = 0 emits nothing, which REPT already does; the macro exists so the call
 ; sites read as a dot count rather than as an assembler directive.
@@ -109,7 +183,11 @@ MACRO IDLE_FOREVER
     ldh [rIE], a
     ldh [rIF], a
 .idle\@:
+IF DEF(GBPROBE_COMBINED)
+    call ProbePoll         ; START goes back to the cart's menu
+ELSE
     halt
+ENDC
     jr .idle\@
 ENDM
 

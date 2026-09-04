@@ -146,15 +146,11 @@ DEF T_CORNER EQU $06
 DEF LCDC_REST EQU LCDC_MEASURE | LCDCF_OBJON    ; $93: the grid-shifting objects
 DEF LCDC_TEST EQU LCDC_REST ^ LCDCF_BG8000      ; bit 4 off: 8800 mode
 
-SECTION "entry", ROM0[$100]
-    nop
-    jp Start
-    ds $150 - @, $00
+    PROBE_HEADER
 
-SECTION "hram", HRAM
-hIsCgb: db
+    PROBE_HRAM
 
-SECTION "main", ROM0[$150]
+    PROBE_MAIN
 
 Start:
     di
@@ -265,7 +261,7 @@ CornerTile:
 INCLUDE "common.inc"
 
 ; ---------------------------------------------------------------- frame ----
-SECTION "frame", ROMX[$4000], BANK[1]
+    PROBE_ROMX
 
 ; SLOT_PARAMS k -- line k's parameters as assembler variables:
 ;   soff    extra lead M-cycles for the store: 0 in a band's top four lines,
@@ -291,6 +287,7 @@ MACRO ARM_NEXT
 ENDM
 
 Frame:
+    PROBE_POLL               ; cart only: START returns to the menu
     ld c, LOW(rLCDC)
     ANCHOR 0
     ; ---- half A: one wake, on the LY 153 -> 0 snapback, then straight line.

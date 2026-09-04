@@ -117,21 +117,17 @@ DEF T_BOT    EQU $02         ; pixel rows 4..7 black
 DEF T_BOTH   EQU $03
 DEF T_CORNER EQU $06
 
-SECTION "entry", ROM0[$100]
-    nop
-    jp Start
-    ds $150 - @, $00
+    PROBE_HEADER
 
-SECTION "hram", HRAM
-hIsCgb: db
+    PROBE_HRAM
 
-SECTION "results", WRAM0[$C000]
+    PROBE_WRAM $C000
 wCount: ds CASES * 2         ; the raw M-cycle counts, little-endian
 wBar:   ds CASES             ; bar lengths in tiles
 wMinLo: db
 wMinHi: db
 
-SECTION "main", ROM0[$150]
+    PROBE_MAIN
 
 Start:
     di

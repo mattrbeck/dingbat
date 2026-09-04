@@ -67,15 +67,11 @@ DEF T_CORNER EQU $06
 DEF T_RULE_A EQU $07         ; map row 7, lines 56..63
 DEF T_RULE_B EQU $08         ; map row 8, lines 64..71
 
-SECTION "entry", ROM0[$100]
-    nop
-    jp Start
-    ds $150 - @, $00
+    PROBE_HEADER
 
-SECTION "hram", HRAM
-hIsCgb: db
+    PROBE_HRAM
 
-SECTION "main", ROM0[$150]
+    PROBE_MAIN
 
 Start:
     di
@@ -176,6 +172,7 @@ Start:
     ldh [rLCDC], a
 
 Frame:
+    PROBE_POLL               ; cart only: START returns to the menu
     ld c, LOW(rLCDC)
     ANCHOR WLINE
     NOPS N

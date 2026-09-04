@@ -56,19 +56,15 @@ DEF T_CORNER EQU $06
 DEF T_MARK   EQU $07         ; rows 3 and 4 black: lines 67, 68 in map row 8
 DEF T_OBJ    EQU $02         ; $8020/$8030 black: the 8x16 object
 
-SECTION "entry", ROM0[$100]
-    nop
-    jp Start
-    ds $150 - @, $00
+    PROBE_HEADER
 
-SECTION "hram", HRAM
-hIsCgb: db
+    PROBE_HRAM
 hDma:   ds 8                 ; ldh [rDMA],a / ld b,40 / dec b / jr nz / ret
 
-SECTION "oamcopy", WRAM0[$C000]
+    PROBE_WRAM $C000
 wOam:   ds 160
 
-SECTION "main", ROM0[$150]
+    PROBE_MAIN
 
 Start:
     di
@@ -198,6 +194,7 @@ Start:
     ldh [rLCDC], a
 
 Frame:
+    PROBE_POLL               ; cart only: START returns to the menu
     ANCHOR ALINE
     NOPS N
     ld a, HIGH(wOam)

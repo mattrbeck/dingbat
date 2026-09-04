@@ -5,3 +5,7 @@ bin/
 # themselves ARE committed -- they are the artifact that goes to hardware.
 build/
 out/
+# The optional second burn, for page 33 only (see README, "One ROM for the
+# flashcart"): GBPROBE_CGB=0 ./build.sh probes_all rebuilds it in seconds.
+probes_all_compat.gb
+probes_all_compat.sym

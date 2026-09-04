@@ -17,6 +17,7 @@ same `.gb` can be burned to a flash cart and photographed (`readout.py` reads th
 ```sh
 ./build.sh            # rgbds, the engine runners, and all the ROMs
 ./build.sh roms       # just re-assemble the ROMs (mk.sh <probe> -D<SYM>=<val> for one)
+./build.sh probes_all # just the one-cart build of the photograph pages (below)
 ./build.sh engines    # just the runners
 ```
 
@@ -202,3 +203,69 @@ Constants are overridable at assembly: `-DBASE= -DLEAD= -DOBJX0= -DWXON=` (probe
 
 `docs/gb-probe-oracle-results-2026-08-11.md`; hardware runs in `docs/hwprobe.md` and
 `docs/flashcart-runbook.md`.
+
+## One ROM for the flashcart: `probes_all.gb`
+
+The eighteen photograph pages above on **one** MBC5 cartridge behind a menu, so a
+hardware session is one burn instead of eighteen.
+
+```sh
+./build.sh probes_all       # or ./build.sh roms, which now builds it too
+./probes_all_check.sh       # the gate: 18 pages x 4 models against expected/
+```
+
+Flash `tools/gbprobe/probes_all.gb` (256 KB, MBC5, CGB flag `$80`).
+
+Controls: **UP/DOWN** move the cursor, **A** runs the page, **START** inside a page
+returns to the menu. The probe (k) pages are still blank for a second or two while
+their sweep runs.
+
+| # | menu row | page | standalone `.gb` |
+|---|---|---|---|
+| 1 | `20 G WY0` | 20 | `probe_g_wy0.gb` |
+| 2 | `21 G WY1` | 21 | `probe_g_wy1.gb` |
+| 3 | `30 H SCX` | 30 | `probe_h_scx.gb` |
+| 4 | `31 H SCY` | 31 | `probe_h_scy.gb` |
+| 5 | `32 H WX` | 32 | `probe_h_wx.gb` |
+| 6 | `33 H BGP` | 33 | `probe_h_bgp.gb` |
+| 7 | `34 H LCDC4` | 34 | `probe_h_lcdc4.gb` |
+| 8 | `35 H LCDC3` | 35 | `probe_h_lcdc3.gb` |
+| 9 | `40 I OAMDMA` | 40 | `probe_i_oamdma.gb` |
+| 10 | `50 J WINRESTART` | 50 | `probe_j_winrestart.gb` |
+| 11 | `51 J HALTLEAD` | 51 | `probe_j_haltlead.gb` |
+| 12 | `52 K SERIALDIV` | 52 | `probe_k_serialdiv.gb` |
+| 13 | `53 K WINGLITCH A0` | 53 | `probe_k_winglitch_a0.gb` |
+| 14 | `53 K WINGLITCH A1` | 53 | `probe_k_winglitch_a1.gb` |
+| 15 | `53 K WINGLITCH A2` | 53 | `probe_k_winglitch_a2.gb` |
+| 16 | `54 K WINGLITCH SCX` | 54 | `probe_k_winglitch_scx.gb` |
+| 17 | `55 K LCDON` | 55 | `probe_k_lcdon.gb` |
+| 18 | `56 K OAMCLASS` | 56 | `probe_k_oamclass.gb` |
+
+**The launcher-to-page hand-off is verified pixel-identical against the standalone
+renders**: `probes_all_check.sh` drives the cart's own menu to each page, gives it the
+same frame count `build.sh expected` uses, and compares the frame with
+`expected/<page>.<model>.png` byte for byte on `dmg cgbc cgbd agb` — 18 x 4, all
+identical, cold and again with `GBPROBE_CHECK_VIA=1`, which reaches every page through
+page 56 and a START return first (page 56 is the one that leaves the most behind: OAM
+rewritten, WRAM results, a DMA trampoline in HRAM).
+
+How it holds: the pages are re-assembled with `GBPROBE_COMBINED` (`hw.inc`'s
+`PROBE_HEADER`/`PROBE_HRAM`/`PROBE_WRAM`/`PROBE_MAIN`/`PROBE_ROMX`), which drops their
+cart header and their copy of `common.inc` and moves the code off `$150`; a page's
+unrolled frame keeps a switchable bank to itself. Nothing timing-critical moves — every
+measurement re-anchors on the LYC halt, and the only code added inside a page is one
+`PROBE_POLL`/`IDLE_FOREVER` START poll ahead of that anchor. The menu hands a page the
+boot `A` it saves at `$FF80` (the byte the page itself writes as `hIsCgb`), the LCD on,
+and every register a page can leave changed put back; OAM and low WRAM are deliberately
+left alone, so a page sees them exactly as its own `.gb` does. The standalone `.gb`
+files are byte-for-byte unchanged by all of this.
+
+**The one deviation is page 33.** A cartridge carries one CGB flag; seventeen pages want
+`$80` and `probe_h_bgp.gb` wants none, because its ruler is BGP, dead on a CGB running a
+CGB-flagged cart. On `probes_all.gb` page 33 therefore differs from `probe_h_bgp.gb`:
+five pixels on a DMG (the header byte the label row prints, `80` instead of `00`) and the
+whole band field on every CGB, where it measures CGB-native instead of compatibility
+mode. `GBPROBE_CGB=0 ./build.sh probes_all` writes `probes_all_compat.gb`, the same cart
+with no CGB flag — page 33 off that build is pixel-identical on all four models (that is
+what the gate checks), and the other seventeen pages off it measure compatibility mode
+and are not what you want. Burn it as a second cart only if page 33 is on the day's list.

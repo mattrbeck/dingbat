@@ -1,6 +1,11 @@
 ## gbprobe's dingbat leg.
 ##
-##   dingbat_shot <rom> <model> <frames> <out.ppm>
+##   dingbat_shot <rom> <model> <frames> <out.ppm> [buttons]
+##
+## [buttons] drives the combined cart's menu (probes_all_check.sh): a comma
+## separated list of steps, each "<n>" or "<n>:<keys>", meaning hold those keys
+## for n frames. Keys are u d l r a b s(tart) e(select). The steps run FIRST and
+## <frames> then runs with nothing held, so <frames> stays the page's own count.
 ##
 ##   model: dmg | dmg0 | mgb | sgb | sgb2 | cgb0 | cgbab | cgbc | cgbd | cgbe
 ##          | cgb (= cgbc, dingbat's shipping CGB default) | agb
@@ -36,6 +41,14 @@ proc revision_of(token: string): (GbRevision, bool) =
     stderr.writeLine "unknown model " & token
     quit(2)
 
+proc press(emu: GB; keys: string) =
+  let j = emu.joypad
+  j.up = 'u' in keys; j.down = 'd' in keys
+  j.left = 'l' in keys; j.right = 'r' in keys
+  j.a = 'a' in keys; j.b = 'b' in keys
+  j.start = 's' in keys; j.jselect = 'e' in keys
+  joypad_update(j, emu)
+
 proc write_ppm(path: string; buf: seq[uint16]; dmg: bool) =
   var f = open(path, fmWrite)
   f.write("P6\n160 144\n255\n")
@@ -61,8 +74,8 @@ proc write_ppm(path: string; buf: seq[uint16]; dmg: bool) =
 
 proc main() =
   let args = commandLineParams()
-  if args.len != 4:
-    echo "usage: dingbat_shot <rom> <model> <frames> <out.ppm>"
+  if args.len notin {4, 5}:
+    echo "usage: dingbat_shot <rom> <model> <frames> <out.ppm> [buttons]"
     quit(2)
   let (rev, want_cgb) = revision_of(args[1])
   let frames = parseInt(args[2])
@@ -73,6 +86,14 @@ proc main() =
                    force_cgb = want_cgb, force_dmg = not want_cgb)
   emu.gb_set_revision(rev)
   emu.post_init()
+
+  if args.len == 5 and args[4].len > 0:
+    for step in args[4].split(','):
+      let parts = step.split(':')
+      emu.press(if parts.len > 1: parts[1] else: "")
+      for _ in 0 ..< parseInt(parts[0]):
+        emu.step_frame()
+    emu.press("")
 
   for _ in 0 ..< frames:
     emu.step_frame()

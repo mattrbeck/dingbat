@@ -14,6 +14,10 @@ DEF FONT_INC EQU 1
 ; Tile $00 is blank; digit d lives at tile $10 + d.
 DEF FONT_BASE EQU $10
 
+; In the combined cart (GBPROBE_COMBINED) the glyphs and the routines below
+; live once, in the launcher's ROM0, and every page imports them.
+IF !DEF(GBPROBE_COMBINED)
+
 FontTiles:
     ; 0
     dw `00333000, `03000300, `03000300, `03000300, `03000300, `03000300, `00333000, `00000000
@@ -50,5 +54,7 @@ FontTiles:
 FontTilesEnd:
 
 DEF FONT_TILE_BYTES EQU FontTilesEnd - FontTiles
+
+ENDC
 
 ENDC

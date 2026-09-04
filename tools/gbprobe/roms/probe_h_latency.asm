@@ -136,15 +136,11 @@ ELSE
 DEF REG EQU rLCDC
 ENDC
 
-SECTION "entry", ROM0[$100]
-    nop
-    jp Start
-    ds $150 - @, $00
+    PROBE_HEADER
 
-SECTION "hram", HRAM
-hIsCgb: db
+    PROBE_HRAM
 
-SECTION "main", ROM0[$150]
+    PROBE_MAIN
 
 Start:
     di
@@ -361,7 +357,7 @@ INCLUDE "common.inc"
 ; ---------------------------------------------------------------- frame ----
 ; 144 unrolled slots are ~16 KB, so the frame gets the ROM's second half
 ; (a plain 32 KB ROM-only cart maps it at $4000 with no banking).
-SECTION "frame", ROMX[$4000], BANK[1]
+    PROBE_ROMX
 
 ; Per-line parameters, as assembler variables set by BAND_PARAMS:
 ;   off    extra lead M-cycles   tval   the test store   rval  the restore
@@ -412,6 +408,7 @@ ENDC
 ENDM
 
 Frame:
+    PROBE_POLL               ; cart only: START returns to the menu
     ld c, LOW(REG)
     ANCHOR 0
     ; wake: line 153, LY already reading 0. Slot 0 begins LEAD M later.

@@ -9,6 +9,8 @@ DEF COMMON_INC EQU 1
 ; at the bottom of each probe, where one is open.
 INCLUDE "font.inc"
 
+IF !DEF(GBPROBE_COMBINED)
+
 ; ---------------------------------------------------------------------------
 ; LcdOff -- stop the LCD safely.
 ; Turning the LCD off outside VBlank is documented as damaging on real
@@ -163,5 +165,7 @@ PutByte:
     call PutNibble
     dec e
     ret
+
+ENDC ; GBPROBE_COMBINED
 
 ENDC
