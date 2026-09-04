@@ -186,11 +186,11 @@ knob in the ROM's README.
 |---|---|---|---|
 | gb-latency | `tools/gbprobe/probe_h_{scx,scy,wx,bgp,lcdc4,lcdc3}.gb` | GB flashcart on DMG, CGB, GBC, AGS; photograph each page | tools/gbprobe/README.md "Photograph pages" |
 | gb-window | `tools/gbprobe/probe_g_wy{0,1}.gb`, `probe_i_oamdma.gb` | same | same |
-| gba-pages | `tests/roms/gbaedge.gba` pages 37–39 (OBJBUDGET, OBJGEOM visual; DMAOPENBUS hex) | GBA flashcart; photograph | tests/roms/README-probes-gba.md |
+| gba-pages | `tests/roms/gbaedge.gba` pages 37–39 (OBJBUDGET, OBJGEOM visual; DMAOPENBUS hex) | **run 2026-09-04 on the AGS** (`expected/agb-sp-5.txt`) | tests/roms/README-probes-gba.md |
 | gba-audio | `tests/roms/psgbias.gba` | GBA flashcart, line-out to a recorder; count the tones first | tests/roms/README-probes-gba.md |
 | gb-ppu2 | `tools/gbprobe/probe_j_{winrestart,haltlead}.gb`, `probe_k_{serialdiv,lcdon,oamclass}.gb`, `probe_k_winglitch_{a0,a1,a2,scx}.gb` | GB flashcart on DMG, CGB, GBC, AGS; photograph | tools/gbprobe/README.md "Photograph pages (probe_j / probe_k)" |
 | gb-apu | `tests/roms/gbedge.gb` pages 1B–20 (hex; PCM readback needs a CGB/AGS, NR52 rows work on DMG too) | GB flashcart; photograph | tests/roms/gbedge_apu_notes.md |
-| gba-pages2 | `tests/roms/gbaedge.gba` pages 40–49 (IRQDECOMP, CONTEND2, MULTIME, TIMPHASE, PSGPHASE, MEMCTL, DMATIME, IWCYCLE, DMAFIFO, UNDMODE) | GBA flashcart; photograph; UNDMODE runs at boot unless SELECT is held | tests/roms/README-probes-gba.md |
+| gba-pages2 | `tests/roms/gbaedge.gba` pages 40–49 (IRQDECOMP, CONTEND2, MULTIME, TIMPHASE, PSGPHASE, MEMCTL, DMATIME, IWCYCLE, DMAFIFO, UNDMODE) | **run 2026-09-04 on the AGS** (`expected/agb-sp-5.txt`; the console survived UNDMODE) unless SELECT is held | tests/roms/README-probes-gba.md |
 | multiboot | `tests/roms/mbprobe/build/sender.gba` (payloads embedded) | flashcart GBA + link cable + second GBA with the retail cart (SMA2 or any EEPROM title; Yoshi Topsy-Turvy; WarioWare Twisted; a Classic NES cart) | tests/roms/mbprobe/README.md |
 
 Predictions: `tools/gbprobe/expected/*.png` (per model), `tests/roms/expected/predicted-2026-09/` (GBA, HLE and LLE), `tests/roms/expected/predicted-gb-2026-09/` (gbedge APU pages per device), and the tables in `tests/roms/mbprobe/README.md`.

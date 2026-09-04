@@ -1,11 +1,12 @@
-# gbaedge hardware results — AGB sessions 1–4
+# gbaedge hardware results — AGB sessions 1–5
 
 Hardware: **GBA SP (AGS-001)**, EverDrive GBA flashcart. `MODEL 18 7F` on every
 page (GetBiosChecksum `BAAE187F` low half). Raw transcriptions and rendered
 PNGs: `tests/roms/expected/agb-sp-{1,2,3,4}.txt` and directories. Builds:
 session 1 = 16-page at 5b0db6b (`ALL F54C`, `1512` after MSRTBIT); session 2 =
 25-page at c1c5d8f (`ALL 4B70`); session 3 = 28-page at 9b0ffc2 (`ALL FDE5`);
-session 4 = 37-page at aaaa0eb (`ALL B473`). Open follow-ups are in
+session 4 = 37-page at aaaa0eb (`ALL B473`); session 5 = 50-page at ad6af27a
+(`ALL 05C6`, pages 37–49, transcription `agb-sp-5.txt`). Open follow-ups are in
 docs/hwprobe-questions.md, "GBA".
 
 ## Pages hardware confirmed byte-perfect
@@ -61,3 +62,24 @@ CRCs there are `IDENT 985C, OPENBUS 60B9, BIOSPROT A024, SWITIME EF34, TIMERS
 DD91, DMALATCH 7A27, LDMSTM 6899, MULFLAGS 64F4, MSRTBIT DCB3/6DA2, PPUSTAT
 2E32, PSGSTAT F59F, WAITSTATE C0D2, PFPHASE 34E0, SWIREGION 65E6, CONTEND
 2D2C, IRQLAT C288`.
+
+## Session 5 (2026-09-04): pages 37–49
+
+Photographed on the same AGS-001; every hex page re-checked against its
+on-screen CRC. Three pages matched dingbat's prediction outright, ten did
+not. The verdict per page, in the order a fix would be worth landing:
+
+| page | hardware said | dingbat | fix that follows |
+|---|---|---|---|
+| 25 OBJBUDGET, 26 OBJGEOM | same picture and CRC as `predicted-2026-09/p37,p38.png` | match | none |
+| 2A MULTIME | carry matrix and early-termination sweep byte-exact | match | none: the MULFLAGS row from session 1 is closed |
+| 2D MEMCTL | the EWRAM wait field of `0x04000800` is live: 16 word reads cost 321/289/609 at WS 13/14/4, i.e. `waits = 15 − WS`, `2·(1+waits)` per word; 8/16-bit access and the 64 K mirrors all work | 321 for every setting (readback only) | apply the field to the page-2 waitstates; default WS 13 equals today's table, so nothing else moves |
+| 2F IWCYCLE | immediate-return IntrWait = 192, matching the real BIOS; mirror clear, r12, sp, IME residues all as modelled | HLE 160 | charge a 32-cycle entry cost in the HLE IntrWait; the halting rows are absolutely timed and already exact |
+| 31 UNDMODE | in an undefined CPSR mode (15/1A/1E) banked r13 and r14 read **0**; the mode field latches the pattern; system-mode r13 survives | routes the pattern to the user bank (reads 51515151, leaks r14) | a seventh, empty bank: reads 0, writes discarded |
+| 28 IRQDECOMP | halted H-blank wake 989 vs 970: recognition ~19 cycles later. V-blank/DMA/timer halted rows exact; IF-ack race byte-exact | `HBLANK_IRQ_SYNC_DELAY = 6` | 6 → ~25; the six failing H-blank Flip suite rows need the same direction and size. Running-CPU rows differ by sub-instruction attribution (+4…+30, one loop period), no knob |
+| 2E DMATIME | start delays and IWRAM/OAM/PRAM/EWRAM/ROM bursts exact to the cycle; VRAM burst +21 (renderer contention); completion IRQ reaches a **running** CPU 15 cycles later (halted case exact, same +15 on IRQDECOMP) | no contention; IRQ gate | defer recognition, not IF, after a burst when the CPU is running; VRAM term below |
+| 30 DMAFIFO | grant is level-conditioned (one 4-word burst per 16 overflows, single-shot leaves nothing behind), confirming the Assumed rule; each hardware-triggered burst costs ~1 cycle more; FIFO B on DMA2 exactly equals A | bursts 30 cycles; B one burst cheaper | +1 on the timer-triggered grant; trace the B/A phase before calling it a rule |
+| 27 DMAOPENBUS | grant at store+3 confirmed; DMA3 from unmapped space repeats its own latch (both `A5A5A5A5`); the one wrong word says an opcode fetch also refreshes open bus | window lasts to the end of the instruction | clear the arm flag at the next opcode fetch; re-check the passing "DMA Prefetch Read" row and Hello Kitty Collection's boot |
+| 29 CONTEND2 | OAM: zero contention in every configuration. PRAM: +1 over 16 reads. VRAM, mode 0: **+1 per CPU halfword read**, OBJ layer and H-blank-free irrelevant. VRAM, mode 2 with two affine BGs: the CPU is locked out until H-blank (1066 vs 230). Code executed from VRAM under forced blank costs 220, not 183 | no contention term; VRAM opcode fetch undercharged by ~2/instruction | first the VRAM fetch cost (a bus bug, renderer off); then an affine-mode VRAM block; a per-access probability term would break the exact mode-3 CONTEND page, contention is phase-locked |
+| 2B TIMPHASE | one free-running divider shared by all timers, a reload write does not realign it, a fresh timer inherits a running one's phase (row `06 19` exact); staircase shape reproduced by the same window length | same model; base phase 1–7 cycles apart | none: shape-only page, residual is accumulated boot drift |
+| 2C PSGPHASE | every ch1 trigger that is the **first trigger after a SOUNDCNT_X 0→1** dies at once, for lengths 1, 2 and 4 ticks alike (no poll timed out; SOUNDCNT_X reads 80 right after the trigger); ch2 triggered two stores later lives 486 polls; where both live, the 256 Hz length clock matches to one poll | length counters live | none yet: not a length-unit effect. One follow-up page decides ch1-specific (sweep unit) vs first-trigger-of-any-channel; also read the BIOS's boot value of bit 7 |
