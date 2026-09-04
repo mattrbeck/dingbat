@@ -176,7 +176,7 @@ reads dingbat screenshots of the same build for the diff side; photos are
 compared by eye. File each delta as a row in docs/hwprobe-questions.md or
 docs/pandocs-upstream.md §2 — each names the knob or model it moves.
 
-## Session 3 kit (ROMs written 2026-09-03, unrun)
+## Session 3 kit (ROMs written 2026-09-03; GBA arms run 2026-09-04)
 
 Each ROM below carries dingbat's prediction next to it; the photo or
 recording is compared against that prediction, and a difference names the
@@ -184,13 +184,40 @@ knob in the ROM's README.
 
 | Folder | ROMs | Rig | README |
 |---|---|---|---|
-| gb-latency | `tools/gbprobe/probe_h_{scx,scy,wx,bgp,lcdc4,lcdc3}.gb` | GB flashcart on DMG, CGB, GBC, AGS; photograph each page | tools/gbprobe/README.md "Photograph pages" |
-| gb-window | `tools/gbprobe/probe_g_wy{0,1}.gb`, `probe_i_oamdma.gb` | same | same |
+| gb-latency | `tools/gbprobe/probe_h_{scx,scy,wx,bgp,lcdc4,lcdc3}.gb` (all eighteen GB pages are on `probes_all.gb`) | **AGS run 2026-09-04** (below); DMG, CGB still to photograph | tools/gbprobe/README.md "Photograph pages" |
+| gb-window | `tools/gbprobe/probe_g_wy{0,1}.gb`, `probe_i_oamdma.gb` | **AGS run 2026-09-04**; DMG, CGB still to photograph | same |
 | gba-pages | `tests/roms/gbaedge.gba` pages 37–39 (OBJBUDGET, OBJGEOM visual; DMAOPENBUS hex) | **run 2026-09-04 on the AGS** (`expected/agb-sp-5.txt`) | tests/roms/README-probes-gba.md |
 | gba-audio | `tests/roms/psgbias.gba` | GBA flashcart, line-out to a recorder; count the tones first | tests/roms/README-probes-gba.md |
-| gb-ppu2 | `tools/gbprobe/probe_j_{winrestart,haltlead}.gb`, `probe_k_{serialdiv,lcdon,oamclass}.gb`, `probe_k_winglitch_{a0,a1,a2,scx}.gb` | GB flashcart on DMG, CGB, GBC, AGS; photograph | tools/gbprobe/README.md "Photograph pages (probe_j / probe_k)" |
+| gb-ppu2 | `tools/gbprobe/probe_j_{winrestart,haltlead}.gb`, `probe_k_{serialdiv,lcdon,oamclass}.gb`, `probe_k_winglitch_{a0,a1,a2,scx}.gb` | **AGS run 2026-09-04**; DMG, CGB still to photograph | tools/gbprobe/README.md "Photograph pages (probe_j / probe_k)" |
 | gb-apu | `tests/roms/gbedge.gb` pages 1B–20 (hex; PCM readback needs a CGB/AGS, NR52 rows work on DMG too) | GB flashcart; photograph | tests/roms/gbedge_apu_notes.md |
 | gba-pages2 | `tests/roms/gbaedge.gba` pages 40–49 (IRQDECOMP, CONTEND2, MULTIME, TIMPHASE, PSGPHASE, MEMCTL, DMATIME, IWCYCLE, DMAFIFO, UNDMODE) | **run 2026-09-04 on the AGS** (`expected/agb-sp-5.txt`; the console survived UNDMODE) unless SELECT is held | tests/roms/README-probes-gba.md |
 | multiboot | `tests/roms/mbprobe/build/sender.gba` (payloads embedded) | flashcart GBA + link cable + second GBA with the retail cart (SMA2 or any EEPROM title; Yoshi Topsy-Turvy; WarioWare Twisted; a Classic NES cart) | tests/roms/mbprobe/README.md |
 
 Predictions: `tools/gbprobe/expected/*.png` (per model), `tests/roms/expected/predicted-2026-09/` (GBA, HLE and LLE), `tests/roms/expected/predicted-gb-2026-09/` (gbedge APU pages per device), and the tables in `tests/roms/mbprobe/README.md`.
+
+### probes_all.gb on the GBA SP in GB mode, 2026-09-04 (IMG_4029-4046)
+
+The AGB column of every page, read from warped photos against
+`tools/gbprobe/expected/*.agb.png`. Labels on all eighteen pages decoded
+byte-identical to dingbat's, `AA HH = 11 80`. Fourteen pages match, three
+differ, one (33 BGP) ran CGB-native on this cart and says nothing.
+
+| page | AGB | dingbat AGB | constant |
+|---|---|---|---|
+| 20 WY0 | window from line 64, x = 80 | same | match |
+| **21 WY1** | LCDC.5 set mid-line on line 65 with WY = 64 already matched: **no window for the rest of the frame** | window from line 65 | the per-line window latch must itself be taken with LCDC.5 set; gating only the store-time re-check (`window_trigger_en`) is not enough |
+| 30 SCX, 35 LCDC3 | R = 75, bands `10×5 11×3 / 10 11×7` | same | `CGB_SCX_LATENCY = 2`, `CGB_MAP_LATENCY = 2` confirmed |
+| **31 SCY** | R = 75, pixel-identical to dingbat's **CGB-D** render | R = 71 (its CGB-C shape) | `scy_fetch_latch` applies to AGB too (SCY latched at the map read), i.e. `grAgb` joins `{grCgbD, grCgbE}` |
+| **32 WX** | first firing band 11 (WX = 87 → x = 80) | band 10 | `CGB_WX_LATENCY` 0 → 1 on AGB |
+| 33 BGP | blank (native mode, BGP dead) | blank | uninformative; needs `GBPROBE_CGB=0` cart |
+| 34 LCDC4 | `9 9 10×6 / 10×5 11×3`, grey half-bars in the same cells | same | `CGB_TDSEL_LATENCY = 1` confirmed |
+| 40 OAMDMA | entry 0 gapped on 67-68, entry 39 gapped on 67 only, pixel-exact | same | `OAM_SCAN_DMA_LOCK` and the strikethrough reference confirmed (hwprobe row 17) |
+| 50 WINRESTART | q\*(off) 1, q\*(on) 7: restart = 6 dots | 6 | `CGB_WIN_RESTART_COUNTER = 0` confirmed; probe (f)'s five-dot reading refuted |
+| 51 HALTLEAD | 8 dots, half A one tile right of half B, q\* = 1 both | same | `CGB_HALT_LEAD_SKIP_LYC0 = 0` confirmed (page is blind to a uniform lead by design) |
+| 52 SERIALDIV | m\* = 22, minimum count `$0061` | same | `SERIAL_TAP_CGB` phase in [4,7]; the sub-M-cycle T stays unpinnable |
+| 53/54 WINGLITCH ×4 | nothing on any page, any band (transitions within 0.15 px) | nothing | `WIN_EN_HOLD_ZERO` DMG-only confirmed; the arming/insert/phase questions need the DMG photos |
+| **55 LCDON** | block `00` = 0,2,6,8; `01` = 0,4,8,8; `28` = **0,0,2,4** | `00` = 0,2,6,8; `01` = `28` = 0,4,8,8 | lines 0 and 1 exact; line 40's read lands 4-6 dots earlier and its staircase slope is 2 per row, not 4, which the page's `4n − s` model cannot produce. Not a trim-knob value; re-shoot with a `-DDBASE=` sweep before naming a constant |
+| 56 OAMCLASS | entirely blank, all 16 classes | blank | Pan Docs A8: no instruction class corrupts OAM in mode 2 on AGB |
+
+Registered frames and the readers used are not committed (job scratch);
+the photos are the record.
