@@ -53,8 +53,10 @@ proc `[]=`*(mmio: MMIO; address: uint32; value: uint8) =
     mmio.gba.interrupts.schedule_interrupt_check()
   else:
     if (io_addr and 0xFFFF'u32) in 0x800'u32..0x803'u32:
-      # Internal memory control: readback only; effects unimplemented.
+      # Internal memory control: the EWRAM wait field is live (see
+      # update_waitcnt); the disable and swap bits are readback only.
       write(mmio.memctrl, value, io_addr and 3)
+      mmio.gba.bus.update_waitcnt(mmio.waitcnt)
       return
     when defined(test_harness):
       if mmio.gba.test_output != nil:

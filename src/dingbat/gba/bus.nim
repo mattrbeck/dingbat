@@ -18,6 +18,19 @@ proc update_waitcnt*(bus: Bus; w: WAITCNT) =
     bus.wait16_s[page] = int8(ACCESS_TIMING_TABLE[0][page])
     bus.wait32_n[page] = int8(ACCESS_TIMING_TABLE[1][page])
     bus.wait32_s[page] = int8(ACCESS_TIMING_TABLE[1][page])
+  # EWRAM waits come from the internal memory control register (0x04000800
+  # bits 24-27, GBATEK "System Control"): waits = 15 - field, one per
+  # halfword, so a word costs twice. Field 13 (the BIOS default) is the
+  # table's 3/6; 14 gives 2/4 and 4 gives 12/24 (hardware: gbaedge MEMCTL
+  # on AGB SP, docs/hwprobe-results-agb.md). Field 15 hangs real hardware;
+  # here it is the fastest setting.
+  block:
+    let ws = int(bits_range(bus.gba.mmio.memctrl, 24, 27))
+    let half = int8(1 + 15 - ws)
+    bus.wait16_n[2] = half
+    bus.wait16_s[2] = half
+    bus.wait32_n[2] = 2 * half
+    bus.wait32_s[2] = 2 * half
   let n_first = [int(w.wait_state_0_first_access),
                  int(w.wait_state_1_first_access),
                  int(w.wait_state_2_first_access)]
