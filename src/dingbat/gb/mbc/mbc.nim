@@ -6,24 +6,27 @@ type
   Mbc5Rumble* = ref object of Mbc5
     rumble*: bool  # transient motor state; deliberately not serialized
 
-proc header_checksum_ok(rom: seq[uint8]; base: int): bool =
-  ## Does a cartridge header whose $0100 entry point sits at `base` carry a
-  ## valid header checksum (Pan Docs, "The Cartridge Header", $014D) and a
-  ## sane ROM-size code ($0148)?
-  if base < 0 or base + 0x50 > rom.len: return false
-  var x = 0'u8
-  for i in 0x34 .. 0x4C: x = x - rom[base + i] - 1
-  x == rom[base + 0x4D] and rom[base + 0x48] <= 0x08
+proc header_logo_ok(rom: seq[uint8]; base: int): bool =
+  ## Does a cartridge header whose $0100 entry point sits at `base` carry the
+  ## boot logo (Pan Docs, "The Cartridge Header", $0104-$0133)? The reference
+  ## is the cart's own header at $0104, which the boot ROM has already
+  ## checked, so no copy of the bitmap is kept here. Weaker than a checksum
+  ## on purpose: the older build of mooneye's multicart_rom_8Mb puts only
+  ## the logo in its extra quarters.
+  if base < 0 or base + 0x34 > rom.len: return false
+  for i in 0x04 ..< 0x34:
+    if rom[base + i] != rom[0x100 + i]: return false
+  true
 
 proc is_mbc1_multicart(rom: seq[uint8]): bool =
   ## MBC1M multicarts (Pan Docs, "MBC1M"): 8 Mbit carts wiring only 4 bits of
   ## BANK1, with BANK2 on ROM address lines 18-19. There is no header flag;
   ## each 256 KiB quarter holds a complete game with its own header, so count
-  ## valid headers at the quarter boundaries (>= 3 of 4).
+  ## logos at the quarter boundaries (>= 3 of 4).
   if rom.len != 0x100000: return false
   var headers = 0
   for page in 0 ..< 4:
-    if header_checksum_ok(rom, page * 0x40000 + 0x100): inc headers
+    if header_logo_ok(rom, page * 0x40000 + 0x100): inc headers
   headers >= 3
 
 method mbc_read*(cart: Mbc; idx: int): uint8 {.base.} = 0xFF'u8
@@ -130,7 +133,7 @@ proc load_cartridge*(rom_path: string): Mbc =
   if cart_type in [0x0B'u8, 0x0C, 0x0D]:
     mmm01_rotate = 0x8000
   elif rom.len > 0x8000 and rom[rom.len - 0x8000 + 0x0147] in [0x0B'u8, 0x0C, 0x0D] and
-       header_checksum_ok(rom, rom.len - 0x8000 + 0x0100):
+       header_logo_ok(rom, rom.len - 0x8000 + 0x0100):
     hdr_base  = rom.len - 0x8000
     cart_type = rom[hdr_base + 0x0147]
 
