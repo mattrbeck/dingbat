@@ -942,7 +942,9 @@ type
       ## CGB D and later latch SCY once per BG fetch, at the map read; CGB C and
       ## earlier sample it live on each of the three read dots. Two-sided from
       ## mealybug `m3_scy_change`: live-per-read is pixel-exact on `_cgb_c` and
-      ## 6217 px wrong on `_cgb_d`, the latch the reverse.
+      ## 6217 px wrong on `_cgb_d`, the latch the reverse. AGB follows D: the
+      ## AGB SP photograph of tools/gbprobe probe_h_scy (2026-09-04) is pixel-
+      ## identical to the latched render (docs/flashcart-runbook.md row 31).
     pcm_read_edge_zero*: bool
       ## CGB 0 / A / B / C. A PCM12 read landing on the very cycle a square
       ## channel's duty step lands reads 0 for that channel if its output was 0
@@ -2758,7 +2760,7 @@ proc gb_quirks_for*(rev: GbRevision): GbQuirks =
   GbQuirks(
     length_clock_any_nrx4: rev in {grCgb0, grCgbAB},
     mixer_write_immediate: rev in {grCgbD, grCgbE},
-    scy_fetch_latch: rev in {grCgbD, grCgbE},
+    scy_fetch_latch: rev in {grCgbD, grCgbE, grAgb},
     pcm_read_edge_zero: rev in {grCgb0, grCgbAB, grCgbC},
     square_freq_backstep_halftick: rev in {grCgbD, grCgbE},
     lyc_compare_hold: rev in {grCgbD, grCgbE, grAgb},

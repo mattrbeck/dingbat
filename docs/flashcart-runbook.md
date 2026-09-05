@@ -207,7 +207,7 @@ differ, one (33 BGP) ran CGB-native on this cart and says nothing.
 | 20 WY0 | window from line 64, x = 80 | same | match |
 | **21 WY1** | LCDC.5 set mid-line on line 65 with WY = 64 already matched: **no window for the rest of the frame** | window from line 65 | the per-line window latch must itself be taken with LCDC.5 set; gating only the store-time re-check is not enough. **Landed on audit** (one latch, `window_trigger`, taken with LCDC.5 set) |
 | 30 SCX, 35 LCDC3 | R = 75, bands `10×5 11×3 / 10 11×7` | same | `CGB_SCX_LATENCY = 2`, `CGB_MAP_LATENCY = 2` confirmed |
-| **31 SCY** | R = 75, pixel-identical to dingbat's **CGB-D** render | R = 71 (its CGB-C shape) | `scy_fetch_latch` applies to AGB too (SCY latched at the map read), i.e. `grAgb` joins `{grCgbD, grCgbE}` |
+| **31 SCY** | R = 75, pixel-identical to dingbat's **CGB-D** render | R = 71 (its CGB-C shape) | `scy_fetch_latch` applies to AGB too (SCY latched at the map read), i.e. `grAgb` joins `{grCgbD, grCgbE}`. **Landed on audit** |
 | **32 WX** | first firing band 11 (WX = 87 → x = 80) | band 10 | `CGB_WX_LATENCY` 0 → 1 on AGB |
 | 33 BGP | blank (native mode, BGP dead) | blank | uninformative; needs `GBPROBE_CGB=0` cart |
 | 34 LCDC4 | `9 9 10×6 / 10×5 11×3`, grey half-bars in the same cells | same | `CGB_TDSEL_LATENCY = 1` confirmed |
