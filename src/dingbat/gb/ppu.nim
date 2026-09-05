@@ -1928,8 +1928,10 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       echo "WX ly=", ppu.ly, " dot=", ppu.cycle_counter, " mode=",
            (ppu.lcd_status and 3), " old=", ppu.wx, " new=", val
     when CGB_WX_LATENCY != 0:
-      if gb.cgb_enabled: ppu_park_pipeline_write(ppu, gb, idx, val)
-      else:              ppu_store_wx(ppu, gb, val)
+      if gb.cgb_enabled and gb.quirks.wx_write_late:
+        ppu_park_pipeline_write(ppu, gb, idx, val)
+      else:
+        ppu_store_wx(ppu, gb, val)
     else:
       ppu_store_wx(ppu, gb, val)
   of 0xFF4F:

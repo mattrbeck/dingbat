@@ -419,8 +419,14 @@ const CGB_HALT_PPU_LEAD_ANY* = CGB_HALT_PPU_LEAD_DOTS != 0
 #   (CGB_OBJ_SIZE_LATENCY, CGB_TDSEL_LATENCY, CGB_MAP_LATENCY).
 # WY 4: one M-cycle, clipped to 3; gambatte `window/arg/late_wy_*` expect the
 #   CGB step one M-cycle earlier than the DMG in 13 of 14 families and the
-#   sweep saturates from 3 up. WX 0: no instrument in the tree moves.
-const CGB_WX_LATENCY*         {.intdefine.} = 0
+#   sweep saturates from 3 up.
+# WX 1, AGB only (GbQuirks.wx_write_late): the AGB SP photograph of
+#   tools/gbprobe probe_h_wx (2026-09-04, docs/flashcart-runbook.md row 32)
+#   puts the first firing band one later than 0 predicts. On the CGB no
+#   instrument settles it: 0 and 1 trade one gambatte row each
+#   (`window/late_wx_scx3_2*` wants 1, the double-speed `late_wx_scx5_ds_1*`
+#   wants 0), so the CGB keeps 0 until its own pages are photographed.
+const CGB_WX_LATENCY*         {.intdefine.} = 1
 const CGB_WY_LATENCY*         {.intdefine.} = 4
   ## One M-cycle, clipped to 3 dots by CGB_LATENCY_CAP; the whole of the
   ## gambatte `window/arg/late_wy_*` device split.
@@ -938,6 +944,11 @@ type
       ## by one pixel per write edge. `grAgb` is deliberately not in the set:
       ## mealybug ships no `_agb` capture and AGE's `agb` rows score the current
       ## behaviour.
+    wx_write_late*: bool
+      ## AGB: a WX write reaches the window comparator CGB_WX_LATENCY dots
+      ## late. The AGB SP photograph of tools/gbprobe probe_h_wx (2026-09-04)
+      ## fires one band later than an immediate write; the CGB pages are
+      ## unphotographed and gambatte's `window/late_wx_*` rows split on it.
     scy_fetch_latch*: bool
       ## CGB D and later latch SCY once per BG fetch, at the map read; CGB C and
       ## earlier sample it live on each of the three read dots. Two-sided from
@@ -2760,6 +2771,7 @@ proc gb_quirks_for*(rev: GbRevision): GbQuirks =
   GbQuirks(
     length_clock_any_nrx4: rev in {grCgb0, grCgbAB},
     mixer_write_immediate: rev in {grCgbD, grCgbE},
+    wx_write_late: rev == grAgb,
     scy_fetch_latch: rev in {grCgbD, grCgbE, grAgb},
     pcm_read_edge_zero: rev in {grCgb0, grCgbAB, grCgbC},
     square_freq_backstep_halftick: rev in {grCgbD, grCgbE},
