@@ -16,7 +16,7 @@
 ;       rule (WX & 7) == 7 - (SCX & 7); no ROM pins that phase
 ;
 ; ARM (mk.sh probe_k_winglitch -DARM=n) picks the arming regime, one ROM each,
-; because `window_trigger_en` is a PER-FRAME latch cleared in VBlank: the three
+; because `window_trigger` is a PER-FRAME latch cleared in VBlank: the three
 ; regimes cannot share a frame, so they share a source instead.
 ;
 ;   ARM = 0  WY = 0 and LCDC.5 is NEVER set in the frame. LY >= WY holds on

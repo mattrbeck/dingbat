@@ -65,7 +65,6 @@ proc new_gb_fifo_ppu*(gb: GB): GbFifoPpu =
     hdma_src: base.hdma_src, hdma_dst: base.hdma_dst,
     hdma_active: base.hdma_active,
     window_trigger: base.window_trigger,
-    window_trigger_en: base.window_trigger_en,
     current_window_line: -1,
     win_lx: WIN_LX_OFF,
     stat_chg_dot: STAT_NO_HOLD,
@@ -1280,10 +1279,10 @@ proc window_refuse_start(ppu: GbFifoPpu) =
   elif ppu.win_hold == 0'u8:
     when WIN_EN_HOLD_ZERO != 0:
       # The refused match collides with the fetcher's push (`size == 8`); the
-      # line's initial fill satisfies that too, so also require a WY match with
-      # the window enabled, or Pokemon Blue (WX = 7, window off) draws a white
+      # line's initial fill satisfies that too, so also require the frame's
+      # window latch, or Pokemon Blue (WX = 7, window off) draws a white
       # column at x = 0. See WIN_EN_HOLD_ZERO.
-      if ppu.fifo.size == 8 and ppu.window_trigger_en:
+      if ppu.fifo.size == 8 and ppu.window_trigger:
         ppu.fifo.data[ppu.fifo.head] =
           GbPixel(color: 0, palette: 0, oam_idx: 0, obj_to_bg: 0)
     ppu.win_hold = hold

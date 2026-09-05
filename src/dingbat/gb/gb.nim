@@ -522,7 +522,7 @@ const WIN_EN_HOLD_ZERO*       {.intdefine.} = 1
   ## colour-0 pixel on the front of the FIFO (1, ships) -- mealybug
   ## `m3_lcdc_win_en_change_multiple_wx`'s t = 8 and t = 32, a single white
   ## pixel with the background unshifted either side (replace, no stall).
-  ## Gated on `window_trigger_en` (a WY match seen with LCDC.5 set this frame):
+  ## Gated on `window_trigger` (a WY match seen with LCDC.5 set this frame):
   ## Pokemon Blue rests at WX = 7 / WY = 0 with the window off and draws no
   ## white column. This is the Star Trek 25th Anniversary glitch (Pan Docs,
   ## "Window"). Whether hardware inserts (delaying the line a dot) or replaces
@@ -1438,13 +1438,9 @@ type
     # stays blank until the first vblank (Pan Docs, LCDC). Not on SGB, where
     # the TV keeps the frozen picture. Transient, not serialized.
     lcd_on_first_frame*: bool
-    # window state
+    # window state: a WY match seen with LCDC.5 set this frame (ppu.nim
+    # `mode_flag=`, ppu_latch_wy, ppu_store_lcdc)
     window_trigger*:     bool
-    # window_trigger's stricter sibling: a WY match seen with LCDC.5 SET this
-    # frame. Gates the WIN_EN_HOLD_ZERO pixel void only (Pokemon Blue rests at
-    # WX = 7 with the window off and must not glitch). Not serialized: cleared
-    # every VBlank.
-    window_trigger_en*:  bool
     current_window_line*: int
     old_stat_flag*:      bool
     # A CPU write to LCDC/STAT/LYC changed a STAT-line input not yet

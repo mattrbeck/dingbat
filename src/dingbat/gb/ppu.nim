@@ -95,7 +95,6 @@ method skip_boot*(ppu: GbPpu; gb: GB) {.base.} =
   # window_trigger against WY = 0 and carries it into the first drawn frame
   # (gambatte window/*). The boot ROM ends in VBlank with the latch clear.
   ppu.window_trigger = false
-  ppu.window_trigger_en = false
   ppu.current_window_line = -1
   # Post-boot VRAM tiles: blank $00, the Nintendo logo $01-$18 decompressed
   # from the cart's own header, and the (R) tile $19.
@@ -1272,18 +1271,17 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   if ppu.first_line and ppu.mode_flag == 0 and mode == 2: ppu.first_line = false
   if mode == 1:
     ppu.window_trigger = false
-    ppu.window_trigger_en = false
   # Pan Docs: the window is drawn once "WY == LY at any point in the frame", so
   # the latch is per frame: cleared entering VBlank, set at the top of every
   # visible line, and by the WY write itself (ppu_latch_wy). Tested here and
-  # not at the 2 -> 3 edge: gambatte window/arg/late_wy_1 vs late_wy_2.
-  elif mode == 2 and ppu.ly == ppu.wy:
+  # not at the 2 -> 3 edge: gambatte window/arg/late_wy_1 vs late_wy_2. The
+  # match counts only with LCDC.5 set: enabling the window on a later line
+  # of the frame draws nothing (hardware: gbprobe probe_g_wy1 on AGB SP,
+  # docs/hwprobe-questions.md row 19).
+  elif mode == 2 and ppu.ly == ppu.wy and window_enabled(ppu):
     when defined(gb_win_trace):
       echo "WYLATCH ly=", ppu.ly, " wy=", ppu.wy, " dot=", ppu.cycle_counter
     ppu.window_trigger = true
-    # The stricter sibling takes the enable bit AT the match — see
-    # window_trigger_en's declaration (gb.nim) for why the two are split.
-    if window_enabled(ppu): ppu.window_trigger_en = true
     if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
   if mode != prev_mode:
     # The one write the STAT readback needs: `cycle_counter` is the FIRST dot
@@ -1545,9 +1543,9 @@ proc ppu_latch_wy*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   ## cleared entering it. Split from ppu_store_wy because the CGB takes the
   ## register and the latch at different latencies (CGB_WY_LATENCY,
   ## CGB_WY_LATCH_LATENCY); `ppu.ly` is read here for that reason.
-  if ppu.ly == val and (ppu.lcd_status and 3'u8) != 1'u8 and ppu.lcd_enabled:
+  if ppu.ly == val and (ppu.lcd_status and 3'u8) != 1'u8 and ppu.lcd_enabled and
+     window_enabled(ppu):
     ppu.window_trigger = true
-    if window_enabled(ppu): ppu.window_trigger_en = true
     if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
 
 proc ppu_store_lcdc*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
@@ -1563,12 +1561,12 @@ proc ppu_store_lcdc*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
            " mode=", (ppu.lcd_status and 3'u8), " val=", toHex(val, 2)
   ppu.lcd_control = val
   # LCDC.5 turning on is the third event that can make "WY match while
-  # enabled" newly true. Assumed; no ROM pins this: with the re-check removed
-  # every verdict in the tree (mooneye, AGE, gambatte, mealybug, shootout
-  # frames) is unchanged. Pan Docs states the WY condition per line only.
+  # enabled" newly true: set mid-line on the WY line the window starts on
+  # that same line (hardware: gbprobe probe_g_wy0 on AGB SP). Pan Docs
+  # states the WY condition per line only.
   if (moved and val and 0x20'u8) != 0 and ppu.ly == ppu.wy and
      (ppu.lcd_status and 3'u8) != 1'u8 and ppu.lcd_enabled:
-    ppu.window_trigger_en = true
+    ppu.window_trigger = true
   if gb.fifo_ppu != nil:
     fifo_arm_window(gb.fifo_ppu)
     when CGB_TDSEL_ANY:

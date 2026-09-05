@@ -2,9 +2,12 @@
 ;
 ; docs/hwprobe-questions.md row 19 / docs/oracles.md ppu_store_lcdc. Pan
 ; Docs states the window's Y condition per line ("WY == LY at some point in
-; the frame"); dingbat latches it at the top of every line without looking
-; at LCDC.5 (window_trigger), and ALSO re-checks it inside the LCDC store
-; (window_trigger_en, Assumed -- removing it changes no verdict in the tree).
+; the frame"); dingbat latched it at the top of every line without looking
+; at LCDC.5 (window_trigger), and ALSO re-checked it inside the LCDC store
+; (window_trigger_en, Assumed -- removing it changed no verdict in the tree).
+; AGB SP 2026-09-04: variant 0 ON line 64, variant 1 no window at all, so
+; the latch itself needs LCDC.5 and the store re-check is real; dingbat now
+; keeps one latch taken with LCDC.5 (docs/hwprobe-questions.md row 19).
 ;
 ; The frame: WY = 64, WX = 87 (window x = 80), LCDC.5 CLEAR from VBlank on.
 ; On line WLINE, at a cycle-counted dot inside mode 3 while the shifter is
