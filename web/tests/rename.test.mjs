@@ -13,6 +13,7 @@ import { loadApp, u8, eq, settle } from "./helpers.mjs";
 const perGameKeys = (n) => [
   "rom:" + n,
   "art:" + n,
+  "frame:" + n,
   "save:" + n,
   "save:" + n + "-p2",
   "stateauto:" + n,
@@ -25,7 +26,8 @@ const perGameKeys = (n) => [
 // The subset Drive mirrors (what parseDriveFileName recognises).
 const syncableKeys = (n) =>
   perGameKeys(n).filter((k) =>
-    !k.startsWith("art:") && !k.startsWith("stateauto:") && !k.startsWith("cheats:"));
+    !k.startsWith("art:") && !k.startsWith("frame:") &&
+    !k.startsWith("stateauto:") && !k.startsWith("cheats:"));
 
 const seedValue = (key, name) => {
   if (key.startsWith("rom:")) return { name, data: u8(1, 2, 3, 4) };

@@ -1509,7 +1509,9 @@ const isRomLoaded = (name) =>
 
 // The inventory of everything stored for one game. Every destructive path
 // works from this; a record not listed here survives a delete.
-//   bytes    ROM image + box art (re-downloadable from Drive)
+//   bytes    ROM image, box art and the last-frame thumbnail (the ROM and
+//            art are re-downloadable from Drive; the frame is a per-device
+//            picture, regenerated the next time the game runs)
 //   saves    battery saves (P1 + 2P partner) and the nine state slots with
 //            their meta; the only group Drive mirrors besides the ROM
 //   session  the auto-resume snapshot; regenerated, never synced
@@ -1521,7 +1523,7 @@ const perGameKeys = (name) => {
     saves.push(slotStateKey(name, s), slotMetaKey(name, s));
   }
   return {
-    bytes: [romKey(name), artKey(name)],
+    bytes: [romKey(name), artKey(name), frameKey(name)],
     saves,
     session: [autoStateKey(name)],
     prefs: [CHEATS_KEY(name)],
@@ -3827,6 +3829,8 @@ const loadSystemSettings = async () => {
 //   "recent"      metadata index: [{ name, ts }], most-recent-first, capped
 //   "rom:<name>"  { name, data: Uint8Array }, fetched only at launch/backup
 //   "art:<name>"  Blob, fetched lazily by the grid
+//   "frame:<name>" Blob (JPEG), the last screen the game showed; the grid's
+//                 thumbnail, fetched lazily like the art (see storeLastFrame)
 // Bytes stay out of the index and tile closures: a few GBA ROMs in the JS
 // heap get the wasm JIT demoted on iOS Safari.
 
@@ -3834,11 +3838,14 @@ const MAX_RECENT = 20;
 
 const romKey = (name) => "rom:" + name;
 const artKey = (name) => "art:" + name;
+const frameKey = (name) => "frame:" + name;
 
-// Drop the ROM record and its box art; save data is never touched here.
+// Drop the ROM record, its box art and its thumbnail; save data is never
+// touched here.
 const evictLocalRom = async (name) => {
   await dbDelete(romKey(name));
   await dbDelete(artKey(name));
+  await dbDelete(frameKey(name));
 };
 
 const getRecentMeta = async () => {
@@ -3853,6 +3860,86 @@ const getRomBytes = async (name) => {
 };
 
 const getRomArt = async (name) => (await dbGet(artKey(name))) || null;
+const getRomFrame = async (name) => (await dbGet(frameKey(name))) || null;
+
+// --- Last frame ------------------------------------------------------------
+// The library tile's thumbnail is the last screen the game showed. It is
+// stored as a JPEG Blob at 2x native (480x320 GBA, 320x288 GB) - around
+// 20 KB a game - captured whenever play stops being visible: pause, the
+// main menu, a save state, a game switch or close, the tab going to the
+// background, and a slow tick while running so a killed tab still has a
+// recent picture. Not a Drive kind (parseDriveFileName): where you were on
+// one device is not library state, and the game regenerates it anyway.
+const FRAME_SCALE = 2;
+const FRAME_JPEG_Q = 0.75;
+const FRAME_TICK_MS = 60000;
+
+// Signature of the framebuffer last stored, so the tick skips an unchanged
+// picture (a title screen left running writes once, not every minute).
+// One pixel in 61, FNV-1a: tells a menu from play; not a checksum.
+let lastFrameSig = null;
+const framebufferSig = (heap) => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i + 2 < heap.length; i += 61 * 4) {
+    h ^= heap[i] ^ (heap[i + 1] << 8) ^ (heap[i + 2] << 16);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h;
+};
+
+// Paint the framebuffer at native size, scale it up by FRAME_SCALE with
+// smoothing off (crisp pixels; the JPEG softens enough on its own). Resolves
+// null where toBlob is missing (the test harness's canvas stand-in).
+const frameBlobFromFb = (heap, w, h) => new Promise((resolve) => {
+  const full = document.createElement("canvas");
+  full.width = w;
+  full.height = h;
+  const fctx = full.getContext("2d");
+  const img = fctx.createImageData(w, h);
+  img.data.set(heap);
+  for (let i = 3; i < img.data.length; i += 4) img.data[i] = 255; // fb alpha is not meaningful
+  fctx.putImageData(img, 0, 0);
+  const out = document.createElement("canvas");
+  out.width = w * FRAME_SCALE;
+  out.height = h * FRAME_SCALE;
+  const octx = out.getContext("2d");
+  octx.imageSmoothingEnabled = false;
+  octx.drawImage(full, 0, 0, out.width, out.height);
+  if (typeof out.toBlob !== "function") { resolve(null); return; }
+  try { out.toBlob(resolve, "image/jpeg", FRAME_JPEG_Q); } catch { resolve(null); }
+});
+
+// Store the running game's current picture. `force` skips the unchanged
+// check: a pause or a close is worth the write even if nothing moved.
+// Single-core only; the link modes draw their own canvases. The framebuffer
+// is copied out synchronously, before the first await, and the name with
+// it: the game may change while the JPEG encodes. Writes are serialized
+// through one chain, so a forced capture landing during the tick's encode
+// still stores last (the tick's picture is the older one).
+let frameStoreChain = Promise.resolve();
+const storeLastFrame = ({ force = false } = {}) => {
+  if (!currentRomName || !currentOriginalName) return Promise.resolve();
+  if (linkMode || rollbackMode || netActive()) return Promise.resolve();
+  if (typeof Module === "undefined" || !Module._wasm_fb_ptr) return Promise.resolve();
+  const ptr = Module._wasm_fb_ptr();
+  if (!ptr) return Promise.resolve();
+  const [w, h] = gameRes();
+  const heap = new Uint8Array(Module.memory.buffer, ptr, w * h * 4).slice();
+  const sig = framebufferSig(heap);
+  if (!force && sig === lastFrameSig) return Promise.resolve();
+  lastFrameSig = sig;
+  const name = currentOriginalName;
+  frameStoreChain = frameStoreChain.then(async () => {
+    try {
+      const blob = await frameBlobFromFb(heap, w, h);
+      if (blob) await dbPut(frameKey(name), blob);
+    } catch {}
+  });
+  return frameStoreChain;
+};
+
+// The slow tick. Paused, the frame is what the pause stored.
+setInterval(() => { if (!paused) storeLastFrame(); }, FRAME_TICK_MS);
 
 // Move `name` to the front of the index and evict past the cap (ROM + art
 // only, never saves).
@@ -4025,7 +4112,8 @@ const refreshHomeRecent = async () => {
     let driveOnly = !localRoms.has(romName);
     let busy = syncDownloading.has(romName);
     let tile = document.createElement("div");
-    tile.className = "home-tile" + (driveOnly ? " home-tile-cloud" : "");
+    // no-art until a picture arrives: the chip stands in for it.
+    tile.className = "home-tile no-art" + (driveOnly ? " home-tile-cloud" : "");
 
     let launch = document.createElement("button");
     launch.type = "button";
@@ -4035,28 +4123,47 @@ const refreshHomeRecent = async () => {
                                  : " — on Drive, tap to sign in and download")
       : romName;
 
-    // The system chip is the identity slot; box art takes the same slot
-    // (its Blob lives in its own record, so no ROM bytes are deserialized).
+    // The 3:2 picture (the GBA screen's shape). Precedence: the last screen
+    // the game showed, else the box art, else the system chip standing in -
+    // a game never opened has no frame and must not get an invented one.
+    // Both Blobs live in their own records, so no ROM bytes are
+    // deserialized here.
+    let thumb = document.createElement("div");
+    thumb.className = "home-tile-thumb";
     let icon = document.createElement("span");
     icon.className = "sys-chip badge-" + system.toLowerCase();
     icon.textContent = system;
-    getRomArt(romName).then((art) => {
-      if (!art || gen !== homeRenderGen) return;
-      let url = URL.createObjectURL(art);
+    thumb.appendChild(icon);
+    const showPicture = (blob, cls) => {
+      if (!blob || gen !== homeRenderGen) return false;
+      let url = URL.createObjectURL(blob);
       artUrls.push(url);
       let img = document.createElement("img");
-      img.className = "home-tile-art";
+      img.className = cls;
       img.src = url;
       img.alt = "";
-      launch.replaceChild(img, icon);
-    }).catch(() => {});
+      thumb.replaceChildren(img);
+      tile.classList.remove("no-art");
+      return true;
+    };
+    getRomFrame(romName)
+      .then((frame) => showPicture(frame, "home-tile-frame") ||
+                       getRomArt(romName).then((art) => showPicture(art, "home-tile-art")))
+      .catch(() => {});
 
+    // The caption over the picture's bottom edge: name and system chip.
+    let caption = document.createElement("span");
+    caption.className = "home-tile-caption";
     let name = document.createElement("span");
     name.className = "home-tile-name";
     name.textContent = displayName(romName); // full name stays in launch.title
+    let chip = document.createElement("span");
+    chip.className = "sys-chip badge-" + system.toLowerCase();
+    chip.textContent = system;
+    caption.append(name, chip);
 
-    launch.appendChild(icon);
-    launch.appendChild(name);
+    launch.appendChild(thumb);
+    launch.appendChild(caption);
     // The tile body downloads and launches; the glyph downloads only.
     launch.addEventListener("click", async () => {
       if (!driveOnly) { launchRom(romName); return; }
@@ -4464,6 +4571,7 @@ const saveToSlot = async (slot) => {
     return false;
   }
   const thumb = captureThumbnail();
+  storeLastFrame({ force: true }); // a save is a moment worth a picture
   try {
     await dbPut(slotStateKey(currentOriginalName, slot), bytes);
     await dbPut(slotMetaKey(currentOriginalName, slot), { thumb, ts: Date.now() });
@@ -6747,10 +6855,12 @@ const loadRom = async (romName, originalName, opts = {}) => {
   if (linkMode) await exitLinkMode();
   if (typeof netShutdown === "function" && netMode) await netShutdown();
   if (currentRomName && currentOriginalName) {
+    await storeLastFrame({ force: true }); // the outgoing game's picture
     await persistSave(currentRomName, currentOriginalName);
   }
   currentRomName = romName;
   currentOriginalName = originalName || romName;
+  lastFrameSig = null; // a new game: the tick's skip must not carry over
   // Before `paused` is reset: closing a scrubber restores the paused state
   // it captured, which must land on the old session's value.
   closeRewindScrubber();
@@ -7065,6 +7175,7 @@ document.addEventListener("drop", (e) => {
 
 const togglePause = (fromRemote) => {
   paused = !paused;
+  if (paused) storeLastFrame({ force: true }); // the paused picture is the library's
   pauseButton.classList.toggle("paused", paused);
   pauseButton.classList.toggle("active", paused);
   pauseButton.title = paused ? "Resume" : "Pause";
@@ -8204,6 +8315,9 @@ const showMainMenu = () => {
   if (!currentRomName && !linkMode) return;
   stopClipRecording(); // don't keep recording a frozen frame from the menu
   paused = true;
+  // The tile behind this menu shows the picture the player just left: the
+  // grid renders now and again once the picture is stored.
+  storeLastFrame({ force: true }).then(() => refreshHomeRecent());
   document.body.classList.add("paused");
   document.body.classList.remove("running");
   updatePausedCard();
@@ -8262,6 +8376,8 @@ const unloadGame = async ({ flushSave = true } = {}) => {
   if (!currentRomName || linkMode || rollbackMode || netActive()) return false;
   const romName = currentRomName;
   const originalName = currentOriginalName;
+  // The closing picture, taken while the name is still attached.
+  await storeLastFrame({ force: true });
   // Detach first: once null, no flush path can re-persist this game's save.
   currentRomName = null;
   currentOriginalName = null;
@@ -9598,12 +9714,15 @@ var Module = {
       } else if (currentRomName && currentOriginalName) {
         persistSave(currentRomName, currentOriginalName);
         persistAutoState();
+        storeLastFrame({ force: true }); // best-effort: the encode may not finish
       }
     });
 
     // Mobile browsers kill backgrounded tabs without pagehide: snapshot on hide.
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden) persistAutoState();
+      if (!document.hidden) return;
+      persistAutoState();
+      storeLastFrame({ force: true });
     });
 
     // iOS Safari often skips beforeunload; pagehide is the reliable signal
@@ -9616,6 +9735,7 @@ var Module = {
       } else if (currentRomName && currentOriginalName) {
         persistSave(currentRomName, currentOriginalName);
         persistAutoState(); // one-tap resume next launch
+        storeLastFrame({ force: true }); // best-effort, as above
       }
       if (audioCtx && audioCtx.state === "running") {
         audioCtx.suspend().catch(() => {});

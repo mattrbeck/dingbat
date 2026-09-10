@@ -91,6 +91,7 @@ test("removeGameFromDevice frees the ROM and art, and nothing else", async () =>
 
   assert.equal(app.idb.get("rom:A.gba"), undefined, "ROM bytes freed");
   assert.equal(app.idb.get("art:A.gba"), undefined, "box art freed too");
+  assert.equal(app.idb.get("frame:A.gba"), undefined, "the thumbnail freed too");
   eq(app.idb.get("save:A.gba"), u8(7), "battery save kept");
   eq(app.idb.get("state:A.gba"), u8(6), "save state kept");
   eq(app.api.syncState.tomb, [], "no tombstone — other devices keep the game");

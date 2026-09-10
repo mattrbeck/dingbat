@@ -1818,7 +1818,9 @@ body.running #home {
    the logo/wordmark can never be clipped. */
 #home-inner {
   width: 100%;
-  max-width: 480px;
+  /* Wide enough for six 3:2 tiles; the brand, paused card and action row
+     keep their own 480px measure below. */
+  max-width: 1400px;
   margin: auto;
   display: flex;
   flex-direction: column;
@@ -1878,6 +1880,7 @@ body.has-game #home-resume {
   justify-content: center;
   gap: 10px;
   width: 100%;
+  max-width: 480px;
 }
 
 #home-load {
@@ -2120,15 +2123,43 @@ body.runtime-ready #boot-progress {
   color: var(--text);
 }
 
+/* An explicit column count rather than auto-fill: 2 on phones, then 3, 4,
+   5 and 6 as the viewport allows. minmax(0, 1fr), not bare 1fr: a bare 1fr
+   track has an auto minimum, so one long nowrap filename would widen its
+   column. */
 #home-recent {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+@media (min-width: 640px) {
+  #home-recent {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 900px) {
+  #home-recent {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1150px) {
+  #home-recent {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1400px) {
+  #home-recent {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
 }
 
 /* Empty-library placeholder (no games yet) — hosts the Drive sign-in entry.
-   #home-recent is an auto-fill grid, so span every column and center the box
-   with margin auto rather than letting it sit in the first 210px track. */
+   #home-recent is a grid, so span every column and center the box with
+   margin auto rather than letting it sit in the first track. */
 .home-empty {
   grid-column: 1 / -1;
   justify-self: center;
@@ -2163,38 +2194,96 @@ body.runtime-ready #boot-progress {
   min-width: 0;
 }
 
+/* A card the shape of the GBA screen (3:2): the picture fills it and the
+   caption sits over its bottom edge, so the card is exactly 3:2 whatever
+   the picture. The picture is the last screen the game showed
+   (getRomFrame), else the box art, else the system chip standing in for
+   it - a game never opened has no frame and must not get an invented one;
+   the chip is a legible state, not a failure. */
 .home-tile-launch {
-  display: flex;
-  align-items: center;
-  gap: 9px;
+  position: relative;
+  display: block;
   width: 100%;
-  padding: 10px 34px 10px 12px;
+  aspect-ratio: 3 / 2;
+  padding: 0;
+  overflow: hidden;
   text-align: left;
   color: var(--text);
-  background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
+  background: var(--surface-1);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: border-color 0.14s, background 0.14s, transform 0.06s;
+  transition: border-color 0.14s, transform 0.06s;
 }
 
 .home-tile-launch:hover {
   border-color: var(--border-2);
-  background: linear-gradient(180deg, var(--surface-3), var(--surface-2));
 }
 
 .home-tile-launch:active {
   transform: translateY(1px);
 }
 
-.home-tile-art {
-  flex: 0 0 auto;
-  width: 26px;
-  height: 26px;
-  object-fit: cover;
-  border-radius: 4px;
+.home-tile-thumb {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+}
+
+.home-tile-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* contain: a GB frame is 10:9 and letterboxes inside the 3:2 card rather
+     than being cropped. Always a downscale: frames are stored at 2x. */
+  object-fit: contain;
   image-rendering: auto;
-  box-shadow: inset 0 0 0 1px rgba(var(--hi-rgb), 0.12);
+}
+
+/* Box art is a cover image, not a screen: it fills. */
+.home-tile-thumb img.home-tile-art {
+  object-fit: cover;
+}
+
+/* No picture yet: the chip sits on the card's own surface, not on black. */
+.home-tile.no-art .home-tile-thumb {
+  background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
+}
+
+/* The chip standing in for a picture is the same chip (.sys-chip, below),
+   a size up. */
+.home-tile-thumb .sys-chip {
+  width: auto;
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+/* ...and then the caption does not repeat it. */
+.home-tile.no-art .home-tile-caption .sys-chip {
+  display: none;
+}
+
+/* The caption: a gradient over the picture's bottom edge, name and chip. */
+.home-tile-caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 10px 8px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.78));
+  color: #fff;
+}
+
+.home-tile.no-art .home-tile-caption {
+  background: none;
+  color: var(--text);
 }
 
 .home-tile-name {
@@ -2205,6 +2294,7 @@ body.runtime-ready #boot-progress {
   white-space: nowrap;
   font-size: 13px;
 }
+
 
 .badge-gba {
   color: var(--badge-gba-fg);
@@ -2224,9 +2314,8 @@ body.runtime-ready #boot-progress {
 }
 body.debug-2p .home-tile-link {
   position: absolute;
-  top: 50%;
-  right: 32px;
-  transform: translateY(-50%);
+  top: 8px;
+  left: 8px;
   height: 22px;
   padding: 0 7px;
   display: flex;
@@ -2237,7 +2326,7 @@ body.debug-2p .home-tile-link {
   font-weight: 700;
   letter-spacing: 0.04em;
   color: var(--text-faint);
-  background: none;
+  background: rgba(0, 0, 0, 0.55);
   border: 1px solid transparent;
   border-radius: 5px;
   cursor: pointer;
@@ -5240,10 +5329,6 @@ body.link-gb #controls {
   #home-tagline {
     font-size: 12px;
   }
-  /* One full-width column on phones so game names aren't truncated */
-  #home-recent {
-    grid-template-columns: 1fr;
-  }
 }
 
 /*
@@ -6185,7 +6270,7 @@ body.sync-shown #status {
   display: none;
 }
 
-/* Tile system chip: one identity slot per tile; box art takes the same slot. */
+/* System chip: the tile's caption and picture stand-in, the Drive tomb rows. */
 .sys-chip {
   flex: 0 0 auto;
   width: 34px;
@@ -6208,20 +6293,18 @@ body.sync-shown #status {
 .home-tile-cloud .home-tile-launch:hover {
   opacity: 1;
 }
-/* Its own tap target (a real button): download-without-launch. Padding widens
-   the hit area within the launch button's reserved right padding; the glyph
-   stays visually where it was. */
+/* Its own tap target (a real button): download-without-launch, over the
+   picture's top-right corner. */
 .home-tile-dl {
   position: absolute;
-  top: 50%;
-  right: 2px;
-  transform: translateY(-50%);
+  top: 6px;
+  right: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 6px;
-  color: var(--text-faint);
-  background: none;
+  color: var(--text-dim);
+  background: rgba(0, 0, 0, 0.55);
   border: 1px solid transparent;
   border-radius: 6px;
   cursor: pointer;
@@ -6229,11 +6312,11 @@ body.sync-shown #status {
 }
 .home-tile-dl:hover {
   color: var(--accent);
-  background: rgba(var(--hi-rgb), 0.08);
+  background: rgba(0, 0, 0, 0.75);
   border-color: var(--border-2);
 }
 .home-tile-dl:active {
-  transform: translateY(-50%) scale(0.92);
+  transform: scale(0.92);
 }
 .home-tile-dl.is-busy {
   cursor: default;

@@ -31,6 +31,7 @@ test("21st ROM evicts the oldest rom:+art: records but keeps its saves", async (
   assert.equal(app.api.MAX_RECENT, 20);
   app.idb.set("save:Game0.gba", u8(9, 9));
   app.idb.set("state:Game0.gba", u8(8));
+  app.idb.set("frame:Game0.gba", u8(6));
   for (let i = 0; i <= 20; i++) {
     await app.api.addRecentRom(`Game${i}.gba`, u8(i), { art: i });
   }
@@ -39,6 +40,7 @@ test("21st ROM evicts the oldest rom:+art: records but keeps its saves", async (
   assert.ok(!names.includes("Game0.gba"), "oldest entry evicted from index");
   assert.equal(app.idb.get("rom:Game0.gba"), undefined, "evicted ROM bytes deleted");
   assert.equal(app.idb.get("art:Game0.gba"), undefined, "evicted art deleted");
+  assert.equal(app.idb.get("frame:Game0.gba"), undefined, "evicted thumbnail deleted");
   eq(app.idb.get("save:Game0.gba"), u8(9, 9), "save survives eviction");
   eq(app.idb.get("state:Game0.gba"), u8(8), "state survives eviction");
 

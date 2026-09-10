@@ -22,6 +22,7 @@ const GLOBAL_KEYS = [
 const perGameKeys = (n) => [
   "rom:" + n,                 // the ROM image
   "art:" + n,                 // box art pulled out of the zip it arrived in
+  "frame:" + n,               // the last screen shown: the library thumbnail
   "save:" + n,                // battery save
   "save:" + n + "-p2",        // the 2P link partner's battery save
   "stateauto:" + n,           // auto-resume snapshot ("Resume" toast)
@@ -35,7 +36,8 @@ const perGameKeys = (n) => [
 // The keys Drive mirrors (what parseDriveFileName recognises).
 const syncableKeys = (n) =>
   perGameKeys(n).filter((k) =>
-    !k.startsWith("art:") && !k.startsWith("stateauto:") && !k.startsWith("cheats:"));
+    !k.startsWith("art:") && !k.startsWith("frame:") &&
+    !k.startsWith("stateauto:") && !k.startsWith("cheats:"));
 
 // A plausible stored value per key shape (statemeta object, cheats text, bytes).
 const seedValue = (key, name) => {
@@ -108,7 +110,7 @@ test("index.js's perGameKeys is exactly the per-game inventory this file pins", 
   eq(sorted(app.runIn("allPerGameKeys('A.gba')")), sorted(perGameKeys("A.gba")));
 
   const groups = app.runIn("perGameKeys('A.gba')");
-  eq(sorted(groups.bytes), ["art:A.gba", "rom:A.gba"]);
+  eq(sorted(groups.bytes), ["art:A.gba", "frame:A.gba", "rom:A.gba"]);
   eq(groups.session, ["stateauto:A.gba"], "the resume snapshot is its own group");
   eq(groups.prefs, ["cheats:A.gba"]);
   eq(sorted(groups.saves), sorted(syncableKeys("A.gba").filter((k) => k !== "rom:A.gba")));
@@ -257,7 +259,7 @@ test("Remove from device frees the ROM-shaped data and keeps every save", async 
   assert.equal(await app.api.removeGameFromDevice("A.gba"), true);
   await settle();
 
-  const freed = ["rom:A.gba", "art:A.gba", "stateauto:A.gba"];
+  const freed = ["rom:A.gba", "art:A.gba", "frame:A.gba", "stateauto:A.gba"];
   const kept = perGameKeys("A.gba").filter((k) => !freed.includes(k));
   eq(keysLeft(app),
     sorted([...GLOBAL_KEYS, ...kept, ...perGameKeys("B.gb")]),
