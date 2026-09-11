@@ -2319,6 +2319,12 @@ body.runtime-ready #boot-progress {
   .lib-chip {
     height: 30px;
   }
+
+  /* The counts are desktop detail: on a phone they cost the chips their
+     one row. */
+  .lib-chip-n {
+    display: none;
+  }
 }
 
 /* An explicit column count rather than auto-fill: 2 on phones, then 3, 4,

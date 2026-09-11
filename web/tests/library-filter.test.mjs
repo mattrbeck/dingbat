@@ -160,16 +160,16 @@ test("location chips appear signed in with games on both sides, and filter", asy
   signIn(app);
   await app.api.refreshHomeRecent();
   await settle();
-  eq(chips(app), ["GBA2", "GBC1", "GB2", "On this device2", "On Drive3"]);
+  eq(chips(app), ["GBA2", "GBC1", "GB2", "On device2", "On Drive3"]);
 
   chip(app, "On Drive").click();
   await settle();
   eq(visible(app), ["Advance Wars", "Crystal", "Mario"]);
-  chip(app, "On this device").click(); // one location at a time
+  chip(app, "On device").click(); // one location at a time
   await settle();
   eq(visible(app), ["Zelda", "Tetris"]);
-  eq(chips(app).filter((c) => c.endsWith("*")), ["On this device2*"]);
-  chip(app, "On this device").click(); // off
+  eq(chips(app).filter((c) => c.endsWith("*")), ["On device2*"]);
+  chip(app, "On device").click(); // off
   await settle();
   eq(visible(app).length, 5);
 });

@@ -1697,7 +1697,8 @@ const applyLibFilter = () => {
 };
 
 // The chips: one per system present (only when there is more than one),
-// then, signed in with games on both sides, "On this device" / "On Drive".
+// then, signed in with games on both sides, "On device" / "On Drive". The
+// counts are desktop detail (styles.css hides them on phones).
 const renderLibChips = (roms, localRoms) => {
   if (!libChips) return;
   let counts = { GBA: 0, GBC: 0, GB: 0 };
@@ -1735,7 +1736,7 @@ const renderLibChips = (roms, localRoms) => {
   }
   let driveOnly = roms.length - local;
   if (driveLinked() && local > 0 && driveOnly > 0) {
-    chip("On this device", local, libFilter.loc === "device", "lib-chip-loc",
+    chip("On device", local, libFilter.loc === "device", "lib-chip-loc",
       () => { libFilter.loc = libFilter.loc === "device" ? "all" : "device"; });
     chip("On Drive", driveOnly, libFilter.loc === "drive", "lib-chip-loc",
       () => { libFilter.loc = libFilter.loc === "drive" ? "all" : "drive"; });
