@@ -8,7 +8,7 @@ import { loadApp, u8, eq, settle } from "./helpers.mjs";
 
 const grid = (app) => app.document.getElementById("home-recent");
 const thumbOf = (tile) => tile.children[0].children[0]; // launch > thumb
-const captionOf = (tile) => tile.children[0].children[1]; // launch > caption
+const captionOf = (tile) => tile.children[0].children[1]; // launch > footer
 
 const seedLibrary = (app, names) => {
   app.idb.set("recent", names.map((name, i) => ({ name, ts: 100 - i })));

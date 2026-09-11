@@ -2194,30 +2194,31 @@ body.runtime-ready #boot-progress {
   min-width: 0;
 }
 
-/* A card the shape of the GBA screen (3:2): the picture fills it and the
-   caption sits over its bottom edge, so the card is exactly 3:2 whatever
-   the picture. The picture is the last screen the game showed
-   (getRomFrame), else the box art, else the system chip standing in for
-   it - a game never opened has no frame and must not get an invented one;
-   the chip is a legible state, not a failure. */
+/* A card: a picture the shape of the GBA screen (3:2), then a footer with
+   the name and the system chip - under the picture, not over it, so a
+   bright frame never fights the text. The picture is the last screen the
+   game showed (getRomFrame), else the box art, else the system chip
+   standing in for it - a game never opened has no frame and must not get
+   an invented one; the chip is a legible state, not a failure. */
 .home-tile-launch {
   position: relative;
-  display: block;
+  display: flex;
+  flex-direction: column;
   width: 100%;
-  aspect-ratio: 3 / 2;
   padding: 0;
   overflow: hidden;
   text-align: left;
   color: var(--text);
-  background: var(--surface-1);
+  background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: border-color 0.14s, transform 0.06s;
+  transition: border-color 0.14s, background 0.14s, transform 0.06s;
 }
 
 .home-tile-launch:hover {
   border-color: var(--border-2);
+  background: linear-gradient(180deg, var(--surface-3), var(--surface-2));
 }
 
 .home-tile-launch:active {
@@ -2225,15 +2226,21 @@ body.runtime-ready #boot-progress {
 }
 
 .home-tile-thumb {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  width: 100%;
+  aspect-ratio: 3 / 2;
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
   background: #000;
 }
 
+/* Absolute, so a tall picture (a 10:9 GB frame, square box art) cannot
+   grow the box past 3:2. */
 .home-tile-thumb img {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
@@ -2250,7 +2257,7 @@ body.runtime-ready #boot-progress {
 
 /* No picture yet: the chip sits on the card's own surface, not on black. */
 .home-tile.no-art .home-tile-thumb {
-  background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
+  background: rgba(var(--hi-rgb), 0.03);
 }
 
 /* The chip standing in for a picture is the same chip (.sys-chip, below),
@@ -2267,23 +2274,14 @@ body.runtime-ready #boot-progress {
   display: none;
 }
 
-/* The caption: a gradient over the picture's bottom edge, name and chip. */
+/* The footer: name and chip, on the card's own surface. */
 .home-tile-caption {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 18px 10px 8px;
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.78));
-  color: #fff;
-}
-
-.home-tile.no-art .home-tile-caption {
-  background: none;
-  color: var(--text);
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
 }
 
 .home-tile-name {

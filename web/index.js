@@ -4151,7 +4151,7 @@ const refreshHomeRecent = async () => {
                        getRomArt(romName).then((art) => showPicture(art, "home-tile-art")))
       .catch(() => {});
 
-    // The caption over the picture's bottom edge: name and system chip.
+    // The footer under the picture: name and system chip.
     let caption = document.createElement("span");
     caption.className = "home-tile-caption";
     let name = document.createElement("span");
