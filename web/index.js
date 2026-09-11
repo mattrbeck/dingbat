@@ -2189,13 +2189,20 @@ const hasUserActivation = () =>
   !navigator.userActivation || navigator.userActivation.isActive;
 
 // Works because GDRIVE_SCOPE includes "email".
+// tokeninfo carries the account's stable subject id beside the address.
+// `sub` is what the queues hang on: it is not an address, so it can outlive
+// sign-out without leaving one behind, and it survives the user changing
+// their email, which a hash of that email would not.
 const gdriveFetchEmail = async () => {
   try {
     let res = await fetch(
       "https://oauth2.googleapis.com/tokeninfo?access_token=" +
         encodeURIComponent(gdriveToken),
     );
-    if (res.ok) rememberDriveEmail((await res.json()).email);
+    if (!res.ok) return;
+    let info = await res.json();
+    rememberDriveEmail(info.email);
+    await adoptDriveAccount(typeof info.sub === "string" ? info.sub : null);
   } catch {}
 };
 
@@ -2408,6 +2415,7 @@ const SYNC_POLL_MS = 3 * 60 * 1000;
 // Drive file; rmt = its last seen modifiedTime; queueRen = pending remote
 // renames [{ from, to }]; ren = this device's rename markers.
 let syncState = { queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [],
+                  delTs: {}, acct: null, parked: {},
                   sigs: {}, rmt: {}, email: null };
 let syncBusy = false;
 let syncTimer = null;
@@ -2428,6 +2436,11 @@ const loadSyncState = async () => {
       ren: Array.isArray(s.ren) ? s.ren : [],
       sigs: s.sigs && typeof s.sigs === "object" ? s.sigs : {},
       rmt: s.rmt && typeof s.rmt === "object" ? s.rmt : {},
+      delTs: s.delTs && typeof s.delTs === "object" ? s.delTs : {},
+      // The account the rest of this belongs to, and the per-account state
+      // of any other account that has signed in here (adoptDriveAccount).
+      acct: typeof s.acct === "string" ? s.acct : null,
+      parked: s.parked && typeof s.parked === "object" ? s.parked : {},
       connected: !!s.connected,
       token: typeof s.token === "string" ? s.token : null,
       tokenExp: typeof s.tokenExp === "number" ? s.tokenExp : 0,
@@ -2442,6 +2455,50 @@ const saveSyncState = () => dbPut("gdrive_sync", syncState);
 // what the UI and the queue key off. syncActive(): a live token right now;
 // gates network work. A token gap is a quiet, recoverable state.
 const driveLinked = () => !!GDRIVE_CLIENT_ID && !!syncState.connected;
+// Linked is a live Drive session. Enrolled is weaker and longer-lived: this
+// device belongs to a Drive account, signed in this minute or not. Intent
+// recorded while signed out or offline still belongs to that account and
+// flushes when it comes back, so the queues key off this. A device that has
+// never signed in records nothing, having nowhere to send it.
+const driveEnrolled = () => !!GDRIVE_CLIENT_ID && (!!syncState.connected || !!syncState.acct);
+
+// Everything the sync remembers describes one account's Drive and means
+// nothing against another: what is queued, what was deleted or renamed, and
+// what Drive is known to hold.
+const PER_ACCOUNT_KEYS = ["queueUp", "queueDel", "queueRen", "tomb", "ren",
+                          "sigs", "rmt", "delTs"];
+// A sync record written before delete stamps existed, or one built whole by
+// a caller, has no map yet.
+const delStamps = () => (syncState.delTs ??= {});
+const blankAccountState = () => ({ queueUp: [], queueDel: [], queueRen: [],
+                                   tomb: [], ren: [], sigs: {}, rmt: {}, delTs: {} });
+
+// One device, more than one Google account. A different account signing in
+// parks the previous account's state under its own id and starts clean; if
+// that account ever signs back in, its parked work is restored and flushes
+// then. Nothing is discarded, and nothing is replayed into a Drive that did
+// not ask for it.
+const adoptDriveAccount = async (acct) => {
+  if (!acct) return;                       // tokeninfo gave no id: leave as is
+  if (syncState.acct === acct) return;     // the same account as before
+  let parked = { ...(syncState.parked || {}) };
+  if (syncState.acct) {
+    let mine = {};
+    for (let k of PER_ACCOUNT_KEYS) mine[k] = syncState[k];
+    parked[syncState.acct] = mine;
+  }
+  let restored = parked[acct];
+  delete parked[acct];
+  Object.assign(syncState, blankAccountState(), restored || {});
+  syncState.acct = acct;
+  syncState.parked = parked;
+  await saveSyncState();
+  let waiting = restored
+    ? (restored.queueDel || []).length + (restored.queueRen || []).length +
+      (restored.tomb || []).length
+    : 0;
+  if (waiting) showToast("Applying changes saved for this account");
+};
 const syncActive = () => !!gdriveToken;
 
 const sigOfBytes = (bytes) => saveSignature(bytes); // FNV-1a + length
@@ -2692,22 +2749,26 @@ const scheduleFlush = () => {
   refreshSyncStatus();
 };
 const markUpload = (name) => {
-  if (!driveLinked()) return;
+  if (!driveEnrolled()) return;
   if (!parseDriveFileName(name)) return;
   if (!syncState.queueUp.includes(name)) syncState.queueUp.push(name);
   saveSyncState();
   scheduleFlush();
 };
 const markDelete = (name) => {
-  if (!driveLinked()) return;
+  if (!driveEnrolled()) return;
   if (!parseDriveFileName(name)) return;
   if (!syncState.queueDel.includes(name)) syncState.queueDel.push(name);
+  // Stamped with the moment it was asked for, not the moment it reaches
+  // Drive: a delete made offline on Tuesday must not outrank another
+  // device's Wednesday write. The same rule the tombstones already use.
+  delStamps()[name] = Date.now();
   syncState.queueUp = syncState.queueUp.filter((n) => n !== name);
   saveSyncState();
   scheduleFlush();
 };
 const markGameUpload = (game) => {
-  if (!driveLinked()) return;
+  if (!driveEnrolled()) return;
   localFilesForGame(game).then((names) => {
     for (let n of names) if (!syncState.queueUp.includes(n)) syncState.queueUp.push(n);
     saveSyncState();
@@ -2774,9 +2835,17 @@ const flushSyncInner = async () => {
     }
     for (let name of syncState.queueDel.slice()) {
       let r = remote.get(name);
-      if (r) await driveDelete(r.id);
-      delete syncState.sigs[name];
-      delete syncState.rmt[name];
+      // Another device wrote this file after the delete was asked for: the
+      // newer write wins and the delete is dropped, leaving the file and
+      // what is known about it alone.
+      let asked = delStamps()[name] || 0;
+      let outranked = !!r && !!asked && Date.parse(r.modifiedTime || 0) > asked;
+      if (r && !outranked) await driveDelete(r.id);
+      if (!outranked) {
+        delete syncState.sigs[name];
+        delete syncState.rmt[name];
+      }
+      delete delStamps()[name];
       syncState.queueDel = syncState.queueDel.filter((n) => n !== name);
     }
     for (let name of syncState.queueUp.slice()) {
@@ -2854,6 +2923,8 @@ const applyRemoteRename = async (from, to) => {
     rmt,
     queueUp: [...new Set(syncState.queueUp.map(mapKey))],
     queueDel: [...new Set(syncState.queueDel.map(mapKey))],
+    delTs: Object.fromEntries(
+      Object.entries(delStamps()).map(([k, v]) => [mapKey(k), v])),
     queueRen: syncState.queueRen.map((r) => ({ from: mapKey(r.from), to: r.to })),
   };
   puts.push(["gdrive_sync", nextSync]);
@@ -3127,7 +3198,10 @@ const resetGameSaves = async (game) => {
 const deleteGameEverywhere = async (game) => {
   await deleteGameLocalData(game);
   await dbPut("recent", (await getRecentMeta()).filter((r) => r.name !== game));
-  if (driveLinked()) {
+  // Enrolled, not linked: a delete made offline or signed out is still a
+  // delete, and the tombstone's timestamp is what carries that intent to
+  // the other devices whenever this one next reaches Drive.
+  if (driveEnrolled()) {
     // Queue the whole inventory: markDelete drops what Drive doesn't hold.
     for (let n of allPerGameKeys(game)) markDelete(n);
     syncState.tomb = syncState.tomb.filter((t) => t.name !== game);
@@ -3275,7 +3349,7 @@ const renameGame = async (oldName, newName) => {
   // device holds their bytes. The queue is written inside the move
   // transaction, so a tab closed mid-rename leaves records and queue consistent.
   let nextSync = null;
-  if (driveLinked()) {
+  if (driveEnrolled()) {
     // Every syncable key, held locally or not, except one already queued
     // for remote deletion (renaming it would resurrect it).
     let mirrored = pairs.filter(([f]) => !!parseDriveFileName(f) &&
@@ -3300,6 +3374,9 @@ const renameGame = async (oldName, newName) => {
       }))],
       // A delete aimed at a new name is stale: this game exists now.
       queueDel: syncState.queueDel.filter((n) => !newKeys.includes(n)),
+      delTs: Object.fromEntries(Object.entries(delStamps())
+        .filter(([k]) => !newKeys.includes(k))
+        .map(([k, v]) => [oldKeys.includes(k) ? newKeys[oldKeys.indexOf(k)] : k, v])),
       queueRen: [...syncState.queueRen,
                  ...mirrored.map(([from, to]) => ({ from, to }))],
       // No tombstone for the old name: the ren marker migrates other devices.
@@ -3757,7 +3834,11 @@ const resumeDriveOnBoot = async () => {
           encodeURIComponent(gdriveToken),
       );
       live = r.ok;
-      if (live) rememberDriveEmail((await r.json()).email);
+      if (live) {
+        let info = await r.json();
+        rememberDriveEmail(info.email);
+        await adoptDriveAccount(typeof info.sub === "string" ? info.sub : null);
+      }
     } catch {
       // Offline at boot: keep the token; the sync path's 401 handling covers it.
       live = true;
