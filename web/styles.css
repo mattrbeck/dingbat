@@ -2400,6 +2400,11 @@ body.runtime-ready #boot-progress {
 .home-tile {
   position: relative;
   border-radius: var(--radius-sm);
+  /* A long press opens the game's menu: no iOS callout or text selection
+     under the finger. */
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
   /* Grid items default to min-width auto, so a long nowrap ROM name would
      inflate the 1fr track past the viewport (seen on phones); this lets the
      track stay put and the name's ellipsis do its job */
@@ -6525,10 +6530,12 @@ body.sync-shown #status {
 }
 /* Its own tap target (a real button): download-without-launch, over the
    picture's top-right corner. */
-.home-tile-dl {
+/* The tile's two corner glyphs. Left: the secondary action - Download on a
+   Drive-only game (2P in debug). Right: the ⋯ menu, on every tile. */
+.home-tile-dl,
+.home-tile-more {
   position: absolute;
   top: 6px;
-  right: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -6538,15 +6545,41 @@ body.sync-shown #status {
   border: 1px solid transparent;
   border-radius: 6px;
   cursor: pointer;
-  transition: color 0.12s, background 0.12s, border-color 0.12s;
+  transition: color 0.12s, background 0.12s, border-color 0.12s, opacity 0.12s;
 }
-.home-tile-dl:hover {
+.home-tile-dl {
+  left: 6px;
+}
+.home-tile-more {
+  right: 6px;
+}
+.home-tile-dl:hover,
+.home-tile-more:hover,
+.home-tile.menu-open .home-tile-more {
   color: var(--accent);
   background: rgba(0, 0, 0, 0.75);
   border-color: var(--border-2);
 }
-.home-tile-dl:active {
+.home-tile-dl:active,
+.home-tile-more:active {
   transform: scale(0.92);
+}
+/* With a mouse, the ⋯ shows on hover (a grid of them is noise); on touch
+   it is always there, being the only visible way in. */
+@media (hover: hover) and (pointer: fine) {
+  .home-tile-more {
+    opacity: 0;
+  }
+  .home-tile:hover .home-tile-more,
+  .home-tile:focus-within .home-tile-more,
+  .home-tile.menu-open .home-tile-more {
+    opacity: 1;
+  }
+}
+.home-tile-more svg {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
 }
 .home-tile-dl.is-busy {
   cursor: default;
@@ -6562,6 +6595,157 @@ body.sync-shown #status {
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+/* --- Per-game menu (index.js "Per-game menu") --- */
+#tile-menu-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+}
+#tile-menu {
+  position: fixed;
+  z-index: 100;
+  width: 276px;
+  padding: 6px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  animation: menu-in 0.12s ease-out;
+}
+#tile-menu[hidden],
+#tile-menu-scrim[hidden] {
+  display: none;
+}
+.tile-menu-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+  padding: 6px 10px 9px;
+  border-bottom: 1px solid var(--border);
+}
+.tile-menu-pic {
+  display: none;
+}
+.tile-menu-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.tile-menu-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+.tile-menu-status {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.tile-menu-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
+}
+.tile-menu-item:hover:not(:disabled),
+.tile-menu-item:focus-visible {
+  background: var(--surface-3);
+}
+.tile-menu-item:disabled {
+  cursor: default;
+}
+.tile-menu-item:disabled .tile-menu-label {
+  color: var(--text-faint);
+}
+.tile-menu-item.danger .tile-menu-label {
+  color: var(--danger);
+}
+.tile-menu-sub {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-dim);
+}
+.tile-menu-sub[hidden] {
+  display: none;
+}
+/* Armed: the red of every armed destructive button here; outranks the
+   hover and the danger label colour. */
+.tile-menu-item.armed,
+.tile-menu-item.armed:hover:not(:disabled) {
+  background: linear-gradient(180deg, var(--danger-hi), var(--danger));
+}
+.tile-menu-item.armed.danger .tile-menu-label,
+.tile-menu-item.armed .tile-menu-label,
+.tile-menu-item.armed .tile-menu-sub {
+  color: var(--accent-ink);
+}
+@keyframes tile-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+}
+/* Phones: a bottom sheet under a scrim, headed by the game's picture. */
+@media (max-width: 759px) {
+  #tile-menu-scrim {
+    background: rgba(0, 0, 0, 0.5);
+  }
+  #tile-menu {
+    inset: auto 0 0 0;
+    width: auto;
+    padding: 10px 12px calc(12px + var(--safe-b));
+    border-bottom: 0;
+    border-radius: var(--radius) var(--radius) 0 0;
+    animation: tile-sheet-in 0.18s ease-out;
+  }
+  .tile-menu-head {
+    margin-bottom: 6px;
+    padding: 4px 6px 12px;
+  }
+  .tile-menu-pic {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 84px;
+    aspect-ratio: 3 / 2;
+    overflow: hidden;
+    border-radius: 6px;
+    background: rgba(var(--hi-rgb), 0.03);
+  }
+  .tile-menu-pic img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #000;
+  }
+  .tile-menu-title {
+    font-size: 15px;
+  }
+  .tile-menu-status {
+    font-size: 12px;
+  }
+  .tile-menu-item {
+    padding: 12px 10px;
+    font-size: 15px;
+  }
+  .tile-menu-sub {
+    font-size: 12px;
+  }
 }
 
 /* "Games removed on another device" modal */

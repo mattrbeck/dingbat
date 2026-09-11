@@ -649,6 +649,16 @@
       </div>
     </div>
 
+    <!-- The per-game menu off a library tile: everything Manage ROMs and
+         Saves does per game (index.js "Per-game menu"). One DOM, two
+         layouts (styles.css): a popover by the tile's glyph on desktop, a
+         bottom sheet on phones. -->
+    <div id="tile-menu-scrim" hidden></div>
+    <div id="tile-menu" role="menu" aria-labelledby="tile-menu-title" hidden>
+      <div class="tile-menu-head" id="tile-menu-head"></div>
+      <div class="tile-menu-items" id="tile-menu-items"></div>
+    </div>
+
     <div id="roms-modal" class="modal-overlay">
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title-3">
         <button type="button" class="modal-close" id="roms-close" aria-label="Close">&times;</button>
