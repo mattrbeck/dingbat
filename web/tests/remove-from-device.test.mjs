@@ -85,13 +85,14 @@ test("removeGameFromDevice frees the ROM and art, and nothing else", async () =>
   app.setFetch(drive.fetch);
   signIn(app, { "rom:A.gba": "sig" });
   seedLocal(app, "A.gba");
+  app.idb.set("frame:A.gba", new Blob([u8(1)]));
 
   assert.equal(await app.api.removeGameFromDevice("A.gba"), true);
   await settle();
 
   assert.equal(app.idb.get("rom:A.gba"), undefined, "ROM bytes freed");
   assert.equal(app.idb.get("art:A.gba"), undefined, "box art freed too");
-  assert.equal(app.idb.get("frame:A.gba"), undefined, "the thumbnail freed too");
+  assert.ok(app.idb.get("frame:A.gba"), "the picture stays: mirrored, and the tile keeps its face");
   eq(app.idb.get("save:A.gba"), u8(7), "battery save kept");
   eq(app.idb.get("state:A.gba"), u8(6), "save state kept");
   eq(app.api.syncState.tomb, [], "no tombstone — other devices keep the game");

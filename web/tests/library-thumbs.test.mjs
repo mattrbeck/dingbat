@@ -57,9 +57,9 @@ test("the frame is per-game inventory: evicted, deleted and renamed with the gam
   assert.equal(app.idb.get("frame:A.gba"), undefined, "evicted with the ROM");
 });
 
-test("the frame is not something Drive mirrors", async () => {
+test("the frame is a Drive kind (the sync is in drive-frames.test.mjs)", async () => {
   const app = await loadApp();
-  assert.equal(app.api.parseDriveFileName("frame:A.gba"), null);
+  eq(app.api.parseDriveFileName("frame:A.gba"), { game: "A.gba", kind: "frame" });
 });
 
 test("storeLastFrame is a no-op without a running game or a wasm runtime", async () => {

@@ -1509,9 +1509,9 @@ const isRomLoaded = (name) =>
 
 // The inventory of everything stored for one game. Every destructive path
 // works from this; a record not listed here survives a delete.
-//   bytes    ROM image, box art and the last-frame thumbnail (the ROM and
-//            art are re-downloadable from Drive; the frame is a per-device
-//            picture, regenerated the next time the game runs)
+//   bytes    ROM image, box art and the last-frame thumbnail (ROM and
+//            frame are mirrored on Drive; the frame is also regenerated the
+//            next time the game runs, and Remove from device keeps it)
 //   saves    battery saves (P1 + 2P partner) and the nine state slots with
 //            their meta; the only group Drive mirrors besides the ROM
 //   session  the auto-resume snapshot; regenerated, never synced
@@ -2114,6 +2114,7 @@ const driveDownload = async (fileId) => {
 // ":slotN". Mirrors romsWithSaveData's ":slotN" and "-p2" folding.
 const parseDriveFileName = (n) => {
   if (n.startsWith("rom:")) return { game: n.slice(4), kind: "rom" };
+  if (n.startsWith("frame:")) return { game: n.slice(6), kind: "frame" };
   for (let [prefix, cat] of [["statemeta:", "statemeta"], ["state:", "state"]]) {
     if (n.startsWith(prefix)) {
       let g = n.slice(prefix.length);
@@ -2318,6 +2319,10 @@ const readSyncBytes = async (key) => {
     let d = v?.data;
     return d && d.length ? new Uint8Array(d) : null;
   }
+  if (key.startsWith("frame:")) {
+    if (!(v instanceof Blob) || !v.size) return null;
+    return new Uint8Array(await v.arrayBuffer());
+  }
   if (key.startsWith("statemeta:")) {
     if (v && typeof v === "object" && !(v instanceof Uint8Array) &&
         !(v instanceof ArrayBuffer)) {
@@ -2332,6 +2337,10 @@ const readSyncBytes = async (key) => {
 const writeSyncBytes = async (name, bytes) => {
   if (name.startsWith("rom:")) {
     await dbPut(name, { name: name.slice(4), data: new Uint8Array(bytes) });
+    return;
+  }
+  if (name.startsWith("frame:")) {
+    await dbPut(name, new Blob([bytes], { type: "image/jpeg" }));
     return;
   }
   if (name.startsWith("statemeta:")) {
@@ -2771,13 +2780,19 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       }
     }
 
-    // Pull saves/states for games this device holds.
+    // Pull saves/states for games this device holds, and pictures for every
+    // game in the library: a Drive-only tile shows the screen another device
+    // last saw (20 KB, and the whole point of the picture).
     let local = await localSyncFiles();
     for (let [name, f] of remote) {
       if (name === LIBRARY_FILE) continue;
       let p = parseDriveFileName(name);
       if (!p || p.kind === "rom") continue;
-      if (!(await hasLocalRom(p.game))) continue;  // Drive-only: pull on demand
+      if (p.kind === "frame") {
+        if (!lib.recents.some((r) => r.name === p.game)) continue; // not a library game
+      } else if (!(await hasLocalRom(p.game))) {
+        continue;                                  // Drive-only: pull on demand
+      }
       if (isRomLoaded(p.game)) continue;           // don't fight the autosave
       if (syncState.rmt[name] === f.modifiedTime) continue; // unchanged remotely
       let bytes = await driveDownload(f.id);
@@ -2903,9 +2918,10 @@ const removeGameFromDevice = async (game) => {
     showToast("Not backed up yet — kept here and queued for Drive");
     return false;
   }
-  // bytes + session; saves and prefs stay (see perGameKeys).
+  // bytes + session; saves and prefs stay (see perGameKeys). The picture
+  // stays too: it is mirrored, tiny, and the Drive-only tile keeps its face.
   let keys = perGameKeys(game);
-  await deleteKeys([...keys.bytes, ...keys.session]);
+  await deleteKeys([...keys.bytes.filter((k) => k !== frameKey(game)), ...keys.session]);
   markGameUpload(game); // the ROM is gone, so this queues the saves we kept
   return true;
 };
@@ -3868,8 +3884,9 @@ const getRomFrame = async (name) => (await dbGet(frameKey(name))) || null;
 // 20 KB a game - captured whenever play stops being visible: pause, the
 // main menu, a save state, a game switch or close, the tab going to the
 // background, and a slow tick while running so a killed tab still has a
-// recent picture. Not a Drive kind (parseDriveFileName): where you were on
-// one device is not library state, and the game regenerates it anyway.
+// recent picture. A Drive kind (parseDriveFileName): each capture queues
+// an upload, and the pull brings pictures down for every library game,
+// so a Drive-only tile shows the screen another device last saw.
 const FRAME_SCALE = 2;
 const FRAME_JPEG_Q = 0.75;
 const FRAME_TICK_MS = 60000;
@@ -3932,7 +3949,10 @@ const storeLastFrame = ({ force = false } = {}) => {
   frameStoreChain = frameStoreChain.then(async () => {
     try {
       const blob = await frameBlobFromFb(heap, w, h);
-      if (blob) await dbPut(frameKey(name), blob);
+      if (blob) {
+        await dbPut(frameKey(name), blob);
+        markUpload(frameKey(name)); // signed in: the other devices' tiles too
+      }
     } catch {}
   });
   return frameStoreChain;
@@ -8417,7 +8437,7 @@ document.getElementById("home-paused-close").addEventListener("click", async () 
 // next loadRom re-inits over it. Signed in, Drive-only games can be
 // included: ROM and battery save are fetched into memory, pictured, and
 // never written to this device, so the library's order and local footprint
-// are exactly what they were.
+// are exactly what they were. The picture itself uploads like any other.
 const THUMBS_OFFER_KEY = "thumbs_offered";
 const THUMBS_RESUME_FRAMES = 2;   // after a state restore: one full render
 const THUMBS_BOOT_FRAMES = 600;   // no session: through the logo to a title (10 s)
@@ -8547,6 +8567,7 @@ const thumbsPictureOne = async (cand, run, remote) => {
   try { FS.unlink("thumb.sav"); } catch {}
   if (!blob) return false;
   await dbPut(frameKey(name), blob);
+  markUpload(frameKey(name));
   return true;
 };
 

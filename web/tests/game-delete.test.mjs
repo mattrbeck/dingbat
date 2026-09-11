@@ -36,8 +36,10 @@ const perGameKeys = (n) => [
 // The keys Drive mirrors (what parseDriveFileName recognises).
 const syncableKeys = (n) =>
   perGameKeys(n).filter((k) =>
-    !k.startsWith("art:") && !k.startsWith("frame:") &&
-    !k.startsWith("stateauto:") && !k.startsWith("cheats:"));
+    !k.startsWith("art:") && !k.startsWith("stateauto:") && !k.startsWith("cheats:"));
+// ...of which the save data: everything mirrored but the ROM and its picture.
+const saveKeys = (n) =>
+  syncableKeys(n).filter((k) => !k.startsWith("rom:") && !k.startsWith("frame:"));
 
 // A plausible stored value per key shape (statemeta object, cheats text, bytes).
 const seedValue = (key, name) => {
@@ -113,7 +115,7 @@ test("index.js's perGameKeys is exactly the per-game inventory this file pins", 
   eq(sorted(groups.bytes), ["art:A.gba", "frame:A.gba", "rom:A.gba"]);
   eq(groups.session, ["stateauto:A.gba"], "the resume snapshot is its own group");
   eq(groups.prefs, ["cheats:A.gba"]);
-  eq(sorted(groups.saves), sorted(syncableKeys("A.gba").filter((k) => k !== "rom:A.gba")));
+  eq(sorted(groups.saves), sorted(saveKeys("A.gba")));
 });
 
 // ── Delete ──────────────────────────────────────────────────────────────────
@@ -259,7 +261,8 @@ test("Remove from device frees the ROM-shaped data and keeps every save", async 
   assert.equal(await app.api.removeGameFromDevice("A.gba"), true);
   await settle();
 
-  const freed = ["rom:A.gba", "art:A.gba", "frame:A.gba", "stateauto:A.gba"];
+  // The picture stays: it is on Drive, and the Drive-only tile keeps its face.
+  const freed = ["rom:A.gba", "art:A.gba", "stateauto:A.gba"];
   const kept = perGameKeys("A.gba").filter((k) => !freed.includes(k));
   eq(keysLeft(app),
     sorted([...GLOBAL_KEYS, ...kept, ...perGameKeys("B.gb")]),
@@ -334,7 +337,8 @@ test("Reset drops the resume snapshot with the saves it duplicates", async () =>
     'otherwise "Save reset — starting fresh" is followed by an offer to un-reset it');
   assert.ok(app.idb.get("rom:A.gba"), "the ROM stays — Reset is not a delete");
   assert.ok(app.idb.get("cheats:A.gba"), "and so do the cheats");
-  for (const k of syncableKeys("A.gba").filter((k) => k !== "rom:A.gba")) {
+  assert.ok(app.idb.get("frame:A.gba"), "and the picture: Reset is about progress");
+  for (const k of saveKeys("A.gba")) {
     assert.equal(app.idb.get(k), undefined, k + " is save data and should be gone");
   }
 });
