@@ -115,6 +115,18 @@ test("signed in but the ROM is not on Drive yet: Remove is present, disabled, an
   assert.equal(status(app), "GBC · On this device, not on Drive yet");
 });
 
+test("a ROM this device never uploaded, but a pull saw on Drive, can be removed", async () => {
+  const app = await loadApp();
+  seed(app, ["Zelda.gbc"]);
+  signIn(app); // no sig: the ROM was already on Drive when this device got it
+  app.api.syncState.rmt["rom:Zelda.gbc"] = "2026-01-01T00:00:00Z"; // what a pull records
+  await boot(app);
+  await open(app, "Zelda.gbc");
+  eq(rows(app)[2], ["Remove from this device",
+                    "Frees the space here. Your saves stay, and the game stays on Drive", false]);
+  assert.equal(status(app), "GBC · On this device and on Drive");
+});
+
 test("a delete queued for the ROM also counts as not on Drive", async () => {
   const app = await loadApp();
   seed(app, ["Zelda.gbc"]);

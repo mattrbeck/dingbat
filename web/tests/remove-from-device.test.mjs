@@ -374,3 +374,74 @@ test("two taps on Remove free the ROM; one tap only arms it", async () => {
   // Drive-only now: the row offers the way back instead of Remove.
   eq(rowButtons(app, "A.gba"), ["Reset", "Delete", "Sync to device"]);
 });
+
+// ── Learning that Drive already holds the ROM ───────────────────────────────
+// A device that never uploaded a ROM (it was already on Drive when this
+// device got the file) has no sig for it. The listing is then the only
+// place it can learn there is a copy to fall back on, or Remove stays
+// greyed for good however often the user syncs.
+
+test("a pull records every ROM the listing holds, without downloading one", async () => {
+  const app = await loadApp();
+  const drive = makeDrive(["rom:A.gba"]);
+  app.setFetch(drive.fetch);
+  signIn(app); // no sigs at all: this device uploaded nothing
+  seedLocal(app, "A.gba");
+
+  await app.api.pullSync({ silent: true });
+  await settle();
+
+  assert.ok(app.api.syncState.rmt["rom:A.gba"], "the listing's ROM is recorded");
+  eq(Object.keys(app.api.syncState.sigs), [], "and no bytes were hashed");
+  assert.ok(!app.fetchCalls.some((c) => /alt=media/.test(String(c.url))),
+    "the ROM itself was never downloaded");
+
+  const f = app.api.gameFlags("A.gba", new Set(["A.gba"]), new Set());
+  assert.equal(f.romOnDrive, true, "so Remove is offered");
+  await openManageList(app);
+  assert.equal(rowButton(app, "A.gba", "Remove from device").getAttribute("aria-disabled"), null);
+});
+
+test("a pull over a ROM Drive does not hold leaves Remove greyed", async () => {
+  const app = await loadApp();
+  app.setFetch(makeDrive([]).fetch); // an empty app folder
+  signIn(app);
+  seedLocal(app, "A.gba");
+
+  await app.api.pullSync({ silent: true });
+  await settle();
+
+  assert.equal(app.api.syncState.rmt["rom:A.gba"], undefined);
+  assert.equal(app.api.gameFlags("A.gba", new Set(["A.gba"]), new Set()).romOnDrive, false);
+  await openManageList(app);
+  assert.equal(rowButton(app, "A.gba", "Remove from device").getAttribute("aria-disabled"), "true");
+});
+
+test("a flush that skips an already-present ROM still records the copy", async () => {
+  const app = await loadApp();
+  app.setFetch(makeDrive(["rom:A.gba"]).fetch);
+  signIn(app);
+  seedLocal(app, "A.gba");
+  app.api.syncState.queueUp.push("rom:A.gba");
+
+  await app.api.flushSync();
+  await settle();
+
+  assert.ok(app.api.syncState.sigs["rom:A.gba"], "recorded");
+  // makeDrive gives the first name file id "f0"; the library write is the
+  // only other upload, and it is a create, not a write to that id.
+  assert.ok(!app.fetchCalls.some((c) => c.url.includes("/f0") && c.method !== "GET"),
+    "an immutable ROM already on Drive is still not re-uploaded");
+  assert.equal(app.api.gameFlags("A.gba", new Set(["A.gba"]), new Set()).romOnDrive, true);
+});
+
+test("a queued delete outranks both records", async () => {
+  const app = await loadApp();
+  app.setFetch(makeDrive(["rom:A.gba"]).fetch);
+  signIn(app, { "rom:A.gba": "sig" });
+  seedLocal(app, "A.gba");
+  app.api.syncState.rmt["rom:A.gba"] = "2026-01-01T00:00:00Z";
+  app.api.syncState.queueDel.push("rom:A.gba");
+
+  assert.equal(app.api.gameFlags("A.gba", new Set(["A.gba"]), new Set()).romOnDrive, false);
+});

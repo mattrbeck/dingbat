@@ -1825,11 +1825,16 @@ const gameFlags = (name, localRoms, withSaves) => {
     linked,
     driveOnly: !localRoms.has(name),
     hasSaves: withSaves.has(name) || savesOnDrive,
-    // Drive confirmed to hold the ROM: a sig with no delete queued. A
-    // just-imported game whose upload is still queued has no sig, so the
-    // only copy is never evictable. Sigs can go stale, so
+    // Drive confirmed to hold the ROM, with no delete queued. Two ways of
+    // knowing, and both count: this device uploaded it (sigs), or a pull
+    // saw it in the listing (rmt). Only the second covers a ROM that was
+    // already on Drive when this device got the file - it uploads nothing,
+    // so it would otherwise never learn there is a copy to fall back on.
+    // A just-imported game whose upload is still queued has neither, so the
+    // only copy is never evictable. Both can go stale, so
     // removeGameFromDevice re-checks the live listing before deleting.
-    romOnDrive: linked && !!syncState.sigs[romKey(name)] &&
+    romOnDrive: linked &&
+      (!!syncState.sigs[romKey(name)] || !!syncState.rmt[romKey(name)]) &&
       !syncState.queueDel.includes(romKey(name)),
     loaded: isRomLoaded(name),
     // A live 2P link has two cores writing this ROM's saves: delete, reset
@@ -2784,8 +2789,10 @@ const flushSyncInner = async () => {
         // Present: ROMs are immutable, anything else re-uploads on change.
         if (!r || (!name.startsWith("rom:") && sig !== syncState.sigs[name])) {
           await driveUploadFile(name, bytes, r?.id);
-          syncState.sigs[name] = sig;
         }
+        // Either way Drive now holds these bytes, so record it: a skipped
+        // upload of an already-present ROM is still proof of a copy there.
+        syncState.sigs[name] = sig;
       }
       syncState.queueUp = syncState.queueUp.filter((n) => n !== name);
     }
@@ -2964,7 +2971,16 @@ const pullSyncInner = async ({ silent = true } = {}) => {
     for (let [name, f] of remote) {
       if (name === LIBRARY_FILE) continue;
       let p = parseDriveFileName(name);
-      if (!p || p.kind === "rom") continue;
+      if (!p) continue;
+      if (p.kind === "rom") {
+        // Never downloaded here: a ROM is immutable, and either already on
+        // this device or fetched on demand (downloadGame). The listing is
+        // then the only place this device can learn that Drive holds it -
+        // which is what "Remove from this device" needs to know before it
+        // frees the local bytes. Recorded, not fetched.
+        syncState.rmt[name] = f.modifiedTime;
+        continue;
+      }
       if (p.kind === "frame") {
         if (!lib.recents.some((r) => r.name === p.game)) continue; // not a library game
       } else if (!(await hasLocalRom(p.game))) {
