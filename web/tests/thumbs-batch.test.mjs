@@ -111,6 +111,63 @@ test("Manage ROMs and Saves opens the same box any time, without spending the of
   assert.ok(app.toasts.some((t) => /Close the running game/.test(t)));
 });
 
+test("at boot, signed in, the offer waits for the first pull — which may picture everything", async () => {
+  const app = await loadApp();
+  seedLibrary(app, ["A.gba"]); // no picture here...
+  app.api.gdriveToken = "t";
+  app.api.gdriveTokenExp = Date.now() + 3600e3;
+  app.api.syncState = { queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [],
+                        sigs: {}, rmt: {}, connected: true };
+  // ...but Drive has one, and the pull is what brings it down.
+  app.setFetch(async (url) => {
+    url = String(url);
+    if (url.startsWith(FILES_URL + "?spaces=appDataFolder")) {
+      return jsonRes({ files: [
+        { id: "p1", name: "frame:A.gba", size: "4", modifiedTime: "2026-01-01T00:00:00Z" },
+      ] });
+    }
+    if (/alt=media/.test(url)) return bytesRes(new TextEncoder().encode("FACE"));
+    return jsonRes({});
+  });
+
+  let offered = null;
+  const pending = app.api.offerThumbnailsAfterBoot().then((v) => { offered = v; });
+  await settle();
+  assert.equal(offered, null, "still waiting on the pull");
+  assert.ok(!modalOpen(app));
+
+  await app.api.pullSync({ silent: true });
+  await pending;
+  assert.equal(offered, false, "the pull pictured the game: nothing to offer");
+  assert.ok(!modalOpen(app));
+  assert.equal(app.idb.get("thumbs_offered"), undefined, "and the offer is not spent");
+});
+
+test("at boot, signed in with no pull coming, the offer gives up waiting", async () => {
+  const app = await loadApp();
+  seedLibrary(app, ["A.gba"]);
+  app.api.gdriveToken = null; // a stale token: the pull waits on a gesture
+  app.api.syncState = { queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [],
+                        sigs: {}, rmt: {}, connected: true };
+  assert.equal(await app.api.offerThumbnailsAfterBoot(20), true);
+  assert.ok(modalOpen(app));
+});
+
+test("signed out, the boot offer does not wait at all", async () => {
+  const app = await loadApp();
+  seedLibrary(app, ["A.gba"]);
+  app.api.gdriveToken = null;
+  app.api.syncState = { queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [],
+                        sigs: {}, rmt: {}, connected: false };
+  let done = false;
+  const p = app.api.offerThumbnailsAfterBoot(60000).then(() => { done = true; });
+  await settle();
+  await settle();
+  assert.ok(done, "resolved without any pull");
+  assert.equal(await p, undefined);
+  assert.ok(modalOpen(app));
+});
+
 // ── The batch ───────────────────────────────────────────────────────────────
 
 test("every unpictured local game is booted, resumed where it can be, and pictured", async () => {

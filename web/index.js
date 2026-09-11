@@ -2846,10 +2846,19 @@ const applyRemoteRename = async (from, to) => {
 };
 
 // --- Pull (down-sync): merged library, tombstones, saves for local games ---
+// Resolves when the session's first pull has ended, well or badly: the
+// boot-time library-pictures offer waits on it, since a pull may be
+// bringing every picture down.
+/** @type {(v?: unknown) => void} */
+let firstPullSettled = () => {};
+const firstPullPromise = new Promise((r) => { firstPullSettled = r; });
 const pullSync = (opts = {}) => {
   if (pullQueued) return syncChain; // already one waiting; don't pile up
   pullQueued = true;
-  return runExclusive(() => { pullQueued = false; return pullSyncInner(opts); });
+  return runExclusive(() => {
+    pullQueued = false;
+    return pullSyncInner(opts).finally(() => firstPullSettled());
+  });
 };
 const pullSyncInner = async ({ silent = true } = {}) => {
   if (!syncActive()) return;
@@ -8640,6 +8649,18 @@ const maybeOfferThumbnails = async () => {
   return true;
 };
 
+// At boot, signed in, the first pull may still be bringing pictures down
+// (they are Drive files): a game is only unpictured once it has had that
+// chance. Waits for the pull, or `maxWait` if none comes (a stale token
+// waits on a gesture; offline).
+const THUMBS_PULL_WAIT_MS = 15000;
+const offerThumbnailsAfterBoot = async (maxWait = THUMBS_PULL_WAIT_MS) => {
+  if (GDRIVE_CLIENT_ID && syncState.connected) {
+    await Promise.race([firstPullPromise, new Promise((r) => setTimeout(r, maxWait))]);
+  }
+  return maybeOfferThumbnails();
+};
+
 // The manual entry: the same box, from Manage ROMs and Saves. A loaded game
 // (paused at home, say) has to close first: the batch takes the core.
 const thumbsFromManage = async () => {
@@ -9843,8 +9864,9 @@ var Module = {
     markRuntimeReady();
     document.body.classList.add("runtime-ready");
     // The one-time library-pictures offer: after the grid and the Drive
-    // session (resumeDriveOnBoot) have had a moment to settle.
-    setTimeout(() => { maybeOfferThumbnails().catch(() => {}); }, 1500);
+    // session (resumeDriveOnBoot) have had a moment to settle, and the
+    // first pull has had its say.
+    setTimeout(() => { offerThumbnailsAfterBoot().catch(() => {}); }, 1500);
     let frameCount = 0;
     const SAMPLE_RATE = 32768; // GBA/GB native sample rate
     const TARGET_FPS = 59.7275;
