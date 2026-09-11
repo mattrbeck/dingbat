@@ -400,6 +400,39 @@
       </div>
     </div>
 
+    <!-- One-time offer: picture every game in the library (index.js
+         maybeOfferThumbnails); the same box shows the run's progress. -->
+    <div id="thumbs-modal" class="modal-overlay">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="thumbs-title">
+        <button type="button" class="modal-close" id="thumbs-close" aria-label="Close">&times;</button>
+        <h2 id="thumbs-title">Add pictures to your library?</h2>
+        <div id="thumbs-offer">
+          <p>dingbat can open each game, pick up where you left off, take a picture of the screen for its library card, and close it again. It takes a few seconds a game. Your games and saves are not changed.</p>
+          <div class="modal-toggle-row" id="thumbs-drive-row">
+            <div>
+              <span class="modal-row-label">Include games kept only on Drive</span>
+              <span class="modal-toggle-sub">Each one is fetched, pictured, and not kept on this device</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="thumbs-drive-toggle" />
+              <span class="switch-track"></span>
+            </label>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="button" id="thumbs-not-now">Not now</button>
+            <button type="button" class="button button-primary" id="thumbs-go">Add pictures</button>
+          </div>
+        </div>
+        <div id="thumbs-progress" hidden>
+          <p id="thumbs-status" aria-live="polite">Opening…</p>
+          <div class="thumbs-bar"><span id="thumbs-bar-fill"></span></div>
+          <div class="modal-actions">
+            <button type="button" class="button" id="thumbs-stop">Stop</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="saves-modal" class="modal-overlay">
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title-1">
         <button type="button" class="modal-close" id="saves-close" aria-label="Close">&times;</button>

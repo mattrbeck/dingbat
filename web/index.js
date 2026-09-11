@@ -4235,6 +4235,7 @@ document.addEventListener("keydown", (e) => {
     closeRewindScrubber();
     closeClipScrubber();
     closeRomWarnModal();
+    closeThumbsModal();
   }
 });
 
@@ -8405,6 +8406,184 @@ document.getElementById("home-paused-close").addEventListener("click", async () 
   if (await unloadGame()) showToast("Game closed — save kept");
 });
 
+// --- Library pictures, in one go ------------------------------------------
+// A one-time offer to picture every game that has none. Each game is booted
+// in the core WITHOUT becoming the loaded game (currentRomName stays null,
+// so no save, session, cheat or frame path can fire for it): its last
+// session is restored where one exists and it is stepped one full render;
+// with no session it runs through its boot toward a title screen, bounded
+// in frames and in wall clock. The screen is then stored as the library
+// frame. The core is left holding the last game, as after a close; the
+// next loadRom re-inits over it. Signed in, Drive-only games can be
+// included: ROM and battery save are fetched into memory, pictured, and
+// never written to this device, so the library's order and local footprint
+// are exactly what they were.
+const THUMBS_OFFER_KEY = "thumbs_offered";
+const THUMBS_RESUME_FRAMES = 2;   // after a state restore: one full render
+const THUMBS_BOOT_FRAMES = 600;   // no session: through the logo to a title (10 s)
+const THUMBS_BOOT_MS = 2500;      // ...or this much wall clock, whichever first
+const THUMBS_CHUNK = 30;          // frames per task, so the page stays responsive
+
+const thumbsModal = document.getElementById("thumbs-modal");
+const thumbsOffer = document.getElementById("thumbs-offer");
+const thumbsProgress = document.getElementById("thumbs-progress");
+const thumbsStatus = document.getElementById("thumbs-status");
+const thumbsBarFill = document.getElementById("thumbs-bar-fill");
+const thumbsDriveRow = document.getElementById("thumbs-drive-row");
+const thumbsDriveToggle = /** @type {HTMLInputElement} */ (document.getElementById("thumbs-drive-toggle"));
+let thumbsRun = null; // { cancelled, done } while a batch runs
+
+// Library entries without a picture. Drive-only ones only when asked.
+const thumbsCandidates = async (includeDrive) => {
+  let keys = new Set((await dbKeys()).filter((k) => typeof k === "string"));
+  let out = [];
+  for (let { name } of await getRecentMeta()) {
+    if (keys.has(frameKey(name))) continue;
+    let local = keys.has(romKey(name));
+    if (local || includeDrive) out.push({ name, local });
+  }
+  return out;
+};
+
+const closeThumbsModal = () => {
+  if (thumbsRun) thumbsRun.cancelled = true;
+  thumbsModal.classList.remove("open");
+  releaseFocus(thumbsModal);
+};
+
+// Shown once per device, when there is something to picture and nothing is
+// loaded (a batch re-inits the core the paused game sits in).
+const maybeOfferThumbnails = async () => {
+  if (!db || currentRomName || linkMode || rollbackMode || netActive()) return false;
+  if (await dbGet(THUMBS_OFFER_KEY)) return false;
+  let cands = await thumbsCandidates(driveLinked());
+  if (!cands.length) return false;
+  await dbPut(THUMBS_OFFER_KEY, Date.now()); // one offer, whatever the answer
+  thumbsDriveRow.hidden = !driveLinked() || !cands.some((c) => !c.local);
+  thumbsDriveToggle.checked = false;
+  thumbsOffer.hidden = false;
+  thumbsProgress.hidden = true;
+  thumbsModal.classList.add("open");
+  trapFocus(thumbsModal);
+  return true;
+};
+
+const thumbsSetProgress = (i, total, name) => {
+  thumbsStatus.textContent = name
+    ? "Picturing " + (i + 1) + " of " + total + " — " + displayName(name)
+    : "Done";
+  thumbsBarFill.style.width = Math.round((i / Math.max(1, total)) * 100) + "%";
+};
+
+// Boot one game in the core and store its screen. Never touches the game's
+// own records: the ROM and save go to scratch FS names, and the .sav is
+// unlinked after, so no later load can pick it up.
+const thumbsPictureOne = async (cand, run, remote) => {
+  let name = cand.name;
+  let bytes = null, save = null;
+  if (cand.local) {
+    bytes = await getRomBytes(name);
+    save = await dbGet("save:" + name);
+  } else {
+    let f = remote.get(romKey(name));
+    if (!f) return false;
+    bytes = await driveDownload(f.id);
+    save = await dbGet("save:" + name); // kept locally by Remove from device
+    let sf = !save && remote.get("save:" + name);
+    if (sf) save = await driveDownload(sf.id);
+  }
+  if (run.cancelled || currentRomName || !bytes || !bytes.length) return false;
+  let ext = extOf(name);
+  let romFile = "thumb" + ext;
+  writeToFS(romFile, bytes);
+  try { FS.unlink("thumb.sav"); } catch {}
+  if (save && save.length) writeToFS("thumb.sav", save);
+  Module.ccall("initFromEmscripten", null, ["string"], [romFile]);
+  let frames = THUMBS_BOOT_FRAMES;
+  let deadline = performance.now() + THUMBS_BOOT_MS;
+  let auto = cand.local ? await dbGet(autoStateKey(name)) : null;
+  if (auto?.bytes && applyStateBytes(auto.bytes)) {
+    frames = THUMBS_RESUME_FRAMES;
+    deadline = Infinity;
+  }
+  for (let done = 0; done < frames && performance.now() < deadline;) {
+    if (run.cancelled || currentRomName) return false; // a launch took the core
+    let n = Math.min(THUMBS_CHUNK, frames - done);
+    for (let i = 0; i < n; i++) Module._loop_tick();
+    done += n;
+    if (Module._clearAudioBuffer) Module._clearAudioBuffer(); // nobody plays it
+    await new Promise((r) => setTimeout(r, 0));
+  }
+  if (run.cancelled || currentRomName) return false;
+  let [w, h] = ext === ".gba" ? [240, 160] : [160, 144];
+  let ptr = Module._wasm_fb_ptr();
+  if (!ptr) return false;
+  let heap = new Uint8Array(Module.memory.buffer, ptr, w * h * 4).slice();
+  let blob = await frameBlobFromFb(heap, w, h);
+  try { FS.unlink("thumb.sav"); } catch {}
+  if (!blob) return false;
+  await dbPut(frameKey(name), blob);
+  return true;
+};
+
+const runThumbnailBatch = async ({ includeDrive = false } = {}) => {
+  if (thumbsRun) return 0;
+  if (currentRomName || linkMode || rollbackMode || netActive()) {
+    showToast("Close the running game first");
+    return 0;
+  }
+  await ensureRuntimeReady();
+  let remote = null;
+  if (includeDrive) {
+    if (!(await ensureDriveSignedIn())) includeDrive = false;
+    else {
+      try { remote = await driveListMap(); }
+      catch (e) { showToast("Couldn't reach Drive — local games only"); includeDrive = false; }
+    }
+  }
+  let cands = await thumbsCandidates(includeDrive);
+  let run = { cancelled: false, done: 0 };
+  thumbsRun = run;
+  thumbsOffer.hidden = true;
+  thumbsProgress.hidden = false;
+  thumbsModal.classList.add("open");
+  try {
+    for (let i = 0; i < cands.length && !run.cancelled; i++) {
+      thumbsSetProgress(i, cands.length, cands[i].name);
+      try {
+        if (await thumbsPictureOne(cands[i], run, remote)) {
+          run.done++;
+          refreshHomeRecent(); // the grid fills in as it goes
+        }
+      } catch (e) {
+        console.warn("thumbnail failed for " + cands[i].name, e);
+      }
+    }
+    thumbsSetProgress(cands.length, cands.length, null);
+  } finally {
+    thumbsRun = null;
+    thumbsModal.classList.remove("open");
+    releaseFocus(thumbsModal);
+    refreshHomeRecent();
+  }
+  showToast(run.done === 0 ? "No pictures added"
+    : run.done + (run.done === 1 ? " picture" : " pictures") + " added" +
+      (run.cancelled ? " before stopping" : ""));
+  return run.done;
+};
+
+const cancelThumbnailRun = () => { if (thumbsRun) thumbsRun.cancelled = true; };
+
+document.getElementById("thumbs-go").addEventListener("click", () => {
+  runThumbnailBatch({ includeDrive: !thumbsDriveRow.hidden && thumbsDriveToggle.checked });
+});
+document.getElementById("thumbs-not-now").addEventListener("click", closeThumbsModal);
+document.getElementById("thumbs-close").addEventListener("click", closeThumbsModal);
+document.getElementById("thumbs-stop").addEventListener("click", cancelThumbnailRun);
+thumbsModal.addEventListener("click", (e) => {
+  if (e.target === thumbsModal && !thumbsRun) closeThumbsModal();
+});
+
 // --- Screenshot ---
 // No preserveDrawingBuffer: pixels are only valid within the render task,
 // so captureCanvas() runs from the main loop right after a frame is drawn.
@@ -9472,6 +9651,9 @@ var Module = {
     // Unblock queued launches and retire the boot progress strip.
     markRuntimeReady();
     document.body.classList.add("runtime-ready");
+    // The one-time library-pictures offer: after the grid and the Drive
+    // session (resumeDriveOnBoot) have had a moment to settle.
+    setTimeout(() => { maybeOfferThumbnails().catch(() => {}); }, 1500);
     let frameCount = 0;
     const SAMPLE_RATE = 32768; // GBA/GB native sample rate
     const TARGET_FPS = 59.7275;
