@@ -2133,6 +2133,14 @@ body.runtime-ready #boot-progress {
   gap: 10px;
 }
 
+/* The smallest phones (an iPhone SE is 320px): one column, so the picture
+   is a picture and the name is not an ellipsis. */
+@media (max-width: 359px) {
+  #home-recent {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 @media (min-width: 640px) {
   #home-recent {
     grid-template-columns: repeat(3, minmax(0, 1fr));
