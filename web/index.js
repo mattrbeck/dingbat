@@ -8451,20 +8451,44 @@ const closeThumbsModal = () => {
   releaseFocus(thumbsModal);
 };
 
-// Shown once per device, when there is something to picture and nothing is
-// loaded (a batch re-inits the core the paused game sits in).
-const maybeOfferThumbnails = async () => {
-  if (!db || currentRomName || linkMode || rollbackMode || netActive()) return false;
-  if (await dbGet(THUMBS_OFFER_KEY)) return false;
-  let cands = await thumbsCandidates(driveLinked());
-  if (!cands.length) return false;
-  await dbPut(THUMBS_OFFER_KEY, Date.now()); // one offer, whatever the answer
+// The box in its offer state. The Drive row shows only when it can mean
+// something: signed in, with a Drive-only game still unpictured.
+const openThumbsOffer = (cands) => {
   thumbsDriveRow.hidden = !driveLinked() || !cands.some((c) => !c.local);
   thumbsDriveToggle.checked = false;
   thumbsOffer.hidden = false;
   thumbsProgress.hidden = true;
   thumbsModal.classList.add("open");
   trapFocus(thumbsModal);
+};
+
+// Shown once per device, when there is something to picture and nothing is
+// loaded (a batch re-inits the core the paused game sits in). Manage ROMs
+// and Saves offers the same box any time (thumbsFromManage).
+const maybeOfferThumbnails = async () => {
+  if (!db || currentRomName || linkMode || rollbackMode || netActive()) return false;
+  if (await dbGet(THUMBS_OFFER_KEY)) return false;
+  let cands = await thumbsCandidates(driveLinked());
+  if (!cands.length) return false;
+  await dbPut(THUMBS_OFFER_KEY, Date.now()); // one offer, whatever the answer
+  openThumbsOffer(cands);
+  return true;
+};
+
+// The manual entry: the same box, from Manage ROMs and Saves. A loaded game
+// (paused at home, say) has to close first: the batch takes the core.
+const thumbsFromManage = async () => {
+  if (currentRomName || linkMode || rollbackMode || netActive()) {
+    showToast("Close the running game first");
+    return false;
+  }
+  let cands = await thumbsCandidates(driveLinked());
+  if (!cands.length) {
+    showToast("Every game already has a picture");
+    return false;
+  }
+  closeRomsModal();
+  openThumbsOffer(cands);
   return true;
 };
 
@@ -8578,6 +8602,7 @@ document.getElementById("thumbs-go").addEventListener("click", () => {
   runThumbnailBatch({ includeDrive: !thumbsDriveRow.hidden && thumbsDriveToggle.checked });
 });
 document.getElementById("thumbs-not-now").addEventListener("click", closeThumbsModal);
+document.getElementById("roms-thumbs").addEventListener("click", () => { thumbsFromManage(); });
 document.getElementById("thumbs-close").addEventListener("click", closeThumbsModal);
 document.getElementById("thumbs-stop").addEventListener("click", cancelThumbnailRun);
 thumbsModal.addEventListener("click", (e) => {

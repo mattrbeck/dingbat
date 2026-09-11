@@ -2806,9 +2806,17 @@ body.debug-2p .home-tile-link {
   border-radius: 2px;
   transition: width 0.2s;
 }
+/* .modal-toggle-row is display:flex, which would defeat [hidden]. */
 #thumbs-progress[hidden],
-#thumbs-offer[hidden] {
+#thumbs-offer[hidden],
+#thumbs-drive-row[hidden] {
   display: none;
+}
+
+/* The Manage entry's button keeps to one line beside its two-line label. */
+#roms-thumbs {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 /* ---- Save States modal ---- */
