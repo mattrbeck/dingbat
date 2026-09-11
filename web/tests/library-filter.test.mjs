@@ -109,6 +109,56 @@ test("a re-render keeps the filter (no flash of the full grid)", async () => {
   eq(visible(app), ["Tetris"]);
 });
 
+test("search is forgiving: spacing, punctuation, word order, a dropped letter", async () => {
+  const app = await loadApp();
+  const m = (q, name) => app.api.libSearchMatch(q, app.api.libFold(name));
+  const FR = "Pokemon FireRed", LA = "Link's Awakening DX", AW = "Advance Wars";
+
+  // Spaces and punctuation never matter, either side.
+  assert.ok(m("firered", FR));
+  assert.ok(m("fire red", FR));
+  assert.ok(m("Fire-Red", FR));
+  assert.ok(m("pokemonfire", FR));
+  assert.ok(m("links awakening", LA));
+  assert.ok(m("linksawakening", LA));
+  assert.ok(m("link's", LA));
+
+  // Words in any order.
+  assert.ok(m("wars advance", AW));
+  assert.ok(m("red pokemon", FR));
+
+  // A dropped or swapped letter still lands (three characters or more).
+  assert.ok(m("pokmon", FR));
+  assert.ok(m("zlda", "Zelda"));
+  assert.ok(m("adwars", AW));
+  assert.ok(m("law", LA), "initials, in order");
+
+  // ...but short words stay exact, and out-of-order characters do not match.
+  assert.ok(!m("ar", "Zelda"));
+  assert.ok(m("ar", AW));
+  assert.ok(!m("derif", FR));
+  assert.ok(!m("wars advance x", AW), "every word has to land");
+  assert.ok(m("", AW), "nothing typed matches everything");
+  assert.ok(m("   ", AW));
+});
+
+test("the grid filters through the forgiving match", async () => {
+  const app = await loadApp();
+  seed(app, ["Pokemon FireRed.gba", "Link's Awakening DX.gbc", "Advance Wars.gba", "Tetris.gb"]);
+  await app.api.refreshHomeRecent();
+  await settle();
+  await search(app, "fire red");
+  eq(visible(app), ["Pokemon FireRed"]);
+  await search(app, "linksawak");
+  eq(visible(app), ["Link's Awakening DX"]);
+  await search(app, "wars adv");
+  eq(visible(app), ["Advance Wars"]);
+  await search(app, "tetrs");
+  eq(visible(app), ["Tetris"]);
+  await search(app, ".gba");
+  eq(visible(app), [], "the extension is not part of the name; the system chips are for that");
+});
+
 // ── Chips ───────────────────────────────────────────────────────────────────
 
 test("system chips carry counts, toggle, and combine with search", async () => {

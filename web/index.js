@@ -1670,9 +1670,34 @@ const sortRoms = (rows) => {
   return rows;
 };
 
+// Search is forgiving. Names and the query are folded to lowercase letters
+// and digits (spaces, apostrophes, dashes and the like never matter, so
+// "firered", "fire red" and "Fire-Red" are one thing). Every word of the
+// query must land somewhere in the name, in any order. A word of three or
+// more characters that lands nowhere as a run still matches if its
+// characters appear in order ("pokmon", "zlda", "adwars"); shorter words
+// stay exact, or "ar" would match most of a library.
+const libFold = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "");
+const libSubsequence = (needle, hay) => {
+  let i = 0;
+  for (let j = 0; j < hay.length && i < needle.length; j++) if (hay[j] === needle[i]) i++;
+  return i === needle.length;
+};
+const libWordMatches = (word, foldedName) =>
+  foldedName.includes(word) || (word.length >= 3 && libSubsequence(word, foldedName));
+// `q` is the raw search string; `foldedName` a folded display name.
+const libSearchMatch = (q, foldedName) => {
+  let words = String(q).toLowerCase().split(/\s+/).map(libFold).filter(Boolean);
+  if (!words.length) return true;
+  if (words.every((w) => libWordMatches(w, foldedName))) return true;
+  // "fire red" typed as two words is also "firered" typed as one.
+  let joined = words.join("");
+  return words.length > 1 && libWordMatches(joined, foldedName);
+};
+
 const libTileMatches = (tile) => {
   let f = libFilter;
-  if (f.q && !tile.dataset.name.includes(f.q)) return false;
+  if (f.q && !libSearchMatch(f.q, tile.dataset.name)) return false;
   if (f.systems.size && !f.systems.has(tile.dataset.system)) return false;
   if (f.loc !== "all" && tile.dataset.loc !== f.loc) return false;
   return true;
@@ -1748,7 +1773,7 @@ const renderLibChips = (roms, localRoms) => {
 
 if (libSearch) {
   libSearch.addEventListener("input", () => {
-    libFilter.q = libSearch.value.trim().toLowerCase();
+    libFilter.q = libSearch.value.trim();
     applyLibFilter();
   });
   libSearch.addEventListener("keydown", (e) => {
@@ -4247,8 +4272,8 @@ const refreshHomeRecent = async () => {
     let tile = document.createElement("div");
     // no-art until a picture arrives: the chip stands in for it.
     tile.className = "home-tile no-art" + (driveOnly ? " home-tile-cloud" : "");
-    // What the filter reads.
-    tile.dataset.name = (displayName(romName) + " " + romName).toLowerCase();
+    // What the filter reads: the name folded the way the search folds it.
+    tile.dataset.name = libFold(displayName(romName));
     tile.dataset.system = system;
     tile.dataset.loc = driveOnly ? "drive" : "device";
 
