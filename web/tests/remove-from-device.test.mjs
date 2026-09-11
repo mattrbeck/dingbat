@@ -52,9 +52,7 @@ const meterStorage = (app) => {
   };
 };
 
-// The sort control's wrapper: the fake DOM has no parent links.
 const openManageList = async (app) => {
-  app.document.getElementById("roms-sort").parentElement = { hidden: false };
   await app.api.refreshRomsManageList();
   await settle();
 };

@@ -334,7 +334,7 @@
 
           <div id="home-recent-wrap" hidden>
             <div class="home-recent-head" id="home-recent-head">
-              <span class="home-recent-label">Recent</span>
+              <span class="home-recent-label">Library <span id="lib-count" class="lib-count"></span></span>
               <span class="home-recent-meta">
                 <span id="storage-info"></span>
                 <!-- One slot: Sync when signed in, Sign in otherwise. -->
@@ -343,7 +343,23 @@
                 <button type="button" class="home-manage-link" id="manage-roms">Manage ROMs and Saves</button>
               </span>
             </div>
+            <!-- Search, filter chips (built by index.js) and sort. A sibling
+                 of the grid, not inside the head: on phones it sticks while
+                 the grid scrolls, and sticky is bounded by its parent. -->
+            <div class="lib-bar" id="lib-bar" hidden>
+              <label class="lib-search" for="lib-search">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+                <input type="search" id="lib-search" placeholder="Search" autocomplete="off" spellcheck="false" aria-label="Search the library" />
+              </label>
+              <div class="lib-chips" id="lib-chips" role="group" aria-label="Filter the library"></div>
+              <select id="lib-sort" class="kb-select lib-sort" aria-label="Sort the library">
+                <option value="recent">Last played</option>
+                <option value="alpha">A–Z</option>
+                <option value="system">System</option>
+              </select>
+            </div>
             <div id="home-recent"></div>
+            <p id="lib-none" class="lib-none" hidden>No games match.</p>
           </div>
         </div>
       </section>
@@ -639,9 +655,6 @@
         <h2 id="modal-title-3">Manage ROMs and Saves</h2>
         <p class="modal-hint">While signed in to Drive, <b>Reset</b> and <b>Delete</b> apply to all your devices.<span id="roms-hint-remove" hidden> <b>Remove from device</b> frees this device only — your save stays, and the game stays on Drive.</span></p>
         <p id="roms-manage-empty" class="modal-toggle-sub" hidden>No games are stored in this browser yet.</p>
-        <div class="roms-sort-row">
-          <button type="button" class="button button-sm button-ghost" id="roms-sort"></button>
-        </div>
         <div id="roms-manage-list" class="roms-manage-list"></div>
         <div class="modal-subhead">Library pictures</div>
         <div class="modal-toggle-row">

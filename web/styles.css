@@ -1797,12 +1797,13 @@ body.rumbling #canvas {
  */
 
 #home {
+  --home-pad: 24px;
   position: absolute;
   inset: 0;
   z-index: 2;
   display: flex;
   flex-direction: column;
-  padding: 24px;
+  padding: var(--home-pad);
   overflow-y: auto;
   /* Home stays dark even when a device theme paints the stage the shell
      colour (--home-bg defaults to transparent for non-device themes). */
@@ -2075,9 +2076,10 @@ body.runtime-ready #boot-progress {
 
 .home-recent-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px 8px;
   margin-bottom: 10px;
 }
 
@@ -2088,6 +2090,7 @@ body.runtime-ready #boot-progress {
 }
 
 .home-recent-label {
+  white-space: nowrap;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -2097,8 +2100,11 @@ body.runtime-ready #boot-progress {
 
 .home-recent-meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 12px;
+  justify-content: flex-end;
+  gap: 4px 12px;
+  margin-left: auto;
 }
 
 #storage-info {
@@ -2108,6 +2114,7 @@ body.runtime-ready #boot-progress {
 }
 
 .home-manage-link {
+  white-space: nowrap;
   padding: 0;
   border: none;
   background: none;
@@ -2121,6 +2128,197 @@ body.runtime-ready #boot-progress {
 
 .home-manage-link:hover {
   color: var(--text);
+}
+
+/* The count beside the label: "LIBRARY 12 games", or "3 of 12" filtered. */
+.lib-count {
+  margin-left: 6px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  font-family: var(--font-mono);
+}
+
+/* --- Library bar: search, chips, sort --------------------------------------
+   One row on desktop. On phones it sticks under the top bar while the grid
+   scrolls, as two rows: search and sort, then the chips scrolling sideways
+   in their own row, so nothing is ever squeezed. */
+.lib-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.lib-bar[hidden] {
+  display: none;
+}
+
+.lib-search {
+  flex: 1 1 160px;
+  min-width: 120px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  color: var(--text-faint);
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  transition: border-color 0.13s;
+}
+
+.lib-search:focus-within {
+  border-color: var(--accent);
+  color: var(--text-dim);
+}
+
+.lib-search svg {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.lib-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: none;
+  border: 0;
+  outline: none;
+}
+
+.lib-chips {
+  display: flex;
+  flex: 0 1 auto;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.lib-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.lib-chip {
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+}
+
+.lib-chip:hover {
+  color: var(--text);
+  border-color: rgba(var(--hi-rgb), 0.24);
+}
+
+.lib-chip[aria-pressed="true"] {
+  color: var(--accent);
+  /* rgba lines: pre-Safari-16.2 fallback, overridden where color-mix parses */
+  background: rgba(var(--accent-rgb), 0.12);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: rgba(var(--accent-rgb), 0.5);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+.lib-chip-n {
+  font-weight: 500;
+  color: var(--text-faint);
+}
+
+.lib-chip[aria-pressed="true"] .lib-chip-n {
+  color: inherit;
+  opacity: 0.8;
+}
+
+/* A gap between the system chips and the location chips. */
+.lib-chip.lib-chip-loc:first-of-type,
+.lib-chip-sep {
+  margin-left: 6px;
+}
+
+.lib-sort {
+  flex: 0 0 auto;
+  height: 32px;
+  padding: 0 8px;
+  font-size: 12.5px;
+}
+
+.lib-none {
+  margin: 8px 0 0;
+  padding: 28px 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-faint);
+  border: 1px dashed var(--border-2);
+  border-radius: var(--radius-sm);
+}
+
+.lib-none[hidden] {
+  display: none;
+}
+
+@media (max-width: 759px) {
+  .lib-bar {
+    position: sticky;
+    /* Sticky offsets are measured from the scroll container's content
+       edge, so 0 would hang the strip a padding below the top. */
+    top: calc(-1 * var(--home-pad));
+    z-index: 3;
+    flex-wrap: wrap;
+    /* Span #home's side padding, so tiles pass under a full-width strip. */
+    margin: 0 calc(-1 * var(--home-pad)) 10px;
+    padding: 8px var(--home-pad);
+    background: rgba(var(--stage-rgb), 0.86);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+  }
+
+  .lib-search {
+    flex: 1 1 0;
+    height: 36px; /* thumb-sized */
+  }
+
+  .lib-sort {
+    height: 36px;
+  }
+
+  /* The chips take their own row, scrolling sideways past the edge. */
+  .lib-chips {
+    flex: 1 1 100%;
+    order: 1;
+    margin: 0 calc(-1 * var(--home-pad));
+    padding: 0 var(--home-pad);
+  }
+
+  .lib-chips:empty {
+    display: none;
+  }
+
+  .lib-chip {
+    height: 30px;
+  }
 }
 
 /* An explicit column count rather than auto-fill: 2 on phones, then 3, 4,
@@ -5349,7 +5547,7 @@ body.link-gb #controls {
    source order. */
 @media (max-width: 560px) {
   #home {
-    padding: 16px;
+    --home-pad: 16px;
   }
   #home-inner {
     gap: 18px;
@@ -6296,15 +6494,6 @@ body.sync-shown #status {
 }
 
 /* Manage ROMs sort toggle */
-.roms-sort-row {
-  display: flex;
-  justify-content: flex-end;
-  margin: -4px 0 10px;
-}
-.roms-sort-row[hidden] {
-  display: none;
-}
-
 /* System chip: the tile's caption and picture stand-in, the Drive tomb rows. */
 .sys-chip {
   flex: 0 0 auto;

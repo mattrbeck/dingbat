@@ -1625,31 +1625,142 @@ romsModal.addEventListener("click", (e) => {
   if (e.target === romsModal) closeRomsModal();
 });
 
-// "recent" is the grid's play order; "alpha" for auditing a long library.
+// --- Library sort + filter --------------------------------------------------
+// One sort, shared by the home grid and the Manage list and kept in
+// "roms_sort": "recent" is play order (the index's own order), "alpha" the
+// name, "system" GBA / GBC / GB then the name. The filters are for the
+// session: a search string, a set of systems (empty = every system) and a
+// location (all / device / drive). Filtering hides tiles in place rather
+// than re-rendering, so the grid never rebuilds under a finger.
+const LIB_SORTS = ["recent", "alpha", "system"];
 let romsSort = "recent";
-const romsSortBtn = document.getElementById("roms-sort");
+const libSortSel = /** @type {HTMLSelectElement} */ (document.getElementById("lib-sort"));
+const libSearch = /** @type {HTMLInputElement} */ (document.getElementById("lib-search"));
+const libChips = document.getElementById("lib-chips");
+const libCountEl = document.getElementById("lib-count");
+const libBar = document.getElementById("lib-bar");
+const libNone = document.getElementById("lib-none");
+let libFilter = { q: "", systems: new Set(), loc: "all" };
 
 const loadRomsSort = async () => {
   let v = await dbGet("roms_sort");
-  if (v === "recent" || v === "alpha") romsSort = v;
-  syncRomsSortButton();
+  if (LIB_SORTS.includes(v)) romsSort = v;
+  syncLibSort();
 };
-const syncRomsSortButton = () => {
-  if (!romsSortBtn) return;
-  romsSortBtn.textContent =
-    romsSort === "alpha" ? "Sort: A–Z" : "Sort: Last played";
-  romsSortBtn.title = romsSort === "alpha"
-    ? "Sorted alphabetically — click to sort by last played"
-    : "Sorted by last played — click to sort alphabetically";
+const syncLibSort = () => { if (libSortSel) libSortSel.value = romsSort; };
+const setRomsSort = async (v) => {
+  if (!LIB_SORTS.includes(v) || v === romsSort) return;
+  romsSort = v;
+  syncLibSort();
+  await dbPut("roms_sort", v);
+  refreshRomsManageList();
+  refreshHomeRecent();
 };
-if (romsSortBtn) {
-  romsSortBtn.addEventListener("click", async () => {
-    romsSort = romsSort === "alpha" ? "recent" : "alpha";
-    syncRomsSortButton();
-    await dbPut("roms_sort", romsSort);
-    refreshRomsManageList();
+if (libSortSel) libSortSel.addEventListener("change", () => setRomsSort(libSortSel.value));
+
+const SYSTEM_ORDER = { GBA: 0, GBC: 1, GB: 2 };
+// Rows carry .name; "recent" keeps the order given (the index's).
+const sortRoms = (rows) => {
+  if (romsSort === "alpha") return [...rows].sort((a, b) => a.name.localeCompare(b.name));
+  if (romsSort === "system") {
+    return [...rows].sort((a, b) =>
+      (SYSTEM_ORDER[systemOf(a.name)] - SYSTEM_ORDER[systemOf(b.name)]) ||
+      a.name.localeCompare(b.name));
+  }
+  return rows;
+};
+
+const libTileMatches = (tile) => {
+  let f = libFilter;
+  if (f.q && !tile.dataset.name.includes(f.q)) return false;
+  if (f.systems.size && !f.systems.has(tile.dataset.system)) return false;
+  if (f.loc !== "all" && tile.dataset.loc !== f.loc) return false;
+  return true;
+};
+
+// Hide the tiles the filter excludes; the count and the empty note follow.
+const applyLibFilter = () => {
+  let shown = 0, total = 0;
+  for (let t of /** @type {HTMLCollectionOf<HTMLElement>} */ (homeRecent.children)) {
+    if (!t.classList.contains("home-tile")) continue;
+    total++;
+    let m = libTileMatches(t);
+    t.hidden = !m;
+    if (m) shown++;
+  }
+  if (libNone) libNone.hidden = !(total > 0 && shown === 0);
+  if (libCountEl) {
+    libCountEl.textContent = shown === total
+      ? total + (total === 1 ? " game" : " games")
+      : shown + " of " + total;
+  }
+};
+
+// The chips: one per system present (only when there is more than one),
+// then, signed in with games on both sides, "On this device" / "On Drive".
+const renderLibChips = (roms, localRoms) => {
+  if (!libChips) return;
+  let counts = { GBA: 0, GBC: 0, GB: 0 };
+  let local = 0;
+  for (let { name } of roms) {
+    counts[systemOf(name)]++;
+    if (localRoms.has(name)) local++;
+  }
+  let systems = Object.keys(SYSTEM_ORDER).filter((s) => counts[s] > 0);
+  // A system that left the library leaves the filter too.
+  for (let s of libFilter.systems) if (!counts[s]) libFilter.systems.delete(s);
+  let chips = [];
+  const chip = (label, n, pressed, cls, onTap) => {
+    let b = document.createElement("button");
+    b.type = "button";
+    b.className = "lib-chip " + cls;
+    b.setAttribute("aria-pressed", pressed ? "true" : "false");
+    b.textContent = label;
+    if (n != null) {
+      let c = document.createElement("span");
+      c.className = "lib-chip-n";
+      c.textContent = String(n);
+      b.appendChild(c);
+    }
+    b.addEventListener("click", () => { onTap(); renderLibChips(roms, localRoms); applyLibFilter(); });
+    chips.push(b);
+  };
+  if (systems.length > 1) {
+    for (let s of systems) {
+      chip(s, counts[s], libFilter.systems.has(s), "lib-chip-sys", () => {
+        if (libFilter.systems.has(s)) libFilter.systems.delete(s);
+        else libFilter.systems.add(s);
+      });
+    }
+  }
+  let driveOnly = roms.length - local;
+  if (driveLinked() && local > 0 && driveOnly > 0) {
+    chip("On this device", local, libFilter.loc === "device", "lib-chip-loc",
+      () => { libFilter.loc = libFilter.loc === "device" ? "all" : "device"; });
+    chip("On Drive", driveOnly, libFilter.loc === "drive", "lib-chip-loc",
+      () => { libFilter.loc = libFilter.loc === "drive" ? "all" : "drive"; });
+  } else if (libFilter.loc !== "all") {
+    libFilter.loc = "all"; // the choice no longer exists
+  }
+  libChips.replaceChildren(...chips);
+};
+
+if (libSearch) {
+  libSearch.addEventListener("input", () => {
+    libFilter.q = libSearch.value.trim().toLowerCase();
+    applyLibFilter();
+  });
+  libSearch.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && libSearch.value) {
+      e.stopPropagation(); // clears the field; does not close anything
+      libSearch.value = "";
+      libFilter.q = "";
+      applyLibFilter();
+    }
   });
 }
+
+// (The Manage list's own sort toggle is gone: it follows the library's.)
 
 // Rows: recents first, then orphaned save-only games by name; under "alpha"
 // one merged A-Z list. { name, inRecent }.
@@ -1665,10 +1776,7 @@ const romsForManagement = async () => {
   for (let name of await romsWithSaveData()) {
     if (!seen.has(name)) rows.push({ name, inRecent: false });
   }
-  if (romsSort === "alpha") {
-    rows.sort((a, b) => a.name.localeCompare(b.name));
-  }
-  return rows;
+  return sortRoms(rows);
 };
 
 // The rename pencil; currentColor so it follows the button's states.
@@ -1691,8 +1799,6 @@ const refreshRomsManageList = async () => {
   let withSaves = new Set(await romsWithSaveData());
   romsManageList.innerHTML = "";
   romsManageEmpty.hidden = rows.length > 0;
-  syncRomsSortButton();
-  if (romsSortBtn) romsSortBtn.parentElement.hidden = rows.length < 2;
 
   for (let { name, inRecent } of rows) {
     let row = document.createElement("div");
@@ -4108,6 +4214,8 @@ const refreshHomeRecent = async () => {
     // Keep the section (Drive sign-in lives in the empty state), drop the header.
     homeRecentWrap.hidden = false;
     if (homeRecentHead) homeRecentHead.hidden = true;
+    if (libBar) libBar.hidden = true;
+    if (libNone) libNone.hidden = true;
     storageInfo.textContent = "";
     homeRecent.replaceChildren(buildEmptyLibraryCard());
     homeArtUrls.forEach(URL.revokeObjectURL);
@@ -4116,6 +4224,8 @@ const refreshHomeRecent = async () => {
   }
   if (homeRecentHead) homeRecentHead.hidden = false;
   homeRecentWrap.hidden = false;
+  // One game: nothing to sort or filter.
+  if (libBar) libBar.hidden = roms.length < 2;
   updateStorageInfo();
   // Entries without local bytes render as Drive-only download tiles, signed
   // in or not (a tap prompts sign-in).
@@ -4126,6 +4236,8 @@ const refreshHomeRecent = async () => {
   for (let k of keys) {
     if (typeof k === "string" && k.startsWith("rom:")) localRoms.add(k.slice(4));
   }
+  renderLibChips(roms, localRoms);
+  roms = sortRoms(roms);
   let tiles = [];
   for (let { name: romName } of roms) {
     let system = systemOf(romName);
@@ -4134,6 +4246,10 @@ const refreshHomeRecent = async () => {
     let tile = document.createElement("div");
     // no-art until a picture arrives: the chip stands in for it.
     tile.className = "home-tile no-art" + (driveOnly ? " home-tile-cloud" : "");
+    // What the filter reads.
+    tile.dataset.name = (displayName(romName) + " " + romName).toLowerCase();
+    tile.dataset.system = system;
+    tile.dataset.loc = driveOnly ? "drive" : "device";
 
     let launch = document.createElement("button");
     launch.type = "button";
@@ -4232,8 +4348,11 @@ const refreshHomeRecent = async () => {
     }
     tiles.push(tile);
   }
+  // Filtered before the commit: a fresh render is already filtered.
+  for (let t of tiles) t.hidden = !libTileMatches(t);
   // The one DOM commit, atomic: no zero-height moment.
   homeRecent.replaceChildren(...tiles);
+  applyLibFilter(); // the count and the empty note
   homeArtUrls.forEach(URL.revokeObjectURL);
   homeArtUrls = artUrls;
 };
