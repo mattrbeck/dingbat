@@ -1843,7 +1843,6 @@ const gameFlags = (name, localRoms, withSaves) => {
     // saves, and unloadGame refuses outright, so every action that touches
     // its files waits for the session to end.
     busy: isRomLoaded(name) && (linkMode || rollbackMode || netActive()),
-    linkRunning: !!(linkMode && linkRomEntry && linkRomEntry.name === name),
     downloading: syncDownloading.has(name),
   };
 };
@@ -4951,7 +4950,7 @@ const refreshHomeRecent = async () => {
   }
   // The pictures offer is worth showing only while something lacks one.
   // Drive-only games count when signed in, since the run can fetch them.
-  thumbsCandidates(driveLinked())
+  thumbsCandidates(driveLinked(), keys)
     .then((cands) => { if (gen === homeRenderGen) homeThumbsBtn.hidden = !cands.length; })
     .catch(() => {});
   // Filtered before the commit: a fresh render is already filtered.
@@ -9182,8 +9181,10 @@ const thumbsDriveToggle = /** @type {HTMLInputElement} */ (document.getElementBy
 let thumbsRun = null; // { cancelled, done } while a batch runs
 
 // Library entries without a picture. Drive-only ones only when asked.
-const thumbsCandidates = async (includeDrive) => {
-  let keys = new Set((await dbKeys()).filter((k) => typeof k === "string"));
+// `known` is the caller's key list, where it already has one (the grid
+// reads the same keys to decide which games are local).
+const thumbsCandidates = async (includeDrive, known) => {
+  let keys = new Set((known || await dbKeys()).filter((k) => typeof k === "string"));
   let out = [];
   for (let { name } of await getRecentMeta()) {
     if (keys.has(frameKey(name))) continue;
@@ -9212,7 +9213,7 @@ const openThumbsOffer = (cands) => {
 
 // Shown once per device, when there is something to picture and nothing is
 // loaded (a batch re-inits the core the paused game sits in). Manage ROMs
-// and Saves offers the same box any time (thumbsFromManage).
+// and Saves offers the same box any time (openThumbsRun).
 const maybeOfferThumbnails = async () => {
   if (!db || currentRomName || linkMode || rollbackMode || netActive()) return false;
   if (await dbGet(THUMBS_OFFER_KEY)) return false;
@@ -9239,7 +9240,7 @@ const offerThumbnailsAfterBoot = async (maxWait = THUMBS_PULL_WAIT_MS) => {
 // (paused at home, say) has to close first: the batch takes the core.
 // The library head's "Add pictures", which is shown only while there is
 // something to picture (refreshHomeRecent).
-const thumbsFromManage = async () => {
+const openThumbsRun = async () => {
   if (currentRomName || linkMode || rollbackMode || netActive()) {
     showToast("Close the running game first");
     return false;
@@ -9365,7 +9366,7 @@ document.getElementById("thumbs-go").addEventListener("click", () => {
   runThumbnailBatch({ includeDrive: !thumbsDriveRow.hidden && thumbsDriveToggle.checked });
 });
 document.getElementById("thumbs-not-now").addEventListener("click", closeThumbsModal);
-document.getElementById("home-thumbs").addEventListener("click", () => { thumbsFromManage(); });
+document.getElementById("home-thumbs").addEventListener("click", () => { openThumbsRun(); });
 document.getElementById("thumbs-close").addEventListener("click", closeThumbsModal);
 document.getElementById("thumbs-stop").addEventListener("click", cancelThumbnailRun);
 thumbsModal.addEventListener("click", (e) => {

@@ -91,7 +91,7 @@ test("Manage ROMs and Saves opens the same box any time, without spending the of
   const app = await loadApp();
   seedLibrary(app, ["A.gba"]);
   app.idb.set("thumbs_offered", 1); // the one-time offer is long gone
-  assert.equal(await app.api.thumbsFromManage(), true);
+  assert.equal(await app.api.openThumbsRun(), true);
   assert.ok(modalOpen(app));
   assert.ok(!app.document.getElementById("roms-modal").classList.contains("open"),
     "the manage box gives way to the offer");
@@ -99,7 +99,7 @@ test("Manage ROMs and Saves opens the same box any time, without spending the of
   // Nothing to do: a toast, no box.
   app.document.getElementById("thumbs-not-now").click();
   app.idb.set("frame:A.gba", new Blob([u8(1)]));
-  assert.equal(await app.api.thumbsFromManage(), false);
+  assert.equal(await app.api.openThumbsRun(), false);
   assert.ok(!modalOpen(app));
   assert.ok(app.toasts.some((t) => /already has a picture/.test(t)), app.toasts.join(" | "));
 
@@ -107,7 +107,7 @@ test("Manage ROMs and Saves opens the same box any time, without spending the of
   app.idb.delete("frame:A.gba");
   app.api.currentRomName = "rom.gba";
   app.api.currentOriginalName = "A.gba";
-  assert.equal(await app.api.thumbsFromManage(), false);
+  assert.equal(await app.api.openThumbsRun(), false);
   assert.ok(app.toasts.some((t) => /Close the running game/.test(t)));
 });
 

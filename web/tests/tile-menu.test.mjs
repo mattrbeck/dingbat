@@ -272,12 +272,10 @@ test("the flags agree with the Manage rows' own inventory reading", async () => 
   signIn(app, { "rom:A.gba": "s" });
   const f = app.api.gameFlags("A.gba", new Set(["A.gba"]), new Set(["A.gba"]));
   eq({ ...f }, { linked: true, driveOnly: false, hasSaves: true, hasLocalSaves: true,
-                 romOnDrive: true, loaded: false, busy: false, linkRunning: false,
-                 downloading: false });
+                 romOnDrive: true, loaded: false, busy: false, downloading: false });
   const g = app.api.gameFlags("B.gba", new Set(["A.gba"]), new Set(["A.gba"]));
   eq({ ...g }, { linked: true, driveOnly: true, hasSaves: false, hasLocalSaves: false,
-                 romOnDrive: false, loaded: false, busy: false, linkRunning: false,
-                 downloading: false });
+                 romOnDrive: false, loaded: false, busy: false, downloading: false });
 });
 
 // ── Opening, closing, the shortcuts ─────────────────────────────────────────
