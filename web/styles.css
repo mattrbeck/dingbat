@@ -6254,40 +6254,46 @@ body.net-mode #saves-modal .modal-toggle-row:has(#reset-save-slot) {
  * ==========================================================
  */
 
-/* A settings row is a grid there (see "Settings rows"), and its generic
-   child rule would drop this pair into the text's own cell. Give it the
-   control column explicitly, spanning both rows so it sits beside the
-   account and its status. */
 .gdrive-actions {
   display: flex;
   gap: 8px;
 }
 
-/* The `div` is load-bearing: the generic child rule above carries a type
-   selector, so a class-only selector loses to it. */
-.settings-pane .modal-toggle-row > div.gdrive-actions {
-  grid-area: 1 / 2 / span 2 / span 1;
-  align-self: center;
+/* A settings row is a grid (see "Settings rows"), which would size this one
+   by the column rather than by what is in it. Flex instead, so the buttons
+   move below the address exactly when the two would not fit on a line
+   together, and not a pixel of viewport sooner. The `div` is load-bearing:
+   the generic child rule carries a type selector, so a class-only selector
+   loses to it. */
+.settings-pane .modal-toggle-row.gdrive-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 16px;
+  row-gap: 10px;
 }
 
-/* Narrow: two buttons and an email cannot share a line without shredding
-   the address into a column, so the buttons take their own line under it
-   and the address gets the full width. */
-@media (max-width: 759px) {
-  .settings-pane .modal-toggle-row.gdrive-row {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto auto auto;
-  }
-  .settings-pane .modal-toggle-row.gdrive-row > div.gdrive-actions {
-    grid-area: 3 / 1;
-    margin-top: 12px;
-  }
+/* min-width back to auto (the generic rule zeroes it): a flex item's
+   automatic minimum is its content's own width, which for an address with
+   nothing to break at is the whole address. That is what makes the line
+   break rather than the address shrink. Growing takes the leftover space,
+   which pins the buttons right while they share the line and hands the
+   address the full width once they do not. */
+.settings-pane .modal-toggle-row.gdrive-row > div.gdrive-row-text {
+  flex: 1 1 auto;
+  min-width: auto;
 }
 
-/* Last resort: an address too long even for a full row still has no spaces
-   to break at, and must not push the box wider. */
+.settings-pane .modal-toggle-row.gdrive-row > div.gdrive-actions {
+  flex: 0 0 auto;
+}
+
+/* break-word, not anywhere: `anywhere` would let the address count as one
+   character wide when the row is measured, so it would shrink into a
+   column instead of taking its own line. This still breaks an address too
+   long even for a full row, which must not push the box wider. */
 .gdrive-row-label {
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .gdrive-progress {
