@@ -340,6 +340,9 @@
                 <!-- One slot: Sync when signed in, Sign in otherwise. -->
                 <button type="button" class="home-manage-link" id="home-signin" hidden>Sign in</button>
                 <button type="button" class="home-manage-link" id="home-sync" hidden>Sync</button>
+                <!-- Shown only while some game has no picture; index.js
+                     "Library pictures, in one go" hides it again once none do. -->
+                <button type="button" class="home-manage-link" id="home-thumbs" hidden>Add pictures</button>
                 <button type="button" class="home-manage-link" id="manage-roms">Manage ROMs and Saves</button>
               </span>
             </div>
@@ -424,7 +427,7 @@
         <h2 id="thumbs-title">Add pictures to your library?</h2>
         <div id="thumbs-offer">
           <p>dingbat can open each game, pick up where you left off, take a picture of the screen for its library card, and close it again. It takes a few seconds a game. Your games and saves are not changed.</p>
-          <p class="modal-hint">You can do this later from <b>Manage ROMs and Saves</b>.</p>
+          <p class="modal-hint">You can do this later from <b>Add pictures</b>, above your library.</p>
           <div class="modal-toggle-row" id="thumbs-drive-row">
             <div>
               <span class="modal-row-label">Include games kept only on Drive</span>
@@ -666,14 +669,6 @@
         <p class="modal-hint">While signed in to Drive, <b>Reset</b> and <b>Delete</b> apply to all your devices.<span id="roms-hint-remove" hidden> <b>Remove from device</b> frees this device only — your save stays, and the game stays on Drive.</span></p>
         <p id="roms-manage-empty" class="modal-toggle-sub" hidden>No games are stored in this browser yet.</p>
         <div id="roms-manage-list" class="roms-manage-list"></div>
-        <div class="modal-subhead">Library pictures</div>
-        <div class="modal-toggle-row">
-          <div>
-            <span class="modal-row-label">Add pictures for games without one</span>
-            <span class="modal-toggle-sub">Opens each game, picks up where you left off, takes a picture of the screen for its library card, and closes it again</span>
-          </div>
-          <button type="button" class="button button-sm" id="roms-thumbs">Add pictures</button>
-        </div>
         <div class="modal-subhead">Google Drive</div>
         <p class="modal-hint">Mirror your games and saves across devices.</p>
         <div id="gdrive-body"></div>

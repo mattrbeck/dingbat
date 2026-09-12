@@ -168,6 +168,49 @@ test("signed out, the boot offer does not wait at all", async () => {
   assert.ok(modalOpen(app));
 });
 
+// ── The way in, above the library ───────────────────────────────────────────
+
+test("the Add pictures link shows only while a game is missing one", async () => {
+  const app = await loadApp();
+  seedLibrary(app, ["A.gba", "B.gba"]);
+  const btn = app.document.getElementById("home-thumbs");
+
+  await app.api.refreshHomeRecent();
+  await settle();
+  assert.equal(btn.hidden, false, "two games, no pictures");
+
+  app.idb.set("frame:A.gba", new Blob([u8(1)]));
+  await app.api.refreshHomeRecent();
+  await settle();
+  assert.equal(btn.hidden, false, "one still has none");
+
+  app.idb.set("frame:B.gba", new Blob([u8(1)]));
+  await app.api.refreshHomeRecent();
+  await settle();
+  assert.equal(btn.hidden, true, "a fully pictured library offers nothing");
+});
+
+test("an empty library offers no pictures link", async () => {
+  const app = await loadApp();
+  app.idb.set("recent", []);
+  const btn = app.document.getElementById("home-thumbs");
+  btn.hidden = false;
+  await app.api.refreshHomeRecent();
+  await settle();
+  assert.equal(btn.hidden, true);
+});
+
+test("signed out, a Drive-only game does not keep the link up on its own", async () => {
+  const app = await loadApp();
+  // In the library, but its bytes are elsewhere and there is no session to
+  // fetch them with, so the run has nothing it could picture.
+  app.idb.set("recent", [{ name: "Cloud.gba", ts: 1 }]);
+  const btn = app.document.getElementById("home-thumbs");
+  await app.api.refreshHomeRecent();
+  await settle();
+  assert.equal(btn.hidden, true);
+});
+
 // ── The batch ───────────────────────────────────────────────────────────────
 
 test("every unpictured local game is booted, resumed where it can be, and pictured", async () => {

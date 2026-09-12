@@ -4340,6 +4340,7 @@ const launchRom = async (name) => {
 const homeRecentWrap = document.getElementById("home-recent-wrap");
 const homeRecentHead = document.getElementById("home-recent-head");
 const homeRecent = document.getElementById("home-recent");
+const homeThumbsBtn = document.getElementById("home-thumbs");
 const storageInfo = document.getElementById("storage-info");
 
 // Empty-library placeholder: on a fresh device the only way to reach Drive
@@ -4737,6 +4738,7 @@ const refreshHomeRecent = async () => {
     if (libBar) libBar.hidden = true;
     if (libNone) libNone.hidden = true;
     storageInfo.textContent = "";
+    homeThumbsBtn.hidden = true;
     closeTileMenu();
     homeRecent.replaceChildren(buildEmptyLibraryCard());
     homeArtUrls.forEach(URL.revokeObjectURL);
@@ -4881,6 +4883,11 @@ const refreshHomeRecent = async () => {
     }
     tiles.push(tile);
   }
+  // The pictures offer is worth showing only while something lacks one.
+  // Drive-only games count when signed in, since the run can fetch them.
+  thumbsCandidates(driveLinked())
+    .then((cands) => { if (gen === homeRenderGen) homeThumbsBtn.hidden = !cands.length; })
+    .catch(() => {});
   // Filtered before the commit: a fresh render is already filtered.
   for (let t of tiles) t.hidden = !libTileMatches(t);
   // The one DOM commit, atomic: no zero-height moment.
@@ -9162,8 +9169,10 @@ const offerThumbnailsAfterBoot = async (maxWait = THUMBS_PULL_WAIT_MS) => {
   return maybeOfferThumbnails();
 };
 
-// The manual entry: the same box, from Manage ROMs and Saves. A loaded game
+// The manual entry: the same box, from the library head. A loaded game
 // (paused at home, say) has to close first: the batch takes the core.
+// The library head's "Add pictures", which is shown only while there is
+// something to picture (refreshHomeRecent).
 const thumbsFromManage = async () => {
   if (currentRomName || linkMode || rollbackMode || netActive()) {
     showToast("Close the running game first");
@@ -9290,7 +9299,7 @@ document.getElementById("thumbs-go").addEventListener("click", () => {
   runThumbnailBatch({ includeDrive: !thumbsDriveRow.hidden && thumbsDriveToggle.checked });
 });
 document.getElementById("thumbs-not-now").addEventListener("click", closeThumbsModal);
-document.getElementById("roms-thumbs").addEventListener("click", () => { thumbsFromManage(); });
+document.getElementById("home-thumbs").addEventListener("click", () => { thumbsFromManage(); });
 document.getElementById("thumbs-close").addEventListener("click", closeThumbsModal);
 document.getElementById("thumbs-stop").addEventListener("click", cancelThumbnailRun);
 thumbsModal.addEventListener("click", (e) => {
