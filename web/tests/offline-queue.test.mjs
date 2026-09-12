@@ -93,6 +93,32 @@ test("offline while signed in already recorded: the session flag is what sign-ou
     "the queue survives a failed flush");
 });
 
+test("signed out: a save wiped here is queued to be wiped on Drive too", async () => {
+  const app = await loadApp();
+  seed(app);
+  app.api.syncState = blankSync({ acct: "acct-1", connected: false });
+
+  await app.api.resetGameSaves("A.gba");
+  await settle();
+
+  assert.equal(app.idb.get("save:A.gba"), undefined, "gone from here");
+  assert.ok(app.api.syncState.queueDel.includes("save:A.gba"),
+    "and queued for Drive, or the next sync hands it back");
+  assert.ok(app.api.syncState.queueDel.includes("state:A.gba"));
+  assert.ok(!app.api.syncState.queueDel.includes("rom:A.gba"),
+    "the game itself is untouched");
+});
+
+test("never signed in: a save wiped here queues nothing", async () => {
+  const app = await loadApp();
+  seed(app);
+  app.api.syncState = blankSync();
+  await app.api.resetGameSaves("A.gba");
+  await settle();
+  assert.equal(app.idb.get("save:A.gba"), undefined);
+  eq(app.api.syncState.queueDel, []);
+});
+
 // ── Coming back ────────────────────────────────────────────────────────────
 
 test("signing back in carries out the delete queued while away", async () => {

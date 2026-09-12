@@ -3206,7 +3206,11 @@ const removeGameFromDevice = async (game) => {
 // --- Deletion (Manage ROMs) ----------------------------------------------
 const resetGameSaves = async (game) => {
   await deleteSaveData(game);
-  if (driveLinked()) queueSaveDataDeletes(game);
+  // Enrolled, not linked: wiping a save is the same kind of intent as
+  // deleting a game, so a reset made offline or signed out is recorded and
+  // reaches Drive when the account comes back. Otherwise the next sync
+  // hands the save straight back.
+  if (driveEnrolled()) queueSaveDataDeletes(game);
 };
 const deleteGameEverywhere = async (game) => {
   await deleteGameLocalData(game);
