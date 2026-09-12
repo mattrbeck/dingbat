@@ -2126,49 +2126,62 @@ const gdriveSignOut = () => {
   showToast("Signed out of Google Drive");
 };
 
+// One Settings row: what it is on the left, the control that acts on it on
+// the right — the shape every other actionable row in this box already has.
+const gdriveRow = (label, sub, control) => {
+  let row = document.createElement("div");
+  row.className = "modal-toggle-row";
+  let text = document.createElement("div");
+  let l = document.createElement("span");
+  l.className = "modal-row-label gdrive-row-label";
+  l.textContent = label;
+  let s = document.createElement("span");
+  s.className = "modal-toggle-sub";
+  s.textContent = sub;
+  text.append(l, s);
+  row.appendChild(text);
+  if (control) row.appendChild(control);
+  return row;
+};
+
 const renderGdriveSection = () => {
   if (!gdriveBody) return;
   gdriveBody.innerHTML = "";
 
   if (!GDRIVE_CLIENT_ID) {
-    let p = document.createElement("p");
-    p.className = "modal-toggle-sub";
-    p.textContent =
-      "Drive sync isn't configured in this build (no Google client ID).";
-    gdriveBody.appendChild(p);
+    gdriveBody.appendChild(gdriveRow(
+      "Not available in this build",
+      "This build was made without a Google client ID.", null));
     return;
   }
 
   if (!driveLinked()) {
-    let btn = makeGdriveButton("Sign in with Google", false, async () => {
+    let btn = makeGdriveButton("Sign in", false, async () => {
       btn.disabled = true;
       try { await gdriveConnect(); }
       catch (e) { showToast(e.message); btn.disabled = false; }
     });
-    gdriveBody.appendChild(btn);
+    gdriveBody.appendChild(gdriveRow(
+      "Sign in with Google",
+      "Mirrors your games and saves across every device you sign in to.", btn));
     return;
   }
 
   let n = pendingCount();
-  let status = document.createElement("p");
-  status.className = "gdrive-status";
   // Linked but between tokens is not signed out; the next Sync buys a token.
-  status.textContent =
-    (gdriveEmail || "Connected to Google Drive") +
-    " · " + (!gdriveToken ? "reconnects when you next sync"
-               : n ? n + " change" + (n === 1 ? "" : "s") + " pending"
-               : "all changes synced");
-  gdriveBody.appendChild(status);
-
-  let actions = document.createElement("div");
-  actions.className = "gdrive-actions";
-  actions.appendChild(
+  let state = !gdriveToken ? "Reconnects when you next sync."
+            : n ? n + " change" + (n === 1 ? "" : "s") + " waiting to go up."
+            : "All changes synced.";
+  gdriveBody.appendChild(gdriveRow(
+    gdriveEmail || "Connected to Google Drive", state,
     makeGdriveButton("Sync now", false, async () => {
       if (!(await ensureDriveSignedIn())) return;
       runFullSync({ label: "Syncing" });
-    }));
-  actions.appendChild(makeGdriveButton("Sign out", true, gdriveSignOut));
-  gdriveBody.appendChild(actions);
+    })));
+  gdriveBody.appendChild(gdriveRow(
+    "Sign out of Google Drive",
+    "Your games and saves stay on this device.",
+    makeGdriveButton("Sign out", true, gdriveSignOut)));
 };
 
 // ============================================================================
