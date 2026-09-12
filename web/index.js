@@ -1825,6 +1825,7 @@ const gameFlags = (name, localRoms, withSaves) => {
     linked,
     driveOnly: !localRoms.has(name),
     hasSaves: withSaves.has(name) || savesOnDrive,
+    hasLocalSaves: withSaves.has(name),
     // Drive confirmed to hold the ROM, with no delete queued. Two ways of
     // knowing, and both count: this device uploaded it (sigs), or a pull
     // saw it in the listing (rmt). Only the second covers a ROM that was
@@ -1837,8 +1838,11 @@ const gameFlags = (name, localRoms, withSaves) => {
       (!!syncState.sigs[romKey(name)] || !!syncState.rmt[romKey(name)]) &&
       !syncState.queueDel.includes(romKey(name)),
     loaded: isRomLoaded(name),
-    // A live 2P link has two cores writing this ROM's saves: delete, reset
-    // and rename are all blocked until link mode exits.
+    // A game in a session that cannot just be closed: an online link, or
+    // the same-browser 2P rig behind ?2p. Two cores are writing this game's
+    // saves, and unloadGame refuses outright, so every action that touches
+    // its files waits for the session to end.
+    busy: isRomLoaded(name) && (linkMode || rollbackMode || netActive()),
     linkRunning: !!(linkMode && linkRomEntry && linkRomEntry.name === name),
     downloading: syncDownloading.has(name),
   };
@@ -1871,6 +1875,11 @@ const resetGameAction = async (name) => {
 // Remove from device = free this device's ROM bytes, keep saves and the
 // Drive copy.
 const removeFromDeviceAction = async (name) => {
+  // Unlike Delete, the save is being kept, so it is flushed on the way out.
+  if (isRomLoaded(name) && !(await unloadGame({ flushSave: true }))) {
+    showToast("Exit the online session first");
+    return;
+  }
   if (await removeGameFromDevice(name)) {
     showToast("ROM removed from this device — save kept, still on Drive");
   }
@@ -1927,7 +1936,7 @@ const refreshRomsManageList = async () => {
     let row = document.createElement("div");
     row.className = "roms-manage-row";
 
-    let { driveOnly, hasSaves, romOnDrive, linkRunning } =
+    let { driveOnly, hasSaves, romOnDrive, busy, loaded } =
       gameFlags(name, localRoms, withSaves);
 
     // The title on .roms-manage-name is how the rest of the app identifies a row.
@@ -1945,9 +1954,9 @@ const refreshRomsManageList = async () => {
     renameBtn.setAttribute("aria-label", "Rename " + displayName(name));
     renameBtn.innerHTML = PENCIL_ICON;
     // Drive-only rows rename too (a metadata PATCH needs no bytes here).
-    if (linkRunning) {
+    if (busy) {
       renameBtn.disabled = true;
-      renameBtn.title = "Exit link mode to rename this game";
+      renameBtn.title = "Exit the online session to rename this game";
     } else {
       renameBtn.title = "Rename this game and everything saved with it";
       renameBtn.addEventListener("click", () => openRenameModal(name));
@@ -1967,11 +1976,11 @@ const refreshRomsManageList = async () => {
     // Reset renders on every row but only arms when there is something to
     // wipe; otherwise greyed with the reason.
     let saveBtn = null;
-    if (hasSaves && linkRunning) {
+    if (hasSaves && busy) {
       saveBtn = makeDisabledButton(
         "Reset",
         "button button-sm roms-manage-btn",
-        "Exit link mode to reset this game's save",
+        "Exit the online session to reset this game's save",
       );
     } else if (!hasSaves) {
       saveBtn = makeInertButton(
@@ -2002,17 +2011,17 @@ const refreshRomsManageList = async () => {
       );
       siblings.push(freeBtn);
     } else if (localRoms.has(name) && romOnDrive) {
-      if (isRomLoaded(name)) {
-        // Unlike Delete, the loaded game is not unloaded for the user.
+      if (busy) {
         freeBtn = makeDisabledButton(
           "Remove from device",
           "button button-sm roms-manage-btn",
-          "Close this game first to remove it from this device",
+          "Exit the online session to remove this game from this device",
         );
       } else {
+        // A running game is closed on the way out, as Delete already does.
         freeBtn = makeConfirmButton({
           label: "Remove from device",
-          confirmLabel: "Remove from this device?",
+          confirmLabel: loaded ? "Close and remove?" : "Remove from this device?",
           className: "button button-sm roms-manage-btn",
           onArm: () => disarmOthers(freeBtn),
           onConfirm: () => removeFromDeviceAction(name),
@@ -2047,16 +2056,17 @@ const refreshRomsManageList = async () => {
     }
 
     let allBtn;
-    if (linkRunning) {
+    if (busy) {
       allBtn = makeDisabledButton(
         "Delete",
         "button button-sm roms-manage-btn roms-manage-danger",
-        "Exit link mode to remove this game",
+        "Exit the online session to remove this game",
       );
     } else {
       allBtn = makeConfirmButton({
         label: "Delete",
-        confirmLabel: "Delete ROM and save data?",
+        confirmLabel: loaded ? "Close and delete everything?"
+                             : "Delete ROM and save data?",
         className: "button button-sm roms-manage-btn roms-manage-danger",
         onArm: () => disarmOthers(allBtn),
         onConfirm: () => deleteGameAction(name),
@@ -3048,8 +3058,10 @@ const pullSyncInner = async ({ silent = true } = {}) => {
         // this device or fetched on demand (downloadGame). The listing is
         // then the only place this device can learn that Drive holds it -
         // which is what "Remove from this device" needs to know before it
-        // frees the local bytes. Recorded, not fetched.
+        // frees the local bytes. Recorded, not fetched - and the listing
+        // gives the size for free, for a game that has never been here.
         syncState.rmt[name] = f.modifiedTime;
+        if (f.size) await noteRomSize(p.game, Number(f.size) || 0);
         continue;
       }
       if (p.kind === "frame") {
@@ -3143,6 +3155,7 @@ const downloadGame = async (game) => {
       for (let f of files) {
         let bytes = await driveDownload(f.id);
         await writeSyncBytes(f.name, bytes);
+        if (f.name === romKey(game)) await noteRomSize(game, bytes.length);
         syncState.sigs[f.name] = sigOfBytes(bytes);
         syncState.rmt[f.name] = f.modifiedTime;
       }
@@ -4130,6 +4143,29 @@ const romKey = (name) => "rom:" + name;
 const artKey = (name) => "art:" + name;
 const frameKey = (name) => "frame:" + name;
 
+// How big each game is, by name. Local only: the key does not parse as a
+// Drive file name, so it is never uploaded, and it describes this device's
+// idea of a size that is the same everywhere anyway. IndexedDB cannot give
+// a record's size without reading it, and a ROM is up to 32 MB, so the
+// figure is noted when it is already in hand - on import, on download, and
+// from the Drive listing - and only read from the ROM itself as a last
+// resort, once, off the back of an explicit menu.
+const ROM_SIZES_KEY = "romsizes";
+/** @type {Record<string, number> | null} */
+let romSizes = null;
+const loadRomSizes = async () => {
+  if (!romSizes) romSizes = (await dbGet(ROM_SIZES_KEY)) || {};
+  return romSizes;
+};
+const romSizeOf = (game) => (romSizes && romSizes[game]) || 0;
+const noteRomSize = async (game, bytes) => {
+  if (!bytes) return;
+  await loadRomSizes();
+  if (romSizes[game] === bytes) return;
+  romSizes[game] = bytes;
+  await dbPut(ROM_SIZES_KEY, romSizes);
+};
+
 // Drop the ROM record, its box art and its thumbnail; save data is never
 // touched here.
 const evictLocalRom = async (name) => {
@@ -4271,6 +4307,7 @@ const requestPersistentStorage = () => {
 const addRecentRom = async (name, bytes, art) => {
   // Bytes first, index second: an interruption leaves at worst an orphan.
   await dbPut(romKey(name), { name, data: new Uint8Array(bytes) });
+  await noteRomSize(name, bytes.byteLength ?? bytes.length);
   if (art) await dbPut(artKey(name), art); // Blob (box art from a zip)
   await bumpRecentIndex(name, { fresh: true });
   refreshHomeRecent();
@@ -4465,67 +4502,65 @@ const tileMenuItem = ({ label, sub = "", danger = false, disabled = "", confirmL
 
 // The items for one game, from its flags (gameFlags). Order: get it, name
 // it, wipe its saves, free the space, and last - set apart - delete it.
+// Every item says what it does in its own label: nothing carries a
+// description. Only a blocked item speaks, and only to say why, since a
+// greyed row that will not explain itself is worse than one that will.
+// Delete needs no reach line any more - enrolled, it always means every
+// device, because a delete made away from Drive is recorded and flushes
+// when the account comes back.
 const tileMenuEntries = (name, f) => {
   let items = [];
-  let linkLock = f.linkRunning ? "Exit link mode first" : "";
+  let busy = f.busy ? "Exit the online session first" : "";
   if (f.driveOnly) {
     items.push(tileMenuItem({
       label: "Download to this device",
-      sub: f.linked ? "The game and its saves, from Drive"
-                    : "Signs in to Google Drive first",
       disabled: f.downloading ? "Downloading…" : "",
       run: () => downloadGameAction(name),
     }));
   }
   items.push(tileMenuItem({
     label: "Rename",
-    sub: "Everything saved with it follows",
-    disabled: linkLock,
+    disabled: busy,
     run: () => openRenameModal(name),
   }));
   items.push(tileMenuItem({
     label: "Reset save data",
-    sub: "Deletes its saves and states" + (f.linked ? " on all your devices" : "") +
-         "; the game starts fresh",
-    disabled: linkLock || (f.hasSaves ? "" : "No save data yet"),
+    disabled: busy || (f.hasSaves ? "" : "No save data yet"),
     confirmLabel: "Delete all save data?",
     run: () => resetGameAction(name),
   }));
   if (!f.driveOnly && f.linked) {
     items.push(tileMenuItem({
       label: "Remove from this device",
-      sub: "Frees the space here. Your saves stay, and the game stays on Drive",
-      disabled: linkLock ||
-        (!f.romOnDrive ? "Not backed up to Drive yet — this is your only copy"
-         : f.loaded ? "Close the game first" : ""),
-      confirmLabel: "Remove from this device?",
+      // A paused game is closed on the way, the way Delete already does it.
+      disabled: busy ||
+        (f.romOnDrive ? "" : "Not backed up to Drive yet — this is your only copy"),
+      confirmLabel: f.loaded ? "Close and remove?" : "Remove from this device?",
       run: () => removeFromDeviceAction(name),
     }));
   }
-  // Delete's reach depends on the session: signed in it is the whole
-  // library; signed out, a Drive-only game only leaves this browser's list
-  // (the copy on Drive is untouched), so say so.
-  let reach = f.linked ? "from Drive and every device"
-            : f.driveOnly ? "from this library; your copy on Drive stays"
-            : "from this browser";
   items.push(tileMenuItem({
     label: "Delete",
     danger: true,
-    sub: (f.loaded ? "Closes the game, then deletes the ROM and its saves, "
-                   : "The ROM and its saves, ") + reach,
-    disabled: linkLock,
-    confirmLabel: "Delete ROM and save data?",
+    disabled: busy,
+    confirmLabel: f.loaded ? "Close and delete everything?"
+                           : "Delete ROM and save data?",
     run: () => deleteGameAction(name),
   }));
   return items;
 };
 
+// The system and, once known, how big the game is - which is the figure
+// every choice in this menu turns on and the one the rest of the screen
+// never gives. Where the game lives is left to the items, which already say
+// it: a Download means it is not here, a Remove means it is. The one thing
+// nothing else can say is that a freed game left its save behind.
 const tileMenuStatus = (name, f) => {
-  let where = f.driveOnly ? "On Drive, not on this device"
-            : f.romOnDrive ? "On this device and on Drive"
-            : f.linked ? "On this device, not on Drive yet"
-            : "On this device";
-  return systemOf(name) + " · " + where + (f.loaded ? " · Paused" : "");
+  let bits = [systemOf(name)];
+  let size = romSizeOf(name);
+  if (size) bits.push(formatBytes(size));
+  if (f.driveOnly && f.hasLocalSaves) bits.push("your save is still on this device");
+  return bits.join(" · ");
 };
 
 // The head: the game's picture (phones), its name and where it lives.
@@ -4559,6 +4594,17 @@ const buildTileMenuHead = (name, f) => {
   let status = document.createElement("span");
   status.className = "tile-menu-status";
   status.textContent = tileMenuStatus(name, f);
+  // Never noted and the bytes are here: read them once, behind the open
+  // menu, and fill the line in. A ROM record is up to 32 MB, so this never
+  // blocks the menu and never happens twice for the same game.
+  if (!romSizeOf(name) && !f.driveOnly) {
+    getRomBytes(name)
+      .then((bytes) => bytes && noteRomSize(name, bytes.length))
+      .then(() => {
+        if (tileMenuFor === name) status.textContent = tileMenuStatus(name, f);
+      })
+      .catch(() => {});
+  }
   text.append(title, status);
   tileMenuHead.replaceChildren(pic, text);
 };
@@ -4712,6 +4758,16 @@ const refreshHomeRecent = async () => {
     if (typeof k === "string" && k.startsWith("rom:")) localRoms.add(k.slice(4));
   }
   renderLibChips(roms, localRoms);
+  // Sizes ride along with the render that needs them, and lose the games
+  // that have left the library.
+  await loadRomSizes();
+  if (gen !== homeRenderGen) return;
+  let live = new Set(roms.map((r) => r.name));
+  let stale = Object.keys(romSizes).filter((n) => !live.has(n));
+  if (stale.length) {
+    for (let n of stale) delete romSizes[n];
+    dbPut(ROM_SIZES_KEY, romSizes);
+  }
   roms = sortRoms(roms);
   let tiles = [];
   for (let { name: romName } of roms) {

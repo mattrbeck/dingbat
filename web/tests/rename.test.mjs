@@ -508,7 +508,7 @@ test("every row carries a rename button that names its game", async () => {
   assert.ok(rowFor(app, OLD).children[1].className.includes("roms-manage-actions"));
 });
 
-test("the rename button is disabled while a link session holds the game", async () => {
+test("the rename button is disabled while a session holds the game", async () => {
   const app = await loadApp();
   seedTypicalGame(app, OLD);
   app.api.linkMode = true;
@@ -517,7 +517,7 @@ test("the rename button is disabled while a link session holds the game", async 
 
   const btn = renameButtonFor(app, OLD);
   assert.equal(btn.disabled, true);
-  assert.match(btn.title, /Exit link mode/);
+  assert.match(btn.title, /Exit the online session/);
 });
 
 // ── The modal ───────────────────────────────────────────────────────────────

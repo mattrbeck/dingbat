@@ -333,7 +333,7 @@ test("Sign out while the modal is open withdraws Remove from the rows", async ()
     "and the intro stops describing it");
 });
 
-test("the game currently loaded shows Remove disabled, not armed", async () => {
+test("the game currently loaded is closed on the way out, and the question says so", async () => {
   const app = await loadApp();
   app.setFetch(makeDrive(["rom:A.gba"]).fetch);
   signIn(app, { "rom:A.gba": "sig" });
@@ -343,8 +343,28 @@ test("the game currently loaded shows Remove disabled, not armed", async () => {
 
   await openManageList(app);
   const btn = rowButton(app, "A.gba", "Remove from device");
-  assert.ok(btn, "the row still shows the action");
-  assert.equal(btn.disabled, true, "but it can't be used on the running game");
+  assert.ok(btn);
+  assert.equal(btn.disabled, false, "a paused game no longer blocks it");
+  await btn.click(); // arm
+  assert.equal(btn.textContent, "Close and remove?");
+  app.api.currentOriginalName = null;
+});
+
+test("a game in an online session is the one Remove waits for", async () => {
+  const app = await loadApp();
+  app.setFetch(makeDrive(["rom:A.gba"]).fetch);
+  signIn(app, { "rom:A.gba": "sig" });
+  app.idb.set("recent", [{ name: "A.gba", ts: 1 }]);
+  app.idb.set("rom:A.gba", { name: "A.gba", data: u8(1) });
+  app.api.currentOriginalName = "A.gba";
+  app.api.rollbackMode = true;
+
+  await openManageList(app);
+  const btn = rowButton(app, "A.gba", "Remove from device");
+  assert.equal(btn.disabled, true);
+  assert.match(btn.title, /online session/);
+  app.api.rollbackMode = false;
+  app.api.currentOriginalName = null;
 });
 
 // ── End to end through the button ───────────────────────────────────────────
