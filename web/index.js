@@ -2126,12 +2126,17 @@ const gdriveSignOut = () => {
   showToast("Signed out of Google Drive");
 };
 
-// One Settings row: what it is on the left, the control that acts on it on
+// One Settings row: what it is on the left, the controls that act on it on
 // the right — the shape every other actionable row in this box already has.
-const gdriveRow = (label, sub, control) => {
+// The account's name is an email, which can outrun any column, so the row
+// wraps as a whole: the buttons keep their size and drop to their own line
+// when the row is tight, leaving the address the full width. Only an
+// address too long even for that breaks mid-word.
+const gdriveRow = (label, sub, ...controls) => {
   let row = document.createElement("div");
-  row.className = "modal-toggle-row";
+  row.className = "modal-toggle-row gdrive-row";
   let text = document.createElement("div");
+  text.className = "gdrive-row-text";
   let l = document.createElement("span");
   l.className = "modal-row-label gdrive-row-label";
   l.textContent = label;
@@ -2140,7 +2145,13 @@ const gdriveRow = (label, sub, control) => {
   s.textContent = sub;
   text.append(l, s);
   row.appendChild(text);
-  if (control) row.appendChild(control);
+  let live = controls.filter(Boolean);
+  if (live.length) {
+    let actions = document.createElement("div");
+    actions.className = "gdrive-actions";
+    actions.append(...live);
+    row.appendChild(actions);
+  }
   return row;
 };
 
@@ -2172,16 +2183,15 @@ const renderGdriveSection = () => {
   let state = !gdriveToken ? "Reconnects when you next sync."
             : n ? n + " change" + (n === 1 ? "" : "s") + " waiting to go up."
             : "All changes synced.";
+  let sync = makeGdriveButton("Sync", false, async () => {
+    if (!(await ensureDriveSignedIn())) return;
+    runFullSync({ label: "Syncing" });
+  });
+  let out = makeGdriveButton("Sign out", true, gdriveSignOut);
+  // The row has no space to say it, and it is the one thing worth saying.
+  out.title = "Your games and saves stay on this device";
   gdriveBody.appendChild(gdriveRow(
-    gdriveEmail || "Connected to Google Drive", state,
-    makeGdriveButton("Sync now", false, async () => {
-      if (!(await ensureDriveSignedIn())) return;
-      runFullSync({ label: "Syncing" });
-    })));
-  gdriveBody.appendChild(gdriveRow(
-    "Sign out of Google Drive",
-    "Your games and saves stay on this device.",
-    makeGdriveButton("Sign out", true, gdriveSignOut)));
+    gdriveEmail || "Connected to Google Drive", state, sync, out));
 };
 
 // ============================================================================

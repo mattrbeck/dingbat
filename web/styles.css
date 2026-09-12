@@ -6254,8 +6254,38 @@ body.net-mode #saves-modal .modal-toggle-row:has(#reset-save-slot) {
  * ==========================================================
  */
 
-/* The account row's label is an email address, which has no spaces to
-   break at. */
+/* A settings row is a grid there (see "Settings rows"), and its generic
+   child rule would drop this pair into the text's own cell. Give it the
+   control column explicitly, spanning both rows so it sits beside the
+   account and its status. */
+.gdrive-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* The `div` is load-bearing: the generic child rule above carries a type
+   selector, so a class-only selector loses to it. */
+.settings-pane .modal-toggle-row > div.gdrive-actions {
+  grid-area: 1 / 2 / span 2 / span 1;
+  align-self: center;
+}
+
+/* Narrow: two buttons and an email cannot share a line without shredding
+   the address into a column, so the buttons take their own line under it
+   and the address gets the full width. */
+@media (max-width: 759px) {
+  .settings-pane .modal-toggle-row.gdrive-row {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+  }
+  .settings-pane .modal-toggle-row.gdrive-row > div.gdrive-actions {
+    grid-area: 3 / 1;
+    margin-top: 12px;
+  }
+}
+
+/* Last resort: an address too long even for a full row still has no spaces
+   to break at, and must not push the box wider. */
 .gdrive-row-label {
   overflow-wrap: anywhere;
 }
