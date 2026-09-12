@@ -2631,7 +2631,13 @@ const mergeLibrary = (a, b) => {
   for (let e of [...(a.recents || []), ...(b.recents || [])]) {
     if (!e?.name) continue;
     let prev = byName.get(e.name);
-    if (!prev || (e.ts || 0) > (prev.ts || 0)) byName.set(e.name, { name: e.name, ts: e.ts || 0 });
+    // The newest play wins the entry; the newest import claim from either
+    // side is kept alongside it, whichever entry that was.
+    let imp = Math.max(prev?.imp || 0, e.imp || 0);
+    if (!prev || (e.ts || 0) > (prev.ts || 0)) {
+      byName.set(e.name, { name: e.name, ts: e.ts || 0 });
+    }
+    if (imp) byName.get(e.name).imp = imp;
   }
   // Newest marker per old name wins.
   let ren = new Map();
@@ -2645,13 +2651,20 @@ const mergeLibrary = (a, b) => {
   // Oldest-first so a chain (A->B, B->C) lands on C.
   for (let r of [...ren.values()].sort((x, y) => (x.ts || 0) - (y.ts || 0))) {
     let e = byName.get(r.from);
-    if (e && (e.ts || 0) < r.ts) {
+    // Someone playing the old name is not an argument about the name: it is
+    // a device that has not pulled the rename yet, and it gets migrated when
+    // it does. Only an import claiming the old name after the rename is a
+    // different game, and spends the marker.
+    let reimported = !!e && (e.imp || 0) > r.ts;
+    if (e && !reimported) {
       byName.delete(r.from);
       let t = byName.get(r.to);
-      if (!t || (t.ts || 0) < (e.ts || 0)) byName.set(r.to, { name: r.to, ts: e.ts || 0 });
+      if (!t || (t.ts || 0) < (e.ts || 0)) {
+        byName.set(r.to, e.imp ? { name: r.to, ts: e.ts || 0, imp: e.imp }
+                                : { name: r.to, ts: e.ts || 0 });
+      }
     }
-    // A newer entry under the old name is a fresh import: the marker is spent.
-    if (byName.has(r.from)) ren.delete(r.from);
+    if (reimported) ren.delete(r.from);
   }
   let tomb = new Map();
   for (let t of [...(a.tomb || []), ...(b.tomb || [])]) {
@@ -2821,6 +2834,37 @@ const flushSyncInner = async () => {
   setSyncStatus("syncing");
   try {
     let remote = await driveListMap();
+    // What the library says about existence and naming, settled before a
+    // single file is touched, so the files cannot end up disagreeing with it.
+    let lib = mergeLibrary(await readDriveLibrary(remote), await localLibrary());
+    // A tombstone the merge dropped: a later play on another device says the
+    // delete was not meant. Its queued file deletes are cancelled. Only a
+    // game delete raises a tombstone, so a save reset's deletes - whose game
+    // is still in the library - are never caught by this.
+    let revived = new Set();
+    for (let t of syncState.tomb) {
+      if (t?.name && !lib.tomb.some((x) => x.name === t.name)) revived.add(t.name);
+    }
+    if (revived.size) {
+      syncState.queueDel = syncState.queueDel.filter((n) => {
+        let g = parseDriveFileName(n)?.game;
+        if (!g || !revived.has(g)) return true;
+        delete delStamps()[n];
+        return false;
+      });
+    }
+    // A rename marker the merge spent: someone imported a fresh game under
+    // the old name, so the name is taken and the queued file renames would
+    // carry off that new game's files.
+    let spent = new Set();
+    for (let r of syncState.ren) {
+      if (r?.from && !lib.ren.some((x) => x.from === r.from)) spent.add(r.from);
+    }
+    if (spent.size) {
+      syncState.queueRen = syncState.queueRen.filter(
+        (q) => !spent.has(parseDriveFileName(q.from)?.game));
+    }
+
     // Renames first: every later step speaks in new names.
     for (let r of syncState.queueRen.slice()) {
       let f = remote.get(r.from);
@@ -2875,10 +2919,20 @@ const flushSyncInner = async () => {
       }
       syncState.queueUp = syncState.queueUp.filter((n) => n !== name);
     }
-    let lib = mergeLibrary(await readDriveLibrary(remote), await localLibrary());
     await writeDriveLibrary(lib, await driveListMap());
     syncState.tomb = lib.tomb;
     syncState.ren = lib.ren;
+    // A game the merge brought back belongs in this device's own library
+    // again, as a tile it can download from.
+    if (revived.size) {
+      let here = await getRecentMeta();
+      let add = lib.recents.filter((r) => revived.has(r.name) &&
+                                          !here.some((h) => h.name === r.name));
+      if (add.length) {
+        await dbPut("recent", [...here, ...add].sort((x, y) => (y.ts || 0) - (x.ts || 0)));
+        refreshHomeRecent();
+      }
+    }
     await saveSyncState();
     syncBusy = false;
     setSyncStatus("done");
@@ -4278,7 +4332,9 @@ setInterval(() => { if (!paused) storeLastFrame(); }, FRAME_TICK_MS);
 // Move `name` to the front of the index and evict past the cap (ROM + art
 // only, never saves).
 const bumpRecentIndex = async (name, { fresh = false } = {}) => {
-  let list = (await getRecentMeta()).filter((r) => r.name !== name);
+  let all = await getRecentMeta();
+  let prev = all.find((r) => r?.name === name);
+  let list = all.filter((r) => r.name !== name);
   let ts = Date.now();
   // A relaunch under a not-yet-applied rename marker must not outrank it
   // (the merge would read that as a new claim on the name): pin recency
@@ -4287,7 +4343,13 @@ const bumpRecentIndex = async (name, { fresh = false } = {}) => {
     let m = syncState.ren.find((r) => r?.from === name);
     if (m?.ts && ts >= m.ts) ts = m.ts - 1;
   }
-  list.unshift({ name, ts });
+  // `imp` is when this game was last really imported, as against merely
+  // played. A rename marker from another device is not spent by a play -
+  // that device simply has not heard about the rename yet - but it is spent
+  // by a fresh import claiming the old name, which is a different game now.
+  // mergeLibrary is what reads it.
+  let imp = fresh ? ts : prev?.imp;
+  list.unshift(imp ? { name, ts, imp } : { name, ts });
   // Past MAX_RECENT: signed in, the entry becomes a Drive-only tile; signed
   // out it is dropped.
   for (let i = MAX_RECENT; i < list.length; i++) await evictLocalRom(list[i].name);

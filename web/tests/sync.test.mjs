@@ -449,16 +449,27 @@ test("mergeLibrary replays a rename chain oldest-first", async () => {
   eq(merged.recents.map((r) => r.name), ["C.gba"], "A lands on C via B");
 });
 
-test("a newer entry under the old name supersedes the rename marker", async () => {
+test("a fresh import under the old name supersedes the rename marker", async () => {
   const app = await loadApp();
-  // Renamed away, then a new game imported under the freed name.
+  // Renamed away, then a new game imported under the freed name. `imp` is
+  // what says "imported" rather than "played" — see sync-conflicts.
   const merged = app.api.mergeLibrary(
     { recents: [{ name: "B.gba", ts: 45 }], ren: [{ from: "A.gba", to: "B.gba", ts: 40 }] },
-    { recents: [{ name: "A.gba", ts: 60 }] },
+    { recents: [{ name: "A.gba", ts: 60, imp: 60 }] },
   );
   eq(merged.recents.map((r) => r.name).sort(), ["A.gba", "B.gba"],
      "the newcomer keeps the freed-up name, alongside the renamed game");
   eq(merged.ren, [], "the spent marker is dropped so it can never rename the newcomer");
+});
+
+test("but merely playing the old name does not: that device has yet to pull", async () => {
+  const app = await loadApp();
+  const merged = app.api.mergeLibrary(
+    { recents: [{ name: "B.gba", ts: 45 }], ren: [{ from: "A.gba", to: "B.gba", ts: 40 }] },
+    { recents: [{ name: "A.gba", ts: 60 }] },   // no import mark: a play
+  );
+  eq(merged.recents.map((r) => r.name), ["B.gba"], "the rename still applies");
+  eq(merged.ren.map((r) => r.from), ["A.gba"], "and the marker waits for that device");
 });
 
 test("pullSync migrates local records when another device renamed the game", async () => {
