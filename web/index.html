@@ -343,7 +343,6 @@
                 <!-- Shown only while some game has no picture; index.js
                      "Library pictures, in one go" hides it again once none do. -->
                 <button type="button" class="home-manage-link" id="home-thumbs" hidden>Add pictures</button>
-                <button type="button" class="home-manage-link" id="manage-roms">Manage ROMs and Saves</button>
               </span>
             </div>
             <!-- Search, filter chips (built by index.js) and sort. A sibling
@@ -652,27 +651,13 @@
       </div>
     </div>
 
-    <!-- The per-game menu off a library tile: everything Manage ROMs and
-         Saves does per game (index.js "Per-game menu"). One DOM, two
-         layouts (styles.css): a popover by the tile's glyph on desktop, a
-         bottom sheet on phones. -->
+    <!-- Every per-game action, off a library tile (index.js "Per-game
+         menu"). One DOM, two layouts (styles.css): a popover by the tile's
+         glyph on desktop, a bottom sheet on phones. -->
     <div id="tile-menu-scrim" hidden></div>
     <div id="tile-menu" role="menu" aria-labelledby="tile-menu-title" hidden>
       <div class="tile-menu-head" id="tile-menu-head"></div>
       <div class="tile-menu-items" id="tile-menu-items"></div>
-    </div>
-
-    <div id="roms-modal" class="modal-overlay">
-      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title-3">
-        <button type="button" class="modal-close" id="roms-close" aria-label="Close">&times;</button>
-        <h2 id="modal-title-3">Manage ROMs and Saves</h2>
-        <p class="modal-hint">While signed in to Drive, <b>Reset</b> and <b>Delete</b> apply to all your devices.<span id="roms-hint-remove" hidden> <b>Remove from device</b> frees this device only — your save stays, and the game stays on Drive.</span></p>
-        <p id="roms-manage-empty" class="modal-toggle-sub" hidden>No games are stored in this browser yet.</p>
-        <div id="roms-manage-list" class="roms-manage-list"></div>
-        <div class="modal-subhead">Google Drive</div>
-        <p class="modal-hint">Mirror your games and saves across devices.</p>
-        <div id="gdrive-body"></div>
-      </div>
     </div>
 
     <!-- Settings: one markup tree, two layouts (styles.css "Settings
@@ -1059,6 +1044,9 @@
                   <button type="button" class="theme-chip" data-theme-name="daiei" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Daiei</button>
                   <button type="button" class="theme-chip" data-theme-name="famicom" role="radio" aria-checked="false"><span class="theme-swatch" aria-hidden="true"></span>Famicom</button>
                 </div>
+                <div class="modal-subhead">Google Drive</div>
+                <p class="modal-hint">Mirror your games and saves across devices.</p>
+                <div id="gdrive-body"></div>
                 <div class="modal-subhead">Emulation</div>
                 <!-- Rewind defaults on: a missing rewindOn key resolves to on
                      (loadSystemSettings). Off drops the ring entirely and hides

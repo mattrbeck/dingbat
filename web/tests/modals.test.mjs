@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { loadApp } from "./helpers.mjs";
 
 const MODAL_IDS = [
-  "settings-modal", "saves-modal", "roms-modal", "update-modal",
+  "settings-modal", "saves-modal", "update-modal",
   "states-modal", "cheats-modal", "report-modal",
 ];
 

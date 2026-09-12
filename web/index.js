@@ -1115,6 +1115,8 @@ const openSettingsModal = () => {
     })
     .catch(() => {});
   updateBiosStatusText();
+  // The Drive controls live under General now; nothing else paints them.
+  renderGdriveSection();
   kbSelection = -1;
   kbPreset.value = detectPreset(activeBindings);
   renderKbBindings();
@@ -1462,28 +1464,7 @@ const makeConfirmButton = ({
   return btn;
 };
 
-const makeDisabledButton = (label, className, title) => {
-  let btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = className;
-  btn.textContent = label;
-  btn.disabled = true;
-  if (title) btn.title = title;
-  return btn;
-};
 
-// Like makeDisabledButton but still tappable: mobile has no hover, so the
-// reason is a toast on tap as well as the tooltip.
-const makeInertButton = (label, className, reason) => {
-  let btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = className + " is-inert";
-  btn.textContent = label;
-  btn.setAttribute("aria-disabled", "true");
-  btn.title = reason;
-  btn.addEventListener("click", () => showToast(reason));
-  return btn;
-};
 
 const romsWithSaveData = async () => {
   let names = new Set();
@@ -1593,37 +1574,6 @@ if (resetSaveSlot) {
   resetSaveSlot.appendChild(resetSaveBtn);
 }
 
-// --- Manage ROMs and Saves modal ---
-// One row per stored game: recents first, then any ROM whose save data
-// outlived its recents entry.
-
-const romsModal = document.getElementById("roms-modal");
-const romsManageList = document.getElementById("roms-manage-list");
-const romsManageEmpty = document.getElementById("roms-manage-empty");
-// Hidden while signed out, when the per-row Remove button doesn't render.
-const romsHintRemove = document.getElementById("roms-hint-remove");
-// Sign-in state the rows were last rendered under: a routine repaint must
-// not disarm an armed confirm button.
-let romsRowsSignedIn = null;
-
-const openRomsModal = () => {
-  menuDropdown.hidden = true;
-  romsModal.classList.add("open");
-  refreshRomsManageList();
-  renderGdriveSection();
-  trapFocus(romsModal);
-};
-
-const closeRomsModal = () => {
-  romsModal.classList.remove("open");
-  releaseFocus(romsModal);
-};
-
-document.getElementById("manage-roms").addEventListener("click", openRomsModal);
-document.getElementById("roms-close").addEventListener("click", closeRomsModal);
-romsModal.addEventListener("click", (e) => {
-  if (e.target === romsModal) closeRomsModal();
-});
 
 // --- Library sort + filter --------------------------------------------------
 // One sort, shared by the home grid and the Manage list and kept in
@@ -1653,7 +1603,6 @@ const setRomsSort = async (v) => {
   romsSort = v;
   syncLibSort();
   await dbPut("roms_sort", v);
-  refreshRomsManageList();
   refreshHomeRecent();
 };
 if (libSortSel) libSortSel.addEventListener("change", () => setRomsSort(libSortSel.value));
@@ -1805,11 +1754,6 @@ const romsForManagement = async () => {
   return sortRoms(rows);
 };
 
-// The rename pencil; currentColor so it follows the button's states.
-const PENCIL_ICON =
-  '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
-  '<path d="M4 20.5h4.2L19 9.7a2.4 2.4 0 0 0-3.4-3.4L4.8 17.1v3.4z"/>' +
-  '<path d="M14.3 7.6l3.4 3.4"/></svg>';
 
 // What a game's management options key off, from the two inventories the
 // callers already hold (this device's ROMs; the games with save data).
@@ -1863,11 +1807,9 @@ const resetGameAction = async (name) => {
   if (isRomLoaded(name)) {
     // Else the in-memory save re-flushes.
     resetLoadedGameSave();
-    closeRomsModal();
     showToast("Save data deleted — starting fresh");
   } else {
     showToast("Save data deleted");
-    refreshRomsManageList();
     updateStorageInfo();
   }
 };
@@ -1882,7 +1824,6 @@ const removeFromDeviceAction = async (name) => {
   if (await removeGameFromDevice(name)) {
     showToast("ROM removed from this device — save kept, still on Drive");
   }
-  refreshRomsManageList();
   refreshHomeRecent();
   updateStorageInfo();
 };
@@ -1891,7 +1832,6 @@ const downloadGameAction = async (name) => {
   if (!(await ensureDriveSignedIn())) return false;
   let ok = await downloadGame(name);
   if (ok) showToast("Synced to this device");
-  refreshRomsManageList();
   refreshHomeRecent();
   updateStorageInfo();
   return ok;
@@ -1910,177 +1850,11 @@ const deleteGameAction = async (name) => {
   await deleteGameEverywhere(name);
   showToast(driveLinked() ? "Deleted from all your devices"
                           : "Removed from this browser");
-  refreshRomsManageList();
   refreshHomeRecent();
   updateStorageInfo();
   return true;
 };
 
-const refreshRomsManageList = async () => {
-  if (!db) return;
-  romsRowsSignedIn = driveLinked();
-  romsHintRemove.hidden = !driveLinked();
-  let rows = await romsForManagement();
-  // What this device actually holds decides each row's buttons.
-  let keys = await dbKeys();
-  let localRoms = new Set();
-  for (let k of keys) {
-    if (typeof k === "string" && k.startsWith("rom:")) localRoms.add(k.slice(4));
-  }
-  let withSaves = new Set(await romsWithSaveData());
-  romsManageList.innerHTML = "";
-  romsManageEmpty.hidden = rows.length > 0;
-
-  for (let { name, inRecent } of rows) {
-    let row = document.createElement("div");
-    row.className = "roms-manage-row";
-
-    let { driveOnly, hasSaves, romOnDrive, busy, loaded } =
-      gameFlags(name, localRoms, withSaves);
-
-    // The title on .roms-manage-name is how the rest of the app identifies a row.
-    let label = document.createElement("div");
-    label.className = "roms-manage-name";
-    label.title = name; // full filename (with extension) for disambiguation
-    let title = document.createElement("span");
-    title.className = "roms-manage-title";
-    title.textContent = displayName(name);
-    label.appendChild(title);
-    let renameBtn = document.createElement("button");
-    renameBtn.type = "button";
-    renameBtn.className = "roms-rename-btn";
-    // Icon-only: the accessible name says which game.
-    renameBtn.setAttribute("aria-label", "Rename " + displayName(name));
-    renameBtn.innerHTML = PENCIL_ICON;
-    // Drive-only rows rename too (a metadata PATCH needs no bytes here).
-    if (busy) {
-      renameBtn.disabled = true;
-      renameBtn.title = "Exit the online session to rename this game";
-    } else {
-      renameBtn.title = "Rename this game and everything saved with it";
-      renameBtn.addEventListener("click", () => openRenameModal(name));
-    }
-    label.appendChild(renameBtn);
-    row.appendChild(label);
-
-    let actions = document.createElement("div");
-    actions.className = "roms-manage-actions";
-
-    // Arming one button disarms any other in the row.
-    let siblings = [];
-    const disarmOthers = (except) => {
-      for (let b of siblings) if (b !== except && b.disarm) b.disarm();
-    };
-
-    // Reset renders on every row but only arms when there is something to
-    // wipe; otherwise greyed with the reason.
-    let saveBtn = null;
-    if (hasSaves && busy) {
-      saveBtn = makeDisabledButton(
-        "Reset",
-        "button button-sm roms-manage-btn",
-        "Exit the online session to reset this game's save",
-      );
-    } else if (!hasSaves) {
-      saveBtn = makeInertButton(
-        "Reset",
-        "button button-sm roms-manage-btn",
-        "No saves to reset",
-      );
-    } else {
-      saveBtn = makeConfirmButton({
-        label: "Reset",
-        confirmLabel: "Delete all save data?",
-        className: "button button-sm roms-manage-btn",
-        onArm: () => disarmOthers(saveBtn),
-        onConfirm: () => resetGameAction(name),
-      });
-    }
-    if (saveBtn) siblings.push(saveBtn);
-
-    // Remove needs: signed in, bytes here, and Drive has the ROM.
-    let freeBtn = null;
-    if (localRoms.has(name) && driveLinked() && !romOnDrive) {
-      // Drive cannot be confirmed to hold this ROM: greyed with the reason,
-      // not a silent absence.
-      freeBtn = makeInertButton(
-        "Remove from device",
-        "button button-sm roms-manage-btn",
-        "Not backed up to Drive yet — removing now would delete your only copy",
-      );
-      siblings.push(freeBtn);
-    } else if (localRoms.has(name) && romOnDrive) {
-      if (busy) {
-        freeBtn = makeDisabledButton(
-          "Remove from device",
-          "button button-sm roms-manage-btn",
-          "Exit the online session to remove this game from this device",
-        );
-      } else {
-        // A running game is closed on the way out, as Delete already does.
-        freeBtn = makeConfirmButton({
-          label: "Remove from device",
-          confirmLabel: loaded ? "Close and remove?" : "Remove from this device?",
-          className: "button button-sm roms-manage-btn",
-          onArm: () => disarmOthers(freeBtn),
-          onConfirm: () => removeFromDeviceAction(name),
-        });
-        freeBtn.title =
-          "Free this device's copy of the ROM. Your save data stays here, the " +
-          "game stays in your Drive library, and one tap re-downloads it.";
-      }
-      siblings.push(freeBtn);
-    }
-
-    // Sync to device = downloadGame. Not a confirm button, but it disarms
-    // any armed sibling.
-    let downBtn = null;
-    if (driveOnly && driveLinked()) {
-      downBtn = document.createElement("button");
-      downBtn.type = "button";
-      downBtn.className = "button button-sm roms-manage-btn";
-      downBtn.title = "Download this game's ROM and saves from Drive to this device";
-      if (syncDownloading.has(name)) {
-        downBtn.textContent = "Syncing…";
-        downBtn.disabled = true;
-      } else {
-        downBtn.textContent = "Sync to device";
-        downBtn.addEventListener("click", async () => {
-          disarmOthers(null);
-          downBtn.textContent = "Syncing…";
-          downBtn.disabled = true;
-          await downloadGameAction(name);
-        });
-      }
-    }
-
-    let allBtn;
-    if (busy) {
-      allBtn = makeDisabledButton(
-        "Delete",
-        "button button-sm roms-manage-btn roms-manage-danger",
-        "Exit the online session to remove this game",
-      );
-    } else {
-      allBtn = makeConfirmButton({
-        label: "Delete",
-        confirmLabel: loaded ? "Close and delete everything?"
-                             : "Delete ROM and save data?",
-        className: "button button-sm roms-manage-btn roms-manage-danger",
-        onArm: () => disarmOthers(allBtn),
-        onConfirm: () => deleteGameAction(name),
-      });
-    }
-    siblings.push(allBtn);
-
-    if (saveBtn) actions.appendChild(saveBtn);
-    actions.appendChild(allBtn);
-    if (freeBtn) actions.appendChild(freeBtn);
-    if (downBtn) actions.appendChild(downBtn);
-    row.appendChild(actions);
-    romsManageList.appendChild(row);
-  }
-};
 
 // --- Google Drive backup ---
 // Battery saves, save states and ROMs in the hidden appDataFolder, via the
@@ -2354,11 +2128,6 @@ const gdriveSignOut = () => {
 
 const renderGdriveSection = () => {
   if (!gdriveBody) return;
-  // Re-render the manage rows on a real sign-in flip only, so routine
-  // repaints cannot disarm an armed confirm button.
-  if (romsModal.classList.contains("open") && romsRowsSignedIn !== driveLinked()) {
-    refreshRomsManageList();
-  }
   gdriveBody.innerHTML = "";
 
   if (!GDRIVE_CLIENT_ID) {
@@ -3256,7 +3025,7 @@ const removeGameFromDevice = async (game) => {
   return true;
 };
 
-// --- Deletion (Manage ROMs) ----------------------------------------------
+// --- Deletion -------------------------------------------------------------
 const resetGameSaves = async (game) => {
   await deleteSaveData(game);
   // Enrolled, not linked: wiping a save is the same kind of intent as
@@ -3281,7 +3050,7 @@ const deleteGameEverywhere = async (game) => {
   }
 };
 
-// --- Rename (Manage ROMs) -------------------------------------------------
+// --- Rename ---------------------------------------------------------------
 // Every per-game key, Drive file name, recents entry and printed photo is
 // addressed by the name, so a rename is an all-or-nothing migration
 // (dbMoveKeys, one transaction).
@@ -3507,16 +3276,10 @@ const openRenameModal = async (oldName) => {
   }
   let wasLoaded = isRomLoaded(oldName);
 
-  // The Manage modal stays open behind; hand the Tab trap over rather than
-  // running two.
-  let reopen = romsModal.classList.contains("open");
-  if (reopen) releaseFocus(romsModal);
-
   let m;
   const close = () => {
     renameModalOpen = false;
     m.dismiss();
-    if (reopen && romsModal.classList.contains("open")) trapFocus(romsModal);
   };
   m = buildSyncModal({ title: "Rename game", hint: null, onDismiss: close });
 
@@ -3658,7 +3421,6 @@ const openRenameModal = async (oldName) => {
       if (!res.ok) { showErrorStep(newName, res.error); return; }
       close();
       showToast("Renamed to “" + displayName(newName) + "”");
-      refreshRomsManageList();
       refreshHomeRecent();
       updateStorageInfo();
     });
@@ -3983,7 +3745,7 @@ const refreshHomeSyncButton = () => {
 const refreshSyncUI = () => {
   refreshHomeSyncButton();
   renderSyncIndicator();
-  if (romsModal.classList.contains("open")) renderGdriveSection();
+  if (settingsModal.classList.contains("open")) renderGdriveSection();
 };
 if (homeSyncBtn) {
   homeSyncBtn.addEventListener("click", async () => {
@@ -4425,7 +4187,7 @@ const buildEmptyLibraryCard = () => {
     let btn = document.createElement("button");
     btn.type = "button";
     btn.className = "button button-sm";
-    btn.textContent = "Sign in with Google"; // same label as Manage ROMs
+    btn.textContent = "Sign in with Google"; // same label as Settings
     btn.addEventListener("click", async () => {
       btn.disabled = true;
       try { await gdriveConnect(); }
@@ -4473,7 +4235,7 @@ let homeArtUrls = [];
 let homeRenderGen = 0;
 
 // --- Per-game menu ---
-// Everything Manage ROMs and Saves does per game, on the library tile: the
+// Every per-game action, on the library tile: the
 // ⋯ glyph, a right-click, or a long press. One DOM, two layouts
 // (styles.css): a popover by the glyph on desktop, a bottom sheet headed by
 // the game's picture on phones. Items that cannot apply right now stay,
@@ -4973,7 +4735,6 @@ document.addEventListener("keydown", (e) => {
       closeSettingsModal();
     }
     closeSavesModal();
-    closeRomsModal();
     closeUpdateModal();
     closeStatesModal();
     closeCheatsModal();
@@ -9212,8 +8973,8 @@ const openThumbsOffer = (cands) => {
 };
 
 // Shown once per device, when there is something to picture and nothing is
-// loaded (a batch re-inits the core the paused game sits in). Manage ROMs
-// and Saves offers the same box any time (openThumbsRun).
+// loaded (a batch re-inits the core the paused game sits in). the library head
+// offers the same box any time (openThumbsRun).
 const maybeOfferThumbnails = async () => {
   if (!db || currentRomName || linkMode || rollbackMode || netActive()) return false;
   if (await dbGet(THUMBS_OFFER_KEY)) return false;
@@ -9250,7 +9011,6 @@ const openThumbsRun = async () => {
     showToast("Every game already has a picture");
     return false;
   }
-  closeRomsModal();
   openThumbsOffer(cands);
   return true;
 };
@@ -9911,7 +9671,7 @@ const renderPrintsGrid = () => {
     save.addEventListener("click", () => downloadPrint(photo));
     const del = document.createElement("button");
     del.type = "button";
-    del.className = "button button-sm roms-manage-danger";
+    del.className = "button button-sm";
     del.textContent = "Delete";
     del.addEventListener("click", async () => {
       printerPhotos.splice(idx, 1);

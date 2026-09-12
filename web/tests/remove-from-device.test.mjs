@@ -52,29 +52,6 @@ const meterStorage = (app) => {
   };
 };
 
-const openManageList = async (app) => {
-  await app.api.refreshRomsManageList();
-  await settle();
-};
-
-const rowButtons = (app, name) => {
-  const list = app.document.getElementById("roms-manage-list");
-  for (const row of list.children) {
-    const [label, actions] = row.children;
-    if (label.title === name) return actions.children.map((b) => b.textContent);
-  }
-  return null;
-};
-
-const rowButton = (app, name, text) => {
-  const list = app.document.getElementById("roms-manage-list");
-  for (const row of list.children) {
-    if (row.children[0].title !== name) continue;
-    return row.children[1].children.find((b) => b.textContent === text) || null;
-  }
-  return null;
-};
-
 // ── The action ──────────────────────────────────────────────────────────────
 
 test("removeGameFromDevice frees the ROM and art, and nothing else", async () => {
@@ -212,188 +189,7 @@ test("signed out, removeGameFromDevice is refused outright", async () => {
 
 // ── The guard, at the button ────────────────────────────────────────────────
 
-test("Remove is offered only for a local game Drive already has", async () => {
-  const app = await loadApp();
-  app.setFetch(makeDrive(["rom:Backed.gba"]).fetch);
-  // Backed: local + sig -> removable. Fresh: upload queued (no sig) -> not.
-  // Cloud: Drive only -> nothing to remove.
-  signIn(app, { "rom:Backed.gba": "sig" });
-  app.api.syncState.queueUp.push("rom:Fresh.gba");
-  app.idb.set("recent", [
-    { name: "Backed.gba", ts: 3 },
-    { name: "Fresh.gba", ts: 2 },
-    { name: "Cloud.gba", ts: 1 },
-  ]);
-  app.idb.set("rom:Backed.gba", { name: "Backed.gba", data: u8(1) });
-  app.idb.set("rom:Fresh.gba", { name: "Fresh.gba", data: u8(2) });
-
-  await openManageList(app);
-  eq(rowButtons(app, "Backed.gba"), ["Reset", "Delete", "Remove from device"]);
-  // The only copy still local: the slot renders greyed, reason on tap.
-  eq(rowButtons(app, "Fresh.gba"), ["Reset", "Delete", "Remove from device"]);
-  const inert = rowButton(app, "Fresh.gba", "Remove from device");
-  assert.equal(inert.getAttribute("aria-disabled"), "true");
-  await inert.click();
-  await settle();
-  assert.ok(app.idb.get("rom:Fresh.gba"), "tapping the inert button evicts nothing");
-  assert.ok(app.toasts.some((t) => /backed up/i.test(t)),
-    "the tap explains itself: " + app.toasts.join(" | "));
-  eq(rowButtons(app, "Cloud.gba"), ["Reset", "Delete", "Sync to device"],
-    "a Drive-only row offers the Drive-side Reset and a download instead of Remove");
-});
-
-test("Sync to device pulls a Drive-only game's files onto this device", async () => {
-  const app = await loadApp();
-  app.setFetch(makeDrive(["rom:Cloud.gba", "save:Cloud.gba"]).fetch);
-  signIn(app);
-  app.idb.set("recent", [{ name: "Cloud.gba", ts: 1 }]);
-
-  await openManageList(app);
-  const btn = rowButton(app, "Cloud.gba", "Sync to device");
-  assert.ok(btn, "Drive-only signed-in row offers Sync to device");
-  await btn.click();
-  await settle();
-  await settle();
-  assert.ok(app.idb.get("rom:Cloud.gba"), "ROM bytes landed in local storage");
-  assert.ok(app.idb.get("save:Cloud.gba"), "save landed too");
-});
-
-test("signed out, a Drive-only residue row offers Delete alone", async () => {
-  const app = await loadApp();
-  app.api.gdriveToken = null;
-  app.api.syncState = { queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [], sigs: {}, rmt: {} };
-  app.idb.set("recent", [{ name: "Cloud.gba", ts: 1 }]);
-
-  await openManageList(app);
-  // Reset always renders; greyed with "No saves to reset" when there are none.
-  eq(rowButtons(app, "Cloud.gba"), ["Reset", "Delete"],
-    "no Drive session: nothing to sync from, Reset present but inert");
-  assert.equal(
-    rowButton(app, "Cloud.gba", "Reset").getAttribute("aria-disabled"), "true");
-});
-
-test("a Drive delete already queued for the ROM disarms Remove", async () => {
-  const app = await loadApp();
-  app.setFetch(makeDrive([]).fetch);
-  signIn(app, { "rom:A.gba": "sig" });
-  app.api.syncState.queueDel.push("rom:A.gba");
-  app.idb.set("recent", [{ name: "A.gba", ts: 1 }]);
-  app.idb.set("rom:A.gba", { name: "A.gba", data: u8(1) });
-
-  await openManageList(app);
-  eq(rowButtons(app, "A.gba"), ["Reset", "Delete", "Remove from device"]);
-  assert.equal(
-    rowButton(app, "A.gba", "Remove from device").getAttribute("aria-disabled"),
-    "true", "queued Drive delete means no confirmed copy to come back from");
-});
-
-test("signed out, no row offers Remove", async () => {
-  const app = await loadApp();
-  app.api.gdriveToken = null;
-  app.api.syncState =
-    { queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [], sigs: { "rom:A.gba": "sig" }, rmt: {} };
-  app.idb.set("recent", [{ name: "A.gba", ts: 1 }]);
-  app.idb.set("rom:A.gba", { name: "A.gba", data: u8(1) });
-
-  await openManageList(app);
-  eq(rowButtons(app, "A.gba"), ["Reset", "Delete"],
-    "with no Drive to come back from, removing local bytes is just deleting");
-  assert.equal(app.document.getElementById("roms-hint-remove").hidden, true,
-    "the intro must not describe a Remove button that isn't there");
-});
-
-test("the intro's Remove sentence shows only while signed in", async () => {
-  const app = await loadApp();
-  app.setFetch(makeDrive(["rom:A.gba"]).fetch);
-  signIn(app, { "rom:A.gba": "sig" });
-  app.idb.set("recent", [{ name: "A.gba", ts: 1 }]);
-  app.idb.set("rom:A.gba", { name: "A.gba", data: u8(1) });
-
-  await openManageList(app);
-  assert.equal(app.document.getElementById("roms-hint-remove").hidden, false);
-});
-
-test("Sign out while the modal is open withdraws Remove from the rows", async () => {
-  const app = await loadApp();
-  app.setFetch(makeDrive(["rom:A.gba"]).fetch);
-  signIn(app, { "rom:A.gba": "sig" });
-  app.idb.set("recent", [{ name: "A.gba", ts: 1 }]);
-  app.idb.set("rom:A.gba", { name: "A.gba", data: u8(1) });
-
-  app.document.getElementById("roms-modal").classList.add("open");
-  await openManageList(app);
-  eq(rowButtons(app, "A.gba"), ["Reset", "Delete", "Remove from device"]);
-
-  app.runIn("gdriveSignOut()");
-  await settle();
-  await settle();
-  eq(rowButtons(app, "A.gba"), ["Reset", "Delete"],
-    "the stale Remove button is withdrawn without reopening the modal");
-  assert.equal(app.document.getElementById("roms-hint-remove").hidden, true,
-    "and the intro stops describing it");
-});
-
-test("the game currently loaded is closed on the way out, and the question says so", async () => {
-  const app = await loadApp();
-  app.setFetch(makeDrive(["rom:A.gba"]).fetch);
-  signIn(app, { "rom:A.gba": "sig" });
-  app.idb.set("recent", [{ name: "A.gba", ts: 1 }]);
-  app.idb.set("rom:A.gba", { name: "A.gba", data: u8(1) });
-  app.api.currentOriginalName = "A.gba";
-
-  await openManageList(app);
-  const btn = rowButton(app, "A.gba", "Remove from device");
-  assert.ok(btn);
-  assert.equal(btn.disabled, false, "a paused game no longer blocks it");
-  await btn.click(); // arm
-  assert.equal(btn.textContent, "Close and remove?");
-  app.api.currentOriginalName = null;
-});
-
-test("a game in an online session is the one Remove waits for", async () => {
-  const app = await loadApp();
-  app.setFetch(makeDrive(["rom:A.gba"]).fetch);
-  signIn(app, { "rom:A.gba": "sig" });
-  app.idb.set("recent", [{ name: "A.gba", ts: 1 }]);
-  app.idb.set("rom:A.gba", { name: "A.gba", data: u8(1) });
-  app.api.currentOriginalName = "A.gba";
-  app.api.rollbackMode = true;
-
-  await openManageList(app);
-  const btn = rowButton(app, "A.gba", "Remove from device");
-  assert.equal(btn.disabled, true);
-  assert.match(btn.title, /online session/);
-  app.api.rollbackMode = false;
-  app.api.currentOriginalName = null;
-});
-
 // ── End to end through the button ───────────────────────────────────────────
-
-test("two taps on Remove free the ROM; one tap only arms it", async () => {
-  const app = await loadApp();
-  app.setFetch(makeDrive(["rom:A.gba"]).fetch);
-  signIn(app, { "rom:A.gba": "sig" });
-  seedLocal(app, "A.gba");
-
-  await openManageList(app);
-  const btn = rowButton(app, "A.gba", "Remove from device");
-  assert.ok(btn);
-
-  await btn.click(); // arm
-  await settle();
-  assert.equal(btn.textContent, "Remove from this device?",
-    "the confirm step says which device, so it can't be read as Delete");
-  assert.ok(app.idb.get("rom:A.gba"), "arming alone removes nothing");
-
-  await btn.click(); // confirm
-  await settle();
-  assert.equal(app.idb.get("rom:A.gba"), undefined, "ROM freed");
-  eq(app.idb.get("save:A.gba"), u8(7), "save kept");
-  assert.ok(app.toasts.some((t) => /save kept/i.test(t)),
-    "the toast says the save survived: " + app.toasts.join(" | "));
-  // Drive-only now: the row offers the way back instead of Remove.
-  eq(rowButtons(app, "A.gba"), ["Reset", "Delete", "Sync to device"]);
-});
 
 // ── Learning that Drive already holds the ROM ───────────────────────────────
 // A device that never uploaded a ROM (it was already on Drive when this
@@ -418,8 +214,6 @@ test("a pull records every ROM the listing holds, without downloading one", asyn
 
   const f = app.api.gameFlags("A.gba", new Set(["A.gba"]), new Set());
   assert.equal(f.romOnDrive, true, "so Remove is offered");
-  await openManageList(app);
-  assert.equal(rowButton(app, "A.gba", "Remove from device").getAttribute("aria-disabled"), null);
 });
 
 test("a pull over a ROM Drive does not hold leaves Remove greyed", async () => {
@@ -433,8 +227,6 @@ test("a pull over a ROM Drive does not hold leaves Remove greyed", async () => {
 
   assert.equal(app.api.syncState.rmt["rom:A.gba"], undefined);
   assert.equal(app.api.gameFlags("A.gba", new Set(["A.gba"]), new Set()).romOnDrive, false);
-  await openManageList(app);
-  assert.equal(rowButton(app, "A.gba", "Remove from device").getAttribute("aria-disabled"), "true");
 });
 
 test("a flush that skips an already-present ROM still records the copy", async () => {

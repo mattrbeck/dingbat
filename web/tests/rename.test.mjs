@@ -326,17 +326,19 @@ test("signed out, that same game renames — there is no remote copy to lose", a
   assert.deepEqual(app.idb.get("save:" + NEW), u8(9, 9));
 });
 
-test("the pencil is enabled on a Drive-only row", async () => {
+test("a game whose bytes are only on Drive still renames", async () => {
   const app = await loadApp();
   app.idb.set("recent", [{ name: OLD, ts: 100 }]);
   app.idb.set("save:" + OLD, u8(9, 9)); // saves here, ROM only on Drive
   signIn(app, { sigs: { ["rom:" + OLD]: "s" } });
-  await openManageList(app);
 
-  const btn = renameButtonFor(app, OLD);
-  assert.equal(btn.disabled, false,
+  const f = app.api.gameFlags(OLD, new Set(), new Set([OLD]));
+  assert.equal(f.driveOnly, true);
+  const items = app.api.tileMenuEntries(OLD, f)
+    .filter((b) => b.children[0].textContent === "Rename");
+  assert.equal(items.length, 1);
+  assert.equal(items[0].disabled, false,
     "Drive renames its files in place, so the bytes never need to be here");
-  assert.match(btn.title, /Rename this game/);
 });
 
 test("a stale tombstone on the new name is cleared, not left to delete the game", async () => {
@@ -475,51 +477,6 @@ test("the game's own name and an existing name are both refused, differently", a
   assert.match(err(app, "Good Boy (EN)", OLD, new Set([NEW])), /already in your library/);
 });
 
-// ── The Manage ROMs row ─────────────────────────────────────────────────────
-
-const openManageList = async (app) => {
-  app.document.getElementById("roms-sort").parentElement = { hidden: false };
-  await app.api.refreshRomsManageList();
-  await settle();
-};
-
-const rowFor = (app, name) =>
-  app.document.getElementById("roms-manage-list").children
-    .find((r) => r.children[0].title === name) || null;
-
-const renameButtonFor = (app, name) => {
-  const row = rowFor(app, name);
-  return row ? row.children[0].children.find((c) => c.tagName === "BUTTON") : null;
-};
-
-test("every row carries a rename button that names its game", async () => {
-  const app = await loadApp();
-  seedTypicalGame(app, OLD);
-  seedTypicalGame(app, "Other.gba", 200);
-  await openManageList(app);
-
-  for (const [name, label] of [[OLD, "Rename Goodboy Demo"], ["Other.gba", "Rename Other"]]) {
-    const btn = renameButtonFor(app, name);
-    assert.ok(btn, "row has a rename button: " + name);
-    assert.equal(btn.getAttribute("aria-label"), label);
-    assert.equal(btn.disabled, false);
-    assert.ok(btn.innerHTML.includes("<svg"), "it is the pencil");
-  }
-  assert.ok(rowFor(app, OLD).children[1].className.includes("roms-manage-actions"));
-});
-
-test("the rename button is disabled while a session holds the game", async () => {
-  const app = await loadApp();
-  seedTypicalGame(app, OLD);
-  app.api.linkMode = true;
-  app.api.linkRomEntry = { name: OLD };
-  await openManageList(app);
-
-  const btn = renameButtonFor(app, OLD);
-  assert.equal(btn.disabled, true);
-  assert.match(btn.title, /Exit the online session/);
-});
-
 // ── The modal ───────────────────────────────────────────────────────────────
 
 const walk = (el, out = []) => {
@@ -534,9 +491,10 @@ const modalButton = (app, label) =>
   walk(overlay(app)).find((n) => n.tagName === "BUTTON" && n.textContent === label);
 const modalInput = (app) => walk(overlay(app)).find((n) => n.tagName === "INPUT");
 
+// The library tile's menu is the only way in now (tile-menu covers the
+// item itself); these test the box it opens.
 const openRename = async (app, name) => {
-  await openManageList(app);
-  await renameButtonFor(app, name).dispatch("click");
+  await app.api.openRenameModal(name);
   await settle();
 };
 
@@ -588,8 +546,12 @@ test("confirming performs the rename and the list re-renders under the new name"
   assert.deepEqual(app.idb.get("save:" + NEW), u8(9, 9));
   assert.equal(app.idb.has("save:" + OLD), false);
   assert.ok(app.toasts.some((t) => t.includes("Renamed to")), app.toasts.join("|"));
-  assert.ok(rowFor(app, NEW), "the row is there under the new name");
-  assert.equal(rowFor(app, OLD), null);
+  await app.api.refreshHomeRecent();
+  await settle();
+  const tiles = app.document.getElementById("home-recent").children
+    .map((t) => t.children[0].title);
+  assert.ok(tiles.includes(NEW), "the tile is there under the new name: " + tiles.join("|"));
+  assert.ok(!tiles.includes(OLD));
 });
 
 test("a colliding name is refused in the modal, before anything is touched", async () => {
