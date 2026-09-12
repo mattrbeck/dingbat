@@ -60,11 +60,33 @@ test("deleteRecent removes index + rom + art but never save data", async () => {
   assert.equal(app.idb.get("rom:A.gba"), undefined);
   assert.equal(app.idb.get("art:A.gba"), undefined);
   eq(app.idb.get("save:A.gba"), u8(5));
-  // An empty library keeps the section (the empty-state card hosts the
-  // Drive sign-in) but drops the header.
+  // An empty library has no head, no bar and no tiles, so the whole section
+  // leaves; the hero above it carries the Drive way in instead.
+  await settle();
+  assert.equal(app.elements.get("home-recent-wrap").hidden, true);
+  assert.equal(app.elements.get("home-drive").hidden, false);
+  assert.equal(app.elements.get("home-drive").textContent, "Sign in with Google");
+  assert.equal(app.elements.get("home-hint").hidden, false);
+});
+
+test("a library with games withdraws the hero's Drive slot", async () => {
+  const app = await loadApp();
+  await app.api.addRecentRom("A.gba", u8(1));
   await settle();
   assert.equal(app.elements.get("home-recent-wrap").hidden, false);
-  assert.equal(app.elements.get("home-recent-head").hidden, true);
+  assert.equal(app.elements.get("home-drive").hidden, true);
+  assert.equal(app.elements.get("home-hint").hidden, true);
+});
+
+test("the grid draws only the columns it fills, and stops at five", async () => {
+  const app = await loadApp();
+  const wrap = app.elements.get("home-recent-wrap");
+  for (let i = 1; i <= 7; i++) {
+    await app.api.addRecentRom(`G${i}.gba`, u8(i));
+    await settle();
+    assert.equal(wrap.dataset.n, i <= 5 ? String(i) : undefined,
+      `${i} games`);
+  }
 });
 
 test("X.gb and X.gbc key separately everywhere (full-name keying)", async () => {

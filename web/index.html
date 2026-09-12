@@ -326,6 +326,10 @@
             </button>
             <!-- Mobile-only replacement for the drop target; hidden on desktop. -->
             <button type="button" id="home-load" class="button button-primary">Load a game</button>
+            <!-- Empty library only: the library head carries the Drive slot
+                 the rest of the time, and the head is not on screen then. -->
+            <button type="button" id="home-drive" class="button" hidden></button>
+            <p id="home-hint" hidden></p>
           </div>
 
           <!-- Wasm-boot progress. CSS delays its fade-in so fast loads never

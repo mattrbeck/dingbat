@@ -63,6 +63,17 @@ needs a second real device.
       confirming tap and then refuses.
 - [ ] **Add pictures** appears above the library only while a game lacks
       one, and is gone once the run finishes.
+- [ ] **An empty library** shows the hero alone: Load a game beside Sign in
+      with Google, one line under them, and no library section at all. The
+      first game loaded brings the section in and takes the pair away.
+- [ ] **A small library does not strand its head.** With one, two and three
+      games on a wide desktop window, the head, the search bar and the tiles
+      are one centred block, not a rule across the screen with a tile in the
+      corner. With two games and every filter chip showing, the chips take
+      their own row rather than scrolling sideways.
+- [ ] **A search does not move the bar.** Typing into the search field with
+      a dozen games leaves the field and the chips exactly where they were,
+      whatever the result count.
 
 ## Drive sync: away from the account
 

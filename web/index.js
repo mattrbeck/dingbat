@@ -1652,6 +1652,24 @@ const libTileMatches = (tile) => {
   return true;
 };
 
+// How many columns the grid should draw. A library smaller than the row it
+// sits in gets only the columns it fills, so the head is ruled over its own
+// tiles instead of across an empty half-screen. styles.css reads the count
+// and works out the rest: which breakpoints are wide enough to narrow at,
+// the floor that keeps the search field and the chips usable, and the cap
+// that stops one game being blown up to fill that floor.
+//
+// The library's own size, not the filter's: a search that narrowed the
+// block would resize the field being typed into, and a chip would move the
+// chip next to it. Filtering changes which tiles show, not how wide the
+// library is.
+const LIB_FIT_MAX = 5;
+const setLibFit = (count) => {
+  if (!homeRecentWrap) return;
+  if (count > LIB_FIT_MAX) delete homeRecentWrap.dataset.n;
+  else homeRecentWrap.dataset.n = String(Math.max(1, count));
+};
+
 // Hide the tiles the filter excludes; the count and the empty note follow.
 const applyLibFilter = () => {
   let shown = 0, total = 0;
@@ -3765,8 +3783,49 @@ const refreshHomeSyncButton = () => {
     : "Sync";
 };
 
+// With no games there is no library head, so the hero carries the Drive
+// slot: the two ways to get a game sit on one rung, and one line says which
+// is which. Both withdraw the moment there is a library to head.
+const homeDriveBtn = /** @type {HTMLButtonElement} */ (document.getElementById("home-drive"));
+const homeHint = document.getElementById("home-hint");
+let libraryEmpty = false;
+
+const refreshHomeEmptyActions = () => {
+  if (!homeDriveBtn || !homeHint) return;
+  if (!libraryEmpty || !GDRIVE_CLIENT_ID) {
+    homeDriveBtn.hidden = true;
+    homeHint.hidden = true;
+    return;
+  }
+  let linked = driveLinked();
+  homeDriveBtn.hidden = false;
+  homeDriveBtn.disabled = false;
+  homeDriveBtn.textContent = linked ? "Sync" : "Sign in with Google";
+  homeHint.hidden = false;
+  homeHint.textContent = linked
+    ? "Nothing on this device yet. Sync brings down the games on your Drive."
+    : "Games load from this device. Sign in to sync them across devices.";
+};
+
+if (homeDriveBtn) {
+  homeDriveBtn.addEventListener("click", async () => {
+    if (driveLinked()) {
+      if (!(await ensureDriveSignedIn())) return;
+      runFullSync({ label: "Syncing" });
+      return;
+    }
+    // gdriveConnect() must be reached with the click's activation still
+    // live, so nothing may be awaited before the call.
+    homeDriveBtn.disabled = true;
+    try { await gdriveConnect(); }
+    catch (e) { showToast(e.message); }
+    refreshHomeEmptyActions();
+  });
+}
+
 const refreshSyncUI = () => {
   refreshHomeSyncButton();
+  refreshHomeEmptyActions();
   renderSyncIndicator();
   if (settingsModal.classList.contains("open")) renderGdriveSection();
 };
@@ -4193,41 +4252,6 @@ const homeRecent = document.getElementById("home-recent");
 const homeThumbsBtn = document.getElementById("home-thumbs");
 const storageInfo = document.getElementById("storage-info");
 
-// Empty-library placeholder: on a fresh device the only way to reach Drive
-// sign-in (the recents header is hidden when the library is empty).
-const buildEmptyLibraryCard = () => {
-  let card = document.createElement("div");
-  card.className = "home-empty";
-  let msg = document.createElement("p");
-  msg.className = "home-empty-msg";
-  msg.textContent = "No games yet — load one to get started.";
-  card.appendChild(msg);
-  if (GDRIVE_CLIENT_ID && !driveLinked()) {
-    let sub = document.createElement("p");
-    sub.className = "home-empty-sub";
-    sub.textContent = "Already have games backed up to Google Drive?";
-    card.appendChild(sub);
-    let btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "button button-sm";
-    btn.textContent = "Sign in with Google"; // same label as Settings
-    btn.addEventListener("click", async () => {
-      btn.disabled = true;
-      try { await gdriveConnect(); }
-      catch (e) { showToast(e.message); btn.disabled = false; }
-    });
-    card.appendChild(btn);
-  } else if (driveLinked()) {
-    let btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "button button-sm";
-    btn.textContent = "Sync now";
-    btn.addEventListener("click", () => runFullSync({ label: "Syncing" }));
-    card.appendChild(btn);
-  }
-  return card;
-};
-
 const formatBytes = (bytes) => {
   if (bytes < 1024) return bytes + " B";
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
@@ -4582,19 +4606,23 @@ const refreshHomeRecent = async () => {
   // Art URLs minted by this render become homeArtUrls only on commit.
   let artUrls = [];
   if (roms.length === 0) {
-    // Keep the section (Drive sign-in lives in the empty state), drop the header.
-    homeRecentWrap.hidden = false;
-    if (homeRecentHead) homeRecentHead.hidden = true;
-    if (libBar) libBar.hidden = true;
+    // Nothing to head, filter or count: the whole section leaves, and the
+    // hero above it becomes the empty state.
+    libraryEmpty = true;
+    refreshHomeEmptyActions();
+    homeRecentWrap.hidden = true;
     if (libNone) libNone.hidden = true;
     storageInfo.textContent = "";
     homeThumbsBtn.hidden = true;
     closeTileMenu();
-    homeRecent.replaceChildren(buildEmptyLibraryCard());
+    homeRecent.replaceChildren();
     homeArtUrls.forEach(URL.revokeObjectURL);
     homeArtUrls = artUrls;
     return;
   }
+  libraryEmpty = false;
+  refreshHomeEmptyActions();
+  setLibFit(roms.length);
   if (homeRecentHead) homeRecentHead.hidden = false;
   homeRecentWrap.hidden = false;
   // One game: nothing to sort or filter.

@@ -1893,6 +1893,35 @@ body.has-game #home-resume {
   border-radius: 999px;
 }
 
+/* The Drive way in, beside the file way in - same pill, quieter fill, so
+   the rung reads as two choices with one of them recommended. */
+#home-drive {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 11px 22px;
+  font-size: 15px;
+  border-radius: 999px;
+}
+
+#home-drive[hidden] {
+  display: none;
+}
+
+/* One line under the rung, saying which button is which. */
+#home-hint {
+  flex: 1 0 100%;
+  margin: 2px 0 0;
+  text-align: center;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+#home-hint[hidden] {
+  display: none;
+}
+
 /* When a game is paused, Resume is the primary action, so Load drops to the
    neutral (secondary) button look. */
 body.has-game #home-load {
@@ -2328,75 +2357,143 @@ body.runtime-ready #boot-progress {
 }
 
 /* An explicit column count rather than auto-fill: 2 on phones, then 3, 4,
-   5 and 6 as the viewport allows. minmax(0, 1fr), not bare 1fr: a bare 1fr
-   track has an auto minimum, so one long nowrap filename would widen its
-   column. */
-#home-recent {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+   5 and 6 as the viewport allows. --lib-cols is that count — the row's
+   capacity at this width — and every other measure here derives from it.
+
+   --lib-fit is how many of those columns are actually drawn. It is the
+   capacity until a [data-n] rule below says the library (or the search
+   result) is smaller, at which point the grid stops drawing columns it has
+   nothing to put in, and the head is ruled over its own tiles rather than
+   across the rest of the screen.
+
+   Two guards on that. --lib-floor is the narrowest the block may get: the
+   search field, the filter chips and the sort menu share that row, and much
+   below this the chips start scrolling. --lib-tile-max is the widest a
+   single tile may get, so a one-game library meets the floor with
+   whitespace rather than with one enormous picture.
+
+   Percentages resolve against whatever element *uses* the variable, so only
+   an element left at the wrap's full width may read --lib-track: one that
+   narrowed itself first would then derive its tracks from its own narrowed
+   width. #home-recent stays full width and centres its tracks for exactly
+   that reason; the head and the bar derive nothing and take --lib-width as
+   a max-width. */
+#home-recent-wrap {
+  --lib-gap: 10px;
+  --lib-cols: 2;
+  --lib-fit: var(--lib-cols);
+  --lib-floor: 460px;
+  --lib-tile-max: 300px;
+  /* The width a tile has when the row is full — the size every tile keeps,
+     whatever the count. */
+  --lib-tile: calc(
+    (100% - (var(--lib-cols) - 1) * var(--lib-gap)) / var(--lib-cols));
+  --lib-width: min(100%, max(var(--lib-floor),
+    calc(var(--lib-fit) * var(--lib-tile) + (var(--lib-fit) - 1) * var(--lib-gap))));
+  --lib-track: min(var(--lib-tile-max),
+    calc((var(--lib-width) - (var(--lib-fit) - 1) * var(--lib-gap)) / var(--lib-fit)));
 }
 
 /* The smallest phones (an iPhone SE is 320px): one column, so the picture
    is a picture and the name is not an ellipsis. */
 @media (max-width: 359px) {
-  #home-recent {
-    grid-template-columns: minmax(0, 1fr);
+  #home-recent-wrap {
+    --lib-cols: 1;
   }
 }
 
 @media (min-width: 640px) {
-  #home-recent {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  #home-recent-wrap {
+    --lib-cols: 3;
   }
 }
 
 @media (min-width: 900px) {
-  #home-recent {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+  #home-recent-wrap {
+    --lib-cols: 4;
   }
 }
 
 @media (min-width: 1150px) {
-  #home-recent {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+  #home-recent-wrap {
+    --lib-cols: 5;
   }
 }
 
 @media (min-width: 1400px) {
-  #home-recent {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+  #home-recent-wrap {
+    --lib-cols: 6;
   }
 }
 
-/* Empty-library placeholder (no games yet) — hosts the Drive sign-in entry.
-   #home-recent is a grid, so span every column and center the box with
-   margin auto rather than letting it sit in the first track. */
-.home-empty {
-  grid-column: 1 / -1;
-  justify-self: center;
-  width: 100%;
-  max-width: 360px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 24px 16px;
-  text-align: center;
-  border: 1px dashed var(--border-2);
-  border-radius: var(--radius-sm);
-}
-.home-empty-msg {
-  margin: 0;
-  font-size: 13px;
-  color: var(--text-dim);
-}
-.home-empty-sub {
-  margin: 6px 0 2px;
-  font-size: 11.5px;
-  color: var(--text-faint);
+/* index.js sets [data-n] to the number of tiles on screen (1–5; above that
+   no library is short of a row). Each breakpoint claims the counts that
+   fall short of its own capacity and inherits the ones the narrower
+   breakpoints already claimed.
+
+   One game is short of a row at every width, phones included, and is the
+   one count with no bar under the head — so it narrows everywhere. Two and
+   up wait for 760px, below which the bar is a full-bleed sticky strip and
+   the block is already about as narrow as the floor anyway. */
+#home-recent-wrap[data-n="1"] {
+  --lib-fit: 1;
 }
 
+.home-recent-head,
+.lib-none {
+  max-width: var(--lib-width);
+  margin-inline: auto;
+}
+
+@media (min-width: 760px) {
+  #home-recent-wrap[data-n="2"] {
+    --lib-fit: 2;
+  }
+  .lib-bar {
+    max-width: var(--lib-width);
+    margin-inline: auto;
+  }
+  /* Two tiles is the floor, and the bar's three parts do not fit across it:
+     measured there, the chips want 295px of a 213px track and the search
+     field is already at its minimum. So the chips take their own row, the
+     way they do on a phone, rather than scrolling sideways. Every wider
+     count clears the bar's full width in one row (three tiles is 636px at
+     its narrowest, against the 576px the row needs). */
+  #home-recent-wrap[data-n="2"] .lib-bar {
+    flex-wrap: wrap;
+  }
+  #home-recent-wrap[data-n="2"] .lib-chips {
+    flex: 1 1 100%;
+    order: 1;
+  }
+}
+
+@media (min-width: 900px) {
+  #home-recent-wrap[data-n="3"] {
+    --lib-fit: 3;
+  }
+}
+
+@media (min-width: 1150px) {
+  #home-recent-wrap[data-n="4"] {
+    --lib-fit: 4;
+  }
+}
+
+@media (min-width: 1400px) {
+  #home-recent-wrap[data-n="5"] {
+    --lib-fit: 5;
+  }
+}
+
+/* A full row's tracks add up to the whole width, so centring them is a
+   no-op until the library is short of one. */
+#home-recent {
+  display: grid;
+  grid-template-columns: repeat(var(--lib-fit), var(--lib-track));
+  justify-content: center;
+  gap: var(--lib-gap);
+}
 .home-tile {
   position: relative;
   border-radius: var(--radius-sm);
