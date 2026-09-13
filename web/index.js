@@ -2452,7 +2452,12 @@ const writeSyncBytes = async (name, bytes) => {
     catch {}
     return;
   }
-  await dbPut(name, bytes);
+  // A save or a state: the person's own, and worth a ROM file to land. Left
+  // to a plain write, a full device would fail the whole pull and report
+  // itself offline. Throwing when even that is not enough is right - the
+  // caller records nothing, so the next pull tries again.
+  if (!(await dbPutRoomy(name, bytes, parseDriveFileName(name)?.game)))
+    throw new Error("this device is out of room");
 };
 
 const driveDelete = (fileId) =>
@@ -4160,18 +4165,28 @@ const localRomBytes = async () => {
   return n;
 };
 
+// A file queued for upload is, as far as the account is concerned, the only
+// copy: give it up before it has been sent and the tile goes looking for a
+// file nothing has. The polite budget always spares those; the pressure path
+// spares them until there is nothing else, losing a copy the person can find
+// again being better than losing the write.
+const uploadPending = (name) =>
+  driveEnrolled() && syncState.queueUp.includes(romKey(name));
+
 // Give up the least-recently-played file. `keep` and the running game are off
 // limits, being the two the room is usually wanted for.
-const evictOldestRom = async (keep) => {
+const evictOldestRom = async (keep, { sparePending = true } = {}) => {
   let list = await getRecentMeta();
   let local = await localRomSet();
   for (let i = list.length - 1; i >= 0; i--) {
     let name = list[i]?.name;
     if (!name || name === keep || name === currentOriginalName) continue;
     if (!local.has(name)) continue;
+    if (sparePending && uploadPending(name)) continue;
     await evictLocalRom(name);
     return name;
   }
+  if (sparePending) return evictOldestRom(keep, { sparePending: false });
   return null;
 };
 
@@ -4332,6 +4347,16 @@ const enforceRomBudget = async (list) => {
   for (let r of list) {
     let name = r?.name;
     if (!name || !local.has(name)) continue;
+    // Two files this line never takes: the running game, which is the most
+    // recent thing there is whatever the index says (a download can otherwise
+    // push it below the line mid-session), and one the account has not been
+    // sent yet. Their bytes still count against the budget - they are held
+    // either way, and pretending otherwise would just evict something else in
+    // their place.
+    if (name === currentOriginalName || uploadPending(name)) {
+      used += romSizeOf(name);
+      continue;
+    }
     if (!full) {
       used += romSizeOf(name);
       if (used <= budget) continue;

@@ -151,6 +151,57 @@ test("a save is never what gets given up to make room", async () => {
   assert.ok(app.idb.get("rom:B.gba"), "not the file of the game being saved");
 });
 
+// What the line may never take, however far over budget the device is.
+
+const enrolled = (app, queueUp = []) => {
+  app.api.syncState =
+    { queueUp, queueDel: [], queueRen: [], tomb: [], ren: [], sigs: {}, rmt: {},
+      connected: false, acct: "acct-1" };
+};
+
+test("the running game is never evicted, however far down the index it sinks",
+  async () => {
+    const app = await loadApp();
+    const all = ["Playing.gba", "New0.gba", "New1.gba", "New2.gba"];
+    for (const n of all) await app.api.addRecentRom(n, u8(1, 1));
+    for (const n of all) await app.api.noteRomSize(n, GB);
+    // Downloads land in front of it, so by the index it is the oldest thing
+    // here - but it is the game on screen.
+    app.api.currentOriginalName = "Playing.gba";
+    await app.api.bumpRecentIndex("New2.gba");
+
+    assert.ok(app.idb.get("rom:Playing.gba"), "the game being played kept its file");
+    assert.equal(app.idb.get("rom:New0.gba"), undefined, "something else paid");
+  });
+
+test("a file the account has not been sent yet is not what the budget takes",
+  async () => {
+    const app = await loadApp();
+    const all = ["Old.gba", "A.gba", "B.gba", "C.gba"];
+    for (const n of all) await app.api.addRecentRom(n, u8(1, 1));
+    for (const n of all) await app.api.noteRomSize(n, GB);
+    enrolled(app, ["rom:Old.gba"]); // queued, never uploaded
+    await app.api.bumpRecentIndex("C.gba");
+
+    assert.ok(app.idb.get("rom:Old.gba"),
+      "giving this up before Drive has it would leave no copy anywhere");
+    assert.equal(app.idb.get("rom:A.gba"), undefined, "a sent file paid instead");
+  });
+
+test("with only unsent files left, pressure takes one rather than lose the write",
+  async () => {
+    const app = await loadApp();
+    for (const n of ["A.gba", "B.gba"]) await app.api.addRecentRom(n, u8(1));
+    enrolled(app, ["rom:A.gba", "rom:B.gba"]);
+    fullUntilFreed(app, "rom:C.gba", 1);
+    await app.api.addRecentRom("C.gba", u8(3, 3));
+    await settle();
+
+    eq(app.idb.get("rom:C.gba"), { name: "C.gba", data: u8(3, 3) });
+    assert.equal(app.idb.get("rom:A.gba"), undefined,
+      "losing a copy the person can find again beats losing the write");
+  });
+
 test("nothing left to give: the write fails and says so, adding no entry",
   async () => {
     const app = await loadApp();
