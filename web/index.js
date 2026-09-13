@@ -4501,18 +4501,25 @@ const formatBytes = (bytes) => {
 // steps, quietest first: the figure, the figure in the colour that means
 // trouble, and the figure with the reason.
 //
-// The reason is in the present tense, because by here it has long since
-// started: files begin being given up at the ROM budget, half the allowance,
-// which this ladder sits well above. So the last line explains the dashed
-// tiles the person has been watching appear, rather than promising something
-// for later. It also says files and not games - the game, its save and its
-// picture all stay, and a line that said otherwise would frighten someone
-// about the one thing that is never at risk.
+// The top step says what happens and drops the figures: once the words
+// explain themselves the numbers inform no decision, and the line is long
+// enough on a phone as it is.
+//
+// "Are removed" describes the rule rather than an event, which is the only
+// tense that is true in both cases - ROM files start going at the budget,
+// half the allowance, so usually this has been happening for a while by here,
+// but a device whose room went on saves and states can reach 95% with nothing
+// evicted yet. And it names ROMs, the one thing that does go: saying it keeps
+// saves is the point of the sentence, because that is what someone reading a
+// storage warning is actually afraid of.
+const usedOf = (usage, quota) =>
+  `${formatBytes(usage)} / ${formatBytes(quota)} used`;
+
 const STORAGE_TIERS = [
-  { at: 0.95, bad: true,
-    lead: "Storage nearly full — older games are giving up their files. " },
-  { at: 0.90, bad: true, lead: "" },
-  { at: 0.80, bad: false, lead: "" },
+  { at: 0.95, bad: true, text: () =>
+      "Storage nearly full. Old ROMs are removed to make room. Saves are kept." },
+  { at: 0.90, bad: true, text: usedOf },
+  { at: 0.80, bad: false, text: usedOf },
 ];
 
 const updateStorageInfo = async () => {
@@ -4523,8 +4530,7 @@ const updateStorageInfo = async () => {
   if (!est?.quota) return;
   let tier = STORAGE_TIERS.find((t) => est.usage / est.quota >= t.at);
   if (!tier) return;
-  storageInfo.textContent =
-    `${tier.lead}${formatBytes(est.usage)} / ${formatBytes(est.quota)} used`;
+  storageInfo.textContent = tier.text(est.usage, est.quota);
   if (tier.bad) storageInfo.classList.add("warn");
 };
 

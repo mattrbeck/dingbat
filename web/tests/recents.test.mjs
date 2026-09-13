@@ -80,10 +80,13 @@ test("the storage line stays away until the room is nearly gone", async () => {
 
   r = await at(0.92);
   assert.equal(r.warn, true, "at 92% the same words in the colour that means it");
-  assert.doesNotMatch(r.text, /giving up/, "still no explanation needed");
+  assert.doesNotMatch(r.text, /nearly full/, "still no explanation needed");
 
   r = await at(0.97);
-  assert.match(r.text, /giving up their files/, "at 97% it says why");
+  assert.equal(r.text,
+    "Storage nearly full. Old ROMs are removed to make room. Saves are kept.",
+    "at 97% it says what goes and, more to the point, what does not");
+  assert.doesNotMatch(r.text, /\d/, "and drops the figures, which decide nothing here");
   assert.equal(r.warn, true);
 });
 

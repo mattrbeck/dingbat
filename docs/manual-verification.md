@@ -89,7 +89,8 @@ needs a second real device.
 - [ ] **The storage line climbs in three steps.** With room to spare the
       library head shows no figure at all, only Sign in / Sync / Add
       pictures. Past 80% the figure appears in the head's own grey; past 90%
-      the same words turn red; past 95% it gains the reason. Freeing space
+      the same words turn red; past 95% the figures give way to the reason,
+      which must say that saves are kept. Freeing space
       walks back down. On a phone the 95% line takes two rows and pushes the
       links below it — check that reads as deliberate rather than broken.
 - [ ] **A full device gives up files, not saves.** Hardest to stage and the
