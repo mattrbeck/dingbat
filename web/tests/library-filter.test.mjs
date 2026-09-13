@@ -10,10 +10,14 @@ const seed = (app, names, { local = names, ts } = {}) => {
   app.idb.set("recent", names.map((name, i) => ({ name, ts: ts ? ts[i] : 100 - i })));
   for (const n of local) app.idb.set("rom:" + n, { name: n, data: u8(1, 2) });
 };
-const signIn = (app) => {
+// Signed in, with a listing that has seen every library ROM on Drive - what
+// makes a game this device lacks a Drive-only game rather than a lost one.
+const signIn = (app, onDrive = LIB) => {
   app.api.gdriveToken = "t";
+  const rmt = {};
+  for (const n of onDrive) rmt["rom:" + n] = "t0";
   app.api.syncState = { queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [],
-                        sigs: {}, rmt: {}, connected: true };
+                        sigs: {}, rmt, connected: true };
 };
 const grid = (app) => app.document.getElementById("home-recent");
 const order = (app) => grid(app).children.map((t) => t.dataset.system + ":" + t.children[0].children[1].children[0].textContent);
@@ -51,17 +55,6 @@ test("the default sort is play order; A–Z and System are the other two", async
     "GBA, GBC, GB; names within");
   assert.equal(app.idb.get("roms_sort"), "system", "kept for next time");
   assert.equal(app.document.getElementById("lib-sort").value, "system");
-});
-
-test("the Manage list follows the same sort", async () => {
-  const app = await loadApp();
-  seed(app, LIB);
-  await app.api.setRomsSort("alpha");
-  const rows = await app.api.romsForManagement();
-  eq(rows.map((r) => r.name), ["Advance Wars.gba", "Crystal.gbc", "Mario.gb", "Tetris.gb", "Zelda.gba"]);
-  await app.api.setRomsSort("system");
-  eq((await app.api.romsForManagement()).map((r) => r.name),
-     ["Advance Wars.gba", "Zelda.gba", "Crystal.gbc", "Mario.gb", "Tetris.gb"]);
 });
 
 test("an unknown stored sort falls back to play order", async () => {

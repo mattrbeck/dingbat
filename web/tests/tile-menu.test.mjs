@@ -15,6 +15,14 @@ const signIn = (app, sigs = {}, rmt = {}) => {
     { queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [], sigs, rmt, connected: true };
 };
 
+// Enrolled but not signed in: the account is known, and so is what its Drive
+// holds; there is no token this minute.
+const signedOutEnrolled = (app, sigs = {}) => {
+  app.api.syncState =
+    { queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [], sigs, rmt: {},
+      connected: false, acct: "acct-1" };
+};
+
 const seed = (app, names, { local = names, saves = [] } = {}) => {
   app.idb.set("recent", names.map((name, i) => ({ name, ts: 100 - i })));
   for (const n of local) app.idb.set("rom:" + n, { name: n, data: u8(1, 2, 3, 4) });
@@ -58,6 +66,7 @@ const boot = async (app) => {
 test("every tile carries the ⋯ glyph; the download glyph moved to the left corner", async () => {
   const app = await loadApp();
   seed(app, ["A.gba", "B.gba"], { local: ["A.gba"] });
+  signIn(app, { "rom:B.gba": "sig" });
   await boot(app);
   for (const t of tiles(app)) {
     const more = moreBtn(t);
@@ -237,6 +246,7 @@ test("a Drive-only game while it downloads: Download is blocked with 'Downloadin
 test("a Drive-only game, signed out: Download is offered and signs in when tapped", async () => {
   const app = await loadApp();
   seed(app, ["Cloud.gba"], { local: [] });
+  signedOutEnrolled(app, { "rom:Cloud.gba": "sig" });
   await boot(app);
   await open(app, "Cloud.gba");
   eq(labels(app), ["Download to this device", "Rename", "Reset save data", "Delete"]);
@@ -266,16 +276,31 @@ test("a game that leaves the library takes its size note with it", async () => {
   eq(Object.keys(app.idb.get("romsizes")), ["B.gba"]);
 });
 
-test("the flags agree with the Manage rows' own inventory reading", async () => {
+test("the flags agree with the tile's own inventory reading", async () => {
   const app = await loadApp();
   seed(app, ["A.gba", "B.gba"], { local: ["A.gba"], saves: ["A.gba"] });
   signIn(app, { "rom:A.gba": "s" });
   const f = app.api.gameFlags("A.gba", new Set(["A.gba"]), new Set(["A.gba"]));
-  eq({ ...f }, { linked: true, driveOnly: false, hasSaves: true, hasLocalSaves: true,
-                 romOnDrive: true, loaded: false, busy: false, downloading: false });
+  eq({ ...f }, { linked: true, driveOnly: false, missing: false, hasSaves: true,
+                 hasLocalSaves: true, romOnDrive: true, loaded: false, busy: false,
+                 downloading: false });
+  // B is in the library, held nowhere: not on this device, and no sig or
+  // listing entry saying Drive has it either.
   const g = app.api.gameFlags("B.gba", new Set(["A.gba"]), new Set(["A.gba"]));
-  eq({ ...g }, { linked: true, driveOnly: true, hasSaves: false, hasLocalSaves: false,
-                 romOnDrive: false, loaded: false, busy: false, downloading: false });
+  eq({ ...g }, { linked: true, driveOnly: true, missing: true, hasSaves: false,
+                 hasLocalSaves: false, romOnDrive: false, loaded: false, busy: false,
+                 downloading: false });
+});
+
+test("a game whose file is nowhere: Find the file leads, and the status says why", async () => {
+  const app = await loadApp();
+  seed(app, ["Lost.gba"], { local: [], saves: ["Lost.gba"] });
+  await boot(app);
+  await open(app, "Lost.gba");
+  eq(labels(app), ["Find the file…", "Rename", "Reset save data", "Delete"]);
+  assert.match(status(app), /the file is not here, but your save is/);
+  // Neither location chip claims it, so neither filter shows it.
+  assert.equal(tileOf(app, "Lost.gba").dataset.loc, "missing");
 });
 
 // ── Opening, closing, the shortcuts ─────────────────────────────────────────

@@ -363,7 +363,7 @@ const logContext = async () => {
     if (fresh && fresh !== version) originVersion = fresh;
   } catch {}
   const versionField = originVersion
-    ? version + " (origin " + originVersion + " \u2014 UPDATE PENDING)"
+    ? version + " (origin " + originVersion + " — UPDATE PENDING)"
     : version;
   const sw = navigator.serviceWorker && navigator.serviceWorker.controller
     ? "sw:controlled" : "sw:none";
@@ -1482,6 +1482,26 @@ const romsWithSaveData = async () => {
   return [...names].sort((a, b) => a.localeCompare(b));
 };
 
+// Save data with no library entry. Two ways in: the localStorage-era
+// migration writes every save it finds, including games the old recents list
+// never held; and builds before this one dropped the entry outright when the
+// 20-game cap evicted the bytes. A game with a save is a game in the library
+// - it comes back as a tile with no file, to be found again or deleted like
+// any other, rather than bytes that nothing on screen accounts for. ts 0
+// because this is a residue and not a claim: it sorts last, and a tombstone
+// from another device still outranks it.
+const adoptSaveOnlyGames = async () => {
+  let recents = await getRecentMeta();
+  let known = new Set(recents.map((r) => r?.name));
+  let add = [];
+  for (let name of await romsWithSaveData()) {
+    if (known.has(name)) continue;
+    if (syncState.tomb.some((t) => t?.name === name)) continue; // deleted elsewhere
+    add.push({ name, ts: 0 });
+  }
+  if (add.length) await dbPut("recent", [...recents, ...add]);
+};
+
 // The game held in memory: deleting its stored save would be re-persisted
 // by the next autosave flush.
 const isRomLoaded = (name) =>
@@ -1695,9 +1715,11 @@ const renderLibChips = (roms, localRoms) => {
   if (!libChips) return;
   let counts = { GBA: 0, GBC: 0, GB: 0 };
   let local = 0;
+  let onDrive = 0;
   for (let { name } of roms) {
     counts[systemOf(name)]++;
     if (localRoms.has(name)) local++;
+    else if (driveHasRom(name)) onDrive++;
   }
   let systems = Object.keys(SYSTEM_ORDER).filter((s) => counts[s] > 0);
   // A system that left the library leaves the filter too.
@@ -1726,11 +1748,12 @@ const renderLibChips = (roms, localRoms) => {
       });
     }
   }
-  let driveOnly = roms.length - local;
-  if (driveLinked() && local > 0 && driveOnly > 0) {
+  // A game whose file is neither here nor on Drive is on neither side of
+  // this choice, so neither chip counts it and neither filter shows it.
+  if (driveLinked() && local > 0 && onDrive > 0) {
     chip("On device", local, libFilter.loc === "device", "lib-chip-loc",
       () => { libFilter.loc = libFilter.loc === "device" ? "all" : "device"; });
-    chip("On Drive", driveOnly, libFilter.loc === "drive", "lib-chip-loc",
+    chip("On Drive", onDrive, libFilter.loc === "drive", "lib-chip-loc",
       () => { libFilter.loc = libFilter.loc === "drive" ? "all" : "drive"; });
   } else if (libFilter.loc !== "all") {
     libFilter.loc = "all"; // the choice no longer exists
@@ -1753,25 +1776,24 @@ if (libSearch) {
   });
 }
 
-// (The Manage list's own sort toggle is gone: it follows the library's.)
-
-// Rows: recents first, then orphaned save-only games by name; under "alpha"
-// one merged A-Z list. { name, inRecent }.
-const romsForManagement = async () => {
-  let recents = await getRecentMeta();
-  let seen = new Set();
-  let rows = [];
-  for (let r of recents) {
-    if (seen.has(r.name)) continue;
-    seen.add(r.name);
-    rows.push({ name: r.name, inRecent: true });
-  }
-  for (let name of await romsWithSaveData()) {
-    if (!seen.has(name)) rows.push({ name, inRecent: false });
-  }
-  return sortRoms(rows);
-};
-
+// Drive confirmed to hold this game's ROM, with no delete queued. Two ways
+// of knowing, and both count: this device uploaded it (sigs), or a pull saw
+// it in the listing (rmt). Only the second covers a ROM that was already on
+// Drive when this device got the file - it uploads nothing, so it would
+// otherwise never learn there is a copy to fall back on. A just-imported
+// game whose upload is still queued has neither, so the only copy is never
+// evictable. Both can go stale, so removeGameFromDevice re-checks the live
+// listing before deleting.
+//
+// Enrolled, not linked: a signed-out device still knows what its account's
+// Drive holds, and a tile has to say where its file is whether or not there
+// is a token this minute. The one caller that needs a live session - Remove
+// from this device, which is about to free the only local copy - adds that
+// condition itself.
+const driveHasRom = (name) =>
+  driveEnrolled() &&
+  (!!syncState.sigs[romKey(name)] || !!syncState.rmt[romKey(name)]) &&
+  !syncState.queueDel.includes(romKey(name));
 
 // What a game's management options key off, from the two inventories the
 // callers already hold (this device's ROMs; the games with save data).
@@ -1786,19 +1808,13 @@ const gameFlags = (name, localRoms, withSaves) => {
   return {
     linked,
     driveOnly: !localRoms.has(name),
+    // No bytes here and no copy to fetch: the file has to come back from the
+    // user's own disk, so every surface that would offer a download offers
+    // to find it instead.
+    missing: !localRoms.has(name) && !driveHasRom(name),
     hasSaves: withSaves.has(name) || savesOnDrive,
     hasLocalSaves: withSaves.has(name),
-    // Drive confirmed to hold the ROM, with no delete queued. Two ways of
-    // knowing, and both count: this device uploaded it (sigs), or a pull
-    // saw it in the listing (rmt). Only the second covers a ROM that was
-    // already on Drive when this device got the file - it uploads nothing,
-    // so it would otherwise never learn there is a copy to fall back on.
-    // A just-imported game whose upload is still queued has neither, so the
-    // only copy is never evictable. Both can go stale, so
-    // removeGameFromDevice re-checks the live listing before deleting.
-    romOnDrive: linked &&
-      (!!syncState.sigs[romKey(name)] || !!syncState.rmt[romKey(name)]) &&
-      !syncState.queueDel.includes(romKey(name)),
+    romOnDrive: linked && driveHasRom(name),
     loaded: isRomLoaded(name),
     // A game in a session that cannot just be closed: an online link, or
     // the same-browser 2P rig behind ?2p. Two cores are writing this game's
@@ -1853,6 +1869,36 @@ const downloadGameAction = async (name) => {
   refreshHomeRecent();
   updateStorageInfo();
   return ok;
+};
+// Find the file = the same inverse, from the user's own disk. The bytes are
+// stored under the entry's name, never the picked file's: the game keeps its
+// save, its picture and its place, which is the whole point of asking. Two
+// guards first, because pairing the wrong ROM with a save is how a save gets
+// written over - the extension has to match, being what decides the system,
+// and so does a size noted before the file left.
+const relinkGameAction = (name, { launch = false } = {}) => {
+  let want = extOf(name);
+  pickFile(ROM_EXTS.join(","), async (bytes, fileName) => {
+    if (extOf(fileName) !== want) {
+      showToast("“" + displayName(name) + "” needs a " + want + " file");
+      return;
+    }
+    let was = romSizeOf(name);
+    if (was && was !== bytes.length && !(await askRomWarn(
+      "A Different File",
+      `"${fileName}" is ${formatBytes(bytes.length)}, but “${displayName(name)}” ` +
+      `was ${formatBytes(was)}. Another game's ROM will not match the save kept ` +
+      `here, and playing it would write over that save. Use it anyway?`))) return;
+    if (!looksLikeValidRom(bytes, want) &&
+        !(await confirmSuspectRom(fileName, want))) return;
+    await dbPut(romKey(name), { name, data: bytes });
+    await noteRomSize(name, bytes.length);
+    markGameUpload(name); // the account's only copy may be this one again
+    showToast("“" + displayName(name) + "” is back on this device");
+    refreshHomeRecent();
+    updateStorageInfo();
+    if (launch) launchRom(name);
+  });
 };
 // Delete = ROM + saves, tombstoned on Drive when signed in. The game in
 // memory is unloaded first (unloadGame detaches it from the autosave flush).
@@ -4061,12 +4107,18 @@ const noteRomSize = async (game, bytes) => {
   await dbPut(ROM_SIZES_KEY, romSizes);
 };
 
-// Drop the ROM record, its box art and its thumbnail; save data is never
-// touched here.
+// Drop the ROM record. The pictures and the save data stay, and so does the
+// library entry (bumpRecentIndex), so what is left is the game itself minus
+// its file: a tile that keeps its face and its save, and says where the file
+// has to come from. Remove from this device keeps the frame for the same
+// reason; here both pictures stay, there being no Drive copy to re-pull them
+// from. The size is noted on the way out, so the menu can still say what
+// getting the file back is worth.
 const evictLocalRom = async (name) => {
+  let rec = await dbGet(romKey(name));
+  let n = rec?.data?.byteLength ?? rec?.data?.length ?? 0;
+  if (n) await noteRomSize(name, n);
   await dbDelete(romKey(name));
-  await dbDelete(artKey(name));
-  await dbDelete(frameKey(name));
 };
 
 const getRecentMeta = async () => {
@@ -4187,10 +4239,12 @@ const bumpRecentIndex = async (name, { fresh = false } = {}) => {
   // mergeLibrary is what reads it.
   let imp = fresh ? ts : prev?.imp;
   list.unshift(imp ? { name, ts, imp } : { name, ts });
-  // Past MAX_RECENT: signed in, the entry becomes a Drive-only tile; signed
-  // out it is dropped.
+  // Past MAX_RECENT the bytes go; the entry never does. The cap bounds what
+  // this device stores, not what the library remembers - dropping the entry
+  // as well would strand the game's save with nothing on screen to account
+  // for it, and take away the one place that could ask for the file back.
+  // The merge has never capped, for the same reason.
   for (let i = MAX_RECENT; i < list.length; i++) await evictLocalRom(list[i].name);
-  if (!driveLinked()) list = list.slice(0, MAX_RECENT);
   await dbPut("recent", list);
 };
 
@@ -4260,13 +4314,6 @@ const updateStorageInfo = async () => {
   }
   let est = await navigator.storage.estimate();
   storageInfo.textContent = `${formatBytes(est.usage)} used`;
-};
-
-const deleteRecent = async (name) => {
-  let list = (await getRecentMeta()).filter((r) => r.name !== name);
-  await dbPut("recent", list);
-  await evictLocalRom(name);
-  refreshHomeRecent();
 };
 
 // Box-art object URLs, revoked and rebuilt each render.
@@ -4380,7 +4427,12 @@ const tileMenuItem = ({ label, sub = "", danger = false, disabled = "", confirmL
 const tileMenuEntries = (name, f) => {
   let items = [];
   let busy = f.busy ? "Exit the online session first" : "";
-  if (f.driveOnly) {
+  if (f.missing) {
+    items.push(tileMenuItem({
+      label: "Find the file…",
+      run: () => relinkGameAction(name),
+    }));
+  } else if (f.driveOnly) {
     items.push(tileMenuItem({
       label: "Download to this device",
       disabled: f.downloading ? "Downloading…" : "",
@@ -4413,7 +4465,8 @@ const tileMenuEntries = (name, f) => {
     danger: true,
     disabled: busy,
     confirmLabel: f.loaded ? "Close and delete everything?"
-                           : "Delete ROM and save data?",
+                : f.missing ? "Delete this game and its save?"
+                            : "Delete ROM and save data?",
     run: () => deleteGameAction(name),
   }));
   return items;
@@ -4428,7 +4481,12 @@ const tileMenuStatus = (name, f) => {
   let bits = [systemOf(name)];
   let size = romSizeOf(name);
   if (size) bits.push(formatBytes(size));
-  if (f.driveOnly && f.hasLocalSaves) bits.push("your save is still on this device");
+  if (f.missing) {
+    bits.push(f.hasLocalSaves ? "the file is not here, but your save is"
+                              : "the file is not on this device");
+  } else if (f.driveOnly && f.hasLocalSaves) {
+    bits.push("your save is still on this device");
+  }
   return bits.join(" · ");
 };
 
@@ -4647,22 +4705,29 @@ const refreshHomeRecent = async () => {
   for (let { name: romName } of roms) {
     let system = systemOf(romName);
     let driveOnly = !localRoms.has(romName);
+    // Byte-less with nothing to fetch: the file has to be found again.
+    let missing = driveOnly && !driveHasRom(romName);
     let busy = syncDownloading.has(romName);
     let tile = document.createElement("div");
     // no-art until a picture arrives: the chip stands in for it.
-    tile.className = "home-tile no-art" + (driveOnly ? " home-tile-cloud" : "");
+    tile.className = "home-tile no-art" +
+      (missing ? " home-tile-missing" : driveOnly ? " home-tile-cloud" : "");
     // What the filter reads: the name folded the way the search folds it.
     tile.dataset.name = libFold(displayName(romName));
     tile.dataset.system = system;
-    tile.dataset.loc = driveOnly ? "drive" : "device";
+    // "missing" is on neither side of the location chips, so neither claims
+    // it and either filter hides it (libTileMatches).
+    tile.dataset.loc = missing ? "missing" : driveOnly ? "drive" : "device";
 
     let launch = document.createElement("button");
     launch.type = "button";
     launch.className = "home-tile-launch";
-    launch.title = driveOnly
-      ? romName + (driveLinked() ? " — on Drive, tap to download"
-                                 : " — on Drive, tap to sign in and download")
-      : romName;
+    launch.title = missing
+      ? romName + " — the file is not on this device, tap to find it"
+      : driveOnly
+        ? romName + (driveLinked() ? " — on Drive, tap to download"
+                                   : " — on Drive, tap to sign in and download")
+        : romName;
 
     // The 3:2 picture (the GBA screen's shape). Precedence: the last screen
     // the game showed, else the box art, else the system chip standing in -
@@ -4712,12 +4777,28 @@ const refreshHomeRecent = async () => {
     launch.addEventListener("click", async () => {
       if (consumedByPress()) return; // the long press opened the menu
       if (!driveOnly) { launchRom(romName); return; }
+      if (missing) { relinkGameAction(romName, { launch: true }); return; }
       if (syncDownloading.has(romName)) return;
       if (!(await ensureDriveSignedIn())) return;
       if (await downloadGame(romName)) launchRom(romName);
     });
 
-    if (driveOnly) {
+    if (missing) {
+      // The corner Download sits in, doing the same job from the other
+      // place a file can come from: fetch it, without launching.
+      let find = document.createElement("button");
+      find.type = "button";
+      find.className = "home-tile-dl";
+      find.title = romName + " — find the file without launching";
+      find.setAttribute("aria-label", "Find the file for " + displayName(romName));
+      find.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/>' +
+                       '<path d="M20 20l-4.5-4.5"/></svg>';
+      find.addEventListener("click", (e) => {
+        e.stopPropagation();
+        relinkGameAction(romName);
+      });
+      tile.appendChild(find);
+    } else if (driveOnly) {
       let dl = document.createElement("button");
       dl.type = "button";
       dl.className = "home-tile-dl" + (busy ? " is-busy" : "");
@@ -7556,7 +7637,7 @@ const looksLikeValidRom = (bytes, ext) => {
   return bytes[0x14d] === chk;
 };
 
-// Ask before loading a file that failed the check; false drops the file.
+// One question about a file, asked before it is accepted; false drops it.
 const romWarnModal = document.getElementById("rom-warn-modal");
 let romWarnResolve = null;
 
@@ -7572,16 +7653,21 @@ const closeRomWarnModal = () => {
   if (romWarnResolve) settleRomWarn(false);
 };
 
-const confirmSuspectRom = (fileName, ext) =>
+const askRomWarn = (title, text) =>
   new Promise((resolve) => {
-    let system = ext === ".gba" ? "GBA" : ext === ".gbc" ? "Game Boy Color" : "Game Boy";
-    document.getElementById("rom-warn-text").textContent =
-      `"${fileName}" doesn't look like a valid ${system} ROM — it may be ` +
-      `corrupt or not a game at all. Load it anyway?`;
+    document.getElementById("rom-warn-title").textContent = title;
+    document.getElementById("rom-warn-text").textContent = text;
     romWarnResolve = resolve;
     romWarnModal.classList.add("open");
     trapFocus(romWarnModal);
   });
+
+const confirmSuspectRom = (fileName, ext) => {
+  let system = ext === ".gba" ? "GBA" : ext === ".gbc" ? "Game Boy Color" : "Game Boy";
+  return askRomWarn("File Check Failed",
+    `"${fileName}" doesn't look like a valid ${system} ROM — it may be ` +
+    `corrupt or not a game at all. Load it anyway?`);
+};
 
 document.getElementById("rom-warn-load").addEventListener("click", () => settleRomWarn(true));
 document.getElementById("rom-warn-cancel").addEventListener("click", closeRomWarnModal);
@@ -10189,6 +10275,9 @@ const initStorage = async () => {
   await loadPrinterPhotos();
   await loadSyncState();
   await loadRomsSort();
+  // After loadSyncState, which reads the tombstones it consults, and before
+  // the first render: an adopted game is a library game from the start.
+  await adoptSaveOnlyGames();
   refreshSyncUI();
   startSyncTriggers();
   resumeDriveOnBoot();

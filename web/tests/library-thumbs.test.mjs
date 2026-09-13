@@ -49,12 +49,16 @@ test("the frame outranks the box art; the art outranks the chip", async () => {
   assert.equal(captionOf(c).children[0].textContent, "C");
 });
 
-test("the frame is per-game inventory: evicted, deleted and renamed with the game", async () => {
+test("the frame is per-game inventory, and outlives the ROM it came from", async () => {
   const app = await loadApp();
   assert.ok(app.api.allPerGameKeys("A.gba").includes("frame:A.gba"));
   app.idb.set("frame:A.gba", u8(1));
+  app.idb.set("rom:A.gba", { name: "A.gba", data: u8(1, 2) });
   await app.api.evictLocalRom("A.gba");
-  assert.equal(app.idb.get("frame:A.gba"), undefined, "evicted with the ROM");
+  assert.equal(app.idb.get("rom:A.gba"), undefined, "the file goes");
+  // Evicting the bytes leaves the game in the library, so the tile has to
+  // keep its face; only a delete takes the picture (allPerGameKeys).
+  eq(app.idb.get("frame:A.gba"), u8(1), "the picture stays");
 });
 
 test("the frame is a Drive kind (the sync is in drive-frames.test.mjs)", async () => {

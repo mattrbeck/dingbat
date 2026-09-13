@@ -6504,11 +6504,16 @@ body.sync-shown #status {
 }
 
 /* A game that lives on Drive but isn't downloaded to this device yet. */
-.home-tile-cloud .home-tile-launch {
+/* A tile with no file behind it - waiting on Drive, or on the user finding
+   it again. Dashed and dimmed either way: still a game, not a game that can
+   be started from here. */
+.home-tile-cloud .home-tile-launch,
+.home-tile-missing .home-tile-launch {
   border-style: dashed;
   opacity: 0.72;
 }
-.home-tile-cloud .home-tile-launch:hover {
+.home-tile-cloud .home-tile-launch:hover,
+.home-tile-missing .home-tile-launch:hover {
   opacity: 1;
 }
 /* Its own tap target (a real button): download-without-launch, over the

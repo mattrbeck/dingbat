@@ -74,6 +74,14 @@ needs a second real device.
 - [ ] **A search does not move the bar.** Typing into the search field with
       a dozen games leaves the field and the chips exactly where they were,
       whatever the result count.
+- [ ] **A game past the 20-game cap keeps everything but its file.** Signed
+      out, load a 21st game: the oldest tile is still there, still showing
+      its picture, dashed like a Drive-only tile, and its menu offers Find
+      the file rather than Download. Nothing is deleted without asking.
+- [ ] **Finding the file again reunites it with its save.** Tap that tile,
+      pick the same ROM from disk, and the game launches with its save
+      intact. Picking a file of a different size asks first; picking one
+      with the wrong extension is refused.
 
 ## Drive sync: away from the account
 

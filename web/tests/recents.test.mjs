@@ -1,4 +1,5 @@
-// Recent-ROM library: addRecentRom / bumpRecentIndex / deleteRecent / getRomBytes.
+// Recent-ROM library: addRecentRom / bumpRecentIndex / getRomBytes, and the
+// 20-game cap, which bounds the bytes this device holds and never the library.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -26,40 +27,38 @@ test("re-adding an existing name moves it to the front, no duplicate", async () 
   eq(app.idb.get("recent").map((r) => r.name), ["A.gba", "B.gba"]);
 });
 
-test("21st ROM evicts the oldest rom:+art: records but keeps its saves", async () => {
+test("the 21st ROM evicts the oldest game's file, and nothing else of it", async () => {
   const app = await loadApp();
   assert.equal(app.api.MAX_RECENT, 20);
   app.idb.set("save:Game0.gba", u8(9, 9));
   app.idb.set("state:Game0.gba", u8(8));
   app.idb.set("frame:Game0.gba", u8(6));
   for (let i = 0; i <= 20; i++) {
-    await app.api.addRecentRom(`Game${i}.gba`, u8(i), { art: i });
+    await app.api.addRecentRom(`Game${i}.gba`, u8(i, i), { art: i });
   }
   const names = app.idb.get("recent").map((r) => r.name);
-  assert.equal(names.length, 20);
-  assert.ok(!names.includes("Game0.gba"), "oldest entry evicted from index");
+  assert.equal(names.length, 21, "the cap bounds bytes, not the library");
+  assert.ok(names.includes("Game0.gba"), "the oldest game keeps its entry");
   assert.equal(app.idb.get("rom:Game0.gba"), undefined, "evicted ROM bytes deleted");
-  assert.equal(app.idb.get("art:Game0.gba"), undefined, "evicted art deleted");
-  assert.equal(app.idb.get("frame:Game0.gba"), undefined, "evicted thumbnail deleted");
+  eq(app.idb.get("art:Game0.gba"), { art: 0 }, "the tile keeps its box art");
+  eq(app.idb.get("frame:Game0.gba"), u8(6), "and its last frame");
   eq(app.idb.get("save:Game0.gba"), u8(9, 9), "save survives eviction");
   eq(app.idb.get("state:Game0.gba"), u8(8), "state survives eviction");
-
-  // An evicted game stays reachable through the manage list as an orphan.
-  const rows = await app.api.romsForManagement();
-  const orphan = rows.find((r) => r.name === "Game0.gba");
-  assert.ok(orphan && orphan.inRecent === false);
+  // Noted on the way out, so the menu can still say what the file is worth.
+  assert.equal(app.idb.get("romsizes")["Game0.gba"], 2);
 });
 
-test("deleteRecent removes index + rom + art but never save data", async () => {
+test("deleting the last game empties the library and the hero takes over", async () => {
   const app = await loadApp();
   await app.api.addRecentRom("A.gba", u8(1), { a: 1 });
   app.idb.set("save:A.gba", u8(5));
-  await app.api.deleteRecent("A.gba");
+  await app.api.deleteGameEverywhere("A.gba");
+  await app.api.refreshHomeRecent();
   await settle();
   eq(app.idb.get("recent"), []);
   assert.equal(app.idb.get("rom:A.gba"), undefined);
   assert.equal(app.idb.get("art:A.gba"), undefined);
-  eq(app.idb.get("save:A.gba"), u8(5));
+  assert.equal(app.idb.get("save:A.gba"), undefined, "Delete takes the save too");
   // An empty library has no head, no bar and no tiles, so the whole section
   // leaves; the hero above it carries the Drive way in instead.
   await settle();

@@ -1,5 +1,5 @@
 // Save-data identity and deletion: the real romsWithSaveData / deleteSaveData /
-// romsForManagement / linkSaveKey / key helpers from web/index.js.
+// adoptSaveOnlyGames / linkSaveKey / key helpers from web/index.js.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -39,21 +39,34 @@ test("deleteSaveData wipes save, -p2 save, and state", async () => {
   assert.ok(app.idb.get("rom:A.gba"), "ROM record untouched");
 });
 
-test("romsForManagement lists recents first (recency order), then orphans by name", async () => {
+test("save data with no entry joins the library, last and claiming nothing", async () => {
   const app = await loadApp();
   app.idb.set("recent", [
     { name: "New.gba", ts: 3 },
     { name: "Old.gba", ts: 1 },
   ]);
-  app.idb.set("save:Old.gba", u8(1));         // in recents AND has a save
-  app.idb.set("save:Zebra.gb", u8(2));        // orphan
-  app.idb.set("state:Alpha.gbc", u8(3));      // orphan, state-only
-  eq(await app.api.romsForManagement(), [
-    { name: "New.gba", inRecent: true },
-    { name: "Old.gba", inRecent: true },
-    { name: "Alpha.gbc", inRecent: false },
-    { name: "Zebra.gb", inRecent: false },
+  app.idb.set("save:Old.gba", u8(1));         // already in the library
+  app.idb.set("save:Zebra.gb", u8(2));        // save with no entry
+  app.idb.set("state:Alpha.gbc", u8(3));      // the same, state-only
+  await app.api.adoptSaveOnlyGames();
+  eq(app.idb.get("recent"), [
+    { name: "New.gba", ts: 3 },
+    { name: "Old.gba", ts: 1 },
+    { name: "Alpha.gbc", ts: 0 },
+    { name: "Zebra.gb", ts: 0 },
   ]);
+  // Every boot runs it; the second finds them known.
+  await app.api.adoptSaveOnlyGames();
+  assert.equal(app.idb.get("recent").length, 4);
+});
+
+test("a game deleted on another device is not adopted back by its leftovers", async () => {
+  const app = await loadApp();
+  app.idb.set("recent", []);
+  app.idb.set("save:Gone.gba", u8(1));
+  app.api.syncState = { ...app.api.syncState, tomb: [{ name: "Gone.gba", ts: 5 }] };
+  await app.api.adoptSaveOnlyGames();
+  eq(app.idb.get("recent"), []);
 });
 
 test("isRomLoaded matches the single-player game and the link-mode ROM", async () => {
