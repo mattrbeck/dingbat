@@ -4495,23 +4495,37 @@ const formatBytes = (bytes) => {
   return (bytes / (1024 * 1024 * 1024)).toFixed(1) + " GB";
 };
 
-// Nothing at all until the room is nearly gone. A figure in the library head
-// is furniture the rest of the time - at 3 MB of 10 GB there is no decision it
-// informs, and it sits among links that do something. Past the line it is not
-// a measurement but a warning, and it says so: this is the point where a save
-// can fail to write, which is the only storage news worth interrupting anyone
-// with. Note that it is not the eviction warning - files start being given up
-// at the ROM budget, half the allowance, well before this - and they do not
-// need one, a tile going dashed being its own notice.
-const STORAGE_WARN_AT = 0.8;
+// Nothing at all until the room starts to run out. A figure in the library
+// head is furniture the rest of the time - at 3 MB of 10 GB there is no
+// decision it informs, and it sits among links that do something. Then three
+// steps, quietest first: the figure, the figure in the colour that means
+// trouble, and the figure with the reason.
+//
+// The reason is in the present tense, because by here it has long since
+// started: files begin being given up at the ROM budget, half the allowance,
+// which this ladder sits well above. So the last line explains the dashed
+// tiles the person has been watching appear, rather than promising something
+// for later. It also says files and not games - the game, its save and its
+// picture all stay, and a line that said otherwise would frighten someone
+// about the one thing that is never at risk.
+const STORAGE_TIERS = [
+  { at: 0.95, bad: true,
+    lead: "Storage nearly full — older games are giving up their files. " },
+  { at: 0.90, bad: true, lead: "" },
+  { at: 0.80, bad: false, lead: "" },
+];
 
 const updateStorageInfo = async () => {
   storageInfo.textContent = "";
+  storageInfo.classList.remove("warn");
   if (!navigator.storage?.estimate) return;
   let est = await navigator.storage.estimate();
-  if (!est?.quota || !(est.usage / est.quota >= STORAGE_WARN_AT)) return;
+  if (!est?.quota) return;
+  let tier = STORAGE_TIERS.find((t) => est.usage / est.quota >= t.at);
+  if (!tier) return;
   storageInfo.textContent =
-    `Storage almost full — ${formatBytes(est.usage)} of ${formatBytes(est.quota)}`;
+    `${tier.lead}${formatBytes(est.usage)} / ${formatBytes(est.quota)} used`;
+  if (tier.bad) storageInfo.classList.add("warn");
 };
 
 // Box-art object URLs, revoked and rebuilt each render.

@@ -67,9 +67,24 @@ test("the storage line stays away until the room is nearly gone", async () => {
   await app.api.updateStorageInfo();
   assert.equal(line(), "", "no figure in the head when there is room");
 
-  app.state.storageQuota = 14000; // 12345 used, ~88%
-  await app.api.updateStorageInfo();
-  assert.match(line(), /almost full/i, "and a warning when there is not");
+  const at = async (pct) => {
+    app.state.storageQuota = Math.round(12345 / pct);
+    await app.api.updateStorageInfo();
+    const el = app.elements.get("storage-info");
+    return { text: el.textContent, warn: el.className.includes("warn") };
+  };
+
+  let r = await at(0.85);
+  assert.match(r.text, /^12\.1 KB \/ .* used$/, "the figure, and nothing else");
+  assert.equal(r.warn, false, "at 85% it is a label, not an alarm");
+
+  r = await at(0.92);
+  assert.equal(r.warn, true, "at 92% the same words in the colour that means it");
+  assert.doesNotMatch(r.text, /giving up/, "still no explanation needed");
+
+  r = await at(0.97);
+  assert.match(r.text, /giving up their files/, "at 97% it says why");
+  assert.equal(r.warn, true);
 });
 
 test("a smaller allowance means fewer files kept", async () => {

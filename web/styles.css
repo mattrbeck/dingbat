@@ -2122,11 +2122,16 @@ body.runtime-ready #boot-progress {
   margin-left: auto;
 }
 
-/* Only on screen when the room is nearly gone (updateStorageInfo), so it is
-   never the faint furniture the rest of the head is. */
+/* Only on screen once the room starts to run out (updateStorageInfo), so it
+   is never the faint furniture the rest of the head is. It reads as one of
+   the head's own labels until .warn, which is the point of the ladder. */
 #storage-info:not(:empty) {
   font-family: var(--font-mono);
   font-size: 11px;
+  color: var(--text-faint);
+}
+
+#storage-info.warn {
   color: var(--danger);
 }
 

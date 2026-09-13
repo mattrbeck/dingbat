@@ -86,10 +86,12 @@ needs a second real device.
       `navigator.storage.estimate()` on the phone, on the desktop and in a
       private window: the three differ, and the budget moves with them. A
       device reporting no figure at all falls back to 2 GB.
-- [ ] **The storage warning keeps quiet.** With room to spare the library
-      head shows no figure at all, only Sign in / Sync / Add pictures. Past
-      80% full one red line appears and reads as a warning rather than a
-      statistic; freeing space takes it away again.
+- [ ] **The storage line climbs in three steps.** With room to spare the
+      library head shows no figure at all, only Sign in / Sync / Add
+      pictures. Past 80% the figure appears in the head's own grey; past 90%
+      the same words turn red; past 95% it gains the reason. Freeing space
+      walks back down. On a phone the 95% line takes two rows and pushes the
+      links below it — check that reads as deliberate rather than broken.
 - [ ] **A full device gives up files, not saves.** Hardest to stage and the
       most worth staging: fill the origin's storage (Safari's allowance is
       the easiest to reach, and a private window's is smaller again), then

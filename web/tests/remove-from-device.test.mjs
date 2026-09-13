@@ -105,7 +105,7 @@ test("removing a game frees its bytes, and says so when the room was short",
   await app.api.refreshHomeRecent();
   await settle();
   assert.match(app.document.getElementById("storage-info").textContent,
-    /almost full/i, "a device this full says so");
+    /used$/, "a device this full says how full");
 
   await app.api.removeGameFromDevice("A.gba");
   await settle();
