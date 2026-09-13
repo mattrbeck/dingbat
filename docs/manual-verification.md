@@ -75,11 +75,16 @@ needs a second real device.
       a dozen games leaves the field and the chips exactly where they were,
       whatever the result count.
 - [ ] **A game past the byte budget keeps everything but its file.** The
-      budget is 2 GB of ROM, so this needs a real library: load GBA games
-      until the total passes it. The oldest tile is still there, still
-      showing its picture, dashed like a Drive-only tile, and its menu
-      offers Find the file rather than Download. Twenty small GB games
-      evict nothing at all.
+      budget is half of what the browser says this origin may hold, so read
+      it off the library first — "X used of Y available" under the grid,
+      halved — then load GBA games until the total passes it. The oldest
+      tile is still there, still showing its picture, dashed like a
+      Drive-only tile, and its menu offers Find the file rather than
+      Download. Twenty small GB games evict nothing at all.
+- [ ] **The allowance is not the same everywhere.** Check that readout on
+      the phone, on the desktop, and in a private window: the three differ,
+      and the budget moves with them. A device reporting no figure at all
+      falls back to 2 GB and the line still holds.
 - [ ] **A full device gives up files, not saves.** Hardest to stage and the
       most worth staging: fill the origin's storage (Safari's allowance is
       the easiest to reach, and a private window's is smaller again), then

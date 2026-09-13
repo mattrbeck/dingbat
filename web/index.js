@@ -4100,16 +4100,54 @@ const loadSystemSettings = async () => {
 // whose library it was. Past the line the bytes go and the entry stays, so
 // drawing it in the wrong place costs a tap to find the file again, not a
 // game.
-const ROM_BUDGET = 2 * 1024 * 1024 * 1024;
+//
+// A share of what the browser says this origin may hold, rather than a number
+// of our own. Every current engine sets that allowance as a fraction of the
+// disk - around 60% on Chrome and on Safari 17 and later, min(10%, 10 GiB) on
+// Firefox - so it is a different figure on a phone and a desktop, and a
+// different figure again on the same disk in a private window: two Chromiums
+// on one 199 GB disk here reported 4 GB and 10 GB. Half of it leaves room for
+// the saves, states and pictures this budget does not count, and keeps a
+// refused write exceptional rather than routine. Clamped at both ends: worth
+// having on a nearly-full disk, and never hundreds of gigabytes on a large
+// one merely because the browser would allow it.
+const ROM_BUDGET_SHARE = 0.5;
+const ROM_BUDGET_MIN = 256 * 1024 * 1024;
+const ROM_BUDGET_MAX = 16 * 1024 * 1024 * 1024;
+const ROM_BUDGET_FALLBACK = 2 * 1024 * 1024 * 1024; // no estimate() to ask
 
-// The browser has a budget of its own, and it is the one that actually bites:
-// smaller on a small disk, unpublished, and not the same on any two engines.
-// It is only ever reported by a write failing, so that is where it is learned
-// - the ROM bytes being held when one last fit. Session-scoped on purpose:
-// tomorrow's free space is not today's, and a figure kept across restarts
-// would hold a device small long after the disk had been cleared.
+// estimate() is deliberately coarse and can be slow enough to notice, and the
+// answer moves only as the disk does, so one reading a minute is as current as
+// a line drawn this roughly needs.
+const QUOTA_TTL_MS = 60 * 1000;
+let quotaBytes = 0;
+let quotaAskedAt = 0;
+const storageQuota = async () => {
+  if (!navigator.storage?.estimate) return 0;
+  if (quotaBytes && Date.now() - quotaAskedAt < QUOTA_TTL_MS) return quotaBytes;
+  try {
+    let est = await navigator.storage.estimate();
+    quotaAskedAt = Date.now();
+    quotaBytes = est?.quota || 0;
+  } catch { /* leave the last reading standing */ }
+  return quotaBytes;
+};
+
+// The browser's real limit is lower than what it estimated often enough to
+// matter, and it is only ever reported by a write failing, so that is where it
+// is learned - the ROM bytes being held when one last fit. Session-scoped on
+// purpose: tomorrow's free space is not today's, and a figure kept across
+// restarts would hold a device small long after the disk had been cleared.
 let romCeiling = Infinity;
-const romBudget = () => Math.min(ROM_BUDGET, romCeiling);
+
+const romBudget = async () => {
+  let quota = await storageQuota();
+  let share = quota ? quota * ROM_BUDGET_SHARE : ROM_BUDGET_FALLBACK;
+  // The clamp first, then the ceiling: a device that has proved it cannot
+  // hold even the floor is telling the truth, and outranks any of this.
+  return Math.min(romCeiling,
+                  Math.max(ROM_BUDGET_MIN, Math.min(ROM_BUDGET_MAX, share)));
+};
 
 const romKey = (name) => "rom:" + name;
 const artKey = (name) => "art:" + name;
@@ -4195,11 +4233,11 @@ const isQuotaError = (e) =>
   !!e && (e.name === "QuotaExceededError" ||
           e.name === "NS_ERROR_DOM_QUOTA_REACHED" || e.code === 22);
 
-// A write that makes room for itself. ROM_BUDGET is our own guess at what is
-// polite; the browser's limit is the one that actually stops a write, and it
-// can be well under ours - a small disk, a Safari origin allowance, or bytes
-// the browser reclaimed from us while the tab was closed. None of it is
-// announced, so the failure is the signal: give up the oldest file, try the
+// A write that makes room for itself. The budget above is drawn from what the
+// browser estimated; the limit that actually stops a write can be under it -
+// estimate() is coarse by design, the disk fills behind us, and bytes can be
+// reclaimed while the tab is closed. None of that is announced, so the
+// failure is the signal: give up the oldest file, try the
 // write again, and keep going until it fits or there is no file left to give.
 // Only ROM files are given up, never a save - a save is usually the very thing
 // being written, and always the thing no one else has a copy of. False means
@@ -4333,7 +4371,7 @@ setInterval(() => { if (!paused) storeLastFrame(); }, FRAME_TICK_MS);
 // Walk the library newest-first and keep files until the budget is spent;
 // from the first game that does not fit, every file after it goes. Strictly
 // by recency, so the rule stays sayable: this device holds the files for the
-// games you played most recently, up to ROM_BUDGET. Only the bytes go - the
+// games you played most recently, up to the budget. Only the bytes go - the
 // entry, the pictures and the save stay, because dropping the entry as well
 // would strand the save with nothing on screen to account for it and take
 // away the one place that could ask for the file back. The merged library
@@ -4341,7 +4379,7 @@ setInterval(() => { if (!paused) storeLastFrame(); }, FRAME_TICK_MS);
 const enforceRomBudget = async (list) => {
   let local = await localRomSet();
   await loadRomSizes();
-  let budget = romBudget();
+  let budget = await romBudget();
   let used = 0;
   let full = false;
   for (let r of list) {
@@ -4463,7 +4501,12 @@ const updateStorageInfo = async () => {
     return;
   }
   let est = await navigator.storage.estimate();
-  storageInfo.textContent = `${formatBytes(est.usage)} used`;
+  // What is left is the fact worth having here: the budget is drawn from the
+  // allowance, so someone wondering why a file went has the figure in front
+  // of them. Only when the browser gives one - it is optional.
+  storageInfo.textContent = est?.quota
+    ? `${formatBytes(est.usage)} used of ${formatBytes(est.quota)} available`
+    : `${formatBytes(est.usage)} used`;
 };
 
 // Box-art object URLs, revoked and rebuilt each render.

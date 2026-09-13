@@ -31,7 +31,8 @@ test("re-adding an existing name moves it to the front, no duplicate", async () 
 
 test("the budget is bytes, not games: 25 small ROMs all keep their files", async () => {
   const app = await loadApp();
-  assert.equal(app.api.ROM_BUDGET, 2 * 1024 * 1024 * 1024);
+  // The harness reports a 4 GB quota, so the line sits at 2 GB.
+  assert.equal(await app.api.romBudget(), 2 * 1024 * 1024 * 1024);
   for (let i = 0; i < 25; i++) await app.api.addRecentRom(`Game${i}.gba`, u8(i, i));
   assert.equal(app.idb.get("recent").length, 25);
   for (let i = 0; i < 25; i++) {
@@ -40,6 +41,35 @@ test("the budget is bytes, not games: 25 small ROMs all keep their files", async
 });
 
 const GB = 1024 * 1024 * 1024;
+
+test("the budget is a share of what the browser says it will allow", async () => {
+  const app = await loadApp();
+  const at = async (quota) => {
+    app.state.storageQuota = quota;
+    app.runIn("quotaBytes = 0"); // the reading is cached for a minute
+    return app.api.romBudget();
+  };
+  assert.equal(await at(20 * GB), 10 * GB, "half the allowance");
+  assert.equal(await at(300 * 1024 * 1024), app.api.ROM_BUDGET_MIN,
+    "a nearly-full disk still keeps a few games rather than none, the quota\n" +
+    "    path taking over from there");
+  assert.equal(await at(900 * GB), app.api.ROM_BUDGET_MAX,
+    "and a large one is not hoarded just because it would be allowed");
+  assert.equal(app.api.ROM_BUDGET_SHARE, 0.5);
+});
+
+test("a smaller allowance means fewer files kept", async () => {
+  const app = await loadApp();
+  app.state.storageQuota = 6 * GB; // a 3 GB budget
+  const all = ["A.gba", "B.gba", "C.gba", "D.gba"];
+  for (const n of all) await app.api.addRecentRom(n, u8(1, 1));
+  for (const n of all) await app.api.noteRomSize(n, GB);
+  app.runIn("quotaBytes = 0");
+  await app.api.bumpRecentIndex("D.gba");
+
+  assert.ok(app.idb.get("rom:B.gba"), "three 1 GB games fit a 3 GB budget");
+  assert.equal(app.idb.get("rom:A.gba"), undefined, "the fourth does not");
+});
 
 test("over budget the oldest files go, and nothing else of those games does",
   async () => {
