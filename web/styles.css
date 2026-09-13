@@ -2122,10 +2122,12 @@ body.runtime-ready #boot-progress {
   margin-left: auto;
 }
 
-#storage-info {
+/* Only on screen when the room is nearly gone (updateStorageInfo), so it is
+   never the faint furniture the rest of the head is. */
+#storage-info:not(:empty) {
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--text-faint);
+  color: var(--danger);
 }
 
 .home-manage-link {

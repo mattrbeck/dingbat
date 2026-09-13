@@ -58,6 +58,20 @@ test("the budget is a share of what the browser says it will allow", async () =>
   assert.equal(app.api.ROM_BUDGET_SHARE, 0.5);
 });
 
+test("the storage line stays away until the room is nearly gone", async () => {
+  const app = await loadApp();
+  await app.api.addRecentRom("A.gba", u8(1));
+  const line = () => app.elements.get("storage-info").textContent;
+
+  app.state.storageQuota = 10 * GB; // 12 KB used: nothing to say
+  await app.api.updateStorageInfo();
+  assert.equal(line(), "", "no figure in the head when there is room");
+
+  app.state.storageQuota = 14000; // 12345 used, ~88%
+  await app.api.updateStorageInfo();
+  assert.match(line(), /almost full/i, "and a warning when there is not");
+});
+
 test("a smaller allowance means fewer files kept", async () => {
   const app = await loadApp();
   app.state.storageQuota = 6 * GB; // a 3 GB budget

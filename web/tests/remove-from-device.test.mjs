@@ -48,7 +48,7 @@ const meterStorage = (app) => {
   app.sandbox.navigator.storage.estimate = async () => {
     let usage = 0;
     for (const v of app.idb.values()) usage += weigh(v);
-    return { usage };
+    return { usage, quota: app.state.storageQuota ?? 4 * 1024 * 1024 * 1024 };
   };
 };
 
@@ -91,14 +91,22 @@ test("the saves left behind are queued for Drive on the way out", async () => {
   assert.ok(!q.includes("rom:A.gba"), "the ROM we just freed is not re-queued");
 });
 
-test("the storage figure reflects the reclaim", async () => {
+test("removing a game frees its bytes, and says so when the room was short",
+  async () => {
   const app = await loadApp();
   app.setFetch(makeDrive(["rom:A.gba"]).fetch);
   signIn(app, { "rom:A.gba": "sig" });
   seedLocal(app, "A.gba", new Uint8Array(64 * 1024));
   meterStorage(app);
 
+  // Nearly full, so the head has something to say before and after.
+  app.state.storageQuota = 70 * 1024;
   const before = (await app.sandbox.navigator.storage.estimate()).usage;
+  await app.api.refreshHomeRecent();
+  await settle();
+  assert.match(app.document.getElementById("storage-info").textContent,
+    /almost full/i, "a device this full says so");
+
   await app.api.removeGameFromDevice("A.gba");
   await settle();
   const after = (await app.sandbox.navigator.storage.estimate()).usage;
@@ -107,8 +115,8 @@ test("the storage figure reflects the reclaim", async () => {
 
   await app.api.refreshHomeRecent();
   await settle();
-  assert.equal(app.document.getElementById("storage-info").textContent,
-    app.api.formatBytes(after) + " used");
+  assert.equal(app.document.getElementById("storage-info").textContent, "",
+    "and the warning goes with them");
 });
 
 test("the removed game re-renders as a Drive-only tile", async () => {

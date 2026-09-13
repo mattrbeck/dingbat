@@ -4495,18 +4495,23 @@ const formatBytes = (bytes) => {
   return (bytes / (1024 * 1024 * 1024)).toFixed(1) + " GB";
 };
 
+// Nothing at all until the room is nearly gone. A figure in the library head
+// is furniture the rest of the time - at 3 MB of 10 GB there is no decision it
+// informs, and it sits among links that do something. Past the line it is not
+// a measurement but a warning, and it says so: this is the point where a save
+// can fail to write, which is the only storage news worth interrupting anyone
+// with. Note that it is not the eviction warning - files start being given up
+// at the ROM budget, half the allowance, well before this - and they do not
+// need one, a tile going dashed being its own notice.
+const STORAGE_WARN_AT = 0.8;
+
 const updateStorageInfo = async () => {
-  if (!navigator.storage?.estimate) {
-    storageInfo.textContent = "";
-    return;
-  }
+  storageInfo.textContent = "";
+  if (!navigator.storage?.estimate) return;
   let est = await navigator.storage.estimate();
-  // What is left is the fact worth having here: the budget is drawn from the
-  // allowance, so someone wondering why a file went has the figure in front
-  // of them. Only when the browser gives one - it is optional.
-  storageInfo.textContent = est?.quota
-    ? `${formatBytes(est.usage)} used of ${formatBytes(est.quota)} available`
-    : `${formatBytes(est.usage)} used`;
+  if (!est?.quota || !(est.usage / est.quota >= STORAGE_WARN_AT)) return;
+  storageInfo.textContent =
+    `Storage almost full — ${formatBytes(est.usage)} of ${formatBytes(est.quota)}`;
 };
 
 // Box-art object URLs, revoked and rebuilt each render.
