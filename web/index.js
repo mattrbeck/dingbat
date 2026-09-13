@@ -9376,6 +9376,9 @@ const brandBarSlot = document.getElementById("brand-slot");
 const barBrand = document.getElementById("bar-brand");
 const barLogo = document.getElementById("bar-logo");
 const BRAND_MOVE_MS = 380;
+// The tail of the flight, over which the bar's copy hands the brand to the
+// hero's. Short on purpose: any longer and the word is readable twice.
+const BRAND_HANDOVER_MS = 130;
 
 let brandAnim = null;
 let brandP = 0;
@@ -9414,7 +9417,7 @@ if (homeScroller.addEventListener) {
 // here - and the logo is the one part that is the same thing in both, so
 // anchoring the transform on it lands it exactly while the word sweeps along.
 const flyBrand = (up) => {
-  if (brandAnim) { brandAnim.cancel(); brandAnim = null; }
+  if (brandAnim) { brandAnim.forEach((a) => a.cancel()); brandAnim = null; }
   if (!barBrand.animate) return;
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   let hero = brandLogo.getBoundingClientRect?.();
@@ -9428,12 +9431,46 @@ const flyBrand = (up) => {
     (bar.top + bar.height / 2 - bx.top) + "px";
   let dx = (hero.left + hero.width / 2) - (bar.left + bar.width / 2);
   let dy = (hero.top + hero.height / 2) - (bar.top + bar.height / 2);
-  let atHero = { transform: `translate(${dx}px, ${dy}px) scale(${scale})`, opacity: 0 };
-  let atBar = { transform: "none", opacity: 1 };
+  let overHero = `translate(${dx}px, ${dy}px) scale(${scale})`;
+  /** @type {KeyframeAnimationOptions} */
+  let glide = { duration: BRAND_MOVE_MS, easing: "cubic-bezier(.22,.61,.36,1)",
+                fill: "backwards" };
 
-  brandAnim = barBrand.animate(up ? [atHero, atBar] : [atBar, atHero],
-    { duration: BRAND_MOVE_MS, easing: "cubic-bezier(.22,.61,.36,1)" });
-  brandAnim.finished
+  if (up) {
+    // A game opening. The hero's copy is hidden the same instant, so this one
+    // starts solid and exactly over it - fading in from nothing would leave a
+    // moment with no brand anywhere.
+    brandAnim = [barBrand.animate(
+      [{ transform: overHero }, { transform: "none" }], glide)];
+  } else {
+    // A game closing, and the harder direction: the hero's copy is back on
+    // screen immediately, so simply flying a ghost down onto it left the real
+    // one sitting there at full size the whole time, which is what read as
+    // growing out of nowhere.
+    //
+    // The two hand over instead, and the handover is its OWN animation rather
+    // than a pair of keyframe offsets. The `easing` option is iteration
+    // easing: it remaps progress before the keyframes are read, so on a glide
+    // this ease-out an offset of 0.66 arrives about a third of the way through
+    // the wall clock, and the crossfade that was meant to be a flick at the
+    // end became most of the flight with the word legible twice in two
+    // different layouts. A separate, linear, delayed fade puts it back where
+    // the eye expects it - by which point the glide has the two logos all but
+    // on top of each other, which is what makes a row without a tagline turn
+    // into a column with one and still read as one object.
+    /** @type {KeyframeAnimationOptions} */
+    let fade = { duration: BRAND_HANDOVER_MS,
+                 delay: BRAND_MOVE_MS - BRAND_HANDOVER_MS,
+                 easing: "linear", fill: "both" };
+    brandAnim = [
+      barBrand.animate([{ transform: "none" }, { transform: overHero }], glide),
+      barBrand.animate([{ opacity: 1 }, { opacity: 0 }], fade),
+      brandEl.animate(
+        [{ opacity: 0, transform: "scale(.97)" },
+         { opacity: 1, transform: "none" }], fade),
+    ];
+  }
+  Promise.all(brandAnim.map((a) => a.finished))
     .then(() => { barBrand.style.transformOrigin = ""; brandAnim = null; })
     .catch(() => {});
 };
