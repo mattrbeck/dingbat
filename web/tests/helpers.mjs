@@ -66,11 +66,24 @@ class FakeElement {
     ev.stopPropagation ??= () => {};
     for (const f of this._listeners[type] || []) await f(ev);
   }
-  appendChild(c) { this.children.push(c); return c; }
-  append(...cs) { for (const c of cs) this.children.push(c); }
-  prepend(...cs) { this.children.unshift(...cs); }
-  replaceChildren(...cs) { this.children = cs; }
-  removeChild(c) { this.children = this.children.filter((x) => x !== c); }
+  // Reparenting is real: a node appended somewhere else leaves where it was,
+  // and knows where it is. index.js moves the brand between two slots and
+  // checks parentElement to decide whether there is anything to do, so a
+  // fake that let a node sit in two parents at once would hide that entirely.
+  _adopt(c) {
+    if (c && c._parent && c._parent !== this) c._parent.removeChild(c);
+    if (c && typeof c === "object") c._parent = this;
+    return c;
+  }
+  get parentElement() { return this._parent ?? null; }
+  appendChild(c) { this._adopt(c); this.children.push(c); return c; }
+  append(...cs) { for (const c of cs) this.children.push(this._adopt(c)); }
+  prepend(...cs) { this.children.unshift(...cs.map((c) => this._adopt(c))); }
+  replaceChildren(...cs) { this.children = cs.map((c) => this._adopt(c)); }
+  removeChild(c) {
+    if (c && c._parent === this) c._parent = null;
+    this.children = this.children.filter((x) => x !== c);
+  }
   replaceChild(n, o) {
     const i = this.children.indexOf(o);
     if (i >= 0) this.children[i] = n; else this.children.push(n);
@@ -538,7 +551,7 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     refreshHomeRecent, handleRomFile, loadRom,
     setRomsSort, sortRoms, applyLibFilter, renderLibChips, libSearchMatch, libFold,
     openTileMenu, closeTileMenu, gameFlags, driveHasRom, tileMenuEntries,
-    sessionMenuEntries, setPausedCardShown,
+    sessionMenuEntries, setPausedCardShown, placeBrand, refreshBrandPlacement,
     LONG_PRESS_MS,
     get tileMenuFor() { return tileMenuFor; },
     get syncDownloading() { return syncDownloading; },

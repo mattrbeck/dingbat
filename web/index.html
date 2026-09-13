@@ -56,6 +56,12 @@
   <body class="no-select">
     <!-- ============================ Top bar ============================ -->
     <header id="topbar">
+      <!-- Where the brand sits while a game is loaded. The brand itself is one
+           element that moves between this and #home-brand-slot rather than two
+           copies, so it can be animated from one to the other - see index.js,
+           "Where the brand lives". Empty the rest of the time. -->
+      <div id="brand-slot"></div>
+
       <div id="menu-container">
         <button type="button" class="icon-btn" id="menu-btn" title="Menu" aria-label="Menu" aria-haspopup="true" aria-expanded="false">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
@@ -132,7 +138,7 @@
             <span>Cheats</span>
           </button>
           <button type="button" class="menu-item" id="open-settings">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 4.5v2.2M12 17.3v2.2M4.5 12h2.2M17.3 12h2.2M6.7 6.7l1.6 1.6M15.7 15.7l1.6 1.6M17.3 6.7l-1.6 1.6M8.3 15.7l-1.6 1.6"/></svg>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" stroke="none" d="M10.1 5.16L10.32 2.45L13.68 2.45L13.9 5.16A7.1 7.1 0 0 1 15.5 5.82L17.56 4.05L19.95 6.44L18.18 8.5A7.1 7.1 0 0 1 18.84 10.1L21.55 10.32L21.55 13.68L18.84 13.9A7.1 7.1 0 0 1 18.18 15.5L19.95 17.56L17.56 19.95L15.5 18.18A7.1 7.1 0 0 1 13.9 18.84L13.68 21.55L10.32 21.55L10.1 18.84A7.1 7.1 0 0 1 8.5 18.18L6.44 19.95L4.05 17.56L5.82 15.5A7.1 7.1 0 0 1 5.16 13.9L2.45 13.68L2.45 10.32L5.16 10.1A7.1 7.1 0 0 1 5.82 8.5L4.05 6.44L6.44 4.05L8.5 5.82A7.1 7.1 0 0 1 10.1 5.16ZM12 8.8A3.2 3.2 0 1 0 12 15.2A3.2 3.2 0 1 0 12 8.8Z"/></svg>
             <span>Settings</span>
           </button>
           <hr class="menu-sep" />
@@ -232,7 +238,7 @@
            so it comes out and the hamburger goes. Exactly one of the two is
            ever on screen (styles.css, "the hamburger on the home screen"). -->
       <button type="button" class="icon-btn" id="settings-btn" title="Settings" aria-label="Settings">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 4.5v2.2M12 17.3v2.2M4.5 12h2.2M17.3 12h2.2M6.7 6.7l1.6 1.6M15.7 15.7l1.6 1.6M17.3 6.7l-1.6 1.6M8.3 15.7l-1.6 1.6"/></svg>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" stroke="none" d="M10.1 5.16L10.32 2.45L13.68 2.45L13.9 5.16A7.1 7.1 0 0 1 15.5 5.82L17.56 4.05L19.95 6.44L18.18 8.5A7.1 7.1 0 0 1 18.84 10.1L21.55 10.32L21.55 13.68L18.84 13.9A7.1 7.1 0 0 1 18.18 15.5L19.95 17.56L17.56 19.95L15.5 18.18A7.1 7.1 0 0 1 13.9 18.84L13.68 21.55L10.32 21.55L10.1 18.84A7.1 7.1 0 0 1 8.5 18.18L6.44 19.95L4.05 17.56L5.82 15.5A7.1 7.1 0 0 1 5.16 13.9L2.45 13.68L2.45 10.32L5.16 10.1A7.1 7.1 0 0 1 5.82 8.5L4.05 6.44L6.44 4.05L8.5 5.82A7.1 7.1 0 0 1 10.1 5.16ZM12 8.8A3.2 3.2 0 1 0 12 15.2A3.2 3.2 0 1 0 12 8.8Z"/></svg>
       </button>
 
       <button type="button" class="icon-btn" id="fullscreen-btn" title="Fullscreen" aria-label="Fullscreen">
@@ -309,12 +315,14 @@
       <section id="home">
         <div id="home-inner">
           <!-- Brand first in the DOM (above the paused card on desktop); the
-               touch layout reorders via flex `order` in styles.css. -->
-          <div id="home-brand">
+               touch layout reorders via flex `order` in styles.css. With a
+               game loaded the brand is not here at all - it is up in the bar,
+               and #home-brand-slot is empty and collapsed. -->
+          <div id="home-brand-slot"><div id="home-brand">
             <img src="favicon.svg" alt="" id="home-logo" />
             <h1>dingbat</h1>
             <p id="home-tagline">a game boy &amp; game boy advance emulator</p>
-          </div>
+          </div></div>
           <!-- Paused-game card: the game Main Menu left behind. JS fills the
                canvas from the framebuffer. It takes the library's own width
                (--lib-width) so the home screen reads as one column, and it

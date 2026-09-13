@@ -4680,11 +4680,12 @@ const tileMenuItem = ({ label, sub = "", danger = false, disabled = "", confirmL
 // buttons rather than being reimplemented: each owns state this menu should
 // not learn (a two-step disarm, a range picker's defaults, a seen-dot).
 const sessionMenuEntries = () => {
+  // No Screenshot and no Clip that!: both are about the frame in front of
+  // you, and the frame in front of you here is the card's own picture of a
+  // game that stopped. They stay in the menu over a running game.
   let items = [
     tileMenuItem({ label: "Save states", run: () => openStatesModal() }),
     tileMenuItem({ label: "Manage saves", run: () => openSavesModal() }),
-    tileMenuItem({ label: "Screenshot", run: () => takeScreenshot() }),
-    tileMenuItem({ label: "Clip that!", run: () => clipLastItem.click() }),
   ];
   if (printerPhotos.length) {
     items.push(tileMenuItem({ label: "Printed photos", run: () => printsItem.click() }));
@@ -7849,6 +7850,9 @@ const loadRom = async (romName, originalName, opts = {}) => {
   rewindButton.classList.remove("active");
   // body.gb-mode drops the L/R row.
   document.body.classList.toggle("gb-mode", systemOf(romName) !== "GBA");
+  // Before the class, not after: body.running hides #home, and a move
+  // measured from a display:none hero has nowhere to come from.
+  placeBrand(true);
   document.body.classList.add("has-game", "running");
   await restoreSave(romName, currentOriginalName);
   Module.ccall("initFromEmscripten", null, ["string"], [romName]);
@@ -9195,6 +9199,7 @@ window.enterRollbackMode = () => {
   pauseButton.classList.remove("paused", "active");
   pauseButton.title = "Pause";
   document.body.classList.toggle("link-gb", linkIsGb);
+  placeBrand(true);
   document.body.classList.add("has-game", "running", "rollback-mode");
   if (typeof window.setNetConnectLabel === "function") window.setNetConnectLabel(true);
   updateCanvasScaling();
@@ -9276,6 +9281,7 @@ const launchLinkRom = async (rom) => {
   pauseButton.title = "Pause";
   gpPrev.fill(false);
   initLinkCanvases();
+  placeBrand(true);
   document.body.classList.add("has-game", "running", "link-mode");
   updateCanvasScaling();
   await touchRecent(rom.name); // bytes are already stored — recency bump only
@@ -9310,6 +9316,72 @@ const resumeGame = () => {
 
 document.getElementById("main-menu").addEventListener("click", showMainMenu);
 document.getElementById("home-resume").addEventListener("click", resumeGame);
+
+
+// --- Where the brand lives -------------------------------------------------
+// One element, two homes: the hero on an empty home screen, and the top bar
+// once a game is loaded. Two copies would be simpler to style and impossible
+// to animate between, and the move is the point - closing a game should look
+// like the wordmark going back where it came from rather than one disappearing
+// and another appearing.
+//
+// The rule is "a game is loaded", not "the card is up": the brand belongs in
+// the bar in the link modes too, which have a game and no card.
+//
+// The move is FLIP. Measure where the LOGO is, move and re-class, measure
+// again, then play the difference off. It is measured on the logo rather than
+// on the brand box because the two layouts are different shapes - a column
+// with a tagline down here, a row without one up there - and the logo is the
+// one part that is the same thing in both. Anchoring the transform's origin on
+// it makes the logo land exactly while the wordmark sweeps along beside it.
+const brandEl = document.getElementById("home-brand");
+const brandLogo = document.getElementById("home-logo");
+const brandBarSlot = document.getElementById("brand-slot");
+const brandHeroSlot = document.getElementById("home-brand-slot");
+const BRAND_MOVE_MS = 380;
+
+let brandAnim = null;
+
+const placeBrand = (inBar, { animate = true } = {}) => {
+  let target = inBar ? brandBarSlot : brandHeroSlot;
+  if (brandEl.parentElement === target) return;
+  let reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // A move mid-flight would measure the transformed box, not the laid-out one.
+  if (brandAnim) { brandAnim.cancel(); brandAnim = null; }
+  let first = animate && !reduced ? brandLogo.getBoundingClientRect?.() : null;
+
+  target.appendChild(brandEl);
+  document.body.classList.toggle("brand-in-bar", inBar);
+
+  // Hidden at this width (a phone with a game running): nothing to play.
+  if (!first || !first.width) return;
+  let last = brandLogo.getBoundingClientRect?.();
+  if (!last || !last.width) return;
+
+  let scale = first.width / last.width;
+  let bx = brandEl.getBoundingClientRect();
+  if (!brandEl.animate) return;
+  brandEl.style.transformOrigin =
+    (last.left + last.width / 2 - bx.left) + "px " +
+    (last.top + last.height / 2 - bx.top) + "px";
+  let dx = (first.left + first.width / 2) - (last.left + last.width / 2);
+  let dy = (first.top + first.height / 2) - (last.top + last.height / 2);
+
+  brandAnim = brandEl.animate(
+    [{ transform: `translate(${dx}px, ${dy}px) scale(${scale})` },
+     { transform: "none" }],
+    { duration: BRAND_MOVE_MS, easing: "cubic-bezier(.22,.61,.36,1)" });
+  brandAnim.finished
+    .then(() => { brandEl.style.transformOrigin = ""; brandAnim = null; })
+    .catch(() => {});
+};
+
+// Put the brand wherever the current state says it belongs, without
+// assuming anything about which way it is going. The call sites that know
+// use placeBrand directly, because they also have to get the ordering
+// right against body.running - see the note at each of them.
+const refreshBrandPlacement = (opts) =>
+  placeBrand(document.body.classList.contains("has-game"), opts);
 
 // --- Paused-game card ---
 // Pixels come from the wasm framebuffer: the canvas is a WebGL context
@@ -9391,6 +9463,7 @@ const unloadGame = async ({ flushSave = true } = {}) => {
   pauseButton.classList.remove("paused", "active");
   pauseButton.title = "Pause";
   document.body.classList.remove("has-game", "running", "paused", "gb-mode");
+  placeBrand(false); // ...and comes back down, played, when the game closes
   clearInputDisplay();   // no cart, no held buttons
   // No cart, no sensor: drop the camera and its button.
   stopWebcam();

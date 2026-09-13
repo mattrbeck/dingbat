@@ -544,9 +544,13 @@ test("the card's ⋯ is the session's; a tile's is the file's; neither is both",
                              null, null, true);
   await settle();
   eq(labels(app),
-     ["Save states", "Manage saves", "Screenshot", "Clip that!",
-      "Link cable", "Cheats", "Report a bug"],
+     ["Save states", "Manage saves", "Link cable", "Cheats", "Report a bug"],
      "what you do to the game you are in the middle of");
+  // Screenshot and Clip that! are about the frame going past, and the
+  // frame here is the card's own picture of a game that stopped.
+  for (const gone of ["Screenshot", "Clip that!"]) {
+    assert.ok(!labels(app).includes(gone), gone + " is a running-game action");
+  }
   assert.equal(app.document.getElementById("tile-menu-head").hidden, true,
                "the card said which game, an inch above");
   app.api.closeTileMenu();
@@ -609,4 +613,48 @@ test("body.lib-has-games follows the library, and is unset before the first rend
   app.idb.set("recent", []);
   await boot(app);
   assert.equal(body.classList.contains("lib-has-games"), false, "back to the empty state");
+});
+
+
+// ── Where the brand lives ───────────────────────────────────────────────────
+// One element with two homes. The harness has no layout, so the FLIP itself is
+// not testable here (it is checked in a browser); what is pinned here is the
+// part the rest of the stylesheet depends on — which parent holds it, and the
+// class that tells the CSS which of the two layouts to wear.
+
+test("the brand moves between the hero and the bar, and says which it is in", async () => {
+  const app = await loadApp();
+  const brand = app.document.getElementById("home-brand");
+  const body = app.document.body;
+
+  assert.equal(body.classList.contains("brand-in-bar"), false);
+  // No starting parent to assert on: the fake DOM mints elements on demand
+  // rather than parsing index.html, so nothing is in a tree until it is put
+  // there. What matters is that a move lands in the right one.
+  app.api.placeBrand(true);
+  assert.equal(brand.parentElement, app.document.getElementById("brand-slot"));
+  assert.equal(body.classList.contains("brand-in-bar"), true);
+
+  app.api.placeBrand(false);
+  assert.equal(brand.parentElement, app.document.getElementById("home-brand-slot"));
+  assert.equal(body.classList.contains("brand-in-bar"), false);
+});
+
+// It follows "a game is loaded", not "the card is up": the link modes have a
+// game and no card, and the brand belongs in the bar there too.
+test("the brand follows has-game, not the card", async () => {
+  const app = await loadApp();
+  const body = app.document.body;
+
+  body.classList.add("has-game");
+  app.api.refreshBrandPlacement();
+  assert.equal(body.classList.contains("brand-in-bar"), true);
+
+  app.api.setPausedCardShown(true);   // a card appearing changes nothing
+  app.api.refreshBrandPlacement();
+  assert.equal(body.classList.contains("brand-in-bar"), true);
+
+  body.classList.remove("has-game");
+  app.api.refreshBrandPlacement();
+  assert.equal(body.classList.contains("brand-in-bar"), false);
 });

@@ -2044,7 +2044,6 @@ body.has-game #home-load:hover {
    card and the one every returning player already aims at. The labelled
    Resume beside it is for everyone who wants to be told. */
 #home-paused-shot {
-  flex: 0 0 auto;
   display: block;
   padding: 0;
   background: none;
@@ -2063,27 +2062,34 @@ body.has-game #home-load:hover {
   transform: translateY(1px);
 }
 
-/* The frame scales with the card rather than sitting in it at thumbnail
-   size: at the library's full width a 240px picture left most of the card
-   empty, and the picture is the one thing on it worth making big. Capped so
-   a very wide screen does not turn 240x160 pixels into a mural. */
+/* The frame scales with the CARD, not with the window: the card takes the
+   library grid's width, which is narrow next to a one-game library, and a
+   picture sized off the viewport bursts straight out of it. A share of the
+   card's own width instead, capped so a very wide screen does not turn
+   240x160 pixels into a mural. */
+#home-paused-shot {
+  flex: 0 1 auto;
+  width: 46%;
+  max-width: 460px;
+}
+
 #home-paused-canvas {
   display: block;
-  width: clamp(240px, 38vw, 460px);
+  width: 100%;
   height: auto;
   background: var(--screen-off);
   image-rendering: pixelated;
 }
 
-/* Name at the top, actions at the foot, the gap between them doing the work:
-   a column that fills the picture's height reads as composed, where one
-   floating in the middle of it reads as a card that was stretched. */
+/* Name over actions as one centred block. Pinning them to the card's two
+   ends filled the height but read as two unrelated things at opposite ends
+   of a box; together they read as one caption beside a picture. */
 #home-paused-body {
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: center;
   gap: 16px;
   padding: 4px 4px 4px 0;
 }
@@ -2146,8 +2152,11 @@ body.has-game #home-load:hover {
    Square, so it reads as a handle beside two worded buttons rather than a
    third thing to read. */
 /* Square, and the same height as the two worded buttons beside it: stretch,
-   because the row's height is set by their padding and this one has none. */
-.home-paused-more {
+   because the row's height is set by their padding and this one has none.
+   Selected through #home-paused-actions so it beats that rule's own padding -
+   which otherwise leaves a 42px button with 40px of padding and no room for
+   the glyph at all. */
+#home-paused-actions .home-paused-more {
   flex: 0 0 auto;
   align-self: stretch;
   width: 42px;
@@ -2182,9 +2191,8 @@ body.has-game #home-load:hover {
   }
   #home-paused-shot {
     align-self: stretch;
-  }
-  #home-paused-canvas {
-    width: 100%;
+    width: auto;
+    max-width: 100%;
   }
   #home-paused-actions .button {
     flex: 1 1 auto;
@@ -2192,6 +2200,77 @@ body.has-game #home-load:hover {
   .home-paused-more {
     flex: 0 0 auto;
   }
+}
+
+
+/* --- The brand's two homes ---------------------------------------------
+   #home-brand is ONE element that moves between the hero and the bar
+   (index.js, "Where the brand lives"), so everything here is the same
+   element wearing two layouts: a centred column with a tagline down in the
+   hero, a wordmark beside its logo up in the bar.
+
+   Desktop centres it in the bar and keeps it there while the game runs -
+   there is room, and a bar with nothing in the middle of it looks unfinished.
+   Phones drop it as soon as a game starts, where the bar's width is spoken
+   for, and left-align it the rest of the time. pointer-events:none because
+   it is a mark, not a control, and on desktop it is absolutely positioned
+   across the middle of a bar full of buttons. */
+#brand-slot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  pointer-events: none;
+}
+
+/* Empty whenever the brand is in the hero; it must not hold a gap open. */
+#brand-slot:empty {
+  display: none;
+}
+
+#home-brand-slot:empty {
+  display: none;
+}
+
+@media (min-width: 760px) {
+  #brand-slot {
+    position: absolute;
+    left: 50%;
+    top: var(--safe-t);
+    height: var(--bar-h);
+    transform: translateX(-50%);
+  }
+}
+
+@media (max-width: 759px) {
+  body.running #brand-slot {
+    display: none;
+  }
+}
+
+body.brand-in-bar #home-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+}
+
+body.brand-in-bar #home-logo {
+  width: 22px;
+  margin-bottom: 0;
+  filter: none;
+}
+
+body.brand-in-bar #home-brand h1 {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+body.brand-in-bar #home-tagline {
+  display: none;
 }
 
 #home-brand {
@@ -2597,6 +2676,26 @@ body.runtime-ready #boot-progress {
 @media (min-width: 1400px) {
   #home-inner {
     --lib-cols: 6;
+  }
+}
+
+/* A short library is allowed to be wider than its cells would make it. The
+   block narrows to what it fills so the head is ruled over its own tiles, but
+   the paused card takes this same width - and two cells on a 1440px screen
+   left the card in a 460px corner of it. So a floor goes under the block
+   while it is short, as a share of the space that is actually there rather
+   than a fixed number a laptop would overflow, and --lib-tile-max is lifted
+   out of the way so the tiles fill the block instead of centring inside it.
+
+   Four cells and up need none of this: the row is already full. */
+@media (min-width: 760px) {
+  #home-inner[data-n="2"] {
+    --lib-floor: min(100%, 780px);
+    --lib-tile-max: 520px;
+  }
+  #home-inner[data-n="3"] {
+    --lib-floor: min(100%, 1000px);
+    --lib-tile-max: 520px;
   }
 }
 
