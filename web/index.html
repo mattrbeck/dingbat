@@ -135,7 +135,7 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 4.5v2.2M12 17.3v2.2M4.5 12h2.2M17.3 12h2.2M6.7 6.7l1.6 1.6M15.7 15.7l1.6 1.6M17.3 6.7l-1.6 1.6M8.3 15.7l-1.6 1.6"/></svg>
             <span>Settings</span>
           </button>
-          <hr class="menu-sep" />
+          <hr class="menu-sep" id="report-sep" />
           <button type="button" class="menu-item" id="report-bug">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8a4 4 0 0 1 8 0v2a4 4 0 0 1-8 0zM12 12v7M6 10H3M6 14H3M18 10h3M18 14h3M8 7 6 5M16 7l2-2"/></svg>
             <span>Report a Bug</span>
@@ -306,16 +306,35 @@
             <h1>dingbat</h1>
             <p id="home-tagline">a game boy &amp; game boy advance emulator</p>
           </div>
-          <!-- Paused-game card: JS fills the canvas from the framebuffer on Main Menu. -->
+          <!-- Paused-game card: the game Main Menu left behind. JS fills the
+               canvas from the framebuffer. It takes the library's own width
+               (--lib-width) so the home screen reads as one column, and it
+               carries every action that is about this game: resume it, close
+               it, or the same ⋯ menu its tile in the grid would give.
+               The picture is still the resume target - it is the biggest,
+               most obvious thing on the card - with the button beside it for
+               anyone who wants a labelled control. -->
           <div id="home-paused" hidden>
-            <button type="button" id="home-paused-shot" title="Resume game">
+            <button type="button" id="home-paused-shot" title="Resume game" aria-label="Resume game">
               <canvas id="home-paused-canvas" width="240" height="160"></canvas>
-              <span class="home-paused-caption">
+            </button>
+            <div id="home-paused-body">
+              <div id="home-paused-title">
                 <span id="home-paused-name"></span>
                 <span class="home-paused-hint">Paused</span>
-              </span>
-            </button>
-            <button type="button" id="home-paused-close" title="Close game &mdash; your save is kept" aria-label="Close game">&times;</button>
+              </div>
+              <div id="home-paused-actions">
+                <button type="button" id="home-paused-resume" class="button button-primary">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></svg>
+                  <span>Resume</span>
+                </button>
+                <button type="button" id="home-paused-close" class="button" title="Close game &mdash; your save is kept">Close game</button>
+                <button type="button" id="home-paused-more" class="button home-paused-more"
+                        title="More for this game" aria-label="More for this game" aria-haspopup="menu">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+                </button>
+              </div>
+            </div>
           </div>
           <!-- pointer:coarse: a row of Resume + "Load a game"; desktop:
                display:contents. -->
@@ -324,7 +343,9 @@
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></svg>
               <span>Resume game</span>
             </button>
-            <!-- Mobile-only replacement for the drop target; hidden on desktop. -->
+            <!-- The empty library's way in. Once there are games the
+                 library head carries it (#lib-add) and this one stands down;
+                 body.lib-empty is the switch. -->
             <button type="button" id="home-load" class="button button-primary">Load a game</button>
             <!-- Empty library only: the library head carries the Drive slot
                  the rest of the time, and the head is not on screen then. -->
@@ -346,6 +367,14 @@
                 <!-- Shown only while some game has no picture; index.js
                      "Library pictures, in one go" hides it again once none do. -->
                 <button type="button" class="home-manage-link" id="home-thumbs" hidden>Add pictures</button>
+                <!-- The way in from a file, at the library it adds to. The
+                     hero's own "Load a game" is the empty-library state and
+                     nothing else, so there is exactly one of these on screen
+                     at a time. Drag-and-drop still works document-wide. -->
+                <button type="button" class="lib-add" id="lib-add">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                  <span>Add game</span>
+                </button>
               </span>
             </div>
             <!-- Search, filter chips (built by index.js) and sort. A sibling

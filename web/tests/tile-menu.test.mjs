@@ -528,3 +528,59 @@ test("Download to this device fetches the ROM, and the tile turns local", async 
   assert.ok(!tileOf(app, "A.gba").classList.contains("home-tile-cloud"));
   eq(app.toasts.slice(-1), ["Synced to this device"]);
 });
+
+
+// ── The paused card's ⋯ is this same menu ───────────────────────────────────
+// One menu per game, opened from two places. The card's entry point adds the
+// session section on top; the grid's tiles never do, so the library menu is
+// exactly what it always was.
+
+test("the card's ⋯ adds the session items above the file ones; a tile's does not", async () => {
+  const app = await loadApp();
+  seed(app, ["Zelda.gbc"], { saves: ["Zelda.gbc"] });
+  await boot(app);
+
+  await app.api.openTileMenu("Zelda.gbc", app.document.createElement("button"),
+                             null, null, true);
+  await settle();
+  eq(labels(app),
+     ["Link cable", "Cheats", "Report a bug", "Rename", "Reset save data", "Delete"],
+     "session first, then the game's files");
+  app.api.closeTileMenu();
+
+  await open(app, "Zelda.gbc");
+  eq(labels(app), ["Rename", "Reset save data", "Delete"],
+     "the grid's own menu is untouched");
+  app.api.closeTileMenu();
+});
+
+// The three items leave the hamburger only while the card is up (body.home-card
+// in styles.css), so the class has to mean exactly "the card is on screen" —
+// never "a game is loaded", which is also true of the link modes the card
+// cannot draw and where the menu is the only way to end a session.
+test("body.home-card tracks the card itself, and clears with it", async () => {
+  const app = await loadApp();
+  const body = app.document.body;
+  assert.equal(body.classList.contains("home-card"), false, "nothing on screen yet");
+  app.api.setPausedCardShown(true);
+  assert.equal(body.classList.contains("home-card"), true);
+  assert.equal(app.document.getElementById("home-paused").hidden, false);
+  app.api.setPausedCardShown(false);
+  assert.equal(body.classList.contains("home-card"), false);
+  assert.equal(app.document.getElementById("home-paused").hidden, true);
+});
+
+// body.lib-has-games decides which way in from a file is on screen: the hero's
+// button or the library head's. Stated the positive way round so that the
+// pre-first-render state — neither class set — shows the hero's.
+test("body.lib-has-games follows the library, and is unset before the first render", async () => {
+  const app = await loadApp();
+  const body = app.document.body;
+  assert.equal(body.classList.contains("lib-has-games"), false, "nothing rendered yet");
+  seed(app, ["Zelda.gbc"]);
+  await boot(app);
+  assert.equal(body.classList.contains("lib-has-games"), true);
+  app.idb.set("recent", []);
+  await boot(app);
+  assert.equal(body.classList.contains("lib-has-games"), false, "back to the empty state");
+});

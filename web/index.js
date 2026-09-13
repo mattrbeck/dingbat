@@ -1689,10 +1689,12 @@ const libTileMatches = (tile) => {
 // chip next to it. Filtering changes which tiles show, not how wide the
 // library is.
 const LIB_FIT_MAX = 5;
+// On #home-inner, not the wrap: the paused card reads the same width tokens
+// and is the wrap's sibling, so their common parent is where they live.
 const setLibFit = (count) => {
-  if (!homeRecentWrap) return;
-  if (count > LIB_FIT_MAX) delete homeRecentWrap.dataset.n;
-  else homeRecentWrap.dataset.n = String(Math.max(1, count));
+  if (!homeInner) return;
+  if (count > LIB_FIT_MAX) delete homeInner.dataset.n;
+  else homeInner.dataset.n = String(Math.max(1, count));
 };
 
 // Hide the tiles the filter excludes; the count and the empty note follow.
@@ -3852,6 +3854,11 @@ const homeDriveBtn = /** @type {HTMLButtonElement} */ (document.getElementById("
 let libraryEmpty = false;
 
 const refreshHomeEmptyActions = () => {
+  // Which way in from a file is on screen: the hero's button with no library
+  // to speak of, the library head's #lib-add once there is one. Stated the
+  // positive way round on purpose - before the first refresh neither class
+  // is set, and the hero's button is the right thing to be showing then.
+  document.body.classList.toggle("lib-has-games", !libraryEmpty);
   if (!homeDriveBtn) return;
   if (!libraryEmpty || !GDRIVE_CLIENT_ID) {
     homeDriveBtn.hidden = true;
@@ -4483,6 +4490,7 @@ const launchRom = async (name) => {
 
 // Home-screen recent grid: the game library.
 const homeRecentWrap = document.getElementById("home-recent-wrap");
+const homeInner = document.getElementById("home-inner");
 const homeRecentHead = document.getElementById("home-recent-head");
 const homeRecent = document.getElementById("home-recent");
 const homeThumbsBtn = document.getElementById("home-thumbs");
@@ -4642,6 +4650,26 @@ const tileMenuItem = ({ label, sub = "", danger = false, disabled = "", confirmL
 // Delete needs no reach line any more - enrolled, it always means every
 // device, because a delete made away from Drive is recorded and flushes
 // when the account comes back.
+// The loaded game's own controls, offered only from the paused card's ⋯.
+// They sit above the file items because they are about the session in front
+// of you rather than the bytes on disk, and they are the reason those same
+// commands can leave the hamburger while the card is up (body.home-card).
+//
+// Link Cable goes through the menu button rather than duplicating netplay.js:
+// that button owns a two-step disarm for the disconnect case, and this menu
+// can never be the disconnect case - the card is drawn only for a single
+// core, so a link session means no card and no ⋯.
+// Save States is deliberately NOT here: it is the one of these that is worth
+// reaching for on a paused game, and it keeps its place in the hamburger.
+const sessionMenuEntries = () => [
+  tileMenuItem({
+    label: "Link cable",
+    run: () => document.getElementById("net-connect").click(),
+  }),
+  tileMenuItem({ label: "Cheats", run: () => openCheatsModal() }),
+  tileMenuItem({ label: "Report a bug", run: () => openReportModal() }),
+];
+
 const tileMenuEntries = (name, f) => {
   let items = [];
   let busy = f.busy ? "Exit the online session first" : "";
@@ -4782,14 +4810,15 @@ const placeTileMenu = (anchor, at) => {
 };
 
 // `at` = {x, y} for a right-click; else the menu hangs off `anchor`.
-const openTileMenu = async (name, anchor, tile, at = null) => {
+const openTileMenu = async (name, anchor, tile, at = null, session = false) => {
   closeTileMenu();
   let [localRoms, withSaves] = await Promise.all([localRomSet(), romsWithSaveData()]);
   let f = gameFlags(name, localRoms, new Set(withSaves));
   tileMenuFor = name;
   tileMenuAnchor = anchor;
   buildTileMenuHead(name, f);
-  tileMenuItems.replaceChildren(...tileMenuEntries(name, f));
+  tileMenuItems.replaceChildren(
+    ...(session ? sessionMenuEntries() : []), ...tileMenuEntries(name, f));
   if (tile) tile.classList.add("menu-open");
   tileMenuScrim.hidden = false;
   tileMenu.hidden = false;
@@ -8012,6 +8041,7 @@ const openRomPicker = () => {
 
 // Mobile "Load a game" button (no drag-and-drop on touch).
 document.getElementById("home-load").addEventListener("click", openRomPicker);
+document.getElementById("lib-add").addEventListener("click", openRomPicker);
 
 let dropOverlay = document.getElementById("drop-overlay");
 let dragCounter = 0;
@@ -9214,8 +9244,19 @@ const homePausedCard = document.getElementById("home-paused");
 const homePausedCanvas = /** @type {HTMLCanvasElement} */ (document.getElementById("home-paused-canvas"));
 const homePausedName = document.getElementById("home-paused-name");
 
+// body.home-card is set exactly while the card is up, and it is what the
+// hamburger and the hero read to stand their own copies down. It is NOT the
+// same question as body.has-game: a 2P, rollback or online session reaches
+// the home screen with a game loaded and no card (two cores, no single
+// framebuffer to draw), and there the menu items and the hero's Resume are
+// the only way back and the only way to disconnect.
+const setPausedCardShown = (on) => {
+  homePausedCard.hidden = !on;
+  document.body.classList.toggle("home-card", on);
+};
+
 const updatePausedCard = () => {
-  homePausedCard.hidden = true;
+  setPausedCardShown(false);
   // Single-core only: the link modes render to their own canvases.
   if (!currentRomName || linkMode || rollbackMode || netActive()) return;
   if (typeof Module === "undefined" || !Module._wasm_fb_ptr) return;
@@ -9233,10 +9274,21 @@ const updatePausedCard = () => {
   ctx.putImageData(img, 0, 0);
   homePausedName.textContent = displayName(currentOriginalName);
   homePausedName.title = currentOriginalName;
-  homePausedCard.hidden = false;
+  setPausedCardShown(true);
 };
 
 document.getElementById("home-paused-shot").addEventListener("click", resumeGame);
+document.getElementById("home-paused-resume").addEventListener("click", resumeGame);
+
+// The card's ⋯ is the game's ⋯: the loaded game's own tile in the grid
+// opens the same menu with the same entries, so there is one menu per game
+// rather than a session menu and a library menu that disagree.
+const homePausedMore = document.getElementById("home-paused-more");
+homePausedMore.addEventListener("click", () => {
+  if (!currentRomName) return;
+  if (tileMenuFor === currentRomName) closeTileMenu();
+  else openTileMenu(currentRomName, homePausedMore, null, null, true);
+});
 
 // Close the paused game: flush its save once, detach it from every later
 // flush path. The core stays frozen in wasm memory until the next loadRom
@@ -9264,7 +9316,7 @@ const unloadGame = async ({ flushSave = true } = {}) => {
   // No cart, no sensor: drop the camera and its button.
   stopWebcam();
   camNoticeShown = null;
-  homePausedCard.hidden = true;
+  setPausedCardShown(false);
   refreshHomeRecent();
   updateCanvasScaling();
   return true;

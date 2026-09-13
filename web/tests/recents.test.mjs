@@ -304,9 +304,11 @@ test("a library with games withdraws the hero's Drive slot", async () => {
   assert.equal(app.elements.get("home-drive").hidden, true);
 });
 
+// On #home-inner rather than the grid's own wrap, because the paused card
+// reads the same width tokens and is the wrap's sibling.
 test("the grid draws only the columns it fills, and stops at five", async () => {
   const app = await loadApp();
-  const wrap = app.elements.get("home-recent-wrap");
+  const wrap = app.elements.get("home-inner");
   for (let i = 1; i <= 7; i++) {
     await app.api.addRecentRom(`G${i}.gba`, u8(i));
     await settle();

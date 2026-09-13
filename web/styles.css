@@ -1162,6 +1162,31 @@ body.has-game #net-connect {
   display: none;
 }
 
+/* --- What the hamburger drops on the home screen ------------------------
+   Two different reasons, so two rules.
+
+   First: a backgrounded game runs no frames, so the three items that steer
+   frames as they go have nothing to act on. Quick Save and Quick Load stay -
+   they snapshot and restore the frozen state, which is a real thing to want
+   from here - as do Save States, Manage Saves and Screenshot. */
+body:not(.running) #slow-motion,
+body:not(.running) #open-rewind-scrub,
+body:not(.running) #record-clip {
+  display: none;
+}
+
+/* Second: while the paused card is up it carries these three itself, on its
+   own ⋯, next to the game they belong to. body.home-card, not
+   body:not(.running): with no card - no game at all, or a link session the
+   card cannot draw - the menu is the only place they exist, and Link Cable
+   is then the only way to end a session. */
+body.home-card #net-connect,
+body.home-card #open-cheats,
+body.home-card #report-bug,
+body.home-card #report-sep {
+  display: none;
+}
+
 /* Slow motion is a MODE the menu toggles — show its live state in place */
 #slow-motion.active {
   color: var(--accent);
@@ -1294,6 +1319,25 @@ body.net-mode .menu-quickrow {
 
 body.running #status {
   display: inline-flex;
+}
+
+/* --- What the bar drops on the home screen ------------------------------
+   A game reached from Main Menu is backgrounded, not playing: it renders no
+   frames, makes no sound, reads no sensor. Everything in the bar that
+   reports or steers that game therefore has nothing to say here, and the
+   home screen is where the library wants the eye. So the enhanced-audio
+   lamp, the cartridge control (tilt / camera) and the volume pair all stand
+   down with the playback controls, and #status goes with them (the sync
+   state is already at the top of the library, where a sync is something you
+   act on rather than watch).
+
+   What stays is what is about the app rather than the game: the menu, the
+   update button — the home screen is the right place to take an update —
+   and fullscreen, which people set before they pick anything. */
+body:not(.running) #hle-indicator,
+body:not(.running) .cart-btn,
+body:not(.running) #volume-control {
+  display: none;
 }
 
 /* Phones: the top-bar volume slider gives way to the mute toggle; a full
@@ -1868,7 +1912,11 @@ body.running #home {
   transform: translateY(1px);
 }
 
-body.has-game #home-resume {
+/* The hero's Resume is the fallback way back, not the usual one: with the
+   card up it sits inside the card instead. What is left for it is the modes
+   the card cannot draw - 2P link, rollback, an online session - where it is
+   the only way back to the game. */
+body.has-game:not(.home-card) #home-resume {
   display: inline-flex;
 }
 
@@ -1891,6 +1939,21 @@ body.has-game #home-resume {
   padding: 11px 24px;
   font-size: 15px;
   border-radius: 999px;
+}
+
+/* With a library on screen the way in from a file is #lib-add, in the head
+   of the thing it adds to. The hero's button is the empty state and nothing
+   else, so only one of the two is ever up. */
+body.lib-has-games #home-load {
+  display: none;
+}
+
+/* ...which can empty the rung completely: with a library and either no game
+   or a card carrying its own Resume, all three of its buttons are down. An
+   empty flex child still costs #home-inner's 26px gap, so it leaves too. */
+body.lib-has-games.home-card #home-actions,
+body.lib-has-games:not(.has-game) #home-actions {
+  display: none;
 }
 
 /* The Drive way in, beside the file way in - same pill, quieter fill, so
@@ -1920,27 +1983,49 @@ body.has-game #home-load:hover {
   background: linear-gradient(180deg, var(--surface-hover), var(--surface-3));
 }
 
-/* Paused-game card — frozen frame of the game Resume returns to. Shown only
-   while a game is paused at the home screen (JS toggles [hidden]). */
-#home-paused {
-  position: relative;
-}
+/* Paused-game card — the frozen frame of the game Resume returns to, at the
+   library grid's own width (--lib-width, inherited from #home-inner) so the
+   home screen is one column from the card to the last tile rather than a
+   narrow box floating over a wide grid.
 
-#home-paused-shot {
+   Desktop: picture left, name and actions right, because the width is there.
+   Phones (<=560px): the picture goes full-bleed across the top with the name
+   and actions under it, which is the only way a 3:2 frame stays a picture at
+   360pt. Both are the same two children in the same order; only the axis
+   changes. */
+#home-paused {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 8px;
+  align-items: stretch;
+  gap: 14px;
+  width: 100%;
+  max-width: var(--lib-width);
+  padding: 12px;
   background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+}
+
+#home-paused[hidden] {
+  display: none;
+}
+
+/* The picture is still the resume target: it is the largest thing on the
+   card and the one every returning player already aims at. The labelled
+   Resume beside it is for everyone who wants to be told. */
+#home-paused-shot {
+  flex: 0 0 auto;
+  display: block;
+  padding: 0;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
   cursor: pointer;
-  transition: border-color 0.14s, background 0.14s, transform 0.06s;
+  transition: border-color 0.14s, transform 0.06s;
 }
 
 #home-paused-shot:hover {
   border-color: var(--border-2);
-  background: linear-gradient(180deg, var(--surface-3), var(--surface-2));
 }
 
 #home-paused-shot:active {
@@ -1949,27 +2034,36 @@ body.has-game #home-load:hover {
 
 #home-paused-canvas {
   display: block;
-  width: 192px;
+  width: 240px;
   height: auto;
-  border-radius: 5px;
   background: var(--screen-off);
   image-rendering: pixelated;
 }
 
-.home-paused-caption {
+#home-paused-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+}
+
+#home-paused-title {
   display: flex;
   align-items: center;
   gap: 8px;
-  max-width: 192px;
+  min-width: 0;
 }
 
 #home-paused-name {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12.5px;
+  font-size: 17px;
+  font-weight: 600;
   text-align: left;
   color: var(--text);
 }
@@ -1986,31 +2080,75 @@ body.has-game #home-load:hover {
   background: rgba(var(--accent-rgb), 0.14);
 }
 
-/* Close ("unload") — ends the paused session; all stored data is kept */
-#home-paused-close {
-  position: absolute;
-  top: 3px;
-  right: 3px;
-  width: 22px;
-  height: 22px;
+#home-paused-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: center;
-  padding: 0;
-  font-size: 16px;
-  line-height: 1;
-  color: var(--text-dim);
-  background: var(--paused-close-bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: color 0.12s, background 0.12s, border-color 0.12s;
+  gap: 8px;
 }
 
+#home-paused-actions .button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 18px;
+  font-size: 14px;
+  border-radius: 999px;
+}
+
+#home-paused-resume svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* ⋯ is the same menu the game's tile opens, with the session items on top.
+   Square, so it reads as a handle beside two worded buttons rather than a
+   third thing to read. */
+.home-paused-more {
+  flex: 0 0 auto;
+  width: 38px;
+  padding: 0 !important;
+  color: var(--text-dim);
+}
+
+.home-paused-more svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+  stroke: none;
+}
+
+.home-paused-more:hover {
+  color: var(--text);
+}
+
+/* Close is the one destructive-looking action here, but it is not
+   destructive: the save is kept and the game stays in the library. So it
+   stays a plain button and only says danger on hover. */
 #home-paused-close:hover {
   color: var(--danger);
   border-color: rgba(var(--danger-rgb), 0.4);
-  background: var(--paused-close-bg-hover);
+}
+
+@media (max-width: 560px) {
+  #home-paused {
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
+  }
+  #home-paused-shot {
+    align-self: stretch;
+  }
+  #home-paused-canvas {
+    width: 100%;
+  }
+  #home-paused-actions .button {
+    flex: 1 1 auto;
+  }
+  .home-paused-more {
+    flex: 0 0 auto;
+  }
 }
 
 #home-brand {
@@ -2150,6 +2288,45 @@ body.runtime-ready #boot-progress {
 
 .home-manage-link:hover {
   color: var(--text);
+}
+
+/* Add game — the one verb in a head of faint readouts, so it is the one
+   thing in the row with a fill. It is quiet all the same: with a library on
+   screen, adding from a file is the rare way in and the grid is the common
+   one. align-self because the row is baseline-aligned for its text and a
+   pill has no baseline worth sharing. */
+.lib-add {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  padding: 5px 12px 5px 9px;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--text);
+  background: linear-gradient(180deg, var(--surface-3), var(--surface-2));
+  border: 1px solid var(--border-2);
+  border-radius: 999px;
+  box-shadow: inset 0 1px 0 var(--inset-hi);
+  cursor: pointer;
+  transition: background 0.13s, border-color 0.13s;
+}
+
+.lib-add svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+
+.lib-add:hover {
+  background: linear-gradient(180deg, var(--surface-hover), var(--surface-3));
+  border-color: var(--border-3, var(--border-2));
 }
 
 /* The count beside the label: "LIBRARY 12 games", or "3 of 12" filtered. */
@@ -2371,7 +2548,7 @@ body.runtime-ready #boot-progress {
    width. #home-recent stays full width and centres its tracks for exactly
    that reason; the head and the bar derive nothing and take --lib-width as
    a max-width. */
-#home-recent-wrap {
+#home-inner {
   --lib-gap: 10px;
   --lib-cols: 2;
   --lib-fit: var(--lib-cols);
@@ -2390,31 +2567,31 @@ body.runtime-ready #boot-progress {
 /* The smallest phones (an iPhone SE is 320px): one column, so the picture
    is a picture and the name is not an ellipsis. */
 @media (max-width: 359px) {
-  #home-recent-wrap {
+  #home-inner {
     --lib-cols: 1;
   }
 }
 
 @media (min-width: 640px) {
-  #home-recent-wrap {
+  #home-inner {
     --lib-cols: 3;
   }
 }
 
 @media (min-width: 900px) {
-  #home-recent-wrap {
+  #home-inner {
     --lib-cols: 4;
   }
 }
 
 @media (min-width: 1150px) {
-  #home-recent-wrap {
+  #home-inner {
     --lib-cols: 5;
   }
 }
 
 @media (min-width: 1400px) {
-  #home-recent-wrap {
+  #home-inner {
     --lib-cols: 6;
   }
 }
@@ -2428,7 +2605,7 @@ body.runtime-ready #boot-progress {
    one count with no bar under the head — so it narrows everywhere. Two and
    up wait for 760px, below which the bar is a full-bleed sticky strip and
    the block is already about as narrow as the floor anyway. */
-#home-recent-wrap[data-n="1"] {
+#home-inner[data-n="1"] {
   --lib-fit: 1;
 }
 
@@ -2439,7 +2616,7 @@ body.runtime-ready #boot-progress {
 }
 
 @media (min-width: 760px) {
-  #home-recent-wrap[data-n="2"] {
+  #home-inner[data-n="2"] {
     --lib-fit: 2;
   }
   .lib-bar {
@@ -2452,29 +2629,29 @@ body.runtime-ready #boot-progress {
      way they do on a phone, rather than scrolling sideways. Every wider
      count clears the bar's full width in one row (three tiles is 636px at
      its narrowest, against the 576px the row needs). */
-  #home-recent-wrap[data-n="2"] .lib-bar {
+  #home-inner[data-n="2"] .lib-bar {
     flex-wrap: wrap;
   }
-  #home-recent-wrap[data-n="2"] .lib-chips {
+  #home-inner[data-n="2"] .lib-chips {
     flex: 1 1 100%;
     order: 1;
   }
 }
 
 @media (min-width: 900px) {
-  #home-recent-wrap[data-n="3"] {
+  #home-inner[data-n="3"] {
     --lib-fit: 3;
   }
 }
 
 @media (min-width: 1150px) {
-  #home-recent-wrap[data-n="4"] {
+  #home-inner[data-n="4"] {
     --lib-fit: 4;
   }
 }
 
 @media (min-width: 1400px) {
-  #home-recent-wrap[data-n="5"] {
+  #home-inner[data-n="5"] {
     --lib-fit: 5;
   }
 }
@@ -6455,8 +6632,11 @@ body.net-mode #saves-modal .modal-toggle-row:has(#reset-save-slot) {
     transform: rotate(360deg);
   }
 }
-/* The status row is normally running-only; sync must be able to reveal it. */
-body.sync-shown #status {
+/* The status row is normally running-only; sync must be able to reveal it —
+   but only over a running game. On the home screen the library head carries
+   the same state (#home-sync), and two live readouts of one thing, one of
+   them in the chrome, is one too many. */
+body.running.sync-shown #status {
   display: inline-flex;
 }
 /* Phones: icon only (tap toasts the description). The fps unit goes too:
