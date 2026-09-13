@@ -357,7 +357,7 @@ test("a pull is deferred, not dropped, when another op is in flight", async () =
     "pull ran despite the concurrent flush, got: " + JSON.stringify(names));
 });
 
-test("the merged library is not truncated at MAX_RECENT", async () => {
+test("the merged library is not truncated by the byte budget", async () => {
   const app = await loadApp();
   const recents = Array.from({ length: 25 }, (_, i) => ({ name: `G${i}.gba`, ts: 1000 - i }));
   const drive = makeDrive({
@@ -368,7 +368,7 @@ test("the merged library is not truncated at MAX_RECENT", async () => {
 
   await app.api.pullSync();
   await settle();
-  // A cap here would make every game past the 20th impossible to download.
+  // Trimming here would make the trimmed games impossible to download.
   assert.equal((app.idb.get("recent") || []).length, 25);
 });
 

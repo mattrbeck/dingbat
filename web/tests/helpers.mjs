@@ -122,7 +122,9 @@ class FakeElement {
 // every request issued on it (including from another request's onsuccess)
 // has settled, and an abort rolls the store back. Writes hit the Map
 // immediately (tests read it straight after awaiting dbPut); atomicity is an
-// undo log. `state.idbFail(op, key)` makes that one request fail.
+// undo log. `state.idbFail(op, key)` makes that one request fail; return an
+// Error to choose which one (the quota paths read `name`), or `true` for a
+// generic failure.
 const makeFakeTx = (store, state) => {
   let pending = 0;
   let settled = false;
@@ -147,8 +149,10 @@ const makeFakeTx = (store, state) => {
     queueMicrotask(() => {
       pending--;
       if (settled) return;
-      if (state?.idbFail?.(op, key)) {
-        r.error = new Error(`fake IndexedDB failure: ${op} ${key}`);
+      const forced = state?.idbFail?.(op, key);
+      if (forced) {
+        r.error = forced instanceof Error
+          ? forced : new Error(`fake IndexedDB failure: ${op} ${key}`);
         r.onerror?.();
         tx.error = r.error;
         tx.onerror?.();
@@ -492,8 +496,8 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     splitRomName, renameFullName, renameNameError, renameInventory,
     renameInventoryLines, renameGame, openRenameModal, RENAME_MAX_LEN,
     getRecentMeta, getRomBytes, getRomArt,
-    addRecentRom, bumpRecentIndex, touchRecent, MAX_RECENT,
-    evictLocalRom,
+    addRecentRom, bumpRecentIndex, touchRecent, ROM_BUDGET,
+    evictLocalRom, enforceRomBudget, noteRomSize,
     romsWithSaveData, deleteSaveData, adoptSaveOnlyGames, isRomLoaded,
     persistSave, restoreSave,
     parseDriveFileName, driveFetch, driveListAll,

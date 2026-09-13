@@ -539,6 +539,11 @@ const dbPut = (key, value) => new Promise((resolve, reject) => {
   let req = tx.objectStore("blobs").put(value, key);
   req.onsuccess = () => resolve();
   req.onerror = () => reject(req.error);
+  // A full disk is not always reported on the request: Safari checks its
+  // quota when the transaction commits, and the only sign is the abort.
+  // Settling twice is a no-op, so this is a second chance at the error and
+  // not a second answer.
+  tx.onabort = () => reject(tx.error || req.error);
 });
 
 const dbDelete = (key) => new Promise((resolve, reject) => {
@@ -2431,7 +2436,11 @@ const readSyncBytes = async (key) => {
 };
 const writeSyncBytes = async (name, bytes) => {
   if (name.startsWith("rom:")) {
-    await dbPut(name, { name: name.slice(4), data: new Uint8Array(bytes) });
+    let game = name.slice(4);
+    // The one sync write big enough to fill a disk, and the one with a copy
+    // to come back for.
+    if (!(await dbPutRoomy(name, { name: game, data: new Uint8Array(bytes) }, game)))
+      throw new Error("this device is out of room");
     return;
   }
   if (name.startsWith("frame:")) {
@@ -3018,8 +3027,9 @@ const pullSyncInner = async ({ silent = true } = {}) => {
         return m ? { name: m.from, ts: Math.min(e.ts || 0, (m.ts || 1) - 1) } : e;
       });
     }
-    // Do not cap at MAX_RECENT: games past the 20th would vanish with no
-    // way to download them. MAX_RECENT only bounds locally held bytes.
+    // Do not apply the byte budget here: it is about this device's disk, and
+    // an entry dropped from the cross-device library is a game no device
+    // could ask for again.
     await dbPut("recent", recents);
     await writeDriveLibrary(lib, remote);
     await saveSyncState();
@@ -4078,7 +4088,23 @@ const loadSystemSettings = async () => {
 // Bytes stay out of the index and tile closures: a few GBA ROMs in the JS
 // heap get the wasm JIT demoted on iOS Safari.
 
-const MAX_RECENT = 20;
+// How many bytes of ROM this device keeps. A budget, not a count: the games
+// it bounds run from 32 KB to 32 MB, so "twenty games" - which is what this
+// was, dating from when ROMs lived base64-encoded inside localStorage's 5 MB
+// - meant either half a megabyte or two thirds of a gigabyte depending on
+// whose library it was. Past the line the bytes go and the entry stays, so
+// drawing it in the wrong place costs a tap to find the file again, not a
+// game.
+const ROM_BUDGET = 2 * 1024 * 1024 * 1024;
+
+// The browser has a budget of its own, and it is the one that actually bites:
+// smaller on a small disk, unpublished, and not the same on any two engines.
+// It is only ever reported by a write failing, so that is where it is learned
+// - the ROM bytes being held when one last fit. Session-scoped on purpose:
+// tomorrow's free space is not today's, and a figure kept across restarts
+// would hold a device small long after the disk had been cleared.
+let romCeiling = Infinity;
+const romBudget = () => Math.min(ROM_BUDGET, romCeiling);
 
 const romKey = (name) => "rom:" + name;
 const artKey = (name) => "art:" + name;
@@ -4121,6 +4147,72 @@ const evictLocalRom = async (name) => {
   await dbDelete(romKey(name));
 };
 
+// The ROM bytes held here, as far as the size record knows. A game whose size
+// was never noted counts nothing, which errs toward keeping files rather than
+// evicting on a guess; every launch notes one (getRomBytes), so the blind spot
+// closes as the library is used, and the pressure path below covers what it
+// misses in the meantime.
+const localRomBytes = async () => {
+  let local = await localRomSet();
+  await loadRomSizes();
+  let n = 0;
+  for (let name of local) n += romSizeOf(name);
+  return n;
+};
+
+// Give up the least-recently-played file. `keep` and the running game are off
+// limits, being the two the room is usually wanted for.
+const evictOldestRom = async (keep) => {
+  let list = await getRecentMeta();
+  let local = await localRomSet();
+  for (let i = list.length - 1; i >= 0; i--) {
+    let name = list[i]?.name;
+    if (!name || name === keep || name === currentOriginalName) continue;
+    if (!local.has(name)) continue;
+    await evictLocalRom(name);
+    return name;
+  }
+  return null;
+};
+
+// Firefox's name for it, Safari's legacy code, everyone else's name.
+const isQuotaError = (e) =>
+  !!e && (e.name === "QuotaExceededError" ||
+          e.name === "NS_ERROR_DOM_QUOTA_REACHED" || e.code === 22);
+
+// A write that makes room for itself. ROM_BUDGET is our own guess at what is
+// polite; the browser's limit is the one that actually stops a write, and it
+// can be well under ours - a small disk, a Safari origin allowance, or bytes
+// the browser reclaimed from us while the tab was closed. None of it is
+// announced, so the failure is the signal: give up the oldest file, try the
+// write again, and keep going until it fits or there is no file left to give.
+// Only ROM files are given up, never a save - a save is usually the very thing
+// being written, and always the thing no one else has a copy of. False means
+// even an empty library could not hold it.
+const dbPutRoomy = async (key, value, keep) => {
+  let freed = 0;
+  for (;;) {
+    try {
+      await dbPut(key, value);
+      if (freed) {
+        // Hold the session's line at a figure that demonstrably fit, so the
+        // next launch settles the library down to it instead of walking into
+        // the same wall one failed write at a time.
+        romCeiling = Math.min(romCeiling, await localRomBytes());
+        showToast("This device was full - " + (freed === 1
+          ? "one game gave up its file" : freed + " games gave up their files") +
+          " to make room");
+        refreshHomeRecent();
+      }
+      return true;
+    } catch (e) {
+      if (!isQuotaError(e)) throw e;
+      if (!(await evictOldestRom(keep))) return false;
+      freed++;
+    }
+  }
+};
+
 const getRecentMeta = async () => {
   return (await dbGet("recent")) || [];
 };
@@ -4129,7 +4221,12 @@ const getRomBytes = async (name) => {
   let rec = await dbGet(romKey(name));
   let d = rec?.data ?? null;
   if (d instanceof ArrayBuffer) d = new Uint8Array(d);
-  return d instanceof Uint8Array && d.length ? d : null;
+  if (!(d instanceof Uint8Array) || !d.length) return null;
+  // The one moment a size is free: the bytes are already in hand. Games
+  // imported by older builds have no recorded size, and the budget cannot
+  // count what it cannot measure, so playing one fixes it.
+  await noteRomSize(name, d.length);
+  return d;
 };
 
 const getRomArt = async (name) => (await dbGet(artKey(name))) || null;
@@ -4218,8 +4315,34 @@ const storeLastFrame = ({ force = false } = {}) => {
 // The slow tick. Paused, the frame is what the pause stored.
 setInterval(() => { if (!paused) storeLastFrame(); }, FRAME_TICK_MS);
 
-// Move `name` to the front of the index and evict past the cap (ROM + art
-// only, never saves).
+// Walk the library newest-first and keep files until the budget is spent;
+// from the first game that does not fit, every file after it goes. Strictly
+// by recency, so the rule stays sayable: this device holds the files for the
+// games you played most recently, up to ROM_BUDGET. Only the bytes go - the
+// entry, the pictures and the save stay, because dropping the entry as well
+// would strand the save with nothing on screen to account for it and take
+// away the one place that could ask for the file back. The merged library
+// has never had the budget applied to it, for the same reason.
+const enforceRomBudget = async (list) => {
+  let local = await localRomSet();
+  await loadRomSizes();
+  let budget = romBudget();
+  let used = 0;
+  let full = false;
+  for (let r of list) {
+    let name = r?.name;
+    if (!name || !local.has(name)) continue;
+    if (!full) {
+      used += romSizeOf(name);
+      if (used <= budget) continue;
+      full = true; // the one that overflowed goes too
+    }
+    await evictLocalRom(name);
+  }
+};
+
+// Move `name` to the front of the index and spend the byte budget over the
+// result (ROM files only, never saves).
 const bumpRecentIndex = async (name, { fresh = false } = {}) => {
   let all = await getRecentMeta();
   let prev = all.find((r) => r?.name === name);
@@ -4239,12 +4362,7 @@ const bumpRecentIndex = async (name, { fresh = false } = {}) => {
   // mergeLibrary is what reads it.
   let imp = fresh ? ts : prev?.imp;
   list.unshift(imp ? { name, ts, imp } : { name, ts });
-  // Past MAX_RECENT the bytes go; the entry never does. The cap bounds what
-  // this device stores, not what the library remembers - dropping the entry
-  // as well would strand the game's save with nothing on screen to account
-  // for it, and take away the one place that could ask for the file back.
-  // The merge has never capped, for the same reason.
-  for (let i = MAX_RECENT; i < list.length; i++) await evictLocalRom(list[i].name);
+  await enforceRomBudget(list);
   await dbPut("recent", list);
 };
 
@@ -4263,7 +4381,14 @@ const requestPersistentStorage = () => {
 
 const addRecentRom = async (name, bytes, art) => {
   // Bytes first, index second: an interruption leaves at worst an orphan.
-  await dbPut(romKey(name), { name, data: new Uint8Array(bytes) });
+  if (!(await dbPutRoomy(romKey(name), { name, data: new Uint8Array(bytes) }, name))) {
+    // The game still plays - it is in the emulator's own filesystem already.
+    // What could not be done is keep it, so say that and add no entry: a
+    // library row with no file behind it would offer to find a file the
+    // person is holding.
+    showToast("No room on this device to keep “" + displayName(name) + "”");
+    return;
+  }
   await noteRomSize(name, bytes.byteLength ?? bytes.length);
   if (art) await dbPut(artKey(name), art); // Blob (box art from a zip)
   await bumpRecentIndex(name, { fresh: true });
@@ -4892,9 +5017,16 @@ const persistSave = async (romName, originalName) => {
     if (data && data.length > 0) {
       const sig = saveSignature(data);
       if (lastSaveSigKey === originalName && sig === lastSaveSig) return;
+      if (!(await dbPutRoomy("save:" + originalName, new Uint8Array(data),
+                             originalName))) {
+        // Do not remember a signature that was never written, or the next
+        // flush would take this save for already-stored and skip it.
+        lastSaveSig = lastSaveSigKey = null;
+        showToast("This device is out of room - your save could not be written");
+        return;
+      }
       lastSaveSig = sig;
       lastSaveSigKey = originalName;
-      await dbPut("save:" + originalName, new Uint8Array(data));
       requestPersistentStorage();
       markUpload("save:" + originalName); // truly-dirty save -> Drive soon
 
@@ -5208,7 +5340,11 @@ const saveToSlot = async (slot) => {
   const thumb = captureThumbnail();
   storeLastFrame({ force: true }); // a save is a moment worth a picture
   try {
-    await dbPut(slotStateKey(currentOriginalName, slot), bytes);
+    if (!(await dbPutRoomy(slotStateKey(currentOriginalName, slot), bytes,
+                           currentOriginalName))) {
+      showToast("This device is out of room - the state was not saved");
+      return false;
+    }
     await dbPut(slotMetaKey(currentOriginalName, slot), { thumb, ts: Date.now() });
     markUpload(slotStateKey(currentOriginalName, slot));
     markUpload(slotMetaKey(currentOriginalName, slot));

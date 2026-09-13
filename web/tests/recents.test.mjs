@@ -1,5 +1,7 @@
 // Recent-ROM library: addRecentRom / bumpRecentIndex / getRomBytes, and the
-// 20-game cap, which bounds the bytes this device holds and never the library.
+// ROM byte budget, which bounds the files this device holds and never the
+// library - plus the pressure path, for when the browser's own limit bites
+// first.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -27,26 +29,140 @@ test("re-adding an existing name moves it to the front, no duplicate", async () 
   eq(app.idb.get("recent").map((r) => r.name), ["A.gba", "B.gba"]);
 });
 
-test("the 21st ROM evicts the oldest game's file, and nothing else of it", async () => {
+test("the budget is bytes, not games: 25 small ROMs all keep their files", async () => {
   const app = await loadApp();
-  assert.equal(app.api.MAX_RECENT, 20);
-  app.idb.set("save:Game0.gba", u8(9, 9));
-  app.idb.set("state:Game0.gba", u8(8));
-  app.idb.set("frame:Game0.gba", u8(6));
-  for (let i = 0; i <= 20; i++) {
-    await app.api.addRecentRom(`Game${i}.gba`, u8(i, i), { art: i });
+  assert.equal(app.api.ROM_BUDGET, 2 * 1024 * 1024 * 1024);
+  for (let i = 0; i < 25; i++) await app.api.addRecentRom(`Game${i}.gba`, u8(i, i));
+  assert.equal(app.idb.get("recent").length, 25);
+  for (let i = 0; i < 25; i++) {
+    assert.ok(app.idb.get(`rom:Game${i}.gba`), `Game${i} keeps its file`);
   }
-  const names = app.idb.get("recent").map((r) => r.name);
-  assert.equal(names.length, 21, "the cap bounds bytes, not the library");
-  assert.ok(names.includes("Game0.gba"), "the oldest game keeps its entry");
-  assert.equal(app.idb.get("rom:Game0.gba"), undefined, "evicted ROM bytes deleted");
-  eq(app.idb.get("art:Game0.gba"), { art: 0 }, "the tile keeps its box art");
-  eq(app.idb.get("frame:Game0.gba"), u8(6), "and its last frame");
-  eq(app.idb.get("save:Game0.gba"), u8(9, 9), "save survives eviction");
-  eq(app.idb.get("state:Game0.gba"), u8(8), "state survives eviction");
-  // Noted on the way out, so the menu can still say what the file is worth.
-  assert.equal(app.idb.get("romsizes")["Game0.gba"], 2);
 });
+
+const GB = 1024 * 1024 * 1024;
+
+test("over budget the oldest files go, and nothing else of those games does",
+  async () => {
+    const app = await loadApp();
+    app.idb.set("save:Game0.gba", u8(9, 9));
+    app.idb.set("state:Game0.gba", u8(8));
+    app.idb.set("frame:Game0.gba", u8(6));
+    // Three games at 1 GB each against a 2 GB budget: the third one played
+    // pushes the first one's file out. Sizes are declared, not stored.
+    for (const n of ["Game0.gba", "Game1.gba", "Game2.gba"]) {
+      await app.api.addRecentRom(n, u8(1, 1), { art: n });
+    }
+    for (const n of ["Game0.gba", "Game1.gba", "Game2.gba"]) {
+      await app.api.noteRomSize(n, GB);
+    }
+    await app.api.bumpRecentIndex("Game2.gba");
+    await settle();
+
+    const names = app.idb.get("recent").map((r) => r.name);
+    assert.equal(names.length, 3, "the budget bounds bytes, not the library");
+    assert.ok(names.includes("Game0.gba"), "the oldest game keeps its entry");
+    assert.equal(app.idb.get("rom:Game0.gba"), undefined, "its file is gone");
+    assert.ok(app.idb.get("rom:Game1.gba"), "and no further than needed");
+    eq(app.idb.get("art:Game0.gba"), { art: "Game0.gba" }, "the tile keeps its art");
+    eq(app.idb.get("frame:Game0.gba"), u8(6), "and its last frame");
+    eq(app.idb.get("save:Game0.gba"), u8(9, 9), "save survives eviction");
+    eq(app.idb.get("state:Game0.gba"), u8(8), "state survives eviction");
+    // Re-read from the record on the way out, so what is left on file is the
+    // true size and the menu can still say what the file is worth.
+    assert.equal(app.idb.get("romsizes")["Game0.gba"], 2);
+  });
+
+test("a game whose size was never noted counts as nothing, not as a guess",
+  async () => {
+    const app = await loadApp();
+    for (const n of ["Big0.gba", "Big1.gba", "Old.gba"]) {
+      await app.api.addRecentRom(n, u8(1, 1));
+    }
+    await app.api.noteRomSize("Big0.gba", GB);
+    await app.api.noteRomSize("Big1.gba", GB);
+    delete app.idb.get("romsizes")["Old.gba"]; // imported before sizes were noted
+    await app.api.bumpRecentIndex("Old.gba");
+
+    // Exactly 2 GB accounted for. Counting the unmeasured game as anything at
+    // all would tip that over and cost the oldest game its file.
+    assert.ok(app.idb.get("rom:Big0.gba"), "nothing evicted on a guess");
+    assert.ok(app.idb.get("rom:Old.gba"));
+  });
+
+test("playing a game notes its size, which is what keeps the budget honest",
+  async () => {
+    const app = await loadApp();
+    await app.api.addRecentRom("A.gba", u8(1, 2, 3, 4));
+    delete app.idb.get("romsizes")["A.gba"];
+    await app.api.getRomBytes("A.gba");
+    assert.equal(app.idb.get("romsizes")["A.gba"], 4);
+  });
+
+// The browser has a limit of its own, under ours and unannounced. It is only
+// ever reported by a write failing, so that is where these tests put it.
+
+const quotaError = () => {
+  const e = new Error("full");
+  e.name = "QuotaExceededError";
+  return e;
+};
+
+// `key` fails to write until this many ROM files have been given up.
+const fullUntilFreed = (app, key, needFreed) => {
+  const err = quotaError();
+  let freed = 0;
+  const del = app.idb.delete.bind(app.idb);
+  app.idb.delete = (k) => {
+    if (typeof k === "string" && k.startsWith("rom:")) freed++;
+    return del(k);
+  };
+  app.state.idbFail = (op, k) => op === "put" && k === key && freed < needFreed && err;
+};
+
+test("a full disk gives up the oldest files rather than losing the write",
+  async () => {
+    const app = await loadApp();
+    for (const n of ["A.gba", "B.gba", "C.gba"]) await app.api.addRecentRom(n, u8(1));
+    fullUntilFreed(app, "rom:D.gba", 2);
+    await app.api.addRecentRom("D.gba", u8(4, 4));
+    await settle();
+
+    eq(app.idb.get("rom:D.gba"), { name: "D.gba", data: u8(4, 4) },
+      "the write went through once there was room");
+    assert.equal(app.idb.get("rom:A.gba"), undefined, "oldest file given up");
+    assert.equal(app.idb.get("rom:B.gba"), undefined, "then the next oldest");
+    assert.ok(app.idb.get("rom:C.gba"), "and no further than needed");
+    assert.equal(app.idb.get("recent").length, 4, "every game keeps its entry");
+    assert.ok(app.toasts.some((t) => /full/i.test(t)), "and the person is told");
+  });
+
+test("a save is never what gets given up to make room", async () => {
+  const app = await loadApp();
+  for (const n of ["A.gba", "B.gba"]) await app.api.addRecentRom(n, u8(1));
+  app.idb.set("save:A.gba", u8(7, 7));
+  app.sandbox.FS.files.set("rom.sav", u8(1, 2, 3));
+  fullUntilFreed(app, "save:B.gba", 1);
+  await app.api.persistSave("rom.gba", "B.gba");
+  await settle();
+
+  eq(app.idb.get("save:B.gba"), u8(1, 2, 3), "the save was written");
+  eq(app.idb.get("save:A.gba"), u8(7, 7), "the other game's save is untouched");
+  assert.equal(app.idb.get("rom:A.gba"), undefined, "a ROM file paid for it");
+  assert.ok(app.idb.get("rom:B.gba"), "not the file of the game being saved");
+});
+
+test("nothing left to give: the write fails and says so, adding no entry",
+  async () => {
+    const app = await loadApp();
+    app.state.idbFail = (op, k) => op === "put" && k === "rom:Big.gba" && quotaError();
+    await app.api.addRecentRom("Big.gba", u8(1, 2, 3));
+    await settle();
+
+    assert.equal(app.idb.get("rom:Big.gba"), undefined);
+    eq(app.idb.get("recent") || [], [],
+      "no tile offering to find a file the person is holding");
+    assert.ok(app.toasts.some((t) => /No room/i.test(t)));
+  });
 
 test("deleting the last game empties the library and the hero takes over", async () => {
   const app = await loadApp();

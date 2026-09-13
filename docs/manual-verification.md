@@ -74,10 +74,20 @@ needs a second real device.
 - [ ] **A search does not move the bar.** Typing into the search field with
       a dozen games leaves the field and the chips exactly where they were,
       whatever the result count.
-- [ ] **A game past the 20-game cap keeps everything but its file.** Signed
-      out, load a 21st game: the oldest tile is still there, still showing
-      its picture, dashed like a Drive-only tile, and its menu offers Find
-      the file rather than Download. Nothing is deleted without asking.
+- [ ] **A game past the byte budget keeps everything but its file.** The
+      budget is 2 GB of ROM, so this needs a real library: load GBA games
+      until the total passes it. The oldest tile is still there, still
+      showing its picture, dashed like a Drive-only tile, and its menu
+      offers Find the file rather than Download. Twenty small GB games
+      evict nothing at all.
+- [ ] **A full device gives up files, not saves.** Hardest to stage and the
+      most worth staging: fill the origin's storage (Safari's allowance is
+      the easiest to reach, and a private window's is smaller again), then
+      import one more game. A toast says how many games gave up their files,
+      those tiles go dashed, every save is still there, and the imported
+      game plays. With nothing left to give, the import says there is no
+      room and adds no tile — it does not leave one offering to find a file
+      you are holding.
 - [ ] **Finding the file again reunites it with its save.** Tap that tile,
       pick the same ROM from disk, and the game launches with its save
       intact. Picking a file of a different size asks first; picking one
