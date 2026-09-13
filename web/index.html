@@ -56,11 +56,19 @@
   <body class="no-select">
     <!-- ============================ Top bar ============================ -->
     <header id="topbar">
-      <!-- Where the brand sits while a game is loaded. The brand itself is one
-           element that moves between this and #home-brand-slot rather than two
-           copies, so it can be animated from one to the other - see index.js,
-           "Where the brand lives". Empty the rest of the time. -->
-      <div id="brand-slot"></div>
+      <!-- The bar's brand. A second copy of the hero's, not the same element
+           moved: #home is the scroll container, so a single element carried
+           up out of it would simply be clipped at its top edge - and the
+           point is that the hero's copy scrolls away under the bar, natively
+           and smoothly, while this one comes up to meet it. index.js drives
+           one number, --brand-p, off the scroll. See "The brand, twice". -->
+      <div id="brand-slot">
+        <button type="button" id="bar-brand" tabindex="-1"
+                title="Back to the top" aria-label="Back to the top">
+          <img src="favicon.svg" alt="" id="bar-logo" />
+          <span>dingbat</span>
+        </button>
+      </div>
 
       <div id="menu-container">
         <button type="button" class="icon-btn" id="menu-btn" title="Menu" aria-label="Menu" aria-haspopup="true" aria-expanded="false">
@@ -315,14 +323,14 @@
       <section id="home">
         <div id="home-inner">
           <!-- Brand first in the DOM (above the paused card on desktop); the
-               touch layout reorders via flex `order` in styles.css. With a
-               game loaded the brand is not here at all - it is up in the bar,
-               and #home-brand-slot is empty and collapsed. -->
-          <div id="home-brand-slot"><div id="home-brand">
+               touch layout reorders via flex `order` in styles.css. It stays
+               here always and simply scrolls away; the bar carries its own
+               copy. -->
+          <div id="home-brand">
             <img src="favicon.svg" alt="" id="home-logo" />
             <h1>dingbat</h1>
             <p id="home-tagline">a game boy &amp; game boy advance emulator</p>
-          </div></div>
+          </div>
           <!-- Paused-game card: the game Main Menu left behind. JS fills the
                canvas from the framebuffer. It takes the library's own width
                (--lib-width) so the home screen reads as one column, and it
@@ -338,7 +346,6 @@
             <div id="home-paused-body">
               <div id="home-paused-title">
                 <span id="home-paused-name"></span>
-                <span class="home-paused-hint">Paused</span>
               </div>
               <div id="home-paused-actions">
                 <button type="button" id="home-paused-resume" class="button button-primary">

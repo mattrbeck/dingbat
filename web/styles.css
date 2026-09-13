@@ -1269,7 +1269,6 @@ body.has-game #save-sep {
   height: 26px;
 }
 
-
 .menu-quickrow .menu-item:hover {
   background: var(--surface-3);
   border-color: var(--border-2);
@@ -2122,17 +2121,6 @@ body.has-game #home-load:hover {
   color: var(--text);
 }
 
-.home-paused-hint {
-  flex: 0 0 auto;
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  padding: 2px 5px;
-  border-radius: 4px;
-  color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.14);
-}
 
 #home-paused-actions {
   display: flex;
@@ -2216,47 +2204,31 @@ body.has-game #home-load:hover {
   }
 }
 
+/* --- The brand, twice ---------------------------------------------------
+   The hero keeps its own (a centred column with the tagline under it) and
+   simply scrolls away; this is the bar's copy, which comes up to meet it.
+   index.js sets --brand-p on the slot: 0 while the hero's brand is fully in
+   view, 1 once it has gone completely under the bar, and every value between
+   as you scroll. So the crossover is the scroll itself rather than a jump at
+   some line.
 
-/* --- The brand's two homes ---------------------------------------------
-   #home-brand is ONE element that moves between the hero and the bar
-   (index.js, "Where the brand lives"), so everything here is the same
-   element wearing two layouts: a centred column with a tagline down in the
-   hero, a wordmark beside its logo up in the bar.
-
-   Desktop centres it in the bar and keeps it there while the game runs -
-   there is room, and a bar with nothing in the middle of it looks unfinished.
-   Phones drop it as soon as a game starts, where the bar's width is spoken
-   for, and left-align it the rest of the time. pointer-events:none because
-   it is a mark, not a control, and on desktop it is absolutely positioned
-   across the middle of a bar full of buttons. */
+   Desktop centres it in the bar and keeps it there while a game runs - there
+   is room, and a bar with nothing in the middle looks unfinished. Phones drop
+   it while a game runs, where the width is spoken for, and left-align it the
+   rest of the time. */
 #brand-slot {
+  --brand-p: 0;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   min-width: 0;
+  /* Opacity 0 still takes a tap, so the slot is inert until index.js says the
+     brand is actually there (.on). */
   pointer-events: none;
 }
 
-/* Empty whenever the brand is in the hero; it must not hold a gap open. */
-#brand-slot:empty {
-  display: none;
-}
-
-/* Empty because the brand went up to the bar. Which of the two reasons it
-   went decides whether the slot collapses: with a game loaded the hero is
-   display:none anyway and the slot should go with it, but when a SCROLL sent
-   the brand up, the slot has to keep standing in the hero's flow at the
-   height index.js reserved. Collapse it then and the page shortens by the
-   brand's height under the reader, which un-scrolls the distance that sent
-   the brand up in the first place - and a display:none element measures as a
-   zero rect at the origin, so the scroll handler could never tell it had
-   come back into view either. */
-#home-brand-slot:empty {
-  display: none;
-}
-
-body.brand-parked #home-brand-slot:empty {
-  display: block;
+#brand-slot.on {
+  pointer-events: auto;
 }
 
 @media (min-width: 760px) {
@@ -2275,24 +2247,38 @@ body.brand-parked #home-brand-slot:empty {
   }
 }
 
-body.brand-in-bar #home-brand {
+#bar-brand {
   display: flex;
   align-items: center;
   gap: 8px;
-  text-align: left;
+  padding: 4px 8px;
+  margin: 0;
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  /* The two things the scroll drives. The lift is small on purpose: the
+     travel that reads is the hero's own, scrolling away behind this. */
+  opacity: var(--brand-p);
+  transform: translateY(calc((1 - var(--brand-p)) * 7px));
 }
 
-body.brand-in-bar #home-logo {
+#bar-brand:hover {
+  background: var(--chrome-btn-top);
+}
+
+#bar-logo {
   width: 22px;
-  margin-bottom: 0;
-  filter: none;
+  height: auto;
+  image-rendering: pixelated;
 }
 
 /* --chrome-ink, not --text: the device themes paint the bar their shell
    colour and re-point this token at ink that reads on it, while --text stays
    the colour for the dark stage below. On DMG's grey bar the wordmark in
    --text was grey on grey. */
-body.brand-in-bar #home-brand h1 {
+#bar-brand span {
   font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.01em;
@@ -2300,12 +2286,16 @@ body.brand-in-bar #home-brand h1 {
   color: var(--chrome-ink);
 }
 
-body.brand-in-bar #home-tagline {
-  display: none;
-}
-
 #home-brand {
   text-align: center;
+}
+
+/* With a game loaded the bar carries the brand, so the hero's copy stands
+   down - otherwise a game paused at the home screen shows both at once. Not
+   body.running, which is only the playing case: a paused game is on this
+   screen with the card, and the bar has the brand then too. */
+body.has-game #home-brand {
+  display: none;
 }
 
 #home-logo {
@@ -2974,7 +2964,6 @@ body.runtime-ready #boot-progress {
   white-space: nowrap;
   font-size: 13px;
 }
-
 
 .badge-gba {
   color: var(--badge-gba-fg);
@@ -5228,7 +5217,6 @@ body.debug-2p .home-tile-link {
   font-weight: 600;
 }
 
-
 /* Rename modal — the confirmation's old/new pair. */
 .rename-diff {
   display: flex;
@@ -5275,7 +5263,6 @@ body.debug-2p .home-tile-link {
 .rename-items li {
   margin: 3px 0;
 }
-
 
 .modal-actions {
   display: flex;
@@ -6607,7 +6594,6 @@ body.rewind-off #report-slider {
 
 #net-manual-view[hidden] { display: none; }
 
-
 .net-manual-code {
   flex: 1 1 auto;
   min-width: 0;
@@ -7025,6 +7011,45 @@ body.running.sync-shown #status {
   font-size: 11px;
   color: var(--text-dim);
 }
+/* With a glyph the row becomes two columns: the icon beside a label that may
+   still carry a sub-line under it, so the icon spans both rows and centres
+   against the pair. A class rather than :has(), which iOS 15.0-15.3 does not
+   have and this app still runs on. */
+.tile-menu-item.has-icon {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  column-gap: 11px;
+  align-items: center;
+}
+
+.tile-menu-icon {
+  grid-column: 1;
+  grid-row: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+}
+
+.tile-menu-icon svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.tile-menu-item.has-icon .tile-menu-label,
+.tile-menu-item.has-icon .tile-menu-sub {
+  grid-column: 2;
+}
+
+.tile-menu-item.has-icon:hover .tile-menu-icon {
+  color: var(--text);
+}
+
 .tile-menu-item {
   display: flex;
   flex-direction: column;

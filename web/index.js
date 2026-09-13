@@ -4600,15 +4600,38 @@ const closeTileMenu = () => {
   if (back && back.isConnected) back.focus({ preventScroll: true });
 };
 
+// The glyphs the hamburger uses for these same commands, so a command looks
+// like itself wherever it is offered. Path data rather than a clone of the
+// menu button: those carry live state (Link Cable's label flips to Disconnect,
+// Printed Photos wears a seen-dot) that has no business in here.
+const MENU_ICONS = {
+  states: '<path d="M4 5h6v6H4zM14 5h6v6h-6zM4 15h6v4H4zM14 15h6v4h-6z"/>',
+  saves: '<path d="M4 7h5l2 2h9v10H4zM4 7V5h7l2 2"/>',
+  link: '<path d="M7 8V6a2 2 0 0 1 2-2h1v6H9a2 2 0 0 1-2-2zM17 16v2a2 2 0 0 1-2 2h-1v-6h1a2 2 0 0 1 2 2zM10 8h4M10 16h4M12 8v8"/>',
+  cheats: '<path d="M12 3l2.2 4.6 5 .7-3.6 3.5.9 5L12 14.9 7.5 16.8l.9-5L4.8 8.3l5-.7z"/>',
+  bug: '<path d="M8 8a4 4 0 0 1 8 0v2a4 4 0 0 1-8 0zM12 12v7M6 10H3M6 14H3M18 10h3M18 14h3M8 7 6 5M16 7l2-2"/>',
+  prints: '<path d="M6 9V4h12v5M6 15h12v5H6zM6 9h12a2 2 0 0 1 2 2v4H4v-4a2 2 0 0 1 2-2z"/>',
+};
+
 // A menu item: a label over a sub-line. `disabled` is the reason, shown in
 // the sub-line's place. Destructive items arm on the first tap and run on
 // the second (the pattern of every destructive button here), disarming
 // after a moment or when a sibling arms.
-const tileMenuItem = ({ label, sub = "", danger = false, disabled = "", confirmLabel = "", run }) => {
+const tileMenuItem = ({ label, sub = "", icon = "", danger = false, disabled = "", confirmLabel = "", run }) => {
   let b = document.createElement("button");
   b.type = "button";
   b.className = "tile-menu-item" + (danger ? " danger" : "");
   b.setAttribute("role", "menuitem");
+  // Only the session items carry one. The file items (Rename, Delete and the
+  // rest) have never had a glyph anywhere, and inventing one for Delete in
+  // particular would be inventing a meaning.
+  if (icon) {
+    b.classList.add("has-icon");
+    let g = document.createElement("span");
+    g.className = "tile-menu-icon";
+    g.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + icon + "</svg>";
+    b.appendChild(g);
+  }
   let l = document.createElement("span");
   l.className = "tile-menu-label";
   l.textContent = label;
@@ -4684,19 +4707,25 @@ const sessionMenuEntries = () => {
   // you, and the frame in front of you here is the card's own picture of a
   // game that stopped. They stay in the menu over a running game.
   let items = [
-    tileMenuItem({ label: "Save states", run: () => openStatesModal() }),
-    tileMenuItem({ label: "Manage saves", run: () => openSavesModal() }),
+    tileMenuItem({ label: "Save states", icon: MENU_ICONS.states,
+                   run: () => openStatesModal() }),
+    tileMenuItem({ label: "Manage saves", icon: MENU_ICONS.saves,
+                   run: () => openSavesModal() }),
   ];
   if (printerPhotos.length) {
-    items.push(tileMenuItem({ label: "Printed photos", run: () => printsItem.click() }));
+    items.push(tileMenuItem({ label: "Printed photos", icon: MENU_ICONS.prints,
+                              run: () => printsItem.click() }));
   }
   items.push(
     tileMenuItem({
       label: "Link cable",
+      icon: MENU_ICONS.link,
       run: () => document.getElementById("net-connect").click(),
     }),
-    tileMenuItem({ label: "Cheats", run: () => openCheatsModal() }),
-    tileMenuItem({ label: "Report a bug", run: () => openReportModal() }),
+    tileMenuItem({ label: "Cheats", icon: MENU_ICONS.cheats,
+                   run: () => openCheatsModal() }),
+    tileMenuItem({ label: "Report a bug", icon: MENU_ICONS.bug,
+                   run: () => openReportModal() }),
   );
   return items;
 };
@@ -5173,8 +5202,8 @@ const refreshHomeRecent = async () => {
   applyLibFilter(); // the count and the empty note
   homeArtUrls.forEach(URL.revokeObjectURL);
   homeArtUrls = artUrls;
-  // The page just changed height: the brand may have to come back down.
-  syncBrandForScroll();
+  // The page just changed height: the crossover point moved with it.
+  syncBrand();
 };
 
 // Escape closes every modal (the net modal's dismissal is netplay.js's).
@@ -7852,10 +7881,11 @@ const loadRom = async (romName, originalName, opts = {}) => {
   rewindButton.classList.remove("active");
   // body.gb-mode drops the L/R row.
   document.body.classList.toggle("gb-mode", systemOf(romName) !== "GBA");
-  // Before the class, not after: body.running hides #home, and a move
+  // Before the class, not after: body.running hides #home, and a flight
   // measured from a display:none hero has nowhere to come from.
-  placeBrand(true);
+  flyBrand(true);
   document.body.classList.add("has-game", "running");
+  setBrandP(1);
   await restoreSave(romName, currentOriginalName);
   Module.ccall("initFromEmscripten", null, ["string"], [romName]);
   await restoreCheats();  // fresh core: re-apply this game's saved cheats
@@ -9201,8 +9231,9 @@ window.enterRollbackMode = () => {
   pauseButton.classList.remove("paused", "active");
   pauseButton.title = "Pause";
   document.body.classList.toggle("link-gb", linkIsGb);
-  placeBrand(true);
+  flyBrand(true);
   document.body.classList.add("has-game", "running", "rollback-mode");
+  setBrandP(1);
   if (typeof window.setNetConnectLabel === "function") window.setNetConnectLabel(true);
   updateCanvasScaling();
 };
@@ -9283,8 +9314,9 @@ const launchLinkRom = async (rom) => {
   pauseButton.title = "Pause";
   gpPrev.fill(false);
   initLinkCanvases();
-  placeBrand(true);
+  flyBrand(true);
   document.body.classList.add("has-game", "running", "link-mode");
+  setBrandP(1);
   updateCanvasScaling();
   await touchRecent(rom.name); // bytes are already stored — recency bump only
 };
@@ -9320,135 +9352,101 @@ document.getElementById("main-menu").addEventListener("click", showMainMenu);
 document.getElementById("home-resume").addEventListener("click", resumeGame);
 
 
-// --- Where the brand lives -------------------------------------------------
-// One element, two homes: the hero on the home screen, and the top bar. Two
-// copies would be simpler to style and impossible to animate between, and the
-// move is the point - closing a game should look like the wordmark going back
-// where it came from rather than one disappearing and another appearing.
+// --- The brand, twice ------------------------------------------------------
+// The hero has one and the bar has another. They are not the same element
+// moved between two parents, which is what this was at first: #home is the
+// scroll container, so an element carried up out of it is clipped at its top
+// edge, and a move can only ever be a jump at some threshold. The point here
+// is the opposite - the hero's copy scrolls away under the bar natively,
+// smoothly, for free, and the bar's copy comes up to meet it over the same
+// distance.
 //
-// Two things send it up. A game being loaded, which includes the link modes
-// (a game and no card); and the library being scrolled far enough that the
-// hero has gone off the top, which is the ordinary reason a masthead becomes
-// a bar.
+// One number does it. --brand-p is 0 while the hero's brand is fully in view
+// and 1 once it has gone completely under the bar; styles.css reads it for the
+// bar copy's opacity and a few pixels of lift. The travel is the brand's own
+// height, so the two cross over exactly as the hero one disappears.
 //
-// The scrolled case is why the hero's slot holds its height open while the
-// brand is away. Let it collapse and the page shortens by the brand's height
-// the instant the brand leaves, which un-scrolls the very distance that sent
-// it up, which sends it back down, which lengthens the page again. The
-// reservation is only for that case: with a game loaded the hero is display:
-// none anyway and the slot should collapse with it.
-//
-// The move is FLIP. Measure where the LOGO is, move and re-class, measure
-// again, then play the difference off. It is measured on the logo rather than
-// on the brand box because the two layouts are different shapes - a column
-// with a tagline down here, a row without one up there - and the logo is the
-// one part that is the same thing in both. Anchoring the transform's origin on
-// it makes the logo land exactly while the wordmark sweeps along beside it.
+// A loaded game pins it at 1: #home is display:none then, there is nothing to
+// scroll and nothing to measure. The two crossings that are events rather than
+// scrolls - a game opening, a game closing - still get the flight, played on
+// the bar copy between the two resting places.
 const brandEl = document.getElementById("home-brand");
 const brandLogo = document.getElementById("home-logo");
 const brandBarSlot = document.getElementById("brand-slot");
-const brandHeroSlot = document.getElementById("home-brand-slot");
+const barBrand = document.getElementById("bar-brand");
+const barLogo = document.getElementById("bar-logo");
 const BRAND_MOVE_MS = 380;
-// It leaves at the line and returns a little short of it, so a scroll resting
-// exactly on the boundary settles instead of buzzing between the two.
-const BRAND_PARK_SLACK = 28;
 
 let brandAnim = null;
-let brandParked = false;  // up in the bar because the library is scrolled
-let brandHeroH = 0;       // the hero slot's height, held open while it is away
+let brandP = 0;
 
-const brandInBar = () =>
-  document.body.classList.contains("has-game") || brandParked;
+const setBrandP = (p) => {
+  brandP = p;
+  brandBarSlot.style?.setProperty("--brand-p", String(p));
+  // Only reachable once it is actually there to be clicked; an element at
+  // opacity 0 still takes a tap.
+  brandBarSlot.classList.toggle("on", p > 0.02);
+  barBrand.tabIndex = p > 0.5 ? 0 : -1;
+};
 
-const placeBrand = (inBar, { animate = true } = {}) => {
-  let target = inBar ? brandBarSlot : brandHeroSlot;
-  let moving = brandEl.parentElement !== target;
-  let reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  if (moving && brandAnim) { brandAnim.cancel(); brandAnim = null; }
+const brandProgress = () => {
+  if (document.body.classList.contains("has-game")) return 1;
+  let s = homeScroller.getBoundingClientRect?.();
+  let b = brandEl.getBoundingClientRect?.();
+  if (!s || !b || !b.height) return brandP;
+  // How much of the hero's brand is still below the top of the scroller.
+  let below = b.bottom - s.top;
+  let p = (b.height - below) / b.height;
+  return p < 0 ? 0 : p > 1 ? 1 : p;
+};
 
-  // Taken while the hero still holds the brand and still has its own height.
-  if (moving && inBar && brandEl.parentElement === brandHeroSlot) {
-    brandHeroH = brandHeroSlot.offsetHeight || brandHeroH;
-  }
-  // Cleared before measuring the landing spot, so the brand comes down to
-  // where it will actually sit rather than to the top of a held-open box.
-  if (!inBar) brandHeroSlot.style.minHeight = "";
+const syncBrand = () => setBrandP(brandProgress());
 
-  let first = moving && animate && !reduced
-    ? brandLogo.getBoundingClientRect?.() : null;
+if (homeScroller.addEventListener) {
+  homeScroller.addEventListener("scroll", syncBrand, { passive: true });
+  window.addEventListener("resize", syncBrand);
+}
 
-  if (moving) {
-    target.appendChild(brandEl);
-    document.body.classList.toggle("brand-in-bar", inBar);
-  }
+// The two crossings that are not scrolls. `up` is a game opening (the hero is
+// about to be hidden), `down` is one closing (it has just come back). Measured
+// on the LOGOS rather than the brand boxes: the two layouts are different
+// shapes - a column with a tagline down there, a wordmark beside its mark up
+// here - and the logo is the one part that is the same thing in both, so
+// anchoring the transform on it lands it exactly while the word sweeps along.
+const flyBrand = (up) => {
+  if (brandAnim) { brandAnim.cancel(); brandAnim = null; }
+  if (!barBrand.animate) return;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  let hero = brandLogo.getBoundingClientRect?.();
+  let bar = barLogo.getBoundingClientRect?.();
+  if (!hero || !bar || !hero.width || !bar.width) return;
 
-  // Settled every call, not only on a move: a game can load while the library
-  // is scrolled, and the reservation has to go with the hero either way. The
-  // class is half of it - styles.css keeps an emptied slot rendered only while
-  // it is standing in for a scrolled-away brand.
-  let reserving =
-    inBar && brandParked && !document.body.classList.contains("has-game");
-  document.body.classList.toggle("brand-parked", reserving);
-  brandHeroSlot.style.minHeight = reserving ? brandHeroH + "px" : "";
+  let scale = hero.width / bar.width;
+  let bx = barBrand.getBoundingClientRect();
+  barBrand.style.transformOrigin =
+    (bar.left + bar.width / 2 - bx.left) + "px " +
+    (bar.top + bar.height / 2 - bx.top) + "px";
+  let dx = (hero.left + hero.width / 2) - (bar.left + bar.width / 2);
+  let dy = (hero.top + hero.height / 2) - (bar.top + bar.height / 2);
+  let atHero = { transform: `translate(${dx}px, ${dy}px) scale(${scale})`, opacity: 0 };
+  let atBar = { transform: "none", opacity: 1 };
 
-  if (!moving) return;
-  // Nothing to play from: a hidden hero (body.running is already on, or a
-  // phone with a game running) has no "from" position, and the harness's DOM
-  // has no layout at all.
-  if (!first || !first.width) return;
-  let last = brandLogo.getBoundingClientRect?.();
-  if (!last || !last.width) return;
-
-  let scale = first.width / last.width;
-  let bx = brandEl.getBoundingClientRect();
-  if (!brandEl.animate) return;
-  brandEl.style.transformOrigin =
-    (last.left + last.width / 2 - bx.left) + "px " +
-    (last.top + last.height / 2 - bx.top) + "px";
-  let dx = (first.left + first.width / 2) - (last.left + last.width / 2);
-  let dy = (first.top + first.height / 2) - (last.top + last.height / 2);
-
-  brandAnim = brandEl.animate(
-    [{ transform: `translate(${dx}px, ${dy}px) scale(${scale})` },
-     { transform: "none" }],
+  brandAnim = barBrand.animate(up ? [atHero, atBar] : [atBar, atHero],
     { duration: BRAND_MOVE_MS, easing: "cubic-bezier(.22,.61,.36,1)" });
   brandAnim.finished
-    .then(() => { brandEl.style.transformOrigin = ""; brandAnim = null; })
+    .then(() => { barBrand.style.transformOrigin = ""; brandAnim = null; })
     .catch(() => {});
 };
 
-// Put the brand wherever the current state says it belongs, without assuming
-// which way it is going. The call sites that DO know use placeBrand directly,
-// because they also have to get the ordering right against body.running - see
-// the note at each of them.
-const refreshBrandPlacement = (opts) => placeBrand(brandInBar(), opts);
-
-// How much of the hero's slot is still below the top of the scroller. Through
-// rects rather than offsetTop, which is measured against whichever ancestor
-// happens to be the offsetParent and is not the scroller.
-const brandHeroBelowTop = () => {
-  let s = homeScroller.getBoundingClientRect?.();
-  let b = brandHeroSlot.getBoundingClientRect?.();
-  return s && b ? b.bottom - s.top : Infinity;
-};
-
-const syncBrandForScroll = () => {
-  // A loaded game already has it up there, and the hero is not on screen to
-  // be scrolled.
+barBrand.addEventListener("click", () => {
   if (document.body.classList.contains("has-game")) return;
-  let below = brandHeroBelowTop();
-  // It goes up the moment the slot clears the top, and does not come back
-  // until a good bit of it is showing again - so a scroll that rests on the
-  // line settles instead of buzzing between the two.
-  let next = brandParked ? below <= BRAND_PARK_SLACK : below <= 0;
-  if (next === brandParked) return;
-  brandParked = next;
-  placeBrand(brandInBar());
-};
-
-if (homeScroller.addEventListener) {
-  homeScroller.addEventListener("scroll", syncBrandForScroll, { passive: true });
-}
+  let smooth = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (homeScroller.scrollTo) {
+    homeScroller.scrollTo({ top: 0, behavior: smooth ? "smooth" : "auto" });
+  } else {
+    homeScroller.scrollTop = 0;
+  }
+});
 
 // --- Paused-game card ---
 // Pixels come from the wasm framebuffer: the canvas is a WebGL context
@@ -9530,9 +9528,11 @@ const unloadGame = async ({ flushSave = true } = {}) => {
   pauseButton.classList.remove("paused", "active");
   pauseButton.title = "Pause";
   document.body.classList.remove("has-game", "running", "paused", "gb-mode");
-  // Not placeBrand(false): if the library is still scrolled down, the
-  // brand stays up there for that reason instead.
-  refreshBrandPlacement();
+  // syncBrand, not a flat 0: if the library is still scrolled down, the
+  // bar keeps its brand for that reason instead, and the flight is from
+  // wherever the scroll says it should end up.
+  syncBrand();
+  if (brandP < 0.5) flyBrand(false);
   clearInputDisplay();   // no cart, no held buttons
   // No cart, no sensor: drop the camera and its button.
   stopWebcam();

@@ -36,14 +36,17 @@ const tileOf = (app, name) =>
 const moreBtn = (tile) => tile.children.find((c) => c.classList.contains("home-tile-more"));
 const menu = (app) => app.document.getElementById("tile-menu");
 const items = (app) => app.document.getElementById("tile-menu-items").children;
+// The session items carry a glyph in front of the label, so a row's children
+// are not [label, sub] at fixed indexes any more. By class, then.
+const kid = (b, cls) => b.children.find((c) => c.classList.contains(cls));
+const labelOf = (b) => kid(b, "tile-menu-label").textContent;
+const subOf = (b) => kid(b, "tile-menu-sub");
 // [label, sub or reason, disabled?]
 const rows = (app) => items(app).map((b) => [
-  b.children[0].textContent,
-  b.children[1].hidden ? "" : b.children[1].textContent,
-  b.disabled,
+  labelOf(b), subOf(b).hidden ? "" : subOf(b).textContent, b.disabled,
 ]);
 const labels = (app) => rows(app).map((r) => r[0]);
-const item = (app, label) => items(app).find((b) => b.children[0].textContent === label);
+const item = (app, label) => items(app).find((b) => labelOf(b) === label);
 const status = (app) =>
   app.document.getElementById("tile-menu-head").children[1].children[1].textContent;
 
@@ -156,12 +159,12 @@ test("the paused game: Remove and Delete close it themselves, and the question s
   eq(rows(app)[2], ["Remove from this device", "", false], "no longer blocked");
   const rm = item(app, "Remove from this device");
   await rm.click(); // arm only
-  assert.equal(rm.children[0].textContent, "Close and remove?");
+  assert.equal(labelOf(rm), "Close and remove?");
   app.api.closeTileMenu();
   await open(app, "Zelda.gbc");
   const del = item(app, "Delete");
   await del.click();
-  assert.equal(del.children[0].textContent, "Close and delete everything?");
+  assert.equal(labelOf(del), "Close and delete everything?");
   app.api.closeTileMenu();
   app.api.currentOriginalName = null;
 });
@@ -420,8 +423,8 @@ test("Delete arms, then deletes: ROM, saves and the tile go; the menu closes", a
   const del = item(app, "Delete");
   await del.click();
   assert.ok(del.classList.contains("armed"));
-  assert.equal(del.children[0].textContent, "Delete ROM and save data?");
-  assert.equal(del.children[1].textContent, "Tap again to confirm");
+  assert.equal(labelOf(del), "Delete ROM and save data?");
+  assert.equal(subOf(del).textContent, "Tap again to confirm");
   assert.equal(menu(app).hidden, false, "arming does not close");
   await del.click();
   await settle();
@@ -444,7 +447,7 @@ test("arming one item disarms another; the arm times out on its own", async () =
   await del.click();
   assert.ok(del.classList.contains("armed"));
   assert.ok(!reset.classList.contains("armed"), "the sibling disarmed");
-  assert.equal(reset.children[0].textContent, "Reset save data");
+  assert.equal(labelOf(reset), "Reset save data");
   assert.equal(app.idb.get("save:A.gba") !== undefined, true, "nothing ran");
   app.api.closeTileMenu();
 });
@@ -553,11 +556,15 @@ test("the card's ⋯ is the session's; a tile's is the file's; neither is both",
   }
   assert.equal(app.document.getElementById("tile-menu-head").hidden, true,
                "the card said which game, an inch above");
+  assert.ok(items(app).every((b) => kid(b, "tile-menu-icon")),
+            "every session item wears the glyph the hamburger gives it");
   app.api.closeTileMenu();
 
   await open(app, "Zelda.gbc");
   eq(labels(app), ["Rename", "Reset save data", "Delete"],
      "what you do to its file, and nothing about the session");
+  assert.ok(items(app).every((b) => !kid(b, "tile-menu-icon")),
+            "the file items have never had a glyph anywhere");
   assert.equal(app.document.getElementById("tile-menu-head").hidden, false,
                "a tile in a grid of them still has to name its game");
   app.api.closeTileMenu();
@@ -616,45 +623,49 @@ test("body.lib-has-games follows the library, and is unset before the first rend
 });
 
 
-// ── Where the brand lives ───────────────────────────────────────────────────
-// One element with two homes. The harness has no layout, so the FLIP itself is
-// not testable here (it is checked in a browser); what is pinned here is the
-// part the rest of the stylesheet depends on — which parent holds it, and the
-// class that tells the CSS which of the two layouts to wear.
+// ── The brand, twice ────────────────────────────────────────────────────────
+// The hero's brand and the bar's are two elements now; what ties them is one
+// number, --brand-p, which index.js drives off the scroll. The harness has no
+// layout, so the crossover itself is checked in a browser; what is pinned here
+// is the contract the stylesheet reads.
 
-test("the brand moves between the hero and the bar, and says which it is in", async () => {
+test("a loaded game pins the bar's brand on, whatever the scroll says", async () => {
   const app = await loadApp();
-  const brand = app.document.getElementById("home-brand");
-  const body = app.document.body;
+  const slot = app.document.getElementById("brand-slot");
 
-  assert.equal(body.classList.contains("brand-in-bar"), false);
-  // No starting parent to assert on: the fake DOM mints elements on demand
-  // rather than parsing index.html, so nothing is in a tree until it is put
-  // there. What matters is that a move lands in the right one.
-  app.api.placeBrand(true);
-  assert.equal(brand.parentElement, app.document.getElementById("brand-slot"));
-  assert.equal(body.classList.contains("brand-in-bar"), true);
+  app.api.syncBrand();
+  assert.equal(app.api.brandP, 0, "nothing scrolled, nothing loaded");
+  assert.equal(slot.classList.contains("on"), false);
 
-  app.api.placeBrand(false);
-  assert.equal(brand.parentElement, app.document.getElementById("home-brand-slot"));
-  assert.equal(body.classList.contains("brand-in-bar"), false);
+  app.document.body.classList.add("has-game");
+  app.api.syncBrand();
+  assert.equal(app.api.brandP, 1, "a game means the hero is not on screen at all");
+  assert.equal(slot.classList.contains("on"), true);
+
+  // And with no game and nothing measurable - which is this harness, and is
+  // also a real browser mid-layout - it keeps what it had rather than snapping
+  // the brand off the bar.
+  app.document.body.classList.remove("has-game");
+  app.api.syncBrand();
+  assert.equal(app.api.brandP, 1, "no measurement, no change");
 });
 
-// It follows "a game is loaded", not "the card is up": the link modes have a
-// game and no card, and the brand belongs in the bar there too.
-test("the brand follows has-game, not the card", async () => {
+// Opacity 0 still takes a tap, so the slot has to be inert until the brand is
+// really there - otherwise an invisible "back to the top" sits over the bar.
+test("the bar's brand is inert, and out of the tab order, until it is showing",
+     async () => {
   const app = await loadApp();
-  const body = app.document.body;
+  const slot = app.document.getElementById("brand-slot");
+  const btn = app.document.getElementById("bar-brand");
 
-  body.classList.add("has-game");
-  app.api.refreshBrandPlacement();
-  assert.equal(body.classList.contains("brand-in-bar"), true);
+  app.api.setBrandP(0);
+  assert.equal(slot.classList.contains("on"), false);
+  assert.equal(btn.tabIndex, -1);
 
-  app.api.setPausedCardShown(true);   // a card appearing changes nothing
-  app.api.refreshBrandPlacement();
-  assert.equal(body.classList.contains("brand-in-bar"), true);
+  app.api.setBrandP(0.3);
+  assert.equal(slot.classList.contains("on"), true, "visible enough to hit");
+  assert.equal(btn.tabIndex, -1, "but not yet worth a tab stop");
 
-  body.classList.remove("has-game");
-  app.api.refreshBrandPlacement();
-  assert.equal(body.classList.contains("brand-in-bar"), false);
+  app.api.setBrandP(1);
+  assert.equal(btn.tabIndex, 0);
 });
