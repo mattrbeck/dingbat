@@ -135,7 +135,7 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 4.5v2.2M12 17.3v2.2M4.5 12h2.2M17.3 12h2.2M6.7 6.7l1.6 1.6M15.7 15.7l1.6 1.6M17.3 6.7l-1.6 1.6M8.3 15.7l-1.6 1.6"/></svg>
             <span>Settings</span>
           </button>
-          <hr class="menu-sep" id="report-sep" />
+          <hr class="menu-sep" />
           <button type="button" class="menu-item" id="report-bug">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8a4 4 0 0 1 8 0v2a4 4 0 0 1-8 0zM12 12v7M6 10H3M6 14H3M18 10h3M18 14h3M8 7 6 5M16 7l2-2"/></svg>
             <span>Report a Bug</span>
@@ -225,6 +225,15 @@
         </button>
         <input type="range" id="vol-slider" class="vol-range" min="0" max="100" step="5" value="100" title="Volume" aria-label="Volume" />
       </div>
+
+      <!-- Settings in the bar, for the home screen. It is the one thing in the
+           hamburger that is about the app rather than the game in front of
+           you, and on the home screen it was the only thing left in there -
+           so it comes out and the hamburger goes. Exactly one of the two is
+           ever on screen (styles.css, "the hamburger on the home screen"). -->
+      <button type="button" class="icon-btn" id="settings-btn" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 4.5v2.2M12 17.3v2.2M4.5 12h2.2M17.3 12h2.2M6.7 6.7l1.6 1.6M15.7 15.7l1.6 1.6M17.3 6.7l-1.6 1.6M8.3 15.7l-1.6 1.6"/></svg>
+      </button>
 
       <button type="button" class="icon-btn" id="fullscreen-btn" title="Fullscreen" aria-label="Fullscreen">
         <svg class="ico-expand" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
@@ -367,14 +376,6 @@
                 <!-- Shown only while some game has no picture; index.js
                      "Library pictures, in one go" hides it again once none do. -->
                 <button type="button" class="home-manage-link" id="home-thumbs" hidden>Add pictures</button>
-                <!-- The way in from a file, at the library it adds to. The
-                     hero's own "Load a game" is the empty-library state and
-                     nothing else, so there is exactly one of these on screen
-                     at a time. Drag-and-drop still works document-wide. -->
-                <button type="button" class="lib-add" id="lib-add">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-                  <span>Add game</span>
-                </button>
               </span>
             </div>
             <!-- Search, filter chips (built by index.js) and sort. A sibling

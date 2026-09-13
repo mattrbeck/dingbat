@@ -4,7 +4,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { loadApp, u8, eq, settle } from "./helpers.mjs";
+import { loadApp, u8, eq, settle, gameTiles } from "./helpers.mjs";
 
 const seed = (app, names, { local = names, ts } = {}) => {
   app.idb.set("recent", names.map((name, i) => ({ name, ts: ts ? ts[i] : 100 - i })));
@@ -20,8 +20,8 @@ const signIn = (app, onDrive = LIB) => {
                         sigs: {}, rmt, connected: true };
 };
 const grid = (app) => app.document.getElementById("home-recent");
-const order = (app) => grid(app).children.map((t) => t.dataset.system + ":" + t.children[0].children[1].children[0].textContent);
-const visible = (app) => grid(app).children.filter((t) => !t.hidden).map((t) => t.children[0].children[1].children[0].textContent);
+const order = (app) => gameTiles(app).map((t) => t.dataset.system + ":" + t.children[0].children[1].children[0].textContent);
+const visible = (app) => gameTiles(app).filter((t) => !t.hidden).map((t) => t.children[0].children[1].children[0].textContent);
 const chips = (app) => app.document.getElementById("lib-chips").children.map((c) =>
   c.textContent + (c.children[0]?.textContent ?? "") +
   (c.getAttribute("aria-pressed") === "true" ? "*" : ""));
@@ -237,4 +237,32 @@ test("a filter that stops meaning anything is dropped, not stuck", async () => {
   eq(visible(app), ["Zelda", "Tetris"]);
   assert.equal(app.api.libFilter.loc, "all");
   assert.equal(app.api.libFilter.systems.size, 0);
+});
+
+
+// ── The add tile ────────────────────────────────────────────────────────────
+// The grid's first cell is the way in from a file. It is not a game, and
+// everything that counts, filters or names games has to know that.
+
+test("the add tile leads the grid, counts as no game, and steps aside for a filter", async () => {
+  const app = await loadApp();
+  seed(app, ["Zelda.gbc", "Metroid.gba"]);
+  await app.api.refreshHomeRecent();
+  await settle();
+
+  const cells = app.document.getElementById("home-recent").children;
+  assert.ok(cells[0].classList.contains("add-tile"), "first cell");
+  assert.ok(!cells[0].classList.contains("home-tile"), "and not a game");
+  assert.equal(gameTiles(app).length, 2);
+  assert.equal(count(app), "2 games", "the count is of games, not cells");
+  assert.equal(cells[0].hidden, false);
+
+  // Searching asks a question about the games that are there; a cell that is
+  // not a game is in the way of the answer.
+  await search(app, "zel");
+  assert.equal(cells[0].hidden, true, "gone while a search runs");
+  assert.equal(count(app), "1 of 2");
+
+  await search(app, "");
+  assert.equal(cells[0].hidden, false, "and back when the grid is the library again");
 });

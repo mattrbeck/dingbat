@@ -3,15 +3,14 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { loadApp, jsonRes, bytesRes, u8, settle } from "./helpers.mjs";
+import { loadApp, jsonRes, bytesRes, u8, settle, gameTiles } from "./helpers.mjs";
 
 const signIn = (app) => {
   app.api.gdriveToken = "test-token";
   app.api.syncState = { queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [], sigs: {}, rmt: {}, connected: true };
 };
 
-const tileCount = (app) =>
-  app.document.getElementById("home-recent").children.length;
+const tileCount = (app) => gameTiles(app).length;
 
 test("overlapping refreshHomeRecent calls render the grid once", async () => {
   const app = await loadApp();

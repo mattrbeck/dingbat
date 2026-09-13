@@ -4,7 +4,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { loadApp, u8, eq, settle } from "./helpers.mjs";
+import { loadApp, u8, eq, settle, gameTiles } from "./helpers.mjs";
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -548,8 +548,7 @@ test("confirming performs the rename and the list re-renders under the new name"
   assert.ok(app.toasts.some((t) => t.includes("Renamed to")), app.toasts.join("|"));
   await app.api.refreshHomeRecent();
   await settle();
-  const tiles = app.document.getElementById("home-recent").children
-    .map((t) => t.children[0].title);
+  const tiles = gameTiles(app).map((t) => t.children[0].title);
   assert.ok(tiles.includes(NEW), "the tile is there under the new name: " + tiles.join("|"));
   assert.ok(!tiles.includes(OLD));
 });

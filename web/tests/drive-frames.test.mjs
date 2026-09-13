@@ -6,7 +6,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { loadApp, jsonRes, bytesRes, u8, eq, settle } from "./helpers.mjs";
+import { loadApp, jsonRes, bytesRes, u8, eq, settle, gameTiles } from "./helpers.mjs";
 
 const FILES_URL = "https://www.googleapis.com/drive/v3/files";
 const UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files";
@@ -162,7 +162,7 @@ test("the pull brings a picture down for a Drive-only game, and only the picture
   // And the tile shows it.
   await app.api.refreshHomeRecent();
   await settle();
-  const tile = app.document.getElementById("home-recent").children[0];
+  const tile = gameTiles(app)[0];
   assert.ok(tile.className.includes("home-tile-cloud"));
   assert.ok(tile.children[0].children[0].children[0].className.includes("home-tile-frame"));
 });

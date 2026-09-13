@@ -643,6 +643,14 @@ export const bytesRes = (bytes, status = 200) => ({
     bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
 });
 
+// The grid's children are not all games: its first cell is the "Load a game"
+// add tile, which carries no .home-tile class precisely so that the count,
+// the filter and the "No games match" note can tell the difference. Every
+// test that walks the grid wants this, not .children.
+export const gameTiles = (app) =>
+  app.document.getElementById("home-recent").children
+     .filter((t) => t.classList.contains("home-tile"));
+
 export const u8 = (...vals) => new Uint8Array(vals);
 
 export const settle = () => new Promise((r) => setTimeout(r, 0));

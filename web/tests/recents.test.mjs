@@ -305,14 +305,17 @@ test("a library with games withdraws the hero's Drive slot", async () => {
 });
 
 // On #home-inner rather than the grid's own wrap, because the paused card
-// reads the same width tokens and is the wrap's sibling.
+// reads the same width tokens and is the wrap's sibling. The count is CELLS,
+// not games: the "Load a game" tile is the grid's first cell and takes a
+// column like any other, so a one-game library still draws two.
 test("the grid draws only the columns it fills, and stops at five", async () => {
   const app = await loadApp();
-  const wrap = app.elements.get("home-inner");
+  const inner = app.elements.get("home-inner");
   for (let i = 1; i <= 7; i++) {
     await app.api.addRecentRom(`G${i}.gba`, u8(i));
     await settle();
-    assert.equal(wrap.dataset.n, i <= 5 ? String(i) : undefined,
+    const cells = i + 1;
+    assert.equal(inner.dataset.n, cells <= 5 ? String(cells) : undefined,
       `${i} games`);
   }
 });

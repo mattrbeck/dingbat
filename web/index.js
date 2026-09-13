@@ -1156,6 +1156,7 @@ const closeSettingsModal = (fromHistory) => {
 };
 
 document.getElementById("open-settings").addEventListener("click", openSettingsModal);
+document.getElementById("settings-btn").addEventListener("click", openSettingsModal);
 for (const id of ["settings-close", "settings-close-list"]) {
   document.getElementById(id).addEventListener("click", () => closeSettingsModal());
 }
@@ -1701,6 +1702,13 @@ const setLibFit = (count) => {
 const applyLibFilter = () => {
   let shown = 0, total = 0;
   for (let t of /** @type {HTMLCollectionOf<HTMLElement>} */ (homeRecent.children)) {
+    // The add tile: shown while the grid is the whole library, gone while it
+    // is an answer to a question about it. Decided here rather than at render
+    // because a search re-filters the grid that is already on screen.
+    if (t.classList.contains("add-tile")) {
+      t.hidden = libFilterActive();
+      continue;
+    }
     if (!t.classList.contains("home-tile")) continue;
     total++;
     let m = libTileMatches(t);
@@ -4579,6 +4587,7 @@ const closeTileMenu = () => {
   if (tileMenu.hidden) return;
   tileMenu.hidden = true;
   tileMenuScrim.hidden = true;
+  tileMenuHead.hidden = false;
   tileMenuHead.replaceChildren();
   tileMenuItems.replaceChildren();
   if (tileMenuPicUrl) { URL.revokeObjectURL(tileMenuPicUrl); tileMenuPicUrl = null; }
@@ -4659,16 +4668,37 @@ const tileMenuItem = ({ label, sub = "", danger = false, disabled = "", confirmL
 // that button owns a two-step disarm for the disconnect case, and this menu
 // can never be the disconnect case - the card is drawn only for a single
 // core, so a link session means no card and no ⋯.
-// Save States is deliberately NOT here: it is the one of these that is worth
-// reaching for on a paused game, and it keeps its place in the hamburger.
-const sessionMenuEntries = () => [
-  tileMenuItem({
-    label: "Link cable",
-    run: () => document.getElementById("net-connect").click(),
-  }),
-  tileMenuItem({ label: "Cheats", run: () => openCheatsModal() }),
-  tileMenuItem({ label: "Report a bug", run: () => openReportModal() }),
-];
+// The card's ⋯. The card is the SESSION - the game you are in the middle of -
+// so this is everything you might do to it while it is paused, and none of
+// the things you might do to its file. Those live on the game's tile in the
+// grid an inch below (Rename, Reset save data, Remove, Delete), which is
+// where they have always lived and where they belong: the tile is the file.
+// Keeping the split means neither menu is a pile, and the card's never has to
+// say which game it is - the card said so, at size, directly above it.
+//
+// Link Cable, Clip that! and Printed Photos go through their own menu
+// buttons rather than being reimplemented: each owns state this menu should
+// not learn (a two-step disarm, a range picker's defaults, a seen-dot).
+const sessionMenuEntries = () => {
+  let items = [
+    tileMenuItem({ label: "Save states", run: () => openStatesModal() }),
+    tileMenuItem({ label: "Manage saves", run: () => openSavesModal() }),
+    tileMenuItem({ label: "Screenshot", run: () => takeScreenshot() }),
+    tileMenuItem({ label: "Clip that!", run: () => clipLastItem.click() }),
+  ];
+  if (printerPhotos.length) {
+    items.push(tileMenuItem({ label: "Printed photos", run: () => printsItem.click() }));
+  }
+  items.push(
+    tileMenuItem({
+      label: "Link cable",
+      run: () => document.getElementById("net-connect").click(),
+    }),
+    tileMenuItem({ label: "Cheats", run: () => openCheatsModal() }),
+    tileMenuItem({ label: "Report a bug", run: () => openReportModal() }),
+  );
+  return items;
+};
 
 const tileMenuEntries = (name, f) => {
   let items = [];
@@ -4816,9 +4846,21 @@ const openTileMenu = async (name, anchor, tile, at = null, session = false) => {
   let f = gameFlags(name, localRoms, new Set(withSaves));
   tileMenuFor = name;
   tileMenuAnchor = anchor;
-  buildTileMenuHead(name, f);
+  // A tile is a picture in a grid of them, so the menu has to say which game
+  // it belongs to and where that game lives. The card has already said both,
+  // at size, an inch above - so the head goes, and with it the accessible
+  // name it carried.
+  tileMenuHead.hidden = session;
+  if (session) {
+    tileMenu.removeAttribute("aria-labelledby");
+    tileMenu.setAttribute("aria-label", displayName(name));
+  } else {
+    tileMenu.removeAttribute("aria-label");
+    tileMenu.setAttribute("aria-labelledby", "tile-menu-title");
+    buildTileMenuHead(name, f);
+  }
   tileMenuItems.replaceChildren(
-    ...(session ? sessionMenuEntries() : []), ...tileMenuEntries(name, f));
+    ...(session ? sessionMenuEntries() : tileMenuEntries(name, f)));
   if (tile) tile.classList.add("menu-open");
   tileMenuScrim.hidden = false;
   tileMenu.hidden = false;
@@ -4895,6 +4937,38 @@ const wireTileMenu = (tile, launch, romName) => {
   return () => { let p = pressed; pressed = false; return p; };
 };
 
+// The first cell of the grid: the way in from a file, shaped like the thing
+// it produces. Deliberately NOT a .home-tile - applyLibFilter, the count and
+// the "No games match" note all walk the grid's children and read that class
+// to mean "a game", and this is not one.
+//
+// It is a library-only affordance. With nothing in the library the hero's own
+// "Load a game" is front and centre and this would be a second, smaller copy
+// of it; while a filter or search is running the grid is answering a question
+// about the games that are there, and a cell that is not a game is in the way.
+const buildAddTile = () => {
+  let tile = document.createElement("div");
+  tile.className = "add-tile";
+  let b = document.createElement("button");
+  b.type = "button";
+  b.className = "add-tile-btn";
+  b.title = "Load a game from a file";
+  b.setAttribute("aria-label", "Load a game from a file");
+  let plus = document.createElement("span");
+  plus.className = "add-tile-plus";
+  plus.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+  let label = document.createElement("span");
+  label.className = "add-tile-label";
+  label.textContent = "Load a game";
+  b.append(plus, label);
+  b.addEventListener("click", openRomPicker);
+  tile.appendChild(b);
+  return tile;
+};
+
+const libFilterActive = () =>
+  !!libFilter.q || libFilter.systems.size > 0 || libFilter.loc !== "all";
+
 // Rebuilt off-DOM and swapped in with one replaceChildren, never emptied
 // first: #home is the scroll container, and an empty grid collapses its
 // scrollHeight so the browser clamps scrollTop to 0.
@@ -4921,7 +4995,7 @@ const refreshHomeRecent = async () => {
   }
   libraryEmpty = false;
   refreshHomeEmptyActions();
-  setLibFit(roms.length);
+  setLibFit(roms.length + 1); // the add tile is a cell too
   if (homeRecentHead) homeRecentHead.hidden = false;
   homeRecentWrap.hidden = false;
   // One game: nothing to sort or filter.
@@ -5090,6 +5164,7 @@ const refreshHomeRecent = async () => {
     .catch(() => {});
   // Filtered before the commit: a fresh render is already filtered.
   for (let t of tiles) t.hidden = !libTileMatches(t);
+  tiles.unshift(buildAddTile());
   // The one DOM commit, atomic: no zero-height moment.
   homeRecent.replaceChildren(...tiles);
   // A menu open on a game that just left the library (deleted elsewhere).
@@ -8041,7 +8116,6 @@ const openRomPicker = () => {
 
 // Mobile "Load a game" button (no drag-and-drop on touch).
 document.getElementById("home-load").addEventListener("click", openRomPicker);
-document.getElementById("lib-add").addEventListener("click", openRomPicker);
 
 let dropOverlay = document.getElementById("drop-overlay");
 let dragCounter = 0;
@@ -9283,11 +9357,16 @@ document.getElementById("home-paused-resume").addEventListener("click", resumeGa
 // The card's ⋯ is the game's ⋯: the loaded game's own tile in the grid
 // opens the same menu with the same entries, so there is one menu per game
 // rather than a session menu and a library menu that disagree.
+// currentOriginalName, NOT currentRomName: the library keys every game by the
+// name it was added under, and currentRomName is the emulator filesystem's
+// sanitised one. Address a game by the wrong one and every flag reads false -
+// the menu decides the file is missing and offers to go and find a file the
+// player is, demonstrably, playing.
 const homePausedMore = document.getElementById("home-paused-more");
 homePausedMore.addEventListener("click", () => {
-  if (!currentRomName) return;
-  if (tileMenuFor === currentRomName) closeTileMenu();
-  else openTileMenu(currentRomName, homePausedMore, null, null, true);
+  if (!currentOriginalName) return;
+  if (tileMenuFor === currentOriginalName) closeTileMenu();
+  else openTileMenu(currentOriginalName, homePausedMore, null, null, true);
 });
 
 // Close the paused game: flush its save once, detach it from every later
@@ -9965,6 +10044,8 @@ var photoDots = {
 
 const applyPhotoDots = () => {
   menuBtn.classList.toggle("has-new-photo", photoDots.menu);
+  // The home screen has no hamburger to carry the dot; its card's ⋯ does.
+  homePausedMore.classList.toggle("has-new-photo", photoDots.menu);
   captureToggle.classList.toggle("has-new-photo", photoDots.capture);
   printsItem.classList.toggle("has-new-photo", photoDots.gallery);
 };

@@ -4,9 +4,9 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { loadApp, u8, eq, settle } from "./helpers.mjs";
+import { loadApp, u8, eq, settle, gameTiles } from "./helpers.mjs";
 
-const grid = (app) => app.document.getElementById("home-recent");
+const grid = (app) => ({ children: gameTiles(app) });
 const thumbOf = (tile) => tile.children[0].children[0]; // launch > thumb
 const captionOf = (tile) => tile.children[0].children[1]; // launch > footer
 

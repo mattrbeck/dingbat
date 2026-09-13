@@ -1175,15 +1175,35 @@ body:not(.running) #record-clip {
   display: none;
 }
 
-/* Second: while the paused card is up it carries these three itself, on its
-   own ⋯, next to the game they belong to. body.home-card, not
-   body:not(.running): with no card - no game at all, or a link session the
-   card cannot draw - the menu is the only place they exist, and Link Cable
-   is then the only way to end a session. */
-body.home-card #net-connect,
-body.home-card #open-cheats,
-body.home-card #report-bug,
-body.home-card #report-sep {
+/* Second: the hamburger on the home screen.
+   Everything in it is about the game - saves, states, capture, cheats, the
+   link cable - and while the card is up the card's own ⋯ carries all of it,
+   beside the game it belongs to. That left Settings, which is not about the
+   game at all and now has its own button in the bar. So the menu goes.
+
+   The one case that keeps it is a game the card cannot draw: a 2P, rollback
+   or online session reaches the home screen with two cores and no single
+   framebuffer, so there is no card and no ⋯ - and the menu is then the only
+   place those items exist and the only way to end the session. Hence
+   .has-game:not(.home-card), never plain .has-game. */
+body:not(.running) #menu-container {
+  display: none;
+}
+
+body:not(.running).has-game:not(.home-card) #menu-container {
+  display: block;
+}
+
+/* ...and Settings is in the bar exactly when the menu that held it is not. */
+#settings-btn {
+  display: none;
+}
+
+body:not(.running) #settings-btn {
+  display: flex;
+}
+
+body:not(.running).has-game:not(.home-card) #settings-btn {
   display: none;
 }
 
@@ -1335,9 +1355,20 @@ body.running #status {
    update button — the home screen is the right place to take an update —
    and fullscreen, which people set before they pick anything. */
 body:not(.running) #hle-indicator,
-body:not(.running) .cart-btn,
-body:not(.running) #volume-control {
+body:not(.running) .cart-btn {
   display: none;
+}
+
+/* Volume is the exception, and stays: it is a thing people set BEFORE they
+   start playing, and the home screen is where they are when they think of
+   it. On phones it even gains the slider it does not get over a game - the
+   bar has almost nothing else on it here, and the in-menu slider went with
+   the hamburger. */
+@media (max-width: 560px) {
+  body:not(.running) #vol-slider {
+    display: block;
+    max-width: 108px;
+  }
 }
 
 /* Phones: the top-bar volume slider gives way to the mute toggle; a full
@@ -2032,21 +2063,29 @@ body.has-game #home-load:hover {
   transform: translateY(1px);
 }
 
+/* The frame scales with the card rather than sitting in it at thumbnail
+   size: at the library's full width a 240px picture left most of the card
+   empty, and the picture is the one thing on it worth making big. Capped so
+   a very wide screen does not turn 240x160 pixels into a mural. */
 #home-paused-canvas {
   display: block;
-  width: 240px;
+  width: clamp(240px, 38vw, 460px);
   height: auto;
   background: var(--screen-off);
   image-rendering: pixelated;
 }
 
+/* Name at the top, actions at the foot, the gap between them doing the work:
+   a column that fills the picture's height reads as composed, where one
+   floating in the middle of it reads as a card that was stretched. */
 #home-paused-body {
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  gap: 12px;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 4px 4px 0;
 }
 
 #home-paused-title {
@@ -2062,8 +2101,9 @@ body.has-game #home-load:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 17px;
+  font-size: clamp(17px, 2.2vw, 26px);
   font-weight: 600;
+  letter-spacing: -0.01em;
   text-align: left;
   color: var(--text);
 }
@@ -2092,7 +2132,7 @@ body.has-game #home-load:hover {
   align-items: center;
   justify-content: center;
   gap: 7px;
-  padding: 9px 18px;
+  padding: 10px 20px;
   font-size: 14px;
   border-radius: 999px;
 }
@@ -2105,10 +2145,13 @@ body.has-game #home-load:hover {
 /* ⋯ is the same menu the game's tile opens, with the session items on top.
    Square, so it reads as a handle beside two worded buttons rather than a
    third thing to read. */
+/* Square, and the same height as the two worded buttons beside it: stretch,
+   because the row's height is set by their padding and this one has none. */
 .home-paused-more {
   flex: 0 0 auto;
-  width: 38px;
-  padding: 0 !important;
+  align-self: stretch;
+  width: 42px;
+  padding: 0;
   color: var(--text-dim);
 }
 
@@ -2288,45 +2331,6 @@ body.runtime-ready #boot-progress {
 
 .home-manage-link:hover {
   color: var(--text);
-}
-
-/* Add game — the one verb in a head of faint readouts, so it is the one
-   thing in the row with a fill. It is quiet all the same: with a library on
-   screen, adding from a file is the rare way in and the grid is the common
-   one. align-self because the row is baseline-aligned for its text and a
-   pill has no baseline worth sharing. */
-.lib-add {
-  align-self: center;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex: 0 0 auto;
-  padding: 5px 12px 5px 9px;
-  font: inherit;
-  font-size: 11.5px;
-  font-weight: 600;
-  white-space: nowrap;
-  color: var(--text);
-  background: linear-gradient(180deg, var(--surface-3), var(--surface-2));
-  border: 1px solid var(--border-2);
-  border-radius: 999px;
-  box-shadow: inset 0 1px 0 var(--inset-hi);
-  cursor: pointer;
-  transition: background 0.13s, border-color 0.13s;
-}
-
-.lib-add svg {
-  width: 14px;
-  height: 14px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2.2;
-  stroke-linecap: round;
-}
-
-.lib-add:hover {
-  background: linear-gradient(180deg, var(--surface-hover), var(--surface-3));
-  border-color: var(--border-3, var(--border-2));
 }
 
 /* The count beside the label: "LIBRARY 12 games", or "3 of 12" filtered. */
@@ -2707,6 +2711,70 @@ body.runtime-ready #boot-progress {
 
 .home-tile-launch:active {
   transform: translateY(1px);
+}
+
+/* --- The add tile ------------------------------------------------------
+   The first cell of the grid: the way in from a file, in the shape of the
+   thing it produces. Dashed and unfilled so it reads as an empty slot
+   waiting for a game rather than as a game - it is the one cell in the grid
+   with no picture, and it should look like it.
+
+   It stretches to the row's height rather than setting one: the games decide
+   how tall a row is (3:2 picture plus a name), and this follows them. */
+.add-tile {
+  display: flex;
+}
+
+.add-tile[hidden] {
+  display: none;
+}
+
+.add-tile-btn {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px;
+  color: var(--text-dim);
+  background: none;
+  border: 1px dashed var(--border-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color 0.14s, border-color 0.14s, background 0.14s;
+}
+
+.add-tile-btn:hover {
+  color: var(--text);
+  border-color: rgba(var(--accent-rgb), 0.55);
+  background: rgba(var(--accent-rgb), 0.06);
+}
+
+.add-tile-plus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+}
+
+.add-tile-plus svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+
+.add-tile-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: center;
 }
 
 .home-tile-thumb {
@@ -6793,6 +6861,12 @@ body.running.sync-shown #status {
 #tile-menu-scrim[hidden] {
   display: none;
 }
+/* Opened from the paused card the head is dropped (openTileMenu's `session`),
+   and display:flex would otherwise beat the attribute. */
+.tile-menu-head[hidden] {
+  display: none;
+}
+
 .tile-menu-head {
   display: flex;
   align-items: center;
@@ -7183,6 +7257,23 @@ body.running.sync-shown #status {
   border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 0 2px var(--chrome-btn-bottom);
+}
+
+/* The same badge on the card's ⋯, which is where the trail continues on the
+   home screen now that the hamburger is not there to carry it. */
+.home-paused-more.has-new-photo {
+  position: relative;
+}
+
+.home-paused-more.has-new-photo::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
 }
 
 /* #menu-container is the positioned ancestor the dropdown is anchored to, so

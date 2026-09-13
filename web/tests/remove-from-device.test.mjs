@@ -4,7 +4,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { loadApp, jsonRes, bytesRes, u8, eq, settle } from "./helpers.mjs";
+import { loadApp, jsonRes, bytesRes, u8, eq, settle, gameTiles } from "./helpers.mjs";
 
 const FILES_URL = "https://www.googleapis.com/drive/v3/files";
 
@@ -130,8 +130,8 @@ test("the removed game re-renders as a Drive-only tile", async () => {
   await settle();
 
   const grid = app.document.getElementById("home-recent");
-  assert.equal(grid.children.length, 2);
-  assert.ok(!grid.children[0].className.includes("home-tile-cloud"));
+  assert.equal(gameTiles(app).length, 2);
+  assert.ok(!gameTiles(app)[0].className.includes("home-tile-cloud"));
 
   // An empty moment collapses #home's scrollHeight (see homegrid.test.mjs).
   const sizes = [];
@@ -146,10 +146,10 @@ test("the removed game re-renders as a Drive-only tile", async () => {
   await settle();
 
   assert.ok(!sizes.includes(0), "the grid was never emptied, saw " + JSON.stringify(sizes));
-  assert.equal(grid.children.length, 2, "the game keeps its place in the library");
-  assert.ok(grid.children[0].className.includes("home-tile-cloud"),
+  assert.equal(gameTiles(app).length, 2, "the game keeps its place in the library");
+  assert.ok(gameTiles(app)[0].className.includes("home-tile-cloud"),
     "and now renders exactly like any other Drive-only game");
-  const controls = grid.children[0].children.map((c) => c.className);
+  const controls = gameTiles(app)[0].children.map((c) => c.className);
   assert.ok(controls.some((c) => c.includes("home-tile-dl")), "download glyph");
   assert.ok(!controls.some((c) => c.includes("home-tile-link")), "no 2P button");
 });

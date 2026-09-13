@@ -6,7 +6,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { loadApp, u8, eq, settle } from "./helpers.mjs";
+import { loadApp, u8, eq, settle, gameTiles } from "./helpers.mjs";
 
 const signIn = (app, sigs = {}, rmt = {}) => {
   app.api.gdriveToken = "test-token";
@@ -30,7 +30,7 @@ const seed = (app, names, { local = names, saves = [] } = {}) => {
   app.idb.set("thumbs_offered", 1);
 };
 
-const tiles = (app) => app.document.getElementById("home-recent").children;
+const tiles = (app) => gameTiles(app);
 const tileOf = (app, name) =>
   tiles(app).find((t) => t.children[0].title.startsWith(name));
 const moreBtn = (tile) => tile.children.find((c) => c.classList.contains("home-tile-more"));
@@ -535,7 +535,7 @@ test("Download to this device fetches the ROM, and the tile turns local", async 
 // session section on top; the grid's tiles never do, so the library menu is
 // exactly what it always was.
 
-test("the card's ⋯ adds the session items above the file ones; a tile's does not", async () => {
+test("the card's ⋯ is the session's; a tile's is the file's; neither is both", async () => {
   const app = await loadApp();
   seed(app, ["Zelda.gbc"], { saves: ["Zelda.gbc"] });
   await boot(app);
@@ -544,14 +544,40 @@ test("the card's ⋯ adds the session items above the file ones; a tile's does n
                              null, null, true);
   await settle();
   eq(labels(app),
-     ["Link cable", "Cheats", "Report a bug", "Rename", "Reset save data", "Delete"],
-     "session first, then the game's files");
+     ["Save states", "Manage saves", "Screenshot", "Clip that!",
+      "Link cable", "Cheats", "Report a bug"],
+     "what you do to the game you are in the middle of");
+  assert.equal(app.document.getElementById("tile-menu-head").hidden, true,
+               "the card said which game, an inch above");
   app.api.closeTileMenu();
 
   await open(app, "Zelda.gbc");
   eq(labels(app), ["Rename", "Reset save data", "Delete"],
-     "the grid's own menu is untouched");
+     "what you do to its file, and nothing about the session");
+  assert.equal(app.document.getElementById("tile-menu-head").hidden, false,
+               "a tile in a grid of them still has to name its game");
   app.api.closeTileMenu();
+});
+
+// The bug this pins: the library keys a game by the name it was added under
+// (currentOriginalName), while currentRomName is the emulator filesystem's
+// sanitised one. Open the menu under the wrong key and every flag reads
+// false - the menu decides the file is missing and offers to go and find a
+// file the player is, demonstrably, playing.
+test("the card's ⋯ finds the loaded game under the library's own key", async () => {
+  const app = await loadApp();
+  seed(app, ["Zelda (U) [!].gbc"]);
+  await boot(app);
+  app.api.currentRomName = "zelda_u.gbc";          // the FS name
+  app.api.currentOriginalName = "Zelda (U) [!].gbc"; // the library key
+  await app.document.getElementById("home-paused-more").click();
+  await settle();
+  assert.equal(app.api.tileMenuFor, "Zelda (U) [!].gbc");
+  assert.ok(!labels(app).includes("Find the file…"),
+            "the game is loaded, so its file is here");
+  app.api.closeTileMenu();
+  app.api.currentRomName = null;
+  app.api.currentOriginalName = null;
 });
 
 // The three items leave the hamburger only while the card is up (body.home-card
