@@ -143,6 +143,24 @@ test("at boot, signed in, the offer waits for the first pull — which may pictu
   assert.equal(app.idb.get("thumbs_offered"), undefined, "and the offer is not spent");
 });
 
+// The guard for the test below, which is the only one here that waits on a
+// timer of the page's own. The harness unrefs the page's timers so that the
+// ones no test ever clears cannot hold the suite open, and exempts short
+// one-shots because those are the only kind a test waits on. Lose the
+// exemption and this file does not fail an assertion: it stops dead, the loop
+// drains, and every test from here down is cancelled - which is how it read
+// on CI while passing on a developer's machine, where something else always
+// happened to be pending.
+test("the harness leaves a short page timer able to hold the loop open", async () => {
+  const app = await loadApp();
+  const short = app.runIn("setTimeout(() => {}, 20)");
+  const long = app.runIn("setTimeout(() => {}, 5000)");
+  assert.equal(short.hasRef(), true, "a test can wait on this one");
+  assert.equal(long.hasRef(), false, "and this one cannot outlive the file");
+  clearTimeout(short);
+  clearTimeout(long);
+});
+
 test("at boot, signed in with no pull coming, the offer gives up waiting", async () => {
   const app = await loadApp();
   seedLibrary(app, ["A.gba"]);

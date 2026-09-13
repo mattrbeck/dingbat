@@ -228,6 +228,8 @@ const makeFakeFS = () => {
 
 // --- App loader -------------------------------------------------------------
 
+const PIN_TIMER_MS = 100;
+
 export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
                                 touch = false, mediaDevices = true,
                                 serviceWorker = false } = {}) => {
@@ -346,7 +348,26 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     URLSearchParams, Response,
     Uint8ClampedArray, ImageData: FakeImageData,
     atob, btoa, performance,
-    setTimeout: (fn, ms) => { const t = setTimeout(fn, ms); t.unref?.(); return t; },
+    // The page's timers are unref'd so that the ones no test ever clears - a
+    // toast fade, a sync debounce, a recorder's five-minute stop - cannot hold
+    // the whole suite open at the end of a file. The cost is that an unref'd
+    // timer cannot keep Node's loop alive either, so a test that genuinely
+    // waits on one (the boot offer giving up on the first pull; the yield
+    // between two games in the picture batch) is at the mercy of whatever else
+    // happens to be pending: on this machine something always is and the timer
+    // fires, on CI the loop drains and the runner reports the await as a
+    // promise that never resolved, cancelling the rest of the file.
+    //
+    // So short one-shots stay ref'd. Every timer the page arms for its own
+    // purposes is 220 ms or more; only the deliberate yields and the waits a
+    // test shortens itself land under the line, and a one-shot can delay the
+    // exit by its own delay and no more. An interval never gets the reprieve -
+    // that is the one that could hold the loop open forever.
+    setTimeout: (fn, ms) => {
+      const t = setTimeout(fn, ms);
+      if (!((ms || 0) <= PIN_TIMER_MS)) t.unref?.();
+      return t;
+    },
     clearTimeout, // host
     setInterval: (fn, ms) => { const t = setInterval(fn, ms); t.unref?.(); return t; },
     clearInterval,
