@@ -1908,20 +1908,6 @@ body.has-game #home-resume {
   display: none;
 }
 
-/* One line under the rung, saying which button is which. */
-#home-hint {
-  flex: 1 0 100%;
-  margin: 2px 0 0;
-  text-align: center;
-  font-size: 12.5px;
-  line-height: 1.5;
-  color: var(--text-faint);
-}
-
-#home-hint[hidden] {
-  display: none;
-}
-
 /* When a game is paused, Resume is the primary action, so Load drops to the
    neutral (secondary) button look. */
 body.has-game #home-load {

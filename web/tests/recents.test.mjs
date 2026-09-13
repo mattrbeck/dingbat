@@ -65,8 +65,7 @@ test("deleteRecent removes index + rom + art but never save data", async () => {
   await settle();
   assert.equal(app.elements.get("home-recent-wrap").hidden, true);
   assert.equal(app.elements.get("home-drive").hidden, false);
-  assert.equal(app.elements.get("home-drive").textContent, "Sign in with Google");
-  assert.equal(app.elements.get("home-hint").hidden, false);
+  assert.equal(app.elements.get("home-drive").textContent, "Sign in");
 });
 
 test("a library with games withdraws the hero's Drive slot", async () => {
@@ -75,7 +74,6 @@ test("a library with games withdraws the hero's Drive slot", async () => {
   await settle();
   assert.equal(app.elements.get("home-recent-wrap").hidden, false);
   assert.equal(app.elements.get("home-drive").hidden, true);
-  assert.equal(app.elements.get("home-hint").hidden, true);
 });
 
 test("the grid draws only the columns it fills, and stops at five", async () => {

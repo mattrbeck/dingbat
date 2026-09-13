@@ -3784,27 +3784,21 @@ const refreshHomeSyncButton = () => {
 };
 
 // With no games there is no library head, so the hero carries the Drive
-// slot: the two ways to get a game sit on one rung, and one line says which
-// is which. Both withdraw the moment there is a library to head.
+// slot: the two ways to get a game sit on one rung, the quieter one second.
+// Same two labels the head uses, so the slot has one name wherever it
+// appears. It withdraws the moment there is a library to head.
 const homeDriveBtn = /** @type {HTMLButtonElement} */ (document.getElementById("home-drive"));
-const homeHint = document.getElementById("home-hint");
 let libraryEmpty = false;
 
 const refreshHomeEmptyActions = () => {
-  if (!homeDriveBtn || !homeHint) return;
+  if (!homeDriveBtn) return;
   if (!libraryEmpty || !GDRIVE_CLIENT_ID) {
     homeDriveBtn.hidden = true;
-    homeHint.hidden = true;
     return;
   }
-  let linked = driveLinked();
   homeDriveBtn.hidden = false;
   homeDriveBtn.disabled = false;
-  homeDriveBtn.textContent = linked ? "Sync" : "Sign in with Google";
-  homeHint.hidden = false;
-  homeHint.textContent = linked
-    ? "Nothing on this device yet. Sync brings down the games on your Drive."
-    : "Games load from this device. Sign in to sync them across devices.";
+  homeDriveBtn.textContent = driveLinked() ? "Sync" : "Sign in";
 };
 
 if (homeDriveBtn) {
