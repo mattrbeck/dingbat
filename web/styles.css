@@ -2031,6 +2031,14 @@ body.has-game #home-load:hover {
   width: 100%;
   max-width: var(--lib-width);
   padding: 12px;
+  /* A hero has a maximum; a grid does not. Past four cells the grid is the
+     whole 1400px row, and a card that followed it there put its caption alone
+     in five hundred pixels of nothing. So it stops at 1000px - and stops
+     FLUSH LEFT, not centred, so the picture's left edge still lines up with
+     the first tile and the search field below it. That alignment is the
+     reason the card was given the grid's width in the first place; the right
+     edge was never the part doing the work. */
+  margin-inline: 0 auto;
   background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -2183,6 +2191,12 @@ body.has-game #home-load:hover {
   border-color: rgba(var(--danger-rgb), 0.4);
 }
 
+@media (min-width: 760px) {
+  #home-paused {
+    max-width: min(var(--lib-width), 1000px);
+  }
+}
+
 @media (max-width: 560px) {
   #home-paused {
     flex-direction: column;
@@ -2228,8 +2242,21 @@ body.has-game #home-load:hover {
   display: none;
 }
 
+/* Empty because the brand went up to the bar. Which of the two reasons it
+   went decides whether the slot collapses: with a game loaded the hero is
+   display:none anyway and the slot should go with it, but when a SCROLL sent
+   the brand up, the slot has to keep standing in the hero's flow at the
+   height index.js reserved. Collapse it then and the page shortens by the
+   brand's height under the reader, which un-scrolls the distance that sent
+   the brand up in the first place - and a display:none element measures as a
+   zero rect at the origin, so the scroll handler could never tell it had
+   come back into view either. */
 #home-brand-slot:empty {
   display: none;
+}
+
+body.brand-parked #home-brand-slot:empty {
+  display: block;
 }
 
 @media (min-width: 760px) {
@@ -2261,12 +2288,16 @@ body.brand-in-bar #home-logo {
   filter: none;
 }
 
+/* --chrome-ink, not --text: the device themes paint the bar their shell
+   colour and re-point this token at ink that reads on it, while --text stays
+   the colour for the dark stage below. On DMG's grey bar the wordmark in
+   --text was grey on grey. */
 body.brand-in-bar #home-brand h1 {
   font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.01em;
   white-space: nowrap;
-  color: var(--text);
+  color: var(--chrome-ink);
 }
 
 body.brand-in-bar #home-tagline {

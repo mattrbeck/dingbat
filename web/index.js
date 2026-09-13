@@ -5173,6 +5173,8 @@ const refreshHomeRecent = async () => {
   applyLibFilter(); // the count and the empty note
   homeArtUrls.forEach(URL.revokeObjectURL);
   homeArtUrls = artUrls;
+  // The page just changed height: the brand may have to come back down.
+  syncBrandForScroll();
 };
 
 // Escape closes every modal (the net modal's dismissal is netplay.js's).
@@ -9319,14 +9321,22 @@ document.getElementById("home-resume").addEventListener("click", resumeGame);
 
 
 // --- Where the brand lives -------------------------------------------------
-// One element, two homes: the hero on an empty home screen, and the top bar
-// once a game is loaded. Two copies would be simpler to style and impossible
-// to animate between, and the move is the point - closing a game should look
-// like the wordmark going back where it came from rather than one disappearing
-// and another appearing.
+// One element, two homes: the hero on the home screen, and the top bar. Two
+// copies would be simpler to style and impossible to animate between, and the
+// move is the point - closing a game should look like the wordmark going back
+// where it came from rather than one disappearing and another appearing.
 //
-// The rule is "a game is loaded", not "the card is up": the brand belongs in
-// the bar in the link modes too, which have a game and no card.
+// Two things send it up. A game being loaded, which includes the link modes
+// (a game and no card); and the library being scrolled far enough that the
+// hero has gone off the top, which is the ordinary reason a masthead becomes
+// a bar.
+//
+// The scrolled case is why the hero's slot holds its height open while the
+// brand is away. Let it collapse and the page shortens by the brand's height
+// the instant the brand leaves, which un-scrolls the very distance that sent
+// it up, which sends it back down, which lengthens the page again. The
+// reservation is only for that case: with a game loaded the hero is display:
+// none anyway and the slot should collapse with it.
 //
 // The move is FLIP. Measure where the LOGO is, move and re-class, measure
 // again, then play the difference off. It is measured on the logo rather than
@@ -9339,21 +9349,52 @@ const brandLogo = document.getElementById("home-logo");
 const brandBarSlot = document.getElementById("brand-slot");
 const brandHeroSlot = document.getElementById("home-brand-slot");
 const BRAND_MOVE_MS = 380;
+// It leaves at the line and returns a little short of it, so a scroll resting
+// exactly on the boundary settles instead of buzzing between the two.
+const BRAND_PARK_SLACK = 28;
 
 let brandAnim = null;
+let brandParked = false;  // up in the bar because the library is scrolled
+let brandHeroH = 0;       // the hero slot's height, held open while it is away
+
+const brandInBar = () =>
+  document.body.classList.contains("has-game") || brandParked;
 
 const placeBrand = (inBar, { animate = true } = {}) => {
   let target = inBar ? brandBarSlot : brandHeroSlot;
-  if (brandEl.parentElement === target) return;
+  let moving = brandEl.parentElement !== target;
   let reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  // A move mid-flight would measure the transformed box, not the laid-out one.
-  if (brandAnim) { brandAnim.cancel(); brandAnim = null; }
-  let first = animate && !reduced ? brandLogo.getBoundingClientRect?.() : null;
+  if (moving && brandAnim) { brandAnim.cancel(); brandAnim = null; }
 
-  target.appendChild(brandEl);
-  document.body.classList.toggle("brand-in-bar", inBar);
+  // Taken while the hero still holds the brand and still has its own height.
+  if (moving && inBar && brandEl.parentElement === brandHeroSlot) {
+    brandHeroH = brandHeroSlot.offsetHeight || brandHeroH;
+  }
+  // Cleared before measuring the landing spot, so the brand comes down to
+  // where it will actually sit rather than to the top of a held-open box.
+  if (!inBar) brandHeroSlot.style.minHeight = "";
 
-  // Hidden at this width (a phone with a game running): nothing to play.
+  let first = moving && animate && !reduced
+    ? brandLogo.getBoundingClientRect?.() : null;
+
+  if (moving) {
+    target.appendChild(brandEl);
+    document.body.classList.toggle("brand-in-bar", inBar);
+  }
+
+  // Settled every call, not only on a move: a game can load while the library
+  // is scrolled, and the reservation has to go with the hero either way. The
+  // class is half of it - styles.css keeps an emptied slot rendered only while
+  // it is standing in for a scrolled-away brand.
+  let reserving =
+    inBar && brandParked && !document.body.classList.contains("has-game");
+  document.body.classList.toggle("brand-parked", reserving);
+  brandHeroSlot.style.minHeight = reserving ? brandHeroH + "px" : "";
+
+  if (!moving) return;
+  // Nothing to play from: a hidden hero (body.running is already on, or a
+  // phone with a game running) has no "from" position, and the harness's DOM
+  // has no layout at all.
   if (!first || !first.width) return;
   let last = brandLogo.getBoundingClientRect?.();
   if (!last || !last.width) return;
@@ -9376,12 +9417,38 @@ const placeBrand = (inBar, { animate = true } = {}) => {
     .catch(() => {});
 };
 
-// Put the brand wherever the current state says it belongs, without
-// assuming anything about which way it is going. The call sites that know
-// use placeBrand directly, because they also have to get the ordering
-// right against body.running - see the note at each of them.
-const refreshBrandPlacement = (opts) =>
-  placeBrand(document.body.classList.contains("has-game"), opts);
+// Put the brand wherever the current state says it belongs, without assuming
+// which way it is going. The call sites that DO know use placeBrand directly,
+// because they also have to get the ordering right against body.running - see
+// the note at each of them.
+const refreshBrandPlacement = (opts) => placeBrand(brandInBar(), opts);
+
+// How much of the hero's slot is still below the top of the scroller. Through
+// rects rather than offsetTop, which is measured against whichever ancestor
+// happens to be the offsetParent and is not the scroller.
+const brandHeroBelowTop = () => {
+  let s = homeScroller.getBoundingClientRect?.();
+  let b = brandHeroSlot.getBoundingClientRect?.();
+  return s && b ? b.bottom - s.top : Infinity;
+};
+
+const syncBrandForScroll = () => {
+  // A loaded game already has it up there, and the hero is not on screen to
+  // be scrolled.
+  if (document.body.classList.contains("has-game")) return;
+  let below = brandHeroBelowTop();
+  // It goes up the moment the slot clears the top, and does not come back
+  // until a good bit of it is showing again - so a scroll that rests on the
+  // line settles instead of buzzing between the two.
+  let next = brandParked ? below <= BRAND_PARK_SLACK : below <= 0;
+  if (next === brandParked) return;
+  brandParked = next;
+  placeBrand(brandInBar());
+};
+
+if (homeScroller.addEventListener) {
+  homeScroller.addEventListener("scroll", syncBrandForScroll, { passive: true });
+}
 
 // --- Paused-game card ---
 // Pixels come from the wasm framebuffer: the canvas is a WebGL context
@@ -9463,7 +9530,9 @@ const unloadGame = async ({ flushSave = true } = {}) => {
   pauseButton.classList.remove("paused", "active");
   pauseButton.title = "Pause";
   document.body.classList.remove("has-game", "running", "paused", "gb-mode");
-  placeBrand(false); // ...and comes back down, played, when the game closes
+  // Not placeBrand(false): if the library is still scrolled down, the
+  // brand stays up there for that reason instead.
+  refreshBrandPlacement();
   clearInputDisplay();   // no cart, no held buttons
   // No cart, no sensor: drop the camera and its button.
   stopWebcam();
