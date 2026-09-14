@@ -31,11 +31,13 @@
 #   retrig         sampler (re)trigger count over the run
 #   mono           FIFO topology (0 stereo, 1 mono A, 2 mono B)
 #   reverb/pcm_rate  last SoundInfo values seen by the hook
-#   hle_rms/real_rms/ratio  span-matched A/B RMS of the HLE render vs the
-#                  game's own FIFO stream (both only accumulate while engaged)
+#   hle_rms/real_rms/ratio  span-matched A/B RMS (DC-free per 125 ms block) of
+#                  the HLE render vs the game's own FIFO stream (both only
+#                  accumulate while engaged)
 #   env_corr       Pearson of the two ~100 ms RMS envelopes (shape/tempo)
 #   xcorr0         sample-level normalised correlation at lag 0 (waveform)
-#   lag            HLE-vs-real lag in APU samples (16-sample resolution)
+#   lag            HLE-vs-real lag in APU samples from the RMS envelopes
+#                  (64-sample resolution; the waveform aliases on periodic music)
 #   start_honoured/_ignored/_unclear  note-ons carrying a non-zero count: did
 #                  the engine start the sample there or at 0 (mp2k.nim)
 #   wall_s         wall time of the frame loop (perf outlier screen)
@@ -100,23 +102,30 @@ proc xcorr0(a, b: seq[int16]): float =
   if saa <= 0 or sbb <= 0: return 0
   sab / sqrt(saa * sbb)
 
-proc best_lag(a, b: seq[int16]; dec = 16; span = 96): int =
+proc best_lag(a, b: seq[int16]; blk = 64; span = 40): int =
   ## Lag (APU samples, positive = HLE later) of the HLE capture against the
-  ## real stream: both decimated by `dec` (mono mix), cross-correlated over
-  ## +-span decimated lags. Coarse (to `dec` samples) but cheap enough for
-  ## every ROM of a sweep.
+  ## real stream, from their RMS envelopes in `blk`-sample blocks (mono
+  ## mix, mean removed), cross-correlated over +-span blocks. An envelope
+  ## cannot alias on periodic music the way the waveform does; resolution
+  ## is one block.
   let n = min(a.len, b.len) div 2
-  let m = n div dec
+  let m = n div blk
   if m < 4 * span: return 0
   var da = newSeq[float](m)
   var db = newSeq[float](m)
+  var ma, mb = 0.0
   for i in 0 ..< m:
     var sa, sb = 0.0
-    for j in 0 ..< dec:
-      let k = (i * dec + j) * 2
-      sa += float(a[k]) + float(a[k + 1])
-      sb += float(b[k]) + float(b[k + 1])
-    da[i] = sa; db[i] = sb
+    for j in 0 ..< blk:
+      let k = (i * blk + j) * 2
+      let va = float(a[k]) + float(a[k + 1])
+      let vb = float(b[k]) + float(b[k + 1])
+      sa += va * va; sb += vb * vb
+    da[i] = sqrt(sa / float(blk)); db[i] = sqrt(sb / float(blk))
+    ma += da[i]; mb += db[i]
+  ma /= float(m); mb /= float(m)
+  for i in 0 ..< m:
+    da[i] -= ma; db[i] -= mb
   var best = 0
   var bestv = -1e300
   for lag in -span .. span:
@@ -125,12 +134,25 @@ proc best_lag(a, b: seq[int16]; dec = 16; span = 96): int =
       acc += da[i + lag] * db[i]
     if acc > bestv:
       bestv = acc; best = lag
-  best * dec
+  best * blk
 
-proc rms(s: seq[int16]): float =
+proc rms(s: seq[int16]; blk = 8192): float =
+  ## RMS with each ~125 ms block's mean removed. The driver's per-channel
+  ## floor truncation parks the FIFO stream at about -0.5 per active voice
+  ## (-11 on a ten-voice mix): inaudible DC that would otherwise count as
+  ## loudness against the HLE, which has none.
   if s.len == 0: return 0
   var a = 0.0
-  for v in s: a += float(v) * float(v)
+  var i = 0
+  while i < s.len:
+    let e = min(i + blk, s.len)
+    var m = 0.0
+    for j in i ..< e: m += float(s[j])
+    m /= float(e - i)
+    for j in i ..< e:
+      let d = float(s[j]) - m
+      a += d * d
+    i = e
   sqrt(a / float(s.len))
 
 proc main() =

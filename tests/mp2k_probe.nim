@@ -79,6 +79,10 @@ proc main() =
   if getEnv("DINGBAT_PROBE_ZOH") == "1": emu.apu.set_fifo_interp(false)
 
   let fj = open(prefix & ".frames.jsonl", fmWrite)
+  # DINGBAT_PROBE_RING=1: the whole A half of pcmBuffer after every frame
+  # (<prefix>.ring.s8, period*spv bytes per frame) for offline slot scans
+  var ring_dump: File = nil
+  if getEnv("DINGBAT_PROBE_RING") == "1": ring_dump = open(prefix & ".ring.s8", fmWrite)
   var engA, engB: seq[int8]
   var prevA, prevB: seq[uint8]
   var passes = 0
@@ -141,6 +145,8 @@ proc main() =
           if chslot < 0: chslot = s
     prevA = curA
     prevB = curB
+    if ring_dump != nil:
+      discard ring_dump.writeBuffer(addr curA[0], half)
     # The slot the pass filled, from pcmDmaCounter AT THE HOOK (the HLE's
     # own derivation, mp2k.nim apply_pending): slot = period - (cnt - 1)
     # for cnt >= 2, else 0. Read at the hook it holds on every vintage
@@ -196,6 +202,13 @@ proc main() =
                       "chslot": chslot, "changed": changed,
                       "hle_slot": hle_slot, "hle_fires": hle_fires,
                       "hook_at": hook_at, "dma_at": dma_at,
+                      "fifo_level": (if emu.mp2k != nil: emu.mp2k.fifo_w - emu.mp2k.fifo_r else: 0),
+                      "predict": (emu.mp2k != nil and emu.mp2k.predict),
+                      "pred_ok": (if emu.mp2k != nil: emu.mp2k.pred_ok else: 0),
+                      "pred_bad": (if emu.mp2k != nil: emu.mp2k.pred_bad else: 0),
+                      "fifo_target": (if emu.mp2k != nil: emu.mp2k.fifo_target else: 0),
+                      "lat_avg": (if emu.mp2k != nil: int(emu.mp2k.lat_avg) else: 0),
+                      "lat_count": (if emu.mp2k != nil: emu.mp2k.lat_count else: 0),
                       "cap_n": mp2kWavCapture.len div 2,
                       "engaged": (emu.mp2k != nil and emu.mp2k.engaged),
                       "rate": rate, "spv": spv, "period": period,
@@ -205,6 +218,7 @@ proc main() =
                       "sndh": toHex(emu.bus.read_half_internal(0x04000082'u32), 4),
                       "ch": chans}))
   fj.close()
+  if ring_dump != nil: ring_dump.close()
   block:
     let fa = open(prefix & ".engA.s8", fmWrite)
     if engA.len > 0: discard fa.writeBuffer(addr engA[0], engA.len)

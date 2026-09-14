@@ -29,11 +29,16 @@
 # 28be88c7 followed NanoBoyAdvance's (BSD-2-Clause since 2026-06).
 #
 # Design:
-#   * SHADOW mode: the real mixer still runs; we consume the per-channel
-#     envelope volumes it computes instead of reimplementing ADSR. Each pass
-#     is snapshotted at its entry and rendered one hook later, when the
-#     volumes it computed are readable (snapshot_pass / apply_pending); that
-#     one-hook lag is also the hardware's double-buffer latency.
+#   * SHADOW mode: the real mixer still runs; its channel table is
+#     snapshotted at the mixer entry hook (snapshot_pass) and the envelope
+#     the pass is about to compute is predicted from the driver's own state
+#     by the rules the probe songs pinned (P3: attack/decay/sustain/release
+#     and the pseudo-echo floor), then the frame is rendered at once
+#     (apply_pending / render_frame) into a FIFO that holds it until the
+#     hardware would play it (measure_latency: the sound DMA's cursor
+#     crossing the slot). Every prediction is checked against the real
+#     bytes one hook later; a vintage that misses drops back to rendering
+#     each pass one hook late from the bytes it left behind.
 #   * Mixer facts below marked P1..P10 come from the probe songs in
 #     tools/mp2kprobe played by the driver itself (tests/mp2k_probe.nim
 #     reads its pcmBuffer).
@@ -71,7 +76,12 @@ const
   SC_VOL_R    = 0x02
   SC_VOL_L    = 0x03
   SC_ATTACK   = 0x04   # ADSR attack rate (added to envelopeVolume per frame)
-  SC_ENV_VOL {.used.} = 0x09
+  SC_DECAY    = 0x05
+  SC_SUSTAIN  = 0x06
+  SC_RELEASE  = 0x07
+  SC_ENV_VOL  = 0x09   # envelopeVolume (the pass's ADSR state)
+  SC_ECHO_VOL = 0x0C   # pseudoEchoVolume: the release floors here (status IEC)
+  SC_ECHO_LEN = 0x0D   # pseudoEchoLength: frames the floor is held, then dropped
   SC_ENV_VR   = 0x0A   # envelopeVolumeRight
   SC_ENV_VL   = 0x0B   # envelopeVolumeLeft
   SC_COUNT    = 0x18   # count/ct: source samples remaining until sample/loop
@@ -141,7 +151,12 @@ const
   #     computed AFTER the release/IEC handling each frame.
   #   ENV (0x03): envelope phase (3=attack, 2=decay, 1=sustain, 0=release).
   CH_START = 0x80'u8
-  CH_STOP {.used.} = 0x40'u8
+  CH_STOP  = 0x40'u8
+  CH_IEC   = 0x04'u8
+  CH_ENV   = 0x03'u8
+  # Predictive mode gives up when more than this share of its checked
+  # predictions miss (a vintage with an envelope rule P3 did not pin)
+  MP2K_PRED_MIN_CHECKS = 64
   CH_ON    = 0xC7'u8   # SOUND_CHANNEL_SF_ON = START|STOP|IEC|ENV — "producing sound"
 
   # m4a compressed-waveform (BDPCM) 4-bit differential LUT: 16 signed deltas
@@ -175,6 +190,12 @@ const
   # sample for the few samples it is late.
   MP2K_FIFO_CAP   = 4096
   MP2K_FIFO_GUARD = 16
+  # From the DMA cursor reaching a slot to that slot's first sample at the
+  # DAC, in APU samples: the 32-byte FIFO filled 16 bytes at a time, and the
+  # emulator's own FIFO reconstruction. Measured against the real stream on
+  # Emerald, Minish Cap, Beast Shooter and Estopolis: about 2.1 ms whatever
+  # the engine rate.
+  MP2K_FIFO_PIPELINE = 68.0'f32
 
 # Mp2kSampler / Mp2kHle are declared in gba.nim (the GBA object references them).
 
@@ -305,6 +326,8 @@ proc mp2k_state_loaded*(m: Mp2kHle) =
   m.fifo_r = 0
   m.fifo_w = 0
   m.fifo_acc = 0
+  m.fifo_err_avg = 0
+  m.lat_n = 0
   m.fifo_last_a = 0
   m.fifo_last_b = 0
   m.fifo_primed = false
@@ -418,7 +441,52 @@ proc snapshot_pass(m: Mp2kHle; sound_info: uint32) =
   m.pend_spv    = int(m.rd16(sound_info + SI_SPV))
   m.pend_cnt    = int(m.rd8(sound_info + SI_DMA_COUNTER))
   m.pend_mono = m.fifo_topology()
+  m.pend_dma_src = m.gba.dma.src[1]
   m.pend_valid = true
+  if m.predict:
+    let master = int(m.rd8(sound_info + SI_MASTER_VOL)) + 1
+    for i in 0 ..< maxc:
+      let p = addr m.pend[i]
+      p.pvalid = false
+      if (p.status and CH_ON) == 0: continue
+      let base = sound_info + uint32(SI_CHANNELS + i * SC_SIZE)
+      var ev = int(m.rd8(base + SC_ENV_VOL))
+      let atk = int(m.rd8(base + SC_ATTACK))
+      let dec = int(m.rd8(base + SC_DECAY))
+      let sus = int(m.rd8(base + SC_SUSTAIN))
+      let rel = int(m.rd8(base + SC_RELEASE))
+      let phase = p.status and CH_ENV
+      # The pass's envelope step (P3, nine vintages): note-on starts at the
+      # attack rate; attack adds the rate and clamps at 255 (into decay);
+      # decay multiplies by rate/256 down to sustain; a STOP multiplies by
+      # the release rate/256 and drops the channel at 0 — unless the note's
+      # pseudo-echo volume catches it first: the release then holds at that
+      # volume (status IEC) for pseudo-echo-length passes (Beast Shooter's
+      # voices; the self-check pins the rule).
+      if (p.status and CH_START) != 0:
+        ev = min(atk, 255)
+      elif (p.status and CH_IEC) != 0:
+        ev = int(m.rd8(base + SC_ECHO_VOL))
+        if int(m.rd8(base + SC_ECHO_LEN)) <= 1: ev = 0
+      elif (p.status and CH_STOP) != 0:
+        ev = (ev * rel) shr 8
+        let echo = int(m.rd8(base + SC_ECHO_VOL))
+        if echo > 0 and ev <= echo: ev = echo
+      elif phase == 3:
+        ev = min(ev + atk, 255)
+      elif phase == 2:
+        ev = (ev * dec) shr 8
+        if ev <= sus: ev = sus
+      let mvs = (ev * master) shr 4
+      let vr = int(m.rd8(base + SC_VOL_R))
+      let vl = int(m.rd8(base + SC_VOL_L))
+      if m.pend_mono != 0:
+        p.pr = uint8((mvs * ((vr + vl) shr 1)) shr 8)
+        p.pl = 0
+      else:
+        p.pr = uint8((mvs * vr) shr 8)
+        p.pl = uint8((mvs * vl) shr 8)
+      p.pvalid = true
 
 proc apply_pending(m: Mp2kHle; sound_info: uint32) =
   ## Turn the pending snapshot (the pass that has just run) plus the
@@ -477,7 +545,7 @@ proc apply_pending(m: Mp2kHle; sound_info: uint32) =
       continue
     let base = sound_info + uint32(SI_CHANNELS + i * SC_SIZE)
     let live = m.rd8(base + SC_STATUS)
-    if (live and CH_ON) == 0 and (p.status and CH_STOP) != 0:
+    if not m.predict and (live and CH_ON) == 0 and (p.status and CH_STOP) != 0:
       # The pass killed a note-off with nothing left to release (release
       # rate 0, or the release/pseudo-echo countdown hit zero): it mixed
       # nothing. (A channel whose sample ran out is the other way to go
@@ -492,9 +560,17 @@ proc apply_pending(m: Mp2kHle; sound_info: uint32) =
     # ONE volume, envelopeVolume * avg(rV, lV) >> 8, at +0x0A and +0x0B
     # left at 0 (observed live) — use it for both sides; the output router
     # then feeds the one fed FIFO. A killed channel keeps its bytes.
-    let vr = float32(m.rd8(base + SC_ENV_VR)) / 256.0'f32
-    let vl = (if m.mono_mode != 0: vr
-              else: float32(m.rd8(base + SC_ENV_VL)) / 256.0'f32)
+    var vr, vl: float32
+    if m.predict and p.pvalid:
+      vr = float32(p.pr) / 256.0'f32
+      vl = (if m.mono_mode != 0: vr else: float32(p.pl) / 256.0'f32)
+      if p.pr == 0 and (m.mono_mode != 0 or p.pl == 0) and (p.status and CH_STOP) != 0:
+        s.active = false   # released to nothing: the pass drops it
+        continue
+    else:
+      vr = float32(m.rd8(base + SC_ENV_VR)) / 256.0'f32
+      vl = (if m.mono_mode != 0: vr
+            else: float32(m.rd8(base + SC_ENV_VL)) / 256.0'f32)
     let ctype = p.ctype
     # Mode bits: TYPE_* table. Compressed decode is selected by WaveData.type
     # != 0 under CMP or REV, not by the channel bit alone.
@@ -642,23 +718,159 @@ proc apply_pending(m: Mp2kHle; sound_info: uint32) =
     s.vol_r = vr
   m.render_frame()
 
+proc hw_latency(m: Mp2kHle): int =
+  ## The hardware's pass-to-DAC latency in APU samples, from where the sound
+  ## DMA's replay cursor sits in the pcmBuffer ring at the hook: the samples
+  ## it still has to replay before it reaches the slot this pass fills, plus
+  ## the FIFO pipeline (the DMA moves 16 bytes at a time into a 32-byte
+  ## FIFO). Measured against the real stream: Emerald 553 = 208 + 18 source
+  ## samples, Minish Cap 228 = 88 + 22. 0 = unknown (no FIFO DMA yet).
+  let spv = m.pend_spv
+  let period = m.pend_period
+  if spv <= 0 or period <= 0 or m.pcm_sample_rate <= 0: return 0
+  var c = -1
+  for k in 1 .. 2:
+    if m.gba.dma.dmacnt_h[k].enable and m.gba.dma.dmacnt_h[k].start_timing == 3 and
+       (m.gba.dma.dmadad[k] == 0x040000A0'u32 or m.gba.dma.dmadad[k] == 0x040000A4'u32):
+      c = k
+      break
+  if c < 0: return 0
+  let base = m.gba.dma.dmasad[c]
+  let src = (if c == 1: m.pend_dma_src else: m.gba.dma.src[c])
+  if src < base: return 0
+  let ring = period * spv
+  let off = int(src - base)
+  if off >= ring: return 0
+  let cnt = m.pend_cnt
+  let slot = (if cnt <= 1: 0 else: period - (cnt - 1))
+  let ahead = ((slot * spv - off) mod ring + ring) mod ring
+  int(float32(ahead) * float32(APU_SAMPLE_RATE) / float32(m.pcm_sample_rate) + MP2K_FIFO_PIPELINE)
+
+proc fifo_dma(m: Mp2kHle): int =
+  ## The sound DMA channel feeding a FIFO (1 or 2), or -1.
+  for k in 1 .. 2:
+    if m.gba.dma.dmacnt_h[k].enable and m.gba.dma.dmacnt_h[k].start_timing == 3 and
+       (m.gba.dma.dmadad[k] == 0x040000A0'u32 or m.gba.dma.dmadad[k] == 0x040000A4'u32):
+      return k
+  -1
+
+proc measure_latency(m: Mp2kHle) =
+  ## Called at every hook after snapshot_pass. Remembers the start address
+  ## of the slot this pass fills and, at later hooks, watches for the sound
+  ## DMA's replay cursor to cross it: the APU samples from that pass's hook
+  ## to the crossing, less the cursor's overshoot, is the latency the
+  ## hardware gives that pass, whatever the vintage's DMA arrangement
+  ## (Emerald lets the DMA run round the ring, Ochaken reprograms it every
+  ## V-blank). Averaged; hw_latency's phase estimate seeds the FIFO target
+  ## until enough crossings are in.
+  let c = m.fifo_dma()
+  if c < 0 or m.pend_spv <= 0 or m.pend_period <= 0 or m.pcm_sample_rate <= 0: return
+  let base = m.gba.dma.dmasad[c]
+  let ring = uint32(m.pend_period * m.pend_spv)
+  let cur = m.gba.dma.src[c]
+  if cur < base or cur - base >= ring: return
+  let curoff = cur - base
+  let prevoff = (if m.lat_prev_src >= base and m.lat_prev_src - base < ring: m.lat_prev_src - base
+                 else: curoff)
+  m.lat_prev_src = cur
+  # resolve pending slots: crossed when the start lies in (prev, cur]
+  let moved = (curoff + ring - prevoff) mod ring
+  var i = 0
+  while i < m.lat_n:
+    let start = m.lat_slot[i]
+    let dist = (curoff + ring - start) mod ring      # cursor past the start by this much
+    let waited = m.apu_clock - m.lat_at[i]
+    if moved > 0'u32 and dist < moved:
+      let lat = float32(waited) - float32(dist) * float32(APU_SAMPLE_RATE) / float32(m.pcm_sample_rate) +
+                MP2K_FIFO_PIPELINE
+      if lat > 0:
+        if m.lat_count == 0: m.lat_avg = lat
+        else: m.lat_avg += (lat - m.lat_avg) * 0.125'f32
+        inc m.lat_count
+      # drop entry i
+      for j in i ..< m.lat_n - 1:
+        m.lat_slot[j] = m.lat_slot[j + 1]
+        m.lat_at[j] = m.lat_at[j + 1]
+      dec m.lat_n
+    elif waited > 6 * 550:
+      for j in i ..< m.lat_n - 1:
+        m.lat_slot[j] = m.lat_slot[j + 1]
+        m.lat_at[j] = m.lat_at[j + 1]
+      dec m.lat_n
+    else:
+      inc i
+  # remember this pass's slot
+  let cnt = m.pend_cnt
+  let slot = (if cnt <= 1: 0 else: m.pend_period - (cnt - 1))
+  if m.lat_n < m.lat_slot.len:
+    m.lat_slot[m.lat_n] = uint32(slot * m.pend_spv)
+    m.lat_at[m.lat_n] = m.apu_clock
+    inc m.lat_n
+
+proc check_predictions(m: Mp2kHle; sound_info: uint32) =
+  ## One hook after a predicted pass its per-side bytes are readable:
+  ## count hits and misses (channels the pass dropped cannot be checked),
+  ## and abandon prediction for this session once misses exceed 2 % of at
+  ## least MP2K_PRED_MIN_CHECKS checks.
+  for i in 0 ..< m.pend_maxc:
+    let p = addr m.pend[i]
+    if not p.pvalid: continue
+    let base = sound_info + uint32(SI_CHANNELS + i * SC_SIZE)
+    let st = m.rd8(base + SC_STATUS)
+    # Off (dropped by the pass) or re-triggered by the next sequencer run:
+    # the bytes are stale, nothing to check
+    if (st and CH_ON) == 0 or (st and CH_START) != 0: continue
+    if p.pr == 0 and (m.pend_mono != 0 or p.pl == 0): continue
+    let r = int(m.rd8(base + SC_ENV_VR))
+    let l = int(m.rd8(base + SC_ENV_VL))
+    if abs(r - int(p.pr)) <= 1 and (m.pend_mono != 0 or abs(l - int(p.pl)) <= 1):
+      inc m.pred_ok
+    else:
+      inc m.pred_bad
+      when defined(mp2kwav):
+        if getEnv("DINGBAT_PREDDUMP") == "1" and m.pred_bad <= 40:
+          echo "predmiss ch", i, " snap st=", toHex(int(p.status), 2), " pred r", int(p.pr), " l", int(p.pl),
+            " actual r", r, " l", l, " now st=", toHex(int(m.rd8(base + SC_STATUS)), 2),
+            " ev=", int(m.rd8(base + SC_ENV_VOL)),
+            " a", int(m.rd8(base + SC_ATTACK)), " d", int(m.rd8(base + SC_DECAY)),
+            " s", int(m.rd8(base + SC_SUSTAIN)), " r", int(m.rd8(base + SC_RELEASE)),
+            " rV", int(m.rd8(base + SC_VOL_R)), " lV", int(m.rd8(base + SC_VOL_L)),
+            " +C..F ", int(m.rd8(base + 0x0C)), "/", int(m.rd8(base + 0x0D)), "/", int(m.rd8(base + 0x0E)), "/", int(m.rd8(base + 0x0F)),
+            " +10..13 ", int(m.rd8(base + 0x10)), "/", int(m.rd8(base + 0x11)), "/", int(m.rd8(base + 0x12)), "/", int(m.rd8(base + 0x13))
+  if m.pred_ok + m.pred_bad >= MP2K_PRED_MIN_CHECKS and
+     m.pred_bad * 50 > m.pred_ok + m.pred_bad:
+    m.predict = false
+
 proc on_frame(m: Mp2kHle; sound_info: uint32) =
   ## Called once per mixer pass (at the learned hook, before the real mixer
-  ## runs). Renders the PREVIOUS pass's frame from its snapshot and the
-  ## envelope it left behind (apply_pending), then snapshots this pass.
-  ## Both vintages probed (Emerald, Minish Cap) compute the envelope inside
-  ## the pass, so a frame can only be rendered one hook late; on Emerald
-  ## that is also when the hardware plays it (553 samples after the pass),
-  ## on Minish Cap the DMA reaches the slot earlier (228) and the HLE runs
-  ## about 330 samples (10 ms) behind the hardware — the price of exact
-  ## envelopes on that vintage.
-  if m.pend_valid:
-    m.fifo_target = MP2K_FIFO_GUARD
-    m.apply_pending(sound_info)
-    m.resync_pending = false   # one full re-latch pass done; back to normal keying
-  else:
-    for i in 0 ..< MP2K_MAX_CHANNELS: m.samplers[i].active = false
-  m.snapshot_pass(sound_info)
+  ## runs). Predictive mode: snapshot this pass, predict the envelope it is
+  ## about to compute (snapshot_pass), render its frame now and let the FIFO
+  ## hold it until the hardware would play it (hw_latency); the prediction
+  ## is checked against the real bytes at the next hook. Otherwise (a
+  ## vintage whose envelope rule the prediction misses) the PREVIOUS pass's
+  ## frame is rendered from its snapshot and the bytes it left behind, one
+  ## hook late — which on Emerald is also the hardware's latency.
+  var done = false
+  if m.predict:
+    if m.pend_valid: m.check_predictions(sound_info)
+    if m.predict:
+      m.snapshot_pass(sound_info)
+      m.measure_latency()
+      m.fifo_target = max((if m.lat_count >= 4: int(m.lat_avg) else: m.hw_latency()), MP2K_FIFO_GUARD)
+      m.apply_pending(sound_info)
+      m.resync_pending = false
+      done = true
+    else:
+      # falsified just now: late mode from this hook on
+      m.pend_valid = false
+  if not done:
+    if m.pend_valid:
+      m.fifo_target = MP2K_FIFO_GUARD
+      m.apply_pending(sound_info)
+      m.resync_pending = false   # one full re-latch pass done; back to normal keying
+    else:
+      for i in 0 ..< MP2K_MAX_CHANNELS: m.samplers[i].active = false
+    m.snapshot_pass(sound_info)
   # --- Foreign FIFO feeder detection -------------------------------------------
   # Some games ship m4a for SFX but stream their MUSIC around the engine's
   # channel structs (Batman Vengeance: the streamer fills pcmBuffer
@@ -1061,8 +1273,7 @@ proc render_frame(m: Mp2kHle) =
   ## however early or late the game's V-blank handler called the mixer: that
   ## jitter (±20 samples on Emerald, more on others) lands in the FIFO level
   ## — as it lands in the hardware's DMA latency — instead of in the voices'
-  ## phase. A slow proportional trim on the level absorbs the residual
-  ## pcmFreq-vs-frame-rate drift (about a sample a second).
+  ## phase.
   var level = m.fifo_w - m.fifo_r
   if level < 0: level = 0
   let cap = m.fifo.len div 2
@@ -1086,16 +1297,51 @@ proc render_frame(m: Mp2kHle) =
     # up to a FIFO-full of frames ago.
     m.fifo_r = m.fifo_w - m.fifo_target
     level = m.fifo_target
+  # Level control. The frame length is never trimmed: it is what advances
+  # every cursor by exactly the driver's spv source-rate samples, and the
+  # V-blank jitter is zero-mean, so shortening frames whenever the level
+  # runs high (and never lengthening them, an underrun merely holds) would
+  # walk the cursors behind the engine one sample per late hook. Instead a
+  # slow average of the level error drives one dropped or duplicated
+  # OUTPUT sample per frame — a 30 µs slide, only when the offset persists
+  # (the pcmFreq-vs-frame-rate drift is about a sample a second).
+  m.fifo_err_avg += (float32(level - m.fifo_target) - m.fifo_err_avg) * (1.0'f32 / 32.0'f32)
+  # A target that moved by more than a frame's jitter (the measured latency
+  # replacing the phase estimate, or a vintage that re-times its DMA) is
+  # taken up in one step; the slow single-sample trim handles the rest.
+  let step_err = level - m.fifo_target
+  if step_err > 96 and level > step_err:
+    m.fifo_r += step_err
+    level -= step_err
+    m.fifo_err_avg = 0
+  elif step_err < -96 and level > 0 and level - step_err < cap - 2:
+    let li = ((m.fifo_w - 1) mod cap) * 2
+    for i in 0 ..< -step_err:
+      let wi = (m.fifo_w mod cap) * 2
+      m.fifo[wi] = m.fifo[li]
+      m.fifo[wi + 1] = m.fifo[li + 1]
+      inc m.fifo_w
+    level -= step_err
+    m.fifo_err_avg = 0
+  elif m.fifo_err_avg > 24.0'f32 and level > 1:
+    inc m.fifo_r
+    dec level
+    m.fifo_err_avg -= 1
+  elif m.fifo_err_avg < -24.0'f32 and level > 0 and level < cap - 2:
+    # duplicate the newest sample
+    let li = ((m.fifo_w - 1) mod cap) * 2
+    let wi = (m.fifo_w mod cap) * 2
+    m.fifo[wi] = m.fifo[li]
+    m.fifo[wi + 1] = m.fifo[li + 1]
+    inc m.fifo_w
+    inc level
+    m.fifo_err_avg += 1
   when defined(mp2kwav):
     # capture index at which this frame's first sample will be emitted
     dbgHookCapIdx.add mp2kWavCapture.len div 2 + level
   m.fifo_acc += nominal
   var n = int(m.fifo_acc)
   m.fifo_acc -= float32(n)
-  let err = level - m.fifo_target
-  if err > 8: n -= min(err div 8, 4)
-  elif err < -8: n += min((-err) div 8, 4)
-  if n < 0: n = 0
   if n > cap - level - 1: n = cap - level - 1
   for i in 0 ..< n:
     let (a, b) = m.render_one()
@@ -1115,6 +1361,7 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
   ## handler, or a pass that never came — the driver's DMA replays its
   ## stale ring slot then) holds the last sample.
   if not m.engaged: return (0'i16, 0'i16)
+  inc m.apu_clock
   var fa = m.fifo_last_a
   var fb = m.fifo_last_b
   if m.fifo_w > m.fifo_r and m.fifo.len > 0:
@@ -1135,3 +1382,4 @@ proc init_mp2k*(m: Mp2kHle) =
   ## ("Runtime detection").
   m.use_cubic = true   # cubic (Catmull-Rom, per Paul Bourke) resampling by default
   m.fifo = newSeq[int16](MP2K_FIFO_CAP * 2)
+  m.predict = getEnv("DINGBAT_MP2K_LATE") != "1"

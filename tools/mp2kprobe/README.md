@@ -182,7 +182,19 @@ fields, and the HLE's render. `DINGBAT_PROBE_ZOH=1` makes the real FIFO stream
 a verbatim replay of that buffer, which is how the pipeline was validated
 (correlation 0.985, amplitude exactly 2.0 on Emerald).
 
-## What the driver does (2026-09-13, Emerald's driver; P1/P3/P6 replayed on Minish Cap's agree)
+## Vintages probed
+
+P1/P2/P3/P6 (and P11 on Emerald) were played through the drivers shipped in
+Pokémon Emerald, Pokémon FireRed, Advance Wars, Breath of Fire, Mother 3 (its
+modified, VSyncOff driver, driven through the health screen) and The Minish
+Cap (mono, 15768 Hz), plus Estopolis Densetsu, Shin Megami Tensei II, Ochaken
+no Heya and Beast Shooter: every one reproduces the laws below to the byte.
+Kirby: Nightmare in Dream Land starts the injected song on two players at
+once, and Castlevania: Circle of the Moon (42 kHz, two-slot ring) keeps its
+buffer where the harness does not yet look, so those two are unconfirmed by
+the probes; the library sweep rates both as matching.
+
+## What the driver does (2026-09-13, Emerald's driver; the vintages above agree)
 
 | Behaviour | Measured |
 |---|---|
@@ -196,3 +208,32 @@ a verbatim replay of that buffer, which is how the pipeline was validated
 | Reverb | before a pass mixes, the slot it overwrites is seeded with (A+B of that slot + A+B of the next slot) × reverb/512: two taps at P−1 and P frames; an impulse of 50 with reverb 64, period 7 echoes 12, 12 then 3, 6, 3 |
 | Stereo halves | the first pcmBuffer half (DMA1 → FIFO A) carries the right-volume mix, the second the left; Emerald routes A right / B left (and plays mono by default) |
 | Latency | the real FIFO stream lags the pass by 553 APU samples on Emerald (one V-blank + 4), 228 on Minish Cap, set by where the DMA is in the ring at the pass |
+
+## What the HLE deliberately does differently
+
+The probes also show where the HLE's render is not the driver's, by design:
+
+* **Reconstruction.** The HLE interpolates (cubic) at 32768 Hz; the driver
+  emits one byte per source-rate sample and the hardware holds it. Sampled at
+  the driver's own instants the HLE's frames match it (Emerald: per-frame
+  correlation median 0.991, 96 % of frames above 0.95; energy 0.99–1.00 of
+  the driver's with DC removed).
+* **No truncation DC.** The driver floors each channel's product, which parks
+  its output at about −0.5 per active voice (−11 on a ten-voice mix). The HLE
+  has no such offset, so raw-RMS comparisons read it as quieter; the sweep's
+  loudness ratio is therefore DC-free.
+* **No wrap.** Past ±127 the driver's byte wraps; the HLE clamps.
+* **Kernel droop and aliasing.** Voices played at more than about two source
+  samples per output sample are dulled by the driver's linear interpolation
+  and folded by its unfiltered decimation; the HLE keeps more of their
+  treble (Breath of Fire's strings come out ~1.2× louder than the driver's,
+  ~1.14× below 4 kHz). This is the audible "improvement" and also the largest
+  remaining deviation from hardware.
+* **Latency.** The HLE predicts each pass's envelope from the P3 rules
+  (checked against the real bytes one hook later: zero misses on every title
+  above, including Beast Shooter's pseudo-echo tails), renders the frame at
+  the pass, and holds it until the sound DMA reaches that slot, a latency it
+  measures per title from the DMA cursor. Against the real stream: Emerald
+  −5 samples, Minish Cap −4, Beast Shooter +3, Breath of Fire −6, Estopolis
+  +36; by the P2 impulse itself, played through each driver: Emerald +8,
+  Ochaken +2, Minish Cap +5, Beast Shooter +34 samples.

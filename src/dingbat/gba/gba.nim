@@ -584,6 +584,8 @@ type
   Mp2kChanSnap* = object
     status*, ctype*: uint8
     wave*, freq*, ct*: uint32
+    pr*, pl*: uint8         # per-side volumes predicted for this pass (mp2k.nim predict_envelope)
+    pvalid*: bool           # a prediction was made (checked one hook later)
 
   Mp2kSampler* = object
     active*:      bool
@@ -652,10 +654,27 @@ type
     pend_cnt*:       int
     pend_maxc*:      int
     pend_mono*:      int
+    pend_dma_src*:   uint32         # sound DMA replay cursor at the hook (mp2k.nim hw_latency)
+    # Predictive mode (mp2k.nim predict_envelope): a pass's frame is rendered
+    # at its own hook from the envelope the pass is about to compute, and
+    # placed at the hardware's latency; falsified by the real bytes one hook
+    # later, the HLE drops back to rendering one hook late.
+    predict*:        bool
+    pred_ok*, pred_bad*: int
+    # Measured pass-to-DMA latency (mp2k.nim measure_latency): each pass's
+    # slot start is watched until the sound DMA's cursor crosses it.
+    apu_clock*:      int            # render_sample calls since init (APU samples)
+    lat_slot*:       array[4, uint32]   # slot start addresses awaiting their crossing
+    lat_at*:         array[4, int]      # apu_clock at each one's hook
+    lat_n*:          int
+    lat_prev_src*:   uint32         # DMA cursor at the previous hook
+    lat_avg*:        float32        # EMA of the measured latency, APU samples (0 = none yet)
+    lat_count*:      int
     # Rendered-frame output FIFO (mp2k.nim render_frame / render_sample)
     fifo*:           seq[int16]     # stereo ring, MP2K_FIFO_CAP frames
     fifo_r*, fifo_w*: int           # read / write cursors (frames)
     fifo_acc*:       float32        # fractional frame-length carry
+    fifo_err_avg*:   float32        # slow average of level - target (render_frame)
     fifo_last_a*, fifo_last_b*: int16  # held across an underrun
     fifo_target*:    int            # level aimed for when a frame is pushed (the guard)
     fifo_primed*:    bool           # target-level silence pre-fill done

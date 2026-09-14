@@ -22,23 +22,26 @@ restructuring it on the probe-ROM facts (tools/mp2kprobe/README.md), 2354 titles
 | crashes / timeouts | 0 / 0 | 0 / 0 |
 | m4a present / engaged | 1033 / 1014 | 1033 / 1014 |
 | music-playing engaged | 780 | 780 |
-| within ±20 % loudness | 773 (99.1 %) | 776 (99.5 %) |
-| median loudness ratio | 0.995 | 0.982 |
+| within ±20 % loudness | 773 (99.1 %) | 779 (99.9 %) |
+| median loudness ratio | 0.995 | 1.004 |
 | median envelope correlation (100 ms RMS) | 0.993 | 0.998 |
 
-No title moved out of the ±20 % band; Van Helsing (0.70 → 0.97), Wings (1.33 → 1.04) and
-Kawaii Koinu (0.77 → 0.81) moved in. The loudness median dropped a little because the exact
-2 × side/256 gain replaced a fitted 2.025 makeup and killed channels no longer sound for a
-frame. Breath of Fire (1.46), Beast Shooter (0.74), SMT II (0.78), Ochaken (0.79) and
-Estopolis (0.79) still sit outside the band, unexplained.
+No title moved out of the ±20 % band; Van Helsing (0.70 → 0.97), Wings (1.33 → 0.99),
+Kawaii Koinu (0.77 → 1.01), Breath of Fire (1.46 → 1.07), Beast Shooter (0.74 → 0.83) and
+Ochaken (0.79 → 0.85) moved in. SMT II (0.78) remains: its FIFO carries ~12 % of audio the
+game injects outside the driver. The loudness ratio is now DC-free (the driver's per-channel
+floor truncation parks its stream at about −0.5 per active voice, which a raw RMS counted
+against the HLE); against the driver's own buffer every probed title's energy is within
+0.96–1.00 with DC removed.
 
 The sweep's note-on census (start_honoured / start_ignored): 58,702 note-ons carried a
 non-zero count and the engine started at sample 0 in every clear case (48 scattered
 "honoured" hits across 9 titles, against hundreds of ignored ones in each), so the HLE no
-longer reads that field as a start offset. Its lag estimate puts the HLE within ±64 APU
-samples of the real stream for 70 % of music titles (median 0); the tails (Castlevania
-+736, Monster Force +1424, a few negative) are where the driver's DMA phase differs from
-Emerald's and are not yet modelled.
+longer reads that field as a start offset. With each pass's envelope predicted at the hook
+and the frame held until the sound DMA reaches its slot (measured per title), the lag
+estimate (RMS-envelope cross-correlation, 64-sample resolution) puts the HLE within ±64 APU
+samples of the real stream for 97 % of music titles (median 0); 20 titles sit beyond ±300,
+Castlevania: Circle of the Moon (42 kHz, two-slot ring, +640) the largest.
 
 The RMS ratio cannot see waveform errors. Against the driver's own pcmBuffer (tests/
 mp2k_probe.nim, Emerald title screen, per-frame correlation at the driver's sample
