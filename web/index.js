@@ -9563,7 +9563,14 @@ const flyBrand = (up) => {
 };
 
 barBrand.addEventListener("click", () => {
-  if (document.body.classList.contains("has-game")) return;
+  // `running`, not `has-game`: a game merely PAUSED is a game sitting on the
+  // home screen, and the library behind its card scrolls like any other. The
+  // has-game test was reading "the brand is parked in the bar" - true the
+  // whole time a game is loaded - as "there is nothing to scroll", and took
+  // the button out of service in the one state people are most often in
+  // when they use it. Only a game on the stage has no home to scroll:
+  // body.running is what puts #home at display:none.
+  if (document.body.classList.contains("running")) return;
   let smooth = !matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (homeScroller.scrollTo) {
     homeScroller.scrollTo({ top: 0, behavior: smooth ? "smooth" : "auto" });

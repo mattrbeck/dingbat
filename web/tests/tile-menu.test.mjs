@@ -690,6 +690,33 @@ const givenBoxes = (app) => {
 const flightOn = (app, id) =>
   app.document.getElementById(id).getAnimations();
 
+// The bar's brand is a "back to the top" button, and the state people are in
+// when they reach for it is a game paused on the home screen with the library
+// scrolled down behind its card. That state is `has-game`, which the handler
+// used to refuse outright - it was reading "the brand is parked in the bar"
+// as "there is nothing to scroll". Only a game actually on the stage has no
+// home to scroll.
+test("the bar's brand scrolls home to the top, paused game or not", async () => {
+  const app = await loadApp();
+  const home = app.document.getElementById("home");
+  const barBrand = app.document.getElementById("bar-brand");
+
+  home.scrollTop = 600;
+  await barBrand.click();
+  assert.equal(home.scrollTop, 0, "no game: scrolls");
+
+  home.scrollTop = 600;
+  app.document.body.classList.add("has-game", "paused");
+  await barBrand.click();
+  assert.equal(home.scrollTop, 0, "paused on the home screen: still scrolls");
+
+  home.scrollTop = 600;
+  app.document.body.classList.add("running");
+  await barBrand.click();
+  assert.equal(home.scrollTop, 600,
+               "on the stage there is no home to scroll, so it stays put");
+});
+
 test("nothing the flight makes outlives it: every animation fills backwards",
      async () => {
   const app = await loadApp();
