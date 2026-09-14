@@ -154,9 +154,6 @@ const
   CH_STOP  = 0x40'u8
   CH_IEC   = 0x04'u8
   CH_ENV   = 0x03'u8
-  # Predictive mode gives up when more than this share of its checked
-  # predictions miss (a vintage with an envelope rule P3 did not pin)
-  MP2K_PRED_MIN_CHECKS = 64
   CH_ON    = 0xC7'u8   # SOUND_CHANNEL_SF_ON = START|STOP|IEC|ENV — "producing sound"
 
   # m4a compressed-waveform (BDPCM) 4-bit differential LUT: 16 signed deltas
@@ -191,11 +188,11 @@ const
   MP2K_FIFO_CAP   = 4096
   MP2K_FIFO_GUARD = 16
   # From the DMA cursor reaching a slot to that slot's first sample at the
-  # DAC, in APU samples: the 32-byte FIFO filled 16 bytes at a time, and the
-  # emulator's own FIFO reconstruction. Measured against the real stream on
-  # Emerald, Minish Cap, Beast Shooter and Estopolis: about 2.1 ms whatever
-  # the engine rate.
-  MP2K_FIFO_PIPELINE = 68.0'f32
+  # DAC, in FIFO (source-rate) samples: the 32-byte FIFO filled 16 bytes at
+  # a time, and the emulator's own FIFO reconstruction. Measured against the
+  # real stream on Emerald, Minish Cap, Beast Shooter and Estopolis (13–18
+  # kHz: about 2.1 ms) and Castlevania (42 kHz: a third of that).
+  MP2K_FIFO_PIPELINE = 28.0'f32
 
 # Mp2kSampler / Mp2kHle are declared in gba.nim (the GBA object references them).
 
@@ -306,11 +303,6 @@ proc decode_at(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte];
   else:
     float32(cast[int8](m.wave_u8(s, rom, rmask, pos)))
 
-proc decode_src(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte];
-                rmask: uint32): float32 {.inline.} =
-  ## Decode the source sample at the sampler's current play position.
-  m.decode_at(s, rom, rmask, s.src_index)
-
 proc mp2k_state_loaded*(m: Mp2kHle) =
   ## Save-state / rollback load hook. Shadow state is not serialized, so
   ## everything timeline-derived (sampler positions, history taps, the delay
@@ -328,6 +320,9 @@ proc mp2k_state_loaded*(m: Mp2kHle) =
   m.fifo_acc = 0
   m.fifo_err_avg = 0
   m.lat_n = 0
+  m.cnt_max = 0
+  m.ring_copy_valid = false
+  m.ring_prev_slot = -1
   m.fifo_last_a = 0
   m.fifo_last_b = 0
   m.fifo_primed = false
@@ -369,16 +364,33 @@ proc mp2k_state_loaded*(m: Mp2kHle) =
 #     copied to RAM at init and jumped to from SoundMain while the lock is
 #     held, with the SoundInfo pointer in r0 (the ABI argument register;
 #     observed on several m4a vintages by this project's harnesses).
-#   * So: once the frame poll sees the ident magic, watch execution until an
-#     instruction is fetched from RAM (0x02/0x03 region) with r0 == &SoundInfo
-#     while ident == ID_NUMBER+1. The first such PC is the mixer entry; hook
-#     it every frame from then on.
-#   * Self-validating: the real entry can ONLY execute with the lock held, so
-#     a learned PC that fires without it (nested-IRQ dispatcher in IWRAM,
-#     engine torn down and the buffer reused...) is blocklisted and re-learnt.
+#   * So: once the frame poll sees the ident magic, watch execution for
+#     instructions fetched from RAM (0x02/0x03 region) with r0 == &SoundInfo
+#     while ident == ID_NUMBER+1. Every such instruction that is the target
+#     of a call (looks_called: a Thumb or ARM BL aimed at it, a BL to a
+#     `bx rN` stub — how a compiled SoundMain reaches a function pointer —
+#     or `mov lr, pc; bx rN`, the two register forms keyed by a fresh return
+#     address) is a candidate. Eight passes are tallied (a pass ends when
+#     the poll sees the lock released, or when an entry is sighted again);
+#     the candidates that fired in every pass are ranked in pass order and
+#     the first is hooked: SoundMainRAM alone on the stock builds (Emerald,
+#     Minish Cap, ...), SoundMain itself on the builds that keep it in RAM.
+#   * That second class (EZ-Talk, Super Dodgeball, Battle Network,
+#     Castlevania, Advance GTA) runs its sequencer AFTER the hook, so its
+#     note-ons reach the snapshot a pass late. check_predictions sees that
+#     two ways — an envelope that does not match one hook later, or a
+#     channel first seen ON without START (the mixer clears START; a hook
+#     after the sequencer always sees it) — and moves the hook to the next
+#     candidate of the pass, the mixer proper. A move that predicts no
+#     better returns to the entry.
+#   * Self-validating: the real entry can ONLY execute with the lock held, and
+#     once per pass, so a learned PC that fires without it (nested-IRQ
+#     dispatcher in IWRAM, engine torn down and the buffer reused...) or many
+#     times a frame (a per-channel helper inside the mixer) is blocklisted
+#     and re-learnt.
 # Hot-path cost: once learned, one PC compare per instruction; while probing
-# (engine init to first mixer pass, typically <2 frames) each RAM-fetched
-# instruction adds one register compare. With the HLE off nothing runs.
+# (engine init to the eighth mixer pass) each RAM-fetched instruction adds
+# one register compare. With the HLE off nothing runs.
 # =============================================================================
 
 proc unlearn_hook*(m: Mp2kHle) =
@@ -393,6 +405,15 @@ proc unlearn_hook*(m: Mp2kHle) =
   m.engaged = false
   m.pend_valid = false
   m.fifo_primed = false
+  m.cand_n = 0
+  m.cand_pick_n = 0
+  m.cand_idx = 0
+  m.probe_passes = 0
+  m.pred_ok = 0
+  m.pred_bad = 0
+  m.seq_late = 0
+  m.seq_locked = false
+  m.predict = getEnv("DINGBAT_MP2K_LATE") != "1"
   for i in 0 ..< MP2K_MAX_CHANNELS: m.samplers[i].active = false
 
 proc fifo_topology(m: Mp2kHle): int =
@@ -440,6 +461,20 @@ proc snapshot_pass(m: Mp2kHle; sound_info: uint32) =
   m.pend_period = int(m.rd8(sound_info + SI_DMA_PERIOD))
   m.pend_spv    = int(m.rd16(sound_info + SI_SPV))
   m.pend_cnt    = int(m.rd8(sound_info + SI_DMA_COUNTER))
+  # The ring's real length is what pcmDmaCounter cycles through, learnt per
+  # configuration: a rate change (Castlevania's intro runs nine 176-byte
+  # slots at 10.5 kHz, then two 704-byte slots at 42 kHz in the same half)
+  # starts the count over, or the old ring's slots would misplace the new.
+  if m.pend_rate != m.cnt_rate or m.pend_spv != m.cnt_spv:
+    m.cnt_rate = m.pend_rate
+    m.cnt_spv = m.pend_spv
+    m.cnt_max = 0
+    m.slot_locked = false
+    m.slot_off = 0
+    m.slot_votes = 0
+    m.ring_copy_valid = false
+  if m.pend_cnt > m.cnt_max and m.pend_cnt <= 16: m.cnt_max = m.pend_cnt
+  if m.cnt_max > m.pend_period: m.pend_period = m.cnt_max
   m.pend_mono = m.fifo_topology()
   m.pend_dma_src = m.gba.dma.src[1]
   m.pend_valid = true
@@ -466,8 +501,10 @@ proc snapshot_pass(m: Mp2kHle; sound_info: uint32) =
       if (p.status and CH_START) != 0:
         ev = min(atk, 255)
       elif (p.status and CH_IEC) != 0:
+        # holding at the echo volume; the pass that finds the length at 0
+        # drops the channel (rig scenario iec: length 8 holds 8 passes)
         ev = int(m.rd8(base + SC_ECHO_VOL))
-        if int(m.rd8(base + SC_ECHO_LEN)) <= 1: ev = 0
+        if int(m.rd8(base + SC_ECHO_LEN)) == 0: ev = 0
       elif (p.status and CH_STOP) != 0:
         ev = (ev * rel) shr 8
         let echo = int(m.rd8(base + SC_ECHO_VOL))
@@ -680,7 +717,12 @@ proc apply_pending(m: Mp2kHle; sound_info: uint32) =
             dbgRetrigLog.inc
         let diff = (if engine_pos > our_pos: engine_pos - our_pos
                     else: our_pos - engine_pos)
-        if diff > 1024'u32:
+        # Snap on a divergence of at least half a pass (a note latched a
+        # pass late while the hook still sat before the sequencer stays a
+        # pass behind for its whole life otherwise: Castlevania's streamed
+        # track); resampler jitter is a sample or two.
+        let adv = uint32(float32(m.pend_spv) * float32(p.freq) / float32(max(m.pcm_sample_rate, 1)))
+        if diff > max(adv div 2, 32'u32):
           if s.reversed:
             s.src_index = (if engine_pos >= s.start_off:
                              engine_pos - s.start_off else: 0'u32)
@@ -718,34 +760,6 @@ proc apply_pending(m: Mp2kHle; sound_info: uint32) =
     s.vol_r = vr
   m.render_frame()
 
-proc hw_latency(m: Mp2kHle): int =
-  ## The hardware's pass-to-DAC latency in APU samples, from where the sound
-  ## DMA's replay cursor sits in the pcmBuffer ring at the hook: the samples
-  ## it still has to replay before it reaches the slot this pass fills, plus
-  ## the FIFO pipeline (the DMA moves 16 bytes at a time into a 32-byte
-  ## FIFO). Measured against the real stream: Emerald 553 = 208 + 18 source
-  ## samples, Minish Cap 228 = 88 + 22. 0 = unknown (no FIFO DMA yet).
-  let spv = m.pend_spv
-  let period = m.pend_period
-  if spv <= 0 or period <= 0 or m.pcm_sample_rate <= 0: return 0
-  var c = -1
-  for k in 1 .. 2:
-    if m.gba.dma.dmacnt_h[k].enable and m.gba.dma.dmacnt_h[k].start_timing == 3 and
-       (m.gba.dma.dmadad[k] == 0x040000A0'u32 or m.gba.dma.dmadad[k] == 0x040000A4'u32):
-      c = k
-      break
-  if c < 0: return 0
-  let base = m.gba.dma.dmasad[c]
-  let src = (if c == 1: m.pend_dma_src else: m.gba.dma.src[c])
-  if src < base: return 0
-  let ring = period * spv
-  let off = int(src - base)
-  if off >= ring: return 0
-  let cnt = m.pend_cnt
-  let slot = (if cnt <= 1: 0 else: period - (cnt - 1))
-  let ahead = ((slot * spv - off) mod ring + ring) mod ring
-  int(float32(ahead) * float32(APU_SAMPLE_RATE) / float32(m.pcm_sample_rate) + MP2K_FIFO_PIPELINE)
-
 proc fifo_dma(m: Mp2kHle): int =
   ## The sound DMA channel feeding a FIFO (1 or 2), or -1.
   for k in 1 .. 2:
@@ -753,6 +767,100 @@ proc fifo_dma(m: Mp2kHle): int =
        (m.gba.dma.dmadad[k] == 0x040000A0'u32 or m.gba.dma.dmadad[k] == 0x040000A4'u32):
       return k
   -1
+
+proc ring_slot_bytes(m: Mp2kHle): int =
+  ## Bytes per V-blank slot of the sound DMA's ring. Normally
+  ## pcmSamplesPerVBlank; Castlevania's driver mixes 704 samples a frame at
+  ## 42 kHz but feeds the FIFO from nine 176-byte slots (a 4:1 downsample),
+  ## so when period*spv does not fit the half (the two DMA sources' spacing)
+  ## the slot is the half split by the period.
+  let spv = m.pend_spv
+  let period = m.pend_period
+  if spv <= 0 or period <= 0: return 0
+  if m.gba.dma.dmacnt_h[1].enable and m.gba.dma.dmacnt_h[2].enable and
+     m.gba.dma.dmacnt_h[1].start_timing == 3 and m.gba.dma.dmacnt_h[2].start_timing == 3:
+    let a = m.gba.dma.dmasad[1]
+    let b = m.gba.dma.dmasad[2]
+    if b > a and b - a <= 8192'u32 and int(b - a) < spv * period:
+      return int(b - a) div period
+  spv
+
+proc dma_rate(m: Mp2kHle; slot_bytes: int): float32 =
+  ## Samples per second the DMA replays: one slot per V-blank.
+  float32(slot_bytes) * float32(APU_SAMPLE_RATE) / 548.625'f32
+
+proc pipeline_apu(m: Mp2kHle; sb: int): float32 =
+  ## The FIFO pipeline in APU samples for this ring's rate. -d:mp2kwav builds
+  ## take DINGBAT_MP2K_PIPE_APU=<n> as a fixed figure for A/B sweeps.
+  when defined(mp2kwav):
+    let fixed = getEnv("DINGBAT_MP2K_PIPE_APU")
+    if fixed.len > 0: return float32(parseInt(fixed))
+  MP2K_FIFO_PIPELINE * float32(APU_SAMPLE_RATE) / m.dma_rate(sb)
+
+proc hw_latency(m: Mp2kHle): int =
+  ## The hardware's pass-to-DAC latency in APU samples, from where the sound
+  ## DMA's replay cursor sits in the pcmBuffer ring at the hook: the samples
+  ## it still has to replay before it reaches the slot this pass fills, plus
+  ## the FIFO pipeline (the DMA moves 16 bytes at a time into a 32-byte
+  ## FIFO). Measured against the real stream: Emerald 553 = 208 + 18 source
+  ## samples, Minish Cap 228 = 88 + 22. 0 = unknown (no FIFO DMA yet).
+  let period = m.pend_period
+  let sb = m.ring_slot_bytes()
+  if sb <= 0 or period <= 0: return 0
+  let c = m.fifo_dma()
+  if c < 0: return 0
+  let base = m.gba.dma.dmasad[c]
+  let src = (if c == 1: m.pend_dma_src else: m.gba.dma.src[c])
+  if src < base: return 0
+  let ring = period * sb
+  let off = int(src - base)
+  if off >= ring: return 0
+  let cnt = m.pend_cnt
+  let slot = ((if cnt <= 1: 0 else: period - (cnt - 1)) + m.slot_off) mod period
+  let ahead = ((slot * sb - off) mod ring + ring) mod ring
+  int(float32(ahead) * float32(APU_SAMPLE_RATE) / m.dma_rate(sb) + m.pipeline_apu(sb))
+
+proc learn_slot_offset(m: Mp2kHle) =
+  ## Which ring slot the pass writes, against the counter formula. The DMA
+  ## half is snapshotted at every hook and diffed at the next: exactly one
+  ## slot changing names the previous pass's slot. Castlevania's driver
+  ## writes two slots ahead of the formula (its 42 kHz mix is downsampled
+  ## into the ring later); Emerald, Minish Cap, Ochaken write the formula's
+  ## slot. Eight agreeing votes lock the offset.
+  if m.slot_locked: return
+  let sb = m.ring_slot_bytes()
+  let period = m.pend_period
+  if sb <= 0 or period <= 0 or sb * period > m.ring_copy.len: return
+  let c = m.fifo_dma()
+  if c < 0: return
+  let base = m.gba.dma.dmasad[c]
+  let n = sb * period
+  if m.ring_copy_valid:
+    var changed = -1
+    var nchanged = 0
+    for s in 0 ..< period:
+      var diff = false
+      for i in s * sb ..< (s + 1) * sb:
+        if m.gba.bus.read_byte_internal(base + uint32(i)) != m.ring_copy[i]:
+          diff = true
+          break
+      if diff:
+        inc nchanged
+        changed = s
+    if nchanged == 1 and m.ring_prev_slot >= 0:
+      let off = (changed - m.ring_prev_slot + period) mod period
+      if off == m.slot_off_vote:
+        inc m.slot_votes
+        if m.slot_votes >= 8:
+          m.slot_off = off
+          m.slot_locked = true
+      else:
+        m.slot_off_vote = off
+        m.slot_votes = 1
+  for i in 0 ..< n: m.ring_copy[i] = m.gba.bus.read_byte_internal(base + uint32(i))
+  m.ring_copy_valid = true
+  let cnt = m.pend_cnt
+  m.ring_prev_slot = (if cnt <= 1: 0 else: period - (cnt - 1))
 
 proc measure_latency(m: Mp2kHle) =
   ## Called at every hook after snapshot_pass. Remembers the start address
@@ -764,9 +872,10 @@ proc measure_latency(m: Mp2kHle) =
   ## V-blank). Averaged; hw_latency's phase estimate seeds the FIFO target
   ## until enough crossings are in.
   let c = m.fifo_dma()
-  if c < 0 or m.pend_spv <= 0 or m.pend_period <= 0 or m.pcm_sample_rate <= 0: return
+  let sb = m.ring_slot_bytes()
+  if c < 0 or sb <= 0: return
   let base = m.gba.dma.dmasad[c]
-  let ring = uint32(m.pend_period * m.pend_spv)
+  let ring = uint32(m.pend_period * sb)
   let cur = m.gba.dma.src[c]
   if cur < base or cur - base >= ring: return
   let curoff = cur - base
@@ -781,8 +890,8 @@ proc measure_latency(m: Mp2kHle) =
     let dist = (curoff + ring - start) mod ring      # cursor past the start by this much
     let waited = m.apu_clock - m.lat_at[i]
     if moved > 0'u32 and dist < moved:
-      let lat = float32(waited) - float32(dist) * float32(APU_SAMPLE_RATE) / float32(m.pcm_sample_rate) +
-                MP2K_FIFO_PIPELINE
+      let lat = float32(waited) - float32(dist) * float32(APU_SAMPLE_RATE) / m.dma_rate(sb) +
+                m.pipeline_apu(sb)
       if lat > 0:
         if m.lat_count == 0: m.lat_avg = lat
         else: m.lat_avg += (lat - m.lat_avg) * 0.125'f32
@@ -801,26 +910,36 @@ proc measure_latency(m: Mp2kHle) =
       inc i
   # remember this pass's slot
   let cnt = m.pend_cnt
-  let slot = (if cnt <= 1: 0 else: m.pend_period - (cnt - 1))
+  let slot = ((if cnt <= 1: 0 else: m.pend_period - (cnt - 1)) + m.slot_off) mod m.pend_period
   if m.lat_n < m.lat_slot.len:
-    m.lat_slot[m.lat_n] = uint32(slot * m.pend_spv)
+    m.lat_slot[m.lat_n] = uint32(slot * sb)
     m.lat_at[m.lat_n] = m.apu_clock
     inc m.lat_n
 
 proc check_predictions(m: Mp2kHle; sound_info: uint32) =
   ## One hook after a predicted pass its per-side bytes are readable:
   ## count hits and misses (channels the pass dropped cannot be checked),
-  ## and abandon prediction for this session once misses exceed 2 % of at
-  ## least MP2K_PRED_MIN_CHECKS checks.
+  ## and abandon prediction for this session once at least eight misses
+  ## make up more than 5 % of the checks (a vintage whose sequencer runs
+  ## after the hook, like EZ-Talk's, misses on every note-on and note-off;
+  ## a game that pokes a channel struct itself misses once).
   for i in 0 ..< m.pend_maxc:
     let p = addr m.pend[i]
-    if not p.pvalid: continue
     let base = sound_info + uint32(SI_CHANNELS + i * SC_SIZE)
     let st = m.rd8(base + SC_STATUS)
-    # Off (dropped by the pass) or re-triggered by the next sequencer run:
-    # the bytes are stale, nothing to check
-    if (st and CH_ON) == 0 or (st and CH_START) != 0: continue
-    if p.pr == 0 and (m.pend_mono != 0 or p.pl == 0): continue
+    # A note is first seen at a hook with START set: the sequencer raised it
+    # and the mixer, which clears START as it initialises the channel, has
+    # not run yet. A channel that was off at the last hook and is now ON
+    # without START was started by a sequencer that ran AFTER that hook — the
+    # hook sits before the pass's sequencer (SoundMain in RAM: EZ-Talk,
+    # Castlevania), and every note-on reaches the render a frame late.
+    # Three sightings move the hook to the pass's next call target.
+    if (p.status and CH_ON) == 0 and (st and CH_ON) != 0 and (st and CH_START) == 0:
+      inc m.seq_late
+    if not p.pvalid: continue
+    # Re-triggered by the next sequencer run, or dropped by the pass (a
+    # kill, or the sample running out): the bytes are stale, nothing to check
+    if (st and CH_START) != 0 or (st and CH_ON) == 0: continue
     let r = int(m.rd8(base + SC_ENV_VR))
     let l = int(m.rd8(base + SC_ENV_VL))
     if abs(r - int(p.pr)) <= 1 and (m.pend_mono != 0 or abs(l - int(p.pl)) <= 1):
@@ -837,9 +956,38 @@ proc check_predictions(m: Mp2kHle; sound_info: uint32) =
             " rV", int(m.rd8(base + SC_VOL_R)), " lV", int(m.rd8(base + SC_VOL_L)),
             " +C..F ", int(m.rd8(base + 0x0C)), "/", int(m.rd8(base + 0x0D)), "/", int(m.rd8(base + 0x0E)), "/", int(m.rd8(base + 0x0F)),
             " +10..13 ", int(m.rd8(base + 0x10)), "/", int(m.rd8(base + 0x11)), "/", int(m.rd8(base + 0x12)), "/", int(m.rd8(base + 0x13))
-  if m.pred_ok + m.pred_bad >= MP2K_PRED_MIN_CHECKS and
-     m.pred_bad * 50 > m.pred_ok + m.pred_bad:
-    m.predict = false
+  let failed = m.pred_bad >= 8 and m.pred_bad * 20 > m.pred_ok + m.pred_bad
+  let late = m.seq_late >= 2 and not m.seq_locked
+  if (failed or late) and m.cand_idx + 1 < m.cand_pick_n:
+    # The hook sits before this pass's sequencer (SoundMain in RAM: EZ-Talk
+    # misses its note-ons and note-offs in the envelope check, Castlevania's
+    # streamed track only in the START check): move to the next call target
+    # of the pass and try again.
+    inc m.cand_idx
+    m.hook_addr  = m.cand[m.cand_pick[m.cand_idx]]
+    m.entry_addr = m.hook_addr and not 1'u32
+    m.pred_ok = 0
+    m.pred_bad = 0
+    m.seq_late = 0
+    m.pend_valid = false
+    m.resync_pending = true      # re-latch every channel from the new vantage
+    m.gba.refresh_hle_hook()
+  elif failed:
+    if m.cand_idx > 0:
+      # A later candidate did not predict either. Back to the entry, still
+      # predicting: the START sightings that moved us were the game's own
+      # (a channel it starts outside the sequencer), so they no longer count.
+      m.cand_idx = 0
+      m.hook_addr  = m.cand[m.cand_pick[0]]
+      m.entry_addr = m.hook_addr and not 1'u32
+      m.pred_ok = 0
+      m.pred_bad = 0
+      m.seq_late = 0
+      m.seq_locked = true
+      m.pend_valid = false
+      m.gba.refresh_hle_hook()
+    else:
+      m.predict = false
 
 proc on_frame(m: Mp2kHle; sound_info: uint32) =
   ## Called once per mixer pass (at the learned hook, before the real mixer
@@ -855,6 +1003,7 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
     if m.pend_valid: m.check_predictions(sound_info)
     if m.predict:
       m.snapshot_pass(sound_info)
+      m.learn_slot_offset()
       m.measure_latency()
       m.fifo_target = max((if m.lat_count >= 4: int(m.lat_avg) else: m.hw_latency()), MP2K_FIFO_GUARD)
       m.apply_pending(sound_info)
@@ -1006,7 +1155,16 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
         m.foreign_streak = 0
       # else: both silent — neutral, hold the evidence count
   when defined(mp2kwav):
+    block:
+      let c = m.fifo_dma()
+      if c > 0:
+        let base = m.gba.dma.dmasad[c]
+        dbgHookRing.setLen(0)
+        for i in 0 ..< 1584: dbgHookRing.add m.rd8(base + uint32(i))
     dbgHookDmaSrc.add m.gba.dma.src[1]
+    dbgHookDmaSrc2.add m.gba.dma.src[2]
+    dbgHookSad.add m.gba.dma.dmasad[1]
+    dbgHookSad2.add m.gba.dma.dmasad[2]
     dbgHookCnt.add int(m.rd8(sound_info + SI_DMA_COUNTER))
   m.frame_seen = true
   m.engaged = true
@@ -1021,30 +1179,135 @@ proc mixer_hook*(m: Mp2kHle) =
   if (sip shr 24) == 0x02'u32 or (sip shr 24) == 0x03'u32:
     let ident = m.rd32(sip + SI_MAGIC)
     if ident == MP2K_IDENT_LOCK or ident == MP2K_IDENT_LOCK_VOFF:
-      m.on_frame(sip)
+      inc m.fires_this_frame
+      if m.fires_this_frame == 1: m.on_frame(sip)
       return
   m.unlearn_hook()
+
+proc lr_taken(m: Mp2kHle; lr: uint32): bool =
+  ## A return address already owned by a candidate: lr keeps its value through
+  ## the whole callee, so every later instruction of it would look like a
+  ## call target otherwise.
+  for i in 0 ..< m.cand_n:
+    if m.cand_lr[i] == lr: return true
+  false
+
+proc looks_called(m: Mp2kHle; pc: uint32): bool =
+  ## Is the instruction about to execute the target of a call? At a function
+  ## entry lr holds the return address, so the instruction before it is the
+  ## call. Forms seen in the library:
+  ##   * Thumb BL (pair at lr-4/lr-2) whose target is this PC;
+  ##   * Thumb BL to a `bx rN` stub (the compiler's call through a function
+  ##     pointer, how SoundMain reaches the mixer in RAM): the target is not
+  ##     recoverable, so the return address must be new;
+  ##   * `mov lr, pc; bx rN` (lr even, from Thumb): same, by return address;
+  ##   * ARM BL whose target is this PC, or a `bx rN` stub.
+  let lr = m.gba.cpu.r[14]
+  let target = pc and not 1'u32
+  if (lr and 1'u32) != 0:
+    let ra = lr and not 1'u32
+    let h = m.rd16(ra - 2'u32)
+    if (h and 0xF800'u16) != 0xF800'u16: return false
+    let hi = m.rd16(ra - 4'u32)
+    if (hi and 0xF800'u16) != 0xF000'u16: return false
+    var off = (uint32(hi and 0x7FF'u16) shl 12) or (uint32(h and 0x7FF'u16) shl 1)
+    if (off and 0x400000'u32) != 0: off = off or 0xFF800000'u32
+    let dest = ra + off
+    if dest == target: return true
+    if (m.rd16(dest) and 0xFF87'u16) == 0x4700'u16: return not m.lr_taken(lr)
+    return false
+  let h = m.rd16(lr - 2'u32)
+  if (h and 0xFF87'u16) == 0x4700'u16 and m.rd16(lr - 4'u32) == 0x46FE'u16:
+    return not m.lr_taken(lr)
+  let w = m.rd32(lr - 4'u32)
+  if (w and 0x0F000000'u32) != 0x0B000000'u32: return false
+  var off = (w and 0x00FFFFFF'u32) shl 2
+  if (off and 0x02000000'u32) != 0: off = off or 0xFC000000'u32
+  let dest = lr + 4'u32 + off
+  if dest == target: return true
+  if (m.rd32(dest) and 0x0FFFFFF0'u32) == 0x012FFF10'u32: return not m.lr_taken(lr)
+  false
+
+proc probe_pass_end(m: Mp2kHle): bool =
+  ## A probed pass ended: tally which candidates it hit. After eight passes
+  ## the candidates that fired in every pass are ranked in pass order and
+  ## the first is hooked (a helper the mixer calls only on some passes drops
+  ## out). Returns true once a hook is chosen.
+  var any = false
+  for i in 0 ..< m.cand_n:
+    if m.cand_seen[i]:
+      inc m.cand_hits[i]
+      m.cand_seen[i] = false
+      any = true
+  m.probe_order = 0
+  if any: inc m.probe_passes
+  if m.probe_passes >= 8:
+    # Candidates that fired in every pass, in the order they come within a
+    # pass. The FIRST is the mixer entry on every vintage probed (Emerald,
+    # Minish Cap, ...: SoundMainRAM; helpers it calls come later). A
+    # vintage whose first candidate is SoundMain itself (EZ-Talk) fails
+    # the prediction check there, and check_predictions moves to the next
+    # candidate — the mixer proper — before giving up.
+    var best_hits = 0
+    for i in 0 ..< m.cand_n:
+      if m.cand_hits[i] > best_hits: best_hits = m.cand_hits[i]
+    m.cand_pick_n = 0
+    for order in 0 ..< m.cand_n:
+      for i in 0 ..< m.cand_n:
+        if m.cand_hits[i] == best_hits and m.cand_order[i] == order and m.cand_pick_n < m.cand_pick.len:
+          m.cand_pick[m.cand_pick_n] = i
+          inc m.cand_pick_n
+    if m.cand_pick_n > 0:
+      m.cand_idx = 0
+      let pc = m.cand[m.cand_pick[0]]
+      m.probe_passes = 0
+      m.hook_addr  = pc                            # pc may carry the Thumb bit; the
+      m.entry_addr = pc and not 1'u32              # hook compare uses it verbatim
+      m.probing = false
+      m.fires_this_frame = 0
+      m.gba.refresh_hle_hook()
+      return true
+  false
 
 proc probe_pc*(m: Mp2kHle; pc: uint32) {.noinline.} =
   ## Learning probe, called from cpu.tick only while probing is armed and only
   ## for RAM-fetched instructions with r0 == &SoundInfo (both prefiltered
-  ## inline). Lock held => this PC is the mixer entry: learn it and run the
-  ## first shadow pass now (the entry has not executed yet, so channel state
-  ## is exactly what the hook would see).
+  ## inline). While the lock is held, every such instruction that is a call
+  ## target is a candidate for the mixer entry; the frame poll picks the LAST
+  ## one of the pass. Vintages that keep SoundMain itself in RAM (EZ-Talk)
+  ## enter it first, run the sequencer, then call the mixer: hooking the
+  ## first candidate would see the channel table before that pass's
+  ## note-ons and note-offs.
   let ident = m.rd32(m.probe_sound_info + SI_MAGIC)
   inc m.dbg_probe_hits
   m.dbg_probe_ident = ident
   if ident != MP2K_IDENT_LOCK and ident != MP2K_IDENT_LOCK_VOFF: return
   for i in 0 ..< m.probe_block_n:
     if m.probe_block[i] == pc: return          # previously invalidated
-  m.hook_addr  = pc                            # pc may carry the Thumb bit; the
-  m.entry_addr = pc and not 1'u32              # hook compare uses it verbatim
-  m.probing = false
-  # The hook just moved from "probing" to "armed" mid-frame; re-fold it into
-  # the CPU sentinel now rather than waiting for the next frame poll.
-  m.gba.refresh_hle_hook()
-  m.dbg_hook_fires.inc
-  m.mixer_hook()
+  for i in 0 ..< m.cand_n:
+    if m.cand[i] == pc:
+      if m.cand_seen[i]:
+        # An entry is called once per pass: seeing it again is the next
+        # pass, on a game whose passes never end at an idle frame poll.
+        if m.probe_pass_end(): return
+      m.cand_seen[i] = true
+      m.cand_order[i] = m.probe_order
+      inc m.probe_order
+      return
+  if not m.looks_called(pc):
+    when defined(mp2kwav):
+      if dbgProbeMiss.len < 64:
+        let lr = m.gba.cpu.r[14]
+        dbgProbeMiss.add (pc, lr, m.rd32(lr - 4'u32))
+    return
+  if m.cand_n < m.cand.len:
+    m.cand[m.cand_n] = pc
+    m.cand_lr[m.cand_n] = m.gba.cpu.r[14]
+    m.cand_seen[m.cand_n] = true
+    m.cand_order[m.cand_n] = m.probe_order
+    m.cand_hits[m.cand_n] = 0
+    inc m.probe_order
+    inc m.cand_n
 
 proc mp2k_frame_poll*(m: Mp2kHle) =
   ## Once-per-frame presence check (2 IWRAM reads; called from step_frame only
@@ -1060,12 +1323,31 @@ proc mp2k_frame_poll*(m: Mp2kHle) =
        ident != MP2K_IDENT_IDLE_VOFF and ident != MP2K_IDENT_LOCK_VOFF:
       m.engaged = false
       for i in 0 ..< MP2K_MAX_CHANNELS: m.samplers[i].active = false
+    # A mixer entry fires once per pass (a game may run two passes in a
+    # frame); a PC that fired more often is a helper inside the mixer, run
+    # per channel: invalidate it and pick again.
+    if m.fires_this_frame > 3:
+      m.unlearn_hook()
+      m.fires_this_frame = 0
+      m.probing = (ident == MP2K_IDENT_IDLE or ident == MP2K_IDENT_IDLE_VOFF) and
+                  m.probe_fails < MP2K_PROBE_MAX_FAILS
+      if m.probing: m.probe_sound_info = sip
+      m.gba.refresh_hle_hook()
+      return
+    m.fires_this_frame = 0
     # Frames since the hook last fired (mixer_live); on_frame zeroes it.
     if m.engaged and m.hook_stale < 1000'i32: inc m.hook_stale
     return
+  # A probed pass ended (the lock is released): tally it.
+  if m.probing and (ident == MP2K_IDENT_IDLE or ident == MP2K_IDENT_IDLE_VOFF):
+    if m.probe_pass_end(): return
   # Arm probing only when the engine is at rest (ident == ID_NUMBER, in
   # either VSync form): arming mid-pass could learn a mid-mixer PC instead of
-  # the entry.
+  # the entry. Once candidates are being collected, stay armed whatever the
+  # poll sees: a driver whose ident reads locked at every V-blank (BB Ball)
+  # delimits its passes by re-sighting an entry, not by an idle poll.
+  if m.probing and m.cand_n > 0 and m.probe_fails < MP2K_PROBE_MAX_FAILS:
+    return
   m.probing = (ident == MP2K_IDENT_IDLE or ident == MP2K_IDENT_IDLE_VOFF) and
               m.probe_fails < MP2K_PROBE_MAX_FAILS
   if m.probing: m.probe_sound_info = sip
@@ -1382,4 +1664,6 @@ proc init_mp2k*(m: Mp2kHle) =
   ## ("Runtime detection").
   m.use_cubic = true   # cubic (Catmull-Rom, per Paul Bourke) resampling by default
   m.fifo = newSeq[int16](MP2K_FIFO_CAP * 2)
+  m.ring_copy = newSeq[uint8](8192)
+  m.ring_prev_slot = -1
   m.predict = getEnv("DINGBAT_MP2K_LATE") != "1"

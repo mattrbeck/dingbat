@@ -220,7 +220,16 @@ def p11():
     t.fine()
     return s
 
-PROBES = {"p11": p11, "p1": p1, "p2": p2, "p3": p3, "p4": p4, "p5": p5, "p6": p6,
+def p0():
+    """Silence: one track that ends at once, so the game's sequencer never
+    allocates a channel and the harness can drive SoundChannel structs
+    itself (tests/mp2k_probe.nim DINGBAT_PROBE_SCRIPT, tools/mp2kprobe/rig.py)."""
+    s = sg.Song()
+    s.voicegroup.direct_sound(dc_wave(0), attack=255, decay=0, sustain=255, release=0)
+    s.track().tempo(150).fine()
+    return s
+
+PROBES = {"p0": p0, "p11": p11, "p1": p1, "p2": p2, "p3": p3, "p4": p4, "p5": p5, "p6": p6,
           "p7": p7, "p8": p8, "p9": p9, "p10": p10}
 
 def main():

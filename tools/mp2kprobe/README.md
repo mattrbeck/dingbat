@@ -190,24 +190,71 @@ modified, VSyncOff driver, driven through the health screen) and The Minish
 Cap (mono, 15768 Hz), plus Estopolis Densetsu, Shin Megami Tensei II, Ochaken
 no Heya and Beast Shooter: every one reproduces the laws below to the byte.
 Kirby: Nightmare in Dream Land starts the injected song on two players at
-once, and Castlevania: Circle of the Moon (42 kHz, two-slot ring) keeps its
-buffer where the harness does not yet look, so those two are unconfirmed by
-the probes; the library sweep rates both as matching.
+once, so it is unconfirmed by the probes; the library sweep rates it as
+matching. Castlevania: Circle of the Moon runs two configurations in one
+boot — nine 176-byte slots at 10512 Hz through the intro, then two 704-byte
+slots at 42048 Hz inside the same 1584-byte half, its title track a pair of
+31-second streamed samples — and is matched by the sweep once the HLE
+re-learns the ring per configuration (below).
 
-## What the driver does (2026-09-13, Emerald's driver; the vintages above agree)
+## rig.py — drive the mixer with our own samples
+
+`songtable.py --patch` plus the silent probe song gives a host whose
+sequencer never allocates a channel; `rig.py` then places WaveData blobs of
+its own in the padded ROM copy and emits a per-frame script of SoundChannel
+writes that `tests/mp2k_probe.nim` applies at frame end
+(`DINGBAT_PROBE_SCRIPT`). The game boots and brings its driver up as usual;
+the channel table is then ours and the mixer plays exactly what the script
+says. Scenarios: `dc` (gain law), `imp` (kernel and timing by impulse), `env`
+(attack/decay/release), `iec` (pseudo-echo floor), `types` (loop, reversed,
+fixed-rate, compressed), `side` (per-side bytes written at the hook), `offs`
+(the count field at note-on), `cap` (every channel at once). It is how the
+per-side-bytes rule, the pseudo-echo hold and the count-field difference
+below were settled without a sequencer in the way.
+
+## How the HLE finds the mixer (2026-09-13)
+
+There is no ROM signature. Every m4a build keeps a pointer to its SoundInfo
+work area at IWRAM 0x03007FF0, and SoundMain holds ident+1 for the whole
+pass. While that lock is held the HLE watches RAM-fetched instructions with
+r0 == &SoundInfo and keeps those that are call targets (a BL aimed at the
+instruction, a BL to a `bx rN` stub — the compiled call through a function
+pointer — or `mov lr, pc; bx rN`). After eight passes the candidates that
+fired in every pass are ranked in pass order and the first is hooked.
+
+Two classes of build turned up in the library:
+
+* **SoundMainRAM alone in RAM** (Emerald, FireRed, Minish Cap, Advance Wars,
+  Breath of Fire, Mother 3, Beast Shooter, Ochaken, Estopolis, GT Advance 3,
+  BB Ball): one candidate, the mixer entry, reached after the sequencer.
+* **SoundMain itself in RAM** (EZ-Talk, Super Dodgeball Advance, Mega Man
+  Battle Network, Castlevania: Circle of the Moon, Advance GTA, Hudson Best
+  Collection): the first candidate is SoundMain, whose sequencer runs after
+  the hook, and the mixer proper is the second. The HLE detects the wrong
+  vantage from the channel table — an envelope that does not match one hook
+  later, or a channel first seen ON without its START bit (the mixer clears
+  START as it initialises a channel, so a hook after the sequencer always
+  sees it) — and moves to the next candidate; a move that predicts no better
+  returns to the entry.
+
+A driver whose ident reads locked at every V-blank (BB Ball) delimits its
+passes by re-sighting an entry instead of by an idle poll.
+
+## What the driver does (2026-09-13, Emerald's driver; the vintages above agree; count field and ring re-timing 2026-09-14)
 
 | Behaviour | Measured |
 |---|---|
 | Per-channel gain | byte = floor(sample × envelopeVolume{R,L} / 256), summed per channel; the s8 buffer wraps past ±127 (3 × 50 → −106) |
 | Envelope timing | every frame is mixed flat at the envelope the pass computes; no ramp on attack, decay or release. At the mixer entry hook the per-side bytes are the previous pass's |
 | Envelope stages | attack: ev += rate, clamp 255; decay: ev = ev·rate/256 down to sustain; release: ev = ev·rate/256, channel dropped at 0; release 0 kills in that pass, mixing nothing |
-| Note-on | starts at sample 0 of that pass's frame; the count field at note-on is stale (Minish Cap: 65 of 65 ignored), not a start offset |
+| Note-on | starts at sample 0 of that pass's frame. The count field at note-on differs by vintage: Emerald's mixer honours it as a start offset (rig `offs`), Minish Cap's ignores it; no sequencer in the library sets one (census: 58,777 ignored, 49 noise), so the HLE ignores it |
 | Resampler | linear interpolation between adjacent source samples, no anti-aliasing when decimating |
 | Sample bounds | `size` is a count (indices 0..size−1), the loop returns to `loopStart` interpolating toward it; a one-shot goes silent at its end and the channel is dropped |
 | Type bits | 0x08 plays at pcmFreq whatever the key; 0x10 plays from data[size−1] downward; both combine; compressed (BDPCM) decodes as the HLE does |
 | Reverb | before a pass mixes, the slot it overwrites is seeded with (A+B of that slot + A+B of the next slot) × reverb/512: two taps at P−1 and P frames; an impulse of 50 with reverb 64, period 7 echoes 12, 12 then 3, 6, 3 |
 | Stereo halves | the first pcmBuffer half (DMA1 → FIFO A) carries the right-volume mix, the second the left; Emerald routes A right / B left (and plays mono by default) |
-| Latency | the real FIFO stream lags the pass by 553 APU samples on Emerald (one V-blank + 4), 228 on Minish Cap, set by where the DMA is in the ring at the pass |
+| Latency | the real FIFO stream lags the pass by 553 APU samples on Emerald (one V-blank + 4), 228 on Minish Cap, set by where the DMA is in the ring at the pass, plus 28 source-rate samples of FIFO whatever the rate (the 32-byte FIFO refilled 16 at a time; measured 22–32 on six titles at each of nine engine rates) |
+| Ring geometry | period × slot bytes, the period read from pcmDmaCounter's cycle; a driver may re-time mid-run (Castlevania: 9 × 176 at 10512 Hz, then 2 × 704 at 42048 Hz), so the period is re-learnt whenever the rate or the frame length changes |
 
 ## What the HLE deliberately does differently
 
@@ -233,7 +280,9 @@ The probes also show where the HLE's render is not the driver's, by design:
   (checked against the real bytes one hook later: zero misses on every title
   above, including Beast Shooter's pseudo-echo tails), renders the frame at
   the pass, and holds it until the sound DMA reaches that slot, a latency it
-  measures per title from the DMA cursor. Against the real stream: Emerald
-  −5 samples, Minish Cap −4, Beast Shooter +3, Breath of Fire −6, Estopolis
-  +36; by the P2 impulse itself, played through each driver: Emerald +8,
-  Ochaken +2, Minish Cap +5, Beast Shooter +34 samples.
+  measures per title from the DMA cursor. Against the real stream (waveform
+  cross-correlation, 32768 Hz): Emerald +7 samples, Minish Cap +12, Beast
+  Shooter +13, Hudson Best Collection +12, Castlevania +24, Super Dodgeball
+  +32, Battle Network +38, Estopolis +84; by the P2 impulse itself, played
+  through each driver: Emerald +8, Ochaken +2, Minish Cap +5, Beast Shooter
+  +34 samples.

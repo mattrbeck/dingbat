@@ -11,6 +11,20 @@
 #        DINGBAT_PROBE_DRIVE=1      mash A/START (menu-gated titles)
 #        DINGBAT_MP2K_RESAMPLE=0|1|2  cubic / linear (the driver's) / hold
 #        DINGBAT_PROBE_ZOH=1        hold-mode FIFO playback (real.wav = buffer verbatim)
+#        DINGBAT_PROBE_SCRIPT=path  drive the driver directly: a JSON list of
+#                                 writes applied at the END of the named frame
+#                                 (so the next pass sees them):
+#                                   {"f": 100, "ch": 0, "set": {"status": 128,
+#                                    "type": 0, "vr": 127, "vl": 127, "atk": 255,
+#                                    "dec": 0, "sus": 255, "rel": 0, "echo_vol": 0,
+#                                    "echo_len": 0, "wave": 150995456, "freq": 13379,
+#                                    "ct": 0}}
+#                                   {"f": 120, "ch": 0, "or": {"status": 64}}
+#                                   {"f": 100, "si": {"reverb": 64, "master": 15}}
+#                                   {"f": 100, "addr": 50331648, "u8": 5}
+#                                 Pair it with a host whose songs are all silent
+#                                 (tools/mp2kprobe/rig.py) so the sequencer never
+#                                 touches the channels.
 #
 # Outputs (<out_prefix>.*):
 #   engA.s8 / engB.s8  the driver's mixed frames, concatenated in mixer order,
@@ -33,7 +47,7 @@
 # the previous frame's snapshot is recorded next to it as a cross-check.
 when not defined(mp2kwav):
   {.error: "build with -d:mp2kwav (see the header)".}
-import std/[os, strutils, json, streams]
+import std/[os, strutils, json, streams, tables]
 import dingbat/gba/gba
 import dingbat/common/test_output
 import dingbat/common/input
@@ -78,17 +92,52 @@ proc main() =
   # engine buffer verbatim (pipeline check) instead of the cubic reconstruction
   if getEnv("DINGBAT_PROBE_ZOH") == "1": emu.apu.set_fifo_interp(false)
 
+  # Script (see the header): writes keyed by frame
+  var script: seq[JsonNode]
+  let script_path = getEnv("DINGBAT_PROBE_SCRIPT")
+  if script_path.len > 0:
+    for n in parseJson(readFile(script_path)): script.add n
+  const chan_fields = {"status": 0'u32, "type": 1, "vr": 2, "vl": 3, "atk": 4, "dec": 5,
+                       "sus": 6, "rel": 7, "ev": 9, "evr": 10, "evl": 11, "echo_vol": 12,
+                       "echo_len": 13, "ct": 24, "freq": 32, "wave": 36}.toTable
+  const si_fields = {"reverb": 5'u32, "maxchans": 6, "master": 7}.toTable
+  proc apply_script(f: int) =
+    let sip = emu.bus.read_word_internal(0x03007FF0'u32)
+    for n in script:
+      if n["f"].getInt != f: continue
+      if n.hasKey("addr"):
+        emu.bus.write_byte_internal(uint32(n["addr"].getInt), uint8(n["u8"].getInt))
+        continue
+      if n.hasKey("si"):
+        for k, v in n["si"]:
+          emu.bus.write_byte_internal(sip + si_fields[k], uint8(v.getInt))
+        continue
+      let base = sip + SI_CHANNELS + uint32(n["ch"].getInt) * SC_SIZE
+      if n.hasKey("set"):
+        for k, v in n["set"]:
+          let off = chan_fields[k]
+          if off >= 24'u32: emu.bus.write_word_internal(base + off, uint32(v.getInt))
+          else: emu.bus.write_byte_internal(base + off, uint8(v.getInt))
+      if n.hasKey("or"):
+        for k, v in n["or"]:
+          let off = chan_fields[k]
+          let cur = emu.bus.read_byte_internal(base + off)
+          emu.bus.write_byte_internal(base + off, cur or uint8(v.getInt))
   let fj = open(prefix & ".frames.jsonl", fmWrite)
   # DINGBAT_PROBE_RING=1: the whole A half of pcmBuffer after every frame
   # (<prefix>.ring.s8, period*spv bytes per frame) for offline slot scans
   var ring_dump: File = nil
-  if getEnv("DINGBAT_PROBE_RING") == "1": ring_dump = open(prefix & ".ring.s8", fmWrite)
+  var ring_hook: File = nil
+  if getEnv("DINGBAT_PROBE_RING") == "1":
+    ring_dump = open(prefix & ".ring.s8", fmWrite)
+    ring_hook = open(prefix & ".ringh.s8", fmWrite)
   var engA, engB: seq[int8]
   var prevA, prevB: seq[uint8]
   var passes = 0
   var slot_off = 0
   var slot_cal = false
   var hle_fires_prev = 0
+  var cnt_max = 0
   for f in 0 ..< frames:
     if drive:
       let phase = (f div 8) mod 4
@@ -97,13 +146,19 @@ proc main() =
     emu.step_frame()
     let sip = emu.bus.read_word_internal(0x03007FF0'u32)
     if (sip shr 24) != 0x02'u32 and (sip shr 24) != 0x03'u32: continue
+    if script.len > 0: apply_script(f)
     let ident = emu.bus.read_word_internal(sip + SI_MAGIC)
     if ident != IDENT_IDLE and ident != IDENT_LOCK: continue
     let spv    = int(emu.bus.read_half_internal(sip + SI_SPV))
-    let period = int(emu.bus.read_byte_internal(sip + SI_DMA_PERIOD))
+    let period0 = int(emu.bus.read_byte_internal(sip + SI_DMA_PERIOD))
     let rate   = int(emu.bus.read_word_internal(sip + SI_PCM_RATE))
     let cnt    = int(emu.bus.read_byte_internal(sip + SI_DMA_COUNTER))
-    if spv <= 0 or spv > 2048 or period <= 0 or period > 16: continue
+    if spv <= 0 or spv > 2048 or period0 <= 0 or period0 > 16: continue
+    # The ring's real length is what the counter cycles through (Castlevania:
+    # period byte 2, counter 9..1)
+    let cnt_hook = (if dbgHookCnt.len > 0: dbgHookCnt[^1] else: cnt)
+    if cnt_hook > cnt_max and cnt_hook <= 16: cnt_max = cnt_hook
+    let period = max(period0, cnt_max)
     # pcmBuffer halves from the sound DMAs (the driver programs DMA1SAD/DMA2SAD
     # to the two halves; a mono vintage programs one).
     var baseA, baseB = 0'u32
@@ -112,7 +167,11 @@ proc main() =
         if emu.dma.dmadad[c] == 0x040000A0'u32: baseA = emu.dma.dmasad[c]
         elif emu.dma.dmadad[c] == 0x040000A4'u32: baseB = emu.dma.dmasad[c]
     if baseA == 0 and baseB == 0: continue
-    let half = spv * period
+    # The half is PCM_DMA_BUF_SIZE bytes (the distance between the two DMA
+    # sources when both run), not necessarily period*spv: Castlevania mixes
+    # 704-sample slots at 42 kHz into a 1584-byte half.
+    var half = spv * period0
+    if baseB > baseA and baseB - baseA <= 8192'u32: half = int(baseB - baseA)
     # A mono vintage feeds one FIFO; the other half of pcmBuffer is still
     # read (engB.s8 then shows what the driver leaves there, which its
     # reverb may sum).
@@ -135,9 +194,10 @@ proc main() =
     var changed = 0
     var chslot = -1
     if prevA.len == half:
-      for s in 0 ..< period:
+      let sbc = (if spv * period > half: half div period else: spv)
+      for s in 0 ..< half div sbc:
         var diff = false
-        for i in s * spv ..< (s + 1) * spv:
+        for i in s * sbc ..< (s + 1) * sbc:
           if curA[i] != prevA[i] or curB[i] != prevB[i]:
             diff = true; break
         if diff:
@@ -147,22 +207,29 @@ proc main() =
     prevB = curB
     if ring_dump != nil:
       discard ring_dump.writeBuffer(addr curA[0], half)
+      # the same half as the hook saw it (zero-filled when no hook fired)
+      var hr = newSeq[uint8](half)
+      for i in 0 ..< min(half, dbgHookRing.len): hr[i] = dbgHookRing[i]
+      discard ring_hook.writeBuffer(addr hr[0], half)
     # The slot the pass filled, from pcmDmaCounter AT THE HOOK (the HLE's
     # own derivation, mp2k.nim apply_pending): slot = period - (cnt - 1)
     # for cnt >= 2, else 0. Read at the hook it holds on every vintage
     # whether the V-blank handler decrements before the mixer (Minish Cap)
     # or after it (Emerald); `chslot` cross-checks it.
-    let cnt_hook = (if dbgHookCnt.len > 0: dbgHookCnt[^1] else: cnt)
-    let slot = (if hle_fires_prev == (if emu.mp2k != nil: emu.mp2k.dbg_hook_fires else: 0): -1
+    var slot = (if hle_fires_prev == (if emu.mp2k != nil: emu.mp2k.dbg_hook_fires else: 0): -1
                 elif cnt_hook <= 1: 0
                 else: period - (cnt_hook - 1))
+    # ring slot size: spv, or the half split by the period when spv*period
+    # does not fit it (Castlevania: 704-sample mixing, 176-byte DMA slots)
+    let sb = (if spv * period > half: half div period else: spv)
+    if slot >= 0 and (slot + 1) * sb > half: slot = -1
     hle_fires_prev = (if emu.mp2k != nil: emu.mp2k.dbg_hook_fires else: 0)
     discard slot_off; discard slot_cal
     let hle_slot = (if emu.mp2k != nil: emu.mp2k.rev_slot else: -1)
     let hle_fires = (if emu.mp2k != nil: emu.mp2k.dbg_hook_fires else: 0)
     if slot >= 0:
       inc passes
-      for i in slot * spv ..< (slot + 1) * spv:
+      for i in slot * sb ..< (slot + 1) * sb:
         engA.add cast[int8](curA[i])
         engB.add cast[int8](curB[i])
     var chans = newJArray()
@@ -201,13 +268,23 @@ proc main() =
     fj.writeLine($(%*{"f": f, "pass": passes, "cnt": cnt, "slot": slot,
                       "chslot": chslot, "changed": changed,
                       "hle_slot": hle_slot, "hle_fires": hle_fires,
-                      "hook_at": hook_at, "dma_at": dma_at,
+                      "hook_at": hook_at, "dma_at": dma_at, "half": half, "cnt_hook": cnt_hook, "slot_bytes": sb,
+                      "src1": (if dbgHookDmaSrc.len > 0: toHex(dbgHookDmaSrc[^1], 8) else: ""),
+                      "src2": (if dbgHookDmaSrc2.len > 0: toHex(dbgHookDmaSrc2[^1], 8) else: ""),
+                      "sad1": (if dbgHookSad.len > 0: toHex(dbgHookSad[^1], 8) else: ""),
+                      "sad2": (if dbgHookSad2.len > 0: toHex(dbgHookSad2[^1], 8) else: ""),
+                      "dad1": toHex(emu.dma.dmadad[1], 8), "dad2": toHex(emu.dma.dmadad[2], 8),
+                      "en1": emu.dma.dmacnt_h[1].enable, "en2": emu.dma.dmacnt_h[2].enable,
                       "fifo_level": (if emu.mp2k != nil: emu.mp2k.fifo_w - emu.mp2k.fifo_r else: 0),
                       "predict": (emu.mp2k != nil and emu.mp2k.predict),
                       "pred_ok": (if emu.mp2k != nil: emu.mp2k.pred_ok else: 0),
                       "pred_bad": (if emu.mp2k != nil: emu.mp2k.pred_bad else: 0),
+                      "seq_late": (if emu.mp2k != nil: emu.mp2k.seq_late else: 0),
+                      "cand_idx": (if emu.mp2k != nil: emu.mp2k.cand_idx else: 0),
                       "fifo_target": (if emu.mp2k != nil: emu.mp2k.fifo_target else: 0),
                       "lat_avg": (if emu.mp2k != nil: int(emu.mp2k.lat_avg) else: 0),
+                      "slot_off": (if emu.mp2k != nil: emu.mp2k.slot_off else: 0),
+                      "slot_locked": (emu.mp2k != nil and emu.mp2k.slot_locked),
                       "lat_count": (if emu.mp2k != nil: emu.mp2k.lat_count else: 0),
                       "cap_n": mp2kWavCapture.len div 2,
                       "engaged": (emu.mp2k != nil and emu.mp2k.engaged),
@@ -216,9 +293,12 @@ proc main() =
                       "master": int(emu.bus.read_byte_internal(sip + SI_MASTER_VOL)),
                       "baseA": toHex(baseA, 8), "baseB": toHex(baseB, 8), "unfed_b": unfed_b,
                       "sndh": toHex(emu.bus.read_half_internal(0x04000082'u32), 4),
+                      "tm0": int(emu.timer.tmd[0]), "tm1": int(emu.timer.tmd[1]),
+                      "dma1_cnt": int(emu.dma.dmacnt_l[1]), "dma2_cnt": int(emu.dma.dmacnt_l[2]),
                       "ch": chans}))
   fj.close()
   if ring_dump != nil: ring_dump.close()
+  if ring_hook != nil: ring_hook.close()
   block:
     let fa = open(prefix & ".engA.s8", fmWrite)
     if engA.len > 0: discard fa.writeBuffer(addr engA[0], engA.len)
@@ -231,6 +311,26 @@ proc main() =
   echo $(%*{"frames": frames, "passes": passes, "eng_samples": engA.len,
             "hle_n": mp2kWavCapture.len div 2, "real_n": realDmaCapture.len div 2,
             "engaged": (emu.mp2k != nil and emu.mp2k.engaged),
-            "hook": (if emu.mp2k != nil: toHex(emu.mp2k.hook_addr, 8) else: "")})
+            "hook": (if emu.mp2k != nil: toHex(emu.mp2k.hook_addr, 8) else: ""),
+            "cand": (if emu.mp2k != nil: (block:
+                       var a = newJArray()
+                       for i in 0 ..< emu.mp2k.cand_n:
+                         a.add(%*{"pc": toHex(emu.mp2k.cand[i], 8), "hits": emu.mp2k.cand_hits[i],
+                                  "order": emu.mp2k.cand_order[i]})
+                       a) else: newJArray()),
+            "pick": (if emu.mp2k != nil: (block:
+                       var a = newJArray()
+                       for i in 0 ..< emu.mp2k.cand_pick_n: a.add(%emu.mp2k.cand_pick[i])
+                       a) else: newJArray()),
+            "cand_idx": (if emu.mp2k != nil: emu.mp2k.cand_idx else: 0),
+            "probe_fails": (if emu.mp2k != nil: emu.mp2k.probe_fails else: 0),
+            "miss": (block:
+                       var a = newJArray()
+                       var seen: seq[uint32] = @[]
+                       for (pc, lr, w) in dbgProbeMiss:
+                         if pc in seen: continue
+                         seen.add pc
+                         a.add(%*{"pc": toHex(pc, 8), "lr": toHex(lr, 8), "w": toHex(w, 8)})
+                       a)})
 
 main()

@@ -48,6 +48,43 @@ mp2k_probe.nim, Emerald title screen, per-frame correlation at the driver's samp
 instants) the as-found HLE scored 0.47 over the run; the restructured one has a per-frame
 median of 0.988 with 90 % of frames above 0.95.
 
+## 2026-09-14: the rig, the mixer-finding rework, Castlevania
+
+`tools/mp2kprobe/rig.py` drives a game's mixer with WaveData of our own through a host whose
+songs are all silent, so channel-struct behaviour could be tested without a sequencer in the way:
+it settled that per-side bytes written at the hook do nothing, that the pseudo-echo hold ends when
+its length reads 0 at the hook, and that the note-on count field is a start offset on Emerald's
+mixer but not on Minish Cap's (and set by no sequencer in the library).
+
+The hook learner was rebuilt. The old one hooked the first RAM instruction seen with the SoundInfo
+pointer in r0 under the engine lock, which on builds that keep all of SoundMain in RAM (EZ-Talk,
+Super Dodgeball Advance, Mega Man Battle Network, Castlevania, Advance GTA, Hudson Best Collection)
+is SoundMain itself, before its sequencer: every note-on reached the render a frame late. The new
+one keeps only call targets (a BL aimed at the instruction, a BL to a `bx rN` stub — how every
+compiled SoundMain reaches its RAM mixer — or `mov lr, pc; bx rN`), tallies eight passes, hooks
+the first candidate that fired in all of them, and moves to the next call target of the pass when
+the channel table shows the hook sits before the sequencer (an envelope that does not match one
+hook later, or a channel first seen ON without its START bit). Castlevania's +640 turned out to be
+three things stacked: its 42 kHz configuration inherited the intro's nine-slot ring period (now
+re-learnt whenever the rate or frame length changes), its hook preceded the sequencer, and the FIFO
+pipeline was a fixed 68 output samples where it is 28 source-rate samples at every engine rate
+(measured 22–32 on six titles at each of nine rates).
+
+| | round 2 | round 3 |
+|---|---|---|
+| within ±20 % loudness (DC-free) | 779 / 780 | 779 / 780 |
+| within ±64 APU samples of hardware timing (envelope) | 756 (96.9 %) | 773 (99.1 %) |
+| beyond ±300 | 20 | 5 |
+| lag-0 waveform correlation > 0.5 | 259 | 403 |
+| median lag-0 waveform correlation | 0.306 | 0.528 |
+
+The waveform correlation is the metric that sees sub-millisecond placement; it improved at every
+engine rate but 42 kHz (four Castlevania dumps, whose streamed track correlates poorly at any
+sub-sample offset; by envelope they sit at 0, by waveform +24 samples). The five titles still
+beyond ±300 by envelope (Cinnamon Fuwafuwa, Winning Post, The Bible Game, Breath of Fire II, GT
+Advance 3) are the envelope estimator aliasing on periodic music — by waveform Cinnamon correlates
+at 0.97 within 30 samples and GT Advance 3 at 0.998 — apart from Winning Post (+512), unexamined.
+
 ## Why span-matched
 
 `-d:mp2kwav` (`src/dingbat/gba/apu.nim`) gates the REAL FIFO capture on the same

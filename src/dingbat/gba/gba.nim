@@ -619,6 +619,23 @@ type
     probe_sound_info*: uint32  # &SoundInfo cached for the probe's lock check
     probe_block*: array[8, uint32]  # invalidated candidates (mislearned PCs)
     probe_block_n*: int
+    # Mixer-entry candidates while probing: called RAM PCs seen with r0 ==
+    # &SoundInfo, with how many probed passes each fired in and its order
+    # within the pass (mp2k.nim probe_pc / mp2k_frame_poll)
+    cand*:       array[8, uint32]
+    cand_lr*:    array[8, uint32]   # return address each candidate was entered with
+    cand_hits*:  array[8, int]
+    cand_order*: array[8, int]
+    cand_seen*:  array[8, bool]
+    cand_n*:     int
+    cand_idx*:   int                # index of the candidate currently hooked
+    cand_pick*:  array[8, int]      # candidates that fired in every probed pass, in pass order
+    cand_pick_n*: int
+    probe_passes*: int
+    probe_order*: int
+    fires_this_frame*: int          # hook fires since the last frame poll (a helper inside the mixer fires per channel)
+    seq_late*:   int                # note-ons the snapshot missed: the hook precedes the sequencer
+    seq_locked*: bool               # those sightings already led to a candidate that failed: ignore them
     probe_fails*: int       # mislearn count; probing gives up at 8
     skip*:       bool       # EXPERIMENTAL perf probe: force-return the real mixer
     engaged*:    bool       # a valid SoundInfo has been observed at least once
@@ -670,6 +687,17 @@ type
     lat_prev_src*:   uint32         # DMA cursor at the previous hook
     lat_avg*:        float32        # EMA of the measured latency, APU samples (0 = none yet)
     lat_count*:      int
+    cnt_rate*:   int                # configuration the counter maximum was learnt under
+    cnt_spv*:    int
+    cnt_max*:        int            # largest pcmDmaCounter seen: the ring's real period
+    # Slot the pass writes vs the counter formula (mp2k.nim learn_slot_offset)
+    ring_copy*:      seq[uint8]
+    ring_copy_valid*: bool
+    ring_prev_slot*: int
+    slot_off*:       int
+    slot_off_vote*:  int
+    slot_votes*:     int
+    slot_locked*:    bool
     # Rendered-frame output FIFO (mp2k.nim render_frame / render_sample)
     fifo*:           seq[int16]     # stereo ring, MP2K_FIFO_CAP frames
     fifo_r*, fifo_w*: int           # read / write cursors (frames)
@@ -950,6 +978,11 @@ when defined(mp2kwav):  # throwaway A/B capture buffers (see mp2k.nim)
   var dbgRetrigCount*: int = 0
   var dbgHookCapIdx*: seq[int] = @[]   # HLE capture length (stereo frames) at each mixer hook
   var dbgHookDmaSrc*: seq[uint32] = @[] # DMA1 internal source cursor at each mixer hook
+  var dbgHookDmaSrc2*: seq[uint32] = @[] # DMA2's
+  var dbgHookRing*: seq[uint8] = @[]     # the A half (up to 1584 bytes) as the hook saw it
+  var dbgProbeMiss*: seq[(uint32, uint32, uint32)] = @[] # (pc, lr, word at lr-4) of sightings that failed the call-form test
+  var dbgHookSad*: seq[uint32] = @[]    # DMA1 source register at each hook
+  var dbgHookSad2*: seq[uint32] = @[]
   var dbgHookCnt*: seq[int] = @[]        # SoundInfo.pcmDmaCounter at each mixer hook
   # Note-on with a non-zero SoundChannel.count: did the engine start the
   # sample at that offset (honoured) or at 0 (ignored)? Judged one pass later
