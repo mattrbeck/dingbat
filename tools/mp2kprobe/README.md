@@ -253,7 +253,7 @@ passes by re-sighting an entry instead of by an idle poll.
 | Type bits | 0x08 plays at pcmFreq whatever the key; 0x10 plays from data[size−1] downward; both combine; compressed (BDPCM) decodes as the HLE does |
 | Reverb | before a pass mixes, the slot it overwrites is seeded with (A+B of that slot + A+B of the next slot) × reverb/512: two taps at P−1 and P frames; an impulse of 50 with reverb 64, period 7 echoes 12, 12 then 3, 6, 3 |
 | Stereo halves | the first pcmBuffer half (DMA1 → FIFO A) carries the right-volume mix, the second the left; Emerald routes A right / B left (and plays mono by default) |
-| Latency | the real FIFO stream lags the pass by 553 APU samples on Emerald (one V-blank + 4), 228 on Minish Cap, set by where the DMA is in the ring at the pass, plus 28 source-rate samples of FIFO whatever the rate (the 32-byte FIFO refilled 16 at a time; measured 22–32 on six titles at each of nine engine rates) |
+| Latency | the real FIFO stream lags the pass by 553 APU samples on Emerald (one V-blank + 4), 228 on Minish Cap, set by where the DMA is in the ring at the pass. The DMA moves 16 bytes at a time, so a slot's first byte is fetched by the transfer that starts at the 16-byte grid below it and then sits 15 deep in the FIFO; beyond that, 10 source-rate samples whatever the rate (6–14 measured on six titles at each of nine engine rates). Estopolis and Ochaken restart the DMA every V-blank on the slot the previous pass wrote, so a pass plays when the *next* V-blank handler runs and inherits that handler's jitter (±5 samples) |
 | Ring geometry | period × slot bytes, the period read from pcmDmaCounter's cycle; a driver may re-time mid-run (Castlevania: 9 × 176 at 10512 Hz, then 2 × 704 at 42048 Hz), so the period is re-learnt whenever the rate or the frame length changes |
 
 ## What the HLE deliberately does differently
@@ -280,9 +280,10 @@ The probes also show where the HLE's render is not the driver's, by design:
   (checked against the real bytes one hook later: zero misses on every title
   above, including Beast Shooter's pseudo-echo tails), renders the frame at
   the pass, and holds it until the sound DMA reaches that slot, a latency it
-  measures per title from the DMA cursor. Against the real stream (waveform
-  cross-correlation, 32768 Hz): Emerald +7 samples, Minish Cap +12, Beast
-  Shooter +13, Hudson Best Collection +12, Castlevania +24, Super Dodgeball
-  +32, Battle Network +38, Estopolis +84; by the P2 impulse itself, played
-  through each driver: Emerald +8, Ochaken +2, Minish Cap +5, Beast Shooter
-  +34 samples.
+  measures per title from the FIFO transfer that crosses the slot. Against
+  the real stream (waveform cross-correlation, 32768 Hz, hold-mode replay):
+  Emerald −18 samples, Minish Cap −9, Beast Shooter −3, Hudson Best
+  Collection −6, Pokémon Ruby −8, Combat Choro Q +1, Estopolis +22, Super
+  Dodgeball +24, Battle Network +24, Castlevania +27; by the P2 impulse
+  itself, played through each driver: Emerald +8, Ochaken +2, Minish Cap
+  +5, Beast Shooter +34 samples.

@@ -154,6 +154,9 @@ type
     count*:     array[4, uint16]
     # Latch per channel: https://github.com/mgba-emu/mgba/issues/2105
     latch*:     array[4, uint32]
+    # Scheduler cycle of the last FIFO transfer on channels 1/2 (mp2k.nim
+    # measure_latency dates a ring slot's crossing from it)
+    fifo_xfer_cycle*: array[4, int64]
     # Priority arbitration: bitmask of channels with a latched request, and
     # the channel of the innermost burst in progress (4 = none). A pending
     # channel runs only while its number is below current_priority; a
@@ -682,7 +685,7 @@ type
     # slot start is watched until the sound DMA's cursor crosses it.
     apu_clock*:      int            # render_sample calls since init (APU samples)
     lat_slot*:       array[4, uint32]   # slot start addresses awaiting their crossing
-    lat_at*:         array[4, int]      # apu_clock at each one's hook
+    lat_at*:         array[4, int64]    # scheduler cycle at each one's hook
     lat_n*:          int
     lat_prev_src*:   uint32         # DMA cursor at the previous hook
     lat_avg*:        float32        # EMA of the measured latency, APU samples (0 = none yet)
@@ -979,6 +982,7 @@ when defined(mp2kwav):  # throwaway A/B capture buffers (see mp2k.nim)
   var dbgHookCapIdx*: seq[int] = @[]   # HLE capture length (stereo frames) at each mixer hook
   var dbgHookDmaSrc*: seq[uint32] = @[] # DMA1 internal source cursor at each mixer hook
   var dbgHookDmaSrc2*: seq[uint32] = @[] # DMA2's
+  var dbgLatDump*: int = 0
   var dbgHookRing*: seq[uint8] = @[]     # the A half (up to 1584 bytes) as the hook saw it
   var dbgProbeMiss*: seq[(uint32, uint32, uint32)] = @[] # (pc, lr, word at lr-4) of sightings that failed the call-form test
   var dbgHookSad*: seq[uint32] = @[]    # DMA1 source register at each hook
@@ -1138,6 +1142,11 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
   gba.apu.apu_catchup_all()
   let base = gba.scheduler.rebase(keep_phase_mask = 1023)
   gba.apu.apu_rebase(base)
+  # FIFO transfer stamps and the MP2K HLE's pending slot hooks are absolute
+  # cycles too (mp2k.nim measure_latency)
+  for c in 1..2: gba.dma.fifo_xfer_cycle[c] -= int64(base)
+  if gba.mp2k != nil:
+    for i in 0 ..< gba.mp2k.lat_n: gba.mp2k.lat_at[i] -= int64(base)
   for i in 0..3:
     if gba.timer.cycle_enabled[i] >= base:
       gba.timer.cycle_enabled[i] -= base

@@ -85,6 +85,27 @@ beyond ±300 by envelope (Cinnamon Fuwafuwa, Winning Post, The Bible Game, Breat
 Advance 3) are the envelope estimator aliasing on periodic music — by waveform Cinnamon correlates
 at 0.97 within 30 samples and GT Advance 3 at 0.998 — apart from Winning Post (+512), unexamined.
 
+### Round 4: the slot crossing dated from the FIFO transfer
+
+The latency measurement assumed the sound DMA's cursor moved continuously; it moves 16 bytes at
+a time, so the crossing of a slot's start was mis-dated by up to 16 source samples, a fixed
+error per title (the hook and the DMA schedule are both locked to V-blank) that the old
+"pipeline" constant could only average. The DMA now stamps each FIFO transfer's cycle, the
+crossing is dated from the transfer that carried the slot's first byte, and that byte's place in
+the FIFO (15 deep after a refill) is counted; the residual is 10 source samples at every rate
+(6–14 measured on six titles at each of nine rates). Per-title spread within a rate fell from
+about ±20 to about ±7 output samples. Sweep: loudness unchanged; lag-0 waveform correlation above
+0.5 on 422 titles (was 403), median 0.547, upper quartile 0.73 → 0.80; the 13.4 kHz family
+(178 titles) went from a median of 0.49 to 0.59.
+
+What remains by waveform is small and vintage-specific: Estopolis and Ochaken restart the DMA
+every V-blank on the previous pass's slot, so a pass plays when the next handler runs and
+inherits its jitter (bimodal ±5 samples against the HLE's jitter-absorbing FIFO); the 42 kHz
+Castlevania sits +27 samples, which at that rate is enough to turn its lag-0 correlation
+negative. The envelope-based lag estimator aliases on periodic music (Cinnamon, GT Advance 3,
+Winning Post read hundreds of samples off while their waveforms correlate at 0.95 within 30).
+Camelot's driver (Golden Sun, Mario Golf/Tennis) never takes the engine lock and is not handled.
+
 ## Why span-matched
 
 `-d:mp2kwav` (`src/dingbat/gba/apu.nim`) gates the REAL FIFO capture on the same

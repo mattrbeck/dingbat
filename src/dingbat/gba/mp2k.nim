@@ -187,12 +187,13 @@ const
   # sample for the few samples it is late.
   MP2K_FIFO_CAP   = 4096
   MP2K_FIFO_GUARD = 16
-  # From the DMA cursor reaching a slot to that slot's first sample at the
-  # DAC, in FIFO (source-rate) samples: the 32-byte FIFO filled 16 bytes at
-  # a time, and the emulator's own FIFO reconstruction. Measured against the
-  # real stream on Emerald, Minish Cap, Beast Shooter and Estopolis (13–18
-  # kHz: about 2.1 ms) and Castlevania (42 kHz: a third of that).
-  MP2K_FIFO_PIPELINE = 28.0'f32
+  # From a byte's FIFO transfer to its sample at the DAC, beyond its place
+  # in the queue (the DMA refills 16 bytes when 15 remain, so a transfer's
+  # first byte plays 15 samples later), in source-rate samples: measured
+  # 6–14 on six titles at each of nine engine rates against the real
+  # stream (the emulator's cubic FIFO reconstruction and DMA service).
+  MP2K_FIFO_PIPELINE = 10.0'f32
+  MP2K_FIFO_REFILL   = 16'u32          # bytes per FIFO DMA transfer (GBATEK)
 
 # Mp2kSampler / Mp2kHle are declared in gba.nim (the GBA object references them).
 
@@ -789,13 +790,18 @@ proc dma_rate(m: Mp2kHle; slot_bytes: int): float32 =
   ## Samples per second the DMA replays: one slot per V-blank.
   float32(slot_bytes) * float32(APU_SAMPLE_RATE) / 548.625'f32
 
-proc pipeline_apu(m: Mp2kHle; sb: int): float32 =
-  ## The FIFO pipeline in APU samples for this ring's rate. -d:mp2kwav builds
-  ## take DINGBAT_MP2K_PIPE_APU=<n> as a fixed figure for A/B sweeps.
+proc pipeline_src(m: Mp2kHle): float32 =
+  ## The residual FIFO pipeline in source-rate samples. -d:mp2kwav builds
+  ## take DINGBAT_MP2K_PIPE_SRC=<n> for A/B sweeps.
   when defined(mp2kwav):
-    let fixed = getEnv("DINGBAT_MP2K_PIPE_APU")
-    if fixed.len > 0: return float32(parseInt(fixed))
-  MP2K_FIFO_PIPELINE * float32(APU_SAMPLE_RATE) / m.dma_rate(sb)
+    let fixed = getEnv("DINGBAT_MP2K_PIPE_SRC")
+    if fixed.len > 0: return float32(parseFloat(fixed))
+  MP2K_FIFO_PIPELINE
+
+proc pipeline_apu(m: Mp2kHle; sb: int): float32 =
+  ## Cursor-to-DAC in APU samples for the phase estimate (hw_latency): a
+  ## byte the cursor has just passed sits about a refill deep in the queue.
+  (float32(MP2K_FIFO_REFILL) + m.pipeline_src()) * float32(APU_SAMPLE_RATE) / m.dma_rate(sb)
 
 proc hw_latency(m: Mp2kHle): int =
   ## The hardware's pass-to-DAC latency in APU samples, from where the sound
@@ -884,14 +890,33 @@ proc measure_latency(m: Mp2kHle) =
   m.lat_prev_src = cur
   # resolve pending slots: crossed when the start lies in (prev, cur]
   let moved = (curoff + ring - prevoff) mod ring
+  let rate = m.dma_rate(sb)
+  let src_cycles = float32(CPU_CLOCK_SPEED) / rate          # cycles per source sample
+  let now_cyc = int64(m.gba.scheduler.cycles)
   var i = 0
   while i < m.lat_n:
     let start = m.lat_slot[i]
     let dist = (curoff + ring - start) mod ring      # cursor past the start by this much
-    let waited = m.apu_clock - m.lat_at[i]
+    let waited = now_cyc - m.lat_at[i]
     if moved > 0'u32 and dist < moved:
-      let lat = float32(waited) - float32(dist) * float32(APU_SAMPLE_RATE) / m.dma_rate(sb) +
-                m.pipeline_apu(sb)
+      # The cursor moves a refill at a time, so the transfer that carried
+      # byte `start` began at the refill grid below it, `n` transfers before
+      # the last one (whose cycle the DMA recorded); the transfers are a
+      # refill of timer periods apart. That byte then sits queue-deep in the
+      # FIFO behind the 15 the refill found there.
+      let xoff = start - (start mod MP2K_FIFO_REFILL)
+      let n = ((curoff + ring - MP2K_FIFO_REFILL - xoff) mod ring) div MP2K_FIFO_REFILL
+      let cross = float32(m.gba.dma.fifo_xfer_cycle[c] - m.lat_at[i]) -
+                  float32(n) * float32(MP2K_FIFO_REFILL) * src_cycles
+      let queue = float32(MP2K_FIFO_REFILL - 1) + float32(start - xoff) + m.pipeline_src()
+      let lat = cross / float32(APU_SAMPLE_PERIOD) +
+                queue * float32(APU_SAMPLE_RATE) / rate
+      when defined(mp2kwav):
+        if getEnv("DINGBAT_LATDUMP") == "1" and dbgLatDump < 40:
+          inc dbgLatDump
+          echo "lat start=", start, " curoff=", curoff, " prevoff=", prevoff, " xoff=", xoff, " n=", n,
+               " xfer-now=", m.gba.dma.fifo_xfer_cycle[c] - now_cyc, " hook-now=", m.lat_at[i] - now_cyc,
+               " cross=", cross, " queue=", queue, " lat=", lat, " ring=", ring, " sb=", sb
       if lat > 0:
         if m.lat_count == 0: m.lat_avg = lat
         else: m.lat_avg += (lat - m.lat_avg) * 0.125'f32
@@ -901,7 +926,7 @@ proc measure_latency(m: Mp2kHle) =
         m.lat_slot[j] = m.lat_slot[j + 1]
         m.lat_at[j] = m.lat_at[j + 1]
       dec m.lat_n
-    elif waited > 6 * 550:
+    elif waited > 6 * 550 * int64(APU_SAMPLE_PERIOD):
       for j in i ..< m.lat_n - 1:
         m.lat_slot[j] = m.lat_slot[j + 1]
         m.lat_at[j] = m.lat_at[j + 1]
@@ -913,7 +938,7 @@ proc measure_latency(m: Mp2kHle) =
   let slot = ((if cnt <= 1: 0 else: m.pend_period - (cnt - 1)) + m.slot_off) mod m.pend_period
   if m.lat_n < m.lat_slot.len:
     m.lat_slot[m.lat_n] = uint32(slot * sb)
-    m.lat_at[m.lat_n] = m.apu_clock
+    m.lat_at[m.lat_n] = int64(m.gba.scheduler.cycles)
     inc m.lat_n
 
 proc check_predictions(m: Mp2kHle; sound_info: uint32) =

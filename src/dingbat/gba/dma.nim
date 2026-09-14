@@ -239,6 +239,9 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
     dma.src[channel] = uint32(int(dma.src[channel]) + delta_source)
     dma.dst[channel] = uint32(int(dma.dst[channel]) + delta_dest)
 
+  if start_timing == 3 and (channel == 1 or channel == 2):
+    dma.fifo_xfer_cycle[channel] = int64(dma.gba.scheduler.cycles)
+
   if dest_ctrl == 3:  # IncrementReload
     dma.dst[channel] = dma.dmadad[channel]
 
