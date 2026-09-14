@@ -696,8 +696,8 @@ test("nothing the flight makes outlives it: every animation fills backwards",
   givenBoxes(app);
   app.api.flyBrand(false);
 
-  const all = [...flightOn(app, "bar-brand"), ...flightOn(app, "bar-word"),
-               ...flightOn(app, "home-brand")];
+  const all = [...flightOn(app, "bar-brand"), ...flightOn(app, "bar-logo"),
+               ...flightOn(app, "bar-word"), ...flightOn(app, "home-brand")];
   assert.ok(all.length >= 3, "a closing flight moves more than one thing");
   for (const a of all) {
     assert.equal(a.id, app.api.BRAND_FLY_ID, "tagged, so the next flight finds it");
@@ -712,7 +712,7 @@ test("a second flight cancels the first, even after the first has settled",
   givenBoxes(app);
 
   app.api.flyBrand(false);
-  const first = [...flightOn(app, "bar-brand"), ...flightOn(app, "home-brand")];
+  const first = [...flightOn(app, "bar-logo"), ...flightOn(app, "home-brand")];
   assert.ok(first.length >= 2);
 
   // Let it land. This is the state the old code lost track of: finished, and
@@ -723,13 +723,28 @@ test("a second flight cancels the first, even after the first has settled",
   app.api.flyBrand(true);
   assert.ok(first.every((a) => a.playState === "idle"),
             "the landed flight was cancelled, not left describing the brand");
-  assert.ok(flightOn(app, "bar-brand").length > 0, "and a new one is up");
+  assert.ok(flightOn(app, "bar-logo").length > 0, "and a new one is up");
 });
 
-// The word makes the round trip fading, because the flight is anchored on the
-// logo - the one part both layouts share - and the bar's word sits to the
-// right of its logo where the hero's sits under it. A word that stayed solid
-// sailed a long way past where it was going to land.
+// What flies is the logo, alone. The bar's word sits to the RIGHT of its logo
+// where the hero's sits UNDER it, so any transform that aims the logo properly
+// carries the word off to one side - fading it on the way down did not fix
+// that, it only made a fainter thing sail past the mark. It stays put and
+// dissolves where it is.
+test("only the logo is given a transform; the word never moves", async () => {
+  const app = await loadApp();
+  givenBoxes(app);
+
+  for (const up of [false, true]) {
+    app.api.flyBrand(up);
+    const moved = (id) => flightOn(app, id)
+      .some((a) => a.frames.some((f) => f.transform !== undefined));
+    assert.equal(moved("bar-logo"), true, "the logo is aimed");
+    assert.equal(moved("bar-word"), false, "the word is not carried along");
+    assert.equal(moved("bar-brand"), false, "nor is the row it sits in");
+  }
+});
+
 test("the word is only solid at the end it belongs to", async () => {
   const app = await loadApp();
   givenBoxes(app);

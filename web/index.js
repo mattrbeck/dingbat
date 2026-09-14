@@ -9418,22 +9418,36 @@ if (homeScroller.addEventListener) {
 // here - and the logo is the one part that is the same thing in both, so
 // anchoring the transform on it lands it exactly while the word sweeps along.
 // Every animation this makes is tagged, and every flight begins by cancelling
-// anything still tagged on either element. Tracking them in a variable was not
-// enough: the variable is cleared when a flight settles, so a finished
-// animation that is still FILLING is invisible to the next flight and goes on
-// holding whatever property it ended on. Which is also why nothing here fills
-// forwards any more - every one of these is `backwards`, so the moment it is
+// anything still tagged on any of the elements it touches. Tracking them in a
+// variable was not enough: the variable is cleared when a flight settles, so a
+// finished animation that is still FILLING is invisible to the next flight and
+// goes on holding whatever property it ended on. Which is also why nothing
+// here fills forwards - every one of these is `backwards`, so the moment it is
 // done the element goes back to being described by the stylesheet and nothing
 // else. A brand that cannot be shown is worse than a brand that does not fly.
 const BRAND_FLY_ID = "brand-fly";
+const BRAND_FLIERS = [barBrand, barLogo, barWord, brandEl];
 
 const cancelFlight = () => {
-  for (let el of [barBrand, barWord, brandEl]) {
+  for (let el of BRAND_FLIERS) {
     el.getAnimations?.().forEach((a) => { if (a.id === BRAND_FLY_ID) a.cancel(); });
   }
   brandAnim = null;
 };
 
+// What flies is the LOGO, by itself.
+//
+// It has to be the logo, because it is the one part the two layouts have in
+// common - everything else about them disagrees. But that means the word
+// cannot come along: the bar's sits to the RIGHT of its logo where the hero's
+// sits UNDER it, so any transform that lands the logo correctly carries the
+// word off to one side. Fading it while it travelled did not fix that, it just
+// made it a fainter thing sailing past the mark.
+//
+// So the word is not in the flight at all. It stays exactly where it is in the
+// bar and dissolves on the spot, and the logo detaches and makes the trip
+// alone. Nothing can overshoot, because nothing but the logo moves - and the
+// logo is being aimed.
 const flyBrand = (up) => {
   cancelFlight();
   if (!barBrand.animate) return;
@@ -9442,45 +9456,38 @@ const flyBrand = (up) => {
   let bar = barLogo.getBoundingClientRect?.();
   if (!hero || !bar || !hero.width || !bar.width) return;
 
-  let scale = hero.width / bar.width;
-  let bx = barBrand.getBoundingClientRect();
-  barBrand.style.transformOrigin =
-    (bar.left + bar.width / 2 - bx.left) + "px " +
-    (bar.top + bar.height / 2 - bx.top) + "px";
-  let dx = (hero.left + hero.width / 2) - (bar.left + bar.width / 2);
-  let dy = (hero.top + hero.height / 2) - (bar.top + bar.height / 2);
-  let overHero = `translate(${dx}px, ${dy}px) scale(${scale})`;
+  // Both rects are as they sit right now, so whatever the bar's own
+  // --brand-p transform is doing is already accounted for in the delta.
+  // transform-origin is the logo's own centre, which is what these numbers
+  // are measured between.
+  let overHero = "translate(" +
+    ((hero.left + hero.width / 2) - (bar.left + bar.width / 2)) + "px, " +
+    ((hero.top + hero.height / 2) - (bar.top + bar.height / 2)) + "px) scale(" +
+    (hero.width / bar.width) + ")";
 
   /** @type {KeyframeAnimationOptions} */
   let glide = { duration: BRAND_MOVE_MS, easing: "cubic-bezier(.22,.61,.36,1)",
                 fill: "backwards" };
-  // The word's own fade. The flight is anchored on the LOGO, because that is
-  // the one part both layouts have in common - but the bar's word sits to the
-  // right of its logo while the hero's sits under it, so a word that made the
-  // whole journey sailed a long way past where it was going to land. It
-  // leaves early on the way down and arrives late on the way up, so only the
-  // logo is ever seen crossing.
-  // Full duration and LINEAR, so the offsets below mean what they say in wall
-  // clock; a short animation that finished early would drop its effect and
-  // hand the word back at full opacity exactly where it is furthest from
-  // where it belongs. Nothing fills forwards, so the tail keyframe is what
-  // holds it: 0 to the end going down, 1 to the end coming up, both of which
-  // agree with what the stylesheet says once the flight lets go.
+  // Full length and LINEAR, so the offsets below mean what they say in wall
+  // clock. A short animation would finish mid-flight, drop its effect and hand
+  // the word straight back at full opacity - and nothing fills forwards here,
+  // so the tail keyframe is what holds it. Both tails agree with what the
+  // stylesheet says once the flight lets go.
   /** @type {KeyframeAnimationOptions} */
   let word = { duration: BRAND_MOVE_MS, easing: "linear", fill: "backwards" };
   let wordFrames = up
     ? [{ opacity: 0, offset: 0 }, { opacity: 0, offset: 0.55 },
        { opacity: 1, offset: 1 }]
-    : [{ opacity: 1, offset: 0 }, { opacity: 0, offset: 0.45 },
+    : [{ opacity: 1, offset: 0 }, { opacity: 0, offset: 0.4 },
        { opacity: 0, offset: 1 }];
 
   let made;
   if (up) {
-    // A game opening. The hero's copy is hidden the same instant, so this one
+    // A game opening. The hero's copy is hidden the same instant, so the logo
     // starts solid and exactly over it - fading in from nothing would leave a
     // moment with no brand anywhere.
     made = [
-      barBrand.animate([{ transform: overHero }, { transform: "none" }], glide),
+      barLogo.animate([{ transform: overHero }, { transform: "none" }], glide),
       barWord.animate(wordFrames, word),
     ];
   } else {
@@ -9493,15 +9500,17 @@ const flyBrand = (up) => {
     // than a pair of keyframe offsets. The `easing` option is iteration
     // easing: it remaps progress before the keyframes are read, so on a glide
     // this ease-out an offset of 0.66 arrives about a third of the way through
-    // the wall clock, and a flick at the end became most of the flight with
-    // the word legible twice in two different layouts.
+    // the wall clock, and a flick at the end became most of the flight.
     /** @type {KeyframeAnimationOptions} */
     let fade = { duration: BRAND_HANDOVER_MS,
                  delay: BRAND_MOVE_MS - BRAND_HANDOVER_MS,
                  easing: "linear", fill: "backwards" };
     made = [
-      barBrand.animate([{ transform: "none" }, { transform: overHero }], glide),
+      barLogo.animate([{ transform: "none" }, { transform: overHero }], glide),
       barWord.animate(wordFrames, word),
+      // On the whole bar copy, so the flying logo goes with it. Held solid
+      // from the start (backwards fill) against the stylesheet, which has
+      // already put --brand-p at 0 by now.
       barBrand.animate([{ opacity: 1 }, { opacity: 0 }], fade),
       brandEl.animate(
         [{ opacity: 0, transform: "scale(.97)" },
@@ -9515,7 +9524,6 @@ const flyBrand = (up) => {
   // flight that is still the current one.
   let settle = () => {
     if (brandAnim !== made) return;
-    barBrand.style.transformOrigin = "";
     brandAnim = null;
     syncBrand();
   };
