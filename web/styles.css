@@ -1386,27 +1386,12 @@ body:not(.running) .cart-btn {
 }
 
 /* --- Enhanced-audio (sound-engine HLE) indicator --- */
+/* An .icon-btn like its neighbours: dim = the engine is recognised but the
+   HLE is not substituting (tapped off for this game, or the game is
+   streaming its own audio); lit = substituting. The colour fades so a
+   toggle never pops. */
 #hle-indicator {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 36px;
-  color: var(--accent);
-  /* Fade/scale in when engaged so it never pops abruptly */
-  opacity: 1;
-  transition: opacity 0.35s ease, transform 0.35s ease;
-}
-
-#hle-indicator[hidden] {
-  display: none;
-}
-
-/* Staged reveal: JS unhides first, then adds .on for the transition */
-#hle-indicator:not(.on) {
-  opacity: 0;
-  transform: scale(0.7);
+  transition: color 0.35s ease, background 0.12s, box-shadow 0.12s, transform 0.06s;
 }
 
 #hle-indicator svg {
@@ -1414,17 +1399,14 @@ body:not(.running) .cart-btn {
   height: 18px;
 }
 
-#hle-indicator svg path {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
 #hle-indicator svg circle {
   fill: currentColor;
   stroke: none;
+}
+
+#hle-indicator.on {
+  color: var(--accent);
+  border-color: rgba(var(--accent-rgb), 0.5);
 }
 
 /* Gentle glow so it reads as "lit", echoing the running-status LED */
@@ -7351,7 +7333,7 @@ body.running.sync-shown #status {
     transition: opacity 0.2s;
   }
   #hle-indicator {
-    transition: opacity 0.35s ease;
+    transition: color 0.35s ease;
   }
   body.running #topbar,
   #topbar-handle,

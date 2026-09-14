@@ -220,17 +220,20 @@
         <span class="update-dot" aria-hidden="true"></span><span id="update-label">Update</span>
       </button>
 
-      <!-- Enhanced-audio indicator: lit while a sound-engine HLE is enabled
-           and actually substituting audio. Informational, not a control. -->
-      <div id="hle-indicator" role="status" hidden
-           title="Enhanced audio active — high-quality sound-engine emulation"
-           aria-label="Enhanced audio active">
+      <!-- Enhanced-audio switch: shown while the Enhanced music synthesis
+           setting is on and the loaded game's sound engine is recognised;
+           lit while the HLE is actually substituting audio. Tapping it turns
+           the HLE off and on for this game only — an A/B against the
+           hardware mix that is never saved and resets on the next load. -->
+      <button type="button" class="icon-btn" id="hle-indicator" hidden
+              title="Enhanced audio on — tap to hear the hardware mix"
+              aria-label="Enhanced audio" aria-pressed="true">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M9 17V4l10-2v12"/>
           <circle cx="6.5" cy="17" r="2.5"/>
           <circle cx="16.5" cy="14" r="2.5"/>
         </svg>
-      </div>
+      </button>
 
       <div id="volume-control">
         <button type="button" class="icon-btn" id="mute-btn" title="Mute" aria-label="Mute">

@@ -6643,11 +6643,15 @@ if (fifoInterpToggle) {
 // Opt-in: re-renders GBA music above the FIFO's ~13 kHz when the MP2K/m4a
 // engine is detected. The wasm side remembers it for future cores.
 var mp2kHle = false;
+// The note icon in the top bar (#hle-indicator) turns the HLE off and on for
+// the loaded game only: never saved, cleared by loadRom. It exists so the
+// two mixes can be compared mid-song without a trip through Settings.
+var mp2kHleSessionOff = false;
 const mp2kHleToggle = /** @type {HTMLInputElement} */ (document.getElementById("mp2k-hle-toggle"));
 
 const applyMp2kHle = () => {
   if (typeof Module !== "undefined" && Module._wasm_set_mp2k_hle) {
-    Module._wasm_set_mp2k_hle((mp2kHle && !speedMode) ? 1 : 0);
+    Module._wasm_set_mp2k_hle((mp2kHle && !speedMode && !mp2kHleSessionOff) ? 1 : 0);
   }
 };
 
@@ -7890,6 +7894,7 @@ const loadRom = async (romName, originalName, opts = {}) => {
   Module.ccall("initFromEmscripten", null, ["string"], [romName]);
   await restoreCheats();  // fresh core: re-apply this game's saved cheats
   applyPitchCorrectFF();  // fresh core: re-push the local audio preference
+  mp2kHleSessionOff = false; // the note-icon A/B belongs to the previous game
   applyMp2kHle();         // (covers loadAudioSettings racing Module init)
   detectTiltCart();       // MBC7/Yoshi: enable tilt input routing for this cart
   detectCameraCart();     // Pocket Camera: offer the real webcam
@@ -11221,26 +11226,43 @@ var Module = {
       }
     };
 
-    // Enhanced-audio indicator. Two-stage so the CSS transition plays:
-    // unhide, then .on on the next frame.
+    // Enhanced-audio switch (#hle-indicator). Shown while the setting is on
+    // and the loaded game's sound engine is recognised — detection survives
+    // the per-game bypass, so the button stays put to be tapped back on —
+    // and lit while the HLE is substituting audio right now.
     const hleIndicator = document.getElementById("hle-indicator");
+    let hleShown = false;
     let hleActive = false;
+    let hlePressed = true;
     const updateHleIndicator = () => {
-      const on = !!(
+      const avail = mp2kHle && !speedMode && !!(
+        Module._wasm_mp2k_available && Module._wasm_mp2k_available()
+      );
+      const on = avail && !!(
         Module._wasm_hle_audio_active && Module._wasm_hle_audio_active()
       );
-      if (on === hleActive) return;
-      hleActive = on;
-      if (on) {
-        hleIndicator.hidden = false;
-        // reflow so the class add animates
-        void hleIndicator.offsetWidth;
-        hleIndicator.classList.add("on");
-      } else {
-        hleIndicator.classList.remove("on");
-        hleIndicator.hidden = true;
+      const pressed = !mp2kHleSessionOff;
+      if (avail !== hleShown) {
+        hleShown = avail;
+        hleIndicator.hidden = !avail;
+      }
+      if (on !== hleActive) {
+        hleActive = on;
+        hleIndicator.classList.toggle("on", on);
+      }
+      if (pressed !== hlePressed) {
+        hlePressed = pressed;
+        hleIndicator.setAttribute("aria-pressed", pressed ? "true" : "false");
+        hleIndicator.title = pressed
+          ? "Enhanced audio on — tap to hear the hardware mix"
+          : "Enhanced audio off for this game — tap to turn it back on";
       }
     };
+    hleIndicator.addEventListener("click", () => {
+      mp2kHleSessionOff = !mp2kHleSessionOff;
+      applyMp2kHle();
+      updateHleIndicator();
+    });
 
     // Advance the online-link core by what `accumulator` affords, capped.
     // Called from the RAF loop and from netplay.js on every inbound message
