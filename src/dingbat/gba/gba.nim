@@ -589,6 +589,7 @@ type
     wave*, freq*, ct*: uint32
     pr*, pl*: uint8         # per-side volumes predicted for this pass (mp2k.nim predict_envelope)
     prf*, plf*: float32     # the same gains un-truncated (side/256 scale), for the quality tier
+    prf2*, plf2*: float32   # ...and the NEXT pass's, by the same rules (the tier's continuous envelope)
     pvalid*: bool           # a prediction was made (checked one hook later)
 
   Mp2kSampler* = object
@@ -612,7 +613,7 @@ type
     tap_i*:       uint32    # cursor the taps were fetched for (0xFFFFFFFF = none)
     ended*:       bool      # one-shot cursor ran past the end: silent (mp2k.nim advance_cursor)
     vol_l*, vol_r*: float32 # per-side gain for the frame being rendered (side/256)
-    vol_l_from*, vol_r_from*: float32  # quality tier: gains the frame's ramp starts from
+    vol_l_to*, vol_r_to*: float32  # quality tier: gains at the END of the frame (next pass's)
     age*:         int       # frames since (re)trigger; 0 on the attack frame
     chk_off*:     uint32    # mp2kwav: non-zero start offset seen at note-on, checked next pass
 
@@ -717,6 +718,7 @@ type
     quality*:        bool
     fine_a*, fine_b*: float32
     ramp_i*:         int            # output samples rendered so far this frame
+    frame_n*:        int            # output samples in the frame being rendered
     fifo_target*:    int            # level aimed for when a frame is pushed (the guard)
     fifo_primed*:    bool           # target-level silence pre-fill done
     mono_mode*:      int    # fed FIFO topology: 0 stereo, 1 mono via A, 2 mono via B (apply_pending)

@@ -220,12 +220,13 @@
         <span class="update-dot" aria-hidden="true"></span><span id="update-label">Update</span>
       </button>
 
-      <!-- Enhanced-audio switch: shown while the Enhanced music synthesis
+      <!-- Enhanced-audio indicator: shown while the Enhanced music synthesis
            setting is on and the loaded game's sound engine is recognised;
-           lit while the HLE is actually substituting audio. Tapping it turns
-           the HLE off and on for this game only — an A/B against the
-           hardware mix that is never saved and resets on the next load. -->
-      <button type="button" class="icon-btn" id="hle-indicator" hidden
+           lit while the HLE is actually substituting audio. A plain icon, not
+           a button in the bar's sense, but tapping it turns the HLE off and
+           on for this game only — a debugging A/B against the hardware mix
+           that is never saved and resets on the next load. -->
+      <button type="button" id="hle-indicator" hidden
               title="Enhanced audio on — tap to hear the hardware mix"
               aria-label="Enhanced audio" aria-pressed="true">
         <svg viewBox="0 0 24 24" aria-hidden="true">

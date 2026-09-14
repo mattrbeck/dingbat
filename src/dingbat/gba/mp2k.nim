@@ -201,9 +201,6 @@ const
   MP2K_FIFO_PIPELINE      = 4.0'f32
   MP2K_FIFO_PIPELINE_FAST = 2.0'f32
   MP2K_FIFO_FAST_RATE     = 35000.0'f32
-  # Quality tier: output samples a continuing note's gain ramps over at the
-  # start of a frame (~3 ms), instead of the driver's per-frame step.
-  MP2K_RAMP_N = 96
   # Sampler tap window: taps[k] holds the source sample at cursor + k -
   # MP2K_TAP_OFF. Catmull-Rom uses the four around the cursor; the quality
   # tier's windowed sinc uses up to all of them: its kernel is 8 source
@@ -562,29 +559,40 @@ proc snapshot_pass(m: Mp2kHle; sound_info: uint32) =
       let sus = int(m.rd8(base + SC_SUSTAIN))
       let rel = int(m.rd8(base + SC_RELEASE))
       let phase = p.status and CH_ENV
+      let echo = int(m.rd8(base + SC_ECHO_VOL))
+      let echo_len = int(m.rd8(base + SC_ECHO_LEN))
       # The pass's envelope step (P3, nine vintages): note-on starts at the
       # attack rate; attack adds the rate and clamps at 255 (into decay);
       # decay multiplies by rate/256 down to sustain; a STOP multiplies by
       # the release rate/256 and drops the channel at 0 — unless the note's
       # pseudo-echo volume catches it first: the release then holds at that
       # volume (status IEC) for pseudo-echo-length passes (Beast Shooter's
-      # voices; the self-check pins the rule).
-      if (p.status and CH_START) != 0:
-        ev = min(atk, 255)
-      elif (p.status and CH_IEC) != 0:
-        # holding at the echo volume; the pass that finds the length at 0
-        # drops the channel (rig scenario iec: length 8 holds 8 passes)
-        ev = int(m.rd8(base + SC_ECHO_VOL))
-        if int(m.rd8(base + SC_ECHO_LEN)) == 0: ev = 0
-      elif (p.status and CH_STOP) != 0:
-        ev = (ev * rel) shr 8
-        let echo = int(m.rd8(base + SC_ECHO_VOL))
-        if echo > 0 and ev <= echo: ev = echo
-      elif phase == 3:
-        ev = min(ev + atk, 255)
-      elif phase == 2:
-        ev = (ev * dec) shr 8
-        if ev <= sus: ev = sus
+      # voices; the self-check pins the rule). Applied once for this pass
+      # (the bytes checked one hook later) and once more for the next, the
+      # far end of the quality tier's continuous envelope.
+      proc env_rule(ev, phase: int; status: uint8): (int, int) =
+        if (status and CH_START) != 0:
+          let e = min(atk, 255)
+          (e, (if e >= 255: 2 else: 3))
+        elif (status and CH_IEC) != 0:
+          # holding at the echo volume; the pass that finds the length at 0
+          # drops the channel (rig scenario iec: length 8 holds 8 passes)
+          ((if echo_len == 0: 0 else: echo), phase)
+        elif (status and CH_STOP) != 0:
+          var e = (ev * rel) shr 8
+          if echo > 0 and e <= echo: e = echo
+          (e, phase)
+        elif phase == 3:
+          let e = min(ev + atk, 255)
+          (e, (if e >= 255: 2 else: 3))
+        elif phase == 2:
+          var e = (ev * dec) shr 8
+          if e <= sus: (sus, 1) else: (e, 2)
+        else:
+          (ev, phase)
+      let (ev1, phase1) = env_rule(ev, int(phase), p.status)
+      let (ev2, _) = env_rule(ev1, phase1, p.status and not CH_START)
+      ev = ev1
       let mvs = (ev * master) shr 4
       let vr = int(m.rd8(base + SC_VOL_R))
       let vl = int(m.rd8(base + SC_VOL_L))
@@ -592,16 +600,21 @@ proc snapshot_pass(m: Mp2kHle; sound_info: uint32) =
       # quality tier, the same product without its two truncations: a quiet
       # voice's tail otherwise steps by 5–10 % per frame on the byte grid.
       let mvs_f = float32(ev * master) * (1.0'f32 / 16.0'f32)
+      let mvs_f2 = float32(ev2 * master) * (1.0'f32 / 16.0'f32)
       if m.pend_mono != 0:
         p.pr = uint8((mvs * ((vr + vl) shr 1)) shr 8)
         p.pl = 0
         p.prf = mvs_f * float32(vr + vl) * (1.0'f32 / 131072.0'f32)
         p.plf = 0
+        p.prf2 = mvs_f2 * float32(vr + vl) * (1.0'f32 / 131072.0'f32)
+        p.plf2 = 0
       else:
         p.pr = uint8((mvs * vr) shr 8)
         p.pl = uint8((mvs * vl) shr 8)
         p.prf = mvs_f * float32(vr) * (1.0'f32 / 65536.0'f32)
         p.plf = mvs_f * float32(vl) * (1.0'f32 / 65536.0'f32)
+        p.prf2 = mvs_f2 * float32(vr) * (1.0'f32 / 65536.0'f32)
+        p.plf2 = mvs_f2 * float32(vl) * (1.0'f32 / 65536.0'f32)
       p.pvalid = true
 
 proc apply_pending(m: Mp2kHle; sound_info: uint32) =
@@ -677,13 +690,18 @@ proc apply_pending(m: Mp2kHle; sound_info: uint32) =
     # left at 0 (observed live) — use it for both sides; the output router
     # then feeds the one fed FIFO. A killed channel keeps its bytes.
     var vr, vl: float32
+    var vr_to, vl_to: float32   # quality tier: the next pass's, else unused
     if m.predict and p.pvalid:
       if m.quality:
         vr = p.prf
         vl = (if m.mono_mode != 0: vr else: p.plf)
+        vr_to = p.prf2
+        vl_to = (if m.mono_mode != 0: vr_to else: p.plf2)
       else:
         vr = float32(p.pr) / 256.0'f32
         vl = (if m.mono_mode != 0: vr else: float32(p.pl) / 256.0'f32)
+        vr_to = vr
+        vl_to = vl
       if p.pr == 0 and (m.mono_mode != 0 or p.pl == 0) and (p.status and CH_STOP) != 0:
         s.active = false   # released to nothing: the pass drops it
         continue
@@ -691,6 +709,8 @@ proc apply_pending(m: Mp2kHle; sound_info: uint32) =
       vr = float32(m.rd8(base + SC_ENV_VR)) / 256.0'f32
       vl = (if m.mono_mode != 0: vr
             else: float32(m.rd8(base + SC_ENV_VL)) / 256.0'f32)
+      vr_to = vr
+      vl_to = vl
     let ctype = p.ctype
     # Mode bits: TYPE_* table. Compressed decode is selected by WaveData.type
     # != 0 under CMP or REV, not by the channel bit alone.
@@ -839,17 +859,15 @@ proc apply_pending(m: Mp2kHle; sound_info: uint32) =
     s.in_rom = wave_region >= 0x08'u32 and wave_region <= 0x0D'u32
     if s.in_rom:
       s.rom_off = (new_wave_data and 0x01FFFFFF'u32)
-    # Quality tier: a continuing note ramps from the previous frame's gain
-    # (render_one); a (re)triggered one starts at its attack value, as the
-    # driver's does.
-    if retrig:
-      s.vol_l_from = vl
-      s.vol_r_from = vr
-    else:
-      s.vol_l_from = s.vol_l
-      s.vol_r_from = s.vol_r
+    # Quality tier: the frame runs from this pass's gain to the next pass's
+    # (render_one), so the envelope is the continuous curve through the
+    # driver's per-frame values — including the run down to zero on the
+    # frame before a released note is dropped. A (re)triggered note starts
+    # at its attack value, as the driver's does.
     s.vol_l = vl
     s.vol_r = vr
+    s.vol_l_to = vl_to
+    s.vol_r_to = vr_to
   m.render_frame()
 
 proc fifo_dma(m: Mp2kHle): int =
@@ -1551,9 +1569,12 @@ proc render_one(m: Mp2kHle): tuple[a: float32, b: float32] =
   ## arithmetic, where that arithmetic is a limit of the hardware rather
   ## than the music — three deliberate departures, each sub-LSB or sub-frame
   ## on the driver's scale:
-  ##   * gains ramp over the first MP2K_RAMP_N output samples of a frame
-  ##     instead of stepping once per V-blank (the driver mixes each pass
-  ##     flat; a decaying note's staircase is a 60 Hz buzz on hardware);
+  ##   * gains run linearly across the frame from this pass's value to the
+  ##     next pass's, predicted by the same rules — the continuous envelope
+  ##     through the driver's per-V-blank values (the driver mixes each
+  ##     pass flat; a decaying note's staircase is a 60 Hz buzz on
+  ##     hardware), and they are the exact written product, not the
+  ##     driver's twice-truncated byte;
   ##   * the echo seed is interpolated between engine-rate cells instead
   ##     of held (the hold is the DMA/DAC's zero-order replay);
   ##   * the sample is not truncated to the FIFO's integer latch — the
@@ -1582,14 +1603,14 @@ proc render_one(m: Mp2kHle): tuple[a: float32, b: float32] =
     else:
       sample = catmull_rom(s.taps[T - 1], s.taps[T], s.taps[T + 1], s.taps[T + 2], s.phase_frac)
     # s8 units in, the driver's per-channel byte out: sample * side / 256.
-    # Quality tier: a continuing note's gain ramps from the previous
-    # frame's value over the frame's first MP2K_RAMP_N output samples.
+    # Quality tier: the gain runs linearly across the frame from this
+    # pass's value to the next pass's predicted one.
     var gl = s.vol_l
     var gr = s.vol_r
-    if m.quality and m.ramp_i < MP2K_RAMP_N:
-      let k = float32(m.ramp_i) * (1.0'f32 / float32(MP2K_RAMP_N))
-      gl = s.vol_l_from + (s.vol_l - s.vol_l_from) * k
-      gr = s.vol_r_from + (s.vol_r - s.vol_r_from) * k
+    if m.quality and m.frame_n > 0:
+      let k = float32(m.ramp_i) / float32(m.frame_n)
+      gl = s.vol_l + (s.vol_l_to - s.vol_l) * k
+      gr = s.vol_r + (s.vol_r_to - s.vol_r) * k
     let cl = sample * gl
     let cr = sample * gr
     accl += cl
@@ -1805,6 +1826,7 @@ proc render_frame(m: Mp2kHle) =
   var n = int(m.fifo_acc)
   m.fifo_acc -= float32(n)
   if n > cap - level - 1: n = cap - level - 1
+  m.frame_n = n
   for i in 0 ..< n:
     let (a, b) = m.render_one()
     let wi = (m.fifo_w mod cap) * 2

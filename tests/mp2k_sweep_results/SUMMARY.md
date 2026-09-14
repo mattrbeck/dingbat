@@ -161,6 +161,14 @@ mono vintages (Minish Cap, Beast Shooter, Metal Max) found their song data centr
 and left volumes differ by at most 1 in 16–20 k channel-frames), so there is no stereo to restore
 there. Fidelity metrics within noise of the hardware-stream comparison (run 26: 708 above 0.5, median 0.844, against run 25's 711 and 0.847 — the sinc removes images the hardware stream still has), loudness unchanged; worst-case cost 5 % (Beast Shooter).
 
+Last, the envelope: the tier's 3 ms ramp became the continuous curve. Each frame's gain now
+runs linearly from this pass's value to the next pass's, predicted by the same P3 rules applied
+once more (attack into decay, decay to sustain, release toward zero with the pseudo-echo floor),
+so a released note runs down to zero across the frame before the driver drops it instead of
+ending on a step. The prediction bytes checked one hook later are unchanged, and so is the
+sweep (run 27). The indicator in the top bar went back to a plain icon at Matt's request; it
+still toggles the HLE for the loaded game when tapped.
+
 The listening set (12 titles, hardware/HLE alternating plus both full tracks, and four
 parity/quality tier files) lives outside the repo in `~/Documents/emu/gba/mp2k-ab/`.
 

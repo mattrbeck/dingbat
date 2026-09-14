@@ -321,8 +321,11 @@ The probes also show where the HLE's render is not the driver's, by design:
 * **Quality tier** (`Mp2kHle.quality`, on by default; `DINGBAT_MP2K_QUALITY=0`
   in the probe for parity checks). Five departures from the driver's
   arithmetic, each a limit of the hardware rather than of the music:
-  a continuing note's gain ramps over the first 96 output samples of a frame
-  (~3 ms) instead of stepping once per V-blank; the gains themselves are the
+  a note's gain runs linearly across each frame from this pass's value to the
+  next pass's, predicted by the same P3 rules — the continuous envelope
+  through the driver's per-V-blank values, including the run down to zero on
+  the frame before a released note is dropped — instead of stepping once per
+  V-blank; the gains themselves are the
   un-truncated product (envelope × master × side) rather than the driver's
   twice-shifted byte, which steps a quiet tail by 5–10 % per frame; the echo
   seed is interpolated between engine-rate cells instead of held (the hold is

@@ -99,6 +99,22 @@ SIO words under `LINKPROTO_VERSION`, and its peer ROM check is a CRC-32 of
 the file (`LinkMsg.rom_crc`; web rollback has its own `rbHash`). None of
 those is `gba_rom_checksum`.
 
+## What is deliberately not in the payload
+
+The MP2K sound-engine HLE (`src/dingbat/gba/mp2k.nim`) keeps no state in the
+payload. Everything it holds is a shadow of the game's own driver state in
+emulated RAM — the learned mixer hook, each voice's read cursor and 64-sample
+tap window, the quality tier's per-frame gain ramps, the echo ring, and the
+frame FIFO that lands each pass at the hardware's latency — and a load rebuilds
+it from that RAM (`mp2k_state_loaded`: every voice re-latches at the engine's
+own cursor, the hook is re-learned if the state came from another session, and
+the first frame after the load starts the FIFO at its target level with
+silence). Consequences a reader may notice: the first V-blank after a load
+plays the hardware path or silence rather than the HLE's render, a note that
+was mid-decay resumes at its next per-frame value (no ramp across the load),
+and a state saved with the HLE off loads identically with it on. None of that
+is a bug to chase, and none of it justifies a payload revision.
+
 ## Rules for changing the format
 
 * **`EventType` is append-only.** `scheduler.save_to` writes `ord(ev.kind)`;

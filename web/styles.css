@@ -1386,17 +1386,46 @@ body:not(.running) .cart-btn {
 }
 
 /* --- Enhanced-audio (sound-engine HLE) indicator --- */
-/* An .icon-btn like its neighbours: dim = the engine is recognised but the
-   HLE is not substituting (tapped off for this game, or the game is
-   streaming its own audio); lit = substituting. The colour fades so a
-   toggle never pops. */
+/* A plain icon, not a button: no chrome, no hover state. dim = the engine
+   is recognised but the HLE is not substituting (tapped off for this game,
+   or the game is streaming its own audio); lit = substituting. Tapping
+   toggles the HLE for the loaded game (a debugging aid). The colour fades
+   so a toggle never pops. */
 #hle-indicator {
-  transition: color 0.35s ease, background 0.12s, box-shadow 0.12s, transform 0.06s;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--chrome-ink-dim);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 0.35s ease;
+}
+
+#hle-indicator[hidden] {
+  display: none;
+}
+
+#hle-indicator:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 #hle-indicator svg {
   width: 18px;
   height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 #hle-indicator svg circle {
@@ -1406,7 +1435,6 @@ body:not(.running) .cart-btn {
 
 #hle-indicator.on {
   color: var(--accent);
-  border-color: rgba(var(--accent-rgb), 0.5);
 }
 
 /* Gentle glow so it reads as "lit", echoing the running-status LED */
