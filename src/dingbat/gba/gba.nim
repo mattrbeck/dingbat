@@ -588,6 +588,7 @@ type
     status*, ctype*: uint8
     wave*, freq*, ct*: uint32
     pr*, pl*: uint8         # per-side volumes predicted for this pass (mp2k.nim predict_envelope)
+    prf*, plf*: float32     # the same gains un-truncated (side/256 scale), for the quality tier
     pvalid*: bool           # a prediction was made (checked one hook later)
 
   Mp2kSampler* = object
@@ -607,7 +608,7 @@ type
     blk*:         array[64, int8]  # decoded s8 samples of that block
     src_index*:   uint32    # integer sample read cursor (block/offset derived from this)
     phase_frac*:  float32   # fractional phase (mu) between fetched samples, 0..1
-    taps*:        array[4, float32]  # source samples at cursor-1 .. cursor+2, s8 units
+    taps*:        array[64, float32] # source samples at cursor-31 .. cursor+32, s8 units (MP2K_TAP_OFF)
     tap_i*:       uint32    # cursor the taps were fetched for (0xFFFFFFFF = none)
     ended*:       bool      # one-shot cursor ran past the end: silent (mp2k.nim advance_cursor)
     vol_l*, vol_r*: float32 # per-side gain for the frame being rendered (side/256)

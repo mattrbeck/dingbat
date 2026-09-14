@@ -148,6 +148,19 @@ per-voice floor, amplified up to 3× by the reverb comb: about 40 DAC steps on B
 absent from the HLE; whole-run RMS comparisons read that as the HLE being quieter (−0.6 dB
 Emerald, −1.7 dB Beast Shooter), while per-second windowed loudness matches within 0.1 dB.
 
+Matt then set the goal explicitly: the HLE should *improve* on the hardware — the artist's intent
+without the hardware's limits — never merely mimic it, and never add sounds or prolong voices.
+Two more limits were lifted in the tier on that basis. Gains are the un-truncated product (the
+driver's twice-shifted byte steps a quiet tail by 5–10 % a frame). Voices are resampled with a
+windowed sinc stretched by the playback step: Breath of Fire plays every voice above the output
+rate (up to 107 kHz) and Beast Shooter a fifth of its, and Catmull-Rom decimated those without a
+filter, so part of BoF's "brightness" was aliasing; band-limited at the output Nyquist its
+above-8 kHz share falls from 6.0 % to 4.7 % (hardware: 0.9 %), the rest being the samples' own
+content. Slow-played voices lose the interpolation images above their own band. A census of the
+mono vintages (Minish Cap, Beast Shooter, Metal Max) found their song data centre-panned (right
+and left volumes differ by at most 1 in 16–20 k channel-frames), so there is no stereo to restore
+there. Fidelity metrics within noise of the hardware-stream comparison (run 26: 708 above 0.5, median 0.844, against run 25's 711 and 0.847 — the sinc removes images the hardware stream still has), loudness unchanged; worst-case cost 5 % (Beast Shooter).
+
 The listening set (12 titles, hardware/HLE alternating plus both full tracks, and four
 parity/quality tier files) lives outside the repo in `~/Documents/emu/gba/mp2k-ab/`.
 

@@ -319,15 +319,27 @@ The probes also show where the HLE's render is not the driver's, by design:
   correlation above 0.5 on 711 of 780 music titles, median 0.85 (was 422
   and 0.55 with the old band and the old pipeline of 10).
 * **Quality tier** (`Mp2kHle.quality`, on by default; `DINGBAT_MP2K_QUALITY=0`
-  in the probe for parity checks). Three departures from the driver's
+  in the probe for parity checks). Five departures from the driver's
   arithmetic, each a limit of the hardware rather than of the music:
   a continuing note's gain ramps over the first 96 output samples of a frame
-  (~3 ms) instead of stepping once per V-blank; the echo seed is interpolated
-  between engine-rate cells instead of held (the hold is the DMA/DAC's
-  zero-order replay); and the sample is not truncated to the FIFO's integer
-  latch — the remainder rides past the 10-bit DAC stage in apu.nim. On the
-  same 50 s runs the tier changes the waveform by 4–7 % RMS (the ramps and
-  the echo) and lowers the above-6 kHz floor of quiet passages by 1.5–3×
-  against the parity render (Emerald 64 → 40, Minish Cap 26 → 8, Beast
-  Shooter 50 → 24 on the emitted scale; the hardware path reads 56, 43, 58).
-  The library sweep's fidelity metrics are unchanged by it.
+  (~3 ms) instead of stepping once per V-blank; the gains themselves are the
+  un-truncated product (envelope × master × side) rather than the driver's
+  twice-shifted byte, which steps a quiet tail by 5–10 % per frame; the echo
+  seed is interpolated between engine-rate cells instead of held (the hold is
+  the DMA/DAC's zero-order replay); the sample is not truncated to the FIFO's
+  integer latch — the remainder rides past the 10-bit DAC stage in apu.nim;
+  and voices are resampled with a windowed sinc (8-sample half-width, 92 % of
+  Nyquist, stretched by the playback step up to 4×) instead of Catmull-Rom,
+  so a slow-played sample carries none of the images the driver's linear
+  interpolation and the DAC's hold add above its own band, and a fast-played
+  one is band-limited at the output Nyquist instead of folding its top
+  octaves back in as the driver's unfiltered decimation does. That last
+  matters more than it sounds: Breath of Fire plays every voice above the
+  output rate (up to 107 kHz, three source samples per output sample) and
+  Beast Shooter a fifth of its. On the same 50 s runs the tier lowers the
+  above-8 kHz share of Breath of Fire from 6.0 % (Catmull-Rom, aliased) to
+  4.7 % — still five times the hardware's 0.9 %, and now all of it the
+  samples' own content below 15 kHz — and the above-6 kHz floor of quiet
+  passages by 1.5–3× on Emerald, Minish Cap and Beast Shooter. The library
+  sweep's fidelity metrics are within noise (708 vs 711 titles above 0.5), and the worst-case cost
+  (Beast Shooter) is 5 % of the emulator's time.

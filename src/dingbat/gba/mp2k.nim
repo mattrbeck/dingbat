@@ -204,9 +204,68 @@ const
   # Quality tier: output samples a continuing note's gain ramps over at the
   # start of a frame (~3 ms), instead of the driver's per-frame step.
   MP2K_RAMP_N = 96
+  # Sampler tap window: taps[k] holds the source sample at cursor + k -
+  # MP2K_TAP_OFF. Catmull-Rom uses the four around the cursor; the quality
+  # tier's windowed sinc uses up to all of them: its kernel is 8 source
+  # samples wide at the sample's own rate and stretches with the playback
+  # step (a voice played at three source samples per output sample needs a
+  # kernel three times as wide to keep its cutoff below the output
+  # Nyquist), up to MP2K_SINC_MAX_STEP.
+  MP2K_TAPS          = 64
+  MP2K_TAP_OFF       = 31
+  MP2K_SINC_HALF     = 8.0'f32           # kernel half-width, source samples, at step <= 1
+  MP2K_SINC_MAX_STEP = 4.0'f32           # 8 * 4 = 32 = the window's reach
+  MP2K_SINC_CUTOFF   = 0.46'f32          # of the (narrower) rate: 92 % of its Nyquist
+  MP2K_SINC_RES      = 512               # prototype table points per source sample
   MP2K_FIFO_REFILL   = 16'u32          # bytes per FIFO DMA transfer (GBATEK)
 
 # Mp2kSampler / Mp2kHle are declared in gba.nim (the GBA object references them).
+
+# Windowed-sinc prototype for the quality tier: sinc at MP2K_SINC_CUTOFF
+# under a Hann window of half-width MP2K_SINC_HALF, tabulated over
+# x in [0, MP2K_SINC_HALF] (symmetric). At playback step s <= 1 a voice is
+# reconstructed with the prototype as is: the sample's own band, none of
+# the images the driver's linear interpolation and the DAC's hold leave
+# above the sample's Nyquist. At s > 1 (Breath of Fire plays every voice
+# at up to three source samples per output sample; Beast Shooter a fifth
+# of its) the kernel is stretched by s — cutoff at the OUTPUT Nyquist — so
+# the decimation is band-limited instead of folding the sample's top
+# octaves back into the music as the driver's does. Weights are
+# normalised per output sample, so DC gain is exact at every phase and
+# step.
+var mp2kSincProto: array[int(MP2K_SINC_HALF) * MP2K_SINC_RES + 2, float32]
+var mp2kSincReady = false
+
+proc build_sinc_table() =
+  if mp2kSincReady: return
+  let fc = 2.0 * float64(MP2K_SINC_CUTOFF)
+  for i in 0 ..< mp2kSincProto.len:
+    let x = float64(i) / float64(MP2K_SINC_RES)
+    let arg = PI * fc * x
+    let sinc = (if abs(arg) < 1e-9: 1.0 else: sin(arg) / arg)
+    let wn = (if x >= float64(MP2K_SINC_HALF): 0.0
+              else: 0.5 + 0.5 * cos(PI * x / float64(MP2K_SINC_HALF)))
+    mp2kSincProto[i] = float32(fc * sinc * wn)
+  mp2kSincReady = true
+
+proc sinc_sample(s: ptr Mp2kSampler; step: float32): float32 {.inline.} =
+  ## The tier's interpolated sample at the cursor's fractional phase, with
+  ## the prototype kernel stretched by max(step, 1) (capped at
+  ## MP2K_SINC_MAX_STEP: the tap window's reach).
+  let st = clamp(step, 1.0'f32, MP2K_SINC_MAX_STEP)
+  let inv = 1.0'f32 / st
+  let half = MP2K_SINC_HALF * st
+  let frac = s.phase_frac
+  var acc = 0.0'f32
+  var wsum = 0.0'f32
+  let k0 = max(0, int(float32(MP2K_TAP_OFF) + frac - half) + 1)
+  let k1 = min(MP2K_TAPS - 1, int(float32(MP2K_TAP_OFF) + frac + half))
+  for k in k0 .. k1:
+    let x = abs(float32(k - MP2K_TAP_OFF) - frac) * inv
+    let w = mp2kSincProto[int(x * float32(MP2K_SINC_RES))]
+    acc += s.taps[k] * w
+    wsum += w
+  if wsum > 1e-6'f32: acc / wsum else: s.taps[MP2K_TAP_OFF]
 
 when defined(mp2kwav):
   import std/[streams, math, strutils]
@@ -529,12 +588,20 @@ proc snapshot_pass(m: Mp2kHle; sound_info: uint32) =
       let mvs = (ev * master) shr 4
       let vr = int(m.rd8(base + SC_VOL_R))
       let vl = int(m.rd8(base + SC_VOL_L))
+      # The bytes the driver computes (checked one hook later) and, for the
+      # quality tier, the same product without its two truncations: a quiet
+      # voice's tail otherwise steps by 5–10 % per frame on the byte grid.
+      let mvs_f = float32(ev * master) * (1.0'f32 / 16.0'f32)
       if m.pend_mono != 0:
         p.pr = uint8((mvs * ((vr + vl) shr 1)) shr 8)
         p.pl = 0
+        p.prf = mvs_f * float32(vr + vl) * (1.0'f32 / 131072.0'f32)
+        p.plf = 0
       else:
         p.pr = uint8((mvs * vr) shr 8)
         p.pl = uint8((mvs * vl) shr 8)
+        p.prf = mvs_f * float32(vr) * (1.0'f32 / 65536.0'f32)
+        p.plf = mvs_f * float32(vl) * (1.0'f32 / 65536.0'f32)
       p.pvalid = true
 
 proc apply_pending(m: Mp2kHle; sound_info: uint32) =
@@ -611,8 +678,12 @@ proc apply_pending(m: Mp2kHle; sound_info: uint32) =
     # then feeds the one fed FIFO. A killed channel keeps its bytes.
     var vr, vl: float32
     if m.predict and p.pvalid:
-      vr = float32(p.pr) / 256.0'f32
-      vl = (if m.mono_mode != 0: vr else: float32(p.pl) / 256.0'f32)
+      if m.quality:
+        vr = p.prf
+        vl = (if m.mono_mode != 0: vr else: p.plf)
+      else:
+        vr = float32(p.pr) / 256.0'f32
+        vl = (if m.mono_mode != 0: vr else: float32(p.pl) / 256.0'f32)
       if p.pr == 0 and (m.mono_mode != 0 or p.pl == 0) and (p.status and CH_STOP) != 0:
         s.active = false   # released to nothing: the pass drops it
         continue
@@ -1431,18 +1502,22 @@ proc src_at(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte]; rmask: uint32;
   m.decode_at(s, rom, rmask, uint32(pos))
 
 proc fetch_taps(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte]; rmask: uint32) {.inline.} =
-  ## taps = play positions cursor-1 .. cursor+2 (the kernel is centred on the
-  ## cursor: the output at phase mu lies between taps[1] and taps[2], so a
-  ## voice lands where the driver's does — P2: the driver's impulse at
-  ## source index 200 answers at the same index). A one-step advance shifts
-  ## and fetches one; anything else refetches all four.
+  ## taps = play positions cursor-MP2K_TAP_OFF .. cursor+8 (the kernel is
+  ## centred on the cursor: the output at phase mu lies between
+  ## taps[MP2K_TAP_OFF] and the next, so a voice lands where the driver's
+  ## does — P2: the driver's impulse at source index 200 answers at the
+  ## same index). A one-step advance shifts and fetches one; anything else
+  ## refetches the window.
   let i = s.src_index
-  if s.tap_i != 0xFFFFFFFF'u32 and i == s.tap_i + 1'u32:
-    s.taps[0] = s.taps[1]; s.taps[1] = s.taps[2]; s.taps[2] = s.taps[3]
-    s.taps[3] = m.src_at(s, rom, rmask, int64(i) + 2)
+  if s.tap_i != 0xFFFFFFFF'u32 and i > s.tap_i and i - s.tap_i < uint32(MP2K_TAPS):
+    # advanced by d < window: shift, fetch the d new positions at the end
+    let d = int(i - s.tap_i)
+    for t in 0 ..< MP2K_TAPS - d: s.taps[t] = s.taps[t + d]
+    for t in MP2K_TAPS - d ..< MP2K_TAPS:
+      s.taps[t] = m.src_at(s, rom, rmask, int64(i) + int64(t) - int64(MP2K_TAP_OFF))
   else:
-    for t in 0 ..< 4:
-      s.taps[t] = m.src_at(s, rom, rmask, int64(i) + int64(t) - 1)
+    for t in 0 ..< MP2K_TAPS:
+      s.taps[t] = m.src_at(s, rom, rmask, int64(i) + int64(t) - int64(MP2K_TAP_OFF))
   s.tap_i = i
 
 proc advance_cursor(s: ptr Mp2kSampler; step: float32) =
@@ -1494,12 +1569,18 @@ proc render_one(m: Mp2kHle): tuple[a: float32, b: float32] =
     if s.tap_i != s.src_index:
       m.fetch_taps(s, rom, rmask)
     var sample: float32
+    let rate0 = (if s.use_pcm_rate: float32(m.pcm_sample_rate) else: float32(s.freq))
+    const T = MP2K_TAP_OFF
     if m.resample_mode == 2:
-      sample = s.taps[1]                    # hold
+      sample = s.taps[T]                    # hold
     elif m.resample_mode == 1 or not cubic:
-      sample = s.taps[1] + (s.taps[2] - s.taps[1]) * s.phase_frac
+      sample = s.taps[T] + (s.taps[T + 1] - s.taps[T]) * s.phase_frac
+    elif m.quality:
+      # Quality tier: windowed sinc, stretched by the playback step
+      # (sinc_sample) — the sample's own band, no images, no aliasing.
+      sample = sinc_sample(s, rate0 / float32(APU_SAMPLE_RATE))
     else:
-      sample = catmull_rom(s.taps[0], s.taps[1], s.taps[2], s.taps[3], s.phase_frac)
+      sample = catmull_rom(s.taps[T - 1], s.taps[T], s.taps[T + 1], s.taps[T + 2], s.phase_frac)
     # s8 units in, the driver's per-channel byte out: sample * side / 256.
     # Quality tier: a continuing note's gain ramps from the previous
     # frame's value over the frame's first MP2K_RAMP_N output samples.
@@ -1531,7 +1612,7 @@ proc render_one(m: Mp2kHle): tuple[a: float32, b: float32] =
         dbgAttackN.inc
     # Advance the resample phase; step = playback-rate / output-rate, where a
     # TYPE_FIX channel's playback rate is pcmFreq (TYPE_* table).
-    let rate = (if s.use_pcm_rate: float32(m.pcm_sample_rate) else: float32(s.freq))
+    let rate = rate0
     when defined(mp2kwav):
       dbgStepN.inc
       if rate > float32(APU_SAMPLE_RATE):
@@ -1777,6 +1858,7 @@ proc init_mp2k*(m: Mp2kHle) =
   ## ("Runtime detection").
   m.use_cubic = true   # cubic (Catmull-Rom, per Paul Bourke) resampling by default
   m.quality = true     # quality tier on (render_one); parity checks turn it off
+  build_sinc_table()
   m.fifo = newSeq[float32](MP2K_FIFO_CAP * 2)
   m.ring_copy = newSeq[uint8](8192)
   m.ring_prev_slot = -1
