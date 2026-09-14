@@ -1901,7 +1901,13 @@ body.running #home {
   flex-direction: column;
   align-items: center;
   gap: 26px;
-  animation: home-in 0.4s ease-out both;
+  /* backwards, not both: there is no `to` keyframe, so the end state is
+     this element's own style regardless - but `both` leaves the animation
+     filling forever, and a filled transform animation computes to an
+     identity MATRIX rather than `none`. That is still a transform, and it
+     quietly makes #home-inner the containing block for every fixed
+     descendant inside the home screen. */
+  animation: home-in 0.4s ease-out backwards;
 }
 
 @keyframes home-in {
@@ -7703,66 +7709,258 @@ body.clip-replaying #controls {
  * lower one, and the seam stops being a line through anything and becomes
  * the join between two things. The top bar sits on the top edge of the
  * lower pane, directly above the controls - the same relationship it has on
- * a phone, addressed to half a screen.
+ * a phone, addressed to half a screen. The home screen does the same trick
+ * with whatever it has: the paused game's picture, or nothing at all.
  *
  * Only this posture. A device folded DOWN the middle, opened like a book,
  * is deliberately left alone: it is a landscape viewport that happens to
  * have a crease in it, and every special case for it cost more than it
  * bought. It keeps the ordinary landscape layout.
  *
- * Everything is read from the segment env() values rather than computed as
- * a fraction of the viewport. The two panes are only equal on devices that
- * happen to be symmetrical, and the dead band is 34px on a hinge and 0 on a
- * crease, so a layout that assumes 50% and a fixed gutter is wrong on every
- * device it was not measured against. Read the numbers.
- *
- * Scoped to body.running throughout. #home is an absolutely-positioned
- * child of #stage, so confining the stage to one segment would confine the
- * library along with it - and a library has no reason to hide from a seam.
- * It is a long scrolling document; it crosses the fold the way text does.
+ * The geometry is in two custom properties and the layout is gated on a
+ * body class, rather than both living in the media query. index.js sets the
+ * class from the query, so the behaviour is identical - but the indirection
+ * buys a debug override (?fold=stacked) that makes the posture reachable in
+ * a desktop browser, which is the only way to work on it at all while
+ * WebKit ships no segments. It is also where a real forced mode would land,
+ * without moving a rule.
  */
 
+:root {
+  /* Where the upper pane ends and the lower one begins. Equal on a crease,
+     34px apart across a hinge. The values here are what a forced fold with
+     no segment data gets: an even split and no dead band. */
+  --seam-end: 50dvh;
+  --seam-start: 50dvh;
+}
+
 @media (vertical-viewport-segments: 2) {
-  body.running #stage {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: env(viewport-segment-height 0 0);
-    padding: var(--safe-t) var(--safe-r) 0 var(--safe-l);
+  :root {
+    --seam-end: env(viewport-segment-bottom 0 0);
+    --seam-start: env(viewport-segment-top 0 1);
+  }
+}
+
+body.fold-stacked {
+  /* The upper pane, measured from the top of the viewport. */
+  --fold-pane: calc(var(--seam-start) - var(--bar-h) - var(--safe-t));
+}
+
+/* The same pane as the home screen's scroll CONTENT sees it, which is inset
+   by the scroller's own padding. Declared here and not on body: --home-pad
+   is defined on #home, so a calc() referring to it anywhere above is
+   invalid at computed-value time and silently drops the whole property. */
+body.fold-stacked #home {
+  --fold-pane-inner: calc(var(--fold-pane) - var(--home-pad));
+  /* A NAMED timeline, not scroll(nearest): the paused picture is fixed to
+     the pane, and `nearest` walks the containing-block chain, which for a
+     fixed element is the viewport - it would find the document scroller and
+     sit at progress 0 forever. A named timeline is looked up through the DOM
+     ancestors instead, where #home still is. */
+  scroll-timeline-name: --home-scroll;
+  scroll-timeline-axis: block;
+}
+
+/* --- A game on the stage ------------------------------------------- */
+
+body.fold-stacked.running #stage {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--seam-end);
+  padding: var(--safe-t) var(--safe-r) 0 var(--safe-l);
+}
+
+body.fold-stacked.running #canvas {
+  width: min(100%, calc((var(--seam-end) - var(--safe-t))
+                        * var(--game-ar, 1.5)));
+}
+
+/* At the top of the lower pane. No --safe-t here: the status bar is up on
+   the picture pane, and an inset repeated on the second pane would open a
+   gap along the fold that belongs to nothing. */
+body.fold-stacked.running #topbar {
+  position: absolute;
+  top: var(--seam-start);
+  left: 0;
+  right: 0;
+  height: var(--bar-h);
+  padding-top: 0;
+}
+
+body.fold-stacked.running #controls {
+  position: absolute;
+  top: calc(var(--seam-start) + var(--bar-h));
+  bottom: 0;
+  left: 0;
+  right: 0;
+}
+
+/* The strip has a height handed to it now, so the cluster can fill the room
+   instead of guessing at it. The base rule's min(54vw, 290px) is a guess
+   made for a strip whose height is whatever its contents come to; against a
+   pane it is either slack or overflow. */
+body.fold-stacked.running #main-controls {
+  height: 100%;
+}
+
+/* --- The home screen, with nothing loaded --------------------------- */
+/*
+ * The brand takes the upper pane and the library begins at the seam. It is
+ * a masthead, not a fixed header: scroll and the library climbs straight
+ * through the fold onto the top screen, the way any long document crosses
+ * it.
+ *
+ * What the scroll-driven animation adds is that the masthead CLOSES on the
+ * way out instead of merely sliding. The generous air above and below the
+ * wordmark is what makes it a title screen at rest and what makes it a
+ * waste of half a screen once you have started reading, so the air is spent
+ * first: the tagline goes, then the mark rides up out of its own padding,
+ * and by the time the block leaves the scrollport the bar has taken the
+ * brand over (index.js drives that half off --brand-p, as it does on every
+ * other screen size).
+ *
+ * Transform and opacity only. Animating the height would be the literal
+ * reading of "the margins shrink", and it would feed straight back into the
+ * scroll range it is driven by - the content gets shorter, the maximum
+ * scroll drops, the timeline it is reading moves under it.
+ */
+
+body.fold-stacked:not(.running):not(.has-game) #home-brand {
+  min-height: var(--fold-pane-inner);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+@supports (animation-timeline: scroll()) {
+  body.fold-stacked:not(.running):not(.has-game) #home-brand > * {
+    animation: fold-brand-close linear both;
+    animation-timeline: --home-scroll;
+    animation-range: 0 var(--fold-pane-inner);
   }
 
-  body.running #canvas {
-    width: min(100%, calc((env(viewport-segment-height 0 0) - var(--safe-t))
-                          * var(--game-ar, 1.5)));
+  body.fold-stacked:not(.running):not(.has-game) #home-tagline {
+    animation-name: fold-brand-close, fold-tagline-out;
   }
+}
 
-  /* At the top of the lower pane. No --safe-t here: the status bar is up on
-     the picture pane, and an inset repeated on the second pane would open a
-     gap along the fold that belongs to nothing. */
-  body.running #topbar {
-    position: absolute;
-    top: env(viewport-segment-top 0 1);
-    left: 0;
-    right: 0;
-    height: var(--bar-h);
-    padding-top: 0;
+@keyframes fold-brand-close {
+  to {
+    /* DOWN the page, not up. The mark has to LAG the scroll for the air to
+       read as closing: the library rises at 1x and the mark at 0.66x, so the
+       gap between them shrinks and the masthead compresses into the bar.
+       Moving it up faster than the page does the opposite - the mark escapes
+       early and leaves a hole where the margin used to be. */
+    transform: translateY(calc(var(--fold-pane-inner) * 0.34));
   }
+}
 
-  body.running #controls {
-    position: absolute;
-    top: calc(env(viewport-segment-top 0 1) + var(--bar-h));
-    bottom: 0;
-    left: 0;
-    right: 0;
+@keyframes fold-tagline-out {
+  0% { opacity: 1; }
+  45% { opacity: 0; }
+  100% { opacity: 0; }
+}
+
+/* --- The home screen, with a game paused ---------------------------- */
+/*
+ * The paused game's picture fills the upper pane - the same pane it fills
+ * while running, so resuming and pausing never move it - and it STAYS
+ * there while everything else, its own name and buttons included, scrolls
+ * up over it.
+ *
+ * That means the picture leaves the flow (fixed to the pane) and the scroll
+ * content gets an opaque surface that starts at the seam and slides up over
+ * it. The surface is a ::before rather than a background on #home-inner
+ * itself: it has to bleed past the scroller's side padding to the screen
+ * edges, and #home-inner is a centred, max-width column.
+ */
+
+body.fold-stacked.home-card:not(.running) #home-paused {
+  display: block;
+  max-width: none;
+  padding: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+}
+
+body.fold-stacked.home-card:not(.running) #home-paused-shot {
+  position: fixed;
+  top: calc(var(--bar-h) + var(--safe-t));
+  left: 0;
+  right: 0;
+  height: var(--fold-pane);
+  width: auto;
+  max-width: none;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: var(--screen-off);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Behind the scrolling surface, not in front of it. The picture is a DOM
+     descendant of #home-inner, so fixing it to the viewport does not take it
+     out of #home-inner's stacking context - z-index here is compared against
+     that element's own ::before, not against the page. */
+  z-index: -2;
+}
+
+body.fold-stacked.home-card:not(.running) #home-paused-shot:active {
+  transform: none;
+}
+
+body.fold-stacked.home-card:not(.running) #home-paused-canvas {
+  width: auto;
+  height: 100%;
+  max-width: 100%;
+}
+
+body.fold-stacked.home-card:not(.running) #home-paused-body {
+  padding-top: 14px;
+}
+
+body.fold-stacked.home-card:not(.running) #home-inner {
+  padding-top: var(--fold-pane-inner);
+  position: relative;
+  z-index: 1;
+}
+
+body.fold-stacked.home-card:not(.running) #home-inner::before {
+  content: "";
+  position: absolute;
+  /* Between the picture (-2) and everything in normal flow. Without a
+     negative index it would paint in the positioned-descendant layer, which
+     is AFTER the card's own caption and the add tile - those would vanish
+     while the library tiles, being positioned, stayed. */
+  z-index: -1;
+  top: var(--fold-pane-inner);
+  bottom: 0;
+  left: 50%;
+  width: 100vw;
+  transform: translateX(-50%);
+  /* What #home itself paints: the stage colour, with --home-bg over it for
+     the device themes that keep the home screen dark on a light shell. */
+  background-color: var(--stage);
+  background-image: linear-gradient(var(--home-bg), var(--home-bg));
+}
+
+@supports (animation-timeline: scroll()) {
+  /* The picture recedes as the page covers it, so the top pane reads as
+     something being left behind rather than something stuck. */
+  body.fold-stacked.home-card:not(.running) #home-paused-shot {
+    animation: fold-paused-recede linear both;
+    animation-timeline: --home-scroll;
+    animation-range: 0 var(--fold-pane-inner);
   }
+}
 
-  /* The strip has a height handed to it now, so the cluster can fill the
-     room instead of guessing at it. The base rule's min(54vw, 290px) is a
-     guess made for a strip whose height is whatever its contents come to;
-     against a pane it is either slack or overflow, and on the lower pane of
-     a 626x890 fold it overflows by about 25px. */
-  body.running #main-controls {
-    height: 100%;
+@keyframes fold-paused-recede {
+  to {
+    transform: scale(0.96);
+    opacity: 0.4;
   }
 }
