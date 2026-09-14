@@ -690,6 +690,57 @@ const givenBoxes = (app) => {
 const flightOn = (app, id) =>
   app.document.getElementById(id).getAnimations();
 
+// Closing a game flies the brand from the bar back down to the hero, and it
+// aims by MEASURING the hero. On a folded device the paused card holds the
+// home screen's entire scroll content down by a pane - #home-inner's
+// padding-top is gated on body.home-card - so a hero measured while the card
+// is still up reads a pane too low, and the mark sails off toward the middle
+// of the screen instead of its resting place. The card has to come down
+// first. Same rule as loadRom's flyBrand(true): fly from the layout the
+// brand will land in, not the one it is leaving.
+test("closing a game takes the card down before it measures the hero",
+     async () => {
+  const app = await loadApp();
+  givenBoxes(app);
+
+  const logo = app.document.getElementById("home-logo");
+  const WITH_CARD = 739;   // what a stale card-held layout would report
+  const SETTLED = 258;     // where the mark actually comes to rest
+  const box = (top) => ({
+    left: 322, top, width: 76, height: 46, right: 398, bottom: top + 46,
+    x: 322, y: top,
+  });
+  logo.getBoundingClientRect = () =>
+    box(app.document.body.classList.contains("home-card") ? WITH_CARD : SETTLED);
+
+  app.document.body.classList.add("has-game", "paused");
+  app.api.setPausedCardShown(true);
+  assert.ok(app.document.body.classList.contains("home-card"),
+            "the card is up to begin with");
+
+  await app.runIn('currentRomName = "g.gba"; currentOriginalName = "g.gba";');
+  await app.api.unloadGame({ flushSave: false });
+
+  assert.equal(app.document.body.classList.contains("home-card"), false,
+               "the card is down by the time the close has finished");
+
+  const flights = flightOn(app, "bar-logo");
+  assert.ok(flights.length > 0, "closing flies the logo home");
+  const aimed = flights[flights.length - 1].frames
+    .map((f) => f.transform).filter(Boolean).join(" ");
+  const y = Number(/translate\([^,]+,\s*(-?[\d.]+)px/.exec(aimed)?.[1]);
+  assert.ok(Number.isFinite(y), "the flight carries a translate: " + aimed);
+
+  // The bar logo's own centre is fixed by givenBoxes, so the only thing that
+  // can move the target is which hero rect was read.
+  const bar = app.document.getElementById("bar-logo").getBoundingClientRect();
+  const barMid = bar.top + bar.height / 2;
+  assert.equal(Math.round(y), Math.round(SETTLED + 23 - barMid),
+               "aimed at where the mark rests, not a pane below it");
+  assert.notEqual(Math.round(y), Math.round(WITH_CARD + 23 - barMid),
+                  "and emphatically not at the card-held position");
+});
+
 // The bar's brand is a "back to the top" button, and the state people are in
 // when they reach for it is a game paused on the home screen with the library
 // scrolled down behind its card. That state is `has-game`, which the handler

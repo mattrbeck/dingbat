@@ -9647,6 +9647,13 @@ const unloadGame = async ({ flushSave = true } = {}) => {
   pauseButton.classList.remove("paused", "active");
   pauseButton.title = "Pause";
   document.body.classList.remove("has-game", "running", "paused", "gb-mode");
+  // Before the brand is measured, not after: on a folded device the card
+  // holds the home screen's whole scroll content down by a pane
+  // (#home-inner's padding-top is gated on body.home-card), so a hero
+  // measured while the card is still up reads a pane too low and the
+  // flight aims at the middle of the screen. Same ordering rule as
+  // loadRom's flyBrand(true): fly from the layout the brand will land in.
+  setPausedCardShown(false);
   // syncBrand, not a flat 0: if the library is still scrolled down, the
   // bar keeps its brand for that reason instead, and the flight is from
   // wherever the scroll says it should end up.
@@ -9656,7 +9663,6 @@ const unloadGame = async ({ flushSave = true } = {}) => {
   // No cart, no sensor: drop the camera and its button.
   stopWebcam();
   camNoticeShown = null;
-  setPausedCardShown(false);
   refreshHomeRecent();
   updateCanvasScaling();
   return true;
