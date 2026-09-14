@@ -1363,7 +1363,7 @@ body:not(.running) .cart-btn {
    it. On phones it even gains the slider it does not get over a game - the
    bar has almost nothing else on it here, and the in-menu slider went with
    the hamburger. */
-@media (max-width: 560px), (horizontal-viewport-segments: 2) {
+@media (max-width: 560px) {
   body:not(.running) #vol-slider {
     display: block;
     max-width: 108px;
@@ -1372,14 +1372,14 @@ body:not(.running) .cart-btn {
 
 /* Phones: the top-bar volume slider gives way to the mute toggle; a full
    slider lives in the menu instead. */
-@media (max-width: 560px), (horizontal-viewport-segments: 2) {
+@media (max-width: 560px) {
   #vol-slider {
     display: none;
   }
 }
 
 /* ...and the in-menu slider is phone-only. */
-@media (min-width: 561px) and (not (horizontal-viewport-segments: 2)) {
+@media (min-width: 561px) {
   #menu-volume {
     display: none;
   }
@@ -2231,7 +2231,7 @@ body.has-game #home-load:hover {
   pointer-events: auto;
 }
 
-@media (min-width: 760px) and (not (horizontal-viewport-segments: 2)) {
+@media (min-width: 760px) {
   #brand-slot {
     position: absolute;
     left: 50%;
@@ -2241,10 +2241,7 @@ body.has-game #home-load:hover {
   }
 }
 
-/* ... and a bar that only has a pane is a phone's bar, however wide the
-   viewport reads: a side-by-side fold puts roughly half the width under the
-   brand's absolute centring, which lands it on top of the transport. */
-@media (max-width: 759px), (horizontal-viewport-segments: 2) {
+@media (max-width: 759px) {
   body.running #brand-slot {
     display: none;
   }
@@ -5712,7 +5709,7 @@ body.large-controls .pad-pill {
  * below; the tablet tier (min-height: 501px, after those) re-sizes and
  * re-anchors the rails for big screens.
  */
-@media (pointer: coarse) and (orientation: landscape) and (not (horizontal-viewport-segments: 2)) {
+@media (pointer: coarse) and (orientation: landscape) {
   body.running #controls {
     position: fixed;
     inset: 0;
@@ -5861,7 +5858,7 @@ body.link-gb #controls {
   body.large-controls #ab {
     --btn-size: min(calc(42vw / 2.8), 74px);
   }
-  @media (pointer: coarse) and (orientation: landscape) and (not (horizontal-viewport-segments: 2)) {
+  @media (pointer: coarse) and (orientation: landscape) {
     #dpad,
     #joystick {
       --dpad-size: min(32vw, 158px, 76vh);
@@ -6113,10 +6110,8 @@ body.rewind-off #report-slider {
  * The five playback buttons fuse into one segmented control
  * ([reset|rewind|pause|2x|ffw]) so the fps readout and the mute button
  * always fit beside them (375pt-wide phones cramp with separate buttons).
- * Also on a side-by-side fold at any viewport width, for the same reason:
- * the bar is living in one pane.
  */
-@media (max-width: 480px), (horizontal-viewport-segments: 2) {
+@media (max-width: 480px) {
   /* Tighten the bar itself so all controls + the fps readout fit at 375pt */
   #topbar {
     gap: 6px;
@@ -6215,7 +6210,7 @@ body.rewind-off #report-slider {
   transition: transform 0.2s ease;
 }
 
-@media (pointer: coarse) and (orientation: landscape) and (not (horizontal-viewport-segments: 2)) and (max-height: 500px) {
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
   /* Top bar off-screen by default; the handle slides it in/out */
   body.running #topbar {
     position: fixed;
@@ -6333,7 +6328,7 @@ body.rewind-off #report-slider {
 
 /* Light theme, translucent pads: flip outline/glyph dark. After (and
    re-asserting) the pressed rules, which these selectors outrank. */
-@media (pointer: coarse) and (orientation: landscape) and (not (horizontal-viewport-segments: 2)) and (max-height: 500px) {
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
   :root[data-theme="light"] body:not(.opaque-controls) .pad-btn,
   :root[data-theme="light"] body:not(.opaque-controls) #dpad > #dpad-center {
     border-color: rgba(24, 32, 52, 0.4);
@@ -6357,7 +6352,7 @@ body.rewind-off #report-slider {
 
 /* Landscape tablets: keep the top bar and opaque pads, size the pads
    GBA-like, stack shoulder + pill above each cluster. */
-@media (pointer: coarse) and (orientation: landscape) and (not (horizontal-viewport-segments: 2)) and (min-height: 501px) {
+@media (pointer: coarse) and (orientation: landscape) and (min-height: 501px) {
   body.running {
     /* Width reserved at each side for the control rail: pad size + outer
        padding + a margin so the frame never sits under the buttons. */
@@ -7622,18 +7617,24 @@ body.clip-replaying #controls {
  * ==========================================================
  * Folding phones: one pane for the picture, one for the chrome
  * ==========================================================
- * A folded device hands the page a viewport in two pieces with a seam
- * across the middle. Sometimes the seam is a dead band the page can never
+ * A device folded ACROSS - the hinge horizontal, the two panes stacked -
+ * hands the page a viewport in two pieces with the seam through the middle
+ * of the picture. Sometimes that seam is a dead band the page can never
  * paint into (Surface Duo: two panels with a 34px hinge between them);
- * sometimes it is a crease with no width at all (a single flexible panel,
- * which is what Apple's Duo is). Either way the middle of the screen is the
- * one place a moving picture must not sit.
+ * sometimes it is a crease with no width at all (a single flexible panel).
+ * Either way the middle of the screen is the one place a moving picture
+ * must not sit.
  *
- * So it doesn't. The picture takes one whole segment, the chrome takes the
- * other, and the seam stops being a line through anything and becomes the
- * join between two things. The top bar sits at the leading edge of the
- * chrome pane, directly above the controls - the same relationship it has
- * on a phone, addressed to half a screen.
+ * So it doesn't. The picture takes the upper segment, the chrome takes the
+ * lower one, and the seam stops being a line through anything and becomes
+ * the join between two things. The top bar sits on the top edge of the
+ * lower pane, directly above the controls - the same relationship it has on
+ * a phone, addressed to half a screen.
+ *
+ * Only this posture. A device folded DOWN the middle, opened like a book,
+ * is deliberately left alone: it is a landscape viewport that happens to
+ * have a crease in it, and every special case for it cost more than it
+ * bought. It keeps the ordinary landscape layout.
  *
  * Everything is read from the segment env() values rather than computed as
  * a fraction of the viewport. The two panes are only equal on devices that
@@ -7647,55 +7648,6 @@ body.clip-replaying #controls {
  * It is a long scrolling document; it crosses the fold the way text does.
  */
 
-/* --- Book fold: the seam runs down the middle, panes side by side ------- */
-@media (horizontal-viewport-segments: 2) {
-  body.running #stage {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    width: env(viewport-segment-width 0 0);
-    /* The status bar and the notch live over this pane, not the other. */
-    padding: var(--safe-t) 0 var(--safe-b) var(--safe-l);
-  }
-
-  /* Sized to the pane, not to 100dvh: the base rule's width formula assumes
-     the picture owns the viewport minus the bar, which overshoots a pane by
-     roughly a whole pane. max-height would rescue the height but the box
-     would still claim width it cannot use. */
-  body.running #canvas {
-    width: min(100%, calc((100% - var(--safe-t) - var(--safe-b)) * var(--game-ar, 1.5)));
-  }
-
-  body.running #topbar {
-    position: absolute;
-    top: 0;
-    left: env(viewport-segment-left 1 0);
-    right: 0;
-    height: calc(var(--bar-h) + var(--safe-t));
-  }
-
-  body.running #controls {
-    position: absolute;
-    top: calc(var(--bar-h) + var(--safe-t));
-    bottom: 0;
-    left: env(viewport-segment-left 1 0);
-    right: 0;
-    /* Undo the landscape rails: in this posture the chrome pane is a tall
-       narrow column, which is a phone, so it gets the phone's stacked
-       layout back. The rails are for a viewport the picture fills. */
-    display: grid;
-    grid-template-columns: 100%;
-    grid-template-rows: auto 1fr auto;
-    align-items: stretch;
-    padding: 14px calc(16px + var(--safe-r)) calc(16px + var(--safe-b)) 16px;
-    background:
-      linear-gradient(180deg, var(--control-strip-top), var(--control-strip-bottom));
-    pointer-events: auto;
-  }
-}
-
-/* --- Laptop fold: the seam runs across, panes stacked (the DS posture) --- */
 @media (vertical-viewport-segments: 2) {
   body.running #stage {
     position: absolute;
@@ -7730,14 +7682,12 @@ body.clip-replaying #controls {
     left: 0;
     right: 0;
   }
-}
 
-/* Both postures: the control strip now has a height handed to it, so the
-   cluster can fill the room instead of guessing at it. The base rule's
-   min(54vw, 290px) is a guess made for a strip whose height is whatever its
-   contents come to - on a pane it is either slack or overflow, and on the
-   shorter pane of a 626x890 fold it overflows by about 25px. */
-@media (horizontal-viewport-segments: 2), (vertical-viewport-segments: 2) {
+  /* The strip has a height handed to it now, so the cluster can fill the
+     room instead of guessing at it. The base rule's min(54vw, 290px) is a
+     guess made for a strip whose height is whatever its contents come to;
+     against a pane it is either slack or overflow, and on the lower pane of
+     a 626x890 fold it overflows by about 25px. */
   body.running #main-controls {
     height: 100%;
   }
