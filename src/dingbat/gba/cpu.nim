@@ -141,6 +141,16 @@ proc fill_pipeline*(cpu: CPU) {.inline.} =
         cpu.gba.bus.bios_latch = v
       cpu.pipeline.push(v)
 
+const NO_HLE_HOOK* = 0xFFFFFFFF'u32
+  ## hle_gate value for "MP2K learning probe running, no hook armed"; a real
+  ## hook's r15 can never be 0xFFFFFFFF.
+
+proc hook_pc*(cpu: CPU): uint32 {.inline.} =
+  ## The pre-pipeline PC of the instruction about to execute, in the form
+  ## the hooks are learned in (probe_pc): r15 less the pipeline depth, with
+  ## the Thumb bit still riding along right after a BX (read_instr clears it).
+  cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
+
 proc clear_pipeline*(cpu: CPU) =
   cpu.pipeline.clear()
   cpu.refill_pending = true
@@ -157,6 +167,14 @@ proc clear_pipeline*(cpu: CPU) =
   else:
     cpu.r[15] += 8
     cpu.gba.bus.add_cycles(2 * int(cpu.gba.bus.wait32_s[page]))
+  # Audio-HLE hooks (refresh_hle_hook): a hook learned at a branch target
+  # is tested here, once per taken branch, rather than once per
+  # instruction; tick runs it (hle_slow). The arrival flag tells the
+  # learning probe which candidates are branch targets.
+  let gate = cpu.hle_gate
+  if gate != 0:
+    cpu.hle_arrived = true
+    if cpu.r[15] == gate: cpu.hle_look = true
 
 proc read_instr*(cpu: CPU): uint32 {.inline.} =
   cpu.refill_pending = false
@@ -329,28 +347,49 @@ when defined(gsprobe):
   var gsProbeLog*: seq[(uint32, uint32, uint32, uint32, uint32, uint32)] = @[]
   var gsProbeIn*: bool
 
-const NO_HLE_HOOK* = 0xFFFFFFFF'u32
-  ## hle_gate value for "MP2K learning probe running, no hook armed"; a real
-  ## hook PC can never be 0xFFFFFFFF.
-
 proc refresh_hle_hook*(gba: GBA) =
   ## Recompute cpu.hle_gate; called once per frame and whenever MP2K learns
   ## its mixer entry. One slot serves both drivers: gs_frame_poll does not
   ## engage once MP2K has a hook, and MP2K only probes its own SoundInfo.
+  ## The gate holds the r15 the hook PC reads as (hook_pc) in the mode it
+  ## was learned in: 4 ahead in Thumb, 8 in ARM (fire_hle_hook re-derives
+  ## the PC from the mode, so an r15 of the other mode cannot fire it).
+  ## A hook learned at a branch target is tested at the pipeline flush
+  ## only; the learning probe, a hook some instructions into its function
+  ## (a vintage whose mixer is entered through a stub before r0 holds
+  ## &SoundInfo), and the Camelot hook are tested at every instruction
+  ## (hle_every).
   var pc = NO_HLE_HOOK
+  var thumb = false
   var probing = false
+  var every = false
   if gba.mp2k_hle:
     if gba.mp2k != nil:
-      if gba.mp2k.hook_addr != 0xFFFFFFFF'u32: pc = gba.mp2k.hook_addr
+      if gba.mp2k.hook_addr != 0xFFFFFFFF'u32:
+        pc = gba.mp2k.hook_addr
+        thumb = gba.mp2k.hook_thumb
+        every = not gba.mp2k.hook_branch
       elif gba.mp2k.probing: probing = true
     if pc == NO_HLE_HOOK and gba.gs_bon != nil and gba.gs_bon.engaged:
-      pc = gba.gs_bon.hook_addr
-  gba.cpu.hle_gate = if pc != NO_HLE_HOOK: pc
+      pc = gba.gs_bon.hook_addr           # carries the Thumb bit (gs_bon.nim)
+      thumb = (pc and 1'u32) != 0
+      every = true
+  gba.cpu.hle_gate = if pc != NO_HLE_HOOK: pc + (if thumb: 4'u32 else: 8'u32)
                      elif probing: NO_HLE_HOOK
                      else: 0'u32
+  gba.cpu.hle_every = probing or every
+  if gba.cpu.hle_every and not gba.cpu.hle_look:
+    # Arming: a stale arrival flag could label a fall-through candidate a
+    # branch target; cleared, a real arrival errs toward the every-
+    # instruction test.
+    gba.cpu.hle_look = true
+    gba.cpu.hle_arrived = false
 
-proc fire_hle_hook(cpu: CPU; cur: uint32): bool {.noinline.} =
-  ## Run the audio-HLE hook armed at `cur`; true when PC was rewritten.
+proc fire_hle_hook(cpu: CPU): bool {.noinline.} =
+  ## r15 reached the armed gate: run the hook whose PC the instruction about
+  ## to execute is (hook_pc rules out the other mode); true when PC was
+  ## rewritten.
+  let cur = cpu.hook_pc()
   let gba = cpu.gba
   let m = gba.mp2k
   if m != nil and cur == m.hook_addr:
@@ -372,6 +411,31 @@ proc fire_hle_hook(cpu: CPU; cur: uint32): bool {.noinline.} =
   if g != nil and g.engaged and cur == g.hook_addr:
     g.gs_mixer_hook()
   false
+
+proc hle_slow(cpu: CPU): bool {.noinline.} =
+  ## tick found hle_look set: a flush landed on an armed hook's r15, or the
+  ## gate is tested at every instruction (hle_every). Runs the hook when
+  ## the instruction about to execute is its, or offers the instruction to
+  ## the learning probe when it is a RAM PC with r0 == &SoundInfo. An IRQ
+  ## that preempted a flush arrival lands here at its handler's first
+  ## instruction instead: nothing fires, and the return flush raises the
+  ## look again. True when the hook rewrote PC.
+  let arrived = cpu.hle_arrived
+  cpu.hle_arrived = false
+  cpu.hle_look = cpu.hle_every
+  let gate = cpu.hle_gate
+  if gate == NO_HLE_HOOK:
+    let m = cpu.gba.mp2k
+    let cur = cpu.hook_pc()
+    let region = cur shr 24
+    if (region == 0x02'u32 or region == 0x03'u32) and
+       cpu.r[0] == m.probe_sound_info:
+      m.probe_pc(cur, arrived)
+    false
+  elif gate != 0 and cpu.r[15] == gate:
+    cpu.fire_hle_hook()
+  else:
+    false
 
 proc tick*(cpu: CPU) =
   # IRQ before the IntrWait re-halt check: the handler must run (and set the
@@ -409,20 +473,9 @@ proc tick*(cpu: CPU) =
         cpu.set_sys_lr(cpu.gba.bus.read_word_internal(usp - 4))
         cpu.set_sys_sp(usp)
   if not cpu.halted:
-    # Audio-HLE hooks share one sentinel compare on the per-instruction path
-    # (refresh_hle_hook); the work is out of line in fire_hle_hook.
-    let gate = cpu.hle_gate
-    if gate != 0:
-      let cur = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
-      if cur == gate:
-        if cpu.fire_hle_hook(cur): return
-      elif gate == NO_HLE_HOOK:
-        # MP2K learning probe; inline prefilter is RAM PC and r0 == &SoundInfo.
-        let m = cpu.gba.mp2k
-        let region = cur shr 24
-        if (region == 0x02'u32 or region == 0x03'u32) and
-           cpu.r[0] == m.probe_sound_info:
-          m.probe_pc(cur)
+    # Audio-HLE hooks: one flag per instruction (refresh_hle_hook).
+    if cpu.hle_look:
+      if cpu.hle_slow(): return
     when defined(gsprobe):
       # Golden Sun "Bon" mixer probe: IWRAM PC histogram + entry events.
       block:

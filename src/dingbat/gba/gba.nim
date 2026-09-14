@@ -366,13 +366,23 @@ type
     entered_waitloop*:           bool
     waitloop_instr_lut*:         seq[WLInstrKind]
     # Audio-HLE hook dispatch folded into one sentinel by refresh_hle_hook so
-    # the per-instruction path is one load and one branch:
-    #   0             -- nothing armed (zero-init = disarmed)
+    # the per-instruction path is one compare of r15 and one branch:
+    #   0             -- nothing armed (zero-init = disarmed; a running r15
+    #                    is never 0)
     #   NO_HLE_HOOK   -- the bounded MP2K learning probe is running
-    #   anything else -- the pre-pipeline PC that fires a hook
-    # A hook PC is a RAM address (never 0) and the pre-pipeline PC is never
-    # NO_HLE_HOOK, so the states cannot collide.
+    #   anything else -- the r15 at which the hook's instruction executes
+    #                    (its PC plus the pipeline depth of its mode)
+    # A hook's r15 is a RAM address plus 4 or 8 (never 0) and is never
+    # NO_HLE_HOOK, so the states cannot collide. A hook at a branch target
+    # is tested at the pipeline flush, which sets hle_look; tick tests only
+    # that flag, after IRQ dispatch, so the hook still runs as the hooked
+    # instruction executes, after any IRQ that preempts it. hle_every keeps
+    # the flag set (the probe, and hooks not at a branch target);
+    # hle_arrived marks an instruction reached by a flush.
     hle_gate*:                   uint32
+    hle_look*:                   bool
+    hle_every*:                  bool
+    hle_arrived*:                bool
 
   SpritePixel* = object
     priority*: uint16
@@ -609,7 +619,10 @@ type
     blk*:         array[64, int8]  # decoded s8 samples of that block
     src_index*:   uint32    # integer sample read cursor (block/offset derived from this)
     phase_frac*:  float32   # fractional phase (mu) between fetched samples, 0..1
-    taps*:        array[64, float32] # source samples at cursor-31 .. cursor+32, s8 units (MP2K_TAP_OFF)
+    taps*:        array[128, float32] # window of 64 source samples at cursor-31 .. cursor+32, s8
+                            # units (MP2K_TAP_OFF), starting at tap_base: the window slides
+                            # through the buffer as the cursor advances (mp2k.nim fetch_taps)
+    tap_base*:    int32     # index of the window's first tap in `taps`
     tap_i*:       uint32    # cursor the taps were fetched for (0xFFFFFFFF = none)
     ended*:       bool      # one-shot cursor ran past the end: silent (mp2k.nim advance_cursor)
     vol_l*, vol_r*: float32 # per-side gain for the frame being rendered (side/256)
@@ -620,6 +633,8 @@ type
   Mp2kHle* = ref object
     gba* {.cursor.}: GBA
     hook_addr*:  uint32     # learned mixer entry PC (0xFFFFFFFF = not learned)
+    hook_thumb*: bool       # CPU mode at that entry (cpu.nim refresh_hle_hook: the gate's pipeline depth)
+    hook_branch*: bool      # every sighting of that entry arrived by a branch (flush-tested gate)
     entry_addr*: uint32     # hook_addr with the Thumb bit cleared (skip-mode return point)
     probing*:    bool       # PC probe armed (mp2k.nim "Runtime detection")
     probe_sound_info*: uint32  # &SoundInfo cached for the probe's lock check
@@ -630,6 +645,8 @@ type
     # within the pass (mp2k.nim probe_pc / mp2k_frame_poll)
     cand*:       array[8, uint32]
     cand_lr*:    array[8, uint32]   # return address each candidate was entered with
+    cand_thumb*: array[8, bool]     # CPU mode each candidate was entered in
+    cand_arrived*: array[8, bool]   # every sighting arrived by a branch
     cand_hits*:  array[8, int]
     cand_order*: array[8, int]
     cand_seen*:  array[8, bool]
@@ -706,6 +723,8 @@ type
     slot_locked*:    bool
     # Rendered-frame output FIFO (mp2k.nim render_frame / render_sample)
     fifo*:           seq[float32]   # stereo ring, MP2K_FIFO_CAP frames, latch scale
+    mix_l*, mix_r*:  seq[float32]   # render_voices: the frame's per-side voice sums
+    mix_ramp*:       seq[float32]   # render_voices: sample k's position k / frame_n in the gain ramp
     fifo_r*, fifo_w*: int           # read / write cursors (frames)
     fifo_acc*:       float32        # fractional frame-length carry
     fifo_err_avg*:   float32        # slow average of level - target (render_frame)
@@ -717,7 +736,6 @@ type
     # FIFO values for apu.nim to add the sub-LSB remainder after the DAC.
     quality*:        bool
     fine_a*, fine_b*: float32
-    ramp_i*:         int            # output samples rendered so far this frame
     frame_n*:        int            # output samples in the frame being rendered
     fifo_target*:    int            # level aimed for when a frame is pushed (the guard)
     fifo_primed*:    bool           # target-level silence pre-fill done
@@ -902,7 +920,7 @@ proc new_mp2k*(gba: GBA): Mp2kHle
 proc init_mp2k*(m: Mp2kHle)
 proc mixer_hook*(m: Mp2kHle)
 proc render_frame(m: Mp2kHle)
-proc probe_pc*(m: Mp2kHle; pc: uint32) {.noinline.}
+proc probe_pc*(m: Mp2kHle; pc: uint32; arrived: bool) {.noinline.}
 proc mp2k_frame_poll*(m: Mp2kHle)
 proc mixer_live*(m: Mp2kHle): bool
 proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16]

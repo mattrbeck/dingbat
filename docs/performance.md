@@ -66,9 +66,25 @@ carrying real games), permanent dual scalar/SIMD maintenance of the
 renderer's most correctness-sensitive code, no benefit on the oldest devices
 — no-go unless the compositor's share grows or SIMD becomes assumable.
 
-The audio-HLE hook check is one sentinel compare against `cpu.hle_hook_pc`
-(refreshed at each arm/disarm site); three separate per-instruction tests
-cost more than the mixing they guarded.
+The audio-HLE hook trigger (2026-09-14) costs one flag test per
+instruction. A hook learned at a branch target is compared against r15 only
+at the pipeline flush, once per taken branch (`clear_pipeline`). The learning
+probe, and the few vintages whose hook sits past a stub-called entry, keep a
+per-instruction compare. Moving the slow path out of line mattered: inlined
+into `cpu.tick` it cost the HLE-off path about 0.6 %. The mixer renders a
+voice at a time across the frame, and the quality tier's unstretched sinc is
+a dot product with a precomputed per-phase row. Retired instructions,
+minimum of five runs, HLE on less HLE off:
+
+| Scene | Before | After |
+|---|---|---|
+| Emerald, Littleroot (600 frames) | +1.22 B (+9.9 %) | +0.32 B (+2.6 %) |
+| Beast Shooter, attract (900 frames) | +4.00 B (+22.9 %) | +1.64 B (+9.4 %) |
+
+What remains on Beast Shooter is mostly the stretched kernel for its
+decimated voices (about 0.6 B). A per-step table would save only the kernel
+lookups, not the 64-tap products, so it was left alone. Output is
+byte-identical to the per-sample loop, and the library sweep is unchanged.
 
 ## Old and constrained devices
 

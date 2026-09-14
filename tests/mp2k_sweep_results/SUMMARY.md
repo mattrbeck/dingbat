@@ -172,6 +172,20 @@ still toggles the HLE for the loaded game when tapped.
 The listening set (12 titles, hardware/HLE alternating plus both full tracks, and four
 parity/quality tier files) lives outside the repo in `~/Documents/emu/gba/mp2k-ab/`.
 
+## 2026-09-14 (night): performance pass
+
+The hook trigger moved from a per-instruction compare to the pipeline flush
+for hooks learned at a branch target. The mixer renders a voice at a time,
+and the unstretched sinc reads precomputed per-phase rows. Run 31 matches
+run 28 on every summary figure: 1013 engaged, 780 music titles, 779 within
+±20 %, median xcorr0 0.844, 708 above 0.5. All 780 music titles move by less
+than 0.01. A flush-only probe (run 30) is the trap here. It moved 29 titles by more
+than 0.01. Their vintages are entered through a stub before r0 holds
+&SoundInfo, so the probe had learned
+their hook a few instructions into the function, where no branch lands. The
+flush-only probe learned a later helper instead, and Hudson Best Collection
+fell from 0.95 to 0.17. Those hooks now keep the per-instruction compare.
+
 ## Why span-matched
 
 `-d:mp2kwav` (`src/dingbat/gba/apu.nim`) gates the REAL FIFO capture on the same

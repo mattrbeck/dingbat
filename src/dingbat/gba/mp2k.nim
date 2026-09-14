@@ -199,6 +199,7 @@ const
   # kernel three times as wide to keep its cutoff below the output
   # Nyquist), up to MP2K_SINC_MAX_STEP.
   MP2K_TAPS          = 64
+  MP2K_TAP_BUF       = 128               # Mp2kSampler.taps: the window slides through twice its length
   MP2K_TAP_OFF       = 31
   MP2K_SINC_HALF     = 8.0'f32           # kernel half-width, source samples, at step <= 1
   MP2K_SINC_MAX_STEP = 4.0'f32           # 8 * 4 = 32 = the window's reach
@@ -220,7 +221,17 @@ const
 # octaves back into the music as the driver's does. Weights are
 # normalised per output sample, so DC gain is exact at every phase and
 # step.
+#
+# At step <= 1 every voice uses the prototype as is, so its kernel at each
+# of the MP2K_SINC_RES fractional phases is tabulated once, normalised
+# (mp2kSincPhase: one row of the 2 * MP2K_SINC_HALF taps the kernel spans
+# per phase), and a voice's sample is one dot product with the row of its
+# phase — the same weights the prototype lookup gives at that phase, to
+# the table's resolution. Above step 1 the kernel is stretched per voice
+# and looked up tap by tap (sinc_sample).
+const MP2K_SINC_PHASE_TAPS = 2 * int(MP2K_SINC_HALF)
 var mp2kSincProto: array[int(MP2K_SINC_HALF) * MP2K_SINC_RES + 2, float32]
+var mp2kSincPhase: array[MP2K_SINC_RES * MP2K_SINC_PHASE_TAPS, float32]
 var mp2kSincReady = false
 
 proc build_sinc_table() =
@@ -233,26 +244,98 @@ proc build_sinc_table() =
     let wn = (if x >= float64(MP2K_SINC_HALF): 0.0
               else: 0.5 + 0.5 * cos(PI * x / float64(MP2K_SINC_HALF)))
     mp2kSincProto[i] = float32(fc * sinc * wn)
+  # Per-phase rows: tap j of a row is the source sample at cursor offset
+  # j - (MP2K_SINC_HALF - 1), i.e. the taps from MP2K_TAP_OFF - 7 to
+  # MP2K_TAP_OFF + 8, at distance |offset - phase| from the output sample.
+  const H = int(MP2K_SINC_HALF)
+  for p in 0 ..< MP2K_SINC_RES:
+    var wsum = 0.0'f32
+    let row = p * MP2K_SINC_PHASE_TAPS
+    for j in 0 ..< MP2K_SINC_PHASE_TAPS:
+      let off = j - (H - 1)                 # source offset from the cursor
+      let dist = (if off <= 0: (-off) * MP2K_SINC_RES + p    # left of the phase
+                  else: off * MP2K_SINC_RES - p)             # right of it
+      let w = mp2kSincProto[dist]
+      mp2kSincPhase[row + j] = w
+      wsum += w
+    let inv = 1.0'f32 / wsum
+    for j in 0 ..< MP2K_SINC_PHASE_TAPS:
+      mp2kSincPhase[row + j] *= inv
   mp2kSincReady = true
+
+# The sampler's inner loops index by construction-bounded offsets (the tap
+# window and the kernel tables); the native release build's runtime checks
+# would cost about as much as the arithmetic.
+{.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
+
+proc dot4(taps: ptr UncheckedArray[float32]; t0: int;
+          w: ptr UncheckedArray[float32]; w0, n: int): float32 {.inline.} =
+  ## Sum of taps[t0 + j] * w[w0 + j] over j < n, as four independent partial
+  ## sums (a single float chain cannot be vectorised without reassociation;
+  ## four chains can) and a scalar tail.
+  var a0 = 0.0'f32
+  var a1 = 0.0'f32
+  var a2 = 0.0'f32
+  var a3 = 0.0'f32
+  var j = 0
+  while j + 4 <= n:
+    a0 += taps[t0 + j] * w[w0 + j]
+    a1 += taps[t0 + j + 1] * w[w0 + j + 1]
+    a2 += taps[t0 + j + 2] * w[w0 + j + 2]
+    a3 += taps[t0 + j + 3] * w[w0 + j + 3]
+    j += 4
+  var acc = (a0 + a1) + (a2 + a3)
+  while j < n:
+    acc += taps[t0 + j] * w[w0 + j]
+    inc j
+  acc
 
 proc sinc_sample(s: ptr Mp2kSampler; step: float32): float32 {.inline.} =
   ## The tier's interpolated sample at the cursor's fractional phase, with
   ## the prototype kernel stretched by max(step, 1) (capped at
   ## MP2K_SINC_MAX_STEP: the tap window's reach).
-  let st = clamp(step, 1.0'f32, MP2K_SINC_MAX_STEP)
+  let frac = s.phase_frac
+  let tb = int(s.tap_base)
+  let taps = cast[ptr UncheckedArray[float32]](addr s.taps[0])
+  if step <= 1.0'f32:
+    # The prototype as is: the tabulated, normalised row of this phase.
+    let row = int(frac * float32(MP2K_SINC_RES)) * MP2K_SINC_PHASE_TAPS
+    let t0 = tb + MP2K_TAP_OFF - (int(MP2K_SINC_HALF) - 1)
+    return dot4(taps, t0, cast[ptr UncheckedArray[float32]](addr mp2kSincPhase[0]),
+                row, MP2K_SINC_PHASE_TAPS)
+  let st = min(step, MP2K_SINC_MAX_STEP)
   let inv = 1.0'f32 / st
   let half = MP2K_SINC_HALF * st
-  let frac = s.phase_frac
-  var acc = 0.0'f32
+  # The prototype is tabulated at MP2K_SINC_RES points per source sample:
+  # a tap at distance d from the output sample reads entry d / st * RES,
+  # and the distance grows by one source sample per tap outward from the
+  # cursor, so the entry advances by sc per tap.
+  let sc = inv * float32(MP2K_SINC_RES)
+  # Taps at and left of the cursor: distance j + frac for the tap j before
+  # it (the window reaches MP2K_TAP_OFF taps back, more than half at the
+  # widest step); then the taps right of it, distance (j + 1) - frac. The
+  # weights are gathered in tap order first so the products vectorise.
+  let nl = min(int(half - frac) + 1, MP2K_TAP_OFF + 1)
+  let nr = min(int(half + frac), MP2K_TAPS - 1 - MP2K_TAP_OFF)
+  var w: array[MP2K_TAPS, float32]
   var wsum = 0.0'f32
-  let k0 = max(0, int(float32(MP2K_TAP_OFF) + frac - half) + 1)
-  let k1 = min(MP2K_TAPS - 1, int(float32(MP2K_TAP_OFF) + frac + half))
-  for k in k0 .. k1:
-    let x = abs(float32(k - MP2K_TAP_OFF) - frac) * inv
-    let w = mp2kSincProto[int(x * float32(MP2K_SINC_RES))]
-    acc += s.taps[k] * w
-    wsum += w
-  if wsum > 1e-6'f32: acc / wsum else: s.taps[MP2K_TAP_OFF]
+  var x = frac * sc
+  for j in 0 ..< nl:
+    let v = mp2kSincProto[int(x)]
+    w[nl - 1 - j] = v
+    wsum += v
+    x += sc
+  x = (1.0'f32 - frac) * sc
+  for j in 0 ..< nr:
+    let v = mp2kSincProto[int(x)]
+    w[nl + j] = v
+    wsum += v
+    x += sc
+  let acc = dot4(taps, tb + MP2K_TAP_OFF + 1 - nl,
+                 cast[ptr UncheckedArray[float32]](addr w[0]), 0, nl + nr)
+  if wsum > 1e-6'f32: acc / wsum else: s.taps[tb + MP2K_TAP_OFF]
+
+{.pop.}
 
 when defined(mp2kwav):
   import std/[streams, math, strutils]
@@ -1104,6 +1187,8 @@ proc check_predictions(m: Mp2kHle; sound_info: uint32) =
     # of the pass and try again.
     inc m.cand_idx
     m.hook_addr  = m.cand[m.cand_pick[m.cand_idx]]
+    m.hook_thumb = m.cand_thumb[m.cand_pick[m.cand_idx]]
+    m.hook_branch = m.cand_arrived[m.cand_pick[m.cand_idx]]
     m.entry_addr = m.hook_addr and not 1'u32
     m.pred_ok = 0
     m.pred_bad = 0
@@ -1118,6 +1203,8 @@ proc check_predictions(m: Mp2kHle; sound_info: uint32) =
       # (a channel it starts outside the sequencer), so they no longer count.
       m.cand_idx = 0
       m.hook_addr  = m.cand[m.cand_pick[0]]
+      m.hook_thumb = m.cand_thumb[m.cand_pick[0]]
+      m.hook_branch = m.cand_arrived[m.cand_pick[0]]
       m.entry_addr = m.hook_addr and not 1'u32
       m.pred_ok = 0
       m.pred_bad = 0
@@ -1401,14 +1488,16 @@ proc probe_pass_end(m: Mp2kHle): bool =
       let pc = m.cand[m.cand_pick[0]]
       m.probe_passes = 0
       m.hook_addr  = pc                            # pc may carry the Thumb bit; the
-      m.entry_addr = pc and not 1'u32              # hook compare uses it verbatim
+      m.hook_thumb = m.cand_thumb[m.cand_pick[0]]  # hook compare uses it verbatim
+      m.hook_branch = m.cand_arrived[m.cand_pick[0]]
+      m.entry_addr = pc and not 1'u32
       m.probing = false
       m.fires_this_frame = 0
       m.gba.refresh_hle_hook()
       return true
   false
 
-proc probe_pc*(m: Mp2kHle; pc: uint32) {.noinline.} =
+proc probe_pc*(m: Mp2kHle; pc: uint32; arrived: bool) {.noinline.} =
   ## Learning probe, called from cpu.tick only while probing is armed and only
   ## for RAM-fetched instructions with r0 == &SoundInfo (both prefiltered
   ## inline). While the lock is held, every such instruction that is a call
@@ -1425,6 +1514,7 @@ proc probe_pc*(m: Mp2kHle; pc: uint32) {.noinline.} =
     if m.probe_block[i] == pc: return          # previously invalidated
   for i in 0 ..< m.cand_n:
     if m.cand[i] == pc:
+      if not arrived: m.cand_arrived[i] = false
       if m.cand_seen[i]:
         # An entry is called once per pass: seeing it again is the next
         # pass, on a game whose passes never end at an idle frame poll.
@@ -1442,6 +1532,8 @@ proc probe_pc*(m: Mp2kHle; pc: uint32) {.noinline.} =
   if m.cand_n < m.cand.len:
     m.cand[m.cand_n] = pc
     m.cand_lr[m.cand_n] = m.gba.cpu.r[14]
+    m.cand_thumb[m.cand_n] = m.gba.cpu.cpsr.thumb
+    m.cand_arrived[m.cand_n] = arrived
     m.cand_seen[m.cand_n] = true
     m.cand_order[m.cand_n] = m.probe_order
     m.cand_hits[m.cand_n] = 0
@@ -1518,16 +1610,23 @@ proc fetch_taps(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte]; rmask: uint3
   ## centred on the cursor: the output at phase mu lies between
   ## taps[MP2K_TAP_OFF] and the next, so a voice lands where the driver's
   ## does — P2: the driver's impulse at source index 200 answers at the
-  ## same index). A one-step advance shifts and fetches one; anything else
-  ## refetches the window.
+  ## same index). An advance shorter than the window slides the window on
+  ## through the buffer and fetches the new positions at its end (the
+  ## buffer is twice the window: the window is copied back to its start
+  ## only when it would run off the end); anything else refetches the
+  ## window.
   let i = s.src_index
   if s.tap_i != 0xFFFFFFFF'u32 and i > s.tap_i and i - s.tap_i < uint32(MP2K_TAPS):
-    # advanced by d < window: shift, fetch the d new positions at the end
     let d = int(i - s.tap_i)
-    for t in 0 ..< MP2K_TAPS - d: s.taps[t] = s.taps[t + d]
+    var tb = int(s.tap_base) + d
+    if tb + MP2K_TAPS > MP2K_TAP_BUF:
+      for t in 0 ..< MP2K_TAPS - d: s.taps[t] = s.taps[tb + t]
+      tb = 0
+    s.tap_base = int32(tb)
     for t in MP2K_TAPS - d ..< MP2K_TAPS:
-      s.taps[t] = m.src_at(s, rom, rmask, int64(i) + int64(t) - int64(MP2K_TAP_OFF))
+      s.taps[tb + t] = m.src_at(s, rom, rmask, int64(i) + int64(t) - int64(MP2K_TAP_OFF))
   else:
+    s.tap_base = 0
     for t in 0 ..< MP2K_TAPS:
       s.taps[t] = m.src_at(s, rom, rmask, int64(i) + int64(t) - int64(MP2K_TAP_OFF))
   s.tap_i = i
@@ -1551,8 +1650,13 @@ proc advance_cursor(s: ptr Mp2kSampler; step: float32) =
   else:
     s.ended = true
 
-proc render_one(m: Mp2kHle): tuple[a: float32, b: float32] =
-  ## One (FIFO A, FIFO B) sample of the frame being rendered, in the FIFO
+proc render_voices(m: Mp2kHle; n: int) =
+  ## The voices of the frame being rendered, summed per side into
+  ## m.mix_l / m.mix_r for its n samples, one voice at a time across the
+  ## frame (the voices are independent, so everything a voice decides once
+  ## per frame is decided once; the sums take the voices in channel order,
+  ## as a sample-at-a-time loop would). render_one then turns each sample
+  ## into a (FIFO A, FIFO B) pair, in the FIFO
   ## latch range (twice the driver's s8 byte) so the APU's DirectSound
   ## scaling applies. Per channel: four source samples around a fractional
   ## cursor, interpolated (cubic by default; the driver itself is linear —
@@ -1573,67 +1677,91 @@ proc render_one(m: Mp2kHle): tuple[a: float32, b: float32] =
   ##     of held (the hold is the DMA/DAC's zero-order replay);
   ##   * the sample is not truncated to the FIFO's integer latch — the
   ##     remainder rides in fine_a/fine_b past the 10-bit DAC (apu.nim).
-  var accl = 0.0'f32
-  var accr = 0.0'f32
   let rom = addr m.gba.cartridge.rom
   let rmask = m.gba.cartridge.rom_mask
   let cubic = m.use_cubic
+  let ml = cast[ptr UncheckedArray[float32]](addr m.mix_l[0])
+  let mr = cast[ptr UncheckedArray[float32]](addr m.mix_r[0])
+  for k in 0 ..< n:
+    ml[k] = 0.0'f32
+    mr[k] = 0.0'f32
+  # The frame's ramp (quality tier): sample k of the frame lies k / frame_n
+  # of the way from this pass's gains to the next pass's.
+  let ramped = m.quality and m.frame_n > 0
+  let rt = cast[ptr UncheckedArray[float32]](addr m.mix_ramp[0])
+  if ramped:
+    for k in 0 ..< n: rt[k] = float32(k) / float32(m.frame_n)
+  # Playback step per source Hz: the step is rate / 32768, an exact
+  # power-of-two scaling.
+  const STEP_PER_HZ = 1.0'f32 / float32(APU_SAMPLE_RATE)
+  let mode = (if m.resample_mode == 2: 2             # hold
+              elif m.resample_mode == 1 or not cubic: 1   # linear
+              elif m.quality: 3                      # windowed sinc
+              else: 0)                               # Catmull-Rom
   for i in 0 ..< MP2K_MAX_CHANNELS:
     let s = addr m.samplers[i]
     if not s.active or s.ended: continue
-    if s.tap_i != s.src_index:
-      m.fetch_taps(s, rom, rmask)
-    var sample: float32
-    let rate0 = (if s.use_pcm_rate: float32(m.pcm_sample_rate) else: float32(s.freq))
-    const T = MP2K_TAP_OFF
-    if m.resample_mode == 2:
-      sample = s.taps[T]                    # hold
-    elif m.resample_mode == 1 or not cubic:
-      sample = s.taps[T] + (s.taps[T + 1] - s.taps[T]) * s.phase_frac
-    elif m.quality:
-      # Quality tier: windowed sinc, stretched by the playback step
-      # (sinc_sample) — the sample's own band, no images, no aliasing.
-      sample = sinc_sample(s, rate0 / float32(APU_SAMPLE_RATE))
-    else:
-      sample = catmull_rom(s.taps[T - 1], s.taps[T], s.taps[T + 1], s.taps[T + 2], s.phase_frac)
-    # s8 units in, the driver's per-channel byte out: sample * side / 256.
-    # Quality tier: the gain runs linearly across the frame from this
-    # pass's value to the next pass's predicted one.
-    var gl = s.vol_l
-    var gr = s.vol_r
-    if m.quality and m.frame_n > 0:
-      let k = float32(m.ramp_i) / float32(m.frame_n)
-      gl = s.vol_l + (s.vol_l_to - s.vol_l) * k
-      gr = s.vol_r + (s.vol_r_to - s.vol_r) * k
-    let cl = sample * gl
-    let cr = sample * gr
-    accl += cl
-    accr += cr
-    when defined(mp2kwav):
-      let sn = sample / 128.0'f32
-      dbgVoiceRawSq[i] += float64(sn) * float64(sn)
-      dbgVoiceRawPk[i] = max(dbgVoiceRawPk[i], abs(sn))
-      dbgVoiceOutSq[i] += float64(cl)*float64(cl) + float64(cr)*float64(cr)
-      dbgVoiceOutPk[i] = max(dbgVoiceOutPk[i], max(abs(cl), abs(cr)))
-      dbgVoiceN[i].inc
-      dbgVoiceComp[i] = s.compressed
-      let k = (if s.compressed: 1 else: 0)
-      dbgKindRawSq[k] += float64(sn) * float64(sn)
-      dbgKindRawPk[k] = max(dbgKindRawPk[k], abs(sn))
-      dbgKindN[k].inc
-      if s.age == 0:            # attack frame (first frame after note-on)
-        dbgAttackSq += float64(cl)*float64(cl) + float64(cr)*float64(cr)
-        dbgAttackPk = max(dbgAttackPk, max(abs(cl), abs(cr)))
-        dbgAttackN.inc
-    # Advance the resample phase; step = playback-rate / output-rate, where a
-    # TYPE_FIX channel's playback rate is pcmFreq (TYPE_* table).
-    let rate = rate0
-    when defined(mp2kwav):
-      dbgStepN.inc
-      if rate > float32(APU_SAMPLE_RATE):
-        dbgStepDecimN.inc
-        dbgStepMax = max(dbgStepMax, rate/float32(APU_SAMPLE_RATE))
-    s.advance_cursor(rate / float32(APU_SAMPLE_RATE))
+    # Advance the resample phase by step = playback-rate / output-rate,
+    # where a TYPE_FIX channel's playback rate is pcmFreq (TYPE_* table).
+    let rate = (if s.use_pcm_rate: float32(m.pcm_sample_rate) else: float32(s.freq))
+    let step = rate * STEP_PER_HZ
+    let vl = s.vol_l
+    let vr = s.vol_r
+    let dl = s.vol_l_to - s.vol_l
+    let dr = s.vol_r_to - s.vol_r
+    for k in 0 ..< n:
+      if s.tap_i != s.src_index:
+        m.fetch_taps(s, rom, rmask)
+      let T = int(s.tap_base) + MP2K_TAP_OFF
+      var sample: float32
+      case mode
+      of 2: sample = s.taps[T]
+      of 1: sample = s.taps[T] + (s.taps[T + 1] - s.taps[T]) * s.phase_frac
+      of 3:
+        # Quality tier: windowed sinc, stretched by the playback step
+        # (sinc_sample) — the sample's own band, no images, no aliasing.
+        sample = sinc_sample(s, step)
+      else:
+        sample = catmull_rom(s.taps[T - 1], s.taps[T], s.taps[T + 1], s.taps[T + 2], s.phase_frac)
+      # s8 units in, the driver's per-channel byte out: sample * side / 256.
+      # Quality tier: the gain runs linearly across the frame from this
+      # pass's value to the next pass's predicted one.
+      var gl = vl
+      var gr = vr
+      if ramped and k > 0:
+        gl = vl + dl * rt[k]
+        gr = vr + dr * rt[k]
+      let cl = sample * gl
+      let cr = sample * gr
+      ml[k] += cl
+      mr[k] += cr
+      when defined(mp2kwav):
+        let sn = sample / 128.0'f32
+        dbgVoiceRawSq[i] += float64(sn) * float64(sn)
+        dbgVoiceRawPk[i] = max(dbgVoiceRawPk[i], abs(sn))
+        dbgVoiceOutSq[i] += float64(cl)*float64(cl) + float64(cr)*float64(cr)
+        dbgVoiceOutPk[i] = max(dbgVoiceOutPk[i], max(abs(cl), abs(cr)))
+        dbgVoiceN[i].inc
+        dbgVoiceComp[i] = s.compressed
+        let kind = (if s.compressed: 1 else: 0)
+        dbgKindRawSq[kind] += float64(sn) * float64(sn)
+        dbgKindRawPk[kind] = max(dbgKindRawPk[kind], abs(sn))
+        dbgKindN[kind].inc
+        if s.age == 0:            # attack frame (first frame after note-on)
+          dbgAttackSq += float64(cl)*float64(cl) + float64(cr)*float64(cr)
+          dbgAttackPk = max(dbgAttackPk, max(abs(cl), abs(cr)))
+          dbgAttackN.inc
+        dbgStepN.inc
+        if rate > float32(APU_SAMPLE_RATE):
+          dbgStepDecimN.inc
+          dbgStepMax = max(dbgStepMax, rate/float32(APU_SAMPLE_RATE))
+      s.advance_cursor(step)
+      if s.ended: break          # a one-shot ran out: silent for the rest
+
+proc render_one(m: Mp2kHle; accl, accr: float32): tuple[a: float32, b: float32] =
+  ## One (FIFO A, FIFO B) sample of the frame being rendered from its voice
+  ## sums (render_voices): the reverb seed, the latch scale and the FIFO
+  ## assignment.
   # --- MP2K reverb: the driver's buffer-seed echo (canonical) -------------------
   # Driver behaviour, observed at runtime (loveemu's summary: "a simple
   # reverb (echo) effect with fixed delay"). pcmBuffer is two s8 halves, one
@@ -1726,7 +1854,6 @@ proc render_one(m: Mp2kHle): tuple[a: float32, b: float32] =
   of 1: fb = 0              # mono via FIFO A (fa == fb already; B silent)
   of 2: fa = 0              # mono via FIFO B
   else: discard
-  inc m.ramp_i
   (fa, fb)
 
 proc render_frame(m: Mp2kHle) =
@@ -1815,14 +1942,14 @@ proc render_frame(m: Mp2kHle) =
   when defined(mp2kwav):
     # capture index at which this frame's first sample will be emitted
     dbgHookCapIdx.add mp2kWavCapture.len div 2 + level
-  m.ramp_i = 0
   m.fifo_acc += nominal
   var n = int(m.fifo_acc)
   m.fifo_acc -= float32(n)
   if n > cap - level - 1: n = cap - level - 1
   m.frame_n = n
+  m.render_voices(n)
   for i in 0 ..< n:
-    let (a, b) = m.render_one()
+    let (a, b) = m.render_one(m.mix_l[i], m.mix_r[i])
     let wi = (m.fifo_w mod cap) * 2
     m.fifo[wi] = a
     m.fifo[wi + 1] = b
@@ -1876,6 +2003,9 @@ proc init_mp2k*(m: Mp2kHle) =
   m.quality = true     # quality tier on (render_one); parity checks turn it off
   build_sinc_table()
   m.fifo = newSeq[float32](MP2K_FIFO_CAP * 2)
+  m.mix_l = newSeq[float32](MP2K_FIFO_CAP)
+  m.mix_r = newSeq[float32](MP2K_FIFO_CAP)
+  m.mix_ramp = newSeq[float32](MP2K_FIFO_CAP)
   m.ring_copy = newSeq[uint8](8192)
   m.ring_prev_slot = -1
   m.predict = getEnv("DINGBAT_MP2K_LATE") != "1"

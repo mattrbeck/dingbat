@@ -19,6 +19,9 @@ proc exception_return_restore*(cpu: CPU) =
     let page = int(bits_range(cpu.r[15], 24, 27))
     cpu.gba.bus.add_cycles(2 * (int(cpu.gba.bus.wait16_s[page]) -
                                 int(cpu.gba.bus.wait32_s[page])))
+    # The flush tested the audio-HLE gate at ARM depth (clear_pipeline); a
+    # Thumb hook returned to by the exception is only recognisable now.
+    if cpu.r[15] == cpu.hle_gate: cpu.hle_look = true
   let old_spsr = uint32(cpu.spsr)
   let was_irq_disabled = cpu.cpsr.irq_disable
   let new_mode = cast[CpuMode](cpu.spsr.mode)

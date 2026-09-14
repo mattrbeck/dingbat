@@ -103,7 +103,8 @@ those is `gba_rom_checksum`.
 
 The MP2K sound-engine HLE (`src/dingbat/gba/mp2k.nim`) keeps no state in the
 payload. Everything it holds is a shadow of the game's own driver state in
-emulated RAM — the learned mixer hook, each voice's read cursor and 64-sample
+emulated RAM — the learned mixer hook and the CPU's trigger for it
+(`hle_gate` and its flags, recomputed every frame), each voice's read cursor and 64-sample
 tap window, the quality tier's per-frame gain ramps, the echo ring, and the
 frame FIFO that lands each pass at the hardware's latency — and a load rebuilds
 it from that RAM (`mp2k_state_loaded`: every voice re-latches at the engine's
