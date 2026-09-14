@@ -11,22 +11,25 @@
 # serialized (save states are identical with the HLE on or off); every
 # state/rollback load calls mp2k_state_loaded to rebuild it from emulated RAM.
 #
-# Provenance / license: this file is this project's own MIT-licensed code. No
-# driver code is reproduced; it relies on interface facts about the
-# "MusicPlayer2000" (M4A / "Sappy") driver — the layout of its RAM work area,
-# its flag bits, the compressed-sample block format and the behaviour of its
-# mixer — observed by running the driver in this emulator and cross-checked
-# against public documentation:
+# Provenance / license: this file is this project's own MIT-licensed code.
+# Every driver behaviour it models is established by running the driver in
+# this emulator (tools/mp2kprobe: the probe songs P1..P11 and the rig
+# scenarios; tests/mp2k_probe.nim reads the driver's own mixed buffer):
+# the envelope rules, the gain law and per-side bytes, the reverb comb, the
+# note-on count field, the compressed-sample format (rig `types`, probe P8:
+# blocks written by this project's own encoder play back through the driver
+# as the intended waveform), the ring geometry, the DMA/FIFO latency and the
+# mixer's calling structure. Public documentation names things and
+# cross-checks:
 #   * loveemu vgmdocs, "Summary of GBA Standard Sound Driver MusicPlayer2000":
 #     https://loveemu.github.io/vgmdocs/Summary_of_GBA_Standard_Sound_Driver_MusicPlayer2000.html
-#   * SoundInfo / SoundChannel / WaveData field names are the pret header
-#     names for those fields; the byte offsets are what the driver reads and
-#     writes at runtime.
-#   * agbplay (ipatix, GPL — documentation only, no code) corroborates the
-#     compressed block format.
+#   * Bregalad and ipatix, 'GBA "Sappy" sound engine information' (song and
+#     wave formats, the probe songs' vocabulary).
 #   * GBATEK — the DirectSound FIFO hardware sink we substitute for.
-# The resampler kernel is this project's own; the kernel before commit
-# 28be88c7 followed NanoBoyAdvance's (BSD-2-Clause since 2026-06).
+#   * The SoundInfo / SoundChannel / WaveData field names follow the names
+#     the pret decompilation project uses for those fields, as labels only;
+#     the offsets are what the driver reads and writes at runtime (rig
+#     `side`, `offs`, `env`, `iec`).
 #
 # Design:
 #   * SHADOW mode: the real mixer still runs; its channel table is
@@ -107,29 +110,20 @@ const
                            # 64-byte chans slots (0x50 + 12*64); the DMA1SAD
                            # every standard driver programs
 
-  # channel.type bits (the sequencer copies the instrument's type byte verbatim
-  # into SoundChannel.type at note-on). Canonical semantics — the mixer code
-  # below only cross-references this table:
-  #   TYPE_CGB (0x07): nonzero low bits select a CGB (PSG) channel 1-4; such
-  #     notes go to the CgbChans array and never reach a DirectSound
-  #     SoundChannel, so a DirectSound channel always has these bits clear.
-  #   TYPE_FIX (0x08): fixed-rate playback — the phase step is forced to 1.0
-  #     source sample per output sample, i.e. the sample plays at exactly
-  #     SoundInfo.pcmFreq with channel.frequency ignored.
-  #   TYPE_REV (0x10): reversed playback — the mixer reflects the read pointer
-  #     to the END of the data and reads with descending addresses. The
-  #     reversed paths never consult the loop registers: on count exhaustion
-  #     the channel is stopped (statusFlags = 0), so REV is always one-shot.
-  #   TYPE_CMP (0x20): compressed (BDPCM) waveform. CMP or REV route the mixer
-  #     into its special-case renderer; within it compressed decode is engaged
-  #     only when WaveData.type != 0 (the u16 at wave+0: 1 = DPCM, 0 = plain
-  #     PCM) — so a CMP-flagged channel with a plain header plays uncompressed
-  #     and a REV-only channel with a DPCM header decodes. All CMP/REV/FIX
-  #     combinations are valid; CMP+REV plays the stream backward (one-shot),
-  #     forward CMP supports looping.
-  #   TYPE_SPL (0x40, key split) and TYPE_RHY (0x80, rhythm): instrument-table
-  #     lookup flags for the sequencer; they may remain set in
-  #     SoundChannel.type but the mixer ignores them.
+  # channel.type bits — what the mixer does with each, as the rig `types`
+  # scenario shows it (a looping ramp, a compressed sine and a one-shot ramp
+  # played under every combination at three rates):
+  #   0x07: low bits nonzero select a PSG channel; such notes never occupy a
+  #     DirectSound channel, so a channel here always has them clear.
+  #   TYPE_FIX (0x08): plays at SoundInfo.pcmFreq whatever the frequency
+  #     field says — one source sample per engine sample.
+  #   TYPE_REV (0x10): plays the data backward from its end; the loop fields
+  #     are ignored, so it is one-shot. Combines with FIX and with CMP.
+  #   TYPE_CMP (0x20): compressed (BDPCM) waveform when the WaveData header's
+  #     type word (wave+0) is nonzero; with a plain header the channel plays
+  #     uncompressed. Forward CMP loops; CMP+REV is one-shot.
+  #   0x40 / 0x80: instrument-table flags the sequencer leaves in the byte;
+  #     the mixer ignores them.
   TYPE_CGB {.used.} = 0x07'u8
   TYPE_FIX = 0x08'u8
   TYPE_REV = 0x10'u8
@@ -137,39 +131,35 @@ const
   TYPE_SPL {.used.} = 0x40'u8
   TYPE_RHY {.used.} = 0x80'u8
 
-  # status bits (SoundChannel.statusFlags):
-  #   START (0x80): note-on request from the sequencer; the mixer consumes it.
-  #   STOP (0x40): note-off request; envelope enters release.
-  #   SPECIAL (0x20): mixer-internal latch — "CMP/REV pointer already
-  #     initialised" (set on the first mixer pass of such a channel).
-  #   LOOP (0x10): set at note start when WaveData.flags carries the loop bits
-  #     (0xC0 at wave+3).
-  #   IEC (0x04): pseudo-echo tail — when the release envelope decays below
-  #     SoundChannel.pseudoEchoVolume the driver holds it there and counts
-  #     pseudoEchoLength down once per frame, killing the channel at zero.
-  #     Shadow mode inherits this for free: envelopeVolumeRight/Left are
-  #     computed AFTER the release/IEC handling each frame.
-  #   ENV (0x03): envelope phase (3=attack, 2=decay, 1=sustain, 0=release).
+  # status bits (SoundChannel.status), as the probe songs and the rig show
+  # the pass treating them:
+  #   START (0x80): note-on; the pass consumes it and starts the sample at 0
+  #     (P7, rig `offs`: the count field is not a start offset).
+  #   STOP (0x40): note-off; the envelope enters release (P3).
+  #   IEC (0x04): pseudo-echo hold — the release floors at pseudoEchoVolume
+  #     for pseudoEchoLength passes, then the channel is dropped (rig `iec`).
+  #   ENV (0x03): envelope phase, 3 attack / 2 decay / 1 sustain / 0 release.
+  #   0x20 and 0x10 are the mixer's own bookkeeping; nothing here reads them.
   CH_START = 0x80'u8
   CH_STOP  = 0x40'u8
   CH_IEC   = 0x04'u8
   CH_ENV   = 0x03'u8
-  CH_ON    = 0xC7'u8   # SOUND_CHANNEL_SF_ON = START|STOP|IEC|ENV — "producing sound"
+  CH_ON    = 0xC7'u8   # START|STOP|IEC|ENV: any set = the channel is sounding
 
-  # m4a compressed-waveform (BDPCM) 4-bit differential LUT: 16 signed deltas
-  # added to a running s8 accumulator. The table is the squares: nibble n < 8
-  # adds n^2, n >= 8 subtracts (16-n)^2 (agbplay documents the same table).
+  # Compressed-waveform ("BDPCM") delta table, as this project's own
+  # encoder's blocks play back through the driver (rig `types`, probe P8: a
+  # four-cycle sine encoded here comes out of the driver's buffer as that
+  # sine): 16 signed 4-bit deltas that are the squares — nibble n < 8 adds
+  # n^2, n >= 8 subtracts (16-n)^2 — on a wrapping s8 accumulator.
   BDPCM_LUT: array[16, int8] = block:
     var t: array[16, int8]
     for n in 0 ..< 16:
       t[n] = (if n < 8: int8(n * n) else: int8(-((16 - n) * (16 - n))))
     t
-  # Block format (canonical; bdpcm_decode_block implements it): 33 bytes /
-  # 64 samples = 1 s8 base byte + 32 nibble bytes. Sample 0 is the RAW base
-  # byte; sample 1 takes the LOW nibble of the first delta byte (its high
-  # nibble is never read); each subsequent byte supplies its high nibble then
-  # its low nibble (63 used nibbles for samples 1..63). The accumulator wraps
-  # at 8 bits (the driver decodes through a byte store / signed byte load).
+  # Block format, likewise: 33 bytes carry 64 samples — a raw s8 base byte
+  # (sample 0), then 32 delta bytes read high nibble first, except that the
+  # first delta byte's high nibble is skipped (sample 1 takes its low
+  # nibble); 63 deltas for samples 1..63, the accumulator wrapping at 8 bits.
   BDPCM_BLOCK_BYTES  = 33'u32
   BDPCM_BLOCK_SAMPS  = 64'u32
 
@@ -341,19 +331,23 @@ proc wave_u8(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte]; rmask: uint32;
 
 proc bdpcm_decode_block(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte];
                         rmask: uint32; blk: uint32) =
-  ## Decode one whole BDPCM block into the sampler's block cache (format and
-  ## nibble order: BDPCM_BLOCK_BYTES above). The driver also decodes
-  ## block-at-a-time, keyed by block index. Whole-block decode keeps the
-  ## stream correct however the resampler lands on it: decimating steps,
-  ## reversed reads and loop wrap-backs all just index into the block.
+  ## Decode one 33-byte block into the sampler's 64-sample cache (format:
+  ## BDPCM_LUT above). Decoding whole blocks keyed by index keeps every
+  ## access pattern — decimating steps, reversed reads, loop wrap-backs —
+  ## a plain lookup into the cache.
   let base = blk * BDPCM_BLOCK_BYTES
-  var acc = cast[int8](m.wave_u8(s, rom, rmask, base))
-  s.blk[0] = acc
-  for i in 1 ..< int(BDPCM_BLOCK_SAMPS):
-    let b = m.wave_u8(s, rom, rmask, base + uint32(i shr 1) + 1'u32)
-    let nib = (if (i and 1) != 0: b and 0x0F'u8 else: b shr 4)
-    acc = cast[int8](int(acc) + int(BDPCM_LUT[nib]))
-    s.blk[i] = acc
+  var acc = int(cast[int8](m.wave_u8(s, rom, rmask, base)))
+  s.blk[0] = int8(acc)
+  var n = 1
+  for k in 1'u32 .. 32'u32:
+    let d = m.wave_u8(s, rom, rmask, base + k)
+    if k > 1'u32:
+      acc = int(cast[int8](uint8((acc + int(BDPCM_LUT[d shr 4])) and 0xFF)))
+      s.blk[n] = int8(acc)
+      inc n
+    acc = int(cast[int8](uint8((acc + int(BDPCM_LUT[d and 0x0F])) and 0xFF)))
+    s.blk[n] = int8(acc)
+    inc n
   s.blk_index = blk
 
 proc decode_at(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte];
