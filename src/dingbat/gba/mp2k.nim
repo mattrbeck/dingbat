@@ -74,9 +74,9 @@ const
   SC_ENV_VOL {.used.} = 0x09
   SC_ENV_VR   = 0x0A   # envelopeVolumeRight
   SC_ENV_VL   = 0x0B   # envelopeVolumeLeft
-  SC_COUNT    = 0x18   # count/ct: the note-on sample start offset while START
-                       # is set; afterwards the source samples remaining until
-                       # sample/loop end (position resync + resume: apply_pending)
+  SC_COUNT    = 0x18   # count/ct: source samples remaining until sample/loop
+                       # end (position resync + resume: apply_pending); stale
+                       # while START is set
   SC_FREQ     = 0x20   # frequency (per-note playback rate, Hz)
   SC_WAVE     = 0x24   # wav pointer -> WaveData
   SC_SIZE     = 64
@@ -548,19 +548,17 @@ proc apply_pending(m: Mp2kHle; sound_info: uint32) =
           else: 0'u32
       else:
         # (re)trigger: reset the resampler + decode state to the note's start.
-        # At note-on SoundChannel.count holds a sample start offset that the
-        # mixer's START handler consumes as data + count (and count = size -
-        # count), so honour it when START keyed this retrigger.
-        var start_off = 0'u32
-        if started:
-          start_off = p.ct
-          if start_off >= m.rd32(wave + 12): start_off = 0
+        # SoundChannel.count at note-on is whatever the channel's previous
+        # note left there, not a start offset: the driver starts every note
+        # at sample 0 (Minish Cap carries such counts on most note-ons and the
+        # engine ignored all of them; Emerald's are always 0). The census in
+        # tests/mp2k_sweep.nim (start_honoured / start_ignored) keeps watch.
         when defined(mp2kwav):
-          s.chk_off = start_off
-        s.start_off = start_off
-        # Forward playback begins at the offset; reversed playback begins at the
-        # END of the (offset-trimmed) data and src_index counts samples consumed.
-        s.src_index = (if reversed: 0'u32 else: start_off)
+          s.chk_off = (if started and p.ct < m.rd32(wave + 12): p.ct else: 0'u32)
+        s.start_off = 0
+        # Forward playback begins at sample 0; reversed playback begins at the
+        # END of the data and src_index counts samples consumed.
+        s.src_index = 0
         s.phase_frac = 0
         s.tap_i = 0xFFFFFFFF'u32
         s.blk_index = 0xFFFFFFFF'u32
