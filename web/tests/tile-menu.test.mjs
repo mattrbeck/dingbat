@@ -669,3 +669,82 @@ test("the bar's brand is inert, and out of the tab order, until it is showing",
   app.api.setBrandP(1);
   assert.equal(btn.tabIndex, 0);
 });
+
+
+// ── The brand's flight ──────────────────────────────────────────────────────
+// The bug these guard against: the flight used to fill FORWARDS, so a finished
+// animation went on describing its element, and it was tracked in a variable
+// that the flight cleared when it settled — which made those leftovers
+// invisible to the next flight. Play the sequence load → menu → close a few
+// times and one of them would be left holding opacity 0 with nothing able to
+// clear it, and the brand was simply gone for the rest of the session.
+
+const givenBoxes = (app) => {
+  // Two logos in the two places, so a flight has something to measure.
+  app.document.getElementById("home-logo").setBox(460, 300, 76, 76);
+  app.document.getElementById("bar-logo").setBox(660, 14, 22, 22);
+  app.document.getElementById("bar-brand").setBox(660, 12, 120, 28);
+  app.document.getElementById("home-brand").setBox(420, 290, 160, 140);
+};
+
+const flightOn = (app, id) =>
+  app.document.getElementById(id).getAnimations();
+
+test("nothing the flight makes outlives it: every animation fills backwards",
+     async () => {
+  const app = await loadApp();
+  givenBoxes(app);
+  app.api.flyBrand(false);
+
+  const all = [...flightOn(app, "bar-brand"), ...flightOn(app, "bar-word"),
+               ...flightOn(app, "home-brand")];
+  assert.ok(all.length >= 3, "a closing flight moves more than one thing");
+  for (const a of all) {
+    assert.equal(a.id, app.api.BRAND_FLY_ID, "tagged, so the next flight finds it");
+    assert.equal(a.opts.fill, "backwards",
+                 "forwards fill is how the brand got stranded");
+  }
+});
+
+test("a second flight cancels the first, even after the first has settled",
+     async () => {
+  const app = await loadApp();
+  givenBoxes(app);
+
+  app.api.flyBrand(false);
+  const first = [...flightOn(app, "bar-brand"), ...flightOn(app, "home-brand")];
+  assert.ok(first.length >= 2);
+
+  // Let it land. This is the state the old code lost track of: finished, and
+  // still attached.
+  first.forEach((a) => a.finish());
+  await settle();
+
+  app.api.flyBrand(true);
+  assert.ok(first.every((a) => a.playState === "idle"),
+            "the landed flight was cancelled, not left describing the brand");
+  assert.ok(flightOn(app, "bar-brand").length > 0, "and a new one is up");
+});
+
+// The word makes the round trip fading, because the flight is anchored on the
+// logo - the one part both layouts share - and the bar's word sits to the
+// right of its logo where the hero's sits under it. A word that stayed solid
+// sailed a long way past where it was going to land.
+test("the word is only solid at the end it belongs to", async () => {
+  const app = await loadApp();
+  givenBoxes(app);
+
+  app.api.flyBrand(false);
+  let word = flightOn(app, "bar-word")[0];
+  assert.equal(word.frames[0].opacity, 1, "solid in the bar it is leaving");
+  assert.equal(word.frames[word.frames.length - 1].opacity, 0, "gone by the hero");
+  assert.equal(word.opts.easing, "linear",
+               "iteration easing would move the offsets off the wall clock");
+  assert.equal(word.opts.duration, app.api.BRAND_MOVE_MS,
+               "full length, so finishing cannot hand it back mid-flight");
+
+  app.api.flyBrand(true);
+  word = flightOn(app, "bar-word")[0];
+  assert.equal(word.frames[0].opacity, 0, "and the other way round coming up");
+  assert.equal(word.frames[word.frames.length - 1].opacity, 1);
+});

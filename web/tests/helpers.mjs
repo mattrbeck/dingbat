@@ -99,7 +99,43 @@ class FakeElement {
   querySelectorAll() { return []; }
   querySelector() { return null; }
   getBoundingClientRect() {
-    return { width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0, x: 0, y: 0 };
+    const b = this._box;
+    if (!b) return { width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0, x: 0, y: 0 };
+    return { width: b.w, height: b.h, top: b.y, left: b.x,
+             right: b.x + b.w, bottom: b.y + b.h, x: b.x, y: b.y };
+  }
+  // Tests give an element a box with setBox(); without one it measures as
+  // nothing, which is what the real code treats as "not on screen".
+  setBox(x, y, w, h) { this._box = { x, y, w, h }; return this; }
+  // Web Animations, enough of it: what was asked for, and whether it is still
+  // attached. Nothing advances on its own - `finished` settles when a test
+  // (or a cancel) says so.
+  animate(frames, opts) {
+    const a = {
+      id: "",
+      frames,
+      opts,
+      playState: "running",
+      _resolve: null,
+      _reject: null,
+      cancel() {
+        if (a.playState === "idle") return;
+        a.playState = "idle";
+        a._reject?.(new Error("cancelled"));
+      },
+      finish() {
+        if (a.playState !== "running") return;
+        a.playState = "finished";
+        a._resolve?.(a);
+      },
+    };
+    a.finished = new Promise((res, rej) => { a._resolve = res; a._reject = rej; });
+    a.finished.catch(() => {});
+    (this._anims ??= []).push(a);
+    return a;
+  }
+  getAnimations() {
+    return (this._anims || []).filter((a) => a.playState !== "idle");
   }
   getContext() {
     // 2D-context stand-in: every method is a no-op except the two that are
@@ -551,7 +587,8 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     refreshHomeRecent, handleRomFile, loadRom,
     setRomsSort, sortRoms, applyLibFilter, renderLibChips, libSearchMatch, libFold,
     openTileMenu, closeTileMenu, gameFlags, driveHasRom, tileMenuEntries,
-    sessionMenuEntries, setPausedCardShown, setBrandP, syncBrand,
+    sessionMenuEntries, setPausedCardShown, setBrandP, syncBrand, flyBrand,
+    BRAND_FLY_ID, BRAND_MOVE_MS,
     get brandP() { return brandP; },
     LONG_PRESS_MS,
     get tileMenuFor() { return tileMenuFor; },

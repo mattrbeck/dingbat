@@ -9375,6 +9375,7 @@ const brandLogo = document.getElementById("home-logo");
 const brandBarSlot = document.getElementById("brand-slot");
 const barBrand = document.getElementById("bar-brand");
 const barLogo = document.getElementById("bar-logo");
+const barWord = document.getElementById("bar-word");
 const BRAND_MOVE_MS = 380;
 // The tail of the flight, over which the bar's copy hands the brand to the
 // hero's. Short on purpose: any longer and the word is readable twice.
@@ -9416,8 +9417,25 @@ if (homeScroller.addEventListener) {
 // shapes - a column with a tagline down there, a wordmark beside its mark up
 // here - and the logo is the one part that is the same thing in both, so
 // anchoring the transform on it lands it exactly while the word sweeps along.
+// Every animation this makes is tagged, and every flight begins by cancelling
+// anything still tagged on either element. Tracking them in a variable was not
+// enough: the variable is cleared when a flight settles, so a finished
+// animation that is still FILLING is invisible to the next flight and goes on
+// holding whatever property it ended on. Which is also why nothing here fills
+// forwards any more - every one of these is `backwards`, so the moment it is
+// done the element goes back to being described by the stylesheet and nothing
+// else. A brand that cannot be shown is worse than a brand that does not fly.
+const BRAND_FLY_ID = "brand-fly";
+
+const cancelFlight = () => {
+  for (let el of [barBrand, barWord, brandEl]) {
+    el.getAnimations?.().forEach((a) => { if (a.id === BRAND_FLY_ID) a.cancel(); });
+  }
+  brandAnim = null;
+};
+
 const flyBrand = (up) => {
-  if (brandAnim) { brandAnim.forEach((a) => a.cancel()); brandAnim = null; }
+  cancelFlight();
   if (!barBrand.animate) return;
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   let hero = brandLogo.getBoundingClientRect?.();
@@ -9432,16 +9450,39 @@ const flyBrand = (up) => {
   let dx = (hero.left + hero.width / 2) - (bar.left + bar.width / 2);
   let dy = (hero.top + hero.height / 2) - (bar.top + bar.height / 2);
   let overHero = `translate(${dx}px, ${dy}px) scale(${scale})`;
+
   /** @type {KeyframeAnimationOptions} */
   let glide = { duration: BRAND_MOVE_MS, easing: "cubic-bezier(.22,.61,.36,1)",
                 fill: "backwards" };
+  // The word's own fade. The flight is anchored on the LOGO, because that is
+  // the one part both layouts have in common - but the bar's word sits to the
+  // right of its logo while the hero's sits under it, so a word that made the
+  // whole journey sailed a long way past where it was going to land. It
+  // leaves early on the way down and arrives late on the way up, so only the
+  // logo is ever seen crossing.
+  // Full duration and LINEAR, so the offsets below mean what they say in wall
+  // clock; a short animation that finished early would drop its effect and
+  // hand the word back at full opacity exactly where it is furthest from
+  // where it belongs. Nothing fills forwards, so the tail keyframe is what
+  // holds it: 0 to the end going down, 1 to the end coming up, both of which
+  // agree with what the stylesheet says once the flight lets go.
+  /** @type {KeyframeAnimationOptions} */
+  let word = { duration: BRAND_MOVE_MS, easing: "linear", fill: "backwards" };
+  let wordFrames = up
+    ? [{ opacity: 0, offset: 0 }, { opacity: 0, offset: 0.55 },
+       { opacity: 1, offset: 1 }]
+    : [{ opacity: 1, offset: 0 }, { opacity: 0, offset: 0.45 },
+       { opacity: 0, offset: 1 }];
 
+  let made;
   if (up) {
     // A game opening. The hero's copy is hidden the same instant, so this one
     // starts solid and exactly over it - fading in from nothing would leave a
     // moment with no brand anywhere.
-    brandAnim = [barBrand.animate(
-      [{ transform: overHero }, { transform: "none" }], glide)];
+    made = [
+      barBrand.animate([{ transform: overHero }, { transform: "none" }], glide),
+      barWord.animate(wordFrames, word),
+    ];
   } else {
     // A game closing, and the harder direction: the hero's copy is back on
     // screen immediately, so simply flying a ghost down onto it left the real
@@ -9452,27 +9493,33 @@ const flyBrand = (up) => {
     // than a pair of keyframe offsets. The `easing` option is iteration
     // easing: it remaps progress before the keyframes are read, so on a glide
     // this ease-out an offset of 0.66 arrives about a third of the way through
-    // the wall clock, and the crossfade that was meant to be a flick at the
-    // end became most of the flight with the word legible twice in two
-    // different layouts. A separate, linear, delayed fade puts it back where
-    // the eye expects it - by which point the glide has the two logos all but
-    // on top of each other, which is what makes a row without a tagline turn
-    // into a column with one and still read as one object.
+    // the wall clock, and a flick at the end became most of the flight with
+    // the word legible twice in two different layouts.
     /** @type {KeyframeAnimationOptions} */
     let fade = { duration: BRAND_HANDOVER_MS,
                  delay: BRAND_MOVE_MS - BRAND_HANDOVER_MS,
-                 easing: "linear", fill: "both" };
-    brandAnim = [
+                 easing: "linear", fill: "backwards" };
+    made = [
       barBrand.animate([{ transform: "none" }, { transform: overHero }], glide),
+      barWord.animate(wordFrames, word),
       barBrand.animate([{ opacity: 1 }, { opacity: 0 }], fade),
       brandEl.animate(
         [{ opacity: 0, transform: "scale(.97)" },
          { opacity: 1, transform: "none" }], fade),
     ];
   }
-  Promise.all(brandAnim.map((a) => a.finished))
-    .then(() => { barBrand.style.transformOrigin = ""; brandAnim = null; })
-    .catch(() => {});
+  made.forEach((a) => { a.id = BRAND_FLY_ID; });
+  brandAnim = made;
+
+  // Settled the same way whether it lands or is cut short, and only by the
+  // flight that is still the current one.
+  let settle = () => {
+    if (brandAnim !== made) return;
+    barBrand.style.transformOrigin = "";
+    brandAnim = null;
+    syncBrand();
+  };
+  Promise.all(made.map((a) => a.finished)).then(settle, settle);
 };
 
 barBrand.addEventListener("click", () => {
