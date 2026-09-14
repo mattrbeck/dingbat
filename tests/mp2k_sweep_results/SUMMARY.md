@@ -106,6 +106,51 @@ negative. The envelope-based lag estimator aliases on periodic music (Cinnamon, 
 Winning Post read hundreds of samples off while their waveforms correlate at 0.95 within 30).
 Camelot's driver (Golden Sun, Mario Golf/Tennis) never takes the engine lock and is not handled.
 
+## 2026-09-14 (evening): the listening set, the level dead band, the quality tier
+
+Matt asked for A/B WAVs (hardware mix and HLE alternating every 6 s in one file) and why the
+HLE now sounds "correct" rather than markedly better than the game. Building the WAVs from
+final-output dumps of the same deterministic run (`tools/mp2kprobe/abmix.py`) exposed two things
+the sweep's metrics had averaged over.
+
+**The HLE sat 11–28 samples off on every title, with the latency model exact.** The frame FIFO's
+level control trimmed one output sample per frame only once the averaged level error exceeded
+24 samples and stopped the moment it fell back to 24, so every title parked near the band's edge
+on whichever side it approached from (Emerald 11 early, Minish Cap 20, Metal Max 28, Castlevania
+24 late; lag-0 waveform correlation 0.0–0.5 with 0.98 one shift away). The band is now 6 with a
+run-to-zero hysteresis. Two more things surfaced once the level held its target: the vintages
+that reprogram the sound DMA every V-blank (Estopolis, Metal Max, Beast Shooter, Super
+Dodgeball) never measured a latency at all — their cursor sits *at* the slot start at the hook,
+which the crossing test computed as a negative latency and dropped; the transfer carrying that
+slot is the next one, not the last. And the "pipeline" constant had been fitted against the
+parked level: in hold-mode replay ten titles at four rates land within ±2 output samples with a
+pipeline of 2 DMA-rate samples; against the cubic FIFO reconstruction the emulator plays (and the
+sweep scores), 4 is best at every engine rate from 5.7 to 27 kHz (2 above 35 kHz), and neither a
+different source-sample constant nor an output-sample constant beats it (runs 20–24).
+
+Sweep, round 4 → now: lag-0 waveform correlation above 0.5 on 422 → 711 of 780 music titles,
+median 0.55 → 0.85, lower quartile 0.23 → 0.70, upper 0.80 → 0.92; envelope lag within ±64 on
+767 → 778; loudness unchanged (779). Per rate: 13.4 kHz 0.59 → 0.88 (121 improved, 36 worse),
+21 kHz 0.54 → 0.85 (144/23), 10.5 kHz 0.55 → 0.85, 15.8 kHz 0.51 → 0.79, 42 kHz −0.57 → 0.58.
+
+**Why it sounded "closer to the game".** The render's output was truncated to the driver's byte
+scale and then went through the 10-bit DAC stage like the hardware's own stream, its gains
+stepped once per V-blank like the driver's, and its echo was held per engine-rate cell like the
+DMA's replay — each faithful, each a limit of the hardware rather than of the music. A quality
+tier (on by default; `DINGBAT_MP2K_QUALITY=0` for parity checks) now ramps a continuing note's
+gain over the frame's first 96 output samples, interpolates the echo between cells, and carries
+the sub-LSB remainder past the DAC stage (apu.nim adds it after the clamp). On the same 50 s
+runs it changes the waveform by 4–7 % RMS and lowers the above-6 kHz floor of quiet passages by
+1.5–3× against the parity render (Emerald 64 → 40, Minish Cap 26 → 8, Beast Shooter 50 → 24 on
+the emitted scale; the hardware path reads 56, 43, 58). The sweep's fidelity metrics are
+unchanged by it (run 19 = run 18 to three decimals). The hardware path's DC offset (the driver's
+per-voice floor, amplified up to 3× by the reverb comb: about 40 DAC steps on Beast Shooter) is
+absent from the HLE; whole-run RMS comparisons read that as the HLE being quieter (−0.6 dB
+Emerald, −1.7 dB Beast Shooter), while per-second windowed loudness matches within 0.1 dB.
+
+The listening set (12 titles, hardware/HLE alternating plus both full tracks, and four
+parity/quality tier files) lives outside the repo in `~/Documents/emu/gba/mp2k-ab/`.
+
 ## Why span-matched
 
 `-d:mp2kwav` (`src/dingbat/gba/apu.nim`) gates the REAL FIFO capture on the same

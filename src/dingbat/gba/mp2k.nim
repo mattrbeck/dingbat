@@ -189,10 +189,21 @@ const
   MP2K_FIFO_GUARD = 16
   # From a byte's FIFO transfer to its sample at the DAC, beyond its place
   # in the queue (the DMA refills 16 bytes when 15 remain, so a transfer's
-  # first byte plays 15 samples later), in source-rate samples: measured
-  # 6–14 on six titles at each of nine engine rates against the real
-  # stream (the emulator's cubic FIFO reconstruction and DMA service).
-  MP2K_FIFO_PIPELINE = 10.0'f32
+  # first byte plays 15 samples later), in DMA-rate samples. Fitted on the
+  # library sweep (lag-0 waveform correlation against the emulator's cubic
+  # FIFO reconstruction, 780 music titles): 4 is best at every engine rate
+  # from 5.7 to 27 kHz (2 and 5 lose at nearly all of them; a constant in
+  # output samples loses at 13.4 kHz and above 30 kHz). Above 35 kHz
+  # (Castlevania's 42 kHz configuration and two 40 kHz titles) 2 wins: the
+  # two differ by 1.6 output samples there, which content reaching 16 kHz
+  # still resolves. (10, until 2026-09-14, was fitted while the frame
+  # FIFO's level control parked every title up to 24 samples early.)
+  MP2K_FIFO_PIPELINE      = 4.0'f32
+  MP2K_FIFO_PIPELINE_FAST = 2.0'f32
+  MP2K_FIFO_FAST_RATE     = 35000.0'f32
+  # Quality tier: output samples a continuing note's gain ramps over at the
+  # start of a frame (~3 ms), instead of the driver's per-frame step.
+  MP2K_RAMP_N = 96
   MP2K_FIFO_REFILL   = 16'u32          # bytes per FIFO DMA transfer (GBATEK)
 
 # Mp2kSampler / Mp2kHle are declared in gba.nim (the GBA object references them).
@@ -757,6 +768,15 @@ proc apply_pending(m: Mp2kHle; sound_info: uint32) =
     s.in_rom = wave_region >= 0x08'u32 and wave_region <= 0x0D'u32
     if s.in_rom:
       s.rom_off = (new_wave_data and 0x01FFFFFF'u32)
+    # Quality tier: a continuing note ramps from the previous frame's gain
+    # (render_one); a (re)triggered one starts at its attack value, as the
+    # driver's does.
+    if retrig:
+      s.vol_l_from = vl
+      s.vol_r_from = vr
+    else:
+      s.vol_l_from = s.vol_l
+      s.vol_r_from = s.vol_r
     s.vol_l = vl
     s.vol_r = vr
   m.render_frame()
@@ -791,12 +811,15 @@ proc dma_rate(m: Mp2kHle; slot_bytes: int): float32 =
   float32(slot_bytes) * float32(APU_SAMPLE_RATE) / 548.625'f32
 
 proc pipeline_src(m: Mp2kHle): float32 =
-  ## The residual FIFO pipeline in source-rate samples. -d:mp2kwav builds
+  ## The residual FIFO pipeline in DMA-rate samples (MP2K_FIFO_PIPELINE;
+  ## MP2K_FIFO_PIPELINE_FAST above MP2K_FIFO_FAST_RATE). -d:mp2kwav builds
   ## take DINGBAT_MP2K_PIPE_SRC=<n> for A/B sweeps.
   when defined(mp2kwav):
     let fixed = getEnv("DINGBAT_MP2K_PIPE_SRC")
     if fixed.len > 0: return float32(parseFloat(fixed))
-  MP2K_FIFO_PIPELINE
+  let sb = m.ring_slot_bytes()
+  if sb > 0 and m.dma_rate(sb) >= MP2K_FIFO_FAST_RATE: MP2K_FIFO_PIPELINE_FAST
+  else: MP2K_FIFO_PIPELINE
 
 proc pipeline_apu(m: Mp2kHle; sb: int): float32 =
   ## Cursor-to-DAC in APU samples for the phase estimate (hw_latency): a
@@ -904,8 +927,16 @@ proc measure_latency(m: Mp2kHle) =
       # the last one (whose cycle the DMA recorded); the transfers are a
       # refill of timer periods apart. That byte then sits queue-deep in the
       # FIFO behind the 15 the refill found there.
+      # A vintage that reprograms the DMA every V-blank (Estopolis, Metal
+      # Max, Beast Shooter, Super Dodgeball) is seen with the cursor AT the
+      # slot start: the transfer carrying it is the NEXT one (n = -1). The
+      # transfers keep their cadence across the restart — the FIFO's refill
+      # requests are the timer's, not the DMA's. (Until 2026-09-14 that
+      # case computed n = ring/16 - 1, a negative latency, and was dropped,
+      # so those titles never measured and stayed on the seed.)
       let xoff = start - (start mod MP2K_FIFO_REFILL)
-      let n = ((curoff + ring - MP2K_FIFO_REFILL - xoff) mod ring) div MP2K_FIFO_REFILL
+      let past = (curoff + ring - xoff) mod ring
+      let n = (if past == 0'u32: -1 else: int((past - MP2K_FIFO_REFILL) div MP2K_FIFO_REFILL))
       let cross = float32(m.gba.dma.fifo_xfer_cycle[c] - m.lat_at[i]) -
                   float32(n) * float32(MP2K_FIFO_REFILL) * src_cycles
       let queue = float32(MP2K_FIFO_REFILL - 1) + float32(start - xoff) + m.pipeline_src()
@@ -1433,12 +1464,25 @@ proc advance_cursor(s: ptr Mp2kSampler; step: float32) =
   else:
     s.ended = true
 
-proc render_one(m: Mp2kHle): tuple[a: int16, b: int16] =
+proc render_one(m: Mp2kHle): tuple[a: float32, b: float32] =
   ## One (FIFO A, FIFO B) sample of the frame being rendered, in the FIFO
   ## latch range (twice the driver's s8 byte) so the APU's DirectSound
   ## scaling applies. Per channel: four source samples around a fractional
   ## cursor, interpolated (cubic by default; the driver itself is linear —
   ## P2 — and `resample_mode` 1/2 select linear/hold for parity checks).
+  ##
+  ## Quality tier (m.quality, the default; off for parity checks): the
+  ## render matches the driver's envelopes, gains and timing but not its
+  ## arithmetic, where that arithmetic is a limit of the hardware rather
+  ## than the music — three deliberate departures, each sub-LSB or sub-frame
+  ## on the driver's scale:
+  ##   * gains ramp over the first MP2K_RAMP_N output samples of a frame
+  ##     instead of stepping once per V-blank (the driver mixes each pass
+  ##     flat; a decaying note's staircase is a 60 Hz buzz on hardware);
+  ##   * the echo seed is interpolated between engine-rate cells instead
+  ##     of held (the hold is the DMA/DAC's zero-order replay);
+  ##   * the sample is not truncated to the FIFO's integer latch — the
+  ##     remainder rides in fine_a/fine_b past the 10-bit DAC (apu.nim).
   var accl = 0.0'f32
   var accr = 0.0'f32
   let rom = addr m.gba.cartridge.rom
@@ -1456,9 +1500,17 @@ proc render_one(m: Mp2kHle): tuple[a: int16, b: int16] =
       sample = s.taps[1] + (s.taps[2] - s.taps[1]) * s.phase_frac
     else:
       sample = catmull_rom(s.taps[0], s.taps[1], s.taps[2], s.taps[3], s.phase_frac)
-    # s8 units in, the driver's per-channel byte out: sample * side / 256
-    let cl = sample * s.vol_l
-    let cr = sample * s.vol_r
+    # s8 units in, the driver's per-channel byte out: sample * side / 256.
+    # Quality tier: a continuing note's gain ramps from the previous
+    # frame's value over the frame's first MP2K_RAMP_N output samples.
+    var gl = s.vol_l
+    var gr = s.vol_r
+    if m.quality and m.ramp_i < MP2K_RAMP_N:
+      let k = float32(m.ramp_i) * (1.0'f32 / float32(MP2K_RAMP_N))
+      gl = s.vol_l_from + (s.vol_l - s.vol_l_from) * k
+      gr = s.vol_r_from + (s.vol_r - s.vol_r_from) * k
+    let cl = sample * gl
+    let cr = sample * gr
     accl += cl
     accr += cr
     when defined(mp2kwav):
@@ -1535,6 +1587,7 @@ proc render_one(m: Mp2kHle): tuple[a: int16, b: int16] =
       # engine's pcmFreq mixing implies).
       let nxts = (if m.rev_slot + 1 >= m.rev_period: 0 else: m.rev_slot + 1)
       let nxt  = (nxts * cap + i) * 2
+      m.rev_seed_prev = m.rev_seed
       if m.reverb_strength > 0'u8:
         let sum  = m.reverb_ring[cur] + m.reverb_ring[cur + 1] +
                    m.reverb_ring[nxt] + m.reverb_ring[nxt + 1]
@@ -1546,15 +1599,22 @@ proc render_one(m: Mp2kHle): tuple[a: int16, b: int16] =
       m.reverb_ring[cur]     = accl + m.rev_seed
       m.reverb_ring[cur + 1] = accr + m.rev_seed
       m.rev_cell = i
-    outl_f = accl + m.rev_seed
-    outr_f = accr + m.rev_seed
+    var seed = m.rev_seed
+    if m.quality:
+      # Interpolate the echo between cells rather than hold it: the hold is
+      # the DMA/DAC's zero-order replay, not part of the music.
+      let frac = clamp(m.rev_phase - float32(i), 0.0'f32, 1.0'f32)
+      seed = m.rev_seed_prev + (m.rev_seed - m.rev_seed_prev) * frac
+    outl_f = accl + seed
+    outr_f = accr + seed
     m.rev_phase += float32(m.pcm_sample_rate) * (1.0'f32 / float32(APU_SAMPLE_RATE))
     m.rev_pos.inc
   # The FIFO latch is the driver's s8 byte doubled. The driver's buffer
   # wraps past the s8 range (P10: three full-scale voices sum to 150 and
-  # come out -106), which no game relies on; clamp there instead.
-  let li = int32(outl_f * 2.0'f32)
-  let ri = int32(outr_f * 2.0'f32)
+  # come out -106), which no game relies on; clamp there instead. The value
+  # stays fractional here; render_sample truncates it to the latch.
+  let li = clamp(outl_f * 2.0'f32, -256.0'f32, 254.0'f32)
+  let ri = clamp(outr_f * 2.0'f32, -256.0'f32, 254.0'f32)
   m.dbg_out_energy += abs(outl_f) + abs(outr_f)
   m.dbg_out_count.inc
   # The result is (FIFO A, FIFO B). The driver's FIRST pcmBuffer half — the
@@ -1564,12 +1624,13 @@ proc render_one(m: Mp2kHle): tuple[a: int16, b: int16] =
   # out right only if A gets the +0x0A mix. A mono driver's other FIFO never
   # receives data on hardware, so it gets silence — the game may still have
   # it routed to a speaker.
-  var fa = int16(clamp(ri, -256, 254))
-  var fb = int16(clamp(li, -256, 254))
+  var fa = ri
+  var fb = li
   case m.mono_mode
   of 1: fb = 0              # mono via FIFO A (fa == fb already; B silent)
   of 2: fa = 0              # mono via FIFO B
   else: discard
+  inc m.ramp_i
   (fa, fb)
 
 proc render_frame(m: Mp2kHle) =
@@ -1611,7 +1672,14 @@ proc render_frame(m: Mp2kHle) =
   # walk the cursors behind the engine one sample per late hook. Instead a
   # slow average of the level error drives one dropped or duplicated
   # OUTPUT sample per frame — a 30 µs slide, only when the offset persists
-  # (the pcmFreq-vs-frame-rate drift is about a sample a second).
+  # (the pcmFreq-vs-frame-rate drift is about a sample a second). The
+  # average is the 1/32 EMA, so the V-blank jitter (±20 samples) leaves a
+  # few samples of noise in it; the trim engages past 6 and, once engaged,
+  # runs on until the average is back within half a sample (hysteresis:
+  # fifo_trimming). A plain band (24, until 2026-09-14) left every title
+  # parked up to 24 samples off its target on the side it approached from
+  # — the whole residual the A/B listening set measured (Emerald 11 early,
+  # Minish Cap 20, Metal Max 28, Castlevania 24 late).
   m.fifo_err_avg += (float32(level - m.fifo_target) - m.fifo_err_avg) * (1.0'f32 / 32.0'f32)
   # A target that moved by more than a frame's jitter (the measured latency
   # replacing the phase estimate, or a vintage that re-times its DMA) is
@@ -1630,11 +1698,14 @@ proc render_frame(m: Mp2kHle) =
       inc m.fifo_w
     level -= step_err
     m.fifo_err_avg = 0
-  elif m.fifo_err_avg > 24.0'f32 and level > 1:
+  elif (m.fifo_err_avg > 6.0'f32 or (m.fifo_trimming and m.fifo_err_avg > 0.5'f32)) and level > 1:
+    m.fifo_trimming = true
     inc m.fifo_r
     dec level
     m.fifo_err_avg -= 1
-  elif m.fifo_err_avg < -24.0'f32 and level > 0 and level < cap - 2:
+  elif (m.fifo_err_avg < -6.0'f32 or (m.fifo_trimming and m.fifo_err_avg < -0.5'f32)) and
+       level > 0 and level < cap - 2:
+    m.fifo_trimming = true
     # duplicate the newest sample
     let li = ((m.fifo_w - 1) mod cap) * 2
     let wi = (m.fifo_w mod cap) * 2
@@ -1643,9 +1714,12 @@ proc render_frame(m: Mp2kHle) =
     inc m.fifo_w
     inc level
     m.fifo_err_avg += 1
+  else:
+    m.fifo_trimming = false
   when defined(mp2kwav):
     # capture index at which this frame's first sample will be emitted
     dbgHookCapIdx.add mp2kWavCapture.len div 2 + level
+  m.ramp_i = 0
   m.fifo_acc += nominal
   var n = int(m.fifo_acc)
   m.fifo_acc -= float32(n)
@@ -1667,7 +1741,10 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
   ## rendered frame FIFO (render_frame). An empty FIFO (a late V-blank
   ## handler, or a pass that never came — the driver's DMA replays its
   ## stale ring slot then) holds the last sample.
-  if not m.engaged: return (0'i16, 0'i16)
+  if not m.engaged:
+    m.fine_a = 0
+    m.fine_b = 0
+    return (0'i16, 0'i16)
   inc m.apu_clock
   var fa = m.fifo_last_a
   var fb = m.fifo_last_b
@@ -1679,16 +1756,28 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
     inc m.fifo_r
     m.fifo_last_a = fa
     m.fifo_last_b = fb
+  # The latch is an integer: truncate toward zero, as the driver's byte
+  # store does. The quality tier keeps the remainder (fine_a/fine_b) for
+  # apu.nim to add after the DAC stage; off, the remainder is zero.
+  let ia = int16(int32(fa))
+  let ib = int16(int32(fb))
+  if m.quality:
+    m.fine_a = fa
+    m.fine_b = fb
+  else:
+    m.fine_a = float32(ia)
+    m.fine_b = float32(ib)
   when defined(mp2kwav):
-    mp2kWavCapture.add fa
-    mp2kWavCapture.add fb
-  (fa, fb)
+    mp2kWavCapture.add ia
+    mp2kWavCapture.add ib
+  (ia, ib)
 
 proc init_mp2k*(m: Mp2kHle) =
   ## Initialise mixer state. Nothing to scan: the hook is learned at runtime
   ## ("Runtime detection").
   m.use_cubic = true   # cubic (Catmull-Rom, per Paul Bourke) resampling by default
-  m.fifo = newSeq[int16](MP2K_FIFO_CAP * 2)
+  m.quality = true     # quality tier on (render_one); parity checks turn it off
+  m.fifo = newSeq[float32](MP2K_FIFO_CAP * 2)
   m.ring_copy = newSeq[uint8](8192)
   m.ring_prev_slot = -1
   m.predict = getEnv("DINGBAT_MP2K_LATE") != "1"

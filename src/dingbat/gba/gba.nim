@@ -611,6 +611,7 @@ type
     tap_i*:       uint32    # cursor the taps were fetched for (0xFFFFFFFF = none)
     ended*:       bool      # one-shot cursor ran past the end: silent (mp2k.nim advance_cursor)
     vol_l*, vol_r*: float32 # per-side gain for the frame being rendered (side/256)
+    vol_l_from*, vol_r_from*: float32  # quality tier: gains the frame's ramp starts from
     age*:         int       # frames since (re)trigger; 0 on the attack frame
     chk_off*:     uint32    # mp2kwav: non-zero start offset seen at note-on, checked next pass
 
@@ -702,11 +703,19 @@ type
     slot_votes*:     int
     slot_locked*:    bool
     # Rendered-frame output FIFO (mp2k.nim render_frame / render_sample)
-    fifo*:           seq[int16]     # stereo ring, MP2K_FIFO_CAP frames
+    fifo*:           seq[float32]   # stereo ring, MP2K_FIFO_CAP frames, latch scale
     fifo_r*, fifo_w*: int           # read / write cursors (frames)
     fifo_acc*:       float32        # fractional frame-length carry
     fifo_err_avg*:   float32        # slow average of level - target (render_frame)
-    fifo_last_a*, fifo_last_b*: int16  # held across an underrun
+    fifo_trimming*:  bool           # trim engaged: runs until the average is ~0
+    fifo_last_a*, fifo_last_b*: float32  # held across an underrun
+    # Quality tier (mp2k.nim "Quality tier"): off = the driver's own
+    # arithmetic (parity checks); on = un-floored output, ramped gains,
+    # interpolated echo. fine_a/fine_b carry this sample's un-truncated
+    # FIFO values for apu.nim to add the sub-LSB remainder after the DAC.
+    quality*:        bool
+    fine_a*, fine_b*: float32
+    ramp_i*:         int            # output samples rendered so far this frame
     fifo_target*:    int            # level aimed for when a frame is pushed (the guard)
     fifo_primed*:    bool           # target-level silence pre-fill done
     mono_mode*:      int    # fed FIFO topology: 0 stereo, 1 mono via A, 2 mono via B (apply_pending)
@@ -736,6 +745,7 @@ type
     rev_phase*:      float32       # cell-position accumulator (pcmFreq/32768 per sample)
     rev_cell*:       int           # last cell written this pass (-1 = none)
     rev_seed*:       float32       # seed held across the current cell's output samples
+    rev_seed_prev*:  float32       # the previous cell's seed (quality: interpolated echo)
 
   # Camelot "Bon" sound-driver HLE state (Golden Sun; gs_bon.nim). Off by
   # default; shares the mp2k_hle enable flag with its own engaged state.

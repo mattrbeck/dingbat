@@ -65,6 +65,9 @@ when not defined(emscripten):
   # byte-compare oracle).
   var gba_audio_dump_file: File = nil
   var gba_audio_dump_on = false
+  # DINGBAT_GBA_AUDIO_DUMP_FINE=1: dump the emitted value instead — the DAC
+  # sum x32 plus the MP2K quality tier's sub-LSB remainder (A/B listening).
+  var gba_audio_dump_fine = false
   var gba_audio_dump_claimed = false
   var gba_audio_dump_pending = 0
 
@@ -77,6 +80,7 @@ when not defined(emscripten):
     if path.len > 0:
       gba_audio_dump_file = open(path, fmWrite)
       gba_audio_dump_on = true
+      gba_audio_dump_fine = getEnv("DINGBAT_GBA_AUDIO_DUMP_FINE") == "1"
 
   proc gba_audio_dump_write(left, right: int16) =
     var frame: array[2, int16]
@@ -338,6 +342,10 @@ proc get_sample*(apu: APU) =
        mp2k_watch or (apu.gba.gs_bon != nil and apu.gba.gs_bon.engaged):
       realDmaCapture.add raw_dma_a
       realDmaCapture.add raw_dma_b
+  # MP2K quality tier: the render's sub-LSB remainder past the integer
+  # latches, added after the DAC stage below (zero unless substituting).
+  var fine_a = 0'f32
+  var fine_b = 0'f32
   if mp2k_subst:
     let (hl, hr) = apu.gba.mp2k.render_sample()
     let m = apu.gba.mp2k
@@ -356,6 +364,8 @@ proc get_sample*(apu: APU) =
     else:
       raw_dma_a = hl
       raw_dma_b = hr
+      fine_a = m.fine_a - float32(hl)
+      fine_b = m.fine_b - float32(hr)
   elif mp2k_watch:
     let m = apu.gba.mp2k
     let (hl, hr) = m.render_sample()
@@ -380,6 +390,13 @@ proc get_sample*(apu: APU) =
   let dma_b_scaled = int32(dma_b) shl apu.soundcnt_h.dma_sound_b_volume
   let dma_left  = dma_a_scaled * int32(apu.soundcnt_h.dma_sound_a_left)  + dma_b_scaled * int32(apu.soundcnt_h.dma_sound_b_left)
   let dma_right = dma_a_scaled * int32(apu.soundcnt_h.dma_sound_a_right) + dma_b_scaled * int32(apu.soundcnt_h.dma_sound_b_right)
+  # The quality tier's remainder, scaled and routed like the latches; it
+  # bypasses the DAC's clamp and resolution mask on purpose (it is what the
+  # hardware could not carry).
+  let fine_ga = (if apu.channel_mask[4]: float32(int32(1) shl int(apu.soundcnt_h.dma_sound_a_volume)) else: 0'f32)
+  let fine_gb = (if apu.channel_mask[5]: float32(int32(1) shl int(apu.soundcnt_h.dma_sound_b_volume)) else: 0'f32)
+  let fine_left  = fine_a * fine_ga * float32(apu.soundcnt_h.dma_sound_a_left)  + fine_b * fine_gb * float32(apu.soundcnt_h.dma_sound_b_left)
+  let fine_right = fine_a * fine_ga * float32(apu.soundcnt_h.dma_sound_a_right) + fine_b * fine_gb * float32(apu.soundcnt_h.dma_sound_b_right)
   let bias = int32(apu.soundbias.bias_level)
   # SOUNDBIAS bits 14-15 "Amplitude Resolution/Sampling Cycle" (GBATEK):
   # "0 9bit/32.768kHz, 1 8bit/65.536kHz, 2 7bit/131.072kHz, 3 6bit/262.144kHz".
@@ -395,14 +412,23 @@ proc get_sample*(apu: APU) =
   let stopped = apu.gba.cpu.stopped
   let total_left  = if stopped: 0'i16 else: int16((max(0, min(0x3FF, psg_left  + dma_left  + bias)) and dac_mask) - bias)
   let total_right = if stopped: 0'i16 else: int16((max(0, min(0x3FF, psg_right + dma_right + bias)) and dac_mask) - bias)
+  # Emitted value at the +-16384 output scale: the DAC sum x32 plus the
+  # quality tier's remainder (exactly total*32 when there is none).
+  let emit_left  = (if stopped: 0'f32 else: (float32(total_left)  + fine_left)  * 32.0'f32)
+  let emit_right = (if stopped: 0'f32 else: (float32(total_right) + fine_right) * 32.0'f32)
   when not defined(emscripten):
     # Before the output switch: the test_harness branch drops the sample
-    if gba_audio_dump_on: gba_audio_dump_write(total_left, total_right)
+    if gba_audio_dump_on:
+      if gba_audio_dump_fine:
+        gba_audio_dump_write(int16(clamp(emit_left,  -32768.0'f32, 32767.0'f32)),
+                             int16(clamp(emit_right, -32768.0'f32, 32767.0'f32)))
+      else:
+        gba_audio_dump_write(total_left, total_right)
   when defined(test_harness):
     discard
   elif defined(emscripten):
-    let sl = float32(total_left * 32) / 32768.0'f32
-    let sr = float32(total_right * 32) / 32768.0'f32
+    let sl = emit_left  / 32768.0'f32
+    let sr = emit_right / 32768.0'f32
     if not apu.turbo:
       # 1x: passthrough, never through the stretcher
       apu.stretch_engaged = false
@@ -423,8 +449,8 @@ proc get_sample*(apu: APU) =
       if apu.turbo_parity:
         appendAudioSample(sl, sr)
   else:
-    var out_l = total_left  * 32
-    var out_r = total_right * 32
+    var out_l = int16(clamp(emit_left,  -32768.0'f32, 32767.0'f32))
+    var out_r = int16(clamp(emit_right, -32768.0'f32, 32767.0'f32))
     if apu.audio_lowpass:
       # One-pole low-pass (~12 kHz corner) modeling the cap/speaker smoothing
       apu.lp_left  += AUDIO_LOWPASS_ALPHA * (float32(out_l) - apu.lp_left)

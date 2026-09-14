@@ -10,6 +10,9 @@
 # Env:   DINGBAT_NOHLE=1            HLE disarmed (engine ground truth only)
 #        DINGBAT_PROBE_DRIVE=1      mash A/START (menu-gated titles)
 #        DINGBAT_MP2K_RESAMPLE=0|1|2  cubic / linear (the driver's) / hold
+#        DINGBAT_MP2K_QUALITY=0     quality tier off: the driver's own arithmetic
+#        DINGBAT_GBA_AUDIO_DUMP_FINE=1  with DINGBAT_GBA_AUDIO_DUMP: dump the
+#                                 emitted value (DAC sum x32 + quality remainder)
 #        DINGBAT_PROBE_ZOH=1        hold-mode FIFO playback (real.wav = buffer verbatim)
 #        DINGBAT_PROBE_SCRIPT=path  drive the driver directly: a JSON list of
 #                                 writes applied at the END of the named frame
@@ -87,6 +90,8 @@ proc main() =
   if emu.mp2k != nil:
     let rs = getEnv("DINGBAT_MP2K_RESAMPLE")
     if rs.len > 0: emu.mp2k.resample_mode = parseInt(rs)
+    # DINGBAT_MP2K_QUALITY=0: the driver's own arithmetic (parity checks)
+    if getEnv("DINGBAT_MP2K_QUALITY") == "0": emu.mp2k.quality = false
   let drive = getEnv("DINGBAT_PROBE_DRIVE") == "1"
   # DINGBAT_PROBE_ZOH=1: zero-order-hold FIFO playback, so real.wav is the
   # engine buffer verbatim (pipeline check) instead of the cubic reconstruction

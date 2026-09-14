@@ -240,6 +240,26 @@ Two classes of build turned up in the library:
 A driver whose ident reads locked at every V-blank (BB Ball) delimits its
 passes by re-sighting an entry instead of by an idle poll.
 
+## abmix.py — an A/B listening file
+
+Two final-output dumps of the same deterministic run (the probe's input is
+scripted, so the runs align to the sample), alternated every few seconds with
+equal-power crossfades, both tracks DC-blocked (the driver's per-voice floor is
+a DC offset the reverb comb amplifies; the HLE has none; a real GBA is
+AC-coupled) and the second shifted by its measured residual lag so the joins
+are in phase:
+
+    DINGBAT_PROBE_DRIVE=1 DINGBAT_GBA_AUDIO_DUMP_FINE=1 DINGBAT_GBA_AUDIO_DUMP=hle.s16 \
+        ./mp2k_probe game.gba out_h 3000
+    DINGBAT_PROBE_DRIVE=1 DINGBAT_NOHLE=1 DINGBAT_GBA_AUDIO_DUMP_FINE=1 DINGBAT_GBA_AUDIO_DUMP=hw.s16 \
+        ./mp2k_probe game.gba out_l 3000
+    python3 tools/mp2kprobe/abmix.py game hw.s16 hle.s16 outdir 6 40 1 hardware hle
+
+writes `game.alternating.wav` (hardware first, switching every 6 s),
+`game.hardware.wav`, `game.hle.wav`, and prints the residual lag, the windowed
+loudness ratio and the switch schedule. `DINGBAT_MP2K_QUALITY=0` on the HLE
+run gives the parity render for a tier-vs-tier file.
+
 ## What the driver does (2026-09-13, Emerald's driver; the vintages above agree; count field and ring re-timing 2026-09-14)
 
 | Behaviour | Measured |
@@ -253,7 +273,7 @@ passes by re-sighting an entry instead of by an idle poll.
 | Type bits | 0x08 plays at pcmFreq whatever the key; 0x10 plays from data[size−1] downward; both combine; compressed (BDPCM) decodes as the HLE does |
 | Reverb | before a pass mixes, the slot it overwrites is seeded with (A+B of that slot + A+B of the next slot) × reverb/512: two taps at P−1 and P frames; an impulse of 50 with reverb 64, period 7 echoes 12, 12 then 3, 6, 3 |
 | Stereo halves | the first pcmBuffer half (DMA1 → FIFO A) carries the right-volume mix, the second the left; Emerald routes A right / B left (and plays mono by default) |
-| Latency | the real FIFO stream lags the pass by 553 APU samples on Emerald (one V-blank + 4), 228 on Minish Cap, set by where the DMA is in the ring at the pass. The DMA moves 16 bytes at a time, so a slot's first byte is fetched by the transfer that starts at the 16-byte grid below it and then sits 15 deep in the FIFO; beyond that, 10 source-rate samples whatever the rate (6–14 measured on six titles at each of nine engine rates). Estopolis and Ochaken restart the DMA every V-blank on the slot the previous pass wrote, so a pass plays when the *next* V-blank handler runs and inherits that handler's jitter (±5 samples) |
+| Latency | the real FIFO stream lags the pass by 553 APU samples on Emerald (one V-blank + 4), 228 on Minish Cap, set by where the DMA is in the ring at the pass. The DMA moves 16 bytes at a time, so a slot's first byte is fetched by the transfer that starts at the 16-byte grid below it and then sits 15 deep in the FIFO; beyond that, about 2 DMA-rate samples against hold-mode replay (the transfer follows the timer tick that requested it; the tick's sample is still the latch's when the APU next reads it) — 4 against the emulator's cubic FIFO reconstruction, which is what the HLE targets (2 above 35 kHz). A vintage that reprograms the DMA every V-blank is seen with the cursor *at* the slot start at the hook, and the transfer carrying that slot is then the next one, not the last. Estopolis and Ochaken restart the DMA every V-blank on the slot the previous pass wrote, so a pass plays when the *next* V-blank handler runs and inherits that handler's jitter (±5 samples) |
 | Ring geometry | period × slot bytes, the period read from pcmDmaCounter's cycle; a driver may re-time mid-run (Castlevania: 9 × 176 at 10512 Hz, then 2 × 704 at 42048 Hz), so the period is re-learnt whenever the rate or the frame length changes |
 
 ## What the HLE deliberately does differently
@@ -281,9 +301,33 @@ The probes also show where the HLE's render is not the driver's, by design:
   above, including Beast Shooter's pseudo-echo tails), renders the frame at
   the pass, and holds it until the sound DMA reaches that slot, a latency it
   measures per title from the FIFO transfer that crosses the slot. Against
-  the real stream (waveform cross-correlation, 32768 Hz, hold-mode replay):
-  Emerald −18 samples, Minish Cap −9, Beast Shooter −3, Hudson Best
-  Collection −6, Pokémon Ruby −8, Combat Choro Q +1, Estopolis +22, Super
-  Dodgeball +24, Battle Network +24, Castlevania +27; by the P2 impulse
-  itself, played through each driver: Emerald +8, Ochaken +2, Minish Cap
-  +5, Beast Shooter +34 samples.
+  the real stream (waveform cross-correlation per 2 s window, 32768 Hz,
+  hold-mode replay, 2026-09-14 evening): Emerald +1 sample, Pokémon Ruby
+  −2, Mermaid Melody +1, Metal Max 2 Kai 0, Castlevania −1, Beast Shooter
+  +1 to +5, Super Dodgeball +1, Minish Cap −2 to +5, Winning Post 0; lag-0
+  correlation 0.83–0.98 on all of them. Earlier in the day the same titles
+  sat 11–28 samples off: not the model but the frame FIFO's level control,
+  whose one-sample trim engaged past a 24-sample band and stopped there, so
+  every title parked near the band's edge; and the vintages that restart
+  the DMA every V-blank never measured at all (their cursor sits at the
+  slot start at the hook, which the crossing test read as a negative
+  latency and dropped). With the band at 6 and a run-to-zero hysteresis
+  and the crossing fixed, hold-mode replay wants a pipeline of 2 DMA-rate
+  samples; the cubic FIFO reconstruction the emulator plays (and the sweep
+  scores against) sits about two source samples behind hold, so the shipped
+  value is 4 (2 above 35 kHz), fitted on the whole library: lag-0 waveform
+  correlation above 0.5 on 711 of 780 music titles, median 0.85 (was 422
+  and 0.55 with the old band and the old pipeline of 10).
+* **Quality tier** (`Mp2kHle.quality`, on by default; `DINGBAT_MP2K_QUALITY=0`
+  in the probe for parity checks). Three departures from the driver's
+  arithmetic, each a limit of the hardware rather than of the music:
+  a continuing note's gain ramps over the first 96 output samples of a frame
+  (~3 ms) instead of stepping once per V-blank; the echo seed is interpolated
+  between engine-rate cells instead of held (the hold is the DMA/DAC's
+  zero-order replay); and the sample is not truncated to the FIFO's integer
+  latch — the remainder rides past the 10-bit DAC stage in apu.nim. On the
+  same 50 s runs the tier changes the waveform by 4–7 % RMS (the ramps and
+  the echo) and lowers the above-6 kHz floor of quiet passages by 1.5–3×
+  against the parity render (Emerald 64 → 40, Minish Cap 26 → 8, Beast
+  Shooter 50 → 24 on the emitted scale; the hardware path reads 56, 43, 58).
+  The library sweep's fidelity metrics are unchanged by it.
