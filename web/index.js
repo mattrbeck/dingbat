@@ -9562,6 +9562,26 @@ const flyBrand = (up) => {
   Promise.all(made.map((a) => a.finished)).then(settle, settle);
 };
 
+// --- Folded devices ---
+// The stacked-fold layout is gated on a body class rather than on the media
+// query directly, so that ?fold=stacked can turn it on anywhere. That is not
+// a feature: WebKit has not implemented the Viewport Segments API, so on a
+// foldable running Safari the query never matches and there is no other way
+// to look at the posture at all. Everything the class turns on reads its
+// geometry from --seam-start / --seam-end, which the media query fills in
+// with the real segment boundaries and which otherwise fall back to an even
+// split with no dead band - what a creaseless fold would report anyway.
+const foldQuery = matchMedia("(vertical-viewport-segments: 2)");
+const foldForced = /[?&]fold=stacked(&|$)/.test(location.search);
+
+const syncFold = () => {
+  document.body.classList.toggle("fold-stacked",
+                                 foldForced || foldQuery.matches);
+};
+
+foldQuery.addEventListener?.("change", syncFold);
+syncFold();
+
 barBrand.addEventListener("click", () => {
   // `running`, not `has-game`: a game merely PAUSED is a game sitting on the
   // home screen, and the library behind its card scrolls like any other. The
