@@ -30,9 +30,13 @@
 #
 # Design:
 #   * SHADOW mode: the real mixer still runs; we consume the per-channel
-#     envelope volumes it computes (on_frame) instead of reimplementing ADSR.
-#   * Output lags the mixer pass by one frame to match the driver's
-#     DirectSound double-buffering (render_sample).
+#     envelope volumes it computes instead of reimplementing ADSR. Each pass
+#     is snapshotted at its entry and rendered one hook later, when the
+#     volumes it computed are readable (snapshot_pass / apply_pending); that
+#     one-hook lag is also the hardware's double-buffer latency.
+#   * Mixer facts below marked P1..P10 come from the probe songs in
+#     tools/mp2kprobe played by the driver itself (tests/mp2k_probe.nim
+#     reads its pcmBuffer).
 #   * 8-bit PCM, looping, BDPCM ("compressed waveform") and every
 #     channel.type mode-bit combination are mixed (TYPE_* table below).
 
@@ -72,7 +76,7 @@ const
   SC_ENV_VL   = 0x0B   # envelopeVolumeLeft
   SC_COUNT    = 0x18   # count/ct: the note-on sample start offset while START
                        # is set; afterwards the source samples remaining until
-                       # sample/loop end (position resync + resume: on_frame)
+                       # sample/loop end (position resync + resume: apply_pending)
   SC_FREQ     = 0x20   # frequency (per-note playback rate, Hz)
   SC_WAVE     = 0x24   # wav pointer -> WaveData
   SC_SIZE     = 64
@@ -162,6 +166,15 @@ const
   # samples; 1024 leaves headroom for frame-length jitter, and cells beyond a
   # pass's real length are simply never read back (intra-frame indexing).
   MP2K_REV_SLOT_LEN = 1024
+  # Output FIFO (render_frame): capacity in stereo samples, and the level
+  # aimed for at the moment a frame is pushed. The hardware plays a pass's
+  # frame one V-blank after the pass plus a few samples of FIFO pipeline
+  # (P2: 553 APU samples on Emerald). The guard is the headroom that keeps
+  # a late V-blank handler from running the FIFO dry, at the price of that
+  # much extra latency (half a millisecond); a later one holds the last
+  # sample for the few samples it is late.
+  MP2K_FIFO_CAP   = 4096
+  MP2K_FIFO_GUARD = 16
 
 # Mp2kSampler / Mp2kHle are declared in gba.nim (the GBA object references them).
 
@@ -262,7 +275,7 @@ proc decode_at(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte];
   ## Decode the source sample at an explicit play position, in raw s8 units.
   ## A reversed channel (TYPE_REV) maps play position p to source index
   ## sample_count-1-p (sample_count already excludes any note start offset;
-  ## see on_frame).
+  ## see apply_pending).
   let pos = (if s.reversed: s.sample_count - 1'u32 - play_pos
              else: play_pos)
   if s.compressed:
@@ -282,21 +295,25 @@ proc mp2k_state_loaded*(m: Mp2kHle) =
   ## everything timeline-derived (sampler positions, history taps, the delay
   ## ring, the reverb line) is dropped and a resync is marked: the next mixer
   ## pass re-latches every channel from the restored SoundInfo, resuming
-  ## mid-note channels at the engine's own position (on_frame). The learned
+  ## mid-note channels at the engine's own position (apply_pending). The learned
   ## hook_addr is kept — states are per-ROM and restore the IWRAM it was
   ## learned from, and a stale PC fails the lock validation anyway. `engaged`
   ## is kept; render_sample emits silence until the first post-load pass.
   for i in 0 ..< MP2K_MAX_CHANNELS:
     m.samplers[i] = Mp2kSampler()      # inactive, zero taps/phase/volumes
-  for v in m.out_delay.mitems: v = 0
-  m.out_delay_w = 0
+  m.pend_valid = false                 # the restored pass is snapshotted afresh
+  m.fifo_r = 0
+  m.fifo_w = 0
+  m.fifo_acc = 0
+  m.fifo_last_a = 0
+  m.fifo_last_b = 0
+  m.fifo_primed = false
   for v in m.reverb_ring.mitems: v = 0
   m.rev_slot = 0
   m.rev_pos = 0
   m.rev_phase = 0
   m.rev_cell = -1
   m.rev_seed = 0
-  m.frame_pos = 0
   m.resync_pending = true
   # Foreign-feeder streak/baseline are timeline-derived: drop them. The
   # fifo_foreign LATCH describes the ROM's driver usage, not the timeline, so
@@ -351,41 +368,73 @@ proc unlearn_hook*(m: Mp2kHle) =
   m.hook_addr  = 0xFFFFFFFF'u32
   m.entry_addr = 0xFFFFFFFF'u32
   m.engaged = false
+  m.pend_valid = false
+  m.fifo_primed = false
   for i in 0 ..< MP2K_MAX_CHANNELS: m.samplers[i].active = false
 
-proc on_frame(m: Mp2kHle; sound_info: uint32) =
-  ## Called once per mixer pass (at the learned hook, before the real mixer
-  ## runs). Re-reads the SoundInfo channel table and refreshes each sampler's
-  ## parameters and envelope endpoints.
-  # DIAG: master_apply != 0 re-applies SoundInfo.masterVolume on top of the
-  # per-side volumes, which already include it (wrong; default 0).
-  let master_mult =
-    if m.master_apply != 0:
-      float32(int(m.rd8(sound_info + SI_MASTER_VOL)) + 1) / 16.0'f32
-    else:
-      1.0'f32
+proc fifo_topology(m: Mp2kHle): int =
+  ## Which FIFO(s) the engine feeds, from the live sound-DMA registers
+  ## (DMA1/2 are the only FIFO-capable channels — GBATEK): 0 = stereo, 1 =
+  ## mono through FIFO A, 2 = mono through FIFO B. The standard driver runs
+  ## DMA1->FIFO A and DMA2->FIFO B; some vintages mix MONO — one pcmBuffer
+  ## through a single FIFO (Minish Cap: DMA1->FIFO A routed to both
+  ## speakers, DMA2 disabled) with a single per-channel volume (the volume
+  ## read in apply_pending). Keying on the DMA registers is what the real
+  ## signal path does, so it is vintage-independent: substitute only the fed
+  ## FIFO(s).
+  var fed_a = false
+  var fed_b = false
+  for c in 1 .. 2:
+    if m.gba.dma.dmacnt_h[c].enable and
+       m.gba.dma.dmacnt_h[c].start_timing == 3:   # special = FIFO timing
+      if   m.gba.dma.dmadad[c] == 0x040000A0'u32: fed_a = true
+      elif m.gba.dma.dmadad[c] == 0x040000A4'u32: fed_b = true
+  (if fed_a and not fed_b: 1
+   elif fed_b and not fed_a: 2
+   else: 0)
+
+proc snapshot_pass(m: Mp2kHle; sound_info: uint32) =
+  ## Capture, at the mixer entry, the state the pass about to run mixes
+  ## from: the channel table's note-on / sample / rate fields and the
+  ## pass-wide SoundInfo fields. Applied one hook later (apply_pending),
+  ## when the envelope this pass computes can be read back.
   var maxc = int(m.rd8(sound_info + SI_MAX_CHANS))
   if maxc > MP2K_MAX_CHANNELS: maxc = MP2K_MAX_CHANNELS
-  # FIFO topology, from the live sound-DMA registers (DMA1/2 are the only
-  # FIFO-capable channels — GBATEK). The standard stereo driver runs
-  # DMA1->FIFO A (left) and DMA2->FIFO B (right); some vintages mix MONO — one
-  # pcmBuffer through a single FIFO (Minish Cap: DMA1->FIFO A routed to both
-  # speakers, DMA2 disabled) with a single per-channel volume (see the
-  # volume read below). Keying on the DMA registers is what the real signal
-  # path does, so it is vintage-independent: substitute only the fed FIFO(s).
-  block:
-    var fed_a = false
-    var fed_b = false
-    for c in 1 .. 2:
-      if m.gba.dma.dmacnt_h[c].enable and
-         m.gba.dma.dmacnt_h[c].start_timing == 3:   # special = FIFO timing
-        if   m.gba.dma.dmadad[c] == 0x040000A0'u32: fed_a = true
-        elif m.gba.dma.dmadad[c] == 0x040000A4'u32: fed_b = true
-    m.mono_mode = (if fed_a and not fed_b: 1
-                   elif fed_b and not fed_a: 2
-                   else: 0)
-  m.reverb_strength = m.rd8(sound_info + SI_REVERB)
-  m.pcm_sample_rate = int(m.rd32(sound_info + SI_PCM_RATE))
+  m.pend_maxc = maxc
+  for i in 0 ..< MP2K_MAX_CHANNELS:
+    let p = addr m.pend[i]
+    if i >= maxc:
+      p.status = 0
+      continue
+    let base = sound_info + uint32(SI_CHANNELS + i * SC_SIZE)
+    p.status = m.rd8(base + SC_STATUS)
+    p.ctype  = m.rd8(base + SC_TYPE)
+    p.wave   = m.rd32(base + SC_WAVE)
+    p.freq   = m.rd32(base + SC_FREQ)
+    p.ct     = m.rd32(base + SC_COUNT)
+  m.pend_reverb = m.rd8(sound_info + SI_REVERB)
+  m.pend_rate   = int(m.rd32(sound_info + SI_PCM_RATE))
+  m.pend_period = int(m.rd8(sound_info + SI_DMA_PERIOD))
+  m.pend_spv    = int(m.rd16(sound_info + SI_SPV))
+  m.pend_cnt    = int(m.rd8(sound_info + SI_DMA_COUNTER))
+  m.pend_mono = m.fifo_topology()
+  m.pend_valid = true
+
+proc apply_pending(m: Mp2kHle; sound_info: uint32) =
+  ## Turn the pending snapshot (the pass that has just run) plus the
+  ## envelope that pass left behind into the sampler state for the frame
+  ## rendered until the next hook. Timeline (probe ROMs, tools/mp2kprobe,
+  ## against the driver's own pcmBuffer): the pass mixes its whole frame
+  ## FLAT at the per-side volumes it computes inside the pass — no ramp
+  ## from the previous frame, on attack, decay or release — and a note-on
+  ## starts at sample 0 of that frame. At the entry hook +0x0A/+0x0B still
+  ## hold the PREVIOUS pass's values, so the frame is rendered one hook
+  ## late, when its own values are readable; the render then sits one hook
+  ## interval behind the pass, which is also the hardware's double-buffer
+  ## latency (the DMA reaches the freshly mixed slot one V-blank later).
+  m.mono_mode = m.pend_mono
+  m.reverb_strength = m.pend_reverb
+  m.pcm_sample_rate = m.pend_rate
   m.dbg_reverb = m.reverb_strength
   m.dbg_pcm_rate = m.pcm_sample_rate
   when defined(mp2kwav): dbgMaster = int(m.rd8(sound_info + SI_MASTER_VOL))
@@ -395,11 +444,11 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
   # whenever engaged, not just while reverb > 0: the real pcmBuffer holds the
   # last pcmDmaPeriod frames unconditionally, so a mid-song reverb-on echoes
   # real history rather than silence.
-  m.rev_period = int(m.rd8(sound_info + SI_DMA_PERIOD))
+  m.rev_period = m.pend_period
   if m.rev_period < 1: m.rev_period = 1     # degenerate guard; real drivers
   elif m.rev_period > 16: m.rev_period = 16 # use 2..12 (PCM_DMA_BUF_SIZE/spv)
   # Cells per slot = pcmSamplesPerVBlank: the ring runs at the ENGINE rate.
-  m.rev_spv = int(m.rd16(sound_info + SI_SPV))
+  m.rev_spv = m.pend_spv
   if m.rev_spv < 16: m.rev_spv = 16
   elif m.rev_spv > MP2K_REV_SLOT_LEN: m.rev_spv = MP2K_REV_SLOT_LEN
   if m.reverb_ring.len != m.rev_period * MP2K_REV_SLOT_LEN * 2:
@@ -407,34 +456,46 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
   # Slot cursor, derived from pcmDmaCounter the way SoundMain derives its
   # pcmBuffer frame cursor: slot = pcmDmaPeriod - (pcmDmaCounter - 1) when
   # pcmDmaCounter >= 2, else 0. This tracks the real ring phase verbatim,
-  # including across skipped mixer passes.
+  # including across skipped mixer passes (probe harness: 0 mismatches
+  # against the slot whose bytes changed, over 386 Emerald passes).
   block:
-    let cnt = int(m.rd8(sound_info + SI_DMA_COUNTER))
+    let cnt = m.pend_cnt
     m.rev_slot = (if cnt <= 1: 0 else: m.rev_period - (cnt - 1))
     if m.rev_slot < 0 or m.rev_slot >= m.rev_period: m.rev_slot = 0
-    when defined(mp2kwav):
-      if getEnv("DINGBAT_SLOTTRACE") == "1" and m.dbg_hook_fires < 40:
-        echo "pass ", m.dbg_hook_fires, " cnt=", cnt, " slot=", m.rev_slot,
-          " period=", m.rev_period, " spv=", m.rev_spv
   m.rev_pos = 0
   m.rev_phase = 0
   m.rev_cell = -1
-  m.frame_pos = 0
   for i in 0 ..< MP2K_MAX_CHANNELS:
     let s = addr m.samplers[i]
-    if i >= maxc:
+    let p = addr m.pend[i]
+    if i >= m.pend_maxc or (p.status and CH_ON) == 0:
       s.active = false
       continue
-    let base   = sound_info + uint32(SI_CHANNELS + i * SC_SIZE)
-    let status = m.rd8(base + SC_STATUS)
-    if (status and CH_ON) == 0:
-      s.active = false
-      continue
-    let ctype = m.rd8(base + SC_TYPE)
-    let wave = m.rd32(base + SC_WAVE)
+    let wave = p.wave
     if wave == 0 or (wave shr 24) == 0: # null / bogus pointer
       s.active = false
       continue
+    let base = sound_info + uint32(SI_CHANNELS + i * SC_SIZE)
+    let live = m.rd8(base + SC_STATUS)
+    if (live and CH_ON) == 0 and (p.status and CH_STOP) != 0:
+      # The pass killed a note-off with nothing left to release (release
+      # rate 0, or the release/pseudo-echo countdown hit zero): it mixed
+      # nothing. (A channel whose sample ran out is the other way to go
+      # off; that pass mixed the tail, and the sampler ends on its own.)
+      s.active = false
+      continue
+    # +0x0A/+0x0B are the pass's per-side volumes: envelopeVolume *
+    # (masterVolume+1)/16 * (rightVolume|leftVolume) >> 8 — masterVolume is
+    # folded in, so consume them as-is. The pass's byte per channel is
+    # floor(sample * side / 256) (P1: DC 64 at 101 -> 25, 127 at 100 -> 49),
+    # so the gain is side/256 on the s8 scale. MONO vintages fold pan away:
+    # ONE volume, envelopeVolume * avg(rV, lV) >> 8, at +0x0A and +0x0B
+    # left at 0 (observed live) — use it for both sides; the output router
+    # then feeds the one fed FIFO. A killed channel keeps its bytes.
+    let vr = float32(m.rd8(base + SC_ENV_VR)) / 256.0'f32
+    let vl = (if m.mono_mode != 0: vr
+              else: float32(m.rd8(base + SC_ENV_VL)) / 256.0'f32)
+    let ctype = p.ctype
     # Mode bits: TYPE_* table. Compressed decode is selected by WaveData.type
     # != 0 under CMP or REV, not by the channel bit alone.
     let reversed   = (ctype and TYPE_REV) != 0
@@ -443,65 +504,48 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
     let loop_status = m.rd16(wave + 2)
     let looping = (loop_status and 0xC000'u16) != 0
     let new_wave_data = wave + 16
-    # Note-on = the START bit in the live status byte: the sequencer sets it
-    # and the mixer consumes it, and this hook runs at the mixer's entry, so
-    # it is still visible here. It MUST restart the sample: a drum pattern
-    # re-keys the SAME sample every beat, so keying on wave_data change alone
-    # would drop repeated hits while the previous one is still sounding.
-    var use_start = true
-    when defined(mp2kwav):
-      var checked {.global.} = false
-      var envStart {.global.} = true
-      if not checked:
-        checked = true
-        envStart = getEnv("DINGBAT_NOSTART") != "1"
-      use_start = envStart
-    let started = (status and CH_START) != 0
-    let retrig = (started and use_start) or
+    # Note-on = the START bit in the status byte at the entry hook: the
+    # sequencer sets it and the mixer consumes it. It MUST restart the
+    # sample: a drum pattern re-keys the SAME sample every beat, so keying
+    # on wave_data change alone would drop repeated hits while the previous
+    # one is still sounding.
+    let started = (p.status and CH_START) != 0
+    let retrig = started or
                  not s.active or s.wave_data != new_wave_data or
                  s.compressed != compressed or s.reversed != reversed
     when defined(mp2kwav):
       let dumpsel = getEnv("DINGBAT_CHDUMP")
       if (dumpsel == $i or dumpsel == "all") and retrig and dbgRetrigLog < 200:
-        echo "ch", i, " st=", toHex(int(status), 2),
-          " ct=", int(m.rd32(base + SC_COUNT)),
-          " evol=", int(m.rd8(base + SC_ENV_VOL)),
+        echo "ch", i, " st=", toHex(int(p.status), 2),
+          " ct=", int(p.ct),
           " evr=", int(m.rd8(base + SC_ENV_VR)),
           " evl=", int(m.rd8(base + SC_ENV_VL)),
-          " rV=", int(m.rd8(base + SC_VOL_R)),
-          " lV=", int(m.rd8(base + SC_VOL_L)),
-          " freq=", int(m.rd32(base + SC_FREQ)),
+          " freq=", int(p.freq),
           " nsamp=", int(m.rd32(wave + 12))
         dbgRetrigLog.inc
-    when defined(mp2kwav):
       if retrig: inc dbgRetrigCount
-    var resumed = false
     if retrig:
       if m.resync_pending and not started:
-        # First mixer pass after a state/rollback load: the channel is already
-        # mid-note in the engine (CH_ON without START) and must not restart
-        # from the sample start — an audible burst hardware doesn't produce.
-        # Resume at the engine's own position: the mixer sets ct = size -
-        # offset at note-on and decrements it per source sample consumed, so
-        # size - ct is the forward cursor AND, for a reversed channel (whose
-        # start offset is unrecoverable post-hoc — assume 0), the consumed
-        # count that reversed src_index tracks. The volume endpoints then
-        # ramp from the freshly reset 0 to the engine's current value over
-        # this one frame — a ~16 ms fade-in that also masks the rebuilt
-        # interpolation history.
+        # First applied snapshot after a state/rollback load: the channel is
+        # already mid-note in the engine (CH_ON without START) and must not
+        # restart from the sample start — an audible burst hardware doesn't
+        # produce. Resume at the engine's own position: the mixer sets ct =
+        # size - offset at note-on and decrements it per source sample
+        # consumed, so size - ct is the forward cursor AND, for a reversed
+        # channel (whose start offset is unrecoverable post-hoc — assume 0),
+        # the consumed count that reversed src_index tracks.
         s.phase_frac = 0
-        s.need_fetch = true
-        s.tap0 = 0; s.tap1 = 0; s.tap2 = 0; s.tap3 = 0
+        s.tap_i = 0xFFFFFFFF'u32
         s.start_off = 0
         s.blk_index = 0xFFFFFFFF'u32
         s.active = true
+        s.ended = false
         s.age = 1                       # mid-note: NOT an attack frame
         let total     = m.rd32(wave + 12)          # WaveData.size
-        let remaining = m.rd32(base + SC_COUNT)    # SoundChannel.ct
+        let remaining = p.ct                       # SoundChannel.ct
         s.src_index =
           if remaining >= 1'u32 and remaining <= total: total - remaining
-          else: 0'u32   # implausible ct: start over, still faded in from 0
-        resumed = true
+          else: 0'u32
       else:
         # (re)trigger: reset the resampler + decode state to the note's start.
         # At note-on SoundChannel.count holds a sample start offset that the
@@ -509,20 +553,36 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
         # count), so honour it when START keyed this retrigger.
         var start_off = 0'u32
         if started:
-          start_off = m.rd32(base + SC_COUNT)
+          start_off = p.ct
           if start_off >= m.rd32(wave + 12): start_off = 0
+        when defined(mp2kwav):
+          s.chk_off = start_off
         s.start_off = start_off
         # Forward playback begins at the offset; reversed playback begins at the
         # END of the (offset-trimmed) data and src_index counts samples consumed.
         s.src_index = (if reversed: 0'u32 else: start_off)
         s.phase_frac = 0
-        s.need_fetch = true
-        s.tap0 = 0; s.tap1 = 0; s.tap2 = 0; s.tap3 = 0
+        s.tap_i = 0xFFFFFFFF'u32
         s.blk_index = 0xFFFFFFFF'u32
         s.active = true
+        s.ended = false
         s.age = 0
     else:
       s.age.inc
+      when defined(mp2kwav):
+        if s.chk_off != 0'u32 and s.age == 1:
+          # One pass after a note-on that carried a count: where did the
+          # engine actually start? (see gba.nim dbgStartHonoured)
+          let total0 = m.rd32(wave + 12)
+          if p.ct >= 1'u32 and p.ct <= total0:
+            let epos = int(total0 - p.ct)
+            let adv = int(float32(m.pend_spv) * float32(s.freq) / float32(max(m.pcm_sample_rate, 1)))
+            let d_hon = abs(epos - (int(s.chk_off) + adv))
+            let d_ign = abs(epos - adv)
+            if d_hon <= 4 and d_ign > 4: inc dbgStartHonoured
+            elif d_ign <= 4 and d_hon > 4: inc dbgStartIgnored
+            else: inc dbgStartUnclear
+          s.chk_off = 0
       # Continuous position resync against the engine's cursor. Some driver
       # builds keep MORE than the mixer in RAM (ALttP Four Swords: SoundMain
       # itself), so the learned hook can fire a stage BEFORE the sequencer —
@@ -532,12 +592,18 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
       # only on gross divergence (> 1024 source samples) so resampler jitter
       # and loop-wrap transients never trigger it; a stale note-on is then
       # corrected within one frame, keyed purely on engine state.
-      let ctv = m.rd32(base + SC_COUNT)
+      let ctv = p.ct
       let total_sz = m.rd32(wave + 12)
       if ctv >= 1'u32 and ctv <= total_sz:
         let engine_pos = total_sz - ctv
         let our_pos = (if s.reversed: s.start_off + s.src_index
                        else: s.src_index)
+        when defined(mp2kwav):
+          if getEnv("DINGBAT_POSDUMP") == $i and dbgRetrigLog < 400:
+            echo "pos ch", i, " pass=", m.dbg_hook_fires, " engine=", engine_pos,
+              " ours=", our_pos, "+", s.phase_frac.formatFloat(ffDecimal, 2),
+              " diff=", int(engine_pos) - int(our_pos)
+            dbgRetrigLog.inc
         let diff = (if engine_pos > our_pos: engine_pos - our_pos
                     else: our_pos - engine_pos)
         if diff > 1024'u32:
@@ -547,16 +613,9 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
           else:
             s.src_index = engine_pos
           s.phase_frac = 0
-          s.need_fetch = true
-          s.hist_gap = 0
+          s.tap_i = 0xFFFFFFFF'u32
+          s.ended = false
           s.blk_index = 0xFFFFFFFF'u32
-          if s.src_index > 0'u32 and s.src_index < s.sample_count:
-            # Seed the interpolation history from the preceding sample (as
-            # the resume path does below).
-            let rom0 = addr m.gba.cartridge.rom
-            let rmask0 = m.gba.cartridge.rom_mask
-            let pv = m.decode_at(s, rom0, rmask0, s.src_index - 1'u32)
-            s.tap0 = pv; s.tap1 = pv; s.tap2 = pv; s.tap3 = pv
     s.wave_data   = new_wave_data
     s.compressed  = compressed
     s.reversed    = reversed
@@ -564,11 +623,13 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
     s.use_pcm_rate = (ctype and TYPE_FIX) != 0
     # Resample rate = the CHANNEL's per-note playback frequency (Hz), NOT the
     # sample header's base frequency at wave+4 (a fixed-point value in other
-    # units). step = freq / output_rate.
-    s.freq        = m.rd32(base + SC_FREQ)
+    # units). step = freq / output_rate (P2: 26758 -> every other source
+    # sample, 6689 -> each source sample twice, interpolated).
+    s.freq        = p.freq
     s.loop_start  = m.rd32(wave + 8)    # WaveData.loopStart
-    # WaveData.size = source sample count; a reversed channel plays
-    # size - offset of them (from data + size - offset DOWN to data[0]).
+    # WaveData.size = source sample count (P7: a 128-sample wave plays
+    # indices 0..127, then the loop returns to loopStart). A reversed channel
+    # plays size - offset of them (from data + size - offset DOWN to data[0]).
     let total = m.rd32(wave + 12)
     s.sample_count = (if reversed and s.start_off < total: total - s.start_off
                       else: total)
@@ -579,58 +640,27 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
     s.in_rom = wave_region >= 0x08'u32 and wave_region <= 0x0D'u32
     if s.in_rom:
       s.rom_off = (new_wave_data and 0x01FFFFFF'u32)
-    if resumed and s.src_index > 0'u32 and s.src_index < s.sample_count:
-      # Seed the resampler history at the resume point with the preceding
-      # source sample (needs in_rom/rom_off, hence after they are set). The
-      # block-cache decoder lands on a mid-block BDPCM position natively.
-      let rom = addr m.gba.cartridge.rom
-      let rmask = m.gba.cartridge.rom_mask
-      s.src_index.dec
-      s.tap0 = m.decode_src(s, rom, rmask)
-      s.src_index.inc
-      s.tap1 = s.tap0; s.tap2 = s.tap0; s.tap3 = s.tap0
-    # +0x0A/+0x0B are the engine's per-side volumes: envelopeVolume *
-    # (masterVolume+1)/16 * (rightVolume|leftVolume) >> 8 — masterVolume is
-    # folded in here, so consume them as-is and never re-apply it. The mixer
-    # writes them once per pass (a per-frame constant); shift last frame's
-    # value into vol_*0 and ramp toward this frame's, mirroring the driver's
-    # per-sample interpolation from the previous endpoint. MONO vintages fold
-    # pan away: ONE volume, envelopeVolume * avg(rV, lV) >> 8, at +0x0A and
-    # +0x0B left at 0 (observed live) — use it for both sides; the output
-    # router then feeds the one fed FIFO.
-    let vr = float32(m.rd8(base + SC_ENV_VR)) / 255.0'f32 * master_mult
-    let vl = (if m.mono_mode != 0: vr
-              else: float32(m.rd8(base + SC_ENV_VL)) / 255.0'f32 * master_mult)
-    if retrig and started and not resumed:
-      # Note-on attack frame. The engine computes this pass's envelope INSIDE
-      # the mixer, after our entry hook reads, so +0x0A/+0x0B still hold the
-      # previous (usually released, zero) values and would silence the first
-      # frame of every note — where a short percussive hit carries most of
-      # its energy. Reproduce the driver's first attack step instead, as
-      # observed from the driver running in this emulator (FireRed): the
-      # START path zeroes envelopeVolume and falls into the attack add
-      # (+attack, clamped 255), then per side = env * (masterVolume+1)/16 *
-      # rV|lV >> 8 (mono: avg(rV, lV)). The pass mixes FLAT at that value,
-      # not a ramp from zero.
-      let atk = min(int(m.rd8(base + SC_ATTACK)), 255)
-      let mvs = (atk * (int(m.rd8(sound_info + SI_MASTER_VOL)) + 1)) shr 4
-      let rvb = int(m.rd8(base + SC_VOL_R))
-      let lvb = int(m.rd8(base + SC_VOL_L))
-      var svr = float32((mvs * rvb) shr 8) / 255.0'f32 * master_mult
-      var svl = float32((mvs * lvb) shr 8) / 255.0'f32 * master_mult
-      if m.mono_mode != 0:
-        let v = float32((mvs * ((rvb + lvb) shr 1)) shr 8) / 255.0'f32 * master_mult
-        svr = v
-        svl = v
-      s.vol_l0 = svl
-      s.vol_r0 = svr
-      s.vol_l1 = svl
-      s.vol_r1 = svr
-    else:
-      s.vol_l0 = s.vol_l1
-      s.vol_r0 = s.vol_r1
-      s.vol_l1 = vl
-      s.vol_r1 = vr
+    s.vol_l = vl
+    s.vol_r = vr
+  m.render_frame()
+
+proc on_frame(m: Mp2kHle; sound_info: uint32) =
+  ## Called once per mixer pass (at the learned hook, before the real mixer
+  ## runs). Renders the PREVIOUS pass's frame from its snapshot and the
+  ## envelope it left behind (apply_pending), then snapshots this pass.
+  ## Both vintages probed (Emerald, Minish Cap) compute the envelope inside
+  ## the pass, so a frame can only be rendered one hook late; on Emerald
+  ## that is also when the hardware plays it (553 samples after the pass),
+  ## on Minish Cap the DMA reaches the slot earlier (228) and the HLE runs
+  ## about 330 samples (10 ms) behind the hardware — the price of exact
+  ## envelopes on that vintage.
+  if m.pend_valid:
+    m.fifo_target = MP2K_FIFO_GUARD
+    m.apply_pending(sound_info)
+    m.resync_pending = false   # one full re-latch pass done; back to normal keying
+  else:
+    for i in 0 ..< MP2K_MAX_CHANNELS: m.samplers[i].active = false
+  m.snapshot_pass(sound_info)
   # --- Foreign FIFO feeder detection -------------------------------------------
   # Some games ship m4a for SFX but stream their MUSIC around the engine's
   # channel structs (Batman Vengeance: the streamer fills pcmBuffer
@@ -748,7 +778,7 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
       # own problem (e.g. a note-on envelope lag), never foreignness. It also
       # only counts once the shadow has been silent longer than the real ring
       # could still be draining engine-mixed audio (pcmBuffer holds up to
-      # pcmDmaPeriod <= 16 frames; our delay line holds 1): a song-stop drain
+      # pcmDmaPeriod <= 16 frames; our FIFO holds about 1): a song-stop drain
       # tail is not foreign.
       var any_active = false
       for i in 0 ..< MP2K_MAX_CHANNELS:
@@ -765,15 +795,17 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
       elif shadow_loud:
         m.foreign_streak = 0
       # else: both silent — neutral, hold the evidence count
+  when defined(mp2kwav):
+    dbgHookDmaSrc.add m.gba.dma.src[1]
+    dbgHookCnt.add int(m.rd8(sound_info + SI_DMA_COUNTER))
   m.frame_seen = true
   m.engaged = true
   m.hook_stale = 0           # the mixer demonstrably ran this frame
-  m.resync_pending = false   # one full re-latch pass done; back to normal keying
 
 proc mixer_hook*(m: Mp2kHle) =
   ## PC-hook entry, called from cpu.tick when r15 reaches the learned mixer
   ## entry. With the engine lock held, refresh the mixer state (the channel
-  ## status still carries START here: on_frame). Without it the learned PC
+  ## status still carries START here: snapshot_pass). Without it the learned PC
   ## was wrong ("Runtime detection"): unlearn and re-probe.
   let sip = m.rd32(MP2K_SOUNDINFO_PTR_ADDR)
   if (sip shr 24) == 0x02'u32 or (sip shr 24) == 0x03'u32:
@@ -828,10 +860,6 @@ proc mp2k_frame_poll*(m: Mp2kHle) =
               m.probe_fails < MP2K_PROBE_MAX_FAILS
   if m.probing: m.probe_sound_info = sip
 
-proc push_tap(s: ptr Mp2kSampler; v: float32) {.inline.} =
-  ## Shift a decoded source sample into the 4-sample history (tap0 newest).
-  (s.tap3, s.tap2, s.tap1, s.tap0) = (s.tap2, s.tap1, s.tap0, v)
-
 proc catmull_rom(p0, p1, p2, p3, mu: float32): float32 {.inline.} =
   ## Catmull-Rom spline between p1 and p2 (mu in 0..1); p0/p3 are the
   ## neighbouring samples.
@@ -840,91 +868,93 @@ proc catmull_rom(p0, p1, p2, p3, mu: float32): float32 {.inline.} =
              (2.0'f32 * p0 - 5.0'f32 * p1 + 4.0'f32 * p2 - p3) * mu2 +
              (3.0'f32 * p1 - p0 - 3.0'f32 * p2 + p3) * mu2 * mu)
 
+proc src_at(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte]; rmask: uint32;
+            pos: int64): float32 {.inline.} =
+  ## Source sample at a play position that may lie outside the data: before
+  ## the note there is silence, past the end a looping sample wraps and a
+  ## one-shot reads silence — the driver's linear interpolation runs toward
+  ## the loop target at the wrap (P7: 127 -> 96) and toward zero at the end.
+  if pos < 0: return 0
+  if pos >= int64(s.sample_count):
+    if s.looping and s.loop_start < s.sample_count:
+      let span = int64(s.sample_count - s.loop_start)
+      return m.decode_at(s, rom, rmask, uint32(int64(s.loop_start) + (pos - int64(s.sample_count)) mod span))
+    return 0
+  m.decode_at(s, rom, rmask, uint32(pos))
+
+proc fetch_taps(m: Mp2kHle; s: ptr Mp2kSampler; rom: ptr seq[byte]; rmask: uint32) {.inline.} =
+  ## taps = play positions cursor-1 .. cursor+2 (the kernel is centred on the
+  ## cursor: the output at phase mu lies between taps[1] and taps[2], so a
+  ## voice lands where the driver's does — P2: the driver's impulse at
+  ## source index 200 answers at the same index). A one-step advance shifts
+  ## and fetches one; anything else refetches all four.
+  let i = s.src_index
+  if s.tap_i != 0xFFFFFFFF'u32 and i == s.tap_i + 1'u32:
+    s.taps[0] = s.taps[1]; s.taps[1] = s.taps[2]; s.taps[2] = s.taps[3]
+    s.taps[3] = m.src_at(s, rom, rmask, int64(i) + 2)
+  else:
+    for t in 0 ..< 4:
+      s.taps[t] = m.src_at(s, rom, rmask, int64(i) + int64(t) - 1)
+  s.tap_i = i
+
 proc advance_cursor(s: ptr Mp2kSampler; step: float32) =
-  ## Move the read cursor by `step` source samples. Whole samples crossed go
-  ## to src_index (and, beyond the first, to hist_gap so the next fetch can
-  ## backfill the tap history); the remainder is the new phase. A looping
-  ## sample wraps modulo its loop length. A one-shot sample — or a reversed
-  ## one, whose driver path never consults the loop registers — holds its last
-  ## sample until the game clears CH_ON.
+  ## Move the read cursor by `step` source samples. A looping sample wraps
+  ## modulo its loop length; a one-shot (or reversed — its driver path never
+  ## consults the loop registers) sample goes silent at its end, as the
+  ## driver's does (P7: the frame's remaining bytes are 0 and the channel
+  ## is then dropped).
   let p = s.phase_frac + step
   let whole = uint32(p)
   s.phase_frac = p - float32(whole)
   if whole == 0'u32: return
   s.src_index += whole
-  s.need_fetch = true
-  s.hist_gap = min(s.hist_gap + whole - 1'u32, 3'u32)
   if s.src_index < s.sample_count: return
   if s.looping and not s.reversed and s.loop_start < s.sample_count:
     let span = s.sample_count - s.loop_start
     s.src_index = s.loop_start + (s.src_index - s.sample_count) mod span
+    s.tap_i = 0xFFFFFFFF'u32   # the run of positions broke: refetch
   else:
-    s.src_index = s.sample_count
-    s.need_fetch = false
+    s.ended = true
 
-proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
-  ## One stereo output sample at the APU rate (32768 Hz), replacing the
-  ## DirectSound FIFO A/B contribution while engaged. Values are in the FIFO
-  ## latch range (about -256..254) so the APU's DirectSound scaling applies.
-  ## Per channel: a 4-tap source-sample history plus a fractional phase; a
-  ## new source sample is decoded only when the cursor crosses a sample
-  ## boundary, and the output is interpolated from the history.
-  if not m.engaged: return (0'i16, 0'i16)
+proc render_one(m: Mp2kHle): tuple[a: int16, b: int16] =
+  ## One (FIFO A, FIFO B) sample of the frame being rendered, in the FIFO
+  ## latch range (twice the driver's s8 byte) so the APU's DirectSound
+  ## scaling applies. Per channel: four source samples around a fractional
+  ## cursor, interpolated (cubic by default; the driver itself is linear —
+  ## P2 — and `resample_mode` 1/2 select linear/hold for parity checks).
   var accl = 0.0'f32
   var accr = 0.0'f32
-  let t = (if m.frame_len > 0: float32(m.frame_pos) / float32(m.frame_len) else: 0.0'f32)
   let rom = addr m.gba.cartridge.rom
   let rmask = m.gba.cartridge.rom_mask
   let cubic = m.use_cubic
   for i in 0 ..< MP2K_MAX_CHANNELS:
     let s = addr m.samplers[i]
-    if not s.active: continue
-    # Fetch a fresh source sample into the history when the phase advanced.
-    # A decimating advance (step > 1) skipped hist_gap source samples: first
-    # backfill the history with the samples ADJACENT to the new position so
-    # the interpolation always spans neighbouring source samples, as the real
-    # mixer's does. Interpolating stride-spaced fetches would act as a
-    # triangle lowpass over the stride and gut bright decimated voices.
-    if s.need_fetch and s.src_index < s.sample_count:
-      if s.hist_gap > 0'u32:
-        var j = min(s.hist_gap, 3'u32)
-        while j >= 1'u32:
-          if s.src_index >= j:
-            s.push_tap(m.decode_at(s, rom, rmask, s.src_index - j))
-          dec j
-        s.hist_gap = 0
-      s.push_tap(m.decode_src(s, rom, rmask))
-      s.need_fetch = false
+    if not s.active or s.ended: continue
+    if s.tap_i != s.src_index:
+      m.fetch_taps(s, rom, rmask)
     var sample: float32
     if m.resample_mode == 2:
-      sample = s.tap0                       # zero-order hold (raw FIFO parity)
+      sample = s.taps[1]                    # hold
     elif m.resample_mode == 1 or not cubic:
-      sample = s.tap1 + (s.tap0 - s.tap1) * s.phase_frac
+      sample = s.taps[1] + (s.taps[2] - s.taps[1]) * s.phase_frac
     else:
-      # One sample of extra latency buys a neighbour on each side of the segment.
-      sample = catmull_rom(s.tap3, s.tap2, s.tap1, s.tap0, s.phase_frac)
-    sample = sample / 128.0'f32
-    var vl, vr: float32
-    case m.env_mode
-    of 1:                       # constant at current (this-frame) envelope
-      vl = s.vol_l1; vr = s.vol_r1
-    else:                       # 0: linear ramp across the frame (original)
-      vl = s.vol_l0 * (1.0'f32 - t) + s.vol_l1 * t
-      vr = s.vol_r0 * (1.0'f32 - t) + s.vol_r1 * t
-    accl += sample * vl
-    accr += sample * vr
+      sample = catmull_rom(s.taps[0], s.taps[1], s.taps[2], s.taps[3], s.phase_frac)
+    # s8 units in, the driver's per-channel byte out: sample * side / 256
+    let cl = sample * s.vol_l
+    let cr = sample * s.vol_r
+    accl += cl
+    accr += cr
     when defined(mp2kwav):
-      let cl = sample * vl
-      let cr = sample * vr
-      dbgVoiceRawSq[i] += float64(sample) * float64(sample)
-      dbgVoiceRawPk[i] = max(dbgVoiceRawPk[i], abs(sample))
+      let sn = sample / 128.0'f32
+      dbgVoiceRawSq[i] += float64(sn) * float64(sn)
+      dbgVoiceRawPk[i] = max(dbgVoiceRawPk[i], abs(sn))
       dbgVoiceOutSq[i] += float64(cl)*float64(cl) + float64(cr)*float64(cr)
       dbgVoiceOutPk[i] = max(dbgVoiceOutPk[i], max(abs(cl), abs(cr)))
       dbgVoiceN[i].inc
       dbgVoiceComp[i] = s.compressed
       let k = (if s.compressed: 1 else: 0)
-      dbgKindRawSq[k] += float64(sample) * float64(sample)
-      dbgKindRawPk[k] = max(dbgKindRawPk[k], abs(sample))
+      dbgKindRawSq[k] += float64(sn) * float64(sn)
+      dbgKindRawPk[k] = max(dbgKindRawPk[k], abs(sn))
       dbgKindN[k].inc
       if s.age == 0:            # attack frame (first frame after note-on)
         dbgAttackSq += float64(cl)*float64(cl) + float64(cr)*float64(cr)
@@ -939,23 +969,23 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
         dbgStepDecimN.inc
         dbgStepMax = max(dbgStepMax, rate/float32(APU_SAMPLE_RATE))
     s.advance_cursor(rate / float32(APU_SAMPLE_RATE))
-  m.frame_pos.inc
-  if m.frame_len > 0 and m.frame_pos >= m.frame_len: m.frame_pos = m.frame_len
   # --- MP2K reverb: the driver's buffer-seed echo (canonical) -------------------
   # Driver behaviour, observed at runtime (loveemu's summary: "a simple
   # reverb (echo) effect with fixed delay"). pcmBuffer is two s8 halves, one
   # per FIFO, each a ring of pcmDmaPeriod one-V-blank slots; the slot the
   # mixer is about to fill holds the audio mixed pcmDmaPeriod V-blanks ago —
-  # the frame the DMA just finished playing (slot cursor: on_frame). Before
-  # any voice is mixed the driver seeds that slot, sample by sample: it sums
-  # the four signed bytes at the same index in both halves of the slot being
-  # overwritten and of the following slot (one frame younger, wrapping to
-  # slot 0), scales the sum by reverb/512, rounds negative results one LSB
-  # toward zero, and stores the one mono result to both halves. Voices are
-  # accumulated on top, so the stored slot is the wet frame and the seed is
-  # the feedback path: a two-tap (P and P-1 frames) feedback comb with gain
-  # reverb/512 per sample pair, stable for reverb <= 127. With reverb == 0
-  # the slot is zero-filled and holds the dry mix.
+  # the frame the DMA just finished playing (slot cursor: apply_pending).
+  # Before any voice is mixed the driver seeds that slot, sample by sample:
+  # it sums the four signed bytes at the same index in both halves of the
+  # slot being overwritten and of the following slot (one frame younger,
+  # wrapping to slot 0), scales the sum by reverb/512, rounds negative
+  # results one LSB toward zero, and stores the one mono result to both
+  # halves. Voices are accumulated on top, so the stored slot is the wet
+  # frame and the seed is the feedback path: a two-tap (P and P-1 frames)
+  # feedback comb with gain reverb/512 per sample pair, stable for reverb
+  # <= 127. With reverb == 0 the slot is zero-filled and holds the dry mix.
+  # (P6, reverb 64, period 7: an impulse of 50 echoes as 12 at 6 and 7
+  # frames, then 3 / 6 / 3 at 12 / 13 / 14 — this model to the byte.)
   #
   # Mapping to the 32768 Hz render: the seed addressing is per-slot and
   # intra-frame-indexed (sample i of this pass pairs with sample i of the
@@ -969,12 +999,12 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
   # applies. The ring MUST run at pcmFreq: the seed sums two consecutive
   # frames, so the buffer's band-limited self-correlation is the loop gain,
   # and a 32768 Hz ring under-echoes (FireRed forced-reverb A/B against the
-  # real FIFO). Floats are in s8-buffer/128 units (a voice contributes
-  # sample/128 * envelopeVolume/255, the driver's byte-lane scale), so the
-  # seed is sum_f * reverb / 512. Omitted, each sub-LSB on the s8 scale: the
-  # negative nudge and the s8 store quantization/wrap. MONO vintages keep the
-  # same formula: both sides are identical, so the four-read sum degrades to
-  # 2*(cur + next) with the same /512 (A/B RMS against the real FIFO).
+  # real FIFO). Floats are on the s8-buffer scale (a voice contributes
+  # sample * side/256, the driver's byte), so the seed is sum * reverb/512.
+  # Omitted, each sub-LSB on the s8 scale: the negative nudge and the s8
+  # store quantization/wrap. MONO vintages keep the same formula: both sides
+  # are identical, so the four-read sum degrades to 2*(cur + next) with the
+  # same /512.
   var outl_f = accl
   var outr_f = accr
   if m.reverb_ring.len > 0:
@@ -1003,51 +1033,107 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
     outr_f = accr + m.rev_seed
     m.rev_phase += float32(m.pcm_sample_rate) * (1.0'f32 / float32(APU_SAMPLE_RATE))
     m.rev_pos.inc
-  # Scale to the DirectSound latch range the APU expects. Makeup gain 2.025:
-  # centres the HLE/real RMS A/B at 1.0 (the pure ÷256 mixer scale would be
-  # ~2.0). `makeup` overrides it for diagnostics.
-  let MP2K_MAKEUP_GAIN = (if m.makeup > 0'f32: m.makeup else: 2.025'f32)
-  let li = int32(outl_f * 127.0'f32 * MP2K_MAKEUP_GAIN)
-  let ri = int32(outr_f * 127.0'f32 * MP2K_MAKEUP_GAIN)
+  # The FIFO latch is the driver's s8 byte doubled. The driver's buffer
+  # wraps past the s8 range (P10: three full-scale voices sum to 150 and
+  # come out -106), which no game relies on; clamp there instead.
+  let li = int32(outl_f * 2.0'f32)
+  let ri = int32(outr_f * 2.0'f32)
   m.dbg_out_energy += abs(outl_f) + abs(outr_f)
   m.dbg_out_count.inc
-  var outl = int16(clamp(li, -512, 511))
-  var outr = int16(clamp(ri, -512, 511))
-  # Route to the FIFO(s) the engine feeds (on_frame); the result is (FIFO A,
-  # FIFO B). A mono driver's other FIFO never receives data on hardware, so
-  # it gets silence — the game may still have it routed to a speaker.
+  # The result is (FIFO A, FIFO B). The driver's FIRST pcmBuffer half — the
+  # one DMA1 feeds FIFO A from — carries the RIGHT-volume mix and the second
+  # the left (P5: a hard-left pan puts the note in the second half only, and
+  # the game's SOUNDCNT_H routes A right / B left), so the speakers come
+  # out right only if A gets the +0x0A mix. A mono driver's other FIFO never
+  # receives data on hardware, so it gets silence — the game may still have
+  # it routed to a speaker.
+  var fa = int16(clamp(ri, -256, 254))
+  var fb = int16(clamp(li, -256, 254))
   case m.mono_mode
-  of 1: outr = 0            # mono via FIFO A (outl == outr already; B silent)
-  of 2: outl = 0            # mono via FIFO B
+  of 1: fb = 0              # mono via FIFO A (fa == fb already; B silent)
+  of 2: fa = 0              # mono via FIFO B
   else: discard
-  # DirectSound double-buffer (canonical): the driver mixes each pcmBuffer
-  # frame one V-blank ahead of the DMA that drains it, so hardware audio lags
-  # the mixer pass by one frame (the HLE/real cross-correlation peaks at a
-  # one-frame lag). Emit the sample from db_delay samples ago to match: the
-  # ring slot about to be overwritten holds the value written db_delay
-  # samples earlier.
-  var eoutl = outl
-  var eoutr = outr
-  if m.db_delay > 0 and m.out_delay.len >= 2:
-    let slots = m.out_delay.len shr 1
-    if m.out_delay_w >= slots: m.out_delay_w = 0
-    let wi = m.out_delay_w shl 1
-    eoutl = m.out_delay[wi]
-    eoutr = m.out_delay[wi + 1]
-    m.out_delay[wi]     = outl
-    m.out_delay[wi + 1] = outr
-    m.out_delay_w = m.out_delay_w + 1
+  (fa, fb)
+
+proc render_frame(m: Mp2kHle) =
+  ## Render the pending pass's whole frame into the output FIFO — the
+  ## double buffer the driver itself keeps. The frame is exactly the pass's
+  ## pcmSamplesPerVBlank source-rate samples long (fractional remainder
+  ## carried), so every cursor advances by exactly what the driver's did,
+  ## however early or late the game's V-blank handler called the mixer: that
+  ## jitter (±20 samples on Emerald, more on others) lands in the FIFO level
+  ## — as it lands in the hardware's DMA latency — instead of in the voices'
+  ## phase. A slow proportional trim on the level absorbs the residual
+  ## pcmFreq-vs-frame-rate drift (about a sample a second).
+  var level = m.fifo_w - m.fifo_r
+  if level < 0: level = 0
+  let cap = m.fifo.len div 2
+  if not m.fifo_primed:
+    # First frame after engaging or a state load: start at the target level
+    # with silence, so the frame lands where the hardware would play it.
+    m.fifo_primed = true
+    var pre = m.fifo_target
+    if pre > cap div 2: pre = cap div 2
+    for i in 0 ..< pre:
+      let wi = (m.fifo_w mod cap) * 2
+      m.fifo[wi] = 0
+      m.fifo[wi + 1] = 0
+      inc m.fifo_w
+    level = m.fifo_w - m.fifo_r
+  let nominal = float32(m.rev_spv) * float32(APU_SAMPLE_RATE) / float32(max(m.pcm_sample_rate, 1))
+  if level > m.fifo_target + int(nominal) * 2:
+    # Nobody is draining (substitution stepped aside for a foreign stream,
+    # or the game's own audio is being passed through): drop the stale
+    # audio so the frame that IS heard next is a current one, not one from
+    # up to a FIFO-full of frames ago.
+    m.fifo_r = m.fifo_w - m.fifo_target
+    level = m.fifo_target
   when defined(mp2kwav):
-    mp2kWavCapture.add eoutl
-    mp2kWavCapture.add eoutr
-  (eoutl, eoutr)
+    # capture index at which this frame's first sample will be emitted
+    dbgHookCapIdx.add mp2kWavCapture.len div 2 + level
+  m.fifo_acc += nominal
+  var n = int(m.fifo_acc)
+  m.fifo_acc -= float32(n)
+  let err = level - m.fifo_target
+  if err > 8: n -= min(err div 8, 4)
+  elif err < -8: n += min((-err) div 8, 4)
+  if n < 0: n = 0
+  if n > cap - level - 1: n = cap - level - 1
+  for i in 0 ..< n:
+    let (a, b) = m.render_one()
+    let wi = (m.fifo_w mod cap) * 2
+    m.fifo[wi] = a
+    m.fifo[wi + 1] = b
+    inc m.fifo_w
+  # keep the indices small
+  if m.fifo_r >= cap:
+    m.fifo_r -= cap
+    m.fifo_w -= cap
+
+proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
+  ## One (FIFO A, FIFO B) sample at the APU rate (32768 Hz), replacing the
+  ## DirectSound FIFO contribution while engaged: the next sample of the
+  ## rendered frame FIFO (render_frame). An empty FIFO (a late V-blank
+  ## handler, or a pass that never came — the driver's DMA replays its
+  ## stale ring slot then) holds the last sample.
+  if not m.engaged: return (0'i16, 0'i16)
+  var fa = m.fifo_last_a
+  var fb = m.fifo_last_b
+  if m.fifo_w > m.fifo_r and m.fifo.len > 0:
+    let cap = m.fifo.len div 2
+    let ri = (m.fifo_r mod cap) * 2
+    fa = m.fifo[ri]
+    fb = m.fifo[ri + 1]
+    inc m.fifo_r
+    m.fifo_last_a = fa
+    m.fifo_last_b = fb
+  when defined(mp2kwav):
+    mp2kWavCapture.add fa
+    mp2kWavCapture.add fb
+  (fa, fb)
 
 proc init_mp2k*(m: Mp2kHle) =
   ## Initialise mixer state. Nothing to scan: the hook is learned at runtime
   ## ("Runtime detection").
-  m.frame_len = APU_SAMPLE_RATE div 60
   m.use_cubic = true   # cubic (Catmull-Rom, per Paul Bourke) resampling by default
-  # One frame of double-buffer latency (render_sample).
-  m.db_delay = m.frame_len
-  m.out_delay = newSeq[int16](m.frame_len * 2)
-  m.out_delay_w = 0
+  m.fifo = newSeq[int16](MP2K_FIFO_CAP * 2)

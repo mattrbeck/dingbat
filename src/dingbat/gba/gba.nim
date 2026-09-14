@@ -581,6 +581,10 @@ type
 
   # MP2K/M4A sound-engine HLE state (mp2k.nim documents every mechanism;
   # comments here only locate it). Off by default.
+  Mp2kChanSnap* = object
+    status*, ctype*: uint8
+    wave*, freq*, ct*: uint32
+
   Mp2kSampler* = object
     active*:      bool
     wave_data*:   uint32
@@ -598,12 +602,12 @@ type
     blk*:         array[64, int8]  # decoded s8 samples of that block
     src_index*:   uint32    # integer sample read cursor (block/offset derived from this)
     phase_frac*:  float32   # fractional phase (mu) between fetched samples, 0..1
-    need_fetch*:  bool      # a new source sample must be decoded this step
-    hist_gap*:    uint32    # source samples skipped by a decimating advance (mp2k.nim render_sample)
-    tap0*, tap1*, tap2*, tap3*: float32  # 4-tap history, s8 units, tap0 newest
-    vol_l0*, vol_l1*: float32
-    vol_r0*, vol_r1*: float32
+    taps*:        array[4, float32]  # source samples at cursor-1 .. cursor+2, s8 units
+    tap_i*:       uint32    # cursor the taps were fetched for (0xFFFFFFFF = none)
+    ended*:       bool      # one-shot cursor ran past the end: silent (mp2k.nim advance_cursor)
+    vol_l*, vol_r*: float32 # per-side gain for the frame being rendered (side/256)
     age*:         int       # frames since (re)trigger; 0 on the attack frame
+    chk_off*:     uint32    # mp2kwav: non-zero start offset seen at note-on, checked next pass
 
   Mp2kHle* = ref object
     gba* {.cursor.}: GBA
@@ -620,8 +624,6 @@ type
     hook_stale*: int32      # frames since the hook last fired (mp2k.nim mixer_live)
     resync_pending*: bool   # re-latch every channel at the engine's position (mp2k_state_loaded)
     samplers*:   array[12, Mp2kSampler]
-    frame_len*:  int
-    frame_pos*:  int
     compressed_skipped*: int
     dbg_compressed_used*: int   # frames*channels where a BDPCM voice was live
     dbg_skip_fires*: int
@@ -638,11 +640,26 @@ type
     pcm_sample_rate*: int
     reverb_strength*: uint8
     use_cubic*:      bool
-    env_mode*:       int           # DIAG: 0=ramp,1=constant-current
-    resample_mode*:  int           # DIAG: 0=cubic,1=linear,2=nearest(hold)
-    makeup*:         float32        # DIAG: output makeup gain override (0 => built-in default)
-    master_apply*:   int            # DIAG: 1 => re-apply SoundInfo.masterVolume (double-applies; wrong)
-    mono_mode*:      int    # fed FIFO topology: 0 stereo, 1 mono via A, 2 mono via B (on_frame)
+    resample_mode*:  int           # DIAG: 0=cubic,1=linear (the driver's own),2=hold
+    # Snapshot of the pass that has just run, rendered one hook later with
+    # the envelope it computed (mp2k.nim snapshot_pass / apply_pending)
+    pend_valid*:     bool
+    pend*:           array[12, Mp2kChanSnap]
+    pend_reverb*:    uint8
+    pend_rate*:      int
+    pend_period*:    int
+    pend_spv*:       int
+    pend_cnt*:       int
+    pend_maxc*:      int
+    pend_mono*:      int
+    # Rendered-frame output FIFO (mp2k.nim render_frame / render_sample)
+    fifo*:           seq[int16]     # stereo ring, MP2K_FIFO_CAP frames
+    fifo_r*, fifo_w*: int           # read / write cursors (frames)
+    fifo_acc*:       float32        # fractional frame-length carry
+    fifo_last_a*, fifo_last_b*: int16  # held across an underrun
+    fifo_target*:    int            # level aimed for when a frame is pushed (the guard)
+    fifo_primed*:    bool           # target-level silence pre-fill done
+    mono_mode*:      int    # fed FIFO topology: 0 stereo, 1 mono via A, 2 mono via B (apply_pending)
     fifo_foreign*:   bool   # session latch: the engine does not own the FIFO stream (on_frame)
     foreign_streak*: int    # consecutive foreign-evidence passes
     fifo_cpu_bytes*: int   # FIFO bytes written by anything but special DMA1/2
@@ -669,10 +686,6 @@ type
     rev_phase*:      float32       # cell-position accumulator (pcmFreq/32768 per sample)
     rev_cell*:       int           # last cell written this pass (-1 = none)
     rev_seed*:       float32       # seed held across the current cell's output samples
-    # DirectSound double-buffer delay (mp2k.nim render_sample)
-    out_delay*:      seq[int16]     # stereo output delay line (2 * db_delay slots)
-    out_delay_w*:    int            # write cursor (in stereo frames)
-    db_delay*:       int            # delay length in samples (0 disables)
 
   # Camelot "Bon" sound-driver HLE state (Golden Sun; gs_bon.nim). Off by
   # default; shares the mp2k_hle enable flag with its own engaged state.
@@ -825,6 +838,7 @@ proc apu_next_step*(apu: APU): CycleCount {.inline.}
 proc new_mp2k*(gba: GBA): Mp2kHle
 proc init_mp2k*(m: Mp2kHle)
 proc mixer_hook*(m: Mp2kHle)
+proc render_frame(m: Mp2kHle)
 proc probe_pc*(m: Mp2kHle; pc: uint32) {.noinline.}
 proc mp2k_frame_poll*(m: Mp2kHle)
 proc mixer_live*(m: Mp2kHle): bool
@@ -915,6 +929,15 @@ when defined(mp2kwav):  # throwaway A/B capture buffers (see mp2k.nim)
   var dbgFifoWrites*: array[2, int]
   var realDmaCapture*: seq[int16] = @[]
   var dbgRetrigCount*: int = 0
+  var dbgHookCapIdx*: seq[int] = @[]   # HLE capture length (stereo frames) at each mixer hook
+  var dbgHookDmaSrc*: seq[uint32] = @[] # DMA1 internal source cursor at each mixer hook
+  var dbgHookCnt*: seq[int] = @[]        # SoundInfo.pcmDmaCounter at each mixer hook
+  # Note-on with a non-zero SoundChannel.count: did the engine start the
+  # sample at that offset (honoured) or at 0 (ignored)? Judged one pass later
+  # from the count it left (apply_pending).
+  var dbgStartHonoured*: int = 0
+  var dbgStartIgnored*: int = 0
+  var dbgStartUnclear*: int = 0
 # Audio: PSG channels 1-4 + the two FIFO (DMA) channels, then the mixer
 include apu/abstract_channels
 include apu/channel1

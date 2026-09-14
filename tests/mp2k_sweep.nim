@@ -11,6 +11,10 @@
 #        DINGBAT_SWEEP_DRIVE=1    mash A/START (menu-gated titles: health
 #                                 screens, title menus — e.g. Mother 3's
 #                                 press-any-button intro gate)
+#        DINGBAT_SWEEP_WAV=prefix write <prefix>.hle.wav / <prefix>.real.wav
+#                                 (32768 Hz s16 stereo, same span) for
+#                                 waveform-level A/B of the HLE render vs
+#                                 the game's own FIFO stream
 #
 # Reported fields (all from THIS run):
 #   rom            basename
@@ -29,8 +33,15 @@
 #   reverb/pcm_rate  last SoundInfo values seen by the hook
 #   hle_rms/real_rms/ratio  span-matched A/B RMS of the HLE render vs the
 #                  game's own FIFO stream (both only accumulate while engaged)
+#   env_corr       Pearson of the two ~100 ms RMS envelopes (shape/tempo)
+#   xcorr0         sample-level normalised correlation at lag 0 (waveform)
+#   lag            HLE-vs-real lag in APU samples (16-sample resolution)
+#   start_honoured/_ignored/_unclear  note-ons carrying a non-zero count: did
+#                  the engine start the sample there or at 0 (mp2k.nim)
 #   wall_s         wall time of the frame loop (perf outlier screen)
-import std/[os, strutils, math, json, monotimes, times]
+when not defined(mp2kwav):
+  {.error: "build with -d:mp2kwav (see the header)".}
+import std/[os, strutils, math, json, monotimes, times, streams]
 import dingbat/gba/gba
 import dingbat/common/test_output
 import dingbat/common/input
@@ -38,6 +49,83 @@ import dingbat/common/input
 const
   IDENT_IDLE = 0x68736D53'u32
   IDENT_LOCK = 0x68736D54'u32
+
+proc write_wav(path: string; samples: seq[int16]) =
+  let f = newFileStream(path, fmWrite)
+  let n = samples.len
+  f.write("RIFF"); f.write(uint32(36 + n * 2)); f.write("WAVE")
+  f.write("fmt "); f.write(uint32(16)); f.write(uint16(1)); f.write(uint16(2))
+  f.write(uint32(32768)); f.write(uint32(32768 * 4)); f.write(uint16(4)); f.write(uint16(16))
+  f.write("data"); f.write(uint32(n * 2))
+  for v in samples: f.write(v)
+  f.close()
+
+proc pearson(a, b: seq[float]): float =
+  let n = min(a.len, b.len)
+  if n < 2: return 0
+  var ma, mb = 0.0
+  for i in 0 ..< n: ma += a[i]; mb += b[i]
+  ma /= float(n); mb /= float(n)
+  var sab, saa, sbb = 0.0
+  for i in 0 ..< n:
+    let da = a[i] - ma
+    let db = b[i] - mb
+    sab += da * db; saa += da * da; sbb += db * db
+  if saa <= 0 or sbb <= 0: return 0
+  sab / sqrt(saa * sbb)
+
+proc env_corr(a, b: seq[int16]; blk = 6554): float =
+  ## Pearson correlation of the per-~100 ms RMS envelopes (shape/tempo gate).
+  let n = min(a.len, b.len)
+  var ea, eb: seq[float]
+  var i = 0
+  while i + blk <= n:
+    var sa, sb = 0.0
+    for j in i ..< i + blk:
+      sa += float(a[j]) * float(a[j]); sb += float(b[j]) * float(b[j])
+    ea.add sqrt(sa / float(blk)); eb.add sqrt(sb / float(blk))
+    i += blk
+  pearson(ea, eb)
+
+proc xcorr0(a, b: seq[int16]): float =
+  ## Normalised sample-level correlation at lag 0. The two captures are
+  ## span-matched and the HLE carries the hardware's one-frame double-buffer
+  ## delay, so lag 0 is the aligned comparison.
+  let n = min(a.len, b.len)
+  var sab, saa, sbb = 0.0
+  for i in 0 ..< n:
+    let x = float(a[i])
+    let y = float(b[i])
+    sab += x * y; saa += x * x; sbb += y * y
+  if saa <= 0 or sbb <= 0: return 0
+  sab / sqrt(saa * sbb)
+
+proc best_lag(a, b: seq[int16]; dec = 16; span = 96): int =
+  ## Lag (APU samples, positive = HLE later) of the HLE capture against the
+  ## real stream: both decimated by `dec` (mono mix), cross-correlated over
+  ## +-span decimated lags. Coarse (to `dec` samples) but cheap enough for
+  ## every ROM of a sweep.
+  let n = min(a.len, b.len) div 2
+  let m = n div dec
+  if m < 4 * span: return 0
+  var da = newSeq[float](m)
+  var db = newSeq[float](m)
+  for i in 0 ..< m:
+    var sa, sb = 0.0
+    for j in 0 ..< dec:
+      let k = (i * dec + j) * 2
+      sa += float(a[k]) + float(a[k + 1])
+      sb += float(b[k]) + float(b[k + 1])
+    da[i] = sa; db[i] = sb
+  var best = 0
+  var bestv = -1e300
+  for lag in -span .. span:
+    var acc = 0.0
+    for i in span ..< m - span:
+      acc += da[i + lag] * db[i]
+    if acc > bestv:
+      bestv = acc; best = lag
+  best * dec
 
 proc rms(s: seq[int16]): float =
   if s.len == 0: return 0
@@ -111,6 +199,10 @@ proc main() =
 
   let hr = rms(mp2kWavCapture)
   let rr = rms(realDmaCapture)
+  let wav = getEnv("DINGBAT_SWEEP_WAV")
+  if wav.len > 0:
+    write_wav(wav & ".hle.wav", mp2kWavCapture)
+    write_wav(wav & ".real.wav", realDmaCapture)
   echo $(%*{
     "rom": rom_path.extractFilename,
     "frames_run": frames_run,
@@ -135,6 +227,12 @@ proc main() =
     "hle_rms": hr,
     "real_rms": rr,
     "ratio": (if rr > 0: hr / rr else: 0.0),
+    "env_corr": env_corr(mp2kWavCapture, realDmaCapture),
+    "xcorr0": xcorr0(mp2kWavCapture, realDmaCapture),
+    "lag": best_lag(mp2kWavCapture, realDmaCapture),
+    "start_honoured": dbgStartHonoured,
+    "start_ignored": dbgStartIgnored,
+    "start_unclear": dbgStartUnclear,
     "hle_n": mp2kWavCapture.len,
     "real_n": realDmaCapture.len,
     "overlay_trig": emu.mp2k.dbg_overlay_triggers,

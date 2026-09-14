@@ -58,6 +58,7 @@ One line per document: what it is for and who reads it. Scores live only in
 - [../tests/golden/README.md](../tests/golden/README.md) — per-row mGBA-suite golden captures for diff-based timing work. GBA timing work.
 - [../tests/roms/expected/README.md](../tests/roms/expected/README.md) — hardware transcriptions of the probe ROMs. Hardware sessions.
 - [../tests/roms/hwverified/README.md](../tests/roms/hwverified/README.md) — self-judging GBA ROMs carrying hardware-verified expectations. GBA maintainers.
+- [../tools/mp2kprobe/README.md](../tools/mp2kprobe/README.md) — probe songs played by the game's own MP2K driver: what the mixer does, to the byte. Audio HLE work.
 - [../tests/mp2k_sweep_results/SUMMARY.md](../tests/mp2k_sweep_results/SUMMARY.md) — the MP2K HLE archive sweep over one ROM per title. Audio HLE work.
 
 ## Tool kits (`tools/*/README.md`)
