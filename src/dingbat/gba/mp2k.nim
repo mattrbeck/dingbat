@@ -44,6 +44,11 @@
 #     measure_latency's estimate). Every prediction is checked against the real
 #     bytes one pass later; a vintage that misses drops back to rendering
 #     each pass one pass late from the bytes it left behind.
+#   * Known limitations (a voice's cursor drifting from the driver's
+#     fixed-point step, the 26.8 kHz titles, whole-sample placement, the
+#     estimate used before a slot is heard) and what was tried against them:
+#     tools/mp2kprobe/README.md "Known limitations"; measured with
+#     tools/mp2ksweep.
 #   * Mixer facts below marked P1..P10 come from the probe songs in
 #     tools/mp2kprobe played by the driver itself (tests/mp2k_probe.nim
 #     reads its pcmBuffer).

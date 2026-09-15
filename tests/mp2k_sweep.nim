@@ -15,6 +15,11 @@
 #                                 (32768 Hz s16 stereo, same span) for
 #                                 waveform-level A/B of the HLE render vs
 #                                 the game's own FIFO stream
+#        DINGBAT_PASSDUMP=file    one line per rendered pass: where the HLE
+#                                 placed the frame and where its slot's first
+#                                 byte left the FIFO (tools/mp2ksweep/README.md
+#                                 lists this and the mp2k.nim debug switches)
+# Tooling: tools/mp2ksweep (build any commit, sweep, capture, reports).
 #
 # Reported fields (all from THIS run):
 #   rom            basename

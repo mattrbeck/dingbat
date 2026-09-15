@@ -286,7 +286,7 @@ Breaking the replacement or the two-pass engage rule fails seven of its 23 check
 
 Engaged 1013 and 780 music titles in all three; 779 within ±20 % loudness, 779 with envelope correlation ≥ 0.9 (777 in 27f). At 0.01, 669 better and 8 worse.
 
-The five:
+The five (kept open in `tools/mp2kprobe/README.md` "Known limitations"; reproduce with `tools/mp2ksweep`, whose `build_at.sh` re-sweeps any commit with the capture fix, and `experiments/rate-lock.patch`):
 * **Disney Sports American Football (0.982 → 0.915) and Skateboarding (0.951 → 0.890).** Placement holds to a sample, but the waveform walks 3 samples early in 12 s: the voice's cursor gains on the engine's (American Football's 21024 Hz voice advances 352 source samples a pass at 18157 Hz; the HLE's 352.0017). Following the engine's position rate fixed both (0.974, and Don-chan 0.991) but moved Bass Tsuri Shiyouze and J.League Winning Eleven 2002 the other way, whose count fields advance slower than the waveform they play, and pulling the cursor onto the engine's position moved Steel Empire a sample off (0.984 → 0.618). Dropped: the count field is not the playback cursor on every vintage.
 * **Disney Princesse / Prinzessinnen (0.838 → 0.799).** A steady 1–2 samples early with placement holding.
 * **Inuyasha Naraku no Wana (0.348 → 0.291).** A 26.8 kHz title that matches poorly in every build; its lag moves 4–6 samples from second to second.

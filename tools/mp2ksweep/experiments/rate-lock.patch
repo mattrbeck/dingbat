@@ -1,0 +1,74 @@
+diff --git a/src/dingbat/gba/gba.nim b/src/dingbat/gba/gba.nim
+index fcc01d4fc..a25019d08 100644
+--- a/src/dingbat/gba/gba.nim
++++ b/src/dingbat/gba/gba.nim
+@@ -625,6 +625,14 @@ type
+     vol_l_to*, vol_r_to*: float32  # quality tier: gains at the END of the frame (next pass's)
+     age*:         int       # frames since (re)trigger; 0 on the attack frame
+     chk_off*:     uint32    # mp2kwav: non-zero start offset seen at note-on, checked next pass
++    # Rate lock (mp2k.nim apply_pending): the engine's position when the
++    # lock began and the passes since (-1 = none), its position at the last
++    # pass
++    lock_e0*:     uint32
++    lock_k*:      int
++    lock_prev*:   uint32
++    lock_rate*:   float64   # source samples a pass, averaged since the lock began
++    lock_freq*:   uint32    # the channel frequency the lock runs at
+ 
+   Mp2kHle* = ref object
+     gba* {.cursor.}: GBA
+diff --git a/src/dingbat/gba/mp2k.nim b/src/dingbat/gba/mp2k.nim
+index 526c88974..27ed57489 100644
+--- a/src/dingbat/gba/mp2k.nim
++++ b/src/dingbat/gba/mp2k.nim
+@@ -832,6 +832,7 @@ proc apply_pending(m: Mp2kHle; sound_info: uint32) =
+         dbgRetrigLog.inc
+       if retrig: inc dbgRetrigCount
+     if retrig:
++      s.lock_k = -1
+       if m.resync_pending and not started:
+         # First applied snapshot after a state/rollback load: the channel is
+         # already mid-note in the engine (CH_ON without START) and must not
+@@ -924,6 +925,28 @@ proc apply_pending(m: Mp2kHle; sound_info: uint32) =
+           s.tap_i = 0xFFFFFFFF'u32
+           s.ended = false
+           s.blk_index = 0xFFFFFFFF'u32
++          s.lock_k = -1
++        # Rate lock. The driver steps a voice by a fixed-point figure it
++        # derives from freq and pcmFreq, which is not freq / pcmFreq exactly:
++        # Disney Sports American Football's 21024 Hz voice advances exactly
++        # 352 source samples a pass at 18157 Hz where the ratio gives
++        # 351.9995, and the free-running cursor gained 0.07 samples every 40
++        # passes, a waveform drift of 3 output samples in 12 s. From its
++        # 16th pass a note plays at the rate its engine positions have
++        # averaged since the lock began. A position that went backward (a
++        # loop wrap), a snap, or a new frequency starts the lock again.
++        if not s.reversed and s.lock_k >= 0 and engine_pos >= s.lock_prev and p.freq == s.lock_freq:
++          inc s.lock_k
++          s.lock_rate = float64(engine_pos - s.lock_e0) / float64(s.lock_k)
++        elif not s.reversed:
++          s.lock_k = 0
++          s.lock_e0 = engine_pos
++          s.lock_freq = p.freq
++        else:
++          s.lock_k = -1
++        s.lock_prev = engine_pos
++      else:
++        s.lock_k = -1
+     s.wave_data   = new_wave_data
+     s.compressed  = compressed
+     s.reversed    = reversed
+@@ -1703,7 +1726,12 @@ proc render_voices(m: Mp2kHle; n: int) =
+     # The driver steps each voice by rate / pcmFreq a byte, and the timer
+     # plays the bytes at play_rate.
+     let rate = (if s.use_pcm_rate: float32(m.pcm_sample_rate) else: float32(s.freq))
+-    let step = rate * STEP_PER_HZ * m.play_rate / float32(max(m.pcm_sample_rate, 1))
++    var step = rate * STEP_PER_HZ * m.play_rate / float32(max(m.pcm_sample_rate, 1))
++    if s.lock_k >= 16:
++      # the pass's source samples over a frame's output samples; a rate more
++      # than 1e-4 off the nominal step is not fixed-point step error
++      let locked = float32(s.lock_rate * float64(max(m.play_rate, 1'f32)) / (float64(m.rev_spv) * float64(APU_SAMPLE_RATE)))
++      if abs(locked - step) <= step * 0.0001'f32: step = locked
+     let vl = s.vol_l
+     let vr = s.vol_r
+     let dl = s.vol_l_to - s.vol_l

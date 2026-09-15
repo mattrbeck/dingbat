@@ -401,3 +401,60 @@ The probes also show where the HLE's render is not the driver's, by design:
   passages by 1.5–3× on Emerald, Minish Cap and Beast Shooter. The library
   sweep's fidelity metrics are within noise (708 vs 711 titles above 0.5), and the worst-case cost
   (Beast Shooter) is 5 % of the emulator's time.
+
+## Known limitations (2026-09-15)
+
+Against the build shipped on 2026-09-14 (15d418042), five of 780 music titles
+lose more than 0.02 of lag-0 correlation. That measure is very sensitive, so
+these are samples of timing, not audible faults. Each one, and the gaps behind
+it, is listed here so it can be picked up again. Tooling and workflow:
+`tools/mp2ksweep/README.md`. Numbers: `tests/mp2k_sweep_results/SUMMARY.md`.
+
+* **A voice's cursor can drift from the driver's by a few parts in 10^6.**
+  - *Titles:* Disney Sports American Football (0.982 → 0.915) and Skateboarding
+    (0.951 → 0.890).
+  - *What happens:* the HLE steps a voice by freq / pcmFreq, but the driver
+    steps by a fixed-point figure it derives from them. American Football's
+    21024 Hz voice advances exactly 352 source samples a pass at 18157 Hz,
+    while the HLE advances 352.0017. Placement holds to a sample, but the
+    waveform walks 3 output samples early in 12 s. The cursor is only snapped
+    to the engine when it is half a pass off.
+  - *Tried and dropped:*
+    - **Playing each voice at the rate the engine's position (size − count)
+      has averaged since the note began** (`tools/mp2ksweep/experiments/rate-lock.patch`).
+      It fixed both titles and Don-chan Puzzle, but made Bass Tsuri Shiyouze
+      and J.League Winning Eleven 2002 worse. Their count advances slower than
+      the waveform they play: Bass Tsuri 267.878 samples a pass against 267.884.
+    - **Pulling the cursor onto the engine's whole-sample position.** Steel
+      Empire fell from 0.98 to 0.62.
+  - *Revisit by:* establishing, with the rig, how each vintage derives its
+    step and what its count field counts, so the HLE can compute the step
+    rather than infer it.
+* **Disney Princesse / Prinzessinnen (0.838 → 0.799).**
+  - *What happens:* a steady 1–2 samples early from the first second, with
+    placement holding. It does not drift, and the rate lock does not change
+    it. Unexplained: possibly where this vintage starts a note within its
+    first frame.
+* **The 26.8 kHz titles match poorly in every build.**
+  - *Titles:* median 0.71 across 10 titles, against 0.93–0.98 at every other
+    rate. Inuyasha Naraku no Wana (0.35 → 0.29), Hamepane Tokyo Myumyu, Little
+    Buster Q, Z.O.E. 2173 Testament and Zone of the Enders.
+  - *What happens:* their lag wanders 4–6 samples from one half-second to the
+    next, while pass dumps show placement holding to a sample. Not understood.
+    (Z.O.E. mixes 448-byte slots in a ring of 3.)
+* **Frames move in whole output samples.**
+  - Placement settles within about half a sample of the slot. A lower trim
+    threshold dithers (a sample dropped or duplicated every other frame).
+    Sub-sample placement would need the frame's render to start at a
+    fractional offset.
+* **Until a slot has been heard, placement is estimated.**
+  - *When:* the first pass or two after engaging or a state load, a vintage
+    whose envelope prediction fails (it renders one pass late), and a DMA
+    whose watched byte never reaches the FIFO.
+  - *Why it matters:* these fall back to the DMA-cursor latency estimate.
+    Its pipeline constant (3.5, 2 above 35 kHz) was fitted with the sweep
+    capture that sat a sample late, so it is probably a sample off.
+* **The reference is the emulator's FIFO, not hardware.**
+  - The two-period delay after a byte leaves the FIFO belongs to the cubic
+    reconstruction (`DMAChannels.fifo_interp`, on by default). With it off,
+    slot timing assumes half a period, which no sweep has checked.
