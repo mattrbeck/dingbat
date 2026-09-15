@@ -86,9 +86,12 @@ the asymmetry.
 `releases/latest`, guarded by `MgbaSuiteSha1` so a new upstream release is reported
 rather than silently re-baselined. That build carries the upstream fixture fixes
 (`mgba-emu/suite@8c97f2c9` volatile `dmaPrefetch` source, `@a58437f3` re-measured
-"H-blank bit start" constants, `@2a8eca1`, `@fbe6156`/`@aac98dc`). "DMA Prefetch Break"
-expects `0x10000000 + 4 * iterations` with the count set by where gcc placed the loop, so
-nobody passes it.
+"H-blank bit start" constants, `@2a8eca1`, `@fbe6156`/`@aac98dc`). Those two rewrites
+measure compiler output, and the fork's ROM is built by a later devkitARM than the
+constants were: dingbat reproduces all seven "H-blank bit start" constants exactly on
+upstream's own earlier build, and "DMA Prefetch Break" counts loop iterations the same
+way. Rebuilding the ROM with a pinned `devkitpro/devkitarm` tag is what would close them
+(`docs/mgba-suite-verdicts.md`).
 
 ### jsmolka, FuzzARM, MagenTests
 

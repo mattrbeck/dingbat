@@ -20,67 +20,48 @@ counts: a change that shifts the poll-loop phase can move every Flip row by
 one skip quantum (±11) and regress two near-misses from 1 cycle out to 10
 while every per-section count stays identical.
 
-## `Hblank` (out[1]) — 3 cycles of code shape, not PPU timing
+## `Hblank` and `Flip 1-6` — the ROM is built by a different compiler
 
-The test halts twice and reads TM0CNT_L after each wake; the row is the
-difference. The constant is `0x4D0 = 1232`, one scanline. Dingbat reads
-`0x4D3` under the HLE BIOS and under the real one.
+These seven rows time code the compiler emits, and the constants belong to
+a build that is not the one CI runs.
 
-Both halts wake at the same line phase (1012) here, so the IRQ period is
-right. The three cycles are in the code the compiler emitted after each
-`Halt()`: after the second one it placed three one-cycle Thumb
-`movs` register setups (IWRAM) ahead of the `ldrh` that reads TM0, and after
-the first none. The second read lands 103 cycles after its wake, the first
-100. Hardware reports exactly 1232 anyway.
+`mgba-emu/suite@a58437f3` re-measured them in June 2026 ("modern gcc
+values"). The auto-run fork is a separate build of that source: both trees
+run `devkitpro/devkitarm` from Docker Hub, but months apart, and the newer
+gcc lays `hblankBit` out differently — after the second `Halt()` it inserts
+three one-cycle `movs` before the `ldrh` that reads TM0, where the older
+build reads TM0 immediately. That alone accounts for the `Hblank` row's
+three cycles.
 
-Upstream's earlier binary of the same source (built before
-`mgba-emu/suite@a58437f3`, whose constants were measured for it) has no
-extra instructions after either halt; dingbat reads 1232 there and hardware
-1233. So in both binaries hardware minus dingbat is 1 mod 4 (−3 and +1),
-while dingbat's own halt entries sit at the same phase mod 4 for both halts
-(both binaries), which rules out a wake that keeps the CPU's phase across
-the halt, and a phase-dependent cost on timer reads breaks the Timing
-section for every non-zero table. What does absorb it is not identified; it lives in the halt
-entry/wake path that Timing and Timer count-up are calibrated against, and
-needs a hardware probe that varies the instruction count after a halt.
+Run against upstream's own January build (`~/code/suite`, whose embedded
+newlib string dates its toolchain a year earlier), dingbat reproduces every
+one of the June constants exactly:
 
-## `Flip 1–6` — the constants disagree with themselves
+| Row | dingbat on the January build | `@a58437f3` |
+|---|---|---|
+| Hblank | 0x4D0 | 0x4D0 |
+| Flip 1 | 0x87 | 0x87 |
+| Flip 2 | 0x3EC | 0x3EC |
+| Flip 3 | 0xE5 | 0xE5 |
+| Flip 4 | 0x3EB | 0x3EB |
+| Flip 5 | 0xE3 | 0xE3 |
+| Flip 6 | 0x3F3 | 0x3F3 |
 
-Each flip spins on DISPSTAT bit 1 and reads TM0 when it changes. Until
-2026-09-15 these rows mostly measured the idle-loop skip, which was not
-transparent: it judged the branch that leaves a loop, and it landed on the
-next event's cycle rather than on the loop's own iteration grid. The skip is
-exact now (`waitloop.nim` "Transparency"); every row reads the same with
-`DINGBAT_NO_WAITLOOP=1`.
+So the PPU and CPU timing these rows measure is right, and the rows fail in
+CI only because the fork's binary is compiled differently. Two further
+checks agree: the June constants are not self-consistent for *any* build
+(flips 3 and 5 run identical code starting at the same phase of the line —
+flip 3 + flip 4 = 1232, one scanline — yet differ by 2), while the 2023
+constants they replaced were (both flips 228). And a replay of the traced
+loops under any shift of the flag edges, the calibration read, the loop
+period, the entry cost or the read-to-TM0 latency reproduces none of the six
+at once; a phase-dependent (mod 4) cost on DISPSTAT reads gets no closer
+than 9 cycles, and one on timer reads breaks Timing and Timer IRQ.
 
-| Row | Before | Now | Expected |
-|---|---|---|---|
-| Flip 1 | 0x9D | 0x80 | 0x87 |
-| Flip 2 | 0x3D2 | 0x3ED | 0x3EC |
-| Flip 3 | 0xEF | 0xE3 | 0xE5 |
-| Flip 4 | 0x3E1 | 0x3F3 | 0x3EB |
-| Flip 5 | 0xFF | 0xE3 | 0xE3 (passes) |
-| Flip 6 | 0x3E0 | 0x3E9 | 0x3F3 |
-
-No deterministic model reproduces these constants for this binary. The
-function is IWRAM Thumb; each flip is an entry path, a 4-instruction poll
-loop (8 cycles) and an exit path. Flips 3 and 5 execute byte-identical
-code, and by the constants themselves (flip 3 + flip 4 = 229 + 1003 = 1232,
-one scanline) their loops start at the same phase of the line. Hardware
-still reports 229 for one and 227 for the other, a difference that is not a
-multiple of the loop's period. Consistent with that:
-
-- A replay of the traced loops with any shift of the set edge, the clear
-  edge, the calibration read, the loop period, the entry cost or the
-  read-to-TM0 latency (a brute force over ±12 cycles each) matches
-  none of the six rows at once.
-- A phase-dependent (mod 4) extra cost on DISPSTAT reads brings the rows no
-  closer than 9 cycles of total error; one on timer reads breaks the Timing
-  and Timer IRQ sections for every non-zero table.
-
-The constants were measured by `mgba-emu/suite@a58437f3` on its own build;
-the auto-run fork is a separate build of the same source and may place this
-code differently. Settling the rows needs the fork's binary run on hardware.
+Closing the rows in CI means rebuilding the fork's ROM with the toolchain
+the constants were measured on (`devkitpro/devkitarm` pinned to a mid-2026
+tag) and re-pinning `MgbaSuiteSha1`, or re-measuring on hardware with the
+fork's own binary.
 
 ## `DMA Prefetch Break` — a phase-alignment row
 
@@ -124,6 +105,34 @@ before 2026-09-15 are PPU behaviour in `ppu.nim` (see `bg_enable_hist`,
 
 The late first tile is modelled for text BGs (modes 0 and 1) only; nothing
 in the suite exercises a mid-line enable of an affine or bitmap layer.
+
+## Under the real BIOS: the four SIO timing rows
+
+Only with a BIOS image: `Normal8/256k` and `Normal8/2M` read one cycle high
+(0x27A vs 0x279, 0xBA vs 0xB9), and the two Multi rows time out on hardware
+too. The timed window is hand-written assembly plus BIOS code, so unlike the
+rows above it does not move with the compiler.
+
+The window runs from the transfer's start write to the stop write after a
+`swi 2` Halt wakes on the serial IRQ. Tracing both BIOS modes: the wake, the
+vector and the BIOS dispatcher take the same 82 cycles either way, and
+everything before the halt is absorbed by it. The difference is the return:
+the real BIOS runs `subs pc, lr, #4` (2 cycles here) and then its Halt tail
+(`bx lr`, the shared SWI epilogue, `movs pc, lr`) at the textbook 21, where
+the HLE charges 22 for the pair (`HALT_RETURN_COST`, tuned on these rows).
+
+Three ways to remove that cycle, each refuted by another hardware-pinned
+section:
+- IRQ entry one cheaper when it wakes a halt (no in-flight fetch): Timer
+  count-up 936 -> 920.
+- the S-bit return discount in every mode, not just IRQ mode: fixes the SIO
+  rows, but the BIOS Timing rows go 2020 -> 1992, each one cycle low.
+- the discount only when the return resumes a halted stream: fixes the SIO
+  rows, Timer count-up still 936 -> 920.
+
+Timer count-up times the BIOS's IntrWait wake and these rows time its Halt
+wake, and one constant cannot serve both. Separating them needs a hardware
+probe that isolates the Halt wake path, not more fitting against the suite.
 
 ## Closed rows, for the record
 
