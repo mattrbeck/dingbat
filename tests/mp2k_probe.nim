@@ -285,7 +285,6 @@ proc main() =
                       "pred_ok": (if emu.mp2k != nil: emu.mp2k.pred_ok else: 0),
                       "pred_bad": (if emu.mp2k != nil: emu.mp2k.pred_bad else: 0),
                       "seq_late": (if emu.mp2k != nil: emu.mp2k.seq_late else: 0),
-                      "cand_idx": (if emu.mp2k != nil: emu.mp2k.cand_idx else: 0),
                       "fifo_target": (if emu.mp2k != nil: emu.mp2k.fifo_target else: 0),
                       "lat_avg": (if emu.mp2k != nil: int(emu.mp2k.lat_avg) else: 0),
                       "slot_off": (if emu.mp2k != nil: emu.mp2k.slot_off else: 0),
@@ -316,26 +315,6 @@ proc main() =
   echo $(%*{"frames": frames, "passes": passes, "eng_samples": engA.len,
             "hle_n": mp2kWavCapture.len div 2, "real_n": realDmaCapture.len div 2,
             "engaged": (emu.mp2k != nil and emu.mp2k.engaged),
-            "hook": (if emu.mp2k != nil: toHex(emu.mp2k.hook_addr, 8) else: ""),
-            "cand": (if emu.mp2k != nil: (block:
-                       var a = newJArray()
-                       for i in 0 ..< emu.mp2k.cand_n:
-                         a.add(%*{"pc": toHex(emu.mp2k.cand[i], 8), "hits": emu.mp2k.cand_hits[i],
-                                  "order": emu.mp2k.cand_order[i]})
-                       a) else: newJArray()),
-            "pick": (if emu.mp2k != nil: (block:
-                       var a = newJArray()
-                       for i in 0 ..< emu.mp2k.cand_pick_n: a.add(%emu.mp2k.cand_pick[i])
-                       a) else: newJArray()),
-            "cand_idx": (if emu.mp2k != nil: emu.mp2k.cand_idx else: 0),
-            "probe_fails": (if emu.mp2k != nil: emu.mp2k.probe_fails else: 0),
-            "miss": (block:
-                       var a = newJArray()
-                       var seen: seq[uint32] = @[]
-                       for (pc, lr, w) in dbgProbeMiss:
-                         if pc in seen: continue
-                         seen.add pc
-                         a.add(%*{"pc": toHex(pc, 8), "lr": toHex(lr, 8), "w": toHex(w, 8)})
-                       a)})
+            "seq_late": (if emu.mp2k != nil: emu.mp2k.seq_late else: 0)})
 
 main()

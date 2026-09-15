@@ -66,25 +66,31 @@ carrying real games), permanent dual scalar/SIMD maintenance of the
 renderer's most correctness-sensitive code, no benefit on the oldest devices
 — no-go unless the compositor's share grows or SIMD becomes assumable.
 
-The audio-HLE hook trigger (2026-09-14) costs one flag test per
-instruction. A hook learned at a branch target is compared against r15 only
-at the pipeline flush, once per taken branch (`clear_pipeline`). The learning
-probe, and the few vintages whose hook sits past a stub-called entry, keep a
-per-instruction compare. Moving the slow path out of line mattered: inlined
-into `cpu.tick` it cost the HLE-off path about 0.6 %. The mixer renders a
-voice at a time across the frame, and the quality tier's unstretched sinc is
-a dot product with a precomputed per-phase row. Retired instructions,
-minimum of five runs, HLE on less HLE off:
+The MP2K HLE has no per-instruction cost (2026-09-14). It learns no code
+address. Each work-RAM store pays one subtract and compare against a window
+the HLE keeps on the driver's SoundInfo, and a mixer pass is the driver's
+lock write followed by its first store into the ring the sound DMA plays
+(`src/dingbat/gba/mp2k.nim` "Runtime detection", census in
+`tools/mp2kprobe/README.md`). It replaced a PC hook tested per instruction
+and then per branch. Retired instructions, minimum of five runs:
 
-| Scene | Before | After |
+| Scene | HLE off | HLE on |
 |---|---|---|
-| Emerald, Littleroot (600 frames) | +1.22 B (+9.9 %) | +0.32 B (+2.6 %) |
-| Beast Shooter, attract (900 frames) | +4.00 B (+22.9 %) | +1.64 B (+9.4 %) |
+| Emerald, Littleroot (600 frames), PC hook | 12.37 B | 12.69 B |
+| Emerald, write trigger | 12.20 B | 12.50 B |
+| Beast Shooter, attract (900 frames), PC hook | 17.46 B | 19.10 B |
+| Beast Shooter, write trigger | 17.25 B | 18.88 B |
+
+The HLE-off drop of about 1.3 % sits at the code-layout noise floor, and the
+frame hashes are unchanged. The mixer renders a voice at a time across the
+frame, and the quality tier's unstretched sinc is a dot product with a
+precomputed per-phase row. Against the pre-2026-09-14 per-instruction PC
+compare, the HLE's overhead fell from 1.22 B to 0.30 B on Emerald and from
+4.00 B to 1.63 B on Beast Shooter.
 
 What remains on Beast Shooter is mostly the stretched kernel for its
 decimated voices (about 0.6 B). A per-step table would save only the kernel
-lookups, not the 64-tap products, so it was left alone. Output is
-byte-identical to the per-sample loop, and the library sweep is unchanged.
+lookups, not the 64-tap products, so it was left alone.
 
 ## Old and constrained devices
 

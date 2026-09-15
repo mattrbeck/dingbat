@@ -3,8 +3,9 @@
 # =============================================================================
 # Re-renders the GBA's common MP2K music mixer at the APU's 32768 Hz instead
 # of the game's ~13 kHz FIFO stream. The engine is detected at runtime from
-# its SoundInfo work area in RAM (no ROM signature — see "Runtime detection"
-# below) and the SoundInfo struct is re-read at every mixer pass.
+# its SoundInfo work area in RAM, and each mixer pass from the driver's own
+# writes to it (no ROM signature and no code address — see "Runtime
+# detection" below); the SoundInfo struct is re-read at every pass.
 #
 # EXPERIMENTAL and OFF BY DEFAULT (gba.mp2k_hle; "Improve audio quality" in
 # both frontends). Not cycle-accurate. Shadow state is deliberately NOT
@@ -33,15 +34,15 @@
 #
 # Design:
 #   * SHADOW mode: the real mixer still runs; its channel table is
-#     snapshotted at the mixer entry hook (snapshot_pass) and the envelope
+#     snapshotted as the mixer starts its pass (snapshot_pass) and the envelope
 #     the pass is about to compute is predicted from the driver's own state
 #     by the rules the probe songs pinned (P3: attack/decay/sustain/release
 #     and the pseudo-echo floor), then the frame is rendered at once
 #     (apply_pending / render_frame) into a FIFO that holds it until the
 #     hardware would play it (measure_latency: the sound DMA's cursor
 #     crossing the slot). Every prediction is checked against the real
-#     bytes one hook later; a vintage that misses drops back to rendering
-#     each pass one hook late from the bytes it left behind.
+#     bytes one pass later; a vintage that misses drops back to rendering
+#     each pass one pass late from the bytes it left behind.
 #   * Mixer facts below marked P1..P10 come from the probe songs in
 #     tools/mp2kprobe played by the driver itself (tests/mp2k_probe.nim
 #     reads its pcmBuffer).
@@ -66,9 +67,11 @@ const
   # stock driver never mixes at +10, so the widening cannot mislearn from it.
   MP2K_IDENT_IDLE_VOFF    = 0x68736D5D'u32   # ID_NUMBER+10: idle, VSync off
   MP2K_IDENT_LOCK_VOFF    = 0x68736D5E'u32   # ID_NUMBER+11: locked, VSync off
-  MP2K_PROBE_MAX_FAILS    = 8                # give up learning after this many mislearns
   MP2K_MAX_CHANNELS       = 12
-  # Frames the learned hook may go silent before substitution steps aside
+  # Bytes in each half of pcmBuffer (one FIFO's ring): the most a sound DMA
+  # replays from its source, pcmDmaPeriod * pcmSamplesPerVBlank at most.
+  MP2K_PCM_HALF           = 1584'u32
+  # Frames the mixer may go without a pass before substitution steps aside
   # (mixer_live). A live SoundMain fires every V-blank, so the stale counter
   # oscillates 0..1; the grace tolerates lag-frame skipped passes.
   MP2K_HOOK_STALE_MAX     = 4'i32
@@ -176,19 +179,26 @@ const
   # much extra latency (half a millisecond); a later one holds the last
   # sample for the few samples it is late.
   MP2K_FIFO_CAP   = 4096
+  # Frames the level control converges from any error after priming or a
+  # target move (render_frame): four EMA time constants, about 2 s.
+  MP2K_FIFO_SETTLE = 128
+  # Level error (1/32 EMA, samples) past which the trim engages outside a
+  # settle window (render_frame); -d:mp2kwav builds take DINGBAT_MP2K_BAND.
+  MP2K_FIFO_BAND = 1.5'f32
   MP2K_FIFO_GUARD = 16
   # From a byte's FIFO transfer to its sample at the DAC, beyond its place
   # in the queue (the DMA refills 16 bytes when 15 remain, so a transfer's
   # first byte plays 15 samples later), in DMA-rate samples. Fitted on the
   # library sweep (lag-0 waveform correlation against the emulator's cubic
-  # FIFO reconstruction, 780 music titles): 4 is best at every engine rate
-  # from 5.7 to 27 kHz (2 and 5 lose at nearly all of them; a constant in
-  # output samples loses at 13.4 kHz and above 30 kHz). Above 35 kHz
-  # (Castlevania's 42 kHz configuration and two 40 kHz titles) 2 wins: the
-  # two differ by 1.6 output samples there, which content reaching 16 kHz
-  # still resolves. (10, until 2026-09-14, was fitted while the frame
-  # FIFO's level control parked every title up to 24 samples early.)
-  MP2K_FIFO_PIPELINE      = 4.0'f32
+  # FIFO reconstruction, 780 music titles): 3.5 is best at every engine rate
+  # from 5.7 to 21 kHz against 3 and 4 (the eleven 26.8 kHz titles prefer 4
+  # by 0.01). Above 35 kHz (Castlevania's 42 kHz configuration and two
+  # 40 kHz titles) 2 wins: the two differ by 1.6 output samples there, which
+  # content reaching 16 kHz still resolves. History: 10 was fitted while the
+  # level control parked titles up to 24 samples early, and 4 while its
+  # 6-sample band still parked them wherever they settled (render_frame's
+  # settle window, 2026-09-14).
+  MP2K_FIFO_PIPELINE      = 3.5'f32
   MP2K_FIFO_PIPELINE_FAST = 2.0'f32
   MP2K_FIFO_FAST_RATE     = 35000.0'f32
   # Sampler tap window: taps[k] holds the source sample at cursor + k -
@@ -390,10 +400,10 @@ when defined(mp2kwav):
     s.close()
 
 proc new_mp2k*(gba: GBA): Mp2kHle =
-  Mp2kHle(gba: gba, hook_addr: 0xFFFFFFFF'u32, engaged: false)
+  Mp2kHle(gba: gba, engaged: false)
 
 proc mixer_live*(m: Mp2kHle): bool =
-  ## True while the learned hook fired within MP2K_HOOK_STALE_MAX frames.
+  ## True while a mixer pass ran within MP2K_HOOK_STALE_MAX frames.
   ## A stopped SoundMain (stock VSyncOff parks ident at +10; or the engine is
   ## torn down without touching ident) cannot be producing the FIFO stream,
   ## so substitution steps aside for the game's own stream (Lilo & Stitch
@@ -453,13 +463,17 @@ proc mp2k_state_loaded*(m: Mp2kHle) =
   ## everything timeline-derived (sampler positions, history taps, the delay
   ## ring, the reverb line) is dropped and a resync is marked: the next mixer
   ## pass re-latches every channel from the restored SoundInfo, resuming
-  ## mid-note channels at the engine's own position (apply_pending). The learned
-  ## hook_addr is kept — states are per-ROM and restore the IWRAM it was
-  ## learned from, and a stale PC fails the lock validation anyway. `engaged`
-  ## is kept; render_sample emits silence until the first post-load pass.
+  ## mid-note channels at the engine's own position (apply_pending). The
+  ## sound window is closed and a pass the state was saved inside is not
+  ## armed: the frame poll reopens the window on the restored SoundInfo and
+  ## the next lock write arms it. `engaged` is kept; render_sample emits
+  ## silence until the first post-load pass.
   for i in 0 ..< MP2K_MAX_CHANNELS:
     m.samplers[i] = Mp2kSampler()      # inactive, zero taps/phase/volumes
   m.pend_valid = false                 # the restored pass is snapshotted afresh
+  m.armed = false
+  m.wsip = 0
+  m.gba.bus.snd_wlen = 0
   m.fifo_r = 0
   m.fifo_w = 0
   m.fifo_acc = 0
@@ -498,68 +512,37 @@ proc mp2k_state_loaded*(m: Mp2kHle) =
                            # regrows the counter within the grace
 
 # =============================================================================
-# Runtime detection (canonical; mp2k_frame_poll / probe_pc / mixer_hook /
-# unlearn_hook implement it): learn the SoundMainRAM entry PC instead of
-# matching a ROM signature.
+# Runtime detection (canonical; mp2k_frame_poll / mp2k_sound_write implement
+# it). Nothing about the game's code is learned: the driver's own writes to
+# its work area mark each mixer pass.
 #   * SOUND_INFO_PTR (0x03007FF0) -> SoundInfo, whose ident is ID_NUMBER at
 #     rest and ID_NUMBER+1 while SoundMain holds its lock (constants above).
 #     That identifies the engine with no ROM pattern on every m4a revision;
 #     custom drivers (e.g. Camelot's) never publish the magic.
-#   * The PCM mixer ("SoundMainRAM", per its name and the loveemu RAM map) is
-#     copied to RAM at init and jumped to from SoundMain while the lock is
-#     held, with the SoundInfo pointer in r0 (the ABI argument register;
-#     observed on several m4a vintages by this project's harnesses).
-#   * So: once the frame poll sees the ident magic, watch execution for
-#     instructions fetched from RAM (0x02/0x03 region) with r0 == &SoundInfo
-#     while ident == ID_NUMBER+1. Every such instruction that is the target
-#     of a call (looks_called: a Thumb or ARM BL aimed at it, a BL to a
-#     `bx rN` stub — how a compiled SoundMain reaches a function pointer —
-#     or `mov lr, pc; bx rN`, the two register forms keyed by a fresh return
-#     address) is a candidate. Eight passes are tallied (a pass ends when
-#     the poll sees the lock released, or when an entry is sighted again);
-#     the candidates that fired in every pass are ranked in pass order and
-#     the first is hooked: SoundMainRAM alone on the stock builds (Emerald,
-#     Minish Cap, ...), SoundMain itself on the builds that keep it in RAM.
-#   * That second class (EZ-Talk, Super Dodgeball, Battle Network,
-#     Castlevania, Advance GTA) runs its sequencer AFTER the hook, so its
-#     note-ons reach the snapshot a pass late. check_predictions sees that
-#     two ways — an envelope that does not match one hook later, or a
-#     channel first seen ON without START (the mixer clears START; a hook
-#     after the sequencer always sees it) — and moves the hook to the next
-#     candidate of the pass, the mixer proper. A move that predicts no
-#     better returns to the entry.
-#   * Self-validating: the real entry can ONLY execute with the lock held, and
-#     once per pass, so a learned PC that fires without it (nested-IRQ
-#     dispatcher in IWRAM, engine torn down and the buffer reused...) or many
-#     times a frame (a per-channel helper inside the mixer) is blocklisted
-#     and re-learnt.
-# Hot-path cost: once learned, one PC compare per instruction; while probing
-# (engine init to the eighth mixer pass) each RAM-fetched instruction adds
-# one register compare. With the HLE off nothing runs.
+#   * A pass is the lock write (ident to ID_NUMBER+1) followed by the mixer's
+#     first store into a ring a sound DMA plays: each enabled special-timing
+#     DMA feeding FIFO A or B replays MP2K_PCM_HALF bytes from its source,
+#     which must lie in SoundInfo's pcmBuffer. The mixer seeds the slot it is
+#     about to fill (the reverb comb, or zeros) before it processes any
+#     channel, so that store is the last moment the channel table holds this
+#     pass's note-ons and the previous pass's envelopes — the vantage
+#     snapshot_pass needs — and the snapshot runs before the store lands.
+#   * The ring, not the whole of pcmBuffer: a mono driver plays one half, and
+#     Beast Shooter's sequencer keeps scratch words in the half it does not
+#     play; they are stored between the lock and the mix every pass.
+#   * Established by a write census over the whole archive (-d:mp2kwcensus;
+#     tools/mp2kprobe/README.md "Pass detection"): on every locked pass of
+#     every title the first ring store follows the lock, and nothing stores
+#     a channel's envelope bytes (+0x09..+0x0B, computed only by the mixer)
+#     before it. The stores that do land between the lock and the ring are
+#     the sequencer's (note-on fields) and SoundInfo +0x0A, a frame counter
+#     this HLE does not read.
+#   * The bus offers mp2k_sound_write only the stores that land in one window
+#     (Bus.snd_wbase / snd_wlen): the ident word between passes, and from the
+#     lock to the first ring store, SoundInfo through the end of its rings.
+#     Every other work-RAM store pays one subtract and compare; nothing runs
+#     per instruction, and with the HLE off the window is closed.
 # =============================================================================
-
-proc unlearn_hook*(m: Mp2kHle) =
-  ## The learned PC fired without the engine lock — impossible for the real
-  ## mixer entry. Blocklist it and let the frame poll re-arm probing.
-  if m.hook_addr != 0xFFFFFFFF'u32 and m.probe_block_n < m.probe_block.len:
-    m.probe_block[m.probe_block_n] = m.hook_addr
-    inc m.probe_block_n
-  inc m.probe_fails
-  m.hook_addr  = 0xFFFFFFFF'u32
-  m.entry_addr = 0xFFFFFFFF'u32
-  m.engaged = false
-  m.pend_valid = false
-  m.fifo_primed = false
-  m.cand_n = 0
-  m.cand_pick_n = 0
-  m.cand_idx = 0
-  m.probe_passes = 0
-  m.pred_ok = 0
-  m.pred_bad = 0
-  m.seq_late = 0
-  m.seq_locked = false
-  m.predict = getEnv("DINGBAT_MP2K_LATE") != "1"
-  for i in 0 ..< MP2K_MAX_CHANNELS: m.samplers[i].active = false
 
 proc fifo_topology(m: Mp2kHle): int =
   ## Which FIFO(s) the engine feeds, from the live sound-DMA registers
@@ -585,7 +568,7 @@ proc fifo_topology(m: Mp2kHle): int =
 proc snapshot_pass(m: Mp2kHle; sound_info: uint32) =
   ## Capture, at the mixer entry, the state the pass about to run mixes
   ## from: the channel table's note-on / sample / rate fields and the
-  ## pass-wide SoundInfo fields. Applied one hook later (apply_pending),
+  ## pass-wide SoundInfo fields. Applied one pass later (apply_pending),
   ## when the envelope this pass computes can be read back.
   var maxc = int(m.rd8(sound_info + SI_MAX_CHANS))
   if maxc > MP2K_MAX_CHANNELS: maxc = MP2K_MAX_CHANNELS
@@ -645,7 +628,7 @@ proc snapshot_pass(m: Mp2kHle; sound_info: uint32) =
       # pseudo-echo volume catches it first: the release then holds at that
       # volume (status IEC) for pseudo-echo-length passes (Beast Shooter's
       # voices; the self-check pins the rule). Applied once for this pass
-      # (the bytes checked one hook later) and once more for the next, the
+      # (the bytes checked one pass later) and once more for the next, the
       # far end of the quality tier's continuous envelope.
       proc env_rule(ev, phase: int; status: uint8): (int, int) =
         if (status and CH_START) != 0:
@@ -673,7 +656,7 @@ proc snapshot_pass(m: Mp2kHle; sound_info: uint32) =
       let mvs = (ev * master) shr 4
       let vr = int(m.rd8(base + SC_VOL_R))
       let vl = int(m.rd8(base + SC_VOL_L))
-      # The bytes the driver computes (checked one hook later) and, for the
+      # The bytes the driver computes (checked one pass later) and, for the
       # quality tier, the same product without its two truncations: a quiet
       # voice's tail otherwise steps by 5–10 % per frame on the byte grid.
       let mvs_f = float32(ev * master) * (1.0'f32 / 16.0'f32)
@@ -703,7 +686,7 @@ proc apply_pending(m: Mp2kHle; sound_info: uint32) =
   ## from the previous frame, on attack, decay or release — and a note-on
   ## starts at sample 0 of that frame. At the entry hook +0x0A/+0x0B still
   ## hold the PREVIOUS pass's values, so the frame is rendered one hook
-  ## late, when its own values are readable; the render then sits one hook
+  ## late, when its own values are readable; the render then sits one pass
   ## interval behind the pass, which is also the hardware's double-buffer
   ## latency (the DMA reaches the freshly mixed slot one V-blank later).
   m.mono_mode = m.pend_mono
@@ -874,11 +857,10 @@ proc apply_pending(m: Mp2kHle; sound_info: uint32) =
             elif d_ign <= 4 and d_hon > 4: inc dbgStartIgnored
             else: inc dbgStartUnclear
           s.chk_off = 0
-      # Continuous position resync against the engine's cursor. Some driver
-      # builds keep MORE than the mixer in RAM (ALttP Four Swords: SoundMain
-      # itself), so the learned hook can fire a stage BEFORE the sequencer —
-      # a note-on then shows a stale SoundChannel.count and the sampler starts
-      # thousands of samples off. ct is ground truth on every later pass:
+      # Continuous position resync against the engine's cursor: a note-on
+      # latched from a stale SoundChannel.count (a start the snapshot saw a
+      # pass late) would leave the sampler thousands of samples off. ct is
+      # ground truth on every later pass:
       # consumed = size - ct (same coordinate across the loop reload). Snap
       # only on gross divergence (> 1024 source samples) so resampler jitter
       # and loop-wrap transients never trigger it; a stale note-on is then
@@ -898,9 +880,8 @@ proc apply_pending(m: Mp2kHle; sound_info: uint32) =
         let diff = (if engine_pos > our_pos: engine_pos - our_pos
                     else: our_pos - engine_pos)
         # Snap on a divergence of at least half a pass (a note latched a
-        # pass late while the hook still sat before the sequencer stays a
-        # pass behind for its whole life otherwise: Castlevania's streamed
-        # track); resampler jitter is a sample or two.
+        # pass late stays a pass behind for its whole life otherwise);
+        # resampler jitter is a sample or two.
         let adv = uint32(float32(m.pend_spv) * float32(p.freq) / float32(max(m.pcm_sample_rate, 1)))
         if diff > max(adv div 2, 32'u32):
           if s.reversed:
@@ -1142,20 +1123,17 @@ proc check_predictions(m: Mp2kHle; sound_info: uint32) =
   ## One hook after a predicted pass its per-side bytes are readable:
   ## count hits and misses (channels the pass dropped cannot be checked),
   ## and abandon prediction for this session once at least eight misses
-  ## make up more than 5 % of the checks (a vintage whose sequencer runs
-  ## after the hook, like EZ-Talk's, misses on every note-on and note-off;
-  ## a game that pokes a channel struct itself misses once).
+  ## make up more than 5 % of the checks (a game that pokes a channel struct
+  ## itself misses once).
   for i in 0 ..< m.pend_maxc:
     let p = addr m.pend[i]
     let base = sound_info + uint32(SI_CHANNELS + i * SC_SIZE)
     let st = m.rd8(base + SC_STATUS)
-    # A note is first seen at a hook with START set: the sequencer raised it
+    # A note is first seen at a pass with START set: the sequencer raised it
     # and the mixer, which clears START as it initialises the channel, has
-    # not run yet. A channel that was off at the last hook and is now ON
-    # without START was started by a sequencer that ran AFTER that hook — the
-    # hook sits before the pass's sequencer (SoundMain in RAM: EZ-Talk,
-    # Castlevania), and every note-on reaches the render a frame late.
-    # Three sightings move the hook to the pass's next call target.
+    # not run yet. A channel that was off at the last pass and is now ON
+    # without START was started outside the sequencer's run before the mix
+    # (a diagnostic count; the pass is marked after the sequencer).
     if (p.status and CH_ON) == 0 and (st and CH_ON) != 0 and (st and CH_START) == 0:
       inc m.seq_late
     if not p.pvalid: continue
@@ -1179,51 +1157,17 @@ proc check_predictions(m: Mp2kHle; sound_info: uint32) =
             " +C..F ", int(m.rd8(base + 0x0C)), "/", int(m.rd8(base + 0x0D)), "/", int(m.rd8(base + 0x0E)), "/", int(m.rd8(base + 0x0F)),
             " +10..13 ", int(m.rd8(base + 0x10)), "/", int(m.rd8(base + 0x11)), "/", int(m.rd8(base + 0x12)), "/", int(m.rd8(base + 0x13))
   let failed = m.pred_bad >= 8 and m.pred_bad * 20 > m.pred_ok + m.pred_bad
-  let late = m.seq_late >= 2 and not m.seq_locked
-  if (failed or late) and m.cand_idx + 1 < m.cand_pick_n:
-    # The hook sits before this pass's sequencer (SoundMain in RAM: EZ-Talk
-    # misses its note-ons and note-offs in the envelope check, Castlevania's
-    # streamed track only in the START check): move to the next call target
-    # of the pass and try again.
-    inc m.cand_idx
-    m.hook_addr  = m.cand[m.cand_pick[m.cand_idx]]
-    m.hook_thumb = m.cand_thumb[m.cand_pick[m.cand_idx]]
-    m.hook_branch = m.cand_arrived[m.cand_pick[m.cand_idx]]
-    m.entry_addr = m.hook_addr and not 1'u32
-    m.pred_ok = 0
-    m.pred_bad = 0
-    m.seq_late = 0
-    m.pend_valid = false
-    m.resync_pending = true      # re-latch every channel from the new vantage
-    m.gba.refresh_hle_hook()
-  elif failed:
-    if m.cand_idx > 0:
-      # A later candidate did not predict either. Back to the entry, still
-      # predicting: the START sightings that moved us were the game's own
-      # (a channel it starts outside the sequencer), so they no longer count.
-      m.cand_idx = 0
-      m.hook_addr  = m.cand[m.cand_pick[0]]
-      m.hook_thumb = m.cand_thumb[m.cand_pick[0]]
-      m.hook_branch = m.cand_arrived[m.cand_pick[0]]
-      m.entry_addr = m.hook_addr and not 1'u32
-      m.pred_ok = 0
-      m.pred_bad = 0
-      m.seq_late = 0
-      m.seq_locked = true
-      m.pend_valid = false
-      m.gba.refresh_hle_hook()
-    else:
-      m.predict = false
+  if failed: m.predict = false
 
 proc on_frame(m: Mp2kHle; sound_info: uint32) =
-  ## Called once per mixer pass (at the learned hook, before the real mixer
-  ## runs). Predictive mode: snapshot this pass, predict the envelope it is
+  ## Called once per mixer pass (at the mixer's first ring store, before it
+  ## lands: "Runtime detection"). Predictive mode: snapshot this pass, predict the envelope it is
   ## about to compute (snapshot_pass), render its frame now and let the FIFO
   ## hold it until the hardware would play it (hw_latency); the prediction
-  ## is checked against the real bytes at the next hook. Otherwise (a
+  ## is checked against the real bytes at the next pass. Otherwise (a
   ## vintage whose envelope rule the prediction misses) the PREVIOUS pass's
   ## frame is rendered from its snapshot and the bytes it left behind, one
-  ## hook late — which on Emerald is also the hardware's latency.
+  ## pass late — which on Emerald is also the hardware's latency.
   var done = false
   if m.predict:
     if m.pend_valid: m.check_predictions(sound_info)
@@ -1396,192 +1340,182 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
   m.engaged = true
   m.hook_stale = 0           # the mixer demonstrably ran this frame
 
-proc mixer_hook*(m: Mp2kHle) =
-  ## PC-hook entry, called from cpu.tick when r15 reaches the learned mixer
-  ## entry. With the engine lock held, refresh the mixer state (the channel
-  ## status still carries START here: snapshot_pass). Without it the learned PC
-  ## was wrong ("Runtime detection"): unlearn and re-probe.
-  let sip = m.rd32(MP2K_SOUNDINFO_PTR_ADDR)
-  if (sip shr 24) == 0x02'u32 or (sip shr 24) == 0x03'u32:
-    let ident = m.rd32(sip + SI_MAGIC)
-    if ident == MP2K_IDENT_LOCK or ident == MP2K_IDENT_LOCK_VOFF:
-      inc m.fires_this_frame
-      if m.fires_this_frame == 1: m.on_frame(sip)
+proc sound_rings(m: Mp2kHle; sip: uint32): bool =
+  ## The ring each enabled special-timing DMA feeding FIFO A or B replays
+  ## (Runtime detection): MP2K_PCM_HALF bytes from its source, counted only
+  ## when the source lies in this SoundInfo's pcmBuffer. False when no
+  ## sound DMA plays from it (a game streaming around the engine).
+  let lo = sip + uint32(SI_PCM_BUFFER)
+  let hi = lo + 2'u32 * MP2K_PCM_HALF
+  result = false
+  for k in 0 .. 1:
+    let c = k + 1
+    m.ring_len[k] = 0
+    if m.gba.dma.dmacnt_h[c].enable and m.gba.dma.dmacnt_h[c].start_timing == 3 and
+       (m.gba.dma.dmadad[c] == 0x040000A0'u32 or m.gba.dma.dmadad[c] == 0x040000A4'u32):
+      let sad = m.gba.dma.dmasad[c]
+      if sad >= lo and sad + MP2K_PCM_HALF <= hi:
+        m.ring_base[k] = sad
+        m.ring_len[k] = MP2K_PCM_HALF
+        result = true
+
+when defined(mp2kwcensus):
+  import std/tables
+  # Write census (-d:mp2kwcensus; tools/mp2kprobe/README.md "Pass
+  # detection"): the evidence for "Runtime detection", gathered from every
+  # work-RAM store independently of the HLE's own trigger. Per locked pass
+  # (the ident store to ID_NUMBER+1 up to the store back to rest or the next
+  # lock): whether the pass stored into a ring a sound DMA plays, whether
+  # anything stored a channel's envelope bytes (+0x09..+0x0B, which only the
+  # mixer computes) before that first ring store, and which SoundInfo fields
+  # were stored in between.
+  var wcSip*: uint32
+  var wcOpen, wcRing, wcEnvHit: bool
+  var wcRingBase: array[2, uint32]
+  var wcRingLen: array[2, uint32]
+  var wcPasses*, wcRingPasses*, wcNoRing*, wcNoRingLate*, wcEnvBefore*: int
+  var wcRingOutside*: int          # ring stores outside a locked pass
+  var wcOther*: int                # pcmBuffer stores outside the DMA's rings
+  var wcFields*: CountTable[string]   # fields stored between lock and first ring store
+  var wcEnvPc*: CountTable[string]    # "ROM"/"RAM": the code that stored envelope bytes early
+
+  proc wc_close*() =
+    if not wcOpen: return
+    wcOpen = false
+    inc wcPasses
+    if wcRing: inc wcRingPasses
+    else:
+      inc wcNoRing
+      if wcPasses > 120: inc wcNoRingLate
+    if wcEnvHit: inc wcEnvBefore
+
+  proc mp2k_wc_write*(m: Mp2kHle; a: uint32; w: int) {.noinline.} =
+    let sip = wcSip
+    if sip == 0'u32: return
+    var ring = false
+    for k in 0 .. 1:
+      if wcRingLen[k] > 0'u32 and a + uint32(w) > wcRingBase[k] and
+         a < wcRingBase[k] + wcRingLen[k]:
+        ring = true
+    let hi = sip + uint32(SI_PCM_BUFFER) + 2'u32 * MP2K_PCM_HALF
+    if not ring and (a + uint32(w) <= sip or a >= hi): return
+    let off = int(a) - int(sip)
+    if not ring and off < 4:
+      let id = m.rd32(sip)
+      if id == MP2K_IDENT_LOCK or id == MP2K_IDENT_LOCK_VOFF:
+        wc_close()
+        wcOpen = true
+        wcRing = false
+        wcEnvHit = false
+        # the rings as sound_rings defines them, taken at the lock
+        let saved_base = m.ring_base
+        let saved_len = m.ring_len
+        discard m.sound_rings(sip)
+        wcRingBase = m.ring_base
+        wcRingLen = m.ring_len
+        m.ring_base = saved_base
+        m.ring_len = saved_len
+      elif id == MP2K_IDENT_IDLE or id == MP2K_IDENT_IDLE_VOFF:
+        wc_close()
       return
-  m.unlearn_hook()
-
-proc lr_taken(m: Mp2kHle; lr: uint32): bool =
-  ## A return address already owned by a candidate: lr keeps its value through
-  ## the whole callee, so every later instruction of it would look like a
-  ## call target otherwise.
-  for i in 0 ..< m.cand_n:
-    if m.cand_lr[i] == lr: return true
-  false
-
-proc looks_called(m: Mp2kHle; pc: uint32): bool =
-  ## Is the instruction about to execute the target of a call? At a function
-  ## entry lr holds the return address, so the instruction before it is the
-  ## call. Forms seen in the library:
-  ##   * Thumb BL (pair at lr-4/lr-2) whose target is this PC;
-  ##   * Thumb BL to a `bx rN` stub (the compiler's call through a function
-  ##     pointer, how SoundMain reaches the mixer in RAM): the target is not
-  ##     recoverable, so the return address must be new;
-  ##   * `mov lr, pc; bx rN` (lr even, from Thumb): same, by return address;
-  ##   * ARM BL whose target is this PC, or a `bx rN` stub.
-  let lr = m.gba.cpu.r[14]
-  let target = pc and not 1'u32
-  if (lr and 1'u32) != 0:
-    let ra = lr and not 1'u32
-    let h = m.rd16(ra - 2'u32)
-    if (h and 0xF800'u16) != 0xF800'u16: return false
-    let hi = m.rd16(ra - 4'u32)
-    if (hi and 0xF800'u16) != 0xF000'u16: return false
-    var off = (uint32(hi and 0x7FF'u16) shl 12) or (uint32(h and 0x7FF'u16) shl 1)
-    if (off and 0x400000'u32) != 0: off = off or 0xFF800000'u32
-    let dest = ra + off
-    if dest == target: return true
-    if (m.rd16(dest) and 0xFF87'u16) == 0x4700'u16: return not m.lr_taken(lr)
-    return false
-  let h = m.rd16(lr - 2'u32)
-  if (h and 0xFF87'u16) == 0x4700'u16 and m.rd16(lr - 4'u32) == 0x46FE'u16:
-    return not m.lr_taken(lr)
-  let w = m.rd32(lr - 4'u32)
-  if (w and 0x0F000000'u32) != 0x0B000000'u32: return false
-  var off = (w and 0x00FFFFFF'u32) shl 2
-  if (off and 0x02000000'u32) != 0: off = off or 0xFC000000'u32
-  let dest = lr + 4'u32 + off
-  if dest == target: return true
-  if (m.rd32(dest) and 0x0FFFFFF0'u32) == 0x012FFF10'u32: return not m.lr_taken(lr)
-  false
-
-proc probe_pass_end(m: Mp2kHle): bool =
-  ## A probed pass ended: tally which candidates it hit. After eight passes
-  ## the candidates that fired in every pass are ranked in pass order and
-  ## the first is hooked (a helper the mixer calls only on some passes drops
-  ## out). Returns true once a hook is chosen.
-  var any = false
-  for i in 0 ..< m.cand_n:
-    if m.cand_seen[i]:
-      inc m.cand_hits[i]
-      m.cand_seen[i] = false
-      any = true
-  m.probe_order = 0
-  if any: inc m.probe_passes
-  if m.probe_passes >= 8:
-    # Candidates that fired in every pass, in the order they come within a
-    # pass. The FIRST is the mixer entry on every vintage probed (Emerald,
-    # Minish Cap, ...: SoundMainRAM; helpers it calls come later). A
-    # vintage whose first candidate is SoundMain itself (EZ-Talk) fails
-    # the prediction check there, and check_predictions moves to the next
-    # candidate — the mixer proper — before giving up.
-    var best_hits = 0
-    for i in 0 ..< m.cand_n:
-      if m.cand_hits[i] > best_hits: best_hits = m.cand_hits[i]
-    m.cand_pick_n = 0
-    for order in 0 ..< m.cand_n:
-      for i in 0 ..< m.cand_n:
-        if m.cand_hits[i] == best_hits and m.cand_order[i] == order and m.cand_pick_n < m.cand_pick.len:
-          m.cand_pick[m.cand_pick_n] = i
-          inc m.cand_pick_n
-    if m.cand_pick_n > 0:
-      m.cand_idx = 0
-      let pc = m.cand[m.cand_pick[0]]
-      m.probe_passes = 0
-      m.hook_addr  = pc                            # pc may carry the Thumb bit; the
-      m.hook_thumb = m.cand_thumb[m.cand_pick[0]]  # hook compare uses it verbatim
-      m.hook_branch = m.cand_arrived[m.cand_pick[0]]
-      m.entry_addr = pc and not 1'u32
-      m.probing = false
-      m.fires_this_frame = 0
-      m.gba.refresh_hle_hook()
-      return true
-  false
-
-proc probe_pc*(m: Mp2kHle; pc: uint32; arrived: bool) {.noinline.} =
-  ## Learning probe, called from cpu.tick only while probing is armed and only
-  ## for RAM-fetched instructions with r0 == &SoundInfo (both prefiltered
-  ## inline). While the lock is held, every such instruction that is a call
-  ## target is a candidate for the mixer entry; the frame poll picks the LAST
-  ## one of the pass. Vintages that keep SoundMain itself in RAM (EZ-Talk)
-  ## enter it first, run the sequencer, then call the mixer: hooking the
-  ## first candidate would see the channel table before that pass's
-  ## note-ons and note-offs.
-  let ident = m.rd32(m.probe_sound_info + SI_MAGIC)
-  inc m.dbg_probe_hits
-  m.dbg_probe_ident = ident
-  if ident != MP2K_IDENT_LOCK and ident != MP2K_IDENT_LOCK_VOFF: return
-  for i in 0 ..< m.probe_block_n:
-    if m.probe_block[i] == pc: return          # previously invalidated
-  for i in 0 ..< m.cand_n:
-    if m.cand[i] == pc:
-      if not arrived: m.cand_arrived[i] = false
-      if m.cand_seen[i]:
-        # An entry is called once per pass: seeing it again is the next
-        # pass, on a game whose passes never end at an idle frame poll.
-        if m.probe_pass_end(): return
-      m.cand_seen[i] = true
-      m.cand_order[i] = m.probe_order
-      inc m.probe_order
+    if ring:
+      if not wcOpen: inc wcRingOutside
+      else: wcRing = true
       return
-  if not m.looks_called(pc):
-    when defined(mp2kwav):
-      if dbgProbeMiss.len < 64:
-        let lr = m.gba.cpu.r[14]
-        dbgProbeMiss.add (pc, lr, m.rd32(lr - 4'u32))
+    if off >= SI_PCM_BUFFER:
+      inc wcOther
+      return
+    if not wcOpen or wcRing: return
+    wcFields.inc(if off < SI_CHANNELS: "si+" & toHex(off, 3)
+                 else: "ch+" & toHex((off - SI_CHANNELS) mod SC_SIZE, 2))
+    if off + w > SI_CHANNELS:
+      for o in max(off, SI_CHANNELS) ..< off + w:
+        let f = (o - SI_CHANNELS) mod SC_SIZE
+        if f >= SC_ENV_VOL and f <= SC_ENV_VL:
+          wcEnvHit = true
+          wcEnvPc.inc(if (m.gba.cpu.r[15] shr 24) >= 8'u32: "ROM" else: "RAM")
+          break
+
+proc mixer_pass(m: Mp2kHle; sip: uint32) =
+  ## The mixer is about to store its first ring byte of the pass. A driver
+  ## not yet engaged needs two such passes in a row: initialisation takes the
+  ## lock and clears the buffer once without mixing (Golden Sun, Mother 3:
+  ## one ring store in a dozen locks at boot), which is not a pass.
+  if m.pass_streak < 1000: inc m.pass_streak
+  if not m.engaged and m.pass_streak < 2: return
+  inc m.dbg_hook_fires
+  inc m.fires_this_frame
+  if m.fires_this_frame == 1: m.on_frame(sip)
+
+proc mp2k_sound_write*(m: Mp2kHle; a: uint32; w: int; v: uint32) {.noinline.} =
+  ## A work-RAM store of `w` bytes of `v` at `a`, inside the bus's sound
+  ## window, before it lands (Runtime detection). A store to the ident word
+  ## arms or disarms the pass by the value ident will hold; the first ring
+  ## store of an armed pass runs it.
+  let bus = m.gba.bus
+  let sip = m.wsip
+  if a < sip + 4'u32:
+    let sh = uint64(a - sip) * 8
+    let wmask = (if w >= 4: 0xFFFFFFFF'u64 else: (1'u64 shl (w * 8)) - 1)
+    let mask = (wmask shl sh) and 0xFFFFFFFF'u64
+    let id = uint32((uint64(m.rd32(sip)) and not mask) or ((uint64(v) shl sh) and mask))
+    if id == MP2K_IDENT_LOCK or id == MP2K_IDENT_LOCK_VOFF:
+      # the previous lock ended with no ring store: the streak is broken
+      if m.armed: m.pass_streak = 0
+      if m.sound_rings(sip):
+        m.armed = true
+        var hi = sip + 4'u32
+        for k in 0 .. 1:
+          if m.ring_len[k] > 0'u32: hi = max(hi, m.ring_base[k] + m.ring_len[k])
+        bus.snd_wlen = hi - sip
+      else:
+        m.armed = false
+        m.pass_streak = 0
+    else:
+      if m.armed: m.pass_streak = 0
+      m.armed = false
+      bus.snd_wlen = 4
     return
-  if m.cand_n < m.cand.len:
-    m.cand[m.cand_n] = pc
-    m.cand_lr[m.cand_n] = m.gba.cpu.r[14]
-    m.cand_thumb[m.cand_n] = m.gba.cpu.cpsr.thumb
-    m.cand_arrived[m.cand_n] = arrived
-    m.cand_seen[m.cand_n] = true
-    m.cand_order[m.cand_n] = m.probe_order
-    m.cand_hits[m.cand_n] = 0
-    inc m.probe_order
-    inc m.cand_n
+  if not m.armed: return
+  for k in 0 .. 1:
+    if m.ring_len[k] > 0'u32 and a + uint32(w) > m.ring_base[k] and
+       a < m.ring_base[k] + m.ring_len[k]:
+      m.armed = false
+      bus.snd_wlen = 4
+      m.mixer_pass(sip)
+      return
 
 proc mp2k_frame_poll*(m: Mp2kHle) =
   ## Once-per-frame presence check (2 IWRAM reads; called from step_frame only
-  ## while mp2k_hle is enabled). Arms PC probing until the mixer entry is
-  ## learned; disengages the HLE if the ident magic ever disappears (engine
+  ## while mp2k_hle is enabled): keeps the bus's sound window on the published
+  ## SoundInfo, and disengages the HLE if the ident magic disappears (engine
   ## torn down) so stale samplers cannot keep looping.
   let sip = m.rd32(MP2K_SOUNDINFO_PTR_ADDR)
   var ident = 0'u32
   if (sip shr 24) == 0x02'u32 or (sip shr 24) == 0x03'u32:
     ident = m.rd32(sip + SI_MAGIC)
-  if m.hook_addr != 0xFFFFFFFF'u32:
-    if m.engaged and ident != MP2K_IDENT_IDLE and ident != MP2K_IDENT_LOCK and
-       ident != MP2K_IDENT_IDLE_VOFF and ident != MP2K_IDENT_LOCK_VOFF:
+  let live = ident == MP2K_IDENT_IDLE or ident == MP2K_IDENT_LOCK or
+             ident == MP2K_IDENT_IDLE_VOFF or ident == MP2K_IDENT_LOCK_VOFF
+  when defined(mp2kwcensus):
+    wcSip = (if live: sip else: 0'u32)
+  let bus = m.gba.bus
+  if not live:
+    if m.engaged:
       m.engaged = false
       for i in 0 ..< MP2K_MAX_CHANNELS: m.samplers[i].active = false
-    # A mixer entry fires once per pass (a game may run two passes in a
-    # frame); a PC that fired more often is a helper inside the mixer, run
-    # per channel: invalidate it and pick again.
-    if m.fires_this_frame > 3:
-      m.unlearn_hook()
-      m.fires_this_frame = 0
-      m.probing = (ident == MP2K_IDENT_IDLE or ident == MP2K_IDENT_IDLE_VOFF) and
-                  m.probe_fails < MP2K_PROBE_MAX_FAILS
-      if m.probing: m.probe_sound_info = sip
-      m.gba.refresh_hle_hook()
-      return
-    m.fires_this_frame = 0
-    # Frames since the hook last fired (mixer_live); on_frame zeroes it.
-    if m.engaged and m.hook_stale < 1000'i32: inc m.hook_stale
-    return
-  # A probed pass ended (the lock is released): tally it.
-  if m.probing and (ident == MP2K_IDENT_IDLE or ident == MP2K_IDENT_IDLE_VOFF):
-    if m.probe_pass_end(): return
-  # Arm probing only when the engine is at rest (ident == ID_NUMBER, in
-  # either VSync form): arming mid-pass could learn a mid-mixer PC instead of
-  # the entry. Once candidates are being collected, stay armed whatever the
-  # poll sees: a driver whose ident reads locked at every V-blank (BB Ball)
-  # delimits its passes by re-sighting an entry, not by an idle poll.
-  if m.probing and m.cand_n > 0 and m.probe_fails < MP2K_PROBE_MAX_FAILS:
-    return
-  m.probing = (ident == MP2K_IDENT_IDLE or ident == MP2K_IDENT_IDLE_VOFF) and
-              m.probe_fails < MP2K_PROBE_MAX_FAILS
-  if m.probing: m.probe_sound_info = sip
+    m.wsip = 0
+    m.armed = false
+    m.pass_streak = 0
+    bus.snd_wlen = 0
+  elif sip != m.wsip or bus.snd_wlen == 0:
+    m.wsip = sip
+    m.armed = false
+    m.pass_streak = 0
+    bus.snd_wbase = sip
+    bus.snd_wlen = 4
+  m.fires_this_frame = 0
+  # Frames since a pass last ran (mixer_live); on_frame zeroes it.
+  if m.engaged and m.hook_stale < 1000'i32: inc m.hook_stale
 
 proc catmull_rom(p0, p1, p2, p3, mu: float32): float32 {.inline.} =
   ## Catmull-Rom spline between p1 and p2 (mu in 0..1); p0/p3 are the
@@ -1872,6 +1806,8 @@ proc render_frame(m: Mp2kHle) =
     # First frame after engaging or a state load: start at the target level
     # with silence, so the frame lands where the hardware would play it.
     m.fifo_primed = true
+    m.fifo_settle = MP2K_FIFO_SETTLE
+    m.fifo_settle_ref = m.fifo_target
     var pre = m.fifo_target
     if pre > cap div 2: pre = cap div 2
     for i in 0 ..< pre:
@@ -1897,17 +1833,47 @@ proc render_frame(m: Mp2kHle) =
   # OUTPUT sample per frame — a 30 µs slide, only when the offset persists
   # (the pcmFreq-vs-frame-rate drift is about a sample a second). The
   # average is the 1/32 EMA, so the V-blank jitter (±20 samples) leaves a
-  # few samples of noise in it; the trim engages past 6 and, once engaged,
+  # few samples of noise in it; the trim engages past MP2K_FIFO_BAND and, once engaged,
   # runs on until the average is back within half a sample (hysteresis:
   # fifo_trimming). A plain band (24, until 2026-09-14) left every title
   # parked up to 24 samples off its target on the side it approached from
   # — the whole residual the A/B listening set measured (Emerald 11 early,
-  # Minish Cap 20, Metal Max 28, Castlevania 24 late).
+  # Minish Cap 20, Metal Max 28, Castlevania 24 late). A 6-sample band
+  # still parked a title wherever it settled inside it (Advance GTA +3,
+  # Emerald -2 on the same build, depending only on the frame it engaged),
+  # so for MP2K_FIFO_SETTLE frames after priming, and after the target moves
+  # by two samples or more, the trim converges from any error; outside it
+  # the band is 1.5 (a sweep of 6, 3 and 1.5 changed only titles long
+  # parked inside the wider bands, Steel Empire 0.55 -> 0.64).
+  if abs(m.fifo_target - m.fifo_settle_ref) >= 2:
+    m.fifo_settle = MP2K_FIFO_SETTLE
+    m.fifo_settle_ref = m.fifo_target
+  var wide = MP2K_FIFO_BAND
+  when defined(mp2kwav):
+    let bandenv = getEnv("DINGBAT_MP2K_BAND")
+    if bandenv.len > 0: wide = float32(parseFloat(bandenv))
+  let band = (if m.fifo_settle > 0 or m.fifo_trimming: 0.5'f32 else: wide)
+  if m.fifo_settle > 0: dec m.fifo_settle
   m.fifo_err_avg += (float32(level - m.fifo_target) - m.fifo_err_avg) * (1.0'f32 / 32.0'f32)
   # A target that moved by more than a frame's jitter (the measured latency
   # replacing the phase estimate, or a vintage that re-times its DMA) is
-  # taken up in one step; the slow single-sample trim handles the rest.
-  let step_err = level - m.fifo_target
+  # taken up in one step; the slow single-sample trim handles the rest. A
+  # level that jumped under a steady target is a pass that did not come (a
+  # V-blank the game ran no SoundMain in: the hardware replays whole stale
+  # slots) or passes that came in a burst, so it is corrected in whole
+  # frames once it is half a frame or more: the part of the error that is
+  # this pass being late within its V-blank stays, as it does on hardware,
+  # and the next on-time pass lands on the target. A smaller jump is taken
+  # up exactly, as before. (Filling to the target left Santa Claus Saves the Earth
+  # 36 samples late for two seconds after the V-blank its song start
+  # skipped.)
+  var step_err = level - m.fifo_target
+  let target_moved = abs(m.fifo_target - m.fifo_step_ref) > 96
+  m.fifo_step_ref = m.fifo_target
+  let nomi = max(int(nominal), 1)
+  if not target_moved and abs(step_err) * 2 >= nomi:
+    let frames = (abs(step_err) + nomi div 2) div nomi
+    step_err = (if step_err > 0: frames * nomi else: -frames * nomi)
   if step_err > 96 and level > step_err:
     m.fifo_r += step_err
     level -= step_err
@@ -1921,13 +1887,12 @@ proc render_frame(m: Mp2kHle) =
       inc m.fifo_w
     level -= step_err
     m.fifo_err_avg = 0
-  elif (m.fifo_err_avg > 6.0'f32 or (m.fifo_trimming and m.fifo_err_avg > 0.5'f32)) and level > 1:
+  elif m.fifo_err_avg > band and level > 1:
     m.fifo_trimming = true
     inc m.fifo_r
     dec level
     m.fifo_err_avg -= 1
-  elif (m.fifo_err_avg < -6.0'f32 or (m.fifo_trimming and m.fifo_err_avg < -0.5'f32)) and
-       level > 0 and level < cap - 2:
+  elif m.fifo_err_avg < -band and level > 0 and level < cap - 2:
     m.fifo_trimming = true
     # duplicate the newest sample
     let li = ((m.fifo_w - 1) mod cap) * 2
@@ -1997,7 +1962,7 @@ proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
   (ia, ib)
 
 proc init_mp2k*(m: Mp2kHle) =
-  ## Initialise mixer state. Nothing to scan: the hook is learned at runtime
+  ## Initialise mixer state. Nothing to scan: passes are detected at runtime
   ## ("Runtime detection").
   m.use_cubic = true   # cubic (Catmull-Rom, per Paul Bourke) resampling by default
   m.quality = true     # quality tier on (render_one); parity checks turn it off

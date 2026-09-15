@@ -207,38 +207,65 @@ writes that `tests/mp2k_probe.nim` applies at frame end
 the channel table is then ours and the mixer plays exactly what the script
 says. Scenarios: `dc` (gain law), `imp` (kernel and timing by impulse), `env`
 (attack/decay/release), `iec` (pseudo-echo floor), `types` (loop, reversed,
-fixed-rate, compressed), `side` (per-side bytes written at the hook), `offs`
+fixed-rate, compressed), `side` (per-side bytes written at the pass), `offs`
 (the count field at note-on), `cap` (every channel at once). It is how the
 per-side-bytes rule, the pseudo-echo hold and the count-field difference
 below were settled without a sequencer in the way.
 
-## How the HLE finds the mixer (2026-09-13)
+## Pass detection (2026-09-14)
 
-There is no ROM signature. Every m4a build keeps a pointer to its SoundInfo
-work area at IWRAM 0x03007FF0, and SoundMain holds ident+1 for the whole
-pass. While that lock is held the HLE watches RAM-fetched instructions with
-r0 == &SoundInfo and keeps those that are call targets (a BL aimed at the
-instruction, a BL to a `bx rN` stub — the compiled call through a function
-pointer — or `mov lr, pc; bx rN`). After eight passes the candidates that
-fired in every pass are ranked in pass order and the first is hooked.
+There is no ROM signature and no code address. Every m4a build keeps a
+pointer to its SoundInfo work area at IWRAM 0x03007FF0, and SoundMain holds
+ident+1 for the whole pass. A pass is the store that takes that lock
+followed by the mixer's first store into a ring the sound DMA plays: each
+enabled special-timing DMA feeding FIFO A or B replays 1584 bytes from its
+source address, which must lie in SoundInfo's pcmBuffer. The mixer seeds the
+slot it is about to fill (the echo, or zeros) before it touches any channel,
+so the state just before that store holds the sequencer's note-ons for the
+pass and the previous pass's envelopes. The HLE snapshots there, before the
+store lands. The bus offers the HLE only the stores in one window: the
+ident word between passes, and SoundInfo through the end of its rings from
+the lock to the first ring store. A driver needs two such passes in a row
+to engage, because initialisation takes the lock and clears the buffer once
+without mixing.
 
-Two classes of build turned up in the library:
+It has to be the ring and not all of pcmBuffer. A mono driver plays one
+half, and Beast Shooter's sequencer keeps scratch words in the other half,
+stored between the lock and the mix on every pass.
 
-* **SoundMainRAM alone in RAM** (Emerald, FireRed, Minish Cap, Advance Wars,
-  Breath of Fire, Mother 3, Beast Shooter, Ochaken, Estopolis, GT Advance 3,
-  BB Ball): one candidate, the mixer entry, reached after the sequencer.
-* **SoundMain itself in RAM** (EZ-Talk, Super Dodgeball Advance, Mega Man
-  Battle Network, Castlevania: Circle of the Moon, Advance GTA, Hudson Best
-  Collection): the first candidate is SoundMain, whose sequencer runs after
-  the hook, and the mixer proper is the second. The HLE detects the wrong
-  vantage from the channel table — an envelope that does not match one hook
-  later, or a channel first seen ON without its START bit (the mixer clears
-  START as it initialises a channel, so a hook after the sequencer always
-  sees it) — and moves to the next candidate; a move that predicts no better
-  returns to the entry.
+The write census establishes the ordering. Build it with `-d:mp2kwcensus`
+and run it with `tools/mp2k_sweep.py` over the archive. For every locked pass
+it records whether the pass stored into a ring, and whether anything stored a
+channel's envelope bytes (+0x09 to +0x0B, which only the mixer computes)
+before the first ring store. It also tallies the SoundInfo fields stored in
+between.
 
-A driver whose ident reads locked at every V-blank (BB Ball) delimits its
-passes by re-sighting an entry instead of by an idle poll.
+| Archive census, 900 frames each | |
+|---|---|
+| ROMs run | 7899 (3 bad dumps crash with the HLE off too) |
+| ROMs whose driver took its lock | 3338 |
+| Locked passes | 2,854,769 |
+| Passes that stored into a ring | 2,812,249 |
+| Passes with envelope bytes stored before the first ring store | 0 |
+| Passes where the ring store came before the old PC hook | 0 |
+| Passes where the old PC hook fired and no ring store followed | 0 |
+
+The stores that do land between the lock and the ring are the sequencer's
+note-on fields and SoundInfo +0x0A, a frame counter the HLE does not read.
+The passes that store no ring byte are passes where the driver takes the lock
+without mixing. The old hook did not fire on any of them either.
+
+This replaced a learned PC hook. While the lock was held, the old HLE
+watched RAM-fetched instructions with r0 == &SoundInfo that looked like call
+targets, then hooked the first that fired in every pass. The driver has two
+layouts in the library. Most keep only the mixer in RAM and call it after the
+sequencer. Some keep SoundMain itself in RAM (EZ-Talk, Super Dodgeball
+Advance, Mega Man Battle Network, Castlevania: Circle of the Moon, Advance
+GTA, Hudson Best Collection), and on those the first candidate ran before the
+sequencer. The census shows the old hook sitting up to 280,000 cycles ahead
+of the mix on 139 ROMs, with note-ons stored in between. On a further 29
+titles the learned address was not a branch target at all. The ring store
+has neither problem.
 
 ## abmix.py — an A/B listening file
 
@@ -273,7 +300,7 @@ run gives the parity render for a tier-vs-tier file.
 | Type bits | 0x08 plays at pcmFreq whatever the key; 0x10 plays from data[size−1] downward; both combine; compressed (BDPCM) decodes as the HLE does |
 | Reverb | before a pass mixes, the slot it overwrites is seeded with (A+B of that slot + A+B of the next slot) × reverb/512: two taps at P−1 and P frames; an impulse of 50 with reverb 64, period 7 echoes 12, 12 then 3, 6, 3 |
 | Stereo halves | the first pcmBuffer half (DMA1 → FIFO A) carries the right-volume mix, the second the left; Emerald routes A right / B left (and plays mono by default) |
-| Latency | the real FIFO stream lags the pass by 553 APU samples on Emerald (one V-blank + 4), 228 on Minish Cap, set by where the DMA is in the ring at the pass. The DMA moves 16 bytes at a time, so a slot's first byte is fetched by the transfer that starts at the 16-byte grid below it and then sits 15 deep in the FIFO; beyond that, about 2 DMA-rate samples against hold-mode replay (the transfer follows the timer tick that requested it; the tick's sample is still the latch's when the APU next reads it) — 4 against the emulator's cubic FIFO reconstruction, which is what the HLE targets (2 above 35 kHz). A vintage that reprograms the DMA every V-blank is seen with the cursor *at* the slot start at the hook, and the transfer carrying that slot is then the next one, not the last. Estopolis and Ochaken restart the DMA every V-blank on the slot the previous pass wrote, so a pass plays when the *next* V-blank handler runs and inherits that handler's jitter (±5 samples) |
+| Latency | the real FIFO stream lags the pass by 553 APU samples on Emerald (one V-blank + 4), 228 on Minish Cap, set by where the DMA is in the ring at the pass. The DMA moves 16 bytes at a time, so a slot's first byte is fetched by the transfer that starts at the 16-byte grid below it and then sits 15 deep in the FIFO; beyond that, about 2 DMA-rate samples against hold-mode replay (the transfer follows the timer tick that requested it; the tick's sample is still the latch's when the APU next reads it) — 3.5 against the emulator's cubic FIFO reconstruction, which is what the HLE targets (2 above 35 kHz). A vintage that reprograms the DMA every V-blank is seen with the cursor *at* the slot start at the pass, and the transfer carrying that slot is then the next one, not the last. Estopolis and Ochaken restart the DMA every V-blank on the slot the previous pass wrote, so a pass plays when the *next* V-blank handler runs and inherits that handler's jitter (±5 samples) |
 | Ring geometry | period × slot bytes, the period read from pcmDmaCounter's cycle; a driver may re-time mid-run (Castlevania: 9 × 176 at 10512 Hz, then 2 × 704 at 42048 Hz), so the period is re-learnt whenever the rate or the frame length changes |
 
 ## What the HLE deliberately does differently

@@ -185,22 +185,14 @@ proc main() =
       emu.set_underclock(parseInt(getEnv("DINGBAT_BENCH_UNDERCLOCK")))
     if getEnv("DINGBAT_MP2K") == "1":
       emu.mp2k_hle = true
-    if getEnv("DINGBAT_MP2K_SKIP") == "1":
-      emu.mp2k_hle = true
-      emu.mp2k.skip = true
     if getEnv("DINGBAT_MP2K_DUMP") == "1":
-      # Exploratory: MP2K detection + SoundInfo dump. Detection is
-      # runtime-learned (mp2k.nim), so hook_addr stays 0xFFFFFFFF until the
-      # engine's first mixer pass.
+      # Exploratory: MP2K detection + SoundInfo dump. Passes are detected
+      # from the driver's own writes (mp2k.nim "Runtime detection").
       emu.mp2k_hle = true
       for f in 0 ..< warmup:
         for ev in script:
           if ev.frame == f: emu.handle_input(ev.key, ev.pressed)
         emu.step_frame()
-      var proc_bytes = "SoundMainRAM prologue @entry: "
-      for k in 0'u32 ..< 12'u32:
-        proc_bytes.add toHex(emu.bus.read_half_internal(emu.mp2k.entry_addr + k*2), 4) & " "
-      echo proc_bytes
       let sip = emu.bus.read_word_internal(0x03007FF0'u32)
       echo "SoundInfo ptr @03007FF0 = 0x", toHex(sip, 8)
       if (sip shr 24) != 0:
@@ -295,10 +287,7 @@ proc main() =
       echo "  rewind verify: ", checked, " snapshots restored, ", bad, " mismatches",
            (if bad == 0: "  OK" else: "  *** FAILED ***")
     if emu.mp2k != nil and emu.mp2k_hle:
-      echo "  mp2k: entry=0x", toHex(emu.mp2k.entry_addr, 8),
-           " hook=0x", toHex(emu.mp2k.hook_addr, 8),
-           " skip_fires=", emu.mp2k.dbg_skip_fires,
-           " hook_fires=", emu.mp2k.dbg_hook_fires,
+      echo "  mp2k: passes=", emu.mp2k.dbg_hook_fires,
            " engaged=", emu.mp2k.engaged,
            " avg_out_energy=", (if emu.mp2k.dbg_out_count > 0:
              formatFloat(emu.mp2k.dbg_out_energy / emu.mp2k.dbg_out_count.float, ffDecimal, 4) else: "0")

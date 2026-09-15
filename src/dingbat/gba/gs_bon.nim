@@ -190,7 +190,7 @@ proc gs_frame_poll*(g: GsBonHle) =
     return
   if ident != GS_IDENT: return
   # m4a game already claimed by the MP2K HLE's runtime learning? Skip the CRC.
-  if g.gba.mp2k != nil and g.gba.mp2k.hook_addr != 0xFFFFFFFF'u32: return
+  if g.gba.mp2k != nil and g.gba.mp2k.engaged: return
   if g.fp_give_up: return
   # Scan IWRAM word-aligned: prefilter on the region's first word, full CRC
   # on hits. 8K word reads per frame while an unclaimed "Smsh" area exists.

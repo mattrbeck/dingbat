@@ -221,6 +221,11 @@ type
     # No BIOS file loaded: `bios` holds the HLE stub. HLE SWI paths that jump
     # into stub code check this so they stay inert under a real BIOS.
     stub_bios*:  bool
+    # MP2K HLE sound window (mp2k.nim "Runtime detection"): a work-RAM store
+    # with (address - snd_wbase) < snd_wlen is offered to mp2k_sound_write
+    # before it lands. snd_wlen 0 = closed.
+    snd_wbase*:  uint32
+    snd_wlen*:   uint32
     # True only during a genuine byte-sized store (strb / DMA byte). Wider IO
     # writes decompose into byte writes, and a few registers treat real byte
     # stores differently (gbaedge IOBYTE/DMAEDGE pages). Not serialized.
@@ -365,24 +370,6 @@ type
     last_waitloop*:              uint32
     entered_waitloop*:           bool
     waitloop_instr_lut*:         seq[WLInstrKind]
-    # Audio-HLE hook dispatch folded into one sentinel by refresh_hle_hook so
-    # the per-instruction path is one compare of r15 and one branch:
-    #   0             -- nothing armed (zero-init = disarmed; a running r15
-    #                    is never 0)
-    #   NO_HLE_HOOK   -- the bounded MP2K learning probe is running
-    #   anything else -- the r15 at which the hook's instruction executes
-    #                    (its PC plus the pipeline depth of its mode)
-    # A hook's r15 is a RAM address plus 4 or 8 (never 0) and is never
-    # NO_HLE_HOOK, so the states cannot collide. A hook at a branch target
-    # is tested at the pipeline flush, which sets hle_look; tick tests only
-    # that flag, after IRQ dispatch, so the hook still runs as the hooked
-    # instruction executes, after any IRQ that preempts it. hle_every keeps
-    # the flag set (the probe, and hooks not at a branch target);
-    # hle_arrived marks an instruction reached by a flush.
-    hle_gate*:                   uint32
-    hle_look*:                   bool
-    hle_every*:                  bool
-    hle_arrived*:                bool
 
   SpritePixel* = object
     priority*: uint16
@@ -632,49 +619,27 @@ type
 
   Mp2kHle* = ref object
     gba* {.cursor.}: GBA
-    hook_addr*:  uint32     # learned mixer entry PC (0xFFFFFFFF = not learned)
-    hook_thumb*: bool       # CPU mode at that entry (cpu.nim refresh_hle_hook: the gate's pipeline depth)
-    hook_branch*: bool      # every sighting of that entry arrived by a branch (flush-tested gate)
-    entry_addr*: uint32     # hook_addr with the Thumb bit cleared (skip-mode return point)
-    probing*:    bool       # PC probe armed (mp2k.nim "Runtime detection")
-    probe_sound_info*: uint32  # &SoundInfo cached for the probe's lock check
-    probe_block*: array[8, uint32]  # invalidated candidates (mislearned PCs)
-    probe_block_n*: int
-    # Mixer-entry candidates while probing: called RAM PCs seen with r0 ==
-    # &SoundInfo, with how many probed passes each fired in and its order
-    # within the pass (mp2k.nim probe_pc / mp2k_frame_poll)
-    cand*:       array[8, uint32]
-    cand_lr*:    array[8, uint32]   # return address each candidate was entered with
-    cand_thumb*: array[8, bool]     # CPU mode each candidate was entered in
-    cand_arrived*: array[8, bool]   # every sighting arrived by a branch
-    cand_hits*:  array[8, int]
-    cand_order*: array[8, int]
-    cand_seen*:  array[8, bool]
-    cand_n*:     int
-    cand_idx*:   int                # index of the candidate currently hooked
-    cand_pick*:  array[8, int]      # candidates that fired in every probed pass, in pass order
-    cand_pick_n*: int
-    probe_passes*: int
-    probe_order*: int
-    fires_this_frame*: int          # hook fires since the last frame poll (a helper inside the mixer fires per channel)
-    seq_late*:   int                # note-ons the snapshot missed: the hook precedes the sequencer
-    seq_locked*: bool               # those sightings already led to a candidate that failed: ignore them
-    probe_fails*: int       # mislearn count; probing gives up at 8
-    skip*:       bool       # EXPERIMENTAL perf probe: force-return the real mixer
+    # Pass detection (mp2k.nim "Runtime detection"): the SoundInfo the bus
+    # window watches, whether its lock write has been seen with no ring store
+    # yet, and the ring each FIFO DMA plays (len 0 = none)
+    wsip*:       uint32
+    armed*:      bool
+    pass_streak*: int               # consecutive locked passes that stored into a ring (engaging needs 2)
+    ring_base*:  array[2, uint32]
+    ring_len*:   array[2, uint32]
+    fires_this_frame*: int          # mixer passes since the last frame poll
+    seq_late*:   int                # channels first seen ON without START (a start outside the driver's sequencer)
     engaged*:    bool       # a valid SoundInfo has been observed at least once
     frame_seen*: bool
-    hook_stale*: int32      # frames since the hook last fired (mp2k.nim mixer_live)
+    hook_stale*: int32      # frames since a mixer pass last ran (mp2k.nim mixer_live)
     resync_pending*: bool   # re-latch every channel at the engine's position (mp2k_state_loaded)
     samplers*:   array[12, Mp2kSampler]
     compressed_skipped*: int
     dbg_compressed_used*: int   # frames*channels where a BDPCM voice was live
-    dbg_skip_fires*: int
-    dbg_hook_fires*: int
+    dbg_hook_fires*: int        # mixer passes seen
     dbg_overlay_triggers*: int  # overlay passthrough entries (idle->held)
     dbg_overlay_passes*: int    # mixer passes spent in overlay passthrough
     dbg_unlatches*: int         # fifo_foreign latches reversed by agreement
-    dbg_probe_hits*: int   # probe prefilter passes (RAM PC + r0 == &SoundInfo)
-    dbg_probe_ident*: uint32  # ident seen at the last probe hit
     dbg_out_energy*: float64
     dbg_out_count*:  int
     dbg_reverb*:     uint8
@@ -729,6 +694,9 @@ type
     fifo_acc*:       float32        # fractional frame-length carry
     fifo_err_avg*:   float32        # slow average of level - target (render_frame)
     fifo_trimming*:  bool           # trim engaged: runs until the average is ~0
+    fifo_settle*:    int            # frames left in which the trim converges from any error (render_frame)
+    fifo_settle_ref*: int           # the target the last settle converged to
+    fifo_step_ref*:  int            # the target at the previous frame (render_frame: a moved target vs a jumped level)
     fifo_last_a*, fifo_last_b*: float32  # held across an underrun
     # Quality tier (mp2k.nim "Quality tier"): off = the driver's own
     # arithmetic (parity checks); on = un-floored output, ramped gains,
@@ -918,9 +886,10 @@ proc apu_catchup_all*(apu: APU) {.inline.}
 proc apu_next_step*(apu: APU): CycleCount {.inline.}
 proc new_mp2k*(gba: GBA): Mp2kHle
 proc init_mp2k*(m: Mp2kHle)
-proc mixer_hook*(m: Mp2kHle)
 proc render_frame(m: Mp2kHle)
-proc probe_pc*(m: Mp2kHle; pc: uint32; arrived: bool) {.noinline.}
+proc mp2k_sound_write*(m: Mp2kHle; a: uint32; w: int; v: uint32) {.noinline.}
+when defined(mp2kwcensus):
+  proc mp2k_wc_write*(m: Mp2kHle; a: uint32; w: int) {.noinline.}
 proc mp2k_frame_poll*(m: Mp2kHle)
 proc mixer_live*(m: Mp2kHle): bool
 proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16]
@@ -1015,7 +984,6 @@ when defined(mp2kwav):  # throwaway A/B capture buffers (see mp2k.nim)
   var dbgHookDmaSrc2*: seq[uint32] = @[] # DMA2's
   var dbgLatDump*: int = 0
   var dbgHookRing*: seq[uint8] = @[]     # the A half (up to 1584 bytes) as the hook saw it
-  var dbgProbeMiss*: seq[(uint32, uint32, uint32)] = @[] # (pc, lr, word at lr-4) of sightings that failed the call-form test
   var dbgHookSad*: seq[uint32] = @[]    # DMA1 source register at each hook
   var dbgHookSad2*: seq[uint32] = @[]
   var dbgHookCnt*: seq[int] = @[]        # SoundInfo.pcmDmaCounter at each mixer hook
@@ -1240,9 +1208,9 @@ proc step_frame*(gba: GBA) =
     gba.mp2k.mp2k_frame_poll()
   if gba.mp2k_hle and gba.gs_bon != nil:
     gba.gs_bon.gs_frame_poll()
-  # Unconditional: this is also what disarms the hook when the setting is
-  # turned off or a driver tears down
-  gba.refresh_hle_hook()
+  # The MP2K sound window closes when the setting is off (the frame poll
+  # opens it while a driver is published)
+  if not gba.mp2k_hle: gba.bus.snd_wlen = 0
   gba.frame_start_cycles = gba.scheduler.cycles
   while gba.ppu.frame == 0:
     gba.cpu.tick()

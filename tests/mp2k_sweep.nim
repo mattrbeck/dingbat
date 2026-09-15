@@ -25,9 +25,8 @@
 #   m4a_seen/_frame  SOUND_INFO_PTR pointed at a live ident (ID_NUMBER or +1)
 #   ident_last     last ident value seen through a valid SOUND_INFO_PTR (hex)
 #   engaged/_frame/_ever  shadow mixer state (final / first frame / ever)
-#   hook           learned SoundMainRAM entry PC (hex)
-#   hook_fires     mixer-pass hook fires
-#   probe_fails    mislearn (unlearn) count — nonzero means detection churn
+#   hook_fires     mixer passes detected (lock write, then the first ring store)
+#   seq_late       channels first seen ON without START
 #   retrig         sampler (re)trigger count over the run
 #   mono           FIFO topology (0 stereo, 1 mono A, 2 mono B)
 #   reverb/pcm_rate  last SoundInfo values seen by the hook
@@ -43,7 +42,7 @@
 #   wall_s         wall time of the frame loop (perf outlier screen)
 when not defined(mp2kwav):
   {.error: "build with -d:mp2kwav (see the header)".}
-import std/[os, strutils, math, json, monotimes, times, streams]
+import std/[os, strutils, math, json, monotimes, times, streams, tables]
 import dingbat/gba/gba
 import dingbat/common/test_output
 import dingbat/common/input
@@ -225,7 +224,7 @@ proc main() =
   if wav.len > 0:
     write_wav(wav & ".hle.wav", mp2kWavCapture)
     write_wav(wav & ".real.wav", realDmaCapture)
-  echo $(%*{
+  var rec = %*{
     "rom": rom_path.extractFilename,
     "frames_run": frames_run,
     "timeout": timed_out,
@@ -236,11 +235,8 @@ proc main() =
     "engaged": emu.mp2k.engaged,
     "engaged_ever": engaged_ever,
     "engage_frame": engage_frame,
-    "hook": toHex(emu.mp2k.hook_addr, 8),
     "hook_fires": emu.mp2k.dbg_hook_fires,
-    "probe_hits": emu.mp2k.dbg_probe_hits,
-    "probe_ident": toHex(emu.mp2k.dbg_probe_ident, 8),
-    "probe_fails": emu.mp2k.probe_fails,
+    "seq_late": emu.mp2k.seq_late,
     "retrig": dbgRetrigCount,
     "mono": emu.mp2k.mono_mode,
     "foreign": emu.mp2k.fifo_foreign,
@@ -256,6 +252,8 @@ proc main() =
     "pred_ok": emu.mp2k.pred_ok,
     "pred_bad": emu.mp2k.pred_bad,
     "lat_avg": int(emu.mp2k.lat_avg),
+    "fifo_err": emu.mp2k.fifo_err_avg,
+    "fifo_target": emu.mp2k.fifo_target,
     "start_honoured": dbgStartHonoured,
     "start_ignored": dbgStartIgnored,
     "start_unclear": dbgStartUnclear,
@@ -265,6 +263,17 @@ proc main() =
     "overlay_passes": emu.mp2k.dbg_overlay_passes,
     "unlatches": emu.mp2k.dbg_unlatches,
     "wall_s": wall
-  })
+  }
+  when defined(mp2kwcensus):
+    wc_close()
+    var fields = newJObject()
+    for k, v in wcFields: fields[k] = %v
+    var envpc = newJObject()
+    for k, v in wcEnvPc: envpc[k] = %v
+    rec["wc"] = %*{"passes": wcPasses, "ring_passes": wcRingPasses, "no_ring": wcNoRing,
+                   "no_ring_late": wcNoRingLate, "env_before": wcEnvBefore,
+                   "env_pc": envpc, "ring_outside": wcRingOutside, "other_buf": wcOther,
+                   "fields": fields}
+  echo $rec
 
 main()

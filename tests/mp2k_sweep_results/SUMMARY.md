@@ -186,6 +186,53 @@ their hook a few instructions into the function, where no branch lands. The
 flush-only probe learned a later helper instead, and Hudson Best Collection
 fell from 0.95 to 0.17. Those hooks now keep the per-instruction compare.
 
+## 2026-09-14 (late night): passes from the driver's writes
+
+The HLE no longer learns a code address. A mixer pass is the driver's lock
+write followed by its first store into a ring the sound DMA plays, taken
+before that store lands (`mp2k.nim` "Runtime detection";
+`tools/mp2kprobe/README.md` "Pass detection" has the archive census that
+establishes the ordering). A driver must make two such passes in a row
+before it engages, because initialisation takes the lock and clears the
+buffer once without mixing (Golden Sun, Mother 3).
+
+Changing the vantage exposed three level-control problems that the old
+hook's timing had been hiding. Each was fixed and swept:
+
+* **The 6-sample band parked titles.** Where a title settled inside the band
+  depended only on the frame it engaged: Advance GTA +3, Emerald -2 on the
+  same build. The trim now converges from any error for 128 frames after
+  priming, or after the target moves by two samples or more, and the band
+  outside that window is 1.5 samples. Sweeping 6, 3 and 1.5 changed only
+  Steel Empire's two releases.
+* **The pipeline constant** had been fitted while titles were parked. It is
+  now 3.5 DMA-rate samples below 35 kHz, down from 4. The 3/3.5/4 sweep
+  favoured 3.5 at every rate from 5.7 to 21 kHz, and the eleven 26.8 kHz
+  titles prefer 4 by 0.01.
+* **A skipped V-blank pass.** Santa Claus Saves the Earth's song start has a
+  V-blank in which no SoundMain runs. Filling the FIFO back to its target
+  then overshot by the next pass's lateness, and left it 36 samples late
+  for two seconds. A level jump of half a frame or more under a steady
+  target is now corrected in whole frames. A smaller jump, or a moved
+  target, is still stepped exactly.
+
+| Run | Engaged | Music | Within ±20 % | Median xcorr0 | xcorr0 > 0.5 |
+|---|---|---|---|---|---|
+| 31 (PC hook, committed) | 1013 | 780 | 779 | 0.844 | 708 |
+| 43 (write trigger, all of the above) | 1013 | 780 | 779 | 0.924 | 750 |
+
+Run 43 improves 420 titles and worsens 12. The larger regressions checked by
+windowed lag:
+
+* **Grandbo** has one glitched second (0.89); every other second matches at
+  0.97–0.99.
+* **Tarzan: Return to the Jungle** is off only in its first two seconds,
+  where engaging seven frames earlier settles a 31-sample start. It then
+  runs at 0.99, 0–1 samples from the stream where it was 2–3.
+* **Steel Empire** is 2 samples late: 0.96 aligned, 0.64 at lag 0 on bright
+  content.
+* **Top Gear All Japan GT** and **Lilo & Stitch 2** were already below 0.3.
+
 ## Why span-matched
 
 `-d:mp2kwav` (`src/dingbat/gba/apu.nim`) gates the REAL FIFO capture on the same

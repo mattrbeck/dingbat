@@ -664,6 +664,18 @@ when defined(linkTrace):
 else:
   template chipWatch(bus: Bus; o: uint32; v: uint32; w: int) = discard
 
+template sndWatch(bus: Bus; a: uint32; w: int; v: uint32) =
+  # MP2K pass detection: one subtract and compare per work-RAM store.
+  if (a - bus.snd_wbase) < bus.snd_wlen: bus.gba.mp2k.mp2k_sound_write(a, w, v)
+
+when defined(mp2kwcensus):
+  # -d:mp2kwcensus: every work-RAM store is offered to the MP2K write census
+  # (mp2k.nim), which orders the driver's lock, hook and buffer writes.
+  template wcWatch(bus: Bus; a: uint32; w: int) =
+    if bus.gba.mp2k != nil: bus.gba.mp2k.mp2k_wc_write(a, w)
+else:
+  template wcWatch(bus: Bus; a: uint32; w: int) = discard
+
 proc write_byte_internal*(bus: Bus; address: uint32; value: uint8) =
   if bits_range(address, 28, 31) > 0: return
   # Self-modifying-code pipeline capture: a write landing on the two opcodes
@@ -674,10 +686,15 @@ proc write_byte_internal*(bus: Bus; address: uint32; value: uint8) =
      address <= bus.gba.cpu.r[15] and address >= bus.gba.cpu.r[15] - 4:
     bus.gba.cpu.fill_pipeline()
   case bits_range(address, 24, 27)
-  of 0x2: bus.wram_board[address and 0x3FFFF'u32] = value
+  of 0x2:
+    sndWatch(bus, address, 1, uint32(value))
+    bus.wram_board[address and 0x3FFFF'u32] = value
+    wcWatch(bus, address, 1)
   of 0x3:
+    sndWatch(bus, address, 1, uint32(value))
     bus.wram_chip[address and 0x7FFF'u32] = value
     chipWatch(bus, address and 0x7FFF'u32, uint32(value), 1)
+    wcWatch(bus, address, 1)
   of 0x4: bus.gba.mmio[address] = value
   of 0x5:
     bus.gba.ppu.render_dirty = true
@@ -708,10 +725,15 @@ proc write_half_internal*(bus: Bus; address: uint32; value: uint16) =
      address <= bus.gba.cpu.r[15] and address >= bus.gba.cpu.r[15] - 4:
     bus.gba.cpu.fill_pipeline()
   case bits_range(address, 24, 27)
-  of 0x2: write_u16_ptr(bus.wram_board, address and 0x3FFFF'u32, value)
+  of 0x2:
+    sndWatch(bus, address, 2, uint32(value))
+    write_u16_ptr(bus.wram_board, address and 0x3FFFF'u32, value)
+    wcWatch(bus, address, 2)
   of 0x3:
+    sndWatch(bus, address, 2, uint32(value))
     write_u16_ptr(bus.wram_chip, address and 0x7FFF'u32, value)
     chipWatch(bus, address and 0x7FFF'u32, uint32(value), 2)
+    wcWatch(bus, address, 2)
   of 0x4:
     if (address and 0xFFFFFF'u32) == 0x132'u32:
       # KEYCNT: atomic 16-bit store so the keypad IRQ check never sees a
@@ -756,10 +778,15 @@ proc write_word_internal*(bus: Bus; address: uint32; value: uint32) =
      address <= bus.gba.cpu.r[15] and address >= bus.gba.cpu.r[15] - 4:
     bus.gba.cpu.fill_pipeline()
   case bits_range(address, 24, 27)
-  of 0x2: write_u32_ptr(bus.wram_board, address and 0x3FFFF'u32, value)
+  of 0x2:
+    sndWatch(bus, address, 4, value)
+    write_u32_ptr(bus.wram_board, address and 0x3FFFF'u32, value)
+    wcWatch(bus, address, 4)
   of 0x3:
+    sndWatch(bus, address, 4, value)
     write_u32_ptr(bus.wram_chip, address and 0x7FFF'u32, value)
     chipWatch(bus, address and 0x7FFF'u32, value, 4)
+    wcWatch(bus, address, 4)
   of 0x4:
     if (address and 0xFFFFFF'u32) == 0x130'u32:
       # Word store covering KEYINPUT (read-only) + KEYCNT: commit KEYCNT
