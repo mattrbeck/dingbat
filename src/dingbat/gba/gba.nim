@@ -540,6 +540,15 @@ type
     last_update_cycle*: array[2, int64]
     inv_period*:        array[2, float32]
     fifo_interp*:     bool   # cubic FIFO reconstruction (default on)
+    # MP2K HLE slot timing (mp2k.nim render_frame, not serialized): the
+    # address each FIFO byte was read from by a special-timing sound DMA
+    # (0 = any other source), and up to four ring addresses whose first
+    # appearance at the DAC is stamped with the HLE's output clock
+    # (watch_clock, -1 until it plays; watch_cyc, the scheduler cycle).
+    tags*:        array[2, array[32, uint32]]
+    watch_addr*:  array[4, uint32]
+    watch_clock*: array[4, int]
+    watch_cyc*:   array[4, int64]
 
   APU* = ref object
     gba* {.cursor.}:               GBA
@@ -630,6 +639,17 @@ type
     last_pass_cnt*:  int            # pcmDmaCounter at the previous pass (mixer_pass: same slot = replacement)
     last_pass_clock*: int64         # apu_clock at the previous pass
     last_frame_w*:   int            # fifo_w where the previous pass's frame starts (render_frame)
+    pass_store*:     uint32         # address of the ring store that ran the current pass
+    watch_pass*:     array[4, int]  # apu_clock at the pass each DMAChannels watch belongs to
+    watch_slot*:     array[4, int]  # that pass's ring slot
+    watch_pass_cyc*: array[4, int64] # scheduler cycle at that pass
+    meas_valid*:     bool           # a pass's slot has been heard (render_frame)
+    meas_play*:      float32        # output clock at which that slot's first sample sounds
+    meas_pass*:      int            # apu_clock at that pass
+    meas_slot*:      int            # its ring slot
+    meas_cyc*:       int64          # scheduler cycle at that pass
+    place_big*:      int            # a large placement error seen at the previous pass (0 = none)
+    dbg_steps*:      int            # placement steps taken (sweep diagnostic)
     replace_pass*:   bool           # the pass being rendered replaces the previous pass's frame
     seq_late*:   int                # channels first seen ON without START (a start outside the driver's sequencer)
     engaged*:    bool       # a valid SoundInfo has been observed at least once
@@ -649,6 +669,7 @@ type
     dbg_reverb*:     uint8
     dbg_pcm_rate*:   int
     pcm_sample_rate*: int
+    play_rate*:      float32        # the rate the sound DMA's timer plays the ring at (apply_pending)
     reverb_strength*: uint8
     use_cubic*:      bool
     resample_mode*:  int           # DIAG: 0=cubic,1=linear (the driver's own),2=hold
@@ -982,6 +1003,16 @@ when defined(mp2kwav):  # throwaway A/B capture buffers (see mp2k.nim)
   var dbgFifoServed*: array[2, int]
   var dbgFifoDrop*: array[2, int]
   var dbgFifoWrites*: array[2, int]
+  # Pass placement oracle (DINGBAT_PASSDUMP): each FIFO byte tagged with the
+  # address the sound DMA read it from; per rendered pass, the capture index
+  # the HLE placed its frame at and the index at which the byte the pass's
+  # first ring store wrote (kind 0) / the model's slot start (kind 1) left
+  # the FIFO.
+  var dbgPassStore*: uint32 = 0
+  var dbgWatch*: seq[tuple[a: uint32, pass: int, kind: int]] = @[]
+  var dbgPassPlaced*: seq[int] = @[]
+  var dbgPassReal*: seq[array[2, int]] = @[]
+  var dbgPassInfo*: seq[string] = @[]
   var realDmaCapture*: seq[int16] = @[]
   var dbgRetrigCount*: int = 0
   var dbgHookCapIdx*: seq[int] = @[]   # HLE capture length (stereo frames) at each mixer hook
@@ -1151,6 +1182,10 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
   for c in 1..2: gba.dma.fifo_xfer_cycle[c] -= int64(base)
   if gba.mp2k != nil:
     for i in 0 ..< gba.mp2k.lat_n: gba.mp2k.lat_at[i] -= int64(base)
+    for k in 0 .. 3:
+      gba.mp2k.watch_pass_cyc[k] -= int64(base)
+      gba.apu.dma_channels.watch_cyc[k] -= int64(base)
+    gba.mp2k.meas_cyc -= int64(base)
   for i in 0..3:
     if gba.timer.cycle_enabled[i] >= base:
       gba.timer.cycle_enabled[i] -= base

@@ -87,6 +87,12 @@ proc main() =
   emu.test_output = new_test_output()
   emu.post_init()
   emu.mp2k_hle = getEnv("DINGBAT_NOHLE") != "1"
+  # post_init emits a sample with the HLE still off, which the real-stream
+  # capture keeps: without this the two captures sit one sample apart and a
+  # time-aligned HLE reads as lag -1.
+  when defined(mp2kwav):
+    realDmaCapture.setLen(0)
+    mp2kWavCapture.setLen(0)
   if emu.mp2k != nil:
     let rs = getEnv("DINGBAT_MP2K_RESAMPLE")
     if rs.len > 0: emu.mp2k.resample_mode = parseInt(rs)

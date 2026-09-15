@@ -39,8 +39,9 @@
 #     by the rules the probe songs pinned (P3: attack/decay/sustain/release
 #     and the pseudo-echo floor), then the frame is rendered at once
 #     (apply_pending / render_frame) into a FIFO that holds it until the
-#     hardware would play it (measure_latency: the sound DMA's cursor
-#     crossing the slot). Every prediction is checked against the real
+#     hardware plays that slot (slot_timing: the byte the pass's first ring
+#     store wrote leaving the FIFO; before a slot has been heard,
+#     measure_latency's estimate). Every prediction is checked against the real
 #     bytes one pass later; a vintage that misses drops back to rendering
 #     each pass one pass late from the bytes it left behind.
 #   * Mixer facts below marked P1..P10 come from the probe songs in
@@ -186,6 +187,8 @@ const
   # settle window (render_frame); -d:mp2kwav builds take DINGBAT_MP2K_BAND.
   MP2K_FIFO_BAND = 1.5'f32
   MP2K_FIFO_GUARD = 16
+  # Used only until a pass's slot has been heard (slot_timing), and fitted
+  # against a real-stream capture that sat one output sample late.
   # From a byte's FIFO transfer to its sample at the DAC, beyond its place
   # in the queue (the DMA refills 16 bytes when 15 remain, so a transfer's
   # first byte plays 15 samples later), in DMA-rate samples. Fitted on the
@@ -485,6 +488,12 @@ proc mp2k_state_loaded*(m: Mp2kHle) =
   m.fifo_last_a = 0
   m.fifo_last_b = 0
   m.fifo_primed = false
+  m.meas_valid = false
+  m.place_big = 0
+  let dc = m.gba.apu.dma_channels
+  for k in 0 .. 3: dc.watch_addr[k] = 0
+  for ch in 0 .. 1:
+    for i in 0 .. 31: dc.tags[ch][i] = 0
   for v in m.reverb_ring.mitems: v = 0
   m.rev_slot = 0
   m.rev_pos = 0
@@ -564,6 +573,27 @@ proc fifo_topology(m: Mp2kHle): int =
   (if fed_a and not fed_b: 1
    elif fed_b and not fed_a: 2
    else: 0)
+
+proc timer_play_rate(m: Mp2kHle): float32 =
+  ## The rate the FIFO's timer actually replays the ring at. pcmFreq is the
+  ## driver's nominal figure; the timer reload it programs is a whole number
+  ## of cycles, which for every standard rate makes the slot exactly one
+  ## frame long (18157 Hz: 924 cycles a byte, 304 bytes = 280896 cycles), so
+  ## the hardware plays each voice a few parts in 10^5 sharper than pcmFreq
+  ## says and a frame of the driver's output lasts 548.625 output samples,
+  ## not spv * 32768 / pcmFreq. Rendering at pcmFreq left every frame that
+  ## much long and the level control trimming a sample every 100 to 300
+  ## frames, each trim a sample of phase against the stream. A timer that is
+  ## off, cascaded, or disagrees with pcmFreq by more than 1 % gives pcmFreq.
+  let nominal = float32(max(m.pcm_sample_rate, 1))
+  let t = int(if m.mono_mode == 2: m.gba.apu.soundcnt_h.dma_sound_b_timer
+              else: m.gba.apu.soundcnt_h.dma_sound_a_timer)
+  let tc = m.gba.timer.tmcnt[t]
+  if not tc.enable or tc.cascade: return nominal
+  const PRESCALE = [1, 64, 256, 1024]
+  let cycles = (65536 - int(m.gba.timer.tmd[t])) * PRESCALE[int(tc.frequency)]
+  let r = float32(CPU_CLOCK_SPEED) / float32(cycles)
+  if abs(r - nominal) > nominal * 0.01'f32: nominal else: r
 
 proc snapshot_pass(m: Mp2kHle; sound_info: uint32) =
   ## Capture, at the mixer entry, the state the pass about to run mixes
@@ -692,6 +722,7 @@ proc apply_pending(m: Mp2kHle; sound_info: uint32) =
   m.mono_mode = m.pend_mono
   m.reverb_strength = m.pend_reverb
   m.pcm_sample_rate = m.pend_rate
+  m.play_rate = m.timer_play_rate()
   m.dbg_reverb = m.reverb_strength
   m.dbg_pcm_rate = m.pcm_sample_rate
   when defined(mp2kwav): dbgMaster = int(m.rd8(sound_info + SI_MASTER_VOL))
@@ -1513,6 +1544,8 @@ proc mp2k_sound_write*(m: Mp2kHle; a: uint32; w: int; v: uint32) {.noinline.} =
        a < m.ring_base[k] + m.ring_len[k]:
       m.armed = false
       bus.snd_wlen = 4
+      when defined(mp2kwav): dbgPassStore = a
+      m.pass_store = a
       m.mixer_pass(sip)
       return
 
@@ -1667,8 +1700,10 @@ proc render_voices(m: Mp2kHle; n: int) =
     if not s.active or s.ended: continue
     # Advance the resample phase by step = playback-rate / output-rate,
     # where a TYPE_FIX channel's playback rate is pcmFreq (TYPE_* table).
+    # The driver steps each voice by rate / pcmFreq a byte, and the timer
+    # plays the bytes at play_rate.
     let rate = (if s.use_pcm_rate: float32(m.pcm_sample_rate) else: float32(s.freq))
-    let step = rate * STEP_PER_HZ
+    let step = rate * STEP_PER_HZ * m.play_rate / float32(max(m.pcm_sample_rate, 1))
     let vl = s.vol_l
     let vr = s.vol_r
     let dl = s.vol_l_to - s.vol_l
@@ -1795,7 +1830,7 @@ proc render_one(m: Mp2kHle; accl, accr: float32): tuple[a: float32, b: float32] 
       seed = m.rev_seed_prev + (m.rev_seed - m.rev_seed_prev) * frac
     outl_f = accl + seed
     outr_f = accr + seed
-    m.rev_phase += float32(m.pcm_sample_rate) * (1.0'f32 / float32(APU_SAMPLE_RATE))
+    m.rev_phase += m.play_rate * (1.0'f32 / float32(APU_SAMPLE_RATE))
     m.rev_pos.inc
   # The FIFO latch is the driver's s8 byte doubled. The driver's buffer
   # wraps past the s8 range (P10: three full-scale voices sum to 150 and
@@ -1820,10 +1855,31 @@ proc render_one(m: Mp2kHle; accl, accr: float32): tuple[a: float32, b: float32] 
   else: discard
   (fa, fb)
 
+when defined(mp2kwav):
+  proc dbg_pass_note(m: Mp2kHle; level: int; kind: string; step: int) =
+    if getEnv("DINGBAT_PASSDUMP").len == 0: return
+    let pass = dbgPassPlaced.len
+    dbgPassPlaced.add mp2kWavCapture.len div 2 + level
+    dbgPassReal.add [-1, -1]
+    var k = 0
+    while k < dbgWatch.len:
+      if dbgWatch[k].pass < pass - 16: dbgWatch.del(k) else: inc k
+    dbgWatch.add (dbgPassStore, pass, 0)
+    let c = m.fifo_dma()
+    let sb = m.ring_slot_bytes()
+    if c > 0 and sb > 0 and m.pend_period > 0:
+      let cnt = m.pend_cnt
+      let slot = ((if cnt <= 1: 0 else: m.pend_period - (cnt - 1)) + m.slot_off) mod m.pend_period
+      dbgWatch.add (m.gba.dma.dmasad[c] + uint32(slot * sb), pass, 1)
+    dbgPassInfo.add kind & " tgt=" & $m.fifo_target & " hw=" & $m.hw_latency() & " lat=" &
+      $int(m.lat_avg) & "/" & $m.lat_count & " lvl=" & $level & " step=" & $step &
+      " err=" & formatFloat(m.fifo_err_avg, ffDecimal, 1) & " settle=" & $m.fifo_settle &
+      " pred=" & $m.predict & " store=" & toHex(dbgPassStore) & " cnt=" & $m.pend_cnt
+
 proc render_frame_samples(m: Mp2kHle; level: int) =
   ## Append the pass's frame to the output FIFO at fifo_w (render_frame).
   let cap = m.fifo.len div 2
-  let nominal = float32(m.rev_spv) * float32(APU_SAMPLE_RATE) / float32(max(m.pcm_sample_rate, 1))
+  let nominal = float32(m.rev_spv) * float32(APU_SAMPLE_RATE) / max(m.play_rate, 1'f32)
   m.last_frame_w = m.fifo_w
   m.fifo_acc += nominal
   var n = int(m.fifo_acc)
@@ -1842,6 +1898,80 @@ proc render_frame_samples(m: Mp2kHle; level: int) =
     m.fifo_r -= cap
     m.fifo_w -= cap
     m.last_frame_w -= cap
+
+proc slot_timing(m: Mp2kHle; level: int; nominal: float32): tuple[known: bool, err: float32] =
+  ## Where this pass's frame lands against where the hardware plays its slot.
+  ## Every sound-DMA byte reaching the FIFO carries the address it was read
+  ## from (DMAChannels.tags), so the output clock at which a pass's slot
+  ## first sounds is observed, not estimated: the byte its first ring store
+  ## wrote leaving the FIFO, plus the FIFO reconstruction's two-period delay
+  ## (the cubic interpolates between the two latches before the newest), less
+  ## half an output sample for stamping at the next output sample: against
+  ## 22 titles from 5.7 to 21 kHz the real stream's content sits within 0.3
+  ## samples of that.
+  ## The DMA plays a slot every frame on its own clock, so a later pass's slot
+  ## sounds a whole number of frames after the last one heard: the count is
+  ## the ring-slot difference, with the frames elapsed between the two passes
+  ## choosing among its multiples of the ring period (a V-blank without a
+  ## pass skips a slot; a pass that rewrites the same slot adds none). The
+  ## result has none of the pass's lateness in it.
+  let dc = m.gba.apu.dma_channels
+  let sb = m.ring_slot_bytes()
+  let period = m.pend_period
+  let rate = (if sb > 0: m.dma_rate(sb) else: 0'f32)
+  let cnt = m.pend_cnt
+  let slot = (if period > 0: ((if cnt <= 1: 0 else: period - (cnt - 1)) + m.slot_off) mod period else: 0)
+  let now = m.apu_clock
+  let now_cyc = int64(m.gba.scheduler.cycles)
+  let f = max(nominal, 1'f32)
+  let frames8 = int64(8'f32 * f) * int64(APU_SAMPLE_PERIOD)
+  # Take the newest slot heard. The output clock only runs while the HLE
+  # substitutes, so a watch whose clock and scheduler spans disagree was
+  # heard across a pause and is dropped, as is one whose slot never played.
+  var best = -1
+  for k in 0 .. 3:
+    if dc.watch_addr[k] == 0'u32: continue
+    if dc.watch_clock[k] >= 0:
+      let span = float32(dc.watch_cyc[k] - m.watch_pass_cyc[k]) / float32(APU_SAMPLE_PERIOD)
+      if abs(span - float32(dc.watch_clock[k] - m.watch_pass[k])) > 2'f32:
+        dc.watch_addr[k] = 0
+      elif best < 0 or m.watch_pass_cyc[k] > m.watch_pass_cyc[best]:
+        best = k
+    elif now_cyc - m.watch_pass_cyc[k] > frames8:
+      dc.watch_addr[k] = 0
+  if best >= 0 and rate > 0:
+    let per = float32(APU_SAMPLE_RATE) / rate
+    let delay = (if dc.fifo_interp: 2'f32 * per else: 0.5'f32 * per) - 0.5'f32
+    m.meas_valid = true
+    m.meas_play = float32(dc.watch_clock[best]) + delay
+    m.meas_pass = m.watch_pass[best]
+    m.meas_slot = m.watch_slot[best]
+    m.meas_cyc = m.watch_pass_cyc[best]
+    for k in 0 .. 3:
+      if dc.watch_addr[k] != 0'u32 and m.watch_pass_cyc[k] <= m.meas_cyc: dc.watch_addr[k] = 0
+  # watch this pass's slot
+  if m.pass_store != 0'u32 and period > 0:
+    var w = -1
+    for k in 0 .. 3:
+      if dc.watch_addr[k] == 0'u32:
+        w = k
+        break
+    if w < 0:
+      w = 0
+      for k in 1 .. 3:
+        if m.watch_pass_cyc[k] < m.watch_pass_cyc[w]: w = k
+    dc.watch_addr[w] = m.pass_store
+    dc.watch_clock[w] = -1
+    m.watch_pass[w] = now
+    m.watch_pass_cyc[w] = now_cyc
+    m.watch_slot[w] = slot
+  if not m.meas_valid or period <= 0 or now_cyc - m.meas_cyc > frames8 or
+     abs(float32(now_cyc - m.meas_cyc) / float32(APU_SAMPLE_PERIOD) - float32(now - m.meas_pass)) > 2'f32:
+    return (false, 0'f32)
+  let kc = ((slot - m.meas_slot) mod period + period) mod period
+  let kt = float32(now - m.meas_pass) / f
+  let k = kc + period * int(round((kt - float32(kc)) / float32(period)))
+  (true, float32(now + level) - (m.meas_play + float32(k) * f))
 
 proc render_frame(m: Mp2kHle) =
   ## Render the pending pass's whole frame into the output FIFO — the
@@ -1869,13 +1999,14 @@ proc render_frame(m: Mp2kHle) =
       m.fifo[wi + 1] = 0
       inc m.fifo_w
     level = m.fifo_w - m.fifo_r
-  let nominal = float32(m.rev_spv) * float32(APU_SAMPLE_RATE) / float32(max(m.pcm_sample_rate, 1))
+  let nominal = float32(m.rev_spv) * float32(APU_SAMPLE_RATE) / max(m.play_rate, 1'f32)
   if m.replace_pass:
     # The pass rewrote the previous pass's slot (mixer_pass): its frame
     # takes the place of whatever of the previous frame is still unplayed,
     # and the level control, which already placed that frame, stays out.
     m.fifo_w = max(m.last_frame_w, m.fifo_r)
     level = m.fifo_w - m.fifo_r
+    when defined(mp2kwav): m.dbg_pass_note(level, "R", 0)
     m.render_frame_samples(level)
     return
   if level > m.fifo_target + int(nominal) * 2:
@@ -1885,6 +2016,67 @@ proc render_frame(m: Mp2kHle) =
     # up to a FIFO-full of frames ago.
     m.fifo_r = m.fifo_w - m.fifo_target
     level = m.fifo_target
+  let (known, place_err) = (if m.predict: m.slot_timing(level, nominal) else: (false, 0'f32))
+  if known:
+    # The slot's play time is known (slot_timing): the frame is moved there.
+    # An error of more than 8 samples is a discontinuity the hardware made
+    # too (a DMA restart, a song start, a V-blank without a pass) and is
+    # stepped at once. An error of half a frame or more is stepped only when
+    # the previous pass saw it too, so a pass whose frame count came out
+    # wrong cannot move the stream by a frame. A smaller error is averaged
+    # first (1/8 per pass: a stamp is a whole output sample, so one reading
+    # carries half a sample of noise either way) and trimmed by a sample
+    # when the average passes 0.6. Frames move in whole samples, so up to
+    # half a sample stays and a lower threshold dithers: trimming every
+    # reading dropped or duplicated a sample every other frame.
+    let e = int(round(place_err))
+    let half = max(int(nominal) div 2, 1)
+    var go = e
+    if abs(e) >= half:
+      if m.place_big == 0 or abs(e - m.place_big) > 16:
+        m.place_big = e
+        go = 0
+    else:
+      m.place_big = 0
+    if abs(go) > 8:
+      m.fifo_err_avg = 0
+      m.fifo_trimming = false
+    else:
+      m.fifo_err_avg += (place_err - m.fifo_err_avg) * 0.125'f32
+      go = (if m.fifo_err_avg > 0.6'f32: 1 elif m.fifo_err_avg < -0.6'f32: -1 else: 0)
+    if go > 8 and level > go:
+      m.fifo_r += go
+      level -= go
+      inc m.dbg_steps
+      m.place_big = 0
+    elif go < -8 and level > 0 and level - go < cap - 2:
+      let li = ((m.fifo_w - 1) mod cap) * 2
+      for i in 0 ..< -go:
+        let wi = (m.fifo_w mod cap) * 2
+        m.fifo[wi] = m.fifo[li]
+        m.fifo[wi + 1] = m.fifo[li + 1]
+        inc m.fifo_w
+      level -= go
+      inc m.dbg_steps
+      m.place_big = 0
+    elif go == 1 and level > 1:
+      inc m.fifo_r
+      dec level
+      m.fifo_err_avg -= 1
+    elif go == -1 and level > 0 and level < cap - 2:
+      let li = ((m.fifo_w - 1) mod cap) * 2
+      let wi = (m.fifo_w mod cap) * 2
+      m.fifo[wi] = m.fifo[li]
+      m.fifo[wi + 1] = m.fifo[li + 1]
+      inc m.fifo_w
+      inc level
+      m.fifo_err_avg += 1
+    m.fifo_step_ref = m.fifo_target
+    when defined(mp2kwav):
+      dbgHookCapIdx.add mp2kWavCapture.len div 2 + level
+      m.dbg_pass_note(level, "S", go)
+    m.render_frame_samples(level)
+    return
   # Level control. The frame length is never trimmed: it is what advances
   # every cursor by exactly the driver's spv source-rate samples, and the
   # V-blank jitter is zero-mean, so shortening frames whenever the level
@@ -1928,6 +2120,7 @@ proc render_frame(m: Mp2kHle) =
   # up exactly, as before. (Filling to the target left Santa Claus Saves the Earth
   # 36 samples late for two seconds after the V-blank its song start
   # skipped.)
+  let level_in = level
   var step_err = level - m.fifo_target
   let target_moved = abs(m.fifo_target - m.fifo_step_ref) > 96
   m.fifo_step_ref = m.fifo_target
@@ -1968,6 +2161,7 @@ proc render_frame(m: Mp2kHle) =
   when defined(mp2kwav):
     # capture index at which this frame's first sample will be emitted
     dbgHookCapIdx.add mp2kWavCapture.len div 2 + level
+    m.dbg_pass_note(level, "N", level_in - level)
   m.render_frame_samples(level)
 
 proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =

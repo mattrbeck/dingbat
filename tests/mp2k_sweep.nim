@@ -163,6 +163,12 @@ proc main() =
   emu.test_output = new_test_output()
   emu.post_init()
   emu.mp2k_hle = getEnv("DINGBAT_NOHLE") != "1"
+  # post_init emits a sample with the HLE still off, which the real-stream
+  # capture keeps: without this the two captures sit one sample apart and a
+  # time-aligned HLE reads as lag -1.
+  when defined(mp2kwav):
+    realDmaCapture.setLen(0)
+    mp2kWavCapture.setLen(0)
 
   # Every m4a/MP2K build embeds ID_NUMBER 0x68736D53 in a literal pool, so
   # scan the ROM bytes for its little-endian form. The pow2 padding is the
@@ -224,6 +230,12 @@ proc main() =
   if wav.len > 0:
     write_wav(wav & ".hle.wav", mp2kWavCapture)
     write_wav(wav & ".real.wav", realDmaCapture)
+  let pd = getEnv("DINGBAT_PASSDUMP")
+  if pd.len > 0:
+    var f = open(pd, fmWrite)
+    for i in 0 ..< dbgPassPlaced.len:
+      f.writeLine($i & " " & $dbgPassPlaced[i] & " " & $dbgPassReal[i][0] & " " & $dbgPassReal[i][1] & " " & dbgPassInfo[i])
+    f.close()
   var rec = %*{
     "rom": rom_path.extractFilename,
     "frames_run": frames_run,
@@ -237,6 +249,7 @@ proc main() =
     "engage_frame": engage_frame,
     "hook_fires": emu.mp2k.dbg_hook_fires,
     "replaced": emu.mp2k.dbg_replaced,
+    "place_steps": emu.mp2k.dbg_steps,
     "seq_late": emu.mp2k.seq_late,
     "retrig": dbgRetrigCount,
     "mono": emu.mp2k.mono_mode,

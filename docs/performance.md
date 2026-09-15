@@ -82,7 +82,8 @@ and then per branch. Retired instructions, minimum of five runs:
 | Beast Shooter, write trigger | 17.25 B | 18.88 B |
 
 The HLE-off drop of about 1.3 % sits at the code-layout noise floor, and the
-frame hashes are unchanged. The mixer renders a voice at a time across the
+frame hashes are unchanged. Tagging each FIFO byte with its source address
+for the HLE's slot timing (2026-09-15) adds 0.15 % with the HLE on or off. The mixer renders a voice at a time across the
 frame, and the quality tier's unstretched sinc is a dot product with a
 precomputed per-phase row. Against the pre-2026-09-14 per-instruction PC
 compare, the HLE's overhead fell from 1.22 B to 0.30 B on Emerald and from

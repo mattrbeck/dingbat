@@ -365,7 +365,14 @@ The probes also show where the HLE's render is not the driver's, by design:
   scores against) sits about two source samples behind hold, so the shipped
   value is 4 (2 above 35 kHz), fitted on the whole library: lag-0 waveform
   correlation above 0.5 on 711 of 780 music titles, median 0.85 (was 422
-  and 0.55 with the old band and the old pipeline of 10).
+  and 0.55 with the old band and the old pipeline of 10). Since 2026-09-15
+  the latency is no longer estimated once a slot has played: the FIFO tags
+  each byte with its source address, and the output clock at which the
+  byte a pass's first ring store wrote leaves the FIFO, plus the cubic
+  reconstruction's two DMA periods less half a stamp sample, is when that
+  slot sounds (`mp2k.nim` slot_timing). All the figures above were measured
+  against a real-stream capture one output sample late (a sample `post_init`
+  emitted before the HLE was armed); the harnesses now clear both captures.
 * **Quality tier** (`Mp2kHle.quality`, on by default; `DINGBAT_MP2K_QUALITY=0`
   in the probe for parity checks). Five departures from the driver's
   arithmetic, each a limit of the hardware rather than of the music:

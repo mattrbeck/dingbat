@@ -5,7 +5,9 @@
 ## census or a sweep established; the comments name where.
 ## Run with: nimble test_mp2kpass
 import std/os
+import std/math
 import dingbat/gba/gba
+import dingbat/common/scheduler
 
 var failures = 0
 
@@ -225,6 +227,108 @@ block:
   emu.pass()
   check(m.hw_latency() > 0 and m.lat_count == 0 and m.fifo_target == max(m.hw_latency(), 16),
         "a DMA re-timed by more than 96 samples restarts the latency measurements (Tarzan)")
+
+echo "slot timing (slot_timing)"
+proc advance(emu: GBA; n: int) =
+  ## n output samples go by: both clocks move and the FIFO plays them.
+  let m = emu.mp2k
+  m.apu_clock += n
+  emu.scheduler.cycles += CycleCount(n * APU_SAMPLE_PERIOD)
+  m.fifo_r = min(m.fifo_r + n, m.fifo_w)
+
+proc hear(emu: GBA) =
+  ## The byte the newest watched pass stored first leaves the FIFO now.
+  let dc = emu.apu.dma_channels
+  var k = -1
+  for i in 0 .. 3:
+    if dc.watch_addr[i] != 0'u32 and dc.watch_clock[i] < 0 and
+       (k < 0 or emu.mp2k.watch_pass_cyc[i] > emu.mp2k.watch_pass_cyc[k]): k = i
+  doAssert k >= 0 and dc.watch_addr[k] == RING_A
+  dc.watch_clock[k] = emu.mp2k.apu_clock
+  dc.watch_cyc[k] = int64(emu.scheduler.cycles)
+
+proc heard_emu(): GBA =
+  ## Engaged, and one pass's slot heard 400 samples after the pass; the
+  ## next pass comes a frame (548 samples) after that one, a slot later.
+  result = engaged_emu()
+  result.set_counter(3)
+  result.drain()
+  result.pass()
+  result.advance(400)
+  result.hear()
+  result.advance(148)
+  result.set_counter(2)
+
+# 400 + the reconstruction's two DMA periods less half a sample + a frame
+# (224 bytes at 13379 Hz) - the 548 samples since the pass
+const PLACED = 400.0 + 2.0 * 548.625 / 224.0 - 0.5 + 224.0 * 32768.0 / 13379.0 - 548.0
+
+block:
+  let emu = heard_emu()
+  let m = emu.mp2k
+  m.fifo_r = m.fifo_w - (int(PLACED) + 40)
+  emu.pass()
+  check(m.dbg_steps == 1 and abs(float(emu.level() - m.frame_n) - PLACED) <= 1.0,
+        "a frame 40 samples later than its slot plays is stepped there at once (placed " &
+        $(emu.level() - m.frame_n) & ", slot " & $PLACED & ")")
+
+block:
+  let emu = heard_emu()
+  let m = emu.mp2k
+  m.fifo_r = m.fifo_w - (int(round(PLACED)) + 3)
+  let before = emu.level()
+  emu.pass()
+  check(m.dbg_steps == 0 and emu.level() - m.frame_n == before,
+        "one reading of a 3-sample error moves nothing (it is averaged first)")
+  # The next passes, a frame apart, keep finding their frames 3 samples late
+  # against the same slot heard (k frames after it).
+  var trims = 0
+  for k in 2 .. 7:
+    emu.advance(548)
+    emu.set_counter(3 - k + (if 3 - k < 1: 7 else: 0))
+    let slot_at = PLACED + float(k - 1) * (224.0 * 32768.0 / 13379.0 - 548.0)
+    let want = int(round(slot_at)) + 3
+    m.fifo_r = m.fifo_w - want
+    emu.pass()
+    if emu.level() - m.frame_n == want - 1: inc trims
+  check(m.dbg_steps == 0 and trims >= 3,
+        "a persisting one is trimmed a sample a frame once the average passes 0.6 (" & $trims & " of 6 frames)")
+
+block:
+  let emu = heard_emu()
+  let m = emu.mp2k
+  m.fifo_r = m.fifo_w - (int(PLACED) + 300)
+  emu.pass()
+  check(m.dbg_steps == 0, "an error of half a frame or more is not stepped on one pass's word")
+  emu.advance(548)
+  emu.set_counter(1)
+  m.fifo_r = m.fifo_w - (int(PLACED) + 300)
+  emu.pass()
+  check(m.dbg_steps == 1 and abs(float(emu.level() - m.frame_n) - PLACED) <= 1.0,
+        "the next pass seeing it too steps it")
+
+block:
+  let emu = engaged_emu()
+  let m = emu.mp2k
+  emu.set_counter(3)
+  emu.drain()
+  emu.pass()
+  m.apu_clock += 400                 # the output clock ran, the scheduler did not:
+  emu.hear()                         # heard across a pause in substitution
+  emu.advance(148)
+  emu.set_counter(2)
+  m.fifo_r = m.fifo_w - (int(PLACED) + 40)
+  emu.pass()
+  check(m.dbg_steps == 0 and not m.meas_valid, "a slot heard across a pause in the output clock is ignored")
+
+block:
+  let emu = heard_emu()
+  let m = emu.mp2k
+  emu.lock()
+  m.mp2k_state_loaded()
+  emu.unlock()
+  check(not m.meas_valid and emu.apu.dma_channels.watch_addr == [0'u32, 0, 0, 0],
+        "a state load forgets the slots heard and watched")
 
 echo "summary: ",(if failures == 0: "all checks passed" else: $failures & " check(s) FAILED")
 if failures > 0: quit(1)

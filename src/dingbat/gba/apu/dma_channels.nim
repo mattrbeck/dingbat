@@ -32,6 +32,7 @@ proc dma_channels_write*(dc: DMAChannels; address: uint32; value: uint8) =
   # MP2K HLE provenance (mp2k.nim on_frame): the m4a driver feeds the FIFOs
   # only via DMA1/2 in FIFO timing; bytes arriving any other way mean the game
   # streams its own audio and must not be substituted.
+  var tag = 0'u32
   if dc.gba.mp2k != nil:
     let d = dc.gba.dma
     let by_fifo_dma = dc.gba.bus.dma_active and
@@ -39,8 +40,11 @@ proc dma_channels_write*(dc: DMAChannels; address: uint32; value: uint8) =
                       d.dmacnt_h[d.current_priority].start_timing == 3
     if not by_fifo_dma:
       inc dc.gba.mp2k.fifo_cpu_bytes
+    else:
+      tag = d.src[d.current_priority] + ((address - DMA_CHANNELS_RANGE_LOW) and 3'u32)
   when defined(mp2kwav): inc dbgFifoWrites[channel]
   if dc.sizes[channel] < 32:
+    dc.tags[channel][(dc.positions[channel] + dc.sizes[channel]) mod 32] = tag
     dc.fifos[channel][(dc.positions[channel] + dc.sizes[channel]) mod 32] = cast[int8](value)
     dc.sizes[channel] += 1
   else:
@@ -71,9 +75,26 @@ proc timer_overflow*(dc: DMAChannels; timer: int) =
       int(dc.gba.apu.soundcnt_h.dma_sound_b_timer)
     if timer == ch_timer:
       if dc.sizes[channel] > 0:
-        when defined(mp2kwav): inc dbgFifoServed[channel]
+        when defined(mp2kwav):
+          inc dbgFifoServed[channel]
+          let dtg = dc.tags[channel][dc.positions[channel]]
+          if dtg != 0'u32:
+            var k = 0
+            while k < dbgWatch.len:
+              if dbgWatch[k].a == dtg:
+                if dbgPassReal[dbgWatch[k].pass][dbgWatch[k].kind] < 0:
+                  dbgPassReal[dbgWatch[k].pass][dbgWatch[k].kind] = realDmaCapture.len div 2
+                dbgWatch.del(k)
+              else:
+                inc k
         log("Timer overflow good; channel:" & $channel & ", timer:" & $timer)
         let sample = int16(dc.fifos[channel][dc.positions[channel]]) shl 1
+        let tg = dc.tags[channel][dc.positions[channel]]
+        if tg != 0'u32:
+          for k in 0 .. 3:
+            if dc.watch_addr[k] == tg and dc.watch_clock[k] < 0:
+              dc.watch_clock[k] = dc.gba.mp2k.apu_clock
+              dc.watch_cyc[k] = int64(dc.gba.scheduler.cycles)
         dc.latches[channel] = sample
         dc.push_fifo_sample(channel, sample)
         dc.positions[channel] = (dc.positions[channel] + 1) mod 32

@@ -268,6 +268,33 @@ Run 50 against run 43: 93 titles better, 18 worse. The largest regressions check
 
 Breaking the replacement or the two-pass engage rule fails seven of its 23 checks.
 
+## 2026-09-15: slot timing heard at the FIFO, the timer's rate, and a one-sample capture bias
+
+**The captures were a sample apart.** `post_init` emits one sample with the HLE still off, and the real-stream capture kept it, so every sweep until now compared the HLE against a reference shifted by one output sample: a time-aligned HLE read as lag −1, and lag-0 correlation rewarded being a sample late. The sweep and probe harnesses now clear both captures after arming the HLE (the HLE output is byte-identical; the reference loses its first sample). The runs below re-sweep the shipped build (15d418042, run 27f) and main before this change (dbc536e23, run 50f) with that fix and nothing else. Figures earlier in this file carry the bias, including the pipeline constant's fit.
+
+**Frames go where their slot is heard.** Every byte a special-timing sound DMA moves into a FIFO is tagged with the address it came from, and the pass's first ring store (the slot start on every pass of the 38 titles checked) is watched: the output clock at which that byte leaves the FIFO, plus the cubic reconstruction's two DMA periods less half a stamp sample (fitted within ±0.3 samples on 22 titles from 5.7 to 21 kHz), is when the hardware plays the slot. Later passes are placed a whole number of frames after the last slot heard, so the pass's own lateness drops out. Errors over 8 samples are stepped at once (a DMA restart, a song start, a V-blank without a pass); a larger-than-half-frame error needs two passes in agreement. The phase estimate and measured-latency average only seed the first frames now. Before, Justice League's DMA re-timing at its song start (+47 samples) was followed by the 1/8 latency average and a one-sample-a-frame slide, and sat 45 → 6 samples early for a second; Summon Night, Momotarou, Kaeru, Pinobee and Scan Hunter had the same shape.
+
+**The timer's rate.** The driver's timer reload is a whole number of cycles that makes a slot exactly one frame (18157 Hz: 924 cycles a byte, 304 bytes = 280896 cycles), so the hardware plays a few parts in 10^5 sharper than pcmFreq. Frames and voice steps now use that rate; at pcmFreq every frame was 0.01 samples long and the trim worked every 100–300 frames.
+
+**Trims are averaged.** A stamp is a whole output sample, so a single reading carries half a sample of noise; trimming each one dropped or duplicated a sample every other frame (Don-chan Puzzle: 332 drops, 337 duplicates in 900 frames) for no net movement. The error is averaged (1/8 a pass) and trimmed at 0.6; frames move in whole samples, so thresholds of 0.5 and below dithered again.
+
+| Build | Median xcorr0 | xcorr0 > 0.5 | Against 27f: better / worse (> 0.02) |
+|---|---|---|---|
+| 27f: shipped, 15d418042 | 0.838 | 699 | |
+| 50f: dbc536e23 | 0.895 | 762 | 493 / 143 |
+| 61: this change | 0.960 | 777 | 609 / 5 |
+
+Engaged 1013 and 780 music titles in all three; 779 within ±20 % loudness, 779 with envelope correlation ≥ 0.9 (777 in 27f). At 0.01, 669 better and 8 worse.
+
+The five:
+* **Disney Sports American Football (0.982 → 0.915) and Skateboarding (0.951 → 0.890).** Placement holds to a sample, but the waveform walks 3 samples early in 12 s: the voice's cursor gains on the engine's (American Football's 21024 Hz voice advances 352 source samples a pass at 18157 Hz; the HLE's 352.0017). Following the engine's position rate fixed both (0.974, and Don-chan 0.991) but moved Bass Tsuri Shiyouze and J.League Winning Eleven 2002 the other way, whose count fields advance slower than the waveform they play, and pulling the cursor onto the engine's position moved Steel Empire a sample off (0.984 → 0.618). Dropped: the count field is not the playback cursor on every vintage.
+* **Disney Princesse / Prinzessinnen (0.838 → 0.799).** A steady 1–2 samples early with placement holding.
+* **Inuyasha Naraku no Wana (0.348 → 0.291).** A 26.8 kHz title that matches poorly in every build; its lag moves 4–6 samples from second to second.
+
+Tried and dropped: no 1-sample trims at all (139 titles worse: the frame-length error accumulates), and trim deadbands of 2 and 3 (abandoned once averaging removed the dither).
+
+`tests/mp2k_pass_test.nim` gains the slot timing: a 40-sample error stepped, a small one averaged then trimmed, a half-frame error needing two passes, a slot heard across a pause in the output clock ignored, and a state load forgetting the watches (30 checks).
+
 ## Why span-matched
 
 `-d:mp2kwav` (`src/dingbat/gba/apu.nim`) gates the REAL FIFO capture on the same
