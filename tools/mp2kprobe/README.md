@@ -255,6 +255,27 @@ note-on fields and SoundInfo +0x0A, a frame counter the HLE does not read.
 The passes that store no ring byte are passes where the driver takes the lock
 without mixing. The old hook did not fire on any of them either.
 
+Engagement matches the old PC hook across the archive (2026-09-14): 3250
+ROMs engage under both, 4645 under neither, and the one difference is a bad
+dump (Yushun Rhapsody [b1]) whose driver mixes seven passes and stops, which
+the old eight-pass probe never learned. No ROM without the m4a ident
+literal engages.
+
+The drivers that must not engage do not. Golden Sun, The Lost Age and their
+translations, Mario Tennis Advance and Mario Golf: Advance Tour keep the
+stock sequencer and SoundInfo but mix with Camelot's own mixer. That mixer
+never takes the lock. Over 12,000 driven frames each, these titles took the
+lock 11 to 45 times (initialisation and song changes), and only the start-up
+clear stored into the ring inside one of those locks. Golden Sun's mixer
+also honours the lock. With the lock held across every V-blank from outside
+the driver, it stored nothing into the ring. So a song change holding the
+lock cannot coincide with that mixer's ring stores.
+
+A CPU-mode test was tried and dropped. The idea was to require that the
+ring store come in the mode the lock was taken in. No pass in the archive
+failed it, but it could not have separated Golden Sun either: its V-blank
+handler runs the mixer in System mode, the same mode as the main loop.
+
 This replaced a learned PC hook. While the lock was held, the old HLE
 watched RAM-fetched instructions with r0 == &SoundInfo that looked like call
 targets, then hooked the first that fired in every pass. The driver has two
