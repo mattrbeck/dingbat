@@ -5127,6 +5127,9 @@ const refreshHomeRecent = async () => {
     // The tile body downloads and launches; the glyph downloads only.
     launch.addEventListener("click", async () => {
       if (consumedByPress()) return; // the long press opened the menu
+      // The game already in memory carries on; a reboot would drop what
+      // happened since the last snapshot.
+      if (currentOriginalName === romName && !linkMode) { resumeGame(); return; }
       if (!driveOnly) { launchRom(romName); return; }
       if (missing) { relinkGameAction(romName, { launch: true }); return; }
       if (syncDownloading.has(romName)) return;
@@ -5625,17 +5628,33 @@ const loadFromSlot = async (slot) => {
 };
 
 // --- Auto save-state (session resume) ---
-// Captured when the page is hidden or closed; local-only (an upload every
-// tab switch otherwise).
+// Captured when the page is hidden or closed and when the game is left;
+// local-only (an upload every tab switch otherwise).
+//
+// A snapshot carries the cart's battery RAM as it was, and restoring it
+// marks that RAM dirty, so the next flush writes it over the save. A
+// snapshot is therefore only offered while the stored save is still the one
+// it was taken with: saveSig is the .sav's signature at capture, and a save
+// written since (in game, or pulled from Drive) retires the snapshot.
 const autoStateKey = (name) => "stateauto:" + name;
+
+const sigOfSave = (data) => (data && data.length ? saveSignature(data) : null);
 
 const persistAutoState = () => {
   if (!currentRomName || !currentOriginalName) return;
   if (linkMode || rollbackMode || netActive()) return; // frame-synced modes
   const bytes = captureStateBytes();
   if (!bytes) return;
-  dbPut(autoStateKey(currentOriginalName), { bytes, ts: Date.now() }).catch(() => {});
+  let sav = null;
+  try { sav = FS.readFile(stripExt(currentRomName) + ".sav"); } catch {}
+  return dbPut(autoStateKey(currentOriginalName),
+               { bytes, ts: Date.now(), saveSig: sigOfSave(sav) }).catch(() => {});
 };
+
+// Snapshots from before saveSig have no proof either way and are not offered.
+const autoStateMatchesSave = async (name, auto) =>
+  auto.saveSig !== undefined &&
+  auto.saveSig === sigOfSave(await dbGet("save:" + name).catch(() => null));
 
 const fmtAgo = (ts) => {
   const m = Math.round((Date.now() - ts) / 60000);
@@ -5655,8 +5674,15 @@ const offerAutoResume = async () => {
     auto = await dbGet(autoStateKey(name));
   } catch {}
   if (!auto || !auto.bytes || name !== currentOriginalName) return;
-  showActionToast("Last session saved " + fmtAgo(auto.ts), "Resume", () => {
+  if (!(await autoStateMatchesSave(name, auto))) return;
+  if (name !== currentOriginalName) return;
+  showActionToast("Last session saved " + fmtAgo(auto.ts), "Resume", async () => {
     if (currentOriginalName !== name) return; // switched games since
+    // The toast outlives the check above; the game may have saved since.
+    if (!(await autoStateMatchesSave(name, auto)) || currentOriginalName !== name) {
+      showToast("The game has saved since — that session is gone");
+      return;
+    }
     showToast(applyStateBytes(auto.bytes) ? "Resumed" : "Couldn't restore the session");
   });
 };
@@ -7859,6 +7885,7 @@ const loadRom = async (romName, originalName, opts = {}) => {
   if (linkMode) await exitLinkMode();
   if (typeof netShutdown === "function" && netMode) await netShutdown();
   if (currentRomName && currentOriginalName) {
+    await persistAutoState(); // where the outgoing game was left
     await storeLastFrame({ force: true }); // the outgoing game's picture
     await persistSave(currentRomName, currentOriginalName);
   }
@@ -9610,7 +9637,8 @@ const unloadGame = async ({ flushSave = true } = {}) => {
   if (!currentRomName || linkMode || rollbackMode || netActive()) return false;
   const romName = currentRomName;
   const originalName = currentOriginalName;
-  // The closing picture, taken while the name is still attached.
+  // The closing picture and session, taken while the name is still attached.
+  if (flushSave) await persistAutoState();
   await storeLastFrame({ force: true });
   // Detach first: once null, no flush path can re-persist this game's save.
   currentRomName = null;

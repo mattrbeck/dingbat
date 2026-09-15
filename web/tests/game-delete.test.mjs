@@ -158,6 +158,8 @@ test("a deleted game offers no Resume, no cheats, and no save states", async () 
   seedGlobals(app, ["A.gba"]);
   seedGame(app, "A.gba");
   app.api.currentOriginalName = "A.gba";
+  // The snapshot was taken with the seeded battery save, so it is offered.
+  app.idb.get("stateauto:A.gba").saveSig = app.runIn("saveSignature(new Uint8Array([7, 7]))");
 
   // An "offer" is a .toast-item with a tappable action; .leaving ones are retired.
   const toast = app.document.getElementById("toast");
