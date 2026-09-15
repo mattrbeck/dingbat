@@ -627,7 +627,10 @@ type
     pass_streak*: int               # consecutive locked passes that stored into a ring (engaging needs 2)
     ring_base*:  array[2, uint32]
     ring_len*:   array[2, uint32]
-    fires_this_frame*: int          # mixer passes since the last frame poll
+    last_pass_cnt*:  int            # pcmDmaCounter at the previous pass (mixer_pass: same slot = replacement)
+    last_pass_clock*: int64         # apu_clock at the previous pass
+    last_frame_w*:   int            # fifo_w where the previous pass's frame starts (render_frame)
+    replace_pass*:   bool           # the pass being rendered replaces the previous pass's frame
     seq_late*:   int                # channels first seen ON without START (a start outside the driver's sequencer)
     engaged*:    bool       # a valid SoundInfo has been observed at least once
     frame_seen*: bool
@@ -637,6 +640,7 @@ type
     compressed_skipped*: int
     dbg_compressed_used*: int   # frames*channels where a BDPCM voice was live
     dbg_hook_fires*: int        # mixer passes seen
+    dbg_replaced*: int          # passes that rewrote the previous pass's slot (mixer_pass)
     dbg_overlay_triggers*: int  # overlay passthrough entries (idle->held)
     dbg_overlay_passes*: int    # mixer passes spent in overlay passthrough
     dbg_unlatches*: int         # fifo_foreign latches reversed by agreement
@@ -675,6 +679,7 @@ type
     lat_prev_src*:   uint32         # DMA cursor at the previous hook
     lat_avg*:        float32        # EMA of the measured latency, APU samples (0 = none yet)
     lat_count*:      int
+    lat_hw_ref*:     int            # the phase estimate the measurements belong to (on_frame: a re-timed DMA restarts them)
     cnt_rate*:   int                # configuration the counter maximum was learnt under
     cnt_spv*:    int
     cnt_max*:        int            # largest pcmDmaCounter seen: the ring's real period

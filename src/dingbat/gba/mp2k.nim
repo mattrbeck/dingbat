@@ -973,7 +973,7 @@ proc pipeline_apu(m: Mp2kHle; sb: int): float32 =
   ## byte the cursor has just passed sits about a refill deep in the queue.
   (float32(MP2K_FIFO_REFILL) + m.pipeline_src()) * float32(APU_SAMPLE_RATE) / m.dma_rate(sb)
 
-proc hw_latency(m: Mp2kHle): int =
+proc hw_latency*(m: Mp2kHle): int =
   ## The hardware's pass-to-DAC latency in APU samples, from where the sound
   ## DMA's replay cursor sits in the pcmBuffer ring at the hook: the samples
   ## it still has to replay before it reaches the slot this pass fills, plus
@@ -1174,8 +1174,21 @@ proc on_frame(m: Mp2kHle; sound_info: uint32) =
     if m.predict:
       m.snapshot_pass(sound_info)
       m.learn_slot_offset()
+      # A DMA the game re-times moves the phase estimate by more than a
+      # FIFO refill's jitter; the latencies measured under the old timing no
+      # longer apply, so they are dropped and the target takes the estimate
+      # until four crossings are in again (Tarzan: Return to the Jungle
+      # re-times at its ninth pass, and an average walking down from the old
+      # latency left its start 35 samples late for two seconds; keeping the
+      # old measurement until new crossings arrive instead measured worse).
+      let hw = m.hw_latency()
+      if hw > 0 and m.lat_hw_ref > 0 and abs(hw - m.lat_hw_ref) > 96:
+        m.lat_count = 0
+        m.lat_avg = 0
+        m.lat_n = 0
+      if hw > 0: m.lat_hw_ref = hw
       m.measure_latency()
-      m.fifo_target = max((if m.lat_count >= 4: int(m.lat_avg) else: m.hw_latency()), MP2K_FIFO_GUARD)
+      m.fifo_target = max((if m.lat_count >= 4: int(m.lat_avg) else: hw), MP2K_FIFO_GUARD)
       m.apply_pending(sound_info)
       m.resync_pending = false
       done = true
@@ -1444,8 +1457,26 @@ proc mixer_pass(m: Mp2kHle; sip: uint32) =
   if m.pass_streak < 1000: inc m.pass_streak
   if not m.engaged and m.pass_streak < 2: return
   inc m.dbg_hook_fires
-  inc m.fires_this_frame
-  if m.fires_this_frame == 1: m.on_frame(sip)
+  # Every pass is rendered. A second pass within a frame's worth of samples
+  # that finds pcmDmaCounter where the previous pass left it writes the
+  # same ring slot again, and the hardware plays the later mix: its frame
+  # replaces the unplayed part of the previous one (GT Championship does
+  # this every twenty frames or so). A pass after the counter moved is a
+  # frame of its own. (Until 2026-09-14 only the first pass of each emulated
+  # frame was rendered, a guard the PC hook needed against helpers inside
+  # the mixer.)
+  let cnt = int(m.rd8(sip + SI_DMA_COUNTER))
+  let nominal = int64(float32(m.rev_spv) * float32(APU_SAMPLE_RATE) /
+                      float32(max(m.pcm_sample_rate, 1)))
+  let same = m.engaged and m.fifo_primed and cnt == m.last_pass_cnt and
+             m.apu_clock - m.last_pass_clock < max(nominal, 1'i64)
+  m.last_pass_cnt = cnt
+  m.last_pass_clock = m.apu_clock
+  if same:
+    inc m.dbg_replaced
+    m.replace_pass = true
+  m.on_frame(sip)
+  m.replace_pass = false
 
 proc mp2k_sound_write*(m: Mp2kHle; a: uint32; w: int; v: uint32) {.noinline.} =
   ## A work-RAM store of `w` bytes of `v` at `a`, inside the bus's sound
@@ -1513,7 +1544,6 @@ proc mp2k_frame_poll*(m: Mp2kHle) =
     m.pass_streak = 0
     bus.snd_wbase = sip
     bus.snd_wlen = 4
-  m.fires_this_frame = 0
   # Frames since a pass last ran (mixer_live); on_frame zeroes it.
   if m.engaged and m.hook_stale < 1000'i32: inc m.hook_stale
 
@@ -1790,6 +1820,29 @@ proc render_one(m: Mp2kHle; accl, accr: float32): tuple[a: float32, b: float32] 
   else: discard
   (fa, fb)
 
+proc render_frame_samples(m: Mp2kHle; level: int) =
+  ## Append the pass's frame to the output FIFO at fifo_w (render_frame).
+  let cap = m.fifo.len div 2
+  let nominal = float32(m.rev_spv) * float32(APU_SAMPLE_RATE) / float32(max(m.pcm_sample_rate, 1))
+  m.last_frame_w = m.fifo_w
+  m.fifo_acc += nominal
+  var n = int(m.fifo_acc)
+  m.fifo_acc -= float32(n)
+  if n > cap - level - 1: n = cap - level - 1
+  m.frame_n = n
+  m.render_voices(n)
+  for i in 0 ..< n:
+    let (a, b) = m.render_one(m.mix_l[i], m.mix_r[i])
+    let wi = (m.fifo_w mod cap) * 2
+    m.fifo[wi] = a
+    m.fifo[wi + 1] = b
+    inc m.fifo_w
+  # keep the indices small
+  if m.fifo_r >= cap:
+    m.fifo_r -= cap
+    m.fifo_w -= cap
+    m.last_frame_w -= cap
+
 proc render_frame(m: Mp2kHle) =
   ## Render the pending pass's whole frame into the output FIFO — the
   ## double buffer the driver itself keeps. The frame is exactly the pass's
@@ -1817,6 +1870,14 @@ proc render_frame(m: Mp2kHle) =
       inc m.fifo_w
     level = m.fifo_w - m.fifo_r
   let nominal = float32(m.rev_spv) * float32(APU_SAMPLE_RATE) / float32(max(m.pcm_sample_rate, 1))
+  if m.replace_pass:
+    # The pass rewrote the previous pass's slot (mixer_pass): its frame
+    # takes the place of whatever of the previous frame is still unplayed,
+    # and the level control, which already placed that frame, stays out.
+    m.fifo_w = max(m.last_frame_w, m.fifo_r)
+    level = m.fifo_w - m.fifo_r
+    m.render_frame_samples(level)
+    return
   if level > m.fifo_target + int(nominal) * 2:
     # Nobody is draining (substitution stepped aside for a foreign stream,
     # or the game's own audio is being passed through): drop the stale
@@ -1907,22 +1968,7 @@ proc render_frame(m: Mp2kHle) =
   when defined(mp2kwav):
     # capture index at which this frame's first sample will be emitted
     dbgHookCapIdx.add mp2kWavCapture.len div 2 + level
-  m.fifo_acc += nominal
-  var n = int(m.fifo_acc)
-  m.fifo_acc -= float32(n)
-  if n > cap - level - 1: n = cap - level - 1
-  m.frame_n = n
-  m.render_voices(n)
-  for i in 0 ..< n:
-    let (a, b) = m.render_one(m.mix_l[i], m.mix_r[i])
-    let wi = (m.fifo_w mod cap) * 2
-    m.fifo[wi] = a
-    m.fifo[wi + 1] = b
-    inc m.fifo_w
-  # keep the indices small
-  if m.fifo_r >= cap:
-    m.fifo_r -= cap
-    m.fifo_w -= cap
+  m.render_frame_samples(level)
 
 proc render_sample*(m: Mp2kHle): tuple[l: int16, r: int16] =
   ## One (FIFO A, FIFO B) sample at the APU rate (32768 Hz), replacing the

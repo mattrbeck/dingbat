@@ -233,6 +233,41 @@ windowed lag:
   content.
 * **Top Gear All Japan GT** and **Lilo & Stitch 2** were already below 0.3.
 
+## 2026-09-14 (later): every pass rendered, latency restart on DMA re-timing, a CI test
+
+**Every pass is rendered.** The old one-pass-per-frame rule was a guard the PC hook needed against helpers inside the mixer. Counting extra passes over the regression list found 170 in 875,126, so they are rare, and they come in two kinds:
+* 139 find pcmDmaCounter unmoved, so they write the same ring slot again and the hardware plays the later mix. That pass's frame now replaces the unplayed part of the previous frame. GT Championship does this every twenty frames or so.
+* 31 come after the counter moved, and they append a frame.
+
+Run 50 replaced 448 passes in 39 ROMs. An ablation against skipping and appending measured it neutral on the titles that moved.
+
+**The latency measurements restart when the game re-times its DMA.** The trigger is a jump of more than 96 samples in the phase estimate. Before, the average walked down from the old timing over about forty passes, and Tarzan: Return to the Jungle started 35 samples late for two seconds. Two variants were tried and dropped, using the 168 titles that moved between runs 43 and 47:
+
+| Variant | Mean xcorr0 change | Better | Worse |
+|---|---|---|---|
+| Restart | +0.086 | 91 | 17 |
+| Keep the old latency until four new crossings | +0.065 | 86 | 33 |
+| Restart plus the level following target moves of 8 or more | +0.043 | 100 | 68 |
+
+| Run | Engaged | Median xcorr0 | xcorr0 > 0.5 |
+|---|---|---|---|
+| 43 | 1013 | 0.924 | 750 |
+| 50 | 1013 | 0.933 | 765 |
+
+Run 50 against run 43: 93 titles better, 18 worse. The largest regressions checked by windowed lag:
+* **Atlantis and Yu Yu Hakusho Tournament Tactics** have one audible second in the capture. It is unchanged on Atlantis and better on Yu Yu Hakusho (0.93 against 0.86).
+* **Zettai Zetsumei Den Chara Suji-san** is a real timing regression. Its later seconds run 17–18 samples early after a re-timing sends the target back to the phase estimate.
+
+`tests/mp2k_pass_test.nim` (`nimble test_mp2kpass`, in CI) drives the trigger and the level control with synthetic stores, no ROMs:
+* lock and ring;
+* a song-change lock, and ring stores with no lock;
+* a mono driver's scratch half, and a DMA playing from outside pcmBuffer;
+* a state load inside a pass;
+* same-slot and new-slot passes;
+* a skipped V-blank, a smaller level jump, and DMA re-timing.
+
+Breaking the replacement or the two-pass engage rule fails seven of its 23 checks.
+
 ## Why span-matched
 
 `-d:mp2kwav` (`src/dingbat/gba/apu.nim`) gates the REAL FIFO capture on the same

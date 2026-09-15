@@ -40,8 +40,8 @@ jobs:
             sleep 10
           done
           exit 1
-      - name: Build test binaries (all nine, in parallel)
-        # Nine independent `nim c` runs in parallel; the steps below only run
+      - name: Build test binaries (in parallel)
+        # Independent `nim c` runs in parallel; the steps below only run
         # what this built. Flag rationale lives in the script.
         shell: bash
         run: .github/scripts/build-tests.sh
@@ -66,6 +66,13 @@ jobs:
         # scan must produce byte-identical sprite_pixels. No ROMs.
         shell: bash
         run: ./dingbat_ppuobjlist_test
+      - name: MP2K HLE pass detection and FIFO level control
+        # The driver's stores sent through the bus (lock, ring, song-change
+        # locks, a mono driver's scratch half, state loads, same-slot passes,
+        # skipped V-blanks, DMA re-timing) against the rules the archive
+        # census and sweeps established. No ROMs.
+        shell: bash
+        run: ./dingbat_mp2kpass_test
       - name: Save-state format compatibility
         # Loads the reference states in tests/states and pins every EventType
         # ordinal (the scheduler serializes events by ordinal) and the legacy

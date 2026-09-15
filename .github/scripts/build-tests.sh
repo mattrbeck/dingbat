@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build every test binary at once: nine independent `nim c` runs, and Nim's
+# Build every test binary at once: independent `nim c` runs, and Nim's
 # semantic pass is single-threaded per invocation.
 #
 # Each target gets its own --nimcache: Nim keys the default cache on the
@@ -40,6 +40,7 @@ build rewind          dingbat_rewind_test           tests/rewind_test.nim
 build lcdresponse     dingbat_lcdresponse_test      tests/lcdresponse_test.nim
 build savefooter      dingbat_savefooter_test       tests/savefooter_test.nim
 build clipreplay      dingbat_clipreplay_test       tests/clip_replay_test.nim
+build mp2kpass        dingbat_mp2kpass_test         tests/mp2k_pass_test.nim
 
 # Wait on every build even after one fails so all broken targets are reported.
 rc=0

@@ -236,6 +236,7 @@ proc main() =
     "engaged_ever": engaged_ever,
     "engage_frame": engage_frame,
     "hook_fires": emu.mp2k.dbg_hook_fires,
+    "replaced": emu.mp2k.dbg_replaced,
     "seq_late": emu.mp2k.seq_late,
     "retrig": dbgRetrigCount,
     "mono": emu.mp2k.mono_mode,
