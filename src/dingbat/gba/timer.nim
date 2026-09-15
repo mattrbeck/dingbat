@@ -50,6 +50,7 @@ proc new_timer*(gba: GBA): Timer =
 
 proc get_current_tm(tim: Timer; num: int): uint16 =
   if tim.tmcnt[num].enable and not tim.tmcnt[num].cascade:
+    tim.gba.bus.volatile_read = true  # counts without events
     # Include un-ticked bus cycles: a DMA reading the timer runs inside event
     # dispatch, where catch_up is suppressed, and each transfer must see the
     # live count (AGS aging cartridge DMA-captures consecutive timer values).

@@ -60,11 +60,10 @@ The ROMs never stop, so the frame count is the exit condition.
 ```
 
 ~1.5 s with waitloop detection healthy, ~70 s without. `DINGBAT_NO_WAITLOOP=1` turns
-idle-loop fast-forward off. The fast-forward snaps `scheduler.cycles` to the next pending
-event, so any row that times a spin loop (the Misc "H-blank bit start" flips poll DISPSTAT
-and time gaps with TM0) can read back the skip rather than the loop; compare with it off
-before concluding a row is a timing bug. `-d:gbaskipcap=<n>` bounds the skip by a
-constant instead of the PSG's next deadline. Per-row verdicts: `docs/mgba-suite-verdicts.md`.
+idle-loop fast-forward off. The fast-forward is exact (whole iterations of the loop's
+measured period, never past an event; `waitloop.nim` "Transparency"), so every row must
+read the same either way — a difference is a detector bug, not a timing result. Per-row
+verdicts: `docs/mgba-suite-verdicts.md`.
 
 **Video tests.** The auto-run build skips the interactive Video suite. `tests/mgba_video.nim`
 drives upstream's interactive `suite.gba` through its menus and diffs each test's actual

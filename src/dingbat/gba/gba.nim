@@ -1,7 +1,7 @@
 # GBA emulator main file
 # All types are declared here; implementation files are `include`d.
 
-import std/[options, times, os, strutils, math, sets]
+import std/[options, times, os, strutils, math, sets, tables]
 from std/bitops import countLeadingZeroBits, countTrailingZeroBits
 import ../common/[util, input, scheduler, emu, resampler, serialize, timestretch, cheats]
 when defined(test_harness):
@@ -275,6 +275,10 @@ type
     # from there while the CPU runs off other memory)
     rom_next_addr*:  uint32
     rom_free_since*: CycleCount
+    # A read whose value changes with time and no scheduler event (a running
+    # timer's count, a PSG status, an EEPROM ready poll) happened since the
+    # waitloop detector last looked; such a loop is never skipped.
+    volatile_read*:  bool
     # Second burst tracker for DMA: src and dst streams interleave on the ROM
     # bus yet each stays sequential, without needing back-to-back bus cycles
     rom_next_addr2*: uint32
@@ -369,6 +373,16 @@ type
     last_non_waitloop*:          uint32
     last_waitloop*:              uint32
     entered_waitloop*:           bool
+    # A waitloop's first memory load (0xFFFFFFFF: none), per cached start
+    waitloop_first_load*:        Table[uint32, uint32]
+    last_waitloop_first_load*:   uint32
+    # Exact-skip bookkeeping (see waitloop.nim "Transparency"): the loop
+    # whose branch was seen last, the bus time it was seen and the period
+    # since the visit before; the dispatch count at that visit
+    wl_addr*:                    uint32
+    wl_time*:                    int64
+    wl_period*:                  int64
+    wl_dispatch_mark*:           uint32
     waitloop_instr_lut*:         seq[WLInstrKind]
 
   SpritePixel* = object
@@ -875,6 +889,10 @@ type
                            ## identity hash exactly this range
 
   GBA* = ref object of EmuObj
+    # Events dispatched so far (wrapping) and cpu.r[15] at the last one;
+    # the waitloop detector's staleness test (waitloop.nim)
+    dispatch_count*:   uint32
+    last_dispatch_pc*: uint32
     bios_path*:  string
     rom_path*:   string
     run_bios*:   bool
@@ -1132,6 +1150,9 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
   # Non-owning capture: the closure lives on the GBA's scheduler
   let gba {.cursor.} = gba
   result = proc(kind: EventType) =
+    # Waitloop exactness: when, and at which PC, the last event ran
+    inc gba.dispatch_count
+    gba.last_dispatch_pc = gba.cpu.r[15]
     case kind
     of etAPUFrameSeq:   gba.apu.tick_frame_sequencer()
     of etAPUSample:     gba.apu.get_sample()
