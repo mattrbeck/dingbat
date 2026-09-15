@@ -20,41 +20,97 @@ counts: a change that shifts the poll-loop phase can move every Flip row by
 one skip quantum (±11) and regress two near-misses from 1 cycle out to 10
 while every per-section count stays identical.
 
-## `Hblank` (out[1]) — a real 3-cycle defect
+## `Hblank` (out[1]) — 3 cycles of code shape, not PPU timing
 
 The test halts twice and reads TM0CNT_L after each wake; the row is the
-difference: the TM0 delta between two consecutive HBlank-IRQ halt-wakes at identical
-code points, so wake-to-read latency cancels and codegen cannot influence
-it. The constant is `0x4D0 = 1232 = 308 dots × 4`, the GBATEK scanline.
-Dingbat reports `0x4D3`, three cycles long, invariant across builds. The
-PPU schedules the line as `960 + 272 = 1232` exactly, so the IRQ *period* is
-right and the three cycles are an asymmetry between the first and second
-halt-wake. `IRQ_GATE_DELAY` (0/9/12/15 swept) does not move it. Instrument
-the HLE `Halt` SWI's `HALT_RETURN_COST` deferral and
-`hle_charge_units_interruptible` against the wake path, not the PPU.
+difference. The constant is `0x4D0 = 1232`, one scanline. Dingbat reads
+`0x4D3` under the HLE BIOS and under the real one.
 
-## `Flip 1–6` — the waitloop skip resolution
+Both halts wake at the same line phase (1012) here, so the IRQ period is
+right. The three cycles are in the code the compiler emitted after each
+`Halt()`: after the second one it placed three one-cycle Thumb
+`movs` register setups (IWRAM) ahead of the `ldrh` that reads TM0, and after
+the first none. The second read lands 103 cycles after its wake, the first
+100. Hardware reports exactly 1232 anyway.
 
-The test spins on a DISPSTAT bit, then reads TM0CNT_L. The idle-loop detector fast-forwards that shape, so the edge is seen at
-whatever bound `fast_forward_bounded` was given, not where the loop would
-have sampled it. Evidence that the rows are quantized rather than mistimed:
-hardware measures the 226-cycle HBlank-high window (1232 − 1006, both
-GBATEK constants; `HBLANK_FLAG_DELAY = 46` reproduces both) as 229 and 227
-on successive passes; dingbat measures 228 and 244 — a 16-cycle spread no
-PPU phase error can produce. Every difference is a multiple of the skip
-granularity. `-d:gbaskipcap=N` bounds the skip by a constant instead of the
-PSG's soonest deadline (a real Thumb spin loop resolves ~15 cycles, which is
-the physically defensible bound); sweeping N against these rows is an
-accuracy/perf trade that wants a retired-instructions number alongside it.
+Upstream's earlier binary of the same source (built before
+`mgba-emu/suite@a58437f3`, whose constants were measured for it) has no
+extra instructions after either halt; dingbat reads 1232 there and hardware
+1233. So in both binaries hardware minus dingbat is 1 mod 4 (−3 and +1),
+while dingbat's own halt entries sit at the same phase mod 4 for both halts
+(both binaries), which rules out a wake that keeps the CPU's phase across
+the halt. What does absorb it is not identified; it lives in the halt
+entry/wake path that Timing and Timer count-up are calibrated against, and
+needs a hardware probe that varies the instruction count after a halt.
 
-## `DMA Prefetch Break`
+## `Flip 1–6` — poll-loop sampling, after an idle-loop exit fix
 
-`out[0] = 0x10000000 + 4 × iterations`: how many iterations of a tight
-ROM-resident read loop over open-bus space fit before a running HBlank DMA
-puts a value on the bus. Hardware `0x10002A94`, dingbat `0x10002478`. The
-quantity depends on the loop's codegen and on the same skip resolution as
-the Flip rows (a scheduler-event-count change moved it without touching
-prefetch or open-bus code). Not a usable accuracy signal as built.
+Each flip spins on DISPSTAT bit 1 and reads TM0 when it changes. Until
+2026-09-15 these rows mostly measured the idle-loop skip: the Thumb
+conditional-branch handler judged the loop before evaluating the branch, so
+the not-taken branch that leaves the loop could still be called a waitloop
+and fast-forward past the exit to the next deadline (a PSG step, up to ~500
+cycles). Only a taken branch is judged now (`thumb.nim`), which also leaves
+Emerald's overworld 1% cheaper in retired instructions.
+
+| Row | Before | Now | Expected |
+|---|---|---|---|
+| Flip 1 | 0x9D | 0x80 | 0x87 |
+| Flip 2 | 0x3D2 | 0x3EF | 0x3EC |
+| Flip 3 | 0xEF | 0xE2 | 0xE5 |
+| Flip 4 | 0x3E1 | 0x3EE | 0x3EB |
+| Flip 5 | 0xFF | 0xE2 | 0xE3 |
+| Flip 6 | 0x3E0 | 0x3F0 | 0x3F3 |
+
+The remaining offsets are within the poll loop's own period (8 cycles in
+IWRAM). With the skip the edge is seen at once; hardware sees it at the
+loop's next read, so its rows jitter by up to a period (2+3 sums to 1233,
+4+5 to 1230). Skipping off entirely (`DINGBAT_NO_WAITLOOP=1`) gives
+0x80/0x3ED/0xE3/0x3F3/0xE3/0x3E9: the cumulative edge times match hardware
+on flips 4–5 and read 6–10 cycles early on 1–3 and 6, which is the
+calibration read above plus the loop phase. Passing these rows needs the
+`Hblank` row's missing piece first.
+
+## `DMA Prefetch Break` — a phase-alignment row
+
+`out[0] = 0x10000000 + 4 × reads`: a 7-instruction Thumb ROM loop reads open
+bus until one read returns an HBlank DMA's last value instead of the
+prefetched opcode. A DMA's value is readable only by the instruction right
+after it, so the loop exits at the first line whose DMA lands just before
+the `ldmia`. The loop takes 36 cycles here; 1232 mod 36 = 8, so the landing
+point walks 8 cycles per line and the exit line depends on the loop's phase
+at line 0.
+
+Dingbat exits at line 9 (2641 reads, `0x10002944`) under the HLE BIOS and at
+line 1 (`0x10002530`) under the real BIOS; hardware's 2725 reads is about
+line 11½ at 36 cycles, which no single landing window reproduces, so the
+iteration cost or the VBlankIntrWait return phase differs as well. One
+constant cannot separate the two. Not a usable accuracy signal as built.
+
+## Video tests (interactive only)
+
+The Video suite has no automated verdict and the auto-run ROM the runner
+fetches skips it. `tests/mgba_video.nim` drives upstream's interactive build
+through its menus and diffs each test's "actual" frame against its
+"expected" one. Six of seven are pixel-exact; the three that did not match
+before 2026-09-15 are now latches in `ppu.nim` (see `bg_enable_hist`,
+`win0_inside`, `oam_view` in `gba.nim`):
+
+* **Layer toggle / Layer toggle 2** — a BG draws while DISPCNT enables it
+  now and at a sample 34 cycles into the line two lines back: enable shows
+  on the third line, disable at once. The sample point is bracketed by
+  "Layer toggle 2" under this core's CPU timing (a handler's enable 29
+  cycles into a line counts, a poll loop's 39 cycles in does not).
+* **OAM Update Delay** — sprites draw from OAM as it stood when the previous
+  line was drawn.
+* **Window offscreen reset** — WIN0V/WIN1V set a flag where VCOUNT equals Y1
+  and clear it where it equals Y2; a Y2 VCOUNT never reaches leaves the
+  window open into the next frame.
+
+Layer toggle 2 still differs in 16 pixels: the first tile of lines 65 and
+146, where the enable lands mid-line. The expected screen draws those eight
+pixels shifted two to the right (with pixels 0–1 transparent on line 65),
+which neither whole-line rendering nor a per-pixel enable reproduces.
 
 ## Closed rows, for the record
 

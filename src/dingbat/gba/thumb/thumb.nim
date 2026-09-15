@@ -36,8 +36,12 @@ proc thumb_software_interrupt*(cpu: CPU; instr: uint32) =
 proc thumb_conditional_branch*[cond: static uint32](cpu: CPU; instr: uint32) =
   let offset      = cast[int32](cast[int8](uint8(bits_range(instr, 0, 7))))
   let branch_dest = uint32(int(cpu.r[15]) + offset * 2)
-  cpu.analyze_loop(branch_dest, cpu.r[15] - 4)
   if cpu.check_cond(cond):
+    # Only a taken branch goes round the loop again. The branch that leaves
+    # it must not be judged: a waitloop verdict there fast-forwards past the
+    # exit to the next deadline (mGBA suite "H-blank bit start" Flip rows,
+    # Video tests "Layer toggle 2").
+    cpu.analyze_loop(branch_dest, cpu.r[15] - 4)
     discard cpu.set_reg(15, branch_dest)
   else:
     cpu.step_thumb()

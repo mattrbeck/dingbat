@@ -62,10 +62,18 @@ The ROMs never stop, so the frame count is the exit condition.
 ~1.5 s with waitloop detection healthy, ~70 s without. `DINGBAT_NO_WAITLOOP=1` turns
 idle-loop fast-forward off. The fast-forward snaps `scheduler.cycles` to the next pending
 event, so any row that times a spin loop (the Misc "H-blank bit start" flips poll DISPSTAT
-and time gaps with TM0) reads back the skip's sampling resolution; set it before
-concluding a row is a timing bug. With the skip off the six flips' residuals are
-non-uniform in sign, so the remainder is real DISPSTAT/H-blank timing error, unattributed.
-`-d:gbaskipcap=<n>` bounds the skip by a constant instead of the PSG's next deadline.
+and time gaps with TM0) can read back the skip rather than the loop; compare with it off
+before concluding a row is a timing bug. `-d:gbaskipcap=<n>` bounds the skip by a
+constant instead of the PSG's next deadline. Per-row verdicts: `docs/mgba-suite-verdicts.md`.
+
+**Video tests.** The auto-run build skips the interactive Video suite. `tests/mgba_video.nim`
+drives upstream's interactive `suite.gba` through its menus and diffs each test's actual
+frame against its expected one (exit 1 on any difference; PPMs with a second argument):
+
+```
+nim c -d:test_harness -d:release --path:src -o:mgba_video tests/mgba_video.nim
+./mgba_video <interactive suite.gba> [ppm dir]
+```
 
 **Argument order differs in one section.** Every section prints failures through a local
 `doResult()` (`mattrbeck/mgba-suite-auto`, one per `src/*.c`). `src/misc-edge.c` passes
