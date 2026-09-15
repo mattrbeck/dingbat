@@ -9,7 +9,10 @@ proc `[]`*(mmio: MMIO; address: uint32): uint8 =
   let io_addr = 0xFFFFFF'u32 and address
   case io_addr
   of 0x000..0x055: mmio.gba.ppu[io_addr]
-  of 0x060..0x0A7: mmio.gba.apu[io_addr]
+  of 0x060..0x0A7:
+    # PSG state advances on lazily caught-up deadlines, not events
+    mmio.gba.bus.volatile_read = true
+    mmio.gba.apu[io_addr]
   of 0x0B0..0x0DF: mmio.gba.dma[io_addr]
   of 0x100..0x10F: mmio.gba.timer[io_addr]
   of 0x120..0x12B, 0x134..0x15B: mmio.gba.serial[io_addr]

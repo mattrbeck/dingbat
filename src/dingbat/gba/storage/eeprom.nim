@@ -95,6 +95,7 @@ method `[]`*(ep: EEPROM; address: uint32): uint8 =
     return value
   # Ready poll (GBATEK: read "until Bit 0 of the returned data becomes 1
   # (Ready)"): 0 while a previous write is still programming, 1 once settled.
+  ep.gba_ref.bus.volatile_read = true  # settles by the clock, not an event
   return if ep.eeprom_now() < ep.busy_until: 0'u8 else: 1'u8
 
 method `[]=`*(ep: EEPROM; address: uint32; value: uint8) =

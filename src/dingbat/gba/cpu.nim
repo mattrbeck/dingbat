@@ -1,9 +1,5 @@
 # CPU implementation (included by gba.nim)
 
-when defined(gbaskipcap):
-  const gbaskipcap* {.intdefine.}: int = 4
-    ## Cycles an idle-loop skip may advance at once (see the waitloop path).
-
 proc mode_bank*(m: CpuMode): int =
   # `m` is guest-controlled (SPSR mode field, MSR CPSR) and can hold any
   # 5-bit pattern (Prince of Tennis 2004 returns with SPSR mode 0x1E).
@@ -329,6 +325,30 @@ when defined(gsprobe):
   var gsProbeLog*: seq[(uint32, uint32, uint32, uint32, uint32, uint32)] = @[]
   var gsProbeIn*: bool
 
+proc waitloop_skip(cpu: CPU; remaining: int) {.noinline.} =
+  ## Skip whole iterations of the loop's period, stopping at or before the
+  ## next event (waitloop.nim "Transparency"). The loop is back at its first
+  ## instruction at `boundary`; after k more iterations it is there again at
+  ## boundary + k*period with nothing else changed, so time and the
+  ## time-anchored bus state move by that much. An event exactly on the
+  ## landing cycle dispatches there, as a real tick would. Out of line: the
+  ## per-instruction path in tick sits on the inlining threshold.
+  cpu.entered_waitloop = false
+  let s = cpu.gba.scheduler
+  let boundary = s.cycles + CycleCount(remaining)
+  if boundary >= s.next_event:
+    s.tick(remaining)
+    return
+  s.cycles = boundary
+  let period = CycleCount(cpu.wl_period)
+  let k = (s.next_event - boundary) div period
+  if k > 0:
+    let adv = k * period
+    s.cycles = boundary + adv
+    cpu.gba.bus.rom_free_since += adv
+    cpu.wl_time += int64(adv)
+    if s.cycles == s.next_event: s.call_current()
+
 proc tick*(cpu: CPU) =
   # IRQ before the IntrWait re-halt check: the handler must run (and set the
   # BIOS mirror flags) or IntrWait re-halts forever.
@@ -420,21 +440,7 @@ proc tick*(cpu: CPU) =
     cpu.gba.bus.cycles = 0
     cpu.gba.bus.synced = 0
     if cpu.entered_waitloop:
-      # The skip length is the idle loop's polling resolution. The PSG
-      # waveform deadlines are not in evbuf (gba/apu.nim) but must still
-      # bound the skip, or DISPSTAT-polling timing rows drift (mGBA suite
-      # "H-blank bit start"). Catching the channels up first keeps every
-      # deadline strictly ahead of scheduler.cycles, which
-      # fast_forward_bounded needs to make progress.
-      when defined(gbaskipcap):
-        # Bound the skip by a constant instead (a Thumb spin loop resolves
-        # ~15 cycles); no catch-up needed since the bound is already ahead.
-        cpu.gba.scheduler.fast_forward_bounded(
-          cpu.gba.scheduler.cycles + CycleCount(gbaskipcap))
-      else:
-        cpu.gba.apu.apu_catchup_all()
-        cpu.gba.scheduler.fast_forward_bounded(cpu.gba.apu.apu_next_step())
-      cpu.entered_waitloop = false
+      cpu.waitloop_skip(remaining)
     else:
       cpu.gba.scheduler.tick(remaining)
   else:

@@ -102,11 +102,12 @@ proc parse_wl_instr*(kind: WLInstrKind; instr: uint16): Option[WLParsed] =
   else:
     none(WLParsed)
 
-proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
+const WL_NO_LOAD = 0xFFFFFFFF'u32
+
+proc judge_loop(cpu: CPU; start_addr: uint32; end_addr: uint32) =
   # Analyze only when the same conditional-branch target arrives twice in a
   # row (branch_dest; the defer records every call's target).
   defer: cpu.branch_dest = start_addr
-  if not cpu.attempt_waitloop_detection: return
   if start_addr != cpu.branch_dest: return
   if not (start_addr < end_addr and
           (end_addr - start_addr) >= 2 and
@@ -123,6 +124,7 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
       return
     if start_addr in cpu.identified_waitloops:
       cpu.last_waitloop = start_addr
+      cpu.last_waitloop_first_load = cpu.waitloop_first_load.getOrDefault(start_addr, WL_NO_LOAD)
       cpu.entered_waitloop = true
       return
     if start_addr in cpu.identified_non_waitloops:
@@ -130,6 +132,7 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
       return
   var written_bits: uint16 = 0
   var never_write: uint16  = 0
+  var first_load = WL_NO_LOAD
   var cur_addr = start_addr
   while cur_addr < end_addr:
     let instr = uint16(cpu.gba.bus.read_half_internal(cur_addr))
@@ -141,6 +144,9 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
         cpu.last_non_waitloop = start_addr
       return
     let p = parsed.get
+    if first_load == WL_NO_LOAD and
+       kind in {wlMultipleLoadStore, wlLoadStoreHalfword, wlLoadStoreImmediateOffset}:
+      first_load = cur_addr
     never_write = never_write or (p.read_bits and not written_bits)
     # Fold in this instruction's writes before checking, so a read-modify-
     # write of one register (subs r2, #1) counts as loop-carried.
@@ -158,5 +164,47 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
     cur_addr += 2
   if cacheable:
     cpu.identified_waitloops.incl(start_addr)
+    cpu.waitloop_first_load[start_addr] = first_load
     cpu.last_waitloop = start_addr
+  cpu.last_waitloop_first_load = first_load
   cpu.entered_waitloop = true
+
+# Transparency. A skip must leave the game exactly where running the loop
+# would have: the same instruction at the same cycle, with every event
+# dispatched at its own cycle. So cpu.tick advances only whole iterations of
+# the loop's measured period, stops short of the next event, and runs the
+# iteration that crosses the event for real. That holds only when
+#   - the loop has run two consecutive iterations of equal period (a DMA
+#     stall or a prefetch warm-up changes it),
+#   - no event ran between the loop reading its state and taking the branch
+#     (otherwise the branch acts on a value the event has since replaced),
+#   - it read nothing that changes with time but not with an event.
+# A verdict that fails any of these runs the next iteration at real speed.
+proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
+  if not cpu.attempt_waitloop_detection: return
+  cpu.judge_loop(start_addr, end_addr)
+  if not cpu.entered_waitloop: return
+  # Consecutive verdicts on one loop are consecutive iterations: the period,
+  # the dispatches and the volatile reads below are all since the last one.
+  let t = int64(cpu.gba.bus.sched.cycles) + int64(cpu.gba.bus.cycles)  # bus_now
+  let same = start_addr == cpu.wl_addr
+  let period = if same: t - cpu.wl_time else: -1'i64
+  let stable = same and period > 0 and period == cpu.wl_period
+  cpu.wl_addr = start_addr
+  cpu.wl_time = t
+  cpu.wl_period = period
+  let dispatched = cpu.gba.dispatch_count != cpu.wl_dispatch_mark
+  cpu.wl_dispatch_mark = cpu.gba.dispatch_count
+  let volatile = cpu.gba.bus.volatile_read
+  cpu.gba.bus.volatile_read = false
+  var fresh = true
+  if dispatched:
+    # r15 reads instruction + 4 while an instruction runs (a catch-up at its
+    # read) and next instruction + 4 at the tick that ends it, so events
+    # that ran at PCs start+4 .. first_load+4 all preceded the first read
+    let last = if cpu.last_waitloop_first_load == WL_NO_LOAD: end_addr
+               else: cpu.last_waitloop_first_load
+    let pc = cpu.gba.last_dispatch_pc
+    fresh = pc >= start_addr + 4 and pc <= last + 4
+  if not (stable and fresh and not volatile):
+    cpu.entered_waitloop = false

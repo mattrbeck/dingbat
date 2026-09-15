@@ -39,37 +39,48 @@ extra instructions after either halt; dingbat reads 1232 there and hardware
 1233. So in both binaries hardware minus dingbat is 1 mod 4 (−3 and +1),
 while dingbat's own halt entries sit at the same phase mod 4 for both halts
 (both binaries), which rules out a wake that keeps the CPU's phase across
-the halt. What does absorb it is not identified; it lives in the halt
+the halt, and a phase-dependent cost on timer reads breaks the Timing
+section for every non-zero table. What does absorb it is not identified; it lives in the halt
 entry/wake path that Timing and Timer count-up are calibrated against, and
 needs a hardware probe that varies the instruction count after a halt.
 
-## `Flip 1–6` — poll-loop sampling, after an idle-loop exit fix
+## `Flip 1–6` — the constants disagree with themselves
 
 Each flip spins on DISPSTAT bit 1 and reads TM0 when it changes. Until
-2026-09-15 these rows mostly measured the idle-loop skip: the Thumb
-conditional-branch handler judged the loop before evaluating the branch, so
-the not-taken branch that leaves the loop could still be called a waitloop
-and fast-forward past the exit to the next deadline (a PSG step, up to ~500
-cycles). Only a taken branch is judged now (`thumb.nim`), which also leaves
-Emerald's overworld 1% cheaper in retired instructions.
+2026-09-15 these rows mostly measured the idle-loop skip, which was not
+transparent: it judged the branch that leaves a loop, and it landed on the
+next event's cycle rather than on the loop's own iteration grid. The skip is
+exact now (`waitloop.nim` "Transparency"); every row reads the same with
+`DINGBAT_NO_WAITLOOP=1`.
 
 | Row | Before | Now | Expected |
 |---|---|---|---|
 | Flip 1 | 0x9D | 0x80 | 0x87 |
-| Flip 2 | 0x3D2 | 0x3EF | 0x3EC |
-| Flip 3 | 0xEF | 0xE2 | 0xE5 |
-| Flip 4 | 0x3E1 | 0x3EE | 0x3EB |
-| Flip 5 | 0xFF | 0xE2 | 0xE3 |
-| Flip 6 | 0x3E0 | 0x3F0 | 0x3F3 |
+| Flip 2 | 0x3D2 | 0x3ED | 0x3EC |
+| Flip 3 | 0xEF | 0xE3 | 0xE5 |
+| Flip 4 | 0x3E1 | 0x3F3 | 0x3EB |
+| Flip 5 | 0xFF | 0xE3 | 0xE3 (passes) |
+| Flip 6 | 0x3E0 | 0x3E9 | 0x3F3 |
 
-The remaining offsets are within the poll loop's own period (8 cycles in
-IWRAM). With the skip the edge is seen at once; hardware sees it at the
-loop's next read, so its rows jitter by up to a period (2+3 sums to 1233,
-4+5 to 1230). Skipping off entirely (`DINGBAT_NO_WAITLOOP=1`) gives
-0x80/0x3ED/0xE3/0x3F3/0xE3/0x3E9: the cumulative edge times match hardware
-on flips 4–5 and read 6–10 cycles early on 1–3 and 6, which is the
-calibration read above plus the loop phase. Passing these rows needs the
-`Hblank` row's missing piece first.
+No deterministic model reproduces these constants for this binary. The
+function is IWRAM Thumb; each flip is an entry path, a 4-instruction poll
+loop (8 cycles) and an exit path. Flips 3 and 5 execute byte-identical
+code, and by the constants themselves (flip 3 + flip 4 = 229 + 1003 = 1232,
+one scanline) their loops start at the same phase of the line. Hardware
+still reports 229 for one and 227 for the other, a difference that is not a
+multiple of the loop's period. Consistent with that:
+
+- A replay of the traced loops with any shift of the set edge, the clear
+  edge, the calibration read, the loop period, the entry cost or the
+  read-to-TM0 latency (a brute force over ±12 cycles each) matches
+  none of the six rows at once.
+- A phase-dependent (mod 4) extra cost on DISPSTAT reads brings the rows no
+  closer than 9 cycles of total error; one on timer reads breaks the Timing
+  and Timer IRQ sections for every non-zero table.
+
+The constants were measured by `mgba-emu/suite@a58437f3` on its own build;
+the auto-run fork is a separate build of the same source and may place this
+code differently. Settling the rows needs the fork's binary run on hardware.
 
 ## `DMA Prefetch Break` — a phase-alignment row
 
