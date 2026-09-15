@@ -313,6 +313,8 @@ proc render_three_ways(emu: GBA; bg: int; cov: var Coverage;
   const CANARY = 0x5A'u8
   if bg < 3:
     for i in 0 ..< 16: ppu.layer_palettes[bg + 1][i] = CANARY
+  # scanline() derives the drawn enables; the renderers are called directly
+  ppu.line_bg_enables = (uint16(ppu.dispcnt) shr 8) and 0xF
   for i in 0 ..< 240: ppu.layer_palettes[bg][i] = 0xE7
   ppu.render_reg_bg(bg)
   let fast = ppu.layer_palettes[bg]

@@ -273,6 +273,7 @@ proc test_differential(emu: GBA; tables: int) =
     if (dc and 0x0020'u16) != 0: inc cov_hbfree
     ppu.mosaic = cast[MOSAIC](uint16(nxt() and 0xFFFF))
     ppu.oam_touched()
+    ppu.latch_oam()
     ppu.obj_list_rebuilds = 0
     for line in 0 .. 159:
       let listed = render_line(ppu, line, false)
@@ -315,6 +316,7 @@ proc test_budget(emu: GBA; tables: int) =
     ppu.dispcnt = cast[DISPCNT](rand_dispcnt())
     ppu.mosaic = cast[MOSAIC](uint16(nxt() and 0xFFFF))
     ppu.oam_touched()
+    ppu.latch_oam()
     ppu.obj_list_rebuilds = 0
     for l in max(0, line - 4) .. min(159, line + 4):
       let listed = render_line(ppu, l, false)
@@ -345,6 +347,7 @@ proc test_midframe(emu: GBA; frames: int) =
     ppu.dispcnt = cast[DISPCNT](rand_dispcnt())
     ppu.mosaic = cast[MOSAIC](uint16(nxt() and 0xFFFF))
     ppu.oam_touched()
+    ppu.latch_oam()
     ppu.obj_list_rebuilds = 0
     for line in 0 .. 159:
       # A burst of OAM traffic before this line renders, the way an H-blank
@@ -365,6 +368,7 @@ proc test_midframe(emu: GBA; frames: int) =
           bus.write_word_internal(addr32 and not 3'u32,
                                   uint32(lo) or (uint32(hi) shl 16))
         inc writes
+      ppu.latch_oam()   # the line boundary the writes wait for
       # The candidate path runs FIRST so it sees whatever mask state the writes
       # left; force_scan never touches the mask, so it cannot repair a stale one.
       let listed = render_line(ppu, line, false)
@@ -391,11 +395,13 @@ proc test_rebuild_guard(emu: GBA) =
     fill_oam(ppu.oam, "mixed")
     ppu.dispcnt = cast[DISPCNT](rand_dispcnt())
     ppu.oam_touched()
+    ppu.latch_oam()
     ppu.obj_list_rebuilds = 0
     for line in 0 .. 159:
       # Dirty EVERY line, which is the pathological case the guard exists for
       bus.write_half_internal(0x07000000'u32 + uint32(below(128) * 8),
                               rand_attr0("mixed"))
+      ppu.latch_oam()
       let listed = render_line(ppu, line, false)
       let scanned = render_line(ppu, line, true)
       let d = diff(listed, scanned)
@@ -418,6 +424,37 @@ proc mask_is_consistent(ppu: PPU): bool =
   ppu.rebuild_obj_lines()
   cached == ppu.obj_line_mask
 
+# 4b. The sprite scan reads OAM as it stood at the last line's end: a write
+# reaches sprites only once latch_oam (start_hblank) copies it, so an
+# H-blank OAM write moves a sprite from the second line after it (mGBA
+# suite Video tests, "OAM Update Delay").
+proc test_oam_view_latch(emu: GBA) =
+  echo "OAM writes reach the sprite scan at the next latch"
+  let ppu = emu.ppu
+  ppu.dispcnt = cast[DISPCNT](0x1000'u16)
+  ppu.mosaic = cast[MOSAIC](0'u16)
+  for i in 0 ..< ppu.oam.len: ppu.oam[i] = 0
+  for i in 0 ..< 128: ppu.oam[i * 8 + 1] = 0x02   # every entry disabled
+  ppu.oam_touched()
+  ppu.latch_oam()
+  # Entry 0: a 16x16 sprite at (0, 40)
+  ppu.oam[0] = 40; ppu.oam[1] = 0x00
+  ppu.oam[2] = 0;  ppu.oam[3] = 0x40
+  ppu.oam_touched()
+  let before = render_line(ppu, 40, false)
+  var drawn_before = false
+  for c in 0 .. 239:
+    if before.pixels[c] != SPRITE_PIXEL_DEFAULT: drawn_before = true
+  check(ppu.oam_view_stale and not drawn_before,
+        "an OAM write alone does not reach the scan")
+  ppu.latch_oam()
+  let after = render_line(ppu, 40, false)
+  var seen = false
+  for c in 0 .. 15:
+    if after.pixels[c].priority != 4: seen = true
+  check(not ppu.oam_view_stale and seen and ppu.mask_is_consistent(),
+        "latch_oam hands it to the scan and the candidate list")
+
 proc test_nonbus_writers(emu: GBA) =
   echo "OAM writers that are not bus writes"
   let ppu = emu.ppu
@@ -425,6 +462,7 @@ proc test_nonbus_writers(emu: GBA) =
   fill_oam(ppu.oam, "mixed")
   ppu.dispcnt = cast[DISPCNT](0x1000'u16)
   ppu.oam_touched()
+  ppu.latch_oam()
   ppu.obj_list_rebuilds = 0
   ppu.rebuild_obj_lines()                 # cache a mask of the pre-reset OAM
   var pre_nonempty = false
@@ -433,6 +471,7 @@ proc test_nonbus_writers(emu: GBA) =
       pre_nonempty = true
   emu.cpu.r[0] = 0x10'u32                 # bit 4 = OAM
   emu.cpu.hle_swi(0x01'u32)
+  ppu.latch_oam()                         # the next line start takes it
   var oam_cleared = true
   for b in ppu.oam:
     if b != 0: oam_cleared = false
@@ -447,12 +486,14 @@ proc test_nonbus_writers(emu: GBA) =
   ppu.obj_list_rebuilds = 0
   fill_oam(ppu.oam, "mixed")
   ppu.oam_touched()
+  ppu.latch_oam()
   ppu.rebuild_obj_lines()
   let state_path = getTempDir() / "dingbat_ppuobjlist.state"
   let saved = emu.save_state(state_path)  # a state whose OAM is this table
   check(saved, "save state written")
   fill_oam(ppu.oam, "affine-double")      # now make the live OAM different
   ppu.oam_touched()
+  ppu.latch_oam()
   ppu.rebuild_obj_lines()                 # ...and cache a mask matching THAT
   let loaded = emu.load_state_bytes(readFile(state_path))
   check(loaded, "save state loaded")
@@ -472,6 +513,7 @@ proc test_negative_control(emu: GBA) =
     ppu.dispcnt = cast[DISPCNT](0x1000'u16)   # mode 0, OBJ on
     ppu.mosaic = cast[MOSAIC](0'u16)
     ppu.oam_touched()
+    ppu.latch_oam()
     ppu.obj_list_rebuilds = 0
     ppu.rebuild_obj_lines()
     for line in 0 .. 159:
@@ -549,6 +591,7 @@ when isMainModule:
   test_budget(emu, tables div 4)
   test_midframe(emu, max(4, tables div 100))
   test_rebuild_guard(emu)
+  test_oam_view_latch(emu)
   test_nonbus_writers(emu)
   test_negative_control(emu)
   test_coverage()

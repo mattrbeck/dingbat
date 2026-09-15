@@ -20,6 +20,10 @@ proc new_ppu*(gba: GBA): PPU =
   result.pram           = newSeq[byte](0x400)
   result.vram           = newSeq[byte](0x18000)
   result.oam            = newSeq[byte](0x400)
+  result.oam_view       = newSeq[byte](0x400)
+  # Every BG counts as enabled at the line starts before power-on, so code
+  # that sets DISPCNT and draws a line directly (the PPU tests) sees it.
+  result.bg_enable_hist = 0xFFF
   result.obj_list_dirty = true  # nothing has built the per-line OBJ list yet
   result.dispcnt        = DISPCNT()
   result.dispstat       = DISPSTAT()
@@ -60,6 +64,41 @@ proc new_ppu*(gba: GBA): PPU =
 proc bitmap*(ppu: PPU): bool =
   ppu.dispcnt.bg_mode >= 3
 
+# Cycles into a line at which the BG enable delay samples DISPCNT (see
+# `bg_enable_hist`). Bracketed by the mGBA suite's "Layer toggle 2" expected
+# screen under this core's CPU timing: an HBlank IRQ handler's enable that
+# lands 29 cycles into line 130 shows on line 132, and a poll loop's enable
+# that lands 39 cycles into line 146 does not show on line 148. 34 is the
+# middle; no hardware measurement pins it closer.
+const BG_ENABLE_LATCH_CYCLE = 34
+
+proc latch_oam*(ppu: PPU) {.inline.} =
+  ## Take the OAM the next line's sprites are drawn from (see `oam_view`).
+  if ppu.oam_view_stale:
+    copyMem(addr ppu.oam_view[0], addr ppu.oam[0], 0x400)
+    ppu.oam_view_stale = false
+    ppu.obj_list_dirty = true
+    ppu.render_dirty = true
+
+proc latch_line_start*(ppu: PPU) {.inline.} =
+  ## The latches every line start updates, VBlank lines included.
+  let vc = ppu.vcount
+  ppu.line_start_cycle = int64(ppu.gba.scheduler.cycles)
+  ppu.bg_enable_hist = ((ppu.bg_enable_hist shl 4) or
+                        ((uint16(ppu.dispcnt) shr 8) and 0xF)) and 0xFFF
+  if vc == uint16(ppu.win0v.y1): ppu.win0_inside = true
+  if vc == uint16(ppu.win0v.y2): ppu.win0_inside = false
+  if vc == uint16(ppu.win1v.y1): ppu.win1_inside = true
+  if vc == uint16(ppu.win1v.y2): ppu.win1_inside = false
+  if vc == 0:
+    # With no register write the latches repeat frame to frame, so the
+    # frame is as static as its registers once they start it the same way
+    let latches = uint32(ppu.bg_enable_hist) or
+                  (uint32(ppu.win0_inside) shl 12) or (uint32(ppu.win1_inside) shl 13)
+    if latches != ppu.frame_start_latches:
+      ppu.frame_start_latches = latches
+      ppu.render_dirty = true
+
 proc start_line*(ppu: PPU) =
   ppu.gba.scheduler.schedule(960, etPPUStartHBlank)
 
@@ -86,6 +125,7 @@ proc start_hblank*(ppu: PPU) =
       ppu.bgref_int[bg_num][0] += ppu.bgaff[bg_num][1].num  # bgx += dmx
       ppu.bgref_int[bg_num][1] += ppu.bgaff[bg_num][3].num  # bgy += dmy
     ppu.gba.dma.trigger_hdma()
+  ppu.latch_oam()
 
 proc set_hblank_flag*(ppu: PPU) =
   ppu.dispstat.hblank = true
@@ -104,6 +144,7 @@ proc end_hblank*(ppu: PPU) =
   ppu.gba.scheduler.schedule(0, etPPUStartLine)
   ppu.dispstat.hblank = false
   ppu.vcount = uint16((int(ppu.vcount) + 1) mod 228)
+  ppu.latch_line_start()
   ppu.gba.dma.trigger_video_capture(ppu.vcount)
   ppu.dispstat.vcounter = (ppu.vcount == uint16(ppu.dispstat.vcount_setting))
   var raised_if = false
@@ -170,7 +211,7 @@ proc bgr16_mul*(a: uint16; coeff: int): uint16 =
             (int(bgr16_red(a))   * coeff) shr 4)
 
 proc sprites_ptr*(ppu: PPU): ptr UncheckedArray[Sprite] =
-  cast[ptr UncheckedArray[Sprite]](addr ppu.oam[0])
+  cast[ptr UncheckedArray[Sprite]](addr ppu.oam_view[0])
 
 # 4bpp tile-row unpacking. `unpack_bg4_span_scalar` is the per-pixel form and
 # the real path for partial spans (the line edges); `unpack_bg4_span` adds a
@@ -221,7 +262,7 @@ proc unpack_bg4_span*(dst: ptr UncheckedArray[uint8]; col: int; row: uint32;
     unpack_bg4_span_scalar(dst, col, row, x_in_tile, span, flip_x_mask, bank)
 
 proc render_reg_bg_impl(ppu: PPU; bg: int; swar: static bool) =
-  if not bit(uint16(ppu.dispcnt), 8 + bg): return
+  if not bit(ppu.line_bg_enables, bg): return
   let bgcnt  = ppu.bgcnt[bg]
   let bghofs = ppu.bghofs[bg]
   let bgvofs = ppu.bgvofs[bg]
@@ -300,7 +341,7 @@ when defined(test_harness):
     render_reg_bg_impl(ppu, bg, false)
 
 proc render_aff_bg*(ppu: PPU; bg: int) =
-  if not bit(uint16(ppu.dispcnt), 8 + bg): return
+  if not bit(ppu.line_bg_enables, bg): return
   let bgcnt = ppu.bgcnt[bg]
   let bg_idx = bg - 2
   let dx = ppu.bgaff[bg_idx][0].num
@@ -349,7 +390,7 @@ proc render_bitmap*(ppu: PPU) =
   let mode = int(ppu.dispcnt.bg_mode)
   ppu.bitmap_direct = mode != 4
   for col in 0..239: ppu.bg2_direct_opaque[col] = false
-  if not bit(uint16(ppu.dispcnt), 10): return  # BG2 disabled
+  if not bit(ppu.line_bg_enables, 2): return  # BG2 disabled
   let dx = ppu.bgaff[0][0].num
   let dy = ppu.bgaff[0][2].num
   var int_x = ppu.bgref_int[0][0]
@@ -451,14 +492,16 @@ proc rebuild_obj_lines*(ppu: PPU) =
   inc ppu.obj_list_rebuilds
 
 proc oam_touched*(ppu: PPU) {.inline.} =
-  ## Invalidate the per-line OBJ candidate list. MUST be called by every path
+  ## Mark `oam_view` stale, which rebuilds the per-line OBJ candidate list
+  ## when the next line start copies it. MUST be called by every path
   ## that mutates ppu.oam: bus.write_half_internal / write_word_internal
   ## (byte writes to OAM are discarded; DMA and cheats funnel through these),
   ## load_ppu_state (covers rewind, rollback and link restores), and the HLE
-  ## RegisterRamReset OAM clear. Test code seeding ppu.oam must call it too.
+  ## RegisterRamReset OAM clear. Test code seeding ppu.oam must call it and
+  ## then latch_oam.
   ## Backstops: scanline() force-rebuilds once per frame, and -d:objListVerify
   ## cross-checks the list against a full scan every line.
-  ppu.obj_list_dirty = true
+  ppu.oam_view_stale = true
 
 proc render_sprites_impl(ppu: PPU; force_scan: bool) =
   if not bit(uint16(ppu.dispcnt), 12): return
@@ -633,12 +676,6 @@ else:
   proc render_sprites*(ppu: PPU; force_scan = false) {.inline.} =
     ppu.render_sprites_impl(force_scan)
 
-proc window_contains(v, lo, hi: uint16): bool {.inline.} =
-  # Hardware windows are comparators: when the start is past the end the
-  # window wraps around the screen edge (flashlight/tunnel effects)
-  if lo <= hi: v >= lo and v < hi
-  else: v >= lo or v < hi
-
 proc fill_window_cols(ppu: PPU; winh: WINH; bits: uint16; effect: bool) =
   # Fill columns [x1, x2); when x1 > x2 the window wraps around the screen edge
   let x1 = int(winh.x1)
@@ -679,14 +716,11 @@ proc window_cover*(winh: WINH): WinCover {.inline.} =
     else: wcPartial
 
 proc line_window_flags*(ppu: PPU): tuple[win0, win1, objwin: bool] {.inline.} =
-  ## Which window sources can affect this scanline: win0/win1 only inside
-  ## their vertical range (y1 > y2 wraps like x1 > x2), the OBJ window only
-  ## when render_sprites wrote an OBJ-window pixel on this line.
-  let vc = ppu.vcount
-  result.win0 = ppu.dispcnt.window_0_display and
-                window_contains(vc, uint16(ppu.win0v.y1), uint16(ppu.win0v.y2))
-  result.win1 = ppu.dispcnt.window_1_display and
-                window_contains(vc, uint16(ppu.win1v.y1), uint16(ppu.win1v.y2))
+  ## Which window sources can affect this scanline: win0/win1 only while
+  ## their vertical latch is set (so y1 > y2 wraps like x1 > x2), the OBJ
+  ## window only when render_sprites wrote an OBJ-window pixel on this line.
+  result.win0 = ppu.dispcnt.window_0_display and ppu.win0_inside
+  result.win1 = ppu.dispcnt.window_1_display and ppu.win1_inside
   result.objwin = ppu.dispcnt.obj_window_display and ppu.line_obj_window
 
 proc uniform_window_state*(ppu: PPU; win0_on, win1_on, objwin_on: bool;
@@ -755,7 +789,7 @@ proc compute_layer_walk*(ppu: PPU) =
   for p in 0 .. 3:
     for bg in 0 .. 3:
       if int(ppu.bgcnt[bg].priority) == p and
-         bit(uint16(ppu.dispcnt), 8 + bg) and bit(ppu.debug_layer_mask, bg):
+         bit(ppu.line_bg_enables, bg) and bit(ppu.debug_layer_mask, bg):
         ppu.walk_bgs[n]   = int8(bg)
         ppu.walk_prios[n] = int8(p)
         inc n
@@ -1200,8 +1234,10 @@ proc scanline*(ppu: PPU) =
   # Only the BGs DISPCNT enables need clearing: a disabled BG is never
   # written (renderers return on the same bit) nor read (compute_layer_walk
   # skips it)
+  ppu.line_bg_enables = (uint16(ppu.dispcnt) shr 8) and
+                        (ppu.bg_enable_hist shr 8) and 0xF
   for bg in 0..3:
-    if bit(uint16(ppu.dispcnt), 8 + bg):
+    if bit(ppu.line_bg_enables, bg):
       for c in 0..239: ppu.layer_palettes[bg][c] = 0
   for c in 0..239: ppu.sprite_pixels[c] = SPRITE_PIXEL_DEFAULT
   ppu.bitmap_direct = false
@@ -1279,7 +1315,12 @@ proc `[]`*(ppu: PPU; io_addr: uint32): uint8 =
 proc `[]=`*(ppu: PPU; io_addr: uint32; value: uint8) =
   ppu.render_dirty = true
   case io_addr
-  of 0x000..0x001: write(ppu.dispcnt, value, io_addr and 1)
+  of 0x000..0x001:
+    write(ppu.dispcnt, value, io_addr and 1)
+    if int64(ppu.gba.scheduler.cycles) - ppu.line_start_cycle < BG_ENABLE_LATCH_CYCLE:
+      # Still ahead of this line's sample: it takes the new enables
+      ppu.bg_enable_hist = (ppu.bg_enable_hist and 0xFF0'u16) or
+                           ((uint16(ppu.dispcnt) shr 8) and 0xF)
   of 0x002..0x003: discard  # green swap
   of 0x004:
     # Writable low-byte bits are 3-5 (the IRQ enables): bits 0-2 are the

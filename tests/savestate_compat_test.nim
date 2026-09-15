@@ -589,6 +589,29 @@ const
   DMA_SEC_LEN  = 1 + 4 * DMA_CH_LEN
   DMA_COUNT_AT = DMA_CH_LEN - 2                 # `count` is last in a channel
 
+# The PPU section (tag GBA_SEC_PPU) gained its line-start latches at rev 6:
+# bg_enable_hist u16, win0/win1 inside, the 0x400-byte OAM view and its
+# stale flag, after the framebuffer and just ahead of GBA_SEC_APU.
+const
+  PPU_TAG        = 0xCB'u8
+  APU_TAG        = 0xCC'u8
+  PPU_PRE_LEN    = 1 + 6 + 4 * 6 + 2 * (4 * 2 + 2 * 12) + 10 * 2 +
+                   0x400 + 0x18000 + 0x400 + 4 + 0x9600 * 2
+  PPU_LATCH_LEN  = 2 + 1 + 1 + 0x400 + 1
+
+proc strip_ppu_latches(payload: var string): bool =
+  ## Rewrite a payload this build wrote into the pre-rev-6 PPU layout.
+  var found = -1
+  for i in 0 .. payload.len - PPU_PRE_LEN - PPU_LATCH_LEN - 1:
+    if payload[i] == char(PPU_TAG) and
+       payload[i + PPU_PRE_LEN + PPU_LATCH_LEN] == char(APU_TAG):
+      if found >= 0: return false  # ambiguous
+      found = i
+  if found < 0: return false
+  let at = found + PPU_PRE_LEN
+  payload.delete(at ..< at + PPU_LATCH_LEN)
+  true
+
 proc strip_dma_count(payload: var string): bool =
   ## Rewrite a payload this build wrote into the pre-rev-5 DMA layout by
   ## dropping each channel's `count`. Returns false if the section could not
@@ -644,10 +667,12 @@ proc run_intr_wait_migration() =
   b.park_in_intr_wait(shifted = false)
   var rev3 = b.state_payload()
   # A rev-3 payload has no halt_resume_pop byte (rev 4) and no per-channel
-  # DMA `count` (rev 5); every later field addition belongs here too.
+  # DMA `count` (rev 5) nor PPU line-start latches (rev 6); every later
+  # field addition belongs here too.
   check(rev3.len == rev4.len, "the two parked payloads differ only by the flag")
   rev3.delete(HALT_RESUME_POP_OFFSET .. HALT_RESUME_POP_OFFSET)
   check(strip_dma_count(rev3), "rev-5 DMA count fields located and removed")
+  check(strip_ppu_latches(rev3), "rev-6 PPU latch fields located and removed")
 
   # (c) read the rev-3 payload as rev 3 and compare against (a)
   let c = new_gba_for(GBA_ROMS[0][0])
@@ -678,6 +703,7 @@ proc run_intr_wait_migration() =
   var rev3_running = d.state_payload()
   rev3_running.delete(HALT_RESUME_POP_OFFSET .. HALT_RESUME_POP_OFFSET)
   check(strip_dma_count(rev3_running), "rev-5 DMA count fields located and removed (running)")
+  check(strip_ppu_latches(rev3_running), "rev-6 PPU latch fields located and removed (running)")
   let e = new_gba_for(GBA_ROMS[0][0])
   for _ in 0 ..< 30: e.step_frame()
   let untouched = e.state_payload()

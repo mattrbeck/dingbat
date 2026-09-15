@@ -419,6 +419,34 @@ type
     bldcnt*:       BLDCNT
     bldalpha*:     BLDALPHA
     bldy*:         BLDY
+    # Line-start latches (serialized from GBA payload rev 6). The mGBA suite
+    # "Video tests" pin all three; the constants are its expected screens.
+    # bg_enable_hist: DISPCNT's BG0-3 enables sampled on the last three
+    # lines, newest in the low nibble. A BG draws only while its bit is set
+    # now AND was set at the sample two lines ago, so an enable shows from
+    # the third line after the write and a disable is immediate ("Layer
+    # toggle" 1 and 2).
+    bg_enable_hist*: uint16
+    # Scheduler cycle of the current line's start, for the sample point
+    # inside the line (BG_ENABLE_LATCH_CYCLE); rebased by end_frame, dated
+    # from the pending line event on a state load.
+    line_start_cycle*: int64
+    # WIN0/WIN1 vertical state: set at the line start where VCOUNT equals
+    # Y1, cleared where it equals Y2 (the clear wins on a tie). A Y2 that
+    # VCOUNT never reaches leaves the window open into the next frame
+    # ("Window offscreen reset").
+    win0_inside*:  bool
+    win1_inside*:  bool
+    # OAM as the sprite scan sees it: copied from `oam` after each line is
+    # drawn, so an OAM write moves sprites from the second line after it
+    # ("OAM Update Delay"). oam_view_stale says a write is waiting.
+    oam_view*:       seq[byte]
+    oam_view_stale*: bool
+    # Frame-start copies of the latches above, so render-skip notices a
+    # latch that settles a frame after the register write that moved it.
+    frame_start_latches*: uint32
+    # BG enables for the line being drawn (scratch): DISPCNT and the delay.
+    line_bg_enables*: uint16
     # Compositing scratch, recomputed each scanline: contributing BGs as a
     # (priority, BG index)-ordered walk list, plus per-column window enables
     walk_bgs*:     array[4, int8]  # BG number of each walk entry
@@ -1180,6 +1208,7 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
   # FIFO transfer stamps and the MP2K HLE's pending slot hooks are absolute
   # cycles too (mp2k.nim measure_latency)
   for c in 1..2: gba.dma.fifo_xfer_cycle[c] -= int64(base)
+  gba.ppu.line_start_cycle -= int64(base)
   if gba.mp2k != nil:
     for i in 0 ..< gba.mp2k.lat_n: gba.mp2k.lat_at[i] -= int64(base)
     for k in 0 .. 3:

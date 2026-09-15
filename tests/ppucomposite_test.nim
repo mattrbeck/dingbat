@@ -88,6 +88,7 @@ proc seed_memory(ppu: PPU; transparent_bias: bool) =
   # render_sprites rebuilds its per-line candidate list when OAM is reported
   # dirty; poking the seq directly skips that report.
   ppu.oam_touched()
+  ppu.latch_oam()
   if transparent_bias:
     # Push a lot of tile data to palette index 0 so the layer walk falls
     # through to lower layers, the backdrop, and the blend-bottom search.
@@ -369,6 +370,7 @@ proc test_effect_spans(emu: GBA) =
   setup(true)
   ppu[0x040] = uint8(SPLIT); ppu[0x041] = 0         # WIN0H: x2 = 120, x1 = 0
   ppu[0x044] = 160;          ppu[0x045] = 0         # WIN0V: whole screen
+  ppu.win0_inside = true                            # ...latched open (no line starts run)
   ppu[0x048] = 0x1F or 0x20                         # WININ:  layers + effects
   ppu[0x04A] = 0x1F                                 # WINOUT: layers, NO effects
   ppu[0x001] = ppu[0x001] or 0x20                   # enable WIN0
@@ -428,7 +430,7 @@ proc test_window_cover_exhaustive(emu: GBA) =
   ppu.debug_layer_mask = 0x1F
   ppu.vcount = 80
   ppu.set_dispcnt_windows(w0 = true, w1 = false, ow = false)
-  ppu.win0v  = winv(0, 160)
+  ppu.win0_inside = true
   ppu.winin  = winin_of(0x1F, true, 0, false)     # inside: all layers, effects
   ppu.winout = winout_of(0x00, false, 0, false)   # outside: nothing, no effects
   for c in 0 ..< 240: ppu.sprite_pixels[c].window = false
@@ -467,13 +469,22 @@ proc test_window_cover_exhaustive(emu: GBA) =
         "all three classes are actually reachable",
         "full=" & $n_full & " empty=" & $n_empty & " partial=" & $n_partial)
 
-# 9b. WIN0V/WIN1V wrap like WIN0H, and y2 > 160 is clamped by nothing (the
-# comparator never matches above 159). Every (y1, y2) x every scanline:
-# 10.5M cases, affordable because the check is O(1).
+# 9b. WIN0V/WIN1V are latches, not comparators: VCOUNT == Y1 at a line
+# start opens the window, VCOUNT == Y2 closes it (the close wins a tie), and
+# the state carries across the frame edge. mGBA suite Video tests, "Window
+# offscreen reset": Y2 = 227 closes before line 0, Y2 = 228 never closes.
+# Every (y1, y2), two frames of line starts, the second frame checked
+# against a closed form written out independently.
 proc test_vertical_ranges(emu: GBA) =
-  echo "WIN0V/WIN1V vertical ranges, every (y1, y2) x every scanline"
+  echo "WIN0V/WIN1V vertical latches, every (y1, y2) x every line start"
   let ppu = emu.ppu
   ppu.set_dispcnt_windows(w0 = true, w1 = true, ow = false)
+  proc want(y1, y2, row: int): bool =
+    if y1 >= 228: false                  # never opens
+    elif y2 >= 228: true                 # opened on frame 1, never closes
+    elif y1 == y2: false                 # the close wins the tie
+    elif y1 < y2: row >= y1 and row < y2
+    else: row >= y1 or row < y2          # wraps through VBlank
   var bad = 0
   var n_in = 0
   var first_bad = ""
@@ -481,35 +492,90 @@ proc test_vertical_ranges(emu: GBA) =
     for y2 in 0 .. 255:
       ppu.win0v = winv(y1, y2)
       ppu.win1v = winv(y2, y1)      # the mirror image, so both orders are hit
-      for row in 0 .. 159:
-        ppu.vcount = uint16(row)
-        let f = ppu.line_window_flags()
-        # The reference: a plain comparator, written out independently.
-        let want0 = (if y1 <= y2: row >= y1 and row < y2 else: row >= y1 or row < y2)
-        let want1 = (if y2 <= y1: row >= y2 and row < y1 else: row >= y2 or row < y1)
-        if f.win0 != want0 or f.win1 != want1:
-          inc bad
-          if first_bad.len == 0:
-            first_bad = "y1=" & $y1 & " y2=" & $y2 & " row=" & $row
-        if f.win0: inc n_in
-  check(bad == 0, "10.5M (y1, y2, line) vertical decisions match a comparator",
+      ppu.win0_inside = false
+      ppu.win1_inside = false
+      ppu.vcount = 227
+      for frame in 0 .. 1:
+        for row in 0 .. 227:
+          ppu.vcount = uint16(row)
+          ppu.latch_line_start()
+          if frame == 1:
+            let f = ppu.line_window_flags()
+            if f.win0 != want(y1, y2, row) or f.win1 != want(y2, y1, row):
+              inc bad
+              if first_bad.len == 0:
+                first_bad = "y1=" & $y1 & " y2=" & $y2 & " row=" & $row
+            if f.win0: inc n_in
+  check(bad == 0, "29.9M (y1, y2, line start) decisions match the latch",
         first_bad)
   check(n_in > 0, "the window is inside on at least some lines")
-  # Degenerate ranges called out by name, so a regression names itself.
-  for (y1, y2, row, want, name) in [
-      (0, 160, 80, true,  "y1=0 y2=160 covers line 80"),
-      (0, 0,   80, false, "zero-height y1=y2=0 covers nothing"),
-      (80, 80, 80, false, "zero-height y1=y2=80 covers nothing"),
-      (0, 255, 159, true, "y2=255 (past the screen) still covers line 159"),
-      (200, 255, 80, false, "a range entirely below the screen covers nothing"),
-      (200, 100, 80, true,  "a wrapped range y1>y2 covers the middle"),
-      (200, 100, 150, false, "...but not line 150"),
-      # A wrapped range's upper half extends past the last visible line; the
-      # comparator is still "inside" there and nothing ever asks about it.
-      (200, 100, 210, true, "...and is still inside at the nonexistent row 210")]:
-    ppu.win0v = winv(y1, y2)
+  # The suite's two configurations, by name
+  for (reg, row, inside, name) in [
+      (0x50E3, 0, false, "Y1=80 Y2=227: closed at line 0"),
+      (0x50E3, 100, true, "Y1=80 Y2=227: open at line 100"),
+      (0x50E4, 0, true, "Y1=80 Y2=228: still open at line 0"),
+      (0x0000, 0, false, "Y1=Y2=0: never open")]:
+    ppu.win0v = cast[WINV](uint16(reg))
+    ppu.win0_inside = false
+    for frame in 0 .. 1:
+      for r in 0 .. 227:
+        ppu.vcount = uint16(r)
+        ppu.latch_line_start()
+        if frame == 1 and r == row:
+          check(ppu.line_window_flags().win0 == inside, name)
+
+# 9b'. The BG enable delay: a BG draws while DISPCNT enables it now and at
+# the sample two lines back (BG_ENABLE_LATCH_CYCLE into the line), so an
+# enable shows on the third line and a disable at once. mGBA suite Video
+# tests, "Layer toggle" 1 and 2.
+proc test_bg_enable_delay(emu: GBA) =
+  echo "BG enable delay"
+  let ppu = emu.ppu
+  proc line_start(row: int) =
     ppu.vcount = uint16(row)
-    check(ppu.line_window_flags().win0 == want, name)
+    ppu.latch_line_start()
+  proc drawn(): uint16 =
+    (uint16(ppu.dispcnt) shr 8) and (ppu.bg_enable_hist shr 8) and 0xF
+  proc write_late(v: uint8) =    # after this line's sample
+    ppu.line_start_cycle = int64(emu.scheduler.cycles) - 1000
+    ppu[0x001] = v
+  proc write_early(v: uint8) =   # ahead of this line's sample
+    ppu.line_start_cycle = int64(emu.scheduler.cycles)
+    ppu[0x001] = v
+  ppu[0x000] = 0
+  write_late(0)
+  for r in 0 .. 2: line_start(r)
+  write_late(0x01)
+  check(drawn() == 0, "late enable: not on the line of the write")
+  line_start(3)
+  check(drawn() == 0, "late enable: not on the next line")
+  line_start(4)
+  check(drawn() == 0, "late enable: not on the line after (its sample was line 2's)")
+  line_start(5)
+  check(drawn() == 1, "late enable: shown from the third line")
+  write_late(0x00)
+  check(drawn() == 0, "a disable is immediate")
+  write_late(0x01)
+  line_start(6)
+  check(drawn() == 1, "a disable between two samples leaves no delay behind")
+  write_early(0x00)
+  line_start(7)
+  write_late(0x01)
+  line_start(8)
+  check(drawn() == 0, "an early disable hides the line two samples on (line 8)")
+  line_start(9)
+  check(drawn() == 0, "...and line 9, whose sample was line 7's")
+  line_start(10)
+  check(drawn() == 1, "...and line 10 shows again")
+  write_early(0x00)
+  line_start(11); line_start(12)
+  write_early(0x01)
+  line_start(13)
+  check(drawn() == 0, "early enable: hidden on the next line")
+  line_start(14)
+  check(drawn() == 1, "early enable: shown two line starts after its sample")
+  # Leave every BG settled for the tests that follow
+  ppu.bg_enable_hist = 0xFFF
 
 # 9c. Differential fuzz over the whole window register space, weighted onto
 # boundary x/y values, wrapped ranges, both windows at once, every DISPCNT
@@ -551,6 +617,8 @@ proc test_uniform_window_fuzz(emu: GBA) =
     ppu.win1h = winh(coord(), coord())
     ppu.win0v = winv(coord(), coord())
     ppu.win1v = winv(coord(), coord())
+    ppu.win0_inside = (nxt() and 1) == 0
+    ppu.win1_inside = (nxt() and 1) == 0
     ppu.vcount = uint16(int(nxt()) mod 160)
     # Masks: half the time from a tiny set so different sources collide
     # (which makes the "partial overlay paints what is already there" branch
@@ -679,6 +747,8 @@ proc test_uniform_window_frames(emu: GBA) =
     ppu.win1h = winh(int(nxt() and 0xFF), int(nxt() and 0xFF))
     ppu.win0v = winv(int(nxt() and 0xFF), int(nxt() and 0xFF))
     ppu.win1v = winv(int(nxt() and 0xFF), int(nxt() and 0xFF))
+    ppu.win0_inside = (nxt() and 1) == 0
+    ppu.win1_inside = (nxt() and 1) == 0
     ppu.winin  = cast[WININ](uint16(nxt() and 0xFFFF))
     ppu.winout = cast[WINOUT](uint16(nxt() and 0xFFFF))
     ppu.set_dispcnt_windows((nxt() and 1) == 0, (nxt() and 1) == 0, objwin)
@@ -697,8 +767,8 @@ proc test_uniform_window_frames(emu: GBA) =
         case r and 7
         of 0: ppu.win0h = winh(int((r shr 3) and 0xFF), int((r shr 11) and 0xFF))
         of 1: ppu.win1h = winh(int((r shr 3) and 0xFF), int((r shr 11) and 0xFF))
-        of 2: ppu.win0v = winv(int((r shr 3) and 0xFF), int((r shr 11) and 0xFF))
-        of 3: ppu.win1v = winv(int((r shr 3) and 0xFF), int((r shr 11) and 0xFF))
+        of 2: ppu.win0_inside = (r and 8) != 0
+        of 3: ppu.win1_inside = (r and 8) != 0
         of 4: ppu.winin  = cast[WININ](uint16((r shr 3) and 0xFFFF))
         of 5: ppu.winout = cast[WINOUT](uint16((r shr 3) and 0xFFFF))
         of 6: ppu.set_dispcnt_windows((r and 8) != 0, (r and 16) != 0,
@@ -741,7 +811,7 @@ proc test_uniform_window_frames(emu: GBA) =
   proc count_fast(x1, x2, in_bits, out_bits: int): int =
     ppu.set_dispcnt_windows(w0 = true, w1 = false, ow = false)
     ppu.win0h = winh(x1, x2)
-    ppu.win0v = winv(0, 160)
+    ppu.win0_inside = true
     ppu.winin  = winin_of(in_bits, false, 0, false)
     ppu.winout = winout_of(out_bits, false, 0, false)
     ppu.debug_layer_mask = 0x1F
@@ -770,6 +840,7 @@ when isMainModule:
   test_determinism(emu)
   test_window_cover_exhaustive(emu)
   test_vertical_ranges(emu)
+  test_bg_enable_delay(emu)
   test_uniform_window_fuzz(emu)
   test_uniform_window_frames(emu)
   echo ""

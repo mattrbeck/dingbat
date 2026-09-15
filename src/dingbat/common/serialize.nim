@@ -45,9 +45,10 @@ const
   #
   # GBA: 1 initial · 2 CPU halt-wake/deferred-return · 3 bus ROM burst trackers
   #      + deterministic RTC · 4 CPU halt_resume_pop · 5 DMA latched word count
+  #      · 6 PPU line-start latches (BG enable delay, window flags, OAM view)
   # GB:  1 initial · 2 serial port section · 3 PPU dots_since_frame
   #      · 4 CPU undefined-opcode lockup flag · 5 Super Game Boy section
-  GBA_PAYLOAD_VERSION* = 5'u32
+  GBA_PAYLOAD_VERSION* = 6'u32
   GB_PAYLOAD_VERSION*  = 5'u32
 
   # magic(8) version(4) core(1) payload_version(1) flags(2) rom_checksum(4)

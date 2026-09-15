@@ -41,6 +41,7 @@ web/rom.gbc
 /dingbat_ppubgunpack_test
 /dingbat_ppuobjlist_test
 /dingbat_mp2kpass_test
+/dingbat_mgba_video
 /dingbat_savestate_compat_test
 /dingbat_rewind_test
 /dingbat_lcdresponse_test

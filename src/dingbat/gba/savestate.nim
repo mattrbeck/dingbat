@@ -307,8 +307,13 @@ proc save_ppu_state(ppu: PPU; w: var Writer) =
   w.write_bytes(ppu.vram)
   w.write_bytes(ppu.oam)
   w.write_seq_u16(ppu.framebuffer)
+  w.write_u16(ppu.bg_enable_hist)
+  w.write_bool(ppu.win0_inside)
+  w.write_bool(ppu.win1_inside)
+  w.write_bytes(ppu.oam_view)
+  w.write_bool(ppu.oam_view_stale)
 
-proc load_ppu_state(ppu: PPU; r: var Reader) =
+proc load_ppu_state(ppu: PPU; r: var Reader; rev: uint32) =
   r.expect_tag(GBA_SEC_PPU)
   ppu.dispcnt  = cast[DISPCNT](r.read_u16())
   ppu.dispstat = cast[DISPSTAT](r.read_u16())
@@ -337,13 +342,41 @@ proc load_ppu_state(ppu: PPU; r: var Reader) =
   r.read_bytes(ppu.vram)
   r.read_bytes(ppu.oam)
   r.read_seq_u16_into(ppu.framebuffer)
+  if rev >= 6:
+    ppu.bg_enable_hist = r.read_u16() and 0xFFF
+    ppu.win0_inside = r.read_bool()
+    ppu.win1_inside = r.read_bool()
+    r.read_bytes(ppu.oam_view)
+    ppu.oam_view_stale = r.read_bool()
+  else:
+    # rev <= 5 had no line-start latches: every enabled BG as settled, the
+    # windows as the comparators they were, OAM as current
+    let bits = (uint16(ppu.dispcnt) shr 8) and 0xF
+    ppu.bg_enable_hist = bits or (bits shl 4) or (bits shl 8)
+    let vc = ppu.vcount
+    proc inside(y1, y2: uint16): bool =
+      if y1 <= y2: vc >= y1 and vc < y2 else: vc >= y1 or vc < y2
+    ppu.win0_inside = inside(uint16(ppu.win0v.y1), uint16(ppu.win0v.y2))
+    ppu.win1_inside = inside(uint16(ppu.win1v.y1), uint16(ppu.win1v.y2))
+    copyMem(addr ppu.oam_view[0], addr ppu.oam[0], 0x400)
+    ppu.oam_view_stale = false
+  ppu.frame_start_latches = 0xFFFFFFFF'u32  # never a real value: re-render
+  # The line's start cycle is not in the payload: the pending line event
+  # (the scheduler section is already loaded) dates it
+  ppu.line_start_cycle = low(int32)
+  for ev in ppu.gba.scheduler.events:
+    case ev.kind
+    of etPPUStartLine:   ppu.line_start_cycle = int64(ev.cycles)
+    of etPPUStartHBlank: ppu.line_start_cycle = int64(ev.cycles) - 960
+    of etPPUEndHBlank:   ppu.line_start_cycle = int64(ev.cycles) - 1232
+    else: discard
   # Force a full re-render so render-skip cannot show stale pre-load pixels
   ppu.frame = 0
   ppu.render_dirty = true
   ppu.skip_render = false
   ppu.frame_static = false
   # The per-line OBJ candidate list is derived scratch, not in the payload
-  ppu.oam_touched()
+  ppu.obj_list_dirty = true
   ppu.obj_list_rebuilds = 0
 
 # ---- APU ----
@@ -740,7 +773,7 @@ proc gba_apply_state(gba: GBA; payload: string; rev: uint32;
   load_serial_state(gba.serial, r)
   load_dma_state(gba.dma, r, rev)
   load_gpio_state(gba.bus.gpio, r, rev)
-  load_ppu_state(gba.ppu, r)
+  load_ppu_state(gba.ppu, r, rev)
   load_apu_state(gba.apu, r)
   gba.apu_extract_state_events()
   load_storage_state(gba.storage, r)
