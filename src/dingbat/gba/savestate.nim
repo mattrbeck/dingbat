@@ -361,6 +361,8 @@ proc load_ppu_state(ppu: PPU; r: var Reader; rev: uint32) =
     copyMem(addr ppu.oam_view[0], addr ppu.oam[0], 0x400)
     ppu.oam_view_stale = false
   ppu.frame_start_latches = 0xFFFFFFFF'u32  # never a real value: re-render
+  ppu.line_start_bg_bits = (uint16(ppu.dispcnt) shr 8) and 0xF
+  ppu.bg_enable_cycle = [-1'i32, -1, -1, -1]
   # The line's start cycle is not in the payload: the pending line event
   # (the scheduler section is already loaded) dates it
   ppu.line_start_cycle = low(int32)

@@ -461,6 +461,11 @@ type
     frame_start_latches*: uint32
     # BG enables for the line being drawn (scratch): DISPCNT and the delay.
     line_bg_enables*: uint16
+    # A BG switched on after its line started (see midline_bg_enable):
+    # DISPCNT's BG bits at the line start, and the cycle into the line each
+    # BG's bit rose (-1: not this line). Derived, not serialized.
+    line_start_bg_bits*: uint16
+    bg_enable_cycle*:    array[4, int32]
     # Compositing scratch, recomputed each scanline: contributing BGs as a
     # (priority, BG index)-ordered walk list, plus per-column window enables
     walk_bgs*:     array[4, int8]  # BG number of each walk entry
