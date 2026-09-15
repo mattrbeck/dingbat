@@ -24,6 +24,8 @@ proc new_ppu*(gba: GBA): PPU =
   # Every BG counts as enabled at the line starts before power-on, so code
   # that sets DISPCNT and draws a line directly (the PPU tests) sees it.
   result.bg_enable_hist = 0xFFF
+  result.line_start_bg_bits = 0xF
+  result.bg_enable_cycle = [-1'i32, -1, -1, -1]
   result.obj_list_dirty = true  # nothing has built the per-line OBJ list yet
   result.dispcnt        = DISPCNT()
   result.dispstat       = DISPSTAT()
@@ -84,6 +86,8 @@ proc latch_line_start*(ppu: PPU) {.inline.} =
   ## The latches every line start updates, VBlank lines included.
   let vc = ppu.vcount
   ppu.line_start_cycle = int64(ppu.gba.scheduler.cycles)
+  ppu.line_start_bg_bits = (uint16(ppu.dispcnt) shr 8) and 0xF
+  ppu.bg_enable_cycle = [-1'i32, -1, -1, -1]
   ppu.bg_enable_hist = ((ppu.bg_enable_hist shl 4) or
                         ((uint16(ppu.dispcnt) shr 8) and 0xF)) and 0xFFF
   if vc == uint16(ppu.win0v.y1): ppu.win0_inside = true
@@ -1193,6 +1197,33 @@ proc composite*(ppu: PPU; row_base: uint32) =
     ppu.composite_span(row_base, col, e, bits, eff)
     col = e
 
+# Cycle into the line at which pixel 0 is output. Bracketed by the mGBA
+# suite's "Layer toggle 2" expected screen (42..45 reproduce it); drawing
+# ends at 960 and the H-blank flag rises 46 cycles later, so 44 keeps the
+# 4-cycle dot grid of both.
+const BG_PIXEL0_CYCLE = 44
+
+proc midline_bg_enable(ppu: PPU; bg: int) =
+  ## A text BG whose DISPCNT bit rose after this line started (and that the
+  ## enable delay lets draw) shows nothing left of the pixel being output
+  ## at the write, and its first tile comes out two pixels late: pixels 0-7
+  ## show what pixels -2..5 would. mGBA suite Video tests, "Layer toggle 2",
+  ## lines 65 and 146. Rendering is whole-line, so the late start is
+  ## rebuilt from a second pass two pixels to the left.
+  if not bit(ppu.line_bg_enables, bg) or bit(ppu.line_start_bg_bits, bg): return
+  let t = ppu.bg_enable_cycle[bg]
+  if t < 0: return
+  let line = ppu.layer_palettes[bg]
+  let hofs = ppu.bghofs[bg]
+  ppu.bghofs[bg] = cast[BGOFS]((uint16(hofs) - 2) and 0x1FF)
+  ppu.render_reg_bg(bg)
+  let early = ppu.layer_palettes[bg]
+  ppu.bghofs[bg] = hofs
+  ppu.layer_palettes[bg] = line
+  for x in 0 .. 7: ppu.layer_palettes[bg][x] = early[x]
+  let hidden = if t < BG_PIXEL0_CYCLE: 0 else: (t - BG_PIXEL0_CYCLE) div 4 + 1
+  for x in 0 ..< min(int(hidden), 240): ppu.layer_palettes[bg][x] = 0
+
 proc scanline*(ppu: PPU) =
   # Render skipping: after a full frame with no change to VRAM/PRAM/OAM/PPU
   # registers the framebuffer already holds every line, so skip until
@@ -1247,10 +1278,14 @@ proc scanline*(ppu: PPU) =
   of 0:
     ppu.render_reg_bg(0); ppu.render_reg_bg(1)
     ppu.render_reg_bg(2); ppu.render_reg_bg(3)
+    if ppu.bg_enable_cycle != [-1'i32, -1, -1, -1]:
+      for b in 0..3: ppu.midline_bg_enable(b)
     ppu.render_sprites()
     ppu.composite(row_base)
   of 1:
     ppu.render_reg_bg(0); ppu.render_reg_bg(1)
+    if ppu.bg_enable_cycle != [-1'i32, -1, -1, -1]:
+      for b in 0..1: ppu.midline_bg_enable(b)
     ppu.render_aff_bg(2)
     ppu.render_sprites()
     ppu.composite(row_base)
@@ -1316,7 +1351,14 @@ proc `[]=`*(ppu: PPU; io_addr: uint32; value: uint8) =
   ppu.render_dirty = true
   case io_addr
   of 0x000..0x001:
+    let before = (uint16(ppu.dispcnt) shr 8) and 0xF
     write(ppu.dispcnt, value, io_addr and 1)
+    let rose = ((uint16(ppu.dispcnt) shr 8) and 0xF) and not before
+    if rose != 0:
+      let t = int32(int64(ppu.gba.scheduler.cycles) + int64(ppu.gba.bus.cycles) -
+                    ppu.line_start_cycle)
+      for b in 0..3:
+        if bit(rose, b): ppu.bg_enable_cycle[b] = t
     if int64(ppu.gba.scheduler.cycles) - ppu.line_start_cycle < BG_ENABLE_LATCH_CYCLE:
       # Still ahead of this line's sample: it takes the new enables
       ppu.bg_enable_hist = (ppu.bg_enable_hist and 0xFF0'u16) or

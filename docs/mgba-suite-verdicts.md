@@ -103,25 +103,27 @@ constant cannot separate the two. Not a usable accuracy signal as built.
 The Video suite has no automated verdict and the auto-run ROM the runner
 fetches skips it. `tests/mgba_video.nim` drives upstream's interactive build
 through its menus and diffs each test's "actual" frame against its
-"expected" one. Six of seven are pixel-exact; the three that did not match
-before 2026-09-15 are now latches in `ppu.nim` (see `bg_enable_hist`,
-`win0_inside`, `oam_view` in `gba.nim`):
+"expected" one. All seven are pixel-exact; the four that did not match
+before 2026-09-15 are PPU behaviour in `ppu.nim` (see `bg_enable_hist`,
+`win0_inside`, `oam_view`, `bg_enable_cycle` in `gba.nim`):
 
 * **Layer toggle / Layer toggle 2** — a BG draws while DISPCNT enables it
   now and at a sample 34 cycles into the line two lines back: enable shows
   on the third line, disable at once. The sample point is bracketed by
   "Layer toggle 2" under this core's CPU timing (a handler's enable 29
   cycles into a line counts, a poll loop's 39 cycles in does not).
+* **Layer toggle 2, lines 65 and 146** — a text BG switched on after its
+  line started draws nothing left of the pixel being output at the write,
+  and its first tile comes out two pixels late. Pixel 0 is output 44
+  cycles into the line (42–45 reproduce the screen).
 * **OAM Update Delay** — sprites draw from OAM as it stood when the previous
   line was drawn.
 * **Window offscreen reset** — WIN0V/WIN1V set a flag where VCOUNT equals Y1
   and clear it where it equals Y2; a Y2 VCOUNT never reaches leaves the
   window open into the next frame.
 
-Layer toggle 2 still differs in 16 pixels: the first tile of lines 65 and
-146, where the enable lands mid-line. The expected screen draws those eight
-pixels shifted two to the right (with pixels 0–1 transparent on line 65),
-which neither whole-line rendering nor a per-pixel enable reproduces.
+The late first tile is modelled for text BGs (modes 0 and 1) only; nothing
+in the suite exercises a mid-line enable of an affine or bitmap layer.
 
 ## Closed rows, for the record
 
