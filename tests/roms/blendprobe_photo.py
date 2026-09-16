@@ -63,25 +63,42 @@ def stripe_amplitude(lum, H, patch):
 
 
 def main():
-    photos = sys.argv[1:]
+    args = sys.argv[1:]
     layout = json.load(open(os.path.join(HERE, 'blendprobe_layout.json')))
-    if len(photos) != len(layout['pages']):
-        sys.exit(f"need {len(layout['pages'])} photos, one per page in order")
+    if args[:1] == ['--pages']:
+        # re-shoots: --pages 5,8,5,8 PHOTO PHOTO PHOTO PHOTO
+        pages = [layout['pages'][int(p)] for p in args[1].split(',')]
+        photos = args[2:]
+        if len(photos) != len(pages):
+            sys.exit('need one photo per listed page')
+    else:
+        pages, photos = layout['pages'], args
+        if len(photos) != len(pages):
+            sys.exit(f"need {len(pages)} photos, one per page in order (or --pages)")
     tmp = tempfile.mkdtemp()
-    for page, photo in zip(layout['pages'], photos):
-        bmp = os.path.join(tmp, f"p{page['page']}.bmp")
+    for n, (page, photo) in enumerate(zip(pages, photos)):
+        bmp = os.path.join(tmp, f"{n}.bmp")
         subprocess.run(['sips', '-s', 'format', 'bmp', photo, '--out', bmp], check=True, capture_output=True)
         img = read_bmp(bmp)
         tl, tr, bl, br = screen_corners(img)
         H = homography([(0, 0), (240, 0), (0, 160), (240, 160)], [tl, tr, bl, br])
         lum = img.mean(axis=2)
         print(f"page {page['page']:02} {page['title']}  ({os.path.basename(photo)})")
+        chans = [np.ascontiguousarray(img[:, :, c]) for c in range(3)]
         for row in page['rows']:
             amps = [(p['value'], stripe_amplitude(lum, H, p)) for p in row['patches']]
             flat = min(amps, key=lambda a: a[1])
             second = sorted(a[1] for a in amps)[1] if len(amps) > 1 else 0
             match = sorted(n for n, v in row['predict'].items() if v == flat[0])
-            print(f"  {row['label']:8} flat {flat[0]:2}  margin {second - flat[1]:5.1f}  [" +
+            # per channel: the patch where each of R, G, B goes flat, and how
+            # flat (a channel whose output is not any 5-bit candidate has no
+            # near-zero patch)
+            per = []
+            for c, name in enumerate('RGB'):
+                ca = [(p['value'], stripe_amplitude(chans[c], H, p)) for p in row['patches']]
+                cf = min(ca, key=lambda a: a[1])
+                per.append(f'{name}{cf[0]}({cf[1]:.1f})')
+            print(f"  {row['label']:8} flat {flat[0]:2}  margin {second - flat[1]:5.1f}  {' '.join(per)}  [" +
                   '  '.join(f'{v}:{a:.1f}' for v, a in amps) + f"]  {','.join(match) or '-'}")
 
 

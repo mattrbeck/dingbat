@@ -31,3 +31,23 @@ Rows that rule out the alternatives: alpha T02B28 / T18B29 / T07B21 (per-term
 truncation gives 15, rounding 17, hardware 16); darken EVY 7 T28 and EVY 11
 T31 (subtract-truncated product gives 16 / 10, rounded forms 16 / 9-10,
 hardware 15 / 9); brighten EVY 11 T02 (rounding gives 22, hardware 21).
+
+# ── re-shoots, same console (clear purple SP, EverDrive; model not confirmed),
+#    2026-09-16 afternoon: IMG_4207-4212 = pages 05,08 x3 in different lighting.
+# Sets IMG_4207/4208 and 4209/4210 are unreadable: the screen is too small in
+# frame and the reader's registration fails (T16 on page 05, where every
+# formula gives 9, reads 10 and 8). Set IMG_4211/4212 reads cleanly:
+page 05 DARKEN EVY 7 (IMG_4211):  T24 13   T27 15   T28 15   T16 9     (margins 5.7-7.0: confirmed)
+page 08 BRIGHTEN EVY 7 (IMG_4212): T04 15†  T05 16   T06 16†  T02 14
+
+# Per-channel reading (blendprobe_photo.py prints R/G/B): every alpha and darken
+# row, and every brighten row whose exact result has a small fraction, goes
+# flat in R, G and B at the same patch. Four brighten rows do not:
+#   EVY 7  T04 (exact 15.8125): R/B flat at 15, G nearest 16 (not flat)
+#   EVY 7  T06 (exact 16.9375): R/B flat at 16, G flat at 17 (one photo) / nearest 17
+#   EVY 3  T10 (exact 13.9375): R/B flat at 13, G nearest 14 (not flat)
+#   EVY 11 T02 (exact 21.9375): R/B flat at 21, G nearest 21 but not flat
+# i.e. exactly the rows with fraction >= 0.8125; green there is not the 5-bit
+# truncation R and B are, and in three of four not any 5-bit value at all.
+# Open: needs a probe with single-channel patches and half-step references
+# before anything is modelled. R/B brighten = truncation is solid.
