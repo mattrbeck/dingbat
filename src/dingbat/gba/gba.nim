@@ -1178,6 +1178,7 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
     of etSerial:        gba.serial.serial_transfer_complete()
     of etDMA:           gba.dma.request_immediate()
     of etRtcSecond:     gba.rtc_irq_poll()
+    of etHDMARequest: gba.dma.trigger_hdma()
     of etHandleInput, etIME, etCameraDone, etGbLycEdge: discard
 
 proc post_init*(gba: GBA) =

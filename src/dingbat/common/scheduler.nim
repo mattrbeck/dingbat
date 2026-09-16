@@ -49,6 +49,9 @@ type
     # A CGB LYC write's owed STAT edge, one M-cycle after the byte lands
     # (CGB_LYC_EDGE_DEFER in gb/gb.nim).
     etGbLycEdge
+    # H-blank DMA request, raised off the DISPSTAT H-blank flag
+    # (HBLANK_DMA_REQUEST_DELAY in gba/ppu.nim).
+    etHDMARequest
 
   Event* = object
     cycles*: CycleCount

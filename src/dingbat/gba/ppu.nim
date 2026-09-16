@@ -120,6 +120,17 @@ const HBLANK_FLAG_DELAY = 46
 # that bracket.
 const HBLANK_IRQ_SYNC_DELAY {.intdefine.} = 6
 
+# An H-blank DMA is requested off the H-blank flag, not the end of drawing:
+# gbaedge HDMAPHASE (AGB SP, docs/hwprobe-results-agb.md session 6) freezes a
+# timer with the DMA's own write, and against the same clock and anchor the
+# write lands 48 cycles after a request at 960 would put it, on two lines,
+# with no spread. A request 2 cycles after the flag reproduces that page's
+# H-blank stamps exactly. The 2 is measured, not derived: it is not
+# DMA_START_DELAY (3), and the same page and DMAOPENBUS disagree about any one
+# start delay, which points at the grant waiting for the CPU bus cycle in
+# flight rather than at a constant.
+const HBLANK_DMA_REQUEST_DELAY {.intdefine.} = 2
+
 proc start_hblank*(ppu: PPU) =
   ppu.gba.scheduler.schedule(272, etPPUEndHBlank)
   ppu.gba.scheduler.schedule(HBLANK_FLAG_DELAY, etPPUSetHBlankFlag)
@@ -128,11 +139,12 @@ proc start_hblank*(ppu: PPU) =
     for bg_num in 0..1:
       ppu.bgref_int[bg_num][0] += ppu.bgaff[bg_num][1].num  # bgx += dmx
       ppu.bgref_int[bg_num][1] += ppu.bgaff[bg_num][3].num  # bgy += dmy
-    ppu.gba.dma.trigger_hdma()
   ppu.latch_oam()
 
 proc set_hblank_flag*(ppu: PPU) =
   ppu.dispstat.hblank = true
+  if ppu.vcount < 160:  # no H-blank DMAs during V-blank
+    ppu.gba.scheduler.schedule(HBLANK_DMA_REQUEST_DELAY, etHDMARequest)
   # Flag and IRQ are the same signal (bit 4 enables an interrupt on the bit-1
   # condition), so they rise together (mGBA suite Flip 1).
   if ppu.dispstat.hblank_irq_enable:
