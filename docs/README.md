@@ -26,6 +26,7 @@ One line per document: what it is for and who reads it. Scores live only in
 - [lcd_ghost_delta.md](lcd_ghost_delta.md) — parked: LCD ghosting per upscale-filter cell. Video maintainers.
 - [web_audio_pacing.md](web_audio_pacing.md) — the web audio scheduling-lead servo and how to measure it. Web maintainers.
 - [hle-bios-shortcomings.md](hle-bios-shortcomings.md) — what the built-in GBA HLE BIOS does not do. GBA maintainers.
+- [gba-rtc.md](gba-rtc.md) — the GBA cartridge clock: host time unless a game sets it, the battery-save RTC trailer, behaviour next to mGBA and real carts. GBA maintainers, anyone moving saves between emulators.
 - [ios-feasibility.md](ios-feasibility.md) — the iOS core build and what is proven. Anyone reviving the iOS port.
 - [performance.md](performance.md) — harnesses, measurement rules, what is known about cost. Anyone doing perf work.
 - [gb_oam_dma_cost.md](gb_oam_dma_cost.md) — measuring a change on the GB CPU bus hot path (the inline cliff). GB perf work.

@@ -273,17 +273,58 @@ block:  # set the clock, it runs from there
   g.rtc_write_bytes(CMD_STATUS_W, [0x40'u8])
 
 block:  # RESET strobes on write AND read (GBATEK), and does not hang the bus
+  # The chip would load 2000-01-01; dingbat returns to the host clock (the
+  # epoch here) so a new game shows today's date (docs/gba-rtc.md)
+  removeFile(sav_path(rtc_rom))
   let g = boot(rtc_rom, E)
   g.rtc_write_bytes(CMD_DATETIME_W, regs(2031, 7, 14, 1, 21, 5, 9))
   discard g.rtc_read_bytes(0x61, 1)   # read-form reset command
   check(g.bus.gpio.rtc.state == rtcWaiting, "a read of the reset register leaves the RTC idle")
   check(g.status() == 0x00, "reset: status 00h")
-  check(g.datetime() == regs(2000, 1, 1, 0, 0, 0, 0), "reset: 2000-01-01 00:00:00, weekday 0",
+  check(g.datetime() == regs(2006, 1, 1, 0, 0, 0, 0), "reset: back to the source clock, not 2000-01-01",
         hex(g.datetime()))
+  check(not g.bus.gpio.rtc.bias_set, "reset: the clock follows the source again")
   g.rtc_write_bytes(CMD_STATUS_W, [0x40'u8])
   g.rtc_write_bytes(CMD_DATETIME_W, regs(2031, 7, 14, 1, 21, 5, 9))
+  g.storage.dirty = false
   g.rtc_write_bytes(CMD_RESET, [])
-  check(g.datetime() == regs(2000, 1, 1, 0, 0, 0, 0), "reset by write")
+  check(g.datetime() == regs(2006, 1, 1, 0, 0, 0, 0), "reset by write")
+  check(g.storage.dirty, "a reset that drops a set clock rewrites the battery file")
+  g.enable_deterministic_rtc(E + 90)
+  check(g.datetime() == regs(2006, 1, 1, 0, 0, 1, 30), "after a reset the clock runs with the source")
+
+block:  # a trailer that recorded host time keeps following the host
+  # what a host-clock emulator (or dingbat with no game-set clock) writes:
+  # the host's local time at the latch instant
+  let then = getTime().toUnix - 86400
+  var f = chip_image(0x8000, 3)
+  let local_then = then + local_zone_offset(then)
+  for b in encode_trailer(local_then, calendar_weekday(local_then), 0x40, then): f.add(char(b))
+  writeFile(sav_path(rtc_rom), f)
+  let g = boot(rtc_rom)
+  check(g.bus.gpio.rtc.bias_host, "a host-time trailer is recognised")
+  let local_now = getTime().toUnix + local_zone_offset(getTime().toUnix)
+  let want = datetime_registers(local_now, calendar_weekday(local_now), 0x40)
+  check(g.datetime()[0 .. 4] == want[0 .. 4], "host-time trailer: shows host local time now",
+        hex(g.datetime()) & " vs " & hex(want))
+  # the same file in a deterministic session uses the stored offset, which
+  # every peer derives from the same bytes whatever its own zone
+  let p = boot(rtc_rom, then + 60)
+  let wp = datetime_registers(local_then + 60, calendar_weekday(local_then + 60), 0x40)
+  check(p.datetime() == wp, "deterministic: saved + (now - latch), zone-independent",
+        hex(p.datetime()) & " vs " & hex(wp))
+  # a game setting the clock turns it into a set clock
+  g.rtc_write_bytes(CMD_DATETIME_W, regs(2031, 7, 14, 1, 21, 5, 9))
+  check(not g.bus.gpio.rtc.bias_host and g.bus.gpio.rtc.bias_set, "a game write replaces host-following")
+
+block:  # a trailer with a set clock stays set
+  let then = getTime().toUnix - 3600
+  var f = chip_image(0x8000, 4)
+  for b in encode_trailer(cal(2012, 3, 4, 5, 6, 7), 0, 0x40, then): f.add(char(b))
+  writeFile(sav_path(rtc_rom), f)
+  let g = boot(rtc_rom)
+  check(g.bus.gpio.rtc.bias_set and not g.bus.gpio.rtc.bias_host, "a set-clock trailer is not host time")
+  removeFile(sav_path(rtc_rom))
 
 block:  # Nintendo's RTC library order: data before direction, from power-on
   let g = boot(rtc_rom, E)

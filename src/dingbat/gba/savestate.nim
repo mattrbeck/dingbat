@@ -251,6 +251,7 @@ proc save_gpio_state(gpio: GPIO; w: var Writer) =
   w.write_u64(uint64(rtc.bias))
   w.write_bool(rtc.bias_set)
   w.write_u8(uint8(rtc.wday_bias))
+  w.write_bool(rtc.bias_host)
 
 proc load_gpio_state(gpio: GPIO; r: var Reader; rev: uint32) =
   r.expect_tag(GBA_SEC_GPIO)
@@ -290,12 +291,14 @@ proc load_gpio_state(gpio: GPIO; r: var Reader; rev: uint32) =
     let wd = r.read_u8()
     check_range(int(wd), 0, 6, "rtc.wday_bias")
     rtc.wday_bias = int(wd)
+    rtc.bias_host = r.read_bool()
   else:
     # rev <= 6 ignored clock writes and read no battery trailer: the clock
     # was always the source clock in the host zone (UTC when deterministic)
     rtc.bias = 0
     rtc.bias_set = false
     rtc.wday_bias = 0
+    rtc.bias_host = false
 
 # ---- PPU ----
 

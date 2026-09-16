@@ -223,6 +223,7 @@ type
     # date's own weekday (the chip's septenary counter is set independently).
     bias*:          int64
     bias_set*:      bool
+    bias_host*:     bool   # bias came from a trailer that recorded host time
     wday_bias*:     int
     # Last unix minute seen by the per-minute IRQ poll. Not serialized (worst
     # case one spurious or missed tick after a state load).

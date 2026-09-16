@@ -603,10 +603,10 @@ const
   PPU_LATCH_LEN  = 2 + 1 + 1 + 0x400 + 1
 
 # The GPIO section (tag GBA_SEC_GPIO) at rev 7: the RTC's irq + m24 bools
-# became one status byte, and bias (u64), bias_set, wday_bias (u8) follow the
-# epoch. Located by its tag and confirmed by GBA_SEC_PPU one section later.
+# became one status byte, and bias (u64), bias_set, wday_bias (u8), bias_host
+# follow the epoch. Located by its tag and confirmed by GBA_SEC_PPU one section later.
 const
-  GPIO_SEC_LEN_V7  = 1 + 3 + 3 + 1 + 4 + 4 + 8 + 1 + 1 + 8 + 8 + 1 + 1
+  GPIO_SEC_LEN_V7  = 1 + 3 + 3 + 1 + 4 + 4 + 8 + 1 + 1 + 8 + 8 + 1 + 1 + 1
   GPIO_STATUS_AT   = 1 + 3 + 3 + 1 + 4 + 4 + 8
   GPIO_CLOCK_AT_V6 = GPIO_STATUS_AT + 2 + 1 + 8  # after irq, m24, det, epoch
 
@@ -624,7 +624,7 @@ proc strip_rtc_clock(payload: var string): bool =
   payload[found + GPIO_STATUS_AT] = irq
   payload.insert($m24, found + GPIO_STATUS_AT + 1)
   let at = found + GPIO_CLOCK_AT_V6
-  payload.delete(at ..< at + 8 + 1 + 1)
+  payload.delete(at ..< at + 8 + 1 + 1 + 1)
   true
 
 proc strip_ppu_latches(payload: var string): bool =
