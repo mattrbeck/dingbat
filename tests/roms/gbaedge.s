@@ -15,7 +15,7 @@
 @  36 MSRTBIT2  37 OBJBUDGET† 38 OBJGEOM† 39 DMAOPENBUS
 @  40 IRQDECOMP 41 CONTEND2 42 MULTIME  43 TIMPHASE 44 PSGPHASE
 @  45 MEMCTL   46 DMATIME  47 IWCYCLE  48 DMAFIFO  49 UNDMODE‡
-@  50 HDMAPHASE 51 PSGFIRST
+@  50 HDMAPHASE 51 PSGFIRST 52 PSGWHY 53 HDMASWEEP
 @ (†visual: the page is a picture drawn with OBJs in mode 0, not a hex
 @  dump — tests/roms/README-probes-gba.md says what to photograph)
 @ (‡UNDMODE writes an undefined CPSR mode number: HOLD SELECT AT POWER-ON
@@ -4282,6 +4282,8 @@ probe_tail3:
     bl  probe_dmafifo
     bl  probe_hdmaphase
     bl  probe_psgfirst
+    bl  probe_psgwhy
+    bl  probe_hdmasweep
     bl  probe_undmode
     pop {pc}
     .ltorg
@@ -6362,6 +6364,384 @@ probe_psgfirst:
     strb r0, [r8, #31]
     mov r0, #0
     strh r0, [r4, #0x84]           @ leave the PSG off behind us
+    pop {r4-r11, pc}
+    .ltorg
+
+
+@ ── slot 52: PSGWHY — which condition kills ch1's trigger? ───────────────
+@ p44 PSGPHASE and p51 PSGFIRST (AGB SP, docs/hwprobe-results-agb.md
+@ session 6) agree that a ch1 trigger shortly after a SOUNDCNT_X master-on
+@ dies while ch2/3/4 live, that NR10 = 0x11 saves it, and that the first two
+@ ch1 triggers die while a third lives.  Every ch1 row that died on either
+@ page triggered at frequency 0x400 — exactly half the sweep's overflow limit
+@ 0x800 — and the p51 row that "lived with the length enable clear" wrote
+@ NR14 = 0x80, which also dropped the frequency to 0.  One candidate explains
+@ the frequency, NR10 and channel pattern at once: ch1's sweep overflow check
+@ runs on trigger even with shift 0, computes f + f, and at f = 0x400 overflows.
+@ It does not explain the trigger-count pattern; rows 9-12 separate count
+@ from time.
+@
+@ Every row is two bytes:
+@   +n   (b) polls until SOUNDCNT_X bit 0 ROSE (0 = already set on the first
+@            read after the store; FF = never rose within 255 polls)
+@   +n+1 (b) polls it then stayed set, divided by 256 (FF = never fell
+@            before the 0x60000 cap; 00 = fell at once)
+@ so a trigger that never enables reads FF 00, one that enables late reads
+@ nn 49, and a healthy counter-16 tone reads 00 49.
+@
+@ Row / what varies / the overflow candidate's prediction:
+@ +0   f=0x400, NR10=0, length on (the p51 +0 row again)         dies
+@ +2   f=0x3FF                                                   lives
+@ +4   f=0x000, length on (de-confounds p51 +24)                 lives
+@ +6   f=0x400, length OFF (the other half of that confound)     dies: FF 00
+@        or 00 00 (with length off a LIVING tone never falls: 00 FF)
+@ +8   f=0x400, NR10=0x08 (negate, shift 0: f - f = 0)            lives
+@ +10  f=0x400, NR10=0x10 (period 1, shift 0)                    dies
+@ +12  f=0x400, NR10=0x01 (period 0, shift 1: f + f/2 = 0x600)    lives
+@ +14  f=0x7FF, NR10=0x01 (f + f/2 overflows)                    dies
+@ +16  +0's trigger two frames after the master-on, not at once  (time)
+@ +18  +0's trigger sixteen frames after the master-on           (time)
+@ +20  ch1 retriggered straight after +0's trigger               (count)
+@ +22  ch2 triggered, then ch1 at once: does ch2's trigger count?
+@ +24  NR14 written with length on but NO trigger, then triggered
+@ +26  +0 with SOUNDCNT_L = 0 (ch1 routed nowhere): rules out the mixer
+@ +28  sixteen frames after a master-on, SOUNDCNT_X = 0x80 written again
+@        (on -> on, no 0 -> 1 edge), then +0's trigger
+@ +30  (b) rows that hit the 0x60000 cap    +31 (b) marker 52
+
+@ r4 = IOBASE, r9 = cap hits.  r0 = NR11/NR12 halfword, r1 = NR13/NR14
+@ halfword -> r3 = rise polls (byte), r2 = fall polls >> 8 (byte)
+.macro pw_trigger
+    strh r0, [r4, #0x62]
+    strh r1, [r4, #0x64]
+    mov r3, #0
+1:  ldrh r0, [r4, #0x84]
+    tst r0, #1
+    bne 2f
+    add r3, r3, #1
+    cmp r3, #255
+    bcc 1b
+    mov r2, #0                     @ never rose
+    b   4f
+2:  ldr r12, =0x00060000
+    mov r2, #0
+3:  ldrh r0, [r4, #0x84]
+    tst r0, #1
+    beq 5f
+    add r2, r2, #1
+    subs r12, r12, #1
+    bne 3b
+    add r9, r9, #1
+    mov r2, #0xFF00                @ never fell
+5:  mov r2, r2, lsr #8
+    cmp r2, #255
+    movhi r2, #255
+4:
+.endm
+
+.macro pw_row off
+    strb r3, [r8, #\off]
+    strb r2, [r8, #(\off + 1)]
+.endm
+
+@ master off (clears every PSG register) then on, mixer routes ch1-4
+.macro pw_reset
+    mov r0, #0
+    strh r0, [r4, #0x84]
+    mov r0, #0x80
+    strh r0, [r4, #0x84]
+    ldr r0, =0xFF77
+    strh r0, [r4, #0x80]
+    mov r0, #2
+    strh r0, [r4, #0x82]
+.endm
+
+@ wait for n V-blank rises
+.macro pw_frames n
+    mov r12, #\n
+1:  ldrh r0, [r4, #4]
+    tst r0, #1
+    bne 1b
+2:  ldrh r0, [r4, #4]
+    tst r0, #1
+    beq 2b
+    subs r12, r12, #1
+    bne 1b
+.endm
+
+probe_psgwhy:
+    push {r4-r11, lr}
+    ldr r0, =SLOTS + 52*SLOTSZ     @ our own slot (EWRAM boots as noise)
+    mov r1, #0
+    mov r2, #(SLOTSZ / 4)
+    bl  fill_words
+    ldr r8, =SLOTS + 52*SLOTSZ
+    mov r4, #IOBASE
+    mov r9, #0
+
+    pw_reset
+    ldr r0, =0xF0B0                @ envelope 15, duty 2, counter 16
+    ldr r1, =0xC400                @ trigger, length on, f = 0x400
+    pw_trigger
+    pw_row 0
+    ldr r0, =0xF0B0                @ +20: retrigger straight away
+    ldr r1, =0xC400
+    pw_trigger
+    pw_row 20
+
+    pw_reset
+    ldr r0, =0xF0B0
+    ldr r1, =0xC3FF                @ f = 0x3FF
+    pw_trigger
+    pw_row 2
+
+    pw_reset
+    ldr r0, =0xF0B0
+    ldr r1, =0xC000                @ f = 0, length on
+    pw_trigger
+    pw_row 4
+
+    pw_reset
+    ldr r0, =0xF0B0
+    ldr r1, =0x8400                @ f = 0x400, length OFF
+    pw_trigger
+    pw_row 6
+
+    .irp nr10, 0x08, 0x10, 0x01
+    pw_reset
+    mov r0, #\nr10
+    strh r0, [r4, #0x60]
+    ldr r0, =0xF0B0
+    ldr r1, =0xC400
+    pw_trigger
+    .if \nr10 == 0x08
+    pw_row 8
+    .elseif \nr10 == 0x10
+    pw_row 10
+    .else
+    pw_row 12
+    .endif
+    .endr
+
+    pw_reset
+    mov r0, #0x01
+    strh r0, [r4, #0x60]
+    ldr r0, =0xF0B0
+    ldr r1, =0xC7FF                @ f = 0x7FF, shift 1: overflows
+    pw_trigger
+    pw_row 14
+
+    pw_reset
+    pw_frames 2
+    ldr r0, =0xF0B0
+    ldr r1, =0xC400
+    pw_trigger
+    pw_row 16
+
+    pw_reset
+    pw_frames 16
+    ldr r0, =0xF0B0
+    ldr r1, =0xC400
+    pw_trigger
+    pw_row 18
+
+    pw_reset
+    ldr r0, =0xF0B0
+    strh r0, [r4, #0x68]           @ ch2 NR21/NR22
+    ldr r0, =0xC400
+    strh r0, [r4, #0x6C]           @ ch2 trigger, then ch1 at once
+    ldr r0, =0xF0B0
+    ldr r1, =0xC400
+    pw_trigger
+    pw_row 22
+
+    pw_reset
+    ldr r0, =0x4400                @ length on, frequency, NO trigger
+    strh r0, [r4, #0x64]
+    ldr r0, =0xF0B0
+    ldr r1, =0xC400
+    pw_trigger
+    pw_row 24
+
+    pw_reset
+    mov r0, #0
+    strh r0, [r4, #0x80]           @ SOUNDCNT_L: nothing routed
+    ldr r0, =0xF0B0
+    ldr r1, =0xC400
+    pw_trigger
+    pw_row 26
+
+    pw_reset
+    pw_frames 16
+    mov r0, #0x80
+    strh r0, [r4, #0x84]           @ on -> on: no 0 -> 1 edge
+    ldr r0, =0xF0B0
+    ldr r1, =0xC400
+    pw_trigger
+    pw_row 28
+
+    strb r9, [r8, #30]
+    mov r0, #52
+    strb r0, [r8, #31]
+    mov r0, #0
+    strh r0, [r4, #0x84]           @ leave the PSG off behind us
+    pop {r4-r11, pc}
+    .ltorg
+
+@ ── slot 53: HDMASWEEP — does the DMA wait for the CPU's bus cycle? ─────
+@ p50 HDMAPHASE (session 6) put the H-blank DMA's request 2 cycles after the
+@ H-blank flag, exactly, while the CPU looped on 1-cycle IWRAM accesses.
+@ With the CPU inside a ROM load the write landed +5 later, at 8 waits +2 —
+@ one sample each, so it cannot tell a deferral that depends on WHERE in the
+@ CPU's bus cycle the request falls from a constant offset.  p27 DMAOPENBUS
+@ says the same thing from another side: no single DMA start delay matches
+@ both of its words.
+@
+@ This page sweeps that phase one cycle at a time, and measures without an
+@ anchor.  Two DMAs each freeze their own timer with their write: an H-blank
+@ DMA0 on line 159 stops TM0, the V-blank DMA1 at the start of line 160
+@ stops TM1.  The CPU loops on a 32-bit ROM load at WS0 = 8 waits (a long
+@ gamepak access) until TM0 stops — so the H-blank request lands inside that
+@ loop — then on 1-cycle IWRAM accesses until TM1 stops, so the V-blank
+@ request meets no long access.  A pre-delay of k one-cycle NOPs, k = 0..13,
+@ shifts where inside the ROM loop the H-blank request lands.  Every row is
+@ TM1 - TM0 = (V-blank write) - (H-blank write): the anchor's poll lag, which
+@ varies with the previous trial's length, cancels out of it entirely.
+@   the grant waits for the end of the bus cycle in flight
+@       -> the rows fall one cycle per k and then jump back by an access's
+@          length: a sawtooth whose jumps sit where the long access ends
+@   the grant comes off the PPU regardless of the CPU
+@       -> every row is the same
+@
+@ +0..+26 (14 h) TM1 - TM0 with pre-delay k = 0..13, the H-blank DMA landing
+@   while the CPU loops on a ROM load at WS0 = 8 waits (prefetch off)
+@ +28 (h) the same with the loop loading from IWRAM, k = 0
+@ +30 (b) (IWRAM k = 7) - (IWRAM k = 0), signed: 0 with 1-cycle accesses
+@ +31 (b) marker 53
+.equ V10STUB,  0x03000900          @ IWRAM copy of hs_stub
+
+@ r1 = DMA0 (H-blank) control, r8 = DMA1 (V-blank) control, r3 = address the
+@ loop loads from, r5 = 0x00800000, r6 = k (0..15), r2 = TM1BASE,
+@ r4 = IOBASE, r9 = DMA0, r10 = TM0BASE, r11 = DMA1
+@ -> r7 = TM1 - TM0 (0xFFFF if either DMA never fired).  No literal pools:
+@ the routine is copied to IWRAM.
+hs_stub:
+    mov r12, #0
+    str r12, [r9, #8]
+    str r12, [r11, #8]
+    str r12, [r10]
+    str r12, [r2]
+1:  ldrh r0, [r4, #6]              @ park on line 158 ...
+    cmp r0, #158
+    bne 1b
+2:  ldrh r0, [r4, #6]
+    cmp r0, #159
+    bne 2b                         @ ... and start on the line-159 boundary
+    str r1, [r9, #8]               @ arm the H-blank DMA0
+    str r8, [r11, #8]              @ arm the V-blank DMA1
+    str r5, [r2]                   @ TM1 first ...
+    str r5, [r10]                  @ ... then TM0, a fixed skew behind
+    rsb r6, r6, #15
+    add pc, pc, r6, lsl #2         @ skip 15-k sled entries: k+1 NOPs run
+    mov r0, r0                     @ (pc reads +8: this word is jumped over)
+    .rept 16
+    mov r0, r0
+    .endr
+    mov r12, #0
+3:  ldr r0, [r3]                   @ the access the H-blank grant may wait on
+    ldrh r0, [r10, #2]             @ TM0CNT_H: still enabled?
+    tst r0, #0x80
+    beq 4f
+    add r12, r12, #1
+    cmp r12, #0x8000
+    bcc 3b
+    b   8f
+4:  mov r12, #0
+5:  ldrh r0, [r2, #2]              @ TM1CNT_H, polled on 1-cycle accesses
+    tst r0, #0x80
+    beq 6f
+    add r12, r12, #1
+    cmp r12, #0x8000
+    bcc 5b
+8:  mvn r7, #0                     @ a DMA never fired
+    b   7f
+6:  ldrh r7, [r2]                  @ V-blank write stamp
+    ldrh r0, [r10]                 @ H-blank write stamp
+    sub r7, r7, r0
+7:  mov r0, #0
+    str r0, [r9, #8]
+    str r0, [r11, #8]
+    str r0, [r10]
+    str r0, [r2]
+    bx  lr
+hs_stub_end:
+
+.macro hs_trial k, addr
+    ldr r1, =0xA1400001            @ DMA0: enable, hblank, 16-bit, fixed, 1
+    ldr r8, =0x91400001            @ DMA1: enable, vblank, 16-bit, fixed, 1
+    ldr r3, =\addr
+    ldr r5, =0x00800000
+    mov r6, #\k
+    ldr r2, =0x04000104            @ TM1BASE
+    ldr r12, =V10STUB
+    mov lr, pc
+    bx  r12
+.endm
+
+probe_hdmasweep:
+    push {r4-r11, lr}
+    ldr r0, =SLOTS + 53*SLOTSZ     @ our own slot (EWRAM boots as noise)
+    mov r1, #0
+    mov r2, #(SLOTSZ / 4)
+    bl  fill_words
+    ldr r0, =hs_stub
+    ldr r1, =V10STUB
+    mov r2, #(hs_stub_end - hs_stub) / 4
+    bl  v8_copy
+    mov r4, #IOBASE
+    ldr r9, =0x040000B0            @ DMA0
+    ldr r10, =TM0BASE
+    ldr r11, =0x040000BC           @ DMA1
+    ldr r0, =IEADDR
+    mov r1, #0
+    strh r1, [r0, #8]              @ IME off
+    ldr r0, =HPZERO                @ the zero both DMAs move
+    strh r1, [r0]
+    str r0, [r9]
+    str r0, [r11]
+    ldr r1, =TM0CNTH
+    str r1, [r9, #4]               @ DMA0 -> TM0CNT_H
+    ldr r1, =0x04000106
+    str r1, [r11, #4]              @ DMA1 -> TM1CNT_H
+    ldr r0, =0x04000204
+    ldrh r0, [r0]
+    push {r0}                      @ WAITCNT, put back at the end
+
+    hs_trial 0, HPZERO             @ IWRAM loop, k = 0 and k = 7
+    ldr r1, =SLOTS + 53*SLOTSZ
+    strh r7, [r1, #28]
+    push {r7}
+    hs_trial 7, HPZERO
+    pop {r0}
+    sub r7, r7, r0
+    ldr r1, =SLOTS + 53*SLOTSZ
+    strb r7, [r1, #30]
+
+    ldr r0, =0x04000204
+    mov r1, #0x0C                  @ WS0 first access 8 waits, prefetch off
+    strh r1, [r0]
+    .irp k, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13
+    hs_trial \k, 0x08000000
+    ldr r1, =SLOTS + 53*SLOTSZ
+    strh r7, [r1, #(\k * 2)]
+    .endr
+    pop {r0}
+    ldr r1, =0x04000204
+    strh r0, [r1]                  @ WAITCNT back as we found it
+
+    ldr r1, =SLOTS + 53*SLOTSZ
+    mov r0, #53
+    strb r0, [r1, #31]
     pop {r4-r11, pc}
     .ltorg
 

@@ -39,7 +39,9 @@ PAGES = ["IDENT", "OPENBUS", "BIOSPROT", "SWITIME", "TIMERS", "DMALATCH",
          "MEMCTL", "DMATIME", "IWCYCLE", "DMAFIFO", "UNDMODE",
          # v9: when in the scanline an H-blank DMA is granted the bus,
          # and whose first trigger after a PSG master-on dies
-         "HDMAPHASE", "PSGFIRST"]
+         "HDMAPHASE", "PSGFIRST",
+         # v10: narrowing pages for session 6's two answers
+         "PSGWHY", "HDMASWEEP"]
 
 
 

@@ -1,4 +1,4 @@
-.equ NPAGES, 52
+.equ NPAGES, 54
 
 .global font_data
 font_data:
@@ -97,6 +97,8 @@ name_table:
     .byte 31,24,14,23,25,14,15,0,0,0   @ UNDMODE
     .byte 18,14,23,11,26,18,11,29,15,0   @ HDMAPHASE
     .byte 26,29,17,16,19,28,29,30,0,0   @ PSGFIRST
+    .byte 26,29,17,33,18,35,0,0,0,0   @ PSGWHY
+    .byte 18,14,23,11,29,33,15,15,26,0   @ HDMASWEEP
 .global str_title
 str_title:
     .byte 17,12,11,15,14,17,15,0,32,2

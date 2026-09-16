@@ -1264,3 +1264,108 @@ a useful control: it proves the row's NR10 write took effect. `+24`/`+26`
 read `FFFF` with `+28` = 2, i.e. both length-disabled rows ran to the cap
 without expiring, as they should. `+20` reads `00`, i.e. the pages before this one left the PSG master off,
 which is the state every row here assumes.
+
+---
+
+# GBA probe pages v10 — narrowing session 6's two answers
+
+Two hex pages, **52 PSGWHY** and **53 HDMASWEEP**. Session 6 answered the
+questions pages 50 and 51 asked, and each answer left a narrower one behind.
+Both pages state in advance what each candidate explanation predicts, row by
+row.
+
+## Page 52 PSGWHY — which condition kills ch1's trigger?
+
+Pages 44 and 51 agree that a ch1 trigger soon after a SOUNDCNT_X master-on
+dies while ch2, ch3 and ch4 live, that NR10 = `0x11` saves it, and that the
+first two ch1 triggers die while a third lives. Re-reading them for other
+causes turned up a confound neither page could see: **every ch1 row that died
+on either page triggered at frequency `0x400`**, exactly half the sweep's
+overflow limit `0x800`, and page 51's "lives with the length enable clear" row
+wrote NR14 = `0x80`, which also dropped the frequency to 0. One candidate
+covers the frequency, NR10 and channel pattern at once — ch1's sweep overflow
+check runs on trigger even with shift 0, computes f + f, and at f = `0x400`
+overflows — but not the trigger-count pattern.
+
+Every row is two bytes: polls until the active bit **rose** (00 = already set
+on the first read, FF = never rose within 255 polls), then polls it stayed set
+÷ 256 (FF = never fell). So a trigger that never enables reads `FF 00`, a late
+one `nn 49`, a healthy counter-16 tone `00 49`. Page 44 and page 51 polled
+only for the fall, which is why they could not tell "never enables" from
+"enables late".
+
+| row | what varies | overflow candidate predicts |
+|---|---|---|
+| +0 | f `0x400`, NR10 0, length on (p51 +0 again) | dies |
+| +2 | f `0x3FF` | lives |
+| +4 | f `0x000`, length on (de-confounds p51 +24) | lives |
+| +6 | f `0x400`, length off | dies (a living tone with length off reads `00 FF`) |
+| +8 | NR10 `0x08` (negate, shift 0: f − f) | lives |
+| +10 | NR10 `0x10` (period 1, shift 0) | dies |
+| +12 | NR10 `0x01` (shift 1: f + f/2 = `0x600`) | lives |
+| +14 | f `0x7FF`, NR10 `0x01` (overflows) | dies |
+| +16 | +0 two frames after the master-on | time |
+| +18 | +0 sixteen frames after the master-on | time |
+| +20 | ch1 retriggered straight after +0 | count |
+| +22 | ch2 triggered, then ch1 at once | does ch2 count? |
+| +24 | NR14 written with length on, no trigger, then triggered | does a write count? |
+| +26 | +0 with SOUNDCNT_L = 0 | rules out the mixer |
+| +28 | sixteen frames after master-on, SOUNDCNT_X = `0x80` again, then +0 | 0→1 edge or any write? |
+| +30 | (b) rows that hit the cap | |
+
+**dingbat predicts** page CRC **F0A4**:
+
+```
+00 49  00 44  00 44  00 FF  00 49  00 07  00 44  FF 00
+00 45  00 46  00 4B  00 44  00 49  00 44  00 49  01 34
+```
+
+dingbat has no first-trigger effect, so every row lives except two, and those
+two are its sweep working as Pan Docs describes: `+10` dies at a sweep
+clock (shift 0 still runs the overflow calculation when the period is
+non-zero) and `+14` never enables (`FF 00`: overflow checked on trigger when
+shift is non-zero). `+14` also proves the page can see "never enables".
+
+## Page 53 HDMASWEEP — does the DMA wait for the CPU's bus cycle?
+
+Page 50 put the H-blank DMA's request exactly 2 cycles after the flag while
+the CPU sat on 1-cycle IWRAM accesses; inside a ROM load the write moved +5,
+at 8 waits +2 — one sample each, so a deferral that depends on where in the
+CPU's bus cycle the request lands could not be told from a constant. Page 39
+DMAOPENBUS says the same from another side: no single DMA start delay
+matches both of its words (2 fixes one and breaks the other, and drops 64
+mGBA Timing rows).
+
+The page sweeps that phase one cycle at a time and measures **without an
+anchor**. An H-blank DMA0 on line 159 freezes TM0 with its write; the
+V-blank DMA1 at the start of line 160 freezes TM1. The CPU loops on a 32-bit
+ROM load at WS0 = 8 waits until TM0 stops — so the H-blank request lands
+inside that loop — then on 1-cycle IWRAM accesses until TM1 stops. A
+pre-delay of k one-cycle NOPs, k = 0–13, moves where the H-blank request
+lands. Every row is TM1 − TM0, the V-blank write minus the H-blank write, so
+the line anchor's poll lag — which a first version of this page showed
+varies by 5 cycles with the previous trial's length — cancels completely.
+
+```
++0..+26 (14 h) TM1 - TM0, pre-delay k = 0..13, ROM load at WS0 = 8 waits
++28 (h)        the same with the loop loading from IWRAM, k = 0
++30 (b)        (IWRAM k = 7) - (IWRAM k = 0), signed
++31 (b)        marker 53
+```
+
+* **A sawtooth** — rows stepping one cycle per k and jumping back by one
+  access length — means the grant waits for the end of the CPU's bus access in
+  flight, and where the jumps fall says whether it waits for the whole
+  32-bit load or for each halfword access.
+* **A flat line** means the grant comes off the PPU and the +5/+2 on page 50
+  came from something else.
+
+**dingbat predicts** page CRC **1BA6**: every row `E2 00` (226) and `+30`
+= 0 — flat, because dingbat grants a DMA at its exact request cycle whatever
+the CPU is doing. 226 is the V-blank request at 1232 less the H-blank request
+at 1008 (flag + 2, page 50), plus the fixed skew between the two timers'
+starts.
+
+Both predictions were captured with the `dma-flag-grant` build (H-blank DMA
+requested at flag + 2); `ALL` there is **1521** (`-auto`, HLE BIOS). Pages
+0-51 are byte-identical to the v9b ROM under the same emulator build.
