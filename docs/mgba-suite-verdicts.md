@@ -59,32 +59,51 @@ with the newer toolchain.
 
 ## `DMA Prefetch Break` — the one real Misc failure
 
-`out[0] = 0x10000000 + 4 × reads`: a 7-instruction Thumb ROM loop reads open
+`out[0] = 0x10000000 + 4 x reads`: a 7-instruction Thumb ROM loop reads open
 bus until one read returns an HBlank DMA's last value instead of the
 prefetched opcode, so the count is a cycle measurement wearing an address.
 `REG_WAITCNT` is 0 throughout (ROM N=5/S=3, prefetch off): libgba's crt0
 never writes it, and the Timing suite's last write is zero.
 
-Run the way the constant was measured — the interactive ROM, `Misc. edge
-case tests` chosen from the menu — dingbat reads 2638 times against
-hardware's 2725 (`0x10002938` vs `0x10002A94`). The loop costs 36 cycles an
-iteration here and about 34.9 on hardware: roughly one cycle per iteration,
-3%.
+The row is a lottery, not a stopwatch. The loop costs 36 cycles an iteration
+and a scanline is 1232, so the DMA's landing point inside the loop walks
+1232 mod 36 = 8 cycles per line, and the loop exits on the first line where
+it lands somewhere the `ldmia` can see it. The exit line is therefore
+whichever line first wins that lottery; the reachable read counts are spaced
+a scanline apart (~34) and hardware's 2725 falls between two of them.
+Moving the loop's phase by four cycles moved the exit nine lines.
 
-The count also depends on what ran before it, so the auto-run fork's row is
-not comparable with a constant measured from the menu. The period is 36
-either way, but the window from the loop's first read to the DMA that ends
-it is 94,982 cycles from the menu and 86,346 in the auto run, which is why
-the fork reports 2399 (`0x1000257C`).
+The window itself is below the resolution the core dispatches at. On
+hardware the DMA's word survives on the data bus only until the next
+gamepak fetch, so the `ldmia` sees it when the transfer lands between that
+instruction's own fetch and its data cycle — a slot a few cycles wide in the
+middle of an instruction. Here a scheduler event can only land on an
+instruction boundary, so the latch is armed for the whole of the following
+instruction instead (`Bus.dma_open_bus_armed`, cleared in `cpu.tick`), which
+is the adjacent slot, not the same one. Closing the row means dispatching a
+DMA part-way through an instruction, not tuning a constant.
 
-One tempting cycle is the ROM burst: the fetch after the loop's open-bus
-read has the right address and is charged N only because the burst requires
-the ROM bus to have been busy continuously. Dropping that requirement — a
-burst survives any cycle that does not touch the gamepak — costs 4 cycles an
-iteration and brings the auto run to 2710 reads, 15 short. It also costs 620
-Timing rows: `ldr r2, [sp]`, `strh r3, [sp]` and the `nop /` pairs pin that
-a code fetch following an IWRAM data access *is* non-sequential. Whatever
-the missing cycle is, it is not that.
+What it did find is a real bug, now fixed. A DMA dispatched from a scheduler
+handler bills its cycles to `bus.cycles`, which a running CPU closes out
+with `scheduler.tick` after each instruction; a halted CPU never does, and
+`fast_forward` sets the clock absolutely, so the debt rode until the wake.
+Halting through a frame of HBlank DMA meant waking one transfer's worth of
+cycles later for every transfer that had run: the suite's VBlank IRQ is
+raised at cycle 0 of line 160, and dingbat entered its vector at cycle 647. It now enters at cycle 7,
+and the HLE and real BIOS agree on this row where they used to differ by a
+line.
+
+Two costings were refuted along the way, both by the rest of the suite:
+- a ROM burst surviving any cycle that does not touch the gamepak (which
+  would make the fetch after the loop's open-bus read sequential, 4 cycles
+  an iteration): 620 Timing rows fail, the `[sp]` rows pinning that a code
+  fetch after an IWRAM data access is non-sequential;
+- charging one pipeline refill instead of two in `clear_pipeline` (the
+  in-flight fetch a taken branch has already made): Timing 2020 -> 1920,
+  Timer count-up 936 -> 400, Timer IRQ 90 -> 69, SIO timing 4 -> 0.
+
+So the 36-cycle iteration is pinned by four independent sections, and the
+row stays red on a landing window no ROM measures.
 
 ## Video tests (interactive only)
 

@@ -447,3 +447,12 @@ proc tick*(cpu: CPU) =
     # Halted: drain events until something wakes the CPU or the frame ends.
     while cpu.halted and cpu.gba.ppu.frame == 0:
       cpu.gba.scheduler.fast_forward()
+      # A DMA dispatched from a handler bills its cycles to bus.cycles, which
+      # a running CPU closes out with scheduler.tick after each instruction.
+      # A halted one never does, so the debt rides until the wake and delays
+      # it by everything the DMAs did while the CPU was asleep. Commit it
+      # here: the time passed, and it belongs to nobody.
+      let pending = cpu.gba.bus.cycles
+      if pending > 0:
+        cpu.gba.bus.cycles = 0
+        cpu.gba.scheduler.tick(pending)
