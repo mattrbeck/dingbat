@@ -82,3 +82,23 @@ def classify(a, b):
     else:
         m['verdict'] = 'MAJOR'
     return m
+
+
+def within_reference_spread(subject, ref, other):
+    """True when every pixel where `subject` is more than one 5-bit step from
+    `ref` is also a pixel where the two references disagree by more than a
+    step (animation phase, scrolling), and that spread covers under half the
+    screen: the rest is at most colour-effect rounding."""
+    import numpy as np
+    if not (subject and ref and other):
+        return False
+    qs, qr, qo = (img.to555(img.read_ppm(c['ppm'])) for c in (subject, ref, other))
+    far = np.abs(qs - qr).max(axis=2) > 1
+    spread = np.abs(qr - qo).max(axis=2) > 1
+    # a moving sprite's edge lands a pixel apart between frames
+    grown = spread.copy()
+    grown[1:] |= spread[:-1]
+    grown[:-1] |= spread[1:]
+    grown[:, 1:] |= grown[:, :-1].copy()
+    grown[:, :-1] |= grown[:, 1:].copy()
+    return bool(far.any()) and not (far & ~grown).any() and spread.mean() < 0.5

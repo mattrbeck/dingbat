@@ -113,6 +113,21 @@ def compare_checkpoints(results, names, subject, cmpdir, tag):
         entry['verdict'] = {s: min((entry['pairs'][f'{s}~{r}']['verdict'] for r in refs),
                                    key=classify.ORDER.index) if refs else 'IDENTICAL'
                             for s in subjects}
+        # animation the references disagree on too, plus one-step rounding
+        # elsewhere, is not a difference
+        for sub in subjects:
+            if entry['verdict'][sub] not in ('DIFFERENT', 'MAJOR') or len(refs) < 2:
+                continue
+            for r in refs:
+                o = next(x for x in refs if x != r)
+                if classify.within_reference_spread(results[sub]['checkpoints'].get(cp),
+                                                    results[r]['checkpoints'].get(cp),
+                                                    results[o]['checkpoints'].get(cp)):
+                    pair = entry['pairs'][f'{sub}~{r}']
+                    pair['verdict'] = 'MINOR'
+                    pair['why'] = f'beyond one 5-bit step only where {r} and {o} differ (animation)'
+                    entry['verdict'][sub] = 'MINOR'
+                    break
         # reference noise: when the references differ from each other at
         # least as much as the subject differs from its closest reference,
         # this checkpoint cannot tell a bug from animation phase
@@ -274,7 +289,8 @@ def cross_load_verdict(report, s, refs, problems):
     def healthy(r):
         """Reader r shows its own save the way at least one other emulator does."""
         row = cps.get(f'{r}-in-{r}', {})
-        return bool(row) and all(any(cell_ok(vv) for vv in c['vs'].values()) for c in row.values() if c['vs'])
+        return bool(row) and all(c['reached'] and (not c['vs'] or any(cell_ok(vv) for vv in c['vs'].values()))
+                                 for c in row.values())
 
     for key, cell in cells.items():
         w, r = key.split('-in-')

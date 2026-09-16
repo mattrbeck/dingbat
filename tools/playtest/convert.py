@@ -23,6 +23,8 @@ A state load or rewind in the session truncates the replay there (the frame
 timeline no longer matches). Always verify the result with
 `playtest.py run ROM --script FILE --no-cross`, and tidy by hand.
 """
+import hashlib
+import json
 import os
 import re
 import statistics
@@ -32,6 +34,8 @@ import emu as emulib
 import screen
 
 POLL = 5
+GUARD_LETTERS = 6  # a guard's text needs at least this many letters
+STABLE = 15     # frames a guard's text must read the same before the input
 MASH_GAP = 90      # taps of one key closer than this form a mash run
 MASH_MIN = 3
 
@@ -149,6 +153,14 @@ class Replay:
         self.total = sess['end'] or sess['events'][-1][0]
         self.poll()
 
+    @classmethod
+    def cached(cls, sess, data):
+        rp = cls.__new__(cls)
+        rp.name = data['name']
+        rp.polls = [(f, t) for f, t in data['polls']]
+        rp.hashes = sess['hashes']
+        return rp
+
     def poll(self):
         h = self.e.hash()
         self.e.shot(self.probe)
@@ -176,9 +188,11 @@ class Replay:
             best = t
         return best
 
-    def guard(self, since, until):
-        """A line readable at `until`, absent at `since`, continuously present
-        from its first poll after `since`: (text, first frame) or None."""
+    def guard(self, since, until, after=None):
+        """A line readable at `until`, not on screen at `since` (not even as
+        an OCR variant), continuously present from its first poll after
+        `since` (and after `after`, for a mash's last tap): (text, first
+        frame) or None."""
         before = self.text_at(since)
         now = self.text_at(until)
         best = None
@@ -192,6 +206,24 @@ class Replay:
                 if f <= since or norm not in t:
                     break
                 first = f
+            if after is not None and first <= after:
+                continue
+            # text still being typed out or scrolling reads differently on
+            # every frame: only a line that has sat still for a while is a guard
+            if until - first < STABLE:
+                continue
+            # a short word misreads easily ("Plain" / "Plamn")
+            if len(re.sub(r'[^A-Za-z]', '', text)) < GUARD_LETTERS:
+                continue
+            # a blinking cursor or scrolling text makes OCR read one line
+            # several ways: a "new" line that resembles one seen between
+            # `since` and its first appearance is noise, not a new screen
+            seen = set(before)
+            for f, t in self.polls:
+                if since <= f < first:
+                    seen.update(t)
+            if any(similar(norm, o) for o in seen):
+                continue
             cand = (len(text), text, first)
             if best is None or cand > best:
                 best = cand
@@ -216,106 +248,189 @@ def convert(log_path, rom, section, workdir, save=None, rtc=None):
         acts.insert(k, {'kind': 'mark', 'frame': m})
     if sess['rtc'] is not None:
         rtc = sess['rtc']
-    rp = Replay(sess, rom, workdir, save, rtc)
-    e = rp.e
-    # pass 1: replay, sampling the screen and checking the recording's hashes
-    # the recorded keypad changes, replayed exactly (actions only shape the text)
     ends = [a['frame'] + a['hold'] if a['kind'] == 'tap'
             else a['last'] + a['hold'] if a['kind'] == 'mash' else a['frame'] for a in acts]
-    desync = None
     final = sess['end'] if sess['end'] else sess['events'][-1][0] + 120
-    try:
-        for frame, mask in sess['events']:
-            rp.run_to(frame)
-            e.set_keys(mask)
-            rp.poll()
-        rp.run_to(final)
-    except Desync as d:
+    # pass 1 (OCR of every few frames) is slow: cache it beside the recording
+    cache = os.path.join(workdir, 'polls.json')
+    key = hashlib.sha1(open(log_path, 'rb').read()
+                       + repr((POLL, rtc, save and open(save, 'rb').read())).encode()).hexdigest()
+    cached = json.load(open(cache)) if os.path.exists(cache) else {}
+    if cached.get('key') == key:
+        rp = Replay.cached(sess, cached)
+        desync = cached['desync']
+    else:
+        rp = Replay(sess, rom, workdir, save, rtc)
+        e = rp.e
+        # pass 1: replay the recorded keypad changes exactly, sampling the
+        # screen and checking the recording's hashes
+        desync = None
+        try:
+            for frame, mask in sess['events']:
+                rp.run_to(frame)
+                e.set_keys(mask)
+                rp.poll()
+            rp.run_to(final)
+        except Desync as d:
+            desync = d.args[0]
+        print(file=sys.stderr)
+        rp.close()
+        json.dump({'key': key, 'desync': desync, 'name': rp.name,
+                   'polls': [[f, t] for f, t in rp.polls]}, open(cache, 'w'))
+    if desync is not None:
         # keep only the actions that finished before the replay diverged
-        desync = d.args[0]
         keep = [i for i, end in enumerate(ends) if end <= desync]
         acts = [acts[i] for i in keep]
         ends = [ends[i] for i in keep]
         final = desync
-    print(file=sys.stderr)
 
-    # pass 2: steps
-    lines = [f"# converted from {os.path.basename(log_path)}: {len(sess['events'])} keypad changes, "
-             f"{len(acts)} actions, replayed in {rp.name}"
-             + (f", {len(sess['hashes'])} sync hashes checked" if sess['hashes'] else ''), f'[{section}]']
+    head = [f"# converted from {os.path.basename(log_path)}: {len(sess['events'])} keypad changes, "
+            f"{len(acts)} actions, replayed in {rp.name}"
+            + (f", {len(sess['hashes'])} sync hashes checked" if sess['hashes'] else ''), f'[{section}]']
     if sess['desync']:
-        lines.append(f"# NOTE: truncated at frame {sess['desync'][0]} ({sess['desync'][1]})")
+        head.append(f"# NOTE: truncated at frame {sess['desync'][0]} ({sess['desync'][1]})")
     if desync is not None:
-        lines.append(f'# NOTE: the headless replay diverged from the recording at frame {desync}; '
-                     f'steps stop there (check BIOS mode / settings of the recording app)')
+        head.append(f'# NOTE: the headless replay diverged from the recording at frame {desync}; '
+                    f'steps stop there (check BIOS mode / settings of the recording app)')
     if not acts:
-        rp.close()
-        return '\n'.join(lines) + '\n'
-    prev_end = 0
-    last_cp = -10 ** 9
-    cp_n = 0
+        return '\n'.join(head) + '\n'
+
+    # pass 2: steps, then replay them in dingbat; a guard that makes an input
+    # land away from its recorded frame (or fail) is replaced by a literal wait
+    literal = set()
+    for attempt in range(1, len(acts) + 3):
+        steps = emit(sess, acts, ends, final, rp, literal)
+        print(f'verifying generated steps (attempt {attempt}, {len(literal)} literal)', file=sys.stderr)
+        # dingbat must replay it on time; mGBA (usually frame-identical, a
+        # separate implementation) catches guards that only dingbat's pixels read
+        bad = None
+        for name in (rp.name, 'mgba'):
+            bad = verify(steps, name, rom, os.path.join(workdir, 'verify-' + name), save, rtc)
+            if bad is not None:
+                print(f'  {name}: guard of action {bad} misplaced an input', file=sys.stderr)
+                break
+        if bad is None:
+            break
+        literal.add(bad)
+    else:
+        head.append('# NOTE: the generated steps never replayed cleanly in dingbat')
+    lines = head + [t for t, _ in steps if t]
+    if literal:
+        lines.insert(len(head), f'# {len(literal)} OCR guard(s) dropped for literal waits after a verification replay')
+    return '\n'.join(lines) + '\n'
+
+
+TOLERANCE = 12   # frames an input may land from its recorded frame (guards poll every 5)
+
+
+def emit(sess, acts, ends, final, rp, literal):
+    """-> [(line, meta)]; meta: 'owner' = the action index whose guard this
+    line is (for blame), 'expect' = the recorded frame of this input."""
+    out = []
+    state = {'last_cp': -10 ** 9, 'cp_n': 0}
+
+    def add(line, **meta):
+        out.append((line, meta))
 
     def checkpoint(label, frame):
-        nonlocal last_cp, cp_n
-        if frame - last_cp >= 300:
-            cp_n += 1
+        if frame - state['last_cp'] >= 300:
+            state['cp_n'] += 1
             slug = re.sub(r'[^a-z0-9]+', '_', label.lower()).strip('_')[:24] or 'screen'
-            lines.append(f'checkpoint {cp_n:02}_{slug}')
-            last_cp = frame
+            add(f"checkpoint {state['cp_n']:02}_{slug}")
+            state['last_cp'] = frame
 
-    for idx, a in enumerate(acts):
-        pending_mash = lines and lines[-1].startswith('@mash ')
-        # a mash's goal is text that was not there when the mashing began
-        g = rp.guard(acts[idx - 1]['frame'] if pending_mash else prev_end, a['frame'])
-        if pending_mash:
-            key, every, hold = lines.pop()[6:].split()
+    def literal_taps(m, upto):
+        taps = [ev[0] for ev in sess['events'] if m['frame'] <= ev[0] <= m['last'] and ev[1]]
+        for t0, t1 in zip(taps, taps[1:] + [upto]):
+            add(f"press {m['keys']} hold={m['hold']}", expect=t0)
+            if t1 - t0 - m['hold'] > 0:
+                add(f"wait {t1 - t0 - m['hold']}")
+
+    prev_end = 0
+    pending = None   # index of a mash waiting for its goal
+    for idx, a in enumerate(acts + [{'kind': 'end', 'frame': final}]):
+        if pending is not None:
+            m = acts[pending]
+            # a mash's goal is text that was not there when the mashing began
+            # and first appeared after its last tap
+            g = None if pending in literal else rp.guard(m['frame'], a['frame'], after=m['last'])
             if g:
                 text, first = g
-                lines.append(f'mash {key} until text {quote(text)} timeout={max(1200, 3 * (a["frame"] - acts[idx - 1]["frame"]))} every={every} hold={hold}')
+                add(f"mash {m['keys']} until text {quote(text)} "
+                    f"timeout={max(1200, 3 * (a['frame'] - m['frame']))} every={m['every']} hold={m['hold']}",
+                    owner=pending, expect=m['frame'])
                 if a['frame'] - first > 0:
-                    lines.append(f'wait {a["frame"] - first}')
+                    add(f"wait {a['frame'] - first}")
             else:
-                lines.append(f'# mash {key} run could not be guarded; replaying taps literally')
-                m = acts[idx - 1]
-                taps = [ev[0] for ev in sess['events'] if m['frame'] <= ev[0] <= m['last'] and ev[1]]
-                for t0, t1 in zip(taps, taps[1:] + [a['frame']]):
-                    lines.append(f'press {key} hold={hold}')
-                    if t1 - t0 - int(hold) > 0:
-                        lines.append(f'wait {t1 - t0 - int(hold)}')
-        elif g and a['frame'] - prev_end >= POLL:
-            text, first = g
-            lines.append(f'until text {quote(text)} timeout={max(600, 3 * (first - prev_end))} every={POLL}')
-            checkpoint(text, first)
-            if a['frame'] - first > 0:
-                lines.append(f'wait {a["frame"] - first}')
-        elif a['frame'] > prev_end:
-            lines.append(f'wait {a["frame"] - prev_end}')
+                literal_taps(m, a['frame'])
+            pending = None
+        else:
+            g = None if idx in literal else rp.guard(prev_end, a['frame'])
+            if g and a['frame'] - prev_end >= POLL:
+                text, first = g
+                add(f"until text {quote(text)} timeout={max(600, 3 * (first - prev_end))} every={POLL}", owner=idx)
+                checkpoint(text, first)
+                if a['frame'] - first > 0:
+                    add(f"wait {a['frame'] - first}")
+            elif a['frame'] > prev_end:
+                add(f"wait {a['frame'] - prev_end}")
 
         if a['kind'] == 'mark':
-            cp_n += 1
-            lines.append(f'checkpoint {cp_n:02}_mark')
-            last_cp = a['frame']
+            state['cp_n'] += 1
+            add(f"checkpoint {state['cp_n']:02}_mark")
+            state['last_cp'] = a['frame']
         elif a['kind'] == 'tap':
-            lines.append(f"press {a['keys']} hold={a['hold']}")
+            add(f"press {a['keys']} hold={a['hold']}", expect=a['frame'])
         elif a['kind'] == 'hold':
-            lines.append(f"hold {a['keys']}" if a['keys'] else 'release')
+            add(f"hold {a['keys']}" if a['keys'] else 'release', expect=a['frame'])
+        elif a['kind'] == 'mash':
+            pending = idx
         else:
-            lines.append(f"@mash {a['keys']} {a['every']} {a['hold']}")
-        prev_end = ends[idx]
-
-    g = rp.guard(acts[-1]['frame'] if lines[-1].startswith('@mash ') else prev_end, final)
-    if lines[-1].startswith('@mash '):
-        key, every, hold = lines.pop()[6:].split()
-        lines.append(f'mash {key} until text {quote(g[0])} every={every} hold={hold}' if g
-                     else f'# trailing {key} mash could not be guarded')
-    elif g:
-        lines.append(f'until text {quote(g[0])} timeout={max(600, 3 * (g[1] - prev_end))} every={POLL}')
-    elif final > prev_end:
-        lines.append(f'wait {final - prev_end}')
-    last_cp = -10 ** 9
+            add('', expect=final)   # end of the recording
+        if a['kind'] != 'end':
+            prev_end = ends[idx]
+    state['last_cp'] = -10 ** 9
     checkpoint('end', final)
-    rp.close()
-    return '\n'.join(lines) + '\n'
+    return out
+
+
+def verify(steps, name, rom, workdir, save, rtc):
+    """Replay the generated steps in dingbat (checkpoints skipped). Returns the
+    action index whose guard is to blame for the first input that lands more
+    than TOLERANCE frames from its recording, or for a failed step; None when
+    every input lands on time."""
+    import runner
+    import script
+    if os.path.isdir(workdir):
+        import shutil
+        shutil.rmtree(workdir)
+    e = emulib.Emulator(name, rom, os.path.join(workdir, 'env'), rtc_epoch=rtc, save_in=save)
+    reader = screen.ScreenReader()
+    ex = runner.Executor(e, os.path.join(workdir, 'shots'), reader, log=lambda *a, **k: None)
+    owner = None
+    try:
+        for line, meta in steps:
+            if 'expect' in meta and meta.get('owner') is None and abs(e.frame - meta['expect']) > TOLERANCE:
+                return owner
+            if 'owner' in meta:
+                owner = meta['owner']
+                if abs(e.frame - meta.get('expect', e.frame)) > TOLERANCE:
+                    return owner
+            if not line or line.startswith('checkpoint') or line.startswith('#'):
+                continue
+            try:
+                ex.do(script.parse_step(line))
+            except runner.StepFailed:
+                return meta.get('owner', owner)
+        return None
+    finally:
+        e.kill()
+        reader.close()
+
+
+def similar(a, b):
+    import difflib
+    return difflib.SequenceMatcher(None, a, b).ratio() >= 0.75
 
 
 def quote(s):
