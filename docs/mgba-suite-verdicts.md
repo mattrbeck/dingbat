@@ -20,27 +20,28 @@ counts: a change that shifts the poll-loop phase can move every Flip row by
 one skip quantum (±11) and regress two near-misses from 1 cycle out to 10
 while every per-section count stays identical.
 
-## `Hblank` and `Flip 1-6` — the ROM is built with the wrong compiler
+## `Hblank` and `Flip 1-6` — closed by pinning the compiler
 
-These seven rows time code the compiler emits, and CI's ROM is built by a
-different compiler than the one the constants were measured against. Built
-correctly, dingbat passes all seven.
+These seven rows time code the compiler emits, and CI's ROM used to be built
+by a different compiler than the one the constants were measured against.
+The fork now pins that compiler and all eight `H-blank bit start` rows pass.
 
-Neither `docker-build.sh` pins a toolchain — upstream's and the auto-run
-fork's both run the floating `devkitpro/devkitarm` tag — but Docker Hub's
-tags are dated, so which compiler a build used is recoverable from when it
-ran. `latest` was the `20260221` image from February until `20260610`
-replaced it on 10 June 2026. `mgba-emu/suite@a58437f` ("Update hblankBit
-test with modern gcc values") and `@8c97f2c` were both committed on
-31 May 2026, so their constants were measured on a `20260221` build. The
-fork's ROM is built by GitHub Actions on push; its `latest` is `20260610`.
+Neither `docker-build.sh` pinned a toolchain — upstream's still runs the
+floating `devkitpro/devkitarm` tag — but Docker Hub's tags are dated, so
+which compiler a build used is recoverable from when it ran. `latest` was
+the `20260221` image from February until `20260610` replaced it on 10 June
+2026. `mgba-emu/suite@a58437f` ("Update hblankBit test with modern gcc
+values") and `@8c97f2c` were both committed on 31 May 2026, so their
+constants were measured on a `20260221` build. The fork's ROM is built by
+GitHub Actions on push, and its `latest` was `20260610`.
 
 Building the fork's source in the suite's own Docker environment confirms
 it: with `devkitpro/devkitarm:20260610` the ROM is byte-identical to the one
-CI downloads (sha1 `00480cf1…`), and with `20260221` it is `da6f5c69…`.
+CI used to download (sha1 `00480cf1…`), and with `20260221` it is
+`da6f5c69…` — the ROM CI downloads now.
 Running dingbat against the two:
 
-| Suite | on `:20260610` (CI's ROM) | on `:20260221` |
+| Suite | on `:20260610` (the old ROM) | on `:20260221` (pinned) |
 |---|---|---|
 | Misc. edge case tests | 5/12 | **11/12** |
 | every other suite | unchanged | unchanged |
@@ -52,10 +53,11 @@ three one-cycle `movs` before the `ldrh` that reads TM0, where the older
 build reads TM0 immediately — exactly the `Hblank` row's three cycles — and
 the six `Flip` loops shift by 1 to 16 cycles each for the same reason.
 
-Closing the rows in CI means pinning the fork's `docker-build.sh` to
-`devkitpro/devkitarm:20260221` and re-pinning `MgbaSuiteSha1` to the ROM
-that produces. Bump the pin only alongside constants re-measured on hardware
-with the newer toolchain.
+`mattrbeck/mgba-suite-auto`'s `docker-build.sh` is therefore pinned to
+`devkitpro/devkitarm:20260221`, and `MgbaSuiteSha1` tracks the ROM it builds
+(`da6f5c69...`, byte-identical to a local build with the same image). Bump
+that pin only alongside constants re-measured on hardware with the newer
+toolchain.
 
 ## `DMA Prefetch Break` — the one real Misc failure
 
