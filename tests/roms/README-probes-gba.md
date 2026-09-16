@@ -1425,3 +1425,56 @@ The poll counts on page 52, like page 51's, assume this loop's
 cartridge-resident rate. Run from RAM over the link rig the fall byte
 saturates rather than wrapping, so a healthy tone reads `00 FF`; `+30` is
 what says a row never expired.
+
+---
+
+# BLENDPROBE — colour special effects to the exact 5-bit value
+
+A separate ROM, `blendprobe.gba` (`python3 tests/roms/blendprobe.py`; the
+method is in that file's docstring, the per-row layout and candidate
+formulas in `blendprobe_layout.json`). It asks what alpha blend (EVA/EVB),
+brighten and darken (EVY) output, and what a coefficient above 16 does,
+down to the last 5-bit step.
+
+Candidate formulas for these effects differ by **one** step, which a photo
+cannot read as an absolute colour. So each patch is vertical 4-pixel stripes
+alternating the effect's output (BG0 over BG1, blended by the hardware) with
+a raw candidate value (BG2, never a blend target). **In the patch whose
+number equals the hardware's output the stripes vanish; a step off, faint
+bars show.** All colours are grey, so a step moves R, G and B together.
+
+## Photograph
+
+Flash `blendprobe.gba`. RIGHT/A = next page, LEFT/B = previous, 11 pages
+(the number is in the footer). Photograph each page straight on.
+
+* Page 00 CONTROL has no effect: in every row the first patch is flat by
+  construction and the next two show a one- and two-step stripe. If the
+  one-step patch is not visibly striped in the photo, the other pages can't
+  be read from it — change exposure or console before going on.
+* Pages 01-10: in each row write down the number under the **flat** patch.
+  Exactly one should be flat. None flat would mean the output is not a
+  plain 5-bit value per channel; several flat means the photo cannot
+  resolve a step.
+
+## What the emulators output
+
+`python3 tests/roms/blendprobe_read.py` runs `blendprobe-auto.gba` in the
+playtest drivers and prints every row's output and the formulas that match.
+On the 2026-09 capture:
+
+* dingbat is exact 5-bit arithmetic: alpha `min(31, (t·EVA>>4) + (b·EVB>>4))`
+  (each term truncated), darken `t − (t·EVY>>4)`, brighten
+  `t + ((31−t)·EVY>>4)`, coefficients clamped to 16 (`ppu.nim`
+  `blend_colors`). Every row has exactly one flat patch.
+* Both reference emulators return non-grey pixels from grey inputs on
+  several rows (e.g. `(17,16,17)`), i.e. they blend at finer than 5-bit
+  precision; their outputs, cut to 5 bits, land a step **above** dingbat's
+  on most alpha and brighten rows and a step **below** on the darken rows
+  where the formulas split.
+  They are not evidence for any 5-bit rule, which is why this page exists.
+* All three clamp an EVA of 20 to 16 (page 04).
+
+The earlier playtest diffs (Onimusha's windows darker, Wario Land 4's
+darkened file select lighter, Ruby's menu backdrop) are exactly these
+rounding directions.

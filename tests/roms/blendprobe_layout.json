@@ -1,0 +1,2096 @@
+{
+ "version": 1,
+ "auto_frames_per_page": 64,
+ "pages": [
+  {
+   "page": 0,
+   "name": "CONTROL",
+   "title": "CONTROL NO EFFECT",
+   "bldcnt": 0,
+   "bldalpha": 0,
+   "bldy": 0,
+   "rows": [
+    {
+     "label": "V06",
+     "top": 6,
+     "bottom": 0,
+     "candidates": [
+      6,
+      7,
+      8
+     ],
+     "predict": {
+      "raw": 6
+     },
+     "patches": [
+      {
+       "value": 6,
+       "x": 64,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 7,
+       "x": 96,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 8,
+       "x": 128,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "V14",
+     "top": 14,
+     "bottom": 0,
+     "candidates": [
+      14,
+      15,
+      16
+     ],
+     "predict": {
+      "raw": 14
+     },
+     "patches": [
+      {
+       "value": 14,
+       "x": 64,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 15,
+       "x": 96,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 16,
+       "x": 128,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "V22",
+     "top": 22,
+     "bottom": 0,
+     "candidates": [
+      22,
+      23,
+      24
+     ],
+     "predict": {
+      "raw": 22
+     },
+     "patches": [
+      {
+       "value": 22,
+       "x": 64,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 23,
+       "x": 96,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 24,
+       "x": 128,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "V28",
+     "top": 28,
+     "bottom": 0,
+     "candidates": [
+      28,
+      29,
+      30
+     ],
+     "predict": {
+      "raw": 28
+     },
+     "patches": [
+      {
+       "value": 28,
+       "x": 64,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 29,
+       "x": 96,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 30,
+       "x": 128,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "page": 1,
+   "name": "ALPHA7-9",
+   "title": "ALPHA EVA 07 EVB 09",
+   "bldcnt": 577,
+   "bldalpha": 2311,
+   "bldy": 0,
+   "rows": [
+    {
+     "label": "T02 B28",
+     "top": 2,
+     "bottom": 28,
+     "candidates": [
+      14,
+      15,
+      16,
+      17,
+      18
+     ],
+     "predict": {
+      "term-trunc": 15,
+      "sum-trunc": 16,
+      "sum-round": 17
+     },
+     "patches": [
+      {
+       "value": 14,
+       "x": 64,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 15,
+       "x": 96,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 16,
+       "x": 128,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 17,
+       "x": 160,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 18,
+       "x": 192,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T00 B28",
+     "top": 0,
+     "bottom": 28,
+     "candidates": [
+      14,
+      15,
+      16,
+      17
+     ],
+     "predict": {
+      "term-trunc": 15,
+      "sum-trunc": 15,
+      "sum-round": 16
+     },
+     "patches": [
+      {
+       "value": 14,
+       "x": 64,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 15,
+       "x": 96,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 16,
+       "x": 128,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 17,
+       "x": 160,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T01 B28",
+     "top": 1,
+     "bottom": 28,
+     "candidates": [
+      14,
+      15,
+      16,
+      17
+     ],
+     "predict": {
+      "term-trunc": 15,
+      "sum-trunc": 16,
+      "sum-round": 16
+     },
+     "patches": [
+      {
+       "value": 14,
+       "x": 64,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 15,
+       "x": 96,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 16,
+       "x": 128,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 17,
+       "x": 160,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T05 B25",
+     "top": 5,
+     "bottom": 25,
+     "candidates": [
+      15,
+      16,
+      17
+     ],
+     "predict": {
+      "term-trunc": 16,
+      "sum-trunc": 16,
+      "sum-round": 16
+     },
+     "patches": [
+      {
+       "value": 15,
+       "x": 64,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 16,
+       "x": 96,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 17,
+       "x": 128,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "page": 2,
+   "name": "ALPHA5-6",
+   "title": "ALPHA EVA 05 EVB 06",
+   "bldcnt": 577,
+   "bldalpha": 1541,
+   "bldy": 0,
+   "rows": [
+    {
+     "label": "T18 B29",
+     "top": 18,
+     "bottom": 29,
+     "candidates": [
+      14,
+      15,
+      16,
+      17,
+      18
+     ],
+     "predict": {
+      "term-trunc": 15,
+      "sum-trunc": 16,
+      "sum-round": 17
+     },
+     "patches": [
+      {
+       "value": 14,
+       "x": 64,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 15,
+       "x": 96,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 16,
+       "x": 128,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 17,
+       "x": 160,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 18,
+       "x": 192,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T13 B31",
+     "top": 13,
+     "bottom": 31,
+     "candidates": [
+      14,
+      15,
+      16,
+      17
+     ],
+     "predict": {
+      "term-trunc": 15,
+      "sum-trunc": 15,
+      "sum-round": 16
+     },
+     "patches": [
+      {
+       "value": 14,
+       "x": 64,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 15,
+       "x": 96,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 16,
+       "x": 128,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 17,
+       "x": 160,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T14 B31",
+     "top": 14,
+     "bottom": 31,
+     "candidates": [
+      14,
+      15,
+      16,
+      17
+     ],
+     "predict": {
+      "term-trunc": 15,
+      "sum-trunc": 16,
+      "sum-round": 16
+     },
+     "patches": [
+      {
+       "value": 14,
+       "x": 64,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 15,
+       "x": 96,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 16,
+       "x": 128,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 17,
+       "x": 160,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T16 B30",
+     "top": 16,
+     "bottom": 30,
+     "candidates": [
+      15,
+      16,
+      17
+     ],
+     "predict": {
+      "term-trunc": 16,
+      "sum-trunc": 16,
+      "sum-round": 16
+     },
+     "patches": [
+      {
+       "value": 15,
+       "x": 64,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 16,
+       "x": 96,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 17,
+       "x": 128,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "page": 3,
+   "name": "ALPHA11-9",
+   "title": "ALPHA EVA 11 EVB 09",
+   "bldcnt": 577,
+   "bldalpha": 2315,
+   "bldy": 0,
+   "rows": [
+    {
+     "label": "T07 B21",
+     "top": 7,
+     "bottom": 21,
+     "candidates": [
+      14,
+      15,
+      16,
+      17,
+      18
+     ],
+     "predict": {
+      "term-trunc": 15,
+      "sum-trunc": 16,
+      "sum-round": 17
+     },
+     "patches": [
+      {
+       "value": 14,
+       "x": 64,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 15,
+       "x": 96,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 16,
+       "x": 128,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 17,
+       "x": 160,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 18,
+       "x": 192,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T00 B28",
+     "top": 0,
+     "bottom": 28,
+     "candidates": [
+      14,
+      15,
+      16,
+      17
+     ],
+     "predict": {
+      "term-trunc": 15,
+      "sum-trunc": 15,
+      "sum-round": 16
+     },
+     "patches": [
+      {
+       "value": 14,
+       "x": 64,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 15,
+       "x": 96,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 16,
+       "x": 128,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 17,
+       "x": 160,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T01 B28",
+     "top": 1,
+     "bottom": 28,
+     "candidates": [
+      14,
+      15,
+      16,
+      17
+     ],
+     "predict": {
+      "term-trunc": 15,
+      "sum-trunc": 16,
+      "sum-round": 16
+     },
+     "patches": [
+      {
+       "value": 14,
+       "x": 64,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 15,
+       "x": 96,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 16,
+       "x": 128,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 17,
+       "x": 160,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T03 B25",
+     "top": 3,
+     "bottom": 25,
+     "candidates": [
+      15,
+      16,
+      17
+     ],
+     "predict": {
+      "term-trunc": 16,
+      "sum-trunc": 16,
+      "sum-round": 16
+     },
+     "patches": [
+      {
+       "value": 15,
+       "x": 64,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 16,
+       "x": 96,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 17,
+       "x": 128,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "page": 4,
+   "name": "ALPHA20-0",
+   "title": "ALPHA EVA 20 EVB 00",
+   "bldcnt": 577,
+   "bldalpha": 20,
+   "bldy": 0,
+   "rows": [
+    {
+     "label": "T11 B00",
+     "top": 11,
+     "bottom": 0,
+     "candidates": [
+      10,
+      11,
+      12,
+      13,
+      14
+     ],
+     "predict": {
+      "term-trunc": 11,
+      "sum-trunc": 11,
+      "sum-round": 11,
+      "unclamped-coef": 13
+     },
+     "patches": [
+      {
+       "value": 10,
+       "x": 64,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 11,
+       "x": 96,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 12,
+       "x": 128,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 13,
+       "x": 160,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 14,
+       "x": 192,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T03 B00",
+     "top": 3,
+     "bottom": 0,
+     "candidates": [
+      2,
+      3,
+      4
+     ],
+     "predict": {
+      "term-trunc": 3,
+      "sum-trunc": 3,
+      "sum-round": 3,
+      "unclamped-coef": 3
+     },
+     "patches": [
+      {
+       "value": 2,
+       "x": 64,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 3,
+       "x": 96,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 4,
+       "x": 128,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T10 B00",
+     "top": 10,
+     "bottom": 0,
+     "candidates": [
+      9,
+      10,
+      11,
+      12,
+      13
+     ],
+     "predict": {
+      "term-trunc": 10,
+      "sum-trunc": 10,
+      "sum-round": 10,
+      "unclamped-coef": 12
+     },
+     "patches": [
+      {
+       "value": 9,
+       "x": 64,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 10,
+       "x": 96,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 11,
+       "x": 128,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 12,
+       "x": 160,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 13,
+       "x": 192,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T09 B00",
+     "top": 9,
+     "bottom": 0,
+     "candidates": [
+      8,
+      9,
+      10,
+      11,
+      12
+     ],
+     "predict": {
+      "term-trunc": 9,
+      "sum-trunc": 9,
+      "sum-round": 9,
+      "unclamped-coef": 11
+     },
+     "patches": [
+      {
+       "value": 8,
+       "x": 64,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 9,
+       "x": 96,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 10,
+       "x": 128,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 11,
+       "x": 160,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 12,
+       "x": 192,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "page": 5,
+   "name": "DARKEN7",
+   "title": "DARKEN EVY 07",
+   "bldcnt": 193,
+   "bldalpha": 0,
+   "bldy": 7,
+   "rows": [
+    {
+     "label": "T24",
+     "top": 24,
+     "bottom": 0,
+     "candidates": [
+      12,
+      13,
+      14,
+      15
+     ],
+     "predict": {
+      "sub-trunc": 14,
+      "mul-trunc": 13,
+      "sub-round": 13,
+      "mul-round": 14
+     },
+     "patches": [
+      {
+       "value": 12,
+       "x": 64,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 13,
+       "x": 96,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 14,
+       "x": 128,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 15,
+       "x": 160,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T27",
+     "top": 27,
+     "bottom": 0,
+     "candidates": [
+      14,
+      15,
+      16,
+      17
+     ],
+     "predict": {
+      "sub-trunc": 16,
+      "mul-trunc": 15,
+      "sub-round": 15,
+      "mul-round": 15
+     },
+     "patches": [
+      {
+       "value": 14,
+       "x": 64,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 15,
+       "x": 96,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 16,
+       "x": 128,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 17,
+       "x": 160,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T28",
+     "top": 28,
+     "bottom": 0,
+     "candidates": [
+      14,
+      15,
+      16,
+      17
+     ],
+     "predict": {
+      "sub-trunc": 16,
+      "mul-trunc": 15,
+      "sub-round": 16,
+      "mul-round": 16
+     },
+     "patches": [
+      {
+       "value": 14,
+       "x": 64,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 15,
+       "x": 96,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 16,
+       "x": 128,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 17,
+       "x": 160,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T16",
+     "top": 16,
+     "bottom": 0,
+     "candidates": [
+      8,
+      9,
+      10
+     ],
+     "predict": {
+      "sub-trunc": 9,
+      "mul-trunc": 9,
+      "sub-round": 9,
+      "mul-round": 9
+     },
+     "patches": [
+      {
+       "value": 8,
+       "x": 64,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 9,
+       "x": 96,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 10,
+       "x": 128,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "page": 6,
+   "name": "DARKEN3",
+   "title": "DARKEN EVY 03",
+   "bldcnt": 193,
+   "bldalpha": 0,
+   "bldy": 3,
+   "rows": [
+    {
+     "label": "T24",
+     "top": 24,
+     "bottom": 0,
+     "candidates": [
+      18,
+      19,
+      20,
+      21
+     ],
+     "predict": {
+      "sub-trunc": 20,
+      "mul-trunc": 19,
+      "sub-round": 19,
+      "mul-round": 20
+     },
+     "patches": [
+      {
+       "value": 18,
+       "x": 64,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 19,
+       "x": 96,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 20,
+       "x": 128,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 21,
+       "x": 160,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T19",
+     "top": 19,
+     "bottom": 0,
+     "candidates": [
+      14,
+      15,
+      16,
+      17
+     ],
+     "predict": {
+      "sub-trunc": 16,
+      "mul-trunc": 15,
+      "sub-round": 15,
+      "mul-round": 15
+     },
+     "patches": [
+      {
+       "value": 14,
+       "x": 64,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 15,
+       "x": 96,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 16,
+       "x": 128,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 17,
+       "x": 160,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T18",
+     "top": 18,
+     "bottom": 0,
+     "candidates": [
+      13,
+      14,
+      15,
+      16
+     ],
+     "predict": {
+      "sub-trunc": 15,
+      "mul-trunc": 14,
+      "sub-round": 15,
+      "mul-round": 15
+     },
+     "patches": [
+      {
+       "value": 13,
+       "x": 64,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 14,
+       "x": 96,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 15,
+       "x": 128,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 16,
+       "x": 160,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T16",
+     "top": 16,
+     "bottom": 0,
+     "candidates": [
+      12,
+      13,
+      14
+     ],
+     "predict": {
+      "sub-trunc": 13,
+      "mul-trunc": 13,
+      "sub-round": 13,
+      "mul-round": 13
+     },
+     "patches": [
+      {
+       "value": 12,
+       "x": 64,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 13,
+       "x": 96,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 14,
+       "x": 128,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "page": 7,
+   "name": "DARKEN11",
+   "title": "DARKEN EVY 11",
+   "bldcnt": 193,
+   "bldalpha": 0,
+   "bldy": 11,
+   "rows": [
+    {
+     "label": "T24",
+     "top": 24,
+     "bottom": 0,
+     "candidates": [
+      6,
+      7,
+      8,
+      9
+     ],
+     "predict": {
+      "sub-trunc": 8,
+      "mul-trunc": 7,
+      "sub-round": 7,
+      "mul-round": 8
+     },
+     "patches": [
+      {
+       "value": 6,
+       "x": 64,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 7,
+       "x": 96,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 8,
+       "x": 128,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 9,
+       "x": 160,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T29",
+     "top": 29,
+     "bottom": 0,
+     "candidates": [
+      8,
+      9,
+      10,
+      11
+     ],
+     "predict": {
+      "sub-trunc": 10,
+      "mul-trunc": 9,
+      "sub-round": 9,
+      "mul-round": 9
+     },
+     "patches": [
+      {
+       "value": 8,
+       "x": 64,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 9,
+       "x": 96,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 10,
+       "x": 128,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 11,
+       "x": 160,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T31",
+     "top": 31,
+     "bottom": 0,
+     "candidates": [
+      8,
+      9,
+      10,
+      11
+     ],
+     "predict": {
+      "sub-trunc": 10,
+      "mul-trunc": 9,
+      "sub-round": 10,
+      "mul-round": 10
+     },
+     "patches": [
+      {
+       "value": 8,
+       "x": 64,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 9,
+       "x": 96,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 10,
+       "x": 128,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 11,
+       "x": 160,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T16",
+     "top": 16,
+     "bottom": 0,
+     "candidates": [
+      4,
+      5,
+      6
+     ],
+     "predict": {
+      "sub-trunc": 5,
+      "mul-trunc": 5,
+      "sub-round": 5,
+      "mul-round": 5
+     },
+     "patches": [
+      {
+       "value": 4,
+       "x": 64,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 5,
+       "x": 96,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 6,
+       "x": 128,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "page": 8,
+   "name": "BRIGHTEN7",
+   "title": "BRIGHTEN EVY 07",
+   "bldcnt": 129,
+   "bldalpha": 0,
+   "bldy": 7,
+   "rows": [
+    {
+     "label": "T04",
+     "top": 4,
+     "bottom": 0,
+     "candidates": [
+      14,
+      15,
+      16,
+      17
+     ],
+     "predict": {
+      "add-trunc": 15,
+      "mul-trunc": 15,
+      "add-round": 16,
+      "mul-round": 16
+     },
+     "patches": [
+      {
+       "value": 14,
+       "x": 64,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 15,
+       "x": 96,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 16,
+       "x": 128,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 17,
+       "x": 160,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T05",
+     "top": 5,
+     "bottom": 0,
+     "candidates": [
+      15,
+      16,
+      17
+     ],
+     "predict": {
+      "add-trunc": 16,
+      "mul-trunc": 16,
+      "add-round": 16,
+      "mul-round": 16
+     },
+     "patches": [
+      {
+       "value": 15,
+       "x": 64,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 16,
+       "x": 96,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 17,
+       "x": 128,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T06",
+     "top": 6,
+     "bottom": 0,
+     "candidates": [
+      15,
+      16,
+      17,
+      18
+     ],
+     "predict": {
+      "add-trunc": 16,
+      "mul-trunc": 16,
+      "add-round": 17,
+      "mul-round": 17
+     },
+     "patches": [
+      {
+       "value": 15,
+       "x": 64,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 16,
+       "x": 96,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 17,
+       "x": 128,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 18,
+       "x": 160,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T02",
+     "top": 2,
+     "bottom": 0,
+     "candidates": [
+      13,
+      14,
+      15,
+      16
+     ],
+     "predict": {
+      "add-trunc": 14,
+      "mul-trunc": 14,
+      "add-round": 15,
+      "mul-round": 15
+     },
+     "patches": [
+      {
+       "value": 13,
+       "x": 64,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 14,
+       "x": 96,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 15,
+       "x": 128,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 16,
+       "x": 160,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "page": 9,
+   "name": "BRIGHTEN3",
+   "title": "BRIGHTEN EVY 03",
+   "bldcnt": 129,
+   "bldalpha": 0,
+   "bldy": 3,
+   "rows": [
+    {
+     "label": "T12",
+     "top": 12,
+     "bottom": 0,
+     "candidates": [
+      14,
+      15,
+      16,
+      17
+     ],
+     "predict": {
+      "add-trunc": 15,
+      "mul-trunc": 15,
+      "add-round": 16,
+      "mul-round": 16
+     },
+     "patches": [
+      {
+       "value": 14,
+       "x": 64,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 15,
+       "x": 96,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 16,
+       "x": 128,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 17,
+       "x": 160,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T13",
+     "top": 13,
+     "bottom": 0,
+     "candidates": [
+      15,
+      16,
+      17
+     ],
+     "predict": {
+      "add-trunc": 16,
+      "mul-trunc": 16,
+      "add-round": 16,
+      "mul-round": 16
+     },
+     "patches": [
+      {
+       "value": 15,
+       "x": 64,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 16,
+       "x": 96,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 17,
+       "x": 128,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T11",
+     "top": 11,
+     "bottom": 0,
+     "candidates": [
+      13,
+      14,
+      15,
+      16
+     ],
+     "predict": {
+      "add-trunc": 14,
+      "mul-trunc": 14,
+      "add-round": 15,
+      "mul-round": 15
+     },
+     "patches": [
+      {
+       "value": 13,
+       "x": 64,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 14,
+       "x": 96,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 15,
+       "x": 128,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 16,
+       "x": 160,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T10",
+     "top": 10,
+     "bottom": 0,
+     "candidates": [
+      12,
+      13,
+      14,
+      15
+     ],
+     "predict": {
+      "add-trunc": 13,
+      "mul-trunc": 13,
+      "add-round": 14,
+      "mul-round": 14
+     },
+     "patches": [
+      {
+       "value": 12,
+       "x": 64,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 13,
+       "x": 96,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 14,
+       "x": 128,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 15,
+       "x": 160,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "page": 10,
+   "name": "BRIGHTEN11",
+   "title": "BRIGHTEN EVY 11",
+   "bldcnt": 129,
+   "bldalpha": 0,
+   "bldy": 11,
+   "rows": [
+    {
+     "label": "T01",
+     "top": 1,
+     "bottom": 0,
+     "candidates": [
+      20,
+      21,
+      22,
+      23
+     ],
+     "predict": {
+      "add-trunc": 21,
+      "mul-trunc": 21,
+      "add-round": 22,
+      "mul-round": 22
+     },
+     "patches": [
+      {
+       "value": 20,
+       "x": 64,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 21,
+       "x": 96,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 22,
+       "x": 128,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 23,
+       "x": 160,
+       "y": 16,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T00",
+     "top": 0,
+     "bottom": 0,
+     "candidates": [
+      20,
+      21,
+      22
+     ],
+     "predict": {
+      "add-trunc": 21,
+      "mul-trunc": 21,
+      "add-round": 21,
+      "mul-round": 21
+     },
+     "patches": [
+      {
+       "value": 20,
+       "x": 64,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 21,
+       "x": 96,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 22,
+       "x": 128,
+       "y": 48,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T02",
+     "top": 2,
+     "bottom": 0,
+     "candidates": [
+      20,
+      21,
+      22,
+      23
+     ],
+     "predict": {
+      "add-trunc": 21,
+      "mul-trunc": 21,
+      "add-round": 22,
+      "mul-round": 22
+     },
+     "patches": [
+      {
+       "value": 20,
+       "x": 64,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 21,
+       "x": 96,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 22,
+       "x": 128,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 23,
+       "x": 160,
+       "y": 80,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    },
+    {
+     "label": "T04",
+     "top": 4,
+     "bottom": 0,
+     "candidates": [
+      21,
+      22,
+      23,
+      24
+     ],
+     "predict": {
+      "add-trunc": 22,
+      "mul-trunc": 22,
+      "add-round": 23,
+      "mul-round": 23
+     },
+     "patches": [
+      {
+       "value": 21,
+       "x": 64,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 22,
+       "x": 96,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 23,
+       "x": 128,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      },
+      {
+       "value": 24,
+       "x": 160,
+       "y": 112,
+       "w": 24,
+       "h": 24
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
