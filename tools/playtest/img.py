@@ -114,7 +114,7 @@ def compare(a, b):
     ys, xs = np.nonzero(~same)
     box = [int(xs.min()), int(ys.min()), int(xs.max() - xs.min() + 1), int(ys.max() - ys.min() + 1)] if len(xs) else None
     return {'exact': round(exact, 4), 'mae': round(mae, 3), 'ncc': round(ncc, 4), 'diff_box': box,
-            'palette_only': palette_only(qa, qb)}
+            'palette_only': palette_only(qa, qb), 'max_channel_delta': int(np.abs(qa - qb).max())}
 
 
 def palette_only(qa, qb):

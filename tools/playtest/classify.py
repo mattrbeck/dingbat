@@ -65,6 +65,13 @@ def classify(a, b):
     elif m['palette_only'] and m['mae'] <= 0.5:
         m['verdict'] = 'MINOR'
         m['why'] = 'palette step only'
+    elif m['max_channel_delta'] <= 1:
+        # Every differing pixel is one 5-bit step off: colour-effect rounding.
+        # The reference emulators blend at finer than 5-bit precision, so they
+        # cannot judge it; tests/roms/blendprobe.gba on hardware does, and
+        # tests/ppucomposite_test.nim pins dingbat to that.
+        m['verdict'] = 'MINOR'
+        m['why'] = 'one 5-bit step (colour-effect rounding)'
     elif m['ncc'] >= 0.85 and text_sim >= 0.6:
         m['verdict'] = 'DIFFERENT'
     elif (m['ncc'] >= 0.98 and m['mae'] < 0.5) or (m['ncc'] >= 0.995 and m['mae'] < 1.0):

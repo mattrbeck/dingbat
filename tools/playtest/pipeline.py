@@ -351,7 +351,8 @@ def cell_ok(v):
         return False
     # a loaded save that shows different values (a menu setting, a count) is
     # a small pixel change but not the same load
-    return not (v['verdict'] == 'MINOR' and v.get('text_similarity', 1.0) < 1.0 and not v.get('palette_only'))
+    return not (v['verdict'] == 'MINOR' and v.get('text_similarity', 1.0) < 1.0 and not v.get('palette_only')
+                and v.get('max_channel_delta', 99) > 1)
 
 
 def loads_like(a, b):
