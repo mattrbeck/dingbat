@@ -1,0 +1,33 @@
+# blendprobe.gba hardware transcription — session 1
+# GBA SP, 2026-09-16, dark room, photos hwphotos/IMG_4196-4206 (page 00-10 in order)
+# Build: blendprobe.gba @ 13e679541 (manual)
+# Read with tests/roms/blendprobe_photo.py (stripe amplitude per candidate patch,
+# 8-px-period component; the flat patch is the output value) and checked by eye.
+# "margin" = second-lowest amplitude minus the lowest; page 00's one-step
+# stripes measure 4.4-14.4 on this console and camera.
+
+page 00 CONTROL (no effect): flat 6 14 22 28 (each row's first patch, by construction)
+
+page 01 ALPHA EVA 7 EVB 9:   T02B28 16   T00B28 15   T01B28 16   T05B25 16
+page 02 ALPHA EVA 5 EVB 6:   T18B29 16   T13B31 15   T14B31 16   T16B30 16
+page 03 ALPHA EVA 11 EVB 9:  T07B21 16   T00B28 15   T01B28 16   T03B25 16
+page 04 ALPHA EVA 20 EVB 0:  T11 11      T03 3       T10 10      T09 9
+page 05 DARKEN EVY 7:        T24 13*     T27 15      T28 15      T16 9*
+page 06 DARKEN EVY 3:        T24 19      T19 15      T18 14      T16 13
+page 07 DARKEN EVY 11:       T24 7       T29 9       T31 9       T16 5
+page 08 BRIGHTEN EVY 7:      T04 15†     T05 16      T06 16†     T02 14
+page 09 BRIGHTEN EVY 3:      T12 15      T13 16      T11 14      T10 13
+page 10 BRIGHTEN EVY 11:     T01 21      T00 21      T02 21      T04 22
+
+*  the photo registers poorly for these two rows (no near-zero amplitude);
+   read by eye; every formula agrees on T16.
+†  thin margins (2.6, 2.3); lean truncation; re-shoot of page 08 requested.
+
+Every value fits, per 5-bit channel:
+  alpha     min(31, (top*EVA + bottom*EVB) >> 4), EVA/EVB above 16 act as 16
+  darken    (top * (16 - EVY)) >> 4          (= top - ceil(top*EVY/16))
+  brighten  top + ((31 - top) * EVY >> 4)    (= (top*(16-EVY) + 31*EVY) >> 4)
+Rows that rule out the alternatives: alpha T02B28 / T18B29 / T07B21 (per-term
+truncation gives 15, rounding 17, hardware 16); darken EVY 7 T28 and EVY 11
+T31 (subtract-truncated product gives 16 / 10, rounded forms 16 / 9-10,
+hardware 15 / 9); brighten EVY 11 T02 (rounding gives 22, hardware 21).
