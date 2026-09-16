@@ -1128,43 +1128,54 @@ moved over eight more trials.
 +16 (h) cycles between two VCOUNT changes (~1232; ROM-polled, so +/- one
         poll period — a sanity check on the clock, not a measurement)
 +18 (h) +0 with a line-50 anchor      +20 (h) +2 with a line-50 anchor
-+22 (h) +0 with the prefetch buffer on   +24 (h) +2 likewise
-+26 (h) +0 with WS0 first access at 8 waits   +28 (h) +2 likewise
++22 (h) +0 with the poll loop's load pointed at ROM   +24 (h) +2 likewise
++26 (h) +0 with that load at WS0 = 8 waits   +28 (h) +2 likewise
 +30 (b) max-min of the answer over 8 more line-100 trials (255 = more)
 +31 (b) marker 50
 ```
 
-`+18`/`+20` say whether the grant is the same on every line. `+22`-`+28`
-vary what the CPU's bus is doing while the stub stays in IWRAM: if the
-grant waits on whatever CPU bus cycle is in flight, they move; if it comes
-off the PPU regardless of the CPU, they track `+0`.
+`+18`/`+20` say whether the grant is the same on every line.
+
+`+22`-`+28` ask the question the sign test cannot: **is the grant quantised
+to CPU bus cycles at all?** Each poll iteration issues one load, at IWRAM
+for the normal trials and at `0x08000000` for these two — nine cycles long
+once WS0 is at 8 waits — so the CPU is inside a long gamepak access for
+most of the line while the anchor and the flag bracket stay in IWRAM and
+stay tight. Compute the answer for each pair: if the DMA has to wait for
+the end of whatever bus cycle is in flight, `+22` and especially `+26`
+drift away from `+0`; if it is granted off the PPU regardless of what the
+CPU is doing, all three agree inside the bracket. That distinction matters
+as much as the sign does — a grant quantised to bus cycles is not a fixed
+cycle in the line at all, and no single constant can model it.
 
 The absolute stamps ride the cycle at which the boot probes reach this
 page, so they may shift between consoles or builds even when the model is
 identical. **Read the differences, not the absolute numbers**; the page
 CRC is not a gate.
 
-**dingbat predicts** page CRC **61F4**:
+**dingbat predicts** page CRC **D459**:
 
 ```
-B6 03 ED 03  E3 03 FF FF  02 00 0A 00  C3 04 D7 04
-E5 04 B9 03  ED 03 B6 03  ED 03 B7 03  ED 03 06 32
+B7 03 F4 03  E7 03 FF FF  02 00 0A 00  C5 04 D4 04
+C1 04 B4 03  F4 03 B6 03  F8 03 B8 03  EB 03 06 32
 ```
 
-The answer there is `(0x03B6 - 1) - 0x03ED` = **-56**, bracketed by `+4`
-to **[-56, -46]** — firmly negative, the cycle-960 edge, which is the
+The answer there is `(0x03B7 - 1) - 0x03F4` = **-62**, bracketed by `+4`
+to **[-62, -49]** — firmly negative, the cycle-960 edge, which is the
 hypothesis on trial. The DMA's own request-to-write latency is
-`+10 - +8` = **8** cycles, the flag bracket is **10** cycles wide, the
-answer moved **6** cycles over eight trials, and `+22`-`+28` track `+0` to
-within a cycle, so in dingbat the grant is independent of the CPU's bus
-state. `+16` reads `0x04E5` = 1253, one ROM poll period over a 1232-cycle
-line.
+`+10 - +8` = **8** cycles, the flag bracket is **13** cycles wide and the
+answer moved **6** cycles over eight trials. The other three answers are
+-65 (line 50), -67 (ROM load) and -52 (ROM load at 8 waits) — all inside
+one bracket of each other, so in dingbat the grant depends on neither the
+line nor what the CPU's bus is doing, which is what a scheduler event
+fired off the PPU should look like. `+16` reads `0x04C1` = 1217, a
+1232-cycle line less the ROM-polled anchor's offset.
 
-`ALL` for this build is **CAD1** (`-auto`, HLE BIOS); pages 0-49 are
+`ALL` for this build is **7F7C** (`-auto`, HLE BIOS); pages 0-49 are
 byte-identical to the v8 build under the same emulator, verified by
 capturing both and diffing every per-page CRC. The page's own absolute
-stamps drifted 3 cycles between two builds of this ROM, which is the
-boot-phase sensitivity above — the answer did not move.
+stamps drift a few cycles between builds of this ROM, which is the
+boot-phase sensitivity above — the answers do not.
 
 If the DMA instead rides the latched flag, the write lands ~8 cycles after
 a grant at 1012 while the flag rose at 1006, so hardware should read

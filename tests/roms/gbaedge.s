@@ -5923,11 +5923,14 @@ v8_cnt_handler:
 @ +16 (h) cycles between two VCOUNT changes on TM2 (~1232: the anchor and
 @   the clocks are sane if this reads a scanline)
 @ +18/+20 (h,h) +0/+2 repeated with a line-50 anchor (line invariance)
-@ +22/+24 (h,h) +0/+2 with the gamepak prefetch buffer ENABLED
-@ +26/+28 (h,h) +0/+2 with WS0 first-access at its slowest (8 waits).  The
-@   stub is in IWRAM either way, so only the DMA's own ROM-free path and the
-@   arming store change: if the grant still waits on a CPU bus cycle these
-@   move, if it comes off the PPU they track +0
+@ +22/+24 (h,h) +0/+2 with the poll loop's load pointed at ROM instead of
+@   IWRAM, so the CPU is inside a gamepak bus cycle most of the time
+@ +26/+28 (h,h) the same with WS0 first-access at its slowest (8 waits), so
+@   that load is a 9-cycle bus cycle.  The anchor and the bracket stay in
+@   IWRAM for all three, so the ANSWER is comparable across them: if the
+@   grant waits for the end of whatever bus cycle is in flight, +22 and +26
+@   drift away from +0 and +26 drifts furthest; if the DMA is granted off the
+@   PPU regardless of the CPU, all three agree
 @ +30 (b) max-min of the answer over 8 more line-100 trials (255 = more)
 @ +31 (b) marker 50
 .equ HPZERO,   0x03000600          @ IWRAM halfword of zero: the DMA source
@@ -5941,13 +5944,13 @@ v8_cnt_handler:
 @ r11 = TM2BASE.  Returns r7 = TM0 frozen (0xFFFF if the DMA never fired),
 @ r6 = TM2 at the flag, r8 = TM2 at the poll before it.
 hp_stub:
-    mov r3, #0
-    str r3, [r9, #8]               @ disarmed while we park
-    str r3, [r10]
-    str r3, [r11]
-    sub r3, r0, #1
+    mov r12, #0
+    str r12, [r9, #8]              @ disarmed while we park
+    str r12, [r10]
+    str r12, [r11]
+    sub r12, r0, #1
 1:  ldrh r7, [r4, #6]              @ VCOUNT
-    cmp r7, r3
+    cmp r7, r12
     bne 1b
 2:  ldrh r7, [r4, #6]
     cmp r7, r0
@@ -5957,16 +5960,20 @@ hp_stub:
     str r5, [r10]                  @ ... then TM0, a fixed skew behind
     mov r12, #0
 3:  ldrh r8, [r11]                 @ TM2 before this look
-    ldrh r3, [r4, #4]              @ DISPSTAT
-    tst r3, r2
+    ldr r0, [r3]                   @ r0 is dead past the anchor.  This load
+                                   @ is what the CPU is busy with when the
+                                   @ grant arrives: IWRAM (1 cycle) normally,
+                                   @ ROM at 8 waits for the stress trials
+    ldrh r0, [r4, #4]              @ DISPSTAT
+    tst r0, r2
     bne 4f
     add r12, r12, #1               @ bounded: never spin on hardware
     cmp r12, #0x8000
     bcc 3b
 4:  ldrh r6, [r11]                 @ TM2 at the first sighting of the flag
     mov r12, #0
-5:  ldrh r3, [r10, #2]             @ TM0CNT_H: is the enable bit still set?
-    tst r3, #0x80
+5:  ldrh r0, [r10, #2]             @ TM0CNT_H: is the enable bit still set?
+    tst r0, #0x80
     beq 6f
     add r12, r12, #1
     cmp r12, #0x8000
@@ -5974,26 +5981,26 @@ hp_stub:
     mvn r7, #0                     @ the DMA never fired
     b   7f
 6:  ldrh r7, [r10]                 @ the frozen stamp
-7:  mov r3, #0
-    str r3, [r9, #8]
-    str r3, [r10]
-    str r3, [r11]
+7:  mov r0, #0
+    str r0, [r9, #8]
+    str r0, [r10]
+    str r0, [r11]
     bx  lr
 
 @ Same registers; no anchor and no flag.  r8 = TM2 one instruction before
 @ the store that arms an immediate DMA, r7 = TM0 frozen by its write.
 hp_imm:
-    mov r3, #0
-    str r3, [r9, #8]
-    str r3, [r10]
-    str r3, [r11]
+    mov r0, #0
+    str r0, [r9, #8]
+    str r0, [r10]
+    str r0, [r11]
     str r5, [r11]
     str r5, [r10]
     ldrh r8, [r11]
     str r1, [r9, #8]
     mov r12, #0
-1:  ldrh r3, [r10, #2]
-    tst r3, #0x80
+1:  ldrh r0, [r10, #2]
+    tst r0, #0x80
     beq 2f
     add r12, r12, #1
     cmp r12, #0x8000
@@ -6001,10 +6008,10 @@ hp_imm:
     mvn r7, #0
     b   3f
 2:  ldrh r7, [r10]
-3:  mov r3, #0
-    str r3, [r9, #8]
-    str r3, [r10]
-    str r3, [r11]
+3:  mov r0, #0
+    str r0, [r9, #8]
+    str r0, [r10]
+    str r0, [r11]
     bx  lr
 hp_stub_end:
 
@@ -6013,7 +6020,23 @@ hp_stub_end:
     mov r0, #\line
     ldr r1, =\ctl
     mov r2, #\flagbit
+    ldr r3, =HPZERO                @ the loop's load lands in IWRAM: 1 cycle
     ldr r5, =0x00800000            @ reload 0, enable, prescaler 1
+    ldr r12, =V9STUB
+    mov lr, pc
+    bx  r12
+.endm
+
+@ the same trial with the loop's load pointed at ROM, so the CPU is inside a
+@ long gamepak bus cycle for most of the line.  The anchor and the flag
+@ bracket stay in IWRAM and stay tight; only what the CPU is busy with
+@ changes.
+.macro hp_trial_rom line, ctl, flagbit
+    mov r0, #\line
+    ldr r1, =\ctl
+    mov r2, #\flagbit
+    mov r3, #0x08000000            @ the cart's first word
+    ldr r5, =0x00800000
     ldr r12, =V9STUB
     mov lr, pc
     bx  r12
@@ -6065,6 +6088,7 @@ probe_hdmaphase:
 
     @ the same DMA started immediately: its request-to-write latency
     ldr r1, =0x81400001            @ enable, immediate, 16-bit, fixed, 1
+    ldr r3, =HPZERO
     ldr r5, =0x00800000
     ldr r12, =V9STUB + (hp_imm - hp_stub)
     mov lr, pc
@@ -6101,19 +6125,19 @@ probe_hdmaphase:
     strh r7, [r1, #18]
     strh r6, [r1, #20]
 
-    ldr r2, =0x04000204
-    ldr r0, [sp]                   @ WAITCNT as we found it ...
-    orr r0, r0, #0x4000            @ ... plus the gamepak prefetch buffer
-    strh r0, [r2]
-    hp_trial 100, 0xA1400001, 2
+    @ the same trial with the CPU on gamepak bus cycles instead of IWRAM
+    @ ones: hp_stub is called where it was assembled, in ROM.  If the grant
+    @ waits for the end of whatever bus cycle is in flight, the answer moves
+    @ between these and +0; if it comes off the PPU it does not.
+    hp_trial_rom 100, 0xA1400001, 2
     ldr r1, =SLOTS + 50*SLOTSZ
     strh r7, [r1, #22]
     strh r6, [r1, #24]
 
     ldr r2, =0x04000204
     mov r0, #0x0C                  @ WS0 first access = 8 waits (the slowest)
-    strh r0, [r2]
-    hp_trial 100, 0xA1400001, 2
+    strh r0, [r2]                  @ -> 9-cycle fetches for the ROM stub
+    hp_trial_rom 100, 0xA1400001, 2
     ldr r1, =SLOTS + 50*SLOTSZ
     strh r7, [r1, #26]
     strh r6, [r1, #28]
