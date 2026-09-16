@@ -602,6 +602,31 @@ const
                    0x400 + 0x18000 + 0x400 + 4 + 0x9600 * 2
   PPU_LATCH_LEN  = 2 + 1 + 1 + 0x400 + 1
 
+# The GPIO section (tag GBA_SEC_GPIO) at rev 7: the RTC's irq + m24 bools
+# became one status byte, and bias (u64), bias_set, wday_bias (u8) follow the
+# epoch. Located by its tag and confirmed by GBA_SEC_PPU one section later.
+const
+  GPIO_SEC_LEN_V7  = 1 + 3 + 3 + 1 + 4 + 4 + 8 + 1 + 1 + 8 + 8 + 1 + 1
+  GPIO_STATUS_AT   = 1 + 3 + 3 + 1 + 4 + 4 + 8
+  GPIO_CLOCK_AT_V6 = GPIO_STATUS_AT + 2 + 1 + 8  # after irq, m24, det, epoch
+
+proc strip_rtc_clock(payload: var string): bool =
+  ## Rewrite a payload this build wrote into the pre-rev-7 GPIO layout.
+  var found = -1
+  for i in 0 .. payload.len - GPIO_SEC_LEN_V7 - 1:
+    if payload[i] == char(GPIO_TAG) and payload[i + GPIO_SEC_LEN_V7] == char(PPU_TAG):
+      if found >= 0: return false  # ambiguous
+      found = i
+  if found < 0: return false
+  let status = uint8(payload[found + GPIO_STATUS_AT])
+  let irq = if (status and 0x08) != 0: '\x01' else: '\x00'
+  let m24 = if (status and 0x40) != 0: '\x01' else: '\x00'
+  payload[found + GPIO_STATUS_AT] = irq
+  payload.insert($m24, found + GPIO_STATUS_AT + 1)
+  let at = found + GPIO_CLOCK_AT_V6
+  payload.delete(at ..< at + 8 + 1 + 1)
+  true
+
 proc strip_ppu_latches(payload: var string): bool =
   ## Rewrite a payload this build wrote into the pre-rev-6 PPU layout.
   var found = -1
@@ -662,20 +687,25 @@ proc run_intr_wait_migration() =
   let a = new_gba_for(GBA_ROMS[0][0])
   for _ in 0 ..< 30: a.step_frame()
   a.park_in_intr_wait(shifted = true)
+  # Pre-rev-7 builds read RTC status as 42h (bit 1 forced); a fresh cart now
+  # reads 40h. Start from 42h so the migrated status is exactly this one.
+  a.bus.gpio.rtc.status = 0x42
   let rev4 = a.state_payload()
 
   # (b) the shape the old build produced for the same wait
   let b = new_gba_for(GBA_ROMS[0][0])
   for _ in 0 ..< 30: b.step_frame()
   b.park_in_intr_wait(shifted = false)
+  b.bus.gpio.rtc.status = 0x42
   var rev3 = b.state_payload()
   # A rev-3 payload has no halt_resume_pop byte (rev 4) and no per-channel
-  # DMA `count` (rev 5) nor PPU line-start latches (rev 6); every later
+  # DMA `count` (rev 5), PPU line-start latches (rev 6) nor RTC clock (rev 7); every later
   # field addition belongs here too.
   check(rev3.len == rev4.len, "the two parked payloads differ only by the flag")
   rev3.delete(HALT_RESUME_POP_OFFSET .. HALT_RESUME_POP_OFFSET)
   check(strip_dma_count(rev3), "rev-5 DMA count fields located and removed")
   check(strip_ppu_latches(rev3), "rev-6 PPU latch fields located and removed")
+  check(strip_rtc_clock(rev3), "rev-7 RTC status/clock fields located and removed")
 
   # (c) read the rev-3 payload as rev 3 and compare against (a)
   let c = new_gba_for(GBA_ROMS[0][0])
@@ -707,6 +737,7 @@ proc run_intr_wait_migration() =
   rev3_running.delete(HALT_RESUME_POP_OFFSET .. HALT_RESUME_POP_OFFSET)
   check(strip_dma_count(rev3_running), "rev-5 DMA count fields located and removed (running)")
   check(strip_ppu_latches(rev3_running), "rev-6 PPU latch fields located and removed (running)")
+  check(strip_rtc_clock(rev3_running), "rev-7 RTC status/clock fields located and removed (running)")
   let e = new_gba_for(GBA_ROMS[0][0])
   for _ in 0 ..< 30: e.step_frame()
   let untouched = e.state_payload()

@@ -245,10 +245,12 @@ proc save_gpio_state(gpio: GPIO; w: var Writer) =
   w.write_i32(int32(rtc.reg))
   w.write_i32(int32(rtc.buffer.size))
   w.write_u64(rtc.buffer.value)
-  w.write_bool(rtc.irq)
-  w.write_bool(rtc.m24)
+  w.write_u8(rtc.status)
   w.write_bool(rtc.deterministic)
   w.write_u64(uint64(rtc.epoch))
+  w.write_u64(uint64(rtc.bias))
+  w.write_bool(rtc.bias_set)
+  w.write_u8(uint8(rtc.wday_bias))
 
 proc load_gpio_state(gpio: GPIO; r: var Reader; rev: uint32) =
   r.expect_tag(GBA_SEC_GPIO)
@@ -266,8 +268,15 @@ proc load_gpio_state(gpio: GPIO; r: var Reader; rev: uint32) =
   rtc.reg = int(r.read_i32())
   rtc.buffer.size = int(r.read_i32())
   rtc.buffer.value = r.read_u64()
-  rtc.irq = r.read_bool()
-  rtc.m24 = r.read_bool()
+  if rev >= 7:
+    rtc.status = r.read_u8() and S3511_STATUS_RW_BITS
+  else:
+    # rev <= 6 kept two flags and reported bit 1 set on every read
+    let irq = r.read_bool()
+    let m24 = r.read_bool()
+    rtc.status = 0x02'u8 or (if irq: 0x08'u8 else: 0'u8) or
+                 (if m24: S3511_STATUS_24H else: 0'u8)
+  rtc.irq = (rtc.status and 0x08'u8) != 0
   if rev >= 3:
     rtc.deterministic = r.read_bool()
     rtc.epoch = int64(r.read_u64())
@@ -275,6 +284,18 @@ proc load_gpio_state(gpio: GPIO; r: var Reader; rev: uint32) =
     # rev <= 2 had no deterministic RTC mode; epoch is ignored while off.
     rtc.deterministic = false
     rtc.epoch = 0
+  if rev >= 7:
+    rtc.bias = int64(r.read_u64())
+    rtc.bias_set = r.read_bool()
+    let wd = r.read_u8()
+    check_range(int(wd), 0, 6, "rtc.wday_bias")
+    rtc.wday_bias = int(wd)
+  else:
+    # rev <= 6 ignored clock writes and read no battery trailer: the clock
+    # was always the source clock in the host zone (UTC when deterministic)
+    rtc.bias = 0
+    rtc.bias_set = false
+    rtc.wday_bias = 0
 
 # ---- PPU ----
 

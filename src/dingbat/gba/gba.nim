@@ -7,6 +7,8 @@ import ../common/[util, input, scheduler, emu, resampler, serialize, timestretch
 when defined(test_harness):
   import ../common/test_output
 import ../common/lut_macros
+import rtc_calendar
+export rtc_calendar
 
 when defined(pftrace):
   # -d:pftrace: dump ROM-bus activity inside each mGBA-suite Timing window
@@ -51,6 +53,14 @@ type
     memory*:    seq[byte]
     save_path*: string
     dirty*:     bool
+    # Battery-file RTC trailer (rtc_calendar.nim). rtc_cart: the ROM carries
+    # the RTC library (storage.nim). `trailer` holds the 16 bytes found after
+    # the chip data when the file had them; `rtc` is set on RTC carts and
+    # supplies a fresh trailer on every write.
+    rtc_cart*:    bool
+    has_trailer*: bool
+    trailer*:     array[16, byte]
+    rtc* {.cursor.}: RTC
   Storage* = ref StorageObj
 
   SRAM* = ref object of StorageObj
@@ -198,12 +208,22 @@ type
     state*:  RtcState
     reg*:    int
     buffer*: RtcBuffer
+    # Status register, R/W bits only (rtc_calendar S3511_STATUS_RW_BITS).
+    # `irq` mirrors bit 3 (per-minute interrupt) for the poll scheduler.
+    status*: uint8
     irq*:    bool
-    m24*:    bool
-    # Netplay/rollback: when deterministic, the clock is a frozen UTC epoch
-    # both peers agree on instead of the host wall-clock.
+    # Netplay/rollback: when deterministic, the clock source is a frozen unix
+    # epoch both peers agree on instead of the host wall clock.
     deterministic*: bool
     epoch*:         int64   # unix seconds; the frozen clock when deterministic
+    # The chip's own clock (rtc.nim "Clock model"): calendar seconds = source
+    # unix seconds + bias. Until the game writes the clock or a battery file
+    # supplies one (bias_set false) the RTC shows host local time, or UTC in
+    # deterministic mode. wday_bias shifts the weekday counter from the
+    # date's own weekday (the chip's septenary counter is set independently).
+    bias*:          int64
+    bias_set*:      bool
+    wday_bias*:     int
     # Last unix minute seen by the per-minute IRQ poll. Not serialized (worst
     # case one spurious or missed tick after a state load).
     irq_minute*:    int64
@@ -1137,7 +1157,8 @@ include mmio
 
 proc new_storage*(gba: GBA; rom_path: string): Storage =
   let save_path = rom_path[0 ..< rom_path.rfind('.')] & ".sav"
-  var t = find_storage_type(rom_path)
+  let content = readFile(rom_path)
+  var t = find_storage_type(content)
   when defined(yoshi_eeprom_pin):
     # Tilt carts save to EEPROM but the string scan can misread them as SRAM
     # (which aliases save bytes under the tilt registers). Behind a define
@@ -1150,13 +1171,22 @@ proc new_storage*(gba: GBA; rom_path: string): Storage =
     of stSRAM:                          new_sram()
     of stFLASH, stFLASH512, stFLASH1M:  new_flash(t)
     of stNone:                          NoBackup()
+  result.rtc_cart = rom_has_rtc(content)
   if t == stNone:
     return   # no chip: no battery file is read or written
   result.save_path = save_path
   if fileExists(save_path):
-    let f = open(save_path, fmRead)
-    discard f.readBytes(result.memory, 0, result.memory.len)
-    f.close()
+    let data = readFile(save_path)
+    # A trailing RTC record (rtc_calendar.nim "Trailer location") is never
+    # chip data, even when it does not decode as a clock: the chip bytes are
+    # everything before it, read up to the chip's size as before.
+    let toff = trailer_offset(data.len)
+    let chip_len = if toff >= 0: toff else: data.len
+    if toff >= 0:
+      result.has_trailer = true
+      for i in 0 ..< RTC_TRAILER_LEN: result.trailer[i] = uint8(data[toff + i])
+    let n = min(chip_len, result.memory.len)
+    if n > 0: copyMem(addr result.memory[0], unsafeAddr data[0], n)
 
 proc new_gba*(bios_path, rom_path: string; run_bios: bool; use_hle: bool = false; hle_after_bios: bool = false): GBA =
   result = GBA(

@@ -47,6 +47,9 @@ task test_savestate_compat, "Run the save-state format compatibility guards":
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_savestate_compat_test tests/savestate_compat_test.nim"
 
+task test_gbartc, "Run the GBA cartridge RTC + battery-save RTC trailer tests":
+  exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_gbartc_test tests/gba_rtc_test.nim"
+
 task statefuzz_build, "Build the hostile-input save-state fuzzer":
   # Run by hand, not in the suite (minutes per core): `./statefuzz <rom>
   # sweep 255` exits non-zero on any uncontained Defect.

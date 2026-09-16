@@ -39,6 +39,7 @@ build savestatecompat dingbat_savestate_compat_test tests/savestate_compat_test.
 build rewind          dingbat_rewind_test           tests/rewind_test.nim
 build lcdresponse     dingbat_lcdresponse_test      tests/lcdresponse_test.nim
 build savefooter      dingbat_savefooter_test       tests/savefooter_test.nim
+build gbartc          dingbat_gbartc_test           tests/gba_rtc_test.nim
 build clipreplay      dingbat_clipreplay_test       tests/clip_replay_test.nim
 build mp2kpass        dingbat_mp2kpass_test         tests/mp2k_pass_test.nim
 build mgbavideo       dingbat_mgba_video            tests/mgba_video.nim

@@ -94,6 +94,12 @@ jobs:
         # not parse as a clock. Synthetic ROMs/saves.
         shell: bash
         run: ./dingbat_savefooter_test
+      - name: GBA cartridge RTC and battery-save RTC trailer
+        # S-3511A protocol writes/reads/strobes, datasheet data validation, the
+        # FlashGBX/mGBA 16-byte trailer (real reference bytes), EEPROM sizing,
+        # save-state migration. Synthetic ROMs plus the committed corpus.
+        shell: bash
+        run: ./dingbat_gbartc_test
       - name: Clip-capture replay determinism
         # Replays a range from the anchor+input log and asserts every frame's
         # serialized state matches the live run; two negative controls must

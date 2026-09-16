@@ -215,3 +215,22 @@ test("a raw .srm imports exactly like a .sav", async () => {
   eq(app.sandbox.FS.files.get("rom.sav"), raw);
   eq(app.idb.get("save:NewName.gba"), raw);
 });
+
+test("a battery save with a 16-byte RTC trailer (FlashGBX / mGBA / dingbat) imports byte-exact", async () => {
+  // The GBA core finds the trailer by length (chip size + 16) and resumes the
+  // cart clock from it, so the import path must neither trim nor refuse it.
+  const app = await loadApp();
+  bootFakeGame(app);
+  const chip = patternSave(0x20000);
+  const trailer = [0x06, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x40,
+                   0x80, 0x1b, 0xb7, 0x43, 0x00, 0x00, 0x00, 0x00];
+  const withRtc = new Uint8Array(chip.length + 16);
+  withRtc.set(chip);
+  withRtc.set(trailer, chip.length);
+  const unwrapped = app.sandbox.SaveImport.unwrap(withRtc, "Emerald.sav");
+  assert.equal(unwrapped.ok, true);
+  assert.equal(unwrapped.format, null);
+  await importSav(app, "NewName.sav", withRtc);
+  eq(app.sandbox.FS.files.get("rom.sav"), withRtc);
+  eq(app.idb.get("save:NewName.gba"), withRtc);
+});

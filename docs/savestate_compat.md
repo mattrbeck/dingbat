@@ -64,6 +64,7 @@ The reader migrates older revisions instead of refusing:
 | GBA 3→4 | `halt_resume_pop=false` + IntrWait stack-frame retrofit | below |
 | GB 1→2 | serial idle | the port was a stub |
 | GB 2→3 | `dots_since_frame=0` | states are written at frame boundaries (asserted) |
+| GBA 6→7 | RTC `status` = `02h \| irq<<3 \| m24<<6`; `bias_set=false`, `bias=0`, `wday_bias=0` | rev ≤ 6 read status back with bit 1 forced and ignored clock writes, so the clock was always the source clock |
 | GB 4→5 | no `GB_SEC_SGB` section → fresh `SgbState` | see `docs/sgb.md` |
 
 **IntrWait retrofit.** Rev 4 made the HLE IntrWait push `{r2, lr}` + `{r4, lr}`

@@ -85,7 +85,8 @@ origins allowlist — https required off localhost, raw IPs rejected).
 - CPU passes armwrestler, FuzzARM and all 13 jsmolka/gba-tests ROMs
 - Cycle-counted bus with waitstates and prefetch; DMA priority and preemption; timers on
   the scheduler; idle-loop detection; passes the AGS aging cartridge
-- Flash, SRAM, EEPROM; RTC; GPIO rumble; tilt (Yoshi's Universal Gravitation, Koro Koro
+- Flash, SRAM, EEPROM; RTC (settable by the game; the clock persists in the battery save
+  as the FlashGBX/mGBA 16-byte trailer); GPIO rumble; tilt (Yoshi's Universal Gravitation, Koro Koro
   Puzzle) and the WarioWare Twisted gyro
 - Link cable locally and online; save states; browser build
 

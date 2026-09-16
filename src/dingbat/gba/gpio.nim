@@ -13,6 +13,13 @@ proc new_gpio*(gba: GBA): GPIO =
   # shared pins would fabricate phantom RTC commands.
   result.gyro_present = gba.cartridge != nil and
     gba.cartridge.game_code() in ["RZWE", "RZWJ", "RZWP"]
+  # An RTC cart's clock persists in its battery file (rtc_calendar.nim): the
+  # trailer read with the save resumes it, and every save write refreshes it.
+  let st = gba.storage
+  if st != nil and st.rtc_cart and not result.gyro_present:
+    st.rtc = result.rtc
+    if st.has_trailer:
+      discard result.rtc.rtc_apply_trailer(st.trailer)
 
 proc address_in_gpio*(address: uint32): bool =
   address >= 0x080000C4'u32 and address <= 0x080000C9'u32
@@ -57,17 +64,35 @@ proc `[]`*(gpio: GPIO; io_addr: uint32): uint8 =
     if gpio.allow_reads: 1'u8 else: 0'u8
   else: 0'u8
 
+proc drive_pins(gpio: GPIO; prev: uint8) =
+  ## Hand the port's output levels to the device on the pins. An input bit
+  ## is not driven by the port; the device sees it low (Assumed; SIO, the
+  ## only input the RTC protocol uses, is ignored while the chip drives it).
+  let pins = gpio.data and gpio.direction
+  if gpio.gyro_present:
+    gyro_update(gpio, pins)
+  else:
+    rtc_write(gpio.rtc, pins, prev)
+
 proc `[]=`*(gpio: GPIO; io_addr: uint32; value: uint8) =
   case io_addr and 0xFF'u32
   of 0xC4:  # IO Port Data
-    let masked = (value and gpio.direction and 0xF'u8) or (gpio.data and (not gpio.direction) and 0xF'u8)
-    gpio.data = masked
-    if gpio.gyro_present:
-      gyro_update(gpio, masked)
-    else:
-      rtc_write(gpio.rtc, masked)
+    # The data register latches every bit written, and a bit drives its pin
+    # while its direction is Out. Assumed from Nintendo's RTC library, which
+    # on every transaction writes SCK high, then SCK|CS, and only THEN sets
+    # the direction to output; the first transaction after power-on (the
+    # direction resets to all-In) is its status probe. Masking the write by
+    # the direction loses that probe: Sennen Kazoku's copy of the library
+    # then reads status 00h and resets the clock at every boot, which a
+    # clock game on a real cart cannot be doing.
+    let prev = gpio.data and gpio.direction
+    gpio.data = value and 0xF'u8
+    gpio.drive_pins(prev)
   of 0xC6:  # IO Port Direction
+    let prev = gpio.data and gpio.direction
     gpio.direction = value and 0x0F'u8
+    if (gpio.data and gpio.direction) != prev:
+      gpio.drive_pins(prev)
   of 0xC8:  # IO Port Control
     gpio.allow_reads = bit(value, 0)
   else: discard

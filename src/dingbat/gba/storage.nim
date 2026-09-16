@@ -27,9 +27,8 @@ proc storage_bytes(t: StorageType): int =
   of stFLASH1M:  0x20000
   of stNone:     0
 
-proc find_storage_type(rom_path: string): StorageType =
-  ## Scan the ROM file for backup type identifiers.
-  let content = readFile(rom_path)
+proc find_storage_type(content: string): StorageType =
+  ## Scan the ROM image for backup type identifiers.
   # A cart that names every non-EEPROM library carries no chip at all: the
   # game probes SRAM (write/verify) and two flash ID routines at boot and
   # disables its own menu if any of them answers -- anti-copier protection on
@@ -54,11 +53,37 @@ method `[]`*(st: Storage; address: uint32): uint8 {.base.} =
 method `[]=`*(st: Storage; address: uint32; value: uint8) {.base.} =
   quit "Storage.[]= not implemented for " & $st.type
 
+proc rom_has_rtc(content: string): bool =
+  ## Carts with the Seiko S-3511A RTC link Nintendo's RTC library, whose ID
+  ## string is "SIIRTC_V" (like "SRAM_V"/"FLASH1M_V" for backup chips). In
+  ## the 7,906-ROM compatibility library it occurs in exactly the Pokemon
+  ## Ruby/Sapphire/Emerald, Boktai 1-3, Rockman EXE 4.5, Sennen Kazoku and
+  ## both Legendz families (and their hacks/translations), the same ten
+  ## game-code families mGBA's override table fits with an RTC, and no others.
+  content.contains("SIIRTC_V")
+
+proc rtc_trailer_bytes(rtc: RTC): array[16, byte]  # rtc.nim
+
+proc battery_file_bytes*(st: Storage): string =
+  ## What write_save puts on disk: the chip bytes, then on an RTC cart the
+  ## clock trailer (rtc_calendar.nim). A trailer read from a cart dingbat does
+  ## not treat as an RTC cart is kept verbatim: RTC detection is a ROM-string
+  ## heuristic, and a clock another tool recorded must not be lost to a cart
+  ## (a hack, a stripped ROM) the heuristic misses.
+  result = newString(st.memory.len)
+  if st.memory.len > 0:
+    copyMem(addr result[0], unsafeAddr st.memory[0], st.memory.len)
+  if st.rtc != nil:
+    let t = rtc_trailer_bytes(st.rtc)
+    for b in t: result.add(char(b))
+  elif st.has_trailer:
+    for b in st.trailer: result.add(char(b))
+
 proc write_save*(st: Storage) =
   # Empty save_path = no battery file (web build persists itself; harnesses
   # detach it so a run leaves no .sav). dirty stays set so a rebind flushes.
   if st.dirty and st.save_path.len > 0:
-    writeFile(st.save_path, st.memory)
+    writeFile(st.save_path, st.battery_file_bytes())
     st.dirty = false
 
 proc read_half*(st: Storage; address: uint32): uint16 =
