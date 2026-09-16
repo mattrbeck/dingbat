@@ -41,8 +41,8 @@ proc test_pack_domain() =
       # brighten: s + ((0x7FFF - s) * evy) / 16
       let d = (((bgr16_spread(0x7FFF'u16) - s) * evy) shr 4) and BGR_LANE_MASK
       let up = s + d
-      # darken: s - (s * evy) / 16
-      let dn = s - (((s * evy) shr 4) and BGR_LANE_MASK)
+      # darken: s * (16 - evy) / 16
+      let dn = ((s * (16'u64 - evy)) shr 4) and BGR_LANE_MASK
       for v in [up, dn]:
         for lane in 0 .. 2:
           let x = (v shr (16 * lane)) and 0xFFFF'u64
@@ -136,6 +136,42 @@ proc test_coefficient_clamping(emu: GBA) =
     let at31 = hash_with(mode, reg, 31)
     check(at16 == at17 and at16 == at31, name & " = 16, 17 and 31 agree",
           toHex(at16) & " / " & toHex(at17) & " / " & toHex(at31))
+
+# 2b. The effects' rounding, pinned to a GBA SP photographed running
+# tests/roms/blendprobe.gba (tests/roms/expected/blendprobe-agb-sp-1.txt).
+# Each row is (mode, EVA or EVY, EVB, top grey, bottom grey, hardware output);
+# the rows are the ones where the candidate roundings disagree, plus a
+# coefficient above 16.
+proc test_blend_hardware_values(emu: GBA) =
+  echo "colour effects round as photographed on hardware"
+  let ppu = emu.ppu
+  const rows = [
+    # alpha: (t*EVA + b*EVB) >> 4
+    (1, 7, 9, 2, 28, 16), (1, 7, 9, 0, 28, 15), (1, 7, 9, 1, 28, 16),
+    (1, 5, 6, 18, 29, 16), (1, 5, 6, 13, 31, 15), (1, 5, 6, 14, 31, 16),
+    (1, 11, 9, 7, 21, 16), (1, 11, 9, 0, 28, 15), (1, 11, 9, 1, 28, 16),
+    (1, 20, 0, 11, 0, 11), (1, 20, 0, 3, 0, 3), (1, 20, 0, 10, 0, 10),
+    # darken: t*(16-EVY) >> 4
+    (3, 7, 0, 24, 0, 13), (3, 7, 0, 27, 0, 15), (3, 7, 0, 28, 0, 15),
+    (3, 3, 0, 24, 0, 19), (3, 3, 0, 19, 0, 15), (3, 3, 0, 18, 0, 14),
+    (3, 11, 0, 24, 0, 7), (3, 11, 0, 29, 0, 9), (3, 11, 0, 31, 0, 9),
+    # brighten: t + ((31-t)*EVY >> 4)
+    (2, 7, 0, 4, 0, 15), (2, 7, 0, 6, 0, 16), (2, 7, 0, 2, 0, 14),
+    (2, 3, 0, 12, 0, 15), (2, 3, 0, 11, 0, 14), (2, 3, 0, 10, 0, 13),
+    (2, 11, 0, 1, 0, 21), (2, 11, 0, 2, 0, 21), (2, 11, 0, 4, 0, 22)]
+  var bad: seq[string]
+  for (mode, e1, e2, t, b, want) in rows:
+    for a in 0x050'u32 .. 0x055'u32: ppu[a] = 0
+    if mode == 1:
+      ppu[0x052] = uint8(e1)
+      ppu[0x053] = uint8(e2)
+    else:
+      ppu[0x054] = uint8(e1)
+    let grey = proc(v: int): uint16 = uint16(v or (v shl 5) or (v shl 10))
+    let got = ppu.blend_colors(grey(t), grey(b), mode)
+    if got != grey(want):
+      bad.add($(mode, e1, e2, t, b) & " -> " & $(int(got) and 0x1F) & " want " & $want)
+  check(bad.len == 0, "all " & $rows.len & " photographed rows", bad.join("; "))
 
 # 3. composite() takes a cheap path when no window is active and no colour
 # math can apply, and a per-span path otherwise. A full-screen window with
@@ -832,6 +868,7 @@ when isMainModule:
   test_pack_domain()
   let emu = make_emu()
   test_coefficient_clamping(emu)
+  test_blend_hardware_values(emu)
   test_fast_slow_agree(emu)
   test_loops_agree_on_identities(emu)
   test_blend_bottom_selection(emu)

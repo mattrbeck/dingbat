@@ -862,22 +862,29 @@ proc bgr16_pack_sat*(v: uint64): uint16 {.inline.} =
 proc bgr16_pack*(v: uint64): uint16 {.inline.} =
   ## Pack three 5-bit lanes back to BGR555 WITHOUT saturating. Valid only
   ## where each lane is already <= 0x1F: with EVY clamped to 16, darken gives
-  ## s - (s*evy)/16 >= 0 and brighten s + ((31-s)*evy)/16 <= 31. EVY = 17
+  ## s*(16-evy)/16 in [0, s] and brighten s + ((31-s)*evy)/16 <= 31. EVY = 17
   ## does overflow, so the `min(16, ...)` on every evy_coefficient read is
   ## load-bearing; tests/ppucomposite_test.nim drives EVY = 16, 17, 31.
   uint16((v and 0x1F'u64) or
          (((v shr 16) and 0x1F'u64) shl 5) or
          (((v shr 32) and 0x1F'u64) shl 10))
 
+# Colour special effects, per 5-bit channel, as measured on a GBA SP with
+# tests/roms/blendprobe.gba (expected/blendprobe-agb-sp-1.txt): alpha sums
+# both weighted layers BEFORE the single truncating shift, (t*EVA + b*EVB)
+# >> 4, saturated at 31; darken truncates the scaled colour, t*(16-EVY) >> 4
+# (so the amount removed rounds up); brighten truncates the amount added,
+# t + ((31-t)*EVY >> 4). Coefficients above 16 act as 16. GBATEK gives these
+# without their rounding; truncating each alpha term separately, or
+# subtracting the truncated t*EVY/16, is a step off on the probe's rows.
 proc blend_colors*(ppu: PPU; top_u16, bot_u16: uint16; blend_mode: int): uint16 =
   case blend_mode
   of 0: top_u16  # None
   of 1:          # Blend
     let eva = uint64(min(16, int(ppu.bldalpha.eva_coefficient)))
     let evb = uint64(min(16, int(ppu.bldalpha.evb_coefficient)))
-    let t = ((bgr16_spread(top_u16) * eva) shr 4) and BGR_LANE_MASK
-    let b = ((bgr16_spread(bot_u16) * evb) shr 4) and BGR_LANE_MASK
-    bgr16_pack_sat(t + b)
+    bgr16_pack_sat(((bgr16_spread(top_u16) * eva + bgr16_spread(bot_u16) * evb) shr 4) and
+                   BGR_LANE_MASK)
   of 2:          # Brighten
     let evy = uint64(min(16, int(ppu.bldy.evy_coefficient)))
     let s = bgr16_spread(top_u16)
@@ -885,8 +892,7 @@ proc blend_colors*(ppu: PPU; top_u16, bot_u16: uint16; blend_mode: int): uint16 
     bgr16_pack_sat(s + d)
   of 3:          # Darken
     let evy = uint64(min(16, int(ppu.bldy.evy_coefficient)))
-    let s = bgr16_spread(top_u16)
-    bgr16_pack_sat(s - (((s * evy) shr 4) and BGR_LANE_MASK))
+    bgr16_pack(((bgr16_spread(top_u16) * (16'u64 - evy)) shr 4) and BGR_LANE_MASK)
   else: top_u16
 
 # Compositing runs per span of columns that share one window configuration.
@@ -979,9 +985,10 @@ proc composite_span_shade(ppu: PPU; w: SpanWalk; row_base: uint32;
   let brighten = ppu.bldcnt.blend_mode == 2
   let white    = bgr16_spread(0x7FFF'u16)
   template shade(c: uint16): uint16 =
+    # blend_colors has the measured rounding of both effects
     let s = bgr16_spread(c)
-    let d = (((if brighten: white - s else: s) * evy) shr 4) and BGR_LANE_MASK
-    if brighten: bgr16_pack(s + d) else: bgr16_pack(s - d)
+    if brighten: bgr16_pack(s + ((((white - s) * evy) shr 4) and BGR_LANE_MASK))
+    else:        bgr16_pack(((s * (16'u64 - evy)) shr 4) and BGR_LANE_MASK)
   template shade_loop(NN: static int; DIRECT: static bool) =
     for col in lo ..< hi:
       let sp = sprites[col]
@@ -1083,18 +1090,17 @@ proc composite_span(ppu: PPU; row_base: uint32; lo, hi: int;
   let white = bgr16_spread(0x7FFF'u16)
 
   template alpha(top_u16, bot_u16: uint16): uint16 =
-    let t = ((bgr16_spread(top_u16) * eva) shr 4) and BGR_LANE_MASK
-    let b = ((bgr16_spread(bot_u16) * evb) shr 4) and BGR_LANE_MASK
-    bgr16_pack_sat(t + b)
+    # one shift after the sum (blend_colors): lanes hold at most 31*16*2
+    bgr16_pack_sat(((bgr16_spread(top_u16) * eva + bgr16_spread(bot_u16) * evb) shr 4) and
+                   BGR_LANE_MASK)
 
   template brighten_darken(top_u16: uint16): uint16 =
     # blend_mode is 2 (brighten toward white) or 3 (darken toward black);
     # mode 0/1 reach here only through the semi-transparent-OBJ fallback,
     # where the hardware result is the unmodified top layer.
     let s = bgr16_spread(top_u16)
-    let d = (((if blend_mode == 2: white - s else: s) * evy) shr 4) and BGR_LANE_MASK
-    if blend_mode == 2:   bgr16_pack(s + d)
-    elif blend_mode == 3: bgr16_pack(s - d)
+    if blend_mode == 2:   bgr16_pack(s + ((((white - s) * evy) shr 4) and BGR_LANE_MASK))
+    elif blend_mode == 3: bgr16_pack(((s * (16'u64 - evy)) shr 4) and BGR_LANE_MASK)
     else:                 top_u16
 
   let sel1_obj = bit(bld, 4)
