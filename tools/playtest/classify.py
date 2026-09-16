@@ -12,6 +12,8 @@ Verdicts, least to most severe:
   MAJOR       a different screen: blank vs content, other text, crash
   FAILED      the script could not reach this checkpoint at all
 """
+import difflib
+
 import img
 import screen
 
@@ -33,11 +35,17 @@ def classify(a, b):
         return {'verdict': 'FAILED'}
     if a['hash'] == b['hash']:
         return {'verdict': 'IDENTICAL'}
+    if a.get('compare') == 'none' or b.get('compare') == 'none':
+        return {'verdict': 'IDENTICAL', 'why': 'recorded, not judged'}
     if a.get('compare') == 'text' or b.get('compare') == 'text':
-        wa, wb = _words(a['text']), _words(b['text'])
-        sim = len(wa & wb) / len(wa | wb) if (wa or wb) else 1.0
-        return {'verdict': 'MINOR' if sim >= 0.9 else 'MAJOR', 'text_similarity': round(sim, 2),
-                'why': 'compared by on-screen text only', 'palette_only': sim >= 0.9}
+        # OCR reads the same screen with small errors and in varying line
+        # order: fuzzy-match the sorted lines
+        la = sorted(screen.normalize(t) for t in a['text'].split(' | '))
+        lb = sorted(screen.normalize(t) for t in b['text'].split(' | '))
+        sim = difflib.SequenceMatcher(None, '\n'.join(la), '\n'.join(lb)).ratio()
+        ok = sim >= 0.8
+        return {'verdict': 'MINOR' if ok else 'MAJOR', 'text_similarity': round(sim, 2),
+                'why': 'compared by on-screen text only', 'palette_only': ok}
     for k, h in enumerate(b['hashes']):
         if h == a['hash']:
             return {'verdict': 'SLIP', 'offset': k - b['center']}

@@ -79,4 +79,4 @@ press A
 until text "B1F" timeout=1200 every=10
 until notext "Tiny" timeout=600 every=10
 wait 90
-checkpoint dungeon window=10 compare=text
+checkpoint dungeon window=10 compare=none

@@ -18,13 +18,13 @@ Steps (keys: A B SELECT START RIGHT LEFT UP DOWN R L, combined with +):
                                  failing the timeout fails the run
   mash KEYS until COND [timeout=1200] [every=20] [hold=4]
                                  tap KEYS every `every` frames until COND
-  checkpoint NAME [window=30] [compare=text]
+  checkpoint NAME [window=30] [compare=text|none]
                                  screenshot + OCR, plus framebuffer hashes of
                                  `window` frames either side (slip detection);
                                  compare=text judges the screen by its OCR text
-                                 only, for screens over a constantly animated
-                                 background (menus over title art, a HUD over
-                                 wandering sprites)
+                                 only (fuzzy), for menus over a constantly
+                                 animated background; compare=none records the
+                                 screen without judging it
 
 Conditions:
   text "STR"      OCR finds STR (case/space-insensitive)
@@ -112,7 +112,7 @@ def parse_step(line):
         opts, rest = _opts(args, {'window'})
         compare = 'pixels'
         for t in rest[1:]:
-            if t in ('compare=text', 'compare=pixels'):
+            if t in ('compare=text', 'compare=pixels', 'compare=none'):
                 compare = t.split('=')[1]
             else:
                 raise ScriptError(f'unknown checkpoint option {t!r}')
@@ -143,7 +143,7 @@ def format_step(step):
         return f"mash {'+'.join(step['keys'])} until {cond} timeout={step['timeout']} every={step['every']}"
     if op == 'checkpoint':
         return f"checkpoint {step['name']} window={step['window']}" + \
-            (' compare=text' if step.get('compare') == 'text' else '')
+            (f" compare={step['compare']}" if step.get('compare', 'pixels') != 'pixels' else '')
     raise ScriptError(op)
 
 
