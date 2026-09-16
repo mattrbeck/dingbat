@@ -53,12 +53,14 @@ def main():
     p = sub.add_parser('sha1')
     p.add_argument('rom')
 
-    p = sub.add_parser('record', help='play a game in the desktop app with input recording, then convert')
+    p = sub.add_parser('record', help='play a game in the desktop app with input recording')
     p.add_argument('rom', help='ROM path, or the sha1 of a ROM in the library')
     p.add_argument('--section', default='new', choices=['new', 'load'])
     p.add_argument('--save', help='[load]: battery file to start from (default: the latest [new] recording\'s)')
     p.add_argument('--app', default=os.environ.get('DINGBAT_APP', os.path.join(HERE, '..', '..', 'dingbat')),
                    help='desktop dingbat binary built from this tree (default: repo-root ./dingbat)')
+    p.add_argument('--convert', action='store_true',
+                   help='convert once the app quits (a headless replay; takes longer than the play did)')
 
     p = sub.add_parser('convert', help='turn a DINGBAT_INPUT_LOG recording into a script section')
     p.add_argument('log')
@@ -144,6 +146,12 @@ def record(args):
     subprocess.run([app, os.path.join(d, 'game.gba')], env=dict(os.environ, DINGBAT_INPUT_LOG=log))
     if not os.path.exists(log):
         sys.exit('the app wrote no input log (is it a build with the recorder?)')
+    if not args.convert:
+        cmd = f'playtest.py convert {log} --rom {rom!r} --section {args.section}'
+        if save:
+            cmd += f" --save {os.path.join(d, 'seed.sav')}"
+        print(f'recorded; convert later with:\n  {cmd}')
+        return 0
     text = convert.convert(log, rom, args.section, os.path.join(d, 'convert'),
                            save=os.path.join(d, 'seed.sav') if save else None, rtc=DEFAULT_RTC)
     out = os.path.join(d, f'{args.section}.play')

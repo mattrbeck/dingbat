@@ -26,6 +26,7 @@ timeline no longer matches). Always verify the result with
 import os
 import re
 import statistics
+import sys
 
 import emu as emulib
 import screen
@@ -145,6 +146,7 @@ class Replay:
         self.probe = os.path.join(workdir, 'probe.ppm')
         self.polls = []   # (frame, {norm: text})
         self.hashes = sess['hashes']
+        self.total = sess['end'] or sess['events'][-1][0]
         self.poll()
 
     def poll(self):
@@ -154,6 +156,8 @@ class Replay:
 
     def run_to(self, frame):
         while self.e.frame < frame:
+            if self.e.frame // 600 != (self.e.frame + POLL) // 600:
+                print(f'\rreplaying frame {self.e.frame} of {self.total}', end='', file=sys.stderr, flush=True)
             step = min(POLL, frame - self.e.frame)
             upcoming = [f for f in self.hashes if self.e.frame < f <= self.e.frame + step]
             if upcoming:
@@ -233,6 +237,7 @@ def convert(log_path, rom, section, workdir, save=None, rtc=None):
         acts = [acts[i] for i in keep]
         ends = [ends[i] for i in keep]
         final = desync
+    print(file=sys.stderr)
 
     # pass 2: steps
     lines = [f"# converted from {os.path.basename(log_path)}: {len(sess['events'])} keypad changes, "
