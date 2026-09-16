@@ -1,0 +1,20 @@
+# gbaedge.gba hardware transcription — session 6 (the v9 pages, 50-51)
+# GBA SP (AGS-001, clear purple) + EverDrive GBA, 2026-09-16
+# 52-page manual build @ 4320ea061 (sha1 ef1b1291bd304066a03d455ed319ca615257b6b4),
+# photos IMG_4194 (P32) and IMG_4195 (P33)
+# Both pages re-check against their on-screen CRC-16 (poly 1021, init FFFF).
+# Pages 0-49 are byte-identical to the v8 build transcribed in agb-sp-5.txt,
+# so only the two new pages were photographed; ALL differs from dingbat's
+# because those earlier pages already did.
+platform: gba
+console: GBA SP AGS-001, EverDrive GBA, 2026-09-16
+all: B8FE
+model: 18 7F
+
+page 32 HDMAPHASE crc 6E69
+E7 03 F4 03 E3 03 FF FF 02 00 09 00 C6 04 D4 04
+E5 04 E4 03 F4 03 EC 03 F7 03 E9 03 06 04 00 32
+
+page 33 PSGFIRST crc 4549
+00 00 5E 45 77 49 78 49 00 00 15 07 1B 47 77 49
+00 00 74 49 00 80 82 88 FF FF FF FF 02 00 00 33

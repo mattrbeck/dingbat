@@ -83,3 +83,103 @@ not. The verdict per page, in the order a fix would be worth landing:
 | 29 CONTEND2 | OAM: zero contention in every configuration. PRAM: +1 over 16 reads. VRAM, mode 0: **+1 per CPU halfword read**, OBJ layer and H-blank-free irrelevant. VRAM, mode 2 with two affine BGs: the CPU is locked out until H-blank (1066 vs 230). Code executed from VRAM under forced blank costs 220, not 183 | no contention term; VRAM opcode fetch undercharged by ~2/instruction | first the VRAM fetch cost (a bus bug, renderer off); then an affine-mode VRAM block; a per-access probability term would break the exact mode-3 CONTEND page, contention is phase-locked |
 | 2B TIMPHASE | one free-running divider shared by all timers, a reload write does not realign it, a fresh timer inherits a running one's phase (row `06 19` exact); staircase shape reproduced by the same window length | same model; base phase 1–7 cycles apart | none: shape-only page, residual is accumulated boot drift |
 | 2C PSGPHASE | every ch1 trigger that is the **first trigger after a SOUNDCNT_X 0→1** dies at once, for lengths 1, 2 and 4 ticks alike (no poll timed out; SOUNDCNT_X reads 80 right after the trigger); ch2 triggered two stores later lives 486 polls; where both live, the 256 Hz length clock matches to one poll | length counters live | none yet: not a length-unit effect. One follow-up page decides ch1-specific (sweep unit) vs first-trigger-of-any-channel; also read the BIOS's boot value of bit 7 |
+
+## Session 6 (2026-09-16): pages 50–51
+
+Photographed on the same AGS-001 (IMG_4194, IMG_4195); both pages re-check
+against their on-screen CRCs (`6E69`, `4549`). Transcription in
+`tests/roms/expected/agb-sp-6.txt`. Neither page matches dingbat, and each
+answers the question it was built for.
+
+### 32 HDMAPHASE — the H-blank DMA follows the flag, not the cycle-960 edge
+
+Every stamp is on one clock with the same anchor as dingbat's prediction, so
+hardware and dingbat can be compared stamp for stamp, not just through the
+signed answer:
+
+| row | hardware | dingbat | hw − dingbat |
+|---|---|---|---|
+| `+0` H-blank DMA write, line 100 | 999 | 951 | **+48** |
+| `+2` H-blank flag first seen | 1012 | 1012 | 0 |
+| `+18` DMA write, line 50 | 996 | 948 | **+48** |
+| `+12` V-blank DMA write | 1222 | 1221 | +1 |
+| `+14` V-blank flag first seen | 1236 | 1236 | 0 |
+| `+10 − +8` immediate DMA request→write | 7 | 8 | −1 |
+| `+22` DMA write, CPU loading from ROM | 1004 | 950 | +54 |
+| `+26` DMA write, ROM load at 8 waits | 1001 | 952 | +49 |
+| `+30` spread of the answer over 8 trials | 0 | 6 | |
+
+The flag stamps agree to the cycle on both lines and the V-blank DMA agrees
+to one, so the anchor, the clocks and the flag model are all sound. Only the
+H-blank DMA moves: it writes **48 cycles later** than dingbat's, identically
+on two lines and with zero spread. With hardware's one-cycle-shorter
+request-to-write latency that puts the grant at cycle **1008–1009** of the
+line: the DISPSTAT H-blank flag (1006, which the flag stamps confirm) plus
+2–3 cycles. The signed answer `(+0 + +6) − +2` is −14, bracketed by `+4` to
+[−14, +3] — the write lands at the flag, not ~60 cycles before it as dingbat
+does.
+
+So the mechanism behind the suite's last red row is confirmed: the H-blank
+DMA is requested off the latched flag, not the end-of-draw edge. The value
+is **not** the 1012 (flag + IRQ synchroniser) the suite fit suggested: it is
+3–4 cycles earlier. In the offsets swept against Misc "DMA Prefetch Break",
+hardware's 48–49 sits below the 51–55 that pass.
+
+The two bus-state variants say the grant is not purely PPU-timed. With the
+CPU's poll loop loading from ROM the write moves +5 (1004), at 8 waits +2
+(1001), against zero spread for the IWRAM trials — consistent with the grant
+waiting for the end of whatever CPU bus cycle is in flight. The suite's loop
+fetches every instruction on 3- and 5-cycle ROM bus cycles, which is roughly the size of
+the gap to the passing offsets.
+
+One more small divergence rides along: an immediate DMA writes one cycle
+earlier than dingbat's (request→write 7, not 8).
+
+Fix that follows, in order: request the H-blank DMA at the flag + 2
+(1008) instead of cycle 960; land the p27 DMAOPENBUS window (clear the arm
+flag at the next opcode fetch); then grant a DMA at the end of the CPU bus
+cycle in flight rather than at the instruction boundary. Each step is
+hardware-backed on its own. Re-run the suite row after each and do not
+tune a constant to close it.
+
+### 33 PSGFIRST — ch1 only, and not a "first trigger" effect
+
+| row | hardware | dingbat |
+|---|---|---|
+| `+0` ch1, first trigger after master-on | **0** | 18653 |
+| `+2` / `+4` / `+6` ch2 / ch3 / ch4, first trigger | 17758 / 18807 / 18808 | ~17594 each |
+| `+8` ch1 first, NR10 = 0 | **0** | 17594 |
+| `+10` ch1 first, NR10 = 0x11 (sweep running) | 1813 | 1816 |
+| `+12` ch1 after ch2's whole tone | 18203 | 18202 |
+| `+16` ch1's second trigger, right after its first | **0** | 19417 |
+| `+18` ch1 again, a few dozen cycles later | 18804 | 19416 |
+| `+21` SOUNDCNT_X right after the `+0` trigger | **80** | 81 |
+| `+24` ch1 first, length enable clear | FFFF (never expired) | FFFF |
+
+Session 5's two candidates are both refuted as stated. It is **ch1
+specific** — ch2, ch3 and ch4 all live on their first trigger after a
+master-on — but it is **not** confined to the first trigger: ch1's second
+trigger, issued straight after the first, dies as well, while a third a few
+dozen cycles later lives. Whatever it is needs all of: ch1; the length
+enable set (`+24` lives with it clear); NR10 at zero (`+10`, with the sweep
+unit running, lives until the sweep overflows); and a trigger soon after the
+master-on — the first and second ch1 triggers die, a third issued the same
+few dozen cycles after the second lives, and so does one issued after ch2's
+whole tone (`+12`). The gap before the dying second trigger and before the
+living third is the same instruction sequence, so neither the gap to the
+previous trigger nor the length value is the gate. The poll-lifetimes where both live
+agree between hardware and dingbat to within sequencer phase, so the length
+clock itself is not in question.
+
+One distinction neither this page nor p44 can make: both poll for the
+active bit to *fall*, and `+21` reads it clear immediately after the store.
+A trigger whose channel never enables and a trigger whose active bit rises
+a few cycles late look identical to them. The `+16`/`+18` pair leans toward
+the late rise — a channel that came up late from the `+16` trigger would
+already be running when `+18` retriggers it — but that is inference. Next
+page: poll for the bit to rise within a bounded window, record the cycles
+to rise, then poll for the fall.
+
+Fix that follows: none yet in the emulator — the mechanism is not
+identified, and a game would hear the difference between a silent note and
+a late one. Build the rise-polling page first.
