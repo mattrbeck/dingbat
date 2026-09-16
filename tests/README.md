@@ -86,12 +86,14 @@ the asymmetry.
 `releases/latest`, guarded by `MgbaSuiteSha1` so a new upstream release is reported
 rather than silently re-baselined. That build carries the upstream fixture fixes
 (`mgba-emu/suite@8c97f2c9` volatile `dmaPrefetch` source, `@a58437f3` re-measured
-"H-blank bit start" constants, `@2a8eca1`, `@fbe6156`/`@aac98dc`). Those two rewrites
-measure compiler output, and the fork's ROM is built by a later devkitARM than the
-constants were: dingbat reproduces all seven "H-blank bit start" constants exactly on
-upstream's own earlier build, and "DMA Prefetch Break" counts loop iterations the same
-way. Rebuilding the ROM with a pinned `devkitpro/devkitarm` tag is what would close them
-(`docs/mgba-suite-verdicts.md`).
+"H-blank bit start" constants, `@2a8eca1`, `@fbe6156`/`@aac98dc`). Those constants time
+compiler output, and neither the fork nor upstream pins the `devkitpro/devkitarm` image
+their `docker-build.sh` builds in, so the fork's ROM is compiled by a later gcc than the
+constants were measured on. Rebuilt in the suite's own Docker environment with the image
+that was current when they were measured (`devkitpro/devkitarm:20260221`), Misc goes 5/12
+to 11/12 with every other suite unchanged, and the one row left is "DMA Prefetch Break".
+Pinning that image in the fork and re-pinning `MgbaSuiteSha1` is what would close them in
+CI (`docs/mgba-suite-verdicts.md`).
 
 ### jsmolka, FuzzARM, MagenTests
 

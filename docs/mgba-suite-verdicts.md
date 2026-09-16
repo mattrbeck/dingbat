@@ -20,64 +20,71 @@ counts: a change that shifts the poll-loop phase can move every Flip row by
 one skip quantum (±11) and regress two near-misses from 1 cycle out to 10
 while every per-section count stays identical.
 
-## `Hblank` and `Flip 1-6` — the ROM is built by a different compiler
+## `Hblank` and `Flip 1-6` — the ROM is built with the wrong compiler
 
-These seven rows time code the compiler emits, and the constants belong to
-a build that is not the one CI runs.
+These seven rows time code the compiler emits, and CI's ROM is built by a
+different compiler than the one the constants were measured against. Built
+correctly, dingbat passes all seven.
 
-`mgba-emu/suite@a58437f3` re-measured them in June 2026 ("modern gcc
-values"). The auto-run fork is a separate build of that source: both trees
-run `devkitpro/devkitarm` from Docker Hub, but months apart, and the newer
-gcc lays `hblankBit` out differently — after the second `Halt()` it inserts
-three one-cycle `movs` before the `ldrh` that reads TM0, where the older
-build reads TM0 immediately. That alone accounts for the `Hblank` row's
-three cycles.
+Neither `docker-build.sh` pins a toolchain — upstream's and the auto-run
+fork's both run the floating `devkitpro/devkitarm` tag — but Docker Hub's
+tags are dated, so which compiler a build used is recoverable from when it
+ran. `latest` was the `20260221` image from February until `20260610`
+replaced it on 10 June 2026. `mgba-emu/suite@a58437f` ("Update hblankBit
+test with modern gcc values") and `@8c97f2c` were both committed on
+31 May 2026, so their constants were measured on a `20260221` build. The
+fork's ROM is built by GitHub Actions on push; its `latest` is `20260610`.
 
-Run against upstream's own January build (`~/code/suite`, whose embedded
-newlib string dates its toolchain a year earlier), dingbat reproduces every
-one of the June constants exactly:
+Building the fork's source in the suite's own Docker environment confirms
+it: with `devkitpro/devkitarm:20260610` the ROM is byte-identical to the one
+CI downloads (sha1 `00480cf1…`), and with `20260221` it is `da6f5c69…`.
+Running dingbat against the two:
 
-| Row | dingbat on the January build | `@a58437f3` |
+| Suite | on `:20260610` (CI's ROM) | on `:20260221` |
 |---|---|---|
-| Hblank | 0x4D0 | 0x4D0 |
-| Flip 1 | 0x87 | 0x87 |
-| Flip 2 | 0x3EC | 0x3EC |
-| Flip 3 | 0xE5 | 0xE5 |
-| Flip 4 | 0x3EB | 0x3EB |
-| Flip 5 | 0xE3 | 0xE3 |
-| Flip 6 | 0x3F3 | 0x3F3 |
+| Misc. edge case tests | 5/12 | **11/12** |
+| every other suite | unchanged | unchanged |
 
-So the PPU and CPU timing these rows measure is right, and the rows fail in
-CI only because the fork's binary is compiled differently. Two further
-checks agree: the June constants are not self-consistent for *any* build
-(flips 3 and 5 run identical code starting at the same phase of the line —
-flip 3 + flip 4 = 1232, one scanline — yet differ by 2), while the 2023
-constants they replaced were (both flips 228). And a replay of the traced
-loops under any shift of the flag edges, the calibration read, the loop
-period, the entry cost or the read-to-TM0 latency reproduces none of the six
-at once; a phase-dependent (mod 4) cost on DISPSTAT reads gets no closer
-than 9 cycles, and one on timer reads breaks Timing and Timer IRQ.
+On the `20260221` build all eight `H-blank bit start` rows pass and so does
+`DMA Prefetch Read`; the only Misc row left is `DMA Prefetch Break` below.
+The difference is codegen: after the second `Halt()` the newer gcc inserts
+three one-cycle `movs` before the `ldrh` that reads TM0, where the older
+build reads TM0 immediately — exactly the `Hblank` row's three cycles — and
+the six `Flip` loops shift by 1 to 16 cycles each for the same reason.
 
-Closing the rows in CI means rebuilding the fork's ROM with the toolchain
-the constants were measured on (`devkitpro/devkitarm` pinned to a mid-2026
-tag) and re-pinning `MgbaSuiteSha1`, or re-measuring on hardware with the
-fork's own binary.
+Closing the rows in CI means pinning the fork's `docker-build.sh` to
+`devkitpro/devkitarm:20260221` and re-pinning `MgbaSuiteSha1` to the ROM
+that produces. Bump the pin only alongside constants re-measured on hardware
+with the newer toolchain.
 
-## `DMA Prefetch Break` — a phase-alignment row
+## `DMA Prefetch Break` — the one real Misc failure
 
 `out[0] = 0x10000000 + 4 × reads`: a 7-instruction Thumb ROM loop reads open
 bus until one read returns an HBlank DMA's last value instead of the
-prefetched opcode. A DMA's value is readable only by the instruction right
-after it, so the loop exits at the first line whose DMA lands just before
-the `ldmia`. The loop takes 36 cycles here; 1232 mod 36 = 8, so the landing
-point walks 8 cycles per line and the exit line depends on the loop's phase
-at line 0.
+prefetched opcode, so the count is a cycle measurement wearing an address.
+`REG_WAITCNT` is 0 throughout (ROM N=5/S=3, prefetch off): libgba's crt0
+never writes it, and the Timing suite's last write is zero.
 
-Dingbat exits at line 9 (2641 reads, `0x10002944`) under the HLE BIOS and at
-line 1 (`0x10002530`) under the real BIOS; hardware's 2725 reads is about
-line 11½ at 36 cycles, which no single landing window reproduces, so the
-iteration cost or the VBlankIntrWait return phase differs as well. One
-constant cannot separate the two. Not a usable accuracy signal as built.
+Run the way the constant was measured — the interactive ROM, `Misc. edge
+case tests` chosen from the menu — dingbat reads 2638 times against
+hardware's 2725 (`0x10002938` vs `0x10002A94`). The loop costs 36 cycles an
+iteration here and about 34.9 on hardware: roughly one cycle per iteration,
+3%.
+
+The count also depends on what ran before it, so the auto-run fork's row is
+not comparable with a constant measured from the menu. The period is 36
+either way, but the window from the loop's first read to the DMA that ends
+it is 94,982 cycles from the menu and 86,346 in the auto run, which is why
+the fork reports 2399 (`0x1000257C`).
+
+One tempting cycle is the ROM burst: the fetch after the loop's open-bus
+read has the right address and is charged N only because the burst requires
+the ROM bus to have been busy continuously. Dropping that requirement — a
+burst survives any cycle that does not touch the gamepak — costs 4 cycles an
+iteration and brings the auto run to 2710 reads, 15 short. It also costs 620
+Timing rows: `ldr r2, [sp]`, `strh r3, [sp]` and the `nop /` pairs pin that
+a code fetch following an IWRAM data access *is* non-sequential. Whatever
+the missing cycle is, it is not that.
 
 ## Video tests (interactive only)
 

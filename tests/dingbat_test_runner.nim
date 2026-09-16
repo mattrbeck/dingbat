@@ -1803,8 +1803,9 @@ proc run_mgba_suite(harness: string; previous: Table[string, bool];
   # a loud warning, not a failure. On a bump, rebaseline in the same commit
   # (row counts can change too) and bump `suite<n>` in the rom-cache key in
   # .github/workflows/test.yml, or the stale key serves the old ROM.
-  # The Misc "H-blank bit start" Flip rows measure the waitloop skip
-  # resolution, not PPU timing (docs/mgba-suite-verdicts.md).
+  # The Misc "H-blank bit start" rows time compiler output: this ROM is built
+  # by a later devkitARM than their constants were measured on, and all eight
+  # pass on a build pinned to the right image (docs/mgba-suite-verdicts.md).
   const MgbaSuiteSha1 = "00480cf1d95de6236ddcbf7026fc6e11c384528a"
   let rom_path = ensure_rom_download(
     "https://github.com/mattrbeck/mgba-suite-auto/releases/latest/download/suite.gba",
