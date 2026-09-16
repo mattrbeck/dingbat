@@ -5,6 +5,7 @@ names what the code assumes and where, which probe ROM measures it, and what a
 hardware answer would move. Probe column: **[pNN]** = a `gbedge`/`gbaedge`
 page (docs/hwprobe.md); **tools/gbprobe/\*** = a standalone probe cart;
 **visual** = needs a photographed frame; **analog** = scope/audio capture;
+**capture** = needs the digital video signal (a GBA LCD pin-out tap), exact per pixel;
 **open** = no probe yet. Hardware results to date: AGS-101 sessions
 (`tests/roms/expected/agb-sp-{1..4}.txt`), MGB + GBA SP GB-slot session
 (`tests/roms/expected/gb-mgb-1.txt`, `gb-agbsp-1.txt`), photos in
@@ -118,6 +119,8 @@ Sessions 1–4 on an AGS-001 settled most of the gbaedge catalogue
 | OBJ per-line cycle budget 1210/954 and cutoff granularity (dingbat: the exhausting sprite draws fully; hardware truncates) | — | **visual**, or CONTEND2's CPU-visible face |
 | Affine reference latch semantics (per-line during vblank vs once at vcount 160) | — | **visual** — mid-frame BG2X write |
 | PSG volume-3 mute; GB/GBA output filters, `GB_DC_CHARGE` | — | **analog** |
+| Colour special effects rounding. Photographs of `blendprobe.gba` on the clear-purple SP (EverDrive) fit, per 5-bit channel: alpha `min(31,(t·EVA+b·EVB)>>4)`, darken `t·(16−EVY)>>4` (the removed amount rounds up), brighten `t+((31−t)·EVY>>4)`, coefficients > 16 act as 16 — **landed** in `ppu.nim` `blend_colors` (5faa0d564). A stripe-nulling photo proves "which 5-bit candidate matches", not the pixel value itself: confirm exactly on the digital video signal | blendprobe pages 01–10 | **capture** — `tests/roms/expected/blendprobe-agb-sp-1.txt` |
+| **Brighten green anomaly.** On the four brighten rows whose exact result has a fraction ≥ 0.8125 (EVY 7 t=4, t=6; EVY 3 t=10; EVY 11 t=2), red and blue null at the truncated value but green nulls a step higher or at no 5-bit candidate at all; every alpha/darken row and every other brighten row nulls in all three channels together. The GBA drives its LCD with 5 bits per channel, so either green carries precision the 15-bit model cannot hold, or the photographs mislead (Bayer demosaicing). dingbat keeps plain truncation for green | blendprobe pages 08–10, per-channel `blendprobe_photo.py` | **capture** first (reads the green bits directly); a single-channel photo probe with half-step dither references is the fallback |
 | Near-BX encoding `0xE120FF11` (SBO violated) wedges the console with IRQs masked; `0xE12FFF31` executes as BX | BXDECODE | dingbat takes `E120FF11` as BX and falls through `E12FFF31` — both wrong; no further probe, model decision |
 
 Zero-code item: run the same gbaedge build on every other GBA-family console
