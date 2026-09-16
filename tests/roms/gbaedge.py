@@ -36,7 +36,9 @@ PAGES = ["IDENT", "OPENBUS", "BIOSPROT", "SWITIME", "TIMERS", "DMALATCH",
          # v8: the nine remaining open GBA rows of docs/hwprobe-questions.md
          # (all hex pages; UNDMODE is skipped when SELECT is held at boot)
          "IRQDECOMP", "CONTEND2", "MULTIME", "TIMPHASE", "PSGPHASE",
-         "MEMCTL", "DMATIME", "IWCYCLE", "DMAFIFO", "UNDMODE"]
+         "MEMCTL", "DMATIME", "IWCYCLE", "DMAFIFO", "UNDMODE",
+         # v9: when in the scanline an H-blank DMA is granted the bus
+         "HDMAPHASE"]
 
 
 

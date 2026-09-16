@@ -15,6 +15,7 @@
 @  36 MSRTBIT2  37 OBJBUDGET† 38 OBJGEOM† 39 DMAOPENBUS
 @  40 IRQDECOMP 41 CONTEND2 42 MULTIME  43 TIMPHASE 44 PSGPHASE
 @  45 MEMCTL   46 DMATIME  47 IWCYCLE  48 DMAFIFO  49 UNDMODE‡
+@  50 HDMAPHASE
 @ (†visual: the page is a picture drawn with OBJs in mode 0, not a hex
 @  dump — tests/roms/README-probes-gba.md says what to photograph)
 @ (‡UNDMODE writes an undefined CPSR mode number: HOLD SELECT AT POWER-ON
@@ -4279,6 +4280,7 @@ probe_tail3:
     bl  probe_dmatime
     bl  probe_iwcycle
     bl  probe_dmafifo
+    bl  probe_hdmaphase
     bl  probe_undmode
     pop {pc}
     .ltorg
@@ -5876,6 +5878,275 @@ v8_cnt_handler:
     strb r3, [r8, #(\off + 4)]
     strb r7, [r8, #(\off + 5)]
 .endm
+
+@ ── slot 50: HDMAPHASE — when in the scanline is an H-blank DMA granted? ──
+@ A DMA armed for H-blank: is it granted the bus on the end-of-draw edge at
+@ cycle 960 of the line, or on the same latched DISPSTAT condition that
+@ raises the H-blank IRQ, tens of cycles later?  Nothing else this ROM or
+@ the mGBA suite measures separates the two, and the answer sets the phase
+@ of every H-blank DMA against the code it interrupts.
+@
+@ Two clocks, started back to back and never restarted inside a trial:
+@   TM0 belongs to the DMA.  The DMA under test writes a halfword of ZERO
+@   into TM0CNT_H, clearing the timer's own enable bit, so TM0 FREEZES on
+@   the cycle of the DMA's write and TM0CNT_L reads that stamp afterwards.
+@   TM2 belongs to the CPU, which polls DISPSTAT and reads TM2CNT_L on the
+@   way past.  Reading a timer does not disturb it, so the flag is bracketed
+@   on a clock the DMA cannot stop.
+@ Both start a fixed distance after a VCOUNT-change poll, so the anchor's
+@ own lag cancels out of any difference.  +6 is the residual start skew,
+@ measured by the same start sequence with no DMA armed.  Every timed loop
+@ runs from IWRAM (hp_stub, copied to V9STUB) so the anchor lands within a
+@ few cycles of the line boundary and the flag bracket is ~10 cycles, not
+@ the ~46 a ROM-resident poll would give.
+@
+@   the answer  =  (+0 + +6) - +2     signed, in cycles
+@     negative  the DMA's write landed BEFORE the CPU could see the H-blank
+@               flag rise -> the DMA is granted on the cycle-960 edge
+@     positive  the flag rose first and the DMA followed -> the DMA rides
+@               the latched flag; subtract (+10 - +8), the DMA's own
+@               request-to-write latency, to get the grant instant itself
+@   +4 is the poll before +2, so the rise is bracketed to [+4, +2] and the
+@   answer is bracketed by the same width.
+@
+@ +0  (h) TM0 frozen by an H-blank DMA0's write, line 100 anchor
+@ +2  (h) TM2 at the first poll that saw DISPSTAT bit 1 set
+@ +4  (h) TM2 at the poll iteration before that one
+@ +6  (h) TM2 - TM0 read back to back with no DMA armed: the start skew
+@ +8  (h) TM2 read by the instruction right before the store that enables an
+@   IMMEDIATE DMA0 writing the same zero to TM0CNT_H
+@ +10 (h) TM0 frozen by that immediate DMA's write.  (+10 - +8) is the DMA's
+@   request-to-write latency, which separates "when was it granted" from
+@   "when did it write"
+@ +12 (h) the same as +0 for a V-blank DMA0, line 159 anchor
+@ +14 (h) the same as +2 for DISPSTAT bit 0
+@ +16 (h) cycles between two VCOUNT changes on TM2 (~1232: the anchor and
+@   the clocks are sane if this reads a scanline)
+@ +18/+20 (h,h) +0/+2 repeated with a line-50 anchor (line invariance)
+@ +22/+24 (h,h) +0/+2 with the gamepak prefetch buffer ENABLED
+@ +26/+28 (h,h) +0/+2 with WS0 first-access at its slowest (8 waits).  The
+@   stub is in IWRAM either way, so only the DMA's own ROM-free path and the
+@   arming store change: if the grant still waits on a CPU bus cycle these
+@   move, if it comes off the PPU they track +0
+@ +30 (b) max-min of the answer over 8 more line-100 trials (255 = more)
+@ +31 (b) marker 50
+.equ HPZERO,   0x03000600          @ IWRAM halfword of zero: the DMA source
+.equ V9STUB,   0x03000700          @ IWRAM copy of hp_stub / hp_imm
+.equ TM0CNTH,  0x04000102
+
+@ ── the IWRAM core.  No literal pools: everything it needs is in a
+@ register, because a pc-relative load would still point into ROM after the
+@ copy.  r0 = line, r1 = DMA control word, r2 = DISPSTAT flag mask,
+@ r4 = IOBASE, r5 = 0x00800000 (timer start), r9 = DMA0, r10 = TM0BASE,
+@ r11 = TM2BASE.  Returns r7 = TM0 frozen (0xFFFF if the DMA never fired),
+@ r6 = TM2 at the flag, r8 = TM2 at the poll before it.
+hp_stub:
+    mov r3, #0
+    str r3, [r9, #8]               @ disarmed while we park
+    str r3, [r10]
+    str r3, [r11]
+    sub r3, r0, #1
+1:  ldrh r7, [r4, #6]              @ VCOUNT
+    cmp r7, r3
+    bne 1b
+2:  ldrh r7, [r4, #6]
+    cmp r7, r0
+    bne 2b                         @ <- the anchor: the line-r0 boundary
+    str r1, [r9, #8]               @ arm DMA0
+    str r5, [r11]                  @ TM2 first ...
+    str r5, [r10]                  @ ... then TM0, a fixed skew behind
+    mov r12, #0
+3:  ldrh r8, [r11]                 @ TM2 before this look
+    ldrh r3, [r4, #4]              @ DISPSTAT
+    tst r3, r2
+    bne 4f
+    add r12, r12, #1               @ bounded: never spin on hardware
+    cmp r12, #0x8000
+    bcc 3b
+4:  ldrh r6, [r11]                 @ TM2 at the first sighting of the flag
+    mov r12, #0
+5:  ldrh r3, [r10, #2]             @ TM0CNT_H: is the enable bit still set?
+    tst r3, #0x80
+    beq 6f
+    add r12, r12, #1
+    cmp r12, #0x8000
+    bcc 5b
+    mvn r7, #0                     @ the DMA never fired
+    b   7f
+6:  ldrh r7, [r10]                 @ the frozen stamp
+7:  mov r3, #0
+    str r3, [r9, #8]
+    str r3, [r10]
+    str r3, [r11]
+    bx  lr
+
+@ Same registers; no anchor and no flag.  r8 = TM2 one instruction before
+@ the store that arms an immediate DMA, r7 = TM0 frozen by its write.
+hp_imm:
+    mov r3, #0
+    str r3, [r9, #8]
+    str r3, [r10]
+    str r3, [r11]
+    str r5, [r11]
+    str r5, [r10]
+    ldrh r8, [r11]
+    str r1, [r9, #8]
+    mov r12, #0
+1:  ldrh r3, [r10, #2]
+    tst r3, #0x80
+    beq 2f
+    add r12, r12, #1
+    cmp r12, #0x8000
+    bcc 1b
+    mvn r7, #0
+    b   3f
+2:  ldrh r7, [r10]
+3:  mov r3, #0
+    str r3, [r9, #8]
+    str r3, [r10]
+    str r3, [r11]
+    bx  lr
+hp_stub_end:
+
+@ one anchored trial -> r7/r6/r8, slot pointer rebuilt afterwards in r1
+.macro hp_trial line, ctl, flagbit
+    mov r0, #\line
+    ldr r1, =\ctl
+    mov r2, #\flagbit
+    ldr r5, =0x00800000            @ reload 0, enable, prescaler 1
+    ldr r12, =V9STUB
+    mov lr, pc
+    bx  r12
+.endm
+
+probe_hdmaphase:
+    push {r4-r11, lr}
+    ldr r0, =SLOTS + 50*SLOTSZ     @ our own slot (EWRAM boots as noise).
+    mov r1, #0                     @ Cleared here rather than by widening
+    mov r2, #(SLOTSZ / 4)          @ probe_tail3's loop, which would shift
+    bl  fill_words                 @ the phase TIMPHASE/IWCYCLE/IRQDECOMP read
+    ldr r0, =hp_stub               @ the timed loops run from IWRAM
+    ldr r1, =V9STUB
+    mov r2, #(hp_stub_end - hp_stub) / 4
+    bl  v8_copy
+    mov r4, #IOBASE
+    ldr r9, =0x040000B0            @ DMA0
+    ldr r10, =TM0BASE
+    ldr r11, =TM2BASE
+    ldr r0, =IEADDR
+    mov r1, #0
+    strh r1, [r0, #8]              @ IME off: no interrupt may perturb a stamp
+    ldr r0, =HPZERO                @ the halfword the DMA moves
+    strh r1, [r0]
+    str r0, [r9]                   @ DMA0 SAD (DMA0 cannot source ROM)
+    ldr r0, =TM0CNTH
+    str r0, [r9, #4]               @ DMA0 DAD = TM0CNT_H
+    ldr r0, =0x04000204            @ WAITCNT, put back at the end
+    ldrh r0, [r0]
+    push {r0}
+
+    hp_trial 100, 0xA1400001, 2    @ enable, hblank, 16-bit, src/dst fixed, 1
+    ldr r1, =SLOTS + 50*SLOTSZ
+    strh r7, [r1, #0]
+    strh r6, [r1, #2]
+    strh r8, [r1, #4]
+
+    @ the two clocks' start skew, measured by the same start sequence
+    ldr r5, =0x00800000
+    str r5, [r11]
+    str r5, [r10]
+    ldrh r2, [r11]
+    ldrh r0, [r10]
+    sub r2, r2, r0
+    strh r2, [r1, #6]
+    mov r0, #0
+    str r0, [r10]
+    str r0, [r11]
+
+    @ the same DMA started immediately: its request-to-write latency
+    ldr r1, =0x81400001            @ enable, immediate, 16-bit, fixed, 1
+    ldr r5, =0x00800000
+    ldr r12, =V9STUB + (hp_imm - hp_stub)
+    mov lr, pc
+    bx  r12
+    ldr r1, =SLOTS + 50*SLOTSZ
+    strh r8, [r1, #8]
+    strh r7, [r1, #10]
+
+    hp_trial 159, 0x91400001, 1    @ enable, vblank, 16-bit, fixed, 1
+    ldr r1, =SLOTS + 50*SLOTSZ
+    strh r7, [r1, #12]
+    strh r6, [r1, #14]
+
+    @ two VCOUNT changes on TM2: the anchor's own sanity check
+1:  ldrh r0, [r4, #6]
+    cmp r0, #99
+    bne 1b
+2:  ldrh r0, [r4, #6]
+    cmp r0, #100
+    bne 2b
+    ldr r5, =0x00800000
+    str r5, [r11]
+3:  ldrh r0, [r4, #6]
+    cmp r0, #101
+    bne 3b
+    ldrh r0, [r11]
+    ldr r1, =SLOTS + 50*SLOTSZ
+    strh r0, [r1, #16]
+    mov r0, #0
+    str r0, [r11]
+
+    hp_trial 50, 0xA1400001, 2     @ line invariance
+    ldr r1, =SLOTS + 50*SLOTSZ
+    strh r7, [r1, #18]
+    strh r6, [r1, #20]
+
+    ldr r2, =0x04000204
+    ldr r0, [sp]                   @ WAITCNT as we found it ...
+    orr r0, r0, #0x4000            @ ... plus the gamepak prefetch buffer
+    strh r0, [r2]
+    hp_trial 100, 0xA1400001, 2
+    ldr r1, =SLOTS + 50*SLOTSZ
+    strh r7, [r1, #22]
+    strh r6, [r1, #24]
+
+    ldr r2, =0x04000204
+    mov r0, #0x0C                  @ WS0 first access = 8 waits (the slowest)
+    strh r0, [r2]
+    hp_trial 100, 0xA1400001, 2
+    ldr r1, =SLOTS + 50*SLOTSZ
+    strh r7, [r1, #26]
+    strh r6, [r1, #28]
+    ldr r2, =0x04000204
+    pop {r0}
+    strh r0, [r2]                  @ WAITCNT back as we found it
+
+    @ eight more line-100 trials: how repeatable is the answer itself?
+    ldrsh r3, [r1, #6]             @ the skew, signed
+    ldr r0, =0x7FFF                @ min
+    mvn r1, r0                     @ max = 0xFFFF8000
+    mov r2, #8                     @ n
+4:  push {r0-r3}
+    hp_trial 100, 0xA1400001, 2
+    pop {r0-r3}
+    add r7, r7, r3                 @ the DMA stamp on the CPU's clock
+    sub r7, r7, r6                 @ ... less the flag stamp = the answer
+    cmp r7, r0
+    movlt r0, r7
+    cmp r7, r1
+    movgt r1, r7
+    subs r2, r2, #1
+    bne 4b
+    sub r0, r1, r0                 @ max - min
+    cmp r0, #255
+    movgt r0, #255
+    ldr r1, =SLOTS + 50*SLOTSZ
+    strb r0, [r1, #30]
+    mov r0, #50
+    strb r0, [r1, #31]
+    pop {r4-r11, pc}
+    .ltorg
+
 probe_undmode:
     push {r4-r11, lr}
     ldr r8, =SLOTS + 49*SLOTSZ

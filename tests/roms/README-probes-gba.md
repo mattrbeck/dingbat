@@ -1049,3 +1049,124 @@ system bank came back untouched, `+29 = 01` says the page walked out on
 its own, `+30 = AA` that it finished. That is `mode_bank`'s `else: 0`
 stated as a measurement; any other constant in `+0`, `+8` or `+16` on
 hardware names the bank the pattern really selects.
+
+---
+
+# GBA probe page v9 — when is an H-blank DMA granted the bus?
+
+One new `gbaedge.gba` page, **50 HDMAPHASE**, hex. It settles a single
+question that nothing else in this ROM or the mGBA suite separates.
+
+A DMA armed for H-blank has to be granted the bus at *some* instant in the
+scanline. dingbat grants it on the end-of-draw edge, cycle 960 of 1232.
+The alternative is that the DMA start signal is the same latched DISPSTAT
+condition that raises the H-blank interrupt — cycle 960 + 46 (the flag)
++ 6 (the IRQ synchroniser) = 1012 — so the DMA rides the flag rather than
+the edge. The two differ by about 52 cycles, and every H-blank DMA in
+every game lands at a different point in the instruction stream it
+interrupts depending on which is right.
+
+The mGBA suite's Misc "DMA Prefetch Break" row is sensitive to exactly
+this: it exits on the one iteration of a 36-cycle loop where an H-blank
+DMA's word is still the last thing on the bus when an unmapped read
+happens. dingbat reads `0x100026D4` against hardware's `0x10002A94`;
+moving the grant from 960 to 1012 closes that row and moves nothing else
+in the 1219-row runner. That is a one-parameter fit to a single row, which
+is why this page exists.
+
+**Page 46 DMATIME does not already answer it.** Its `+24` — cycles from
+the polled rise of the H-blank flag to the DMA's word appearing in memory
+— reads `0025` (37) on both the AGS and dingbat. Both ends of that
+measurement are ROM-resident polls tens of cycles wide, so it reports ~37
+whether the DMA fired before the flag or after it. The agreement is
+granularity, not evidence.
+
+## How this page measures it
+
+Two timers, started back to back and never restarted inside a trial.
+
+**TM0 belongs to the DMA.** The DMA under test copies one halfword of
+*zero* into `TM0CNT_H`. That clears the timer's own enable bit, so TM0
+freezes on the cycle of the DMA's write and `TM0CNT_L` reads that stamp
+back afterwards. No polling and no granularity — the DMA timestamps
+itself.
+
+**TM2 belongs to the CPU**, which polls DISPSTAT and reads `TM2CNT_L` on
+the way past. Reading a timer does not disturb it, so the flag is
+bracketed on a clock the DMA cannot stop.
+
+Every timed loop runs from IWRAM (`hp_stub`, copied to `0x03000700`, with
+no literal pools — a pc-relative load would still point into ROM after the
+copy). That puts the VCOUNT anchor within a few cycles of the line
+boundary and makes the flag bracket ~10 cycles instead of the ~46 a
+ROM-resident poll gives.
+
+**The answer is `(+0 + +6) - +2`, signed, in cycles:**
+
+* **negative** — the DMA's write landed before the CPU could see the
+  H-blank flag rise. The DMA is granted on the cycle-960 edge and
+  dingbat's model stands.
+* **positive** — the flag rose first and the DMA followed. The DMA rides
+  the latched flag; subtract `+10 - +8` (the DMA's own request-to-write
+  latency, measured on the same page) to get the grant instant itself.
+
+`+4` is the poll before `+2`, so the flag's rise is bracketed to
+`[+4, +2]` and the answer inherits that width. `+30` is how far the answer
+moved over eight more trials.
+
+## Slot
+
+```
++0  (h) TM0 frozen by an H-blank DMA0's write, line 100 anchor
++2  (h) TM2 at the first poll that saw DISPSTAT bit 1 set
++4  (h) TM2 at the poll iteration before that one
++6  (h) TM2 - TM0 read back to back, no DMA armed: the start skew
++8  (h) TM2 right before the store that enables an IMMEDIATE DMA0
++10 (h) TM0 frozen by that immediate DMA's write
++12 (h) +0 for a V-blank DMA0, line 159 anchor
++14 (h) +2 for DISPSTAT bit 0
++16 (h) cycles between two VCOUNT changes (~1232; ROM-polled, so +/- one
+        poll period — a sanity check on the clock, not a measurement)
++18 (h) +0 with a line-50 anchor      +20 (h) +2 with a line-50 anchor
++22 (h) +0 with the prefetch buffer on   +24 (h) +2 likewise
++26 (h) +0 with WS0 first access at 8 waits   +28 (h) +2 likewise
++30 (b) max-min of the answer over 8 more line-100 trials (255 = more)
++31 (b) marker 50
+```
+
+`+18`/`+20` say whether the grant is the same on every line. `+22`-`+28`
+vary what the CPU's bus is doing while the stub stays in IWRAM: if the
+grant waits on whatever CPU bus cycle is in flight, they move; if it comes
+off the PPU regardless of the CPU, they track `+0`.
+
+The absolute stamps ride the cycle at which the boot probes reach this
+page, so they may shift between consoles or builds even when the model is
+identical. **Read the differences, not the absolute numbers**; the page
+CRC is not a gate.
+
+**dingbat predicts** page CRC **61F4**:
+
+```
+B6 03 ED 03  E3 03 FF FF  02 00 0A 00  C3 04 D7 04
+E5 04 B9 03  ED 03 B6 03  ED 03 B7 03  ED 03 06 32
+```
+
+The answer there is `(0x03B6 - 1) - 0x03ED` = **-56**, bracketed by `+4`
+to **[-56, -46]** — firmly negative, the cycle-960 edge, which is the
+hypothesis on trial. The DMA's own request-to-write latency is
+`+10 - +8` = **8** cycles, the flag bracket is **10** cycles wide, the
+answer moved **6** cycles over eight trials, and `+22`-`+28` track `+0` to
+within a cycle, so in dingbat the grant is independent of the CPU's bus
+state. `+16` reads `0x04E5` = 1253, one ROM poll period over a 1232-cycle
+line.
+
+`ALL` for this build is **CAD1** (`-auto`, HLE BIOS); pages 0-49 are
+byte-identical to the v8 build under the same emulator, verified by
+capturing both and diffing every per-page CRC. The page's own absolute
+stamps drifted 3 cycles between two builds of this ROM, which is the
+boot-phase sensitivity above — the answer did not move.
+
+If the DMA instead rides the latched flag, the write lands ~8 cycles after
+a grant at 1012 while the flag rose at 1006, so hardware should read
+**about +4 to +14** — the other side of zero, ~60 cycles away from what
+dingbat says. There is no reading in between that both models can produce.
