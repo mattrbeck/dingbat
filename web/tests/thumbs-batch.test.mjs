@@ -296,6 +296,28 @@ test("Drive-only games are fetched, pictured, and never written to the device", 
   eq(app.idb.get("recent").map((r) => r.name), ["A.gba", "D.gba"], "order untouched");
 });
 
+// On a fresh page nothing has set `paused`, so the page's own frame loop
+// would step each booted game alongside the batch and schedule its audio -
+// and go on playing the last one, unseen, after the run. The batch freezes
+// the loop out of the core instead of muting: nothing the player set is
+// touched, so no way the run can end leaves them silenced.
+test("a batch keeps the page's loop out of the core, and mutes nothing", async () => {
+  const app = await loadApp();
+  stubModule(app);
+  seedLibrary(app, ["A.gba", "B.gb"]);
+  assert.equal(app.runIn("paused"), false, "a fresh page starts unpaused");
+  app.runIn(`globalThis.__unpausedTicks = 0;
+    const tick = Module._loop_tick;
+    Module._loop_tick = () => { if (!paused) __unpausedTicks++; tick(); };`);
+  const audioBefore = app.runIn("JSON.stringify([volume, muted])");
+
+  assert.equal(await app.api.runThumbnailBatch(), 2);
+  assert.equal(app.runIn("__unpausedTicks"), 0, "every frame stepped with the loop frozen");
+  assert.equal(app.runIn("paused"), true, "and the last game stays frozen after");
+  assert.equal(app.runIn("JSON.stringify([volume, muted])"), audioBefore);
+  assert.equal(app.idb.get("audio"), undefined, "no audio setting was written");
+});
+
 test("Stop ends the run after the game in hand", async () => {
   const app = await loadApp();
   stubModule(app);

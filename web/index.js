@@ -9883,6 +9883,14 @@ const runThumbnailBatch = async ({ includeDrive = false } = {}) => {
   let cands = await thumbsCandidates(includeDrive);
   let run = { cancelled: false, done: 0 };
   thumbsRun = run;
+  // Freeze the main loop out of the core, as unloadGame does. On a fresh
+  // page nothing has ever set `paused`, so the loop would step each game
+  // the batch boots alongside it and play its audio - and keep playing the
+  // last one, unseen, after the batch ends. The batch steps the core itself
+  // and discards what it makes. No volume or mute is touched, so a reload,
+  // a crash or a closed box can't leave the player silenced; the next
+  // loadRom unpauses as it always does.
+  paused = true;
   thumbsOffer.hidden = true;
   thumbsProgress.hidden = false;
   thumbsModal.classList.add("open");
