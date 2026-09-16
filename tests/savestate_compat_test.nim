@@ -81,7 +81,9 @@ static:
   doAssert (ord(stEEPROM), ord(stSRAM), ord(stFLASH),
             ord(stFLASH512), ord(stFLASH1M)) == (0, 1, 2, 3, 4),
     "StorageType ordinals are save-state format (flash_type, storage tags)"
-  doAssert ord(high(StorageType)) == 4,
+  # stNone (chipless cart) is never a flash_type; its storage tag is 3
+  doAssert ord(stNone) == 5
+  doAssert ord(high(StorageType)) == 5,
     "a StorageType was appended without pinning it here"
 
   doAssert (ord(fsReady), ord(fsCmd1), ord(fsCmd2), ord(fsIdentification),

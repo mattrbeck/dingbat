@@ -44,7 +44,8 @@ type
 
 
   StorageType* = enum
-    stEEPROM, stSRAM, stFLASH, stFLASH512, stFLASH1M
+    stEEPROM, stSRAM, stFLASH, stFLASH512, stFLASH1M,
+    stNone   # no backup chip on the cart (storage.nim find_storage_type)
 
   StorageObj* = object of RootObj
     memory*:    seq[byte]
@@ -53,6 +54,8 @@ type
   Storage* = ref StorageObj
 
   SRAM* = ref object of StorageObj
+
+  NoBackup* = ref object of StorageObj   # empty memory, no .sav
 
   FlashStateFlag* = enum
     fsReady, fsCmd1, fsCmd2, fsIdentification, fsPrepareWrite, fsPrepareErase, fsSetBank
@@ -1050,6 +1053,7 @@ include storage
 include storage/sram
 include storage/flash
 include storage/eeprom
+include storage/none
 include rtc
 include gpio
 # Interrupt controller + keypad input
@@ -1145,6 +1149,9 @@ proc new_storage*(gba: GBA; rom_path: string): Storage =
     of stEEPROM:                        new_eeprom(gba)
     of stSRAM:                          new_sram()
     of stFLASH, stFLASH512, stFLASH1M:  new_flash(t)
+    of stNone:                          NoBackup()
+  if t == stNone:
+    return   # no chip: no battery file is read or written
   result.save_path = save_path
   if fileExists(save_path):
     let f = open(save_path, fmRead)

@@ -26,6 +26,10 @@ def rom_info(rom_path):
     with open(rom_path, 'rb') as f:
         data = f.read()
     chips = [(name, sizes) for tag, name, sizes in CHIP_IDS if tag in data]
+    # every non-EEPROM library named at once: a chipless cart (see dingbat's
+    # storage.nim find_storage_type)
+    if b'SRAM_V' in data and b'FLASH512_V' in data and b'FLASH1M_V' in data:
+        chips = [('none', ())]
     # FLASH_V is a substring match hazard only for FLASH512_V/FLASH1M_V, which
     # are listed first; keep the first hit
     chip, sizes = chips[0] if chips else (None, ())

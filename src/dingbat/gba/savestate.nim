@@ -539,6 +539,7 @@ proc load_apu_state(apu: APU; r: var Reader) =
 proc storage_kind_tag(st: Storage): uint8 =
   if st of EEPROM: 2'u8
   elif st of Flash: 1'u8
+  elif st of NoBackup: 3'u8
   else: 0'u8
 
 proc save_storage_state(st: Storage; w: var Writer) =
@@ -582,7 +583,7 @@ proc load_storage_state(st: Storage; r: var Reader) =
   if st of Flash:
     let fl = Flash(st)
     let ft = r.read_u8()
-    if int(ft) > int(high(StorageType)):
+    if int(ft) > ord(stFLASH1M):
       raise state_error("invalid flash type in save state")
     fl.flash_type = StorageType(ft)
     let fst = r.read_u8()

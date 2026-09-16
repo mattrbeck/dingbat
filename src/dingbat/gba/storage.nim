@@ -7,6 +7,7 @@ proc `$`*(t: StorageType): string =
   of stFLASH:    "FLASH"
   of stFLASH512: "FLASH512"
   of stFLASH1M:  "FLASH1M"
+  of stNone:     "none"
 
 proc match_str(t: StorageType): string =
   case t
@@ -15,6 +16,7 @@ proc match_str(t: StorageType): string =
   of stFLASH:   "FLASH_V"
   of stFLASH512: "FLASH512_V"
   of stFLASH1M: "FLASH1M_V"
+  of stNone:    ""
 
 proc storage_bytes(t: StorageType): int =
   case t
@@ -23,12 +25,25 @@ proc storage_bytes(t: StorageType): int =
   of stFLASH:    0x10000
   of stFLASH512: 0x10000
   of stFLASH1M:  0x20000
+  of stNone:     0
 
 proc find_storage_type(rom_path: string): StorageType =
   ## Scan the ROM file for backup type identifiers.
   let content = readFile(rom_path)
+  # A cart that names every non-EEPROM library carries no chip at all: the
+  # game probes SRAM (write/verify) and two flash ID routines at boot and
+  # disables its own menu if any of them answers -- anti-copier protection on
+  # a password-only game whose retail board has no backup memory (TCRF, "Top
+  # Gun: Combat Zones (Game Boy Advance)"). Measured by tracing its check
+  # value: 0x33 (menu works) with no chip or EEPROM, 0x22 with SRAM, 0x1122 /
+  # 0x1133 with any flash ID it knows. Of the 7,906 ROMs in the compatibility
+  # library only that game (and its patched dumps) has this combination;
+  # pairs of these strings (Rockman EXE 4.5, One Piece) are real chips.
+  if content.contains("SRAM_V") and content.contains("FLASH512_V") and
+     content.contains("FLASH1M_V"):
+    return stNone
   for t in StorageType:
-    if content.contains(match_str(t)):
+    if t != stNone and content.contains(match_str(t)):
       return t
   echo "Backup type could not be identified."
   stSRAM  # fallback
