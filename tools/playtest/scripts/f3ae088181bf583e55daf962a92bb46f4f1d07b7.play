@@ -1,0 +1,71 @@
+@title Pokemon Emerald Version (USA, Europe)
+@file Pokemon - Emerald Version (U).gba
+@game BPEE
+@chip FLASH1M + RTC
+
+# New game as a boy named AA, straight to the moving truck, save there.
+
+[new]
+wait 900
+press START
+until text "PRESS START" timeout=1200 every=10
+checkpoint title window=30
+press START
+until text "NEW GAME" timeout=600 every=10
+until stable 20 timeout=300
+checkpoint main_menu
+press A
+until text "waiting" timeout=1200 every=10
+checkpoint birch
+mash A until text "GIRL" timeout=3000 every=20
+until stable 10 timeout=200
+checkpoint gender
+press A
+mash A until text "name" timeout=600 every=20
+wait 90
+press A
+until text "BACK" timeout=600 every=10
+wait 60
+checkpoint naming
+# type "AA", jump to OK, confirm
+press A after=20
+press A after=20
+press START after=20
+press A after=60
+until text "YES" timeout=300 every=5
+press A after=10
+mash A until blank timeout=3000 every=20
+until notblank timeout=1200 every=10
+# the truck is moving: no menu until it stops and the door opens
+wait 800
+press RIGHT hold=40 after=60
+checkpoint truck
+press START
+until text "SAVE" timeout=120 every=5
+wait 10
+mash DOWN until selected "SAVE" timeout=200 every=10
+checkpoint start_menu
+press A
+until text "YES" timeout=300 every=5
+wait 10
+checkpoint save_prompt window=10
+press A
+until text "saved the game" timeout=900 every=5
+checkpoint saved window=0
+
+[load]
+wait 900
+press START
+until text "PRESS START" timeout=1200 every=10
+press START
+until text "CONTINUE" timeout=600 every=10
+until stable 20 timeout=300
+checkpoint continue_menu
+press A
+until notblank timeout=600 every=10
+until stable 30 timeout=900
+checkpoint resumed
+press START
+until text "SAVE" timeout=120 every=5
+wait 10
+checkpoint resumed_menu
