@@ -68,24 +68,33 @@ develop the `[load]` section.
 
 ## Writing a script: recording a human
 
-The desktop app logs the keypad per emulated frame when `DINGBAT_INPUT_LOG`
-is set (appending; each ROM load starts a session, quitting ends it; a state
-load or rewind marks the rest unusable):
+Build the desktop app from this tree (`nimble build -d:release`), then:
 
 ```
-DINGBAT_INPUT_LOG=~/rec/game-new.log ./dingbat game.gba     # play to an in-game save, quit
-DINGBAT_INPUT_LOG=~/rec/game-load.log ./dingbat game.gba    # boot again, continue, quit
-playtest.py convert ~/rec/game-new.log --rom game.gba --section new > part1
-playtest.py convert ~/rec/game-load.log --rom game.gba --section load --save <the .sav> > part2
+playtest.py record <rom or sha1> --section new     # play to an in-game save, quit the app
+playtest.py record <rom or sha1> --section load    # boots with that save: continue into the game, quit
 ```
 
-`convert` replays the session headless in dingbat (same BIOS mode), OCR-samples
-the screen, and writes steps: taps become `press`, dialog mashing becomes
-`mash KEY until text "<where it led>"`, and gaps become `until text "<line
-that appeared>"` plus the player's reaction time, so the script tolerates other
-emulators reaching each screen on a different frame. Check the result with
-`playtest.py run game.gba --script FILE --no-cross`, add `@title`/`@file`, save
-it as `scripts/<sha1>.play`.
+Each recording gets its own directory, `out/recordings/<sha1>/<section>-<time>/`
+(ROM symlink, the app's `game.sav`, `input.log`, `<section>.play`), so nothing
+touches your library or normal saves; `--section load` starts from the latest
+`new` recording's save. While playing: **F9** marks a screen worth checking
+(it becomes a checkpoint); don't load states or rewind (the log marks the rest
+unusable); fast-forward is fine. The app's RTC is frozen at the harness epoch
+while recording.
+
+Underneath, `DINGBAT_INPUT_LOG=<file>` makes the desktop app log keypad changes
+per emulated frame, a framebuffer hash every 60 frames, marks, and the end
+frame. `playtest.py convert LOG --rom ROM --section S [--save SEED]` (run by
+`record` when the app quits) replays the log headless in dingbat with the same
+BIOS mode and **checks every hash**: if the replay diverges from what you saw,
+the script stops there and says at which frame. It OCR-samples the screen and
+writes steps: taps become `press`, dialog mashing becomes `mash KEY until text
+"<where it led>"`, and gaps become `until text "<line that appeared>"` plus
+your reaction time, so the script tolerates other emulators reaching each
+screen on a different frame. Check the result with `playtest.py run ROM
+--script FILE --no-cross`, add `@title`/`@file`, save it as
+`scripts/<sha1>.play`.
 
 ## Game list
 

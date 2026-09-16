@@ -625,7 +625,13 @@ proc on_cheats_changed()
 # DINGBAT_INPUT_LOG=<path> records a GBA session's keypad as "<frame> <mask>"
 # lines (mask in KEYINPUT bit order, set before that frame runs) for
 # tools/playtest, which replays it headless and turns it into a script. Loading
-# a state or rewinding breaks the frame timeline; the log says so.
+# a state or rewinding breaks the frame timeline; the log says so. Every 60
+# frames a "hash" line carries the framebuffer hash the playtest drivers
+# compute, so a replay can prove it is still in step; F9 writes a "mark" (the
+# player saying "check this screen"). The RTC is frozen at the playtest
+# harness's epoch while recording, so a clock-reading game replays the same.
+
+const INPUT_LOG_RTC_EPOCH = 1136073600'i64   # tools/playtest DEFAULT_RTC
 
 var input_log: system.File
 var input_log_open = false
@@ -644,13 +650,23 @@ proc input_log_start(rom_path: string) =
   input_log.writeLine "session " & $getTime().toUnix
   input_log.writeLine "rom " & rom_path
   input_log.writeLine &"bios run_bios={app.cfg.run_bios} use_hle={app.cfg.use_hle} hle_after_bios={app.cfg.hle_after_bios}"
+  app.gba_emu.enable_deterministic_rtc(INPUT_LOG_RTC_EPOCH)
+  input_log.writeLine &"rtc {INPUT_LOG_RTC_EPOCH}"
   input_log.flushFile()
   input_log_frame = 0
   input_log_mask = 0
   echo "input log: recording to ", path
 
+proc input_log_fb_hash(): uint64 =
+  ## FNV-1a over the 15-bit pixels, as tools/playtest/drivers hash them
+  result = 0xcbf29ce484222325'u64
+  for p in app.gba_emu.ppu.framebuffer:
+    result = (result xor uint64(p and 0x7FFF)) * 0x100000001b3'u64
+
 proc input_log_frame_start() =
   if not input_log_open: return
+  if input_log_frame mod 60 == 0 and input_log_frame > 0:
+    input_log.writeLine &"hash {input_log_frame} {input_log_fb_hash().toHex}"
   let mask = int(not toU16(app.gba_emu.keypad.keyinput) and 0x03FF'u16)
   if mask != input_log_mask:
     input_log.writeLine &"{input_log_frame} {mask}"
@@ -662,6 +678,12 @@ proc input_log_event(what: string) =
   if not input_log_open: return
   input_log.writeLine &"desync {input_log_frame} {what}"
   input_log.flushFile()
+
+proc input_log_mark() =
+  if not input_log_open: return
+  input_log.writeLine &"mark {input_log_frame}"
+  input_log.flushFile()
+  echo "input log: mark at frame ", input_log_frame
 
 proc input_log_close() =
   if not input_log_open: return
@@ -1643,6 +1665,9 @@ proc handle_input() =
           of K_q:
             app.running = false
           else: discard
+      elif sym == K_F9:
+        # playtest recording: mark this screen as a checkpoint
+        if pressed: input_log_mark()
       elif sym == K_F12:
         # Screenshot to config_dir/screenshots (fires on press, not release)
         if pressed: save_screenshot()

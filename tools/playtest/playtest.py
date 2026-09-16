@@ -53,6 +53,13 @@ def main():
     p = sub.add_parser('sha1')
     p.add_argument('rom')
 
+    p = sub.add_parser('record', help='play a game in the desktop app with input recording, then convert')
+    p.add_argument('rom', help='ROM path, or the sha1 of a ROM in the library')
+    p.add_argument('--section', default='new', choices=['new', 'load'])
+    p.add_argument('--save', help='[load]: battery file to start from (default: the latest [new] recording\'s)')
+    p.add_argument('--app', default=os.environ.get('DINGBAT_APP', os.path.join(HERE, '..', '..', 'dingbat')),
+                   help='desktop dingbat binary built from this tree (default: repo-root ./dingbat)')
+
     p = sub.add_parser('convert', help='turn a DINGBAT_INPUT_LOG recording into a script section')
     p.add_argument('log')
     p.add_argument('--rom', required=True)
@@ -84,6 +91,8 @@ def main():
                 print(render_reply(line, r))
     elif args.cmd == 'sha1':
         print(sha1_of(args.rom))
+    elif args.cmd == 'record':
+        sys.exit(record(args))
     elif args.cmd == 'convert':
         import convert
         print(convert.convert(args.log, args.rom, args.section, os.path.join(args.out, 'convert'),
@@ -95,6 +104,53 @@ def main():
         sys.exit(pipeline.run(args))
     elif args.cmd == 'suite':
         sys.exit(suite(args))
+
+
+def record(args):
+    """Isolated recording directory out/recordings/<sha1>/<section>-<time>/:
+    game.gba (symlink), game.sav (the app's battery file), input.log, and
+    <section>.play once the app quits."""
+    import datetime
+    import glob
+    import shutil
+    import subprocess
+    import convert
+    rom = args.rom
+    if not os.path.exists(rom) and re.fullmatch(r'[0-9a-f]{40}', rom):
+        rom = resolve(args.out, rom)
+    rom = os.path.abspath(rom)
+    sha1 = sha1_of(rom)
+    app = os.path.abspath(args.app)
+    if not os.access(app, os.X_OK):
+        sys.exit(f'no desktop build at {app}: run `nimble build -d:release` in this tree '
+                 f'(the input recorder is new), or pass --app')
+    base = os.path.join(args.out, 'recordings', sha1)
+    d = os.path.join(base, f"{args.section}-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}")
+    os.makedirs(d)
+    os.symlink(rom, os.path.join(d, 'game.gba'))
+    save = args.save
+    if args.section == 'load' and not save:
+        news = sorted(glob.glob(os.path.join(base, 'new-*', 'game.sav')))
+        if not news:
+            sys.exit('no [new] recording with a save yet; record --section new first or pass --save')
+        save = news[-1]
+    if save:
+        shutil.copyfile(save, os.path.join(d, 'game.sav'))
+        shutil.copyfile(save, os.path.join(d, 'seed.sav'))
+    log = os.path.join(d, 'input.log')
+    print(f'recording {os.path.basename(rom)} [{args.section}] into {d}')
+    print('  play normally; F9 marks a screen worth checking; do not load states or rewind;')
+    print('  for [new], quit the app once the game has confirmed the save.')
+    subprocess.run([app, os.path.join(d, 'game.gba')], env=dict(os.environ, DINGBAT_INPUT_LOG=log))
+    if not os.path.exists(log):
+        sys.exit('the app wrote no input log (is it a build with the recorder?)')
+    text = convert.convert(log, rom, args.section, os.path.join(d, 'convert'),
+                           save=os.path.join(d, 'seed.sav') if save else None, rtc=DEFAULT_RTC)
+    out = os.path.join(d, f'{args.section}.play')
+    open(out, 'w').write(text)
+    print(text)
+    print(f'script section written to {out}')
+    return 0
 
 
 def resolve(outroot, sha1):

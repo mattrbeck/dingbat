@@ -41,10 +41,19 @@ def parse_log(path, session=-1):
     for raw in open(path):
         line = raw.strip()
         if line.startswith('session'):
-            cur = {'rom': None, 'bios': {}, 'events': [], 'desync': None, 'end': None}
+            cur = {'rom': None, 'bios': {}, 'events': [], 'desync': None, 'end': None,
+                   'rtc': None, 'hashes': {}, 'marks': []}
             sessions.append(cur)
         elif cur is None or not line or line.startswith('#'):
             continue
+        elif line.startswith('rtc '):
+            cur['rtc'] = int(line.split()[1])
+        elif line.startswith('hash '):
+            _, frame, h = line.split()
+            cur['hashes'][int(frame)] = h.upper().rjust(16, '0')
+        elif line.startswith('mark '):
+            if cur['desync'] is None:
+                cur['marks'].append(int(line.split()[1]))
         elif line.startswith('rom '):
             cur['rom'] = line[4:]
         elif line.startswith('bios '):
@@ -118,6 +127,10 @@ def readable(lines):
             if l.get('conf', 0) >= 0.9 and len(re.sub(r'[^A-Za-z]', '', l['text'])) >= 4}
 
 
+class Desync(Exception):
+    """The headless replay's framebuffer no longer matches the recording."""
+
+
 class Replay:
     """Runs the recording in dingbat, keeping the readable text of every poll."""
 
@@ -131,6 +144,7 @@ class Replay:
         self.reader = screen.ScreenReader()
         self.probe = os.path.join(workdir, 'probe.ppm')
         self.polls = []   # (frame, {norm: text})
+        self.hashes = sess['hashes']
         self.poll()
 
     def poll(self):
@@ -140,8 +154,15 @@ class Replay:
 
     def run_to(self, frame):
         while self.e.frame < frame:
-            self.e.run(min(POLL, frame - self.e.frame))
+            step = min(POLL, frame - self.e.frame)
+            upcoming = [f for f in self.hashes if self.e.frame < f <= self.e.frame + step]
+            if upcoming:
+                step = min(upcoming) - self.e.frame
+            self.e.run(step)
             self.poll()
+            want = self.hashes.get(self.e.frame)
+            if want is not None and self.e.hash().upper() != want:
+                raise Desync(self.e.frame)
 
     def text_at(self, frame):
         best = self.polls[0][1]
@@ -180,36 +201,51 @@ class Replay:
 def convert(log_path, rom, section, workdir, save=None, rtc=None):
     sess = parse_log(log_path)
     acts = actions_of(sess['events'])
+    # F9 marks become checkpoints, placed after any mash run they fall inside
+    for m in sess['marks']:
+        k = 0
+        while k < len(acts) and acts[k]['frame'] < m:
+            k += 1
+        prev = acts[k - 1] if k else None
+        if prev and prev['kind'] == 'mash' and prev['last'] + prev['hold'] >= m:
+            m = prev['last'] + prev['hold']
+        acts.insert(k, {'kind': 'mark', 'frame': m})
+    if sess['rtc'] is not None:
+        rtc = sess['rtc']
     rp = Replay(sess, rom, workdir, save, rtc)
     e = rp.e
-    # pass 1: replay, sampling the screen
-    ends = []
-    for a in acts:
-        rp.run_to(a['frame'])
-        if a['kind'] == 'hold':
-            e.set_keys(emulib.key_mask(a['keys'].split('+')) if a['keys'] else 0)
-            end = a['frame']
-        else:
-            taps = [a['frame']] if a['kind'] == 'tap' else None
-            if a['kind'] == 'mash':
-                taps = [ev for ev in sess['events'] if a['frame'] <= ev[0] <= a['last'] and ev[1]]
-                taps = [t[0] for t in taps]
-            for t in taps:
-                rp.run_to(t)
-                e.set_keys(emulib.key_mask(a['keys'].split('+')))
-                e.run(a['hold'])
-                e.set_keys(0)
-                rp.poll()
-            end = e.frame
-        ends.append(end)
-    final = sess['end'] if sess['end'] else e.frame + 120
-    rp.run_to(final)
+    # pass 1: replay, sampling the screen and checking the recording's hashes
+    # the recorded keypad changes, replayed exactly (actions only shape the text)
+    ends = [a['frame'] + a['hold'] if a['kind'] == 'tap'
+            else a['last'] + a['hold'] if a['kind'] == 'mash' else a['frame'] for a in acts]
+    desync = None
+    final = sess['end'] if sess['end'] else sess['events'][-1][0] + 120
+    try:
+        for frame, mask in sess['events']:
+            rp.run_to(frame)
+            e.set_keys(mask)
+            rp.poll()
+        rp.run_to(final)
+    except Desync as d:
+        # keep only the actions that finished before the replay diverged
+        desync = d.args[0]
+        keep = [i for i, end in enumerate(ends) if end <= desync]
+        acts = [acts[i] for i in keep]
+        ends = [ends[i] for i in keep]
+        final = desync
 
     # pass 2: steps
     lines = [f"# converted from {os.path.basename(log_path)}: {len(sess['events'])} keypad changes, "
-             f"{len(acts)} actions, replayed in {rp.name}", f'[{section}]']
+             f"{len(acts)} actions, replayed in {rp.name}"
+             + (f", {len(sess['hashes'])} sync hashes checked" if sess['hashes'] else ''), f'[{section}]']
     if sess['desync']:
         lines.append(f"# NOTE: truncated at frame {sess['desync'][0]} ({sess['desync'][1]})")
+    if desync is not None:
+        lines.append(f'# NOTE: the headless replay diverged from the recording at frame {desync}; '
+                     f'steps stop there (check BIOS mode / settings of the recording app)')
+    if not acts:
+        rp.close()
+        return '\n'.join(lines) + '\n'
     prev_end = 0
     last_cp = -10 ** 9
     cp_n = 0
@@ -250,7 +286,11 @@ def convert(log_path, rom, section, workdir, save=None, rtc=None):
         elif a['frame'] > prev_end:
             lines.append(f'wait {a["frame"] - prev_end}')
 
-        if a['kind'] == 'tap':
+        if a['kind'] == 'mark':
+            cp_n += 1
+            lines.append(f'checkpoint {cp_n:02}_mark')
+            last_cp = a['frame']
+        elif a['kind'] == 'tap':
             lines.append(f"press {a['keys']} hold={a['hold']}")
         elif a['kind'] == 'hold':
             lines.append(f"hold {a['keys']}" if a['keys'] else 'release')
