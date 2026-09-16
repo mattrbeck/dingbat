@@ -148,7 +148,10 @@ class Session:
                 ex.emu.state_load(os.path.join(self.dir, f'undo-{ex.emu.name}.state'))
                 ex.emu.frame = before[ex.emu.name]
                 ex.emu.set_keys(0)
-            self.each(undo)
+            bad = {n: r[1] for n, r in self.each(undo).items() if r[0] != 'ok'}
+            if bad:
+                # an emulator that could not roll back is on another timeline now
+                reply['rollback_failed'] = bad
         return reply
 
     def render(self):

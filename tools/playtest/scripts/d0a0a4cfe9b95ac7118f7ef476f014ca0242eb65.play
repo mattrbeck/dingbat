@@ -1,0 +1,27 @@
+@title Advance Wars (USA)
+@file Advance Wars (U) (V1.0) [!].gba
+@game AWRE
+@chip FLASH
+@status wip: reaches Nell's forced Field Training ("Troop Orders" map) but no save yet. Naming the player does NOT persist (a reboot asks for the name again), so the first real write is later: finish the Troop Orders tutorial mission (guided cursor moves, several turns) or reach a map menu with Save. Needs a human recording from here.
+
+# New game: skip the intro, mash START through Nell's welcome to the name
+# keyboard, name the player "A", confirm, then Nell pushes Field Training.
+
+[new]
+wait 1100
+press START
+until text "Nintendo" timeout=600 every=10
+checkpoint title window=0
+mash START until text "enter your" timeout=3000 every=30
+wait 10
+checkpoint naming window=0
+press A after=30
+press A after=30
+press START after=30
+until text "correct" timeout=300 every=5
+wait 10
+checkpoint name_confirm window=0
+press A after=30
+mash A until text "SELECT" timeout=3000 every=40
+wait 60
+checkpoint nell_mode_select window=0

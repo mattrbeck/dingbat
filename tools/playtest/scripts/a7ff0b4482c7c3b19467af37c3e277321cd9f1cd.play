@@ -1,0 +1,40 @@
+@title Sword of Mana (USA)
+@file Sword of Mana (U) [!].gba
+@game AVSE
+@chip FLASH512
+@status wip: reaches the opening narration after New Game (hero, named "A"); A-mashing then runs a long prologue (narration, the Granz castle-town flashback) and nothing is written to flash along the way. The first save needs the prologue played through to the first save point. A human should record: New Game, hero, name, play to the first save point and save, quit after the save message. [load]: title > the file > resume.
+
+# Title (PUSH START) > NEW GAME > hero > name entry: DOWN to the letters,
+# A types "A", START jumps to OK!, A; "Is this okay?" defaults to No, so
+# LEFT then A > "This dream again."
+
+[new]
+wait 600
+press START
+wait 720
+until text "PUSH START" timeout=900 every=10
+checkpoint title
+press START
+until notext "PUSH" timeout=600 every=10
+wait 120
+press A
+until text "Select a" timeout=600 every=10
+wait 60
+checkpoint character_select
+press A after=120
+press A
+until text "your character" timeout=600 every=10
+wait 60
+press A after=60
+press DOWN after=15
+press A after=15
+press A after=15
+press START after=30
+checkpoint name_entry
+press A
+until text "okay" timeout=300 every=5
+wait 30
+press LEFT after=20
+press A
+until text "dream" timeout=900 every=10
+checkpoint prologue

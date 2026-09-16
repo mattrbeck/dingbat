@@ -1,0 +1,76 @@
+@title Pokemon Ruby Version (USA)
+@file Pokemon - Ruby Version (U) (V1.0) [!].gba
+@game AXVE
+@chip FLASH1M + RTC
+
+# New game as a boy named AA, straight to the moving truck, save there.
+# (Same route as the Emerald script; Ruby's start menu highlight defeats the
+# selected-entry heuristic, so SAVE is reached with two DOWN presses.)
+
+[new]
+wait 900
+press START
+until text "PRESS START" timeout=1200 every=10
+checkpoint title window=0
+press START
+until text "NEW GAME" timeout=600 every=10
+until stable 20 timeout=300
+checkpoint main_menu window=0
+press A
+until text "waiting" timeout=1200 every=10
+checkpoint birch
+mash A until text "GIRL" timeout=3000 every=20
+until stable 10 timeout=200
+checkpoint gender
+press A
+mash A until text "name" timeout=600 every=20
+wait 90
+press A
+until text "BACK" timeout=600 every=10
+wait 60
+checkpoint naming
+# type "AA", jump to OK, confirm
+press A after=20
+press A after=20
+press START after=20
+press A after=60
+until text "YES" timeout=300 every=5
+press A after=10
+mash A until blank timeout=3000 every=20
+until notblank timeout=1200 every=10
+# the truck is moving: no menu until it stops and the door opens
+wait 800
+press RIGHT hold=40 after=60
+checkpoint truck
+press START
+until text "SAVE" timeout=120 every=5
+wait 10
+# BAG -> AA -> SAVE
+press DOWN after=10
+press DOWN after=10
+checkpoint start_menu
+press A
+until text "save the game" timeout=300 every=5
+wait 30
+checkpoint save_prompt window=10
+press A
+until text "saved the game" timeout=900 every=5
+checkpoint saved window=0
+
+[load]
+wait 900
+press START
+until text "PRESS START" timeout=1200 every=10
+press START
+until text "CONTINUE" timeout=600 every=10
+until text "PLAYER" timeout=300 every=5
+wait 30
+checkpoint continue_menu window=0
+press A
+until notblank timeout=600 every=10
+until stable 30 timeout=900
+checkpoint resumed
+press START
+until text "SAVE" timeout=120 every=5
+wait 10
+checkpoint resumed_menu

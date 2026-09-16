@@ -18,8 +18,13 @@ Steps (keys: A B SELECT START RIGHT LEFT UP DOWN R L, combined with +):
                                  failing the timeout fails the run
   mash KEYS until COND [timeout=1200] [every=20] [hold=4]
                                  tap KEYS every `every` frames until COND
-  checkpoint NAME [window=30]    screenshot + OCR, plus framebuffer hashes of
-                                 `window` frames either side (slip detection)
+  checkpoint NAME [window=30] [compare=text]
+                                 screenshot + OCR, plus framebuffer hashes of
+                                 `window` frames either side (slip detection);
+                                 compare=text judges the screen by its OCR text
+                                 only, for screens over a constantly animated
+                                 background (menus over title art, a HUD over
+                                 wandering sprites)
 
 Conditions:
   text "STR"      OCR finds STR (case/space-insensitive)
@@ -105,7 +110,13 @@ def parse_step(line):
                 'hold': opts.get('hold', 4)}
     if op == 'checkpoint':
         opts, rest = _opts(args, {'window'})
-        return {'op': 'checkpoint', 'name': rest[0], 'window': opts.get('window', 30)}
+        compare = 'pixels'
+        for t in rest[1:]:
+            if t in ('compare=text', 'compare=pixels'):
+                compare = t.split('=')[1]
+            else:
+                raise ScriptError(f'unknown checkpoint option {t!r}')
+        return {'op': 'checkpoint', 'name': rest[0], 'window': opts.get('window', 30), 'compare': compare}
     raise ScriptError(f'unknown step {op!r}')
 
 
@@ -131,7 +142,8 @@ def format_step(step):
     if op == 'mash':
         return f"mash {'+'.join(step['keys'])} until {cond} timeout={step['timeout']} every={step['every']}"
     if op == 'checkpoint':
-        return f"checkpoint {step['name']} window={step['window']}"
+        return f"checkpoint {step['name']} window={step['window']}" + \
+            (' compare=text' if step.get('compare') == 'text' else '')
     raise ScriptError(op)
 
 

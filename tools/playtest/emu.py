@@ -99,8 +99,11 @@ class Emulator:
             self.held = mask
 
     def run(self, n):
+        # counted here, not taken from the driver: a state load rewinds the
+        # harness's frame count but not the driver's
         if n > 0:
-            self.frame = int(self.cmd(f'run {n}'))
+            self.cmd(f'run {n}')
+            self.frame += n
 
     def runhash(self, n):
         hashes = self.cmd(f'runhash {n}').split()

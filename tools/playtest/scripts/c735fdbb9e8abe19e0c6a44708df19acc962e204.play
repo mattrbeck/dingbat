@@ -1,0 +1,67 @@
+@title Fire Emblem (USA)
+@file Fire Emblem (U) [!].gba
+@game AE7E
+@chip SRAM_F (FRAM)
+
+# New game in the first slot with the default tactician (Mark, January,
+# Male). Confirming the personal information writes the slot; the Prologue
+# title card follows.
+
+[new]
+wait 600
+press START
+until text "START" timeout=600 every=10
+wait 120
+checkpoint title
+press START
+until text "New Game" timeout=600 every=10
+wait 60
+press A
+until text "NO DATA" timeout=300 every=5
+wait 60
+checkpoint slots_empty
+press A
+until text "Personal" timeout=600 every=10
+wait 60
+checkpoint personal_info
+mash A until notext "Personal" timeout=600 every=30
+until text "Name Entry" timeout=600 every=10
+wait 60
+checkpoint name_entry
+press START after=30
+press A
+until text "finish" timeout=600 every=10
+wait 30
+press START
+until text "Are these" timeout=600 every=10
+until text "want" timeout=300 every=5
+wait 60
+checkpoint confirm
+mash A until notext "Personal" timeout=900 every=40
+until text "Plains" timeout=1500 every=5
+wait 30
+checkpoint prologue window=30
+until text "awake" timeout=1500 every=5
+wait 90
+checkpoint lyn window=30
+
+[load]
+wait 600
+press START
+until text "START" timeout=600 every=10
+wait 120
+press START
+until text "Restart Chapter" timeout=600 every=10
+wait 60
+checkpoint main_menu
+press A
+until text "Plains" timeout=300 every=5
+wait 60
+checkpoint slots
+press A
+until notext "NO DATA" timeout=300 every=5
+until notext "Plains" timeout=600 every=5
+until text "Plains" timeout=1500 every=5
+until text "awake" timeout=1500 every=5
+wait 90
+checkpoint lyn window=30

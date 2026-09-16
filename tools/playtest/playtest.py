@@ -117,7 +117,12 @@ def suite(args):
         if not fn.endswith('.play'):
             continue
         sha1 = fn[:-5]
-        meta = script.parse(open(os.path.join(HERE, 'scripts', fn)).read())['meta']
+        try:
+            meta = script.parse(open(os.path.join(HERE, 'scripts', fn)).read())['meta']
+        except script.ScriptError as e:
+            if not args.only or any(sha1.startswith(o) for o in args.only):
+                rows.append((fn, 'ERROR', str(e)))
+            continue
         title = meta.get('title', sha1)
         if args.only and not any(sha1.startswith(o) or o.lower() in title.lower() for o in args.only):
             continue
@@ -152,6 +157,8 @@ def render_reply(line, r):
         s = f'{"ok" if r["recorded"] else "!!"} {r["step"]}: ' + ', '.join(parts)
         if 'failed_look' in r:
             s += f'\n   (rolled back; failure screen: {r["failed_look"]})'
+        if 'rollback_failed' in r:
+            s += f'\n   !! ROLLBACK FAILED, emulators out of sync: {r["rollback_failed"]} -- restart the session'
         return s
     if 'script' in r:
         return r['script']

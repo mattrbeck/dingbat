@@ -1,0 +1,82 @@
+@title Pokemon Mystery Dungeon - Red Rescue Team (USA)
+@file Pokemon Mystery Dungeon - Red Rescue Team (U).gba
+@game B24E
+@chip FLASH1M
+
+# New game: A through the personality quiz (first answer every time), keep
+# the default partner and its name, name yourself "aa", A through the story
+# into Tiny Woods B1F, then Others > Quicksave. The quiz questions, and so
+# the player's Pokemon, and the dungeon layout depend on timing, so they
+# differ between emulators; loading the quicksave restores the saving
+# emulator's team and layout everywhere.
+
+[new]
+wait 600
+press START
+mash START until text "New Game" timeout=3000 every=60
+wait 60
+checkpoint main_menu
+mash A until text "nickname" timeout=8000 every=30
+wait 90
+checkpoint partner_nickname compare=text
+press A after=90
+press START after=30
+press A
+until text "Yes" timeout=300 every=5
+wait 60
+press UP after=20
+press A after=60
+mash A until text "your name" timeout=9000 every=30
+wait 60
+mash A until text "END" timeout=3000 every=30
+wait 30
+checkpoint name_entry
+press A after=20
+press START after=30
+press A
+until text "Yes" timeout=300 every=5
+wait 60
+press UP after=20
+press A after=60
+mash A until text "B1F" timeout=9000 every=30
+checkpoint tiny_woods
+until notext "Tiny" timeout=600 every=10
+# the partner explains the controls first; a menu only opens once it is gone
+until text "Head for" timeout=900 every=5
+mash A until notext "Head for" timeout=1200 every=30
+wait 60
+mash B until text "Others" timeout=600 every=60
+wait 20
+checkpoint dungeon_menu window=0
+press DOWN after=10
+press DOWN after=10
+press DOWN after=10
+# Others > Quicksave or Give Up > Quicksave (the small menu font OCRs badly)
+press A after=40
+press DOWN after=10
+press A after=40
+press A
+until text "preparation" timeout=300 every=5
+wait 60
+checkpoint quicksave_prompt window=0
+press UP after=20
+press A
+until text "has been saved" timeout=1500 every=10
+checkpoint saved window=0
+
+[load]
+wait 600
+press START
+mash START until text "Continue" timeout=3000 every=60
+wait 60
+checkpoint continue_menu compare=text
+press A
+until text "quicksave" timeout=600 every=10
+wait 60
+checkpoint resume_prompt compare=text
+press UP after=20
+press A
+until text "B1F" timeout=1200 every=10
+until notext "Tiny" timeout=600 every=10
+wait 90
+checkpoint dungeon window=10 compare=text

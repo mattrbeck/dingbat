@@ -1,0 +1,24 @@
+@title Mario & Luigi - Superstar Saga (USA)
+@file Mario & Luigi - Superstar Saga (U).gba
+@game A88E
+@chip EEPROM
+@status wip: reaches the opening cutscene in Mario's house (Toad arrives) but no save. The game has no save until the first Save Album, after the scripted opening (Toad in Mario's house, Peach's Castle, the Bowser battle tutorial). Mashing A stalls in Mario's house where the player has to act; a human recording from the file screen to the first Save Album is needed.
+
+# Title -> MARIO & LUIGI -> new file -> Start Game (the first A presses on
+# the file book are ignored while it animates, hence the mash).
+
+[new]
+until text "PRESS START" timeout=1500 every=10
+wait 20
+checkpoint title window=0
+press START
+until text "OPTIONS" timeout=300 every=5
+wait 30
+checkpoint game_select window=0
+press A
+until text "Start Game" timeout=300 every=5
+wait 150
+checkpoint file_book window=0
+mash A until notext "Start Game" timeout=4000 every=60
+until text "Beanbean" timeout=4000 every=10
+checkpoint opening window=0

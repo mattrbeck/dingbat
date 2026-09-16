@@ -1,0 +1,34 @@
+@title Castlevania - Aria of Sorrow (USA)
+@file Castlevania - Aria of Sorrow (U) [!].gba
+@game A2CE
+@chip SRAM_F (FRAM)
+@status wip: reaches gameplay in Castle Corridor (a few rooms in, after picking up the Short Sword); the game writes only its header at boot and nothing at New Game/name entry, so the first real save needs Soma to reach the first save room. Explored live: holding RIGHT with A taps walks through the first corridor rooms, then a stone pillar blocks the ledge (paths go up/down stairs on the left). A human should record: New Game, name, skip dialog, walk to the first save room, touch the save statue, quit after "saved". [load]: Select Data shows the file; pick it to resume in the save room.
+
+[new]
+wait 600
+press START
+until text "GAME START" timeout=600 every=10
+wait 60
+checkpoint title
+press A
+until text "Select Data" timeout=300 every=5
+wait 60
+press A
+until text "NEW GAME" timeout=300 every=5
+wait 60
+checkpoint select_data
+press A
+until text "DEL" timeout=300 every=5
+wait 30
+checkpoint name_entry
+press A after=20
+press A after=20
+press START after=20
+until text "2035" timeout=1200 every=10
+checkpoint intro
+# the opening scene: taps of A advance the dialog; RIGHT held walks Soma out
+# of the courtyard once play starts
+hold RIGHT
+mash A until text "Corridor" timeout=9000 every=47
+release
+checkpoint castle_corridor window=10

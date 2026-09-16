@@ -1,0 +1,37 @@
+@title Mario Kart Super Circuit (USA)
+@file Mario Kart Super Circuit (U) [!].gba
+@game AMKE
+@chip FLASH (512K)
+@status wip: reaches the start line of a Peach Circuit time trial; the game writes nothing to flash through the menus (the ghost-display setting toggle was not saved either), so the first save needs a finished race (3 laps; records are written at the finish). Needs a human to drive the time trial with the recorder, then quit on the results screen after the records are saved.
+
+# Title -> 1P -> TIME TRIAL -> TRIAL -> default character -> Mushroom Cup ->
+# Peach Circuit -> race. Everything after the countdown is missing.
+
+[new]
+wait 600
+press START
+until text "SINGLE PLAYER" timeout=600 every=10
+wait 130
+checkpoint title
+press START
+until text "CHOOSE" timeout=300 every=5
+wait 60
+checkpoint game_select
+press DOWN after=30
+press A
+until text "RECORDS" timeout=300 every=5
+wait 60
+press A
+until text "CHARACTER" timeout=300 every=5
+wait 60
+checkpoint character_select
+press A after=60
+press A after=150
+checkpoint cup_select
+press A
+until text "PEACH" timeout=300 every=5
+wait 30
+press A after=90
+checkpoint track
+press A after=320
+checkpoint start_line

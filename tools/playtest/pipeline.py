@@ -201,25 +201,27 @@ def run(args):
                 cell['save_after'] = {'size': len(after), 'size_before': len(seeded),
                                       'diff': saves.diff_ranges(seeded[:len(after)], after[:len(seeded)])}
             report['load'][f'{w}-in-{r}'] = cell
-        # each reader's screens with a foreign save vs with its own save,
-        # and every cell vs the reference emulator's own round trip
-        ref = next((n for n in names if not n.startswith(SUBJECT_PREFIX)), names[0])
+        # One save must look the same whichever emulator reads it, so each
+        # cell is compared with the other readers of the SAME writer's save.
+        # (Different writers' saves legitimately differ: RNG-seeded starters,
+        # play time.) load_checkpoints[w-in-r][cp][x] = verdict vs w-in-x.
         report['load_checkpoints'] = {}
         for (w, r), res in load.items():
-            # baseline: the reader with its own save; when that round trip
-            # itself failed, the writer's own round trip stands in
-            own = load.get((r, r))
-            baseline, base_name = (own, r) if own and own['ok'] else (load.get((w, w)), w)
-            if baseline and not baseline['ok']:
-                baseline = None
-            refcell = load.get((ref, ref))
             cps = {}
-            for cp in res['checkpoints'] or (baseline['checkpoints'] if baseline else {}):
-                cps[cp] = {
-                    'baseline': f'{base_name}-in-{base_name}' if baseline else None,
-                    'vs_own_save': classify.classify(res['checkpoints'].get(cp), baseline['checkpoints'].get(cp)) if baseline else None,
-                    'vs_reference': classify.classify(res['checkpoints'].get(cp), refcell['checkpoints'].get(cp)) if refcell and refcell['ok'] else None,
-                }
+            cp_names_row = []
+            for x in names:
+                for cp in load.get((w, x), {}).get('checkpoints', {}):
+                    if cp not in cp_names_row:
+                        cp_names_row.append(cp)
+            for cp in cp_names_row:
+                mine = res['checkpoints'].get(cp)
+                cps[cp] = {'reached': mine is not None, 'vs': {}}
+                for x in names:
+                    if x == r or (w, x) not in load:
+                        continue
+                    other = load[(w, x)]['checkpoints'].get(cp)
+                    if mine is not None and other is not None:
+                        cps[cp]['vs'][x] = classify.classify(mine, other)
             report['load_checkpoints'][f'{w}-in-{r}'] = cps
         # composites: one image per checkpoint, every cell
         cp_names = []
@@ -257,6 +259,103 @@ def run(args):
     global last_outdir
     last_outdir = outdir
     return 0 if all(v['pass'] for v in report['verdicts'].values()) else 1
+
+
+def cross_load_verdict(report, s, refs, problems):
+    """Row-wise judgement of the save matrix for subject `s`; appends
+    problems, returns notes."""
+    notes = []
+    cells, cps = report['load'], report['load_checkpoints']
+
+    def agree(key, cp, x):
+        c = cps.get(key, {}).get(cp)
+        return bool(c and x in c['vs'] and cell_ok(c['vs'][x]))
+
+    def healthy(r):
+        """Reader r shows its own save the way at least one other emulator does."""
+        row = cps.get(f'{r}-in-{r}', {})
+        return bool(row) and all(any(cell_ok(vv) for vv in c['vs'].values()) for c in row.values() if c['vs'])
+
+    for key, cell in cells.items():
+        w, r = key.split('-in-')
+        if s not in (w, r):
+            continue
+        # booting must not rewrite the file -- unless the references rewrite
+        # the same save the same way (the game's own boot bookkeeping)
+        if not cell['save_unchanged']:
+            after = cell.get('save_after') or {}
+            padded = after.get('diff', {}).get('bytes') == 0 and after.get('size', 0) > after.get('size_before', 0)
+            refs_keep = [x for x in refs if f'{w}-in-{x}' in cells and cells[f'{w}-in-{x}']['save_unchanged']]
+            if r == s and refs_keep:
+                problems.append(f'{w} save in {r}: battery file changed by booting, {"/".join(refs_keep)} left it '
+                                f'unchanged: {after}')
+            elif padded:
+                notes.append(f'{r} extends a {after["size_before"]}-byte save to {after["size"]} bytes on boot (data unchanged)')
+            else:
+                notes.append(f'{w} save in {r}: the game rewrites part of the save at boot (references too)')
+
+    # s reading reference saves: agree with at least one reference reader
+    for w in refs:
+        key = f'{w}-in-{s}'
+        if key not in cells:
+            continue
+        for cp, c in cps[key].items():
+            ref_readers = [x for x in refs if cps.get(f'{w}-in-{x}', {}).get(cp, {}).get('reached')]
+            if not ref_readers:
+                continue
+            if not c['reached']:
+                problems.append(f'{w} save in {s}: never reached {cp} ({cells[key]["error"]}); '
+                                f'{"/".join(ref_readers)} did')
+            elif not any(agree(key, cp, x) for x in ref_readers):
+                if len(ref_readers) > 1 and not agree(f'{w}-in-{ref_readers[0]}', cp, ref_readers[1]):
+                    notes.append(f'{w} save, checkpoint {cp}: the references show it differently too: not diagnostic')
+                else:
+                    detail = ', '.join(f"{x}={c['vs'][x]['verdict']}" for x in ref_readers if x in c['vs'])
+                    problems.append(f'{w} save in {s}: checkpoint {cp} differs from the references reading the same save ({detail})')
+
+    # references reading s's save: each should show it as s shows it, unless
+    # that reference cannot even show its own save consistently
+    for r in refs:
+        key = f'{s}-in-{r}'
+        if key not in cells:
+            continue
+        for cp, c in cps[key].items():
+            own = cps.get(f'{s}-in-{s}', {}).get(cp)
+            if not own or not own['reached']:
+                continue
+            ok = c['reached'] and agree(key, cp, s)
+            if ok:
+                continue
+            if not healthy(r):
+                notes.append(f'{s} save in {r}: checkpoint {cp} differs, but {r} does not show its own save '
+                             f'like the others either: not diagnostic')
+            elif any(agree(key, cp, x) for x in refs if x != r):
+                notes.append(f'{s} save in {r}: checkpoint {cp} differs from {s}, but matches another reference')
+            else:
+                what = 'never reached' if not c['reached'] else c['vs'][s]['verdict']
+                problems.append(f'{s} save in {r}: checkpoint {cp}: {what} compared with {s} reading its own save')
+
+    # reference-only cells, for the record
+    for key, cell in cells.items():
+        w, r = key.split('-in-')
+        if s in (w, r):
+            continue
+        if not cell['ok']:
+            notes.append(f'references: {w} save in {r}: [load] failed: {cell["error"]}')
+    return notes
+
+
+def cell_ok(v):
+    """A load-checkpoint verdict that counts as the save having loaded."""
+    if v['verdict'] not in OK_LOAD:
+        return False
+    # a loaded save that shows different values (a menu setting, a count) is
+    # a small pixel change but not the same load
+    return not (v['verdict'] == 'MINOR' and v.get('text_similarity', 1.0) < 1.0 and not v.get('palette_only'))
+
+
+def loads_like(a, b):
+    return cell_ok(classify.classify(a, b))
 
 
 def _strip(res):
@@ -345,37 +444,7 @@ def verdicts(report, names):
                     v['notes'].append(f"bytes differ from {r} in {pair['diff']['bytes']} bytes / {pair['diff']['count']} ranges")
         # cross-load
         if 'load' in report:
-            for key, cell in report['load'].items():
-                w, r = key.split('-in-')
-                if s not in (w, r):
-                    if not cell['ok']:
-                        v['notes'].append(f'references: {w} save in {r}: [load] failed: {cell["error"]}')
-                    continue
-                if not cell['ok']:
-                    v['problems'].append(f'{w} save in {r}: [load] failed: {cell["error"]}')
-                    continue
-                if not cell['save_unchanged']:
-                    after = cell.get('save_after') or {}
-                    padded = (after.get('diff', {}).get('bytes') == 0 and after.get('size', 0) > after.get('size_before', 0))
-                    msg = f'{w} save in {r}: battery file changed by booting: {after}'
-                    if padded and r != s:
-                        v['notes'].append(f'{r} extends a {after["size_before"]}-byte save to {after["size"]} bytes on boot (data unchanged)')
-                    else:
-                        v['problems'].append(msg)
-                for cp, c in report['load_checkpoints'][key].items():
-                    if not c['vs_own_save']:
-                        v['notes'].append(f'{w} save in {r}: checkpoint {cp}: no successful own-save baseline, not diagnostic')
-                        continue
-                    own = c['vs_own_save']
-                    base = c.get('baseline') or f'{r}-in-{r}'
-                    if own['verdict'] not in OK_LOAD:
-                        v['problems'].append(f'{w} save in {r}: checkpoint {cp} vs {base}: {own["verdict"]}')
-                    elif (own['verdict'] == 'MINOR' and own.get('text_similarity', 1.0) < 1.0
-                          and not own.get('palette_only')):
-                        # a loaded save that shows different values (a menu
-                        # setting, a count) is a small pixel change but not a load
-                        v['problems'].append(f'{w} save in {r}: checkpoint {cp} vs {base}: MINOR but on-screen '
-                                             f'text differs ({own["text_similarity"]})')
+            v['notes'] += cross_load_verdict(report, s, refs, v['problems'])
         v['pass'] = not v['problems']
         out[s] = v
     return out
@@ -404,8 +473,8 @@ def print_summary(report):
               + (f" diff_bytes={p['diff']['bytes']}" if 'diff' in p else '') + extra)
     for key, cell in report.get('load', {}).items():
         cps = report['load_checkpoints'].get(key, {})
-        s = ', '.join(f"{cp}: own={c['vs_own_save']['verdict'] if c['vs_own_save'] else '-'}"
-                      f"/ref={c['vs_reference']['verdict'] if c['vs_reference'] else '-'}" for cp, c in cps.items())
+        s = ', '.join(f"{cp}: " + (' '.join(f"{x}={vv['verdict']}" for x, vv in c['vs'].items()) if c['reached'] else 'NOT REACHED')
+                      for cp, c in cps.items())
         print(f"   load {key:22} {'ok' if cell['ok'] else 'FAILED'} unchanged={cell['save_unchanged']} {s}"
               + (f"  {cell['error']}" if cell['error'] else ''))
     for s, v in report['verdicts'].items():
@@ -439,10 +508,10 @@ def write_html(report, outdir):
             parts.append(f"<img src='{rel(en['png'])}'>")
     parts.append('<h2>Saves</h2><pre>' + e(json.dumps({'saves': report['saves'], 'pairs': report['save_pairs']}, indent=1)) + '</pre>')
     if 'load' in report:
-        parts.append('<h2>Cross-load</h2><table><tr><th>cell</th><th>ok</th><th>save unchanged</th><th>checkpoints (vs own save / vs reference)</th></tr>')
+        parts.append('<h2>Cross-load</h2><table><tr><th>cell</th><th>ok</th><th>save unchanged</th><th>checkpoints (vs the other readers of the same save)</th></tr>')
         for key, cell in report['load'].items():
             cps = report['load_checkpoints'][key]
-            s = '; '.join(f"{e(cp)}: {c['vs_own_save']['verdict'] if c['vs_own_save'] else '-'} / {c['vs_reference']['verdict'] if c['vs_reference'] else '-'}"
+            s = '; '.join(f"{e(cp)}: " + (' '.join(f"{x}={vv['verdict']}" for x, vv in c['vs'].items()) if c['reached'] else 'NOT REACHED')
                           for cp, c in cps.items())
             parts.append(f"<tr><td>{e(key)}</td><td>{cell['ok']}</td><td>{cell['save_unchanged']}</td><td>{s} {e(cell['error'] or '')}</td></tr>")
         parts.append('</table>')

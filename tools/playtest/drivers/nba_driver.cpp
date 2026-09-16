@@ -151,13 +151,16 @@ int main(int argc, char** argv) {
       memset(state.get(), 0, sizeof(nba::SaveState));
       core->CopyState(*state);
       FILE* f = fopen(arg.c_str(), "wb");
-      bool ok = f && fwrite(state.get(), sizeof(nba::SaveState), 1, f) == 1;
+      // the core only redraws when a frame runs, so the screen rides along
+      bool ok = f && fwrite(state.get(), sizeof(nba::SaveState), 1, f) == 1 &&
+                fwrite(video->frame, sizeof video->frame, 1, f) == 1;
       if (f) fclose(f);
       reply(ok ? "ok" : "err state_save failed");
     } else if (cmd == "state_load") {
       auto state = std::make_unique<nba::SaveState>();
       FILE* f = fopen(arg.c_str(), "rb");
-      bool ok = f && fread(state.get(), sizeof(nba::SaveState), 1, f) == 1;
+      bool ok = f && fread(state.get(), sizeof(nba::SaveState), 1, f) == 1 &&
+                fread(video->frame, sizeof video->frame, 1, f) == 1;
       if (f) fclose(f);
       if (ok) core->LoadState(*state);
       reply(ok ? "ok" : "err state_load failed");

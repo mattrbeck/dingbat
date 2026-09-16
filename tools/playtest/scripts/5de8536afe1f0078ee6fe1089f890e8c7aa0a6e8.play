@@ -1,0 +1,31 @@
+@title Metroid - Zero Mission (USA)
+@file Metroid - Zero Mission (U) [!].gba
+@game BMXE
+@chip SRAM
+@status wip: reaches Samus standing in the first Brinstar room on a new Normal file. Starting the file writes only the header/select-slot blocks (no Samus data: file A still reads --:--:--), so the first real save needs Samus to reach the first save station in Brinstar (platforming through several rooms). A human should record: file A, Start Game, Normal, play to the first save room, stand on the station and answer Yes, quit after "Save complete". [load]: file A shows Brinstar and the play time; Start Game resumes in the save room.
+
+# Intro > title (PRESS START) > SAMUS DATA > file A > Start Game > Normal >
+# intro text > Brinstar.
+
+[new]
+wait 600
+press START
+until text "ZERO MISSI" timeout=600 every=10
+wait 60
+checkpoint title
+press START
+until text "SAMUS DATA" timeout=600 every=10
+wait 60
+checkpoint samus_data
+press A
+until text "Start Game" timeout=300 every=5
+wait 60
+press A
+until text "Difficulty" timeout=300 every=5
+wait 30
+checkpoint difficulty
+press A
+until text "Planet Zebes" timeout=900 every=10
+mash A until notext "Zebes" timeout=1200 every=20
+wait 600
+checkpoint brinstar window=10

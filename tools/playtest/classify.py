@@ -33,6 +33,11 @@ def classify(a, b):
         return {'verdict': 'FAILED'}
     if a['hash'] == b['hash']:
         return {'verdict': 'IDENTICAL'}
+    if a.get('compare') == 'text' or b.get('compare') == 'text':
+        wa, wb = _words(a['text']), _words(b['text'])
+        sim = len(wa & wb) / len(wa | wb) if (wa or wb) else 1.0
+        return {'verdict': 'MINOR' if sim >= 0.9 else 'MAJOR', 'text_similarity': round(sim, 2),
+                'why': 'compared by on-screen text only', 'palette_only': sim >= 0.9}
     for k, h in enumerate(b['hashes']):
         if h == a['hash']:
             return {'verdict': 'SLIP', 'offset': k - b['center']}

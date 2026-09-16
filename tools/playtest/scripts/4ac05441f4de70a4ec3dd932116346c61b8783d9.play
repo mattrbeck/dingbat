@@ -1,0 +1,25 @@
+@title Final Fantasy Tactics Advance (USA)
+@file Final Fantasy Tactics Advance (U) [!].gba
+@game AFXE
+@chip FLASH512
+@status wip: reaches the snowball-fight tutorial battle at St. Ivalice (after naming Marche); mashing A does not advance the battle (the turn waits on a real command), and the first chance to save is the world map in Ivalice after this battle, the dream sequence and the first clan battle. A human should record: New Game, keep "Marche", play the snowball fight and the first battles, then Save on the world map and quit after the save message. [load]: title > SAVED GAME (Continue) > the slot > world map.
+
+# Title > NEW GAME > A through the school scenes > name entry (START, then
+# LEFT to Yes on "Confirm action. OK?", which defaults to No) > the snowball
+# fight begins.
+
+[new]
+wait 600
+mash START until text "NEW GAME" timeout=3000 every=60
+wait 60
+checkpoint title
+press A
+mash A until text "Name" timeout=6000 every=40
+mash A until text "Enter" timeout=3000 every=40
+wait 30
+checkpoint name_entry
+press START
+until text "Confirm" timeout=300 every=5
+wait 30
+press LEFT after=20
+press A after=60

@@ -113,12 +113,12 @@ class Executor:
                 e.run(max(0, step['every'] - step['hold']))
             self.run_until(step, step['cond'], before_poll=tap)
         elif op == 'checkpoint':
-            self.checkpoint(step['name'], step['window'])
+            self.checkpoint(step['name'], step['window'], step.get('compare', 'pixels'))
         else:
             raise ValueError(op)
         self.steps_done += 1
 
-    def checkpoint(self, name, window):
+    def checkpoint(self, name, window, compare='pixels'):
         before = self.emu.runhash(window) if window else []
         path = os.path.join(self.outdir, f'{name}.ppm')
         center_hash = self.emu.hash()
@@ -132,7 +132,7 @@ class Executor:
         hashes = (before or [center_hash]) + after
         cp = {'name': name, 'frame': frame, 'hash': center_hash, 'ppm': path,
               'hashes': hashes, 'center': len(before or [center_hash]) - 1,
-              'text': read['text'], 'selected': read['selected']}
+              'text': read['text'], 'selected': read['selected'], 'compare': compare}
         self.checkpoints[name] = cp
         self.log(f"{self.emu.name}: checkpoint {name} @f{frame} text={read['text'][:80]!r}")
         return cp
