@@ -427,9 +427,6 @@ proc tick*(cpu: CPU) =
       cpu.thumb_execute(instr)
     else:
       cpu.arm_execute(instr)
-    # The DMA open-bus latch lasts one CPU instruction. Cleared before
-    # scheduler.tick so a DMA at this boundary arms it for the next one.
-    cpu.gba.bus.dma_open_bus_armed = false
     var remaining = cpu.gba.bus.cycles
     let total = remaining + cpu.gba.bus.synced
     when defined(pcprofile):

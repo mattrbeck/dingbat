@@ -1009,20 +1009,30 @@ proc read_word_rotate*(bus: Bus; address: uint32): uint32 =
 proc read_open_bus_value*(bus: Bus; address: uint32): uint8 =
   log("Reading open bus at " & hex_str(address))
   let shift = (address and 3) * 8
-  # A DMA is the last bus master to have driven the data bus: unmapped reads
-  # by the DMA itself, or by the first CPU instruction after the burst,
-  # return the last word it moved. GBATEK "GBA Unpredictable Things",
-  # Reading from Unused Memory: unused memory "returns the recently
-  # pre-fetched opcode", and, of that value, "Theoretically, this might also
-  # change if a DMA transfer occurs" — GBATEK says no more. The mGBA suite
-  # pins the existence of the latch: Misc "DMA Prefetch Read" is the one
-  # row that flips (PASS -> FAIL, 4/12 -> 3/12) when this branch is removed
-  # (measured on the 2026-09-01 audit build); the DMA section's R+0x10
-  # rows and Misc "DMA Prefetch Break" (still red) do not depend on it.
-  # The exact window — the DMA's own reads plus exactly one CPU instruction
-  # after the burst — is Assumed; no ROM pins its length. Hello Kitty
-  # Collection: Miracle Fashion Maker's boot needs at least this much.
-  if bus.dma_active or bus.dma_open_bus_armed:
+  # GBATEK "GBA Unpredictable Things", Reading from Unused Memory: unused
+  # memory "returns the recently pre-fetched opcode", which "might also
+  # change if a DMA transfer occurs". The DMA's own unmapped reads see its
+  # latch. Otherwise the last word a DMA moved is still on the bus only for
+  # the CPU's first access after the burst: a DMA is granted when the CPU
+  # access in flight ends, and any later access, the opcode fetch included,
+  # replaces the value (gbaedge DMAOPENBUS on AGB SP, docs/hwprobe-results-
+  # agb.md session 5: "an opcode fetch also refreshes open bus"). So this
+  # read sees the word when the request came after this instruction's fetch
+  # began and no later than this read began; bursts due by now are run
+  # first so a request inside this instruction is known.
+  if bus.dma_active:
+    return uint8(bus.dma_open_bus shr shift)
+  # The instruction's opcode fetch is its first charged access, and catch-up
+  # moves exactly the cycles it ticks from `cycles` into `synced`, so the
+  # fetch began at sched.cycles - synced throughout the instruction.
+  let fetch_start = bus.sched.cycles - CycleCount(bus.synced)
+  let access = if bits_range(address, 28, 31) > 0: 1
+               else: int(bus.wait16_n[bits_range(address, 24, 27)])
+  let read_start = bus.bus_now() - CycleCount(access)
+  if not bus.sched.dispatching:
+    bus.catch_up()
+  if bus.dma_has_run and bus.dma_request_at > fetch_start and
+     bus.dma_request_at <= read_start:
     return uint8(bus.dma_open_bus shr shift)
   let pc = bus.gba.cpu.r[15]
   # PC in MMIO/unmapped memory would recurse back into this proc

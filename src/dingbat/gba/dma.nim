@@ -178,6 +178,10 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
 
   # The cycle the ROM bus changes hands, before any burst cycles are charged;
   # the prefetch hand-off (bus.rom_access_cycles) counts forward from here.
+  # Handlers and catch-up run an event at its own cycle, so this is the
+  # cycle the burst was requested at (read_open_bus_value).
+  dma.gba.bus.dma_request_at = dma.gba.bus.sched.cycles
+  dma.gba.bus.dma_has_run = true
   dma.gba.bus.dma_grant_now =
     dma.gba.bus.sched.cycles + CycleCount(dma.gba.bus.cycles)
   dma.gba.bus.dma_first_rom = true
@@ -282,10 +286,6 @@ proc run_pending*(dma: DMA) =
     let bus = dma.gba.bus
     # The CPU (or a paused outer burst) resumes with a nonsequential access.
     bus.dma_active = saved < 4
-    if saved == 4:
-      # The CPU's next instruction still sees the DMA's last word on open-bus
-      # reads (cleared in cpu.tick).
-      bus.dma_open_bus_armed = true
     when defined(pftrace):
       pft("DMA" & $ch & " END sched=" & $bus.sched.cycles & " busc=" & $bus.cycles &
           " rfs=" & $bus.rom_free_since & " hot=" & $bus.rom_hot)

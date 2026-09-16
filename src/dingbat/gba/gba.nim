@@ -299,16 +299,18 @@ type
     # read one instruction after the enable must see the DMA'd data)
     dma_pending*: bool
     # Open-bus latch left by DMA: the last word a DMA moved stays on the data
-    # bus, so an unmapped read by the DMA itself or by the first CPU
-    # instruction after the burst sees that word instead of the CPU prefetch
-    # (GBATEK "GBA Unpredictable Things" only says the value "might also
-    # change if a DMA transfer occurs"). Armed when a burst hands the bus
-    # back, cleared at the next instruction boundary (cpu.tick); the
-    # one-instruction window is assumed. mGBA suite Misc "DMA Prefetch Read"
-    # fails without it. Hello Kitty Collection: Miracle Fashion Maker's boot
-    # terminates only when a sound-FIFO DMA's final zero word shows up here.
+    # bus until the CPU's next bus access replaces it, so an unmapped read
+    # sees that word only if it is the first access after the burst
+    # (read_open_bus_value). dma_request_at is the cycle the latest burst was
+    # requested at. Hardware: gbaedge DMAOPENBUS and HDMAPHASE on AGB SP
+    # (docs/hwprobe-results-agb.md sessions 5-6). mGBA suite Misc "DMA
+    # Prefetch Read" and three games need the word: Hello Kitty Collection:
+    # Miracle Fashion Maker's boot (a sound-FIFO DMA's final zero word) and
+    # Famicom Mini Metroid, whose table walk off the end of a ROM table stops
+    # only on an H-blank DMA's word.
     dma_open_bus*:       uint32
-    dma_open_bus_armed*: bool
+    dma_request_at*:     CycleCount
+    dma_has_run*:        bool
 
   WLInstrKind* = enum
     wlLongBranchLink, wlUnconditionalBranch, wlSoftwareInterrupt,
