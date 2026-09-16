@@ -427,6 +427,11 @@ def verdicts(report, names):
                     if sv['canonical'] and tr and theirs - tr == mine:
                         v['notes'].append(f'{r} appends a {tr}-byte trailer after the chip data '
                                           f'({theirs} bytes); cross-load decides compatibility')
+                    elif (report['saves'][r].get('canonical') and sv.get('trailer_bytes')
+                          and mine - sv['trailer_bytes'] == theirs):
+                        v['notes'].append(f"dingbat appends a {sv['trailer_bytes']}-byte trailer "
+                                          f"after the chip data{' (RTC)' if report['rom_info'].get('rtc') else ''} "
+                                          f'and {r} does not; cross-load decides compatibility')
                     elif mine in canon and theirs in canon:
                         # 4Kbit vs 64Kbit EEPROM: both are chip sizes; which one
                         # the game uses shows in whether the other side loads it

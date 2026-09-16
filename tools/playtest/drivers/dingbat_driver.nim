@@ -2,6 +2,7 @@
 ## protocol documented in tools/playtest/README.md on stdin/stdout.
 ##
 ## Usage: dingbat_driver <rom.gba> <bios.bin|hle> [--run-bios] [--rtc EPOCH]
+##   Without --rtc the cartridge RTC runs from the host clock.
 ##   The battery save is <rom minus extension>.sav, exactly as the desktop
 ##   app places it; run the driver on a ROM symlink inside a private
 ##   directory so saves never touch the library.
@@ -32,6 +33,38 @@ proc write_ppm(path: string; buf: seq[uint16]) =
     data[i*3+1] = char(uint8((g5 shl 3) or (g5 shr 2)))
     data[i*3+2] = char(uint8((b5 shl 3) or (b5 shr 2)))
   writeFile(path, "P6\n240 160\n255\n" & data)
+
+# Cartridge RTC over the GPIO port, bit-banged the way a game's RTC driver
+# does it (GBATEK "GBA Cart I/O Port (GPIO)" / "Real-Time Clock"): commands
+# MSB first, parameters LSB first, one SCK low->high per bit. The same
+# sequence in every driver, so `rtc_get` compares what each game would read.
+proc rtc_xfer(emu: GBA; cmd: uint8; data: openArray[byte]; nread: int): seq[byte] =
+  let g = emu.bus.gpio
+  template w(reg: uint32; v: uint8) = g[0x08000000'u32 + reg] = v
+  w(0xC8, 1)
+  w(0xC6, 7)
+  w(0xC4, 1)
+  w(0xC4, 5)
+  for i in 0 .. 7:
+    let b = (cmd shr (7 - i)) and 1
+    w(0xC4, 4'u8 or (b shl 1))
+    w(0xC4, 5'u8 or (b shl 1))
+  for v in data:
+    for i in 0 .. 7:
+      let b = (v shr i) and 1
+      w(0xC4, 4'u8 or (b shl 1))
+      w(0xC4, 5'u8 or (b shl 1))
+  if nread > 0:
+    w(0xC6, 5)
+    for _ in 0 ..< nread:
+      var v = 0'u8
+      for i in 0 .. 7:
+        w(0xC4, 4)
+        w(0xC4, 5)
+        v = v or (((g[0x080000C4'u32] shr 1) and 1) shl i)
+      result.add(v)
+  w(0xC6, 7)
+  w(0xC4, 1)
 
 proc reply(s: string) =
   stdout.write(s & "\n")
@@ -116,6 +149,20 @@ proc main() =
         for k in 0'u32 ..< uint32(parseInt(parts[2])):
           s.add(emu.bus[a + k].toHex(2))
         reply "ok " & s
+      of "rtc_get":
+        # DATE_TIME register bytes (year month day weekday hour minute second)
+        # and the status register, hex
+        let dt = emu.rtc_xfer(0x65, [], 7)
+        let st = emu.rtc_xfer(0x63, [], 1)
+        var h = ""
+        for b in dt: h.add(b.toHex(2))
+        reply "ok " & h & " " & st[0].toHex(2)
+      of "rtc_set":
+        # rtc_set YYMMDDWWHHMMSS: a DATE_TIME write of those register bytes
+        var b: seq[byte]
+        for k in 0 .. 6: b.add(uint8(parseHexInt(parts[1][2 * k .. 2 * k + 1])))
+        discard emu.rtc_xfer(0x64, b, 0)
+        reply "ok"
       of "quit":
         emu.storage.write_save()
         reply "ok"

@@ -131,7 +131,14 @@ prints `ready ...`, then answers one line per command with `ok [...]` or `err ..
 | `shot PATH` | write the framebuffer as a binary PPM |
 | `state_save PATH` / `state_load PATH` | emulator-native save state |
 | `savedata PATH` / `flush` / `peek ADDR LEN` | where supported |
+| `rtc_get` | read the cartridge RTC over the GPIO port as a game does: DATE_TIME register bytes and the status byte, hex (dingbat, mGBA) |
+| `rtc_set YYMMDDWWHHMMSS` | DATE_TIME write of those register bytes (dingbat, mGBA — mGBA ignores clock writes) |
+| `poke8 ADDR VAL` | bus write, e.g. a flash command that dirties the save (mGBA) |
 | `quit` | flush the battery file and exit |
+
+`rtc_crosscheck.py [rom]` uses these to prove the battery-save RTC trailer
+carries a cart clock between dingbat and mGBA in both directions, on frozen
+and wall clocks (see `src/dingbat/gba/rtc_calendar.nim` for the format).
 
 Every driver skips the BIOS intro by default, so frame 0 is the first game
 frame everywhere. Drivers run with `TZ=UTC`; the RTC is frozen at the script's

@@ -60,6 +60,47 @@ static struct mLogger g_logger = { .log = null_log };
 
 static void reply(const char* s) { printf("%s\n", s); fflush(stdout); }
 
+/* Cartridge RTC over the GPIO port through the core's bus, bit-banged exactly
+ * as dingbat_driver's rtc_xfer does (commands MSB first, parameters LSB
+ * first, one SCK low->high per bit). */
+static void gpio_w(struct mCore* core, uint32_t reg, uint16_t v) {
+  core->busWrite16(core, 0x08000000 + reg, v);
+}
+
+static int rtc_xfer(struct mCore* core, uint8_t cmd, const uint8_t* data, int nwrite,
+                    uint8_t* out, int nread) {
+  gpio_w(core, 0xC8, 1);
+  gpio_w(core, 0xC6, 7);
+  gpio_w(core, 0xC4, 1);
+  gpio_w(core, 0xC4, 5);
+  for (int i = 0; i < 8; ++i) {
+    int b = (cmd >> (7 - i)) & 1;
+    gpio_w(core, 0xC4, 4 | (b << 1));
+    gpio_w(core, 0xC4, 5 | (b << 1));
+  }
+  for (int k = 0; k < nwrite; ++k)
+    for (int i = 0; i < 8; ++i) {
+      int b = (data[k] >> i) & 1;
+      gpio_w(core, 0xC4, 4 | (b << 1));
+      gpio_w(core, 0xC4, 5 | (b << 1));
+    }
+  if (nread > 0) {
+    gpio_w(core, 0xC6, 5);
+    for (int k = 0; k < nread; ++k) {
+      uint8_t v = 0;
+      for (int i = 0; i < 8; ++i) {
+        gpio_w(core, 0xC4, 4);
+        gpio_w(core, 0xC4, 5);
+        v |= ((core->busRead16(core, 0x080000C4) >> 1) & 1) << i;
+      }
+      out[k] = v;
+    }
+  }
+  gpio_w(core, 0xC6, 7);
+  gpio_w(core, 0xC4, 1);
+  return nread;
+}
+
 int main(int argc, char** argv) {
   const char* pos[2] = {0};
   int npos = 0, run_bios = 0;
@@ -165,6 +206,29 @@ int main(int argc, char** argv) {
       for (int k = 0; k < len; ++k) printf("%02X", core->rawRead8(core, addr + k, -1));
       printf("\n");
       fflush(stdout);
+    } else if (!strcmp(cmd, "rtc_get")) {
+      uint8_t dt[7], st[1];
+      rtc_xfer(core, 0x65, NULL, 0, dt, 7);
+      rtc_xfer(core, 0x63, NULL, 0, st, 1);
+      printf("ok %02X%02X%02X%02X%02X%02X%02X %02X\n",
+             dt[0], dt[1], dt[2], dt[3], dt[4], dt[5], dt[6], st[0]);
+      fflush(stdout);
+    } else if (!strcmp(cmd, "rtc_set")) {
+      uint8_t dt[7];
+      int ok = strlen(arg) >= 14;
+      for (int k = 0; ok && k < 7; ++k) {
+        unsigned v;
+        ok = sscanf(arg + 2 * k, "%2x", &v) == 1;
+        dt[k] = (uint8_t) v;
+      }
+      if (ok) rtc_xfer(core, 0x64, dt, 7, NULL, 0);
+      reply(ok ? "ok" : "err rtc_set YYMMDDWWHHMMSS");
+    } else if (!strcmp(cmd, "poke8")) {
+      /* a bus write, e.g. a flash command sequence that dirties the save */
+      unsigned addr = 0, val = 0;
+      sscanf(arg, "%x %x", &addr, &val);
+      core->busWrite8(core, addr, (uint8_t) val);
+      reply("ok");
     } else if (!strcmp(cmd, "quit")) {
       core->deinit(core);
       reply("ok");
