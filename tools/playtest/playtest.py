@@ -53,6 +53,13 @@ def main():
     p = sub.add_parser('sha1')
     p.add_argument('rom')
 
+    p = sub.add_parser('convert', help='turn a DINGBAT_INPUT_LOG recording into a script section')
+    p.add_argument('log')
+    p.add_argument('--rom', required=True)
+    p.add_argument('--section', default='new', choices=['new', 'load'])
+    p.add_argument('--save', help='battery file the [load] recording was made with')
+    p.add_argument('--rtc', type=int, default=DEFAULT_RTC)
+
     for name in ('run', 'suite'):
         p = sub.add_parser(name)
         if name == 'run':
@@ -77,6 +84,10 @@ def main():
                 print(render_reply(line, r))
     elif args.cmd == 'sha1':
         print(sha1_of(args.rom))
+    elif args.cmd == 'convert':
+        import convert
+        print(convert.convert(args.log, args.rom, args.section, os.path.join(args.out, 'convert'),
+                              save=args.save, rtc=args.rtc), end='')
     elif args.cmd == 'run':
         import pipeline
         if not os.path.exists(args.rom) and re.fullmatch(r'[0-9a-f]{40}', args.rom):

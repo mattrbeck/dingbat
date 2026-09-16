@@ -66,6 +66,34 @@ everywhere (and a failure screenshot kept), so the recorded script always
 reproduces the emulators' state. `serve --save FILE` seeds a battery file to
 develop the `[load]` section.
 
+## Writing a script: recording a human
+
+The desktop app logs the keypad per emulated frame when `DINGBAT_INPUT_LOG`
+is set (appending; each ROM load starts a session, quitting ends it; a state
+load or rewind marks the rest unusable):
+
+```
+DINGBAT_INPUT_LOG=~/rec/game-new.log ./dingbat game.gba     # play to an in-game save, quit
+DINGBAT_INPUT_LOG=~/rec/game-load.log ./dingbat game.gba    # boot again, continue, quit
+playtest.py convert ~/rec/game-new.log --rom game.gba --section new > part1
+playtest.py convert ~/rec/game-load.log --rom game.gba --section load --save <the .sav> > part2
+```
+
+`convert` replays the session headless in dingbat (same BIOS mode), OCR-samples
+the screen, and writes steps: taps become `press`, dialog mashing becomes
+`mash KEY until text "<where it led>"`, and gaps become `until text "<line
+that appeared>"` plus the player's reaction time, so the script tolerates other
+emulators reaching each screen on a different frame. Check the result with
+`playtest.py run game.gba --script FILE --no-cross`, add `@title`/`@file`, save
+it as `scripts/<sha1>.play`.
+
+## Game list
+
+`games.json` is the target list: the popular library plus carts whose save
+hardware is ambiguous or unusual (several or no library ID strings, 4Kbit vs
+64Kbit EEPROM, RTC, tilt/solar sensors), each with its SHA-1 and the ID strings
+found in the ROM.
+
 ## Pieces
 
 | file | role |

@@ -39,7 +39,7 @@ class DriverError(RuntimeError):
 
 class Emulator:
     def __init__(self, name, rom, envdir, bios=DEFAULT_BIOS, rtc_epoch=None,
-                 save_in=None):
+                 save_in=None, extra_args=()):
         """Start `name` on `rom` in a fresh `envdir`. `save_in` seeds the
         emulator's battery file before boot (a copy, never a link)."""
         binary, real_bios = EMULATORS[name]
@@ -56,6 +56,7 @@ class Emulator:
         cmd = [os.path.join(BIN, binary), self.rom, bios if real_bios else 'hle']
         if rtc_epoch is not None:
             cmd += ['--rtc', str(rtc_epoch)]
+        cmd += list(extra_args)
         env = dict(os.environ, TZ='UTC')
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=open(os.path.join(self.envdir, 'stderr.log'), 'w'),

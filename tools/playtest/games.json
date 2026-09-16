@@ -1,0 +1,797 @@
+[
+ {
+  "title": "Pokemon - Emerald Version",
+  "file": "Pokemon - Emerald Version (U).gba",
+  "sha1": "f3ae088181bf583e55daf962a92bb46f4f1d07b7",
+  "game_code": "BPEE",
+  "category": "popular",
+  "library_strings": [
+   "FLASH1M_V",
+   "SIIRTC_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Pokemon - Fire Red Version",
+  "file": "Pokemon - Fire Red Version (U) (V1.0).gba",
+  "sha1": "41cb23d8dccc8ebd7c649cd8fbb58eeace6e2fdc",
+  "game_code": "BPRE",
+  "category": "popular",
+  "library_strings": [
+   "FLASH1M_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Pokemon - Leaf Green Version",
+  "file": "Pokemon - Leaf Green Version (U) (V1.0).gba",
+  "sha1": "574fa542ffebb14be69902d1d36f1ec0a4afd71e",
+  "game_code": "BPGE",
+  "category": "popular",
+  "library_strings": [
+   "FLASH1M_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Pokemon - Ruby Version",
+  "file": "Pokemon - Ruby Version (U) (V1.0) [!].gba",
+  "sha1": "f28b6ffc97847e94a6c21a63cacf633ee5c8df1e",
+  "game_code": "AXVE",
+  "category": "popular+save-quirk",
+  "library_strings": [
+   "FLASH1M_V",
+   "SIIRTC_V"
+  ],
+  "why": "FLASH1M + RTC"
+ },
+ {
+  "title": "Pokemon - Sapphire Version",
+  "file": "Pokemon - Sapphire Version (U) (V1.0) [!].gba",
+  "sha1": "3ccbbd45f8553c36463f13b938e833f652b793e4",
+  "game_code": "AXPE",
+  "category": "popular",
+  "library_strings": [
+   "FLASH1M_V",
+   "SIIRTC_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Legend of Zelda, The - The Minish Cap",
+  "file": "Legend of Zelda, The - The Minish Cap (U).gba",
+  "sha1": "b4bd50e4131b027c334547b4524e2dbbd4227130",
+  "game_code": "BZME",
+  "category": "popular",
+  "library_strings": [
+   "EEPROM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Legend of Zelda, The - A Link To The Past Four Swords",
+  "file": "Legend of Zelda, The - A Link To The Past Four Swords (U) [!].gba",
+  "sha1": "a272055abbbf6c26b0cd54c87395d01699589161",
+  "game_code": "AZLE",
+  "category": "popular",
+  "library_strings": [
+   "EEPROM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Metroid Fusion",
+  "file": "Metroid Fusion (U) [!].gba",
+  "sha1": "ca33f4348c2c05dd330d37b97e2c5a69531dfe87",
+  "game_code": "AMTE",
+  "category": "popular",
+  "library_strings": [
+   "SRAM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Metroid - Zero Mission",
+  "file": "Metroid - Zero Mission (U) [!].gba",
+  "sha1": "5de8536afe1f0078ee6fe1089f890e8c7aa0a6e8",
+  "game_code": "BMXE",
+  "category": "popular",
+  "library_strings": [
+   "SRAM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Castlevania - Aria of Sorrow",
+  "file": "Castlevania - Aria of Sorrow (U) [!].gba",
+  "sha1": "abd71fe01ebb201bcc133074db1dd8c5253776c7",
+  "game_code": "A2CE",
+  "category": "popular",
+  "library_strings": [
+   "SRAM_F_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Castlevania - Harmony of Dissonance",
+  "file": "Castlevania - Harmony of Dissonance (U) [!].gba",
+  "sha1": "b90da0d9be0b3a0893cd9e2c399056bcf9579e21",
+  "game_code": "ACHE",
+  "category": "popular",
+  "library_strings": [
+   "SRAM_F_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Castlevania - Circle of the Moon",
+  "file": "Castlevania - Circle of the Moon (U) [!].gba",
+  "sha1": "d661b01eb94186435723ac03344792c11c20c522",
+  "game_code": "AAME",
+  "category": "popular",
+  "library_strings": [
+   "SRAM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Golden Sun",
+  "file": "Golden Sun (UE) [!].gba",
+  "sha1": "5c4695205413df7db52b9a184815a07783999971",
+  "game_code": "AGSE",
+  "category": "popular",
+  "library_strings": [
+   "FLASH_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Golden Sun - The Lost Age",
+  "file": "Golden Sun - The Lost Age (UE) [!].gba",
+  "sha1": "b500663220cb9bf56b9f8e8c0c544f1d6fa3a824",
+  "game_code": "AGFE",
+  "category": "popular",
+  "library_strings": [
+   "FLASH_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Fire Emblem",
+  "file": "Fire Emblem (U) [!].gba",
+  "sha1": "c735fdbb9e8abe19e0c6a44708df19acc962e204",
+  "game_code": "AE7E",
+  "category": "popular",
+  "library_strings": [
+   "SRAM_F_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Fire Emblem - The Sacred Stones",
+  "file": "Fire Emblem - The Sacred Stones (U).gba",
+  "sha1": "c25b145e37456171ada4b0d440bf88a19f4d509f",
+  "game_code": "BE8E",
+  "category": "popular",
+  "library_strings": [
+   "SRAM_F_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Advance Wars",
+  "file": "Advance Wars (U) (V1.0) [!].gba",
+  "sha1": "d0a0a4cfe9b95ac7118f7ef476f014ca0242eb65",
+  "game_code": "AWRE",
+  "category": "popular",
+  "library_strings": [
+   "FLASH_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Advance Wars 2 - Black Hole Rising",
+  "file": "Advance Wars 2 - Black Hole Rising (U) [!].gba",
+  "sha1": "14dd0b22c894865867aff89e8116b2dffae25605",
+  "game_code": "AW2E",
+  "category": "popular",
+  "library_strings": [
+   "FLASH_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Mario & Luigi - Superstar Saga",
+  "file": "Mario & Luigi - Superstar Saga (U).gba",
+  "sha1": "7c303cdde5061ee329296948060b875cb50ba410",
+  "game_code": "A88E",
+  "category": "popular",
+  "library_strings": [
+   "EEPROM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Super Mario Advance 4 - Super Mario Bros. 3",
+  "file": "Super Mario Advance 4 - Super Mario Bros. 3 (U) (V1.1).gba",
+  "sha1": "532f3307021637474b6dd37da059ca360f612337",
+  "game_code": "AX4E",
+  "category": "popular",
+  "library_strings": [
+   "FLASH1M_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Super Mario Advance 2 - Super Mario World",
+  "file": "Super Mario Advance 2 - Super Mario World (U) [!].gba",
+  "sha1": "5101ddf223d1d918928fe1f306b63a42ada14a5e",
+  "game_code": "AA2E",
+  "category": "popular",
+  "library_strings": [
+   "EEPROM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Super Mario Advance 3 - Yoshi's Island",
+  "file": "Super Mario Advance 3 - Yoshi's Island (U) [!].gba",
+  "sha1": "7352d2bd064d9ebaec579e264228aa21c7345b80",
+  "game_code": "A3AE",
+  "category": "popular",
+  "library_strings": [
+   "EEPROM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Super Mario Advance",
+  "file": "Super Mario Advance (U) [!].gba",
+  "sha1": "05e41b04cdcd73194c0f836639c5774779f50a3f",
+  "game_code": "AMZE",
+  "category": "popular+save-quirk",
+  "library_strings": [
+   "EEPROM_V"
+  ],
+  "why": "4Kbit EEPROM size autodetect history"
+ },
+ {
+  "title": "Kirby - Nightmare in Dreamland",
+  "file": "Kirby - Nightmare in Dreamland (U) [!].gba",
+  "sha1": "37a476567d133c146fee6b5e2eb0b07a215da6b0",
+  "game_code": "A7KE",
+  "category": "popular",
+  "library_strings": [
+   "SRAM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Kirby & The Amazing Mirror",
+  "file": "Kirby & The Amazing Mirror (U).gba",
+  "sha1": "274b102b6d940f46861a92b4e65f89a51815c12c",
+  "game_code": "B8KE",
+  "category": "popular",
+  "library_strings": [
+   "SRAM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Wario Land 4",
+  "file": "Wario Land 4 (UE) [!].gba",
+  "sha1": "b9fe05a8080e124b67bce6a623234ee3b518a2c1",
+  "game_code": "AWAE",
+  "category": "popular",
+  "library_strings": [
+   "SRAM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "WarioWare Inc.",
+  "file": "WarioWare Inc. (U).gba",
+  "sha1": "3f556448d290fa5406d6ed367fee16cc02387ad3",
+  "game_code": "AZWE",
+  "category": "popular",
+  "library_strings": [
+   "SRAM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Final Fantasy Tactics Advance",
+  "file": "Final Fantasy Tactics Advance (U) [!].gba",
+  "sha1": "4ac05441f4de70a4ec3dd932116346c61b8783d9",
+  "game_code": "AFXE",
+  "category": "popular",
+  "library_strings": [
+   "FLASH512_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Final Fantasy I & II - Dawn of Souls",
+  "file": "Final Fantasy I & II - Dawn of Souls (U).gba",
+  "sha1": "6472695d69661490f78245e2982e1e676c080be7",
+  "game_code": "BFFE",
+  "category": "popular",
+  "library_strings": [
+   "SRAM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Final Fantasy IV Advance",
+  "file": "Final Fantasy IV Advance (U).gba",
+  "sha1": "c49be22eaf999774d5f2983e12ed4aace2950f36",
+  "game_code": "BZ4E",
+  "category": "popular",
+  "library_strings": [
+   "SRAM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Final Fantasy VI Advance",
+  "file": "Final Fantasy VI Advance (U).gba",
+  "sha1": "e9a2a58bc56ace26cb56d0cf5cdad1a10aa5dedf",
+  "game_code": "BZ6E",
+  "category": "popular",
+  "library_strings": [
+   "SRAM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Megaman Zero",
+  "file": "Megaman Zero (U).gba",
+  "sha1": "193b14120119162518a73c70876f0b8bffdbd96e",
+  "game_code": "AZCE",
+  "category": "popular",
+  "library_strings": [
+   "SRAM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Megaman Battle Network 3 - Blue Version",
+  "file": "Megaman Battle Network 3 - Blue Version (U) [!].gba",
+  "sha1": "3d21905b6e860d39a00ba643779776de4c73c411",
+  "game_code": "A3XE",
+  "category": "popular",
+  "library_strings": [
+   "SRAM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Megaman Zero 3",
+  "file": "Megaman Zero 3 (U).gba",
+  "sha1": "403a78f2cad93d41e4b0f2e520ce08026531664b",
+  "game_code": "BZ3E",
+  "category": "popular",
+  "library_strings": [
+   "SRAM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Pokemon Mystery Dungeon - Red Rescue Team",
+  "file": "Pokemon Mystery Dungeon - Red Rescue Team (U).gba",
+  "sha1": "9f4cfc5b5f4859d17169a485462e977c7aac2b89",
+  "game_code": "B24E",
+  "category": "popular",
+  "library_strings": [
+   "FLASH1M_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Harvest Moon - Friends of Mineral Town",
+  "file": "Harvest Moon - Friends of Mineral Town (U) [!].gba",
+  "sha1": "a2fc3574f0a65a4fcf7682fb274b9d7eebdef963",
+  "game_code": "A4NE",
+  "category": "popular",
+  "library_strings": [
+   "SRAM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Sonic Advance",
+  "file": "Sonic Advance (U) [!].gba",
+  "sha1": "d842afa7dd1e84de08addb94a51506f1bcafd551",
+  "game_code": "ASOE",
+  "category": "popular",
+  "library_strings": [
+   "FLASH_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Sonic Advance 2",
+  "file": "Sonic Advance 2 (U) (M6) [!].gba",
+  "sha1": "7bcd6a07af7c894746fa28073fe0c0e34408022d",
+  "game_code": "A2NE",
+  "category": "popular",
+  "library_strings": [
+   "FLASH512_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Mario Kart Super Circuit",
+  "file": "Mario Kart Super Circuit (U) [!].gba",
+  "sha1": "9d327c030c3e2d9007990518594f70c3340ac56f",
+  "game_code": "AMKE",
+  "category": "popular",
+  "library_strings": [
+   "FLASH_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Mario Golf - Advance Tour",
+  "file": "Mario Golf - Advance Tour (U).gba",
+  "sha1": "157058590cfb1d1cb83a3afac4847c2169f360a7",
+  "game_code": "BMGE",
+  "category": "popular",
+  "library_strings": [
+   "SRAM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Mario Tennis Advance - Power Tour",
+  "file": "Mario Tennis Advance - Power Tour (U).gba",
+  "sha1": "794584acbd15a69fb9ac760c0a6f48095805bd59",
+  "game_code": "BTME",
+  "category": "popular",
+  "library_strings": [
+   "SRAM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Donkey Kong Country",
+  "file": "Donkey Kong Country (U) [!].gba",
+  "sha1": "fcc62356a3b7157ca7dda1398c9bf1af1dd31265",
+  "game_code": "A5NE",
+  "category": "popular",
+  "library_strings": [
+   "EEPROM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Donkey Kong Country 2",
+  "file": "Donkey Kong Country 2 (U).gba",
+  "sha1": "b0a4d59447c8d7c321bea4dc7253b0f581129ede",
+  "game_code": "B2DE",
+  "category": "popular",
+  "library_strings": [
+   "EEPROM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Tactics Ogre - The Knight of Lodis",
+  "file": "Tactics Ogre - The Knight of Lodis (U) [!].gba",
+  "sha1": "85a46320a31f16f5c6dda27fc094edd078dbe43d",
+  "game_code": "ATOE",
+  "category": "popular",
+  "library_strings": [
+   "FLASH_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Yu-Gi-Oh! - World Championship Tournament 2004",
+  "file": "Yu-Gi-Oh! - World Championship Tournament 2004 (U) (M6).gba",
+  "sha1": "3a7fceffa1405640fe4606e006d272d1af542f2b",
+  "game_code": "BYWE",
+  "category": "popular",
+  "library_strings": [
+   "SRAM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Dragon Ball Z - The Legacy of Goku II",
+  "file": "Dragon Ball Z - The Legacy of Goku II (U) [!].gba",
+  "sha1": "18e0715dec419f3501c301511530d2edcd590f8b",
+  "game_code": "ALFE",
+  "category": "popular",
+  "library_strings": [
+   "EEPROM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Drill Dozer",
+  "file": "Drill Dozer (U).gba",
+  "sha1": "c1058cc2482b91204100cc8515da99aeb06773f5",
+  "game_code": "V49E",
+  "category": "popular",
+  "library_strings": [
+   "SRAM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Boktai - The Sun is in Your Hand",
+  "file": "Boktai - The Sun is in Your Hand (U) [!].gba",
+  "sha1": "7164326283df46a3941ec7b6ceca889cbc40e660",
+  "game_code": "U3IE",
+  "category": "popular",
+  "library_strings": [
+   "EEPROM_V",
+   "SIIRTC_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Kingdom Hearts - Chain of Memories",
+  "file": "Kingdom Hearts - Chain of Memories (U).gba",
+  "sha1": "10729bd884f8fdca7a310b6d606c52e46657aa48",
+  "game_code": "B8CE",
+  "category": "popular",
+  "library_strings": [
+   "SRAM_F_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Sword of Mana",
+  "file": "Sword of Mana (U) [!].gba",
+  "sha1": "a7ff0b4482c7c3b19467af37c3e277321cd9f1cd",
+  "game_code": "AVSE",
+  "category": "popular",
+  "library_strings": [
+   "FLASH512_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Pokemon Pinball - Ruby & Sapphire",
+  "file": "Pokemon Pinball - Ruby & Sapphire (E) (M5).gba",
+  "sha1": "b8b7881eaa9856b5ada99078ad1053d31cb79827",
+  "game_code": "BPPP",
+  "category": "popular",
+  "library_strings": [
+   "SRAM_F_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Astro Boy - Omega Factor",
+  "file": "Astro Boy - Omega Factor (U) (M6).gba",
+  "sha1": "4d652c24979dd7a08ee683b32d1d8986a5511a87",
+  "game_code": "BTAE",
+  "category": "popular",
+  "library_strings": [
+   "EEPROM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Metal Slug Advance",
+  "file": "Metal Slug Advance (U).gba",
+  "sha1": "067e1511ab6becf797f1bbd321a858e96a0349af",
+  "game_code": "BSME",
+  "category": "popular",
+  "library_strings": [
+   "EEPROM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Mario Party Advance",
+  "file": "Mario Party Advance (U).gba",
+  "sha1": "fa917d74d592260c3d6142a969fcbd94156f956b",
+  "game_code": "B8ME",
+  "category": "popular",
+  "library_strings": [
+   "EEPROM_V"
+  ],
+  "why": ""
+ },
+ {
+  "title": "Hello Kitty - Happy Party Pals",
+  "file": "Hello Kitty - Happy Party Pals (U).gba",
+  "sha1": "43496b1527dbe90627ab02a54a30acbcf42a3bdc",
+  "game_code": "B86E",
+  "category": "save-quirk",
+  "library_strings": [],
+  "why": "no save-type string in the ROM"
+ },
+ {
+  "title": "Disney's Kim Possible 2 - Drakken's Demise",
+  "file": "Disney's Kim Possible 2 - Drakken's Demise (U).gba",
+  "sha1": "d2baaec3c20b48bebe79ebe27761cd107fd067bf",
+  "game_code": "BKME",
+  "category": "save-quirk",
+  "library_strings": [
+   "EEPROM_V",
+   "FLASH512_V"
+  ],
+  "why": "EEPROM and FLASH512 strings"
+ },
+ {
+  "title": "Medabots AX - Metabee Version",
+  "file": "Medabots AX - Metabee Version (U).gba",
+  "sha1": "80c024df6d40e499776665d7f0c494a252973048",
+  "game_code": "AK8E",
+  "category": "save-quirk",
+  "library_strings": [
+   "EEPROM_V",
+   "FLASH_V"
+  ],
+  "why": "EEPROM and FLASH strings"
+ },
+ {
+  "title": "Super Monkey Ball Jr",
+  "file": "Super Monkey Ball Jr (U) [!].gba",
+  "sha1": "0d994a58b7acdfe9357e5405acebe232128b80fe",
+  "game_code": "ALUE",
+  "category": "save-quirk",
+  "library_strings": [
+   "EEPROM_V",
+   "SRAM_V",
+   "FLASH_V"
+  ],
+  "why": "EEPROM, SRAM and FLASH strings"
+ },
+ {
+  "title": "Top Gun - Combat Zones",
+  "file": "Top Gun - Combat Zones (U).gba",
+  "sha1": "4f6ae177d236657a075e3366ed4f90c97b03f10d",
+  "game_code": "A2YE",
+  "category": "save-quirk",
+  "library_strings": [
+   "SRAM_V",
+   "FLASH512_V",
+   "FLASH1M_V"
+  ],
+  "why": "SRAM, FLASH512 and FLASH1M strings; saves nothing"
+ },
+ {
+  "title": "Onimusha Tactics",
+  "file": "Onimusha Tactics (U).gba",
+  "sha1": "83abee3aa535590f666d7e9a6971640d8a41aa9d",
+  "game_code": "A6OE",
+  "category": "save-quirk",
+  "library_strings": [
+   "EEPROM_V",
+   "SRAM_V"
+  ],
+  "why": "EEPROM and SRAM strings"
+ },
+ {
+  "title": "Rocky",
+  "file": "Rocky (U) (M5).gba",
+  "sha1": "50a2b4d10542274d5a37c6cd5c8541a3ba8d5681",
+  "game_code": "AR8E",
+  "category": "save-quirk",
+  "library_strings": [
+   "EEPROM_V",
+   "SRAM_V"
+  ],
+  "why": "EEPROM and SRAM strings"
+ },
+ {
+  "title": "Yu-Gi-Oh! - The Sacred Cards",
+  "file": "Yu-Gi-Oh! - The Sacred Cards (U) [!].gba",
+  "sha1": "a06735f9c3d10be9339657026981aef77af34b27",
+  "game_code": "AY7E",
+  "category": "save-quirk",
+  "library_strings": [
+   "SRAM_V",
+   "SRAM_F_V"
+  ],
+  "why": "SRAM and SRAM_F (FRAM) strings"
+ },
+ {
+  "title": "Classic NES Series - Super Mario Bros.",
+  "file": "Classic NES Series - Super Mario Bros. (U).gba",
+  "sha1": "8ca35864ae33c9462dd66ceff1fac5a79e2e0a6f",
+  "game_code": "FSME",
+  "category": "save-quirk",
+  "library_strings": [
+   "EEPROM_V"
+  ],
+  "why": "4Kbit EEPROM + emulator checks"
+ },
+ {
+  "title": "Classic NES Series - Metroid",
+  "file": "Classic NES Series - Metroid (U).gba",
+  "sha1": "838da11f879e2fa3ffdef95e1c6d5a54246c1846",
+  "game_code": "FMRE",
+  "category": "save-quirk",
+  "library_strings": [
+   "EEPROM_V"
+  ],
+  "why": "4Kbit EEPROM; sized-from-.sav history"
+ },
+ {
+  "title": "Yoshi Topsy-Turvy",
+  "file": "Yoshi Topsy-Turvy (U).gba",
+  "sha1": "947498cb1db918d305500257e8223deeaddf561d",
+  "game_code": "KYGE",
+  "category": "save-quirk",
+  "library_strings": [
+   "EEPROM_V"
+  ],
+  "why": "EEPROM + tilt sensor"
+ },
+ {
+  "title": "Koro Koro Puzzle - Happy Panechu!",
+  "file": "Koro Koro Puzzle - Happy Panechu! (J) [!].gba",
+  "sha1": "40cb751d119a49be0cd44cf0491c93ebc8795ef0",
+  "game_code": "KHPJ",
+  "category": "save-quirk",
+  "library_strings": [
+   "EEPROM_V"
+  ],
+  "why": "EEPROM + tilt sensor"
+ },
+ {
+  "title": "Dragon Ball Z - The Legacy of Goku",
+  "file": "Dragon Ball Z - The Legacy of Goku (U) [!].gba",
+  "sha1": "a3c8c76742f11fc6a3f6e3fcca20992458cac0b5",
+  "game_code": "ALGE",
+  "category": "save-quirk",
+  "library_strings": [
+   "EEPROM_V"
+  ],
+  "why": "EEPROM 4K vs 64K"
+ },
+ {
+  "title": "Sonic Pinball Party",
+  "file": "Sonic Pinball Party (U) (M6).gba",
+  "sha1": "92b5c19cb4dee8fdfc15a8abdc699822d5373042",
+  "game_code": "A3VE",
+  "category": "save-quirk",
+  "library_strings": [
+   "FLASH512_V"
+  ],
+  "why": "FLASH512"
+ },
+ {
+  "title": "Battle Network Rockman EXE 4.5 - Real Operation",
+  "file": "Battle Network Rockman EXE 4.5 - Real Operation (J).gba",
+  "sha1": "f89ef4ca8ec1823eb75fa184f2d0f9e66cc78a59",
+  "game_code": "BR4J",
+  "category": "save-quirk",
+  "library_strings": [
+   "SRAM_V",
+   "FLASH512_V",
+   "SIIRTC_V"
+  ],
+  "why": "SRAM and FLASH512 strings + RTC"
+ },
+ {
+  "title": "Sennen Kazoku",
+  "file": "Sennen Kazoku (J).gba",
+  "sha1": "4dcd7cee46d3a5e848a22eb371bebbbc2fb8d488",
+  "game_code": "BKAJ",
+  "category": "save-quirk",
+  "library_strings": [
+   "FLASH1M_V",
+   "SIIRTC_V"
+  ],
+  "why": "FLASH1M + RTC"
+ },
+ {
+  "title": "Hello Kitty Collection Miracle",
+  "file": "Hello Kitty Collection Miracle (J).gba",
+  "sha1": "5242170ad6fe8f1169e423f13f77ad18f54d3659",
+  "game_code": "AKTJ",
+  "category": "save-quirk",
+  "library_strings": [
+   "EEPROM_V"
+  ],
+  "why": "Hello Kitty Collection - Miracle Fashion Maker: known save-detection trouble"
+ }
+]

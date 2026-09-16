@@ -621,6 +621,54 @@ proc current_cheat_engine(): CheatEngine
 proc load_cheats()
 proc on_cheats_changed()
 
+# ──────────────────────────── Input log ────────────────────────────
+# DINGBAT_INPUT_LOG=<path> records a GBA session's keypad as "<frame> <mask>"
+# lines (mask in KEYINPUT bit order, set before that frame runs) for
+# tools/playtest, which replays it headless and turns it into a script. Loading
+# a state or rewinding breaks the frame timeline; the log says so.
+
+var input_log: system.File
+var input_log_open = false
+var input_log_frame = 0
+var input_log_mask = 0
+
+proc input_log_start(rom_path: string) =
+  let path = getEnv("DINGBAT_INPUT_LOG")
+  if path.len == 0: return
+  if input_log_open: input_log.close()
+  # append: every ROM load (including a reset) starts a new session in the file
+  input_log_open = open(input_log, path, fmAppend)
+  if not input_log_open:
+    echo "input log: cannot write ", path
+    return
+  input_log.writeLine "session " & $getTime().toUnix
+  input_log.writeLine "rom " & rom_path
+  input_log.writeLine &"bios run_bios={app.cfg.run_bios} use_hle={app.cfg.use_hle} hle_after_bios={app.cfg.hle_after_bios}"
+  input_log.flushFile()
+  input_log_frame = 0
+  input_log_mask = 0
+  echo "input log: recording to ", path
+
+proc input_log_frame_start() =
+  if not input_log_open: return
+  let mask = int(not toU16(app.gba_emu.keypad.keyinput) and 0x03FF'u16)
+  if mask != input_log_mask:
+    input_log.writeLine &"{input_log_frame} {mask}"
+    input_log.flushFile()
+    input_log_mask = mask
+  inc input_log_frame
+
+proc input_log_event(what: string) =
+  if not input_log_open: return
+  input_log.writeLine &"desync {input_log_frame} {what}"
+  input_log.flushFile()
+
+proc input_log_close() =
+  if not input_log_open: return
+  input_log.writeLine &"end {input_log_frame}"
+  input_log.close()
+  input_log_open = false
+
 proc load_rom(path: string) =
   if not fileExists(path):
     echo "ROM not found: ", path; return
@@ -652,6 +700,7 @@ proc load_rom(path: string) =
     let bios = app.cfg.bios_path
     app.gba_emu = new_gba(bios, rom_path, app.cfg.run_bios, app.cfg.use_hle, app.cfg.hle_after_bios)
     app.gba_emu.post_init()
+    input_log_start(rom_path)
     app.gb_emu = nil
     app.emu_kind = ekGBA
     app.border_shown = false
@@ -777,7 +826,9 @@ proc load_state_slot(slot: int): bool =
     of ekGBA: app.gba_emu.load_state(path)
     of ekGB:  app.gb_emu.load_state(path)
     of ekNone: false
-  if result: echo "State loaded: ", path
+  if result:
+    echo "State loaded: ", path
+    input_log_event("state_load")
 
 proc state_reject_sentence(): string =
   ## One sentence per StateRejectKind, saying what to do about it; never raw
@@ -2362,6 +2413,7 @@ proc main() =
         app.last_rewind_pop = now_r
         let snap = app.rewind.pop()
         if snap.len > 0:
+          input_log_event("rewind")
           try:
             case app.emu_kind
             of ekGBA: app.gba_emu.apply_state_payload(snap)
@@ -2389,6 +2441,7 @@ proc main() =
               echo "NETLINK: peer disconnected — continuing single-player"
               teardown_netlink()
           else:
+            input_log_frame_start()
             app.gba_emu.run_until_frame()
             emulated = true
       of ekGB:
@@ -2526,5 +2579,6 @@ proc main() =
       # Idle until audio drains or the next present slot; don't busy-spin
       delay(1)
   flush_gb_save()
+  input_log_close()
 
 main()
