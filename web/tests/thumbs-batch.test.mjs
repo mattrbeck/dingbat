@@ -235,7 +235,8 @@ test("every unpictured local game is booted, resumed where it can be, and pictur
   const app = await loadApp();
   stubModule(app);
   seedLibrary(app, ["A.gba", "B.gb", "C.gba"]);
-  app.idb.set("stateauto:A.gba", { bytes: u8(9, 9, 9), ts: 1 });
+  // Taken with no battery save, and none written since: Resume would offer it.
+  app.idb.set("stateauto:A.gba", { bytes: u8(9, 9, 9), ts: 1, saveSig: null });
   app.idb.set("save:B.gb", u8(5, 5));
   const cPicture = new Blob([u8(7)]);
   app.idb.set("frame:C.gba", cPicture);

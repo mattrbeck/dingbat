@@ -25,8 +25,7 @@ const perGameKeys = (n) => [
 
 // The subset Drive mirrors (what parseDriveFileName recognises).
 const syncableKeys = (n) =>
-  perGameKeys(n).filter((k) =>
-    !k.startsWith("art:") && !k.startsWith("stateauto:") && !k.startsWith("cheats:"));
+  perGameKeys(n).filter((k) => !k.startsWith("art:") && !k.startsWith("cheats:"));
 
 const seedValue = (key, name) => {
   if (key.startsWith("rom:")) return { name, data: u8(1, 2, 3, 4) };
