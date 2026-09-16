@@ -1171,7 +1171,7 @@ line nor what the CPU's bus is doing, which is what a scheduler event
 fired off the PPU should look like. `+16` reads `0x04C1` = 1217, a
 1232-cycle line less the ROM-polled anchor's offset.
 
-`ALL` for this build is **7F7C** (`-auto`, HLE BIOS); pages 0-49 are
+`ALL` for the v9b build (with page 51) is **9C6C** (`-auto`, HLE BIOS); pages 0-49 are
 byte-identical to the v8 build under the same emulator, verified by
 capturing both and diffing every per-page CRC. The page's own absolute
 stamps drift a few cycles between builds of this ROM, which is the
@@ -1181,3 +1181,86 @@ If the DMA instead rides the latched flag, the write lands ~8 cycles after
 a grant at 1012 while the flag rose at 1006, so hardware should read
 **about +4 to +14** — the other side of zero, ~60 cycles away from what
 dingbat says. There is no reading in between that both models can produce.
+
+---
+
+# GBA probe page v9b — whose first PSG trigger dies?
+
+**51 PSGFIRST**, hex. It finishes the one question session 5 left explicitly
+open.
+
+Page 44 PSGPHASE found that every ch1 trigger which is the **first trigger
+after a SOUNDCNT_X 0→1** dies at once — for lengths 1, 2 and 4 ticks alike,
+with SOUNDCNT_X reading `80` right after — while a ch2 trigger two stores
+later lived its full 486 polls. That rules out a length-unit effect and
+leaves two candidates, which `docs/hwprobe-results-agb.md` records as "one
+follow-up page decides": is it **ch1 specific** (the sweep unit is what ch1
+has and ch2 has not), or does the **first trigger of any channel** after a
+master-on die?
+
+Every row is the same poll count as page 44 — one `ldrh SOUNDCNT_X`, a test
+and an increment, ~5.5 cycles on hardware — so the two pages are directly
+comparable.
+
+**One thing deliberately differs from page 44: the length.** Page 44 used
+length 63, i.e. a counter of one 256 Hz tick, which makes every row a knife
+edge on the frame sequencer's phase — a single spurious clock at the trigger
+is the difference between the whole tone and none of it. Every row here
+loads a counter of **16** ticks instead, so a spurious clock costs a
+sixteenth and "died at once" (a few hundred polls or fewer) is
+unmistakable against "lived" (~17 600).
+
+## Slot
+
+```
++0  (h) ch1 counter 16, the first trigger after a master off/on
++2  (h) ch2, likewise      +4  (h) ch3, likewise     +6  (h) ch4, likewise
++8  (h) ch1 as +0 with NR10 written 0 (sweep off, the reset state)
++10 (h) ch1 as +0 with NR10 = 0x11 (sweep period 1, shift 1: unit running)
++12 (h) ch1 triggered SECOND, after a ch2 trigger took the first slot
++14 (h) that ch2 trigger's own count
++16 (h) ch1's second trigger, its own first one discarded
++18 (h) ch1 again with no master toggle at all in front of it
++20 (b) SOUNDCNT_X as the BIOS left it, read in main before any probe
+        wrote IO: does the boot state already have bit 7 set?
++21/+22/+23 (b) SOUNDCNT_X right after the +0, +2 and +6 triggers
++24 (h) ch1's first trigger with the length counter DISABLED
++26 (h) ch2's first trigger with the length counter DISABLED
++28 (h) rows that hit the poll cap; a capped row itself reads FFFF
++31 (b) marker 51
+```
+
+## How to read it
+
+* `+2`/`+4`/`+6` all short like `+0` — the first trigger of **any** channel
+  dies; a master-on leaves the whole PSG unready for one trigger.
+* `+2`/`+4`/`+6` long while `+0` is short — **ch1 specific**, and then
+  `+10` against `+8` says whether the sweep unit running is what does it.
+* `+12` long while `+0` is short — it is the **first trigger** that dies,
+  not ch1: the same channel lives once another channel has gone first.
+  Together with `+16` that separates "first trigger after master-on" from
+  "first trigger of this channel".
+* `+24`/`+26` short — the channel is being silenced by something other than
+  its length counter, since length is disabled there and nothing should ever
+  clear the active bit. `FFFF` in those two is the healthy answer.
+* `+20` is free evidence either way: if the BIOS hands over with bit 7
+  already set, a game's own master-on is a 1→1 write, not 0→1, and the
+  effect may never fire in practice.
+
+**dingbat predicts** page CRC **747B**:
+
+```
+DD 48 BA 44  B8 44 BB 44  BA 44 18 07  1A 47 BB 44
+D9 4B D8 4B  00 81 82 88  FF FF FF FF  02 00 00 33
+```
+
+Every channel lives: `+0` 18653 polls, `+2`/`+4`/`+6` about 17594 each (the
+spread is sequencer phase between trials, not a difference in kind), and
+`+12`/`+16`/`+18` the same again. So dingbat has **no** first-trigger effect
+at all, which is the same disagreement page 44 already showed on ch1 —
+hardware 0, dingbat alive. `+10` at 1816 is the sweep running the frequency
+up into its overflow cutoff, which is the sweep unit working normally and is
+a useful control: it proves the row's NR10 write took effect. `+24`/`+26`
+read `FFFF` with `+28` = 2, i.e. both length-disabled rows ran to the cap
+without expiring, as they should. `+20` reads `00`, i.e. the pages before this one left the PSG master off,
+which is the state every row here assumes.

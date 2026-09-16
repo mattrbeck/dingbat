@@ -15,7 +15,7 @@
 @  36 MSRTBIT2  37 OBJBUDGET† 38 OBJGEOM† 39 DMAOPENBUS
 @  40 IRQDECOMP 41 CONTEND2 42 MULTIME  43 TIMPHASE 44 PSGPHASE
 @  45 MEMCTL   46 DMATIME  47 IWCYCLE  48 DMAFIFO  49 UNDMODE‡
-@  50 HDMAPHASE
+@  50 HDMAPHASE 51 PSGFIRST
 @ (†visual: the page is a picture drawn with OBJs in mode 0, not a hex
 @  dump — tests/roms/README-probes-gba.md says what to photograph)
 @ (‡UNDMODE writes an undefined CPSR mode number: HOLD SELECT AT POWER-ON
@@ -4281,6 +4281,7 @@ probe_tail3:
     bl  probe_iwcycle
     bl  probe_dmafifo
     bl  probe_hdmaphase
+    bl  probe_psgfirst
     bl  probe_undmode
     pop {pc}
     .ltorg
@@ -6168,6 +6169,199 @@ probe_hdmaphase:
     strb r0, [r1, #30]
     mov r0, #50
     strb r0, [r1, #31]
+    pop {r4-r11, pc}
+    .ltorg
+
+
+@ ── slot 51: PSGFIRST — whose first trigger dies, and why? ───────────────
+@ Session 5 (docs/hwprobe-results-agb.md, p44 PSGPHASE) found that every ch1
+@ trigger which is the FIRST trigger after a SOUNDCNT_X 0->1 dies at once,
+@ for lengths 1, 2 and 4 ticks alike, while a ch2 trigger two stores later
+@ lives its full 486 polls.  That is not a length-unit effect, and the note
+@ left one question: is it ch1 specific (its sweep unit is what ch1 has and
+@ ch2 has not), or does the first trigger of ANY channel after a master-on
+@ die?  Every row here is the same poll count as p44 — one `ldrh
+@ SOUNDCNT_X`, a test and an increment, ~5.5 cycles on hardware — so the
+@ numbers are directly comparable with that page.
+@
+@ Read it like this:
+@   +2/+4/+6 all short like +0   -> the first trigger of ANY channel dies;
+@       the master-on write leaves the whole PSG unready for one trigger
+@   +2/+4/+6 long, +0 short      -> ch1 specific, and +10 vs +8 says whether
+@       the sweep unit is what does it
+@   +12 long while +0 is short   -> it is the FIRST trigger that dies, not
+@       ch1: the same channel lives once another channel went first
+@   +24/+26 short                -> the channel is being silenced by
+@       something other than its length counter, since length is disabled
+@       in those two rows and nothing should ever clear the active bit
+@
+@ +0  (h) ch1 counter 16, the first trigger after a master off/on
+@ +2  (h) ch2 counter 16, the first trigger after a master off/on
+@ +4  (h) ch3 counter 16, the first trigger after a master off/on
+@ +6  (h) ch4 counter 16, the first trigger after a master off/on
+@ +8  (h) ch1 as +0 with NR10 written 0 (sweep off, the reset state)
+@ +10 (h) ch1 as +0 with NR10 = 0x11 (sweep period 1, shift 1: unit active)
+@ +12 (h) ch1 triggered SECOND, after a ch2 trigger took the first slot
+@ +14 (h) that ch2 trigger's own count
+@ +16 (h) ch1's second trigger, its own first one discarded
+@ +18 (h) ch1 again with no master toggle at all in front of it
+@ +20 (b) SOUNDCNT_X on entry, as the earlier pages left it — a state
+@   check, not the BIOS handoff value: reading that in main would shift the
+@   boot phase TIMERS / IRQLAT / SWEEP2 / IRQDECOMP ride
+@ +21/+22/+23 (b,b,b) SOUNDCNT_X read immediately after the +0, +2 and +6
+@   triggers
+@ +24 (h) ch1's first trigger with the length counter DISABLED
+@ +26 (h) ch2's first trigger with the length counter DISABLED
+@ +28 (h) rows that hit the poll cap; a capped row itself reads FFFF
+@ +31 (b) marker 51
+
+@ r4 = IOBASE, r9 = poll-cap hits.  r0 = the NRx1/NRx2 halfword, r1 = the
+@ trigger halfword -> r3 = poll iterations, r6 = SOUNDCNT_X after the trigger
+.macro pf_wait ctl, trig, bit
+    strh r0, [r4, #\ctl]
+    strh r1, [r4, #\trig]
+    ldrh r6, [r4, #0x84]
+    ldr r2, =0x00060000
+    mov r3, #0
+1:  ldrh r0, [r4, #0x84]
+    tst r0, #\bit
+    beq 2f
+    add r3, r3, #1
+    subs r2, r2, #1
+    bne 1b
+    add r9, r9, #1
+    mvn r3, #0                     @ never expired: 0xFFFF, not a truncated
+                                   @ 0x60000 that would read as "died at once"
+2:
+.endm
+
+@ master off (which clears every PSG register) then on, and the mixer set up
+@ for all four channels
+.macro pf_reset
+    mov r0, #0
+    strh r0, [r4, #0x84]
+    mov r0, #0x80
+    strh r0, [r4, #0x84]
+    ldr r0, =0xFF77                @ all four channels, both sides, full
+    strh r0, [r4, #0x80]
+    mov r0, #2
+    strh r0, [r4, #0x82]           @ PSG ratio 100 %
+.endm
+
+@ ch3 needs its DAC on and a non-zero wave before it will play at all
+.macro pf_wave
+    mov r0, #0x80
+    strh r0, [r4, #0x70]           @ NR30: DAC on, bank 0
+    ldr r0, =0x04000090
+    mvn r1, #0
+    str r1, [r0, #0]
+    str r1, [r0, #4]
+    str r1, [r0, #8]
+    str r1, [r0, #12]
+.endm
+
+probe_psgfirst:
+    push {r4-r11, lr}
+    ldr r0, =SLOTS + 51*SLOTSZ     @ our own slot (EWRAM boots as noise)
+    mov r1, #0
+    mov r2, #(SLOTSZ / 4)
+    bl  fill_words
+    ldr r8, =SLOTS + 51*SLOTSZ
+    mov r4, #IOBASE
+    mov r9, #0                     @ poll-cap hits
+    ldrh r10, [r4, #0x84]          @ before this page writes it
+
+    @ ── the first trigger after a master-on, one channel at a time ──
+    pf_reset
+    ldr r0, =0xF0B0                @ envelope 15, duty 2, counter 16
+    ldr r1, =0xC400                @ trigger + length enable
+    pf_wait 0x62, 0x64, 1
+    strh r3, [r8, #0]
+    strb r6, [r8, #21]
+
+    pf_reset
+    ldr r0, =0xF0B0
+    ldr r1, =0xC400
+    pf_wait 0x68, 0x6C, 2
+    strh r3, [r8, #2]
+    strb r6, [r8, #22]
+
+    pf_reset
+    pf_wave
+    ldr r0, =0x20F0                @ NR32 volume 100 %, NR31 counter 16
+    ldr r1, =0xC000                @ trigger + length enable
+    pf_wait 0x72, 0x74, 4
+    strh r3, [r8, #4]
+
+    pf_reset
+    ldr r0, =0xF030                @ NR42 envelope 15, NR41 counter 16
+    ldr r1, =0xC000                @ NR44 trigger + length enable, NR43 = 0
+    pf_wait 0x78, 0x7C, 8
+    strh r3, [r8, #6]
+    strb r6, [r8, #23]
+
+    @ ── ch1's sweep unit idle vs running ──
+    pf_reset
+    mov r0, #0
+    strh r0, [r4, #0x60]           @ NR10: no sweep (also the reset state)
+    ldr r0, =0xF0B0
+    ldr r1, =0xC400
+    pf_wait 0x62, 0x64, 1
+    strh r3, [r8, #8]
+
+    pf_reset
+    mov r0, #0x11                  @ NR10: period 1, shift 1 — unit running
+    strh r0, [r4, #0x60]
+    ldr r0, =0xF0B0
+    ldr r1, =0xC400
+    pf_wait 0x62, 0x64, 1
+    strh r3, [r8, #10]
+
+    @ ── is it ch1, or is it whoever goes first? ──
+    pf_reset
+    ldr r0, =0xF0B0
+    ldr r1, =0xC400
+    pf_wait 0x68, 0x6C, 2          @ ch2 takes the first slot ...
+    strh r3, [r8, #14]
+    ldr r0, =0xF0B0
+    ldr r1, =0xC400
+    pf_wait 0x62, 0x64, 1          @ ... so ch1 is only the second trigger
+    strh r3, [r8, #12]
+
+    @ ── ch1's own second trigger, and ch1 with no master toggle ──
+    pf_reset
+    ldr r0, =0xF0B0
+    ldr r1, =0xC400
+    pf_wait 0x62, 0x64, 1          @ discarded
+    ldr r0, =0xF0B0
+    ldr r1, =0xC400
+    pf_wait 0x62, 0x64, 1
+    strh r3, [r8, #16]
+
+    ldr r0, =0xF0B0
+    ldr r1, =0xC400
+    pf_wait 0x62, 0x64, 1
+    strh r3, [r8, #18]
+
+    @ ── the same two first triggers with the length counter disabled ──
+    pf_reset
+    ldr r0, =0xF0B0
+    ldr r1, =0x8000                @ trigger, length enable CLEAR
+    pf_wait 0x62, 0x64, 1
+    strh r3, [r8, #24]
+
+    pf_reset
+    ldr r0, =0xF0B0
+    ldr r1, =0x8000
+    pf_wait 0x68, 0x6C, 2
+    strh r3, [r8, #26]
+
+    strb r10, [r8, #20]            @ SOUNDCNT_X as the earlier pages left it
+    strh r9, [r8, #28]
+    mov r0, #51
+    strb r0, [r8, #31]
+    mov r0, #0
+    strh r0, [r4, #0x84]           @ leave the PSG off behind us
     pop {r4-r11, pc}
     .ltorg
 

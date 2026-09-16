@@ -37,8 +37,9 @@ PAGES = ["IDENT", "OPENBUS", "BIOSPROT", "SWITIME", "TIMERS", "DMALATCH",
          # (all hex pages; UNDMODE is skipped when SELECT is held at boot)
          "IRQDECOMP", "CONTEND2", "MULTIME", "TIMPHASE", "PSGPHASE",
          "MEMCTL", "DMATIME", "IWCYCLE", "DMAFIFO", "UNDMODE",
-         # v9: when in the scanline an H-blank DMA is granted the bus
-         "HDMAPHASE"]
+         # v9: when in the scanline an H-blank DMA is granted the bus,
+         # and whose first trigger after a PSG master-on dies
+         "HDMAPHASE", "PSGFIRST"]
 
 
 
