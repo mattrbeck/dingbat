@@ -55,6 +55,18 @@ class Executor:
         state = {}
         if cond['kind'] == 'changed':
             state['start'] = self.emu.hash()
+        if cond['kind'] == 'stable' and before_poll:
+            # mash until stable: the screen must stop changing for N frames
+            # across the input pattern
+            need, last, since = cond['arg'], self.emu.hash(), self.emu.frame
+            while self.emu.frame - start < step['timeout']:
+                before_poll()
+                h = self.emu.hash()
+                if h != last:
+                    last, since = h, self.emu.frame
+                elif self.emu.frame - since >= need:
+                    return self.emu.frame - start
+            raise StepFailed(step, f"screen never stable for {need} frames", self.emu.frame)
         if cond['kind'] == 'stable':
             need, last, streak = cond['arg'], None, 0
             while self.emu.frame - start < step['timeout']:

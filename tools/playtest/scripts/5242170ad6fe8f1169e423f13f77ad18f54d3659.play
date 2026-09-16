@@ -1,0 +1,56 @@
+@title Hello Kitty Collection - Miracle Fashion Maker (Japan)
+@file Hello Kitty Collection Miracle (J).gba
+@game AKTJ
+@chip EEPROM (EEPROM_V string)
+@status wip: reaches the first board-game turn after the prologue, brand-name entry and bear tutorial; no save written yet (EEPROM still blank in all three) and no save menu found on START
+
+# Japanese: OCR reads only garbage, so conditions are loose and most steps
+# are timed presses. What a human needs to do from the board: play until the
+# game saves (probably at the end of the first day / back home, or a save
+# option in some menu) and note the screen that confirms it.
+# Route: title -> A on "はじめから" -> ~110 dialog pages of prologue (the
+# typewriter text ignores a held A, one tap per page) -> brand name entry:
+# A types "あ", START jumps to "けってい", A, then A on "はい" -> ~20 pages of
+# the bear's tutorial -> board with a rolled "5".
+
+[new]
+until text "SANRIO" timeout=900 every=10
+wait 120
+# skip the story intro to the title
+press START after=120
+press START after=120
+wait 30
+checkpoint title
+press A after=240
+# prologue: about 110 pages; stop when the brand-name keyboard is up
+mash A until text "66ZT" timeout=15000 every=90
+wait 60
+checkpoint name_entry
+press A after=30
+press START after=30
+press A after=120
+checkpoint name_confirm
+press A after=200
+# bear tutorial
+press A after=70
+press A after=70
+press A after=70
+press A after=70
+press A after=70
+press A after=70
+press A after=70
+press A after=70
+press A after=70
+press A after=70
+press A after=70
+press A after=70
+press A after=70
+press A after=70
+press A after=70
+press A after=70
+press A after=70
+press A after=70
+press A after=70
+press A after=70
+checkpoint board
+# TODO: play to the first save

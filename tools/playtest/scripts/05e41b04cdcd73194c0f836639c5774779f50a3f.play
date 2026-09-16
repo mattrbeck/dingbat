@@ -1,0 +1,63 @@
+@title Super Mario Advance (USA)
+@file Super Mario Advance (U) [!].gba
+@game AMZE
+@chip EEPROM 4Kbit
+
+# Super Mario 2, File A as Mario, pause in 1-1 and SAVE AND QUIT; the
+# title then leads back to a file select whose File A reads WORLD 1-1.
+
+[new]
+wait 600
+press START
+until text "Single Player" timeout=600 every=10
+checkpoint title
+press A
+until text "Choose a Game" timeout=600 every=10
+wait 60
+press A hold=10
+until text "ERASE" timeout=600 every=10
+wait 60
+checkpoint file_select
+press A
+until text "CHOOSE A PLAYER" timeout=600 every=10
+wait 60
+checkpoint player_select
+press A hold=10
+until notext "CHOOSE A PLAYER" timeout=600 every=10
+wait 600
+mash START until text "PAUSE" timeout=900 every=60
+wait 20
+checkpoint paused
+press DOWN after=20
+press DOWN after=20
+press A after=30
+until text "Single Player" timeout=900 every=10
+checkpoint quit_to_title
+press A
+until text "Choose a Game" timeout=600 every=10
+wait 60
+press A hold=10
+until text "ERASE" timeout=600 every=10
+wait 60
+checkpoint saved window=10
+
+[load]
+wait 600
+press START
+until text "Single Player" timeout=600 every=10
+press A
+until text "Choose a Game" timeout=600 every=10
+wait 60
+press A hold=10
+until text "ERASE" timeout=600 every=10
+wait 60
+checkpoint file_select_loaded window=10
+press A
+until text "CHOOSE A PLAYER" timeout=600 every=10
+wait 60
+press A hold=10
+until notext "CHOOSE A PLAYER" timeout=600 every=10
+wait 600
+mash START until text "PAUSE" timeout=900 every=60
+wait 20
+checkpoint resumed_paused

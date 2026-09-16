@@ -54,6 +54,11 @@ def classify(a, b):
         m['why'] = 'palette step only'
     elif m['ncc'] >= 0.85 and text_sim >= 0.6:
         m['verdict'] = 'DIFFERENT'
+    elif (m['ncc'] >= 0.98 and m['mae'] < 0.5) or (m['ncc'] >= 0.995 and m['mae'] < 1.0):
+        # the layout matches almost exactly: OCR words churning over small
+        # differences (tinted windows, a moving sprite) must not make it MAJOR
+        m['verdict'] = 'DIFFERENT'
+        m['why'] = 'same layout, OCR text differs'
     else:
         m['verdict'] = 'MAJOR'
     return m

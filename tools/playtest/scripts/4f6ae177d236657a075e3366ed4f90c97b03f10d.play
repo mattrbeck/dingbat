@@ -1,0 +1,43 @@
+@title Top Gun - Combat Zones (USA)
+@file Top Gun - Combat Zones (U).gba
+@game A2YE
+@save none
+@chip none (ROM names SRAM, FLASH512 and FLASH1M; progress is by PASSWORD)
+
+# The game has no in-game save: the main menu offers START / PASSWORD /
+# OPTIONS / CREDITS and progress is carried by passwords. This plays into
+# the first training flight; the check is that it gets there and that no
+# emulator writes a battery file (there is deliberately no [load]).
+# At boot the game probes the save area: it writes "TiTus Interactive Studio"
+# at 0x0E000000 and pokes 0x0E005555/0x0E002AAA.
+
+[new]
+wait 600
+press START after=200
+until text "ENGLISH" timeout=600 every=10
+wait 30
+checkpoint language
+press A hold=10
+until notext "ENGLISH" timeout=600 every=10
+wait 120
+press START hold=10
+until text "MAIN MENU" timeout=900 every=10
+wait 60
+checkpoint main_menu window=10
+press A hold=10
+until text "HARD" timeout=300 every=10
+wait 30
+checkpoint difficulty window=0
+press A hold=10
+until text "Tomcat" timeout=300 every=10
+wait 30
+checkpoint aircraft window=0
+press A hold=10 after=200
+checkpoint briefing window=0
+press A hold=10 after=300
+press A hold=10 after=300
+press START hold=10 after=400
+press A hold=10 after=200
+press A hold=10 after=200
+press A hold=10 after=300
+checkpoint flight window=0

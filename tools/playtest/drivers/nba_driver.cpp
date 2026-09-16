@@ -13,8 +13,7 @@
 #include <nba/core.hpp>
 #include <platform/loader/bios.hpp>
 #include <platform/loader/rom.hpp>
-#include <platform/loader/save_state.hpp>
-#include <platform/writer/save_state.hpp>
+#include <nba/save_state.hpp>
 
 #include <cstdio>
 #include <unistd.h>
@@ -144,11 +143,24 @@ int main(int argc, char** argv) {
     } else if (cmd == "savedata" || cmd == "flush" || cmd == "peek") {
       reply("err unsupported");
     } else if (cmd == "state_save") {
-      reply(nba::SaveStateWriter::Write(core, arg) == nba::SaveStateWriter::Result::Success
-            ? "ok" : "err state_save failed");
+      // The core's own writer leaves fields of absent hardware (the RTC on
+      // carts without one) uninitialised, and its loader then rejects many
+      // of those states. A zeroed struct dumped raw round-trips within this
+      // binary, which is all a session needs.
+      auto state = std::make_unique<nba::SaveState>();
+      memset(state.get(), 0, sizeof(nba::SaveState));
+      core->CopyState(*state);
+      FILE* f = fopen(arg.c_str(), "wb");
+      bool ok = f && fwrite(state.get(), sizeof(nba::SaveState), 1, f) == 1;
+      if (f) fclose(f);
+      reply(ok ? "ok" : "err state_save failed");
     } else if (cmd == "state_load") {
-      reply(nba::SaveStateLoader::Load(core, arg) == nba::SaveStateLoader::Result::Success
-            ? "ok" : "err state_load failed");
+      auto state = std::make_unique<nba::SaveState>();
+      FILE* f = fopen(arg.c_str(), "rb");
+      bool ok = f && fread(state.get(), sizeof(nba::SaveState), 1, f) == 1;
+      if (f) fclose(f);
+      if (ok) core->LoadState(*state);
+      reply(ok ? "ok" : "err state_load failed");
     } else if (cmd == "quit") {
       core.reset();
       reply("ok");

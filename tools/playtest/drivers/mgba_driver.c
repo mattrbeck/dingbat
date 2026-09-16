@@ -150,12 +150,12 @@ int main(int argc, char** argv) {
       reply("ok");
     } else if (!strcmp(cmd, "state_save")) {
       struct VFile* vf = VFileOpen(arg, O_CREAT | O_TRUNC | O_RDWR);
-      int ok = vf && mCoreSaveStateNamed(core, vf, SAVESTATE_RTC);
+      int ok = vf && mCoreSaveStateNamed(core, vf, SAVESTATE_RTC | SAVESTATE_SCREENSHOT);
       if (vf) vf->close(vf);
       reply(ok ? "ok" : "err state_save failed");
     } else if (!strcmp(cmd, "state_load")) {
       struct VFile* vf = VFileOpen(arg, O_RDONLY);
-      int ok = vf && mCoreLoadStateNamed(core, vf, SAVESTATE_RTC);
+      int ok = vf && mCoreLoadStateNamed(core, vf, SAVESTATE_RTC | SAVESTATE_SCREENSHOT);
       if (vf) vf->close(vf);
       reply(ok ? "ok" : "err state_load failed");
     } else if (!strcmp(cmd, "peek")) {

@@ -16,6 +16,7 @@ Besides script steps, `do` understands:
   undo            drop the last recorded step (does not rewind emulators)
 """
 import concurrent.futures as cf
+import hashlib
 import json
 import os
 import shutil
@@ -33,9 +34,24 @@ AUTH = b'dingbat-playtest'
 
 
 def sock_path(outroot, name):
-    d = os.path.join(outroot, 'sessions')
-    os.makedirs(d, exist_ok=True)
-    return os.path.join(d, name + '.sock')
+    # AF_UNIX paths are limited to ~104 bytes, so the socket lives in /tmp
+    # under a short hash of (output root, session name)
+    tag = hashlib.sha1(f'{os.path.abspath(outroot)}|{name}'.encode()).hexdigest()[:12]
+    return f'/tmp/playtest-{tag}.sock'
+
+
+def _legacy_sock_path(outroot, name):
+    return os.path.join(outroot, 'sessions', name + '.sock')
+
+
+def _live(path):
+    try:
+        with Client(path, family='AF_UNIX', authkey=AUTH) as conn:
+            conn.send([])
+            conn.recv()
+        return True
+    except (OSError, EOFError):
+        return False
 
 
 class Session:
@@ -162,6 +178,8 @@ class Session:
 def serve(name, rom, emus, outroot, save=None, rtc=None):
     path = sock_path(outroot, name)
     if os.path.exists(path):
+        if _live(path):
+            raise SystemExit(f'session {name!r} is already running; pick another name or stop it')
         os.unlink(path)
     sess = Session(name, rom, emus, outroot, save=save, rtc=rtc)
     print(f'session {name} ready: {path}', flush=True)
@@ -196,6 +214,9 @@ def serve(name, rom, emus, outroot, save=None, rtc=None):
 
 
 def send(name, lines, outroot):
-    with Client(sock_path(outroot, name), family='AF_UNIX', authkey=AUTH) as conn:
+    path = sock_path(outroot, name)
+    if not os.path.exists(path) and os.path.exists(_legacy_sock_path(outroot, name)):
+        path = _legacy_sock_path(outroot, name)
+    with Client(path, family='AF_UNIX', authkey=AUTH) as conn:
         conn.send(list(lines))
         return conn.recv()

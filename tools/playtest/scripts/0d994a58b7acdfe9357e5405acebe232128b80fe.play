@@ -1,0 +1,38 @@
+@title Super Monkey Ball Jr. (USA)
+@file Super Monkey Ball Jr (U) [!].gba
+@game ALUE
+@chip EEPROM (EEPROM_V + SRAM_V + FLASH_V strings)
+
+# The game formats its save on first boot. Leaving Game Options after a
+# change writes it ("Saving game data..."): music volume High -> Medium.
+# [load] shows the loaded setting on the Game Options screen.
+
+[new]
+mash START until text "Game Start" timeout=1500 every=30
+wait 30
+# (no checkpoint on the title menu: the monkey animation never lines up)
+press DOWN after=20
+press A
+until text "Reset" timeout=300 every=10
+wait 30
+checkpoint options
+press DOWN after=15
+press DOWN after=15
+press LEFT after=30
+until text "Medium" timeout=120 every=5
+checkpoint volume_medium
+press B
+until text "power off" timeout=300 every=2
+checkpoint saving window=0
+until notext "power off" timeout=900 every=5
+until text "Press START" timeout=600 every=10
+
+[load]
+mash START until text "Game Start" timeout=1500 every=30
+wait 30
+# (no checkpoint on the title menu: the monkey animation never lines up)
+press DOWN after=20
+press A
+until text "Reset" timeout=300 every=10
+wait 30
+checkpoint options_loaded

@@ -1,0 +1,82 @@
+@title Onimusha Tactics (USA)
+@file Onimusha Tactics (U).gba
+@game A6OE
+@chip EEPROM (EEPROM_V + SRAM_V strings)
+
+# New game, skip the intro and the first scenes, decline the tutorial, then
+# use the in-battle Save (slot 1) on the first player phase of Episode 1.
+
+[new]
+mash START until text "Load Game" timeout=1500 every=30
+wait 30
+checkpoint title_menu
+press A
+until blank timeout=600 every=5
+until notblank timeout=1200 every=10
+# "Long, long ago..." intro: START skips it
+wait 60
+press START
+until text "Episode" timeout=600 every=10
+wait 180
+checkpoint episode
+press START
+until blank timeout=600 every=5
+until notblank timeout=1200 every=10
+wait 90
+# opening scene: START skips to the mission screen
+press START
+until text "Death of" timeout=600 every=10
+wait 20
+checkpoint mission
+press A
+until text "how to" timeout=600 every=10
+wait 20
+# "Want to learn how to fight?" -> No
+press DOWN after=10
+press A after=30
+wait 40
+press A after=30
+wait 60
+press A after=90
+press A after=90
+press A after=90
+wait 180
+mash START until text "End Phase" timeout=1500 every=60
+wait 10
+checkpoint battle_menu
+press DOWN after=20
+press A
+until notblank timeout=600 every=10
+until text "Empty" timeout=600 every=10
+wait 30
+checkpoint save_slots
+press A
+until text "Here" timeout=300 every=5
+wait 20
+# the prompt defaults to No
+press UP after=20
+press A
+until text "completed" timeout=900 every=5
+checkpoint saved window=0
+
+[load]
+mash START until text "Load Game" timeout=1500 every=30
+wait 30
+checkpoint title_menu
+# with a save the cursor starts on Load Game
+press A
+until blank timeout=600 every=5
+until text "Playtime" timeout=900 every=10
+wait 20
+checkpoint load_slots
+press A after=40
+until text "data" timeout=300 every=5
+press UP after=20
+press A after=10
+until blank timeout=600 every=5
+until notblank timeout=900 every=10
+wait 120
+checkpoint resumed
+press START after=40
+until text "End Phase" timeout=120 every=5
+checkpoint resumed_menu

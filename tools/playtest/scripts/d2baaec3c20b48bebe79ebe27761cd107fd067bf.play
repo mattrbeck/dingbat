@@ -1,0 +1,41 @@
+@title Disney's Kim Possible 2 - Drakken's Demise (USA)
+@file Disney's Kim Possible 2 - Drakken's Demise (U).gba
+@game BKME
+@chip EEPROM (EEPROM_V + FLASH512_V strings)
+@status wip: reaches level 1 gameplay; nothing is written after the boot-time format until a level is finished (New Game slot, Options and pause-menu Quit do not save; Load Game stays Empty)
+
+# What a human needs to do: New Game -> slot 1 -> Play -> finish the first
+# level (side-scroller, Kim walks right; context "A" prompts along the way)
+# until the save icon appears / the slot shows progress in Load Game.
+# The game formats a 4Kbit EEPROM image ("1M2A" header) on first boot:
+# dingbat and mgba write 512 bytes, nba 8192; the first 512 bytes are
+# identical in all three.
+
+[new]
+mash START until text "Load Game" timeout=1500 every=40
+wait 30
+checkpoint title_menu
+press A after=90
+until text "Empty" timeout=300 every=10
+checkpoint slots
+press A after=90
+until text "Training" timeout=300 every=10
+press A after=60
+until text "icon" timeout=300 every=10
+checkpoint save_icon_notice
+press A after=120
+press A after=60
+# skip the opening cutscene; START in game opens the pause menu
+mash START until text "Continue" timeout=1500 every=60
+press B after=60
+checkpoint level1
+# TODO: play level 1 to its end and wait for the save icon
+
+[load]
+mash START until text "Load Game" timeout=1500 every=40
+wait 30
+checkpoint title_menu
+press DOWN after=20
+press A after=90
+until text "Empty" timeout=300 every=10
+checkpoint load_slots

@@ -160,12 +160,18 @@ def run(args):
     # ---------------------------------------------------------- saves
     savedir = os.path.join(outdir, 'saves')
     os.makedirs(savedir)
-    written = {}
+    # `@save none`: the game has no battery save (passwords, or nothing);
+    # the check is then that dingbat writes no data, and there is no matrix
+    no_save = play['meta'].get('save', '').strip() == 'none'
+    report['no_save'] = no_save
+    copies, written = {}, {}
     for n in names:
         if new[n].get('save') and new[n]['ok']:
-            written[n] = os.path.join(savedir, n + '.sav')
-            shutil.copyfile(new[n]['save'], written[n])
-    report['saves'] = {n: saves.describe(written.get(n), info) for n in names}
+            copies[n] = os.path.join(savedir, n + '.sav')
+            shutil.copyfile(new[n]['save'], copies[n])
+            if os.path.getsize(copies[n]) > 0 and not no_save:
+                written[n] = copies[n]
+    report['saves'] = {n: saves.describe(copies.get(n), info) for n in names}
     report['save_pairs'] = {}
     for i, a in enumerate(names):
         for b in names[i + 1:]:
@@ -200,13 +206,19 @@ def run(args):
         ref = next((n for n in names if not n.startswith(SUBJECT_PREFIX)), names[0])
         report['load_checkpoints'] = {}
         for (w, r), res in load.items():
+            # baseline: the reader with its own save; when that round trip
+            # itself failed, the writer's own round trip stands in
             own = load.get((r, r))
+            baseline, base_name = (own, r) if own and own['ok'] else (load.get((w, w)), w)
+            if baseline and not baseline['ok']:
+                baseline = None
             refcell = load.get((ref, ref))
             cps = {}
-            for cp in res['checkpoints'] or (own['checkpoints'] if own else {}):
+            for cp in res['checkpoints'] or (baseline['checkpoints'] if baseline else {}):
                 cps[cp] = {
-                    'vs_own_save': classify.classify(res['checkpoints'].get(cp), own['checkpoints'].get(cp)) if own else None,
-                    'vs_reference': classify.classify(res['checkpoints'].get(cp), refcell['checkpoints'].get(cp)) if refcell else None,
+                    'baseline': f'{base_name}-in-{base_name}' if baseline else None,
+                    'vs_own_save': classify.classify(res['checkpoints'].get(cp), baseline['checkpoints'].get(cp)) if baseline else None,
+                    'vs_reference': classify.classify(res['checkpoints'].get(cp), refcell['checkpoints'].get(cp)) if refcell and refcell['ok'] else None,
                 }
             report['load_checkpoints'][f'{w}-in-{r}'] = cps
         # composites: one image per checkpoint, every cell
@@ -216,12 +228,20 @@ def run(args):
                 if cp not in cp_names:
                     cp_names.append(cp)
         for cp in cp_names:
+            # rows = writer, columns = reader; a cell that never reached the
+            # checkpoint is a grey placeholder so the grid keeps its shape
             frames, labels = [], []
-            for (w, r), res in sorted(load.items()):
-                c = res['checkpoints'].get(cp)
-                if c:
-                    frames.append(img.read_ppm(c['ppm']))
-                    labels.append(f'{w} sav in {r}')
+            for w in names:
+                for r in names:
+                    if (w, r) not in load:
+                        continue
+                    c = load[(w, r)]['checkpoints'].get(cp)
+                    if c:
+                        frames.append(img.read_ppm(c['ppm']))
+                        labels.append(f'{w} sav in {r}')
+                    else:
+                        frames.append(img.np.full((img.H, img.W, 3), 96, dtype=img.np.uint8))
+                        labels.append(f'{w} sav in {r} failed')
             if frames:
                 img.write_png(os.path.join(cmpdir, f'load-{cp}.png'), _grid(frames, labels, len(names)))
 
@@ -285,7 +305,14 @@ def verdicts(report, names):
                 v['notes'].append(f'checkpoint {cp}: {detail}')
         # save format
         sv = report['saves'].get(s, {})
-        if not sv.get('exists'):
+        if report.get('no_save'):
+            if sv.get('exists') and not sv.get('blank'):
+                v['problems'].append(f"game has no battery save, but dingbat wrote {sv['size']} bytes of data")
+            for r in refs:
+                rs = report['saves'].get(r, {})
+                if rs.get('exists'):
+                    v['notes'].append(f"{r} leaves a {rs['size']}-byte {'blank ' if rs.get('blank') else ''}file")
+        elif not sv.get('exists'):
             v['problems'].append('no battery file written')
         else:
             if not sv['canonical']:
@@ -297,9 +324,15 @@ def verdicts(report, names):
                 if not pair['same_size']:
                     mine, theirs = sv['size'], report['saves'][r]['size']
                     tr = report['saves'][r].get('trailer_bytes')
+                    canon = report['rom_info']['canonical_sizes']
                     if sv['canonical'] and tr and theirs - tr == mine:
                         v['notes'].append(f'{r} appends a {tr}-byte trailer after the chip data '
                                           f'({theirs} bytes); cross-load decides compatibility')
+                    elif mine in canon and theirs in canon:
+                        # 4Kbit vs 64Kbit EEPROM: both are chip sizes; which one
+                        # the game uses shows in whether the other side loads it
+                        v['notes'].append(f'save size differs from {r} ({mine} vs {theirs}), both valid '
+                                          f'chip sizes; cross-load decides compatibility')
                     else:
                         v['problems'].append(f"save size differs from {r}: {mine} vs {theirs}")
                 if 'decoded' in pair:
@@ -315,16 +348,34 @@ def verdicts(report, names):
             for key, cell in report['load'].items():
                 w, r = key.split('-in-')
                 if s not in (w, r):
+                    if not cell['ok']:
+                        v['notes'].append(f'references: {w} save in {r}: [load] failed: {cell["error"]}')
                     continue
                 if not cell['ok']:
                     v['problems'].append(f'{w} save in {r}: [load] failed: {cell["error"]}')
                     continue
                 if not cell['save_unchanged']:
-                    v['problems'].append(f'{w} save in {r}: battery file changed by booting: {cell.get("save_after")}')
+                    after = cell.get('save_after') or {}
+                    padded = (after.get('diff', {}).get('bytes') == 0 and after.get('size', 0) > after.get('size_before', 0))
+                    msg = f'{w} save in {r}: battery file changed by booting: {after}'
+                    if padded and r != s:
+                        v['notes'].append(f'{r} extends a {after["size_before"]}-byte save to {after["size"]} bytes on boot (data unchanged)')
+                    else:
+                        v['problems'].append(msg)
                 for cp, c in report['load_checkpoints'][key].items():
-                    own = c['vs_own_save']['verdict'] if c['vs_own_save'] else 'IDENTICAL'
-                    if own not in OK_LOAD:
-                        v['problems'].append(f'{w} save in {r}: checkpoint {cp} vs {r} with its own save: {own}')
+                    if not c['vs_own_save']:
+                        v['notes'].append(f'{w} save in {r}: checkpoint {cp}: no successful own-save baseline, not diagnostic')
+                        continue
+                    own = c['vs_own_save']
+                    base = c.get('baseline') or f'{r}-in-{r}'
+                    if own['verdict'] not in OK_LOAD:
+                        v['problems'].append(f'{w} save in {r}: checkpoint {cp} vs {base}: {own["verdict"]}')
+                    elif (own['verdict'] == 'MINOR' and own.get('text_similarity', 1.0) < 1.0
+                          and not own.get('palette_only')):
+                        # a loaded save that shows different values (a menu
+                        # setting, a count) is a small pixel change but not a load
+                        v['problems'].append(f'{w} save in {r}: checkpoint {cp} vs {base}: MINOR but on-screen '
+                                             f'text differs ({own["text_similarity"]})')
         v['pass'] = not v['problems']
         out[s] = v
     return out

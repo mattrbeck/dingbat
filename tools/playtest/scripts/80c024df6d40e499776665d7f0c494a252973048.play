@@ -1,0 +1,53 @@
+@title Medabots AX - Metabee Version (USA)
+@file Medabots AX - Metabee Version (U).gba
+@game AK8E
+@chip EEPROM (EEPROM_V + FLASH_V strings)
+
+# With no save, START on the title drops straight into the story on the
+# island map; a few lines of dialog later SELECT on the map saves.
+# With a save the title opens a CONTINUE menu; SELECT's save prompt shows
+# the loaded medal / parts counts.
+
+[new]
+until text "DREAM CREATOR" timeout=3000 every=10
+until notext "DREAM CREATOR" timeout=900 every=10
+wait 60
+press START
+until text "PRESS START" timeout=900 every=10
+wait 30
+checkpoint title
+press START
+until text "Ikki, look" timeout=600 every=10
+wait 20
+checkpoint intro
+mash A until text "with S" timeout=900 every=40
+wait 60
+checkpoint island_map
+press SELECT
+until text "Save the game" timeout=300 every=5
+wait 10
+checkpoint save_prompt
+press A
+until text "Save completed" timeout=600 every=5
+checkpoint saved window=0
+
+[load]
+until text "DREAM CREATOR" timeout=3000 every=10
+until notext "DREAM CREATOR" timeout=900 every=10
+wait 60
+press START
+until text "PRESS START" timeout=900 every=10
+wait 30
+checkpoint title
+press START
+until text "CONTINUE" timeout=600 every=10
+wait 30
+checkpoint continue_menu
+press A
+until text "ISLAND MAP" timeout=600 every=10
+wait 60
+checkpoint resumed
+press SELECT
+until text "Save the game" timeout=300 every=5
+wait 10
+checkpoint resumed_save_prompt
