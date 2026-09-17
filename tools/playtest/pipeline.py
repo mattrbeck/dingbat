@@ -342,9 +342,18 @@ def cross_load_verdict(report, s, refs, problems):
             ok = c['reached'] and agree(key, cp, s)
             if ok:
                 continue
+            # the reader shows another writer's save differently from that
+            # writer too: the difference is the reader's (animation phase,
+            # wandering characters), not this save's
+            others = [w for w in refs if w not in (r, s) and f'{w}-in-{r}' in cps
+                      and cps.get(f'{w}-in-{w}', {}).get(cp, {}).get('reached')]
+            reader_quirk = any(not agree(f'{w}-in-{r}', cp, w) for w in others)
             if not healthy(r):
                 notes.append(f'{s} save in {r}: checkpoint {cp} differs, but {r} does not show its own save '
                              f'like the others either: not diagnostic')
+            elif reader_quirk:
+                notes.append(f'{s} save in {r}: checkpoint {cp} differs, but {r} shows the other saves '
+                             f'differently from their writers too: not diagnostic')
             elif any(agree(key, cp, x) for x in refs if x != r):
                 notes.append(f'{s} save in {r}: checkpoint {cp} differs from {s}, but matches another reference')
             else:

@@ -2,23 +2,400 @@
 @file Mario & Luigi - Superstar Saga (U).gba
 @game A88E
 @chip EEPROM
-@status wip: reaches the opening cutscene in Mario's house (Toad arrives) but no save. The game has no save until the first Save Album, after the scripted opening (Toad in Mario's house, Peach's Castle, the Bowser battle tutorial). Mashing A stalls in Mario's house where the player has to act; a human recording from the file screen to the first Save Album is needed.
 
-# Title -> MARIO & LUIGI -> new file -> Start Game (the first A presses on
-# the file book are ignored while it animates, hence the mash).
+# Recorded by hand in the desktop app (2026-09-16): new file, the opening in
+# Mario's house and Peach's Castle, to the first Save Album; [load] continues.
 
+# converted from input.log: 192 keypad changes, 839 sync hashes checked in dingbat
 [new]
-until text "PRESS START" timeout=1500 every=10
-wait 20
-checkpoint title window=0
-press START
-until text "OPTIONS" timeout=300 every=5
-wait 30
-checkpoint game_select window=0
-press A
-until text "Start Game" timeout=300 every=5
-wait 150
-checkpoint file_book window=0
-mash A until notext "Start Game" timeout=4000 every=60
-until text "Beanbean" timeout=4000 every=10
-checkpoint opening window=0
+wait 1102
+hold A
+wait 97
+release
+wait 390
+hold A
+wait 98
+release
+wait 666
+hold A
+wait 67
+release
+wait 435
+hold A
+wait 94
+release
+wait 594
+press A hold=51
+wait 6
+checkpoint 01_f3600
+wait 273
+hold A
+wait 92
+release
+wait 423
+hold A
+wait 62
+release
+wait 2750
+checkpoint 02_f7200
+wait 1428
+checkpoint 03_mark
+wait 684
+hold A
+wait 64
+release
+wait 559
+hold A
+wait 64
+release
+wait 1407
+hold LEFT
+wait 112
+release
+wait 195
+hold DOWN
+wait 76
+release
+wait 264
+hold LEFT
+wait 175
+checkpoint 04_f12228
+wait 99
+release
+wait 121
+press UP hold=31
+wait 226
+hold DOWN
+wait 168
+hold LEFT+DOWN
+wait 13
+hold LEFT
+wait 253
+hold LEFT+UP
+wait 48
+hold UP
+wait 244
+release
+wait 326
+hold A
+wait 76
+release
+wait 1331
+hold A
+wait 83
+release
+wait 581
+checkpoint 05_f15828
+wait 1492
+press A hold=30
+wait 2078
+checkpoint 06_f19428
+wait 439
+checkpoint 07_mark
+wait 656
+press A hold=58
+wait 336
+hold A
+wait 73
+release
+wait 144
+hold A
+wait 101
+release
+wait 637
+hold A
+wait 107
+release
+wait 411
+hold A
+wait 101
+release
+wait 223
+hold A
+wait 102
+release
+wait 196
+hold A
+wait 108
+release
+wait 347
+checkpoint 08_f23467
+wait 27
+hold A
+wait 100
+release
+wait 452
+hold A
+wait 81
+release
+wait 300
+hold A
+wait 87
+release
+wait 460
+hold A
+wait 112
+release
+wait 1981
+checkpoint 09_f27067
+wait 249
+checkpoint 10_mark
+wait 573
+hold A
+wait 85
+release
+wait 597
+hold A
+wait 98
+release
+wait 353
+hold A
+wait 101
+release
+wait 282
+hold A
+wait 98
+release
+wait 285
+hold A
+wait 94
+release
+wait 272
+hold A
+wait 106
+release
+wait 409
+hold A
+wait 70
+release
+wait 72
+hold A
+wait 105
+checkpoint 11_f30916
+wait 16
+release
+wait 378
+hold A
+wait 110
+release
+wait 193
+hold A
+wait 66
+release
+wait 572
+hold A
+wait 86
+release
+wait 253
+hold A
+wait 114
+release
+wait 862
+press RIGHT hold=33
+wait 324
+press A hold=58
+wait 535
+checkpoint 12_f34516
+wait 113
+hold A
+wait 64
+release
+wait 386
+hold A
+wait 77
+release
+wait 1111
+press A hold=5
+wait 50
+press A hold=6
+wait 47
+press A hold=5
+wait 102
+press A hold=5
+wait 60
+press A hold=8
+wait 131
+press A hold=6
+wait 40
+press A hold=7
+wait 43
+press A hold=6
+wait 223
+press A hold=6
+wait 493
+hold A
+wait 74
+release
+wait 396
+hold A
+wait 71
+release
+wait 65
+checkpoint 13_f38116
+wait 212
+hold A
+wait 98
+release
+wait 278
+hold A
+wait 73
+release
+wait 279
+hold A
+wait 78
+release
+wait 341
+hold A
+wait 78
+release
+wait 431
+hold A
+wait 74
+release
+wait 355
+hold A
+wait 85
+release
+wait 359
+hold A
+wait 99
+release
+wait 348
+hold A
+wait 86
+release
+wait 281
+hold A
+wait 45
+checkpoint 14_f41716
+wait 39
+release
+wait 212
+hold A
+wait 101
+release
+wait 228
+hold A
+wait 110
+release
+wait 246
+hold A
+wait 98
+release
+wait 285
+hold A
+wait 134
+release
+wait 556
+hold A
+wait 75
+release
+wait 198
+hold A
+wait 132
+release
+wait 240
+hold A
+wait 83
+release
+wait 372
+hold A
+wait 84
+release
+wait 201
+hold UP
+wait 67
+hold RIGHT+UP
+wait 139
+checkpoint 15_f45316
+wait 40
+hold UP
+wait 110
+hold LEFT+UP
+wait 84
+hold LEFT
+wait 16
+release
+wait 551
+hold UP
+wait 1
+hold A+UP
+wait 94
+hold UP
+wait 29
+release
+wait 171
+hold UP
+wait 40
+hold A+UP
+wait 70
+hold UP
+wait 33
+release
+wait 358
+hold UP
+wait 13
+hold A+UP
+wait 92
+hold UP
+wait 75
+release
+wait 1
+hold RIGHT
+wait 76
+release
+wait 362
+press RIGHT hold=37
+wait 305
+hold UP
+wait 75
+release
+wait 120
+press LEFT hold=30
+wait 228
+hold UP
+wait 78
+release
+wait 428
+press RIGHT hold=4
+wait 14
+press UP hold=23
+wait 42
+checkpoint 16_f48916
+wait 40
+press LEFT hold=23
+wait 18
+press LEFT hold=3
+wait 29
+press A hold=25
+wait 160
+checkpoint 17_mark
+wait 61
+press A hold=5
+wait 40
+press UP hold=2
+wait 39
+press A hold=4
+wait 750
+checkpoint 18_mark
+wait 243
+checkpoint 19_end
+
+# converted from input.log: 10 keypad changes, 27 sync hashes checked in dingbat
+[load]
+wait 158
+press A hold=10
+wait 654
+press A hold=6
+wait 132
+press A hold=5
+wait 217
+press A hold=5
+wait 82
+checkpoint 01_mark
+wait 41
+press A hold=5
+wait 183
+checkpoint 02_mark
+wait 137
+checkpoint 03_end
