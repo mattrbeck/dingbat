@@ -1,0 +1,28 @@
+@title Super Mario Advance 3 - Yoshi's Island (USA)
+@file Super Mario Advance 3 - Yoshi's Island (U) [!].gba
+@game A3AE
+@chip EEPROM
+@status wip: stops at the first page of the stork story on FILE A (mashing A on from there drops Yoshi into 1-1, Make Eggs, Throw Eggs); the cart only gets its boot-time initialisation records until a stage is cleared, so the first save needs 1-1 played to the goal ring (the game saves on returning to the map). Holding RIGHT with flutter jumps stalls at the first tall hill, and enemy positions already differ between emulators at the stage start (the story is mashed through), so a human should record: Single Player, Yoshi's Island, FILE A, story, clear 1-1, back on the map after the save; [load] picks FILE A and shows the map with 1-1 cleared.
+
+# Title -> Single Player -> Yoshi's Island -> FILE A -> story -> stage 1-1.
+
+[new]
+mash START until text "Single Player" timeout=1500 every=60
+wait 30
+checkpoint title_menu compare=text
+press A after=90
+until text "Choose a" timeout=600 every=10
+wait 30
+checkpoint choose_game compare=text
+press A after=120
+until text "Nintendo" timeout=1200 every=10
+wait 30
+checkpoint yi_title compare=text
+press START after=120
+until text "FILE MENU" timeout=600 every=10
+until stable 20 timeout=300
+checkpoint file_menu
+press A after=180
+until text "Welcome" timeout=1200 every=10
+wait 20
+checkpoint story window=10

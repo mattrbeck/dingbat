@@ -1,0 +1,32 @@
+@title Castlevania - Circle of the Moon (USA)
+@file Castlevania - Circle of the Moon (U) [!].gba
+@game AAME
+@chip SRAM
+@status wip: stops in the opening cutscene (Dracula's "you sealed me" line); mashing A on through the dialog (about 1,700 more frames) drops Nathan into the catacombs with control, but the game writes only its "DRACULA AGB" header at boot and nothing at name entry, so the first real save needs Nathan walked to the first save room. Explored live: from the landing spot RIGHT leads down a shaft of wooden ledges to a wall, the way on is left past a skeleton. A human should record: DATA SELECT, empty file, name AA, the opening dialog, walk to the first save room and touch the save statue, quit after the save message; [load]: DATA SELECT shows the file, pick it to resume in the save room.
+
+# Title skip -> DATA SELECT -> empty file -> name AA -> opening scroll and the
+# Dracula cutscene.
+
+[new]
+wait 600
+press START
+until text "Game" timeout=600 every=10
+wait 60
+checkpoint main_menu compare=text
+press A
+until text "Choose" timeout=300 every=10
+wait 30
+checkpoint data_select window=10
+press A
+until text "ENTRY" timeout=300 every=10
+wait 30
+checkpoint name_entry window=10
+press A after=20
+press A after=20
+press START after=30
+checkpoint name_aa window=10
+press A
+until text "1830" timeout=900 every=10
+checkpoint intro_scroll compare=text
+mash A until text "sealed" timeout=6000 every=20
+checkpoint dracula compare=text

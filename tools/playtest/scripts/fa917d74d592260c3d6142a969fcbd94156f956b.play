@@ -1,0 +1,273 @@
+@title Mario Party Advance (USA)
+@file Mario Party Advance (U).gba
+@game B8ME
+@chip EEPROM
+
+# A blank cart formats itself ("Saving..." right after the Hudson logo), then
+# the host has the player fill in a profile: name, birth month JAN, hobby,
+# comment, dream and secret. Each keyboard ignores keys for a while after it
+# appears, and that delay differs between emulators, so every field is filled
+# to its maximum length with a fixed run of A taps (taps on a full field do
+# nothing) instead of typing a few letters. The game saves the profile
+# ("Saving...") and drops into Shroom City. [load] boots straight to "Welcome
+# to Party World" instead of the new-game profile interview.
+
+[new]
+until text "Press any button" timeout=900 every=10
+checkpoint health window=10
+press A
+until text "HUDSON" timeout=600 every=10
+press START after=20
+until text "Saving" timeout=900 every=10
+checkpoint format_saving window=0 compare=text
+until notext "Saving" timeout=1200 every=10
+until text "there" timeout=600 every=10
+mash A until text "you should" timeout=3000 every=30
+# fill the name field to its maximum length, whenever the keyboard
+# starts accepting keys, then jump to OK and confirm
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press START after=30
+checkpoint name compare=text
+press A after=90
+mash A until text "born" timeout=900 every=60
+wait 60
+press A after=90
+mash A until text "hobby" timeout=1500 every=90
+# fill the hobby field to its maximum length, whenever the keyboard
+# starts accepting keys, then jump to OK and confirm
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press START after=30
+checkpoint hobby compare=text
+press A after=90
+mash A until text "just enter" timeout=1500 every=90
+# fill the comment field to its maximum length, whenever the keyboard
+# starts accepting keys, then jump to OK and confirm
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press START after=30
+checkpoint comment compare=text
+press A after=90
+mash A until text "dream" timeout=1500 every=60
+# fill the dream field to its maximum length, whenever the keyboard
+# starts accepting keys, then jump to OK and confirm
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press START after=30
+checkpoint dream compare=text
+press A after=90
+mash A until text "secret" timeout=1500 every=60
+# fill the secret field to its maximum length, whenever the keyboard
+# starts accepting keys, then jump to OK and confirm
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press A after=8
+press START after=30
+checkpoint secret compare=text
+press A after=90
+mash A until text "Saving" timeout=1500 every=60
+checkpoint profile_saving window=0 compare=text
+until notext "Saving" timeout=1200 every=10
+wait 60
+checkpoint shroom_city compare=none
+
+[load]
+until text "Press any button" timeout=900 every=10
+press A
+until text "HUDSON" timeout=600 every=10
+press START after=20
+until text "Welcome to" timeout=900 every=10
+wait 30
+checkpoint welcome compare=text
+mash A until text "let's" timeout=900 every=40
+checkpoint lets_go compare=text
