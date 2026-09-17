@@ -61,3 +61,30 @@ Save-memory writes logged over a minute of boot/menus in dingbat:
 **FIXED:** SRAM + a flash library without EEPROM -> that flash type
 (storage.nim); tests/savestate_compat_test.nim covers the pairs.
 (the harness's saves.py rom_info mirrors it). Rockman EXE 4.5 playtest now PASS: dingbat saves, all 9 cross-loads work, 9 bytes differ from mGBA's save.
+
+## 4. Random outcomes differ on identical input frames (Yu-Gi-Oh! 2004 deck)
+
+Not an RNG bug: a boot-timing phase. Method (tools in the session scratch,
+recipe here): replay identical input in dingbat and mGBA, peek the game's
+RNG seed (IWRAM 0x03000040) every frame. The sequences are identical; the
+seed advances once per game frame, but dingbat reaches frame-13's value one
+frame later than mGBA and stays one frame behind. The lag comes from a
+per-frame count of TM0 IRQ bursts (TM0 reload 0xFCE2 = 798 cycles, 16
+overflows per burst; 22 bursts per 280896-cycle frame exactly) taken in
+the vblank path: dingbat counts 21, mGBA 22 -- the timer phase straddles
+the snapshot.
+
+Two causes found:
+1. **Skip-BIOS video phase** (fix applied, pending gates): dingbat started
+   the PPU on line 0 at ROM entry; its own LLE BIOS boot hands over on line
+   126, 838 cycles in (mGBA's skip-boot also uses line 126). TM0 phase vs
+   mGBA at each frame boundary went from 367 to ~23 cycles. bootio.gba's
+   VCOUNT word (0x006) photographs the hardware value.
+2. **~50 cycles of ROM-access cost** between instruction 82,600 and the TM0
+   enable at instruction 83,772 (dingbat vs mGBA cycle counts per
+   instruction agree to +-2 before that). Too fine to call without
+   hardware; the deck still differs. Left as is.
+
+Side note: dingbat's harness frame 1 can end mid-frame when the boot halts
+across two vblanks inside one CPU step (step_frame exits with frame=2); the
+count realigns by frame 3.

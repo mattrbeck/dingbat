@@ -1270,6 +1270,7 @@ proc post_init*(gba: GBA) =
     # multiboot probe writes RCNT = 0x800F); from RCNT = 0 Sonic Advance 1
     # and 2 hang at boot
     gba.serial.rcnt = 0x800F
+    gba.ppu.skip_boot_phase()
 
 proc handle_saves*(gba: GBA) =
   gba.scheduler.schedule(280896, etSaves)
