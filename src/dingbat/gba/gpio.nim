@@ -1,5 +1,7 @@
 # GPIO implementation (included by gba.nim)
 
+const SOLAR_DARK* = 0xE8'u8  # sensor light level with no sunlight
+
 proc new_gpio*(gba: GBA): GPIO =
   result = GPIO(
     gba: gba,
@@ -13,6 +15,9 @@ proc new_gpio*(gba: GBA): GPIO =
   # shared pins would fabricate phantom RTC commands.
   result.gyro_present = gba.cartridge != nil and
     gba.cartridge.game_code() in ["RZWE", "RZWJ", "RZWP"]
+  result.solar_present = gba.cartridge != nil and
+    gba.cartridge.game_code()[0 .. 2] in ["U3I", "U32", "U33"]
+  result.solar_level = SOLAR_DARK
   # An RTC cart's clock persists in its battery file (rtc_calendar.nim): the
   # trailer read with the save resumes it, and every save write refreshes it.
   let st = gba.storage
@@ -20,6 +25,21 @@ proc new_gpio*(gba: GBA): GPIO =
     st.rtc = result.rtc
     if st.has_trailer:
       discard result.rtc.rtc_apply_trailer(st.trailer)
+
+proc solar_update(gpio: GPIO; pins: uint8) =
+  ## Reset (bit 1) clears the counter; each rising clock (bit 0) counts up,
+  ## saturating. The chip-select bit is not modelled: the game resets the
+  ## counter before every measurement, so RTC traffic on the shared clock
+  ## line cannot reach a reading.
+  if (pins and 2'u8) != 0:
+    gpio.solar_counter = 0
+  let clock = (pins and 1'u8) != 0
+  if clock and not gpio.solar_clock and gpio.solar_counter < 0xFF'u8:
+    inc gpio.solar_counter
+  gpio.solar_clock = clock
+
+proc solar_flag(gpio: GPIO): uint8 =
+  if gpio.solar_counter >= gpio.solar_level: 0x8'u8 else: 0'u8
 
 proc address_in_gpio*(address: uint32): bool =
   address >= 0x080000C4'u32 and address <= 0x080000C9'u32
@@ -54,6 +74,8 @@ proc `[]`*(gpio: GPIO; io_addr: uint32): uint8 =
     if gpio.allow_reads:
       if gpio.gyro_present:
         ((gpio.data and gpio.direction) or (gpio.gyro_out shl 2)) and 0xF'u8
+      elif gpio.solar_present and (gpio.direction and 0x8'u8) == 0:
+        (rtc_read(gpio.rtc) and 0x7'u8) or gpio.solar_flag()
       else:
         rtc_read(gpio.rtc) and 0xF'u8
     else:
@@ -73,6 +95,8 @@ proc drive_pins(gpio: GPIO; prev: uint8) =
     gyro_update(gpio, pins)
   else:
     rtc_write(gpio.rtc, pins, prev)
+    if gpio.solar_present:
+      solar_update(gpio, pins)
 
 proc `[]=`*(gpio: GPIO; io_addr: uint32; value: uint8) =
   case io_addr and 0xFF'u32

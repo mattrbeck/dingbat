@@ -143,6 +143,10 @@ proc main() =
         reply(if emu.save_state(parts[1]): "ok" else: "err state_save failed")
       of "state_load":
         reply(if emu.load_state(parts[1]): "ok" else: "err state_load failed")
+      of "layers":
+        # debug visibility: bits 0-3 BG0-3, bit 4 OBJ
+        emu.ppu.debug_layer_mask = uint8(parseHexInt(parts[1]))
+        reply "ok"
       of "peek":
         let a = uint32(parseHexInt(parts[1]))
         var s = ""

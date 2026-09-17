@@ -244,6 +244,16 @@ type
     gyro_sample*:  uint16
     gyro_clock*:   bool
     gyro_out*:     uint8
+    # Solar sensor (Boktai 1/2, Shin Bokura no Taiyou; GBATEK "GBA Cart
+    # Solar Sensor"), sharing the port with the RTC: bit 0 clocks a counter,
+    # bit 1 resets it, bit 3 (input) reads 1 once the counter reaches the
+    # light level. solar_level is the live frontend input: 0xE8 is dark,
+    # smaller is brighter (GBATEK: ~0x50 in direct sunlight). The counter is
+    # not serialized: a state loaded mid-measurement misreads one sample.
+    solar_present*: bool
+    solar_level*:   uint8
+    solar_counter*: uint8
+    solar_clock*:   bool
 
   Bus* = ref object
     gba* {.cursor.}:        GBA

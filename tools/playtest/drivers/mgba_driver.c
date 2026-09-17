@@ -14,6 +14,7 @@
 #include <mgba/core/log.h>
 #include <mgba/core/serialize.h>
 #include <mgba-util/vfs.h>
+#include <mgba/internal/gba/gba.h>
 
 #include <fcntl.h>
 #include <stdio.h>
@@ -223,6 +224,36 @@ int main(int argc, char** argv) {
       }
       if (ok) rtc_xfer(core, 0x64, dt, 7, NULL, 0);
       reply(ok ? "ok" : "err rtc_set YYMMDDWWHHMMSS");
+    } else if (!strcmp(cmd, "stepn")) {
+      long want = 0;
+      sscanf(arg, "%ld", &want);
+      struct GBA* gba = core->board;
+      for (long k = 0; k < want; ++k) core->step(core);
+      printf("ok global=%llu vcount=%u pc=%08X\n",
+             (unsigned long long) mTimingGlobalTime(&gba->timing),
+             core->busRead16(core, 0x04000006), gba->cpu->gprs[15]);
+      fflush(stdout);
+    } else if (!strcmp(cmd, "stepuntil")) {
+      /* stepuntil ADDR MASK: single-step until (busRead16(ADDR) & MASK) != 0;
+       * reports the master clock (cycles since reset), VCOUNT, PC */
+      unsigned addr = 0, mask = 0;
+      sscanf(arg, "%x %x", &addr, &mask);
+      struct GBA* gba = core->board;
+      long n = 0;
+      while (!(core->busRead16(core, addr) & mask) && n < 50000000) {
+        core->step(core);
+        ++n;
+      }
+      printf("ok steps=%ld global=%llu vcount=%u pc=%08X\n", n,
+             (unsigned long long) mTimingGlobalTime(&gba->timing),
+             core->busRead16(core, 0x04000006), gba->cpu->gprs[15]);
+      fflush(stdout);
+    } else if (!strcmp(cmd, "busread16")) {
+      /* a CPU-visible read (I/O registers update lazily: timers, VCOUNT) */
+      unsigned addr = 0;
+      sscanf(arg, "%x", &addr);
+      printf("ok %04X\n", core->busRead16(core, addr));
+      fflush(stdout);
     } else if (!strcmp(cmd, "poke8")) {
       /* a bus write, e.g. a flash command sequence that dirties the save */
       unsigned addr = 0, val = 0;

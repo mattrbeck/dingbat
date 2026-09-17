@@ -543,6 +543,34 @@ block:  # an older payload revision (tests/states corpus): status migrates, cloc
   else:
     check(false, "corpus state and ROM present (run from the repo root)")
 
+# ===========================================================================
+echo "=== Solar sensor (Boktai) ==="
+
+block:
+  var rom = readFile(make_rom("boktai", ["SIIRTC_V001"]))
+  for i, c in "U3IE": rom[0xAC + i] = c
+  let path = dir / "boktai.gba"
+  writeFile(path, rom)
+  let g = boot(path, E)
+  check(g.bus.gpio.solar_present, "a U3I* cart has the solar sensor")
+  proc measure(g: GBA): int =
+    ## The game's loop: reset, then clock until the flag reads 1
+    g.gpio_w(0xC8, 1)
+    g.gpio_w(0xC6, 7)             # bits 0-2 out, bit 3 (flag) in
+    g.gpio_w(0xC4, 2)             # reset
+    g.gpio_w(0xC4, 0)
+    for n in 0 .. 0x100:
+      if (g.gpio_r(0xC4) and 8'u8) != 0: return n
+      g.gpio_w(0xC4, 1)
+      g.gpio_w(0xC4, 0)
+    -1
+  check(g.measure() == int(SOLAR_DARK), "no sunlight: the flag rises at the dark level",
+        $g.measure())
+  g.bus.gpio.solar_level = 0x50
+  check(g.measure() == 0x50, "sunlight: the flag rises sooner", $g.measure())
+  let plain = boot(make_rom("plainrtc", ["SIIRTC_V001"]), E)
+  check(not plain.bus.gpio.solar_present, "other RTC carts have no solar sensor")
+
 removeDir(dir)
 if failures > 0:
   echo "\n", failures, " failure(s)"

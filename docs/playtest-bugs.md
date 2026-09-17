@@ -75,7 +75,7 @@ the vblank path: dingbat counts 21, mGBA 22 -- the timer phase straddles
 the snapshot.
 
 Two causes found:
-1. **Skip-BIOS video phase** (fix applied, pending gates): dingbat started
+1. **Skip-BIOS video phase** (FIXED 9a3c7b7cd, test runner unchanged): dingbat started
    the PPU on line 0 at ROM entry; its own LLE BIOS boot hands over on line
    126, 838 cycles in (mGBA's skip-boot also uses line 126). TM0 phase vs
    mGBA at each frame boundary went from 367 to ~23 cycles. bootio.gba's
@@ -88,3 +88,37 @@ Two causes found:
 Side note: dingbat's harness frame 1 can end mid-frame when the boot halts
 across two vblanks inside one CPU step (step_frame exits with frame=2); the
 count realigns by frame 3.
+
+After the phase fix the Yu-Gi-Oh! 2004 and Mario Golf AT playtests PASS on
+their checkpoints, but their saves still differ from BOTH references (107
+and 4 bytes): the deck/values are still one frame off. Harvest Moon FoMT
+still FAILs at farm_intro (not traced; note early-frame RAM peeks in dingbat
+are unreliable because of the frame-1 quirk above).
+Probe commands added to the playtest drivers for this: mGBA `busread16 A`,
+`stepn N`, `stepuntil A MASK` (single-steps, reports the master clock);
+dingbat `layers MASK`. Instruction-level cycle comparison recipe: step both
+N instructions from boot and diff dingbat `scheduler.cycles` vs mGBA
+`mTimingGlobalTime` (a Nim tool that ticks the CPU; do not poll I/O between
+ticks, bus reads cost cycles).
+
+## 5. Boktai: "Solar Sensor is broken."
+
+**FIXED:** GPIO solar sensor for game codes U3I* / U32* / U33* (gpio.nim,
+GBATEK "GBA Cart Solar Sensor"): bit 1 resets a counter, bit 0 rising edges
+count, bit 3 reads 1 once the counter reaches `solar_level` (default 0xE8 =
+no sunlight). Verified: with the sensor removed the message appears at frame
+~4476 of the scripted run; with it the intro continues. tests/gba_rtc_test.nim
+covers dark/bright measurements. **Open:** no frontend control yet for
+`gpio.solar_level` (desktop/web), so the in-game sun gauge stays at zero.
+
+## 6. Fire Emblem: The Sacred Stones, one-step colour on two menus
+
+Not resolved. At select_mode BLDCNT=0x3C42 (BG1 over BG2/BG3/OBJ/BD),
+BLDALPHA=0x030D (13+3). dingbat's pixels differ from both references on
+~12k pixels, mostly 1-3 steps darker, some white pixels 29 vs 31 -- more
+than blend truncation explains, so a layer input (BG1/BG2 content or frame
+phase of the animated fog) differs. The references agree with each other
+though their checkpoint frames differ by 5. The verdict itself came from OCR
+noise on the text. mGBA's enableVideoLayer segfaults in the headless build,
+so a per-layer comparison needs another route (dump BG1/BG2 tile+palette
+state in both at the same frame).
