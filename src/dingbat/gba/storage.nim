@@ -41,6 +41,14 @@ proc find_storage_type(content: string): StorageType =
   if content.contains("SRAM_V") and content.contains("FLASH512_V") and
      content.contains("FLASH1M_V"):
     return stNone
+  # SRAM and one flash library (Rockman EXE 4.5, One Piece - Mezase! King of
+  # Paris): the game sends the flash ID command before anything else. Rockman
+  # waits on a flash answer and never saves to SRAM; One Piece falls back to
+  # SRAM only when no flash answers.
+  if content.contains("SRAM_V") and not content.contains("EEPROM_V"):
+    for t in [stFLASH512, stFLASH1M, stFLASH]:
+      if content.contains(match_str(t)):
+        return t
   for t in StorageType:
     if t != stNone and content.contains(match_str(t)):
       return t

@@ -30,6 +30,9 @@ def rom_info(rom_path):
     # storage.nim find_storage_type)
     if b'SRAM_V' in data and b'FLASH512_V' in data and b'FLASH1M_V' in data:
         chips = [('none', ())]
+    # SRAM + a flash library without EEPROM: the game wants flash (storage.nim)
+    elif b'SRAM_V' in data and b'EEPROM_V' not in data:
+        chips = [c for c in chips if c[0] != 'SRAM'] or chips
     # FLASH_V is a substring match hazard only for FLASH512_V/FLASH1M_V, which
     # are listed first; keep the first hit
     chip, sizes = chips[0] if chips else (None, ())

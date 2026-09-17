@@ -42,3 +42,22 @@ clock, so the RTC bias is negative. The writer wrapped it into a u64
 silently; the reader's checked `int64(u64)` conversion raised. **FIXED** with
 casts on both sides; tests/gba_rtc_test.nim covers a negative bias. The bias
 code is only on this branch, so no shipped state is affected.
+
+## 3. Rockman EXE 4.5 never saves (SRAM picked over FLASH512)
+
+Library census (7906 ROMs, save-library strings): ROMs naming more than one
+library are Medabots AX / Medarot G (EEPROM+FLASH), Kim Possible (J) / Kim
+Possible 2 / Ueki no Housoku (EEPROM+FLASH512), Breath of Fire (J) / Super
+Monkey Ball Jr (EEPROM+FLASH+SRAM), One Piece - Mezase! King of Paris
+(SRAM+FLASH), Rockman EXE 4.5 (SRAM+FLASH512), Top Gun (all but EEPROM).
+Save-memory writes logged over a minute of boot/menus in dingbat:
+- Rockman 4.5: flash ID command only, then waits on flash (mGBA pins BR4J to
+  FLASH512 + RTC).
+- One Piece: flash ID command, then SRAM writes when no flash answers (with
+  flash it erases/programs flash; mGBA autodetects flash from that command).
+- Medabots, Kim Possible 2, Monkey Ball Jr: EEPROM first (dingbat's EEPROM
+  pick matches). Ueki: flash ID then EEPROM (mGBA pins EEPROM; unchanged).
+- Breath of Fire (J): no save access in that minute; unchanged (EEPROM).
+**FIXED:** SRAM + a flash library without EEPROM -> that flash type
+(storage.nim); tests/savestate_compat_test.nim covers the pairs.
+(the harness's saves.py rom_info mirrors it). Rockman EXE 4.5 playtest now PASS: dingbat saves, all 9 cross-loads work, 9 bytes differ from mGBA's save.

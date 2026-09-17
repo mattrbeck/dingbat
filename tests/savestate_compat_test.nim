@@ -476,8 +476,12 @@ proc run_cart_shapes() =
   let base = readFile(ROM_DIR / GBA_ROMS[0][0])
   for (marker, want) in [("SRAM_V", stSRAM), ("EEPROM_V", stEEPROM),
                          ("FLASH_V", stFLASH), ("FLASH512_V", stFLASH512),
-                         ("FLASH1M_V", stFLASH1M)]:
-    let path = tmp / ("dingbat_shape_" & marker & ".gba")
+                         ("FLASH1M_V", stFLASH1M),
+                         # SRAM + one flash library: the game wants flash
+                         ("SRAM_V\0FLASH512_V", stFLASH512),
+                         ("SRAM_V\0FLASH_V", stFLASH),
+                         ("EEPROM_V\0SRAM_V", stEEPROM)]:
+    let path = tmp / ("dingbat_shape_" & marker.replace("\0", "_") & ".gba")
     writeFile(path, base & marker & "\0")
     defer: removeFile(path)
     let emu = new_gba("", path, run_bios = false, use_hle = true)
