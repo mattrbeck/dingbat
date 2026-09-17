@@ -1,0 +1,19 @@
+@title Drill Dozer (USA)
+@file Drill Dozer (U).gba
+@game V49E
+@chip SRAM
+
+@status wip: reaches File 1 New Game and the opening (the truck at night, the drive into the city); nothing is written to SRAM through the file menu, the Sound/Rumble options (changing both and backing out to the title leaves SRAM blank) or starting File 1, so the first save needs the first stage played through (drilling, enemies, the boss) to the stage-clear save. A human should record: title > File 1 New Game > play stage 1 to the end and accept the save, quit after the save message. [load]: File 1 shows the progress; pick it to reach the map/hideout.
+
+[new]
+wait 600
+press A
+mash START until text "Rumble" timeout=1500 every=40
+wait 60
+checkpoint file_select_empty window=30
+press A
+wait 600
+checkpoint truck window=30
+mash B until stable 45 timeout=3000 every=30
+wait 30
+checkpoint opening window=30

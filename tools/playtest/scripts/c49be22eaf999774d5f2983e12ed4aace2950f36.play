@@ -1,0 +1,16 @@
+@title Final Fantasy IV Advance (USA)
+@file Final Fantasy IV Advance (U).gba
+@game BZ4E
+@chip SRAM
+@status wip: reaches the opening dialogue on the Red Wings airship deck ("we will arrive at Baron shortly"). Live, mashing A on from there reaches the monster attack and "Cecil: Is everyone okay?", but the emulators drift tens of frames apart through it (the second reference reaches each screen early), so it is not scripted. The opening then runs the fly-in credits (an A press there skips back to the title, where A starts a New Game again, so mashing loops), the Baron castle audience, Cecil's room and the next morning; the first save is on the world map after walking Cecil and Kain out of Baron castle. A human should record: New Game, advance the dialogue (not during the credits), walk out of Baron castle to the world map, Save to slot 1, quit after the save message. [load]: title > Load Game > slot 1 > the world map.
+
+[new]
+wait 600
+press A
+mash START until text "Game" timeout=3000 every=40
+wait 60
+checkpoint title window=0
+press A hold=10
+until text "Baron shortly" timeout=4000 every=10
+wait 30
+checkpoint deck window=30 compare=text

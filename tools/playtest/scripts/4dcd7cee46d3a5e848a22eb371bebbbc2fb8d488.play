@@ -1,0 +1,27 @@
+@title Sennen Kazoku (Japan)
+@file Sennen Kazoku (J).gba
+@game BKAJ
+@chip FLASH1M + RTC
+@status wip: reaches the "family details" screen after はじめから, the god's opening and the start-date prompt (2005/1/1 accepted). The family generated there is random: each emulator is repeatable run to run, but dingbat, mgba and the second reference each get different members and names on the same frame with the same inputs (the cart clock reads the same frozen 06-01-01 00:00:00 in dingbat and mgba), and a few frames' difference in pacing changes the family again. The dialogue that follows has different lengths per family, so the emulators part ways: 200 more A presses (~7000 frames) reach the house and the cupid's arrow tutorial, on different screens per emulator. No save is written by then. The first save needs a human: finish the family naming and the cupid tutorial, then save from the in-game menu and quit after it confirms; [load] would pick つづきから and show the house. Scripting it needs per-emulator branches, which the step language lacks.
+
+[new]
+wait 600
+press START
+wait 300
+checkpoint press_start window=30
+press START
+wait 300
+checkpoint title window=30 compare=none
+press A
+wait 300
+checkpoint heaven window=30
+mash A until text "2005" timeout=3000 every=30
+wait 60
+checkpoint start_date window=30
+press A
+wait 120
+press A
+wait 120
+mash A until notext "2005" timeout=1500 every=30
+wait 90
+checkpoint family window=30 compare=none

@@ -1,0 +1,36 @@
+@title Castlevania - Harmony of Dissonance (USA)
+@file Castlevania - Harmony of Dissonance (U) [!].gba
+@game ACHE
+@chip SRAM
+@status wip: reaches Juste's first control on the castle bridge after the Juste/Maxim dialogue (New Game, name "A"); holding RIGHT runs into a giant armoured monster that blocks the bridge, and the first save needs Juste to get past it into the castle and reach the first save room (combat and platforming). A human should record: Game Start, New Game, name, skip the dialogue, fight/run through the entrance to the first save room, stand in it until the save message, quit. [load]: Game Start > Select data > DATA1 > resume in the save room.
+
+[new]
+wait 600
+press START
+until text "START" timeout=600 every=10
+wait 30
+checkpoint title window=30 compare=text
+press START
+until text "INFORMATION" timeout=600 every=10
+wait 30
+press A
+until text "DATA1" timeout=600 every=10
+wait 30
+checkpoint select_data window=0 compare=text
+press A
+wait 120
+checkpoint name_entry window=0
+# name "A": A types it, START confirms
+press A after=20
+press START after=60
+until text "Simon" timeout=900 every=10
+checkpoint story compare=text
+until text "CASTLEVANIA" timeout=6000 every=20
+until notext "CASTLEVANIA" timeout=3000 every=20
+until text "Juste" timeout=900 every=10
+wait 60
+checkpoint bridge_dialogue compare=text
+mash A until text "inside" timeout=3000 every=40
+press A after=60
+wait 200
+checkpoint gameplay window=30

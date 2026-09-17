@@ -1,0 +1,60 @@
+@title Donkey Kong Country (USA)
+@file Donkey Kong Country (U) [!].gba
+@game A5NE
+@chip EEPROM
+
+# Start > file 1 > 1 player > name "A", mash through the opening (Cranky,
+# the Kremlings, Diddy) to the Kongo Jungle map, then START > Save Game >
+# Yes. [load]: file 1 shows the save time, and resumes on the same map.
+# OCR reads the map banner as "Kongo Jongle"/"Кongo" (Cyrillic K), hence "ongo".
+
+[new]
+mash START until text "EXTRAS" timeout=2400 every=40
+wait 60
+checkpoint main_menu window=30 compare=text
+press A
+until text "SELECT" timeout=600 every=10
+wait 60
+checkpoint file_select_empty window=30 compare=text
+press A
+until text "Player" timeout=600 every=10
+wait 60
+press A
+until text "NAME" timeout=600 every=10
+wait 60
+checkpoint name_entry window=30
+# "A": A types it, START ends the entry
+press A after=20
+press START after=60
+until text "stand guard" timeout=900 every=10
+wait 30
+checkpoint cranky compare=text
+mash A until text "ongo" timeout=8000 every=30
+wait 120
+checkpoint kongo_jungle_map window=30
+press START
+until text "SAVE" timeout=300 every=5
+wait 60
+checkpoint pause_menu window=30 compare=text
+press A
+wait 60
+checkpoint save_prompt window=0 compare=text
+press A
+until text "plete" timeout=600 every=5
+checkpoint saved window=0
+
+[load]
+mash START until text "EXTRAS" timeout=2400 every=40
+wait 60
+press A
+until text "SELECT" timeout=600 every=10
+wait 120
+checkpoint file_select_saved window=30 compare=text
+press A
+until text "ongo" timeout=1200 every=10
+wait 120
+checkpoint resumed_map window=30
+press START
+until text "SAVE" timeout=300 every=5
+wait 60
+checkpoint resumed_menu window=30 compare=text

@@ -1,0 +1,66 @@
+@title Super Mario Advance 2 - Super Mario World (USA)
+@file Super Mario Advance 2 - Super Mario World (U) [!].gba
+@game AA2E
+@chip EEPROM
+
+# Super Mario World, File A. On the Yoshi's House map open the START menu
+# and Save & Quit; the attract demo and title then lead back to a file
+# select whose File A reads WORLD 1.
+
+[new]
+mash START until text "Single Player" timeout=2400 every=40
+wait 60
+checkpoint game_select window=0
+press A hold=10
+until text "CHOOSE A" timeout=600 every=10
+wait 60
+press A hold=10
+wait 120
+mash START until text "Choose a File" timeout=900 every=60
+wait 60
+checkpoint file_select_empty window=0
+press A hold=10
+until text "Toadstool" timeout=900 every=10
+wait 30
+checkpoint intro_text window=0
+mash A until text "HOUSE" timeout=1800 every=20
+# the R-button hint pops up over the map before the menu opens
+wait 300
+checkpoint yoshis_house_map window=0
+press START
+until text "Continue" timeout=200 every=5
+wait 20
+press DOWN after=20
+press DOWN after=20
+checkpoint map_menu window=0
+press A after=60
+mash START until text "Single Player" timeout=1800 every=40
+wait 60
+press A hold=10
+until text "CHOOSE A" timeout=600 every=10
+wait 60
+press A hold=10
+wait 120
+mash START until text "Choose a File" timeout=900 every=60
+wait 60
+checkpoint saved window=0
+
+[load]
+mash START until text "Single Player" timeout=2400 every=40
+wait 60
+press A hold=10
+until text "CHOOSE A" timeout=600 every=10
+wait 60
+press A hold=10
+wait 120
+mash START until text "Choose a File" timeout=900 every=60
+wait 60
+checkpoint file_select_saved window=0
+press A hold=10
+until text "HOUSE" timeout=900 every=10
+wait 120
+checkpoint resumed window=0
+press START
+until text "Continue" timeout=200 every=5
+wait 20
+checkpoint resumed_menu window=0
