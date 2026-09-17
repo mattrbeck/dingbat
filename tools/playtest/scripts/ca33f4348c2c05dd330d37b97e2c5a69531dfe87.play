@@ -1,0 +1,43 @@
+@title Metroid Fusion (USA)
+@file Metroid Fusion (U) [!].gba
+@game AMTE
+@chip SRAM
+@status wip: reaches Samus in control in the docking bay after the opening story (file A); starting the file writes only small header blocks, and the first real save is a save room on the Main Deck a few rooms away (walk left out of the docking bay, through the rooms past the Navigation Room). Exploring blind, Samus walked left into the next room and got hidden behind the foreground wall; the route needs platforming. A human should record: file A, Start, tap through the story, walk to the first Navigation Room and the save room beside it, stand on the save pad and answer Yes, quit after the save message. [load]: SAMUS DATA shows file A with a time; START resumes in the save room.
+
+# New file A; A taps through the story slides (each ends on a black frame).
+
+[new]
+wait 600
+until notblank timeout=1200 every=10
+mash START until text "START" timeout=1200 every=30
+checkpoint title window=30
+press START
+until text "SAMUS DATA" timeout=900 every=10
+wait 30
+checkpoint file_select window=0 compare=text
+# file A: START / COPY DATA / ERASE DATA, then start
+press A after=60
+press A after=90
+until notblank timeout=900 every=4
+until text "Biologic" timeout=1500 every=10
+wait 20
+checkpoint intro window=0 compare=text
+mash A until notext "Biologic" timeout=600 every=20
+mash A until blank timeout=6000 every=30
+until notblank timeout=600 every=4
+mash A until blank timeout=6000 every=30
+until notblank timeout=600 every=4
+mash A until blank timeout=6000 every=30
+until notblank timeout=600 every=4
+wait 30
+checkpoint ship_map window=0 compare=text
+mash A until blank timeout=6000 every=30
+until notblank timeout=600 every=4
+wait 30
+mash A until blank timeout=6000 every=30
+until notblank timeout=600 every=4
+wait 60
+mash A until blank timeout=6000 every=30
+until notblank timeout=600 every=4
+wait 60
+checkpoint docking_bay window=0 compare=none

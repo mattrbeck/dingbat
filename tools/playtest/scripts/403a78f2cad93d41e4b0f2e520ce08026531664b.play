@@ -1,0 +1,29 @@
+@title Mega Man Zero 3 (USA)
+@file Megaman Zero 3 (U).gba
+@game BZ3E
+@chip SRAM
+@status wip: reaches the snowfield scene after the opening story crawl ("Two months later...", the Resistance soldiers and Ciel with Zero, dialogue still running); nothing is saved on New Game. The first save is at the Resistance Base after the opening mission (the crashed-ship stage and its boss), which needs real platforming and combat. A human should record: NEW GAME, hold A through the story, play the opening mission, then save at the base computer and quit after the save message. [load]: LOAD GAME > the slot > the base.
+
+# The story crawl only advances while a button is held.
+
+[new]
+wait 600
+press START after=60
+checkpoint title window=0 compare=text
+press START after=90
+checkpoint title_menu window=10
+# NEW GAME
+press START
+until blank timeout=600 every=4
+until notblank timeout=900 every=4
+wait 60
+hold A
+until blank timeout=9000 every=10
+release
+until notblank timeout=1200 every=4
+wait 60
+checkpoint two_months window=10
+mash A until blank timeout=4000 every=30
+until notblank timeout=900 every=4
+wait 3000
+checkpoint snowfield window=10

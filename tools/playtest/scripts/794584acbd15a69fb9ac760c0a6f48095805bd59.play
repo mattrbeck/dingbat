@@ -1,0 +1,84 @@
+@title Mario Tennis Advance - Power Tour (USA)
+@file Mario Tennis Advance - Power Tour (U).gba
+@game BTME
+@chip SRAM
+
+# First boot asks for the language (saved at once: the header block), then
+# START on the title starts a Power Tour file: the boy (Clay), righty, Normal,
+# keep the name; the file is written on the fade into "Good morning, Clay".
+# [load]: the language screen is skipped, Main Menu > Power Tour shows Slot 1
+# with the play time and "Inside Lodge", and it resumes at the morning scene.
+
+[new]
+wait 600
+until text "Italiano" timeout=600 every=10
+wait 30
+checkpoint language window=30
+# English, then Yes (the prompt opens on No)
+press A after=60
+press LEFT after=20
+checkpoint language_yes window=10
+press A
+until text "Press any button" timeout=600 every=10
+checkpoint health_safety window=30
+press A
+wait 120
+mash START until text "PRESS" timeout=1200 every=30
+checkpoint title window=0 compare=text
+press START
+until text "Choose the character" timeout=900 every=10
+wait 30
+checkpoint choose_character window=10
+press A
+until text "Pick a character" timeout=300 every=10
+wait 30
+checkpoint pick_character window=0 compare=text
+press A
+until text "Play as the boy" timeout=300 every=10
+wait 30
+press A
+until text "righty or a lefty" timeout=300 every=10
+wait 30
+press A
+until text "want to be a righty" timeout=300 every=10
+wait 30
+press A
+until text "difficulty level" timeout=300 every=10
+wait 30
+press A
+until text "normal mode" timeout=300 every=10
+wait 30
+press A
+until text "the name" timeout=300 every=10
+wait 30
+press RIGHT after=30
+checkpoint keep_name window=0 compare=text
+press A
+until text "OK" timeout=300 every=10
+wait 30
+press A
+until blank timeout=600 every=4
+until text "Good morning" timeout=900 every=10
+wait 60
+checkpoint saved window=30
+
+[load]
+wait 600
+until text "Press any button" timeout=600 every=10
+checkpoint health_safety_loaded window=30
+press A
+wait 120
+mash START until text "PRESS" timeout=1200 every=30
+press START
+until text "best player" timeout=600 every=10
+wait 60
+checkpoint main_menu window=30
+press A
+until text "Select File" timeout=600 every=10
+wait 60
+checkpoint select_file window=30
+press A
+until blank timeout=600 every=4
+until text "Good morning" timeout=900 every=10
+wait 60
+checkpoint resumed window=30

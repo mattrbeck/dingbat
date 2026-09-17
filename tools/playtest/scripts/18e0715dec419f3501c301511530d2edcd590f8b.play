@@ -1,0 +1,69 @@
+@title Dragon Ball Z - The Legacy of Goku II (USA)
+@file Dragon Ball Z - The Legacy of Goku II (U) [!].gba
+@game ALFE
+@chip EEPROM
+@status wip: reaches Trunks in control outside Pepper Town after Gohan's training (melee boulder, energy-blast boulder, the Super Saiyan cutscene, "Stay here, I'll take care of them"); nothing is written to EEPROM along the way. The pause menu has only Status / Items / Journal / Options (no Save): the game saves at Save Points ("Game Saved!"), and the first one is further on (Pepper Town or beyond); walking up and right from here dead-ends at a cliff. A human should record: New Game, play the Trunks prologue to the first Save Point, use it, quit after "Game Saved!". [load]: title > START > the save slot > resume at the Save Point.
+
+# Nothing touches the EEPROM up to here: dingbat writes no battery file, the
+# references leave blank 8192-byte files. In live sessions the second
+# reference rolled different starting stats for Trunks (random rolls on a
+# slightly different frame).
+
+[new]
+wait 660
+until notblank timeout=600 every=4
+wait 400
+press START
+wait 120
+checkpoint title window=30
+press A
+wait 150
+checkpoint select_game window=0
+press A
+wait 120
+until text "present day" timeout=300 every=10
+wait 30
+checkpoint story window=0
+mash A until blank timeout=6000 every=30
+until notblank timeout=600 every=4
+wait 120
+mash A until blank timeout=6000 every=30
+until notblank timeout=600 every=4
+wait 120
+checkpoint pepper_town window=10
+mash A until text "melee" timeout=2000 every=20
+until text "destroy" timeout=300 every=5
+wait 30
+checkpoint tutorial window=0 compare=text
+mash A until notext "destroy" timeout=300 every=20
+wait 120
+# walk up to the boulder, face it, punch
+hold UP
+wait 90
+release
+press LEFT hold=8 after=10
+press A after=30
+press A after=30
+press A after=30
+press A after=60
+until text "on this one" timeout=300 every=5
+mash A until notext "on this one" timeout=900 every=30
+wait 60
+mash A until text "meter" timeout=600 every=30
+mash A until notext "meter" timeout=900 every=30
+wait 60
+press SELECT hold=10 after=60
+# up to the second boulder, energy blasts
+hold UP
+wait 90
+release
+press RIGHT hold=14 after=5
+press UP hold=3 after=10
+press B after=40
+press B after=40
+press B after=60
+# Super Saiyan lesson and cutscene, until Gohan flies off
+mash A until text "Stay here" timeout=4000 every=44
+mash A until notext "Stay here" timeout=600 every=44
+wait 300
+checkpoint trunks_alone window=10

@@ -1,0 +1,111 @@
+@title Final Fantasy I & II - Dawn of Souls (USA)
+@file Final Fantasy I & II - Dawn of Souls (U).gba
+@game BFFE
+@chip SRAM
+
+# Title Select > FINAL FANTASY > New Game; keep the default classes (Warrior,
+# Thief, White Mage, Black Mage) and name each one "A" by hand (SELECT's
+# Auto-Name is random and picks different names in mGBA). START skips the
+# prologue to the world map outside Cornelia; the menu's Save writes File 1.
+# [load]: Load Game shows File 1 (four A's, Cornelia, 500 Gil) and resumes
+# on the world map.
+
+[new]
+wait 600
+until stable 30 timeout=900 every=4
+checkpoint title window=10
+press START after=120
+press START after=120
+until text "Title Select" timeout=600 every=10
+wait 20
+checkpoint title_select window=10
+press A after=120
+until text "SQUARE" timeout=900 every=10
+wait 60
+checkpoint ff1_title window=0 compare=text
+press START
+wait 120
+checkpoint new_game window=10
+press A
+until text "Confirm" timeout=600 every=10
+wait 20
+checkpoint party window=10
+# RIGHT moves the hand onto the name; A opens the name entry, A types "A"
+press RIGHT after=20
+press A
+until text "Enter name" timeout=300 every=5
+wait 20
+press A after=20
+press START after=60
+press DOWN after=20
+press A
+until text "Enter name" timeout=300 every=5
+wait 20
+press A after=20
+press START after=60
+press DOWN after=20
+press A
+until text "Enter name" timeout=300 every=5
+wait 20
+press A after=20
+press START after=60
+press DOWN after=20
+press A
+until text "Enter name" timeout=300 every=5
+wait 20
+press A after=20
+press START after=60
+checkpoint party_named window=10
+press START
+until text "Begin game" timeout=300 every=5
+wait 30
+press A
+until blank timeout=600 every=4
+until notblank timeout=900 every=4
+until text "darkness" timeout=900 every=10
+wait 30
+checkpoint prologue window=0 compare=text
+press START after=120
+checkpoint world_map window=10
+press START
+until text "Formation" timeout=300 every=5
+wait 30
+checkpoint menu window=10
+# Save is the last entry: UP wraps to it
+press UP after=20
+press A
+until text "Empty" timeout=300 every=5
+wait 30
+checkpoint save_files window=10
+press A
+until text "Cornelia" timeout=300 every=5  # "Data saved." does not OCR
+wait 30
+checkpoint saved window=10
+
+[load]
+wait 600
+until stable 30 timeout=900 every=4
+press START after=120
+press START after=120
+until text "Title Select" timeout=600 every=10
+wait 20
+press A after=120
+until text "SQUARE" timeout=900 every=10
+wait 60
+press START
+wait 120
+checkpoint load_menu window=10
+# the hand starts on Load Game when a save exists
+press A
+until text "Select file to load" timeout=300 every=5
+wait 30
+checkpoint load_files window=10
+press A
+until blank timeout=300 every=2
+until notblank timeout=600 every=4
+wait 120
+checkpoint resumed_world_map window=10
+press START
+until text "Formation" timeout=300 every=5
+wait 30
+checkpoint resumed_menu window=10

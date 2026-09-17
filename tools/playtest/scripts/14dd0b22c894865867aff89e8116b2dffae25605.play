@@ -1,0 +1,63 @@
+@title Advance Wars 2 - Black Hole Rising (USA)
+@file Advance Wars 2 - Black Hole Rising (U) [!].gba
+@game AW2E
+@chip FLASH
+
+# Campaign > New, tap through the prologue and the Orange Star briefing into
+# the first map (Andy's mission). Mashing A through the opening dialogue ends
+# with the map menu open; Save from it. [load]: Campaign > Continue lands back
+# on that map.
+
+[new]
+wait 600
+mash START until text "PRESS START" timeout=1200 every=30
+checkpoint title window=30
+mash START until text "SELECT" timeout=900 every=30
+wait 60
+checkpoint select_mode window=30 compare=text
+# CAMPAIGN opens CONTINUE / NEW with NEW lit while there is no save
+press A after=40
+checkpoint campaign_new window=0 compare=text
+press A
+until text "tightening" timeout=1500 every=10
+wait 30
+checkpoint prologue window=0 compare=text
+mash A until text "CAMPAIGN" timeout=3000 every=30
+until text "needed to see" timeout=600 every=5
+wait 30
+checkpoint campaign_map window=0 compare=text
+mash A until blank timeout=9000 every=30
+until notblank timeout=900 every=4
+until text "forces here" timeout=900 every=5
+wait 30
+checkpoint battle_intro window=30
+# the briefing ends on the map menu (CO / Intel / Options / Save / End)
+mash A until text "Options" timeout=6000 every=40
+wait 30
+checkpoint map_menu window=30
+press DOWN after=15
+press DOWN after=15
+press DOWN after=15
+press A
+until text "Save current" timeout=300 every=5
+wait 30
+checkpoint save_prompt window=30
+mash A until notext "Save current" timeout=300 every=30
+until notext "Now saving" timeout=900 every=5
+wait 180
+checkpoint saved window=30 compare=none  # map units and cursor animate out of phase between emulators
+
+[load]
+wait 600
+mash START until text "PRESS START" timeout=1200 every=30
+mash START until text "SELECT" timeout=900 every=30
+wait 60
+checkpoint select_mode_loaded window=0 compare=text
+# CAMPAIGN opens with CONTINUE highlighted
+press A after=40
+checkpoint campaign_continue window=0 compare=text
+press A
+until blank timeout=600 every=4
+until notblank timeout=900 every=4
+wait 240
+checkpoint resumed_map window=30
