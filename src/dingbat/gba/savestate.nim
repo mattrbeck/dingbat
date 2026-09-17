@@ -247,8 +247,8 @@ proc save_gpio_state(gpio: GPIO; w: var Writer) =
   w.write_u64(rtc.buffer.value)
   w.write_u8(rtc.status)
   w.write_bool(rtc.deterministic)
-  w.write_u64(uint64(rtc.epoch))
-  w.write_u64(uint64(rtc.bias))
+  w.write_u64(cast[uint64](rtc.epoch))
+  w.write_u64(cast[uint64](rtc.bias))  # negative when a game sets an earlier clock
   w.write_bool(rtc.bias_set)
   w.write_u8(uint8(rtc.wday_bias))
   w.write_bool(rtc.bias_host)
@@ -280,13 +280,13 @@ proc load_gpio_state(gpio: GPIO; r: var Reader; rev: uint32) =
   rtc.irq = (rtc.status and 0x08'u8) != 0
   if rev >= 3:
     rtc.deterministic = r.read_bool()
-    rtc.epoch = int64(r.read_u64())
+    rtc.epoch = cast[int64](r.read_u64())
   else:
     # rev <= 2 had no deterministic RTC mode; epoch is ignored while off.
     rtc.deterministic = false
     rtc.epoch = 0
   if rev >= 7:
-    rtc.bias = int64(r.read_u64())
+    rtc.bias = cast[int64](r.read_u64())
     rtc.bias_set = r.read_bool()
     let wd = r.read_u8()
     check_range(int(wd), 0, 6, "rtc.wday_bias")

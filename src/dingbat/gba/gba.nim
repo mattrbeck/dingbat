@@ -1266,6 +1266,10 @@ proc post_init*(gba: GBA) =
     gba.gs_bon.init_gs_bon()
   if not gba.run_bios:
     gba.cpu.skip_bios()
+    # The BIOS boot leaves the link port in general-purpose mode (its
+    # multiboot probe writes RCNT = 0x800F); from RCNT = 0 Sonic Advance 1
+    # and 2 hang at boot
+    gba.serial.rcnt = 0x800F
 
 proc handle_saves*(gba: GBA) =
   gba.scheduler.schedule(280896, etSaves)

@@ -519,6 +519,15 @@ block:
   check(g2.load_state_bytes(img) and g2.datetime() == regs(2040, 10, 10, 3, 10, 10, 10),
         "state carries the clock to another core")
 
+block:  # a clock set EARLIER than the source clock: the bias is negative
+  removeFile(sav_path(rtc_rom))
+  let g = boot(rtc_rom, E)
+  g.rtc_write_bytes(CMD_DATETIME_W, regs(2001, 2, 3, 6, 4, 5, 6))
+  let img = g.state_bytes()
+  let g2 = boot(rtc_rom, E)
+  check(g2.load_state_bytes(img) and g2.datetime() == regs(2001, 2, 3, 6, 4, 5, 6),
+        "a state with a negative clock bias loads", hex(g2.datetime()))
+
 block:  # an older payload revision (tests/states corpus): status migrates, clock unset
   const corpus = "tests/states/inputrec.gba.v7.state"
   if fileExists(corpus) and fileExists("tests/roms/inputrec.gba"):
