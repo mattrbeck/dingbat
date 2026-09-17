@@ -1,0 +1,48 @@
+@title Yu-Gi-Oh! World Championship Tournament 2004 (USA)
+@file Yu-Gi-Oh! - World Championship Tournament 2004 (U) (M6).gba
+@game BYWE
+@chip SRAM
+
+# First boot: English, New Game, "Got Basic Deck!" -- the save is written by
+# the time the main menu appears (checked: the battery file is unchanged by
+# anything done in the menu afterwards). [load] skips the language screen,
+# takes Continue onto the main menu (DECK 40 in the header).
+#
+# The basic deck is shuffled from a seed that depends on when the buttons are
+# pressed, so [new] presses on fixed frames (the text checks only guard that
+# the screen is really there) to give every emulator the same deck.
+
+[new]
+wait 630
+until text "Selection" timeout=300 every=10
+checkpoint language window=30 compare=text
+press A
+wait 180
+until text "2004" timeout=600 every=10
+checkpoint title window=30
+press START
+wait 120
+press A
+wait 120
+until text "Basic Deck" timeout=600 every=10
+wait 30
+checkpoint basic_deck window=30
+press A
+wait 120
+until text "Edit Deck" timeout=600 every=10
+wait 30
+checkpoint main_menu window=30 compare=text
+
+[load]
+until text "Start" timeout=900 every=10
+wait 30
+press START
+wait 120
+# the first RIGHT arrives before the menu takes input
+press RIGHT after=30
+press RIGHT after=30
+checkpoint continue_selected window=30
+press A
+until text "Edit Deck" timeout=600 every=10
+wait 30
+checkpoint main_menu window=30 compare=text

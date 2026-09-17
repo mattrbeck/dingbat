@@ -1,0 +1,49 @@
+@title WarioWare, Inc.: Mega Microgame$! (USA)
+@file WarioWare Inc. (U).gba
+@game AZWE
+@chip SRAM
+
+# First boot asks for a name and a gender; confirming them writes the save
+# (the battery file is still blank on the title screen). [load] skips the
+# name entry straight to the main menu and the stage select.
+
+[new]
+wait 600
+press START
+until text "PRESS STAR" timeout=600 every=5
+checkpoint title window=30
+press START
+until text "NAME ENTR" timeout=300 every=5
+wait 30
+checkpoint name_entry window=30
+# type "A", scroll left onto END, confirm
+press A after=30
+press LEFT after=50
+press A
+until text "How about" timeout=300 every=5
+wait 20
+checkpoint confirm_name window=30
+press A
+until text "Which" timeout=300 every=5
+wait 20
+checkpoint gender window=30
+press A
+until text "Diamond City" timeout=300 every=5
+wait 30
+checkpoint diamond_city window=30
+wait 300
+checkpoint city window=10
+
+[load]
+wait 600
+press START
+until text "PRESS STAR" timeout=600 every=5
+wait 30
+press START
+until text "Options" timeout=600 every=5
+wait 30
+checkpoint main_menu window=30 compare=text
+press A
+until text "Genre" timeout=300 every=5
+wait 30
+checkpoint stage_select window=30 compare=text

@@ -1,0 +1,44 @@
+@title The Legend of Zelda: A Link to the Past & Four Swords (USA)
+@file Legend of Zelda, The - A Link To The Past Four Swords (U) [!].gba
+@game AZLE
+@chip EEPROM
+
+# Registering a name on file 1 writes the file ("Now saving..."); [load]
+# shows file 1 with its name, hearts and the OPTIONS button, then picks
+# A Link to the Past through its title into the opening story.
+
+[new]
+until text "CHOOSE A FILE" timeout=900 every=10
+wait 150
+press A
+until text "ENTER A NAME" timeout=300 every=5
+wait 30
+# type "A", then START jumps to END
+press A after=20
+press START after=60
+checkpoint name_entry window=30 compare=text
+press A
+until text "Now saving" timeout=300 every=2
+checkpoint saving window=30 compare=text
+until notext "saving" timeout=900 every=5
+until text "CHOOSE A FILE" timeout=600 every=5
+wait 30
+checkpoint file_saved window=30 compare=text
+
+[load]
+until text "CHOOSE A FILE" timeout=900 every=10
+until text "OPTIONS" timeout=600 every=5
+wait 30
+checkpoint file_loaded window=30 compare=text
+press A
+until text "Four" timeout=300 every=5
+wait 30
+press A
+wait 300
+until text "2002" timeout=900 every=10
+wait 30
+checkpoint alttp_title window=30
+# the title ignores START while its logo is still settling
+mash START until text "Hyrule" timeout=1200 every=60
+wait 20
+checkpoint story window=30 compare=text

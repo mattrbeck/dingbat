@@ -1,0 +1,53 @@
+@title Koro Koro Puzzle: Happy Panechu! (Japan)
+@file Koro Koro Puzzle - Happy Panechu! (J) [!].gba
+@game KHPJ
+@chip EEPROM (4K) + tilt sensor
+
+# Japanese text: OCR reads little of it, so this script leans on fixed waits
+# (every emulator reaches each screen on the same frame here).
+# First boot: warning story screen, title, then "hold the Game Boy level and
+# press A" (tilt calibration), name entry (keep the default, START jumps to
+# OK), then the tilt tutorial. The calibration and name are in the EEPROM by
+# the time the tutorial asks the player to tilt the console, which the
+# drivers cannot do, so [new] stops there.
+
+[new]
+wait 700
+checkpoint warning window=30
+press A
+wait 120
+until text "PUSH START" timeout=300 every=10
+checkpoint title window=10 compare=text
+press START
+wait 90
+checkpoint calibrate window=30
+press A
+wait 120
+press A
+wait 120
+press START
+wait 90
+checkpoint name_entry window=30
+press A
+wait 120
+checkpoint what_is_panechu window=30
+press A
+wait 90
+checkpoint tilt_tutorial window=30
+
+# [load]: the title and calibration come back on every boot, but with a save
+# the name entry is skipped and the game goes straight to "What is Panechu?"
+[load]
+wait 700
+press A
+wait 120
+until text "PUSH START" timeout=300 every=10
+press START
+wait 90
+checkpoint calibrate window=30
+press A
+wait 150
+checkpoint what_is_panechu window=30
+press A
+wait 90
+checkpoint tilt_tutorial window=30

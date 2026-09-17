@@ -1,0 +1,81 @@
+@title Mario Golf: Advance Tour (USA)
+@file Mario Golf - Advance Tour (U).gba
+@game BMGE
+@chip SRAM
+
+# Story mode from a blank cart: keep the default golfer name (Neil), mash
+# through the arrival at the Marion Club and the manager's welcome speech
+# (about 19000 frames of dialogue), then Pause > Save and Quit. [load] takes
+# STORY from the main menu, continues the saved game in the Manager's Room and
+# opens the pause menu there.
+
+[new]
+wait 600
+mash START until text "START" timeout=1500 every=30
+wait 30
+checkpoint title window=30
+press START
+until text "game character" timeout=900 every=10
+checkpoint toad window=30
+press A
+wait 90
+press A
+wait 90
+mash A until text "name" timeout=1500 every=30
+press A
+until text "HIJK" timeout=300 every=5
+wait 20
+checkpoint name_entry window=30 compare=text
+# the cursor starts on Finish
+press A
+until text "Tear it up" timeout=300 every=5
+checkpoint named window=30 compare=text
+mash A until text "rival the likes" timeout=12000 every=30
+checkpoint manager window=30 compare=text
+mash A until text "assist you" timeout=6000 every=30
+# the last lines of the speech: each ends a mash so a stray press can never
+# re-open a conversation with the manager once the player can move
+mash B until text "club champ of other" timeout=4000 every=30
+wait 30
+press B after=60
+mash B until text "just play Mario" timeout=1500 every=30
+wait 30
+press B after=60
+mash B until text "neglect your practice" timeout=1500 every=30
+wait 30
+press B after=60
+mash B until text "ultimate golfer" timeout=1500 every=30
+wait 30
+press B after=60
+until notext "ultimate golfer" timeout=300 every=10
+mash START until text "Save and" timeout=1800 every=90
+wait 30
+checkpoint pause_menu window=30 compare=text
+# UP wraps from Character Data to Save and Quit
+press UP after=20
+press A
+until text "Save current data" timeout=300 every=5
+wait 20
+checkpoint save_prompt window=30 compare=text
+press A
+until text "Data saved" timeout=600 every=5
+wait 60
+checkpoint saved window=30 compare=text
+
+[load]
+mash START until text "START" timeout=1500 every=30
+wait 30
+checkpoint title window=30
+press START
+until text "Play through the story" timeout=300 every=5
+wait 30
+checkpoint main_menu window=30 compare=text
+press A
+until text "saved data here" timeout=300 every=5
+wait 30
+checkpoint continue_prompt window=30 compare=text
+press A
+wait 180
+mash START until text "Save and" timeout=1200 every=90
+wait 30
+checkpoint pause_menu window=30 compare=text
