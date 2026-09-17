@@ -60,7 +60,7 @@ def main():
     p.add_argument('--app', default=os.environ.get('DINGBAT_APP', os.path.join(HERE, '..', '..', 'dingbat')),
                    help='desktop dingbat binary built from this tree (default: repo-root ./dingbat)')
     p.add_argument('--convert', action='store_true',
-                   help='convert once the app quits (a headless replay; takes longer than the play did)')
+                   help='convert once the app quits')
 
     p = sub.add_parser('convert', help='turn a DINGBAT_INPUT_LOG recording into a script section')
     p.add_argument('log')

@@ -85,15 +85,16 @@ while recording.
 
 Underneath, `DINGBAT_INPUT_LOG=<file>` makes the desktop app log keypad changes
 per emulated frame, a framebuffer hash every 60 frames, marks, and the end
-frame. `playtest.py convert LOG --rom ROM --section S [--save SEED]` (run by
-`record` when the app quits) replays the log headless in dingbat with the same
-BIOS mode and **checks every hash**: if the replay diverges from what you saw,
-the script stops there and says at which frame. It OCR-samples the screen and
-writes steps: taps become `press`, dialog mashing becomes `mash KEY until text
-"<where it led>"`, and gaps become `until text "<line that appeared>"` plus
-your reaction time, so the script tolerates other emulators reaching each
-screen on a different frame. Check the result with `playtest.py run ROM
---script FILE --no-cross`, add `@title`/`@file`, save it as
+frame. `record` prints the next command when the app quits:
+`playtest.py convert LOG --rom ROM --section S [--save SEED]` replays the log
+headless in dingbat with the same BIOS mode and **checks every hash** (if the
+replay diverges from what you saw, the script stops there and says at which
+frame), then writes your inputs on exactly the frames you pressed them:
+`press` / `hold` / `release` and `wait`, a checkpoint at every F9 mark, one a
+minute into any unmarked stretch, and one at the end. It reads no screen text:
+every emulator gets the same input timeline, so a checkpoint that differs is a
+finding (an emulator that reaches a screen late has a timing difference), not
+something the script should wait out. Add `@title`/`@file` and save it as
 `scripts/<sha1>.play`.
 
 ## Game list
