@@ -1,0 +1,19 @@
+@title Mega Man Zero (USA)
+@file Megaman Zero (U).gba
+@game AZCE
+@chip SRAM
+@status wip: the script replays to the "Watch out!!!" line of the opening; explored live to the opening stage after New Game (Ciel's rescue of Zero, "Watch out!!!", Zero in control in the ruins); the title has only NEW GAME / CONTINUE and nothing is written to SRAM until the first save at the Resistance Base, which needs the opening stage cleared, including the Golem boss. A human should record: New Game, play the opening stage and the Golem fight, at the Resistance Base save at Ciel's computer, quit after the save message. [load]: title > CONTINUE > the slot > the base.
+
+[new]
+until text "PRESS START" timeout=1500 every=10
+wait 30
+checkpoint title window=0
+press START
+until text "GAME" timeout=300 every=5
+wait 30
+checkpoint new_game window=0
+press A
+mash A until text "Watch out" timeout=9000 every=30
+checkpoint watch_out window=0 compare=text
+# Explored live: about 5000 more frames of A-mashing (Ciel's "......", the
+# Golem reveal) hand control to Zero in the ruins.

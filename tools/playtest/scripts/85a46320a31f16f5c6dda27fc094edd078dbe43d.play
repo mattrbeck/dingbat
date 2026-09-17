@@ -1,0 +1,36 @@
+@title Tactics Ogre - The Knight of Lodis (USA)
+@file Tactics Ogre - The Knight of Lodis (U) [!].gba
+@game ATOE
+@chip FLASH
+@status wip: reaches the first (tutorial) battle after the name "AA", the default birthday, the tarot questions (default answers) and the prologue; nothing is written to flash before it. The battle has to be won, and with A-mashing the three emulators already diverge on the first turn (an out-of-range warning in one). A human should record: name, birthday, tarot answers, win the first battle, then save at the first save prompt / world-map menu and quit after the save message. [load]: title > Load/Continue > the slot > resume.
+
+# The opening scene runs until START skips it to the name entry.
+
+[new]
+wait 1200
+mash A until text "sound" timeout=2400 every=30
+press START
+until text "Enter name" timeout=600 every=10
+wait 30
+checkpoint enter_name window=0
+press A after=20
+until text "Select letter" timeout=300 every=5
+press A after=30
+# type "AA", START to finish
+press A after=20
+press A after=20
+press START
+until text "OK?" timeout=300 every=5
+wait 20
+checkpoint name_ok window=0
+press A
+until text "birthdate" timeout=300 every=5
+wait 30
+checkpoint birthday window=0
+press A
+until text "Yes" timeout=300 every=5
+wait 20
+press A
+# tarot questions, then the prologue narration (default answers everywhere)
+mash A until text "BATTLE START" timeout=20000 every=30
+checkpoint battle_start window=0 compare=none

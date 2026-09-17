@@ -1,0 +1,35 @@
+@title Kingdom Hearts - Chain of Memories (USA)
+@file Kingdom Hearts - Chain of Memories (U).gba
+@game B8CE
+@chip SRAM
+@status wip: the script replays to the card-cycling step of Marluxia's tutorial battle; explored live to Sora free in the first Traverse Town room after New Game, file 1, the opening, Marluxia's card-battle tutorial (jump, reload, card cycling, category change) and the town intro; nothing is written to SRAM along the way and there is no save point in that room or on START. The first save needs map cards used on the doors to reach a save point. A human should record: New Game, file 1, the tutorial, walk Traverse Town to the first save point (or a Moment's Reprieve room), save, quit after the save message. [load]: title > Continue > file 1 > resume.
+
+# Dialogue only advances on a firm press: mash with hold=8 every 60 frames.
+
+[new]
+until text "PRESS" timeout=1500 every=10
+wait 150
+checkpoint title window=0 compare=text
+press START
+until text "NEW GAME" timeout=300 every=5
+wait 150
+press A
+until text "Select a file" timeout=600 every=5
+wait 30
+checkpoint file_select window=0
+press A
+mash A until text "Castle" timeout=12000 every=60 hold=8
+mash A until text "Dodge Roll" timeout=12000 every=30 hold=8
+checkpoint tutorial window=0 compare=text
+press B after=60
+press RIGHT hold=4 after=4
+press RIGHT hold=4 after=60
+mash A until text "Reloading" timeout=3000 every=30 hold=8
+# out of cards: hold A on the reload icon
+press A hold=90 after=10
+mash A until text "Selecting Cards" timeout=3000 every=30 hold=8
+checkpoint selecting_cards window=0 compare=text
+# Explored live but not yet replay-stable (the category-change prompt was not
+# reached on replay): R, A, L, A, hold A 90 frames, then the Changing
+# Categories prompt wants SELECT; after it, A-mashing (hold=8 every=60) runs
+# the town intro until Sora is free in the first Traverse Town room.
