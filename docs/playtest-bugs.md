@@ -449,9 +449,36 @@ survives the one test that could have killed it, and the sprite layer --
 which an earlier, contaminated run had supplying a third of the differing
 pixels -- contributes none.
 
-What is left is to compare the per-line scroll values themselves between the
-two emulators, which is a core-side dump rather than anything visible on
-screen.
+**And the per-line scroll trace says it is a vertical-offset boundary.**
+With `-d:bgtrace` dumping what each text BG rendered every line with, BG1's
+scroll on driver frame 549 changes at thirteen lines, and **every one of the
+three differing lines is one of them -- 3 of 3**:
+
+| line | BG1 (hofs, vofs) across the boundary | what moved | pixels differ |
+|---|---|---|---|
+| 23, 55, 69 | (65250,0) -> (65393,0) -> ... | hofs | no |
+| 79 | (65500,0) -> (0,1) | hofs+vofs | no |
+| 86, 94, 102, 110 | (0,1) <-> (0,0) | vofs | no |
+| **119, 127, 135** | **(0,1) <-> (0,0)** | **vofs** | **YES** |
+| 143, 151 | (0,1) <-> (0,0) | vofs | no |
+
+So the differences sit exactly where BG1's *vertical* offset changes, on the
+last line before it changes, and never where only the horizontal offset
+moves. The ten vertical boundaries that do not differ are the ones where
+BG1 has no horizontal edge for a one-line shift to reveal -- vofs 0 against
+vofs 1 is invisible on uniform content, which is also why the three that do
+differ are consecutive and in the busiest part of the picture.
+
+That makes this a question about *when a per-line vertical scroll write
+takes effect*, one line either side, rather than about the scroll values
+themselves, which are what they should be. It is the renderer's latch, not
+the DMA's arithmetic -- consistent with the rows being tile-bottom lines,
+and consistent with the grant instant having been measured as irrelevant.
+
+What would close it is mGBA's own per-line BG1 trace for the same frame, to
+confirm its vofs changes a line earlier or later than dingbat's. That is the
+only piece still missing, and it needs mGBA instrumentation rather than
+anything here.
 
 Two cautions earned the hard way while taking this, both now fixed upstream
 and both recorded in section 9: `dingbat_test` wrote GBA screenshots in
