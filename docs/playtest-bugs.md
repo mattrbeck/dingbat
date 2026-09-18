@@ -255,3 +255,25 @@ Nothing changed in dingbat on the strength of this. The bench runs from the
 cartridge, so a flashcart settles it outright, and that is worth doing before
 anyone touches the model: the argument above is an internal-consistency
 argument about mGBA, not a measurement of hardware.
+
+
+## Suite snapshot, 2026-09-17
+
+All 52 ready scripts, on the tree with this session's boot fixes: **46 pass,
+6 fail**. The 19 `@status wip` scripts still need a human to play to a first
+save.
+
+| game | checkpoint | state |
+|---|---|---|
+| Fire Emblem: The Sacred Stones | select_mode, slots_empty | section 6 |
+| Harvest Moon: FoMT | farm_intro | section 4 (same bug as Yu-Gi-Oh) |
+| Advance Wars | 02_mark | not traced |
+| Mario & Luigi: Superstar Saga | 07_mark | not traced |
+| Wario Land 4 | difficulty | palette-cycle animation, known |
+| Dragon Ball Z: The Legacy of Goku | -- | plays identically; a reference's save read back in dingbat differs |
+
+Advance Wars and Mario & Luigi were re-run against a driver built from the
+commit before this session's changes and fail identically there, so neither
+is a regression -- both are pre-existing and previously went unnoticed. At
+both failing checkpoints the two references disagree with each other as
+well, which is the same shape as Fire Emblem's animated menus.
