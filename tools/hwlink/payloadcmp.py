@@ -87,7 +87,11 @@ def on_hardware(payload_source, args, block=None):
         m.ping()
         answers = [m.run_payload(code, a) for a in args]
         # a payload that answers with a block of memory rather than one word
-        return [int(w, 16) for w in m.read_mem(*block)] if block else answers
+        if not block:
+            return answers
+        # read_mem hands back ints; be forgiving of hex strings too
+        return [w if isinstance(w, int) else int(w, 16)
+                for w in m.read_mem(*block)]
 
 
 def main(argv):

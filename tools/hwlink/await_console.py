@@ -31,6 +31,11 @@ POLL_SECONDS = 20
 GIVE_UP_HOURS = 12
 
 
+def as_words(values):
+    """monitor.read_mem hands back ints; be forgiving of hex strings too."""
+    return [v if isinstance(v, int) else int(v, 16) for v in values]
+
+
 def console_is_awake():
     """True when the GBA answers the multiboot handshake."""
     try:
@@ -56,8 +61,8 @@ def run(payloads, out):
                 answer = m.run_payload(code, arg)
                 log(out, f'{name}  arg={arg:#x}  r0={answer:#010x}')
             if count:
-                words = m.read_mem(RESULTS, int(count))
-                data = b''.join(int(w, 16).to_bytes(4, 'little') for w in words)
+                words = as_words(m.read_mem(RESULTS, int(count)))
+                data = b''.join(w.to_bytes(4, 'little') for w in words)
                 log(out, '  ' + ' '.join(f'{b:02X}' for b in data))
 
 
