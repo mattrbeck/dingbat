@@ -27,6 +27,7 @@ only reported when dingbat's score stands out against both.
     bootsweep.py run <rom-or-sha1> [...]     # named ROMs
     bootsweep.py sweep [--limit N] [--seconds N] [--shuffle]
     bootsweep.py show <title>                # screenshots at the first odd frame
+    bootsweep.py triage                      # re-run everything flagged, ranked
 """
 import argparse
 import json
@@ -177,7 +178,7 @@ def candidates(limit, shuffle, skip_known=True):
 
 def main(argv):
     ap = argparse.ArgumentParser()
-    ap.add_argument('verb', choices=['run', 'sweep', 'show'])
+    ap.add_argument('verb', choices=['run', 'sweep', 'show', 'triage'])
     ap.add_argument('names', nargs='*')
     ap.add_argument('--seconds', type=float, default=40.0)
     ap.add_argument('--limit', type=int, default=0)
@@ -195,6 +196,8 @@ def main(argv):
         roms = [n if os.path.exists(n) else lib.find(n) for n in args.names]
     elif args.verb == 'sweep':
         roms = candidates(args.limit, args.shuffle)
+    elif args.verb == 'triage':
+        return triage(args.out, frames)
     else:
         return show(args.names[0], frames)
 
@@ -249,3 +252,55 @@ def show(name, frames):
 
 if __name__ == '__main__':
     sys.exit(main(sys.argv))
+
+
+def triage(results_path, frames):
+    """Re-run every flagged game and rank what is worth a person's time.
+
+    A sweep in progress was started before the witness count existed, and a
+    flagged game is cheap to run again. For each one this also writes a
+    side-by-side composite at a frame where both references agree with each
+    other and dingbat does not, which is the frame a person should look at.
+    """
+    results = json.load(open(results_path))
+    flagged = [r for r in results if r.get('alone')]
+    print(f'{len(flagged)} flagged of {len(results)} swept\n')
+    out = []
+    for r in flagged:
+        if not os.path.exists(r['rom']):
+            continue
+        envroot = os.path.join(OUT, 'triage-env')
+        hashes = {n: frame_hashes(n, r['rom'], os.path.join(envroot, n), frames)
+                  for n in ['dingbat'] + REFERENCES}
+        agreed, total = witnessed(hashes)
+        a, b = (hashes[n] for n in REFERENCES)
+        others = set(a) | set(b)
+        odd = [k for k, x in enumerate(hashes['dingbat']) if x not in others]
+        at = next((k for k in odd if a[k] == b[k]), None)
+        if at is not None:
+            shots = os.path.join(OUT, 'shots', r['title'])
+            os.makedirs(shots, exist_ok=True)
+            import img
+            frames_ = []
+            for name in ['dingbat'] + REFERENCES:
+                e = emu.Emulator(name, r['rom'], os.path.join(envroot, name))
+                e.run(at + 1)
+                p = os.path.join(shots, f'{name}.ppm')
+                e.shot(p)
+                e.kill()
+                frames_.append(img.read_ppm(p))
+            img.write_png(os.path.join(shots, 'compare.png'),
+                          img.composite(frames_, ['dingbat'] + REFERENCES, scale=2))
+            same = img.compare(frames_[0], frames_[1])['exact']
+        else:
+            same = None
+        out.append((agreed, total, at, same, r['title']))
+        print(f'{r["title"][:52]:<54}{agreed:5}/{total:<6}'
+              f'{"frame " + str(at) if at is not None else "":>12}'
+              f'{"" if same is None else f"  {same:.3f} identical"}', flush=True)
+
+    print('\nranked, strongest first:')
+    for agreed, total, at, same, title in sorted(out, reverse=True):
+        share = agreed / total if total else 0
+        print(f'  {share:5.0%}  {agreed:5}/{total:<6} {title}')
+    return 0

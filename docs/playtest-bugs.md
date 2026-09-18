@@ -321,6 +321,33 @@ the same way against the other two and only the shape is read:
     dingbat 850   mgba 12    nba 9        dingbat is the odd one out
     dingbat 900   mgba 880   nba 890      the game is nondeterministic
 
+### Yu-Gi-Oh! The Eternal Duelist Soul — the sweep finds it too
+
+The strongest signal so far, and it lands on a game section 7 already
+traced by a completely different route: **1,813 odd dingbat frames in
+2,400, and at 1,659 of them the two references drew byte-identical frames
+to each other.** mGBA 163, the second reference 157.
+
+At frame 1570 the references agree exactly and dingbat differs on 46 % of
+the screen. The picture is the title screen; the logo and every line of
+text are identical in all three, and what differs is the scrolling green
+grid behind them, which dingbat draws at a phase neither reference ever
+draws in 2,400 frames. Not merely offset in time -- an offset would put
+dingbat's frames somewhere in a reference's run, and none of them appear.
+
+**This is in tension with section 7, and both results should be kept.**
+Section 7 measured on hardware that a block of Thumb multiplies costs 317
+cycles from IWRAM, which puts mGBA's 212 for the same block fetched from
+the cartridge about a hundred cycles below a measured floor -- mGBA's
+prefetch model is wrong there. This sweep says that in the behaviour a
+player can see, dingbat is the one that differs from both references at
+once. Those are different claims and can both hold: being wrong about a
+cycle count is not the same as being wrong about what reaches the screen,
+and the two references can share a model that is wrong in a way that
+happens to agree. What neither result gives us is dingbat's own number
+measured, which still needs the block fetched from a cartridge, which
+still needs the flashcart.
+
 ### Donkey Kong Country 2 (E)
 
 The first real find, and it survives on the current tree (measured again
