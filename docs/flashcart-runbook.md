@@ -223,3 +223,35 @@ differ, one (33 BGP) ran CGB-native on this cart and says nothing.
 
 Registered frames and the readers used are not committed (job scratch);
 the photos are the record.
+
+## A second route: multiboot over the link cable (no flashcart, no camera)
+
+A USB link-cable adapter (GB-Link USB, RP2040, CDC serial) can upload a
+probe into a GBA's EWRAM through the BIOS multiboot protocol and then keep
+clocking the link, so the probe can **send its results back to the host**
+rather than being photographed. `tools/hwlink/gblink.py` is the host side;
+its docstring has the wire format and the command bytes.
+
+    python3 tests/roms/linkecho.py                            # build the smoke test
+    python3 tools/hwlink/gblink.py boot tests/roms/linkecho.mb.gba
+
+A pass is the screen turning green and the host reading back `C0DE1234`
+(first run 2026-09-17, adapter firmware 2.2.3, AGS). Notes that cost time:
+
+- The adapter must be switched to 3.3 V before anything answers; without it
+  every poll reads `FFFFFFFF` and the GBA looks absent.
+- The console has to be **powered on with no cartridge**, so that its BIOS
+  sits in the multiboot wait loop. Once a probe is running the poll stops
+  answering `0x7202` and the console needs a power cycle before the next
+  upload — one physical action per probe.
+- A multiboot image is linked at 0x02000000 and must clear 0x1A0 bytes, or
+  the upload's length word underflows (the failure looks like a bad echo on
+  the very first data word).
+- The upload leaves the adapter configured for its own transfer shape:
+  re-send the mode and timing commands before reading, and discard the first
+  word, which catches the probe mid-cycle.
+
+What this route cannot answer: the console has no cartridge, so anything
+about the cartridge bus — ROM waitstates, the prefetcher, save chips — still
+needs a flashcart. Everything internal (PPU output values, timers, DMA, IRQ
+timing, the APU) is in reach, and in reach without a photograph.
