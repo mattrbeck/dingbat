@@ -6384,10 +6384,14 @@ probe_psgfirst:
 @ Every row is two bytes:
 @   +n   (b) polls until SOUNDCNT_X bit 0 ROSE (0 = already set on the first
 @            read after the store; FF = never rose within 255 polls)
-@   +n+1 (b) polls it then stayed set, divided by 256 (FF = never fell
-@            before the 0x60000 cap; 00 = fell at once)
+@   +n+1 (b) polls it then stayed set, divided by 256 and SATURATED at FF
+@            (00 = fell at once)
 @ so a trigger that never enables reads FF 00, one that enables late reads
-@ nn 49, and a healthy counter-16 tone reads 00 49.
+@ nn xx, and a healthy counter-16 tone reads 00 49 from this ROM.  The fall
+@ byte saturates, so on a faster poll loop -- a payload run from RAM over the
+@ link rig, say -- a healthy tone reads 00 FF and FF no longer means "never
+@ expired": +30, the count of rows that hit the 0x60000 poll cap, is what
+@ says that.
 @
 @ Row / what varies / the overflow candidate's prediction:
 @ +0   f=0x400, NR10=0, length on (the p51 +0 row again)         dies

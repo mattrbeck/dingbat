@@ -1289,8 +1289,12 @@ overflows — but not the trigger-count pattern.
 
 Every row is two bytes: polls until the active bit **rose** (00 = already set
 on the first read, FF = never rose within 255 polls), then polls it stayed set
-÷ 256 (FF = never fell). So a trigger that never enables reads `FF 00`, a late
-one `nn 49`, a healthy counter-16 tone `00 49`. Page 44 and page 51 polled
+÷ 256, **saturated at FF**. So a trigger that never enables reads `FF 00`, a
+late one `nn xx`, and a healthy counter-16 tone `00 49` from this ROM. Because
+the fall byte saturates, a faster poll loop (the same rows run as a payload
+from RAM over the link rig) puts a healthy tone at `00 FF`, and there `FF` does
+not mean "never expired" — `+30`, the number of rows that hit the 0x60000 poll
+cap, is what says that. Page 44 and page 51 polled
 only for the fall, which is why they could not tell "never enables" from
 "enables late".
 
