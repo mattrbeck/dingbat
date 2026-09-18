@@ -1052,6 +1052,25 @@ hardware names the bank the pattern really selects.
 
 ---
 
+## Reading a page's counts off the link rig
+
+Standing note for every page here that counts poll iterations. These pages
+were written for a cartridge, where the poll loop runs at roughly 59 cycles an
+iteration. The same rows re-run as a payload over the link rig execute from
+RAM at about ten cycles, six times faster, and the counts they were sized for
+overflow their fields:
+
+* **PSGFIRST (51)** stores a 16-bit count. A live row wraps: 104856 polls
+  reads as `0x9998`, a plausible number rather than an obvious overflow. Add
+  `0x10000` to any row too small for its length.
+* **PSGWHY (52)** stores the count divided by 256 and saturated, so a healthy
+  tone reads `00 FF` and `FF` stops meaning "never expired"; `+30` is what
+  says that.
+
+Check any unwrapping by ratio rather than by eye: halve a row's length and its
+count must halve. That is how the wrap above was caught -- a bumped row
+appeared to *gain* a third, and unwrapped it was exactly 2.0000.
+
 # GBA probe page v9 — when is an H-blank DMA granted the bus?
 
 One new `gbaedge.gba` page, **50 HDMAPHASE**, hex. It settles a single

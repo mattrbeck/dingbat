@@ -178,6 +178,8 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
 
   # The cycle the ROM bus changes hands, before any burst cycles are charged;
   # the prefetch hand-off (bus.rom_access_cycles) counts forward from here.
+  when defined(dmacount):
+    if start_timing == 2: hdma_grants[channel] += 1
   # Handlers and catch-up run an event at its own cycle, so this is the
   # cycle the burst was requested at (read_open_bus_value).
   dma.gba.bus.dma_request_at = dma.gba.bus.sched.cycles

@@ -15,10 +15,19 @@ when defined(pftrace):
   # site is `when defined(pftrace)`, so a normal build pays nothing.
   var pft_on*: bool
   var pft_dma*: bool
+
   var pft_lines*: seq[string]
   proc pft*(s: string) =
     # Bounded: a game can leave TM0 running for whole frames.
     if pft_on and pft_lines.len < 4096: pft_lines.add(s)
+
+when defined(dmacount):
+  # -d:dmacount: per-frame H-blank DMA grant census. 160 visible lines means
+  # 160 grants per armed channel; a repeating channel whose source pointer is
+  # a per-frame accumulator (DKC2's per-line BG1 scroll table) drifts for the
+  # rest of the frame on any miscount.
+  var hdma_grants*: array[4, int]
+  var hdma_frame*: int
 
 include reg
 

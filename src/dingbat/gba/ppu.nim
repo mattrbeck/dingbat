@@ -171,6 +171,17 @@ proc end_hblank*(ppu: PPU) =
     ppu.dispstat.vblank = false
   elif ppu.vcount == 160:
     ppu.dispstat.vblank = true
+    when defined(dmacount):
+      let d = ppu.gba.dma
+      var line = "DMACOUNT f=" & $hdma_frame
+      for ch in 0 .. 3:
+        if hdma_grants[ch] != 0 or d.dmacnt_h[ch].start_timing == 2:
+          line.add " ch" & $ch & " grants=" & $hdma_grants[ch] &
+                   " src=" & toHex(d.src[ch], 8) & " sad=" & toHex(d.dmasad[ch], 8) &
+                   " cnt=" & $d.count[ch] & " en=" & $d.dmacnt_h[ch].enable
+        hdma_grants[ch] = 0
+      if line.len > 20: stderr.writeLine(line)
+      hdma_frame += 1
     ppu.gba.dma.trigger_vdma()
     if ppu.dispstat.vblank_irq_enable:
       ppu.gba.interrupts.reg_if.vblank = true
