@@ -3,6 +3,14 @@
 **Not hardware.** Every other directory under `expected/` holds hardware
 truth transcribed from a console; this one holds what *dingbat* produces
 for the probes written in 2026-09, before anyone has run them on silicon.
+
+> **Superseded, deliberately kept.** This is dingbat's answer *before* the
+> AGS sessions of 2026-09-04 and 2026-09-16, which is what those sessions
+> were diffed against, so it stays as it was. Four pages have moved since
+> — 27 DMAOPENBUS (a model fix, onto the hardware column), and 2D MEMCTL,
+> 2F IWCYCLE and 31 UNDMODE (boot phase, not a model change). For what
+> dingbat says today see `../predicted-2026-09-17/`, and regenerate rather
+> than diffing this file against a current build.
 It exists so the hardware session has something to diff against, and so
 the emulator's answer is on record with a date rather than reconstructed
 afterwards.
