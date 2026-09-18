@@ -64,49 +64,81 @@ def build_wrapper(payload_source, args):
     return rom
 
 
-def in_emulators(rom, count, names=('dingbat', 'mgba')):
+def in_emulators(rom, count, names=('dingbat', 'mgba'), block=None, frames=8):
     sys.path.insert(0, os.path.join(REPO, 'tools', 'playtest'))
     import emu as emulib
+    address, count = block if block else (RESULTS, count)
     out = {}
     for name in names:
         e = emulib.Emulator(name, rom, os.path.join(SCRATCH, 'run', name))
-        e.run(8)
-        raw = e.cmd(f'peek {RESULTS:08X} {count * 4}').strip()
+        e.run(frames)
+        raw = e.cmd(f'peek {address:08X} {count * 4}').strip()
         out[name] = [int.from_bytes(bytes.fromhex(raw[i * 8:i * 8 + 8]), 'little')
                      for i in range(count)]
         e.kill()
     return out
 
 
-def on_hardware(payload_source, args):
+def on_hardware(payload_source, args, block=None):
     sys.path.insert(0, HERE)
     from monitor import Monitor, assemble
     code = assemble(payload_source, out_dir=SCRATCH)
     with Monitor() as m:
         m.ping()
-        return [m.run_payload(code, a) for a in args]
+        answers = [m.run_payload(code, a) for a in args]
+        # a payload that answers with a block of memory rather than one word
+        return [int(w, 16) for w in m.read_mem(*block)] if block else answers
 
 
 def main(argv):
     emulators_only = '--emulators-only' in argv
     argv = [a for a in argv if a != '--emulators-only']
+    block, frames = None, 8
+    for a in list(argv):
+        if a.startswith('--frames='):          # a long payload needs more
+            frames = int(a.split('=')[1], 0)
+            argv.remove(a)
+    for a in list(argv):
+        if a.startswith('--block='):           # --block=0x02008000:8, in words
+            address, _, count = a.split('=')[1].partition(':')
+            block = (int(address, 0), int(count or 1, 0))
+            argv.remove(a)
     source = argv[1]
     args = [int(a, 0) for a in argv[2:]] or [0]
 
     rom = build_wrapper(source, args)
-    results = in_emulators(rom, len(args))
+    results = in_emulators(rom, len(args), block=block, frames=frames)
     if not emulators_only:
         try:
-            results['hardware'] = on_hardware(source, args)
+            results['hardware'] = on_hardware(source, args, block=block)
         except Exception as e:
             print(f'(no hardware reading: {e})')
 
     names = [n for n in ('hardware', 'dingbat', 'mgba') if n in results]
+    if block:
+        return show_block(results, names, block)
     print(f'{"argument":>12}' + ''.join(f'{n:>12}' for n in names) + '   disagree')
     for i, a in enumerate(args):
         row = [results[n][i] for n in names]
         mark = '  <<<' if len(set(row)) > 1 else ''
         print(f'{a:#12x}' + ''.join(f'{v:12}' for v in row) + mark)
+    return 0
+
+
+def show_block(results, names, block):
+    """A probe page's block of memory, one row of bytes per emulator, and
+    which byte offsets disagree -- the rows are what the probe documents."""
+    address, count = block
+    data = {n: b''.join(w.to_bytes(4, 'little') for w in results[n]) for n in names}
+    for n in names:
+        print(f'{n:>10}  ' + ' '.join(f'{b:02X}' for b in data[n]))
+    if len(names) > 1:
+        odd = [k for k in range(count * 4)
+               if len({data[n][k] for n in names}) > 1]
+        print(f'{"disagree":>10}  ' + ' '.join(
+            ' ^' if k in odd else '  ' for k in range(count * 4)))
+        print(f'\n{len(odd)} of {count * 4} bytes disagree'
+              + (f': offsets {odd}' if odd else ''))
     return 0
 
 
