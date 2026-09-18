@@ -46,6 +46,11 @@ change how another suite is scored:
   scratch directory (what `tools/playtest` and the library sweeps do) or pass `--nosave`.
   A harness that skips this agrees with one that does not until the frame the game first
   reads its save, and then diverges completely — which reads like a core bug and is not.
+
+**Frame numbering against `tools/playtest`.** The playtest driver's frame N is this
+harness's `--timeout=N+1`, verified byte-identical on a GBA title at driver frames 300
+and 549. The sweep's findings are recorded in the driver's numbering, so that is the side
+to convert from.
 - `--ed-breakpoint` makes undefined opcode `0xED` end the run with the mooneye verdict
   (mooneye-gb's 2016 magic breakpoint, which wilbertpol's fork targets).
 - `--screen-check` asserts the panel settles (10 unchanged frames within 240 of the

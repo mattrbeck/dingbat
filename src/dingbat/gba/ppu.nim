@@ -103,6 +103,13 @@ proc latch_line_start*(ppu: PPU) {.inline.} =
       ppu.frame_start_latches = latches
       ppu.render_dirty = true
 
+when defined(bgtrace):
+  import std/os, std/strutils
+  proc bgtrace_frame_of(): int =
+    try: parseInt(getEnv("DINGBAT_BGTRACE_FRAME", "-1"))
+    except CatchableError: -1
+  let bgtrace_frame* = bgtrace_frame_of()
+
 proc start_line*(ppu: PPU) =
   ppu.gba.scheduler.schedule(960, etPPUStartHBlank)
 
@@ -200,6 +207,7 @@ proc end_hblank*(ppu: PPU) =
 
 proc draw*(ppu: PPU) =
   inc ppu.frame
+  when defined(bgtrace): inc bgtrace_n
   # True only when every scanline was skipped (framebuffer unchanged), so
   # frontends can skip the texture upload
   ppu.frame_static = ppu.skip_render or ppu.forced_skip
@@ -293,6 +301,16 @@ proc render_reg_bg_impl(ppu: PPU; bg: int; swar: static bool) =
   let bgcnt  = ppu.bgcnt[bg]
   let bghofs = ppu.bghofs[bg]
   let bgvofs = ppu.bgvofs[bg]
+  when defined(bgtrace):
+    # -d:bgtrace + DINGBAT_BGTRACE_FRAME=<n>: the scroll a text BG actually
+    # rendered each line with. A game steering one BG from a per-line H-blank
+    # DMA table (Donkey Kong Country 2's BG1 parallax) differs from a
+    # reference in what reaches the screen without differing in any register
+    # the CPU can read back, and the composite cannot say which layer moved.
+    if bgtrace_n == bgtrace_frame:
+      stderr.writeLine "BGTRACE f=" & $ppu.frame & " v=" & $ppu.vcount &
+        " bg=" & $bg & " h=" & $uint16(bghofs) & " v=" & $uint16(bgvofs) &
+        " cnt=" & toHex(cast[uint16](bgcnt), 4)
   let (bg_width, bg_height) = case bgcnt.screen_size
     of 0b00: (0x0FF, 0x0FF)
     of 0b01: (0x1FF, 0x0FF)

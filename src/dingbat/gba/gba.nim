@@ -21,6 +21,9 @@ when defined(pftrace):
     # Bounded: a game can leave TM0 running for whole frames.
     if pft_on and pft_lines.len < 4096: pft_lines.add(s)
 
+when defined(bgtrace):
+  var bgtrace_n*: int
+
 when defined(dmacount):
   # -d:dmacount: per-frame H-blank DMA grant census. 160 visible lines means
   # 160 grants per armed channel; a repeating channel whose source pointer is
