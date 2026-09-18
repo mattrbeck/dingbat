@@ -1293,3 +1293,87 @@ frame in the future, and the open-bus window could not open again until the
 next burst re-stamped it. Fixed. Every gate is byte-identical either way,
 which is why it survived: the window it silently held shut is one almost
 nothing reads.
+
+
+## 15. The H-blank DMA deferral, stamped: a shape, not a constant, 2026-09-18
+
+`hdmastamp.s` is `hdmasweep.s` with the two DMA writes reported raw instead of
+subtracted, `k` swept over 32 so a whole loop period is covered instead of
+half, and a no-DMA control. Run over the link rig on an AGB SP, five times.
+
+### The deferral is a ramp that snaps, and its size is the access
+
+The loop period is exactly **24 cycles** (`k` and `k+24` agree on every stable
+row). 21 of 32 rows are identical across all five runs; the rest tip run to
+run and are ignored here, per the rule that a re-hosted page is repeated
+before it is believed. Taking each row's TM0 above the column minimum as the
+deferral:
+
+| k | 19 | 20 | 21 | 22 | 23 | 0 / 24 | 1 / 25 |
+|---|---|---|---|---|---|---|---|
+| deferral | 6 | 7 | 8 | 9 | 10 | **11** | **0** |
+
+**One cycle of deferral per cycle of pre-delay, then a snap to zero.** Each
+extra NOP puts the request one cycle earlier inside the access in flight, so
+the grant waits one cycle longer, until the request falls before the access
+starts and waits nothing. Several ramps are interleaved because the loop holds
+more than one bus access (the long gamepak load and the short MMIO poll), and
+the largest deferral seen is **15**, the length of the longest access.
+
+So the answer to "should we just add a constant" is no. The deferral is 0 at
+most phases and up to 15 at others, and any constant is wrong nearly
+everywhere -- it would also undo the exact agreement hdmamul and hdmasweep now
+have on their undeferred rows. What has to be modelled is the rule:
+**grant at the end of the bus access in flight**, which is what the prototype
+in section 14 does.
+
+dingbat's own spread on the same column is **6**, against hardware's 15, and
+it is incidental jitter from dispatching at instruction boundaries rather than
+a deferral. That number is the size of what is missing.
+
+### The trap: absolute stamps on this page are anchored, not absolute
+
+The page's stamps count from its own timer start, so "both DMA writes are late"
+and "both timers start early" fit the DMA rows equally well -- the same class
+of mistake as reading a difference as though it pinned one of its terms
+(section 14). The control row exists to separate them, and it earns its keep:
+
+| | hardware | dingbat | delta |
+|---|---|---|---|
+| **control: TM0 when the CPU first sees the H-blank flag, no DMA at all** | 1006 | 999 | **7** |
+| IWRAM loop, H-blank DMA write | 998 | 994 | 4 |
+| IWRAM loop, V-blank DMA write | 1225 | 1221 | 4 |
+
+A measurement with no DMA in it differs by seven cycles. Before that row
+existed, the four DMA stamps looked like a clean common-mode offset of about
+six cycles in both grants -- and a common-mode correction of +6 was built and
+does make all four DMA stamps match hardware exactly while leaving hdmamul at
+227, which is precisely what a common-mode error would look like. It was not
+shipped, because the control says the anchor moved too. **Normalised against
+the control, dingbat's DMA write is about three cycles LATE relative to the
+flag, not early** -- the opposite direction from what the suite's row wants.
+
+Two things follow. The ramp above is trustworthy because it is a shape within
+one column and immune to any constant anchor offset. Nothing absolute from
+this page is trustworthy without the control, including in earlier sections.
+
+### The seven cycles are a new lead, and not a DMA one
+
+Something with no DMA in it -- the interval from the timer start just after
+the VCOUNT 158-to-159 edge to the cycle the CPU's poll loop first sees the
+H-blank flag -- is seven cycles shorter here than on hardware. That is the
+line's own geometry, the timer's enable latency, or the poll's timing, and all
+three are worth separating. p50 HDMAPHASE timed its flag stamps as agreeing to
+the cycle on a different poll loop, so the two measurements are in tension and
+whichever is right, something is unmodelled.
+
+### Does this close the suite's last row? Probably not on its own
+
+With the V-blank DMA correct, `DMA Prefetch Break` passes for an H-blank grant
+9 to 12 cycles after the flag, against the 2 shipped -- a correction of 7 to
+10 in that loop. But that loop runs at `WAITCNT` 0, where gamepak accesses are
+3 to 5 cycles, so a deferral that waits for the access in flight can supply at
+most about 5 there. **The deferral is necessary and looks insufficient.** The
+rest has to come from somewhere else, and the seven-cycle anchor discrepancy
+above is the first place to look. Claiming the deferral will close the row
+would be the same over-reach this file has now recorded twice.
