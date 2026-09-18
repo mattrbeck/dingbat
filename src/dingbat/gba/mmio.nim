@@ -47,6 +47,15 @@ proc `[]=`*(mmio: MMIO; address: uint32; value: uint8) =
   of 0x300:
     mmio.postflg = value and 1
   of 0x301:
+    # HALTCNT answers only to BIOS code; a byte write from ROM or RAM is
+    # ignored. Hardware (haltprobe on an AGB SP, docs/playtest-bugs.md
+    # section 18): through SWI 2 the CPU halts 4931 cycles and comes back on
+    # the V-count match four lines later, and dingbat agrees to the cycle --
+    # but a `strb` to 0x04000301 from IWRAM does not halt it at all, it stays
+    # on the same scanline, and mGBA agrees. We honoured the write from
+    # anywhere, so a game could halt itself by a route hardware ignores.
+    # SWI 2 is unaffected: hle_bios sets cpu.halted directly.
+    if (mmio.gba.cpu.r[15] and 0x0F000000'u32) != 0: return
     mmio.gba.cpu.halted = true
     mmio.gba.cpu.stopped = bit(value, 7)
     # Stop blanks the LCD without a memory write.

@@ -154,6 +154,11 @@ const HBLANK_FLAG_DELAY {.intdefine.} = 46
 # that bracket.
 const HBLANK_IRQ_SYNC_DELAY {.intdefine.} = 6
 
+# The same, for the interrupts raised at the line boundary (V-count match
+# and V-blank) rather than at the H-blank flag. Split from the shared
+# IRQ_SYNC_DELAY so it can be measured on its own.
+const LINE_IRQ_SYNC_DELAY {.intdefine.} = 5
+
 # An H-blank DMA is requested off the H-blank flag, not the end of drawing:
 # gbaedge HDMAPHASE (AGB SP, docs/hwprobe-results-agb.md session 6) freezes a
 # timer with the DMA's own write, and against the same clock and anchor the
@@ -242,7 +247,7 @@ proc end_hblank*(ppu: PPU) =
   # IF bits 0-2 are driven by the DISPSTAT conditions; nothing re-evaluates
   # periodically). mGBA suite Timer count-up "0b, 0x000C 1xv 1d 4i".
   if raised_if:
-    ppu.gba.interrupts.schedule_interrupt_check(IRQ_SYNC_DELAY)
+    ppu.gba.interrupts.schedule_interrupt_check(LINE_IRQ_SYNC_DELAY)
 
 proc draw*(ppu: PPU) =
   inc ppu.frame

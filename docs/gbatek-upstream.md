@@ -109,6 +109,27 @@ flag at all. That is worth stating because a model that grants the DMA when
 software could first notice the flag is consistently late. The bound is what
 is solid; the distribution inside it is finer than the payload can address.
 
+### 1.5 HALTCNT is BIOS-only, and the halt wake against the DMA grant
+
+Two rows from `halthb.s` and a minimal halt probe, both on an AGB SP.
+
+**`HALTCNT` (`0x04000301`) does not halt when written from ROM or RAM.** A
+byte write to it from IWRAM leaves the CPU running on the same scanline;
+`SWI 2` from the same place halts for 4931 cycles and returns four lines
+later on a V-count match. GBATEK already restricts `0x04000300`-`0x04000301`
+to BIOS access, so this corroborates rather than corrects it — but it is
+worth a test ROM, because emulators disagree about it in both directions and
+a game that halts by the wrong route will hang or spin depending on which way
+the emulator errs.
+
+**The H-blank DMA's grant against a halted CPU's wake.** With `IME` clear a
+V-count match halt fixes the line exactly, and a second halt on the H-blank
+IRQ leaves the bus idle, so the grant has nothing to wait on. Timing the
+wake and the DMA's own write on one clock, the wake follows the write by a
+constant **24 cycles**, identical on every sled offset and across four runs.
+That is the grant's floor, and it is the cleanest number on this page: both
+ends are hardware events and there is no software sampling between them.
+
 ## 2. Not settled — hardware needed first
 
 1. **BIOS-region Thumb open bus** (§1.1). No payload can execute from BIOS, so

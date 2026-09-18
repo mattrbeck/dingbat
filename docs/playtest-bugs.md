@@ -1576,3 +1576,86 @@ shows 6, inside the same bounds. That is worth modelling for its own sake --
 it is the grant resolving against a phase finer than instruction boundaries
 -- but it is not worth fitting to this row, and `hdmageo.s` is the page that
 should judge any attempt at it.
+
+
+## 18. Controlling the line: `halthb.s`, and two bugs it found, 2026-09-18
+
+Matt's question: if the entry phase is what limits sections 15 to 17, can we
+not control it with an interrupt rather than a poll? Yes, and it is a better
+instrument in three separate ways.
+
+A V-count match interrupt fixes the line exactly. With `IME` clear no handler
+runs -- which matters, because a resident monitor owns the IRQ vector -- but
+HALT still exits on `IE & IF`, so the CPU resumes at a cycle the PPU chose
+instead of one a polling loop happened to sample. `halthb.s` does that, then
+arms the H-blank DMA to freeze a second timer and halts again, so both stamps
+are hardware events with no software sampling between them:
+
+* **W** -- TM0 the instant the CPU resumes from HALT on the H-blank IRQ
+* **D** -- TM1, frozen by the H-blank DMA's own write to `TM1CNT_H`
+
+It also arranges something no earlier page could: **at the H-blank the CPU is
+halted, so there is no bus access in flight for the grant to wait on.**
+Section 15 measured the grant deferring up to 15 cycles behind a long access;
+this measures the floor, with the bus provably idle.
+
+### The proof that entry is controlled
+
+`W` must not vary with `k`: the sled moves where the CPU halts, and the wake
+is tied to the flag, not to the halt. It does not vary, on any platform, and
+the whole page is identical across four hardware runs -- where `hdmageo.s`
+needed nine runs pooled because its rows moved run to run. **That is the
+phase control, and it is worth more than the measurement it carries.**
+
+### Bug 1: `HALTCNT` is BIOS-only, and we honoured it from anywhere
+
+The first attempt wrote `HALTCNT` (`0x04000301`) directly and did not halt on
+hardware at all -- `W` simply tracked the sled. mGBA did the same. dingbat
+halted for ~1000 cycles. A minimal probe settles it: park on line 100, set a
+V-count match for 104, start a free-running timer, halt, read it back.
+
+| | raw `strb` to `0x04000301` | `SWI 2` |
+|---|---|---|
+| hardware | **11 cycles, still line 100** | 4931, line 104 |
+| mGBA | 11 cycles, still line 100 | 4934 |
+| dingbat (before) | **4914, line 104** | 4931 |
+
+`0x04000300`-`0x04000301` answer only to BIOS code; the write is ignored from
+ROM or RAM, which is why `SWI 2` works -- the BIOS performs the write itself.
+Gated on the PC being in the BIOS region in `mmio.nim`; `SWI 2` is unaffected
+because `hle_bios` sets `cpu.halted` directly. After the fix all three agree
+on both rows. No gate moved.
+
+### Bug 2: the line-boundary IRQ was two cycles early
+
+With the entry controlled, the page reads, on every `k` and every run:
+
+| | W | D | **W − D** |
+|---|---|---|---|
+| hardware | 1004 | 980 | **24** |
+| dingbat (before) | 1006 | 982 | **24** |
+| mGBA | 1011 | 980 | 31 |
+
+`W − D` is the anchor-free quantity -- the halt wake against the grant, both
+hardware events -- and **it was already exactly right**, which is a real
+result in its own right: with the bus idle the grant's floor is correct, and
+mGBA's is seven cycles out. But `W` and `D` were *both* two high, and since
+they share a timer that starts just after the first wake, the only thing that
+can move them together is **when that first wake happened**. The V-count
+match wake was two cycles early.
+
+The line-boundary interrupts were sharing the global `IRQ_SYNC_DELAY` of 3
+with timers, serial, keypad and DMA. Split into `LINE_IRQ_SYNC_DELAY` and set
+to **5**, which is what hardware measures. The suite does not constrain it at
+all -- 3, 4, 5 and 6 give an identical 6997/1 -- so this is a row only
+hardware could have decided, and the constant would have been indefensible
+without it. `linegeo.s` and `hdmageo.s` re-run unchanged afterwards.
+
+### What this changes about method
+
+Three of the four pages in sections 15 to 18 were limited by an entry the
+payload did not control, and two of them produced a number that was later
+withdrawn. The order to reach for is now: **control the line with a V-count
+match halt, take every stamp from one free-running timer, and prefer two
+hardware events over any event and any poll.** A poll in the measurement is a
+quantiser; a poll in the *entry* is a quantiser you cannot see.
