@@ -507,3 +507,40 @@ That is a hypothesis, not a finding, and it is the same family as section
 checkable: the games that flag this way should be the ones whose animation
 is driven from code whose timing section 7 disputes. Nobody has checked
 that yet.
+
+
+## 9. Two harnesses on the same core disagree
+
+Found while trying to take a per-layer screenshot of the Donkey Kong Country
+2 frame above. `tests/dingbat_test.nim --mode=screenshot` and
+`tools/playtest/drivers/dingbat_driver.nim` are the same emulator built from
+the same tree, both HLE, both `run_bios = false`, both calling `post_init`,
+both taking no input. On Donkey Kong Country 2 (E) they produce **byte-
+identical frames at 10 and 30, and completely different ones from 60**:
+
+| driver frame | dingbat_test | pixels differing |
+|---|---|---|
+| 10 | `--timeout=10` | 0 |
+| 30 | `--timeout=30` | 0 |
+| 60 | `--timeout=60` | 38400 (all) |
+| 120 | `--timeout=120` | 38400 |
+| 300 | `--timeout=300` | 38218 |
+| 549 | `--timeout=546..553` | ~38263 at every offset |
+
+Exact agreement and then total disagreement is not drift, and sweeping the
+timeout by +/-4 rules out an off-by-one -- every offset is equally wrong.
+Ruled out so far: battery files (a `--nosave` run is byte-identical to a
+saving one), non-determinism (repeated runs agree exactly), and input
+(neither harness presses anything).
+
+This matters beyond one game: a screenshot from one harness cannot be used
+to explain a finding from the other until it is resolved, which is what
+blocked the per-layer dump. Whichever is wrong, one of the two is not
+running what we think it runs.
+
+**A trap found alongside it:** `dingbat_test` writes its battery file beside
+the ROM. Pointed at the library it will create a `.sav` inside
+`~/Documents/emu/gba/archive/roms`, which is read-only by convention. The
+playtest harness symlinks each ROM into its own environment directory for
+exactly this reason; anything else driving `dingbat_test` over the library
+should do the same, or pass `--nosave`.
