@@ -430,11 +430,34 @@ translated -- it is a different mixture of the same two palettes, which is
 exactly what is observed: the same colours, rearranged within each row,
 with no whole-row displacement in either axis.
 
-So the evidence remains consistent with DMA0's per-line BG1 scroll being
-applied differently, and no composite-image test can confirm or refute
-that. What would is a **per-layer dump at one frame in both emulators**,
-which is the same instrument section 6 has been waiting on for Fire
-Emblem. That is the next step here, and it needs no hardware.
+**The per-layer dump names the layer: it is all BG1.** With one
+screenshot per layer at the driver's frame 549, every one of the 301
+differing pixels takes its visible colour from BG1:
+
+| layer | lit pixels | supplies the visible colour at a differing pixel |
+|---|---|---|
+| BG0 | 10264 | 0 |
+| BG1 | 38400 | **301** |
+| BG2 | 0 | 0 |
+| BG3 | 5024 | 0 |
+| OBJ | 3268 | 0 |
+
+and row by row: 119 -> 100 of 100 BG1, 127 -> 114 of 114, 135 -> 87 of 87.
+Nothing else contributes a single pixel. BG1 is exactly the layer DMA0's
+per-line writes to 0x04000014 steer, so the per-line scroll hypothesis
+survives the one test that could have killed it, and the sprite layer --
+which an earlier, contaminated run had supplying a third of the differing
+pixels -- contributes none.
+
+What is left is to compare the per-line scroll values themselves between the
+two emulators, which is a core-side dump rather than anything visible on
+screen.
+
+Two cautions earned the hard way while taking this, both now fixed upstream
+and both recorded in section 9: `dingbat_test` wrote GBA screenshots in
+greyscale, and its `--nosave` never detached a GBA battery. Any per-layer
+figure taken before those fixes is void -- including the earlier reading of
+this very frame, which is why the OBJ share above is 0 and not a third.
 Settling it properly needs a per-layer dump at one frame in both emulators,
 which is also what Fire Emblem (section 6) has been waiting on.
 
@@ -542,23 +565,31 @@ scratch-symlink run now agree to the pixel), the table above becomes:
 | 300 | 37982 |
 | 549 | 37971 |
 
-**The other half is still open.** Bisected, the first differing frame is
-**166**, and it grows from there rather than switching: 43 pixels at 166,
-102 at 167, 553 at 170, 3,591 at 176, 26,653 at 187, essentially the whole
-screen by 210. A small perturbation amplifying is the signature of a
-divergence in what the game computes, not of a harness reading the wrong
-frame.
+**The other half was greyscale, and the bisect was measuring a
+sunrise.** `dingbat_test` wrote GBA screenshots as luma -- a Game Boy
+default the GBA path inherited, since the DMG screenshot suites compare
+against grey references -- so against a colour reference every *lit* pixel
+differed. The "first divergence at frame 166, growing to the whole screen by
+210" was a scene fading in, one newly-lit pixel at a time: 0 while the
+screen was dark, 43 as a logo began to appear, ~37,900 once it was lit.
+Nothing was amplifying.
 
-Ruled out: battery files (above), non-determinism (**both** harnesses are
-individually deterministic -- three cold driver runs give one hash, repeated
-`dingbat_test` runs are byte-identical), input (the core powers up at
-KEYINPUT 0x03FF and neither harness writes it), an off-by-one (every offset
-in +/-4 is equally wrong), and the idle-loop fast-forward
-(`DINGBAT_NO_WAITLOOP=1` changes nothing either way).
+That also explains why every elimination came back negative. Both harnesses
+really were deterministic, the keys really were identical, the offsets
+really were all equally wrong, and the idle-loop fast-forward really did
+change nothing -- because the difference was not in the emulation at all.
 
-Both construct the emulator the same way -- `new_gba(..., run_bios = false,
-use_hle = true)` then `post_init()` -- so whatever differs is not in the
-arguments.
+Fixed upstream, and with it the two harnesses agree to the pixel. The
+mapping is **`--timeout` = driver frame + 1**, verified exact at driver
+frames 300 and 549; the 336-pixel residual that survived the colour fix was
+that off-by-one.
+
+The lesson worth keeping is not about screenshots. Three real defects hid
+behind what looked like a core divergence -- a battery that would not
+detach, a harness pointed at a read-only library, and a colour space -- and
+each was found by taking the comparison seriously rather than explaining the
+number away. A harness that disagrees with another harness is a bug
+somewhere, and it is usually not where the interesting code is.
 
 This matters beyond one game: a screenshot from one harness cannot be used
 to explain a finding from the other until it is resolved, which is what
