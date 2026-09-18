@@ -1,8 +1,9 @@
 """Wait for the console to be switched on, then run payloads unattended.
 
-The rig can only talk to a GBA that is powered on and sitting in its
-multiboot wait loop, which is where a BIOS boot with no cartridge leaves it.
-That is the one part of a hardware session a person still has to do. This
+The rig can only talk to a GBA that is powered on: either sitting in its
+multiboot wait loop, which is where a BIOS boot with no cartridge leaves it,
+or already running a resident monitor from an earlier session. Switching it
+on is the one part of a hardware session a person still has to do. This
 waits for it instead of failing:
 
     python3 await_console.py out.txt payloads/psgwhy.s:8 payloads/waitprobe.s@0,4,8
@@ -36,19 +37,37 @@ def as_words(values):
     return [v if isinstance(v, int) else int(v, 16) for v in values]
 
 
-def console_is_awake():
-    """True when the GBA answers the multiboot handshake."""
+def console_state():
+    """'multiboot', 'monitor', or None if the console is not answering.
+
+    Waiting only for the multiboot handshake was wrong: a console that is
+    already running a resident monitor never sends it, so this sat polling a
+    console that was answering perfectly well. A monitor echoes any word it
+    does not recognise, and 0x6202 is not one of its commands, so the same
+    probe separates the two states -- 0x7202 back means the BIOS wait loop,
+    the word itself means a monitor.
+    """
     try:
         with gblink.GBLink() as link:
             link.open_link()
-            return any(link.transfer32(0x00006202) & 0xFFFF == 0x7202
-                       for _ in range(8))
+            probe = 0x00006202
+            answers = [link.transfer32(probe) for _ in range(8)]
     except Exception:
-        return False
+        return None
+    if any(a & 0xFFFF == 0x7202 for a in answers):
+        return 'multiboot'
+    if any(a == probe for a in answers):
+        return 'monitor'
+    return None
 
 
-def run(payloads, out):
-    monitor.install(log=lambda m: log(out, m))
+def run(payloads, out, state='multiboot'):
+    # A monitor already resident is ready to take payloads; reinstalling it
+    # would only cost a reboot and an upload.
+    if state == 'monitor':
+        log(out, 'a monitor is already running; using it as it is')
+    else:
+        monitor.install(log=lambda m: log(out, m))
     with monitor.Monitor() as m:
         m.ping()
         for spec in payloads:
@@ -78,10 +97,11 @@ def main(argv):
     deadline = time.time() + GIVE_UP_HOURS * 3600
     log(out, f'waiting for the console, {len(payloads)} payloads queued')
     while time.time() < deadline:
-        if console_is_awake():
-            log(out, 'console is awake')
+        state = console_state()
+        if state:
+            log(out, f'console is awake ({state})')
             try:
-                run(payloads, out)
+                run(payloads, out, state)
                 log(out, 'done')
                 return 0
             except Exception as e:
