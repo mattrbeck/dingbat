@@ -134,7 +134,15 @@ proc start_line*(ppu: PPU) =
 
 # GBATEK: "the H-Blank flag is '0' for a total of 1006 cycles", so the flag
 # (and the IRQ it enables) rises 46 cycles after drawing ends at 960.
-const HBLANK_FLAG_DELAY = 46
+#
+# An intdefine because the sweep is the evidence, not the value. Misc "DMA
+# Prefetch Break" reads open bus and never touches DISPSTAT, so it sees only
+# this delay plus HBLANK_DMA_REQUEST_DELAY as a sum: 53..56 here closes it
+# exactly as 9..12 there does. It is not free to move, though -- from 50 up
+# the six "H-blank bit start Flip" rows fail, and those read the flag itself.
+# The suite pins the flag here and asks the grant to move relative to it.
+# docs/playtest-bugs.md section 16 has the sweep and what it rules out.
+const HBLANK_FLAG_DELAY {.intdefine.} = 46
 
 # Cycles from the H-blank signal to IRQ recognition; longer than the timers'
 # IRQ_SYNC_DELAY (3). Pinned by mGBA suite "H-blank bit start / Flip 1",

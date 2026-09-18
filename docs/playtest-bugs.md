@@ -1377,3 +1377,97 @@ most about 5 there. **The deferral is necessary and looks insufficient.** The
 rest has to come from somewhere else, and the seven-cycle anchor discrepancy
 above is the first place to look. Claiming the deferral will close the row
 would be the same over-reach this file has now recorded twice.
+
+
+## 16. `DMA Prefetch Break`: a knob map, and two beliefs retired, 2026-09-18
+
+Sections 14 and 15 each ended on a claim about what would close this row.
+Both were wrong, and the way they were wrong is worth more than the row.
+
+### What the row is actually sensitive to: one number, not two
+
+`HBLANK_FLAG_DELAY` is now an `intdefine` so this is reproducible. Sweeping
+it with the grant delay held at 2, against the whole suite:
+
+| flag delay | 46 | 48 | 50 | 51 | 52 | 53-56 | 58 | 61 |
+|---|---|---|---|---|---|---|---|---|
+| Break reads | 2540 | 24B8 | 24B8 | 24B8 | 2B1C | **passes** | 2A0C | 2984 |
+| suite fails | 1 | 1 | 5 | 8 | 7 | 6 | 7 | 7 |
+
+Moving the *flag* by +7 to +10 closes the row, exactly as moving the *grant*
+by +7 to +10 does (section 14's sweep). The row cannot tell them apart: it
+sees only the sum, because it never reads `DISPSTAT` at all -- it reads open
+bus in a 36-cycle loop and exits when a DMA lands in the right phase.
+
+But the flag is not free to move. From 50 upward the six `H-blank bit start
+Flip` rows fail, and those rows read the flag directly. **The suite pins the
+flag where it is and demands the grant move relative to it.** That is a
+coherent position -- it is exactly the deferral of section 15 -- so the
+deferral was built.
+
+### The deferral is real on hardware and inert on this row
+
+`Bus.access_end` stamped at the end of every CPU bus access, `etHDMARequest`
+re-armed there when the request lands inside one, capped so a stale stamp
+cannot strand it. Swept over caps 4, 6, 8, 10, 12, 16, 18, 24 and 64:
+
+**Every cap gives the same suite result, and the same Break value as the
+baseline (`0x10002540`).** Not "close"; identical, and flat in the cap. In
+that loop the H-blank request never lands inside a bus access, so there is
+nothing to wait for and the model has no effect. It also costs `DMA Prefetch
+Read`, which the baseline passes.
+
+So section 15's "necessary but insufficient" was the wrong shape of wrong.
+The deferral is not a partial answer to this row; it is **not an answer to
+this row at all**. It remains well-measured on hardware (section 15's ramp)
+and worth modelling for its own sake, but it must be justified by the payload
+that measures it, never by this row.
+
+The prototype also exposed a real defect worth recording: `access_end` was
+not rebased in `end_frame`, so after a frame boundary it stranded around
+150,000 cycles in the future -- the same bug the shipped `dma_request_at`
+rebase fixed, reintroduced by the same omission. Any new `CycleCount` field
+on `Bus` needs a rebase line, and the absence of one is silent.
+
+### Why the row is not merely an open-bus question
+
+An earlier 13x13 sweep of the post-DMA window's bounds reached only three
+values and never the target, while moving the flag reaches it easily. The
+difference tells us something: moving the window moves only *what the CPU
+reads*, whereas moving the flag also moves *when the DMA steals the bus*, and
+the burst's theft shifts the loop's own phase. **The row constrains when the
+transfer happens, not just how it is observed.** That is why no open-bus
+model can close it, and why it is a real -- if brittle -- timing constraint.
+
+### The sign problem, stated plainly
+
+The row wants the H-blank DMA 7 to 10 cycles later relative to the flag.
+Section 15's hardware page, normalised against its no-DMA control, says our
+DMA write is already about 3 cycles **late**. Those point opposite ways. One
+of them is wrong, and the candidates are: the control's own seven-cycle
+discrepancy (unexplained, see section 15), or the row being a phase
+coincidence that a correct model is not obliged to reproduce.
+
+**Nothing should be shipped for this row until that sign is resolved**, and
+it cannot be resolved by any local sweep -- every constant that moves the row
+also moves rows that are already correct.
+
+### The experiment that would resolve it: `linegeo.s`
+
+The control in `hdmastamp.s` measures from a timer start to a flag poll, so
+timer-enable latency and poll granularity are folded into its 1006-vs-999.
+An anchor-free version is straightforward and has not been built:
+
+* one timer, started once, **never stopped**, read three times;
+* stamp A at the VCOUNT 158->159 edge, B when the H-blank flag of that line
+  is first seen, C at the VCOUNT 159->160 edge;
+* report B-A and C-A, both differences within a single timer run, so the
+  enable latency cancels exactly;
+* sweep a pre-delay sled as section 15 does, to get below poll granularity.
+
+**C-A must be 1232.** That is the certainty check: a payload that does not
+return the scanline length is not measuring what it claims, and no number
+from it should be believed. With the method validated by C-A, B-A pins the
+flag against the line for the first time, and the seven cycles either survive
+or dissolve. The same run can stamp the V-blank flag against VCOUNT 160 and
+so pin the other term of every difference this file has relied on.
