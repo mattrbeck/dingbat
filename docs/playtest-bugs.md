@@ -251,10 +251,27 @@ Thumb code, mGBA is running it fast. The second reference agrees with mGBA on
 the resulting deck, so either it shares the model or it is fast for its own
 reasons; it exposes no cycle counter, so this bench cannot ask it directly.
 
-Nothing changed in dingbat on the strength of this. The bench runs from the
-cartridge, so a flashcart settles it outright, and that is worth doing before
-anyone touches the model: the argument above is an internal-consistency
-argument about mGBA, not a measurement of hardware.
+**Hardware has since anchored the floor.** `tests/roms/payloads/thumbmul.s`
+runs that same multiply block on the console through the resident monitor,
+and `tools/hwlink/payloadcmp.py` runs the identical bytes in both emulators
+through the same IWRAM wrapper:
+
+| | hardware | dingbat | mGBA |
+|---|---|---|---|
+| 64 Thumb multiplies, from IWRAM | **317** | 317 | 317 |
+
+All three agree exactly, so the instruction timing underneath is right
+everywhere and 317 cycles is what those instructions provably cost to
+execute. mGBA's 212 for the same block fetched from the cartridge is about a
+hundred cycles below that, which is no longer just inconsistent with its own
+model -- it is below a measured hardware floor.
+
+dingbat still was not changed on the strength of this. What hardware has
+settled is that mGBA is wrong here, not that dingbat's number is right: 340
+is plausible but unmeasured, and measuring it needs the block fetched from a
+cartridge, which needs a flashcart. The wait-state path is measured and
+matches: `tests/roms/payloads/waitcnt.s` agrees with both emulators on all
+six settings on hardware.
 
 
 ## Suite snapshot, 2026-09-17
