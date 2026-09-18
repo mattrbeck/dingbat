@@ -85,6 +85,22 @@ instruction instead (`Bus.dma_open_bus_armed`, cleared in `cpu.tick`), which
 is the adjacent slot, not the same one. Closing the row means dispatching a
 DMA part-way through an instruction, not tuning a constant.
 
+**Measured 2026-09-18, and the premise above is false** (docs/playtest-bugs.md
+section 13). `obuswin.s` on an AGB SP: the window is not ended by the next
+gamepak fetch — a single MUL, one instruction touching no bus at all, already
+ends it — and it is not one instruction wide either. What ends it is the
+CPU's next bus access of any kind, opcode fetches included, which is what this
+file's own field comment says. More to the point, `obuswint.s` shows the latch
+is **per-halfword**: two NOPs after a burst, Thumb code reads `DEAD6019`, half
+the DMA word beside a freshly fetched opcode halfword. `read_open_bus_value`
+answers with a predicate — the whole word or none of it — and no predicate of
+that shape can return a half-and-half word at any bounds, so the fix is to
+model the latch as a register whose halves are written independently, not to
+dispatch a DMA mid-instruction. Moving the predicate's lower bound to what
+hardware measures for ARM code in IWRAM makes every measured row right and
+costs `DMA Prefetch Read`, driving this row to `0x00000000`; both bounds tried
+are tabulated in that section.
+
 What it did find is a real bug, now fixed. A DMA dispatched from a scheduler
 handler bills its cycles to `bus.cycles`, which a running CPU closes out
 with `scheduler.tick` after each instruction; a halted CPU never does, and

@@ -1010,3 +1010,99 @@ made a decision rather than the ones any implementation gets right:
 So the HLE arithmetic is right, not merely self-consistent. The open HLE
 question is unaffected and remains what it was: the *cycle costs* of these
 bodies, where Sqrt is up to 3x off (docs/hwprobe-questions.md, SWITIME).
+
+
+## 13. The post-DMA open-bus latch, measured, 2026-09-18
+
+Aimed at the mGBA suite's last red row, `DMA Prefetch Break`. It did not
+close it. What it did was replace the reasoning the row has been parked on
+with measurements, and rule out the fix that reasoning implies.
+
+docs/mgba-suite-verdicts.md parks the row like this: on hardware "the DMA's
+word survives on the data bus only until the next gamepak fetch", so in a
+ROM-resident loop the window is a slot a few cycles wide in the middle of an
+instruction, where dingbat arms it for a whole instruction; therefore
+"closing the row means dispatching a DMA part-way through an instruction,
+not tuning a constant". Nothing had measured the premise.
+
+### obuswin.s -- the window is cycles, not instructions, and not the gamepak
+
+Same immediate DMA3 every row; only what sits between the burst and an
+unmapped read changes.
+
+| between the burst and the read | hardware | dingbat | mGBA |
+|---|---|---|---|
+| nothing | opcode | same | **wrong** |
+| one 1-cycle NOP | **the DMA word** | same | same |
+| two NOPs | opcode | **the DMA word** | same as hw |
+| one MUL (1 instruction, ~4 cycles, no bus access) | opcode | same | **the DMA word** |
+| one LDR from IWRAM | opcode | same | **the DMA word** |
+| one LDR from EWRAM | opcode | same | **the DMA word** |
+| one LDR from the **gamepak** | opcode | same | **the DMA word** |
+| NOP, then a gamepak LDR | opcode | same | same |
+| a gamepak LDR, then a NOP | opcode | same | same |
+| one LDMIA of 4 registers | opcode | same | **the DMA word** |
+
+Two claims die here. It is **not one instruction**: a single MUL, one
+instruction that touches no bus at all, already closes it. And it is **not
+"until the next gamepak access"**: that MUL never goes near the gamepak. The
+surviving reading is the one dingbat's own field comment already states --
+the word stays until the CPU's next bus access replaces it, opcode fetches
+included, which is why a MUL's extra internal cycles are enough (they buy
+another fetch) and why every load closes it (its own data cycle). The
+suite's "next gamepak fetch" is that rule's ROM-resident special case.
+
+### obuswint.s -- and the latch is per-halfword, which changes the shape
+
+The same trials in Thumb, and this is the result that matters:
+
+| NOPs between the burst and the read | hardware | dingbat |
+|---|---|---|
+| 0 | opcode | same |
+| 1 | `DEADBEE3`, the DMA word | same |
+| **2** | **`DEAD6019`** | `60A86019` |
+| 3 | opcode | same |
+
+At two NOPs hardware returns **half the DMA word beside a freshly fetched
+opcode halfword**. The latch is per-halfword: a DMA fills both halves, and
+later halfword fetches overwrite them one at a time, each into the half its
+own address bit 1 selects -- the same placement rule closed as THUMBBUS this
+morning (section 12). dingbat loses the DMA half entirely.
+
+### What that rules out
+
+`read_open_bus_value` answers this with a predicate -- the whole DMA word, or
+no DMA word -- gated on `dma_request_at` falling between two cycle stamps. A
+predicate of that shape **cannot produce `DEAD6019` at all**, whatever its
+bounds. So the width is not the bug; the shape is.
+
+That is also why the obvious fix fails. obuswin.s says the lower bound is one
+fetch too early for ARM code in IWRAM (the two-NOP row should be an opcode
+and dingbat returns the word). Moving it:
+
+| lower bound | ARM/IWRAM rows | `DMA Prefetch Read` | `DMA Prefetch Break` |
+|---|---|---|---|
+| `> fetch_start` (shipped) | two-NOP row wrong | **PASS** | `0x10002540` vs `0x10002A94` |
+| `> fetch_start + 1` | all correct | **FAIL** | `0x00000000` |
+| `> fetch_start + fetch cost` | all correct | **FAIL** | `0x00000000` |
+
+Both corrections make every measured ARM row right and cost a passing suite
+row, and neither moves `Break` toward its target -- it goes to zero, i.e. the
+loop stops seeing a word at all. Reverted; the suite and the 1219-row runner
+are back to baseline exactly.
+
+### What the next attempt should be
+
+Model the latch instead of the window: a real 32-bit register, halves written
+independently, updated by opcode fetches and by the last word a DMA moved,
+and read back whole. That is the mechanism all three payloads agree on, it
+subsumes the Thumb composition already in `read_open_bus_value` (which
+recomputes the same value from `pc` on demand), and it is the only shape that
+can return a half-and-half word. It is not a constant to tune, but neither is
+it "dispatch a DMA part-way through an instruction" -- the verdicts doc's
+conclusion followed from a premise that is now measured false.
+
+It is a hot-path change touching three named games and several suite rows, so
+it wants a session that can watch the gates, not a drive-by. `obuswin.s`,
+`obuswint.s` and `obusprobe.s` reproduce every number above in seconds, and
+`-d:obusdbg` prints the cycle stamps the current predicate turns on.

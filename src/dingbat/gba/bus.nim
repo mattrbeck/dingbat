@@ -1031,6 +1031,27 @@ proc read_open_bus_value*(bus: Bus; address: uint32): uint8 =
   let read_start = bus.bus_now() - CycleCount(access)
   if not bus.sched.dispatching:
     bus.catch_up()
+  # This all-or-nothing window is known to be the wrong SHAPE, not merely
+  # the wrong width, and tests/roms/payloads/obuswint.s is the measurement
+  # that says so: from Thumb code, two NOPs after a burst, an AGB SP returns
+  # DEAD6019 -- the DMA word's high half beside a freshly fetched opcode
+  # halfword. The latch is per-halfword, a DMA fills both halves, and later
+  # halfword fetches overwrite them one at a time into the half each one's
+  # own address bit 1 selects (the same placement rule as the Thumb
+  # composition below). A predicate that can only answer "the whole DMA word"
+  # or "no DMA word" cannot produce that, so no lower bound is right: moving
+  # this one to fetch_start + 1, which is what obuswin.s measures for ARM
+  # code in IWRAM, costs `DMA Prefetch Read` and drives `DMA Prefetch Break`
+  # to zero. Both left as they are until the latch itself is modelled
+  # (docs/playtest-bugs.md section 13).
+  when defined(obusdbg):
+    # -d:obusdbg: the cycle stamps this window turns on, one line per unmapped
+    # word read. obuswin.s and obuswint.s are the hardware column.
+    if bus.dma_has_run and (address and 3) == 0:
+      echo "obus ", hex_str(address), " req=", bus.dma_request_at,
+           " fetch=", fetch_start, " read=", read_start,
+           " -> ", (if bus.dma_request_at > fetch_start and
+                       bus.dma_request_at <= read_start: "DMA" else: "opcode")
   if bus.dma_has_run and bus.dma_request_at > fetch_start and
      bus.dma_request_at <= read_start:
     return uint8(bus.dma_open_bus shr shift)
