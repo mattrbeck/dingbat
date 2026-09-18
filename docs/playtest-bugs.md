@@ -527,11 +527,38 @@ identical frames at 10 and 30, and completely different ones from 60**:
 | 300 | `--timeout=300` | 38218 |
 | 549 | `--timeout=546..553` | ~38263 at every offset |
 
-Exact agreement and then total disagreement is not drift, and sweeping the
-timeout by +/-4 rules out an off-by-one -- every offset is equally wrong.
-Ruled out so far: battery files (a `--nosave` run is byte-identical to a
-saving one), non-determinism (repeated runs agree exactly), and input
-(neither harness presses anything).
+**Half of it was a battery file, and that half is fixed.** `--nosave`
+never detached the GBA battery -- it only blanked the GB cartridge -- so
+`dingbat_test` pointed at the library silently loaded the `.sav` sitting
+beside the ROM while the playtest harness, which symlinks into its own
+directory, booted blank. On a battery game the two then agree until the
+frame the save is first read. With that fixed (a `--nosave` run and a
+scratch-symlink run now agree to the pixel), the table above becomes:
+
+| driver frame | differing, battery detached |
+|---|---|
+| 60 | 0 |
+| 120 | 0 |
+| 300 | 37982 |
+| 549 | 37971 |
+
+**The other half is still open.** Bisected, the first differing frame is
+**166**, and it grows from there rather than switching: 43 pixels at 166,
+102 at 167, 553 at 170, 3,591 at 176, 26,653 at 187, essentially the whole
+screen by 210. A small perturbation amplifying is the signature of a
+divergence in what the game computes, not of a harness reading the wrong
+frame.
+
+Ruled out: battery files (above), non-determinism (**both** harnesses are
+individually deterministic -- three cold driver runs give one hash, repeated
+`dingbat_test` runs are byte-identical), input (the core powers up at
+KEYINPUT 0x03FF and neither harness writes it), an off-by-one (every offset
+in +/-4 is equally wrong), and the idle-loop fast-forward
+(`DINGBAT_NO_WAITLOOP=1` changes nothing either way).
+
+Both construct the emulator the same way -- `new_gba(..., run_bios = false,
+use_hle = true)` then `post_init()` -- so whatever differs is not in the
+arguments.
 
 This matters beyond one game: a screenshot from one harness cannot be used
 to explain a finding from the other until it is resolved, which is what
