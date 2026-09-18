@@ -823,3 +823,89 @@ at `fetch_start` after a burst rather than at the window itself. Left alone
 deliberately: three games named in that comment depend on the word surviving,
 and this page probes one shape only -- an immediate DMA3 to EWRAM, from ARM
 code. `obusprobe.s` reproduces it in seconds when someone picks it up.
+
+
+## 12. Checking what section 11 assumed, 2026-09-18
+
+Section 11 gated the Thumb open-bus pair on the width of the bus the code is
+fetched over, and the only evidence for the gate was that the mGBA suite
+agreed with it -- which is the same as assuming the suite is right. Two
+payloads test it instead. Both ran with the slot empty and the monitor
+resident.
+
+### obusbus.s -- the gate is right, and its OAM arm is wrong
+
+The identical Thumb block, copied rather than reassembled, run from four
+memories of known width, each reading 0x10000000. The two rows per memory are
+the same load at the two word alignments:
+
+| memory | width | bit 1 clear | bit 1 set | composition |
+|---|---|---|---|---|
+| IWRAM | 32 | `3E026028` | `60A83E02` | the two fetches, placed by bit 1 |
+| EWRAM | 16 | `60286028` | `60A860A8` | `[$+4]` duplicated into both halves |
+| VRAM  | 16 | `60286028` | `60A860A8` | the same |
+| OAM   | 32 | `606E6028` | `60A83E02` | the aligned **word** holding `$+4` |
+
+Identical with the display on and forced blank, so the OAM row is not the PPU
+competing for the bus.
+
+**The gate holds.** Two independently measured 16-bit memories duplicate
+`[$+4]`, which is exactly what dingbat does outside the wide regions, and the
+cartridge bus is 16 bits wide too. So the 40 I/O rows and 6 Timing rows that
+composing everywhere cost were not masking a second bug -- the suite was
+right and the gate is hardware-correct, now by measurement rather than by
+agreement.
+
+**But bus width is the wrong rule.** OAM is 32 bits wide and does not compose
+a pair: it hands back the aligned word holding `$+4`, which is what ARM code
+gets. What decides the answer is how much of the latch one fetch fills --
+a 16-bit bus mirrors its halfword into both halves, IWRAM drives only the
+half its address selects and leaves the other half holding the previous
+fetch, and OAM fills the whole latch at once. Three cases, not two. dingbat
+had OAM in IWRAM's case on the reasoning that both are 32 bits wide; fixed,
+with both gates row-identical. No game executes from OAM, so the value here
+is the mechanism, not the row.
+
+BIOS is the one region left unmeasured -- a payload cannot execute there --
+and stays with IWRAM, the memory it shares a bus with.
+
+### hdmasweep.s -- the H-blank grant does defer, at some phases
+
+gbaedge slot 53, the page the mGBA suite's last red row has been waiting on,
+run for the first time. It asks whether the H-blank DMA grant waits for the
+CPU's bus cycle to end, by shifting the request inside a loop of 8-wait ROM
+loads with a pre-delay of k one-cycle NOPs and measuring anchor-free as
+(V-blank write - H-blank write). A larger number means the H-blank DMA landed
+earlier. Six runs:
+
+| k | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8-13 |
+|---|---|---|---|---|---|---|---|---|---|
+| hardware | 216-219 | 217-219 | 216-218 | 227 or 216 | 227 | 227 | **216** | 227 | 227 |
+| dingbat | 226 | 226 | 226 | 226 | 226 | 226 | 226 | 226 | 226 |
+
+The method's own control passes on hardware every run: the IWRAM row reads
+227 and (IWRAM k=7) - (IWRAM k=0) is 0, so one-cycle accesses give no spread
+and the ROM rows mean what they claim. **mGBA's control fails** -- its
+`+30` reads -1, a spread where there can be none -- so its rows on this page
+are noise and are not a third opinion.
+
+Neither of the page's two predictions is what came out. It is not a sawtooth
+falling one cycle per k, and it is not flat: most phases show no deferral at
+all, k = 6 shows a stable **11-cycle** deferral in all six runs, and k = 0-3
+sit in an unstable band that tips between the two. So a deferral is real on
+silicon and depends on where in the CPU's bus cycle the request falls, but
+not in the shape the page was drawn to catch.
+
+**dingbat models none of it** -- 226 flat across every k, including the
+phases where hardware loses 11 cycles. That is the mechanism the suite's
+`DMA Prefetch Break` row plausibly needs, because the suite's own request
+lands inside a long ROM access; grant-at-1012 was only ever a fit to that one
+row, and hardware already refuted it (p50: the grant is at flag + 2).
+
+Two things left alone deliberately. The deferral itself is a scheduler
+change, and the DMA grant deferral is another session's piece of work; this
+is the measurement it needs, not a patch. And dingbat sits **1 cycle** below
+hardware on every undeferred row including the IWRAM control (226 vs 227) --
+p50 calibrated the H-blank request against absolute stamps and found flag + 2
+exact, so the residual cycle is more likely on the V-blank DMA's side than
+the H-blank one. Neither constant should move on one page.

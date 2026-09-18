@@ -1055,14 +1055,30 @@ proc read_open_bus_value*(bus: Bus; address: uint32): uint8 =
       # both, [$+4] = 60A8 and 6128. dingbat duplicated [$+4] into both
       # halves, which is right only when the two happen to be equal.
       #
-      # Over a 16-bit bus one fetch cannot fill both halves and the duplicate
-      # is what hardware gives: the mGBA suite reads its write-only registers
-      # from ROM-resident Thumb code, and composing there costs 40 I/O rows
-      # and 6 Timing rows. Only the 32-bit-wide regions take the pair --
-      # BIOS, IWRAM and OAM. IWRAM is the one measured; the other two are the
-      # same bus width and no suite row executes from either.
-      let pc_wide = pc_region == 0x0 or pc_region == 0x3 or pc_region == 0x7
-      if pc_wide:
+      # There are three cases, and bus width alone does not pick between
+      # them: what matters is how much of the latch one fetch fills.
+      # obusbus.s copies the identical Thumb block into four memories and
+      # runs it from each, so the rows differ in the memory executed from and
+      # in nothing else (same on an AGB SP with the display on and forced
+      # blank, so the OAM row is not the PPU competing for the bus):
+      #
+      #   IWRAM 32-bit  3E026028  60A83E02   the two fetches, placed by bit 1
+      #   EWRAM 16-bit  60286028  60A860A8   [$+4] duplicated into both halves
+      #   VRAM  16-bit  60286028  60A860A8   the same
+      #   OAM   32-bit  606E6028  60A83E02   the aligned WORD holding $+4
+      #
+      # A 16-bit bus cannot fill both halves from one fetch, so it mirrors --
+      # which is also why the mGBA suite, reading its write-only registers
+      # from ROM-resident Thumb code, wants the duplicate: composing there
+      # costs 40 I/O rows and 6 Timing rows. OAM fills the whole latch from
+      # one fetch, so Thumb code there composes exactly as ARM code does; it
+      # was assumed to match IWRAM because both are 32 bits wide, and it does
+      # not. BIOS is the one region left unmeasured -- a payload cannot
+      # execute there -- and stays with IWRAM, the memory it shares a bus
+      # with.
+      if pc_region == 0x7:
+        bus.read_word_internal(pc and not 3'u32)
+      elif pc_region == 0x0 or pc_region == 0x3:
         let older = uint32(bus.read_half_internal((pc - 2) and not 1'u32))
         let newer = uint32(bus.read_half_internal(pc and not 1'u32))
         if (pc and 2) != 0: (newer shl 16) or older
