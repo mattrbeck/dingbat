@@ -130,6 +130,19 @@ constant **24 cycles**, identical on every sled offset and across four runs.
 That is the grant's floor, and it is the cleanest number on this page: both
 ends are hardware events and there is no software sampling between them.
 
+### 1.6 What an H-blank DMA costs the CPU
+
+`dmasteal.s` enters a chosen line by a V-count match halt, then runs a loop of
+fixed iteration count across that line's H-blank, once with a DMA armed and
+once without; the difference is the steal, with no poll anywhere to quantise
+it. On an AGB SP a 16-bit DMA of N transfers between internal memories costs
+**3 + 2N cycles**, and the figure is unchanged across source and destination
+in IWRAM, EWRAM, VRAM, palette and OAM, and across 16- and 32-bit width, once
+each region's own wait states are accounted for. Both emulators we compare
+against agree on every row, so this is a corroboration rather than a
+correction — recorded because the number is useful and because the method
+(fixed-count loop, halted entry) is what makes it exact.
+
 ## 2. Not settled — hardware needed first
 
 1. **BIOS-region Thumb open bus** (§1.1). No payload can execute from BIOS, so

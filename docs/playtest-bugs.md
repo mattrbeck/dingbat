@@ -1659,3 +1659,94 @@ withdrawn. The order to reach for is now: **control the line with a V-count
 match halt, take every stamp from one free-running timer, and prefer two
 hardware events over any event and any poll.** A poll in the measurement is a
 quantiser; a poll in the *entry* is a quantiser you cannot see.
+
+
+## 19. Four more probes on the halted-entry rig, 2026-09-18
+
+Section 18's shape -- fix the line with a V-count match halt, take every stamp
+from one free-running timer, prefer two hardware events to any event and any
+poll -- applied to everything else within reach. Three of the four came back
+clean, which is worth as much as the one that did not.
+
+### `vdmageo.s`: the V-blank grant, and a constant that deserved re-checking
+
+`VBLANK_DMA_REQUEST_DELAY` was set to 1 earlier the same day on the strength
+of a difference (`hdmamul`, blind to a common-mode shift) and an absolute
+stamp from a page whose anchor was later withdrawn. Exactly the shape of
+thing to distrust. Re-measured with no anchor -- V-count match on 159, halt,
+DMA1 freezing TM1, halt again on the V-blank IRQ:
+
+| | W | D | W − D |
+|---|---|---|---|
+| hardware | 1229 | 1205 | **24** |
+| dingbat | 1229 | 1205 | **24** |
+| mGBA | 1229 | 1204 | 25 |
+
+Byte-identical, and the same `W − D = 24` the H-blank side gives. The
+constant was right; it is now right *for a reason we can point at*.
+
+### `dmasteal.s`: how much the burst actually costs the CPU
+
+The other half of what moves `DMA Prefetch Break` is the theft itself, and
+nothing had ever measured it. Enter on line 100, free-run TM0, execute a loop
+of **fixed** iteration count spanning that line's H-blank -- no poll, so no
+quantiser -- once with and once without a DMA armed.
+
+An IWRAM 16-bit DMA of N transfers costs exactly **3 + 2N** cycles, and every
+row of a sweep over transfer count (1..32), source and destination region
+(IWRAM, EWRAM, VRAM, palette, OAM) and width (16 and 32 bit) is identical on
+hardware, dingbat and mGBA. Twelve region/width rows, twelve agreements. The
+steal is not where the last row's error lives.
+
+### `timergeo.s`: the prescaler is global, and we are one tick out at one phase
+
+The prescaler divider free-runs and is not restarted when a timer is enabled
+-- which dingbat already models -- but *where that grid sits relative to the
+video grid* had never been checked, because before section 18 the payload's
+own phase was whatever the monitor handed us.
+
+Counting prescaler-64 ticks over a fixed span, entering at the top of each of
+eight consecutive lines:
+
+| entry line | 100 | 101 | 102 | 103 | 104 | 105 | 106 | 107 |
+|---|---|---|---|---|---|---|---|---|
+| hardware | 19 | 19 | 19 | **18** | 19 | 19 | 19 | **18** |
+| dingbat | 19 | 19 | 19 | **19** | 19 | 19 | 19 | **19** |
+| mGBA | **18** | 19 | 19 | 19 | **18** | 19 | 19 | 19 |
+
+Period 4, because the line step is 1232 mod 64 = 16 and four lines are the
+four distinct phases. **At one phase in four our count is one tick high**, and
+mGBA is one tick low at a different phase; neither of us is right, and we are
+wrong in opposite places.
+
+No phase constant fixes it. A `TIMER_PHASE` added to both ends of
+`ticks_between` was swept over 0, 16, 32, 48 and 1023 -- the last being −1 for
+every period, since all of them divide 1024, which tests the other half-open
+convention -- and the disagreeing row does not move. So this is not the grid
+being offset; it is the boundary case itself, one phase where hardware
+resolves a tick the other way. The mGBA suite does not constrain it at all
+(every value gives 6997/1), so nothing but hardware can decide it. **Not
+fixed, and deliberately not guessed at.**
+
+### The limit of the current control, and what would lift it
+
+The ÷256 and ÷1024 rows of that page looked like clean disagreements and then
+**changed between runs on hardware**, so they are discarded. They had to: a
+frame is 280896 cycles, and 280896 mod 64 = 0 but mod 256 = 64 and mod 1024 =
+320. The ÷64 phase therefore repeats every frame and is reproducible, while
+the ÷256 and ÷1024 phases walk with the frame index and need frame parity
+controlled as well as the line.
+
+**We control the line; we do not control the frame.** That is the next thing
+to fix about the rig, and until it is, no prescaler-256 or -1024 claim from
+this page means anything. It is the same lesson as section 17 one level up:
+the thing that moved was the part of the entry we had not pinned.
+
+### None of this reaches the last row
+
+`DMA Prefetch Break` counts a loop **in ROM**, and the rig is a multiboot link
+with no cartridge in the slot, so gamepak and prefetch timing cannot be
+measured here at all. Everything reachable that the row depends on -- line
+geometry, flag position, grant window, grant floor, DMA steal -- is now
+measured and correct. What is left is on the other side of a bus this rig
+cannot see, which is what `prefetchbench.gba` on the flashcart is for.
