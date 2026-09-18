@@ -294,3 +294,65 @@ commit before this session's changes and fail identically there, so neither
 is a regression -- both are pre-existing and previously went unnoticed. At
 both failing checkpoints the two references disagree with each other as
 well, which is the same shape as Fire Emblem's animated menus.
+
+
+## 8. A second net: every game, no script
+
+The suite above needs a recorded script per game, which is why it covers 52
+titles out of a 7,899-ROM library. `tools/playtest/bootsweep.py` covers the
+rest of the library at the cost of depth: it boots a game in all three
+emulators, presses nothing, and watches for 40 seconds. That is enough for
+the logos, the title screen and -- on most GBA titles -- the attract-mode
+demo, which is real gameplay with real input, just not ours.
+
+What it compares is deliberately not frame-by-frame. Two emulators a few
+frames apart on an animating screen disagree on nearly every frame while
+both being right, which is what the suite's SLIP verdict exists for. Here
+each emulator's whole run is reduced to the *set* of frames it drew, and
+what is counted is set difference: a frame hash one emulator produced that
+another never produced at any point in the run. A timing slip cancels out of
+that completely; drawing something nobody else ever draws does not.
+
+A count on its own still means little, because a game that seeds its RNG
+from uninitialised memory diverges in all three. So every emulator is scored
+the same way against the other two and only the shape is read:
+
+    dingbat 0     mgba 0     nba 0        nothing to see
+    dingbat 850   mgba 12    nba 9        dingbat is the odd one out
+    dingbat 900   mgba 880   nba 890      the game is nondeterministic
+
+### Donkey Kong Country 2 (E)
+
+The first real find, and it survives on the current tree (measured again
+after rebasing onto `55c79b9fb`, so it is not a regression from the H-blank
+DMA work and not fixed by it either):
+
+| | odd frames in 2,400 |
+|---|---|
+| dingbat | 208 |
+| mGBA | 1 |
+| second reference | 4 |
+
+The odd frames are not one event. There is a single one at frame 156 and
+then a steady beat from frame 549 to frame 1279, one or two frames every
+five or six -- something that repeats on the intro's animation cycle.
+
+At frame 620 the two references are **byte-identical to each other** and
+dingbat differs from both, which is the cleanest shape a finding can have
+here. It is 3,006 pixels of 38,400, scattered along layer edges (the mast,
+the rigging, the banner), mean absolute error 0.36, largest channel delta
+25. Tested and rejected: a horizontal shift of any row by 1-4 pixels in
+either direction improves not one of the 160 differing rows, so it is not a
+scroll offset. The differing pixels are blend results -- dingbat draws
+5-bit (6,6,6) where the references have (10,8,6), and so on through 257
+distinct colour pairs -- which points at a colour special effect being
+applied with a different coefficient, or on a different line, rather than at
+geometry.
+
+Not traced further. The screenshots and the per-row analysis are
+reproducible with `bootsweep.py show "Donkey Kong Country 2"`.
+
+Two Pokemon Ruby ROM hacks flag as well (`Pokemon Ambar`, `Obsidian Demo
+1`), both with the same shape at the same frame, 766. They share a base, so
+they are one finding, and being hacks they are weak evidence about hardware;
+the sweep's dump filters do not catch a hack that is not marked as one.
