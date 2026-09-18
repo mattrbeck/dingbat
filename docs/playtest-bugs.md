@@ -475,10 +475,32 @@ themselves, which are what they should be. It is the renderer's latch, not
 the DMA's arithmetic -- consistent with the rows being tile-bottom lines,
 and consistent with the grant instant having been measured as irrelevant.
 
-What would close it is mGBA's own per-line BG1 trace for the same frame, to
-confirm its vofs changes a line earlier or later than dingbat's. That is the
-only piece still missing, and it needs mGBA instrumentation rather than
-anything here.
+**Where this stops, deliberately.** The values are correct, the timing of
+their effect is unknown, a one-line latch is suspected, and nothing in
+dingbat changes until that is settled. mGBA's own per-line trace would only
+say the two emulators disagree, not which is right, and the documentation
+does not pin the cycle at which a text BG's vertical offset stops affecting
+the line being fetched -- which is why this has survived this long. What
+settles it is a photograph: a BG with a sharp horizontal edge, its vertical
+offset driven from a per-line table toggling every eight lines exactly as
+DKC2 drives it. The edge's zigzag shows directly which line each shift lands
+on, with no emulator in the loop. That is a visual probe page, and the link
+rig cannot answer it because composited pixel output is not CPU-readable.
+
+**Does any other game show the same signature?** Screened all 26 flagged
+games at their sparsest witnessed frame: **no**. Every game's differing rows
+are tile-bottom in about one case in eight, which is what chance gives, and
+the sparse cases are other shapes entirely -- X-Bladez differs on rows 53,
+77, 117, 119, 122, 124 (one tile-bottom), a Yoshi's Island trainer on rows
+32-39 (exactly one whole tile row), Billy Hatcher on row 84 alone. Only
+Super Donkey Kong 2 (J) matches DKC2's shape, and that is the same game.
+
+So the latch does not gain priority from the sweep. **The screen is weak
+evidence, though, and should not be read as a clean negative:** it samples
+24 frames per game, and it did not find DKC2's own frame 549 either -- it
+picked frame 711, where DKC2 differs on one row that is not tile-bottom. A
+sensitive version would have to examine every witnessed frame of every
+flagged game.
 
 Two cautions earned the hard way while taking this, both now fixed upstream
 and both recorded in section 9: `dingbat_test` wrote GBA screenshots in
