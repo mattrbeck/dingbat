@@ -52,6 +52,17 @@ def classify(a, b):
     for k, h in enumerate(a['hashes']):
         if h == b['hash']:
             return {'verdict': 'SLIP', 'offset': a['center'] - k}
+    # Neither centre frame appears in the other's window, but the two windows
+    # may still overlap: on a screen that animates every frame, both sides can
+    # be rendering the same sequence a few frames apart without either centre
+    # landing in the other's window. Rendering the same frame at all is a slip,
+    # so compare the windows against each other and report the smallest shift.
+    elsewhere = {h: k for k, h in enumerate(b['hashes'])}
+    offsets = [(k - a['center']) - (elsewhere[h] - b['center'])
+               for k, h in enumerate(a['hashes']) if h in elsewhere]
+    if offsets:
+        return {'verdict': 'SLIP', 'offset': min(offsets, key=abs),
+                'why': 'the windows share a frame; neither centre does'}
     fa, fb = img.read_ppm(a['ppm']), img.read_ppm(b['ppm'])
     m = img.compare(fa, fb)
     wa, wb = _words(a['text']), _words(b['text'])

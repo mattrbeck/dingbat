@@ -192,17 +192,28 @@ noise on the text. mGBA's enableVideoLayer segfaults in the headless build,
 so a per-layer comparison needs another route (dump BG1/BG2 tile+palette
 state in both at the same frame).
 
-**2026-09-17: this is animation phase, not colour.** Both failing
-checkpoints sit on menus over an animated background, and *no two*
-emulators agree on them: dingbat~mgba 69% of pixels exact, dingbat~nba 70%,
-and mgba~nba 85% with channel deltas up to 15 — the references differ from
-each other in the same way, only less. The neighbouring `intro` checkpoint,
-on a settled screen, is IDENTICAL between dingbat and mGBA while the second
-reference SLIPs 9 frames. So the menus are simply sampled at different
-points in their animation; the "one-step colour" reading in the heading was
-wrong, and the blend formula (hardware-verified) is not involved.
+**2026-09-17: the heading is wrong, but it is not a frame offset either.**
+Both failing checkpoints sit on menus over an animated background, and *no
+two* emulators agree on them: dingbat~mgba 69% of pixels exact, dingbat~nba
+70%, mgba~nba 85%, all with channel deltas of 15-20. So the references
+disagree with each other here in the same way, only half as much.
 
-Worth doing in the harness rather than the core: the classifier only
-compares each checkpoint's centre frame against the other side's hash
-window. Comparing the two recorded windows against *each other* is free and
-strictly stronger, and these two checkpoints want a wider window anyway.
+The obvious explanation, that each emulator samples the animation at a
+different point, was tested and does not hold. The classifier now also
+cross-compares the two recorded hash windows (not just each centre frame
+against the other's window), and the windows were widened to 200 frames as
+an experiment: dingbat still never renders a frame mGBA also rendered, and
+neither does the second reference. On these screens no two emulators ever
+produce an identical frame at any offset, so exact-frame comparison cannot
+adjudicate them at all, and the pixel metrics are all we have. They put
+dingbat about twice as far from either reference as they are from each
+other - suggestive, not conclusive.
+
+Note for anyone re-running this: widening a checkpoint's window shifts every
+later checkpoint, because collecting the window advances the emulator. The
+experiment above turned the next checkpoint from IDENTICAL into SLIP(-3)
+purely that way. The windows in the script are back to 30.
+
+Still the most likely reading is the original one: a layer input (the
+animated fog's content or phase) differs, not the blend, which is
+hardware-verified. Needs a per-layer dump in both at the same frame.
