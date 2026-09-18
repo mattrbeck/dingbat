@@ -242,8 +242,12 @@ A pass is the screen turning green and the host reading back `C0DE1234`
   every poll reads `FFFFFFFF` and the GBA looks absent.
 - The console has to be **powered on with no cartridge**, so that its BIOS
   sits in the multiboot wait loop. Once a probe is running the poll stops
-  answering `0x7202` and the console needs a power cycle before the next
-  upload — one physical action per probe.
+  answering `0x7202`. Rather than a power cycle per probe, upload the
+  resident monitor once (`tools/hwlink/monitor.py install`) and send
+  experiments to it; it also answers `BOOT` with SWI 26h, which reboots
+  through the BIOS and leaves the console ready for a fresh upload, so even
+  replacing the monitor needs nobody at the console. A power cycle is left
+  for the first install and for a payload that hung.
 - A multiboot image is linked at 0x02000000 and must clear 0x1A0 bytes, or
   the upload's length word underflows (the failure looks like a bad echo on
   the very first data word).

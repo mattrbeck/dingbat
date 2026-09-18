@@ -62,6 +62,11 @@ class Monitor:
     def __init__(self, dev=DEFAULT_DEV):
         self.link = GBLink(dev)
         self.link.open_link()
+        # The first transfer or two after the link is re-armed catch the
+        # console mid-cycle and read back noise or an idle line; throw them
+        # away so the first real command is not the one that gets lost.
+        for _ in range(4):
+            self.link.transfer32(0)
 
     def close(self):
         self.link.close()
@@ -75,12 +80,13 @@ class Monitor:
     def _x(self, word=0):
         return self.link.transfer32(word & 0xFFFFFFFF)
 
-    def ping(self):
-        self._x(CMD_PING)
-        got = self._x()
-        if got != ANS_PONG:
-            raise MonitorError(f'ping answered 0x{got:08X}, not PONG')
-        return True
+    def ping(self, tries=4):
+        for _ in range(tries):
+            self._x(CMD_PING)
+            got = self._x()
+            if got == ANS_PONG:
+                return True
+        raise MonitorError(f'ping answered 0x{got:08X}, not PONG')
 
     def alive(self):
         """The monitor echoes any word it does not recognise."""
@@ -174,13 +180,19 @@ def install(image=MONITOR_IMAGE, dev=DEFAULT_DEV, log=print):
         ok, message = multiboot(link, open(image, 'rb').read(), log=log)
         if not ok:
             return False, message
-    time.sleep(0.3)
-    with Monitor(dev) as m:
+    # The monitor has its own start-up to do, and the adapter has just been
+    # switched out of the shape the upload used; give both room before
+    # deciding the upload failed.
+    last = None
+    for _ in range(5):
+        time.sleep(0.5)
         try:
-            m.ping()
-        except MonitorError as e:
-            return False, f'uploaded, but {e}'
-    return True, 'monitor installed and answering'
+            with Monitor(dev) as m:
+                m.ping()
+            return True, 'monitor installed and answering'
+        except (MonitorError, OSError) as e:
+            last = e
+    return False, f'uploaded, but {last}'
 
 
 def main(argv):
