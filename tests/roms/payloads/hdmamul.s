@@ -1,41 +1,28 @@
-@ payload: does the H-blank DMA grant wait for the CPU's bus cycle to end?
+@ payload: does a DMA grant wait for INTERNAL cycles, or only for the bus?
 @
-@ This is gbaedge slot 53 (HDMASWEEP), re-hosted as a link-cable payload. The
-@ stub, the trial sequence and the byte layout are the probe's, unchanged, so
-@ its prediction table reads against this one directly; only the plumbing
-@ differs -- 32 bytes to 0x02008000 for the host to read back, instead of a
-@ screen slot to photograph.
+@ The companion to hdmasweep.s, and the other half of the rule behind the
+@ H-blank DMA grant. hdmasweep asks whether the grant waits for the CPU's bus
+@ access in flight to finish; this asks whether it waits for anything at all
+@ when the CPU is busy with no bus access -- an ARM7TDMI multiply spends its
+@ internal cycles with the bus idle, so if the two pages disagree the grant
+@ tracks the bus, and if they agree it tracks the instruction.
 @
-@ The rig multiboots into EWRAM with no cartridge, and the probe's loop loads
-@ from 0x08000000 at WS0 = 8 waits. That still works: the wait states are the
-@ memory controller's, not the cartridge's, so the access takes its eight
-@ cycles whether or not anything is in the slot. The loaded value is open bus
-@ and is discarded -- only the length of the access matters here. The IWRAM
-@ rows (+28, +30) are the method's own control: they must read as they do on
-@ a cart-booted run for the ROM rows to mean anything.
+@ Everything else is hdmasweep's: same stub, same two timer-freezing DMAs,
+@ same pre-delay sweep, same byte layout. The only change is in the poll loop,
+@ where `ldr r0, [r3]` from the gamepak becomes `mul r0, r3, r6` on two large
+@ operands, which on an ARM7TDMI is four internal cycles and no bus access.
+@ WAITCNT is never touched, since nothing here reads the cartridge.
 @
-@ p50 (docs/hwprobe-results-agb.md session 6) put the H-blank DMA's request 2
-@ cycles after the H-blank flag while the CPU looped on 1-cycle IWRAM
-@ accesses; inside a ROM load the write landed +5 later. One sample each, so
-@ it cannot tell a deferral that depends on WHERE in the CPU's bus cycle the
-@ request falls from a constant offset.
-@
-@ Measured without an anchor: two DMAs each freeze their own timer with their
-@ write -- an H-blank DMA0 on line 159 stops TM0, a V-blank DMA1 at the start
-@ of line 160 stops TM1 -- and every row is TM1 - TM0, so the poll lag
-@ cancels. A pre-delay of k one-cycle NOPs, k = 0..13, shifts where inside
-@ the ROM loop the H-blank request lands.
-@   the grant waits for the end of the bus cycle in flight
-@       -> the rows fall one cycle per k and jump back by an access's length:
-@          a sawtooth whose jumps sit where the long access ends
-@   the grant comes off the PPU regardless of the CPU
-@       -> every row is the same
+@ Read it against hdmasweep's rows:
+@   both sawtooth   -> the grant waits for the instruction, bus or not
+@   load sawtooth, multiply flat -> it waits for the bus cycle specifically
+@   both flat       -> the grant is PPU-timed and neither wait exists
 @
 @ +0..+26 (14 h) TM1 - TM0 with pre-delay k = 0..13, the H-blank DMA landing
-@   while the CPU loops on a ROM load at WS0 = 8 waits (prefetch off)
-@ +28 (h) the same with the loop loading from IWRAM, k = 0
-@ +30 (b) (IWRAM k = 7) - (IWRAM k = 0), signed: 0 with 1-cycle accesses
-@ +31 (b) marker 53
+@   while the CPU loops on a multiply
+@ +28, +30  unused here: hdmasweep.s carries the 1-cycle IWRAM control, and
+@   this page's loop is the comparison rather than a second control
+@ +31 (b) marker 54
     .arm
     .text
     .global _start
@@ -100,34 +87,13 @@ _start:
     str r1, [r9, #4]               @ DMA0 -> TM0CNT_H
     ldr r1, =0x04000106
     str r1, [r11, #4]              @ DMA1 -> TM1CNT_H
-    ldr r0, =0x04000204
-    ldrh r0, [r0]
-    push {r0}                      @ WAITCNT, put back at the end
-
-    hs_trial 0, HPZERO             @ IWRAM loop, k = 0 and k = 7
-    ldr r1, =RESULTS
-    strh r7, [r1, #28]
-    push {r7}
-    hs_trial 7, HPZERO
-    pop {r0}
-    sub r7, r7, r0
-    ldr r1, =RESULTS
-    strb r7, [r1, #30]
-
-    ldr r0, =0x04000204
-    mov r1, #0x0C                  @ WS0 first access 8 waits, prefetch off
-    strh r1, [r0]
     .irp k, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13
-    hs_trial \k, 0x08000000
+    hs_trial \k, 0x7FFFFFFF        @ a multiplier big enough to cost 4 cycles
     ldr r1, =RESULTS
     strh r7, [r1, #(\k * 2)]
     .endr
-    pop {r0}
-    ldr r1, =0x04000204
-    strh r0, [r1]                  @ WAITCNT back as we found it
-
     ldr r1, =RESULTS
-    mov r0, #53
+    mov r0, #54
     strb r0, [r1, #31]
 
     pop {r6}                       @ timer controls and IME back as found
@@ -138,7 +104,7 @@ _start:
     pop {r6}
     ldr r0, =0x04000200
     strh r6, [r0, #8]
-    ldr r0, =0x48444D41            @ 'HDMA': the payload ran to the end
+    ldr r0, =0x484D554C            @ 'HMUL': the payload ran to the end
     ldmfd sp!, {r4-r11, lr}
     bx  lr
     .ltorg
@@ -170,8 +136,9 @@ hs_stub:
     .rept 16
     mov r0, r0
     .endr
+    mov r6, r3                     @ r3 is the multiplier, not an address
     mov r12, #0
-3:  ldr r0, [r3]                   @ the access the H-blank grant may wait on
+3:  mul r0, r3, r6                 @ four internal cycles, bus idle
     ldrh r0, [r10, #2]             @ TM0CNT_H: still enabled?
     tst r0, #0x80
     beq 4f

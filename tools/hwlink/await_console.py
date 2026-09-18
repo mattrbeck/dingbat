@@ -5,12 +5,13 @@ multiboot wait loop, which is where a BIOS boot with no cartridge leaves it.
 That is the one part of a hardware session a person still has to do. This
 waits for it instead of failing:
 
-    python3 await_console.py out.txt payloads/psgwhy.s payloads/swiedge.s:24
+    python3 await_console.py out.txt payloads/psgwhy.s:8 payloads/waitprobe.s@0,4,8
 
 It polls the link every 20 seconds, doing nothing while the console is dark,
 and the moment it answers, installs the monitor and runs each payload in
-turn, appending each one's result block to the output file (a payload that
-answers with more than the default eight words says so as `source.s:24`). So the
+turn, appending its answers to the output file. A payload that answers in a block
+of memory says how many words as `source.s:8`; one that wants arguments, and
+answers in r0 to each, lists them as `source.s@0,4,8`. So the
 answer is waiting whenever the console is next switched on, rather than
 needing someone at the keyboard at that moment.
 """
@@ -47,12 +48,17 @@ def run(payloads, out):
         m.ping()
         for spec in payloads:
             source, _, count = spec.partition(':')
+            source, _, arglist = source.partition('@')
+            args = [int(a, 0) for a in arglist.split(',')] if arglist else [0]
             code = monitor.assemble(source, out_dir='/tmp')
-            answer = m.run_payload(code)
-            words = m.read_mem(RESULTS, int(count) if count else WORDS)
-            data = b''.join(int(w, 16).to_bytes(4, 'little') for w in words)
-            log(out, f'{os.path.basename(source)}  r0={answer:#010x}')
-            log(out, '  ' + ' '.join(f'{b:02X}' for b in data))
+            name = os.path.basename(source)
+            for arg in args:
+                answer = m.run_payload(code, arg)
+                log(out, f'{name}  arg={arg:#x}  r0={answer:#010x}')
+            if count:
+                words = m.read_mem(RESULTS, int(count))
+                data = b''.join(int(w, 16).to_bytes(4, 'little') for w in words)
+                log(out, '  ' + ' '.join(f'{b:02X}' for b in data))
 
 
 def log(out, message):
