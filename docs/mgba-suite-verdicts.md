@@ -149,6 +149,31 @@ Two costings were refuted along the way, both by the rest of the suite:
 So the 36-cycle iteration is pinned by four independent sections, and the
 row stays red on a landing window no ROM measures.
 
+
+**Closed as a verdict, 2026-09-18: this row stays red, and should**
+(docs/playtest-bugs.md section 17). Two anchor-free payloads measured every
+quantity the row depends on against an AGB SP. `linegeo.s` starts one timer,
+never stops it, and reports only differences between reads of it: the
+scanline brackets 1232, the H-blank flag brackets 1006, and the V-blank flag
+is simultaneous with the VCOUNT 160 edge — hardware, dingbat and mGBA all
+identical. `hdmageo.s` adds a second timer frozen by the H-blank DMA's own
+write, so the grant is reported relative to the flag with nothing absolute in
+it; over nine runs hardware's window is −11..−5 cycles and **dingbat's bounds
+are the same −11..−5**, with two runs coming back byte-identical to the
+console. mGBA's window is −12..−6, shifted.
+
+The row wants the H-blank DMA 7 to 10 cycles later than we put it. Hardware
+says it is not. Each of the three constants that would close it is now
+refuted on its own: `HBLANK_DMA_REQUEST_DELAY` and `HBLANK_FLAG_DELAY` by
+`hdmageo.s` and by the six `H-blank bit start Flip` rows respectively, and a
+grant deferral by being provably inert here (flat across caps 4 to 64,
+section 16). Closing this row now would mean moving something hardware says
+is right.
+
+The seven-cycle "anchor discrepancy" that this file and `hdmastamp.s` carried
+as the leading explanation was itself an artifact — the payload's polling
+loop taking one extra iteration at two of seven phases — and is withdrawn.
+
 ## Video tests (interactive only)
 
 The Video suite has no automated verdict and the auto-run ROM the runner

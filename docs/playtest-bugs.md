@@ -1359,6 +1359,13 @@ this page is trustworthy without the control, including in earlier sections.
 
 ### The seven cycles are a new lead, and not a DMA one
 
+**Withdrawn 2026-09-18, see section 17.** The seven cycles were this
+page's own polling loop taking one extra iteration at two of seven
+phases, not anything in the console. `linegeo.s` measures the same
+quantities without an anchor and finds the line, the flag and the
+V-blank edge all correct. What is below is left as written because the
+reasoning still holds; only its premise was wrong.
+
 Something with no DMA in it -- the interval from the timer start just after
 the VCOUNT 158-to-159 edge to the cycle the CPU's poll loop first sees the
 H-blank flag -- is seven cycles shorter here than on hardware. That is the
@@ -1471,3 +1478,101 @@ from it should be believed. With the method validated by C-A, B-A pins the
 flag against the line for the first time, and the seven cycles either survive
 or dissolve. The same run can stamp the V-blank flag against VCOUNT 160 and
 so pin the other term of every difference this file has relied on.
+
+
+## 17. The anchor was the artifact: `linegeo.s` and `hdmageo.s`, 2026-09-18
+
+Sections 15 and 16 both ended pointing at the same unexplained seven cycles,
+and section 16 said no local sweep could settle the sign. Two anchor-free
+payloads settle it. Both start one timer, once, never stop it, and report
+only differences between reads of it, so the timer's enable latency is common
+to every stamp and cancels exactly.
+
+### `linegeo.s`: the line is right, and the seven cycles were quantisation
+
+Four stamps on one free-running timer: A at the VCOUNT 158->159 edge, B when
+the H-blank flag of line 159 is first seen, C at the VCOUNT 159->160 edge, E
+when the V-blank flag is first seen. Two runs on an AGB SP, `k` swept 0..31.
+
+| | hardware | dingbat | mGBA |
+|---|---|---|---|
+| C - A (the scanline) | 1227, 1234 | 1227, 1234 | 1227, 1234 |
+| B - A (the H-blank flag) | 1002, 1009 | 1002, 1009 | 1002, 1009 |
+| E - C (V-blank flag vs VCOUNT) | 8 | 8 | 8 |
+
+**Identical, and 1232 sits inside the C - A bracket.** The scanline length,
+the H-blank flag's position in it, and the V-blank flag against the VCOUNT
+edge are all correct here, and correct in mGBA too.
+
+The only column that disagrees is `A` itself -- the one value on the page
+that is anchored, and labelled as such in the source. It differs by exactly
+7, one iteration of the polling loop, and only at two of the seven poll
+phases. **That is the whole of section 15's "1006 versus 999": its control
+sat on one of those two phases.** Quantisation, not physics. The seven-cycle
+lead is closed, and closed as an artifact of the instrument.
+
+A caveat the payload teaches: C - A is *not* pinned at 1232 even though
+1232 = 7 x 176 and both VCOUNT polls are the same seven-cycle loop. The
+H-blank flag poll runs between them and restarts the grid at a new phase, so
+C - A brackets the line rather than equalling it. It is still a certainty
+check -- a run that does not bracket 1232 is not measuring a scanline -- but
+a weaker one than it looks.
+
+### `hdmageo.s`: the grant, with no anchor in it
+
+Same construction, plus TM1 started immediately after TM0 and frozen by the
+H-blank DMA's own write to TM1CNT_H. The skew between the two timer starts is
+two instructions of the same code everywhere, so it is a constant that
+cancels on comparison. **D - B is then the DMA's write relative to the flag
+being seen, with no timer start, no line boundary and nothing absolute in
+it.** Nine runs on an AGB SP, `k` swept 0..13.
+
+| | D - B, pooled over all runs | bounds |
+|---|---|---|
+| hardware | -11, -10, -9, -8, -6, -5 | **-11 .. -5** |
+| dingbat | -11, -8, -6, -5 | **-11 .. -5** |
+| mGBA | -12, -9, -6 | -12 .. -6 |
+
+**The bounds are identical.** Our grant is not late and not early: it lands
+in the same window hardware's does, and on two runs the whole 112-byte page
+came back byte-identical to the console. What it does not do is produce the
+two intermediate values -10 and -9, which hardware reaches at phases the
+sled cannot address -- our response to phase is coarser, which is the same
+thing section 15 saw as a spread of 6 against hardware's 15, restated without
+an anchor. mGBA's window is shifted and one cycle wider on the low side.
+
+Two methodological notes, both learned the hard way here. The console's entry
+phase relative to the video line is **not** controlled -- the monitor invokes
+the payload wherever it likes -- so per-`k` rows move between runs and only
+phase-independent statistics (the value set, the bounds) mean anything. And
+a 32-trial sweep never returns: the monitor allows ten seconds and every
+trial waits out a frame parking on line 158, so `hdmageo.s` runs 14, which is
+two whole periods of the seven-cycle grid.
+
+### What this settles about `DMA Prefetch Break`
+
+Everything the row depends on is now measured against hardware and correct:
+the scanline length, the H-blank flag's position, the V-blank flag, and the
+H-blank DMA grant's window relative to that flag. The row wants the DMA 7 to
+10 cycles later than we put it (section 16). **Hardware says it is not.**
+
+So the row is not a bug we have failed to find. It is the phase coincidence
+the reachability analysis in section 14 described: a 36-cycle loop against a
+once-a-line DMA, whose reported value is the read count at which the two
+first coincide, and which moves by whole scanlines under sub-cycle changes
+anywhere. `docs/gbatek-upstream.md` section 3 carries the suggestion to its
+author. Three of the constants that would close it -- `HBLANK_FLAG_DELAY`,
+`HBLANK_DMA_REQUEST_DELAY`, and a grant deferral -- are now each refuted
+individually by a hardware payload or by the rest of the suite.
+
+**This row should stay red.** Closing it now would mean moving something that
+hardware says is right, and the next section of this file would be about
+taking it back out.
+
+### What is left, and it is small
+
+Our phase response is coarser than the console's: 4 values where hardware
+shows 6, inside the same bounds. That is worth modelling for its own sake --
+it is the grant resolving against a phase finer than instruction boundaries
+-- but it is not worth fitting to this row, and `hdmageo.s` is the page that
+should judge any attempt at it.

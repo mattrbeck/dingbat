@@ -82,18 +82,43 @@ nothing. Several such ramps interleave because the loop holds more than one
 bus access, and the largest wait observed is 15, the length of the longest
 access in that loop.
 
+### 1.4 The scanline, and where the H-blank DMA's write lands in it
+
+Both from payloads that start one timer, never stop it, and report only
+differences between reads of it, so the timer's enable latency is common to
+every stamp and cancels. That matters more than it sounds: the same
+measurements taken against a timer started inside the payload disagreed with
+hardware by seven cycles, and those seven cycles turned out to be the
+payload's own polling loop landing one iteration later at two phases in
+seven. An absolute cycle count from a probe of this kind is worth little.
+
+`linegeo.s` stamps the VCOUNT 158→159 edge, the H-blank flag of line 159, the
+VCOUNT 159→160 edge and the V-blank flag, all on one free-running timer. On
+an AGB SP the scanline comes back bracketing **1232**, the H-blank flag
+bracketing **1006**, and the V-blank flag simultaneous with the VCOUNT 160
+edge to within the poll's resolution. GBATEK's numbers for all three are
+confirmed — a corroboration, not a correction, and worth having because none
+of the three had been measured here before.
+
+`hdmageo.s` adds a second timer started immediately after the first and
+frozen by the H-blank DMA's own write to its control register, so the DMA's
+write is reported relative to the flag with nothing absolute in it. Over nine
+runs the write lands **5 to 11 cycles before a polling loop first observes
+the flag**: the grant is already committed by the time software can see the
+flag at all. That is worth stating because a model that grants the DMA when
+software could first notice the flag is consistently late. The bound is what
+is solid; the distribution inside it is finer than the payload can address.
+
 ## 2. Not settled — hardware needed first
 
 1. **BIOS-region Thumb open bus** (§1.1). No payload can execute from BIOS, so
    the one remaining row of that table is unmeasured. It would need a BIOS
    entry point that returns to caller-controlled code mid-fetch.
-2. **A seven-cycle anchor discrepancy with no DMA in it.** `hdmastamp.s`'s
-   control row times the interval from a timer start just after the VCOUNT
-   158→159 edge to the cycle a poll loop first sees the H-blank flag. Hardware
-   reads 1006 where dingbat reads 999. That is line geometry, timer enable
-   latency, or the poll's own timing, and separating the three needs a payload
-   that stamps each independently. Until it is understood, no *absolute* cycle
-   claim anchored on this page should be published — see §3.
+2. **The grant's fine phase response.** §1.4 pins the window the H-blank
+   grant lands in, and its bounds agree with hardware exactly. Inside those
+   bounds the console reaches two phases we do not, so something resolves the
+   grant against a phase finer than an instruction boundary. Unmodelled here,
+   and not yet characterised well enough to state as a correction.
 
 ## 3. A note on method, and one for the mGBA suite
 

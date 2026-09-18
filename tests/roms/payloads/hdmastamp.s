@@ -40,6 +40,13 @@
 @   anchor moved and the DMA rows say nothing about the DMA.
 @ +136 (b) marker 55
 @ 0xFFFFFFFF in any slot means a DMA never fired there.
+@
+@ NOTE 2026-09-18: the control at +140 did its job and then misled us. It
+@ reads 1006 on hardware against 999 here, and those seven cycles are this
+@ page's own VCOUNT poll taking one extra iteration at two phases in seven,
+@ not a property of the console. linegeo.s measures the line with no anchor
+@ at all and finds the geometry exact. Treat every absolute number here as
+@ anchored; the deferral SHAPE is what survives.
     .arm
     .text
     .global _start
