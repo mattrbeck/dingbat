@@ -951,3 +951,62 @@ after. Nothing changed here -- this is the PSG thread's to land, the unstable
 rows should be settled first from a cartridge or with a rate-matched poll
 delay, and a trigger that enables for one poll is audible where a refused one
 is not.
+
+### hdmamul.s -- and the grant rule, settled
+
+hdmasweep's companion, and the page that turns its odd shape into a rule. It
+is hdmasweep with one line changed: the poll loop's `ldr r0, [r3]` from the
+gamepak becomes `mul r0, r3, r6` on two large operands, which on an ARM7TDMI
+is four internal cycles with the bus idle. Its own decision table:
+
+* both pages sawtooth -> the grant waits for the instruction, bus or not
+* the load defers, the multiply is flat -> it waits for the **bus cycle**
+* both flat -> the grant is PPU-timed and neither wait exists
+
+Hardware is **227 on every k, in all six runs, with no variation at all** --
+the flattest row this rig has produced. Against hdmasweep's loads, which lose
+a stable 11 cycles at k = 6 and tip run to run at k = 0-3, that is the middle
+line:
+
+**the H-blank DMA grant waits for the CPU's bus access in flight, and waits
+for nothing when the CPU is busy with no bus access.** An internal cycle
+never delays it. That is the rule the two pages were written to decide, and
+it is now decided.
+
+It also rules out the reading that hdmasweep's non-sawtooth shape means no
+deferral exists: if the grant ignored the bus, the load page would be flat
+too, and it is not.
+
+The same 1-cycle gap shows here for the third time -- hardware 227, dingbat
+226, on a loop that touches no cartridge at all. Three independent loops (ROM
+load, IWRAM load, multiply) all put dingbat exactly one cycle below hardware
+on this measurement, which makes a constant offset in one of the two DMAs far
+more likely than anything phase-dependent. p50 pinned the H-blank request
+against absolute stamps, so the V-blank side is the place to look. Not
+changed here: one page should not move a constant that three games and the
+suite's last red row sit on.
+
+mGBA's rows on this page wander between 0xE0 and 0xE3 with no pattern, as
+they did on hdmasweep.
+
+### swiedge.s -- the HLE BIOS, checked against Nintendo's
+
+dingbat ships an HLE BIOS, so every arithmetic SWI is our code standing in
+for Nintendo's, and until now it had only ever been checked against itself.
+The console in the rig runs the real thing. Same payload, same inputs, one
+side executing the actual BIOS.
+
+**0 of 96 bytes disagree.** All 24 answers match on hardware, dingbat and
+mGBA, and they are deliberately the cases where an implementation has to have
+made a decision rather than the ones any implementation gets right:
+
+* `GetBiosChecksum` = `BAAE187F`, the AGB BIOS
+* Div 1/0 and -1/0 -- the sign of the numerator is kept
+* Div `0x80000000 / -1`, the one quotient that overflows
+* Div -7/2 -- the rounding direction and the sign of the remainder
+* Sqrt at 0, 1, `0x3FFFFFFF` and `0xFFFFFFFF`, both ends of the range
+* ArcTan2 at the origin, on all four axes and on the diagonal
+
+So the HLE arithmetic is right, not merely self-consistent. The open HLE
+question is unaffected and remains what it was: the *cycle costs* of these
+bodies, where Sqrt is up to 3x off (docs/hwprobe-questions.md, SWITIME).
