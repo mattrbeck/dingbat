@@ -1153,28 +1153,46 @@ page, so they may shift between consoles or builds even when the model is
 identical. **Read the differences, not the absolute numbers**; the page
 CRC is not a gate.
 
-**dingbat predicts** page CRC **D459**:
+**What hardware said** (AGS, `expected/agb-sp-6.txt`): the answer is
+**-14**, bracketed by `+4` to **[-14, +3]** — the write lands at the flag,
+not ~60 cycles before it. Stamp for stamp against the prediction below, the
+H-blank flag and the V-blank DMA agreed with dingbat to within a cycle while
+the H-blank DMA's write came **48 cycles later**, identically on two lines
+with zero spread. That put the grant at cycle 1008-1009 and is what landed
+in `78d2a5631`.
+
+**dingbat predicted, before that fix** — page CRC **D459**:
 
 ```
 B7 03 F4 03  E7 03 FF FF  02 00 0A 00  C5 04 D4 04
 C1 04 B4 03  F4 03 B6 03  F8 03 B8 03  EB 03 06 32
 ```
 
-The answer there is `(0x03B7 - 1) - 0x03F4` = **-62**, bracketed by `+4`
-to **[-62, -49]** — firmly negative, the cycle-960 edge, which is the
-hypothesis on trial. The DMA's own request-to-write latency is
-`+10 - +8` = **8** cycles, the flag bracket is **13** cycles wide and the
-answer moved **6** cycles over eight trials. The other three answers are
--65 (line 50), -67 (ROM load) and -52 (ROM load at 8 waits) — all inside
-one bracket of each other, so in dingbat the grant depends on neither the
-line nor what the CPU's bus is doing, which is what a scheduler event
-fired off the PPU should look like. `+16` reads `0x04C1` = 1217, a
-1232-cycle line less the ROM-polled anchor's offset.
+The answer there was `(0x03B7 - 1) - 0x03F4` = **-62**, bracketed to
+**[-62, -49]** — firmly negative, the cycle-960 edge, which was the
+hypothesis on trial. Its other three answers were -65 (line 50), -67 (ROM
+load) and -52 (ROM load at 8 waits), all inside one bracket of each other,
+so the grant depended on neither the line nor the CPU's bus — what a
+scheduler event fired off the PPU looks like.
 
-`ALL` for the v9b build (with page 51) is **9C6C** (`-auto`, HLE BIOS); pages 0-49 are
-byte-identical to the v8 build under the same emulator, verified by
-capturing both and diffing every per-page CRC. The page's own absolute
-stamps drift a few cycles between builds of this ROM, which is the
+**dingbat now** — page CRC **E217**, with the H-blank request at flag + 2:
+
+```
+E7 03 F4 03  E3 03 FF FF  02 00 0A 00  C5 04 D4 04
+C1 04 E4 03  F4 03 E6 03  F8 03 E8 03  06 04 06 32
+```
+
+`+0`, `+4`, `+18` and `+28` now reproduce the hardware column exactly. What
+is left is step 3's signature: `+10` (an immediate DMA writes one cycle
+earlier on hardware), `+12` (the V-blank DMA one cycle later), `+22`/`+26`
+(hardware's write moves +5 and +2 when the CPU is inside a ROM access,
+dingbat's does not) and `+30` (hardware repeats with zero spread, dingbat
+varies by 6). `+16` reads `0x04C1` = 1217, a 1232-cycle line less the
+ROM-polled anchor's offset.
+
+Pages 0-49 are byte-identical to the v8 build under the same emulator,
+verified by capturing both and diffing every per-page CRC. The page's own
+absolute stamps drift a few cycles between builds of this ROM, which is the
 boot-phase sensitivity above — the answers do not.
 
 If the DMA instead rides the latched flag, the write lands ~8 cycles after
@@ -1247,12 +1265,17 @@ unmistakable against "lived" (~17 600).
   already set, a game's own master-on is a 1→1 write, not 0→1, and the
   effect may never fire in practice.
 
-**dingbat predicts** page CRC **747B**:
+**dingbat predicts** page CRC **FC8E**:
 
 ```
-DD 48 BA 44  B8 44 BB 44  BA 44 18 07  1A 47 BB 44
+DD 48 BA 44  B9 44 BA 44  BA 44 18 07  1A 47 BB 44
 D9 4B D8 4B  00 81 82 88  FF FF FF FF  02 00 00 33
 ```
+
+(Captured on main at `4c50c9c9e`. The pre-`78d2a5631` build read CRC
+**747B**, differing by one poll each at `+4` and `+6` — the per-row
+sequencer phase noise this page's own text warns about, not a change of
+kind.)
 
 Every channel lives: `+0` 18653 polls, `+2`/`+4`/`+6` about 17594 each (the
 spread is sequencer phase between trials, not a difference in kind), and
@@ -1373,6 +1396,13 @@ the CPU is doing. 226 is the V-blank request at 1232 less the H-blank request
 at 1008 (flag + 2, page 50), plus the fixed skew between the two timers'
 starts.
 
-Both predictions were captured with the `dma-flag-grant` build (H-blank DMA
-requested at flag + 2); `ALL` there is **1521** (`-auto`, HLE BIOS). Pages
-0-51 are byte-identical to the v9b ROM under the same emulator build.
+Both predictions were captured on main with the H-blank request at flag + 2
+and the open-bus window of `55c79b9fb`; `ALL` there is **1CA7** (`-auto`,
+HLE BIOS), and pages 52/53 read the same CRCs (**F0A4**, **1BA6**) as they
+did before those two commits. Pages 0-51 are byte-identical to the v9b ROM
+under the same emulator build.
+
+The poll counts on page 52, like page 51's, assume this loop's
+cartridge-resident rate. Run from RAM over the link rig the fall byte
+saturates rather than wrapping, so a healthy tone reads `00 FF`; `+30` is
+what says a row never expired.
