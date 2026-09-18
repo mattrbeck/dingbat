@@ -52,6 +52,9 @@ type
     # H-blank DMA request, raised off the DISPSTAT H-blank flag
     # (HBLANK_DMA_REQUEST_DELAY in gba/ppu.nim).
     etHDMARequest
+    # V-blank DMA request, raised off the V-blank flag
+    # (VBLANK_DMA_REQUEST_DELAY in gba/ppu.nim).
+    etVDMARequest
 
   Event* = object
     cycles*: CycleCount

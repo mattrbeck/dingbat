@@ -1182,20 +1182,64 @@ Move the H-blank DMA request later and the row closes. At
 shipped delay of 2 is this one flipping FAIL to PASS. A four-wide plateau with
 zero collateral is not a knife-edge fit.
 
-But 9 is refuted by hardware, and the payloads say so precisely:
+That constant is refuted -- but **not by hdmamul, and the first version of
+this section said otherwise**. See "what hdmamul can and cannot see" below.
+The payload rows:
 
 | | hardware | dingbat @ delay 2 | dingbat @ delay 9 |
 |---|---|---|---|
 | hdmamul (multiply loop, bus idle) | **227 on all fourteen** | 226 flat | **219 flat** |
 | hdmasweep (32-bit ROM load, 8 waits) | 219 219 218 216 227 227 216 227 227 227 227 227 227 227 | 226 flat | 219 flat |
 
-On an idle bus hardware wants the grant one cycle **earlier** than dingbat has
-it (227 against 226, so the request belongs at flag+1); the suite's loop wants
-it about seven cycles **later**. One constant cannot serve both, and that is
-the whole point -- the difference between them is the deferral hdmasweep
-measures and dingbat does not model: **the grant waits for the CPU's bus
-access in flight, and for nothing else.** An idle bus defers nothing; the
-Break loop's gamepak accesses defer several cycles.
+### What hdmamul can and cannot see
+
+hdmamul's stub arms DMA0 on H-blank to zero `TM0CNT_H` and DMA1 on V-blank to
+zero `TM1CNT_H`, and reports `TM1 - TM0`. **It is a difference between the two
+DMAs' writes, and pins neither absolutely.** So it is blind to a common-mode
+offset: move both grants by the same amount and it cannot tell. Measured,
+moving both together (H-blank at 2+k, V-blank at k):
+
+| H / V request | suite | `Break` | hdmamul, all 14 rows |
+|---|---|---|---|
+| 2 / 0 (shipped before this) | 6997/1 | `0x10002540` | 226 |
+| 4 / 2 | 6997/1 | `0x100024B8` | 226 |
+| 6 / 4 | 6997/1 | `0x100024B8` | 226 |
+| 8 / 6 | 6997/1 | `0x10002B1C` | 226 |
+| **9 / 7** | **6998/0** | **PASS** | 226 |
+| 10 / 8 | 6998/0 | PASS | 226 |
+
+hdmamul sits at 226 across the whole range. Reading "hardware 227, dingbat
+226" as "the H-blank request belongs at flag+1" attributed a differential
+measurement to one of its two terms, which it does not license.
+
+What does refute the common-mode shift is **p50 HDMAPHASE**, whose stamps are
+absolute against a shared anchor: the V-blank DMA's write is hardware 1222
+against dingbat 1221, and both flag stamps agree to the cycle. A common-mode
++7 would put that write seven cycles late, not one.
+
+### The missing cycle was the V-blank DMA's, and it is now fixed
+
+p50 says dingbat's V-blank DMA write is one cycle early. hdmamul and hdmasweep
+say the V-minus-H difference is one low, on every row of both sweeps. That is
+the same cycle seen absolutely and differentially. Raising the V-blank DMA's
+request to flag+1 (`VBLANK_DMA_REQUEST_DELAY`, mirroring the H-blank's flag+2)
+makes both payloads match hardware exactly:
+
+| | hardware | dingbat before | dingbat now |
+|---|---|---|---|
+| hdmamul, all 14 rows | 227 | 226 | **227** |
+| hdmasweep, undeferred rows and the IWRAM control | 227 | 226 | **227** |
+
+The suite is row-identical and the 1219-row runner has zero changed rows. What
+is left on hdmasweep is only the deferral: hardware drops to 216-219 at the k
+where the request lands inside a gamepak access, and dingbat is still flat.
+
+So one constant cannot serve both pages, and that is the whole point -- the
+difference is the deferral hdmasweep measures and dingbat does not model:
+**the grant waits for the CPU's bus access in flight, and for nothing else.**
+An idle bus defers nothing; the Break loop's gamepak accesses defer several
+cycles. p50 measured that directly too: the H-blank DMA's write moves from 999
+to 1004 with the CPU loading from ROM, against zero spread on IWRAM.
 
 The arithmetic closes. Instrumenting the grant in that loop: the request lands
 with the in-flight access ending 1 or 3 cycles later, the CPU-to-DMA hand-off

@@ -73,7 +73,8 @@ static:
   doAssert ord(etCameraDone) == 21
   doAssert ord(etGbLycEdge) == 22
   doAssert ord(etHDMARequest) == 23
-  doAssert ord(high(EventType)) == 23,
+  doAssert ord(etVDMARequest) == 24
+  doAssert ord(high(EventType)) == 24,
     "an EventType was appended without pinning its ordinal here"
 
   # Every other enum whose ordinal (or `set` bit position) reaches a state

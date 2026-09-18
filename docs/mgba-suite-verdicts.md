@@ -112,11 +112,15 @@ other returns one of the same three.
 
 The lever is the grant. At `-d:HBLANK_DMA_REQUEST_DELAY=9` (through 12) the
 whole suite is green, 6998/6998, and that row is the only line in all 6998
-that changes. The constant itself is refuted -- hdmamul measures 227 on an
-idle bus where dingbat gives 226, so the request belongs at flag+1, not later
--- but the gap between "flag+1 on an idle bus" and "about flag+9 in this loop"
-is exactly the deferral hdmasweep measures and dingbat does not model: the
-grant waits for the CPU's bus access in flight, and for nothing else. A
+that changes. The constant itself is refuted, but by p50 HDMAPHASE and not by
+hdmamul: hdmamul reports the V-blank DMA's write minus the H-blank DMA's and
+is blind to a common-mode shift (moving both grants together leaves it at 226
+across the whole range while this row goes green), whereas p50's stamps are
+absolute and put the V-blank write one cycle from dingbat's, not seven. The
+gap between a hardware-pinned grant and the flag+9 this row wants is the
+deferral hdmasweep measures and dingbat does not model: the grant waits for
+the CPU's bus access in flight, and for nothing else; p50 timed it at +5 with
+the CPU loading from ROM. A
 prototype of that deferral makes hdmasweep sawtooth for the first time while
 hdmamul stays flat; it is not calibrated and was not shipped. So closing this
 row still needs sub-instruction dispatch resolution, as this file said -- but

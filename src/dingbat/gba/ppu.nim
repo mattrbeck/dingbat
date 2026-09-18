@@ -156,6 +156,15 @@ const HBLANK_IRQ_SYNC_DELAY {.intdefine.} = 6
 # start delay, which points at the grant waiting for the CPU bus cycle in
 # flight rather than at a constant.
 const HBLANK_DMA_REQUEST_DELAY {.intdefine.} = 2
+# The V-blank DMA's request is raised one cycle after the flag, as the
+# H-blank's is raised two after its own. Hardware: p50 HDMAPHASE on an AGB SP
+# timed the V-blank DMA's write one cycle later than dingbat's against a
+# shared anchor (1222 vs 1221) while both flag stamps agreed to the cycle, and
+# hdmamul.s/hdmasweep.s -- which report the V-blank write minus the H-blank
+# write -- read 226 where hardware reads 227 on every row of both sweeps. The
+# same missing cycle, seen absolutely and differentially; at +1 both payloads
+# match hardware exactly.
+const VBLANK_DMA_REQUEST_DELAY {.intdefine.} = 1
 
 proc start_hblank*(ppu: PPU) =
   ppu.gba.scheduler.schedule(272, etPPUEndHBlank)
@@ -208,7 +217,10 @@ proc end_hblank*(ppu: PPU) =
         hdma_grants[ch] = 0
       if line.len > 20: stderr.writeLine(line)
       hdma_frame += 1
-    ppu.gba.dma.trigger_vdma()
+    when VBLANK_DMA_REQUEST_DELAY > 0:
+      ppu.gba.scheduler.schedule(VBLANK_DMA_REQUEST_DELAY, etVDMARequest)
+    else:
+      ppu.gba.dma.trigger_vdma()
     if ppu.dispstat.vblank_irq_enable:
       ppu.gba.interrupts.reg_if.vblank = true
       raised_if = true
