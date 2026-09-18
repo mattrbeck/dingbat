@@ -42,8 +42,12 @@ CMD_READ = 0x52443E3E
 CMD_CALL = 0x43414C4C
 CMD_GETR = 0x47455452
 CMD_BOOT = 0x424F4F54
+CMD_ABRT = 0x41425254
 ANS_PONG = 0x504F4E47
 ANS_DONE = 0x444F4E45
+# What a streaming command can be asked for in one go; the console caps this
+# too, and a desync costs one transfer per word to walk off.
+MAX_WORDS = 1024
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MONITOR_IMAGE = os.path.join(REPO, 'tests', 'roms', 'gbamon.mb.gba')
@@ -64,9 +68,12 @@ class Monitor:
         self.link.open_link()
         # The first transfer or two after the link is re-armed catch the
         # console mid-cycle and read back noise or an idle line; throw them
-        # away so the first real command is not the one that gets lost.
+        # away so the first real command is not the one that gets lost, then
+        # make sure whatever was there before left the console at its command
+        # loop rather than half way through a transfer.
         for _ in range(4):
             self.link.transfer32(0)
+        self.resync()
 
     def close(self):
         self.link.close()
@@ -94,7 +101,21 @@ class Monitor:
         self._x(probe)
         return self._x() == probe
 
+    def resync(self, tries=MAX_WORDS + 8):
+        """Walk a half-finished command off the wire. The adapter drops a
+        transfer now and then, which slides every following word one place
+        along; without this the session is lost to it."""
+        for _ in range(tries):
+            self._x(CMD_ABRT)
+            if self._x(CMD_ABRT) == CMD_ABRT:
+                return True         # echoed, so it is back at the command loop
+        return False
+
     def write_mem(self, address, words):
+        if len(words) > MAX_WORDS:
+            for i in range(0, len(words), MAX_WORDS):
+                self.write_mem(address + i * 4, words[i:i + MAX_WORDS])
+            return
         self._x(CMD_WRITE)
         self._x(address)
         self._x(len(words))
@@ -102,6 +123,11 @@ class Monitor:
             self._x(w)
 
     def read_mem(self, address, count):
+        if count > MAX_WORDS:
+            out = []
+            for i in range(0, count, MAX_WORDS):
+                out += self.read_mem(address + i * 4, min(MAX_WORDS, count - i))
+            return out
         self._x(CMD_READ)
         self._x(address)
         self._x(count)
@@ -128,18 +154,20 @@ class Monitor:
         self._x(CMD_BOOT)
         self._x()
 
-    def run_payload(self, code, arg=0, address=PAYLOAD_ADDRESS):
-        """Upload a blob of ARM code, call it, return r0."""
+    def run_payload(self, code, arg=0, address=PAYLOAD_ADDRESS, tries=3):
+        """Upload a blob of ARM code, call it, return r0. Reads the code back
+        before running it: a dropped transfer would otherwise be executed."""
         data = bytearray(code)
         while len(data) % 4:
             data.append(0)
         words = [int.from_bytes(data[i:i + 4], 'little')
                  for i in range(0, len(data), 4)]
-        self.write_mem(address, words)
-        back = self.read_mem(address, len(words))
-        if back != words:
-            raise MonitorError('the payload did not read back as written')
-        return self.call(address, arg)
+        for attempt in range(tries):
+            self.write_mem(address, words)
+            if self.read_mem(address, len(words)) == words:
+                return self.call(address, arg)
+            self.resync()
+        raise MonitorError('the payload would not upload intact')
 
 
 def assemble(source_path, out_dir=None):
