@@ -49,6 +49,10 @@ BATCH_WORDS = 14
 DEFAULT_DEV = os.environ.get('GBLINK_DEV', '/dev/cu.usbmodem1102')
 
 
+class LinkDead(RuntimeError):
+    """The adapter is talking but the link to the console is not up."""
+
+
 class GBLink:
     def __init__(self, dev=DEFAULT_DEV):
         self.fd = os.open(dev, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
@@ -142,14 +146,45 @@ class GBLink:
     def led(self, r, g, b, on=True):
         self.command(CMD_LED, r, g, b, 1 if on else 0)
 
-    def open_link(self):
-        """3.3 V, raw link relay, one 32-bit transfer at a time."""
-        self.set_voltage_3v3()
-        time.sleep(0.15)
-        self.set_mode(MODE_LINK)
-        time.sleep(0.2)
-        self.set_timing(36, 4)
-        time.sleep(0.05)
+    def open_link(self, tries=40):
+        """3.3 V, raw link relay, one 32-bit transfer at a time.
+
+        Bringing the link up is unreliable: measured over 25 cold opens, only
+        3 came up. What makes it tractable is that the failure is entirely in
+        initialisation -- an open that comes up is then solid, every transfer
+        clean -- so the fix is to check and re-issue rather than to slow
+        anything down. A dead link reads FFFFFFFF forever; a live one answers
+        something else whatever state the console is in (0x7202 from the
+        multiboot wait loop, an echo from a running monitor), so one benign
+        probe word tells the two apart without knowing which we are talking
+        to. Before this, a dead link looked exactly like an absent console,
+        which cost a morning of power-cycling a console that was answering
+        perfectly well.
+        """
+        for attempt in range(tries):
+            self.set_voltage_3v3()
+            time.sleep(0.15)
+            self.set_mode(MODE_LINK)
+            time.sleep(0.2)
+            self.drain_status()
+            self.set_timing(36, 4)
+            time.sleep(0.05)
+            # 0x6202 is the multiboot poll and is not a monitor command, so it
+            # is answered or echoed but never acted on
+            if any(self.transfer32(0x6202) != 0xFFFFFFFF for _ in range(4)):
+                return attempt
+        raise LinkDead(f'the link would not come up in {tries} attempts; '
+                       'the console reads FFFFFFFF, which is a dead link and '
+                       'not necessarily an absent console')
+
+    def drain_status(self, timeout=0.3):
+        """Read off whatever the adapter has queued on the status channel."""
+        out = []
+        while True:
+            m = self.read_channel(CH_STATUS, timeout=timeout)
+            if m is None:
+                return out
+            out.append(m)
 
     # --- link transfers ---
     def transfer32(self, value, timeout=2.0):

@@ -651,3 +651,65 @@ the ROM. Pointed at the library it will create a `.sav` inside
 playtest harness symlinks each ROM into its own environment directory for
 exactly this reason; anything else driving `dingbat_test` over the library
 should do the same, or pass `--nosave`.
+
+
+## 10. The hardware run, 2026-09-18
+
+All six queued payloads, on the SP over the link cable. These belong in
+docs/hwprobe-results-agb.md with the other sessions; they are here because
+that file is another branch's and this is where the payloads were written.
+
+**waitprobe -- an empty cartridge slot honours WAITCNT.** 256 loads from
+0x08000000, hardware with no cartridge against the emulators with one:
+
+| WAITCNT | 0x0000 | 0x0004 | 0x0008 | 0x000C | 0x10000 | 0x1000C |
+|---|---|---|---|---|---|---|
+| hardware | 3588 | 3332 | 3076 | 4612 | 2819 | 3843 |
+| both emulators | 3588 | 3332 | 3076 | 4612 | 2819 | 3843 |
+
+Identical to the digit, and 4612 - 3588 = 1024 exactly as predicted from
+N + S per load. Wait states are the memory controller's, not the
+cartridge's, and the rig can measure them with an empty slot -- which is
+what licenses hdmasweep's ROM rows below.
+
+**hdmasweep and hdmamul -- the DMA grant waits for the bus cycle.** Fourteen
+rows each, sweeping where in the CPU's access the H-blank request lands:
+
+| | rows |
+|---|---|
+| hdmasweep (32-bit ROM load, 8 waits), hardware | 219 219 218 216 227 227 216 227 227 227 227 227 227 227 |
+| hdmasweep, dingbat | 226 on all fourteen |
+| hdmamul (four internal cycles, bus idle), hardware | **227 on all fourteen** |
+| hdmamul, dingbat | 226 on all fourteen |
+
+The load page varies and the multiply page is flat, so the grant defers to
+the CPU's **bus cycle** in flight and not to the instruction: a request
+landing inside a multiply waits for nothing. dingbat models no deferral at
+all, and is also one cycle off the no-deferral baseline (226 against 227).
+
+**swiedge -- the HLE BIOS arithmetic is exactly right.** All 24 answers
+byte-identical across hardware, dingbat and mGBA: GetBiosChecksum
+0xBAAE187F, Div by zero, 0x80000000 / -1, Sqrt at both ends of its range,
+ArcTan2 on all four axes and at the origin. dingbat replaces these calls
+with its own code and gets every edge case the real BIOS gives.
+
+**psgfirst and psgwhy** are the sound-channel pages; their rows are in the
+message trail to the session that owns that model, and psgwhy disagrees with
+both emulators at five rows. Two worth naming: at f = 0x7FF with NR10 = 0x01
+hardware's channel rises and then dies at once where both emulators never
+start it, and with ch2 triggered first hardware never starts ch1 where both
+emulators run it normally.
+
+### The link would not come up, and that is not an absent console
+
+Twenty-five cold opens handshook **three times**; the other twenty-two read
+`FFFFFFFF` on every transfer, which is indistinguishable from a console that
+is switched off. The console was power-cycled twice and the adapter replugged
+before the fault turned out to be in `open_link`.
+
+The failure is entirely in initialisation -- an open that comes up is then
+solid, every transfer clean -- so `open_link` now probes with a benign word
+(0x6202, answered in the multiboot loop and echoed by a running monitor, so
+it works whatever state the console is in) and re-issues the whole sequence
+until the link answers, up to 40 attempts. A dead link and an absent console
+are no longer the same symptom.
