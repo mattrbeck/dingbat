@@ -393,6 +393,15 @@ mechanism docs/hwprobe-questions.md is still asking about. (The source
 address and count are only legible in mGBA's dump, since dingbat returns
 open bus for the write-only DMA registers.)
 
+**The grant count is not the problem.** A per-frame H-blank grant census
+(the DMA-phases work's `-d:dmacount`, run here on this branch) gives DMA0
+**exactly 160 grants on every one of 536 frames**, with the source pointer
+reading 0x0200679C at every V-blank against SAD 0x0200651C -- a difference
+of 0x280, which is exactly 160 grants of two halfwords. The table is
+consumed once per frame, completely, with no drift to accumulate. So the
+difference is in *where in each line* the write lands, not how many land,
+which puts it behind the same hardware column as everything else.
+
 The obvious form of that -- a line early or late -- does not fit either:
 comparing dingbat's row y against the reference's rows y+/-1 and y+/-2
 improves only 6 of the 160 differing rows, and none of them to zero. What
@@ -440,3 +449,34 @@ the same picture to the eye and to three decimal places of matching pixels.
 
 Which leaves Yu-Gi-Oh and Donkey Kong Country 2 as the two worth a person's
 time, and they are the two written up above.
+
+
+### The shape the strong flags share
+
+Three of the four strongest flags are the same picture at different
+addresses: an element that animates continuously, drawn by dingbat at a
+phase that neither reference ever draws in 2,400 frames, while the two
+references agree with each other exactly.
+
+| game | the animating thing | witnessed |
+|---|---|---|
+| Yu-Gi-Oh! The Eternal Duelist Soul | the scrolling grid behind the title | 1659/1813 |
+| Kaeru B Back (J) | the gears turning behind the logo | 1360/1877 |
+| Donkey Kong Country 2 (E) | the per-line parallax scroll | 207/208 |
+
+In each the static parts -- logo, text, sprites -- are identical in all
+three emulators, and only the moving thing differs. That is worth saying
+plainly because of what it rules out: a renderer that drew a tile or a
+colour wrong would not restrict itself to the animating element, and a
+pure timing offset would put dingbat's frames somewhere in a reference's
+run, where none of them appear. What fits all three is the *rate* at which
+something advances -- a counter driven off a timer, an IRQ or the cycle
+cost of the code that updates it -- being slightly different in dingbat,
+so its phases fall between the ones the references produce rather than
+among them.
+
+That is a hypothesis, not a finding, and it is the same family as section
+7's disagreement about what a block of code costs. It predicts something
+checkable: the games that flag this way should be the ones whose animation
+is driven from code whose timing section 7 disputes. Nobody has checked
+that yet.
