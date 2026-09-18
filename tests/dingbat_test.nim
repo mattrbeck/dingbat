@@ -1789,6 +1789,15 @@ proc main() =
     let emu = new_gba(actual_bios, rom_path, run_bios = false, use_hle = is_hle)
     emu.test_output = test_out
     emu.post_init()
+    if no_save:
+      # new_gba loads <rom>.sav when one exists, so a ROM sitting in a shared
+      # library boots from whatever save is beside it and a run leaves one
+      # behind. --nosave used to cover only the GB path, which made a GBA run
+      # here silently disagree with any harness that symlinks the ROM into a
+      # scratch directory: identical through the logos, then divergent from
+      # the frame the game first reads its save.
+      for i in 0 ..< emu.storage.memory.len: emu.storage.memory[i] = 0
+      emu.storage.save_path = ""
     # Same knob as dingbat_bench: idle-loop fast-forward snaps scheduler.cycles
     # to the next event, so a spin loop's exit cycle depends on what is
     # queued. Off, a real timing error is separable from sampling resolution.

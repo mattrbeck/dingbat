@@ -37,9 +37,15 @@ Options: `--timeout=<frames>`, `--frames=<warmup>`, `--screenshot=<path.ppm>`,
 Four GB flags exist because suites end a run differently; each is opt-in so it cannot
 change how another suite is scored:
 
-- `--nosave` blanks cart RAM and detaches the `.sav`. Battery-backed suite ROMs otherwise
-  drop a save in the shared cache dir and the next run loads it as power-on state (in CI
-  `actions/cache` would carry it between runs).
+- `--nosave` blanks cart RAM and detaches the `.sav`, on GB and GBA alike. Battery-backed
+  suite ROMs otherwise drop a save in the shared cache dir and the next run loads it as
+  power-on state (in CI `actions/cache` would carry it between runs).
+  **Never point the harness straight at a ROM library.** `new_gba` loads `<rom>.sav` when
+  one exists and a saving run writes one back, so a library ROM boots from whatever save
+  sits beside it and the run leaves a file in someone's archive. Symlink the ROM into a
+  scratch directory (what `tools/playtest` and the library sweeps do) or pass `--nosave`.
+  A harness that skips this agrees with one that does not until the frame the game first
+  reads its save, and then diverges completely — which reads like a core bug and is not.
 - `--ed-breakpoint` makes undefined opcode `0xED` end the run with the mooneye verdict
   (mooneye-gb's 2016 magic breakpoint, which wilbertpol's fork targets).
 - `--screen-check` asserts the panel settles (10 unchanged frames within 240 of the
