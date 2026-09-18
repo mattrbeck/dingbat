@@ -137,11 +137,15 @@ proc start_line*(ppu: PPU) =
 #
 # An intdefine because the sweep is the evidence, not the value. Misc "DMA
 # Prefetch Break" reads open bus and never touches DISPSTAT, so it sees only
-# this delay plus HBLANK_DMA_REQUEST_DELAY as a sum: 53..56 here closes it
-# exactly as 9..12 there does. It is not free to move, though -- from 50 up
-# the six "H-blank bit start Flip" rows fail, and those read the flag itself.
-# The suite pins the flag here and asks the grant to move relative to it.
-# docs/playtest-bugs.md section 16 has the sweep and what it rules out.
+# this delay plus HBLANK_DMA_REQUEST_DELAY as a sum: 55..58 here closes it
+# exactly as 11..14 there does. It is not free to move, though -- the six
+# "H-blank bit start Flip" rows want 43..48 and nothing else, and those read
+# the flag itself. The suite pins the flag here and asks the grant to move
+# relative to it. (Those windows were 53..56, 9..12 and up-to-49 until
+# 6964209c6 moved the line IRQ by two cycles, which shifted the Break row a
+# whole line of loop passes. Re-measured in section 20, not section 16's
+# table, which predates that commit.)
+# docs/playtest-bugs.md sections 16 and 20 have the sweeps.
 const HBLANK_FLAG_DELAY {.intdefine.} = 46
 
 # Cycles from the H-blank signal to IRQ recognition; longer than the timers'

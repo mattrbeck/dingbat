@@ -1750,3 +1750,147 @@ measured here at all. Everything reachable that the row depends on -- line
 geometry, flag position, grant window, grant floor, DMA steal -- is now
 measured and correct. What is left is on the other side of a bus this rig
 cannot see, which is what `prefetchbench.gba` on the flashcart is for.
+
+
+## 20. `DMA Prefetch Break`: what the test actually is, 2026-09-18
+
+Sections 14 to 19 worked on this row from the outside, measuring everything
+it depends on that the link rig can reach and finding all of it correct.
+This round read the test's own source instead, and re-swept the knobs against
+the current HEAD. Both changed the picture.
+
+### The baseline had moved and nobody noticed
+
+We report **`0x100025C8`, not `0x10002540`**. Commit `6964209c6`, which fixed
+the line-boundary IRQ, shifted this row by 34 iterations as a side effect.
+The deficit against the expected `0x10002A94` is **307 iterations, not 341**,
+and *section 16's table is stale*: the flag-delay pass window is now 55..58
+where it records 53..56, and the grant window 11..14 where it records 9..12.
+The `H-blank bit start Flip` rows want `HBLANK_FLAG_DELAY` in 43..48.
+
+A lesson worth keeping: a row we have decided to leave red still needs its
+number re-read after every commit that touches timing, or the next session
+reasons from a value that no longer exists. Three sessions' arithmetic in
+this file was done against 2384.
+
+### What the test does
+
+It arms DMA3 for **one** 32-bit word, source and destination both **fixed**
+(so the datum is always the same word), H-blank timing, repeating. Then it
+spins a seven-instruction Thumb loop **in ROM** reading unmapped
+`0x10000000 + 4i`. Open bus there is the Thumb halfword at the load's own
+address + 4 -- the loop's own `ands`, doubled -- and the loop's masked
+compare passes on exactly that, so it spins on its own opcode until an
+H-blank DMA's word displaces it. The reported number is the pointer when
+that happened.
+
+Two things follow that we had wrong. **The test never writes `WAITCNT`**: it
+runs at the reset default, four-cycle ROM accesses with the gamepak prefetch
+buffer *off*. So the prefetch buffer is not involved at all, and the name of
+the row refers to the CPU pipeline's prefetch showing up on open bus. And
+`DMA Prefetch Read`, which we pass, is not a separate test but the second
+output of the same function -- passing it means our open-bus-during-DMA
+*value* is right and only the *phase* is wrong.
+
+### The deficit is quantised, and the target is on the other ladder
+
+A line is 1232 cycles and the loop is 36, so 34.2 passes fit in a line.
+**Every constant in the emulator moves the exit in whole steps of 34
+iterations** -- one line's worth of passes -- and the reachable values fall
+on two ladders one pass apart: 2350 + 34k and 2351 + 34k. The expected 2725
+is on the second ladder. A 103-build sweep of all five intdefines:
+
+| constant | shipped | gain on this row | green range |
+|---|---|---|---|
+| `HBLANK_FLAG_DELAY` | 46 | −34 iterations per ~2.6 cycles, wraps at 53→54 | 43..48 |
+| `HBLANK_IRQ_SYNC_DELAY` | 6 | **exactly zero**, 17 builds, never moved a byte | 4..8 |
+| `LINE_IRQ_SYNC_DELAY` | 5 | +34 per ~2.3 cycles, monotone, saturates at `0x2A90` | **0..32, all of it** |
+| `HBLANK_DMA_REQUEST_DELAY` | 2 | identical to the flag delay at (44+k): they are one axis | 0..8, 10..16 |
+| `VBLANK_DMA_REQUEST_DELAY` | 1 | **exactly zero**, 16 builds | 0..16, all of it |
+
+`LINE_IRQ_SYNC_DELAY` is the sharpest miss and the best evidence in the
+table. The suite does not constrain it *at all* -- 6997/1 for every value
+from 0 to 32 -- it has the highest usable gain, it walks straight up to
+**`0x2A90`, one single iteration short of the target**, and then saturates.
+It can never land on `0x2A94` because it is on the wrong ladder. The only
+transition in the entire sweep that changes residue class is crossing
+flag + grant >= 56, which is the grant delay that section 14's hardware
+measurement refutes.
+
+So the row is closeable -- `HBLANK_DMA_REQUEST_DELAY` in 11..14 gives a full
+green 6998/0 with zero collateral -- by exactly the one knob hardware says is
+wrong, and by nothing else. That is the same conclusion as section 15, but it
+is now a statement about the model's reachable set rather than about a search
+that happened to fail.
+
+### The expected value has a provenance problem
+
+`0x10002A94` is a hardcoded constant in the suite's expectation table. It was
+introduced in 2026-05-31, in the **same commit that rewrote the code it
+measures** ("make the test resistant to gcc updates"), with no hardware claim
+in the message. Its predecessor `0x10002A64` stood for three years; the one
+time it was checked against silicon, a GBA SP reported **`0x10002AF8`** and a
+second emulator agreed with the console, while the table matched the suite's
+own emulator and not the hardware. A companion commit the same day replaced
+an earlier contributor's explicitly hardware-derived numbers for the sibling
+`H-blank bit start` rows with values described as "modern gcc values", and an
+upstream issue is still open reporting those as wrong on hardware.
+
+No hardware reading of the current build has been published anywhere. The
+constant is also **per-build**: it depends on the compiler's exact code
+addresses and alignment, which is why it moved when the loop went from six
+instructions to seven.
+
+None of that makes the constant wrong. It does mean we have been treating a
+number of unknown provenance as an oracle, which is the thing this project
+does not do anywhere else.
+
+### `tests/roms/prefetchdma.gba`
+
+A cartridge ROM, because everything left is on the gamepak side of a bus the
+link rig cannot see. Four parts: the loop's period across wait settings, what
+an H-blank DMA costs a ROM-fetched loop (the link rig's answer, with the loop
+in EWRAM, is exactly 3 + 2N), the post-DMA open-bus window scanned a cycle at
+a time from ROM code, and a replica of the suite's own loop and DMA reporting
+its break address at sixteen entry phases. Results stream down the link cable
+and are copied to SRAM, so a run gives exact numbers rather than a photograph.
+
+It has already separated the two emulators twice before reaching hardware.
+
+**A loop with an unmapped load gets no prefetch benefit in the other emulator
+and full benefit here.** A four-instruction Thumb loop `ldr r0,[r2]` /
+`add r2,#4` / `sub r1,#1` / `bne`, fetched from ROM at 3/1 with prefetch on,
+costs 14.12 cycles an iteration here and 18.12 there -- and 18.13 in both
+with prefetch off, and 14.12 in both when the load target is mapped IWRAM.
+Same split at 4/2 waits. So one of us keeps the prefetcher running across a
+load of unmapped space and the other does not. Part A settles it.
+
+**The replica's open bus diverges too.** dingbat spins it and reports a break
+address; the other emulator breaks on the *first* pass, having read back an
+opcode from twenty instructions earlier. The loop layout was checked by
+disassembly -- `ands` (`0x4003`) sits exactly four bytes after the `ldmia`,
+in the priming read and in the loop alike -- so the suite's own rule says
+both should read `0x40034003`. Part D settles that too.
+
+**And the break address scatters.** Across sixteen entry phases spanning
+about forty-five cycles, dingbat's replica gives sixteen *distinct* break
+addresses, from `0x1000248C` to `0x10002AFC` -- a spread that brackets the
+expected `0x10002A94` and is wider than our whole deficit. The row is a
+knife-edge coincidence whose answer depends on the cycle the loop is entered
+on. That does not excuse a wrong number, but it does say what kind of number
+it is, and it is a strong reason to want silicon's reading of the actual
+suite rather than a closer approach to a constant of unknown origin.
+
+### What hardware is being asked
+
+In priority order, and all of it needs a cart in the slot:
+
+1. **Run `mgba-suite.gba` itself and read the Misc page.** Nobody has ever
+   done this for the build we test against. If silicon does not say
+   `0x10002A94`, every session spent chasing that constant was chasing a
+   model, and the row becomes a documentation task rather than a bug.
+2. `prefetchdma.gba` part A: the loop's period, and which of the two
+   prefetch behaviours across an unmapped load is real.
+3. Part D: the replica's break address, three-way.
+4. Parts B and C: the DMA's cost to a ROM-fetched loop, and the open-bus
+   window's closing edge against a gamepak fetch.
