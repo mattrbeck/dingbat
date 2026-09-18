@@ -113,6 +113,13 @@ def sweep_one(rom, frames, keep=None):
             'seconds': round(time.time() - started, 1)}
 
 
+def slug(title):
+    """A directory name with no spaces: the dingbat driver's `shot` takes its
+    path to the end of the word, not the end of the line, so a path with a
+    space in it silently writes nothing."""
+    return ''.join(c if c.isalnum() or c in '-._' else '-' for c in title).strip('-')
+
+
 def _one(job):
     rom, frames, deadline = job
     # a ROM that wedges a driver would otherwise stall the whole sweep: the
@@ -250,9 +257,6 @@ def show(name, frames):
     return 0
 
 
-if __name__ == '__main__':
-    sys.exit(main(sys.argv))
-
 
 def triage(results_path, frames):
     """Re-run every flagged game and rank what is worth a person's time.
@@ -278,7 +282,7 @@ def triage(results_path, frames):
         odd = [k for k, x in enumerate(hashes['dingbat']) if x not in others]
         at = next((k for k in odd if a[k] == b[k]), None)
         if at is not None:
-            shots = os.path.join(OUT, 'shots', r['title'])
+            shots = os.path.join(OUT, 'shots', slug(r['title']))
             os.makedirs(shots, exist_ok=True)
             import img
             frames_ = []
@@ -291,16 +295,19 @@ def triage(results_path, frames):
                 frames_.append(img.read_ppm(p))
             img.write_png(os.path.join(shots, 'compare.png'),
                           img.composite(frames_, ['dingbat'] + REFERENCES, scale=2))
-            same = img.compare(frames_[0], frames_[1])['exact']
+            same = img.compare(frames_[0], frames_[1])['exact']   # dingbat vs a reference
         else:
             same = None
         out.append((agreed, total, at, same, r['title']))
         print(f'{r["title"][:52]:<54}{agreed:5}/{total:<6}'
               f'{"frame " + str(at) if at is not None else "":>12}'
-              f'{"" if same is None else f"  {same:.3f} identical"}', flush=True)
+              f'{"" if same is None else f"  {same:.3f} of pixels match"}', flush=True)
 
     print('\nranked, strongest first:')
     for agreed, total, at, same, title in sorted(out, reverse=True):
         share = agreed / total if total else 0
         print(f'  {share:5.0%}  {agreed:5}/{total:<6} {title}')
     return 0
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv))

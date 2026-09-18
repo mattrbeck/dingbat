@@ -412,3 +412,31 @@ Two Pokemon Ruby ROM hacks flag as well (`Pokemon Ambar`, `Obsidian Demo
 1`), both with the same shape at the same frame, 766. They share a base, so
 they are one finding, and being hacks they are weak evidence about hardware;
 the sweep's dump filters do not catch a hack that is not marked as one.
+
+
+### The sweep's flags so far
+
+659 of 2,297 library titles swept (the run continues; results land in
+`tools/playtest/out/bootsweep/results.json` as they come). `bootsweep.py
+triage` re-runs everything flagged and ranks it by the share of dingbat's
+lone frames where the two references drew byte-identical frames to each
+other:
+
+| share | witnessed | game |
+|---|---|---|
+| 92 % | 1659/1813 | Yu-Gi-Oh! The Eternal Duelist Soul (U) |
+| 100 % | 207/208 | Donkey Kong Country 2 (E) |
+| 38 % | 367/963 | X-Bladez: Inline Skater (E) |
+| 24 % | 51/216 | four "2 Games in 1" Sonic compilations |
+| 0 % | 0/966 | R-Type III (E) |
+
+R-Type III is what the metric is for: 966 lone frames, and the references
+never once agree with each other on any of them, so there is nothing to
+arbitrate and it is not a finding. The four Sonic compilations are one
+finding, not four -- they share a title screen whose shine all three
+emulators draw at a different point of its sweep. X-Bladez is real but
+sub-perceptual: at the frame triage picked, dingbat and the references are
+the same picture to the eye and to three decimal places of matching pixels.
+
+Which leaves Yu-Gi-Oh and Donkey Kong Country 2 as the two worth a person's
+time, and they are the two written up above.
