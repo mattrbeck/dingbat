@@ -12,6 +12,9 @@
 @   'RD>>' addr count              -> answers count words, then 'DONE'
 @   'CALL' addr arg                -> runs it (ARM, r0 = arg), answers 'DONE';
 @                                     'GETR' then fetches the returned r0
+@   'BOOT' -> SWI 26h HardReset: reboots through the BIOS, which with no
+@             cartridge returns to the multiboot wait loop, so the host can
+@             upload a new image without anyone touching the console
 @   anything else is echoed back, which is the host's liveness check
 @
 @ Every transfer is a full 32-bit exchange: the monitor stages its answer
@@ -41,6 +44,7 @@
 .equ CMD_READ,  0x52443E3E         @ 'RD>>'
 .equ CMD_CALL,  0x43414C4C         @ 'CALL'
 .equ CMD_GETR,  0x47455452         @ 'GETR'
+.equ CMD_BOOT,  0x424F4F54         @ 'BOOT'
 .equ ANS_PONG,  0x504F4E47         @ 'PONG'
 .equ ANS_DONE,  0x444F4E45         @ 'DONE'
 
@@ -96,6 +100,9 @@ loop:
     ldr r1, =CMD_GETR
     cmp r5, r1
     beq do_getr
+    ldr r1, =CMD_BOOT
+    cmp r5, r1
+    beq do_boot
 
     str r5, [r6, #0]               @ unknown word: echo it back
     b   loop
@@ -150,6 +157,10 @@ do_call:
     ldr r1, =ANS_DONE
     str r1, [r6, #0]
     b   loop
+
+do_boot:
+    swi 0x260000                   @ undocumented, and the only way back to an
+    b   loop                       @ uploadable state without a power cycle
 
 do_getr:
     ldr r1, [r6, #4]

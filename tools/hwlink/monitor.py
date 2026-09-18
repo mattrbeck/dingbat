@@ -41,6 +41,7 @@ CMD_WRITE = 0x57523E3E
 CMD_READ = 0x52443E3E
 CMD_CALL = 0x43414C4C
 CMD_GETR = 0x47455452
+CMD_BOOT = 0x424F4F54
 ANS_PONG = 0x504F4E47
 ANS_DONE = 0x444F4E45
 
@@ -114,6 +115,13 @@ class Monitor:
         self._x(CMD_GETR)
         return self._x()
 
+    def reboot(self):
+        """Send the console back through its BIOS boot, which with no
+        cartridge leaves it waiting for an upload again. This is what makes
+        replacing the monitor a software step rather than a power cycle."""
+        self._x(CMD_BOOT)
+        self._x()
+
     def run_payload(self, code, arg=0, address=PAYLOAD_ADDRESS):
         """Upload a blob of ARM code, call it, return r0."""
         data = bytearray(code)
@@ -149,7 +157,17 @@ def assemble(source_path, out_dir=None):
 
 
 def install(image=MONITOR_IMAGE, dev=DEFAULT_DEV, log=print):
-    """Upload the monitor. The console must be powered on with no cartridge."""
+    """Upload the monitor. The console must be waiting for an upload: either
+    just powered on with no cartridge, or already running a monitor, which
+    `reboot` puts back into that state by itself."""
+    try:
+        with Monitor(dev) as running:
+            if running.alive():
+                log('a monitor is already running; rebooting it to take an upload')
+                running.reboot()
+                time.sleep(4.0)      # the BIOS boot splash has to play out
+    except OSError:
+        pass
     with GBLink(dev) as link:
         link.set_voltage_3v3()
         time.sleep(0.15)
@@ -178,6 +196,9 @@ def main(argv):
             address, count = int(argv[2], 0), int(argv[3], 0)
             for i, w in enumerate(m.read_mem(address, count)):
                 print(f'{address + i * 4:08X}: {w:08X}')
+        elif what == 'reboot':
+            m.reboot()
+            print('rebooting; the console will be waiting for an upload')
         elif what == 'run':
             code = assemble(argv[2])
             arg = int(argv[3], 0) if len(argv) > 3 else 0
