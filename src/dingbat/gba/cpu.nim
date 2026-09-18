@@ -39,6 +39,8 @@ proc skip_bios*(cpu: CPU) =
   cpu.reg_banks[mode_bank(modeIRQ)][5] = 0x03007FA0'u32
   cpu.reg_banks[mode_bank(modeSVC)][5] = 0x03007FE0'u32
   cpu.r[15] = 0x08000000'u32
+  # The BIOS branches to the entry point, leaving it in LR
+  cpu.r[14] = 0x08000000'u32
   # At ROM entry the BIOS leaves DISPCNT force-blanked and POSTFLG set
   # (hardware: gbaedge IDENT on AGB SP, docs/hwprobe.md).
   cpu.gba.ppu.dispcnt = cast[DISPCNT](0x0080'u16)

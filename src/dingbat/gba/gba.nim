@@ -1275,11 +1275,21 @@ proc post_init*(gba: GBA) =
     gba.gs_bon = new_gs_bon(gba)
     gba.gs_bon.init_gs_bon()
   if not gba.run_bios:
+    # The state the BIOS leaves at ROM entry. Derived by logging every I/O
+    # write a full BIOS boot makes and then diffing the two boot paths'
+    # registers and RAM at ROM entry: what is set below is the whole
+    # difference, and it is the same for every ROM.
     gba.cpu.skip_bios()
-    # The BIOS boot leaves the link port in general-purpose mode (its
-    # multiboot probe writes RCNT = 0x800F); from RCNT = 0 Sonic Advance 1
-    # and 2 hang at boot
-    gba.serial.rcnt = 0x800F
+    # Link port in general-purpose mode (the BIOS's last RCNT write is
+    # 0x8000); from RCNT = 0 Sonic Advance 1 and 2 hang at boot
+    gba.serial.rcnt = 0x8000
+    # PSG and both DMA channels at full volume. The FIFO reset bits the BIOS
+    # writes alongside these are write-only.
+    gba.apu.soundcnt_h = cast[SOUNDCNT_H](0x000E'u16)
+    # The BIOS clears wave RAM; a cold Channel3 holds the GB power-on pattern
+    for bank in 0..1:
+      for idx in 0 ..< WAVE_RAM_SIZE:
+        gba.apu.channel3.wave_ram[bank][idx] = 0
     gba.ppu.skip_boot_phase()
 
 proc handle_saves*(gba: GBA) =

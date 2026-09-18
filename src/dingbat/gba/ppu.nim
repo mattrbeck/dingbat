@@ -70,7 +70,13 @@ proc skip_boot_phase*(ppu: PPU) =
   ## timer and vblank wait 126 lines early, which changes RNG seeds taken
   ## from timer phase (Yu-Gi-Oh! WCT 2004's starter deck).
   const ENTRY_LINE = 126
-  const ENTRY_LINE_POS = 838
+  # The BIOS reaches the entry point with the first two ROM words already
+  # fetched, charged to its own branch; this path still has to fetch them, so
+  # it starts that much earlier and the two boots run in lockstep from the
+  # first instruction on. 14 = a non-sequential plus a sequential 32-bit ROM
+  # read at the boot WAITCNT of 0.
+  const PIPELINE_REFILL = 14
+  const ENTRY_LINE_POS = 838 - PIPELINE_REFILL
   ppu.gba.scheduler.clear(etPPUStartHBlank)
   ppu.vcount = ENTRY_LINE
   ppu.line_start_cycle = int64(ppu.gba.scheduler.cycles) - ENTRY_LINE_POS

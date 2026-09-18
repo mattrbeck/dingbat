@@ -24,6 +24,36 @@ real-BIOS path produces. Sonic Advance and Sonic Advance 2 playtests PASS
 (play identical to mGBA, saves cross-load). Sonic Advance 2's save still
 differs from mGBA's in 28 bytes (3 ranges): not yet examined.
 
+### What else the skip-BIOS boot got wrong (2026-09-17)
+
+dingbat runs the real BIOS itself (`--run-bios`), so it is its own oracle for
+this: boot both ways, stop the moment PC reaches 0x08000000, and diff every
+CPU register, every I/O word and all of IWRAM/EWRAM/palette/VRAM/OAM. Then
+log every I/O write the BIOS makes to see which values are deliberate. The
+whole difference was five things, the same for every ROM tested:
+
+- **RCNT** — the BIOS's last write is 0x8000, not the 0x800F assumed above
+  (0x800F was an intermediate value of its multiboot probe). dingbat reads
+  back 0x800F either way, because bits 0-3 read the pins, so this is a
+  faithfulness fix, not a behaviour change.
+- **SOUNDCNT_H = 0x000E** — PSG and both DMA channels at full volume. Was 0.
+  (The FIFO reset bits the BIOS writes alongside are write-only.)
+- **Wave RAM** — the BIOS clears it; dingbat left Channel 3's GB power-on
+  pattern (0xFF00 per word).
+- **LR = 0x08000000** — the BIOS branches to the entry point. Was 0.
+- **The entry video phase was 14 cycles late.** Both boots enter on line 126
+  at 838 cycles, but the BIOS arrives with the first two ROM words already
+  fetched and paid for, while this path still has to fetch them. Starting
+  14 cycles earlier (a non-sequential plus a sequential 32-bit ROM read at
+  the boot WAITCNT of 0) makes the two boots run in exact lockstep: the PPU
+  phase now matches at every one of the first 83,891 instructions, where
+  before it diverged at instruction 1 and stayed 14 cycles apart forever.
+
+What still differs is unobservable: elapsed cycles, the stale banked copy of
+LR (overwritten by the first mode switch), TM0's frozen counter while the
+timer is disabled (reloaded on enable), and SPSR in SYS mode (no such
+register on hardware). Test runner unchanged at 1219/1171/48.
+
 First emulator runs of bootio.gba (dingbat skip-BIOS vs dingbat real BIOS vs
 mGBA), open-bus words aside:
 - the skip-BIOS boot also differs from dingbat's real-BIOS boot in SOUNDCNT_H
@@ -89,6 +119,45 @@ Side note: dingbat's harness frame 1 can end mid-frame when the boot halts
 across two vblanks inside one CPU step (step_frame exits with frame=2); the
 count realigns by frame 3.
 
+### 2026-09-17: it is not a boot-phase offset, and Harvest Moon is the same bug
+
+Two results from this round.
+
+**The boot phase is exonerated.** With a temporary knob on the skip-boot
+video phase, shifting it by -800, -600, -400, -200, -120 ... +130 cycles
+never moves the frame at which Yu-Gi-Oh's seed reaches its next value
+(dingbat 13, mGBA 12, at every offset). So the one-frame lag is not a
+timer/vblank straddle that a few dozen cycles could tip, and the 14-cycle
+entry fix above, though right, does not decide it either.
+
+**dingbat's ROM timing diverges when the prefetcher is switched on.**
+Stepping dingbat and mGBA instruction by instruction from ROM entry and
+diffing their cycle counts: they agree to within the 0..2 cycles of
+intra-instruction accounting for the first 82,688 instructions. At
+instruction 82,689 the game writes WAITCNT 0x0003 -> 0x4014 — bit 14, the
+gamepak prefetcher — and from that instruction on dingbat accumulates about
+one extra cycle per 17 instructions, reaching +66 by instruction 83,821,
+where the timer the RNG reads is enabled. mGBA and the second reference
+produce byte-identical saves here; dingbat is the odd one out.
+
+dingbat's prefetch model is pinned against the mGBA suite's ROM timing rows
+and passes every one of them. The single failing row in the whole 6998-test
+suite is "DMA Prefetch Break" (0x100026D4 vs an expected 0x10002A94, 960
+cycles fast) — the one hardware-anchored prefetch discrepancy we have, and
+the obvious next thread to pull.
+
+Recipe: `cycdump` (a Nim tool stepping the CPU and printing cycles per
+instruction) against the mGBA driver's `stepn 1`, comparing the running
+delta's envelope rather than per-instruction costs, which differ harmlessly
+because the two emulators charge bus cycles at different boundaries.
+
+**Harvest Moon FoMT is the same bug, not a separate one.** Its farm_intro
+checkpoint differs because the farm's random debris (branches, stones,
+stumps) is laid out differently; mGBA and the second reference agree with
+each other and dingbat does not, and that layout is what makes its save
+differ in 4051 bytes. Same shape as the Yu-Gi-Oh deck: identical input,
+a different draw from a timing-seeded RNG.
+
 After the phase fix the Yu-Gi-Oh! 2004 and Mario Golf AT playtests PASS on
 their checkpoints, but their saves still differ from BOTH references (107
 and 4 bytes): the deck/values are still one frame off. Harvest Moon FoMT
@@ -122,3 +191,18 @@ though their checkpoint frames differ by 5. The verdict itself came from OCR
 noise on the text. mGBA's enableVideoLayer segfaults in the headless build,
 so a per-layer comparison needs another route (dump BG1/BG2 tile+palette
 state in both at the same frame).
+
+**2026-09-17: this is animation phase, not colour.** Both failing
+checkpoints sit on menus over an animated background, and *no two*
+emulators agree on them: dingbat~mgba 69% of pixels exact, dingbat~nba 70%,
+and mgba~nba 85% with channel deltas up to 15 — the references differ from
+each other in the same way, only less. The neighbouring `intro` checkpoint,
+on a settled screen, is IDENTICAL between dingbat and mGBA while the second
+reference SLIPs 9 frames. So the menus are simply sampled at different
+points in their animation; the "one-step colour" reading in the heading was
+wrong, and the blend formula (hardware-verified) is not involved.
+
+Worth doing in the harness rather than the core: the classifier only
+compares each checkpoint's centre frame against the other side's hash
+window. Comparing the two recorded windows against *each other* is free and
+strictly stronger, and these two checkpoints want a wider window anyway.
