@@ -402,15 +402,39 @@ consumed once per frame, completely, with no drift to accumulate. So the
 difference is in *where in each line* the write lands, not how many land,
 which puts it behind the same hardware column as everything else.
 
-The obvious form of that -- a line early or late -- does not fit either:
-comparing dingbat's row y against the reference's rows y+/-1 and y+/-2
-improves only 6 of the 160 differing rows, and none of them to zero. What
-would fit is the *table pointer* drifting: a repeating H-blank DMA whose
-grant is timed differently can consume a different number of entries over a
-frame, after which every line is drawn with a neighbouring line's scroll
-values and no single offset describes the result. That is a guess, and the
-page that constrains it is `tests/roms/payloads/hdmasweep.s`; worth
-re-testing here once it has its hardware column.
+**Not the grant instant either, and this one is already measured.**
+DKC2 scores an identical 208 odd frames on the tree before the H-blank DMA
+work and on the tree after it -- that is, with the DMA requested at cycle
+960 and at 1008. That moves all 160 per-line writes by 48 cycles and the
+game's output does not change by a pixel, because dingbat renders a
+scanline in one go and both grant points fall after line N's render and
+before line N+1's. Whatever hardware says about a grant waiting on a bus
+cycle is a few cycles on top of the 48 that demonstrably did nothing here.
+So this is not behind `hdmasweep.s`, and saying so earlier was an
+under-reading of our own data.
+
+**Nor is it blending.** At a differing frame `BLDCNT` and `BLDALPHA` both
+read 0000 in dingbat and mGBA alike, the two frames use exactly the same
+197 colours, and of the differing pixels **not one** is a colour the other
+emulator fails to draw somewhere else in the same frame. Blend arithmetic
+invents values that need not exist in any palette; nothing here is
+invented. It is selection, not arithmetic.
+
+**What the composite tests can and cannot show.** No row of dingbat's
+frame equals any row of the reference's within +/-60 pixels horizontally or
++/-24 lines vertically. That sounds like it rules out a scroll difference,
+and an earlier version of this section said so. It does not. Three
+background layers are enabled here, and if one layer's per-line scroll
+differs while the others stay put, the composited row is neither layer
+translated -- it is a different mixture of the same two palettes, which is
+exactly what is observed: the same colours, rearranged within each row,
+with no whole-row displacement in either axis.
+
+So the evidence remains consistent with DMA0's per-line BG1 scroll being
+applied differently, and no composite-image test can confirm or refute
+that. What would is a **per-layer dump at one frame in both emulators**,
+which is the same instrument section 6 has been waiting on for Fire
+Emblem. That is the next step here, and it needs no hardware.
 Settling it properly needs a per-layer dump at one frame in both emulators,
 which is also what Fire Emblem (section 6) has been waiting on.
 
@@ -463,6 +487,9 @@ references agree with each other exactly.
 | Yu-Gi-Oh! The Eternal Duelist Soul | the scrolling grid behind the title | 1659/1813 |
 | Kaeru B Back (J) | the gears turning behind the logo | 1360/1877 |
 | Donkey Kong Country 2 (E) | the per-line parallax scroll | 207/208 |
+
+(DKC2's entry here is about which part of the picture moves, not a claim
+about the cause; see its own section for what has been ruled out.)
 
 In each the static parts -- logo, text, sprites -- are identical in all
 three emulators, and only the moving thing differs. That is worth saying
