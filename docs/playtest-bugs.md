@@ -1881,6 +1881,93 @@ on. That does not excuse a wrong number, but it does say what kind of number
 it is, and it is a strong reason to want silicon's reading of the actual
 suite rather than a closer approach to a constant of unknown origin.
 
+### What actually selects the ladder, traced cycle by cycle
+
+Instrumenting every unmapped read, every DMA grant and every bus access in
+the loop answers it, and the answer is not a number.
+
+The loop is 36.006 cycles measured over 2417 iterations (2414 of 2417 gaps
+are exactly 36; the other three are the DMA's theft). It starts at vcount
+160, dot 227 -- **inside V-blank** -- and 2321 of the first 2418 reads happen
+there, where no H-blank DMA exists and no exit is possible. Everything is
+decided in the first few visible lines of the next frame: we exit on **line
+2**, on the third H-blank DMA the loop ever sees, and the expected 2725 lands
+on **line 11**, nine scanlines later.
+
+The grant is at dot 1008 on every line with zero spread and the word reaches
+the bus at dot 1012. Taking F as the dot at which the load's own opcode fetch
+starts, the walk is −2 on eight lines and −4 on five, summing to exactly −36
+over **13 lines** -- one full wrap of the pass. So F takes only **13 values,
+all odd**. Our window admits F in [1005, 1007]; the grid contains exactly one
+such point, 1007, and that is the entire selection rule. Which line it first
+occurs on depends only on where in V-blank the loop started -- shift that by
+two cycles and the first hit moves a line, which is 34 iterations. That is
+the 34-quantum, and it is why `LINE_IRQ_SYNC_DELAY`, which moves the V-blank
+entry, walks the value in steps of 0x88.
+
+**Ladder A is "the grant lands inside the load instruction". Ladder B is "the
+word survives to the next pass's load".** Our exit is always the last read
+whose own opcode fetch began before the grant. The target is the first read
+whose fetch begins after it -- literally one pass later.
+
+And our model **cannot reach ladder B by construction**: `read_open_bus_value`
+keys the window on *this reading instruction's own* `fetch_start`, so a read
+whose fetch began after `dma_request_at` fails `dma_request_at > fetch_start`
+for every choice of bounds. That is why section 14's 13x13 bounds sweep
+reached only three values, all on ladder A, and why the only knob that crosses
+ladders is one that moves the grant -- moving the grant changes which pass the
+grant is *inside*, which is the one thing bounds cannot change.
+
+### The inconsistency that would close it, and it is ours
+
+Three mechanisms could put the capture on the next pass. Two are already
+refuted: the latch surviving 12 cycles and two opcode fetches longer is
+refuted by `obuswin.s` (section 13), and moving the grant 13--16 cycles later
+is refuted by `hdmageo.s` (section 17). The third is not refuted, and it is a
+disagreement inside dingbat rather than with hardware.
+
+**Our timing model and our value model disagree about when a fetch happened.**
+`read_open_bus_value` returns the opcode at `r15` -- `0x4003` from
+`0x08005FB8` -- and that value is right, because on hardware the pipeline runs
+ahead and that halfword has already been fetched when the load's data cycle
+occurs. The test's own steady-state result proves it. But our *access trace*
+shows we fetch `0x08005FB8` **after** the load's data cycle: we fetch lazily,
+one fetch per instruction, charged when that instruction executes. So the bus
+access immediately before the data cycle is the load's own fetch, where on the
+console it is a fetch two instructions further on.
+
+That is about two fetches, eight to ten cycles -- the same order as the twelve
+to thirteen the target needs -- and it moves the capture from the pass
+containing the grant to the pass after it **without moving the grant and
+without extending the latch**. Stated as a mechanism: the open-bus window
+should sit where the real pipeline's last pre-data-cycle fetch sits, which is
+two instruction fetches later in the pass than where we put it.
+
+Not built. It is not a constant: it means reordering when fetch cycles are
+charged relative to data cycles, which touches the 32 DMA/ROM Timing rows,
+the prefetch columns, the BIOS timing rows, and the `rom_hot` bookkeeping that
+hangs off fetch order, and would need `HBLANK_DMA_REQUEST_DELAY` and the DMA
+hand-off constants re-derived against the same payloads. It is recorded here
+because it is the first candidate that is not refuted by one of our own
+hardware pages, and because the evidence for it needs no hardware at all.
+
+### Two things found on the way, both worth knowing
+
+`clear_pipeline`'s flat `2 x wait_s` refill lump is the **largest single term
+in this loop** -- 6 of its 36 cycles -- and it is charged on top of the two
+refill fetches the following instructions then charge individually. That reads
+like a double charge, and removing it was tested: the suite goes to 6294/704
+and the row overshoots to `0x1000308C`. So it is load-bearing and calibrated,
+not a bug. But the row's dominant time constant is a lump whose justification
+is a comment, and the loop period is a lever that reaches *past* the target.
+
+`seq = address == rom_next_addr and (prefetch_on or contiguous)` -- the rule
+that a burst breaks whenever the CPU spent cycles off the ROM bus -- costs
+this loop 4 cycles a pass. Removing it leaves the suite at 6997/1 with the row
+unchanged, so it is not a lever here; but it is stated as modelling rather
+than measurement, and it is **duplicated by hand in `rom_access_cycles` and
+`rom_fetch_cycles`**, so editing one of them is silently a no-op.
+
 ### What hardware is being asked
 
 In priority order, and all of it needs a cart in the slot:

@@ -56,7 +56,7 @@ All tests passed.
 
 | Test | Actual | Expected |
 |------|--------|----------|
-| DMA Prefetch Break | 0x10002540 | 0x10002A94 |
+| DMA Prefetch Break | 0x100025C8 | 0x10002A94 |
 
 ## Summary
 
