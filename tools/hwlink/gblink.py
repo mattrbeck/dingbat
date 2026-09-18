@@ -254,6 +254,35 @@ def multiboot(link, image, log=print, poll_limit=3000):
     return True, 'upload complete; the GBA is running the image'
 
 
+REPORT_MAGIC = 0x4C525054          # 'LRPT', see tests/roms/linkreport.inc
+
+
+def read_report(link, limit=4096):
+    """Read a result block from a probe ROM that includes linkreport.inc.
+
+    The ROM streams 'LRPT', a word count, and the block, over and over, so
+    listening can start at any moment. The whole block is read twice and the
+    copies compared, because the adapter drops a transfer now and then and a
+    dropped one would go unnoticed inside a block of numbers."""
+    def one():
+        for _ in range(limit):
+            if link.transfer32(0) == REPORT_MAGIC:
+                break
+        else:
+            return None
+        count = link.transfer32(0)
+        if not 0 < count <= limit:
+            return None
+        return [link.transfer32(0) for _ in range(count)]
+
+    first = one()
+    if first is None:
+        return None, 'no probe is reporting on the link'
+    if one() != first:
+        return None, 'the block did not read back the same twice'
+    return first, f'{len(first)} words'
+
+
 def boot_and_read(path, words=8, log=print, dev=DEFAULT_DEV):
     """Upload an image, then read back what it sends over the link."""
     with GBLink(dev) as link:
@@ -287,6 +316,13 @@ def main(argv):
             link.open_link()
             for k in range(int(argv[2]) if len(argv) > 2 else 8):
                 print(f'read {k}: 0x{link.transfer32(0):08X}')
+        elif what == 'report':
+            link.open_link()
+            values, message = read_report(link)
+            print(message)
+            if values:
+                for i, v in enumerate(values):
+                    print(f'  {i:3}: {v:10} (0x{v:08X})')
         else:
             print(__doc__)
             return 2

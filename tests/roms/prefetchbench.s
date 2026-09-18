@@ -85,7 +85,17 @@ done:
     ldr r0, =0x02000FFC
     ldr r1, =0x600D0000
     str r1, [r0]
-1:  b   1b
+    @ Offer the results to a host on the link cable, so a flashcart run needs
+    @ no photograph. With no cable nothing ever completes and this is just a
+    @ spin (see linkreport.inc).
+    ldr r0, =0x02000000
+    mov r1, #(9 * 4)
+    bl  link_report_init
+1:  bl  link_report_poll
+    b   1b
+    .ltorg                         @ main's literals, before the timed blocks
+
+    .include "linkreport.inc"
 
     .align 2
 waits:
