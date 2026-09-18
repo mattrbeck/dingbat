@@ -1256,8 +1256,11 @@ D9 4B D8 4B  00 81 82 88  FF FF FF FF  02 00 00 33
 
 Every channel lives: `+0` 18653 polls, `+2`/`+4`/`+6` about 17594 each (the
 spread is sequencer phase between trials, not a difference in kind), and
-`+12`/`+16`/`+18` the same again. So dingbat has **no** first-trigger effect
-at all, which is the same disagreement page 44 already showed on ch1 —
+`+12`/`+16`/`+18` the same again. (Every row is a 16-bit poll count, which only fits
+because this loop runs from the cartridge at ~59 cycles a poll; run from RAM
+it polls ~6x faster and a live row wraps, so off-cart add 0x10000 to any row
+too small for its length and confirm by ratio.) So dingbat has **no**
+first-trigger effect at all, which is the same disagreement page 44 already showed on ch1 —
 hardware 0, dingbat alive. `+10` at 1816 is the sweep running the frequency
 up into its overflow cutoff, which is the sweep unit working normally and is
 a useful control: it proves the row's NR10 write took effect. `+24`/`+26`

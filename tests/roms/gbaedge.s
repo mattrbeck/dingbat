@@ -6216,6 +6216,14 @@ probe_hdmaphase:
 @ +26 (h) ch2's first trigger with the length counter DISABLED
 @ +28 (h) rows that hit the poll cap; a capped row itself reads FFFF
 @ +31 (b) marker 51
+@
+@ Every count here is a 16-bit poll count, and that only fits because this
+@ loop runs from the cartridge at about 59 cycles a poll: a counter-16 tone
+@ is ~17800 polls.  The same rows run as a payload from RAM poll about ten
+@ cycles apart, six times faster, and a live row WRAPS -- 104856 polls
+@ stores as 0x9998.  Off-cart, add 0x10000 to any row whose value is too
+@ small for its length, and check the unwrapping by ratio: halving a row's
+@ length must halve its count.
 
 @ r4 = IOBASE, r9 = poll-cap hits.  r0 = the NRx1/NRx2 halfword, r1 = the
 @ trigger halfword -> r3 = poll iterations, r6 = SOUNDCNT_X after the trigger
