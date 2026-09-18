@@ -41,6 +41,7 @@ One line per document: what it is for and who reads it. Scores live only in
 - [samesuite-apu.md](samesuite-apu.md) — SameSuite APU read from its `.asm` and the GB APU model built on it. GB APU work.
 - [pandocs-audit.md](pandocs-audit.md) — where dingbat disagrees with Pan Docs, ranked, with evidence or `Assumed`. GB maintainers.
 - [pandocs-upstream.md](pandocs-upstream.md) — corrections draftable for gbdev/pandocs, and what hardware must settle first. Whoever files them.
+- [gbatek-upstream.md](gbatek-upstream.md) — the GBA counterpart: open-bus and DMA-grant corrections hardware has settled, each with the payload that reproduces it, plus what is not settled and why. Whoever files them.
 - [oracles.md](oracles.md) — behaviours pinned only by comparison with another emulator: the complete list, each a probe candidate. Anyone citing evidence.
 - [hwprobe-questions.md](hwprobe-questions.md) — the ranked catalogue of hardware questions the suites cannot settle, with the probe for each. Whoever plans a hardware session.
 - [hwprobe.md](hwprobe.md) — the `gbedge`/`gbaedge` probe ROMs: page tables and the photograph protocol. Hardware sessions.
