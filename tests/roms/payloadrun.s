@@ -39,6 +39,10 @@ main:
     ldr r1, =0x600D0000
     str r1, [r0]
 3:  b   3b
+    @ Before the payload, not after it: the default pool goes to the end of
+    @ the section, and a payload of more than 4K puts it out of reach of the
+    @ loads above.
+    .ltorg
 
     .align 2
 arg_count:

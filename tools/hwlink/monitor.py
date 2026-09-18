@@ -178,8 +178,12 @@ def assemble(source_path, out_dir=None):
     obj = os.path.join(out_dir, stem + '.o')
     elf = os.path.join(out_dir, stem + '.elf')
     binary = os.path.join(out_dir, stem + '.bin')
-    subprocess.run(['arm-none-eabi-as', '-mcpu=arm7tdmi', '-o', obj,
-                    source_path], check=True)
+    # A payload may .include from tests/roms (linkreport.inc), so its own
+    # directory and the one above it are both on the include path.
+    here = os.path.dirname(os.path.abspath(source_path))
+    subprocess.run(['arm-none-eabi-as', '-mcpu=arm7tdmi',
+                    '-I', here, '-I', os.path.dirname(here),
+                    '-o', obj, source_path], check=True)
     subprocess.run(['arm-none-eabi-ld', f'-Ttext={PAYLOAD_ADDRESS:#x}',
                     '-o', elf, obj], check=True)
     subprocess.run(['arm-none-eabi-objcopy', '-O', 'binary', elf, binary],

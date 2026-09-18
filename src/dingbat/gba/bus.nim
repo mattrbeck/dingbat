@@ -1042,8 +1042,34 @@ proc read_open_bus_value*(bus: Bus; address: uint32): uint8 =
     return 0'u8
   let word: uint32 =
     if bus.gba.cpu.cpsr.thumb:
-      let opcode = uint32(bus.read_half_internal(pc and not 1'u32))
-      (opcode shl 16) or opcode
+      # A Thumb fetch is a halfword, so what the 32-bit bus holds has to be
+      # made of two of them -- but only where the bus the code is fetched
+      # over is 32 bits wide. There the two most recent fetches ($+2 and $+4,
+      # and r15 reads $+4) each land in the half of the latch its own address
+      # bit 1 selects, not in fetch order, so the halves come from two
+      # different words and no single aligned read reproduces them.
+      #
+      # Measured on the AGB SP over the link rig (tests/roms/payloads/
+      # obusprobe.s, code in IWRAM): the same load at 0x030000F0 reads
+      # 3E0260A8 and at 0x030000FA reads 61283E02, where [$+2] = 3E02 in
+      # both, [$+4] = 60A8 and 6128. dingbat duplicated [$+4] into both
+      # halves, which is right only when the two happen to be equal.
+      #
+      # Over a 16-bit bus one fetch cannot fill both halves and the duplicate
+      # is what hardware gives: the mGBA suite reads its write-only registers
+      # from ROM-resident Thumb code, and composing there costs 40 I/O rows
+      # and 6 Timing rows. Only the 32-bit-wide regions take the pair --
+      # BIOS, IWRAM and OAM. IWRAM is the one measured; the other two are the
+      # same bus width and no suite row executes from either.
+      let pc_wide = pc_region == 0x0 or pc_region == 0x3 or pc_region == 0x7
+      if pc_wide:
+        let older = uint32(bus.read_half_internal((pc - 2) and not 1'u32))
+        let newer = uint32(bus.read_half_internal(pc and not 1'u32))
+        if (pc and 2) != 0: (newer shl 16) or older
+        else:               (older shl 16) or newer
+      else:
+        let opcode = uint32(bus.read_half_internal(pc and not 1'u32))
+        (opcode shl 16) or opcode
     else:
       bus.read_word_internal(pc and not 3'u32)
   uint8(word shr shift)

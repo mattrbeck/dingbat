@@ -36,8 +36,10 @@ def build_wrapper(payload_source, args):
     sys.path.insert(0, ROMS)
     import romfix
     blob = os.path.join(SCRATCH, 'payload.bin')
-    _run(['arm-none-eabi-as', '-mcpu=arm7tdmi', '-o', f'{SCRATCH}/payload.o',
-          payload_source])
+    src_dir = os.path.dirname(os.path.abspath(payload_source))
+    _run(['arm-none-eabi-as', '-mcpu=arm7tdmi',
+          '-I', src_dir, '-I', os.path.dirname(src_dir), '-I', ROMS,
+          '-o', f'{SCRATCH}/payload.o', payload_source])
     _run(['arm-none-eabi-ld', f'-Ttext={PAYLOAD_ADDRESS:#x}', '-o',
           f'{SCRATCH}/payload.elf', f'{SCRATCH}/payload.o'])
     _run(['arm-none-eabi-objcopy', '-O', 'binary', f'{SCRATCH}/payload.elf', blob])

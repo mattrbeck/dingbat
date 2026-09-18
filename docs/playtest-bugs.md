@@ -713,3 +713,113 @@ solid, every transfer clean -- so `open_link` now probes with a benign word
 it works whatever state the console is in) and re-issues the whole sequence
 until the link answers, up to 40 attempts. A dead link and an absent console
 are no longer the same symptom.
+
+
+## 11. Two more from the rig, 2026-09-18
+
+Both ran with the slot empty and the monitor resident, so neither needed
+anyone at the console.
+
+### The prefetch question cannot be answered with an empty slot
+
+Reading the gamepak region with no cartridge in it does not return the
+address pattern all the way. The first access of a word reads the latched
+address, and the sequential second access reads a floating bus:
+
+| address | 0x08000000 | 0x08000004 | 0x08008680 | 0x0A000000 | 0x0E000000 |
+|---|---|---|---|---|---|
+| word read | `FFFF0000` | `FFFE0002` | `FFFF4340` | `FFFF0000` | `FFFFFFFF` |
+
+The low halfword is `addr >> 1` exactly, every time; the high halfword is
+`FFFF` or `FFFE`, never the address. That settles a tempting idea: since the
+low halfwords spell out a long run of harmless Thumb encodings (`0x0000` at
+0x08000000 rising to `0x3FFF` at 0x08008000, all data-processing on low
+registers, with 64 consecutive `MUL`s at 0x08008680), it looked as though
+code could be *executed* from an empty slot and the prefetcher measured
+without a cartridge. It cannot: sequential fetches -- which is what
+straight-line execution is made of -- read `FFFF`, and `0xF800`-`0xFFFF` is
+the `BL` suffix, so the CPU would branch somewhere unpredictable within two
+instructions. **prefetchbench.gba genuinely needs the flashcart.**
+
+### pfram.s -- the floor for prefetchbench, measured on silicon
+
+What the rig *can* do is the other half of the subtraction. `pfram.s` runs
+prefetchbench's eight subjects out of IWRAM, where no opcode comes from the
+gamepak and the prefetcher never engages, so the cartridge run's prefetch
+effect is (cartridge - this) per subject rather than (cartridge - an
+emulator's idea of the floor).
+
+All 32 rows -- eight subjects by four wait settings -- are identical on
+hardware, dingbat and mGBA:
+
+| subject | 3/1 | 4/2 | | subject | 3/1 | 4/2 |
+|---|---|---|---|---|---|---|
+| arm nops | 263 | 263 | | thumb nops | 263 | 263 |
+| arm loop | 518 | 518 | | thumb loop | 518 | 518 |
+| arm nops+load | 520 | **584** | | thumb nops+load | 522 | **586** |
+| arm multiplies | 137 | 137 | | thumb multiplies | 317 | 317 |
+
+Two results fall out of it. The prefetch-on and prefetch-off columns are
+equal on every row including the two that load from the gamepak, so **the
+prefetch buffer does not serve data loads** -- GBATEK says opcode fetches
+only, and this is that claim measured rather than assumed. And the two
+gamepak rows move by exactly 64 cycles between the wait settings, 2 cycles
+across 32 loads, which is waitprobe's empty-slot result again from a
+different direction.
+
+It also gives **linkreport.inc its first run on hardware**. The block came
+back over the stream byte-identical to the same block read through the
+monitor's own `read_mem`. That path is how the cartridge run reports, so it
+is now proven before the run that needs the cartridge rather than during it.
+
+### obusprobe.s -- what an unmapped read returns
+
+Reads of 0x10000000, which nothing answers. Seven rows; hardware disagrees
+with dingbat on three and with mGBA on one, and no two of the three agree
+everywhere:
+
+| | hardware | dingbat (was) | mGBA |
+|---|---|---|---|
+| ARM ldr | `E58A0000` | same | same |
+| Thumb ldr, load at 0x030000F0 | `3E0260A8` | `60A860A8` | same as hw |
+| Thumb ldr, load at 0x030000FA | `61283E02` | `61286128` | same as hw |
+| Thumb ldrh, load at 0x03000104 | `000061A8` | same | same |
+| Thumb ldrh, load at 0x0300010E | `00003E02` | `00006228` | same as hw |
+| unmapped read 0 instr after a DMA | `E59F0068` | same as hw | `E58A0034` |
+| unmapped read 1 instr after a DMA | `DEADBEE3` | same | same |
+| unmapped read 2 instr after a DMA | `E59F0024` | `DEADBEE3` | same as hw |
+
+**The Thumb composition, closed.** This was THUMBBUS in
+docs/hwprobe-questions.md, carried as "deferred". A Thumb fetch is a
+halfword, so the 32-bit bus value has to be made of two of them, and the
+rule is not fetch order: each of the two most recent fetches, `$+2` and
+`$+4`, lands in the half of the latch **its own address bit 1 selects**. The
+two loads above are the same instruction at the two alignments and that is
+the only thing separating them -- at 0x030000F0, `[$+2]` = 3E02 is the high
+half and `[$+4]` = 60A8 the low; at 0x030000FA the same two swap places.
+dingbat duplicated `[$+4]` into both halves, which is right only when they
+happen to be equal.
+
+The fix is **conditional on the bus width the code is fetched over**, and
+finding that out was the whole of the work. Composing everywhere costs 40
+I/O rows and 6 Timing rows of the mGBA suite, because that suite reads its
+write-only registers from ROM-resident Thumb code, and a 16-bit bus cannot
+fill both halves of a 32-bit latch from one fetch -- there the duplicate is
+what hardware gives. So the pair applies in the 32-bit-wide regions only:
+BIOS, IWRAM and OAM. IWRAM is the one measured; the other two are the same
+bus width and no row in any suite executes from either. With that condition
+the 1219-row runner and every mGBA suite section are **row-identical** to
+before, and the four Thumb rows above match hardware.
+
+**The post-DMA window, still open.** Hardware puts the DMA's last word on
+the bus for exactly one instruction: the read immediately after the enable
+store sees an opcode (the burst has not run yet), the next one sees
+`DEADBEE3`, and the one after that is back to an opcode. dingbat holds the
+word one instruction too long and mGBA releases it one too early, so each is
+wrong at one end and they are wrong at opposite ends. dingbat's condition in
+`read_open_bus_value` is `dma_request_at > fetch_start and <= read_start`,
+and the distance-2 read should fail the first test but does not, which points
+at `fetch_start` after a burst rather than at the window itself. Left alone
+deliberately: three games named in that comment depend on the word surviving,
+and this page probes one shape only -- an immediate DMA3 to EWRAM, from ARM
+code. `obusprobe.s` reproduces it in seconds when someone picks it up.
