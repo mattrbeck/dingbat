@@ -909,3 +909,45 @@ hardware on every undeferred row including the IWRAM control (226 vs 227) --
 p50 calibrated the H-blank request against absolute stamps and found flag + 2
 exact, so the residual cycle is more likely on the V-blank DMA's side than
 the H-blank one. Neither constant should move on one page.
+
+### psgwhy.s -- ch1's dying trigger enables first, and it is the sweep
+
+gbaedge slot 52, also run for the first time. p44 and p51 could only watch
+SOUNDCNT_X bit 0 *fall*, so neither could tell a trigger that never enables
+from one that enables and is then killed; this page polls for the rise too.
+
+**Four runs, and six of the fifteen rows vary between them**, so the page
+cannot be read as a whole. The payload runs from IWRAM and the probe's poll
+loop was written cartridge-resident, so it polls faster here than the rows
+were calibrated for and races the frame sequencer -- the same caveat already
+noted for p52's fall counts, now visible as instability. Only the rows that
+repeated in all four runs are reported:
+
+| row | hardware | dingbat / mGBA |
+|---|---|---|
+| f = 0x400, length on (**the dying row**) | enabled, then died at once | healthy, stays on |
+| f = 0x3FF | healthy | healthy |
+| f = 0, length on | healthy | healthy |
+| f = 0x7FF, shift 1 (a real sweep overflow) | enabled, then died at once | **never enabled** |
+| retrigger straight away | never enabled | healthy |
+| nothing routed (SOUNDCNT_L = 0) | enabled, then died at once | healthy |
+
+Two things close on those rows alone.
+
+**The open question was a false dichotomy.** docs/hwprobe-questions.md
+carried "never-enables vs active bit rises late" for this row. It is neither:
+the bit is already set on the first poll after the store and has fallen by
+the next. The channel turns on and is then killed.
+
+**The f + f sweep candidate holds.** f = 0x400 dies, f = 0x3FF lives, f = 0
+lives -- exactly the boundary where the overflow check `f + f` reaches the
+limit 0x800, and it is the frequency that decides it. The page was written to
+test that and the stable rows fit it.
+
+**Both emulators have the mechanism backwards** on the one row where a sweep
+overflow is unambiguous (f = 0x7FF, shift 1): they refuse the trigger, so the
+channel never enables, where hardware accepts it and kills it immediately
+after. Nothing changed here -- this is the PSG thread's to land, the unstable
+rows should be settled first from a cartridge or with a rate-matched poll
+delay, and a trigger that enables for one poll is audible where a refused one
+is not.
