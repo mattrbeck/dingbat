@@ -217,3 +217,33 @@ purely that way. The windows in the script are back to 30.
 Still the most likely reading is the original one: a layer input (the
 animated fog's content or phase) differs, not the blend, which is
 hardware-verified. Needs a per-layer dump in both at the same frame.
+
+
+## 7. Prefetch: Thumb code with internal cycles (the Yu-Gi-Oh residue)
+
+`tests/roms/prefetchbench.{s,py}` times eight instruction patterns fetched
+from the cartridge, across four wait settings. Seven of them, ARM and Thumb
+alike, are cycle-identical in dingbat and mGBA. One is not:
+
+| subject | waits | dingbat | mGBA |
+|---|---|---|---|
+| thumb multiplies | 3/1 prefetch ON | 340 | 212 |
+| thumb multiplies | 3/1 prefetch off | 535 | 535 |
+| thumb multiplies | 4/2 prefetch ON | 357 | 239 |
+| thumb multiplies | 4/2 prefetch off | 614 | 614 |
+
+Two cycles per instruction, over 64 multiplies, and only with the prefetcher
+on. ARM multiplies agree exactly, so it is specific to 16-bit fetches being
+served out of the buffer after the CPU has spent internal cycles off the bus
+-- `rom_access_cycles`' prefetch-hit branch in bus.nim, where the credit
+earned while the bus was free is set against a 16-bit `need`.
+
+That is the shape of the section 4 drift: Yu-Gi-Oh's divergence starts at
+the instruction that enables the prefetcher, accumulates about a cycle per
+17 instructions of Thumb code, and decides the starter deck.
+
+**Not fixed, deliberately.** mGBA is not an oracle and this is exactly the
+kind of question that has been settled the wrong way before. The ROM runs
+from the cartridge, so hardware can answer it directly on a flashcart -- the
+link cable cannot, because the prefetcher only affects opcodes fetched from
+the gamepak and a multiboot payload runs from RAM.
