@@ -1794,6 +1794,16 @@ proc main() =
     # queued. Off, a real timing error is separable from sampling resolution.
     if getEnv("DINGBAT_NO_WAITLOOP") == "1":
       emu.cpu.attempt_waitloop_detection = false
+    # DINGBAT_LAYER_MASK=<hex>: composite only these layers (bits 0-3 = BG0-3,
+    # bit 4 = OBJ), the debug panel's per-layer toggle reached headlessly. One
+    # screenshot per layer is what separates "one BG's per-line scroll differs"
+    # from "the composite differs": a composite test cannot see a single
+    # layer's shift, because a row of two mixed palettes is neither layer
+    # translated. mGBA's layer toggles give the comparison column.
+    let layer_mask = getEnv("DINGBAT_LAYER_MASK")
+    if layer_mask.len > 0:
+      emu.ppu.debug_layer_mask = uint16(parseHexInt(layer_mask))
+      emu.ppu.render_dirty = true
     if sio_driver == "loopback":
       emu.set_sio_driver(LoopbackSioDriver())
     for frame in 0 ..< timeout_frames:
