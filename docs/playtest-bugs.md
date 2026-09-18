@@ -349,6 +349,35 @@ distinct colour pairs -- which points at a colour special effect being
 applied with a different coefficient, or on a different line, rather than at
 geometry.
 
+Nor is it a register left in the wrong state. Every readable PPU
+register agrees at that frame -- DISPCNT, DISPSTAT, all four BGxCNT, WININ,
+WINOUT, BLDCNT and BLDALPHA -- and `BLDCNT` reads 0, so whatever blend
+produced those pixels was set up and taken down *within* the frame. (The
+write-only registers cannot be compared this way: dingbat returns open bus
+for the BG offsets, the window bounds, MOSAIC and BLDY, where mGBA returns
+the last value written. Reading open bus is the correct behaviour, so that
+is not a finding.)
+
+A per-scanline effect landing differently, then -- and the DMA channels
+say which one. At that frame DKC2 has **DMA0 armed on H-blank, repeating,
+writing two halfwords from a table in EWRAM to 0x04000014**, which is
+BG1HOFS and BG1VOFS: a per-line parallax scroll, driven by exactly the
+mechanism docs/hwprobe-questions.md is still asking about. (The source
+address and count are only legible in mGBA's dump, since dingbat returns
+open bus for the write-only DMA registers.)
+
+The obvious form of that -- a line early or late -- does not fit either:
+comparing dingbat's row y against the reference's rows y+/-1 and y+/-2
+improves only 6 of the 160 differing rows, and none of them to zero. What
+would fit is the *table pointer* drifting: a repeating H-blank DMA whose
+grant is timed differently can consume a different number of entries over a
+frame, after which every line is drawn with a neighbouring line's scroll
+values and no single offset describes the result. That is a guess, and the
+page that constrains it is `tests/roms/payloads/hdmasweep.s`; worth
+re-testing here once it has its hardware column.
+Settling it properly needs a per-layer dump at one frame in both emulators,
+which is also what Fire Emblem (section 6) has been waiting on.
+
 Not traced further. The screenshots and the per-row analysis are
 reproducible with `bootsweep.py show "Donkey Kong Country 2"`.
 

@@ -71,6 +71,24 @@ def odd_frames(hashes):
     return out
 
 
+def witnessed(hashes):
+    """Of the frames dingbat drew alone, how many did the two references draw
+    IDENTICALLY to each other?
+
+    This is what separates a finding from an animation. On a screen that
+    animates every frame the three can sit at three different points of the
+    same sweep, all equally right, and dingbat's exact frames can still be
+    unique to it -- but then the references do not agree with each other
+    either, and there is nothing to arbitrate. When they are byte-identical to
+    each other at the very frames where dingbat is alone, they agree on what
+    should be on screen and dingbat does not.
+    """
+    a, b = (hashes[r] for r in REFERENCES)
+    others = set(a) | set(b)
+    odd = [k for k, x in enumerate(hashes['dingbat']) if x not in others]
+    return sum(1 for k in odd if a[k] == b[k]), len(odd)
+
+
 def sweep_one(rom, frames, keep=None):
     title = os.path.splitext(os.path.basename(rom))[0]
     # per-process, so several sweeps can run at once without sharing a game.sav
@@ -86,9 +104,11 @@ def sweep_one(rom, frames, keep=None):
     # not do the same thing to each other. The floor keeps a handful of frames
     # of fade timing from being news.
     alone = ding > 8 and ding > 4 * max(refs + [1])
+    agreed, total = witnessed(hashes)
     return {'title': title, 'rom': rom, 'frames': frames,
             'odd': {n: counts[n][0] for n in counts},
             'first_odd': first, 'alone': alone,
+            'witnessed': agreed, 'witnessed_of': total,
             'seconds': round(time.time() - started, 1)}
 
 
@@ -110,7 +130,14 @@ def _one(job):
 
 def report(r):
     marks = ' '.join(f'{n}={r["odd"][n]}' for n in ['dingbat'] + REFERENCES)
-    flag = '  <<< dingbat alone' if r['alone'] else ''
+    flag = ''
+    if r['alone']:
+        # the references agreeing with each other on those frames is what
+        # makes it worth a look; without that it is an animation phase
+        w = r.get('witnessed', 0)
+        flag = ('  <<< dingbat alone, references agree on '
+                f'{w}/{r.get("witnessed_of", 0)}' if w else
+                '  <   dingbat alone but the references disagree too')
     first = f'  first@{r["first_odd"]}' if r['first_odd'] is not None else ''
     print(f'{r["title"][:52]:<54}{marks}{first}{flag}', flush=True)
 
@@ -192,9 +219,12 @@ def main(argv):
             with open(args.out, 'w') as f:
                 json.dump(results, f, indent=1)
     flagged = [r for r in results if r.get('alone')]
-    print(f'\n{len(results)} swept, {len(flagged)} where dingbat stands alone')
-    for r in flagged:
-        print(f'  {r["title"]}  (first odd frame {r["first_odd"]})')
+    witnessed_ = [r for r in flagged if r.get('witnessed')]
+    print(f'\n{len(results)} swept, {len(flagged)} where dingbat stands alone, '
+          f'{len(witnessed_)} of those with the references agreeing')
+    for r in sorted(flagged, key=lambda r: -r.get('witnessed', 0)):
+        w = f'{r.get("witnessed", 0)}/{r.get("witnessed_of", 0)} witnessed'
+        print(f'  {r["title"]}  (first odd frame {r["first_odd"]}, {w})')
     return 0
 
 
