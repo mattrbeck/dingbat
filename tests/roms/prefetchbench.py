@@ -23,7 +23,8 @@ sys.path.insert(0, HERE)
 import romfix                                # noqa: E402
 
 SUBJECTS = ['arm nops', 'arm loop', 'arm nops+load', 'arm multiplies',
-            'thumb nops', 'thumb loop', 'thumb nops+load', 'thumb multiplies']
+            'thumb nops', 'thumb loop', 'thumb nops+load', 'thumb multiplies',
+            'thumb mul in IWRAM']
 WAITS = ['3/1 pf-ON', '3/1 pf-off', '4/2 pf-ON', '4/2 pf-off']
 RESULTS = 0x02000000
 MARKER = 0x02000FFC

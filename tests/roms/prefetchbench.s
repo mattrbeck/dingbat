@@ -35,6 +35,19 @@ _start:
     .space 0x20
 main:
     ldr sp, =0x03007F00
+    @ Copy the Thumb multiply block into IWRAM. It uses only immediates, so
+    @ it runs anywhere. Timed from there it costs no cartridge fetches at
+    @ all, which is the floor any cartridge measurement has to sit above:
+    @ internal cycles cannot be overlapped away.
+    ldr r0, =subject_h
+    ldr r1, =0x03001000
+    ldr r2, =subject_h_end
+    ldr r3, =subject_h
+    sub r2, r2, r3
+1:  ldr r4, [r0], #4
+    str r4, [r1], #4
+    subs r2, r2, #4
+    bgt 1b
     ldr r10, =0x02000000           @ where results go
     adr r11, subjects
     mov r9, #0                     @ subject index
@@ -89,6 +102,7 @@ subjects:
     .word subject_f + 1
     .word subject_g + 1
     .word subject_h + 1
+    .word 0x03001001               @ subject I: subject_h copied into IWRAM
     .word 0
 
     .align 2
@@ -171,3 +185,4 @@ subject_h:                         @ 64 multiplies: internal cycles throughout
     mul r1, r2
     .endr
     bx  lr
+subject_h_end:

@@ -221,29 +221,37 @@ hardware-verified. Needs a per-layer dump in both at the same frame.
 
 ## 7. Prefetch: Thumb code with internal cycles (the Yu-Gi-Oh residue)
 
-`tests/roms/prefetchbench.{s,py}` times eight instruction patterns fetched
-from the cartridge, across four wait settings. Seven of them, ARM and Thumb
-alike, are cycle-identical in dingbat and mGBA. One is not:
+`tests/roms/prefetchbench.{s,py}` times nine instruction patterns across four
+wait settings. Eight are cycle-identical in dingbat and mGBA, ARM and Thumb
+alike. One is not, and the ninth subject says which emulator is wrong:
 
 | subject | waits | dingbat | mGBA |
 |---|---|---|---|
-| thumb multiplies | 3/1 prefetch ON | 340 | 212 |
-| thumb multiplies | 3/1 prefetch off | 535 | 535 |
-| thumb multiplies | 4/2 prefetch ON | 357 | 239 |
-| thumb multiplies | 4/2 prefetch off | 614 | 614 |
+| thumb multiplies (from ROM) | 3/1 prefetch ON | 340 | 212 |
+| thumb multiplies (from ROM) | 3/1 prefetch off | 535 | 535 |
+| thumb multiplies (from ROM) | 4/2 prefetch ON | 357 | 239 |
+| thumb multiplies (from ROM) | 4/2 prefetch off | 614 | 614 |
+| **the same block, from IWRAM** | any | **333** | **333** |
 
-Two cycles per instruction, over 64 multiplies, and only with the prefetcher
-on. ARM multiplies agree exactly, so it is specific to 16-bit fetches being
-served out of the buffer after the CPU has spent internal cycles off the bus
--- `rom_access_cycles`' prefetch-hit branch in bus.nim, where the credit
-earned while the bus was free is set against a 16-bit `need`.
+Subject I copies that exact multiply block into IWRAM and times it there, so
+it costs no cartridge fetch at all. Both emulators agree it takes 333 cycles.
+That is a floor: the prefetcher can hide the cost of fetching an instruction,
+but nothing can make an instruction execute faster than its own internal
+cycles.
 
-That is the shape of the section 4 drift: Yu-Gi-Oh's divergence starts at
-the instruction that enables the prefetcher, accumulates about a cycle per
-17 instructions of Thumb code, and decides the starter deck.
+dingbat's cartridge run with the prefetcher on is 340, seven cycles above the
+floor -- the buffer hiding almost all of the fetch, which is what the
+hardware is supposed to do. mGBA's is 212, which is 121 cycles *below* its
+own floor: with its prefetcher on, code in the cartridge runs faster than the
+same code in zero-wait RAM. That cannot happen on hardware.
 
-**Not fixed, deliberately.** mGBA is not an oracle and this is exactly the
-kind of question that has been settled the wrong way before. The ROM runs
-from the cartridge, so hardware can answer it directly on a flashcart -- the
-link cable cannot, because the prefetcher only affects opcodes fetched from
-the gamepak and a multiboot payload runs from RAM.
+**So dingbat is most likely right here and mGBA is wrong**, and the reading
+in section 4 was backwards: dingbat is not drifting slow through Yu-Gi-Oh's
+Thumb code, mGBA is running it fast. The second reference agrees with mGBA on
+the resulting deck, so either it shares the model or it is fast for its own
+reasons; it exposes no cycle counter, so this bench cannot ask it directly.
+
+Nothing changed in dingbat on the strength of this. The bench runs from the
+cartridge, so a flashcart settles it outright, and that is worth doing before
+anyone touches the model: the argument above is an internal-consistency
+argument about mGBA, not a measurement of hardware.
