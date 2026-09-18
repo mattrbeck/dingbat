@@ -1342,6 +1342,14 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
     gba.bus.rom_free_since -= base
   else:
     gba.bus.rom_free_since = 0
+  # The post-DMA open-bus window bounds this stamp against cycles taken from
+  # the scheduler, so it has to move with the scheduler. Left behind it sat a
+  # whole frame in the future, and the window then could not open again until
+  # the next burst re-stamped it.
+  if gba.bus.dma_request_at >= base:
+    gba.bus.dma_request_at -= base
+  else:
+    gba.bus.dma_request_at = 0
   if gba.interrupts.gate_open_at >= base:
     gba.interrupts.gate_open_at -= base
   else:

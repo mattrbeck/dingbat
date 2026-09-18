@@ -1106,3 +1106,146 @@ It is a hot-path change touching three named games and several suite rows, so
 it wants a session that can watch the gates, not a drive-by. `obuswin.s`,
 `obuswint.s` and `obusprobe.s` reproduce every number above in seconds, and
 `-d:obusdbg` prints the cycle stamps the current predicate turns on.
+
+
+## 14. `DMA Prefetch Break`: what the window cannot do, and what can, 2026-09-18
+
+Section 13 took the row's premise apart and left "model the latch as a
+register" as the next attempt. That attempt was made and it is the wrong
+target. The row does not turn on what the open-bus latch holds; it turns on
+**when the H-blank DMA's word reaches the bus**. Below is the proof that the
+window is not the lever, the measurement that says what is, and a prototype
+that reproduces the measured behaviour for the first time.
+
+### The test, read from its own source
+
+`mgba-suite-auto/src/misc-edge.c`:
+
+```c
+u32* ptr = (u32*) 0x10000000;
+DMA3COPY(&a, &b, DMA_HBLANK | DMA_SRC_FIXED | DMA_DST_FIXED | DMA_REPEAT | DMA32 | 1);
+for (i = 0; i < 0x00008000; ++i) {
+        u32 value = *ptr;
+        ++ptr;
+        if ((value & 0xFFC0FFC0) != 0x40004000) { out[0] = (u32) ptr; break; }
+}
+```
+
+One word per H-blank, and a ROM-resident Thumb loop reading unmapped space
+until a read is not the prefetched opcode. `out[0] = 0x10000000 + 4 x reads`,
+so the constant `0x10002A94` is 2725 reads. The loop is exactly **36 cycles**
+an iteration here, and dingbat's window is the 3-cycle slot
+`(fetch_start, fetch_start + 3]`, so the exit is a phase coincidence between a
+once-a-line event and a 36-cycle loop. Note the mask: a HALF-and-half latch
+would also break the loop, which is why section 13's finding looked relevant.
+
+### No bounds can close it
+
+Two sweeps, both against the whole suite (one run is about a second):
+
+* Every `(lo, hi)` in a 13x13 grid around the shipped bounds. `Break` takes
+  **three values in the entire space** -- `0x00000000`, `0x100024B8` and
+  `0x10002540`. The target is not among them.
+* Better: disable the window entirely so the loop never exits, log the
+  DMA-to-read phase offset for all 16384 reads, and evaluate **every**
+  possible sub-instruction slot offline in one pass. The shipped slot
+  reproduces 2384 exactly. Only two degenerate one-cycle slots at an offset
+  of -11 (the burst landing eleven cycles before the load's own fetch, which
+  is no mechanism at all) give 2725, and the achievable exit counts are
+  otherwise **dense** -- nearly every integer is reachable by some slot.
+
+Dense reachability is the important half. It means matching this constant by
+choosing a window is fitting, not modelling, and a fit here would be worth
+nothing: the suite's own `Flip` rows move by a skip quantum when the poll
+loop's phase shifts.
+
+### Nobody else passes it either
+
+Both reference emulators were run on the same ROM to `ALL DONE`:
+
+| | `Break` | reads | Misc |
+|---|---|---|---|
+| hardware (the ROM's constant) | `0x10002A94` | 2725 | -- |
+| dingbat | `0x10002540` | 2384 | 11/12 |
+| the second reference (`nba`) | `0x10002540` | 2384 | 11/12 |
+| mGBA 0.10.5 | `0x100024B8` | 2350 | 6/12 |
+
+dingbat and the second reference agree **bit for bit**, and mGBA's own value
+is one of the three the bounds sweep reaches. Three independent cores landing
+inside a three-element set is what a shared structural gap looks like.
+
+### What the lever is, measured
+
+Move the H-blank DMA request later and the row closes. At
+`-d:HBLANK_DMA_REQUEST_DELAY=9` (and 10, 11, 12) the **entire suite is green,
+6998/6998**, and across all 6998 rows the only line that changes versus the
+shipped delay of 2 is this one flipping FAIL to PASS. A four-wide plateau with
+zero collateral is not a knife-edge fit.
+
+But 9 is refuted by hardware, and the payloads say so precisely:
+
+| | hardware | dingbat @ delay 2 | dingbat @ delay 9 |
+|---|---|---|---|
+| hdmamul (multiply loop, bus idle) | **227 on all fourteen** | 226 flat | **219 flat** |
+| hdmasweep (32-bit ROM load, 8 waits) | 219 219 218 216 227 227 216 227 227 227 227 227 227 227 | 226 flat | 219 flat |
+
+On an idle bus hardware wants the grant one cycle **earlier** than dingbat has
+it (227 against 226, so the request belongs at flag+1); the suite's loop wants
+it about seven cycles **later**. One constant cannot serve both, and that is
+the whole point -- the difference between them is the deferral hdmasweep
+measures and dingbat does not model: **the grant waits for the CPU's bus
+access in flight, and for nothing else.** An idle bus defers nothing; the
+Break loop's gamepak accesses defer several cycles.
+
+The arithmetic closes. Instrumenting the grant in that loop: the request lands
+with the in-flight access ending 1 or 3 cycles later, the CPU-to-DMA hand-off
+costs 2, and the transfer itself 2. So the word reaches the bus at request+5
+to request+7 -- the 9-ish effective delay the suite wants, without moving the
+constant hardware pins at flag+1.
+
+### A prototype that reproduces the shape
+
+Three edits, and they are small enough to redo from this description:
+
+1. `Bus.access_end`, a stamp of when the CPU's most recent bus access
+   finishes. Set it right after every `bus.cycles += bus.access_cycles(...)`
+   in the six data-access wrappers and at the end of the two fast fetch paths
+   in `fetch_half`/`fetch_word`; internal cycles must never move it, which is
+   what separates the load page from the multiply page.
+2. `etHDMARequest` re-arms itself at `access_end` when that is in the future
+   (bounded, the longest gamepak access is 18 cycles), instead of granting.
+3. Stamp the open-bus window from the cycle the transfer **ends** rather than
+   the cycle the burst was requested -- that is when the word is actually on
+   the bus, and it is worth four cycles here.
+
+Result on the payload rig: **hdmasweep stops being flat.** It was 226 on all
+fourteen rows; it now varies (217, 219, 217, 217, 216, ...) while hdmamul
+stays flat at 226. That is the measured rule -- load varies, multiply flat --
+reproduced for the first time.
+
+It is not shippable yet and was not shipped. The shape is right and the
+magnitudes are not: dingbat defers on rows where hardware defers nothing, so
+the sawtooth sits near 216-219 where hardware runs up to 227. Calibrating it
+means moving the base delay to flag+1 as hdmamul demands and then getting the
+deferral to fire only for an access genuinely spanning the request cycle --
+and dingbat dispatches events at instruction boundaries, so by the time
+`etHDMARequest` runs, the access that spanned the request cycle has usually
+already been charged. That is the same sub-instruction resolution problem the
+verdicts doc named, now with a number on it (about seven cycles) and two
+hardware payloads bracketing the answer.
+
+It also touches DMA timing globally -- 32 Timing rows, the Metroid title fix,
+DKC2 -- so it wants a supervised session. The gates are cheap: one suite run
+is about a second, and `payloadcmp.py --emulators-only --block=0x02008000:8`
+on hdmasweep.s and hdmamul.s is the hardware column.
+
+### One real bug found on the way
+
+`end_frame` rebases every absolute-cycle anchor it knows about -- the
+scheduler, the APU, timers, `rom_free_since`, `gate_open_at`, EEPROM's
+`busy_until` -- but not `Bus.dma_request_at`, which `read_open_bus_value`
+compares against cycles taken from the scheduler. Left behind, it sat a whole
+frame in the future, and the open-bus window could not open again until the
+next burst re-stamped it. Fixed. Every gate is byte-identical either way,
+which is why it survived: the window it silently held shut is one almost
+nothing reads.

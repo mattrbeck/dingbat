@@ -94,12 +94,34 @@ file's own field comment says. More to the point, `obuswint.s` shows the latch
 is **per-halfword**: two NOPs after a burst, Thumb code reads `DEAD6019`, half
 the DMA word beside a freshly fetched opcode halfword. `read_open_bus_value`
 answers with a predicate — the whole word or none of it — and no predicate of
-that shape can return a half-and-half word at any bounds, so the fix is to
-model the latch as a register whose halves are written independently, not to
-dispatch a DMA mid-instruction. Moving the predicate's lower bound to what
-hardware measures for ARM code in IWRAM makes every measured row right and
-costs `DMA Prefetch Read`, driving this row to `0x00000000`; both bounds tried
-are tabulated in that section.
+that shape can return a half-and-half word at any bounds. Moving the
+predicate's lower bound to what hardware measures for ARM code in IWRAM makes
+every measured row right and costs `DMA Prefetch Read`, driving this row to
+`0x00000000`; both bounds tried are tabulated in that section.
+
+**The latch is not what this row turns on** (docs/playtest-bugs.md section
+14). Modelling it as a register was tried and is the wrong target. What this
+row turns on is *when the H-blank DMA's word reaches the bus*, and two sweeps
+prove no window can fix that: across a 13x13 grid of bounds `Break` takes only
+three values (`0x00000000`, `0x100024B8`, `0x10002540`), and disabling the
+window to log the phase offset of all 16384 reads shows the reachable exit
+counts are dense -- almost every integer is hit by some sub-instruction slot,
+so matching 2725 by choosing one is fitting, not modelling. Both reference
+emulators fail the row too; one returns dingbat's value bit for bit and the
+other returns one of the same three.
+
+The lever is the grant. At `-d:HBLANK_DMA_REQUEST_DELAY=9` (through 12) the
+whole suite is green, 6998/6998, and that row is the only line in all 6998
+that changes. The constant itself is refuted -- hdmamul measures 227 on an
+idle bus where dingbat gives 226, so the request belongs at flag+1, not later
+-- but the gap between "flag+1 on an idle bus" and "about flag+9 in this loop"
+is exactly the deferral hdmasweep measures and dingbat does not model: the
+grant waits for the CPU's bus access in flight, and for nothing else. A
+prototype of that deferral makes hdmasweep sawtooth for the first time while
+hdmamul stays flat; it is not calibrated and was not shipped. So closing this
+row still needs sub-instruction dispatch resolution, as this file said -- but
+the size of the correction is now known (about seven cycles) and two hardware
+payloads bracket it.
 
 What it did find is a real bug, now fixed. A DMA dispatched from a scheduler
 handler bills its cycles to `bus.cycles`, which a running CPU closes out
