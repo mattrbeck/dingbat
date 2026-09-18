@@ -1830,7 +1830,12 @@ proc main() =
       if mode == tmMgbaSuite and test_out.mgba_debug_output.contains("ALL DONE"):
         test_out.finished = true
     if mode == tmScreenshot and screenshot_path.len > 0:
-      write_ppm(screenshot_path, emu.ppu.framebuffer, 240, 160, color_mode)
+      # Always colour on GBA: greyscale is a Game Boy notion (the DMG
+      # screenshot suites compare against grey references), and a
+      # greyscaled GBA frame differs from any colour reference in every
+      # lit pixel -- which reads as a state divergence that grows as a
+      # scene fades in, and cost another session a night's bisecting.
+      write_ppm(screenshot_path, emu.ppu.framebuffer, 240, 160, true)
       echo screenshot_path
       quit(0)
   else:
