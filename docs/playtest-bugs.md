@@ -2038,3 +2038,83 @@ In priority order, and all of it needs a cart in the slot:
 3. Part D: the replica's break address, three-way.
 4. Parts B and C: the DMA's cost to a ROM-fetched loop, and the open-bus
    window's closing edge against a gamepak fetch.
+
+
+## 21. `DMA Prefetch Break`: the target is out of range, and the loop period is why, 2026-09-18 evening
+
+Sections 14 and 20 argued the row sits on a ladder we cannot climb. With the
+latch built (section 13) and `-d:obuslatchdbg` printing a stamp per unmapped
+read, the loop can now be read off directly instead of reasoned about, and
+the conclusion is stronger and simpler than a ladder.
+
+### What the loop actually does, measured
+
+2418 word reads, and every number below comes from the log, not a model:
+
+| quantity | value |
+|---|---|
+| loop period | **36 cycles** (2413 of 2418 iterations; 4 stragglers at 38/40/42) |
+| fetch -> read, the whole window | **3 cycles** |
+| DMA grants during the entire loop | **four**: 72, 85080, 86312, 87544 |
+| grant spacing | 1232, i.e. one scanline |
+
+The loop starts in V-blank and spends **2321 of its 2418 reads there, with no
+H-blank DMA in existence**. Only three grants are live, one per visible line,
+and we break on the third: its grant at 87544 falls between that read's fetch
+at 87543 and its data cycle at 87546. Everything about this row is decided in
+three scanlines at the very end.
+
+Also settled by the same log: the loop runs from ROM, a 16-bit bus, so every
+fetch mirrors into **both** halves of the latch and `h0 == h1` on every
+iteration. The per-halfword machinery section 13 wanted is real and correct
+and is **inert for this test**. It cannot be what closes this row.
+
+### Why nothing reaches the target
+
+The grant moves `1232 mod 36 = 8` cycles per line against the loop's phase,
+and `gcd(8, 36) = 4`. So the grant only ever visits **9 of the 36 offsets**,
+all congruent mod 4. Either one of those nine lands inside the 3-cycle window
+within nine lines, or none ever will. That caps how long the loop can
+survive, and the cap is the whole story:
+
+**Over every entry phase in a full 1232-cycle period, the exit index can only
+land in 2316..2623.** The suite wants **2725**. It is not on another rung of
+a ladder -- it is outside the achievable range entirely, and no window width
+from 1 to 12 changes that (the range only shrinks).
+
+That retires the remaining knobs at once. It is not the window's width, not
+its lower bound, not the entry phase, not the grant dot, and not the latch's
+shape. `-d:OBUS_LEAD` confirms it from the other side: the reachable set is
+`{2418, 25688, 0}` -- lead 1 overshoots by 684 lines, lead >= 3 never breaks
+at all (reproducing section 13's `0x00000000`).
+
+### What is left, and it is measurable tonight
+
+The cap comes from `gcd(1232 mod P, P)` for loop period `P`. Sweeping `P`
+with everything else held at the measured values:
+
+| P | 1232 mod P | gcd | offsets visited | reachable exits | 2725? |
+|---|---|---|---|---|---|
+| 34 | 8 | 2 | 17 | 2452..3067 | **yes** |
+| 35 | 7 | 7 | 5 | 2382..2557 | no |
+| **36 (ours)** | 8 | 4 | 9 | **2316..2623** | **no** |
+| 37 | 11 | 1 | 37 | 2253..2818 | **yes** |
+| 38 | 16 | 2 | 19 | 2194..2809 | **yes** |
+| 31 | 23 | 1 | 31 | 2689..3602 | **yes** |
+
+So the expected constant is only explicable if the real loop takes **31, 34,
+37 or 38 cycles** -- not 36. A period one or two cycles longer than ours
+would do it, and the two nearest candidates, 37 and 38, are exactly the size
+of error a single mis-charged pipeline refill would produce. `clear_pipeline`
+charges a flat `2 * wait_s` for the branch at the bottom of this loop, which
+is 6 of the 36 cycles and the largest single term in it (section 20).
+
+This is a falsifiable prediction, and `tests/roms/prefetchdma.gba` Part A
+already measures precisely it: the period of a seven-instruction Thumb loop
+in ROM at 4/2 waits with the prefetcher off. **If hardware reports 36, the
+expected constant cannot be a property of this loop at all and the row should
+be treated as build-specific magic** (section 20 on its provenance). If it
+reports 37 or 38, the row is a real timing bug in our ROM fetch accounting
+and the open-bus model was never implicated.
+
+Either way the next move is one number off a cartridge, not more modelling.

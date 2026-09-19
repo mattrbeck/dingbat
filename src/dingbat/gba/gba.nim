@@ -372,6 +372,11 @@ type
     # still lets the two halves answer differently, which is what DEAD6019
     # requires.
     obus_half_at*:       array[2, CycleCount]
+    # -d:obusahead: the bus clock at the PREVIOUS instruction's start. The
+    # real pipeline issued this opcode's fetch about one instruction before
+    # dingbat charges it, so that is the cycle the fetch actually drove the
+    # bus at. Timing-neutral: only the latch stamps move.
+    obus_prev_at*:       CycleCount
 
   WLInstrKind* = enum
     wlLongBranchLink, wlUnconditionalBranch, wlSoftwareInterrupt,

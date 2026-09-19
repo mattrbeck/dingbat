@@ -170,12 +170,16 @@ when defined(obuslatch):
     if region == 0x1 or region == 0x4 or region > 0xD or
        bits_range(pc, 28, 31) > 0:
       return                       # unmapped pc would recurse into open bus
+    when defined(obusahead):
+      let now = cpu.gba.bus.sched.cycles + CycleCount(cpu.gba.bus.cycles)
     if cpu.cpsr.thumb:
       let a = pc and not 1'u32
       cpu.gba.bus.obus_drive_half(a, cpu.gba.bus.read_half_internal(a))
     else:
       let a = pc and not 3'u32
       cpu.gba.bus.obus_drive_word(cpu.gba.bus.read_word_internal(a))
+    when defined(obusahead):
+      cpu.gba.bus.obus_prev_at = now
 
 proc read_instr*(cpu: CPU): uint32 {.inline.} =
   cpu.refill_pending = false

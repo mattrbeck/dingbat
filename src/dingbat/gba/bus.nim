@@ -848,6 +848,25 @@ proc install_fetch_cache(bus: Bus; page: uint32): bool =
   bus.fetch_c32 = int(bus.wait32_n[int(page)])
   true
 
+const OBUS_LEAD {.intdefine.} = 0
+  ## -d:OBUS_LEAD=N: the pipeline issues the NEXT fetch while this
+  ## instruction executes, so the last thing to drive the bus before a load's
+  ## data cycle is a fetch dingbat has not charged yet. N cycles of lead
+  ## model that; the exit of the mGBA suite's Break row is quantised in whole
+  ## scanlines, so this moves it in steps of 34 reads or not at all.
+
+when defined(obuslatchdbg):
+  # The driver's stdout is the harness protocol and the python runner
+  # captures its stderr, so a debug line only survives in a file.
+  var olat_file: File
+  var olat_ready = false
+  proc olat_log(msg: string) =
+    if not olat_ready:
+      olat_ready = olat_file.open(getEnv("OLAT_LOG", "/tmp/olat.txt"), fmAppend)
+    if olat_ready:
+      olat_file.writeLine(msg)
+      olat_file.flushFile()
+
 when defined(obuslatch):
   # How much of the latch one access fills is a property of the memory, not
   # of the instruction set: obusbus.s runs the identical Thumb block from
@@ -859,7 +878,8 @@ when defined(obuslatch):
     # The live bus clock, not the window's `sched.cycles - synced`: that one
     # is pinned until something calls catch_up, so a run of NOPs would stamp
     # every fetch with the same cycle and the halves could never disagree.
-    bus.sched.cycles + CycleCount(bus.cycles)
+    when defined(obusahead): bus.obus_prev_at
+    else: bus.sched.cycles + CycleCount(bus.cycles) + CycleCount(OBUS_LEAD)
 
   proc obus_drive_word*(bus: Bus; value: uint32) {.inline.} =
     bus.obus_latch = value
@@ -1063,11 +1083,11 @@ proc read_open_bus_value*(bus: Bus; address: uint32): uint8 =
     var seen = bus.obus_latch
     when defined(obuslatchdbg):
       if bus.dma_has_run:
-        stderr.writeLine "olat a=" & hex_str(address) &
+        olat_log("a=" & hex_str(address) &
              " lat=" & hex_str(bus.obus_latch) &
              " h0=" & $bus.obus_half_at[0] & " h1=" & $bus.obus_half_at[1] &
              " req=" & $bus.dma_request_at & " started=" & $started &
-             " dmaw=" & hex_str(bus.dma_open_bus)
+             " dmaw=" & hex_str(bus.dma_open_bus))
     if bus.dma_has_run and bus.dma_request_at <= started:
       if bus.dma_request_at > bus.obus_half_at[0]:
         seen = (seen and 0xFFFF0000'u32) or (bus.dma_open_bus and 0xFFFF'u32)
