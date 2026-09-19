@@ -357,6 +357,21 @@ type
     dma_open_bus*:       uint32
     dma_request_at*:     CycleCount
     dma_has_run*:        bool
+    # -d:obuslatch: the same bus modelled as a real 32-bit register instead
+    # of a predicate -- halves written independently, driven by opcode
+    # fetches and by the last word a DMA moved, read back whole. That is the
+    # only shape that can return the half-DMA, half-opcode word an AGB SP
+    # gives two NOPs after a burst (obuswint.s; docs/playtest-bugs.md
+    # section 13). Not serialized: a save state reloads it on the next fetch.
+    obus_latch*:         uint32
+    # The cycle each half was last driven by an opcode fetch. A DMA is not
+    # applied here but resolved against these at read time, because dingbat
+    # defers an immediate DMA to the next data access: it runs in the right
+    # CYCLE but the wrong ORDER, after fetches it should precede. Comparing
+    # stamps per half keeps the timestamps that already pass the suite and
+    # still lets the two halves answer differently, which is what DEAD6019
+    # requires.
+    obus_half_at*:       array[2, CycleCount]
 
   WLInstrKind* = enum
     wlLongBranchLink, wlUnconditionalBranch, wlSoftwareInterrupt,
@@ -986,6 +1001,9 @@ proc irq*(cpu: CPU)
 proc und*(cpu: CPU)
 proc schedule_interrupt_check*(intr: Interrupts; delay: int = 0)
 proc read_open_bus_value*(bus: Bus; address: uint32): uint8
+when defined(obuslatch):
+  proc obus_drive_word*(bus: Bus; value: uint32) {.inline.}
+  proc obus_drive_half*(bus: Bus; address: uint32; value: uint16) {.inline.}
 proc rom_cool*(bus: Bus) {.inline.}
 proc add_cycles*(bus: Bus; n: int) {.inline.}
 proc `[]`*(bus: Bus; address: uint32): uint8

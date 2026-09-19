@@ -848,6 +848,44 @@ proc install_fetch_cache(bus: Bus; page: uint32): bool =
   bus.fetch_c32 = int(bus.wait32_n[int(page)])
   true
 
+when defined(obuslatch):
+  # How much of the latch one access fills is a property of the memory, not
+  # of the instruction set: obusbus.s runs the identical Thumb block from
+  # four memories and gets three different answers. IWRAM and BIOS place a
+  # halfword into the half its own address bit 1 selects; OAM drives the
+  # whole aligned word from one access; the 16-bit memories -- EWRAM, VRAM
+  # and the gamepak -- cannot fill both halves at once, and mirror.
+  proc obus_stamp(bus: Bus): CycleCount {.inline.} =
+    # The live bus clock, not the window's `sched.cycles - synced`: that one
+    # is pinned until something calls catch_up, so a run of NOPs would stamp
+    # every fetch with the same cycle and the halves could never disagree.
+    bus.sched.cycles + CycleCount(bus.cycles)
+
+  proc obus_drive_word*(bus: Bus; value: uint32) {.inline.} =
+    bus.obus_latch = value
+    let now = bus.obus_stamp()
+    bus.obus_half_at[0] = now
+    bus.obus_half_at[1] = now
+
+  proc obus_drive_half*(bus: Bus; address: uint32; value: uint16) {.inline.} =
+    let region = bits_range(address, 24, 27)
+    let now = bus.obus_stamp()
+    if region == 0x0 or region == 0x3:
+      if (address and 2) != 0:
+        bus.obus_latch = (bus.obus_latch and 0x0000FFFF'u32) or
+                         (uint32(value) shl 16)
+        bus.obus_half_at[1] = now
+      else:
+        bus.obus_latch = (bus.obus_latch and 0xFFFF0000'u32) or uint32(value)
+        bus.obus_half_at[0] = now
+    else:
+      if region == 0x7:
+        bus.obus_latch = bus.read_word_internal(address and not 3'u32)
+      else:
+        bus.obus_latch = uint32(value) or (uint32(value) shl 16)
+      bus.obus_half_at[0] = now
+      bus.obus_half_at[1] = now
+
 proc fetch_half*(bus: Bus; address: uint32): uint16 {.inline.} =
   let page = bits_range(address, 24, 27)
   if page == bus.fetch_page or bus.install_fetch_cache(page):
@@ -1009,6 +1047,34 @@ proc read_word_rotate*(bus: Bus; address: uint32): uint32 =
 proc read_open_bus_value*(bus: Bus; address: uint32): uint8 =
   log("Reading open bus at " & hex_str(address))
   let shift = (address and 3) * 8
+  when defined(obuslatch):
+    # Each half answers for itself: it shows the DMA's word if the burst was
+    # requested after that half was last fetch-driven and no later than this
+    # read began. Both halves agreeing reproduces the old all-or-nothing
+    # answer; them disagreeing is DEAD6019, which no single predicate can
+    # produce (docs/playtest-bugs.md section 13).
+    if bus.dma_active:
+      return uint8(bus.dma_open_bus shr shift)
+    let acc = if bits_range(address, 28, 31) > 0: 1
+              else: int(bus.wait16_n[bits_range(address, 24, 27)])
+    let started = bus.bus_now() - CycleCount(acc)
+    if not bus.sched.dispatching:
+      bus.catch_up()
+    var seen = bus.obus_latch
+    when defined(obuslatchdbg):
+      if bus.dma_has_run:
+        stderr.writeLine "olat a=" & hex_str(address) &
+             " lat=" & hex_str(bus.obus_latch) &
+             " h0=" & $bus.obus_half_at[0] & " h1=" & $bus.obus_half_at[1] &
+             " req=" & $bus.dma_request_at & " started=" & $started &
+             " dmaw=" & hex_str(bus.dma_open_bus)
+    if bus.dma_has_run and bus.dma_request_at <= started:
+      if bus.dma_request_at > bus.obus_half_at[0]:
+        seen = (seen and 0xFFFF0000'u32) or (bus.dma_open_bus and 0xFFFF'u32)
+      if bus.dma_request_at > bus.obus_half_at[1]:
+        seen = (seen and 0x0000FFFF'u32) or
+               (bus.dma_open_bus and 0xFFFF0000'u32)
+    return uint8(seen shr shift)
   # GBATEK "GBA Unpredictable Things", Reading from Unused Memory: unused
   # memory "returns the recently pre-fetched opcode", which "might also
   # change if a DMA transfer occurs". The DMA's own unmapped reads see its

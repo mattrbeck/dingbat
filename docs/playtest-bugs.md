@@ -1060,14 +1060,18 @@ The same trials in Thumb, and this is the result that matters:
 |---|---|---|
 | 0 | opcode | same |
 | 1 | `DEADBEE3`, the DMA word | same |
-| **2** | **`DEAD6019`** | `60A86019` |
+| **2** | **`DEAD6019`** | `DEADBEE3` |
 | 3 | opcode | same |
 
 At two NOPs hardware returns **half the DMA word beside a freshly fetched
 opcode halfword**. The latch is per-halfword: a DMA fills both halves, and
 later halfword fetches overwrite them one at a time, each into the half its
 own address bit 1 selects -- the same placement rule closed as THUMBBUS this
-morning (section 12). dingbat loses the DMA half entirely.
+morning (section 12). dingbat keeps the DMA word whole and loses the
+opcode half -- it holds too much, not too little. (`60A86019` was
+written here first; that is mGBA's value for this row, a column slip.
+dingbat's own ARM two-NOP row is `DEADBEE3` too, which is the
+self-consistent reading: its window is wide at both ends.)
 
 ### What that rules out
 
@@ -1107,6 +1111,59 @@ it wants a session that can watch the gates, not a drive-by. `obuswin.s`,
 `obuswint.s` and `obusprobe.s` reproduce every number above in seconds, and
 `-d:obusdbg` prints the cycle stamps the current predicate turns on.
 
+
+### The latch, built: `-d:obuslatch`, 2026-09-18 evening
+
+The attempt above, carried out. `-d:obuslatch` replaces the predicate with a
+real 32-bit register: `Bus.obus_latch` plus `obus_half_at`, the cycle each
+half was last driven by an opcode fetch. Fetches drive it; the DMA does not
+write it but is resolved against those stamps at read time, per half. The
+default build is untouched -- every line is inside `when defined`.
+
+Three things it settles.
+
+**It is suite-neutral.** mGBA suite 6997/1 and the 1219-row runner
+1171/48, both identical to HEAD, and `DMA Prefetch Break` returns the same
+`0x100025C8`. The shape can be replaced without paying for it, which is what
+section 13 could not assume.
+
+**The latch reaches the shape the predicate could not.** It emits genuine
+half-and-half words -- `DEAD4770` on obuswint's three-NOP row -- where the
+old answer was all-or-nothing by construction. That was the whole point.
+
+**What is left is one number.** All three post-DMA rows
+(`obusprobe +48`, `obuswin +8`, `obuswint +8`) are wrong by exactly **one
+opcode fetch**: hardware puts the half-and-half word two NOPs after the
+burst, dingbat puts it three. Not a shape, not a window, not a constant to
+sweep -- one fetch of lag, the same distance on every row.
+
+Where the lag comes from is known and is not the latch's fault. The value
+driven is right: `obus_drive_pipeline` writes what r15 points at, two
+instructions ahead of the one executing, exactly as the BIOS latch beside it
+already does for the same reason (gbaedge IDENT). What is wrong is the
+ORDER. dingbat charges one fetch per instruction, lazily, when that
+instruction executes; and it defers an immediate DMA to the next data
+access. Both land in the right CYCLE -- which is why stamp arithmetic still
+passes 6997 rows -- but the fetches the real pipeline had already issued
+before the burst got the bus have not happened yet in ours. The latch is
+order-sensitive where the predicate was not, so it is the first thing in the
+emulator to show that ordering error as a wrong value rather than hiding it.
+
+That also says what closing `Break` would cost, and it is not this file: the
+fetch stream has to run ahead of execution, not beside it. Section 14's
+ladder argument is unchanged by any of this -- the exit stays on ladder A.
+
+### A harness trap found while gating the above
+
+`dingbat_test_runner` does not build the harness. It shells out to
+`./dingbat_test` as it finds it on disk (`harness_name`, near the argument
+parsing) and never checks that it matches the tree. A stale binary there
+silently produces a stale `tests/results_mgba_suite.md` -- during this
+session one from earlier the same day reported `DMA Prefetch Break` as
+`0x10002540`, one full 34-iteration rung off the `0x100025C8` the same
+commit's source actually gives, which is exactly the kind of difference this
+row is being mined for. Rebuild `dingbat_test` before believing a runner
+number, and before regenerating the results markdown.
 
 ## 14. `DMA Prefetch Break`: what the window cannot do, and what can, 2026-09-18
 

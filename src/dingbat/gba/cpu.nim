@@ -156,8 +156,30 @@ proc clear_pipeline*(cpu: CPU) =
     cpu.r[15] += 8
     cpu.gba.bus.add_cycles(2 * int(cpu.gba.bus.wait32_s[page]))
 
+when defined(obuslatch):
+  proc obus_drive_pipeline*(cpu: CPU) {.inline.} =
+    ## What drives the bus is the newest PIPELINE fetch, two instructions
+    ## ahead of the one executing -- r15, exactly. dingbat fetches lazily,
+    ## one per instruction at the executing address, so the fetch itself is
+    ## the wrong place to drive the latch from; the BIOS latch in read_instr
+    ## below already compensates the same way for the same reason (gbaedge
+    ## IDENT on an AGB SP). Without this every out-of-bounds row reads one
+    ## instruction short.
+    let pc = cpu.r[15]
+    let region = bits_range(pc, 24, 27)
+    if region == 0x1 or region == 0x4 or region > 0xD or
+       bits_range(pc, 28, 31) > 0:
+      return                       # unmapped pc would recurse into open bus
+    if cpu.cpsr.thumb:
+      let a = pc and not 1'u32
+      cpu.gba.bus.obus_drive_half(a, cpu.gba.bus.read_half_internal(a))
+    else:
+      let a = pc and not 3'u32
+      cpu.gba.bus.obus_drive_word(cpu.gba.bus.read_word_internal(a))
+
 proc read_instr*(cpu: CPU): uint32 {.inline.} =
   cpu.refill_pending = false
+  when defined(obuslatch): cpu.obus_drive_pipeline()
   if cpu.pipeline.size == 0:
     if cpu.cpsr.thumb:
       cpu.r[15] = cpu.r[15] and not 1'u32
