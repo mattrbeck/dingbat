@@ -168,6 +168,8 @@ proc hle_intr_wait(cpu: CPU; discard_old: bool; mask: uint16) =
   cpu.halted = true
   cpu.gba.interrupts.schedule_interrupt_check()  # may already be pending
 
+const INTRWAIT_TUNE {.intdefine.} = 44
+
 proc check_intr_wait*(cpu: CPU) =
   ## Execution reached the instruction after an IntrWait SWI (the user IRQ
   ## handler returned): re-halt unless a requested flag is in the mirror.
@@ -195,7 +197,12 @@ proc check_intr_wait*(cpu: CPU) =
     # routine's frame pop and the dispatcher's restore, instruction-counted
     # from the real BIOS. Keeps code after IntrWait phase-aligned with the
     # timer prescaler (mGBA suite Timer count-up rows).
-    cpu.gba.bus.add_cycles(44)  # INTRWAIT_TUNE
+    # vbwait.s (tests/roms/payloads) shows this HLE returning from a halted
+    # IntrWait one cycle later than the real BIOS does in our own core. The
+    # cycle is NOT here: at 43 the return matches and 16 Timer count-up rows
+    # fail, while the real BIOS passes them all -- so the excess is on the
+    # way in (the handler is entered a cycle late), not on the way out.
+    cpu.gba.bus.add_cycles(INTRWAIT_TUNE)
   else:
     # Re-halt with the check subroutine's register state (see hle_intr_wait)
     cpu.r[0] = 0

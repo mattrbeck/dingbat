@@ -2071,6 +2071,10 @@ and is **inert for this test**. It cannot be what closes this row.
 
 ### Why nothing reaches the target
 
+> **Corrected in section 22.** The argument below forgets the cycles the DMA
+> itself steals from the loop, which turn the +8 walk into +4 or +2 a line.
+> The target is reachable; what decides the row is the entry phase.
+
 The grant moves `1232 mod 36 = 8` cycles per line against the loop's phase,
 and `gcd(8, 36) = 4`. So the grant only ever visits **9 of the 36 offsets**,
 all congruent mod 4. Either one of those nine lands inside the 3-cycle window
@@ -2118,3 +2122,184 @@ reports 37 or 38, the row is a real timing bug in our ROM fetch accounting
 and the open-bus model was never implicated.
 
 Either way the next move is one number off a cartridge, not more modelling.
+
+
+## 22. `DMA Prefetch Break`: gamepak timing without a cartridge, and what silicon says, 2026-09-20
+
+Sections 12 and 19 both closed with "this needs the flashcart". It does not.
+The link rig can execute code from the cartridge region of a console with an
+**empty slot**, and that turned every remaining unknown about this row into a
+measurement. The flashcart was unavailable; nothing below used it.
+
+### The trick
+
+`slotfloat.s`: an empty slot answers a **nonsequential** halfword read with
+`addr >> 1` and a **sequential** one with `0xFFFF`. Byte-identical over
+sixteen runs, even and odd halfwords, at WAITCNT 0 (4/2).
+
+`0xFFFF` is the Thumb `BL` suffix: `pc = lr + 0xFFE`. So branch to `A` and
+the CPU executes the opcode `(A >> 1) & 0xFFFF`, fetched by a real
+nonsequential gamepak access with the real wait states (they belong to the
+memory controller, not the cartridge), and the *next* fetch -- sequential,
+floating -- branches to wherever `lr` was aimed. Section 12 looked at the same
+float and called it the end of the idea; it is the way home.
+
+The suffix also leaves `lr` = its own address + 2, so with `lr` aimed back
+into the slot the excursion **chains**: the hop after next lands `0x1002`
+further on, where the opcode is `0x801` greater. Two interleaved families
+(`mov r0` / `cmp` / `add` / `sub` / `and`, and one ending in `bx r6`) give
+about 130 cycles of continuous gamepak-region fetching in the shape N S S S.
+
+Rules this cost a power cycle each to learn:
+
+- **`bx pc` must sit on a word boundary.** Both emulators forgive a
+  misaligned one; the console never came back.
+- **Only WAITCNT 0 is safe.** At 3-wait and 2-wait first accesses the float is
+  sampled before it settles and the exit suffix is sometimes not there; at 8
+  waits the *address* has decayed by the time it is sampled. A timer watchdog
+  in the payload recovers a hang, but not garbage that rewrites the vector.
+- The emulators need an image that reads the same way: `tools/hwlink/
+  slotexec.py` pads payloadcmp's wrapper to 128 KiB of `0xFFFF` and plants
+  `A >> 1` at each address a payload's table names. Two table addresses one
+  halfword apart collide there and not on the console (it cost a false
+  3-cycle "disagreement"); keep them apart.
+
+### `slotexec.s`: the loop period is 36, on silicon
+
+Twenty single opcodes, each timed from IWRAM through the slot and back.
+**At 4/2 with the prefetcher off -- the setting the row runs under -- hardware,
+dingbat and mGBA agree on all twenty.** A taken branch in ROM costs 11. A load
+costs its fetch + 1 + 1 and the fetch after it is nonsequential; the same
+after a store; an unmapped data access costs 1; multiplies cost their
+internal cycles and the fetch after them is nonsequential too. Those are the
+terms of the Break loop, `3+3+(3+1+1)+(5+1)+5+3+11 = 36`. Section 21 asked
+hardware for one number and this is it: **36**.
+
+At 4/2 with the prefetcher **on**: hardware equals dingbat on all twenty and
+mGBA misses nine, including the "unmapped load" split section 20 recorded
+between the two emulators. That is the first silicon check the prefetch
+model has had.
+
+### `slotdma.s`: what an H-blank DMA does to code fetched from the gamepak
+
+Halted entry on a V-count match (section 18), a delay, a k-NOP sled, the
+chain, and DMA0 armed for H-blank with `TM1CNT_H` as its destination so the
+DMA's own write stamps itself. Three runs, every cell identical. With k
+sliding the DMA across N S S S (period 14):
+
+| DMA request lands in | DMA's write | cost to the CPU |
+|---|---|---|
+| the 5-cycle nonsequential fetch | floor +4 down to +0 | DMA + 2 |
+| either sequential fetch that another follows | floor +2 .. +0 | DMA + 2 |
+| the last sequential fetch before a branch | floor +2 .. +0 | DMA + 0 |
+| IWRAM NOPs (control) | floor, flat | DMA |
+
+So, measured in the gamepak region for the first time:
+
+1. **The grant waits for the access in flight and nothing else** -- a ramp the
+   length of that access, 0..4 then 0..2, 0..2, 0..2. dingbat is flat; mGBA
+   ramps 0..10 across whole instructions. (Section 15 found the same rule
+   against an 8-wait data load; this is the opcode-fetch case.)
+2. **After a DMA the next gamepak access is nonsequential**, and the slot
+   *shows* it: the fetch that should have floated to `0xFFFF` comes back as
+   `addr >> 1`. That is +2 exactly when the broken fetch would have been
+   sequential, and +0 when the next access was a branch target anyway. (The
+   chain's raw "+5" rows are this: the forced-N fetch replaced the exit suffix
+   with one more harmless opcode.) dingbat already cools its burst trackers
+   after a DMA; it just applies the penalty to the next *instruction* rather
+   than the next *access*.
+
+Then the row's own instruction, `ldmia r2!, {r3}` from unmapped memory, as a
+single hop, reporting what it loaded:
+
+| request lands in | loaded | note |
+|---|---|---|
+| the hop's first two fetches | `CA0ACA0A` / `CA0BCA0B` | not the DMA word: a forced-N fetch came between |
+| **the `ldmia`'s own fetch, all 3 cycles** | **`00000000`, the DMA's word** | the capture window |
+| its data cycle | `FFFFFFFF` | and **T drops by 1**: the DMA runs over the internal cycle that follows |
+| its internal cycle, or later | `FFFFFFFF` | |
+
+3. **The capture window is exactly the three cycles of the load's own fetch.**
+   With the stamp conventions aligned, that *is* `read_open_bus_value`'s
+   `(fetch_start, read_start]`. The window was never the bug.
+4. A DMA requested during a data cycle **overlaps the internal cycle after
+   it**. Neither emulator models that. Not fixed here.
+5. One real dingbat bug seen on the way: at the phase where the request falls
+   inside the unmapped read itself we return **`000000FF`** -- the read is
+   assembled a byte at a time and the catch-up inside it lets the DMA land
+   between bytes. Hardware reads a whole word. Not fixed here.
+
+### Section 21 was wrong, and why
+
+Section 21 argued the expected exit is out of range because the grant walks
+`1232 mod 36 = 8` cycles a line. It forgot the DMA's own stolen cycles: each
+grant delays the loop by 4 or 6, so the walk is **+4 or +2 a line**, not +8,
+and a walk of thirteen lines is reachable. With the measured rules:
+
+| request phase in the loop | lines until captured |
+|---|---|
+| `cmp` / `beq` fetches before the `ldmia` | 1 .. 3 |
+| the `ldmia`'s fetch | 0 |
+| its data and internal cycles, the `str` fetch | 12 .. 13 |
+| the `str`'s write, the `ands` fetch | 10 .. 12 |
+| `cmp`, `beq`, the branch target, the refill | 9 down to 4 |
+
+The expected `0x10002A94` is line 11, reachable from three phases: the
+`str`'s write and two cycles of the `ands` fetch. dingbat enters at the `beq`'s fetch and walks 2, 4, 6 -- line 2,
+`0x100025C8` -- and under the hardware rules above that walk is *identical*.
+**So the row is one number: the loop's entry phase, about fifteen cycles
+from where we have it.**
+
+### `vbwait.s`: the entry phase, against Nintendo's BIOS
+
+The loop is entered when `VBlankIntrWait` returns. The console runs the real
+BIOS, so this is the one leg never compared with anything. `vbwait.s` calls
+IntrWait from a fixed cycle (halted entry), starts TM0 on the return, and
+reads it at a second V-count halt wake two lines later; a second clock stamps
+handler entry (H) and the return (R).
+
+| | hardware | dingbat, real BIOS | dingbat, HLE | mGBA |
+|---|---|---|---|---|
+| T, waiting on **V-blank** | **2379** | 2379 (was 2378) | 2378 (was 2377) | 2379 |
+| T, waiting on **V-count 160** | **2378** | 2378 | 2377 | 2379 |
+| H, handler entered (V-blank / V-count) | 8381 / 8382 | 8379 / 8380 | 8380 / 8381 | 8378 / 8378 |
+| R - H, the way out | 82 | 84 | 84 | 85 |
+
+("was": before the fix below. Larger T = an earlier return.)
+
+- **The V-blank interrupt reaches the CPU one cycle sooner than a V-count
+  match raised at the same line boundary.** We shared one delay. Fixed:
+  `VBLANK_IRQ_SYNC_DELAY = LINE_IRQ_SYNC_DELAY - 1`. Both gates row-identical
+  (the suite cannot see it); with it the real-BIOS core reads hardware's T
+  on both rows.
+- The HLE returns one cycle late. It is **not** `INTRWAIT_TUNE`: at 43 the
+  return matches and 16 Timer count-up rows fail, while the real BIOS passes
+  them all -- the HLE's extra cycle is on the way *in*. Open.
+- On hardware the handler is entered **2 cycles later and left 2 cycles
+  sooner** than in our real-BIOS core, same instructions. The halt-wake IRQ
+  entry and its return are split in the wrong place (the split in `cpu.irq`
+  is calibrated on a running CPU). Invisible to everything but code that
+  reads a clock inside a wake handler. Open.
+
+### Where that leaves the row
+
+With the measured V-blank delay and the real BIOS, dingbat reports
+**`0x10002540`**; with the HLE, `0x100025C8` (its one late cycle is worth
+exactly one line). A second reference emulator has reported `0x10002540` all
+along. No WAITCNT a flashcart loader might leave behind produces the expected
+value either (`-d:breakwait -d:BREAKWAIT=N` forces one for this test alone:
+4/2 prefetch on gives `0x10002D94`, the fast settings `0x100044F8`).
+
+Every mechanism this row depends on has now been measured on an AGB SP --
+loop period, grant, deferral, forced-N, capture window, line geometry, the
+IntrWait return -- and dingbat agrees with all of it that bears on the
+answer. **The prediction for silicon is `0x10002540`, not `0x10002A94`.** If
+the flashcart photograph says `0x10002A94` there are about fifteen cycles
+somewhere none of these probes looked, and the place to look is the suite's
+own interrupt dispatcher; if it says `0x10002540` the row is a wrong
+expectation and the only thing left to do is make the HLE's IntrWait as good
+as the real BIOS's.
+
+New debug flags: `-d:hdmalog` (every H-blank grant with its line and pc),
+`-d:breakwait`. New payloads: `slotfloat.s`, `slotexec.s`, `slotdma.s`,
+`vbwait.s`; runners `tools/hwlink/slotexec.py`, `slotdma.py`.

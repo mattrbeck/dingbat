@@ -1,6 +1,6 @@
 """Slide an H-blank DMA across code fetched from an empty cartridge slot.
 
-    python3 slotdma.py [--emulators-only] [--runs=N] [--control] [--prefetch] [K0 K1]
+    python3 slotdma.py [--emulators-only] [--runs=N] [--control] [--waitcnt=N] [K0 K1]
 
 tests/roms/payloads/slotdma.s explains the excursion. This runs it for every
 sled length K0..K1 (default 0..41, 14 to a call) on the console and in both
@@ -15,6 +15,7 @@ DMA's own length is a burst the DMA broke.
 """
 import os
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -37,13 +38,16 @@ def decode(words):
     return out
 
 
+HOP = 0
+
+
 def show(v, k):
     t, d, cnt, r0, lr = v
     if t == 0xFFFF:
         return 'WATCHDOG'
     s = f'{t - k:>4} {d if not cnt & 0x80 else "----":>4}'
-    if r0 != 0xFFFFFFFF:                 # the walk did not run as written
-        s += f' r0={r0:X} lr={lr:X}'
+    if HOP:                              # what the single opcode loaded
+        s += f' {r0:08X}'
     return s
 
 
@@ -52,7 +56,12 @@ def main(argv):
     nums = [int(a, 0) for a in argv[1:] if not a.startswith('--')]
     k0, k1 = (nums + [0, 41])[:2] if len(nums) < 2 else nums[:2]
     runs = next((int(f.split('=')[1]) for f in flags if f.startswith('--runs=')), 3)
-    mode = (0x100 if '--control' in flags else 0) | (0x200 if '--prefetch' in flags else 0)
+    waitcnt = next((int(f.split('=')[1], 0) for f in flags if f.startswith('--waitcnt=')), 0)
+    global HOP
+    HOP = next((int(f.split('=')[1]) for f in flags if f.startswith('--hop=')), 0)
+    delay = next((int(f.split('=')[1]) for f in flags if f.startswith('--delay=')), 0)
+    mode = ((0x100 if '--control' in flags else 0) | (0x200 if '--nodma' in flags else 0)
+            | (HOP << 10) | (delay << 12) | (waitcnt << 16))
     rows = slotexec.table_of(SOURCE)
     bases = list(range(k0, k1 + 1, TRIALS))
     args = [mode | b for b in bases]
@@ -69,14 +78,21 @@ def main(argv):
         code = assemble(SOURCE, out_dir=payloadcmp.SCRATCH)
         for arg in args:
             for _ in range(runs):
-                with Monitor() as m:
-                    m.ping()
-                    m.run_payload(code, arg)
-                    got.setdefault('hardware', {}).setdefault(arg, []).append(
-                        decode(m.read_mem(RESULTS, TRIALS * 4)))
+                for attempt in range(3):     # the adapter drops a word now and
+                    try:                     # then; a re-run costs half a second
+                        with Monitor() as m:
+                            m.ping()
+                            m.run_payload(code, arg)
+                            block = decode(m.read_mem(RESULTS, TRIALS * 4))
+                        break
+                    except Exception:
+                        if attempt == 2:
+                            raise
+                        time.sleep(1.5)
+                got.setdefault('hardware', {}).setdefault(arg, []).append(block)
 
     names = [n for n in ('hardware', 'dingbat', 'mgba') if n in got]
-    print(f'{"k":>3}  ' + ''.join(f'{n + " T-k    D":<24}' for n in names))
+    print(f'{"k":>3}  ' + ''.join(f'{n + " T-k    D":<26}' for n in names))
     for arg, base in zip(args, bases):
         for i in range(TRIALS):
             k = base + i
@@ -87,7 +103,7 @@ def main(argv):
                 seen = sorted({show(r[i], k) for r in got[n][arg]})
                 cells.append(' | '.join(seen))
             mark = '' if len(set(cells)) == 1 else '  <<<'
-            print(f'{k:>3}  ' + ''.join(f'{c:<24}' for c in cells) + mark)
+            print(f'{k:>3}  ' + ''.join(f'{c:<26}' for c in cells) + mark)
     return 0
 
 

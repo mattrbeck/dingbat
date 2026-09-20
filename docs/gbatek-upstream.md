@@ -143,6 +143,41 @@ against agree on every row, so this is a corroboration rather than a
 correction — recorded because the number is useful and because the method
 (fixed-count loop, halted entry) is what makes it exact.
 
+### 1.7 An empty cartridge slot, and code executed from it
+
+With no cartridge, a **nonsequential** halfword read of the gamepak region
+returns `addr >> 1` and a **sequential** one returns `0xFFFF`, at the reset
+WAITCNT (4/2) -- `tests/roms/payloads/slotfloat.s`, identical over sixteen
+runs. GBATEK gives the `addr >> 1` half only. Two consequences: `0xFFFF` is
+the Thumb `BL` suffix, so a branch into the empty slot executes exactly one
+chosen opcode and returns through `lr + 0xFFE` (`slotexec.s`), which makes
+gamepak opcode timing measurable over a link cable; and the value read
+*witnesses* whether the memory controller treated a fetch as sequential. At
+other first-access waits the float is not reliable -- do not build on it.
+
+Measured that way (`slotdma.s`), in the gamepak region at 4/2:
+
+- the H-blank DMA's grant waits for the opcode fetch in flight, 0..4 cycles
+  into a nonsequential fetch and 0..2 into a sequential one (1.3, now for
+  opcode fetches);
+- **the first gamepak access after a DMA is nonsequential** -- the fetch that
+  should float to `0xFFFF` reads `addr >> 1`;
+- an unmapped load reads the DMA's word only when the request fell in that
+  load's own opcode fetch;
+- a DMA requested during a data cycle runs *over* the internal cycle that
+  follows it: the instruction ends a cycle sooner.
+
+With the prefetcher on, twenty single-opcode timings match dingbat's model
+and nine of them differ from mGBA's.
+
+### 1.8 The V-blank interrupt is a cycle ahead of the V-count match
+
+`tests/roms/payloads/vbwait.s`: IntrWait called from a fixed cycle returns
+one cycle earlier when it waits on V-blank than when it waits on a V-count
+match at line 160 -- the same line boundary, two sources, 2379 against 2378
+on every run. Emulators that share one delay for both are a cycle out on one
+of them.
+
 ## 2. Not settled — hardware needed first
 
 1. **BIOS-region Thumb open bus** (§1.1). No payload can execute from BIOS, so

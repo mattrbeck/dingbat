@@ -28,11 +28,14 @@
 @ H-blank a cycle at a time.
 @
 @ r0 = base k (bits 0..7), | 0x100 for the control: the same walk with the
-@ excursion replaced by 130 cycles of IWRAM NOPs, | 0x200 for WAITCNT 0x4000.
+@ excursion replaced by 130 cycles of IWRAM NOPs; | 0x200 for no DMA at all;
+@ bits 16..31 = WAITCNT -- but ONLY 0 is safe: at other first-access waits the
+@ empty slot's float is unreliable and the console has been lost to it twice.
 @ 14 trials, k = base .. base + 13, 16 bytes each at 0x02008000:
 @   +0 (h) T  TM0 at the landing pad        +2 (h) D  TM1 as the DMA froze it
 @   +4 (h) TM1CNT_H at the pad (bit 7 clear = the DMA had fired)
-@   +8 (w) r0 at the pad (0xFFFFFFFF = family A ran as written)
+@   +8 (w) r0 at the pad (0xFFFFFFFF = family A ran as written); for a single
+@          hop, r3 -- what the opcode loaded
 @   +12 (w) lr at the pad
 @ T = 0xFFFF: the watchdog fired.
     .arm
@@ -67,9 +70,7 @@ _start:
     strh r2, [r4, #8]
     adr r2, watchdog
     str r2, [r1]
-    tst r0, #0x200
-    movne r2, #0x4000
-    moveq r2, #0
+    mov r2, r0, lsr #16
     strh r2, [r4, #4]              @ WAITCNT under test
     ldr r1, =HPZERO
     mov r2, #0
@@ -104,6 +105,8 @@ next:
     add r6, r6, r1                 @ k
     ldr r5, =0x00800000
     ldr r8, =0xA1400001
+    tst r7, #0x200                 @ | 0x200: the same write with the enable
+    bicne r8, r8, #0x80000000      @ bit clear -- the no-DMA baseline
 
     mov r0, #LINE
     mov r0, r0, lsl #8
@@ -125,19 +128,36 @@ next:
     strh r0, [r2, #8]              @ ... IME can come back on
 
     mov r0, #DELAY
+    and r1, r7, #0xF000            @ bits 12..15: four more cycles of delay each,
+    add r0, r0, r1, lsr #12        @ for an excursion shorter than the chain
 1:  subs r0, r0, #1
     bne 1b
 
     ldr r3, =(sled_end + 1)
     sub r3, r3, r6, lsl #1         @ k NOPs, then the way in
+    and r1, r7, #0xC00             @ bits 10..11: which excursion
+    adr r0, hops
+    add r0, r0, r1, lsr #6         @ 16 bytes a row
+    ldr r12, [r0]
+    ldr lr, [r0, #4]
+    ldr r2, [r0, #8]
     tst r7, #0x100
-    ldreq r12, =(A0 + 1)           @ one arm always runs and one never does,
-    ldrne r12, =(control + 1)      @ so both modes cost the same
+    ldrne r12, =(control + 1)
     ldr r5, =(land + 1)
     mov r6, r5                     @ a hop landing short turns bx r6 into bx r5
-    ldr lr, =(B0 - 0xFFE)
     mov r0, #0
     bx r3
+
+@ entry, lr, r2. Rows 1..3 are single hops: one opcode, and the float goes
+@ straight to the pad. Row 2 is the Break row's own instruction, and what it
+@ READ comes back in place of r0.
+hops:
+    .word A0 + 1, B0 - 0xFFE, 0, 0                   @ 0 the chain
+    .word 0x0800D027, land - 0xFFE, HPZERO, 0        @ 1 6813 ldr r3,[r2] IWRAM
+    .word 0x08019411, land - 0xFFE, 0x10000000, 0    @ 2 CA08 ldmia r2!,{r3} unmapped
+    .word 0x08004401, land - 0xFFE, 0, 0             @ 3 2200 mov r2,#0 (clear of A4:
+                                                     @   the emulators' image cannot
+                                                     @   float a planted halfword)
 
     .thumb
     .rept 48
@@ -161,10 +181,15 @@ land:
     .arm
     ldrh r1, [r10]                 @ T
     ldrh r2, [r11]                 @ D, if the DMA has frozen it
+    mov r4, r3                     @ a single hop's load, before r3 is reused
     ldrh r3, [r11, #2]
     mov r8, lr
-    mov r9, r0
     ldr r12, =vars
+    ldr r9, [r12, #8]
+    tst r9, #0xC00
+    moveq r9, r0                   @ the chain reports r0,
+    movne r9, r4                   @ a single hop what its opcode loaded
+
     ldr r5, [r12, #4]
 store:
     ldr r4, =RESULTS
@@ -245,3 +270,6 @@ table:
     .word 0x08007E5E, 0   @ B3 3F2F
     .word 0x08008008, 0   @ A4 4004
     .word 0x08008E60, 0   @ B4 4730
+    .word 0x0800D026, 0   @ hop 1
+    .word 0x08019410, 0   @ hop 2
+    .word 0x08004400, 0   @ hop 3 (not 0x08008516: its float is unreliable)

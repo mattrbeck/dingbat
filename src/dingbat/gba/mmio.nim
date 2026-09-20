@@ -36,7 +36,18 @@ proc `[]=`*(mmio: MMIO; address: uint32; value: uint8) =
   case io_addr
   of 0x000..0x055: mmio.gba.ppu[io_addr] = value
   of 0x060..0x0A7: mmio.gba.apu[io_addr] = value
-  of 0x0B0..0x0DF: mmio.gba.dma[io_addr] = value
+  of 0x0B0..0x0DF:
+    mmio.gba.dma[io_addr] = value
+    when defined(breakwait):
+      # -d:breakwait -d:BREAKWAIT=N: run the mGBA suite's `DMA Prefetch Break`
+      # loop under another WAITCNT, as a flashcart loader that left its own
+      # setting behind would. An experiment, never a default.
+      const BREAKWAIT {.intdefine.} = 0
+      if io_addr == 0x0DF and mmio.gba.cpu.r[15] >= 0x08005F90'u32 and
+         mmio.gba.cpu.r[15] < 0x08005FB0'u32:
+        write(mmio.waitcnt, uint8(BREAKWAIT and 0xFF), 0)
+        write(mmio.waitcnt, uint8(BREAKWAIT shr 8), 1)
+        mmio.gba.bus.update_waitcnt(mmio.waitcnt)
   of 0x100..0x10F: mmio.gba.timer[io_addr] = value
   of 0x120..0x12B, 0x134..0x15B: mmio.gba.serial[io_addr] = value
   of 0x130..0x133: mmio.gba.keypad[io_addr] = value

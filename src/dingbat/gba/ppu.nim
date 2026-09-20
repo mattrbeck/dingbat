@@ -163,6 +163,15 @@ const HBLANK_IRQ_SYNC_DELAY {.intdefine.} = 6
 # IRQ_SYNC_DELAY so it can be measured on its own.
 const LINE_IRQ_SYNC_DELAY {.intdefine.} = 5
 
+# The V-blank interrupt reaches the CPU one cycle sooner than a V-count match
+# raised at the very same line boundary. tests/roms/payloads/vbwait.s calls
+# IntrWait from a fixed cycle and stamps its return against a later V-count
+# halt wake: an AGB SP reads 2388 waiting on V-blank and 2387 waiting on a
+# match at line 160, every run. With one shared delay we read 2387 for both
+# under the real BIOS. The mGBA suite does not constrain it (4 and 5 score the
+# same); only the console could.
+const VBLANK_IRQ_SYNC_DELAY {.intdefine.} = LINE_IRQ_SYNC_DELAY - 1
+
 # An H-blank DMA is requested off the H-blank flag, not the end of drawing:
 # gbaedge HDMAPHASE (AGB SP, docs/hwprobe-results-agb.md session 6) freezes a
 # timer with the DMA's own write, and against the same clock and anchor the
@@ -216,6 +225,7 @@ proc end_hblank*(ppu: PPU) =
   ppu.gba.dma.trigger_video_capture(ppu.vcount)
   ppu.dispstat.vcounter = (ppu.vcount == uint16(ppu.dispstat.vcount_setting))
   var raised_if = false
+  var irq_delay = LINE_IRQ_SYNC_DELAY
   if ppu.dispstat.vcounter_irq_enable and ppu.dispstat.vcounter:
     ppu.gba.interrupts.reg_if.vcounter = true
     raised_if = true
@@ -241,6 +251,7 @@ proc end_hblank*(ppu: PPU) =
     if ppu.dispstat.vblank_irq_enable:
       ppu.gba.interrupts.reg_if.vblank = true
       raised_if = true
+      irq_delay = VBLANK_IRQ_SYNC_DELAY
     for bg_num in 0..1:
       for ref_num in 0..1:
         ppu.bgref_int[bg_num][ref_num] = ppu.bgref[bg_num][ref_num].num
@@ -251,7 +262,7 @@ proc end_hblank*(ppu: PPU) =
   # IF bits 0-2 are driven by the DISPSTAT conditions; nothing re-evaluates
   # periodically). mGBA suite Timer count-up "0b, 0x000C 1xv 1d 4i".
   if raised_if:
-    ppu.gba.interrupts.schedule_interrupt_check(LINE_IRQ_SYNC_DELAY)
+    ppu.gba.interrupts.schedule_interrupt_check(irq_delay)
 
 proc draw*(ppu: PPU) =
   inc ppu.frame
