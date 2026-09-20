@@ -54,7 +54,8 @@ def console_state():
             answers = [link.transfer32(probe) for _ in range(8)]
     except Exception:
         return None
-    if any(a & 0xFFFF == 0x7202 for a in answers):
+    # the 32-bit link shape carries the BIOS's 0x7202 in the TOP half
+    if any(0x7202 in (a & 0xFFFF, a >> 16) for a in answers):
         return 'multiboot'
     if any(a == probe for a in answers):
         return 'monitor'
