@@ -2283,6 +2283,9 @@ handler entry (H) and the return (R).
 
 ### Where that leaves the row
 
+> **Superseded by section 23**, the same day. The entry phase this section
+> ends on was found: it is our fork of the suite, not the emulator.
+
 With the measured V-blank delay and the real BIOS, dingbat reports
 **`0x10002540`**; with the HLE, `0x100025C8` (its one late cycle is worth
 exactly one line). A second reference emulator has reported `0x10002540` all
@@ -2303,3 +2306,94 @@ as the real BIOS's.
 New debug flags: `-d:hdmalog` (every H-blank grant with its line and pc),
 `-d:breakwait`. New payloads: `slotfloat.s`, `slotexec.s`, `slotdma.s`,
 `vbwait.s`; runners `tools/hwlink/slotexec.py`, `slotdma.py`.
+
+
+## 23. `DMA Prefetch Break`: it was the fork, 2026-09-20 evening
+
+Matt's question was whether we build the suite with the compiler upstream
+used, since the Misc rows time compiler output (section 20, and the pin in
+the fork's `docker-build.sh`). Answering it found the row.
+
+### The compiler is not the difference
+
+Upstream pins nothing: its `docker-build.sh` pulls `devkitpro/devkitarm`
+with no tag, so "their version" is whatever `latest` was on the day. Our
+`20260221` pin is an inference from the date of the commits that re-measured
+the constants. It can be checked, though, because upstream's buildbot
+publishes its own binary (`s3.amazonaws.com/mgba/suite-latest.zip`, built
+2026-07-08). Against the ROM we test:
+
+- `dmaPrefetch` is **byte-identical**, all 132 bytes, but for one literal (a
+  data address). Same instructions, same registers, same literal-pool
+  offsets, same word alignment of the loop (`0x08006520` there, `0x08005FB4`
+  here).
+- libgba's interrupt dispatcher is byte-identical but for the address of its
+  handler table.
+
+So the pinned toolchain reproduces upstream's code for this test exactly.
+
+### What the fork changed
+
+Only `main()`: upstream runs **one suite at a time from a menu**; the fork
+runs **all thirteen back to back** so a harness can score them. That is not
+neutral. libgba's dispatcher walks its handler table linearly looking for the
+raised flag, and nothing registers a V-blank *handler* -- `main()` only
+enables the interrupt -- so every V-blank walks the entire table to its
+terminator. Each entry it steps over is `ldr / cmp / beq / ands / bne / add /
+b` = **11 cycles** from IWRAM.
+
+On a console, Misc opened from a fresh boot runs with the table empty. In our
+auto-run, the suite before Misc is SIO timing, which does `irqInit();
+irqSet(IRQ_TIMER1, ...)` and leaves that entry behind. `VBlankIntrWait`
+therefore returns 11 cycles later than on the console, the loop starts 11
+cycles later, and the H-blank grant falls 11 cycles earlier in it: phase 2-3
+instead of 15-16. Section 22's table says what that costs -- two lines
+instead of eleven, **exactly the 307 iterations this row has been short all
+along.**
+
+Shown twice:
+
+- `-d:breakirq` empties the table as the test arms its DMA: **Misc 12/12,
+  suite 6998/6998.** The grant walk is 15, 19, 21, 23, 25, 27, 31, 35, 1, 3,
+  5, 7 -- eleven lines, then the capture -- and the exit is `0x10002A94`.
+- The fork rebuilt (pinned image, scratch copy) with `irqInit();
+  irqEnable(IRQ_VBLANK);` before each suite, which is the state the menu
+  leaves: **stock dingbat scores it 6998/6998.** No other row moves.
+
+The expected constant is right, the emulator was right, and sections 14 to
+22 were measuring a console-vs-harness difference in test *setup*. None of
+that work is wasted -- the period, the grant deferral, the forced
+nonsequential access, the capture window and the V-blank interrupt's extra
+cycle are all real and all measured -- but none of it was ever going to turn
+this row green.
+
+### Two things still open
+
+**The real BIOS lands one line short.** On the rebuilt ROM the HLE reports
+`0x10002A94` and the real-BIOS core `0x10002A0C`: entry phase 16 against 15,
+the one cycle by which `vbwait.s` shows the HLE returning late. `vbwait.s`
+says the real-BIOS core's return is the one that matches silicon (with a
+minimal handler), so either the console is a cycle off that on libgba's
+path, or our per-line steal differs from hardware's in a way that cancels it
+for the HLE. It does differ: section 22 measured the post-DMA nonsequential
+penalty per *access*, we charge it per *instruction*, and on this walk that
+changes the steal at the branch-target phases (we take 4 where the console
+takes 6). Hand-walking the measured rule from either entry phase gives line
+12, not 11. So the HLE's pass is genuine against the suite's constant but is
+not yet proof of cycle-exactness, and the honest next step is to model the
+penalty per access and see whether the real-BIOS core then lands on 11.
+
+**The suite's own test is order-dependent**, on hardware too: run Timer IRQ
+or SIO timing from the menu and then Misc, and the console should report a
+different Break value than from a fresh boot. `hblankBit` next to it calls
+`irqInit()` itself; `dmaPrefetch` does not. Worth sending upstream with the
+rest of docs/gbatek-upstream.md section 3, when Matt chooses to.
+
+### For the flashcart
+
+Three ROMs now sit in `~/Documents/emu/gba/flashcart-tests/`:
+`mgba-suite-upstream-official.gba` (open Misc from a fresh boot: expect
+`0x10002A94`; then run SIO timing and Misc again: expect it to change),
+`mgba-suite-irqreset.gba` (the rebuilt fork: expect `0x10002A94`), and the
+current fork build `mgba-suite.gba` (expect `0x10002540`, section 22). The
+fork patch is beside them.

@@ -38,6 +38,20 @@ proc `[]=`*(mmio: MMIO; address: uint32; value: uint8) =
   of 0x060..0x0A7: mmio.gba.apu[io_addr] = value
   of 0x0B0..0x0DF:
     mmio.gba.dma[io_addr] = value
+    when defined(breakirq):
+      # -d:breakirq: empty libgba's interrupt table as the mGBA suite's
+      # `DMA Prefetch Break` arms its DMA -- the state a console is in when
+      # Misc is opened straight from the menu, rather than after the twelve
+      # suites our auto-run puts in front of it (the last of which leaves a
+      # TIMER1 handler the V-blank dispatch has to step over). An experiment.
+      if io_addr == 0x0DF and mmio.gba.cpu.r[15] >= 0x08005F90'u32 and
+         mmio.gba.cpu.r[15] < 0x08005FB0'u32:
+        stderr.writeLine("breakirq: table was " &
+          hex_str(mmio.gba.bus.read_word_internal(0x03003368'u32)) & " " &
+          hex_str(mmio.gba.bus.read_word_internal(0x0300336C'u32)) & " " &
+          hex_str(mmio.gba.bus.read_word_internal(0x03003374'u32)))
+        mmio.gba.bus.write_word_internal(0x03003368'u32, 0)
+        mmio.gba.bus.write_word_internal(0x0300336C'u32, 0)
     when defined(breakwait):
       # -d:breakwait -d:BREAKWAIT=N: run the mGBA suite's `DMA Prefetch Break`
       # loop under another WAITCNT, as a flashcart loader that left its own
