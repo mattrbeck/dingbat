@@ -178,6 +178,38 @@ match at line 160 -- the same line boundary, two sources, 2379 against 2378
 on every run. Emulators that share one delay for both are a cycle out on one
 of them.
 
+That one cycle is the match flag's: see 1.9.
+
+### 1.9 The H-blank flag rises at 1007, and the V-count match flag lags VCOUNT by one
+
+GBATEK: "the H-Blank flag is '0' for a total of 1006 cycles". On an AGB SP it
+is 1007. `tests/roms/payloads/breakram.s` enters on a V-count interrupt, runs
+a swept number of one-cycle NOPs and reads DISPSTAT and VCOUNT once each -- no
+polling loop, so no quantisation. Against the next VCOUNT edge the flag's
+fall and the V-blank flag's rise are simultaneous with it; the H-blank flag's
+rise is at 1007; and the V-count match flag changes one cycle *after* VCOUNT
+does (DISPSTAT reads `100` for one cycle as the line after a match begins).
+The match flag is a live compare: rewriting the setting mid-line changes it
+at once.
+
+The H-blank DMA's write is 2 cycles after the flag and so is the V-blank
+DMA's after its own (both stamped by the DMA's own write to a timer, from an
+interrupt-anchored entry).
+
+### 1.10 One PPU interrupt delay; a DMA stalls it; a halted CPU resumes inside one
+
+With the flags placed as in 1.9, V-blank, V-count match and H-blank all reach
+the CPU 4 cycles after they are raised, halted or running. Two interactions
+with DMA, both measured with a one-word H-blank DMA and an H-blank interrupt
+off the same flag:
+
+* A running CPU takes the interrupt exactly 4 cycles later with the DMA armed
+  than without: the synchroniser's clock stops with the CPU's. A wall-clock
+  delay gets this wrong by 3.
+* A halted CPU woken during a burst resumes on the burst's **last** cycle:
+  `halthb.s` wakes at 1003 with no DMA and 1004 / 1006 / 1010 under one, two
+  and four words.
+
 ## 2. Not settled — hardware needed first
 
 1. **BIOS-region Thumb open bus** (§1.1). No payload can execute from BIOS, so

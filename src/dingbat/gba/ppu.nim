@@ -132,65 +132,59 @@ when defined(bgtrace):
 proc start_line*(ppu: PPU) =
   ppu.gba.scheduler.schedule(960, etPPUStartHBlank)
 
-# GBATEK: "the H-Blank flag is '0' for a total of 1006 cycles", so the flag
-# (and the IRQ it enables) rises 46 cycles after drawing ends at 960.
+# GBATEK: "the H-Blank flag is '0' for a total of 1006 cycles". An AGB SP says
+# 1007: tests/roms/payloads/breakram.s enters on a V-count interrupt and reads
+# DISPSTAT once, a swept number of one-cycle NOPs later, with no polling loop
+# to quantise the answer. From the same entry the next VCOUNT edge and the
+# flag's fall both land on our cycle; the flag's RISE lands one cycle later,
+# and so do the two things raised off it, the H-blank DMA's write and (with
+# the DMA out of the way) the H-blank interrupt. Every earlier page that
+# bracketed the flag (linegeo.s, hdmageo.s) did it with a seven-cycle poll
+# and could not see one cycle.
 #
-# An intdefine because the sweep is the evidence, not the value. Misc "DMA
-# Prefetch Break" reads open bus and never touches DISPSTAT, so it sees only
-# this delay plus HBLANK_DMA_REQUEST_DELAY as a sum: 55..58 here closes it
-# exactly as 11..14 there does. It is not free to move, though -- the six
-# "H-blank bit start Flip" rows want 43..48 and nothing else, and those read
-# the flag itself. The suite pins the flag here and asks the grant to move
-# relative to it. (Those windows were 53..56, 9..12 and up-to-49 until
-# 6964209c6 moved the line IRQ by two cycles, which shifted the Break row a
-# whole line of loop passes. Re-measured in section 20, not section 16's
-# table, which predates that commit.)
-# docs/playtest-bugs.md sections 16 and 20 have the sweeps.
-const HBLANK_FLAG_DELAY {.intdefine.} = 46
+# The mGBA suite's Misc "DMA Prefetch Break" sees this constant and
+# HBLANK_DMA_REQUEST_DELAY as one sum, and one cycle of it is a whole
+# scanline of that row's loop: at 46 the row read one line late under the
+# HLE and the real BIOS alike, at 47 it passes under both. The six "H-blank
+# bit start Flip" rows read the flag itself and pass at either.
+# docs/playtest-bugs.md section 25.
+const HBLANK_FLAG_DELAY {.intdefine.} = 47
 
-# Cycles from the H-blank signal to IRQ recognition; longer than the timers'
-# IRQ_SYNC_DELAY (3). Pinned by mGBA suite "H-blank bit start / Flip 1",
-# which admits recognition at 1010..1014; 1012 is the middle, and gbaedge
-# IRQDECOMP's running-CPU row (AGB SP) is exact at 6. The same page's
-# halted row wakes 19 cycles later on hardware than here, and this constant
-# cannot supply it: 0/6/25/60 give 964/970/972/1007 against 989 while the
-# running row leaves 957 (docs/hwprobe-results-agb.md). An intdefine for
-# that bracket.
-const HBLANK_IRQ_SYNC_DELAY {.intdefine.} = 6
-
-# The same, for the interrupts raised at the line boundary (V-count match
-# and V-blank) rather than at the H-blank flag. Split from the shared
-# IRQ_SYNC_DELAY so it can be measured on its own.
-const LINE_IRQ_SYNC_DELAY {.intdefine.} = 5
-
-# The V-blank interrupt reaches the CPU one cycle sooner than a V-count match
-# raised at the very same line boundary. tests/roms/payloads/vbwait.s calls
-# IntrWait from a fixed cycle and stamps its return against a later V-count
-# halt wake: an AGB SP reads 2388 waiting on V-blank and 2387 waiting on a
-# match at line 160, every run. With one shared delay we read 2387 for both
-# under the real BIOS. The mGBA suite does not constrain it (4 and 5 score the
-# same); only the console could.
-const VBLANK_IRQ_SYNC_DELAY {.intdefine.} = LINE_IRQ_SYNC_DELAY - 1
+# Cycles from a PPU interrupt being raised to the CPU recognising it; one
+# longer than the timers' IRQ_SYNC_DELAY (3). ONE delay serves all three
+# sources once each is raised where the console raises it (breakram.s and
+# halthb.s, AGB SP):
+#   V-blank        at the line boundary
+#   V-count match  one cycle after it -- the match flag in DISPSTAT reads its
+#                  old value for one cycle after VCOUNT has moved on, and the
+#                  interrupt follows the flag (VCOUNT_MATCH_DELAY)
+#   H-blank        with the H-blank flag
+# Before this the three carried 4, 5 and 6 to the same effect, except that
+# the H-blank's 6 was really 4 with two things folded in: the flag's missing
+# cycle, and one cycle of an H-blank DMA's stall (dma.nim: a pending
+# interrupt check slips by as long as a DMA holds the bus; a halted CPU
+# resumes on a DMA's last cycle, cpu.nim).
+const PPU_IRQ_SYNC_DELAY {.intdefine.} = 4
+const VCOUNT_MATCH_DELAY {.intdefine.} = 1
+const HBLANK_IRQ_SYNC_DELAY {.intdefine.} = PPU_IRQ_SYNC_DELAY
+const LINE_IRQ_SYNC_DELAY {.intdefine.} = PPU_IRQ_SYNC_DELAY + VCOUNT_MATCH_DELAY
+const VBLANK_IRQ_SYNC_DELAY {.intdefine.} = PPU_IRQ_SYNC_DELAY
 
 # An H-blank DMA is requested off the H-blank flag, not the end of drawing:
 # gbaedge HDMAPHASE (AGB SP, docs/hwprobe-results-agb.md session 6) freezes a
 # timer with the DMA's own write, and against the same clock and anchor the
 # write lands 48 cycles after a request at 960 would put it, on two lines,
-# with no spread. A request 2 cycles after the flag reproduces that page's
-# H-blank stamps exactly. The 2 is measured, not derived: it is not
-# DMA_START_DELAY (3), and the same page and DMAOPENBUS disagree about any one
-# start delay, which points at the grant waiting for the CPU bus cycle in
-# flight rather than at a constant.
+# with no spread. The 2 is measured, not derived: breakram.s stamps the write
+# from an interrupt-anchored entry, to the cycle, on two lines and two
+# channels, and flag + 2 with the flag at 1007 is exact.
 const HBLANK_DMA_REQUEST_DELAY {.intdefine.} = 2
-# The V-blank DMA's request is raised one cycle after the flag, as the
-# H-blank's is raised two after its own. Hardware: p50 HDMAPHASE on an AGB SP
-# timed the V-blank DMA's write one cycle later than dingbat's against a
-# shared anchor (1222 vs 1221) while both flag stamps agreed to the cycle, and
-# hdmamul.s/hdmasweep.s -- which report the V-blank write minus the H-blank
-# write -- read 226 where hardware reads 227 on every row of both sweeps. The
-# same missing cycle, seen absolutely and differentially; at +1 both payloads
-# match hardware exactly.
-const VBLANK_DMA_REQUEST_DELAY {.intdefine.} = 1
+# The V-blank DMA's request is raised two cycles after the V-blank flag, as
+# the H-blank's is after its own. breakram.s (AGB SP) stamps its write from a
+# V-count entry on line 159: 1097 on the console, 1096 here at +1.
+# hdmamul.s/hdmasweep.s report this write minus the H-blank DMA's and read
+# 227 on the console; they held at +1 only while the H-blank flag was also a
+# cycle early.
+const VBLANK_DMA_REQUEST_DELAY {.intdefine.} = 2
 
 proc start_hblank*(ppu: PPU) =
   ppu.gba.scheduler.schedule(272, etPPUEndHBlank)
@@ -1438,7 +1432,18 @@ proc `[]`*(ppu: PPU; io_addr: uint32): uint8 =
   case io_addr
   of 0x000..0x001: read(ppu.dispcnt, io_addr and 1)
   of 0x002..0x003: 0'u8  # green swap
-  of 0x004..0x005: read(ppu.dispstat, io_addr and 1)
+  of 0x004:
+    # The V-count match flag is a live compare, VCOUNT_MATCH_DELAY behind
+    # VCOUNT: for that long after a line boundary it still answers for the
+    # line before, and a write to the setting shows at once (breakram.s, AGB
+    # SP: `100` for one cycle as line 31 begins with the match at 30, and the
+    # flag already clear on line 30 itself once the setting is rewritten).
+    var line = int(ppu.vcount)
+    if int64(ppu.gba.scheduler.cycles) - ppu.line_start_cycle < VCOUNT_MATCH_DELAY:
+      line = (line + 227) mod 228
+    let live = line == int(ppu.dispstat.vcount_setting)
+    (read(ppu.dispstat, 0) and not 0x04'u8) or (if live: 0x04'u8 else: 0'u8)
+  of 0x005: read(ppu.dispstat, 1)
   of 0x006..0x007: read(ppu.vcount, io_addr and 1)
   of 0x008, 0x00A, 0x00C, 0x00E:  # BGxCNT low byte
     read(ppu.bgcnt[int((io_addr - 0x008) shr 1)], 0)

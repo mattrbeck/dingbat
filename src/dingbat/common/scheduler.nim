@@ -120,6 +120,26 @@ proc clear*(s: Scheduler; kind: EventType) =
   s.nevents = j
   s.next_event = if j > 0: s.evbuf[j - 1].cycles else: high(CycleCount)
 
+proc delay_pending*(s: Scheduler; kind: EventType; after: CycleCount; by: CycleCount) =
+  ## Push every pending event of `kind` due later than `after` back by `by`
+  ## cycles (GBA: an interrupt still in the CPU's synchroniser while a DMA
+  ## holds the bus -- gba/dma.nim).
+  var moved = false
+  for i in 0 ..< s.nevents:
+    if s.evbuf[i].kind == kind and s.evbuf[i].cycles > after:
+      s.evbuf[i].cycles += by
+      moved = true
+  if moved:
+    # insertion sort, descending by cycle, stable so ties keep their order
+    for i in 1 ..< s.nevents:
+      let e = s.evbuf[i]
+      var j = i
+      while j > 0 and s.evbuf[j - 1].cycles < e.cycles:
+        s.evbuf[j] = s.evbuf[j - 1]
+        dec j
+      s.evbuf[j] = e
+    s.next_event = s.evbuf[s.nevents - 1].cycles
+
 proc has_event*(s: Scheduler; kind: EventType): bool =
   ## Whether an event of this kind is still pending; the GBA state loader uses
   ## it to tell a recognised pending interrupt from a check still in flight.

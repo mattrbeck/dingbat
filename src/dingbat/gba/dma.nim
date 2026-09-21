@@ -287,9 +287,22 @@ proc run_pending*(dma: DMA) =
       if dma.gba.apu.dma_channels.sizes[ch - 1] >= 16: continue
     let saved = dma.current_priority
     dma.current_priority = ch
+    let bus = dma.gba.bus
+    let granted_at = bus.sched.cycles + CycleCount(bus.cycles)
     dma.run_channel(ch, nested = saved < 4)
     dma.current_priority = saved
-    let bus = dma.gba.bus
+    when DMA_STALLS_IRQ_SYNC:
+      # The CPU's interrupt synchroniser runs on the CPU's clock, and that
+      # stops while a DMA has the bus: an interrupt raised but not yet
+      # recognised when the burst began is recognised that much later.
+      # tests/roms/payloads/breakram.s, AGB SP: a running CPU takes an H-blank
+      # interrupt exactly four cycles later when a one-word H-blank DMA
+      # (requested two cycles after the same flag) is armed than when it is
+      # not. A wall-clock delay loses one cycle to it, not four.
+      # A halted CPU has no clock to stop; its wake is cpu.nim's business.
+      if saved == 4 and not dma.gba.cpu.halted:
+        let held = bus.sched.cycles + CycleCount(bus.cycles) - granted_at
+        bus.sched.delay_pending(etInterrupts, granted_at, held)
     # The CPU (or a paused outer burst) resumes with a nonsequential access.
     bus.dma_active = saved < 4
     when defined(pftrace):

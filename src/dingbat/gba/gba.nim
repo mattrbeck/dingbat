@@ -1013,6 +1013,7 @@ proc rom_cool*(bus: Bus) {.inline.}
 
 # A branch into the gamepak refills N then S, in that order (cpu.clear_pipeline).
 const ROM_REFILL_ORDERED* {.booldefine.} = true
+const DMA_STALLS_IRQ_SYNC* {.booldefine.} = true
 proc add_cycles*(bus: Bus; n: int) {.inline.}
 proc `[]`*(bus: Bus; address: uint32): uint8
 proc `[]=`*(bus: Bus; address: uint32; value: uint8)

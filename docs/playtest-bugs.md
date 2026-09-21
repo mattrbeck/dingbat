@@ -2405,6 +2405,12 @@ fork patch is beside them.
 
 ## 24. The real BIOS, chased: three bugs, and the row is mGBA's number, 2026-09-20 night
 
+> **Superseded in part by section 25**, the same night. "Where the row is
+> now" below is wrong: the suite's constant is the console's number. Every
+> term had been compared with the console and the sum had not; run end to
+> end, the console disagreed with both cores by one cycle, and the cycle was
+> the H-blank flag's.
+
 Section 23 left the real-BIOS core one scanline short of the HLE on the
 rebuilt ROM. One line of that loop is one cycle of entry phase, so this was a
 hunt for single cycles, done the way the others were: a probe on the AGB SP
@@ -2507,3 +2513,137 @@ Three photographs settle it, and they discriminate cleanly:
 
 New: `tests/roms/payloads/slotret.s`, `vbwait.s | 0x200`, `slotdma.s` hop 3
 (a store), `-d:irqlog`.
+
+
+## 25. The pieces matched and the sum did not: the H-blank flag rises at 1007, 2026-09-20 late
+
+Section 24 ended with both cores agreeing on `0x10002B1C`, the suite and mGBA
+on `0x10002A94`, and every term of the row individually compared with an AGB
+SP. Matt's question was the right one: what is confounded? The answer was
+the one thing never done -- **the whole sentence had never been run on the
+console**, only its words.
+
+### The row is an exact tie
+
+`-d:obuslatchdbg` on the rebuilt ROM: on line 11 the DMA's request landed on
+the very cycle the `ldmia`'s own fetch would have begun, the DMA went first,
+the fetch refreshed the bus and the capture was lost; line 12 caught it. A
+sweep of the loop's entry (a throwaway `BREAK_DELAY` knob) showed the
+structure: the answer encodes the entry delay mod 36 in its low bits *and*
+the catching line, `0x10002A94` is in our family one line up, stale
+dispatcher entries cannot produce it (three give `...2A90`), and **entering
+one cycle earlier passes, under both cores.** So: one cycle between
+VBlankIntrWait's return and an H-blank DMA's request, or the tie-break.
+
+### `breakram.s`: the same sentence, where the rig can run it
+
+An empty slot cannot hold a loop, so `tests/roms/payloads/breakram.s` runs the
+suite's sequence from RAM: DMA3 with the suite's control word, SWI 5 through
+Nintendo's BIOS, a table-walking dispatcher, the suite's entry instructions
+and its seven-instruction loop on unmapped memory, from IWRAM (period 12,
+one-cycle window, walk +4) or EWRAM (period 30, window 3, walk -2), swept over
+a sled of one-cycle NOPs after the return. Each k is one end-to-end number
+and every edge in the staircase is a one-cycle statement.
+
+**The console caught at dingbat's k + 1 with identical read counts, every
+run.** A stamp mode (the same DMA's word also stops a timer started by the
+entry sequence) split it: the console's T was ours + 1 at every k, *and the
+capture fell at the same T in both*. So the tie-break was right and the DMA's
+write was a cycle late on the console relative to the return -- V-blank wait
+or V-count wait, same line or 68 lines on, DMA0 or DMA3, and the V-blank DMA
+too. `slotdma.s`'s own control had said so all along (D = 980 against our
+979); section 22 filed the D column under "deferral, unmodelled" and compared
+only the cost column. That was the confounder.
+
+### Which end moved: single reads of DISPSTAT
+
+Both DMAs late by one cycle is either the DMAs or the anchor. A third mode
+spins a coarse delay after the entry and reads DISPSTAT and VCOUNT *once* --
+no polling loop, which is what quantised `linegeo.s` and `hdmageo.s` to
+seven cycles. From the same V-count entry, to the cycle:
+
+| event | console vs dingbat |
+|---|---|
+| next VCOUNT edge | same |
+| H-blank flag falls | same |
+| V-blank flag rises (line 160) | same |
+| **H-blank flag rises** | **+1** |
+| H-blank DMA's write, V-blank DMA's write | +1 |
+| V-count match flag changes | +1: it reads its old value for one cycle after VCOUNT moves |
+
+The entry was right. **The H-blank flag rises at 1007, not GBATEK's 1006**
+(low for 1007 cycles, high for 225), and the H-blank DMA follows it at +2 as
+before; the V-blank DMA's request is +2 as well, not +1. `hdmamul.s`'s 227
+had been bought in section 14 with a V-blank +1 that was correct only while
+the H-blank DMA was also a cycle early -- the common-mode blind spot that
+`docs/gbatek-upstream.md` section 3 warns about in its own words.
+
+Entering on a **running** CPU (the interrupt lands in a ring of one-cycle
+Thumb NOPs and the dispatcher rewrites the BIOS's saved lr) gives the same +1,
+so it is not a halt-wake effect.
+
+### Four more things the same payloads measured
+
+1. **One interrupt delay, not three.** With the flag at 1007 and no DMA
+   armed, a running CPU takes the H-blank interrupt 4 cycles after the flag,
+   and `halthb.s` without its DMA wakes at 1003 on the console and, at 4,
+   here. The V-count match is raised one cycle after the line boundary (the
+   lagging flag above) and V-blank at it, so 4 serves both -- which is
+   section 22's "V-blank is a cycle ahead of V-count", explained. The old
+   4 / 5 / 6 becomes `PPU_IRQ_SYNC_DELAY = 4` plus `VCOUNT_MATCH_DELAY = 1`.
+   H-blank's 6 had been 4, plus the flag's missing cycle, plus one cycle of:
+2. **A DMA stalls an interrupt still in the synchroniser by its whole
+   length.** A running CPU takes the H-blank interrupt exactly 4 cycles later
+   with a one-word H-blank DMA armed than without. A wall-clock delay loses
+   one cycle to it. `dma.nim` now pushes pending interrupt checks back by as
+   long as a (non-nested) burst held the bus. H-blank interrupt plus H-blank
+   DMA is what every raster effect does.
+3. **A halted CPU resumes on a DMA's last cycle.** `halthb.s`: 1003 with no
+   DMA, 1004 / 1006 / 1010 under one, two and four words; waiting the burst
+   out reads a cycle more each time. The same cycle section 22 saw a running
+   CPU get back when an internal cycle met a DMA.
+4. The V-count match flag is a live compare: rewrite the setting mid-line and
+   the flag is already clear, where we (and mGBA) held it to the next line.
+   DISPSTAT reads now compute it. Whether a mid-line match *raises* the
+   interrupt is not measured.
+
+### Where that leaves everything
+
+`tools/hwlink/breakram.py --record` stores the console's table (15 sweeps,
+152 cells, three runs each; 151 cells gave one answer) and `--check` scores
+the emulators against it:
+
+| | cells matching the console |
+|---|---|
+| dingbat, HLE | **151 / 152** |
+| dingbat, real BIOS | **151 / 152** |
+| mGBA 0.10.5 | 70 / 152 |
+
+(The odd cell is the one the console answered two ways.) `halthb.s` and
+`hdmamul.s` are byte-identical again -- `halthb.s` had quietly stopped being
+so when section 24 moved the HLE's Halt return, and nothing re-ran it --
+`slotdma.s`'s D floor is 980 in both, its cheap rows and the `ldmia` capture
+window sit on the console's k (they had been one k early, which section 24
+called a match), `vbwait.s` is unchanged.
+
+**The mGBA suite's rebuilt ROM scores 6998 / 6998 under the HLE and under
+the real BIOS.** The released fork still fails `DMA Prefetch Break` with
+`0x10002540`, as a console would: that is the stale TIMER1 handler of section
+23, and `breakram.py --stale=1` confirms eleven cycles an entry on silicon
+(one 12-cycle read fewer, one NOP more).
+Runner 1219 / 1171 / 48, row-identical; save-state, clip-replay and rewind
+tests pass.
+
+So the constant was the console's, mGBA reaches it with compensating errors
+(it matches fewer than half of these cells), and section 24's table of
+predictions is withdrawn: an official build from a fresh boot should read
+`0x10002A94`, and `0x10002540` after SIO timing.
+
+Method, for next time: **compare the sum, not just the terms** -- and when a
+runner prints two columns, a mismatch in the one you were not looking at is
+still a mismatch.
+
+Still open: the handler-entry split (+2 / -2, section 22), the grant's
+deferral, the internal-cycle overlap for a running CPU, the torn unmapped
+word, the prefetch-on refill order, and whether an LYC write that newly
+matches raises the interrupt.

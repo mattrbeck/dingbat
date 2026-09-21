@@ -526,7 +526,16 @@ proc tick*(cpu: CPU) =
       # A halted one never does, so the debt rides until the wake and delays
       # it by everything the DMAs did while the CPU was asleep. Commit it
       # here: the time passed, and it belongs to nobody.
+      # If the wake comes while a DMA still has the bus, the CPU resumes on
+      # the DMA's LAST cycle, not after it: tests/roms/payloads/halthb.s on an
+      # AGB SP wakes on the H-blank interrupt at 1003 with no DMA armed and at
+      # 1004 / 1006 / 1010 under an H-blank DMA of one, two and four words,
+      # where waiting the burst out reads 1005 / 1007 / 1011. (The same cycle
+      # a running CPU gets back when its internal cycle meets a DMA,
+      # docs/playtest-bugs.md section 22.)
       let pending = cpu.gba.bus.cycles
       if pending > 0:
         cpu.gba.bus.cycles = 0
-        cpu.gba.scheduler.tick(pending)
+        cpu.gba.scheduler.tick(pending - 1)
+        if cpu.halted:
+          cpu.gba.scheduler.tick(1)
