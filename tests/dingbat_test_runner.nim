@@ -1807,7 +1807,7 @@ proc run_mgba_suite(harness: string; previous: Table[string, bool];
   # `devkitpro/devkitarm:20260221` — the image that was `latest` when those
   # constants were re-measured. Built by any other gcc they disagree with
   # their own expected values (docs/mgba-suite-verdicts.md).
-  const MgbaSuiteSha1 = "da6f5c694f78af382eebfa082bcbba5583f76372"
+  const MgbaSuiteSha1 = "35d330ee6b6ab0004c473d0f62c2c91b2f34f60a"
   let rom_path = ensure_rom_download(
     "https://github.com/mattrbeck/mgba-suite-auto/releases/latest/download/suite.gba",
     "mgba-suite.gba", MgbaSuiteSha1)
