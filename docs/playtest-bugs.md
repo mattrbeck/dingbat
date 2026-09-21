@@ -2644,6 +2644,12 @@ runner prints two columns, a mismatch in the one you were not looking at is
 still a mismatch.
 
 Still open: the handler-entry split (+2 / -2, section 22), the grant's
-deferral, the internal-cycle overlap for a running CPU, the torn unmapped
-word, the prefetch-on refill order, and whether an LYC write that newly
-matches raises the interrupt.
+deferral, the internal-cycle overlap for a running CPU (it needs a stamp on
+every bus access, the hottest path in the core, for one cycle at one phase),
+the prefetch-on refill order, and whether an LYC write that newly matches
+raises the interrupt.
+
+The torn unmapped word (section 22, item 5) is fixed: an unmapped read now
+takes one verdict for the whole access (`read_open_bus_word`) instead of one
+per byte with a catch-up -- and possibly a DMA -- between them. `slotdma.s`
+hop 2 reads `FFFFFFFF` at that phase, as the console does.

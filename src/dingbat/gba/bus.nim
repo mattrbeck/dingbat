@@ -565,20 +565,19 @@ proc read_half_internal*(bus: Bus; address: uint32): uint16 {.inline.} =
   let orig = address
   let address = address and not 1'u32
   if bits_range(address, 28, 31) > 0:  # unmapped: open bus, not a mirror
-    return uint16(bus.read_open_bus_value(address)) or
-           (uint16(bus.read_open_bus_value(address or 1)) shl 8)
+    return uint16(bus.read_open_bus_word(address) shr ((address and 2) * 8))
   case bits_range(address, 24, 27)
   of 0x0:
     if bits_range(bus.gba.cpu.r[15], 24, 27) == 0:
       read_u16_ptr(bus.bios, address and 0x3FFF'u32)
     elif (address and 0x00FFFFFF'u32) >= 0x4000'u32 and not bus.dma_active:
       # Page-0 out-of-bounds -> open bus (see read_byte_internal)
-      uint16(bus.read_open_bus_value(address)) or (uint16(bus.read_open_bus_value(address or 1)) shl 8)
+      uint16(bus.read_open_bus_word(address) shr ((address and 2) * 8))
     else:
       # BIOS latch (see read_byte_internal)
       let shift = (address and 2) * 8
       uint16(bus.bios_latch shr shift)
-  of 0x1: uint16(bus.read_open_bus_value(address)) or (uint16(bus.read_open_bus_value(address or 1)) shl 8)
+  of 0x1: uint16(bus.read_open_bus_word(address) shr ((address and 2) * 8))
   of 0x2: read_u16_ptr(bus.wram_board, address and 0x3FFFF'u32)
   of 0x3: read_u16_ptr(bus.wram_chip, address and 0x7FFF'u32)
   of 0x4:
@@ -606,28 +605,19 @@ proc read_word_internal*(bus: Bus; address: uint32): uint32 {.inline.} =
   let orig = address
   let address = address and not 3'u32
   if bits_range(address, 28, 31) > 0:  # unmapped: open bus, not a mirror
-    let v = bus.read_open_bus_value(address)
-    return uint32(v) or (uint32(bus.read_open_bus_value(address or 1)) shl 8) or
-           (uint32(bus.read_open_bus_value(address or 2)) shl 16) or
-           (uint32(bus.read_open_bus_value(address or 3)) shl 24)
+    return bus.read_open_bus_word(address)
   case bits_range(address, 24, 27)
   of 0x0:
     if bits_range(bus.gba.cpu.r[15], 24, 27) == 0:
       read_u32_ptr(bus.bios, address and 0x3FFF'u32)
     elif (address and 0x00FFFFFF'u32) >= 0x4000'u32 and not bus.dma_active:
       # Page-0 out-of-bounds -> open bus (see read_byte_internal)
-      let v = bus.read_open_bus_value(address)
-      uint32(v) or (uint32(bus.read_open_bus_value(address or 1)) shl 8) or
-      (uint32(bus.read_open_bus_value(address or 2)) shl 16) or
-      (uint32(bus.read_open_bus_value(address or 3)) shl 24)
+      bus.read_open_bus_word(address)
     else:
       # BIOS latch (see read_byte_internal)
       bus.bios_latch
   of 0x1:
-    let v = bus.read_open_bus_value(address)
-    uint32(v) or (uint32(bus.read_open_bus_value(address or 1)) shl 8) or
-    (uint32(bus.read_open_bus_value(address or 2)) shl 16) or
-    (uint32(bus.read_open_bus_value(address or 3)) shl 24)
+    bus.read_open_bus_word(address)
   of 0x2: read_u32_ptr(bus.wram_board, address and 0x3FFFF'u32)
   of 0x3: read_u32_ptr(bus.wram_chip, address and 0x7FFF'u32)
   of 0x4:
@@ -1064,9 +1054,14 @@ proc read_word_rotate*(bus: Bus; address: uint32): uint32 =
   let bits = (address and 3) * 8
   (word shr bits) or (word shl (32 - bits))
 
-proc read_open_bus_value*(bus: Bus; address: uint32): uint8 =
+proc read_open_bus_word*(bus: Bus; address: uint32): uint32 =
+  ## The whole 32-bit latch, decided ONCE for an access. The verdict turns on
+  ## when this read began, and working that out runs catch-up, which can run
+  ## a DMA and move the clock -- so a word assembled from four byte-wide
+  ## verdicts could tear: tests/roms/payloads/slotdma.s hop 2 read `000000FF`
+  ## where an AGB SP reads `FFFFFFFF`, the DMA having landed after the first
+  ## byte's verdict and before the second's.
   log("Reading open bus at " & hex_str(address))
-  let shift = (address and 3) * 8
   when defined(obuslatch):
     # Each half answers for itself: it shows the DMA's word if the burst was
     # requested after that half was last fetch-driven and no later than this
@@ -1074,7 +1069,7 @@ proc read_open_bus_value*(bus: Bus; address: uint32): uint8 =
     # answer; them disagreeing is DEAD6019, which no single predicate can
     # produce (docs/playtest-bugs.md section 13).
     if bus.dma_active:
-      return uint8(bus.dma_open_bus shr shift)
+      return bus.dma_open_bus
     let acc = if bits_range(address, 28, 31) > 0: 1
               else: int(bus.wait16_n[bits_range(address, 24, 27)])
     let started = bus.bus_now() - CycleCount(acc)
@@ -1094,7 +1089,7 @@ proc read_open_bus_value*(bus: Bus; address: uint32): uint8 =
       if bus.dma_request_at > bus.obus_half_at[1]:
         seen = (seen and 0x0000FFFF'u32) or
                (bus.dma_open_bus and 0xFFFF0000'u32)
-    return uint8(seen shr shift)
+    return seen
   # GBATEK "GBA Unpredictable Things", Reading from Unused Memory: unused
   # memory "returns the recently pre-fetched opcode", which "might also
   # change if a DMA transfer occurs". The DMA's own unmapped reads see its
@@ -1107,7 +1102,7 @@ proc read_open_bus_value*(bus: Bus; address: uint32): uint8 =
   # began and no later than this read began; bursts due by now are run
   # first so a request inside this instruction is known.
   if bus.dma_active:
-    return uint8(bus.dma_open_bus shr shift)
+    return bus.dma_open_bus
   # The instruction's opcode fetch is its first charged access, and catch-up
   # moves exactly the cycles it ticks from `cycles` into `synced`, so the
   # fetch began at sched.cycles - synced throughout the instruction.
@@ -1140,13 +1135,13 @@ proc read_open_bus_value*(bus: Bus; address: uint32): uint8 =
                        bus.dma_request_at <= read_start: "DMA" else: "opcode")
   if bus.dma_has_run and bus.dma_request_at > fetch_start and
      bus.dma_request_at <= read_start:
-    return uint8(bus.dma_open_bus shr shift)
+    return bus.dma_open_bus
   let pc = bus.gba.cpu.r[15]
   # PC in MMIO/unmapped memory would recurse back into this proc
   let pc_region = bits_range(pc, 24, 27)
   if pc_region == 0x1 or pc_region == 0x4 or pc_region > 0xD or
      bits_range(pc, 28, 31) > 0:  # PC itself in unmapped space would recurse
-    return 0'u8
+    return 0'u32
   let word: uint32 =
     if bus.gba.cpu.cpsr.thumb:
       # A Thumb fetch is a halfword, so what the 32-bit bus holds has to be
@@ -1195,4 +1190,7 @@ proc read_open_bus_value*(bus: Bus; address: uint32): uint8 =
         (opcode shl 16) or opcode
     else:
       bus.read_word_internal(pc and not 3'u32)
-  uint8(word shr shift)
+  word
+
+proc read_open_bus_value*(bus: Bus; address: uint32): uint8 =
+  uint8(bus.read_open_bus_word(address) shr ((address and 3) * 8))

@@ -1005,6 +1005,7 @@ type
 proc irq*(cpu: CPU)
 proc und*(cpu: CPU)
 proc schedule_interrupt_check*(intr: Interrupts; delay: int = 0)
+proc read_open_bus_word*(bus: Bus; address: uint32): uint32
 proc read_open_bus_value*(bus: Bus; address: uint32): uint8
 when defined(obuslatch):
   proc obus_drive_word*(bus: Bus; value: uint32) {.inline.}
