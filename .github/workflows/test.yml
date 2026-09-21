@@ -106,6 +106,13 @@ jobs:
         # fail. Committed ROMs only.
         shell: bash
         run: ./dingbat_clipreplay_test
+      - name: GBA cycle laws recorded from an AGB SP
+        # tests/roms/cyclelaws: the link rig's recorded tables frozen into
+        # ROMs (tools/hwlink/lawrom.py). Each cell is ONE timing term the
+        # console measured; the mGBA suite's rows are sums and pass on
+        # cancelling errors. HLE only here (no BIOS in CI). Committed ROMs.
+        shell: bash
+        run: ./dingbat_cyclelaws_test
       - name: GB HBlank-DMA re-entrancy (Pokemon Crystal boot crash)
         # gbhdmatest.gbc re-arms HBlank HDMA forever; the block copy ticks the
         # PPU inside the mode 3->0 transition, which recurses to stack overflow

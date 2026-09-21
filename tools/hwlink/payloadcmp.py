@@ -85,12 +85,15 @@ def on_hardware(payload_source, args, block=None):
     sys.path.insert(0, HERE)
     from monitor import Monitor, assemble
     code = assemble(payload_source, out_dir=SCRATCH)
+    if not block:
+        # asked twice; rig.ask says so on stderr if the console did not
+        # answer the same way both times, and the most frequent answer stands
+        import rig
+        return [int(max(c.counts, key=c.counts.get), 16) for c in rig.ask(code, args, runs=2)]
     with Monitor() as m:
         m.ping()
         answers = [m.run_payload(code, a) for a in args]
         # a payload that answers with a block of memory rather than one word
-        if not block:
-            return answers
         # read_mem hands back ints; be forgiving of hex strings too
         return [w if isinstance(w, int) else int(w, 16)
                 for w in m.read_mem(*block)]

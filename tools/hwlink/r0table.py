@@ -10,7 +10,6 @@ never match; that is the point of keeping it.
 import json
 import os
 import sys
-import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -32,6 +31,9 @@ TABLE = {
     'wakeirq': [0x00, 0x10, 0x20, 0x28, 0x60, 0x24, 0x2C, 0x64, 0x22, 0x26],
     'tmrw': [0x00, 0x01, 0x02, 0x10, 0x11, 0x20, 0x21, 0x30],
     'lycwrite': [0],
+    # tests/roms/payloads/probe.inc held to the console: dmaphase's controls,
+    # a multiply period and three NOP phases, rebuilt from the kit
+    'kitdemo': [0x80, 0xB0] + list(range(0x00, 0x07)) + [0x30, 0x31, 0x32],
 }
 
 
@@ -46,23 +48,10 @@ def in_emulators(name, args):
 
 
 def on_console(name, args, runs):
-    from monitor import Monitor, assemble
+    from monitor import assemble
+    import rig
     code = assemble(source(name), out_dir=payloadcmp.SCRATCH)
-    seen = [set() for _ in args]
-    for _ in range(runs):
-        for i, a in enumerate(args):
-            for attempt in range(3):
-                try:
-                    with Monitor() as m:
-                        m.ping()
-                        v = m.run_payload(code, a)
-                    break
-                except Exception:
-                    if attempt == 2:
-                        raise
-                    time.sleep(1.5)
-            seen[i].add(f'{v:08X}')
-    return [' | '.join(sorted(s)) for s in seen]
+    return [c.text for c in rig.ask(code, args, runs=runs)]
 
 
 def main(argv):
@@ -79,19 +68,8 @@ def main(argv):
             json.dump(table, open(TABLE_FILE, 'w'), indent=1)
         return 0
     if '--check' in flags:
-        bad = {n: 0 for n in EMULATORS}
-        total = 0
-        for name in words or list(table):
-            args = [int(a, 0) for a in table[name]]
-            got = in_emulators(name, args)
-            total += len(args)
-            for n in EMULATORS:
-                wrong = [f'{a:#x}' for i, a in enumerate(args) if got[n][i] != table[name][f'{a:#x}']]
-                bad[n] += len(wrong)
-                if wrong and n != 'mgba':
-                    print(f'  {n:<13}{name:<10} {" ".join(wrong)}')
-        for n in EMULATORS:
-            print(f'{n:<13} {total - bad[n]}/{total} cells match the console')
+        import tables
+        tables.check(tables.rows(only=words or list(table)))
         return 0
 
     name, args = words[0], [int(a, 0) for a in words[1:]] or [0]

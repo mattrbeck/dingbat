@@ -53,7 +53,11 @@ class Emulator:
         self.save_path = os.path.join(self.envdir, 'game.sav')
         if save_in:
             shutil.copyfile(save_in, self.save_path)
-        cmd = [os.path.join(BIN, binary), self.rom, bios if real_bios else 'hle']
+        path = os.path.join(BIN, binary)
+        if binary == 'dingbat_driver':
+            # a variant build under test (tools/knobsweep.py) without touching bin/
+            path = os.environ.get('PLAYTEST_DINGBAT_DRIVER', path)
+        cmd = [path, self.rom, bios if real_bios else 'hle']
         if rtc_epoch is not None:
             cmd += ['--rtc', str(rtc_epoch)]
         cmd += list(extra_args)

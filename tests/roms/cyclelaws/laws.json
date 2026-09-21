@@ -1,0 +1,1147 @@
+[
+ {
+  "payload": "breakram",
+  "rom": "breakram.gba",
+  "sha1": "c9c523fa36b6223f4525f701df2729717fb41071",
+  "frames": 1276,
+  "cells": [
+   {
+    "id": "breakram 0",
+    "kind": "loop",
+    "want": "-"
+   },
+   {
+    "id": "breakram 1",
+    "kind": "loop",
+    "want": "7052@0"
+   },
+   {
+    "id": "breakram 2",
+    "kind": "loop",
+    "want": "-"
+   },
+   {
+    "id": "breakram 3",
+    "kind": "loop",
+    "want": "-"
+   },
+   {
+    "id": "breakram 4",
+    "kind": "loop",
+    "want": "-"
+   },
+   {
+    "id": "breakram 5",
+    "kind": "loop",
+    "want": "7154@1"
+   },
+   {
+    "id": "breakram 6",
+    "kind": "loop",
+    "want": "-"
+   },
+   {
+    "id": "breakram 7",
+    "kind": "loop",
+    "want": "-"
+   },
+   {
+    "id": "breakram 8",
+    "kind": "loop",
+    "want": "-"
+   },
+   {
+    "id": "breakram 9",
+    "kind": "loop",
+    "want": "7256@2"
+   },
+   {
+    "id": "breakram 10",
+    "kind": "loop",
+    "want": "-"
+   },
+   {
+    "id": "breakram 11",
+    "kind": "loop",
+    "want": "-"
+   },
+   {
+    "id": "breakram 12",
+    "kind": "loop",
+    "want": "-"
+   },
+   {
+    "id": "breakram --stale=1 0",
+    "kind": "loop",
+    "want": "-"
+   },
+   {
+    "id": "breakram --stale=1 1",
+    "kind": "loop",
+    "want": "-"
+   },
+   {
+    "id": "breakram --stale=1 2",
+    "kind": "loop",
+    "want": "7051@0"
+   },
+   {
+    "id": "breakram --stale=1 3",
+    "kind": "loop",
+    "want": "-"
+   },
+   {
+    "id": "breakram --stale=1 4",
+    "kind": "loop",
+    "want": "-"
+   },
+   {
+    "id": "breakram --stale=1 5",
+    "kind": "loop",
+    "want": "-"
+   },
+   {
+    "id": "breakram --stale=1 6",
+    "kind": "loop",
+    "want": "7153@1"
+   },
+   {
+    "id": "breakram --stale=1 7",
+    "kind": "loop",
+    "want": "-"
+   },
+   {
+    "id": "breakram --stale=1 8",
+    "kind": "loop",
+    "want": "-"
+   },
+   {
+    "id": "breakram --stale=1 9",
+    "kind": "loop",
+    "want": "-"
+   },
+   {
+    "id": "breakram --stale=1 10",
+    "kind": "loop",
+    "want": "7255@2"
+   },
+   {
+    "id": "breakram --stale=1 11",
+    "kind": "loop",
+    "want": "-"
+   },
+   {
+    "id": "breakram --stale=1 12",
+    "kind": "loop",
+    "want": "-"
+   },
+   {
+    "id": "breakram --ewram 0",
+    "kind": "loop",
+    "want": "3351@13"
+   },
+   {
+    "id": "breakram --ewram 1",
+    "kind": "loop",
+    "want": "3310@12"
+   },
+   {
+    "id": "breakram --ewram 2",
+    "kind": "loop",
+    "want": "3228@10"
+   },
+   {
+    "id": "breakram --ewram 3",
+    "kind": "loop",
+    "want": "3187@9"
+   },
+   {
+    "id": "breakram --ewram 4",
+    "kind": "loop",
+    "want": "3105@7"
+   },
+   {
+    "id": "breakram --ewram 5",
+    "kind": "loop",
+    "want": "3064@6"
+   },
+   {
+    "id": "breakram --ewram 6",
+    "kind": "loop",
+    "want": "2982@4"
+   },
+   {
+    "id": "breakram --ewram 7",
+    "kind": "loop",
+    "want": "2941@3"
+   },
+   {
+    "id": "breakram --ewram 8",
+    "kind": "loop",
+    "want": "2859@1"
+   },
+   {
+    "id": "breakram --ewram 9",
+    "kind": "loop",
+    "want": "2818@0"
+   },
+   {
+    "id": "breakram --ewram 10",
+    "kind": "loop",
+    "want": "3350@13"
+   },
+   {
+    "id": "breakram --ewram 11",
+    "kind": "loop",
+    "want": "3309@12"
+   },
+   {
+    "id": "breakram --ewram 12",
+    "kind": "loop",
+    "want": "3227@10"
+   },
+   {
+    "id": "breakram --ewram 13",
+    "kind": "loop",
+    "want": "3186@9"
+   },
+   {
+    "id": "breakram --ewram 14",
+    "kind": "loop",
+    "want": "3104@7"
+   },
+   {
+    "id": "breakram --ewram 15",
+    "kind": "loop",
+    "want": "3063@6"
+   },
+   {
+    "id": "breakram --ewram 16",
+    "kind": "loop",
+    "want": "2981@4"
+   },
+   {
+    "id": "breakram --ewram 17",
+    "kind": "loop",
+    "want": "2940@3"
+   },
+   {
+    "id": "breakram --ewram 18",
+    "kind": "loop",
+    "want": "2858@1"
+   },
+   {
+    "id": "breakram --ewram 19",
+    "kind": "loop",
+    "want": "2817@0"
+   },
+   {
+    "id": "breakram --ewram 20",
+    "kind": "loop",
+    "want": "3349@13"
+   },
+   {
+    "id": "breakram --ewram 21",
+    "kind": "loop",
+    "want": "3308@12"
+   },
+   {
+    "id": "breakram --ewram 22",
+    "kind": "loop",
+    "want": "3226@10"
+   },
+   {
+    "id": "breakram --ewram 23",
+    "kind": "loop",
+    "want": "3185@9"
+   },
+   {
+    "id": "breakram --ewram 24",
+    "kind": "loop",
+    "want": "3103@7"
+   },
+   {
+    "id": "breakram --ewram 25",
+    "kind": "loop",
+    "want": "3062@6"
+   },
+   {
+    "id": "breakram --ewram 26",
+    "kind": "loop",
+    "want": "2980@4"
+   },
+   {
+    "id": "breakram --ewram 27",
+    "kind": "loop",
+    "want": "2939@3"
+   },
+   {
+    "id": "breakram --ewram 28",
+    "kind": "loop",
+    "want": "2857@1"
+   },
+   {
+    "id": "breakram --ewram 29",
+    "kind": "loop",
+    "want": "2816@0"
+   },
+   {
+    "id": "breakram --stamp 0",
+    "kind": "stamp",
+    "want": "T=19103 -"
+   },
+   {
+    "id": "breakram --stamp 1",
+    "kind": "stamp",
+    "want": "T=19102 7052"
+   },
+   {
+    "id": "breakram --stamp 2",
+    "kind": "stamp",
+    "want": "T=19101 -"
+   },
+   {
+    "id": "breakram --stamp --vcount=160 0",
+    "kind": "stamp",
+    "want": "T=19102 7052"
+   },
+   {
+    "id": "breakram --stamp --vcount=160 1",
+    "kind": "stamp",
+    "want": "T=19101 -"
+   },
+   {
+    "id": "breakram --stamp --vcount=160 2",
+    "kind": "stamp",
+    "want": "T=19100 -"
+   },
+   {
+    "id": "breakram --stamp --vcount=30 0",
+    "kind": "stamp",
+    "want": "T=862 173"
+   },
+   {
+    "id": "breakram --stamp --vcount=30 1",
+    "kind": "stamp",
+    "want": "T=861 -"
+   },
+   {
+    "id": "breakram --stamp --vcount=30 2",
+    "kind": "stamp",
+    "want": "T=860 -"
+   },
+   {
+    "id": "breakram --stamp --dma0 --vcount=30 0",
+    "kind": "stamp",
+    "want": "T=862 173"
+   },
+   {
+    "id": "breakram --stamp --dma0 --vcount=30 1",
+    "kind": "stamp",
+    "want": "T=861 -"
+   },
+   {
+    "id": "breakram --stamp --dma0 --vcount=30 2",
+    "kind": "stamp",
+    "want": "T=860 -"
+   },
+   {
+    "id": "breakram --stamp --vdma --vcount=159 0",
+    "kind": "stamp",
+    "want": "T=1087 -"
+   },
+   {
+    "id": "breakram --stamp --vdma --vcount=159 1",
+    "kind": "stamp",
+    "want": "T=1086 -"
+   },
+   {
+    "id": "breakram --stamp --vdma --vcount=159 2",
+    "kind": "stamp",
+    "want": "T=1085 -"
+   },
+   {
+    "id": "breakram --stamp --hblank --vcount=30 0",
+    "kind": "stamp",
+    "want": "T=1122 297"
+   },
+   {
+    "id": "breakram --stamp --hblank --vcount=30 1",
+    "kind": "stamp",
+    "want": "T=1121 -"
+   },
+   {
+    "id": "breakram --stamp --hblank --vcount=30 2",
+    "kind": "stamp",
+    "want": "T=1120 -"
+   },
+   {
+    "id": "breakram --vcount=30 --edge=200 28",
+    "kind": "edge",
+    "want": "100 v30"
+   },
+   {
+    "id": "breakram --vcount=30 --edge=200 29",
+    "kind": "edge",
+    "want": "100 v30"
+   },
+   {
+    "id": "breakram --vcount=30 --edge=200 30",
+    "kind": "edge",
+    "want": "100 v30"
+   },
+   {
+    "id": "breakram --vcount=30 --edge=200 31",
+    "kind": "edge",
+    "want": "100 v30"
+   },
+   {
+    "id": "breakram --vcount=30 --edge=200 32",
+    "kind": "edge",
+    "want": "100 v30"
+   },
+   {
+    "id": "breakram --vcount=30 --edge=200 33",
+    "kind": "edge",
+    "want": "100 v30"
+   },
+   {
+    "id": "breakram --vcount=30 --edge=200 34",
+    "kind": "edge",
+    "want": "110 v30"
+   },
+   {
+    "id": "breakram --vcount=30 --edge=200 35",
+    "kind": "edge",
+    "want": "110 v30"
+   },
+   {
+    "id": "breakram --vcount=30 --edge=200 36",
+    "kind": "edge",
+    "want": "110 v30"
+   },
+   {
+    "id": "breakram --vcount=30 --edge=200 37",
+    "kind": "edge",
+    "want": "110 v30"
+   },
+   {
+    "id": "breakram --vcount=30 --edge=200 38",
+    "kind": "edge",
+    "want": "110 v30"
+   },
+   {
+    "id": "breakram --vcount=30 --edge=200 39",
+    "kind": "edge",
+    "want": "110 v30"
+   },
+   {
+    "id": "breakram --vcount=30 --edge=200 40",
+    "kind": "edge",
+    "want": "110 v30"
+   },
+   {
+    "id": "breakram --running --vcount=30 --edge=212 18",
+    "kind": "edge",
+    "want": "100 v30"
+   },
+   {
+    "id": "breakram --running --vcount=30 --edge=212 19",
+    "kind": "edge",
+    "want": "100 v30"
+   },
+   {
+    "id": "breakram --running --vcount=30 --edge=212 20",
+    "kind": "edge",
+    "want": "100 v30"
+   },
+   {
+    "id": "breakram --running --vcount=30 --edge=212 21",
+    "kind": "edge",
+    "want": "100 v30"
+   },
+   {
+    "id": "breakram --running --vcount=30 --edge=212 22",
+    "kind": "edge",
+    "want": "100 v30"
+   },
+   {
+    "id": "breakram --running --vcount=30 --edge=212 23",
+    "kind": "edge",
+    "want": "100 v30"
+   },
+   {
+    "id": "breakram --running --vcount=30 --edge=212 24",
+    "kind": "edge",
+    "want": "110 v30"
+   },
+   {
+    "id": "breakram --running --vcount=30 --edge=212 25",
+    "kind": "edge",
+    "want": "110 v30"
+   },
+   {
+    "id": "breakram --running --vcount=30 --edge=212 26",
+    "kind": "edge",
+    "want": "110 v30"
+   },
+   {
+    "id": "breakram --running --vcount=30 --edge=212 27",
+    "kind": "edge",
+    "want": "110 v30"
+   },
+   {
+    "id": "breakram --running --vcount=30 --edge=212 28",
+    "kind": "edge",
+    "want": "110 v30"
+   },
+   {
+    "id": "breakram --running --vcount=30 --edge=212 29",
+    "kind": "edge",
+    "want": "110 v30"
+   },
+   {
+    "id": "breakram --running --vcount=30 --edge=212 30",
+    "kind": "edge",
+    "want": "110 v30"
+   },
+   {
+    "id": "breakram --vcount=30 --edge=255 28",
+    "kind": "edge",
+    "want": "110 v30"
+   },
+   {
+    "id": "breakram --vcount=30 --edge=255 29",
+    "kind": "edge",
+    "want": "110 v30"
+   },
+   {
+    "id": "breakram --vcount=30 --edge=255 30",
+    "kind": "edge",
+    "want": "110 v30"
+   },
+   {
+    "id": "breakram --vcount=30 --edge=255 31",
+    "kind": "edge",
+    "want": "110 v30"
+   },
+   {
+    "id": "breakram --vcount=30 --edge=255 32",
+    "kind": "edge",
+    "want": "110 v31"
+   },
+   {
+    "id": "breakram --vcount=30 --edge=255 33",
+    "kind": "edge",
+    "want": "110 v31"
+   },
+   {
+    "id": "breakram --vcount=30 --edge=255 34",
+    "kind": "edge",
+    "want": "110 v31"
+   },
+   {
+    "id": "breakram --vcount=30 --edge=255 35",
+    "kind": "edge",
+    "want": "100 v31"
+   },
+   {
+    "id": "breakram --vcount=30 --edge=255 36",
+    "kind": "edge",
+    "want": "000 v31"
+   },
+   {
+    "id": "breakram --vcount=30 --edge=255 37",
+    "kind": "edge",
+    "want": "000 v31"
+   },
+   {
+    "id": "breakram --vcount=30 --edge=255 38",
+    "kind": "edge",
+    "want": "000 v31"
+   },
+   {
+    "id": "breakram --vcount=30 --edge=255 39",
+    "kind": "edge",
+    "want": "000 v31"
+   },
+   {
+    "id": "breakram --vcount=30 --edge=255 40",
+    "kind": "edge",
+    "want": "000 v31"
+   },
+   {
+    "id": "breakram --vcount=159 --edge=255 28",
+    "kind": "edge",
+    "want": "110 v159"
+   },
+   {
+    "id": "breakram --vcount=159 --edge=255 29",
+    "kind": "edge",
+    "want": "110 v159"
+   },
+   {
+    "id": "breakram --vcount=159 --edge=255 30",
+    "kind": "edge",
+    "want": "110 v159"
+   },
+   {
+    "id": "breakram --vcount=159 --edge=255 31",
+    "kind": "edge",
+    "want": "110 v159"
+   },
+   {
+    "id": "breakram --vcount=159 --edge=255 32",
+    "kind": "edge",
+    "want": "110 v160"
+   },
+   {
+    "id": "breakram --vcount=159 --edge=255 33",
+    "kind": "edge",
+    "want": "110 v160"
+   },
+   {
+    "id": "breakram --vcount=159 --edge=255 34",
+    "kind": "edge",
+    "want": "110 v160"
+   },
+   {
+    "id": "breakram --vcount=159 --edge=255 35",
+    "kind": "edge",
+    "want": "101 v160"
+   },
+   {
+    "id": "breakram --vcount=159 --edge=255 36",
+    "kind": "edge",
+    "want": "001 v160"
+   },
+   {
+    "id": "breakram --vcount=159 --edge=255 37",
+    "kind": "edge",
+    "want": "001 v160"
+   },
+   {
+    "id": "breakram --vcount=159 --edge=255 38",
+    "kind": "edge",
+    "want": "001 v160"
+   },
+   {
+    "id": "breakram --vcount=159 --edge=255 39",
+    "kind": "edge",
+    "want": "001 v160"
+   },
+   {
+    "id": "breakram --vcount=159 --edge=255 40",
+    "kind": "edge",
+    "want": "001 v160"
+   },
+   {
+    "id": "breakram --nodma --hblank --vcount=30 --edge=12 34",
+    "kind": "edge",
+    "want": "010 v30"
+   },
+   {
+    "id": "breakram --nodma --hblank --vcount=30 --edge=12 35",
+    "kind": "edge",
+    "want": "010 v30"
+   },
+   {
+    "id": "breakram --nodma --hblank --vcount=30 --edge=12 36",
+    "kind": "edge",
+    "want": "010 v30"
+   },
+   {
+    "id": "breakram --nodma --hblank --vcount=30 --edge=12 37",
+    "kind": "edge",
+    "want": "010 v30"
+   },
+   {
+    "id": "breakram --nodma --hblank --vcount=30 --edge=12 38",
+    "kind": "edge",
+    "want": "010 v30"
+   },
+   {
+    "id": "breakram --nodma --hblank --vcount=30 --edge=12 39",
+    "kind": "edge",
+    "want": "010 v30"
+   },
+   {
+    "id": "breakram --nodma --hblank --vcount=30 --edge=12 40",
+    "kind": "edge",
+    "want": "010 v31"
+   },
+   {
+    "id": "breakram --nodma --hblank --vcount=30 --edge=12 41",
+    "kind": "edge",
+    "want": "010 v31"
+   },
+   {
+    "id": "breakram --nodma --hblank --vcount=30 --edge=12 42",
+    "kind": "edge",
+    "want": "010 v31"
+   },
+   {
+    "id": "breakram --nodma --hblank --vcount=30 --edge=12 43",
+    "kind": "edge",
+    "want": "000 v31"
+   },
+   {
+    "id": "breakram --nodma --hblank --vcount=30 --edge=12 44",
+    "kind": "edge",
+    "want": "000 v31"
+   },
+   {
+    "id": "breakram --nodma --hblank --vcount=30 --edge=12 45",
+    "kind": "edge",
+    "want": "000 v31"
+   },
+   {
+    "id": "breakram --nodma --hblank --vcount=30 --edge=12 46",
+    "kind": "edge",
+    "want": "000 v31"
+   },
+   {
+    "id": "breakram --hblank --vcount=30 --edge=12 32",
+    "kind": "edge",
+    "want": "010 v30"
+   },
+   {
+    "id": "breakram --hblank --vcount=30 --edge=12 33",
+    "kind": "edge",
+    "want": "010 v30"
+   },
+   {
+    "id": "breakram --hblank --vcount=30 --edge=12 34",
+    "kind": "edge",
+    "want": "010 v30"
+   },
+   {
+    "id": "breakram --hblank --vcount=30 --edge=12 35",
+    "kind": "edge",
+    "want": "010 v30"
+   },
+   {
+    "id": "breakram --hblank --vcount=30 --edge=12 36",
+    "kind": "edge",
+    "want": "010 v31"
+   },
+   {
+    "id": "breakram --hblank --vcount=30 --edge=12 37",
+    "kind": "edge",
+    "want": "010 v31"
+   },
+   {
+    "id": "breakram --hblank --vcount=30 --edge=12 38",
+    "kind": "edge",
+    "want": "010 v31"
+   },
+   {
+    "id": "breakram --hblank --vcount=30 --edge=12 39",
+    "kind": "edge",
+    "want": "000 v31"
+   },
+   {
+    "id": "breakram --hblank --vcount=30 --edge=12 40",
+    "kind": "edge",
+    "want": "000 v31"
+   },
+   {
+    "id": "breakram --hblank --vcount=30 --edge=12 41",
+    "kind": "edge",
+    "want": "000 v31"
+   },
+   {
+    "id": "breakram --hblank --vcount=30 --edge=12 42",
+    "kind": "edge",
+    "want": "000 v31"
+   },
+   {
+    "id": "breakram --hblank --vcount=30 --edge=12 43",
+    "kind": "edge",
+    "want": "000 v31"
+   },
+   {
+    "id": "breakram --hblank --vcount=30 --edge=12 44",
+    "kind": "edge",
+    "want": "000 v31"
+   }
+  ]
+ },
+ {
+  "payload": "dmaphase",
+  "rom": "dmaphase.gba",
+  "sha1": "0bf53d28920bb8363818ba788889a33368372d67",
+  "frames": 348,
+  "cells": [
+   {
+    "id": "dmaphase 0x80",
+    "kind": "hex",
+    "want": "04800484"
+   },
+   {
+    "id": "dmaphase 0x85",
+    "kind": "hex",
+    "want": "04850489"
+   },
+   {
+    "id": "dmaphase 0x90",
+    "kind": "hex",
+    "want": "04800484"
+   },
+   {
+    "id": "dmaphase 0xa0",
+    "kind": "hex",
+    "want": "04300434"
+   },
+   {
+    "id": "dmaphase 0xb0",
+    "kind": "hex",
+    "want": "04400441"
+   },
+   {
+    "id": "dmaphase 0x0",
+    "kind": "hex",
+    "want": "048303D5"
+   },
+   {
+    "id": "dmaphase 0x1",
+    "kind": "hex",
+    "want": "048303D5"
+   },
+   {
+    "id": "dmaphase 0x2",
+    "kind": "hex",
+    "want": "048303D5"
+   },
+   {
+    "id": "dmaphase 0x3",
+    "kind": "hex",
+    "want": "048303D5"
+   },
+   {
+    "id": "dmaphase 0x4",
+    "kind": "hex",
+    "want": "048803D5"
+   },
+   {
+    "id": "dmaphase 0x5",
+    "kind": "hex",
+    "want": "048803D5"
+   },
+   {
+    "id": "dmaphase 0x6",
+    "kind": "hex",
+    "want": "048803D5"
+   },
+   {
+    "id": "dmaphase 0x7",
+    "kind": "hex",
+    "want": "048803D5"
+   },
+   {
+    "id": "dmaphase 0x8",
+    "kind": "hex",
+    "want": "048803D5"
+   },
+   {
+    "id": "dmaphase 0x9",
+    "kind": "hex",
+    "want": "048D03D5"
+   },
+   {
+    "id": "dmaphase 0x10",
+    "kind": "hex",
+    "want": "048303D7"
+   },
+   {
+    "id": "dmaphase 0x11",
+    "kind": "hex",
+    "want": "048403D8"
+   },
+   {
+    "id": "dmaphase 0x12",
+    "kind": "hex",
+    "want": "048503D9"
+   },
+   {
+    "id": "dmaphase 0x13",
+    "kind": "hex",
+    "want": "048603DA"
+   },
+   {
+    "id": "dmaphase 0x14",
+    "kind": "hex",
+    "want": "048803D5"
+   },
+   {
+    "id": "dmaphase 0x15",
+    "kind": "hex",
+    "want": "048903D5"
+   },
+   {
+    "id": "dmaphase 0x16",
+    "kind": "hex",
+    "want": "048903D5"
+   },
+   {
+    "id": "dmaphase 0x17",
+    "kind": "hex",
+    "want": "048A03D6"
+   },
+   {
+    "id": "dmaphase 0x18",
+    "kind": "hex",
+    "want": "048B03D7"
+   },
+   {
+    "id": "dmaphase 0x19",
+    "kind": "hex",
+    "want": "048C03D8"
+   },
+   {
+    "id": "dmaphase 0x1a",
+    "kind": "hex",
+    "want": "048D03D9"
+   },
+   {
+    "id": "dmaphase 0x1b",
+    "kind": "hex",
+    "want": "048E03DA"
+   },
+   {
+    "id": "dmaphase 0x20",
+    "kind": "hex",
+    "want": "043303D5"
+   },
+   {
+    "id": "dmaphase 0x21",
+    "kind": "hex",
+    "want": "043503D5"
+   },
+   {
+    "id": "dmaphase 0x22",
+    "kind": "hex",
+    "want": "043603D5"
+   },
+   {
+    "id": "dmaphase 0x23",
+    "kind": "hex",
+    "want": "043603D5"
+   },
+   {
+    "id": "dmaphase 0x24",
+    "kind": "hex",
+    "want": "043803D5"
+   },
+   {
+    "id": "dmaphase 0x25",
+    "kind": "hex",
+    "want": "043903D5"
+   },
+   {
+    "id": "dmaphase 0x30",
+    "kind": "hex",
+    "want": "044403D5"
+   },
+   {
+    "id": "dmaphase 0x31",
+    "kind": "hex",
+    "want": "044503D5"
+   },
+   {
+    "id": "dmaphase 0x32",
+    "kind": "hex",
+    "want": "044603D5"
+   }
+  ]
+ },
+ {
+  "payload": "wakeirq",
+  "rom": "wakeirq.gba",
+  "sha1": "793f31525f037b55d781727edbf952abceb3f62e",
+  "frames": 140,
+  "cells": [
+   {
+    "id": "wakeirq 0x0",
+    "kind": "hex",
+    "want": "017009A1",
+    "hle_want": "00FC09A1",
+    "hle_why": "bits 16..31 are the BIOS address the interrupt returns to; the HLE has no BIOS instruction to be inside. The cycle (09A1) is the console's."
+   },
+   {
+    "id": "wakeirq 0x10",
+    "kind": "hex",
+    "want": "0000099D"
+   },
+   {
+    "id": "wakeirq 0x20",
+    "kind": "hex",
+    "want": "09CB099E"
+   },
+   {
+    "id": "wakeirq 0x28",
+    "kind": "hex",
+    "want": "095F099E"
+   },
+   {
+    "id": "wakeirq 0x60",
+    "kind": "hex",
+    "want": "0AFA099E"
+   },
+   {
+    "id": "wakeirq 0x24",
+    "kind": "hex",
+    "want": "09B10984"
+   },
+   {
+    "id": "wakeirq 0x2c",
+    "kind": "hex",
+    "want": "093F0984"
+   },
+   {
+    "id": "wakeirq 0x64",
+    "kind": "hex",
+    "want": "0B000984"
+   },
+   {
+    "id": "wakeirq 0x22",
+    "kind": "hex",
+    "want": "099E0000"
+   },
+   {
+    "id": "wakeirq 0x26",
+    "kind": "hex",
+    "want": "09840000"
+   }
+  ]
+ },
+ {
+  "payload": "tmrw",
+  "rom": "tmrw.gba",
+  "sha1": "da407fba11ef8f9c1d7afa1fe4129e917d7bcbce",
+  "frames": 124,
+  "cells": [
+   {
+    "id": "tmrw 0x0",
+    "kind": "hex",
+    "want": "0007000F"
+   },
+   {
+    "id": "tmrw 0x1",
+    "kind": "hex",
+    "want": "00080010"
+   },
+   {
+    "id": "tmrw 0x2",
+    "kind": "hex",
+    "want": "00090011"
+   },
+   {
+    "id": "tmrw 0x10",
+    "kind": "hex",
+    "want": "0008000F"
+   },
+   {
+    "id": "tmrw 0x11",
+    "kind": "hex",
+    "want": "00090010"
+   },
+   {
+    "id": "tmrw 0x20",
+    "kind": "hex",
+    "want": "00090011"
+   },
+   {
+    "id": "tmrw 0x21",
+    "kind": "hex",
+    "want": "000A0012"
+   },
+   {
+    "id": "tmrw 0x30",
+    "kind": "hex",
+    "want": "000A0011"
+   }
+  ]
+ },
+ {
+  "payload": "lycwrite",
+  "rom": "lycwrite.gba",
+  "sha1": "b3d7444a9b22b4b84f382f8738dc010ee8bfb61a",
+  "frames": 68,
+  "cells": [
+   {
+    "id": "lycwrite 0x0",
+    "kind": "hex",
+    "want": "64101011"
+   }
+  ]
+ },
+ {
+  "payload": "kitdemo",
+  "rom": "kitdemo.gba",
+  "sha1": "96d80e1fa65961b4ce88776b0d3bd8deafd3e8fd",
+  "frames": 156,
+  "cells": [
+   {
+    "id": "kitdemo 0x80",
+    "kind": "hex",
+    "want": "04800484"
+   },
+   {
+    "id": "kitdemo 0xb0",
+    "kind": "hex",
+    "want": "04400441"
+   },
+   {
+    "id": "kitdemo 0x0",
+    "kind": "hex",
+    "want": "048303D5"
+   },
+   {
+    "id": "kitdemo 0x1",
+    "kind": "hex",
+    "want": "048303D5"
+   },
+   {
+    "id": "kitdemo 0x2",
+    "kind": "hex",
+    "want": "048303D5"
+   },
+   {
+    "id": "kitdemo 0x3",
+    "kind": "hex",
+    "want": "048303D5"
+   },
+   {
+    "id": "kitdemo 0x4",
+    "kind": "hex",
+    "want": "048803D5"
+   },
+   {
+    "id": "kitdemo 0x5",
+    "kind": "hex",
+    "want": "048803D5"
+   },
+   {
+    "id": "kitdemo 0x6",
+    "kind": "hex",
+    "want": "048803D5"
+   },
+   {
+    "id": "kitdemo 0x30",
+    "kind": "hex",
+    "want": "044403D5"
+   },
+   {
+    "id": "kitdemo 0x31",
+    "kind": "hex",
+    "want": "044503D5"
+   },
+   {
+    "id": "kitdemo 0x32",
+    "kind": "hex",
+    "want": "044603D5"
+   }
+  ]
+ }
+]

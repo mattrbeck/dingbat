@@ -20,7 +20,6 @@ times per k and every distinct answer is shown.
 import json
 import os
 import sys
-import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -94,23 +93,11 @@ def in_emulators(mode, ks):
 
 
 def on_console(mode, ks, runs):
-    from monitor import Monitor, assemble
+    from monitor import assemble
+    import rig
     code = assemble(SOURCE, out_dir=payloadcmp.SCRATCH)
-    seen = [set() for _ in ks]
-    for _ in range(runs):
-        for i, k in enumerate(ks):
-            for attempt in range(3):         # the adapter drops a word now and then
-                try:
-                    with Monitor() as m:
-                        m.ping()
-                        v = m.run_payload(code, mode | k)
-                    break
-                except Exception:
-                    if attempt == 2:
-                        raise
-                    time.sleep(1.5)
-            seen[i].add(show(v, mode))
-    return [' | '.join(sorted(s)) for s in seen]
+    cells = rig.ask(code, [mode | k for k in ks], runs=runs, show=lambda v: show(v, mode))
+    return [c.text for c in cells]
 
 
 def table(got, ks):
@@ -136,21 +123,9 @@ def main(argv):
             json.dump(out, open(TABLE_FILE, 'w'), indent=1)
         return 0
     if '--check' in flags:
-        want = json.load(open(TABLE_FILE))
-        bad = {n: 0 for n in EMULATORS}
-        total = 0
-        for row, cells in want.items():
-            ks = [int(k) for k in cells]
-            got = in_emulators(mode_of(row.split()), ks)
-            total += len(ks)
-            for n in EMULATORS:
-                wrong = [k for i, k in enumerate(ks) if got[n][i] != cells[str(k)]]
-                bad[n] += len(wrong)
-                if wrong and n != 'mgba':
-                    print(f'  {n:<13}{row or "(loop)":<42} k={wrong}')
-        for n in EMULATORS:
-            print(f'{n:<13} {total - bad[n]}/{total} cells match the console')
-        return 0
+        import tables
+        wrong = tables.check(tables.rows(only=('breakram',)))
+        return 1 if wrong['dingbat'] or wrong['dingbat-bios'] else 0
 
     k0, k1 = (nums + [0, 23])[:2] if len(nums) < 2 else nums[:2]
     ks = list(range(k0, k1 + 1))

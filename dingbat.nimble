@@ -59,6 +59,10 @@ task test_rewind, "Run the rewind-ring property tests (IDs, eviction, keyframes)
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_rewind_test tests/rewind_test.nim"
 
+task test_cyclelaws, "Hold the core to the cycle laws recorded from an AGB SP":
+  exec "nim c -r -d:test_harness -d:release --path:src " &
+       "-o:dingbat_cyclelaws_test tests/cyclelaws_test.nim"
+
 task test_clipreplay, "Run the clip-capture replay determinism tests":
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_clipreplay_test tests/clip_replay_test.nim"
