@@ -9,8 +9,16 @@ proc exception_return_restore*(cpu: CPU) =
   # return refills from the gamepak, where restarting the ROM fetch stream
   # costs it (hardware: gbaedge IRQLAT2 on AGB SP, docs/hwprobe.md). SWI
   # entry/return splits evenly (mGBA suite BIOS timing rows).
+  # An IRQ that woke an HLE Halt or IntrWait returns, notionally, to the
+  # caller -- but on the console it returns into the BIOS routine that was
+  # halted, never to the gamepak, so the cycle comes back whatever the
+  # caller's region. Without this the HLE left a cartridge-resident caller
+  # one cycle later than the real BIOS does in our own core (the mGBA suite's
+  # `DMA Prefetch Break` reads that cycle as a whole scanline).
+  let into_halted_bios = cpu.gba.bus.stub_bios and
+    (cpu.intr_wait_active or cpu.halt_resume_charge != 0)
   if cast[CpuMode](cpu.cpsr.mode) == modeIRQ and
-     int(bits_range(cpu.r[15], 24, 27)) notin 8..13:
+     (into_halted_bios or int(bits_range(cpu.r[15], 24, 27)) notin 8..13):
     cpu.gba.bus.add_cycles(-1)
   if cpu.spsr.thumb:
     cpu.r[15] -= 4
@@ -19,6 +27,15 @@ proc exception_return_restore*(cpu: CPU) =
     let page = int(bits_range(cpu.r[15], 24, 27))
     cpu.gba.bus.add_cycles(2 * (int(cpu.gba.bus.wait16_s[page]) -
                                 int(cpu.gba.bus.wait32_s[page])))
+    when ROM_REFILL_ORDERED:
+      if page >= 0x8 and page <= 0xD and not cpu.gba.bus.prefetch_on:
+        # clear_pipeline left the burst continuing at the ARM-aligned target
+        # and the correction above cooled it; the Thumb refill's burst
+        # continues at the halfword the next instruction fetches.
+        let bus = cpu.gba.bus
+        bus.rom_next_addr = (cpu.r[15] - 4) and not 1'u32
+        bus.rom_free_since = bus.sched.cycles + CycleCount(bus.cycles)
+        bus.rom_hot = true
   let old_spsr = uint32(cpu.spsr)
   let was_irq_disabled = cpu.cpsr.irq_disable
   let new_mode = cast[CpuMode](cpu.spsr.mode)

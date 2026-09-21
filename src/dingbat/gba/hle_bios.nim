@@ -197,11 +197,11 @@ proc check_intr_wait*(cpu: CPU) =
     # routine's frame pop and the dispatcher's restore, instruction-counted
     # from the real BIOS. Keeps code after IntrWait phase-aligned with the
     # timer prescaler (mGBA suite Timer count-up rows).
-    # vbwait.s (tests/roms/payloads) shows this HLE returning from a halted
-    # IntrWait one cycle later than the real BIOS does in our own core. The
-    # cycle is NOT here: at 43 the return matches and 16 Timer count-up rows
-    # fail, while the real BIOS passes them all -- so the excess is on the
-    # way in (the handler is entered a cycle late), not on the way out.
+    # Checked against Nintendo's BIOS on an AGB SP (tests/roms/payloads/
+    # vbwait.s): with this the return lands on the console's cycle for a
+    # V-blank wait and a V-count wait alike, behind a minimal handler and a
+    # table-walking one. A one-cycle miss that page first showed here was
+    # HALT_RETURN_COST's (below), which moved the page's own clocks.
     cpu.gba.bus.add_cycles(INTRWAIT_TUNE)
   else:
     # Re-halt with the check subroutine's register state (see hle_intr_wait)
@@ -222,7 +222,12 @@ const SWI_HLE_BASE = 48
 # with refill = 21), less the cycle the IRQ exception return charges on the
 # vector side. A deferral, not an extra cost: post-wake measurements see it
 # (mGBA suite SIO timing rows).
-const HALT_RETURN_COST = 20
+# 21, not the 20 instruction-counted above: vbwait.s stamps IntrWait's return
+# against a Halt wake, and at 20 every stamp on the page sat one cycle from
+# the real BIOS in our own core -- which is itself on the console's cycle.
+# halthb.s could not see it: a Halt return cancels out of that page's
+# difference. The mGBA suite does not constrain it either.
+const HALT_RETURN_COST {.intdefine.} = 21
 
 # --- Routine-body cost models ---
 #

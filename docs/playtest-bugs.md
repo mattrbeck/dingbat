@@ -2272,7 +2272,8 @@ handler entry (H) and the return (R).
   `VBLANK_IRQ_SYNC_DELAY = LINE_IRQ_SYNC_DELAY - 1`. Both gates row-identical
   (the suite cannot see it); with it the real-BIOS core reads hardware's T
   on both rows.
-- The HLE returns one cycle late. It is **not** `INTRWAIT_TUNE`: at 43 the
+- *(Resolved in section 24: it was the HLE's Halt return, not IntrWait.)*
+  The HLE returns one cycle late. It is **not** `INTRWAIT_TUNE`: at 43 the
   return matches and 16 Timer count-up rows fail, while the real BIOS passes
   them all -- the HLE's extra cycle is on the way *in*. Open.
 - On hardware the handler is entered **2 cycles later and left 2 cycles
@@ -2369,6 +2370,9 @@ this row green.
 
 ### Two things still open
 
+> **Both chased in section 24.** The HLE's pass here was two errors
+> cancelling; with them fixed both cores agree, one line *past* the constant.
+
 **The real BIOS lands one line short.** On the rebuilt ROM the HLE reports
 `0x10002A94` and the real-BIOS core `0x10002A0C`: entry phase 16 against 15,
 the one cycle by which `vbwait.s` shows the HLE returning late. `vbwait.s`
@@ -2397,3 +2401,109 @@ Three ROMs now sit in `~/Documents/emu/gba/flashcart-tests/`:
 `mgba-suite-irqreset.gba` (the rebuilt fork: expect `0x10002A94`), and the
 current fork build `mgba-suite.gba` (expect `0x10002540`, section 22). The
 fork patch is beside them.
+
+
+## 24. The real BIOS, chased: three bugs, and the row is mGBA's number, 2026-09-20 night
+
+Section 23 left the real-BIOS core one scanline short of the HLE on the
+rebuilt ROM. One line of that loop is one cycle of entry phase, so this was a
+hunt for single cycles, done the way the others were: a probe on the AGB SP
+for each suspect, and no change without one.
+
+### What was wrong
+
+**1. A branch into the gamepak was refilled in the wrong order.**
+`clear_pipeline` charged a flat `2S` and left the nonsequential access to the
+target's own fetch. The sum was right and the order was not, and section 22
+had already measured why order matters: the first gamepak access after a DMA
+is nonsequential. With N charged last, a DMA landing in the refill cost
+nothing where the console pays two cycles, and one landing in the branch's
+own fetch cost two where the console pays none. Now N then S at the target,
+the burst continuing into the target's own fetch, events due before the
+refill run first (`ROM_REFILL_ORDERED`; prefetch-off only -- with the
+prefetcher on the totals would move and section 22's twenty rows pin those).
+An exception return into Thumb, and the HLE's post-return charges, keep the
+burst alive the same way.
+
+Checked where it was found: **`slotdma.s`'s cost column now matches the
+console at every phase** of the chain and of all three single hops, where it
+was wrong at five phases in fourteen. The `ldmia` capture window also came
+out exact (the same three k as hardware; it had looked six wide only because
+of where the refill was charged). Suite and runner row-identical.
+
+**2. The HLE's Halt returned a cycle early.** Section 22 blamed IntrWait and
+was wrong. `-d:irqlog` shows both cores take the wake IRQ on the same cycle;
+what differed was the *first* Halt in `vbwait.s`, which starts the page's
+clocks. `HALT_RETURN_COST` 20 -> 21 and the HLE matches the real BIOS -- and
+the console -- on T, R and H alike. `halthb.s` never saw it because a Halt
+return cancels out of that page's difference.
+
+That exposed **3: `SIO_TRANSFER_OVERHEAD` was 8 and should be 7.** The four
+SIO timing rows end on a Halt wake, so they measure the serial start-up
+*plus* the Halt return. At 8 they passed under the HLE and read exactly one
+cycle long under the real BIOS, which is why the real-BIOS core has always
+scored 0/4 there: the short Halt was hiding the long serial start. **The
+real-BIOS core now passes all four, for the first time.**
+
+**4. An IRQ that wakes an HLE Halt returns into the BIOS, not the caller.**
+`exception_return_restore` gives a cycle back unless the return refills from
+the gamepak. Under the HLE a halted SWI's wake IRQ returns, notionally, to
+the caller, so a cartridge-resident caller lost the cycle; on the console
+that return is into the halted BIOS routine whatever the caller's region.
+
+Probes that came back *clean*, and so rule their suspects out:
+`slotret.s` (an exception return into gamepak Thumb costs exactly what a
+branch does -- console, both cores and mGBA all 20/20/13/13), `vbwait.s` with
+a table-walking dispatcher (`mrs`, four-register push and pop, word-wide I/O
+reads, an IME write: the real-BIOS core returns on the console's cycle,
+2352 / 2351), and a DMA swept across a store (no phase costs anything extra,
+on silicon or here -- so the one-cycle saving in section 22 really is the
+internal cycle, not data cycles in general).
+
+### Where the row is now
+
+**The HLE and the real BIOS agree on every row of both ROMs**, 6997/6998
+each, down to the knife-edge value: `0x10002540` on the released fork,
+`0x10002B1C` on the rebuilt one. Section 23's HLE pass was error 1 and error
+2 cancelling; hand-walking section 22's rules had predicted line 12, and that
+is what both cores now compute.
+
+**mGBA reports exactly `0x10002A94` on the rebuilt ROM.** So the suite's
+constant is reproduced by the suite author's emulator and by nothing else we
+have -- and mGBA is measurably wrong, against this console, on the mechanisms
+that decide it: it defers the grant across whole instructions (section 22),
+charges nothing for the broken burst, raises the V-count interrupt a cycle
+early and enters a wake handler three cycles early (`vbwait.s`). Section 20
+had already found this constant's predecessor agreeing with that emulator
+and not with a console. It may still be right: eleven lines against twelve
+is one cycle, and there are mechanisms here measured only in one context
+(the internal-cycle overlap is unmodelled and is not on this walk; the wake
+handler is entered two cycles late on the console with the return on time).
+But it is no longer the better-supported number.
+
+Three photographs settle it, and they discriminate cleanly:
+
+| ROM, how run | dingbat (both cores) | mGBA / suite constant |
+|---|---|---|
+| `mgba-suite-upstream-official.gba`, fresh boot, Misc | `0x10002B1C` | `0x10002A94` |
+| the same, after running SIO timing first | `0x10002540` | -- |
+| `mgba-suite-irqreset.gba` (rebuilt fork) | `0x10002B1C` | `0x10002A94` |
+
+### Still open, all measured
+
+- The wake handler is entered 2 cycles later on the console than in either
+  core, and left 2 cycles sooner; the return is on time. `cpu.irq`'s
+  entry/return split is calibrated on a running CPU and is wrong for a
+  halted one. Visible only to code that reads a clock inside a wake handler.
+- A DMA requested during a data cycle runs over the internal cycle after it
+  (-1). Unmodelled.
+- The H-blank grant's deferral to the end of the access in flight moves the
+  DMA's own writes by up to 4 cycles at 4/2. Unmodelled; it does not change
+  what the CPU pays.
+- A DMA landing between the bytes of one unmapped read tears the word
+  (`000000FF`). The console reads it whole.
+- With the prefetcher on, a branch into the gamepak is still refilled in the
+  old order.
+
+New: `tests/roms/payloads/slotret.s`, `vbwait.s | 0x200`, `slotdma.s` hop 3
+(a store), `-d:irqlog`.

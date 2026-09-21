@@ -141,6 +141,7 @@ next:
     ldr r12, [r0]
     ldr lr, [r0, #4]
     ldr r2, [r0, #8]
+    ldr r4, [r0, #12]
     tst r7, #0x100
     ldrne r12, =(control + 1)
     ldr r5, =(land + 1)
@@ -155,9 +156,7 @@ hops:
     .word A0 + 1, B0 - 0xFFE, 0, 0                   @ 0 the chain
     .word 0x0800D027, land - 0xFFE, HPZERO, 0        @ 1 6813 ldr r3,[r2] IWRAM
     .word 0x08019411, land - 0xFFE, 0x10000000, 0    @ 2 CA08 ldmia r2!,{r3} unmapped
-    .word 0x08004401, land - 0xFFE, 0, 0             @ 3 2200 mov r2,#0 (clear of A4:
-                                                     @   the emulators' image cannot
-                                                     @   float a planted halfword)
+    .word 0x0800C0C7, land - 0xFFE, 0, HPZERO + 8    @ 3 6063 str r3,[r4,#4] IWRAM
 
     .thumb
     .rept 48
@@ -272,4 +271,4 @@ table:
     .word 0x08008E60, 0   @ B4 4730
     .word 0x0800D026, 0   @ hop 1
     .word 0x08019410, 0   @ hop 2
-    .word 0x08004400, 0   @ hop 3 (not 0x08008516: its float is unreliable)
+    .word 0x0800C0C6, 0   @ hop 3

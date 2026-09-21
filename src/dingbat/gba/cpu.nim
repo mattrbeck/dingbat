@@ -77,6 +77,16 @@ proc switch_mode*(cpu: CPU; new_mode: CpuMode) =
 
 proc irq*(cpu: CPU) =
   if not cpu.cpsr.irq_disable:
+    when defined(irqlog):
+      # -d:irqlog: the cycle every IRQ is taken at, to IRQLOG (a file: the
+      # playtest driver's stdout is its protocol pipe).
+      block:
+        var f: File
+        if f.open(getEnv("IRQLOG", "/tmp/irqlog.txt"), fmAppend):
+          f.writeLine("irq now=" & $(cpu.gba.bus.sched.cycles + CycleCount(cpu.gba.bus.cycles)) &
+            " pc=" & toHex(cpu.r[15], 8) & " wake=" & $cpu.halt_wake &
+            " vcount=" & $cpu.gba.ppu.vcount & " if=" & toHex(uint16(cpu.gba.interrupts.reg_if), 4))
+          f.close()
     let lr = cpu.r[15] - (if cpu.cpsr.thumb: 0'u32 else: 4'u32)
     let old_cpsr = cpu.cpsr
     cpu.switch_mode(modeIRQ)
@@ -149,6 +159,34 @@ proc clear_pipeline*(cpu: CPU) =
     # abandons the buffered stream (mGBA suite BIOS timing, prefetch columns).
     cpu.gba.bus.rom_next_addr = 1
     cpu.gba.bus.rom_hot = false
+  when ROM_REFILL_ORDERED:
+    if page >= 0x8 and page <= 0xD and not cpu.gba.bus.prefetch_on:
+      # The refill in the order the console makes it: a nonsequential fetch
+      # at the target, a sequential one after it, and then each instruction's
+      # own fetch continues the burst. The sum is what it always was (2S here
+      # and N on the target's own fetch), but the ORDER is observable: a DMA
+      # breaks the burst, and the first gamepak access after it is
+      # nonsequential (tests/roms/payloads/slotdma.s on an AGB SP reads that
+      # straight off an empty slot). With the N charged last, a DMA landing in
+      # the refill cost nothing where the console pays two cycles, and one
+      # landing in the branch's own fetch cost two where the console pays
+      # nothing, because the N that follows absorbs it. Events due by now run
+      # first for the same reason: a DMA requested before the refill starts
+      # has to cool the burst before the N is charged, not after.
+      let bus = cpu.gba.bus
+      bus.catch_up()
+      bus.rom_cool()
+      if cpu.cpsr.thumb:
+        bus.cycles += int(bus.wait16_n[page]) + int(bus.wait16_s[page])
+        bus.rom_next_addr = cpu.r[15] and not 1'u32
+        cpu.r[15] += 4
+      else:
+        bus.cycles += int(bus.wait32_n[page]) + int(bus.wait32_s[page])
+        bus.rom_next_addr = cpu.r[15] and not 3'u32
+        cpu.r[15] += 8
+      bus.rom_free_since = bus.sched.cycles + CycleCount(bus.cycles)
+      bus.rom_hot = true
+      return
   if cpu.cpsr.thumb:
     cpu.r[15] += 4
     cpu.gba.bus.add_cycles(2 * int(cpu.gba.bus.wait16_s[page]))
@@ -388,7 +426,15 @@ proc tick*(cpu: CPU) =
     # Back at the instruction after an IntrWait SWI: re-halt unless satisfied.
     let cur = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
     if cur == cpu.intr_wait_resume_addr:
+      # The cycles charged here stand in for BIOS code that ran BEFORE the
+      # return's refill, which the handler's exception return has already
+      # paid for in the console's order (clear_pipeline). Charging them must
+      # not cool the burst, or the caller's first fetch pays for a second
+      # nonsequential access the real BIOS never makes.
+      let hot = cpu.gba.bus.rom_hot
       cpu.check_intr_wait()
+      when ROM_REFILL_ORDERED:
+        if hot and not cpu.halted: cpu.gba.bus.rom_hot = true
   if cpu.halt_resume_charge != 0 and not cpu.halted:
     # Back at the instruction after an HLE Halt/Stop SWI: charge the BIOS
     # return path the real BIOS runs after the wake.
@@ -399,7 +445,10 @@ proc tick*(cpu: CPU) =
       # atomic lump (~240k cycles for a large LZ77UnComp) starves the Gen-3
       # link master's per-frame transfer cadence and FireRed/LeafGreen abort
       # the trade with LAG_MASTER. A remainder stays parked for the next return.
+      let hot = cpu.gba.bus.rom_hot   # as for IntrWait above
       let remain = cpu.hle_charge_units_interruptible(int(cpu.halt_resume_charge))
+      when ROM_REFILL_ORDERED:
+        if hot: cpu.gba.bus.rom_hot = true
       cpu.halt_resume_charge = int32(remain)
       if remain != 0: return
       # Dispatcher exit path: pop the caller's r12 from its SVC-stack slot.

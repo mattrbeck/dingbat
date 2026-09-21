@@ -76,7 +76,13 @@ proc normal_transfer_cycles*(serial: Serial): int =
   let cycles_per_bit = if fast: 8 else: 64
   # Start-up overhead before the first shifted bit; pinned by the mGBA suite
   # SIO timing tests (which shift uniformly when CPU cycle accounting changes).
-  const SIO_TRANSFER_OVERHEAD = 8
+  # Those rows end on a Halt wake, so they measure this PLUS the BIOS's Halt
+  # return. At 8 they passed under the HLE and all four read one cycle long
+  # under the real BIOS -- the HLE's Halt return was a cycle short
+  # (hle_bios.HALT_RETURN_COST, found against an AGB SP) and hid it. With the
+  # BIOS path exact in both cores the remainder is 7, and the real-BIOS core
+  # passes the four rows for the first time.
+  const SIO_TRANSFER_OVERHEAD = 7
   bits * cycles_per_bit + SIO_TRANSFER_OVERHEAD
 
 proc multi_transfer_cycles*(serial: Serial): int =

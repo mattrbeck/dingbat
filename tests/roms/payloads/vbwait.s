@@ -45,6 +45,8 @@ _start:
     mov r2, #0
     strh r2, [r4, #8]
     adr r2, handler
+    tst r0, #0x200                 @ | 0x200: a dispatcher-shaped handler
+    adrne r2, dispatcher
     str r2, [r1]
     str r2, [r12, #4]
     mov r2, #0
@@ -158,6 +160,44 @@ handler:
     strh r3, [r2]                  @ the BIOS's copy, which IntrWait polls
     bx lr
 
+@ The shape of a table-walking dispatcher that finds nothing to call: read
+@ IE/IF and IME as words, mask IME, save SPSR and four registers, fold the
+@ flags into the BIOS's copy, look at one empty table slot, acknowledge,
+@ restore, unmask, return. The mGBA suite's `DMA Prefetch Break` is entered
+@ through a handler like this, and it uses instruction kinds the minimal one
+@ above does not: mrs, a four-register push and pop, word-wide I/O reads,
+@ a write to IME.
+dispatcher:
+    mov r3, #0x04000000
+    add r0, r3, #0x100
+    ldrh r0, [r0, #4]              @ H
+    ldr r2, =vars
+    str r0, [r2, #20]
+    ldr r2, [r3, #0x200]           @ IE | IF << 16
+    ldr r1, [r3, #0x208]           @ IME
+    str r3, [r3, #0x208]           @ IME off
+    mrs r0, spsr
+    stmfd sp!, {r0, r1, r3, lr}
+    and r1, r2, r2, lsr #16
+    tst r1, #0x40
+    bne watchdog_d
+    ldrh r2, [r3, #-8]             @ the BIOS's copy, 0x03FFFFF8
+    orr r2, r2, r1
+    strh r2, [r3, #-8]
+    ldr r2, =table
+    add r3, r3, #0x200
+    ldr r0, [r2, #4]               @ first slot's mask: none
+    cmp r0, #0
+    beq 1f
+    ands r0, r0, r1
+1:  strh r1, [r3, #2]              @ IF
+    ldmfd sp!, {r0, r1, r3, lr}
+    str r1, [r3, #0x208]           @ IME back
+    mov pc, lr
+table:
+    .word 0, 0
+watchdog_d:
+    add r0, r3, #0x200
 watchdog:
     mov r1, #0
     strh r1, [r0, #8]
