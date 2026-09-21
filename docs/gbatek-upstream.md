@@ -215,6 +215,41 @@ off the same flag:
   `halthb.s` wakes at 1003 with no DMA and 1004 / 1006 / 1010 under one, two
   and four words.
 
+### 1.11 A halted CPU's interrupt is taken one instruction after the wake
+
+`tests/roms/payloads/wakeirq.s`: halt through SWI 2 with IME set. The return
+address the BIOS dispatcher pushes is that of the instruction AFTER the one
+following the HALTCNT write: the CPU resumes, runs one instruction, and only
+then takes the exception. With IME clear the resume is on the same cycle.
+A running CPU interrupted in a sled of one-cycle NOPs gives the split of the
+exception's cost: the first handler instruction runs a cycle sooner, and the
+interrupted code resumes a cycle later, than a 4-in / 3-out split puts them.
+
+### 1.12 A timer stops one cycle after the write that stops it
+
+`tests/roms/payloads/tmrw.s`, straight-line IWRAM code: start, read, three
+NOPs, stop, read. The distance from the read to the frozen count is one more
+than a stop taking effect at the write gives. (Starts are two cycles after
+the write, as documented.)
+
+### 1.13 DMA against the CPU: the access in flight, internal cycles, and the prefetcher
+
+`tests/roms/payloads/dmaphase.s` and `slotdma.s`, a one-halfword H-blank DMA
+stamped by its own write:
+
+* A request that lands inside a CPU bus access is granted when that access
+  ends. A 32-bit EWRAM access is one six-cycle access for this purpose.
+* The CPU is halted only when it needs the bus. Internal cycles proceed under
+  the burst: a four-cycle DMA costs a multiply 4, 3, 2, 1 or 0 cycles by
+  phase.
+* With the gamepak prefetcher enabled, a burst that does not touch the
+  gamepak leaves it running and does not force a nonsequential access after
+  it; against code fetched from the gamepak such a burst usually costs
+  nothing. With the prefetcher disabled the access after the burst is
+  nonsequential (+2 at 4/2).
+* Of the burst's two hand-off cycles one precedes its first transfer and one
+  follows its last.
+
 ## 2. Not settled — hardware needed first
 
 1. **BIOS-region Thumb open bus** (§1.1). No payload can execute from BIOS, so

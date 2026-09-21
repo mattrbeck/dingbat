@@ -5,6 +5,7 @@ const
   TIMER_EVENT_TYPES* = [etTimer0, etTimer1, etTimer2, etTimer3]
   # Counting starts 2 cycles after the enable write.
   TIMER_START_DELAY = 2
+const TIMER_STOP_DELAY {.intdefine.} = 1
 
 # The prescaler is free-running: a timer with period P ticks at absolute
 # cycles divisible by P regardless of when it was enabled. Ticks are counted
@@ -85,6 +86,7 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
       tim.update_tm(num)
       let was_enabled = tim.tmcnt[num].enable
       let was_cascade = tim.tmcnt[num].cascade
+      let old_period = TIMER_PERIODS[tim.tmcnt[num].frequency]
       write(tim.tmcnt[num], value, 0)
       if num == 0:
         # TM0CNT_H's count-up bit is unimplemented and reads back 0 (GBATEK,
@@ -121,6 +123,17 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
           tim.cycle_enabled[num] = tim.gba.scheduler.cycles + CycleCount(delay)
           tim.gba.scheduler.schedule(tim.cycles_until_overflow(num), TIMER_EVENT_TYPES[num])
       elif was_enabled:
+        when TIMER_STOP_DELAY > 0:
+          # The count goes on for a cycle after the write that stops it
+          # (tests/roms/payloads/tmrw.s on an AGB SP: a read, three NOPs and
+          # a stop freeze the count one higher than a stop-at-the-write gives,
+          # where the read itself agrees).
+          if not was_cascade:
+            let now = tim.gba.scheduler.cycles
+            let extra = ticks_between(now, now + CycleCount(TIMER_STOP_DELAY), old_period)
+            if extra > 0:
+              if tim.tm[num] == 0xFFFF'u16: tim.timer_overflow_event(num)
+              else: tim.tm[num] += uint16(extra)
         tim.gba.scheduler.clear(TIMER_EVENT_TYPES[num])
   else:
     let now = tim.gba.scheduler.cycles

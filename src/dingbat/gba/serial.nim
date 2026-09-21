@@ -82,7 +82,7 @@ proc normal_transfer_cycles*(serial: Serial): int =
   # (hle_bios.HALT_RETURN_COST, found against an AGB SP) and hid it. With the
   # BIOS path exact in both cores the remainder is 7, and the real-BIOS core
   # passes the four rows for the first time.
-  const SIO_TRANSFER_OVERHEAD = 7
+  const SIO_TRANSFER_OVERHEAD = 7 - TIMER_STOP_DELAY  # fitted on rows that stop a timer to read it
   bits * cycles_per_bit + SIO_TRANSFER_OVERHEAD
 
 proc multi_transfer_cycles*(serial: Serial): int =

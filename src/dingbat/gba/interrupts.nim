@@ -17,7 +17,7 @@ proc set_interrupt_flag*(intr: Interrupts; bit: int) {.inline.} =
 
 # Cycles from a peripheral raising IF to CPU recognition (mGBA suite Timer
 # IRQ rows). Register writes (IE/IF/IME) re-evaluate with no delay.
-const IRQ_SYNC_DELAY* = 3
+const IRQ_SYNC_DELAY* {.intdefine.} = 3
 
 # Cycles of continued execution after a register write (IME 0->1, IE unmask,
 # msr clearing CPSR.I) releases an already-parked IF bit. The window is

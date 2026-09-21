@@ -29,7 +29,8 @@
 @
 @ r0 = base k (bits 0..7), | 0x100 for the control: the same walk with the
 @ excursion replaced by 130 cycles of IWRAM NOPs; | 0x200 for no DMA at all;
-@ bits 16..31 = WAITCNT -- but ONLY 0 is safe: at other first-access waits the
+@ bits 16..31 = WAITCNT -- but only the 4/2 waits are safe (0, or 0x4000 for
+@ the same waits with the prefetcher on): at other first-access waits the
 @ empty slot's float is unreliable and the console has been lost to it twice.
 @ 14 trials, k = base .. base + 13, 16 bytes each at 0x02008000:
 @   +0 (h) T  TM0 at the landing pad        +2 (h) D  TM1 as the DMA froze it

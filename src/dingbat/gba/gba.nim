@@ -343,7 +343,18 @@ type
     # True while a delayed immediate DMA is scheduled: data accesses catch the
     # scheduler up so the DMA preempts the CPU at its exact start cycle (a
     # read one instruction after the enable must see the DMA'd data)
-    dma_pending*: bool
+    # Every data access syncs the scheduler while either bit is set: bit 0 an
+    # immediate DMA is armed, bit 1 a PPU-timed DMA request is close
+    # (DMA_ACCESS_WINDOW). One test on the data path and none on fetches: the
+    # window invalidates the fetch cache and rides its miss path.
+    sync_bits*: uint8
+    access_end*: CycleCount         # end of the access a window sync is inside
+    dma_deferred_from*: CycleCount  # a deferred grant's original request cycle
+    dma_deferred*: bool
+    window_closing*: bool           # the request fired; the next fetch closes the window
+    idle_until*: CycleCount         # end of the internal cycles a window sync is inside
+    dma_end_at*: CycleCount         # when the last CPU-interrupting burst let go
+    dma_held*: int                  # and how long it had held the bus
     # Open-bus latch left by DMA: the last word a DMA moved stays on the data
     # bus until the CPU's next bus access replaces it, so an unmapped read
     # sees that word only if it is the first access after the burst
@@ -1014,8 +1025,33 @@ proc rom_cool*(bus: Bus) {.inline.}
 
 # A branch into the gamepak refills N then S, in that order (cpu.clear_pipeline).
 const ROM_REFILL_ORDERED* {.booldefine.} = true
+const ROM_REFILL_ORDERED_PF* {.booldefine.} = true
+const DMA_KEEPS_PREFETCH* {.booldefine.} = true
+  ## A DMA that never touches the gamepak leaves the prefetcher running: the
+  ## CPU's stream is not broken and the burst's cycles are prefetch time
+  ## (tests/roms/payloads/slotdma.s at WAITCNT 0x4000).
+const HALT_WAKE_RUNS_ONE* {.booldefine.} = true
+  ## An interrupt that wakes a halted CPU is taken one instruction after the
+  ## wake, not at it (cpu.tick; tests/roms/payloads/wakeirq.s).
+const HALT_WAKE_INSTR_COST* = 3
+  ## What that instruction costs in Nintendo's BIOS: `bx lr` after Halt's
+  ## HALTCNT write, `bl` after IntrWait's. The HLE charges it by number.
+const IRQ_ENTRY_EXTRA* {.intdefine.} = 1
+  ## Cycles an IRQ entry costs beyond its pipeline refill (cpu.irq).
+const DMA_ACCESS_WINDOW* {.booldefine.} = true
+const DMA_LEAD_CYCLES* {.intdefine.} = 1
+  ## Of a burst's two hand-off cycles, how many come before its first
+  ## transfer; the rest follow its last. One and one: with both in front the
+  ## DMA's own writes landed a cycle late, which only showed once a timer
+  ## stop was put where tmrw.s measures it -- every DMA-written stop stamp
+  ## (halthb.s, breakram.s, dmaphase.s, slotdma.s) had been absorbing it.
+  ## A PPU-timed DMA is granted at the end of the bus access in flight, not
+  ## at its request (tests/roms/payloads/dmaphase.s, hdmastamp.s). Knowing
+  ## where accesses end costs a scheduler sync per access, so it is paid only
+  ## from the H-blank's start to the request, and only with such a DMA armed.
 const DMA_STALLS_IRQ_SYNC* {.booldefine.} = true
 proc add_cycles*(bus: Bus; n: int) {.inline.}
+proc idle_window*(bus: Bus; n: int)
 proc `[]`*(bus: Bus; address: uint32): uint8
 proc `[]=`*(bus: Bus; address: uint32; value: uint8)
 proc read_half*(bus: Bus; address: uint32): uint16
@@ -1056,6 +1092,7 @@ proc trigger_vdma*(dma: DMA)
 proc request_immediate*(dma: DMA)
 proc trigger_video_capture*(dma: DMA; vcount: uint16)
 proc catch_up(bus: Bus) {.inline.}
+proc catch_up_access(bus: Bus) {.inline.}
 proc serial_transfer_complete*(serial: Serial)
 proc trigger_fifo*(dma: DMA; fifo_channel: int)
 proc bitmap*(ppu: PPU): bool
@@ -1241,6 +1278,22 @@ proc new_gba*(bios_path, rom_path: string; run_bios: bool; use_hle: bool = false
 
 proc handle_saves*(gba: GBA)
 
+proc defer_dma_request(gba: GBA; kind: EventType): bool =
+  ## A PPU-timed DMA request that lands inside a CPU bus access is granted at
+  ## the access's end. Only a window sync knows where that is; a halted CPU,
+  ## an internal cycle or a closed window leave access_end in the past.
+  when DMA_ACCESS_WINDOW:
+    let bus = gba.bus
+    if bus.dma_deferred and gba.scheduler.cycles != bus.access_end:
+      bus.dma_deferred = false       # a deferral whose grant found no channel
+    if (bus.sync_bits and 2) != 0 and not gba.cpu.halted and
+       bus.access_end > gba.scheduler.cycles:
+      bus.dma_deferred = true
+      bus.dma_deferred_from = gba.scheduler.cycles
+      gba.scheduler.schedule(int(bus.access_end - gba.scheduler.cycles), kind)
+      return true
+  false
+
 proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
   # Non-owning capture: the closure lives on the GBA's scheduler
   let gba {.cursor.} = gba
@@ -1268,8 +1321,10 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
     of etSerial:        gba.serial.serial_transfer_complete()
     of etDMA:           gba.dma.request_immediate()
     of etRtcSecond:     gba.rtc_irq_poll()
-    of etHDMARequest: gba.dma.trigger_hdma()
-    of etVDMARequest: gba.dma.trigger_vdma()
+    of etHDMARequest:
+      if not gba.defer_dma_request(kind): gba.dma.trigger_hdma()
+    of etVDMARequest:
+      if not gba.defer_dma_request(kind): gba.dma.trigger_vdma()
     of etHandleInput, etIME, etCameraDone, etGbLycEdge: discard
 
 proc post_init*(gba: GBA) =
@@ -1379,6 +1434,14 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
     gba.bus.dma_request_at -= base
   else:
     gba.bus.dma_request_at = 0
+  if gba.bus.idle_until >= base: gba.bus.idle_until -= base
+  else: gba.bus.idle_until = 0
+  if gba.bus.dma_end_at >= base: gba.bus.dma_end_at -= base
+  else: gba.bus.dma_end_at = 0
+  if gba.bus.access_end >= base:
+    gba.bus.access_end -= base
+  else:
+    gba.bus.access_end = 0
   if gba.interrupts.gate_open_at >= base:
     gba.interrupts.gate_open_at -= base
   else:

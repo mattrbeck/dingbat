@@ -2648,6 +2648,8 @@ deferral, the internal-cycle overlap for a running CPU (it needs a stamp on
 every bus access, the hottest path in the core, for one cycle at one phase),
 and the prefetch-on refill order.
 
+> All four are settled in section 26.
+
 **An LYC write that newly matches does raise the interrupt.**
 `tests/roms/payloads/lycwrite.s`, parked on line 100 with IME clear and IF
 clean: moving the setting 50 -> 100 sets IF's V-count bit at once; turning
@@ -2659,3 +2661,133 @@ The torn unmapped word (section 22, item 5) is fixed: an unmapped read now
 takes one verdict for the whole access (`read_open_bus_word`) instead of one
 per byte with a catch-up -- and possibly a DMA -- between them. `slotdma.s`
 hop 2 reads `FFFFFFFF` at that phase, as the console does.
+
+
+## 26. The open items, chased: five more laws and one link-rig defect, 2026-09-21
+
+Section 25 closed the suite and left four things open plus one odd cell in
+`breakram.py`'s table. All five are settled here, each against the console.
+
+### The odd cell was the link, not the console
+
+`--stamp --vcount=160`, k = 2, had answered `T=19099` once and `T=19100`
+twice. Ten more runs: `19100` every time, which is dingbat's answer -- and
+`19099` is k = 3's. `monitor.py` verified the payload's bytes by reading them
+back but sent the ARGUMENT bare in the call command, so one flipped bit ran
+k = 3 and filed it under k = 2. `run_payload` now uploads a nine-word
+trampoline behind the payload: the argument rides in memory (read back with
+the code), the result is stored beside it and read until two reads agree.
+The whole table re-recorded through it: **152 cells, 152 single-valued, the
+only change that one cell. dingbat 152 / 152 under both BIOSes.**
+
+### 1. A halted CPU runs one more instruction before it takes the interrupt
+
+`tests/roms/payloads/wakeirq.s`: halt through SWI 2 with IME on, and have the
+handler report the return address the BIOS's dispatcher pushed. We said
+`0x1B4` (the `bx lr` after Halt's HALTCNT write, not yet run); **the console
+says `0x170`: the `bx lr` has already executed**, and the handler is entered
+2 cycles later (`0x9A1` against `0x99F`). A plain wake with IME clear is on
+the same cycle in all four columns. The interrupt input is synchronised on a
+clock that was stopped, so the wake comes first and the exception one
+instruction later. That is the whole of section 22's "entered 2 later, left
+2 sooner, return on time": the three cycles of `bx lr` (`bl` in IntrWait)
+move from after the handler to before it, less one cycle that turned out to
+be a different bug:
+
+### 2. The IRQ entry/return split was a cycle out, hidden by a timer stop that was a cycle early
+
+The control for the above runs the CPU into a sled of 2700 one-cycle NOPs
+instead of halting. V-count match or timer overflow, the console interrupts
+**the same NOP**, **returns on the same cycle**, costs **the same in all**
+(return into the sled instead and its end does not move) -- and reads a
+clock in the handler **one cycle sooner**. So entry was a cycle long and the
+return a cycle short. Moving that cycle alone failed about 250 of the mGBA suite's timer
+rows, which stop a timer inside a handler. One more control: stop a timer as
+the handler's first act. Identical on the console and here. Reads a cycle
+apart and stops not -- so `tests/roms/payloads/tmrw.s` does it in
+straight-line IWRAM code: start, NOPs, read, three NOPs, stop, read the
+frozen count. The first read agrees; **the console freezes one higher. A
+write that stops a timer takes effect a cycle after we had it.** The suite's
+rows pass either way because they only ever see entry + stop.
+
+With the stop where it belongs every DMA-written stop stamp on every page
+moved a cycle, which located the last piece: a burst's two hand-off cycles
+are one before its first transfer and one after its last, not two in front.
+All four together: `IRQ_ENTRY_EXTRA = 1`, `TIMER_STOP_DELAY = 1`,
+`DMA_LEAD_CYCLES = 1`, and the HLE's fitted `SIO_TRANSFER_OVERHEAD` follows
+the stop (its four rows stop a timer to read it). Suite and runner
+row-identical; `vbwait.s` H, R and T are the console's under both cores for
+the first time, all three modes.
+
+The HLE gets the same shape by number: three cycles before the entry on a
+wake, three fewer on the way out. The one cell it cannot match is the
+address itself -- the HLE has no BIOS instruction to be inside.
+
+### 3. The grant waits for the access in flight, and the CPU works through the burst when it can
+
+`tests/roms/payloads/dmaphase.s`: the halted, interrupt-anchored entry,
+a one-cycle NOP sled, then a long run of ONE kind of instruction under a
+one-halfword H-blank DMA that freezes TM1 with its own write. D is when the
+DMA wrote; T less the no-DMA control is what the CPU paid.
+
+| run | D over a period | the CPU pays |
+|---|---|---|
+| multiplies (1 fetch + 4 internal) | flat | **4, 3, 2, 1, 0** as the request moves from the last internal cycle back to the fetch |
+| EWRAM loads (1 + 6 + 1) | ramps 0..5 across the data access, snaps | 3 with the grant just before the internal cycle or in it, else 4 |
+| IWRAM loads (1 + 1 + 1) | flat | 3 on the data cycle, else 4 |
+| NOPs | flat | 4 |
+
+Two rules, and both are about the bus. **A request inside a bus access is
+granted at that access's end** (a 32-bit EWRAM load is ONE six-cycle access,
+not two). **The CPU is stopped only when it needs the bus:** internal cycles
+run underneath a burst, all of them, so a four-cycle DMA inside a multiply
+can cost nothing at all. Section 22's "-1" was the one-internal-cycle case.
+
+Knowing where accesses end costs a scheduler sync per access, which is what
+section 16 priced itself out with. `DMA_ACCESS_WINDOW` pays it only from the
+H-blank's start to the request (49 cycles a line) and only with an H-blank or
+V-blank DMA armed, with no new test on the fetch path at all: the window
+invalidates the fetch cache and rides its miss path, data accesses reuse the
+flag test the immediate-DMA window already made, internal cycles take one
+predictable branch. A gamepak branch's refill becomes two accesses inside
+the window, and a burst between them breaks the second. Cost, retired
+instructions, 1500 frames: Metroid Zero Mission +0.70%, Golden Sun 2 +0.63%.
+`dmaphase.s` 36 / 36 under both cores (mGBA 13); `slotdma.s`'s D column,
+section 22's unmodelled ramp, now the console's at every k.
+
+### 4. With the prefetcher on, the refill is in the same order and a DMA off the gamepak is nearly free
+
+`slotdma.py --waitcnt=0x4000` -- the empty slot survives the prefetcher at
+4/2 waits. No-DMA baseline 1043 with it on or off (the chain is all branches).
+With it on the console pays **0** cycles for a DMA at nine of fourteen
+phases, 3 at three, 4 at the two that are in IWRAM; with it off, 4 plus the
+forced nonsequential fetch. The prefetcher keeps fetching while a burst that
+never touches the gamepak has the bus. `ROM_REFILL_ORDERED_PF` (the refill
+in hardware order with the prefetcher on too) and `DMA_KEEPS_PREFETCH` (such
+a burst neither breaks the stream nor wastes its cycles) give D 14 / 14 and
+T 11 / 14 against 5 and 3 before. The three left are one cycle each, at the
+phases where the grant follows the opcode's own fetch and a branch is next:
+it looks like the prefetcher's committed-halfword penalty applying to a
+branch's first fetch, and the suite's prefetch columns are too many passing
+rows to try that on one page's evidence.
+
+### Where everything is
+
+| table | dingbat, HLE | dingbat, real BIOS | mGBA 0.10.5 |
+|---|---|---|---|
+| `breakram.py --check` | 152 / 152 | 152 / 152 | 70 |
+| `r0table.py --check` (`dmaphase`, `wakeirq`, `tmrw`, `lycwrite`) | 54 / 55 | 55 / 55 | 16 |
+
+mGBA suite: rebuilt fork ROM 6998 / 6998 under both BIOSes, released ROM
+still its one row (section 23). Runner 1219 / 1171 / 48, row-identical;
+save-state, clip-replay and rewind tests pass. `halthb.s`, `hdmamul.s` and
+`vbwait.s` word-identical to the console under both cores.
+
+Still open, smaller than before: the three prefetch-on phases above; a
+handler on the HLE finds a different return address on the stack than
+Nintendo's BIOS leaves; the library-wide waitloop on==off sweep has not been
+re-run on this tree.
+
+Method, again: a row that passes is evidence about a SUM. The timer rows
+had always passed on entry + stop, and each term was a cycle out.
+

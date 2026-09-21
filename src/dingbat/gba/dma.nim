@@ -89,23 +89,36 @@ proc `[]=`*(dma: DMA; io_addr: uint32; value: uint8) =
         # Starts DMA_START_DELAY cycles after the enable write; the CPU keeps
         # executing until then (mGBA suite "Trivial DMA"). The event re-checks
         # enable, so no per-channel pending state is needed.
-        dma.gba.bus.dma_pending = true
+        dma.gba.bus.sync_bits = dma.gba.bus.sync_bits or 1
         dma.gba.scheduler.schedule(DMA_START_DELAY, etDMA)
   else:
     echo "Unmapped DMA write addr: ", hex_str(uint8(io_addr)), " val: ", value
 
 proc request_immediate*(dma: DMA) =
-  dma.gba.bus.dma_pending = false
+  dma.gba.bus.sync_bits = dma.gba.bus.sync_bits and not 1'u8
   for channel in 0..3:
     if dma.dmacnt_h[channel].enable and dma.dmacnt_h[channel].start_timing == 0:
       dma.request(channel)
 
+proc armed*(dma: DMA; timing: int): bool =
+  for channel in 0..3:
+    if dma.dmacnt_h[channel].enable and int(dma.dmacnt_h[channel].start_timing) == timing:
+      return true
+
+proc close_access_window(dma: DMA) {.inline.} =
+  # Not yet: the burst this request starts, and the internal cycles that may
+  # run under it, still need the window. The next opcode fetch closes it.
+  if (dma.gba.bus.sync_bits and 2) != 0: dma.gba.bus.window_closing = true
+
 proc trigger_hdma*(dma: DMA) =
+  # Line 159's window stays open for the V-blank DMA behind it.
+  if not (dma.gba.ppu.vcount == 159 and dma.armed(1)): dma.close_access_window()
   for channel in 0..3:
     if dma.dmacnt_h[channel].enable and dma.dmacnt_h[channel].start_timing == 2:  # HBlank
       dma.request(channel)
 
 proc trigger_vdma*(dma: DMA) =
+  dma.close_access_window()
   for channel in 0..3:
     if dma.dmacnt_h[channel].enable and dma.dmacnt_h[channel].start_timing == 1:  # VBlank
       dma.request(channel)
@@ -186,17 +199,22 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
         " cyc=" & $dma.gba.bus.sched.cycles & " pc=" & toHex(dma.gba.cpu.r[15], 8))
   # Handlers and catch-up run an event at its own cycle, so this is the
   # cycle the burst was requested at (read_open_bus_value).
-  dma.gba.bus.dma_request_at = dma.gba.bus.sched.cycles
+  dma.gba.bus.dma_request_at =
+    if dma.gba.bus.dma_deferred: dma.gba.bus.dma_deferred_from
+    else: dma.gba.bus.sched.cycles
+  dma.gba.bus.dma_deferred = false
   dma.gba.bus.dma_has_run = true
+  # The prefetch hand-off phase (bus.rom_access_cycles) was pinned with two
+  # lead cycles; keep its origin where those rows put it.
   dma.gba.bus.dma_grant_now =
-    dma.gba.bus.sched.cycles + CycleCount(dma.gba.bus.cycles)
+    dma.gba.bus.sched.cycles + CycleCount(dma.gba.bus.cycles) - CycleCount(2 - DMA_LEAD_CYCLES)
   dma.gba.bus.dma_first_rom = true
 
   # CPU->DMA bus hand-off cost (mGBA suite DMA timing rows). A channel that
   # preempts another mid-burst pays nothing: the bus never returns to the
   # CPU (AGS aging cartridge DMA priority test).
   if not nested:
-    dma.gba.bus.add_cycles(2)
+    dma.gba.bus.add_cycles(DMA_LEAD_CYCLES)
 
   dma.gba.bus.dma_active = true
   dma.gba.bus.rom_next_addr = 1  # start both burst trackers cold
@@ -249,6 +267,9 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
     dma.src[channel] = uint32(int(dma.src[channel]) + delta_source)
     dma.dst[channel] = uint32(int(dma.dst[channel]) + delta_dest)
 
+  if not nested and DMA_LEAD_CYCLES < 2:
+    dma.gba.bus.add_cycles(2 - DMA_LEAD_CYCLES)   # the hand-back
+
   if start_timing == 3 and (channel == 1 or channel == 2):
     dma.fifo_xfer_cycle[channel] = int64(dma.gba.scheduler.cycles)
 
@@ -289,6 +310,10 @@ proc run_pending*(dma: DMA) =
     dma.current_priority = ch
     let bus = dma.gba.bus
     let granted_at = bus.sched.cycles + CycleCount(bus.cycles)
+    when DMA_KEEPS_PREFETCH:
+      if saved == 4: bus.rom_cool()
+      let cpu_stream = bus.rom_next_addr
+      let cpu_free = bus.rom_free_since
     dma.run_channel(ch, nested = saved < 4)
     dma.current_priority = saved
     when DMA_STALLS_IRQ_SYNC:
@@ -301,7 +326,19 @@ proc run_pending*(dma: DMA) =
       # not. A wall-clock delay loses one cycle to it, not four.
       # A halted CPU has no clock to stop; its wake is cpu.nim's business.
       if saved == 4 and not dma.gba.cpu.halted:
-        let held = bus.sched.cycles + CycleCount(bus.cycles) - granted_at
+        var held = bus.sched.cycles + CycleCount(bus.cycles) - granted_at
+        when DMA_ACCESS_WINDOW:
+          if (bus.sync_bits and 2) != 0:
+            if bus.idle_until > granted_at:
+              # Granted inside a run of internal cycles: the rest of them ran
+              # under the burst (bus.idle_window).
+              let free = min(held, bus.idle_until - granted_at)
+              bus.cycles -= int(free)
+              held -= free
+              bus.dma_held = 0
+            else:
+              bus.dma_held = int(held)
+            bus.dma_end_at = bus.sched.cycles + CycleCount(bus.cycles)
         bus.sched.delay_pending(etInterrupts, granted_at, held)
     # The CPU (or a paused outer burst) resumes with a nonsequential access.
     bus.dma_active = saved < 4
@@ -310,3 +347,7 @@ proc run_pending*(dma: DMA) =
           " rfs=" & $bus.rom_free_since & " hot=" & $bus.rom_hot)
     bus.rom_next_addr = 1
     bus.rom_next_addr2 = 1
+    when DMA_KEEPS_PREFETCH:
+      if saved == 4 and bus.prefetch_on and bus.dma_first_rom and cpu_stream != 1:
+        bus.rom_next_addr = cpu_stream
+        bus.rom_free_since = cpu_free

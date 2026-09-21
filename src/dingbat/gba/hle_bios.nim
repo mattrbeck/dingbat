@@ -202,7 +202,7 @@ proc check_intr_wait*(cpu: CPU) =
     # V-blank wait and a V-count wait alike, behind a minimal handler and a
     # table-walking one. A one-cycle miss that page first showed here was
     # HALT_RETURN_COST's (below), which moved the page's own clocks.
-    cpu.gba.bus.add_cycles(INTRWAIT_TUNE)
+    cpu.gba.bus.add_cycles(INTRWAIT_TUNE - (when HALT_WAKE_RUNS_ONE: HALT_WAKE_INSTR_COST else: 0))
   else:
     # Re-halt with the check subroutine's register state (see hle_intr_wait)
     cpu.r[0] = 0

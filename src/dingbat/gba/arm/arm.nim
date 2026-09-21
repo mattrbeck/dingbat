@@ -4,11 +4,13 @@ proc exception_return_restore*(cpu: CPU) =
   ## CPSR <- SPSR after an instruction that loaded r15 with the S bit set
   ## (subs pc, lr, #4 / ldmfd sp!, {..., pc}^). Assumes set_reg(15) already
   ## ran, so the pipeline offset is corrected when returning to thumb.
-  # IRQ return gives back the one cycle cpu.irq over-charged beyond an even
-  # split of the data sheet's 2S+1N entry + 2S+1N return, except when the
-  # return refills from the gamepak, where restarting the ROM fetch stream
-  # costs it (hardware: gbaedge IRQLAT2 on AGB SP, docs/hwprobe.md). SWI
-  # entry/return splits evenly (mGBA suite BIOS timing rows).
+  # An IRQ return costs what the instruction costs, plus one cycle when it
+  # refills from the gamepak, where restarting the ROM fetch stream costs it
+  # (hardware: gbaedge IRQLAT2 on AGB SP, docs/hwprobe.md). The arithmetic
+  # below is that, written against IRQ_ENTRY_EXTRA so the old uneven split
+  # (-d:IRQ_ENTRY_EXTRA=2: a cycle more going in, a cycle given back here)
+  # can still be built; see cpu.irq for why it was wrong. SWI entry/return
+  # splits evenly (mGBA suite BIOS timing rows).
   # An IRQ that woke an HLE Halt or IntrWait returns, notionally, to the
   # caller -- but on the console it returns into the BIOS routine that was
   # halted, never to the gamepak, so the cycle comes back whatever the
@@ -19,7 +21,9 @@ proc exception_return_restore*(cpu: CPU) =
     (cpu.intr_wait_active or cpu.halt_resume_charge != 0)
   if cast[CpuMode](cpu.cpsr.mode) == modeIRQ and
      (into_halted_bios or int(bits_range(cpu.r[15], 24, 27)) notin 8..13):
-    cpu.gba.bus.add_cycles(-1)
+    cpu.gba.bus.add_cycles(-1 + (2 - IRQ_ENTRY_EXTRA))
+  elif cast[CpuMode](cpu.cpsr.mode) == modeIRQ:
+    cpu.gba.bus.add_cycles(2 - IRQ_ENTRY_EXTRA)
   if cpu.spsr.thumb:
     cpu.r[15] -= 4
     # set_reg(15) refilled at ARM width; a Thumb return refills with two
@@ -28,7 +32,7 @@ proc exception_return_restore*(cpu: CPU) =
     cpu.gba.bus.add_cycles(2 * (int(cpu.gba.bus.wait16_s[page]) -
                                 int(cpu.gba.bus.wait32_s[page])))
     when ROM_REFILL_ORDERED:
-      if page >= 0x8 and page <= 0xD and not cpu.gba.bus.prefetch_on:
+      if page >= 0x8 and page <= 0xD and (ROM_REFILL_ORDERED_PF or not cpu.gba.bus.prefetch_on):
         # clear_pipeline left the burst continuing at the ARM-aligned target
         # and the correction above cooled it; the Thumb refill's burst
         # continues at the halfword the next instruction fetches.

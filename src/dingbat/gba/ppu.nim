@@ -187,6 +187,10 @@ const HBLANK_DMA_REQUEST_DELAY {.intdefine.} = 2
 const VBLANK_DMA_REQUEST_DELAY {.intdefine.} = 2
 
 proc start_hblank*(ppu: PPU) =
+  when DMA_ACCESS_WINDOW:
+    if (ppu.vcount < 160 and ppu.gba.dma.armed(2)) or (ppu.vcount == 159 and ppu.gba.dma.armed(1)):
+      ppu.gba.bus.sync_bits = ppu.gba.bus.sync_bits or 2
+      ppu.gba.bus.fetch_page = 0xFFFFFFFF'u32
   ppu.gba.scheduler.schedule(272, etPPUEndHBlank)
   ppu.gba.scheduler.schedule(HBLANK_FLAG_DELAY, etPPUSetHBlankFlag)
   if ppu.vcount < 160:

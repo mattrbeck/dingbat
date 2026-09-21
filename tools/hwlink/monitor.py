@@ -155,20 +155,40 @@ class Monitor:
         self._x()
 
     def run_payload(self, code, arg=0, address=PAYLOAD_ADDRESS, tries=3):
-        """Upload a blob of ARM code, call it, return r0. Reads the code back
-        before running it: a dropped transfer would otherwise be executed."""
+        """Upload a blob of ARM code, call it, return r0. Nothing the link
+        carries is trusted unread: the code is read back before it runs, and
+        so is the argument -- it rides in memory behind a trampoline rather
+        than in the call command, where a flipped bit once ran k = 3 and
+        filed the answer under k = 2. The result is stored beside it and read
+        back until two reads agree."""
         data = bytearray(code)
         while len(data) % 4:
             data.append(0)
         words = [int.from_bytes(data[i:i + 4], 'little')
                  for i in range(0, len(data), 4)]
+        tramp = address + 4 * len(words)
+        branch = ((address - (tramp + 12 + 8)) >> 2) & 0xFFFFFF
+        words += [0xE92D4010,              # stmfd sp!, {r4, lr}
+                  0xE28F4010,              # adr r4, slots
+                  0xE5940000,              # ldr r0, [r4]
+                  0xEB000000 | branch,     # bl payload
+                  0xE5840004,              # str r0, [r4, #4]
+                  0xE8BD4010,              # ldmfd sp!, {r4, lr}
+                  0xE12FFF1E,              # bx lr
+                  arg & 0xFFFFFFFF, 0x5A5A5A5A]
+        result_at = tramp + 32
         for attempt in range(tries):
             self.write_mem(address, words)
-            if self.read_mem(address, len(words)) == words:
-                return self.call(address, arg)
-            self.resync()
+            if self.read_mem(address, len(words)) != words:
+                self.resync()
+                continue
+            self.call(tramp, 0)
+            for _ in range(4):             # the run happened; memory has its answer
+                first = self.read_mem(result_at, 1)[0]
+                if first == self.read_mem(result_at, 1)[0]:
+                    return first
+                self.resync()
         raise MonitorError('the payload would not upload intact')
-
 
 def assemble(source_path, out_dir=None):
     """Assemble an ARM payload to a flat blob. Position-independent: the

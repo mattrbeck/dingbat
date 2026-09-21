@@ -96,12 +96,16 @@ proc irq*(cpu: CPU) =
     discard cpu.set_reg(14, lr)
     discard cpu.set_reg(15, 0x18'u32)
     # Entry/return overhead: the ARM7TDMI data sheet costs exception entry
-    # and the S-bit return at 2S+1N each, six cycles beyond the two pipeline
-    # refills set_reg(15) charges. The split is uneven: entry +2 here (the
-    # handler's first instruction runs 4 cycles after the interrupted
-    # boundary; mGBA suite Timer IRQ rows), return +1 minus one given back in
-    # exception_return_restore.
-    cpu.gba.bus.add_cycles(2)
+    # and the S-bit return at 2S+1N each. Entry is the refill set_reg(15)
+    # charges plus IRQ_ENTRY_EXTRA = 1. It was 2, with the return a cycle
+    # short to match: tests/roms/payloads/wakeirq.s on an AGB SP interrupts a
+    # sled of one-cycle NOPs (V-count and timer sources alike) and the
+    # console interrupts the same NOP, returns on the same cycle, and reads a
+    # clock in the handler one cycle sooner. The mGBA suite's timer rows had
+    # pinned the old split only because they stop a timer inside the handler,
+    # and a stop lands a cycle later than we had it (TIMER_STOP_DELAY): two
+    # errors that cancelled everywhere except in a handler that reads.
+    cpu.gba.bus.add_cycles(IRQ_ENTRY_EXTRA)
     # Interrupting code that executes from the gamepak also pays for the
     # in-flight 32-bit ROM fetch: +2*S16 (hardware: gbaedge IRQLAT2 and
     # IRQWIN2 on AGB SP, docs/hwprobe.md; the mGBA suite Timer IRQ rows run
@@ -160,7 +164,7 @@ proc clear_pipeline*(cpu: CPU) =
     cpu.gba.bus.rom_next_addr = 1
     cpu.gba.bus.rom_hot = false
   when ROM_REFILL_ORDERED:
-    if page >= 0x8 and page <= 0xD and not cpu.gba.bus.prefetch_on:
+    if page >= 0x8 and page <= 0xD and (ROM_REFILL_ORDERED_PF or not cpu.gba.bus.prefetch_on):
       # The refill in the order the console makes it: a nonsequential fetch
       # at the target, a sequential one after it, and then each instruction's
       # own fetch continues the burst. The sum is what it always was (2S here
@@ -176,16 +180,51 @@ proc clear_pipeline*(cpu: CPU) =
       let bus = cpu.gba.bus
       bus.catch_up()
       bus.rom_cool()
+      let (n, s) = if cpu.cpsr.thumb: (int(bus.wait16_n[page]), int(bus.wait16_s[page]))
+                   else: (int(bus.wait32_n[page]), int(bus.wait32_s[page]))
+      var both = n + s
+      var broken = false
+      var credit = 0
+      when DMA_ACCESS_WINDOW:
+        if (bus.sync_bits and 2) != 0:
+          # Two accesses, each with an end a DMA grant can wait for; and a
+          # burst between them breaks the second, which is then nonsequential
+          # (tests/roms/payloads/slotdma.s).
+          # With the prefetcher on, a burst that never touches the gamepak
+          # breaks nothing: the prefetcher works through it, and the cycles
+          # it held the bus are fetch time the CPU does not pay again.
+          bus.cycles += n
+          bus.catch_up_access()
+          both = s
+          let after_first = bus.dma_end_at == bus.sched.cycles + CycleCount(bus.cycles)
+          if after_first:
+            if DMA_KEEPS_PREFETCH and bus.prefetch_on and bus.dma_first_rom:
+              both = max(0, s - bus.dma_held)
+              credit = bus.dma_held - (s - both)
+            else:
+              both = n
+          bus.cycles += both
+          bus.catch_up_access()
+          both = 0
+          # One granted at the end of the second leaves the burst broken for
+          # the target's own fetch, as the burst itself left it.
+          if not after_first and bus.dma_end_at == bus.sched.cycles + CycleCount(bus.cycles):
+            if DMA_KEEPS_PREFETCH and bus.prefetch_on and bus.dma_first_rom:
+              credit = bus.dma_held
+            else:
+              broken = true
+      bus.cycles += both
       if cpu.cpsr.thumb:
-        bus.cycles += int(bus.wait16_n[page]) + int(bus.wait16_s[page])
         bus.rom_next_addr = cpu.r[15] and not 1'u32
         cpu.r[15] += 4
       else:
-        bus.cycles += int(bus.wait32_n[page]) + int(bus.wait32_s[page])
         bus.rom_next_addr = cpu.r[15] and not 3'u32
         cpu.r[15] += 8
-      bus.rom_free_since = bus.sched.cycles + CycleCount(bus.cycles)
-      bus.rom_hot = true
+      if broken:
+        bus.rom_next_addr = 1
+        return
+      bus.rom_free_since = bus.sched.cycles + CycleCount(bus.cycles) - CycleCount(credit)
+      bus.rom_hot = credit == 0
       return
   if cpu.cpsr.thumb:
     cpu.r[15] += 4
@@ -245,6 +284,10 @@ proc read_instr*(cpu: CPU): uint32 {.inline.} =
 
 proc idle*(cpu: CPU; n: int) {.inline.} =
   ## Internal (I) cycles: no bus access.
+  when DMA_ACCESS_WINDOW:
+    if (cpu.gba.bus.sync_bits and 2) != 0:
+      cpu.gba.bus.idle_window(n)
+      return
   cpu.gba.bus.add_cycles(n)
 
 proc mul_i_cycles*(rs: uint32; signed_early_term: bool): int {.inline.} =
@@ -419,7 +462,24 @@ proc tick*(cpu: CPU) =
   # IRQ before the IntrWait re-halt check: the handler must run (and set the
   # BIOS mirror flags) or IntrWait re-halts forever.
   if not cpu.halted and cpu.irq_line and not cpu.cpsr.irq_disable:
-    cpu.irq()
+    # A halted CPU's interrupt input is synchronised on a clock that was
+    # stopped: the wake comes first and the exception an instruction later.
+    # tests/roms/payloads/wakeirq.s on an AGB SP: the handler finds the
+    # BIOS's `bx lr` after its HALTCNT write already executed, where a plain
+    # wake (IME clear) resumes on the same cycle as here.
+    if HALT_WAKE_RUNS_ONE and cpu.halt_wake and not cpu.gba.bus.stub_bios:
+      discard
+    else:
+      if HALT_WAKE_RUNS_ONE and cpu.halt_wake:
+        # The HLE's stand-in for that instruction (a `bx lr` after Halt's
+        # HALTCNT write, a `bl` after IntrWait's: three cycles either way),
+        # taken out of what the return path charges later.
+        if cpu.intr_wait_active:
+          cpu.gba.bus.add_cycles(HALT_WAKE_INSTR_COST)
+        elif cpu.halt_resume_charge >= HALT_WAKE_INSTR_COST:
+          cpu.gba.bus.add_cycles(HALT_WAKE_INSTR_COST)
+          cpu.halt_resume_charge -= HALT_WAKE_INSTR_COST
+      cpu.irq()
   # The halt-wake entry exemption covers only the first boundary after the wake.
   cpu.halt_wake = false
   if cpu.intr_wait_active and not cpu.halted:
