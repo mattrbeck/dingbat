@@ -1,6 +1,6 @@
 # mGBA Test Suite - Detailed Results
 
-*Generated: 2026-09-20 18:55:33*
+*Generated: 2026-09-21 10:14:59*
 
 ## Memory tests
 
@@ -50,16 +50,12 @@ All tests passed.
 
 All tests passed.
 
-## Misc. edge case tests (11/12 passed)
+## Misc. edge case tests
 
-11/12 tests passed, 1 failed:
-
-| Test | Actual | Expected |
-|------|--------|----------|
-| DMA Prefetch Break | 0x10002540 | 0x10002A94 |
+All tests passed.
 
 ## Summary
 
 - **Total:** 6998
-- **Pass:** 6997
-- **Fail:** 1
+- **Pass:** 6998
+- **Fail:** 0

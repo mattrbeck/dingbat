@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-09-18 13:34:47 · commit aa5bb1500 · game-boy-test-roms v7.0*
+*Generated: 2026-09-21 10:14:59 · commit 16bd923a4 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1219
-- **Pass:** 1171
-- **Fail:** 48
+- **Pass:** 1172
+- **Fail:** 47
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -16,7 +16,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Blargg dmg_sound | 12 | 12 |
 | Game Boy - Blargg cgb_sound | 12 | 12 |
 | Game Boy - Mooneye | 152 | 152 |
-| GBA - mGBA Test Suite | 12 | 13 |
+| GBA - mGBA Test Suite | 13 | 13 |
 | GBA - jsmolka gba-tests | 13 | 13 |
 | GBA - FuzzARM | 5 | 5 |
 | Game Boy - Acid2 | 2 | 2 |
@@ -47,23 +47,9 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 
 **All 152 tests passed.**
 
-## GBA - mGBA Test Suite (12/13)
+## GBA - mGBA Test Suite (13/13)
 
-| Test | Device | Result |
-|------|--------|--------|
-| mgba-suite/Memory tests | — | 👌 |
-| mgba-suite/I/O read tests | — | 👌 |
-| mgba-suite/Timing tests | — | 👌 |
-| mgba-suite/Timer count-up tests | — | 👌 |
-| mgba-suite/Timer IRQ tests | — | 👌 |
-| mgba-suite/Shifter tests | — | 👌 |
-| mgba-suite/Carry tests | — | 👌 |
-| mgba-suite/Multiply long tests | — | 👌 |
-| mgba-suite/BIOS math tests | — | 👌 |
-| mgba-suite/DMA tests | — | 👌 |
-| mgba-suite/SIO register R/W tests | — | 👌 |
-| mgba-suite/SIO timing tests | — | 👌 |
-| mgba-suite/Misc. edge case tests | — | 👀 11/12 passed |
+**All 13 tests passed.**
 
 See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
