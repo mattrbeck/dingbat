@@ -2646,8 +2646,14 @@ still a mismatch.
 Still open: the handler-entry split (+2 / -2, section 22), the grant's
 deferral, the internal-cycle overlap for a running CPU (it needs a stamp on
 every bus access, the hottest path in the core, for one cycle at one phase),
-the prefetch-on refill order, and whether an LYC write that newly matches
-raises the interrupt.
+and the prefetch-on refill order.
+
+**An LYC write that newly matches does raise the interrupt.**
+`tests/roms/payloads/lycwrite.s`, parked on line 100 with IME clear and IF
+clean: moving the setting 50 -> 100 sets IF's V-count bit at once; turning
+the enable on while already matching does not; acknowledging IF while still
+matching does not bring it back. So the match is an edge of the live compare
+and a register write can make one. Neither emulator did; dingbat now does.
 
 The torn unmapped word (section 22, item 5) is fixed: an unmapped read now
 takes one verdict for the whole access (`read_open_bus_word`) instead of one

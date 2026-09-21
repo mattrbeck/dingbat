@@ -192,6 +192,11 @@ does (DISPSTAT reads `100` for one cycle as the line after a match begins).
 The match flag is a live compare: rewriting the setting mid-line changes it
 at once.
 
+And the interrupt is that compare's rising edge (`lycwrite.s`): writing the
+current line into the setting mid-line raises it immediately; enabling the
+interrupt while already matching, or acknowledging IF while still matching,
+raises nothing.
+
 The H-blank DMA's write is 2 cycles after the flag and so is the V-blank
 DMA's after its own (both stamped by the DMA's own write to a timer, from an
 interrupt-anchored entry).

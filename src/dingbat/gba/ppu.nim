@@ -1481,7 +1481,19 @@ proc `[]=`*(ppu: PPU; io_addr: uint32; value: uint8) =
     # reads back as just the flags)
     let preserved = uint8(toU16(ppu.dispstat)) and 0x07'u8
     write(ppu.dispstat, (value and 0x38'u8) or preserved, 0)
-  of 0x005: write(ppu.dispstat, value, 1)
+  of 0x005:
+    # The match is an edge of a live compare, so a write that moves the
+    # setting ONTO the current line raises the interrupt there and then.
+    # tests/roms/payloads/lycwrite.s, AGB SP, parked on line 100 with IF
+    # clean: setting 50 -> 100 sets IF's V-count bit; turning the enable on
+    # while already matching does not; acknowledging IF while still matching
+    # does not bring it back.
+    let was = int(ppu.dispstat.vcount_setting) == int(ppu.vcount)
+    write(ppu.dispstat, value, 1)
+    if not was and int(ppu.dispstat.vcount_setting) == int(ppu.vcount) and
+       ppu.dispstat.vcounter_irq_enable:
+      ppu.gba.interrupts.reg_if.vcounter = true
+      ppu.gba.interrupts.schedule_interrupt_check(PPU_IRQ_SYNC_DELAY)
   of 0x006..0x007: discard  # vcount
   of 0x008..0x00F: write(ppu.bgcnt[int((io_addr - 0x008) shr 1)], value, io_addr and 1)
   of 0x010..0x01F:
