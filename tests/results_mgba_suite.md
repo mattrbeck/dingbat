@@ -1,6 +1,6 @@
 # mGBA Test Suite - Detailed Results
 
-*Generated: 2026-09-20 18:55:33*
+*Generated: 2026-09-20 18:58:40*
 
 ## Memory tests
 
@@ -56,7 +56,7 @@ All tests passed.
 
 | Test | Actual | Expected |
 |------|--------|----------|
-| DMA Prefetch Break | 0x10002540 | 0x10002A94 |
+| DMA Prefetch Break | 0x10002B1C | 0x10002A94 |
 
 ## Summary
 
