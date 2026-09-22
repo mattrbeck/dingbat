@@ -46,7 +46,11 @@ const STAT_M0_LEAD_T* {.intdefine.} = 2
   ## the second line after LCD enable on; the 96 gambatte `sprites/*_m3stat_ds_1`
   ## rows refuse a flat dot count, and `M3_END_EARLY` is refused because the
   ## readable field would move with it (GBMicrotest `poweron_stat_*`, `win*_a`).
-const STAT_DISPATCH_MIN_AGE_DS* {.intdefine.} = 2
+const STAT_DISPATCH_MIN_AGE_DS* {.intdefine.} = 0
+  ## Retired (0, compiled out) with STAT_M0_LEAD_DS's joint move, which moves
+  ## the source itself and pins the IF-write rows through IF_WRITE_LAND_DOTS_DS:
+  ## 0, 2 and 4 score identically on the hunt list and AGE stays green. The
+  ## original note follows.
   ## Double speed only: dots the MODE-0 source's own rise must have been up
   ## for at an instruction boundary before the running CPU dispatches it; 0
   ## = any age (compiles out). The double-speed dispatch grid sits on odd
