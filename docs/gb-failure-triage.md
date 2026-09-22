@@ -526,10 +526,12 @@ the double-speed members that could.
 
 ### C5. Arming the window late through WY
 
-**Rows (30).** `window/arg/late_wy_{FFto0,FFto1,FFto2,10to0}_*`,
-`late_wy_{1toFF,2toFF}_*`, `late_scx_late_wy_FFto4_*`,
-`late_enable_afterVblank_*`, `window/late_enable_afterVblank_*`,
-`window/late_wy_{ds,ds_lcdoffset1,lcdoffset1}_*`.
+**Rows (10).** `window/arg/late_wy_{1toFF,2toFF}_2`, `late_wy_2`,
+`window/late_wy_2`, `late_wy_lcdoffset1_2` [cgb] (the disarm and line-0
+cases), `late_scx_late_wy_FFto4_ly4_wx00_{1 [cgb],2 [dmg]}`, and the double-
+speed `late_wy_FFto2_ly2_ds_1`, `late_wy_ds_1`, `late_enable_ly0_ds_1`.
+Closed 2026-09-22 (second pass): the late-line cutoff and the DMG's one-dot
+check below took 14 rows.
 
 **Behaviour.** The WY condition is a latch set on the first line where
 `LY == WY` while the window is enabled and held for the frame (Pan Docs,
@@ -557,6 +559,16 @@ the WY value a write committed in the boundary M-cycle lands 4 dots later).
 4 loses 3) and the `_ds_` members keep the immediate latch; `window/late_wy_2`
 and `late_wy_10to1_ly1_1 [cgb]` are the two single-speed rows the rule
 still misses.
+
+**Closed 2026-09-22, second pass** (`WIN_LATCH_END_DMG = 451`,
+`WIN_LATCH_END_CGB = 454`, `WIN_CHECK_DEFER_DMG = 1`): a WY == LY match seen
+at or after that dot no longer latches the window, because the per-line check
+that carries it has already run (gambatte-core checks LY == WY at line cycle
+450 and LY + 1 == WY at 454); the DMG's comparator samples one dot after the
+write (its WY copy lags 2 cycles there). +14: the `_3` DMG arms of
+`late_wy_{10to0_ly1,FFto0_ly2,FFto1_ly2,FFto2_ly2_scx3}` and
+`late_enable_afterVblank`, the CGB `_2` arms and `_ds_2`/`ds_lcdoffset1_2`
+members of the same families. Each constant is bracketed at its declaration.
 
 ### C6. Window disable and re-enable mid-line on the CGB
 

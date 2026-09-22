@@ -1923,7 +1923,9 @@ proc win_check_now*(ppu: GbPpu; gb: GB) =
   # steps with the LYC one, ahead of the readable LY (WIN_CHECK_CMP_LY).
   let cmp_ly = when WIN_CHECK_CMP_LY != 0: ppu.irq_ly_of else: ppu.ly
   if ppu.lcd_enabled and window_enabled(ppu) and (ppu.lcd_status and 3'u8) != 1'u8 and
-     cmp_ly == ppu.wy:
+     cmp_ly == ppu.wy and
+     (let e = (if gb.cgb_enabled: WIN_LATCH_END_CGB else: WIN_LATCH_END_DMG);
+      e == 0 or ppu.cycle_counter < int32(e)):
     when defined(gb_win_trace):
       echo "WYCHECK ly=", ppu.ly, " cmp=", cmp_ly, " wy=", ppu.wy, " dot=", ppu.cycle_counter
     ppu.window_trigger = true
@@ -1947,7 +1949,8 @@ proc ppu_latch_wy*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   when WIN_CHECK_DEFER_ANY:
     if gb.fifo_ppu != nil and win_check_defer(gb) != 0: return
   if ppu.ly == val and (ppu.lcd_status and 3'u8) != 1'u8 and ppu.lcd_enabled and
-     window_enabled(ppu):
+     window_enabled(ppu) and
+     (WIN_LATCH_END_DMG == 0 or ppu.cycle_counter < int32(WIN_LATCH_END_DMG)):
     ppu.window_trigger = true
     if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
 

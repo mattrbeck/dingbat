@@ -669,9 +669,26 @@ const WIN_CHECK_DEFER_CGB*    {.intdefine.} = 5
   ## 7 +42/-21, 8 +49/-22 (8 takes two more boundary rows and loses the
   ## mid-line `late_wy_FFto2_ly2_*_1` writes, whose window must still start
   ## on the same line). 0 = immediate.
-const WIN_CHECK_DEFER_DMG*    {.intdefine.} = 0
-  ## The same on a DMG (its writes land at the commit). 4 loses 3 and takes
-  ## nothing; the DMG's arm deadline is the immediate latch.
+const WIN_LATCH_END_DMG*      {.intdefine.} = 451
+const WIN_LATCH_END_CGB*      {.intdefine.} = 454
+  ## First dot of a line at which a WY == LY match (the write's immediate
+  ## latch on DMG, the deferred check on CGB) no longer latches the window
+  ## for the frame (0 = never): the per-line check that would carry it has
+  ## already run, and a match on the next line's LY is the boundary's check.
+  ## gambatte-core runs that check at line cycle 450 (LY == WY) and 454
+  ## (LY + 1 == WY). DMG (the check lands WIN_CHECK_DEFER_DMG after the
+  ## write): 451..454 take `window/arg/late_wy_{10to0_ly1,FFto0_ly2,
+  ## FFto1_ly2}_3` and `late_enable_afterVblank_{3,5}`, 450 loses five `_2`s,
+  ## 455 the five it takes.
+  ## CGB (the check lands WIN_CHECK_DEFER_CGB after the write): 454 is
+  ## two-sided, +8 (`late_wy_*_2`, `late_enable_afterVblank_{2,4,ds_2,
+  ## ds_lcdoffset1_2}`); 453 loses three `_ds_1`/`lcdoffset1_1`, 455 six.
+const WIN_CHECK_DEFER_DMG*    {.intdefine.} = 1
+  ## The same on a DMG (its writes land at the commit): one dot, gambatte-core's
+  ## DMG WY copy lagging its write by 2 cycles. With WIN_LATCH_END_DMG: 1 takes
+  ## `window/arg/late_enable_afterVblank_5`, `late_wy_FFto2_ly2_scx3_3`,
+  ## `late_enable_afterVblank_3` [dmg]; 0 takes none, 2 loses 11
+  ## (`late_wy_FFto2_ly2_*_2`, `late_wy_10to1_ly1_2`, ...).
 const WIN_LINE0_CHECK_DOT_CGB* {.intdefine.} = 4
   ## Dot of line 0 at which a CGB runs the per-line WY == LY check, instead of
   ## the mode-2 entry at the boundary (lines 1..143 keep the boundary). Pinned

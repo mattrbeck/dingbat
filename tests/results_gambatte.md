@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-22 13:28:02*
+*Generated: 2026-09-22 13:41:08*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5025/5216 passed.**
+**5039/5216 passed.**
 
 ## bgen
 
@@ -422,33 +422,19 @@ All 20 tests passed.
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 
-## window (441/476 passed)
+## window (455/476 passed)
 
-441/476 tests passed, 35 failed:
+455/476 tests passed, 21 failed:
 
 | Test | Result |
 |------|--------|
-| window/arg/late_enable_afterVblank_4_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/arg/late_enable_afterVblank_5_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/arg/late_scx_late_wy_FFto4_ly4_wx00_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/arg/late_scx_late_wy_FFto4_ly4_wx00_2_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
-| window/arg/late_wy_10to0_ly1_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/arg/late_wy_10to0_ly1_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/arg/late_wy_1toFF_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/arg/late_wy_2_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/arg/late_wy_2toFF_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/arg/late_wy_FFto0_ly2_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/arg/late_wy_FFto0_ly2_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| window/arg/late_wy_FFto0_ly2_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/arg/late_wy_FFto1_ly2_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/arg/late_wy_FFto1_ly2_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/arg/late_wy_FFto2_ly2_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/arg/late_wy_FFto2_ly2_scx3_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/late_disable_scx5_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_enable_afterVblank_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_enable_afterVblank_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
-| window/late_enable_afterVblank_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_enable_afterVblank_ds_lcdoffset1_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_enable_ly0_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_reenable_scx3_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_wx_scx3_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
