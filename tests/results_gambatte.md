@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-22 16:15:01*
+*Generated: 2026-09-22 16:20:25*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5131/5216 passed.**
+**5133/5216 passed.**
 
 ## bgen
 
@@ -327,15 +327,13 @@ All 20 tests passed.
 
 All 36 tests passed.
 
-## window (470/476 passed)
+## window (472/476 passed)
 
-470/476 tests passed, 6 failed:
+472/476 tests passed, 4 failed:
 
 | Test | Result |
 |------|--------|
-| window/arg/late_wy_FFto2_ly2_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_disable_scx5_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_enable_ly0_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_reenable_scx3_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/on_screen/wx17_weoff_wxA5_weon [cgb, png] | 960/23040 pixels differ |
 | window/on_screen/wxA6_late_we_reenable_3 [dmg, png] | 916/23040 pixels differ |

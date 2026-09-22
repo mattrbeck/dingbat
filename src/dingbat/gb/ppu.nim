@@ -2072,8 +2072,11 @@ proc ppu_store_wx*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
 
 template win_check_defer*(gb: GB): int32 =
   ## WIN_CHECK_DEFER_* for this console, in dots of this speed.
-  (if gb.cgb_enabled: int32(WIN_CHECK_DEFER_CGB) else: int32(WIN_CHECK_DEFER_DMG)) shr
-    gb.memory.current_speed
+  (if WIN_CHECK_DEFER_CGB_DS >= 0 and gb.memory.current_speed != 0'u8:
+     int32(WIN_CHECK_DEFER_CGB_DS)
+   else:
+     (if gb.cgb_enabled: int32(WIN_CHECK_DEFER_CGB) else: int32(WIN_CHECK_DEFER_DMG)) shr
+       gb.memory.current_speed)
 
 proc win_check_now*(ppu: GbPpu; gb: GB) =
   ## The WY == LY comparator, sampled now (WIN_CHECK_DEFER).
@@ -2083,7 +2086,11 @@ proc win_check_now*(ppu: GbPpu; gb: GB) =
   let cmp_ly = when WIN_CHECK_CMP_LY != 0: ppu.irq_ly_of else: ppu.ly
   if ppu.lcd_enabled and window_enabled(ppu) and (ppu.lcd_status and 3'u8) != 1'u8 and
      cmp_ly == ppu.wy and
-     (let e = (if gb.cgb_enabled: WIN_LATCH_END_CGB else: WIN_LATCH_END_DMG);
+     (let e = (if gb.cgb_enabled:
+                 (if WIN_LATCH_END_CGB_DS != 0 and gb.memory.current_speed != 0'u8:
+                    WIN_LATCH_END_CGB_DS
+                  else: WIN_LATCH_END_CGB)
+               else: WIN_LATCH_END_DMG);
       e == 0 or ppu.cycle_counter < int32(e)):
     when defined(gb_win_trace):
       echo "WYCHECK ly=", ppu.ly, " cmp=", cmp_ly, " wy=", ppu.wy, " dot=", ppu.cycle_counter

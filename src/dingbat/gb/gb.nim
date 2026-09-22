@@ -781,6 +781,14 @@ const WIN_LATCH_END_CGB*      {.intdefine.} = 454
   ## CGB (the check lands WIN_CHECK_DEFER_CGB after the write): 454 is
   ## two-sided, +8 (`late_wy_*_2`, `late_enable_afterVblank_{2,4,ds_2,
   ## ds_lcdoffset1_2}`); 453 loses three `_ds_1`/`lcdoffset1_1`, 455 six.
+const WIN_CHECK_DEFER_CGB_DS* {.intdefine.} = 1
+  ## WIN_CHECK_DEFER_CGB at double speed, in dots (-1 = the single-speed value
+  ## halved, 2): one dot, with WIN_LATCH_END_CGB_DS moved with it. The pair is
+  ## +2 (`window/arg/late_wy_FFto2_ly2_ds_1`, `late_enable_ly0_ds_1`), none
+  ## lost; 0 or 2 at 453, and 452/454/455 at 1, each lose one to three
+  ## `late_wy_FFto0_ly2_ds_*`/`late_enable_afterVblank_ds_*` rows.
+const WIN_LATCH_END_CGB_DS* {.intdefine.} = 453
+  ## WIN_LATCH_END_CGB at double speed (0 = the same 454).
 const WIN_CHECK_DEFER_DMG*    {.intdefine.} = 1
   ## The same on a DMG (its writes land at the commit): one dot, gambatte-core's
   ## DMG WY copy lagging its write by 2 cycles. With WIN_LATCH_END_DMG: 1 takes
