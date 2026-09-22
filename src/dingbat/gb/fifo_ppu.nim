@@ -1570,6 +1570,17 @@ when WIN_EN_REVOKE_ANY:
     ## Forward declaration (the undo replays tick_shifter); the pragmas must
     ## match the implementation's, which gcc checks and clang does not.
 
+when M0_IRQ_EDGE_X != 0 and STAT_IRQ_SPLIT:
+  proc fifo_m0_edge_obj(ppu: GbFifoPpu; gb: GB) {.noinline.} =
+    ## M0_IRQ_EDGE_X for an object at X = 167; a window still to start at
+    ## WX = 166 holds the request back. Out of line: the object trigger is on
+    ## tick_shifter's path (+0.25% retired instructions inline).
+    if ppu.irq_mode == 3'u8 and
+       not (ppu.window_trigger and window_enabled(ppu) and
+            int(ppu.wx) <= GB_WIDTH + 6 and
+            (not ppu.fetching_window or ppu.fetcher_x == 0)):
+      ppu_set_irq_mode(ppu, gb, 0'u8)
+
 proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
   if ppu.fifo.size > 0:
     if not ppu.smooth_scroll_sampled: fifo_sample_smooth_scroll(ppu)
@@ -1585,6 +1596,9 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
        # W - T = +2 (the +2 row itself is unscored), which is OBJ_ABORT_LEAD
        # spent on the rising edge.
        not fifo_obj_walked_past(ppu):
+      when M0_IRQ_EDGE_X != 0 and STAT_IRQ_SPLIT:
+        # An object at X = 167 is fetched after the line's mode-0 request.
+        if unlikely(int(ppu.sprites[0].x) == GB_WIDTH + 7): fifo_m0_edge_obj(ppu, gb)
       ppu.fetching_sprite = true
       # First object of the line inside the tail burst? (OBJ_TAIL_WALK_REFUND;
       # read before the store below sets the flag.)
@@ -1681,6 +1695,11 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
               fifo_reset_bg(ppu, true)
               return
             # fifo_reset_bg clears the hold on its way through.
+            when M0_IRQ_EDGE_X != 0 and STAT_IRQ_SPLIT:
+              # A window started at WX = 166 runs after the line's mode-0
+              # request (M0_IRQ_EDGE_X).
+              if int(ppu.wx) == GB_WIDTH + 6 and ppu.irq_mode == 3'u8:
+                ppu_set_irq_mode(ppu, gb, 0'u8)
             win_start_reset(ppu)
             return
         else:
@@ -1707,13 +1726,19 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
         if ppu.win_defer == 0'u8 and ppu.win_revoking:
           win_defer_undo(ppu, gb)
 
-proc fetch_work_pending(ppu: GbFifoPpu): bool {.inline.} =
+proc fetch_work_pending(ppu: GbFifoPpu; for_irq = false): bool {.inline.} =
   ## What the fetcher still owes for the last `m3_lead` pixels of a line;
   ## shared by fetcher_retired and fifo_irq_m0_ready. Only reached inside the
-  ## tail. See fetcher_retired for the terms.
-  if ppu.fetching_sprite: return true
+  ## tail. See fetcher_retired for the terms. `for_irq`: the mode-0 request's
+  ## question (M0_IRQ_EDGE_X), which an object at X = 167 or a window at
+  ## WX = 166 does not hold back.
+  let obj_x_max = if for_irq and M0_IRQ_EDGE_X != 0: GB_WIDTH + 6 else: GB_WIDTH + 7
+  let wx_max = if for_irq and M0_IRQ_EDGE_X != 0: GB_WIDTH + 5 else: GB_WIDTH + 6
+  if ppu.fetching_sprite:
+    if not (for_irq and M0_IRQ_EDGE_X != 0): return true
+    if ppu.sprites.len == 0 or int(ppu.sprites[0].x) <= obj_x_max: return true
   if sprite_enabled(ppu) and ppu.sprites.len > 0 and
-     int(ppu.sprites[0].x) <= GB_WIDTH + 7: return true
+     int(ppu.sprites[0].x) <= obj_x_max: return true
   when WIN_TAIL_FETCH != 0:
     # A started window whose restart has not pushed yet (`fetcher_x == 0`)
     # still owes the fetcher (WIN_TAIL_FETCH, gb.nim). On the last pixel the
@@ -1730,7 +1755,7 @@ proc fetch_work_pending(ppu: GbFifoPpu): bool {.inline.} =
          (CGB_WIN_TAIL_LAST != 0 and ppu.cgb and not ppu.obj_last_px):
         return true
   if not ppu.fetching_window and ppu.window_trigger and window_enabled(ppu) and
-     int(ppu.wx) <= GB_WIDTH + 6: return true
+     int(ppu.wx) <= wx_max: return true
   # A DMG line carried out of the previous one (DMG_WIN_LAST_PX_CARRY) owes
   # nothing for its own WX = 166 match: AGE stat-mode-window-dmgC reads the
   # line as 172 + SCX, the same as WX = 167, and gambatte window/m2int_wxA6_*
@@ -2019,7 +2044,7 @@ when STAT_IRQ_SPLIT:
     ## caller's guard never calls this where it ships.
     if ppu.lx < ppu.m3_retire_lx - lead: return false
     if ppu.lx >= int32(GB_WIDTH) - lead: return true
-    not fetch_work_pending(ppu)
+    not fetch_work_pending(ppu, for_irq = true)
 
 when M3_PIPE_LEAD_ANY:
   proc fifo_burst_tail(ppu: GbFifoPpu; gb: GB) {.inline.} =

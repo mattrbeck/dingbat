@@ -1256,8 +1256,9 @@ when CGB_STAT_WRITE_RULE != 0:
     if lycperiod and (old and 0x40'u8) != 0: return false
     let lyc_new = lycperiod and (data and 0x40'u8) != 0
     if ly < 143 or (ly == 143 and ttnl > 2 * (1 + dsi)):
-      # This line's mode-0 request still ahead: modes 2 and 3.
-      let m0_pending = (ppu.lcd_status and 3'u8) >= 2'u8
+      # This line's mode-0 request still ahead: modes 2 and 3 on the request's
+      # own clock (M0_IRQ_EDGE_X can raise it before the STAT mode reads 0).
+      let m0_pending = ppu.irq_m0_of >= 2'u8
       if m0_pending or ttnl <= (if ly < 143: 4 + 4 * dsi else: 4 + 2 * dsi):
         if lyc_new: return true
       elif (old and 0x08'u8) == 0'u8:

@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-09-22 14:31:43 · commit e4a40dddc · game-boy-test-roms v7.0*
+*Generated: 2026-09-22 14:42:23 · commit 20ceec097 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
@@ -128,7 +128,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/lycint_m0stat | per-ROM | 👌 6/6 passed |
 | gambatte/lycm2int | per-ROM | 👌 18/18 passed |
 | gambatte/lywrite | per-ROM | 👌 8/8 passed |
-| gambatte/m0enable | per-ROM | 👀 163/167 passed |
+| gambatte/m0enable | per-ROM | 👀 164/167 passed |
 | gambatte/m0int_m0irq | per-ROM | 👌 4/4 passed |
 | gambatte/m0int_m0stat | per-ROM | 👌 12/12 passed |
 | gambatte/m0int_m3stat | per-ROM | 👌 6/6 passed |
@@ -147,12 +147,12 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/serial | per-ROM | 👀 76/82 passed |
 | gambatte/sound | per-ROM | 👀 299/300 passed |
 | gambatte/speedchange | per-ROM | 👀 231/244 passed |
-| gambatte/sprites | per-ROM | 👀 472/476 passed |
+| gambatte/sprites | per-ROM | 👀 474/476 passed |
 | gambatte/tima | per-ROM | 👀 225/232 passed |
 | gambatte/undef_ops | per-ROM | 👌 20/20 passed |
 | gambatte/vram_m3 | per-ROM | 👀 48/50 passed |
 | gambatte/vramw_m3end | per-ROM | 👀 34/36 passed |
-| gambatte/window | per-ROM | 👀 455/476 passed |
+| gambatte/window | per-ROM | 👀 458/476 passed |
 
 Each row is one gambatte subdirectory. See [detailed results](results_gambatte.md) for individual test outcomes.
 

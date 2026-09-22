@@ -268,14 +268,17 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
     # IF itself decides here, ahead of its byte (irq_precedence/
     # if_and_ie_0_vector_4).
     let ie_hi = irq_read(gb.interrupts, 0xFFFF)
-    let early = (cpu.sp - 1) == 0xFF0F'u16
-    let early_irq = if early: highest_priority(gb.interrupts) else: INT_NONE
+    let early_irq = highest_priority(gb.interrupts)
+    # Only a timer, serial or joypad choice can still be overtaken; the split
+    # tick costs every other dispatch (0.24% retired instructions).
+    let early = (cpu.sp - 1) == 0xFF0F'u16 or early_irq == INT_VBLANK or
+                early_irq == INT_STAT
   cpu.sp = cpu.sp - 1
   oam_bug_if(gb, cpu.sp, obWrite)
   mem_write(gb.memory, gb, int(cpu.sp), uint8(cpu.pc and 0xFF))
   var elapsed = 8 + IRQ_PUSH_T
   when IRQ_VECTOR_T > 4 + IRQ_PUSH_T:
-    if IRQ_VECTOR_T > elapsed:
+    if IRQ_VECTOR_T > elapsed and not early:
       mem_tick_components(gb.memory, gb, IRQ_VECTOR_T - elapsed)
       elapsed = IRQ_VECTOR_T
     let interrupt = if early: early_irq

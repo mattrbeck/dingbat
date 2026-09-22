@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-22 14:31:43*
+*Generated: 2026-09-22 14:42:23*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5078/5216 passed.**
+**5084/5216 passed.**
 
 ## bgen
 
@@ -172,14 +172,13 @@ All 18 tests passed.
 
 All 8 tests passed.
 
-## m0enable (163/167 passed)
+## m0enable (164/167 passed)
 
-163/167 tests passed, 4 failed:
+164/167 tests passed, 3 failed:
 
 | Test | Result |
 |------|--------|
 | m0enable/disable_ds_1_cgb04c_out1 [cgb] | got 3, expected 1 |
-| m0enable/enable_wxA6_2x_spxA7_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m0enable/lycdisable_ff41_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m0enable/lycdisable_ff45_scx1_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
 
@@ -330,14 +329,12 @@ All 67 tests passed.
 | speedchange/speedchange5_nop_ch1_duty0_pos6_to_pos7_timing_1_cgb04c_outaudio0 [cgb, audio] | audio1 (mix varies over 35112 samples), expected audio0 |
 | speedchange/speedchange_ch1_nr4init_duty0_pos6_to_pos7_timing_2_cgb04c_outaudio1 [cgb, audio] | audio0 (mix constant over 35112 samples), expected audio1 |
 
-## sprites (472/476 passed)
+## sprites (474/476 passed)
 
-472/476 tests passed, 4 failed:
+474/476 tests passed, 2 failed:
 
 | Test | Result |
 |------|--------|
-| sprites/10spritesPrLine_10xposA7_m0irq_2_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
-| sprites/10spritesPrLine_10xposA7_m0irq_2_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | sprites/enable/late_disable_ds_3_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/late_disable_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 
@@ -377,9 +374,9 @@ All 20 tests passed.
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 
-## window (455/476 passed)
+## window (458/476 passed)
 
-455/476 tests passed, 21 failed:
+458/476 tests passed, 18 failed:
 
 | Test | Result |
 |------|--------|
@@ -396,9 +393,6 @@ All 20 tests passed.
 | window/late_wy_2_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_wy_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_wy_lcdoffset1_2_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/m2int_wxA6_m0irq2_2_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
-| window/m2int_wxA6_m0irq_2_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
-| window/m2int_wxA6_spxA7_m0irq_2_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | window/m2int_wxA6_spxA7_m0irq_2_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | window/m2int_wxA6_spxA7_m3stat_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wxA6_spxA7_m3stat_4_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |

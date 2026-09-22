@@ -208,6 +208,18 @@ const CGB_STAT_RULE_OFF_DS* {.intdefine.} = 3
   ## The rule's clock against dingbat's dot: the write's M-cycle starts this
   ## many dots after the rule's cycle count (1 single speed, 3 double; the
   ## side-by-side traces' offsets). Two-sided: 0/2 and 2/4 lose 9..30.
+const M0_IRQ_EDGE_X* {.intdefine.} = 1
+  ## The mode-0 STAT request rises where the line's pixels end even when an
+  ## object at X = 167 or a window started at WX = 166 keeps the fetcher (and
+  ## the STAT mode, which still reads 3) busy past it: gambatte-core raises
+  ## it when its pixel position reaches 166, and those fetches come after.
+  ## Raised as the X = 167 object's fetch or the WX = 166 window's start
+  ## begins, unless a WX = 166 window is still to start. gambatte
+  ## `sprites/10spritesPrLine_10xposA7_m0irq_2` (both devices),
+  ## `window/m2int_wxA6_m0irq{,2}_2` [cgb], `m2int_wxA6_spxA7_m0irq_2` [dmg],
+  ## `m0enable/enable_wxA6_2x_spxA7_ds_1`; the CGB STAT-write rule reads
+  ## "mode 0 has begun" off the same request. 0 = the request waits for the
+  ## fetcher.
 const STAT_M1_LEAD* {.intdefine.} = 1
   ## The mode-1 STAT source rises with the LYC comparator's lead
   ## (STAT_LYC_LY_LEAD_DOTS, 2 dots at single speed) at the end of line 143,
