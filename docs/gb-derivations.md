@@ -118,6 +118,13 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
 - Site: `m2_line144` (`ppu.nim`): high on line 144 in mode 1, and on CGB also
   for the last 4 dots of line 143. Which CGB revisions keep the mode-0
   M-cycle at the end of mode 1 is `GbQuirks.m1_end_no_mode0`.
+- The pulse is continuous across the 143 -> 144 boundary (2026-09-22): LY
+  advances before mode 1 is set and the comparator's drop is evaluated in
+  between (`ly_advance_vblank_entry`), so a pulse gated on mode 1 read low
+  there and the mode-1 rise became a false STAT edge. gambatte
+  `m1/m1irq_m2enable_lyc_1`, `m2m1irq_ifw_2`, `m1irq_m2disable_lycdisable_3`,
+  `lyc143_late_m2enable_lycdisable_2` (+13 / -3; the three CGB `_2`/`_ds_1`
+  arms are triage A3's vblank-entry latency).
 - Evidence: mooneye `misc/ppu/vblank_stat_intr-C` vs `-GS`: the DIV-reset
   bracket is 54/55 NOPs for vblank on every model and for STAT on DMG, but
   53/54 for STAT on CGB.

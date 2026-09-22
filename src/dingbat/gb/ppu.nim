@@ -940,7 +940,13 @@ proc m2_line144*(ppu: GbPpu; gb: GB): bool {.inline.} =
   ## Asked in the flag domain: the pulse is pinned to the vblank interrupt,
   ## which does not lead.
   if ppu.ly == 144:
-    ppu.mode_flag == 1 and m2_144_within_pulse(ppu, gb)
+    # Not gated on the mode flag: the 143 -> 144 boundary advances LY before
+    # it sets mode 1, and the comparator's drop is evaluated in between
+    # (ly_advance_vblank_entry). A pulse that went high on line 143's last
+    # M-cycle must still be high there, or the drop is a dip and the mode-1
+    # rise a false edge: gambatte m1/m1irq_m2enable_lyc_1 (LYC = 143 held the
+    # line; hardware sees no STAT edge at vblank).
+    m2_144_within_pulse(ppu, gb)
   elif ppu.ly == 143:
     ppu.mode_flag == 0 and ppu.cycle_counter >= M2_144_EARLY_DOT and
       (when M2_144_EARLY_DMG and M2_144_EARLY_DMG_HALT:

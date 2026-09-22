@@ -104,7 +104,7 @@ already reads the mode-0 side.
 
 ### A3. A STAT source enabled, disabled or handed over across a line edge
 
-**Rows (81).** `lycEnable` 31, `m2enable` 7, `m1` 23, `m0enable` 5,
+**Rows (71).** `lycEnable` 31, `m2enable` 7, `m1` 13, `m0enable` 5,
 `miscmstatirq` 7, `m2int_m0irq/m2int_m0irq_scx3_ifw_{2,4}` (4),
 `ly0/lycint152_lyc{0,153}flag_ds_3`, `lycint_lycflag/lycint_lycflag_ds_3`.
 Heavily CGB, and a third of them `lcdoffset1` or `_ds_` members.
@@ -159,12 +159,25 @@ edge. Sub-shapes, each a separate rule:
   the OAM source enabled one M-cycle across the line boundary it rises on.
   `STAT_M2_LEAD = 1` puts the rise one CPU M-cycle before the boundary;
   these say the enable window around it is still a cycle out, mostly on CGB.
-* `m1/m1irq_m2enable_lyc_*`, `m2m1irq_ifw_*`, `m1irq_m2disable_lycdisable_*`,
-  `ly143_late_m{0,2}enable_*`, `m1irq_late_enable_*` (23): the mode-1 /
-  mode-2 / LYC hand-over at the top of line 144, where hardware refuses an
-  edge a level-OR gives. `LY_BLIND_SCOPE = 2` (the comparator is blind while
-  LY changes, including the mode 0 -> 1 entry) took the rest of `m1`; these
-  are what it does not reach.
+* `m1/ly143_late_m{0,2}enable_*`, `m1irq_late_enable_*`,
+  `m1irq_m0disable_2`, `m1irq_enable_after_lyc144_2`, `lycint143_m1irq_
+  late_retrigger_2`, `lycint_vblankirq_late_retrigger_2`, and the CGB arms
+  `m1irq_m2enable_lyc_2`, `lyc143_late_m2enable_lycdisable_ds_1`,
+  `m2m1irq_ifw_ds_1` (13): the mode-1 / mode-2 / LYC hand-over at the top of
+  line 144. **Closed 2026-09-22 (+10):** the line-144 OAM pulse went low for
+  the instant between the LY advance and the mode-1 set inside
+  `ly_advance_vblank_entry`, so the comparator's drop there was a dip and
+  the mode-1 rise a false edge whenever LYC = 143 had held the line
+  (`m1irq_m2enable_lyc_1`, `m2m1irq_ifw_2`, `m1irq_m2disable_lycdisable_3`,
+  `lyc143_late_m2enable_lycdisable_2` and `_ds_2` twins, both devices);
+  `m2_line144` now holds through the boundary. The three CGB arms left are
+  the same rows one M-cycle later: the CGB write's enable lands 2 dots after
+  its commit, one dot BEFORE dingbat's boundary events, where gambatte-core's
+  model (read for facts: `mstat_irq.h`, the mode-1 event 2 cycles before the
+  LY increment, a write latched only if `cc + 2 < event`) has it tie with
+  them and lose. The vblank-entry sources sit 2 dots earlier against the CPU
+  grid than the mode-0 source, whose rows bracket `CGB_STAT_ENABLE_LATENCY`
+  at 2; a per-source spelling is the next step.
 * `lycEnable/lyc153_late_*`, `lyc0_m1disable_*`, `lcdoff_lycirqen_*` (15):
   the LYC = 153 and LYC = 0 sources around the LY 153 -> 0 snapback
   (`LYC_SRC_RELATCH_LEAD = 1`, `LYC_SETTLE_DOTS`), and LYC armed while the

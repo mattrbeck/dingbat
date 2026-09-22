@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-21 23:19:42*
+*Generated: 2026-09-21 23:27:00*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4905/5216 passed.**
+**4915/5216 passed.**
 
 ## bgen
 
@@ -314,9 +314,9 @@ All 12 tests passed.
 
 All 6 tests passed.
 
-## m1 (143/170 passed)
+## m1 (153/170 passed)
 
-143/170 tests passed, 27 failed:
+153/170 tests passed, 17 failed:
 
 | Test | Result |
 |------|--------|
@@ -325,9 +325,7 @@ All 6 tests passed.
 | m1/ly143_late_m2enable_2_dmg08_out3_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m1/ly143_late_m2enable_ds_2_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m1/ly143_late_m2enable_ds_lcdoffset1_2_cgb04c_out1 [cgb] | got 3, expected 1 |
-| m1/lyc143_late_m2enable_lycdisable_2_dmg08_cgb04c_out1 [dmg] | got 3, expected 1 |
-| m1/lyc143_late_m2enable_lycdisable_2_dmg08_cgb04c_out1 [cgb] | got 3, expected 1 |
-| m1/lyc143_late_m2enable_lycdisable_ds_2_cgb04c_out1 [cgb] | got 3, expected 1 |
+| m1/lyc143_late_m2enable_lycdisable_ds_1_cgb04c_out3 [cgb] | got 1, expected 3 |
 | m1/lycint143_m1irq_late_retrigger_2_dmg08_cgb04c_out1 [dmg] | got 3, expected 1 |
 | m1/lycint143_m1irq_late_retrigger_2_dmg08_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m1/lycint_vblankirq_late_retrigger_2_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |
@@ -337,16 +335,8 @@ All 6 tests passed.
 | m1/m1irq_late_enable_lcdoffset1_1_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m1/m1irq_m0disable_2_dmg08_out3_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m1/m1irq_m2disable_lycdisable_2_dmg08_out3_cgb04c_out1 [cgb] | got 3, expected 1 |
-| m1/m1irq_m2disable_lycdisable_3_dmg08_cgb04c_out1 [dmg] | got 3, expected 1 |
-| m1/m1irq_m2disable_lycdisable_3_dmg08_cgb04c_out1 [cgb] | got 3, expected 1 |
-| m1/m1irq_m2disable_lycdisable_ds_2_cgb04c_out1 [cgb] | got 3, expected 1 |
-| m1/m1irq_m2enable_lyc_1_dmg08_cgb04c_out1 [dmg] | got 3, expected 1 |
-| m1/m1irq_m2enable_lyc_1_dmg08_cgb04c_out1 [cgb] | got 3, expected 1 |
-| m1/m1irq_m2enable_lyc_2_dmg08_out1_cgb04c_out3 [dmg] | got 3, expected 1 |
-| m1/m1irq_m2enable_lyc_ds_1_cgb04c_out1 [cgb] | got 3, expected 1 |
-| m1/m2m1irq_ifw_2_dmg08_cgb04c_out1 [dmg] | got 3, expected 1 |
-| m1/m2m1irq_ifw_2_dmg08_cgb04c_out1 [cgb] | got 3, expected 1 |
-| m1/m2m1irq_ifw_ds_2_cgb04c_out1 [cgb] | got 3, expected 1 |
+| m1/m1irq_m2enable_lyc_2_dmg08_out1_cgb04c_out3 [cgb] | got 1, expected 3 |
+| m1/m2m1irq_ifw_ds_1_cgb04c_out3 [cgb] | got 1, expected 3 |
 
 ## m2enable (113/120 passed)
 
