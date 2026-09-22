@@ -2630,7 +2630,9 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       echo "WX ly=", ppu.ly, " dot=", ppu.cycle_counter, " mode=",
            (ppu.lcd_status and 3), " old=", ppu.wx, " new=", val
     when CGB_WX_LATENCY != 0:
-      if gb.cgb_enabled and gb.quirks.wx_write_late:
+      # Every CGB at single speed (CGB_WX_LATE_SS); the AGB at both speeds.
+      if gb.cgb_enabled and (gb.quirks.wx_write_late or
+                             (CGB_WX_LATE_SS != 0 and gb.memory.current_speed == 0'u8)):
         ppu_park_pipeline_write(ppu, gb, idx, val)
       else:
         ppu_store_wx(ppu, gb, val)
