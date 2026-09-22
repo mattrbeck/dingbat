@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-22 16:45:54*
+*Generated: 2026-09-22 16:49:39*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5140/5216 passed.**
+**5141/5216 passed.**
 
 ## bgen
 
@@ -101,13 +101,9 @@ All 64 tests passed.
 
 All 62 tests passed.
 
-## ly0 (95/96 passed)
+## ly0
 
-95/96 tests passed, 1 failed:
-
-| Test | Result |
-|------|--------|
-| ly0/lycint152_lyc153flag_ds_3_cgb04c_outC5 [cgb] | got C1, expected C5 |
+All 96 tests passed.
 
 ## lyc0int_m0irq
 

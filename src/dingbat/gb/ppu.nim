@@ -1078,6 +1078,11 @@ proc m2_line144*(ppu: GbPpu; gb: GB): bool {.inline.} =
 # device-split: gambatte's `_dmg08_cgb04c_` ly0 filenames carry one value, and
 # a sweep breaks `[cgb]` ly0 rows on both sides of 9.
 const LY153_SNAP_DOT_D {.intdefine: "LY153_SNAP_DOT".} = 5
+const LYC153_HOLD_DS* {.intdefine.} = 1
+  ## At double speed every CGB reads the comparison against 153 through the
+  ## snapback's blind window, as CGB D+ do at both speeds
+  ## (quirks.lyc_compare_hold): gambatte ly0/lycint152_lyc153flag_ds_3 reads
+  ## the bit set 4 cycles into line 153 and clear at 6 (+1, none lost).
 const LYC_SETTLE_DOTS_D {.intdefine: "LYC_SETTLE_DOTS".} = 4
 const LY153_SNAP_DOT* = int32(LY153_SNAP_DOT_D)
 const LYC_SETTLE_DOTS* = int32(LYC_SETTLE_DOTS_D)
@@ -1479,7 +1484,9 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
   # instead of clearing it: wilbertpol ly_lyc_153-C reads STAT on that M-cycle
   # (quirks.lyc_compare_hold). `settling` first so no field read sits in front
   # of the branch the mode-3 dot loop pays for.
-  if settling and ppu.lyc == 153'u8 and gb.quirks.lyc_compare_hold:
+  if settling and ppu.lyc == 153'u8 and
+     (gb.quirks.lyc_compare_hold or
+      (LYC153_HOLD_DS != 0 and gb.memory.current_speed != 0'u8 and gb.cgb_enabled)):
     ppu.coincidence_flag = true
   # The SOURCE leaves the blind window LYC_SRC_RELATCH_LEAD M-cycles early.
   # Spelled as `not settling or <dot>` so nothing extra is live across the
