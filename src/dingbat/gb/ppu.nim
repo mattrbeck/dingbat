@@ -751,10 +751,16 @@ proc `coincidence_flag=`*(ppu: GbPpu; on: bool) {.inline.} =
   else:  ppu.lcd_status = ppu.lcd_status and not 0x04'u8
 proc mode_flag*(ppu: GbPpu): uint8 {.inline.} = ppu.lcd_status and 0x03
 
-const STAT_M0_LEAD_DS_D {.intdefine: "STAT_M0_LEAD_DS".} = STAT_M0_LEAD_T shr 1
+const STAT_M0_LEAD_DS_D {.intdefine: "STAT_M0_LEAD_DS".} = 0
 const STAT_M0_LEAD_DS* = int32(STAT_M0_LEAD_DS_D)
-  ## The mode-0 source's lead in double speed, in dots. Ships at the identity
-  ## `STAT_M0_LEAD_T shr 1` (a double-speed T-cycle is half a dot). 0 turns
+  ## The mode-0 source's lead in double speed, in dots. Ships 0 (was the
+  ## identity `STAT_M0_LEAD_T shr 1` = 1), one of a joint double-speed move
+  ## with IF_WRITE_LAND_DOTS_DS 1, IRQ_SAMPLE_T_DS 18 and
+  ## CGB_M0_HALT_BLIND_DS_DOTS 0: +6 on the hunt list with none lost
+  ## (`enable_display/frame1_m0irq_count_scx3_ds_1`, `lcd_offset/offset1_
+  ## lyc99int_m0irq_count_scx2_ds_1`, `m0enable/{disable,lycdisable_ff41}_
+  ## ds_1`, `m2int_m0irq_scx5_ds_1`, `serial/start_wait_trigger_int8_read_if_
+  ## ds_2`), and every one-constant neighbour of that point loses 1..9. 0 turns
   ## AGE stat-interrupt/stat-int's double-speed odd-SCX cells green but moves
   ## the mode 3 -> 0 edge two gambatte `_ds_` rows measure; the defect is the
   ## double-speed dispatch grid sitting one dot late (CGB_LATENCY_CAP, gb.nim).
@@ -1179,8 +1185,10 @@ const M0_HALT_BLIND_DOTS* {.intdefine.} = 2
   ## rise is invisible to the halted CPU's latch; 0 compiles it out. DMG only.
 const CGB_M0_HALT_BLIND_DOTS* {.intdefine.} = 0
   ## The CGB's single-speed value, in DOTS (not scaled). Saturates at 0.
-const CGB_M0_HALT_BLIND_DS_DOTS* {.intdefine.} = 1
-  ## And the CGB's double-speed value, in DOTS. Bracketed on both sides at 1.
+const CGB_M0_HALT_BLIND_DS_DOTS* {.intdefine.} = 0
+  ## And the CGB's double-speed value, in DOTS: 0 with STAT_M0_LEAD_DS 0 (the
+  ## joint move there; 1 loses `halt/m0{int,irq}_m0stat_scx2_ds_1`). It was
+  ## 1, bracketed on both sides, with the one-dot lead.
 
 when M0_HALT_BLIND_DOTS > 0 or CGB_M0_HALT_BLIND_DOTS > 0 or
      CGB_M0_HALT_BLIND_DS_DOTS > 0:

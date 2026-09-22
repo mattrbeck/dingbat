@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-22 14:53:57*
+*Generated: 2026-09-22 15:01:57*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5092/5216 passed.**
+**5098/5216 passed.**
 
 ## bgen
 
@@ -67,9 +67,9 @@ All 8 tests passed.
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_4 [dmg, png] | 1/23040 pixels differ |
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_5 [dmg, png] | 144/23040 pixels differ |
 
-## enable_display (170/184 passed)
+## enable_display (171/184 passed)
 
-170/184 tests passed, 14 failed:
+171/184 tests passed, 13 failed:
 
 | Test | Result |
 |------|--------|
@@ -78,7 +78,6 @@ All 8 tests passed.
 | enable_display/frame0_m0irq_count_scx2_ds_1_cgb04c_out90 [cgb] | got 00, expected 90 |
 | enable_display/frame0_m0irq_count_scx3_ds_1_cgb04c_out90 [cgb] | got 00, expected 90 |
 | enable_display/frame0_m2stat_count_ds_1_cgb04c_out91 [cgb] | got 01, expected 91 |
-| enable_display/frame1_m0irq_count_scx3_ds_1_cgb04c_out90 [cgb] | got 00, expected 90 |
 | enable_display/frame1_m2stat_count_ds_1_cgb04c_out91 [cgb] | got 01, expected 91 |
 | enable_display/ly0_late_cgbpr_ds_2_cgb04c_outFF [cgb] | got 55, expected FF |
 | enable_display/ly0_late_cgbpw_ds_2_cgb04c_out55 [cgb] | got AA, expected 55 |
@@ -96,13 +95,12 @@ All 158 tests passed.
 
 All 64 tests passed.
 
-## lcd_offset (58/62 passed)
+## lcd_offset (59/62 passed)
 
-58/62 tests passed, 4 failed:
+59/62 tests passed, 3 failed:
 
 | Test | Result |
 |------|--------|
-| lcd_offset/offset1_lyc99int_m0irq_count_scx2_ds_1_cgb04c_out90 [cgb] | got 00, expected 90 |
 | lcd_offset/offset1_lyc99int_m2stat_count_ds_2_cgb04c_out90 [cgb] | got 00, expected 90 |
 | lcd_offset/offset1_lyc99int_m3stat_count_ds_2_cgb04c_out90 [cgb] | got 00, expected 90 |
 | lcd_offset/offset3_lyc8fint_m1stat_1_cgb04c_outC0 [cgb] | got C1, expected C0 |
@@ -166,14 +164,12 @@ All 18 tests passed.
 
 All 8 tests passed.
 
-## m0enable (164/167 passed)
+## m0enable (166/167 passed)
 
-164/167 tests passed, 3 failed:
+166/167 tests passed, 1 failed:
 
 | Test | Result |
 |------|--------|
-| m0enable/disable_ds_1_cgb04c_out1 [cgb] | got 3, expected 1 |
-| m0enable/lycdisable_ff41_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m0enable/lycdisable_ff45_scx1_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
 
 ## m0int_m0irq
@@ -200,13 +196,9 @@ All 6 tests passed.
 
 All 120 tests passed.
 
-## m2int_m0irq (71/72 passed)
+## m2int_m0irq
 
-71/72 tests passed, 1 failed:
-
-| Test | Result |
-|------|--------|
-| m2int_m0irq/m2int_m0irq_scx5_ds_1_cgb04c_out1 [cgb] | got 3, expected 1 |
+All 72 tests passed.
 
 ## m2int_m0stat
 
@@ -280,9 +272,9 @@ All 69 tests passed.
 
 All 67 tests passed.
 
-## serial (76/82 passed)
+## serial (77/82 passed)
 
-76/82 tests passed, 6 failed:
+77/82 tests passed, 5 failed:
 
 | Test | Result |
 |------|--------|
@@ -291,7 +283,6 @@ All 67 tests passed.
 | serial/nopx1_start_wait_read_if_2_dmg08_cgb04c_outE8 [cgb] | got E0, expected E8 |
 | serial/start83_late_div_write_wait_read_if_1b_cgb04c_outE8 [cgb] | got E0, expected E8 |
 | serial/start83_late_div_write_wait_read_if_2b_cgb04c_outE8 [cgb] | got E0, expected E8 |
-| serial/start_wait_trigger_int8_read_if_ds_2_cgb04c_outE0 [cgb] | got E8, expected E0 |
 
 ## sound (299/300 passed)
 

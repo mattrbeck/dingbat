@@ -168,11 +168,12 @@ const IRQ_PUSH_T* {.intdefine.} = 0
   ## M-cycles: 0 = pushes first (ships), 8 = Pan Docs' wait-first order.
   ## The two are indistinguishable by score.
 
-const IRQ_SAMPLE_T_DS* {.intdefine.} = 16
-  ## IRQ_SAMPLE_T for a dispatch taken in double speed, in CPU T-cycles: 16 is
-  ## the start of the fifth M-cycle. An odd value is off the dot grid there
+const IRQ_SAMPLE_T_DS* {.intdefine.} = 18
+  ## IRQ_SAMPLE_T for a dispatch taken in double speed, in CPU T-cycles: 18,
+  ## as single speed, since STAT_M0_LEAD_DS's joint move (16 and 20 lose there;
+  ## it was 16 with the one-dot lead). An odd value is off the dot grid
   ## (17/17 loses 150 `_ds_` rows), and 20 flips every `_ds_1`
-  ## *_late_retrigger arm the other way, so the split stays.
+  ## *_late_retrigger arm the other way.
 const IRQ_SAMPLE_T* {.intdefine.} = 18
   ## T-cycles into the 5 M-cycle interrupt dispatch at which the taken line's
   ## IF bit is cleared: inside the fifth M-cycle, after the two waits and two

@@ -656,9 +656,9 @@ const IF_WRITE_LAND_DOTS* {.intdefine.} = 1
   ## + 1 before storing). gambatte `m2int_m0irq/m2int_m0irq_scx3_ifw_{2,4}`
   ## (both devices: the mode-0 request rises on the write's first dot);
   ## needs LYC_SRC_RELATCH_ADJ. 2 loses 20 `*_ifw_1`/`*_early_*` rows.
-const IF_WRITE_LAND_DOTS_DS* {.intdefine.} = 0
-  ## The same in double speed: 1 loses `m2int_m0irq_scx4_ifw_ds_1` (the
-  ## double-speed grid, A1).
+const IF_WRITE_LAND_DOTS_DS* {.intdefine.} = 1
+  ## The same in double speed, one of STAT_M0_LEAD_DS's joint move (0 and 2
+  ## lose there; alone, 1 lost `m2int_m0irq_scx4_ifw_ds_1`).
 proc mem_write*(mem: GbMemory; gb: GB; idx: int; val: uint8) {.hot_bus_inline.} =
   ## A CPU write commits at the START of its M-cycle, before its PPU dots: the
   ## VRAM/OAM lock is decided on the mode at the start of the M-cycle
