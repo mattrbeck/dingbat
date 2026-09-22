@@ -835,23 +835,25 @@ proc build_gbmicrotest_tests(dir: string): seq[TestDef] =
   tests
 
 proc shot(name, rom, png: string; timeout: int; color = false; cgb = false;
-          no_save = false): TestDef =
+          no_save = false; model = ""): TestDef =
   ## One screenshot TestDef. The bundled references use the palettes the
   ## harness renders (DMG #00/#55/#AA/#FF, CGB channels (X<<3)|(X>>2)).
   TestDef(name: name, rom_path: rom, mode: tmScreenshot, timeout: timeout,
-          expected_png: png, color: color, cgb: cgb, no_save: no_save)
+          expected_png: png, color: color, cgb: cgb, no_save: no_save,
+          model: model)
 
 proc build_small_screenshot_tests(roms_dir: string): seq[TestDef] =
   ## The bundle's small screenshot suites, from an explicit table: each has
   ## its own exit condition (from its howto) and device, and the reference
-  ## name encodes the capture device. "-ncm" / CGB-compatibility images are a
-  ## third device not modelled here. Frame counts are the howtos' run times;
-  ## a ROM that signals LD B,B (cgb-acid-hell) stops there anyway.
+  ## name encodes the capture device. A CGB-compatibility capture of a DMG
+  ## cart runs with `--cgb` (force_cgb), the mealybug `_cgb_c` path. Frame
+  ## counts are the howtos' run times; a ROM that signals LD B,B
+  ## (cgb-acid-hell) stops there anyway.
   var tests: seq[TestDef]
   template add_if(name, rom, png: string; timeout: int; color = false;
-                  cgb = false; no_save = false) =
+                  cgb = false; no_save = false; model = "") =
     if fileExists(rom) and fileExists(png):
-      tests.add(shot(name, rom, png, timeout, color, cgb, no_save))
+      tests.add(shot(name, rom, png, timeout, color, cgb, no_save, model))
 
   # BullyGB (Hacktix). The only bundled reference is a CGB capture, and
   # --mode=screenshot treats a missing --cgb as DMG, so the device is named.
@@ -900,8 +902,15 @@ proc build_small_screenshot_tests(roms_dir: string): seq[TestDef] =
   add_if("little-things-gb/firstwhite", little / "firstwhite.gb",
          little / "firstwhite-dmg-cgb.png", 60)
 
-  # MBC3 bank tester: device-independent; the CGB reference is a compat-mode
-  # capture, so only the DMG row is scored. Battery-backed, hence --nosave.
+  # MBC3 bank tester: device-independent (the howto: untested on hardware,
+  # "should work on all revisions since it tests a cartridge"). The CGB
+  # reference is the DMG cart in CGB compatibility mode, which --cgb can run
+  # (the mealybug `_cgb_c` path) and which lays out pixel-for-pixel the same
+  # here at every CGB revision -- but its green is #7BFF4A where the howto
+  # beside it, every mealybug `_cgb_c` capture and the boot ROM's default
+  # compat palette ($1BEF) say #7BFF31, so an exact row fails on 3,825 pixels
+  # of one wrong colour. Recorded in NotScored; only the DMG row is scored.
+  # Battery-backed, hence --nosave.
   let mbc3 = roms_dir / "mbc3-tester"
   add_if("mbc3-tester/mbc3-tester", mbc3 / "mbc3-tester.gb",
          mbc3 / "mbc3-tester-dmg.png", 60, no_save = true)
@@ -911,8 +920,8 @@ proc age_device_tokens(base: string): seq[string] =
   ## Trailing device tokens of an AGE test-rom name. AGE encodes the devices a
   ## test was verified on as dash-separated suffixes (README, "Test naming"):
   ## `ei-halt-dmgC-cgbBCE` -> @["dmgC", "cgbBCE"], `ly-ncmE` -> @["ncmE"].
-  ## `ncm` means "CGB in non-CGB mode", a third device this harness does not
-  ## model.
+  ## `ncm` means "CGB in non-CGB mode": the same CGB revision running a
+  ## DMG-flagged cart, which `--cgb` forces (compatibility mode).
   let parts = base.split('-')
   for i in countdown(parts.high, 0):
     let p = parts[i]
@@ -942,8 +951,9 @@ proc age_models_for(device: string): seq[string] =
   ## (`spsw-tima-cgbBC` vs `-cgbE`, `caution/spsw-interrupts-*`), served by
   ## GbQuirks.spsw_div_mid_taps_slow / spsw_irq_leaf_hold_short.
   let d = device.toLowerAscii()
-  if d.startsWith("ncm"): return @[]        # CGB in non-CGB mode: not modelled
-  if not d.startsWith("cgb") or d.len <= 3:
+  # `ncm` = the same CGB revisions running a DMG cart in compatibility mode
+  # (force_cgb, the mealybug `_cgb_c` path); the span letters mean the same.
+  if not (d.startsWith("cgb") or d.startsWith("ncm")) or d.len <= 3:
     let one = age_model_for(device)
     return if one.len > 0: @[one] else: @[]
   for ch in d[3 .. ^1]:
@@ -989,8 +999,9 @@ proc build_age_tests(age_dir: string): seq[TestDef] =
         shots.add((pbase[cut + 1 .. ^1], png))
     if shots.len > 0:
       for (device, png) in shots:
-        if device.startsWith("ncm"): continue   # device not modeled
-        let cgb = device.startsWith("cgb")
+        # `ncm` (CGB in non-CGB mode) is a DMG-flagged cart on a CGB: --cgb
+        # forces compatibility mode, exactly as mealybug's `_cgb_c` rows run.
+        let cgb = device.startsWith("cgb") or device.startsWith("ncm")
         let models = age_models_for(device)
         # A span becomes one row per revision it names; the suffix is added
         # only when there is more than one, so single-revision rows keep the
@@ -1005,16 +1016,18 @@ proc build_age_tests(age_dir: string): seq[TestDef] =
       continue
     let devices = age_device_tokens(base)
     let dmg = devices.anyIt(it.startsWith("dmg"))
-    let cgb = devices.anyIt(it.startsWith("cgb"))
+    # `ncm` rows are DMG-flagged carts ($143 = $00) run on a CGB, i.e. CGB
+    # compatibility mode, which --cgb forces (force_cgb). Same machine as the
+    # mealybug `_cgb_c` captures; every ncm arm passes.
+    let cgb = devices.anyIt(it.startsWith("cgb") or it.startsWith("ncm"))
     if not dmg and not cgb:
-      continue   # ncm-only: CGB in non-CGB mode, which this harness cannot run
+      continue   # no device token the harness can name
     # One row per machine the name declares (`ei-halt-dmgC-cgbBCE` runs on
     # four). Failing rows stop at LD B,B (bb_breakpoint), so the extra arms
     # cost little.
     var arms: seq[(bool, string)]   # (run as CGB, --model token)
     for d in devices:
-      if d.startsWith("ncm"): continue     # CGB in non-CGB mode: not modelled
-      let is_cgb = d.startsWith("cgb")
+      let is_cgb = d.startsWith("cgb") or d.startsWith("ncm")
       for m in age_models_for(d):
         if (is_cgb, m) notin arms: arms.add((is_cgb, m))
     if arms.len == 0: arms.add((not dmg, ""))
@@ -1189,8 +1202,7 @@ proc build_shootout_tests(): seq[TestDef] =
     ))
 
   # CasualPokePlayer's MBC3 tests: invalid RTC banks, single-write latch,
-  # RAM-enable width. DMG, half a second each. `sgb-ext-test` is an SGB
-  # packet-protocol test the shootout runs on an SGB; skipped.
+  # RAM-enable width. DMG, half a second each.
   for name in ["rtc-invalid-banks-test", "latch-rtc-test", "ramg-mbc3-test"]:
     tests.add(TestDef(
       name: "cpp/" & name,
@@ -1201,13 +1213,26 @@ proc build_shootout_tests(): seq[TestDef] =
       expected_png: ensure_shootout_file("cpp/" & name & ".png"),
       no_save: true,
     ))
+  # `sgb-ext-test`: the SGB packet-protocol stress test, run on the SGB
+  # (--sgb; the shootout's `model=SGB`). Its `runtime=0.5` is a lower bound:
+  # the shootout polls for `runtime + startup_time(1.0) + 5.0` seconds and the
+  # ROM's report is still blank at 30 frames, complete well inside that
+  # budget (the same rule rtc3test uses above).
+  tests.add(TestDef(
+    name: "cpp/sgb-ext-test",
+    rom_path: ensure_shootout_file("cpp/sgb-ext-test.gb"),
+    mode: tmScreenshot,
+    grey_tolerance: ShootoutTolerance,
+    timeout: int((0.5 + 6.0) * 59.7275),
+    expected_png: ensure_shootout_file("cpp/sgb-ext-test.png"),
+    sgb: true,
+    no_save: true,
+  ))
 
   # daid's tests: STOP / speed-switch behaviour and a mid-scanline BGP probe.
   # `ppu_scanline_bgp`, `stop_instr` and `stop_instr_gbc_mode3` are
   # DMG-flagged carts the shootout runs "on GBC", i.e. CGB compatibility
-  # mode. `stop_instr` (GBC) is not scored: its reference is an all-black
-  # frame, which a blanked panel matches however STOP got there.
-  # `rom_and_ram.gb` ships no reference (the shootout classes it INFO).
+  # mode. `rom_and_ram.gb` ships no reference (the shootout classes it INFO).
   # Mid-scanline BGP writes have three legitimate DMG outcomes (old palette,
   # new, or their OR, per console); the shootout accepts any, and so does
   # this row.
@@ -1247,10 +1272,25 @@ proc build_shootout_tests(): seq[TestDef] =
     timeout: 30,
     expected_png: ensure_shootout_file("daid/stop_instr.dmg.png"),
   ))
-  # The one GBC daid row worth gating: the ROM prints "LCD on: PASS", spins
-  # until STAT reads mode 3, then STOPs; daid's note says a mode-3 STOP on a
-  # CGB keeps displaying because the PPU keeps running. Refused by an
-  # implementation that blanks the panel.
+  # The same ROM on a CGB (compatibility mode, at the revision the shootout
+  # adapter runs). daid's note: the PPU keeps running through STOP but cannot
+  # reach VRAM, so the panel goes black. That is a distinct outcome from a
+  # blanked panel, which this harness paints white (ppu_blank_frame, and the
+  # DMG reference above), so the all-black reference does discriminate.
+  tests.add(TestDef(
+    name: "daid/stop_instr-gbc",
+    rom_path: ensure_shootout_file("daid/stop_instr.gb"),
+    mode: tmScreenshot,
+    grey_tolerance: ShootoutTolerance,
+    timeout: 30,
+    expected_png: ensure_shootout_file("daid/stop_instr.gbc.png"),
+    color: true,
+    cgb: true,
+    model: "cgbe",
+  ))
+  # The ROM prints "LCD on: PASS", spins until STAT reads mode 3, then STOPs;
+  # daid's note says a mode-3 STOP on a CGB keeps displaying because the PPU
+  # keeps running. Refused by an implementation that blanks the panel.
   tests.add(TestDef(
     name: "daid/stop_instr_gbc_mode3",
     rom_path: ensure_shootout_file("daid/stop_instr_gbc_mode3.gb"),
@@ -1411,24 +1451,19 @@ const NotScored: seq[(string, string)] = @[
   # results page. Keep in sync with the skip sites (each names its builder).
   ("blargg/oam_bug/7-timing_effect", "broken standalone build: its verbose " &
     "output overruns the $A004..$BFFF text window into the $C000 copy of its " &
-    "own code, so it never reports — on real DMG hardware too (docboy#33). " &
+    "own code, so it never reports — on real DMG hardware too (docboy#33: " &
+    "the maintainer reproduced the blank screen on a DMG through an " &
+    "Everdrive X7, and the shootout leaves it out for the same reason). " &
     "Test 7 is scored through `blargg/oam_bug/combined` instead. " &
     "(build_blargg_tests)"),
-  ("daid/ppu_scanline_bgp (GBC)", "its reference captures a CGB-D-or-later " &
-    "palette-write dot; the tree deliberately scores CPU CGB C, which " &
-    "mealybug's 27 compat-mode rows pin from the other side. " &
-    "(build_shootout_tests)"),
-  ("daid/stop_instr (GBC)", "reference is an all-black frame, which a " &
-    "blanked panel matches however STOP got there — a gate that cannot " &
-    "fail. (build_shootout_tests)"),
-  ("daid/rom_and_ram, acid/which", "ship no reference image; the shootout " &
-    "classes them INFO, not pass/fail. (build_shootout_tests)"),
-  ("cpp/sgb-ext-test", "SGB packet-protocol test the shootout scores on an " &
-    "SGB; not covered by dingbat's SGB adapter model. " &
-    "(build_shootout_tests)"),
+  ("daid/rom_and_ram, acid/which", "ship no reference image; the shootout's " &
+    "test.py gives a test with no pass image the default result INFO, not " &
+    "pass/fail. (build_shootout_tests)"),
   ("magen/oam_internal_priority", "its only stated criterion is prose (\"2 " &
-    "pairs of rectangles connected or touching\"); nothing machine-checkable " &
-    "to score against. (build_magen_tests)"),
+    "pairs of rectangles connected or touching\") plus a SameBoy window " &
+    "capture in the repo's images/ (318x295, an emulator's output, not a " &
+    "hardware frame); nothing machine-checkable to score against. The " &
+    "harness frame shows the same two touching pairs. (build_magen_tests)"),
   ("mooneye/wilbertpol `ags` arms", "`ags` is AGB silicon in a different " &
     "package — the suite's own README says so — and dingbat models one AGB, " &
     "so a `-C`/`-A` token's `ags` member folds into its `agb` arm rather " &
@@ -1439,8 +1474,6 @@ const NotScored: seq[(string, string)] = @[
     "stop short of revision 0, which the suite treats as its own machine and " &
     "ships separate `-cgb0`/`-dmg0` ROMs for precisely because it diverges. " &
     "Those separate ROMs ARE scored. (build_mooneye_tests)"),
-  ("age `ncm*` rows", "CGB running in non-CGB mode, a device this harness " &
-    "does not model. (build_age_tests)"),
   ("age `oam/oam-write-dmgC`", "the AGE emulator's own runner blacklists it " &
     "(its test-blacklist.txt names this ROM, `_in-progress` and " &
     "`speed-switch/caution`, nothing else of the suite), and the source marks " &
@@ -1456,15 +1489,21 @@ const NotScored: seq[(string, string)] = @[
     "rig, not hardware. The non-colliding members of the same family " &
     "(`busyread8000`, `busyreadFF4B`) and every CGB arm ARE scored. " &
     "(build_gambatte_rows / gambatte_row_reads_powerup_wram)"),
-  ("gambatte `_outaudio0/1` rows (220) + the AGB column", "audio-register " &
-    "sampling and the AGB device are not scored; see results_gambatte.md's " &
-    "source notes. (build_gambatte_rows)"),
+  ("gambatte `_outaudio0/1` rows (220) + the AGB column", "gambatte's " &
+    "testrunner.cpp decides an `outaudio` row on whether the final frame's " &
+    "35,112 mixed samples (2 MHz) are all equal to the first; this harness " &
+    "has no 2 MHz tap on the mixer, and its 32,768 Hz stream could read " &
+    "constant where the 2 MHz one is not. A runner gap, not a model claim. " &
+    "The AGB column: gambatte's runner marks it `FIXME: Actual AGB results` " &
+    "and feeds it the CGB expectations, so it asserts nothing about AGB. " &
+    "(build_gambatte_rows)"),
   ("gbmicrotest: 31 ROMs that never write the $FF82 verdict byte", "scanned " &
     "all 513 bundled ROMs for `ldh ($82),a` / `ld ($ff82),a`; 482 contain one " &
     "and these 31 contain neither, so the harness would be scoring " &
-    "uninitialised HRAM rather than a result. All 31 were failing rows before " &
-    "the skip. The honest suite denominator is 482. " &
-    "(build_gbmicrotest_tests)"),
+    "uninitialised HRAM rather than a result. The upstream sources agree " &
+    "(none of the 31 .s files calls a test_finish macro) and GateBoy's own " &
+    "test list never runs them. All 31 were failing rows before the skip. " &
+    "The honest suite denominator is 482. (build_gbmicrotest_tests)"),
   ("gbmicrotest: 2 ROMs whose expected byte is unreachable", "`halt_op_dupe_delay` " &
     "wants DIV = $55 about 62 M-cycles after resetting DIV, which needs a " &
     "5,440 M-cycle HALT its own HBlank-every-line setup rules out ($55 is the " &
@@ -1477,11 +1516,19 @@ const NotScored: seq[(string, string)] = @[
     "defects, not verdicts. The honest suite denominator is 480. " &
     "(build_gbmicrotest_tests)"),
   ("scribbltests/fairylake, scribbltests/winpos", "ship no reference " &
-    "image. (build_small_screenshot_tests)"),
-  ("little-things-gb/tellinglys", "needs scripted joypad input mid-run. " &
-    "(build_small_screenshot_tests)"),
-  ("mbc3-tester CGB reference", "a CGB compat-mode capture; only the DMG " &
-    "row is scored. (build_small_screenshot_tests)"),
+    "image: the bundle's howto says so and upstream has only animated " &
+    "GIFs; fairylake is a WIP demo and winpos is a joypad-driven WX/WY " &
+    "explorer. (build_small_screenshot_tests)"),
+  ("little-things-gb/tellinglys", "needs scripted joypad input mid-run " &
+    "(all eight buttons, one after another), which the GB side of the " &
+    "harness has no way to inject. (build_small_screenshot_tests)"),
+  ("mbc3-tester CGB reference", "a CGB compatibility-mode capture the " &
+    "harness can run (--cgb) and matches pixel-for-pixel in layout at every " &
+    "CGB revision, except that its green is #7BFF4A where the howto beside " &
+    "it, every mealybug `_cgb_c` capture and the boot ROM's default compat " &
+    "palette ($1BEF) give #7BFF31 -- a colour no compat palette produces. " &
+    "An exact row fails on those 3,825 pixels alone, so only the DMG row is " &
+    "scored. (build_small_screenshot_tests)"),
   ("mooneye/utils/ (bootrom_dumper, dump_boot_hwio)", "tools, not pass/fail " &
     "tests. bootrom_dumper waits for a boot ROM to dump and can only time out " &
     "(docs/gb-failure-triage.md calls it unrecoverable); dump_boot_hwio ends " &

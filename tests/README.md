@@ -169,7 +169,7 @@ authority on device, exit condition and verdict.
 | Blargg `instr_timing`, `mem_timing-2`, `oam_bug`, `halt_bug`, `interrupt_time` | `$A000` status + `DEB061` | `tmSram`; `interrupt_time` is CGB-only; `oam_bug` needs ~21 emulated seconds |
 | Mooneye (Gekkio) | `LD B,B` + Fibonacci regs | `manual-only/sprite_priority` is a screenshot |
 | Mooneye (wilbertpol) | opcode `0xED` + Fibonacci regs | `--ed-breakpoint`; `utils/`, `logic-analysis/` have no verdict |
-| AGE | `LD B,B` + Fibonacci regs, or screenshot | `--bb-breakpoint`; `ncm*` (CGB in non-CGB mode) skipped |
+| AGE | `LD B,B` + Fibonacci regs, or screenshot | `--bb-breakpoint`; `ncm*` (CGB in non-CGB mode) runs the DMG-flagged cart with `--cgb`, one arm per revision |
 | GBMicrotest | HRAM `$FF82` | 2 frames (30 for `is_if_set_during_ime0`); 31 ROMs never write `$FF82` (`MicrotestNoVerdict`), 2 assert a byte no Game Boy produces (`MicrotestBrokenExpected`); scored out of 480 |
 | Mealybug, Acid2, cgb-acid-hell, bully, strikethrough, scribbltests, turtle-tests, little-things-gb, mbc3-tester | framebuffer vs bundled PNG | exact match; see below |
 | SameSuite `dma`, `ppu`, `interrupt`, `sgb`, `apu` | `LD B,B` + Fibonacci regs | `--cgb` except `sgb/` (`--sgb`); `apu/` alone via `--apu` |
@@ -234,10 +234,10 @@ the shootout's rule (`util.py: compareImage`: 8-bit luma, every pixel within 50)
 they are screen captures carrying an emulator's colour correction — rtc3test's green is
 `#009100`, unreachable from `(X<<3)|(X>>2)`. `grey_tolerance` on `TestDef` implements it;
 everything else stays exact, so a shootout row's percentage is not comparable to a
-mealybug or gambatte row's. Skipped with a stated reason: `acid/which.gb` and
-`daid/rom_and_ram.gb` (no reference; the shootout scores them INFO), `cpp/sgb-ext-test`
-(no `--sgb` row is built for it; the adapter in `docs/sgb.md` passes it byte-exact outside
-the runner, so the skip is a runner gap, not a model gap), and the compat-mode daid rows.
+mealybug or gambatte row's. `cpp/sgb-ext-test` runs with `--sgb` on the shootout's polling
+budget (its `runtime=0.5` is a lower bound; the report is blank at 30 frames). Skipped with
+a stated reason: `acid/which.gb` and `daid/rom_and_ram.gb` (no reference; the shootout
+scores them INFO).
 
 ### Exit code, baselines, hazards
 
