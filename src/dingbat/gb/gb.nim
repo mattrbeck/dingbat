@@ -211,6 +211,12 @@ const LCDON_M0_LAG_DS* {.intdefine.} = 8
   ## `enable_display/ly0_m0irq_scx{0,1}_ds_1`, `frame0_m0irq_count_scx{2,3}_
   ## ds_1` (+4, none lost); 4 is inert, 12 loses the four `_2` twins.
 const CGB_LYC_RULE_FIRE_T* {.intdefine.} = 4
+const CGB_LYC_EVENT_HOLD_SS* {.intdefine.} = 7
+  ## CGB_LYC_EVENT_HOLD_DS at single speed: a CGB LYC write committed in the
+  ## last 7 dots of a line (gambatte-core: within 6 cycles of the event, plus
+  ## dingbat's one-dot write offset) is not seen by the next line's event.
+  ## gambatte `lycEnable/ff45_enable_weirdpoint_{2,lcdoffset1_2}` [cgb];
+  ## 6 loses the first, 8 `ff45_enable_weirdpoint_lcdoffset1_1`.
 const CGB_STAT_LYC_DISABLE_HOLD* {.intdefine.} = 2
   ## CPU cycles before the next line's LYC event inside which a CGB STAT write
   ## clearing the LYC enable no longer reaches that event: it still requests

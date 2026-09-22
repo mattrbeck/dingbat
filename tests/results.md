@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-09-22 16:37:33 · commit 938590c95 · game-boy-test-roms v7.0*
+*Generated: 2026-09-22 16:41:39 · commit 9548f4fcd · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1254
-- **Pass:** 1236
-- **Fail:** 18
+- **Pass:** 1237
+- **Fail:** 17
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -29,7 +29,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - SameSuite APU | 70 | 70 |
 | Game Boy - Shootout ROMs | 15 | 15 |
 | Game Boy - Mooneye (wilbertpol) | 184 | 184 |
-| Game Boy - gambatte | 30 | 48 |
+| Game Boy - gambatte | 31 | 48 |
 
 ## Game Boy - Blargg (28/28)
 
@@ -101,7 +101,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 184 tests passed.**
 
-## Game Boy - gambatte (30/48)
+## Game Boy - gambatte (31/48)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -121,7 +121,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/ly0 | per-ROM | 👀 95/96 passed |
 | gambatte/lyc0int_m0irq | per-ROM | 👌 6/6 passed |
 | gambatte/lyc153int_m2irq | per-ROM | 👌 16/16 passed |
-| gambatte/lycEnable | per-ROM | 👀 223/225 passed |
+| gambatte/lycEnable | per-ROM | 👌 225/225 passed |
 | gambatte/lycint_ly | per-ROM | 👌 6/6 passed |
 | gambatte/lycint_lycflag | per-ROM | 👌 12/12 passed |
 | gambatte/lycint_lycirq | per-ROM | 👌 4/4 passed |

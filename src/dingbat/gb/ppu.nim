@@ -2556,6 +2556,16 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
          (CGB_LYC_WRITE_RULE_DS != 0 or gb.memory.current_speed == 0'u8):
         let trig = cgb_lyc_write_trigger(ppu, gb, ppu.lyc, val)
         if gb.memory.current_speed == 0'u8:
+          when CGB_LYC_EVENT_HOLD_SS > 0 and CGB_LYC_EVENT_HOLD_DS > 0:
+            # CGB_LYC_EVENT_HOLD_DS's window at single speed.
+            if ppu.cycle_counter >= ppu.gb_line_end - int32(CGB_LYC_EVENT_HOLD_SS) and
+               ppu.ly != 153'u8 and not (ppu.ly == 0'u8 and (ppu.lcd_status and 3'u8) == 1'u8) and
+               int(val) == int(ppu.ly) + 1:
+              gb.lyc_hold_on = true
+              gb.lyc_hold_new = val
+              gb.lyc_hold_ly = ppu.ly
+              if trig: gb.interrupts.lcd_stat_interrupt = true
+              return
           ppu_defer_machinery_write(ppu, gb, idx, val)
           gb.lyc_rule_on = true
           gb.lyc_rule_trig = trig
