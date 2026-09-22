@@ -860,8 +860,9 @@ const SPEED_SWITCH_FREEZES_OAM_DMA* {.intdefine.} = 1
   ## $71, 0 runs the transfer out to $A0).
 const SPEED_SWITCH_OAM_DMA_HANDBACK_T* {.intdefine.} = 4
   ## Bus cycles the unit is still clocked for across the stall: the hand-back
-  ## M-cycle, the one OAMDMA_HALT_PAUSE charges at a HALT wake. 4 and 8 each
-  ## satisfy one of the two rows above; 4 is the HALT path's value.
+  ## M-cycle. 4 and 8 each satisfied one of the two rows above until a
+  ## transfer whose last byte is written was let hand OAM back in the stall
+  ## as in a HALT (OAMDMA_HALT_RELEASE): 4 plus that takes both.
 const SPEED_SWITCH_STALL_T* {.intdefine.} = 65548
   ## Dead fallback: the stall in T-cycles of the 4.194304 MHz base clock, used
   ## only when SPEED_SWITCH_STALL_CPU is 0. Selecting it (any value, 65547 to
@@ -925,7 +926,12 @@ proc mem_tick_stalled(mem: GbMemory; gb: GB; cycles: int;
       mem_dma_tick(mem, gb, cycles)
     elif SPEED_SWITCH_OAM_DMA_HANDBACK_T != 0:
       # Once per stall, not per chunk: the hand-back is at the grant.
-      if first_chunk: mem_dma_tick(mem, gb, SPEED_SWITCH_OAM_DMA_HANDBACK_T)
+      if first_chunk:
+        mem_dma_tick(mem, gb, SPEED_SWITCH_OAM_DMA_HANDBACK_T)
+        # A transfer whose last byte is written hands OAM back in the stall
+        # too (OAMDMA_HALT_RELEASE).
+        when OAMDMA_HALT_RELEASE != 0:
+          if mem.dma_position == 0xA0: mem_dma_tick(mem, gb, 4)
   # `current_speed` is already the speed switched TO: 1 = ended in double.
   const extra_single =
     when SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE != SS_EXTRA_SINGLE_SAME:

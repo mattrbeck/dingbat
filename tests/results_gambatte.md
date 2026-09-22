@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-22 16:27:10*
+*Generated: 2026-09-22 16:31:30*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5135/5216 passed.**
+**5136/5216 passed.**
 
 ## bgen
 
@@ -217,13 +217,12 @@ All 44 tests passed.
 
 All 69 tests passed.
 
-## oamdma (797/802 passed)
+## oamdma (798/802 passed)
 
-797/802 tests passed, 5 failed:
+798/802 tests passed, 4 failed:
 
 | Test | Result |
 |------|--------|
-| oamdma/oamdma_late_speedchange_stat_2_cgb04c_out3 [cgb] | got 0, expected 3 |
 | oamdma/oamdma_src0000_busyint0002_dmg08_cgb04c_outFF941234 [dmg] | got 76871234, expected FF941234 |
 | oamdma/oamdma_src0000_busyint0002_dmg08_cgb04c_outFF941234 [cgb] | got 76871234, expected FF941234 |
 | oamdma/oamdma_src8000_srcchange0000_busyinc_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |
