@@ -111,6 +111,14 @@ already reads the mode-0 side.
 `ly0/lycint152_lyc{0,153}flag_ds_3`, `lycint_lycflag/lycint_lycflag_ds_3`.
 Heavily CGB, and a third of them `lcdoffset1` or `_ds_` members.
 
+**Closed 2026-09-22: the coincidence bit's readback at a double-speed line
+edge (+4).** `lycint_lycflag_ds_3`, `ly0/lycint152_lyc0flag_ds_3` and
+`enable_display/frame{0,1}_m2stat_count_ds_1` read STAT in the M-cycle LY
+steps in. At double speed the bit still compares against the line being
+left while the dot counter is below 2, and clears from dot 2
+(`LYC_JUST_CHANGED_HOLD_DS`, ppu.nim; the `lcd_offset1` twin pins the upper
+side). `lycint152_lyc153flag_ds_3` stays red.
+
 **Closed 2026-09-22: a disable is an edge's other half (+20).** The STAT
 line is a level OR into an edge detector, and dingbat only re-evaluated it
 at source changes and at the M-cycle boundary a STAT write's byte waits

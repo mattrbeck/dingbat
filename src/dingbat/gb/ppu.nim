@@ -3,6 +3,13 @@
 # Dots the re-enabled PPU is already into line 0 when the LCDC write retires;
 # see the LCDC-enable path in ppu_write.
 const LCD_ON_HEAD_START* {.intdefine.} = 5'i32
+const LYC_JUST_CHANGED_HOLD_DS* {.intdefine.} = 2
+  ## At double speed a STAT read whose M-cycle stepped LY still reports the
+  ## comparison against the line being left while the dot counter is below
+  ## this: gambatte reads the bit set 4 dots before its line end and clear 3
+  ## before (`enable_display/frame{0,1}_m2stat_count_ds_1`, `lycint_lycflag_
+  ## ds_3`, `ly0/lycint152_lyc0flag_ds_3`; +4, none lost). 3 loses
+  ## `lcd_offset/offset1_lyc8fint_m1stat_ds_1`, 0 is the old clear-always.
 
 # Dots past the start of VBlank at which the CGB boot ROM hands off (skip_boot).
 const CGB_BOOT_PHASE* {.intdefine.} = 165
@@ -2250,7 +2257,9 @@ proc ppu_read*(ppu: GbPpu; gb: GB; idx: int): uint8 =
       live = live and not 0b0000_0100'u8
       # CGB D and later HOLD the comparison against the LY being left instead
       # of clearing it (quirks.lyc_compare_hold, gb.nim).
-      if gb.quirks.lyc_compare_hold and
+      if (gb.quirks.lyc_compare_hold or
+          (LYC_JUST_CHANGED_HOLD_DS != 0 and gb.memory.current_speed != 0'u8 and
+           ppu.cycle_counter < LYC_JUST_CHANGED_HOLD_DS)) and
          ppu.lyc == (if ppu.ly == 0'u8: 153'u8 else: ppu.ly - 1'u8):
         live = live or 0b0000_0100'u8
     # Leaving vblank the two mode bits do not move together: bit 0 drops as

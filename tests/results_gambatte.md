@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-22 15:25:45*
+*Generated: 2026-09-22 15:32:31*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5108/5216 passed.**
+**5112/5216 passed.**
 
 ## bgen
 
@@ -67,16 +67,14 @@ All 8 tests passed.
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_4 [dmg, png] | 1/23040 pixels differ |
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_5 [dmg, png] | 144/23040 pixels differ |
 
-## enable_display (175/184 passed)
+## enable_display (177/184 passed)
 
-175/184 tests passed, 9 failed:
+177/184 tests passed, 7 failed:
 
 | Test | Result |
 |------|--------|
 | enable_display/enable_display_ly0_sprites_m0stat_2_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | enable_display/enable_display_ly0_sprites_m0stat_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
-| enable_display/frame0_m2stat_count_ds_1_cgb04c_out91 [cgb] | got 01, expected 91 |
-| enable_display/frame1_m2stat_count_ds_1_cgb04c_out91 [cgb] | got 01, expected 91 |
 | enable_display/ly0_late_cgbpr_ds_2_cgb04c_outFF [cgb] | got 55, expected FF |
 | enable_display/ly0_late_cgbpw_ds_2_cgb04c_out55 [cgb] | got AA, expected 55 |
 | enable_display/ly0_late_scx7_m3stat_scx0_2_dmg08_out87_cgb04c_out84 [dmg] | got 84, expected 87 |
@@ -105,13 +103,12 @@ All 64 tests passed.
 
 All 62 tests passed.
 
-## ly0 (94/96 passed)
+## ly0 (95/96 passed)
 
-94/96 tests passed, 2 failed:
+95/96 tests passed, 1 failed:
 
 | Test | Result |
 |------|--------|
-| ly0/lycint152_lyc0flag_ds_3_cgb04c_outC4 [cgb] | got C0, expected C4 |
 | ly0/lycint152_lyc153flag_ds_3_cgb04c_outC5 [cgb] | got C1, expected C5 |
 
 ## lyc0int_m0irq
@@ -136,13 +133,9 @@ All 16 tests passed.
 
 All 6 tests passed.
 
-## lycint_lycflag (11/12 passed)
+## lycint_lycflag
 
-11/12 tests passed, 1 failed:
-
-| Test | Result |
-|------|--------|
-| lycint_lycflag/lycint_lycflag_ds_3_cgb04c_out4 [cgb] | got 0, expected 4 |
+All 12 tests passed.
 
 ## lycint_lycirq
 
