@@ -400,6 +400,13 @@ const OAM_READ_M0_OPEN_DOTS_DS* {.intdefine.} = 3
   ## one dot later (oam-read-cgbE; GbQuirks.oam_read_open_late, added at the
   ## use site); CGB-D is unmeasured and gets the C behaviour.
 
+const OAM_READ_M2_LAG_DOTS_DS* {.intdefine.} = 2
+  ## CGB 0..C only, double speed only: dots into a line before the mode 2
+  ## read lock engages (a read sampled at dot 1 is served, at dot 3 refused);
+  ## CGB E locks at once, and every revision does at single speed. AGE
+  ## oam/oam-read-dmgC-cgbBC (`EFF` = $00 there) against oam-read-cgbE
+  ## (`EFF` = $FF), the double-speed delay-1 line. Bracketed to 2..3.
+
 const OAM_READ_M3_CLOSE_DOTS* {.intdefine.} = 5'i32
   ## The OAM read lock's CLOSE edge at the start of mode 3, in dots after the
   ## 2 -> 3 flag edge; only reachable on the LCD-enable line (every other line
@@ -510,6 +517,10 @@ proc cpu_oam_open*(ppu: GbPpu; is_write: bool; mcycle_dots: int32 = 0;
     else:
       return live != 2
   let lag = lcdon_latched_mode(ppu, ds)
+  when defined(gb_oamr_trace):
+    echo "OAMR ly=", ppu.ly, " dot=", ppu.cycle_counter, " live=", live, " lag=", lag,
+         " prev=", ppu.stat_prev_mode, " chg=", ppu.stat_chg_dot,
+         " first=", ppu.first_line, " ds=", ds, " late=", open_late
   if lag == 3:
     when OAM_READ_M3_CLOSE_DOTS != 0:
       # Mode 3's own close edge, which only the LCD-on line reaches: on any
@@ -529,6 +540,14 @@ proc cpu_oam_open*(ppu: GbPpu; is_write: bool; mcycle_dots: int32 = 0;
         return true
     return false
   if ppu.first_line: return true
+  when OAM_READ_M2_LAG_DOTS_DS != 0:
+    # CGB 0..C at double speed: the mode 2 read lock engages this far into
+    # the line; CGB E (open_late, the same revision split as the open edge)
+    # locks at once. AGE oam/oam-read-dmgC-cgbBC vs oam-read-cgbE, the
+    # double-speed delay-1 reads on every mode 2 edge (`EFF`).
+    if ds and not open_late and live == 2'u8 and lag != 2'u8 and
+       ppu.cycle_counter < OAM_READ_M2_LAG_DOTS_DS:
+      return true
   lag != 2 and live != 2 and live != 3
 
 # ---- The DMG OAM corruption bug -------------------------------------------
@@ -1726,10 +1745,12 @@ proc ppu_read*(ppu: GbPpu; gb: GB; idx: int): uint8 =
   of 0xFE00..0xFE9F:
     # OAM is the PPU's during modes 2 and 3; reads answer $FF. See cpu_oam_open
     # (mooneye intr_2_oam_ok_timing, lcdon_timing-GS).
-    if cpu_oam_open(ppu, is_write = false,
+    let open = cpu_oam_open(ppu, is_write = false,
                     open_late = gb.quirks.oam_read_open_late,
-                    ds = gb.memory.current_speed != 0):
-      ppu.sprite_table[idx - 0xFE00]
+                    ds = gb.memory.current_speed != 0)
+    when defined(gb_oamr_trace):
+      echo "  -> open=", open
+    if open: ppu.sprite_table[idx - 0xFE00]
     else: 0xFF'u8
   of 0xFF40:         ppu.lcd_control
   of 0xFF41:

@@ -205,9 +205,10 @@ line when halted, two errors that cancel in the halted steady state
 
 ### B1. Line 0's mode edges are 2 dots later than the counter says
 
-**Rows (47).** AGE `oam/oam-read-{dmgC-cgbBC@dmgC,@cgbab,@cgbc}`,
-`oam-read-cgbE`, `oam/oam-write-dmgC`, `vram/vram-read-{dmgC,
-cgbBCE@*}` (9 arms; `oam-write-cgbBCE@*` closed 2026-09-21, below); gambatte `enable_display` 15 (`ly0_late_vram{r,w}_*`,
+**Rows (45).** AGE `oam/oam-read-dmgC-cgbBC@dmgC`, `oam-read-cgbE`,
+`oam/oam-write-dmgC`, `vram/vram-read-{dmgC, cgbBCE@*}` (7 arms;
+`oam-write-cgbBCE@*` and `oam-read-dmgC-cgbBC@{cgbab,cgbc}` closed
+2026-09-21, below); gambatte `enable_display` 15 (`ly0_late_vram{r,w}_*`,
 `ly0_late_scx7_m3stat_*`, `frame{0,1}_m{0,2}{irq,stat}_count_*_ds_1`,
 `enable_display_ly0_sprites_m0stat_2`, `ly0_oambusy_read_ds_1`),
 `lcd_offset` 19 (all CGB), `display_startstate/stat_*_2 [cgb]` 4.
@@ -256,6 +257,14 @@ and which contradicts gambatte `postwrite_2_scx3` [dmg] on the open edge;
 gambatte `prewrite_lcdoffset1_1` [cgb], which passed only because the
 start-of-cycle sample cancelled the `lcdoffset1` phase error the
 `preread_lcdoffset1_1` row still shows.
+
+**Closed 2026-09-21: the double-speed mode 2 read lock on CGB 0..C.**
+`oam-read-dmgC-cgbBC@{cgbab,cgbc}` failed on one line: at double speed a
+read sampled at dot 1 of a line is served on CGB B/C (`EFF` = $00 in that
+ROM) and refused on CGB E (`EFF` = $FF in `oam-read-cgbE`); dot 3 is refused
+everywhere. `OAM_READ_M2_LAG_DOTS_DS = 2` (ppu.nim), keyed off the same
+revision split as `oam_read_open_late`; 3 loses gambatte
+`preread_ds_lcdoffset1_2`, and 2 takes `preread_ds_1` [cgb].
 
 **To close (the rest).** One spelling of line 0's 2 dots that the lock
 rows, the STAT rows, the interrupt rows and the pixel rows accept together.
