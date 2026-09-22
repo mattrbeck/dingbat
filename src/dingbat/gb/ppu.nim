@@ -395,6 +395,10 @@ const CRAM_LOCK_DOTS* {.booldefine.} = true
 const CRAM_LOCK_ON_LAT*    {.intdefine.} = 1
 const CRAM_LOCK_ON_LAT_DS* {.intdefine.} = 2
 const CRAM_LOCK_OFF_LAT*   {.intdefine.} = 2
+const CRAM_LOCK_OFF_LAT_DS* {.intdefine.} = 3
+  ## CRAM_LOCK_OFF_LAT at double speed (-1 = the same 2): 3 takes gambatte
+  ## `cgbpal_m3/cgbpal_m3end_scx5_ds_{1,3}`; 2 is the old value, 4 loses
+  ## `cgbpal_m3end_ds_{2,4}`.
 const CRAM_LOCK_LINE0_EXTRA* {.intdefine.} = 4
 
 proc cpu_cram_open_dots(ppu: GbPpu; gb: GB; is_write: bool): bool {.noinline.} =
@@ -409,7 +413,8 @@ proc cpu_cram_open_dots(ppu: GbPpu; gb: GB; is_write: bool): bool {.noinline.} =
     if ppu.first_line: on += int32(CRAM_LOCK_LINE0_EXTRA)
     return since < on
   if m == 0'u8 and ppu.stat_prev_mode == 3'u8:
-    return since >= int32(CRAM_LOCK_OFF_LAT)
+    return since >= (if ds and CRAM_LOCK_OFF_LAT_DS >= 0: int32(CRAM_LOCK_OFF_LAT_DS)
+                     else: int32(CRAM_LOCK_OFF_LAT))
   true
 
 proc cpu_cram_open*(ppu: GbPpu; gb: GB; is_write: bool): bool {.inline.} =
