@@ -86,6 +86,8 @@ when HDMA_GRANT_FETCH_DOTS >= 0:
       # (gambatte dma/hdma_ei_m3halt_m0unhalt_ly_2).
       if ppu.hdma_due_deadline == high(int32):
         ppu.hdma_due_deadline = ppu.cycle_counter
+      when defined(gb_dma_trace):
+        echo "GRANT? dot=", ppu.cycle_counter, " slack=", slack, " dl=", ppu.hdma_due_deadline
       if ppu.cycle_counter + slack >= ppu.hdma_due_deadline:
         ppu_step_hdma(ppu, gb, in_cpu_cycle = HDMA_GRANT_FETCH_HOLD)
     else:
@@ -112,7 +114,17 @@ proc cpu_halt*(cpu: GbCpu; gb: GB) =
       # (gambatte dma/hdma_late_m3halt_m2unhalt_scx2_2).
       if unlikely(gb.ppu.hdma_block_due) and
          gb.ppu.hdma_due_deadline != high(int32):
-        hdma_grant(gb, int32(HDMA_GRANT_FETCH_DOTS))
+        when HDMA_HALT_DEFERS_DUE != 0:
+          # The HALT finds the request pending and parks it for the wake
+          # (HDMA_HALT_REQ_DOTS' "requested" state), with its prefetch.
+          if gb.ppu.hdma_active and (gb.ppu.lcd_status and 3'u8) == 0'u8:
+            gb.ppu.hdma_due_deadline = high(int32)
+            gb.ppu.hdma_due_forced = true
+            gb.ppu.hdma_prefetch_op = int16(gb.memory.read_byte(gb, int(cpu.pc)))
+          else:
+            gb.ppu.hdma_block_due = false
+        else:
+          hdma_grant(gb, int32(HDMA_GRANT_FETCH_DOTS))
     when HDMA_HALT_M0_BLIND != 0:
       # The dot the VRAM DMA's HBlank edge detector stops being clocked on
       # (HDMA_HALT_M0_BLIND in gb.nim).
@@ -214,6 +226,15 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
   clear_interrupt(gb.interrupts, interrupt)
   mem_tick_extra(gb.memory, gb, 20)
 
+when HDMA_EDGE_BEATS_DISPATCH != 0:
+  proc hdma_edge_lookahead(gb: GB) {.noinline.} =
+    ## HDMA_EDGE_BEATS_DISPATCH: mode 3 retiring on this very dot raises the
+    ## HBlank request now, and it takes the bus ahead of the dispatch.
+    if gb.ppu.hdma_active and not gb.ppu.hdma_block_due and
+       gb.fifo_ppu != nil and (gb.ppu.lcd_status and 3'u8) == 3'u8 and
+       fetcher_retired(gb.fifo_ppu) and gb.fifo_ppu.m3_hold == 0:
+      ppu_step_hdma(gb.ppu, gb)
+
 proc handle_interrupts*(cpu: GbCpu; gb: GB) =
   # The running CPU's test: the timer's request reaches it one M-cycle ahead
   # of everyone else's view of IF (TIMER_IRQ_RUN_LEAD in gb.nim; inert at 0).
@@ -235,6 +256,8 @@ proc handle_interrupts*(cpu: GbCpu; gb: GB) =
          gb.ppu.cycle_counter - gb.ppu.stat_if_dot < STAT_DISPATCH_MIN_AGE_DS:
         return
     cpu.halted = false
+    when HDMA_EDGE_BEATS_DISPATCH != 0:
+      if cpu.ime: hdma_edge_lookahead(gb)
     if cpu.ime: dispatch_interrupt(cpu, gb)
 
 # Where inside an M-cycle a HALTED CPU latches the interrupt line. A running
@@ -397,15 +420,10 @@ proc tick*(cpu: GbCpu; gb: GB) =
              " due=", (if gb.ppu.hdma_block_due: 1 else: 0),
              " act=", (if gb.ppu.hdma_active: 1 else: 0),
              " mode=", (gb.ppu.lcd_status and 3'u8)
-      if gb.ppu.hdma_block_due:
-        if gb.ppu.hdma_active and (gb.ppu.lcd_status and 3'u8) == 0'u8 and
-           (HDMA_WAKE_M0_MARGIN == 0 or
-            gb.ppu.cycle_counter +
-              int32(HDMA_WAKE_M0_MARGIN shr int(gb.memory.current_speed)) <
-              gb_line_end(gb.ppu)):
-          ppu_step_hdma(gb.ppu, gb)
-        else:
-          gb.ppu.hdma_block_due = false
+      when HDMA_WAKE_BLIND_DOTS > 0:
+        gb.ppu.hdma_wake_dot = gb.ppu.cycle_counter
+      let prefetched = ppu_hdma_wake(gb.ppu, gb, prefetch = not cpu.ime) and
+        HDMA_HALT_REQ_BUG != 0
       when CGB_HALT_PPU_LEAD_ANY:
         # The dots the head of this halt held back, paid with no bus half: a
         # phase, not a charge.
@@ -414,7 +432,25 @@ proc tick*(cpu: GbCpu; gb: GB) =
                        ignore_speed = true)
           gb.cpu.halt_ppu_debt = 0
       cpu.halted = false
+      when HDMA_EDGE_BEATS_DISPATCH != 0:
+        if cpu.ime:
+          # A block the debt's dots made due also goes ahead of the dispatch.
+          when HDMA_WAKE_DEBT_RECHECK != 0:
+            if gb.ppu.hdma_block_due: ppu_hdma_wake(gb.ppu, gb)
+          hdma_edge_lookahead(gb)
       if cpu.ime: dispatch_interrupt(cpu, gb)
+      elif prefetched and not cpu.ime and gb.ppu.hdma_prefetch_op >= 0:
+        # The HALT found the HBlank request pending and had already fetched
+        # the next opcode without moving PC past it (HDMA_HALT_REQ_BUG): it
+        # runs now, from the prefetch, and PC still points at it.
+        let op = uint8(gb.ppu.hdma_prefetch_op)
+        gb.ppu.hdma_prefetch_op = -1
+        mem_reset_cycle_count(gb.memory)
+        mem_tick_components(gb.memory, gb, 4)
+        cpu.halt_bug = true
+        let cycles_taken = UNPREFIXED[op](cpu, gb)
+        cpu.cached_hl = -1
+        mem_tick_extra(gb.memory, gb, cycles_taken)
     return
   when defined(gbfuzz_trace):
     if gbfuzz_trace_hook != nil:
@@ -438,7 +474,8 @@ proc tick*(cpu: GbCpu; gb: GB) =
     # a block already owed takes the bus ahead of the dispatch (gambatte
     # irq_precedence/hdma_vs_m0, late_hdma_vs_{ei,ie,tima}: the DMA's source
     # is the stack the dispatch pushes onto).
-    if unlikely(gb.ppu.hdma_block_due):
+    if unlikely(gb.ppu.hdma_block_due) and
+       (HDMA_HALT_DEFERS_DUE == 0 or not cpu.halted):
       hdma_grant(gb, int32(HDMA_GRANT_FETCH_DOTS - HDMA_GRANT_BOUNDARY_DOTS))
   when HDMA_STEAL_DELAY_M != 0 and HDMA_STEAL_LEAD_DOTS < 0 and
        HDMA_GRANT_FETCH_DOTS < 0:

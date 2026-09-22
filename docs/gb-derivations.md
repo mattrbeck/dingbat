@@ -298,6 +298,59 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
   only on the M-cycle the halt ends (asking every halted M-cycle measured
   0.3 % of Pokemon Blue).
 
+### A HALT parks a pending HBlank request for the wake; the wake pays it in any mode
+- Claim: the HBlank request is a line the CPU samples at its hand-over
+  points; HALT is not one. A request up when HALT executes (owed and not yet
+  granted, or its mode-0 edge on the HALT's own dot) is held and the block
+  runs at the wake, before any dispatch, whatever mode the PPU is then in. An
+  edge falling while halted is not requested (the frozen detector above);
+  one falling inside a running block is lost when the block acknowledges
+  the request at its end.
+- Evidence: gambatte `dma/hdma_late_m3halt_m2unhalt_scx1_{1,2}` (edge 4
+  dots after the HALT: block at the next HBlank; edge on the HALT's dot:
+  block at the mode-2 wake), `hdma_late_m3halt_m2unhalt_inc_scx2_2`,
+  `hdma_transition_halt_late_unhalt_scx1_{1,2}` (the second line's edge falls
+  inside the woken block and is not paid).
+- Site: `HDMA_HALT_REQ_DOTS`, `HDMA_HALT_DEFERS_DUE`, `HDMA_BLOCK_SWALLOW`,
+  `ppu_hdma_wake` (ppu.nim), the halted branch of `cpu.tick`.
+
+### ... and that HALT has prefetched the next opcode without advancing PC
+- Claim: the HALT that parks a request has fetched the following byte into
+  the opcode latch without incrementing PC. At an IME-off wake that byte runs
+  first and is then fetched again, so it runs twice (the halt-bug shape), and
+  the latch fetch is the block's release M-cycle, not an extra one. It is the
+  byte as it was at the HALT, before the block.
+- Evidence: gambatte `dma/hdma_late_m3halt_m2unhalt_inc_scx1_2` (`HALT; INC A`
+  prints 02), `hdma_transition_7fffhalt_inc_m3unhalt` (HALT at $7FFF, the next
+  byte is the block's destination $8000 and the pre-block byte runs),
+  `hdma_late_m3halt_m2unhalt_ly_scx1_3` (no extra M-cycle: LY read unchanged).
+- Site: `HDMA_HALT_REQ_BUG`.
+
+### The KEY1 switch's stall is that HALT, and STOP's operand is the latch
+- Claim: Pan Docs' STOP chart puts the switch leaf in HALT mode. The HBlank
+  detector freezes across the 2^17-cycle stall as across any halt; a request
+  up at the STOP (for 2 dots, or its edge on the STOP's dot) is found by it.
+  Into double speed the block runs inside the stall and the transfer ends with
+  its length register unchanged (FF55 reads length | $80); into single speed
+  it is paid at the stall's end. Either way the operand byte STOP fetched is
+  in the opcode latch and runs as the first instruction after the stall.
+- Evidence: gambatte `dma/hdma_m0speedchange_late_m3wakeup_scx{1,2}_{1,2}`
+  (an edge in the stall's last dots is not seen), `hdma_late_m3speedchange_
+  hdma5_scx2_{1,2,3}` (00 / 80 / FF), `_read_hdmadst00_*` (the block's byte
+  in VRAM), `_inc_scx1_2` and `hdma_late_speedchange_inc_scx1_ds_2` (the ROMs
+  write `stop, 3c`; A reads 02), `_tima_scx1_ds_{1..4}` (the age bracket).
+- Site: `HDMA_SWITCH_HALTS`, `HDMA_SWITCH_REQ`, `HDMA_SWITCH_REQ_AGE`,
+  `HDMA_STOP_OPERAND_RUNS`, `stop_instr` (memory.nim).
+
+### An HBlank request beats a dispatch that starts on its dot
+- Claim: when the mode-0 edge and an interrupt dispatch fall on the same
+  boundary, the block goes first (its source may be the stack the dispatch
+  pushes onto).
+- Evidence: gambatte `irq_precedence/late_hdma_vs_tima_scx1_{1,2}` (one
+  M-cycle apart: 1234 then 11E9), `hdma_vs_m0_scx1`, `late_hdma_vs_{ei,ie}_
+  scx1_2`, the `_halt` variants at a wake.
+- Site: `HDMA_EDGE_BEATS_DISPATCH`, `HDMA_WAKE_DEBT_RECHECK`.
+
 ### FF55 bit 7 means "no transfer active" on every path into that state
 - Claim: Pan Docs: "This works under any circumstances — after completion of
   General Purpose, or HBlank Transfer, and after manually terminating a HBlank

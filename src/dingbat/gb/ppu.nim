@@ -1499,7 +1499,8 @@ proc ppu_copy_hdma_block*(ppu: GbPpu; gb: GB; in_cpu_cycle = false;
   ppu.hdma5 = ppu.hdma5 - 1
   not dst_overflow
 
-proc ppu_step_hdma*(ppu: GbPpu; gb: GB; in_cpu_cycle = false) =
+proc ppu_step_hdma*(ppu: GbPpu; gb: GB; in_cpu_cycle = false;
+                    charge_overhead = true) =
   # The block copy ticks the PPU, which can drive another mode change; without
   # this guard a nested transition into mode 0 recurses until the stack overflows.
   if ppu.hdma_copying: return
@@ -1508,7 +1509,10 @@ proc ppu_step_hdma*(ppu: GbPpu; gb: GB; in_cpu_cycle = false) =
          " mode=", (ppu.lcd_status and 3'u8), " hdma5=", toHex(ppu.hdma5, 2)
   ppu.hdma_copying   = true
   ppu.hdma_block_due = false
-  let may_continue = ppu_copy_hdma_block(ppu, gb, in_cpu_cycle)
+  let may_continue = ppu_copy_hdma_block(ppu, gb, in_cpu_cycle, charge_overhead)
+  when HDMA_BLOCK_SWALLOW != 0:
+    ppu.hdma_block_due = false
+    ppu.hdma_swallow_end = ppu.cycle_counter + (if charge_overhead: 0'i32 else: 4'i32)
   if ppu.hdma5 == 0xFF or not may_continue: ppu.hdma_active = false
   ppu.hdma_copying = false
 
@@ -1528,6 +1532,51 @@ when STAT_IRQ_SPLIT:
         ppu.stat_if_m0_rise = false
       else:
         ppu_handle_stat_interrupt(ppu, gb)
+
+proc ppu_hdma_switch_req*(ppu: GbPpu; gb: GB) =
+  ## HDMA_SWITCH_REQ: a request the speed switch's HALT found pending.
+  ppu.hdma_block_due = false
+  ppu.hdma_stop_req = true
+  if not ppu.hdma_active: return
+  if gb.memory.current_speed == 1'u8:
+    # Into double speed: the block, with no CPU on the bus to observe its
+    # dots (the stall absorbs them), then the transfer stops.
+    let src_base = int(ppu.hdma_src)
+    let dst_base = 0x8000 or int(ppu.hdma_dst and 0x1FF0'u16)
+    let src_legal = src_base < 0x8000 or (src_base >= 0xA000 and src_base < 0xE000)
+    ppu_flush_hdma_bytes(ppu, gb)
+    for byte in 0 ..< 0x10:
+      let val = if src_legal: gb.memory.read_byte(gb, src_base + byte) else: 0xFF'u8
+      gb.memory.write_byte(gb, dst_base + byte, val)
+    ppu.hdma_src = ppu.hdma_src + 0x10
+    ppu.hdma_dst = ppu.hdma_dst + 0x10
+    ppu.hdma_active = false
+  else:
+    ppu.hdma_block_due = true
+    ppu.hdma_due_forced = true
+    ppu.hdma_due_deadline = high(int32)
+
+proc ppu_hdma_wake*(ppu: GbPpu; gb: GB; prefetch = false): bool {.discardable.} =
+  ## A HALT (or a speed switch's stall) ending: an HBlank block that came due
+  ## while halted transfers the moment the CPU is back on the bus, if it was
+  ## requested before the HALT (HDMA_HALT_REQ_DOTS) or the mode 0 that owed it
+  ## is still running with room left (HDMA_WAKE_M0_MARGIN).
+  if not ppu.hdma_block_due: return
+  let forced = HDMA_HALT_REQ_DOTS >= 0 and ppu.hdma_due_forced
+  ppu.hdma_due_forced = false
+  if ppu.hdma_active and forced:
+    # The prefetched opcode's fetch M-cycle (HDMA_HALT_REQ_BUG) is the block's
+    # release M-cycle: it is not charged twice.
+    ppu_step_hdma(ppu, gb, charge_overhead = not prefetch or HDMA_HALT_REQ_BUG == 0)
+    return true
+  elif ppu.hdma_active and (ppu.lcd_status and 3'u8) == 0'u8 and
+     (HDMA_WAKE_M0_MARGIN == 0 or
+      ppu.cycle_counter +
+        int32(HDMA_WAKE_M0_MARGIN shr int(gb.memory.current_speed)) <
+        gb_line_end(ppu)):
+    ppu_step_hdma(ppu, gb)
+  else:
+    ppu.hdma_block_due = false
 
 proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   let prev_mode = ppu.mode_flag
@@ -1595,6 +1644,7 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   # DUE and cpu.tick pays it at the wake if still in that mode 0 (gambatte
   # dma/hdma_m3halt_m1unhalt_hdma5). `in_cpu_cycle`: the edge lands inside a
   # CPU access still on the bus, so the bytes are held HDMA_VISIBLE_DOTS dots.
+  let hdma_halted = gb.cpu.halted or ppu.hdma_stalled
   when HDMA_HALT_M0_BLIND != 0:
     # The edge detector's registered mode, clocked by the CPU: read before this
     # change updates it, and not updated while halted (HDMA_HALT_M0_BLIND).
@@ -1604,7 +1654,7 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
     let hdma_blind_lag = int32(if gb.memory.current_speed != 0'u8:
                                  HDMA_HALT_BLIND_LAG_DS
                                else: HDMA_HALT_BLIND_LAG)
-    if (not gb.cpu.halted) or hdma_since_halt <= hdma_blind_lag:
+    if (not hdma_halted) or hdma_since_halt <= hdma_blind_lag:
       ppu.hdma_seen_mode = mode
   if mode == 0 and prev_mode != 0 and ppu.hdma_active and ppu.lcd_enabled:
     when HDMA_SPEEDSWITCH_KILL_W != 0:
@@ -1616,20 +1666,47 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
           echo "KILLWIN ly=", ppu.ly, " dot=", ppu.cycle_counter,
                " stopdot=", ppu.hdma_kill_from, " d=", d
         ppu.hdma_kill_from = -1
-        if d >= 0 and d < HDMA_SPEEDSWITCH_KILL_W:
-          ppu.hdma_active    = false
-          ppu.hdma_block_due = false
+        if d >= 0 and d < HDMA_SPEEDSWITCH_KILL_W and
+           (HDMA_SWITCH_REQ_KILL_DS != 0 or gb.memory.current_speed == 1'u8 or
+            HDMA_SWITCH_REQ == 0):
+          when HDMA_SWITCH_REQ != 0:
+            ppu_hdma_switch_req(ppu, gb)
+            return
+          else:
+            ppu.hdma_active    = false
+            ppu.hdma_block_due = false
           return
+    when HDMA_BLOCK_SWALLOW != 0:
+      if ppu.hdma_copying: return
+      if ppu.hdma_swallow_end >= 0:
+        let se = ppu.hdma_swallow_end
+        ppu.hdma_swallow_end = -1
+        if ppu.cycle_counter <= se and ppu.cycle_counter + 8 > se: return
     when HDMA_DISABLE_GRACE_DOTS != 0:
       ppu.hdma_due_dot = ppu.cycle_counter
     when defined(gb_dma_trace):
       echo "M0DUE ly=", ppu.ly, " dot=", ppu.cycle_counter,
-           " halted=", (if gb.cpu.halted: 1 else: 0),
+           " halted=", (if hdma_halted: 1 else: 0),
            " seenwas=", hdma_seen_was
-    if gb.cpu.halted:
+    when HDMA_HALT_M0_BLIND != 0 and HDMA_WAKE_BLIND_DOTS > 0:
+      if not hdma_halted and hdma_seen_was == 0'u8:
+        var since_wake = ppu.cycle_counter - ppu.hdma_wake_dot
+        if since_wake < 0: since_wake += gb_line_end(ppu)
+        if since_wake <= int32(HDMA_WAKE_BLIND_DOTS shr int(gb.memory.current_speed)):
+          return
+    if hdma_halted:
       when HDMA_HALT_M0_BLIND != 0:
         # Halted inside a mode 0 the detector still registers: no edge to see.
         if hdma_seen_was == 0'u8: return
+      when HDMA_HALT_REQ_DOTS >= 0:
+        var since = ppu.cycle_counter - ppu.hdma_halt_dot
+        if since < 0: since += gb_line_end(ppu)
+        ppu.hdma_due_forced = since <= HDMA_HALT_REQ_DOTS and not ppu.hdma_stalled
+        when HDMA_HALT_REQ_BUG != 0:
+          # The HALT's prefetch of the next opcode, before the block can
+          # overwrite it (gambatte dma/hdma_transition_halt_hdmadst_unhalt).
+          if ppu.hdma_due_forced:
+            ppu.hdma_prefetch_op = int16(gb.memory.read_byte(gb, int(gb.cpu.pc)))
       ppu.hdma_block_due = true
       ppu.hdma_due_delay = 0
       when HDMA_GRANT_FETCH_DOTS >= 0:

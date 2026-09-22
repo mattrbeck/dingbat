@@ -993,6 +993,16 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
         when SPEED_SWITCH_STALL_CPU != 0: SPEED_SWITCH_STALL_CPU
         else: SPEED_SWITCH_STALL_T shl mem.current_speed
       var spent = stall_cycles
+      gb.ppu.hdma_stop_req = false
+      when HDMA_SWITCH_REQ != 0:
+        if gb.ppu.hdma_block_due and gb.ppu.hdma_active and
+           (gb.ppu.lcd_status and 3'u8) == 0'u8 and
+           gb.ppu.cycle_counter - gb.ppu.hdma_due_dot >=
+             HDMA_SWITCH_REQ_AGE:
+          ppu_hdma_switch_req(gb.ppu, gb)
+      when HDMA_SWITCH_HALTS != 0:
+        gb.ppu.hdma_stalled = true
+        gb.ppu.hdma_halt_dot = gb.ppu.cycle_counter
       when SPEED_SWITCH_STALL_RUNS_CPU_CLOCK != 0:
         # The divider runs, so the DIV-APU event needs no lifting.
         when SPEED_SWITCH_STALL_ENDS_ON_IRQ != 0:
@@ -1005,6 +1015,15 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
         gb.scheduler.clear(etAPUFrameSeq)
         mem_tick_stalled(mem, gb, stall_cycles)
         gb.scheduler.schedule(apu_div_phase(gb.timer, gb), etAPUFrameSeq)
+      when HDMA_SWITCH_HALTS != 0:
+        gb.ppu.hdma_stalled = false
+        ppu_hdma_wake(gb.ppu, gb,
+                      prefetch = HDMA_STOP_OPERAND_RUNS != 0 and gb.ppu.hdma_stop_req)
+        gb.ppu.hdma_seen_mode = gb.ppu.lcd_status and 3'u8
+        gb.ppu.hdma_wake_dot = gb.ppu.cycle_counter - 1000
+      when HDMA_STOP_OPERAND_RUNS != 0:
+        # STOP had fetched its operand as the next opcode (HDMA_SWITCH_REQ).
+        if gb.ppu.hdma_stop_req: result = false
       # Charge the stall to the instruction so mem_tick_extra does not repeat it.
       mem.cycle_tick_count += spent
     return

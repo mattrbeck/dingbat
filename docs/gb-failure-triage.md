@@ -604,49 +604,61 @@ pixels to 1.
 
 ### D1. HBlank DMA blocks owed across a halt or a speed switch
 
-**Rows (46).** `dma` 39: `hdma_late_m3halt_m2unhalt_*`,
-`hdma_m0halt_late_m3unhalt_scx1_2`, `hdma_transition_{ei_,}halt_*`,
-`hdma_transition_halt_m0unhalt_*`, `hdma_late_m0unhalt_{2,ds_2}` (halt);
-`hdma_late_m3speedchange_*`, `hdma_m0speedchange_late_m3wakeup_*`,
-`hdma_transition_speedchange_*`, `hdma_late_speedchange_inc_*` (speed
-switch); `hdma_pc_7ffe`, `late_gdma_pc_7ffe_1` (a transfer while the CPU
-fetches at the top of ROM); `hdma_late_enable_{ds_lcdoffset1,lcdoffset3}_2`,
-`hdma_disable_display_1`. `irq_precedence/hdma_vs_m0_scx1`,
-`hdma_vs_m0_scx2_halt`, `late_hdma_vs_{ei,ie}_scx1_2`,
-`late_hdma_vs_tima_scx{1,2}{,_halt}_1` (7): a block and an interrupt
-dispatch contending for the same instant. `hdma_vs_m0_scx{1,2}` trade
-places with the boot phase (`CGB_BOOT_PHASE` 161 -> 165 took scx2 and lost
-scx1, 2026-09-22): the ROM's LY poll leaves the hand-off phase modulo the
-loop length, so the pair is a 1-dot ruler on the contention, not on the
-boot.
+**Rows (7).** `dma/hdma_transition_ei_halt_late_unhalt_ldaaimm_hdma_scx1_1`
+(IME-on wake of a "requested" block), `hdma_transition_speedchange_7fffstop_inc`
+(STOP at $7FFF, its operand byte in VRAM), `hdma_pc_7ffe`, `late_gdma_pc_7ffe_1`
+(a transfer while the CPU fetches across $7FFF/$8000),
+`hdma_late_enable_{ds_lcdoffset1,lcdoffset3}_2` (the lcdoffset grid, A1/E1),
+`hdma_disable_display_1`. 32 rows of this bucket and 7 of
+`irq_precedence/hdma_vs_*` closed 2026-09-22 (below).
 
 **Behaviour.** An HBlank DMA copies one 16-byte block per mode-0 edge while
 the CPU is off the bus (Pan Docs, "LCD VRAM DMA Transfers"). The CPU hands
-the bus over at three points — its opcode fetch, an instruction boundary,
-and halt entry — never on an operand M-cycle (`HDMA_GRANT_FETCH_DOTS`,
-`HDMA_GRANT_BOUNDARY_DOTS = 3`; gambatte `dma/hdma_start*` and mealybug
-`dma/hdma_timing-C` parameterised by the fetch). A halted CPU's edge
-detector holds a CPU-clocked copy of the mode, so a mode-0 edge under a
-halt is invisible until the CPU runs again (`HDMA_HALT_M0_BLIND = 1`,
-`HDMA_HALT_BLIND_LAG = 2`; `hdma_m3halt_m0unhalt*` vs `hdma_late_m0halt_*`).
-A block takes the bus ahead of an interrupt dispatch (`irq_precedence/
-hdma_vs_*`, the dispatch's stack push being the DMA's source). Its bytes
-land 4 dots after the block (`HDMA_VISIBLE_DOTS`; `hdma_start_ds_1` and
-`hdma_start_scx5_2` separate dots from M-cycles).
+the bus over at its opcode fetch or an instruction boundary — never on an
+operand M-cycle (`HDMA_GRANT_FETCH_DOTS`, `HDMA_GRANT_BOUNDARY_DOTS = 3`;
+gambatte `dma/hdma_start*` and mealybug `dma/hdma_timing-C` parameterised by
+the fetch). A halted CPU's edge detector holds a CPU-clocked copy of the
+mode, so a mode-0 edge under a halt is invisible until the CPU runs again
+(`HDMA_HALT_M0_BLIND = 1`, `HDMA_HALT_BLIND_LAG = 2`). The HALT itself is a
+request state, not a hand-over point:
 
-**Modelled.** All of the above, plus `HDMA_BLOCK_OVERHEAD_BUS = 4`,
-`HDMA_WAKE_M0_MARGIN = 8` (fitted: `hdma_late_m0unhalt_{1,2}` wake with 7
-and 11 dots of mode 0 left and want no block and a block — neither is room
-for a block, so the real rule splits that pair some other way),
-`HDMA_SPEEDSWITCH_KILL_W`, `SPEED_SWITCH_FREEZES_OAM_DMA`,
-`VDMA_OAM_BUS_CAPTURE`.
+* A request up when the HALT executes (owed and not granted, or its edge on
+  the HALT's own dot) is parked and paid at the wake whatever the mode then
+  is (`HDMA_HALT_DEFERS_DUE`, `HDMA_HALT_REQ_DOTS = 0`). That HALT has already
+  fetched the next opcode without moving PC past it: with IME off the wake
+  runs the prefetched byte, then fetches it again (`HDMA_HALT_REQ_BUG`; the
+  `inc` rows count it, the `7fffhalt` row proves the byte was read before
+  the block rewrote it), and the block's release M-cycle is that fetch.
+* An edge that falls inside a running block is lost — the block
+  acknowledges the request as it ends (`HDMA_BLOCK_SWALLOW`).
+* A wake from a halt entered in mode 0 is blind for its own M-cycle
+  (`HDMA_WAKE_BLIND_DOTS = 4`); a wake in mode 0 takes the block only if the
+  request window, which closes a few dots before the line end, is still open
+  (`HDMA_WAKE_M0_MARGIN = 4`).
+* The KEY1 switch's stall is the same HALT (`HDMA_SWITCH_HALTS`): a request
+  it finds pending (up for `HDMA_SWITCH_REQ_AGE = 2` dots, or its edge on the
+  STOP's dot, `HDMA_SPEEDSWITCH_KILL_W`) runs its block inside the stall and
+  ends the transfer with the length unchanged when switching to double speed,
+  and is paid at the stall's end when switching to single (`HDMA_SWITCH_REQ`);
+  either way STOP's operand byte, already in the opcode latch, runs as the
+  first opcode after the stall (`HDMA_STOP_OPERAND_RUNS`; the ROMs write
+  `stop, 3c`).
+* A block whose request rises on the dot an interrupt dispatch would begin
+  takes the bus first (`HDMA_EDGE_BEATS_DISPATCH`, `HDMA_WAKE_DEBT_RECHECK`;
+  `irq_precedence/hdma_vs_*`, the dispatch's stack push being the DMA's
+  source).
 
-**To close.** The halt rows want one statement of which owed block a wake
-delivers and when; the speed-switch rows the same across the 2^17-cycle
-stall (E1) — today `_1` members pass and `_2`/`_3` members fail, i.e. the
-block already owed at the STOP is delivered but its phase is wrong. Trace
-with `-d:gb_dma_trace` (FF55 writes, HDMABLOCK, MODE, REGREAD per dot) and
-`-d:gb_halt_trace`.
+Its bytes land 4 dots after the block (`HDMA_VISIBLE_DOTS`;
+`hdma_start_ds_1` and `hdma_start_scx5_2` separate dots from M-cycles).
+Every one of these knobs is bracketed two-sided or has its one-sided bracket
+at the declaration in `gb.nim`.
+
+**To close.** The IME-on requested wake (`ei_halt_..._1`): the dispatch
+pushes the PC after the HALT and 12 dots later than dingbat's; `7fffstop`
+wants the stall's prefetched operand read from VRAM before the block, as
+`7fffhalt` does; the `pc_7ffe` pair is the CPU's fetch from locked VRAM
+during a transfer. How the rules were read: the gambatte oracle trace in
+`tools/gbppu/README.md` ("Side-by-side event traces").
 
 ### D2. OAM DMA against the mode-2 scan and the CPU
 

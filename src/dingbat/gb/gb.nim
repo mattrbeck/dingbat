@@ -307,14 +307,16 @@ const GB_POWERUP_WRAM_PATTERN* {.intdefine.} = 1
   ## which read uninitialised $DE00-$DFFF through the echo; zeroing those two
   ## pages to buy them back would fit the capture rig, not hardware.
 const HDMA_SPEEDSWITCH_KILL_W* {.intdefine.} = 1
-  ## Dots before the mode 3 -> 0 edge within which a CGB speed switch destroys
-  ## an armed HBlank VRAM DMA outright (0 = off). An ordinary HALT only defers
-  ## the block (Pan Docs FF55; gambatte `hdma_m3halt_m1unhalt_hdma5`); this is
-  ## the race where the block comes due on the dot the clock changes. 1 ships:
-  ## `-d:gb_dma_trace` puts STOP and the edge on the same dot in every gambatte
+  ## Dots from a CGB speed switch's STOP within which the mode 3 -> 0 edge
+  ## counts as a request the switch's HALT found pending (0 = off); what that
+  ## does is HDMA_SWITCH_REQ (into double speed the block runs in the stall and
+  ## the transfer ends). An ordinary HALT only defers the block (Pan Docs FF55;
+  ## gambatte `hdma_m3halt_m1unhalt_hdma5`). 1 ships: `-d:gb_dma_trace` puts
+  ## STOP and the edge on the same dot in every gambatte
   ## `transition_speedchange_hdmalen*` / `late_m3speedchange_hdma5_*_2` row
   ## that wants the transfer gone, and `late_m3speedchange_hdma5_scx2_1`, one
-  ## dot away, wants it kept, so the window is a strict `d < W`.
+  ## dot away, wants it kept, so the window is a strict `d < W` (0 loses 11,
+  ## 2 loses 2).
 const HDMA_DISABLE_GRACE_DOTS* {.intdefine.} = 4
   ## Dots after the mode 3 -> 0 edge at which an owed HBlank block has
   ## committed, i.e. after which an FF55 write with bit 7 clear can no longer
@@ -349,6 +351,15 @@ const HDMA_GRANT_BOUNDARY_DOTS* {.intdefine.} = 3
   ## <= 3 by gambatte `irq_precedence/late_hdma_vs_{ei,ie}_scx2_2` and
   ## `late_hdma_vs_tima_scx2_1`. 2 and 3 are row-for-row identical; the dot
   ## between the two thresholds is real and unexplained.
+const HDMA_EDGE_BEATS_DISPATCH* {.intdefine.} = 1
+  ## An HBlank request raised on the very dot an interrupt dispatch would
+  ## begin takes the bus first. The PPU retires mode 3 inside the NEXT tick,
+  ## so at a boundary where the fetcher has retired on the current dot the
+  ## edge has not fired yet; the DMA is decided ahead of the dispatch anyway
+  ## (gambatte `irq_precedence/hdma_vs_m0_scx1`, `late_hdma_vs_{ei,ie}_scx1_2`,
+  ## `late_hdma_vs_tima_scx1_1` running, and with HDMA_WAKE_DEBT_RECHECK the
+  ## `_halt` rows woken). Only on the dispatch path, so it costs nothing per
+  ## instruction. 0 = off (loses those rows, wins none).
 const HDMA_GRANT_FETCH_HOLD* {.booldefine.} = false
   ## Whether a block granted at a hand-over point still holds its bytes back
   ## HDMA_VISIBLE_DOTS (`in_cpu_cycle`). It does not: the grant is between two
@@ -409,12 +420,91 @@ const HDMA_HALT_BLIND_LAG* {.intdefine.} = 2
 const HDMA_HALT_BLIND_LAG_DS* {.intdefine.} = 0
   ## The same lag in double speed, separately bracketed: gambatte
   ## `hdma_late_m0halt_ds_1` refuses any nonzero value.
-const HDMA_WAKE_M0_MARGIN* {.intdefine.} = 8
+const HDMA_HALT_REQ_DOTS* {.intdefine.} = 0
+  ## A mode-0 edge up to this many dots after the CPU halted is a request
+  ## raised before the HALT (the edge is processed in the tick after the dot
+  ## it is on), and a request the HALT finds pending is "requested": paid at
+  ## the wake whatever the mode then is, even in mode 2 or 3. -1 = off. 0 is
+  ## two-sided: off loses gambatte `dma/hdma_late_m3halt_m2unhalt_scx1_2` and
+  ## `hdma_transition_{,ei_}halt_late_unhalt_*_2`, 1 loses
+  ## `hdma_late_m3halt_m2unhalt_scx2_1` (edge one dot after the HALT).
+const HDMA_HALT_DEFERS_DUE* {.intdefine.} = 1
+  ## The same state for a block already owed, not yet granted, when the HALT
+  ## executes: the HALT is not a hand-over point, it parks the request for the
+  ## wake (and the boundary after the HALT does not grant it either). gambatte
+  ## `dma/hdma_late_m3halt_m2unhalt_inc_scx2_2` and `_ly_scx2_4`; 0 = the old
+  ## grant at the HALT's fetch.
+const HDMA_HALT_REQ_BUG* {.intdefine.} = 1
+  ## A HALT that leaves a request "requested" has already fetched the next
+  ## opcode without moving PC past it. With IME off the wake runs that
+  ## prefetched byte (read before the block could overwrite it) and PC still
+  ## points at it, so it runs twice, as in the halt bug; the block's release
+  ## M-cycle is that fetch, not charged twice. gambatte
+  ## `dma/hdma_late_m3halt_m2unhalt_inc_scx1_2` (`inc a` twice),
+  ## `hdma_transition_7fffhalt_inc_m3unhalt` (the byte at $8000 read before the
+  ## block rewrote it), `hdma_transition_halt_{late_unhalt,m0unhalt}_ldaaimm_*`.
+  ## With IME on the wake's dispatch pushes the PC after the HALT and nothing
+  ## is refunded (the refund there loses `hdma_late_ei_m3halt_m2unhalt_*`).
+const HDMA_BLOCK_SWALLOW* {.intdefine.} = 1
+  ## A mode-0 edge that falls while an HBlank block is running is lost: the
+  ## block acknowledges the request line as it ends. Only a block taken at a
+  ## wake can run into the next line's edge; with the refunded M-cycle above
+  ## the window reaches 4 dots past the block's last. 0 loses gambatte
+  ## `dma/hdma_transition_halt_late_unhalt_scx1_1`.
+const HDMA_SWITCH_HALTS* {.intdefine.} = 1
+  ## The speed switch's stall is a HALT to the HBlank DMA's edge detector
+  ## (Pan Docs' STOP chart: the switch leaf is HALT mode): it freezes across
+  ## the stall and the stall's end is a wake, without HDMA_WAKE_BLIND_DOTS
+  ## (the interrupt wake's own M-cycle). 0 loses gambatte
+  ## `dma/hdma_m0speedchange_late_m3wakeup_scx{1,2}_2`, whose mode-0 edge
+  ## falls in the stall's last dots after a switch made inside mode 0.
+const HDMA_SWITCH_REQ* {.intdefine.} = 1
+  ## An HBlank request pending when a speed switch halts the CPU (owed and not
+  ## yet granted at the STOP, or its edge on the STOP's dot): switching to
+  ## double speed, the block runs inside the stall and the transfer ends with
+  ## its length unchanged (FF55 reads length | $80); switching to single, the
+  ## request waits for the stall's end and is paid there whatever the mode,
+  ## with HDMA_HALT_REQ_BUG's refund. 0 = the old HDMA_SPEEDSWITCH_KILL_W drop
+  ## (no block), which leaves gambatte `dma/hdma_late_m3speedchange_*` and
+  ## `hdma_transition_speedchange_*` ten rows short.
+const HDMA_SWITCH_REQ_AGE* {.intdefine.} = 2
+  ## Dots a pending request must have been up at the STOP for the switch's
+  ## HALT to find it (HDMA_SWITCH_REQ). From double speed it is two-sided:
+  ## gambatte `dma/hdma_late_m3speedchange_*_scx2_ds_1` refuse 1 and the
+  ## `_scx1_ds_2`/`tima_scx1_ds_{3,4}` rows refuse 3. From single speed 0..3
+  ## score alike and 4 loses `late_m3speedchange_{hdma5,read_hdmadst00}_scx2_2`.
+const HDMA_SWITCH_REQ_KILL_DS* {.intdefine.} = 0
+  ## Whether the HDMA_SPEEDSWITCH_KILL_W edge (the mode-0 edge on the STOP's
+  ## dot) is a pending request on a switch INTO single speed too. 0: only into
+  ## double; 1 loses `late_m3speedchange_read_hdmadst00_scx1_ds_1` and
+  ## `tima_scx1_ds_{1,2}`, whose edge on that dot comes after the STOP.
+const HDMA_STOP_OPERAND_RUNS* {.intdefine.} = 1
+  ## STOP fetches its operand byte into the opcode latch; when the switch's
+  ## HALT finds an HBlank request pending that latch is live, and the operand
+  ## runs as the first opcode after the stall (a two-byte STOP becomes a
+  ## one-byte one). gambatte `dma/hdma_late_m3speedchange_inc_scx1_2` and
+  ## `hdma_late_speedchange_inc_scx1_ds_2` (`stop, 3c` = INC A), `_ly_scx1_4`,
+  ## `hdma_transition_speedchange_{ldaaimm_scx1,ldaaimm_scx1_ds,oamdma}`.
+  ## 0 loses those six and wins none.
+const HDMA_WAKE_BLIND_DOTS* {.intdefine.} = 4
+  ## Dots after an interrupt wake from HALT (measured before the CGB halt's
+  ## PPU debt is paid) for which the HBlank edge detector is still frozen
+  ## (halved in double speed; 0 = none): the wake's own M-cycle. A CPU that
+  ## halted inside mode 0 and wakes this close before the next mode-0 edge
+  ## misses it. gambatte `dma/hdma_m0halt_late_m3unhalt_scx1_2` (edge 4 dots
+  ## after the wake) wants 4..7, `_1` (8 dots) refuses 8, 3 misses `_2`.
+const HDMA_WAKE_DEBT_RECHECK* {.intdefine.} = 1
+  ## At a wake that dispatches, a block the CGB halt's debt dots made due
+  ## (the edge fell in them) is taken before the dispatch, like
+  ## HDMA_EDGE_BEATS_DISPATCH. gambatte `irq_precedence/hdma_vs_m0_scx2_halt`,
+  ## `late_hdma_vs_tima_scx2_halt_1`; 0 loses them.
+const HDMA_WAKE_M0_MARGIN* {.intdefine.} = 4
   ## Normal-speed dots of the owing mode 0 that must remain at the wake for the
-  ## block to be taken there (halved in double speed; 0 = any). Fitted, not
-  ## derived: gambatte `dma/hdma_late_m0unhalt_{1,2}` wake with 7 and 11 dots
-  ## of mode 0 left and want no block and a block. Neither is room for a
-  ## 36-dot block, so the real rule is something else that splits this pair.
+  ## block to be taken there (halved in double speed; 0 = any): the HBlank
+  ## request window closes a few dots before the line ends, and a wake past
+  ## that close finds no request. gambatte `dma/hdma_late_m0unhalt_{1,2}` and
+  ## `_ds_{1,2}` bracket it: 3..5 take all four, 2 loses `_1`, 6 loses `_ds_2`
+  ## (refused 0, 1, 2, 6, 8 -- 8 was the old fit, which left both `_2` red).
 const HDMA_OVERHEAD_LEADS* {.intdefine.} =
   (if HDMA_GRANT_FETCH_DOTS >= 0: 0 else: 1)
   ## Charge HDMA_BLOCK_OVERHEAD_BUS before the transfer's bytes rather than
@@ -1532,6 +1622,21 @@ type
     # ...and the PPU dot the CPU halted on, so the freeze can carry
     # HDMA_HALT_BLIND_LAG dots past it. Scratch, like hdma_block_due.
     hdma_halt_dot*: int32
+    # HDMA_HALT_REQ_DOTS: the owed block was requested before the HALT and is
+    # paid at the wake whatever the mode. Scratch, like hdma_block_due.
+    hdma_due_forced*: bool
+    # HDMA_WAKE_BLIND_DOTS: the dot the CPU last woke from a HALT on. Scratch.
+    hdma_wake_dot*: int32
+    # HDMA_SWITCH_HALTS: inside a speed switch's stall. Scratch.
+    hdma_stalled*: bool
+    # HDMA_BLOCK_SWALLOW: the dot a block's swallow window ends on, or -1.
+    # Scratch.
+    hdma_swallow_end*: int32
+    # HDMA_HALT_REQ_BUG: the opcode the HALT prefetched, or -1. Scratch.
+    hdma_prefetch_op*: int16
+    # HDMA_SWITCH_REQ: the speed switch's HALT found an HBlank request
+    # pending, so STOP's operand byte is left to run as an opcode. Scratch.
+    hdma_stop_req*: bool
     # CPU instruction boundaries still owed before a due HBlank DMA block may
     # take the bus. See HDMA_STEAL_DELAY_M.
     hdma_due_delay*: int8

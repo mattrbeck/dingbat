@@ -256,6 +256,22 @@ dumps the same WRAM range from a second emulator for any model (`dmg mgb sgb sgb
 cgba cgbb cgbc cgbd cgbe agb`); sweep the oracle over revisions, since sweeping dingbat's
 can only find a mismatch it already models.
 
+## Side-by-side event traces
+
+For a row whose mechanism is an event ORDER (a DMA block against a HALT wake, a
+dispatch or a speed switch), put dingbat's events beside a reference's for the same
+ROM. dingbat: `-d:gb_io_trace -d:gb_dma_trace -d:gb_irq_trace` prints every I/O
+read/write (`IOR`/`IOW`), `HALT`, `WAKE`, `M0DUE`, `HDMABLOCK`, `IRQ` with the line
+and dot. The reference: gambatte-core's `test/testrunner` built from its own tree with
+a local, uncommitted stderr print in `Memory` (FF reads and writes, `dma()` start and
+end, `halt()`, the unhalt and interrupt-wake events, `stop()`, the dispatch), each
+with `ly` and the line cycle from its `LyCounter`. Read it for facts only; it is GPL
+and nothing of it enters this tree. Offsets: a dingbat write dot is gambatte's line
+cycle + 1 at single speed (+3 at double); a dingbat read is logged at its M-cycle end,
+gambatte's at its start. A gambatte event at line cycle T is taken by a boundary at
+T, dingbat's edge at dot d by the tick after d. Every HBlank-DMA rule of 2026-09-22
+(docs/gb-failure-triage.md D1) was read this way.
+
 ## Other
 
     python3 tools/gbppu/sm83dis.py <rom> [start_hex] [len_hex]   # enough SM83 to read a test ROM's body

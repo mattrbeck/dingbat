@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-22 09:40:54*
+*Generated: 2026-09-22 12:48:05*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4958/5216 passed.**
+**4997/5216 passed.**
 
 ## bgen
 
@@ -38,50 +38,18 @@ All 14 tests passed.
 
 All 8 tests passed.
 
-## dma (190/229 passed)
+## dma (222/229 passed)
 
-190/229 tests passed, 39 failed:
+222/229 tests passed, 7 failed:
 
 | Test | Result |
 |------|--------|
 | dma/hdma_disable_display_1_cgb04c_out1 [cgb] | got 0, expected 1 |
 | dma/hdma_late_enable_ds_lcdoffset1_2_cgb04c_out0 [cgb] | got 1, expected 0 |
 | dma/hdma_late_enable_lcdoffset3_2_cgb04c_out0 [cgb] | got 1, expected 0 |
-| dma/hdma_late_m0unhalt_2_cgb04c_outFF [cgb] | got 00, expected FF |
-| dma/hdma_late_m0unhalt_ds_2_cgb04c_outFF [cgb] | got 00, expected FF |
-| dma/hdma_late_m3halt_m2unhalt_inc_scx1_2_cgb04c_out02 [cgb] | got 01, expected 02 |
-| dma/hdma_late_m3halt_m2unhalt_inc_scx2_2_cgb04c_out02 [cgb] | got 01, expected 02 |
-| dma/hdma_late_m3halt_m2unhalt_ly_scx2_4_cgb04c_out03 [cgb] | got 02, expected 03 |
-| dma/hdma_late_m3halt_m2unhalt_scx1_2_cgb04c_outFF [cgb] | got 00, expected FF |
-| dma/hdma_late_m3speedchange_hdma5_scx1_ds_1_cgb04c_out00 [cgb] | got 80, expected 00 |
-| dma/hdma_late_m3speedchange_hdma5_scx1_ds_2_cgb04c_outFF [cgb] | got 00, expected FF |
-| dma/hdma_late_m3speedchange_hdma5_scx2_2_cgb04c_out80 [cgb] | got 00, expected 80 |
-| dma/hdma_late_m3speedchange_hdma5_scx2_ds_2_cgb04c_outFF [cgb] | got 00, expected FF |
-| dma/hdma_late_m3speedchange_inc_scx1_2_cgb04c_out02 [cgb] | got 01, expected 02 |
-| dma/hdma_late_m3speedchange_ly_scx1_4_cgb04c_out93 [cgb] | got 92, expected 93 |
-| dma/hdma_late_m3speedchange_read_hdmadst00_scx1_2_cgb04c_out9F [cgb] | got 00, expected 9F |
-| dma/hdma_late_m3speedchange_read_hdmadst00_scx1_ds_2_cgb04c_out9F [cgb] | got 00, expected 9F |
-| dma/hdma_late_m3speedchange_read_hdmadst00_scx2_2_cgb04c_out9F [cgb] | got 00, expected 9F |
-| dma/hdma_late_m3speedchange_read_hdmadst00_scx2_ds_2_cgb04c_out9F [cgb] | got 00, expected 9F |
-| dma/hdma_late_m3speedchange_tima_scx1_ds_3_cgb04c_outF6 [cgb] | got F4, expected F6 |
-| dma/hdma_late_m3speedchange_tima_scx1_ds_4_cgb04c_outF7 [cgb] | got F4, expected F7 |
-| dma/hdma_late_speedchange_inc_scx1_ds_2_cgb04c_out02 [cgb] | got 01, expected 02 |
-| dma/hdma_m0halt_late_m3unhalt_scx1_2_cgb04c_out00 [cgb] | got FF, expected 00 |
-| dma/hdma_m0speedchange_late_m3wakeup_scx1_2_cgb04c_out00 [cgb] | got FF, expected 00 |
-| dma/hdma_m0speedchange_late_m3wakeup_scx2_2_cgb04c_out00 [cgb] | got FF, expected 00 |
 | dma/hdma_pc_7ffe_cgb04c_out02 [cgb] | got 80, expected 02 |
-| dma/hdma_transition_7fffhalt_inc_m3unhalt_cgb04c_out01 [cgb] | got 00, expected 01 |
 | dma/hdma_transition_ei_halt_late_unhalt_ldaaimm_hdma_scx1_1_cgb04c_out00 [cgb] | got 01, expected 00 |
-| dma/hdma_transition_ei_halt_late_unhalt_ldaaimm_hdma_scx1_2_cgb04c_out02 [cgb] | got 01, expected 02 |
-| dma/hdma_transition_ei_halt_late_unhalt_scx1_2_cgb04c_outFF [cgb] | got 00, expected FF |
-| dma/hdma_transition_halt_late_unhalt_ldaaimm_hdma_scx1_1_cgb04c_out00 [cgb] | got 01, expected 00 |
-| dma/hdma_transition_halt_late_unhalt_ldaaimm_hdma_scx1_2_cgb04c_out02 [cgb] | got FF, expected 02 |
-| dma/hdma_transition_halt_late_unhalt_scx1_2_cgb04c_outFF [cgb] | got 00, expected FF |
-| dma/hdma_transition_halt_m0unhalt_ldaaimm_scx1_cgb04c_out02 [cgb] | got 01, expected 02 |
 | dma/hdma_transition_speedchange_7fffstop_inc_cgb04c_out02 [cgb] | got 01, expected 02 |
-| dma/hdma_transition_speedchange_ldaaimm_scx1_cgb04c_outFF [cgb] | got 31, expected FF |
-| dma/hdma_transition_speedchange_ldaaimm_scx1_ds_cgb04c_out03 [cgb] | got 31, expected 03 |
-| dma/hdma_transition_speedchange_oamdma_cgb04c_out71 [cgb] | got 72, expected 71 |
 | dma/late_gdma_pc_7ffe_1_cgb04c_out02 [cgb] | got 00, expected 02 |
 
 ## dmgpalette_during_m3 (9/17 passed)
@@ -137,19 +105,12 @@ All 8 tests passed.
 | halt/late_m0irq_halt_m0stat_scx3_2b_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | halt/noime_m2irq_m0stat_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 
-## irq_precedence (49/64 passed)
+## irq_precedence (56/64 passed)
 
-49/64 tests passed, 15 failed:
+56/64 tests passed, 8 failed:
 
 | Test | Result |
 |------|--------|
-| irq_precedence/hdma_vs_m0_scx1_cgb04c_out1234 [cgb] | got 0183, expected 1234 |
-| irq_precedence/hdma_vs_m0_scx2_halt_cgb04c_out1234 [cgb] | got 0184, expected 1234 |
-| irq_precedence/late_hdma_vs_ei_scx1_2_cgb04c_out1234 [cgb] | got 102F, expected 1234 |
-| irq_precedence/late_hdma_vs_ie_scx1_2_cgb04c_out1234 [cgb] | got 102F, expected 1234 |
-| irq_precedence/late_hdma_vs_tima_scx1_1_cgb04c_out1234 [cgb] | got 11E9, expected 1234 |
-| irq_precedence/late_hdma_vs_tima_scx1_halt_1_cgb04c_out1234 [cgb] | got 11C9, expected 1234 |
-| irq_precedence/late_hdma_vs_tima_scx2_halt_1_cgb04c_out1234 [cgb] | got 11C9, expected 1234 |
 | irq_precedence/late_m0irq_vs_tima_scx2_1_dmg08_cgb04c_out4 [dmg] | got 2, expected 4 |
 | irq_precedence/late_m0irq_vs_tima_scx2_1_dmg08_cgb04c_out4 [cgb] | got 2, expected 4 |
 | irq_precedence/late_m0irq_vs_tima_scx2_halt_1_dmg08_cgb04c_out4 [dmg] | got 2, expected 4 |
