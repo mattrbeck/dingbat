@@ -1980,7 +1980,7 @@ when STAT_IRQ_SPLIT:
       # with the comparator (STAT_M1_LEAD, VBLANK_IRQ_LEAD).
       when VBLANK_IRQ_LEAD != 0:
         gb.interrupts.vblank_interrupt = true
-        ppu.vbl_early = true
+        gb.vbl_early = true
       when STAT_M1_LEAD != 0:
         # A STAT write still in flight that turns the mode-1 enable off is
         # already the enable this rise sees.
@@ -1989,7 +1989,7 @@ when STAT_IRQ_SPLIT:
           # The match on line 143 lets go before the mode-1 source rises: the
           # edge detector sees the two in that order.
           ppu_handle_stat_interrupt(ppu, gb)
-          ppu.m1_early = true
+          gb.m1_early = true
     ppu_handle_stat_interrupt(ppu, gb)
 
   proc fifo_irq_line_advance(ppu: GbFifoPpu; gb: GB) =
@@ -2290,10 +2290,10 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           if int(ppu.ly) == GB_HEIGHT:
             when LY_BLIND_SCOPE >= 2: ly_advance_vblank_entry(ppu, gb)
             else:                     ppu.`mode_flag=`(1'u8, gb)
-            when STAT_M1_LEAD != 0: ppu.m1_early = false
+            when STAT_M1_LEAD != 0: gb.m1_early = false
             when VBLANK_IRQ_LEAD != 0:
-              if not ppu.vbl_early: gb.interrupts.vblank_interrupt = true
-              ppu.vbl_early = false
+              if not gb.vbl_early: gb.interrupts.vblank_interrupt = true
+              gb.vbl_early = false
             else:
               gb.interrupts.vblank_interrupt = true
             when defined(gb_phase_trace):
@@ -2326,10 +2326,11 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           # As STAT_M1_LEAD: a STAT write in flight that clears the enable is
           # the enable this rise sees.
           if ppu.ly == 0'u8 and lyc_lead_dots(gb) != 0 and
-             ppu.cycle_counter == 456 - lyc_lead_dots(gb) and
-             not (gb.memory.deferred_reg == 0xFF41'u16 and
-                  (gb.memory.deferred_val and 0x20'u8) == 0'u8):
-            ppu_handle_stat_interrupt(ppu, gb)
+             ppu.cycle_counter == 456 - lyc_lead_dots(gb):
+            gb.m2_ly0_up = true
+            if not (gb.memory.deferred_reg == 0xFF41'u16 and
+                    (gb.memory.deferred_val and 0x20'u8) == 0'u8):
+              ppu_handle_stat_interrupt(ppu, gb)
         elif STAT_M2_EARLY:
           if m2_lead_active(gb) and ppu.cycle_counter == ppu.m2_early_dot(gb):
             fifo_m2_early_edge(ppu, gb)
@@ -2354,6 +2355,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             else:
               ppu_handle_stat_interrupt(ppu, gb)
             ppu.`mode_flag=`(2'u8, gb)
+            when STAT_M2_LY0_LEAD != 0: gb.m2_ly0_up = false
           else:
             ppu.ly += 1
             ppu.read_mode = ppu.read_mode or LY_JUST_CHANGED

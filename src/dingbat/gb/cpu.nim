@@ -125,7 +125,7 @@ proc cpu_halt*(cpu: GbCpu; gb: GB) =
     cpu.halted   = false
   else:
     cpu.halted = true
-    when DMG_HALT_MIN_MCYCLES > 1: cpu.halt_mcycles = 0
+    when DMG_HALT_MIN_MCYCLES > 1: gb.halt_start = gb.scheduler.cycles
     when HDMA_GRANT_FETCH_DOTS >= 0:
       # The third hand-over point, the HALT: charged at the HALT's fetch rather
       # than per halted M-cycle (at most 4 dots apart, row-for-row identical,
@@ -139,8 +139,8 @@ proc cpu_halt*(cpu: GbCpu; gb: GB) =
           # (HDMA_HALT_REQ_DOTS' "requested" state), with its prefetch.
           if gb.ppu.hdma_active and (gb.ppu.lcd_status and 3'u8) == 0'u8:
             gb.ppu.hdma_due_deadline = high(int32)
-            gb.ppu.hdma_due_forced = true
-            gb.ppu.hdma_prefetch_op = int16(gb.memory.read_byte(gb, int(cpu.pc)))
+            gb.hdma_due_forced = true
+            gb.hdma_prefetch_op = int16(gb.memory.read_byte(gb, int(cpu.pc)))
           else:
             gb.ppu.hdma_block_due = false
         else:
@@ -197,6 +197,15 @@ const IRQ_SAMPLE_T* {.intdefine.} = 18
   ## reach the dispatch one M-cycle later, relative to the instant IF rises,
   ## than the mode-2 source does. Settling the per-source rise phases (A3) is
   ## what moves them, not this constant.
+when HDMA_EDGE_BEATS_DISPATCH != 0:
+  proc hdma_edge_lookahead(gb: GB) {.noinline.} =
+    ## HDMA_EDGE_BEATS_DISPATCH: mode 3 retiring on this very dot raises the
+    ## HBlank request now, and it takes the bus ahead of the dispatch.
+    if gb.ppu.hdma_active and not gb.ppu.hdma_block_due and
+       gb.fifo_ppu != nil and (gb.ppu.lcd_status and 3'u8) == 3'u8 and
+       fetcher_retired(gb.fifo_ppu) and gb.fifo_ppu.m3_hold == 0:
+      ppu_step_hdma(gb.ppu, gb)
+
 const IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD* {.intdefine.} = 2
   ## T-cycles past IRQ_SAMPLE_T at which a CGB dispatch clears a TIMER or
   ## SERIAL request: those two lines are acknowledged later than the LCD
@@ -210,6 +219,10 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
   ## The taken half of handle_interrupts: push PC, vector, charge 5 M-cycles.
   ## Out of line: two inlined mem_writes give handle_interrupts a prologue
   ## paid on every non-taken call (+0.8% retired instructions).
+  when HDMA_EDGE_BEATS_DISPATCH != 0:
+    # Here and not in handle_interrupts, which is inlined into `tick`: the
+    # call there cost +0.4% retired instructions on a title with no HDMA.
+    hdma_edge_lookahead(gb)
   cpu.ime = false
   # An armed halt bug is spent here when the dispatch follows the HALT
   # (EI; HALT with IF & IE != 0): the pushed address is the HALT's own, so
@@ -258,15 +271,6 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
   clear_interrupt(gb.interrupts, interrupt)
   mem_tick_extra(gb.memory, gb, 20)
 
-when HDMA_EDGE_BEATS_DISPATCH != 0:
-  proc hdma_edge_lookahead(gb: GB) {.noinline.} =
-    ## HDMA_EDGE_BEATS_DISPATCH: mode 3 retiring on this very dot raises the
-    ## HBlank request now, and it takes the bus ahead of the dispatch.
-    if gb.ppu.hdma_active and not gb.ppu.hdma_block_due and
-       gb.fifo_ppu != nil and (gb.ppu.lcd_status and 3'u8) == 3'u8 and
-       fetcher_retired(gb.fifo_ppu) and gb.fifo_ppu.m3_hold == 0:
-      ppu_step_hdma(gb.ppu, gb)
-
 proc handle_interrupts*(cpu: GbCpu; gb: GB) =
   # The running CPU's test: the timer's request reaches it one M-cycle ahead
   # of everyone else's view of IF (TIMER_IRQ_RUN_LEAD in gb.nim; inert at 0).
@@ -288,8 +292,6 @@ proc handle_interrupts*(cpu: GbCpu; gb: GB) =
          gb.ppu.cycle_counter - gb.ppu.stat_if_dot < STAT_DISPATCH_MIN_AGE_DS:
         return
     cpu.halted = false
-    when HDMA_EDGE_BEATS_DISPATCH != 0:
-      if cpu.ime: hdma_edge_lookahead(gb)
     if cpu.ime: dispatch_interrupt(cpu, gb)
 
 # Where inside an M-cycle a HALTED CPU latches the interrupt line. A running
@@ -420,6 +422,68 @@ when defined(gbfuzz_trace):
   # Instruction trace for tools/gbfuzz; compiled out of normal builds.
   var gbfuzz_trace_hook*: proc(pc: uint16; opcode: uint8) {.closure.}
 
+proc cpu_halt_wake(cpu: GbCpu; gb: GB) {.noinline.} =
+  ## The M-cycle a halt ends on (the line is up). Out of line: none of it runs
+  ## on a halted M-cycle, and inline it grew `tick` past clang's inline
+  ## threshold for the halted loop (+0.5% retired instructions on a
+  ## HALT-idling DMG title).
+  when DMG_HALT_MIN_MCYCLES > 1:
+    # A DMG HALT answers no earlier than its second M-cycle.
+    if not gb.cgb_enabled and
+       gb.scheduler.cycles - gb.halt_start < CycleCount(4 * DMG_HALT_MIN_MCYCLES):
+      return
+  when defined(gb_halt_trace):
+    # One line per halt exit, with the PPU dot the CPU resumed on.
+    if gb.fifo_ppu != nil:
+      echo "HALTWAKE ly=", gb.fifo_ppu.ly, " dot=", gb.fifo_ppu.cycle_counter,
+           " mode=", (gb.ppu.lcd_status and 3'u8),
+           " if=", toHex(irq_read(gb.interrupts, 0xFF0F), 2),
+           " ime=", (if cpu.ime: 1 else: 0)
+  # CGB halt-exit charge (CGB_HALT_EXIT_MCYCLES in gb.nim; ships at 0).
+  # Here rather than at the dispatch because the IME-clear wakes want it
+  # too (gambatte halt/*_irq_*), and ahead of the HBlank DMA block.
+  when CGB_HALT_EXIT_MCYCLES != 0:
+    if gb.cgb_enabled:
+      mem_tick_extra(gb.memory, gb, 4 * CGB_HALT_EXIT_MCYCLES)
+  # An HBlank block that came due while halted transfers the moment the
+  # CPU is back on the bus, ahead of the dispatch below, and only if the
+  # mode 0 that owed it is still running. Copied at the boundary, not
+  # inside a CPU access's dots (HDMA_VISIBLE_DOTS, `in_cpu_cycle`).
+  when defined(gb_dma_trace):
+    echo "WAKE ly=", gb.ppu.ly, " dot=", gb.ppu.cycle_counter,
+         " due=", (if gb.ppu.hdma_block_due: 1 else: 0),
+         " act=", (if gb.ppu.hdma_active: 1 else: 0),
+         " mode=", (gb.ppu.lcd_status and 3'u8)
+  when HDMA_WAKE_BLIND_DOTS > 0:
+    gb.hdma_wake_dot = gb.ppu.cycle_counter
+  let prefetched = ppu_hdma_wake(gb.ppu, gb, prefetch = not cpu.ime) and
+    HDMA_HALT_REQ_BUG != 0
+  when CGB_HALT_PPU_LEAD_ANY:
+    # The dots the head of this halt held back, paid with no bus half: a
+    # phase, not a charge.
+    if gb.cpu.halt_ppu_debt != 0:
+      mem_tick_ppu(gb.memory, gb, int(gb.cpu.halt_ppu_debt),
+                   ignore_speed = true)
+      gb.cpu.halt_ppu_debt = 0
+  cpu.halted = false
+  when HDMA_EDGE_BEATS_DISPATCH != 0 and HDMA_WAKE_DEBT_RECHECK != 0:
+    # A block the debt's dots made due also goes ahead of the dispatch (the
+    # dispatch runs HDMA_EDGE_BEATS_DISPATCH's lookahead itself).
+    if cpu.ime and gb.ppu.hdma_block_due: ppu_hdma_wake(gb.ppu, gb)
+  if cpu.ime: dispatch_interrupt(cpu, gb)
+  elif prefetched and not cpu.ime and gb.hdma_prefetch_op >= 0:
+    # The HALT found the HBlank request pending and had already fetched
+    # the next opcode without moving PC past it (HDMA_HALT_REQ_BUG): it
+    # runs now, from the prefetch, and PC still points at it.
+    let op = uint8(gb.hdma_prefetch_op)
+    gb.hdma_prefetch_op = -1
+    mem_reset_cycle_count(gb.memory)
+    mem_tick_components(gb.memory, gb, 4)
+    cpu.halt_bug = true
+    let cycles_taken = UNPREFIXED[op](cpu, gb)
+    cpu.cached_hl = -1
+    mem_tick_extra(gb.memory, gb, cycles_taken)
+
 proc tick*(cpu: GbCpu; gb: GB) =
   # `locked` is only tested behind the `halted` branch, so the running CPU
   # pays nothing for it.
@@ -434,66 +498,7 @@ proc tick*(cpu: GbCpu; gb: GB) =
       return
     # The halt ends on IF & IE whether or not IME lets the interrupt be taken;
     # where in the M-cycle that is asked is HALT_IF_SAMPLE_T.
-    var awake = cpu_halt_tick(gb)
-    when DMG_HALT_MIN_MCYCLES > 1:
-      if cpu.halt_mcycles < 255'u8: inc cpu.halt_mcycles
-      if awake and not gb.cgb_enabled and
-         int(cpu.halt_mcycles) < DMG_HALT_MIN_MCYCLES:
-        awake = false
-    if awake:
-      when defined(gb_halt_trace):
-        # One line per halt exit, with the PPU dot the CPU resumed on.
-        if gb.fifo_ppu != nil:
-          echo "HALTWAKE ly=", gb.fifo_ppu.ly, " dot=", gb.fifo_ppu.cycle_counter,
-               " mode=", (gb.ppu.lcd_status and 3'u8),
-               " if=", toHex(irq_read(gb.interrupts, 0xFF0F), 2),
-               " ime=", (if cpu.ime: 1 else: 0)
-      # CGB halt-exit charge (CGB_HALT_EXIT_MCYCLES in gb.nim; ships at 0).
-      # Here rather than at the dispatch because the IME-clear wakes want it
-      # too (gambatte halt/*_irq_*), and ahead of the HBlank DMA block.
-      when CGB_HALT_EXIT_MCYCLES != 0:
-        if gb.cgb_enabled:
-          mem_tick_extra(gb.memory, gb, 4 * CGB_HALT_EXIT_MCYCLES)
-      # An HBlank block that came due while halted transfers the moment the
-      # CPU is back on the bus, ahead of the dispatch below, and only if the
-      # mode 0 that owed it is still running. Copied at the boundary, not
-      # inside a CPU access's dots (HDMA_VISIBLE_DOTS, `in_cpu_cycle`).
-      when defined(gb_dma_trace):
-        echo "WAKE ly=", gb.ppu.ly, " dot=", gb.ppu.cycle_counter,
-             " due=", (if gb.ppu.hdma_block_due: 1 else: 0),
-             " act=", (if gb.ppu.hdma_active: 1 else: 0),
-             " mode=", (gb.ppu.lcd_status and 3'u8)
-      when HDMA_WAKE_BLIND_DOTS > 0:
-        gb.ppu.hdma_wake_dot = gb.ppu.cycle_counter
-      let prefetched = ppu_hdma_wake(gb.ppu, gb, prefetch = not cpu.ime) and
-        HDMA_HALT_REQ_BUG != 0
-      when CGB_HALT_PPU_LEAD_ANY:
-        # The dots the head of this halt held back, paid with no bus half: a
-        # phase, not a charge.
-        if gb.cpu.halt_ppu_debt != 0:
-          mem_tick_ppu(gb.memory, gb, int(gb.cpu.halt_ppu_debt),
-                       ignore_speed = true)
-          gb.cpu.halt_ppu_debt = 0
-      cpu.halted = false
-      when HDMA_EDGE_BEATS_DISPATCH != 0:
-        if cpu.ime:
-          # A block the debt's dots made due also goes ahead of the dispatch.
-          when HDMA_WAKE_DEBT_RECHECK != 0:
-            if gb.ppu.hdma_block_due: ppu_hdma_wake(gb.ppu, gb)
-          hdma_edge_lookahead(gb)
-      if cpu.ime: dispatch_interrupt(cpu, gb)
-      elif prefetched and not cpu.ime and gb.ppu.hdma_prefetch_op >= 0:
-        # The HALT found the HBlank request pending and had already fetched
-        # the next opcode without moving PC past it (HDMA_HALT_REQ_BUG): it
-        # runs now, from the prefetch, and PC still points at it.
-        let op = uint8(gb.ppu.hdma_prefetch_op)
-        gb.ppu.hdma_prefetch_op = -1
-        mem_reset_cycle_count(gb.memory)
-        mem_tick_components(gb.memory, gb, 4)
-        cpu.halt_bug = true
-        let cycles_taken = UNPREFIXED[op](cpu, gb)
-        cpu.cached_hl = -1
-        mem_tick_extra(gb.memory, gb, cycles_taken)
+    if cpu_halt_tick(gb): cpu_halt_wake(cpu, gb)
     return
   when defined(gbfuzz_trace):
     if gbfuzz_trace_hook != nil:

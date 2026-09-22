@@ -1461,8 +1461,6 @@ type
     # cpu_halt_tick). The same value for a whole halt, so not serialized:
     # load_cpu_state reconstructs it from `halted` and the speed.
     halt_ppu_debt*: int32
-    # DMG_HALT_MIN_MCYCLES: halted M-cycles spent since the HALT. Scratch.
-    halt_mcycles*: uint8
     # Scheduler cycle EI's delayed IME landed on (etIME), so HALT can ask what
     # IME was at its own fetch (cpu_halt). Scratch like `cached_hl`, not
     # serialized: 0 answers "not set during this fetch", right at any boundary.
@@ -1671,21 +1669,6 @@ type
     # ...and the PPU dot the CPU halted on, so the freeze can carry
     # HDMA_HALT_BLIND_LAG dots past it. Scratch, like hdma_block_due.
     hdma_halt_dot*: int32
-    # HDMA_HALT_REQ_DOTS: the owed block was requested before the HALT and is
-    # paid at the wake whatever the mode. Scratch, like hdma_block_due.
-    hdma_due_forced*: bool
-    # HDMA_WAKE_BLIND_DOTS: the dot the CPU last woke from a HALT on. Scratch.
-    hdma_wake_dot*: int32
-    # HDMA_SWITCH_HALTS: inside a speed switch's stall. Scratch.
-    hdma_stalled*: bool
-    # HDMA_BLOCK_SWALLOW: the dot a block's swallow window ends on, or -1.
-    # Scratch.
-    hdma_swallow_end*: int32
-    # HDMA_HALT_REQ_BUG: the opcode the HALT prefetched, or -1. Scratch.
-    hdma_prefetch_op*: int16
-    # HDMA_SWITCH_REQ: the speed switch's HALT found an HBlank request
-    # pending, so STOP's operand byte is left to run as an opcode. Scratch.
-    hdma_stop_req*: bool
     # CPU instruction boundaries still owed before a due HBlank DMA block may
     # take the bus. See HDMA_STEAL_DELAY_M.
     hdma_due_delay*: int8
@@ -1768,11 +1751,6 @@ type
       # The source's own `stat_chg_dot`, a different dot from the flag's when a
       # lead is on. Per-line, not serialized.
       irq_chg_dot*:      int16
-      # STAT_M1_LEAD: the mode-1 source is up ahead of the flag (line 143's
-      # last dots). Cleared at the boundary, so never live at a frame edge.
-      m1_early*:         bool
-      # VBLANK_IRQ_LEAD: the vblank request already went up with it.
-      vbl_early*:        bool
       stat_if_dot*:      int32   # STAT_DISPATCH_MIN_AGE_DS: dot the STAT request last rose
       stat_if_ly*:       uint8
       stat_if_m0*:       bool    # ... and whether the mode-0 source's own edge raised it
@@ -2297,6 +2275,25 @@ type
     sgb*:            SgbState
     cheats*:         CheatEngine
     cheat_hooks:     MemHooks       # built once, reused each frame
+    # HBlank-DMA scratch for the halt and speed-switch rules (HDMA_HALT_REQ_*,
+    # HDMA_SWITCH_*, HDMA_WAKE_BLIND_DOTS, HDMA_BLOCK_SWALLOW). Kept here, at
+    # the end of the machine object, and not in GbPpu: a field inserted into
+    # GbPpu moves GbFifoPpu's hot state (+0.5% retired instructions measured).
+    # Live only across a halt or a stall, like hdma_block_due; not serialized.
+    hdma_due_forced*:  bool    # requested before the HALT: paid at the wake
+    hdma_stalled*:     bool    # inside a speed switch's stall
+    hdma_stop_req*:    bool    # the switch found a request: STOP's operand runs
+    hdma_prefetch_op*: int16   # the opcode the HALT prefetched, or -1
+    hdma_wake_dot*:    int32   # the dot the CPU last woke from a HALT on
+    hdma_swallow_end*: int32   # the dot a block's swallow window ends on, or -1
+    # The comparator-lead sources entering and leaving vblank (STAT_M1_LEAD,
+    # VBLANK_IRQ_LEAD, STAT_M2_LY0_LEAD): up ahead of the boundary, cleared on
+    # it, so never live at a frame edge. Here for the same layout reason.
+    m1_early*:         bool
+    vbl_early*:        bool
+    m2_ly0_up*:        bool
+    # DMG_HALT_MIN_MCYCLES: the scheduler cycle the CPU halted on. Scratch.
+    halt_start*:       CycleCount
     when defined(test_harness):
       test_output*:  TestOutput
 

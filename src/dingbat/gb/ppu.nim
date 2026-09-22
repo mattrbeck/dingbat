@@ -27,9 +27,9 @@ when STAT_IRQ_SPLIT:
   template irq_m0_of(ppu: GbPpu): uint8 =
     when STAT_IRQ_LEAD != 0 or STAT_M0_LEAD_T != 0: ppu.irq_mode
     else: ppu.mode_flag
-  template irq_m1_of(ppu: GbPpu): uint8 =
+  template irq_m1_of(ppu: GbPpu; gb: GB): uint8 =
     when STAT_IRQ_LEAD != 0: ppu.irq_mode
-    elif STAT_M1_LEAD != 0: (if ppu.m1_early: 1'u8 else: ppu.mode_flag)
+    elif STAT_M1_LEAD != 0: (if gb.m1_early: 1'u8 else: ppu.mode_flag)
     else: ppu.mode_flag
   template irq_ly_of(ppu: GbPpu): uint8 =
     when STAT_IRQ_LEAD != 0 or STAT_LYC_LEAD != 0 or STAT_LYC_LY_LEAD_ANY:
@@ -38,7 +38,7 @@ when STAT_IRQ_SPLIT:
 else:
   template irq_mode_of(ppu: GbPpu): uint8 = ppu.mode_flag
   template irq_m0_of(ppu: GbPpu): uint8 = ppu.mode_flag
-  template irq_m1_of(ppu: GbPpu): uint8 = ppu.mode_flag
+  template irq_m1_of(ppu: GbPpu; gb: GB): uint8 = ppu.mode_flag
   template irq_ly_of(ppu: GbPpu): uint8 = ppu.ly
 
 when not LCD_ON_TRIM_ANY:
@@ -951,7 +951,7 @@ proc m2_early*(ppu: GbPpu): bool {.inline.} =
   ## m2_line144's, on its own measurement.
   let m = ppu.lcd_status and 3'u8
   (m == 0'u8 and ppu.ly < 143'u8) or
-    ((STAT_M2_EARLY_LY0 or STAT_M2_LY0_LEAD != 0) and m == 1'u8 and ppu.ly == 0'u8)
+    (STAT_M2_EARLY_LY0 and m == 1'u8 and ppu.ly == 0'u8)
 
 template m2_lead_active*(gb: GB): bool =
   ## Is the lead nonzero for THIS console? At a lead of 0 the rising dot is
@@ -978,11 +978,8 @@ template m0_source*(ppu: GbPpu; gb: GB): bool =
 
 proc m2_source*(ppu: GbPpu; gb: GB): bool {.inline.} =
   when STAT_M2_LY0_LEAD != 0:
-    # Line 0's pulse rises with the comparator's lead (STAT_M2_LY0_LEAD).
-    if ppu.ly == 0'u8 and (ppu.lcd_status and 3'u8) == 1'u8:
-      let ld = int32(if gb.memory.current_speed == 0: STAT_LYC_LY_LEAD_DOTS
-                     else: STAT_LYC_LY_LEAD_DS)
-      return ld != 0 and ppu.cycle_counter >= 456'i32 - ld
+    # Line 0's pulse, already up (STAT_M2_LY0_LEAD).
+    if gb.m2_ly0_up: return true
   when STAT_M2_EARLY:
     if m2_lead_active(gb) and ppu.cycle_counter >= ppu.m2_early_dot(gb):
       return ppu.m2_early
@@ -1214,7 +1211,7 @@ proc stat_level_with(ppu: GbPpu; gb: GB; en, lyc: uint8): bool {.noinline.} =
     (ppu.m2_source(gb)     and (en and 0x20'u8) != 0) or
     ((en and 0x20'u8) != 0 and ppu.m2_line144(gb)) or
     (ppu.m0_source(gb)     and (en and 0x08'u8) != 0) or
-    (ppu.irq_m1_of == 1    and (en and 0x10'u8) != 0)
+    (ppu.irq_m1_of(gb) == 1    and (en and 0x10'u8) != 0)
 
 const LYC_DROP_LATENCY_DMG* {.intdefine.} = 1
 const LYC_DROP_LATENCY_CGB* {.intdefine.} = 6
@@ -1331,7 +1328,7 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
     # The OAM source also asserts entering vblank; see m2_line144.
     ((en and 0x20'u8) != 0    and ppu.m2_line144(gb)) or
     (ppu.m0_source(gb)        and (en and 0x08'u8) != 0) or
-    (ppu.irq_m1_of == 1       and (en and 0x10'u8) != 0)
+    (ppu.irq_m1_of(gb) == 1       and (en and 0x10'u8) != 0)
   if not ppu.old_stat_flag and stat_flag:
     when defined(gb_stat_read_trace):
       echo "STATIRQ ly=", ppu.ly, " cc=", ppu.cycle_counter,
@@ -1531,7 +1528,7 @@ proc ppu_step_hdma*(ppu: GbPpu; gb: GB; in_cpu_cycle = false;
   let may_continue = ppu_copy_hdma_block(ppu, gb, in_cpu_cycle, charge_overhead)
   when HDMA_BLOCK_SWALLOW != 0:
     ppu.hdma_block_due = false
-    ppu.hdma_swallow_end = ppu.cycle_counter + (if charge_overhead: 0'i32 else: 4'i32)
+    gb.hdma_swallow_end = ppu.cycle_counter + (if charge_overhead: 0'i32 else: 4'i32)
   if ppu.hdma5 == 0xFF or not may_continue: ppu.hdma_active = false
   ppu.hdma_copying = false
 
@@ -1555,7 +1552,7 @@ when STAT_IRQ_SPLIT:
 proc ppu_hdma_switch_req*(ppu: GbPpu; gb: GB) =
   ## HDMA_SWITCH_REQ: a request the speed switch's HALT found pending.
   ppu.hdma_block_due = false
-  ppu.hdma_stop_req = true
+  gb.hdma_stop_req = true
   if not ppu.hdma_active: return
   if gb.memory.current_speed == 1'u8:
     # Into double speed: the block, with no CPU on the bus to observe its
@@ -1572,7 +1569,7 @@ proc ppu_hdma_switch_req*(ppu: GbPpu; gb: GB) =
     ppu.hdma_active = false
   else:
     ppu.hdma_block_due = true
-    ppu.hdma_due_forced = true
+    gb.hdma_due_forced = true
     ppu.hdma_due_deadline = high(int32)
 
 proc ppu_hdma_wake*(ppu: GbPpu; gb: GB; prefetch = false): bool {.discardable.} =
@@ -1581,8 +1578,8 @@ proc ppu_hdma_wake*(ppu: GbPpu; gb: GB; prefetch = false): bool {.discardable.} 
   ## requested before the HALT (HDMA_HALT_REQ_DOTS) or the mode 0 that owed it
   ## is still running with room left (HDMA_WAKE_M0_MARGIN).
   if not ppu.hdma_block_due: return
-  let forced = HDMA_HALT_REQ_DOTS >= 0 and ppu.hdma_due_forced
-  ppu.hdma_due_forced = false
+  let forced = HDMA_HALT_REQ_DOTS >= 0 and gb.hdma_due_forced
+  gb.hdma_due_forced = false
   if ppu.hdma_active and forced:
     # The prefetched opcode's fetch M-cycle (HDMA_HALT_REQ_BUG) is the block's
     # release M-cycle: it is not charged twice.
@@ -1663,7 +1660,7 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   # DUE and cpu.tick pays it at the wake if still in that mode 0 (gambatte
   # dma/hdma_m3halt_m1unhalt_hdma5). `in_cpu_cycle`: the edge lands inside a
   # CPU access still on the bus, so the bytes are held HDMA_VISIBLE_DOTS dots.
-  let hdma_halted = gb.cpu.halted or ppu.hdma_stalled
+  let hdma_halted = gb.cpu.halted or gb.hdma_stalled
   when HDMA_HALT_M0_BLIND != 0:
     # The edge detector's registered mode, clocked by the CPU: read before this
     # change updates it, and not updated while halted (HDMA_HALT_M0_BLIND).
@@ -1697,9 +1694,9 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
           return
     when HDMA_BLOCK_SWALLOW != 0:
       if ppu.hdma_copying: return
-      if ppu.hdma_swallow_end >= 0:
-        let se = ppu.hdma_swallow_end
-        ppu.hdma_swallow_end = -1
+      if gb.hdma_swallow_end >= 0:
+        let se = gb.hdma_swallow_end
+        gb.hdma_swallow_end = -1
         if ppu.cycle_counter <= se and ppu.cycle_counter + 8 > se: return
     when HDMA_DISABLE_GRACE_DOTS != 0:
       ppu.hdma_due_dot = ppu.cycle_counter
@@ -1709,7 +1706,7 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
            " seenwas=", hdma_seen_was
     when HDMA_HALT_M0_BLIND != 0 and HDMA_WAKE_BLIND_DOTS > 0:
       if not hdma_halted and hdma_seen_was == 0'u8:
-        var since_wake = ppu.cycle_counter - ppu.hdma_wake_dot
+        var since_wake = ppu.cycle_counter - gb.hdma_wake_dot
         if since_wake < 0: since_wake += gb_line_end(ppu)
         if since_wake <= int32(HDMA_WAKE_BLIND_DOTS shr int(gb.memory.current_speed)):
           return
@@ -1720,12 +1717,12 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
       when HDMA_HALT_REQ_DOTS >= 0:
         var since = ppu.cycle_counter - ppu.hdma_halt_dot
         if since < 0: since += gb_line_end(ppu)
-        ppu.hdma_due_forced = since <= HDMA_HALT_REQ_DOTS and not ppu.hdma_stalled
+        gb.hdma_due_forced = since <= HDMA_HALT_REQ_DOTS and not gb.hdma_stalled
         when HDMA_HALT_REQ_BUG != 0:
           # The HALT's prefetch of the next opcode, before the block can
           # overwrite it (gambatte dma/hdma_transition_halt_hdmadst_unhalt).
-          if ppu.hdma_due_forced:
-            ppu.hdma_prefetch_op = int16(gb.memory.read_byte(gb, int(gb.cpu.pc)))
+          if gb.hdma_due_forced:
+            gb.hdma_prefetch_op = int16(gb.memory.read_byte(gb, int(gb.cpu.pc)))
       ppu.hdma_block_due = true
       ppu.hdma_due_delay = 0
       when HDMA_GRANT_FETCH_DOTS >= 0:
