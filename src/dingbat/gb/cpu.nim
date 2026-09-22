@@ -93,6 +93,19 @@ when HDMA_GRANT_FETCH_DOTS >= 0:
     else:
       ppu.hdma_block_due = false
 
+const HALT_IME_PENDING_REDO* {.intdefine.} = 1
+  ## A HALT that finds IME on and IF & IE != 0 does not halt: the opcode after
+  ## it was fetched without moving PC, the dispatch undoes that fetch and
+  ## pushes the HALT's own address, and RETI runs the HALT again (the halt
+  ## bug's IME-on shape; gambatte-core models it as the prefetch undo).
+  ## gambatte `halt/late_m0int_halt_m0stat_scx{2,3}_3a` (both devices) and
+  ## `scx3_3b` [dmg] halt again after the handler; 0 returns past the HALT.
+const DMG_HALT_MIN_MCYCLES* {.intdefine.} = 2
+  ## Halted M-cycles a DMG spends before a pending interrupt can end the HALT:
+  ## an interrupt raised during the HALT's first M-cycle is answered at the
+  ## end of the second. gambatte `halt/late_m0{int,irq}_halt_m0stat_scx3_2b`
+  ## [dmg] want 2; 3 loses six `_1b`/`_2a` rows. The CGB's side of this is
+  ## CGB_HALT_PPU_LEAD.
 proc cpu_halt*(cpu: GbCpu; gb: GB) =
   ## Pan Docs, "Halt Bug": with IME = 0 and IF & IE != 0 the CPU does not halt
   ## and PC fails to increment for the next instruction. The IME that decides
@@ -104,8 +117,15 @@ proc cpu_halt*(cpu: GbCpu; gb: GB) =
   if not ime_at_fetch and interrupt_ready(gb.interrupts):
     cpu.halt_bug = true
     cpu.halted   = false
+  elif HALT_IME_PENDING_REDO != 0 and cpu.ime and interrupt_ready(gb.interrupts):
+    # IME on and a request already up: the HALT does not halt; its fetch of
+    # the next opcode is undone by the dispatch, which pushes the HALT's own
+    # address (dispatch_interrupt's halt-bug path), so RETI runs it again.
+    cpu.halt_bug = true
+    cpu.halted   = false
   else:
     cpu.halted = true
+    when DMG_HALT_MIN_MCYCLES > 1: cpu.halt_mcycles = 0
     when HDMA_GRANT_FETCH_DOTS >= 0:
       # The third hand-over point, the HALT: charged at the HALT's fetch rather
       # than per halted M-cycle (at most 4 dots apart, row-for-row identical,
@@ -296,18 +316,23 @@ const HALT_IF_SAMPLE_T* {.intdefine.} = 4
 # and no blinding all five collapse onto their late arm. So the source rises
 # in the tail of its M-cycle and a halted CPU catches it at the boundary,
 # the same classification HALT_IF_SAMPLE_T's table makes for the OAM source.
-# Open: gambatte halt/noime_m2irq_m0stat_1 [cgb] is the one row this costs;
-# either the rule is DMG-only or CGB_HALT_PPU_LEAD already pays for it there.
+# On the CGB, CGB_HALT_PPU_LEAD already pays for it: blinding there too
+# fails all five intr_2_* on CGB C and E and gambatte halt/noime_m2irq_
+# m0stat_1 [cgb]; DMG-only passes all six (M2_LEAD_HALT_BLIND_DMG_ONLY).
 const M2_LEAD_HALT_BLIND* {.booldefine.} = true
   ## Whether a HALTED CPU is blind to the mode 2 STAT source for the
   ## STAT_M2_LEAD M-cycles it leads the line boundary by. Ships on with
   ## STAT_M2_LEAD; false is the control build.
+const M2_LEAD_HALT_BLIND_DMG_ONLY* {.intdefine.} = 1
+  ## The blindness on DMG-family machines only (see above). 0 = both.
 
 when STAT_M2_EARLY and M2_LEAD_HALT_BLIND:
   proc halt_m2_lead_blind(gb: GB): bool {.noinline.} =
     ## Is the interrupt line up only because the OAM source is inside its lead
     ## window? Approximate in one direction: a STAT bit raised earlier by
     ## another source and re-masked mid-halt by an IE write is deferred too.
+    when M2_LEAD_HALT_BLIND_DMG_ONLY != 0:
+      if gb.cgb_enabled: return false
     let irq = gb.interrupts
     if not (irq.lcd_stat_interrupt and irq.lcd_stat_enabled): return false
     if (irq.vblank_interrupt and irq.vblank_enabled) or
@@ -409,7 +434,13 @@ proc tick*(cpu: GbCpu; gb: GB) =
       return
     # The halt ends on IF & IE whether or not IME lets the interrupt be taken;
     # where in the M-cycle that is asked is HALT_IF_SAMPLE_T.
-    if cpu_halt_tick(gb):
+    var awake = cpu_halt_tick(gb)
+    when DMG_HALT_MIN_MCYCLES > 1:
+      if cpu.halt_mcycles < 255'u8: inc cpu.halt_mcycles
+      if awake and not gb.cgb_enabled and
+         int(cpu.halt_mcycles) < DMG_HALT_MIN_MCYCLES:
+        awake = false
+    if awake:
       when defined(gb_halt_trace):
         # One line per halt exit, with the PPU dot the CPU resumed on.
         if gb.fifo_ppu != nil:

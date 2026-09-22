@@ -1444,6 +1444,8 @@ type
     # cpu_halt_tick). The same value for a whole halt, so not serialized:
     # load_cpu_state reconstructs it from `halted` and the speed.
     halt_ppu_debt*: int32
+    # DMG_HALT_MIN_MCYCLES: halted M-cycles spent since the HALT. Scratch.
+    halt_mcycles*: uint8
     # Scheduler cycle EI's delayed IME landed on (etIME), so HALT can ask what
     # IME was at its own fetch (cpu_halt). Scratch like `cached_hl`, not
     # serialized: 0 answers "not set during this fetch", right at any boundary.

@@ -283,10 +283,14 @@ mode-0 residual as A1/A5, seen through the priority resolver.
 
 ### A5. Halt-woken readers of the mode-0 edge
 
-**Rows (11).** `halt/late_m0int_halt_m0stat_scx{2,3}_{2b,3a,3b}` (7, mixed
-direction inside one family: `scx2_3a` wants the read earlier, `scx3_2b`
-later), `halt/noime_m2irq_m0stat_1 [cgb]`,
-`oamdma/oamdma_late_halt_stat_2` (both), `oamdma_late_speedchange_stat_2`.
+**Rows (3).** `oamdma/oamdma_late_halt_stat_2` (both),
+`oamdma_late_speedchange_stat_2`. The eight `halt/` rows closed 2026-09-22:
+a HALT with IME on and an interrupt already pending re-runs after the
+handler (`HALT_IME_PENDING_REDO`: the `_3a`/`_3b` rows, which were never an
+SCX question), a DMG HALT answers no earlier than its second M-cycle
+(`DMG_HALT_MIN_MCYCLES`: `_2b`), and `M2_LEAD_HALT_BLIND` is DMG-only
+(`noime_m2irq_m0stat_1 [cgb]`; mooneye `intr_2_*` then pass on CGB C and E
+too, which the both-devices rule failed).
 
 **Behaviour.** A halted CPU latches the interrupt line at a different point
 of its M-cycle from a running one, and the mode-0 source's rise sits

@@ -444,6 +444,17 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
   vs `_m0irq_*`): the known one-dot-early mode-0 STAT raise seen from inside
   the instrument.
 
+### HALT with an interrupt already pending, and the DMG's two-M-cycle HALT
+- Claim: a HALT that finds IME on and IF & IE != 0 does not halt; the
+  dispatch pushes the HALT's own address (the next opcode's fetch is
+  undone), so the handler returns to the HALT and it halts again. A DMG HALT
+  answers an interrupt no earlier than the end of its second M-cycle.
+- Evidence: gambatte `halt/late_m0int_halt_m0stat_scx{2,3}_3a` (both
+  devices) and `_scx3_3b` [dmg] push the HALT's address; `halt/late_m0{int,
+  irq}_halt_m0stat_scx3_2b` [dmg] (an interrupt raised in the HALT's first
+  M-cycle, dispatched one M-cycle later than the next opcode would have).
+- Site: `HALT_IME_PENDING_REDO`, `DMG_HALT_MIN_MCYCLES` (cpu.nim).
+
 ### The halted CPU samples the interrupt line at the end of its M-cycle
 - Ships: `HALT_IF_SAMPLE_T = 4` (`cpu.nim`); 2 is the alternative arm.
 - Open: at 2, GBMicrotest `int_hblank_halt_scx{0,3,4,7}` and wilbertpol
