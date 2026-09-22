@@ -760,19 +760,33 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
   if not mem.requested_oam_dma and mem.dma_position > 0xA0: return
   when OAMDMA_HALT_PAUSE != 0:
     var cycles = cycles
-    # The unit is clocked by bus cycles and HALT stops them. The wake M-cycle
-    # is the hand-back and does clock it; added here because that M-cycle's
-    # bus half runs with `halted` still set (OAMDMA_HALT_PAUSE).
+    # The unit is clocked by bus cycles and HALT stops them, one M-cycle in
+    # (OAMDMA_HALT_GRACE); OAMDMA_WAKE_EXTRA is added at the wake because that
+    # M-cycle's bus half runs with `halted` still set (OAMDMA_HALT_PAUSE).
     if gb.cpu.halted:
       # A VRAM DMA makes bus cycles of its own, so the unit keeps stepping
       # (storing nothing; VDMA_OAM_BUS_CAPTURE). `dma_was_halted` stays set
       # so the wake still pays the hand-back.
       if VDMA_OAM_BUS_CAPTURE == 0 or not mem.vdma_bus_hold:
-        mem.dma_was_halted = true
-        return
+        when OAMDMA_HALT_GRACE != 0:
+          if not mem.dma_was_halted and gb.dma_halt_grace < uint8(OAMDMA_HALT_GRACE):
+            inc gb.dma_halt_grace
+          elif OAMDMA_HALT_RELEASE != 0 and mem.dma_position == 0xA0 and
+               not mem.dma_was_halted:
+            # Every byte is written: the hand-back still happens.
+            discard
+          else:
+            mem.dma_was_halted = true
+            return
+        else:
+          mem.dma_was_halted = true
+          return
     elif mem.dma_was_halted:
       mem.dma_was_halted = false
-      when OAMDMA_HALT_PAUSE == 1: cycles += 4
+      when OAMDMA_HALT_GRACE != 0: gb.dma_halt_grace = 0
+      when OAMDMA_HALT_PAUSE == 1: cycles += OAMDMA_WAKE_EXTRA
+    else:
+      when OAMDMA_HALT_GRACE != 0: gb.dma_halt_grace = 0
       when OAMDMA_HALT_PAUSE == 3: return
   for _ in 0 ..< cycles:
     if mem.requested_oam_dma:

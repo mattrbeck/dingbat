@@ -407,9 +407,20 @@ const CGB_HALT_PPU_LEAD* {.intdefine.} = 1
   ## cheaper spelling, if ever needed, decides at halt entry rather than per
   ## halted M-cycle.
 const OAMDMA_HALT_PAUSE* {.intdefine.} = 1
+const OAMDMA_HALT_GRACE* {.intdefine.} = 1
+  ## M-cycles the OAM DMA unit still clocks after the CPU halts: the pause
+  ## starts one M-cycle late, and the wake then owes no extra hand-back cycle
+  ## (OAMDMA_WAKE_EXTRA 0). The same byte for the `oamdmasrc80_halt_*` rows,
+  ## which pinned the old (0, 4) pair; with OAMDMA_HALT_RELEASE it takes
+  ## gambatte `oamdma/oamdma_late_halt_stat_2` on both devices (a HALT on the
+  ## transfer's last M-cycle still lets it finish). (1, 4) and (2, *) lose
+  ## the five `oamdmasrc80_halt`/`hdma_transition_oamdma_2` rows.
+const OAMDMA_WAKE_EXTRA* {.intdefine.} = 0
+const OAMDMA_HALT_RELEASE* {.intdefine.} = 1
+  ## A transfer whose last byte is written hands OAM back even with the CPU
+  ## halted, instead of on the wake.
   ## The OAM DMA unit is clocked by the CPU's bus cycles, so it freezes while
-  ## the CPU is halted, and the M-cycle the CPU wakes on is the one that hands
-  ## the bus back. 1 ships; 0 runs the transfer through a HALT; 2 (pause, no
+  ## the CPU is halted, one M-cycle into the HALT (OAMDMA_HALT_GRACE). 1 ships; 0 runs the transfer through a HALT; 2 (pause, no
   ## hand-back) and 3 (pause, wake M-cycle does not clock) are controls. Pinned
   ## to the byte by gambatte `oamdma/oamdmasrc80_halt_{lycirq,m2irq}_read8000`
   ## (all four rows want $81; the other arms answer $A0, $2B or $82).
@@ -2439,6 +2450,7 @@ type
     lyc_hold_new*:     uint8
     lyc_hold_ly*:      uint8
     m0_late_fire*:     bool    # LCDON_M0_LAG_DS: the LCD-on line's mode-0 source is owed
+    dma_halt_grace*:   uint8   # OAMDMA_HALT_GRACE: the halted M-cycle the OAM DMA still gets
     when defined(test_harness):
       test_output*:  TestOutput
 
