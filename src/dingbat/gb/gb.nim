@@ -681,10 +681,6 @@ const DMG_WIN_LAST_PX_CARRY* {.intdefine.} = 1
   ## measured +3.6% (see `fifo_emit_pixel`). Still red:
   ## `wxA6_late_we_reenable_3` [dmg], one window line too many.
 
-const DMG_WIN_CARRY_OWES*    {.intdefine.} = 1
-  ## Whether a DMG line carried out of the previous one (DMG_WIN_LAST_PX_CARRY)
-  ## holds mode 3 for its own WX = 166 match (fetch_work_pending). Experimental
-  ## control for AGE stat-mode-window-dmgC, which reads that line as 172.
 const WIN_CARRY_TILE*        {.intdefine.} = 1
   ## The window tile column a carried start (DMG_WIN_LAST_PX_CARRY) draws
   ## first. 1: the aborted start on the previous line already ran column 0's

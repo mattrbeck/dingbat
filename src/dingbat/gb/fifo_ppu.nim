@@ -1731,16 +1731,11 @@ proc fetch_work_pending(ppu: GbFifoPpu): bool {.inline.} =
         return true
   if not ppu.fetching_window and ppu.window_trigger and window_enabled(ppu) and
      int(ppu.wx) <= GB_WIDTH + 6: return true
-  when DMG_WIN_LAST_PX_CARRY != 0 and DMG_WIN_CARRY_OWES != 0:
-    # A DMG line carried out of the previous one starts with the window
-    # already fetching and its WX = 166 match still ahead, and owes that
-    # restart like an ordinary one (gambatte window/m2int_wxA6_m3stat_1 and
-    # siblings read 174 dots, not 172).
-    if not ppu.cgb and ppu.fetching_window and
-       (ppu.lx < int32(GB_WIDTH) - 1 or
-        (ppu.obj_last_px and ppu.lx < int32(GB_WIDTH))) and
-       ppu.window_trigger and window_enabled(ppu) and
-       int(ppu.wx) == GB_WIDTH + 6: return true
+  # A DMG line carried out of the previous one (DMG_WIN_LAST_PX_CARRY) owes
+  # nothing for its own WX = 166 match: AGE stat-mode-window-dmgC reads the
+  # line as 172 + SCX, the same as WX = 167, and gambatte window/m2int_wxA6_*
+  # [dmg] agree (holding mode 3 for it, as this once did, cost
+  # m2int_wxA6_scx3_m3stat_2 [dmg] and bought nothing).
   false
 
 proc fetcher_retired(ppu: GbFifoPpu): bool {.inline.} =

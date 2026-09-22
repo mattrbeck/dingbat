@@ -326,16 +326,15 @@ gambatte window 426 -> 434 (`m2int_wxA5_m0irq_2` both devices,
 `m2int_wxA6_{,firstline_,scx5_}m3stat_3` [cgb], `m2int_wxA6_{,scx5_}
 m3stat_ds_2`, `m2int_wxA6_vrambusyread_3` [cgb]), nothing lost.
 
-**Still red (1 AGE arm + gambatte).** `stat-mode-window-dmgC`: the DMG's
-WX = 166 line, where the start is carried to the next line
-(`DMG_WIN_LAST_PX_CARRY`) and dingbat reads 173 against AGE's 172 (the same
-row as WX 167, no window). gambatte `m2int_wxA6_m3stat_1` [dmg] reads the
-same line as longer than 172 ("174, not 172", the carry's pending term in
-`fetch_work_pending`); the two ROMs set the window up differently (AGE: WY =
-8, SCX = LY, LCD off/on per frame; gambatte: from the mode 2 handler) and
-have not been read against each other. The remaining `window/` rows are
-the `spxA7` (object at X = 167 sharing the slot), `m0irq`, `oambusyread`
-and `on_screen` families, unchanged by this.
+**Closed later the same day (DMG WX 166).** `stat-mode-window-dmgC` read
+the DMG's carried WX = 166 line (`DMG_WIN_LAST_PX_CARRY`) as 173 against
+AGE's 172, the same row as WX 167. `fetch_work_pending` held mode 3 for
+the carried line's own match, citing gambatte `m2int_wxA6_m3stat_1` [dmg]
+as wanting "174, not 172"; with the term deleted that row still passes,
+`m2int_wxA6_scx3_m3stat_2` [dmg] joins it, and nothing in `window/`,
+mealybug or the `on_screen` frames moves. The claim was stale. AGE 87 ->
+88. The remaining `window/` rows are the `spxA7` (object at X = 167
+sharing the slot), `m0irq`, `oambusyread` and `on_screen` families.
 
 ### C3. Mid-line SCX stores
 
