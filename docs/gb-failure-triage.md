@@ -316,36 +316,31 @@ close in dots, as the open now is.
 
 ### C2. The window's mode-3 penalty near the right edge
 
-**Rows (23).** AGE `stat-mode-window/stat-mode-window-{cgbBCE@*, dmgC,
-ds-cgbBCE@*}` (7 arms; only the WX 165/166 cells are wrong); gambatte
-`window/m2int_wxA5_m0irq_2`, `m2int_wxA6_{m0irq,m0irq2,spxA7_m0irq}_2`,
-`m2int_wxA6_{m3stat_3, m3stat_ds_2, scx3_m3stat_2, scx5_m3stat_3,
-scx5_m3stat_ds_2, firstline_m3stat_3, spxA7_m3stat_{2,4}}`,
-`m2int_wxA6_{oambusyread_2, vrambusyread_3}` (16).
+**Closed 2026-09-21 (CGB and WX 165).** AGE `stat-mode-window/*` was a
+reading error in the triage, not a three-way conflict: gambatte
+`m2int_wxA6_m3stat_3` [cgb] wants mode 0 by its third read, i.e. the CGB's
+WX = 166 line is 178 dots there too, and 180 was dingbat's number, not
+hardware's. The mechanism: mode 3 ends `m3_lead` (2) dots before the last
+pixel would leave the shifter, and a window restart delays that pixel by a
+fetch, so the flag falls at hit + 5 + (159 - lx) wherever the match lands
+-- a flat six dots. dingbat's tail waited for the restarted fetch's push
+instead: +1 at WX 165, +2 at WX 166 (`WIN_TAIL_FLAG_LEAD`, gb.nim; the
+`-d:gb_m3_trace` dots at 246/248/249 for WX 163/165/166 all retire on 254
+under the rule). AGE 75 -> 81 (`stat-mode-window-{cgbBCE,ds-cgbBCE}@*`),
+gambatte window 426 -> 434 (`m2int_wxA5_m0irq_2` both devices,
+`m2int_wxA6_{,firstline_,scx5_}m3stat_3` [cgb], `m2int_wxA6_{,scx5_}
+m3stat_ds_2`, `m2int_wxA6_vrambusyread_3` [cgb]), nothing lost.
 
-**Behaviour.** A window start costs 6 dots of mode 3 (Pan Docs, "Mode 3
-Length"; mealybug `m3_window_timing`'s header). AGE sweeps WX 0..9 and
-162..167 with `SCX = LY` and its expected table is byte-identical for WX 1
-through 166 on both devices — the restart is charged in full however close
-to the right edge the trigger lands. dingbat (`-d:gb_m3_len`, per SCX):
-
-    WX        1..163   164        165      166      167
-    CGB       178      178/179    179      180      172
-    DMG       178      178/179    179      173      172
-    hardware  178      178        178      178      172
-
-**Modelled.** `WIN_TAIL_FETCH`, `CGB_WIN_TAIL_LAST = 1` (the CGB's mode 3
-ends with the last FETCH and the DMG's with the last PIXEL, so at WX 166
-they part: DMG 174, CGB 180 — gambatte `m2int_wxA6_*_m3stat` brackets the
-CGB extra to 5..7 dots) and `DMG_WIN_LAST_PX_CARRY = 1` (a DMG WX = 166
-match is owed to the next line; 14 `window/on_screen/wxA6_*` frames).
-`OBJ_TAIL_WALK_REFUND` covers an object at X = 167 in the same slot.
-
-**To close.** AGE is a third witness saying the flat 178 is right for both
-devices; gambatte's `wxA6` families say the CGB is longer and the `on_screen`
-frames pin the DMG carry to the pixel. The three have not been read against
-each other, and whatever reconciles them has to keep the 14 frames and
-`m2int_wxA6_m3stat_1`.
+**Still red (1 AGE arm + gambatte).** `stat-mode-window-dmgC`: the DMG's
+WX = 166 line, where the start is carried to the next line
+(`DMG_WIN_LAST_PX_CARRY`) and dingbat reads 173 against AGE's 172 (the same
+row as WX 167, no window). gambatte `m2int_wxA6_m3stat_1` [dmg] reads the
+same line as longer than 172 ("174, not 172", the carry's pending term in
+`fetch_work_pending`); the two ROMs set the window up differently (AGE: WY =
+8, SCX = LY, LCD off/on per frame; gambatte: from the mode 2 handler) and
+have not been read against each other. The remaining `window/` rows are
+the `spxA7` (object at X = 167 sharing the slot), `m0irq`, `oambusyread`
+and `on_screen` families, unchanged by this.
 
 ### C3. Mid-line SCX stores
 

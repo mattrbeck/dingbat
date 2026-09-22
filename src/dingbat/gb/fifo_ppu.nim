@@ -610,6 +610,12 @@ proc win_start_reset(ppu: GbFifoPpu) {.inline.} =
   ## 3's length is unchanged. The clamp is read back off `lx` rather than
   ## stored (a store on every register write measured +0.07%). A held match
   ## is excluded: WIN_EN_HOLD_BACK has already moved its `lx`.
+  when WIN_TAIL_FLAG_LEAD != 0:
+    # A restart in the tail retires on a fixed dot (WIN_TAIL_FLAG_LEAD, gb.nim).
+    ppu.win_tail_end =
+      if ppu.lx >= int32(GB_WIDTH) - ppu.m3_lead:
+        ppu.cycle_counter + 7 - ppu.m3_lead + (int32(GB_WIDTH) - 1 - ppu.lx)
+      else: 0
   when WIN_PRE_PX_PHASE != 0:
     if ppu.win_hold == 0'u8 and int32(ppu.wx) - 7 == ppu.lx - 1:
       dec ppu.lx
@@ -1705,10 +1711,15 @@ proc fetch_work_pending(ppu: GbFifoPpu): bool {.inline.} =
     # devices part (CGB_WIN_TAIL_LAST): the CGB waits for the fetch, the DMG
     # ends with the pixel; an object already fetched on that pixel
     # (obj_last_px) is not charged twice.
-    if ppu.fetching_window and ppu.fetcher_x == 0 and
-       (ppu.lx < int32(GB_WIDTH) - 1 or
-        (CGB_WIN_TAIL_LAST != 0 and ppu.cgb and not ppu.obj_last_px)):
-      return true
+    if ppu.fetching_window and ppu.fetcher_x == 0:
+      when WIN_TAIL_FLAG_LEAD != 0:
+        # A tail restart's retire dot (WIN_TAIL_FLAG_LEAD, gb.nim); an object
+        # fetched on the last pixel keeps the shared-slot rule below.
+        if ppu.win_tail_end != 0 and not ppu.obj_last_px:
+          return ppu.cycle_counter < ppu.win_tail_end
+      if ppu.lx < int32(GB_WIDTH) - 1 or
+         (CGB_WIN_TAIL_LAST != 0 and ppu.cgb and not ppu.obj_last_px):
+        return true
   if not ppu.fetching_window and ppu.window_trigger and window_enabled(ppu) and
      int(ppu.wx) <= GB_WIDTH + 6: return true
   when DMG_WIN_LAST_PX_CARRY != 0:
@@ -2053,6 +2064,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
               ppu.wx < uint8(WIN_LINE_START_WX) and ppu.window_trigger)
           fifo_reset_sprite(ppu)
           when CGB_WIN_TAIL_LAST != 0: ppu.obj_last_px = false
+          when WIN_TAIL_FLAG_LEAD != 0: ppu.win_tail_end = 0
           ppu.lx = 0
           when MIXER_DOT_LAG != 0:
             # No tail in flight until this line emits (the LCD switched off

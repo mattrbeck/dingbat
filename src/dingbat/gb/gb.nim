@@ -677,6 +677,18 @@ const WIN_CARRY_REACT_LINES* {.intdefine.} = 1
   ## `window/on_screen/wxA6_late_we_reenable_1..3`, `wxA6_weoff_at_xposA6` and
   ## `wxA6_wy01_weoff_ly02_weon_ly60` want the rows every four lines, not eight.
 
+const WIN_TAIL_FLAG_LEAD*     {.intdefine.} = 1
+  ## A window restart inside the last `m3_lead` pixels ends mode 3 by the same
+  ## rule as one anywhere else: the flag falls `m3_lead` dots before the last
+  ## pixel would leave the shifter, and the restart delays that pixel by a
+  ## fetch, so mode 3 ends at hit + 7 - m3_lead + (159 - lx) whatever `lx`
+  ## the match landed on -- a flat six dots over the window-less line (Pan
+  ## Docs, "Mode 3 Length"). Without it the tail waits for the restarted
+  ## fetch's push, which is one dot more at WX = 165 and two at WX = 166.
+  ## AGE stat-mode-window (SCX = LY, WX 0..9 and 162..167, byte-identical
+  ## expectations for WX 1..166 on CGB B/C/E and DMG C) and gambatte
+  ## window/m2int_wxA6_m3stat_3 [cgb] (mode 0 by its third read). A carried
+  ## DMG start (DMG_WIN_LAST_PX_CARRY) is not a restart and is left alone.
 const CGB_WIN_TAIL_LAST*      {.intdefine.} = 1
   ## Whether a window restart issued on the line's LAST pixel holds mode 3 open,
   ## which only the CGB does: the DMG's mode 3 ends with the last pixel, the
@@ -1570,6 +1582,7 @@ type
     # only by fetch_work_pending on a CGB, where a window restart and an object
     # fetch on that pixel are one fetch slot (CGB_WIN_TAIL_LAST).
     obj_last_px*:         bool
+    win_tail_end*:        int32   # WIN_TAIL_FLAG_LEAD: the dot a tail restart retires on (0 = none)
     # A window start owed to the next line: the WX comparator matched on the
     # line's last pixel, which a DMG's end-of-line cleanup cannot clear
     # (DMG_WIN_LAST_PX_CARRY). Consumed at the head of the next line whose
