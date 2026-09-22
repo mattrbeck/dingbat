@@ -237,9 +237,12 @@ write sampled at dot 1 of a line lands and one at dot 5 does not, and the
 lock lets go again over the 2 -> 3 edge (dot 81 lands, 85 does not) --
 gambatte `midwrite_2`/`prewrite_2` (`dmg08_out1_cgb04c_out0`), GBMicrotest
 `oam_write_l0_e`/`l1_c`, mooneye `lcdon_write_timing-GS`. `OAM_WRITE_*`
-(gb.nim, ppu.nim). Still red: `oam-write-dmgC` on its delay-2 line, which
-the ROM's author marks as depending on when the LCD was last switched off
-and which contradicts gambatte `postwrite_2_scx3` [dmg] on the open edge;
+(gb.nim, ppu.nim). `oam-write-dmgC` is in `NotScored` since 2026-09-21: its delay-2 line,
+which the ROM's author marks as depending on when the LCD was last switched
+off, contradicts gambatte `postwrite_2_scx3` [dmg] on the open edge, and
+the AGE emulator's own runner blacklists the ROM. SameBoy's DMG model does
+reproduce the line, so it is modellable; the thread to pull is a
+slot-by-slot diff of SameBoy's bytes against dingbat's on that line;
 gambatte `prewrite_lcdoffset1_1` [cgb], which passed only because the
 start-of-cycle sample cancelled the `lcdoffset1` phase error the
 `preread_lcdoffset1_1` row still shows.

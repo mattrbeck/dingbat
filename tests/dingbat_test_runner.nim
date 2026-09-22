@@ -970,6 +970,15 @@ proc build_age_tests(age_dir: string): seq[TestDef] =
   for rom in find_roms_recursive(age_dir, ".gb"):
     let rel = rom.relativePath(age_dir).changeFileExt("")
     let base = rom.splitFile().name
+    # `oam/oam-write-dmgC`: not scored. Its author's runner blacklists it (the
+    # AGE emulator's test-blacklist.txt names it, `_in-progress` and
+    # `speed-switch/caution`, nothing else of the suite), and the source
+    # marks its delay-2 line as depending on when the LCD was last switched
+    # off, changing when the test runs more frames. Verified on one
+    # DMG-CPU-08 in 2021. Every other line of the ROM passes here, and the
+    # CGB twin (oam-write-cgbBCE) is scored on all three revisions.
+    if rel == "oam" / "oam-write-dmgC":
+      continue
     # Screenshot ROMs are the ones with `<base>-<device>.png` siblings.
     var shots: seq[(string, string)]   # (device, png path)
     for png in find_roms(rom.parentDir, ".png"):
@@ -1432,6 +1441,13 @@ const NotScored: seq[(string, string)] = @[
     "Those separate ROMs ARE scored. (build_mooneye_tests)"),
   ("age `ncm*` rows", "CGB running in non-CGB mode, a device this harness " &
     "does not model. (build_age_tests)"),
+  ("age `oam/oam-write-dmgC`", "the AGE emulator's own runner blacklists it " &
+    "(its test-blacklist.txt names this ROM, `_in-progress` and " &
+    "`speed-switch/caution`, nothing else of the suite), and the source marks " &
+    "the delay-2 line as depending on when the LCD was last switched off, " &
+    "changing when the test covers more frames; verified on one DMG-CPU-08 " &
+    "in 2021. Every other line of the ROM passes here; the CGB twin " &
+    "`oam-write-cgbBCE` is scored on B, C and E. (build_age_tests)"),
   ("gambatte `oamdma_src{FE00,FF00}_*read*` DMG rows (9)", "their verdict " &
     "is a byte of uninitialised WRAM. That source fetches through the echo, " &
     "so it reads $DE00/$DF00, and a colliding CPU read gets the DMA's latch " &

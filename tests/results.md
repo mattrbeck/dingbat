@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-09-21 19:39:24 · commit 2fd1f7a92 · game-boy-test-roms v7.0*
+*Generated: 2026-09-21 20:19:31 · commit 8071fd400 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
-- **Total:** 1223
+- **Total:** 1222
 - **Pass:** 1195
-- **Fail:** 28
+- **Fail:** 27
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -23,7 +23,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - MagenTests | 7 | 7 |
 | Game Boy - Mealybug Tearoom | 74 | 74 |
 | Game Boy - GBMicrotest | 480 | 480 |
-| Game Boy - AGE | 88 | 89 |
+| Game Boy - AGE | 88 | 88 |
 | Game Boy - Screenshot suites | 13 | 13 |
 | Game Boy - SameSuite | 8 | 8 |
 | Game Boy - SameSuite APU | 70 | 70 |
@@ -77,99 +77,9 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 480 tests passed.**
 
-## Game Boy - AGE (88/89)
+## Game Boy - AGE (88/88)
 
-| Test | Device | Result |
-|------|--------|--------|
-| age/halt/ei-halt-dmgC-cgbBCE@dmgC | DMG dmgC | 👌 |
-| age/halt/ei-halt-dmgC-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/halt/ei-halt-dmgC-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/halt/ei-halt-dmgC-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/halt/halt-m0-interrupt-dmgC-cgbBCE@dmgC | DMG dmgC | 👌 |
-| age/halt/halt-m0-interrupt-dmgC-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/halt/halt-m0-interrupt-dmgC-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/halt/halt-m0-interrupt-dmgC-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/halt/halt-prefetch-dmgC-cgbBCE@dmgC | DMG dmgC | 👌 |
-| age/halt/halt-prefetch-dmgC-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/halt/halt-prefetch-dmgC-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/halt/halt-prefetch-dmgC-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/lcd-align-ly/lcd-align-ly-cgbBC@cgbab | CGB cgbab | 👌 |
-| age/lcd-align-ly/lcd-align-ly-cgbBC@cgbc | CGB cgbc | 👌 |
-| age/lcd-align-ly/lcd-align-ly-cgbE | CGB cgbe | 👌 |
-| age/ly/ly-cgbE | CGB cgbe | 👌 |
-| age/ly/ly-dmgC-cgbBC@dmgC | DMG dmgC | 👌 |
-| age/ly/ly-dmgC-cgbBC@cgbab | CGB cgbab | 👌 |
-| age/ly/ly-dmgC-cgbBC@cgbc | CGB cgbc | 👌 |
-| age/m3-bg-bgp/m3-bg-bgp-dmgC | DMG dmgC | 👌 |
-| age/m3-bg-lcdc/m3-bg-lcdc-ds-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/m3-bg-lcdc/m3-bg-lcdc-ds-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/m3-bg-lcdc/m3-bg-lcdc-ds-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/m3-bg-lcdc/m3-bg-lcdc-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/m3-bg-lcdc/m3-bg-lcdc-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/m3-bg-lcdc/m3-bg-lcdc-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/m3-bg-lcdc/m3-bg-lcdc-dmgC | DMG dmgC | 👌 |
-| age/m3-bg-scx/m3-bg-scx-ds-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/m3-bg-scx/m3-bg-scx-ds-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/m3-bg-scx/m3-bg-scx-ds-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/m3-bg-scx/m3-bg-scx-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/m3-bg-scx/m3-bg-scx-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/m3-bg-scx/m3-bg-scx-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/m3-bg-scx/m3-bg-scx-dmgC | DMG dmgC | 👌 |
-| age/oam/oam-read-cgbE | CGB cgbe | 👌 |
-| age/oam/oam-read-dmgC-cgbBC@dmgC | DMG dmgC | 👌 |
-| age/oam/oam-read-dmgC-cgbBC@cgbab | CGB cgbab | 👌 |
-| age/oam/oam-read-dmgC-cgbBC@cgbc | CGB cgbc | 👌 |
-| age/oam/oam-write-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/oam/oam-write-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/oam/oam-write-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/oam/oam-write-dmgC | DMG dmgC | 👀 Mooneye: FAIL |
-| age/speed-switch/caution/spsw-interrupts-cgbBC@cgbab | CGB cgbab | 👌 |
-| age/speed-switch/caution/spsw-interrupts-cgbBC@cgbc | CGB cgbc | 👌 |
-| age/speed-switch/caution/spsw-interrupts-cgbE | CGB cgbe | 👌 |
-| age/speed-switch/spsw-ch2-lc-delay-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/speed-switch/spsw-ch2-lc-delay-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/speed-switch/spsw-ch2-lc-delay-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/speed-switch/spsw-div-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/speed-switch/spsw-div-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/speed-switch/spsw-div-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/speed-switch/spsw-mode0-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/speed-switch/spsw-mode0-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/speed-switch/spsw-mode0-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/speed-switch/spsw-stop-prefetch-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/speed-switch/spsw-stop-prefetch-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/speed-switch/spsw-stop-prefetch-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/speed-switch/spsw-tima-cgbBC@cgbab | CGB cgbab | 👌 |
-| age/speed-switch/spsw-tima-cgbBC@cgbc | CGB cgbc | 👌 |
-| age/speed-switch/spsw-tima-cgbE | CGB cgbe | 👌 |
-| age/stat-interrupt/stat-int-dmgC-cgbBCE@dmgC | DMG dmgC | 👌 |
-| age/stat-interrupt/stat-int-dmgC-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/stat-interrupt/stat-int-dmgC-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/stat-interrupt/stat-int-dmgC-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE@dmgC | DMG dmgC | 👌 |
-| age/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/stat-mode-sprites/stat-mode-sprites-ds-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/stat-mode-sprites/stat-mode-sprites-ds-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/stat-mode-sprites/stat-mode-sprites-ds-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/stat-mode-window/stat-mode-window-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/stat-mode-window/stat-mode-window-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/stat-mode-window/stat-mode-window-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/stat-mode-window/stat-mode-window-dmgC | DMG dmgC | 👌 |
-| age/stat-mode-window/stat-mode-window-ds-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/stat-mode-window/stat-mode-window-ds-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/stat-mode-window/stat-mode-window-ds-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/stat-mode/stat-mode-cgbE | CGB cgbe | 👌 |
-| age/stat-mode/stat-mode-dmgC-cgbBC@dmgC | DMG dmgC | 👌 |
-| age/stat-mode/stat-mode-dmgC-cgbBC@cgbab | CGB cgbab | 👌 |
-| age/stat-mode/stat-mode-dmgC-cgbBC@cgbc | CGB cgbc | 👌 |
-| age/stat-mode/stat-mode-ds-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/stat-mode/stat-mode-ds-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/stat-mode/stat-mode-ds-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/vram/vram-read-cgbBCE@cgbab | CGB cgbab | 👌 |
-| age/vram/vram-read-cgbBCE@cgbc | CGB cgbc | 👌 |
-| age/vram/vram-read-cgbBCE@cgbe | CGB cgbe | 👌 |
-| age/vram/vram-read-dmgC | DMG dmgC | 👌 |
+**All 88 tests passed.**
 
 ## Game Boy - Screenshot suites (13/13)
 
@@ -259,6 +169,7 @@ Everything skipped on purpose, with the reason and the builder that skips it. If
 - **mooneye/wilbertpol `ags` arms** — `ags` is AGB silicon in a different package — the suite's own README says so — and dingbat models one AGB, so a `-C`/`-A` token's `ags` member folds into its `agb` arm rather than inventing a machine. Everything else those tokens name IS run: see mooneye_machines_for. (build_mooneye_tests / build_wilbertpol_tests)
 - **mooneye/wilbertpol revision 0 inside a bare model token** — `-cgb` and `-dmg` fan out across the revisions dingbat models but deliberately stop short of revision 0, which the suite treats as its own machine and ships separate `-cgb0`/`-dmg0` ROMs for precisely because it diverges. Those separate ROMs ARE scored. (build_mooneye_tests)
 - **age `ncm*` rows** — CGB running in non-CGB mode, a device this harness does not model. (build_age_tests)
+- **age `oam/oam-write-dmgC`** — the AGE emulator's own runner blacklists it (its test-blacklist.txt names this ROM, `_in-progress` and `speed-switch/caution`, nothing else of the suite), and the source marks the delay-2 line as depending on when the LCD was last switched off, changing when the test covers more frames; verified on one DMG-CPU-08 in 2021. Every other line of the ROM passes here; the CGB twin `oam-write-cgbBCE` is scored on B, C and E. (build_age_tests)
 - **gambatte `oamdma_src{FE00,FF00}_*read*` DMG rows (9)** — their verdict is a byte of uninitialised WRAM. That source fetches through the echo, so it reads $DE00/$DF00, and a colliding CPU read gets the DMA's latch rather than its own byte -- Pan Docs says WRAM is random on power-up and GB_POWERUP_WRAM_PATTERN honours that, so these encode gambatte's capture rig, not hardware. The non-colliding members of the same family (`busyread8000`, `busyreadFF4B`) and every CGB arm ARE scored. (build_gambatte_rows / gambatte_row_reads_powerup_wram)
 - **gambatte `_outaudio0/1` rows (220) + the AGB column** — audio-register sampling and the AGB device are not scored; see results_gambatte.md's source notes. (build_gambatte_rows)
 - **gbmicrotest: 31 ROMs that never write the $FF82 verdict byte** — scanned all 513 bundled ROMs for `ldh ($82),a` / `ld ($ff82),a`; 482 contain one and these 31 contain neither, so the harness would be scoring uninitialised HRAM rather than a result. All 31 were failing rows before the skip. The honest suite denominator is 482. (build_gbmicrotest_tests)
