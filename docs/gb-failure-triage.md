@@ -330,6 +330,10 @@ line when halted, two errors that cancel in the halted steady state
 `enable_display_ly0_sprites_m0stat_2`, `ly0_oambusy_read_ds_1`),
 `lcd_offset` 19 (all CGB). `display_startstate/stat_*_2 [cgb]` (4) closed
 2026-09-22: `CGB_BOOT_PHASE` 161 -> 165, which no other row felt.
+`ly0_m0irq_scx{0,1}_ds_1` and `frame0_m0irq_count_scx{2,3}_ds_1` closed
+2026-09-22: at double speed the LCD-on line's mode-0 source trails its flag
+by the same 2 dots the single-speed source spends as a lost lead
+(`LCDON_M0_LAG_DS`, gb.nim).
 
 **Behaviour.** After `LCDC.7` goes high the first line starts in mode 0 and
 its mode-3 edges sit 2 dots later against the CPU's grid than on any later

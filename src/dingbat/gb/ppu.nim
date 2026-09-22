@@ -1774,8 +1774,18 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
     # window from it, and a stale one made the LCD-on line's wake an M-cycle
     # early.
     if ppu.irq_mode != mode:
-      ppu.irq_mode = mode
-      ppu.irq_chg_dot = int16(ppu.cycle_counter)
+      when LCDON_M0_LAG_DS != 0:
+        # The LCD-on line's mode-0 source trails its flag at double speed
+        # (LCDON_M0_LAG_DS, gb.nim); later lines keep the joint-move lead.
+        if mode == 0'u8 and ppu.first_line and gb.memory.current_speed != 0'u8:
+          gb.m0_late_fire = true
+          gb.scheduler.schedule(LCDON_M0_LAG_DS, etGbLycEdge)
+        else:
+          ppu.irq_mode = mode
+          ppu.irq_chg_dot = int16(ppu.cycle_counter)
+      else:
+        ppu.irq_mode = mode
+        ppu.irq_chg_dot = int16(ppu.cycle_counter)
   ppu_handle_stat_interrupt(ppu, gb)
   # The HBlank DMA step runs AFTER lcd_status reflects mode 0: the block copy
   # ticks the PPU, and a nested tick still seeing mode 3 re-enters the FIFO

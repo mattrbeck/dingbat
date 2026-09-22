@@ -202,6 +202,14 @@ const DMG_LYC_EVENT_HOLD* {.intdefine.} = 4
   ## `lycEnable/ff45_enable_weirdpoint_3` [dmg], 8 three `ff45_enable_
   ## weirdpoint`/`lyc153_late_ff45_enable`/`lycwirq_trigger_*` rows; 4 is
   ## gambatte-core's window.
+const LCDON_M0_LAG_DS* {.intdefine.} = 8
+  ## Scheduler cycles (4 per M-cycle) the mode-0 STAT source trails the mode
+  ## flag on the first line after an LCD enable at double speed. On that line
+  ## the source loses the 2-dot lead every later line has at single speed
+  ## (`m0_source_lead`, fifo_ppu.nim); at double speed that lead is already 0
+  ## (STAT_M0_LEAD_DS), so the same 2 dots show as a lag. gambatte
+  ## `enable_display/ly0_m0irq_scx{0,1}_ds_1`, `frame0_m0irq_count_scx{2,3}_
+  ## ds_1` (+4, none lost); 4 is inert, 12 loses the four `_2` twins.
 const CGB_LYC_RULE_FIRE_T* {.intdefine.} = 4
   ## Scheduler cycles after the byte lands (single speed) at which the rule's
   ## request goes up: after that boundary's interrupt check, before the next
@@ -2409,6 +2417,7 @@ type
     lyc_hold_on*:      bool    # CGB_LYC_EVENT_HOLD_DS: a new LYC waits out the event
     lyc_hold_new*:     uint8
     lyc_hold_ly*:      uint8
+    m0_late_fire*:     bool    # LCDON_M0_LAG_DS: the LCD-on line's mode-0 source is owed
     when defined(test_harness):
       test_output*:  TestOutput
 
@@ -3340,6 +3349,12 @@ proc gb_dispatch(gb: GB): proc(kind: EventType) {.closure.} =
       # A CGB LYC write's STAT edge, one M-cycle past the boundary its byte
       # landed on (CGB_LYC_EDGE_DEFER).
       when CGB_LYC_EDGE_DEFER and not CGB_LYC_EDGE_POLL:
+        when LCDON_M0_LAG_DS != 0:
+          if gb.m0_late_fire:
+            gb.m0_late_fire = false
+            if gb.ppu.first_line and (gb.ppu.lcd_status and 3'u8) == 0'u8:
+              ppu_set_irq_mode(gb.ppu, gb, 0'u8)
+            return
         when CGB_LYC_WRITE_RULE != 0:
           # Booked by the rule for a write that requests the interrupt.
           if gb.lyc_rule_fire:
