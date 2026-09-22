@@ -435,15 +435,16 @@ its mode 3 and 4 dots into its mode 0, with its line 3 dots ahead of ours).
 **Rows (27).** `oam_access/{postread_scx{2,3,5}_2, 10spritesprline_postread_2,
 postwrite_2_scx3, midwrite_2, prewrite_{2,ds_2,ds_lcdoffset1_2},
 preread_{ds,lcdoffset1}_1}`, `vram_m3/{postread_scx{2,3}_2,
-10spritesprline_postread_2, preread_lcdoffset2_1, prewrite_lcdoffset2_1}`,
-`vramw_m3end/vramw_m3end_scx3_{3,5}`.
+10spritesprline_postread_2, preread_lcdoffset2_1, prewrite_lcdoffset2_1}`.
+`vramw_m3end_scx3_5` (both devices) closed 2026-09-22: a VRAM write issued
+in mode 3 asks the lock 3 dots into its M-cycle (`VRAM_WRITE_M3_END_DOTS`,
+memory.nim; 0 at double speed).
 
 **Behaviour.** The CPU's VRAM and OAM access windows open and close on PPU
 dots, not on the CPU's M-cycle boundaries (Pan Docs, "Accessing VRAM and
 OAM"). The `postread_*_2` rows read one M-cycle after the mode 3 -> 0 edge at
 SCX 2/3/5 or with ten objects and want the lock open; `prewrite`/`preread`
-ask the close edge at mode 3's start on CGB and in double speed;
-`vramw_m3end_scx3_{3,5}` bracket a VRAM WRITE's last admitted M-cycle.
+ask the close edge at mode 3's start on CGB and in double speed.
 
 **Modelled.** Open edge: `VRAM_READ_M0_OPEN_DOTS = 2` / `_DS = 3`,
 `OAM_READ_M0_OPEN_DOTS = 2` / `_DS = 3` (AGE-bracketed, B1). Close edge:

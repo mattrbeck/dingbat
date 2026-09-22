@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-22 15:44:54*
+*Generated: 2026-09-22 15:52:00*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5121/5216 passed.**
+**5123/5216 passed.**
 
 ## bgen
 
@@ -325,14 +325,9 @@ All 20 tests passed.
 | vram_m3/preread_lcdoffset1_2_cgb04c_out3 [cgb] | got 0, expected 3 |
 | vram_m3/prewrite_lcdoffset1_2_cgb04c_out0 [cgb] | got 1, expected 0 |
 
-## vramw_m3end (34/36 passed)
+## vramw_m3end
 
-34/36 tests passed, 2 failed:
-
-| Test | Result |
-|------|--------|
-| vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
-| vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
+All 36 tests passed.
 
 ## window (464/476 passed)
 

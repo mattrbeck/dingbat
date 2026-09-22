@@ -666,6 +666,24 @@ const IF_WRITE_LAND_DOTS* {.intdefine.} = 1
 const IF_WRITE_LAND_DOTS_DS* {.intdefine.} = 1
   ## The same in double speed, one of STAT_M0_LEAD_DS's joint move (0 and 2
   ## lose there; alone, 1 lost `m2int_m0irq_scx4_ifw_ds_1`).
+const VRAM_WRITE_M3_END_DOTS* {.intdefine.} = 3
+  ## Dots into its M-cycle at which a VRAM write issued in mode 3 asks the
+  ## lock: a mode 3 that ends in those dots lets it through. gambatte
+  ## `vramw_m3end/vramw_m3end_scx3_5` (both devices: SCX 3 ends mode 3 one dot
+  ## before the write's last); 2 is inert, 4 loses `vramw_m3end_4` on both.
+const VRAM_WRITE_M3_END_DOTS_DS* {.intdefine.} = 0
+  ## The same at double speed: 1 loses `vramw_m3end_scx5_ds_4`.
+proc mem_write_vram_m3(mem: GbMemory; gb: GB; idx: int; val: uint8) {.noinline.} =
+  ## A VRAM write issued in mode 3 asks the lock VRAM_WRITE_M3_END_DOTS into
+  ## its M-cycle, so a mode 3 that ends inside the M-cycle lets it through.
+  let dots = 4 shr int(mem.current_speed)
+  let pre = min(dots, if mem.current_speed != 0'u8: VRAM_WRITE_M3_END_DOTS_DS
+                      else: VRAM_WRITE_M3_END_DOTS)
+  if pre > 0: mem_tick_ppu(mem, gb, pre, ignore_speed = true)
+  mem_write_open(mem, gb, idx, val)
+  if dots - pre > 0: mem_tick_ppu(mem, gb, dots - pre, ignore_speed = true)
+  if mem.write_deferred: mem_flush_deferred(mem, gb)
+
 proc mem_write*(mem: GbMemory; gb: GB; idx: int; val: uint8) {.hot_bus_inline.} =
   ## A CPU write commits at the START of its M-cycle, before its PPU dots: the
   ## VRAM/OAM lock is decided on the mode at the start of the M-cycle
@@ -697,6 +715,10 @@ proc mem_write*(mem: GbMemory; gb: GB; idx: int; val: uint8) {.hot_bus_inline.} 
     mem_write_open(mem, gb, idx, val)
     mem_tick_ppu(mem, gb, dots - pre, ignore_speed = true)
     if mem.write_deferred: mem_flush_deferred(mem, gb)
+    return
+  elif VRAM_WRITE_M3_END_DOTS != 0 and (idx and 0xE000) == 0x8000 and
+       (gb.ppu.lcd_status and 3'u8) == 3'u8:
+    mem_write_vram_m3(mem, gb, idx, val)
     return
   else:
     mem_write_open(mem, gb, idx, val)
