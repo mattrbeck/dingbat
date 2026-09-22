@@ -1304,6 +1304,31 @@ when CGB_STAT_WRITE_RULE != 0:
     if ly == 153: return ttnl <= 2 * (1 + dsi) and ttnl > 2
     false
 
+when CGB_STAT_LYC_DISABLE_HOLD != 0:
+  proc cgb_stat_lyc_disable_hold(ppu: GbPpu; gb: GB; old, data: uint8) {.noinline.} =
+    ## A CGB STAT write that clears the LYC enable within
+    ## CGB_STAT_LYC_DISABLE_HOLD cycles of the next line's LYC event does not
+    ## reach that event: it still requests the interrupt when LY + 1 == LYC,
+    ## unless the old OAM (lines 1..144) or VBlank enable blocks it.
+    if (old and 0x40'u8) == 0'u8 or (data and 0x40'u8) != 0'u8: return
+    let dsi = int(gb.memory.current_speed)
+    var lc = int(ppu.cycle_counter) -
+             (if dsi != 0: CGB_STAT_RULE_OFF_DS else: CGB_STAT_RULE_OFF)
+    var ly = int(ppu.ly)
+    if lc < 0:
+      lc += 456
+      ly = (if ly == 0: 153 else: ly - 1)
+    if ly >= 153 or ((ppu.lcd_status and 3'u8) == 1'u8 and ly == 0): return
+    let ev = ((456 - lc) shl dsi) - (2 + 2 * dsi)
+    if ev <= 0 or ev > CGB_STAT_LYC_DISABLE_HOLD: return
+    let cly = ly + 1
+    if cly != int(ppu.lyc): return
+    let blocked = if cly <= 144 and cly > 0: (old and 0x20'u8) != 0'u8
+                  else: (old and 0x10'u8) != 0'u8
+    if blocked: return
+    gb.lyc_rule_fire = true
+    gb.scheduler.schedule(max(1, ev), etGbLycEdge)
+
 when CGB_LYC_WRITE_RULE != 0 or DMG_LYC_WRITE_RULE != 0:
   proc cgb_lyc_write_trigger(ppu: GbPpu; gb: GB; old, data: uint8): bool {.noinline.} =
     ## CGB_LYC_WRITE_RULE: does a CGB LYC write request the interrupt itself?
@@ -2461,6 +2486,8 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
         rule_mode = true
         if cgb_stat_write_trigger(ppu, gb, ppu.lcd_status, val):
           gb.interrupts.lcd_stat_interrupt = true
+        when CGB_STAT_LYC_DISABLE_HOLD != 0:
+          cgb_stat_lyc_disable_hold(ppu, gb, ppu.lcd_status, val)
         let adopt_en = when CGB_STAT_RULE_OR != 0: ppu.lcd_status or (val and 0x78'u8)
                        else: (ppu.lcd_status and 0x87'u8) or (val and 0x78'u8)
         if stat_level_with(ppu, gb, adopt_en, ppu.lyc):

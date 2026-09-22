@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-22 16:31:30*
+*Generated: 2026-09-22 16:37:33*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5136/5216 passed.**
+**5137/5216 passed.**
 
 ## bgen
 
@@ -117,13 +117,12 @@ All 6 tests passed.
 
 All 16 tests passed.
 
-## lycEnable (222/225 passed)
+## lycEnable (223/225 passed)
 
-222/225 tests passed, 3 failed:
+223/225 tests passed, 2 failed:
 
 | Test | Result |
 |------|--------|
-| lycEnable/ff41_disable_2_dmg08_out0_cgb04c_out2 [cgb] | got 0, expected 2 |
 | lycEnable/ff45_enable_weirdpoint_2_dmg08_out3_cgb04c_out1 [cgb] | got 3, expected 1 |
 | lycEnable/ff45_enable_weirdpoint_lcdoffset1_2_cgb04c_out0 [cgb] | got 2, expected 0 |
 

@@ -211,6 +211,12 @@ const LCDON_M0_LAG_DS* {.intdefine.} = 8
   ## `enable_display/ly0_m0irq_scx{0,1}_ds_1`, `frame0_m0irq_count_scx{2,3}_
   ## ds_1` (+4, none lost); 4 is inert, 12 loses the four `_2` twins.
 const CGB_LYC_RULE_FIRE_T* {.intdefine.} = 4
+const CGB_STAT_LYC_DISABLE_HOLD* {.intdefine.} = 2
+  ## CPU cycles before the next line's LYC event inside which a CGB STAT write
+  ## clearing the LYC enable no longer reaches that event: it still requests
+  ## the interrupt (gambatte-core's LYC event keeps the old STAT unless the
+  ## write is more than two cycles ahead). gambatte `lycEnable/ff41_disable_2`
+  ## [cgb]; 1 is inert, 4 loses `ff41_disable_ds_1`. 0 compiles it out.
   ## Scheduler cycles after the byte lands (single speed) at which the rule's
   ## request goes up: after that boundary's interrupt check, before the next
   ## (gambatte `lycEnable/lyc_ff45_trigger_delay_{2,3}`; 6 loses both, 0
