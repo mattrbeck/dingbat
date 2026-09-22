@@ -440,7 +440,15 @@ of the mealybug/daid side. Hardware experiment (d) below.
 
 ### C8. AGE `m3-bg-bgp-dmgC`, 2 pixels
 
-23038/23040 after `MIXER_PALETTE_OR`; the two pixels are not diagnosed.
+**Closed 2026-09-21.** Both pixels were x = 0 on a line whose BGP pulse's
+restoring write found pixel 0 exactly MIXER_PALETTE_BACK stages down the
+mixer tail (SCX 1 in the first band, SCX 5 in the second): the model
+painted it `old or new` (black), hardware paints it the clean new shade.
+The band's run lengths, 10 - SCX, put every other edge where the model
+has it. `MIXER_PALETTE_OR_HEAD = 0` (gb.nim): the line's first pixel is
+never the transition pixel. mealybug is unchanged and gambatte
+`dmgpalette_during_m3/dmgpalette_during_m3_scx1_4` goes from 144 wrong
+pixels to 1.
 
 ---
 

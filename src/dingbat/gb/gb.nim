@@ -681,6 +681,10 @@ const DMG_WIN_LAST_PX_CARRY* {.intdefine.} = 1
   ## measured +3.6% (see `fifo_emit_pixel`). Still red:
   ## `wxA6_late_we_reenable_3` [dmg], one window line too many.
 
+const DMG_WIN_CARRY_OWES*    {.intdefine.} = 1
+  ## Whether a DMG line carried out of the previous one (DMG_WIN_LAST_PX_CARRY)
+  ## holds mode 3 for its own WX = 166 match (fetch_work_pending). Experimental
+  ## control for AGE stat-mode-window-dmgC, which reads that line as 172.
 const WIN_CARRY_TILE*        {.intdefine.} = 1
   ## The window tile column a carried start (DMG_WIN_LAST_PX_CARRY) draws
   ## first. 1: the aborted start on the previous line already ran column 0's
@@ -827,6 +831,15 @@ const MIXER_HEAD_LINGER*      {.intdefine.} = 1
   ## MIXER_PRIORITY_BACK. mealybug `m3_lcdc_bg_en_change` bands 0-2 blank x = 0
   ## two dots after it leaves; `m3_bgp_change` says the palettes are not
   ## extended. Written as `back < head`, not a lag: the two stages coincide.
+const MIXER_PALETTE_OR_HEAD*  {.intdefine.} = 0
+  ## Whether the line's first pixel can be a DMG palette write's `old or new`
+  ## transition pixel (1) or takes the clean new value (0). AGE
+  ## m3-bg-bgp-dmgC: a BGP pulse whose restoring write finds pixel 0 exactly
+  ## MIXER_PALETTE_BACK stages down the tail (SCX 1 in its first band, 5 in
+  ## its second) leaves it white on hardware where `old or new` is black;
+  ## the same write one pixel further on (SCX 0 and 4) blends as usual. The
+  ## band's run lengths, 10 - SCX, place every other edge where the model has
+  ## it. mealybug m3_bgp_change is unchanged either way.
 const MIX_HOLD*               {.intdefine.} = 4
   ## Entries in the mixer's held-pair ring (GbFifoPpu.mix), a power of two. Must
   ## cover the deepest mixer stage plus the pipeline lead (static-asserted in

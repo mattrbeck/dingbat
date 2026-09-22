@@ -234,7 +234,7 @@ when SCX_STORE_STALL_DOTS != 0:
 
 proc fifo_recompose_last*(ppu: GbFifoPpu; gb: GB; back: int32;
                           skip: int32 = 0) {.noinline.}
-proc fifo_recompose_at*(ppu: GbFifoPpu; gb: GB; back: int32) {.noinline.}
+proc fifo_recompose_at*(ppu: GbFifoPpu; gb: GB; back: int32): bool {.noinline.}
 
 proc fifo_obj_size_write*(ppu: GbFifoPpu; gb: GB) {.noinline.}
 
@@ -2009,7 +2009,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
                   of 0xFF48: addr ppu.obp0
                   else:      addr ppu.obp1
         ppu_update_palette(cur[], ppu_palette_from_array(cur[]) or val)
-        fifo_recompose_at(gb.fifo_ppu, gb, int32(MIXER_PALETTE_BACK))
+        or_pixel = fifo_recompose_at(gb.fifo_ppu, gb, int32(MIXER_PALETTE_BACK))
     case idx
     of 0xFF47: ppu_update_palette(ppu.bgp,  val)
     of 0xFF48: ppu_update_palette(ppu.obp0, val)

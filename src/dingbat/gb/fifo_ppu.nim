@@ -1435,11 +1435,20 @@ proc fifo_recompose_last*(ppu: GbFifoPpu; gb: GB; back: int32;
   let (front, top, run) = mixer_tail_front(ppu, back, mixer_head_back(gb))
   fifo_recompose_span(ppu, gb, front, back - skip, top, run)
 
-proc fifo_recompose_at*(ppu: GbFifoPpu; gb: GB; back: int32) {.noinline.} =
+proc fifo_recompose_at*(ppu: GbFifoPpu; gb: GB; back: int32): bool {.noinline.} =
   ## Re-colour exactly the pixel `back` stages down the tail (the palette
-  ## write's transition pixel, MIXER_PALETTE_OR in gb.nim).
+  ## write's transition pixel, MIXER_PALETTE_OR in gb.nim). False when that
+  ## pixel is the line's first and MIXER_PALETTE_OR_HEAD says it takes the
+  ## clean value instead: the caller then paints it with the rest.
   let (front, top, run) = mixer_tail_front(ppu, back, mixer_head_back(gb))
+  when defined(gb_px_trace):
+    echo "PALAT ly=", ppu.ly, " dot=", ppu.cycle_counter, " lx=", ppu.lx,
+         " front=", front, " back=", back, " run=", run, " top=", top,
+         " tail0=", ppu.tail_dot0, " fifo=", ppu.fifo.size, " spr=", ppu.fetching_sprite
+  when MIXER_PALETTE_OR_HEAD == 0:
+    if front - back == 0'i32 and run == 0'i32: return false
   fifo_recompose_span(ppu, gb, front, back, min(top, front - back), run)
+  true
 
 proc fifo_obj_size_write*(ppu: GbFifoPpu; gb: GB) {.noinline.} =
   ## LCDC.2 written after an object merged and before its high plane was
@@ -1722,7 +1731,7 @@ proc fetch_work_pending(ppu: GbFifoPpu): bool {.inline.} =
         return true
   if not ppu.fetching_window and ppu.window_trigger and window_enabled(ppu) and
      int(ppu.wx) <= GB_WIDTH + 6: return true
-  when DMG_WIN_LAST_PX_CARRY != 0:
+  when DMG_WIN_LAST_PX_CARRY != 0 and DMG_WIN_CARRY_OWES != 0:
     # A DMG line carried out of the previous one starts with the window
     # already fetching and its WX = 166 match still ahead, and owes that
     # restart like an ordinary one (gambatte window/m2int_wxA6_m3stat_1 and
