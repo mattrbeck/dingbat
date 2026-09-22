@@ -686,9 +686,16 @@ during a transfer. How the rules were read: the gambatte oracle trace in
 
 ### D2. OAM DMA against the mode-2 scan and the CPU
 
-**Rows (11).** `oamdma/late_sp{00x,00y,01x,01y,39x,39y}_ds_*` (6),
-`late_sp39x_4`, `oamdma_src0000_busyint0002` (both devices),
+**Rows (4).** `oamdma_src0000_busyint0002` (both devices),
 `oamdma_src8000_srcchange0000_busyinc` (both).
+
+**Closed 2026-09-22 (+9).** `late_sp{00x,00y,01x,01y,39x,39y}_ds_*`,
+`late_sp39x_4`, `sprites/late_disable_ds_1`, `sprites/enable/late_disable_
+ds_3`: the `_ds` ROMs run with LCDC.1 clear, and the CGB fetcher stops for
+objects anyway (`CGB_OBJ_FETCH_OFF`; alone it phase-swapped the family),
+while at double speed the transfer's edge sits two dots earlier against the
+scan, object N at 2N + 2 (`OAM_SCAN_DMA_EDGE_DS`, the write offset's +3
+against single speed's +1).
 
 **Behaviour.** The mode-2 scan reads OAM entry `n` on dot `2n` and reads
 nothing while an OAM DMA owns the OAM bus; the transfer moves one entry per
@@ -702,9 +709,7 @@ against the last Y/X latched (`strikethrough` keeps its object 39).
 `OBJ_SCAN_DOT_ADJ = 0`, `CGB_OAM_DMA_START_T = 8`, `OAMDMA_HALT_PAUSE = 1`,
 `OAMDMA_FREEZE_BUS = 1`, `OAMDMA_WRAM_A12 = 1`, `OBJ_DMA_BUS_LEAD`.
 
-**To close.** The six `_ds` rows read as entry `n` at `2n + 2` in double
-speed, which `late_sp02x` refuses at single speed (note at
-`OAM_SCAN_DMA_LOCK`). The two `busy*` families are value rows (which byte a
+**To close.** The two `busy*` families are value rows (which byte a
 colliding access sees) and are undiagnosed.
 
 ---

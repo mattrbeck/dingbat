@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-22 15:32:31*
+*Generated: 2026-09-22 15:44:54*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5112/5216 passed.**
+**5121/5216 passed.**
 
 ## bgen
 
@@ -219,19 +219,12 @@ All 44 tests passed.
 
 All 69 tests passed.
 
-## oamdma (788/802 passed)
+## oamdma (795/802 passed)
 
-788/802 tests passed, 14 failed:
+795/802 tests passed, 7 failed:
 
 | Test | Result |
 |------|--------|
-| oamdma/late_sp00x_ds_2_cgb04c_out3 [cgb] | got 0, expected 3 |
-| oamdma/late_sp00y_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| oamdma/late_sp01x_ds_2_cgb04c_out3 [cgb] | got 0, expected 3 |
-| oamdma/late_sp01y_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
-| oamdma/late_sp39x_4_cgb04c_out3 [cgb] | got 0, expected 3 |
-| oamdma/late_sp39x_ds_2_cgb04c_out3 [cgb] | got 0, expected 3 |
-| oamdma/late_sp39y_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | oamdma/oamdma_late_halt_stat_2_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | oamdma/oamdma_late_halt_stat_2_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | oamdma/oamdma_late_speedchange_stat_2_cgb04c_out3 [cgb] | got 0, expected 3 |
@@ -301,14 +294,9 @@ All 67 tests passed.
 | speedchange/speedchange5_nop_ch1_duty0_pos6_to_pos7_timing_1_cgb04c_outaudio0 [cgb, audio] | audio1 (mix varies over 35112 samples), expected audio0 |
 | speedchange/speedchange_ch1_nr4init_duty0_pos6_to_pos7_timing_2_cgb04c_outaudio1 [cgb, audio] | audio0 (mix constant over 35112 samples), expected audio1 |
 
-## sprites (474/476 passed)
+## sprites
 
-474/476 tests passed, 2 failed:
-
-| Test | Result |
-|------|--------|
-| sprites/enable/late_disable_ds_3_cgb04c_out3 [cgb] | got 0, expected 3 |
-| sprites/late_disable_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
+All 476 tests passed.
 
 ## tima (225/232 passed)
 

@@ -206,8 +206,8 @@ const OAM_SCAN_DMA_LOCK* {.intdefine.} = 1
   ## is why no constant start latency (CGB_OAM_DMA_START_T) could fix these
   ## rows. Pinned by gambatte oamdma/late_sp{00,01,02,39}{x,y}: sixteen
   ## one-M-cycle brackets putting object N's dot at 2N (OBJ_SCAN_DOT_ADJ).
-  ## Open: the six late_sp*_ds_* rows read as object N at 2N + 2 in double
-  ## speed, which late_sp02x refuses at single speed.
+  ## At double speed the transfer's edge sits two dots earlier against the
+  ## scan (OAM_SCAN_DMA_EDGE_DS).
 
 # The OAM scan compares each object's Y against LCDC.2 as it stands in that
 # object's own two-dot slot (object N on dot 2N), since the CPU can move the
@@ -223,6 +223,26 @@ const OBJ_SCAN_DOT_ADJ* {.intdefine.} = 0'i32
   ## Dots to shift every object's scan sample by. 0 ships (object N on dot 2N);
   ## -1 is the other cell that gambatte sprites/late_sizechange* and
   ## oamdma/late_sp* both cannot separate from it.
+
+const OAM_SCAN_DMA_EDGE_DS* {.intdefine.} = 2
+  ## Dots the OAM DMA's take/give edge sits earlier against the mode-2 scan at
+  ## double speed: object N is read on dot 2N + 2 there, the CPU's bus half
+  ## landing two dots later against the PPU than at single speed (a write is
+  ## gambatte's cycle + 3 at double speed, + 1 at single). The six
+  ## oamdma/late_sp*_ds rows, with CGB_OBJ_FETCH_OFF; 0 loses three of them,
+  ## 3 four `_ds_2` twins.
+const CGB_OBJ_FETCH_OFF* {.intdefine.} = 1
+  ## The CGB's fetcher stops for objects with LCDC.1 clear (Pan Docs, "OBJ
+  ## Penalty Algorithm"); the mixer alone drops them. The late_sp*_ds ROMs
+  ## run with objects off, which is why this read as a phase swap of that
+  ## family until OAM_SCAN_DMA_EDGE_DS came with it. With it: +9 (late_sp*_ds,
+  ## late_sp39x_4, sprites/late_disable_ds_1, sprites/enable/late_disable_ds_3).
+
+template obj_fetch_on(ppu: GbFifoPpu): bool =
+  ## Whether the fetcher stops for this line's objects: LCDC.1, or always on a
+  ## CGB (CGB_OBJ_FETCH_OFF), which fetches with objects off and only the
+  ## mixer drops them.
+  sprite_enabled(ppu) or (CGB_OBJ_FETCH_OFF != 0 and ppu.cgb)
 
 proc obj_scan_height(ppu: GbFifoPpu; dot: int32): int {.inline.} =
   ## `sprite_height` as the OAM scan's comparator saw it on `dot`. The same walk
@@ -427,7 +447,13 @@ proc fifo_oam_lock_change*(ppu: GbFifoPpu; gb: GB; taking: bool) =
   ## `cycle_counter` is the dot the M-cycle carrying the edge starts on (the
   ## bus half of an M-cycle runs before its PPU dots).
   if ppu.mode_flag == 2:
-    oam_scan_advance(ppu, gb, ppu.cycle_counter, blocked = not taking)
+    when OAM_SCAN_DMA_EDGE_DS != 0:
+      let upto = if gb.memory.current_speed != 0'u8:
+                   ppu.cycle_counter - int32(OAM_SCAN_DMA_EDGE_DS)
+                 else: ppu.cycle_counter
+      oam_scan_advance(ppu, gb, upto, blocked = not taking)
+    else:
+      oam_scan_advance(ppu, gb, ppu.cycle_counter, blocked = not taking)
 
 const SCX_FINE_BORROW* {.intdefine.} = 1
   ## Tiles the BG fetcher's map column drops when a mid-line SCX write lowers
@@ -1584,10 +1610,9 @@ when M0_IRQ_EDGE_X != 0 and STAT_IRQ_SPLIT:
 proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
   if ppu.fifo.size > 0:
     if not ppu.smooth_scroll_sampled: fifo_sample_smooth_scroll(ppu)
-    # Object trigger, before the pop. Not gated on `ppu.cgb` (Pan Docs says
-    # the CGB pays the fetch with objects off): tried, it phase-swaps the
-    # gambatte oamdma/late_sp* family.
-    if sprite_enabled(ppu) and ppu.sprites.len > 0 and
+    # Object trigger, before the pop. The CGB fetches with objects off
+    # (CGB_OBJ_FETCH_OFF).
+    if obj_fetch_on(ppu) and ppu.sprites.len > 0 and
        int(ppu.lx) + 8 >= int(ppu.sprites[0].x) and
        # Off the hot path: reached only once the three tests above passed.
        not obj_yields_to_window(ppu) and
@@ -1737,7 +1762,7 @@ proc fetch_work_pending(ppu: GbFifoPpu; for_irq = false): bool {.inline.} =
   if ppu.fetching_sprite:
     if not (for_irq and M0_IRQ_EDGE_X != 0): return true
     if ppu.sprites.len == 0 or int(ppu.sprites[0].x) <= obj_x_max: return true
-  if sprite_enabled(ppu) and ppu.sprites.len > 0 and
+  if obj_fetch_on(ppu) and ppu.sprites.len > 0 and
      int(ppu.sprites[0].x) <= obj_x_max: return true
   when WIN_TAIL_FETCH != 0:
     # A started window whose restart has not pushed yet (`fetcher_x == 0`)
