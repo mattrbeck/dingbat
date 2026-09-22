@@ -518,6 +518,15 @@ grid's constants are a coupled set and move together or not at all.
   `ly0/lycint152_lyc153irq_late_retrigger_2`). A rendered line's window
   stays: skipping it loses 12 `lcdirq_precedence`/`miscmstatirq` rows.
 
+### An IF write lands one dot into its M-cycle
+- Claim: a request raised in the first dot of the M-cycle that writes IF is
+  overwritten by the write (single speed). The LYC = 0 match on line 153
+  rises on dot 6, one later than the source relatch had it.
+- Evidence: gambatte `m2int_m0irq/m2int_m0irq_scx3_ifw_{2,4}` (both
+  devices) against `ly0/lycint152_lyc0irq_ifw_1`; gambatte-core stores IF
+  after catching its sources up to the write's cycle + 1.
+- Site: `IF_WRITE_LAND_DOTS` (memory.nim), `LYC_SRC_RELATCH_ADJ` (ppu.nim).
+
 ### A CGB dispatch clears a timer or serial request 2 T later
 - Claim: the dispatch acknowledges the LCD lines 18 T in and the timer and
   serial lines later on CGB, so a timer or serial request rising in the

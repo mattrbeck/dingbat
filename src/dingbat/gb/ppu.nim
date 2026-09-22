@@ -1111,6 +1111,13 @@ proc lyc_settling*(ppu: GbPpu): bool {.noinline.} =
 # M-cycle, not four dots: gambatte's `_ds_` ly0/lycEnable arms step by exactly
 # the M-cycle a flat four overshoots them by.
 const LYC_SRC_RELATCH_LEAD* {.intdefine.} = 1
+const LYC_SRC_RELATCH_ADJ* {.intdefine.} = 1
+  ## Dots added to that source relatch: dot 6 of line 153 at single speed,
+  ## where gambatte-core raises its LYC = 0 event (dot 8 in double speed).
+  ## Found with IF_WRITE_LAND_DOTS: gambatte `ly0/lycint152_lyc0irq_ifw_1`
+  ## clears IF on dot 5 and must still see the request, and on its own it
+  ## takes `lycEnable/lyc0_ff41_disable_ds_1`, `lyc0_m1disable_ds_1`. 2 loses
+  ## ten `lyc0*` rows.
   ## CPU M-cycles by which the LY = LYC STAT source leaves the snapback's blind
   ## window before the readable bit does; 0 compiles the split out.
 
@@ -1120,7 +1127,8 @@ proc lyc_src_relatch_dot*(gb: GB): int32 {.inline.} =
   when LYC_SRC_RELATCH_LEAD == 0: LYC_RELATCH_DOT
   else:
     LYC_RELATCH_DOT -
-      int32(LYC_SRC_RELATCH_LEAD) * int32(4 shr gb.memory.current_speed)
+      int32(LYC_SRC_RELATCH_LEAD) * int32(4 shr gb.memory.current_speed) +
+      int32(LYC_SRC_RELATCH_ADJ)
 
 proc lyc_settle_halt_skip(gb: GB): bool {.inline.} =
   ## Is this CPU one the snapback's blind window does not defer? See

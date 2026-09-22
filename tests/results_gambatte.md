@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-22 13:41:08*
+*Generated: 2026-09-22 14:00:20*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5039/5216 passed.**
+**5045/5216 passed.**
 
 ## bgen
 
@@ -142,9 +142,9 @@ All 6 tests passed.
 
 All 16 tests passed.
 
-## lycEnable (203/225 passed)
+## lycEnable (205/225 passed)
 
-203/225 tests passed, 22 failed:
+205/225 tests passed, 20 failed:
 
 | Test | Result |
 |------|--------|
@@ -162,8 +162,6 @@ All 16 tests passed.
 | lycEnable/lcdoff_lycirqen_1_dmg08_cgb04c_outE2 [dmg] | got E0, expected E2 |
 | lycEnable/lcdoff_lycirqen_1_dmg08_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lcdoff_lycirqen_4_dmg08_outE2_cgb04c_outE0 [dmg] | got E0, expected E2 |
-| lycEnable/lyc0_ff41_disable_ds_1_cgb04c_outE0 [cgb] | got E2, expected E0 |
-| lycEnable/lyc0_m1disable_ds_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lyc153_late_ff41_enable_ds_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lyc153_late_ff41_enable_ds_lcdoffset1_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lyc153_late_ff41_enable_lcdoffset1_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
@@ -247,16 +245,12 @@ All 6 tests passed.
 | m2enable/late_enable_ly0_lcdoffset2_2_cgb04c_out0 [cgb] | got 2, expected 0 |
 | m2enable/late_enable_m1disable_ly0_2_dmg08_out2_cgb04c_out0 [cgb] | got 2, expected 0 |
 
-## m2int_m0irq (67/72 passed)
+## m2int_m0irq (71/72 passed)
 
-67/72 tests passed, 5 failed:
+71/72 tests passed, 1 failed:
 
 | Test | Result |
 |------|--------|
-| m2int_m0irq/m2int_m0irq_scx3_ifw_2_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
-| m2int_m0irq/m2int_m0irq_scx3_ifw_2_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
-| m2int_m0irq/m2int_m0irq_scx3_ifw_4_dmg08_cgb04c_out0 [dmg] | got 8, expected 0 |
-| m2int_m0irq/m2int_m0irq_scx3_ifw_4_dmg08_cgb04c_out0 [cgb] | got 8, expected 0 |
 | m2int_m0irq/m2int_m0irq_scx5_ds_1_cgb04c_out1 [cgb] | got 3, expected 1 |
 
 ## m2int_m0stat

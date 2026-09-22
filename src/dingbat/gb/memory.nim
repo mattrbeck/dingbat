@@ -649,6 +649,16 @@ proc mem_write_tail(mem: GbMemory; gb: GB) {.noinline.} =
     mem_tick_ppu(mem, gb, 4)
   mem_flush_deferred(mem, gb)
 
+const IF_WRITE_LAND_DOTS* {.intdefine.} = 1
+  ## Dots into its M-cycle at which a CPU write to IF lands: an interrupt
+  ## request raised in those dots is overwritten by the write rather than
+  ## surviving it (gambatte-core catches its sources up to the write's cycle
+  ## + 1 before storing). gambatte `m2int_m0irq/m2int_m0irq_scx3_ifw_{2,4}`
+  ## (both devices: the mode-0 request rises on the write's first dot);
+  ## needs LYC_SRC_RELATCH_ADJ. 2 loses 20 `*_ifw_1`/`*_early_*` rows.
+const IF_WRITE_LAND_DOTS_DS* {.intdefine.} = 0
+  ## The same in double speed: 1 loses `m2int_m0irq_scx4_ifw_ds_1` (the
+  ## double-speed grid, A1).
 proc mem_write*(mem: GbMemory; gb: GB; idx: int; val: uint8) {.hot_bus_inline.} =
   ## A CPU write commits at the START of its M-cycle, before its PPU dots: the
   ## VRAM/OAM lock is decided on the mode at the start of the M-cycle
@@ -668,6 +678,17 @@ proc mem_write*(mem: GbMemory; gb: GB; idx: int; val: uint8) {.hot_bus_inline.} 
     # samples (OAM_WRITE_SAMPLE_END, gb.nim), so the dots run first.
     mem_tick_ppu(mem, gb, 4)
     mem_write_open(mem, gb, idx, val, sampled_late = true)
+    if mem.write_deferred: mem_flush_deferred(mem, gb)
+    return
+  elif IF_WRITE_LAND_DOTS != 0 and idx == 0xFF0F:
+    # IF_WRITE_LAND_DOTS: a source rising in the write's first dots is
+    # overwritten by it.
+    let dots = 4 shr int(mem.current_speed)
+    let pre = if mem.current_speed != 0'u8: IF_WRITE_LAND_DOTS_DS
+              else: min(IF_WRITE_LAND_DOTS, dots - 1)
+    if pre > 0: mem_tick_ppu(mem, gb, pre, ignore_speed = true)
+    mem_write_open(mem, gb, idx, val)
+    mem_tick_ppu(mem, gb, dots - pre, ignore_speed = true)
     if mem.write_deferred: mem_flush_deferred(mem, gb)
     return
   else:
