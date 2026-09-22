@@ -232,6 +232,12 @@ const OAM_SCAN_DMA_EDGE_DS* {.intdefine.} = 2
   ## oamdma/late_sp*_ds rows, with CGB_OBJ_FETCH_OFF; 0 loses three of them,
   ## 3 four `_ds_2` twins.
 const LCDON_NO_OAM_SCAN* {.intdefine.} = 1
+const CGB_OBJ_YIELD_LAST* {.intdefine.} = 1
+  ## Whether the CGB's object at the window's first column yields to the
+  ## window start on the line's last pixel too (obj_yields_to_window). The DMG
+  ## charges it in front of the restart there; the CGB restarts first and
+  ## fetches the object after. gambatte window/m2int_wxA6_spxA7_{m0irq_2,
+  ## m3stat_2,m3stat_4} [cgb] (+3, none lost).
   ## The first line after an LCD enable starts in mode 0 with no OAM scan
   ## (Pan Docs, "LCD Status Register"), so it finds no objects. gambatte
   ## `enable_display/enable_display_ly0_sprites_m0stat_2` (both devices): two
@@ -1337,13 +1343,13 @@ proc obj_yields_to_window(ppu: GbFifoPpu): bool {.inline.} =
   ## dots 104/106 around the dot-105 write. Resolving both cases window-first
   ## takes win_map_change 34 -> 318 wrong pixels. The object re-pays the wait
   ## (gambatte window/late_disable_spx10_wx0f_2 and two sprites/space ties).
-  ## Not on the re-trigger (it may decline, parking the shifter) and not on
-  ## x = 159, where gambatte window/m2int_wxA6_spxA7_* wants the object
-  ## charged in front of the restart. The WX = 166 DMG/CGB split
+  ## Not on the re-trigger (it may decline, parking the shifter) and, on the
+  ## DMG, not on x = 159, where gambatte window/m2int_wxA6_spxA7_* [dmg] wants
+  ## the object charged in front of the restart (CGB_OBJ_YIELD_LAST). The WX = 166 DMG/CGB split
   ## (m2int_wxA6_m3stat, 180 vs 190 dots) is not this rule's.
   ppu.lx == ppu.win_lx and not ppu.fetching_window and
     ppu.lx + 8 == int32(ppu.sprites[0].x) and
-    ppu.lx < int32(GB_WIDTH) - 1
+    (ppu.lx < int32(GB_WIDTH) - 1 or (CGB_OBJ_YIELD_LAST != 0 and ppu.cgb))
 
 proc win_start_reaches_pixels(ppu: GbFifoPpu): bool {.inline.} =
   ## DMG_WIN_START_LAST_PX (off): refuse a DMG window START on x = 159. The

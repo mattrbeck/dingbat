@@ -486,8 +486,11 @@ the carried line's own match, citing gambatte `m2int_wxA6_m3stat_1` [dmg]
 as wanting "174, not 172"; with the term deleted that row still passes,
 `m2int_wxA6_scx3_m3stat_2` [dmg] joins it, and nothing in `window/`,
 mealybug or the `on_screen` frames moves. The claim was stale. AGE 87 ->
-88. The remaining `window/` rows are the `spxA7` (object at X = 167
-sharing the slot), `m0irq`, `oambusyread` and `on_screen` families.
+88. The `spxA7` CGB rows (`m2int_wxA6_spxA7_{m0irq_2,m3stat_2,m3stat_4}`)
+closed 2026-09-22: the CGB's object at the window's first column yields to
+the window start on the last pixel too, where the DMG charges it first
+(`CGB_OBJ_YIELD_LAST`). The remaining `window/` rows are the `m0irq`,
+`oambusyread` and `on_screen` families.
 
 ### C3. Mid-line SCX stores
 
