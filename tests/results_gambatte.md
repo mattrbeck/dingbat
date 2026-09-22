@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-22 16:53:18*
+*Generated: 2026-09-22 16:57:35*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5143/5216 passed.**
+**5145/5216 passed.**
 
 ## bgen
 
@@ -62,14 +62,12 @@ All 8 tests passed.
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_4 [dmg, png] | 1/23040 pixels differ |
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_5 [dmg, png] | 144/23040 pixels differ |
 
-## enable_display (179/184 passed)
+## enable_display (181/184 passed)
 
-179/184 tests passed, 5 failed:
+181/184 tests passed, 3 failed:
 
 | Test | Result |
 |------|--------|
-| enable_display/ly0_late_cgbpr_ds_2_cgb04c_outFF [cgb] | got 55, expected FF |
-| enable_display/ly0_late_cgbpw_ds_2_cgb04c_out55 [cgb] | got AA, expected 55 |
 | enable_display/ly0_late_scx7_m3stat_scx0_2_dmg08_out87_cgb04c_out84 [dmg] | got 84, expected 87 |
 | enable_display/ly0_late_scx7_m3stat_scx1_1_dmg08_cgb04c_out87 [cgb] | got 84, expected 87 |
 | enable_display/ly0_late_vramw_2_dmg08_out55_cgb04c_outAA [cgb] | got 55, expected AA |

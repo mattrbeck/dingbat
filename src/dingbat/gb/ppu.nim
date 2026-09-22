@@ -400,6 +400,10 @@ const CRAM_LOCK_OFF_LAT_DS* {.intdefine.} = 3
   ## `cgbpal_m3/cgbpal_m3end_scx5_ds_{1,3}`; 2 is the old value, 4 loses
   ## `cgbpal_m3end_ds_{2,4}`.
 const CRAM_LOCK_LINE0_EXTRA* {.intdefine.} = 4
+const CRAM_LOCK_LINE0_EXTRA_DS* {.intdefine.} = 2
+  ## CRAM_LOCK_LINE0_EXTRA at double speed (-1 = the same 4): the 4 dots
+  ## halved. gambatte enable_display/ly0_late_cgbp{r,w}_ds_2; 2 and 3 take
+  ## both, 1 loses the `_ds_1` twins, 4 the `_ds_2` pair.
 
 proc cpu_cram_open_dots(ppu: GbPpu; gb: GB; is_write: bool): bool {.noinline.} =
   ## CRAM_LOCK_DOTS: the lock as a dot window around the mode-3 edges.
@@ -410,7 +414,9 @@ proc cpu_cram_open_dots(ppu: GbPpu; gb: GB; is_write: bool): bool {.noinline.} =
   var since = at - ppu.stat_chg_dot
   if m == 3'u8:
     var on = if ds: int32(CRAM_LOCK_ON_LAT_DS) else: int32(CRAM_LOCK_ON_LAT)
-    if ppu.first_line: on += int32(CRAM_LOCK_LINE0_EXTRA)
+    if ppu.first_line:
+      on += (if ds and CRAM_LOCK_LINE0_EXTRA_DS >= 0: int32(CRAM_LOCK_LINE0_EXTRA_DS)
+             else: int32(CRAM_LOCK_LINE0_EXTRA))
     return since < on
   if m == 0'u8 and ppu.stat_prev_mode == 3'u8:
     return since >= (if ds and CRAM_LOCK_OFF_LAT_DS >= 0: int32(CRAM_LOCK_OFF_LAT_DS)
