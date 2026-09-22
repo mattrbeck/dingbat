@@ -104,7 +104,7 @@ already reads the mode-0 side.
 
 ### A3. A STAT source enabled, disabled or handed over across a line edge
 
-**Rows (88).** `lycEnable` 31, `m2enable` 9, `m1` 23, `m0enable` 10,
+**Rows (81).** `lycEnable` 31, `m2enable` 7, `m1` 23, `m0enable` 5,
 `miscmstatirq` 7, `m2int_m0irq/m2int_m0irq_scx3_ifw_{2,4}` (4),
 `ly0/lycint152_lyc{0,153}flag_ds_3`, `lycint_lycflag/lycint_lycflag_ds_3`.
 Heavily CGB, and a third of them `lcdoffset1` or `_ds_` members.
@@ -133,6 +133,16 @@ facts): each source event reads a copy of STAT that a write updates only
 when it lands more than 2 cycles (CGB) before the event, i.e. the same
 window, spelled per source.
 
+**Closed 2026-09-22: the same for LYC writes (+7).** An LYC write that
+breaks the match is the same disable through the comparator
+(`LYC_DROP_LATENCY_DMG = 1`, `_CGB = 6` = the CGB's deferred byte plus its
+2-dot latency, `LYC_DROP_BOUNDARY_SKIP`, ppu.nim, brackets at the
+constants). Took `m0enable/lycdisable_ff45_{3, scx1_2, scx2_2} [dmg]`,
+`lycdisable_ff45_scx{1,2}_1 [cgb]`, `m2enable/lyc1_m2irq_late_lyc255_{1
+[cgb], 2 [dmg]}`; nothing lost. `lycdisable_ff45_scx1_ds_1` [cgb] is the
+family's residue (double speed halves the 6 to 3 dots; the row wants the
+single-speed count).
+
 **Behaviour.** The STAT interrupt line is a level OR of four sources into
 one edge detector, so an interrupt fires only when the OR rises from zero
 (Pan Docs, "LCD Status Register", STAT blocking; mooneye
@@ -141,12 +151,9 @@ LYC one M-cycle per member across a line boundary and ask whether the
 enable, the disable or the hand-over from one source to another produced an
 edge. Sub-shapes, each a separate rule:
 
-* `m0enable/lycdisable_ff45_*` (7; the `ff41` half closed above): LYC
-  source disabled by an LYC write while the mode-0 source is coming up;
-  hardware takes the interrupt (`out2`), dingbat does not. The LYC write is
-  deferred a whole M-cycle on CGB (`CGB_LYC_WRITE_DEFER`) and lands live on
-  DMG, and neither path runs `stat_drop_arm`; the DMG members are the next
-  cheap rows.
+* `m0enable/lycdisable_ff45_scx1_ds_1` (1; the rest closed above): the
+  LYC-write drop at double speed, where the 6-dot CGB latency is spent as
+  3.
 * `m2enable/late_enable_*_2`, `lyc1_m2irq_late_lyc255_*`,
   `late_{enable_,}m1disable_ly0_2`, `lyc0_late_m2enable_lycdisable_2` (9):
   the OAM source enabled one M-cycle across the line boundary it rises on.

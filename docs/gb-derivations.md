@@ -140,6 +140,14 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
   pair, where the disable landing on the latency's last dot still blocks;
   a strict comparison loses six other CGB rows, so that source's window is
   one dot longer, an open row of triage A3.
+- The LYC write is the same disable through the comparator: `LYC_DROP_
+  LATENCY_DMG = 1`, `_CGB = 6` (the CGB's one-M-cycle LYC defer plus the
+  2-dot latency), both bracketed at the constants by `m0enable/lycdisable_
+  ff45_*` and `m2enable/lyc1_m2irq_late_lyc255_*` (+7, nothing lost). An
+  LYC write in the M-cycle of the line boundary does not drop the line
+  (`LYC_DROP_BOUNDARY_SKIP`): the comparator meets the new LYC and the new
+  LY together, so `lycEnable/ff45_enable_weirdpoint_3` and `lyc153_late_
+  ff45_enable_3` [dmg] see no edge.
 
 ### CPU VRAM/OAM locks close on the live mode and open with the STAT bits
 - Site: `cpu_vram_open` / `cpu_oam_open`, checked on the CPU bus

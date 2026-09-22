@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-21 23:07:58*
+*Generated: 2026-09-21 23:19:42*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4898/5216 passed.**
+**4905/5216 passed.**
 
 ## bgen
 
@@ -290,9 +290,9 @@ All 18 tests passed.
 
 All 8 tests passed.
 
-## m0enable (157/167 passed)
+## m0enable (162/167 passed)
 
-157/167 tests passed, 10 failed:
+162/167 tests passed, 5 failed:
 
 | Test | Result |
 |------|--------|
@@ -300,12 +300,7 @@ All 8 tests passed.
 | m0enable/enable_wxA6_2x_spxA7_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m0enable/late_enable_lcdoffset1_1_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m0enable/lycdisable_ff41_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
-| m0enable/lycdisable_ff45_3_dmg08_out2_cgb04c_out0 [dmg] | got 0, expected 2 |
-| m0enable/lycdisable_ff45_scx1_1_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
-| m0enable/lycdisable_ff45_scx1_2_dmg08_out2_cgb04c_out0 [dmg] | got 0, expected 2 |
 | m0enable/lycdisable_ff45_scx1_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
-| m0enable/lycdisable_ff45_scx2_1_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
-| m0enable/lycdisable_ff45_scx2_2_dmg08_out2_cgb04c_out0 [dmg] | got 0, expected 2 |
 
 ## m0int_m0irq
 
@@ -353,9 +348,9 @@ All 6 tests passed.
 | m1/m2m1irq_ifw_2_dmg08_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m1/m2m1irq_ifw_ds_2_cgb04c_out1 [cgb] | got 3, expected 1 |
 
-## m2enable (111/120 passed)
+## m2enable (113/120 passed)
 
-111/120 tests passed, 9 failed:
+113/120 tests passed, 7 failed:
 
 | Test | Result |
 |------|--------|
@@ -366,8 +361,6 @@ All 6 tests passed.
 | m2enable/late_m1disable_ly0_2_dmg08_out2_cgb04c_out0 [cgb] | got 2, expected 0 |
 | m2enable/lyc0_late_m2enable_lycdisable_2_dmg08_out2_cgb04c_out0 [cgb] | got 2, expected 0 |
 | m2enable/lyc1_late_m2enable_lycdisable_1_dmg08_out0_cgb04c_out2 [cgb] | got 0, expected 2 |
-| m2enable/lyc1_m2irq_late_lyc255_1_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
-| m2enable/lyc1_m2irq_late_lyc255_2_dmg08_out2_cgb04c_out0 [dmg] | got 0, expected 2 |
 
 ## m2int_m0irq (67/72 passed)
 

@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-09-21 23:07:58 · commit 9ce5907be · game-boy-test-roms v7.0*
+*Generated: 2026-09-21 23:19:42 · commit b4ec381f4 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
@@ -128,12 +128,12 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/lycint_m0stat | per-ROM | 👌 6/6 passed |
 | gambatte/lycm2int | per-ROM | 👌 18/18 passed |
 | gambatte/lywrite | per-ROM | 👌 8/8 passed |
-| gambatte/m0enable | per-ROM | 👀 157/167 passed |
+| gambatte/m0enable | per-ROM | 👀 162/167 passed |
 | gambatte/m0int_m0irq | per-ROM | 👌 4/4 passed |
 | gambatte/m0int_m0stat | per-ROM | 👌 12/12 passed |
 | gambatte/m0int_m3stat | per-ROM | 👌 6/6 passed |
 | gambatte/m1 | per-ROM | 👀 143/170 passed |
-| gambatte/m2enable | per-ROM | 👀 111/120 passed |
+| gambatte/m2enable | per-ROM | 👀 113/120 passed |
 | gambatte/m2int_m0irq | per-ROM | 👀 67/72 passed |
 | gambatte/m2int_m0stat | per-ROM | 👌 6/6 passed |
 | gambatte/m2int_m2irq | per-ROM | 👌 18/18 passed |

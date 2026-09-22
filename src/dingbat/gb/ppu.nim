@@ -1115,37 +1115,57 @@ when M0_HALT_BLIND_DOTS > 0 or CGB_M0_HALT_BLIND_DOTS > 0 or
       else: int32(M0_HALT_BLIND_DOTS shr gb.memory.current_speed)
     age >= 1'i32 and age <= blind
 
-proc stat_level_with(ppu: GbPpu; gb: GB; en: uint8): bool {.noinline.} =
-  ## The STAT line's level under enable byte `en` at this instant: the same
-  ## four sources ppu_handle_stat_interrupt ORs, without the edge detector.
+proc stat_level_with(ppu: GbPpu; gb: GB; en, lyc: uint8): bool {.noinline.} =
+  ## The STAT line's level under enable byte `en` and LYC value `lyc` at this
+  ## instant: the same four sources ppu_handle_stat_interrupt ORs, without
+  ## the edge detector.
   let settling = ppu.ly == 0'u8 and ppu.lyc_settling and
                  not lyc_settle_halt_skip(gb)
   let src_settled =
     when LYC_SRC_RELATCH_LEAD == 0: not settling
     else: not settling or ppu.cycle_counter >= lyc_src_relatch_dot(gb)
-  (ppu.irq_ly_of == ppu.lyc and (en and 0x40'u8) != 0 and src_settled) or
+  (ppu.irq_ly_of == lyc  and (en and 0x40'u8) != 0 and src_settled) or
     (ppu.m2_source(gb)     and (en and 0x20'u8) != 0) or
     ((en and 0x20'u8) != 0 and ppu.m2_line144(gb)) or
     (ppu.irq_m0_of == 0    and (en and 0x08'u8) != 0) or
     (ppu.irq_m1_of == 1    and (en and 0x10'u8) != 0)
 
-proc stat_drop_arm*(ppu: GbPpu; gb: GB; val: uint8) =
-  ## A STAT write commits: its enable bits reach the line STAT_ENABLE_LATENCY
-  ## dots later (CGB_STAT_ENABLE_LATENCY on CGB), and a source the write
-  ## DISABLES lets the line fall right there, ahead of the M-cycle boundary
-  ## where the parked byte lands. Without this the edge detector still holds
-  ## the old level when another source rises inside the same M-cycle, and the
-  ## handover is not an edge: gambatte m2enable/m2_late_m0disable_1 (both
-  ## devices) writes $28 -> $20 four dots before the mode-2 rise and wants
-  ## the interrupt. The level is sampled now and refreshed by every source
-  ## change until the latency expires (ppu_handle_stat_interrupt), so a rise
-  ## inside the latency window is seen with the OLD enables, as
-  ## stat_enables_leading already reads it.
+const LYC_DROP_LATENCY_DMG* {.intdefine.} = 1
+const LYC_DROP_LATENCY_CGB* {.intdefine.} = 6
+  ## Dots after an LYC write's commit at which a broken match lets the STAT
+  ## line fall (stat_drop_arm), per device. The STAT write's own latency is
+  ## STAT_ENABLE_LATENCY / CGB_STAT_ENABLE_LATENCY; the CGB's LYC byte is
+  ## itself deferred one M-cycle (CGB_LYC_WRITE_DEFER), hence 4 + 2. Brackets
+  ## (gambatte, 2026-09-22): DMG 0 loses m0enable/lycdisable_ff45_scx3_3, 2
+  ## loses lycdisable_ff45_3, 1 takes both plus lycdisable_ff45_scx{1,2}_2
+  ## and m2enable/lyc1_m2irq_late_lyc255_2; CGB 2 and 4 flip the `_1`/`_2`
+  ## arms of lycdisable_ff45_scx{1,2}, `_2` and lyc255 against each other,
+  ## 6 takes the `_1` arms and lyc255_1 with nothing lost, 8 takes none.
+const LYC_DROP_BOUNDARY_SKIP* {.intdefine.} = 1
+  ## 1: an LYC write whose M-cycle holds the line boundary does not drop the
+  ## line -- the comparator meets the new LYC and the new LY together, so a
+  ## match that moves with LY never goes low. 0 loses gambatte
+  ## lycEnable/ff45_enable_weirdpoint_3 and lyc153_late_ff45_enable_3 [dmg]
+  ## (the write moves LYC onto the line about to start and hardware sees no
+  ## edge) and takes nothing.
+
+proc stat_drop_arm*(ppu: GbPpu; gb: GB; en, lyc: uint8; lat_dots: int32) =
+  ## A STAT or LYC write commits: its effect reaches the line
+  ## STAT_ENABLE_LATENCY dots later (CGB_STAT_ENABLE_LATENCY on CGB), and a
+  ## source the write DISABLES -- an enable bit cleared, or the comparator's
+  ## match broken -- lets the line fall right there, ahead of the M-cycle
+  ## boundary where the parked byte lands. Without this the edge detector
+  ## still holds the old level when another source rises inside the same
+  ## M-cycle, and the handover is not an edge: gambatte
+  ## m2enable/m2_late_m0disable_1 (both devices) writes $28 -> $20 four dots
+  ## before the mode-2 rise and wants the interrupt; m0enable/lycdisable_
+  ## ff45_* move LYC off the match ahead of the mode-0 rise. The level is
+  ## sampled now and refreshed by every source change until the latency
+  ## expires (ppu_handle_stat_interrupt), so a rise inside the latency window
+  ## is seen with the OLD enables, as stat_enables_leading already reads it.
   if not ppu.lcd_enabled: return
-  let en = (ppu.lcd_status and 0b1000_0111'u8) or (val and 0b0111_1000'u8)
-  let lat = int32(if gb.cgb_enabled: CGB_STAT_ENABLE_LATENCY
-                  else: STAT_ENABLE_LATENCY) shr gb.memory.current_speed
-  let level = stat_level_with(ppu, gb, en)
+  let lat = lat_dots shr gb.memory.current_speed
+  let level = stat_level_with(ppu, gb, en, lyc)
   if lat == 0:
     if not level: ppu.old_stat_flag = false
   else:
@@ -1167,9 +1187,12 @@ proc stat_drop_settle(ppu: GbPpu; gb: GB) {.noinline.} =
   elif gb.memory.deferred_reg == 0xFF41'u16:
     let en = (ppu.lcd_status and 0b1000_0111'u8) or
              (gb.memory.deferred_val and 0b0111_1000'u8)
-    ppu.stat_drop_level = stat_level_with(ppu, gb, en)
+    ppu.stat_drop_level = stat_level_with(ppu, gb, en, ppu.lyc)
+  elif gb.memory.deferred_reg == 0xFF45'u16:
+    ppu.stat_drop_level = stat_level_with(ppu, gb, ppu.lcd_status,
+                                          gb.memory.deferred_val)
   else:
-    ppu.stat_drop_pending = false
+    ppu.stat_drop_level = stat_level_with(ppu, gb, ppu.lcd_status, ppu.lyc)
 
 proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
   # With the PPU off the comparator is stopped: the coincidence bit freezes and
@@ -2016,7 +2039,10 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       # mem_tick_bus and mem_tick_ppu, so the dot counter has not moved yet.
       ppu.stat_wr_dot = int16(ppu.cycle_counter)
     ppu_defer_machinery_write(ppu, gb, idx, val)
-    stat_drop_arm(ppu, gb, val)
+    stat_drop_arm(ppu, gb, (ppu.lcd_status and 0b1000_0111'u8) or
+                           (val and 0b0111_1000'u8), ppu.lyc,
+                  int32(if gb.cgb_enabled: CGB_STAT_ENABLE_LATENCY
+                        else: STAT_ENABLE_LATENCY))
   of 0xFF42:
     when defined(gb_m3_trace):
       # Diagnostic (tools only): the dot each mid-mode-3 SCY write lands on.
@@ -2053,6 +2079,11 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       ppu.lyc = val
     if edge_here: ppu.stat_write_pending = true
     gb.memory.write_deferred = true
+    if LYC_DROP_BOUNDARY_SKIP == 0 or
+       ppu.cycle_counter + (4'i32 shr gb.memory.current_speed) < ppu.gb_line_end:
+      stat_drop_arm(ppu, gb, ppu.lcd_status, val,
+                    int32(if gb.cgb_enabled: LYC_DROP_LATENCY_CGB
+                          else: LYC_DROP_LATENCY_DMG))
   of 0xFF46: discard  # handled by memory DMA
   # The three DMG palettes are pure mixer reads -- nothing else in the PPU looks
   # at them -- so each one carries the mixer's extra dot (fifo_recompose_last).
