@@ -185,7 +185,9 @@ token is a specific `--model`. A ROM whose name declares several machines (AGE's
 row per revision. SameSuite APU rows default to **cgbE** (its README states CGB-E passes
 everything and CGB-C fails most channel 1/2/4 tests — `GbQuirks.pcm_read_edge_zero`), with
 a `-cgb0B`/`-cgbDE`/`-A` filename token resolving to its highest member. Mealybug's
-`dma/*-C` rows carry `model: "cgbc"`. gambatte's `dmg08`/`cgb04c` tags name capture
+`dma/*-C` rows carry `model: "cgbc"`. wilbertpol's `-C`/`-cgb` rows run on **cgbE**: the
+fork's sources name no revision and six of its gpu ROMs assert what gambatte's `cgb04c` rows
+and AGE's `cgbBC`/`cgbE` pairs place after CGB C (`WilbertpolCgbRep` in the runner). gambatte's `dmg08`/`cgb04c` tags name capture
 provenance (a DMG-CPU-08 board, CPU CGB C), which are the runner's defaults; no `--model`
 axis exists for that mode.
 

@@ -979,8 +979,8 @@ type
       ## (the `LY_JUST_CHANGED` branch in `ppu_read`). wilbertpol
       ## `acceptance/gpu/ly_lyc{,_0,_144,_153}-C` sample exactly that M-cycle out
       ## of a matching line and expect the bit set, and the advance INTO a match
-      ## clear -- a one-M-cycle-stale copy. Their `-C` suffix is not borne out
-      ## at CGB-C; the `@cgbc` arms stay red on purpose, `@agb` is the target.
+      ## clear -- a one-M-cycle-stale copy. Their `-C` is the fork's Color
+      ## GROUP, scored on CGB-E (the runner); CGB-C itself is unmeasured here.
     oam_read_open_late*: bool
       ## CGB E. The CPU's OAM read lock reopens one dot later at the end of mode
       ## 3 than on DMG-C / CGB-B / CGB-C (5 dots after the flag edge, not 4).

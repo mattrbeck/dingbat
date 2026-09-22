@@ -571,13 +571,15 @@ proc is_cgb_model(m: string): bool =
   ## package (suite README), so they run with --cgb.
   m.startsWith("cgb") or m == "agb" or m == "ags"
 
-proc mooneye_machines_for(base: string): seq[string] =
+proc mooneye_machines_for(base: string; cgb_rep = "cgbc"): seq[string] =
   ## Every `--model` a mooneye/wilbertpol ROM's filename claims (README, "Test
   ## naming": G = dmg+mgb, S = sgb+sgb2, C = cgb+agb+ags, A = agb+ags; a group
   ## token is the union of its letters). Revisions fan out only where the
   ## name lists them (`cgbABCDE` -> four rows); a bare model token gets one
-  ## representative revision, the default CGB-C, since the ROM makes no
-  ## per-revision claim. Revision 0 is never in a fan-out: the suite ships
+  ## representative revision, `cgb_rep`, since the ROM makes no per-revision
+  ## claim. Gekkio's suite keeps the default CGB-C (its README's device table
+  ## verifies on CPU CGB C and D); wilbertpol's fork passes CGB-E, see
+  ## build_wilbertpol_tests. Revision 0 is never in a fan-out: the suite ships
   ## separate `-dmg0`/`-cgb0` ROMs. `ags` folds into `agb` (same SoC).
   if '-' notin base:
     return @[]
@@ -589,7 +591,7 @@ proc mooneye_machines_for(base: string): seq[string] =
       case ch
       of 'G': picked.add("dmgABC"); picked.add("mgb")
       of 'S': picked.add("sgb"); picked.add("sgb2")
-      of 'C': picked.add("cgbc"); picked.add("agb")
+      of 'C': picked.add(cgb_rep); picked.add("agb")
       of 'A': picked.add("agb")
       else: discard
   else:
@@ -600,7 +602,7 @@ proc mooneye_machines_for(base: string): seq[string] =
     of "mgb":           picked.add("mgb")
     of "sgb":           picked.add("sgb")
     of "sgb2":          picked.add("sgb2")
-    of "cgb":           picked.add("cgbc")
+    of "cgb":           picked.add(cgb_rep)
     of "cgbABCDE":      (for r in CgbRevs: picked.add(r))
     of "cgb0":          picked.add("cgb0")
     else: return @[]
@@ -1040,14 +1042,17 @@ proc build_wilbertpol_tests(roms_dir: string): seq[TestDef] =
     let name = "mooneye-wilbertpol/" & rel.changeFileExt("")
     if rel.startsWith("utils") or rel.startsWith("logic-analysis"):
       continue
-    # `ly_lyc{,_0,_144,_153}-C`: the CGB arm is not scored. The ROMs assert a
-    # CGB LY=LYC behaviour dingbat produces only from CPU CGB D onward, and
-    # this fork's `-C` (README: cgb+agb+ags) has no revision axis to say
-    # otherwise; upstream mooneye later gained that axis and ships no ly_lyc*
-    # at all. Inference from a deletion, not proof; a hardware probe would
-    # settle it. The agb arms pass and are kept, as are the `_write` siblings.
-    const ly_lyc_c_skip = ["ly_lyc-C.gb", "ly_lyc_0-C.gb",
-                           "ly_lyc_144-C.gb", "ly_lyc_153-C.gb"]
+    # This fork's `-C` is the Color GROUP (README: cgb+agb+ags), and its
+    # sources name no CPU revision ("pass: CGB, AGS"). Its Color rows run on
+    # CGB-E: every `-C`/`-cgb` ROM in the fork passes on CGB D and E and six
+    # (`ly_lyc{,_0,_144,_153}-C`, `ly_new_frame-C`, `ly00_mode1_2-C`) fail on
+    # C, while the CPU-CGB-C rows of gambatte (`ly0/lycint152_ly153_*`,
+    # `lycint152_ly0stat_*`) and AGE (`ly-dmgC-cgbBC`, `stat-mode-dmgC-cgbBC`
+    # against their `-cgbE` twins) assert the C behaviour dingbat has -- no
+    # machine passes both. SameBoy, which claims the whole fork, tests it on
+    # CGB-E too. Upstream mooneye never carried these gpu ROMs (they were
+    # written for the fork after its author's one upstream PR).
+    const WilbertpolCgbRep = "cgbe"
     # The two screenshot ROMs: sprite_priority (same DMG reference as Gekkio's)
     # and madness/mgb_oam_dma_halt_sprites (MGB capture).
     if rel == "manual-only" / "sprite_priority.gb":
@@ -1065,7 +1070,7 @@ proc build_wilbertpol_tests(roms_dir: string): seq[TestDef] =
     # including under misc/, which in this fork also holds boot_hwio-S and
     # boot_regs-mgb/sgb/sgb2.
     let suffix = if '-' in base: base.rsplit('-', maxsplit = 1)[1] else: ""
-    let machines = mooneye_machines_for(base)
+    let machines = mooneye_machines_for(base, WilbertpolCgbRep)
     if machines.len == 0:
       tests.add(TestDef(
         name: name,
@@ -1078,7 +1083,6 @@ proc build_wilbertpol_tests(roms_dir: string): seq[TestDef] =
       ))
     else:
       for m in machines:
-        if m == "cgbc" and rel.extractFilename in ly_lyc_c_skip: continue
         tests.add(TestDef(
           name: name & (if machines.len > 1: "@" & m else: ""),
           rom_path: rom,
@@ -1428,13 +1432,6 @@ const NotScored: seq[(string, string)] = @[
     "Those separate ROMs ARE scored. (build_mooneye_tests)"),
   ("age `ncm*` rows", "CGB running in non-CGB mode, a device this harness " &
     "does not model. (build_age_tests)"),
-  ("mooneye-wilbertpol `acceptance/gpu/ly_lyc{,_0,_144,_153}-C` (4 arms)",
-    "they assert a CGB LY=LYC behaviour dingbat models from CPU CGB D onward, " &
-    "for a `-C` group this 2016 fork's README defines as `cgb+agb+ags` with " &
-    "no revision axis. Upstream mooneye later added that axis and dropped " &
-    "ly_lyc* entirely. Assumed, not hardware-proven: no probe pins the C/D " &
-    "split. The `_write` arms of the same family pass and ARE scored. " &
-    "(build_wilbertpol_tests)"),
   ("gambatte `oamdma_src{FE00,FF00}_*read*` DMG rows (9)", "their verdict " &
     "is a byte of uninitialised WRAM. That source fetches through the echo, " &
     "so it reads $DE00/$DF00, and a colliding CPU read gets the DMA's latch " &

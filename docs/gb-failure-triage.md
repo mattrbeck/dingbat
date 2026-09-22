@@ -580,11 +580,12 @@ family.
 
 ---
 
-## G. Revision-vocabulary rows, red on purpose
+## G. Revision-vocabulary rows, closed by scoring the right machine
 
-**Rows (2 scored, 4 skipped).** wilbertpol `acceptance/gpu/ly00_mode1_2-C@cgbc`
-and `ly_new_frame-C@cgbc` (scored, red); `ly_lyc{,_0,_144,_153}-C@cgbc`
-(skipped, in `NotScored`). Their `@agb` arms pass.
+**Rows (0).** wilbertpol `acceptance/gpu/ly00_mode1_2-C`, `ly_new_frame-C`
+and `ly_lyc{,_0,_144,_153}-C` were red (two scored) or skipped (four) while
+the runner stood the fork's `-C` on CPU CGB C. They are green since the
+fork's Color rows moved to CGB E (`WilbertpolCgbRep`, the runner).
 
 **Behaviour.** Three behaviours split at CGB C/D, and AGE ships each as a
 ROM pair with per-unit hardware records in the headers: the readable LY 153
@@ -593,13 +594,20 @@ ROM pair with per-unit hardware records in the headers: the readable LY 153
 M-cycle of mode 0 between mode 1 ending and line 0's mode 2 exists on every
 DMG and CGB <= C and not on D+ (`m1_end_no_mode0`; `stat-mode-dmgC-cgbBC`
 vs `stat-mode-cgbE`, the `M1E` byte); CGB D+ hold the LY=LYC comparison the
-blind window is leaving (`lyc_compare_hold`). wilbertpol's `-C` is the 2016
-fork's hardware GROUP `cgb+agb+ags` with no revision axis, so its four
-`ly_lyc*-C` ROMs assert the D+ behaviour for revision C; upstream mooneye
-later added the axis and ships no `ly_lyc*` at all.
-No ROM in the tree pins the C/D placement of `ly_lyc*`
-(`docs/oracles.md`, `lyc_compare_hold`); the two scored rows are the same
-vocabulary problem and fail for the same reason.
+blind window is leaving (`lyc_compare_hold`). gambatte's CPU-CGB-C rows say
+the same at one-NOP resolution (`ly0/lycint152_ly153_{1,2,3}` read 152, 153,
+0; `lycint152_ly0stat_{1,2,3}` read $C1, $C0, $C2). wilbertpol's `-C` is the
+2016 fork's hardware GROUP `cgb+agb+ags` with no revision axis, its sources
+say only "pass: CGB, AGS", and its six ROMs on these edges assert the D+
+values -- no machine passes them and the gambatte/AGE C rows together.
+Every `-C`/`-cgb` ROM in the fork passes on CGB D and E (182/182 serial
+rows); SameBoy, which claims the whole fork, tests it on CGB E. Upstream
+mooneye never carried these gpu ROMs: they were written for the fork after
+its author's one upstream PR.
+
+**Still open on hardware.** Whether a CPU CGB C also holds the LY=LYC
+comparison (`lyc_compare_hold`, `docs/oracles.md`): no ROM in the tree pins
+the C/D placement of `ly_lyc*`, and the fork's CGB E score does not ask.
 
 ---
 
