@@ -57,6 +57,8 @@ proc timer_reload_tima(t: GbTimer; gb: GB) =
     # anchor of the gambatte speedchange*_tima0N_* rows.
     echo "TIMAIRQ tdiv=", t.tdiv, " tap=", t.bit_for_tima
   gb.interrupts.timer_interrupt = true
+  when defined(gb_io_trace):
+    echo "TIMERIF ly=", gb.ppu.ly, " dot=", gb.ppu.cycle_counter, " sched=", gb.scheduler.cycles
   t.tima = t.tma
 
 proc timer_check_edge(t: GbTimer; gb: GB; on_write = false) =

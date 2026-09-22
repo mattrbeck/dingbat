@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-22 12:48:05*
+*Generated: 2026-09-22 13:12:26*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4997/5216 passed.**
+**5006/5216 passed.**
 
 ## bgen
 
@@ -120,9 +120,9 @@ All 8 tests passed.
 | irq_precedence/late_m0irq_vs_tima_scx3_halt_1_dmg08_cgb04c_out4 [dmg] | got 2, expected 4 |
 | irq_precedence/late_m0irq_vs_tima_scx3_halt_1_dmg08_cgb04c_out4 [cgb] | got 2, expected 4 |
 
-## lcd_offset (54/62 passed)
+## lcd_offset (55/62 passed)
 
-54/62 tests passed, 8 failed:
+55/62 tests passed, 7 failed:
 
 | Test | Result |
 |------|--------|
@@ -131,7 +131,6 @@ All 8 tests passed.
 | lcd_offset/offset1_lyc99int_m2irq_count_ds_1_cgb04c_out98 [cgb] | got 90, expected 98 |
 | lcd_offset/offset1_lyc99int_m2stat_count_ds_2_cgb04c_out90 [cgb] | got 00, expected 90 |
 | lcd_offset/offset1_lyc99int_m3stat_count_ds_2_cgb04c_out90 [cgb] | got 00, expected 90 |
-| lcd_offset/offset2_lyc8fint_m1irq_2_cgb04c_outE3 [cgb] | got E0, expected E3 |
 | lcd_offset/offset2_lyc99int_m2irq_count_2_cgb04c_out90 [cgb] | got 00, expected 90 |
 | lcd_offset/offset3_lyc8fint_m1stat_1_cgb04c_outC0 [cgb] | got C1, expected C0 |
 
@@ -244,9 +243,9 @@ All 12 tests passed.
 
 All 6 tests passed.
 
-## m1 (155/170 passed)
+## m1 (161/170 passed)
 
-155/170 tests passed, 15 failed:
+161/170 tests passed, 9 failed:
 
 | Test | Result |
 |------|--------|
@@ -257,13 +256,7 @@ All 6 tests passed.
 | m1/lyc143_late_m0enable_lycdisable_2_dmg08_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m1/lyc143_late_m2enable_lycdisable_2_dmg08_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m1/lyc143_late_m2enable_lycdisable_ds_1_cgb04c_out3 [cgb] | got 1, expected 3 |
-| m1/lycint143_m1irq_late_retrigger_2_dmg08_cgb04c_out1 [dmg] | got 3, expected 1 |
-| m1/lycint143_m1irq_late_retrigger_2_dmg08_cgb04c_out1 [cgb] | got 3, expected 1 |
-| m1/lycint_vblankirq_late_retrigger_2_dmg08_cgb04c_out0 [dmg] | got 1, expected 0 |
-| m1/lycint_vblankirq_late_retrigger_2_dmg08_cgb04c_out0 [cgb] | got 1, expected 0 |
 | m1/m1irq_late_enable_2_dmg08_out2_cgb04c_out0 [cgb] | got 2, expected 0 |
-| m1/m1irq_m0disable_2_dmg08_out3_cgb04c_out1 [cgb] | got 3, expected 1 |
-| m1/m1irq_m2disable_lycdisable_2_dmg08_out3_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m1/m2m1irq_ifw_ds_1_cgb04c_out3 [cgb] | got 1, expected 3 |
 
 ## m2enable (115/120 passed)
@@ -365,9 +358,9 @@ All 69 tests passed.
 
 All 67 tests passed.
 
-## serial (75/82 passed)
+## serial (76/82 passed)
 
-75/82 tests passed, 7 failed:
+76/82 tests passed, 6 failed:
 
 | Test | Result |
 |------|--------|
@@ -376,7 +369,6 @@ All 67 tests passed.
 | serial/nopx1_start_wait_read_if_2_dmg08_cgb04c_outE8 [cgb] | got E0, expected E8 |
 | serial/start83_late_div_write_wait_read_if_1b_cgb04c_outE8 [cgb] | got E0, expected E8 |
 | serial/start83_late_div_write_wait_read_if_2b_cgb04c_outE8 [cgb] | got E0, expected E8 |
-| serial/start_wait_trigger_int8_read_if_2_dmg08_outE8_cgb04c_outE0 [cgb] | got E8, expected E0 |
 | serial/start_wait_trigger_int8_read_if_ds_2_cgb04c_outE0 [cgb] | got E8, expected E0 |
 
 ## sound (299/300 passed)
@@ -418,15 +410,14 @@ All 67 tests passed.
 | sprites/enable/late_disable_ds_3_cgb04c_out3 [cgb] | got 0, expected 3 |
 | sprites/late_disable_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 
-## tima (224/232 passed)
+## tima (225/232 passed)
 
-224/232 tests passed, 8 failed:
+225/232 tests passed, 7 failed:
 
 | Test | Result |
 |------|--------|
 | tima/tc00_irq_late_retrigger_2_dmg08_outE4_cgb04c_outE0 [cgb] | got E4, expected E0 |
 | tima/tc00_irq_late_retrigger_3_dmg08_cgb04c_outE0 [dmg] | got E4, expected E0 |
-| tima/tc00_irq_late_retrigger_3_dmg08_cgb04c_outE0 [cgb] | got E4, expected E0 |
 | tima/tc00_irq_late_retrigger_ds_2_cgb04c_outE0 [cgb] | got E4, expected E0 |
 | tima/tc00_late_tc01_5_dmg08_cgb04c_out00 [dmg] | got FF, expected 00 |
 | tima/tc00_late_tc01_5_dmg08_cgb04c_out00 [cgb] | got FF, expected 00 |

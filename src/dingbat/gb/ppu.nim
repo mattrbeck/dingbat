@@ -28,7 +28,9 @@ when STAT_IRQ_SPLIT:
     when STAT_IRQ_LEAD != 0 or STAT_M0_LEAD_T != 0: ppu.irq_mode
     else: ppu.mode_flag
   template irq_m1_of(ppu: GbPpu): uint8 =
-    when STAT_IRQ_LEAD != 0: ppu.irq_mode else: ppu.mode_flag
+    when STAT_IRQ_LEAD != 0: ppu.irq_mode
+    elif STAT_M1_LEAD != 0: (if ppu.m1_early: 1'u8 else: ppu.mode_flag)
+    else: ppu.mode_flag
   template irq_ly_of(ppu: GbPpu): uint8 =
     when STAT_IRQ_LEAD != 0 or STAT_LYC_LEAD != 0 or STAT_LYC_LY_LEAD_ANY:
       ppu.irq_ly

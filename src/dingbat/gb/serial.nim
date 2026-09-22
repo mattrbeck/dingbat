@@ -60,6 +60,8 @@ proc serial_finish_transfer*(serial: GbSerial; gb: GB) =
   serial.bits_remaining = 0
   serial.serial_update_shifting()
   gb.interrupts.serial_interrupt = true
+  when defined(gb_io_trace):
+    echo "SERIALIF ly=", gb.ppu.ly, " dot=", gb.ppu.cycle_counter, " sched=", gb.scheduler.cycles
 
 method serial_peer_committed*(drv: GbSerialDriver): bool {.base.} =
   ## Does `serial_complete` publish something outside this core that cannot
@@ -184,6 +186,8 @@ when SERIAL_CPU_SAMPLE_T < 4:
     if serial.serial_cpu_pre(gb) and not serial.pre_irq and
        serial.serial_edge_finished_byte():
       gb.interrupts.serial_interrupt = true
+      when defined(gb_io_trace):
+        echo "SERIALIF2 ly=", gb.ppu.ly, " dot=", gb.ppu.cycle_counter, " sched=", gb.scheduler.cycles
 
   proc serial_if_latch_fixup*(gb: GB) {.inline.} =
     ## The same rule for an $FF0F read (mem_tick_if_read, after

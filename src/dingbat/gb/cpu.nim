@@ -177,6 +177,15 @@ const IRQ_SAMPLE_T* {.intdefine.} = 18
   ## reach the dispatch one M-cycle later, relative to the instant IF rises,
   ## than the mode-2 source does. Settling the per-source rise phases (A3) is
   ## what moves them, not this constant.
+const IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD* {.intdefine.} = 2
+  ## T-cycles past IRQ_SAMPLE_T at which a CGB dispatch clears a TIMER or
+  ## SERIAL request: those two lines are acknowledged later than the LCD
+  ## ones, so a timer or serial request raised in the dispatch's last T-cycles
+  ## is still taken back. gambatte `tima/tc00_irq_late_retrigger_3` [cgb] and
+  ## `serial/start_wait_trigger_int8_read_if_2` [cgb]; 0 and 1 take neither,
+  ## and above 2 the clear would fall outside the dispatch's 20 T. One-sided:
+  ## `tc00_irq_late_retrigger_2` [cgb] wants the timer later still, i.e. its
+  ## request rises later here than on hardware (A2).
 proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
   ## The taken half of handle_interrupts: push PC, vector, charge 5 M-cycles.
   ## Out of line: two inlined mem_writes give handle_interrupts a prologue
@@ -223,6 +232,9 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
       if gb.memory.current_speed == 1: IRQ_SAMPLE_T_DS else: IRQ_SAMPLE_T
     if sample_t > 8 + IRQ_PUSH_T:
       mem_tick_components(gb.memory, gb, sample_t - 8 - IRQ_PUSH_T)
+  when IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD != 0:
+    if gb.cgb_enabled and (interrupt == INT_TIMER or interrupt == INT_SERIAL):
+      mem_tick_components(gb.memory, gb, IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD)
   clear_interrupt(gb.interrupts, interrupt)
   mem_tick_extra(gb.memory, gb, 20)
 

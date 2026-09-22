@@ -1975,6 +1975,21 @@ when STAT_IRQ_SPLIT:
     ## readable LY does (the boundary's catch-up keeps the two equal
     ## everywhere else). Line 153's snap to 0 is its own machinery.
     ppu.irq_ly = ppu.ly + 1
+    if int(ppu.irq_ly) == GB_HEIGHT:
+      # Entering vblank: the mode-1 source and the vblank request come up
+      # with the comparator (STAT_M1_LEAD, VBLANK_IRQ_LEAD).
+      when VBLANK_IRQ_LEAD != 0:
+        gb.interrupts.vblank_interrupt = true
+        ppu.vbl_early = true
+      when STAT_M1_LEAD != 0:
+        # A STAT write still in flight that turns the mode-1 enable off is
+        # already the enable this rise sees.
+        if not (gb.memory.deferred_reg == 0xFF41'u16 and
+                (gb.memory.deferred_val and 0x10'u8) == 0'u8):
+          # The match on line 143 lets go before the mode-1 source rises: the
+          # edge detector sees the two in that order.
+          ppu_handle_stat_interrupt(ppu, gb)
+          ppu.m1_early = true
     ppu_handle_stat_interrupt(ppu, gb)
 
   proc fifo_irq_line_advance(ppu: GbFifoPpu; gb: GB) =
@@ -2275,7 +2290,12 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           if int(ppu.ly) == GB_HEIGHT:
             when LY_BLIND_SCOPE >= 2: ly_advance_vblank_entry(ppu, gb)
             else:                     ppu.`mode_flag=`(1'u8, gb)
-            gb.interrupts.vblank_interrupt = true
+            when STAT_M1_LEAD != 0: ppu.m1_early = false
+            when VBLANK_IRQ_LEAD != 0:
+              if not ppu.vbl_early: gb.interrupts.vblank_interrupt = true
+              ppu.vbl_early = false
+            else:
+              gb.interrupts.vblank_interrupt = true
             when defined(gb_phase_trace):
               echo "VBLIRQ ly=", ppu.ly, " t=", gb_phase, "/", gb_ticklen
             ppu.frame = true

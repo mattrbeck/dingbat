@@ -140,6 +140,27 @@ const STAT_LYC_LY_LEAD_DS* {.intdefine.} = 0
   ## single-speed one) loses every `_ds_` sibling; the double-speed constants
   ## are a coupled set (STAT_READ_SAMPLE_DS_ADD, SPEED_SWITCH_PPU_EXTRA_DOTS,
   ## IRQ_SAMPLE_T_DS) and move together or not at all.
+const VBLANK_IRQ_LEAD* {.intdefine.} = 1
+  ## The vblank request goes up with STAT_M1_LEAD's mode-1 source, the
+  ## comparator's lead before line 144 (2 dots at single speed), not on the
+  ## boundary: gambatte-core flags both in its line-cycle-454 event. The
+  ## retriggering dispatch of `m1/lycint_vblankirq_late_retrigger_2` (both
+  ## devices) clears a request raised then; `lcd_offset/
+  ## offset2_lyc8fint_m1irq_2` [cgb] sees it an M-cycle earlier. 0 loses the
+  ## three and takes nothing.
+const STAT_M1_LEAD* {.intdefine.} = 1
+  ## The mode-1 STAT source rises with the LYC comparator's lead
+  ## (STAT_LYC_LY_LEAD_DOTS, 2 dots at single speed) at the end of line 143,
+  ## ahead of the mode flag and the vblank interrupt: gambatte-core raises its
+  ## mode-1 event at line cycle 454 with its LYC event. Line 143's LYC match
+  ## lets go first and the mode-1 source rises after it, so a match on 143
+  ## still leaves the edge detector an edge (0 of that order loses 15 rows,
+  ## `m1/lycint143_m1irq_*` and `lcdirq_precedence/m1irq_lcdstat50_lyc8f`); a
+  ## STAT write still in flight that clears the enable is the enable the rise
+  ## sees (CGB_STAT_ENABLE_LATENCY would otherwise land it too late:
+  ## `m1/m1irq_disable_1` [cgb]). Takes `m1/lycint143_m1irq_late_retrigger_2`
+  ## (both devices), `m1irq_m0disable_2`, `m1irq_m2disable_lycdisable_2`
+  ## [cgb]; 0 is the old rise at line 144's first dot.
 const STAT_LYC_LY_LEAD_ANY* = STAT_LYC_LY_LEAD_DOTS != 0 or STAT_LYC_LY_LEAD_DS != 0
 const STAT_IRQ_SPLIT* = STAT_IRQ_LEAD != 0 or STAT_LYC_LEAD != 0 or
                         STAT_M0_LEAD_T != 0 or STAT_LYC_LY_LEAD_ANY
@@ -1719,6 +1740,11 @@ type
       # The source's own `stat_chg_dot`, a different dot from the flag's when a
       # lead is on. Per-line, not serialized.
       irq_chg_dot*:      int16
+      # STAT_M1_LEAD: the mode-1 source is up ahead of the flag (line 143's
+      # last dots). Cleared at the boundary, so never live at a frame edge.
+      m1_early*:         bool
+      # VBLANK_IRQ_LEAD: the vblank request already went up with it.
+      vbl_early*:        bool
       stat_if_dot*:      int32   # STAT_DISPATCH_MIN_AGE_DS: dot the STAT request last rose
       stat_if_ly*:       uint8
       stat_if_m0*:       bool    # ... and whether the mode-0 source's own edge raised it

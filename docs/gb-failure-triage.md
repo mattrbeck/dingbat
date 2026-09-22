@@ -54,15 +54,16 @@ did not move either way.
 
 ### A2. The dispatch's IF clear against a source rising inside it
 
-**Rows (12).** The `_2` arm of the `*_late_retrigger` families whose
-first source is the LYC comparator, mode 1 or the timer, both devices:
-`ly0/lycint152_lyc153irq_late_retrigger_2`,
-`lyc153int_m2irq/lyc153int_m2irq_late_retrigger_2`,
-`m1/lycint143_m1irq_late_retrigger_2`,
-`m1/lycint_vblankirq_late_retrigger_2`, and
-`tima/tc00_irq_late_retrigger_{2 [cgb],3,ds_2}`.
-`ly0/lycint152_lyc0irq_late_retrigger_2` and
-`irq_precedence/late_m0irq_retrigger_2` closed 2026-09-22 (below).
+**Rows (6).** `ly0/lycint152_lyc153irq_late_retrigger_2`,
+`lyc153int_m2irq/lyc153int_m2irq_late_retrigger_2` (both devices),
+`tima/tc00_irq_late_retrigger_{2 [cgb],ds_2}`. Closed 2026-09-22:
+`ly0/lycint152_lyc0irq_late_retrigger_2`, `irq_precedence/
+late_m0irq_retrigger_2`, then `m1/lycint143_m1irq_late_retrigger_2` and
+`m1/lycint_vblankirq_late_retrigger_2` (both devices; the mode-1 source and
+the vblank request rise with the comparator's 2-dot lead, `STAT_M1_LEAD`,
+`VBLANK_IRQ_LEAD`), `tc00_irq_late_retrigger_3` [cgb] and
+`serial/start_wait_trigger_int8_read_if_2` [cgb] (a CGB dispatch clears a
+timer or serial request 2 T later, `IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD`).
 
 **Behaviour.** Each ROM's handler re-requests its own interrupt with an
 `LDH ($0F),A` that moves one M-cycle per member, `EI`s, and reads IF inside

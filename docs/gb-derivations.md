@@ -486,6 +486,30 @@ and mode-1 sources is one dispatch late until the comparator's LY steps at
 dot 454 (`STAT_LYC_LY_LEAD_DOTS`). Single speed only; the double-speed
 grid's constants are a coupled set and move together or not at all.
 
+### ... and the mode-1 source and the vblank request rise with it
+- Claim: entering vblank is the same event: at dot 454 of line 143 the
+  comparator's LY steps to 144, line 143's LYC match lets go, the mode-1 STAT
+  source rises after it (so a match on 143 still hands the edge detector an
+  edge) and the vblank request goes up. A STAT write still in flight that
+  clears the mode-1 enable is already the enable the rise sees.
+- Evidence: gambatte `m1/lycint143_m1irq_late_retrigger_2` and
+  `m1/lycint_vblankirq_late_retrigger_2` (both devices: the retriggered
+  dispatch's IF clear takes back a request raised at 454, not one at 456),
+  `m1irq_m0disable_2`, `m1irq_m2disable_lycdisable_2`, `m1irq_disable_1`
+  [cgb], `lcd_offset/offset2_lyc8fint_m1irq_2` [cgb]; without the order
+  (LYC falls, then mode 1 rises) the `lycint143_m1irq_*` family loses 15.
+- Site: `STAT_M1_LEAD`, `VBLANK_IRQ_LEAD`, `fifo_lyc_ly_lead` (fifo_ppu.nim).
+
+### A CGB dispatch clears a timer or serial request 2 T later
+- Claim: the dispatch acknowledges the LCD lines 18 T in and the timer and
+  serial lines later on CGB, so a timer or serial request rising in the
+  dispatch's last T-cycles is still taken back there.
+- Evidence: gambatte `tima/tc00_irq_late_retrigger_3` [cgb],
+  `serial/start_wait_trigger_int8_read_if_2` [cgb]; gambatte-core's
+  acknowledge looks ahead 2 T for the LCD, 2 + CGB for the timer and 3 + CGB
+  for serial (`Memory::ackIrq`).
+- Site: `IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD` (cpu.nim).
+
 ### The window's WY comparator samples five dots after a CGB write
 
 gambatte `window/arg/late_wy_FFto0_ly2` and `late_enable_afterVblank` flip
