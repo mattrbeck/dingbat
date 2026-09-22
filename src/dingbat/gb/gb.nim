@@ -207,6 +207,16 @@ const SERIAL_CPU_SAMPLE_T* {.intdefine.} = 0
 # DMG out of a halt (gambatte `halt/lycirq_m2stat_2`, `halt/m1int_ly_2`) but
 # spends no time doing it -- 42 gambatte `tima/*` rows refuse any charge. The
 # shape is a phase, CGB_HALT_PPU_LEAD below.
+const OAM_WRITE_SAMPLE_END* {.intdefine.} = 1
+  ## Where in its M-cycle a CPU write to OAM asks the OAM lock: 1 = after the
+  ## cycle's PPU dots, the same point a read samples at; 0 = before them, like
+  ## every other write (mem_write). With the lag below it is the whole of AGE
+  ## oam/oam-write-cgbBCE: 12 writes per line placed against the mode 2 and
+  ## mode 0 edges of lines 0, 1 and 143 at 1-dot-per-SCX resolution, on CGB
+  ## B, C and E, both speeds. The start-of-cycle sample reads both edges 3
+  ## dots late at single speed and the mode 2 edge a whole M-cycle late at
+  ## double speed. See OAM_WRITE_LOCK_LAG_DOTS (ppu.nim).
+
 const CGB_HALT_EXIT_MCYCLES* {.intdefine.} = 0
 const CGB_HALT_LEAD_LYC_ONLY* {.intdefine.} = 0
   ## Restrict CGB_HALT_PPU_LEAD to halts where the LYC comparator is the only

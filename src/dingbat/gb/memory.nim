@@ -529,7 +529,8 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
   of 0xFFFF:         irq_write(gb.interrupts, idx, val)
   else: discard
 
-proc mem_write_open(mem: GbMemory; gb: GB; idx: int; val: uint8) {.inline.} =
+proc mem_write_open(mem: GbMemory; gb: GB; idx: int; val: uint8;
+                    sampled_late = false) {.inline.} =
   ## A CPU write that reaches the bus; dropped when the VRAM/OAM window is
   ## shut. Both locks are here because ppu_write has none of its own (a write
   ## samples the latched mode, a read the live one; cpu_oam_open), and the OAM
@@ -541,8 +542,13 @@ proc mem_write_open(mem: GbMemory; gb: GB; idx: int; val: uint8) {.inline.} =
       if gb.ppu.hdma_bytes_held: ppu_land_hdma_if_due(gb.ppu, gb)
     if not cpu_vram_open(gb.ppu, is_write = true): return
   elif idx >= 0xFE00 and idx <= 0xFE9F:
+    # `mcycle_dots` is the span still ahead of the sample point: the whole
+    # cycle for a start-of-cycle sample, nothing for an end-of-cycle one.
     if not cpu_oam_open(gb.ppu, is_write = true,
-                        mcycle_dots = int32(4 shr mem.current_speed)): return
+                        mcycle_dots = (if sampled_late: 0'i32
+                                       else: int32(4 shr mem.current_speed)),
+                        ds = mem.current_speed != 0'u8,
+                        cgb = gb.cgb_enabled): return
   write_byte(mem, gb, idx, val)
 
 proc mem_write_busy(mem: GbMemory; gb: GB; idx: int; val: uint8) {.noinline.} =
@@ -590,6 +596,13 @@ proc mem_write*(mem: GbMemory; gb: GB; idx: int; val: uint8) {.hot_bus_inline.} 
     mem_tick_bus(mem, gb, 4)
   if mem.dma_busy:
     mem_write_busy(mem, gb, idx, val)
+  elif OAM_WRITE_SAMPLE_END != 0 and idx >= 0xFE00 and idx <= 0xFE9F:
+    # An OAM write asks its lock after the M-cycle's dots, where a read
+    # samples (OAM_WRITE_SAMPLE_END, gb.nim), so the dots run first.
+    mem_tick_ppu(mem, gb, 4)
+    mem_write_open(mem, gb, idx, val, sampled_late = true)
+    if mem.write_deferred: mem_flush_deferred(mem, gb)
+    return
   else:
     mem_write_open(mem, gb, idx, val)
   when HDMA_STEAL_LEAD_DOTS >= 0:

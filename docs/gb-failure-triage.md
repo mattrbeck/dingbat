@@ -205,9 +205,9 @@ line when halted, two errors that cancel in the halted steady state
 
 ### B1. Line 0's mode edges are 2 dots later than the counter says
 
-**Rows (50).** AGE `oam/oam-read-{dmgC-cgbBC@dmgC,@cgbab,@cgbc}`,
-`oam-read-cgbE`, `oam/oam-write-{dmgC,cgbBCE@*}`, `vram/vram-read-{dmgC,
-cgbBCE@*}` (12 arms); gambatte `enable_display` 15 (`ly0_late_vram{r,w}_*`,
+**Rows (47).** AGE `oam/oam-read-{dmgC-cgbBC@dmgC,@cgbab,@cgbc}`,
+`oam-read-cgbE`, `oam/oam-write-dmgC`, `vram/vram-read-{dmgC,
+cgbBCE@*}` (9 arms; `oam-write-cgbBCE@*` closed 2026-09-21, below); gambatte `enable_display` 15 (`ly0_late_vram{r,w}_*`,
 `ly0_late_scx7_m3stat_*`, `frame{0,1}_m{0,2}{irq,stat}_count_*_ds_1`,
 `enable_display_ly0_sprites_m0stat_2`, `ly0_oambusy_read_ds_1`),
 `lcd_offset` 19 (all CGB), `display_startstate/stat_*_2 [cgb]` 4.
@@ -237,10 +237,29 @@ and is far worse whole-runner. `VRAM_READ_M0_OPEN_DOTS = 2` (3 at DS),
 `oam_read_open_late` (CGB-E's OAM lock reopens a dot later; AGE
 `oam-read-cgbE` vs `-dmgC-cgbBC`) are the lock edges themselves.
 
-**To close.** One spelling of line 0's 2 dots that the lock rows, the STAT
-rows, the interrupt rows and the pixel rows accept together. The AGE cells
-are the instrument (`agediff.py`); `oam-write`'s residue has not been read
-at cell resolution and is not known to be the same 2 dots.
+**Closed 2026-09-21: the OAM write lock.** `oam-write-cgbBCE@*` (3 arms)
+and gambatte `oam_access/{mid,pre,post}write*` (+5) were not line 0 at all:
+a CPU write to OAM asked the lock at the START of its M-cycle while a read
+asks after the dots, and the lock's edges lag the mode flag. Read at
+1-dot-per-SCX resolution off the ROM's 12-write ladder (WRAM `$C000`, one
+byte per write; `tools/gbfuzz/sameboy_wram.c`'s dingbat twin): sampled
+after the dots the open edge is flag + 2 (+3 double speed), exactly the
+read side's, the LCD-on line adds its 2-dot lead, and the CGB's LCD-on
+close is flag + 2..5. The DMG shares the open edge but locks later: a
+write sampled at dot 1 of a line lands and one at dot 5 does not, and the
+lock lets go again over the 2 -> 3 edge (dot 81 lands, 85 does not) --
+gambatte `midwrite_2`/`prewrite_2` (`dmg08_out1_cgb04c_out0`), GBMicrotest
+`oam_write_l0_e`/`l1_c`, mooneye `lcdon_write_timing-GS`. `OAM_WRITE_*`
+(gb.nim, ppu.nim). Still red: `oam-write-dmgC` on its delay-2 line, which
+the ROM's author marks as depending on when the LCD was last switched off
+and which contradicts gambatte `postwrite_2_scx3` [dmg] on the open edge;
+gambatte `prewrite_lcdoffset1_1` [cgb], which passed only because the
+start-of-cycle sample cancelled the `lcdoffset1` phase error the
+`preread_lcdoffset1_1` row still shows.
+
+**To close (the rest).** One spelling of line 0's 2 dots that the lock
+rows, the STAT rows, the interrupt rows and the pixel rows accept together.
+The AGE cells are the instrument (`agediff.py`).
 
 ### B2. The CGB palette-RAM lock's edges
 

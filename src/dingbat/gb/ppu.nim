@@ -407,24 +407,100 @@ const OAM_READ_M3_CLOSE_DOTS* {.intdefine.} = 5'i32
   ## at both speeds; the `read_mode` snapshot gave 3 in double speed. 0
   ## restores the snapshot rule.
 
+const OAM_WRITE_OPEN_LAG_DOTS* {.intdefine.} = 2
+const OAM_WRITE_OPEN_LAG_DOTS_DS* {.intdefine.} = 3
+const OAM_WRITE_CLOSE_LAG_DOTS* {.intdefine.} = 5
+const OAM_WRITE_CLOSE_LAG_DOTS_DS* {.intdefine.} = 3
+const OAM_WRITE_M3_GAP_DOTS_DMG* {.intdefine.} = 4
+const OAM_WRITE_M2_LAG_DOTS_DMG* {.intdefine.} = 4
+  ## The OAM WRITE lock's edges, in dots after the PPU's own mode edges, asked
+  ## at the write's sample point (OAM_WRITE_SAMPLE_END, gb.nim: after the
+  ## M-cycle's dots, where a read samples too, so the dot named is one past
+  ## the CPU's write strobe).
+  ##
+  ## Every console: the lock OPENs OAM_WRITE_OPEN_LAG_DOTS after the 3 -> 0
+  ## flag (the read side's OAM_READ_M0_OPEN_DOTS: same values), the LCD-on
+  ## line's open edge carrying LCD_ON_LINE0_LOCK_LEAD on top as the read
+  ## side's does. AGE oam/oam-write-cgbBCE's 1-dot-per-SCX ladder pins the
+  ## single-speed value to exactly 2 and the double-speed value to exactly 3;
+  ## gambatte oam_access/postwrite_2_scx3 (dmg08 and cgb04c alike) puts the
+  ## DMG on the same edge.
+  ##
+  ## CGB: the mode 2 lock at a line start engages at once (AGE, and gambatte
+  ## oam_access/prewrite_2 cgb04c_out0), and on the LCD-on line -- the only
+  ## line whose mode 3 is not preceded by a locking mode 2 -- the lock CLOSEs
+  ## OAM_WRITE_CLOSE_LAG_DOTS after the 2 -> 3 flag. AGE brackets the close
+  ## to 2..5 at single speed (5 = the read side's OAM_READ_M3_CLOSE_DOTS) and
+  ## 2..3 at double speed.
+  ##
+  ## DMG: the mode 2 lock at a line start engages OAM_WRITE_M2_LAG_DOTS_DMG
+  ## into the line (a write sampled at dot 1 lands, one at dot 5 is refused:
+  ## gambatte oam_access/prewrite_2 dmg08_out1 vs cgb04c_out0, GBMicrotest
+  ## oam_write_l0_e, mooneye lcdon_write_timing-GS, AGE oam-write-dmgC's
+  ## delay-2 line), and the lock lets go again for OAM_WRITE_M3_GAP_DOTS_DMG
+  ## at EVERY line's 2 -> 3 edge (sampled at dot 81 lands, 85 refused:
+  ## gambatte oam_access/midwrite_2 dmg08_out1 vs cgb04c_out0, GBMicrotest
+  ## oam_write_l1_c). Both DMG values are bracketed to 2..5 and not pinned
+  ## inside it; 4 is the M-cycle. The AGE dmgC ROM's delay-2 line also
+  ## reads a later LCD-on-line open edge that gambatte postwrite_2_scx3
+  ## contradicts; its author marks that line as depending on when the LCD
+  ## was last switched off, and it is not modelled.
+  ##
+  ## gambatte oam_access/{pre,post}{read,write}_lcdoffset1_* and preread_ds_1
+  ## are not witnesses: the lcdoffset1 LCD-on phase is off by an M-cycle in
+  ## dingbat on the read side too, and prewrite_lcdoffset1_1 [cgb] passed
+  ## before this law only because the start-of-cycle sample cancelled it.
+
 const OAM_WRITE_M2_TAIL {.intdefine.} = 1
   ## Whether an OAM write is still admitted on the M-cycle mode 2 ends in. Pan
   ## Docs says OAM is the PPU's for all of mode 2; mooneye lcdon_write_timing-GS
   ## and GBMicrotest oam_write_l1_c say the last M-cycle still takes a write.
 
 proc cpu_oam_open*(ppu: GbPpu; is_write: bool; mcycle_dots: int32 = 0;
-                   open_late = false; ds = false): bool {.inline.} =
+                   open_late = false; ds = false; cgb = true): bool {.inline.} =
   if not lcd_enabled(ppu): return true
   let live = ppu.lcd_status and 3'u8
   if is_write:
-    # Same sample point as the VRAM write above: the live mode here is the mode
-    # at the start of the write's own M-cycle.
-    if live == 3: return false
+    when defined(gb_oamw_trace):
+      echo "OAMW ly=", ppu.ly, " dot=", ppu.cycle_counter, " live=", live,
+           " prev=", ppu.stat_prev_mode, " chg=", ppu.stat_chg_dot,
+           " first=", ppu.first_line, " ds=", ds, " cgb=", cgb
+    # The sample point is the write's (OAM_WRITE_SAMPLE_END, memory.nim); the
+    # live mode is read there and mode 3's edges lag (OAM_WRITE_*_LAG_DOTS).
+    let open_lag = if ds: int32(OAM_WRITE_OPEN_LAG_DOTS_DS)
+                   else: int32(OAM_WRITE_OPEN_LAG_DOTS)
+    let close_lag = if ds: int32(OAM_WRITE_CLOSE_LAG_DOTS_DS)
+                    else: int32(OAM_WRITE_CLOSE_LAG_DOTS)
+    if live == 3:
+      when OAM_WRITE_M3_GAP_DOTS_DMG != 0:
+        # The DMG's lock lets go for a few dots at the mode 2 -> 3 edge of
+        # every line (gambatte oam_access/midwrite_2 dmg08_out1 vs cgb04c_out0).
+        if not cgb and ppu.stat_prev_mode == 2'u8 and
+           ppu.cycle_counter - ppu.stat_chg_dot < OAM_WRITE_M3_GAP_DOTS_DMG:
+          return true
+      # Mode 3's own close edge, which only the LCD-on line reaches: every
+      # other line is shut by its mode 2 already.
+      if close_lag != 0 and cgb and ppu.first_line and
+         ppu.stat_prev_mode == 2'u8 and
+         ppu.cycle_counter - ppu.stat_chg_dot < close_lag:
+        return true
+      return false
+    if open_lag != 0 or LCD_ON_LINE0_LOCK_LEAD != 0:
+      # The open edge after the mode 3 -> 0 flag, plus the LCD-on line's lead.
+      if live == 0'u8 and ppu.stat_prev_mode == 3'u8:
+        var want = open_lag
+        when LCD_ON_LINE0_LOCK_LEAD != 0:
+          if ppu.first_line: want += LCD_ON_LINE0_LOCK_LEAD
+        if ppu.cycle_counter - ppu.stat_chg_dot < want: return false
     # The first line's OAM scan does not lock OAM at all (it is also the mode
     # that STAT reports as 0 -- see ppu_read 0xFF41).
     if ppu.first_line: return true
     when OAM_WRITE_M2_TAIL != 0:
       if live == 2:
+        when OAM_WRITE_M2_LAG_DOTS_DMG != 0:
+          # The DMG's mode 2 lock engages this far into the line.
+          if not cgb and ppu.cycle_counter < OAM_WRITE_M2_LAG_DOTS_DMG:
+            return true
         # Mode 2 always ends at dot 80 and the OAM scan releases the bus before
         # the CPU's write strobe, so "does this M-cycle span dot 80" is the
         # test. mcycle_dots is 4, or 2 in double speed. Exact for the FIFO
