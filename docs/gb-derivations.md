@@ -419,6 +419,44 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
   20 where the mode-2-first families want below 19 — a per-source phase
   question, `docs/gb-failure-triage.md` A2.
 
+### The comparator steps two dots before the line boundary
+
+gambatte-core schedules its LYC interrupt event at frame cycle
+`LYC * 456 - 2` (`lyc_irq.cpp`) and its mode-1 event at `144 * 456 - 2`:
+both sources rise two dots before the LY increment. dingbat's LY steps on
+the boundary and its STAT sources rose there too, which the ordinary CPU
+grid cannot tell apart (the boundary is the last dot of an M-cycle, both
+are seen at the same instruction end). A KEY1 speed-switch round trip
+leaves the CPU grid three dots behind the PPU's (E1), and there the two
+differ by a whole M-cycle: every gambatte `*_lcdoffset1_1` row on the LYC
+and mode-1 sources is one dispatch late until the comparator's LY steps at
+dot 454 (`STAT_LYC_LY_LEAD_DOTS`). Single speed only; the double-speed
+grid's constants are a coupled set and move together or not at all.
+
+### The window's WY comparator samples five dots after a CGB write
+
+gambatte `window/arg/late_wy_FFto0_ly2` and `late_enable_afterVblank` flip
+between commits 445 and 449 of line 0 on the CGB (449 and 453 on the DMG),
+`late_wy_1toFF` between 449 and 453: a WY write or an LCDC.5 enable that
+lands before the boundary arms the window for the next line only if the
+comparator sees the match with the OLD line number, and it samples one CPU
+M-cycle after the write lands (`WIN_CHECK_DEFER_CGB`). Mid-line writes
+(`late_wy_FFto2_ly2_*`, 85 -> 89) bracket the same deferral from above.
+Line 0's own check runs at dot 4 (`WIN_LINE0_CHECK_DOT_CGB`): `late_wy_1`
+(commit 453 of line 153, lands 1) must be seen and `late_wy_2` (commit 1,
+lands 5) must not. SameBoy's model is the same shape -- the write lands at
+the M-cycle start and the check runs at the next 4-dot grid tick.
+
+### The CGB palette RAM lock trails the STAT edges
+
+gambatte `cgbpal_m3/cgbpal_m3end_{1,3}` (single speed) and `_ds_{1,3}`:
+BCPD/OCPD are still locked for a read at the first M-cycle of mode 0 and a
+write one dot into it, and open two dots in at both speeds; `m3start_ds_1`
+and `{read,write}_m3start_ds_1`: at double speed the lock engages two dots
+after the mode-3 edge, at single speed one (`CRAM_LOCK_ON_LAT{,_DS}`,
+`CRAM_LOCK_OFF_LAT`). `enable_display/ly0_late_cgbp{r,w}_2`: the LCD-on
+first line locks four dots later still (`CRAM_LOCK_LINE0_EXTRA`), not never.
+
 ### The interrupt check stays a leaf
 - `handle_interrupts` runs after every instruction and almost never takes the
   branch; its taken half (`dispatch_interrupt`) is `{.noinline.}` so the

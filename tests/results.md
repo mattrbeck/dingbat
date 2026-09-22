@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-09-21 23:27:00 · commit eddd446ac · game-boy-test-roms v7.0*
+*Generated: 2026-09-22 09:40:54 · commit 19ee1b5d9 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1254
-- **Pass:** 1227
-- **Fail:** 27
+- **Pass:** 1228
+- **Fail:** 26
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -29,7 +29,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - SameSuite APU | 70 | 70 |
 | Game Boy - Shootout ROMs | 15 | 15 |
 | Game Boy - Mooneye (wilbertpol) | 184 | 184 |
-| Game Boy - gambatte | 21 | 48 |
+| Game Boy - gambatte | 22 | 48 |
 
 ## Game Boy - Blargg (28/28)
 
@@ -101,46 +101,46 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 184 tests passed.**
 
-## Game Boy - gambatte (21/48)
+## Game Boy - gambatte (22/48)
 
 | Test | Device | Result |
 |------|--------|--------|
 | gambatte/bgen | per-ROM | 👌 2/2 passed |
 | gambatte/bgtiledata | per-ROM | 👌 34/34 passed |
 | gambatte/bgtilemap | per-ROM | 👌 40/40 passed |
-| gambatte/cgbpal_m3 | per-ROM | 👀 33/44 passed |
+| gambatte/cgbpal_m3 | per-ROM | 👀 42/44 passed |
 | gambatte/display_startstate | per-ROM | 👌 14/14 passed |
 | gambatte/div | per-ROM | 👌 8/8 passed |
 | gambatte/dma | per-ROM | 👀 190/229 passed |
 | gambatte/dmgpalette_during_m3 | per-ROM | 👀 9/17 passed |
-| gambatte/enable_display | per-ROM | 👀 166/184 passed |
+| gambatte/enable_display | per-ROM | 👀 168/184 passed |
 | gambatte/halt | per-ROM | 👀 150/158 passed |
 | gambatte/irq_precedence | per-ROM | 👀 49/64 passed |
-| gambatte/lcd_offset | per-ROM | 👀 43/62 passed |
+| gambatte/lcd_offset | per-ROM | 👀 54/62 passed |
 | gambatte/lcdirq_precedence | per-ROM | 👌 62/62 passed |
 | gambatte/ly0 | per-ROM | 👀 92/96 passed |
 | gambatte/lyc0int_m0irq | per-ROM | 👌 6/6 passed |
 | gambatte/lyc153int_m2irq | per-ROM | 👀 14/16 passed |
-| gambatte/lycEnable | per-ROM | 👀 194/225 passed |
+| gambatte/lycEnable | per-ROM | 👀 202/225 passed |
 | gambatte/lycint_ly | per-ROM | 👌 6/6 passed |
 | gambatte/lycint_lycflag | per-ROM | 👀 11/12 passed |
 | gambatte/lycint_lycirq | per-ROM | 👌 4/4 passed |
 | gambatte/lycint_m0stat | per-ROM | 👌 6/6 passed |
 | gambatte/lycm2int | per-ROM | 👌 18/18 passed |
 | gambatte/lywrite | per-ROM | 👌 8/8 passed |
-| gambatte/m0enable | per-ROM | 👀 162/167 passed |
+| gambatte/m0enable | per-ROM | 👀 163/167 passed |
 | gambatte/m0int_m0irq | per-ROM | 👌 4/4 passed |
 | gambatte/m0int_m0stat | per-ROM | 👌 12/12 passed |
 | gambatte/m0int_m3stat | per-ROM | 👌 6/6 passed |
-| gambatte/m1 | per-ROM | 👀 153/170 passed |
-| gambatte/m2enable | per-ROM | 👀 113/120 passed |
+| gambatte/m1 | per-ROM | 👀 155/170 passed |
+| gambatte/m2enable | per-ROM | 👀 115/120 passed |
 | gambatte/m2int_m0irq | per-ROM | 👀 67/72 passed |
 | gambatte/m2int_m0stat | per-ROM | 👌 6/6 passed |
 | gambatte/m2int_m2irq | per-ROM | 👌 18/18 passed |
 | gambatte/m2int_m2stat | per-ROM | 👌 8/8 passed |
 | gambatte/m2int_m3stat | per-ROM | 👌 44/44 passed |
-| gambatte/miscmstatirq | per-ROM | 👀 272/279 passed |
-| gambatte/oam_access | per-ROM | 👀 67/69 passed |
+| gambatte/miscmstatirq | per-ROM | 👀 273/279 passed |
+| gambatte/oam_access | per-ROM | 👌 69/69 passed |
 | gambatte/oamdma | per-ROM | 👀 788/802 passed |
 | gambatte/scx_during_m3 | per-ROM | 👀 131/141 passed |
 | gambatte/scy | per-ROM | 👌 67/67 passed |
@@ -152,7 +152,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/undef_ops | per-ROM | 👌 20/20 passed |
 | gambatte/vram_m3 | per-ROM | 👀 48/50 passed |
 | gambatte/vramw_m3end | per-ROM | 👀 34/36 passed |
-| gambatte/window | per-ROM | 👀 435/476 passed |
+| gambatte/window | per-ROM | 👀 440/476 passed |
 
 Each row is one gambatte subdirectory. See [detailed results](results_gambatte.md) for individual test outcomes.
 

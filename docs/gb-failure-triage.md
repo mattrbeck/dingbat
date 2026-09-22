@@ -202,36 +202,64 @@ blind window is leaving); the CGB enable latency above.
 `STATW` line is each STAT write's commit dot) against one statement of when
 each source's level rises and falls relative to the line boundary. No Pan
 Docs sentence gives these dots; the evidence is the families themselves.
-Two threads measured 2026-09-22, neither shipped:
+Closed 2026-09-22 (second round), three rules, each bracketed two-sided on
+the full 5157-row list:
 
-* *The comparator's LY steps before the boundary.* A standalone rule that
-  advanced the LYC source's LY `N` dots before a rendered line's boundary
-  (irq_ly, an explicit edge-detector run on that dot) takes the same 16 rows
-  at N = 2 and N = 3 -- `m1/m1irq_m2enable_lyc_2`, `m1/lyc143_late_m2enable_
-  lycdisable_ds_1`, `m2enable/late_enable_after_lycint{,_disable}_2`,
-  `lyc1_late_m2enable_lycdisable_1`, `lycEnable/lyc153_late_{enable_,}
-  m1disable_2 [cgb]`, `lcd_offset/offset{1,2}_lyc8fint_m1stat_1`, `oam_access/
-  pre{read,write}_lcdoffset1_1`, `vram_m3/pre{read,write}_lcdoffset2_1`,
-  `cgbpal_m3/cgbpal_{read,write}_m3start_lcdoffset1_1` -- and loses their
-  `lcdoffset*_2` / `_ds_` siblings (14 at N = 3; N = 2 also loses 150 double-
-  speed `sprites/*_m3stat_ds_2` rows through the skip target, N = 1 loses 21).
-  A flat dot count flips one arm of each `lcdoffset` pair, so the step is
-  aligned to the CPU's M-cycle grid, not the line's dot grid: gambatte-core
-  puts the LYC and mode-1 events 2 cycles before an M-aligned LY increment,
-  and dingbat's boundary sits on the last dot of an M-cycle. The next
-  spelling is "the comparator steps at a fixed T of the M-cycle the boundary
-  falls in", derived from the tick's phase, with the double-speed grid its
-  own case. Riding the whole irq domain instead (`STAT_M0_LEAD_DOMAIN`)
-  costs 13 rows on its own (the mode-0 source dropping early, the LYC-write
-  windows) and 26 with the LYC term.
-* *The mode-2 enable on CGB, `m2enable/late_enable_*_2 [cgb]` (7).* A write
-  committing 3 dots before the boundary (gambatte's LY - 4) that enables the
-  OAM source while disabling mode 0 fires on CGB and not on DMG. The DMG
-  half is the level OR (mode 0 hands to the pulse, no dip); the CGB half
-  needs the drop (clears only, `old and new` enables) at the commit and a
-  RISE evaluation when the set bits land 2 dots later, while the pulse
-  (dots 452..454) is still high -- i.e. an edge-detector run at the landing
-  dot, which nothing schedules today (the boundary flush is after the pulse).
+* *The comparator's LY steps 2 dots before the boundary, single speed*
+  (`STAT_LYC_LY_LEAD_DOTS = 2`, `fifo_lyc_ly_lead`): irq_ly becomes the next
+  line at dot 454 and the edge detector runs there. 1 takes 8 and loses 3, 2
+  takes 15 and loses 6, 3 takes 15 and loses 9. The winners are every
+  single-speed `*_lcdoffset1_1` row (the speed-switch round trip leaves the
+  CPU grid 3 dots behind the PPU's, so a source rising on the boundary is
+  sampled one M-cycle late: `cgbpal_m3/cgbpal_{read,write}_m3start_
+  lcdoffset1_1`, `lcd_offset/offset{1,2}_lyc8fint_m1stat_1`, `lycEnable/
+  late_ff45_enable_lcdoffset1_1`, `m0enable/late_enable_lcdoffset1_1`,
+  `m1/ly143_late_m0enable_lcdoffset1_1`, `oam_access/pre{read,write}_
+  lcdoffset1_1`, `vram_m3/pre{read,write}_lcdoffset2_1`) plus the LYC-held
+  enables (`m2enable/late_enable_after_lycint{,_disable}_2`, `lyc1_late_
+  m2enable_lycdisable_1`, `m1/m1irq_m2enable_lyc_2`). gambatte-core's LYC
+  event sits at line cycle 454 (`lyc_irq.cpp`, `lycReg * 456 - 2`), the same
+  dot. The six it loses (`m1/lyc143_late_m{0,2}enable_lycdisable_2`,
+  `offset2_lyc8fint_m1irq_2`, `m2enable/late_enable_lcdoffset2_2`, `vram_m3/
+  pre{read,write}_lcdoffset1_2`) are rows where the ending line's match must
+  NOT dip before a same-M-cycle enable lands: gambatte's `lycperiod` (a match
+  with more than 2 cycles to the step) blocks any STAT write from triggering.
+  Double speed is left at 0 (`STAT_LYC_LY_LEAD_DS`): every `_ds_` sibling
+  moves the other way, and the double-speed constants are a coupled set
+  (see below).
+* *The OAM pulse's falling edge is evaluated* (`STAT_M2_PULSE_END_EVAL`,
+  dot `STAT_M2_PULSE + 1` on every line): +4, no losses. `lycEnable/
+  late_ff41_enable_after_m2int{,_disable}` enable LYC inside the mode-2
+  handler with LYC == LY; the line had fallen at dot 4 and nothing ran the
+  detector, so the enable found `old_stat_flag` still high.
+* *The CGB's last-M-cycle mode-2 enable* (`STAT_M2_ENABLE_WINDOW_CGB`):
+  gambatte-core's `statChangeTriggersM2IrqCgb` as a rule of its own -- a
+  CGB STAT write committing in the line's last M-cycle (lines 0..142) that
+  newly sets the OAM enable with mode 0 off, while the LYC source is not
+  holding the line, requests the interrupt at once; line 143 has no window
+  at single speed and line 153 a one-dot window at double speed only. +1
+  (`m2enable/late_enable_m0disable_2 [cgb]`); the level model cannot spell
+  it because the mode-0 source is still up at the commit on both devices
+  and the DMG must not fire.
+
+Measured and refused the same day (all on top of the three): the STAT
+drop sampled with `old and new` enables (`STAT_DROP_OLD_LEVEL`, -33: the
+`miscmstatirq/*_08_40`, `*_40_08` swaps of two high sources want no dip);
+the CGB mode-0 source ending at dot 452 where the OAM source begins
+(`STAT_M0_FALL_AT_M2_CGB`, SameBoy's single `mode_for_interrupt`, -1 alone
+and -7 with an evaluation on the dot the set bits land, `STAT_SET_LANDING_
+EVAL`, because `m2enable/late_enable_*_3` -- the enable committed on dot 1,
+landing on 3 with the pulse still high -- must not fire); the whole-suite
+joint moves of the double-speed grid (`SPEED_SWITCH_PPU_EXTRA_DOTS` 7/9
+with `STAT_READ_SAMPLE_DS_ADD` 0/2: -86 to -280) and of the to-single
+switch residual (`SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE` -1, 0, 1, 2, 4, 5, 7:
+each loses 26..34 `speedchange*_ly44_m3*` ladder rows and takes no
+`lcd_offset` row).
+
+**Remaining (A3).** The `_ds_` and `_lcdoffset*_2` siblings above, the
+`lyc143` pair and `late_enable_lcdoffset{2,3}_2`: one statement of the
+comparator's step and the pulse's width on the double-speed grid, derived
+with the double-speed constants together rather than one at a time.
 
 The knob sweep of 2026-09-22 (`+-1` of every GB `{.intdefine.}`, 206 knobs,
 red rows first and every hit validated on the full 5157-row list from a
@@ -373,13 +401,18 @@ The AGE cells are the instrument (`agediff.py`).
 the VRAM lock's on the read side; the `_ds_`/`lcdoffset1` members and the
 `m3end_1/_3` pairs ask for the edge in dots, as C1 does for VRAM.
 
-**Modelled.** `CRAM_LOCK_R = 3` (the latched mode plus the LCD-on line-0
-exemption), `CRAM_LOCK_W = 0` (the live mode; the knob is inert on every
-cgbpal row). No dot-resolution edge.
-
-**To close.** Bracket the open and close edges in dots from the `_1/_3`
-pairs at both speeds, the way `VRAM_READ_M0_OPEN_DOTS` was, then the line-0
-members follow B1.
+**Closed 2026-09-22** (`CRAM_LOCK_DOTS`, `cpu_cram_open_dots`): the lock is
+a dot window around the mode-3 edges, a write asked at its commit and a read
+at the start of its M-cycle. It engages `CRAM_LOCK_ON_LAT = 1` dot after
+the mode-3 edge at single speed and 2 at double (`_DS`; 3 and 4 lose the
+`_ds_lcdoffset1_2` pair, 2 loses nothing), releases `CRAM_LOCK_OFF_LAT = 2`
+dots after the mode-0 edge at both speeds (3 loses `m3end_scx3_{2,4}`, whose
+mode 3 ends 3 dots later than `m3end_{2,4}`'s under the same sled; 4 loses
+nine), and the LCD-on first line engages `CRAM_LOCK_LINE0_EXTRA = 4` dots
+later instead of not at all (`enable_display/ly0_late_cgbp{r,w}_2`). +11
+rows, none lost; the `_ds_` members of ly0_late_cgbp* and the B1 residue
+remain. SameBoy reaches the same window (`cgb_palettes_blocked` 3 dots into
+its mode 3 and 4 dots into its mode 0, with its line 3 dots ahead of ours).
 
 ---
 
@@ -505,8 +538,19 @@ families.
 **Modelled.** The level latch; `CGB_WY_LATENCY = 4` (one M-cycle, clipped to
 3 dots by `CGB_LATENCY_CAP = 1`), `CGB_WY_LATCH_LATENCY = 0`.
 
-**To close.** A DMG arm deadline separate from the disarm (the families
-bracket it to one M-cycle), then the CGB delta on top.
+**Closed 2026-09-22 on the CGB** (`WIN_CHECK_DEFER_CGB = 5`,
+`WIN_LINE0_CHECK_DOT_CGB = 4`, `win_check_now`): a WY write or an LCDC.5
+enable no longer arms the latch at its landing; the comparator samples 5
+dots after the commit (4 and 5 equal at +28/+29, 6..8 lose the mid-line
+`late_wy_FFto2_ly2_*_1` writes, whose window must still start on the same
+line; 8 takes two more boundary rows and loses six), reading the LY of that
+dot, and line 0's per-line check runs at dot 4 rather than the boundary
+(`late_wy_{1,2}` against `late_wy_lcdoffset1_{1,2}`: the boundary check sees
+the WY value a write committed in the boundary M-cycle lands 4 dots later).
++27 with the A3 lead in place, +2 without it. The DMG (`WIN_CHECK_DEFER_DMG`,
+4 loses 3) and the `_ds_` members keep the immediate latch; `window/late_wy_2`
+and `late_wy_10to1_ly1_1 [cgb]` are the two single-speed rows the rule
+still misses.
 
 ### C6. Window disable and re-enable mid-line on the CGB
 

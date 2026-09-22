@@ -126,8 +126,23 @@ const STAT_M0_LEAD_FIRST_LINE* {.booldefine.} = false
   ## Whether STAT_M0_LEAD_T applies on the first line after an LCD enable. Ships
   ## false: tools/gbppu/gam_dispatch.py reads that line's dispatch as exact.
 
+const STAT_LYC_LY_LEAD_DOTS* {.intdefine.} = 2
+  ## Dots before a line's boundary at which the LYC comparator's LY (irq_ly)
+  ## steps to the next line in SINGLE speed, so its STAT source rises and
+  ## falls ahead of the readable LY (fifo_lyc_ly_lead). gambatte-core's LYC
+  ## and mode-1 events sit at line cycle 454, and after a KEY1 round trip
+  ## (the CPU grid 3 dots behind the PPU's) a source rising on the boundary
+  ## is dispatched one M-cycle late: every gambatte `*_lcdoffset1_1` row on
+  ## the LYC/mode-1 sources. Bracketed on the 5157-row list: 1 is +8/-3, 2
+  ## +15/-6, 3 +15/-9 (docs/gb-failure-triage.md A3). 0 compiles it out.
+const STAT_LYC_LY_LEAD_DS* {.intdefine.} = 0
+  ## The same in double speed. 0: a lead there (1..3 were tried with the
+  ## single-speed one) loses every `_ds_` sibling; the double-speed constants
+  ## are a coupled set (STAT_READ_SAMPLE_DS_ADD, SPEED_SWITCH_PPU_EXTRA_DOTS,
+  ## IRQ_SAMPLE_T_DS) and move together or not at all.
+const STAT_LYC_LY_LEAD_ANY* = STAT_LYC_LY_LEAD_DOTS != 0 or STAT_LYC_LY_LEAD_DS != 0
 const STAT_IRQ_SPLIT* = STAT_IRQ_LEAD != 0 or STAT_LYC_LEAD != 0 or
-                        STAT_M0_LEAD_T != 0
+                        STAT_M0_LEAD_T != 0 or STAT_LYC_LY_LEAD_ANY
 static:
   # The two share one early-advancing domain (irq_ly / irq_mode), so they cannot
   # ask for different amounts of lead at once. Either is free to be 0.
@@ -523,6 +538,52 @@ const CGB_MAP_ANY* = CGB_MAP_LATENCY != 0
   ## Whether anything records the map-select bits' change dot; at 0 the field
   ## is never written and the fetcher's compare never takes.
 const CGB_WY_LATCH_LATENCY*   {.intdefine.} = 0
+const WIN_CHECK_DEFER_CGB*    {.intdefine.} = 5
+  ## Dots after a WY write's (or an LCDC.5 enable's) commit at which the
+  ## window's WY == LY comparator samples on a CGB, in place of the immediate
+  ## latch (ppu_latch_wy). gambatte window/arg/late_wy_FFto0_ly2 and
+  ## late_enable_afterVblank flip between commits 445 and 449 of the line
+  ## before: the write lands at the end of its M-cycle and the comparator
+  ## runs one CPU M-cycle later, reading the LY of that dot. Bracketed with
+  ## STAT_LYC_LY_LEAD_DOTS on: 4 and 5 are +41/-13 and +42/-13, 6 +42/-19,
+  ## 7 +42/-21, 8 +49/-22 (8 takes two more boundary rows and loses the
+  ## mid-line `late_wy_FFto2_ly2_*_1` writes, whose window must still start
+  ## on the same line). 0 = immediate.
+const WIN_CHECK_DEFER_DMG*    {.intdefine.} = 0
+  ## The same on a DMG (its writes land at the commit). 4 loses 3 and takes
+  ## nothing; the DMG's arm deadline is the immediate latch.
+const WIN_LINE0_CHECK_DOT_CGB* {.intdefine.} = 4
+  ## Dot of line 0 at which a CGB runs the per-line WY == LY check, instead of
+  ## the mode-2 entry at the boundary (lines 1..143 keep the boundary). Pinned
+  ## by window/late_wy_{1,2} against late_wy_lcdoffset1_{1,2}: a WY write
+  ## committed in the boundary M-cycle (453, landing 456) must be seen, one
+  ## committed on dot 1 (landing 4) must not. 0 = boundary.
+const STAT_M2_ENABLE_WINDOW_CGB* {.booldefine.} = true
+  ## A CGB STAT write in the last M-cycle of a rendered line that newly sets
+  ## the OAM enable (with mode 0 off) requests the interrupt at once, unless
+  ## the LYC source already holds the line: the next line's OAM source is up
+  ## and the enable meets it. gambatte m2enable/late_enable_m0disable_2
+  ## [cgb]: commit 453 fires, 449 fires through the source's own rise, 1 (the
+  ## next line) does not, and the DMG never does. Line 143 has no window at
+  ## single speed, line 153's is one dot wide in double speed only. The level
+  ## model cannot spell it: the mode-0 source is still up at the commit on
+  ## both devices (STAT_M0_FALL_AT_M2_CGB, ppu.nim). +1, no losses.
+const STAT_SET_LANDING_EVAL*  {.booldefine.} = false
+  ## Whether the STAT edge detector runs on the dot a CGB STAT write's SET
+  ## enable bits land (CGB_STAT_ENABLE_LATENCY after the commit), so a source
+  ## already high there is a rising edge without waiting for the boundary
+  ## flush. Off: -10 (-7 with STAT_M0_FALL_AT_M2_CGB) -- gambatte m2enable/
+  ## late_enable_*_3 commit the enable on dot 1 of the next line, landing on
+  ## 3 with the OAM pulse still high, and hardware does not fire; a source
+  ## already high when the set bits land is not an edge.
+const WIN_CHECK_CMP_LY*       {.intdefine.} = 0
+  ## 1: the deferred window check compares WY with the comparator's LY
+  ## (irq_ly, which STAT_LYC_LY_LEAD_DOTS steps before the boundary) rather
+  ## than the readable LY. Row-for-row identical to 0 at the shipping
+  ## deferral (no check lands in the two dots that differ); kept as the
+  ## control.
+const WIN_CHECK_DEFER_ANY* = WIN_CHECK_DEFER_CGB != 0 or WIN_CHECK_DEFER_DMG != 0 or
+                             WIN_LINE0_CHECK_DOT_CGB != 0
 const WIN_EN_ABORT*           {.intdefine.} = 1
   ## Whether clearing LCDC.5 mid-mode-3 returns the fetcher to background tiles
   ## on this line (1, ships). DMG behaviour, not CGB-only: mealybug's PPU notes
@@ -1508,6 +1569,8 @@ type
     # CGB latency), ahead of the M-cycle boundary the rest of the byte waits
     # for (stat_drop_arm, ppu.nim). Live only inside that M-cycle: not
     # serialized, a state is never taken mid-M-cycle.
+    win_check_dot*:      int32     # WIN_CHECK_DEFER: dot the comparator samples on, -1 none
+    stat_set_dot*:       int32     # STAT_SET_LANDING_EVAL: dot a STAT write's set bits land, -1 none
     stat_drop_pending*:  bool
     stat_drop_level*:    bool
     stat_drop_dot*:      int32

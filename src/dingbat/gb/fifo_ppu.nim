@@ -1878,10 +1878,29 @@ template fifo_skip_target(ppu: GbFifoPpu; gb: GB; m: uint8): int32 =
   when not STAT_M0_LEAD_DOMAIN:
     # STAT_M0_LEAD_T alone moves one edge inside mode 3 and compiles the
     # domain's boundary hooks out; only a domain lead needs the branch below.
-    if m == 2: m3_start_dot(gb)
-    elif ppu.ly == 143 and m == 0 and m2_144_early_active(gb): M2_144_EARLY_DOT
-    elif ppu.m2_early_stop(gb): ppu.m2_early_dot(gb)
-    else: gb_line_end(ppu)
+    block:
+      var tgt =
+        if m == 2:
+          when STAT_M2_PULSE_END_EVAL and STAT_M2_PULSE >= 0:
+            (if ppu.cycle_counter <= int32(STAT_M2_PULSE) + 1: int32(STAT_M2_PULSE) + 1
+             else: m3_start_dot(gb))
+          else: m3_start_dot(gb)
+        elif ppu.ly == 143 and m == 0 and m2_144_early_active(gb): M2_144_EARLY_DOT
+        elif ppu.m2_early_stop(gb): ppu.m2_early_dot(gb)
+        elif STAT_LYC_LY_LEAD_ANY and lyc_lead_dots(gb) != 0 and
+             ppu.cycle_counter <= gb_line_end(ppu) - lyc_lead_dots(gb):
+          gb_line_end(ppu) - lyc_lead_dots(gb)
+        else: gb_line_end(ppu)
+      when WIN_CHECK_DEFER_ANY:
+        # A pending comparator sample is a stop of its own (WIN_CHECK_DEFER).
+        if ppu.win_check_dot >= 0 and ppu.win_check_dot < tgt and
+           ppu.cycle_counter <= ppu.win_check_dot:
+          tgt = ppu.win_check_dot
+      when STAT_SET_LANDING_EVAL:
+        if ppu.stat_set_dot >= 0 and ppu.stat_set_dot < tgt and
+           ppu.cycle_counter <= ppu.stat_set_dot:
+          tgt = ppu.stat_set_dot
+      tgt
   else:
     # A STAT_IRQ_LEAD build stops twice per boundary, `lead` dots apart
     # (`>=`: a stop the counter sits on is not processed yet).
@@ -1945,6 +1964,18 @@ when STAT_IRQ_SPLIT:
       (if ppu.first_line: 0'i32 else: lead)
     else:
       lead
+
+  template lyc_lead_dots(gb: GB): int32 =
+    ## STAT_LYC_LY_LEAD_DOTS / _DS for the speed the CPU is in.
+    (if gb.memory.current_speed == 0: int32(STAT_LYC_LY_LEAD_DOTS)
+     else: int32(STAT_LYC_LY_LEAD_DS))
+
+  proc fifo_lyc_ly_lead(ppu: GbFifoPpu; gb: GB) {.noinline.} =
+    ## The comparator's LY steps to the next line lyc_lead_dots before the
+    ## readable LY does (the boundary's catch-up keeps the two equal
+    ## everywhere else). Line 153's snap to 0 is its own machinery.
+    ppu.irq_ly = ppu.ly + 1
+    ppu_handle_stat_interrupt(ppu, gb)
 
   proc fifo_irq_line_advance(ppu: GbFifoPpu; gb: GB) =
     ## The STAT interrupt line's own line boundary, STAT_IRQ_LEAD M-cycles
@@ -2036,6 +2067,12 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             if ppu.lx >= m0_hook_lx and ppu.irq_mode == 3 and
                fifo_irq_m0_ready(ppu, px_lead):
               ppu_set_irq_mode(ppu, gb, 0'u8)
+          when WIN_CHECK_DEFER_ANY:
+            if ppu.cycle_counter == ppu.win_check_dot: win_check_now(ppu, gb)
+          when STAT_SET_LANDING_EVAL:
+            if ppu.cycle_counter == ppu.stat_set_dot:
+              ppu.stat_set_dot = -1
+              ppu_handle_stat_interrupt(ppu, gb)
           fifo_pipeline_dot(ppu, gb)
           ppu.cycle_counter += 1
           dec remaining
@@ -2044,8 +2081,18 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
       when defined(gb_phase_trace):
         gb_phase = int32(cycles - remaining - 1)
         gb_ticklen = int32(cycles)
+      when WIN_CHECK_DEFER_ANY:
+        if ppu.cycle_counter == ppu.win_check_dot: win_check_now(ppu, gb)
+      when STAT_SET_LANDING_EVAL:
+        if ppu.cycle_counter == ppu.stat_set_dot:
+          ppu.stat_set_dot = -1
+          ppu_handle_stat_interrupt(ppu, gb)
       case m
       of 2:  # OAM search
+        when STAT_M2_PULSE_END_EVAL and STAT_M2_PULSE >= 0:
+          # The OAM pulse's falling edge (STAT_M2_PULSE_END_EVAL, ppu.nim).
+          if ppu.cycle_counter == int32(STAT_M2_PULSE) + 1:
+            ppu_handle_stat_interrupt(ppu, gb)
         # The whole boundary moves M3_GRID_EARLY early.
         let m3_dot = m3_start_dot(gb)
         when STAT_IRQ_SPLIT:
@@ -2192,6 +2239,14 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         if ppu.cycle_counter == M2_144_EARLY_DOT and ppu.ly == 143 and
            m2_144_early_active(gb):
           ppu_handle_stat_interrupt(ppu, gb)
+        when STAT_LYC_LY_LEAD_ANY:
+          # The LYC comparator's LY steps ahead of the readable one
+          # (STAT_LYC_LY_LEAD_DOTS, gb.nim); nothing else happens on that
+          # dot, so run the edge detector explicitly.
+          block:
+            let ld = lyc_lead_dots(gb)
+            if ld != 0 and ppu.cycle_counter == gb_line_end(ppu) - ld:
+              fifo_lyc_ly_lead(ppu, gb)
         # The next line's OAM source comes up in this line's last M-cycle
         # (STAT_M2_LEAD).
         when STAT_M2_EARLY:
@@ -2202,6 +2257,10 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             if ppu.cycle_counter == gb_line_end(ppu) - lead:
               fifo_irq_line_advance(ppu, gb)
         if ppu.cycle_counter == gb_line_end(ppu):
+          when WIN_CHECK_DEFER_ANY:
+            if ppu.win_check_dot >= 0: ppu.win_check_dot -= ppu.cycle_counter
+          when STAT_SET_LANDING_EVAL:
+            if ppu.stat_set_dot >= 0: ppu.stat_set_dot -= ppu.cycle_counter
           ppu.stat_chg_dot -= ppu.cycle_counter
           when LCD_ON_TRIM_ANY:
             if ppu.lcdon_lines > 0: dec ppu.lcdon_lines
@@ -2236,6 +2295,12 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
         when M2_144_PULSE:
           if ppu.ly == 144'u8 and ppu.cycle_counter == m2_144_fall_dot(gb):
             ppu_handle_stat_interrupt(ppu, gb)
+        when STAT_LYC_LY_LEAD_ANY:
+          block:
+            let ld = lyc_lead_dots(gb)
+            if ld != 0 and ppu.ly != 0'u8 and ppu.ly != 153'u8 and
+               ppu.cycle_counter == 456 - ld:
+              fifo_lyc_ly_lead(ppu, gb)
         # Line 0's pulse does not lead unless STAT_M2_EARLY_LY0 is on.
         when STAT_M2_EARLY:
           if m2_lead_active(gb) and ppu.cycle_counter == ppu.m2_early_dot(gb):
@@ -2245,6 +2310,10 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             if ppu.cycle_counter == 456 - lead: fifo_irq_line_advance(ppu, gb)
         if ppu.cycle_counter == 456:
           ppu.cycle_counter = 0
+          when WIN_CHECK_DEFER_ANY:
+            if ppu.win_check_dot >= 0: ppu.win_check_dot -= 456
+          when STAT_SET_LANDING_EVAL:
+            if ppu.stat_set_dot >= 0: ppu.stat_set_dot -= 456
           ppu.stat_chg_dot -= 456
           # Line 153's advance to 0 already ran in fifo_line153_edge; the
           # `ly == 0` branch is that snap's mode 1 -> 2.
@@ -2275,6 +2344,8 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
       ppu.cycle_counter += 1
   else:
     ppu.cycle_counter = 0
+    when WIN_CHECK_DEFER_ANY: ppu.win_check_dot = -1
+    when STAT_SET_LANDING_EVAL: ppu.stat_set_dot = -1
     ppu.`mode_flag=`(0'u8, gb)
     ppu.ly = 0
     when STAT_IRQ_SPLIT: ppu.irq_ly = 0

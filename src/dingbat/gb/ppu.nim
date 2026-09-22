@@ -30,7 +30,9 @@ when STAT_IRQ_SPLIT:
   template irq_m1_of(ppu: GbPpu): uint8 =
     when STAT_IRQ_LEAD != 0: ppu.irq_mode else: ppu.mode_flag
   template irq_ly_of(ppu: GbPpu): uint8 =
-    when STAT_IRQ_LEAD != 0 or STAT_LYC_LEAD != 0: ppu.irq_ly else: ppu.ly
+    when STAT_IRQ_LEAD != 0 or STAT_LYC_LEAD != 0 or STAT_LYC_LY_LEAD_ANY:
+      ppu.irq_ly
+    else: ppu.ly
 else:
   template irq_mode_of(ppu: GbPpu): uint8 = ppu.mode_flag
   template irq_m0_of(ppu: GbPpu): uint8 = ppu.mode_flag
@@ -95,6 +97,8 @@ method skip_boot*(ppu: GbPpu; gb: GB) {.base.} =
   # window_trigger against WY = 0 and carries it into the first drawn frame
   # (gambatte window/*). The boot ROM ends in VBlank with the latch clear.
   ppu.window_trigger = false
+  ppu.win_check_dot = -1
+  ppu.stat_set_dot = -1
   ppu.current_window_line = -1
   # Post-boot VRAM tiles: blank $00, the Nintendo logo $01-$18 decompressed
   # from the cart's own header, and the (R) tile $19.
@@ -361,16 +365,49 @@ proc cpu_vram_open*(ppu: GbPpu; is_write: bool; cgb = false;
 
 const CRAM_LOCK_R {.intdefine.} = 3
 const CRAM_LOCK_W {.intdefine.} = 0
-  ## Which edges the CGB palette-RAM (BCPD/OCPD) mode-3 lock asks on. R=3
-  ## ships: the latched mode (one M-cycle later than the VRAM lock on the read
-  ## side) plus the LCD-on line-0 exemption. Scored by gambatte cgbpal_m3 and
-  ## enable_display/ly0_late_cgbp*. The write knob is inert on every cgbpal row.
+  ## The mode-based spellings of the lock, used only with CRAM_LOCK_DOTS off.
+  ## R=3: the latched mode (one M-cycle later than the VRAM lock on the read
+  ## side) plus the LCD-on line-0 exemption; the dot window above is the same
+  ## edges to the dot, plus the unlock's two-dot trail.
 
-proc cpu_cram_open*(ppu: GbPpu; is_write: bool): bool {.inline.} =
+const CRAM_LOCK_DOTS* {.booldefine.} = true
+  ## Dot-based CGB palette-RAM lock (replaces CRAM_LOCK_R/W when true): locked
+  ## from CRAM_LOCK_ON_LAT{,_DS} dots after the mode-3 edge until
+  ## CRAM_LOCK_OFF_LAT dots after the mode-0 edge; the LCD-on first line locks
+  ## CRAM_LOCK_LINE0_EXTRA dots later. A write is asked at its commit, a read
+  ## at the start of its M-cycle. gambatte cgbpal_m3 (42/44) and
+  ## enable_display/ly0_late_cgbp{r,w}_2, +11 rows and none lost. Brackets
+  ## on the 5157-row list: ON 0 and 2 lose 2 and 6 more than 1; ON_DS 1, 3
+  ## and 4 lose 1, 2 and 5 more than 2; OFF 3 loses `m3end_scx3_{2,4}`
+  ## (their mode 3 ends 3 dots later under the same sled) and 4 loses nine.
+  ## docs/gb-failure-triage.md B2.
+const CRAM_LOCK_ON_LAT*    {.intdefine.} = 1
+const CRAM_LOCK_ON_LAT_DS* {.intdefine.} = 2
+const CRAM_LOCK_OFF_LAT*   {.intdefine.} = 2
+const CRAM_LOCK_LINE0_EXTRA* {.intdefine.} = 4
+
+proc cpu_cram_open_dots(ppu: GbPpu; gb: GB; is_write: bool): bool {.noinline.} =
+  ## CRAM_LOCK_DOTS: the lock as a dot window around the mode-3 edges.
+  let ds = gb.memory.current_speed != 0
+  let at = if is_write: ppu.cycle_counter
+           else: ppu.cycle_counter - (if ds: 2'i32 else: 4'i32)
+  let m = ppu.lcd_status and 3'u8
+  var since = at - ppu.stat_chg_dot
+  if m == 3'u8:
+    var on = if ds: int32(CRAM_LOCK_ON_LAT_DS) else: int32(CRAM_LOCK_ON_LAT)
+    if ppu.first_line: on += int32(CRAM_LOCK_LINE0_EXTRA)
+    return since < on
+  if m == 0'u8 and ppu.stat_prev_mode == 3'u8:
+    return since >= int32(CRAM_LOCK_OFF_LAT)
+  true
+
+proc cpu_cram_open*(ppu: GbPpu; gb: GB; is_write: bool): bool {.inline.} =
   ## CGB palette RAM belongs to the PPU during mode 3 (Pan Docs, Palettes):
   ## reads answer $FF, writes are dropped with the auto-increment still firing.
   ## Its edges are one M-cycle later than the VRAM lock's (gambatte cgbpal_m3).
   if not lcd_enabled(ppu): return true
+  when CRAM_LOCK_DOTS:
+    return cpu_cram_open_dots(ppu, gb, is_write)
   if is_write:
     when CRAM_LOCK_W == 0:
       # Line 0 after LCD-on does not lock (same exemption as the read side;
@@ -880,6 +917,21 @@ template m2_early_dot*(ppu: GbPpu; gb: GB): int32 =
   ## The dot of the outgoing line the source comes up on.
   gb_line_end(ppu) - m2_lead_mcycles(gb) * int32(4 shr gb.memory.current_speed)
 
+const STAT_M0_FALL_AT_M2_CGB* {.booldefine.} = false
+  ## Whether the CGB's mode-0 STAT source ends where the next line's OAM
+  ## source begins (m2_early_dot, lines 0..142), rather than at the boundary
+  ## -- SameBoy's single "mode for the interrupt", which turns to 2 there.
+  ## Off: -1 alone (m0enable/late_enable_{1,ds_1,lcdoffset1_1} enable mode 0
+  ## in that last M-cycle and want the edge, which then needs the set bits'
+  ## landing evaluated, STAT_SET_LANDING_EVAL, and that loses more). The one
+  ## row it was for is STAT_M2_ENABLE_WINDOW_CGB's (gb.nim).
+const STAT_M2_PULSE_END_EVAL* {.booldefine.} = true
+  ## Whether the edge detector runs when a line's OAM pulse ends (dot
+  ## STAT_M2_PULSE + 1), so the line is seen low before a later enable:
+  ## gambatte lycEnable/late_ff41_enable_after_m2int{,_disable} enable LYC
+  ## inside the mode-2 handler with LYC == LY and hardware fires again. +4 on
+  ## both devices, nothing lost.
+
 proc m2_early*(ppu: GbPpu): bool {.inline.} =
   ## Is this line's tail handing over to a line that scans OAM? Mode 0 on
   ## 0..142, and mode 1 with LY already 0 (line 153). Line 143 -> 144 is
@@ -901,6 +953,15 @@ template m2_early_stop*(ppu: GbPpu; gb: GB): bool =
   ## rising dot. Folds to `false` when the rise is on the boundary.
   when STAT_M2_EARLY: m2_lead_active(gb) and ppu.m2_early
   else: false
+
+template m0_source*(ppu: GbPpu; gb: GB): bool =
+  ## The mode-0 STAT source (STAT_M0_FALL_AT_M2_CGB).
+  when STAT_M0_FALL_AT_M2_CGB and STAT_M2_EARLY:
+    ppu.irq_m0_of == 0 and not (gb.cgb_enabled and ppu.ly < 143'u8 and
+                                m2_lead_active(gb) and
+                                ppu.cycle_counter >= ppu.m2_early_dot(gb))
+  else:
+    ppu.irq_m0_of == 0
 
 proc m2_source*(ppu: GbPpu; gb: GB): bool {.inline.} =
   when STAT_M2_EARLY:
@@ -1133,7 +1194,7 @@ proc stat_level_with(ppu: GbPpu; gb: GB; en, lyc: uint8): bool {.noinline.} =
   (ppu.irq_ly_of == lyc  and (en and 0x40'u8) != 0 and src_settled) or
     (ppu.m2_source(gb)     and (en and 0x20'u8) != 0) or
     ((en and 0x20'u8) != 0 and ppu.m2_line144(gb)) or
-    (ppu.irq_m0_of == 0    and (en and 0x08'u8) != 0) or
+    (ppu.m0_source(gb)     and (en and 0x08'u8) != 0) or
     (ppu.irq_m1_of == 1    and (en and 0x10'u8) != 0)
 
 const LYC_DROP_LATENCY_DMG* {.intdefine.} = 1
@@ -1154,6 +1215,22 @@ const LYC_DROP_BOUNDARY_SKIP* {.intdefine.} = 1
   ## lycEnable/ff45_enable_weirdpoint_3 and lyc153_late_ff45_enable_3 [dmg]
   ## (the write moves LYC onto the line about to start and hardware sees no
   ## edge) and takes nothing.
+
+const STAT_DROP_OLD_LEVEL* {.intdefine.} = 0
+  ## How stat_drop_arm samples the line a STAT write is about to move. 0:
+  ## with the write's NEW enables (the line falls only if the new value reads
+  ## low right now). 1: with the enables both values share (old AND new), so
+  ## a swap between two sources dips. Measured -33: gambatte miscmstatirq
+  ## `*statwirq_trigger_*_08_40` / `_40_08` swap two high sources and want
+  ## no edge on either device. The pulse's end is handled where it happens
+  ## instead (STAT_M2_PULSE_END_EVAL).
+
+template stat_write_drop_enables*(ppu: GbPpu; val: uint8): uint8 =
+  ## The enables stat_drop_arm samples for a STAT write of `val`.
+  when STAT_DROP_OLD_LEVEL != 0:
+    (ppu.lcd_status and 0b1000_0111'u8) or (val and ppu.lcd_status and 0b0111_1000'u8)
+  else:
+    (ppu.lcd_status and 0b1000_0111'u8) or (val and 0b0111_1000'u8)
 
 proc stat_drop_arm*(ppu: GbPpu; gb: GB; en, lyc: uint8; lat_dots: int32) =
   ## A STAT or LYC write commits: its effect reaches the line
@@ -1191,8 +1268,7 @@ proc stat_drop_settle(ppu: GbPpu; gb: GB) {.noinline.} =
     ppu.stat_drop_pending = false
     if not ppu.stat_drop_level: ppu.old_stat_flag = false
   elif gb.memory.deferred_reg == 0xFF41'u16:
-    let en = (ppu.lcd_status and 0b1000_0111'u8) or
-             (gb.memory.deferred_val and 0b0111_1000'u8)
+    let en = stat_write_drop_enables(ppu, gb.memory.deferred_val)
     ppu.stat_drop_level = stat_level_with(ppu, gb, en, ppu.lyc)
   elif gb.memory.deferred_reg == 0xFF45'u16:
     ppu.stat_drop_level = stat_level_with(ppu, gb, ppu.lcd_status,
@@ -1235,7 +1311,7 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
     (ppu.m2_source(gb)        and (en and 0x20'u8) != 0) or
     # The OAM source also asserts entering vblank; see m2_line144.
     ((en and 0x20'u8) != 0    and ppu.m2_line144(gb)) or
-    (ppu.irq_m0_of == 0       and (en and 0x08'u8) != 0) or
+    (ppu.m0_source(gb)        and (en and 0x08'u8) != 0) or
     (ppu.irq_m1_of == 1       and (en and 0x10'u8) != 0)
   if not ppu.old_stat_flag and stat_flag:
     when defined(gb_stat_read_trace):
@@ -1473,6 +1549,10 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   # match counts only with LCDC.5 set: enabling the window on a later line
   # of the frame draws nothing (hardware: gbprobe probe_g_wy1 on AGB SP,
   # docs/hwprobe-questions.md row 19).
+  elif mode == 2 and WIN_LINE0_CHECK_DOT_CGB != 0 and ppu.ly == 0'u8 and
+       gb.cgb_enabled and gb.fifo_ppu != nil:
+    # Line 0's check runs WIN_LINE0_CHECK_DOT_CGB dots in (gb.nim).
+    ppu.win_check_dot = int32(WIN_LINE0_CHECK_DOT_CGB) shr gb.memory.current_speed
   elif mode == 2 and ppu.ly == ppu.wy and window_enabled(ppu):
     when defined(gb_win_trace):
       echo "WYLATCH ly=", ppu.ly, " wy=", ppu.wy, " dot=", ppu.cycle_counter
@@ -1728,6 +1808,29 @@ proc ppu_store_wx*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   ppu.wx = val
   if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
 
+template win_check_defer*(gb: GB): int32 =
+  ## WIN_CHECK_DEFER_* for this console, in dots of this speed.
+  (if gb.cgb_enabled: int32(WIN_CHECK_DEFER_CGB) else: int32(WIN_CHECK_DEFER_DMG)) shr
+    gb.memory.current_speed
+
+proc win_check_now*(ppu: GbPpu; gb: GB) =
+  ## The WY == LY comparator, sampled now (WIN_CHECK_DEFER).
+  ppu.win_check_dot = -1
+  # Against the comparator's LY (irq_ly when a lead is on): the WY comparator
+  # steps with the LYC one, ahead of the readable LY (WIN_CHECK_CMP_LY).
+  let cmp_ly = when WIN_CHECK_CMP_LY != 0: ppu.irq_ly_of else: ppu.ly
+  if ppu.lcd_enabled and window_enabled(ppu) and (ppu.lcd_status and 3'u8) != 1'u8 and
+     cmp_ly == ppu.wy:
+    when defined(gb_win_trace):
+      echo "WYCHECK ly=", ppu.ly, " cmp=", cmp_ly, " wy=", ppu.wy, " dot=", ppu.cycle_counter
+    ppu.window_trigger = true
+    if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
+
+proc win_check_schedule*(ppu: GbPpu; gb: GB; dots: int32) {.inline.} =
+  ## Sample the comparator `dots` from now (may fall on the next line; the
+  ## boundary rebases it). A later schedule replaces an earlier one.
+  ppu.win_check_dot = ppu.cycle_counter + dots
+
 proc ppu_store_wy*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   ppu.wy = val
 
@@ -1738,6 +1841,8 @@ proc ppu_latch_wy*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   ## cleared entering it. Split from ppu_store_wy because the CGB takes the
   ## register and the latch at different latencies (CGB_WY_LATENCY,
   ## CGB_WY_LATCH_LATENCY); `ppu.ly` is read here for that reason.
+  when WIN_CHECK_DEFER_ANY:
+    if gb.fifo_ppu != nil and win_check_defer(gb) != 0: return
   if ppu.ly == val and (ppu.lcd_status and 3'u8) != 1'u8 and ppu.lcd_enabled and
      window_enabled(ppu):
     ppu.window_trigger = true
@@ -1750,6 +1855,10 @@ proc ppu_store_lcdc*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   # fetch and on a CGB gets there a dot late (tdsel_dot; NO_TDSEL_CHANGE on DMG).
   let moved = ppu.lcd_control xor val
   let flip2 = (moved and 0x04'u8) != 0
+  when WIN_CHECK_DEFER_ANY:
+    if (moved and val and 0x20'u8) != 0 and gb.fifo_ppu != nil and
+       win_check_defer(gb) != 0:
+      win_check_schedule(ppu, gb, win_check_defer(gb))
   when defined(gb_lcdc2_trace):
     if flip2:
       echo "LCDC2 ly=", ppu.ly, " dot=", ppu.cycle_counter,
@@ -1761,7 +1870,10 @@ proc ppu_store_lcdc*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   # states the WY condition per line only.
   if (moved and val and 0x20'u8) != 0 and ppu.ly == ppu.wy and
      (ppu.lcd_status and 3'u8) != 1'u8 and ppu.lcd_enabled:
-    ppu.window_trigger = true
+    when WIN_CHECK_DEFER_ANY:
+      if gb.fifo_ppu == nil or win_check_defer(gb) == 0: ppu.window_trigger = true
+    else:
+      ppu.window_trigger = true
   if gb.fifo_ppu != nil:
     fifo_arm_window(gb.fifo_ppu)
     when CGB_TDSEL_ANY:
@@ -1935,14 +2047,14 @@ proc ppu_read*(ppu: GbPpu; gb: GB; idx: int): uint8 =
   of 0xFF69:
     # CGB palette RAM is the PPU's during mode 3 (Pan Docs, Palettes); the
     # index ports stay open throughout.
-    if gb.cgb_native and cpu_cram_open(ppu, false): ppu.pram[ppu.palette_index]
+    if gb.cgb_native and cpu_cram_open(ppu, gb, false): ppu.pram[ppu.palette_index]
     else: 0xFF'u8
   of 0xFF6A:
     if gb.cgb_enabled:
       0x40'u8 or (if ppu.obj_auto_increment: 0x80'u8 else: 0'u8) or ppu.obj_palette_index
     else: 0xFF'u8
   of 0xFF6B:
-    if gb.cgb_native and cpu_cram_open(ppu, false):
+    if gb.cgb_native and cpu_cram_open(ppu, gb, false):
       ppu.obj_pram[ppu.obj_palette_index]
     else: 0xFF'u8
   else: 0xFF'u8
@@ -2045,10 +2157,33 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       # mem_tick_bus and mem_tick_ppu, so the dot counter has not moved yet.
       ppu.stat_wr_dot = int16(ppu.cycle_counter)
     ppu_defer_machinery_write(ppu, gb, idx, val)
-    stat_drop_arm(ppu, gb, (ppu.lcd_status and 0b1000_0111'u8) or
-                           (val and 0b0111_1000'u8), ppu.lyc,
+    stat_drop_arm(ppu, gb, stat_write_drop_enables(ppu, val), ppu.lyc,
                   int32(if gb.cgb_enabled: CGB_STAT_ENABLE_LATENCY
                         else: STAT_ENABLE_LATENCY))
+    when STAT_M2_ENABLE_WINDOW_CGB:
+      if gb.cgb_enabled and ppu.lcd_enabled and gb.fifo_ppu != nil and
+         (val and 0x20'u8) != 0 and (ppu.lcd_status and 0x20'u8) == 0 and
+         (val and 0x08'u8) == 0 and
+         not ((ppu.lcd_status and 0x40'u8) != 0 and ppu.irq_ly_of == ppu.lyc):
+        let ttl = ppu.gb_line_end - ppu.cycle_counter
+        let ds = gb.memory.current_speed != 0
+        let inwin =
+          if ppu.ly < 143'u8: (if ds: ttl >= 1 and ttl <= 3 else: ttl >= 2 and ttl <= 3)
+          elif ppu.ly == 143'u8: ds and ttl == 3
+          elif ppu.ly == 153'u8 or (ppu.ly == 0'u8 and (ppu.lcd_status and 3'u8) == 1'u8):
+            ds and ttl == 1
+          else: false
+        if inwin:
+          when defined(gb_stat_read_trace):
+            echo "M2WIN ly=", ppu.ly, " cc=", ppu.cycle_counter
+          gb.interrupts.lcd_stat_interrupt = true
+          ppu.old_stat_flag = true
+    when STAT_SET_LANDING_EVAL:
+      # The set bits' landing is an evaluation of its own (gb.nim).
+      if gb.fifo_ppu != nil and (val and not ppu.lcd_status and 0b0111_1000'u8) != 0:
+        let lat = int32(if gb.cgb_enabled: CGB_STAT_ENABLE_LATENCY
+                        else: STAT_ENABLE_LATENCY) shr gb.memory.current_speed
+        if lat > 0: ppu.stat_set_dot = ppu.cycle_counter + lat
   of 0xFF42:
     when defined(gb_m3_trace):
       # Diagnostic (tools only): the dot each mid-mode-3 SCY write lands on.
@@ -2125,6 +2260,9 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     when defined(gb_win_trace):
       echo "WY ly=", ppu.ly, " dot=", ppu.cycle_counter, " mode=",
            (ppu.lcd_status and 3), " old=", ppu.wy, " new=", val
+    when WIN_CHECK_DEFER_ANY:
+      if gb.fifo_ppu != nil and win_check_defer(gb) != 0:
+        win_check_schedule(ppu, gb, win_check_defer(gb))
     when CGB_WY_LATENCY_ANY:
       if gb.cgb_enabled:
         ppu_park_pipeline_write(ppu, gb, idx, val)
@@ -2175,7 +2313,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     if gb.cgb_native:
       # A mode-3 write is dropped but the auto-increment still fires: it lives
       # in the index port, not in CRAM (Pan Docs, Palettes).
-      if cpu_cram_open(ppu, true):
+      if cpu_cram_open(ppu, gb, true):
         ppu.pram[ppu.palette_index] = val
       if ppu.auto_increment:
         ppu.palette_index = (ppu.palette_index + 1) and 0x3F
@@ -2185,7 +2323,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       ppu.obj_auto_increment = (val and 0x80) != 0
   of 0xFF6B:
     if gb.cgb_native:
-      if cpu_cram_open(ppu, true):
+      if cpu_cram_open(ppu, gb, true):
         ppu.obj_pram[ppu.obj_palette_index] = val
       if ppu.obj_auto_increment:
         ppu.obj_palette_index = (ppu.obj_palette_index + 1) and 0x3F

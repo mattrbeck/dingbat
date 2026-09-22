@@ -517,6 +517,17 @@ proc mem_read*(mem: GbMemory; gb: GB; idx: int): uint8 {.hot_bus_inline.} =
   else:
     mem_tick_components(mem, gb, 4)
   # A running DMA owns the bus and is decided first.
+  when defined(gb_io_trace):
+    # Diagnostic (tools only): every I/O read with the PPU's position, the
+    # instrument the gambatte per-family dot tables are read off (LY reads are
+    # left out: the wait loops spam them).
+    if idx >= 0xFF00 and idx != 0xFF44 or idx >= 0xFE00 and idx < 0xFEA0:
+      let v = if mem.dma_busy: mem_read_busy(mem, gb, idx)
+              else: mem_read_open(mem, gb, idx)
+      echo "IOR ", toHex(idx, 4), "=", toHex(v, 2), " ly=", gb.ppu.ly,
+           " dot=", gb.ppu.cycle_counter, " mode=", (gb.ppu.lcd_status and 3),
+           " ds=", mem.current_speed
+      return v
   if mem.dma_busy: return mem_read_busy(mem, gb, idx)
   mem_read_open(mem, gb, idx)
 
@@ -528,6 +539,12 @@ proc mem_dma_transfer*(mem: GbMemory; source: uint8) =
 proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
   # Any write with bit 0 set unmaps the boot ROM (the CGB boot ROM writes
   # 0x11, the DMG one 0x01).
+  when defined(gb_io_trace):
+    # Diagnostic (tools only): every I/O write's commit dot.
+    if idx >= 0xFF00 or idx >= 0xFE00 and idx < 0xFEA0:
+      echo "IOW ", toHex(idx, 4), "=", toHex(val, 2), " ly=", gb.ppu.ly,
+           " dot=", gb.ppu.cycle_counter, " mode=", (gb.ppu.lcd_status and 3),
+           " ds=", mem.current_speed
   if idx == 0xFF50 and (val and 1) != 0:
     mem.bootrom = @[]
     # Handoff: a DMG cart drops out of CGB mode but the machine stays a CGB
