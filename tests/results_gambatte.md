@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-22 13:12:26*
+*Generated: 2026-09-22 13:19:56*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5006/5216 passed.**
+**5017/5216 passed.**
 
 ## bgen
 
@@ -120,51 +120,42 @@ All 8 tests passed.
 | irq_precedence/late_m0irq_vs_tima_scx3_halt_1_dmg08_cgb04c_out4 [dmg] | got 2, expected 4 |
 | irq_precedence/late_m0irq_vs_tima_scx3_halt_1_dmg08_cgb04c_out4 [cgb] | got 2, expected 4 |
 
-## lcd_offset (55/62 passed)
+## lcd_offset (57/62 passed)
 
-55/62 tests passed, 7 failed:
+57/62 tests passed, 5 failed:
 
 | Test | Result |
 |------|--------|
 | lcd_offset/offset1_lyc99int_m0irq_count_scx2_ds_1_cgb04c_out90 [cgb] | got 00, expected 90 |
-| lcd_offset/offset1_lyc99int_m2irq_count_2_cgb04c_out90 [cgb] | got 00, expected 90 |
 | lcd_offset/offset1_lyc99int_m2irq_count_ds_1_cgb04c_out98 [cgb] | got 90, expected 98 |
 | lcd_offset/offset1_lyc99int_m2stat_count_ds_2_cgb04c_out90 [cgb] | got 00, expected 90 |
 | lcd_offset/offset1_lyc99int_m3stat_count_ds_2_cgb04c_out90 [cgb] | got 00, expected 90 |
-| lcd_offset/offset2_lyc99int_m2irq_count_2_cgb04c_out90 [cgb] | got 00, expected 90 |
 | lcd_offset/offset3_lyc8fint_m1stat_1_cgb04c_outC0 [cgb] | got C1, expected C0 |
 
 ## lcdirq_precedence
 
 All 62 tests passed.
 
-## ly0 (92/96 passed)
+## ly0 (94/96 passed)
 
-92/96 tests passed, 4 failed:
+94/96 tests passed, 2 failed:
 
 | Test | Result |
 |------|--------|
 | ly0/lycint152_lyc0flag_ds_3_cgb04c_outC4 [cgb] | got C0, expected C4 |
 | ly0/lycint152_lyc153flag_ds_3_cgb04c_outC5 [cgb] | got C1, expected C5 |
-| ly0/lycint152_lyc153irq_late_retrigger_2_dmg08_cgb04c_outE0 [dmg] | got E2, expected E0 |
-| ly0/lycint152_lyc153irq_late_retrigger_2_dmg08_cgb04c_outE0 [cgb] | got E2, expected E0 |
 
 ## lyc0int_m0irq
 
 All 6 tests passed.
 
-## lyc153int_m2irq (14/16 passed)
+## lyc153int_m2irq
 
-14/16 tests passed, 2 failed:
+All 16 tests passed.
 
-| Test | Result |
-|------|--------|
-| lyc153int_m2irq/lyc153int_m2irq_late_retrigger_2_dmg08_cgb04c_out0 [dmg] | got 2, expected 0 |
-| lyc153int_m2irq/lyc153int_m2irq_late_retrigger_2_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
+## lycEnable (203/225 passed)
 
-## lycEnable (202/225 passed)
-
-202/225 tests passed, 23 failed:
+203/225 tests passed, 22 failed:
 
 | Test | Result |
 |------|--------|
@@ -187,7 +178,6 @@ All 6 tests passed.
 | lycEnable/lyc153_late_ff41_enable_ds_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lyc153_late_ff41_enable_ds_lcdoffset1_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lyc153_late_ff41_enable_lcdoffset1_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
-| lycEnable/lyc153_late_ff45_enable_2_dmg08_outE2_cgb04c_outE0 [cgb] | got E2, expected E0 |
 | lycEnable/lyc153_late_ff45_enable_ds_2_cgb04c_outE0 [cgb] | got E2, expected E0 |
 | lycEnable/lyc153_late_ff45_enable_lcdoffset1_1_cgb04c_outE2 [cgb] | got E0, expected E2 |
 | lycEnable/lycwirq_trigger_ly00_stat50_ds_lcdoffset1_2_cgb04c_outE2 [cgb] | got E0, expected E2 |
@@ -243,9 +233,9 @@ All 12 tests passed.
 
 All 6 tests passed.
 
-## m1 (161/170 passed)
+## m1 (162/170 passed)
 
-161/170 tests passed, 9 failed:
+162/170 tests passed, 8 failed:
 
 | Test | Result |
 |------|--------|
@@ -256,20 +246,17 @@ All 6 tests passed.
 | m1/lyc143_late_m0enable_lycdisable_2_dmg08_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m1/lyc143_late_m2enable_lycdisable_2_dmg08_cgb04c_out1 [cgb] | got 3, expected 1 |
 | m1/lyc143_late_m2enable_lycdisable_ds_1_cgb04c_out3 [cgb] | got 1, expected 3 |
-| m1/m1irq_late_enable_2_dmg08_out2_cgb04c_out0 [cgb] | got 2, expected 0 |
 | m1/m2m1irq_ifw_ds_1_cgb04c_out3 [cgb] | got 1, expected 3 |
 
-## m2enable (115/120 passed)
+## m2enable (117/120 passed)
 
-115/120 tests passed, 5 failed:
+117/120 tests passed, 3 failed:
 
 | Test | Result |
 |------|--------|
 | m2enable/late_enable_lcdoffset2_2_cgb04c_out0 [cgb] | got 2, expected 0 |
 | m2enable/late_enable_ly0_lcdoffset2_2_cgb04c_out0 [cgb] | got 2, expected 0 |
 | m2enable/late_enable_m1disable_ly0_2_dmg08_out2_cgb04c_out0 [cgb] | got 2, expected 0 |
-| m2enable/late_m1disable_ly0_2_dmg08_out2_cgb04c_out0 [cgb] | got 2, expected 0 |
-| m2enable/lyc0_late_m2enable_lycdisable_2_dmg08_out2_cgb04c_out0 [cgb] | got 2, expected 0 |
 
 ## m2int_m0irq (67/72 passed)
 
@@ -446,9 +433,9 @@ All 20 tests passed.
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 
-## window (440/476 passed)
+## window (441/476 passed)
 
-440/476 tests passed, 36 failed:
+441/476 tests passed, 35 failed:
 
 | Test | Result |
 |------|--------|
@@ -473,7 +460,6 @@ All 20 tests passed.
 | window/late_enable_afterVblank_3_dmg08_cgb04c_out0 [dmg] | got 3, expected 0 |
 | window/late_enable_afterVblank_ds_2_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_enable_afterVblank_ds_lcdoffset1_2_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_enable_afterVblank_lcdoffset1_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_enable_ly0_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_reenable_scx3_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_wx_scx3_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |

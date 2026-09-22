@@ -499,6 +499,13 @@ grid's constants are a coupled set and move together or not at all.
   [cgb], `lcd_offset/offset2_lyc8fint_m1irq_2` [cgb]; without the order
   (LYC falls, then mode 1 rises) the `lycint143_m1irq_*` family loses 15.
 - Site: `STAT_M1_LEAD`, `VBLANK_IRQ_LEAD`, `fifo_lyc_ly_lead` (fifo_ppu.nim).
+- The same lead ends line 153: line 0's OAM pulse rises at 153:454
+  (`STAT_M2_LY0_LEAD`; gambatte `lyc153int_m2irq_late_retrigger_2`,
+  `m2enable/late_m1disable_ly0_2`, `lcd_offset/offset{1,2}_lyc99int_m2irq_
+  count_2`), and a vblank line's boundary opens no second blind window for a
+  comparator that already stepped (`LY_BLIND_SKIP_LED`;
+  `ly0/lycint152_lyc153irq_late_retrigger_2`). A rendered line's window
+  stays: skipping it loses 12 `lcdirq_precedence`/`miscmstatirq` rows.
 
 ### A CGB dispatch clears a timer or serial request 2 T later
 - Claim: the dispatch acknowledges the LCD lines 18 T in and the timer and

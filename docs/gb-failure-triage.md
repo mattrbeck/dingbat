@@ -54,9 +54,10 @@ did not move either way.
 
 ### A2. The dispatch's IF clear against a source rising inside it
 
-**Rows (6).** `ly0/lycint152_lyc153irq_late_retrigger_2`,
-`lyc153int_m2irq/lyc153int_m2irq_late_retrigger_2` (both devices),
-`tima/tc00_irq_late_retrigger_{2 [cgb],ds_2}`. Closed 2026-09-22:
+**Rows (2).** `tima/tc00_irq_late_retrigger_{2 [cgb],ds_2}`. Closed
+2026-09-22: `ly0/lycint152_lyc153irq_late_retrigger_2` and
+`lyc153int_m2irq_late_retrigger_2` (both devices; `LY_BLIND_SKIP_LED`,
+`STAT_M2_LY0_LEAD`),
 `ly0/lycint152_lyc0irq_late_retrigger_2`, `irq_precedence/
 late_m0irq_retrigger_2`, then `m1/lycint143_m1irq_late_retrigger_2` and
 `m1/lycint_vblankirq_late_retrigger_2` (both devices; the mode-1 source and

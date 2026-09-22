@@ -148,6 +148,15 @@ const VBLANK_IRQ_LEAD* {.intdefine.} = 1
   ## devices) clears a request raised then; `lcd_offset/
   ## offset2_lyc8fint_m1irq_2` [cgb] sees it an M-cycle earlier. 0 loses the
   ## three and takes nothing.
+const LY_BLIND_SKIP_LED* {.intdefine.} = 1
+  ## A vblank line's boundary opens no comparator blind window
+  ## (ly_advance_vblank) when the comparator already stepped
+  ## STAT_LYC_LY_LEAD_DOTS earlier: the match it holds is already the new
+  ## line's, and dropping it again re-raises a request a dispatch has just
+  ## cleared. gambatte `ly0/lycint152_lyc153irq_late_retrigger_2` (both
+  ## devices), `lycEnable/lyc153_late_ff45_enable_2` [cgb]. A rendered line's
+  ## window stays (skipping it there loses 12 `lcdirq_precedence`,
+  ## `miscmstatirq/lycwirq_trigger_m0_late_ly44_lyc45_*`, `ff41_disable_3`).
 const STAT_M1_LEAD* {.intdefine.} = 1
   ## The mode-1 STAT source rises with the LYC comparator's lead
   ## (STAT_LYC_LY_LEAD_DOTS, 2 dots at single speed) at the end of line 143,

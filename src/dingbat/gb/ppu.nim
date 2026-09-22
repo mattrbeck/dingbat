@@ -888,8 +888,19 @@ const STAT_M2_LEAD* {.intdefine.} = 1
   ## is blind to the lead (M2_LEAD_HALT_BLIND): mooneye intr_2_* wait with
   ## EI; HALT and their wilbertpol `_nops` twins do not.
 const STAT_M2_EARLY_LY0* {.booldefine.} = false
-  ## Line 0's pulse does not lead (line 153 scans no OAM): mooneye
-  ## acceptance/ppu/intr_1_2_timing-GS.
+  ## Line 0's pulse does not take STAT_M2_LEAD's whole M-cycle (line 153 scans
+  ## no OAM): mooneye acceptance/ppu/intr_1_2_timing-GS. See STAT_M2_LY0_LEAD.
+const STAT_M2_LY0_LEAD* {.intdefine.} = 1
+  ## Line 0's OAM pulse rises with the comparator's lead instead
+  ## (STAT_LYC_LY_LEAD_DOTS: dot 454 of line 153 at single speed, none in
+  ## double), where gambatte-core raises line 0's mode-2 event; the mode 1 -> 2
+  ## hand-over at the boundary is then no dip, and a STAT write in flight that
+  ## clears the enable is the enable the rise sees. gambatte
+  ## `lyc153int_m2irq/lyc153int_m2irq_late_retrigger_2` (both devices),
+  ## `m2enable/late_m1disable_ly0_2`, `lyc0_late_m2enable_lycdisable_2`,
+  ## `m1/m1irq_late_enable_2`, `lcd_offset/offset{1,2}_lyc99int_m2irq_count_2`,
+  ## `window/late_enable_afterVblank_lcdoffset1_1` [cgb]; the in-flight rule
+  ## keeps `m2enable/disable_ly0_1` [cgb]. intr_1_2_timing-GS is unmoved.
 const STAT_M2_LEAD_CGB* {.intdefine.} = 0
   ## CGB-only addition to STAT_M2_LEAD. The source's M-cycle is
   ## device-independent (GBMicrotest oam_int_if_edge_* put the CGB exact and
@@ -940,7 +951,7 @@ proc m2_early*(ppu: GbPpu): bool {.inline.} =
   ## m2_line144's, on its own measurement.
   let m = ppu.lcd_status and 3'u8
   (m == 0'u8 and ppu.ly < 143'u8) or
-    (STAT_M2_EARLY_LY0 and m == 1'u8 and ppu.ly == 0'u8)
+    ((STAT_M2_EARLY_LY0 or STAT_M2_LY0_LEAD != 0) and m == 1'u8 and ppu.ly == 0'u8)
 
 template m2_lead_active*(gb: GB): bool =
   ## Is the lead nonzero for THIS console? At a lead of 0 the rising dot is
@@ -966,6 +977,12 @@ template m0_source*(ppu: GbPpu; gb: GB): bool =
     ppu.irq_m0_of == 0
 
 proc m2_source*(ppu: GbPpu; gb: GB): bool {.inline.} =
+  when STAT_M2_LY0_LEAD != 0:
+    # Line 0's pulse rises with the comparator's lead (STAT_M2_LY0_LEAD).
+    if ppu.ly == 0'u8 and (ppu.lcd_status and 3'u8) == 1'u8:
+      let ld = int32(if gb.memory.current_speed == 0: STAT_LYC_LY_LEAD_DOTS
+                     else: STAT_LYC_LY_LEAD_DS)
+      return ld != 0 and ppu.cycle_counter >= 456'i32 - ld
   when STAT_M2_EARLY:
     if m2_lead_active(gb) and ppu.cycle_counter >= ppu.m2_early_dot(gb):
       return ppu.m2_early
@@ -1764,6 +1781,13 @@ proc ly_advance_line*(ppu: GbPpu; gb: GB) {.noinline.} =
 proc ly_advance_vblank*(ppu: GbPpu; gb: GB) {.noinline.} =
   ## A vblank line starting: the same window with no mode change inside it.
   ## `noinline` for the reason above.
+  when LY_BLIND_SKIP_LED != 0:
+    # The comparator already stepped STAT_LYC_LY_LEAD_DOTS ago; nothing
+    # changes for it here.
+    if (if gb.memory.current_speed != 0'u8: STAT_LYC_LY_LEAD_DS
+        else: STAT_LYC_LY_LEAD_DOTS) != 0:
+      ppu_handle_stat_interrupt(ppu, gb)
+      return
   let lyc_en = ly_advance_open(ppu)
   ppu_handle_stat_interrupt(ppu, gb)
   ly_advance_close(ppu, gb, lyc_en)

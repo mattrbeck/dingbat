@@ -2322,7 +2322,15 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
                ppu.cycle_counter == 456 - ld:
               fifo_lyc_ly_lead(ppu, gb)
         # Line 0's pulse does not lead unless STAT_M2_EARLY_LY0 is on.
-        when STAT_M2_EARLY:
+        when STAT_M2_LY0_LEAD != 0:
+          # As STAT_M1_LEAD: a STAT write in flight that clears the enable is
+          # the enable this rise sees.
+          if ppu.ly == 0'u8 and lyc_lead_dots(gb) != 0 and
+             ppu.cycle_counter == 456 - lyc_lead_dots(gb) and
+             not (gb.memory.deferred_reg == 0xFF41'u16 and
+                  (gb.memory.deferred_val and 0x20'u8) == 0'u8):
+            ppu_handle_stat_interrupt(ppu, gb)
+        elif STAT_M2_EARLY:
           if m2_lead_active(gb) and ppu.cycle_counter == ppu.m2_early_dot(gb):
             fifo_m2_early_edge(ppu, gb)
         when STAT_IRQ_SPLIT:
@@ -2339,7 +2347,12 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           # `ly == 0` branch is that snap's mode 1 -> 2.
           if ppu.ly == 0:
             when STAT_IRQ_SPLIT: ppu.irq_ly = ppu.ly
-            ppu_handle_stat_interrupt(ppu, gb)
+            # With the pulse already up (STAT_M2_LY0_LEAD) the mode-1 -> 2
+            # hand-over is not a dip.
+            when STAT_M2_LY0_LEAD != 0:
+              if lyc_lead_dots(gb) == 0: ppu_handle_stat_interrupt(ppu, gb)
+            else:
+              ppu_handle_stat_interrupt(ppu, gb)
             ppu.`mode_flag=`(2'u8, gb)
           else:
             ppu.ly += 1
