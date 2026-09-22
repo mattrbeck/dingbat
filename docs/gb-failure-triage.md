@@ -198,10 +198,45 @@ pulse (`M2_144_PULSE`); `lyc_compare_hold` (CGB D+ hold the comparison the
 blind window is leaving); the CGB enable latency above.
 
 **To close.** Read each sub-shape at cell resolution with `famflip.py` and
-`-d:gb_stat_src_trace` (which names the source on every rising edge) against
-one statement of when each source's level rises and falls relative to the
-line boundary. No Pan Docs sentence gives these dots; the evidence is the
-families themselves.
+`-d:gb_stat_src_trace` (which names the source on every rising edge; the
+`STATW` line is each STAT write's commit dot) against one statement of when
+each source's level rises and falls relative to the line boundary. No Pan
+Docs sentence gives these dots; the evidence is the families themselves.
+Two threads measured 2026-09-22, neither shipped:
+
+* *The comparator's LY steps before the boundary.* A standalone rule that
+  advanced the LYC source's LY `N` dots before a rendered line's boundary
+  (irq_ly, an explicit edge-detector run on that dot) takes the same 16 rows
+  at N = 2 and N = 3 -- `m1/m1irq_m2enable_lyc_2`, `m1/lyc143_late_m2enable_
+  lycdisable_ds_1`, `m2enable/late_enable_after_lycint{,_disable}_2`,
+  `lyc1_late_m2enable_lycdisable_1`, `lycEnable/lyc153_late_{enable_,}
+  m1disable_2 [cgb]`, `lcd_offset/offset{1,2}_lyc8fint_m1stat_1`, `oam_access/
+  pre{read,write}_lcdoffset1_1`, `vram_m3/pre{read,write}_lcdoffset2_1`,
+  `cgbpal_m3/cgbpal_{read,write}_m3start_lcdoffset1_1` -- and loses their
+  `lcdoffset*_2` / `_ds_` siblings (14 at N = 3; N = 2 also loses 150 double-
+  speed `sprites/*_m3stat_ds_2` rows through the skip target, N = 1 loses 21).
+  A flat dot count flips one arm of each `lcdoffset` pair, so the step is
+  aligned to the CPU's M-cycle grid, not the line's dot grid: gambatte-core
+  puts the LYC and mode-1 events 2 cycles before an M-aligned LY increment,
+  and dingbat's boundary sits on the last dot of an M-cycle. The next
+  spelling is "the comparator steps at a fixed T of the M-cycle the boundary
+  falls in", derived from the tick's phase, with the double-speed grid its
+  own case. Riding the whole irq domain instead (`STAT_M0_LEAD_DOMAIN`)
+  costs 13 rows on its own (the mode-0 source dropping early, the LYC-write
+  windows) and 26 with the LYC term.
+* *The mode-2 enable on CGB, `m2enable/late_enable_*_2 [cgb]` (7).* A write
+  committing 3 dots before the boundary (gambatte's LY - 4) that enables the
+  OAM source while disabling mode 0 fires on CGB and not on DMG. The DMG
+  half is the level OR (mode 0 hands to the pulse, no dip); the CGB half
+  needs the drop (clears only, `old and new` enables) at the commit and a
+  RISE evaluation when the set bits land 2 dots later, while the pulse
+  (dots 452..454) is still high -- i.e. an edge-detector run at the landing
+  dot, which nothing schedules today (the boundary flush is after the pulse).
+
+The knob sweep of 2026-09-22 (`+-1` of every GB `{.intdefine.}`, 206 knobs,
+red rows first and every hit validated on the full 5157-row list from a
+snapshot build) found no net-positive value: the remaining 300 rows are
+mechanism rows, not phase rows.
 
 ### A4. Mode-0 STAT interrupt against a timer interrupt
 
