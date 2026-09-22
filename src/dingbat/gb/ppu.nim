@@ -733,6 +733,9 @@ when STAT_ENABLE_EARLY:
     if elapsed >= lat:
       (ppu.lcd_status and 0b1000_0111'u8) or
         (gb.memory.deferred_val and 0b0111_1000'u8)
+    elif CGB_STAT_WRITE_RULE != 0 and CGB_STAT_RULE_OR != 0 and gb.cgb_enabled:
+      # Inside the latency a source sees the old and the new enables.
+      ppu.lcd_status or (gb.memory.deferred_val and 0b0111_1000'u8)
     else:
       ppu.lcd_status
 
@@ -1220,6 +1223,56 @@ proc stat_level_with(ppu: GbPpu; gb: GB; en, lyc: uint8): bool {.noinline.} =
     ((en and 0x20'u8) != 0 and ppu.m2_line144(gb)) or
     (ppu.m0_source(gb)     and (en and 0x08'u8) != 0) or
     (ppu.irq_m1_of(gb) == 1    and (en and 0x10'u8) != 0)
+
+when CGB_STAT_WRITE_RULE != 0:
+  proc cgb_stat_write_trigger(ppu: GbPpu; gb: GB; old, data: uint8): bool {.noinline.} =
+    ## CGB_STAT_WRITE_RULE: does a CGB STAT write that newly enables a source
+    ## request the interrupt itself? Expressed against the time left to the
+    ## next LY increment in CPU-clock cycles (`ttnl`, two per dot in double
+    ## speed), at the write's M-cycle start.
+    if (data and not old and 0x78'u8) == 0'u8: return false
+    let dsi = int(gb.memory.current_speed)
+    let line = 456 shl dsi
+    var lc = int(ppu.cycle_counter) -
+             (if dsi != 0: CGB_STAT_RULE_OFF_DS else: CGB_STAT_RULE_OFF)
+    var ly = int(ppu.ly)
+    if lc < 0:
+      lc += 456
+      ly = (if ly == 0: 153 else: ly - 1)
+    # Line 153 after the snapback reads LY 0; the rule counts it as 153.
+    if ly == 0 and (ppu.lcd_status and 3'u8) == 1'u8: ly = 153
+    let ttnl = (456 - lc) shl dsi
+    # The comparator's LY: two cycles (four in double speed) ahead of LY,
+    # and LY 0 six (twelve) cycles into line 153.
+    var cly = ly
+    var cttnl = ttnl
+    if ly == 153:
+      cttnl -= line - 6 - 6 * dsi
+      if cttnl <= 0: cly = 0; cttnl += line
+    else:
+      cttnl -= 2 + 2 * dsi
+      if cttnl <= 0: cly = ly + 1; cttnl += line
+    let lycperiod = cly == int(ppu.lyc) and cttnl > 2
+    if lycperiod and (old and 0x40'u8) != 0: return false
+    let lyc_new = lycperiod and (data and 0x40'u8) != 0
+    if ly < 143 or (ly == 143 and ttnl > 2 * (1 + dsi)):
+      # This line's mode-0 request still ahead: modes 2 and 3.
+      let m0_pending = (ppu.lcd_status and 3'u8) >= 2'u8
+      if m0_pending or ttnl <= (if ly < 143: 4 + 4 * dsi else: 4 + 2 * dsi):
+        if lyc_new: return true
+      elif (old and 0x08'u8) == 0'u8:
+        if (data and 0x08'u8) != 0'u8 or lyc_new: return true
+    else:
+      if not ((old and 0x10'u8) != 0'u8 and (ly < 153 or ttnl > 3 + 3 * dsi)):
+        if ((data and 0x10'u8) != 0'u8 and (ly < 153 or ttnl > 4 + 2 * dsi)) or
+           lyc_new: return true
+    # The OAM source: newly enabled with mode 0's off, inside the last
+    # cycles before the next line's request.
+    if (old and 0x20'u8) != 0'u8 or (data and 0x28'u8) != 0x20'u8: return false
+    if ly < 143: return ttnl <= 4 * (1 + dsi) and ttnl > 2
+    if ly == 143: return ttnl <= 4 * (1 + dsi) and ttnl > 4 + 2 * dsi
+    if ly == 153: return ttnl <= 2 * (1 + dsi) and ttnl > 2
+    false
 
 const LYC_DROP_LATENCY_DMG* {.intdefine.} = 1
 const LYC_DROP_LATENCY_CGB* {.intdefine.} = 6
@@ -2263,6 +2316,19 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     # DMG only. The $FF phase of the write acts here at the commit point; only
     # the real value waits for the M-cycle boundary (ppu_stat_write_glitch).
     if not gb.cgb_enabled: ppu_stat_write_glitch(ppu, gb)
+    var rule_mode = false
+    when CGB_STAT_WRITE_RULE != 0:
+      # CGB: the write's own interrupt is decided by rule; the line takes the
+      # level the old OR new enables give without an edge (inside the latency
+      # a source sees both, stat_enables_leading).
+      if gb.cgb_enabled and ppu.lcd_enabled and gb.fifo_ppu != nil:
+        rule_mode = true
+        if cgb_stat_write_trigger(ppu, gb, ppu.lcd_status, val):
+          gb.interrupts.lcd_stat_interrupt = true
+        let adopt_en = when CGB_STAT_RULE_OR != 0: ppu.lcd_status or (val and 0x78'u8)
+                       else: (ppu.lcd_status and 0x87'u8) or (val and 0x78'u8)
+        if stat_level_with(ppu, gb, adopt_en, ppu.lyc):
+          ppu.old_stat_flag = true
     when STAT_ENABLE_EARLY:
       # Where the M-cycle's PPU dots start. mem_write applies the byte between
       # mem_tick_bus and mem_tick_ppu, so the dot counter has not moved yet.
@@ -2272,7 +2338,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
                   int32(if gb.cgb_enabled: CGB_STAT_ENABLE_LATENCY
                         else: STAT_ENABLE_LATENCY))
     when STAT_M2_ENABLE_WINDOW_CGB:
-      if gb.cgb_enabled and ppu.lcd_enabled and gb.fifo_ppu != nil and
+      if not rule_mode and gb.cgb_enabled and ppu.lcd_enabled and gb.fifo_ppu != nil and
          (val and 0x20'u8) != 0 and (ppu.lcd_status and 0x20'u8) == 0 and
          (val and 0x08'u8) == 0 and
          not ((ppu.lcd_status and 0x40'u8) != 0 and ppu.irq_ly_of == ppu.lyc):

@@ -157,6 +157,32 @@ const LY_BLIND_SKIP_LED* {.intdefine.} = 1
   ## devices), `lycEnable/lyc153_late_ff45_enable_2` [cgb]. A rendered line's
   ## window stays (skipping it there loses 12 `lcdirq_precedence`,
   ## `miscmstatirq/lycwirq_trigger_m0_late_ly44_lyc45_*`, `ff41_disable_3`).
+const CGB_STAT_WRITE_RULE* {.intdefine.} = 1
+  ## A CGB STAT write's own interrupt comes from an explicit rule over the
+  ## time left to the next LY increment (cgb_stat_write_trigger, ppu.nim),
+  ## the same decision gambatte-core makes (statChangeTriggersStatIrqCgb:
+  ## a newly enabled mode-0 source fires only once mode 0 has begun and more
+  ## than 4 cycles (4 + 4 in double speed) remain on a rendered line, mode 1
+  ## on vblank lines, the OAM source only in the last 4 cycles before the
+  ## next line's request, LYC only inside the comparator's match period),
+  ## instead of the level model's edge when the enables land. The line takes
+  ## the new level without an edge; a mode-1 or line-0 OAM rise inside the
+  ## write's latency is judged against the OLD enables. +16 -1 on the hunt
+  ## list: `m1/ly143_late_m{0,2}enable_*`, `lyc143_late_m*enable_lycdisable_2`,
+  ## `lycEnable/late_ff41_enable_{ds_1,lcdoffset1_1}`,
+  ## `lyc153_late_ff41_enable_*`, `m0enable/{disable,lycdisable_ff41}_ds_1`,
+  ## `m2enable/late_enable_{,ly0_}lcdoffset2_2`, two `miscmstatirq`; loses
+  ## `m1/ly143_late_m2enable_ds_lcdoffset1_1` (the double-speed line-144
+  ## pulse's phase, A1). Supersedes STAT_M2_ENABLE_WINDOW_CGB. 0 = the level
+  ## model's edge.
+const CGB_STAT_RULE_OR* {.intdefine.} = 1
+  ## Inside the write's latency a source sees the old OR the new enables
+  ## (the mode-0 request fires for either); 0 (old only) loses seven.
+const CGB_STAT_RULE_OFF* {.intdefine.} = 1
+const CGB_STAT_RULE_OFF_DS* {.intdefine.} = 3
+  ## The rule's clock against dingbat's dot: the write's M-cycle starts this
+  ## many dots after the rule's cycle count (1 single speed, 3 double; the
+  ## side-by-side traces' offsets). Two-sided: 0/2 and 2/4 lose 9..30.
 const STAT_M1_LEAD* {.intdefine.} = 1
   ## The mode-1 STAT source rises with the LYC comparator's lead
   ## (STAT_LYC_LY_LEAD_DOTS, 2 dots at single speed) at the end of line 143,

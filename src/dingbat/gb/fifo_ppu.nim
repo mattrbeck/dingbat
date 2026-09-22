@@ -1989,6 +1989,11 @@ when STAT_IRQ_SPLIT:
           # The match on line 143 lets go before the mode-1 source rises: the
           # edge detector sees the two in that order.
           ppu_handle_stat_interrupt(ppu, gb)
+          when CGB_STAT_WRITE_RULE != 0:
+            # A STAT write in flight: the rise is judged against the line the
+            # OLD enables hold (CGB_STAT_WRITE_RULE).
+            if gb.cgb_enabled and gb.memory.deferred_reg == 0xFF41'u16:
+              ppu.old_stat_flag = stat_level_with(ppu, gb, ppu.lcd_status, ppu.lyc)
           gb.m1_early = true
     ppu_handle_stat_interrupt(ppu, gb)
 
@@ -2327,6 +2332,10 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           # the enable this rise sees.
           if ppu.ly == 0'u8 and lyc_lead_dots(gb) != 0 and
              ppu.cycle_counter == 456 - lyc_lead_dots(gb):
+            when CGB_STAT_WRITE_RULE != 0:
+              # As at the mode-1 rise: judged against the OLD enables.
+              if gb.cgb_enabled and gb.memory.deferred_reg == 0xFF41'u16:
+                ppu.old_stat_flag = stat_level_with(ppu, gb, ppu.lcd_status, ppu.lyc)
             gb.m2_ly0_up = true
             if not (gb.memory.deferred_reg == 0xFF41'u16 and
                     (gb.memory.deferred_val and 0x20'u8) == 0'u8):
