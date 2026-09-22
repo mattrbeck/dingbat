@@ -231,6 +231,11 @@ const OAM_SCAN_DMA_EDGE_DS* {.intdefine.} = 2
   ## gambatte's cycle + 3 at double speed, + 1 at single). The six
   ## oamdma/late_sp*_ds rows, with CGB_OBJ_FETCH_OFF; 0 loses three of them,
   ## 3 four `_ds_2` twins.
+const LCDON_NO_OAM_SCAN* {.intdefine.} = 1
+  ## The first line after an LCD enable starts in mode 0 with no OAM scan
+  ## (Pan Docs, "LCD Status Register"), so it finds no objects. gambatte
+  ## `enable_display/enable_display_ly0_sprites_m0stat_2` (both devices): two
+  ## objects on line 0 held mode 3 past the read.
 const CGB_OBJ_FETCH_OFF* {.intdefine.} = 1
   ## The CGB's fetcher stops for objects with LCDC.1 clear (Pan Docs, "OBJ
   ## Penalty Algorithm"); the mixer alone drops them. The late_sp*_ds ROMs
@@ -2232,6 +2237,10 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
                 ppu.scan_x_bus = ppu.sprite_table[0x9D]
           else:
             ppu.sprites = fifo_get_sprites(ppu, gb)
+          when LCDON_NO_OAM_SCAN != 0:
+            # The LCD-on line opens in mode 0, not with an OAM scan: it finds
+            # no objects (LCDON_NO_OAM_SCAN).
+            if unlikely(ppu.first_line): ppu.sprites.setLen(0)
           when LY0_PIPE_ANY:
             # The pipeline advance (M3_PIPE_AHEAD + the CGB term), both halves
             # paid here: the head delay shrinks and the rest is spent as
