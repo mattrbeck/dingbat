@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-21 21:38:20*
+*Generated: 2026-09-21 22:36:07*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4870/5216 passed.**
+**4878/5216 passed.**
 
 ## bgen
 
@@ -39,16 +39,9 @@ All 40 tests passed.
 | cgbpal_m3/cgbpal_write_m3start_ds_1_cgb04c_out01 [cgb] | got 00, expected 01 |
 | cgbpal_m3/cgbpal_write_m3start_lcdoffset1_1_cgb04c_out01 [cgb] | got 00, expected 01 |
 
-## display_startstate (10/14 passed)
+## display_startstate
 
-10/14 tests passed, 4 failed:
-
-| Test | Result |
-|------|--------|
-| display_startstate/stat_2_cgb04c_out84 [cgb] | got 87, expected 84 |
-| display_startstate/stat_scx2_2_cgb04c_out84 [cgb] | got 87, expected 84 |
-| display_startstate/stat_scx3_2_cgb04c_out84 [cgb] | got 87, expected 84 |
-| display_startstate/stat_scx5_2_cgb04c_out84 [cgb] | got 87, expected 84 |
+All 14 tests passed.
 
 ## div
 
@@ -155,21 +148,19 @@ All 8 tests passed.
 | halt/late_m0irq_halt_m0stat_scx3_2b_dmg08_cgb04c_out2 [dmg] | got 0, expected 2 |
 | halt/noime_m2irq_m0stat_1_dmg08_cgb04c_out0 [cgb] | got 2, expected 0 |
 
-## irq_precedence (47/64 passed)
+## irq_precedence (49/64 passed)
 
-47/64 tests passed, 17 failed:
+49/64 tests passed, 15 failed:
 
 | Test | Result |
 |------|--------|
-| irq_precedence/hdma_vs_m0_scx2_cgb04c_out0183 [cgb] | got 1234, expected 0183 |
+| irq_precedence/hdma_vs_m0_scx1_cgb04c_out1234 [cgb] | got 0183, expected 1234 |
 | irq_precedence/hdma_vs_m0_scx2_halt_cgb04c_out1234 [cgb] | got 0184, expected 1234 |
 | irq_precedence/late_hdma_vs_ei_scx1_2_cgb04c_out1234 [cgb] | got 102F, expected 1234 |
 | irq_precedence/late_hdma_vs_ie_scx1_2_cgb04c_out1234 [cgb] | got 102F, expected 1234 |
 | irq_precedence/late_hdma_vs_tima_scx1_1_cgb04c_out1234 [cgb] | got 11E9, expected 1234 |
 | irq_precedence/late_hdma_vs_tima_scx1_halt_1_cgb04c_out1234 [cgb] | got 11C9, expected 1234 |
 | irq_precedence/late_hdma_vs_tima_scx2_halt_1_cgb04c_out1234 [cgb] | got 11C9, expected 1234 |
-| irq_precedence/late_m0irq_retrigger_2_dmg08_cgb04c_outE0 [dmg] | got E2, expected E0 |
-| irq_precedence/late_m0irq_retrigger_2_dmg08_cgb04c_outE0 [cgb] | got E2, expected E0 |
 | irq_precedence/late_m0irq_vs_tima_scx2_1_dmg08_cgb04c_out4 [dmg] | got 2, expected 4 |
 | irq_precedence/late_m0irq_vs_tima_scx2_1_dmg08_cgb04c_out4 [cgb] | got 2, expected 4 |
 | irq_precedence/late_m0irq_vs_tima_scx2_halt_1_dmg08_cgb04c_out4 [dmg] | got 2, expected 4 |
@@ -209,15 +200,13 @@ All 8 tests passed.
 
 All 62 tests passed.
 
-## ly0 (90/96 passed)
+## ly0 (92/96 passed)
 
-90/96 tests passed, 6 failed:
+92/96 tests passed, 4 failed:
 
 | Test | Result |
 |------|--------|
 | ly0/lycint152_lyc0flag_ds_3_cgb04c_outC4 [cgb] | got C0, expected C4 |
-| ly0/lycint152_lyc0irq_late_retrigger_2_dmg08_cgb04c_outE0 [dmg] | got E2, expected E0 |
-| ly0/lycint152_lyc0irq_late_retrigger_2_dmg08_cgb04c_outE0 [cgb] | got E2, expected E0 |
 | ly0/lycint152_lyc153flag_ds_3_cgb04c_outC5 [cgb] | got C1, expected C5 |
 | ly0/lycint152_lyc153irq_late_retrigger_2_dmg08_cgb04c_outE0 [dmg] | got E2, expected E0 |
 | ly0/lycint152_lyc153irq_late_retrigger_2_dmg08_cgb04c_outE0 [cgb] | got E2, expected E0 |
@@ -530,9 +519,9 @@ All 67 tests passed.
 | speedchange/speedchange3_nop_ch1_duty0_pos6_to_pos7_timing_1_cgb04c_outaudio0 [cgb, audio] | audio1 (mix varies over 35112 samples), expected audio0 |
 | speedchange/speedchange4_ch1_duty0_pos6_to_pos7_timing_1_cgb04c_outaudio0 [cgb, audio] | audio1 (mix varies over 35112 samples), expected audio0 |
 | speedchange/speedchange4_ch1_duty0_pos6_to_pos7_timing_nop_1_cgb04c_outaudio0 [cgb, audio] | audio1 (mix varies over 35112 samples), expected audio0 |
-| speedchange/speedchange5_ch1_duty0_pos6_to_pos7_timing_1_cgb04c_outaudio0 [cgb, audio] | audio1 (mix varies over 35111 samples), expected audio0 |
-| speedchange/speedchange5_ch1_duty0_pos6_to_pos7_timing_nop_1_cgb04c_outaudio0 [cgb, audio] | audio1 (mix varies over 35111 samples), expected audio0 |
-| speedchange/speedchange5_nop_ch1_duty0_pos6_to_pos7_timing_1_cgb04c_outaudio0 [cgb, audio] | audio1 (mix varies over 35111 samples), expected audio0 |
+| speedchange/speedchange5_ch1_duty0_pos6_to_pos7_timing_1_cgb04c_outaudio0 [cgb, audio] | audio1 (mix varies over 35112 samples), expected audio0 |
+| speedchange/speedchange5_ch1_duty0_pos6_to_pos7_timing_nop_1_cgb04c_outaudio0 [cgb, audio] | audio1 (mix varies over 35112 samples), expected audio0 |
+| speedchange/speedchange5_nop_ch1_duty0_pos6_to_pos7_timing_1_cgb04c_outaudio0 [cgb, audio] | audio1 (mix varies over 35112 samples), expected audio0 |
 | speedchange/speedchange_ch1_nr4init_duty0_pos6_to_pos7_timing_2_cgb04c_outaudio1 [cgb, audio] | audio0 (mix constant over 35112 samples), expected audio1 |
 
 ## sprites (472/476 passed)

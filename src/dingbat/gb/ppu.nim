@@ -5,7 +5,7 @@
 const LCD_ON_HEAD_START* {.intdefine.} = 5'i32
 
 # Dots past the start of VBlank at which the CGB boot ROM hands off (skip_boot).
-const CGB_BOOT_PHASE* {.intdefine.} = 161
+const CGB_BOOT_PHASE* {.intdefine.} = 165
 
 # Dot of line 153 at which the DMG/MGB boot ROM hands off (skip_boot).
 const DMG_BOOT_PHASE* {.intdefine.} = 397
@@ -110,9 +110,13 @@ method skip_boot*(ppu: GbPpu; gb: GB) {.base.} =
       ppu.vram[0][0x1904 + i] = uint8(0x01 + i)
       ppu.vram[0][0x1924 + i] = uint8(0x0D + i)
   if gb.cgb_enabled:
-    # The CGB boot ROM hands off mid-VBlank. 161 is pinned by gambatte
-    # display_startstate/stat_* (159..162) and by phase == 1 (mod 4), the same
-    # PPU-dot-to-M-cycle offset the DMG's LCD_ON_HEAD_START gives.
+    # The CGB boot ROM hands off mid-VBlank. 165 is pinned by gambatte
+    # display_startstate/stat_*: the `_1` rows read STAT mode 3 and the `_2`
+    # rows, one NOP later, mode 0, which only 165 satisfies (162..164 take
+    # the SCX 0/2/3 `_2` rows one by one, 166 loses stat_1) -- and by
+    # phase == 1 (mod 4), the same PPU-dot-to-M-cycle offset the DMG's
+    # LCD_ON_HEAD_START gives. 157/161/165 are otherwise indistinguishable:
+    # every other gambatte row resyncs on LY.
     const phase = CGB_BOOT_PHASE
     ppu.ly = uint8(144 + phase div 456)
     ppu.cycle_counter = int32(phase mod 456)

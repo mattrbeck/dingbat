@@ -54,33 +54,53 @@ did not move either way.
 
 ### A2. The dispatch's IF clear against a source rising inside it
 
-**Rows (16).** The `_2` arm of every `*_late_retrigger` family, both
-devices: `ly0/lycint152_lyc0irq_late_retrigger_2`,
+**Rows (12).** The `_2` arm of the `*_late_retrigger` families whose
+first source is the LYC comparator, mode 1 or the timer, both devices:
 `ly0/lycint152_lyc153irq_late_retrigger_2`,
 `lyc153int_m2irq/lyc153int_m2irq_late_retrigger_2`,
 `m1/lycint143_m1irq_late_retrigger_2`,
-`m1/lycint_vblankirq_late_retrigger_2`,
-`irq_precedence/late_m0irq_retrigger_2`, and
-`tima/tc00_irq_late_retrigger_{2,3,ds_2}`.
+`m1/lycint_vblankirq_late_retrigger_2`, and
+`tima/tc00_irq_late_retrigger_{2 [cgb],3,ds_2}`.
+`ly0/lycint152_lyc0irq_late_retrigger_2` and
+`irq_precedence/late_m0irq_retrigger_2` closed 2026-09-22 (below).
 
 **Behaviour.** Each ROM's handler re-requests its own interrupt with an
 `LDH ($0F),A` that moves one M-cycle per member, `EI`s, and reads IF inside
-the second dispatch; the member the value flips on is where the dispatch
-clears the taken IF bit. Pan Docs, "Interrupt Handling": the dispatch is five
-M-cycles, the fifth setting PC. gambatte `m2int_m2irq_late_retrigger_{1,2}`
-pins the clear at the start of that fifth M-cycle (T = 16) and every other
-`*_late_retrigger` family — five STAT sources and the timer — agrees on its
-`_1` arm.
+the second dispatch. The whole chain from the first dispatch to the second
+is fixed by the handler bytes (m2int_m2irq: 436 T at `_1`, 4 more per
+member) and the source's next rise is one line (456 T) or one timer period
+(2048 T) after its first, so each member asks whether the second dispatch's
+IF clear lands before or after that next rise. Writing the clear as `T`
+cycles into the dispatch and the first rise's distance to the dispatch's
+M-cycle boundary as `d` (0..3), the `_1`/`_2` flip of every family brackets
+`d + T` to a 4-cycle window: mode-2-first families (m2int_m2irq,
+late_m0irq_retrigger) say 16 < d + T < 20; LYC-, mode-1- and timer-first
+families say 20 < d + T < 24. Pan Docs, "Interrupt Handling": the dispatch is
+five M-cycles, the fifth setting PC.
 
-**Modelled.** `IRQ_SAMPLE_T = 16`, `IRQ_SAMPLE_T_DS = 16` (cpu.nim). The
-`_2` arms want the clear at T = 20 in single speed; `20 / 16` takes them and
-costs `m2int_m2irq_late_retrigger_1`, `irq_precedence/late_m0irq_retrigger_
-scx1_1` and `serial/start_wait_trigger_int8_read_if_2 [dmg]`.
+**Modelled.** `IRQ_SAMPLE_T = 18`, `IRQ_SAMPLE_T_DS = 16` (cpu.nim; the
+bracket is at the constant: 16 loses the two mid-M-cycle sources, 19 loses
+`late_m0irq_retrigger_scx1_1`, 20 also `m2int_m2irq_late_retrigger_1`,
+`20 / 16` is +15 / -5 over the suite).
 
-**To close.** Seven sources agreeing against `m2int_m2irq` about the same
-instant says the difference is in when each SOURCE rises relative to the
-dispatch, not in the clear. Settle the per-source rise dots (A3, A4) before
-moving this constant.
+**To close.** One clear cannot sit in both windows, so the two groups of
+sources reach the dispatch one M-cycle apart, relative to the instant their
+IF bit rises, with the mode-2 source the early one. dingbat raises the
+mode-2 source one M-cycle before the line boundary (`STAT_M2_LEAD`), the
+LYC and mode-1 sources on it, and dispatches the timer one M-cycle ahead of
+its IF bit (`TIMER_IRQ_RUN_LEAD`): the retrigger rows say the timer, LYC and
+mode-1 sources need one M-cycle more between rise and dispatch than that,
+or the mode-2 source one less, without moving where any of them is read
+back (the absolute `m2int_*`, `lycint_*`, `tima/*` rows are green). Second-
+emulator cross-check (gambatte-core `video.cpp`, `lyc_irq.cpp`, `tima.cpp`,
+`interrupter.cpp`, read for facts): it flags the mode-2 source 4 cycles
+before the LY increment, LYC and mode 1 2 cycles before it, LYC = 0 6
+cycles into line 153, the timer 3 cycles after its tap edge, dispatches at
+the first instruction boundary at or after the flag, and clears IF 16
+cycles into the dispatch — the same shape, the sources' phases differing,
+not the clear. The instrument is `-d:gb_stat_src_trace` against these
+seven families (A3's per-source table); `tools/gbppu/gam_dispatch.py`
+already reads the mode-0 side.
 
 ### A3. A STAT source enabled, disabled or handed over across a line edge
 
@@ -197,7 +217,8 @@ line when halted, two errors that cancel in the halted steady state
 2026-09-21, below); gambatte `enable_display` 15 (`ly0_late_vram{r,w}_*`,
 `ly0_late_scx7_m3stat_*`, `frame{0,1}_m{0,2}{irq,stat}_count_*_ds_1`,
 `enable_display_ly0_sprites_m0stat_2`, `ly0_oambusy_read_ds_1`),
-`lcd_offset` 19 (all CGB), `display_startstate/stat_*_2 [cgb]` 4.
+`lcd_offset` 19 (all CGB). `display_startstate/stat_*_2 [cgb]` (4) closed
+2026-09-22: `CGB_BOOT_PHASE` 161 -> 165, which no other row felt.
 
 **Behaviour.** After `LCDC.7` goes high the first line starts in mode 0 and
 its mode-3 edges sit 2 dots later against the CPU's grid than on any later
@@ -209,12 +230,10 @@ the pixel side — `line_0_fix` burns 4 T-cycles fewer on LY 0
 (`docs/gb-mealybug-sources.md` §1.2). `lcd_offset`'s `*_count_*` families
 are a 1-dot-per-SCX coincidence ruler for the STAT raise dot; read to ±1 dot
 only, because `offset1_lyc99int_m0{stat,irq}_count_scx1_ds` — flag and IRQ
-of one edge — demand opposite parities. `display_startstate/stat_*_2` read
-STAT on the first line after the CGB boot hand-off and want mode 0 where
-dingbat reads 3.
+of one edge — demand opposite parities.
 
-**Modelled.** `LCD_ON_HEAD_START = 5` (DMG) / `CGB_BOOT_PHASE = 161` (CGB;
-gambatte `display_startstate/stat_*` 159..162) seed the first line.
+**Modelled.** `LCD_ON_HEAD_START = 5` (DMG) / `CGB_BOOT_PHASE = 165` (CGB;
+gambatte `display_startstate/stat_*`, all 12) seed the first line.
 `LCD_ON_LINE0_LOCK_LEAD = 2` spends the 2 dots in the VRAM and OAM locks
 only; `LCD_ON_STAT_READ_LAG = 2` spends them in the STAT read. `LCD_ON_LINE0_
 TRIM` and `LCD_ON_LINE1_TRIM` (the geometry fix) ship 0: `=2` moves the
@@ -465,9 +484,14 @@ pixels to 1.
 `hdma_transition_speedchange_*`, `hdma_late_speedchange_inc_*` (speed
 switch); `hdma_pc_7ffe`, `late_gdma_pc_7ffe_1` (a transfer while the CPU
 fetches at the top of ROM); `hdma_late_enable_{ds_lcdoffset1,lcdoffset3}_2`,
-`hdma_disable_display_1`. `irq_precedence/hdma_vs_m0_scx2{,_halt}`,
-`late_hdma_vs_{ei,ie}_scx1_2`, `late_hdma_vs_tima_scx{1,2}{,_halt}_1` (7):
-a block and an interrupt dispatch contending for the same instant.
+`hdma_disable_display_1`. `irq_precedence/hdma_vs_m0_scx1`,
+`hdma_vs_m0_scx2_halt`, `late_hdma_vs_{ei,ie}_scx1_2`,
+`late_hdma_vs_tima_scx{1,2}{,_halt}_1` (7): a block and an interrupt
+dispatch contending for the same instant. `hdma_vs_m0_scx{1,2}` trade
+places with the boot phase (`CGB_BOOT_PHASE` 161 -> 165 took scx2 and lost
+scx1, 2026-09-22): the ROM's LY poll leaves the hand-off phase modulo the
+loop length, so the pair is a 1-dot ruler on the contention, not on the
+boot.
 
 **Behaviour.** An HBlank DMA copies one 16-byte block per mode-0 edge while
 the CPU is off the bus (Pan Docs, "LCD VRAM DMA Transfers"). The CPU hands

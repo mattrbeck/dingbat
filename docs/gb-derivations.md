@@ -26,16 +26,26 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
   constant satisfies all four; a 454/458-dot line pair fits best but has no
   mechanism, so it does not ship. Table at `LCD_ON_LINE0_TRIM`.
 
-### The CGB boot hand-off lands on the M-cycle grid at phase 161
-- Ships: `CGB_BOOT_PHASE = 161` (`ppu.nim`).
+### The CGB boot hand-off lands on the M-cycle grid at phase 165
+- Ships: `CGB_BOOT_PHASE = 165` (`ppu.nim`).
 - Claim: the CPU and PPU share one clock, so the dot-grid-to-M-cycle offset is
   a property of the machine, not of the boot ROM. DMG's 5-dot head start
   leaves 452 = 113 × 4 dots to the line end; the CGB seed must also satisfy
   `457 − phase ≡ 0 (mod 4)`.
-- Evidence: gambatte `display_startstate/stat_1` + `stat_2` leave 159..162
-  open and 161 is the only `1 mod 4` value in it; 157/161/165 score alike and
-  160 scores lowest. The `m2int_*` families, whose DMG and CGB twins expect
-  the same value, all missed by one M-cycle on CGB at 160.
+- Evidence: gambatte `display_startstate/stat_*_1` read STAT mode 3 and
+  `stat_*_2`, one NOP later, mode 0 (SCX 0/2/3/5, so the mode-0 edge is read
+  at four offsets). 165 is the only value that takes all eight: 158..161
+  fail every `_2` row, 162..164 take them one SCX at a time, 166 loses
+  `stat_1`. 157/161/165 score alike on every other gambatte row (5157-row
+  A/B, 2026-09-22), because the rest resync on LY; 160 scores lowest, and
+  the `m2int_*` families, whose DMG and CGB twins expect the same value, all
+  missed by one M-cycle on CGB at 160. 161 shipped 2026-08..09 on the `_1`
+  rows alone (the `_2` rows were red from the day the suite was scored).
+- Cross-check (gambatte-core `initstate.cpp`, read for facts): its post-boot
+  state puts the CGB at frame cycle `144 * 456 + 164` and the DMG at
+  `153 * 456 + 396`, both on the M-cycle grid; dingbat's dot index is one
+  ahead of gambatte's line cycle on both machines (165 / 397), which 161 was
+  not.
 
 ### A CPU write commits at the start of its M-cycle
 - Site: `mem_write` (`memory.nim`) runs the bus tick, lands the byte, then runs
@@ -356,6 +366,24 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
   halted M-cycle's PPU tick and costs +5 % retired instructions on Pokemon
   Blue; the untried reduction is to skip the split when the PPU's idle-skip
   target is past the M-cycle's end.
+
+### The dispatch clears IF inside its fifth M-cycle
+- Ships: `IRQ_SAMPLE_T = 18`, `IRQ_SAMPLE_T_DS = 16` (`cpu.nim`).
+- Claim: the taken line's IF bit is cleared after the two waits and two
+  pushes (Pan Docs, "Interrupt Handling"), 2 T into the fifth M-cycle in
+  single speed.
+- Evidence: gambatte `*_late_retrigger` (six STAT sources and the timer):
+  the handler's IF re-request moves one M-cycle per member and the second
+  dispatch's read of IF says whether the clear beat the source's next rise.
+  16 loses the `_2` arms of `ly0/lycint152_lyc0irq` and
+  `irq_precedence/late_m0irq_retrigger` (sources that rise mid-M-cycle), 17
+  takes the first pair, 18 both (+4, nothing lost, 2026-09-22), 19 loses
+  `late_m0irq_retrigger_scx1_1`, 20 also `m2int_m2irq_late_retrigger_1`.
+  Double speed keeps 16: an odd value is off the dot grid and 20 flips every
+  `_ds_1` arm.
+- Open: the LYC-, mode-1- and timer-first families' `_2` arms (12 rows) want
+  20 where the mode-2-first families want below 19 — a per-source phase
+  question, `docs/gb-failure-triage.md` A2.
 
 ### The interrupt check stays a leaf
 - `handle_interrupts` runs after every instruction and almost never takes the

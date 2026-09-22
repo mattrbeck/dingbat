@@ -137,20 +137,34 @@ const IRQ_PUSH_T* {.intdefine.} = 0
   ## The two are indistinguishable by score.
 
 const IRQ_SAMPLE_T_DS* {.intdefine.} = 16
-  ## IRQ_SAMPLE_T for a dispatch taken in double speed; equal to IRQ_SAMPLE_T
-  ## compiles the split out (ships). 20/16 gains the `_2` arm of seven gambatte
-  ## *_late_retrigger families on both devices but loses
-  ## m2int_m2irq_late_retrigger_1, the direct read-out of the clear; when each
-  ## source rises needs settling before this flips.
-const IRQ_SAMPLE_T* {.intdefine.} = 16
+  ## IRQ_SAMPLE_T for a dispatch taken in double speed, in CPU T-cycles: 16 is
+  ## the start of the fifth M-cycle. An odd value is off the dot grid there
+  ## (17/17 loses 150 `_ds_` rows), and 20 flips every `_ds_1`
+  ## *_late_retrigger arm the other way, so the split stays.
+const IRQ_SAMPLE_T* {.intdefine.} = 18
   ## T-cycles into the 5 M-cycle interrupt dispatch at which the taken line's
-  ## IF bit is cleared. gambatte *_late_retrigger (under five STAT sources and
-  ## the timer) move a handler's IF re-request one M-cycle per member;
-  ## m2int_m2irq_late_retrigger_{1,2} bracket the clear to later than 15 T and
-  ## no later than 19 T: the start of the fifth M-cycle, after the two waits
-  ## and two pushes (Pan Docs, "Interrupt Handling"). Only the clear is here;
-  ## which line is taken is decided between the push bytes (dispatch_interrupt;
+  ## IF bit is cleared: inside the fifth M-cycle, after the two waits and two
+  ## pushes (Pan Docs, "Interrupt Handling"). Only the clear is here; which
+  ## line is taken is decided between the push bytes (dispatch_interrupt;
   ## mooneye acceptance/interrupts/ie_push).
+  ##
+  ## Bracket: gambatte *_late_retrigger (six STAT sources and the timer, both
+  ## devices) re-request the handler's own interrupt one M-cycle later per
+  ## member and read IF inside the second dispatch, so each family measures
+  ## the clear against its source's next rise. 16 (the fifth M-cycle's first
+  ## T) loses the `_2` arms of ly0/lycint152_lyc0irq and irq_precedence/
+  ## late_m0irq_retrigger, whose sources rise mid-M-cycle (the snapback's
+  ## LYC = 0 match, the mode-0 source at STAT_M0_LEAD_T); 17 takes only the
+  ## first pair; 18 takes both (+4); 19 loses late_m0irq_retrigger_scx1_1,
+  ## and 20 also m2int_m2irq_late_retrigger_1 (both devices).
+  ##
+  ## Open (docs/gb-failure-triage.md A2): the `_2` arms of the LYC-, mode-1-
+  ## and timer-first families (12 rows) want the clear at 20 while the mode-2-
+  ## first families want it below 19, one full M-cycle apart with the same
+  ## handler bytes. The dispatch cannot be in two places, so those sources
+  ## reach the dispatch one M-cycle later, relative to the instant IF rises,
+  ## than the mode-2 source does. Settling the per-source rise phases (A3) is
+  ## what moves them, not this constant.
 proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
   ## The taken half of handle_interrupts: push PC, vector, charge 5 M-cycles.
   ## Out of line: two inlined mem_writes give handle_interrupts a prologue
