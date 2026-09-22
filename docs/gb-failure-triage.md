@@ -104,10 +104,34 @@ already reads the mode-0 side.
 
 ### A3. A STAT source enabled, disabled or handed over across a line edge
 
-**Rows (108).** `lycEnable` 33, `m2enable` 20, `m1` 23, `m0enable` 18,
+**Rows (88).** `lycEnable` 31, `m2enable` 9, `m1` 23, `m0enable` 10,
 `miscmstatirq` 7, `m2int_m0irq/m2int_m0irq_scx3_ifw_{2,4}` (4),
 `ly0/lycint152_lyc{0,153}flag_ds_3`, `lycint_lycflag/lycint_lycflag_ds_3`.
 Heavily CGB, and a third of them `lcdoffset1` or `_ds_` members.
+
+**Closed 2026-09-22: a disable is an edge's other half (+20).** The STAT
+line is a level OR into an edge detector, and dingbat only re-evaluated it
+at source changes and at the M-cycle boundary a STAT write's byte waits
+for. A write whose cleared enable bits took the line low inside its own
+M-cycle, followed by another source rising before the boundary, was a
+handover with no edge: the detector still held the old level.
+`-d:gb_stat_read_trace` on `m2enable/m2_late_m0disable_1` shows the $28 ->
+$20 write committing on dot 449 and the mode-2 rise at 452 with no
+interrupt. Now a STAT write samples the line under its new enables at the
+commit, plus the CGB's 2-dot latency, and lets it fall there
+(`stat_drop_arm`, ppu.nim); a rise inside the latency window refreshes the
+sample. Took `m2enable/{m2_late_m0disable, late_enable_m0disable,
+late_enable_after_lycint_disable, lyc1_m2irq_late_lycdisable}_1` and their
+`_ds_1` twins, `m0enable/lycdisable_ff41_*` (7), `lycEnable/lyc{0,153}_
+late_{enable_,}m1disable_2 [dmg]`, `lyc153_m1disable_ds_1`; lost
+`lycEnable/lyc153_late_{enable_,}m1disable_2 [cgb]`, whose LYC = 153 rise
+meets a mode-1 disable landing on the latency's last dot and still blocks
+(a strict `>` loses six other CGB rows instead: that source's latency is
+one dot longer than the mode-0/2 sources', not the rule's edge). Second-
+emulator cross-check (gambatte-core `mstat_irq.h`, `lyc_irq.cpp`, read for
+facts): each source event reads a copy of STAT that a write updates only
+when it lands more than 2 cycles (CGB) before the event, i.e. the same
+window, spelled per source.
 
 **Behaviour.** The STAT interrupt line is a level OR of four sources into
 one edge detector, so an interrupt fires only when the OR rises from zero
@@ -117,12 +141,16 @@ LYC one M-cycle per member across a line boundary and ask whether the
 enable, the disable or the hand-over from one source to another produced an
 edge. Sub-shapes, each a separate rule:
 
-* `m0enable/lycdisable_ff4{1,5}_*` (14): LYC source disabled by a STAT or
-  LYC write while the mode-0 source is coming up; hardware takes the
-  interrupt (`out2`), dingbat does not.
-* `m2enable/late_enable_*`, `lyc1_m2irq_late_lyc*`, `m2_late_m0disable`
-  (20): the OAM source enabled one M-cycle across the line boundary it rises
-  on. `STAT_M2_LEAD = 1` puts the rise one CPU M-cycle before the boundary;
+* `m0enable/lycdisable_ff45_*` (7; the `ff41` half closed above): LYC
+  source disabled by an LYC write while the mode-0 source is coming up;
+  hardware takes the interrupt (`out2`), dingbat does not. The LYC write is
+  deferred a whole M-cycle on CGB (`CGB_LYC_WRITE_DEFER`) and lands live on
+  DMG, and neither path runs `stat_drop_arm`; the DMG members are the next
+  cheap rows.
+* `m2enable/late_enable_*_2`, `lyc1_m2irq_late_lyc255_*`,
+  `late_{enable_,}m1disable_ly0_2`, `lyc0_late_m2enable_lycdisable_2` (9):
+  the OAM source enabled one M-cycle across the line boundary it rises on.
+  `STAT_M2_LEAD = 1` puts the rise one CPU M-cycle before the boundary;
   these say the enable window around it is still a cycle out, mostly on CGB.
 * `m1/m1irq_m2enable_lyc_*`, `m2m1irq_ifw_*`, `m1irq_m2disable_lycdisable_*`,
   `ly143_late_m{0,2}enable_*`, `m1irq_late_enable_*` (23): the mode-1 /

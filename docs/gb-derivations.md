@@ -122,6 +122,25 @@ a reference PNG, `mGBA suite <section>` a section of mGBA's test ROM.
   bracket is 54/55 NOPs for vblank on every model and for STAT on DMG, but
   53/54 for STAT on CGB.
 
+### A STAT write's cleared enables let the line fall at the commit
+- Ships: `stat_drop_arm` / `stat_drop_settle` (`ppu.nim`), at the existing
+  `STAT_ENABLE_LATENCY = 0` / `CGB_STAT_ENABLE_LATENCY = 2`.
+- Claim: the STAT interrupt line is a level OR into an edge detector, and a
+  write that disables the source holding it high takes it low when the
+  enable bits reach the line (the top of the write's M-cycle on DMG, 2 dots
+  in on CGB), not at the M-cycle boundary where the byte lands. A source
+  rising between those two instants is therefore an edge.
+- Evidence: gambatte `m2enable/m2_late_m0disable_1` (both devices, and
+  `_ds_1`): $28 -> $20 commits on dot 449, the mode-2 source rises on 452,
+  hardware takes the interrupt; the `_2` arm, one M-cycle later, does not.
+  Same shape in `late_enable_m0disable_1`, `late_enable_after_lycint_
+  disable_1`, `lyc1_m2irq_late_lycdisable_1`, `m0enable/lycdisable_ff41_*`
+  and `lycEnable/lyc{0,153}_late_{enable_,}m1disable_2 [dmg]`: +22 / -2 on
+  the suite (2026-09-22). The two losses are the CGB arms of the LYC = 153
+  pair, where the disable landing on the latency's last dot still blocks;
+  a strict comparison loses six other CGB rows, so that source's window is
+  one dot longer, an open row of triage A3.
+
 ### CPU VRAM/OAM locks close on the live mode and open with the STAT bits
 - Site: `cpu_vram_open` / `cpu_oam_open`, checked on the CPU bus
   (`mem_read`/`mem_write`), never in `ppu_read`/`ppu_write`, so the OAM DMA

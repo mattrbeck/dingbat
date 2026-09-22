@@ -1504,6 +1504,13 @@ type
     window_trigger*:     bool
     current_window_line*: int
     old_stat_flag*:      bool
+    # A STAT write's cleared enable bits let the line DROP at the commit (+ the
+    # CGB latency), ahead of the M-cycle boundary the rest of the byte waits
+    # for (stat_drop_arm, ppu.nim). Live only inside that M-cycle: not
+    # serialized, a state is never taken mid-M-cycle.
+    stat_drop_pending*:  bool
+    stat_drop_level*:    bool
+    stat_drop_dot*:      int32
     # A CPU write to LCDC/STAT/LYC changed a STAT-line input not yet
     # re-evaluated: the byte lands at the top of its M-cycle (mem_write), the
     # edge is taken at the boundary. Consumed in the same M-cycle; not serialized.
