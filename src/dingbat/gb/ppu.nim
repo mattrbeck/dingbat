@@ -1171,6 +1171,10 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
                     else: 0),
            " stat=", toHex(ppu.lcd_status, 2), " lycreg=", ppu.lyc
     gb.interrupts.lcd_stat_interrupt = true
+    when STAT_DISPATCH_MIN_AGE_DS != 0 or defined(gb_dispatch_trace):
+      ppu.stat_if_dot = ppu.cycle_counter
+      ppu.stat_if_ly = ppu.ly
+      ppu.stat_if_m0 = ppu.stat_if_m0_rise
   ppu.old_stat_flag = stat_flag
 
 # ---- An ordinary LY advance is an edge the STAT line has to see too ---------
@@ -1351,7 +1355,13 @@ when STAT_IRQ_SPLIT:
       # The source's own change dot: halt_m0_tail_blind measures from THIS dot,
       # not from stat_chg_dot.
       ppu.irq_chg_dot = int16(ppu.cycle_counter)
-      ppu_handle_stat_interrupt(ppu, gb)
+      when STAT_DISPATCH_MIN_AGE_DS != 0:
+        # A rise here is the mode-0 source's own (STAT_DISPATCH_MIN_AGE_DS).
+        ppu.stat_if_m0_rise = mode == 0'u8
+        ppu_handle_stat_interrupt(ppu, gb)
+        ppu.stat_if_m0_rise = false
+      else:
+        ppu_handle_stat_interrupt(ppu, gb)
 
 proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   let prev_mode = ppu.mode_flag

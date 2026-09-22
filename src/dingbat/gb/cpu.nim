@@ -208,6 +208,18 @@ proc handle_interrupts*(cpu: GbCpu; gb: GB) =
     # (Pan Docs' STOP chart; daid stop_instr.gb) and only a joypad line ends
     # it, so this must not un-halt the CPU the M-cycle STOP retires.
     if cpu.stopped: return
+    when defined(gb_dispatch_trace):
+      if cpu.ime and highest_priority(gb.interrupts) == INT_STAT:
+        echo "DISPATCH ly=", gb.ppu.ly, " cc=", gb.ppu.cycle_counter,
+             " raised=", gb.ppu.stat_if_dot, " ds=", gb.memory.current_speed
+    when STAT_DISPATCH_MIN_AGE_DS != 0:
+      # A STAT request younger than the threshold waits a boundary at double
+      # speed (STAT_DISPATCH_MIN_AGE_DS, gb.nim), unless something else is up.
+      if gb.memory.current_speed != 0'u8 and gb.ppu.stat_if_m0 and
+         highest_priority(gb.interrupts) == INT_STAT and
+         gb.ppu.ly == gb.ppu.stat_if_ly and
+         gb.ppu.cycle_counter - gb.ppu.stat_if_dot < STAT_DISPATCH_MIN_AGE_DS:
+        return
     cpu.halted = false
     if cpu.ime: dispatch_interrupt(cpu, gb)
 

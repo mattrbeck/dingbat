@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-21 19:20:24*
+*Generated: 2026-09-21 19:28:58*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**4658/4996 passed.**
+**4660/4996 passed.**
 
 ## bgen
 
@@ -303,14 +303,13 @@ All 18 tests passed.
 
 All 8 tests passed.
 
-## m0enable (149/167 passed)
+## m0enable (150/167 passed)
 
-149/167 tests passed, 18 failed:
+150/167 tests passed, 17 failed:
 
 | Test | Result |
 |------|--------|
 | m0enable/disable_ds_1_cgb04c_out1 [cgb] | got 3, expected 1 |
-| m0enable/disable_scx5_ds_2_cgb04c_out3 [cgb] | got 1, expected 3 |
 | m0enable/enable_wxA6_2x_spxA7_ds_1_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m0enable/late_enable_lcdoffset1_1_cgb04c_out2 [cgb] | got 0, expected 2 |
 | m0enable/lycdisable_ff41_2_dmg08_out2_cgb04c_out0 [dmg] | got 0, expected 2 |
@@ -332,13 +331,9 @@ All 8 tests passed.
 
 All 4 tests passed.
 
-## m0int_m0stat (11/12 passed)
+## m0int_m0stat
 
-11/12 tests passed, 1 failed:
-
-| Test | Result |
-|------|--------|
-| m0int_m0stat/m0int_m0stat_scx5_ds_2_cgb04c_out2 [cgb] | got 0, expected 2 |
+All 12 tests passed.
 
 ## m0int_m3stat
 

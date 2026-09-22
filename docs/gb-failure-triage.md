@@ -37,34 +37,20 @@ row whose ROM names several machines.
 
 ### A1. The mode-0 dispatch grid at double speed
 
-**Rows (7).** AGE `stat-interrupt/stat-int-dmgC-cgbBCE@{cgbab,cgbc,cgbe}`
-(double-speed half: every odd SCX, no even one); gambatte
-`m2int_m0irq/m2int_m0irq_scx5_ds_1`, `m0int_m0stat/m0int_m0stat_scx5_ds_2`,
-`enable_display/ly0_m0irq_scx{0,1}_ds_1`.
-
-**Behaviour.** The mode-0 STAT interrupt's dispatch relative to the line's
-mode 0 -> 2 edge, read at 2-dot resolution. AGE `stat-int` takes the mode-0
-interrupt on line 3 and reads STAT back at two delays one M-cycle apart for
-SCX 0..9; its expected table (CGB B/C/E, per the header) is a staircase that
-dingbat's double-speed arm reproduces only on even SCX, dispatching a whole
-M-cycle early on odd SCX — the signature of a one-dot source lead on a 2-dot
-M-cycle grid.
-
-**Modelled.** `STAT_M0_LEAD_T = 2` (ppu.nim): the mode-0 source leads the
-mode 3 -> 0 flag by 2 T-cycles of the CPU clock, single speed exact;
-`STAT_M0_LEAD_DS = 1` is the double-speed value. `CGB_M0_HALT_BLIND_DS_DOTS
-= 1`.
-
-**To close.** `-d:STAT_M0_LEAD_DS=0 -d:CGB_M0_HALT_BLIND_DS_DOTS=0` takes the
-AGE arms and five gambatte rows but loses
-`irq_precedence/late_m0irq_retrigger_scx1_ds_2` and
-`m2int_m0irq/m2int_m0irq_scx3_ifw_ds_2`: the two sides bracket the same mode
-3 -> 0 edge from opposite directions, so the lead is not the quantity that is
-wrong. `STAT_M0_LEAD_DS` ships at the identity `STAT_M0_LEAD_T shr 1` (a
-double-speed T-cycle is half a dot; its comment in `ppu.nim`). Rounding the
-source to an odd dot reproduces the staircase and keeps the edge, which
-points at the CPU-to-PPU dispatch phase in double speed
-(`mem_tick_ppu_latched`, `CGB_LATENCY_CAP`) rather than at the source.
+**Closed 2026-09-21.** AGE `stat-interrupt/stat-int-dmgC-cgbBCE@{cgbab,
+cgbc,cgbe}`, gambatte `m0int_m0stat/m0int_m0stat_scx5_ds_2` and
+`m0enable/disable_scx5_ds_2` (the whole `m0int_m0stat` directory is green).
+The `-d:gb_dispatch_trace` dots said it outright: the double-speed dispatch
+grid sits on odd dots, the mode-0 source rises at flag - 1 (STAT_M0_LEAD_DS,
+which the IF-write rows pin), so for an odd SCX it rose one dot before a
+boundary and was taken there, while for an even SCX it rose two dots before
+one. AGE's staircase pairs SCX (1,2), (3,4), (5,6): a mode-0 rise one dot old
+at the boundary waits for the next. `STAT_DISPATCH_MIN_AGE_DS = 2` (gb.nim),
+gated to the mode-0 source's own edge: applied to every STAT rise it breaks
+the same ROM's mode 2 and mode 1 cells (those sources rise on the boundary
+dot and are taken), and to CPU-written enables gambatte `m2int_m0irq/*_ds_1`.
+The remaining `_ds_` rows (`m2int_m0irq_scx5_ds_1`, `enable_display/*_ds_1`)
+did not move either way.
 
 ### A2. The dispatch's IF clear against a source rising inside it
 

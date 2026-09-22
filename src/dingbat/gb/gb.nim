@@ -46,6 +46,23 @@ const STAT_M0_LEAD_T* {.intdefine.} = 2
   ## the second line after LCD enable on; the 96 gambatte `sprites/*_m3stat_ds_1`
   ## rows refuse a flat dot count, and `M3_END_EARLY` is refused because the
   ## readable field would move with it (GBMicrotest `poweron_stat_*`, `win*_a`).
+const STAT_DISPATCH_MIN_AGE_DS* {.intdefine.} = 2
+  ## Double speed only: dots the MODE-0 source's own rise must have been up
+  ## for at an instruction boundary before the running CPU dispatches it; 0
+  ## = any age (compiles out). The double-speed dispatch grid sits on odd
+  ## dots and the source rises at flag - STAT_M0_LEAD_DS, so for an odd SCX
+  ## it rises one dot before a boundary and was taken there. AGE
+  ## stat-interrupt/stat-int's double-speed half (the mode-0 source set at
+  ## the head of line 3, STAT read back at two delays one M-cycle apart, SCX
+  ## 0..9) pairs SCX (1,2), (3,4), (5,6): that rise waits a boundary. Moving
+  ## the source instead (STAT_M0_LEAD_DS = 0) reproduces the staircase but
+  ## loses gambatte irq_precedence/late_m0irq_retrigger_scx1_ds_2 and
+  ## m2int_m0irq/m2int_m0irq_scx3_ifw_ds_2, whose IF writes pin the rise
+  ## dot; applied to every STAT rise it breaks the mode 2 and mode 1 cells of
+  ## the same ROM (those sources rise on the boundary's own dot and are
+  ## taken), and to CPU-written enables gambatte m2int_m0irq/*_ds_1. 2 ships:
+  ## a rise two dots old (an even SCX) is taken; gambatte
+  ## m0int_m0stat/m0int_m0stat_scx5_ds_2 comes with it.
 const STAT_ENABLE_LATENCY* {.intdefine.} = 0
   ## Dots after the top of its M-cycle at which a STAT write's four source-enable
   ## bits reach the STAT interrupt line; 4 = the old M-cycle-boundary spelling.
@@ -1518,6 +1535,10 @@ type
       # The source's own `stat_chg_dot`, a different dot from the flag's when a
       # lead is on. Per-line, not serialized.
       irq_chg_dot*:      int16
+      stat_if_dot*:      int32   # STAT_DISPATCH_MIN_AGE_DS: dot the STAT request last rose
+      stat_if_ly*:       uint8
+      stat_if_m0*:       bool    # ... and whether the mode-0 source's own edge raised it
+      stat_if_m0_rise*:  bool    # set around the mode-0 source's edge detector call
     # Dots since the last frame was pushed, counted whether or not the PPU is
     # driving the panel. The panel refreshes at a fixed rate regardless, so
     # this is what keeps frame output steady across an LCD that switches off

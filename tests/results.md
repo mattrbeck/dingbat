@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-09-21 19:20:24 · commit cad8bd4e2 · game-boy-test-roms v7.0*
+*Generated: 2026-09-21 19:28:58 · commit e1c9f476d · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1223
-- **Pass:** 1189
-- **Fail:** 34
+- **Pass:** 1193
+- **Fail:** 30
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -23,13 +23,13 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - MagenTests | 7 | 7 |
 | Game Boy - Mealybug Tearoom | 74 | 74 |
 | Game Boy - GBMicrotest | 480 | 480 |
-| Game Boy - AGE | 83 | 89 |
+| Game Boy - AGE | 86 | 89 |
 | Game Boy - Screenshot suites | 13 | 13 |
 | Game Boy - SameSuite | 8 | 8 |
 | Game Boy - SameSuite APU | 70 | 70 |
 | Game Boy - Shootout ROMs | 13 | 13 |
 | Game Boy - Mooneye (wilbertpol) | 184 | 184 |
-| Game Boy - gambatte | 20 | 48 |
+| Game Boy - gambatte | 21 | 48 |
 
 ## Game Boy - Blargg (28/28)
 
@@ -77,7 +77,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 480 tests passed.**
 
-## Game Boy - AGE (83/89)
+## Game Boy - AGE (86/89)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -142,9 +142,9 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | age/speed-switch/spsw-tima-cgbBC@cgbc | CGB cgbc | 👌 |
 | age/speed-switch/spsw-tima-cgbE | CGB cgbe | 👌 |
 | age/stat-interrupt/stat-int-dmgC-cgbBCE@dmgC | DMG dmgC | 👌 |
-| age/stat-interrupt/stat-int-dmgC-cgbBCE@cgbab | CGB cgbab | 👀 Mooneye: FAIL |
-| age/stat-interrupt/stat-int-dmgC-cgbBCE@cgbc | CGB cgbc | 👀 Mooneye: FAIL |
-| age/stat-interrupt/stat-int-dmgC-cgbBCE@cgbe | CGB cgbe | 👀 Mooneye: FAIL |
+| age/stat-interrupt/stat-int-dmgC-cgbBCE@cgbab | CGB cgbab | 👌 |
+| age/stat-interrupt/stat-int-dmgC-cgbBCE@cgbc | CGB cgbc | 👌 |
+| age/stat-interrupt/stat-int-dmgC-cgbBCE@cgbe | CGB cgbe | 👌 |
 | age/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE@dmgC | DMG dmgC | 👌 |
 | age/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE@cgbab | CGB cgbab | 👌 |
 | age/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE@cgbc | CGB cgbc | 👌 |
@@ -191,7 +191,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 184 tests passed.**
 
-## Game Boy - gambatte (20/48)
+## Game Boy - gambatte (21/48)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -218,9 +218,9 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/lycint_m0stat | per-ROM | 👌 6/6 passed |
 | gambatte/lycm2int | per-ROM | 👌 18/18 passed |
 | gambatte/lywrite | per-ROM | 👌 8/8 passed |
-| gambatte/m0enable | per-ROM | 👀 149/167 passed |
+| gambatte/m0enable | per-ROM | 👀 150/167 passed |
 | gambatte/m0int_m0irq | per-ROM | 👌 4/4 passed |
-| gambatte/m0int_m0stat | per-ROM | 👀 11/12 passed |
+| gambatte/m0int_m0stat | per-ROM | 👌 12/12 passed |
 | gambatte/m0int_m3stat | per-ROM | 👌 6/6 passed |
 | gambatte/m1 | per-ROM | 👀 143/170 passed |
 | gambatte/m2enable | per-ROM | 👀 100/120 passed |
