@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-22 14:50:15*
+*Generated: 2026-09-22 14:53:57*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5087/5216 passed.**
+**5092/5216 passed.**
 
 ## bgen
 
@@ -67,9 +67,9 @@ All 8 tests passed.
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_4 [dmg, png] | 1/23040 pixels differ |
 | dmgpalette_during_m3/scx3/dmgpalette_during_m3_5 [dmg, png] | 144/23040 pixels differ |
 
-## enable_display (168/184 passed)
+## enable_display (170/184 passed)
 
-168/184 tests passed, 16 failed:
+170/184 tests passed, 14 failed:
 
 | Test | Result |
 |------|--------|
@@ -77,10 +77,8 @@ All 8 tests passed.
 | enable_display/enable_display_ly0_sprites_m0stat_2_dmg08_cgb04c_out0 [cgb] | got 3, expected 0 |
 | enable_display/frame0_m0irq_count_scx2_ds_1_cgb04c_out90 [cgb] | got 00, expected 90 |
 | enable_display/frame0_m0irq_count_scx3_ds_1_cgb04c_out90 [cgb] | got 00, expected 90 |
-| enable_display/frame0_m2irq_count_ds_1_cgb04c_out98 [cgb] | got 90, expected 98 |
 | enable_display/frame0_m2stat_count_ds_1_cgb04c_out91 [cgb] | got 01, expected 91 |
 | enable_display/frame1_m0irq_count_scx3_ds_1_cgb04c_out90 [cgb] | got 00, expected 90 |
-| enable_display/frame1_m2irq_count_ds_1_cgb04c_out98 [cgb] | got 90, expected 98 |
 | enable_display/frame1_m2stat_count_ds_1_cgb04c_out91 [cgb] | got 01, expected 91 |
 | enable_display/ly0_late_cgbpr_ds_2_cgb04c_outFF [cgb] | got 55, expected FF |
 | enable_display/ly0_late_cgbpw_ds_2_cgb04c_out55 [cgb] | got AA, expected 55 |
@@ -98,14 +96,13 @@ All 158 tests passed.
 
 All 64 tests passed.
 
-## lcd_offset (57/62 passed)
+## lcd_offset (58/62 passed)
 
-57/62 tests passed, 5 failed:
+58/62 tests passed, 4 failed:
 
 | Test | Result |
 |------|--------|
 | lcd_offset/offset1_lyc99int_m0irq_count_scx2_ds_1_cgb04c_out90 [cgb] | got 00, expected 90 |
-| lcd_offset/offset1_lyc99int_m2irq_count_ds_1_cgb04c_out98 [cgb] | got 90, expected 98 |
 | lcd_offset/offset1_lyc99int_m2stat_count_ds_2_cgb04c_out90 [cgb] | got 00, expected 90 |
 | lcd_offset/offset1_lyc99int_m3stat_count_ds_2_cgb04c_out90 [cgb] | got 00, expected 90 |
 | lcd_offset/offset3_lyc8fint_m1stat_1_cgb04c_outC0 [cgb] | got C1, expected C0 |
@@ -191,15 +188,13 @@ All 12 tests passed.
 
 All 6 tests passed.
 
-## m1 (167/170 passed)
+## m1 (169/170 passed)
 
-167/170 tests passed, 3 failed:
+169/170 tests passed, 1 failed:
 
 | Test | Result |
 |------|--------|
 | m1/ly143_late_m2enable_ds_lcdoffset1_1_cgb04c_out3 [cgb] | got 1, expected 3 |
-| m1/lyc143_late_m2enable_lycdisable_ds_1_cgb04c_out3 [cgb] | got 1, expected 3 |
-| m1/m2m1irq_ifw_ds_1_cgb04c_out3 [cgb] | got 1, expected 3 |
 
 ## m2enable
 
