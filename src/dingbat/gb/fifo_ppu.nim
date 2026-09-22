@@ -767,6 +767,19 @@ proc fifo_head_window(ppu: GbFifoPpu) =
       # SCX latch instead (WIN_WX0_PHASE, fifo_sample_smooth_scroll).
       ppu.fetch_counter = -int(max(0, int32(ppu.wx) - 1))
 
+proc fifo_head_window_late*(ppu: GbFifoPpu) =
+  ## A WY match landing after the head decided this line is a BG line
+  ## (WIN_HEAD_LATE_DOT): with WX below WIN_LINE_START_WX and nothing shifted
+  ## out yet, the line still becomes a window line, its startup fetch
+  ## beginning now.
+  if ppu.fetching_window or not ppu.dropped_first_fetch or
+     not window_enabled(ppu) or ppu.wx >= uint8(WIN_LINE_START_WX): return
+  if ppu.lx > -int32(7 and int(ppu.scx)): return
+  fifo_reset_bg(ppu, true)
+  ppu.lx = int32(-max(0, 7 - int(ppu.wx))) - int32(7 and int(ppu.scx))
+  when WIN_HEAD_ABSORB != 0:
+    ppu.fetch_counter = -int(max(0, int32(ppu.wx) - 1))
+
 # M3_THROWAWAY_DOTS (gb.nim): the discarded head fetch is `B0`, four dots,
 # and the first real cycle runs to its own push slot (12 dots together).
 # mealybug m3_scy_change separates 4 from 6: the first tile's B read must take

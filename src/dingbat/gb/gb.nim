@@ -940,6 +940,13 @@ const WIN_WX0_PHASE*          {.intdefine.} = 1
   ## `m3_window_timing_wx_0.asm` calls "activating one T-cycle later when WX = 0
   ## and SCX > 0"; tested at the SCX latch dot, see fifo_sample_smooth_scroll.
 const WIN_LINE_START_LATCH*   {.intdefine.} = 1
+const WIN_HEAD_LATE_DOT* {.intdefine.} = 84
+  ## A WY match can still make the line a window line (WX below
+  ## WIN_LINE_START_WX) until this dot plus SCX & 7, the end of the fine-scroll
+  ## discard, not only at the head (fifo_head_window_late). gambatte
+  ## window/arg/late_scx_late_wy_FFto4_ly4_wx00_{1 [cgb],2 [dmg]} (SCX 4: a
+  ## check on dot 86 takes, 90 does not) against late_wy_FFto2_ly2_wx00_*
+  ## (SCX 0: 82 takes, 86 does not). 82..85 score alike; 0 compiles it out.
   ## Which dot WX is read on to decide whether a line starts as a window line:
   ## the last dot of the throw-away fetch at the head of mode 3 (1, ships) or
   ## the mode 2 -> 3 edge six dots earlier (0). Bracketed two-sided by two

@@ -246,6 +246,8 @@ proc fifo_arm_window*(ppu: GbFifoPpu)
 
 proc fifo_arm_scx*(ppu: GbFifoPpu)
 
+proc fifo_head_window_late*(ppu: GbFifoPpu) {.noinline.}
+
 when SCX_STORE_STALL_DOTS != 0:
   proc fifo_scx_store_stall*(ppu: GbFifoPpu; old_scx: uint8)
 
@@ -2085,8 +2087,15 @@ proc win_check_now*(ppu: GbPpu; gb: GB) =
       e == 0 or ppu.cycle_counter < int32(e)):
     when defined(gb_win_trace):
       echo "WYCHECK ly=", ppu.ly, " cmp=", cmp_ly, " wy=", ppu.wy, " dot=", ppu.cycle_counter
+    let was = ppu.window_trigger
     ppu.window_trigger = true
-    if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
+    if gb.fifo_ppu != nil:
+      fifo_arm_window(gb.fifo_ppu)
+      when WIN_HEAD_LATE_DOT != 0:
+        # A match just past the head's window-line decision (WIN_HEAD_LATE_DOT).
+        if not was and (ppu.lcd_status and 3'u8) == 3'u8 and
+           ppu.cycle_counter <= int32(WIN_HEAD_LATE_DOT) + int32(ppu.scx and 7):
+          fifo_head_window_late(gb.fifo_ppu)
   when WIN_CHECK_TWO_SLOTS != 0:
     # A later sample queued behind this one (win_check_schedule).
     if gb.win_check_gap > 0:
