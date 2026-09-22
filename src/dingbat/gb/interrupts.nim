@@ -28,6 +28,15 @@ proc highest_priority*(irq: GbInterrupts): uint16 =
   elif irq.joypad_interrupt   and irq.joypad_enabled:   INT_JOYPAD
   else: INT_NONE
 
+proc highest_priority_ie*(irq: GbInterrupts; ie: uint8): uint16 =
+  ## highest_priority against an IE value captured earlier.
+  if irq.vblank_interrupt and (ie and 0x01'u8) != 0:   INT_VBLANK
+  elif irq.lcd_stat_interrupt and (ie and 0x02'u8) != 0: INT_STAT
+  elif irq.timer_interrupt and (ie and 0x04'u8) != 0:    INT_TIMER
+  elif irq.serial_interrupt and (ie and 0x08'u8) != 0:   INT_SERIAL
+  elif irq.joypad_interrupt and (ie and 0x10'u8) != 0:   INT_JOYPAD
+  else: INT_NONE
+
 proc clear_interrupt*(irq: GbInterrupts; line: uint16) =
   case line
   of INT_VBLANK: irq.vblank_interrupt    = false

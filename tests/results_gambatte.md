@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-22 14:25:36*
+*Generated: 2026-09-22 14:31:43*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5070/5216 passed.**
+**5078/5216 passed.**
 
 ## bgen
 
@@ -94,20 +94,9 @@ All 8 tests passed.
 
 All 158 tests passed.
 
-## irq_precedence (56/64 passed)
+## irq_precedence
 
-56/64 tests passed, 8 failed:
-
-| Test | Result |
-|------|--------|
-| irq_precedence/late_m0irq_vs_tima_scx2_1_dmg08_cgb04c_out4 [dmg] | got 2, expected 4 |
-| irq_precedence/late_m0irq_vs_tima_scx2_1_dmg08_cgb04c_out4 [cgb] | got 2, expected 4 |
-| irq_precedence/late_m0irq_vs_tima_scx2_halt_1_dmg08_cgb04c_out4 [dmg] | got 2, expected 4 |
-| irq_precedence/late_m0irq_vs_tima_scx2_halt_1_dmg08_cgb04c_out4 [cgb] | got 2, expected 4 |
-| irq_precedence/late_m0irq_vs_tima_scx3_1_dmg08_cgb04c_out4 [dmg] | got 2, expected 4 |
-| irq_precedence/late_m0irq_vs_tima_scx3_1_dmg08_cgb04c_out4 [cgb] | got 2, expected 4 |
-| irq_precedence/late_m0irq_vs_tima_scx3_halt_1_dmg08_cgb04c_out4 [dmg] | got 2, expected 4 |
-| irq_precedence/late_m0irq_vs_tima_scx3_halt_1_dmg08_cgb04c_out4 [cgb] | got 2, expected 4 |
+All 64 tests passed.
 
 ## lcd_offset (57/62 passed)
 

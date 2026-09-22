@@ -270,16 +270,10 @@ mechanism rows, not phase rows.
 
 ### A4. Mode-0 STAT interrupt against a timer interrupt
 
-**Rows (8).** `irq_precedence/late_m0irq_vs_tima_scx{2,3}{,_halt}_1`, both
-devices: hardware takes the timer (`out4`), dingbat the STAT (`out2`).
-
-**Behaviour.** Priority is by IF bit order when both are pending at the
-dispatch (Pan Docs, "Interrupt Handling"); the row therefore measures which
-source rose first, at SCX 2 and 3 only — the mode-0 edge's position inside
-the M-cycle. `TIMER_IRQ_RUN_LEAD = 1` (gb.nim) puts a TIMA overflow at a
-running CPU's dispatch one M-cycle ahead of its IF bit; `STAT_M0_LEAD_T = 2`
-is the mode-0 side. The SCX dependence says it is the same sub-M-cycle
-mode-0 residual as A1/A5, seen through the priority resolver.
+Closed 2026-09-22: the dispatch chooses its vector 16 T in, after the high
+push (`IRQ_VECTOR_T`), so a mode-0 request rising in the dispatch's fourth
+M-cycle beats the timer request that started it
+(`irq_precedence/late_m0irq_vs_tima_*`, both devices).
 
 ### A5. Halt-woken readers of the mode-0 edge
 

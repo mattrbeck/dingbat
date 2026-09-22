@@ -206,6 +206,16 @@ when HDMA_EDGE_BEATS_DISPATCH != 0:
        fetcher_retired(gb.fifo_ppu) and gb.fifo_ppu.m3_hold == 0:
       ppu_step_hdma(gb.ppu, gb)
 
+const IRQ_VECTOR_T* {.intdefine.} = 16
+  ## T-cycles into the dispatch at which the vector is chosen: after the high
+  ## push, inside the fifth M-cycle's lead-in (gambatte-core picks it at the
+  ## low push's cycle, 16 in), so a request rising in the dispatch's fourth
+  ## M-cycle still wins on priority. IE is the value the high push left, and
+  ## a low push aimed at IF decides ahead of its own byte. gambatte
+  ## `irq_precedence/late_m0irq_vs_tima_scx{2,3}{,_halt}_1` (both devices: the
+  ## mode-0 request rises 16 T in, beats the timer, and the handler reads the
+  ## timer bit still set); 14 and 18 lose four, 4 (the old choice after the
+  ## high push) takes none of them.
 const IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD* {.intdefine.} = 2
   ## T-cycles past IRQ_SAMPLE_T at which a CGB dispatch clears a TIMER or
   ## SERIAL request: those two lines are acknowledged later than the LCD
@@ -250,21 +260,33 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
   # Which line is taken is decided between the two push bytes, not at the
   # clear below: gambatte irq_precedence/if_and_ie_0_vector pushes over $FFFF
   # and vectors to $0000 from SP = $0000 (new IE seen) but $0050 from $0001.
-  let interrupt = highest_priority(gb.interrupts)
+  when IRQ_VECTOR_T <= 4 + IRQ_PUSH_T:
+    let interrupt = highest_priority(gb.interrupts)
+  else:
+    # The vector is chosen IRQ_VECTOR_T into the dispatch, against the IE the
+    # high push left (the low push's own byte is not seen). A low push onto
+    # IF itself decides here, ahead of its byte (irq_precedence/
+    # if_and_ie_0_vector_4).
+    let ie_hi = irq_read(gb.interrupts, 0xFFFF)
+    let early = (cpu.sp - 1) == 0xFF0F'u16
+    let early_irq = if early: highest_priority(gb.interrupts) else: INT_NONE
   cpu.sp = cpu.sp - 1
   oam_bug_if(gb, cpu.sp, obWrite)
   mem_write(gb.memory, gb, int(cpu.sp), uint8(cpu.pc and 0xFF))
+  var elapsed = 8 + IRQ_PUSH_T
+  when IRQ_VECTOR_T > 4 + IRQ_PUSH_T:
+    if IRQ_VECTOR_T > elapsed:
+      mem_tick_components(gb.memory, gb, IRQ_VECTOR_T - elapsed)
+      elapsed = IRQ_VECTOR_T
+    let interrupt = if early: early_irq
+                    else: highest_priority_ie(gb.interrupts, ie_hi)
   cpu.pc = interrupt
-  # Run out to the sample point before clearing IF (IRQ_SAMPLE_T); the two
-  # writes above have charged 8 of it. One call, not one per M-cycle.
-  when IRQ_SAMPLE_T_DS == IRQ_SAMPLE_T:
-    when IRQ_SAMPLE_T > 8 + IRQ_PUSH_T:
-      mem_tick_components(gb.memory, gb, IRQ_SAMPLE_T - 8 - IRQ_PUSH_T)
-  else:
-    let sample_t =
-      if gb.memory.current_speed == 1: IRQ_SAMPLE_T_DS else: IRQ_SAMPLE_T
-    if sample_t > 8 + IRQ_PUSH_T:
-      mem_tick_components(gb.memory, gb, sample_t - 8 - IRQ_PUSH_T)
+  # Run out to the sample point before clearing IF (IRQ_SAMPLE_T). One call,
+  # not one per M-cycle.
+  let sample_t =
+    if gb.memory.current_speed == 1: IRQ_SAMPLE_T_DS else: IRQ_SAMPLE_T
+  if sample_t > elapsed:
+    mem_tick_components(gb.memory, gb, sample_t - elapsed)
   when IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD != 0:
     if gb.cgb_enabled and (interrupt == INT_TIMER or interrupt == INT_SERIAL):
       mem_tick_components(gb.memory, gb, IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD)
