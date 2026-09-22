@@ -1369,6 +1369,12 @@ when CGB_LYC_WRITE_RULE != 0 or DMG_LYC_WRITE_RULE != 0:
     int(data) == cly
 
 const LYC_DROP_LATENCY_DMG* {.intdefine.} = 1
+const LYC_DROP_LATENCY_CGB_DS* {.intdefine.} = 2
+  ## The same at double speed, in dots (-1 = LYC_DROP_LATENCY_CGB halved, 3).
+  ## The double-speed byte is applied at the write, not deferred a boundary,
+  ## so the halved single-speed figure carries a defer it does not have. 2 is
+  ## two-sided: 3 loses `m0enable/lycdisable_ff45_scx1_ds_1`, 1 `m2enable/
+  ## lyc1_m2irq_late_lyc255_ds_2`.
 const LYC_DROP_LATENCY_CGB* {.intdefine.} = 6
   ## Dots after an LYC write's commit at which a broken match lets the STAT
   ## line fall (stat_drop_arm), per device. The STAT write's own latency is
@@ -2592,7 +2598,9 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
           if trig: gb.interrupts.lcd_stat_interrupt = true
           if LYC_DROP_BOUNDARY_SKIP == 0 or
              ppu.cycle_counter + 2'i32 < ppu.gb_line_end:
-            stat_drop_arm(ppu, gb, ppu.lcd_status, val, int32(LYC_DROP_LATENCY_CGB))
+            stat_drop_arm(ppu, gb, ppu.lcd_status, val,
+                          (if LYC_DROP_LATENCY_CGB_DS >= 0: int32(LYC_DROP_LATENCY_CGB_DS) shl 1
+                           else: int32(LYC_DROP_LATENCY_CGB)))
         return
     when DMG_LYC_WRITE_RULE != 0:
       # DMG: the same rule; the request goes up at the write.
