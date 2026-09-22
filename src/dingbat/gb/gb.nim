@@ -783,6 +783,16 @@ const WIN_LINE0_CHECK_DOT_CGB* {.intdefine.} = 3
 const WIN_LINE0_CHECK_DOT_CGB_DS* {.intdefine.} = 4
   ## The same in double speed, in dots: 4 is two-sided (3 loses
   ## `late_wy_ds_1`, 5 `late_wy_ds_lcdoffset1_2`).
+const WIN_NEXT_LINE_CHECK*    {.intdefine.} = 1
+  ## The window's next-line check (LY + 1 == WY latches it for the frame)
+  ## also runs at dot 454 of lines 0..142, with the LYC comparator's lead,
+  ## where gambatte-core runs it, besides the boundary's. A CGB WY write in
+  ## the line's last M-cycle is not yet visible there, so the window still
+  ## starts: gambatte `window/arg/late_wy_{1,2}toFF_2` [cgb].
+const WIN_NEXT_LINE_WY_SEEN*  {.intdefine.} = 2
+  ## Dots after its commit from which that check reads a CGB WY store still in
+  ## the pipeline (CGB_WY_LATENCY lands it later): two-sided, 1 takes neither
+  ## row above, 3 loses `late_wy_1toFF_lcdoffset1_1`.
 const WIN_CHECK_TWO_SLOTS*    {.intdefine.} = 1
   ## A WY write's deferred check (WIN_CHECK_DEFER_CGB) no longer replaces
   ## line 0's own check pending ahead of it: that check still runs, against
@@ -2393,6 +2403,9 @@ type
     lyc_rule_trig*:    bool
     lyc_rule_fire*:    bool
     win_check_gap*:    int32   # WIN_CHECK_TWO_SLOTS: a second sample, dots after the first
+    wy_inflight*:      bool    # WIN_NEXT_LINE_CHECK: a CGB WY store not yet landed
+    wy_inflight_val*:  uint8
+    wy_inflight_dot*:  int32
     lyc_hold_on*:      bool    # CGB_LYC_EVENT_HOLD_DS: a new LYC waits out the event
     lyc_hold_new*:     uint8
     lyc_hold_ly*:      uint8

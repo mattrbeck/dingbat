@@ -1999,6 +1999,18 @@ when STAT_IRQ_SPLIT:
     ## The comparator's LY steps to the next line lyc_lead_dots before the
     ## readable LY does (the boundary's catch-up keeps the two equal
     ## everywhere else). Line 153's snap to 0 is its own machinery.
+    when WIN_NEXT_LINE_CHECK != 0:
+      # The window's next-line WY check runs here too, on the WY this dot
+      # holds (WIN_NEXT_LINE_CHECK).
+      # A CGB WY store committed two or more dots ago is already the value
+      # this check reads, though its pipeline landing is later.
+      let wy = if gb.wy_inflight and
+                  ppu.cycle_counter - gb.wy_inflight_dot >= int32(WIN_NEXT_LINE_WY_SEEN):
+                 gb.wy_inflight_val
+               else: ppu.wy
+      if ppu.ly < 143'u8 and window_enabled(ppu) and wy == ppu.ly + 1 and
+         (ppu.lcd_status and 3'u8) == 0'u8:
+        ppu.window_trigger = true
     ppu.irq_ly = ppu.ly + 1
     if int(ppu.irq_ly) == GB_HEIGHT:
       # Entering vblank: the mode-1 source and the vblank request come up

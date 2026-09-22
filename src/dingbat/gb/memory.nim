@@ -241,6 +241,12 @@ when CGB_WRITE_LATENCY_ANY:
     let reg = int(mem.pipe_reg)
     let val = mem.pipe_val
     mem.pipe_reg = 0
+    when WIN_NEXT_LINE_CHECK != 0:
+      # A WY store still in flight, for the next-line check (fifo_lyc_ly_lead).
+      if reg == 0xFF4A:
+        gb.wy_inflight = true
+        gb.wy_inflight_val = val
+        gb.wy_inflight_dot = gb.ppu.cycle_counter
     # 4 dots per M-cycle, 2 in double speed. A latency past the M-cycle's end
     # saturates at `cap` (CGB_LATENCY_CAP).
     let mdots = 4 shr mem.current_speed
@@ -264,6 +270,7 @@ when CGB_WRITE_LATENCY_ANY:
     of 0xFF4A:
       run(CGB_WY_LATENCY)
       ppu_store_wy(gb.ppu, gb, val)
+      when WIN_NEXT_LINE_CHECK != 0: gb.wy_inflight = false
       run(CGB_WY_LATCH_LATENCY - int(mem.current_speed))
       ppu_latch_wy(gb.ppu, gb, val)
     of 0xFF4B:
