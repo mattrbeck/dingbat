@@ -773,12 +773,21 @@ const WIN_CHECK_DEFER_DMG*    {.intdefine.} = 1
   ## `window/arg/late_enable_afterVblank_5`, `late_wy_FFto2_ly2_scx3_3`,
   ## `late_enable_afterVblank_3` [dmg]; 0 takes none, 2 loses 11
   ## (`late_wy_FFto2_ly2_*_2`, `late_wy_10to1_ly1_2`, ...).
-const WIN_LINE0_CHECK_DOT_CGB* {.intdefine.} = 4
+const WIN_LINE0_CHECK_DOT_CGB* {.intdefine.} = 3
   ## Dot of line 0 at which a CGB runs the per-line WY == LY check, instead of
-  ## the mode-2 entry at the boundary (lines 1..143 keep the boundary). Pinned
-  ## by window/late_wy_{1,2} against late_wy_lcdoffset1_{1,2}: a WY write
-  ## committed in the boundary M-cycle (453, landing 456) must be seen, one
-  ## committed on dot 1 (landing 4) must not. 0 = boundary.
+  ## the mode-2 entry at the boundary (lines 1..143 keep the boundary). A WY
+  ## write committed in the boundary M-cycle (453) must be seen, one on dot 1
+  ## must not (window/late_wy_{1,2}, late_wy_lcdoffset1_{1,2}). With
+  ## WIN_CHECK_TWO_SLOTS: 3 is two-sided (2 loses `late_wy_lcdoffset1_1`, 4
+  ## `late_wy_2` and `arg/late_wy_2`). 0 = boundary.
+const WIN_LINE0_CHECK_DOT_CGB_DS* {.intdefine.} = 4
+  ## The same in double speed, in dots: 4 is two-sided (3 loses
+  ## `late_wy_ds_1`, 5 `late_wy_ds_lcdoffset1_2`).
+const WIN_CHECK_TWO_SLOTS*    {.intdefine.} = 1
+  ## A WY write's deferred check (WIN_CHECK_DEFER_CGB) no longer replaces
+  ## line 0's own check pending ahead of it: that check still runs, against
+  ## the WY it sees, and the write's is queued behind it. Needed by the
+  ## line-0 dots above; 0 loses `late_wy_2` again.
 const STAT_M2_ENABLE_WINDOW_CGB* {.booldefine.} = true
   ## A CGB STAT write in the last M-cycle of a rendered line that newly sets
   ## the OAM enable (with mode 0 off) requests the interrupt at once, unless
@@ -2383,6 +2392,7 @@ type
     lyc_rule_on*:      bool
     lyc_rule_trig*:    bool
     lyc_rule_fire*:    bool
+    win_check_gap*:    int32   # WIN_CHECK_TWO_SLOTS: a second sample, dots after the first
     lyc_hold_on*:      bool    # CGB_LYC_EVENT_HOLD_DS: a new LYC waits out the event
     lyc_hold_new*:     uint8
     lyc_hold_ly*:      uint8

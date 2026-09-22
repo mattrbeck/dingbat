@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-22 15:01:57*
+*Generated: 2026-09-22 15:12:43*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5098/5216 passed.**
+**5102/5216 passed.**
 
 ## bgen
 
@@ -357,25 +357,21 @@ All 20 tests passed.
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [dmg] | got 0, expected 3 |
 | vramw_m3end/vramw_m3end_scx3_5_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 
-## window (458/476 passed)
+## window (462/476 passed)
 
-458/476 tests passed, 18 failed:
+462/476 tests passed, 14 failed:
 
 | Test | Result |
 |------|--------|
 | window/arg/late_scx_late_wy_FFto4_ly4_wx00_1_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/arg/late_scx_late_wy_FFto4_ly4_wx00_2_dmg08_out3_cgb04c_out0 [dmg] | got 0, expected 3 |
 | window/arg/late_wy_1toFF_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/arg/late_wy_2_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/arg/late_wy_2toFF_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/arg/late_wy_FFto2_ly2_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_disable_scx5_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_enable_ly0_ds_1_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/late_reenable_scx3_2_dmg08_out3_cgb04c_out0 [cgb] | got 3, expected 0 |
 | window/late_wx_scx3_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/late_wy_2_dmg08_cgb04c_out3 [cgb] | got 0, expected 3 |
-| window/late_wy_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
-| window/late_wy_lcdoffset1_2_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wxA6_spxA7_m0irq_2_dmg08_cgb04c_out2 [cgb] | got 0, expected 2 |
 | window/m2int_wxA6_spxA7_m3stat_2_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |
 | window/m2int_wxA6_spxA7_m3stat_4_dmg08_out0_cgb04c_out3 [cgb] | got 0, expected 3 |

@@ -1744,7 +1744,9 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   elif mode == 2 and WIN_LINE0_CHECK_DOT_CGB != 0 and ppu.ly == 0'u8 and
        gb.cgb_enabled and gb.fifo_ppu != nil:
     # Line 0's check runs WIN_LINE0_CHECK_DOT_CGB dots in (gb.nim).
-    ppu.win_check_dot = int32(WIN_LINE0_CHECK_DOT_CGB) shr gb.memory.current_speed
+    ppu.win_check_dot =
+      if gb.memory.current_speed != 0'u8: int32(WIN_LINE0_CHECK_DOT_CGB_DS)
+      else: int32(WIN_LINE0_CHECK_DOT_CGB)
   elif mode == 2 and ppu.ly == ppu.wy and window_enabled(ppu):
     when defined(gb_win_trace):
       echo "WYLATCH ly=", ppu.ly, " wy=", ppu.wy, " dot=", ppu.cycle_counter
@@ -2068,11 +2070,23 @@ proc win_check_now*(ppu: GbPpu; gb: GB) =
       echo "WYCHECK ly=", ppu.ly, " cmp=", cmp_ly, " wy=", ppu.wy, " dot=", ppu.cycle_counter
     ppu.window_trigger = true
     if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
+  when WIN_CHECK_TWO_SLOTS != 0:
+    # A later sample queued behind this one (win_check_schedule).
+    if gb.win_check_gap > 0:
+      ppu.win_check_dot = ppu.cycle_counter + gb.win_check_gap
+      gb.win_check_gap = 0
 
 proc win_check_schedule*(ppu: GbPpu; gb: GB; dots: int32) {.inline.} =
   ## Sample the comparator `dots` from now (may fall on the next line; the
-  ## boundary rebases it). A later schedule replaces an earlier one.
-  ppu.win_check_dot = ppu.cycle_counter + dots
+  ## boundary rebases it). With WIN_CHECK_TWO_SLOTS an earlier pending sample
+  ## (line 0's own check) is kept and this one queued behind it; otherwise a
+  ## later schedule replaces an earlier one.
+  let at = ppu.cycle_counter + dots
+  when WIN_CHECK_TWO_SLOTS != 0:
+    if ppu.win_check_dot >= ppu.cycle_counter and ppu.win_check_dot < at:
+      gb.win_check_gap = at - ppu.win_check_dot
+      return
+  ppu.win_check_dot = at
 
 proc ppu_store_wy*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   ppu.wy = val
