@@ -175,6 +175,31 @@ const CGB_STAT_WRITE_RULE* {.intdefine.} = 1
   ## `m1/ly143_late_m2enable_ds_lcdoffset1_1` (the double-speed line-144
   ## pulse's phase, A1). Supersedes STAT_M2_ENABLE_WINDOW_CGB. 0 = the level
   ## model's edge.
+const CGB_LYC_WRITE_RULE* {.intdefine.} = 1
+  ## The same for a CGB LYC write (cgb_lyc_write_trigger, ppu.nim;
+  ## gambatte-core's lycRegChangeTriggersStatIrq read as the timing): an
+  ## unchanged value does nothing; a write requests the interrupt if the new
+  ## value equals the comparator's LY, stepped to the next line within 6
+  ## cycles (10 double speed) of it unless the old value already matched
+  ## there, and not while a mode-0 or mode-1 source holds the line. The line
+  ## rises to the new level without an edge; a fall stays stat_drop_arm's.
+  ## +10 on the hunt list with the two below, nothing lost: `lycEnable/
+  ## late_ff45_enable_ds_{2,lcdoffset1_2}`, `ff45_enable_weirdpoint_ds_*`,
+  ## `lyc153_late_ff45_enable_lcdoffset1_1`, `lycwirq_trigger_ly00_stat50_
+  ## ds_lcdoffset1_2`, `miscmstatirq/lycwirq_trigger_m0_late_ly44_lyc45_ds_3`.
+const CGB_LYC_RULE_FIRE_T* {.intdefine.} = 4
+  ## Scheduler cycles after the byte lands (single speed) at which the rule's
+  ## request goes up: after that boundary's interrupt check, before the next
+  ## (gambatte `lycEnable/lyc_ff45_trigger_delay_{2,3}`; 6 loses both, 0
+  ## dispatches an M-cycle early). Double speed requests at the write.
+const CGB_LYC_WRITE_RULE_DS* {.intdefine.} = 1
+  ## The rule in double speed too; 0 keeps the old path there (+1 instead of
+  ## +10).
+const CGB_LYC_EVENT_HOLD_DS* {.intdefine.} = 4
+  ## Double speed: a write of the NEXT line's LY within this many dots of the
+  ## line end is too late for that line's comparator event, which still
+  ## compares the old value; the new one lands after it without an edge.
+  ## Two-sided: 3 loses one of the rule's rows, 5 three (`_ds_1` members).
 const CGB_STAT_RULE_OR* {.intdefine.} = 1
   ## Inside the write's latency a source sees the old OR the new enables
   ## (the mode-0 request fires for either); 0 (old only) loses seven.
@@ -2320,6 +2345,14 @@ type
     m2_ly0_up*:        bool
     # DMG_HALT_MIN_MCYCLES: the scheduler cycle the CPU halted on. Scratch.
     halt_start*:       CycleCount
+    # CGB_LYC_WRITE_RULE: a CGB LYC write's byte is in flight, and whether it
+    # requests the interrupt. Live one M-cycle; not serialized.
+    lyc_rule_on*:      bool
+    lyc_rule_trig*:    bool
+    lyc_rule_fire*:    bool
+    lyc_hold_on*:      bool    # CGB_LYC_EVENT_HOLD_DS: a new LYC waits out the event
+    lyc_hold_new*:     uint8
+    lyc_hold_ly*:      uint8
     when defined(test_harness):
       test_output*:  TestOutput
 
@@ -3251,7 +3284,14 @@ proc gb_dispatch(gb: GB): proc(kind: EventType) {.closure.} =
       # A CGB LYC write's STAT edge, one M-cycle past the boundary its byte
       # landed on (CGB_LYC_EDGE_DEFER).
       when CGB_LYC_EDGE_DEFER and not CGB_LYC_EDGE_POLL:
-        ppu_handle_stat_interrupt(gb.ppu, gb)
+        when CGB_LYC_WRITE_RULE != 0:
+          # Booked by the rule for a write that requests the interrupt.
+          if gb.lyc_rule_fire:
+            gb.lyc_rule_fire = false
+            gb.interrupts.lcd_stat_interrupt = true
+          else: ppu_handle_stat_interrupt(gb.ppu, gb)
+        else:
+          ppu_handle_stat_interrupt(gb.ppu, gb)
     else: discard
 
 proc post_init*(gb: GB) =

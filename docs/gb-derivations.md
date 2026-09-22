@@ -535,6 +535,17 @@ grid's constants are a coupled set and move together or not at all.
   `disable_by_m1enable_ly0_1` [cgb]; the rule is gambatte-core's
   statChangeTriggersStatIrqCgb read as a statement of the timing.
 - Site: `CGB_STAT_WRITE_RULE`, `cgb_stat_write_trigger` (ppu.nim).
+- The LYC write is the same kind of rule: an unchanged value does nothing; a
+  new value requests the interrupt if it equals the comparator's LY (the
+  next line's within 6 cycles, 10 in double speed, of the step, unless the
+  old value already matched there), not while a mode-0 or mode-1 source
+  holds the line; single speed requests it one M-cycle after the byte lands.
+  In double speed a write of the next line's LY in the line's last 4 dots is
+  too late for that line's comparator event. Evidence: gambatte
+  `lycEnable/late_ff45_enable_ds_*`, `ff45_enable_weirdpoint_ds_*`,
+  `lyc_ff45_trigger_delay_{2,3}`, `ff45_reenable_3` (same value), `ff45_
+  disable_ds_1` (a disabling write is not held). Site: `CGB_LYC_WRITE_RULE`,
+  `CGB_LYC_EVENT_HOLD_DS`.
 
 ### An IF write lands one dot into its M-cycle
 - Claim: a request raised in the first dot of the M-cycle that writes IF is

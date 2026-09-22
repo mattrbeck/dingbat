@@ -1274,6 +1274,44 @@ when CGB_STAT_WRITE_RULE != 0:
     if ly == 153: return ttnl <= 2 * (1 + dsi) and ttnl > 2
     false
 
+when CGB_LYC_WRITE_RULE != 0:
+  proc cgb_lyc_write_trigger(ppu: GbPpu; gb: GB; old, data: uint8): bool {.noinline.} =
+    ## CGB_LYC_WRITE_RULE: does a CGB LYC write request the interrupt itself?
+    ## Against the time left to the next LY increment, as the STAT rule.
+    if data == old or (ppu.lcd_status and 0x40'u8) == 0'u8 or int(data) >= 154:
+      return false
+    let dsi = int(gb.memory.current_speed)
+    let line = 456 shl dsi
+    var lc = int(ppu.cycle_counter) -
+             (if dsi != 0: CGB_STAT_RULE_OFF_DS else: CGB_STAT_RULE_OFF)
+    var ly = int(ppu.ly)
+    if lc < 0:
+      lc += 456
+      ly = (if ly == 0: 153 else: ly - 1)
+    if ly == 0 and (ppu.lcd_status and 3'u8) == 1'u8: ly = 153
+    let ttnl = (456 - lc) shl dsi
+    # Blocked by a mode-0 or mode-1 source already holding the line.
+    if ly < 144:
+      if (ppu.lcd_status and 0x08'u8) != 0'u8 and (ppu.lcd_status and 3'u8) == 0'u8 and
+         int(data) == ly: return false
+    else:
+      if (ppu.lcd_status and 0x10'u8) != 0'u8 and
+         not (ly == 153 and ttnl <= 2 + 2 * dsi + 2): return false
+    var cly = ly
+    var cttnl = ttnl
+    if ly == 153:
+      cttnl -= line - 6 - 6 * dsi
+      if cttnl <= 0: cly = 0; cttnl += line
+    else:
+      cttnl -= 2 + 2 * dsi
+      if cttnl <= 0: cly = ly + 1; cttnl += line
+    if cttnl <= 4 + 4 * dsi + 2:
+      # A write that meets LY and LYC stepping together never sees the line
+      # low: no edge.
+      if int(old) == cly and cttnl > 2: return false
+      cly = (if cly == 153: 0 else: cly + 1)
+    int(data) == cly
+
 const LYC_DROP_LATENCY_DMG* {.intdefine.} = 1
 const LYC_DROP_LATENCY_CGB* {.intdefine.} = 6
   ## Dots after an LYC write's commit at which a broken match lets the STAT
@@ -1358,6 +1396,12 @@ proc ppu_handle_stat_interrupt*(ppu: GbPpu; gb: GB) =
   # no STAT interrupt fires (mooneye stat_lyc_onoff).
   if not ppu.lcd_enabled:
     return
+  when CGB_LYC_EVENT_HOLD_DS > 0:
+    if unlikely(gb.lyc_hold_on) and ppu.ly != gb.lyc_hold_ly and ppu.cycle_counter >= 1:
+      # The held LYC write lands past the event (CGB_LYC_EVENT_HOLD_DS).
+      gb.lyc_hold_on = false
+      ppu.lyc = gb.lyc_hold_new
+      ppu.old_stat_flag = stat_level_with(ppu, gb, ppu.stat_enables_now(gb), ppu.lyc)
   if ppu.stat_drop_pending: stat_drop_settle(ppu, gb)
   # The comparator is blind for the M-cycle the LY 153 -> 0 snapback falls in,
   # on both sides of the comparison (lyc_settling). Blind, not held: holding
@@ -1931,6 +1975,20 @@ proc ppu_write_machinery*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     # CGB only, reachable only with CGB_LYC_WRITE_DEFER. With CGB_LYC_EDGE_DEFER
     # the STAT edge is one M-cycle further on again, booked as a scheduler
     # event rather than a per-M-cycle poll (CGB_LYC_EDGE_SCHED_T, gb.nim).
+    when CGB_LYC_WRITE_RULE != 0:
+      if gb.lyc_rule_on:
+        gb.lyc_rule_on = false
+        ppu.lyc = val
+        # Up without an edge; a fall is stat_drop_arm's. The rule's request
+        # arrives one M-cycle on, on CGB_LYC_EDGE_DEFER's one-shot.
+        if stat_level_with(ppu, gb, ppu.lcd_status, val): ppu.old_stat_flag = true
+        if gb.lyc_rule_trig:
+          when CGB_LYC_EDGE_DEFER and not CGB_LYC_EDGE_POLL:
+            gb.lyc_rule_fire = true
+            gb.scheduler.schedule(CGB_LYC_RULE_FIRE_T, etGbLycEdge)
+          else:
+            gb.interrupts.lcd_stat_interrupt = true
+        return
     when CGB_LYC_WRITE_DEFER:
       ppu.lyc = val
       when CGB_LYC_EDGE_DEFER:
@@ -2386,6 +2444,41 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     # NOT deferred on a DMG: LYC is the comparator's other input and wilbertpol
     # acceptance/gpu/ly_lyc_write-GS wants the new value inside its own
     # M-cycle; only the STAT edge is held back. On CGB see CGB_LYC_WRITE_DEFER.
+    when CGB_LYC_WRITE_RULE != 0:
+      # CGB: the write's own interrupt by rule (CGB_LYC_WRITE_RULE); the line
+      # takes the new level without an edge where the byte lands.
+      if gb.cgb_enabled and ppu.lcd_enabled and gb.fifo_ppu != nil and
+         (CGB_LYC_WRITE_RULE_DS != 0 or gb.memory.current_speed == 0'u8):
+        let trig = cgb_lyc_write_trigger(ppu, gb, ppu.lyc, val)
+        if gb.memory.current_speed == 0'u8:
+          ppu_defer_machinery_write(ppu, gb, idx, val)
+          gb.lyc_rule_on = true
+          gb.lyc_rule_trig = trig
+          gb.memory.write_deferred = true
+          if LYC_DROP_BOUNDARY_SKIP == 0 or
+             ppu.cycle_counter + 4'i32 < ppu.gb_line_end:
+            stat_drop_arm(ppu, gb, ppu.lcd_status, val, int32(LYC_DROP_LATENCY_CGB))
+        else:
+          when CGB_LYC_EVENT_HOLD_DS > 0:
+            # Written this close to the next line's comparator event, the
+            # event still compares the OLD value; the new one is taken
+            # afterwards without an edge (released in ppu_handle_stat_interrupt).
+            # Only a value whose own event is that one (the next line's LY).
+            if ppu.cycle_counter >= ppu.gb_line_end - int32(CGB_LYC_EVENT_HOLD_DS) and
+               ppu.ly != 153'u8 and not (ppu.ly == 0'u8 and (ppu.lcd_status and 3'u8) == 1'u8) and
+               int(val) == int(ppu.ly) + 1:
+              gb.lyc_hold_on = true
+              gb.lyc_hold_new = val
+              gb.lyc_hold_ly = ppu.ly
+              if trig: gb.interrupts.lcd_stat_interrupt = true
+              return
+          ppu.lyc = val
+          if stat_level_with(ppu, gb, ppu.lcd_status, val): ppu.old_stat_flag = true
+          if trig: gb.interrupts.lcd_stat_interrupt = true
+          if LYC_DROP_BOUNDARY_SKIP == 0 or
+             ppu.cycle_counter + 2'i32 < ppu.gb_line_end:
+            stat_drop_arm(ppu, gb, ppu.lcd_status, val, int32(LYC_DROP_LATENCY_CGB))
+        return
     var edge_here = true
     when CGB_LYC_WRITE_DEFER:
       if gb.cgb_enabled and (CGB_LYC_WRITE_DEFER_DS or gb.memory.current_speed == 0):
