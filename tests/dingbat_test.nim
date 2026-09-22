@@ -1374,7 +1374,15 @@ proc gambatte_digit(t: array[8, uint8]): char =
       return "0123456789ABCDEF"[i]
   '?'
 
-proc gambatte_run(rom: string; cgb: bool; frames: int): GB =
+# gambatte's `_outaudio0/1` verdict (test/testrunner.cpp,
+# evaluateStrTestResults): after the run, "audio0" iff every one of the final
+# frame's 35,112 samples equals the first, "audio1" otherwise. Its sample
+# stream is the raw mix at 2 MHz (one sample per two T-cycles) with no output
+# filter, so the probe runs the mixer at that cadence (GbApu.probe_period = 2)
+# and compares the pre-DC-blocker mix.
+const GambatteAudioProbePeriod = 2
+
+proc gambatte_run(rom: string; cgb: bool; frames: int; audio = false): GB =
   result = new_gb("", rom, fifo = true, headless = true, run_bios = false,
                   force_cgb = cgb, force_dmg = not cgb)
   result.test_output = new_test_output()
@@ -1382,11 +1390,34 @@ proc gambatte_run(rom: string; cgb: bool; frames: int): GB =
   # Read-only fixtures in a shared cache dir: detach the battery file before
   # a frame runs, or it becomes the next run's power-on state.
   result.cartridge.sav_path = ""
-  for _ in 0 ..< frames: result.step_frame()
+  if not audio:
+    for _ in 0 ..< frames: result.step_frame()
+    return
+  # Audio rows: the probe cadence is engaged two frames early so the sample
+  # event is already on the 2 MHz grid, then the comparison window is one
+  # frame of samples starting `shift` T-cycles after the penultimate frame
+  # boundary (DINGBAT_GAM_AUDIO_SHIFT, default 0: exactly the final frame).
+  # The run continues one frame past the end so a positive shift is covered.
+  var shift = 0
+  try: shift = parseInt(getEnv("DINGBAT_GAM_AUDIO_SHIFT", "0"))
+  except ValueError: discard
+  const per_frame = 70224 div GambatteAudioProbePeriod
+  for _ in 0 ..< frames - 3: result.step_frame()
+  result.apu.probe_period = GambatteAudioProbePeriod
+  result.step_frame()
+  result.apu.probe_armed = false
+  result.apu.probe_constant = true
+  result.apu.probe_samples = 0
+  result.apu.probe_skip = per_frame + shift div GambatteAudioProbePeriod
+  result.apu.probe_limit = per_frame
+  result.step_frame()
+  result.step_frame()
+  if shift > 0: result.step_frame()
 
 proc gambatte_batch(list_path, out_path: string; frames, dump_tiles: int): int =
   ## Scores a list of gambatte tests in one process. Each line is
-  ## `<dmg|cgb>\t<hex|png>\t<expected>\t<rom path>`; one
+  ## `<dmg|cgb>\t<hex|png|audio>\t<expected>\t<rom path>` (audio: expected is
+  ## `0` = the final frame's mix is constant, `1` = it is not); one
   ## `GAM <index> <PASS|FAIL> <detail>` line comes back per input, in order.
   ##
   ## Verdicts go to `--out=<file>` when given: the runner does not drain shard
@@ -1417,7 +1448,7 @@ proc gambatte_batch(list_path, out_path: string; frames, dump_tiles: int): int =
     var ok = false
     var detail = ""
     try:
-      let emu = gambatte_run(rom, cgb, frames)
+      let emu = gambatte_run(rom, cgb, frames, audio = kind == "audio")
       let fb = emu.ppu.framebuffer
       # DINGBAT_GAM_DUMP=<dir> writes each scored frame as a PPM in the
       # comparison's colour space, to see WHERE a png row disagrees.
@@ -1464,6 +1495,14 @@ proc gambatte_batch(list_path, out_path: string; frames, dump_tiles: int): int =
           ok = diff == 0
           detail = if ok: "png match"
                    else: $diff & "/" & $(GB_WIDTH * GB_HEIGHT) & " pixels differ"
+      of "audio":
+        let constant = emu.apu.probe_constant
+        let got = if constant: "0" else: "1"
+        ok = got == expected
+        detail = "audio" & got & " (mix " &
+                 (if constant: "constant" else: "varies") & " over " &
+                 $emu.apu.probe_samples & " samples)" &
+                 (if ok: "" else: ", expected audio" & expected)
       else:
         detail = "unknown kind " & kind
     except CatchableError:

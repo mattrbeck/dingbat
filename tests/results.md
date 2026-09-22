@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-09-21 20:47:36 · commit ba16d426d · game-boy-test-roms v7.0*
+*Generated: 2026-09-21 21:38:20 · commit 7af426dff · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1254
-- **Pass:** 1227
-- **Fail:** 27
+- **Pass:** 1226
+- **Fail:** 28
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -29,7 +29,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - SameSuite APU | 70 | 70 |
 | Game Boy - Shootout ROMs | 15 | 15 |
 | Game Boy - Mooneye (wilbertpol) | 184 | 184 |
-| Game Boy - gambatte | 21 | 48 |
+| Game Boy - gambatte | 20 | 48 |
 
 ## Game Boy - Blargg (28/28)
 
@@ -101,7 +101,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 184 tests passed.**
 
-## Game Boy - gambatte (21/48)
+## Game Boy - gambatte (20/48)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -145,8 +145,8 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/scx_during_m3 | per-ROM | 👀 131/141 passed |
 | gambatte/scy | per-ROM | 👌 67/67 passed |
 | gambatte/serial | per-ROM | 👀 75/82 passed |
-| gambatte/sound | per-ROM | 👀 113/116 passed |
-| gambatte/speedchange | per-ROM | 👌 208/208 passed |
+| gambatte/sound | per-ROM | 👀 299/300 passed |
+| gambatte/speedchange | per-ROM | 👀 231/244 passed |
 | gambatte/sprites | per-ROM | 👀 472/476 passed |
 | gambatte/tima | per-ROM | 👀 224/232 passed |
 | gambatte/undef_ops | per-ROM | 👌 20/20 passed |
@@ -167,7 +167,7 @@ Everything skipped on purpose, with the reason and the builder that skips it. If
 - **mooneye/wilbertpol revision 0 inside a bare model token** — `-cgb` and `-dmg` fan out across the revisions dingbat models but deliberately stop short of revision 0, which the suite treats as its own machine and ships separate `-cgb0`/`-dmg0` ROMs for precisely because it diverges. Those separate ROMs ARE scored. (build_mooneye_tests)
 - **age `oam/oam-write-dmgC`** — the AGE emulator's own runner blacklists it (its test-blacklist.txt names this ROM, `_in-progress` and `speed-switch/caution`, nothing else of the suite), and the source marks the delay-2 line as depending on when the LCD was last switched off, changing when the test covers more frames; verified on one DMG-CPU-08 in 2021. Every other line of the ROM passes here; the CGB twin `oam-write-cgbBCE` is scored on B, C and E. (build_age_tests)
 - **gambatte `oamdma_src{FE00,FF00}_*read*` DMG rows (9)** — their verdict is a byte of uninitialised WRAM. That source fetches through the echo, so it reads $DE00/$DF00, and a colliding CPU read gets the DMA's latch rather than its own byte -- Pan Docs says WRAM is random on power-up and GB_POWERUP_WRAM_PATTERN honours that, so these encode gambatte's capture rig, not hardware. The non-colliding members of the same family (`busyread8000`, `busyreadFF4B`) and every CGB arm ARE scored. (build_gambatte_rows / gambatte_row_reads_powerup_wram)
-- **gambatte `_outaudio0/1` rows (220) + the AGB column** — gambatte's testrunner.cpp decides an `outaudio` row on whether the final frame's 35,112 mixed samples (2 MHz) are all equal to the first; this harness has no 2 MHz tap on the mixer, and its 32,768 Hz stream could read constant where the 2 MHz one is not. A runner gap, not a model claim. The AGB column: gambatte's runner marks it `FIXME: Actual AGB results` and feeds it the CGB expectations, so it asserts nothing about AGB. (build_gambatte_rows)
+- **gambatte's AGB column** — gambatte's runner marks it `FIXME: Actual AGB results` and feeds it the CGB expectations, so it asserts nothing about AGB. (build_gambatte_rows)
 - **gbmicrotest: 31 ROMs that never write the $FF82 verdict byte** — scanned all 513 bundled ROMs for `ldh ($82),a` / `ld ($ff82),a`; 482 contain one and these 31 contain neither, so the harness would be scoring uninitialised HRAM rather than a result. The upstream sources agree (none of the 31 .s files calls a test_finish macro) and GateBoy's own test list never runs them. All 31 were failing rows before the skip. The honest suite denominator is 482. (build_gbmicrotest_tests)
 - **gbmicrotest: 2 ROMs whose expected byte is unreachable** — `halt_op_dupe_delay` wants DIV = $55 about 62 M-cycles after resetting DIV, which needs a 5,440 M-cycle HALT its own HBlank-every-line setup rules out ($55 is the suite's scratch marker; its sibling `halt_op_dupe` is correctly written and passes). `stat_write_glitch_l154_d` is missing the `xor a ; ldh ($FF0F),a` its three siblings have, so it asserts IF = $E0 across a whole frame of LCD-on time it never cleared VBlank in -- restore that clear and it passes, strip it from `_c` at identical timing and `_c` produces `_d`'s byte. Both are ROM defects, not verdicts. The honest suite denominator is 480. (build_gbmicrotest_tests)
 - **scribbltests/fairylake, scribbltests/winpos** — ship no reference image: the bundle's howto says so and upstream has only animated GIFs; fairylake is a WIP demo and winpos is a joypad-driven WX/WY explorer. (build_small_screenshot_tests)

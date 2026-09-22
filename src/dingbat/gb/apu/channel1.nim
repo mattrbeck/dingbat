@@ -234,8 +234,9 @@ proc ch1_write*(ch: GbChannel1; idx: int; val: uint8; gb: GB) =
       if not was_enabled: ch.sample_bit = 0
       ch.next_step = gb_trigger_deadline(gb, ch1_period(ch, gb),
                                          if was_enabled: 1 else: 2)
-      init_volume_envelope(ch)
-      ch.sweep_timer      = if ch.sweep_period > 0: ch.sweep_period else: 8'u8
+      init_volume_envelope(ch, env_trigger_extra(gb))
+      ch.sweep_timer      = (if ch.sweep_period > 0: ch.sweep_period else: 8'u8) +
+                            sweep_trigger_extra(gb)
       ch.sweep_enabled    = ch.sweep_period > 0 or ch.shift > 0
       ch.negate_used      = false
       # A pending sweep stop does not survive the restart (only reachable when

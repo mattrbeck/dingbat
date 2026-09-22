@@ -53,6 +53,26 @@ proc mem_flush_deferred*(mem: GbMemory; gb: GB) =
     ppu_write_machinery(gb.ppu, gb, reg, v)
   ppu_flush_stat_write(gb.ppu, gb)
 
+const BOOT_FS_STAGE_DMG* {.intdefine.} = 1
+const BOOT_FS_STAGE_CGB* {.intdefine.} = 0
+  ## The frame sequencer's next step (0-7) at the boot hand-off: the boot ROM
+  ## powered the APU on at its start and the sequencer has been stepping since.
+  ## Per boot ROM. gambatte sound/ch2_init_env_counter_timing_{1..4} trigger
+  ## channel 2 at four spacings against the first envelope clock and want the
+  ## DMG's tick on 2, 3 and 4 and the CGB's on 4 only: every other stage loses
+  ## at least one of the 40 envelope rows on that device (DINGBAT_BOOT_FS_STAGE
+  ## sweep, the test build).
+
+const BOOT_CH1_PHASE_DMG_T* {.intdefine.} = 728
+const BOOT_CH1_PHASE_CGB_T* {.intdefine.} = 1612
+  ## T-cycles into channel 1's 2016-cycle duty cycle (frequency $7C1, duty 2)
+  ## at the boot hand-off, per boot ROM: the beep's second note is still
+  ## stepping (NR52 reads $F1). gambatte sound/ch1_init_pos_{1..8} retrigger
+  ## the channel at eight spacings and read which duty sample it froze on;
+  ## the sweep over all 504 values four cycles apart (DINGBAT_BOOT_CH1_PHASE,
+  ## the test build) passes all eight only at 728 [dmg] and 1612 [cgb], with
+  ## both neighbours losing two.
+
 proc skip_boot*(mem: GbMemory; gb: GB) =
   mem.bootrom = @[]
   # Post-boot register state (mooneye boot_hwio-*). NR52 first: sound-register
@@ -62,7 +82,37 @@ proc skip_boot*(mem: GbMemory; gb: GB) =
   mem.write_byte(gb, 0xFF10, 0x80)
   mem.write_byte(gb, 0xFF11, 0xBF)
   mem.write_byte(gb, 0xFF12, 0xF3)
+  # The beep's second note: NR13 = $C1 with NR14 = $87 (both boot ROMs), so
+  # the channel hands off stepping at frequency $7C1, one duty step every 252
+  # T-cycles. NR13 is write-only, so no hwio ROM sees this; gambatte
+  # sound/ch1_init_pos_* do (they retrigger without ever writing NR13).
+  mem.write_byte(gb, 0xFF13, 0xC1)
   mem.write_byte(gb, 0xFF14, 0xBF)
+  block:
+    # Where in its 8-step, 2016 T-cycle duty cycle the beep is at the
+    # hand-off: BOOT_CH1_PHASE_*_T T-cycles into it (position = phase div 252,
+    # next step 252 - phase mod 252 away). Per boot ROM: each runs a different
+    # length after its second note. Pinned by sound/ch1_init_pos_{1..8} on
+    # dmg08 and cgb04c.
+    var phase = (if gb.boot_model in {bmCgb0, bmCgbABCDE, bmAgb}:
+                   BOOT_CH1_PHASE_CGB_T else: BOOT_CH1_PHASE_DMG_T)
+    when defined(test_harness):
+      let env = getEnv("DINGBAT_BOOT_CH1_PHASE")
+      if env.len > 0: phase = parseInt(env)
+    let ch = gb.apu.channel1
+    const step = 252
+    phase = phase mod (8 * step)
+    ch.wave_duty_position = phase div step
+    ch.sample_bit = WAVE_DUTY1[ch.duty][ch.wave_duty_position]
+    ch.next_step = gb.scheduler.cycles + CycleCount(step - phase mod step)
+    # The sequencer's step at the hand-off (BOOT_FS_STAGE_*); post_init aims
+    # its next edge from the divider phase timer.skip_boot seeds.
+    var stage = (if gb.boot_model in {bmCgb0, bmCgbABCDE, bmAgb}:
+                   BOOT_FS_STAGE_CGB else: BOOT_FS_STAGE_DMG)
+    when defined(test_harness):
+      let env_stage = getEnv("DINGBAT_BOOT_FS_STAGE")
+      if env_stage.len > 0: stage = parseInt(env_stage)
+    gb.apu.frame_sequencer_stage = stage and 7
   mem.write_byte(gb, 0xFF16, 0x3F)
   mem.write_byte(gb, 0xFF17, 0x00)
   mem.write_byte(gb, 0xFF19, 0xBF)
@@ -806,6 +856,10 @@ proc mem_tick_stalled(mem: GbMemory; gb: GB; cycles: int;
   let ppu_cycles = (cycles shr mem.current_speed) + extra
   if gb.fifo_ppu != nil: fifo_tick(gb.fifo_ppu, gb, ppu_cycles)
   else: gb.ppu.tick(gb, ppu_cycles)
+  # The APU's share of the same oscillator restart (APU_SPSW_EXTRA_DOTS).
+  if first_chunk:
+    gb.apu.apu_stall_extra(gb, (if mem.current_speed == 1: APU_SPSW_EXTRA_DOTS
+                                else: APU_SPSW_EXTRA_DOTS_SINGLE))
   when CGB_LYC_EDGE_DEFER and CGB_LYC_EDGE_POLL:
     # As in mem_tick_ppu.
     if unlikely(mem.lyc_edge_owed):

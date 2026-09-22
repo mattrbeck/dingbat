@@ -31,6 +31,22 @@ proc gb_apu_edge*(gb: GB): CycleCount =
   let past = (now + tick - (gb.apu.tick_phase mod tick)) mod tick
   if past == 0: now else: now + (tick - past)
 
+const APU_TRIGGER_EDGE_BEFORE* {.intdefine.} = 0
+  ## 1: a square trigger counts its startup from the 1 MHz edge at or BEFORE
+  ## the write; 0: from the edge at or after it. Only distinguishable at double
+  ## speed, where a CPU write can land half a tick off the grid. The two
+  ## claims contradict on CPU CGB C: gambatte sound/ch1_duty0_pos6_to_pos7_
+  ## timing_ds_{5,6} want 1 (a first trigger one NOP later lands on the same
+  ## edge), SameSuite channel_{1,2}_align{,_cpu} and channel_1_freq_change_
+  ## timing-* (7 rows) want 0 and lose with 1. Ships 0; the two gambatte rows
+  ## are the residual (docs/gb-failure-triage.md H1).
+
+proc gb_apu_edge_before*(gb: GB): CycleCount =
+  ## The last edge of the APU's 1 MHz tick grid at or before the current cycle.
+  let tick = gb_apu_tick(gb)
+  let now  = gb.scheduler.cycles
+  now - ((now + tick - (gb.apu.tick_phase mod tick)) mod tick)
+
 proc gb_trigger_deadline*(gb: GB; period: CycleCount;
                           extra_ticks: int): CycleCount =
   ## Absolute cycle of a channel's first waveform step after a trigger: the
@@ -39,7 +55,9 @@ proc gb_trigger_deadline*(gb: GB; period: CycleCount;
   ## extra_ticks of startup delay -- 2 for a square that was off
   ## (channel_1_delay), 1 for a restart (channel_1_restart). The waveform
   ## position is untouched. Channel 4 has its own rule: gb_noise_deadline.
-  gb_apu_edge(gb) + period + CycleCount(extra_ticks) * gb_apu_tick(gb)
+  let edge = if APU_TRIGGER_EDGE_BEFORE != 0: gb_apu_edge_before(gb)
+             else: gb_apu_edge(gb)
+  edge + period + CycleCount(extra_ticks) * gb_apu_tick(gb)
 
 proc gb_noise_deadline*(gb: GB; period: CycleCount; divisor_code: uint8;
                         restarting: bool): CycleCount =
@@ -98,10 +116,58 @@ proc volume_step*(ch: GbVolumeEnvChannel) =
       else:
         ch.vol_env_is_updating = false
 
-proc init_volume_envelope*(ch: GbVolumeEnvChannel) =
-  ch.volume_envelope_timer = ch.period
+proc init_volume_envelope*(ch: GbVolumeEnvChannel; extra = 0) =
+  ## `extra`: envelope clocks added to the first period (env_trigger_extra).
+  ch.volume_envelope_timer = (if ch.period != 0: ch.period + uint8(extra)
+                              else: ch.period)
   ch.current_volume        = ch.starting_volume
   ch.vol_env_is_updating   = true
+
+# Forward declaration: timer.nim is included after the APU (gb.nim, which
+# already forward-declares apu_div_phase).
+proc apu_div_period*(gb: GB): int {.inline.}
+
+const ENV_TRIGGER_PRECLOCK_SKIP* {.intdefine.} = 1
+  ## 1: a trigger landing in the frame-sequencer step before the envelope
+  ## clock (step 6), taken 4 T-cycles early, does not get that clock: its
+  ## first envelope period is one clock longer. gambatte
+  ## sound/ch2_init_{,reset_}env_counter_timing_* (40 rows, both devices):
+  ## 0 loses `reset_` 11, 13, 14 [dmg] and 15 [cgb], which trigger inside
+  ## step 6 and expect the envelope still at volume 0 after the clock.
+const SWEEP_TRIGGER_LEAD_T_DMG* {.intdefine.} = 4
+const SWEEP_TRIGGER_LEAD_T_CGB* {.intdefine.} = 8
+  ## A trigger within this many T-cycles before a sweep clock (steps 2 and 6)
+  ## misses that clock: the sweep timer starts one clock later. gambatte
+  ## sound/ch1_init_reset_sweep_counter_timing_* (22 rows): 0 loses
+  ## timing_4 [dmg] and timing_10 [cgb], whose triggers sit one NOP before a
+  ## sweep clock and expect the channel still running (no overflow yet) when
+  ## the ROM turns the sweep off.
+
+proc fs_next_edge_in*(gb: GB): int =
+  ## Raw scheduler cycles until the frame sequencer's next step runs
+  ## (stage `gb.apu.frame_sequencer_stage`), including a pending skipped edge.
+  result = apu_div_phase(gb.timer, gb)
+  if gb.apu.div_skip: result += apu_div_period(gb)
+
+proc env_trigger_extra*(gb: GB): int =
+  ## Extra envelope clocks for a trigger now (ENV_TRIGGER_PRECLOCK_SKIP).
+  when ENV_TRIGGER_PRECLOCK_SKIP == 0:
+    0
+  else:
+    let d = fs_next_edge_in(gb)
+    let lead = 4 shl gb.scheduler.speed
+    let stage = gb.apu.frame_sequencer_stage
+    if (stage == 7 and d > lead) or (stage == 6 and d <= lead): 1 else: 0
+
+proc sweep_trigger_extra*(gb: GB): uint8 =
+  ## Extra sweep clocks for a trigger now (SWEEP_TRIGGER_LEAD_T_*).
+  let lead_t = (if gb.cgb_enabled: SWEEP_TRIGGER_LEAD_T_CGB
+                else: SWEEP_TRIGGER_LEAD_T_DMG)
+  if lead_t == 0: return 0
+  let d = fs_next_edge_in(gb)
+  let stage = gb.apu.frame_sequencer_stage
+  if (stage == 2 or stage == 6) and d <= (lead_t shl gb.scheduler.speed): 1
+  else: 0
 
 proc read_NRx2*(ch: GbVolumeEnvChannel): uint8 =
   (ch.starting_volume shl 4) or (if ch.envelope_add_mode: 0x08'u8 else: 0'u8) or ch.period

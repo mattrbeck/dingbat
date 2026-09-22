@@ -1,5 +1,14 @@
 # GB APU master (included by gb.nim)
 
+const APU_POWERON_TAP_LEAD* {.intdefine.} = 4
+  ## Divider counts ahead of an NR52 power-on write at which the DIV-APU tap
+  ## bit is sampled for the skipped first edge (GbApu.div_skip). gambatte
+  ## sound/ch2_init_reset_env_counter_timing_{5 [dmg], 7 [cgb]}: each family
+  ## powers the APU on at a different divider phase, and 0 ticks their
+  ## envelope one clock early on exactly those two; 4 lands all 32
+  ## `init_reset_env_counter_timing` rows and every SameSuite
+  ## div_write_trigger row.
+
 const APU_SPSW_TAP_LAG_T* {.intdefine.} = 4
   ## Divider counts added to every etAPUFrameSeq re-aim while
   ## GbApu.spsw_fs_lag is set: after an odd number of KEY1 switches into double
@@ -146,6 +155,41 @@ proc apu_rebase*(apu: GbApu; gb: GB; base: CycleCount) {.inline.} =
   apu.tick_phase = (apu.tick_phase + tick - (base mod tick)) mod tick
   apu.noise_phase = (apu.noise_phase + 2 * tick - (base mod (2 * tick))) mod (2 * tick)
 
+const APU_SPSW_EXTRA_DOTS* {.intdefine.} = 10
+const APU_SPSW_EXTRA_DOTS_SINGLE* {.intdefine.} = 7
+  ## T-cycles the APU's 4 MHz domain runs across the KEY1 stall beyond what
+  ## the CPU clock counts, for a switch ending in double / single speed (the
+  ## PPU's SPEED_SWITCH_PPU_EXTRA_DOTS = 8 / 3). Pinned by the single-switch
+  ## gambatte audio rows, which watch channel 1's duty pointer reach its
+  ## seventh step against a retrigger one NOP apart: to double,
+  ## speedchange_ch1_duty0_pos6_to_pos7_timing_{1,2} and _nop_{1,2} say 8 is
+  ## late and 12 early; to single (the `_ds_` members, which switch up before
+  ## the trigger and down after it), 5 is late and 9 early. The two-, three-
+  ## and five-switch ladders are NOT additive in these (docs/gb-failure-
+  ## triage.md H2), so the multi-switch rows stay red.
+
+proc apu_stall_extra*(apu: GbApu; gb: GB; dots: int) =
+  ## Advance every channel deadline by `dots` T-cycles of real time: the
+  ## deadlines are in cycles of the CPU clock, so pull them in by dots shl
+  ## speed. Called once per stall after the scheduler ticked (mem_tick_stalled).
+  if dots == 0: return
+  apu_catchup_all(apu, gb)
+  let d = CycleCount(dots) shl gb.scheduler.speed
+  template pull(x: untyped) =
+    if x != GB_NO_STEP and x >= d: x -= d
+  pull(apu.channel1.next_step)
+  pull(apu.channel2.next_step)
+  pull(apu.channel3.next_step)
+  pull(apu.channel4.next_step)
+  pull(apu.channel1.sweep_check_at)
+  pull(apu.channel1.sweep_stop_at)
+  pull(apu.channel1.sweep_load_at)
+  ch4_advance_divisor(apu.channel4, gb)
+  pull(apu.channel4.div_next)
+  let tick = gb_apu_tick(gb)
+  apu.tick_phase  = (apu.tick_phase + tick - (d mod tick)) mod tick
+  apu.noise_phase = (apu.noise_phase + 2 * tick - (d mod (2 * tick))) mod (2 * tick)
+
 proc apu_rescale_speed*(apu: GbApu; gb: GB; old_speed, new_speed: uint8) =
   ## CGB speed switch: remaining delays are in CPU cycles, so entering double
   ## speed doubles them and leaving halves them (as Scheduler.`speed_mode=`).
@@ -238,7 +282,8 @@ proc get_sample*(apu: GbApu; gb: GB) =
   # Gated on `enabled` (a disabled channel's amplitude does not depend on its
   # phase; the steps replay exactly later), NOT on channel_mask (a debug mute;
   # skipping the catch-up would let CH4's shift loop fall a frame behind).
-  const OBS = uint32(GB_SAMPLE_PERIOD)
+  let OBS = if apu.probe_period != 0: apu.probe_period
+            else: uint32(GB_SAMPLE_PERIOD)
   if apu.channel1.enabled: ch1_catchup_at(apu.channel1, gb, OBS)
   if apu.channel2.enabled: ch2_catchup_at(apu.channel2, gb, OBS)
   if apu.channel3.enabled: ch3_catchup_at(apu.channel3, gb, OBS)
@@ -262,6 +307,21 @@ proc get_sample*(apu: GbApu; gb: GB) =
      (if (apu.nr51 and 0x04) != 0: c3 else: 0.0'f32) +
      (if (apu.nr51 and 0x02) != 0: c2 else: 0.0'f32) +
      (if (apu.nr51 and 0x01) != 0: c1 else: 0.0'f32))
+  if apu.probe_period != 0:
+    # Mixer probe (GbApu.probe_*): the raw mix, before the coupling capacitor,
+    # is what a test compares; the cap only shapes the presented stream.
+    if apu.probe_skip > 0:
+      dec apu.probe_skip
+    elif apu.probe_limit != 0 and apu.probe_samples >= apu.probe_limit:
+      discard
+    else:
+      if not apu.probe_armed:
+        apu.probe_armed = true
+        apu.probe_left  = mix_left
+        apu.probe_right = mix_right
+      elif mix_left != apu.probe_left or mix_right != apu.probe_right:
+        apu.probe_constant = false
+      inc apu.probe_samples
   # Output coupling capacitor (see GB_DC_CHARGE), applied before the dump hook.
   let sample_left  = mix_left  - apu.dc_cap_left
   let sample_right = mix_right - apu.dc_cap_right
@@ -342,7 +402,9 @@ proc get_sample*(apu: GbApu; gb: GB) =
         discard sdl_queue_audio_gb(apu.audio_dev,
           addr apu.buffer[0], uint32(queue_len * 4))
       apu.buffer_pos = 0
-  gb.scheduler.schedule_gb(GB_SAMPLE_PERIOD, etAPUSample)
+  gb.scheduler.schedule_gb(
+    (if apu.probe_period != 0: int(apu.probe_period) else: GB_SAMPLE_PERIOD),
+    etAPUSample)
 
 proc new_gb_apu*(gb: GB; headless: bool): GbApu =
   result = GbApu(
@@ -513,7 +575,9 @@ proc apu_write*(apu: GbApu; idx: int; val: uint8; gb: GB) =
       # bit is set (internal divider bit 12, 13 in double speed; timer.nim
       # apu_div_bit) skips the first DIV-APU event.
       let tap = 12 + int(gb.scheduler.speed)
-      apu.div_skip = ((gb.timer.tdiv shr tap) and 1) != 0
+      # The bit is sampled APU_POWERON_TAP_LEAD divider counts ahead of the
+      # write (gambatte sound/ch2_init_reset_env_counter_timing_{5,7}).
+      apu.div_skip = (((gb.timer.tdiv + uint16(APU_POWERON_TAP_LEAD)) shr tap) and 1) != 0
       apu.first_half_of_length_period = apu.div_skip
   of 0xFF30..0xFF3F: ch3_write(apu.channel3, idx, val, gb)
   else: discard

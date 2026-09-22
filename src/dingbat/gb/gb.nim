@@ -1925,6 +1925,22 @@ type
     # Presentation state, not serialized: it re-converges within ~6 ms.
     dc_cap_left*:         float32
     dc_cap_right*:        float32
+    # Mixer probe (test harness): while probe_period is non-zero the sample
+    # event runs every probe_period scheduler cycles instead of
+    # GB_SAMPLE_PERIOD and each pre-DC-blocker mix is compared with the first
+    # one seen since probe_reset. gambatte's `_outaudio0/1` verdict is "every
+    # sample of the final frame, at 2 MHz, equals the first" (test/
+    # testrunner.cpp, evaluateStrTestResults); probe_period = 2 is that
+    # stream. Observation only: the channels' closed-form catch-up gives the
+    # same amplitudes at any cadence. Not serialized.
+    probe_period*:        uint32
+    probe_armed*:         bool      # first sample since the reset recorded
+    probe_left*:          float32
+    probe_right*:         float32
+    probe_constant*:      bool
+    probe_samples*:       int       # compared so far (after the skip)
+    probe_skip*:          int       # samples to ignore before arming
+    probe_limit*:         int       # stop comparing after this many (0 = never)
     left_resampler*:      Resampler[float32]
     right_resampler*:     Resampler[float32]
     resample_freq*:       int

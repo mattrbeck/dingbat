@@ -283,9 +283,14 @@ mechanism per the bundle's howto and gambatte-core's `test/testrunner.cpp`:
 prints the top-row tiles, and a few hundred ROMs whose names state their digits resolve
 all 16 shapes by majority vote.
 
-Not scored: the 220 `_outaudio0/1` rows (gambatte decides them on whether all 35,112
-samples of the final frame are identical at 2 MHz; dingbat's APU emits at 32,768 Hz) and
-gambatte's AGB column (its own runner marks it "FIXME" and feeds it CGB expectations).
+The 220 `_outaudio0/1` rows use gambatte's own rule (`test/testrunner.cpp`): after the run,
+`audio0` iff all 35,112 samples of the final frame are identical, `audio1` otherwise. Its
+stream is the raw mix at 2 MHz with no output filter, so `--mode=gambatte` arms a probe on
+the mixer (`GbApu.probe_*`) that runs the sample event every 2 T-cycles over the final frame
+and compares the pre-DC-blocker mix; the presented 32,768 Hz stream is not involved.
+`DINGBAT_GAM_AUDIO_SHIFT=<T-cycles>` slides that window (a ±456 sweep moved no verdict).
+Not scored: gambatte's AGB column (its own runner marks it "FIXME" and feeds it CGB
+expectations).
 
 Rows are sharded across `countProcessors()` processes, each a `--mode=gambatte --list=`
 batch with a fresh `GB` per row (~7 s). `results.md` carries one row per subdirectory;

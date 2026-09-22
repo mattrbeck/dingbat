@@ -1489,14 +1489,9 @@ const NotScored: seq[(string, string)] = @[
     "rig, not hardware. The non-colliding members of the same family " &
     "(`busyread8000`, `busyreadFF4B`) and every CGB arm ARE scored. " &
     "(build_gambatte_rows / gambatte_row_reads_powerup_wram)"),
-  ("gambatte `_outaudio0/1` rows (220) + the AGB column", "gambatte's " &
-    "testrunner.cpp decides an `outaudio` row on whether the final frame's " &
-    "35,112 mixed samples (2 MHz) are all equal to the first; this harness " &
-    "has no 2 MHz tap on the mixer, and its 32,768 Hz stream could read " &
-    "constant where the 2 MHz one is not. A runner gap, not a model claim. " &
-    "The AGB column: gambatte's runner marks it `FIXME: Actual AGB results` " &
-    "and feeds it the CGB expectations, so it asserts nothing about AGB. " &
-    "(build_gambatte_rows)"),
+  ("gambatte's AGB column", "gambatte's runner marks it `FIXME: Actual AGB " &
+    "results` and feeds it the CGB expectations, so it asserts nothing " &
+    "about AGB. (build_gambatte_rows)"),
   ("gbmicrotest: 31 ROMs that never write the $FF82 verdict byte", "scanned " &
     "all 513 bundled ROMs for `ldh ($82),a` / `ld ($ff82),a`; 482 contain one " &
     "and these 31 contain neither, so the harness would be scoring " &
@@ -1994,15 +1989,16 @@ proc generate_mgba_detail_md(details: seq[MgbaSuiteDetail]): string =
 
 # ==================== gambatte ====================
 # sinamas' gambatte suite from the game-boy-test-roms bundle; filename rules
-# and scoring in tests/README.md. Not scored: `_outaudio0/1` rows (the verdict
-# needs a 2 MHz sample stream; dingbat's APU emits at 32,768 Hz) and the AGB
-# column. Reported per subdirectory; detail in tests/results_gambatte.md.
+# and scoring in tests/README.md. `_outaudio0/1` rows are scored by a 2 MHz
+# probe on the mixer (gambatte's own rule; see gambatte_run in
+# dingbat_test.nim). Not scored: the AGB column. Reported per subdirectory;
+# detail in tests/results_gambatte.md.
 
 type
   GambatteRow = object
     dev: string        # "dmg" | "cgb"
-    kind: string       # "hex" | "png"
-    expected: string   # hex string, or the reference PNG's path
+    kind: string       # "hex" | "png" | "audio"
+    expected: string   # hex string, the reference PNG's path, or "0"/"1"
     rom: string
     group: string      # top-level directory under gambatte/
     name: string       # display name, unique per row
@@ -2059,7 +2055,13 @@ proc build_gambatte_rows(gambatte_dir: string): seq[GambatteRow] =
       if marker.len == 0: continue
       let tail = fname[fname.find(marker) + marker.len .. ^1]
       if tail.startsWith("audio0") or tail.startsWith("audio1"):
-        continue  # audio verdict is out of reach, see the header comment
+        # Audio verdict: the final frame's mix is constant (0) or not (1);
+        # scored by the mixer probe in --mode=gambatte (gambatte_run).
+        rows.add(GambatteRow(
+          dev: dev, kind: "audio", expected: $tail[5], rom: rom, group: group,
+          name: rel.changeFileExt("") & " [" & dev & ", audio]",
+        ))
+        continue
       if dev == "dmg" and gambatte_row_reads_powerup_wram(stem):
         continue  # verdict is uninitialised WRAM; recorded in NotScored
       let expected = gambatte_hex_prefix(tail)

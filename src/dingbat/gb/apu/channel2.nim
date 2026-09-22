@@ -112,5 +112,5 @@ proc ch2_write*(ch: GbChannel2; idx: int; val: uint8; gb: GB) =
       if not was_enabled: ch.sample_bit = 0
       ch.next_step = gb_trigger_deadline(gb, ch2_period(ch, gb),
                                          if was_enabled: 1 else: 2)
-      init_volume_envelope(ch)
+      init_volume_envelope(ch, env_trigger_extra(gb))
   else: discard

@@ -199,6 +199,6 @@ proc ch4_write*(ch: GbChannel4; idx: int; val: uint8; gb: GB) =
       ch.div_next = deadline -
         CycleCount(ch4_steps_to_rise(ch.div_counter, ch.clock_shift) - 1) *
         ch4_inc_period(ch, gb)
-      init_volume_envelope(ch)
+      init_volume_envelope(ch, env_trigger_extra(gb))
       ch.lfsr = 0x7FFF'u16
   else: discard

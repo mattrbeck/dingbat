@@ -528,8 +528,9 @@ colliding access sees) and are undiagnosed.
 
 **Rows (18).** AGE `speed-switch/spsw-tima-{cgbBC@*,cgbE}` (3),
 `spsw-ch2-lc-delay-cgbBCE@*` (3), `caution/spsw-interrupts-{cgbBC@*,cgbE}`
-(3); gambatte `speedchange/speedchange{,2,5}_ch2_nr52_{1a,2a}{,_ds}` (6),
-`sound/ch2_late_reset_nr52_2b{,_ds}` (3).
+(3); gambatte `speedchange/speedchange{,2,5}_ch2_nr52_{1a,2a}{,_ds}` (6).
+`sound/ch2_late_reset_nr52_2b{,_ds}` (3) went green on 2026-09-22 with the
+APU's own share of the stall (`APU_SPSW_EXTRA_DOTS`, section H).
 
 **Behaviour.** A switch armed by KEY1 and taken by `STOP` resets DIV and
 stalls the CPU for 2^17 cycles of the NEW CPU clock while the timer, serial
@@ -555,7 +556,8 @@ edge arrives one M-cycle late until the APU is powered off.
 **Residue.** Channel 2's length counter expires one M-cycle early in three
 of seven switch configurations (`sc`, `sc2_ds`, `sc5`: ends in double
 speed, odd switch count) and is exact in the other four, including `sc3`,
-which refutes a flat delay; the `speedchange_tima0x` family is internally
+which refutes a flat delay (the duty-pointer ladder in H2 has the same
+shape); the `speedchange_tima0x` family is internally
 unsatisfiable by any stall length (the failures are one tick low, so it is
 which cycles the timer sees around the reset). The AGE tables are readable
 at cell resolution and have not all been read since the DIV-reset split
@@ -627,6 +629,64 @@ its author's one upstream PR.
 **Still open on hardware.** Whether a CPU CGB C also holds the LY=LYC
 comparison (`lyc_compare_hold`, `docs/oracles.md`): no ROM in the tree pins
 the C/D placement of `ly_lyc*`, and the fork's CGB E score does not ask.
+
+---
+
+## H. The APU as heard: gambatte's `_outaudio` rows
+
+gambatte scores 220 of its ROMs on sound, not pixels (`test/testrunner.cpp`):
+after the run, `audio0` iff all 35,112 samples of the final frame are equal,
+`audio1` otherwise, on the raw 2 MHz mix with no output filter. The harness
+reproduces the rule with a probe on the mixer (`GbApu.probe_*`, armed by
+`--mode=gambatte` for the last frame; `tests/README.md`). The ROMs are
+one-NOP ladders around a square channel's duty pointer, envelope or sweep, so
+they read the APU at a resolution nothing else in the tree does. Scored since
+2026-09-21: 207 of 220 (`sound` 184/184, `speedchange` 23/36).
+
+**Closed by them (all knobs two-sided, comments carry the brackets).**
+`BOOT_CH1_PHASE_{DMG,CGB}_T` (memory.nim): the boot beep's second note is
+still stepping at the hand-off (NR52 = $F1), frequency $7C1, and
+`ch1_init_pos_{1..8}` pin where in its 2016-cycle duty cycle each boot ROM
+leaves it (728 / 1612, one value of 504). `BOOT_FS_STAGE_{DMG,CGB}`: the
+frame sequencer's step at the hand-off (1 / 0, `ch2_init_env_counter_timing`).
+`ENV_TRIGGER_PRECLOCK_SKIP` (abstract_channels.nim): a trigger inside the
+sequencer step before the envelope clock, taken 4 T early, misses that clock.
+`SWEEP_TRIGGER_LEAD_T_{DMG,CGB}` = 4 / 8: a trigger that close before a sweep
+clock misses it. `APU_POWERON_TAP_LEAD` = 4 (apu.nim): the tap bit that
+decides the skipped first DIV-APU edge is sampled 4 counts ahead of the NR52
+write. `APU_SPSW_EXTRA_DOTS` = 10 / `_SINGLE` = 7: the APU's share of the
+KEY1 stall's oscillator restart, the PPU's 8 / 3 by another clock.
+
+### H1. A double-speed trigger's grid edge
+
+**Rows (2).** `sound/ch1_duty0_pos6_to_pos7_timing_ds_6` and
+`speedchange_ch1_duty0_pos6_to_pos7_timing_nop_ds_2`.
+
+**Behaviour.** At double speed a CPU write can land half a 1 MHz tick off
+the APU's grid. gambatte's ladder `_ds_1..6` says a first trigger one NOP
+later still counts from the SAME edge (the edge before the write); SameSuite
+`channel_{1,2}_align{,_cpu}` and `channel_1_freq_change_timing-*` (7 rows,
+all green) say a write between edges waits for the next. Both are hardware
+records on CPU CGB C. `APU_TRIGGER_EDGE_BEFORE = 1` takes the two and loses
+the seven; it ships 0.
+
+**Refuted.** A half-tick shift of the grid's anchor at power-on or at the
+switch (`tick_phase` + 4 CPU cycles): breaks `_ds_2`/`_ds_4` and fixes
+nothing.
+
+### H2. The switch ladder is not additive
+
+**Rows (13).** `speedchange{2,3,4,5}*_ch1_duty0_pos6_to_pos7_timing_*` (12)
+and `speedchange_ch1_nr4init_duty0_pos6_to_pos7_timing_2`.
+
+**Measured.** With the single-switch values pinned (to double 10, back 7, each
+two-sided at a NOP), the multi-switch ROMs want sums no constant pair gives:
+two switches (up, down) 14..16; three (up, down, up) exactly 24; four 22..26;
+five about 32. A fourth switch adds nothing where a second added 5, so the
+extra depends on the state the switch finds (divider phase after its reset,
+most likely), the same open residual as the PPU's `lcd_offset` rows (E1).
+(8, 6) scores three more rows than (10, 7) and is two-sided on nothing; it is
+not shipped.
 
 ---
 
