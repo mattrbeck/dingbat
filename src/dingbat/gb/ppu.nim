@@ -1275,13 +1275,14 @@ when CGB_STAT_WRITE_RULE != 0:
     if ly == 153: return ttnl <= 2 * (1 + dsi) and ttnl > 2
     false
 
-when CGB_LYC_WRITE_RULE != 0:
+when CGB_LYC_WRITE_RULE != 0 or DMG_LYC_WRITE_RULE != 0:
   proc cgb_lyc_write_trigger(ppu: GbPpu; gb: GB; old, data: uint8): bool {.noinline.} =
     ## CGB_LYC_WRITE_RULE: does a CGB LYC write request the interrupt itself?
     ## Against the time left to the next LY increment, as the STAT rule.
     if data == old or (ppu.lcd_status and 0x40'u8) == 0'u8 or int(data) >= 154:
       return false
     let dsi = int(gb.memory.current_speed)
+    let cgbi = if gb.cgb_enabled: 1 else: 0
     let line = 456 shl dsi
     var lc = int(ppu.cycle_counter) -
              (if dsi != 0: CGB_STAT_RULE_OFF_DS else: CGB_STAT_RULE_OFF)
@@ -1297,7 +1298,7 @@ when CGB_LYC_WRITE_RULE != 0:
          int(data) == ly: return false
     else:
       if (ppu.lcd_status and 0x10'u8) != 0'u8 and
-         not (ly == 153 and ttnl <= 2 + 2 * dsi + 2): return false
+         not (ly == 153 and ttnl <= 2 + 2 * dsi + 2 * cgbi): return false
     var cly = ly
     var cttnl = ttnl
     if ly == 153:
@@ -1306,10 +1307,10 @@ when CGB_LYC_WRITE_RULE != 0:
     else:
       cttnl -= 2 + 2 * dsi
       if cttnl <= 0: cly = ly + 1; cttnl += line
-    if cttnl <= 4 + 4 * dsi + 2:
+    if cttnl <= 4 + 4 * dsi + 2 * cgbi:
       # A write that meets LY and LYC stepping together never sees the line
       # low: no edge.
-      if int(old) == cly and cttnl > 2: return false
+      if int(old) == cly and cttnl > 2 * cgbi: return false
       cly = (if cly == 153: 0 else: cly + 1)
     int(data) == cly
 
@@ -2375,6 +2376,13 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     # DMG only. The $FF phase of the write acts here at the commit point; only
     # the real value waits for the M-cycle boundary (ppu_stat_write_glitch).
     if not gb.cgb_enabled: ppu_stat_write_glitch(ppu, gb)
+    when LCDOFF_STAT_LYC_IRQ != 0:
+      # LCD off: the comparator's frozen match meets an LYC enable the write
+      # turns on (on a DMG any write does, as the $FF phase).
+      if not ppu.lcd_enabled and (ppu.lcd_status and 0x04'u8) != 0'u8 and
+         (ppu.lcd_status and 0x40'u8) == 0'u8 and
+         (not gb.cgb_enabled or (val and 0x40'u8) != 0'u8):
+        gb.interrupts.lcd_stat_interrupt = true
     var rule_mode = false
     when CGB_STAT_WRITE_RULE != 0:
       # CGB: the write's own interrupt is decided by rule; the line takes the
@@ -2479,6 +2487,27 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
           if LYC_DROP_BOUNDARY_SKIP == 0 or
              ppu.cycle_counter + 2'i32 < ppu.gb_line_end:
             stat_drop_arm(ppu, gb, ppu.lcd_status, val, int32(LYC_DROP_LATENCY_CGB))
+        return
+    when DMG_LYC_WRITE_RULE != 0:
+      # DMG: the same rule; the request goes up at the write.
+      if not gb.cgb_enabled and ppu.lcd_enabled and gb.fifo_ppu != nil:
+        let trig = cgb_lyc_write_trigger(ppu, gb, ppu.lyc, val)
+        when DMG_LYC_EVENT_HOLD > 0 and CGB_LYC_EVENT_HOLD_DS > 0:
+          # As CGB_LYC_EVENT_HOLD_DS: too close to the next line's event.
+          if ppu.cycle_counter >= ppu.gb_line_end - int32(DMG_LYC_EVENT_HOLD) and
+             ppu.ly != 153'u8 and not (ppu.ly == 0'u8 and (ppu.lcd_status and 3'u8) == 1'u8) and
+             int(val) == int(ppu.ly) + 1:
+            gb.lyc_hold_on = true
+            gb.lyc_hold_new = val
+            gb.lyc_hold_ly = ppu.ly
+            if trig: gb.interrupts.lcd_stat_interrupt = true
+            return
+        ppu.lyc = val
+        if stat_level_with(ppu, gb, ppu.lcd_status, val): ppu.old_stat_flag = true
+        if trig: gb.interrupts.lcd_stat_interrupt = true
+        if LYC_DROP_BOUNDARY_SKIP == 0 or
+           ppu.cycle_counter + 4'i32 < ppu.gb_line_end:
+          stat_drop_arm(ppu, gb, ppu.lcd_status, val, int32(LYC_DROP_LATENCY_DMG))
         return
     var edge_here = true
     when CGB_LYC_WRITE_DEFER:

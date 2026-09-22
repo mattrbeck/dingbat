@@ -187,6 +187,17 @@ const CGB_LYC_WRITE_RULE* {.intdefine.} = 1
   ## late_ff45_enable_ds_{2,lcdoffset1_2}`, `ff45_enable_weirdpoint_ds_*`,
   ## `lyc153_late_ff45_enable_lcdoffset1_1`, `lycwirq_trigger_ly00_stat50_
   ## ds_lcdoffset1_2`, `miscmstatirq/lycwirq_trigger_m0_late_ly44_lyc45_ds_3`.
+const DMG_LYC_WRITE_RULE* {.intdefine.} = 0
+  ## CGB_LYC_WRITE_RULE on a DMG (no CGB-only terms), requesting at the
+  ## write. Refused: it takes gambatte `miscmstatirq/lycwirq_trigger_m0_late_
+  ## ly44_lyc45_4` [dmg] but fails mooneye acceptance/ppu/stat_irq_blocking
+  ## and stat_lyc_onoff and wilbertpol gpu/stat_irq_blocking, which the DMG
+  ## level model passes. Kept compilable with DMG_LYC_EVENT_HOLD.
+const DMG_LYC_EVENT_HOLD* {.intdefine.} = 4
+  ## CGB_LYC_EVENT_HOLD_DS for a DMG at single speed: 3..6 score alike, 2 loses
+  ## `lycEnable/ff45_enable_weirdpoint_3` [dmg], 8 three `ff45_enable_
+  ## weirdpoint`/`lyc153_late_ff45_enable`/`lycwirq_trigger_*` rows; 4 is
+  ## gambatte-core's window.
 const CGB_LYC_RULE_FIRE_T* {.intdefine.} = 4
   ## Scheduler cycles after the byte lands (single speed) at which the rule's
   ## request goes up: after that boundary's interrupt check, before the next
@@ -208,6 +219,12 @@ const CGB_STAT_RULE_OFF_DS* {.intdefine.} = 3
   ## The rule's clock against dingbat's dot: the write's M-cycle starts this
   ## many dots after the rule's cycle count (1 single speed, 3 double; the
   ## side-by-side traces' offsets). Two-sided: 0/2 and 2/4 lose 9..30.
+const LCDOFF_STAT_LYC_IRQ* {.intdefine.} = 1
+  ## With the LCD off the comparator's match is frozen where it stood, and a
+  ## STAT write that turns the LYC enable on over a frozen match requests
+  ## the interrupt (on a DMG any STAT write does: its $FF phase). gambatte
+  ## `lycEnable/lcdoff_lycirqen_1` (both devices), `_4` [dmg]; `_2`/`_3`
+  ## (no frozen match, enable already on) stay quiet.
 const M0_IRQ_EDGE_X* {.intdefine.} = 1
   ## The mode-0 STAT request rises where the line's pixels end even when an
   ## object at X = 167 or a window started at WX = 166 keeps the fetcher (and
