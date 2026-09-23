@@ -232,6 +232,14 @@ const OAM_SCAN_DMA_EDGE_DS* {.intdefine.} = 2
   ## oamdma/late_sp*_ds rows, with CGB_OBJ_FETCH_OFF; 0 loses three of them,
   ## 3 four `_ds_2` twins.
 const LCDON_NO_OAM_SCAN* {.intdefine.} = 1
+const SCX_LATCH_LCDON_EXTRA* {.intdefine.} = 1
+const SCX_LATCH_LCDON_EXTRA_CGB* {.intdefine.} = 2
+  ## Dots the LCD-on line's fine-scroll discard keeps taking an SCX store past
+  ## its own length (SCX_FINE_LATCH_LIVE's window), DMG / CGB. gambatte
+  ## enable_display/ly0_late_scx7_m3stat_scx0_2 [dmg] and _scx1_1 [cgb]; both
+  ## two-sided (DMG 0 and 2, CGB 1 and 3 each lose one of the ladder).
+  ## The line-0-of-every-frame form of this was refused (eleven
+  ## scx_during_m3 rows); only the LCD-on line takes it.
 const CGB_OBJ_YIELD_LAST* {.intdefine.} = 1
   ## Whether the CGB's object at the window's first column yields to the
   ## window start on the line's last pixel too (obj_yields_to_window). The DMG
@@ -502,9 +510,9 @@ const SCX_FINE_BORROW_DMG_LEAD* {.intdefine.} = 1
 # length, not a fixed number of dots: gambatte scx_during_m3's dot-89 store
 # is refused at F = 0 (scx_0063c0) and taken at F = 3 and 7 (scx_0367c0,
 # scx_0360c0, scx_0761c0); a capped `min(N, F)` saturates only at N = 7.
-# Costs enable_display/ly0_late_scx7_m3stat_scx1_2 [dmg], a line-0 row (line
-# 0's latch is dot 84, not 88); widening the window on line 0 alone loses
-# eleven scx_during_m3 rows, so that row is left red.
+# The LCD-on line keeps the window open a dot (DMG) or two (CGB) longer
+# (SCX_LATCH_LCDON_EXTRA); widening it on line 0 of every frame instead loses
+# eleven scx_during_m3 rows.
 
 # SCX_FINE_LATCH_WRAP (gb.nim): the discard is a three-bit SLOT COUNTER that
 # compares its slot against the live SCX & 7 every dot. A store that puts the
@@ -582,6 +590,11 @@ proc fifo_sample_smooth_scroll*(ppu: GbFifoPpu) =
     # threshold). Not read off `lx`: the head's throw-away fetch parks the
     # shifter, so `lx` stays negative long after the discard is spent.
     ppu.scx_latch_until = ppu.cycle_counter + int32(ppu.scx and 7)
+    when SCX_LATCH_LCDON_EXTRA != 0 or SCX_LATCH_LCDON_EXTRA_CGB != 0:
+      # The LCD-on line takes a store for longer (SCX_LATCH_LCDON_EXTRA).
+      if ppu.first_line:
+        ppu.scx_latch_until += (if ppu.cgb: int32(SCX_LATCH_LCDON_EXTRA_CGB)
+                                else: int32(SCX_LATCH_LCDON_EXTRA))
     when SCX_FINE_LATCH_WRAP != 0:
       ppu.scx_latch_slot = uint8(ppu.cycle_counter and 7'i32)
   if ppu.fetching_window:
