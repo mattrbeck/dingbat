@@ -741,6 +741,13 @@ const CGB_WE_ENABLE_LATE* {.intdefine.} = 1
 const WIN_LX_OFF_V* = -128'i32
   ## fifo_ppu.nim's WIN_LX_OFF (the comparator parked), here for ppu.nim.
 const CGB_WX_LATE_SS* {.intdefine.} = 1
+const WIN_CARRY_CANCEL_OFF* {.intdefine.} = 1
+  ## A carried DMG window start (DMG_WIN_LAST_PX_CARRY) that meets LCDC.5 low
+  ## at the head of mode 3 is dropped rather than held for a later head: the
+  ## window-started state is decided there, and gambatte-core clears its
+  ## pending start at that point. gambatte `window/on_screen/
+  ## wxA6_late_we_reenable_3` [dmg] (the start owed from line 143 meets LY 0
+  ## with the bit still low; held, it draws line 1). 0 loses it, nothing else.
 const CGB_WE_DISABLE_LATE* {.intdefine.} = 2
   ## Dots a CGB LCDC.5 fall takes to reach the fetcher's window abort
   ## (WIN_EN_ABORT): a map read inside them still fetches a window tile.

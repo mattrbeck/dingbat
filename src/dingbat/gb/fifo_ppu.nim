@@ -751,7 +751,7 @@ proc fifo_head_window(ppu: GbFifoPpu) =
     # A start owed from the previous line (DMG_WIN_LAST_PX_CARRY), asked first
     # because it is not a WX match. gambatte wxA6_late_we_reenable_1..4
     # bracket its dot to this one (LCDC.5 back on at dots 77/81/85 taken, 89
-    # not). LCDC.5 clear does not cancel it, only defers spending it.
+    # not). LCDC.5 low at this head drops it (WIN_CARRY_CANCEL_OFF).
     if ppu.win_carry and window_enabled(ppu):
       ppu.win_carry = false
       ppu.fetching_window = true
@@ -763,6 +763,10 @@ proc fifo_head_window(ppu: GbFifoPpu) =
       ppu.fetcher_x = WIN_CARRY_TILE
       fifo_arm_window(ppu)
       return
+    when WIN_CARRY_CANCEL_OFF != 0:
+      # Owed with LCDC.5 low at the head: the start is dropped, not deferred
+      # (WIN_CARRY_CANCEL_OFF).
+      if ppu.win_carry: ppu.win_carry = false
   when WIN_LINE_START_LATCH != 0:
     if not ppu.fetching_window and window_enabled(ppu) and ppu.window_trigger and
        ppu.wx < uint8(WIN_LINE_START_WX):
