@@ -81,6 +81,21 @@ proc thumb_multiple_load_store*[load: static bool](cpu: CPU; instr: uint32) =
 proc thumb_push_pop_registers*[pop, pclr: static bool](cpu: CPU; instr: uint32) =
   let list    = bits_range(instr, 0, 7)
   var address = cpu.r[13]
+  when not pclr:
+    if list == 0:
+      # Empty list: as LDMIA/STMDB on sp with an empty list, r15 alone is
+      # transferred and sp moves by 0x40 (alyosha thumb/Pop_no_regs).
+      when pop:
+        let value = cpu.gba.bus.read_word(address)
+        cpu.idle(1)
+        discard cpu.set_reg(13, address + 0x40'u32)
+        discard cpu.set_reg(15, value)
+      else:
+        address -= 0x40'u32
+        cpu.gba.bus.write_word(address, cpu.r[15] + 2)
+        discard cpu.set_reg(13, address)
+        cpu.step_thumb()
+      return
   when pop:
     for idx in 0..7:
       if bit(list, idx):
@@ -358,7 +373,8 @@ macro thumbLutBuilder(): untyped =
       of "0101..1...": call("thumb_load_store_sign_extended", bits_range(i, 4, 5))
       of "0101..0...": call("thumb_load_store_register_offset", bits_range(i, 4, 5))
       of "01001.....": call("thumb_pc_relative_load")
-      of "010001111.": call("thumb_undefined")  # BX with H1 (BLX Rm is ARMv5)
+      # BX with H1 set (ARMv5's BLX Rm) executes as BX, no link write, like
+      # its ARM counterpart (alyosha thumb/blx).
       of "010001....": call("thumb_high_reg_branch_exchange", bits_range(i, 2, 3), i.bit(1), i.bit(0))
       of "010000....": call("thumb_alu_operations", bits_range(i, 0, 3))
       of "001.......": call("thumb_move_compare_add_subtract", bits_range(i, 5, 6))

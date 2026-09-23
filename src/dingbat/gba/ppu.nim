@@ -65,8 +65,9 @@ proc new_ppu*(gba: GBA): PPU =
 
 proc skip_boot_phase*(ppu: PPU) =
   ## Video phase at ROM entry when the BIOS boot is skipped: the BIOS hands
-  ## over on line 126, 838 cycles in (a full LLE boot here; mGBA's skip-boot
-  ## uses line 126 as well). From line 0 the CPU reaches every boot-time
+  ## over on line 126, 841 cycles in (a full LLE boot here: 270 frames, 126
+  ## lines and 841 cycles from power-on; mGBA's skip-boot uses line 126 as
+  ## well). From line 0 the CPU reaches every boot-time
   ## timer and vblank wait 126 lines early, which changes RNG seeds taken
   ## from timer phase (Yu-Gi-Oh! WCT 2004's starter deck).
   const ENTRY_LINE = 126
@@ -76,7 +77,10 @@ proc skip_boot_phase*(ppu: PPU) =
   # first instruction on. 14 = a non-sequential plus a sequential 32-bit ROM
   # read at the boot WAITCNT of 0.
   const PIPELINE_REFILL = 14
-  const ENTRY_LINE_POS = 838 - PIPELINE_REFILL
+  # 841 is where the LLE boot's first ROM instruction runs, bracketed by
+  # alyosha DMA_pause_timing_end_1/_2 and Internal_Cycle_DMA_IRQ_Br_pre(_tim)
+  # (end_1 red at 839, Br_pre red at 842).
+  const ENTRY_LINE_POS = 841 - PIPELINE_REFILL
   ppu.gba.scheduler.clear(etPPUStartHBlank)
   ppu.vcount = ENTRY_LINE
   ppu.line_start_cycle = int64(ppu.gba.scheduler.cycles) - ENTRY_LINE_POS

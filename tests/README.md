@@ -173,8 +173,10 @@ at `JsmolkaRev`, FuzzARM at `FuzzArmRev` (tests are generated at build time, so 
 SHA is a re-baseline), MagenTests at `MagenRelease`, and ~30 shootout files at
 `ShootoutRev`. CI backs the dir with `actions/cache`; bump the key when a URL changes.
 
-Flags: `--bios=<path>` (mGBA suite only), `--apu` (runs only Blargg dmg_sound/cgb_sound +
-SameSuite APU and prints tallies without rewriting results files).
+Flags: `--bios=<path>` (the mGBA suite and every GBA screenshot row run on that BIOS image
+instead of the HLE), `--apu` (runs only Blargg dmg_sound/cgb_sound + SameSuite APU and prints
+tallies without rewriting results files), `--suite=gba` (the same for every GBA suite: mGBA,
+jsmolka, FuzzARM, alyosha, PeterLemon, Other; about a minute).
 
 ### Which suites run, and how each is scored
 

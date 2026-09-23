@@ -60,6 +60,29 @@ proc arm_unimplemented*(cpu: CPU; instr: uint32) =
 proc arm_unused*(cpu: CPU; instr: uint32) =
   cpu.und()
 
+# MRC past its fetch: an internal cycle and the coprocessor transfer cycle
+# (1S + 1I + 1C). Coprocessor_14's timer read is red at 1 and at 3.
+const MRC_CP14_IDLE = 2
+
+proc arm_coprocessor_register_transfer*(cpu: CPU; instr: uint32) =
+  # CP14 (the debug unit) is the only coprocessor that answers: MCR is
+  # ignored and MRC reads the bus as it holds the newest prefetch, the word
+  # two instructions ahead; MRC to r15 moves that word's top nibble into
+  # NZCV. Every other coprocessor number traps (alyosha arm/Coprocessor_14).
+  if bits_range(instr, 8, 11) != 14:
+    cpu.und()
+    return
+  if bit(instr, 20):  # MRC
+    let value = cpu.gba.bus.read_word_internal(cpu.r[15])
+    cpu.idle(MRC_CP14_IDLE)
+    let rd = int(bits_range(instr, 12, 15))
+    if rd == 15:
+      cpu.cpsr = cast[PSR]((uint32(cpu.cpsr) and 0x0FFFFFFF'u32) or
+                           (value and 0xF0000000'u32))
+    else:
+      discard cpu.set_reg(rd, value)
+  cpu.step_arm()
+
 proc rotate_register*(cpu: CPU; instr: uint32; carry_out: ptr bool; allow_register_shifts: bool): uint32 =
   let reg        = int(bits_range(instr, 0, 3))
   let shift_type = int(bits_range(instr, 5, 6))
@@ -233,9 +256,12 @@ proc arm_multiply*[accumulate, set_cond: static bool](cpu: CPU; instr: uint32) =
   cpu.idle(mul_i_cycles(cpu.r[rs], true) + (when accumulate: 1 else: 0))
   when set_cond:
     cpu.cpsr.carry = mul_booth_carry(mfShort, cpu.r[rm], cpu.r[rs], uint64(acc))
-  discard cpu.set_reg(rd, cpu.r[rm] * cpu.r[rs] + acc)
-  when set_cond: cpu.set_neg_and_zero_flags(cpu.r[rd])
-  if rd != 15: cpu.step_arm()
+  let res = cpu.r[rm] * cpu.r[rs] + acc
+  # A multiply cannot write r15: the result is dropped, no branch (png183
+  # arm/multiply; likewise either half of a long multiply below).
+  if rd != 15: cpu.r[rd] = res
+  when set_cond: cpu.set_neg_and_zero_flags(res)
+  cpu.step_arm()
 
 proc arm_multiply_long*[signed, accumulate, set_cond: static bool](cpu: CPU; instr: uint32) =
   let rdhi = int(bits_range(instr, 16, 19))
@@ -255,26 +281,29 @@ proc arm_multiply_long*[signed, accumulate, set_cond: static bool](cpu: CPU; ins
   cpu.idle(mul_i_cycles(rs_val, signed) + (when accumulate: 2 else: 1))
   when accumulate:
     res += acc
-  discard cpu.set_reg(rdhi, uint32(res shr 32))
-  discard cpu.set_reg(rdlo, uint32(res))
+  # RdLo is written first: with RdHi == RdLo the high word stays
+  if rdlo != 15: cpu.r[rdlo] = uint32(res)
+  if rdhi != 15: cpu.r[rdhi] = uint32(res shr 32)
   when set_cond:
-    cpu.cpsr.negative = bit(cpu.r[rdhi], 31)
+    cpu.cpsr.negative = bit(res, 63)
     cpu.cpsr.zero     = (res == 0)
     cpu.cpsr.carry = mul_booth_carry(
       (when signed: mfLongSigned else: mfLongUnsigned), rm_val, rs_val, acc)
-  if rdhi != 15 and rdlo != 15: cpu.step_arm()
+  cpu.step_arm()
 
 proc arm_single_data_swap*[byte_quantity: static bool](cpu: CPU; instr: uint32) =
   let rn = int(bits_range(instr, 16, 19))
   let rd = int(bits_range(instr, 12, 15))
   let rm = int(bits_range(instr, 0, 3))
+  # r15 as the source stores A+12, as STR does (png183 arm/data_swap)
+  let source = if rm == 15: cpu.r[15] + 4 else: cpu.r[rm]
   when byte_quantity:
     let tmp = cpu.gba.bus[cpu.r[rn]]
-    cpu.gba.bus[cpu.r[rn]] = uint8(cpu.r[rm])
+    cpu.gba.bus[cpu.r[rn]] = uint8(source)
     discard cpu.set_reg(rd, uint32(tmp))
   else:
     let tmp = cpu.gba.bus.read_word_rotate(cpu.r[rn])
-    cpu.gba.bus.write_word(cpu.r[rn], cpu.r[rm])
+    cpu.gba.bus.write_word(cpu.r[rn], source)
     discard cpu.set_reg(rd, tmp)
   cpu.idle(1)
   if rd != 15: cpu.step_arm()
@@ -294,7 +323,7 @@ proc arm_halfword_data_transfer*[pre, add, immediate, write_back, load: static b
     else:     address -= offset
   when sh == 0b00:
     raise newException(Exception, "HalfwordDataTransfer sh=00: " & hex_str(instr))
-  elif sh == 0b01:  # ldrh/strh
+  elif sh == 0b01 or not load:  # ldrh/strh; stores with S set are STRH (png183 arm/halfword_transfer)
     when load:
       let value = cpu.gba.bus.read_half_rotate(address)
       cpu.idle(1)
@@ -447,7 +476,10 @@ proc arm_software_interrupt*(cpu: CPU; instr: uint32) =
 
 proc arm_psr_transfer*[imm_flag, spsr, msr: static bool](cpu: CPU; instr: uint32) =
   let mode     = cast[CpuMode](cpu.cpsr.mode)
-  let has_spsr {.used.} = mode != modeUSR and mode != modeSYS  # unread in some instantiations
+  # An invalid mode has no SPSR: writes are dropped and reads give 0x10
+  # (png183 psr/psr2). User and System read the CPSR (alyosha psr).
+  let bank = mode_bank(mode)
+  let has_spsr {.used.} = bank != 0 and bank != UNDEF_BANK  # unread in some instantiations
   when msr:
     var mask: uint32 = 0
     if bit(instr, 19): mask = mask or 0xFF000000'u32
@@ -459,7 +491,12 @@ proc arm_psr_transfer*[imm_flag, spsr, msr: static bool](cpu: CPU; instr: uint32
       when imm_flag:
         cpu.immediate_offset(bits_range(instr, 0, 11), addr carry_out) and mask
       else:
-        cpu.r[int(bits_range(instr, 0, 3))] and mask
+        # The operand goes through the barrel shifter like any other: an
+        # immediate shift of Rm, RRX included (png183 psr/psr2). The
+        # loose-decoded BX forms (bit 4 set, arm_branch_exchange) take Rm as is.
+        if bit(instr, 4): cpu.r[int(bits_range(instr, 0, 3))] and mask
+        else: cpu.rotate_register(bits_range(instr, 0, 11), addr carry_out,
+                                  allow_register_shifts = false) and mask
     when spsr:
       if has_spsr:
         # See PSR_PHYS_MASK; SPSR forces mode bit4 high.
@@ -467,9 +504,12 @@ proc arm_psr_transfer*[imm_flag, spsr, msr: static bool](cpu: CPU; instr: uint32
           (((uint32(cpu.spsr) and not mask) or value) and PSR_PHYS_MASK) or 0x10'u32)
     else:
       let was_irq_disabled = cpu.cpsr.irq_disable
+      # Mode bit 4 is wired high in CPSR as in SPSR: a write of mode 0x03
+      # enters SVC (alyosha psr, "works fine on hardware").
+      let written = if (mask and 0xFF) > 0: value or 0x10'u32 else: value
       if (mask and 0xFF) > 0:
-        cpu.switch_mode(cast[CpuMode](value and 0x1F'u32))
-      cpu.cpsr = cast[PSR]((((uint32(cpu.cpsr) and not mask) or value) and PSR_PHYS_MASK))
+        cpu.switch_mode(cast[CpuMode](written and 0x1F'u32))
+      cpu.cpsr = cast[PSR]((((uint32(cpu.cpsr) and not mask) or written) and PSR_PHYS_MASK))
       if cpu.cpsr.thumb:
         # MSR writes the T bit on ARM7TDMI (Pokemon Pinball R/S exits its
         # decompressor via `msr cpsr, r2` with T set, then a Thumb `bx r0`). The
@@ -490,6 +530,8 @@ proc arm_psr_transfer*[imm_flag, spsr, msr: static bool](cpu: CPU; instr: uint32
     let rd = int(bits_range(instr, 12, 15))
     if spsr and has_spsr:
       discard cpu.set_reg(rd, uint32(cpu.spsr))
+    elif spsr and bank == UNDEF_BANK:
+      discard cpu.set_reg(rd, 0x10'u32)
     else:
       discard cpu.set_reg(rd, uint32(cpu.cpsr))
   when not msr:
@@ -498,16 +540,37 @@ proc arm_psr_transfer*[imm_flag, spsr, msr: static bool](cpu: CPU; instr: uint32
     cpu.step_arm()
 
 proc arm_branch_exchange*(cpu: CPU; instr: uint32) =
-  # The 12-bit LUT cannot see bits 19-8, so an SBO-violated BX (0xE120FF11)
-  # lands here too; on hardware it executes as MSR CPSR from a register
-  # (hardware: gbaedge BXDECODE on AGB SP, docs/hwprobe.md). The ARMv5
-  # BLX-register word arrives via its own LUT entry and executes as BX.
-  if bits_range(instr, 4, 7) == 0b0001'u32 and bits_range(instr, 8, 19) != 0xFFF'u32:
-    arm_psr_transfer[false, false, true](cpu, instr)
-    return
-  let address = cpu.r[int(bits_range(instr, 0, 3))]
-  cpu.cpsr.thumb = bit(address, 0)
-  discard cpu.set_reg(15, address)
+  # BX decodes loosely (png183 arm/branches, from hardware). Bits 5-6 are
+  # ignored and Rm is written to Rd (bits 12-15; r15 = the branch). With
+  # bit 21 set, bits 16-19 are a PSR field mask (bit 22 = SPSR): mask bits 0
+  # and 3 together make the exchange, T <- Rm bit 0 and nothing else, and any
+  # other mask is an MSR of Rm under it (the control field writes mode, I, F
+  # and T from Rm's low byte). The same reading explains gbaedge BXDECODE on
+  # an AGB SP: `0xE120FF11` branches to a Thumb address in ARM state and
+  # wedges; `0xE12FFF31`, ARMv5's BLX, executes as BX.
+  let value = cpu.r[int(bits_range(instr, 0, 3))]
+  let rd = int(bits_range(instr, 12, 15))
+  if bit(instr, 21):
+    if (bits_range(instr, 16, 19) and 0b1001'u32) == 0b1001'u32:
+      if bit(instr, 22):
+        let mode = cast[CpuMode](cpu.cpsr.mode)
+        if mode != modeUSR and mode != modeSYS: cpu.spsr.thumb = bit(value, 0)
+      elif rd == 15:
+        cpu.cpsr.thumb = bit(value, 0)
+      elif bit(value, 0) and not cpu.cpsr.thumb:
+        # T set with no branch: the two words prefetched as ARM run on as
+        # Thumb from A+8, as for an MSR setting T (arm_psr_transfer).
+        cpu.cpsr.thumb = true
+        cpu.pipeline.clear()
+        cpu.pipeline.push(0x46C0'u32)
+        cpu.pipeline.push(cpu.gba.bus.read_word_internal(cpu.r[15]) and 0xFFFF'u32)
+      if rd != 15: cpu.step_arm()
+    # arm_psr_transfer reads the mask and Rm from the same bits
+    elif bit(instr, 22): arm_psr_transfer[false, true, true](cpu, instr)
+    else: arm_psr_transfer[false, false, true](cpu, instr)
+  else:
+    cpu.step_arm()
+  discard cpu.set_reg(rd, value)
 
 proc arm_data_processing*[imm_flag: static bool, opcode: static ArmAluOp,
                             set_cond, bit4: static bool](cpu: CPU; instr: uint32) =

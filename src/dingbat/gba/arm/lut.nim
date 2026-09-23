@@ -7,13 +7,14 @@ macro armLutBuilder(): untyped =
   for i in 0'u32 ..< 4096'u32:
     result.add:
       checkBits i:
-      of "000000..1001": call("arm_multiply", i.bit(5), i.bit(4))
+      # MUL/MLA ignore bit 22 (png183 arm/multiply)
+      of "00000...1001": call("arm_multiply", i.bit(5), i.bit(4))
       of "00001...1001": call("arm_multiply_long", i.bit(6), i.bit(5), i.bit(4))
-      of "00010.001001": call("arm_single_data_swap", i.bit(6))
-      of "000100100001": call("arm_branch_exchange")
-      # The ARMv5 BLX-register word executes as BX on ARM7TDMI, no link
-      # write (hardware: gbaedge BXDECODE on AGB SP, docs/hwprobe.md).
-      of "000100100011": call("arm_branch_exchange")
+      # SWP ignores bits 20, 21 and 23 (png183 arm/data_swap)
+      of "0001....1001": call("arm_single_data_swap", i.bit(6))
+      # BX, with bits 5-6 (ARMv5's BLX is bit 5) and bits 21-22 free
+      # (arm_branch_exchange).
+      of "00010..00..1": call("arm_branch_exchange")
       of "000.....1..1": call("arm_halfword_data_transfer", i.bit(8), i.bit(7), i.bit(6), i.bit(5), i.bit(4), bits_range(i, 1, 2))
       of "011........1": call("arm_unimplemented")  # undefined instruction
       of "01..........": call("arm_single_data_transfer", i.bit(9), i.bit(8), i.bit(7), i.bit(6), i.bit(5), i.bit(4), i.bit(0))
@@ -21,7 +22,7 @@ macro armLutBuilder(): untyped =
       of "101.........": call("arm_branch", i.bit(8))
       of "110.........": call("arm_unimplemented")  # coprocessor data transfer
       of "1110.......0": call("arm_unimplemented")  # coprocessor data operation
-      of "1110.......1": call("arm_unimplemented")  # coprocessor register transfer
+      of "1110.......1": call("arm_coprocessor_register_transfer")
       of "1111........": call("arm_software_interrupt")
       of "00.10..0....": call("arm_psr_transfer", i.bit(9), i.bit(6), i.bit(5))
       of "00..........": call("arm_data_processing", i.bit(9), ArmAluOp(bits_range(i, 5, 8)), i.bit(4), i.bit(0))

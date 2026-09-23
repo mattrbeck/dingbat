@@ -252,6 +252,9 @@ proc read_verdict_text(ppm: seq[uint8]; glyphs: seq[(char, array[8, uint8])]): s
       best = text.strip()
   best
 
+# --bios: GBA screenshot rows run on this BIOS image instead of the HLE.
+var screenshot_bios = ""
+
 proc run_test(test: TestDef; harness_path: string): TestResult =
   let mode_str = case test.mode
     of tmSerial: "serial"
@@ -282,6 +285,8 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
       cmd.add(" --nosave")
     if test.press.len > 0:
       cmd.add(" --press=" & test.press)
+    if screenshot_bios.len > 0 and test.rom_path.endsWith(".gba"):
+      cmd.add(" --bios=" & screenshot_bios.quoteShell)
     let (run_output, run_code) = execCmdEx(cmd, options = {poUsePath})
     if run_code != 0:
       return TestResult(name: test.name, passed: false, output: run_output.strip())
@@ -2460,6 +2465,7 @@ proc main() =
 
   var bios_path = ""
   var apu_only = false
+  var gba_only = false
   var p = initOptParser(commandLineParams())
   while true:
     p.next()
@@ -2472,14 +2478,16 @@ proc main() =
         var v = p.val
         if v.len == 0: p.next(); v = p.key
         bios_path = v
+        screenshot_bios = v
       of "apu":
         apu_only = true
       of "suite":
         var v = p.val
         if v.len == 0: p.next(); v = p.key
         if v == "apu": apu_only = true
+        elif v == "gba": gba_only = true
         else:
-          echo "Unknown suite: ", v, " (only 'apu' can be selected)"
+          echo "Unknown suite: ", v, " (only 'apu' or 'gba' can be selected)"
           quit(1)
       else: discard
 
@@ -2508,6 +2516,34 @@ proc main() =
       apu_total += suite.results.len
       apu_pass += passes
     echo &"\nAPU total: {apu_total}, Pass: {apu_pass}, Fail: {apu_total - apu_pass}"
+    quit(0)
+
+  # --suite=gba: run ONLY the GBA suites and print tallies without touching
+  # any results file.
+  if gba_only:
+    let no_previous = initTable[string, bool]()
+    var gba_regressions: seq[string]
+    var gba_suites: seq[SuiteResults]
+    var mgba_detail: seq[MgbaSuiteDetail]
+    gba_suites.add(run_mgba_suite(harness, no_previous, gba_regressions,
+                                  mgba_detail, bios_path))
+    gba_suites.add(run_suite("GBA - jsmolka gba-tests",
+      build_jsmolka_tests(ensure_jsmolka_test_roms()), harness, no_previous,
+      gba_regressions))
+    gba_suites.add(run_suite("GBA - FuzzARM",
+      build_fuzzarm_tests(ensure_fuzzarm_test_roms()), harness, no_previous,
+      gba_regressions))
+    gba_suites.add(run_suite("GBA - alyosha gba-tests", build_alyosha_tests(
+      ensure_github_tree("alyosha-tas/gba-tests", AlyoshaRev, "alyosha-gba-tests"),
+      ensure_github_tree("png183/gba-tests", Png183Rev, "png183-gba-tests"),
+      ensure_jsmolka_test_roms()), harness, no_previous, gba_regressions))
+    gba_suites.add(run_suite("GBA - PeterLemon BIOS", build_peterlemon_bios_tests(),
+                             harness, no_previous, gba_regressions))
+    gba_suites.add(run_suite("GBA - Other test ROMs", build_gba_misc_tests(),
+                             harness, no_previous, gba_regressions))
+    echo ""
+    for suite in gba_suites:
+      echo &"{suite.suite_name}: {suite.results.countIt(it.passed)}/{suite.results.len} pass"
     quit(0)
 
   let results_path = getCurrentDir() / "tests" / "results.md"

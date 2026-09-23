@@ -70,7 +70,9 @@ proc update_tm(tim: Timer; num: int) =
 proc `[]`*(tim: Timer; io_addr: uint32): uint8 =
   let num = int((io_addr and 0xF) div 4)
   if bit(io_addr, 1):
-    read(tim.tmcnt[num], io_addr and 1)
+    # Bits 3-5 and the high byte are unused and read 0 (png183
+    # timer_check_count_up_presence writes 0x3C and reads back 0x04)
+    read(cast[uint16](tim.tmcnt[num]) and 0x00C7'u16, io_addr and 1)
   else:
     let v = tim.get_current_tm(num)
     when defined(pftrace):
