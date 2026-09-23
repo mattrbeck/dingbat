@@ -74,12 +74,23 @@ if ("serviceWorker" in navigator) {
   // uncontrolled becomes controlled by the first claim and a later Update
   // click must still reload); appUpdating covers the handover being the
   // first claim this page sees.
+  //
+  // The new worker claims every tab, so an Update clicked in another tab
+  // lands here too: with a game in progress that reload is not this tab's
+  // player's to lose. The button offers it instead (applyUpdate reloads).
   let hadController = !!navigator.serviceWorker.controller;
   let refreshing = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     if ((hadController || appUpdating) && !refreshing) {
-      refreshing = true;
-      location.reload();
+      if (appUpdating || !(currentRomName || linkMode || rollbackMode || netActive())) {
+        refreshing = true;
+        location.reload();
+      } else {
+        updateActivated = true;
+        showUpdateButton();
+        document.getElementById("update-label").textContent = "Reload";
+        updateBtn.title = "Updated in another tab: reload when you're ready";
+      }
     }
     hadController = true;
   });
@@ -161,6 +172,9 @@ const fullResetReload = async () => {
 // True once an update reload is committed; the Drive token renewal must not
 // start a popup the reload will orphan.
 var appUpdating = false;
+// Another tab's Update already put the new worker in charge of this one,
+// which kept its game (controllerchange above): all that is left is the reload.
+var updateActivated = false;
 
 const applyUpdate = async () => {
   appUpdating = true;
@@ -170,6 +184,10 @@ const applyUpdate = async () => {
   updateBtn.classList.add("updating");
   document.getElementById("update-label").textContent = "Updating…";
   closeUpdateModal();
+  if (updateActivated) {
+    location.reload();
+    return;
+  }
   if (swRegistration) {
     try {
       await swRegistration.update();

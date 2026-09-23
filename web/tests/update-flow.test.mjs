@@ -93,3 +93,47 @@ test("failed install (redundant worker) falls back to the clean-slate reset", as
   assert.equal(app.sw.registration.unregisterCalls, 1);
   assert.equal(app.state.reloads, 1); // fullResetReload, not silence
 });
+
+// ServiceWorker.lean's bug_update_in_one_tab_reloads_the_other_midgame: the
+// Update click in one tab activates the new worker, which claims every tab.
+test("another tab's update does not reload this tab mid-game; it offers the reload", async () => {
+  const app = await loadApp({ serviceWorker: { controlled: true } });
+  await settle();
+  app.api.currentRomName = "rom.gba";
+  app.sw.takeControl(); // the handover another tab's Update click triggered
+  await settle();
+  assert.equal(app.state.reloads, 0, "the game in this tab must not be reloaded under the player");
+  const btn = app.elements.get("update-btn");
+  assert.equal(btn.hidden, false, "the button says an update is waiting for this tab");
+  assert.equal(app.elements.get("update-label").textContent, "Reload");
+  // The player's own click, through the usual confirm, is what reloads.
+  await btn.dispatch("click");
+  assert.ok(app.elements.get("update-modal").classList.contains("open"));
+  await app.elements.get("update-confirm").dispatch("click");
+  await settle();
+  assert.equal(app.state.reloads, 1);
+  assert.equal(app.sw.registration.unregisterCalls, 0, "the new worker is already in charge: no reset");
+});
+
+test("a rollback session counts as a game in progress", async () => {
+  const app = await loadApp({ serviceWorker: { controlled: true } });
+  await settle();
+  app.api.rollbackMode = true;
+  app.sw.takeControl();
+  await settle();
+  assert.equal(app.state.reloads, 0);
+});
+
+test("this tab's own Update still reloads it with a game loaded", async () => {
+  const app = await loadApp({ serviceWorker: { controlled: true } });
+  await settle();
+  app.api.currentRomName = "rom.gba";
+  const waiting = app.sw.makeWorker("installed");
+  app.sw.registration.waiting = waiting;
+  await app.elements.get("update-btn").dispatch("click"); // opens the confirm
+  await app.elements.get("update-confirm").dispatch("click");
+  await settle();
+  app.sw.takeControl(waiting);
+  await settle();
+  assert.equal(app.state.reloads, 1);
+});
