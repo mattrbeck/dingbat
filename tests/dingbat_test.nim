@@ -1860,7 +1860,10 @@ proc main() =
       # here silently disagree with any harness that symlinks the ROM into a
       # scratch directory: identical through the logos, then divergent from
       # the frame the game first reads its save.
-      for i in 0 ..< emu.storage.memory.len: emu.storage.memory[i] = 0
+      # Blank means a fresh chip, as new_storage builds one with no .sav: every
+      # backup type starts erased at $FF (jsmolka/alyosha save/* read 0 as
+      # written data and fail their first check).
+      for i in 0 ..< emu.storage.memory.len: emu.storage.memory[i] = 0xFF
       emu.storage.save_path = ""
     # Same knob as dingbat_bench: idle-loop fast-forward snaps scheduler.cycles
     # to the next event, so a spin loop's exit cycle depends on what is
