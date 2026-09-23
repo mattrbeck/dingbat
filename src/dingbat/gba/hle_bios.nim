@@ -4,10 +4,44 @@ proc mul32(a, b: int32): int32 {.inline.} =
   ## Wrapping 32-bit multiply matching ARM `mul` instruction (low 32 bits).
   cast[int32](cast[uint32](cast[int64](a) * cast[int64](b)))
 
-proc bios_arctan(cpu: CPU) =
+# The affine SWIs' sine table: 256 steps per turn in 1.14 fixed point,
+# truncated toward zero. Derived, not copied: trunc(sin(i * pi / 128) *
+# 0x4000) reproduces the real BIOS's pa/pb/pc/pd for all 256 angles at
+# scale 0x4000 (ObjAffineSet under LLE), and cos is the table a quarter
+# turn on. The closest a non-quadrant entry comes to an integer is 0.003,
+# so no libm rounding can flip one.
+const AFFINE_SINE = block:
+  var t: array[256, int32]
+  for i in 0 ..< 256:
+    t[i] = int32(trunc(sin(float64(i) * PI / 128.0) * 16384.0))
+  t
+
+proc affine_params(sx, sy: int32; angle: uint16): (int16, int16, int16, int16) =
+  ## BgAffineSet/ObjAffineSet matrix: only the angle's high byte is used
+  ## (the low byte never moves the result), each product is shifted down
+  ## arithmetically, and pb negates the shifted product. Exact against the
+  ## real BIOS on 1024 ObjAffineSet entries (scales 0x100, 0x7FFF/-0x8000,
+  ## 0x1234/-1, -0x100/3) and 144 BgAffineSet entries (random scales,
+  ## centres, offsets). The float version this replaces was off by one in
+  ## most entries (PeterLemon BIOSBGAFFINESET/BIOSOBJAFFINESET data).
+  let a = int(angle shr 8)
+  let s = AFFINE_SINE[a]
+  let c = AFFINE_SINE[(a + 64) and 255]
+  template h(x: int32): int16 = cast[int16](uint16(cast[uint32](x) and 0xFFFF))
+  (h(ashr(sx * c, 14)), h(-ashr(sx * s, 14)), h(ashr(sy * s, 14)), h(ashr(sy * c, 14)))
+
+proc bios_arctan(cpu: CPU): int =
   ## ArcTan (SWI 0x09): the BIOS polynomial with 32-bit wrapping arithmetic
   ## and ASR shifts. r0 = tan in 1.14 -> r0 = angle (0x4000 = pi/2);
   ## r1 = -(input^2 >> 14), r3 = polynomial accumulator, as the routine leaves them.
+  ## Returns the body cost: fixed, plus the multiplies' early-termination
+  ## cycles. Two take the input as the multiplier (the square and the final
+  ## scale); the six middle Horner steps take the running accumulator (the
+  ## sum before each multiply). Fitted against the real BIOS with TM0 around
+  ## the swi on 285 inputs (every width 8..32 bits, both signs): exact on
+  ## all. The previous fixed 46 + 2 * mul(input) is this model whenever the
+  ## accumulator stays within 16 bits (inputs up to 0xFFFF), and was 1-4
+  ## cycles off beyond (PeterLemon BIOSARCTAN's 0xFEDCBA98 by 1).
   let a = cast[int32](cpu.r[0])
   var r1 = mul32(a, a)
   r1 = ashr(r1, 14)
@@ -15,18 +49,15 @@ proc bios_arctan(cpu: CPU) =
   const ARCTAN_COEFFS = [0xA9'i32, 0x0390, 0x091C, 0x0FB6, 0x16AA, 0x2081, 0x3651, 0xA2F9]
   var r3 = mul32(ARCTAN_COEFFS[0], r1)
   r3 = ashr(r3, 14)
+  result = 34 + 2 * mul_i_cycles(cast[uint32](a), true)
   for i in 1 ..< ARCTAN_COEFFS.len - 1:
-    r3 = r3 + ARCTAN_COEFFS[i]; r3 = mul32(r3, r1); r3 = ashr(r3, 14)
+    r3 = r3 + ARCTAN_COEFFS[i]
+    result += mul_i_cycles(cast[uint32](r3), true)
+    r3 = mul32(r3, r1); r3 = ashr(r3, 14)
   r3 = r3 + ARCTAN_COEFFS[^1]
   cpu.r[0] = cast[uint32](ashr(mul32(r3, a), 16))
   cpu.r[1] = cast[uint32](r1)
   cpu.r[3] = cast[uint32](r3)
-
-proc arctan_cycles(a: uint32): int {.inline.} =
-  ## ArcTan body cost: fixed, plus two multiplies whose multiplier is the
-  ## input (real-BIOS TM0: 127 for 0/1/-1, 129 for 0x100..0xFFFF, 131 for
-  ## 0x10000, net of the dispatch).
-  46 + 2 * mul_i_cycles(a, true)
 
 proc div_align_shifts(n, d: uint32): int {.inline.} =
   ## Taken-branch count of the BIOS divide's alignment loop (0x3C8): r2
@@ -238,6 +269,15 @@ const HALT_RETURN_COST {.intdefine.} = 21
 # caller refill. Per-unit terms use nonsequential waitstates: the BIOS loops
 # interleave instruction fetches with the data accesses, so no burst survives.
 
+proc rom_pf_seq16(bus: Bus; page: int): int {.inline.} =
+  ## What a ROM halfword data read saves when it lands on the address after
+  ## the previous ROM access with the prefetch buffer on: the bus then
+  ## prices it sequential even with BIOS instructions in between (with the
+  ## buffer off those break the burst). Zero outside the cartridge bus.
+  if bus.prefetch_on and page >= 0x8 and page <= 0xD:
+    int(bus.wait16_n[page]) - int(bus.wait16_s[page])
+  else: 0
+
 proc hle_body_start(cpu: CPU): int64 {.inline.} =
   int64(cpu.gba.scheduler.cycles) + int64(cpu.gba.bus.cycles)
 
@@ -273,6 +313,10 @@ const BIOS_CHECK_SKIP_COST = 26
 # (the routine indexes with an offset register) and the re-dispatch
 # re-charges the entry overhead (~50 cycles).
 const HLE_COPY_IRQ_CHECK = 32
+
+# RegisterRamReset's "other I/O" phase: cycles from the phase start to the
+# timer-register clear (see the bit-7 phase)
+const RRR_TIMER_STOP {.intdefine.} = 376
 
 proc hle_irq_deliverable(cpu: CPU): bool {.inline.} =
   let intr = cpu.gba.interrupts
@@ -367,6 +411,11 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       # `movs pc, lr`, restoring CPSR from SPSR_svc and returning to lr_svc
       let target = cpu.r[14] and not 1'u32
       let spsr = cpu.spsr
+      # The trap's own swi and dispatch are an artifact of the stub: take
+      # them back. Net 57 puts the no-driver path on the real BIOS's 80
+      # cycles around the swi (PeterLemon BIOSSoundDriverMain; 56 and 58
+      # miss by one either way).
+      cpu.gba.bus.add_cycles(-57)
       cpu.switch_mode(cast[CpuMode](spsr.mode))
       cpu.cpsr = spsr
       discard cpu.set_reg(15, target - 2)  # the stub is thumb
@@ -560,8 +609,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       cpu.r[1] = estimate
       cpu.r[3] = quotient
   of 0x09:  # ArcTan
-    cpu.idle(arctan_cycles(cpu.r[0]))
-    bios_arctan(cpu)
+    cpu.idle(bios_arctan(cpu))
   of 0x0A:  # ArcTan2(x, y) -> angle, 0x10000 = 2 pi
     # Behaviour taken from the real BIOS under LLE (77 inputs, values exact):
     # the ratio handed to ArcTan is the smaller coordinate over the larger,
@@ -588,7 +636,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       let den = if flat: x else: y
       let ratio = cast[uint32](uint32((int64(num) div int64(den)) and 0xFFFFFFFF))
       cpu.r[0] = ratio
-      bios_arctan(cpu)
+      let poly_cycles = bios_arctan(cpu)
       let t = cpu.r[0]
       # Per-octant fixed cost (real-BIOS TM0 readings around the swi, net of
       # the divide and polynomial): the quadrant branches differ in length.
@@ -602,7 +650,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       else:
         if y > 0: (cpu.r[0] = 0x4000'u32 - t; model = if x > 0: 67 else: 69)
         else: (cpu.r[0] = 0xC000'u32 - t; model = if x > 0: 72 else: 68)
-      model += hle_div_body_cost(num, den) + arctan_cycles(ratio)
+      model += hle_div_body_cost(num, den) + poly_cycles
     cpu.r[3] = 0x170'u32
     cpu.hle_charge_body(body_t0, model)
   of 0x0B:  # CpuSet
@@ -786,8 +834,18 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
           else:  # bit 7: reset all other I/O (except SIO and sound)
             for offset in 0x000'u32..0x05F'u32:
               cpu.gba.bus[0x04000000'u32 + offset] = 0x00'u8
-            for offset in 0x0B0'u32..0x11F'u32:
+            for offset in 0x0B0'u32..0x0FF'u32:
               cpu.gba.bus[0x04000000'u32 + offset] = 0x00'u8
+            # The timers stop RRR_TIMER_STOP cycles into the phase on the
+            # real BIOS, one word store per timer (TM0 started before the
+            # swi reads 431 there, TM2 433; PeterLemon
+            # BIOSRegisterRamReset's "other" row); the HLE's byte writes
+            # above are quicker, so wait before the timer block.
+            block:
+              let early = RRR_TIMER_STOP - int(cpu.hle_body_start() - phase_t0)
+              if early > 0 and not continuing: cpu.idle(early)
+            for offset in countup(0x100'u32, 0x11C'u32, 4):
+              cpu.gba.bus.write_word(0x04000000'u32 + offset, 0)
             for offset in 0x130'u32..0x133'u32:
               cpu.gba.bus[0x04000000'u32 + offset] = 0x00'u8
             for offset in 0x15C'u32..0x1FF'u32:
@@ -849,41 +907,49 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     else:
       let count = (raw_count + 7) and not 7'u32  # round up to multiple of 8
       let fill = bit(ctrl, 24)
-      let fill_val = cpu.gba.bus.read_word(src)
+      # Routine cost (0xBC4): a fixed part, then per 8-word burst the loop
+      # instructions plus an ldmia (copy only) and an stmia, each one
+      # nonsequential access and seven sequential ones in its region. Fill:
+      # 52 + the fill word's read, 5 + the stmia per burst; copy: 43, 7 +
+      # both bursts per burst. Fitted to real-BIOS TM0 around the swi on 300
+      # calls (1..256 words; sources IWRAM/EWRAM/VRAM/palette/ROM,
+      # destinations IWRAM/EWRAM/VRAM; WAITCNT 0x0000 and 0x4317): exact on
+      # all. The old per-word overhead (8 per burst, one too many for a copy
+      # and three for a fill) and an uncharged fixed part put PeterLemon
+      # BIOSCPUFASTSET 91 and 337 cycles out.
+      let bus = cpu.gba.bus
+      let sp = int(bits_range(src, 24, 27))
+      let dp = int(bits_range(dst, 24, 27))
+      let burst_s = int(bus.wait32_n[sp]) + 7 * int(bus.wait32_s[sp])
+      let burst_d = int(bus.wait32_n[dp]) + 7 * int(bus.wait32_s[dp])
+      let model_fixed = if fill: 52 + int(bus.wait32_n[sp]) else: 43
+      let model_burst = if fill: 5 + burst_d else: 7 + burst_s + burst_d
+      # Cartridge-bus sources are read uncharged: the bus would price every
+      # word as the HLE interleaves them with the writes, not as the ldmia's
+      # sequential burst the model charges. Everywhere else N == S and the
+      # charged access is the model's own.
+      let rom_src = sp >= 0x8 and sp <= 0xD
+      let fill_val = if fill: bus.read_word(src) else: 0'u32
       var done = 0'u32
-      var overhead_charged = 0
       var interrupted = false
       while done < count:
         let val = if fill: fill_val
-                  else: cpu.gba.bus.read_word(src)
-        cpu.gba.bus.write_word(dst, val)
+                  elif rom_src: bus.read_word_internal(src)
+                  else: bus.read_word(src)
+        bus.write_word(dst, val)
         if not fill: src += 4
         dst += 4
         inc done
         # The check interval is a multiple of the 8-word burst so the
-        # remaining count stays one too; loop overhead is spread per chunk.
+        # remaining count stays one too; the routine time is topped up per
+        # chunk so mid-copy events and IRQs land at faithful positions.
         if (done and (HLE_COPY_IRQ_CHECK - 1)) == 0 and done < count:
-          cpu.idle(HLE_COPY_IRQ_CHECK)
-          overhead_charged += HLE_COPY_IRQ_CHECK
-          cpu.gba.bus.catch_up()
+          cpu.hle_charge_body(body_t0, model_fixed + model_burst * int(done div 8))
+          bus.catch_up()
           if cpu.hle_irq_deliverable():
             interrupted = true
             break
-      # Loop overhead beyond the bus accesses (mGBA suite "CpuSet" timing
-      # row, which uses swi 0xC). The HLE charges every word nonsequential,
-      # but the 8-word ldmia/stmia bursts make words 2-8 sequential: credit
-      # the difference per burst (zero where N==S), plus one further
-      # sequential access pinned by gbaedge SWITIME (256-word ROM->EWRAM,
-      # hardware 0x0DFB).
-      let seq_credit = block:
-        let bus = cpu.gba.bus
-        let sp = int(bits_range(cpu.r[0], 24, 27))
-        let dp = int(bits_range(cpu.r[1], 24, 27))
-        let per_burst = (if fill: 0
-                         else: int(bus.wait32_n[sp]) - int(bus.wait32_s[sp])) +
-                        int(bus.wait32_n[dp]) - int(bus.wait32_s[dp])
-        (7 * (int(done) div 8) + 1) * per_burst
-      cpu.idle(int(done) + 5 - overhead_charged - seq_credit)
+      cpu.hle_charge_body(body_t0, model_fixed + model_burst * int(done div 8))
       cpu.r[0] = src
       cpu.r[1] = dst
       # The stm bursts go through r2-r9; r3 keeps the last word stored
@@ -895,37 +961,51 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
         cpu.hle_swi_rewind()
   of 0x0D:  # GetBiosChecksum
     cpu.r[0] = 0xBAAE187F'u32
+    # The routine sums the whole 16 KB image: a fixed 40960 cycles on the
+    # real BIOS (TM0 around the swi, PeterLemon BIOSCHECKSUM's 0xA033), 10
+    # per word. Charged preemptibly like the other long bodies.
+    cpu.hle_charge_body_interruptible(body_t0, 40960)
   of 0x0E:  # BgAffineSet
     var src = cpu.r[0]
     var dst = cpu.r[1]
     let count = cpu.r[2]
-    # Per entry: sin/cos lookups, four multiplies and the accesses (2 words
-    # + 3 halfwords read, 4 halfwords + 2 words written), all nonsequential.
-    # IWRAM exact against real-BIOS execution; 22 pinned by gbaedge SWITIME
-    # (1 entry, ROM -> EWRAM, 0x0146).
+    # Per entry: the accesses (a 3-word ldm, 3 halfwords read, 4 halfwords
+    # + 2 words written, all else nonsequential; from ROM with the prefetch
+    # buffer on one of the halfword reads is sequential, see rom_pf_seq16),
+    # eight multiplies taking the scales and the display offsets as the
+    # multiplier (two each), and 56 cycles besides; 23 fixed. Fitted to
+    # real-BIOS TM0 around the swi: 300 single entries with random scales,
+    # offsets and angles (the multiplier set is the only one of the
+    # candidate operands that fits all), counts 0..5 with IWRAM/EWRAM
+    # sources and destinations, ROM sources at WAITCNT 0x0000/0x0014/0x4317:
+    # exact on all; gbaedge SWITIME's hardware 0x0146 (1 entry, ROM ->
+    # EWRAM) is the ldm's two sequential words.
     let affine_model = block:
       let bus = cpu.gba.bus
       let sp = int(bits_range(src, 24, 27))
       let dp = int(bits_range(dst, 24, 27))
-      22 + int(count) * (73 + 2 * int(bus.wait32_n[sp]) + 3 * int(bus.wait16_n[sp]) +
+      23 + int(count) * (56 + int(bus.wait32_n[sp]) + 2 * int(bus.wait32_s[sp]) +
+                         3 * int(bus.wait16_n[sp]) - bus.rom_pf_seq16(sp) +
                          4 * int(bus.wait16_n[dp]) + 2 * int(bus.wait32_n[dp]))
+    var mul_cycles = 0
     for i in 0'u32 ..< count:
       let center_org_x = cast[int32](cpu.gba.bus.read_word(src))
       let center_org_y = cast[int32](cpu.gba.bus.read_word(src + 4))
       let display_cx = int32(cast[int16](cpu.gba.bus.read_half(src + 8)))
       let display_cy = int32(cast[int16](cpu.gba.bus.read_half(src + 10)))
-      let scale_x = cast[int16](cpu.gba.bus.read_half(src + 12))
-      let scale_y = cast[int16](cpu.gba.bus.read_half(src + 14))
+      let scale_x = int32(cast[int16](cpu.gba.bus.read_half(src + 12)))
+      let scale_y = int32(cast[int16](cpu.gba.bus.read_half(src + 14)))
       let angle = cpu.gba.bus.read_half(src + 16)
-      let theta = float64(angle) / 32768.0 * PI
-      let cos_t = cos(theta)
-      let sin_t = sin(theta)
-      let pa = cast[int16](int32(float64(scale_x) * cos_t))
-      let pb = cast[int16](int32(-float64(scale_x) * sin_t))
-      let pc = cast[int16](int32(float64(scale_y) * sin_t))
-      let pd = cast[int16](int32(float64(scale_y) * cos_t))
-      let start_x = int32(center_org_x) - (int32(pa) * display_cx + int32(pb) * display_cy)
-      let start_y = int32(center_org_y) - (int32(pc) * display_cx + int32(pd) * display_cy)
+      let (pa, pb, pc, pd) = affine_params(scale_x, scale_y, angle)
+      mul_cycles += 2 * (mul_i_cycles(cast[uint32](scale_x), true) +
+                         mul_i_cycles(cast[uint32](scale_y), true) +
+                         mul_i_cycles(cast[uint32](display_cx), true) +
+                         mul_i_cycles(cast[uint32](display_cy), true))
+      # 32-bit wrapping, as the routine computes it
+      let start_x = cast[int32](uint32((int64(center_org_x) -
+        (int64(pa) * display_cx + int64(pb) * display_cy)) and 0xFFFFFFFF))
+      let start_y = cast[int32](uint32((int64(center_org_y) -
+        (int64(pc) * display_cx + int64(pd) * display_cy)) and 0xFFFFFFFF))
       cpu.gba.bus.write_half(dst, cast[uint16](pa))
       cpu.gba.bus.write_half(dst + 2, cast[uint16](pb))
       cpu.gba.bus.write_half(dst + 4, cast[uint16](pc))
@@ -936,35 +1016,40 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       dst += 16
     # Interruptible: a per-scanline table (count=160) is ~12k cycles, which
     # atomically would starve per-frame IRQ work such as SIO rounds.
-    cpu.hle_charge_body_interruptible(body_t0, affine_model)
+    cpu.hle_charge_body_interruptible(body_t0, affine_model + mul_cycles)
   of 0x0F:  # ObjAffineSet
     var src = cpu.r[0]
     var dst = cpu.r[1]
     var count = cpu.r[2]
     let dst_stride = cpu.r[3]
-    # Per entry: sin/cos lookups, two multiplies, 3 halfword reads and 4
-    # halfword writes, all nonsequential (stride 2 and 8 cost the same).
+    # Per entry: 3 halfword reads and 4 halfword writes, all nonsequential
+    # (stride 2 and 8 cost the same), four multiplies taking the scales as
+    # the multiplier (two each), 37 besides; 15 fixed. Real-BIOS TM0 around
+    # the swi: exact on 32-entry runs with scales 0x100/0x7FFF/-0x8000/
+    # 0x1234/-1/-0x100/3 and counts 0..5 into IWRAM/EWRAM/OAM, ROM sources
+    # at WAITCNT 0x0000/0x0014/0x4317 (one read sequential with the prefetch
+    # buffer on, as BgAffineSet).
     let affine_model = block:
       let bus = cpu.gba.bus
       let sp = int(bits_range(src, 24, 27))
       let dp = int(bits_range(dst, 24, 27))
-      15 + int(count) * (45 + 3 * int(bus.wait16_n[sp]) + 4 * int(bus.wait16_n[dp]))
+      15 + int(count) * (37 + 3 * int(bus.wait16_n[sp]) - bus.rom_pf_seq16(sp) +
+                         4 * int(bus.wait16_n[dp]))
+    var mul_cycles = 0
     while count > 0:
       let sx = cast[int32](cast[int16](cpu.gba.bus.read_half(src)))
       let sy = cast[int32](cast[int16](cpu.gba.bus.read_half(src + 2)))
-      let angle = uint32(cpu.gba.bus.read_half(src + 4))
+      let angle = cpu.gba.bus.read_half(src + 4)
       src += 8
-      let theta = float64(angle) / 32768.0 * 3.14159265358979323846
-      let cos_val = cast[int16](int32(float64(sx) * cos(theta)))
-      let sin_val = cast[int16](int32(float64(sx) * sin(theta)))
-      let cos_val_y = cast[int16](int32(float64(sy) * cos(theta)))
-      let sin_val_y = cast[int16](int32(float64(sy) * sin(theta)))
-      cpu.gba.bus.write_half(dst, uint16(cos_val));             dst += dst_stride  # pa
-      cpu.gba.bus.write_half(dst, uint16(cast[uint16](-sin_val))); dst += dst_stride  # pb
-      cpu.gba.bus.write_half(dst, uint16(sin_val_y));           dst += dst_stride  # pc
-      cpu.gba.bus.write_half(dst, uint16(cos_val_y));           dst += dst_stride  # pd
+      let (pa, pb, pc, pd) = affine_params(sx, sy, angle)
+      mul_cycles += 2 * (mul_i_cycles(cast[uint32](sx), true) +
+                         mul_i_cycles(cast[uint32](sy), true))
+      cpu.gba.bus.write_half(dst, cast[uint16](pa)); dst += dst_stride
+      cpu.gba.bus.write_half(dst, cast[uint16](pb)); dst += dst_stride
+      cpu.gba.bus.write_half(dst, cast[uint16](pc)); dst += dst_stride
+      cpu.gba.bus.write_half(dst, cast[uint16](pd)); dst += dst_stride
       count -= 1
-    cpu.hle_charge_body_interruptible(body_t0, affine_model)  # as BgAffineSet
+    cpu.hle_charge_body_interruptible(body_t0, affine_model + mul_cycles)  # as BgAffineSet
   of 0x11:  # LZ77UnCompWram (8-bit writes)
     var src = cpu.r[0]
     let src_page = int(bits_range(src, 24, 27))
@@ -1059,9 +1144,10 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
         n_flags * (9 + rn) + n_lit * (20 + rn) + n_tok * (25 + 3 * rn) +
         n_runb * (21 + dh) + dh * int(decomp_len div 2))
   of 0x10:  # BitUnPack
-    # No routine-body cost model (only the HLE's own bus accesses are
-    # charged); the Diff filters 0x16-0x18 share this gap.
     var src = cpu.r[0]
+    let src_page = int(bits_range(src, 24, 27))
+    let dst_page = int(bits_range(cpu.r[1], 24, 27))
+    let info_page = int(bits_range(cpu.r[2], 24, 27))
     var dst = cpu.r[1]
     let info = cpu.r[2]
     let src_len = uint32(cpu.gba.bus.read_half(info))
@@ -1080,14 +1166,17 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     # dest_width may be 32, where a plain shift would be undefined
     let dest_mask = if dest_width >= 32: 0xFFFFFFFF'u32
                     else: (1'u32 shl dest_width) - 1
+    var n_units, n_offset, n_words = 0
     for i in 0'u32 ..< src_len:
       let byte_val = uint32(cpu.gba.bus[src]); src += 1
       var bit_pos: uint32 = 0
       while bit_pos < 8:
         let val = (byte_val shr bit_pos) and src_mask
         var expanded: uint32
+        inc n_units
         if val != 0 or zero_flag:
           expanded = val + offset_val
+          inc n_offset
         else:
           expanded = 0
         out_word = out_word or ((expanded and dest_mask) shl out_bits)
@@ -1097,7 +1186,25 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
           dst += 4
           out_word = 0
           out_bits = 0
+          inc n_words
         bit_pos += src_width
+    # Routine cost: a fixed 59 and the info block's reads (two words and
+    # three halfword/byte accesses, by the region they cost); per source
+    # byte 12 + its ldrb; per unit 22, +2 when the offset is added (nonzero
+    # unit, or the zero flag); per full output word 1 + its str. Fitted to
+    # real-BIOS TM0 around the swi on 918 calls (every source and
+    # destination width, 1..33 bytes, zero/random/all-ones data, offset and
+    # zero-flag combinations; IWRAM/EWRAM sources, IWRAM/EWRAM/VRAM
+    # destinations) and the info block in IWRAM/EWRAM/ROM (one of its reads
+    # sequential from ROM with the prefetch buffer on): exact on all.
+    block:
+      let bus = cpu.gba.bus
+      cpu.hle_charge_body_interruptible(body_t0, 59 +
+        3 * int(bus.wait16_n[info_page]) + 2 * int(bus.wait32_n[info_page]) -
+        bus.rom_pf_seq16(info_page) +
+        int(src_len) * (12 + int(bus.wait16_n[src_page])) +
+        n_units * 22 + n_offset * 2 +
+        n_words * (1 + int(bus.wait32_n[dst_page])))
   of 0x13:  # HuffUnComp
     var src = cpu.r[0]
     let src_page = int(bits_range(src, 24, 27))
@@ -1122,7 +1229,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     var cur_node = tree_start
     var cur_word: uint32 = 0
     var bits_left: int = 0
-    var n_node, n_leaf, n_words, n_outw = 0
+    var n_node, n_leaf, n_leaf_seq, n_words, n_outw = 0
     while written < decomp_len:
       if bits_left == 0:
         cur_word = cpu.gba.bus.read_word(data_pos)
@@ -1142,6 +1249,10 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       let is_leaf = if is_right: right_is_leaf else: left_is_leaf
       if is_leaf:
         n_leaf += 1
+        # The symbol read lands on the node's address + 2 (offset 0, the
+        # child on the node's own parity): sequential from ROM with the
+        # prefetch buffer on (rom_pf_seq16)
+        if child_addr == cur_node + 2: n_leaf_seq += 1
         let leaf_val = uint32(cpu.gba.bus[child_addr])
         if data_size == 4:
           out_word = out_word or (leaf_val shl out_bits)
@@ -1163,15 +1274,20 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     # Tree-walk cost (routine 0x1014): per input bit, a fixed budget plus two
     # ldrb tree reads (the node byte is re-read for the leaf flags); a leaf
     # adds the symbol ldrb, a stack reload and the root reset; each output
-    # word one str, each bitstream refill one ldr. Cycle-exact on odd-depth
-    # calibration streams, within 0.5% on even depths.
+    # word one str, each bitstream refill one ldr. Real-BIOS TM0 around the
+    # swi: exact on 204 streams (4- and 8-bit, 2..9 symbols, 4..256 bytes;
+    # IWRAM/EWRAM/ROM sources at WAITCNT 0x0000/0x0014/0x4014/0x4317,
+    # IWRAM/EWRAM/VRAM destinations).
     block:
       let bus = cpu.gba.bus
       let b = int(bus.wait16_n[src_page])   # nonseq byte read at src
       let w = int(bus.wait32_n[src_page])   # nonseq word read at src
       let d = int(bus.wait32_n[dst_page])   # nonseq word write at dst
+      # (the tree-size byte after the header word is the fixed part's
+      # sequential read)
       cpu.hle_charge_body_interruptible(body_t0, 57 + 2 * b + w +
-        n_node * (25 + 2 * b) + n_leaf * (39 + 3 * b) +
+        n_node * (25 + 2 * b) + n_leaf * (39 + 3 * b) -
+        (1 + n_leaf_seq) * bus.rom_pf_seq16(src_page) +
         n_outw * d + n_words * (9 + w))
   of 0x14:  # RLUnCompWram (8-bit writes)
     var src = cpu.r[0]
@@ -1205,14 +1321,18 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
           cpu.gba.bus[dst] = cpu.gba.bus[src]
           src += 1; dst += 1; written += 1; n_lit += 1
     # Loop cost (Thumb routine 0x1278): flag decode, literal ldrb+strb,
-    # run fill byte read once then strb per output byte.
+    # run fill byte read once then strb per output byte. Fitted to
+    # real-BIOS TM0 around the swi on 44 streams (1..8 random tokens and
+    # single literals/runs of 1..128 bytes; IWRAM/EWRAM sources and
+    # destinations): exact on all (the old 40/10/11/9/7 put PeterLemon
+    # BIOSRLE 5849 cycles slow, and the Vram form 4550 fast).
     block:
       let bus = cpu.gba.bus
       let rn = int(bus.wait16_n[src_page])
       let db = int(bus.wait16_n[dst_page])
-      cpu.hle_charge_body_interruptible(body_t0, 40 + int(bus.wait32_n[src_page]) +
-        n_flags * (10 + rn) + n_lit * (11 + rn + db) +
-        n_rruns * (9 + rn) + n_runb * (7 + db))
+      cpu.hle_charge_body_interruptible(body_t0, 42 + int(bus.wait32_n[src_page]) +
+        n_flags * (12 + rn) + n_lit * (9 + rn + db) +
+        n_rruns * (5 + rn) + n_runb * (6 + db))
   of 0x15:  # RLUnCompVram (16-bit writes)
     var src = cpu.r[0]
     let src_page = int(bits_range(src, 24, 27))
@@ -1259,14 +1379,15 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
           dst += 1; written += 1; out_idx += 1; n_lit += 1
     # Loop cost (Thumb routine 0x12C0): the flag decode spills through the
     # stack, literals buffer into halfwords, runs replay the spilled fill
-    # byte, each completed output halfword is one strh.
+    # byte, each completed output halfword is one strh. Fitted as the Wram
+    # form above (58 streams, VRAM destinations too): exact on all.
     block:
       let bus = cpu.gba.bus
       let rn = int(bus.wait16_n[src_page])
       let dh = int(bus.wait16_n[dst_page])
-      cpu.hle_charge_body_interruptible(body_t0, 45 + int(bus.wait32_n[src_page]) +
-        n_flags * (18 + rn) + n_lit * (14 + rn) +
-        n_rruns * (10 + rn) + n_runb * 13 + n_halves * (2 + dh))
+      cpu.hle_charge_body_interruptible(body_t0, 46 + int(bus.wait32_n[src_page]) +
+        n_flags * (20 + rn) + n_lit * (15 + rn) +
+        n_rruns * (7 + rn) + n_runb * 15 + n_halves * (1 + dh))
   of 0x16:  # Diff8bitUnFilterWram (8-bit writes)
     var src = cpu.r[0]
     let header = cpu.gba.bus.read_word(src)
@@ -1285,6 +1406,16 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       prev = uint8((uint32(prev) + uint32(diff)) and 0xFF)
       cpu.gba.bus[dst] = prev
       dst += 1; written += 1
+    # Loop cost: 29 + the header read, 11 + an ldrb and an strb per byte.
+    # The three Diff filters are fitted to real-BIOS TM0 around the swi on
+    # 36 calls each (2..200 bytes, IWRAM/EWRAM sources, IWRAM/EWRAM/VRAM
+    # destinations): exact on all (PeterLemon BIOSDIFF).
+    block:
+      let bus = cpu.gba.bus
+      let sp = int(bits_range(cpu.r[0], 24, 27))
+      let dp = int(bits_range(cpu.r[1], 24, 27))
+      cpu.hle_charge_body_interruptible(body_t0, 29 + int(bus.wait32_n[sp]) +
+        int(decomp_len) * (11 + int(bus.wait16_n[sp]) + int(bus.wait16_n[dp])))
   of 0x17:  # Diff8bitUnFilterVram (16-bit writes)
     var src = cpu.r[0]
     let header = cpu.gba.bus.read_word(src)
@@ -1310,6 +1441,15 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
         out_buf = out_buf or (uint16(prev) shl 8)
         cpu.gba.bus.write_half(dst and not 1'u32, out_buf)
       dst += 1; written += 1; out_idx += 1
+    # Loop cost: 31 + the header read, 18 + an ldrb per byte, an strh per
+    # output halfword (fitted with 0x16)
+    block:
+      let bus = cpu.gba.bus
+      let sp = int(bits_range(cpu.r[0], 24, 27))
+      let dp = int(bits_range(cpu.r[1], 24, 27))
+      cpu.hle_charge_body_interruptible(body_t0, 31 + int(bus.wait32_n[sp]) +
+        int(decomp_len) * (18 + int(bus.wait16_n[sp])) +
+        int(decomp_len div 2) * int(bus.wait16_n[dp]))
   of 0x18:  # Diff16bitUnFilter
     var src = cpu.r[0]
     let header = cpu.gba.bus.read_word(src)
@@ -1328,11 +1468,55 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       prev = uint16((uint32(prev) + uint32(diff)) and 0xFFFF)
       cpu.gba.bus.write_half(dst, prev)
       dst += 2; written += 2
+    # Loop cost: 29 + the header read, 11 + an ldrh and an strh per
+    # halfword (fitted with 0x16). From ROM with the prefetch buffer on the
+    # first halfword, right after the header, reads sequential (the rest do
+    # not: real-BIOS TM0 at WAITCNT 0x4317 is 2 cycles quicker, not 2 per
+    # halfword).
+    block:
+      let bus = cpu.gba.bus
+      let sp = int(bits_range(cpu.r[0], 24, 27))
+      let dp = int(bits_range(cpu.r[1], 24, 27))
+      cpu.hle_charge_body_interruptible(body_t0, 29 + int(bus.wait32_n[sp]) -
+        bus.rom_pf_seq16(sp) +
+        int(written div 2) * (11 + int(bus.wait16_n[sp]) + int(bus.wait16_n[dp])))
   of 0x19:  # SoundBias(r0): 0 -> SOUNDBIAS 0x000, else 0x200
-    # bias_level is the 9-bit field at bits 1-9, so register 0x200 = 0x100
-    cpu.gba.apu.soundbias.bias_level = if cpu.r[0] == 0: 0x000'u16 else: 0x100'u16
-  of 0x1A, 0x1B, 0x1D, 0x1E, 0x20, 0x21, 0x22, 0x23, 0x24, 0x28, 0x29:
-    discard  # Sound driver / music player stubs (games use their own engine)
+    # The real BIOS ramps the level one step (register value 2) at a time:
+    # r0 = 0 walks it down to 0, any other r0 walks it up to 0x200 and never
+    # down (0x3FE stays 0x3FE). The ramp lands at once here, the time is
+    # charged: 20 cycles, plus 61 per step and 2 once when falling, 62 per
+    # step when rising (real-BIOS TM0 around the swi from 0x000, 0x002,
+    # 0x100, 0x1FE, 0x200, 0x3FE, both directions: exact; PeterLemon
+    # BIOSSoundBias's 0x200 -> 0x200 is the bare 20). The other SOUNDBIAS
+    # bits are kept. bias_level is the 9-bit field at bits 1-9, so register
+    # 0x200 = 0x100.
+    let level = int(cpu.gba.apu.soundbias.bias_level)
+    var model = 20
+    if cpu.r[0] == 0:
+      if level > 0: model += 2 + 61 * level
+      cpu.gba.apu.soundbias.bias_level = 0
+    elif level < 0x100:
+      model += 62 * (0x100 - level)
+      cpu.gba.apu.soundbias.bias_level = 0x100
+    cpu.hle_charge_body_interruptible(body_t0, model)
+  # Sound driver / music player stubs (games use their own engine). The
+  # engine is not modeled, but the routines' time with no driver installed
+  # is (real-BIOS TM0 around the swi, [0x03007FF0] null or pointing at a
+  # non-driver area; PeterLemon BIOSSoundDriver*/ChannelClear rows).
+  of 0x1A:  # SoundDriverInit
+    # Not timed: the real routine spins until VCOUNT reads 159 (it returns
+    # on line 159 from any phase, up to a frame later) and then programs
+    # Timer 0, sound DMA 1/2 (CNT_H 0xB600), SOUNDCNT_H and the SoundArea
+    # for the BIOS mixer, none of which the HLE models (PeterLemon
+    # BIOSSoundDriverInit reads the reprogrammed Timer 0).
+    discard
+  of 0x1B: cpu.idle(29)  # SoundDriverMode
+  of 0x1D: cpu.idle(16)  # SoundDriverVSync
+  of 0x1E: cpu.idle(31)  # SoundChannelClear
+  of 0x28: cpu.idle(30)  # SoundDriverVSyncOff
+  of 0x29: cpu.idle(9)   # SoundDriverVSyncOn
+  of 0x20, 0x21, 0x22, 0x23, 0x24:
+    discard  # MusicPlayer stubs (not timed: their cost follows the player)
   of 0x1C:  # SoundDriverMain
     if not cpu.gba.bus.stub_bios:
       return  # a real BIOS image is mapped (hle_after_bios): no stub trampolines
@@ -1371,13 +1555,33 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       cpu.r[1] = 0
       cpu.r[2] = 0x37C8'u32
       cpu.r[3] = last
-      # Per word: the table ldr, the validation subroutine and the stmia
+      # Per word: the table ldr, the validation subroutine and the stmia.
+      # Real-BIOS TM0 around the swi, destination in IWRAM, EWRAM and VRAM:
+      # 1257/1437/1293 cycles, the dispatch included (PeterLemon
+      # BIOSSoundGetJumpList). The word count is fixed, so the split between
+      # the fixed and per-word terms is not observable; 3 / 32 is one that fits.
       let dst_page = int(bits_range(cpu.r[0], 24, 27))
-      cpu.hle_charge_body(body_t0, 6 + 36 * (33 + int(cpu.gba.bus.wait32_n[dst_page])))
+      cpu.hle_charge_body(body_t0, 3 + 36 * (32 + int(cpu.gba.bus.wait32_n[dst_page])))
   of 0x1F:  # MidiKey2Freq
     let base_freq = cpu.gba.bus.read_word(cpu.r[0] + 4)
-    let key = cast[int32](cpu.r[1])
-    let pitch = cast[int32](cpu.r[2])
+    var key = cast[int32](cpu.r[1])
+    var pitch = cast[int32](cpu.r[2])
+    # Keys above 178 clamp to key 178 with fine pitch 255 (real BIOS under
+    # LLE: every key 179..255 returns the same value). Body cost from
+    # real-BIOS TM0 around the swi over keys 0..255 and pitches 0..255: 88,
+    # +1 for a key in the top octaves (84 and up), +3 for a nonzero pitch;
+    # a clamped key costs 94; plus the WaveData read. The multiply by the
+    # base frequency does not move it (0x10 .. 0xFFFFFFFF alike).
+    let wave_page = int(bits_range(cpu.r[0] + 4, 24, 27))
+    var model = 88 + int(cpu.gba.bus.wait32_n[wave_page])
+    if cast[uint32](key) > 178:
+      key = 178
+      pitch = 255
+      model += 6
+    else:
+      if key >= 84: model += 1
+      if pitch != 0: model += 3
+    cpu.hle_charge_body(body_t0, model)
     # Reference key 180, not middle C: WaveData.freq stores the sample rate
     # scaled up 10 octaves (Metroid Fusion intro aliases with 60).
     let exponent = (float64(key) - 180.0 + float64(pitch) / 256.0) / 12.0
