@@ -900,6 +900,18 @@ sampling rules, not a switch residual (closed 2026-09-22).
 (8, 6) scores three more rows than (10, 7) and is two-sided on nothing; it is
 not shipped.
 
+**Mechanism (2026-09-22, from gambatte-core's PSG).** Its APU counts 2 MHz
+cycles as `(cpu_cc - last) >> (1 + ds)` with the remainder carried in `last`;
+a switch up re-reads the carried single-speed remainder at double-speed
+scale (the APU loses 0 or 1 base tick) and a switch down subtracts one CPU
+cycle before re-reading (it gains 2..5), so each switch's extra depends on
+the APU grid's phase against the CPU at that switch. dingbat rescales the
+channel deadlines exactly and re-anchors its 1 MHz tick grid at every
+switch, which has no memory of that phase. Carrying the grid's real-time
+phase across the switch (tried) plus a joint sweep of the two extras tops
+out at 211/220 and always loses the single-switch `_2` pair: closing H2 needs
+the channels quantised to a carried 2 MHz grid, an APU restructure.
+
 ---
 
 ## Hardware experiments that would close buckets
