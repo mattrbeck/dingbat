@@ -614,7 +614,8 @@ proc mem_write_open(mem: GbMemory; gb: GB; idx: int; val: uint8;
     # change VRAM and a held block would otherwise land on top of it.
     when HDMA_VISIBLE_DOTS != 0:
       if gb.ppu.hdma_bytes_held: ppu_land_hdma_if_due(gb.ppu, gb)
-    if not cpu_vram_open(gb.ppu, is_write = true): return
+    if not cpu_vram_open(gb.ppu, is_write = true, cgb = gb.cgb_enabled,
+                            ds = mem.current_speed != 0'u8): return
   elif idx >= 0xFE00 and idx <= 0xFE9F:
     # `mcycle_dots` is the span still ahead of the sample point: the whole
     # cycle for a start-of-cycle sample, nothing for an end-of-cycle one.

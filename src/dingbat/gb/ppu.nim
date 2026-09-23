@@ -338,6 +338,14 @@ proc cpu_vram_open*(ppu: GbPpu; is_write: bool; cgb = false;
   if is_write:
     # A write is applied before its M-cycle's dots (mem_write), so the live
     # mode is the mode at the start of that M-cycle.
+    when VRAM_WRITE_LINE0_CGB_GRACE != 0 and LCD_ON_LINE0_LOCK_LEAD != 0:
+      # The CGB's LCD-on line closes the lock as late for a write as for a
+      # read (the read side's close edge below; VRAM_WRITE_LINE0_CGB_GRACE).
+      if cgb and ppu.first_line and (ppu.lcd_status and 3'u8) == 3'u8 and
+         ppu.stat_prev_mode == 2'u8 and
+         ppu.cycle_counter - ppu.stat_chg_dot <
+           (if ds: 2'i32 else: 4'i32) + 1 + LCD_ON_LINE0_LOCK_LEAD:
+        return true
     return (ppu.lcd_status and 3'u8) != 3
   if lcdon_latched_mode(ppu, ds) == 3:
     when VRAM_READ_M0_OPEN_DOTS != 0 or VRAM_READ_M0_OPEN_DOTS_DS != 0:

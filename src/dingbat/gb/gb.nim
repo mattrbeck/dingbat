@@ -211,6 +211,11 @@ const LCDON_M0_LAG_DS* {.intdefine.} = 8
   ## `enable_display/ly0_m0irq_scx{0,1}_ds_1`, `frame0_m0irq_count_scx{2,3}_
   ## ds_1` (+4, none lost); 4 is inert, 12 loses the four `_2` twins.
 const CGB_LYC_RULE_FIRE_T* {.intdefine.} = 4
+const VRAM_WRITE_LINE0_CGB_GRACE* {.intdefine.} = 1
+  ## Whether a CGB VRAM write on the LCD-on line gets the read lock's late
+  ## close edge (cpu_vram_open). gambatte enable_display/ly0_late_vramw_2
+  ## [cgb]; widths 5..8 dots all take it and 10 loses `ly0_late_vramw_3`, so
+  ## the read side's own 7 is reused rather than a new number.
 const CGB_LYC_EVENT_HOLD_SS* {.intdefine.} = 7
   ## CGB_LYC_EVENT_HOLD_DS at single speed: a CGB LYC write committed in the
   ## last 7 dots of a line (gambatte-core: within 6 cycles of the event, plus
