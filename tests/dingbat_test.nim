@@ -1896,6 +1896,15 @@ proc main() =
           test_out.finished = true
       if mode == tmMgbaSuite and test_out.mgba_debug_output.contains("ALL DONE"):
         test_out.finished = true
+      if test_out.agbeeg_log.endsWith("DONE\0"):
+        test_out.finished = true
+    if test_out.agbeeg_log.len > 0:
+      # One `AGBEEG <name> <verdict>` line per test the cartridge reported
+      let fields = test_out.agbeeg_log.split('\0')
+      var i = 0
+      while i + 1 < fields.len and fields[i] != "DONE":
+        echo "AGBEEG ", fields[i].replace(' ', '_'), " ", fields[i + 1]
+        i += 2
     if mode == tmScreenshot and screenshot_path.len > 0:
       # Always colour on GBA: greyscale is a Game Boy notion (the DMG
       # screenshot suites compare against grey references), and a

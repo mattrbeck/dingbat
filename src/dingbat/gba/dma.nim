@@ -27,8 +27,6 @@ proc new_dma*(gba: GBA): DMA =
     result.src[i]     = 0
     result.dst[i]     = 0
 
-proc run_pending*(dma: DMA)
-
 proc request(dma: DMA; channel: int) {.inline.} =
   ## Latch a request; run_pending grants it in priority order.
   dma.pending = dma.pending or uint8(1 shl channel)

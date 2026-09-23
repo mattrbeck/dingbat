@@ -10,6 +10,9 @@ type
     mgba_debug_pos*: int
     mgba_debug_output*: string
     mgba_debug_enable*: uint16
+    # AGBEEG aging cartridge CI port (a byte register at 0x04999990): NUL-
+    # terminated test name, then "PASS"/"FAIL", repeated, then "DONE"
+    agbeeg_log*: string
     finished*: bool
     result_text*: string
 

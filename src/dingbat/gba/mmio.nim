@@ -103,6 +103,8 @@ proc `[]=`*(mmio: MMIO; address: uint32; value: uint8) =
         elif io_addr == 0xFFF781'u32:
           mmio.gba.test_output.mgba_debug_enable =
             (mmio.gba.test_output.mgba_debug_enable and 0x00FF'u16) or (uint16(value) shl 8)
+        elif io_addr == 0x999990'u32:
+          mmio.gba.test_output.agbeeg_log.add(char(value))
         elif io_addr >= 0xFFF600'u32 and io_addr <= 0xFFF6FF'u32:
           let off = int(io_addr - 0xFFF600'u32)
           mmio.gba.test_output.mgba_debug_buffer[off] = value

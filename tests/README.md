@@ -132,7 +132,10 @@ ship the frame they draw as a PNG and are compared exactly; they run on the HLE 
 the red rows show where its SWI cycle counts differ from the real BIOS's. ROMs that only
 print their verdicts are scored on a pinned hash of the all-pass frame, checked by eye when
 pinned; a ROM that has never drawn that frame here is `unpinned` and red until it does.
-SwpBusLocking's verdict is its backdrop colour (`pass_rgb`).
+SwpBusLocking's verdict is its backdrop colour (`pass_rgb`). AGBEEG reports each check
+through its CI port (a byte register at `0x04999990`: name, `PASS`/`FAIL`, ..., `DONE`);
+`dingbat_test` prints one `AGBEEG <name> <verdict>` line per check and the runner scores one
+row per check (`agbeeg_check`).
 
 `--mode=fuzzarm`: five DenSinH/FuzzARM ROMs of 10 000 randomly generated ARM/Thumb tests.
 The ROM reports a failure, waits for a button and continues; the mode drives that gate and

@@ -47,6 +47,8 @@ type
                           # this RRGGBB (ROMs whose verdict is the backdrop)
     verdict_glyphs: string # screenshot mode: the suite's font source; the row
                            # is scored on the verdict line it draws (read_verdict_text)
+    agbeeg_check: string  # screenshot mode: pass iff the harness printed
+                          # `AGBEEG <this> PASS` (the cartridge's CI port)
     ed_breakpoint: bool   # opcode 0xED ends the run (wilbertpol mooneye fork)
     bb_breakpoint: bool   # LD B,B always ends the run, pass or fail (AGE)
     screen_check: bool    # after the verdict, require the panel to have settled
@@ -290,6 +292,14 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
     let (run_output, run_code) = execCmdEx(cmd, options = {poUsePath})
     if run_code != 0:
       return TestResult(name: test.name, passed: false, output: run_output.strip())
+    if test.agbeeg_check.len > 0:
+      removeFile(tmp_ppm)
+      let line = "AGBEEG " & test.agbeeg_check & " "
+      for l in run_output.splitLines():
+        if l.startsWith(line):
+          let verdict = l[line.len .. ^1].strip()
+          return TestResult(name: test.name, passed: verdict == "PASS", output: verdict)
+      return TestResult(name: test.name, passed: false, output: "not reported")
     if test.verdict_glyphs.len > 0:
       let text = read_verdict_text(read_ppm_rgb(tmp_ppm),
                                    load_verdict_glyphs(test.verdict_glyphs))
@@ -1605,17 +1615,21 @@ proc build_gba_misc_tests(): seq[TestDef] =
     pass_rgb: "18B518",
   ))
 
-  # zaydlang/AGBEEG-Aging-Cartridge v0.0.2: cartridge, CPU and DMA checks with
-  # an O/X per check and PASS/FAIL per group; no all-pass frame yet.
-  result.add(TestDef(
-    name: "agbeeg/AGBEEG_AGING_CARTRIDGE",
-    rom_path: ensure_rom_download(AgbeegUrl, "agbeeg-v0.0.2.gba", AgbeegSha1),
-    mode: tmScreenshot,
-    timeout: 600,
-    color: true,
-    no_save: true,
-    expected_hash: "unpinned",
-  ))
+  # zaydlang/AGBEEG-Aging-Cartridge v0.0.2: hardware-measured cartridge, CPU
+  # and DMA checks, each reported through the cartridge's CI port at
+  # 0x04999990 (dingbat_test prints them); one row per check.
+  for check in ["ROM_ACCESS_DURING_PREFETCH", "TOGGLE_PREFETCHER", "SWP_LOCKS_BUS",
+                "LDM_DOES_NOT_LOCK_BUS", "STM_DOES_NOT_LOCK_BUS",
+                "CPU_RUNS_IDLES_DURING_DMA"]:
+    result.add(TestDef(
+      name: "agbeeg/" & check.toLowerAscii,
+      rom_path: ensure_rom_download(AgbeegUrl, "agbeeg-v0.0.2.gba", AgbeegSha1),
+      mode: tmScreenshot,
+      timeout: 600,
+      color: true,
+      no_save: true,
+      agbeeg_check: check,
+    ))
 
 proc build_jsmolka_tests(dir: string): seq[TestDef] =
   ## arm, thumb, memory, bios, save/*, unsafe report through the r12 protocol

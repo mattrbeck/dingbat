@@ -333,6 +333,10 @@ type
     # bus yet each stays sequential, without needing back-to-back bus cycles
     rom_next_addr2*: uint32
     dma_active*:     bool
+    # SWP holds the bus from its read to its write: DMA requests granted in
+    # between wait for the write (arm_single_data_swap). Never set between
+    # instructions, so not serialized.
+    swp_lock*:       bool
     # Prefetch hand-off to a DMA burst: rom_free_since is on the CPU's bus
     # clock while a granted DMA runs on the event clock (tick_slow rewinds to
     # the due event's cycle), so the prefetcher's phase is counted forward
@@ -1019,6 +1023,7 @@ type
 # Forward declarations to handle circular include dependencies
 proc irq*(cpu: CPU)
 proc und*(cpu: CPU)
+proc run_pending*(dma: DMA)
 proc schedule_interrupt_check*(intr: Interrupts; delay: int = 0)
 proc read_open_bus_word*(bus: Bus; address: uint32): uint32
 proc read_open_bus_value*(bus: Bus; address: uint32): uint8
@@ -1350,7 +1355,7 @@ proc post_init*(gba: GBA) =
     # Inside a DMA burst the clock is rewound to the event's cycle; the
     # request stays latched and the burst loop runs run_pending at its next
     # transfer boundary
-    if g.dma.pending != 0 and not g.bus.dma_active:
+    if g.dma.pending != 0 and not g.bus.dma_active and not g.bus.swp_lock:
       g.dma.run_pending()
   gba.handle_saves()
   # MP2K HLE: runtime-detected (mp2k.nim); nothing runs unless gba.mp2k_hle

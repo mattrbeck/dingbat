@@ -297,14 +297,21 @@ proc arm_single_data_swap*[byte_quantity: static bool](cpu: CPU; instr: uint32) 
   let rm = int(bits_range(instr, 0, 3))
   # r15 as the source stores A+12, as STR does (png183 arm/data_swap)
   let source = if rm == 15: cpu.r[15] + 4 else: cpu.r[rm]
+  # The read and write are one locked bus transaction: a DMA requested
+  # between them is granted after the write (SwpBusLocking, AGBEEG
+  # swp_locks_bus; LDM/STM do not lock).
+  let bus = cpu.gba.bus
+  bus.swp_lock = true
   when byte_quantity:
-    let tmp = cpu.gba.bus[cpu.r[rn]]
-    cpu.gba.bus[cpu.r[rn]] = uint8(source)
-    discard cpu.set_reg(rd, uint32(tmp))
+    let tmp = bus[cpu.r[rn]]
+    bus[cpu.r[rn]] = uint8(source)
   else:
-    let tmp = cpu.gba.bus.read_word_rotate(cpu.r[rn])
-    cpu.gba.bus.write_word(cpu.r[rn], source)
-    discard cpu.set_reg(rd, tmp)
+    let tmp = bus.read_word_rotate(cpu.r[rn])
+    bus.write_word(cpu.r[rn], source)
+  bus.swp_lock = false
+  if cpu.gba.dma.pending != 0 and not bus.dma_active:
+    cpu.gba.dma.run_pending()
+  discard cpu.set_reg(rd, uint32(tmp))
   cpu.idle(1)
   if rd != 15: cpu.step_arm()
 

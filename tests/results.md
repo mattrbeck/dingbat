@@ -1,13 +1,13 @@
 # Dingbat Test Results
 
-*Generated: 2026-09-23 12:27:08 · commit 4e8f4a085 · game-boy-test-roms v7.0*
+*Generated: 2026-09-23 12:35:45 · commit 52312b188 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
-- **Total:** 1418
-- **Pass:** 1313
+- **Total:** 1423
+- **Pass:** 1318
 - **Fail:** 105
 
 | Suite | Pass | Total |
@@ -20,7 +20,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | GBA - jsmolka gba-tests | 13 | 13 |
 | GBA - alyosha gba-tests | 48 | 126 |
 | GBA - PeterLemon BIOS | 5 | 25 |
-| GBA - Other test ROMs | 3 | 7 |
+| GBA - Other test ROMs | 8 | 12 |
 | GBA - FuzzARM | 5 | 5 |
 | Game Boy - Acid2 | 2 | 2 |
 | Game Boy - MagenTests | 7 | 7 |
@@ -221,7 +221,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | peterlemon/BIOSSoundGetJumpList | — | 👀 99.6% correct (38237/38400 pixels match) |
 | peterlemon/BIOSMidiKey2Freq | — | 👀 99.7% correct (38268/38400 pixels match) |
 
-## GBA - Other test ROMs (3/7)
+## GBA - Other test ROMs (8/12)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -230,8 +230,13 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | hades/timer-basic | — | 👌 |
 | hades/dma-latch | — | 👀 no all-pass frame pinned yet (frame hash 40D27CC0FE05E9EE) |
 | hades/dma-start-delay | — | 👀 no all-pass frame pinned yet (frame hash D24D56A7522BC46E) |
-| swp/SwpBusLocking | — | 👀 backdrop #EF0000, pass is #18B518 |
-| agbeeg/AGBEEG_AGING_CARTRIDGE | — | 👀 no all-pass frame pinned yet (frame hash 81EAE7A98499F3DC) |
+| swp/SwpBusLocking | — | 👌 |
+| agbeeg/rom_access_during_prefetch | — | 👌 |
+| agbeeg/toggle_prefetcher | — | 👀 FAIL |
+| agbeeg/swp_locks_bus | — | 👌 |
+| agbeeg/ldm_does_not_lock_bus | — | 👌 |
+| agbeeg/stm_does_not_lock_bus | — | 👌 |
+| agbeeg/cpu_runs_idles_during_dma | — | 👀 FAIL |
 
 ## GBA - FuzzARM (5/5)
 
