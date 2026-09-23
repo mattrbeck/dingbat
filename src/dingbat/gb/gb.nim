@@ -710,6 +710,14 @@ const CGB_HALT_PPU_LEAD_ANY* = CGB_HALT_PPU_LEAD_DOTS != 0
 #   a CPU clock, which is half a dot at double speed (CGB_WX_LATE_SS); the
 #   CGB's own pages are still unphotographed.
 const CGB_WX_LATENCY*         {.intdefine.} = 1
+const CGB_WE_ENABLE_LATE* {.intdefine.} = 1
+  ## A CGB LCDC.5 rise at single speed reaches the window comparator a dot
+  ## late, as a WX store does (CGB_WX_LATE_SS): the match is missed when the
+  ## shifter pops the window's first pixel on the write's own dot. gambatte
+  ## window/late_reenable_scx3_2 [cgb] (the discard pops it there) against
+  ## late_reenable_1 (SCX 0: the pixel pops a dot later and the window starts).
+const WIN_LX_OFF_V* = -128'i32
+  ## fifo_ppu.nim's WIN_LX_OFF (the comparator parked), here for ppu.nim.
 const CGB_WX_LATE_SS* {.intdefine.} = 1
   ## Whether every CGB takes the WX store CGB_WX_LATENCY dots late at single
   ## speed. At double speed the same CPU clock is half a dot and rounds to

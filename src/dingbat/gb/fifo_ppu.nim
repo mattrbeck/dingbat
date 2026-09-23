@@ -5,7 +5,7 @@
 # prints one per mode 3 dot. Tools only; compiled out of shipping builds.
 
 # Unreachable `lx` (it runs -7..160): parks the shifter's window compare.
-const WIN_LX_OFF = -128'i32
+const WIN_LX_OFF = WIN_LX_OFF_V
 
 # "No tail in flight": puts `cycle_counter - tail_dot0` far past the line end
 # so every recompose span is empty (fifo_recompose_last).

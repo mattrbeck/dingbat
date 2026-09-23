@@ -2224,6 +2224,14 @@ proc ppu_store_lcdc*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
       ppu.window_trigger = true
   if gb.fifo_ppu != nil:
     fifo_arm_window(gb.fifo_ppu)
+    when CGB_WE_ENABLE_LATE != 0:
+      # A CGB LCDC.5 rise reaches the comparator a dot late at single speed,
+      # like a WX store (CGB_WX_LATE_SS): a match on this very dot is missed.
+      if (moved and val and 0x20'u8) != 0 and gb.fifo_ppu.cgb and
+         gb.memory.current_speed == 0'u8 and (ppu.lcd_status and 3'u8) == 3'u8 and
+         not gb.fifo_ppu.fetching_window and gb.fifo_ppu.lx == gb.fifo_ppu.win_lx and
+         gb.fifo_ppu.fifo.size > 0:
+        gb.fifo_ppu.win_lx = WIN_LX_OFF_V
     when CGB_TDSEL_ANY:
       if (moved and 0x10'u8) != 0 and gb.fifo_ppu.cgb:
         # The dot the fetcher sees it on. A CPU-clock delay, so a double-speed
