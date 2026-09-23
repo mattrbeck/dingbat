@@ -920,6 +920,22 @@ no extras pair then closes H2); gambatte's rule only after a switch; the
 carried clock with its grid re-aligned to the power-on write. Hardware
 experiment (e) would settle which record the model should follow.
 
+**Both-right checks (2026-09-23).** Measurement: our audio verdict is
+gambatte's runner rule verbatim (all 35,112 samples of the scored frame
+equal), and moving the PCM12/34 read's sample point inside its M-cycle loses
+48 SameSuite rows, so neither instrument is the offset. Revision: the runner
+scores `freq_change_timing-cgb0BC` on CGB C, the revision gambatte's `cgb04c`
+rows are scored on. SameBoy: on CGB C it passes the SameSuite row and 32/46
+of gambatte's duty ladder (all fourteen misses are `audio1` members,
+including the no-switch `sound/*_ds_{2,4,6}`); on E it is the mirror image
+(22/46). The double-speed half of the conflict was a 2 us trigger grid (H1,
+closed); what remains is the single-speed trigger after a power-on inside
+the switch ladder, where gambatte's clock parity and SameSuite's power-on
+anchor still differ by 3 cycles. Switch-rule variants (up-switch delay,
+down-switch re-read, double-speed parity reference), a power-on parity
+re-alignment with +1 calibration, and a C-gated grid anchor with a start-up
+constant all fail to satisfy both.
+
 ---
 
 ## Hardware experiments that would close buckets
