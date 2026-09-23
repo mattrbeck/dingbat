@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-22 17:25:39*
+*Generated: 2026-09-22 17:32:07*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5151/5216 passed.**
+**5152/5216 passed.**
 
 ## bgen
 
@@ -33,15 +33,14 @@ All 14 tests passed.
 
 All 8 tests passed.
 
-## dma (223/229 passed)
+## dma (224/229 passed)
 
-223/229 tests passed, 6 failed:
+224/229 tests passed, 5 failed:
 
 | Test | Result |
 |------|--------|
 | dma/hdma_late_enable_ds_lcdoffset1_2_cgb04c_out0 [cgb] | got 1, expected 0 |
 | dma/hdma_late_enable_lcdoffset3_2_cgb04c_out0 [cgb] | got 1, expected 0 |
-| dma/hdma_pc_7ffe_cgb04c_out02 [cgb] | got 80, expected 02 |
 | dma/hdma_transition_ei_halt_late_unhalt_ldaaimm_hdma_scx1_1_cgb04c_out00 [cgb] | got 01, expected 00 |
 | dma/hdma_transition_speedchange_7fffstop_inc_cgb04c_out02 [cgb] | got 01, expected 02 |
 | dma/late_gdma_pc_7ffe_1_cgb04c_out02 [cgb] | got 00, expected 02 |

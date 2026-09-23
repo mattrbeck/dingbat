@@ -719,6 +719,14 @@ const CGB_WE_ENABLE_LATE* {.intdefine.} = 1
 const WIN_LX_OFF_V* = -128'i32
   ## fifo_ppu.nim's WIN_LX_OFF (the comparator parked), here for ppu.nim.
 const CGB_WX_LATE_SS* {.intdefine.} = 1
+const HDMA_START_GRANT_FETCH* {.intdefine.} = 2
+  ## An FF55 write that arms an HBlank transfer inside mode 0 raises the block's
+  ## request at once, but the CPU hands the bus over at the end of its NEXT
+  ## opcode fetch, not at the boundary the write's own instruction ends on
+  ## (HDMA_GRANT_FETCH_DOTS' rule); the request stands if mode 0 ends first.
+  ## The value is the deadline past the write in dots: 2..4 take gambatte
+  ## dma/hdma_pc_7ffe (the opcode at $8000 is fetched before the block
+  ## overwrites it), 1 and 6 do not. 0 = the old immediate block.
 const HDMA_LCD_OFF_BLOCK* {.intdefine.} = 1
   ## Whether switching the LCD off with an HBlank DMA armed requests a block,
   ## as the LCD-off PPU sits in mode 0 (gambatte-core requests one on the
@@ -2488,6 +2496,7 @@ type
     m0_late_fire*:     bool    # LCDON_M0_LAG_DS: the LCD-on line's mode-0 source is owed
     dma_halt_grace*:   uint8   # OAMDMA_HALT_GRACE: the halted M-cycle the OAM DMA still gets
     timer_irq_acked*:  bool    # TIMER_ACK_LOOKAHEAD: the dispatch acked the reload's request
+    hdma_start_req*:   bool    # HDMA_START_GRANT_FETCH: the owed block was raised by FF55
     when defined(test_harness):
       test_output*:  TestOutput
 

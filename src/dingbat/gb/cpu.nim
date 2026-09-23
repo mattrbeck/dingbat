@@ -79,7 +79,10 @@ when HDMA_GRANT_FETCH_DOTS >= 0:
     ## points: the end of an opcode fetch, an instruction boundary, or a HALT.
     ## `slack` is the dots of allowance the point gets over the request dot.
     let ppu = gb.ppu
-    if ppu.hdma_active and (ppu.lcd_status and 3'u8) == 0'u8:
+    # A request an FF55 write raised in mode 0 stands after mode 0 ends
+    # (HDMA_START_GRANT_FETCH).
+    let start_req = gb.hdma_start_req
+    if ppu.hdma_active and ((ppu.lcd_status and 3'u8) == 0'u8 or start_req):
       # `high(int32)` = owed to a halted CPU, waiting for its wake. Reaching a
       # fetch or boundary means the CPU is running and that wake has passed
       # (armed by the dispatch's own dots), so the debt is owed now
@@ -88,9 +91,12 @@ when HDMA_GRANT_FETCH_DOTS >= 0:
         ppu.hdma_due_deadline = ppu.cycle_counter
       when defined(gb_dma_trace):
         echo "GRANT? dot=", ppu.cycle_counter, " slack=", slack, " dl=", ppu.hdma_due_deadline
-      if ppu.cycle_counter + slack >= ppu.hdma_due_deadline:
+      if ppu.cycle_counter + slack >= ppu.hdma_due_deadline or
+         (start_req and (ppu.lcd_status and 3'u8) != 0'u8):
+        gb.hdma_start_req = false
         ppu_step_hdma(ppu, gb, in_cpu_cycle = HDMA_GRANT_FETCH_HOLD)
     else:
+      gb.hdma_start_req = false
       ppu.hdma_block_due = false
 
 const HALT_IME_PENDING_REDO* {.intdefine.} = 1

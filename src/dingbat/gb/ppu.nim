@@ -2029,8 +2029,20 @@ proc ppu_start_hdma*(ppu: GbPpu; gb: GB; val: uint8) =
     # Arming an HBlank transfer while already in HBlank starts it right away.
     # With the LCD off the mode reads 0 forever, so an armed transfer copies
     # exactly one block and no more (SameSuite dma/hdma_lcd_off).
-    if ppu.mode_flag == 0 or not ppu.lcd_enabled:
-      ppu_step_hdma(ppu, gb)
+    when HDMA_START_GRANT_FETCH != 0 and HDMA_GRANT_FETCH_DOTS >= 0:
+      if ppu.mode_flag == 0 and ppu.lcd_enabled and not gb.cpu.halted:
+        # In HBlank already: the request is up at once and the CPU hands the
+        # bus over at the end of its next opcode fetch (HDMA_START_GRANT_FETCH).
+        ppu.hdma_block_due = true
+        ppu.hdma_due_delay = 0
+        ppu.hdma_due_deadline = ppu.cycle_counter + int32(HDMA_START_GRANT_FETCH)
+        gb.hdma_start_req = true
+        when HDMA_DISABLE_GRACE_DOTS != 0: ppu.hdma_due_dot = ppu.cycle_counter
+      elif ppu.mode_flag == 0 or not ppu.lcd_enabled:
+        ppu_step_hdma(ppu, gb)
+    else:
+      if ppu.mode_flag == 0 or not ppu.lcd_enabled:
+        ppu_step_hdma(ppu, gb)
   else:
     if not ppu.hdma_active:
       # One acquire and one release for the whole burst: a GDMA never hands the
