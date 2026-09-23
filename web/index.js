@@ -7901,12 +7901,18 @@ const loadRom = async (romName, originalName, opts = {}) => {
   if (typeof abortRetroClip === "function") abortRetroClip();
   if (typeof stopClipRecording === "function") stopClipRecording();
   if (linkMode) await exitLinkMode();
-  if (typeof netShutdown === "function" && netMode) await netShutdown();
+  // Rollback is a link session too, though netMode is false in it: its
+  // teardown persists the session's battery under currentOriginalName, so it
+  // runs while that still names the session's game.
+  if (typeof netShutdown === "function" && (netActive() || rollbackMode)) await netShutdown();
   if (currentRomName && currentOriginalName) {
     await persistAutoState(); // where the outgoing game was left
     await storeLastFrame({ force: true }); // the outgoing game's picture
     await persistSave(currentRomName, currentOriginalName);
   }
+  // A link session that started during the awaits owns the core now; naming
+  // another game under it would have its teardown persist into that game.
+  if (rollbackMode || netActive()) return;
   currentRomName = romName;
   currentOriginalName = originalName || romName;
   lastFrameSig = null; // a new game: the tick's skip must not carry over
@@ -11241,8 +11247,11 @@ var Module = {
 
     window.addEventListener("beforeunload", () => {
       // Get the BYE out so the peer sees a clean exit (the sync parts run
-      // before the page dies).
-      if (netMode && typeof netShutdown === "function") netShutdown();
+      // before the page dies). A rollback session (netMode is false in it)
+      // too: its teardown promotes the session's core and issues the put of
+      // its battery synchronously (rbTeardown -> persistSave), and nothing
+      // else here would persist what was played in it.
+      if ((netActive() || rollbackMode) && typeof netShutdown === "function") netShutdown();
       if (linkMode) {
         persistLinkSaves();
       } else if (currentRomName && currentOriginalName) {
@@ -11263,7 +11272,8 @@ var Module = {
     // (also on bfcache entry). Suspend the AudioContext so a bfcached page
     // doesn't hold the audio session.
     window.addEventListener("pagehide", () => {
-      if (netMode && typeof netShutdown === "function") netShutdown();
+      // As beforeunload, rollback included.
+      if ((netActive() || rollbackMode) && typeof netShutdown === "function") netShutdown();
       if (linkMode) {
         persistLinkSaves();
       } else if (currentRomName && currentOriginalName) {

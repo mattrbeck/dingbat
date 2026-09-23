@@ -21,8 +21,12 @@ index.js side: `rollbackMode` (7154) is set by `enterRollbackMode` (9250) from
 `rbStartIfReady` (netplay.js 1294), which also sets `netMode = false`; the rAF
 `tick` runs exactly one branch: rollback, else netMode (SIO), else linkMode,
 else the solo core (11321-11400). `loadRom` (7881) and the `pagehide` /
-`beforeunload` handlers (11203/11226) tear the session down only
-`if (netMode)`.
+`beforeunload` handlers tear the session down `if (netActive() ||
+rollbackMode)`. Those three, and loadRom's return when a session started
+during its awaits, model the code as fixed by the commit "web: a rollback
+session ends before a launch or a page close" (line numbers at that commit;
+the rest of this file is still at dd7ba741f): at dd7ba741f they tore down only
+`if (netMode)`, and `netMode` is false in a rollback session.
 
 ## What is modelled
 
@@ -55,7 +59,7 @@ else the solo core (11321-11400). `loadRom` (7881) and the `pagehide` /
   currentOriginalName)` evaluates its arguments, reads the FS and issues the
   IndexedDB put synchronously (dbPutRoomy -> dbPut, index.js 4260/537), so the
   write's key is fixed at teardown time and is modelled there.
-* `loadRom`'s awaits before its commit (7885-7893) are `loadStart`/`loadCommit`.
+* `loadRom`'s awaits before its commit (7885-7897) are `launch`/`loadCommit`.
 * One "waiting"/"paired" reply stands for any server message; SDP/ICE
   contents are not modelled (a pc either yields its channel or not).
 * `navigator.onLine` is true; BroadcastChannel exists.
@@ -69,12 +73,14 @@ Proved: at most one signaling socket is ever live and none survives leaving
 deadline / fallback timers only ever belong to the current session
 (`timers_belong_to_current`); at most three reconnect dials between server
 replies (`redial_bounded`); every channel offered to wireChannel is installed
-or closed (`loser_closed`); with no launch or page teardown during a rollback
-session, every save record holds its own game and teardown persists the
-session (`benign_saves_keyed`, `benign_teardown_persists`).
+or closed (`loser_closed`); under every interleaving of launches, page
+teardowns and sessions, every save record holds its own game, no page dies
+with a session's progress unstored, and ending a session persists it under
+its own game (`saves_keyed`, `teardown_persists`, `pagehide_persists_session`).
 Refuted (`bug_*`): a cancelled or locally-won dial's stale `onerror` marks the
-server down; a retried manual Confirm closes its own channel; launching a
-game or closing the tab during a rollback session corrupts or loses saves.
+server down; a retried manual Confirm closes its own channel. The two
+rollback save traces found at dd7ba741f (launching a game, or closing the tab,
+during a rollback session) are now safe (`regress_*`).
 -/
 namespace WebState.Netplay
 
@@ -505,23 +511,30 @@ def step (s : State) : Event → State
                modal := false, manualView := false }
   | .rbProgress => { s with rbV := s.rbV + 1 }
   | .disconnect => shutdown false s
-  -- loadRom (7881): `if (netMode) await netShutdown()` -- rollback mode is not netMode
+  -- loadRom (7881-7889): `if (netActive() || rollbackMode) await netShutdown()`:
+  -- the session ends while currentOriginalName still names its game.
   | .launch g =>
-    let s := if s.netMode then shutdown false s else s
+    let s := if s.netMode || s.rollbackMode then shutdown false s else s
     { s with loadPending := some g }
-  -- persistSave(outgoing) ... currentOriginalName = g; restoreSave; initFromEmscripten
+  -- persistSave(outgoing) ... currentOriginalName = g; restoreSave; initFromEmscripten.
+  -- 7897: a session that started during the awaits owns the core: the load
+  -- returns without naming its game.
   | .loadCommit =>
     match s.loadPending with
     | none => s
     | some g =>
+      if s.netMode || s.rollbackMode then { s with loadPending := none } else
       let s := { s with store := put s.game s.solo s.store }
       { s with game := g, solo := s.store g, loadPending := none }
-  -- pagehide (11226): `if (netMode) netShutdown()`; persistSave(currentRomName, ...)
+  -- pagehide (11235) / beforeunload (11209): `if (netActive() || rollbackMode)
+  -- netShutdown()` (its put is issued synchronously), then
+  -- persistSave(currentRomName, ...). `lostProgress`: the page died in a
+  -- session whose progress is not in the store.
   | .pagehide =>
-    let s := if s.netMode then shutdown false s else s
-    let s := { s with store := put s.game s.solo s.store }
-    { s with dead := true,
-             lostProgress := s.rollbackMode && s.store s.sessGame != (s.sessGame, s.rbV) }
+    let s1 := if s.netMode || s.rollbackMode then shutdown false s else s
+    let s2 := { s1 with store := put s1.game s1.solo s1.store }
+    { s2 with dead := true,
+              lostProgress := s.rollbackMode && s2.store s.sessGame != (s.sessGame, s.rbV) }
 
 inductive Reachable : State → Prop
   | init : Reachable init
@@ -1086,7 +1099,9 @@ theorem ninv_ev_loadCommit {s : State}  (h : NInv s) (he : en s (.loadCommit) = 
   simp only [step]
   split
   · exact h
-  · exact obs _ ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
+  · split
+    · exact obs _ ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
+    · exact obs _ ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
 
 theorem ninv_ev_pagehide {s : State}  (h : NInv s) (he : en s (.pagehide) = true) :
     NInv (step s (.pagehide)) := by
@@ -1277,24 +1292,13 @@ theorem loser_closed {s : State} (h : Reachable s) : LInv s := by
   | init => exact linv_init
   | step e _ _ ih => exact linv_step ih e
 
-/-! ### Saves: correct as long as nothing loads or unloads during a rollback session
+/-! ### Saves: every record holds its own game, whatever runs during a session
 
-The two save bugs need `launch`/`loadCommit`/`pagehide` while `rollbackMode`.
-Excluding exactly those, every IndexedDB save record holds its own game's
-data, and ending the session persists the session's progress. -/
-
-def benign (s : State) : Event → Bool
-  | .launch _ | .loadCommit | .pagehide => !s.rollbackMode
-  | _ => true
-
-inductive Reach2 : State → Prop
-  | init : Reach2 init
-  | step {s : State} (e : Event) : Reach2 s → en s e = true → benign s e = true → Reach2 (step s e)
-
-theorem reach2_reachable {s : State} (h : Reach2 s) : Reachable s := by
-  induction h with
-  | init => exact .init
-  | step e _ he _ ih => exact .step e ih he
+At dd7ba741f this held only with no launch or page teardown during a rollback
+session (the traces at the end). A launch and a page teardown now end the
+session first, and a load that a session overtook names nothing: every
+IndexedDB save record holds its own game's data, and ending the session, by
+Disconnect, a launch or the page going away, persists its progress. -/
 
 structure SInv (s : State) : Prop where
   keyed   : ∀ g, (s.store g).1 = g
@@ -1427,8 +1431,8 @@ theorem sinv_netFail {s : State} (h : SInv s) : SInv (netFail s) := by
     · exact sinv_newSession (sinv_shutdown h true) (shutdown_rb_false h true)
     · exact sinv_shutdown h true
 
-theorem sinv_step {s : State} {e : Event} (hn : NInv s) (h : SInv s) (he : en s e = true)
-    (hb : benign s e = true) : SInv (step s e) := by
+theorem sinv_step {s : State} {e : Event} (hn : NInv s) (h : SInv s) (he : en s e = true) :
+    SInv (step s e) := by
   cases e with
   | openModal =>
     have hc : s.cur = none := by simp [en] at he; grind
@@ -1543,64 +1547,101 @@ theorem sinv_step {s : State} {e : Event} (hn : NInv s) (h : SInv s) (he : en s 
     · exact sinv_sv (sinv_shutdown h false) rfl
     · exact sinv_sv h rfl
   | loadCommit =>
-    simp [benign] at hb
     simp only [step]; split
     · exact h
     · rename_i g _
-      obtain ⟨a1, a2, a3, a4, a5⟩ := h
-      refine ⟨?_, ?_, ?_, ?_, a5⟩
+      split
+      · exact sinv_sv h rfl
+      · rename_i hn
+        have hb : s.rollbackMode = false := by
+          revert hn; cases s.netMode <;> cases s.rollbackMode <;> simp
+        obtain ⟨a1, a2, a3, a4, a5⟩ := h
+        refine ⟨?_, ?_, ?_, ?_, a5⟩
+        · intro x; simp only [put]
+          by_cases hx : x = s.game
+          · subst hx; simp [a2]
+          · simp [hx, a1 x]
+        · simp only [put]
+          by_cases hx : g = s.game
+          · subst hx; simp [a2]
+          · simp [hx, a1 g]
+        · intro hr; simp [hb] at hr
+        · intro hr; simp [hb] at hr
+  | pagehide =>
+    cases hr : s.rollbackMode with
+    | false =>
+      have ht : SInv (if s.netMode then shutdown false s else s) := by
+        split
+        · exact sinv_shutdown h false
+        · exact h
+      have hrb : (if s.netMode then shutdown false s else s).rollbackMode = false := by
+        split
+        · exact shutdown_rb_false h false
+        · exact hr
+      simp only [step, hr, Bool.or_false, Bool.false_and]
+      generalize (if s.netMode then shutdown false s else s) = t at ht hrb ⊢
+      obtain ⟨a1, a2, a3, a4, a5⟩ := ht
+      refine ⟨?_, ?_, ?_, ?_, rfl⟩
       · intro x; simp only [put]
-        by_cases hx : x = s.game
+        by_cases hx : x = t.game
         · subst hx; simp [a2]
         · simp [hx, a1 x]
-      · simp only [put]
-        by_cases hx : g = s.game
-        · subst hx; simp [a2]
-        · simp [hx, a1 g]
-      · intro hr; simp [hb] at hr
-      · intro hr; simp [hb] at hr
-  | pagehide =>
-    simp [benign] at hb
-    have ht : SInv (if s.netMode then shutdown false s else s) := by
-      split
-      · exact sinv_shutdown h false
-      · exact h
-    have hrb : (if s.netMode then shutdown false s else s).rollbackMode = false := by
-      split
-      · exact shutdown_rb_false h false
-      · exact hb
-    simp only [step]
-    generalize (if s.netMode then shutdown false s else s) = t at ht hrb ⊢
-    obtain ⟨a1, a2, a3, a4, a5⟩ := ht
-    refine ⟨?_, ?_, ?_, ?_, ?_⟩
-    · intro x; simp only [put]
-      by_cases hx : x = t.game
-      · subst hx; simp [a2]
-      · simp [hx, a1 x]
-    · exact a2
-    · intro hr; simp [hrb] at hr
-    · intro hr; simp [hrb] at hr
-    · simp [hrb]
+      · exact a2
+      · intro h'; simp [hrb] at h'
+      · intro h'; simp [hrb] at h'
+    | true =>
+      -- The session's core is promoted and persisted under its own game.
+      have hs := h.rbLive hr
+      have hg := h.sessOwn hr
+      have a1 := h.keyed
+      refine ⟨?_, ?_, ?_, ?_, ?_⟩
+      · intro x
+        simp only [step, hr, Bool.or_true, ite_true, shutdown, hs, Bool.and_self, put]
+        by_cases hx : x = s.game
+        · subst hx; simp [hg]
+        · simp [hx, a1 x]
+      · simp [step, hr, shutdown, hs, hg]
+      · intro h'; simp [step, hr, shutdown, hs] at h'
+      · intro h'; simp [step, hr, shutdown, hs] at h'
+      · simp [step, hr, shutdown, hs, put, hg]
 
-theorem sinv_reach2 {s : State} (h : Reach2 s) : SInv s := by
+theorem sinv_reachable {s : State} (h : Reachable s) : SInv s := by
   induction h with
   | init => exact sinv_init
-  | step e hr he hb ih => exact sinv_step (ninv_reachable (reach2_reachable hr)) ih he hb
+  | step e hr he ih => exact sinv_step (ninv_reachable hr) ih he
 
-/-- With no game launched and no page teardown during a rollback session,
-    every save record holds its own game's battery data and no session progress
-    is lost. -/
-theorem benign_saves_keyed {s : State} (h : Reach2 s) (g : Nat) :
+/-- Under every interleaving: every save record holds its own game's battery
+    data, and the page never dies with a session's progress unstored. -/
+theorem saves_keyed {s : State} (h : Reachable s) (g : Nat) :
     (s.store g).1 = g ∧ s.lostProgress = false :=
-  ⟨(sinv_reach2 h).keyed g, (sinv_reach2 h).noLoss⟩
+  ⟨(sinv_reachable h).keyed g, (sinv_reachable h).noLoss⟩
 
-/-- ... and ending the session persists its progress under its own game. -/
-theorem benign_teardown_persists {s : State} (h : Reach2 s) (hr : s.rollbackMode = true) (keep : Bool) :
+/-- Ending a session persists its progress under its own game. -/
+theorem teardown_persists {s : State} (h : Reachable s) (hr : s.rollbackMode = true) (keep : Bool) :
     (shutdown keep s).store s.sessGame = (s.sessGame, s.rbV) := by
-  have hi := sinv_reach2 h
+  have hi := sinv_reachable h
   have hs := hi.rbLive hr
   have hg := hi.sessOwn hr
   simp [shutdown, hs, hr, put, hg]
+
+/-- Closing the tab during a session stores the session's progress. -/
+theorem pagehide_persists_session {s : State} (h : Reachable s) (hr : s.rollbackMode = true) :
+    (step s .pagehide).store s.sessGame = (s.sessGame, s.rbV) := by
+  have hi := sinv_reachable h
+  have hs := hi.rbLive hr
+  have hg := hi.sessOwn hr
+  simp [step, shutdown, hs, hr, put, hg]
+
+/-- A launch during a session ends it before anything is loaded, with its
+    progress stored under its own game. -/
+theorem launch_ends_session {s : State} (h : Reachable s) (hr : s.rollbackMode = true) (g : Nat) :
+    (step s (.launch g)).rollbackMode = false ∧
+    (step s (.launch g)).store s.sessGame = (s.sessGame, s.rbV) := by
+  have hi := sinv_reachable h
+  have hs := hi.rbLive hr
+  have hg := hi.sessOwn hr
+  simp [step, shutdown, hs, hr, put, hg]
+
 /-! ## Counterexamples -/
 
 /-- Cancel while the signaling socket is still dialing: netShutdown's
@@ -1657,32 +1698,45 @@ theorem bug_manual_remint_still_wedged :
         | some p => s.raceClosed (.manual p)
         | none => false) = true := by decide
 
-/-- A rollback session sets `netMode = false` (rbStartIfReady 1299), so
-    `loadRom`'s `if (netMode) await netShutdown()` does not end it. From the
-    home screen (Main menu is not hidden in rollback mode), tapping another game
-    loads it into the solo core while the session keeps running (the rAF
-    rollback branch wins); when the session later ends, rbTeardown promotes the
-    session's core and persists it with `currentOriginalName` -- now the other
-    game -- so game 1's save is overwritten with game 0's battery data (and
-    `markUpload` sends it to Drive). -/
+/-! ### The rollback save traces found at dd7ba741f, now safe
+
+Each `regress_*` runs the old counterexample's events (every one enabled) and
+checks the state it ends in. -/
+
 def wrongKeyBad (s : State) : Bool := (s.store 1).1 != 1
 
-theorem bug_launch_during_rollback_corrupts_save :
+/-- At dd7ba741f a rollback session set `netMode = false` (rbStartIfReady
+    1299), so `loadRom`'s `if (netMode) await netShutdown()` did not end it:
+    tapping another game loaded it into the solo core while the session ran
+    on, and when the session ended, rbTeardown persisted the session's core
+    under `currentOriginalName` -- by then the other game -- so game 1's save
+    was overwritten with game 0's battery data. The launch now ends the
+    session first, persisting it under game 0 (so the old trace's final
+    Disconnect is no longer there to press). -/
+theorem regress_launch_during_rollback_corrupts_save :
     witnesses [.openModal, .joinClick, .localPair, .rbStart, .rbProgress,
-               .launch 1, .loadCommit, .disconnect] wrongKeyBad = true := by decide
+               .launch 1, .loadCommit]
+      (fun s => !wrongKeyBad s && s.store 0 == (0, 1) && s.game == 1 && !s.rollbackMode)
+      = true := by decide
 
-/-- While the rollback session runs, the game on screen is the session's, but
-    `currentOriginalName` names the newly launched one. -/
-theorem bug_launch_during_rollback_splits_identity :
+/-- ... and the game on screen and `currentOriginalName` no longer split. -/
+theorem regress_launch_during_rollback_splits_identity :
     witnesses [.openModal, .joinClick, .localPair, .rbStart, .launch 1, .loadCommit]
-      (fun s => s.rollbackMode && s.game != s.sessGame) = true := by decide
+      (fun s => !(s.rollbackMode && s.game != s.sessGame)) = true := by decide
 
-/-- `pagehide` tears down only `if (netMode)`: in a rollback session the
-    session's core (whose battery holds e.g. a finished trade) is never
-    promoted or persisted -- persistSave(currentRomName) writes the solo core's
-    pre-session .sav -- so closing the tab loses the session's progress. -/
-theorem bug_pagehide_in_rollback_loses_progress :
+/-- A session that starts while a load is between its first segment and its
+    commit: the load names nothing (loadRom's return at 7897), and ending the
+    session later persists it under its own game. -/
+theorem regress_session_starts_mid_load :
+    witnesses [.openModal, .joinClick, .localPair, .launch 1, .rbStart, .rbProgress,
+               .loadCommit, .disconnect]
+      (fun s => !wrongKeyBad s && s.game == 0 && s.store 0 == (0, 1)) = true := by decide
+
+/-- At dd7ba741f `pagehide` tore down only `if (netMode)`: the session's core
+    (whose battery held e.g. a finished trade) was never promoted or
+    persisted, and closing the tab lost the session's progress. -/
+theorem regress_pagehide_in_rollback_loses_progress :
     witnesses [.openModal, .joinClick, .localPair, .rbStart, .rbProgress, .pagehide]
-      (fun s => s.lostProgress) = true := by decide
+      (fun s => !s.lostProgress && s.store 0 == (0, 1)) = true := by decide
 
 end WebState.Netplay
