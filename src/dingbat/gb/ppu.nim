@@ -2079,6 +2079,16 @@ proc ppu_run_gdma*(ppu: GbPpu; gb: GB) =
   when GDMA_SETUP_MCYCLES != 0:
     mem_tick_components(gb.memory, gb, 4 * GDMA_SETUP_MCYCLES, from_cpu = false)
 
+const HDMA_START_CUTOFF_SS* {.intdefine.} = 2
+  ## Dots before the line's end from which an FF55 write arming an HBlank
+  ## transfer no longer counts as inside this HBlank (the block waits for the
+  ## next mode-0 edge), at single speed; `_DS` at double speed, where only the
+  ## boundary dot itself is excluded. gambatte `dma/hdma_late_enable_
+  ## lcdoffset3_2` and `ds_lcdoffset1_2` (the grids a speed-switch round
+  ## trip leaves put the write on dots 454 and 456) against `_1` twins and
+  ## `hdma_late_enable_{1,ds_1}`: SS 1 takes only the double-speed row, 3
+  ## loses `hdma_late_enable_1`; DS 1 loses `hdma_late_enable_ds_1`.
+const HDMA_START_CUTOFF_DS* {.intdefine.} = 0
 proc ppu_start_hdma*(ppu: GbPpu; gb: GB; val: uint8) =
   ## A write to FF55. The length register takes the low 7 bits whether the
   ## write starts or stops a transfer (SameSuite dma/hdma_lcd_off reads back
@@ -2096,8 +2106,17 @@ proc ppu_start_hdma*(ppu: GbPpu; gb: GB; val: uint8) =
     # Arming an HBlank transfer while already in HBlank starts it right away.
     # With the LCD off the mode reads 0 forever, so an armed transfer copies
     # exactly one block and no more (SameSuite dma/hdma_lcd_off).
+    var in_m0 = ppu.mode_flag == 0
+    when HDMA_START_CUTOFF_SS != 0 or HDMA_START_CUTOFF_DS != 0:
+      # (DS 0 still excludes the boundary dot.) Too close to the line's end, the arming write misses this HBlank
+      # (HDMA_START_CUTOFF_SS/_DS).
+      if in_m0 and ppu.lcd_enabled and
+         ppu.cycle_counter >= gb_line_end(ppu) -
+           int32(if gb.memory.current_speed != 0'u8: HDMA_START_CUTOFF_DS
+                 else: HDMA_START_CUTOFF_SS):
+        in_m0 = false
     when HDMA_START_GRANT_FETCH != 0 and HDMA_GRANT_FETCH_DOTS >= 0:
-      if ppu.mode_flag == 0 and ppu.lcd_enabled and not gb.cpu.halted:
+      if in_m0 and ppu.lcd_enabled and not gb.cpu.halted:
         # In HBlank already: the request is up at once and the CPU hands the
         # bus over at the end of its next opcode fetch (HDMA_START_GRANT_FETCH).
         ppu.hdma_block_due = true
@@ -2105,10 +2124,10 @@ proc ppu_start_hdma*(ppu: GbPpu; gb: GB; val: uint8) =
         ppu.hdma_due_deadline = ppu.cycle_counter + int32(HDMA_START_GRANT_FETCH)
         gb.hdma_start_req = true
         when HDMA_DISABLE_GRACE_DOTS != 0: ppu.hdma_due_dot = ppu.cycle_counter
-      elif ppu.mode_flag == 0 or not ppu.lcd_enabled:
+      elif in_m0 or not ppu.lcd_enabled:
         ppu_step_hdma(ppu, gb)
     else:
-      if ppu.mode_flag == 0 or not ppu.lcd_enabled:
+      if in_m0 or not ppu.lcd_enabled:
         ppu_step_hdma(ppu, gb)
   else:
     if not ppu.hdma_active:
