@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-22 19:56:32*
+*Generated: 2026-09-22 20:07:10*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5178/5216 passed.**
+**5185/5216 passed.**
 
 ## bgen
 
@@ -172,19 +172,12 @@ All 69 tests passed.
 
 All 802 tests passed.
 
-## scx_during_m3 (131/141 passed)
+## scx_during_m3 (138/141 passed)
 
-131/141 tests passed, 10 failed:
+138/141 tests passed, 3 failed:
 
 | Test | Result |
 |------|--------|
-| scx_during_m3/scx_0761c0/scx_during_m3_2 [cgb, png] | 9/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_3 [cgb, png] | 2448/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_4 [cgb, png] | 3575/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_ds_2 [cgb, png] | 9/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_ds_3 [cgb, png] | 2440/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_ds_4 [cgb, png] | 2448/23040 pixels differ |
-| scx_during_m3/scx_0761c0/scx_during_m3_ds_5 [cgb, png] | 2431/23040 pixels differ |
 | scx_during_m3/scx_attrib_during_m3_spx2_ds [cgb, png] | 8/23040 pixels differ |
 | scx_during_m3/scx_during_m3_spx2 [cgb, png] | 8/23040 pixels differ |
 | scx_during_m3/scx_during_m3_spx2_ds [cgb, png] | 8/23040 pixels differ |

@@ -757,6 +757,17 @@ const CGB_WE_ENABLE_LATE* {.intdefine.} = 1
 const WIN_LX_OFF_V* = -128'i32
   ## fifo_ppu.nim's WIN_LX_OFF (the comparator parked), here for ppu.nim.
 const CGB_WX_LATE_SS* {.intdefine.} = 1
+const SCX_BORROW_DISCARD_END* {.intdefine.} = 1
+  ## Once a mid-discard SCX store has made the fine-scroll discard wrap
+  ## (SCX_FINE_LATCH_WRAP), the fetcher's map column borrows against where the
+  ## discard ENDED (`scx_live_fine`), one tile back per wrap, instead of the
+  ## line's latched fine scroll: the tiles after the discard are counted from
+  ## its end (gambatte-core restarts its pixel position there, so the column
+  ## is `(SCX + 8 - F_end + 8j) / 8`). gambatte `scx_during_m3/scx_0761c0/
+  ## scx_during_m3_{2,3,4,ds_2..ds_5}` [cgb] (a $61 store in the discard of a
+  ## line latched at 7 wraps it; the later $C0 store then borrows one tile
+  ## more). Without the wrap term the reference change breaks every frame;
+  ## CGB-only scores the same. 0 = the line's latched reference always.
 const WIN_REVOKE_DS_PUSH* {.intdefine.} = 1
   ## At CGB double speed a window start is still revoked by an LCDC.5 fall
   ## landing on the dot its restart pushes the first tile (k = W - D =
@@ -2101,6 +2112,7 @@ type
       # (SCX_LIVE_BORROW_LATCHED). Inside the same `when` as its field.
       when SCX_LIVE_BORROW_LATCHED:
         scx_live_fine*:   int32
+        scx_wraps*:       int32   # SCX_BORROW_DISCARD_END: discard wraps this line
     # Low three bits of the dot the line latched its fine scroll on: the slot
     # index the wrap needs, which `scx_latch_until` cannot supply once a store
     # has moved the window's end. A byte because that is all it is (int32

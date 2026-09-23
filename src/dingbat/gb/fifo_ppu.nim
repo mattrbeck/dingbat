@@ -148,6 +148,7 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
   when SCX_FINE_LATCH_LIVE:
     ppu.scx_latch_until = -1'i32
     ppu.scx_live_fine = 0'i32
+    when SCX_BORROW_DISCARD_END != 0: ppu.scx_wraps = 0'i32
   when SCX_STORE_STALL_DOTS != 0:
     # Per-line: a stall armed at the end of one line must not hold the next.
     ppu.scx_stall = 0'i32
@@ -544,6 +545,7 @@ proc fifo_arm_scx*(ppu: GbFifoPpu) =
         if int32(want) < consumed:
           extra = SCX_FINE_LATCH_WRAP
           ppu.scx_latch_until += SCX_FINE_LATCH_WRAP
+          when SCX_BORROW_DISCARD_END != 0: inc ppu.scx_wraps
       # The running discard target, not the borrow's reference
       # (SCX_LIVE_BORROW_LATCHED).
       when SCX_LIVE_BORROW_LATCHED:
@@ -552,6 +554,13 @@ proc fifo_arm_scx*(ppu: GbFifoPpu) =
       else:
         ppu.lx -= int32(want - ppu.scx_fine) + extra
         ppu.scx_fine = want
+  when SCX_BORROW_DISCARD_END != 0 and SCX_LIVE_BORROW_LATCHED:
+    # The borrow's reference is where the discard ENDED (SCX_BORROW_DISCARD_END),
+    # a tile back per wrap it took.
+    if ppu.scx_wraps > 0'i32:
+      ppu.scx_tile = (int(ppu.scx) shr 3) - int(ppu.scx_wraps) -
+                     SCX_FINE_BORROW * ord(int32(int(ppu.scx) and 7) < ppu.scx_live_fine)
+      return
   ppu.scx_tile = (int(ppu.scx) shr 3) -
                  SCX_FINE_BORROW * ord((int(ppu.scx) and 7) < ppu.scx_fine)
 
@@ -584,6 +593,7 @@ proc fifo_sample_smooth_scroll*(ppu: GbFifoPpu) =
   when SCX_FINE_LATCH_LIVE and SCX_LIVE_BORROW_LATCHED:
     # Second copy: this one follows the discard (SCX_LIVE_BORROW_LATCHED).
     ppu.scx_live_fine = int32(ppu.scx_fine)
+    when SCX_BORROW_DISCARD_END != 0: ppu.scx_wraps = 0'i32
   fifo_arm_scx(ppu)
   when SCX_FINE_LATCH_LIVE:
     # The window is the discard's own length, in raw SCX & 7 (a count, not a
