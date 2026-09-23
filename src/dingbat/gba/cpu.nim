@@ -158,6 +158,11 @@ proc clear_pipeline*(cpu: CPU) =
   cpu.refill_pending = true
   # Refill = two sequential fetches at the destination.
   let page = int(bits_range(cpu.r[15], 24, 27))
+  # The console's fetch address runs two instructions ahead of the executing
+  # one, where dingbat fetches; the refill's prefetch check needs the lead
+  # the branch itself ran at.
+  let old_ahead = cpu.gba.bus.rom_ahead
+  cpu.gba.bus.rom_ahead = (if cpu.cpsr.thumb: 4'i8 else: 8'i8)
   if page < 0x8 or page > 0xD:
     # The prefetcher only runs while executing from ROM; leaving the gamepak
     # abandons the buffered stream (mGBA suite BIOS timing, prefetch columns).
@@ -185,8 +190,53 @@ proc clear_pipeline*(cpu: CPU) =
       var both = n + s
       var broken = false
       var credit = 0
+      var streamed = false  # the refill came through the prefetcher
+      var windowed = false
       when DMA_ACCESS_WINDOW:
-        if (bus.sync_bits and 2) != 0:
+        windowed = (bus.sync_bits and 2) != 0
+      if not windowed and bus.prefetch_on:
+        let now = bus.sched.cycles + CycleCount(bus.cycles)
+        let target = cpu.r[15] and (if cpu.cpsr.thumb: not 1'u32 else: not 3'u32)
+        let from_rom = bus.fetch_page - 0x8 <= 5
+        if from_rom and bus.rom_next_addr + uint32(old_ahead) == target and
+           (bus.pf_paused or now > bus.rom_free_since or
+            (bus.pf_running and old_ahead == 4)):
+          # A branch to the halfword the prefetcher reads next keeps the
+          # buffer: the target comes out of it, or out of the halfword in
+          # flight, like any sequential fetch (alyosha prefetcher_full_arm
+          # t001c, prefetcher_branch_thumb). With nothing buffered or in
+          # flight, a Thumb branch still meets the prefetcher starting on the
+          # target at S if it has been running since the CPU's own last
+          # access (prefetcher_branch_thumb_4), and fetches nonsequentially
+          # if it has not (prefetcher_branch_thumb_2). An ARM branch there
+          # fetches nonsequentially either way (ppu/start_up_vbl's startup
+          # `bx` after eight back-to-back ARM fetches). Bracketed: counting
+          # the running prefetcher for ARM too fails ppu/start_up_vbl and
+          # prefetcher_branch_thumb_arm_3's first check; for neither mode,
+          # prefetcher_branch_thumb_3 and _4.
+          let halves = if cpu.cpsr.thumb: 1 else: 2
+          let first = bus.pf_serve(now, page, halves)
+          both = first + bus.pf_serve(now + CycleCount(first), page, halves)
+          streamed = true
+        elif from_rom and not bus.pf_paused and now > bus.rom_free_since:
+          # Any other target flushes the buffer. A halfword in its final
+          # cycle has committed and the fetch waits it out, as a data access
+          # does (rom_access_cycles' prefetch hand-off). Without the cycle
+          # alyosha prefetcher_full_arm, prefetcher_branch_thumb, _thumb_3,
+          # prefetcher_boundary_1 and _3 fail.
+          let elapsed = int(now - bus.rom_free_since)
+          let commit =
+            if elapsed < 64: ((bus.pf_commit[page] shr elapsed) and 1'u64) != 0
+            else:
+              let sp = int(bus.wait16_s[page])
+              elapsed < 8 * sp and elapsed mod sp == sp - 1
+          if commit: both += 1
+      if not streamed:
+        # The CPU's own fetches: the prefetcher starts behind them
+        bus.pf_paused = false
+        bus.pf_running = false
+      when DMA_ACCESS_WINDOW:
+        if windowed:
           # Two accesses, each with an end a DMA grant can wait for; and a
           # burst between them breaks the second, which is then nonsequential
           # (tests/roms/payloads/slotdma.s).
@@ -199,7 +249,11 @@ proc clear_pipeline*(cpu: CPU) =
           let after_first = bus.dma_end_at == bus.sched.cycles + CycleCount(bus.cycles)
           if after_first:
             if DMA_KEEPS_PREFETCH and bus.prefetch_on and bus.dma_first_rom:
-              both = max(0, s - bus.dma_held)
+              # Taking a halfword the prefetcher fetched during the burst is
+              # a buffer read, one cycle (bus.pf_serve). alyosha Interactions/
+              # Internal_Cycle_DMA_IRQ_Br_pre_tim, whose H-blank DMA lands
+              # here: 0 cycles reads a cycle short, 2 a cycle long.
+              both = max(1, s - bus.dma_held)
               credit = bus.dma_held - (s - both)
             else:
               both = n
@@ -222,6 +276,9 @@ proc clear_pipeline*(cpu: CPU) =
         cpu.r[15] += 8
       if broken:
         bus.rom_next_addr = 1
+        return
+      if streamed:
+        bus.rom_hot = bus.rom_free_since == bus.sched.cycles + CycleCount(bus.cycles)
         return
       bus.rom_free_since = bus.sched.cycles + CycleCount(bus.cycles) - CycleCount(credit)
       bus.rom_hot = credit == 0

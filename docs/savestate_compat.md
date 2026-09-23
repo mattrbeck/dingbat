@@ -66,6 +66,7 @@ The reader migrates older revisions instead of refusing:
 | GB 2→3 | `dots_since_frame=0` | states are written at frame boundaries (asserted) |
 | GBA 6→7 | RTC `status` = `02h \| irq<<3 \| m24<<6`; `bias_set=false`, `bias=0`, `wday_bias=0`, `bias_host=false` | rev ≤ 6 read status back with bit 1 forced and ignored clock writes, so the clock was always the source clock |
 | GB 4→5 | no `GB_SEC_SGB` section → fresh `SgbState` | see `docs/sgb.md` |
+| GBA 7→8 | bus `pf_paused=false`, `pf_running=false`, `pf_count=0` | rev ≤ 7 had no pause state; a full buffer re-pauses on the next fetch, and a running prefetcher with credit is running again at once, so at most one branch's refill differs |
 
 **IntrWait retrofit.** Rev 4 made the HLE IntrWait push `{r2, lr}` + `{r4, lr}`
 on the System stack for the whole wait and pop all four on resume. A rev-3

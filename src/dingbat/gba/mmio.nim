@@ -68,7 +68,7 @@ proc `[]=`*(mmio: MMIO; address: uint32; value: uint8) =
   of 0x200..0x203, 0x208..0x209: mmio.gba.interrupts[io_addr] = value
   of 0x204..0x205:
     write(mmio.waitcnt, value, io_addr and 1)
-    mmio.gba.bus.update_waitcnt(mmio.waitcnt)
+    mmio.gba.bus.write_waitcnt(mmio.waitcnt)
   of 0x300:
     mmio.postflg = value and 1
   of 0x301:

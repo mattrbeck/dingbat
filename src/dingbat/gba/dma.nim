@@ -259,6 +259,11 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
     # Only DMA3 can write the gamepak bus; channels 0-2 drop such writes
     # (no bus access, no redirect). See DMA_DST_MASK.
     let dst_writable = channel == 3 or dma.dst[channel] < 0x08000000'u32
+    # A source the DMA cannot read (BIOS, unmapped) still costs its read
+    # cycle; the latch just keeps its value. alyosha Interactions: with 0,
+    # Internal_Cycle_DMA_Mul, _IRQ_br1_IWRAM and _IRQ_nop_IWRAM fail; with 2,
+    # _DMA_Mul and _IRQ_Br_pre_tim.
+    if not src_accessible: dma.gba.bus.add_cycles(1)
     if word_size == 4:
       if src_accessible:
         dma.latch[channel] = dma.gba.bus.read_word(dma.src[channel])

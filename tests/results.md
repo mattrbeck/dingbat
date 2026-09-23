@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-09-23 15:49:22 · commit 3dda81cb0 · game-boy-test-roms v7.0*
+*Generated: 2026-09-23 16:15:20 · commit 46f85b8b9 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1423
-- **Pass:** 1349
-- **Fail:** 74
+- **Pass:** 1367
+- **Fail:** 56
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -18,9 +18,9 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Mooneye | 152 | 152 |
 | GBA - mGBA Test Suite | 13 | 13 |
 | GBA - jsmolka gba-tests | 13 | 13 |
-| GBA - alyosha gba-tests | 60 | 126 |
+| GBA - alyosha gba-tests | 77 | 126 |
 | GBA - PeterLemon BIOS | 24 | 25 |
-| GBA - Other test ROMs | 8 | 12 |
+| GBA - Other test ROMs | 9 | 12 |
 | GBA - FuzzARM | 5 | 5 |
 | Game Boy - Acid2 | 2 | 2 |
 | Game Boy - MagenTests | 7 | 7 |
@@ -60,7 +60,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 13 tests passed.**
 
-## GBA - alyosha gba-tests (60/126)
+## GBA - alyosha gba-tests (77/126)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -89,11 +89,11 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | alyosha/Interactions/Internal_Cycle_DMA_IRQ_ST | — | 👌 |
 | alyosha/Interactions/Internal_Cycle_DMA_IRQ_ST_p3 | — | 👌 |
 | alyosha/Interactions/Internal_Cycle_DMA_IRQ_br | — | 👌 |
-| alyosha/Interactions/Internal_Cycle_DMA_IRQ_br1_IWRAM | — | 👀 Failed test 040 |
+| alyosha/Interactions/Internal_Cycle_DMA_IRQ_br1_IWRAM | — | 👌 |
 | alyosha/Interactions/Internal_Cycle_DMA_IRQ_ldr_IWRAM | — | 👌 |
-| alyosha/Interactions/Internal_Cycle_DMA_IRQ_nop_IWRAM | — | 👀 Failed test 042 |
-| alyosha/Interactions/Internal_Cycle_DMA_MUL_IRQ | — | 👀 Failed test 181 |
-| alyosha/Interactions/Internal_Cycle_DMA_Mul | — | 👀 Failed test 037 |
+| alyosha/Interactions/Internal_Cycle_DMA_IRQ_nop_IWRAM | — | 👌 |
+| alyosha/Interactions/Internal_Cycle_DMA_MUL_IRQ | — | 👀 Failed test 189 |
+| alyosha/Interactions/Internal_Cycle_DMA_Mul | — | 👌 |
 | alyosha/LDM/LDM_ALU | — | 👀 Failed test 002 |
 | alyosha/LDM/LDM_ALU_IMM | — | 👀 Failed test 002 |
 | alyosha/LDM/LDM_ALU_Store | — | 👀 Failed test 006 |
@@ -116,11 +116,11 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | alyosha/fifo_dma/fifo | — | 👀 no verdict on screen |
 | alyosha/fifo_dma/fifo_2 | — | 👀 Failed test 111 |
 | alyosha/fifo_dma/fifo_3 | — | 👀 Failed test 111 |
-| alyosha/fifo_dma/fifo_4 | — | 👀 Failed test 102 |
+| alyosha/fifo_dma/fifo_4 | — | 👀 Failed test 111 |
 | alyosha/fifo_dma/fifo_5 | — | 👀 Failed test 059 |
 | alyosha/fifo_dma/fifo_6 | — | 👀 Failed test 151 |
 | alyosha/fifo_dma/fifo_dma_disable_3 | — | 👌 |
-| alyosha/fifo_dma/fifo_dma_disable_4 | — | 👀 Failed test 096 |
+| alyosha/fifo_dma/fifo_dma_disable_4 | — | 👀 Failed test 104 |
 | alyosha/fifo_dma/fifo_dma_disable_5 | — | 👌 |
 | alyosha/irq/BL_1 | — | 👌 |
 | alyosha/irq/BL_IRQ | — | 👀 Failed test 248 |
@@ -131,39 +131,39 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | alyosha/irq/IF | — | 👌 |
 | alyosha/irq/IF_Timer | — | 👌 |
 | alyosha/irq/IRQ_sub | — | 👀 Failed test 251 |
-| alyosha/irq/IRQ_sub_2 | — | 👀 no verdict on screen |
-| alyosha/irq/IRQ_sub_2_slow | — | 👀 Failed test 239 |
+| alyosha/irq/IRQ_sub_2 | — | 👀 Failed test 201 |
+| alyosha/irq/IRQ_sub_2_slow | — | 👀 no verdict on screen |
 | alyosha/irq/IRQ_sub_slow | — | 👀 Failed test 244 |
 | alyosha/irq/halt_pc | — | 👀 Failed test 002 |
-| alyosha/irq/halt_pc_2 | — | 👀 Failed test 241 |
+| alyosha/irq/halt_pc_2 | — | 👀 Failed test 242 |
 | alyosha/irq/halt_pc_3 | — | 👀 Failed test 239 |
 | alyosha/irq/halt_pc_4 | — | 👀 Failed test 198 |
 | alyosha/memory/PAL_8_bit_writes | — | 👌 |
 | alyosha/memory/VRAM_8_bit_writes | — | 👌 |
 | alyosha/ppu/Sprite_Last_VRAM_Access | — | 👀 Failed test 141 |
 | alyosha/ppu/Sprite_Last_VRAM_Access_Free | — | 👀 Failed test 119 |
-| alyosha/ppu/start_up | — | 👀 Failed test 080 |
+| alyosha/ppu/start_up | — | 👌 |
 | alyosha/ppu/start_up_vbl | — | 👌 |
-| alyosha/ppu/start_up_vbl_irq | — | 👀 Failed test 054 |
-| alyosha/ppu/start_up_vbl_irq_halt | — | 👀 Failed test 052 |
+| alyosha/ppu/start_up_vbl_irq | — | 👀 Failed test 050 |
+| alyosha/ppu/start_up_vbl_irq_halt | — | 👌 |
 | alyosha/prefetcher/bounday_test_1 | — | 👀 Failed test 033 |
-| alyosha/prefetcher/prefetcher_boundary_1 | — | 👀 Failed test 081 |
+| alyosha/prefetcher/prefetcher_boundary_1 | — | 👌 |
 | alyosha/prefetcher/prefetcher_boundary_2 | — | 👌 |
-| alyosha/prefetcher/prefetcher_boundary_3 | — | 👀 Failed test 083 |
+| alyosha/prefetcher/prefetcher_boundary_3 | — | 👌 |
 | alyosha/prefetcher/prefetcher_boundary_4 | — | 👌 |
-| alyosha/prefetcher/prefetcher_branch_thumb | — | 👀 Failed test 040 |
-| alyosha/prefetcher/prefetcher_branch_thumb_2 | — | 👀 Failed test 045 |
-| alyosha/prefetcher/prefetcher_branch_thumb_3 | — | 👀 Failed test 036 |
-| alyosha/prefetcher/prefetcher_branch_thumb_4 | — | 👀 Failed test 027 |
-| alyosha/prefetcher/prefetcher_branch_thumb_5 | — | 👀 Failed test 063 |
+| alyosha/prefetcher/prefetcher_branch_thumb | — | 👌 |
+| alyosha/prefetcher/prefetcher_branch_thumb_2 | — | 👌 |
+| alyosha/prefetcher/prefetcher_branch_thumb_3 | — | 👌 |
+| alyosha/prefetcher/prefetcher_branch_thumb_4 | — | 👌 |
+| alyosha/prefetcher/prefetcher_branch_thumb_5 | — | 👌 |
 | alyosha/prefetcher/prefetcher_branch_thumb_6 | — | 👌 |
-| alyosha/prefetcher/prefetcher_branch_thumb_arm | — | 👀 Failed test 059 |
+| alyosha/prefetcher/prefetcher_branch_thumb_arm | — | 👌 |
 | alyosha/prefetcher/prefetcher_branch_thumb_arm_3 | — | 👀 Failed test 078 |
 | alyosha/prefetcher/prefetcher_branch_thumb_arm_4 | — | 👌 |
 | alyosha/prefetcher/prefetcher_dma | — | 👀 Failed test 059 |
-| alyosha/prefetcher/prefetcher_full_arm | — | 👀 Failed test 001 |
-| alyosha/prefetcher/prefetcher_full_arm_2 | — | 👀 Failed test 105 |
-| alyosha/prefetcher/prefetcher_full_thumb | — | 👀 Failed test 044 |
+| alyosha/prefetcher/prefetcher_full_arm | — | 👌 |
+| alyosha/prefetcher/prefetcher_full_arm_2 | — | 👌 |
+| alyosha/prefetcher/prefetcher_full_thumb | — | 👌 |
 | alyosha/psr/psr | — | 👀 Failed test 229 |
 | alyosha/thumb/Pop_no_regs | — | 👌 |
 | alyosha/thumb/Push_no_regs | — | 👌 |
@@ -175,11 +175,11 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | alyosha/timing/cpy_data_bios | — | 👌 |
 | alyosha/timing/dma_from_bios | — | 👀 Failed test 017 |
 | alyosha/timing/dma_long | — | 👌 |
-| alyosha/timing/prefetch_enable | — | 👀 Failed test 186 |
+| alyosha/timing/prefetch_enable | — | 👌 |
 | alyosha/timing/prefetch_enable_2 | — | 👌 |
 | alyosha/unsafe/fifo_dma_disable_jam | — | 👌 |
 | alyosha/unsafe/fifo_dma_disable_jam_2 | — | 👌 |
-| alyosha/unsafe/prefetcher_branch_thumb_arm_2 | — | 👀 Failed test 071 |
+| alyosha/unsafe/prefetcher_branch_thumb_arm_2 | — | 👀 Failed test 078 |
 | png183/DMA/dma_repeat_immediate | — | 👌 |
 | png183/arm/arm | — | 👌 |
 | png183/arm/branches | — | 👌 |
@@ -221,7 +221,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | peterlemon/BIOSSoundGetJumpList | — | 👌 |
 | peterlemon/BIOSMidiKey2Freq | — | 👌 |
 
-## GBA - Other test ROMs (8/12)
+## GBA - Other test ROMs (9/12)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -232,7 +232,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | hades/dma-start-delay | — | 👀 no all-pass frame pinned yet (frame hash D24D56A7522BC46E) |
 | swp/SwpBusLocking | — | 👌 |
 | agbeeg/rom_access_during_prefetch | — | 👌 |
-| agbeeg/toggle_prefetcher | — | 👀 FAIL |
+| agbeeg/toggle_prefetcher | — | 👌 |
 | agbeeg/swp_locks_bus | — | 👌 |
 | agbeeg/ldm_does_not_lock_bus | — | 👌 |
 | agbeeg/stm_does_not_lock_bus | — | 👌 |

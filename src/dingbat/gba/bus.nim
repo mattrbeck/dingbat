@@ -85,8 +85,6 @@ when defined(fetchprof):
   #   4 rac fetch calls  5 rac data calls
   #   6 rac prefetch-hit 7 rac plain-seq     8 rac nonseq
   #   9 rac went hot after
-  #  10 rac prefetch-hit with credit >= need (cost floor 1)
-  #  11 rac prefetch-hit with zero credit
   var fetchprof*: array[16, uint64]
 
 proc bus_now(bus: Bus): CycleCount {.inline.} =
@@ -106,6 +104,95 @@ proc add_cycles*(bus: Bus; n: int) {.inline.} =
   bus.rom_cool()
   bus.cycles += n
 
+proc write_waitcnt*(bus: Bus; w: WAITCNT) =
+  ## A CPU write to WAITCNT, with PREFETCH_TOGGLE_LAW. Switching the
+  ## prefetcher off does not discard the buffer: the halfword in flight
+  ## completes, the CPU uses up what is buffered, and once it is empty its
+  ## next fetch is nonsequential -- the drained pause state. AGBEEG aging
+  ## cartridge toggle_prefetcher, measured on hardware: all 16 disable cells
+  ## (WAITCNT 0x4000/4004/4010/4014 x 1-4 idle cycles) match; counting the
+  ## in-flight halfword as landed at once reads 2/2/1/1 low, dropping it
+  ## 1 high.
+  if not PREFETCH_TOGGLE_LAW: discard
+  elif bus.prefetch_on and not w.gamepack_prefetch_buffer and
+     bus.fetch_page - 0x8 <= 5 and not bus.pf_paused:
+    let now = bus.bus_now()
+    let s = int(bus.wait16_s[bus.fetch_page])
+    var have = 0
+    if now > bus.rom_free_since:
+      let gap = int(now - bus.rom_free_since)
+      have = min(8, gap div s)
+      if have < 8 and gap mod s != 0:
+        # The halfword in flight lands at rom_free_since (pf_serve waits)
+        have += 1
+        bus.rom_free_since = now + CycleCount(s - gap mod s)
+    bus.pf_paused = true
+    bus.pf_count = int8(have)
+    bus.rom_hot = false
+  elif w.gamepack_prefetch_buffer and not bus.prefetch_on and
+       bus.bus_now() > bus.rom_free_since:
+    # Switched on after cycles off the ROM bus with it off: those cycles
+    # broke the burst, so the next fetch is nonsequential, and the
+    # prefetcher starts behind it (toggle_prefetcher's enable half: all 16
+    # cells match; with the write cycle credited to the prefetcher, as
+    # without the law, they read 3/2/4/3 low)
+    bus.rom_next_addr = 1
+    bus.rom_hot = false
+    bus.pf_running = false
+  bus.update_waitcnt(w)
+
+proc pf_serve_stopped(bus: Bus; now: CycleCount; page: int; halves: int): int =
+  ## pf_serve for a stopped prefetcher: the buffer filled (or WAITCNT
+  ## switched it off) and the CPU is using up what it holds. Out of line: at
+  ## most eight fetches per fill come here.
+  let s = int(bus.wait16_s[page])
+  if not bus.pf_paused:
+    # The eighth halfword landed at rom_free_since + 8*s: stopped since
+    bus.pf_paused = true
+    bus.pf_count = 8
+  # While stopped, rom_free_since is past `now` only for a halfword still in
+  # flight when WAITCNT switched the prefetcher off (write_waitcnt)
+  let wait = if bus.rom_free_since > now: int(bus.rom_free_since - now) else: 0
+  if int(bus.pf_count) >= halves:
+    bus.pf_count -= int8(halves)
+    return max(1, wait)
+  # Drained: the CPU reads what is missing itself, nonsequentially, and the
+  # prefetcher restarts behind it on the next free cycle
+  let missing = halves - int(bus.pf_count)
+  bus.pf_paused = false
+  bus.pf_running = false
+  let cost = wait + int(bus.wait16_n[page]) + (missing - 1) * s
+  bus.rom_free_since = now + CycleCount(cost)
+  cost
+
+proc pf_serve(bus: Bus; now: CycleCount; page: int; halves: int): int {.pf_inline.} =
+  ## Cost of an opcode fetch of `halves` halfwords that continues the
+  ## prefetcher's stream (prefetch on). The prefetcher reads one halfword per
+  ## S time while the ROM bus is free, from rom_free_since; a fetch takes what
+  ## it has (one cycle) or waits out the rest, and leftover credit carries to
+  ## the next fetch. rom_free_since can sit ahead of `now` (the waitloop
+  ## fast-forward discards a partial instruction's cycles): zero credit.
+  ## Hardware (alyosha prefetcher_full_*, prefetcher_branch_thumb_4): at
+  ## eight halfwords the prefetcher stops and stays stopped until the CPU has
+  ## taken every one; the fetch after that is the CPU's own, nonsequential
+  ## (pf_serve_stopped). Bracketed: stopping at 7 fails prefetcher_full_arm,
+  ## _full_arm_2, _full_thumb and _branch_thumb_4; at 9, _full_arm,
+  ## _full_arm_2 and _branch_thumb_4.
+  if not bus.pf_paused:
+    let s = int(bus.wait16_s[page])
+    let need = halves * s
+    if now <= bus.rom_free_since:
+      # No free cycle since the ROM bus was last busy: nothing buffered, and
+      # the halfwords come at S, whoever fetches them
+      bus.rom_free_since += CycleCount(need)
+      return need
+    let gap = now - bus.rom_free_since
+    if gap < CycleCount(8 * s):
+      bus.pf_running = true
+      bus.rom_free_since += CycleCount(need)
+      return max(1, need - int(gap))  # a full buffer serves even a 32-bit fetch in one cycle
+  bus.pf_serve_stopped(now, page, halves)
+
 proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int {.inline.} =
   ## Cycle cost of a ROM-region (pages 8-D) access, tracking burst
   ## sequentiality and the prefetch buffer. Sequential = the address
@@ -114,6 +201,7 @@ proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int 
   let page = int(bits_range(address, 24, 27))
   let now = bus.bus_now()
   let contiguous = now == bus.rom_free_since
+  let was_paused = bus.pf_paused
   var seq: bool
   if bus.dma_active:
     # DMA: src and dst streams each keep their own burst (LRU pair of
@@ -137,41 +225,34 @@ proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int 
       bus.rom_next_addr2 = bus.rom_next_addr
       bus.rom_next_addr = address
   else:
-    seq = address == bus.rom_next_addr and (bus.prefetch_on or contiguous)
+    seq = address == bus.rom_next_addr and
+          (bus.prefetch_on or contiguous or (fetch and bus.pf_paused))
   when defined(fetchprof):
     fetchprof[if fetch: 4 else: 5].inc
   var cost: int
   var new_free_since: CycleCount
-  if seq:
-    if fetch and bus.prefetch_on and not contiguous:
-      # Prefetch hit: the buffer worked ahead while the ROM bus was free, one
-      # halfword per S-access time (up to 8); leftover credit carries to the
-      # next fetch. rom_free_since can sit ahead of `now` (the waitloop
-      # fast-forward discards a partial instruction's cycles): zero credit,
-      # never an unsigned wrap.
-      let s = int(bus.wait16_s[page])
-      let credit = if now > bus.rom_free_since:
-                     min(int(now - bus.rom_free_since), 8 * s)
-                   else: 0
-      let need = if is32: 2 * s else: s
-      cost = max(1, need - credit)  # a full buffer serves even a 32-bit fetch in one cycle
-      let done = now + CycleCount(cost)
-      let floor = if done > CycleCount(8 * s): done - CycleCount(8 * s) else: 0
-      new_free_since = max(bus.rom_free_since + CycleCount(need), floor)
-      when defined(fetchprof):
-        fetchprof[6].inc
-        if credit >= need: fetchprof[10].inc
-        if credit == 0: fetchprof[11].inc
-    else:
-      cost = int(if is32: bus.wait32_s[page] else: bus.wait16_s[page])
-      new_free_since = now + CycleCount(cost)
-      when defined(fetchprof): fetchprof[7].inc
+  if seq and fetch and (bus.prefetch_on or bus.pf_paused):
+    cost = bus.pf_serve(now, page, if is32: 2 else: 1)
+    new_free_since = bus.rom_free_since
+    when defined(fetchprof): fetchprof[6].inc
   else:
-    cost = int(if is32: bus.wait32_n[page] else: bus.wait16_n[page])
+    # Anything but a prefetched fetch flushes the buffer and has the ROM bus
+    # to itself: the prefetcher is idle until its next free cycle
+    if seq:
+      cost = int(if is32: bus.wait32_s[page] else: bus.wait16_s[page])
+      when defined(fetchprof): fetchprof[7].inc
+    else:
+      cost = int(if is32: bus.wait32_n[page] else: bus.wait16_n[page])
+      when defined(fetchprof): fetchprof[8].inc
     new_free_since = now + CycleCount(cost)
-    when defined(fetchprof): fetchprof[8].inc
+    bus.pf_running = false
+    # A data access leaves the prefetcher stopped until the CPU's next
+    # opcode fetch (alyosha prefetcher_branch_thumb_2: after a gamepak load
+    # its I cycle fills nothing); "drained" says exactly that
+    bus.pf_paused = not fetch and bus.prefetch_on
+    bus.pf_count = 0
   if not fetch and not contiguous and bus.prefetch_on and not bus.dma_active and
-     bus.fetch_page - 0x8 <= 5:
+     not was_paused and bus.fetch_page - 0x8 <= 5:
     # Prefetch hand-off: a CPU data access takes the ROM bus from the
     # prefetcher, which is `elapsed mod s` cycles into a halfword. A halfword
     # in its address/wait phase is abandoned free; one in its final cycle has
@@ -202,7 +283,7 @@ proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int 
     # ((k-1) mod s == s-1) is `k mod s == 0`. Pinned by the 32 mGBA suite
     # DMA/ROM Timing rows (k = 2 for a ROM-read burst, 3 for a ROM-write one).
     bus.dma_first_rom = false
-    if bus.prefetch_on and bus.fetch_page - 0x8 <= 5:
+    if bus.prefetch_on and not was_paused and bus.fetch_page - 0x8 <= 5:
       let s = int(bus.wait16_s[page])
       let k = int(now - bus.dma_grant_now)
       # Buffer full (8 halfwords): nothing in flight to arbitrate against
@@ -228,46 +309,26 @@ proc rom_fetch_cycles(bus: Bus; address: uint32; page: int;
   ## the fetch-relevant half, kept in step by hand; the framebuffer-hash A/B
   ## and the mGBA Timing suite catch drift.
   let now = bus.bus_now()
-  let contiguous = now == bus.rom_free_since
   var cost: int
-  var new_free_since: CycleCount
-  if address == bus.rom_next_addr and (bus.prefetch_on or contiguous):
-    if bus.prefetch_on and not contiguous:
-      # Same arithmetic as rom_access_cycles' prefetch-hit branch, with the
-      # `floor` term hoisted into the one case that can reach it: for gap <=
-      # cap, max(rom_free_since + need, done - cap) is always the first term
-      # (gap < need: done == rom_free_since + need; gap >= need: cost = 1 and
-      # gap+1-cap <= 1 <= need). Only a gap longer than a full buffer can
-      # raise the floor.
-      let s = int(bus.wait16_s[page])
-      let cap = 8 * s
-      let need = when is32: 2 * s else: s
-      if now <= bus.rom_free_since:
-        # Waitloop fast-forward pushed rom_free_since past `now`: no credit
-        cost = need
-        new_free_since = bus.rom_free_since + CycleCount(need)
-      else:
-        let gap = int(now - bus.rom_free_since)
-        if gap <= cap:
-          cost = max(1, need - gap)
-          new_free_since = bus.rom_free_since + CycleCount(need)
-        else:
-          cost = max(1, need - cap)
-          let done = now + CycleCount(cost)
-          let floor = if done > CycleCount(cap): done - CycleCount(cap) else: 0
-          new_free_since = max(bus.rom_free_since + CycleCount(need), floor)
-    else:
-      cost = int(when is32: bus.wait32_s[page] else: bus.wait16_s[page])
-      new_free_since = now + CycleCount(cost)
+  when defined(pftrace):
+    let rfs_in = bus.rom_free_since
+  if address == bus.rom_next_addr and (bus.prefetch_on or bus.pf_paused):
+    cost = bus.pf_serve(now, page, when is32: 2 else: 1)
   else:
-    cost = int(when is32: bus.wait32_n[page] else: bus.wait16_n[page])
-    new_free_since = now + CycleCount(cost)
+    cost =
+      if address == bus.rom_next_addr and now == bus.rom_free_since:
+        int(when is32: bus.wait32_s[page] else: bus.wait16_s[page])
+      else:
+        int(when is32: bus.wait32_n[page] else: bus.wait16_n[page])
+    bus.rom_free_since = now + CycleCount(cost)
+    bus.pf_paused = false
+    bus.pf_running = false
   when defined(pftrace):
     pft("  RFC fetch" & (when is32: "32" else: "16") &
-        " a=" & toHex(address, 8) & " now=" & $now & " rfs_in=" & $bus.rom_free_since &
-        " cost=" & $cost & " rfs_out=" & $new_free_since)
+        " a=" & toHex(address, 8) & " now=" & $now & " rfs_in=" & $rfs_in &
+        " cost=" & $cost & " rfs_out=" & $bus.rom_free_since & " paused=" & $bus.pf_paused &
+        " cnt=" & $bus.pf_count)
   bus.rom_next_addr = address + (when is32: 4'u32 else: 2'u32)
-  bus.rom_free_since = new_free_since
   cost
 
 proc access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int {.inline.} =
@@ -298,6 +359,7 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
   result = Bus(gba: gba)
   result.sched = gba.scheduler
   result.cycles = 0
+  result.rom_ahead = 8
   result.fetch_page = 0xFFFFFFFF'u32  # no fetch page cached yet
   result.bios       = newSeq[byte](0x4000)
   result.wram_board = newSeq[byte](0x40000)

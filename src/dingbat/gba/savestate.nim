@@ -97,6 +97,9 @@ proc save_bus_state(bus: Bus; w: var Writer) =
   w.write_u64(uint64(bus.rom_free_since))
   w.write_bool(bus.rom_hot)
   w.write_bool(bus.dma_active)
+  w.write_bool(bus.pf_paused)   # v8
+  w.write_bool(bus.pf_running)
+  w.write_u8(uint8(bus.pf_count))
 
 proc load_bus_state(bus: Bus; r: var Reader; rev: uint32) =
   r.expect_tag(GBA_SEC_BUS)
@@ -122,6 +125,17 @@ proc load_bus_state(bus: Bus; r: var Reader; rev: uint32) =
     bus.rom_free_since = 0
     bus.rom_hot = false
     bus.dma_active = false
+  if rev >= 8:
+    bus.pf_paused = r.read_bool()
+    bus.pf_running = r.read_bool()
+    bus.pf_count = int8(r.read_u8())
+    check_range(int(bus.pf_count), 0, 8, "bus.pf_count")
+  else:
+    # rev <= 7 had no pause state: the credit alone was the buffer, and a
+    # prefetcher with credit counts as running (bus.pf_serve)
+    bus.pf_paused = false
+    bus.pf_running = false
+    bus.pf_count = 0
   bus.fetch_page = 0xFFFFFFFF'u32  # invalidate the fetch fast path
 
 # ---- Interrupts / MMIO / Keypad ----
@@ -782,6 +796,8 @@ proc gba_apply_state(gba: GBA; payload: string; rev: uint32;
       "handler still running, under an older HLE stack model that cannot be " &
       "reconstructed — it would resume with a corrupted stack pointer")
   load_bus_state(gba.bus, r, rev)
+  # Derived, not stored: at a frame boundary it is the executing mode's lead
+  gba.bus.rom_ahead = (if gba.cpu.cpsr.thumb: 4'i8 else: 8'i8)
   r.expect_tag(GBA_SEC_SCHED)
   gba.scheduler.load_from(r, pad = in_process)
   # Only the PPU event chain increments ppu.frame, and a running machine

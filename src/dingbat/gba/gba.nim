@@ -345,6 +345,18 @@ type
     # from there while the CPU runs off other memory)
     rom_next_addr*:  uint32
     rom_free_since*: CycleCount
+    # Prefetch buffer states the rom_free_since credit cannot express
+    # (rom_access_cycles). pf_paused: the buffer filled and the prefetcher
+    # stopped until the CPU drains it; pf_count halfwords are left, and at 0
+    # the next fetch is the CPU's own, nonsequential. pf_running: the
+    # prefetcher has had a free bus cycle since the CPU's last own ROM
+    # access; until it has, a branch to the next halfword is nonsequential.
+    # rom_ahead: how far the console's fetch address leads the executing
+    # instruction's, which is where dingbat fetches (8 ARM, 4 Thumb).
+    pf_paused*:      bool
+    pf_running*:     bool
+    pf_count*:       int8
+    rom_ahead*:      int8
     # A read whose value changes with time and no scheduler event (a running
     # timer's count, a PSG status, an EEPROM ready poll) happened since the
     # waitloop detector last looked; such a loop is never skipped.
@@ -1053,6 +1065,15 @@ when defined(obuslatch):
   proc obus_drive_word*(bus: Bus; value: uint32) {.inline.}
   proc obus_drive_half*(bus: Bus; address: uint32; value: uint16) {.inline.}
 proc rom_cool*(bus: Bus) {.inline.}
+# The prefetch serve sits on the ROM fetch slow path, which runs once per
+# instruction outside a hot stream; clang left it out of line, costing ~1% of
+# retired instructions. Pinned where the attribute exists (GCC makes a failed
+# always_inline a hard error).
+when defined(clang):
+  {.pragma: pf_inline, codegenDecl: "__attribute__((always_inline)) inline $# $#$#".}
+else:
+  {.pragma: pf_inline, inline.}
+proc pf_serve(bus: Bus; now: CycleCount; page: int; halves: int): int {.pf_inline.}
 
 # A branch into the gamepak refills N then S, in that order (cpu.clear_pipeline).
 const ROM_REFILL_ORDERED* {.booldefine.} = true
@@ -1061,6 +1082,12 @@ const DMA_KEEPS_PREFETCH* {.booldefine.} = true
   ## A DMA that never touches the gamepak leaves the prefetcher running: the
   ## CPU's stream is not broken and the burst's cycles are prefetch time
   ## (tests/roms/payloads/slotdma.s at WAITCNT 0x4000).
+const PREFETCH_TOGGLE_LAW* {.booldefine.} = true
+  ## WAITCNT switching the prefetcher off keeps the buffer until the CPU
+  ## drains it; switching it on after idle cycles breaks the burst
+  ## (bus.write_waitcnt). Measured on hardware by the AGBEEG aging cartridge
+  ## (toggle_prefetcher, 32/32 cells); with it alyosha timing/prefetch_enable,
+  ## ppu/start_up and ppu/start_up_vbl_irq_halt read right too.
 const HALT_WAKE_RUNS_ONE* {.booldefine.} = true
   ## An interrupt that wakes a halted CPU is taken one instruction after the
   ## wake, not at it (cpu.tick; tests/roms/payloads/wakeirq.s).

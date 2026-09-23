@@ -615,6 +615,29 @@ const
   GPIO_STATUS_AT   = 1 + 3 + 3 + 1 + 4 + 4 + 8
   GPIO_CLOCK_AT_V6 = GPIO_STATUS_AT + 2 + 1 + 8  # after irq, m24, det, epoch
 
+# The bus section (tag GBA_SEC_BUS) gained the prefetch pause/run state at
+# rev 8: pf_paused, pf_running (bools) and pf_count (u8), last before
+# GBA_SEC_SCHED. Fixed length: cycles, bios latch, both work RAMs, the two
+# burst trackers, rom_free_since, rom_hot, dma_active.
+const
+  BUS_TAG         = 0xC2'u8
+  SCHED_TAG       = 0xC3'u8
+  BUS_PRE_LEN     = 1 + 4 + 4 + 0x40000 + 0x8000 + 4 + 4 + 8 + 1 + 1
+  BUS_PF_LEN      = 1 + 1 + 1
+
+proc strip_bus_prefetch(payload: var string): bool =
+  ## Rewrite a payload this build wrote into the pre-rev-8 bus layout.
+  var found = -1
+  for i in 0 .. payload.len - BUS_PRE_LEN - BUS_PF_LEN - 1:
+    if payload[i] == char(BUS_TAG) and
+       payload[i + BUS_PRE_LEN + BUS_PF_LEN] == char(SCHED_TAG):
+      if found >= 0: return false  # ambiguous
+      found = i
+  if found < 0: return false
+  let at = found + BUS_PRE_LEN
+  payload.delete(at ..< at + BUS_PF_LEN)
+  true
+
 proc strip_rtc_clock(payload: var string): bool =
   ## Rewrite a payload this build wrote into the pre-rev-7 GPIO layout.
   var found = -1
@@ -704,13 +727,14 @@ proc run_intr_wait_migration() =
   b.bus.gpio.rtc.status = 0x42
   var rev3 = b.state_payload()
   # A rev-3 payload has no halt_resume_pop byte (rev 4) and no per-channel
-  # DMA `count` (rev 5), PPU line-start latches (rev 6) nor RTC clock (rev 7); every later
-  # field addition belongs here too.
+  # DMA `count` (rev 5), PPU line-start latches (rev 6), RTC clock (rev 7) nor
+  # bus prefetch state (rev 8); every later field addition belongs here too.
   check(rev3.len == rev4.len, "the two parked payloads differ only by the flag")
   rev3.delete(HALT_RESUME_POP_OFFSET .. HALT_RESUME_POP_OFFSET)
   check(strip_dma_count(rev3), "rev-5 DMA count fields located and removed")
   check(strip_ppu_latches(rev3), "rev-6 PPU latch fields located and removed")
   check(strip_rtc_clock(rev3), "rev-7 RTC status/clock fields located and removed")
+  check(strip_bus_prefetch(rev3), "rev-8 bus prefetch fields located and removed")
 
   # (c) read the rev-3 payload as rev 3 and compare against (a)
   let c = new_gba_for(GBA_ROMS[0][0])

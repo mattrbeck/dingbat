@@ -31,6 +31,7 @@ proc exception_return_restore*(cpu: CPU) =
     let page = int(bits_range(cpu.r[15], 24, 27))
     cpu.gba.bus.add_cycles(2 * (int(cpu.gba.bus.wait16_s[page]) -
                                 int(cpu.gba.bus.wait32_s[page])))
+    cpu.gba.bus.rom_ahead = 4  # clear_pipeline set the ARM lead
     when ROM_REFILL_ORDERED:
       if page >= 0x8 and page <= 0xD and (ROM_REFILL_ORDERED_PF or not cpu.gba.bus.prefetch_on):
         # clear_pipeline left the burst continuing at the ARM-aligned target
