@@ -266,15 +266,18 @@ switch residual (`SPEED_SWITCH_PPU_EXTRA_DOTS_SINGLE` -1, 0, 1, 2, 4, 5, 7:
 each loses 26..34 `speedchange*_ly44_m3*` ladder rows and takes no
 `lcd_offset` row).
 
-**Remaining (A3).** The `_ds_` and `_lcdoffset*_2` siblings above, the
-`lyc143` pair and `late_enable_lcdoffset{2,3}_2`: one statement of the
-comparator's step and the pulse's width on the double-speed grid, derived
-with the double-speed constants together rather than one at a time.
+**Remaining (A3).** One row, `m1/ly143_late_m2enable_ds_lcdoffset1_1`:
+the line-144 OAM pulse at double speed wants dot 455 on the grid a switch
+leaves (gambatte-core raises it 8 cycles before the line ends) and 454 on
+frames that turned the LCD on in double speed (`enable_display/frame{0,1}_
+m2irq_count_ds_2`), i.e. the double-speed LCD-on seed sits a dot off the
+switch-reached grid. `M2_144_EARLY_DOT_DS = 455` trades the three.
 
 The knob sweep of 2026-09-22 (`+-1` of every GB `{.intdefine.}`, 206 knobs,
 red rows first and every hit validated on the full 5157-row list from a
 snapshot build) found no net-positive value: the remaining 300 rows are
-mechanism rows, not phase rows.
+mechanism rows, not phase rows. Re-run at 5176 (519 variants, all 5216 rows):
+only `MIXER_PALETTE_OR = 0` (C7) comes out positive.
 
 ### A4. Mode-0 STAT interrupt against a timer interrupt
 
@@ -516,6 +519,13 @@ and `CGB_SCX_LATENCY = 2` is the one term carried. The `scx_0761c0` residue
 is at `F = 7`, where every store lowers the target; `spx2` is an object
 fetch under a store.
 
+The three `spx2` rows are not timing: pixel 0 is the object's column 6
+drawn in OBJ palette 0 colour 2, which the ROM never writes. Pan Docs leaves
+CGB OBJ palette RAM unspecified after boot; dingbat fills `$FF`, and
+gambatte-core seeds it from one console's power-on dump, so the reference
+encodes that unit's garbage (the same class as the `oamdma_src{FE00,FF00}`
+WRAM rows in NotScored).
+
 **To close.** Hardware experiment (b) below measures the extension law
 directly. `tools/gbppu/m3len.sh` / `-d:gb_m3_len` give dingbat's side.
 
@@ -614,7 +624,10 @@ setting. gambatte's references encode the clean edge.
 **Modelled.** `MIXER_PALETTE_OR = 1`, `MIXER_PALETTE_BACK = 2` (DMG only; the
 CGB's own write dot puts the pixel out of reach). Not a correctness constant
 but a DMG-instance choice with no selector; these eight rows are the price
-of the mealybug/daid side. Hardware experiment (d) below.
+of the mealybug/daid side (re-checked 2026-09-22: `MIXER_PALETTE_OR = 0`
+takes all eight and loses mealybug `m3_bgp_change{,_sprites}` [dmg] and AGE
+`m3-bg-bgp-dmgC`; SameBoy on a DMG-B draws dingbat's frame to the pixel).
+Hardware experiment (d) below.
 
 ### C8. AGE `m3-bg-bgp-dmgC`, 2 pixels
 
@@ -634,13 +647,12 @@ pixels to 1.
 
 ### D1. HBlank DMA blocks owed across a halt or a speed switch
 
-**Rows (7).** `dma/hdma_transition_ei_halt_late_unhalt_ldaaimm_hdma_scx1_1`
-(IME-on wake of a "requested" block), `hdma_transition_speedchange_7fffstop_inc`
-(STOP at $7FFF, its operand byte in VRAM), `hdma_pc_7ffe`, `late_gdma_pc_7ffe_1`
-(a transfer while the CPU fetches across $7FFF/$8000),
-`hdma_late_enable_{ds_lcdoffset1,lcdoffset3}_2` (the lcdoffset grid, A1/E1),
-`hdma_disable_display_1`. 32 rows of this bucket and 7 of
-`irq_precedence/hdma_vs_*` closed 2026-09-22 (below).
+**Rows (0).** dma 229/229 since 2026-09-22: the last four closed with
+`HDMA_HALT_REQ_BUG_IME` (with IME on the prefetched opcode runs between the
+wake's block and the dispatch), `STOP_OPERAND_LATCH` (the operand runs as
+the byte STOP latched, not a re-read of VRAM after the stall) and
+`HDMA_START_CUTOFF_SS/_DS` (an arming write two dots from the line end
+misses that HBlank). The rules below are the model the bucket left.
 
 **Behaviour.** An HBlank DMA copies one 16-byte block per mode-0 edge while
 the CPU is off the bus (Pan Docs, "LCD VRAM DMA Transfers"). The CPU hands
@@ -767,9 +779,9 @@ landed.
 
 ### F1. The eighth shift edge against a CPU access
 
-**Rows (7).** `serial/nopx1_start{,83}_wait_read_if_2`,
-`start83_late_div_write_wait_read_if_{1b,2b}` (CGB),
-`start_wait_trigger_int8_read_if_{2,ds_2}` (CGB).
+**Rows (5).** `serial/nopx1_start{,83}_wait_read_if_2`,
+`start83_late_div_write_wait_read_if_{1b,2b}` (CGB). (`start_wait_trigger_
+int8_read_if_*` went green with the dispatch's push order.)
 
 **Behaviour.** The shift clock is a falling edge of a divider bit
 (Pan Docs, "Serial Data Transfer"); a CPU access meets the shifter before
@@ -779,23 +791,21 @@ its own M-cycle's tap edge (`SERIAL_CPU_SAMPLE_T = 0`; gambatte
 `boot_sclk_align-dmgABCmgb` pinning the DMG. Re-seeding the boot divider
 instead is refused by GBMicrotest `timer_tima_phase_*` and gambatte `div`.
 
-**Residue.** The CGB's fast-clock arms and the `trigger_int8` ordering; no
-point of the tap/sample space (`SERIAL_TAP_*` × `SERIAL_CPU_SAMPLE_T`)
-reaches them, so it is not a phase.
+**Residue.** Side by side with gambatte-core: its transfer completes on a
+256-cycle grid anchored to the divider, and the boot transfer's IF rises
+4 T later than dingbat's (8:440 against 8:437) while the dispatch lands on
+the same M-cycle, so the handler's restart meets the next grid point on the
+other side. `SERIAL_TAP_* = 8` moves the grid there and loses the eleven
+`*div_write*` rows, which anchor the grid to the DIV reset where it is;
+`SERIAL_DIV_WRITE_LEAD_T` and `SERIAL_CPU_SAMPLE_T` moved with it lose as
+many. The two anchors disagree by one M-cycle, which is a statement about
+where the DIV reset lands, not about the serial unit.
 
 ### F2. TIMA reload against a read
 
-**Rows (4).** `tima/tc00_late_tc01_{5,7}` (both devices).
-
-**Behaviour.** Switching TAC's tap reads the newly selected divider bit one
-M-cycle before the byte lands and leaves the old tap at the value latched at
-the end of the write (`TAC_SELECT_LEAD_T = 4`; `tc00_late_tc01` and
-`tc00_tc01_late_tc00_of_2` pin the two halves in opposite directions). `_5`
-reads TIMA on the M-cycle dingbat's 4-cycle reload countdown expires and
-gets the pre-reload value where hardware has reloaded: the reload window's
-interior (Pan Docs, "Timer Obscure Behaviour") is not modelled —
-`docs/pandocs-audit.md` A6. Arming the countdown at 5 instead halves the
-family.
+Closed 2026-09-22 (`TAC_SELECT_LEAD_T = 0`): both taps are judged at the end
+of the TAC write; the old four-cycle rewind was what missed the switch
+glitch in `tc00_late_tc01_{5,7}`.
 
 ---
 
@@ -882,7 +892,8 @@ two-sided at a NOP), the multi-switch ROMs want sums no constant pair gives:
 two switches (up, down) 14..16; three (up, down, up) exactly 24; four 22..26;
 five about 32. A fourth switch adds nothing where a second added 5, so the
 extra depends on the state the switch finds (divider phase after its reset,
-most likely), the same open residual as the PPU's `lcd_offset` rows (E1).
+most likely); the PPU's `lcd_offset` rows turned out to be single-dot
+sampling rules, not a switch residual (closed 2026-09-22).
 (8, 6) scores three more rows than (10, 7) and is two-sided on nothing; it is
 not shipped.
 
@@ -986,6 +997,20 @@ tried again as a knob.
 ## Closed buckets
 
 One line each; the knob's own comment carries the derivation.
+
+* Closed 2026-09-22, the small-families pass (gambatte 5157 -> 5178;
+  each knob bracketed at its own comment): `STAT_GLITCH_M0_LEAD`,
+  `DMG_LYC_BOUNDARY_OPEN` (miscmstatirq 279/279); `CGB_WE_DISABLE_LATE`,
+  `WIN_CARRY_CANCEL_OFF`, `WIN_REVOKE_DS_PUSH` (window 476/476; the undo now
+  restores the ring the push overwrote); `IRQ_PUSH_T 12` + `IRQ_PUSH_LATE`
+  (the dispatch waits three M-cycles, then pushes, the IF clear split inside
+  the low push: oamdma 802/802); `TAC_SELECT_LEAD_T 0` (tima 232/232);
+  `STOP_OPERAND_LATCH`, `HDMA_HALT_REQ_BUG_IME`, `HDMA_START_CUTOFF_SS/_DS`
+  (dma 229/229); `STAT_READ_M1_LAG`, `STAT_READ_M23_LEAD_DS`,
+  `VRAM_{READ,WRITE}_CGB_M3_EDGE_SS` (lcd_offset 62/62, vram_m3 50/50: the
+  speed-switch round trips put CPU accesses on grid phases nothing else
+  reaches, so these rows pin single dots of the STAT/VRAM sampling, not a
+  switch residual). The hunt list now carries the 68 `.gb` rows too.
 
 * Closed 2026-09-22, the oracle pass (gambatte 5104 -> 5157; each knob is
   bracketed at its own comment):
