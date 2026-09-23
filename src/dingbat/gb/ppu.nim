@@ -862,6 +862,13 @@ proc stat_m0_tail(ppu: GbPpu; gb: GB): int32 {.noinline.} =
     if io_mc > int32(STAT_M0_TAIL_MAX_MC): return 0'i32
   tail
 
+const STAT_READ_M1_LAG* {.intdefine.} = 1
+  ## Extra dots a STAT read's mode field keeps showing mode 0 after line 144
+  ## begins, at single speed. Only reachable on the CPU grid a speed-switch
+  ## round trip plus a double-speed NOP leaves (the read's sample lands on
+  ## line 144's dot 0): gambatte `lcd_offset/offset3_lyc8fint_m1stat_1`
+  ## [cgb] reads $C0 there. 2 loses `offset2_lyc8fint_m1stat_2`; the same
+  ## dot at double speed loses `enable_display/frame{0,1}_m1stat_ds_2`.
 proc stat_read_mode*(ppu: GbPpu; gb: GB): uint8 {.inline.} =
   ## The mode bits a CPU read of STAT returns: the mode in effect STAT_READ_SAMPLE
   ## dots back from where the read's M-cycle leaves the dot counter. Kept as a
@@ -872,6 +879,11 @@ proc stat_read_mode*(ppu: GbPpu; gb: GB): uint8 {.inline.} =
     if ppu.first_line: t += LCD_ON_STAT_READ_LAG
   when STAT_M0_TAIL_ANY:
     t += stat_m0_tail(ppu, gb)
+  when STAT_READ_M1_LAG != 0:
+    # Entering vblank is read one dot later at single speed (STAT_READ_M1_LAG).
+    if (ppu.lcd_status and 3'u8) == 1'u8 and ppu.ly == 144'u8 and
+       gb.memory.current_speed == 0'u8:
+      t += int32(STAT_READ_M1_LAG)
   if ppu.cycle_counter - ppu.stat_chg_dot < t: ppu.stat_prev_mode
   else: ppu.lcd_status and 3'u8
 

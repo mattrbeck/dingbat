@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-22 19:22:36*
+*Generated: 2026-09-22 19:34:00*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5171/5216 passed.**
+**5172/5216 passed.**
 
 ## bgen
 
@@ -69,15 +69,14 @@ All 158 tests passed.
 
 All 64 tests passed.
 
-## lcd_offset (59/62 passed)
+## lcd_offset (60/62 passed)
 
-59/62 tests passed, 3 failed:
+60/62 tests passed, 2 failed:
 
 | Test | Result |
 |------|--------|
 | lcd_offset/offset1_lyc99int_m2stat_count_ds_2_cgb04c_out90 [cgb] | got 00, expected 90 |
 | lcd_offset/offset1_lyc99int_m3stat_count_ds_2_cgb04c_out90 [cgb] | got 00, expected 90 |
-| lcd_offset/offset3_lyc8fint_m1stat_1_cgb04c_outC0 [cgb] | got C1, expected C0 |
 
 ## lcdirq_precedence
 
