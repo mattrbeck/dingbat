@@ -1,0 +1,5 @@
+name = "webstate"
+defaultTargets = ["WebState"]
+
+[[lean_lib]]
+name = "WebState"

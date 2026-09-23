@@ -174,3 +174,6 @@ tools/gbgate/roms.txt
 # Regenerable multiboot-probe outputs (tests/roms/mbprobe/build.py)
 tests/roms/mbprobe/build/*.sav
 tests/roms/mbprobe/build/payload_mirror_cart.gba
+
+# Lean build outputs (formal/)
+formal/.lake/

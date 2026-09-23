@@ -1,0 +1,727 @@
+/-
+# Run/pause state of the emulator (web/index.js, web/netplay.js @ dd7ba741f)
+
+The core steps in the rAF `tick` (index.js 11321) iff `!paused` and a game is
+loaded; rAF does not fire while the tab is hidden. So "running" is
+`loaded && !paused && visible`, and every pausing surface works by writing the
+one global `paused` (index.js 7767). The writers are:
+
+* the pause button / Space / Period       -> `togglePause`      (8217)
+* the peer, in a rollback session         -> `applyRemotePause` (8231)
+* Report a Bug, the rewind scrubber, the clip range picker: each snapshots
+  `paused` into its own `*WasPaused` on open and writes it back on close
+  (5881/5911, 6391/6421, 8714/8758)
+* the home screen                         -> `showMainMenu` / `resumeGame` (9358/9373)
+* the Link Cable modal                    -> `netFrozeGame` (netplay.js 200, 1549)
+* a clip export's replay                  -> `startClipExport`: `paused = false` (8471)
+* `loadRom` (7899), `unloadGame` (9652), `enterRollbackMode` (9260),
+  `launchNetRom`/`netShutdown` (netplay.js 1430, 1551-1557), `rbConnect` (1140).
+
+The pause button's icon/title (`#pause.paused`, title "Resume") is `lit`.
+There is no separate "the user's own pause choice" variable: `lit` is the
+closest thing (only `togglePause` sets it from `paused`), so the properties
+are stated against it.
+
+The Screen Wake Lock (index.js 7784-7820) is re-synced on every rAF tick
+(11325) and on `visibilitychange`; its `request()` is an await (the `.then` at
+7798 is a separate event). netplay.js keeps a second, independent wake lock
+for the Link Cable modal (`acquireWakeLock`, netplay.js 941-961), also behind
+an await.
+
+## Abstractions (and why they do not affect the properties)
+
+* 2P local link (`linkMode`) and the SIO online path (`netMode`, `launchNetRom`)
+  are not modelled; `rb` is the rollback session (`rollbackMode`), whose
+  `currentRomName` stays set, so `rb -> loaded`. `emulationActive` (7789) is
+  `loaded && !paused`. `rbConnect`'s `paused = true` (netplay.js 1140) happens
+  while the Link Cable modal already froze the game, so it is not an event.
+* One ROM identity: `loaded` = `!!currentRomName`. `loadRom`'s awaits before
+  its synchronous commit (7880-7910) are folded into *when* the `loadRom`
+  event may fire: at any time outside a rollback session (a drop on
+  `document`, 8252, has no modal guard; a Drive download or IndexedDB read in
+  flight under `launchRom`/a tile tap lands whenever it lands).
+  `abortRetroClip` (7883, the first segment) is folded into the commit.
+* `unloadGame`'s final synchronous segment (9643-9669) is one event, enabled
+  whenever a single-core game is loaded (its awaits let it land late).
+* `netShutdown`'s post-await tail (`closeNetModal`, netplay.js 1601) is folded
+  into its first segment; nothing in the tail touches `paused`/`lit`.
+* Non-pausing modals (settings, save states, cheats...) are not modelled: they
+  never write `paused`, and while one is open the pause button is covered too.
+* User input (taps, keys) requires `visible`; network and timer events do not.
+  The tick (and `finishRetroClip` inside it) requires `visible`: rAF stops.
+* Wake-lock grants follow the Screen Wake Lock spec: the grant task checks
+  visibility and resolves in the same task, and the `.then` runs in that
+  task's microtask checkpoint, so grant + `.then` is one event (`wakeGrant`),
+  but any number of events may run between `request()` and it. A hide
+  releases every lock and *queues* a `release` event per lock (`relQ`),
+  dispatched later (`relFire`). `uaRevoke` is the UA dropping a held lock for
+  its own reasons (battery). Lock identities are fresh naturals.
+* Audio: only `audioCtx.state === "running"` (`ctxRunning`); the code does
+  not promise to suspend it on pause (see `obs_pause_keeps_audio_context`).
+-/
+namespace WebState.RunPause
+
+/-- The run/pause part of the state. -/
+structure Pz where
+  loaded     : Bool   -- !!currentRomName (index.js 7765)
+  rb         : Bool   -- rollbackMode (enterRollbackMode 9250)
+  paused     : Bool   -- paused (7767)
+  lit        : Bool   -- pauseButton.classList "paused"/"active" + title "Resume"
+  home       : Bool   -- a loaded game with body.running removed (showMainMenu 9358)
+  report     : Bool   -- reportModal.classList "open"
+  reportWas  : Bool   -- reportWasPaused (5820)
+  rw         : Bool   -- rewindModal.classList "open"
+  rwWas      : Bool   -- rwWasPaused (6311)
+  clip       : Bool   -- clipModal.classList "open"
+  clipWas    : Bool   -- clipWasPaused (8505)
+  netModal   : Bool   -- netModal.classList "open" (netplay.js)
+  netFroze   : Bool   -- netFrozeGame (netplay.js 172)
+  replay     : Bool   -- clipReplayActive (8369)
+
+/-- The page-lifecycle, wake-lock and audio part of the state. -/
+structure Wk where
+  visible    : Bool          -- document.visibilityState === "visible"
+  bfcache    : Bool          -- between pagehide and pageshow
+  ctxRunning : Bool          -- audioCtx.state === "running"
+  sentinel   : Option Nat    -- wakeSentinel (7787)
+  requesting : Bool          -- wakeRequesting (7788) = the request's .then is pending
+  netLock    : Option Nat    -- screenLock (netplay.js 940)
+  netPending : Nat           -- acquireWakeLock() continuations in flight (netplay.js 941)
+  idxLocks   : List Nat      -- UA-held screen locks obtained by syncWakeLock
+  netLocks   : List Nat      -- UA-held screen locks obtained by acquireWakeLock
+  relQ       : List Nat      -- queued WakeLockSentinel "release" events
+  nextId     : Nat           -- fresh lock identities
+
+structure State where
+  p : Pz
+  w : Wk
+
+def init : State :=
+  { p := { loaded := false, rb := false, paused := false, lit := false, home := false,
+           report := false, reportWas := false, rw := false, rwWas := false,
+           clip := false, clipWas := false, netModal := false, netFroze := false,
+           replay := false },
+    w := { visible := true, bfcache := false, ctxRunning := false, sentinel := none,
+           requesting := false, netLock := none, netPending := 0, idxLocks := [],
+           netLocks := [], relQ := [], nextId := 0 } }
+
+inductive Event where
+  | pauseTap              -- #pause pointerup/click (8246-8260); hidden on home (styles.css 1110)
+  | pauseKey              -- Space (9061) / Period (9103) -> pauseButton.click(); NOT gated on home
+  | remotePause (on : Bool) -- RB_PAUSE from the peer (netplay.js 1197) -> applyRemotePause (8231)
+  | openReport | closeReport          -- 5881 / 5911
+  | openRw | closeRw                  -- 6391 / 6421
+  | openClip | closeClip              -- 8714 / 8758
+  | clipSave                          -- clipSaveBtn (8768): closeClipScrubber + startClipExport
+  | clipDone                          -- tick -> finishRetroClip(true) (11405 / 8383)
+  | mainMenu | resume                 -- showMainMenu 9358 / resumeGame 9373
+  | loadRom                           -- loadRom's commit segment (7880-7910)
+  | unload                            -- unloadGame's final segment (9643-9669)
+  | openNet                           -- openNetConnect after its awaits (netplay.js 176-205)
+  | netDismiss                        -- netDismissModal -> netShutdown, pre-session (netplay.js 1605)
+  | netFailKeep                       -- netFail pre-session: netShutdown({ keepModal: true }) (netplay.js 235-243)
+  | netStart                          -- rbStartIfReady: closeNetModal + enterRollbackMode (netplay.js 1294)
+  | netEnd                            -- netShutdown of a session (netplay.js 1540-1558 + rbTeardown)
+  | tabHide | tabShow                 -- visibilitychange (index 7820; netplay.js 950)
+  | tick                              -- rAF tick -> syncWakeLock (11325)
+  | wakeGrant | wakeDeny              -- wakeLock.request(...).then / .catch (7798 / 7810)
+  | netGrant | netDeny                -- acquireWakeLock's await resumes / throws (netplay.js 943)
+  | relFire                           -- a queued "release" event is dispatched (listener 7806)
+  | uaRevoke                          -- the UA drops the page's held lock (battery, ...)
+  | pagehide | pageshow | gesture     -- 11226 / 11242 / resumeAudio (11079) on a user gesture
+  deriving DecidableEq, Repr
+
+def anyModal (p : Pz) : Bool := p.report || p.rw || p.clip || p.netModal
+
+/-- emulationActive (7789). -/
+def active (p : Pz) : Bool := p.loaded && !p.paused
+/-- syncWakeLock's `want` (7793): running and visible. -/
+def want (s : State) : Bool := active s.p && s.w.visible
+
+/-- `s.release()` on a sentinel the page holds: the spec removes it at once and
+queues its "release" event. -/
+def relIdx (w : Wk) (l : Nat) : Wk :=
+  if l ∈ w.idxLocks then
+    { w with idxLocks := w.idxLocks.filter (fun x => x != l), relQ := w.relQ ++ [l] }
+  else w
+
+/-- syncWakeLock (7791-7819), its synchronous part. -/
+def syncW (p : Pz) (w : Wk) : Wk :=
+  if active p && w.visible && w.sentinel.isNone && !w.requesting then
+    { w with requesting := true }                                   -- 7795-7797
+  else if !(active p && w.visible) then
+    match w.sentinel with
+    | some l => relIdx { w with sentinel := none } l                -- 7812-7815
+    | none => w
+  else w
+
+/-- releaseWakeLock (netplay.js 946). -/
+def releaseNetLock (w : Wk) : Wk :=
+  match w.netLock with
+  | some l =>
+    if l ∈ w.netLocks then
+      { w with netLock := none, netLocks := w.netLocks.filter (fun x => x != l),
+               relQ := w.relQ ++ [l] }
+    else { w with netLock := none }
+  | none => w
+
+/-- togglePause (8217); the relay to the peer is not state here. -/
+def togglePause (p : Pz) : Pz := { p with paused := !p.paused, lit := !p.paused }
+
+def closeReportM (p : Pz) : Pz :=      -- closeReportModal (5911)
+  if p.report then { p with report := false, paused := p.reportWas } else p
+def closeRwM (p : Pz) : Pz :=          -- closeRewindScrubber (6421)
+  if p.rw then { p with rw := false, paused := p.rwWas } else p
+def closeClipM (p : Pz) : Pz :=        -- closeClipScrubber (8758)
+  if p.clip then { p with clip := false, paused := p.clipWas } else p
+
+/-- netShutdown's thaw (netplay.js 1549-1554). -/
+def thaw (p : Pz) : Pz :=
+  if p.netFroze then { p with netFroze := false, paused := false, lit := false } else p
+
+/-- startClipExport (8418-8472), the arming path. -/
+def startClip (p : Pz) : Pz :=
+  if !p.replay && p.loaded && !p.rb then { p with replay := true, paused := false } else p
+
+def stepP (p : Pz) : Event → Pz
+  | .pauseTap => togglePause p
+  | .pauseKey => togglePause p
+  | .remotePause on => if p.paused != on then togglePause p else p
+  | .openReport => { p with reportWas := p.paused, paused := true, report := true }
+  | .closeReport => closeReportM p
+  | .openRw => { p with rwWas := p.paused, paused := true, rw := true }
+  | .closeRw => closeRwM p
+  | .openClip => { p with clipWas := p.paused, paused := true, clip := true }
+  | .closeClip => closeClipM p
+  | .clipSave => startClip (closeClipM p)
+  | .clipDone => { p with replay := false }            -- finishRetroClip: paused untouched
+  | .mainMenu => { p with paused := true, home := true } -- the button is untouched
+  | .resume => { p with paused := false, lit := false, home := false }
+  | .loadRom =>
+    -- abortRetroClip; closeRewindScrubber(); closeClipScrubber(); paused = false; button reset
+    { closeClipM (closeRwM { p with replay := false }) with
+        loaded := true, paused := false, lit := false, home := false }
+  | .unload => { p with loaded := false, paused := true, lit := false, home := false }
+  | .openNet =>
+    let fr := p.loaded && !p.paused                      -- netFrozeGame (netplay.js 200)
+    { p with netModal := true, netFroze := fr, paused := p.paused || fr, lit := p.lit || fr }
+  | .netDismiss => { thaw p with netModal := false }
+  | .netFailKeep => thaw p                                -- the modal stays open
+  | .netStart =>                                          -- netFrozeGame = false; enterRollbackMode
+    { p with netModal := false, netFroze := false, rb := true, paused := false, lit := false,
+             home := false }
+  | .netEnd =>
+    -- thaw; then `if (s?.rb) { paused = false; body.paused off }` -- the button is NOT
+    -- reset; rbTeardown -> leaveRollbackMode runs before rbTeardown's first await
+    { thaw p with paused := false, rb := false, netModal := false }
+  | _ => p
+
+def stepW (p : Pz) (w : Wk) : Event → Wk
+  | .openNet => { w with netPending := w.netPending + 1 }   -- acquireWakeLock() (netplay.js 189)
+  | .netDismiss | .netStart | .netEnd => releaseNetLock w     -- closeNetModal (netplay.js 110)
+  | .tabHide =>
+    -- the UA releases every screen lock and queues their "release" events; then the
+    -- visibilitychange listeners: syncWakeLock (7820); netplay's only stamps a time (952)
+    syncW p { w with visible := false, relQ := w.relQ ++ w.idxLocks ++ w.netLocks,
+                     idxLocks := [], netLocks := [] }
+  | .tabShow =>
+    let w := syncW p { w with visible := true }
+    if p.netModal then { w with netPending := w.netPending + 1 } else w   -- netplay.js 955
+  | .tick => syncW p w
+  | .wakeGrant =>
+    if !w.visible then { w with requesting := false }      -- rejected: .catch (7810)
+    else
+      let n := w.nextId
+      if !active p then                                    -- 7801-7803: s.release()
+        { w with requesting := false, nextId := n + 1, relQ := w.relQ ++ [n] }
+      else                                                 -- 7805
+        { w with requesting := false, nextId := n + 1, idxLocks := n :: w.idxLocks,
+                 sentinel := some n }
+  | .wakeDeny => { w with requesting := false }
+  | .netGrant =>
+    if !w.visible then { w with netPending := w.netPending - 1 }   -- rejected: catch {}
+    else                                                   -- screenLock = await request()
+      { w with netPending := w.netPending - 1, nextId := w.nextId + 1,
+               netLocks := w.nextId :: w.netLocks, netLock := some w.nextId }
+  | .netDeny => { w with netPending := w.netPending - 1 }
+  | .relFire =>
+    match w.relQ with
+    | [] => w
+    | l :: r => { w with relQ := r,
+                         sentinel := if w.sentinel == some l then none else w.sentinel }  -- 7806
+  | .uaRevoke =>
+    match w.idxLocks with
+    | [] => w
+    | l :: r => { w with idxLocks := r, relQ := w.relQ ++ [l] }
+  -- pagehide: netShutdown only `if (netMode)` (11227), and rbStartIfReady set
+  -- netMode = false, so a rollback session is untouched; the context is suspended (11235)
+  | .pagehide => { w with ctxRunning := false, bfcache := true }
+  | .pageshow => { w with bfcache := false, ctxRunning := w.ctxRunning || p.loaded }  -- 11242
+  | .gesture => { w with ctxRunning := true }
+  | _ => w
+
+def step (s : State) (e : Event) : State := { p := stepP s.p e, w := stepW s.p s.w e }
+
+/-- When the event can happen. -/
+def en (s : State) : Event → Bool
+  | .pauseTap => s.w.visible && s.p.loaded && !anyModal s.p && !s.p.home
+  | .pauseKey => s.w.visible && s.p.loaded && !anyModal s.p && !s.p.replay  -- 9033, 9053, 9058
+  | .remotePause _ => s.p.rb
+  | .openReport => s.w.visible && !anyModal s.p   -- hamburger, or the paused card's ⋯ (4728)
+  | .closeReport | .closeRw | .closeClip => s.w.visible  -- buttons; Escape runs every closer (5214)
+  | .openRw => s.w.visible && s.p.loaded && !s.p.rb && !s.p.home && !anyModal s.p  -- 6394, styles 1173
+  | .openClip => s.w.visible && s.p.loaded && !s.p.rb && !s.p.home && !anyModal s.p && !s.p.replay
+  | .clipSave => s.w.visible && s.p.clip
+  | .clipDone => s.w.visible && s.p.replay
+  | .mainMenu => s.w.visible && s.p.loaded && !s.p.home && !anyModal s.p
+  | .resume => s.w.visible && s.p.loaded && s.p.home && !anyModal s.p
+  | .loadRom => !s.p.rb
+  | .unload => s.p.loaded && !s.p.rb
+  | .openNet => s.w.visible && !anyModal s.p && !s.p.rb
+  | .netDismiss => s.w.visible && s.p.netModal && !s.p.rb
+  | .netFailKeep => s.p.netModal && !s.p.rb
+  | .netStart => s.p.netModal && s.p.loaded && !s.p.rb
+  | .netEnd => s.p.rb
+  | .tabHide => s.w.visible
+  | .tabShow => !s.w.visible && !s.w.bfcache
+  | .tick => s.w.visible
+  | .wakeGrant | .wakeDeny => s.w.requesting
+  | .netGrant | .netDeny => decide (s.w.netPending > 0)
+  | .relFire => !s.w.relQ.isEmpty
+  | .uaRevoke => !s.w.idxLocks.isEmpty
+  | .pagehide => !s.w.visible && !s.w.bfcache
+  | .pageshow => s.w.bfcache
+  | .gesture => s.w.visible
+
+inductive Reachable : State → Prop
+  | init : Reachable init
+  | step {s e} : Reachable s → en s e = true → Reachable (step s e)
+
+def run (s : State) : List Event → Option State
+  | [] => some s
+  | e :: es => if en s e then run (step s e) es else none
+
+theorem run_reachable {s t : State} {es : List Event} (hs : Reachable s)
+    (h : run s es = some t) : Reachable t := by
+  induction es generalizing s with
+  | nil => simp [run] at h; exact h ▸ hs
+  | cons e es ih =>
+    simp only [run] at h
+    split at h
+    · exact ih (Reachable.step hs (by assumption)) h
+    · cases h
+
+/-- A trace from `init`, enabled at every step, that ends in a `bad` state. -/
+def witnesses (es : List Event) (bad : State → Bool) : Bool :=
+  match run init es with
+  | some s => bad s
+  | none => false
+
+theorem witness_sound {es : List Event} {bad : State → Bool}
+    (h : witnesses es bad = true) : ∃ s, Reachable s ∧ bad s = true := by
+  unfold witnesses at h
+  split at h
+  · exact ⟨_, run_reachable Reachable.init (by assumption), h⟩
+  · cases h
+
+/-! ## Part 1: the run/pause discipline -/
+
+/-- The intended properties, plus the bookkeeping that makes them inductive.
+* `frozen`:  a loaded game never steps behind a pausing overlay or the home screen.
+* `label`:   with nothing over the game, the button's icon/title matches `paused`.
+* `restore*`: each open overlay remembers exactly the user's own choice, so
+  closing it gives that choice back (neither sticks the game paused nor
+  unpauses a game the user paused). -/
+structure Inv (p : Pz) : Prop where
+  rbLoaded : p.rb = true → p.loaded = true
+  excl1    : p.report = true → p.rw = false ∧ p.clip = false ∧ p.netModal = false
+  excl2    : p.rw = true → p.clip = false ∧ p.netModal = false
+  excl3    : p.clip = true → p.netModal = false
+  rwHome   : p.rw = true → p.home = false ∧ p.rb = false
+  clipHome : p.clip = true → p.home = false ∧ p.rb = false
+  netRb    : p.netModal = true → p.rb = false
+  frozen   : p.loaded = true → (p.report || p.rw || p.clip || p.netModal || p.home) = true →
+               p.paused = true
+  label    : p.loaded = true → (p.report || p.rw || p.clip || p.netModal) = false →
+               p.home = false → p.paused = p.lit
+  restoreReport : p.loaded = true → p.report = true → p.reportWas = (p.lit || p.home)
+  restoreRw     : p.loaded = true → p.rw = true → p.rwWas = p.lit
+  restoreClip   : p.loaded = true → p.clip = true → p.clipWas = p.lit
+  netFroze1 : p.netFroze = true → p.netModal = true ∧ (p.loaded = true → p.home = false ∧ p.lit = true)
+  netOwn    : p.loaded = true → p.netModal = true → p.netFroze = false → p.home = false →
+                p.lit = true
+
+/-- The events the discipline survives. Every excluded case has a `bug_*` below. -/
+def benign (p : Pz) : Event → Bool
+  | .pauseKey => !p.home                          -- bug_space_on_home_runs_game
+  | .remotePause _ => !p.report && !p.home         -- bug_remote_resume_under_report / _on_home
+  | .loadRom => !p.report && !p.netModal           -- bug_load_under_report_* / _under_link_modal
+  | .netEnd => !p.home && !p.report && !p.lit      -- bug_link_end_*
+  | .clipSave => !p.clipWas                        -- bug_clip_export_drops_pause
+  | .netFailKeep => !p.netFroze                    -- bug_link_setup_error_thaws_under_modal
+  | _ => true
+
+inductive ReachableB : State → Prop
+  | init : ReachableB init
+  | step {s e} : ReachableB s → en s e = true → benign s.p e = true → ReachableB (step s e)
+
+theorem inv_init : Inv init.p := by
+  constructor <;> simp [init]
+
+theorem inv_step {s : State} {e : Event} (h : Inv s.p) (he : en s e = true)
+    (hb : benign s.p e = true) : Inv (step s e).p := by
+  obtain ⟨h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11, h12, h13, h14⟩ := h
+  cases e <;> simp only [en, benign, anyModal] at he hb <;>
+    (constructor <;> simp only [step, stepP, togglePause, closeReportM, closeRwM, closeClipM,
+      thaw, startClip] <;> (repeat' split) <;> grind)
+
+theorem inv_benign {s : State} (h : ReachableB s) : Inv s.p := by
+  induction h with
+  | init => exact inv_init
+  | step _ he hb ih => exact inv_step ih he hb
+
+/-- Corollary (frozen): with only benign events, a loaded game never runs behind
+Report a Bug, a scrubber, the Link Cable modal or the home screen. -/
+theorem benign_frozen {s : State} (h : ReachableB s) (hl : s.p.loaded = true)
+    (ho : (anyModal s.p || s.p.home) = true) : active s.p = false := by
+  have := (inv_benign h).frozen hl
+  simp only [anyModal] at ho
+  simp [active, this ho]
+
+/-- Corollary (label): with nothing over the game, the icon says what the core does. -/
+theorem benign_label {s : State} (h : ReachableB s) (hl : s.p.loaded = true)
+    (hm : anyModal s.p = false) (hh : s.p.home = false) : s.p.paused = s.p.lit :=
+  (inv_benign h).label hl hm hh
+
+/-! ### Refutations: each non-benign case is reachable and breaks a property -/
+
+/-- The core steps (visible, loaded, unpaused) with a pausing overlay or the home
+screen in front of it. -/
+def runsBehind (s : State) : Bool :=
+  s.p.loaded && (anyModal s.p || s.p.home) && !s.p.paused && s.w.visible
+
+/-- Nothing covers the game, and the pause button's icon/title contradicts `paused`. -/
+def labelWrong (s : State) : Bool :=
+  s.p.loaded && !anyModal s.p && !s.p.home && (s.p.paused != s.p.lit)
+
+/-- Space (or Period) on the home screen: `shortcutKeyHandler` (9030-9066) checks
+`anyModal` and `gameLoaded` but not `body.running`, and calls the hidden pause
+button's `click()`; `togglePause` unpauses the game `showMainMenu` froze, so it
+runs, with sound, behind the library. -/
+theorem bug_space_on_home_runs_game :
+    ∃ s, Reachable s ∧ (runsBehind s && s.p.home) = true :=
+  witness_sound (es := [.loadRom, .mainMenu, .pauseKey]) (by decide)
+
+/-- A ROM dropped on the page (or a launch whose download was in flight) while
+Report a Bug is open: `loadRom` closes the two scrubbers before `paused = false`
+(7895-7899) but not the report modal, so the new game runs under it... -/
+theorem bug_load_under_report_runs :
+    ∃ s, Reachable s ∧ (runsBehind s && s.p.report) = true :=
+  witness_sound (es := [.loadRom, .pauseTap, .openReport, .loadRom]) (by decide)
+
+/-- ...and closing the report writes back the old game's `reportWasPaused`: the new
+game is frozen while the button shows Pause (not Resume). -/
+theorem bug_load_under_report_sticks_paused :
+    ∃ s, Reachable s ∧ (labelWrong s && s.p.paused && !s.p.lit) = true :=
+  witness_sound (es := [.loadRom, .pauseTap, .openReport, .loadRom, .closeReport]) (by decide)
+
+/-- The same under the Link Cable modal: a paused game (so `netFrozeGame` stayed
+false) replaced by a dropped ROM runs behind the modal meant to freeze it. -/
+theorem bug_load_under_link_modal_runs :
+    ∃ s, Reachable s ∧ (runsBehind s && s.p.netModal) = true :=
+  witness_sound (es := [.loadRom, .pauseTap, .openNet, .loadRom]) (by decide)
+
+/-- In a rollback session Report a Bug stays in the menu (styles.css 6086-6099 do
+not hide #report-bug). The peer pauses, the player opens the report, the peer
+resumes: `applyRemotePause(false)` runs `togglePause`, so the core runs under the
+report... -/
+theorem bug_remote_resume_under_report_runs :
+    ∃ s, Reachable s ∧ (runsBehind s && s.p.report) = true :=
+  witness_sound (es := [.loadRom, .openNet, .netStart, .remotePause true, .openReport,
+                        .remotePause false]) (by decide)
+
+/-- ...and closing the report restores the stale `true`: frozen, button shows Pause,
+while the peer runs on into the prediction stall. -/
+theorem bug_remote_resume_under_report_sticks_paused :
+    ∃ s, Reachable s ∧ (labelWrong s && s.p.paused && !s.p.lit) = true :=
+  witness_sound (es := [.loadRom, .openNet, .netStart, .remotePause true, .openReport,
+                        .remotePause false, .closeReport]) (by decide)
+
+/-- Main Menu during a rollback session sets `paused = true` without relaying it; the
+peer pausing and resuming (to unstick the stall that caused) flips it back: the
+local core runs behind the home screen. -/
+theorem bug_remote_resume_on_home_runs :
+    ∃ s, Reachable s ∧ (runsBehind s && s.p.home) = true :=
+  witness_sound (es := [.loadRom, .openNet, .netStart, .mainMenu, .remotePause true,
+                        .remotePause false]) (by decide)
+
+/-- Paused in a session, then the peer leaves (netPeerGone -> netShutdown): `paused =
+false` and body.paused go (netplay.js 1556-1558) but the button keeps its Resume icon/title. -/
+theorem bug_link_end_keeps_resume_icon :
+    ∃ s, Reachable s ∧ (labelWrong s && !s.p.paused && s.p.lit) = true :=
+  witness_sound (es := [.loadRom, .openNet, .netStart, .pauseTap, .netEnd]) (by decide)
+
+/-- On the home screen during a session, the peer leaving unpauses the core behind
+the library ("your game keeps running", netplay.js 1532). -/
+theorem bug_link_end_on_home_runs :
+    ∃ s, Reachable s ∧ (runsBehind s && s.p.home) = true :=
+  witness_sound (es := [.loadRom, .openNet, .netStart, .mainMenu, .netEnd]) (by decide)
+
+/-- A clip export from a paused game: `startClipExport` sets `paused = false` so the
+replay runs (8471), and `finishRetroClip` never puts it back: the live game carries
+on after the export with the Resume icon (and body.paused) still showing. -/
+theorem bug_clip_export_drops_pause :
+    ∃ s, Reachable s ∧ (labelWrong s && !s.p.paused && s.p.lit && !s.p.replay) = true :=
+  witness_sound (es := [.loadRom, .pauseTap, .openClip, .clipSave, .clipDone]) (by decide)
+
+/-- Any setup failure while the Link Cable modal is up (wrong code, signaling or ICE
+error: netFail -> `netShutdown({ keepModal: true })`) thaws the game (netplay.js 1549-1555) but
+leaves the modal open for a retry, so the game runs behind it through the rest of
+code entry and pairing -- what the freeze (netplay.js 197-199) exists to prevent. -/
+theorem bug_link_setup_error_thaws_under_modal :
+    ∃ s, Reachable s ∧ (runsBehind s && s.p.netModal) = true :=
+  witness_sound (es := [.loadRom, .openNet, .netFailKeep]) (by decide)
+
+/-! ## Part 2: the Screen Wake Lock -/
+
+/-- The wake-lock bookkeeping of index.js, which holds in every reachable state. -/
+structure WInv (w : Wk) : Prop where
+  held    : w.idxLocks = [] ∨ ∃ l, w.sentinel = some l ∧ w.idxLocks = [l] ∧ l ∉ w.relQ
+  live    : ∀ l, w.sentinel = some l → w.idxLocks = [l] ∨ l ∈ w.relQ
+  reqNone : w.requesting = true → w.sentinel = none
+  relLt   : ∀ l ∈ w.relQ, l < w.nextId
+  senLt   : ∀ l, w.sentinel = some l → l < w.nextId
+  netLt   : ∀ l ∈ w.netLocks, l < w.nextId
+  hidden  : w.visible = false → w.sentinel = none ∧ w.idxLocks = [] ∧ w.netLocks = []
+  netSen  : ∀ l ∈ w.netLocks, w.sentinel ≠ some l
+
+theorem winv_init : WInv init.w := by
+  constructor <;> simp [init]
+
+theorem winv_syncW (p : Pz) {w : Wk} (h : WInv w) : WInv (syncW p w) := by
+  obtain ⟨h1, h2, h3, h4, h5, h6, h7, h8⟩ := h
+  unfold syncW
+  split
+  · constructor <;> simp_all
+  · split
+    · split
+      · rename_i l hs
+        have hid : w.idxLocks = [] ∨ w.idxLocks = [l] := by
+          rcases h1 with h1 | ⟨l', hl', h1, _⟩
+          · exact Or.inl h1
+          · rw [hs] at hl'; cases hl'; exact Or.inr h1
+        unfold relIdx
+        split
+        · rename_i hm
+          have hid' : w.idxLocks = [l] := by
+            rcases hid with hid | hid
+            · rw [hid] at hm; simp at hm
+            · exact hid
+          constructor <;> simp only [hid'] <;> simp_all
+          intro l' hl'; rcases hl' with hl' | rfl
+          · exact h4 l' hl'
+          · exact h5
+        · constructor <;> simp_all
+          all_goals grind
+      · exact ⟨h1, h2, h3, h4, h5, h6, h7, h8⟩
+    · exact ⟨h1, h2, h3, h4, h5, h6, h7, h8⟩
+
+theorem winv_releaseNetLock {w : Wk} (h : WInv w) : WInv (releaseNetLock w) := by
+  obtain ⟨h1, h2, h3, h4, h5, h6, h7, h8⟩ := h
+  unfold releaseNetLock
+  split
+  · split
+    · rename_i l _ hm
+      have hl := h6 l hm
+      constructor <;> simp only [List.mem_append, List.mem_cons, List.mem_filter] <;>
+        simp_all <;> grind
+    · constructor <;> simp_all
+  · exact ⟨h1, h2, h3, h4, h5, h6, h7, h8⟩
+
+theorem winv_step {s : State} {e : Event} (h : WInv s.w) (he : en s e = true) :
+    WInv (step s e).w := by
+  have hs := winv_syncW s.p h
+  have hr := winv_releaseNetLock h
+  obtain ⟨h1, h2, h3, h4, h5, h6, h7, h8⟩ := h
+  cases e <;> simp only [step, stepW, en] at he ⊢
+  all_goals first
+    | exact ⟨h1, h2, h3, h4, h5, h6, h7, h8⟩
+    | exact hs
+    | exact hr
+    | skip
+  case tabHide =>
+    -- hidden, so syncWakeLock's `want` is false: it drops the sentinel, whose lock
+    -- the UA already released
+    have hsen : ∀ l, s.w.sentinel = some l → l ∈ s.w.relQ ++ s.w.idxLocks ++ s.w.netLocks := by
+      intro l hl; rcases h2 l hl with h | h <;> simp [h]
+    have hall : ∀ l, (l ∈ s.w.relQ ∨ l ∈ s.w.idxLocks) ∨ l ∈ s.w.netLocks → l < s.w.nextId := by
+      intro l hl
+      rcases hl with (hl | hl) | hl
+      · exact h4 l hl
+      · rcases h1 with h1 | ⟨l', hs', h1, _⟩
+        · simp [h1] at hl
+        · simp [h1] at hl; exact h5 l (hl ▸ hs')
+      · exact h6 l hl
+    unfold syncW relIdx
+    simp only [Bool.and_false, Bool.false_and, Bool.not_false, ↓reduceIte,
+      Bool.false_eq_true, List.not_mem_nil]
+    split
+    · constructor <;> simp only [List.mem_append] <;> simp_all
+    · constructor <;> simp only [List.mem_append] <;> simp_all
+      all_goals grind
+  case tabShow =>
+    have := winv_syncW s.p (w := { s.w with visible := true })
+      ⟨h1, h2, h3, h4, h5, h6, by simp, h8⟩
+    split
+    · obtain ⟨g1, g2, g3, g4, g5, g6, g7, g8⟩ := this
+      exact ⟨g1, g2, g3, g4, g5, g6, g7, g8⟩
+    · exact this
+  case wakeGrant =>
+    split
+    · constructor <;> simp_all
+    · have hn := h3 he
+      have hi : s.w.idxLocks = [] := by
+        rcases h1 with h1 | ⟨l, hl, _⟩
+        · exact h1
+        · rw [hn] at hl; cases hl
+      split
+      · constructor <;> simp only [List.mem_append, List.mem_cons] <;> simp_all <;> grind
+      · constructor <;> simp_all <;> grind
+  case wakeDeny => constructor <;> simp_all
+  case netGrant =>
+    split
+    · constructor <;> simp_all
+    · constructor <;> simp only [List.mem_cons] <;> simp_all <;> grind
+  case relFire =>
+    split
+    · exact ⟨h1, h2, h3, h4, h5, h6, h7, h8⟩
+    · rename_i l r hq
+      constructor <;> simp_all <;> grind
+  case uaRevoke =>
+    split
+    · exact ⟨h1, h2, h3, h4, h5, h6, h7, h8⟩
+    · rename_i l r hq
+      constructor <;> simp only [List.mem_append, List.mem_cons] <;> simp_all <;> grind
+
+theorem winv_reachable {s : State} (h : Reachable s) : WInv s.w := by
+  induction h with
+  | init => exact winv_init
+  | step _ he ih => exact winv_step ih he
+
+/-- No leaked index.js lock: every screen lock the UA holds for syncWakeLock is the
+one `wakeSentinel` points at, whatever interleaving of pauses, overlays, hides,
+grants, denials, revocations and "release" events happened. -/
+theorem wake_no_leak {s : State} (h : Reachable s) :
+    ∀ l ∈ s.w.idxLocks, s.w.sentinel = some l := by
+  intro l hl
+  rcases (winv_reachable h).held with h1 | ⟨l', hs, h1, _⟩
+  · simp [h1] at hl
+  · simp [h1] at hl; exact hl ▸ hs
+
+/-- `wakeSentinel` is never stale for long: its lock is held, or its "release" event
+is queued and will clear it (the listener at 7806). -/
+theorem wake_sentinel_live {s : State} (h : Reachable s) {l : Nat}
+    (hs : s.w.sentinel = some l) : s.w.idxLocks = [l] ∨ l ∈ s.w.relQ :=
+  (winv_reachable h).live l hs
+
+/-- A hidden page holds no screen lock at all (neither file's). -/
+theorem wake_hidden_none {s : State} (h : Reachable s) (hv : s.w.visible = false) :
+    s.w.idxLocks = [] ∧ s.w.netLocks = [] :=
+  let ⟨_, a, b⟩ := (winv_reachable h).hidden hv
+  ⟨a, b⟩
+
+/-- A request that resolves after its reason went away (paused, home, an overlay,
+unloaded) is released in its `.then`: nothing is held afterwards. -/
+theorem wake_late_grant_released {s : State} (h : Reachable s)
+    (he : en s .wakeGrant = true) (ha : active s.p = false) :
+    (step s .wakeGrant).w.idxLocks = [] ∧ (step s .wakeGrant).w.sentinel = none := by
+  have hw := winv_reachable h
+  simp only [en] at he
+  have hn := hw.reqNone he
+  have hi : s.w.idxLocks = [] := by
+    rcases hw.held with h1 | ⟨l, hl, _⟩
+    · exact h1
+    · rw [hn] at hl; cases hl
+  simp only [step, stepW, ha]
+  split <;> simp [hi, hn]
+
+theorem syncW_visible (p : Pz) (w : Wk) : (syncW p w).visible = w.visible := by
+  unfold syncW relIdx
+  split
+  · rfl
+  · split
+    · split
+      · split <;> rfl
+      · rfl
+    · rfl
+
+/-- Progress: one rAF tick later the lock matches "running and visible" -- held
+or requested when wanted, released when not. -/
+theorem wake_tick_converges {s : State} (h : Reachable s) :
+    (want (step s .tick) = true →
+       (step s .tick).w.sentinel.isSome = true ∨ (step s .tick).w.requesting = true) ∧
+    (want (step s .tick) = false →
+       (step s .tick).w.sentinel = none ∧ (step s .tick).w.idxLocks = []) := by
+  have hw := winv_reachable h
+  have hid : ∀ l, s.w.sentinel = some l → s.w.idxLocks = [] ∨ s.w.idxLocks = [l] := by
+    intro l hs
+    rcases hw.held with h1 | ⟨l', hl', h1, _⟩
+    · exact Or.inl h1
+    · rw [hs] at hl'; cases hl'; exact Or.inr h1
+  have hnone : s.w.sentinel = none → s.w.idxLocks = [] := by
+    intro hs
+    rcases hw.held with h1 | ⟨l', hl', _⟩
+    · exact h1
+    · rw [hs] at hl'; cases hl'
+  have hwt : want (step s .tick) = (active s.p && s.w.visible) := by
+    simp only [want, step, stepP, stepW, syncW_visible]
+  rw [hwt]
+  simp only [step, stepW]
+  unfold syncW
+  cases hwv : (active s.p && s.w.visible)
+  · refine ⟨(fun h => by cases h), fun _ => ?_⟩
+    simp only [Bool.false_and, Bool.false_eq_true, Bool.not_false, ↓reduceIte]
+    rcases hs : s.w.sentinel with _ | l
+    · simp [hs, hnone hs]
+    · simp only [relIdx]
+      rcases hid l hs with h' | h' <;> simp [h']
+  · refine ⟨fun _ => ?_, (fun h => by cases h)⟩
+    simp only [Bool.true_and, Bool.not_true, Bool.false_eq_true, ↓reduceIte]
+    split
+    · simp
+    · rename_i hc
+      rcases hs : s.w.sentinel with _ | l
+      · cases hr : s.w.requesting <;> simp_all
+      · simp
+
+/-- netplay.js's modal lock has neither guard: `acquireWakeLock` assigns
+`screenLock = await request()` with no check that the modal is still open, and
+`releaseWakeLock` (in `closeNetModal`) only drops a lock that has already
+arrived. The player backgrounds the tab while waiting for a friend; on return the
+modal re-arms the lock (netplay.js 955), and the peer's READY, queued while the
+tab was throttled, starts the session (`rbStartIfReady` -> `closeNetModal`)
+before that request resolves. The late lock is stored and never released: once
+the player pauses, index.js correctly drops its own lock, but the screen stays
+awake until the tab is next hidden. -/
+theorem bug_link_modal_wake_lock_leak :
+    ∃ s, Reachable s ∧
+      (!s.w.netLocks.isEmpty && !s.p.netModal && !want s && s.w.idxLocks.isEmpty &&
+        s.w.visible) = true :=
+  witness_sound (es := [.loadRom, .openNet, .netGrant, .tabHide, .tabShow, .netStart,
+                        .netGrant, .pauseTap, .tick]) (by decide)
+
+/-! ## Part 3: audio -/
+
+/-- Not a promise the code makes, recorded so nobody assumes it: pausing (by any
+path) leaves the AudioContext running; only pagehide suspends it (11235). The
+paused core just stops pushing buffers, so output falls silent once the queued
+lead drains. -/
+theorem obs_pause_keeps_audio_context :
+    ∃ s, Reachable s ∧ (s.p.paused && s.p.loaded && s.w.ctxRunning && s.w.visible) = true :=
+  witness_sound (es := [.gesture, .loadRom, .pauseTap]) (by decide)
+
+/-- What pagehide does promise: a page entering the bfcache has suspended its
+context (pageshow and gestures, the only resumers, cannot fire while cached). -/
+theorem pagehide_suspends_audio (s : State) : (step s .pagehide).w.ctxRunning = false := rfl
+
+end WebState.RunPause

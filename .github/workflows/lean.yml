@@ -1,0 +1,27 @@
+name: Lean models
+# The web frontend's state machines, modelled and proved in formal/.
+# The proofs read no JS, so only a change under formal/ can break them.
+on:
+  push:
+    paths: ["formal/**", ".github/workflows/lean.yml"]
+  pull_request:
+    paths: ["formal/**", ".github/workflows/lean.yml"]
+  workflow_dispatch:
+jobs:
+  lean:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: formal
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install elan (toolchain comes from formal/lean-toolchain)
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Build every model and proof
+        run: lake build
+      - name: Axiom audit (no sorry, native_decide or new axioms)
+        run: lake env lean AxiomAudit.lean
