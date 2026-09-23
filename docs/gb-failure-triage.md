@@ -271,7 +271,14 @@ the line-144 OAM pulse at double speed wants dot 455 on the grid a switch
 leaves (gambatte-core raises it 8 cycles before the line ends) and 454 on
 frames that turned the LCD on in double speed (`enable_display/frame{0,1}_
 m2irq_count_ds_2`), i.e. the double-speed LCD-on seed sits a dot off the
-switch-reached grid. `M2_144_EARLY_DOT_DS = 455` trades the three.
+switch-reached grid. `M2_144_EARLY_DOT_DS = 455` trades the three. Side by
+side, dingbat's write dots sit at gambatte + 4 after a double-speed LCD
+enable and gambatte + 3 on a switch-reached grid (gambatte has one class), so
+the LCD-on seed is the dot that is off; shifting it either way alone loses
+85 rows today because the double-speed constants were bracketed around it. A
+history bit that picks 454 or 455 takes the row with nothing lost but only
+patches this one event, so it is not shipped; the fix is the seed plus a
+joint re-bracket of the `_DS` set.
 
 The knob sweep of 2026-09-22 (`+-1` of every GB `{.intdefine.}`, 206 knobs,
 red rows first and every hit validated on the full 5157-row list from a
