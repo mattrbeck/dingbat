@@ -266,6 +266,15 @@ const M0_IRQ_EDGE_X* {.intdefine.} = 1
   ## `m0enable/enable_wxA6_2x_spxA7_ds_1`; the CGB STAT-write rule reads
   ## "mode 0 has begun" off the same request. 0 = the request waits for the
   ## fetcher.
+const DMG_LYC_BOUNDARY_OPEN* {.intdefine.} = 1
+  ## A DMG LYC write parked in the M-cycle a rendered line starts in still
+  ## lets the comparator's boundary window open (ly_advance_open), unless the
+  ## old LYC matched the line ending: a match that moves with LY sees no edge
+  ## (gambatte-core's LYC-write rule, "old value already matched there").
+  ## gambatte `miscmstatirq/lycwirq_trigger_m0_late_ly44_lyc45_4` [dmg] (the
+  ## mode-0 source hands the line to the new match); `lycEnable/
+  ## ff45_enable_weirdpoint_3` [dmg] is the matched case and is lost without
+  ## the exception. 0 = any parked write closes the window.
 const STAT_GLITCH_M0_LEAD* {.intdefine.} = 1
   ## Dots before the mode 3 -> 0 flag at which the DMG STAT-write bug's $FF
   ## phase already finds the mode-0 source (ppu_stat_write_glitch); measured
@@ -2517,6 +2526,7 @@ type
     timer_irq_acked*:  bool    # TIMER_ACK_LOOKAHEAD: the dispatch acked the reload's request
     hdma_start_req*:   bool    # HDMA_START_GRANT_FETCH: the owed block was raised by FF55
     gdma_owed*:        bool    # GDMA_AFTER_FETCH: a general-purpose DMA waits for the next fetch
+    lyc_write_old*:    int16   # DMG_LYC_BOUNDARY_OPEN: LYC before a parked DMG LYC write (+1; 0 = none)
     when defined(test_harness):
       test_output*:  TestOutput
 

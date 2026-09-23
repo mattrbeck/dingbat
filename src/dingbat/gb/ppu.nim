@@ -1615,6 +1615,7 @@ proc ppu_flush_stat_write*(ppu: GbPpu; gb: GB) =
   ## are not an M-cycle (post-boot table, cheat pokes) call it directly.
   if ppu.stat_write_pending:
     ppu.stat_write_pending = false
+    when DMG_LYC_BOUNDARY_OPEN != 0: gb.lyc_write_old = 0
     ppu_handle_stat_interrupt(ppu, gb)
 
 proc ppu_flush_hdma_bytes*(ppu: GbPpu; gb: GB) =
@@ -1981,7 +1982,14 @@ proc ly_advance_line*(ppu: GbPpu; gb: GB) {.noinline.} =
   ## call rather than open/`mode_flag=`/close at the call site: spelled inline
   ## in fifo_tick_slow's dot loop it costs +1.19% of retired instructions on
   ## Pokemon Crystal.
-  let lyc_en = ly_advance_open(ppu)
+  var lyc_en = ly_advance_open(ppu)
+  when DMG_LYC_BOUNDARY_OPEN != 0:
+    # A parked DMG LYC write does not close the window unless the old value
+    # matched the line now ending (DMG_LYC_BOUNDARY_OPEN).
+    if ppu.stat_write_pending and gb.lyc_write_old > 0'i16 and
+       int(gb.lyc_write_old) != int(ppu.ly):
+      lyc_en = ppu.lcd_status and 0x40'u8
+      ppu.lcd_status = ppu.lcd_status and 0b1011_1111'u8
   ppu.`mode_flag=`(2'u8, gb)
   ly_advance_close(ppu, gb, lyc_en)
 
@@ -2692,6 +2700,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
           stat_drop_arm(ppu, gb, ppu.lcd_status, val, int32(LYC_DROP_LATENCY_DMG))
         return
     var edge_here = true
+    let old_lyc = ppu.lyc
     when CGB_LYC_WRITE_DEFER:
       if gb.cgb_enabled and (CGB_LYC_WRITE_DEFER_DS or gb.memory.current_speed == 0):
         ppu_defer_machinery_write(ppu, gb, idx, val)
@@ -2700,6 +2709,8 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       else: ppu.lyc = val
     else:
       ppu.lyc = val
+    when DMG_LYC_BOUNDARY_OPEN != 0:
+      if not gb.cgb_enabled: gb.lyc_write_old = int16(old_lyc) + 1
     if edge_here: ppu.stat_write_pending = true
     gb.memory.write_deferred = true
     if LYC_DROP_BOUNDARY_SKIP == 0 or

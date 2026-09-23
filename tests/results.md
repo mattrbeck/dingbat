@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-09-22 18:04:08 · commit 2799e6dd6 · game-boy-test-roms v7.0*
+*Generated: 2026-09-22 18:11:10 · commit 65cca7b80 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1254
-- **Pass:** 1241
-- **Fail:** 13
+- **Pass:** 1242
+- **Fail:** 12
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -29,7 +29,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - SameSuite APU | 70 | 70 |
 | Game Boy - Shootout ROMs | 15 | 15 |
 | Game Boy - Mooneye (wilbertpol) | 184 | 184 |
-| Game Boy - gambatte | 35 | 48 |
+| Game Boy - gambatte | 36 | 48 |
 
 ## Game Boy - Blargg (28/28)
 
@@ -101,7 +101,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 184 tests passed.**
 
-## Game Boy - gambatte (35/48)
+## Game Boy - gambatte (36/48)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -139,7 +139,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gambatte/m2int_m2irq | per-ROM | 👌 18/18 passed |
 | gambatte/m2int_m2stat | per-ROM | 👌 8/8 passed |
 | gambatte/m2int_m3stat | per-ROM | 👌 44/44 passed |
-| gambatte/miscmstatirq | per-ROM | 👀 278/279 passed |
+| gambatte/miscmstatirq | per-ROM | 👌 279/279 passed |
 | gambatte/oam_access | per-ROM | 👌 69/69 passed |
 | gambatte/oamdma | per-ROM | 👀 800/802 passed |
 | gambatte/scx_during_m3 | per-ROM | 👀 131/141 passed |
