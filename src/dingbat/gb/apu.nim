@@ -157,6 +157,9 @@ proc apu_rebase*(apu: GbApu; gb: GB; base: CycleCount) {.inline.} =
 
 const APU_SPSW_EXTRA_DOTS* {.intdefine.} = 10
 const APU_SPSW_EXTRA_DOTS_SINGLE* {.intdefine.} = 7
+const APU_SPSW_EXTRA_DOTS_CARRY* {.intdefine.} = 5
+const APU_SPSW_EXTRA_DOTS_CARRY_SINGLE* {.intdefine.} = 1
+  ## The same shares under APU_CLOCK_CARRY (abstract_channels.nim).
   ## T-cycles the APU's 4 MHz domain runs across the KEY1 stall beyond what
   ## the CPU clock counts, for a switch ending in double / single speed (the
   ## PPU's SPEED_SWITCH_PPU_EXTRA_DOTS = 8 / 3). Pinned by the single-switch
@@ -194,18 +197,24 @@ proc apu_rescale_speed*(apu: GbApu; gb: GB; old_speed, new_speed: uint8) =
   ## CGB speed switch: remaining delays are in CPU cycles, so entering double
   ## speed doubles them and leaving halves them (as Scheduler.`speed_mode=`).
   apu_catchup_all(apu, gb)
-  let now = gb.scheduler.cycles
+  var now = gb.scheduler.cycles
+  var base_new = now
+  when APU_CLOCK_CARRY != 0:
+    if gb.quirks.apu_clock_carry:
+      # Deadlines keep their distance in 2 MHz cycles from the carried clock's
+      # last cycle, which the switch re-reads (APU_CLOCK_CARRY).
+      now = CycleCount(gb.sh_l0)
+      base_new = CycleCount(gb.sh_l1)
+  template conv(x: CycleCount): CycleCount =
+    block:
+      let remaining = x - now
+      base_new + (if new_speed > old_speed: remaining shl (new_speed - old_speed)
+                  else:                     remaining shr (old_speed - new_speed))
   template adj(ch: untyped) =
-    if ch.next_step != GB_NO_STEP:
-      let remaining = ch.next_step - now
-      ch.next_step = now + (if new_speed > old_speed: remaining shl (new_speed - old_speed)
-                            else:                     remaining shr (old_speed - new_speed))
+    if ch.next_step != GB_NO_STEP: ch.next_step = conv(ch.next_step)
   template adj_sweep(field: untyped) =
     if apu.channel1.field != GB_NO_STEP:
-      let remaining = apu.channel1.field - now
-      apu.channel1.field =
-        now + (if new_speed > old_speed: remaining shl (new_speed - old_speed)
-               else:                     remaining shr (old_speed - new_speed))
+      apu.channel1.field = conv(apu.channel1.field)
   adj_sweep(sweep_check_at)
   adj_sweep(sweep_stop_at)
   adj_sweep(sweep_load_at)
@@ -216,15 +225,12 @@ proc apu_rescale_speed*(apu: GbApu; gb: GB; old_speed, new_speed: uint8) =
   # Settle the divisor stage first; it can be in the past (see apu_rebase).
   ch4_advance_divisor(apu.channel4, gb)
   if apu.channel4.div_next != GB_NO_STEP:
-    let rem4 = apu.channel4.div_next - now
-    apu.channel4.div_next =
-      now + (if new_speed > old_speed: rem4 shl (new_speed - old_speed)
-             else:                     rem4 shr (old_speed - new_speed))
+    apu.channel4.div_next = conv(apu.channel4.div_next)
   # The tick grids are re-anchored, not rescaled: the divider phase after a
   # speed switch is unpinned (SameSuite's APU tests switch speed before the APU
   # power-on that sets it).
-  apu.tick_phase  = now mod (CycleCount(4) shl new_speed)
-  apu.noise_phase = now mod (CycleCount(8) shl new_speed)
+  apu.tick_phase  = gb.scheduler.cycles mod (CycleCount(4) shl new_speed)
+  apu.noise_phase = gb.scheduler.cycles mod (CycleCount(8) shl new_speed)
 
 proc gb_rebase*(gb: GB): CycleCount {.discardable.} =
   ## Frame-boundary scheduler rebase. Catching the channels up first keeps every
@@ -232,6 +238,8 @@ proc gb_rebase*(gb: GB): CycleCount {.discardable.} =
   gb.apu.apu_catchup_all(gb)
   result = gb.scheduler.rebase()
   gb.apu.apu_rebase(gb, result)
+  when APU_CLOCK_CARRY != 0:
+    gb.sh_last -= int64(result); gb.sh_l0 -= int64(result); gb.sh_l1 -= int64(result)
 
 proc tick_frame_sequencer*(apu: GbApu; gb: GB) =
   # length_step clears `enabled` and sweep_step rewrites ch1.frequency, so
@@ -560,6 +568,7 @@ proc apu_write*(apu: GbApu; idx: int; val: uint8; gb: GB) =
       apu.channel4.div_counter = 0
       apu_drop_spsw_lag(apu, gb)
     elif (val and 0x80) != 0 and not apu.sound_enabled:
+      when APU_CLOCK_CARRY != 0: apu_sh_power_on(gb)
       apu.sound_enabled = true
       apu.frame_sequencer_stage = 0
       apu_drop_spsw_lag(apu, gb)

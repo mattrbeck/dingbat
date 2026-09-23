@@ -1475,6 +1475,7 @@ type
       ## AGB SP photograph of tools/gbprobe probe_h_scy (2026-09-04) is pixel-
       ## identical to the latched render (docs/flashcart-runbook.md row 31).
     pcm_read_edge_zero*: bool
+    apu_clock_carry*: bool
       ## CGB 0 / A / B / C. A PCM12 read landing on the very cycle a square
       ## channel's duty step lands reads 0 for that channel if its output was 0
       ## before the step (the rising edge is invisible to a read taken on it).
@@ -2589,6 +2590,11 @@ type
     wd_ds_push*:       bool
     wd_ds_ly*:         uint8
     stop_op_latch*:    int16   # STOP_OPERAND_LATCH: STOP's operand byte, run as the next opcode (+1; 0 = none)
+    sh_last*:          int64   # APU_CLOCK_CARRY: the 2 MHz APU clock's last whole cycle (scheduler cycles)
+    sh_cc*:            int64   # APU_CLOCK_CARRY: that clock's counter; its parity picks the 1 MHz trigger edge
+    sh_l0*:            int64   # APU_CLOCK_CARRY: the clock's last cycle at a switch, before / after its re-read
+    sh_l1*:            int64
+    sh_skip_div*:      bool    # APU_CLOCK_CARRY: the switch's own DIV reset is booked by stop_instr
     lyc_write_old*:    int16   # DMG_LYC_BOUNDARY_OPEN: LYC before a parked DMG LYC write (+1; 0 = none)
     when defined(test_harness):
       test_output*:  TestOutput
@@ -3365,6 +3371,7 @@ proc gb_quirks_for*(rev: GbRevision): GbQuirks =
     wx_write_late: rev == grAgb,
     scy_fetch_latch: rev in {grCgbD, grCgbE, grAgb},
     pcm_read_edge_zero: rev in {grCgb0, grCgbAB, grCgbC},
+    apu_clock_carry: rev in {grCgb0, grCgbAB, grCgbC},
     square_freq_backstep_halftick: rev in {grCgbD, grCgbE},
     lyc_compare_hold: rev in {grCgbD, grCgbE, grAgb},
     oam_read_open_late: rev == grCgbE,
@@ -3479,6 +3486,7 @@ proc gb_skip_boot(gb: GB) =
   gb.memory.skip_boot(gb)
   gb.ppu.skip_boot(gb)
   gb.timer.skip_boot(gb)
+  when APU_CLOCK_CARRY != 0: apu_sh_boot(gb)
 
 proc handle_saves*(gb: GB) =
   ## Flush battery-backed cart RAM once per frame (when dirty) so progress

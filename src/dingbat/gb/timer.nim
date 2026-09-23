@@ -215,6 +215,8 @@ proc timer_read*(t: GbTimer; idx: int): uint8 =
 proc timer_write*(t: GbTimer; gb: GB; idx: int; val: uint8) =
   case idx
   of 0xFF04:
+    when APU_CLOCK_CARRY != 0:
+      if not gb.sh_skip_div: apu_sh_div_reset(gb, sh_now(gb))
     # Resetting DIV drops every divider bit: if the APU tap was high the frame
     # sequencer steps early (SameSuite apu/div_*). The sequencer is a scheduled
     # event, so re-aim it now; a lazy re-aim can skip an edge falling before

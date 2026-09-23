@@ -987,8 +987,12 @@ proc mem_tick_stalled(mem: GbMemory; gb: GB; cycles: int;
   else: gb.ppu.tick(gb, ppu_cycles)
   # The APU's share of the same oscillator restart (APU_SPSW_EXTRA_DOTS).
   if first_chunk:
-    gb.apu.apu_stall_extra(gb, (if mem.current_speed == 1: APU_SPSW_EXTRA_DOTS
-                                else: APU_SPSW_EXTRA_DOTS_SINGLE))
+    var carry = false
+    when APU_CLOCK_CARRY != 0: carry = gb.quirks.apu_clock_carry
+    gb.apu.apu_stall_extra(gb, (if mem.current_speed == 1:
+                                  (if carry: APU_SPSW_EXTRA_DOTS_CARRY else: APU_SPSW_EXTRA_DOTS)
+                                else:
+                                  (if carry: APU_SPSW_EXTRA_DOTS_CARRY_SINGLE else: APU_SPSW_EXTRA_DOTS_SINGLE)))
   when CGB_LYC_EDGE_DEFER and CGB_LYC_EDGE_POLL:
     # As in mem_tick_ppu.
     if unlikely(mem.lyc_edge_owed):
@@ -1078,7 +1082,17 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
     # point so the divider's consumers (frame sequencer, serial, TIMA edge)
     # see it as a write, at the old speed; where in the opcode it lands is
     # SPEED_SWITCH_DIV_RESET_T in timer.nim.
+    when APU_CLOCK_CARRY != 0:
+      # The carried APU clock's view of the switch: the DIV reset at the STOP,
+      # the re-read eight cycles later going up and at once going down.
+      let sh_t0 = sh_now(gb)
+      apu_sh_div_reset(gb, sh_t0)
+      gb.sh_skip_div = true
     timer_speed_switch_div_reset(gb.timer, gb)
+    when APU_CLOCK_CARRY != 0:
+      gb.sh_skip_div = false
+      apu_sh_speed_change(gb, sh_t0 + (if mem.current_speed == 0: 8'i64 else: 0'i64),
+                          int64(mem.current_speed))
     let old_speed = mem.current_speed
     mem.current_speed = mem.current_speed xor 1
     # The channels' next_step deadlines live outside the scheduler's events.

@@ -47,6 +47,72 @@ proc gb_apu_edge_before*(gb: GB): CycleCount =
   let now  = gb.scheduler.cycles
   now - ((now + tick - (gb.apu.tick_phase mod tick)) mod tick)
 
+const APU_CLOCK_CARRY* {.intdefine.} = 0
+  ## Ships 0. 1: on CPU CGB C and older (GbQuirks.apu_clock_carry) the square
+  ## channels count their start-up from the 1 MHz edge at or BEFORE the write
+  ## on a 2 MHz APU clock whose phase is carried through APU power-on, DIV
+  ## resets and speed switches (the apu_sh_* shadow below, the rules
+  ## gambatte-core's PSG uses), and a switch carries every APU deadline across
+  ## by its distance in 2 MHz cycles (apu_rescale_speed), with
+  ## APU_SPSW_EXTRA_DOTS_CARRY{,_SINGLE} = 5 / 1 for the stall. It takes all
+  ## fourteen red gambatte audio rows (sound/ch1_duty0_pos6_to_pos7_timing_ds_6,
+  ## speedchange{2..5}*_ch1_duty0_pos6_to_pos7_timing_*, speedchange_ch1_
+  ## nr4init_*_2; peak bracketed on both extras) and loses SameSuite
+  ## channel_1_freq_change_timing-cgb0BC, whose triggers want the 1 MHz grid
+  ## anchored at the power-on write (the shipping rule). Both are CGB C
+  ## hardware records; applied to D/E too it loses nine more SameSuite rows.
+  ## docs/gb-failure-triage.md H1/H2.
+
+when APU_CLOCK_CARRY != 0:
+  template sh_now(gb: GB): int64 = int64(gb.scheduler.cycles)
+  template sh_ds(gb: GB): int64 = int64(gb.memory.current_speed)
+  proc apu_sh_advance*(gb: GB; t: int64; ds: int64) =
+    ## Whole 2 MHz cycles up to `t` (2 scheduler cycles each at single speed,
+    ## 4 at double); the remainder stays carried in `sh_last`.
+    let step = 2'i64 shl ds
+    if t > gb.sh_last:
+      let n = (t - gb.sh_last) div step
+      gb.sh_last += n * step
+      gb.sh_cc += n
+  proc apu_sh_boot*(gb: GB) =
+    let t = sh_now(gb)
+    gb.sh_last = t - 1
+    gb.sh_cc = t shr 1
+  proc apu_sh_power_on*(gb: GB) =
+    ## Power-on keeps the counter's low bits and re-aligns the clock to a
+    ## multiple of four cycles.
+    let t = sh_now(gb)
+    let ds = sh_ds(gb)
+    apu_sh_advance(gb, t, ds)
+    let off = gb.sh_last and ds
+    let c = gb.sh_cc + off
+    gb.sh_cc = (c and 0xFFF) + 2 * ((not (c + 1 + (1 - ds))) and 0x800)
+    gb.sh_last = ((gb.sh_last + 3) and not 3'i64) - (1 - ds)
+  proc apu_sh_div_reset*(gb: GB; t: int64) =
+    ## A DIV reset re-aligns the counter to a 4096-cycle boundary.
+    let ds = sh_ds(gb)
+    apu_sh_advance(gb, t, ds)
+    let off = gb.sh_last and ds
+    let c = gb.sh_cc + off
+    gb.sh_cc = (c and not 0xFFF'i64) + 2 * (c and 0x800) - off
+  proc apu_sh_speed_change*(gb: GB; t: int64; old_ds: int64) =
+    ## The carried remainder is re-read at the new speed (one cycle less going
+    ## down); going up the counter also drops half its cycles since the reset.
+    apu_sh_advance(gb, t, old_ds)
+    gb.sh_l0 = gb.sh_last
+    gb.sh_last -= old_ds
+    gb.sh_l1 = gb.sh_last
+    if old_ds == 0:
+      gb.sh_cc = gb.sh_cc - (gb.sh_cc and 0xFFF) div 2 - (gb.sh_last and 1)
+  proc apu_sh_edge*(gb: GB): CycleCount =
+    ## The 1 MHz edge at or before the write, on the carried clock.
+    let t = sh_now(gb)
+    let ds = sh_ds(gb)
+    apu_sh_advance(gb, t, ds)
+    let refv = if ds != 0 and (gb.sh_last and 1) != 0: 0'i64 else: 1'i64
+    let k = gb.sh_cc - ((gb.sh_cc - refv) and 1)
+    CycleCount(max(0'i64, gb.sh_last + (k - gb.sh_cc) * (2'i64 shl ds)))
+
 proc gb_trigger_deadline*(gb: GB; period: CycleCount;
                           extra_ticks: int): CycleCount =
   ## Absolute cycle of a channel's first waveform step after a trigger: the
@@ -55,8 +121,10 @@ proc gb_trigger_deadline*(gb: GB; period: CycleCount;
   ## extra_ticks of startup delay -- 2 for a square that was off
   ## (channel_1_delay), 1 for a restart (channel_1_restart). The waveform
   ## position is untouched. Channel 4 has its own rule: gb_noise_deadline.
-  let edge = if APU_TRIGGER_EDGE_BEFORE != 0: gb_apu_edge_before(gb)
+  var edge = if APU_TRIGGER_EDGE_BEFORE != 0: gb_apu_edge_before(gb)
              else: gb_apu_edge(gb)
+  when APU_CLOCK_CARRY != 0:
+    if gb.quirks.apu_clock_carry: edge = apu_sh_edge(gb)
   edge + period + CycleCount(extra_ticks) * gb_apu_tick(gb)
 
 proc gb_noise_deadline*(gb: GB; period: CycleCount; divisor_code: uint8;

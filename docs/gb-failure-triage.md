@@ -871,7 +871,7 @@ decides the skipped first DIV-APU edge is sampled 4 counts ahead of the NR52
 write. `APU_SPSW_EXTRA_DOTS` = 10 / `_SINGLE` = 7: the APU's share of the
 KEY1 stall's oscillator restart, the PPU's 8 / 3 by another clock.
 
-### H1. A double-speed trigger's grid edge
+### H1. A double-speed trigger's grid edge (see H2's working model)
 
 **Rows (2).** `sound/ch1_duty0_pos6_to_pos7_timing_ds_6` and
 `speedchange_ch1_duty0_pos6_to_pos7_timing_nop_ds_2`.
@@ -903,17 +903,26 @@ sampling rules, not a switch residual (closed 2026-09-22).
 (8, 6) scores three more rows than (10, 7) and is two-sided on nothing; it is
 not shipped.
 
-**Mechanism (2026-09-22, from gambatte-core's PSG).** Its APU counts 2 MHz
-cycles as `(cpu_cc - last) >> (1 + ds)` with the remainder carried in `last`;
-a switch up re-reads the carried single-speed remainder at double-speed
-scale (the APU loses 0 or 1 base tick) and a switch down subtracts one CPU
-cycle before re-reading (it gains 2..5), so each switch's extra depends on
-the APU grid's phase against the CPU at that switch. dingbat rescales the
-channel deadlines exactly and re-anchors its 1 MHz tick grid at every
-switch, which has no memory of that phase. Carrying the grid's real-time
-phase across the switch (tried) plus a joint sweep of the two extras tops
-out at 211/220 and always loses the single-switch `_2` pair: closing H2 needs
-the channels quantised to a carried 2 MHz grid, an APU restructure.
+**Mechanism and a working model (2026-09-22).** gambatte-core's PSG counts
+2 MHz cycles as `(cpu_cc - last) >> (1 + ds)` with the remainder carried;
+APU power-on keeps the counter's low bits and re-aligns `last` to four
+cycles, a DIV reset re-aligns the counter to 4096, a switch re-reads the
+carried remainder at the new speed, and a square trigger starts from the
+1 MHz edge at or BEFORE the write, the edge picked by the counter's parity.
+`APU_CLOCK_CARRY = 1` (abstract_channels.nim) shadows that clock, takes the
+trigger edge from it and carries every APU deadline across a switch by its
+2 MHz distance (stall extras 5 / 1): all fourteen red rows of H1 and H2 go
+green, nothing else in gambatte moves, and SameSuite
+`channel_1_freq_change_timing-cgb0BC` goes red. That row wants the shipping
+rule, the grid anchored at the power-on write with the edge at or after the
+write; both are CPU CGB C records, so the knob is gated to CGB C and older
+(`GbQuirks.apu_clock_carry`; applied to D/E it loses nine more SameSuite
+rows) and ships 0. Refuted on the way (each tops out at 211-213/220): the
+shipping trigger rule with the grid's real-time phase carried across the
+switch; a divider-locked grid (K = 4 reproduces today's results exactly, and
+no extras pair then closes H2); gambatte's rule only after a switch; the
+carried clock with its grid re-aligned to the power-on write. Hardware
+experiment (e) would settle which record the model should follow.
 
 ---
 
@@ -938,6 +947,11 @@ hardware question with its priority is `docs/hwprobe-questions.md`.
 * **(d)** The DMG BGP transition pixel on as many DMGs as can be borrowed,
   with mainboard/CPU markings per unit — C7. The sample size is the
   experiment; no single unit can answer it.
+* **(e)** On a CPU CGB C: the gambatte `speedchange2_ch1_duty0_pos6_to_pos7_
+  timing_{1,2}` pair and SameSuite `channel_1_freq_change_timing-cgb0BC` on
+  the same console. If both pass, the square trigger's 1 MHz edge depends on
+  history neither model captures; if one fails, `APU_CLOCK_CARRY` (H2)
+  follows the other. Needs a CGB C, which the kit does not have.
 
 ---
 
