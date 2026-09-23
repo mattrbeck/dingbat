@@ -20,6 +20,12 @@ const LY_BLIND_SCOPE* {.intdefine.} = 2
 # (dots, so it scales with double speed). 4 = the M-cycle's end and compiles
 # the field and the split tick out. Write-up at `irq_read` in interrupts.nim.
 const IF_READ_SAMPLE_T* {.intdefine.} = 0
+const IF_READ_M2_144_TIE_DS* {.intdefine.} = 1
+  ## Double speed: an IF read whose M-cycle starts on the line-144 OAM pulse's
+  ## dot (M2_144_EARLY_DOT_DS) latches after that dot. The pulse sits on a
+  ## whole dot of gambatte-core's line clock and ties with the read, which it
+  ## resolves event-first; the other sources land on half dots at double
+  ## speed, and a one-dot sample for every read loses seven of their rows.
 
 const TIMER_IRQ_RUN_LEAD* {.intdefine.} = 1
   ## M-cycles by which a TIMA overflow reaches a running CPU's interrupt

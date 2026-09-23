@@ -929,13 +929,15 @@ proc stat_read_mode*(ppu: GbPpu; gb: GB): uint8 {.inline.} =
 # The dot within line 143 at which CGB raises the line-144 mode 2 STAT source.
 # See m2_line144 below: 456 - 4 dots, i.e. one M-cycle before the line ends.
 const M2_144_EARLY_DOT_SS* = 452'i32
-const M2_144_EARLY_DOT_DS_D {.intdefine: "M2_144_EARLY_DOT_DS".} = 454
-  ## In double speed the line-144 pulse rises one FAST M-cycle before the line
-  ## ends, as every other line's OAM source does (it was 452, a normal-speed
-  ## M-cycle, at both speeds). Two-sided: 453 loses `lcd_offset/offset1_
-  ## lyc99int_m2irq_count_ds_1` and `m1/lyc143_late_m2enable_lycdisable_ds_1`,
-  ## 455 three `_ds_2` members. Takes `enable_display/frame{0,1}_m2irq_count_
-  ## ds_1`, `m1/m2m1irq_ifw_ds_1` and those two.
+const M2_144_EARLY_DOT_DS_D {.intdefine: "M2_144_EARLY_DOT_DS".} = 455
+  ## In double speed the line-144 pulse rises 8 CPU cycles (4 dots of
+  ## gambatte-core's line clock, dingbat's 455 on its +3 offset) before the
+  ## line ends. A STAT write landing on 454 is ahead of it (gambatte `m1/
+  ## ly143_late_m2enable_ds_lcdoffset1_1`), and an IF read whose M-cycle
+  ## starts on 455 sees it (IF_READ_M2_144_TIE_DS: `enable_display/
+  ## frame{0,1}_m2irq_count_ds_2`, which alone held this at 454). 453 loses
+  ## `lcd_offset/offset1_lyc99int_m2irq_count_ds_1` and `m1/lyc143_late_
+  ## m2enable_lycdisable_ds_1`.
 const M2_144_EARLY_DOT_DS* = int32(M2_144_EARLY_DOT_DS_D)
 template M2_144_EARLY_DOT*: int32 =
   ## The line-144 OAM source's rising dot: one CPU M-cycle before the line

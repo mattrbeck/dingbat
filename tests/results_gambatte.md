@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-22 20:07:10*
+*Generated: 2026-09-22 20:50:48*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5185/5216 passed.**
+**5186/5216 passed.**
 
 ## bgen
 
@@ -128,13 +128,9 @@ All 12 tests passed.
 
 All 6 tests passed.
 
-## m1 (169/170 passed)
+## m1
 
-169/170 tests passed, 1 failed:
-
-| Test | Result |
-|------|--------|
-| m1/ly143_late_m2enable_ds_lcdoffset1_1_cgb04c_out3 [cgb] | got 1, expected 3 |
+All 170 tests passed.
 
 ## m2enable
 

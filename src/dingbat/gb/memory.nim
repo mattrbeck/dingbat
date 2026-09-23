@@ -498,7 +498,13 @@ when IF_READ_SAMPLE_T < 4:
     else:
       mem_tick_bus(mem, gb, 4)
       let dots = 4 shr mem.current_speed
-      let head = min(dots, IF_READ_SAMPLE_T shr mem.current_speed)
+      var head = min(dots, IF_READ_SAMPLE_T shr mem.current_speed)
+      when IF_READ_M2_144_TIE_DS != 0:
+        # The line-144 OAM pulse's own dot: an IF read whose M-cycle starts on
+        # it sees it (IF_READ_M2_144_TIE_DS).
+        if mem.current_speed != 0 and gb.ppu.ly == 143'u8 and
+           gb.ppu.cycle_counter == M2_144_EARLY_DOT_DS:
+          head = 1
       if head <= 0:
         irq_latch_mcycle(gb.interrupts)
         mem_tick_ppu(mem, gb, dots, ignore_speed = true)
