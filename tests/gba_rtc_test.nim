@@ -344,10 +344,15 @@ block:  # Nintendo's RTC library order: data before direction, from power-on
     g.gpio_w(0xC4, 5)
     v = v or (((g.gpio_r(0xC4) shr 1) and 1) shl i)
   check(v == 0x40, "the first transaction after power-on is seen (status probe reads 40h)", v.toHex)
-  # CS still high after the last bit: extra clocks must not start a command
-  g.gpio_w(0xC4, 4)
-  g.gpio_w(0xC4, 5)
-  check(g.bus.gpio.rtc.state == rtcWaiting, "clocking with CS held high after a read starts nothing")
+  # CS still high after the last bit: the read loops and starts no command
+  # (gba-rtc-test "Status Read Loop" on an S-3511A)
+  var again = 0'u8
+  for i in 0 .. 7:
+    g.gpio_w(0xC4, 4)
+    g.gpio_w(0xC4, 5)
+    again = again or (((g.gpio_r(0xC4) shr 1) and 1) shl i)
+  check(g.bus.gpio.rtc.state == rtcReading and again == 0x40,
+        "clocking with CS held high after a read repeats the register", again.toHex)
   g.gpio_w(0xC6, 7)
   g.gpio_w(0xC4, 1)
   check(g.datetime() == regs(2006, 1, 1, 0, 0, 0, 0), "next transaction after CS low works")

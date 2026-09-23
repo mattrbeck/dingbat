@@ -74,10 +74,14 @@ proc `[]`*(gpio: GPIO; io_addr: uint32): uint8 =
     if gpio.allow_reads:
       if gpio.gyro_present:
         ((gpio.data and gpio.direction) or (gpio.gyro_out shl 2)) and 0xF'u8
-      elif gpio.solar_present and (gpio.direction and 0x8'u8) == 0:
-        (rtc_read(gpio.rtc) and 0x7'u8) or gpio.solar_flag()
       else:
-        rtc_read(gpio.rtc) and 0xF'u8
+        # An output pin reads back the port's latch; an input pin reads the
+        # line: the chip's SIO, and low for CS and SCK, which only the port
+        # drives (gba-rtc-test "In Pin" tests). Bit 3 is the solar sensor's
+        # flag on Boktai and otherwise unconnected, reading low.
+        let lines = (if rtc_sio_level(gpio.rtc): 0x2'u8 else: 0'u8) or
+                    (if gpio.solar_present: gpio.solar_flag() else: 0'u8)
+        ((gpio.data and gpio.direction) or (lines and not gpio.direction)) and 0xF'u8
     else:
       0'u8
   of 0xC6:  # IO Port Direction
@@ -88,13 +92,13 @@ proc `[]`*(gpio: GPIO; io_addr: uint32): uint8 =
 
 proc drive_pins(gpio: GPIO; prev: uint8) =
   ## Hand the port's output levels to the device on the pins. An input bit
-  ## is not driven by the port; the device sees it low (Assumed; SIO, the
-  ## only input the RTC protocol uses, is ignored while the chip drives it).
+  ## is not driven by the port; the device sees it low (CS and SCK read back
+  ## low as inputs, gba-rtc-test).
   let pins = gpio.data and gpio.direction
   if gpio.gyro_present:
     gyro_update(gpio, pins)
   else:
-    rtc_write(gpio.rtc, pins, prev)
+    rtc_write(gpio.rtc, pins, prev, gpio.direction)
     if gpio.solar_present:
       solar_update(gpio, pins)
 

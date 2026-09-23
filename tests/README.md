@@ -126,6 +126,14 @@ the runner), because the r12 protocol misreads the LDM and halt ROMs. Copies of 
 ROMs and the three draw-only ROMs are skipped. Many rows are red: they are the open GBA
 timing gaps, not harness faults.
 
+**PeterLemon BIOS, gba-rtc-test, Hades-Tests, SwpTestsGBA, AGBEEG** (screenshot mode,
+downloaded at pinned revisions or release SHA-1s, never committed). PeterLemon's BIOS ROMs
+ship the frame they draw as a PNG and are compared exactly; they run on the HLE BIOS, and
+the red rows show where its SWI cycle counts differ from the real BIOS's. ROMs that only
+print their verdicts are scored on a pinned hash of the all-pass frame, checked by eye when
+pinned; a ROM that has never drawn that frame here is `unpinned` and red until it does.
+SwpBusLocking's verdict is its backdrop colour (`pass_rgb`).
+
 `--mode=fuzzarm`: five DenSinH/FuzzARM ROMs of 10 000 randomly generated ARM/Thumb tests.
 The ROM reports a failure, waits for a button and continues; the mode drives that gate and
 reads each verdict out of the ROM's 16-word dump at `0x02000000`. "Done" is the ROM's

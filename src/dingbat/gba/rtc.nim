@@ -159,63 +159,65 @@ proc rtc_register_bytes(reg: int): int =
   of 3: 3  # TIME
   else: 0
 
-proc push_bool*(buf: var RtcBuffer; value: bool) =
-  inc buf.size
-  buf.value = (buf.value shl 1) or (if value: 1'u64 else: 0'u64)
-
-proc push_byte*(buf: var RtcBuffer; value: uint8) =
-  for b in 0..7:
-    buf.push_bool(bit(value, b))
-
-proc shift_bit*(buf: var RtcBuffer): bool =
-  doAssert buf.size > 0, "Invalid RTC buffer size " & $buf.size
-  dec buf.size
-  ((buf.value shr buf.size) and 1) == 1
-
-proc shift_byte*(buf: var RtcBuffer): uint8 =
-  result = 0
-  for b in 0..7:
-    if buf.shift_bit():
-      result = result or (1'u8 shl b)
+# ==================== Serial interface ====================
+#
+# The chip's side of the three GPIO pins (SCK = bit 0, SIO = bit 1, CS =
+# bit 2), as the gba-rtc-test ROM (CasualPokePlayer, "RTC Basic Tests") pins
+# it down on a real S-3511A:
+#   * CS high starts a command and CS low ends whatever is running; no SCK
+#     level is required at CS's rising edge.
+#   * While CS is low the chip sees SCK as high, so CS rising with SCK high
+#     is not a clock edge.
+#   * A bit is taken on SCK's rising edge from the SIO level of the port
+#     write BEFORE the edge (a write that raises SCK and changes SIO together
+#     delivers the old SIO), not from a level seen at a falling edge.
+#   * The command byte is MSB first; its top nibble must be 0110, or it is
+#     dropped and the next eight bits are a new command.
+#   * Read data comes out LSB first on SCK's falling edge, from a register
+#     that rotates: reading past the end repeats it. Until the first falling
+#     edge, and whenever the chip is not reading, SIO floats high.
+#   * The CPU pulling SIO low while the chip reads clears, at the next falling
+#     edge, the bit last shifted out (the register, not the status itself).
+#   * A status write lands on the 8th bit, then on every 8k+1st (that bit
+#     included: the byte is the last eight bits), or when CS drops after a
+#     whole number of bytes past the first.
+#
+# Field use (also the save-state layout): `sck` / `cs` are the levels the
+# chip sees, `sio` its own SIO output; `buffer.value` holds the command
+# bits, the bits written so far, or the rotating read register, and
+# `buffer.size` the bit count (for a status write it cycles 9..16 after the
+# first byte; for a read it is the register's length).
 
 proc clear*(buf: var RtcBuffer) =
   buf.size = 0
   buf.value = 0
 
-proc rtc_prepare_read(rtc: RTC) =
+proc rtc_load_read(rtc: RTC) =
+  ## Latch the register the read command names into the rotating register.
+  var bytes: seq[uint8]
   case rtc.reg
   of 1:  # CONTROL
-    rtc.buffer.push_byte(rtc.status)
+    bytes.add(rtc.status)
   of 2:  # DATE_TIME
     let cal = rtc_calendar_now(rtc)
     for b in datetime_registers(cal, rtc_weekday_of(rtc, cal), rtc.status):
-      rtc.buffer.push_byte(b)
+      bytes.add(b)
   of 3:  # TIME
     let cal = rtc_calendar_now(rtc)
     let r = datetime_registers(cal, rtc_weekday_of(rtc, cal), rtc.status)
-    for i in 4 .. 6:
-      rtc.buffer.push_byte(r[i])
+    for i in 4 .. 6: bytes.add(r[i])
   else:
-    # GBATEK: the alarm/free registers read "always FFh". One byte is
-    # Assumed; SIO stays high after it.
-    rtc.buffer.push_byte(0xFF'u8)
+    # GBATEK: the alarm/free registers read "always FFh".
+    bytes.add(0xFF'u8)
+  rtc.buffer.value = 0
+  for i, b in bytes:
+    rtc.buffer.value = rtc.buffer.value or (uint64(b) shl (8 * i))
+  rtc.buffer.size = 8 * bytes.len
+  rtc.sio = true
+  when defined(rtc_trace): echo "RTCREAD ", bytes
 
-proc reverse_bits(b: uint8): uint8 =
-  result = 0
-  for i in 0..7:
-    if bit(b, 7 - i):
-      result = result or (1'u8 shl i)
-
-proc rtc_read_command(full_cmd: uint8): tuple[state: RtcState, reg: int] =
-  let cmd_bits =
-    if (full_cmd and 0xF'u8) == 0b0110'u8:
-      reverse_bits(full_cmd) and 0xF'u8
-    else:
-      full_cmd and 0xF'u8
-  let is_read = bit(cmd_bits, 0)
-  let reg_code = int(cmd_bits shr 1)
-  let state = if is_read: rtcReading else: rtcWriting
-  (state: state, reg: reg_code)
+proc rtc_written_byte(rtc: RTC; i: int): uint8 =
+  uint8((rtc.buffer.value shr (8 * i)) and 0xFF'u64)
 
 proc rtc_strobe(rtc: RTC): bool =
   ## GBATEK: the force-reset and force-IRQ registers "are strobed by ANY
@@ -237,22 +239,25 @@ proc rtc_strobe(rtc: RTC): bool =
     true
   else: false
 
+proc rtc_commit_status(rtc: RTC; value: uint8) =
+  when defined(rtc_trace): echo "RTCSTATUS ", value.toHex
+  let before = rtc.status
+  rtc_set_status(rtc, value)
+  if rtc.status != before: rtc_mark_battery_dirty(rtc)
+
 proc rtc_execute_write(rtc: RTC) =
+  ## A DATE_TIME / TIME parameter block is complete.
   case rtc.reg
-  of 1:  # CONTROL
-    let before = rtc.status
-    rtc_set_status(rtc, rtc.buffer.shift_byte())
-    if rtc.status != before: rtc_mark_battery_dirty(rtc)
   of 2:  # DATE_TIME: year, month, day, weekday, hour, minute, second
     var b: array[7, uint8]
-    for i in 0 .. 6: b[i] = rtc.buffer.shift_byte()
+    for i in 0 .. 6: b[i] = rtc.rtc_written_byte(i)
     let (cal, wday) = normalize_datetime(b[0], b[1], b[2],
                                          uint8(written_hour(b[4], rtc.status)),
                                          b[5], b[6], b[3])
     rtc_set_clock(rtc, cal, wday)
   of 3:  # TIME: hour, minute, second on the current date
     var b: array[3, uint8]
-    for i in 0 .. 2: b[i] = rtc.buffer.shift_byte()
+    for i in 0 .. 2: b[i] = rtc.rtc_written_byte(i)
     let now = rtc_calendar_now(rtc)
     let c = from_calendar_seconds(now)
     let (cal, _) = normalize_datetime(bcd(c.year mod 100), bcd(c.month), bcd(c.day),
@@ -260,17 +265,13 @@ proc rtc_execute_write(rtc: RTC) =
                                       b[1], b[2], 0'u8)
     # The weekday counter is not part of a TIME write; the date is unchanged
     rtc_set_clock(rtc, cal, rtc_weekday_of(rtc, now))
-  else:
-    discard rtc_strobe(rtc)
-  rtc.buffer.clear()
-  rtc.state = rtcWaiting
-  rtc.cs = false
+  else: discard
 
 proc new_rtc*(gba: GBA): RTC =
   result = RTC(
     gba: gba,
-    sck: false,
-    sio: false,
+    sck: true,   # CS low: the chip sees SCK high
+    sio: true,
     cs: false,
     state: rtcWaiting,
     reg: 1,  # CONTROL default
@@ -278,53 +279,88 @@ proc new_rtc*(gba: GBA): RTC =
     irq: false,
   )
 
-proc rtc_read*(rtc: RTC): uint8 =
-  uint8(rtc.sck) or (uint8(rtc.sio) shl 1) or (uint8(rtc.cs) shl 2)
+proc rtc_sio_level*(rtc: RTC): bool =
+  ## What the chip puts on SIO: its data bit while a read runs, else high.
+  not rtc.cs or rtc.state != rtcReading or rtc.sio
 
-proc rtc_write*(rtc: RTC; value: uint8; prev: uint8) =
-  ## `value` is the pin levels now, `prev` the levels before this port write.
-  let sck = bit(value, 0)
-  let sio = bit(value, 1)
-  let cs  = bit(value, 2)
+proc rtc_command_byte(rtc: RTC) =
+  ## Eight command bits are in: start the transfer they name.
+  let cmd = uint8(rtc.buffer.value and 0xFF'u64)
+  rtc.buffer.value = 0
+  rtc.buffer.size = 0
+  if (cmd shr 4) != 0b0110'u8:
+    return  # not a command: the next eight bits are
+  rtc.reg = int((cmd shr 1) and 7'u8)
+  when defined(rtc_trace): echo "RTCCMD ", cmd.toHex
+  if rtc.reg == 0 or rtc.reg == 6:
+    # Strobes take no parameter in either direction
+    discard rtc_strobe(rtc)
+    rtc.state = rtcDone
+  elif (cmd and 1'u8) != 0:
+    rtc.state = rtcReading
+    rtc_load_read(rtc)
+  else:
+    rtc.state = rtcWriting
+
+proc rtc_rising(rtc: RTC; level: bool) =
+  let b = if level: 1'u64 else: 0'u64
   case rtc.state
-  of rtcWaiting:
-    # A command starts when CS rises while SCK is high (datasheet 1.3: data
-    # is clocked "after turning the CS pin to H"). SCK may rise in the same
-    # port write: the library's first transaction enables SCK and CS as
-    # outputs together (gpio.nim).
-    if sck and cs and not bit(prev, 2) and not rtc.cs:
-      rtc.state = rtcCommand
-      rtc.cs = true
-    rtc.sck = sck
-    rtc.sio = sio
   of rtcCommand:
-    if not rtc.sck and sck:
-      rtc.buffer.push_bool(sio)
-      if rtc.buffer.size == 8:
-        let (new_state, new_reg) = rtc_read_command(rtc.buffer.shift_byte())
-        rtc.state = new_state
-        rtc.reg   = new_reg
-        if rtc.reg == 0 or rtc.reg == 6:
-          # Strobes take no parameter in either direction
-          rtc_execute_write(rtc)
-        elif rtc.state == rtcReading:
-          rtc_prepare_read(rtc)
-        else:
-          if rtc_register_bytes(rtc.reg) == 0:
-            rtc_execute_write(rtc)
-    rtc.sck = sck
-    rtc.sio = sio
-  of rtcReading:
-    if not rtc.sck and sck:
-      rtc.sio = rtc.buffer.shift_bit()
-      if rtc.buffer.size == 0:
-        rtc.state = rtcWaiting
-        rtc.cs = false
-    rtc.sck = sck
+    rtc.buffer.value = (rtc.buffer.value shl 1) or b
+    inc rtc.buffer.size
+    if rtc.buffer.size == 8: rtc_command_byte(rtc)
   of rtcWriting:
-    if not rtc.sck and sck:
-      rtc.buffer.push_bool(sio)
+    if rtc.reg == 1:
+      # CONTROL: an 8-bit shift register, newest bit at the top
+      rtc.buffer.value = ((rtc.buffer.value shr 1) or (b shl 7)) and 0xFF'u64
+      rtc.buffer.size = if rtc.buffer.size == 16: 9 else: rtc.buffer.size + 1
+      if rtc.buffer.size == 8 or rtc.buffer.size == 9:
+        rtc_commit_status(rtc, uint8(rtc.buffer.value))
+    elif rtc_register_bytes(rtc.reg) > 0:
+      rtc.buffer.value = rtc.buffer.value or (b shl rtc.buffer.size)
+      inc rtc.buffer.size
       if rtc.buffer.size == rtc_register_bytes(rtc.reg) * 8:
         rtc_execute_write(rtc)
-    rtc.sck = sck
-    rtc.sio = sio
+        rtc.state = rtcDone
+    # ALARM / command 5 / 7: the bits go nowhere and the command stays active
+  else: discard
+
+proc rtc_falling(rtc: RTC; pulled_low: bool) =
+  if rtc.state != rtcReading: return
+  let top = rtc.buffer.size - 1
+  if pulled_low:
+    rtc.buffer.value = rtc.buffer.value and not (1'u64 shl top)
+  let o = rtc.buffer.value and 1'u64
+  rtc.sio = o != 0
+  rtc.buffer.value = (rtc.buffer.value shr 1) or (o shl top)
+
+proc rtc_write*(rtc: RTC; value, prev, direction: uint8) =
+  ## `value` is the pin levels the port drives now, `prev` before this port
+  ## write; an input pin is not driven and reads as low here.
+  let cs = bit(value, 2)
+  if not cs:
+    if rtc.cs and rtc.state == rtcWriting and rtc.reg == 1 and
+       (rtc.buffer.size == 8 or rtc.buffer.size == 16):
+      rtc_commit_status(rtc, uint8(rtc.buffer.value))
+    rtc.cs = false
+    rtc.sck = true
+    rtc.sio = true
+    rtc.state = rtcWaiting
+    rtc.pulled_low = false
+    rtc.buffer.clear()
+    return
+  if not rtc.cs:
+    rtc.cs = true
+    rtc.state = rtcCommand
+    rtc.buffer.clear()
+  # The CPU holding SIO low against a read, on this write or the one that
+  # raised SCK before it; the next falling edge takes it.
+  if rtc.state == rtcReading and bit(direction, 1) and not bit(value, 1):
+    rtc.pulled_low = true
+  let sck = bit(value, 0)
+  if sck and not rtc.sck:
+    rtc_rising(rtc, bit(prev, 1))
+  elif rtc.sck and not sck:
+    rtc_falling(rtc, rtc.pulled_low)
+    rtc.pulled_low = false
+  rtc.sck = sck

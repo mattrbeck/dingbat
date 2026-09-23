@@ -105,10 +105,10 @@ static:
   doAssert (ord(eeprom4k), ord(eeprom64k)) == (0, 1),
     "EepromSize ordinals are save-state format"
 
-  doAssert (ord(rtcWaiting), ord(rtcCommand), ord(rtcReading), ord(rtcWriting)) ==
-           (0, 1, 2, 3),
+  doAssert (ord(rtcWaiting), ord(rtcCommand), ord(rtcReading), ord(rtcWriting),
+            ord(rtcDone)) == (0, 1, 2, 3, 4),
     "RtcState ordinals are save-state format"
-  doAssert ord(high(RtcState)) == 3,
+  doAssert ord(high(RtcState)) == 4,
     "an RtcState was appended without pinning it here"
 
   # The scheduler refuses a state carrying more pending events than it can

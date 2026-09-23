@@ -43,6 +43,8 @@ type
     model: string         # mooneye per-model boot table (--model=...); "" = default
     no_save: bool         # blank cart RAM + detach the .sav (battery-backed ROMs)
     press: string         # screenshot mode: --press schedule (F:BTN[+BTN],...)
+    pass_rgb: string      # screenshot mode: pass iff the bottom-right pixel is
+                          # this RRGGBB (ROMs whose verdict is the backdrop)
     verdict_glyphs: string # screenshot mode: the suite's font source; the row
                            # is scored on the verdict line it draws (read_verdict_text)
     ed_breakpoint: bool   # opcode 0xED ends the run (wilbertpol mooneye fork)
@@ -289,6 +291,12 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
       removeFile(tmp_ppm)
       return TestResult(name: test.name, passed: text == "All tests passed",
                         output: if text.len > 0: text else: "no verdict on screen")
+    if test.pass_rgb.len > 0:
+      let px = read_ppm_rgb(tmp_ppm)
+      removeFile(tmp_ppm)
+      let got = px[^3].toHex(2) & px[^2].toHex(2) & px[^1].toHex(2)
+      return TestResult(name: test.name, passed: got == test.pass_rgb.toUpperAscii,
+                        output: &"backdrop #{got}, pass is #{test.pass_rgb.toUpperAscii}")
     if test.expected_hash.len > 0:
       # No reference image ships with these ROMs; the gate is a pinned frame
       # hash (build_jsmolka_tests).
@@ -297,6 +305,11 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
         h = (h xor uint64(uint8(c))) * 0x100000001B3'u64
       removeFile(tmp_ppm)
       let got = h.toHex(16)
+      if test.expected_hash == "unpinned":
+        # No run has produced the all-pass frame yet, so there is nothing to
+        # pin; the row stays red until one does and is pinned by eye.
+        return TestResult(name: test.name, passed: false,
+                          output: &"no all-pass frame pinned yet (frame hash {got})")
       return TestResult(
         name: test.name,
         passed: got == test.expected_hash,
@@ -1490,6 +1503,115 @@ proc build_alyosha_tests(alyosha, png183, jsmolka: string): seq[TestDef] =
         verdict_glyphs: glyphs,
       ))
 
+# Single-ROM GBA suites fetched from release assets, each pinned by SHA-1.
+const RtcTestUrl = "https://github.com/CasualPokePlayer/gba-rtc-test/releases/download/r2/RtcTestROM.gba"
+const RtcTestSha1 = "b76a045b79b2c7ec73787a73ceee8508355af43e"
+
+# PeterLemon/GBA: bare-metal BIOS-call ROMs, each shipping the frame it draws
+# (results and TIMER0 cycle counts) as a PNG; the author tests on a real GBA
+# only. Pinned to a commit; downloaded, never vendored (no licence file).
+const PeterLemonRev = "efdb535c9c6212c154379c947e758e173fd1e03d"
+const PeterLemonBios = [
+  "Arithmetic/ARCTAN/BIOSARCTAN", "Arithmetic/DIV/BIOSDIV",
+  "Arithmetic/SQRT/BIOSSQRT", "Decompress/BIT/1BPP/BIOSBIT1BPP",
+  "Decompress/BIT/2BPP/BIOSBIT2BPP", "Decompress/BIT/4BPP/BIOSBIT4BPP",
+  "Decompress/BIT/8BPP/BIOSBIT8BPP", "Decompress/DIFF/BIOSDIFF",
+  "Decompress/HUFFMAN/BIOSHUFFMAN", "Decompress/LZ77/BIOSLZ77",
+  "Decompress/RLE/BIOSRLE", "MemoryCopy/CPUFASTSET/BIOSCPUFASTSET",
+  "MemoryCopy/CPUSET/BIOSCPUSET", "Misc/CHECKSUM/BIOSCHECKSUM",
+  "Reset/RegisterRam/BIOSRegisterRamReset",
+  "RotationScaling/BGAffineSet/BIOSBGAFFINESET",
+  "RotationScaling/OBJAffineSet/BIOSOBJAFFINESET", "Sound/Bias/BIOSSoundBias",
+  "Sound/ChannelClear/BIOSSoundChannelClear",
+  "Sound/DriverInit/BIOSSoundDriverInit", "Sound/DriverMain/BIOSSoundDriverMain",
+  "Sound/DriverMode/BIOSSoundDriverMode",
+  "Sound/DriverVSync/BIOSSoundDriverVSync",
+  "Sound/GetJumpList/BIOSSoundGetJumpList",
+  "Sound/MidiKey2Freq/BIOSMidiKey2Freq"]
+
+proc build_peterlemon_bios_tests(): seq[TestDef] =
+  ## One exact-image row per ROM. Run on the HLE BIOS (CI has no BIOS image):
+  ## the results match, the printed cycle counts are the real BIOS's, so a red
+  ## row here is HLE SWI timing. With the real BIOS all 25 match.
+  for rel in PeterLemonBios:
+    let base = &"https://raw.githubusercontent.com/PeterLemon/GBA/{PeterLemonRev}/BIOS/{rel}"
+    let file = "peterlemon-" & PeterLemonRev[0 ..< 7] & "-" & rel.splitPath().tail
+    result.add(TestDef(
+      name: "peterlemon/" & rel.splitPath().tail,
+      rom_path: ensure_rom_download(base & ".gba", file & ".gba"),
+      mode: tmScreenshot,
+      timeout: 300,
+      color: true,
+      no_save: true,
+      expected_png: ensure_rom_download(base & ".png", file & ".png"),
+    ))
+
+const HadesTestsRev = "29274ce31005f45bf5ca214bbb599377633a511e"
+const SwpTestUrl = "https://github.com/zaydlang/SwpTestsGBA/releases/download/v1.0.0/SwpBusLocking.gba"
+const AgbeegUrl = "https://github.com/zaydlang/AGBEEG-Aging-Cartridge/releases/download/v0.0.2/AGBEEG_AGING_CARTRIDGE.gba"
+const AgbeegSha1 = "4949798dde70f46d24bca5ee9c890cfa7c5101d8"
+
+proc build_gba_misc_tests(): seq[TestDef] =
+  ## ROMs that print their verdicts and ship no reference image, scored on a
+  ## pinned hash of the frame whose every verdict reads "Passed" (checked by
+  ## eye when pinned; the frame shows no clock or other varying value).
+  # gba-rtc-test r2: 17 pin-level tests of the cart's Seiko S-3511A (the RTC
+  # state machine: CS/SCK framing, SIO sampling, read looping, status write
+  # commit points, in-pin levels). The cartridge build, not the multiboot one.
+  result.add(TestDef(
+    name: "gba-rtc-test/RtcTestROM",
+    rom_path: ensure_rom_download(RtcTestUrl, "gba-rtc-test-r2.gba", RtcTestSha1),
+    mode: tmScreenshot,
+    timeout: 300,
+    color: true,
+    no_save: true,
+    expected_hash: "5E310AB13DD390CA",
+  ))
+
+  # hades-emu/Hades-Tests (GPL-2.0): per-check PASS/FAIL and a "Total: a/b"
+  # line. dma-latch (2/4) and dma-start-delay (0/8) have never drawn their
+  # all-pass frame here, so nothing is pinned for them yet.
+  for (rom, hash) in [("bios-openbus", "2E1EF1B0B52F22CA"),
+                      ("timer-basic", "65ABD86A89664A82"),
+                      ("dma-latch", "unpinned"),
+                      ("dma-start-delay", "unpinned")]:
+    result.add(TestDef(
+      name: "hades/" & rom,
+      rom_path: ensure_rom_download(
+        &"https://raw.githubusercontent.com/hades-emu/Hades-Tests/{HadesTestsRev}/roms/{rom}.gba",
+        "hades-" & HadesTestsRev[0 ..< 7] & "-" & rom & ".gba"),
+      mode: tmScreenshot,
+      timeout: 300,
+      color: true,
+      no_save: true,
+      expected_hash: hash,
+    ))
+
+  # zaydlang/SwpTestsGBA: a DMA and a SWP race for one word; SWP locks the bus
+  # across its read and write, so the DMA's 0xCAFEBABE lands last. The verdict
+  # is the backdrop: RGB8(25, 179, 25) green, drawn as #18B518.
+  result.add(TestDef(
+    name: "swp/SwpBusLocking",
+    rom_path: ensure_rom_download(SwpTestUrl, "swp-v1.0.0-SwpBusLocking.gba"),
+    mode: tmScreenshot,
+    timeout: 120,
+    color: true,
+    no_save: true,
+    pass_rgb: "18B518",
+  ))
+
+  # zaydlang/AGBEEG-Aging-Cartridge v0.0.2: cartridge, CPU and DMA checks with
+  # an O/X per check and PASS/FAIL per group; no all-pass frame yet.
+  result.add(TestDef(
+    name: "agbeeg/AGBEEG_AGING_CARTRIDGE",
+    rom_path: ensure_rom_download(AgbeegUrl, "agbeeg-v0.0.2.gba", AgbeegSha1),
+    mode: tmScreenshot,
+    timeout: 600,
+    color: true,
+    no_save: true,
+    expected_hash: "unpinned",
+  ))
+
 proc build_jsmolka_tests(dir: string): seq[TestDef] =
   ## arm, thumb, memory, bios, save/*, unsafe report through the r12 protocol
   ## --mode=jsmolka reads, all-or-nothing, naming the first failed check. The
@@ -2424,6 +2546,12 @@ proc main() =
     ensure_jsmolka_test_roms())
   all_suites.add(run_suite("GBA - alyosha gba-tests", alyosha_tests, harness,
                            previous, regressions))
+
+  all_suites.add(run_suite("GBA - PeterLemon BIOS", build_peterlemon_bios_tests(),
+                           harness, previous, regressions))
+
+  all_suites.add(run_suite("GBA - Other test ROMs", build_gba_misc_tests(),
+                           harness, previous, regressions))
 
   let fuzzarm_tests = build_fuzzarm_tests(ensure_fuzzarm_test_roms())
   all_suites.add(run_suite("GBA - FuzzARM", fuzzarm_tests, harness,

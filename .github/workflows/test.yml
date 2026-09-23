@@ -25,7 +25,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/rom-cache
-          key: test-roms-${{ runner.os }}-gb7.0-dmg1.0-cgb1.1-suite35d330ee-jsmolka-a6447c5-fuzzarm-a675329-magen0.5.0-shootout38b926b-alyosha66f5f1d-png183-8793745
+          key: test-roms-${{ runner.os }}-gb7.0-dmg1.0-cgb1.1-suite35d330ee-jsmolka-a6447c5-fuzzarm-a675329-magen0.5.0-shootout38b926b-alyosha66f5f1d-png183-8793745-rtcr2-plemon-efdb535-hades29274ce-swp1.0.0-agbeeg0.0.2
       - name: Install dependencies
         # Only zippy: the full dep tree pulls GUI-only packages whose install
         # fails on the Windows runner. Retry, then prove the import works.

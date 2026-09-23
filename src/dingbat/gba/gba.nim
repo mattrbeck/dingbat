@@ -194,7 +194,8 @@ type
     # line 2 (gbaedge CAPDMA page). Not serialized.
     video_active*:     bool
   RtcState* = enum
-    rtcWaiting, rtcCommand, rtcReading, rtcWriting
+    rtcWaiting, rtcCommand, rtcReading, rtcWriting,
+    rtcDone   # a strobe or parameter block has run; nothing more until CS drops
 
   RtcBuffer* = object
     size*:  int
@@ -228,6 +229,9 @@ type
     # Last unix minute seen by the per-minute IRQ poll. Not serialized (worst
     # case one spurious or missed tick after a state load).
     irq_minute*:    int64
+    # The CPU drove SIO low against a read since the last falling SCK edge
+    # (rtc.nim, Serial interface). Not serialized: it lives for one clock.
+    pulled_low*:    bool
 
   GPIO* = ref object
     gba* {.cursor.}:         GBA
