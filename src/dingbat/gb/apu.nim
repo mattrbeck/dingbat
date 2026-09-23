@@ -568,6 +568,7 @@ proc apu_write*(apu: GbApu; idx: int; val: uint8; gb: GB) =
       apu.channel4.div_counter = 0
       apu_drop_spsw_lag(apu, gb)
     elif (val and 0x80) != 0 and not apu.sound_enabled:
+      when APU_DS_TRIGGER_SNAP != 0: gb.apu_power_on_at = int64(gb.scheduler.cycles)
       when APU_CLOCK_CARRY != 0: apu_sh_power_on(gb)
       apu.sound_enabled = true
       apu.frame_sequencer_stage = 0

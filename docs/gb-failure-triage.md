@@ -871,22 +871,18 @@ decides the skipped first DIV-APU edge is sampled 4 counts ahead of the NR52
 write. `APU_SPSW_EXTRA_DOTS` = 10 / `_SINGLE` = 7: the APU's share of the
 KEY1 stall's oscillator restart, the PPU's 8 / 3 by another clock.
 
-### H1. A double-speed trigger's grid edge (see H2's working model)
+### H1. A double-speed trigger's grid edge
 
-**Rows (2).** `sound/ch1_duty0_pos6_to_pos7_timing_ds_6` and
-`speedchange_ch1_duty0_pos6_to_pos7_timing_nop_ds_2`.
-
-**Behaviour.** At double speed a CPU write can land half a 1 MHz tick off
-the APU's grid. gambatte's ladder `_ds_1..6` says a first trigger one NOP
-later still counts from the SAME edge (the edge before the write); SameSuite
-`channel_{1,2}_align{,_cpu}` and `channel_1_freq_change_timing-*` (7 rows,
-all green) say a write between edges waits for the next. Both are hardware
-records on CPU CGB C. `APU_TRIGGER_EDGE_BEFORE = 1` takes the two and loses
-the seven; it ships 0.
-
-**Refuted.** A half-tick shift of the grid's anchor at power-on or at the
-switch (`tick_phase` + 4 CPU cycles): breaks `_ds_2`/`_ds_4` and fixes
-nothing.
+Closed 2026-09-23 (`APU_DS_TRIGGER_SNAP`, CGB C and older): at double speed
+a square trigger counts from the nearest point of a 2 us grid starting 8
+CPU cycles after the APU power-on write. The two "contradicting" records sit
+at 124 (gambatte `_ds_5`/`_ds_6`, rounds down onto `_ds_1`'s edge at 120)
+and 100 cycles (SameSuite `freq_change_timing-cgb0BC`, rounds up to 104) past
+power-on, both 4 off the 1 MHz grid; the 2 us grid tells them apart. CGB E
+keeps the 1 MHz edge-after rule (SameSuite `channel_{1,2}_align` lose with the
+snap there), which the SameSuite README's C/E split allows. SameSuite covers
+all four divider phases with one answer, so the anchor is the power-on write,
+not DIV; SameBoy passes SameSuite on C and E but not this gambatte ladder.
 
 ### H2. The switch ladder is not additive
 

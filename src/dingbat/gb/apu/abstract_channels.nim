@@ -54,14 +54,13 @@ const APU_CLOCK_CARRY* {.intdefine.} = 0
   ## resets and speed switches (the apu_sh_* shadow below, the rules
   ## gambatte-core's PSG uses), and a switch carries every APU deadline across
   ## by its distance in 2 MHz cycles (apu_rescale_speed), with
-  ## APU_SPSW_EXTRA_DOTS_CARRY{,_SINGLE} = 5 / 1 for the stall. It takes all
-  ## fourteen red gambatte audio rows (sound/ch1_duty0_pos6_to_pos7_timing_ds_6,
-  ## speedchange{2..5}*_ch1_duty0_pos6_to_pos7_timing_*, speedchange_ch1_
-  ## nr4init_*_2; peak bracketed on both extras) and loses SameSuite
-  ## channel_1_freq_change_timing-cgb0BC, whose triggers want the 1 MHz grid
-  ## anchored at the power-on write (the shipping rule). Both are CGB C
-  ## hardware records; applied to D/E too it loses nine more SameSuite rows.
-  ## docs/gb-failure-triage.md H1/H2.
+  ## APU_SPSW_EXTRA_DOTS_CARRY{,_SINGLE} = 5 / 1 for the stall. It takes the
+  ## thirteen red gambatte speed-switch audio rows (speedchange{2..5}*_ch1_
+  ## duty0_pos6_to_pos7_timing_*, speedchange_ch1_nr4init_*_2; peak bracketed
+  ## on both extras) and loses SameSuite channel_1_freq_change_timing-cgb0BC,
+  ## whose single-speed triggers after an APU power-on want the grid anchored
+  ## at the write (gambatte's clock puts the edge 3 cycles earlier there).
+  ## docs/gb-failure-triage.md H2.
 
 when APU_CLOCK_CARRY != 0:
   template sh_now(gb: GB): int64 = int64(gb.scheduler.cycles)
@@ -113,6 +112,18 @@ when APU_CLOCK_CARRY != 0:
     let k = gb.sh_cc - ((gb.sh_cc - refv) and 1)
     CycleCount(max(0'i64, gb.sh_last + (k - gb.sh_cc) * (2'i64 shl ds)))
 
+const APU_DS_TRIGGER_SNAP* {.intdefine.} = 1
+  ## CPU CGB C and older (GbQuirks.apu_clock_carry), double speed: a square
+  ## trigger counts its start-up from the nearest point of a 2 us grid that
+  ## starts 8 CPU cycles after the APU's power-on write (a write 4 cycles off
+  ## it rounds toward it either way). gambatte `sound/ch1_duty0_pos6_to_
+  ## pos7_timing_ds_{1..6}` [cgb]: `_5`, whose first trigger is 124 cycles
+  ## past power-on, counts from the same edge as `_1` at 120 (rounding down),
+  ## while SameSuite `channel_1_freq_change_timing-cgb0BC`'s triggers 100
+  ## cycles past power-on round up. The 1 MHz edge-after rule alone cannot
+  ## give both. CGB D/E keep the 1 MHz rule: SameSuite `channel_{1,2}_align`
+  ## on E lose with the snap. 0 = the 1 MHz grid on every revision.
+
 proc gb_trigger_deadline*(gb: GB; period: CycleCount;
                           extra_ticks: int): CycleCount =
   ## Absolute cycle of a channel's first waveform step after a trigger: the
@@ -123,6 +134,11 @@ proc gb_trigger_deadline*(gb: GB; period: CycleCount;
   ## position is untouched. Channel 4 has its own rule: gb_noise_deadline.
   var edge = if APU_TRIGGER_EDGE_BEFORE != 0: gb_apu_edge_before(gb)
              else: gb_apu_edge(gb)
+  when APU_DS_TRIGGER_SNAP != 0:
+    if gb.memory.current_speed != 0 and gb.quirks.apu_clock_carry:
+      let w = int64(gb.scheduler.cycles)
+      let d = ((w - gb.apu_power_on_at - 8) mod 16 + 16) mod 16
+      edge = CycleCount(if d < 8: w - d else: w + (16 - d))
   when APU_CLOCK_CARRY != 0:
     if gb.quirks.apu_clock_carry: edge = apu_sh_edge(gb)
   edge + period + CycleCount(extra_ticks) * gb_apu_tick(gb)
