@@ -109,6 +109,26 @@ type
     # opens the last gate on a parked IF (IRQ_GATE_DELAY, interrupts.nim).
     # Not serialized (a ~12-cycle window); rebased by end_frame.
     gate_open_at*: CycleCount
+    # A timer interrupt in the synchroniser (raise_synced, interrupts.nim):
+    # raised at pipe_at (pipe_new: the IF bits it set), IE & IF sampled into
+    # pipe_bits after that cycle's register writes, recognised at pipe_due.
+    # Not serialized (a few cycles long; load_irq_state drops it); rebased
+    # by end_frame.
+    pipe_raised*:  uint16
+    pipe_new*:     uint16
+    pipe_bits*:    uint16
+    pipe_sampled*: bool
+    pipe_at*:      CycleCount
+    pipe_due*:     CycleCount
+    # The span the last DMA burst stalled the running CPU (dma.run_pending),
+    # for the synchroniser, which stops with it (DMA_STALLS_IRQ_SYNC).
+    # stall_open: the CPU's first access after it is still to come;
+    # stall_pushed: the burst delayed a recognition already under way.
+    # Transient like the pipe; rebased by end_frame.
+    stall_from*:   CycleCount
+    stall_to*:     CycleCount
+    stall_open*:   bool
+    stall_pushed*: bool
 
   Keypad* = ref object
     gba* {.cursor.}:      GBA
@@ -1025,6 +1045,8 @@ proc irq*(cpu: CPU)
 proc und*(cpu: CPU)
 proc run_pending*(dma: DMA)
 proc schedule_interrupt_check*(intr: Interrupts; delay: int = 0)
+proc unstall*(intr: Interrupts; ran: int)
+proc stall_tail*(intr: Interrupts; access_end: CycleCount; cost: int)
 proc read_open_bus_word*(bus: Bus; address: uint32): uint32
 proc read_open_bus_value*(bus: Bus; address: uint32): uint8
 when defined(obuslatch):
@@ -1059,6 +1081,17 @@ const DMA_LEAD_CYCLES* {.intdefine.} = 1
   ## where accesses end costs a scheduler sync per access, so it is paid only
   ## from the H-blank's start to the request, and only with such a DMA armed.
 const DMA_STALLS_IRQ_SYNC* {.booldefine.} = true
+  ## The stall also covers the wait states of the access the CPU was waiting
+  ## to make (Interrupts.stall_tail), and gives back internal cycles the CPU
+  ## ran under the burst (Interrupts.unstall). Without either, alyosha
+  ## Interactions rows go red: no tail, Internal_Cycle_DMA_IRQ/_ST/_ST_p3/_br;
+  ## no unstall, Internal_Cycle_DMA_IRQ_7/_ldr_IWRAM/_MUL_IRQ.
+const DMA_REGRAB* {.intdefine.} = 1
+  ## A PPU-timed request landing within this many cycles of the last burst's
+  ## end is granted at once, not deferred to the end of the CPU access in
+  ## flight: the CPU's access after a burst has not yet taken the bus. alyosha
+  ## DMA_pause_timing_end_4 (request one cycle after its immediate burst ends)
+  ## is red at 0, _end_3 (two cycles after) at 2.
 proc add_cycles*(bus: Bus; n: int) {.inline.}
 proc idle_window*(bus: Bus; n: int)
 proc `[]`*(bus: Bus; address: uint32): uint8
@@ -1101,7 +1134,7 @@ proc trigger_vdma*(dma: DMA)
 proc request_immediate*(dma: DMA)
 proc trigger_video_capture*(dma: DMA; vcount: uint16)
 proc catch_up(bus: Bus) {.inline.}
-proc catch_up_access(bus: Bus) {.inline.}
+proc catch_up_access(bus: Bus; cost: int) {.inline.}
 proc serial_transfer_complete*(serial: Serial)
 proc trigger_fifo*(dma: DMA; fifo_channel: int)
 proc bitmap*(ppu: PPU): bool
@@ -1296,7 +1329,8 @@ proc defer_dma_request(gba: GBA; kind: EventType): bool =
     if bus.dma_deferred and gba.scheduler.cycles != bus.access_end:
       bus.dma_deferred = false       # a deferral whose grant found no channel
     if (bus.sync_bits and 2) != 0 and not gba.cpu.halted and
-       bus.access_end > gba.scheduler.cycles:
+       bus.access_end > gba.scheduler.cycles and
+       gba.scheduler.cycles > bus.dma_end_at + CycleCount(DMA_REGRAB):
       bus.dma_deferred = true
       bus.dma_deferred_from = gba.scheduler.cycles
       gba.scheduler.schedule(int(bus.access_end - gba.scheduler.cycles), kind)
@@ -1455,6 +1489,17 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
     gba.interrupts.gate_open_at -= base
   else:
     gba.interrupts.gate_open_at = 0
+  if gba.interrupts.stall_to >= base:
+    gba.interrupts.stall_from -= min(gba.interrupts.stall_from, base)
+    gba.interrupts.stall_to -= base
+  else:
+    gba.interrupts.stall_from = 0
+    gba.interrupts.stall_to = 0
+  if gba.interrupts.pipe_due >= base:
+    gba.interrupts.pipe_at -= min(gba.interrupts.pipe_at, base)
+    gba.interrupts.pipe_due -= base
+  else:
+    gba.interrupts.pipe_raised = 0
   if gba.storage of EEPROM:
     let ep = EEPROM(gba.storage)
     if ep.busy_until >= base:

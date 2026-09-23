@@ -816,7 +816,7 @@ proc write_word_internal*(bus: Bus; address: uint32; value: uint32) =
 
 # ---- Instruction-fetch fast path ----
 
-proc window_fetch_sync(bus: Bus)
+proc window_fetch_sync(bus: Bus; cost: int)
 proc fetch_half_miss(bus: Bus; address: uint32): uint16
 proc fetch_word_miss(bus: Bus; address: uint32): uint32
 
@@ -996,19 +996,22 @@ proc catch_up(bus: Bus) {.inline.} =
   else:
     bus.catch_up_slow()
 
-proc catch_up_access(bus: Bus) {.inline.} =
-  ## catch_up from inside a bus access whose cycles are already charged: the
-  ## clock it syncs to is the access's END, and a DMA request that fires on
-  ## the way there landed inside the access (gba.nim, defer_dma_request).
+proc catch_up_access(bus: Bus; cost: int) {.inline.} =
+  ## catch_up from inside a bus access whose cycles (`cost`) are already
+  ## charged: the clock it syncs to is the access's END, and a DMA request
+  ## that fires on the way there landed inside the access (gba.nim,
+  ## defer_dma_request).
   bus.access_end = bus.bus_now()
+  when DMA_STALLS_IRQ_SYNC:
+    if bus.gba.interrupts.stall_open: bus.gba.interrupts.stall_tail(bus.access_end, cost)
   bus.catch_up()
 
-proc window_fetch_sync(bus: Bus) =
+proc window_fetch_sync(bus: Bus; cost: int) =
   bus.fetch_page = 0xFFFFFFFF'u32   # stay on the miss path while the window is open
   # A request that fires inside this very fetch leaves the window open for
   # the internal cycles behind it; the fetch after that closes it.
   let closing = bus.window_closing
-  bus.catch_up_access()
+  bus.catch_up_access(cost)
   if closing:
     bus.window_closing = false
     bus.sync_bits = bus.sync_bits and not 2'u8
@@ -1025,8 +1028,11 @@ proc idle_window*(bus: Bus; n: int) =
   let now = bus.bus_now()
   if bus.dma_end_at == now and bus.dma_held > 0:
     # The burst began as the access before these cycles ended.
-    n = max(0, n - bus.dma_held)
+    let ran = min(n, bus.dma_held)
+    n -= ran
     bus.dma_held = 0
+    # And the interrupt synchroniser ran with them: the CPU was not stalled.
+    bus.gba.interrupts.unstall(ran)
   bus.cycles += n
   bus.idle_until = bus.bus_now()
   bus.catch_up()
@@ -1039,20 +1045,23 @@ proc idle_window*(bus: Bus; n: int) =
 # armed window keeps the CPU-vs-DMA memory order cycle-exact.
 proc `[]`*(bus: Bus; address: uint32): uint8 =
   bus.rom_cool()
-  bus.cycles += bus.access_cycles(address, is32 = false, fetch = false)
-  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active: bus.catch_up_access()
+  let cost = bus.access_cycles(address, is32 = false, fetch = false)
+  bus.cycles += cost
+  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active: bus.catch_up_access(cost)
   bus.read_byte_internal(address)
 
 proc read_half*(bus: Bus; address: uint32): uint16 =
   bus.rom_cool()
-  bus.cycles += bus.access_cycles(address, is32 = false, fetch = false)
-  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active: bus.catch_up_access()
+  let cost = bus.access_cycles(address, is32 = false, fetch = false)
+  bus.cycles += cost
+  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active: bus.catch_up_access(cost)
   bus.read_half_internal(address)
 
 proc read_word*(bus: Bus; address: uint32): uint32 =
   bus.rom_cool()
-  bus.cycles += bus.access_cycles(address, is32 = true, fetch = false)
-  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active: bus.catch_up_access()
+  let cost = bus.access_cycles(address, is32 = true, fetch = false)
+  bus.cycles += cost
+  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active: bus.catch_up_access(cost)
   bus.read_word_internal(address)
 
 proc fetch_half_miss(bus: Bus; address: uint32): uint16 =
@@ -1061,9 +1070,10 @@ proc fetch_half_miss(bus: Bus; address: uint32): uint16 =
       # The window vetoed the fetch cache to get here. Charge the fetch the
       # way the fast path does, then sync to its end.
       bus.sync_bits = bus.sync_bits and not 2'u8
+      let before = bus.cycles
       result = bus.fetch_half(address)
       bus.sync_bits = bus.sync_bits or 2
-      bus.window_fetch_sync()
+      bus.window_fetch_sync(bus.cycles - before)
       return
   bus.read_half(address)
 
@@ -1071,30 +1081,34 @@ proc fetch_word_miss(bus: Bus; address: uint32): uint32 =
   when DMA_ACCESS_WINDOW:
     if (bus.sync_bits and 2) != 0:
       bus.sync_bits = bus.sync_bits and not 2'u8
+      let before = bus.cycles
       result = bus.fetch_word(address)
       bus.sync_bits = bus.sync_bits or 2
-      bus.window_fetch_sync()
+      bus.window_fetch_sync(bus.cycles - before)
       return
   bus.read_word(address)
 
 proc `[]=`*(bus: Bus; address: uint32; value: uint8) =
   bus.rom_cool()
-  bus.cycles += bus.access_cycles(address, is32 = false, fetch = false)
-  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active: bus.catch_up_access()
+  let cost = bus.access_cycles(address, is32 = false, fetch = false)
+  bus.cycles += cost
+  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active: bus.catch_up_access(cost)
   bus.byte_io_write = true
   bus.write_byte_internal(address, value)
   bus.byte_io_write = false
 
 proc write_half*(bus: Bus; address: uint32; value: uint16) =
   bus.rom_cool()
-  bus.cycles += bus.access_cycles(address, is32 = false, fetch = false)
-  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active: bus.catch_up_access()
+  let cost = bus.access_cycles(address, is32 = false, fetch = false)
+  bus.cycles += cost
+  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active: bus.catch_up_access(cost)
   bus.write_half_internal(address, value)
 
 proc write_word*(bus: Bus; address: uint32; value: uint32) =
   bus.rom_cool()
-  bus.cycles += bus.access_cycles(address, is32 = true, fetch = false)
-  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active: bus.catch_up_access()
+  let cost = bus.access_cycles(address, is32 = true, fetch = false)
+  bus.cycles += cost
+  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active: bus.catch_up_access(cost)
   bus.write_word_internal(address, value)
 
 # For DMA write-word via uint32 subscript

@@ -1,5 +1,13 @@
 # DMA implementation (included by gba.nim)
 
+const DMA_PREEMPT_AFTER_READ {.booldefine.} = true
+  ## A higher-priority request preempts a burst between a transfer's read and
+  ## its write, and only there: not between one transfer's write and the
+  ## next one's read (alyosha DMA_pause_timing_*: an H-blank DMA0 landing on
+  ## an immediate DMA1's read is granted before its write, one landing on
+  ## its write waits for the next read). False (between transfers, as
+  ## before) reds _mid_1 and _mid_2; both points reds _mid_2; neither reds
+  ## _mid_1 and _end_1.._end_3.
 const
   DMA_START_DELAY = 3
   DMA_SRC_MASK = [0x07FFFFFF'u32, 0x0FFFFFFF'u32, 0x0FFFFFFF'u32, 0x0FFFFFFF'u32]
@@ -227,8 +235,7 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
       preemptible = true
       break
 
-  for _ in 0 ..< len:
-    # Preemption point between transfers (a read/write pair is atomic).
+  template preempt_point() =
     # Draining here dispatches events that came due during the burst;
     # handlers only latch requests, so a higher-priority channel is granted
     # at this drained boundary and runs nested via run_pending while this
@@ -243,6 +250,9 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
         bus.catch_up()
       if dma.pending != 0:
         dma.run_pending()
+
+  for _ in 0 ..< len:
+    when not DMA_PREEMPT_AFTER_READ: preempt_point()
     # TODO: deny-list; misses unmapped gaps such as 0x00004000-0x01FFFFFF.
     let src_region = bits_range(dma.src[channel], 24, 27)
     let src_accessible = src_region != 0x0 and src_region != 0x1 and dma.src[channel] < 0x10000000'u32
@@ -252,12 +262,14 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
     if word_size == 4:
       if src_accessible:
         dma.latch[channel] = dma.gba.bus.read_word(dma.src[channel])
+      when DMA_PREEMPT_AFTER_READ: preempt_point()
       if dst_writable:
         dma.gba.bus.write_word(dma.dst[channel], dma.latch[channel])
     else:
       if src_accessible:
         let half = uint32(dma.gba.bus.read_half(dma.src[channel]))
         dma.latch[channel] = half or (half shl 16)
+      when DMA_PREEMPT_AFTER_READ: preempt_point()
       if dst_writable:
         dma.gba.bus.write_half(dma.dst[channel], uint16(dma.latch[channel]))
     # The moved word stays on the data bus for open-bus reads (Bus.dma_open_bus).
@@ -337,7 +349,14 @@ proc run_pending*(dma: DMA) =
             else:
               bus.dma_held = int(held)
             bus.dma_end_at = bus.sched.cycles + CycleCount(bus.cycles)
-        bus.sched.delay_pending(etInterrupts, granted_at, held)
+        let intr = dma.gba.interrupts
+        intr.stall_pushed = bus.sched.delay_pending(etInterrupts, granted_at, held)
+        if intr.pipe_raised != 0 and intr.pipe_due > granted_at:
+          intr.pipe_due += held
+        # And one raised under the burst starts at its end (raise_synced).
+        intr.stall_to = bus.sched.cycles + CycleCount(bus.cycles)
+        intr.stall_from = intr.stall_to - held
+        intr.stall_open = true
     # The CPU (or a paused outer burst) resumes with a nonsequential access.
     bus.dma_active = saved < 4
     when defined(pftrace):

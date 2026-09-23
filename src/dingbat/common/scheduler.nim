@@ -120,7 +120,7 @@ proc clear*(s: Scheduler; kind: EventType) =
   s.nevents = j
   s.next_event = if j > 0: s.evbuf[j - 1].cycles else: high(CycleCount)
 
-proc delay_pending*(s: Scheduler; kind: EventType; after: CycleCount; by: CycleCount) =
+proc delay_pending*(s: Scheduler; kind: EventType; after: CycleCount; by: CycleCount): bool {.discardable.} =
   ## Push every pending event of `kind` due later than `after` back by `by`
   ## cycles (GBA: an interrupt still in the CPU's synchroniser while a DMA
   ## holds the bus -- gba/dma.nim).
@@ -129,8 +129,27 @@ proc delay_pending*(s: Scheduler; kind: EventType; after: CycleCount; by: CycleC
     if s.evbuf[i].kind == kind and s.evbuf[i].cycles > after:
       s.evbuf[i].cycles += by
       moved = true
+  result = moved
   if moved:
     # insertion sort, descending by cycle, stable so ties keep their order
+    for i in 1 ..< s.nevents:
+      let e = s.evbuf[i]
+      var j = i
+      while j > 0 and s.evbuf[j - 1].cycles < e.cycles:
+        s.evbuf[j] = s.evbuf[j - 1]
+        dec j
+      s.evbuf[j] = e
+    s.next_event = s.evbuf[s.nevents - 1].cycles
+
+proc advance_pending*(s: Scheduler; kind: EventType; after: CycleCount; by: CycleCount) =
+  ## Bring every pending event of `kind` due later than `after` forward by
+  ## `by` cycles, never to `after` or before (undoes part of delay_pending).
+  var moved = false
+  for i in 0 ..< s.nevents:
+    if s.evbuf[i].kind == kind and s.evbuf[i].cycles > after:
+      s.evbuf[i].cycles = max(after + 1, s.evbuf[i].cycles - by)
+      moved = true
+  if moved:
     for i in 1 ..< s.nevents:
       let e = s.evbuf[i]
       var j = i

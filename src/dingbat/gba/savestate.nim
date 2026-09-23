@@ -137,6 +137,11 @@ proc load_irq_state(intr: Interrupts; r: var Reader) =
   intr.reg_ie = cast[InterruptReg](r.read_u16())
   intr.reg_if = cast[InterruptReg](r.read_u16())
   intr.ime = r.read_bool()
+  # The synchroniser and stall spans are transient and not saved.
+  intr.pipe_raised = 0
+  intr.stall_open = false
+  intr.stall_from = 0
+  intr.stall_to = 0
 
 proc save_mmio_state(mmio: MMIO; w: var Writer) =
   w.write_tag(GBA_SEC_MMIO)

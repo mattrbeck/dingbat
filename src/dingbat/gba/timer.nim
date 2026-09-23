@@ -36,8 +36,7 @@ proc timer_overflow_event*(tim: Timer; num: int) =
   if num <= 1:
     tim.gba.apu.timer_overflow(num)
   if tim.tmcnt[num].irq_enable:
-    tim.gba.interrupts.set_interrupt_flag(IRQ_TIMER_BIT_BASE + num)
-    tim.gba.interrupts.schedule_interrupt_check(IRQ_SYNC_DELAY)
+    tim.gba.interrupts.raise_synced(IRQ_TIMER_BIT_BASE + num)
   if not tim.tmcnt[num].cascade:
     tim.gba.scheduler.schedule(tim.cycles_until_overflow(num), TIMER_EVENT_TYPES[num])
 
@@ -89,6 +88,7 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
       let was_enabled = tim.tmcnt[num].enable
       let was_cascade = tim.tmcnt[num].cascade
       let old_period = TIMER_PERIODS[tim.tmcnt[num].frequency]
+      let old_ctrl = tim.tmcnt[num]
       write(tim.tmcnt[num], value, 0)
       if num == 0:
         # TM0CNT_H's count-up bit is unimplemented and reads back 0 (GBATEK,
@@ -117,6 +117,17 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
             pft_on = false
       if tim.tmcnt[num].enable:
         if not was_enabled:
+          # A counter stopped at 0xFFFF ticks once more before the enable
+          # reloads it, and that overflow raises the interrupt (alyosha
+          # timer/timer_disable test 2, prescaler 1; its readme). Only when
+          # the prescaler ticks on the enable's cycle: the mGBA suite's Timer
+          # count-up rows enable a /1024 timer over a 0xFFFF count and take
+          # no interrupt there.
+          let now = tim.gba.scheduler.cycles
+          if tim.tm[num] == 0xFFFF'u16 and tim.tmcnt[num].irq_enable and
+             not tim.tmcnt[num].cascade and
+             ticks_between(now - 1, now, TIMER_PERIODS[tim.tmcnt[num].frequency]) > 0:
+            tim.gba.interrupts.raise_synced(IRQ_TIMER_BIT_BASE + num)
           tim.tm[num] = tim.tmd[num]
         if tim.tmcnt[num].cascade:
           tim.gba.scheduler.clear(TIMER_EVENT_TYPES[num])
@@ -134,7 +145,14 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
             let now = tim.gba.scheduler.cycles
             let extra = ticks_between(now, now + CycleCount(TIMER_STOP_DELAY), old_period)
             if extra > 0:
-              if tim.tm[num] == 0xFFFF'u16: tim.timer_overflow_event(num)
+              if tim.tm[num] == 0xFFFF'u16:
+                # That cycle runs under the old control bits: an overflow on
+                # it still raises the interrupt (alyosha irq/IF_Timer,
+                # timer/timer_disable).
+                let new_ctrl = tim.tmcnt[num]
+                tim.tmcnt[num] = old_ctrl
+                tim.timer_overflow_event(num)
+                tim.tmcnt[num] = new_ctrl
               else: tim.tm[num] += uint16(extra)
         tim.gba.scheduler.clear(TIMER_EVENT_TYPES[num])
   else:

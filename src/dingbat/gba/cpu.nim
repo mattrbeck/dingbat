@@ -194,7 +194,7 @@ proc clear_pipeline*(cpu: CPU) =
           # breaks nothing: the prefetcher works through it, and the cycles
           # it held the bus are fetch time the CPU does not pay again.
           bus.cycles += n
-          bus.catch_up_access()
+          bus.catch_up_access(n)
           both = s
           let after_first = bus.dma_end_at == bus.sched.cycles + CycleCount(bus.cycles)
           if after_first:
@@ -204,7 +204,7 @@ proc clear_pipeline*(cpu: CPU) =
             else:
               both = n
           bus.cycles += both
-          bus.catch_up_access()
+          bus.catch_up_access(both)
           both = 0
           # One granted at the end of the second leaves the burst broken for
           # the target's own fetch, as the burst itself left it.
