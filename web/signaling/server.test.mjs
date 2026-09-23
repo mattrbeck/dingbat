@@ -11,15 +11,19 @@
 // failed assertion.
 
 import net from 'node:net';
+import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { writeFileSync, unlinkSync } from 'node:fs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SERVER = join(HERE, 'server.js');
 const PORT = 8791; // distinct from the default 8790 so a dev server can coexist
 const PORT2 = 8792; // scratch servers for the abuse-limit scenarios
+const PORT_GOOGLE = 8793; // the fake Google token endpoint
 const HOST = '127.0.0.1';
 
 // ---------------- minimal WebSocket client ----------------
@@ -143,6 +147,24 @@ async function liveRooms(port) {
   if (!m) throw new Error('could not read room count from: ' + body);
   return parseInt(m[1], 10);
 }
+
+// One HTTP request with arbitrary headers (Origin included); body is JSON.
+const httpReq = (port, method, path, body, headers) =>
+  new Promise((resolve, reject) => {
+    const data = body === null ? '' : JSON.stringify(body);
+    const req = http.request({ host: HOST, port, method, path,
+      headers: { ...headers, 'Content-Length': Buffer.byteLength(data) } }, (res) => {
+      let text = '';
+      res.on('data', (d) => (text += d));
+      res.on('end', () => {
+        let json = null;
+        try { json = JSON.parse(text); } catch {}
+        resolve({ status: res.statusCode, headers: res.headers, body: text, json });
+      });
+    });
+    req.on('error', reject);
+    req.end(data);
+  });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -497,8 +519,136 @@ async function run() {
     }
   });
 
+  // ---------------- Drive token broker ----------------
+  // A fake Google token endpoint records every form it is sent and answers
+  // from `googleReply`.
+  const googleForms = [];
+  let googleReply = () => [200, {}];
+  const google = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (d) => (body += d));
+    req.on('end', () => {
+      const form = Object.fromEntries(new URLSearchParams(body));
+      googleForms.push(form);
+      const [status, obj] = googleReply(form);
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(obj));
+    });
+  });
+  await new Promise((r) => google.listen(PORT_GOOGLE, HOST, r));
+  const ORIGIN = 'https://dingbat.gg';
+  const brokerEnv = {
+    GOOGLE_OAUTH_CLIENT_ID: 'cid.apps.googleusercontent.com',
+    GOOGLE_OAUTH_CLIENT_SECRET: 'shh-secret',
+    GOOGLE_OAUTH_TOKEN_URL: `http://${HOST}:${PORT_GOOGLE}/token`,
+    SIGNAL_ALLOWED_ORIGINS: ORIGIN,
+  };
+
+  try {
+    await withServer(PORT2, {}, async (port) => {
+      const r = await httpReq(port, 'GET', '/oauth', null, { Origin: ORIGIN });
+      assert(r.status === 404, 'broker is off without a client secret (404)');
+    });
+
+    await withServer(PORT2, brokerEnv, async (port) => {
+      let r = await httpReq(port, 'GET', '/oauth', null, { Origin: ORIGIN });
+      assert(r.status === 200 && r.json?.oauth === true, 'GET /oauth reports the broker');
+      assert(r.headers['access-control-allow-origin'] === ORIGIN, 'CORS echoes an allowed origin');
+      assert(r.headers['cache-control'] === 'no-store', 'broker replies are no-store');
+
+      r = await httpReq(port, 'GET', '/oauth', null, { Origin: 'https://evil.example' });
+      assert(r.status === 403, 'a foreign origin is refused');
+
+      r = await httpReq(port, 'OPTIONS', '/oauth/refresh', null, {
+        Origin: ORIGIN, 'Access-Control-Request-Method': 'POST',
+      });
+      assert(r.status === 204 && /POST/.test(r.headers['access-control-allow-methods'] || ''),
+        'preflight answered');
+
+      r = await httpReq(port, 'GET', '/', null, {});
+      assert(/signaling server/.test(r.body), 'health line unchanged');
+
+      // Code exchange: the secret is added server-side, the reply is cut down.
+      googleReply = () => [200, {
+        access_token: 'at-1', expires_in: 3599, refresh_token: 'rt-1',
+        id_token: 'not-forwarded', scope: 'x',
+      }];
+      googleForms.length = 0;
+      r = await httpReq(port, 'POST', '/oauth/exchange', {
+        code: 'code-1', code_verifier: 'ver-1', redirect_uri: ORIGIN + '/oauth-callback.html',
+      }, { Origin: ORIGIN, 'Content-Type': 'text/plain' });
+      assert(r.status === 200, 'exchange succeeds');
+      assert(JSON.stringify(r.json) ===
+        JSON.stringify({ access_token: 'at-1', expires_in: 3599, refresh_token: 'rt-1' }),
+        'exchange returns only access_token, expires_in, refresh_token');
+      const f = googleForms[0] || {};
+      assert(f.grant_type === 'authorization_code' && f.code === 'code-1' &&
+        f.code_verifier === 'ver-1' && f.client_secret === 'shh-secret' &&
+        f.client_id === 'cid.apps.googleusercontent.com' &&
+        f.redirect_uri === ORIGIN + '/oauth-callback.html',
+        'Google receives the code, verifier, redirect and the server-held secret');
+
+      googleForms.length = 0;
+      r = await httpReq(port, 'POST', '/oauth/exchange', {
+        code: 'code-1', redirect_uri: 'https://evil.example/cb',
+      }, { Origin: ORIGIN });
+      assert(r.status === 400 && googleForms.length === 0,
+        'a redirect outside the allowed origins never reaches Google');
+
+      // Refresh: never hands back a (rotated) refresh token.
+      googleReply = () => [200, { access_token: 'at-2', expires_in: 3599, refresh_token: 'rt-x' }];
+      googleForms.length = 0;
+      r = await httpReq(port, 'POST', '/oauth/refresh', { refresh_token: 'rt-1' }, { Origin: ORIGIN });
+      assert(r.status === 200 && r.json.access_token === 'at-2' && !('refresh_token' in r.json),
+        'refresh returns a new access token');
+      assert(googleForms[0]?.grant_type === 'refresh_token' &&
+        googleForms[0]?.refresh_token === 'rt-1', 'Google receives the refresh grant');
+
+      googleReply = () => [400, { error: 'invalid_grant', error_description: 'revoked' }];
+      r = await httpReq(port, 'POST', '/oauth/refresh', { refresh_token: 'rt-dead' }, { Origin: ORIGIN });
+      assert(r.status === 400 && r.json?.error === 'invalid_grant', 'a dead grant is a 400 invalid_grant');
+
+      r = await httpReq(port, 'POST', '/oauth/refresh', { nope: 1 }, { Origin: ORIGIN });
+      assert(r.status === 400, 'a malformed body is a 400');
+
+      r = await httpReq(port, 'POST', '/oauth/refresh', { refresh_token: 'x'.repeat(20000) }, { Origin: ORIGIN });
+      assert(r.status === 413, 'an oversized body is refused');
+
+      // Rate limit (the requests above count too).
+      googleReply = () => [200, { access_token: 'at-3', expires_in: 3599 }];
+      let limited = false;
+      for (let i = 0; i < 35 && !limited; i++) {
+        r = await httpReq(port, 'POST', '/oauth/refresh', { refresh_token: 'rt-1' }, { Origin: ORIGIN });
+        limited = r.status === 429;
+      }
+      assert(limited, 'per-IP rate limit reached within 35 calls');
+    });
+
+    // Google unreachable: 502, which the client treats as "keep the token".
+    await withServer(PORT2, { ...brokerEnv, GOOGLE_OAUTH_TOKEN_URL: `http://${HOST}:1/token` },
+      async (port) => {
+        const r = await httpReq(port, 'POST', '/oauth/refresh', { refresh_token: 'rt-1' }, { Origin: ORIGIN });
+        assert(r.status === 502 && r.json?.error === 'upstream', 'Google unreachable is a 502');
+      });
+
+    // The secret can come from a file (kept out of the process environment).
+    const secretFile = join(tmpdir(), `dingbat-oauth-secret-${process.pid}`);
+    writeFileSync(secretFile, 'file-secret\n');
+    try {
+      const env = { ...brokerEnv, GOOGLE_OAUTH_CLIENT_SECRET: '',
+                    GOOGLE_OAUTH_CLIENT_SECRET_FILE: secretFile };
+      await withServer(PORT2, env, async (port) => {
+        googleReply = () => [200, { access_token: 'at-f', expires_in: 3599 }];
+        googleForms.length = 0;
+        const r = await httpReq(port, 'POST', '/oauth/refresh', { refresh_token: 'rt-1' }, { Origin: ORIGIN });
+        assert(r.status === 200 && googleForms[0]?.client_secret === 'file-secret',
+          'GOOGLE_OAUTH_CLIENT_SECRET_FILE supplies the secret');
+      });
+    } finally { unlinkSync(secretFile); }
+  } finally { google.close(); }
+
   if (failures) { console.error(`\n${failures} assertion(s) failed`); process.exit(1); }
-  console.log('\nall signaling room-lifecycle tests passed');
+  console.log('\nall signaling room-lifecycle and token-broker tests passed');
 }
 
 run().catch((e) => { console.error(e); process.exit(1); });

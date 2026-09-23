@@ -425,7 +425,144 @@ function attach(ws) {
 
 // ---------------- HTTP + upgrade plumbing ----------------
 
+// ---------------- Google Drive token broker ----------------
+// Google's browser-only token flow gives 1h access tokens and no refresh
+// token, and each renewal is a gesture-gated popup. The code flow gives a
+// refresh token, but trading it needs the client secret, so it lives here.
+// Stateless: the client keeps its refresh token (useless without the secret)
+// and sends it back. Off unless GOOGLE_OAUTH_CLIENT_ID and
+// GOOGLE_OAUTH_CLIENT_SECRET (or GOOGLE_OAUTH_CLIENT_SECRET_FILE) are set.
+//   GET  /oauth           {"oauth":true}; 404 when not configured
+//   POST /oauth/exchange  {code, code_verifier, redirect_uri}
+//                         -> {access_token, expires_in, refresh_token}
+//   POST /oauth/refresh   {refresh_token} -> {access_token, expires_in}
+// Replies are 200, 400 (the grant is dead: the client drops its refresh
+// token) or 502 (Google unreachable: the client keeps it and falls back).
+const OAUTH_CLIENT_ID = process.env.GOOGLE_OAUTH_CLIENT_ID || '';
+const OAUTH_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET ||
+  (process.env.GOOGLE_OAUTH_CLIENT_SECRET_FILE
+    ? (() => {
+      try { return require('fs').readFileSync(process.env.GOOGLE_OAUTH_CLIENT_SECRET_FILE, 'utf8').trim(); }
+      catch { return ''; }
+    })()
+    : '');
+const OAUTH_TOKEN_URL = process.env.GOOGLE_OAUTH_TOKEN_URL || 'https://oauth2.googleapis.com/token';
+const OAUTH_ENABLED = !!(OAUTH_CLIENT_ID && OAUTH_SECRET);
+// A device refreshes about once an hour; this only ever stops abuse.
+const OAUTH_WINDOW_MS = 60 * 1000;
+const MAX_OAUTH_PER_WINDOW = 30;
+const MAX_HTTP_BODY = 16 * 1024;
+const OAUTH_UPSTREAM_TIMEOUT_MS = 10 * 1000;
+const oauthWindows = new Map(); // ip -> { start, count }
+
+const originAllowed = (origin) =>
+  !ALLOWED_ORIGINS.size || ALLOWED_ORIGINS.has(String(origin).toLowerCase());
+
+function httpReply(res, status, obj, origin, extra = {}) {
+  const headers = { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...extra };
+  if (origin && originAllowed(origin)) {
+    headers['Access-Control-Allow-Origin'] = origin;
+    headers.Vary = 'Origin';
+  }
+  res.writeHead(status, headers);
+  res.end(obj === null ? '' : JSON.stringify(obj));
+}
+
+async function brokerCall(res, form, origin, keepRefresh) {
+  let status = 0;
+  let j = null;
+  try {
+    const r = await fetch(OAUTH_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(form).toString(),
+      signal: AbortSignal.timeout(OAUTH_UPSTREAM_TIMEOUT_MS),
+    });
+    status = r.status;
+    j = await r.json().catch(() => null);
+  } catch { /* unreachable: 502 below */ }
+  if (status === 200 && j && typeof j.access_token === 'string' && j.access_token) {
+    const out = { access_token: j.access_token, expires_in: Number(j.expires_in) || 3600 };
+    if (keepRefresh && typeof j.refresh_token === 'string' && j.refresh_token) {
+      out.refresh_token = j.refresh_token;
+    }
+    httpReply(res, 200, out, origin);
+  } else if ((status === 400 || status === 401) && j && typeof j === 'object') {
+    httpReply(res, 400, { error: String(j.error || 'invalid_grant') }, origin);
+  } else {
+    httpReply(res, 502, { error: 'upstream' }, origin);
+  }
+}
+
+function handleOAuth(req, res, path) {
+  const origin = req.headers.origin || '';
+  if (origin && !originAllowed(origin)) return httpReply(res, 403, { error: 'origin' }, '');
+  if (!OAUTH_ENABLED) return httpReply(res, 404, { error: 'oauth_disabled' }, origin);
+  if (req.method === 'OPTIONS') {
+    return httpReply(res, 204, null, origin, {
+      'Access-Control-Allow-Methods': 'GET, POST',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Max-Age': '86400',
+    });
+  }
+  if (req.method === 'GET' && path === '/oauth') return httpReply(res, 200, { oauth: true }, origin);
+  if (req.method !== 'POST' || (path !== '/oauth/exchange' && path !== '/oauth/refresh')) {
+    return httpReply(res, 404, { error: 'not_found' }, origin);
+  }
+  const ip = effectiveIp(req.socket.remoteAddress, req.headers['x-forwarded-for']);
+  const now = Date.now();
+  let w = oauthWindows.get(ip);
+  if (!w || now - w.start >= OAUTH_WINDOW_MS) w = { start: now, count: 0 };
+  w.count++;
+  oauthWindows.set(ip, w);
+  if (w.count > MAX_OAUTH_PER_WINDOW) return httpReply(res, 429, { error: 'rate' }, origin);
+
+  const chunks = [];
+  let size = 0;
+  req.on('data', (d) => {
+    if (size > MAX_HTTP_BODY) return; // already refused
+    size += d.length;
+    if (size > MAX_HTTP_BODY) {
+      res.setHeader('Connection', 'close');
+      httpReply(res, 413, { error: 'size' }, origin);
+      return;
+    }
+    chunks.push(d);
+  });
+  req.on('end', () => {
+    if (size > MAX_HTTP_BODY) return;
+    let j = null;
+    try { j = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch {}
+    if (!j || typeof j !== 'object' || Array.isArray(j)) {
+      return httpReply(res, 400, { error: 'bad_request' }, origin);
+    }
+    const str = (v) => (typeof v === 'string' ? v : '');
+    if (path === '/oauth/refresh') {
+      if (!str(j.refresh_token)) return httpReply(res, 400, { error: 'bad_request' }, origin);
+      brokerCall(res, {
+        grant_type: 'refresh_token', client_id: OAUTH_CLIENT_ID,
+        client_secret: OAUTH_SECRET, refresh_token: str(j.refresh_token),
+      }, origin, false);
+      return;
+    }
+    const redirect = str(j.redirect_uri);
+    // Google checks the redirect URI against its own allowlist too; this
+    // keeps a foreign page from using the broker for its own redirect.
+    const redirectOk = !!redirect && (!ALLOWED_ORIGINS.size ||
+      [...ALLOWED_ORIGINS].some((o) => redirect.toLowerCase().startsWith(o + '/')));
+    if (!str(j.code) || !redirectOk) return httpReply(res, 400, { error: 'bad_request' }, origin);
+    const form = {
+      grant_type: 'authorization_code', client_id: OAUTH_CLIENT_ID,
+      client_secret: OAUTH_SECRET, code: str(j.code), redirect_uri: redirect,
+    };
+    if (str(j.code_verifier)) form.code_verifier = str(j.code_verifier);
+    brokerCall(res, form, origin, true);
+  });
+}
+
 const server = http.createServer((req, res) => {
+  const path = String(req.url || '/').split('?')[0];
+  if (path === '/oauth' || path.startsWith('/oauth/')) return handleOAuth(req, res, path);
   // Health check / friendly hint for anyone poking the port with a browser.
   // The body is static — a live room count is a (mild) recon gift, so it is
   // only reported when SIGNAL_STATS=1 (test harness / private ops).
@@ -491,6 +628,9 @@ const reaper = setInterval(() => {
   // them here so the map can't grow without bound under an IP-hopping scan.
   for (const [ip, w] of rzWindows) {
     if (now - w.start >= RENDEZVOUS_WINDOW_MS) rzWindows.delete(ip);
+  }
+  for (const [ip, w] of oauthWindows) {
+    if (now - w.start >= OAUTH_WINDOW_MS) oauthWindows.delete(ip);
   }
 }, PING_INTERVAL_MS);
 reaper.unref(); // never keep the process alive just for the sweep

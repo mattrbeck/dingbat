@@ -106,6 +106,36 @@ needs a second real device.
       intact. Picking a file of a different size asks first; picking one
       with the wrong extension is refused.
 
+## Drive sign-in: staying signed in
+
+Gated: the broker routes on both servers against a fake Google
+(`web/signaling/server.test.mjs`, also with `SIGNAL_CMD` on the Nim
+binary), and every client path against a fake broker
+(`web/tests/driveauth.test.mjs`). Not gated: real Google, the consent
+popup's trip back through `oauth-callback.html`, and iOS.
+
+- [ ] **Fresh sign-in, broker up.** Signed out, tap Sign in: one Google
+      consent screen (offline access), then synced. An hour later (or
+      after clearing the stored token's expiry), tap around: no popup
+      flashes, and Drive keeps syncing.
+- [ ] **Stay signed in.** On a device signed in before this build,
+      Settings shows "Stay signed in" while the broker answers; tapping it
+      shows the consent screen once, and the row goes away.
+- [ ] **Broker down.** Stop the signaling server: the next renewal is
+      today's popup-on-tap, the refresh token is kept, and once the server
+      is back renewals are silent again with no new consent.
+- [ ] **Second device.** Sign in on a phone after the laptop: the phone
+      gets its own consent screen and its own refresh token; the laptop
+      keeps renewing silently.
+- [ ] **iPhone, Safari and home-screen app.** The consent popup comes back
+      and signs in on both. The home-screen app is the doubtful one: if
+      the popup finishes but the page never signs in, the callback could
+      not reach the app (report it; the popup flow still works).
+- [ ] **Sign out (do this last).** Sign out, then check
+      myaccount.google.com → Security → Third-party access: dingbat's
+      access is gone. Revoking ends the grant for the whole account, so
+      every other device drops back to Sign in too, as it did before.
+
 ## Drive sync: away from the account
 
 Gated: what is queued and how conflicts settle

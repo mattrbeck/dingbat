@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>dingbat · Google sign-in</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    font: 16px/1.4 system-ui, sans-serif; background: #f4f1ea; color: #222;
+  }
+  @media (prefers-color-scheme: dark) { body { background: #16140f; color: #eee; } }
+  p { margin: 0 16px; text-align: center; }
+</style>
+</head>
+<body>
+<p id="msg">Finishing sign-in…</p>
+<script>
+// Google's redirect target for the Drive consent popup (driveCodeGrant in
+// index.js). Hands the code to the page by every route that might survive
+// the trip through Google's pages: window.opener, a BroadcastChannel, and a
+// localStorage write (the storage event). The page ignores a state it did
+// not issue.
+(() => {
+  const KEY = "dingbat-oauth";
+  const q = new URLSearchParams(location.search);
+  const msg = {
+    type: KEY,
+    state: q.get("state") || "",
+    code: q.get("code") || "",
+    error: q.get("error") || "",
+  };
+  // Keep the code out of history and any later Referer.
+  history.replaceState(null, "", location.pathname);
+  try { window.opener?.postMessage(msg, location.origin); } catch {}
+  try { const ch = new BroadcastChannel(KEY); ch.postMessage(msg); ch.close(); } catch {}
+  try { localStorage.setItem(KEY, JSON.stringify(msg)); localStorage.removeItem(KEY); } catch {}
+  document.getElementById("msg").textContent = msg.code
+    ? "Signed in. You can close this window."
+    : "Sign-in didn't finish. You can close this window.";
+  setTimeout(() => window.close(), 300);
+})();
+</script>
+</body>
+</html>

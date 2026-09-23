@@ -2016,7 +2016,8 @@ const deleteGameAction = async (name) => {
 
 // --- Google Drive backup ---
 // Battery saves, save states and ROMs in the hidden appDataFolder, via the
-// GIS token flow (no backend, no client secret). Drive file names mirror
+// GIS token flow (no backend, no client secret), upgraded to refresh tokens
+// when the token broker answers (see driveCodeGrant). Drive file names mirror
 // the IndexedDB keys one-to-one; the folder listing is the index (no
 // manifest), matched by name client-side.
 // The client ID is public by design (the token flow has no secret): the
@@ -2051,6 +2052,13 @@ const clearDriveToken = () => {
   syncState.token = null;
   syncState.tokenExp = 0;
   saveSyncState();
+};
+
+const adoptGrantedToken = (resp) => {
+  gdriveToken = resp.access_token;
+  // 60s margin so a token never expires mid-request.
+  gdriveTokenExp = Date.now() + ((Number(resp.expires_in) || 3600) - 60) * 1000;
+  persistDriveToken();
 };
 
 // The account email, kept so re-grants can carry a login_hint.
@@ -2143,10 +2151,7 @@ const gdriveAcquireToken = (promptMode, hint = syncState.email, { connect = fals
           reject(new Error("Signed out of Google Drive"));
           return;
         }
-        gdriveToken = resp.access_token;
-        // 60s margin so a token never expires mid-request.
-        gdriveTokenExp = Date.now() + ((Number(resp.expires_in) || 3600) - 60) * 1000;
-        persistDriveToken();
+        adoptGrantedToken(resp);
         resolve();
       };
       gdriveTokenClient.error_callback = (err) => {
@@ -2169,6 +2174,205 @@ const gdriveAcquireToken = (promptMode, hint = syncState.email, { connect = fals
 // tell us (Chrome 72+, Safari 16.4+), don't try.
 const hasUserActivation = () =>
   !navigator.userActivation || navigator.userActivation.isActive;
+
+// --- Refresh-token sign-in through the token broker ------------------------
+// The token flow above has no refresh token, so every renewal is a popup.
+// The signaling server doubles as a token broker (web/signaling/server.js):
+// one consent popup on the authorization-code flow buys a refresh token,
+// kept in syncState, and renewals become a plain fetch with no gesture. The
+// broker holds the client secret and nothing else. It is often down, and
+// every path then falls back to the popup flow above, unchanged.
+const DRIVE_OAUTH_CHANNEL = "dingbat-oauth"; // oauth-callback.html posts here
+const DRIVE_BROKER_RETRY_MS = 60 * 1000;     // after a failure, popups own renewal this long
+const DRIVE_CODE_WAIT_MS = 5 * 60 * 1000;    // an abandoned consent popup gives up
+
+// Same host as the signaling socket (netplay.js decides: prod, LAN or
+// ?signal=), over http(s). "" when netplay.js is not loaded.
+const driveBrokerBase = () => {
+  if (typeof NET_SIGNAL_URL === "undefined") return "";
+  let m = /^(wss?):\/\/([^/?#]+)/.exec(NET_SIGNAL_URL);
+  return m ? (m[1] === "wss" ? "https://" : "http://") + m[2] : "";
+};
+
+// fetch with a deadline; AbortSignal.timeout is too new for iOS 15.
+const fetchWithin = (url, opts, ms) => {
+  let ctl = typeof AbortController === "function" ? new AbortController() : null;
+  let t = ctl && setTimeout(() => ctl.abort(), ms);
+  return fetch(url, { ...opts, signal: ctl?.signal })
+    .finally(() => { if (t) clearTimeout(t); });
+};
+
+// text/plain keeps it a CORS "simple" request: no preflight round trip.
+const driveBrokerPost = async (path, body) => {
+  let r = await fetchWithin(driveBrokerBase() + path, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  }, 8000);
+  let j = null;
+  try { j = await r.json(); } catch {}
+  return { status: r.status, j };
+};
+
+// Whether the broker is configured and reachable; cached for a minute.
+let driveBrokerOk = false;
+let driveBrokerProbedAt = 0;
+const probeDriveBroker = async () => {
+  let base = driveBrokerBase();
+  if (!base || !GDRIVE_CLIENT_ID) return false;
+  if (Date.now() - driveBrokerProbedAt < 60 * 1000) return driveBrokerOk;
+  driveBrokerProbedAt = Date.now();
+  try {
+    let r = await fetchWithin(base + "/oauth", { cache: "no-store" }, 3000);
+    driveBrokerOk = r.ok && (await r.json())?.oauth === true;
+  } catch {
+    driveBrokerOk = false;
+  }
+  return driveBrokerOk;
+};
+
+// A new access token from the stored refresh token, no popup. False when
+// there is none, the broker is down (retried after DRIVE_BROKER_RETRY_MS
+// unless forced), or Google says the grant is gone (then it is dropped and
+// this device is back on popups).
+let driveBrokerRetryAt = 0;
+let driveRefreshInFlight = null;
+const driveRefreshSilently = ({ force = false } = {}) => {
+  if (!syncState.refresh || !driveBrokerBase()) return Promise.resolve(false);
+  if (!force && Date.now() < driveBrokerRetryAt) return Promise.resolve(false);
+  driveRefreshInFlight ??= (async () => {
+    const rt = syncState.refresh;
+    const issued = driveSession;
+    // Signed out, or in again, while the fetch was out: the answer is the
+    // old session's and is refused, as a popup's is.
+    const stale = () => !syncState.connected || issued !== driveSession;
+    try {
+      let { status, j } = await driveBrokerPost("/oauth/refresh", { refresh_token: rt });
+      if (stale()) return false;
+      if (status === 200 && j?.access_token) {
+        driveBrokerOk = true;
+        adoptGrantedToken(j);
+        return true;
+      }
+      if (status === 400 && j?.error === "invalid_grant" && syncState.refresh === rt) {
+        syncState.refresh = null;
+        saveSyncState();
+      }
+    } catch {}
+    driveBrokerRetryAt = Date.now() + DRIVE_BROKER_RETRY_MS;
+    return false;
+  })().finally(() => { driveRefreshInFlight = null; });
+  return driveRefreshInFlight;
+};
+
+const base64Url = (bytes) =>
+  btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const randomUrlToken = () => base64Url(crypto.getRandomValues(new Uint8Array(32)));
+
+// The code arrives from oauth-callback.html by whichever route survives:
+// window.opener (unless Google's pages severed it), a BroadcastChannel, or a
+// localStorage write (the storage event). A newer attempt cancels this one.
+let driveCodeCancel = null;
+const waitForDriveCode = (state, popup) => new Promise((resolve, reject) => {
+  driveCodeCancel?.(new Error("Sign-in was canceled"));
+  let channel = null;
+  let focusTimer = null;
+  const finish = (fn, v) => {
+    clearTimeout(timer);
+    clearTimeout(focusTimer);
+    window.removeEventListener("message", onMessage);
+    window.removeEventListener("storage", onStorage);
+    window.removeEventListener("focus", onFocus);
+    try { channel?.close(); } catch {}
+    driveCodeCancel = null;
+    fn(v);
+  };
+  const onResult = (d) => {
+    if (!d || d.type !== DRIVE_OAUTH_CHANNEL || d.state !== state) return;
+    if (d.code) finish(resolve, d.code);
+    else finish(reject, new Error(d.error === "access_denied"
+      ? "Sign-in was canceled" : "Google sign-in failed: " + d.error));
+  };
+  const onMessage = (e) => { if (e.origin === location.origin) onResult(e.data); };
+  const onStorage = (e) => {
+    if (e.key !== DRIVE_OAUTH_CHANNEL || !e.newValue) return;
+    try { onResult(JSON.parse(e.newValue)); } catch {}
+  };
+  // Focus coming back with the popup gone and no code: the user closed it.
+  // (A severed opener reads the popup as closed throughout, hence the grace.)
+  const onFocus = () => {
+    clearTimeout(focusTimer);
+    focusTimer = setTimeout(() => {
+      if (popup.closed) finish(reject, new Error("Sign-in was canceled"));
+    }, 3000);
+  };
+  const timer = setTimeout(() => finish(reject, new Error("Sign-in timed out")),
+    DRIVE_CODE_WAIT_MS);
+  driveCodeCancel = (err) => finish(reject, err);
+  window.addEventListener("message", onMessage);
+  window.addEventListener("storage", onStorage);
+  window.addEventListener("focus", onFocus);
+  try {
+    channel = new BroadcastChannel(DRIVE_OAUTH_CHANNEL);
+    channel.onmessage = (e) => onResult(e.data);
+  } catch {}
+});
+
+// The one consent popup: authorization-code flow with offline access, so
+// the broker's exchange returns a refresh token. prompt=consent because
+// Google only issues a refresh token when the consent screen is shown (a
+// second device would otherwise get none). Must run inside a user gesture.
+// Session rules as gdriveAcquireToken: a sign-in's grant starts a new
+// session; any other grant is refused if the session ended meanwhile.
+const driveCodeGrant = async (hint, { connect = false } = {}) => {
+  const issued = driveSession;
+  let popup = window.open("", "dingbat-google-signin", "popup,width=500,height=650");
+  if (!popup) throw new Error("Popup blocked — allow popups for this site and try again");
+  let redirectUri = new URL("oauth-callback.html", location.origin + location.pathname).href;
+  let state = randomUrlToken();
+  let verifier = randomUrlToken();
+  let challenge = "";
+  try {
+    let digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+    challenge = base64Url(new Uint8Array(digest));
+  } catch {
+    verifier = ""; // no SubtleCrypto (plain-http LAN dev): the secret still guards the code
+  }
+  let q = new URLSearchParams({
+    client_id: GDRIVE_CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: "code",
+    scope: GDRIVE_SCOPE,
+    access_type: "offline",
+    prompt: hint ? "consent" : "select_account consent",
+    include_granted_scopes: "true",
+    state,
+  });
+  if (challenge) {
+    q.set("code_challenge", challenge);
+    q.set("code_challenge_method", "S256");
+  }
+  if (hint) q.set("login_hint", hint);
+  popup.location.href = "https://accounts.google.com/o/oauth2/v2/auth?" + q;
+  let code = await waitForDriveCode(state, popup);
+  let { status, j } = await driveBrokerPost("/oauth/exchange",
+    { code, code_verifier: verifier, redirect_uri: redirectUri });
+  if (status !== 200 || !j?.access_token) {
+    throw new Error("Google sign-in failed" + (j?.error ? ": " + j.error : ""));
+  }
+  if (connect) driveSession++;
+  else if (!syncState.connected || issued !== driveSession) {
+    throw new Error("Signed out of Google Drive");
+  }
+  adoptGrantedToken(j);
+  // Replaced even when none came back: one kept from before may belong to
+  // another account.
+  syncState.refresh = j.refresh_token || null;
+  driveBrokerRetryAt = 0;
+  await saveSyncState();
+};
 
 // Works because GDRIVE_SCOPE includes "email".
 // tokeninfo carries the account's stable subject id beside the address.
@@ -2208,10 +2412,12 @@ const driveFetch = async (url, opts = {}) => {
   let res = await send();
   if (res.status === 401) {
     try {
-      if (!hasUserActivation()) throw new Error("no activation for a popup");
-      // Signed out since the request left: no popup, the answer is refused.
+      // Signed out since the request left: no re-grant, the answer is refused.
       if (!driveLinked()) throw new Error("signed out");
-      await gdriveAcquireToken("");
+      if (!(await driveRefreshSilently({ force: true }))) {
+        if (!hasUserActivation()) throw new Error("no activation for a popup");
+        await gdriveAcquireToken("");
+      }
     } catch {
       clearDriveToken();
       armDriveRenewOnGesture();
@@ -2373,7 +2579,16 @@ const gdriveSignOut = () => {
   // Ends the session: a flush or pull still running stops at its next
   // await, and a token popup still open is refused when it answers.
   driveSession++;
-  if (gdriveToken && typeof google !== "undefined" && google.accounts?.oauth2) {
+  if (syncState.refresh) {
+    // Revoking the refresh token ends the whole grant, access token included.
+    fetch("https://oauth2.googleapis.com/revoke", {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "token=" + encodeURIComponent(syncState.refresh),
+    }).catch(() => {});
+    syncState.refresh = null;
+  } else if (gdriveToken && typeof google !== "undefined" && google.accounts?.oauth2) {
     google.accounts.oauth2.revoke(gdriveToken, () => {});
   }
   rememberDriveEmail(null); // no hint left behind: the next sign-in may be another account
@@ -2455,6 +2670,18 @@ const renderGdriveSection = () => {
   out.title = "Your games and saves stay on this device";
   gdriveBody.appendChild(gdriveRow(
     gdriveEmail || "Connected to Google Drive", state, sync, out));
+
+  // Signed in on the popup flow while the broker answers: offer the switch.
+  if (!syncState.refresh && driveBrokerOk) {
+    let stay = makeGdriveButton("Stay signed in", false, async () => {
+      stay.disabled = true;
+      try { await driveStaySignedIn(); }
+      catch (e) { showToast(e.message); stay.disabled = false; }
+    });
+    gdriveBody.appendChild(gdriveRow(
+      "Stay signed in",
+      "Stops the Google window that reconnects Drive about once an hour.", stay));
+  }
 };
 
 // ============================================================================
@@ -2510,6 +2737,8 @@ const loadSyncState = async () => {
       connected: !!s.connected,
       token: typeof s.token === "string" ? s.token : null,
       tokenExp: typeof s.tokenExp === "number" ? s.tokenExp : 0,
+      // Refresh token from the broker's code exchange (driveCodeGrant).
+      refresh: typeof s.refresh === "string" ? s.refresh : null,
       email: typeof s.email === "string" ? s.email : null,
     };
     gdriveEmail = syncState.email;
@@ -4425,11 +4654,23 @@ const buildSyncModal = ({ title, hint, onDismiss }) => {
 };
 
 // --- Connect / disconnect -------------------------------------------------
+// Through the broker when it answers (one consent screen, then no more
+// popups); otherwise the token flow's account chooser.
 const gdriveConnect = async () => {
   let acct;
+  // The popup must open inside the tap, so a known probe answer is taken as
+  // it stands (resumeDriveOnBoot probes early); only a first tap waits.
+  let viaBroker = driveBrokerProbedAt ? driveBrokerOk : await probeDriveBroker();
+  probeDriveBroker(); // refresh a stale answer for next time
   driveConnecting++;
   try {
-    await gdriveAcquireToken(undefined, syncState.email, { connect: true });
+    if (viaBroker) {
+      await driveCodeGrant(syncState.email, { connect: true });
+    } else {
+      await gdriveAcquireToken(undefined, syncState.email, { connect: true });
+      // A refresh token left from an earlier grant may be another account's.
+      syncState.refresh = null;
+    }
     acct = await gdriveFetchEmail();
   } finally {
     driveConnecting--;
@@ -4438,6 +4679,7 @@ const gdriveConnect = async () => {
   // work, tombstones and renames are what is loaded: syncing now could send
   // them to this one. Better to ask again.
   if (!acct && syncState.acct) {
+    syncState.refresh = null;
     clearDriveToken();
     throw new Error("Couldn't confirm which Google account signed in — try again");
   }
@@ -4459,7 +4701,7 @@ const ensureDriveSignedIn = async () => {
   if (syncActive()) return true;
   if (driveLinked()) {
     try {
-      await gdriveAcquireToken("");
+      if (!(await driveRefreshSilently({ force: true }))) await gdriveAcquireToken("");
       driveRenewFails = 0;
       if (!gdriveEmail) await gdriveFetchEmail();
       refreshSyncUI();
@@ -4475,10 +4717,11 @@ const ensureDriveSignedIn = async () => {
 };
 
 // --- Keeping the session alive -------------------------------------------
-// ~1h tokens, no refresh token, and even the silent re-grant is a popup
-// needing transient activation. So when the token is missing or near
-// expiry, a one-shot listener does the silent re-grant on the next
-// pointerdown/keydown/touchstart. Renewal starts this long before expiry.
+// ~1h tokens. With a refresh token and a live broker, renewal is a fetch,
+// done as soon as the token goes stale. Otherwise even the silent re-grant
+// is a popup needing transient activation, so a one-shot listener does it
+// on the next pointerdown/keydown/touchstart. Renewal starts this long
+// before expiry.
 const DRIVE_RENEW_LEAD_MS = 10 * 60 * 1000;
 // Consecutive silent-renew rejections before the signed-out UI; each costs a popup.
 const DRIVE_RENEW_MAX_FAILS = 3;
@@ -4489,9 +4732,22 @@ let driveRenewFails = 0;
 const driveTokenStale = () =>
   !gdriveToken || gdriveTokenExp - Date.now() < DRIVE_RENEW_LEAD_MS;
 
+// The token needs renewing: now, through the broker, when this device has
+// a refresh token and the broker has not just failed; else on a gesture.
 const armDriveRenewOnGesture = () => {
-  if (driveRenewArmed) return;
   if (!GDRIVE_CLIENT_ID || !syncState.connected) return;
+  if (syncState.refresh && driveBrokerBase() && Date.now() >= driveBrokerRetryAt) {
+    renewDriveToken({ gesture: false });
+    return;
+  }
+  armDriveRenewListener();
+};
+
+// Listener only. renewDriveToken's fallbacks come here, never back through
+// armDriveRenewOnGesture, so a failing broker cannot loop.
+const armDriveRenewListener = () => {
+  if (!GDRIVE_CLIENT_ID || !syncState.connected) return;
+  if (driveRenewArmed) return;
   if (driveRenewFails >= DRIVE_RENEW_MAX_FAILS) return;
   driveRenewArmed = true;
   const events = ["pointerdown", "keydown", "touchstart"];
@@ -4509,11 +4765,13 @@ const armDriveRenewOnGesture = () => {
   events.forEach((e) => window.addEventListener(e, onGesture, true));
 };
 
-// Silent re-grant, with a live token (rollover) or none (resume).
-const renewDriveToken = async () => {
+// Silent re-grant, with a live token (rollover) or none (resume): through
+// the broker when this device has a refresh token, else the popup, which
+// only a gesture may open.
+const renewDriveToken = async ({ gesture = true } = {}) => {
   if (!GDRIVE_CLIENT_ID || !syncState.connected) return;
   if (appUpdating) return; // reload imminent: a popup now would be orphaned
-  if (navigator.onLine === false) { armDriveRenewOnGesture(); return; }
+  if (navigator.onLine === false) { armDriveRenewListener(); return; }
   const wasSignedOut = !gdriveToken;
   // Signed out (or in again) while this was waiting: not this renewal's
   // business any more.
@@ -4523,14 +4781,21 @@ const renewDriveToken = async () => {
     return !syncState.connected;
   };
 
+  if (await driveRefreshSilently()) {
+    driveRenewFails = 0;
+    if (wasSignedOut && !over()) await driveSessionResumed(over);
+    return;
+  }
+  if (!gesture) { armDriveRenewListener(); return; }
+
   // A script-load failure (offline) must not count against the fail budget.
   try { await loadGisScript(); }
-  catch { armDriveRenewOnGesture(); return; }
+  catch { armDriveRenewListener(); return; }
   if (over()) return;
 
   // Activation lasts about five seconds and may have aged out while the
   // script loaded; a refused popup would spend a strike, so wait.
-  if (!hasUserActivation()) { armDriveRenewOnGesture(); return; }
+  if (!hasUserActivation()) { armDriveRenewListener(); return; }
 
   try {
     await gdriveAcquireToken("");
@@ -4545,7 +4810,7 @@ const renewDriveToken = async () => {
       refreshSyncUI();
       refreshHomeRecent();
     } else {
-      armDriveRenewOnGesture();
+      armDriveRenewListener();
     }
     return;
   }
@@ -4553,6 +4818,12 @@ const renewDriveToken = async () => {
   if (over()) return;
   driveRenewFails = 0;
   if (!wasSignedOut) return; // pure rollover: nothing user-visible changed
+  await driveSessionResumed(over);
+};
+
+// A token again after a gap: name the account, redraw, catch up. `over`
+// is the caller's check that its session is still the live one.
+const driveSessionResumed = async (over) => {
   await gdriveFetchEmail();
   if (over()) return;
   renderGdriveSection();
@@ -4561,10 +4832,33 @@ const renewDriveToken = async () => {
   await pullSync();
 };
 
+// Moves a popup-renewed device onto the broker: one consent screen, and
+// the hourly reconnect popup stops. Offered in Settings while the broker
+// answers and this device has no refresh token.
+const driveStaySignedIn = async () => {
+  await driveCodeGrant(syncState.email);
+  driveRenewFails = 0;
+  await gdriveFetchEmail(); // the chooser may have landed on another account
+  renderGdriveSection();
+  refreshSyncUI();
+  refreshHomeRecent();
+  showToast(syncState.refresh
+    ? "You'll stay signed in to Drive on this device"
+    : "Google didn't grant offline access. Try again later.");
+  pullSync();
+};
+
 // Boot resume: reuse a persisted token within its lifetime, confirmed via
 // tokeninfo (a plain fetch); otherwise arm the first-gesture re-grant.
 const resumeDriveOnBoot = async () => {
-  if (!GDRIVE_CLIENT_ID || !syncState.connected || gdriveToken) return;
+  // Learn early whether the broker answers: a signed-out device's Sign in
+  // must choose its popup inside the tap (gdriveConnect), and a popup-flow
+  // device may be offered "Stay signed in".
+  if (GDRIVE_CLIENT_ID && !syncState.refresh) {
+    probeDriveBroker().then((ok) => { if (ok) renderGdriveSection(); });
+  }
+  if (!GDRIVE_CLIENT_ID || !syncState.connected) return;
+  if (gdriveToken) return;
   // Warm the GIS script for a linked account: transient activation lasts
   // ~5s, and a cold script fetch on a phone can eat that whole budget.
   loadGisScript().catch(() => {});

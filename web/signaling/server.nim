@@ -16,7 +16,7 @@
 ##   the room, so the server cannot carry game/save/ROM bytes.
 ##
 ## No TLS: a reverse proxy terminates wss:// and forwards plain ws://. The
-## request path is ignored.
+## request path is ignored, except /oauth (below).
 ##
 ## Per-IP limits key on the direct peer address, except when that is localhost
 ## (reverse proxy): then the last X-Forwarded-For entry, the one the trusted
@@ -24,9 +24,20 @@
 ## from other Origins; a missing Origin is allowed (non-browser clients), so
 ## this is CSWSH protection only. SIGNAL_STATS=1 puts the live room count in
 ## the health line (test harness only).
+##
+## Google Drive token broker (plain HTTP, same port; see server.js for the
+## why). Off unless GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET (or
+## GOOGLE_OAUTH_CLIENT_SECRET_FILE) are set:
+##   GET  /oauth           {"oauth":true}; 404 when not configured
+##   POST /oauth/exchange  {"code","code_verifier","redirect_uri"}
+##                         -> {"access_token","expires_in","refresh_token"}
+##   POST /oauth/refresh   {"refresh_token"} -> {"access_token","expires_in"}
+## Stateless: the refresh token lives on the client and is useless without
+## the secret, which lives only here. Google is reached through the system
+## curl, so this binary stays TLS-free and statically linkable.
 
 import std/[asyncdispatch, asyncnet, nativesockets, tables, sets, json,
-            strutils, times, os, hashes, sha1, base64]
+            strutils, times, os, hashes, sha1, base64, osproc, streams, uri]
 
 const
   WsGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -49,6 +60,12 @@ const
   # headroom yet makes tunneling data through allowlisted envelopes useless.
   RelayTypes = ["sdp", "ice"]
   MaxRelayBytesPerRoom = 256 * 1024
+  # Token broker: a device refreshes about once an hour, so 30 a minute per
+  # IP only ever stops abuse. Bodies are a code or a token, well under 16 KB.
+  OAuthWindowSec = 60.0
+  MaxOAuthPerWindow = 30
+  MaxHttpBody = 16 * 1024
+  CurlTimeoutSec = 10
 
 type
   Conn = ref object
@@ -87,6 +104,7 @@ var
   ipConns = initTable[string, int]()    # ip -> live post-handshake sockets
   ipWaiting = initTable[string, int]()  # ip -> unclaimed waiting rooms hosted
   rzWindows = initTable[string, RzWin]() # ip -> rendezvous attempts this window
+  oauthWindows = initTable[string, RzWin]() # ip -> token-broker calls this window
 
 let statsEnabled = getEnv("SIGNAL_STATS") == "1"
 let allowedOrigins = block:
@@ -95,6 +113,18 @@ let allowedOrigins = block:
     let p = part.strip().toLowerAscii()
     if p.len > 0: s.incl p
   s
+
+let oauthClientId = getEnv("GOOGLE_OAUTH_CLIENT_ID")
+let oauthSecret = block:
+  var v = getEnv("GOOGLE_OAUTH_CLIENT_SECRET")
+  let f = getEnv("GOOGLE_OAUTH_CLIENT_SECRET_FILE")
+  if v.len == 0 and f.len > 0:
+    try: v = readFile(f).strip()
+    except IOError: discard
+  v
+let oauthTokenUrl = getEnv("GOOGLE_OAUTH_TOKEN_URL",
+                           "https://oauth2.googleapis.com/token")
+let oauthEnabled = oauthClientId.len > 0 and oauthSecret.len > 0
 
 proc bumpIp(t: var Table[string, int], ip: string) =
   t[ip] = t.getOrDefault(ip) + 1
@@ -300,6 +330,149 @@ proc onText(c: Conn, text: string) {.async.} =
     else:
       await c.fail("that code is already in use — pick another")
 
+# --- Drive token broker ----------------------------------------------------
+
+proc originAllowed(origin: string): bool =
+  allowedOrigins.len == 0 or origin.toLowerAscii() in allowedOrigins
+
+proc httpReply(c: Conn, status, body, origin: string,
+               extra = "") {.async.} =
+  var head = "HTTP/1.1 " & status & "\r\nContent-Type: application/json\r\n" &
+             "Cache-Control: no-store\r\n" & extra
+  if origin.len > 0 and originAllowed(origin):
+    head.add "Access-Control-Allow-Origin: " & origin & "\r\nVary: Origin\r\n"
+  try:
+    await c.sock.send(head & "Content-Length: " & $body.len &
+      "\r\nConnection: close\r\n\r\n" & body)
+  except CatchableError: discard
+
+# POSTs a form to Google through curl. The secret goes in on stdin, never on
+# the command line (argv is world-readable). Returns curl's output with the
+# HTTP status on the last line ("000" when Google was never reached).
+proc curlPost(url, form: string): Future[string] {.async.} =
+  var p: Process
+  try:
+    p = startProcess("curl", args = ["-sS", "--max-time", $CurlTimeoutSec,
+      "-H", "Content-Type: application/x-www-form-urlencoded",
+      "--data-binary", "@-", "-w", "\n%{http_code}", url],
+      options = {poUsePath, poStdErrToStdOut})
+  except CatchableError:
+    return "\n000"
+  try:
+    p.inputStream.write(form)
+    p.inputStream.close()
+    # Polled, not waited on: the event loop keeps serving while curl runs.
+    var waited = 0
+    while p.peekExitCode() == -1:
+      if waited > (CurlTimeoutSec + 5) * 1000:
+        p.kill()
+        discard p.waitForExit()
+        break
+      await sleepAsync(20)
+      waited += 20
+    result = p.outputStream.readAll()
+  except CatchableError:
+    result = "\n000"
+  p.close()
+
+proc formEncode(fields: openArray[(string, string)]): string =
+  for (k, v) in fields:
+    if result.len > 0: result.add '&'
+    result.add encodeUrl(k, usePlus = false) & "=" & encodeUrl(v, usePlus = false)
+
+# Google's reply cut down to what the client needs, under the status the
+# client acts on: 200, 400 (the grant is dead: drop the refresh token) or 502.
+proc brokerCall(c: Conn, form, origin: string, keepRefresh: bool) {.async.} =
+  let raw = await curlPost(oauthTokenUrl, form)
+  let nl = raw.rfind('\n')
+  let code = if nl >= 0: raw[nl + 1 .. ^1].strip() else: "000"
+  let body = if nl >= 0: raw[0 ..< nl] else: ""
+  var j: JsonNode
+  try: j = parseJson(body)
+  except CatchableError: j = nil
+  if code == "200" and j != nil and j.kind == JObject and
+      j{"access_token"}.getStr("").len > 0:
+    var o = %*{"access_token": j{"access_token"}.getStr(""),
+               "expires_in": j{"expires_in"}.getInt(3600)}
+    if keepRefresh and j{"refresh_token"}.getStr("").len > 0:
+      o["refresh_token"] = %j{"refresh_token"}.getStr("")
+    await c.httpReply("200 OK", $o, origin)
+  elif (code == "400" or code == "401") and j != nil and j.kind == JObject:
+    let err = j{"error"}.getStr("invalid_grant")
+    await c.httpReply("400 Bad Request", $(%*{"error": err}), origin)
+  else:
+    await c.httpReply("502 Bad Gateway", """{"error":"upstream"}""", origin)
+
+proc handleOAuth(c: Conn, meth, path, origin: string,
+                 contentLength: int) {.async.} =
+  if origin.len > 0 and not originAllowed(origin):
+    await c.httpReply("403 Forbidden", """{"error":"origin"}""", "")
+    return
+  if not oauthEnabled:
+    await c.httpReply("404 Not Found", """{"error":"oauth_disabled"}""", origin)
+    return
+  if meth == "OPTIONS":
+    await c.httpReply("204 No Content", "", origin,
+      "Access-Control-Allow-Methods: GET, POST\r\n" &
+      "Access-Control-Allow-Headers: Content-Type\r\n" &
+      "Access-Control-Max-Age: 86400\r\n")
+    return
+  if meth == "GET" and path == "/oauth":
+    await c.httpReply("200 OK", """{"oauth":true}""", origin)
+    return
+  if meth != "POST" or path notin ["/oauth/exchange", "/oauth/refresh"]:
+    await c.httpReply("404 Not Found", """{"error":"not_found"}""", origin)
+    return
+  let ip = c.effectiveIp()
+  let now = epochTime()
+  var w = oauthWindows.getOrDefault(ip, (start: now, count: 0))
+  if now - w.start >= OAuthWindowSec: w = (start: now, count: 0)
+  w.count.inc
+  oauthWindows[ip] = w
+  if w.count > MaxOAuthPerWindow:
+    await c.httpReply("429 Too Many Requests", """{"error":"rate"}""", origin)
+    return
+  if contentLength < 0 or contentLength > MaxHttpBody:
+    await c.httpReply("413 Payload Too Large", """{"error":"size"}""", origin)
+    return
+  while c.buf.len < contentLength:
+    let chunk = await c.sock.recv(4096)
+    if chunk.len == 0: return
+    c.buf.add chunk
+  var j: JsonNode
+  try: j = parseJson(c.buf[0 ..< contentLength])
+  except CatchableError: j = nil
+  if j == nil or j.kind != JObject:
+    await c.httpReply("400 Bad Request", """{"error":"bad_request"}""", origin)
+    return
+  if path == "/oauth/refresh":
+    let rt = j{"refresh_token"}.getStr("")
+    if rt.len == 0:
+      await c.httpReply("400 Bad Request", """{"error":"bad_request"}""", origin)
+      return
+    await c.brokerCall(formEncode({"grant_type": "refresh_token",
+      "client_id": oauthClientId, "client_secret": oauthSecret,
+      "refresh_token": rt}), origin, false)
+  else:
+    let code = j{"code"}.getStr("")
+    let verifier = j{"code_verifier"}.getStr("")
+    let redirect = j{"redirect_uri"}.getStr("")
+    # Google checks the redirect URI against its own allowlist too; this
+    # keeps a foreign page from using the broker for its own redirect.
+    var redirectOk = redirect.len > 0
+    if redirectOk and allowedOrigins.len > 0:
+      redirectOk = false
+      for o in allowedOrigins:
+        if redirect.toLowerAscii().startsWith(o & "/"): redirectOk = true
+    if code.len == 0 or not redirectOk:
+      await c.httpReply("400 Bad Request", """{"error":"bad_request"}""", origin)
+      return
+    var fields = @{"grant_type": "authorization_code",
+      "client_id": oauthClientId, "client_secret": oauthSecret,
+      "code": code, "redirect_uri": redirect}
+    if verifier.len > 0: fields.add ("code_verifier", verifier)
+    await c.brokerCall(formEncode(fields), origin, true)
+
 proc handshake(c: Conn): Future[bool] {.async.} =
   while true:
     let idx = c.buf.find("\r\n\r\n")
@@ -308,6 +481,12 @@ proc handshake(c: Conn): Future[bool] {.async.} =
       c.buf = c.buf[idx + 4 .. ^1]
       var key, origin: string
       var isWs = false
+      var contentLength = 0
+      let reqLine = head.splitLines()[0].splitWhitespace()
+      let meth = if reqLine.len > 0: reqLine[0] else: ""
+      var path = if reqLine.len > 1: reqLine[1] else: "/"
+      let q = path.find('?')
+      if q >= 0: path = path[0 ..< q]
       for line in head.splitLines():
         let colon = line.find(':')
         if colon < 0: continue
@@ -316,8 +495,14 @@ proc handshake(c: Conn): Future[bool] {.async.} =
         if name == "sec-websocket-key": key = val
         elif name == "origin": origin = val
         elif name == "x-forwarded-for": c.hsXff = val
+        elif name == "content-length":
+          try: contentLength = parseInt(val)
+          except ValueError: contentLength = -1
         elif name == "upgrade" and val.toLowerAscii().contains("websocket"):
           isWs = true
+      if not isWs and (path == "/oauth" or path.startsWith("/oauth/")):
+        await c.handleOAuth(meth, path, origin, contentLength)
+        return false
       if key.len == 0 or not isWs:
         # Not a WebSocket upgrade: health probe. The room count is only
         # reported under SIGNAL_STATS=1 (a live count is a recon gift).
@@ -416,6 +601,10 @@ proc reaper() {.async.} =
     for ip, w in rzWindows:
       if now - w.start >= RzWindowSec: staleIps.add ip
     for ip in staleIps: rzWindows.del ip
+    staleIps.setLen 0
+    for ip, w in oauthWindows:
+      if now - w.start >= OAuthWindowSec: staleIps.add ip
+    for ip in staleIps: oauthWindows.del ip
 
 proc serve(port: Port) {.async.} =
   # buffered = false: Conn.buf does the framing, and asyncnet's buffered read
