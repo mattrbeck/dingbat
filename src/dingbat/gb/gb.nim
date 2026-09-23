@@ -2595,7 +2595,9 @@ type
     sh_l0*:            int64   # APU_CLOCK_CARRY: the clock's last cycle at a switch, before / after its re-read
     sh_l1*:            int64
     sh_skip_div*:      bool    # APU_CLOCK_CARRY: the switch's own DIV reset is booked by stop_instr
-    apu_power_on_at*:  int64   # APU_DS_TRIGGER_SNAP: the scheduler cycle of the last APU power-on
+    apu_power_on_at*:  int64   # APU_DS_TRIGGER_SNAP: the scheduler cycle of the last APU power-on.
+                               # Not serialized (waits on the batched GB_PAYLOAD_VERSION bump, as
+                               # GbApu.tick_phase): a load keeps the running value.
     lyc_write_old*:    int16   # DMG_LYC_BOUNDARY_OPEN: LYC before a parked DMG LYC write (+1; 0 = none)
     when defined(test_harness):
       test_output*:  TestOutput

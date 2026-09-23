@@ -785,27 +785,21 @@ landed.
 
 ### F1. The eighth shift edge against a CPU access
 
-**Rows (5).** `serial/nopx1_start{,83}_wait_read_if_2`,
-`start83_late_div_write_wait_read_if_{1b,2b}` (CGB). (`start_wait_trigger_
-int8_read_if_*` went green with the dispatch's push order.)
-
-**Behaviour.** The shift clock is a falling edge of a divider bit
-(Pan Docs, "Serial Data Transfer"); a CPU access meets the shifter before
-its own M-cycle's tap edge (`SERIAL_CPU_SAMPLE_T = 0`; gambatte
-`serial/start_wait_read_{sb,sc,if}_*`, `nopx1_*`). `SERIAL_TAP_DMG = 4` and
-`SERIAL_TAP_CGB = 4`: a 4-T-wide plateau on each SoC, mooneye
-`boot_sclk_align-dmgABCmgb` pinning the DMG. Re-seeding the boot divider
-instead is refused by GBMicrotest `timer_tima_phase_*` and gambatte `div`.
-
-**Residue.** Side by side with gambatte-core: its transfer completes on a
-256-cycle grid anchored to the divider, and the boot transfer's IF rises
-4 T later than dingbat's (8:440 against 8:437) while the dispatch lands on
-the same M-cycle, so the handler's restart meets the next grid point on the
-other side. `SERIAL_TAP_* = 8` moves the grid there and loses the eleven
-`*div_write*` rows, which anchor the grid to the DIV reset where it is;
-`SERIAL_DIV_WRITE_LEAD_T` and `SERIAL_CPU_SAMPLE_T` moved with it lose as
-many. The two anchors disagree by one M-cycle, which is a statement about
-where the DIV reset lands, not about the serial unit.
+**Closed 2026-09-23** (`SERIAL_SC_WRITE_LEAD_T = 4`, serial.nim):
+`serial/nopx1_start{,83}_wait_read_if_2`,
+`start83_late_div_write_wait_read_if_{1b,2b}` (CGB); serial 82/82. The SC
+store re-sampled the tap after the divider had already ticked its own
+M-cycle, so a tap edge on the store's M-cycle was swallowed and the first
+slot opened one half-period late. The store now samples the level from the
+top of its M-cycle, the same "access before the edge" order as
+`SERIAL_CPU_SAMPLE_T`; bracket [1,4] (0 loses the five, 5 loses
+`nopx2_start_wait_read_if_1` on both devices). The old reading (boot and
+DIV-reset anchors a M-cycle apart) was the same swallowed edge seen from
+the two ends. Refuted on the way: a one-M-cycle serial lead on a running
+CPU's dispatch, as `TIMER_IRQ_RUN_LEAD` (with any `SERIAL_TAP_*` it loses
+the `start_wait_read_{sb,sc}_2` family, which pins the dispatch where it
+is), and every `SERIAL_TAP_*` from 0 to 16 on its own (none turns
+`nopx1_start_wait_read_if_2`).
 
 ### F2. TIMA reload against a read
 
@@ -888,6 +882,10 @@ not DIV; SameBoy passes SameSuite on C and E but not this gambatte ladder.
 
 **Rows (13).** `speedchange{2,3,4,5}*_ch1_duty0_pos6_to_pos7_timing_*` (12)
 and `speedchange_ch1_nr4init_duty0_pos6_to_pos7_timing_2`.
+
+**Status (2026-09-23): red by decision.** Where gambatte and SameSuite
+disagree here, dingbat follows SameSuite until hardware experiment (e) runs
+on a CPU CGB C, so `APU_CLOCK_CARRY` stays 0 and these rows stay red.
 
 **Measured.** With the single-switch values pinned (to double 10, back 7, each
 two-sided at a NOP), the multi-switch ROMs want sums no constant pair gives:
@@ -1077,8 +1075,7 @@ One line each; the knob's own comment carries the derivation.
   against the DMA; `IRQ_PUSH_T` 12 fixes it and loses 19 IF-clear rows),
   `tima/tc00_late_tc01_{5,7}` (a TAC-glitch overflow's $00 window, A6),
   the `lcd_offset` phase rows, the serial `*_wait_read_if_2`
-  rows (the tap phase is pinned by the DIV-reset rows, the boot divider by
-  mooneye boot_div), `window/late_disable_scx5_ds_1` (a sixth revocable dot
+  rows (closed 2026-09-23, F1), `window/late_disable_scx5_ds_1` (a sixth revocable dot
   breaks the empty-FIFO undo), `scx_during_m3/scx_0761c0` (C3, a discard-end
   borrow reference makes it far worse).
 
@@ -1153,8 +1150,8 @@ One line each; the knob's own comment carries the derivation.
 * A TIMA overflow reaches a running CPU one M-cycle before a halted one:
   `TIMER_IRQ_RUN_LEAD`.
 * The serial shift clock is a half-rate toggle the SC write reseeds, and a
-  CPU access meets it before its own tap edge: `SERIAL_TAP_*`,
-  `SERIAL_CPU_SAMPLE_T`.
+  CPU access, the SC store included, meets it before its own tap edge:
+  `SERIAL_TAP_*`, `SERIAL_CPU_SAMPLE_T`, `SERIAL_SC_WRITE_LEAD_T`.
 * The CGB window start is revocable; the DMG revokes for one dot:
   `CGB_WIN_REVOKE_LAG`, `DMG_WIN_EN_REVOKE`.
 * The OAM X = 167 object charged for the tail walk twice:

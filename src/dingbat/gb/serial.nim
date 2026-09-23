@@ -90,9 +90,7 @@ proc set_serial_driver*(gb: GB; drv: GbSerialDriver) =
 
 proc serial_phase(gb: GB): uint16 {.inline.} =
   ## gambatte serial/* puts the phase at [0,3]; mooneye boot_sclk_align-dmgABCmgb
-  ## puts the DMG's at [4,7], where it ships (SERIAL_TAP_DMG in gb.nim). The
-  ## CGB fast-clock rows (gambatte serial/start83_*) are a whole bit slot off
-  ## and no phase reaches them.
+  ## puts the DMG's at [4,7], where it ships (SERIAL_TAP_DMG in gb.nim).
   if gb.cgb_enabled: uint16(SERIAL_TAP_CGB) else: uint16(SERIAL_TAP_DMG)
 
 proc serial_tap_high(serial: GbSerial; gb: GB): bool {.inline.} =
@@ -215,6 +213,16 @@ proc serial_read*(serial: GbSerial; gb: GB; idx: int): uint8 =
   of 0xFF02: serial.sc or serial_sc_unused_bits(gb)
   else: 0xFF'u8
 
+const SERIAL_SC_WRITE_LEAD_T* {.intdefine.} = 4
+  ## T-cycles before the divider's present count at which an SC store samples
+  ## the tap it restarts the slot sequence from: the store meets the shifter at
+  ## the top of its M-cycle (SERIAL_CPU_SAMPLE_T), before the divider ticks
+  ## that M-cycle, so a tap edge on the store's own M-cycle counts after it
+  ## and opens the first slot. gambatte `serial/nopx1_start{,83}_wait_read_if_2`
+  ## (a handler's restart on the edge) and `start83_late_div_write_wait_read_
+  ## if_{1b,2b}`; bracket [1,4]: 0 loses those five, 5 loses `nopx2_start_
+  ## wait_read_if_1` (both devices), whose restart is one M-cycle later.
+
 proc serial_write_commit(serial: GbSerial; gb: GB; idx: int; val: uint8) =
   case idx
   of 0xFF01:
@@ -242,7 +250,12 @@ proc serial_write_commit(serial: GbSerial; gb: GB; idx: int; val: uint8) =
       serial.out_latch = serial.sb
       serial.driver.serial_start(gb)
     # The clock-select bit may have moved the tap: resample it, no phantom edge.
-    serial.serial_prime_history(gb)
+    when SERIAL_SC_WRITE_LEAD_T != 0:
+      serial.clock_history =
+        if ((gb.timer.tdiv - uint16(SERIAL_SC_WRITE_LEAD_T) + serial_phase(gb)) and
+            serial.serial_tap_bit(gb)) != 0: 1'u8 else: 0'u8
+    else:
+      serial.serial_prime_history(gb)
     serial.serial_update_shifting()
   else: discard
 
@@ -266,5 +279,8 @@ proc serial_write*(serial: GbSerial; gb: GB; idx: int; val: uint8) =
       # Let the replay keep again: the pre-edge state is now the post-write one.
       serial.edge_cycle = high(CycleCount)
       serial.serial_tap_fell(gb)
+      # The replayed edge is spent: SERIAL_SC_WRITE_LEAD_T's pre-tick sample
+      # must not see it again.
+      serial.serial_prime_history(gb)
       return
   serial_write_commit(serial, gb, idx, val)

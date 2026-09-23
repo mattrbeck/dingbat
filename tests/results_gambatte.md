@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-23 08:01:24*
+*Generated: 2026-09-23 10:02:37*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5187/5216 passed.**
+**5192/5216 passed.**
 
 ## bgen
 
@@ -182,17 +182,9 @@ All 802 tests passed.
 
 All 67 tests passed.
 
-## serial (77/82 passed)
+## serial
 
-77/82 tests passed, 5 failed:
-
-| Test | Result |
-|------|--------|
-| serial/nopx1_start83_wait_read_if_2_dmg08_outE0_cgb04c_outE8 [cgb] | got E0, expected E8 |
-| serial/nopx1_start_wait_read_if_2_dmg08_cgb04c_outE8 [dmg] | got E0, expected E8 |
-| serial/nopx1_start_wait_read_if_2_dmg08_cgb04c_outE8 [cgb] | got E0, expected E8 |
-| serial/start83_late_div_write_wait_read_if_1b_cgb04c_outE8 [cgb] | got E0, expected E8 |
-| serial/start83_late_div_write_wait_read_if_2b_cgb04c_outE8 [cgb] | got E0, expected E8 |
+All 82 tests passed.
 
 ## sound
 
