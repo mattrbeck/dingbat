@@ -719,6 +719,10 @@ const CGB_WE_ENABLE_LATE* {.intdefine.} = 1
 const WIN_LX_OFF_V* = -128'i32
   ## fifo_ppu.nim's WIN_LX_OFF (the comparator parked), here for ppu.nim.
 const CGB_WX_LATE_SS* {.intdefine.} = 1
+const HDMA_LCD_OFF_BLOCK* {.intdefine.} = 1
+  ## Whether switching the LCD off with an HBlank DMA armed requests a block,
+  ## as the LCD-off PPU sits in mode 0 (gambatte-core requests one on the
+  ## disable). gambatte dma/hdma_disable_display_1 (+1, none lost).
 const TIMER_ACK_LOOKAHEAD* {.intdefine.} = 4
   ## T-cycles past its IF clear within which a timer request still to rise is
   ## acknowledged by the same dispatch (gambatte-core acks a flag whose event

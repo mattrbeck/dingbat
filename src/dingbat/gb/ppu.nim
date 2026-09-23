@@ -2467,6 +2467,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     when defined(gb_win_trace):
       echo "LCDC ly=", ppu.ly, " dot=", ppu.cycle_counter, " mode=",
            (ppu.lcd_status and 3), " old=", toHex(ppu.lcd_control,2), " new=", toHex(val,2)
+    let lcd_going_off = (ppu.lcd_control and 0x80'u8) != 0 and (val and 0x80'u8) == 0
     # Only the six bits the pipeline reads are late on CGB; the enable bit has
     # already restarted the mode machinery above on this dot.
     when CGB_LCDC_LATENCY_ANY:
@@ -2476,6 +2477,11 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
         ppu_store_lcdc(ppu, gb, val)
     else:
       ppu_store_lcdc(ppu, gb, val)
+    when HDMA_LCD_OFF_BLOCK != 0:
+      # Switching the LCD off with an HBlank DMA armed requests a block, as
+      # entering mode 0 does (HDMA_LCD_OFF_BLOCK).
+      if lcd_going_off and ppu.hdma_active and not ppu.hdma_copying:
+        ppu_step_hdma(ppu, gb, in_cpu_cycle = true)
     # Deferred to the end of this M-cycle (stat_write_pending). LCDC.1 and, in
     # CGB mode, LCDC.0 are mixer reads (mealybug m3_lcdc_obj_en_change; see
     # fifo_recompose_last).
