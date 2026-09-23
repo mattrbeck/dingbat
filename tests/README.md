@@ -31,6 +31,8 @@ Options: `--timeout=<frames>`, `--frames=<warmup>`, `--screenshot=<path.ppm>`,
 `--max-fails=<n>` (fuzzarm), `--color`, `--dmg`, `--cgb`, `--sgb`, `--cgb-rev=<0|A|B|C|D|E>`,
 `--model=<dmg0|mgb|sgb|cgb0|...>` (boot table + `GbQuirks` revision), `--nosave`,
 `--ed-breakpoint`, `--bb-breakpoint`, `--screen-check`, `--bios=<path>`,
+`--press=<frame>:<btn>[+<btn>],...` (GB: hold the buttons from that frame for six frames,
+for ROMs with a menu; applied between frames, as the frontend does),
 `--sio=null|loopback`, and for the link modes `--listen`, `--connect`,
 `--netlink-delay-ms`, `--link-contract=multi|normal|normal32`, `--attach-after`.
 

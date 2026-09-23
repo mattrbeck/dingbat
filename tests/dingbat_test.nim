@@ -1608,6 +1608,7 @@ proc main() =
   var out_path = ""        # gambatte mode: verdict file (see gambatte_batch)
   var gambatte_frames = GambatteFrames
   var dump_tiles = 0       # gambatte mode: dump the first N top-row tiles
+  var presses: seq[(int, Input, bool)]  # --press: (frame, button, down) on the GB frame loop
 
   var p = initOptParser(commandLineParams())
   var positional = 0
@@ -1754,6 +1755,30 @@ proc main() =
         var v = p.val
         if v.len == 0: p.next(); v = p.key
         gambatte_frames = parseInt(v)
+      of "press":
+        # --press=F:BTN[+BTN],... holds the buttons from frame F for 6 frames
+        # (a ROM's menu or "press every key" prompt; the bundle's rtc3test and
+        # tellinglys howtos). Buttons: a b select start up down left right.
+        var v = p.val
+        if v.len == 0: p.next(); v = p.key
+        for item in v.split(','):
+          let parts = item.split(':')
+          let f = parseInt(parts[0])
+          for b in parts[1].split('+'):
+            let inp = case b.toLowerAscii()
+              of "a": Input.A
+              of "b": Input.B
+              of "select": Input.SELECT
+              of "start": Input.START
+              of "up": Input.UP
+              of "down": Input.DOWN
+              of "left": Input.LEFT
+              of "right": Input.RIGHT
+              else:
+                echo "Unknown button: ", b
+                quit(1)
+            presses.add((f, inp, true))
+            presses.add((f + 6, inp, false))
       of "dump-tiles":
         var v = p.val
         if v.len == 0: p.next(); v = p.key
@@ -1914,6 +1939,8 @@ proc main() =
       emu.cartridge.sav_path = ""
     for frame in 0 ..< timeout_frames:
       if test_out.finished: break
+      for (f, inp, down) in presses:
+        if f == frame: emu.handle_input(inp, down)
       emu.step_frame()
       if mode == tmSerial and test_out.serial_buffer.len > 0:
         if test_out.serial_buffer.contains("Passed") or

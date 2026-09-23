@@ -1,13 +1,13 @@
 # Dingbat Test Results
 
-*Generated: 2026-09-23 10:02:37 · commit 10471b7bd · game-boy-test-roms v7.0*
+*Generated: 2026-09-23 10:18:10 · commit e5ad5568f · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
-- **Total:** 1254
-- **Pass:** 1251
+- **Total:** 1260
+- **Pass:** 1257
 - **Fail:** 3
 
 | Suite | Pass | Total |
@@ -24,7 +24,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Mealybug Tearoom | 74 | 74 |
 | Game Boy - GBMicrotest | 480 | 480 |
 | Game Boy - AGE | 118 | 118 |
-| Game Boy - Screenshot suites | 13 | 13 |
+| Game Boy - Screenshot suites | 19 | 19 |
 | Game Boy - SameSuite | 8 | 8 |
 | Game Boy - SameSuite APU | 70 | 70 |
 | Game Boy - Shootout ROMs | 15 | 15 |
@@ -81,9 +81,9 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 118 tests passed.**
 
-## Game Boy - Screenshot suites (13/13)
+## Game Boy - Screenshot suites (19/19)
 
-**All 13 tests passed.**
+**All 19 tests passed.**
 
 ## Game Boy - SameSuite (8/8)
 

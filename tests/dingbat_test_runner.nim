@@ -42,6 +42,7 @@ type
     sgb: bool             # run the cart in a Super Game Boy (--sgb)
     model: string         # mooneye per-model boot table (--model=...); "" = default
     no_save: bool         # blank cart RAM + detach the .sav (battery-backed ROMs)
+    press: string         # screenshot mode: --press schedule (F:BTN[+BTN],...)
     ed_breakpoint: bool   # opcode 0xED ends the run (wilbertpol mooneye fork)
     bb_breakpoint: bool   # LD B,B always ends the run, pass or fail (AGE)
     screen_check: bool    # after the verdict, require the panel to have settled
@@ -222,6 +223,8 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
       cmd.add(" --model=" & test.model)
     if test.no_save:
       cmd.add(" --nosave")
+    if test.press.len > 0:
+      cmd.add(" --press=" & test.press)
     let (run_output, run_code) = execCmdEx(cmd, options = {poUsePath})
     if run_code != 0:
       return TestResult(name: test.name, passed: false, output: run_output.strip())
@@ -835,12 +838,12 @@ proc build_gbmicrotest_tests(dir: string): seq[TestDef] =
   tests
 
 proc shot(name, rom, png: string; timeout: int; color = false; cgb = false;
-          no_save = false; model = ""): TestDef =
+          no_save = false; model = ""; press = ""): TestDef =
   ## One screenshot TestDef. The bundled references use the palettes the
   ## harness renders (DMG #00/#55/#AA/#FF, CGB channels (X<<3)|(X>>2)).
   TestDef(name: name, rom_path: rom, mode: tmScreenshot, timeout: timeout,
           expected_png: png, color: color, cgb: cgb, no_save: no_save,
-          model: model)
+          model: model, press: press)
 
 proc build_small_screenshot_tests(roms_dir: string): seq[TestDef] =
   ## The bundle's small screenshot suites, from an explicit table: each has
@@ -851,9 +854,9 @@ proc build_small_screenshot_tests(roms_dir: string): seq[TestDef] =
   ## (cgb-acid-hell) stops there anyway.
   var tests: seq[TestDef]
   template add_if(name, rom, png: string; timeout: int; color = false;
-                  cgb = false; no_save = false; model = "") =
+                  cgb = false; no_save = false; model = ""; press = "") =
     if fileExists(rom) and fileExists(png):
-      tests.add(shot(name, rom, png, timeout, color, cgb, no_save, model))
+      tests.add(shot(name, rom, png, timeout, color, cgb, no_save, model, press))
 
   # BullyGB (Hacktix). The only bundled reference is a CGB capture, and
   # --mode=screenshot treats a missing --cgb as DMG, so the device is named.
@@ -896,8 +899,10 @@ proc build_small_screenshot_tests(roms_dir: string): seq[TestDef] =
   add_if("cgb-acid-hell/cgb-acid-hell", hell / "cgb-acid-hell.gbc",
          hell / "cgb-acid-hell.png", 120, color = true, cgb = true)
 
-  # little-things-gb (pinobatch). tellinglys needs a scripted button press,
-  # which dingbat_test cannot do.
+  # little-things-gb (pinobatch). tellinglys is not scored: it checks that
+  # the joypad interrupt lands on varying lines, and dingbat_test's --press
+  # applies input between frames exactly as the frontend does, so it reads
+  # "same line each time" -- a frontend input-timing question, not the core's.
   let little = roms_dir / "little-things-gb"
   add_if("little-things-gb/firstwhite", little / "firstwhite.gb",
          little / "firstwhite-dmg-cgb.png", 60)
@@ -914,6 +919,24 @@ proc build_small_screenshot_tests(roms_dir: string): seq[TestDef] =
   let mbc3 = roms_dir / "mbc3-tester"
   add_if("mbc3-tester/mbc3-tester", mbc3 / "mbc3-tester.gb",
          mbc3 / "mbc3-tester-dmg.png", 60, no_save = true)
+
+  # rtc3test (aaaaaa123456789): the MBC3 clock, device-independent (howto).
+  # A menu picks the subtest; --press drives it and the frame budget is the
+  # howto's run time plus margin (13 / 8 / 26 emulated seconds; 700 and 1500
+  # frames stop short of the basic and sub-second verdicts). CGB rows are the
+  # DMG cart in compatibility mode. Battery-backed, hence --nosave. The
+  # shootout's pre-split builds (build_shootout_tests) cover the native-CGB
+  # arm under a tolerance; these are exact and add the DMG.
+  let rtc = roms_dir / "rtc3test"
+  for (sub, press, frames) in [("basic-tests", "60:a", 1000),
+                               ("range-tests", "60:down,80:a", 800),
+                               ("sub-second-writes", "60:down,80:down,100:a", 1900)]:
+    add_if("rtc3test/" & sub & "-dmg", rtc / "rtc3test.gb",
+           rtc / ("rtc3test-" & sub & "-dmg.png"), frames, no_save = true,
+           press = press)
+    add_if("rtc3test/" & sub & "-cgb", rtc / "rtc3test.gb",
+           rtc / ("rtc3test-" & sub & "-cgb.png"), frames, color = true,
+           cgb = true, no_save = true, press = press)
   tests
 
 proc age_device_tokens(base: string): seq[string] =
