@@ -28,13 +28,17 @@ proc skip_boot*(t: GbTimer; gb: GB) =
     of bmCgbABCDE:
       if native: 0x1E9C'u16 else: 0x2674'u16  # misc/boot_div-cgbABCDE
 
-const TAC_SELECT_LEAD_T* {.intdefine.} = 4
+const TAC_SELECT_LEAD_T* {.intdefine.} = 0
   ## T-cycles before the end of a TAC write's M-cycle at which the newly
   ## selected divider bit is sampled; the bit being left stays the latched
   ## `previous_bit`. A select change can tick TIMA by itself (Pan Docs, "Timer
-  ## Obscure Behaviour"); 4 is pinned by gambatte tima/tc00_late_tc01_* and
-  ## tima/tc00_tc01_late_tc00_of_*. A $FF05 read DOES see an increment or
-  ## reload that landed in its own M-cycle (unlike SB/SC/IF, see
+  ## Obscure Behaviour"). 0 (compiled out): both taps are judged at the end
+  ## of the write. gambatte `tima/tc00_late_tc01_5` has the old tap (bit 9)
+  ## rise on the write's own T-cycle and the new one (bit 3) low, a glitch
+  ## increment; `_7` the new tap high, none. 4, the old value, missed both
+  ## (both devices); 1..3 take neither. Nothing else moves, including
+  ## `tc00_tc01_late_tc00_of_*`. A $FF05 read DOES see an increment or reload
+  ## that landed in its own M-cycle (unlike SB/SC/IF, see
   ## SERIAL_CPU_SAMPLE_T); a pre-edge latch for TIMA loses 18+ tima rows.
 
 const SPEED_SWITCH_IRQ_LEAF_HOLD_T* {.intdefine.} = 8
