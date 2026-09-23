@@ -692,8 +692,8 @@ during a transfer. How the rules were read: the gambatte oracle trace in
 
 ### D2. OAM DMA against the mode-2 scan and the CPU
 
-**Rows (4).** `oamdma_src0000_busyint0002` (both devices),
-`oamdma_src8000_srcchange0000_busyinc` (both).
+**Rows (2).** `oamdma_src0000_busyint0002` (both devices); the
+`srcchange0000_busyinc` pair closed 2026-09-22 (`OAMDMA_SRCCHANGE_BUS`).
 
 **Closed 2026-09-22 (+9).** `late_sp{00x,00y,01x,01y,39x,39y}_ds_*`,
 `late_sp39x_4`, `sprites/late_disable_ds_1`, `sprites/enable/late_disable_
@@ -987,7 +987,7 @@ tried again as a knob.
 
 One line each; the knob's own comment carries the derivation.
 
-* Closed 2026-09-22, the oracle pass (gambatte 5104 -> 5153; each knob is
+* Closed 2026-09-22, the oracle pass (gambatte 5104 -> 5157; each knob is
   bracketed at its own comment):
   `LCDON_M0_LAG_DS`, `LYC_JUST_CHANGED_HOLD_DS`, `LYC153_HOLD_DS` (the LCD-on
   line and the line edges at double speed); `CGB_OBJ_FETCH_OFF` +
@@ -1002,7 +1002,12 @@ One line each; the knob's own comment carries the derivation.
   (cgbpal_m3 44/44); `TIMER_ACK_LOOKAHEAD` (the dispatch acks a timer
   request due within an M-cycle); `HDMA_LCD_OFF_BLOCK`,
   `HDMA_START_GRANT_FETCH`, `GDMA_AFTER_FETCH` (DMA hand-over at the next
-  opcode fetch). Still open from that pass: the serial `*_wait_read_if_2`
+  opcode fetch); `OAMDMA_SRCCHANGE_BUS` (D2); `SCX_LATCH_LCDON_EXTRA{,_CGB}`
+  (enable_display 184/184). Still open from that pass: `oamdma_src0000_
+  busyint0002` (the dispatch's pushes land 3 M-cycles ahead of gambatte's
+  against the DMA; `IRQ_PUSH_T` 12 fixes it and loses 19 IF-clear rows),
+  `tima/tc00_late_tc01_{5,7}` (a TAC-glitch overflow's $00 window, A6),
+  the `lcd_offset` phase rows, the serial `*_wait_read_if_2`
   rows (the tap phase is pinned by the DIV-reset rows, the boot divider by
   mooneye boot_div), `window/late_disable_scx5_ds_1` (a sixth revocable dot
   breaks the empty-FIFO undo), `scx_during_m3/scx_0761c0` (C3, a discard-end
