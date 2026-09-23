@@ -615,8 +615,17 @@ const HDMA_HALT_REQ_BUG* {.intdefine.} = 1
   ## `dma/hdma_late_m3halt_m2unhalt_inc_scx1_2` (`inc a` twice),
   ## `hdma_transition_7fffhalt_inc_m3unhalt` (the byte at $8000 read before the
   ## block rewrote it), `hdma_transition_halt_{late_unhalt,m0unhalt}_ldaaimm_*`.
-  ## With IME on the wake's dispatch pushes the PC after the HALT and nothing
-  ## is refunded (the refund there loses `hdma_late_ei_m3halt_m2unhalt_*`).
+  ## With IME on see HDMA_HALT_REQ_BUG_IME.
+const HDMA_HALT_REQ_BUG_IME* {.intdefine.} = 1
+  ## HDMA_HALT_REQ_BUG with IME on: the prefetched opcode also runs (once,
+  ## PC still on it) between the wake's block and the dispatch, whose push
+  ## then carries the PC after it; the block's release M-cycle is refunded
+  ## as with IME off. gambatte `dma/hdma_transition_ei_halt_late_unhalt_
+  ## ldaaimm_hdma_scx1_1` (`LD (a16),A` reads its low operand as its own
+  ## opcode $EA and stores to $80EA before the dispatch; gambatte-core holds
+  ## its interrupt for one instruction after such a block). Without the
+  ## refund it loses `hdma_late_ei_m3halt_m2unhalt_ly_scx1_3` and the `_2`
+  ## twin; 0 = the dispatch comes first.
 const HDMA_BLOCK_SWALLOW* {.intdefine.} = 1
   ## A mode-0 edge that falls while an HBlank block is running is lost: the
   ## block acknowledges the request line as it ends. Only a block taken at a
