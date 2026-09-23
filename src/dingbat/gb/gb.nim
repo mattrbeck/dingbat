@@ -266,6 +266,13 @@ const M0_IRQ_EDGE_X* {.intdefine.} = 1
   ## `m0enable/enable_wxA6_2x_spxA7_ds_1`; the CGB STAT-write rule reads
   ## "mode 0 has begun" off the same request. 0 = the request waits for the
   ## fetcher.
+const STAT_GLITCH_M0_LEAD* {.intdefine.} = 1
+  ## Dots before the mode 3 -> 0 flag at which the DMG STAT-write bug's $FF
+  ## phase already finds the mode-0 source (ppu_stat_write_glitch); measured
+  ## from the source's own change dot, STAT_M0_LEAD_T ahead of the flag.
+  ## gambatte `miscmstatirq/m0statwirq_scx{2,3,5}_{1,2}` [dmg]: SCX 2 fires
+  ## on the M-cycle SCX 3 does not, SCX 5 on the one after. 0 loses scx2_2
+  ## and scx5_2, 2 loses scx2_2; nothing else moves.
 const STAT_M1_LEAD* {.intdefine.} = 1
   ## The mode-1 STAT source rises with the LYC comparator's lead
   ## (STAT_LYC_LY_LEAD_DOTS, 2 dots at single speed) at the end of line 143,

@@ -1597,7 +1597,12 @@ proc ppu_stat_write_glitch*(ppu: GbPpu; gb: GB) =
   ## while adding m2_source here costs eleven gambatte m2enable rows.
   if not ppu.lcd_enabled: return
   if ppu.old_stat_flag: return
-  if ppu.ly == ppu.lyc or ppu.mode_flag == 0 or ppu.mode_flag == 1:
+  var m0 = ppu.mode_flag == 0
+  when STAT_GLITCH_M0_LEAD != 0 and STAT_IRQ_SPLIT:
+    if not m0 and ppu.mode_flag == 3 and ppu.irq_mode == 0'u8 and
+       ppu.cycle_counter >= int32(ppu.irq_chg_dot) + STAT_GLITCH_M0_LEAD:
+      m0 = true
+  if ppu.ly == ppu.lyc or m0 or ppu.mode_flag == 1:
     when defined(gb_stat_read_trace):
       echo "STATGLITCH ly=", ppu.ly, " cc=", ppu.cycle_counter,
            " mode=", ppu.mode_flag
