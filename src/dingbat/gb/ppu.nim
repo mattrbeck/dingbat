@@ -334,6 +334,19 @@ template lcdon_latched_mode(ppu: GbPpu; ds: bool): uint8 =
         m = 3'u8
     m
 
+const VRAM_READ_CGB_M3_EDGE_SS* {.intdefine.} = 4
+  ## CGB, single speed: a VRAM read whose M-cycle began on mode 3's first dot
+  ## (live mode 3, prev 2, the edge this many dots back) is locked although
+  ## the M-cycle-start latch still says mode 2. Reachable only on the CPU grid
+  ## a speed-switch round trip leaves: gambatte `vram_m3/preread_lcdoffset1_2`
+  ## (read ending on dot 84 locked) against `preread_lcdoffset2_1` (83, open)
+  ## and `preread_2` [cgb] (81, open). 3 loses `lcdoffset2_1`, 5 is inert;
+  ## double speed already agrees (`preread_ds_lcdoffset1_{1,2}`).
+const VRAM_WRITE_CGB_M3_EDGE_SS* {.intdefine.} = 80
+  ## The write side's twin: a CGB write committed at single speed with the PPU
+  ## on mode 2's last dot boundary (dot 80, where mode 3 begins) is locked.
+  ## gambatte `vram_m3/prewrite_lcdoffset1_2`; 79 loses `prewrite_lcdoffset2_1`,
+  ## 81 is inert.
 proc cpu_vram_open*(ppu: GbPpu; is_write: bool; cgb = false;
                     ds = false): bool {.inline.} =
   if not lcd_enabled(ppu): return true
@@ -348,6 +361,13 @@ proc cpu_vram_open*(ppu: GbPpu; is_write: bool; cgb = false;
          ppu.cycle_counter - ppu.stat_chg_dot <
            (if ds: 2'i32 else: 4'i32) + 1 + LCD_ON_LINE0_LOCK_LEAD:
         return true
+    when VRAM_WRITE_CGB_M3_EDGE_SS != 0:
+      # A CGB write committed on the dot mode 3 begins is locked at single
+      # speed (VRAM_WRITE_CGB_M3_EDGE_SS).
+      if cgb and not ds and not ppu.first_line and
+         (ppu.lcd_status and 3'u8) == 2'u8 and
+         ppu.cycle_counter >= int32(VRAM_WRITE_CGB_M3_EDGE_SS):
+        return false
     return (ppu.lcd_status and 3'u8) != 3
   if lcdon_latched_mode(ppu, ds) == 3:
     when VRAM_READ_M0_OPEN_DOTS != 0 or VRAM_READ_M0_OPEN_DOTS_DS != 0:
@@ -372,6 +392,13 @@ proc cpu_vram_open*(ppu: GbPpu; is_write: bool; cgb = false;
         return true
     return false
   if ppu.first_line: return true
+  when VRAM_READ_CGB_M3_EDGE_SS != 0:
+    # A CGB read whose M-cycle began on mode 3's first dot is already locked
+    # at single speed (VRAM_READ_CGB_M3_EDGE_SS).
+    if cgb and not ds and (ppu.lcd_status and 3'u8) == 3'u8 and
+       ppu.stat_prev_mode == 2'u8 and
+       ppu.cycle_counter - ppu.stat_chg_dot >= int32(VRAM_READ_CGB_M3_EDGE_SS):
+      return false
   # Both clauses are load-bearing. Dropping the live clause costs mooneye
   # lcdon_timing-GS on every DMG/SGB arm and GBMicrotest poweron_vram_{026,140}
   # and vram_read_l1_b; keeping it on a CGB costs gambatte dma/hdma_late_enable_1
