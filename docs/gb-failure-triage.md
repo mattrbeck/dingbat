@@ -987,6 +987,27 @@ tried again as a knob.
 
 One line each; the knob's own comment carries the derivation.
 
+* Closed 2026-09-22, the oracle pass (gambatte 5104 -> 5153; each knob is
+  bracketed at its own comment):
+  `LCDON_M0_LAG_DS`, `LYC_JUST_CHANGED_HOLD_DS`, `LYC153_HOLD_DS` (the LCD-on
+  line and the line edges at double speed); `CGB_OBJ_FETCH_OFF` +
+  `OAM_SCAN_DMA_EDGE_DS` (the `late_sp*_ds` rows, D2); `VRAM_WRITE_M3_END_DOTS`
+  and `VRAM_WRITE_LINE0_CGB_GRACE` (C1); `LCDON_NO_OAM_SCAN` (B1);
+  `CGB_OBJ_YIELD_LAST` (C2); `CGB_WX_LATE_SS`, `CGB_WE_ENABLE_LATE`,
+  `WIN_HEAD_LATE_DOT`, `WIN_CHECK_DEFER_CGB_DS` + `WIN_LATCH_END_CGB_DS`
+  (window arming); `OAMDMA_HALT_GRACE`/`_WAKE_EXTRA`/`_HALT_RELEASE` (OAM
+  DMA across HALT and the speed-switch stall); `CGB_STAT_LYC_DISABLE_HOLD`,
+  `CGB_LYC_EVENT_HOLD_SS`, `LYC_DROP_LATENCY_CGB_DS` (lycEnable 225/225,
+  m0enable 167/167); `CRAM_LOCK_OFF_LAT_DS`, `CRAM_LOCK_LINE0_EXTRA_DS`
+  (cgbpal_m3 44/44); `TIMER_ACK_LOOKAHEAD` (the dispatch acks a timer
+  request due within an M-cycle); `HDMA_LCD_OFF_BLOCK`,
+  `HDMA_START_GRANT_FETCH`, `GDMA_AFTER_FETCH` (DMA hand-over at the next
+  opcode fetch). Still open from that pass: the serial `*_wait_read_if_2`
+  rows (the tap phase is pinned by the DIV-reset rows, the boot divider by
+  mooneye boot_div), `window/late_disable_scx5_ds_1` (a sixth revocable dot
+  breaks the empty-FIFO undo), `scx_during_m3/scx_0761c0` (C3, a discard-end
+  borrow reference makes it far worse).
+
 * Line 0's pipeline one M-cycle ahead (the PNG rows): `STAT_M2_LEAD = 1` +
   `M3_PIPE_AHEAD = 1` (the OAM source rises one CPU M-cycle before its line,
   and the pipeline with it); `LY0_PIPE_MCYCLES` is what it subsumed.
