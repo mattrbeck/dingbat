@@ -497,10 +497,13 @@ the window start on the last pixel too, where the DMG charges it first
 
 ### C3. Mid-line SCX stores
 
-**Rows (10).** `scx_during_m3/scx_0761c0/scx_during_m3_{2,3,4,ds_2..ds_5}`
-(the `_3`/`_4`/`_ds_*` members at ~2400 wrong pixels, `_2`/`_ds_2` at 9),
-`scx_during_m3_spx2{,_ds}`, `scx_attrib_during_m3_spx2_ds` (8 px each,
-CGB, an object case).
+**Rows (3).** `scx_during_m3_spx2{,_ds}`, `scx_attrib_during_m3_spx2_ds`
+(8 px each, CGB; not timing, see below). The seven `scx_0761c0` rows closed
+2026-09-22 with `SCX_BORROW_DISCARD_END`: after a mid-discard store wraps the
+discard, the map column borrows against where the discard ended, one tile
+back per wrap (gambatte-core restarts its pixel position at the discard's
+end; a side-by-side trace of its map reads against dingbat's FTILE lines put
+the `$C0` store's first tile one column apart).
 
 **Behaviour.** The BG fetcher's map column is a live sum
 `((SCX + 8k - F) shr 3) and 31` — a store that lowers `SCX and 7` below the
