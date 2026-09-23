@@ -43,6 +43,8 @@ type
     model: string         # mooneye per-model boot table (--model=...); "" = default
     no_save: bool         # blank cart RAM + detach the .sav (battery-backed ROMs)
     press: string         # screenshot mode: --press schedule (F:BTN[+BTN],...)
+    verdict_glyphs: string # screenshot mode: the suite's font source; the row
+                           # is scored on the verdict line it draws (read_verdict_text)
     ed_breakpoint: bool   # opcode 0xED ends the run (wilbertpol mooneye fork)
     bb_breakpoint: bool   # LD B,B always ends the run, pass or fail (AGE)
     screen_check: bool    # after the verdict, require the panel to have settled
@@ -195,6 +197,59 @@ proc ensure_png_download(url, filename: string): string =
   download_file(url, path)
   path
 
+proc load_verdict_glyphs(asm_path: string): seq[(char, array[8, uint8])] =
+  ## The 8x8 font of the jsmolka test framework (lib/glyphs.asm: `dw` words,
+  ## two per glyph from ' ', one byte per row, bit c = column c).
+  var words: seq[uint32]
+  for line in lines(asm_path):
+    var rest = line
+    while true:
+      let i = rest.find("0x")
+      if i < 0: break
+      words.add(uint32(parseHexInt(rest[i + 2 ..< i + 10])))
+      rest = rest[i + 10 .. ^1]
+  for g in 0 ..< words.len div 2:
+    var rows: array[8, uint8]
+    for r in 0 ..< 8:
+      let w = words[2 * g + r div 4]
+      rows[r] = uint8((w shr (8 * (r mod 4))) and 0xFF)
+    result.add((char(32 + g), rows))
+
+proc read_verdict_text(ppm: seq[uint8]; glyphs: seq[(char, array[8, uint8])]): string =
+  ## The framework's verdict line: "All tests passed" at (56, 76) or
+  ## "Failed test NNN" at (60, 76) in a 240-wide RGB frame, ink = anything
+  ## not the colour of pixel (0, 0). The column origin with fewer unknown
+  ## cells wins.
+  const w = 240
+  const y0 = 76
+  proc px(x, y: int): (uint8, uint8, uint8) =
+    let b = 3 * (y * w + x)
+    (ppm[b], ppm[b + 1], ppm[b + 2])
+  let bg = px(0, 0)
+  var best = ""
+  var best_unknown = high(int)
+  for x0 in [56, 60]:
+    var text = ""
+    var unknown = 0
+    var cx = x0
+    while cx + 8 <= w:
+      var cell: array[8, uint8]
+      for r in 0 ..< 8:
+        for c in 0 ..< 8:
+          if px(cx + c, y0 + r) != bg: cell[r] = cell[r] or uint8(1 shl c)
+      var ch = '?'
+      for (k, g) in glyphs:
+        if g == cell:
+          ch = k
+          break
+      if ch == '?': inc unknown
+      text.add(ch)
+      cx += 8
+    if unknown < best_unknown:
+      best_unknown = unknown
+      best = text.strip()
+  best
+
 proc run_test(test: TestDef; harness_path: string): TestResult =
   let mode_str = case test.mode
     of tmSerial: "serial"
@@ -228,6 +283,12 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
     let (run_output, run_code) = execCmdEx(cmd, options = {poUsePath})
     if run_code != 0:
       return TestResult(name: test.name, passed: false, output: run_output.strip())
+    if test.verdict_glyphs.len > 0:
+      let text = read_verdict_text(read_ppm_rgb(tmp_ppm),
+                                   load_verdict_glyphs(test.verdict_glyphs))
+      removeFile(tmp_ppm)
+      return TestResult(name: test.name, passed: text == "All tests passed",
+                        output: if text.len > 0: text else: "no verdict on screen")
     if test.expected_hash.len > 0:
       # No reference image ships with these ROMs; the gate is a pinned frame
       # hash (build_jsmolka_tests).
@@ -1369,6 +1430,66 @@ proc ensure_jsmolka_test_roms(): string =
   removeFile(zipfile)
   inner
 
+# alyosha-tas/gba-tests (MIT), which extends the jsmolka framework with DMA,
+# IRQ, prefetcher, bus, FIFO, LDM, serial and timer timing ROMs, and png183's
+# fork of it. Pinned like JsmolkaRev.
+const AlyoshaRev = "66f5f1d60cd7030b600606886c76f5c821ecaf9d"
+const Png183Rev = "87937453b780e7fafc64eef80b89293ead9c636c"
+
+proc ensure_github_tree(repo, rev, prefix: string): string =
+  ## Fetch (and cache) a GitHub repo at a commit; returns the extracted tree.
+  let dir = RomCacheDir / prefix & "-" & rev[0 ..< 7]
+  let inner = dir / repo.split('/')[1] & "-" & rev
+  if dirExists(inner): return inner
+  if dirExists(dir): removeDir(dir)
+  echo &"Downloading {repo}..."
+  createDir(RomCacheDir)
+  let zipfile = RomCacheDir / prefix & ".zip"
+  download_file(&"https://github.com/{repo}/archive/{rev}.zip", zipfile)
+  try:
+    extractAll(zipfile, dir)
+  except ZippyError, IOError, OSError:
+    echo "Failed to extract: ", getCurrentExceptionMsg()
+    if dirExists(dir): removeDir(dir)
+    removeFile(zipfile)
+    quit(1)
+  removeFile(zipfile)
+  inner
+
+proc build_alyosha_tests(alyosha, png183, jsmolka: string): seq[TestDef] =
+  ## Every self-checking ROM, scored on the verdict line the framework draws
+  ## (read_verdict_text; the jsmolka r12 protocol misreads the LDM and halt
+  ## ROMs). Left out: byte-identical copies of jsmolka's ROMs (scored there,
+  ## and the fork's copies of alyosha's), and the three that only draw
+  ## (`Sprite_Disable_Midline`, `Sprite_Disable_on_VRAM_Access`,
+  ## `stripes_x_offset`), which ship no reference. The verdict is on screen
+  ## within 30 frames; 600 is margin. Runs with HLE BIOS unless --bios: six
+  ## halt/IRQ rows read differently on the real BIOS.
+  const DrawOnly = ["Sprite_Disable_Midline", "Sprite_Disable_on_VRAM_Access",
+                    "stripes_x_offset"]
+  var seen: seq[string]
+  for rom in walkDirRec(jsmolka):
+    if rom.endsWith(".gba"): seen.add($secureHashFile(rom))
+  for (label, root) in [("alyosha", alyosha), ("png183", png183)]:
+    let glyphs = root / "lib" / "glyphs.asm"
+    var roms: seq[string]
+    for rom in walkDirRec(root):
+      if rom.endsWith(".gba"): roms.add(rom)
+    roms.sort()
+    for rom in roms:
+      let h = $secureHashFile(rom)
+      if h in seen or rom.splitFile().name in DrawOnly: continue
+      seen.add(h)
+      result.add(TestDef(
+        name: label & "/" & rom.relativePath(root).changeFileExt(""),
+        rom_path: rom,
+        mode: tmScreenshot,
+        timeout: 600,
+        color: true,
+        no_save: true,
+        verdict_glyphs: glyphs,
+      ))
+
 proc build_jsmolka_tests(dir: string): seq[TestDef] =
   ## arm, thumb, memory, bios, save/*, unsafe report through the r12 protocol
   ## --mode=jsmolka reads, all-or-nothing, naming the first failed check. The
@@ -2295,6 +2416,13 @@ proc main() =
 
   let jsmolka_tests = build_jsmolka_tests(ensure_jsmolka_test_roms())
   all_suites.add(run_suite("GBA - jsmolka gba-tests", jsmolka_tests, harness,
+                           previous, regressions))
+
+  let alyosha_tests = build_alyosha_tests(
+    ensure_github_tree("alyosha-tas/gba-tests", AlyoshaRev, "alyosha-gba-tests"),
+    ensure_github_tree("png183/gba-tests", Png183Rev, "png183-gba-tests"),
+    ensure_jsmolka_test_roms())
+  all_suites.add(run_suite("GBA - alyosha gba-tests", alyosha_tests, harness,
                            previous, regressions))
 
   let fuzzarm_tests = build_fuzzarm_tests(ensure_fuzzarm_test_roms())

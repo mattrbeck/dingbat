@@ -118,6 +118,14 @@ mode runs until the PC stops moving and reads `r12`. It detaches the battery fil
 ./dingbat_test /tmp/dingbat-test-roms/gba-tests-a6447c5/gba-tests-<rev>/arm/arm.gba --mode=jsmolka --timeout=600
 ```
 
+**alyosha-tas/gba-tests** (and png183's fork) extend the same framework with DMA, IRQ,
+prefetcher, bus, FIFO, LDM, serial and timer timing ROMs. They are scored in screenshot
+mode on the verdict line the framework draws ("All tests passed" / "Failed test NNN" at
+y = 76, read with the font from the repo's own `lib/glyphs.asm`: `read_verdict_text` in
+the runner), because the r12 protocol misreads the LDM and halt ROMs. Copies of jsmolka's
+ROMs and the three draw-only ROMs are skipped. Many rows are red: they are the open GBA
+timing gaps, not harness faults.
+
 `--mode=fuzzarm`: five DenSinH/FuzzARM ROMs of 10 000 randomly generated ARM/Thumb tests.
 The ROM reports a failure, waits for a button and continues; the mode drives that gate and
 reads each verdict out of the ROM's 16-word dump at `0x02000000`. "Done" is the ROM's

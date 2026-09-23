@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-09-23 10:18:10 · commit e5ad5568f · game-boy-test-roms v7.0*
+*Generated: 2026-09-23 10:23:33 · commit cbf48795a · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
-- **Total:** 1260
-- **Pass:** 1257
-- **Fail:** 3
+- **Total:** 1386
+- **Pass:** 1294
+- **Fail:** 92
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -18,6 +18,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Mooneye | 152 | 152 |
 | GBA - mGBA Test Suite | 13 | 13 |
 | GBA - jsmolka gba-tests | 13 | 13 |
+| GBA - alyosha gba-tests | 37 | 126 |
 | GBA - FuzzARM | 5 | 5 |
 | Game Boy - Acid2 | 2 | 2 |
 | Game Boy - MagenTests | 7 | 7 |
@@ -56,6 +57,137 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 ## GBA - jsmolka gba-tests (13/13)
 
 **All 13 tests passed.**
+
+## GBA - alyosha gba-tests (37/126)
+
+| Test | Device | Result |
+|------|--------|--------|
+| alyosha/Bus/DMA_CPU_Bus_Interaction | — | 👀 Failed test 001 |
+| alyosha/Bus/DMA_IWRAM_Bus | — | 👌 |
+| alyosha/Bus/DMA_OAM_Bus | — | 👀 Failed test 001 |
+| alyosha/Bus/DMA_Outside_Bios_Bus | — | 👌 |
+| alyosha/Bus/LDRSH_misaligned | — | 👀 Failed test 001 |
+| alyosha/Bus/Unused_location_update_bus | — | 👀 Failed test 001 |
+| alyosha/DMA/DMA_Mode_Change | — | 👌 |
+| alyosha/DMA/DMA_ROM_Fixed | — | 👀 Failed test 242 |
+| alyosha/DMA/DMA_pause_timing_ROM_to_IWRAM | — | 👌 |
+| alyosha/DMA/DMA_pause_timing_end_1 | — | 👀 Failed test 013 |
+| alyosha/DMA/DMA_pause_timing_end_2 | — | 👀 Failed test 014 |
+| alyosha/DMA/DMA_pause_timing_end_3 | — | 👌 |
+| alyosha/DMA/DMA_pause_timing_end_4 | — | 👀 Failed test 014 |
+| alyosha/DMA/DMA_pause_timing_mid_1 | — | 👀 Failed test 012 |
+| alyosha/DMA/DMA_pause_timing_mid_2 | — | 👀 Failed test 013 |
+| alyosha/Interactions/Halt_DMA_IRQ | — | 👀 Failed test 240 |
+| alyosha/Interactions/Halt_DMA_IRQ_Read_OAM | — | 👀 Failed test 040 |
+| alyosha/Interactions/Halt_IRQ | — | 👀 Failed test 224 |
+| alyosha/Interactions/Internal_Cycle_DMA_IRQ | — | 👀 Failed test 008 |
+| alyosha/Interactions/Internal_Cycle_DMA_IRQ_7 | — | 👌 |
+| alyosha/Interactions/Internal_Cycle_DMA_IRQ_Br_pre | — | 👀 Failed test 028 |
+| alyosha/Interactions/Internal_Cycle_DMA_IRQ_Br_pre_tim | — | 👀 Failed test 024 |
+| alyosha/Interactions/Internal_Cycle_DMA_IRQ_ST | — | 👀 Failed test 008 |
+| alyosha/Interactions/Internal_Cycle_DMA_IRQ_ST_p3 | — | 👀 Failed test 008 |
+| alyosha/Interactions/Internal_Cycle_DMA_IRQ_br | — | 👌 |
+| alyosha/Interactions/Internal_Cycle_DMA_IRQ_br1_IWRAM | — | 👀 Failed test 040 |
+| alyosha/Interactions/Internal_Cycle_DMA_IRQ_ldr_IWRAM | — | 👌 |
+| alyosha/Interactions/Internal_Cycle_DMA_IRQ_nop_IWRAM | — | 👀 Failed test 042 |
+| alyosha/Interactions/Internal_Cycle_DMA_MUL_IRQ | — | 👀 Failed test 184 |
+| alyosha/Interactions/Internal_Cycle_DMA_Mul | — | 👀 Failed test 040 |
+| alyosha/LDM/LDM_ALU | — | 👀 Failed test 002 |
+| alyosha/LDM/LDM_ALU_IMM | — | 👀 Failed test 002 |
+| alyosha/LDM/LDM_ALU_Store | — | 👀 Failed test 006 |
+| alyosha/LDM/LDM_Bx | — | 👀 Failed test 001 |
+| alyosha/LDM/LDM_LD | — | 👀 Failed test 002 |
+| alyosha/LDM/LDM_MUL_UL_32 | — | 👀 Failed test 002 |
+| alyosha/LDM/LDM_MUL_UL_SL | — | 👀 Failed test 002 |
+| alyosha/LDM/LDM_Swap | — | 👀 Failed test 002 |
+| alyosha/STM_ALU_IMM | — | 👌 |
+| alyosha/Serial/serial_read_data | — | 👌 |
+| alyosha/Serial/serial_time | — | 👌 |
+| alyosha/Serial/serial_time_2 | — | 👌 |
+| alyosha/Serial/serial_time_2M | — | 👌 |
+| alyosha/Serial/serial_time_2M_2 | — | 👌 |
+| alyosha/Serial/serial_time_2M_3 | — | 👌 |
+| alyosha/Serial/serial_time_3 | — | 👌 |
+| alyosha/Serial/serial_time_start_bit | — | 👌 |
+| alyosha/Serial/serial_time_start_bit_2 | — | 👌 |
+| alyosha/arm/Coprocessor_14 | — | 👀 no verdict on screen |
+| alyosha/fifo_dma/fifo | — | 👀 no verdict on screen |
+| alyosha/fifo_dma/fifo_2 | — | 👀 Failed test 111 |
+| alyosha/fifo_dma/fifo_3 | — | 👀 Failed test 111 |
+| alyosha/fifo_dma/fifo_4 | — | 👀 Failed test 102 |
+| alyosha/fifo_dma/fifo_5 | — | 👀 Failed test 059 |
+| alyosha/fifo_dma/fifo_6 | — | 👀 Failed test 151 |
+| alyosha/fifo_dma/fifo_dma_disable_3 | — | 👌 |
+| alyosha/fifo_dma/fifo_dma_disable_4 | — | 👀 Failed test 096 |
+| alyosha/fifo_dma/fifo_dma_disable_5 | — | 👌 |
+| alyosha/irq/BL_1 | — | 👌 |
+| alyosha/irq/BL_IRQ | — | 👀 Failed test 248 |
+| alyosha/irq/BL_IRQ_2 | — | 👀 Failed test 002 |
+| alyosha/irq/BL_IRQ_3 | — | 👀 Failed test 001 |
+| alyosha/irq/BL_IRQ_R14 | — | 👌 |
+| alyosha/irq/IE | — | 👀 Failed test 003 |
+| alyosha/irq/IF | — | 👀 Failed test 002 |
+| alyosha/irq/IF_Timer | — | 👀 Failed test 002 |
+| alyosha/irq/IRQ_sub | — | 👀 Failed test 251 |
+| alyosha/irq/IRQ_sub_2 | — | 👀 Failed test 216 |
+| alyosha/irq/IRQ_sub_2_slow | — | 👀 Failed test 218 |
+| alyosha/irq/IRQ_sub_slow | — | 👀 Failed test 244 |
+| alyosha/irq/halt_pc | — | 👀 Failed test 002 |
+| alyosha/irq/halt_pc_2 | — | 👀 Failed test 241 |
+| alyosha/irq/halt_pc_3 | — | 👀 Failed test 239 |
+| alyosha/irq/halt_pc_4 | — | 👀 Failed test 198 |
+| alyosha/memory/PAL_8_bit_writes | — | 👌 |
+| alyosha/memory/VRAM_8_bit_writes | — | 👌 |
+| alyosha/ppu/Sprite_Last_VRAM_Access | — | 👀 Failed test 141 |
+| alyosha/ppu/Sprite_Last_VRAM_Access_Free | — | 👀 Failed test 119 |
+| alyosha/ppu/start_up | — | 👀 Failed test 080 |
+| alyosha/ppu/start_up_vbl | — | 👀 Failed test 092 |
+| alyosha/ppu/start_up_vbl_irq | — | 👀 Failed test 068 |
+| alyosha/ppu/start_up_vbl_irq_halt | — | 👀 Failed test 055 |
+| alyosha/prefetcher/bounday_test_1 | — | 👀 Failed test 033 |
+| alyosha/prefetcher/prefetcher_boundary_1 | — | 👀 Failed test 081 |
+| alyosha/prefetcher/prefetcher_boundary_2 | — | 👌 |
+| alyosha/prefetcher/prefetcher_boundary_3 | — | 👀 Failed test 083 |
+| alyosha/prefetcher/prefetcher_boundary_4 | — | 👌 |
+| alyosha/prefetcher/prefetcher_branch_thumb | — | 👀 Failed test 040 |
+| alyosha/prefetcher/prefetcher_branch_thumb_2 | — | 👀 Failed test 045 |
+| alyosha/prefetcher/prefetcher_branch_thumb_3 | — | 👀 Failed test 036 |
+| alyosha/prefetcher/prefetcher_branch_thumb_4 | — | 👀 Failed test 027 |
+| alyosha/prefetcher/prefetcher_branch_thumb_5 | — | 👀 Failed test 063 |
+| alyosha/prefetcher/prefetcher_branch_thumb_6 | — | 👌 |
+| alyosha/prefetcher/prefetcher_branch_thumb_arm | — | 👀 Failed test 059 |
+| alyosha/prefetcher/prefetcher_branch_thumb_arm_3 | — | 👀 Failed test 078 |
+| alyosha/prefetcher/prefetcher_branch_thumb_arm_4 | — | 👌 |
+| alyosha/prefetcher/prefetcher_dma | — | 👀 Failed test 059 |
+| alyosha/prefetcher/prefetcher_full_arm | — | 👀 Failed test 001 |
+| alyosha/prefetcher/prefetcher_full_arm_2 | — | 👀 Failed test 105 |
+| alyosha/prefetcher/prefetcher_full_thumb | — | 👀 Failed test 044 |
+| alyosha/psr/psr | — | 👀 Failed test 004 |
+| alyosha/thumb/Pop_no_regs | — | 👀 Failed test 001 |
+| alyosha/thumb/Push_no_regs | — | 👌 |
+| alyosha/thumb/blx | — | 👀 no verdict on screen |
+| alyosha/thumb/cpy | — | 👌 |
+| alyosha/timer/timer | — | 👀 Failed test 003 |
+| alyosha/timer/timer_disable | — | 👀 Failed test 002 |
+| alyosha/timer/timer_reset | — | 👀 Failed test 001 |
+| alyosha/timing/cpy_data_bios | — | 👌 |
+| alyosha/timing/dma_from_bios | — | 👀 Failed test 017 |
+| alyosha/timing/dma_long | — | 👌 |
+| alyosha/timing/prefetch_enable | — | 👀 Failed test 186 |
+| alyosha/timing/prefetch_enable_2 | — | 👌 |
+| alyosha/unsafe/fifo_dma_disable_jam | — | 👌 |
+| alyosha/unsafe/fifo_dma_disable_jam_2 | — | 👌 |
+| alyosha/unsafe/prefetcher_branch_thumb_arm_2 | — | 👀 Failed test 071 |
+| png183/DMA/dma_repeat_immediate | — | 👌 |
+| png183/arm/arm | — | 👌 |
+| png183/arm/branches | — | 👀 no verdict on screen |
+| png183/arm/data_swap | — | 👀 Failed test 454 |
+| png183/arm/halfword_transfer | — | 👀 Failed test 422 |
+| png183/arm/multiply | — | 👀 Failed test 320 |
+| png183/irq/halt_pc | — | 👀 Failed test 198 |
+| png183/memory/memory | — | 👀 Failed test 104 |
+| png183/psr/psr2 | — | 👀 Failed test 007 |
+| png183/timer/timer_check_count_up_presence | — | 👀 Failed test 001 |
 
 ## GBA - FuzzARM (5/5)
 
