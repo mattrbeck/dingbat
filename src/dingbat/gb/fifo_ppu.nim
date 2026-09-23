@@ -817,7 +817,9 @@ proc tick_bg_fetcher*(ppu: GbFifoPpu; gb: GB) =
       # effect at this, the next map read (mealybug PPU notes: "at the end of
       # the current window tile"); the BG column is taken from the screen
       # position this fetch lands at and the fine scroll is not re-paid.
-      if ppu.fetching_window and not window_enabled(ppu):
+      if ppu.fetching_window and not window_enabled(ppu) and
+         (CGB_WE_DISABLE_LATE == 0 or not ppu.cgb or
+          ppu.cycle_counter >= gb.we_off_dot):
         ppu.fetching_window = false
         ppu.fetcher_x = int((ppu.lx + int32(ppu.fifo.size)) div 8)
         fifo_arm_window(ppu)

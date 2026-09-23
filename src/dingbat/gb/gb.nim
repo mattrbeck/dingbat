@@ -741,6 +741,14 @@ const CGB_WE_ENABLE_LATE* {.intdefine.} = 1
 const WIN_LX_OFF_V* = -128'i32
   ## fifo_ppu.nim's WIN_LX_OFF (the comparator parked), here for ppu.nim.
 const CGB_WX_LATE_SS* {.intdefine.} = 1
+const CGB_WE_DISABLE_LATE* {.intdefine.} = 2
+  ## Dots a CGB LCDC.5 fall takes to reach the fetcher's window abort
+  ## (WIN_EN_ABORT): a map read inside them still fetches a window tile.
+  ## gambatte-core lands a CGB LCDC write two cycles late. gambatte
+  ## `window/on_screen/wx17_weoff_wxA5_weon` [cgb] (the fall a dot before a
+  ## map read keeps one more window tile); 1 is inert, 3 and 4 lose
+  ## `weon_wx18_weoff_weon_wx80` [cgb]. Double speed is unpinned: the
+  ## CPU-clock form (1 dot there) scores the same.
 const HDMA_START_GRANT_FETCH* {.intdefine.} = 2
   ## An FF55 write that arms an HBlank transfer inside mode 0 raises the block's
   ## request at once, but the CPU hands the bus over at the end of its NEXT
@@ -2526,6 +2534,7 @@ type
     timer_irq_acked*:  bool    # TIMER_ACK_LOOKAHEAD: the dispatch acked the reload's request
     hdma_start_req*:   bool    # HDMA_START_GRANT_FETCH: the owed block was raised by FF55
     gdma_owed*:        bool    # GDMA_AFTER_FETCH: a general-purpose DMA waits for the next fetch
+    we_off_dot*:       int32   # CGB_WE_DISABLE_LATE: dot a CGB LCDC.5 fall reaches the fetcher
     lyc_write_old*:    int16   # DMG_LYC_BOUNDARY_OPEN: LYC before a parked DMG LYC write (+1; 0 = none)
     when defined(test_harness):
       test_output*:  TestOutput

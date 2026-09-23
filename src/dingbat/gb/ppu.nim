@@ -2259,6 +2259,10 @@ proc ppu_store_lcdc*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
     else:
       ppu.window_trigger = true
   if gb.fifo_ppu != nil:
+    when CGB_WE_DISABLE_LATE != 0:
+      # The fall's own latency to the window abort (CGB_WE_DISABLE_LATE).
+      if (moved and 0x20'u8) != 0 and (val and 0x20'u8) == 0'u8:
+        gb.we_off_dot = ppu.cycle_counter + int32(CGB_WE_DISABLE_LATE)
     fifo_arm_window(gb.fifo_ppu)
     when CGB_WE_ENABLE_LATE != 0:
       # A CGB LCDC.5 rise reaches the comparator a dot late at single speed,
