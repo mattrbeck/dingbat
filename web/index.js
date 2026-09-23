@@ -1575,28 +1575,31 @@ const deleteGameLocalData = async (name) => {
 
 // Wipe the running game's battery save and reboot it; state slots stay.
 const resetCurrentSaveFile = async () => {
-  if (!currentOriginalName) return;
-  await dbDelete("save:" + currentOriginalName);
-  await dbDelete("save:" + currentOriginalName + "-p2");
+  // Detached before the first delete, so the autosave cannot re-flush it.
+  const game = detachLoadedGame();
+  if (!game) return;
+  const name = game.originalName;
+  await dbDelete("save:" + name);
+  await dbDelete("save:" + name + "-p2");
   // The reboot ends in offerAutoResume, which would offer to un-reset.
-  await deleteKeys(perGameKeys(currentOriginalName).session);
-  markDelete("save:" + currentOriginalName);
-  markDelete("save:" + currentOriginalName + "-p2");
-  // Drops the FS .sav and reboots, so the autosave cannot re-flush it.
-  resetLoadedGameSave();
+  await deleteKeys(perGameKeys(name).session);
+  markDelete("save:" + name);
+  markDelete("save:" + name + "-p2");
+  loadRom(game.romName, name);
 };
 
-// Reboot the loaded game with no battery save (after its stored save is gone).
-const resetLoadedGameSave = () => {
-  if (!currentRomName || !currentOriginalName) return;
-  let romName = currentRomName;
-  let originalName = currentOriginalName;
-  try { FS.unlink(stripExt(romName) + ".sav"); } catch {}
-  // Null these first so loadRom's "persist previous save" step is skipped,
-  // else it writes the old save straight back to the deleted key.
+// Detach the loaded game ahead of deleting its stored save: drop its FS .sav
+// and null its names, so no flush path can write the in-memory save back -
+// neither the 5 s autosave landing between the deletes nor loadRom's
+// "persist the outgoing game" step at the reboot. Returns the names to
+// reboot under (loadRom), or null when no game is loaded.
+const detachLoadedGame = () => {
+  if (!currentRomName || !currentOriginalName) return null;
+  const game = { romName: currentRomName, originalName: currentOriginalName };
+  try { FS.unlink(stripExt(game.romName) + ".sav"); } catch {}
   currentRomName = null;
   currentOriginalName = null;
-  loadRom(romName, originalName);
+  return game;
 };
 
 // "Reset save file": a persistent two-step confirm button.
@@ -1870,10 +1873,12 @@ const localRomSet = async () => {
 // rows and the tile menu both call these.
 // Reset = wipe save data, keep the ROM.
 const resetGameAction = async (name) => {
+  const loaded = isRomLoaded(name);
+  // Detached before the deletes, else the in-memory save re-flushes.
+  const game = currentOriginalName === name ? detachLoadedGame() : null;
   await resetGameSaves(name);
-  if (isRomLoaded(name)) {
-    // Else the in-memory save re-flushes.
-    resetLoadedGameSave();
+  if (loaded) {
+    if (game) loadRom(game.romName, game.originalName); // no .sav, no save: fresh
     showToast("Save data deleted — starting fresh");
   } else {
     showToast("Save data deleted");

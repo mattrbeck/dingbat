@@ -176,3 +176,32 @@ test("closing the tab during a rollback session tears it down (and persists it)"
   }
 });
 
+// ── Finding 15: reset save data (SavePersistence) ───────────────────────────
+
+// The library's Reset (resetGameAction) and the Saves panel's "Reset save
+// file" (resetCurrentSaveFile) both delete several keys, save:<name> first.
+for (const [label, call] of [["Reset", `resetGameAction("A.gba")`],
+                             ["Reset save file", "resetCurrentSaveFile()"]]) {
+  test(`an autosave landing inside ${label} does not bring the save back`, async () => {
+    const app = await boot();
+    await play(app, "A.gba");
+    gameSaves(app, 1);
+    await autosave(app);
+    gameSaves(app, 2); // in-game save from the last few seconds, not yet flushed
+
+    const gate = hold(app, "delete", "stateauto:A.gba");
+    const resetting = app.runIn(call);
+    await parked(gate);  // save:A is gone; the session delete is still to come
+    assert.equal(app.idb.get("save:A.gba"), undefined);
+    await autosave(app); // the 5 s tick between the deletes
+    gate.release();
+    await resetting;
+    await drain();
+
+    assert.equal(app.idb.get("save:A.gba"), undefined, "the save stays deleted");
+    assert.equal(named(app), "A.gba", "rebooted");
+    assert.equal(core(app).ram, null, "the reboot starts fresh");
+    await autosave(app);
+    assert.equal(app.idb.get("save:A.gba"), undefined);
+  });
+}

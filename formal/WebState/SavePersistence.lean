@@ -36,8 +36,12 @@ IndexedDB key `save:<game>` (and from there to Drive's upload queue), and back.
 * Slots: `saveToSlot` (5565), `loadFromSlot` (5605). Import:
   `applyImportedSave` (5302). Delete: `deleteGameAction` (1920) ->
   `unloadGame({flushSave:false})` (9636) -> `deleteGameEverywhere` (3149).
-  Reset: `resetGameAction` (1854) -> `resetGameSaves` (3141) ->
-  `resetLoadedGameSave` (1572). Drive pull: the `isRomLoaded` guard (3005)
+  Reset: `resetGameAction` (1857) detaches a loaded game first
+  (`detachLoadedGame` 1578: unlink the FS .sav, null the names), then
+  `resetGameSaves` (3146), then reboots it with `loadRom`; the Saves panel's
+  `resetCurrentSaveFile` (1559) does the same (line numbers and this order as
+  of the commit "web: Reset detaches the game before deleting its save"; at
+  dd7ba741f the detach came after the deletes). Drive pull: the `isRomLoaded` guard (3005)
   before `await driveDownload` and `writeSyncBytes` (2447) after it.
 
 ## Model
@@ -141,8 +145,9 @@ inductive Pending where
   | delSaves (g : Nat)
   /-- ... save:g deleted; awaiting the slot + session deletes. -/
   | delRest (g : Nat)
-  /-- resetGameAction 1855: save:g deleted; awaiting the other deletes. -/
-  | resetRest (g : Nat)
+  /-- resetGameAction 1861: save:g deleted; awaiting the other deletes. `loaded`:
+      the game was loaded and has been detached; `gb`: its core's kind. -/
+  | resetRest (g : Nat) (loaded : Bool) (gb : Bool)
   /-- loadFromSlot 5609: awaiting `dbGet(state:g)` (= v). -/
   | slotGet (g : Nat) (v : Option Core)
   /-- applyImportedSave 5317: awaiting `dbPut(save:g)`. -/
@@ -318,12 +323,10 @@ def resumeP (fx : Bool) (s : St) (p : Pending) (ok : Bool) : St :=
                     floor := upd s.floor g 0 } (.delRest g)
   | .delRest g =>
       { s with slot := upd s.slot g none, auto := upd s.auto g none, deletes := s.deletes ++ [g] }
-  | .resetRest g =>
+  | .resetRest g loaded gb =>
       let s1 := { s with slot := upd s.slot g none, auto := upd s.auto g none,
                          deletes := s.deletes ++ [g] }
-      if s1.cur = some g then                               -- 1856 isRomLoaded
-        l3 fx { s1 with fs := none, cur := none } g (gbOf s1) -- resetLoadedGameSave 1576-1581
-      else s1
+      if loaded then l3 fx s1 g gb else s1                  -- 1864 the reboot: loadRom
   | .slotGet _ v =>                                         -- 5617-5618 (no name re-check)
       match v with
       | some sc => applyState { s with clock := s.clock + 1 } (restamp s.clock sc)
@@ -370,9 +373,14 @@ def step (fx : Bool) (s : St) : Ev → St
       | none => s
   | .delete g =>                                            -- 1921-1930
       if s.cur = some g then push s (.unloadPre g false true) else push s (.delSaves g)
-  | .reset g =>                                             -- 3142 -> 1549: first delete is save:g
-      push { s with idb := upd s.idb g none, wiped := upd s.wiped g (some s.clock),
-                    floor := upd s.floor g 0 } (.resetRest g)
+  | .reset g =>
+      -- 1858-1860: a loaded game is detached first (detachLoadedGame 1578-1585:
+      -- unlink the FS .sav, null the names), in the same segment as the first
+      -- delete (resetGameSaves 3146 -> deleteSaveData 1548: save:g).
+      let loaded := decide (s.cur = some g)
+      let s0 := if loaded then { s with fs := none, cur := none } else s
+      push { s0 with idb := upd s0.idb g none, wiped := upd s0.wiped g (some s0.clock),
+                     floor := upd s0.floor g 0 } (.resetRest g loaded (gbOf s))
   | .tapResume =>
       match s.toast with
       | some (g, a) =>
@@ -776,7 +784,7 @@ theorem resumeP_inv {s : St} (p : Pending) (ok : Bool) (h : FInv s) (hp : POK p)
       · exact h.slot g' c hc
     · exact h.toast
     · exact h.pend
-  | resetRest g =>
+  | resetRest g loaded gb =>
     simp only [resumeP]
     have h1 : FInv { s with slot := upd s.slot g none, auto := upd s.auto g none,
                             deletes := s.deletes ++ [g] } := by
@@ -798,16 +806,7 @@ theorem resumeP_inv {s : St} (p : Pending) (ok : Bool) (h : FInv s) (hp : POK p)
       · exact h.toast
       · exact h.pend
     split
-    · apply l3_inv
-      constructor
-      · exact h1.idb
-      · intro b hb; simp at hb
-      · intro g' hg'; simp at hg'
-      · exact h1.core
-      · exact h1.auto
-      · exact h1.slot
-      · exact h1.toast
-      · exact h1.pend
+    · exact l3_inv g gb h1
     · exact h1
   | slotGet g v =>
     simp only [resumeP]
@@ -942,20 +941,35 @@ theorem step_inv {s : St} (e : Ev) (h : FInv s) : FInv (step true s e) := by
     · exact push_inv (p := .delSaves g) h trivial
   | reset g =>
     simp only [step]
-    refine push_inv (p := .resetRest g) ?_ trivial
+    have h0 : FInv (if decide (s.cur = some g) = true then { s with fs := none, cur := none }
+                    else s) := by
+      split
+      · constructor
+        · exact h.idb
+        · intro b hb; simp at hb
+        · intro g' hg'; simp at hg'
+        · exact h.core
+        · exact h.auto
+        · exact h.slot
+        · exact h.toast
+        · exact h.pend
+      · exact h
+    generalize (if decide (s.cur = some g) = true then { s with fs := none, cur := none }
+                else s) = s0 at h0 ⊢
+    refine push_inv ?_ trivial
     constructor
     · intro g' b' hb'
       simp only [upd_apply] at hb'
       split at hb'
       · cases hb'
-      · exact h.idb g' b' hb'
-    · exact h.fs
-    · exact h.cur
-    · exact h.core
-    · exact h.auto
-    · exact h.slot
-    · exact h.toast
-    · exact h.pend
+      · exact h0.idb g' b' hb'
+    · exact h0.fs
+    · exact h0.cur
+    · exact h0.core
+    · exact h0.auto
+    · exact h0.slot
+    · exact h0.toast
+    · exact h0.pend
   | tapResume =>
     simp only [step]
     split
@@ -1346,25 +1360,35 @@ theorem bug_gb_init_flush_replaces_save :
 
 open Ev in
 /-- Reset save data for the loaded game, with an in-game save from the last
-    few seconds not yet flushed. resetGameAction deletes `save:<g>` first and
-    detaches the game only after all its deletes; the 5 s tick in between
-    writes the FS bytes back, and resetLoadedGameSave's reboot restores them. -/
+    few seconds not yet flushed. At dd7ba741f resetGameAction deleted
+    `save:<g>` first and detached the game only after all its deletes; the 5 s
+    tick in between wrote the FS bytes back, and the reboot restored them.
+    The game is now detached before the first delete: the tick finds no game
+    named, the reboot finds neither a save nor an FS file, and the game starts
+    fresh. -/
 def trResetUndone : List Ev :=
   [launch 0 false, resume 0 true, resume 0 true,
    play, frame, tick true, resume 0 true,             -- save v1 flushed
    play, frame,                                       -- in-game save v2, in rom.sav only
-   reset 0,                                           -- save:0 deleted (clock 3)
-   tick true, resume 1 true,                          -- 5 s tick mid-deletes: v2 -> save:0
-   resume 0 true,                                     -- rest of the deletes; unlink; reboot
-   resume 0 true]                                     -- restoreSave finds v2; boots on it
+   reset 0,                                           -- detached; save:0 deleted (clock 3)
+   tick true, resume 1 true,                          -- the 5 s tick mid-deletes: no name
+   resume 0 true,                                     -- rest of the deletes; the reboot
+   resume 0 true]                                     -- restoreSave finds nothing
 
-theorem bug_reset_undone_by_flush :
-    let s := run false init trResetUndone
-    Reachable false s ∧ s.idb 0 = some ⟨0, 2⟩ ∧ s.wiped 0 = some 3 ∧
-      s.core = some ⟨0, false, some ⟨0, 2⟩, false⟩ ∧ 0 ∈ s.deletes ∧ ¬ NoResurrect s := by
-  refine ⟨run_reachable _ _ _ .init, by decide, by decide, by decide, by decide, fun h => ?_⟩
-  have := h 0 ⟨0, 2⟩ 3 (by decide) (by decide)
-  exact absurd this (by decide)
+theorem regress_reset_undone_by_flush (fx : Bool) :
+    let s := run fx init trResetUndone
+    Reachable fx s ∧ s.idb 0 = none ∧ s.wiped 0 = some 3 ∧ s.cur = some 0 ∧
+      s.core = some ⟨0, false, none, false⟩ ∧ 0 ∈ s.deletes ∧ NoResurrect s := by
+  have hw : (run fx init trResetUndone).wiped = upd (fun _ => none) 0 (some 3) := by
+    cases fx <;> rfl
+  have hi : (run fx init trResetUndone).idb 0 = none := by cases fx <;> decide
+  refine ⟨run_reachable _ _ _ .init, hi, by rw [hw]; rfl, by cases fx <;> decide,
+    by cases fx <;> decide, by cases fx <;> decide, ?_⟩
+  intro g b t hb ht
+  rw [hw, upd_apply] at ht
+  split at ht
+  · subst_vars; rw [hi] at hb; cases hb
+  · cases ht
 
 open Ev in
 /-- Close A, relaunch it: Resume is offered (the snapshot matches save:A).
