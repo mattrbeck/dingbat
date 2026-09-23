@@ -896,6 +896,13 @@ const STAT_READ_M1_LAG* {.intdefine.} = 1
   ## line 144's dot 0): gambatte `lcd_offset/offset3_lyc8fint_m1stat_1`
   ## [cgb] reads $C0 there. 2 loses `offset2_lyc8fint_m1stat_2`; the same
   ## dot at double speed loses `enable_display/frame{0,1}_m1stat_ds_2`.
+const STAT_READ_M23_LEAD_DS* {.intdefine.} = 1
+  ## Dots by which a double-speed STAT read sees mode 2 or mode 3 sooner after
+  ## its rise than STAT_READ_SAMPLE + _DS_ADD gives (modes 0 and 1 keep the
+  ## full hold: `_DS_ADD` 0 for every mode loses 136 rows). Reachable only on
+  ## the grid a speed-switch round trip leaves: gambatte `lcd_offset/
+  ## offset1_lyc99int_m{2,3}stat_count_ds_2` read line cycle 453/77 as the
+  ## new mode. 2 (mode 2 alone) loses sixteen `_ds_` rows.
 proc stat_read_mode*(ppu: GbPpu; gb: GB): uint8 {.inline.} =
   ## The mode bits a CPU read of STAT returns: the mode in effect STAT_READ_SAMPLE
   ## dots back from where the read's M-cycle leaves the dot counter. Kept as a
@@ -906,6 +913,10 @@ proc stat_read_mode*(ppu: GbPpu; gb: GB): uint8 {.inline.} =
     if ppu.first_line: t += LCD_ON_STAT_READ_LAG
   when STAT_M0_TAIL_ANY:
     t += stat_m0_tail(ppu, gb)
+  when STAT_READ_M23_LEAD_DS != 0:
+    # Modes 2 and 3 read a dot early at double speed (STAT_READ_M23_LEAD_DS).
+    if gb.memory.current_speed != 0'u8 and (ppu.lcd_status and 2'u8) != 0'u8:
+      t -= int32(STAT_READ_M23_LEAD_DS)
   when STAT_READ_M1_LAG != 0:
     # Entering vblank is read one dot later at single speed (STAT_READ_M1_LAG).
     if (ppu.lcd_status and 3'u8) == 1'u8 and ppu.ly == 144'u8 and
