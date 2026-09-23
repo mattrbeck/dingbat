@@ -728,6 +728,12 @@ const HDMA_START_GRANT_FETCH* {.intdefine.} = 2
   ## dma/hdma_pc_7ffe (the opcode at $8000 is fetched before the block
   ## overwrites it), 1 and 6 do not. 0 = the old immediate block.
 const HDMA_LCD_OFF_BLOCK* {.intdefine.} = 1
+const GDMA_AFTER_FETCH* {.intdefine.} = 1
+  ## Whether a general-purpose DMA started by FF55 takes the bus at the end of
+  ## the CPU's next opcode fetch (the HBlank transfer's hand-over point,
+  ## HDMA_GRANT_FETCH_DOTS) rather than on the write's own boundary. gambatte
+  ## dma/late_gdma_pc_7ffe_1: the opcode at $8000 is fetched in mode 2 before
+  ## the burst, the operands after it in mode 3 (+1, none lost).
   ## Whether switching the LCD off with an HBlank DMA armed requests a block,
   ## as the LCD-off PPU sits in mode 0 (gambatte-core requests one on the
   ## disable). gambatte dma/hdma_disable_display_1 (+1, none lost).
@@ -2497,6 +2503,7 @@ type
     dma_halt_grace*:   uint8   # OAMDMA_HALT_GRACE: the halted M-cycle the OAM DMA still gets
     timer_irq_acked*:  bool    # TIMER_ACK_LOOKAHEAD: the dispatch acked the reload's request
     hdma_start_req*:   bool    # HDMA_START_GRANT_FETCH: the owed block was raised by FF55
+    gdma_owed*:        bool    # GDMA_AFTER_FETCH: a general-purpose DMA waits for the next fetch
     when defined(test_harness):
       test_output*:  TestOutput
 

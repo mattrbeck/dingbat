@@ -2012,6 +2012,19 @@ proc ppu_update_palette*(palette: var array[4, uint8]; val: uint8) =
 proc ppu_palette_from_array*(palette: array[4, uint8]): uint8 =
   palette[0] or (palette[1] shl 2) or (palette[2] shl 4) or (palette[3] shl 6)
 
+proc ppu_run_gdma*(ppu: GbPpu; gb: GB) =
+  ## The general-purpose DMA's burst.
+  # One acquire and one release for the whole burst: a GDMA never hands the
+  # bus back in between.
+  when HDMA_OVERHEAD_LEADS != 0: ppu_charge_hdma_overhead(ppu, gb)
+  for _ in 0 .. int(ppu.hdma5):
+    if not ppu_copy_hdma_block(ppu, gb, charge_overhead = false): break
+  when HDMA_OVERHEAD_LEADS == 0: ppu_charge_hdma_overhead(ppu, gb)
+  # GDMA is short of the hardware by some amount and ships at zero; see
+  # GDMA_SETUP_MCYCLES in gb.nim.
+  when GDMA_SETUP_MCYCLES != 0:
+    mem_tick_components(gb.memory, gb, 4 * GDMA_SETUP_MCYCLES, from_cpu = false)
+
 proc ppu_start_hdma*(ppu: GbPpu; gb: GB; val: uint8) =
   ## A write to FF55. The length register takes the low 7 bits whether the
   ## write starts or stops a transfer (SameSuite dma/hdma_lcd_off reads back
@@ -2045,16 +2058,14 @@ proc ppu_start_hdma*(ppu: GbPpu; gb: GB; val: uint8) =
         ppu_step_hdma(ppu, gb)
   else:
     if not ppu.hdma_active:
-      # One acquire and one release for the whole burst: a GDMA never hands the
-      # bus back in between.
-      when HDMA_OVERHEAD_LEADS != 0: ppu_charge_hdma_overhead(ppu, gb)
-      for _ in 0 .. int(ppu.hdma5):
-        if not ppu_copy_hdma_block(ppu, gb, charge_overhead = false): break
-      when HDMA_OVERHEAD_LEADS == 0: ppu_charge_hdma_overhead(ppu, gb)
-      # GDMA is short of the hardware by some amount and ships at zero; see
-      # GDMA_SETUP_MCYCLES in gb.nim.
-      when GDMA_SETUP_MCYCLES != 0:
-        mem_tick_components(gb.memory, gb, 4 * GDMA_SETUP_MCYCLES, from_cpu = false)
+      when GDMA_AFTER_FETCH != 0 and HDMA_GRANT_FETCH_DOTS >= 0:
+        if not gb.cpu.halted:
+          # The CPU hands the bus over at the end of its next opcode fetch
+          # (GDMA_AFTER_FETCH); cpu.tick runs the burst there.
+          gb.gdma_owed = true
+          ppu.hdma_block_due = true
+          return
+      ppu_run_gdma(ppu, gb)
     else:
       # Terminating an armed HBlank transfer: the block this HBlank owed is owed
       # no longer, unless the write is too late to catch it -- the block takes

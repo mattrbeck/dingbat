@@ -553,7 +553,14 @@ proc tick*(cpu: GbCpu; gb: GB) =
     # fetch, never on the operand or data M-cycles (the gambatte two-M-cycle
     # `LD A,[HL]` vs mealybug three-M-cycle `LDH A,[rHDMA5]` split;
     # HDMA_GRANT_FETCH_DOTS in gb.nim).
-    if unlikely(gb.ppu.hdma_block_due): hdma_grant(gb, 0)
+    if unlikely(gb.ppu.hdma_block_due):
+      when GDMA_AFTER_FETCH != 0:
+        if gb.gdma_owed:
+          gb.gdma_owed = false
+          gb.ppu.hdma_block_due = false
+          ppu_run_gdma(gb.ppu, gb)
+        else: hdma_grant(gb, 0)
+      else: hdma_grant(gb, 0)
   when STAT_M0_TAIL_MAX_MC != 0:
     # So stat_read_mode can tell a read on its instruction's second M-cycle
     # from one on its third.
@@ -567,7 +574,8 @@ proc tick*(cpu: GbCpu; gb: GB) =
     # irq_precedence/hdma_vs_m0, late_hdma_vs_{ei,ie,tima}: the DMA's source
     # is the stack the dispatch pushes onto).
     if unlikely(gb.ppu.hdma_block_due) and
-       (HDMA_HALT_DEFERS_DUE == 0 or not cpu.halted):
+       (HDMA_HALT_DEFERS_DUE == 0 or not cpu.halted) and
+       (GDMA_AFTER_FETCH == 0 or not gb.gdma_owed):
       hdma_grant(gb, int32(HDMA_GRANT_FETCH_DOTS - HDMA_GRANT_BOUNDARY_DOTS))
   when HDMA_STEAL_DELAY_M != 0 and HDMA_STEAL_LEAD_DOTS < 0 and
        HDMA_GRANT_FETCH_DOTS < 0:
