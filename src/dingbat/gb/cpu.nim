@@ -377,6 +377,12 @@ proc handle_interrupts*(cpu: GbCpu; gb: GB) =
          gb.ppu.ly == gb.ppu.stat_if_ly and
          gb.ppu.cycle_counter - gb.ppu.stat_if_dot < STAT_DISPATCH_MIN_AGE_DS:
         return
+    when STOP_OPERAND_LATCH != 0:
+      # A dispatch discards STOP's latched opcode; the pushed PC is its byte's
+      # address, re-fetched on return.
+      if gb.stop_op_latch > 0:
+        gb.stop_op_latch = 0
+        cpu.locked = false
     cpu.halted = false
     if cpu.ime: dispatch_interrupt(cpu, gb)
 
@@ -570,26 +576,9 @@ proc cpu_halt_wake(cpu: GbCpu; gb: GB) {.noinline.} =
     cpu.cached_hl = -1
     mem_tick_extra(gb.memory, gb, cycles_taken)
 
-proc tick*(cpu: GbCpu; gb: GB) =
-  # `locked` is only tested behind the `halted` branch, so the running CPU
-  # pays nothing for it.
-  if cpu.halted:
-    cpu.cached_hl = -1
-    # The two halts no interrupt ends: the opcode lockup (still ticking) and
-    # STOP mode (not). Testing `locked` here rather than `stopped` alone is
-    # the cheapest shape measured on a HALT-idling title.
-    if cpu.locked:
-      if cpu.stopped: cpu_stop_tick(cpu, gb)
-      else:           mem_tick_extra(gb.memory, gb, 4)
-      return
-    # The halt ends on IF & IE whether or not IME lets the interrupt be taken;
-    # where in the M-cycle that is asked is HALT_IF_SAMPLE_T.
-    if cpu_halt_tick(gb): cpu_halt_wake(cpu, gb)
-    return
-  when defined(gbfuzz_trace):
-    if gbfuzz_trace_hook != nil:
-      gbfuzz_trace_hook(cpu.pc, read_byte(gb.memory, gb, int(cpu.pc)))
-  let opcode = mem_read(gb.memory, gb, int(cpu.pc))
+template cpu_exec_fetched(cpu: GbCpu; gb: GB; opcode: uint8) =
+  ## Everything after the opcode fetch: shared by `tick` and the STOP operand
+  ## latch's run (cpu_run_latched).
   when HDMA_GRANT_FETCH_DOTS >= 0:
     # Hand-over point 1: an owed block takes the bus at the end of the opcode
     # fetch, never on the operand or data M-cycles (the gambatte two-M-cycle
@@ -634,3 +623,38 @@ proc tick*(cpu: GbCpu; gb: GB) =
       else:
         gb.ppu.hdma_block_due = false
   handle_interrupts(cpu, gb)
+
+when STOP_OPERAND_LATCH != 0:
+  proc cpu_run_latched(cpu: GbCpu; gb: GB) {.noinline.} =
+    ## STOP_OPERAND_LATCH: the byte STOP latched as its next opcode runs now.
+    ## The fetch M-cycle is still spent; its byte is not used. Parked behind
+    ## `halted`/`locked` so the running CPU's fetch pays nothing for it.
+    cpu.halted = false
+    cpu.locked = false
+    discard mem_read(gb.memory, gb, int(cpu.pc))
+    let opcode = uint8(gb.stop_op_latch - 1)
+    gb.stop_op_latch = 0
+    cpu_exec_fetched(cpu, gb, opcode)
+
+proc tick*(cpu: GbCpu; gb: GB) =
+  # `locked` is only tested behind the `halted` branch, so the running CPU
+  # pays nothing for it.
+  if cpu.halted:
+    cpu.cached_hl = -1
+    # The two halts no interrupt ends: the opcode lockup (still ticking) and
+    # STOP mode (not). Testing `locked` here rather than `stopped` alone is
+    # the cheapest shape measured on a HALT-idling title.
+    if cpu.locked:
+      if cpu.stopped: cpu_stop_tick(cpu, gb)
+      elif STOP_OPERAND_LATCH != 0 and gb.stop_op_latch > 0: cpu_run_latched(cpu, gb)
+      else:           mem_tick_extra(gb.memory, gb, 4)
+      return
+    # The halt ends on IF & IE whether or not IME lets the interrupt be taken;
+    # where in the M-cycle that is asked is HALT_IF_SAMPLE_T.
+    if cpu_halt_tick(gb): cpu_halt_wake(cpu, gb)
+    return
+  when defined(gbfuzz_trace):
+    if gbfuzz_trace_hook != nil:
+      gbfuzz_trace_hook(cpu.pc, read_byte(gb.memory, gb, int(cpu.pc)))
+  let opcode = mem_read(gb.memory, gb, int(cpu.pc))
+  cpu_exec_fetched(cpu, gb, opcode)

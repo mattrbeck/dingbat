@@ -1099,6 +1099,10 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
         when SPEED_SWITCH_STALL_CPU != 0: SPEED_SWITCH_STALL_CPU
         else: SPEED_SWITCH_STALL_T shl mem.current_speed
       var spent = stall_cycles
+      when HDMA_STOP_OPERAND_RUNS != 0 and STOP_OPERAND_LATCH != 0:
+        # The operand byte as STOP's own M-cycle fetched it, before anything
+        # the stall runs can rewrite it (STOP_OPERAND_LATCH).
+        gb.stop_op_latch = int16(read_byte(mem, gb, int(gb.cpu.pc))) + 1
       gb.hdma_stop_req = false
       when HDMA_SWITCH_REQ != 0:
         if gb.ppu.hdma_block_due and gb.ppu.hdma_active and
@@ -1129,7 +1133,13 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
         gb.hdma_wake_dot = gb.ppu.cycle_counter - 1000
       when HDMA_STOP_OPERAND_RUNS != 0:
         # STOP had fetched its operand as the next opcode (HDMA_SWITCH_REQ).
-        if gb.hdma_stop_req: result = false
+        if gb.hdma_stop_req:
+          result = false
+          when STOP_OPERAND_LATCH != 0:
+            # Run the latched byte from the halted path (cpu_run_latched).
+            gb.cpu.halted = true
+            gb.cpu.locked = true
+        elif STOP_OPERAND_LATCH != 0: gb.stop_op_latch = 0
       # Charge the stall to the instruction so mem_tick_extra does not repeat it.
       mem.cycle_tick_count += spent
     return

@@ -650,6 +650,13 @@ const HDMA_SWITCH_REQ_KILL_DS* {.intdefine.} = 0
   ## dot) is a pending request on a switch INTO single speed too. 0: only into
   ## double; 1 loses `late_m3speedchange_read_hdmadst00_scx1_ds_1` and
   ## `tima_scx1_ds_{1,2}`, whose edge on that dot comes after the STOP.
+const STOP_OPERAND_LATCH* {.intdefine.} = 1
+  ## With HDMA_STOP_OPERAND_RUNS: the operand runs as the byte STOP's own
+  ## M-cycle fetched, not a re-read of its address after the stall, which the
+  ## block run inside the stall (or a VRAM lock) may have changed. gambatte
+  ## `dma/hdma_transition_speedchange_7fffstop_inc` (STOP at $7FFF, operand
+  ## $3C at $8000: the block overwrites it and the re-read lands in mode 3).
+  ## Run from the halted path (cpu_run_latched) so the fetch pays nothing.
 const HDMA_STOP_OPERAND_RUNS* {.intdefine.} = 1
   ## STOP fetches its operand byte into the opcode latch; when the switch's
   ## HALT finds an HBlank request pending that latch is live, and the operand
@@ -2554,6 +2561,7 @@ type
     wd_fifo*:          GbPixelFifo  # WIN_REVOKE_DS_PUSH: the ring at a CGB double-speed window start
     wd_ds_push*:       bool
     wd_ds_ly*:         uint8
+    stop_op_latch*:    int16   # STOP_OPERAND_LATCH: STOP's operand byte, run as the next opcode (+1; 0 = none)
     lyc_write_old*:    int16   # DMG_LYC_BOUNDARY_OPEN: LYC before a parked DMG LYC write (+1; 0 = none)
     when defined(test_harness):
       test_output*:  TestOutput
