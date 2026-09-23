@@ -543,6 +543,16 @@ proc mem_dma_transfer*(mem: GbMemory; source: uint8) =
   mem.requested_oam_dma = true
   mem.next_dma_counter  = 0
 
+proc mem_dma_restart_bus(mem: GbMemory; gb: GB; source: uint8) =
+  ## OAMDMA_SRCCHANGE_BUS: a transfer restarted while one runs moves the
+  ## running unit onto the new source's bus at the write.
+  when OAMDMA_SRCCHANGE_BUS != 0:
+    if mem.dma_busy:
+      var bus_src = int(source) shl 8
+      if bus_src >= 0xE000: bus_src = bus_src and not 0x2000
+      mem.dma_bus   = dma_bus_of(gb, bus_src)
+      mem.dma_drive = dma_drive_of(gb, bus_src)
+
 proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
   # Any write with bit 0 set unmaps the boot ROM (the CGB boot ROM writes
   # 0x11, the DMG one 0x01).
@@ -580,7 +590,9 @@ proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
     # Where in the M-cycle the write meets the serial shifter (SERIAL_CPU_SAMPLE_T).
     when SERIAL_CPU_SAMPLE_T < 4: serial_if_write_fixup(gb)
   of 0xFF10..0xFF3F: apu_write(gb.apu, idx, val, gb)
-  of 0xFF46:         mem_dma_transfer(mem, val)
+  of 0xFF46:
+    mem_dma_restart_bus(mem, gb, val)
+    mem_dma_transfer(mem, val)
   of 0xFF40..0xFF45, 0xFF47..0xFF4B: ppu_write(gb.ppu, gb, idx, val)
   of 0xFF4D:
     if gb.cgb_native: mem.requested_speed_switch = (val and 0x1) != 0

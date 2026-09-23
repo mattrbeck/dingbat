@@ -424,6 +424,12 @@ const CGB_HALT_PPU_LEAD* {.intdefine.} = 1
   ## cheaper spelling, if ever needed, decides at halt entry rather than per
   ## halted M-cycle.
 const OAMDMA_HALT_PAUSE* {.intdefine.} = 1
+const OAMDMA_SRCCHANGE_BUS* {.intdefine.} = 1
+  ## Whether an FF46 write while a transfer runs moves the running unit onto
+  ## the NEW source's bus at once (the old transfer keeps copying until the
+  ## restart takes over, but its bus conflicts are the new source's). gambatte
+  ## oamdma/oamdma_src8000_srcchange0000_busyinc (both devices): the ROM
+  ## fetch right after the restart to $0000 is already blocked (+2).
 const OAMDMA_HALT_GRACE* {.intdefine.} = 1
   ## M-cycles the OAM DMA unit still clocks after the CPU halts: the pause
   ## starts one M-cycle late, and the wake then owes no extra hand-back cycle
