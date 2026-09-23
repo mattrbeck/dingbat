@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-22 18:24:53*
+*Generated: 2026-09-22 18:29:44*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5162/5216 passed.**
+**5163/5216 passed.**
 
 ## bgen
 
@@ -283,10 +283,6 @@ All 20 tests passed.
 
 All 36 tests passed.
 
-## window (475/476 passed)
+## window
 
-475/476 tests passed, 1 failed:
-
-| Test | Result |
-|------|--------|
-| window/late_disable_scx5_ds_1_cgb04c_out0 [cgb] | got 3, expected 0 |
+All 476 tests passed.

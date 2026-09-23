@@ -1612,7 +1612,7 @@ proc win_start_carries(ppu: GbFifoPpu): bool {.inline.} =
 
 
 when WIN_EN_REVOKE_ANY:
-  proc win_defer_arm(ppu: GbFifoPpu) {.noinline.} =
+  proc win_defer_arm(ppu: GbFifoPpu; gb: GB) {.noinline.} =
     ## A CGB window start has just been taken and is revocable for
     ## CGB_WIN_EN_DEFER dots: record what win_start_reset overwrites. Nothing
     ## pushes to the BG FIFO during those dots, so head/tail/size are the whole
@@ -1634,6 +1634,13 @@ when WIN_EN_REVOKE_ANY:
     when MIXER_DOT_LAG != 0:
       ppu.wd_tail_dot0 = ppu.tail_dot0
       ppu.wd_mix_run   = ppu.mix_run
+    when WIN_REVOKE_DS_PUSH != 0:
+      # CGB double speed: the start stays revocable over the restart's push
+      # too (WIN_REVOKE_DS_PUSH), which overwrites the ring; keep all of it.
+      gb.wd_ds_push = ppu.cgb and gb.memory.current_speed != 0'u8
+      if gb.wd_ds_push:
+        gb.wd_fifo = ppu.fifo
+        gb.wd_ds_ly = ppu.ly
 
   proc win_defer_undo(ppu: GbFifoPpu; gb: GB) {.noinline.}
     ## Forward declaration (the undo replays tick_shifter); the pragmas must
@@ -1744,7 +1751,7 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
           else:
             when WIN_EN_REVOKE_ANY:
               # Revocable start: record before WIN_EN_HOLD_BACK moves `lx`.
-              win_defer_arm(ppu)
+              win_defer_arm(ppu, gb)
             when WIN_EN_HOLD_BACK != 0:
               # A match that waited starts one pixel left (WIN_EN_HOLD_BACK);
               # the window's first push overwrites that background pixel.
@@ -1775,7 +1782,7 @@ proc tick_shifter*(ppu: GbFifoPpu; gb: GB) =
             fifo_emit_pixel(ppu, gb)
             fifo_reset_bg(ppu, true)
             return
-          when WIN_EN_REVOKE_ANY: win_defer_arm(ppu)
+          when WIN_EN_REVOKE_ANY: win_defer_arm(ppu, gb)
           win_start_reset(ppu)
           return
       elif ppu.fetch_counter == WIN_REACT_PHASE and win_react_last_park(ppu) and
@@ -1915,6 +1922,33 @@ when WIN_EN_REVOKE_ANY:
       when DMG_WIN_EN_REVOKE != 0:
         extra = int(ppu.cycle_counter - ppu.wd_dot)
     for _ in 0 ..< extra: fifo_pipeline_dot(ppu, gb)
+
+when WIN_REVOKE_DS_PUSH != 0:
+  proc win_revoke_ds_push*(ppu: GbFifoPpu; gb: GB) {.noinline.} =
+    ## WIN_REVOKE_DS_PUSH: LCDC.5 falls at double speed on the dot the CGB
+    ## window's restart pushed its first tile. Undo as win_defer_undo does,
+    ## restoring the ring the push overwrote; no dot is replayed beyond the
+    ## match dot's, so the line pays k - 1.
+    if not gb.wd_ds_push or gb.wd_ds_ly != ppu.ly or not ppu.fetching_window or
+       ppu.win_defer != 0'u8 or
+       ppu.cycle_counter - ppu.wd_dot != int32(CGB_WIN_EN_DEFER) + 1: return
+    gb.wd_ds_push = false
+    ppu.fifo = gb.wd_fifo
+    ppu.win_defer = 0'u8
+    ppu.win_revoking = false
+    ppu.fetcher_x     = ppu.wd_fetcher_x
+    ppu.fetch_counter = ppu.wd_fetch_counter
+    ppu.obj_tile_fx   = ppu.wd_obj_tile_fx
+    ppu.lx            = ppu.wd_lx
+    ppu.head_cycle    = ppu.wd_head_cycle
+    ppu.win_hold      = ppu.wd_win_hold
+    ppu.fetching_window = false
+    dec ppu.current_window_line
+    when MIXER_DOT_LAG != 0:
+      ppu.tail_dot0 = ppu.wd_tail_dot0
+      ppu.mix_run   = ppu.wd_mix_run
+    fifo_arm_window(ppu)
+    tick_shifter(ppu, gb)
 
 proc fifo_obj_abort*(ppu: GbFifoPpu; gb: GB) =
   ## LCDC.1 went low during an object's stall: the fetch is abandoned, the

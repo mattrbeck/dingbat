@@ -256,6 +256,8 @@ proc fifo_recompose_last*(ppu: GbFifoPpu; gb: GB; back: int32;
 proc fifo_recompose_at*(ppu: GbFifoPpu; gb: GB; back: int32): bool {.noinline.}
 
 proc fifo_obj_size_write*(ppu: GbFifoPpu; gb: GB) {.noinline.}
+when WIN_REVOKE_DS_PUSH != 0:
+  proc win_revoke_ds_push*(ppu: GbFifoPpu; gb: GB) {.noinline.}
 
 proc fifo_obj_abort*(ppu: GbFifoPpu; gb: GB)
 when OBJ_ABORT != 0 and OBJ_ABORT_LATE:
@@ -2264,6 +2266,9 @@ proc ppu_store_lcdc*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
       if (moved and 0x20'u8) != 0 and (val and 0x20'u8) == 0'u8:
         gb.we_off_dot = ppu.cycle_counter + int32(CGB_WE_DISABLE_LATE)
     fifo_arm_window(gb.fifo_ppu)
+    when WIN_REVOKE_DS_PUSH != 0:
+      if (moved and 0x20'u8) != 0 and (val and 0x20'u8) == 0'u8 and gb.wd_ds_push:
+        win_revoke_ds_push(gb.fifo_ppu, gb)
     when CGB_WE_ENABLE_LATE != 0:
       # A CGB LCDC.5 rise reaches the comparator a dot late at single speed,
       # like a WX store (CGB_WX_LATE_SS): a match on this very dot is missed.

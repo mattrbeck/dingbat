@@ -741,6 +741,15 @@ const CGB_WE_ENABLE_LATE* {.intdefine.} = 1
 const WIN_LX_OFF_V* = -128'i32
   ## fifo_ppu.nim's WIN_LX_OFF (the comparator parked), here for ppu.nim.
 const CGB_WX_LATE_SS* {.intdefine.} = 1
+const WIN_REVOKE_DS_PUSH* {.intdefine.} = 1
+  ## At CGB double speed a window start is still revoked by an LCDC.5 fall
+  ## landing on the dot its restart pushes the first tile (k = W - D =
+  ## CGB_WIN_EN_DEFER + 1), a double-speed M-cycle being two dots: the undo
+  ## restores the ring the push overwrote and charges k - 1, the same line
+  ## length a fall on the dot before gets. gambatte `window/
+  ## late_disable_scx5_ds_1` (k = 6 revoked; `_ds_2`, k = 8, kept); charging
+  ## the extra dot loses `late_disable_late_scx00_wx10_ds_2`. Single speed
+  ## keeps k = 6 (`late_disable_scx5_2`).
 const WIN_CARRY_CANCEL_OFF* {.intdefine.} = 1
   ## A carried DMG window start (DMG_WIN_LAST_PX_CARRY) that meets LCDC.5 low
   ## at the head of mode 3 is dropped rather than held for a later head: the
@@ -994,8 +1003,8 @@ const CGB_WIN_EN_DEFER*       {.intdefine.} = 5
   ## global phase serves both. Refunding through `m3_lead` would still draw the
   ## window; a fixed defer is refused by the pairs. Cheap because the FIFO is
   ## empty for all five dots: the undo is nine scalars plus one replayed
-  ## shifter step, counted in tick_shifter's FIFO-empty arm. Open:
-  ## `late_disable_scx5_ds_1` wants k = 6 revocable.
+  ## shifter step, counted in tick_shifter's FIFO-empty arm. Double speed
+  ## also revokes k = 6 (WIN_REVOKE_DS_PUSH).
 const CGB_WIN_REVOKE_LAG*     {.intdefine.} = 1
   ## Shifter dots between the LCDC.5 write that revokes a CGB window start and
   ## the dot the undo lands on. Not free: the undo restores the match dot's
@@ -2542,6 +2551,9 @@ type
     hdma_start_req*:   bool    # HDMA_START_GRANT_FETCH: the owed block was raised by FF55
     gdma_owed*:        bool    # GDMA_AFTER_FETCH: a general-purpose DMA waits for the next fetch
     we_off_dot*:       int32   # CGB_WE_DISABLE_LATE: dot a CGB LCDC.5 fall reaches the fetcher
+    wd_fifo*:          GbPixelFifo  # WIN_REVOKE_DS_PUSH: the ring at a CGB double-speed window start
+    wd_ds_push*:       bool
+    wd_ds_ly*:         uint8
     lyc_write_old*:    int16   # DMG_LYC_BOUNDARY_OPEN: LYC before a parked DMG LYC write (+1; 0 = none)
     when defined(test_harness):
       test_output*:  TestOutput
