@@ -697,6 +697,29 @@ proc mem_write_vram_m3(mem: GbMemory; gb: GB; idx: int; val: uint8) {.noinline.}
   if dots - pre > 0: mem_tick_ppu(mem, gb, dots - pre, ignore_speed = true)
   if mem.write_deferred: mem_flush_deferred(mem, gb)
 
+proc mem_write_split*(mem: GbMemory; gb: GB; idx: int; val: uint8; pre: int) {.noinline.} =
+  ## A CPU write whose M-cycle is left open `pre` T-cycles after its byte;
+  ## the caller finishes it with mem_write_finish (IRQ_PUSH_T's low push,
+  ## which the dispatch's IF clear falls inside).
+  # The DMA unit's M-cycle whole (the byte meets its slot); the scheduler
+  # and timer only up to the split, the rest in mem_write_finish.
+  mem.cycle_tick_count += 4
+  if mem.requested_oam_dma or mem.dma_position <= 0xA0:
+    mem_dma_tick(mem, gb, 4)
+  if pre > 0:
+    gb.scheduler.tick(pre)
+    timer_tick(gb.timer, gb, pre)
+  if mem.dma_busy: mem_write_busy(mem, gb, idx, val)
+  else: mem_write_open(mem, gb, idx, val)
+  if pre > 0: mem_tick_ppu(mem, gb, pre)
+
+proc mem_write_finish*(mem: GbMemory; gb: GB; rest: int) {.noinline.} =
+  if rest > 0:
+    gb.scheduler.tick(rest)
+    timer_tick(gb.timer, gb, rest)
+    mem_tick_ppu(mem, gb, rest)
+  if mem.write_deferred: mem_flush_deferred(mem, gb)
+
 proc mem_write*(mem: GbMemory; gb: GB; idx: int; val: uint8) {.hot_bus_inline.} =
   ## A CPU write commits at the START of its M-cycle, before its PPU dots: the
   ## VRAM/OAM lock is decided on the mode at the start of the M-cycle

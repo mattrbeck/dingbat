@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-22 18:29:44*
+*Generated: 2026-09-22 18:42:57*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5163/5216 passed.**
+**5165/5216 passed.**
 
 ## bgen
 
@@ -181,14 +181,9 @@ All 279 tests passed.
 
 All 69 tests passed.
 
-## oamdma (800/802 passed)
+## oamdma
 
-800/802 tests passed, 2 failed:
-
-| Test | Result |
-|------|--------|
-| oamdma/oamdma_src0000_busyint0002_dmg08_cgb04c_outFF941234 [dmg] | got 76871234, expected FF941234 |
-| oamdma/oamdma_src0000_busyint0002_dmg08_cgb04c_outFF941234 [cgb] | got 76871234, expected FF941234 |
+All 802 tests passed.
 
 ## scx_during_m3 (131/141 passed)
 

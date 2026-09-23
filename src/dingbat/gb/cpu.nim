@@ -169,10 +169,22 @@ proc cpu_lock*(cpu: GbCpu) =
   cpu.halted = true
   cpu.locked = true
 
-const IRQ_PUSH_T* {.intdefine.} = 0
+const IRQ_PUSH_T* {.intdefine.} = 12
   ## T-cycles of internal wait charged before the dispatch's two push
-  ## M-cycles: 0 = pushes first (ships), 8 = Pan Docs' wait-first order.
-  ## The two are indistinguishable by score.
+  ## M-cycles. Ships 12 with IRQ_PUSH_LATE: three waits, then the pushes, the
+  ## low one being the dispatch's last M-cycle (gambatte-core's order). 0
+  ## (pushes first) and 8 (Pan Docs' wait-wait-push-push-jump) score alike
+  ## everywhere but on an OAM DMA's bus: gambatte `oamdma/oamdma_src0000_
+  ## busyint0002` (both devices) reads the pushed PC back from DMA slots
+  ## $9E/$9F, three M-cycles after where pushes-first puts it.
+const IRQ_PUSH_LATE* {.intdefine.} = 1
+  ## With IRQ_PUSH_T = 12: the low push is split at the IF clear
+  ## (IRQ_SAMPLE_T, plus IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD), so the clear keeps
+  ## its T-cycle inside the push's M-cycle (mem_write_split). Without the
+  ## split the clear moves to 20 and 19 rows are lost.
+static:
+  doAssert IRQ_PUSH_LATE == 0 or IRQ_PUSH_T == 12,
+    "IRQ_PUSH_LATE splits the dispatch's last M-cycle; it needs IRQ_PUSH_T = 12"
 
 const IRQ_SAMPLE_T_DS* {.intdefine.} = 18
   ## IRQ_SAMPLE_T for a dispatch taken in double speed, in CPU T-cycles: 18,
@@ -282,6 +294,36 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
                 early_irq == INT_STAT
   cpu.sp = cpu.sp - 1
   oam_bug_if(gb, cpu.sp, obWrite)
+  when IRQ_PUSH_LATE != 0:
+    # The low push is the dispatch's last M-cycle; the IF clear falls inside
+    # it (IRQ_PUSH_LATE).
+    let sample_t0 =
+      if gb.memory.current_speed == 1: IRQ_SAMPLE_T_DS else: IRQ_SAMPLE_T
+    when IRQ_VECTOR_T > 4 + IRQ_PUSH_T:
+      let interrupt = if early: early_irq
+                      else: highest_priority_ie(gb.interrupts, ie_hi)
+    var sample_t1 = sample_t0
+    when IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD != 0:
+      if gb.cgb_enabled and (interrupt == INT_TIMER or interrupt == INT_SERIAL):
+        sample_t1 += IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD
+    let pre = max(0, min(4, sample_t1 - 16))
+    mem_write_split(gb.memory, gb, int(cpu.sp), uint8(cpu.pc and 0xFF), pre)
+    cpu.pc = interrupt
+    clear_interrupt(gb.interrupts, interrupt)
+    when TIMER_ACK_LOOKAHEAD != 0:
+      if interrupt == INT_TIMER:
+        const k = TIMER_ACK_LOOKAHEAD
+        let t = gb.timer
+        var due = -1
+        if t.countdown > 0: due = t.countdown
+        elif t.enabled and t.tima == 0xFF'u8:
+          let period = 1 shl (t.bit_for_tima + 1)
+          due = period - (int(t.tdiv) and (period - 1)) + 4
+        if due > 0 and due <= k:
+          gb.timer_irq_acked = true
+    mem_write_finish(gb.memory, gb, 4 - pre)
+    mem_tick_extra(gb.memory, gb, 20)
+    return
   mem_write(gb.memory, gb, int(cpu.sp), uint8(cpu.pc and 0xFF))
   var elapsed = 8 + IRQ_PUSH_T
   when IRQ_VECTOR_T > 4 + IRQ_PUSH_T:
