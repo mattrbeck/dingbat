@@ -719,6 +719,13 @@ const CGB_WE_ENABLE_LATE* {.intdefine.} = 1
 const WIN_LX_OFF_V* = -128'i32
   ## fifo_ppu.nim's WIN_LX_OFF (the comparator parked), here for ppu.nim.
 const CGB_WX_LATE_SS* {.intdefine.} = 1
+const TIMER_ACK_LOOKAHEAD* {.intdefine.} = 4
+  ## T-cycles past its IF clear within which a timer request still to rise is
+  ## acknowledged by the same dispatch (gambatte-core acks a flag whose event
+  ## is due a few cycles on; dingbat's clear cannot move later without
+  ## lengthening the dispatch). One M-cycle: gambatte tima/tc00_irq_late_
+  ## retrigger_{2 [cgb],3 [dmg],ds_2}; the DMG takes 2..5, the CGB 4..7, and
+  ## 6/8 lose `_2` [dmg] and the `_1` rows. 0 compiles it out.
   ## Whether every CGB takes the WX store CGB_WX_LATENCY dots late at single
   ## speed. At double speed the same CPU clock is half a dot and rounds to
   ## none, which resolves the trade below: `late_wx_scx3_2` [cgb] takes it,
@@ -2476,6 +2483,7 @@ type
     lyc_hold_ly*:      uint8
     m0_late_fire*:     bool    # LCDON_M0_LAG_DS: the LCD-on line's mode-0 source is owed
     dma_halt_grace*:   uint8   # OAMDMA_HALT_GRACE: the halted M-cycle the OAM DMA still gets
+    timer_irq_acked*:  bool    # TIMER_ACK_LOOKAHEAD: the dispatch acked the reload's request
     when defined(test_harness):
       test_output*:  TestOutput
 

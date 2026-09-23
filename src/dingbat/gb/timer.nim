@@ -56,7 +56,14 @@ proc timer_reload_tima(t: GbTimer; gb: GB) =
     # Diagnostic (tools only): the divider the overflow reload landed on, the
     # anchor of the gambatte speedchange*_tima0N_* rows.
     echo "TIMAIRQ tdiv=", t.tdiv, " tap=", t.bit_for_tima
-  gb.interrupts.timer_interrupt = true
+  when TIMER_ACK_LOOKAHEAD != 0:
+    if gb.timer_irq_acked:
+      # Already acknowledged by the dispatch that ran just ahead of it.
+      gb.timer_irq_acked = false
+    else:
+      gb.interrupts.timer_interrupt = true
+  else:
+    gb.interrupts.timer_interrupt = true
   when defined(gb_io_trace):
     echo "TIMERIF ly=", gb.ppu.ly, " dot=", gb.ppu.cycle_counter, " sched=", gb.scheduler.cycles
   t.tima = t.tma

@@ -1,13 +1,13 @@
 # gambatte Test Suite - Detailed Results
 
-*Generated: 2026-09-22 17:09:04*
+*Generated: 2026-09-22 17:18:13*
 
 Each row is one ROM run on one device. `[dmg]` / `[cgb]` is the
 device the filename asks for; `[.., png]` rows are scored against the
 reference image next to the ROM, the rest against the hex value the
 ROM draws on screen. See tests/README.md for the mechanism.
 
-**5147/5216 passed.**
+**5150/5216 passed.**
 
 ## bgen
 
@@ -271,15 +271,12 @@ All 67 tests passed.
 
 All 476 tests passed.
 
-## tima (225/232 passed)
+## tima (228/232 passed)
 
-225/232 tests passed, 7 failed:
+228/232 tests passed, 4 failed:
 
 | Test | Result |
 |------|--------|
-| tima/tc00_irq_late_retrigger_2_dmg08_outE4_cgb04c_outE0 [cgb] | got E4, expected E0 |
-| tima/tc00_irq_late_retrigger_3_dmg08_cgb04c_outE0 [dmg] | got E4, expected E0 |
-| tima/tc00_irq_late_retrigger_ds_2_cgb04c_outE0 [cgb] | got E4, expected E0 |
 | tima/tc00_late_tc01_5_dmg08_cgb04c_out00 [dmg] | got FF, expected 00 |
 | tima/tc00_late_tc01_5_dmg08_cgb04c_out00 [cgb] | got FF, expected 00 |
 | tima/tc00_late_tc01_7_dmg08_cgb04c_outFF [dmg] | got FE, expected FF |

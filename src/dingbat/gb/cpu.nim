@@ -295,6 +295,18 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
     if gb.cgb_enabled and (interrupt == INT_TIMER or interrupt == INT_SERIAL):
       mem_tick_components(gb.memory, gb, IRQ_SAMPLE_CGB_TIMER_SERIAL_ADD)
   clear_interrupt(gb.interrupts, interrupt)
+  when TIMER_ACK_LOOKAHEAD != 0:
+    # A timer request due within the lookahead is acknowledged with this one.
+    if interrupt == INT_TIMER:
+      const k = TIMER_ACK_LOOKAHEAD
+      let t = gb.timer
+      var due = -1
+      if t.countdown > 0: due = t.countdown
+      elif t.enabled and t.tima == 0xFF'u8:
+        let period = 1 shl (t.bit_for_tima + 1)
+        due = period - (int(t.tdiv) and (period - 1)) + 4
+      if due > 0 and due <= k:
+        gb.timer_irq_acked = true
   mem_tick_extra(gb.memory, gb, 20)
 
 proc handle_interrupts*(cpu: GbCpu; gb: GB) =
