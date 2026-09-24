@@ -28,6 +28,7 @@ import dingbat/frontend/link_cable
 import dingbat/frontend/persist
 import dingbat/frontend/game_load
 import dingbat/frontend/game_lock
+import dingbat/frontend/window_restore
 when defined(gui_driver):
   import dingbat/frontend/gui_driver
 import dingbat/common/cheats
@@ -513,6 +514,15 @@ proc resize_to_output() =
   if app.fullscreen: return
   let (w, h) = output_size()
   setSize(app.window, cint(w * app.scale), cint(h * app.scale))
+
+proc set_fullscreen(on: bool) =
+  ## Menu and Cmd/Ctrl+F. Saved, so the next start can come back this way
+  ## (window_restore.nim).
+  app.fullscreen = on
+  discard setFullscreen(app.window, if on: SDL_WINDOW_FULLSCREEN_DESKTOP else: 0'u32)
+  if app.cfg.fullscreen != on:
+    app.cfg.fullscreen = on
+    save_config(app.cfg)
 
 proc game_viewport(): (GLint, GLint, GLint, GLint) =
   ## The letterboxed rect the game quad is drawn into. An SGB border switches
@@ -1606,10 +1616,9 @@ proc render_imgui() =
               if app.emu_kind != ekNone: resize_to_output()
               save_config(app.cfg)
           igSeparator()
-          if igMenuItem_BoolPtr(cstring("Fullscreen  " & MOD_KEY_STR & "+F"),
-                                nil, addr app.fullscreen, true):
-            let flags = if app.fullscreen: SDL_WINDOW_FULLSCREEN_DESKTOP else: 0'u32
-            discard setFullscreen(app.window, flags)
+          if igMenuItem_Bool(cstring("Fullscreen  " & MOD_KEY_STR & "+F"),
+                             nil, app.fullscreen, true):
+            set_fullscreen(not app.fullscreen)
           igEndMenu()
         igEndMenu()
 
@@ -1849,9 +1858,7 @@ proc handle_input() =
           if app.emu_kind != ekNone and app.netlink == nil:
             app.pending_load = true
         of K_f:
-          app.fullscreen = not app.fullscreen
-          let flags = if app.fullscreen: SDL_WINDOW_FULLSCREEN_DESKTOP else: 0'u32
-          discard setFullscreen(app.window, flags)
+          set_fullscreen(not app.fullscreen)
         of K_q:
           app.running = false
         else: discard
@@ -2236,6 +2243,13 @@ proc main() =
   # boot_settings applies them); written into cfg, the next save_config
   # would have made them permanent.
   let cfg = load_config()
+  # Fullscreen at start only as the platform restores windows. When it does
+  # not, the saved flag is cleared, as macOS discards a window's state at
+  # quit, so turning the system setting on later brings back nothing stale.
+  let start_fs = start_fullscreen(cfg.fullscreen, system_restores_windows())
+  if cfg.fullscreen != start_fs:
+    cfg.fullscreen = start_fs
+    save_config(cfg)
 
   when defined(windows):
     # Per-monitor DPI awareness (SDL >= 2.24): render at native pixels
@@ -2262,7 +2276,7 @@ proc main() =
     "dingbat",
     SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
     cint(GBA_W * cfg.frame_size), cint(GBA_H * cfg.frame_size),
-    window_flags
+    window_flags or (if start_fs: SDL_WINDOW_FULLSCREEN_DESKTOP else: 0'u32)
   )
   if window == nil:
     echo "Failed to create window: ", $sdl2.getError(); system.quit(1)
@@ -2329,7 +2343,7 @@ proc main() =
                       else: cfg.frame_size),
     running:         true,
     paused:          false,
-    fullscreen:      false,
+    fullscreen:      start_fs,
     enable_overlay:  false,
     last_mouse_tick: getTicks(),
     rewind:          new_rewind(),

@@ -6,8 +6,9 @@
 ## BIOS options must hold for one run only, and a BIOS mode that needs a
 ## file must fall back to HLE when there is none.
 
-import std/[os, tables, tempfiles, options]
+import std/[os, osproc, strutils, tables, tempfiles, options]
 import dingbat/common/[config, input]
+import dingbat/frontend/window_restore
 
 var failures = 0
 
@@ -37,7 +38,8 @@ proc same_settings(a, b: Config): bool =
     a.sgb_border == b.sgb_border and a.rewind == b.rewind and
     a.pitch_correct_ff == b.pitch_correct_ff and a.audio_lowpass == b.audio_lowpass and
     a.fifo_interp == b.fifo_interp and a.mp2k_hle == b.mp2k_hle and
-    a.speed_mode == b.speed_mode and a.frame_size == b.frame_size
+    a.speed_mode == b.speed_mode and a.frame_size == b.frame_size and
+    a.fullscreen == b.fullscreen
 
 echo "Key bindings survive a restart"
 block:
@@ -82,6 +84,7 @@ block:
   cfg.fifo_interp = false
   cfg.mp2k_hle = true
   cfg.speed_mode = true
+  cfg.fullscreen = true
   cfg.keybindings = homerow_keybindings()
   cfg.keybindings[KP_8] = Input.SELECT
   cfg.controller_bindings = {cint(0): Input.B, cint(1): Input.A}.toTable
@@ -243,8 +246,10 @@ block:
   cfg.mp2k_hle = true
   cfg.speed_mode = true
   cfg.frame_size = 5
+  cfg.fullscreen = true
   cfg.reset_to_defaults()
   let want = new_config()
+  want.fullscreen = true   # where the window is, not a setting
   want.explorer_dir = dir / "roms"
   want.recents = @[dir / "a.gba"]
   want.bios_path = dir / "gba_bios.bin"
@@ -262,6 +267,31 @@ block:
   check load_config_file(path).frame_size == 6, "6x comes back"
   writeFile(path, "---\nframe_size: 99\n")
   check load_config_file(path).frame_size == 8, "a hand-edited size is clamped"
+
+echo "Fullscreen at start follows the platform"
+block:
+  let path = dir / "fs.yml"
+  let cfg = new_config()
+  check not cfg.fullscreen, "a fresh install starts in a window"
+  cfg.fullscreen = true
+  save_config_file(cfg, path)
+  check load_config_file(path).fullscreen, "quitting fullscreen is remembered"
+  check start_fullscreen(true, true), "quit fullscreen, windows restored: fullscreen"
+  check not start_fullscreen(true, false), "quit fullscreen, windows closed at quit: a window"
+  check not start_fullscreen(false, true) and not start_fullscreen(false, false),
+        "quit in a window: a window"
+  # macOS "Close windows when quitting an application": the key is its inverse
+  check restores_windows(true, true), "NSQuitAlwaysKeepsWindows = 1 (switch off): restore"
+  check not restores_windows(false, true), "NSQuitAlwaysKeepsWindows = 0 (switch on): do not"
+  check not restores_windows(true, false), "never set: do not"
+  when defined(macosx):
+    # The CoreFoundation read agrees with what `defaults` says for this user
+    let (text, code) = execCmdEx("defaults read -g NSQuitAlwaysKeepsWindows")
+    let want = code == 0 and text.strip() == "1"
+    check system_restores_windows() == want,
+          "system_restores_windows() = " & $want & " as `defaults read -g` gives"
+  else:
+    check system_restores_windows(), "Windows and Linux restore"
 
 removeDir(dir)
 

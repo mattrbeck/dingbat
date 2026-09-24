@@ -1,5 +1,5 @@
 -- What this models, for formal/anchors.mjs (which lists stale models):
--- @models src/dingbat.nim: load_rom apply_color_correction apply_master_volume apply_fifo_interp apply_speed_mode render_imgui handle_input main
+-- @models src/dingbat.nim: load_rom apply_color_correction apply_master_volume apply_fifo_interp apply_speed_mode set_fullscreen render_imgui handle_input main
 -- @models src/dingbat/frontend/config_editor.nim: new_config_editor do_reset do_apply do_factory_reset render
 -- @models src/dingbat/frontend/keybindings_widget.nim: wants_input key_released load_preset render reset apply
 -- @models src/dingbat/frontend/controller_widget.nim: wants_input button_released render reset apply
@@ -8,6 +8,7 @@
 -- @models src/dingbat/frontend/file_explorer.nim: new_file_explorer render close
 -- @models src/dingbat/frontend/cheats_widget.nim: attach
 -- @models src/dingbat/common/config.nim: new_config reset_to_defaults parse_config load_config_file load_config save_config_file save_config key_name_to_code key_code_to_name keycode_file_name keycode_from_file_name boot_settings
+-- @models src/dingbat/frontend/window_restore.nim: restores_windows system_restores_windows start_fullscreen
 
 /-
 # Settings: the config editor, the input-capture widgets, and config.nim
@@ -114,6 +115,8 @@ Refuted for the code as it is (`real`), each a concrete trace from `init`:
 * (a) `bug_real_bios_without_file`, `bug_run_bios_without_file`.
 * `bug_rom_dialog_opens_hidden_selection`.
 * (d) `bug_reset_defaults_keeps_interp_and_speed`.
+* `bug_fullscreen_forgotten`: fullscreen is never saved; every start is
+  windowed.
 
 Proved for the code as it is: `liveOK_real` (every live setting agrees with
 cfg in every reachable state, Reset to Defaults included),
@@ -161,6 +164,13 @@ What shipped, switch by switch:
 * The config half of finding 1 (save_config writes only the keys this
   process changed, over a fresh read) is a two-process property; it is
   modelled in `SavePersistence` (`cliOver`, `cfg_ok`), not here.
+* `fsRestore` (fix round 2): set_fullscreen saves `cfg.fullscreen`; main
+  starts fullscreen when it is set and the platform restores windows
+  (`S.sysRestore`: Windows and Linux always, macOS per its Close-windows
+  switch, read by window_restore.nim), and otherwise clears it.
+  `fsOK_reachable`: cfg, the file and the window always agree;
+  `fixed_restart_fullscreen`: a restart is fullscreen iff the window was and
+  the platform restores windows.
 -/
 namespace DesktopState.Settings
 
@@ -251,11 +261,15 @@ structure Fix where
   /-- A config file that does not parse is renamed aside (at start, or when
   a save finds it), never overwritten (finding 18, as shipped). -/
   moveAside : Bool := false
+  /-- Fullscreen is saved when toggled; a start comes back fullscreen when
+  it quit fullscreen and the platform restores windows (window_restore.nim),
+  and otherwise clears the saved flag (fix round 2, as shipped). -/
+  fsRestore : Bool := false
 
 def real : Fix := {}
 def fixed : Fix :=
   { openGate := true, visGate := true, captureFilter := true, resetAll := true, biosGate := true,
-    feFresh := true, numericKeys := true, cliApart := true, moveAside := true }
+    feFresh := true, numericKeys := true, cliApart := true, moveAside := true, fsRestore := true }
 def naive : Fix := { resetNaive := true }
 
 /-! ## Config and the file -/
@@ -275,13 +289,14 @@ structure Cfg where
   speed     : Bool               -- cfg.speed_mode
   rewind    : Bool               -- cfg.rewind
   recent    : Option FileE       -- cfg.recents[0]
+  fullscreen : Bool              -- cfg.fullscreen (fixed; the code as it is has no such key)
 
 /-- new_config (config 286-313). -/
 def defaults : Cfg :=
   { kb := defaultKb, pad := defaultPad, useHle := true, afterBios := false,
     runBios := false, biosFile := false, gbFifo := true, sgb := false,
     volume := 100, color := true, interp := true, speed := false, rewind := true,
-    recent := none }
+    recent := none, fullscreen := false }
 
 /-- `parse_config(loadToJson(save_config(c)))`. save_config writes each binding
 as `key_code_to_name(k): input` (452-453); an unnamed key is written as
@@ -422,6 +437,11 @@ structure S where
   lastRoute   : Route            -- where the last key event went
   cli         : Cli              -- this run's command line (fixed: app.boot_overrides)
   lostBad     : Bool             -- a file that did not parse was overwritten (history)
+  fs          : Bool             -- app.fullscreen: the window is fullscreen
+  /-- The platform reopens windows as they were at quit: always on Windows
+  and Linux; on macOS when "Close windows when quitting an application" is
+  off (NSQuitAlwaysKeepsWindows = 1). The environment; the user may flip it. -/
+  sysRestore  : Bool
 
 /-! ## Helpers: the Nim procs -/
 
@@ -584,20 +604,33 @@ def onKey (fx : Fix) (s : S) (k : Key) (down : Bool) : S :=
 def onPad (fx : Fix) (s : S) (b : Nat) (down : Bool) : S :=
   { s with ed := if wantsPad fx s && !down then capturePad s.ed b else s.ed }
 
+/-- load_config, and (the code as it is) the CLI overrides written into it. -/
+def cfg0 (fx : Fix) (d : Disk) (a : Cli) : Cfg :=
+  if fx.cliApart then loadDisk fx d else cliApply fx a (loadDisk fx d)
+
 /-- The app as `main` leaves it before the loop (2160-2256), from whatever
 file is on disk: load_config, the CLI overrides written into cfg (fixed: kept
 beside it), new_file_explorer (selected_idx 0 is a directory),
 new_config_editor, apply_color_correction (2287). A quit (the loop's end) or
 a crash, then a relaunch, is this with the old disk. Fixed, a file that does
 not parse is moved aside, so the disk has none. -/
-def launch (fx : Fix) (d : Disk) (a : Cli) (gen : Nat) (lost : Bool) : S :=
-  let c := if fx.cliApart then loadDisk fx d else cliApply fx a (loadDisk fx d)
-  { pc := .emu, cfg := c, disk := if fx.moveAside && d.isBad then .missing else d,
+
+def launch (fx : Fix) (d : Disk) (a : Cli) (gen : Nat) (lost : Bool) (sys : Bool) : S :=
+  let c0 := cfg0 fx d a
+  -- main, fixed: start_fullscreen(cfg.fullscreen, system_restores_windows());
+  -- a flag the platform does not honour is cleared and saved.
+  let stale := fx.fsRestore && c0.fullscreen && !sys
+  let c := if stale then { c0 with fullscreen := false } else c0
+  { pc := .emu, cfg := c,
+    disk := if stale then .ok c else if fx.moveAside && d.isBad then .missing else d,
     ed := initEd, fe := { dlg := .none, sel := none },
     core := none, gen := gen, cheatsGen := none, shaderColor := c.color, wck := false,
-    modHeld := false, lastRoute := .none, cli := a, lostBad := lost }
+    modHeld := false, lastRoute := .none, cli := a, lostBad := lost,
+    fs := fx.fsRestore && c0.fullscreen && sys, sysRestore := sys }
 
-def init : S := launch real .missing {} 0 false
+/-- A first start where the platform restores windows (Windows, Linux);
+`setSys` flips that. -/
+def init : S := launch real .missing {} 0 false true
 
 /-! ## Events and the step -/
 
@@ -621,9 +654,12 @@ inductive Ev where
   | apply | revert | ok | resetDefaults | resetConfirm | resetCancel
   -- ImGui: the file explorer modal
   | feSelect (f : FileE) | feNavigate | feOpen | feCancel
+  -- the window: Audio/Video > Fullscreen, or Cmd/Ctrl+F (set_fullscreen)
+  | toggleFs
   -- the environment
   | restart (a : Cli)      -- quit or crash, then launch again (with these flags)
   | corruptFile            -- the file stops parsing (a hand edit, a cut-short write)
+  | setSys (b : Bool)      -- the user flips macOS's Close-windows switch
 
 /-- No modal popup is up, so the menu bar and the Settings window take clicks. -/
 def uiFree (s : S) : Bool := s.pc == .ui && !s.ed.resetPopup && s.fe.dlg == .none
@@ -772,8 +808,16 @@ def stepO (fx : Fix) (s : S) : Ev → Option S
   | .feCancel =>
     if s.pc == .ui && s.fe.dlg != .none then some { s with fe := { s.fe with dlg := .none } }
     else none
-  | .restart a => some (launch fx s.disk a s.gen s.lostBad)
+  | .toggleFs =>
+    -- the hotkey (input phase) or the menu item (a drawn frame, no modal).
+    -- The code as it is flips the window only; fixed, cfg too, and saves.
+    if s.pc == .input || uiFree s then
+      some (if fx.fsRestore then save fx { s with fs := !s.fs, cfg := { s.cfg with fullscreen := !s.fs } }
+            else { s with fs := !s.fs })
+    else none
+  | .restart a => some (launch fx s.disk a s.gen s.lostBad s.sysRestore)
   | .corruptFile => some { s with disk := .bad }
+  | .setSys b => some { s with sysRestore := b }
 
 def step (fx : Fix) (s : S) (e : Ev) : S := (stepO fx s e).getD s
 
@@ -1279,9 +1323,9 @@ theorem liveOK_loadRom (fx : Fix) (s : S) (f : FileE) (hc : s.shaderColor = s.cf
   subst hc'
   exact ⟨rfl, rfl, Or.inr rfl⟩
 
-theorem liveOK_launch (fx : Fix) (d : Disk) (a : Cli) (g : Nat) (l : Bool) :
-    LiveOK (launch fx d a g l) := by
-  refine ⟨rfl, ?_⟩
+theorem liveOK_launch (fx : Fix) (d : Disk) (a : Cli) (g : Nat) (l y : Bool) :
+    LiveOK (launch fx d a g l y) := by
+  refine ⟨by simp only [launch], ?_⟩
   intro c hc; simp [launch] at hc
 
 theorem liveOK_save {fx : Fix} {s : S} (h : LiveOK s) : LiveOK (save fx s) := h
@@ -1354,7 +1398,7 @@ theorem liveOK_stepO (fx : Fix) (hfx : fx.resetNaive = true → fx.resetAll = tr
     | exact h
     | exact liveOK_loadRom fx s _ hc
     | exact liveOK_factory fx hfx s h
-    | exact liveOK_launch _ _ _ _ _
+    | exact liveOK_launch _ _ _ _ _ _
     | (obtain ⟨_, _, _, hk⟩ := onKey_shape fx s _ _; rw [hk]; exact h)
     | (obtain ⟨_, hk⟩ := onPad_shape fx s _ _; rw [hk]; exact h)
     | exact liveOK_save (liveOK_applySpeed _ hc (fun c hc' => (h.2 c hc').1))
@@ -1379,7 +1423,7 @@ theorem reachable_induct {P : S → Prop} (fx : Fix) (h0 : P init)
     | none => simpa using ih
     | some t => exact hs _ _ _ ih h
 
-theorem liveOK_init : LiveOK init := liveOK_launch _ _ _ _ _
+theorem liveOK_init : LiveOK init := liveOK_launch _ _ _ _ _ _
 
 /-- (a)/(d), proved: for the code as it is (and for the fixed code), every
 live setting agrees with cfg in every reachable state. The live side is
@@ -1533,24 +1577,34 @@ theorem cfgGood_loadDisk (fx : Fix) (d : Disk) (h : DiskGood d) : CfgGood (loadD
   | ok c => exact cfgGood_persist fx c h
   | bad => exact cfgGood_defaults
 
-theorem invF_launch (fx : Fix) (d : Disk) (a : Cli) (g : Nat) (l : Bool) (h : DiskGood d) :
-    InvF (launch fx d a g l) where
-  cfg := by
-    unfold launch; dsimp only
-    split
-    · exact cfgGood_loadDisk fx d h
-    · exact cfgGood_cli fx a _ (cfgGood_loadDisk fx d h)
-  disk := by
-    unfold launch; dsimp only
-    split
-    · trivial
-    · exact h
-  kbEdit := by intro k i hk; simp [launch, initEd] at hk
-  padEdit := by intro b i hb; simp [launch, initEd] at hb
-  fe := by simp [launch]
-  core := by intro c hc; simp [launch] at hc
+/-- CfgGood does not read the fullscreen flag. -/
+theorem cfgGood_fs {c : Cfg} (h : CfgGood c) (b : Bool) : CfgGood { c with fullscreen := b } := h
 
-theorem invF_init : InvF init := invF_launch _ _ _ _ _ trivial
+theorem cfgGood_launch0 (fx : Fix) (d : Disk) (a : Cli) (h : DiskGood d) :
+    CfgGood (cfg0 fx d a) := by
+  unfold cfg0; split
+  · exact cfgGood_loadDisk fx d h
+  · exact cfgGood_cli fx a _ (cfgGood_loadDisk fx d h)
+
+theorem invF_launch (fx : Fix) (d : Disk) (a : Cli) (g : Nat) (l y : Bool) (h : DiskGood d) :
+    InvF (launch fx d a g l y) := by
+  have h0 := cfgGood_launch0 fx d a h
+  have hc : CfgGood (launch fx d a g l y).cfg := by
+    simp only [launch]; split
+    · exact cfgGood_fs h0 false
+    · exact h0
+  refine ⟨hc, ?_, ?_, ?_, ?_, ?_⟩
+  · simp only [launch]; split
+    · exact cfgGood_fs h0 false
+    · split
+      · trivial
+      · exact h
+  · intro k i hk; simp [launch, initEd] at hk
+  · intro b i hb; simp [launch, initEd] at hb
+  · simp [launch]
+  · intro c hc; simp [launch] at hc
+
+theorem invF_init : InvF init := invF_launch _ _ _ _ _ _ trivial
 
 /-- InvF reads only cfg, disk, the widgets' edits, the explorer and the core. -/
 theorem invF_same {s t : S} (h : InvF s) (h1 : t.cfg = s.cfg) (h2 : t.disk = s.disk)
@@ -1767,7 +1821,11 @@ theorem invF_stepO {s t : S} (h : InvF s) (e : Ev) (he : stepO fixed s e = some 
       t.ed.padEdit = s.ed.padEdit → t.fe = s.fe → t.core = s.core → InvF t :=
     fun h _ h1 h2 h3 h4 h5 h6 => invF_same h h1 h2 h3 h4 h5 h6
   cases e with
-  | restart a => simp only [stepO] at he; cases he; exact invF_launch _ _ _ _ _ h.disk
+  | restart a => simp only [stepO] at he; cases he; exact invF_launch _ _ _ _ _ _ h.disk
+  | setSys b => simp only [stepO] at he; cases he; exact invF_same h rfl rfl rfl rfl rfl rfl
+  | toggleFs =>
+    simp only [stepO] at he; split at he <;> cases he
+    exact invF_save (invF_mk' h (cfgGood_fs h.cfg _) h.disk rfl rfl h.fe rfl)
   | corruptFile =>
     simp only [stepO] at he; cases he; exact ⟨h.cfg, trivial, h.kbEdit, h.padEdit, h.fe, h.core⟩
   | renderTop =>
@@ -1914,5 +1972,95 @@ theorem fixed_reset_is_defaults (c : Cfg) :
 theorem real_reset_keeps (c : Cfg) :
     (factoryCfg real c).interp = c.interp ∧ (factoryCfg real c).speed = c.speed :=
   ⟨rfl, rfl⟩
+
+/-! ## Fullscreen at start
+
+The code as it is never saves fullscreen: every start is windowed, however
+dingbat quit. Fixed (`fsRestore`), a start is fullscreen exactly when the
+last run was fullscreen and the platform restores windows: Windows and
+Linux always (browsers' F11 and games' display mode come back as left); on
+macOS when "Close windows when quitting an application" is off, as AppKit
+apps restore a fullscreen window only then. -/
+
+/-- Cmd/Ctrl+F, quit, start again: windowed. -/
+theorem bug_fullscreen_forgotten :
+    ((run real init (keys [.toggleFs])).map (·.fs)) = some true ∧
+    ((run real init (keys [.toggleFs] ++ [.restart {}])).map (·.fs)) = some false := by
+  decide
+
+/-- Fixed: back fullscreen; not when the platform closes windows at quit;
+and a flag that start did not honour is gone, so turning the macOS switch
+off later brings back nothing stale. -/
+theorem regress_fullscreen_forgotten :
+    ((run fixed init (keys [.toggleFs] ++ [.restart {}])).map (·.fs)) = some true ∧
+    ((run fixed init (keys [.toggleFs] ++ [.setSys false, .restart {}])).map (·.fs)) = some false ∧
+    ((run fixed init (keys [.toggleFs] ++ [.setSys false, .restart {}, .setSys true, .restart {}])).map
+      (·.fs)) = some false ∧
+    ((run fixed init (keys [.toggleFs] ++ keys [.toggleFs] ++ [.restart {}])).map (·.fs)) =
+      some false := by
+  decide
+
+/-- The saved flag and the file follow the window. -/
+def FsOK (s : S) : Prop :=
+  s.cfg.fullscreen = s.fs ∧ ∀ c, s.disk = .ok c → c.fullscreen = s.fs
+
+theorem fsOK_of {s t : S} (h : FsOK s) (h1 : t.fs = s.fs)
+    (h2 : t.cfg.fullscreen = s.cfg.fullscreen) (h3 : t.disk = s.disk ∨ t.disk = .ok t.cfg) :
+    FsOK t := by
+  refine ⟨by rw [h1, h2]; exact h.1, ?_⟩
+  intro c hc
+  rcases h3 with h3 | h3
+  · rw [h1]; exact h.2 c (h3 ▸ hc)
+  · rw [h3] at hc; cases hc; rw [h1, h2]; exact h.1
+
+theorem cfg0_fullscreen {d : Disk} {c : Cfg} (a : Cli) (hd : d = .ok c) :
+    (cfg0 fixed d a).fullscreen = c.fullscreen := by
+  subst hd; rfl
+
+/-- Whatever the file says, a fixed start leaves cfg, the file and the
+window agreeing. -/
+theorem fsOK_launch (d : Disk) (a : Cli) (g : Nat) (l y : Bool) :
+    FsOK (launch fixed d a g l y) := by
+  have hdisk : ∀ c, (if (fixed.moveAside && d.isBad) = true then Disk.missing else d) = .ok c →
+      c.fullscreen = (cfg0 fixed d a).fullscreen := by
+    intro c hc
+    have : d = .ok c := by revert hc; cases d <;> simp [Disk.isBad, fixed]
+    exact (cfg0_fullscreen a this).symm
+  revert hdisk
+  simp only [FsOK, launch]
+  generalize cfg0 fixed d a = c0
+  cases hb : c0.fullscreen <;> cases y <;> simp [fixed, hb]
+
+theorem fsOK_stepO {s t : S} (h : FsOK s) (e : Ev) (he : stepO fixed s e = some t) : FsOK t := by
+  cases e with
+  | restart a => simp only [stepO] at he; cases he; exact fsOK_launch _ _ _ _ _
+  | corruptFile =>
+    simp only [stepO] at he; cases he
+    exact ⟨h.1, fun c hc => by cases hc⟩
+  | toggleFs =>
+    simp only [stepO] at he; split at he <;> cases he
+    exact ⟨rfl, fun c hc => by cases hc; rfl⟩
+  | _ =>
+    simp only [stepO] at he <;> (try split at he) <;> (try cases he) <;>
+    first
+    | exact fsOK_of h rfl rfl (Or.inl rfl)
+    | exact fsOK_of h rfl rfl (Or.inr rfl)
+    | (split <;> first
+        | exact fsOK_of h rfl rfl (Or.inl rfl)
+        | exact fsOK_of h rfl rfl (Or.inr rfl)
+        | (split <;> first
+            | exact fsOK_of h rfl rfl (Or.inl rfl)
+            | exact fsOK_of h rfl rfl (Or.inr rfl)))
+
+theorem fsOK_reachable : ∀ s, Reachable fixed s → FsOK s :=
+  reachable_induct fixed ⟨rfl, fun c hc => by cases hc⟩ fun _ _ e h he => fsOK_stepO h e he
+
+/-- Fixed, in general: a quit (or crash) and a start come back fullscreen
+exactly when the window was fullscreen and the platform restores windows. -/
+theorem fixed_restart_fullscreen (s : S) (hs : Reachable fixed s) (c : Cfg) (hd : s.disk = .ok c)
+    (a : Cli) : (step fixed s (.restart a)).fs = (s.fs && s.sysRestore) := by
+  have hc := (fsOK_reachable s hs).2 c hd
+  show (fixed.fsRestore && (cfg0 fixed s.disk a).fullscreen && s.sysRestore) = (s.fs && s.sysRestore)
+  rw [cfg0_fullscreen a hd, hc]; rfl
 
 end DesktopState.Settings

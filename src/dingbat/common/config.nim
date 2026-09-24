@@ -299,6 +299,9 @@ type
     # scanline renderer at next load; less accurate, other niceties suspended.
     speed_mode*:        bool
     frame_size*:        int      # window size, a multiple of the native picture (1..8)
+    # The window was fullscreen when dingbat last quit (or last toggled it);
+    # window_restore.nim decides whether the next start honours it.
+    fullscreen*:        bool
     # Each file key's text as this process last read or wrote it. save_config
     # writes only the keys whose value differs and takes the rest from the
     # file as it is now, so a second dingbat window's changes survive.
@@ -336,6 +339,7 @@ proc new_config*(): Config =
     mp2k_hle:        false,
     speed_mode:      false,
     frame_size:      3,
+    fullscreen:      false,
   )
 
 proc reset_to_defaults*(cfg: Config) =
@@ -348,6 +352,7 @@ proc reset_to_defaults*(cfg: Config) =
   d.bios_path       = cfg.bios_path
   d.gb_bootrom_path = cfg.gb_bootrom_path
   d.headless        = cfg.headless
+  d.fullscreen      = cfg.fullscreen  # where the window is, not a setting
   d.file_entries    = cfg.file_entries
   d.notice          = cfg.notice
   d.save_error      = cfg.save_error
@@ -466,6 +471,8 @@ proc parse_config(j: JsonNode): Config =
     cfg.speed_mode = j["speed_mode"].getBool(false)
   if j.hasKey("frame_size") and j["frame_size"].kind == JInt:
     cfg.frame_size = clamp(j["frame_size"].getInt(3), 1, 8)
+  if j.hasKey("fullscreen"):
+    cfg.fullscreen = j["fullscreen"].getBool(false)
   # bios path is nested under "gba" key to match Crystal's config structure
   var hle_key_present = false
   if j.hasKey("gba") and j["gba"].kind == JObject:
@@ -597,6 +604,7 @@ proc config_entries(cfg: Config): seq[ConfigEntry] =
     ("mp2k_hle",           "mp2k_hle: " & $cfg.mp2k_hle),
     ("speed_mode",         "speed_mode: " & $cfg.speed_mode),
     ("frame_size",         "frame_size: " & $cfg.frame_size),
+    ("fullscreen",         "fullscreen: " & $cfg.fullscreen),
     ("gba.bios",           "  bios:" & bios),
     ("gba.hle",            "  hle: " & $cfg.use_hle),
     ("gba.hle_after_bios", "  hle_after_bios: " & $cfg.hle_after_bios),
