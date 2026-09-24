@@ -37,7 +37,7 @@ proc same_settings(a, b: Config): bool =
     a.sgb_border == b.sgb_border and a.rewind == b.rewind and
     a.pitch_correct_ff == b.pitch_correct_ff and a.audio_lowpass == b.audio_lowpass and
     a.fifo_interp == b.fifo_interp and a.mp2k_hle == b.mp2k_hle and
-    a.speed_mode == b.speed_mode
+    a.speed_mode == b.speed_mode and a.frame_size == b.frame_size
 
 echo "Key bindings survive a restart"
 block:
@@ -213,6 +213,55 @@ block:
   boot = boot_settings(cfg, BootOverrides())
   check not boot.use_hle and boot.hle_after_bios and boot.note.len == 0, "with the file: as configured"
   check boot_settings(new_config(), BootOverrides()).note.len == 0, "HLE with no file needs no note"
+
+echo "Reset to Defaults resets every setting and keeps the user's data"
+block:
+  let cfg = new_config()
+  cfg.explorer_dir = dir / "roms"
+  cfg.recents = @[dir / "a.gba"]
+  cfg.bios_path = dir / "gba_bios.bin"
+  cfg.gb_bootrom_path = dir / "dmg_boot.bin"
+  cfg.keybindings = homerow_keybindings()
+  cfg.controller_bindings = {cint(0): Input.B}.toTable
+  cfg.run_bios = true
+  cfg.use_hle = false
+  cfg.hle_after_bios = true
+  cfg.gb_fifo = false
+  cfg.gb_rumble = false
+  cfg.volume = 12
+  cfg.mute = true
+  cfg.color_correction = false
+  cfg.video_filter = vfGrid
+  cfg.lcd_response = true
+  cfg.preserve_aspect = false
+  cfg.sgb_enable = true
+  cfg.sgb_border = false
+  cfg.rewind = false
+  cfg.pitch_correct_ff = true
+  cfg.audio_lowpass = true
+  cfg.fifo_interp = false
+  cfg.mp2k_hle = true
+  cfg.speed_mode = true
+  cfg.frame_size = 5
+  cfg.reset_to_defaults()
+  let want = new_config()
+  want.explorer_dir = dir / "roms"
+  want.recents = @[dir / "a.gba"]
+  want.bios_path = dir / "gba_bios.bin"
+  want.gb_bootrom_path = dir / "dmg_boot.bin"
+  check cfg.fifo_interp and not cfg.speed_mode, "Audio interpolation back on, Speed mode off"
+  check same_settings(cfg, want) and cfg.frame_size == want.frame_size,
+        "every other setting is the default; paths and recents kept"
+
+echo "Frame size is saved"
+block:
+  let path = dir / "frame.yml"
+  let cfg = new_config()
+  cfg.frame_size = 6
+  save_config_file(cfg, path)
+  check load_config_file(path).frame_size == 6, "6x comes back"
+  writeFile(path, "---\nframe_size: 99\n")
+  check load_config_file(path).frame_size == 8, "a hand-edited size is clamped"
 
 removeDir(dir)
 

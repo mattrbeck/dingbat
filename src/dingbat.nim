@@ -1378,6 +1378,10 @@ proc render_imgui() =
             app.rewind.clear()  # suspended while on; history would go stale
           apply_speed_mode()
           save_config(app.cfg)
+        # The GB renderer swap waits for a load; say so where it is chosen
+        if app.emu_kind == ekGB:
+          igSetItemTooltip("On a Game Boy game this takes effect at the next " &
+                           "load or Reset.")
         # 2x Speed stays audio-paced (at double rate); Fast Forward is
         # inverted audio sync — unsynced emulation runs uncapped, so
         # checked == not sync. Radio-style: fast forward would silently
@@ -1475,7 +1479,9 @@ proc render_imgui() =
           for s in 1 .. 8:
             if igMenuItem_Bool(cstring($s & "x"), nil, s == app.scale, true):
               app.scale = s
+              app.cfg.frame_size = s
               if app.emu_kind != ekNone: resize_to_output()
+              save_config(app.cfg)
           igSeparator()
           if igMenuItem_BoolPtr(cstring("Fullscreen  " & MOD_KEY_STR & "+F"),
                                 nil, addr app.fullscreen, true):
@@ -2219,7 +2225,7 @@ proc main() =
   let window = createWindow(
     "dingbat",
     SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-    cint(GBA_W * 3), cint(GBA_H * 3),
+    cint(GBA_W * cfg.frame_size), cint(GBA_H * cfg.frame_size),
     SDL_WINDOW_OPENGL or SDL_WINDOW_RESIZABLE
   )
   if window == nil:
@@ -2255,15 +2261,16 @@ proc main() =
 
   let fe = new_file_explorer(cfg)
   let ce = new_config_editor(cfg, fe)
-  # "Reset to Defaults" changes color-correction and volume, which no widget
-  # owns — push them into the live GL uniform and APU here.
+  # "Reset to Defaults" changes settings no widget owns (color correction,
+  # volume, speed mode and the audio niceties, frame size) — push them into
+  # the live GL uniform, core and window here.
   ce.live_sync = proc() =
     apply_color_correction()
     apply_master_volume()
-    apply_pitch_correct_ff()
-    apply_audio_lowpass()
-    apply_fifo_interp()
-    apply_mp2k_hle()
+    apply_speed_mode()  # also re-applies pitch, low-pass, interpolation, MP2K
+    if app.scale != app.cfg.frame_size:
+      app.scale = app.cfg.frame_size
+      if app.emu_kind != ekNone: resize_to_output()
 
   app = AppState(
     cfg:             cfg,
@@ -2282,7 +2289,8 @@ proc main() =
     cheats:          new_cheats_widget(),
     save_states:     new_save_states_widget(),
     dbg:             nil,
-    scale:           (when defined(gputime): parseInt(getEnv("DINGBAT_SCALE", "3")) else: 3),
+    scale:           (when defined(gputime): parseInt(getEnv("DINGBAT_SCALE", "3"))
+                      else: cfg.frame_size),
     running:         true,
     paused:          false,
     fullscreen:      false,

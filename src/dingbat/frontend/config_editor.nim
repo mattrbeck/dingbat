@@ -17,8 +17,8 @@ type
     controller*:  ControllerWidget
     open*:        bool
     prev_open:    bool
-    # Pushes settings no widget owns (color-correction uniform, master volume)
-    # into the live core. Set by the app; may be nil.
+    # Pushes settings no widget owns (color-correction uniform, master volume,
+    # speed mode, frame size) into the live core. Set by the app; may be nil.
     live_sync*:   proc() {.closure.}
 
 proc new_config_editor*(cfg: Config; fe: FileExplorer): ConfigEditor =
@@ -47,29 +47,10 @@ proc do_apply(ed: ConfigEditor) =
   save_config(ed.cfg)
 
 # Restore every setting to its default while keeping the user's data (file
-# paths, recents, explorer directory, the runtime headless flag). Defaults are
-# copied from a fresh new_config() so they live in exactly one place.
+# paths, recents, explorer directory, the runtime headless flag); the list of
+# what is kept lives in reset_to_defaults, so a new setting resets too.
 proc do_factory_reset(ed: ConfigEditor) =
-  let d = new_config()
-  ed.cfg.keybindings         = d.keybindings
-  ed.cfg.controller_bindings = d.controller_bindings
-  ed.cfg.run_bios            = d.run_bios
-  ed.cfg.use_hle             = d.use_hle
-  ed.cfg.hle_after_bios      = d.hle_after_bios
-  ed.cfg.gb_fifo             = d.gb_fifo
-  ed.cfg.gb_rumble           = d.gb_rumble
-  ed.cfg.volume              = d.volume
-  ed.cfg.mute                = d.mute
-  ed.cfg.color_correction    = d.color_correction
-  ed.cfg.video_filter        = d.video_filter
-  ed.cfg.lcd_response        = d.lcd_response
-  ed.cfg.preserve_aspect     = d.preserve_aspect
-  ed.cfg.sgb_enable          = d.sgb_enable
-  ed.cfg.sgb_border          = d.sgb_border
-  ed.cfg.rewind              = d.rewind
-  ed.cfg.pitch_correct_ff    = d.pitch_correct_ff
-  ed.cfg.audio_lowpass       = d.audio_lowpass
-  ed.cfg.mp2k_hle            = d.mp2k_hle
+  ed.cfg.reset_to_defaults()
   ed.do_reset()
   ed.do_apply()
   if ed.live_sync != nil:

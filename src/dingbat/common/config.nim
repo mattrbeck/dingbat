@@ -298,6 +298,7 @@ type
     # Speed mode for low-end devices: GBA frameskip + 2x CPU underclock, GB
     # scanline renderer at next load; less accurate, other niceties suspended.
     speed_mode*:        bool
+    frame_size*:        int      # window size, a multiple of the native picture (1..8)
     # Each file key's text as this process last read or wrote it. save_config
     # writes only the keys whose value differs and takes the rest from the
     # file as it is now, so a second dingbat window's changes survive.
@@ -334,7 +335,23 @@ proc new_config*(): Config =
     fifo_interp:     true,
     mp2k_hle:        false,
     speed_mode:      false,
+    frame_size:      3,
   )
+
+proc reset_to_defaults*(cfg: Config) =
+  ## Every setting back to new_config()'s, keeping the user's data (file
+  ## paths, recents, the explorer folder), the runtime headless flag and
+  ## this process's file bookkeeping. A field added later resets too.
+  let d = new_config()
+  d.explorer_dir    = cfg.explorer_dir
+  d.recents         = cfg.recents
+  d.bios_path       = cfg.bios_path
+  d.gb_bootrom_path = cfg.gb_bootrom_path
+  d.headless        = cfg.headless
+  d.file_entries    = cfg.file_entries
+  d.notice          = cfg.notice
+  d.save_error      = cfg.save_error
+  cfg[] = d[]
 
 type
   BootOverrides* = object
@@ -447,6 +464,8 @@ proc parse_config(j: JsonNode): Config =
     cfg.mp2k_hle = j["mp2k_hle"].getBool(false)
   if j.hasKey("speed_mode"):
     cfg.speed_mode = j["speed_mode"].getBool(false)
+  if j.hasKey("frame_size") and j["frame_size"].kind == JInt:
+    cfg.frame_size = clamp(j["frame_size"].getInt(3), 1, 8)
   # bios path is nested under "gba" key to match Crystal's config structure
   var hle_key_present = false
   if j.hasKey("gba") and j["gba"].kind == JObject:
@@ -577,6 +596,7 @@ proc config_entries(cfg: Config): seq[ConfigEntry] =
     ("fifo_interp",        "fifo_interp: " & $cfg.fifo_interp),
     ("mp2k_hle",           "mp2k_hle: " & $cfg.mp2k_hle),
     ("speed_mode",         "speed_mode: " & $cfg.speed_mode),
+    ("frame_size",         "frame_size: " & $cfg.frame_size),
     ("gba.bios",           "  bios:" & bios),
     ("gba.hle",            "  hle: " & $cfg.use_hle),
     ("gba.hle_after_bios", "  hle_after_bios: " & $cfg.hle_after_bios),
