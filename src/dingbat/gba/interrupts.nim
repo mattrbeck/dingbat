@@ -18,6 +18,14 @@ proc set_interrupt_flag*(intr: Interrupts; bit: int) {.inline.} =
 # Cycles from a peripheral raising IF to CPU recognition (mGBA suite Timer
 # IRQ rows). Register writes (IE/IF/IME) re-evaluate with no delay.
 const IRQ_SYNC_DELAY* {.intdefine.} = 3
+const UNDER_BURST_CREDIT {.intdefine.} = 1
+  ## A timer interrupt raised while a burst holds the CPU off the bus is
+  ## recognised IRQ_SYNC_DELAY - UNDER_BURST_CREDIT cycles after the CPU
+  ## gets the bus back, or IRQ_SYNC_DELAY after the raise if that is later:
+  ## one stage of the synchroniser keeps counting while the CPU is stopped.
+  ## tests/roms/payloads/irqstorm.s on an AGB SP, TM0 every 16 cycles under
+  ## a 1..4096-word EWRAM burst: 0 reads the five cells one cycle late, 2 four
+  ## of them one cycle early.
 
 # Cycles of continued execution after a register write (IME 0->1, IE unmask,
 # msr clearing CPSR.I) releases an already-parked IF bit. The window is
@@ -54,7 +62,9 @@ proc stalled_for(intr: Interrupts; now: CycleCount): int {.inline.} =
 proc raise_synced*(intr: Interrupts; bit: int) =
   let now = intr.gba.scheduler.cycles
   if intr.pipe_raised == 0:
-    let delay = IRQ_SYNC_DELAY + intr.stalled_for(now)
+    let st = intr.stalled_for(now)
+    let delay = if st == 0: IRQ_SYNC_DELAY
+                else: max(IRQ_SYNC_DELAY, st + IRQ_SYNC_DELAY - UNDER_BURST_CREDIT)
     intr.pipe_bits = 0
     intr.pipe_sampled = false
     intr.pipe_at = now
