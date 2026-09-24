@@ -168,16 +168,18 @@ test("initFromEmscripten flushes no outgoing core over the incoming game's save"
 // until something flushes it. persistSave flushes the solo core first, so it
 // lands in the outgoing game's own save, not nowhere and not the next game's.
 
+const flushableCore = (app) => app.runIn(`
+  core.dirty = false;
+  Module._wasm_flush_save = () => {
+    if (!core.dirty) return;
+    FS.files.set("rom.sav", new Uint8Array(core.ram));
+    core.dirty = false;
+  };
+`);
+
 test("RAM a paused core holds unflushed is persisted as its own game's save", async () => {
   const app = await boot();
-  app.runIn(`
-    core.dirty = false;
-    Module._wasm_flush_save = () => {
-      if (!core.dirty) return;
-      FS.files.set("rom.sav", new Uint8Array(core.ram));
-      core.dirty = false;
-    };
-  `);
+  flushableCore(app);
   await playAThenHome(app);
   // A state loaded while paused: the core's RAM, marked dirty, no frame run.
   app.runIn("core.ram = [0x0a, 9]; core.dirty = true;");
@@ -185,6 +187,31 @@ test("RAM a paused core holds unflushed is persisted as its own game's save", as
   await play(app, "B.gba");
   eq(app.idb.get("save:A.gba"), u8(0x0a, 9));
   assert.equal(core(app).ram, null, "B booted on no battery file");
+});
+
+// The Resume snapshot's signature says which battery the state carries: the
+// RAM in the state, flushed, not a file the flush has not caught up with.
+test("a snapshot of a paused core records the battery its state carries", async () => {
+  const app = await boot();
+  flushableCore(app);
+  await playAThenHome(app);
+  app.runIn("core.ram = [0x0a, 9]; core.dirty = true;");
+  app.document.hidden = true;
+  await app.dispatchDoc("visibilitychange");
+  await drain();
+  const auto = app.idb.get("stateauto:A.gba");
+  assert.equal(auto.bytes[1], 9, "the state carries the loaded RAM");
+  assert.equal(auto.saveSig, app.runIn("saveSignature(new Uint8Array([0x0a, 9]))"));
+});
+
+test("...and so is it when the game is closed", async () => {
+  const app = await boot();
+  flushableCore(app);
+  await playAThenHome(app);
+  app.runIn("core.ram = [0x0a, 9]; core.dirty = true;");
+
+  assert.equal(await app.runIn("unloadGame()"), true);
+  eq(app.idb.get("save:A.gba"), u8(0x0a, 9), "the close's flush wrote the core's RAM");
 });
 
 test("a game with a save boots on its own save", async () => {
@@ -522,6 +549,16 @@ test("Resume applies a snapshot taken with the live battery", async () => {
   assert.equal(core(app).applied, 1);
 });
 
+test("Resume is refused over RAM a paused core holds unflushed", async () => {
+  const app = await boot();
+  flushableCore(app);
+  const pill = await resumeOffered(app);
+  app.runIn("core.ram = [0x0a, 5]; core.dirty = true;"); // a state loaded while paused
+  pill.onclick();
+  await drain();
+  assert.equal(core(app).applied, 0, "the snapshot was not applied over it");
+});
+
 test("Resume is refused once the game has saved in game, before any autosave", async () => {
   const app = await boot();
   const pill = await resumeOffered(app);
@@ -529,6 +566,35 @@ test("Resume is refused once the game has saved in game, before any autosave", a
   pill.onclick();
   await drain();
   assert.equal(core(app).applied, 0, "the older snapshot was not applied");
+});
+
+// ── Import (SavePersistence, found by the model of the flush) ───────────────
+// An imported save replaces the loaded game's. The reboot used to persist
+// "the outgoing game" first - with the core's own RAM flushed over the
+// imported file - and to snapshot the replaced session under the imported
+// save's signature, so Resume would put the old battery back.
+
+test("an imported save survives the reboot, and no Resume offers the replaced one", async () => {
+  const app = await boot();
+  flushableCore(app);
+  app.api.gdriveToken = "test-token";
+  app.api.syncState = { queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [],
+                        sigs: {}, rmt: {}, connected: true };
+  await playAThenHome(app);
+  app.runIn("core.ram = [0x0a, 7]; core.dirty = true;"); // a state loaded while paused
+
+  const imported = u8(0x0a, 0x42);
+  await app.runIn("applyImportedSave")(imported, "A.sav");
+  await drain();
+  eq(app.idb.get("save:A.gba"), imported, "save:A is the import");
+  eq(core(app).ram, [...imported], "the game rebooted on it");
+  assert.ok(app.api.syncState.queueUp.includes("save:A.gba"), "and it is queued for Drive");
+  const offer = app.document.getElementById("toast").children.find((c) =>
+    c.classList.contains("has-action") && !c.classList.contains("leaving"));
+  if (offer) { offer.onclick(); await drain(); }
+  assert.equal(core(app).applied, 0, "no Resume puts the replaced battery back");
+  await autosave(app);
+  eq(app.idb.get("save:A.gba"), imported);
 });
 
 // ── Low: the quota retry (SavePersistence) ──────────────────────────────────
@@ -557,6 +623,61 @@ test("a quota retry does not put older bytes back over a newer save", async () =
   await drain();
   eq(app.idb.get("save:A.gba"), v2, "the newer save stands");
   assert.ok(app.toasts.some((t) => t.includes("gave up its file")), "the eviction is still told");
+});
+
+// The same retry against a Reset (or a Delete) instead of a newer save:
+// SavePersistence.open_quota_retry_resurrects_reset_save, now regress_*.
+for (const [label, call] of [["Reset", `resetGameAction("A.gba")`],
+                             ["Delete", `deleteGameAction("A.gba")`]]) {
+  test(`a quota retry does not put a save back after ${label}`, async () => {
+    const app = await boot();
+    await play(app, "A.gba");
+    let failNext = true;
+    app.state.idbFail = (op, key) => {
+      if (op === "put" && key === "save:A.gba" && failNext) {
+        failNext = false;
+        const e = new Error("full"); e.name = "QuotaExceededError";
+        return e;
+      }
+      return false;
+    };
+    const gate = hold(app, "delete", "rom:C.gba");
+    gameSaves(app, 1);
+    const first = autosave(app);       // rejected: gives up C's ROM, then retries
+    await parked(gate);
+    await app.runIn(call);             // the user wipes the save meanwhile
+    await drain();
+    assert.equal(app.idb.get("save:A.gba"), undefined);
+    gate.release();
+    await first;
+    await drain();
+    assert.equal(app.idb.get("save:A.gba"), undefined, "the wiped save stays wiped");
+  });
+}
+
+test("a quota retry does not put a save back over an imported one", async () => {
+  const app = await boot();
+  await play(app, "A.gba");
+  let failNext = true;
+  app.state.idbFail = (op, key) => {
+    if (op === "put" && key === "save:A.gba" && failNext) {
+      failNext = false;
+      const e = new Error("full"); e.name = "QuotaExceededError";
+      return e;
+    }
+    return false;
+  };
+  const gate = hold(app, "delete", "rom:C.gba");
+  gameSaves(app, 1);
+  const first = autosave(app);
+  await parked(gate);
+  const imported = u8(0x0a, 0x42);
+  await app.runIn("applyImportedSave")(imported, "A.sav");
+  await drain();
+  gate.release();
+  await first;
+  await drain();
+  eq(app.idb.get("save:A.gba"), imported, "the import stands");
 });
 
 // ── Medium: a load under a pausing overlay (RunPause) ──────────────────────

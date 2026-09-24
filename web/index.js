@@ -1557,7 +1557,12 @@ const perGameKeys = (name) => {
 const allPerGameKeys = (name) => Object.values(perGameKeys(name)).flat();
 
 const deleteKeys = async (keys) => {
-  for (let k of keys) await dbDelete(k);
+  for (let k of keys) {
+    // In the segment that issues the delete: a persist of this save waiting
+    // on a quota eviction must not put it back (persistSeq).
+    if (k.startsWith("save:")) retireSavePuts(k.slice(5));
+    await dbDelete(k);
+  }
 };
 
 // Remove one ROM's save data. The auto-resume snapshot goes with it: it is
@@ -1578,6 +1583,7 @@ const resetCurrentSaveFile = async () => {
   const game = detachLoadedGame();
   if (!game) return;
   const name = game.originalName;
+  retireSavePuts(name); // as deleteKeys
   await dbDelete("save:" + name);
   await dbDelete("save:" + name + "-p2");
   // The reboot ends in offerAutoResume, which would offer to un-reset.
@@ -5577,18 +5583,26 @@ const saveSignature = (data) => {
 
 // Each persist of a game's save takes the next number: a put waiting on a
 // quota eviction gives way to a later persist of the same save that went in
-// meanwhile, instead of putting its older bytes back over it.
+// meanwhile, instead of putting its older bytes back over it. A delete of the
+// save (Reset, Delete) takes one too, so the waiting put gives way to that.
 const persistSeq = new Map();
+const retireSavePuts = (name) => persistSeq.set(name, (persistSeq.get(name) || 0) + 1);
+
+// The solo core's battery RAM into its file now, if it changed. A paused core
+// runs no frames to flush it, and a state loaded while paused leaves the RAM
+// it carried only in the core: whatever reads the file for the loaded game
+// (persistSave, persistAutoState's signature) flushes it first.
+const flushSoloSave = () => {
+  if (currentRomName && !linkMode && !rollbackMode &&
+      typeof Module !== "undefined" && Module._wasm_flush_save) {
+    Module._wasm_flush_save();
+  }
+};
 
 const persistSave = async (romName, originalName) => {
   let savName = romName.substring(0, romName.lastIndexOf(".")) + ".sav";
   try {
-    // The solo core's file: a paused core runs no frames to flush it, and a
-    // state loaded while paused leaves the RAM it carried only in the core.
-    if (romName === currentRomName && !linkMode && !rollbackMode &&
-        typeof Module !== "undefined" && Module._wasm_flush_save) {
-      Module._wasm_flush_save();
-    }
+    if (romName === currentRomName) flushSoloSave(); // the solo core's file
     let data = FS.readFile(savName);
     if (data && data.length > 0) {
       const sig = saveSignature(data);
@@ -5672,13 +5686,20 @@ const applyImportedSave = async (bytes, fileName) => {
     if (!confirm("You've selected a save file that doesn't match the name of the current game. Are you sure you want to overwrite the save?")) return;
   }
   bytes = unwrapped.bytes;
-  let savName = currentRomName.substring(0, currentRomName.lastIndexOf(".")) + ".sav";
-  writeToFS(savName, bytes);
-  await dbPut("save:" + currentOriginalName, new Uint8Array(bytes));
+  // Detached first, as Reset: the save being replaced must not be persisted
+  // on the way out (the flush would write the core's own RAM over the
+  // imported file), nor snapshotted for Resume under the imported save's
+  // signature (Resume would then put the replaced battery back). The reboot
+  // installs the import from save:<name>.
+  const game = detachLoadedGame();
+  if (!game) return;
+  retireSavePuts(game.originalName); // a waiting quota retry gives way (persistSeq)
+  await dbPut("save:" + game.originalName, new Uint8Array(bytes));
+  markUpload("save:" + game.originalName); // no flush will: its signature is the installed one
   if (unwrapped.format)
     showToast(`Imported ${unwrapped.format} save` +
       (unwrapped.title ? ` — ${unwrapped.title}` : ""));
-  loadRom(currentRomName, currentOriginalName);
+  loadRom(game.romName, game.originalName);
 };
 
 document.getElementById("load-save").addEventListener("click", () => {
@@ -6005,14 +6026,17 @@ const persistAutoState = () => {
   if (linkMode || rollbackMode || netActive()) return; // frame-synced modes
   const bytes = captureStateBytes();
   if (!bytes) return;
+  // liveSaveSig flushes first: the signature is the battery this state carries.
   return dbPut(autoStateKey(currentOriginalName),
                { bytes, ts: Date.now(), saveSig: liveSaveSig() }).catch(() => {});
 };
 
 // The loaded game's battery as it is now: its FS .sav, which the core writes
-// the moment the game saves and save:<name> catches up with only at the next
-// flush (up to 5 s later).
+// the moment the game saves (flushed first: a paused core's RAM may be ahead
+// of it) and save:<name> catches up with only at the next autosave (up to 5 s
+// later).
 const liveSaveSig = () => {
+  flushSoloSave();
   let sav = null;
   try { sav = FS.readFile(stripExt(currentRomName) + ".sav"); } catch {}
   return sigOfSave(sav);
@@ -10103,13 +10127,15 @@ const unloadGame = async ({ flushSave = true } = {}) => {
   if (gen !== loadGen) return false;
   await storeLastFrame({ force: true });
   if (gen !== loadGen) return false;
-  // Detach, flush and drop the FS .sav with no await between them: once the
-  // names are null no flush path can re-persist this game's save, the flush
-  // reads the file before its first await, and the unlink keeps a later load
-  // from picking up stale battery data.
+  // Flush, detach and drop the FS .sav with no await between them. The flush
+  // goes first, while the name still says the core is this game's (it
+  // flushes the core's unwritten RAM to the file only then) and reads the
+  // file before its first await; once the names are null no flush path can
+  // re-persist this game's save; the unlink keeps a later load from picking
+  // up stale battery data.
+  const flushed = flushSave ? persistSave(romName, originalName) : null;
   currentRomName = null;
   currentOriginalName = null;
-  const flushed = flushSave ? persistSave(romName, originalName) : null;
   try { FS.unlink(stripExt(romName) + ".sav"); } catch {}
   // The cheat list belongs to the game that left; restoreCheats refills it.
   cheatList = [];

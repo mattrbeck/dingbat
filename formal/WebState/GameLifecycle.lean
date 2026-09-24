@@ -1,39 +1,45 @@
 /-
 # The game lifecycle: loading, switching, closing and resuming a game
 
-Models `web/index.js` as fixed by the commit "web: a game is named only once
-its core and save are in; loads and closes take a token" (line numbers at that
-commit). The model at dd7ba741f, and the eight counterexamples it proved there,
+Models `web/index.js` as fixed on the branch worktree-lean-web-state, up to
+the commit "web: flush the solo core wherever its file is read; Reset, Delete
+and Import retire a waiting quota retry" (line numbers at that commit). The
+model at dd7ba741f, and the eight counterexamples it proved there,
 are in the history of this file; each of those traces is replayed here against
 the fixed code as a `regress_*` theorem.
 
 | JS                                             | lines        |
 |------------------------------------------------|--------------|
-| `launchRom` (takes the load token)             | 4505-4520    |
-| library tile click (resume-if-loaded shortcut) | 5151-5161    |
-| `handleRomFile` / `handleZipFile` (open, drop) | 8187-8253    |
-| `loadGen` / `loadingName` / `nextLoadGen`      | 7821-7835    |
-| `loadRom`: L0 7954-7969, L1 7970-7971,         | 7954-8044    |
-|   L2 7972-7973, L3 7974-7980 (loadingName,     |              |
-|   dbGet save:), L4 7981-8028 (ROM +            |              |
+| `launchRom` (takes the load token)             | 4535-4550    |
+| library tile click (resume-if-loaded           | 5181-5195    |
+|   shortcut; a Drive-only tile takes the token  |              |
+|   at the tap, 5192, and launches after its     |              |
+|   download only if no later tap took it, 5194) |              |
+| `handleRomFile` / `handleZipFile` (open, drop) | 8245-8311    |
+| `loadGen` / `loadingName` / `nextLoadGen`      | 7879-7893    |
+| `loadRom`: L0 8012-8027, L1 8028-8029,         | 8012-8102    |
+|   L2 8030-8031, L3 8036-8038 (loadingName,     |              |
+|   dbGet save:), L4 8039-8085 (ROM +            |              |
 |   installSave + init + names, one segment),    |              |
-|   L5 8029-8044                                 |              |
-| `installSave` / `persistSave`                  | 5263-5319    |
-| `persistAutoState` / `autoStateMatchesSave`    | 5687-5708    |
-| `offerAutoResume` + the Resume toast action    | 5720-5743    |
-| `pushToast` (an offer's tap handler)           | 5413-5461    |
-| `showMainMenu` (go home) / `resumeGame`        | 9468-9491    |
-| `setPausedCardShown` / `updatePausedCard`      | 9698-9723    |
-| `unloadGame`: U0 9749-9755, U1 9756-9757,      | 9749-9788    |
-|   U2 9758-9788 (detach, flush, unlink: one     |              |
-|   segment); the card's X 9790                  |              |
-| 5 s autosave, `beforeunload`, `pagehide`,      | 11314-11363  |
+|   L5 8086-8102                                 |              |
+| `flushSoloSave` / `persistSave` /              | 5313-5366    |
+|   `installSave`                                |              |
+| `persistAutoState` / `liveSaveSig` /           | 5742-5766    |
+|   `autoStateMatchesSave`                       |              |
+| `offerAutoResume` + the Resume toast action    | 5778-5800    |
+| `pushToast` (an offer's tap handler)           | 5468-5516    |
+| `showMainMenu` (go home) / `resumeGame`        | 9547-9570    |
+| `setPausedCardShown` / `updatePausedCard`      | 9777-9802    |
+| `unloadGame`: U0 9828-9834, U1 9835-9836,      | 9828-9869    |
+|   U2 9837-9869 (flush, detach, unlink: one     |              |
+|   segment); the card's X 9871                  |              |
+| 5 s autosave, `beforeunload`, `pagehide`,      | 11395-11444  |
 |   `visibilitychange` (hidden)                  |              |
-| `pullSyncInner`'s per-save download (checks    | 3012-3027    |
+| `pullSyncInner`'s per-save download (checks    | 3042-3057    |
 |   before and after the download)               |              |
-| `flushSyncInner`'s upload (blind: no remote    | 2791-2806    |
+| `flushSyncInner`'s upload (blind: no remote    | 2821-2836    |
 |   modifiedTime check)                          |              |
-| RAF `tick` (runs the core whenever !paused)    | 11444-11598  |
+| RAF `tick` (runs the core whenever !paused)    | 11525-11679  |
 | core: `initFromEmscripten` reads `rom.<ext>` and `rom.sav` (no flush of the
 |   outgoing core, dingbat_wasm.nim); the cores flush dirty cart RAM to `rom.sav`
 |   once per frame (`handle_saves`, `storage.nim`)                               |
@@ -54,8 +60,16 @@ Exactly the variables these functions read or write (see the field comments).
   number that is fresh at each production). Two saves are equal iff their bytes
   are, so `saveSignature` is the identity (no FNV collisions).
 * **Cart RAM = `rom.sav`.** The cores flush dirty RAM to `rom.sav` once per
-  frame; the model flushes at the write (`gameSave`) and at a snapshot apply
-  (restoring marks RAM dirty). Only a sub-frame lag is lost.
+  frame, but a paused core runs no frames (a state loaded while paused leaves
+  its RAM in the core only). Every reader of the loaded game's `rom.sav`
+  flushes the core first (`flushSoloSave` 5313 -> `wasm_flush_save`:
+  persistSave 5323, and `liveSaveSig` 5757 for persistAutoState's signature
+  and the Resume check), and unloadGame's flush runs while the game is still
+  named, so what every one of them reads is the core's RAM. The model
+  therefore writes the file at the RAM write (`gameSave`) and at a snapshot
+  apply (restoring marks RAM dirty); SavePersistence models the dirty flag
+  and the flush themselves (`switch_persists_dirty_ram`,
+  `close_persists_dirty_ram`).
 * **IndexedDB**: every `dbGet`/`dbPut` is a one-request transaction on one store,
   so IDB runs them in issue order: a request's effect is taken at the segment
   that issues it, and the `await` on it is a separate event. `dbPutRoomy`'s
@@ -71,7 +85,10 @@ Exactly the variables these functions read or write (see the field comments).
   menu's Delete/Remove/Reset, "library pictures" and renames are not modelled:
   every persist path returns early in the link modes (and loadRom abandons a
   load a link session overtook, Netplay.lean), and the others are separate
-  entry points (Reset and import take the load token too).
+  entry points (Reset and import detach the game and take the load token
+  too; SavePersistence models them). The SIO link path's boot (`launchNetRom`,
+  netplay.js) mirrors loadRom's L3/L4: it takes the token, reads the save, and
+  names its game only in the segment that installs the save and inits the core.
 * **Drive**: one remote copy of `save:g` and the per-file `syncState.sigs`
   (`synced`); another device writing a newer save is `remoteSave`. A page load
   (`reload`) keeps IndexedDB and Drive and drops everything else.
@@ -214,7 +231,7 @@ def pushAfter (s : St) : After → St
   | .none => s
   | .l3 g t => push s (.l3 g t)
 
-/-- `persistSave(romName, g)` up to its first await (5273-5283): read FS
+/-- `persistSave(romName, g)` up to its first await (5320-5331): read FS
 rom.sav synchronously; nothing, or the signature last written for `g`, returns;
 otherwise the dbPutRoomy is issued, and lastSig/markUpload follow its await. -/
 def persistSave (s : St) (g : G) (k : After) : St :=
@@ -224,7 +241,7 @@ def persistSave (s : St) (g : G) (k : After) : St :=
     if s.lastSig = some (g, d) then pushAfter s k
     else push { s with idb := upd s.idb g (some d) } (.psDone g d k)
 
-/-- `persistAutoState()` (5687-5694): no name or no core returns; the dbPut
+/-- `persistAutoState()` (5742-5749): no name or no core returns; the dbPut
 is issued with the snapshot and the signature of FS rom.sav. -/
 def persistAuto (s : St) : St :=
   match s.cur, s.core with
@@ -233,11 +250,11 @@ def persistAuto (s : St) : St :=
     { s with auto := upd s.auto g (some a) }
   | _, _ => s
 
-/-- `resumeGame` (9483-9491). -/
+/-- `resumeGame` (9562-9570). -/
 def resumeGame (s : St) : St :=
   if s.cur.isSome then { s with paused := false, running := true } else s
 
-/-- `offerAutoResume` up to its first await (5720-5726). -/
+/-- `offerAutoResume` up to its first await (5778-5784). -/
 def offerStart (s : St) : St :=
   match s.cur with
   | none => s
@@ -256,7 +273,7 @@ def applyState (s : St) (a : Snap) : St :=
     { s with coreRam := a.ram, fsSav := orKeep a.ram s.fsSav, fresh := a.fresh }
   else s
 
-/-- `showMainMenu` (9468-9481) with `updatePausedCard` (9703-9723). -/
+/-- `showMainMenu` (9547-9560) with `updatePausedCard` (9782-9802). -/
 def goHome (s : St) : St :=
   match s.cur with
   | none => s
@@ -274,13 +291,13 @@ def gameSave (s : St) : St :=
     { s with coreRam := some d, fsSav := some d, clock := s.clock + 1, fresh := false }
   | _, _ => s
 
-/-- The 5 s interval (11314-11320). -/
+/-- The 5 s interval (11395-11401). -/
 def tick (s : St) : St :=
   match s.cur with
   | some g => persistSave s g .none
   | none => s
 
-/-- `pagehide` / `beforeunload` (11322-11363): persistSave, then persistAutoState. -/
+/-- `pagehide` / `beforeunload` (11403-11444): persistSave, then persistAutoState. -/
 def pagehide (s : St) : St :=
   match s.cur with
   | some g => persistAuto (persistSave s g .none)
@@ -289,7 +306,7 @@ def pagehide (s : St) : St :=
 def remoteSave (s : St) (g : G) : St :=
   { s with drive := upd s.drive g (some ⟨g, s.clock⟩), clock := s.clock + 1 }
 
-/-- `flushSyncInner`'s upload of save:g (2791-2806): re-uploads whenever the
+/-- `flushSyncInner`'s upload of save:g (2821-2836): re-uploads whenever the
 bytes differ from the last synced signature. No remote-version check. -/
 def upload (s : St) (g : G) : St :=
   if s.dirty g then
@@ -307,7 +324,7 @@ def reload (s : St) : St :=
   { init with idb := s.idb, auto := s.auto, drive := s.drive, synced := s.synced,
               dirty := s.dirty, clock := s.clock, loadGen := s.loadGen }
 
-/-- The pull's per-save write (3021-3025): written when its signature differs
+/-- The pull's per-save write (3051-3055): written when its signature differs
 from the last synced one. -/
 def pullWrite (s : St) (g : G) (d : Sav) : St :=
   if some d ≠ s.synced g then
@@ -319,7 +336,7 @@ def toastTap (s : St) (i : Nat) : St :=
   | none => s
   | some (n, a) =>
     -- pushToast's onclick: dismiss, then fn(); fn checks the name and awaits
-    -- autoStateMatchesSave (5730-5735)
+    -- autoStateMatchesSave (5788-5793)
     let s := { s with toasts := s.toasts.eraseIdx i }
     if s.cur = some n then push s (.res1 n a (s.idb n)) else s
 
@@ -334,8 +351,9 @@ def toastTap (s : St) (i : Nat) : St :=
    none; `lastSaveSig` := what was read), runs `initFromEmscripten` (which no
    longer flushes the outgoing GB core), clears `loadingName` and names the
    game, `paused = false`, `has-game running`.
-3. **unloadGame** detaches, calls persistSave (its FS read is synchronous) and
-   unlinks in the same segment.
+3. **unloadGame** calls persistSave (its flush and FS read are synchronous,
+   and run while the game is still named), then detaches and unlinks, in the
+   same segment.
 4. **Resume** re-checks the snapshot's signature against FS rom.sav, the live
    battery, synchronously just before `applyStateBytes`.
 5. **The pull** treats `loadingName` as loaded, and re-checks after the
@@ -345,30 +363,31 @@ def toastTap (s : St) (i : Nat) : St :=
 def bump (s : St) (g : G) (isLoad : Bool) : St :=
   { s with loadGen := s.loadGen + 1, loading := none, gFlow := g, gIsLoad := isLoad }
 
-/-- loadRom L3 (7974-7980): `loadingName = name`, dbGet(save:name) issued. -/
+/-- loadRom L3 (8036-8038): `loadingName = name`, dbGet(save:name) issued. -/
 def l3Seg (s : St) (g : G) (t : Nat) : St :=
   push { s with loading := some g } (.l4 g t (s.idb g))
 
-/-- loadRom L0 (7954-7967): with a game in, persistAutoState; else straight to L3. -/
+/-- loadRom L0 (8012-8025): with a game in, persistAutoState; else straight to L3. -/
 def loadStart (s : St) (g : G) (t : Nat) : St :=
   if s.cur.isSome then push (persistAuto s) (.l1 g t) else l3Seg s g t
 
-/-- loadRom L4 (7981-8028): ROM, save, core, names: one segment. -/
+/-- loadRom L4 (8039-8085): ROM, save, core, names: one segment. -/
 def l4Seg (s : St) (g : G) (t : Nat) (v : Option Sav) : St :=
   push { s with fsRom := some g, fsSav := v, core := some g, coreRam := v, fresh := true,
                 lastSig := v.map (fun d => (g, d)), loading := none, cur := some g,
                 paused := false, hasGame := true, running := true } (.l5 g t)
 
-/-- unloadGame U2 (9758-9788): detach, flush, unlink, pause, one segment. -/
+/-- unloadGame U2 (9837-9869): flush, detach, unlink, pause, one segment. -/
 def u2Seg (s : St) (g : G) : St :=
-  let s1 := persistSave { s with cur := none } g .none
-  { s1 with fsSav := none, paused := true, hasGame := false, running := false, card := none }
+  let s1 := persistSave s g .none
+  { s1 with cur := none, fsSav := none, paused := true, hasGame := false, running := false,
+            card := none }
 
 def fire (s : St) : Pend → St
   | .launchW g t => if t = s.loadGen then push s (.launchL g t) else s
   | .launchL g t => if t = s.loadGen then loadStart s g t else s
   | .l1 g t => if t = s.loadGen then push s (.l2 g t) else s
-  | .l2 g t =>                                                      -- 7972: args read now
+  | .l2 g t =>                                                      -- 8030: args read now
     if t = s.loadGen then
       match s.cur with
       | none => s
@@ -376,41 +395,41 @@ def fire (s : St) : Pend → St
     else s
   | .l3 g t => if t = s.loadGen then l3Seg s g t else s
   | .l4 g t v => if t = s.loadGen then l4Seg s g t v else s
-  | .l5 _ t => if t = s.loadGen then offerStart s else s            -- 8029, 8042
-  | .offer1 n a =>                                                  -- 5727-5728
+  | .l5 _ t => if t = s.loadGen then offerStart s else s            -- 8086-8087, 8100
+  | .offer1 n a =>                                                  -- 5785-5786
     match a with
     | none => s
     | some a => if s.cur = some n then push s (.offer2 n a (s.idb n)) else s
-  | .offer2 n a v =>                                                -- 5728-5730
+  | .offer2 n a v =>                                                -- 5786-5788
     if a.sig = v ∧ s.cur = some n then { s with toasts := s.toasts ++ [(n, a)] } else s
-  | .res1 n a v =>                                                  -- 5735-5741
+  | .res1 n a v =>                                                  -- 5793-5799
     if a.sig = v ∧ s.cur = some n ∧ a.sig = s.fsSav then applyState s a else s
-  | .u1 g t => if t = s.loadGen then push s (.u2 g t) else s        -- 9756
-  | .u2 g t => if t = s.loadGen then u2Seg s g else s               -- 9758
+  | .u1 g t => if t = s.loadGen then push s (.u2 g t) else s        -- 9835
+  | .u2 g t => if t = s.loadGen then u2Seg s g else s               -- 9837
   | .psDone g d k => pushAfter { s with lastSig := some (g, d), dirty := upd s.dirty g true } k
-  | .pullW g d => if s.cur = some g ∨ s.loading = some g then s else pullWrite s g d -- 3020
+  | .pullW g d => if s.cur = some g ∨ s.loading = some g then s else pullWrite s g d -- 3050
 
 def step (s : St) : Ev → St
   | .tap g =>
     if s.running then s                                   -- #home hidden: no tile
-    else if s.cur = some g then resumeGame s              -- 5155
-    else push (bump s g true) (.launchW g (s.loadGen + 1)) -- launchRom 4506
+    else if s.cur = some g then resumeGame s              -- 5185
+    else push (bump s g true) (.launchW g (s.loadGen + 1)) -- launchRom 4536
   | .openFile g => push (bump s g true) (.launchW g (s.loadGen + 1))
   | .goHome => goHome s
   | .resume => if s.running then s else resumeGame s
   | .closeCard =>
     if s.running || s.card.isNone then s
-    else match s.cur with                                 -- unloadGame 9749-9755
+    else match s.cur with                                 -- unloadGame 9828-9834
       | none => s
       | some g => push (persistAuto (bump s g false)) (.u1 g (s.loadGen + 1))
   | .frame => frame s
   | .gameSave => gameSave s
   | .tick => tick s
-  | .hide => persistAuto s                                -- 11339-11343
+  | .hide => persistAuto s                                -- 11420-11424
   | .pagehide => pagehide s
   | .toastTap i => toastTap s i
   | .remoteSave g => remoteSave s g
-  | .pullCheck g =>                                       -- 3014-3016
+  | .pullCheck g =>                                       -- 3044-3046
     match s.drive g with
     | some d =>
       if s.cur ≠ some g ∧ s.loading ≠ some g ∧ some d ≠ s.synced g then push s (.pullW g d) else s
@@ -462,13 +481,13 @@ def ResumeKeepsBattery (stp : St → Ev → St) (s : St) : Prop :=
 /-! ## One-step facts -/
 
 /-- Tapping the tile of the game in memory resumes it: no load starts, the
-core is untouched, and it runs (5155). -/
+core is untouched, and it runs (5185). -/
 theorem tap_loaded_resumes (s : St) (g : G) (hr : s.running = false) (hc : s.cur = some g) :
     step s (.tap g) = { s with paused := false, running := true } := by
   simp [step, hr, hc, resumeGame]
 
 /-- unloadGame's final flush is addressed to the outgoing game's key: every
-other `save:` key is untouched (9763-9766). -/
+other `save:` key is untouched (9844-9847). -/
 theorem unload_flush_keyed_by_outgoing (s : St) (g h : G) (hne : h ≠ g) :
     (u2Seg s g).idb h = s.idb h := by
   simp only [u2Seg, persistSave]
@@ -480,7 +499,7 @@ theorem unload_flush_keyed_by_outgoing (s : St) (g h : G) (hne : h ≠ g) :
 
 /-- The Resume action applies a snapshot only to the game still current, and
 only when both the stored save and the live battery match its signature
-(5735-5741). -/
+(5793-5799). -/
 theorem resume_applies_only_matched (s : St) (n : G) (a : Snap) (v : Option Sav)
     (h : fire s (.res1 n a v) ≠ s) : a.sig = v ∧ s.cur = some n ∧ a.sig = s.fsSav := by
   simp only [fire] at h
@@ -904,7 +923,7 @@ theorem inv_fire {s : St} {p : Pend} (hI : Inv s) (hp : PendOK s.kv p) : Inv (fi
         · exact savOK_cur hI hc
         · intro d hd; change s.fsSav = none at hn; rw [hn] at hd; exact absurd hd (by simp)
       unfold u2Seg
-      obtain ⟨I, P, heq, hIdb, hP⟩ := persistSave_shape { s with cur := none } g .none
+      obtain ⟨I, P, heq, hIdb, hP⟩ := persistSave_shape s g .none
       rw [heq]
       refine ⟨?_, hI.auto, hI.drive, fun _ h => absurd h (by simp), ?_, hI.toasts, ?_⟩
       · intro h d hd

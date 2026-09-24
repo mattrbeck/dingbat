@@ -4,56 +4,64 @@
 What a game's battery save goes through on its way from the wasm core to the
 IndexedDB key `save:<game>` (and from there to Drive's upload queue), and back.
 
-`step` models the code as fixed by the commit "web: a game is named only once
-its core and save are in; loads and closes take a token" and the three before
-it on this branch (Reset, the quota retry); line numbers are at that commit.
-The machine at dd7ba741f, and its seven counterexamples, are in this file's
-history; each trace is replayed against `step` as a `regress_*` theorem.
+`step` models the code as fixed on the branch worktree-lean-web-state, up to
+and including the commit "web: flush the solo core wherever its file is read;
+Reset, Delete and Import retire a waiting quota retry" (line numbers are at
+that commit). The machine at dd7ba741f, and its seven counterexamples, are in
+this file's history; each trace is replayed against `step` as a `regress_*`
+theorem.
 
 * The core keeps the cart's battery RAM in memory and marks it dirty when the
   game writes it (`ram_dirty`, gb.nim; `storage.dirty`, gba storage.nim). Once
   per emulated frame the dirty RAM is written to the emscripten MEMFS file
   next to the ROM (`handle_saves`: gb.nim 3494 `mbc_save`, gba.nim 1449
-  `write_save`). Every solo ROM is the FS file `rom.<ext>` (written at the
-  boot, loadRom 7989), so there is ONE battery file, `rom.sav`, shared by
-  every game.
-* `persistSave(romName, originalName)` (5273) reads that file synchronously,
-  skips if its signature equals `lastSaveSig` for the same name, else takes
-  the next number in `persistSeq` (5271, 5280-5281) and
-  `await dbPutRoomy("save:" + originalName, ...)` (4275; the put is issued in
+  `write_save`); a paused core runs no frames, so a state loaded while paused
+  leaves its RAM in the core only. `wasm_flush_save` (dingbat_wasm.nim) writes
+  it on demand: `flushSoloSave` (5313) calls it for the loaded solo game, and
+  every reader of that game's file calls `flushSoloSave` first. Every solo ROM
+  is the FS file `rom.<ext>` (written at the boot, loadRom 8047), so there is
+  ONE battery file, `rom.sav`, shared by every game.
+* `persistSave(romName, originalName)` (5320) flushes the solo core when
+  `romName` is the loaded game's (5323), reads that file synchronously, skips
+  if its signature equals `lastSaveSig` for the same name, else takes the next
+  number in `persistSeq` (5306, 5328-5329) and
+  `await dbPutRoomy("save:" + originalName, ...)` (4305; the put is issued in
   the same segment; a QuotaExceededError evicts a ROM and re-issues the put
-  after an await, unless a later persist of the same save has taken a number
-  meanwhile, 4279), then remembers the signature and calls
-  `markUpload("save:" + originalName)` (2660).
-  Callers: the 5 s `setInterval` (11314), `beforeunload` (11322) and `pagehide`
-  (11348) with the *current* names; `loadRom` (7973) for the outgoing game;
-  `unloadGame` (9765) for the game it detaches.
-* `loadRom` (7954): outgoing game: `await persistAutoState()`,
+  after an await, unless something has taken a later number for the same save
+  meanwhile, 4309), then remembers the signature and calls
+  `markUpload("save:" + originalName)` (2690). A later persist, and a delete
+  (`retireSavePuts` 5307: deleteKeys 1564, resetCurrentSaveFile 1587) or an
+  import (5414) of the same save, each take a number.
+  Callers: the 5 s `setInterval` (11399), `beforeunload` (11413) and `pagehide`
+  (11435) with the *current* names; `loadRom` (8031) for the outgoing game;
+  `unloadGame` (9844) for the game it closes, before its names are nulled.
+* `loadRom` (8012): outgoing game: `await persistAutoState()`,
   `await storeLastFrame()`, `await persistSave(...)`; then `loadingName = g`
-  and `await dbGet("save:" + g)` (7979-7980); then ONE segment (7989-8028)
-  writes the ROM, `installSave` (5308: writes the FS `.sav`, or unlinks it
+  and `await dbGet("save:" + g)` (8037-8038); then ONE segment (8047-8085)
+  writes the ROM, `installSave` (5356: writes the FS `.sav`, or unlinks it
   when there is no stored save, and sets `lastSaveSig` to what it wrote),
-  `initFromEmscripten` (dingbat_wasm.nim 1699: builds the new core, which
-  reads `rom.sav` if it exists, gba.nim 1303 `new_storage`, gb `mbc_load`;
-  no flush of the outgoing core any more, 1706), clears `loadingName`, and
-  names the game, `paused = false`. Then `offerAutoResume` (5720).
-* Resume snapshot: `persistAutoState` (5687) stores `stateauto:<game>` with
-  the FS `.sav` signature at capture (`saveSig`, `liveSaveSig` 5699);
-  `offerAutoResume` and the toast's tap re-check it against `save:<game>`
-  (`autoStateMatchesSave` 5706), and the tap also against the FS `.sav`
-  (5735-5736), before `applyStateBytes`, which marks the cart RAM dirty (gb
-  savestate.nim 755, gba savestate.nim 646).
-* Slots: `saveToSlot` (5609), `loadFromSlot` (5649). Import:
-  `applyImportedSave` (5346). Delete: `deleteGameAction` (1927) ->
-  `unloadGame({flushSave:false})` (9749) -> `deleteGameEverywhere` (3162).
-  Close: `unloadGame` (9749): after its awaits, if no later load or close has
-  taken the token, detach, flush and unlink in one segment (9763-9766).
-  Reset: `resetGameAction` (1859) detaches a loaded game first
-  (`detachLoadedGame` 1579: unlink the FS .sav, null the names), then
-  `resetGameSaves` (3154), then reboots it with `loadRom`; the Saves panel's
-  `resetCurrentSaveFile` (1559) does the same. Drive pull: the
-  `isRomLoaded || loadingName` guard before `await driveDownload` (3014) and
-  again after it (3020), then `writeSyncBytes` (2454).
+  `initFromEmscripten` (builds the new core, which reads `rom.sav` if it
+  exists, gba.nim 1303 `new_storage`, gb `mbc_load`; no flush of the outgoing
+  core), clears `loadingName`, and names the game, `paused = false`. Then
+  `offerAutoResume` (5778).
+* Resume snapshot: `persistAutoState` (5742) stores `stateauto:<game>` with
+  the FS `.sav` signature (`liveSaveSig` 5756, which flushes first: the
+  signature is the battery the state carries); `offerAutoResume` and the
+  toast's tap re-check it against `save:<game>` (`autoStateMatchesSave`), and
+  the tap also against the live battery (5793-5794) before `applyStateBytes`,
+  which marks the cart RAM dirty (gb savestate.nim 755, gba savestate.nim 646).
+* Slots: `saveToSlot` (5664), `loadFromSlot` (5704). Import:
+  `applyImportedSave` (5394) detaches the game (as Reset), retires waiting
+  puts, puts the imported bytes, `markUpload`s them and reboots. Delete:
+  `deleteGameAction` (1957) -> `unloadGame({flushSave:false})` (9828) ->
+  `deleteGameEverywhere` (3192). Close: `unloadGame` (9828): after its awaits,
+  if no later load or close has taken the token, flush, detach and unlink in
+  one segment (9844-9847). Reset: `resetGameAction` (1883) detaches a loaded
+  game first (`detachLoadedGame` 1603: the token, unlink the FS .sav, null the
+  names), then `resetGameSaves` (3184), then reboots it with `loadRom`; the
+  Saves panel's `resetCurrentSaveFile` (1582) does the same. Drive pull: the
+  `isRomLoaded || loadingName` guard before `await driveDownload` (3044) and
+  again after it (3050), then `writeSyncBytes` (2484).
 
 ## Model
 
@@ -117,12 +125,13 @@ deriving DecidableEq, Repr
 /-- The wasm core (`stateGb`/`stateGba`). -/
 structure Core where
   game  : Nat
-  gb    : Bool          -- a GB/GBC core (`initFromEmscripten` flushes it on the way out)
+  gb    : Bool          -- a GB/GBC core
   ram   : Option Bytes  -- cart battery RAM; none = never written
   dirty : Bool          -- gb `cart.ram_dirty` / gba `storage.dirty`
 deriving DecidableEq, Repr
 
-/-- A `stateauto:<game>` record (5646): the captured core and `saveSig`. -/
+/-- A `stateauto:<game>` record (persistAutoState 5742): the captured core and
+    `saveSig`. -/
 structure Snap where
   core    : Core
   saveSig : Option Bytes   -- sigOfSave(FS .sav at capture); none = no .sav
@@ -131,40 +140,40 @@ deriving DecidableEq, Repr
 /-- What the awaiting caller of a `persistSave` does when it returns. -/
 inductive After where
   | none                      -- the setInterval / pagehide / beforeunload / unloadGame call
-  | load (g : Nat) (gb : Bool) -- loadRom 7973: the rest of loadRom
+  | load (g : Nat) (gb : Bool) -- loadRom 8031: the rest of loadRom
 deriving DecidableEq, Repr
 
 inductive Pending where
-  /-- persistSave 5282: `dbPutRoomy` put issued and accepted; awaiting it. -/
+  /-- persistSave 5330: `dbPutRoomy` put issued and accepted; awaiting it. -/
   | persist (g : Nat) (b : Bytes) (k : After)
-  /-- dbPutRoomy 4288: the put failed with QuotaExceededError; awaiting
-      `evictOldestRom`, after which the same bytes are put again, unless a
-      later persist has taken a number past `t` (4279). -/
+  /-- dbPutRoomy 4318: the put failed with QuotaExceededError; awaiting
+      `evictOldestRom`, after which the same bytes are put again, unless
+      something has taken a number for this save past `t` (4309). -/
   | evict (g : Nat) (b : Bytes) (k : After) (t : Nat)
-  /-- loadRom 7969-7973: awaiting persistAutoState + storeLastFrame. -/
+  /-- loadRom 8027-8031: awaiting persistAutoState + storeLastFrame. -/
   | loadPre (g : Nat) (gb : Bool)
-  /-- loadRom 7980: awaiting `dbGet("save:"+g)` (= v). -/
+  /-- loadRom 8038: awaiting `dbGet("save:"+g)` (= v). -/
   | loadRestore (g : Nat) (gb : Bool) (v : Option Bytes)
-  /-- offerAutoResume 5725: awaiting `dbGet(stateauto)` (= a). -/
+  /-- offerAutoResume 5783: awaiting `dbGet(stateauto)` (= a). -/
   | offerGet (g : Nat) (a : Option Snap)
-  /-- offerAutoResume 5728 / autoStateMatchesSave 5706: awaiting `dbGet(save)`. -/
+  /-- offerAutoResume 5786 / autoStateMatchesSave: awaiting `dbGet(save)`. -/
   | offerCheck (g : Nat) (a : Snap) (v : Option Bytes)
-  /-- the Resume toast's handler 5735: awaiting `dbGet(save)`. -/
+  /-- the Resume toast's handler 5793: awaiting `dbGet(save)`. -/
   | tapCheck (g : Nat) (a : Snap) (v : Option Bytes)
-  /-- unloadGame 9755-9757: awaiting persistAutoState + storeLastFrame. -/
+  /-- unloadGame 9834-9837: awaiting persistAutoState + storeLastFrame. -/
   | unloadPre (g : Nat) (flush : Bool) (thenDelete : Bool)
-  /-- deleteGameEverywhere 3163: awaiting the rom/art/frame deletes. -/
+  /-- deleteGameEverywhere 3193 -> deleteKeys: awaiting the rom/art/frame deletes. -/
   | delSaves (g : Nat)
   /-- ... save:g deleted; awaiting the slot + session deletes. -/
   | delRest (g : Nat)
-  /-- resetGameAction 1863: save:g deleted; awaiting the other deletes. `loaded`:
+  /-- resetGameAction 1887: save:g deleted; awaiting the other deletes. `loaded`:
       the game was loaded and has been detached; `gb`: its core's kind. -/
   | resetRest (g : Nat) (loaded : Bool) (gb : Bool)
-  /-- loadFromSlot 5653: awaiting `dbGet(state:g)` (= v). -/
+  /-- loadFromSlot: awaiting `dbGet(state:g)` (= v). -/
   | slotGet (g : Nat) (v : Option Core)
-  /-- applyImportedSave 5361: awaiting `dbPut(save:g)`. -/
-  | importPut (g : Nat)
-  /-- Drive pull 3014-3016: passed the guard, awaiting `driveDownload`. -/
+  /-- applyImportedSave 5415: awaiting `dbPut(save:g)` of the imported bytes. -/
+  | importPut (g : Nat) (gb : Bool)
+  /-- Drive pull 3044-3046: passed the guard, awaiting `driveDownload`. -/
   | pull (g : Nat) (b : Bytes)
 deriving DecidableEq, Repr
 
@@ -178,8 +187,8 @@ structure St where
   paused  : Bool                 -- paused
   cur     : Option Nat           -- currentRomName && currentOriginalName
   lastSig : Option (Nat × Bytes) -- lastSaveSigKey / lastSaveSig
-  seq     : Nat → Nat            -- persistSeq (5271): the last number a persist of save:g took
-  loading : Option Nat           -- loadingName (7831)
+  seq     : Nat → Nat            -- persistSeq (5306): the last number taken for save:g
+  loading : Option Nat           -- loadingName
   pend    : List Pending         -- in-flight continuations
   toast   : Option (Nat × Snap)  -- the Resume action toast
   -- ghost state (not in the JS; for stating properties)
@@ -200,19 +209,19 @@ inductive Ev where
   | play                    -- the running game writes its cart battery RAM
   | frame                   -- handle_saves: dirty RAM -> rom.sav (once per frame)
   | pause                   -- showMainMenu (home) / pause button
-  | unpause                 -- resumeGame (9483): needs a loaded game
-  | tick (ok : Bool)        -- setInterval 11314 / pagehide 11348 / beforeunload 11322: persistSave(current names); ok = the put is accepted
-  | hide                    -- visibilitychange 11339 / pagehide: persistAutoState()
-  | launch (g : Nat) (gb : Bool) -- loadRom("rom.<ext>", g): tile tap (launchRom 4505), file drop, restart
+  | unpause                 -- resumeGame (9562): needs a loaded game
+  | tick (ok : Bool)        -- setInterval 11399 / pagehide 11435 / beforeunload 11413: persistSave(current names); ok = the put is accepted
+  | hide                    -- visibilitychange 11420 / pagehide: persistAutoState()
+  | launch (g : Nat) (gb : Bool) -- loadRom("rom.<ext>", g): tile tap (launchRom 4535), file drop, restart
   | resume (i : Nat) (ok : Bool) -- the i-th pending continuation runs
-  | close                   -- "Close" on the paused card: unloadGame() (9790)
-  | delete (g : Nat)        -- deleteGameAction(g) (1927)
-  | reset (g : Nat)         -- resetGameAction(g) (1859) / resetCurrentSaveFile (1559)
+  | close                   -- "Close" on the paused card: unloadGame() (9871)
+  | delete (g : Nat)        -- deleteGameAction(g) (1957)
+  | reset (g : Nat)         -- resetGameAction(g) (1883) / resetCurrentSaveFile (1582)
   | tapResume               -- tap "Resume" on the toast
   | slotSave                -- saveToSlot(0)
   | slotLoad                -- loadFromSlot(0)
-  | importSave              -- applyImportedSave, after the confirms (5358)
-  | pullStart (g : Nat)     -- Drive pull reaches save:g (3014)
+  | importSave              -- applyImportedSave, after the confirms (5406)
+  | pullStart (g : Nat)     -- Drive pull reaches save:g (3044)
 deriving DecidableEq, Repr
 
 def push (s : St) (p : Pending) : St := { s with pend := s.pend ++ [p] }
@@ -221,7 +230,19 @@ def push (s : St) (p : Pending) : St := { s with pend := s.pend ++ [p] }
 def raise (s : St) (b : Bytes) : St :=
   { s with floor := upd s.floor b.game (max (s.floor b.game) b.ver) }
 
-/-- loadRom 7978-7980 after the outgoing persist: `loadingName = g`, the dbGet
+/-- `flushSoloSave` (5313) -> `wasm_flush_save`: with a game loaded, the core's
+    dirty battery RAM into `rom.sav`, now. -/
+def flushCore (s : St) : St :=
+  match s.cur, s.core with
+  | some _, some c =>
+    if c.dirty then
+      match c.ram with
+      | some r => raise { s with fs := some r, core := some { c with dirty := false } } r
+      | none => s
+    else s
+  | _, _ => s
+
+/-- loadRom 8036-8038 after the outgoing persist: `loadingName = g`, the dbGet
     of the incoming save. Nothing is switched yet: the outgoing game stays
     named, on its own `rom.sav`, until the boot (`l4`). -/
 def l3 (s : St) (g : Nat) (gb : Bool) : St :=
@@ -231,27 +252,32 @@ def finish (s : St) : After → St
   | .none => s
   | .load g gb => l3 s g gb
 
-/-- persistSave 5273-5283, its synchronous first segment. -/
+/-- persistSave 5320-5331, its synchronous first segment: the flush (for the
+    loaded game's file), then the read. -/
 def persistCall (s : St) (g : Nat) (ok : Bool) (k : After) : St :=
+  let s := if s.cur = some g then flushCore s else s        -- 5323
   match s.fs with
-  | none => finish s k                                     -- 5276 no FS file
+  | none => finish s k                                     -- 5324 no FS file
   | some b =>
-    if s.lastSig = some (g, b) then finish s k              -- 5279 unchanged
+    if s.lastSig = some (g, b) then finish s k              -- 5327 unchanged
     else
-      let t := s.seq g + 1                                  -- 5280-5281 persistSeq
+      let t := s.seq g + 1                                  -- 5328-5329 persistSeq
       let s := { s with seq := upd s.seq g t }
-      if ok then                                            -- 5282-5283 put issued, accepted
+      if ok then                                            -- 5330-5331 put issued, accepted
         push (raise { s with idb := upd s.idb g (some b), writes := s.writes ++ [(g, b)] } b)
           (.persist g b k)
-      else push s (.evict g b k t)                          -- 4288 quota: evict, retry
+      else push s (.evict g b k t)                          -- 4318 quota: evict, retry
 
-/-- persistAutoState 5687-5694 (the dbPut's effect; nobody awaits its tail). -/
+/-- persistAutoState 5742-5749 (the dbPut's effect; nobody awaits its tail):
+    the state captured, then `liveSaveSig` flushes and reads the file. -/
 def autoSnap (s : St) : St :=
   match s.cur, s.core with
-  | some g, some c => { s with auto := upd s.auto g (some ⟨c, s.fs⟩) }
+  | some g, some c =>
+    let s1 := flushCore s
+    { s1 with auto := upd s1.auto g (some ⟨c, s1.fs⟩) }
   | _, _ => s
 
-/-- loadRom 7954-7969, first segment: the load token (which clears
+/-- loadRom 8012-8027, first segment: the load token (which clears
     `loadingName`), then the outgoing game's snapshot and await. -/
 def launchCall (s : St) (g : Nat) (gb : Bool) : St :=
   let s := { s with loading := none }
@@ -259,17 +285,17 @@ def launchCall (s : St) (g : Nat) (gb : Bool) : St :=
   | some _ => push (autoSnap s) (.loadPre g gb)
   | none => l3 s g gb          -- nothing loaded: straight to the dbGet
 
-/-- offerAutoResume 5720-5725: first segment. -/
+/-- offerAutoResume 5778-5783: first segment. -/
 def offerStart (s : St) : St :=
   match s.cur with
   | some n => push s (.offerGet n (s.auto n))
   | none => s
 
-/-- loadRom 7989-8028, one segment: installSave replaces `rom.sav` by exactly
+/-- loadRom 8047-8085, one segment: installSave replaces `rom.sav` by exactly
     the incoming save (unlinks it when there is none) and remembers its
     signature; initFromEmscripten builds the new core on it (and flushes no
     outgoing core); `loadingName` is cleared and the game named. Then
-    offerAutoResume's start (8042). -/
+    offerAutoResume's start (8100). -/
 def l4 (s : St) (g : Nat) (gb : Bool) (v : Option Bytes) : St :=
   offerStart { s with fs := v, cur := some g, paused := false, core := some ⟨g, gb, v, false⟩,
                       loading := none, lastSig := v.map (fun b => (g, b)) }
@@ -286,63 +312,66 @@ def restamp (t : Nat) (sc : Core) : Core :=
 
 def gbOf (s : St) : Bool := match s.core with | some c => c.gb | none => false
 
+/-- A delete or an import of save:g takes a `persistSeq` number
+    (`retireSavePuts` 5307): a put waiting on an eviction gives way. -/
+def retire (s : St) (g : Nat) : St := { s with seq := upd s.seq g (s.seq g + 1) }
+
 def resumeP (s : St) (p : Pending) (ok : Bool) : St :=
   match p with
-  | .persist g b k =>                                       -- 5292-5295
+  | .persist g b k =>                                       -- 5340-5343
       finish { s with lastSig := some (g, b), uploads := s.uploads ++ [(g, b)] } k
   | .evict g b k t =>
-      if ok then                                            -- 4288: evicted one
-        if s.seq g ≠ t then finish s k                      -- 4279, 5284: a later persist went in
-        else                                                -- 4284: put again
+      if ok then                                            -- 4318: evicted one
+        if s.seq g ≠ t then finish s k                      -- 4309, 5332: taken over
+        else                                                -- 4314: put again
           push (raise { s with idb := upd s.idb g (some b), writes := s.writes ++ [(g, b)] } b)
             (.persist g b k)
-      else finish { s with lastSig := none } k               -- 5285-5290: nothing left to give
-  | .loadPre g gb =>                                        -- 7973 (names re-read here)
+      else finish { s with lastSig := none } k               -- 5333-5338: nothing left to give
+  | .loadPre g gb =>                                        -- 8031 (names re-read here)
       match s.cur with
       | some a => persistCall s a ok (.load g gb)
       | none => s
   | .loadRestore g gb v => l4 s g gb v
-  | .offerGet g a =>                                        -- 5727-5728
+  | .offerGet g a =>                                        -- 5785-5786
       match a with
       | some a' => if s.cur = some g then push s (.offerCheck g a' (s.idb g)) else s
       | none => s
-  | .offerCheck g a v =>                                    -- 5728-5730
+  | .offerCheck g a v =>                                    -- 5786-5788
       if a.saveSig = v ∧ s.cur = some g then { s with toast := some (g, a) } else s
-  | .tapCheck g a v =>                                      -- 5735-5740: stored and live save
-      if a.saveSig = v ∧ s.cur = some g ∧ a.saveSig = s.fs then
-        applyState { s with resumes := s.resumes ++ [(g, a, v)] } a.core
+  | .tapCheck g a v =>                                      -- 5793-5798: stored and live save
+      if a.saveSig = v ∧ s.cur = some g then
+        let s := flushCore s                                -- liveSaveSig flushes first
+        if a.saveSig = s.fs then applyState { s with resumes := s.resumes ++ [(g, a, v)] } a.core
+        else s
       else s
   | .unloadPre g flush thenDelete =>
-      -- 9756-9758: a later load or close has taken the token: the game it set
+      -- 9835-9837: a later load or close has taken the token: the game it set
       -- out to close is no longer the one named.
       if s.cur != some g then s
+      else if flush then
+        -- 9844-9847: the flush (the core's RAM, then the file), while the name
+        -- still says the core is g's; then detach and unlink, one segment
+        let s2 := persistCall s g ok .none
+        { s2 with cur := none, fs := none, paused := true }
       else
-        let s1 := { s with cur := none }                     -- 9763-9764
-        if flush then
-          -- 9765-9766: the flush reads the file, then the unlink, one segment
-          let s2 := persistCall s1 g ok .none
-          { s2 with fs := none, paused := true }
-        else
-          let s2 := { s1 with fs := none, paused := true }  -- 9766, 9770
-          if thenDelete then push s2 (.delSaves g) else s2   -- 1937 deleteGameEverywhere
-  | .delSaves g =>
-      push { s with idb := upd s.idb g none, wiped := upd s.wiped g (some s.clock),
-                    floor := upd s.floor g 0 } (.delRest g)
+        let s2 := { s with cur := none, fs := none, paused := true }  -- 9845-9847, 9851
+        if thenDelete then push s2 (.delSaves g) else s2   -- 1967 deleteGameEverywhere
+  | .delSaves g =>                                          -- deleteKeys 1564-1565
+      push (retire { s with idb := upd s.idb g none, wiped := upd s.wiped g (some s.clock),
+                            floor := upd s.floor g 0 } g) (.delRest g)
   | .delRest g =>
       { s with slot := upd s.slot g none, auto := upd s.auto g none, deletes := s.deletes ++ [g] }
   | .resetRest g loaded gb =>
       let s1 := { s with slot := upd s.slot g none, auto := upd s.auto g none,
                          deletes := s.deletes ++ [g] }
-      if loaded then launchCall s1 g gb else s1             -- 1866 the reboot: loadRom
-  | .slotGet _ v =>                                         -- 5653-5662 (no name re-check)
+      if loaded then launchCall s1 g gb else s1             -- 1889 the reboot: loadRom
+  | .slotGet _ v =>                                         -- loadFromSlot (no name re-check)
       match v with
       | some sc => applyState { s with clock := s.clock + 1 } (restamp s.clock sc)
       | none => s
-  | .importPut _ =>                                         -- 5365 loadRom(current names)
-      match s.cur with
-      | some g' => launchCall s g' (gbOf s)
-      | none => s
-  | .pull g b =>                                            -- 3020-3023: re-checked, written
+  | .importPut g gb =>                                      -- 5416-5420: markUpload, reboot
+      launchCall s g gb
+  | .pull g b =>                                            -- 3050-3053: re-checked, written
       if s.cur = some g ∨ s.loading = some g then s
       else raise { s with idb := upd s.idb g (some b) } b
 
@@ -375,26 +404,27 @@ def step (s : St) : Ev → St
       match s.pend[i]? with
       | some p => resumeP { s with pend := s.pend.eraseIdx i } p ok
       | none => s
-  | .close =>                                               -- 9749-9755: the token, then
+  | .close =>                                               -- 9828-9834: the token, then
       match s.cur with
       | some g => push (autoSnap { s with loading := none }) (.unloadPre g true false)
       | none => s
-  | .delete g =>                                            -- 1928-1937
+  | .delete g =>                                            -- 1958-1967
       if s.cur = some g then push { s with loading := none } (.unloadPre g false true)
       else push s (.delSaves g)
   | .reset g =>
-      -- 1860-1861: a loaded game is detached first (detachLoadedGame 1579-1587:
+      -- 1884-1887: a loaded game is detached first (detachLoadedGame 1603-1611:
       -- the token, unlink the FS .sav, null the names), in the same segment as
-      -- the first delete (resetGameSaves 3154 -> deleteSaveData 1548: save:g).
+      -- the first delete (resetGameSaves 3184 -> deleteSaveData -> deleteKeys
+      -- 1564-1565: the persistSeq number, then save:g).
       let loaded := decide (s.cur = some g)
       let s0 := if loaded then { s with fs := none, cur := none, loading := none } else s
-      push { s0 with idb := upd s0.idb g none, wiped := upd s0.wiped g (some s0.clock),
-                     floor := upd s0.floor g 0 } (.resetRest g loaded (gbOf s))
+      push (retire { s0 with idb := upd s0.idb g none, wiped := upd s0.wiped g (some s0.clock),
+                             floor := upd s0.floor g 0 } g) (.resetRest g loaded (gbOf s))
   | .tapResume =>
       match s.toast with
       | some (g, a) =>
         let s1 := { s with toast := none }
-        if s.cur = some g then push s1 (.tapCheck g a (s.idb g)) else s1   -- 5731-5735
+        if s.cur = some g then push s1 (.tapCheck g a (s.idb g)) else s1   -- 5789-5793
       | none => s
   | .slotSave =>
       match s.cur, s.core with
@@ -404,15 +434,17 @@ def step (s : St) : Ev → St
       match s.cur with
       | some g => push s (.slotGet g (s.slot g))
       | none => s
-  | .importSave =>                                          -- 5360-5361
+  | .importSave =>
+      -- 5412-5415: detached (as Reset), the persistSeq number, the put issued
       match s.cur, s.core with
-      | some g, some _ =>
+      | some g, some c =>
         let b : Bytes := ⟨g, s.clock⟩
-        push (raise { s with fs := some b, idb := upd s.idb g (some b), clock := s.clock + 1 } b)
-          (.importPut g)
+        push (raise (retire { s with fs := none, cur := none, loading := none,
+                                     idb := upd s.idb g (some b), clock := s.clock + 1 } g) b)
+          (.importPut g c.gb)
       | _, _ => s
   | .pullStart g =>
-      if s.cur = some g ∨ s.loading = some g then s         -- 3014
+      if s.cur = some g ∨ s.loading = some g then s         -- 3044
       else push { s with clock := s.clock + 1 } (.pull g ⟨g, s.clock⟩)
 
 inductive Reachable : St → Prop
@@ -525,6 +557,19 @@ theorem fs_of_cur {s : St} (h : FInv s) {g : Nat} (hc : s.cur = some g) :
   cases hc1'
   omega
 
+/-- Detached: no name, the FS .sav unlinked, paused (unloadGame). -/
+theorem finv_detach {s : St} (h : FInv s) :
+    FInv { s with cur := none, fs := none, paused := true } := by
+  constructor
+  · exact h.idb
+  · intro b hb; simp at hb
+  · intro g' hg'; simp at hg'
+  · exact h.core
+  · exact h.auto
+  · exact h.slot
+  · exact h.toast
+  · exact h.pend
+
 /-- The FS .sav unlinked and the game paused (unloadGame, detachLoadedGame). -/
 theorem finv_unlink {s : St} (h : FInv s) : FInv { s with fs := none, paused := true } := by
   constructor
@@ -546,9 +591,61 @@ theorem finish_inv {s : St} (k : After) (h : FInv s) : FInv (finish s k) := by
   | none => exact h
   | load g gb => exact l3_inv g gb h
 
+/-- The flush touches `rom.sav`, the core's dirty flag and the ghost floor only. -/
+theorem flushCore_eq (s : St) :
+    ∃ f c fl, flushCore s = { s with fs := f, core := c, floor := fl } := by
+  unfold flushCore
+  split
+  · split
+    · split
+      · exact ⟨_, _, _, rfl⟩
+      · exact ⟨s.fs, s.core, s.floor, rfl⟩
+    · exact ⟨s.fs, s.core, s.floor, rfl⟩
+  · exact ⟨s.fs, s.core, s.floor, rfl⟩
+
+theorem flushCore_cur (s : St) : (flushCore s).cur = s.cur := by
+  obtain ⟨f, c, fl, e⟩ := flushCore_eq s; rw [e]
+
+theorem flushCore_inv {s : St} (h : FInv s) : FInv (flushCore s) := by
+  unfold flushCore
+  split
+  · rename_i g c _ hc
+    split
+    · split
+      · rename_i r hr
+        apply raise_inv
+        have hw : r.game = c.game := h.core c hc r hr
+        constructor
+        · exact h.idb
+        · intro b hb; simp only [Option.some.injEq] at hb; subst hb
+          exact ⟨_, rfl, hw.symm⟩
+        · intro g' hg'
+          obtain ⟨c', hc', hg⟩ := h.cur g' hg'
+          rw [hc] at hc'; cases hc'
+          exact ⟨_, rfl, hg⟩
+        · intro c' hc'; simp only [Option.some.injEq] at hc'; subst hc'
+          exact h.core c hc
+        · exact h.auto
+        · exact h.slot
+        · exact h.toast
+        · exact h.pend
+      · exact h
+    · exact h
+  · exact h
+
 theorem persistCall_inv {s : St} (g : Nat) (ok : Bool) (k : After) (h : FInv s)
     (hfs : ∀ b, s.fs = some b → b.game = g) : FInv (persistCall s g ok k) := by
   unfold persistCall
+  have key : FInv (if s.cur = some g then flushCore s else s) ∧
+      ∀ b, (if s.cur = some g then flushCore s else s).fs = some b → b.game = g := by
+    split
+    · rename_i hc
+      have h1 := flushCore_inv h
+      exact ⟨h1, fs_of_cur h1 (by rw [flushCore_cur]; exact hc)⟩
+    · exact ⟨h, hfs⟩
+  generalize (if s.cur = some g then flushCore s else s) = s at key ⊢
+  obtain ⟨h, hfs⟩ := key
+  dsimp only
   split
   · exact finish_inv k h
   · rename_i b hb
@@ -577,19 +674,22 @@ theorem autoSnap_inv {s : St} (h : FInv s) : FInv (autoSnap s) := by
   unfold autoSnap
   split
   · rename_i g c _ hc
+    have h1 := flushCore_inv h
+    obtain ⟨f, co, fl, e⟩ := flushCore_eq s
+    rw [e] at h1 ⊢
     constructor
-    · exact h.idb
-    · exact h.fs
-    · exact h.cur
-    · exact h.core
+    · exact h1.idb
+    · exact h1.fs
+    · exact h1.cur
+    · exact h1.core
     · intro g' a ha
       simp only [upd_apply] at ha
       split at ha
       · cases ha; exact h.core c hc
-      · exact h.auto g' a ha
-    · exact h.slot
-    · exact h.toast
-    · exact h.pend
+      · exact h1.auto g' a ha
+    · exact h1.slot
+    · exact h1.toast
+    · exact h1.pend
   · exact h
 
 theorem launchCall_inv {s : St} (g : Nat) (gb : Bool) (h : FInv s) :
@@ -730,7 +830,10 @@ theorem resumeP_inv {s : St} (p : Pending) (ok : Bool) (h : FInv s) (hp : POK p)
   | tapCheck g a v =>
     simp only [resumeP]
     split
-    · exact applyState_inv _ (finv_congr h rfl rfl rfl rfl rfl rfl rfl rfl) hp
+    · have h1 := flushCore_inv h
+      split
+      · exact applyState_inv _ (finv_congr h1 rfl rfl rfl rfl rfl rfl rfl rfl) hp
+      · exact h1
     · exact h
   | unloadPre g flush thenDelete =>
     simp only [resumeP]
@@ -741,32 +844,13 @@ theorem resumeP_inv {s : St} (p : Pending) (ok : Bool) (h : FInv s) (hp : POK p)
         simpa using hne
       have hfs := fs_of_cur h hc
       split
-      · refine finv_unlink (persistCall_inv (s := { s with cur := none }) g ok _ ?_
-          (fun b hb => hfs b hb))
-        constructor
-        · exact h.idb
-        · exact h.fs
-        · intro g' hg'; simp at hg'
-        · exact h.core
-        · exact h.auto
-        · exact h.slot
-        · exact h.toast
-        · exact h.pend
-      · have h2 : FInv { s with cur := none, fs := none, paused := true } := by
-          constructor
-          · exact h.idb
-          · intro b hb; simp at hb
-          · intro g' hg'; simp at hg'
-          · exact h.core
-          · exact h.auto
-          · exact h.slot
-          · exact h.toast
-          · exact h.pend
+      · exact finv_detach (persistCall_inv g ok _ h hfs)
+      · have h2 := finv_detach h
         split
         · exact push_inv (p := .delSaves g) h2 trivial
         · exact h2
   | delSaves g =>
-    simp only [resumeP]
+    simp only [resumeP, retire]
     refine push_inv (p := .delRest g) ?_ trivial
     constructor
     · intro g' b' hb'
@@ -831,11 +915,8 @@ theorem resumeP_inv {s : St} (p : Pending) (ok : Bool) (h : FInv s) (hp : POK p)
       exact applyState_inv _ (finv_congr h rfl rfl rfl rfl rfl rfl rfl rfl)
         (restamp_wf _ _ (hp sc rfl))
     · exact h
-  | importPut g =>
-    simp only [resumeP]
-    split
-    · exact launchCall_inv _ _ h
-    · exact h
+  | importPut g gb =>
+    exact launchCall_inv _ _ h
   | pull g b =>
     simp only [resumeP]
     split
@@ -975,6 +1056,7 @@ theorem step_inv {s : St} (e : Ev) (h : FInv s) : FInv (step s e) := by
     generalize (if decide (s.cur = some g) = true then { s with fs := none, cur := none, loading := none }
                 else s) = s0 at h0 ⊢
     refine push_inv ?_ trivial
+    simp only [retire]
     constructor
     · intro g' b' hb'
       simp only [upd_apply] at hb'
@@ -1035,20 +1117,17 @@ theorem step_inv {s : St} (e : Ev) (h : FInv s) : FInv (step s e) := by
     simp only [step]
     split
     · rename_i g c hg hc
-      refine push_inv (p := .importPut g) ?_ trivial
+      refine push_inv (p := .importPut g c.gb) ?_ trivial
       apply raise_inv
-      obtain ⟨c', hc', hg'⟩ := h.cur g hg
+      simp only [retire]
       constructor
       · intro g' b' hb'
         simp only [upd_apply] at hb'
         split at hb'
         · rename_i hgg; cases hb'; exact hgg.symm
         · exact h.idb g' b' hb'
-      · intro b hb
-        simp only [Option.some.injEq] at hb
-        subst hb
-        exact ⟨c', hc', hg'⟩
-      · exact h.cur
+      · intro b hb; simp at hb
+      · intro g' hg'; simp at hg'
       · exact h.core
       · exact h.auto
       · exact h.slot
@@ -1126,22 +1205,33 @@ theorem ginv_finish {s : St} (k : After) (h : GInv s) : GInv (finish s k) := by
   | none => exact h
   | load g gb => exact ginv_l3 g gb h
 
+theorem ginv_flushCore {s : St} (h : GInv s) : GInv (flushCore s) := by
+  obtain ⟨f, c, fl, e⟩ := flushCore_eq s
+  rw [e]; exact ginv_congr h rfl rfl rfl (fun _ hq => hq)
+
 theorem ginv_persistCall {s : St} (g : Nat) (ok : Bool) (k : After) (h : GInv s) :
     GInv (persistCall s g ok k) := by
   unfold persistCall
+  have h' : GInv (if s.cur = some g then flushCore s else s) := by
+    split
+    · exact ginv_flushCore h
+    · exact h
+  generalize (if s.cur = some g then flushCore s else s) = s at h' ⊢
+  dsimp only
   split
-  · exact ginv_finish k h
+  · exact ginv_finish k h'
   · rename_i b _
     split
-    · exact ginv_finish k h
+    · exact ginv_finish k h'
     · split
-      · exact ginv_write g b k h _ rfl rfl rfl rfl
-      · exact ginv_push _ (ginv_congr h rfl rfl rfl (fun _ hq => hq))
+      · exact ginv_write g b k h' _ rfl rfl rfl rfl
+      · exact ginv_push _ (ginv_congr h' rfl rfl rfl (fun _ hq => hq))
 
 theorem ginv_autoSnap {s : St} (h : GInv s) : GInv (autoSnap s) := by
   unfold autoSnap
   split
-  · exact ginv_congr h rfl rfl rfl (fun _ hq => hq)
+  · have h1 := ginv_flushCore h
+    exact ginv_congr h1 rfl rfl rfl (fun _ hq => hq)
   · exact h
 
 theorem ginv_launchCall {s : St} (g : Nat) (gb : Bool) (h : GInv s) :
@@ -1211,14 +1301,17 @@ theorem ginv_resumeP {s : St} (p : Pending) (ok : Bool) (s0 : St) (i : Nat)
     simp only [resumeP]
     split
     · rename_i hc
-      apply ginv_applyState
-      constructor
-      · intro x hx
-        rw [List.mem_append, List.mem_singleton] at hx
-        rcases hx with hx | rfl
-        · exact h.guard x hx
-        · exact hc.1
-      · exact h.upload
+      have h1 := ginv_flushCore h
+      split
+      · apply ginv_applyState
+        constructor
+        · intro x hx
+          rw [List.mem_append, List.mem_singleton] at hx
+          rcases hx with hx | rfl
+          · exact h1.guard x hx
+          · exact hc.1
+        · exact h1.upload
+      · exact h1
     · exact h
   | unloadPre g flush thenDelete =>
     have h : GInv s := by
@@ -1233,8 +1326,7 @@ theorem ginv_resumeP {s : St} (p : Pending) (ok : Bool) (s0 : St) (i : Nat)
     split
     · exact h
     · split
-      · exact ginv_congr (s := persistCall { s with cur := none } g ok .none)
-          (ginv_persistCall g ok .none (ginv_congr h rfl rfl rfl (fun _ hq => hq)))
+      · exact ginv_congr (s := persistCall s g ok .none) (ginv_persistCall g ok .none h)
           rfl rfl rfl (fun _ hq => hq)
       · split
         · exact ginv_push _ (ginv_congr h rfl rfl rfl (fun _ hq => hq))
@@ -1374,26 +1466,29 @@ theorem regress_switch_window_overwrites_save :
 
 open Ev in
 /-- A (0) is a GB game whose cart RAM is dirty when it is left (written after
-    the frame's `handle_saves`). B (1) has a save. At dd7ba741f restoreSave
-    wrote B's save to `rom.sav`, initFromEmscripten then `mbc_save`d the
-    outgoing GB core over it, B booted on A's RAM, and the next flush replaced
-    `save:B` for good. The outgoing core is no longer flushed at init: B boots
-    on its own save, and `save:B` keeps it. -/
+    the frame's `handle_saves`, or a state loaded while paused). B (1) has a
+    save. At dd7ba741f restoreSave wrote B's save to `rom.sav`,
+    initFromEmscripten then `mbc_save`d the outgoing GB core over it, B booted
+    on A's RAM, and the next flush replaced `save:B` for good. The outgoing
+    core is no longer flushed at init; the switch's own persist of A flushes
+    it instead (`flushSoloSave`), into A's file, while A is still named: A's
+    RAM is A's save, and B boots on its own. -/
 def trGbInitFlush : List Ev :=
   [launch 0 true, resume 0 true, resume 0 true,      -- A (GB) boots
    pullStart 1, resume 0 true,                        -- B's save arrives from Drive
    play, frame, tick true, resume 0 true,             -- A saves; flushed
    play, pause,                                       -- A writes cart RAM; home before the next flush
-   launch 1 false, resume 0 true, resume 0 true,      -- tap B; the boot
-   tick true, resume 1 true]
+   launch 1 false,                                    -- tap B: A's snapshot (flushes)
+   resume 0 true, resume 0 true,                      -- A's persist: its RAM to save:A; dbGet save:B
+   resume 0 true,                                     -- the boot
+   tick true]
 
 theorem regress_gb_init_flush_replaces_save :
     let s := run init trGbInitFlush
-    Reachable s ∧ s.idb 1 = some ⟨1, 1⟩ ∧ s.fs = some ⟨1, 1⟩ ∧
-      s.core = some ⟨1, false, some ⟨1, 1⟩, false⟩ ∧ Prov s ∧ Durable s 1 := by
-  refine ⟨run_reachable _ _ .init, by decide, by decide, by decide,
-    provenance (run_reachable _ _ .init), ?_⟩
-  simp only [Durable]; decide
+    Reachable s ∧ s.idb 1 = some ⟨1, 1⟩ ∧ s.idb 0 = some ⟨0, 3⟩ ∧ s.fs = some ⟨1, 1⟩ ∧
+      s.core = some ⟨1, false, some ⟨1, 1⟩, false⟩ ∧ Prov s ∧ Durable s 0 ∧ Durable s 1 := by
+  refine ⟨run_reachable _ _ .init, by decide, by decide, by decide, by decide,
+    provenance (run_reachable _ _ .init), ?_, ?_⟩ <;> simp only [Durable] <;> decide
 
 open Ev in
 /-- Reset save data for the loaded game, with an in-game save from the last
@@ -1490,16 +1585,127 @@ theorem regress_pull_overwritten_by_stale_flush :
   refine ⟨run_reachable _ _ .init, by decide, by decide, by decide, ?_⟩
   simp only [Durable]; decide
 
-/-! ## What the code still does not keep: `NoResurrect`
+/-! ## Unflushed RAM across a switch or a close
 
-Two writers of `save:<g>` issue their put after an await and are not told
-that the user has since reset (or deleted) that save. Neither is on the load
-path this model's fixes are about; both are reported, not fixed. -/
+A paused core runs no frames, so RAM a state load gave it is dirty in the core
+and not in `rom.sav`. The outgoing persist of a switch and the flush of a
+close run while the game is still named, and flush the core first: that RAM
+is what they store, under its own game. -/
+
+/-- A switch's outgoing persist (loadRom 8031) stores the core's unflushed RAM
+    under the outgoing game. -/
+theorem switch_persists_dirty_ram {s : St} {i g a : Nat} {gb : Bool} {c : Core} {r : Bytes}
+    (hi : s.pend[i]? = some (.loadPre g gb)) (hc : s.cur = some a) (hcore : s.core = some c)
+    (hd : c.dirty = true) (hr : c.ram = some r) (hls : s.lastSig ≠ some (a, r)) :
+    (step s (.resume i true)).idb a = some r ∧ (a, r) ∈ (step s (.resume i true)).writes := by
+  simp [step, hi, resumeP, hc, persistCall, flushCore, hcore, hd, hr, hls, raise, push, upd]
+
+/-- A close (unloadGame 9844) stores the core's unflushed RAM under its game. -/
+theorem close_persists_dirty_ram {s : St} {i a : Nat} {td : Bool} {c : Core} {r : Bytes}
+    (hi : s.pend[i]? = some (.unloadPre a true td)) (hc : s.cur = some a)
+    (hcore : s.core = some c) (hd : c.dirty = true) (hr : c.ram = some r)
+    (hls : s.lastSig ≠ some (a, r)) :
+    (step s (.resume i true)).idb a = some r ∧ (a, r) ∈ (step s (.resume i true)).writes ∧
+      (step s (.resume i true)).cur = none := by
+  simp [step, hi, resumeP, hc, persistCall, flushCore, hcore, hd, hr, hls, raise, push, upd]
+
+open Ev in
+/-- Play A, save (persisted), save again, pause before the frame flushes it,
+    close. The close's snapshot and flush write that RAM to `rom.sav` while A
+    is still named, and the close stores it: `save:0` is the newest save. -/
+def trCloseDirty : List Ev :=
+  [launch 0 false, resume 0 true, resume 0 true,
+   play, frame, tick true, resume 0 true,             -- v1 persisted
+   play, pause,                                       -- v2 in the core only
+   close, resume 0 true]                              -- the close
+
+theorem regress_close_drops_dirty_ram :
+    let s := run init trCloseDirty
+    Reachable s ∧ s.idb 0 = some ⟨0, 2⟩ ∧ s.cur = none ∧ Prov s ∧ Durable s 0 := by
+  refine ⟨run_reachable _ _ .init, by decide, by decide,
+    provenance (run_reachable _ _ .init), ?_⟩
+  simp only [Durable]; decide
+
+/-! ## Import
+
+`applyImportedSave` detaches the game (as Reset) before its put, and the reboot
+installs the import. Before (and at dd7ba741f), the reboot first persisted
+"the outgoing game": with the flush, the core's own RAM went over the
+imported file and into `save:<g>`; and without it, the outgoing snapshot was
+taken under the imported save's signature with the replaced battery in its
+state, so Resume offered, and applied, the save just replaced. -/
+
+open Ev in
+def trImport : List Ev :=
+  [launch 0 false, resume 0 true, resume 0 true,
+   play, frame, tick true, resume 0 true,             -- v1 persisted
+   hide,                                              -- a snapshot (v1)
+   play, pause,                                       -- v2 in the core only
+   importSave,                                        -- the import (v3): detached, put
+   resume 0 true, resume 0 true,                      -- the reboot: dbGet, boot on v3
+   resume 0 true, resume 0 true]                      -- the offer: v1's snapshot is not v3
+
+theorem regress_import_survives_reboot :
+    let s := run init trImport
+    Reachable s ∧ s.idb 0 = some ⟨0, 3⟩ ∧ s.fs = some ⟨0, 3⟩ ∧ s.cur = some 0 ∧
+      s.toast = none ∧ s.pend = [] ∧ Prov s :=
+  ⟨run_reachable _ _ .init, by decide, by decide, by decide, by decide, by decide,
+   provenance (run_reachable _ _ .init)⟩
+
+/-! ## Reset, Delete and Import against a waiting quota retry
+
+A persist waiting on a quota eviction re-puts its bytes unless a later number
+has been taken for the save (`persistSeq`). A delete of the save (Reset,
+Delete) and an import take one. -/
+
+open Ev in
+/-- A persist of game 0's save is waiting on a quota eviction when the player
+    resets game 0. The Reset took no number before, so the retry found itself
+    the latest and put the wiped save back (`NoResurrect` failed); now it gives
+    way. -/
+def trQuotaReset : List Ev :=
+  [launch 0 false, resume 0 true, resume 0 true, play, frame, tick false,  -- v1: quota -> evict
+   reset 0,                                           -- save:0 deleted, a number taken
+   resume 0 true]                                     -- eviction done: gives way
+
+theorem regress_quota_retry_resurrects_reset_save :
+    let s := run init trQuotaReset
+    Reachable s ∧ s.idb 0 = none ∧ s.wiped 0 = some 2 ∧ NoResurrect s := by
+  have hw : (run init trQuotaReset).wiped = upd (fun _ => none) 0 (some 2) := rfl
+  have hi : (run init trQuotaReset).idb 0 = none := by decide
+  refine ⟨run_reachable _ _ .init, hi, by rw [hw]; rfl, ?_⟩
+  intro g b t hb ht
+  rw [hw, upd_apply] at ht
+  split at ht
+  · subst_vars; rw [hi] at hb; cases hb
+  · cases ht
+
+open Ev in
+/-- The same with Delete (the game loaded: unloadGame, then the deletes). -/
+theorem regress_quota_retry_resurrects_deleted_save :
+    let s := run init [launch 0 false, resume 0 true, resume 0 true, play, frame, tick false,
+                       delete 0, resume 1 true, resume 1 true, resume 0 true]
+    Reachable s ∧ s.idb 0 = none ∧ s.wiped 0 = some 2 :=
+  ⟨run_reachable _ _ .init, by decide, by decide⟩
+
+open Ev in
+/-- ...and with an import: the import stands. -/
+theorem regress_quota_retry_over_import :
+    let s := run init [launch 0 false, resume 0 true, resume 0 true, play, frame, tick false,
+                       importSave, resume 0 true]
+    Reachable s ∧ s.idb 0 = some ⟨0, 2⟩ :=
+  ⟨run_reachable _ _ .init, by decide⟩
+
+/-! ## What the code still does not keep: `NoResurrect` against a Drive pull
+
+The pull's per-save write issues its put after an await and is not told that
+the user has since reset (or deleted) that save. It is the Drive code's, and
+reported, not fixed here. -/
 
 open Ev in
 /-- A Drive pull is downloading game 1's save when the player resets game 1
     (not loaded, so nothing to detach); the download lands and writes the
-    old save back. In the JS this is the pull's per-save write (3020-3023),
+    old save back. In the JS this is the pull's per-save write (3050-3053),
     which re-checks only that the game is not loaded or loading; the Drive
     deletes that Reset queued then remove Drive's copy, and the next sync's
     reconcile uploads the resurrected local one. -/
@@ -1508,19 +1714,6 @@ theorem open_pull_resurrects_reset_save :
     Reachable s ∧ s.idb 1 = some ⟨1, 1⟩ ∧ s.wiped 1 = some 2 ∧ ¬ NoResurrect s := by
   refine ⟨run_reachable _ _ .init, by decide, by decide, fun h => ?_⟩
   have := h 1 ⟨1, 1⟩ 2 (by decide) (by decide)
-  exact absurd this (by decide)
-
-open Ev in
-/-- A persist of game 0's save is waiting on a quota eviction when the player
-    resets game 0: the reset detaches the game and deletes `save:0`, but takes
-    no `persistSeq` number, so the retry finds itself the latest and puts the
-    old bytes back. (Needs a full disk and a two-tap Reset inside an eviction.) -/
-theorem open_quota_retry_resurrects_reset_save :
-    let s := run init [launch 0 false, resume 0 true, resume 0 true, play, frame, tick false,
-                       reset 0, resume 0 true]
-    Reachable s ∧ s.idb 0 = some ⟨0, 1⟩ ∧ s.wiped 0 = some 2 ∧ ¬ NoResurrect s := by
-  refine ⟨run_reachable _ _ .init, by decide, by decide, fun h => ?_⟩
-  have := h 0 ⟨0, 1⟩ 2 (by decide) (by decide)
   exact absurd this (by decide)
 
 end WebState.SavePersistence

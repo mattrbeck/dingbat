@@ -8,7 +8,8 @@ by the per-game menu's head, shown through object URLs.
 Line numbers are web/index.js at commit dd7ba741f, except the load path
 (`loadBegin`/`loadOutDone`/`loadInit`), which models loadRom as fixed by the
 commit "web: a game is named only once its core and save are in; loads and
-closes take a token", at that commit's lines.
+closes take a token", at the lines of "web: flush the solo core wherever its file
+is read; Reset, Delete and Import retire a waiting quota retry".
 
 ## Writers of "frame:<name>"
 * `storeLastFrame` (4359–4381): copies the wasm framebuffer and the name
@@ -416,8 +417,8 @@ def paintMenu (fix : Bool) (s : State) (e : Nat) (mp : MPic) (p : Pic) (k : Key)
   else s1
 
 def step (fix : Bool) (s : State) : Ev → State
-  -- loadRom 7954–7971: with a game in, persistAutoState then storeLastFrame
-  -- (the outgoing picture) is awaited; with none, straight to 7978. (The load
+  -- loadRom 8012–8029: with a game in, persistAutoState then storeLastFrame
+  -- (the outgoing picture) is awaited; with none, straight to 8036. (The load
   -- path, loadBegin/loadOutDone/loadInit, is as of the commit "web: a game is
   -- named only once its core and save are in; loads and closes take a token";
   -- at dd7ba741f the names switched before `await restoreSave`.)
@@ -427,13 +428,13 @@ def step (fix : Bool) (s : State) : Ev → State
       | some _ => let r := storeFrame fix s; { r.1 with sess := .loadOut b r.2 }
       | none => { s with sess := .loadRestore b }
     else s
-  -- loadRom 7972–7980: persistSave awaited; `await dbGet(save:b)`. The
+  -- loadRom 8030–8038: persistSave awaited; `await dbGet(save:b)`. The
   -- outgoing game stays named (and paused as it was) until the boot.
   | .loadOutDone =>
     match s.sess with
     | .loadOut b w => if ready s w then { s with sess := .loadRestore b } else s
     | _ => s
-  -- loadRom 7981–8007: initFromEmscripten, and in the same segment
+  -- loadRom 8039–8065: initFromEmscripten, and in the same segment
   -- currentRomName/currentOriginalName := b, lastFrameSig := null, paused := false.
   | .loadInit =>
     match s.sess with
