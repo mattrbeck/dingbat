@@ -201,3 +201,45 @@ bd_tswi_\n:
         TSWIWRAP2 bd_etswi 1B
         TSWIWRAP2 bd_etswi 1D
         TSWIWRAP2 bd_etswi 28
+
+@ bd_pswi(n, r0): SWI n (0x1A-0x2A) with r0 = the argument and r1-r3,
+@ r12 = 0x11111111 / 0x22222222 / 0x33333333 / 0xCCCCCCCC, markers and
+@ bd_regs as the other wrappers
+        .section .iwram, "ax", %progbits
+        .arm
+        .global bd_pswi
+bd_pswi:
+        push    {r4-r11, lr}
+        sub     r2, r0, #0x1A
+        adr     r11, 1f
+        add     r11, r11, r2, lsl #3
+        mov     r0, r1
+        ldr     r1, =0x11111111
+        ldr     r2, =0x22222222
+        ldr     r3, =0x33333333
+        ldr     r12, =0xCCCCCCCC
+        mov     r4, #0x04000000
+        add     r4, r4, #0xFF0
+        mov     r5, #0xF0
+        strb    r5, [r4]
+        mov     pc, r11
+1:
+        .irp    n, 1A,1B,1C,1D,1E,1F,20,21,22,23,24,25,26,27,28,29,2A
+        swi     #0x\n\()0000
+        b       2f
+        .endr
+2:
+        push    {r0-r3}
+        ldr     r5, =bd_regs
+        pop     {r6-r9}
+        stmia   r5!, {r6-r9}
+        str     r12, [r5], #4
+        str     sp, [r5], #4
+        str     lr, [r5], #4
+        mrs     r6, cpsr
+        str     r6, [r5], #4
+        mov     r5, #0xF1
+        strb    r5, [r4]
+        pop     {r4-r11, lr}
+        bx      lr
+        .pool

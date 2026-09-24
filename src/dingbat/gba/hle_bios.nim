@@ -1127,24 +1127,30 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     var dst = cpu.r[1]
     var remaining = decomp_len
     var n_flags, n_lit, n_tok, n_runb = 0
+    # Uncharged accesses: the cost model below prices every one of them, and
+    # charging it all through hle_charge_body_interruptible is what lets an
+    # IRQ in. Charged as they went, a 64 KB output (Phantasy Star
+    # Collection's scene loads) held off a V-count IRQ for 390k cycles
+    # where the real BIOS takes it on time.
+    let bus = cpu.gba.bus
     while remaining > 0:
-      let flags = cpu.gba.bus[src]; src += 1; n_flags += 1
+      let flags = bus.read_byte_internal(src); src += 1; n_flags += 1
       for i in 0 ..< 8:
         if remaining == 0: break
         if bit(flags, 7 - i):
           # Compressed block
-          let b1 = uint32(cpu.gba.bus[src]); src += 1
-          let b2 = uint32(cpu.gba.bus[src]); src += 1
+          let b1 = uint32(bus.read_byte_internal(src)); src += 1
+          let b2 = uint32(bus.read_byte_internal(src)); src += 1
           let length = (b1 shr 4) + 3
           let offset = ((b1 and 0xF) shl 8) or b2
           n_tok += 1
           for j in 0'u32 ..< length:
             if remaining == 0: break
-            cpu.gba.bus[dst] = cpu.gba.bus[dst - offset - 1]
+            bus.write_byte_internal(dst, bus.read_byte_internal(dst - offset - 1))
             dst += 1; remaining -= 1; n_runb += 1
         else:
           # Uncompressed byte
-          cpu.gba.bus[dst] = cpu.gba.bus[src]
+          bus.write_byte_internal(dst, bus.read_byte_internal(src))
           src += 1; dst += 1; remaining -= 1; n_lit += 1
     # Loop cost (routine 0x10FC) per token kind; rn/db = nonsequential byte
     # access at the src/dst pages. Run bytes: ldrb dst-offset + strb + loop.
@@ -1624,11 +1630,32 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       if key >= 84: model += 1
       if pitch != 0: model += 3
     cpu.hle_charge_body(body_t0, model)
-    # Reference key 180, not middle C: WaveData.freq stores the sample rate
-    # scaled up 10 octaves (Metroid Fusion intro aliases with 60).
-    let exponent = (float64(key) - 180.0 + float64(pitch) / 256.0) / 12.0
-    let freq = float64(base_freq) * pow(2.0, exponent)
-    cpu.r[0] = uint32(freq)
+    # freq * 2^((key + pitch/256 - 180) / 12): reference key 180, not middle
+    # C, since WaveData.freq stores the sample rate scaled up 10 octaves
+    # (Metroid Fusion intro aliases with 60). Exactly as the real BIOS
+    # rounds it: the high word of freq * M, M a 32-bit multiplier that is a
+    # top-octave value per semitone shifted down one bit per octave below,
+    # the fine pitch interpolating linearly (>> 8) toward the next
+    # semitone's, and one fixed M for every clamped key. The twelve values
+    # are the multipliers the real BIOS's results imply (tools/biosdrv/
+    # midikey.c: keys 0-255 and pitches 0-255 at four keys, eight WaveData
+    # frequencies from 0x400 to 0xFFFFFFFF, out-of-range keys and pitches:
+    # all 10432 results exact but a key negative as a signed word, which the
+    # real routine does not clamp and this does; the float form this
+    # replaces missed 6948 of them by 1-12).
+    const M2F_TOP = [2147483648'u64, 2275179671'u64, 2410468894'u64, 2553802834'u64,
+                     2705659852'u64, 2866546760'u64, 3037000500'u64, 3217589947'u64,
+                     3408917802'u64, 3611622603'u64, 3826380858'u64, 4053909304'u64]
+    var mult: uint64
+    if cast[uint32](cpu.r[1]) > 178:
+      mult = 4053020522'u64
+    else:
+      template m0(k: int): uint64 = M2F_TOP[k mod 12] shr (14 - k div 12)
+      let lo = m0(int(key))
+      let hi = m0(int(key) + 1)
+      # (only the fine pitch's low byte counts: 256 plays as 0, 300 as 44)
+      mult = lo + uint64((int64(hi - lo) * int64(pitch and 0xFF)) shr 8)
+    cpu.r[0] = uint32((uint64(base_freq) * mult) shr 32)
   of 0x25:  # MultiBoot
     cpu.r[0] = 1'u32  # failure: multiboot is not emulated
   else:

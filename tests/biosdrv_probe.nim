@@ -13,7 +13,8 @@
 #              flag, address, byte
 #   fifoA.bin / fifoB.bin  every byte that reached FIFO A / B, in order
 #   fifo.txt   one line per FIFO word burst: frame, cycle, channel, 4 bytes
-#   marks.bin  at every byte write to 0x04000FF0 (a probe ROM's marker):
+#   marks.bin  at every byte write to 0x04000FF0 (a probe ROM's marker), and
+#              at every frame's end with BD_SNAPEVERY=1 (marker 0xFF):
 #              u32 marker, u32 frame, u64 cycle, then the snapshot regions
 #              (BD_SNAP="addr:len,addr:len", hex) back to back
 #   frames.txt one framebuffer hash per frame
@@ -33,6 +34,10 @@ proc main() =
   emu.test_output = new_test_output()
   emu.post_init()
   emu.mp2k_hle = false
+  # No saves: a fresh chip (erased, as with no .sav), and nothing written
+  # back, so a symlinked library ROM runs the same way every time
+  for i in 0 ..< emu.storage.memory.len: emu.storage.memory[i] = 0xFF
+  emu.storage.save_path = ""
   var regions: seq[(uint32, int)]
   for part in getEnv("BD_SNAP").split(','):
     if part.len == 0: continue
@@ -49,6 +54,13 @@ proc main() =
   var s0 = 0'i64         # scheduler.cycles at the current frame's start
   proc now(): int64 =
     abs_base + (int64(emu.scheduler.cycles) - s0) + int64(emu.bus.cycles)
+  proc snapshot(m: uint32) =
+    mk.write(m); mk.write(uint32(frame)); mk.write(now())
+    for (ad, ln) in regions:
+      for i in 0 ..< ln:
+        mk.write(emu.bus.read_byte_internal(ad + uint32(i)))
+  # BD_SNAPEVERY=1: also snapshot (marker 0xFF) at the end of every frame
+  let snapevery = getEnv("BD_SNAPEVERY") == "1"
   bdIoHook = proc(address: uint32; value: uint8) =
     let a = address and 0xFFFFFF'u32
     if a >= 0xA0'u32 and a <= 0xA7'u32:
@@ -65,10 +77,7 @@ proc main() =
                    (if emu.bus.dma_active: " D " else: " - ") &
                    toHex(a, 3) & "=" & toHex(value, 2))
     elif a == 0xFF0'u32:
-      mk.write(uint32(value)); mk.write(uint32(frame)); mk.write(now())
-      for (ad, ln) in regions:
-        for i in 0 ..< ln:
-          mk.write(emu.bus.read_byte_internal(ad + uint32(i)))
+      snapshot(uint32(value))
   # BD_MEMTRACE=1: every store the BIOS makes (PC below 0x4000), DMA excluded;
   # BD_MEMTRACE=all: every CPU store
   let mtall = getEnv("BD_MEMTRACE") == "all"
@@ -103,7 +112,8 @@ proc main() =
         let pc = emu.cpu.r[15] - (if emu.cpu.cpsr.thumb: 4'u32 else: 8'u32)
         sl.writeLine($frame & " " & $now() & " swi " & toHex(n, 2) & " pc=" & toHex(pc, 8) &
                      " r0=" & toHex(emu.cpu.r[0], 8) & " r1=" & toHex(emu.cpu.r[1], 8) &
-                     " r2=" & toHex(emu.cpu.r[2], 8) & " r3=" & toHex(emu.cpu.r[3], 8))
+                     " r2=" & toHex(emu.cpu.r[2], 8) & " r3=" & toHex(emu.cpu.r[3], 8) &
+                     " cpsr=" & toHex(uint32(emu.cpu.cpsr), 8) & " ime=" & $emu.interrupts.ime)
   let fr = newFileStream(prefix & ".frames.txt", fmWrite)
   for f in 0 ..< frames:
     frame = f
@@ -116,6 +126,7 @@ proc main() =
     while best - s0 < 280896 - 512: best += 1024
     abs_base += best - s0
     fr.writeLine($f & " " & toHex(cast[uint64](hash(emu.ppu.framebuffer)), 16))
+    if snapevery: snapshot(0xFF)
   bdIoHook = nil
   bdMemHook = nil
   bdIoReadHook = nil

@@ -364,8 +364,7 @@ proc sd_vsync(cpu: CPU) =
   let area = cpu.sd_area()
   let ident = cpu.sd_ident(area)
   if area < 0x02000000'u32 or ident != SD_IDENT:
-    cpu.r[0] = area
-    cpu.r[1] = 0
+    cpu.r[0] = area       # (r1 is left as it was: regs.c)
     cpu.r[3] = ident
     cpu.idle(16)
     return
@@ -396,7 +395,6 @@ proc sd_vsync_off(cpu: CPU) =
   let ident = cpu.sd_ident(area)
   if area < 0x02000000'u32 or (ident != SD_IDENT and ident != SD_IDENT + 1):
     cpu.r[0] = ident
-    cpu.r[1] = 0
     cpu.r[3] = SD_R3
     # An ident below 'Smsh' is refused three cycles sooner (two compares)
     cpu.idle(if area >= 0x02000000'u32 and ident < SD_IDENT: 27 else: 30)
@@ -422,12 +420,12 @@ proc sd_channel_clear(cpu: CPU) =
   let bus = cpu.gba.bus
   let area = cpu.sd_area()
   let ident = cpu.sd_ident(area)
-  cpu.r[1] = 0
   cpu.r[3] = SD_R3
   if area < 0x02000000'u32 or ident != SD_IDENT:
     cpu.r[0] = ident
     cpu.idle(31)
     return
+  cpu.r[1] = 0
   for i in 0'u32 ..< 12'u32:
     bus.write_byte_internal(area + 0x50 + i * 0x40, 0)
   cpu.r[0] = area + 0x350
@@ -763,7 +761,6 @@ proc sd_main(cpu: CPU) =
   let ident = cpu.sd_ident(area)
   if area < 0x02000000'u32 or ident != SD_IDENT:
     cpu.r[0] = area
-    cpu.r[1] = 0
     cpu.r[3] = ident
     cpu.idle(14)
     return
@@ -838,6 +835,9 @@ proc sd_trap(cpu: CPU): bool =
     bus.add_cycles(-SD_TRAP_COST_T)
     let area = cpu.r[4]
     let cost = cpu.sd_mix(area)
+    when defined(biosdrvtrace):
+      if getEnv("BD_MIXCOST") == "1":
+        echo "mixcost ", cost, " at ", int64(cpu.gba.scheduler.cycles) + int64(bus.cycles)
     cpu.r[9] = SD_PH_SM_DONE
     cpu.cpsr.thumb = false
     cpu.sd_delay(cost - SD_MIX_BASE, 2)
