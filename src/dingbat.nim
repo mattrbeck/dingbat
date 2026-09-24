@@ -1616,6 +1616,9 @@ proc render_imgui() =
   if app.gb_dbg != nil:
     app.gb_dbg.render_windows()
   app.cheats.render()
+  # load_state_slot refuses while linked; the window says so up front.
+  app.save_states.load_blocked =
+    if app.netlink != nil: "Loading is paused while linked." else: ""
   app.save_states.render()
 
   render_link_window()

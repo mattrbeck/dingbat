@@ -18,6 +18,7 @@ type
     selected*: int
     have_rom*: bool
     notice*:   string  ## last Save/Load failure, shown under the grid
+    load_blocked*: string  ## why Load is off (a link is up), "" = allowed
     slots*:    array[NUM_SLOTS, StateSlot]
     on_open*:   proc() {.closure.}         ## (re)populate slots + textures
     on_save*:   proc(slot: int) {.closure.}
@@ -197,11 +198,14 @@ proc render*(w: SaveStatesWidget) =
         if w.on_save != nil: w.on_save(w.selected)
         if w.on_open != nil: w.on_open()
       igSameLine(0, GAP)
-      if not sel.used: igBeginDisabled(true)
+      let no_load = not sel.used or w.load_blocked.len > 0
+      if no_load: igBeginDisabled(true)
       if igButton("Load", ImVec2(x: BTN_W, y: 0)):
         w.notice = ""
         if w.on_load != nil: w.on_load(w.selected)
-      if not sel.used: igEndDisabled()
+      if no_load: igEndDisabled()
+      if w.load_blocked.len > 0:
+        igTextColored(dim(), cstring(w.load_blocked))
       if w.notice.len > 0:
         igTextColored(ImVec4(x: 1.0, y: 0.45, z: 0.42, w: 1.0),
                       cstring(w.notice))
