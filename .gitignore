@@ -178,6 +178,7 @@ tools/gbgate/roms.txt
 /dingbat_gbapurebase_test
 /dingbat_desktop_settings_test
 /dingbat_desktop_lifecycle_test
+/dingbat_desktop_modal_test
 
 # Regenerable multiboot-probe outputs (tests/roms/mbprobe/build.py)
 tests/roms/mbprobe/build/*.sav
