@@ -30,7 +30,11 @@ def fnv1a(data: bytes) -> int:
 
 
 def reseal(buf: bytearray) -> bytes:
-    """Recompute payload_len and payload_hash so the header still validates."""
+    """Recompute payload_hash so the header still validates. The trailers
+    (thumbnail, whole-ROM identity) go with their flags: they are no part of
+    what these variants exercise."""
+    del buf[HEADER + struct.unpack("<I", bytes(buf[24:28]))[0]:]
+    buf[14:16] = b"\0\0"
     buf[24:28] = struct.pack("<I", len(buf) - HEADER)
     buf[28:32] = struct.pack("<I", fnv1a(bytes(buf[HEADER:])))
     return bytes(buf)

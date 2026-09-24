@@ -32,6 +32,14 @@ type
     buf*: string
     pos*: int
 
+  WholeRom* = object
+    ## A cart's whole-ROM identity (the STATE_FLAG_WHOLE_ROM trailer).
+    ## `known` false: the core writes no trailer and checks none (GB, whose
+    ## header already covers the whole file).
+    known*: bool
+    hash*: uint32   ## fnv1a over every byte of the ROM file
+    size*: uint32   ## the file's length
+
 const
   STATE_MAGIC*   = "DGBSTATE"  # 8 bytes
 
@@ -59,10 +67,21 @@ const
   # `slot` before v7, so 0 is the "pre-v7, derive it" marker and revisions
   # start at 1.
   STATE_HEADER_SIZE* = 32
-  # Optional trailer after the payload, flagged in `flags`; outside the
-  # hash-validated payload, so old readers ignore it. Layout: thumb_w(2)
-  # thumb_h(2) len(4) BGR555 pixels.
+  # Optional trailers after the payload, each flagged in `flags` and written
+  # in flag-bit order; outside the hash-validated payload, so a reader that
+  # does not know a flag ignores its trailer (every v7 reader discards the
+  # flags and accepts bytes past the payload). A trailer is found by skipping
+  # the ones before it, so one is never removed or reshaped once shipped.
+  #
+  # Thumbnail: thumb_w(2) thumb_h(2) len(4) BGR555 pixels.
   STATE_FLAG_THUMBNAIL* = 0x0001'u16
+  # Whole-ROM identity: len(4) = 8, then fnv1a over the whole ROM file (4)
+  # and the file's length in bytes (4); a later build may lengthen it. The
+  # header's rom_checksum stays what older readers compare (for GBA a hash
+  # of the first 1 MB only, and rom_size a fixed tag), so a hack that
+  # differs only past 1 MB is told apart by this trailer alone.
+  STATE_FLAG_WHOLE_ROM* = 0x0002'u16
+  WHOLE_ROM_TRAILER_LEN* = 8
 
 var last_state_reject_kind*: StateRejectKind = srkNone
   ## Set beside `last_state_error` by every refusal. Assigned only from procs
@@ -237,6 +256,13 @@ proc fnv1a*(data: openArray[byte]): uint32 =
 proc fnv1a*(data: string): uint32 =
   fnv1a(toOpenArrayByte(data, 0, data.high))
 
+proc fnv1a_more*(h: uint32; data: openArray[byte]): uint32 =
+  ## Continue a hash: fnv1a_more(fnv1a(a), b) == fnv1a(a & b), so a prefix's
+  ## identity and the whole file's come out of one pass.
+  result = h
+  for b in data:
+    result = (result xor uint32(b)) * 0x01000193'u32
+
 # ==================== State file header ====================
 
 proc current_payload_version*(core: CoreKind): uint32 =
@@ -286,43 +312,53 @@ proc write_state_header(w: var Writer; core: CoreKind;
   w.buf.add(payload)
 
 proc make_state_bytes*(core: CoreKind; rom_checksum, rom_size: uint32;
-                       payload: string): string =
-  ## Full state-file image (header + payload) as bytes.
-  var w = Writer()
-  write_state_header(w, core, rom_checksum, rom_size, payload, 0'u16)
-  w.buf
-
-proc make_state_bytes*(core: CoreKind; rom_checksum, rom_size: uint32;
                        payload: string; thumbnail: openArray[byte];
-                       thumb_w, thumb_h: uint16): string =
-  ## As above, plus a thumbnail trailer (BGR555, thumb_w*thumb_h) after the
-  ## payload. Falls back to a plain image if the thumbnail is empty/degenerate.
+                       thumb_w, thumb_h: uint16;
+                       whole_rom = WholeRom()): string =
+  ## Full state-file image: header, payload, then the trailers: a thumbnail
+  ## (BGR555, thumb_w*thumb_h; left out if empty or degenerate) and, when
+  ## the core knows it, the whole-ROM identity.
   let has_thumb = thumbnail.len == int(thumb_w) * int(thumb_h) * 2 and
                   thumb_w > 0'u16 and thumb_h > 0'u16
-  let flags = if has_thumb: STATE_FLAG_THUMBNAIL else: 0'u16
+  var flags = if has_thumb: STATE_FLAG_THUMBNAIL else: 0'u16
+  if whole_rom.known: flags = flags or STATE_FLAG_WHOLE_ROM
   var w = Writer()
   write_state_header(w, core, rom_checksum, rom_size, payload, flags)
   if has_thumb:
     w.write_u16(thumb_w)
     w.write_u16(thumb_h)
     w.write_seq_u8(thumbnail)   # u32 length prefix + raw BGR555 bytes
+  if whole_rom.known:
+    w.write_u32(uint32(WHOLE_ROM_TRAILER_LEN))
+    w.write_u32(whole_rom.hash)
+    w.write_u32(whole_rom.size)
   w.buf
 
-proc write_state_file*(path: string; core: CoreKind;
-                       rom_checksum, rom_size: uint32; payload: string) =
-  let parent = path.parentDir
-  if parent.len > 0:
-    createDir(parent)
-  write_file_atomic(path, make_state_bytes(core, rom_checksum, rom_size, payload))
+proc make_state_bytes*(core: CoreKind; rom_checksum, rom_size: uint32;
+                       payload: string; whole_rom = WholeRom()): string =
+  ## As above, without a thumbnail.
+  make_state_bytes(core, rom_checksum, rom_size, payload, [], 0'u16, 0'u16,
+                   whole_rom)
 
 proc write_state_file*(path: string; core: CoreKind;
                        rom_checksum, rom_size: uint32; payload: string;
-                       thumbnail: openArray[byte]; thumb_w, thumb_h: uint16) =
+                       whole_rom = WholeRom()) =
   let parent = path.parentDir
   if parent.len > 0:
     createDir(parent)
   write_file_atomic(path, make_state_bytes(core, rom_checksum, rom_size, payload,
-                                           thumbnail, thumb_w, thumb_h))
+                                           whole_rom))
+
+proc write_state_file*(path: string; core: CoreKind;
+                       rom_checksum, rom_size: uint32; payload: string;
+                       thumbnail: openArray[byte]; thumb_w, thumb_h: uint16;
+                       whole_rom = WholeRom()) =
+  let parent = path.parentDir
+  if parent.len > 0:
+    createDir(parent)
+  write_file_atomic(path, make_state_bytes(core, rom_checksum, rom_size, payload,
+                                           thumbnail, thumb_w, thumb_h,
+                                           whole_rom))
 
 proc downscale_bgr555*(src: openArray[uint16]; src_w, src_h, dst_w, dst_h: int): seq[byte] =
   ## Nearest-neighbour downscale of a BGR555 framebuffer to little-endian
@@ -338,10 +374,54 @@ proc downscale_bgr555*(src: openArray[uint16]; src_w, src_h, dst_w, dst_h: int):
       result[o]     = byte(px and 0xFF)
       result[o + 1] = byte((px shr 8) and 0xFF)
 
+proc state_flags(data: string): uint16 =
+  uint16(byte(data[14])) or (uint16(byte(data[15])) shl 8)
+
+type
+  WholeRomTrailer* = enum
+    wrAbsent      ## not flagged: an older build's state, or a GB one
+    wrPresent     ## flagged and read
+    wrUnreadable  ## flagged, but the bytes are not there: the file is short
+
+proc le32(data: string; pos: int): uint32 =
+  for i in 0 .. 3: result = result or (uint32(byte(data[pos + i])) shl (8 * i))
+
+proc parse_state_whole_rom*(data: string): tuple[kind: WholeRomTrailer;
+                                                 rom: WholeRom] =
+  ## The whole-ROM identity trailer of a state image. Never raises and
+  ## leaves last_state_reject_kind alone (state_names_rom's contract).
+  result.kind = wrAbsent
+  if data.len < STATE_HEADER_SIZE: return
+  let flags = state_flags(data)
+  if (flags and STATE_FLAG_WHOLE_ROM) == 0: return
+  result.kind = wrUnreadable
+  # int64: every length here is a stranger's u32, and int is 32 bits on wasm
+  let size = int64(data.len)
+  var pos = int64(STATE_HEADER_SIZE) + int64(le32(data, 24))   # payload_len
+  if (flags and STATE_FLAG_THUMBNAIL) != 0:
+    if pos + 8 > size: return
+    pos += 8 + int64(le32(data, int(pos) + 4))                   # w, h, len
+  if pos + 4 > size: return
+  let n = int64(le32(data, int(pos)))
+  if n < WHOLE_ROM_TRAILER_LEN or pos + 4 + n > size: return
+  result.rom = WholeRom(known: true, hash: le32(data, int(pos) + 4),
+                        size: le32(data, int(pos) + 8))
+  result.kind = wrPresent
+
+proc names_whole_rom(data: string; whole_rom: WholeRom): bool =
+  ## False only when this state carries a whole-ROM identity and it is not
+  ## this cart's. Nothing to compare with (an older build's state, a core
+  ## that keeps none) passes: the header identity decides alone.
+  if not whole_rom.known: return true
+  let t = parse_state_whole_rom(data)
+  t.kind != wrPresent or
+    (t.rom.hash == whole_rom.hash and t.rom.size == whole_rom.size)
+
 proc parse_state_payload*(data: string; core: CoreKind;
                           rom_checksum, rom_size: uint32;
                           origin = "state data";
-                          legacy_checksums: seq[uint32] = @[]):
+                          legacy_checksums: seq[uint32] = @[];
+                          whole_rom = WholeRom()):
                          tuple[payload: string; rev: uint32] =
   ## Validates the header of a full state image and returns the payload and
   ## its payload revision (the caller's per-subsystem loaders migrate older
@@ -349,6 +429,8 @@ proc parse_state_payload*(data: string; core: CoreKind;
   ## identities older builds wrote for this same cart, accepted on read and
   ## never written (the caller derives them from the loaded ROM, see
   ## gba_legacy_rom_checksums); a state from a different ROM is still refused.
+  ## `whole_rom`, when known, must match the state's whole-ROM trailer if it
+  ## has one; one without (an older build's) is judged by the header alone.
   if data.len < STATE_HEADER_SIZE or data[0 ..< STATE_MAGIC.len] != STATE_MAGIC:
     raise state_error("not a dingbat save state: " & origin, srkNotAState)
   var r = Reader(buf: data, pos: STATE_MAGIC.len)
@@ -381,13 +463,25 @@ proc parse_state_payload*(data: string; core: CoreKind;
   # `<`, not `!=`: an optional trailer (e.g. thumbnail) may follow the payload.
   if data.len - STATE_HEADER_SIZE < payload_len:
     raise state_error("save state is truncated or corrupt", srkTruncated)
+  if whole_rom.known:
+    let t = parse_state_whole_rom(data)
+    case t.kind
+    of wrAbsent: discard
+    of wrUnreadable:
+      raise state_error("save state is truncated (its ROM identity is cut off)",
+                        srkTruncated)
+    of wrPresent:
+      if t.rom.hash != whole_rom.hash or t.rom.size != whole_rom.size:
+        raise state_error("save state belongs to a different ROM (its " &
+                          "whole-ROM identity differs)", srkWrongRom)
   result.payload = data[STATE_HEADER_SIZE ..< STATE_HEADER_SIZE + payload_len]
   result.rev = rev
   if fnv1a(result.payload) != payload_hash:
     raise state_error("save state payload hash mismatch (corrupt file)")
 
 proc state_names_rom*(data: string; core: CoreKind; rom_checksum, rom_size: uint32;
-                      legacy_checksums: seq[uint32] = @[]): bool =
+                      legacy_checksums: seq[uint32] = @[];
+                      whole_rom = WholeRom()): bool =
   ## Whether a state image's header says it was made in this core for this
   ## cart, the identity test parse_state_payload applies, and nothing else:
   ## a damaged or too-new state for this cart still counts. Never raises and
@@ -400,7 +494,8 @@ proc state_names_rom*(data: string; core: CoreKind; rom_checksum, rom_size: uint
   let file_checksum = r.read_u32()
   let file_rom_size = r.read_u32()
   file_rom_size == rom_size and
-    (file_checksum == rom_checksum or file_checksum in legacy_checksums)
+    (file_checksum == rom_checksum or file_checksum in legacy_checksums) and
+    names_whole_rom(data, whole_rom)
 
 proc parse_state_thumbnail*(data: string): tuple[w, h: int; pixels: seq[byte]] =
   ## The optional thumbnail trailer (BGR555), (0,0,@[]) if absent. Never
@@ -408,8 +503,7 @@ proc parse_state_thumbnail*(data: string): tuple[w, h: int; pixels: seq[byte]] =
   result = (0, 0, @[])
   if data.len < STATE_HEADER_SIZE or data[0 ..< STATE_MAGIC.len] != STATE_MAGIC:
     return
-  let flags = uint16(byte(data[14])) or (uint16(byte(data[15])) shl 8)
-  if (flags and STATE_FLAG_THUMBNAIL) == 0:
+  if (state_flags(data) and STATE_FLAG_THUMBNAIL) == 0:
     return
   try:
     var hr = Reader(buf: data, pos: 24)   # payload_len field
@@ -425,11 +519,12 @@ proc parse_state_thumbnail*(data: string): tuple[w, h: int; pixels: seq[byte]] =
 
 proc read_state_payload*(path: string; core: CoreKind;
                          rom_checksum, rom_size: uint32;
-                         legacy_checksums: seq[uint32] = @[]):
+                         legacy_checksums: seq[uint32] = @[];
+                         whole_rom = WholeRom()):
                         tuple[payload: string; rev: uint32] =
   if not fileExists(path):
     # Its own kind, not srkCorrupt: "nothing saved here" and "damaged" are
     # opposite things to tell someone.
     raise state_error("no save state found at " & path, srkNoFile)
   parse_state_payload(readFile(path), core, rom_checksum, rom_size, path,
-                      legacy_checksums)
+                      legacy_checksums, whole_rom)

@@ -29,6 +29,14 @@ proc reseal(image: var string) =
   patch_le32(image, 24, uint32(payload_len))
   patch_le32(image, 28, fnv1a(image[STATE_HEADER_SIZE ..< image.len]))
 
+proc strip_trailers(image: string): string =
+  ## Header and payload only: the base every mutant starts from, so that
+  ## reseal's "everything after the header" is exactly the payload.
+  var r = Reader(buf: image, pos: 24)
+  result = image[0 ..< STATE_HEADER_SIZE + int(r.read_u32())]
+  result[14] = '\0'
+  result[15] = '\0'
+
 proc mutate(base: string; rng: var Rand; aggressive: bool): string =
   result = base
   let payload_lo = STATE_HEADER_SIZE
@@ -119,13 +127,13 @@ when isMainModule:
     e.test_output = new_test_output()
     e.post_init()
     for _ in 0 ..< 120: e.step_frame()
-    base = e.state_bytes()
+    base = strip_trailers(e.state_bytes())
   else:
     let e = new_gb("", rom, fifo = true, headless = true, run_bios = false)
     e.test_output = new_test_output()
     e.post_init()
     for _ in 0 ..< 120: e.step_frame()
-    base = e.state_bytes()
+    base = strip_trailers(e.state_bytes())
 
   if args[1] == "poke":
     # Reproduce one sweep finding: set payload byte `seed` to `post`. Build

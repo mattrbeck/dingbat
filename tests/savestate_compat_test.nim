@@ -138,6 +138,9 @@ static:
   doAssert STATE_MAGIC == "DGBSTATE"
   doAssert STATE_HEADER_SIZE == 32
   doAssert STATE_FLAG_THUMBNAIL == 0x0001'u16
+  # The whole-ROM trailer: bit and length are what every build since reads.
+  doAssert STATE_FLAG_WHOLE_ROM == 0x0002'u16
+  doAssert WHOLE_ROM_TRAILER_LEN == 8
   doAssert ord(ckGBA) == 0 and ord(ckGB) == 1
   # The legacy container -> payload revision table is derived from history and
   # can never change; pinning it makes an edit to legacy_payload_version fail
@@ -225,8 +228,11 @@ proc run_corpus() =
           "no .state files in " & CORPUS_DIR & " — regenerate with --write-corpus")
     return
   var revs_seen: array[CoreKind, set[uint8]]
+  var whole_rom_seen = 0
   for path in entries:
-    # <rom-with-extension>.v<N>.state, N = the CONTAINER version in the header
+    # <rom-with-extension>.v<N>[-<what>].state, N = the CONTAINER version in
+    # the header; `-<what>` names a later shape within one container
+    # (`-wholerom`: the whole-ROM trailer)
     let base = path.extractFilename
     let parts = base.split('.')
     if parts.len < 3:
@@ -243,6 +249,7 @@ proc run_corpus() =
       check(false, label, "ROM " & rom & " is missing from " & ROM_DIR)
       continue
     revs_seen[core].incl(uint8(want_rev))
+    if parse_state_whole_rom(data).kind == wrPresent: inc whole_rom_seen
     # The revision the reader derives is the whole basis for the migration it
     # then applies, so assert it rather than only that the load worked.
     var got_rev = 0'u32
@@ -291,6 +298,7 @@ proc run_corpus() =
   check(revs_seen[ckGB] >= {1'u8, 2'u8, 3'u8},
         "corpus covers GB payload revisions 1, 2 and 3",
         "GB revisions present: " & $revs_seen[ckGB])
+  check(whole_rom_seen > 0, "corpus has a state with the whole-ROM trailer")
 
 proc run_roundtrip() =
   ## A state taken by THIS build must load in THIS build; separates "the
@@ -466,6 +474,173 @@ proc run_rom_identity() =
         "1 MB cart's identity is unchanged by this fix (old expression agrees)")
   check(big_sum == fnv1a(toOpenArrayByte(big, 0, 0x100000 - 1)),
         "1 MB cart's identity is the file")
+
+# 3c. A cart is its WHOLE file. The header's identity hashes only the first
+# 1 MB (and its rom_size is a fixed tag), so a hack that differs only past
+# 1 MB took the original's states. Every GBA state this build writes also
+# carries a whole-ROM trailer (STATE_FLAG_WHOLE_ROM), enforced when present;
+# the header stays what older readers compare, so they still load the file,
+# and a state without the trailer (an older build's) is judged by the header
+# alone, as before.
+
+proc whole_rom_less(img: string): string =
+  ## The image as a build before the trailer wrote it: the trailer (always
+  ## last) gone and its flag clear.
+  let t = parse_state_whole_rom(img)
+  doAssert t.kind == wrPresent
+  result = img[0 ..< img.len - 4 - WHOLE_ROM_TRAILER_LEN]
+  result[14] = char(uint8(result[14]) and not uint8(STATE_FLAG_WHOLE_ROM))
+
+proc big_gba_rom(name: string; size: int; poke = -1): string =
+  ## A `size`-byte cart: inputrec.gba's code at the front, a fixed pattern
+  ## after it, and byte `poke` (if any) flipped.
+  let code = readFile(ROM_DIR / GBA_ROMS[0][0])
+  var rom = newString(size)
+  for i in 0 ..< size:
+    rom[i] = char(uint8((i * 31 + (i shr 7) * 17 + 3) and 0xFF))
+  for i in 0 ..< code.len: rom[i] = code[i]
+  if poke >= 0: rom[poke] = char(uint8(rom[poke]) xor 0x5A'u8)
+  result = getTempDir() / ("dingbat_wholerom_" & name & ".gba")
+  writeFile(result, rom)
+
+proc run_whole_rom() =
+  echo "whole-ROM identity: a cart that differs only past 1 MB is another cart"
+  const MB = 0x100000
+  let path_a  = big_gba_rom("a", 2 * MB)
+  let path_a2 = big_gba_rom("a2", 2 * MB, poke = MB + 0x1234)   # a hack
+  let path_a3 = big_gba_rom("a3", MB + MB div 2)                # a's prefix
+  defer:
+    for p in [path_a, path_a2, path_a3]: removeFile(p)
+  proc boot(p: string): GBA =
+    result = new_gba("", p, run_bios = false, use_hle = true)
+    result.post_init()
+    for _ in 0 ..< 30: result.step_frame()
+  let a = boot(path_a)
+  let a2 = boot(path_a2)
+  let a3 = boot(path_a3)
+
+  # The identities, cached at load, are the file's bytes.
+  let file_a = readFile(path_a)
+  check(a.cartridge.rom_identity == fnv1a(toOpenArrayByte(file_a, 0, MB - 1)) and
+        a.cartridge.rom_identity_whole == fnv1a(file_a),
+        "the 1 MB and whole-file identities are hashes of the file")
+  check(a.cartridge.rom_identity_whole != a2.cartridge.rom_identity_whole and
+        a.cartridge.rom_identity == a2.cartridge.rom_identity,
+        "the hack has its own whole-ROM identity and the same 1 MB one")
+
+  let plain = a.state_bytes()
+  let thumbed = a.state_bytes(thumbnail = true)
+  # The premise: the header cannot tell the two carts apart.
+  check(rom_identity(plain) == rom_identity(a2.state_bytes()),
+        "the header's ROM identity is the same for both carts")
+  check(parse_state_whole_rom(plain).kind == wrPresent and
+        parse_state_whole_rom(thumbed).kind == wrPresent,
+        "every GBA state carries the whole-ROM trailer")
+  let (tw, th, px) = parse_state_thumbnail(thumbed)
+  check(tw > 0 and th > 0 and px.len == tw * th * 2,
+        "the thumbnail trailer still comes first, where older readers look")
+
+  check(a.load_state_bytes(plain) and a.load_state_bytes(thumbed),
+        "the cart loads its own states")
+  check(a.state_is_for(plain), "and claims them")
+  for (img, what) in [(plain, "state"), (thumbed, "thumbnail state")]:
+    for (emu, who) in [(a2, "the hack"), (a3, "a cart with a's first 1 MB, shorter")]:
+      let before = emu.state_payload()
+      let ok = emu.load_state_bytes(img)
+      check(not ok and last_state_reject_kind == srkWrongRom,
+            who & " refuses a's " & what & " as another game's",
+            "loaded " & $ok & ", kind " & $last_state_reject_kind)
+      check(emu.state_payload() == before, who & " is untouched")
+      check(not emu.state_is_for(img), who & " does not claim a's " & what)
+
+  # A state from before the trailer: the header decides, as it always did.
+  let old_plain = whole_rom_less(plain)
+  let old_thumbed = whole_rom_less(thumbed)
+  check(a.load_state_bytes(old_plain) and a.load_state_bytes(old_thumbed),
+        "an older build's state (no trailer) loads")
+  check(a2.load_state_bytes(old_plain),
+        "and, having only the 1 MB identity, loads in the hack too (as before)")
+  check(parse_state_thumbnail(old_thumbed).pixels == px,
+        "the thumbnail reads the same without the whole-ROM trailer")
+
+  # What a reader that knows no whole-ROM trailer (every build before this
+  # one) does with the new image: the same header checks, the flags ignored,
+  # bytes past the payload ignored. It gets the same payload out.
+  for img in [plain, thumbed]:
+    var got = ""
+    try:
+      got = parse_state_payload(img, ckGBA, a.cartridge.rom_identity,
+                                0x02000000'u32).payload
+    except CatchableError: discard
+    check(got.len > 0 and
+          got == parse_state_payload(whole_rom_less(img), ckGBA,
+                                     a.cartridge.rom_identity,
+                                     0x02000000'u32).payload,
+          "a reader without the trailer takes the new image's payload")
+
+  # A flagged trailer that is cut off is a short file, not an anonymous state.
+  check(not a.load_state_bytes(plain[0 ..< plain.len - 4]) and
+        last_state_reject_kind == srkTruncated,
+        "a state whose whole-ROM trailer is cut off is refused as truncated")
+  # Wild lengths (a stranger's file) are a short file too, never a crash.
+  var wild = plain
+  for i in 0 .. 3: wild[plain.len - 12 + i] = '\xFF'
+  var wild_thumb = thumbed
+  let thumb_len_at = STATE_HEADER_SIZE + (block:
+    var r = Reader(buf: thumbed, pos: 24)
+    int(r.read_u32())) + 4
+  for i in 0 .. 3: wild_thumb[thumb_len_at + i] = '\xF0'
+  for (img, what) in [(wild, "whole-ROM"), (wild_thumb, "thumbnail")]:
+    check(not a.load_state_bytes(img) and last_state_reject_kind == srkTruncated,
+          "a " & what & " trailer length past the end is refused as truncated")
+    check(a.state_is_for(img), "and the header still names the cart")
+  # A later build may lengthen the trailer: the first 8 bytes still decide.
+  var longer = plain[0 ..< plain.len - 12]
+  var w = Writer()
+  w.write_u32(12)
+  w.write_u32(a.cartridge.rom_identity_whole)
+  w.write_u32(uint32(a.cartridge.rom_size))
+  w.write_u32(0xDEADBEEF'u32)
+  longer.add w.buf
+  check(a.load_state_bytes(longer) and not a2.load_state_bytes(longer),
+        "a longer trailer from a later build is read by its first 8 bytes")
+
+  # A cheat patches the ROM buffer; the identities were taken at load.
+  a.cartridge.rom[MB + 0x1234] = a.cartridge.rom[MB + 0x1234] xor 0xFF'u8
+  check(a.state_bytes().parse_state_whole_rom().rom.hash ==
+          a.cartridge.rom_identity_whole and a.load_state_bytes(plain),
+        "a patched ROM buffer does not re-identify the cart")
+
+  # A cart of 1 MB or less: both identities are the same hash.
+  let small = new_gba_for(GBA_ROMS[0][0])
+  check(small.cartridge.rom_identity_whole == small.cartridge.rom_identity,
+        "under 1 MB the whole-ROM identity is the header's")
+
+  # GB never had the limit: its header hashes the whole file and carries
+  # its real length, so it writes no trailer.
+  var gb_rom = newString(2 * MB)
+  for i in 0 ..< gb_rom.len: gb_rom[i] = char(uint8((i * 37 + 11) and 0xFF))
+  gb_rom[0x0147] = char(0x19)   # MBC5
+  gb_rom[0x0148] = char(0x06)   # 2 MB
+  gb_rom[0x0149] = '\0'
+  let gb_a = getTempDir() / "dingbat_wholerom_a.gb"
+  let gb_a2 = getTempDir() / "dingbat_wholerom_a2.gb"
+  writeFile(gb_a, gb_rom)
+  gb_rom[MB + 0x1234] = char(uint8(gb_rom[MB + 0x1234]) xor 0x5A'u8)
+  writeFile(gb_a2, gb_rom)
+  defer:
+    removeFile(gb_a)
+    removeFile(gb_a2)
+  let g = new_gb("", gb_a, fifo = true, headless = true, run_bios = false)
+  g.post_init()
+  for _ in 0 ..< 30: g.step_frame()
+  let g2 = new_gb("", gb_a2, fifo = true, headless = true, run_bios = false)
+  g2.post_init()
+  let gimg = g.state_bytes(thumbnail = true)
+  check(parse_state_whole_rom(gimg).kind == wrAbsent, "a GB state has no trailer")
+  check(g.load_state_bytes(gimg) and not g2.load_state_bytes(gimg) and
+        last_state_reject_kind == srkWrongRom,
+        "a GB cart differing past 1 MB already refuses by the header")
 
 proc run_cart_shapes() =
   ## Every corpus state comes from a cart with no backup chip and, on the GB
@@ -854,6 +1029,7 @@ when isMainModule:
     quit(0)
   run_roundtrip()
   run_rom_identity()
+  run_whole_rom()
   run_cart_shapes()
   run_rejections()
   run_intr_wait_migration()

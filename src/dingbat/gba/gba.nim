@@ -1099,10 +1099,13 @@ type
     db_delay*:   int
 
   Cartridge* = ref object
-    rom_identity*: uint32  ## FNV-1a of the ROM as read from disk. The
-                           ## save-state identity reads this, never `rom`:
+    rom_identity*: uint32  ## FNV-1a of the first 1 MB of the ROM as read
+                           ## from disk, the state header's identity. The
+                           ## save-state identities read these, never `rom`:
                            ## cheats patch that buffer in place
                            ## (gba_rom_checksum).
+    rom_identity_whole*: uint32  ## FNV-1a of the whole file, the states'
+                                 ## whole-ROM trailer (gba_whole_rom)
     rom*: seq[byte]        ## sized to the next power of two >= the ROM file
     rom_mask*: uint32      ## rom.len - 1
     rom_size*: int         ## bytes read from the file (no pad, no Classic NES

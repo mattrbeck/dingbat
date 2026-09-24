@@ -26,13 +26,18 @@ proc new_cartridge*(rom_path: string): Cartridge =
   if sz == 0x100000:
     for i in 1 .. 3:
       copyMem(addr result.rom[i * sz], addr result.rom[0], sz)
-  # Cart identity is hashed once, from the first 1 MB as loaded, never from the
-  # live buffer: the cheat engine patches `rom` in place, and a changed hash
-  # would stop every save state for the game from loading.
+  # Cart identity is hashed once, as loaded, never from the live buffer: the
+  # cheat engine patches `rom` in place, and a changed hash would stop every
+  # save state for the game from loading. One pass gives both: the first
+  # 1 MB (the state header's identity) and, continuing it, the whole file
+  # (the state's whole-ROM trailer), ~70 ms for a 32 MB cart.
   let idn = min(sz, 0x100000)
   result.rom_identity =
     if idn <= 0: fnv1a(toOpenArray(result.rom, 0, -1))
     else: fnv1a(toOpenArray(result.rom, 0, idn - 1))
+  result.rom_identity_whole =
+    if sz <= idn: result.rom_identity
+    else: fnv1a_more(result.rom_identity, toOpenArray(result.rom, idn, sz - 1))
 
 proc rom_open_bus*(address: uint32): uint8 {.inline.} =
   ## Value returned when reading past the end of the ROM: the incrementing

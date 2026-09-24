@@ -885,6 +885,14 @@ proc gba_rom_checksum(gba: GBA): uint32 =
   ## is a separate quantity.
   gba.cartridge.rom_identity
 
+proc gba_whole_rom(gba: GBA): WholeRom =
+  ## The whole-ROM identity every state this build writes carries in a
+  ## trailer, and that a state with one must match: the header's 1 MB hash
+  ## (and its fixed size tag) cannot tell apart a hack that differs only
+  ## past 1 MB. Cached at load like rom_identity.
+  WholeRom(known: true, hash: gba.cartridge.rom_identity_whole,
+           size: uint32(max(gba.cartridge.rom_size, 0)))
+
 proc gba_legacy_rom_checksums(gba: GBA): seq[uint32] =
   ## Identities older builds computed for this cart, accepted on read only.
   ## Both variants hashed the 1 MB window of the padded buffer, so they
@@ -941,14 +949,17 @@ proc gba_thumbnail(gba: GBA): seq[byte] =
   downscale_bgr555(gba.ppu.framebuffer, 240, 160, GBA_THUMB_W, GBA_THUMB_H)
 
 proc state_bytes*(gba: GBA; thumbnail = false): string =
-  ## Full state image (header + payload), the .state file format. With
-  ## thumbnail, a BGR555 screenshot trailer is appended (old readers ignore it).
+  ## Full state image (header + payload + the whole-ROM trailer), the .state
+  ## file format. With thumbnail, a BGR555 screenshot trailer goes before the
+  ## whole-ROM one. Older readers ignore both.
   let payload = gba.gba_state_payload()
   if thumbnail:
     make_state_bytes(ckGBA, gba.gba_rom_checksum(), GBA_STATE_ROM_TAG, payload,
-                     gba.gba_thumbnail(), uint16(GBA_THUMB_W), uint16(GBA_THUMB_H))
+                     gba.gba_thumbnail(), uint16(GBA_THUMB_W), uint16(GBA_THUMB_H),
+                     gba.gba_whole_rom())
   else:
-    make_state_bytes(ckGBA, gba.gba_rom_checksum(), GBA_STATE_ROM_TAG, payload)
+    make_state_bytes(ckGBA, gba.gba_rom_checksum(), GBA_STATE_ROM_TAG, payload,
+                     gba.gba_whole_rom())
 
 proc gba_apply_checked(gba: GBA; payload: string; rev: uint32): bool =
   ## Apply a validated payload, restoring the live machine if it fails midway.
@@ -979,16 +990,17 @@ proc parse_state_image*(gba: GBA; data: string; origin = "state data"):
   ## load_state passes the same values to read_state_payload instead (it
   ## needs the file-not-found path).
   parse_state_payload(data, ckGBA, gba.gba_rom_checksum(), GBA_STATE_ROM_TAG,
-                      origin, gba.gba_legacy_rom_checksums())
+                      origin, gba.gba_legacy_rom_checksums(), gba.gba_whole_rom())
 
 proc state_rom_identity*(gba: GBA): uint32 =
   ## The ROM identity a state header carries; the desktop names slot files by it.
   gba.gba_rom_checksum()
 
 proc state_is_for*(gba: GBA; data: string): bool =
-  ## Whether a state image's header names this cart (legacy identities too).
+  ## Whether a state image names this cart: its header (legacy identities
+  ## too) and its whole-ROM trailer when it has one.
   state_names_rom(data, ckGBA, gba.gba_rom_checksum(), GBA_STATE_ROM_TAG,
-                  gba.gba_legacy_rom_checksums())
+                  gba.gba_legacy_rom_checksums(), gba.gba_whole_rom())
 
 proc load_state_bytes*(gba: GBA; data: string): bool =
   ## Validate and apply a full state image. Mirrors load_state's rollback.
@@ -1008,10 +1020,12 @@ proc save_state*(gba: GBA; path: string; thumbnail = false): bool =
     if thumbnail:
       write_state_file(path, ckGBA, gba.gba_rom_checksum(), GBA_STATE_ROM_TAG,
                        gba.gba_state_payload(), gba.gba_thumbnail(),
-                       uint16(GBA_THUMB_W), uint16(GBA_THUMB_H))
+                       uint16(GBA_THUMB_W), uint16(GBA_THUMB_H),
+                       gba.gba_whole_rom())
     else:
       write_state_file(path, ckGBA, gba.gba_rom_checksum(),
-                       GBA_STATE_ROM_TAG, gba.gba_state_payload())
+                       GBA_STATE_ROM_TAG, gba.gba_state_payload(),
+                       gba.gba_whole_rom())
     true
   except CatchableError:
     last_state_error = getCurrentExceptionMsg()   # the frontend's hint
@@ -1026,7 +1040,8 @@ proc load_state*(gba: GBA; path: string): bool =
   try:
     image = read_state_payload(path, ckGBA, gba.gba_rom_checksum(),
                                GBA_STATE_ROM_TAG,
-                               gba.gba_legacy_rom_checksums())
+                               gba.gba_legacy_rom_checksums(),
+                               gba.gba_whole_rom())
   except CatchableError:
     last_state_error = getCurrentExceptionMsg()
     echo "Load state failed: ", last_state_error
