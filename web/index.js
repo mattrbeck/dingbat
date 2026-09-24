@@ -1886,12 +1886,18 @@ const resetGameAction = async (name) => {
     updateStorageInfo();
   }
 };
+// unloadGame refused: a link session holds the game, or a load that started
+// after the close took over from it (loadGen) - then the game was not closed
+// here, and the load persists it as the outgoing one. Say which.
+const unloadRefused = (what) => showToast(linkMode || rollbackMode || netActive()
+  ? "Exit the online session first"
+  : "Not " + what + " — another game started loading");
 // Remove from device = free this device's ROM bytes, keep saves and the
 // Drive copy.
 const removeFromDeviceAction = async (name) => {
   // Unlike Delete, the save is being kept, so it is flushed on the way out.
   if (isRomLoaded(name) && !(await unloadGame({ flushSave: true }))) {
-    showToast("Exit the online session first");
+    unloadRefused("removed");
     return;
   }
   if (await removeGameFromDevice(name)) {
@@ -1946,7 +1952,7 @@ const deleteGameAction = async (name) => {
     // Unload before deleting: nulling currentRomName keeps the autosave
     // from re-flushing over the deleted key. No final flush.
     if (!(await unloadGame({ flushSave: false }))) {
-      showToast("Exit the online session first");
+      unloadRefused("deleted");
       return false;
     }
   }

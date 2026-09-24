@@ -366,6 +366,20 @@ test("the page going away mid-switch writes nothing under the incoming name", as
   await drain();
 });
 
+// A close that a later tap superseded says so, not "online session".
+test("a Delete that a later tap superseded does not blame an online session", async () => {
+  const app = await boot();
+  await playAThenHome(app);
+  const deleting = app.runIn(`deleteGameAction("A.gba")`); // unloadGame awaits...
+  app.runIn(`launchRom("B.gba")`);                          // ...and a tap takes over
+  assert.equal(await deleting, false, "not deleted");
+  await drain();
+  assert.ok(!app.toasts.includes("Exit the online session first"), app.toasts.join(" | "));
+  assert.ok(app.toasts.some((t) => t.startsWith("Not deleted")), "says it was not deleted");
+  assert.ok(app.idb.get("rom:A.gba"), "A is still in the library");
+  assert.equal(named(app), "B.gba", "the tap's load went ahead");
+});
+
 // A Drive-only tile downloads before it launches, for seconds: a tile tapped
 // meanwhile is the later tap, and wins.
 test("a Drive-only game whose download finishes after another tap does not replace it", async () => {
