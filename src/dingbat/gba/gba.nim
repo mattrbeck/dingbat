@@ -1397,7 +1397,19 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
       if not gba.defer_dma_request(kind): gba.dma.trigger_vdma()
     of etHandleInput, etIME, etCameraDone, etGbLycEdge: discard
 
+# Timer prescaler phase at ROM entry when the BIOS boot is skipped. The
+# prescaler runs free from power-on (timer.nim) and this core counts it from
+# scheduler cycle 0, so a skip-BIOS start at cycle 0 put every /64, /256 and
+# /1024 tick in the wrong place. alyosha timer/timer reads a /64 timer ten
+# times across three ticks straight after entry: it passes only at 8 mod 64
+# (7 misses the first tick, 9 catches the third a read early). The bits above
+# 64 are not pinned by any row; 776 is the value nearest the LLE boot's
+# own entry (795 mod 1024 here: 75,997,979 cycles to the first ROM fetch).
+const SKIP_BIOS_PRESCALER_PHASE {.intdefine.} = 776
+
 proc post_init*(gba: GBA) =
+  if not gba.run_bios:
+    gba.scheduler.cycles = CycleCount(SKIP_BIOS_PRESCALER_PHASE)
   gba.storage    = new_storage(gba, gba.rom_path)
   gba.mmio       = new_mmio(gba)
   gba.timer      = new_timer(gba)
