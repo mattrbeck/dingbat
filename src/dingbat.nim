@@ -27,6 +27,8 @@ import dingbat/frontend/save_states_widget
 import dingbat/frontend/link_cable
 import dingbat/frontend/persist
 import dingbat/frontend/game_load
+when defined(gui_driver):
+  import dingbat/frontend/gui_driver
 import dingbat/common/cheats
 import dingbat/common/serialize
 
@@ -1274,7 +1276,9 @@ proc render_game() =
 
 proc show_menu_bar(): bool =
   if app.emu_kind == ekNone: return true
-  let focused    = getMouseFocus() == app.window
+  var focused    = getMouseFocus() == app.window
+  when defined(gui_driver):
+    focused = focused or gui_driver.mouse_in
   let mouse_idle = getTicks() - app.last_mouse_tick > 3000'u32
   result = focused and not mouse_idle
   discard showCursor(result)
@@ -2210,11 +2214,15 @@ proc main() =
   discard glSetAttribute(SDL_GL_DEPTH_SIZE, 24)
   discard glSetAttribute(SDL_GL_STENCIL_SIZE, 8)
 
+  var window_flags = SDL_WINDOW_OPENGL or SDL_WINDOW_RESIZABLE
+  when defined(gui_driver):
+    driver_init()
+    if driver_enabled(): window_flags = window_flags or SDL_WINDOW_HIDDEN
   let window = createWindow(
     "dingbat",
     SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
     cint(GBA_W * cfg.frame_size), cint(GBA_H * cfg.frame_size),
-    SDL_WINDOW_OPENGL or SDL_WINDOW_RESIZABLE
+    window_flags
   )
   if window == nil:
     echo "Failed to create window: ", $sdl2.getError(); system.quit(1)
@@ -2446,6 +2454,7 @@ proc main() =
     echo "LATENCY: present_interval=", present_interval, " ms, ",
          "display refresh=", display_mode.refresh_rate, " Hz"
   while app.running:
+    when defined(gui_driver): driver_poll(window)
     var emulated = false
     # Frame advance bypasses the audio pacing gate: it must run exactly one
     # frame regardless of queue depth
@@ -2607,6 +2616,7 @@ proc main() =
           echo "capture FAILED: ", capture_path
         app.running = false
       render_imgui()
+      when defined(gui_driver): driver_frame(window)
       glSwapWindow(window)
       presented = true
       if lat_trials > 0 and lat_state == 2:
