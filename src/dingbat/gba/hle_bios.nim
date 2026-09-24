@@ -443,6 +443,17 @@ proc hle_halt(cpu: CPU; t_entry: int64; rfs_entry: CycleCount) =
   cpu.halted = true
   # Halt exits on IE & IF != 0 regardless of IME, including already-pending
   cpu.gba.interrupts.schedule_interrupt_check()
+include hle_sound
+
+when defined(biosdrvtrace):
+  # tests/biosdrv_probe.nim: every SWI the CPU executes (HLE or real BIOS)
+  var bdSwiHook*: proc(swi_num: uint32) {.closure.}
+
+proc hle_takes*(cpu: CPU; swi_num: uint32): bool {.inline.} =
+  ## With a real BIOS image mapped (hle_after_bios) the sound-driver SWIs run
+  ## the image's own driver: their HLE continues through stub-BIOS code.
+  cpu.gba.bus.stub_bios or swi_num notin {0x1A'u32..0x1E'u32, 0x20'u32..0x24'u32,
+                                          0x28'u32, 0x29'u32}
 
 proc hle_swi*(cpu: CPU; swi_num: uint32) =
   ## HLE BIOS SWI dispatch; used when no BIOS image is provided.
@@ -484,7 +495,9 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     # The SWI handler steps the PC by the caller's ISA after we return:
     # set_reg(15, target - step) lands on `target`. Capture before any CPSR change.
     let isa_step = if cpu.cpsr.thumb: 2'u32 else: 4'u32
-    if cpu.r[15] == 0x1DFE'u32 or cpu.r[15] == 0x1E02'u32:
+    if cpu.gba.bus.stub_bios and cpu.sd_trap():
+      discard  # a sound-driver routine's stub continuation (hle_sound.nim)
+    elif cpu.r[15] == 0x1DFE'u32 or cpu.r[15] == 0x1E02'u32:
       # SoundMain stub epilogue (see 0x1C / new_bus): the dispatcher's
       # `movs pc, lr`, restoring CPSR from SPSR_svc and returning to lr_svc
       let target = cpu.r[14] and not 1'u32
@@ -1566,18 +1579,13 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
   # engine is not modeled, but the routines' time with no driver installed
   # is (real-BIOS TM0 around the swi, [0x03007FF0] null or pointing at a
   # non-driver area; PeterLemon BIOSSoundDriver*/ChannelClear rows).
-  of 0x1A:  # SoundDriverInit
-    # Not timed: the real routine spins until VCOUNT reads 159 (it returns
-    # on line 159 from any phase, up to a frame later) and then programs
-    # Timer 0, sound DMA 1/2 (CNT_H 0xB600), SOUNDCNT_H and the SoundArea
-    # for the BIOS mixer, none of which the HLE models (PeterLemon
-    # BIOSSoundDriverInit reads the reprogrammed Timer 0).
-    discard
-  of 0x1B: cpu.idle(29)  # SoundDriverMode
-  of 0x1D: cpu.idle(16)  # SoundDriverVSync
-  of 0x1E: cpu.idle(31)  # SoundChannelClear
-  of 0x28: cpu.idle(30)  # SoundDriverVSyncOff
-  of 0x29: cpu.idle(9)   # SoundDriverVSyncOn
+  # SoundDriverInit/Mode/VSync/ChannelClear/VSyncOff/VSyncOn: hle_sound.nim
+  of 0x1A: cpu.sd_init()
+  of 0x1B: cpu.sd_mode()
+  of 0x1D: cpu.sd_vsync()
+  of 0x1E: cpu.sd_channel_clear()
+  of 0x28: cpu.sd_vsync_off()
+  of 0x29: cpu.sd_vsync_on()
   of 0x20, 0x21, 0x22, 0x23, 0x24:
     discard  # MusicPlayer stubs (not timed: their cost follows the player)
   of 0x1C:  # SoundDriverMain

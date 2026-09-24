@@ -1199,6 +1199,7 @@ proc read_half_rotate*(bus: Bus; address: uint32): uint32
 proc read_half_signed*(bus: Bus; address: uint32): uint32
 proc read_byte_internal*(bus: Bus; address: uint32): uint8 {.inline.}
 proc read_word_internal*(bus: Bus; address: uint32): uint32 {.inline.}
+proc write_byte_internal*(bus: Bus; address: uint32; value: uint8)
 proc write_half_internal*(bus: Bus; address: uint32; value: uint16)
 proc write_word_internal*(bus: Bus; address: uint32; value: uint32)
 proc `[]`*(mmio: MMIO; address: uint32): uint8

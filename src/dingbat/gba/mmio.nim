@@ -5,8 +5,13 @@ proc new_mmio*(gba: GBA): MMIO =
   result.waitcnt = WAITCNT()
   result.memctrl = 0x0D000020'u32  # GBATEK, "System Control"
 
+when defined(biosdrvtrace):
+  var bdIoReadHook*: proc(address: uint32) {.closure.}
+
 proc `[]`*(mmio: MMIO; address: uint32): uint8 =
   let io_addr = 0xFFFFFF'u32 and address
+  when defined(biosdrvtrace):
+    if bdIoReadHook != nil: bdIoReadHook(address)
   case io_addr
   of 0x000..0x055: mmio.gba.ppu[io_addr]
   of 0x060..0x0A7:
@@ -31,8 +36,14 @@ proc `[]`*(mmio: MMIO; address: uint32): uint8 =
         elif io_addr == 0xFFF781'u32: return 0x1D'u8  # high byte
     mmio.gba.bus.read_open_bus_value(io_addr)
 
+when defined(biosdrvtrace):
+  # tests/biosdrv_probe.nim: every I/O byte write, before it lands
+  var bdIoHook*: proc(address: uint32; value: uint8) {.closure.}
+
 proc `[]=`*(mmio: MMIO; address: uint32; value: uint8) =
   let io_addr = 0xFFFFFF'u32 and address
+  when defined(biosdrvtrace):
+    if bdIoHook != nil: bdIoHook(address, value)
   case io_addr
   of 0x000..0x055: mmio.gba.ppu[io_addr] = value
   of 0x060..0x0A7: mmio.gba.apu[io_addr] = value

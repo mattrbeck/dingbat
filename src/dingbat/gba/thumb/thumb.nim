@@ -20,7 +20,9 @@ proc thumb_unconditional_branch*(cpu: CPU; instr: uint32) =
 proc thumb_software_interrupt*(cpu: CPU; instr: uint32) =
   let use_hle = cpu.gba.use_hle or (cpu.gba.hle_after_bios and cpu.r[15] >= 0x08000000'u32)
   let swi_num = bits_range(instr, 0, 7)
-  if use_hle:
+  when defined(biosdrvtrace):
+    if bdSwiHook != nil: bdSwiHook(swi_num)
+  if use_hle and cpu.hle_takes(swi_num):
     cpu.hle_swi(swi_num)
     cpu.step_thumb()
   else:

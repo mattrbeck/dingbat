@@ -35,6 +35,7 @@ web/rom.gbc
 # Native binary (root-level only)
 /dingbat
 /dingbat_test
+/biosdrv_probe
 /dingbat_cheat_test
 /dingbat_cheat_int_test
 /dingbat_ppucomposite_test

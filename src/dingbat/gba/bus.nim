@@ -488,6 +488,18 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
                  0x0000, 0x0000]:
       result.bios[0x1DC4 + i * 2]     = uint8(h and 0xFF)
       result.bios[0x1DC4 + i * 2 + 1] = uint8(h shr 8)
+    # Sound-driver continuations (hle_sound.nim): a delay loop and the
+    # VCOUNT-159 poll, each closed by a `swi 0` trap back into the HLE
+    write_stub_u32(result.bios, 0x3900, 0xE2588001'u32)  # subs r8, r8, #1
+    write_stub_u32(result.bios, 0x3904, 0x1AFFFFFD'u32)  # bne  0x3900
+    write_stub_u32(result.bios, 0x3908, 0xEF000000'u32)  # swi  0
+    write_stub_u32(result.bios, 0x3910, 0xE1D010B6'u32)  # ldrh r1, [r0, #6]
+    write_stub_u32(result.bios, 0x3914, 0xE351009F'u32)  # cmp  r1, #159
+    write_stub_u32(result.bios, 0x3918, 0x0A000002'u32)  # beq  0x3928
+    write_stub_u32(result.bios, 0x391C, 0xE1D010B6'u32)  # ldrh r1, [r0, #6]
+    write_stub_u32(result.bios, 0x3920, 0xE351009F'u32)  # cmp  r1, #159
+    write_stub_u32(result.bios, 0x3924, 0x1AFFFFFC'u32)  # bne  0x391C
+    write_stub_u32(result.bios, 0x3928, 0xEF000000'u32)  # swi  0
     write_stub_u32(result.bios, 0x1E04, 0x03007FF0'u32)
     write_stub_u32(result.bios, 0x1E08, 0x68736D53'u32)
   result.gpio = new_gpio(gba)
@@ -1112,7 +1124,20 @@ proc idle_window*(bus: Bus; n: int) =
 # scheduler only at instruction end, so an access positioned after the
 # burst's start would otherwise land before it. Forcing catch-up during the
 # armed window keeps the CPU-vs-DMA memory order cycle-exact.
+when defined(biosdrvtrace):
+  # tests/biosdrv_probe.nim: every CPU/DMA store (address, width, value)
+  var bdMemHook*: proc(address: uint32; width: int; value: uint32) {.closure.}
+  var bdReadHook*: proc(address: uint32; width: int) {.closure.}
+  template bdWatch(a: uint32; w: int; v: uint32) =
+    if bdMemHook != nil: bdMemHook(a, w, v)
+  template bdWatchRead(a: uint32; w: int) =
+    if bdReadHook != nil: bdReadHook(a, w)
+else:
+  template bdWatch(a: uint32; w: int; v: uint32) = discard
+  template bdWatchRead(a: uint32; w: int) = discard
+
 proc `[]`*(bus: Bus; address: uint32): uint8 =
+  bdWatchRead(address, 1)
   bus.rom_cool()
   let cost = bus.access_cycles(address, is32 = false, fetch = false)
   bus.cycles += cost
@@ -1127,6 +1152,7 @@ proc `[]`*(bus: Bus; address: uint32): uint8 =
   bus.read_byte_internal(address)
 
 proc read_half*(bus: Bus; address: uint32): uint16 =
+  bdWatchRead(address, 2)
   bus.rom_cool()
   let cost = bus.access_cycles(address, is32 = false, fetch = false)
   bus.cycles += cost
@@ -1141,6 +1167,7 @@ proc read_half*(bus: Bus; address: uint32): uint16 =
   bus.read_half_internal(address)
 
 proc read_word*(bus: Bus; address: uint32): uint32 =
+  bdWatchRead(address, 4)
   bus.rom_cool()
   let cost = bus.access_cycles(address, is32 = true, fetch = false)
   bus.cycles += cost
@@ -1179,6 +1206,7 @@ proc fetch_word_miss(bus: Bus; address: uint32): uint32 =
   bus.read_word(address)
 
 proc `[]=`*(bus: Bus; address: uint32; value: uint8) =
+  bdWatch(address, 1, uint32(value))
   bus.rom_cool()
   let cost = bus.access_cycles(address, is32 = false, fetch = false)
   bus.cycles += cost
@@ -1193,6 +1221,7 @@ proc `[]=`*(bus: Bus; address: uint32; value: uint8) =
   bus.byte_io_write = false
 
 proc write_half*(bus: Bus; address: uint32; value: uint16) =
+  bdWatch(address, 2, uint32(value))
   bus.rom_cool()
   let cost = bus.access_cycles(address, is32 = false, fetch = false)
   bus.cycles += cost
@@ -1205,6 +1234,7 @@ proc write_half*(bus: Bus; address: uint32; value: uint16) =
   bus.write_half_internal(address, value)
 
 proc write_word*(bus: Bus; address: uint32; value: uint32) =
+  bdWatch(address, 4, value)
   bus.rom_cool()
   let cost = bus.access_cycles(address, is32 = true, fetch = false)
   bus.cycles += cost
