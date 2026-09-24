@@ -467,6 +467,18 @@ proc wasm_state_data(): pointer {.exportc.} =
   ## calling wasm_state_size() again.
   if stateImage.len > 0: addr stateImage[0] else: nil
 
+proc wasm_flush_save() {.exportc.} =
+  ## The solo core's battery RAM into its file now, if it changed. Both cores
+  ## flush once a frame, but a paused one runs no frames: a state loaded while
+  ## paused carries its RAM, marks it dirty, and nothing writes it until the
+  ## game runs again. JS calls this before it reads the file to persist it.
+  case stateKind
+  of ekGBA:
+    if stateGba != nil: stateGba.storage.write_save()
+  of ekGB:
+    if stateGb != nil: stateGb.cartridge.mbc_save()
+  of ekNone: discard
+
 proc wasm_set_turbo(on: cint) {.exportc.} =
   ## 2x speed: the APU drops every other sample, so JS gets realtime-rate
   ## (pitched-up) audio at double the frames per second. In online rollback

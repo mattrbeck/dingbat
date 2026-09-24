@@ -162,6 +162,30 @@ test("initFromEmscripten flushes no outgoing core over the incoming game's save"
   assert.doesNotMatch(body, /mbc_save|write_save/);
 });
 
+// What that flush was for is JS's to ask for: a core paused behind the home
+// screen runs no frames, so RAM a state load gave it is in the core only
+// until something flushes it. persistSave flushes the solo core first, so it
+// lands in the outgoing game's own save, not nowhere and not the next game's.
+
+test("RAM a paused core holds unflushed is persisted as its own game's save", async () => {
+  const app = await boot();
+  app.runIn(`
+    core.dirty = false;
+    Module._wasm_flush_save = () => {
+      if (!core.dirty) return;
+      FS.files.set("rom.sav", new Uint8Array(core.ram));
+      core.dirty = false;
+    };
+  `);
+  await playAThenHome(app);
+  // A state loaded while paused: the core's RAM, marked dirty, no frame run.
+  app.runIn("core.ram = [0x0a, 9]; core.dirty = true;");
+
+  await play(app, "B.gba");
+  eq(app.idb.get("save:A.gba"), u8(0x0a, 9));
+  assert.equal(core(app).ram, null, "B booted on no battery file");
+});
+
 test("a game with a save boots on its own save", async () => {
   const app = await boot();
   const b = u8(0x0b, 7);

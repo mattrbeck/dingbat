@@ -5291,6 +5291,12 @@ const persistSeq = new Map();
 const persistSave = async (romName, originalName) => {
   let savName = romName.substring(0, romName.lastIndexOf(".")) + ".sav";
   try {
+    // The solo core's file: a paused core runs no frames to flush it, and a
+    // state loaded while paused leaves the RAM it carried only in the core.
+    if (romName === currentRomName && !linkMode && !rollbackMode &&
+        typeof Module !== "undefined" && Module._wasm_flush_save) {
+      Module._wasm_flush_save();
+    }
     let data = FS.readFile(savName);
     if (data && data.length > 0) {
       const sig = saveSignature(data);
