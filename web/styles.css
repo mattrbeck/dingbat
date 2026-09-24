@@ -2507,6 +2507,14 @@ body.runtime-ready #boot-progress {
   background: none;
   border: 0;
   outline: none;
+  /* type=search's native look: on iOS 15 Safari that includes a faint
+     magnifier of its own, drawn beside the one in .lib-search. */
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.lib-search input::-webkit-search-decoration {
+  -webkit-appearance: none;
 }
 
 .lib-chips {
