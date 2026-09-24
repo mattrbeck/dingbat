@@ -805,3 +805,22 @@ test("a tab switch during a load files no picture under the incoming name", asyn
   gate.release();
   await drain();
 });
+
+// ── Resume beats a load another tile started ────────────────────────────────
+// Found driving the UI: tap another tile, then (before its load boots) the
+// paused game's own tile or the card's Resume. The resume is the later
+// choice, so it takes the load token and the earlier tap's load stands down.
+
+test("tapping back to the paused game while another tile loads keeps the paused game", async () => {
+  const app = await boot();
+  await playAThenHome(app);
+  const gate = hold(app, "get", "save:B.gba");
+  app.runIn(`launchRom("B.gba")`);
+  await parked(gate);
+  app.runIn("resumeGame()");          // the card's Resume, or A's own tile
+  gate.release();
+  await drain();
+  assert.equal(named(app), "A.gba", "A is still the game");
+  assert.equal(core(app).rom, ROM["A.gba"], "and still the core");
+  assert.equal(app.document.body.classList.contains("running"), true);
+});

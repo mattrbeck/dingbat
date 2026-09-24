@@ -254,9 +254,12 @@ def persistAuto (s : St) : St :=
     { s with auto := upd s.auto g (some a) }
   | _, _ => s
 
-/-- `resumeGame` (9562-9570). -/
+/-- `resumeGame`: a choice of game like a tap, so it takes the load token
+(`nextLoadGen`), and a load another tile started stands down. -/
 def resumeGame (s : St) : St :=
-  if s.cur.isSome then { s with paused := false, running := true } else s
+  if s.cur.isSome then
+    { s with paused := false, running := true, loadGen := s.loadGen + 1, loading := none }
+  else s
 
 /-- `offerAutoResume` up to its first await (5778-5784). -/
 def offerStart (s : St) : St :=
@@ -485,9 +488,10 @@ def ResumeKeepsBattery (stp : St → Ev → St) (s : St) : Prop :=
 /-! ## One-step facts -/
 
 /-- Tapping the tile of the game in memory resumes it: no load starts, the
-core is untouched, and it runs (5185). -/
+core is untouched, it runs, and it takes the token from any load in flight. -/
 theorem tap_loaded_resumes (s : St) (g : G) (hr : s.running = false) (hc : s.cur = some g) :
-    step s (.tap g) = { s with paused := false, running := true } := by
+    step s (.tap g) =
+      { s with paused := false, running := true, loadGen := s.loadGen + 1, loading := none } := by
   simp [step, hr, hc, resumeGame]
 
 /-- unloadGame's final flush is addressed to the outgoing game's key: every
@@ -809,7 +813,7 @@ theorem inv_resumeGame {s : St} (hI : Inv s) : Inv (resumeGame s) := by
   split
   · rename_i hc
     exact ⟨hI.save, hI.auto, hI.drive, hI.coh, ⟨hI.ui.1, fun _ => hc, fun _ _ h => by simp at h⟩,
-      hI.toasts, fun q hq => pendOK_unpause (hI.pend q hq) hc⟩
+      hI.toasts, fun q hq => pendOK_bump (hI.pend q hq) (by simp [St.kv])⟩
   · exact hI
 
 theorem inv_l3Seg {s : St} {g : G} {t : Nat} (hI : Inv s) (hp : LoadClaim s.kv g t)
@@ -1300,5 +1304,17 @@ theorem regress_resume_restores_older_battery :
     (step (run init trResumeUnflushed) (.fire 0)).fsSav = some ⟨.A, 1⟩ ∧
     ResumeKeepsBattery step (run init trResumeUnflushed) :=
   ⟨by decide, by decide, resume_keeps_battery (reachable_run _ _ .init)⟩
+
+/-- Found driving the UI: with A paused behind the home screen, tap B's tile
+and then, before B's load boots, tap back to A (its tile or the card's
+Resume). Resume is the later choice, so it takes the load token like a tap:
+B's load stands down and A is still the game, running. -/
+def trResumeBeatsLoad : List Ev :=
+  abHome ++ [.tap .B, .fire 0, .resume] ++ List.replicate 12 (.fire 0)
+
+theorem regress_resume_beats_inflight_load :
+    let s := run init trResumeBeatsLoad
+    s.cur = some .A ∧ s.core = some .A ∧ s.running = true ∧ CurCoherent s :=
+  ⟨by decide, by decide, by decide, (every_trace _).2.2.1⟩
 
 end WebState.GameLifecycle

@@ -235,3 +235,21 @@ test("in the game view the same keys act", async () => {
   assert.equal(await press(app, "F9"), true);
   assert.equal(app.runIn("__ticks"), 1, "F9 renders the paused frame to grab it");
 });
+
+// The SDL runtime's window key grab preventDefaults Tab page-wide from the
+// moment the runtime starts; the window-capture escape hatch stops Tab before
+// it when the home screen is up, so Tab walks the library as on any page.
+test("Tab on the home screen is the page's, before the runtime's key grab", async () => {
+  const app = await loadApp();
+  const tab = async () => {
+    let stopped = false;
+    const target = { tagName: "BODY", closest: () => null }; // not the chrome, no modal
+    await app.dispatchWin("keydown", { code: "Tab", target,
+                                       stopImmediatePropagation: () => { stopped = true; } });
+    return stopped;
+  };
+  app.document.body.classList.remove("running");
+  assert.equal(await tab(), true, "home screen: the grab never sees Tab");
+  app.document.body.classList.add("running");
+  assert.equal(await tab(), false, "in the game view Tab stays the game's (fast-forward)");
+});

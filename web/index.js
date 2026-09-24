@@ -1,5 +1,5 @@
-// Tab escape hatch: with focus in the chrome or a modal, Tab keeps moving
-// focus. Window capture phase, registered before em.js, so it outranks the
+// Tab escape hatch: with focus in the chrome or a modal, or anywhere on the
+// home screen, Tab keeps moving focus. Window capture phase, registered before em.js, so it outranks the
 // SDL runtime's key grab (which preventDefaults Tab app-wide once a game
 // runs) and the fast-forward shortcut. keydown only, so a held fast-forward
 // always gets its keyup. Stopping at window capture also hides the event
@@ -12,6 +12,9 @@ window.addEventListener("keydown", (e) => {
   } else if (t.closest(".modal-overlay.open")) {
     e.stopImmediatePropagation();
     if (modalTrapHandler) modalTrapHandler(e);
+  } else if (!document.body.classList.contains("running")) {
+    // The home screen: no game on show, so Tab is the page's.
+    e.stopImmediatePropagation();
   }
 }, true);
 
@@ -9859,6 +9862,9 @@ const showMainMenu = () => {
 
 const resumeGame = () => {
   if (!currentRomName && !linkMode) return;
+  // A choice of game like a tile tap: a load another tile started a moment
+  // ago must not boot over the game the player just chose to keep playing.
+  nextLoadGen();
   paused = false;
   pauseButton.classList.remove("paused", "active");
   pauseButton.title = "Pause";
