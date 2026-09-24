@@ -1,6 +1,6 @@
 # dbsuite - Detailed Results
 
-*Generated: 2026-09-24 10:57:45 · commit aa98ecdac · game-boy-test-roms v7.0*
+*Generated: 2026-09-24 14:14:45 · commit fe2a37639 · game-boy-test-roms v7.0*
 
 tests/roms/dbsuite/dbsuite.gba (cartridge build) in dingbat. Every expected value is an AGB SP (AGS-001) answer; each case's source comment in tests/roms/dbsuite/ gives its provenance. A case that is not PASS here is dingbat disagreeing with the console.
 
@@ -55,7 +55,7 @@ All pass.
 
 | Case | Status | Got / expected |
 |------|--------|----------------|
-| apu/psg-ch1-first-trigger-dies | FAIL | got=00004806 exp=00000000 |
+| apu/psg-ch1-first-trigger-dies | FAIL | got=000047D9 exp=00000000 |
 | apu/psg-ch1-nr10-0-dies | FAIL | got=000044BA exp=00000000 |
 | apu/psg-ch1-second-trigger-dies | FAIL | got=00004BD8 exp=00000000 |
 | apu/psg-soundcnt-x-after-ch1 | FAIL | got=00000081 exp=00000080 |

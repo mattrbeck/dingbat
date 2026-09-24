@@ -75,7 +75,16 @@ run_sweep:
     .ltorg
     cword "sweep-period-0-never-ticks", run_sweep, 0, 0x80000
     cword "sweep-trigger-overflow", RUN_SAME, 4, 0
-    cword "sweep-trigger-second-check", RUN_SAME, 8, 0
+@ sweep-trigger-second-check: the trigger's second check depends on where
+@ the trigger lands in the PSG's 16-cycle (1 MHz) clock.  Over the link rig
+@ (tools/hwlink, 2026-09-24, the same rows from IWRAM with a delay loop in
+@ 4-cycle steps) the 1300 row dies at the trigger for half the phases -- the
+@ delay alternates kill/live every 8 cycles -- and otherwise lives to the
+@ first tick (21000-24500 IWRAM polls; 0x10A0, 0x114C and 0x12DF from this
+@ ROM's multiboot build on the SP).  A cartridge boot always lands on the
+@ same phase, which is why gbaedge and hwverified/sweep photographed 0; a
+@ multiboot upload lands anywhere.  So: 0, or death by the first tick.
+    crange "sweep-trigger-second-check", RUN_SAME, 8, 0xFFFFFFFF, 0, 0x1800
     crange "sweep-first-tick-rechecks", RUN_SAME, 12, 0xFFFFFFFF, 0x800, 0x1800, F_CART
     crange "sweep-512-dies-tick-3", RUN_SAME, 16, 0xFFFFFFFF, 0x2A00, 0x4000, F_CART
     crange "sweep-2018-survives-2048", RUN_SAME, 20, 0xFFFFFFFF, 0x400, 0x1A00, F_CART

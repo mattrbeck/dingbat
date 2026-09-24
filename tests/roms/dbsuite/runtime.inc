@@ -773,6 +773,25 @@ wait_vblank:
     bx  lr
     .ltorg
 
+@ wait_vblank for the viewer loops, serving the link all the while: the host
+@ clocks the results stream far faster than once a frame, and a word the ROM
+@ has not re-armed reads as nothing (link_report_poll re-arms one word per
+@ call).  Not for the cases: their poll loops keep their own timing.
+wait_vblank_link:
+    stmfd sp!, {r4, lr}
+1:  bl  link_report_poll
+    ldr r0, =0x04000006
+    ldrh r1, [r0]
+    cmp r1, #159
+    bne 1b
+2:  bl  link_report_poll
+    ldr r0, =0x04000006
+    ldrh r1, [r0]
+    cmp r1, #160
+    bne 2b
+    ldmfd sp!, {r4, pc}
+    .ltorg
+
 @ ═══════════════════════════ output channels ═════════════════════════════
 @ mGBA's debug registers (0x04FFF780 enable -> reads 0x1DEA, 0x04FFF600
 @ string, 0x04FFF700 flags) and no$gba's debug port (0x04FFFA00 reads
@@ -1520,8 +1539,7 @@ menu_list:
     bl  draw_str
     bl  draw_verdict
 menu_loop:
-    bl  wait_vblank
-    bl  link_report_poll
+    bl  wait_vblank_link
     cmp r9, #0
     beq 2f
     subs r9, r9, #1
@@ -1962,8 +1980,7 @@ sv_redraw:
     bl  draw_str
     bl  draw_verdict
 sv_loop:
-    bl  wait_vblank
-    bl  link_report_poll
+    bl  wait_vblank_link
     bl  read_keys
     cmp r0, #0
     beq sv_loop
@@ -2051,8 +2068,7 @@ dv_redraw:
     bl  draw_str
     bl  draw_verdict
 dv_loop:
-    bl  wait_vblank
-    bl  link_report_poll
+    bl  wait_vblank_link
     bl  read_keys
     cmp r0, #0
     beq dv_loop
