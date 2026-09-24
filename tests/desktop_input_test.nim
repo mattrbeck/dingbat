@@ -254,6 +254,42 @@ block trigger_held_across_load:
   h.apply_trigger(sp, linked = false)
   doAssert not sp.sync, "a trigger held across a load stopped fast-forwarding"
 
+# -- A notice closed with Return or Escape (round 3) ---------------------------
+
+block modal_keys:
+  # What an open modal does with a press: Escape cancels (or is OK, on a
+  # notice), Return is the default button; nothing on the frame it appears
+  doAssert modal_key_of(appearing = false, escape = true, enter = false) == mkCancel
+  doAssert modal_key_of(appearing = false, escape = false, enter = true) == mkDefault
+  doAssert modal_key_of(appearing = false, escape = false, enter = false) == mkNone
+  for esc in [false, true]:
+    for ent in [false, true]:
+      doAssert modal_key_of(appearing = true, escape = esc, enter = ent) == mkNone
+
+block modal_key_not_for_the_game:
+  # Return is Start. Pressed with a notice up (WantCaptureKeyboard), it
+  # closes the notice and the game never sees it; its release, after, lets
+  # go of nothing. Start held from before the notice is let go as usual.
+  reset_all()
+  const KRETURN = cint(13)
+  let bindings2 = {KRETURN: Input.START}.toTable
+  discard h.route_key(bindings2, KRETURN, true, false, false,
+                      imgui_keyboard = true, capturing = false)
+  sync()
+  doAssert core == {}, "the Return that closed a notice pressed Start"
+  discard h.route_key(bindings2, KRETURN, false, false, false,
+                      imgui_keyboard = false, capturing = false)
+  sync()
+  doAssert core == {}
+  discard h.route_key(bindings2, KRETURN, true, false, false,
+                      imgui_keyboard = false, capturing = false)
+  sync()
+  doAssert core == {Input.START}
+  discard h.route_key(bindings2, KRETURN, false, false, false,
+                      imgui_keyboard = true, capturing = false)
+  sync()
+  doAssert core == {}
+
 # -- Finding 15: bindings the game can never receive -------------------------------
 
 block unbindable:

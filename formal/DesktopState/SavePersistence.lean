@@ -1,6 +1,7 @@
 -- What this models, for formal/anchors.mjs (which lists stale models):
--- @models src/dingbat.nim: flush_saves load_rom current_rom_path cheat_file_path save_cheats load_cheats on_cheats_changed state_file_path save_state_slot load_state_slot delete_state_slot refresh_state_slots process_pending_state render_state_notice render_notice poll_battery_notice render_battery_notice render_imgui handle_input finish_link teardown_netlink main
+-- @models src/dingbat.nim: flush_saves load_rom current_rom_path cheat_file_path save_cheats load_cheats on_cheats_changed state_file_path save_state_slot load_state_slot delete_state_slot refresh_state_slots process_pending_state render_state_notice poll_battery_notice render_battery_notice render_imgui handle_input finish_link teardown_netlink main
 -- @models src/dingbat/frontend/save_states_widget.nim: mark_stale render
+-- @models src/dingbat/frontend/notice.nim: modal_key render_notice
 -- @models src/dingbat/frontend/persist.nim: poll dismiss state_file_name legacy_state_file_name state_read_path state_delete_paths
 -- @models src/dingbat/frontend/game_load.nim: flush_batteries extract_zip_rom
 -- @models src/dingbat/frontend/game_lock.nim: files_key states_key try_lock claim_files claim_states abandon commit
@@ -130,7 +131,8 @@ phase, both after a completed frame, except after a link loss mid-frame
   from (`viewFiles`); `used` is `viewFiles k ≠ none`.
 * ImGui's skip condition (1272-1283) is `imguiSkipped`; the menu is visible
   whenever the user moves the mouse, so menu clicks are allowed in every
-  present. A modal notice blocks menu and window clicks until OK
+  present. A modal notice blocks menu and window clicks until OK, or
+  (since round 3) Return or Escape, all three in the present phase
   (`noticeOk`). `WantCaptureKeyboard` (1640) is not modelled: it only removes
   key events, and no trace below needs a key while an ImGui window has focus.
 * Config is two fields: `hle` (the BIOS mode the CLI can set: `gba.hle`,
@@ -639,7 +641,7 @@ inductive Ev where
   | mSetHle (i : Bool) (b : Bool)         -- Settings > BIOS (bios_selection.nim 79-82, config_editor.nim 46)
   | mSetVol (i : Bool) (v : Nat)          -- any setting: 1386-1425 save_config(app.cfg)
   | mCheat (i : Bool)                     -- a cheat edit: on_cheats_changed 818-821
-  | noticeOk (i : Bool)                   -- the modal's OK (render_state_notice 1255-1263)
+  | noticeOk (i : Bool)                   -- the modal's OK, Return or Escape (notice.nim render_notice)
   | mDone (i : Bool)                      -- the Save States window's render entry (widget 69-75)
   -- phase win
   | wSave (i : Bool) (k : Nat) (io : Io)  -- widget 191-193: on_save then on_open

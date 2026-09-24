@@ -57,6 +57,12 @@ type
     krFastForward  ## Tab (Shift+Tab for 2x)
     krChannel      ## 1-6: toggle an audio channel
 
+  ModalKey* = enum
+    ## What a key means to an open modal (frontend/notice.nim)
+    mkNone     ## nothing
+    mkDefault  ## Return / keypad Enter: the default button
+    mkCancel   ## Escape: close, or the Cancel button
+
 proc held*(h: HeldInput): set[Input] =
   ## Every input some key, pad button or stick holds
   for inp in h.keys.values: result.incl inp
@@ -111,6 +117,18 @@ proc route_key*(h: var HeldInput; bindings: Table[cint, Input]; key: cint;
   if key == KEY_TAB: return krFastForward
   if key >= KEY_1 and key < KEY_1 + 6: return krChannel
   krNone
+
+proc modal_key_of*(appearing, escape, enter: bool): ModalKey =
+  ## A key press (not a repeat) as an open modal takes it. The game never
+  ## gets it: a modal sets ImGui's WantCaptureKeyboard, so `route_key` gives
+  ## the press to nothing, and the release comes once the modal is gone and
+  ## lets go of nothing. A press on the frame the modal appears is not for
+  ## it: that is the press that closed the one before (a queued notice opens
+  ## the frame the one ahead of it closes), or one the game was given.
+  if appearing: mkNone
+  elif escape: mkCancel
+  elif enter: mkDefault
+  else: mkNone
 
 proc pad_added*(h: var HeldInput; pad: int32) =
   h.pads[pad] = PadHolds()

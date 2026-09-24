@@ -16,6 +16,7 @@ import dingbat/gba/gba
 import dingbat/gba/netlink
 import dingbat/gb/gb
 import dingbat/frontend/file_explorer
+import dingbat/frontend/notice
 import dingbat/frontend/config_editor
 import dingbat/frontend/keybindings_widget
 import dingbat/frontend/controller_widget
@@ -1337,52 +1338,6 @@ proc poll_battery_notice() =
       let cart = app.gb_emu.cartridge
       app.battery.poll(cart.sav_path, cart.save_error, cart.save_error_new)
   of ekNone: app.battery.poll("", "", none)
-
-proc render_notice(popup: string; text, hint: var string) =
-  ## A modal sentence for the user, until OK or the X clears `text`.
-  if text.len == 0:
-    # Cleared from outside (a battery write landed): ImGui keeps a popup
-    # open until it is closed from inside it.
-    if igIsPopupOpen_Str(cstring(popup), 0) and
-       igBeginPopupModal(cstring(popup), nil,
-                         cint(ImGui_WindowFlags_AlwaysAutoResize)):
-      igCloseCurrentPopup()
-      igEndPopup()
-    return
-  if not igIsPopupOpen_Str(cstring(popup), 0):
-    igOpenPopup_Str(cstring(popup), 0)
-  var center = ImVec2(x: 0, y: 0)
-  let vp = igGetMainViewport()
-  if vp != nil:
-    when compiles(ImGuiViewport_GetCenter(addr center, vp)):
-      ImGuiViewport_GetCenter(addr center, vp)
-    else:
-      let c = ImGuiViewport_GetCenter(vp)
-      center = ImVec2(x: c.x, y: c.y)
-  igSetNextWindowPos(center, cint(ImGui_Cond_Appearing), ImVec2(x: 0.5, y: 0.5))
-  igSetNextWindowSizeConstraints(ImVec2(x: 380, y: 0), ImVec2(x: 560, y: 400),
-                                 nil, nil)
-  var stay_open = true
-  if igBeginPopupModal(cstring(popup), addr stay_open,
-                       cint(ImGui_WindowFlags_AlwaysAutoResize)):
-    igPushTextWrapPos(0)
-    igTextUnformatted(cstring(text), nil)
-    if hint.len > 0:
-      igSpacing()
-      # Through "%s", not as the format string: the hint carries core wording
-      # built from the FILE's own bytes, and a '%' in there would read
-      # arguments that were never pushed.
-      igTextDisabled("%s", cstring(hint))
-    igPopTextWrapPos()
-    igSpacing()
-    if igButton("OK", ImVec2(x: 120, y: 0)):
-      text = ""
-      hint = ""
-      igCloseCurrentPopup()
-    igEndPopup()
-  if not stay_open:
-    text = ""
-    hint = ""
 
 proc render_state_notice() =
   ## What the app says when a save state is refused (a silent refusal reads

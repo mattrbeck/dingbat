@@ -2,6 +2,7 @@ import std/options
 import imguin/[cimgui, impl_opengl, impl_sdl2]
 import ../common/[config, input]
 import file_explorer
+import notice
 import bios_selection
 import video_widget
 import keybindings_widget
@@ -165,7 +166,8 @@ proc render*(ed: ConfigEditor) =
         ed.do_factory_reset()
         igCloseCurrentPopup()
       igSameLine(0, -1)
-      if igButton("Cancel", ImVec2(x: 120, y: 0)):
+      # Escape cancels; Return does nothing here (Reset is not undoable)
+      if igButton("Cancel", ImVec2(x: 120, y: 0)) or modal_key() == mkCancel:
         igCloseCurrentPopup()
       igEndPopup()
 
@@ -183,7 +185,9 @@ proc render*(ed: ConfigEditor) =
       ed.open = false
       igCloseCurrentPopup()
     igSameLine(0, -1)
-    if igButton("Cancel", ImVec2(x: 100, y: 0)):
+    # Escape cancels. Return does nothing: Apply and Discard each act on
+    # edits the player may not have looked at.
+    if igButton("Cancel", ImVec2(x: 100, y: 0)) or modal_key() == mkCancel:
       igCloseCurrentPopup()
     igEndPopup()
 
