@@ -1462,6 +1462,8 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
     of etVDMARequest:
       if not gba.defer_dma_request(kind): gba.dma.trigger_vdma()
     of etLdmGlitch:     gba.cpu.ldm_glitch_restore()
+    of etFifoARequest:  gba.dma.trigger_fifo(0)
+    of etFifoBRequest:  gba.dma.trigger_fifo(1)
     of etHandleInput, etIME, etCameraDone, etGbLycEdge: discard
 
 # Timer prescaler phase at ROM entry when the BIOS boot is skipped. The

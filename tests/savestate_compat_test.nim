@@ -75,7 +75,9 @@ static:
   doAssert ord(etHDMARequest) == 23
   doAssert ord(etVDMARequest) == 24
   doAssert ord(etLdmGlitch) == 25
-  doAssert ord(high(EventType)) == 25,
+  doAssert ord(etFifoARequest) == 26
+  doAssert ord(etFifoBRequest) == 27
+  doAssert ord(high(EventType)) == 27,
     "an EventType was appended without pinning its ordinal here"
 
   # Every other enum whose ordinal (or `set` bit position) reaches a state

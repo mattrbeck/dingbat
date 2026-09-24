@@ -2,6 +2,28 @@
 
 const DMA_CHANNELS_RANGE_LOW*  = 0xA0'u32
 const DMA_CHANNELS_RANGE_HIGH* = 0xA7'u32
+const FIFO_MASTER_RESET {.booldefine.} = true
+  ## Both FIFOs are held empty while SOUNDCNT_X's master enable is off:
+  ## clearing it empties them, writes are dropped (apu `[]=`), and timer
+  ## overflows neither play nor request a DMA. alyosha fifo_dma/fifo, test 2:
+  ## 24 samples written with the sound off, and the first overflow after
+  ## the enable requests a DMA; test 3: the same with the sound cycled off
+  ## and on after the writes; without the gate an armed sound DMA refills a
+  ## FIFO that cannot fill, every overflow, and the ROM never draws a
+  ## verdict. fifo_2's eight rows each start that way (false: 051).
+const FIFO_REQ_BEFORE_POP {.booldefine.} = true
+  ## A FIFO asks for a refill on its timer's overflow when it held fewer than
+  ## 16 bytes before the sample was taken, not after: alyosha fifo_dma/fifo_4
+  ## preloads exactly 16 and the first overflow requests nothing, the second
+  ## does. (After the pop: fifo_4 reads 111; fifo_3 alone prefers it, by one
+  ## cycle -- 174 for 175 -- and it is red either way.)
+const FIFO_DMA_REQUEST_DELAY {.intdefine.} = 4
+  ## The refill DMA is requested this many cycles after the overflow.
+  ## alyosha fifo_dma/fifo_2 reads a timer just after the first refill, for
+  ## eight timer reloads: 3 puts the burst before the read in one row (081),
+  ## 5 after it in another (051). fifo_4 and fifo_dma_disable_4 read green
+  ## from 3 to 5. Bounded: at most one request per overflow per FIFO, and
+  ## a grant re-checks the FIFO level (dma.run_pending).
 
 proc dma_channels_in_range*(address: uint32): bool =
   address >= DMA_CHANNELS_RANGE_LOW and address <= DMA_CHANNELS_RANGE_HIGH
@@ -23,6 +45,14 @@ proc new_dma_channels*(gba: GBA): DMAChannels =
   when not defined(test_harness) and not defined(emscripten):
     if getEnv("DINGBAT_FIFO_INTERP") == "0":
       result.fifo_interp = false
+
+proc fifo_reset*(dc: DMAChannels; channel: int) =
+  for i in 0..31: dc.fifos[channel][i] = 0
+  dc.positions[channel] = 0
+  dc.sizes[channel] = 0
+  dc.latches[channel] = 0
+  dc.hist[channel] = [0'i16, 0, 0, 0]
+  dc.inv_period[channel] = 0.0'f32
 
 proc dma_channels_read*(dc: DMAChannels; address: uint32): uint8 =
   dc.gba.bus.read_open_bus_value(address)
@@ -68,12 +98,18 @@ proc push_fifo_sample(dc: DMAChannels; channel: int; sample: int16) {.inline.} =
   dc.last_update_cycle[channel] = now
 
 proc timer_overflow*(dc: DMAChannels; timer: int) =
+  when FIFO_MASTER_RESET:
+    # With the master enable off both FIFOs are held empty and request no
+    # DMA (alyosha fifo_dma/fifo: an armed sound DMA and a running timer
+    # with the sound off do not stall the CPU)
+    if not dc.gba.apu.sound_enabled: return
   for channel in 0..1:
     let ch_timer = if channel == 0:
       int(dc.gba.apu.soundcnt_h.dma_sound_a_timer)
     else:
       int(dc.gba.apu.soundcnt_h.dma_sound_b_timer)
     if timer == ch_timer:
+      let want = dc.sizes[channel] < 16
       if dc.sizes[channel] > 0:
         when defined(mp2kwav):
           inc dbgFifoServed[channel]
@@ -104,8 +140,14 @@ proc timer_overflow*(dc: DMAChannels; timer: int) =
         log("Timer overflow but empty; channel:" & $channel & ", timer:" & $timer)
         dc.latches[channel] = 0
         dc.push_fifo_sample(channel, 0)
-    if dc.sizes[channel] < 16:
-      dc.gba.dma.trigger_fifo(channel)
+      # Only the FIFO this timer drives asks for a refill (it used to be any
+      # FIFO below the mark, on either sound timer)
+      if (if FIFO_REQ_BEFORE_POP: want else: dc.sizes[channel] < 16):
+        when FIFO_DMA_REQUEST_DELAY > 0:
+          dc.gba.scheduler.schedule(FIFO_DMA_REQUEST_DELAY,
+                                    if channel == 0: etFifoARequest else: etFifoBRequest)
+        else:
+          dc.gba.dma.trigger_fifo(channel)
 
 proc cubic4(y0, y1, y2, y3: int16; mu: float32): int16 {.inline.} =
   ## Four-point cubic through y1 and y2 at fraction mu (Paul Bourke, "Cubic

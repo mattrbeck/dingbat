@@ -58,6 +58,9 @@ type
     # End of the instruction after a GBA LDM^ (ldm_user_glitch in
     # gba/arm/arm.nim). Never in a state file: a save settles it first.
     etLdmGlitch
+    # Sound FIFO A / B DMA request, raised off its timer's overflow
+    # (FIFO_DMA_REQUEST_DELAY in gba/apu/dma_channels.nim).
+    etFifoARequest, etFifoBRequest
 
   Event* = object
     cycles*: CycleCount
