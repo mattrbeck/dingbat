@@ -1141,5 +1141,792 @@
     "want": "044603D5"
    }
   ]
+ },
+ {
+  "payload": "tmrdma",
+  "rom": "tmrdma.gba",
+  "sha1": "59a82d5b0cde4ca83f8f67d34d807dc5aace062f",
+  "frames": 140,
+  "cells": [
+   {
+    "id": "tmrdma 0x0",
+    "kind": "hex",
+    "want": "F303FF81"
+   },
+   {
+    "id": "tmrdma 0x1",
+    "kind": "hex",
+    "want": "F501FFE9"
+   },
+   {
+    "id": "tmrdma 0x2",
+    "kind": "hex",
+    "want": "F601FFEA"
+   },
+   {
+    "id": "tmrdma 0x3",
+    "kind": "hex",
+    "want": "F701FFEB"
+   },
+   {
+    "id": "tmrdma 0x4",
+    "kind": "hex",
+    "want": "F801FFEC"
+   },
+   {
+    "id": "tmrdma 0x5",
+    "kind": "hex",
+    "want": "F901FFED"
+   },
+   {
+    "id": "tmrdma 0x6",
+    "kind": "hex",
+    "want": "FA01FFEE"
+   },
+   {
+    "id": "tmrdma 0x7",
+    "kind": "hex",
+    "want": "FB01FFEF"
+   },
+   {
+    "id": "tmrdma 0x10",
+    "kind": "hex",
+    "want": "EC00BEEF"
+   },
+   {
+    "id": "tmrdma 0x20",
+    "kind": "hex",
+    "want": "8100FF81"
+   }
+  ]
+ },
+ {
+  "payload": "dmastart",
+  "rom": "dmastart.gba",
+  "sha1": "d7a483cf7d66fa259efe7c135707c3993456b50c",
+  "frames": 220,
+  "cells": [
+   {
+    "id": "dmastart 0x0",
+    "kind": "hex",
+    "want": "00040206"
+   },
+   {
+    "id": "dmastart 0x1",
+    "kind": "hex",
+    "want": "0014000B"
+   },
+   {
+    "id": "dmastart 0x2",
+    "kind": "hex",
+    "want": "000F0206"
+   },
+   {
+    "id": "dmastart 0x3",
+    "kind": "hex",
+    "want": "00160106"
+   },
+   {
+    "id": "dmastart 0x4",
+    "kind": "hex",
+    "want": "00170106"
+   },
+   {
+    "id": "dmastart 0x5",
+    "kind": "hex",
+    "want": "00170106"
+   },
+   {
+    "id": "dmastart 0x6",
+    "kind": "hex",
+    "want": "0014020B"
+   },
+   {
+    "id": "dmastart 0x7",
+    "kind": "hex",
+    "want": "00110206"
+   },
+   {
+    "id": "dmastart 0x8",
+    "kind": "hex",
+    "want": "000F0206"
+   },
+   {
+    "id": "dmastart 0x9",
+    "kind": "hex",
+    "want": "00110008"
+   },
+   {
+    "id": "dmastart 0x10",
+    "kind": "hex",
+    "want": "00040206"
+   },
+   {
+    "id": "dmastart 0x11",
+    "kind": "hex",
+    "want": "0014000B"
+   },
+   {
+    "id": "dmastart 0x12",
+    "kind": "hex",
+    "want": "000F0206"
+   },
+   {
+    "id": "dmastart 0x13",
+    "kind": "hex",
+    "want": "00160106"
+   },
+   {
+    "id": "dmastart 0x14",
+    "kind": "hex",
+    "want": "00170106"
+   },
+   {
+    "id": "dmastart 0x15",
+    "kind": "hex",
+    "want": "00170106"
+   },
+   {
+    "id": "dmastart 0x16",
+    "kind": "hex",
+    "want": "0014020B"
+   },
+   {
+    "id": "dmastart 0x17",
+    "kind": "hex",
+    "want": "00110206"
+   },
+   {
+    "id": "dmastart 0x18",
+    "kind": "hex",
+    "want": "000F0206"
+   },
+   {
+    "id": "dmastart 0x19",
+    "kind": "hex",
+    "want": "00110008"
+   }
+  ]
+ },
+ {
+  "payload": "dmadur",
+  "rom": "dmadur.gba",
+  "sha1": "c806fd9bf75e9e5191b96017484dc862ad3106db",
+  "frames": 556,
+  "cells": [
+   {
+    "id": "dmadur 0x0",
+    "kind": "hex",
+    "want": "00000000"
+   },
+   {
+    "id": "dmadur 0x3",
+    "kind": "hex",
+    "want": "00000002"
+   },
+   {
+    "id": "dmadur 0x4",
+    "kind": "hex",
+    "want": "00000002"
+   },
+   {
+    "id": "dmadur 0x5",
+    "kind": "hex",
+    "want": "00000002"
+   },
+   {
+    "id": "dmadur 0x6",
+    "kind": "hex",
+    "want": "00000002"
+   },
+   {
+    "id": "dmadur 0x7",
+    "kind": "hex",
+    "want": "00000002"
+   },
+   {
+    "id": "dmadur 0x10",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "dmadur 0x11",
+    "kind": "hex",
+    "want": "00000000"
+   },
+   {
+    "id": "dmadur 0x12",
+    "kind": "hex",
+    "want": "00000000"
+   },
+   {
+    "id": "dmadur 0x13",
+    "kind": "hex",
+    "want": "00000007"
+   },
+   {
+    "id": "dmadur 0x14",
+    "kind": "hex",
+    "want": "0000000C"
+   },
+   {
+    "id": "dmadur 0x15",
+    "kind": "hex",
+    "want": "0000000C"
+   },
+   {
+    "id": "dmadur 0x16",
+    "kind": "hex",
+    "want": "00000007"
+   },
+   {
+    "id": "dmadur 0x17",
+    "kind": "hex",
+    "want": "00000007"
+   },
+   {
+    "id": "dmadur 0x20",
+    "kind": "hex",
+    "want": "00000002"
+   },
+   {
+    "id": "dmadur 0x21",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "dmadur 0x22",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "dmadur 0x23",
+    "kind": "hex",
+    "want": "00000008"
+   },
+   {
+    "id": "dmadur 0x24",
+    "kind": "hex",
+    "want": "0000000D"
+   },
+   {
+    "id": "dmadur 0x25",
+    "kind": "hex",
+    "want": "0000000D"
+   },
+   {
+    "id": "dmadur 0x26",
+    "kind": "hex",
+    "want": "00000008"
+   },
+   {
+    "id": "dmadur 0x27",
+    "kind": "hex",
+    "want": "00000008"
+   },
+   {
+    "id": "dmadur 0x30",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "dmadur 0x31",
+    "kind": "hex",
+    "want": "00000002"
+   },
+   {
+    "id": "dmadur 0x32",
+    "kind": "hex",
+    "want": "00000002"
+   },
+   {
+    "id": "dmadur 0x33",
+    "kind": "hex",
+    "want": "00000009"
+   },
+   {
+    "id": "dmadur 0x34",
+    "kind": "hex",
+    "want": "0000000E"
+   },
+   {
+    "id": "dmadur 0x35",
+    "kind": "hex",
+    "want": "0000000E"
+   },
+   {
+    "id": "dmadur 0x36",
+    "kind": "hex",
+    "want": "00000009"
+   },
+   {
+    "id": "dmadur 0x37",
+    "kind": "hex",
+    "want": "00000009"
+   },
+   {
+    "id": "dmadur 0x40",
+    "kind": "hex",
+    "want": "00000004"
+   },
+   {
+    "id": "dmadur 0x41",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "dmadur 0x42",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "dmadur 0x43",
+    "kind": "hex",
+    "want": "0000000A"
+   },
+   {
+    "id": "dmadur 0x44",
+    "kind": "hex",
+    "want": "0000000F"
+   },
+   {
+    "id": "dmadur 0x45",
+    "kind": "hex",
+    "want": "0000000F"
+   },
+   {
+    "id": "dmadur 0x46",
+    "kind": "hex",
+    "want": "0000000A"
+   },
+   {
+    "id": "dmadur 0x47",
+    "kind": "hex",
+    "want": "0000000A"
+   },
+   {
+    "id": "dmadur 0x50",
+    "kind": "hex",
+    "want": "00000006"
+   },
+   {
+    "id": "dmadur 0x51",
+    "kind": "hex",
+    "want": "00000005"
+   },
+   {
+    "id": "dmadur 0x52",
+    "kind": "hex",
+    "want": "00000005"
+   },
+   {
+    "id": "dmadur 0x53",
+    "kind": "hex",
+    "want": "0000000C"
+   },
+   {
+    "id": "dmadur 0x54",
+    "kind": "hex",
+    "want": "00000011"
+   },
+   {
+    "id": "dmadur 0x55",
+    "kind": "hex",
+    "want": "00000011"
+   },
+   {
+    "id": "dmadur 0x56",
+    "kind": "hex",
+    "want": "0000000C"
+   },
+   {
+    "id": "dmadur 0x57",
+    "kind": "hex",
+    "want": "0000000C"
+   },
+   {
+    "id": "dmadur 0x60",
+    "kind": "hex",
+    "want": "00000008"
+   },
+   {
+    "id": "dmadur 0x61",
+    "kind": "hex",
+    "want": "00000007"
+   },
+   {
+    "id": "dmadur 0x62",
+    "kind": "hex",
+    "want": "00000007"
+   },
+   {
+    "id": "dmadur 0x63",
+    "kind": "hex",
+    "want": "0000000E"
+   },
+   {
+    "id": "dmadur 0x64",
+    "kind": "hex",
+    "want": "00000013"
+   },
+   {
+    "id": "dmadur 0x65",
+    "kind": "hex",
+    "want": "00000013"
+   },
+   {
+    "id": "dmadur 0x66",
+    "kind": "hex",
+    "want": "0000000E"
+   },
+   {
+    "id": "dmadur 0x67",
+    "kind": "hex",
+    "want": "0000000E"
+   },
+   {
+    "id": "dmadur 0x70",
+    "kind": "hex",
+    "want": "0000000C"
+   },
+   {
+    "id": "dmadur 0x71",
+    "kind": "hex",
+    "want": "0000000B"
+   },
+   {
+    "id": "dmadur 0x72",
+    "kind": "hex",
+    "want": "0000000B"
+   },
+   {
+    "id": "dmadur 0x73",
+    "kind": "hex",
+    "want": "00000012"
+   },
+   {
+    "id": "dmadur 0x74",
+    "kind": "hex",
+    "want": "00000017"
+   },
+   {
+    "id": "dmadur 0x75",
+    "kind": "hex",
+    "want": "00000017"
+   },
+   {
+    "id": "dmadur 0x76",
+    "kind": "hex",
+    "want": "00000012"
+   },
+   {
+    "id": "dmadur 0x77",
+    "kind": "hex",
+    "want": "00000012"
+   }
+  ]
+ },
+ {
+  "payload": "dmamulirq",
+  "rom": "dmamulirq.gba",
+  "sha1": "f8237a480326acb26b4f5e8d04583ec2ad409270",
+  "frames": 532,
+  "cells": [
+   {
+    "id": "dmamulirq 0xffff",
+    "kind": "hex",
+    "want": "6301007C"
+   },
+   {
+    "id": "dmamulirq 0xfffe",
+    "kind": "hex",
+    "want": "6301007C"
+   },
+   {
+    "id": "dmamulirq 0xfffd",
+    "kind": "hex",
+    "want": "6301007C"
+   },
+   {
+    "id": "dmamulirq 0xfffc",
+    "kind": "hex",
+    "want": "64010081"
+   },
+   {
+    "id": "dmamulirq 0xfffb",
+    "kind": "hex",
+    "want": "64010081"
+   },
+   {
+    "id": "dmamulirq 0xfffa",
+    "kind": "hex",
+    "want": "64010081"
+   },
+   {
+    "id": "dmamulirq 0xfff9",
+    "kind": "hex",
+    "want": "64010081"
+   },
+   {
+    "id": "dmamulirq 0xfff8",
+    "kind": "hex",
+    "want": "64010081"
+   },
+   {
+    "id": "dmamulirq 0xfff7",
+    "kind": "hex",
+    "want": "64010081"
+   },
+   {
+    "id": "dmamulirq 0xfff6",
+    "kind": "hex",
+    "want": "64010081"
+   },
+   {
+    "id": "dmamulirq 0xfff5",
+    "kind": "hex",
+    "want": "64010081"
+   },
+   {
+    "id": "dmamulirq 0xfff4",
+    "kind": "hex",
+    "want": "64010081"
+   },
+   {
+    "id": "dmamulirq 0xfff3",
+    "kind": "hex",
+    "want": "64010081"
+   },
+   {
+    "id": "dmamulirq 0xfff2",
+    "kind": "hex",
+    "want": "64010081"
+   },
+   {
+    "id": "dmamulirq 0xfff1",
+    "kind": "hex",
+    "want": "64010081"
+   },
+   {
+    "id": "dmamulirq 0xfff0",
+    "kind": "hex",
+    "want": "64010081"
+   },
+   {
+    "id": "dmamulirq 0xffea",
+    "kind": "hex",
+    "want": "64010081"
+   },
+   {
+    "id": "dmamulirq 0xffd6",
+    "kind": "hex",
+    "want": "64010081"
+   },
+   {
+    "id": "dmamulirq 0xffc2",
+    "kind": "hex",
+    "want": "64010081"
+   },
+   {
+    "id": "dmamulirq 0xffae",
+    "kind": "hex",
+    "want": "64010081"
+   },
+   {
+    "id": "dmamulirq 0xff9a",
+    "kind": "hex",
+    "want": "64010081"
+   },
+   {
+    "id": "dmamulirq 0xff86",
+    "kind": "hex",
+    "want": "68010095"
+   },
+   {
+    "id": "dmamulirq 0xff96",
+    "kind": "hex",
+    "want": "65010086"
+   },
+   {
+    "id": "dmamulirq 0xff92",
+    "kind": "hex",
+    "want": "6601008B"
+   },
+   {
+    "id": "dmamulirq 0xff8e",
+    "kind": "hex",
+    "want": "67010090"
+   },
+   {
+    "id": "dmamulirq 0xff8a",
+    "kind": "hex",
+    "want": "67010090"
+   },
+   {
+    "id": "dmamulirq 0x1ffff",
+    "kind": "hex",
+    "want": "92010081"
+   },
+   {
+    "id": "dmamulirq 0x1fffe",
+    "kind": "hex",
+    "want": "92010081"
+   },
+   {
+    "id": "dmamulirq 0x1fffd",
+    "kind": "hex",
+    "want": "92010081"
+   },
+   {
+    "id": "dmamulirq 0x1fffc",
+    "kind": "hex",
+    "want": "92010081"
+   },
+   {
+    "id": "dmamulirq 0x1fffb",
+    "kind": "hex",
+    "want": "92010081"
+   },
+   {
+    "id": "dmamulirq 0x1fffa",
+    "kind": "hex",
+    "want": "92010081"
+   },
+   {
+    "id": "dmamulirq 0x1fff9",
+    "kind": "hex",
+    "want": "93010089"
+   },
+   {
+    "id": "dmamulirq 0x1fff8",
+    "kind": "hex",
+    "want": "93010089"
+   },
+   {
+    "id": "dmamulirq 0x1fff7",
+    "kind": "hex",
+    "want": "93010089"
+   },
+   {
+    "id": "dmamulirq 0x1fff6",
+    "kind": "hex",
+    "want": "93010089"
+   },
+   {
+    "id": "dmamulirq 0x1fff5",
+    "kind": "hex",
+    "want": "93010089"
+   },
+   {
+    "id": "dmamulirq 0x1fff4",
+    "kind": "hex",
+    "want": "93010089"
+   },
+   {
+    "id": "dmamulirq 0x1fff3",
+    "kind": "hex",
+    "want": "93010089"
+   },
+   {
+    "id": "dmamulirq 0x1fff2",
+    "kind": "hex",
+    "want": "93010089"
+   },
+   {
+    "id": "dmamulirq 0x1fff1",
+    "kind": "hex",
+    "want": "93010089"
+   },
+   {
+    "id": "dmamulirq 0x1fff0",
+    "kind": "hex",
+    "want": "93010089"
+   },
+   {
+    "id": "dmamulirq 0x1ffea",
+    "kind": "hex",
+    "want": "93010089"
+   },
+   {
+    "id": "dmamulirq 0x1ffd6",
+    "kind": "hex",
+    "want": "93010089"
+   },
+   {
+    "id": "dmamulirq 0x1ffc2",
+    "kind": "hex",
+    "want": "93010089"
+   },
+   {
+    "id": "dmamulirq 0x1ffae",
+    "kind": "hex",
+    "want": "93010089"
+   },
+   {
+    "id": "dmamulirq 0x1ff9a",
+    "kind": "hex",
+    "want": "93010089"
+   },
+   {
+    "id": "dmamulirq 0x1ff86",
+    "kind": "hex",
+    "want": "95010099"
+   },
+   {
+    "id": "dmamulirq 0x1ff96",
+    "kind": "hex",
+    "want": "93010089"
+   },
+   {
+    "id": "dmamulirq 0x1ff92",
+    "kind": "hex",
+    "want": "93010089"
+   },
+   {
+    "id": "dmamulirq 0x1ff8e",
+    "kind": "hex",
+    "want": "94010091"
+   },
+   {
+    "id": "dmamulirq 0x1ff8a",
+    "kind": "hex",
+    "want": "94010091"
+   },
+   {
+    "id": "dmamulirq 0x2fffe",
+    "kind": "hex",
+    "want": "CD01001D"
+   },
+   {
+    "id": "dmamulirq 0x2ffea",
+    "kind": "hex",
+    "want": "D1010031"
+   },
+   {
+    "id": "dmamulirq 0x2ffd6",
+    "kind": "hex",
+    "want": "D5010045"
+   },
+   {
+    "id": "dmamulirq 0x2ffc2",
+    "kind": "hex",
+    "want": "DC010058"
+   },
+   {
+    "id": "dmamulirq 0x2ffae",
+    "kind": "hex",
+    "want": "F001006C"
+   },
+   {
+    "id": "dmamulirq 0x2ff9a",
+    "kind": "hex",
+    "want": "38010080"
+   },
+   {
+    "id": "dmamulirq 0x2ff86",
+    "kind": "hex",
+    "want": "38010094"
+   }
+  ]
  }
 ]

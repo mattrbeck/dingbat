@@ -34,6 +34,21 @@ TABLE = {
     # tests/roms/payloads/probe.inc held to the console: dmaphase's controls,
     # a multiply period and three NOP phases, rebuilt from the kit
     'kitdemo': [0x80, 0xB0] + list(range(0x00, 0x07)) + [0x30, 0x31, 0x32],
+    # alyosha timer_reset's DMA race: k = 0..7 NOPs, DMA1 alone, DMA0 alone
+    'tmrdma': list(range(0, 8)) + [0x10, 0x20],
+    # the instruction after an immediate DMA's enable, ARM then Thumb
+    'dmastart': list(range(0, 10)) + list(range(0x10, 0x1A)),
+    # one-unit bursts by n NOPs; not the two cells that read TM1 before the
+    # DMA starts it
+    'dmadur': [n * 16 + v for n in range(8) for v in range(8)
+               if not (n == 0 and v in (1, 2))],
+    # a timer interrupt raised k cycles after TM0 starts, across the burst's
+    # start one cycle at a time, then across the rest of it
+    'dmamulirq': [(v << 16) | (0x10000 - k)
+                  for v, ks in ((0, list(range(1, 17)) + list(range(22, 123, 20)) + [106, 110, 114, 118]),
+                                (1, list(range(1, 17)) + list(range(22, 123, 20)) + [106, 110, 114, 118]),
+                                (2, list(range(2, 123, 20))))
+                  for k in ks],
 }
 
 
