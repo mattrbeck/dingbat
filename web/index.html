@@ -9,6 +9,20 @@
       content="width=device-width, initial-scale=1, viewport-fit=cover"
       name="viewport"
     />
+    <script>
+      // iOS zooms the page in when a text field under 16px takes focus (the
+      // library search is 13px) and leaves it zoomed. maximum-scale=1 is what
+      // stops that; since iOS 10 Safari ignores it for pinch, so the page can
+      // still be zoomed by hand. iOS only - Android honours it and would lose
+      // pinch-zoom altogether.
+      try {
+        if (/iP(hone|ad|od)/.test(navigator.platform) ||
+            (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)) {
+          var vp = document.querySelector('meta[name="viewport"]');
+          if (vp) vp.content += ", maximum-scale=1";
+        }
+      } catch (e) {}
+    </script>
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <!-- No apple-mobile-web-app-status-bar-style: black-translucent offsets

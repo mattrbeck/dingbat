@@ -670,6 +670,34 @@ test("the bar's brand is inert, and out of the tab order, until it is showing",
   assert.equal(btn.tabIndex, 0);
 });
 
+// In a game the bar's brand is Main Menu; on the home screen it is back to the
+// top - including with a paused game behind the card, where it used to do
+// nothing at all.
+test("the bar's brand goes home from a game and to the top on the home screen",
+     async () => {
+  const app = await loadApp();
+  app.runIn(`
+    currentRomName = "rom.gba";
+    document.body.classList.add("has-game", "running");
+    globalThis.__scrolls = [];
+    homeScroller.scrollTo = (o) => { __scrolls.push(o.top); };
+    0`);
+  const btn = app.document.getElementById("bar-brand");
+
+  await btn.dispatch("pointerenter");
+  assert.equal(btn.title, "Main Menu");
+  await btn.click();
+  assert.equal(app.runIn("paused"), true, "the game froze behind the menu");
+  assert.equal(app.document.body.classList.contains("running"), false,
+               "and the home screen is up");
+  assert.equal(app.runIn("JSON.stringify(__scrolls)"), "[]", "no scroll on the way home");
+
+  await btn.dispatch("pointerenter");
+  assert.equal(btn.title, "Back to the top");
+  await btn.click();
+  assert.equal(app.runIn("JSON.stringify(__scrolls)"), "[0]");
+});
+
 
 // ── The brand's flight ──────────────────────────────────────────────────────
 // The bug these guard against: the flight used to fill FORWARDS, so a finished

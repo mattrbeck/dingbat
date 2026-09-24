@@ -10138,8 +10138,25 @@ const flyBrand = (up) => {
   Promise.all(made.map((a) => a.finished)).then(settle, settle);
 };
 
+// In a game the brand is the way home, the same as Main Menu (desktop only in
+// practice: phones drop the bar's brand while a game runs). On the home screen
+// - with or without a paused game behind it - it goes back to the top.
+const brandGoesHome = () => document.body.classList.contains("running");
+
+// The label follows what a click will do, read at the moment it matters.
+const labelBarBrand = () => {
+  let label = brandGoesHome() ? "Main Menu" : "Back to the top";
+  barBrand.title = label;
+  barBrand.setAttribute("aria-label", label);
+};
+barBrand.addEventListener("pointerenter", labelBarBrand);
+barBrand.addEventListener("focus", labelBarBrand);
+
 barBrand.addEventListener("click", () => {
-  if (document.body.classList.contains("has-game")) return;
+  if (brandGoesHome()) {
+    showMainMenu();
+    return;
+  }
   let smooth = !matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (homeScroller.scrollTo) {
     homeScroller.scrollTo({ top: 0, behavior: smooth ? "smooth" : "auto" });
