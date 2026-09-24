@@ -62,8 +62,19 @@ the same headlessly:
 ./dingbat_test <rom> --mode=netlink --connect <hostA>:7788 --timeout 1200  # unit 1
 ```
 
-HELLO verifies both sides run the same ROM (CRC-32). `--netlink-delay-ms N` adds
-artificial per-message latency. Over the internet the listener's port must be reachable.
+The harness's HELLO requires both sides to run the same ROM (CRC-32); the GUI's Link
+Cable window and `--listen`/`--connect` accept a different one, so cross-version games
+(Ruby↔Sapphire) link. `--netlink-delay-ms N` adds artificial per-message latency. Over
+the internet the listener's port must be reachable.
+
+**Two windows on one computer** (the Link Cable window auto-pairs them over localhost)
+cannot open the same ROM file: the second is refused, since both would write one `.sav`,
+each over the other's progress, and share the save-state slots and cheats. Open a
+different game in each (Ruby and Sapphire), or a copy of the ROM file under another name,
+which gets its own `.sav`. A copy under the same file name in another folder is refused
+too (its save states would be shared). The lock is an OS advisory lock in the config
+folder (`~/.config/dingbat/locks`; `%APPDATA%\dingbat\locks` on Windows), which the OS
+drops when a window closes or crashes.
 
 ## Acceptance tests (CI: `.github/workflows/test.yml`)
 

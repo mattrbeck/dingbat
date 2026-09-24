@@ -27,6 +27,7 @@ import dingbat/frontend/save_states_widget
 import dingbat/frontend/link_cable
 import dingbat/frontend/persist
 import dingbat/frontend/game_load
+import dingbat/frontend/game_lock
 when defined(gui_driver):
   import dingbat/frontend/gui_driver
 import dingbat/common/cheats
@@ -274,12 +275,15 @@ proc print_help() =
   echo "  (BIOS options and a BIOS argument hold for this run; Settings keep theirs)"
   echo "  --version        Print version"
   echo ""
-  echo "Network link (2-player, GBA only — run the same ROM on both sides):"
+  echo "Network link (2-player, GBA only; the same game, or two that trade):"
   echo "  --listen PORT       Host the link on PORT (this side is unit 0)"
   echo "  --connect HOST:PORT Join a host's link (this side is unit 1)"
   echo "  --netlink-delay-ms N  Add N ms of send latency (network simulation)"
   echo "  --link-auto         Zero-config auto-pair on localhost (same as opening"
-  echo "                      the Link Cable window; for testing two local copies)"
+  echo "                      the Link Cable window)"
+  echo "  Two windows on one computer can't open the same ROM file (they would"
+  echo "  share its save): open a different game in each (Ruby and Sapphire),"
+  echo "  or a copy of the ROM file under another name."
   echo ""
   echo "Verification:"
   echo "  --capture N:PATH    After N presented frames, write the GL back buffer"
@@ -436,6 +440,8 @@ type AppState = ref object
   # Set when a ROM could not be loaded; render_load_notice draws it.
   load_notice:       string
   load_notice_hint:  string
+  # This window's hold on its game's files: a second window is refused
+  game_lock:       GameLock
   # Command-line BIOS choices: for this run only, never written to cfg
   boot_overrides:  BootOverrides
   # A battery save that can't be written; shown in the same modal once
@@ -691,6 +697,15 @@ proc load_rom(path: string) =
       return
   # Before the new core reads the .sav: a Reset reloads the same file
   flush_saves()
+  # A game another dingbat window has open is refused before its .sav is
+  # read; a Reset keeps this window's own lock
+  let lock_dir = config_dir() / "locks"
+  var claim: GameLock
+  if not app.game_lock.claim_files(lock_dir, rom_path, claim):
+    let (text, hint) = refusal_notice(rfFiles, path.extractFilename(),
+                                      rom_path.extractFilename())
+    load_notice(text, hint)
+    return
   # The new core is built and checked before anything of the old one goes
   let boot = boot_settings(app.cfg, app.boot_overrides)
   if boot.note.len > 0 and not is_gb_rom(rom_path): echo boot.note
@@ -704,7 +719,17 @@ proc load_rom(path: string) =
     run_bios: boot.run_bios, use_hle: boot.use_hle,
     hle_after_bios: boot.hle_after_bios))
   if built.error.len > 0:
+    claim.abandon()
     load_notice(built.error, built.detail)
+    return
+  # A copy of this game under the same file name shares its save-state slots
+  let identity = if built.gb != nil: built.gb.state_rom_identity()
+                 else: built.gba.state_rom_identity()
+  if not app.game_lock.claim_states(lock_dir, rom_path, identity, claim):
+    claim.abandon()
+    let (text, hint) = refusal_notice(rfStates, path.extractFilename(),
+                                      rom_path.extractFilename())
+    load_notice(text, hint)
     return
   # The link, or a setup still waiting for a peer, belongs to the outgoing
   # core: left up, the netlink keeps driving that core unseen, and a peer
@@ -724,6 +749,8 @@ proc load_rom(path: string) =
       app.state_notice_hint = last_state_error
   # What that finished frame wrote goes too
   flush_saves()
+  # The old game's files are written out; its locks go to the new game
+  app.game_lock.commit(claim)
   if built.gb != nil:
     app.gb_emu = built.gb
     app.gba_emu = nil
@@ -2126,6 +2153,8 @@ proc render_link_window() =
         # An animated ellipsis so it's visibly working; auto stops on close.
         let dots = 1 + (int(getTicks() div 400) mod 3)
         igText("Waiting to pair%s", cstring(repeat('.', dots)))
+        # load_rom refuses a ROM file another window has open (game_lock.nim)
+        igTextWrapped("%s", cstring(LINK_SAME_MACHINE_HINT))
       elif app.link.setup == lsListening:
         igText("Hosting on port %d", cint(app.link.port))
         igText("Waiting for a friend to join...")

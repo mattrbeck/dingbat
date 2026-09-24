@@ -3,15 +3,26 @@
 ## a battery write that fails keeps the game running and tells the player
 ## once per run of failures (finding 4); a battery or save-state write cut
 ## short leaves the previous file whole (finding 18); two games with the same
-## file name keep their own save-state slots (finding 2).
+## file name keep their own save-state slots (finding 2); a second window on
+## a game another window has open is refused (finding 1).
 
-import std/[os, strformat, strutils, tempfiles]
+import std/[os, osproc, streams, strformat, strutils, tempfiles]
 import dingbat/gba/gba
 import dingbat/gb/gb
 import dingbat/common/serialize
 import dingbat/frontend/persist
+import dingbat/frontend/game_lock
 when defined(posix):
   import std/posix
+
+# A child process for the lock test: takes the lock at the given path and
+# holds it until it is killed.
+if paramCount() == 2 and paramStr(1) == "--hold-lock":
+  var l: FileLock
+  echo (if try_lock(paramStr(2), "child", l) == lrTaken: "locked" else: "busy")
+  stdout.flushFile()
+  discard stdin.readLine()
+  quit(0)
 
 var failures = 0
 
@@ -243,6 +254,113 @@ block:  # GB: the same identity test
   check(g.state_is_for(readFile(path)), "its header names its cart")
   let other = boot_gba(make_gba_rom("gba_ident"))
   check(not other.state_is_for(readFile(path)), "a GBA cart does not claim a GB state")
+
+echo "=== A second window on an open game is refused (finding 1) ==="
+
+let locks = dir / "locks"
+
+proc open_game(w: var GameLock; rom: string; builds = true): Refusal =
+  ## load_rom's order: the battery/cheat lock before the .sav is read, the
+  ## core built, the save-state lock once the cart is known, and the old
+  ## game's locks let go only when the new game is running.
+  var c: GameLock
+  if not w.claim_files(locks, rom, c): return rfFiles
+  if not builds:
+    c.abandon()
+    return rfNone
+  let g = boot_gba(rom)
+  if not w.claim_states(locks, rom, g.state_rom_identity(), c):
+    c.abandon()
+    return rfStates
+  w.commit(c)
+  rfNone
+
+block:
+  let ruby = make_gba_rom("Ruby", "lock")
+  let sapphire = make_gba_rom("Sapphire", "lock", mark = 1)
+  var w1, w2: GameLock
+  check(w1.open_game(ruby) == rfNone, "window 1 opens Ruby")
+  check(w2.open_game(ruby) == rfFiles, "window 2 is refused Ruby")
+  check(w2.files.key == "" and w2.states.key == "",
+        "and the refused load holds nothing")
+  let rel = relativePath(ruby, getCurrentDir())
+  check(w2.open_game(rel) == rfFiles, "also when the path is spelled relative")
+  when defined(posix):
+    let linked_dir = dir / "lock-link"
+    createSymlink(dir / "lock", linked_dir)
+    check(w2.open_game(linked_dir / "Ruby.gba") == rfFiles,
+          "also through a symlinked folder (the same Ruby.sav)")
+  check(w1.open_game(ruby) == rfNone, "window 1's Reset keeps its game")
+  check(w1.files.held and w1.states.held, "and its locks")
+  check(w2.open_game(ruby) == rfFiles, "window 2 is still refused after the Reset")
+  check(w2.open_game(sapphire) == rfNone, "window 2 opens Sapphire")
+  check(w1.open_game(sapphire) == rfFiles,
+        "window 1 is refused Sapphire and keeps running Ruby")
+  check(w1.files.key == files_key(ruby), "window 1 still holds Ruby")
+  check(w2.open_game(ruby) == rfFiles, "so window 2 is still refused Ruby")
+  check(w2.files.key == files_key(sapphire), "window 2 keeps Sapphire")
+
+  # A file that turns out not to be a ROM lets go of the lock it took
+  let emerald = make_gba_rom("Emerald", "lock", mark = 2)
+  check(w1.open_game(emerald, builds = false) == rfNone and
+        w1.files.key == files_key(ruby), "a failed load leaves window 1 on Ruby")
+  var w3: GameLock
+  check(w3.open_game(emerald) == rfNone, "and Emerald is free for another window")
+
+  # Switching is what releases: window 1 moves on, and Ruby is free
+  let leaf = make_gba_rom("LeafGreen", "lock", mark = 3)
+  check(w1.open_game(leaf) == rfNone, "window 1 switches to LeafGreen")
+  check(w2.open_game(ruby) == rfNone, "and window 2 can now open Ruby")
+
+  # Tetris.gb and Tetris.gbc beside each other write one Tetris.sav
+  check(files_key(dir / "Tetris.gb") == files_key(dir / "Tetris.gbc"),
+        "same folder and name, other extension: the same battery lock")
+
+  # Copies: under another name, a second save of their own; under the same
+  # name in another folder, the save states would be shared
+  let copy = dir / "lock" / "Ruby copy.gba"
+  copyFile(ruby, copy)
+  var w4: GameLock
+  check(w4.open_game(copy) == rfNone, "a copy under another name opens")
+  let other = make_gba_rom("Ruby", "elsewhere")
+  var w5: GameLock
+  check(w5.open_game(other) == rfStates,
+        "a copy under the same name elsewhere is refused (shared slots)")
+  check(w5.files.key == "" and w5.states.key == "", "and holds nothing")
+
+  when defined(macosx) or defined(windows):
+    check(files_key(dir / "lock" / "RUBY.gba") == files_key(ruby),
+          "the name's case does not matter where the file system ignores it")
+
+  let (text, hint) = refusal_notice(rfFiles, "Ruby.gba", "Ruby.gba")
+  check("another dingbat window" in text and "Ruby.sav" in hint and
+        "Sapphire" in hint and "copy of the ROM file" in hint,
+        "the notice says why and what works for linking")
+
+block:  # the OS lets go when the holder dies, however it dies
+  let path = lock_path(locks, "files", "held by a child")
+  let p = startProcess(getAppFilename(), args = ["--hold-lock", path],
+                       options = {poStdErrToStdOut})
+  let said = p.outputStream.readLine()
+  check(said == "locked", "a child process takes the lock")
+  var l: FileLock
+  check(try_lock(path, "parent", l) == lrBusy, "the parent cannot while it lives")
+  p.kill()
+  discard p.waitForExit()
+  p.close()
+  check(try_lock(path, "parent", l) == lrTaken, "and can once it is killed")
+  l.release()
+
+block:  # no lock file can be made: the game opens anyway
+  let blocked = dir / "not-a-folder"
+  writeFile(blocked, "")
+  var l: FileLock
+  check(try_lock(blocked / "x.lock", "k", l) == lrNoLock,
+        "a lock folder that cannot be made is not a refusal")
+  var w: GameLock
+  var c: GameLock
+  check(w.claim_files(blocked, make_gba_rom("Unlockable"), c) and not c.files.held,
+        "the load goes ahead unlocked")
 
 removeDir(dir)
 
