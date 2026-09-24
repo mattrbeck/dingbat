@@ -1392,8 +1392,12 @@ theorem reset_restarts {s : St} (h : Reachable s) (hpc : s.pc = .input) {c : Cor
    post-inits the new core into a value of its own, refusing a GB file under
    0x8000 bytes or a GBA file under 0xC0 before a constructor indexes into it,
    and catching `CatchableError`. Refused: a notice, and the old game keeps
-   running, flushed (`gameOf r = none`, the state after `flushCur`). Only
-   then: `link_auto_stop(); link_cancel_setup();
+   running, flushed (`gameOf r = none`, the state after `flushCur`). A
+   game another dingbat process holds (`game_lock.nim`, `SavePersistence`'s
+   `lock`) is refused at the same point with the same outcome, just before
+   or just after `build_core`: the old game running, flushed. Whether that
+   happens depends on the other process, outside this machine; the outcome
+   is the refusal step's, which the proofs here cover. Only then: `link_auto_stop(); link_cancel_setup();
    teardown_netlink("another game was loaded")` (forward-declared; it
    finishes a frame the link left torn, which `NetLink` models and this
    machine's frames never are), a pending Quick Save is saved from the

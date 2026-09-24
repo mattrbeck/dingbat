@@ -3,6 +3,7 @@
 -- @models src/dingbat/frontend/save_states_widget.nim: mark_stale render
 -- @models src/dingbat/frontend/persist.nim: poll dismiss state_file_name legacy_state_file_name state_read_path state_delete_paths
 -- @models src/dingbat/frontend/game_load.nim: flush_batteries extract_zip_rom
+-- @models src/dingbat/frontend/game_lock.nim: files_key states_key try_lock claim_files claim_states abandon commit
 -- @models src/dingbat/common/atomicfile.nim: write_file_atomic
 -- @models src/dingbat/common/config.nim: load_config save_config
 -- @models src/dingbat/common/serialize.nim: parse_state_payload read_state_payload write_state_file
@@ -74,7 +75,8 @@ refresh). Anything else leaves the state unchanged.
 There are **two processes** (`app false`, `app true`) sharing one file system:
 the Link Cable window's zero-config mode pairs two dingbat processes on
 127.0.0.1 (`link_auto_start` 1924, `service_link_setup` 1986), and nothing
-stops both from loading the same ROM file. Their events interleave freely.
+stops both from loading the same ROM file (fixed: `lock`). Their events
+interleave freely.
 
 The environment chooses each write's outcome (`Io`): it succeeds, the open
 fails (`denied`: a read-only folder or file), it fails part way (`full`: a
@@ -89,7 +91,7 @@ proposed change at once. Each flag is one small Nim change:
 | `linkGate` | `process_pending_state`, `on_load` and File > Quick Load refuse while `app.netlink != nil` | `bug_menu_quick_load_while_linked`, `bug_window_load_while_linked`, `bug_quick_load_races_link` | `loads_ok` |
 | `staleView` | `load_rom` calls `app.save_states.mark_stale()` | `bug_window_shows_previous_games_slots`, `bug_window_delete_hidden_slot` | `fi_ok` (`ViewJ`, `blind = []`) |
 | `identity` | `state_file_path` adds the ROM identity (`state_rom_identity`) to the name; the old name is only ever read, and only when its header names this cart | `bug_same_name_state_overwritten` | `st_ok` |
-| `lock` | a window whose game is already open in another window uses `<name>-p2.sav` / `-p2` states (seeded from the first, as the web's 2P mode does) | `bug_two_windows_lost_update` | `fi_ok` (`Excl`, `BaseJ`, `clobbers = []`) |
+| `lock` | `load_rom` refuses a ROM whose `.sav`/`.cht` (same folder, same name minus extension) or save-state slots (same file name, same ROM identity) another live window holds: an OS lock per name (`frontend/game_lock.nim`), taken before the `.sav` is read and before anything of the running game goes, released when the process ends or after a switch to another game | `bug_two_windows_lost_update` | `fi_ok` (`Excl`, `BaseJ`, `clobbers = []`), `two_windows_distinct` |
 | `catchIo` | `write_save` catches IOError/OSError like `mbc_save`; both record it (`save_error`) and the app shows it until a write lands (`batErr`) | `bug_gba_save_error_crashes`, `gb_save_error_unseen` | `clean_ok`, `regress_gba_save_error` |
 | `flushGba` | `flush_gb_save` also flushes the GBA battery | `bug_gba_quit_drops_battery` | `clean_ok` |
 | `atomic` | every `writeFile` of a persisted file goes through `write_file_atomic` (temp, fsync, rename over `path`); a failed Quick Save says the slot is unchanged | `bug_truncated_sav_accepted`, `bug_failed_quick_save_destroys_previous`, `failed_quick_save_silent` | `clean_ok`, `regress_failed_quick_save_says_so` |
@@ -142,6 +144,13 @@ phase, both after a completed frame, except after a link loss mid-frame
 * The config file and `.cht` are always written whole here (their truncation
   is argued in the report, not modelled); `.cht` is modelled only for its
   identity (`wrongCht`, the same name as the `.sav`).
+* The lock (`lock`) is the other process's `cur` while it is live: game_lock.nim
+  takes both locks inside `load_rom` and swaps them where `cur` changes, and
+  the OS drops them when the process ends (`dead`, `exited`). A folder is its
+  real path, and on macOS and Windows its name's case does not count (the
+  lock keys fold it), which only refuses more. Not modelled: a lock file that
+  cannot be made (an unwritable config folder), where `load_rom` goes ahead
+  unlocked, as every build before this one did.
 * Ghost fields (`base`, `loads`, `clobbers`, `foreign`, `blind`, `dropped`,
   `truncs`, `crashes`, `staleRewind`, `midSaves`, `userHle`, `userVol`,
   `wrongBoot`, `wrongCht`) only record what happened; no code reads them.
@@ -175,12 +184,13 @@ deriving DecidableEq, Repr
 /-- `load_rom` 704-705: `.gb`/`.gbc` build a GB core, anything else a GBA core. -/
 def Rom.gba (r : Rom) : Bool := r.ext == 0
 
-/-- A battery file path: `<dir>/<base>.sav` (and `.cht`), `p2 = false`; the
-    fixed code's second-window file `<dir>/<base>-p2.sav` has `p2 = true`. -/
-abbrev SavPath := Nat × Nat × Bool
+/-- A battery file path: `<dir>/<base>.sav` (and `.cht`). -/
+abbrev SavPath := Nat × Nat
 
-/-- A save-state file name under `config_dir/states`. -/
-abbrev StPath := Nat × Nat × Nat
+/-- A save-state file name under `config_dir/states`: the ROM identity (0 in
+    the real code's names, which carry none), the ROM's file name (`base`,
+    `ext`) and the slot. -/
+abbrev StPath := Nat × Nat × Nat × Nat
 
 /-- A battery image. -/
 structure Bat where
@@ -239,7 +249,6 @@ structure App where
   pc        : Phase
   cur       : Option Rom      -- current_rom_path() (769), emu_kind != ekNone
   core      : Option Core     -- app.gba_emu / app.gb_emu
-  p2        : Bool            -- fixed code only: this window's saves are the -p2 files
   paused    : Bool            -- app.paused
   running   : Bool            -- app.running
   pendSave  : Bool            -- app.pending_save
@@ -261,7 +270,7 @@ structure App where
   base      : Option Bat      -- ghost: the .sav content this process last read or wrote
 
 def App.off : App :=
-  { pc := .off, cur := none, core := none, p2 := false, paused := false, running := true,
+  { pc := .off, cur := none, core := none, paused := false, running := true,
     pendSave := false, pendLoad := false, linked := false, setup := false, mid := false, rewind := [],
     rewinding := false, notice := false, win := false, wasOpen := false, view := none,
     viewFiles := fun _ => none, cfg := Cfg.dflt, over := false, batErr := false, base := none }
@@ -298,8 +307,8 @@ def init : St :=
 structure Fix where
   linkGate    : Bool  -- no state load while linked, wherever it is asked for
   staleView   : Bool  -- load_rom marks the Save States window stale
-  identity    : Bool  -- state files named by ROM identity (and -p2), not by file name
-  lock        : Bool  -- a second window on the same game gets the -p2 files
+  identity    : Bool  -- state files named by ROM identity and file name, not by file name alone
+  lock        : Bool  -- a second window on a game's files is refused
   catchIo     : Bool  -- write_save's IOError caught, like mbc_save's
   flushGba    : Bool  -- the GBA battery is flushed at a switch and at quit, like GB's
   atomic      : Bool  -- every writeFile goes to a temp file, then renames over
@@ -315,22 +324,20 @@ def fixed : Fix := ⟨true, true, true, true, true, true, true, true, true, true
 
 /-- gba.nim 1358 / gb mbc.nim 156: `rom_path[0 ..< rom_path.rfind('.')] & ".sav"`;
     cheat_file_path 777-781 the same with `.cht`. -/
-def savPath (r : Rom) (p2 : Bool) : SavPath := (r.dir, r.base, p2)
+def savPath (r : Rom) : SavPath := (r.dir, r.base)
 
 /-- state_file_path 823-831: `config_dir/states/<rom.extractFilename()>[.slotN].state`.
-    Fixed: named by the ROM identity (and -p2). What shipped
-    (frontend/persist.nim `state_file_name`) is
-    `<rom file name>-<identity>[.slotN].state`: the file name only splits one
-    game's slots further, and every property below reads only the identity
-    part. It also reads, never writes, an older build's
+    Fixed: named by the ROM identity as well, what shipped
+    (frontend/persist.nim `state_file_name`):
+    `<rom file name>-<identity>[.slotN].state`. It also reads, never writes, an older build's
     `<rom file name>[.slotN].state` when the slot has no file of its own and
     that file's header names this cart (`state_read_path`, and Delete removes
     it too). The model's `init` holds no such files (every run starts on an
     empty disk), so that fallback is not modelled; its loads are guarded by the
     same header check as any other (`loads_ok`) and it never shows or deletes
     another game's file (tests/desktop_persist_test.nim). -/
-def stPath (fx : Fix) (r : Rom) (p2 : Bool) (k : Nat) : StPath :=
-  if fx.identity then (r.game, (if p2 then 1 else 0), k) else (r.base, r.ext, k)
+def stPath (fx : Fix) (r : Rom) (k : Nat) : StPath :=
+  (if fx.identity then r.game else 0, r.base, r.ext, k)
 
 /-! ## Helpers -/
 
@@ -382,7 +389,7 @@ def flushFrame (fx : Fix) (s : St) (i : Bool) (io : Io) : St :=
   | some r, some c =>
     match c.dirty, c.ram with
     | true, some b =>
-      let p := savPath r a.p2
+      let p := savPath r
       let s1 := { s with clobbers := if s.sav p = a.base then s.clobbers
                                      else s.clobbers ++ [(p, s.sav p, b)] }
       let w := wr fx.atomic s.sav p b { b with whole := false } io
@@ -411,7 +418,7 @@ def flushOut (fx : Fix) (s : St) (i : Bool) : St :=
     | true, some b =>
       if r.gba && !fx.flushGba then { s with dropped := s.dropped ++ [b] }
       else
-        let p := savPath r a.p2
+        let p := savPath r
         let s1 := { s with clobbers := if s.sav p = a.base then s.clobbers
                                        else s.clobbers ++ [(p, s.sav p, b)] }
         setA { s1 with sav := upd s1.sav p (some b) } i
@@ -425,19 +432,26 @@ def differs {α : Type} (o : Option α) (g : α → Nat) (x : Nat) : Bool :=
   | some v => g v != x
   | none => false
 
-/-- Two ROMs whose files would collide: the same `.sav`/`.cht` name, or the
-    same game (so the same identity-named state files). -/
-def conflict (r r' : Rom) : Bool := (r.dir == r'.dir && r.base == r'.base) || r.game == r'.game
+/-- The same `.sav` and `.cht`: game_lock.nim `files_key` (the folder, symlinks
+    resolved, and the name minus the extension). -/
+def sameFiles (r r' : Rom) : Bool := r.dir == r'.dir && r.base == r'.base
 
-/-- Fixed code only: the other live window already has this game (same .sav
-    name, or same ROM identity) open: take the other file. -/
-def lockP2 (s : St) (i : Bool) (r : Rom) : Bool :=
+/-- The same save-state slots: game_lock.nim `states_key` (the file name and
+    the ROM identity, in any folder). -/
+def sameStates (r r' : Rom) : Bool := r.game == r'.game && r.base == r'.base && r.ext == r'.ext
+
+/-- Two ROMs whose files would collide. -/
+def conflict (r r' : Rom) : Bool := sameFiles r r' || sameStates r r'
+
+/-- Fixed code only: the other process holds the lock `same` names for `r`.
+    A lock is held from the load that took it until the process ends or its
+    next successful switch: exactly while that process is live with the game
+    as `cur` (`load_rom` commits the new game's locks where `cur` changes). -/
+def holds (s : St) (i : Bool) (same : Rom → Rom → Bool) (r : Rom) : Bool :=
   let o := s.app (!i)
-  if live o then
-    match o.cur with
-    | some r' => if conflict r r' then !o.p2 else false
-    | none => false
-  else false
+  live o && (match o.cur with
+    | some r' => same r r'
+    | none => false)
 
 /-- Ghost only: a core built on another game's battery file, a cheat list
     read from another game's `.cht`. -/
@@ -445,8 +459,8 @@ def noteBoot (s : St) (r : Rom) (ram : Option Bat) : St :=
   { s with
     wrongBoot := if differs ram Bat.game r.game then s.wrongBoot ++ [(r, ram.getD ⟨0, 0, true⟩)]
                  else s.wrongBoot
-    wrongCht := if differs (s.cht (savPath r false)) id r.game
-                then s.wrongCht ++ [(r, (s.cht (savPath r false)).getD 0)] else s.wrongCht }
+    wrongCht := if differs (s.cht (savPath r)) id r.game
+                then s.wrongCht ++ [(r, (s.cht (savPath r)).getD 0)] else s.wrongCht }
 
 @[simp] theorem noteBoot_app (s : St) (r : Rom) (b : Option Bat) : (noteBoot s r b).app = s.app := rfl
 @[simp] theorem noteBoot_sav (s : St) (r : Rom) (b : Option Bat) : (noteBoot s r b).sav = s.sav := rfl
@@ -473,17 +487,20 @@ def noteBoot (s : St) (r : Rom) (ram : Option Bat) : St :=
 @[simp] theorem noteBoot_userVol (s : St) (r : Rom) (b : Option Bat) :
     (noteBoot s r b).userVol = s.userVol := rfl
 
-/-- `load_rom` (694-766). -/
+/-- `load_rom` (694-766). Fixed (`lock`): after the running game's battery
+    is flushed, refused (a notice, the running game left as it is) when
+    another window holds this ROM's `.sav`/`.cht` (`claim_files`, before the
+    new core reads the `.sav`) or, once the core is built, its save-state
+    slots (`claim_states`); nothing between the two changes what this
+    machine sees. -/
 def loadRom (fx : Fix) (s0 : St) (i : Bool) (r : Rom) : St :=
   let s := flushOut fx s0 i                                    -- 702 flush_gb_save
+  if fx.lock && holds s i conflict r then s else
   let a := s.app i
-  let p2 := if fx.lock then lockP2 s i r else false
-  let disk := s.sav (savPath r p2)
   -- new_storage 1377-1385 / mbc_load 3247: whatever .sav is there, any length
-  -- (fixed, second window: seeded from the first window's file)
-  let ram := if p2 && disk.isNone then s.sav (savPath r false) else disk
-  let s := noteBoot s r ram                                    -- 735 load_cheats
-  let a' := { a with cur := some r, core := some ⟨r.game, s.clock, ram, false⟩, p2 := p2,
+  let disk := s.sav (savPath r)
+  let s := noteBoot s r disk                                   -- 735 load_cheats
+  let a' := { a with cur := some r, core := some ⟨r.game, s.clock, disk, false⟩,
                      base := disk, batErr := false,
                      rewind := [], rewinding := false,                 -- 744-745
                      paused := false, pendSave := false, pendLoad := false,  -- 763-765
@@ -512,7 +529,7 @@ def saveSlot (fx : Fix) (s : St) (i : Bool) (k : Nat) (io : Io) : St :=
   let a := s.app i
   match a.cur, a.core with
   | some r, some c =>
-    let p := stPath fx r a.p2 k
+    let p := stPath fx r k
     let f : StF := ⟨r.game, c, true⟩
     let s1 := { s with foreign := if differs (s.st p) StF.ident r.game
                                   then s.foreign ++ [(p, (s.st p).getD f, f)] else s.foreign }
@@ -532,7 +549,7 @@ def loadSlot (fx : Fix) (s : St) (i : Bool) (k : Nat) : St × Bool :=
   if fx.linkGate && a.linked then (s, false) else
   match a.cur, a.core with
   | some r, some _ =>
-    match s.st (stPath fx r a.p2 k) with
+    match s.st (stPath fx r k) with
     | some f =>
       if f.whole && f.ident == r.game then
         (setA { s with clock := s.clock + 1, loads := s.loads ++ [(a.linked, r, f)] } i
@@ -546,7 +563,7 @@ def loadSlot (fx : Fix) (s : St) (i : Bool) (k : Nat) : St × Bool :=
 def refresh (fx : Fix) (s : St) (i : Bool) : St :=
   let a := s.app i
   match a.cur with
-  | some r => setA s i { a with view := some r, viewFiles := fun k => s.st (stPath fx r a.p2 k) }
+  | some r => setA s i { a with view := some r, viewFiles := fun k => s.st (stPath fx r k) }
   | none => setA s i { a with view := none, viewFiles := fun _ => none }
 
 /-- The end of a loop iteration: `while app.running` (2426), else leave the
@@ -736,7 +753,7 @@ def step (fx : Fix) (s : St) : Ev → St
       let a := s.app i
       click s i .menu
         (match a.cur with
-         | some r => { s with cht := upd s.cht (savPath r false) (some r.game) }
+         | some r => { s with cht := upd s.cht (savPath r) (some r.game) }
          | none => s)
   | .noticeOk i =>
       let a := s.app i
@@ -755,7 +772,7 @@ def step (fx : Fix) (s : St) : Ev → St
         (if !a.win then s else
          match a.cur with
          | some r =>
-           let p := stPath fx r a.p2 k
+           let p := stPath fx r k
            let s0 := { s with blind := if s.st p = a.viewFiles k then s.blind else s.blind ++ [p] }
            let s1 := saveSlot fx s0 i k io
            if (s1.app i).pc = .dead then s1 else refresh fx s1 i
@@ -770,7 +787,7 @@ def step (fx : Fix) (s : St) : Ev → St
         (if !(a.win && (a.viewFiles k).isSome) then s else
          match a.cur with
          | some r =>
-           let p := stPath fx r a.p2 k
+           let p := stPath fx r k
            let s0 := { s with blind := if s.st p = a.viewFiles k || s.st p = none then s.blind
                                        else s.blind ++ [p] }
            refresh fx { s0 with st := upd s0.st p none } i
@@ -1160,8 +1177,8 @@ theorem stInv_congr {s t : St} (h : StInv s) (h1 : t.st = s.st) (h2 : t.foreign 
     StInv t := by
   unfold StInv at *; rw [h1, h2]; exact h
 
-theorem differs_st {s : St} (h : ∀ p f, s.st p = some f → f.ident = p.1) (r : Rom) (p2 : Bool)
-    (k : Nat) : differs (s.st (stPath fixed r p2 k)) StF.ident r.game = false := by
+theorem differs_st {s : St} (h : ∀ p f, s.st p = some f → f.ident = p.1) (r : Rom)
+    (k : Nat) : differs (s.st (stPath fixed r k)) StF.ident r.game = false := by
   unfold differs
   split
   · rename_i f hf
@@ -1170,9 +1187,9 @@ theorem differs_st {s : St} (h : ∀ p f, s.st p = some f → f.ident = p.1) (r 
     simp [this]
   · rfl
 
-theorem st_upd_ok {s : St} (hs : ∀ p f, s.st p = some f → f.ident = p.1) (r : Rom) (p2 : Bool)
+theorem st_upd_ok {s : St} (hs : ∀ p f, s.st p = some f → f.ident = p.1) (r : Rom)
     (k : Nat) (c : Core) :
-    ∀ q f, upd s.st (stPath fixed r p2 k) (some ⟨r.game, c, true⟩) q = some f → f.ident = q.1 := by
+    ∀ q f, upd s.st (stPath fixed r k) (some ⟨r.game, c, true⟩) q = some f → f.ident = q.1 := by
   intro q f hq
   simp only [upd_apply] at hq
   split at hq
@@ -1189,8 +1206,8 @@ theorem saveSlot_stInv (s : St) (i : Bool) (k : Nat) (io : Io) (h : StInv s) :
     cases hcore : (s.app i).core with
     | none => simp only [saveSlot, hcur, hcore]; exact ⟨hf, hs⟩
     | some c =>
-      have hd := differs_st hs r (s.app i).p2 k
-      have hup := st_upd_ok hs r (s.app i).p2 k c
+      have hd := differs_st hs r k
+      have hup := st_upd_ok hs r k c
       cases io <;> simp [saveSlot, hcur, hcore, hd, wr, powerDown] <;> exact ⟨hf, by assumption⟩
 
 theorem refresh_stInv {s : St} (i : Bool) (h : StInv s) : StInv (refresh fixed s i) :=
@@ -1316,11 +1333,13 @@ theorem rewInv_rf {s : St} (i : Bool) (h : RewInv s) : RewInv (refresh fixed s i
 
 theorem loadRom_rew (s : St) (i : Bool) (r : Rom) (h : RewInv s) : RewInv (loadRom fixed s i r) := by
   have h0 := rewInv_fo i h
-  generalize hs : flushOut fixed s i = s0 at h0
-  simp only [loadRom, hs]
-  refine rewInv_setA i ?_ ?_
-  · apply rewInv_of h0 <;> (try intro) <;> repeat (first | split | simp_all)
-  · intro l _ x hx; simp [lr] at hx
+  simp only [loadRom]
+  generalize flushOut fixed s i = s0 at h0 ⊢
+  split
+  · exact h0
+  · refine rewInv_setA i ?_ ?_
+    · apply rewInv_of h0 <;> (try intro) <;> repeat (first | split | simp_all)
+    · intro l _ x hx; simp [lr] at hx
 
 theorem rewOK_empty (a : App) (h : a.rewind = []) : RewOK a := by
   intro l _ x hx; simp [lr, h] at hx
@@ -1460,21 +1479,21 @@ end Rewind
 
 section Excl
 
-/-- Two live windows never hold colliding files on the same side (main / -p2). -/
+/-- Two live windows never run games whose files collide. -/
 def Excl (s : St) : Prop :=
   ∀ j r r', live (s.app j) = true → live (s.app !j) = true → (s.app j).cur = some r →
-    (s.app !j).cur = some r' → conflict r r' = true → (s.app j).p2 ≠ (s.app !j).p2
+    (s.app !j).cur = some r' → conflict r r' = false
 
 /-- A live window's `.sav` is exactly what it last read or wrote. -/
 def BaseJ (s : St) (j : Bool) : Prop :=
   live (s.app j) = true → ∀ r, (s.app j).cur = some r →
-    s.sav (savPath r (s.app j).p2) = (s.app j).base
+    s.sav (savPath r) = (s.app j).base
 
 /-- A live window whose Save States grid is marked fresh shows its current
     game's slot files, exactly as they are on disk. -/
 def ViewJ (s : St) (j : Bool) : Prop :=
   live (s.app j) = true → ∀ r, (s.app j).cur = some r → (s.app j).wasOpen = true →
-    (s.app j).view = some r ∧ ∀ k, (s.app j).viewFiles k = s.st (stPath fixed r (s.app j).p2 k)
+    (s.app j).view = some r ∧ ∀ k, (s.app j).viewFiles k = s.st (stPath fixed r k)
 
 /-- In the window phase an open Save States window has been refreshed. -/
 def WinJ (s : St) (j : Bool) : Prop :=
@@ -1493,46 +1512,42 @@ theorem conflict_symm (r r' : Rom) : conflict r r' = conflict r' r := by
     by_cases h : x = y
     · subst h; rfl
     · rw [beq_false_of_ne h, beq_false_of_ne (Ne.symm h)]
-  simp only [conflict, e r.dir, e r.base, e r.game]
+  simp only [conflict, sameFiles, sameStates, e r.dir, e r.base, e r.game, e r.ext]
 
-theorem savPath_eq {r r' : Rom} {p p' : Bool} (h : savPath r p = savPath r' p') :
-    conflict r r' = true ∧ p = p' := by
+theorem savPath_eq {r r' : Rom} (h : savPath r = savPath r') : conflict r r' = true := by
   simp [savPath] at h
-  obtain ⟨h1, h2, h3⟩ := h
-  exact ⟨by simp [conflict, h1, h2], h3⟩
+  obtain ⟨h1, h2⟩ := h
+  simp [conflict, sameFiles, h1, h2]
 
-theorem stPath_eq {r r' : Rom} {p p' : Bool} {k k' : Nat}
-    (h : stPath fixed r p k = stPath fixed r' p' k') : conflict r r' = true ∧ p = p' := by
+theorem stPath_eq {r r' : Rom} {k k' : Nat}
+    (h : stPath fixed r k = stPath fixed r' k') : conflict r r' = true := by
   simp [stPath, fixed] at h
-  obtain ⟨h1, h2, _⟩ := h
-  refine ⟨by simp [conflict, h1], ?_⟩
-  cases p <;> cases p' <;> simp_all
+  obtain ⟨h1, h2, h3, _⟩ := h
+  simp [conflict, sameStates, h1, h2, h3]
 
 /-- Two live windows' files are distinct. -/
 theorem distinct {s : St} (h : Excl s) {j : Bool} {r r' : Rom} (hl : live (s.app j) = true)
     (hl' : live (s.app !j) = true) (hc : (s.app j).cur = some r) (hc' : (s.app !j).cur = some r') :
-    savPath r (s.app j).p2 ≠ savPath r' (s.app !j).p2 ∧
-    ∀ k k', stPath fixed r (s.app j).p2 k ≠ stPath fixed r' (s.app !j).p2 k' := by
+    savPath r ≠ savPath r' ∧ ∀ k k', stPath fixed r k ≠ stPath fixed r' k' := by
   constructor
   · intro he
-    obtain ⟨hcf, hp⟩ := savPath_eq he
-    exact h j r r' hl hl' hc hc' hcf hp
+    have := h j r r' hl hl' hc hc'
+    rw [savPath_eq he] at this; cases this
   · intro k k' he
-    obtain ⟨hcf, hp⟩ := stPath_eq he
-    exact h j r r' hl hl' hc hc' hcf hp
+    have := h j r r' hl hl' hc hc'
+    rw [stPath_eq he] at this; cases this
 
 /-- What `FI` reads of an app, apart from `base`. -/
 structure SameNB (a b : App) : Prop where
   live : live a = live b
   cur : a.cur = b.cur
-  p2 : a.p2 = b.p2
   view : a.view = b.view
   files : a.viewFiles = b.viewFiles
   wasOpen : a.wasOpen = b.wasOpen
   win : a.win = b.win
   pcwin : a.pc = .win → b.pc = .win
 
-theorem SameNB.rfl' (a : App) : SameNB a a := ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, id⟩
+theorem SameNB.rfl' (a : App) : SameNB a a := ⟨rfl, rfl, rfl, rfl, rfl, rfl, id⟩
 
 theorem sameNB_upd {f : Bool → App} {i : Bool} {a : App} (h : SameNB a (f i)) (j : Bool) :
     SameNB (upd f i a j) (f j) := by
@@ -1550,14 +1565,13 @@ theorem fi_transfer {s t : St} (h : FI s) (hA : ∀ j, SameNB (t.app j) (s.app j
     (hb : t.blind = s.blind) : FI t := by
   obtain ⟨hx, _, hv, hw, hcl, hbl⟩ := h
   refine ⟨?_, hB, ?_, ?_, hc ▸ hcl, hb ▸ hbl⟩
-  · intro j r r' hl hl' hcur hcur' hcf
-    rw [(hA j).p2, (hA !j).p2]
+  · intro j r r' hl hl' hcur hcur'
     rw [(hA j).live] at hl; rw [(hA !j).live] at hl'
     rw [(hA j).cur] at hcur; rw [(hA !j).cur] at hcur'
-    exact hx j r r' hl hl' hcur hcur' hcf
+    exact hx j r r' hl hl' hcur hcur'
   · intro j hl r hcur hwo
     rw [(hA j).live] at hl; rw [(hA j).cur] at hcur; rw [(hA j).wasOpen] at hwo
-    rw [(hA j).view, (hA j).files, hst, (hA j).p2]
+    rw [(hA j).view, (hA j).files, hst]
     exact hv j hl r hcur hwo
   · intro j hpc hwin
     have hpc' := (hA j).pcwin hpc; rw [(hA j).win] at hwin
@@ -1568,7 +1582,7 @@ theorem base_congr {s t : St} (hbase : ∀ j, BaseJ s j) (hA : ∀ j, SameNB (t.
     (hb : ∀ j, (t.app j).base = (s.app j).base) (hsav : t.sav = s.sav) : ∀ j, BaseJ t j := by
   intro j hl r hc
   rw [(hA j).live] at hl; rw [(hA j).cur] at hc
-  rw [hsav, (hA j).p2, hb j]
+  rw [hsav, hb j]
   exact hbase j hl r hc
 
 theorem fi_congr {s t : St} (h : FI s) (hA : ∀ j, SameNB (t.app j) (s.app j))
@@ -1593,16 +1607,16 @@ theorem base_write {s t : St} {i : Bool} {r : Rom} {v : Bat} (hx : Excl s)
     (hbase : ∀ j, BaseJ s j) (hl : live (s.app i) = true) (hc : (s.app i).cur = some r)
     (hA : ∀ j, SameNB (t.app j) (s.app j)) (hbi : (t.app i).base = some v)
     (hbo : (t.app !i).base = (s.app !i).base)
-    (hsav : t.sav = upd s.sav (savPath r (s.app i).p2) (some v)) : ∀ j, BaseJ t j := by
+    (hsav : t.sav = upd s.sav (savPath r) (some v)) : ∀ j, BaseJ t j := by
   intro j hl' r1 hc1
   rw [(hA j).live] at hl'; rw [(hA j).cur] at hc1
-  rw [hsav, (hA j).p2]
+  rw [hsav]
   by_cases hj : j = i
   · subst hj
     rw [hc] at hc1; cases hc1
     rw [upd_same, hbi]
   · have hj' := other_eq hj; subst hj'
-    have hne : savPath r1 (s.app !i).p2 ≠ savPath r (s.app i).p2 :=
+    have hne : savPath r1 ≠ savPath r :=
       Ne.symm (distinct hx hl (by simpa using hl') hc (by simpa using hc1)).1
     simp only [upd_apply, hne, ite_false, hbo]
     exact hbase _ hl' r1 hc1
@@ -1627,7 +1641,7 @@ theorem setA_self {s : St} {i : Bool} {a : App} : (setA s i a).app i = a := by
 theorem fi_flushWrite {s : St} {i : Bool} {r : Rom} {b : Bat} (h : FI s)
     (hl : live (s.app i) = true) (hc : (s.app i).cur = some r) (a : App)
     (ha : SameNB a (s.app i)) (hab : a.base = some b) (tr : Nat) :
-    FI (setA { s with sav := upd s.sav (savPath r (s.app i).p2) (some b), truncs := tr } i a) := by
+    FI (setA { s with sav := upd s.sav (savPath r) (some b), truncs := tr } i a) := by
   refine fi_transfer h (sameNB_upd_i ha) ?_ rfl rfl rfl
   exact base_write h.1 h.2.1 hl hc (sameNB_upd_i ha) (by rw [setA_self]; exact hab)
     (by rw [setA_other]) rfl
@@ -1652,13 +1666,13 @@ theorem flushFrame_F {s : St} {i : Bool} (io : Io) (h : FI s) (hpc : (s.app i).p
       all_goals simp only [wr, fixed_atomic, fixed_catchIo, cuts_true, Bool.not_true, Bool.and_false,
         Bool.false_eq_true, ite_false, ite_true, reduceCtorEq]
       · refine fi_flushWrite h hl hcur _ ?_ ?_ _
-        · exact ⟨rfl, by simp [hcur], rfl, rfl, rfl, rfl, rfl, id⟩
+        · exact ⟨rfl, by simp [hcur], rfl, rfl, rfl, rfl, id⟩
         · simp
       · refine fi_setA (fi_congr h (fun _ => SameNB.rfl' _) (fun _ => rfl) rfl rfl rfl rfl) ?_ ?_
-        · exact ⟨rfl, by simp [hcur], rfl, rfl, rfl, rfl, rfl, id⟩
+        · exact ⟨rfl, by simp [hcur], rfl, rfl, rfl, rfl, id⟩
         · simp [hb]
       · refine fi_setA (fi_congr h (fun _ => SameNB.rfl' _) (fun _ => rfl) rfl rfl rfl rfl) ?_ ?_
-        · exact ⟨rfl, by simp [hcur], rfl, rfl, rfl, rfl, rfl, id⟩
+        · exact ⟨rfl, by simp [hcur], rfl, rfl, rfl, rfl, id⟩
         · simp [hb]
       · exact fi_powerDown (fi_congr h (fun _ => SameNB.rfl' _) (fun _ => rfl) rfl rfl rfl rfl)
 
@@ -1678,7 +1692,7 @@ theorem flushOut_F {s : St} {i : Bool} (h : FI s) (hl : live (s.app i) = true) :
       have hb := h.2.1 i hl r hcur
       simp only [hb, ite_true, fixed_flushGba, Bool.not_true, Bool.and_false, Bool.false_eq_true, ite_false]
       refine fi_flushWrite h hl hcur _ ?_ ?_ s.truncs
-      · exact ⟨rfl, by simp [hcur], rfl, rfl, rfl, rfl, rfl, id⟩
+      · exact ⟨rfl, by simp [hcur], rfl, rfl, rfl, rfl, id⟩
       · rfl
 
 /-- What `flushOut` leaves of every app: all `FI` reads but `base`, and the phase. -/
@@ -1693,39 +1707,35 @@ theorem flushOut_app (s : St) (i : Bool) (j : Bool) :
     | (simp only [setA_app, upd_apply]
        split
        · rename_i hj; subst hj
-         exact ⟨⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, id⟩, rfl, rfl, fun h => absurd rfl h⟩
+         exact ⟨⟨rfl, rfl, rfl, rfl, rfl, rfl, id⟩, rfl, rfl, fun h => absurd rfl h⟩
        · exact ⟨SameNB.rfl' _, rfl, rfl, fun _ => rfl⟩)
 
 theorem flushOut_rest (s : St) (i : Bool) :
     (flushOut fixed s i).st = s.st ∧ (flushOut fixed s i).blind = s.blind := by
   simp only [flushOut] <;> repeat (first | split | simp_all [setA])
 
-/-- A boot of ROM `r` in live window `i` (not in the window phase), on the
-    file the lock picked, from a state satisfying `FI`. -/
+/-- A boot of ROM `r` in live window `i` (not in the window phase), which the
+    lock let through (no live window has a colliding game), from a state
+    satisfying `FI`. -/
 theorem fi_boot {s t : St} {i : Bool} {r : Rom} (h : FI s) (hw : (s.app i).pc ≠ .win)
     (ha_pc : (t.app i).pc = (s.app i).pc) (ha_cur : (t.app i).cur = some r)
-    (ha_p2 : (t.app i).p2 = lockP2 s i r)
-    (ha_base : (t.app i).base = s.sav (savPath r (t.app i).p2)) (ha_wo : (t.app i).wasOpen = false)
+    (key : live (s.app !i) = true → ∀ r', (s.app !i).cur = some r' → conflict r r' = false)
+    (ha_base : (t.app i).base = s.sav (savPath r)) (ha_wo : (t.app i).wasOpen = false)
     (ho : t.app (!i) = s.app (!i)) (hsav : t.sav = s.sav) (hst : t.st = s.st)
     (hcl : t.clobbers = s.clobbers) (hbl : t.blind = s.blind) : FI t := by
   obtain ⟨hx, hbase, hv, hwj, hcl0, hbl0⟩ := h
   refine ⟨?_, ?_, ?_, ?_, hcl ▸ hcl0, hbl ▸ hbl0⟩
-  · -- the lock: the new file is not the other live window's
-    have key : live (s.app !i) = true → ∀ r', (s.app !i).cur = some r' → conflict r r' = true →
-        (t.app i).p2 ≠ (s.app !i).p2 := by
-      intro hl' r' hc' hcf
-      rw [ha_p2]; simp only [lockP2, hl', ite_true, hc', hcf]; cases (s.app !i).p2 <;> simp
-    intro j r1 r2 hl1 hl2 hc1 hc2 hcf
+  · intro j r1 r2 hl1 hl2 hc1 hc2
     by_cases hj : j = i
     · subst hj
-      rw [ho] at hl2 hc2 ⊢
+      rw [ho] at hl2 hc2
       rw [ha_cur] at hc1; cases hc1
-      exact key hl2 r2 hc2 hcf
+      exact key hl2 r2 hc2
     · have hj' := other_eq hj; subst hj'
-      simp only [Bool.not_not] at hl2 hc2 ⊢
-      rw [ho] at hl1 hc1 ⊢
+      simp only [Bool.not_not] at hl2 hc2
+      rw [ho] at hl1 hc1
       rw [ha_cur] at hc2; cases hc2
-      exact Ne.symm (key hl1 r1 hc1 (by rw [conflict_symm]; exact hcf))
+      rw [conflict_symm]; exact key hl1 r1 hc1
   · intro j hl1 r1 hc1
     by_cases hj : j = i
     · subst hj
@@ -1744,15 +1754,28 @@ theorem fi_boot {s t : St} {i : Bool} {r : Rom} (h : FI s) (hw : (s.app i).pc �
     · have hj' := other_eq hj; subst hj'
       rw [ho] at hpc hwin ⊢; exact hwj _ hpc hwin
 
+/-- What `holds` reads is the other window's app. -/
+theorem holds_false {s : St} {i : Bool} {same : Rom → Rom → Bool} {r : Rom}
+    (h : holds s i same r = false) (hl : live (s.app !i) = true) {r' : Rom}
+    (hc : (s.app !i).cur = some r') : same r r' = false := by
+  simp only [holds, hl, hc, Bool.true_and] at h; exact h
+
 theorem loadRom_F {s : St} {i : Bool} (r : Rom) (h : FI s) (hl : live (s.app i) = true)
     (hw : (s.app i).pc ≠ .win) : FI (loadRom fixed s i r) := by
   have h0 := flushOut_F h hl
   have hA := flushOut_app s i i
-  have hR := flushOut_rest s i
-  simp only [loadRom]
-  generalize flushOut fixed s i = s0 at h0 hA hR ⊢
-  refine fi_boot (r := r) h0 (by rw [hA.2.1]; exact hw) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
-  all_goals simp [setA, upd_apply, fixed]
+  have hlock : fixed.lock = true := rfl
+  simp only [loadRom, hlock, Bool.true_and]
+  generalize flushOut fixed s i = s0 at h0 hA ⊢
+  split
+  · exact h0
+  · rename_i hs
+    simp only [Bool.not_eq_true] at hs
+    refine fi_boot (r := r) h0 (by rw [hA.2.1]; exact hw) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+    · simp [setA, upd_apply]
+    · simp [setA, upd_apply]
+    · exact fun hl' _ hc' => holds_false hs hl' hc'
+    all_goals simp [setA, upd_apply, fixed]
 
 theorem fi_to_fix {s : St} (i : Bool) (h : FI s) : FIx s i :=
   ⟨h.1, h.2.1, h.2.2.1 _, h.2.2.2.1, h.2.2.2.2.1, h.2.2.2.2.2⟩
@@ -1771,7 +1794,7 @@ theorem fi_offline {s : St} {i : Bool} {a : App} (h : FI s) (hl : live a = false
   have hi : (setA s i a).app i = a := setA_self
   have ho : (setA s i a).app (!i) = s.app (!i) := setA_other
   refine ⟨?_, ?_, ?_, ?_, hc, hbl⟩
-  · intro j r r' hl1 hl2 hc1 hc2 hcf
+  · intro j r r' hl1 hl2 hc1 hc2
     by_cases hj : j = i
     · subst hj; rw [hi, hl] at hl1; cases hl1
     · have := other_eq hj; subst this
@@ -1796,7 +1819,7 @@ theorem fi_fresh {s : St} {i : Bool} {a : App} (h : FI s) (hc : a.cur = none) (h
   have hi : (setA s i a).app i = a := setA_self
   have ho : (setA s i a).app (!i) = s.app (!i) := setA_other
   refine ⟨?_, ?_, ?_, ?_, hcl, hbl⟩
-  · intro j r r' hl1 hl2 hc1 hc2 hcf
+  · intro j r r' hl1 hl2 hc1 hc2
     by_cases hj : j = i
     · subst hj; rw [hi, hc] at hc1; cases hc1
     · have := other_eq hj; subst this
@@ -1830,37 +1853,36 @@ theorem loadSlot_F {s : St} (i : Bool) (k : Nat) (h : FI s) : FI (loadSlot fixed
   all_goals first
     | exact h
     | exact fi_setA (fi_congr h (fun _ => SameNB.rfl' _) (fun _ => rfl) rfl rfl rfl rfl)
-        ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, id⟩ rfl
+        ⟨rfl, rfl, rfl, rfl, rfl, rfl, id⟩ rfl
 
 /-- Replacing app `i` by one that keeps what `Excl` and `BaseJ` read and
     satisfies `ViewJ i` and `WinJ i` itself, from `FIx s i`. -/
 theorem fix_setA_view {s : St} {i : Bool} {a : App} (h : FIx s i)
-    (hl : live a = live (s.app i)) (hc : a.cur = (s.app i).cur) (hp : a.p2 = (s.app i).p2)
+    (hl : live a = live (s.app i)) (hc : a.cur = (s.app i).cur)
     (hb : a.base = (s.app i).base)
     (hW : a.pc = .win → a.win = true → a.wasOpen = true)
     (hV : live a = true → ∀ r, a.cur = some r → a.wasOpen = true →
-      a.view = some r ∧ ∀ k, a.viewFiles k = s.st (stPath fixed r a.p2 k)) :
+      a.view = some r ∧ ∀ k, a.viewFiles k = s.st (stPath fixed r k)) :
     FI (setA s i a) := by
   obtain ⟨hx, hbj, hv, hwj, hcl, hbl⟩ := h
   have hi : (setA s i a).app i = a := setA_self
   have ho : (setA s i a).app (!i) = s.app (!i) := setA_other
   refine ⟨?_, ?_, ?_, ?_, hcl, hbl⟩
-  · intro j r1 r2 hl1 hl2 hc1 hc2 hcf
+  · intro j r1 r2 hl1 hl2 hc1 hc2
     by_cases hj : j = i
     · subst hj
-      rw [hi] at hl1 hc1 ⊢; rw [ho] at hl2 hc2 ⊢
-      rw [hl] at hl1; rw [hc] at hc1; rw [hp]
-      exact hx j r1 r2 hl1 hl2 hc1 hc2 hcf
+      rw [hi] at hl1 hc1; rw [ho] at hl2 hc2
+      rw [hl] at hl1; rw [hc] at hc1
+      exact hx j r1 r2 hl1 hl2 hc1 hc2
     · have := other_eq hj; subst this
-      simp only [Bool.not_not] at hl2 hc2 ⊢
-      rw [hi] at hl2 hc2 ⊢; rw [ho] at hl1 hc1 ⊢
-      rw [hl] at hl2; rw [hc] at hc2; rw [hp]
-      have := hx (!i) r1 r2 hl1 (by simpa using hl2) hc1 (by simpa using hc2) hcf
-      simpa using this
+      simp only [Bool.not_not] at hl2 hc2
+      rw [hi] at hl2 hc2; rw [ho] at hl1 hc1
+      rw [hl] at hl2; rw [hc] at hc2
+      exact hx (!i) r1 r2 hl1 (by simpa using hl2) hc1 (by simpa using hc2)
   · intro j hl1 r1 hc1
     by_cases hj : j = i
     · subst hj
-      rw [hi] at hl1 hc1 ⊢; rw [hl] at hl1; rw [hc] at hc1; rw [hp, hb]
+      rw [hi] at hl1 hc1 ⊢; rw [hl] at hl1; rw [hc] at hc1; rw [hb]
       exact hbj j hl1 r1 hc1
     · have := other_eq hj; subst this
       rw [ho] at hl1 hc1 ⊢; exact hbj _ hl1 r1 hc1
@@ -1879,12 +1901,12 @@ theorem fix_refresh {s : St} {i : Bool} (h : FIx s i) : FI (refresh fixed s i) :
   simp only [refresh]
   split
   · rename_i r hcur
-    refine fix_setA_view h rfl rfl rfl rfl (h.2.2.2.1 i) ?_
+    refine fix_setA_view h rfl rfl rfl (h.2.2.2.1 i) ?_
     intro _ r1 hc1 _
     simp only [hcur] at hc1; cases hc1
     exact ⟨rfl, fun _ => rfl⟩
   · rename_i hcur
-    refine fix_setA_view h rfl rfl rfl rfl (h.2.2.2.1 i) ?_
+    refine fix_setA_view h rfl rfl rfl (h.2.2.2.1 i) ?_
     intro _ r1 hc1; simp only [hcur] at hc1; cases hc1
 
 theorem fi_refresh {s : St} (i : Bool) (h : FI s) : FI (refresh fixed s i) := fix_refresh (fi_to_fix i h)
@@ -1892,7 +1914,7 @@ theorem fi_refresh {s : St} (i : Bool) (h : FI s) : FI (refresh fixed s i) := fi
 /-- `mark_stale` (or a load_rom in the fixed code) outside the window phase. -/
 theorem fix_stale {s : St} {i : Bool} (h : FIx s i) (hw : (s.app i).pc ≠ .win) (n : Bool) :
     FI (setA s i { s.app i with wasOpen := false, notice := n }) :=
-  fix_setA_view h rfl rfl rfl rfl (fun hp => absurd hp hw) (fun _ _ _ hwo => by cases hwo)
+  fix_setA_view h rfl rfl rfl (fun hp => absurd hp hw) (fun _ _ _ hwo => by cases hwo)
 
 theorem fi_allDead {t : St} (hd : ∀ j, (t.app j).pc = .dead) (hcl : t.clobbers = [])
     (hbl : t.blind = []) : FI t := by
@@ -1903,11 +1925,11 @@ theorem fi_allDead {t : St} (hd : ∀ j, (t.app j).pc = .dead) (hcl : t.clobbers
   · intro j hl1; rw [hl] at hl1; cases hl1
   · intro j hpc; rw [hd] at hpc; cases hpc
 
-/-- A change to window `i`'s own slot file `stPath r p2 k` only. -/
+/-- A change to window `i`'s own slot file `stPath r k` only. -/
 theorem fix_stWrite {s t : St} {i : Bool} {r : Rom} {k : Nat} (h : FI s)
     (hl : live (s.app i) = true) (hc : (s.app i).cur = some r)
     (happ : t.app = s.app) (hsav : t.sav = s.sav) (hcl : t.clobbers = s.clobbers)
-    (hbl : t.blind = s.blind) (hst : ∀ q, q ≠ stPath fixed r (s.app i).p2 k → t.st q = s.st q) :
+    (hbl : t.blind = s.blind) (hst : ∀ q, q ≠ stPath fixed r k → t.st q = s.st q) :
     FIx t i := by
   obtain ⟨hx, hb, hv, hw, hcl0, hbl0⟩ := h
   refine ⟨?_, ?_, ?_, ?_, hcl ▸ hcl0, hbl ▸ hbl0⟩
@@ -1931,8 +1953,8 @@ theorem saveSlot_F {s : St} {i : Bool} (k : Nat) (io : Io) (h : FI s) (hl : live
     | none => exact fi_to_fix i h
     | some c =>
       simp only
-      have hst : ∀ (v : Option StF), ∀ q, q ≠ stPath fixed r (s.app i).p2 k →
-          upd s.st (stPath fixed r (s.app i).p2 k) v q = s.st q := fun v q hq => by
+      have hst : ∀ (v : Option StF), ∀ q, q ≠ stPath fixed r k →
+          upd s.st (stPath fixed r k) v q = s.st q := fun v q hq => by
         simp only [upd_apply, hq, ite_false]
       cases io <;> simp only [wr, fixed_atomic, ite_true, reduceCtorEq, ite_false]
       all_goals first
@@ -1956,7 +1978,7 @@ theorem loopEnd_F {s : St} {i : Bool} (h : FI s) (hl : live (s.app i) = true) :
     FI (loopEnd fixed s i) := by
   simp only [loopEnd]
   split
-  · exact fi_setA h ⟨by rw [hl]; rfl, rfl, rfl, rfl, rfl, rfl, rfl, fun hp => by cases hp⟩ rfl
+  · exact fi_setA h ⟨by rw [hl]; rfl, rfl, rfl, rfl, rfl, rfl, fun hp => by cases hp⟩ rfl
   · exact fi_offline (flushOut_F h hl) (by simp [live]) (by simp)
 
 theorem pendStep_F {s : St} {i : Bool} (io : Io) (h : FI s) (hpc : (s.app i).pc = .pend) :
@@ -1964,12 +1986,12 @@ theorem pendStep_F {s : St} {i : Bool} (io : Io) (h : FI s) (hpc : (s.app i).pc 
   have hl : live (s.app i) = true := live_of_pc hpc (by simp)
   simp only [pendStep]
   split
-  · exact fi_setA h ⟨by rw [hl]; rfl, rfl, rfl, rfl, rfl, rfl, rfl, fun hp => by cases hp⟩ rfl
+  · exact fi_setA h ⟨by rw [hl]; rfl, rfl, rfl, rfl, rfl, rfl, fun hp => by cases hp⟩ rfl
   · generalize hs1 : (if (s.app i).pendSave = true then _ else s) = s1
     have h1 : FI s1 ∧ ((s1.app i).pc = .pend ∨ (s1.app i).pc = .dead) := by
       subst hs1; split
       · have h0 : FI (setA s i { s.app i with pendSave := false }) :=
-          fi_setA h ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, id⟩ rfl
+          fi_setA h ⟨rfl, rfl, rfl, rfl, rfl, rfl, id⟩ rfl
         have hs := saveSlot_F 0 io h0 (by rw [setA_self]; exact hl)
         have hp := saveSlot_pc (setA s i { s.app i with pendSave := false }) i 0 io i
         have hx : ((setA s i { s.app i with pendSave := false }).app i).pc = .pend := by
@@ -1987,7 +2009,7 @@ theorem pendStep_F {s : St} {i : Bool} (io : Io) (h : FI s) (hpc : (s.app i).pc 
       have h2 : FI s2 ∧ (s2.app i).pc = .pend := by
         subst hs2; split
         · have h0 : FI (setA s1 i { s1.app i with pendLoad := false }) :=
-            fi_setA h1 ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, id⟩ rfl
+            fi_setA h1 ⟨rfl, rfl, rfl, rfl, rfl, rfl, id⟩ rfl
           have hL := loadSlot_F i 0 h0
           have hLp : ((loadSlot fixed (setA s1 i { s1.app i with pendLoad := false }) i 0).1.app i).pc =
               .pend := by
@@ -1995,10 +2017,10 @@ theorem pendStep_F {s : St} {i : Bool} (io : Io) (h : FI s) (hpc : (s.app i).pc 
             all_goals simp [setA, hp1']
           split
           · exact ⟨hL, hLp⟩
-          · exact ⟨fi_setA hL ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, id⟩ rfl, by rw [setA_self]; exact hLp⟩
+          · exact ⟨fi_setA hL ⟨rfl, rfl, rfl, rfl, rfl, rfl, id⟩ rfl, by rw [setA_self]; exact hLp⟩
         · exact ⟨h1, hp1'⟩
       obtain ⟨h2, hp2⟩ := h2
-      exact fi_setA h2 ⟨by simp [live, hp2], rfl, rfl, rfl, rfl, rfl, rfl, fun hp => by cases hp⟩ rfl
+      exact fi_setA h2 ⟨by simp [live, hp2], rfl, rfl, rfl, rfl, rfl, fun hp => by cases hp⟩ rfl
 
 theorem flushFrame_pc (s : St) (i : Bool) (io : Io) :
     ((flushFrame fixed s i io).app i).pc = (s.app i).pc ∨ ((flushFrame fixed s i io).app i).pc = .dead := by
@@ -2008,7 +2030,7 @@ theorem flushFrame_pc (s : St) (i : Bool) (io : Io) :
 theorem refresh_view (s : St) (i : Bool) :
     (refresh fixed s i).st = s.st ∧ ∀ r, ((refresh fixed s i).app i).cur = some r →
       ((refresh fixed s i).app i).view = some r ∧
-      ∀ k, ((refresh fixed s i).app i).viewFiles k = s.st (stPath fixed r ((refresh fixed s i).app i).p2 k) := by
+      ∀ k, ((refresh fixed s i).app i).viewFiles k = s.st (stPath fixed r k) := by
   simp only [refresh]
   split
   · rename_i r0 hcur
@@ -2022,14 +2044,14 @@ theorem refresh_view (s : St) (i : Bool) :
 
 theorem refresh_app (s : St) (i : Bool) :
     live ((refresh fixed s i).app i) = live (s.app i) ∧ ((refresh fixed s i).app i).cur = (s.app i).cur ∧
-    ((refresh fixed s i).app i).p2 = (s.app i).p2 ∧ ((refresh fixed s i).app i).base = (s.app i).base ∧
+    ((refresh fixed s i).app i).base = (s.app i).base ∧
     ((refresh fixed s i).app i).pc = (s.app i).pc := by
   simp only [refresh]; split <;> simp [setA_self, live]
 
 /-- The Save States grid a click lands on shows the files on disk. -/
 theorem view_at_click {s : St} {i : Bool} {r : Rom} (h : FI s) (hpc : (s.app i).pc = .win)
     (hwin : (s.app i).win = true) (hc : (s.app i).cur = some r) (k : Nat) :
-    (s.app i).viewFiles k = s.st (stPath fixed r (s.app i).p2 k) :=
+    (s.app i).viewFiles k = s.st (stPath fixed r k) :=
   (h.2.2.1 i (live_of_pc hpc (by simp)) r hc (h.2.2.2.1 i hpc hwin)).2 k
 
 theorem step_F (s : St) (e : Ev) (h : FI s) : FI (step fixed s e) := by
@@ -2051,7 +2073,7 @@ theorem step_F (s : St) (e : Ev) (h : FI s) : FI (step fixed s e) := by
         have hp1' : (s1.app i).pc = .emu := by rcases hp1 with hp1 | hp1; exact hp1; exact absurd hp1 hnd
         split
         · exact fi_setA (fi_congr h1 (fun _ => SameNB.rfl' _) (fun _ => rfl) rfl rfl rfl rfl)
-            ⟨by simp [live, hp1'], rfl, rfl, rfl, rfl, rfl, rfl, fun hp => by cases hp⟩ rfl
+            ⟨by simp [live, hp1'], rfl, rfl, rfl, rfl, rfl, fun hp => by cases hp⟩ rfl
         · exact h1
     · exact h
   case mStates i =>
@@ -2059,7 +2081,7 @@ theorem step_F (s : St) (e : Ev) (h : FI s) : FI (step fixed s e) := by
     repeat' split
     all_goals first
       | exact h
-      | exact fix_setA_view (fi_to_fix i h) rfl rfl rfl rfl (fun hp => by simp_all) (h.2.2.1 i)
+      | exact fix_setA_view (fi_to_fix i h) rfl rfl rfl (fun hp => by simp_all) (h.2.2.1 i)
   case mDone i =>
     simp only [step, at_]
     split
@@ -2067,18 +2089,18 @@ theorem step_F (s : St) (e : Ev) (h : FI s) : FI (step fixed s e) := by
       have hl : live (s.app i) = true := live_of_pc hpc (by simp)
       have hlw : ∀ a : App, a.pc = .win → live a = true := fun a ha => live_of_pc ha (by simp)
       split
-      · exact fix_setA_view (fi_to_fix i h) (by rw [hl]; rfl) rfl rfl rfl (fun _ hw => by simp_all)
+      · exact fix_setA_view (fi_to_fix i h) (by rw [hl]; rfl) rfl rfl (fun _ hw => by simp_all)
           (fun _ _ _ hwo => by cases hwo)
       · split
         · have h1 := fi_refresh i h
           obtain ⟨hst, hv⟩ := refresh_view s i
-          obtain ⟨ha1, ha2, ha3, ha4, _⟩ := refresh_app s i
-          refine fix_setA_view (fi_to_fix i h1) (by rw [ha1, hl]; rfl) rfl rfl rfl (fun _ _ => rfl) ?_
+          obtain ⟨ha1, ha2, ha3, _⟩ := refresh_app s i
+          refine fix_setA_view (fi_to_fix i h1) (by rw [ha1, hl]; rfl) rfl rfl (fun _ _ => rfl) ?_
           intro _ r hr _
           obtain ⟨hv1, hv2⟩ := hv r hr
           exact ⟨hv1, fun k => by rw [hv2 k, hst]⟩
         · rename_i hwin hwo
-          exact fix_setA_view (fi_to_fix i h) (by rw [hl]; rfl) rfl rfl rfl (fun _ _ => by simpa using hwo)
+          exact fix_setA_view (fi_to_fix i h) (by rw [hl]; rfl) rfl rfl (fun _ _ => by simpa using hwo)
             (fun _ r hc hw1 => h.2.2.1 i hl r hc hw1)
     · exact h
   case wSave i k io =>
@@ -2119,7 +2141,7 @@ theorem step_F (s : St) (e : Ev) (h : FI s) : FI (step fixed s e) := by
   case wClose i =>
     simp only [step, click]
     split
-    · exact fix_setA_view (fi_to_fix i h) rfl rfl rfl rfl (fun _ hw => by cases hw) (h.2.2.1 i)
+    · exact fix_setA_view (fi_to_fix i h) rfl rfl rfl (fun _ hw => by cases hw) (h.2.2.1 i)
     · exact h
   case drop i r =>
     simp only [step, at_]; split
@@ -2143,7 +2165,7 @@ theorem step_F (s : St) (e : Ev) (h : FI s) : FI (step fixed s e) := by
   all_goals repeat' split
   all_goals first
     | exact h
-    | exact fi_setA h ⟨by simp_all [live], rfl, rfl, rfl, rfl, rfl, rfl, fun hp => by simp_all⟩ rfl
+    | exact fi_setA h ⟨by simp_all [live], rfl, rfl, rfl, rfl, rfl, fun hp => by simp_all⟩ rfl
     | exact pendStep_F _ h (by simp_all)
     | exact loadRom_F _ h (live_of_pc (by simp_all) (by simp)) (by simp_all)
     | exact loopEnd_F h (live_of_pc (by simp_all) (by simp))
@@ -2164,6 +2186,14 @@ theorem fi_ok {s : St} (h : Reachable fixed s) : FI s := by
     · intro j hl; simp [init, App.off, live] at hl
     · intro j hpc; simp [init, App.off] at hpc
   | step e _ ih => exact step_F _ e ih
+
+/-- **Proved (fixed):** two live windows never write the same `.sav` or
+    `.cht` (both named by `savPath`) nor the same save-state file. -/
+theorem two_windows_distinct {s : St} (h : Reachable fixed s) {r r' : Rom}
+    (hl : live (s.app false) = true) (hl' : live (s.app true) = true)
+    (hc : (s.app false).cur = some r) (hc' : (s.app true).cur = some r') :
+    savPath r ≠ savPath r' ∧ ∀ k k', stPath fixed r k ≠ stPath fixed r' k' :=
+  distinct (j := false) (fi_ok h).1 hl hl' hc hc'
 
 end Excl
 
@@ -2216,7 +2246,9 @@ theorem loadRom_midInv (s : St) (i : Bool) (r : Rom) (h : MidInv s) : MidInv (lo
   have h0 := midInv_of h (flushOut_mid s i).1 (flushOut_mid s i).2
   simp only [loadRom]
   generalize flushOut fixed s i = s0 at h0 ⊢
-  exact midInv_setA i ⟨h0.1, h0.2⟩ (h0.2 i)
+  split
+  · exact h0
+  · exact midInv_setA i ⟨h0.1, h0.2⟩ (h0.2 i)
 
 theorem launch_midInv (s : St) (i : Bool) (c : Bool) (ro : Option Rom) (h : MidInv s) :
     MidInv (launch fixed s i c ro) := by
@@ -2450,7 +2482,7 @@ theorem bug_quick_load_races_link :
 theorem bug_same_name_state_overwritten :
     Reachable real (run real init tSameName) ∧
     (run real init tSameName).foreign.length = 1 ∧
-    ((run real init tSameName).st (stPath real romA false 0)).map (·.ident) = some 200 ∧
+    ((run real init tSameName).st (stPath real romA 0)).map (·.ident) = some 200 ∧
     ((run real init tSameName).app false).notice = true ∧
     (run real init tSameName).loads = [] :=
   ⟨run_reachable _ _ _ .init, by decide +kernel, by decide +kernel, by decide +kernel, by decide +kernel⟩
@@ -2471,9 +2503,9 @@ theorem bug_window_shows_previous_games_slots :
     game's file: A's slot 2 is deleted while the grid showed C's. -/
 theorem bug_window_delete_hidden_slot :
     Reachable real (run real init tStale) ∧
-    (run real init tStale).blind = [stPath real romA false 1] ∧
-    (run real init tStale).st (stPath real romA false 1) = none ∧
-    ((run real init tStale).st (stPath real romC false 1)).isSome = true :=
+    (run real init tStale).blind = [stPath real romA 1] ∧
+    (run real init tStale).st (stPath real romA 1) = none ∧
+    ((run real init tStale).st (stPath real romC 1)).isSome = true :=
   ⟨run_reachable _ _ _ .init, by decide +kernel, by decide +kernel, by decide +kernel⟩
 
 /-- **A GBA battery write that fails kills the app.** `write_save`
@@ -2483,7 +2515,7 @@ theorem bug_gba_save_error_crashes :
     Reachable real (run real init (tGbaCrash romA)) ∧
     ((run real init (tGbaCrash romA)).app false).pc = .dead ∧
     (run real init (tGbaCrash romA)).crashes = 1 ∧
-    (run real init (tGbaCrash romA)).sav (savPath romA false) = none :=
+    (run real init (tGbaCrash romA)).sav (savPath romA) = none :=
   ⟨run_reachable _ _ _ .init, by decide +kernel, by decide +kernel, by decide +kernel⟩
 
 /-- The same failure on a GB cart is caught (`mbc_save` 3243-3246). -/
@@ -2497,18 +2529,18 @@ theorem bug_gba_quit_drops_battery :
     Reachable real (run real init (tQuit romA)) ∧
     ((run real init (tQuit romA)).app false).pc = .exited ∧
     (run real init (tQuit romA)).dropped.length = 1 ∧
-    (run real init (tQuit romA)).sav (savPath romA false) = none :=
+    (run real init (tQuit romA)).sav (savPath romA) = none :=
   ⟨run_reachable _ _ _ .init, by decide +kernel, by decide +kernel, by decide +kernel⟩
 
 theorem gb_quit_flushes :
-    (run real init (tQuit romG)).sav (savPath romG false) = some ⟨400, 2, true⟩ := by decide +kernel
+    (run real init (tQuit romG)).sav (savPath romG) = some ⟨400, 2, true⟩ := by decide +kernel
 
 /-- **A truncated `.sav` replaces the good one and is accepted.** `writeFile`
     truncates first; power lost mid-write leaves a short file, and
     `new_storage` / `mbc_load` read whatever length is there. -/
 theorem bug_truncated_sav_accepted :
     Reachable real (run real init tPower) ∧
-    (run real init tPower).sav (savPath romA false) = some ⟨100, 3, false⟩ ∧
+    (run real init tPower).sav (savPath romA) = some ⟨100, 3, false⟩ ∧
     ((run real init tPower).app false).core.map (·.ram) = some (some ⟨100, 3, false⟩) :=
   ⟨run_reachable _ _ _ .init, by decide +kernel, by decide +kernel⟩
 
@@ -2518,7 +2550,7 @@ theorem bug_truncated_sav_accepted :
     (`process_pending_state` 931 discards the result). -/
 theorem bug_failed_quick_save_destroys_previous :
     Reachable real (run real init tStateCut) ∧
-    ((run real init tStateCut).st (stPath real romA false 0)).map (·.whole) = some false ∧
+    ((run real init tStateCut).st (stPath real romA 0)).map (·.whole) = some false ∧
     (run real init tStateCut).truncs = 1 ∧
     ((run real init tStateCut).app false).notice = true ∧
     (run real init tStateCut).loads = [] :=
@@ -2547,7 +2579,7 @@ theorem bug_rewind_crosses_state_load :
 theorem bug_two_windows_lost_update :
     Reachable real (run real init tTwo) ∧
     (run real init tTwo).clobbers.length = 1 ∧
-    (run real init tTwo).sav (savPath romA false) = some ⟨100, 5, true⟩ ∧
+    (run real init tTwo).sav (savPath romA) = some ⟨100, 5, true⟩ ∧
     ((run real init tTwo).app false).base = some ⟨100, 3, true⟩ :=
   ⟨run_reachable _ _ _ .init, by decide +kernel, by decide +kernel, by decide +kernel⟩
 
@@ -2565,7 +2597,7 @@ theorem bug_two_windows_config_lost :
 theorem bug_same_basename_shares_sav :
     Reachable real (run real init tBasename) ∧
     (run real init tBasename).wrongBoot.length = 2 ∧
-    (run real init tBasename).sav (savPath romG false) = some ⟨500, 5, true⟩ :=
+    (run real init tBasename).sav (savPath romG) = some ⟨500, 5, true⟩ :=
   ⟨run_reachable _ _ _ .init, by decide +kernel, by decide +kernel⟩
 
 /-- **A Quick Save queued just before the peer drops is written from inside a
@@ -2602,7 +2634,7 @@ theorem regress_gba_save_error :
     (run fixed init (tGbaCrash romA)).crashes = 0 ∧
     ((run fixed init (tGbaCrash romA)).app false).batErr = true ∧
     ((run fixed init tGbaRecover).app false).batErr = false ∧
-    (run fixed init tGbaRecover).sav (savPath romA false) = some ⟨100, 2, true⟩ := by decide +kernel
+    (run fixed init tGbaRecover).sav (savPath romA) = some ⟨100, 2, true⟩ := by decide +kernel
 
 /-- The real code's GB flush survives the same failure but tells only stdout. -/
 theorem gb_save_error_unseen : ((run real init (tGbaCrash romG)).app false).batErr = false := by
@@ -2613,10 +2645,10 @@ theorem regress_gb_save_error_shown : ((run fixed init (tGbaCrash romG)).app fal
 
 theorem regress_gba_quit :
     (run fixed init (tQuit romA)).dropped = [] ∧
-    (run fixed init (tQuit romA)).sav (savPath romA false) = some ⟨100, 2, true⟩ := by decide +kernel
+    (run fixed init (tQuit romA)).sav (savPath romA) = some ⟨100, 2, true⟩ := by decide +kernel
 
 theorem regress_power :
-    (run fixed init tPower).sav (savPath romA false) = some ⟨100, 2, true⟩ := by decide +kernel
+    (run fixed init tPower).sav (savPath romA) = some ⟨100, 2, true⟩ := by decide +kernel
 
 theorem regress_state_cut :
     (run fixed init tStateCut).loads.length = 1 ∧ (run fixed init tStateCut).truncs = 0 := by
@@ -2632,13 +2664,13 @@ def tSaveCut : List Ev :=
 /-- The real code says nothing and leaves the slot truncated ... -/
 theorem failed_quick_save_silent :
     ((run real init tSaveCut).app false).notice = false ∧
-    ((run real init tSaveCut).st (stPath real romA false 0)).map (·.whole) = some false := by
+    ((run real init tSaveCut).st (stPath real romA 0)).map (·.whole) = some false := by
   decide +kernel
 
 /-- ... the fixed code keeps the slot's previous state whole and says so. -/
 theorem regress_failed_quick_save_says_so :
     ((run fixed init tSaveCut).app false).notice = true ∧
-    ((run fixed init tSaveCut).st (stPath fixed romA false 0)).map (·.whole) = some true := by
+    ((run fixed init tSaveCut).st (stPath fixed romA 0)).map (·.whole) = some true := by
   decide +kernel
 
 theorem regress_cli :
@@ -2647,11 +2679,49 @@ theorem regress_cli :
 
 theorem regress_rewind : (run fixed init tRewind).staleRewind = 0 := by decide +kernel
 
+/-- The second window's `dingbat Pokemon.gba` is refused (`load_rom`'s notice,
+    the window open with no game); the first window's save stays on disk. -/
 theorem regress_two_windows :
     (run fixed init tTwo).clobbers = [] ∧
-    (run fixed init tTwo).sav (savPath romA false) = some ⟨100, 3, true⟩ ∧
-    (run fixed init tTwo).sav (savPath romA true) = some ⟨100, 5, true⟩ ∧
-    (run fixed init tTwoCfg).cfgDisk = some ⟨false, 7⟩ := by decide +kernel
+    ((run fixed init tTwo).app true).cur = none ∧
+    ((run fixed init tTwo).app true).pc = .emu ∧
+    (run fixed init tTwo).sav (savPath romA) = some ⟨100, 2, true⟩ ∧
+    (run fixed init tTwoCfg).cfgDisk = some ⟨false, 7⟩ ∧
+    ((run fixed init tTwoCfg).app true).cur = some romC := by decide +kernel
+
+/-- `~/roms/usa/Pokemon copy.gba`: the same game under another name. -/
+def romCopy : Rom := ⟨0, 8, 0, 100⟩
+/-- `~/roms/backup/Pokemon.gba`: the same game under the same name elsewhere. -/
+def romBak : Rom := ⟨2, 5, 0, 100⟩
+
+/-- `tTwo` with window 1 opening `r`. -/
+def tTwoOf (r : Rom) : List Ev :=
+  [.launch false false (some romA), .launch true false (some r),
+   F true, .pend false .ok, .inputDone false, .linkIdle false, .noPresent false,
+   F,
+   .frame true true .ok, .pend true .ok, .inputDone true, .linkIdle true, .noPresent true,
+   .frame true false .ok]
+
+/-- What the refusal notice suggests: a copy under another name runs, on a
+    `.sav` of its own. -/
+theorem regress_copy_other_name :
+    (run fixed init (tTwoOf romCopy)).clobbers = [] ∧
+    ((run fixed init (tTwoOf romCopy)).app true).cur = some romCopy ∧
+    (run fixed init (tTwoOf romCopy)).sav (savPath romA) = some ⟨100, 3, true⟩ ∧
+    (run fixed init (tTwoOf romCopy)).sav (savPath romCopy) = some ⟨100, 5, true⟩ := by
+  decide +kernel
+
+/-- A copy under the same file name in another folder has its own `.sav` but
+    the same save-state slots: refused. -/
+theorem regress_copy_same_name :
+    ((run fixed init (tTwoOf romBak)).app true).cur = none ∧
+    (run fixed init (tTwoOf romBak)).clobbers = [] := by decide +kernel
+
+/-- The lock goes with the process: once window 0 has quit, window 1 opens
+    the game. -/
+theorem regress_open_after_quit :
+    ((run fixed init (tQuit romA ++ [.launch true false (some romA)])).app true).cur = some romA := by
+  decide +kernel
 
 theorem regress_mid : (run fixed init tMid).midSaves = 0 := by decide +kernel
 
