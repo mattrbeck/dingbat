@@ -418,6 +418,12 @@
               <label class="lib-search" for="lib-search">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
                 <input type="search" id="lib-search" placeholder="Search" autocomplete="off" spellcheck="false" aria-label="Search the library" />
+                <!-- Our own clear, not the native one: iOS drops that with the
+                     native look, and it takes no cursor. CSS shows it only
+                     while there is something to clear. -->
+                <button type="button" class="lib-search-clear" id="lib-search-clear" title="Clear" aria-label="Clear the search">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg>
+                </button>
               </label>
               <div class="lib-chips" id="lib-chips" role="group" aria-label="Filter the library"></div>
               <select id="lib-sort" class="kb-select lib-sort" aria-label="Sort the library">

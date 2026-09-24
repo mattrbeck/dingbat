@@ -1808,6 +1808,11 @@ const renderLibChips = (roms, localRoms) => {
 };
 
 if (libSearch) {
+  const clearLibSearch = () => {
+    libSearch.value = "";
+    libFilter.q = "";
+    applyLibFilter();
+  };
   libSearch.addEventListener("input", () => {
     libFilter.q = libSearch.value.trim();
     applyLibFilter();
@@ -1815,10 +1820,13 @@ if (libSearch) {
   libSearch.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && libSearch.value) {
       e.stopPropagation(); // clears the field; does not close anything
-      libSearch.value = "";
-      libFilter.q = "";
-      applyLibFilter();
+      clearLibSearch();
     }
+  });
+  // Back in the field afterwards, as the native clear leaves it.
+  document.getElementById("lib-search-clear")?.addEventListener("click", () => {
+    clearLibSearch();
+    libSearch.focus();
   });
 }
 

@@ -2513,8 +2513,40 @@ body.runtime-ready #boot-progress {
   appearance: none;
 }
 
-.lib-search input::-webkit-search-decoration {
+.lib-search input::-webkit-search-decoration,
+.lib-search input::-webkit-search-cancel-button {
   -webkit-appearance: none;
+  display: none;
+}
+
+/* The field's clear. The padding is hit area, given back by the margin so
+   the glyph sits where the field's own right padding says. */
+.lib-search-clear {
+  flex: 0 0 auto;
+  display: flex;
+  padding: 5px;
+  margin: 0 -5px 0 0;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.lib-search-clear:hover {
+  color: var(--text);
+}
+
+.lib-search-clear svg {
+  width: 12px;
+  height: 12px;
+  stroke-width: 2.4;
+}
+
+/* Nothing to clear. :placeholder-shown also follows a value set from script
+   (Escape), which an input listener would not see. */
+.lib-search input:placeholder-shown + .lib-search-clear {
+  display: none;
 }
 
 .lib-chips {

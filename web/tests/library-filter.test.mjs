@@ -91,6 +91,21 @@ test("typing hides the tiles that do not match; the count and the note follow", 
   assert.equal(count(app), "5 games");
 });
 
+test("the field's clear button empties the search and shows every game", async () => {
+  const app = await loadApp();
+  seed(app, LIB);
+  await app.api.refreshHomeRecent();
+  await settle();
+  await search(app, "tet");
+  eq(visible(app), ["Tetris"]);
+
+  await app.document.getElementById("lib-search-clear").click();
+  await settle();
+  assert.equal(app.document.getElementById("lib-search").value, "");
+  eq(visible(app).length, 5);
+  assert.equal(count(app), "5 games");
+});
+
 test("a re-render keeps the filter (no flash of the full grid)", async () => {
   const app = await loadApp();
   seed(app, LIB);
