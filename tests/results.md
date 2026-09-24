@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-09-23 20:12:51 · commit 10b668ccb · game-boy-test-roms v7.0*
+*Generated: 2026-09-23 21:15:22 · commit 3cfa7847a · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1435
-- **Pass:** 1399
-- **Fail:** 36
+- **Pass:** 1408
+- **Fail:** 27
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -18,10 +18,10 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Mooneye | 152 | 152 |
 | GBA - mGBA Test Suite | 13 | 13 |
 | GBA - jsmolka gba-tests | 13 | 13 |
-| GBA - alyosha gba-tests | 98 | 126 |
+| GBA - alyosha gba-tests | 106 | 126 |
 | GBA - PeterLemon BIOS | 24 | 25 |
 | GBA - Other test ROMs | 9 | 12 |
-| GBA - hwverified (AGS-001) | 11 | 12 |
+| GBA - hwverified (AGS-001) | 12 | 12 |
 | GBA - FuzzARM | 5 | 5 |
 | Game Boy - Acid2 | 2 | 2 |
 | Game Boy - MagenTests | 7 | 7 |
@@ -61,18 +61,18 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 13 tests passed.**
 
-## GBA - alyosha gba-tests (98/126)
+## GBA - alyosha gba-tests (106/126)
 
 | Test | Device | Result |
 |------|--------|--------|
-| alyosha/Bus/DMA_CPU_Bus_Interaction | — | 👀 Failed test 001 |
+| alyosha/Bus/DMA_CPU_Bus_Interaction | — | 👌 |
 | alyosha/Bus/DMA_IWRAM_Bus | — | 👌 |
-| alyosha/Bus/DMA_OAM_Bus | — | 👀 Failed test 001 |
+| alyosha/Bus/DMA_OAM_Bus | — | 👌 |
 | alyosha/Bus/DMA_Outside_Bios_Bus | — | 👌 |
-| alyosha/Bus/LDRSH_misaligned | — | 👀 Failed test 001 |
-| alyosha/Bus/Unused_location_update_bus | — | 👀 Failed test 001 |
+| alyosha/Bus/LDRSH_misaligned | — | 👌 |
+| alyosha/Bus/Unused_location_update_bus | — | 👌 |
 | alyosha/DMA/DMA_Mode_Change | — | 👌 |
-| alyosha/DMA/DMA_ROM_Fixed | — | 👀 Failed test 242 |
+| alyosha/DMA/DMA_ROM_Fixed | — | 👌 |
 | alyosha/DMA/DMA_pause_timing_ROM_to_IWRAM | — | 👌 |
 | alyosha/DMA/DMA_pause_timing_end_1 | — | 👌 |
 | alyosha/DMA/DMA_pause_timing_end_2 | — | 👌 |
@@ -114,14 +114,14 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | alyosha/Serial/serial_time_start_bit | — | 👌 |
 | alyosha/Serial/serial_time_start_bit_2 | — | 👌 |
 | alyosha/arm/Coprocessor_14 | — | 👌 |
-| alyosha/fifo_dma/fifo | — | 👀 no verdict on screen |
-| alyosha/fifo_dma/fifo_2 | — | 👀 Failed test 111 |
-| alyosha/fifo_dma/fifo_3 | — | 👀 Failed test 111 |
-| alyosha/fifo_dma/fifo_4 | — | 👀 Failed test 111 |
+| alyosha/fifo_dma/fifo | — | 👀 Failed test 002 |
+| alyosha/fifo_dma/fifo_2 | — | 👌 |
+| alyosha/fifo_dma/fifo_3 | — | 👀 Failed test 174 |
+| alyosha/fifo_dma/fifo_4 | — | 👌 |
 | alyosha/fifo_dma/fifo_5 | — | 👀 Failed test 059 |
-| alyosha/fifo_dma/fifo_6 | — | 👀 Failed test 151 |
+| alyosha/fifo_dma/fifo_6 | — | 👀 Failed test 155 |
 | alyosha/fifo_dma/fifo_dma_disable_3 | — | 👌 |
-| alyosha/fifo_dma/fifo_dma_disable_4 | — | 👀 Failed test 104 |
+| alyosha/fifo_dma/fifo_dma_disable_4 | — | 👌 |
 | alyosha/fifo_dma/fifo_dma_disable_5 | — | 👌 |
 | alyosha/irq/BL_1 | — | 👌 |
 | alyosha/irq/BL_IRQ | — | 👌 |
@@ -229,8 +229,8 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | gba-rtc-test/RtcTestROM | — | 👌 |
 | hades/bios-openbus | — | 👌 |
 | hades/timer-basic | — | 👌 |
-| hades/dma-latch | — | 👀 no all-pass frame pinned yet (frame hash 40D27CC0FE05E9EE) |
-| hades/dma-start-delay | — | 👀 no all-pass frame pinned yet (frame hash D24D56A7522BC46E) |
+| hades/dma-latch | — | 👀 no all-pass frame pinned yet (frame hash 009077408465C7EE) |
+| hades/dma-start-delay | — | 👀 no all-pass frame pinned yet (frame hash 58A8421328C709E6) |
 | swp/SwpBusLocking | — | 👌 |
 | agbeeg/rom_access_during_prefetch | — | 👌 |
 | agbeeg/toggle_prefetcher | — | 👌 |
@@ -239,22 +239,9 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | agbeeg/stm_does_not_lock_bus | — | 👌 |
 | agbeeg/cpu_runs_idles_during_dma | — | 👀 FAIL |
 
-## GBA - hwverified (AGS-001) (11/12)
+## GBA - hwverified (AGS-001) (12/12)
 
-| Test | Device | Result |
-|------|--------|--------|
-| hwverified/msrtbit | — | 👌 |
-| hwverified/psrmask | — | 👌 |
-| hwverified/thumbcmp | — | 👌 |
-| hwverified/ldmuser | — | 👌 |
-| hwverified/pcwb | — | 👌 |
-| hwverified/bxdecode | — | 👌 |
-| hwverified/irqwin | — | 👌 |
-| hwverified/dmabyte | — | 👌 |
-| hwverified/capdma | — | 👌 |
-| hwverified/sweep | — | 👌 |
-| hwverified/iomap | — | 👌 |
-| hwverified/irqstorm | — | 👀 bottom-right pixel #FF0000, pass is #00FF00 |
+**All 12 tests passed.**
 
 ## GBA - FuzzARM (5/5)
 
