@@ -2,7 +2,8 @@
 """Run a biosdrv probe ROM on the HLE BIOS and on the real BIOS image inside
 dingbat (tests/biosdrv_probe.nim) and diff what the sound driver did.
 
-  compare.py <rom.gba> [frames] [--show] [--fifo] [--io]
+  compare.py <rom.gba> [frames] [--show] [--fifo] [--io] [--polls] [--area]
+             [--first]
 
 Reports, marker by marker: the cycle cost of every bracketed call (0xF0 ->
 0xF1), then every snapshot byte that differs (SoundArea offsets are printed
@@ -85,13 +86,20 @@ def main():
         else:
             line += f"  t hle {ca} real {cb} ({ca - cb:+d})"
         diffs = []
-        for (base, n), x, y in zip(regs, sa, sb):
+        # --area: the SoundArea snapshot only (no RESULT / register block)
+        rsel = regs[:1] if "--area" in flags else regs
+        for (base, n), x, y in zip(rsel, sa, sb):
             for j in range(n):
                 if x[j] != y[j]:
                     diffs.append(f"{base + j:08X}(+{j:03X}) {x[j]:02X}/{y[j]:02X}")
         if diffs:
             ndiff += 1
             line += f"  {len(diffs)} bytes differ"
+        if diffs and "--first" in flags:
+            print(line)
+            for d in diffs[:int(os.environ.get("MAXD", "24"))]:
+                print("      " + d)
+            break
         if diffs or "--show" in flags or a == 0xF1:
             print(line)
             for d in diffs[:int(os.environ.get("MAXD", "24"))]:

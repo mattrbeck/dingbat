@@ -29,7 +29,10 @@ typedef volatile u32 vu32;
 #define MARK(n) (REG8(0x04000FF0) = (u8)(n))
 
 // Fixed work areas (clear of the crt0's .bss at the bottom of IWRAM)
-#define AREA ((u8 *)0x03004000)       // SoundArea, 0xFB0 bytes
+#ifndef AREA_ADDR
+#define AREA_ADDR 0x03004000
+#endif
+#define AREA ((u8 *)AREA_ADDR)        // SoundArea, 0xFB0 bytes
 #define RESULT ((vu32 *)0x02030000)   // probe-written results
 
 extern u32 bd_regs[8];

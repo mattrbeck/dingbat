@@ -69,13 +69,15 @@ proc main() =
       for (ad, ln) in regions:
         for i in 0 ..< ln:
           mk.write(emu.bus.read_byte_internal(ad + uint32(i)))
-  # BD_MEMTRACE=1: every store the BIOS makes (PC below 0x4000), DMA excluded
-  let mt = if getEnv("BD_MEMTRACE") == "1": newFileStream(prefix & ".mem.txt", fmWrite) else: nil
+  # BD_MEMTRACE=1: every store the BIOS makes (PC below 0x4000), DMA excluded;
+  # BD_MEMTRACE=all: every CPU store
+  let mtall = getEnv("BD_MEMTRACE") == "all"
+  let mt = if getEnv("BD_MEMTRACE").len > 0: newFileStream(prefix & ".mem.txt", fmWrite) else: nil
   if mt != nil:
     bdMemHook = proc(address: uint32; width: int; value: uint32) =
-      if emu.cpu.r[15] < 0x4000'u32 and not emu.bus.dma_active and
+      if (mtall or emu.cpu.r[15] < 0x4000'u32) and not emu.bus.dma_active and
          (address shr 24) != 4:
-        mt.writeLine($frame & " " & $now() & " pc=" & toHex(emu.cpu.r[15], 4) & " " &
+        mt.writeLine($frame & " " & $now() & " pc=" & toHex(emu.cpu.r[15] and 0xFFFF'u32, 4) & " " &
                      toHex(address, 8) & ":" & $width & "=" & toHex(value, width * 2))
   # BD_IOREAD=1: every I/O read the BIOS makes
   let ir = if getEnv("BD_IOREAD") == "1": newFileStream(prefix & ".ioread.txt", fmWrite) else: nil

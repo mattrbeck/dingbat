@@ -497,19 +497,6 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     let isa_step = if cpu.cpsr.thumb: 2'u32 else: 4'u32
     if cpu.gba.bus.stub_bios and cpu.sd_trap():
       discard  # a sound-driver routine's stub continuation (hle_sound.nim)
-    elif cpu.r[15] == 0x1DFE'u32 or cpu.r[15] == 0x1E02'u32:
-      # SoundMain stub epilogue (see 0x1C / new_bus): the dispatcher's
-      # `movs pc, lr`, restoring CPSR from SPSR_svc and returning to lr_svc
-      let target = cpu.r[14] and not 1'u32
-      let spsr = cpu.spsr
-      # The trap's own swi and dispatch are an artifact of the stub: take
-      # them back. Net 57 puts the no-driver path on the real BIOS's 80
-      # cycles around the swi (PeterLemon BIOSSoundDriverMain; 56 and 58
-      # miss by one either way).
-      cpu.gba.bus.add_cycles(-57)
-      cpu.switch_mode(cast[CpuMode](spsr.mode))
-      cpu.cpsr = spsr
-      discard cpu.set_reg(15, target - 2)  # the stub is thumb
     elif cpu.r[15] == 8'u32:
       # Boot trap #1: the game jumped to the reset vector. The BIOS re-runs
       # its boot (display blanked, peripherals silenced, work RAM cleared,
@@ -1588,23 +1575,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
   of 0x29: cpu.sd_vsync_on()
   of 0x20, 0x21, 0x22, 0x23, 0x24:
     discard  # MusicPlayer stubs (not timed: their cost follows the player)
-  of 0x1C:  # SoundDriverMain
-    if not cpu.gba.bus.stub_bios:
-      return  # a real BIOS image is mapped (hle_after_bios): no stub trampolines
-    # Run the stub-BIOS SoundMain dispatch (thumb at the routine's address,
-    # 0x1DC4): it checks the SoundInfo ident at [0x03007FF0], and if an
-    # MP2K driver is installed locks the engine and calls the game's ROM
-    # callbacks (Cyberdrive Zoids blocks its main loop on them). The BIOS
-    # PCM mixer is not modeled. The stub runs in SVC mode like the
-    # dispatcher; its closing `swi 0` is the `movs pc, lr` exit trap (0x00).
-    let isa_step = if cpu.cpsr.thumb: 2'u32 else: 4'u32
-    let old_cpsr = cpu.cpsr
-    let ret = cpu.r[15] - isa_step
-    cpu.switch_mode(modeSVC)
-    cpu.spsr = old_cpsr
-    cpu.r[14] = ret
-    cpu.cpsr.thumb = true
-    discard cpu.set_reg(15, 0x1DC4'u32 - isa_step)
+  of 0x1C: cpu.sd_main()  # SoundDriverMain: hle_sound.nim
   of 0x2A:  # SoundGetJumpList
     # Copy the 36 sound-driver pointers from the BIOS table (0x3738) to
     # [r0]; the stub BIOS backs them with code (new_bus). Routine (0x2692)

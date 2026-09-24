@@ -463,31 +463,16 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
                  0xC01E, 0xC01E, 0xC01E, 0xC01E, 0x4664, 0x4770]:
       result.bios[0x23B0 + i * 2]     = uint8(h and 0xFF)
       result.bios[0x23B0 + i * 2 + 1] = uint8(h shr 8)
-    # SoundDriverMain dispatch (SWI 0x1C, thumb at the real 0x1DC4): the
-    # lock/callback part of the BIOS SoundMain — check the SoundInfo ident at
-    # [0x03007FF0], lock, call the game hooks [info+32]([info+36]) and
-    # [info+40](info) (Cyberdrive Zoids' main loop blocks until they run),
-    # unlock. The PCM mixer is not modeled. Runs in SVC mode like the real
-    # routine (hle_swi 0x1C stages the switch); the closing `swi 0` traps are
-    # the dispatcher's `movs pc, lr` exit, performed by the HLE.
-    #   ldr r2, =0x03007FF0; ldr r0, [r2]; ldr r2, =magic; ldr r3, [r0]
-    #   cmp r3, r2; bne ret; adds r3, #1; str r3, [r0]      ; lock
-    #   push {r4, lr}; adds r4, r0, #0
-    #   ldr r3, [r4, #32]; cmp r3, #0; beq 1f
-    #   ldr r0, [r4, #36]; bl call
-    # 1: ldr r3, [r4, #40]; cmp r3, #0; beq 2f
-    #   adds r0, r4, #0; bl call
-    # 2: ldr r2, =magic; str r2, [r4]                        ; unlock
-    #   pop {r4}; pop {r3}; mov lr, r3; swi 0
-    # call: bx r3      ret: swi 0
-    for i, h in [0x4A0F'u16, 0x6810, 0x4A0F, 0x6803, 0x4293, 0xD116,
-                 0x3301, 0x6003, 0xB510, 0x1C04, 0x6A23, 0x2B00,
-                 0xD002, 0x6A60, 0xF000, 0xF80C, 0x6AA3, 0x2B00,
-                 0xD002, 0x1C20, 0xF000, 0xF806, 0x4A05, 0x6022,
-                 0xBC10, 0xBC08, 0x469E, 0xDF00, 0x4718, 0xDF00,
-                 0x0000, 0x0000]:
-      result.bios[0x1DC4 + i * 2]     = uint8(h and 0xFF)
-      result.bios[0x1DC4 + i * 2 + 1] = uint8(h shr 8)
+    # SoundDriverMain's callback returns (hle_sound.nim sd_main): the real
+    # routine calls SoundInfo +0x20 and +0x28 with lr 0x1DF1 / 0x1DF9, so the
+    # stub puts its `swi 0` traps (Thumb) at those addresses. The BIOS's
+    # default for the SoundInfo function slots Init fills (0x1709) returns
+    # at once.
+    for a in [0x1DF0, 0x1DF8]:
+      result.bios[a] = 0x00'u8
+      result.bios[a + 1] = 0xDF'u8
+    result.bios[0x1708] = 0x70'u8   # bx lr
+    result.bios[0x1709] = 0x47'u8
     # Sound-driver continuations (hle_sound.nim): a delay loop and the
     # VCOUNT-159 poll, each closed by a `swi 0` trap back into the HLE
     write_stub_u32(result.bios, 0x3900, 0xE2588001'u32)  # subs r8, r8, #1
@@ -500,8 +485,6 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     write_stub_u32(result.bios, 0x3920, 0xE351009F'u32)  # cmp  r1, #159
     write_stub_u32(result.bios, 0x3924, 0x1AFFFFFC'u32)  # bne  0x391C
     write_stub_u32(result.bios, 0x3928, 0xEF000000'u32)  # swi  0
-    write_stub_u32(result.bios, 0x1E04, 0x03007FF0'u32)
-    write_stub_u32(result.bios, 0x1E08, 0x68736D53'u32)
   result.gpio = new_gpio(gba)
   # Tilt carts cannot be probed at runtime, so detection is by game code:
   # KYG* = Yoshi's Universal Gravitation / Topsy-Turvy, KHPJ = Koro Koro
