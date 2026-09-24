@@ -136,6 +136,11 @@ jobs:
         # a temp folder.
         shell: bash
         run: ./dingbat_desktop_persist_test
+      - name: Desktop game lifecycle (load_rom's headless half)
+        # A file that is not a ROM is refused with the running game kept.
+        # Synthetic ROMs.
+        shell: bash
+        run: ./dingbat_desktop_lifecycle_test
       - name: Clip-capture replay determinism
         # Replays a range from the anchor+input log and asserts every frame's
         # serialized state matches the live run; two negative controls must

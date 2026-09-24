@@ -27,6 +27,7 @@ import dingbat/frontend/cheats_widget
 import dingbat/frontend/save_states_widget
 import dingbat/frontend/link_cable
 import dingbat/frontend/persist
+import dingbat/frontend/game_load
 import dingbat/common/cheats
 import dingbat/common/serialize
 
@@ -430,6 +431,9 @@ type AppState = ref object
   # Set when a save state is refused; render_state_notice draws it.
   state_notice:      string
   state_notice_hint: string
+  # Set when a ROM could not be loaded; render_load_notice draws it.
+  load_notice:       string
+  load_notice_hint:  string
   # Command-line BIOS choices: for this run only, never written to cfg
   boot_overrides:  BootOverrides
   # A battery save that can't be written; shown in the same modal once
@@ -689,27 +693,43 @@ proc input_log_close() =
 
 proc new_core_takes_held_input()  # defined below, with the controllers
 
+proc load_notice(text, hint: string) =
+  echo text, (if hint.len > 0: " (" & hint & ")" else: "")
+  app.load_notice = text
+  app.load_notice_hint = hint
+
 proc load_rom(path: string) =
+  ## Every failure leaves the running game (or the home screen) as it was and
+  ## says why.
   if not fileExists(path):
-    echo "ROM not found: ", path; return
+    load_notice(&"{path.extractFilename()} isn't there any more.", path)
+    return
   # Zips: load the first ROM inside; recents keep the zip path itself
   var rom_path = path
   if path.splitFile().ext.toLowerAscii() == ".zip":
     rom_path = extract_zip_rom(path)
-    if rom_path == "": return
+    if rom_path == "":
+      load_notice(&"No Game Boy or GBA ROM could be read from {path.extractFilename()}.", "")
+      return
+  # Before the new core reads the .sav: a Reset reloads the same file
   flush_gb_save()
-  let ext = rom_path.splitFile().ext.toLowerAscii()
+  # The new core is built and checked before anything of the old one goes
   let boot = boot_settings(app.cfg, app.boot_overrides)
-  if ext in [".gb", ".gbc"]:
+  if boot.note.len > 0 and not is_gb_rom(rom_path): echo boot.note
+  let built = build_core(rom_path, CoreOptions(
+    gb_bootrom: app.cfg.gb_bootrom_path,
     # Speed mode forces the cheaper scanline renderer; the FIFO preference
     # is remembered and returns when it is switched off.
-    app.gb_emu = new_gb(app.cfg.gb_bootrom_path, rom_path,
-                        app.cfg.gb_fifo and not app.cfg.speed_mode,
-                        app.cfg.headless, boot.gb_run_bios)
-    # Super Game Boy is opt-in from config but header-gated in the core: a
-    # cart without the SGB flag, or one that is CGB-capable, gets nothing.
-    app.gb_emu.sgb_requested = app.cfg.sgb_enable
-    app.gb_emu.post_init()
+    gb_fifo: app.cfg.gb_fifo and not app.cfg.speed_mode,
+    headless: app.cfg.headless, gb_run_bios: boot.gb_run_bios,
+    sgb: app.cfg.sgb_enable, bios_path: boot.bios_path,
+    run_bios: boot.run_bios, use_hle: boot.use_hle,
+    hle_after_bios: boot.hle_after_bios))
+  if built.error.len > 0:
+    load_notice(built.error, built.detail)
+    return
+  if built.gb != nil:
+    app.gb_emu = built.gb
     app.gba_emu = nil
     app.emu_kind = ekGB
     app.border_shown = false
@@ -718,10 +738,7 @@ proc load_rom(path: string) =
     app.dbg = nil
     app.gb_dbg = new_gb_debug(app.gb_emu)
   else:
-    if boot.note.len > 0: echo boot.note
-    app.gba_emu = new_gba(boot.bios_path, rom_path, boot.run_bios, boot.use_hle,
-                          boot.hle_after_bios)
-    app.gba_emu.post_init()
+    app.gba_emu = built.gba
     input_log_start(rom_path)
     app.gb_emu = nil
     app.emu_kind = ekGBA
@@ -1329,6 +1346,12 @@ proc render_state_notice() =
   ## of something the user just did, so it never appears unbidden.
   render_notice("State##notice", app.state_notice, app.state_notice_hint)
 
+proc render_load_notice() =
+  ## A ROM that could not be loaded. After the other notices, never over one:
+  ## two modals opened at the same level replace each other every frame.
+  if app.state_notice.len > 0 or app.cfg.notice.len > 0: return
+  render_notice("Open ROM##notice", app.load_notice, app.load_notice_hint)
+
 proc render_config_notice() =
   ## The settings file was moved aside or could not be written (config.nim
   ## reports each cause once). Shown after the state notice, never over it.
@@ -1340,7 +1363,8 @@ proc render_battery_notice() =
   ## The running game's battery save can't be written (persist.nim
   ## BatteryNotice: once per run of failures, down when a write lands).
   ## Unbidden, so it waits for the other notices.
-  if app.state_notice.len > 0 or app.cfg.notice.len > 0: return
+  if app.state_notice.len > 0 or app.cfg.notice.len > 0 or
+     app.load_notice.len > 0: return
   render_notice("Save file##battery", app.battery.text, app.battery.hint)
 
 var imgui_skipped = false  # the last render_imgui returned before igNewFrame
@@ -1363,7 +1387,7 @@ proc render_imgui() =
      # The menu bar hides after three idle seconds, exactly the state a Quick
      # Load keypress lands in; the notice must still be drawn then.
      app.state_notice.len == 0 and app.cfg.notice.len == 0 and
-     app.battery.text.len == 0:
+     app.load_notice.len == 0 and app.battery.text.len == 0:
     # Only igNewFrame drains ImGui's input queue, a few events a frame, so
     # every key event of a long keyboard-only session would wait there and
     # the menu would take that long to see a click. Drop the backlog, and
@@ -1580,6 +1604,7 @@ proc render_imgui() =
 
   render_state_notice()
   render_config_notice()
+  render_load_notice()
   render_battery_notice()
 
   app.ce.render()
