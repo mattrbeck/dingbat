@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-09-23 22:00:50 · commit 26b624c81 · game-boy-test-roms v7.0*
+*Generated: 2026-09-23 22:55:48 · commit c40a3252d · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1435
-- **Pass:** 1410
-- **Fail:** 25
+- **Pass:** 1411
+- **Fail:** 24
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -19,7 +19,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | GBA - mGBA Test Suite | 13 | 13 |
 | GBA - jsmolka gba-tests | 13 | 13 |
 | GBA - alyosha gba-tests | 107 | 126 |
-| GBA - PeterLemon BIOS | 24 | 25 |
+| GBA - PeterLemon BIOS | 25 | 25 |
 | GBA - Other test ROMs | 10 | 12 |
 | GBA - hwverified (AGS-001) | 12 | 12 |
 | GBA - FuzzARM | 5 | 5 |
@@ -192,35 +192,9 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | png183/psr/psr2 | — | 👀 Failed test 013 |
 | png183/timer/timer_check_count_up_presence | — | 👌 |
 
-## GBA - PeterLemon BIOS (24/25)
+## GBA - PeterLemon BIOS (25/25)
 
-| Test | Device | Result |
-|------|--------|--------|
-| peterlemon/BIOSARCTAN | — | 👌 |
-| peterlemon/BIOSDIV | — | 👌 |
-| peterlemon/BIOSSQRT | — | 👌 |
-| peterlemon/BIOSBIT1BPP | — | 👌 |
-| peterlemon/BIOSBIT2BPP | — | 👌 |
-| peterlemon/BIOSBIT4BPP | — | 👌 |
-| peterlemon/BIOSBIT8BPP | — | 👌 |
-| peterlemon/BIOSDIFF | — | 👌 |
-| peterlemon/BIOSHUFFMAN | — | 👌 |
-| peterlemon/BIOSLZ77 | — | 👌 |
-| peterlemon/BIOSRLE | — | 👌 |
-| peterlemon/BIOSCPUFASTSET | — | 👌 |
-| peterlemon/BIOSCPUSET | — | 👌 |
-| peterlemon/BIOSCHECKSUM | — | 👌 |
-| peterlemon/BIOSRegisterRamReset | — | 👌 |
-| peterlemon/BIOSBGAFFINESET | — | 👌 |
-| peterlemon/BIOSOBJAFFINESET | — | 👌 |
-| peterlemon/BIOSSoundBias | — | 👌 |
-| peterlemon/BIOSSoundChannelClear | — | 👌 |
-| peterlemon/BIOSSoundDriverInit | — | 👀 99.6% correct (38236/38400 pixels match) |
-| peterlemon/BIOSSoundDriverMain | — | 👌 |
-| peterlemon/BIOSSoundDriverMode | — | 👌 |
-| peterlemon/BIOSSoundDriverVSync | — | 👌 |
-| peterlemon/BIOSSoundGetJumpList | — | 👌 |
-| peterlemon/BIOSMidiKey2Freq | — | 👌 |
+**All 25 tests passed.**
 
 ## GBA - Other test ROMs (10/12)
 

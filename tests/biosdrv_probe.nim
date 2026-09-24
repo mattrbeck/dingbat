@@ -34,6 +34,8 @@ proc main() =
   emu.test_output = new_test_output()
   emu.post_init()
   emu.mp2k_hle = false
+  # BD_NOWAITLOOP=1: no idle-loop fast-forward (it snaps the scheduler)
+  if getEnv("BD_NOWAITLOOP") == "1": emu.cpu.attempt_waitloop_detection = false
   # No saves: a fresh chip (erased, as with no .sav), and nothing written
   # back, so a symlinked library ROM runs the same way every time
   for i in 0 ..< emu.storage.memory.len: emu.storage.memory[i] = 0xFF

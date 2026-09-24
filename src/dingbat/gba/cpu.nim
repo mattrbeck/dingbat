@@ -637,7 +637,23 @@ proc tick*(cpu: CPU) =
       # link master's per-frame transfer cadence and FireRed/LeafGreen abort
       # the trade with LAG_MASTER. A remainder stays parked for the next return.
       let hot = cpu.gba.bus.rom_hot   # as for IntrWait above
-      let remain = cpu.hle_charge_units_interruptible(int(cpu.halt_resume_charge))
+      var owed = int(cpu.halt_resume_charge)
+      if not cpu.halt_resume_pop:
+        # A decompression/copy park: the IRQ that preempted the routine
+        # returned here, refilling the pipeline in the caller's region, where
+        # the real routine's handler returns into BIOS code (two 1-cycle
+        # fetches). Take the difference back out of the remainder
+        # (tools/biosdrv/lz77i.c: LZ77UnCompWram under a Timer 1 IRQ every
+        # 1000/3000/12000 cycles, Thumb caller in the cartridge at WAITCNT
+        # 0x4317: 4.3, 4.0 and 4.1 cycles long per IRQ without this, exact
+        # with it; an ARM caller in IWRAM was exact either way).
+        let bus = cpu.gba.bus
+        let page = int(bits_range(cur, 24, 27))
+        let refill = if cpu.cpsr.thumb: int(bus.wait16_n[page]) + int(bus.wait16_s[page])
+                     else: int(bus.wait32_n[page]) + int(bus.wait32_s[page])
+        let extra = refill - (int(bus.wait32_n[0]) + int(bus.wait32_s[0]))
+        if extra > 0: owed -= min(extra, owed)
+      let remain = cpu.hle_charge_units_interruptible(owed)
       when ROM_REFILL_ORDERED:
         if hot: cpu.gba.bus.rom_hot = true
       cpu.halt_resume_charge = int32(remain)

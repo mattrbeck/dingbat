@@ -519,6 +519,13 @@ type
     # dispatcher's {r2, lr} frame live (System sp shifted down 8); the resume
     # must pop it. Decompression SWIs park charges here but never shift sp.
     halt_resume_pop*:       bool
+    # An HLE CpuSet/CpuFastSet preempted by an IRQ rewinds onto its SWI with
+    # the continuation in r0-r2 (hle_bios.nim); these name that SWI and
+    # state so the re-dispatch is known as the same routine resuming (it
+    # pays no dispatch or entry again, as the real one returns into its
+    # loop). Not serialized: after a state load the resume pays them once.
+    copy_cont_pc*:          uint32
+    copy_cont_regs*:        array[3, uint32]
     # Waitloop fields
     attempt_waitloop_detection*: bool
     cache_waitloop_results*:     bool

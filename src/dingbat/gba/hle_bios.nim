@@ -469,6 +469,9 @@ proc hle_takes*(cpu: CPU; swi_num: uint32): bool {.inline.} =
   of 0x1A'u32..0x1E'u32, 0x20'u32..0x24'u32, 0x28'u32, 0x29'u32: false
   else: true
 
+const COPY_CONT_ADJ {.intdefine.} = -13   # the resume over the loop it stands for (cpusi.c: -12 and -14 put every preempted call a cycle per IRQ long and short)
+const COPY_CONT_FIXED {.intdefine.} = 0
+
 proc hle_swi*(cpu: CPU; swi_num: uint32) =
   ## HLE BIOS SWI dispatch; used when no BIOS image is provided.
   if cpu.r[15] == 0x178'u32 and swi_num == 0 and not cpu.cpsr.thumb:
@@ -477,12 +480,29 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
   let t_entry = cpu.hle_body_start()
   sd_swi_t0 = t_entry   # the sound driver places its register writes from here
   let rfs_entry = cpu.gba.bus.rom_free_since
+  # A CpuSet/CpuFastSet an IRQ preempted comes back here through the SWI it
+  # rewound onto (copy_cont_*). The real routine's handler returned into its
+  # loop instead, so the resume pays neither the dispatch nor the return
+  # refill (the first leg paid that), and the handler's return refill in the
+  # caller's region is taken back to the BIOS's two 1-cycle fetches
+  # (tools/biosdrv/cpusi.c: 8000-unit copies and fills under a Timer 1 IRQ
+  # every 1000/3000/12000 cycles, ARM caller in IWRAM and Thumb in the
+  # cartridge; each IRQ cost ~130 cycles more than on the real BIOS).
+  let swi_addr = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
+  let copy_cont = (swi_num == 0x0B or swi_num == 0x0C) and cpu.copy_cont_pc != 0 and
+                  cpu.copy_cont_pc == swi_addr and cpu.r[0] == cpu.copy_cont_regs[0] and
+                  cpu.r[1] == cpu.copy_cont_regs[1] and cpu.r[2] == cpu.copy_cont_regs[2]
+  cpu.copy_cont_pc = 0
+  if copy_cont:
+    let bus = cpu.gba.bus
+    let page = int(bits_range(swi_addr, 24, 27))
+    let refill = if cpu.cpsr.thumb: int(bus.wait16_n[page]) + int(bus.wait16_s[page])
+                 else: int(bus.wait32_n[page]) + int(bus.wait32_s[page])
+    bus.add_cycles(-(refill - 2) + COPY_CONT_ADJ)
   # Init, Mode, VSync and VSyncOff write registers sooner into the SWI than
   # the whole dispatch charge: they pay it themselves (hle_sound.nim sd_owed)
-  case swi_num
-  of 0x1A, 0x1B, 0x1D, 0x28:
-    if cpu.gba.bus.stub_bios: sd_owed = SWI_HLE_BASE
-    else: cpu.idle(SWI_HLE_BASE)
+  elif swi_num in [0x1A'u32, 0x1B, 0x1D, 0x28] and cpu.gba.bus.stub_bios:
+    sd_owed = SWI_HLE_BASE
   else: cpu.idle(SWI_HLE_BASE)
   # BIOS open-bus latch: the last opcode the BIOS fetches before returning
   # (GBATEK "Reading from BIOS memory"; mGBA suite checks it after VBlankIntrWait)
@@ -490,7 +510,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
   # The return refills the caller's pipeline: N + S fetch in its region,
   # plus one more sequential halfword slot (S16 - 1, the residual every
   # non-IWRAM mGBA suite column shows)
-  block:
+  if not copy_cont:
     let bus = cpu.gba.bus
     let page = int(bits_range(cpu.r[15], 24, 27))
     if cpu.cpsr.thumb:
@@ -767,7 +787,8 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       # so mid-copy events and IRQs land at faithful cycle positions.
       let model_fixed = block:
         let bus = cpu.gba.bus
-        if word_mode:
+        if copy_cont: COPY_CONT_FIXED
+        elif word_mode:
           if fill: 44 + int(bus.wait32_n[src_page]) else: 44
         else:
           if fill: 46 + int(bus.wait16_n[src_page]) else: 46
@@ -834,6 +855,8 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       cpu.hle_charge_body(body_t0, model_fixed + model_unit * int(done))
       if interrupted:
         cpu.r[2] = (ctrl and not 0x1FFFFF'u32) or (count - done)
+        cpu.copy_cont_pc = swi_addr
+        cpu.copy_cont_regs = [cpu.r[0], cpu.r[1], cpu.r[2]]
         cpu.hle_swi_rewind()
   of 0x01:  # RegisterRamReset
     # The routine (0x9C2) handles the flag groups in this order: other I/O
@@ -1008,7 +1031,8 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       let dp = int(bits_range(dst, 24, 27))
       let burst_s = int(bus.wait32_n[sp]) + 7 * int(bus.wait32_s[sp])
       let burst_d = int(bus.wait32_n[dp]) + 7 * int(bus.wait32_s[dp])
-      let model_fixed = if fill: 52 + int(bus.wait32_n[sp]) else: 43
+      let model_fixed = if copy_cont: COPY_CONT_FIXED
+                        elif fill: 52 + int(bus.wait32_n[sp]) else: 43
       let model_burst = if fill: 5 + burst_d else: 7 + burst_s + burst_d
       # Cartridge-bus sources are read uncharged: the bus would price every
       # word as the HLE interleaves them with the writes, not as the ldmia's
@@ -1044,6 +1068,8 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
                    else: cpu.gba.bus.read_word_internal(dst - 4)
       if interrupted:
         cpu.r[2] = (ctrl and not 0x1FFFFF'u32) or (count - done)
+        cpu.copy_cont_pc = swi_addr
+        cpu.copy_cont_regs = [cpu.r[0], cpu.r[1], cpu.r[2]]
         cpu.hle_swi_rewind()
   of 0x0D:  # GetBiosChecksum
     cpu.r[0] = 0xBAAE187F'u32

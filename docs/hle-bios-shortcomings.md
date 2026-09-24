@@ -45,9 +45,9 @@ it deliberately does not model:
   - an ARM callback at exactly 0x03000000 is entered 10 cycles later than
     by the real call; Cyberdrive Zoids' voice command with its tone table
     in the cartridge returns a cycle early.
-  Left in that set: Cyberdrive Zoids' frames from 527 (its loop reads stale
-  stack words: with the other SWIs' pushes now left as the real BIOS leaves
-  them, what still differs is SoundDriverMain's mixing locals), Gameboy Player
+  Left in that set: 15 of Cyberdrive Zoids' frames from 968 (it reads stale
+  stack words; what still differs there is SoundDriverMain's mixing
+  locals), Gameboy Player
   Controller's stream from byte 11282 (its multiboot LZ77UnCompWram, EWRAM
   to EWRAM, runs ~243k cycles short of the real one, which moves the sound
   start), the FFCC loader's frame 3 and last silent FIFO burst (its first
@@ -57,13 +57,18 @@ it deliberately does not model:
 * **Interrupted-copy register remnants.** An IRQ preempting CpuSet /
   CpuFastSet leaves the continuation in r0/r1/r2 (PC rewound onto the SWI).
   On that path only, the halfword forms advance r0/r1 (the real routine
-  leaves them) and r2's count counts down; each preemption re-pays the SWI
-  dispatch (~50 cycles).
+  leaves them) and r2's count counts down. The resume is timed as the real
+  routine's (no second dispatch; tools/biosdrv/cpusi.c exact from an IWRAM
+  caller, 3 cycles per call off from a cartridge one) unless a state load
+  falls inside the preemption, when it pays the dispatch once (the
+  continuation marker is not serialized).
 * **Interrupted decompression sees finished output.** LZ77/Huffman/RL are
   preempted at faithful cycle positions (the uncharged remainder rides the
   halt-resume path), but the destination is written up front, so a handler
   inspecting it mid-call sees the completed output. Diff/BitUnPack are
-  atomic.
+  atomic. An LZ77UnCompWram from the cartridge runs 5-7% short of the
+  real routine on small streams (tools/biosdrv/lz77t.c: 99-143 cycles on a
+  64-byte one); from EWRAM it is exact, preempted or not (lz77i.c).
 * **Interrupted RegisterRamReset** encodes its continuation in r0 (bit 31
   marker, remaining phase charge in bits 8–29, pending flags). A caller
   passing bit 31 set with garbage mid bits would be misread; compilers emit
