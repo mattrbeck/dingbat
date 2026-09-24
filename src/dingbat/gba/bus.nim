@@ -1323,7 +1323,11 @@ proc read_open_bus_word*(bus: Bus; address: uint32): uint32 =
       if pc_region == 0x7:
         bus.read_word_internal(pc and not 3'u32)
       elif pc_region == 0x0 or pc_region == 0x3:
-        let older = uint32(bus.read_half_internal((pc - 2) and not 1'u32))
+        # pc < 2 (a wild jump that wrapped): $+2 is at 0xFFFFFFFE, unmapped,
+        # and its read would come back here with the same PC; the one
+        # fetched halfword stands in for both
+        let older = if pc < 2: uint32(bus.read_half_internal(pc and not 1'u32))
+                    else: uint32(bus.read_half_internal((pc - 2) and not 1'u32))
         let newer = uint32(bus.read_half_internal(pc and not 1'u32))
         if (pc and 2) != 0: (newer shl 16) or older
         else:               (older shl 16) or newer
