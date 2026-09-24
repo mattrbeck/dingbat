@@ -35,17 +35,26 @@ proc gather_entries(fe: FileExplorer) =
     else: cmp(a.name, b.name))
 
 proc new_file_explorer*(cfg: Config): FileExplorer =
-  result = FileExplorer(cfg: cfg, selected_idx: 0)
+  result = FileExplorer(cfg: cfg, selected_idx: -1)
   result.gather_entries()
 
 proc close*(fe: FileExplorer) =
   fe.open = false
   igCloseCurrentPopup()
 
+proc shown(entry: FileEntry; extensions: openArray[string]): bool =
+  ## Directories always; files only with one of `extensions` (any, if none).
+  if not entry.is_file or extensions.len == 0: return true
+  entry.extension in extensions
+
 proc render*(fe: FileExplorer; name: string; open_popup: bool;
              extensions: openArray[string]; handler: proc(path: string)) =
   if open_popup:
     fe.open = true
+    # Each dialog starts with nothing selected: the ROM and BIOS dialogs
+    # share this explorer, and a selection left by one (the BIOS image) is
+    # a row the other hides but Open would still load.
+    fe.selected_idx = -1
     igOpenPopup_Str(cstring(name), 0)
 
   var center = ImVec2(x: 0, y: 0)
@@ -81,6 +90,7 @@ proc render*(fe: FileExplorer; name: string; open_popup: bool;
         fe.cfg.explorer_dir = normalizedPath(target)
         save_config(fe.cfg)
         fe.gather_entries()
+        fe.selected_idx = -1
 
     var disp_size = ImVec2(x: 800, y: 600)
     let vp2 = igGetMainViewport()
@@ -93,11 +103,7 @@ proc render*(fe: FileExplorer; name: string; open_popup: bool;
     if igBeginListBox("##files", ImVec2(x: width, y: height)):
       for idx, entry in fe.entries:
         if entry.hidden and not fe.show_hidden: continue
-        if entry.is_file and extensions.len > 0:
-          var ok = false
-          for ext in extensions:
-            if entry.extension == ext: ok = true; break
-          if not ok: continue
+        if not entry.shown(extensions): continue
         let is_selected = idx == fe.selected_idx
         let label = if entry.is_file: "[F] " & entry.name
                     else: "[D] " & entry.name & "/"
@@ -122,11 +128,13 @@ proc render*(fe: FileExplorer; name: string; open_popup: bool;
       fe.cfg.explorer_dir = normalizedPath(navigate_to)
       save_config(fe.cfg)
       fe.gather_entries()
-      fe.selected_idx = 0
+      fe.selected_idx = -1
 
     igBeginGroup()
     if igButton("Open", ImVec2(x: 0, y: 0)):
-      if fe.selected_idx < fe.entries.len and fe.entries[fe.selected_idx].is_file:
+      if fe.selected_idx in 0 ..< fe.entries.len and
+         fe.entries[fe.selected_idx].is_file and
+         fe.entries[fe.selected_idx].shown(extensions):
         let path = fe.cfg.explorer_dir / fe.entries[fe.selected_idx].name
         handler(path)
         fe.close()
