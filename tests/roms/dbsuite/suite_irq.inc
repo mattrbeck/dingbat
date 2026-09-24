@@ -481,5 +481,8 @@ v8_race_end:
 
     payload_blob pl_wakeirq, "wakeirq.bin"
     payload_blob pl_dmamulirq, "dmamulirq.bin"
+    payload_blob pl_dmairq, "dmairq.bin"
+    payload_blob pl_irqwait, "irqwait.bin"
     payload_blob pl_lycwrite, "lycwrite.bin"
     .include "gen_irq.inc"
+    .include "gen_sp_irq.inc"

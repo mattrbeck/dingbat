@@ -405,3 +405,4 @@ run_dmatime:
     payload_blob pl_dmadur, "dmadur.bin"
     payload_blob pl_kitdemo, "kitdemo.bin"
     .include "gen_dma.inc"
+    .include "gen_sp_dma.inc"

@@ -233,3 +233,4 @@ run_psgfirst:
     cbyte "psg-soundcnt-x-after-ch4", RUN_SAME, 23, 0x88, F_CART
     chalf "psg-ch1-length-off-never-expires", RUN_SAME, 24, 0xFFFF, F_CART
     chalf "psg-ch2-length-off-never-expires", RUN_SAME, 26, 0xFFFF, F_CART
+    .include "gen_sp_apu.inc"

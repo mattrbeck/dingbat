@@ -345,6 +345,183 @@ und_recover:
     cbyte "undefined-modes-finish", RUN_SAME, 28, 0x04, F_RISKY
     cbyte "undefined-modes-clean",  RUN_SAME, 29, 0x01, F_RISKY
 
+@ ─────────── writes in an undefined mode, and the loose MRS slot ──────────
+@ WHAT: (a) CPSR_c = 0xCC (mode 0x0C, IRQ and FIQ masked): `mov r13, #0xFF`,
+@ `mov r14, #0x77` and `mov r12, #0x55`, each read straight back, then the
+@ caller's r13 once its mode is back.  (b) The immediate form of the MRS
+@ slot -- TST/CMP immediate with S and bit 21 clear -- as 0xE30F0000,
+@ 0xE3010000, 0xE3001000, 0xE3001002 and 0xE34031F2 over known registers.
+@ WHY: an undefined mode has no r13/r14 at all: a write is lost and a read
+@ gives 0, while r8-r12 stay the user bank's and the caller's bank is left
+@ alone.  The loose MRS slot is a register move, Rd = Rn, the immediate and
+@ the PSR bit ignored (png183 psr/psr2 tests 13-20).  An emulator that
+@ banks undefined modes like User keeps 0xFF; one that decodes the slot as
+@ MRS returns the CPSR.
+@ PROVENANCE: AGB SP through tools/hwlink, 2026-09-24: this sequence from
+@ IWRAM read 0, 0, 0x55 and the caller's sp; then r0 = the move's pc,
+@ 42, 42, 0xFE and r0-r3 = FE, 1, 2A, FE.
+run_undwrite:
+    push {r4-r11, lr}
+    ldr r8, =SLOT
+    mrs r4, CPSR
+    mov r10, sp
+    msr CPSR_c, #0xCC
+    mov r13, #0xFF
+    mov r5, r13
+    mov r14, #0x77
+    mov r6, r14
+    mov r12, #0x55
+    mov r7, r12
+    msr CPSR_c, r4
+    mov r9, sp                     @ the caller's r13, not yet reloaded
+    mov sp, r10
+    str r5, [r8, #0]
+    str r6, [r8, #4]
+    str r7, [r8, #8]
+    sub r9, r9, r10
+    str r9, [r8, #12]
+    mov r0, #0
+    mov r1, pc
+    .word 0xE30F0000               @ r0 = r15 (this address + 8 = r1 + 4)
+    sub r0, r0, r1
+    str r0, [r8, #16]
+    mov r0, #0
+    mov r1, #42
+    .word 0xE3010000               @ r0 = r1
+    str r0, [r8, #20]
+    mov r0, #42
+    mov r1, #0
+    .word 0xE3001000               @ r1 = r0
+    str r1, [r8, #24]
+    mov r0, #0xFE
+    mov r1, #0
+    mov r2, #42
+    .word 0xE3001002               @ r1 = r0 (bits 0-3 unused)
+    str r1, [r8, #28]
+    mov r0, #0xFE
+    mov r1, #1
+    mov r2, #42
+    mov r3, #0
+    .word 0xE34031F2               @ CMP slot, PSR bit set: r3 = r0
+    orr r3, r3, r2, lsl #8
+    orr r3, r3, r1, lsl #16
+    orr r3, r3, r0, lsl #24
+    str r3, [r8, #32]
+    pop {r4-r11, pc}
+    .ltorg
+    cword "mode-0c-r13-write-lost",  run_undwrite, 0, 0, F_RISKY
+    cword "mode-0c-r14-write-lost",  RUN_SAME, 4, 0, F_RISKY
+    cword "mode-0c-r12-writable",    RUN_SAME, 8, 0x55, F_RISKY
+    cword "mode-0c-caller-r13-kept", RUN_SAME, 12, 0, F_RISKY
+    cword "mrs-slot-imm-pc",         RUN_SAME, 16, 4, F_RISKY
+    cword "mrs-slot-imm-rn",         RUN_SAME, 20, 42, F_RISKY
+    cword "mrs-slot-imm-rd",         RUN_SAME, 24, 42, F_RISKY
+    cword "mrs-slot-imm-rm-unused",  RUN_SAME, 28, 0xFE, F_RISKY
+    cword "mrs-slot-imm-cmp-form",   RUN_SAME, 32, 0xFE012AFE, F_RISKY
+
+@ ─────────────── Thumb cmp pc at a halfword, and with no SPSR ─────────────
+@ WHAT: (a) Thumb `cmp pc, r0` at A with A % 4 == 2, in IRQ mode, with an
+@ SPSR whose T bit is clear (N set, IRQ mode, I clear).  The block overlays
+@ Thumb and ARM decode: W+0/W+2 read as ARM `strmi r4, [r7]` (a breadcrumb
+@ in a cleared scratch word), W+4/W+6 as a benign `orr`, then ARM `add r6,
+@ r6, #2` at W+8 and `bx r5` escapes at W+12 and W+16.  (b) the same
+@ instruction in System mode, which has no SPSR, with N|Z preset -- flags
+@ no compare of pc against 0 can produce.
+@ WHY: the Thumb `cmp pc` form restores CPSR from SPSR (the thumb-cmp-pc
+@ cases above); where ARM execution then resumes is UNPREDICTABLE.  The
+@ console restored the SPSR (0x80000012) and resumed past BOTH overlay words
+@ and the add -- at A+10 or A+14 -- where resuming at (A+2) & ~3 runs the
+@ add (r6 = 2) and resuming at A & ~3 stores the breadcrumb.  In System
+@ mode the restore is a no-op: CPSR reads C000001F, not a compare's flags.
+@ PROVENANCE: AGB SP, gbaedge page 35 THUMBPC3 (session 4, 2026-08-11, CRC
+@ 104A; tests/roms/expected/agb-sp-4.txt): 80000012, scratch 0, r6 0,
+@ clean; C000001F, clean.  Ported with the page's own block and watchdog.
+run_thumbpc3:
+    push {r4-r11, lr}
+    ldr r8, =SLOT
+    mrs r9, CPSR
+    msr CPSR_c, #0xD2              @ IRQ mode: keep its stack pointer
+    mov r11, sp
+    msr CPSR_c, r9
+    @ (a)
+    ldr r7, =SCRATCH + 0x80
+    mov r0, #0
+    str r0, [r7]
+    msr CPSR_c, #0x12              @ IRQ mode, I clear (the watchdog reaches it)
+    ldr sp, =SCRATCH + 0xF0
+    ldr r1, =0x80000012            @ SPSR: N, T clear, IRQ mode, I clear
+    msr SPSR_cxsf, r1
+    wdg_arm tp3_rec
+    ldr r4, =0xC0DEC0DE
+    mov r6, #0
+    mov r0, #0
+    ldr r5, =tp3_rec
+    ldr r1, =tp3_blk + 3           @ W+2, Thumb
+    bx  r1
+tp3_rec:
+    mrs r10, CPSR                  @ as it resumed, before anything else
+    msr CPSR_c, #0xD2
+    mov sp, r11
+    msr CPSR_cxsf, r9
+    wdg_disarm
+    str r10, [r8, #0]
+    ldr r0, [r7]
+    str r0, [r8, #4]
+    strb r6, [r8, #8]
+    ldr r2, =MARKER
+    ldr r0, [r2, #8]
+    strb r0, [r8, #9]
+    mov r0, #0
+    str r0, [r2, #8]
+    @ (b)
+    msr CPSR_c, #0x1F              @ System mode, I clear
+    wdg_arm tp3b_rec
+    ldr r0, =0xC0000000
+    msr CPSR_f, r0                 @ N|Z: no compare of pc with 0 gives both
+    mov r0, #0
+    adr r3, tp3b_ret
+    adr r1, tp3b_pad
+    orr r1, r1, #1
+    bx  r1
+    .thumb
+tp3b_pad:
+    .hword 0x4587                  @ cmp pc, r0
+    .hword 0x4718                  @ bx r3
+    .hword 0x4718                  @ bx r3 (a skipped slot still escapes)
+    .hword 0x4718
+    .align 2
+    .arm
+tp3b_ret:
+    mrs r1, CPSR
+    str r1, [r8, #12]
+tp3b_rec:
+    msr CPSR_c, #0xD2
+    mov sp, r11
+    msr CPSR_cxsf, r9
+    wdg_disarm
+    ldr r2, =MARKER
+    ldr r0, [r2, #8]
+    strb r0, [r8, #16]
+    mov r0, #0
+    str r0, [r2, #8]
+    pop {r4-r11, pc}
+    .ltorg
+    .align 2
+tp3_blk:                           @ W
+    .hword 0x4000                  @ W+0: ARM word W = strmi r4, [r7]
+    .hword 0x4587                  @ W+2: Thumb cmp pc, r0 (the entry, A)
+    .hword 0x4728                  @ W+4: Thumb bx r5 / ARM low half
+    .hword 0xE387                  @ W+6: ARM word W+4 = orr r4, r7, #...
+    .word 0xE2866002               @ W+8:  add r6, r6, #2
+    .word 0xE12FFF15               @ W+12: bx r5
+    .word 0xE12FFF15               @ W+16: bx r5 (safety)
+    cword "thumb-cmp-pc-halfword-restores-spsr", run_thumbpc3, 0, 0x80000012, F_RISKY
+    cword "thumb-cmp-pc-halfword-not-at-a-and-3", RUN_SAME, 4, 0, F_RISKY
+    cbyte "thumb-cmp-pc-halfword-skips-the-add", RUN_SAME, 8, 0, F_RISKY
+    cbyte "thumb-cmp-pc-halfword-clean", RUN_SAME, 9, 1, F_RISKY
+    cword "thumb-cmp-pc-system-mode-no-op", RUN_SAME, 12, 0xC000001F, F_RISKY
+    cbyte "thumb-cmp-pc-system-mode-clean", RUN_SAME, 16, 1, F_RISKY
+
 @ ──────────────────────────── Thumb multiply ──────────────────────────────
 @ WHAT/PROVENANCE: tests/roms/payloads/thumbmul.s -- 64 Thumb multiplies
 @ timed from IWRAM.  AGB SP through the link rig, 2026-09-17: 317 cycles

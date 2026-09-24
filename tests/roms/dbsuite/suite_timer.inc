@@ -70,3 +70,4 @@ run_timers:
 
     payload_blob pl_tmrw, "tmrw.bin"
     .include "gen_timer.inc"
+    .include "gen_sp_timer.inc"

@@ -38,3 +38,4 @@
     cword "arctan2-neg-x",          RUN_SAME, 0x154, 0x8000
     cword "arctan2-neg-y",          RUN_SAME, 0x158, 0xC000
     cword "arctan2-diagonal",       RUN_SAME, 0x15C, 0x2000
+    .include "gen_sp_bios.inc"

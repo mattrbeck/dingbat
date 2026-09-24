@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-09-24 16:59:06 · commit ddc3fad8 · game-boy-test-roms v7.0*
+*Generated: 2026-09-24 17:15:50 · commit f5bca4e2 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1443
-- **Pass:** 1418
-- **Fail:** 25
+- **Pass:** 1417
+- **Fail:** 26
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -22,7 +22,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | GBA - PeterLemon BIOS | 25 | 25 |
 | GBA - Other test ROMs | 10 | 12 |
 | GBA - hwverified (AGS-001) | 12 | 12 |
-| GBA - dbsuite (AGS-001) | 4 | 8 |
+| GBA - dbsuite (AGS-001) | 3 | 8 |
 | GBA - FuzzARM | 5 | 5 |
 | Game Boy - Acid2 | 2 | 2 |
 | Game Boy - MagenTests | 7 | 7 |
@@ -218,18 +218,18 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 12 tests passed.**
 
-## GBA - dbsuite (AGS-001) (4/8)
+## GBA - dbsuite (AGS-001) (3/8)
 
 | Test | Device | Result |
 |------|--------|--------|
-| dbsuite/cpu | — | 👌 102/102 passed |
-| dbsuite/irq | — | 👀 94/101 passed |
-| dbsuite/timer | — | 👌 14/14 passed |
-| dbsuite/dma | — | 👀 215/217 passed |
+| dbsuite/cpu | — | 👀 116/117 passed |
+| dbsuite/irq | — | 👀 138/145 passed |
+| dbsuite/timer | — | 👌 26/26 passed |
+| dbsuite/dma | — | 👀 254/262 passed |
 | dbsuite/bus | — | 👀 70/79 passed |
 | dbsuite/ppu | — | 👌 156/156 passed |
-| dbsuite/apu | — | 👀 19/23 passed |
-| dbsuite/bios | — | 👌 24/24 passed |
+| dbsuite/apu | — | 👀 36/52 passed |
+| dbsuite/bios | — | 👌 47/47 passed |
 
 One row per dbsuite sub-suite (tests/roms/dbsuite). See [detailed results](results_dbsuite.md) for every case that is not a pass.
 

@@ -12,31 +12,31 @@
   },
   {
    "name": "irq",
-   "first": 102
+   "first": 117
   },
   {
    "name": "timer",
-   "first": 203
+   "first": 262
   },
   {
    "name": "dma",
-   "first": 217
+   "first": 288
   },
   {
    "name": "bus",
-   "first": 434
+   "first": 550
   },
   {
    "name": "ppu",
-   "first": 513
+   "first": 629
   },
   {
    "name": "apu",
-   "first": 669
+   "first": 785
   },
   {
    "name": "bios",
-   "first": 692
+   "first": 837
   }
  ],
  "cases": [
@@ -1255,6 +1255,186 @@
   {
    "index": 101,
    "suite": "cpu",
+   "name": "mode-0c-r13-write-lost",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": true,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000000",
+   "hi": "00000000"
+  },
+  {
+   "index": 102,
+   "suite": "cpu",
+   "name": "mode-0c-r14-write-lost",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": true,
+   "offset": 4,
+   "mask": "FFFFFFFF",
+   "lo": "00000000",
+   "hi": "00000000"
+  },
+  {
+   "index": 103,
+   "suite": "cpu",
+   "name": "mode-0c-r12-writable",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": true,
+   "offset": 8,
+   "mask": "FFFFFFFF",
+   "lo": "00000055",
+   "hi": "00000055"
+  },
+  {
+   "index": 104,
+   "suite": "cpu",
+   "name": "mode-0c-caller-r13-kept",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": true,
+   "offset": 12,
+   "mask": "FFFFFFFF",
+   "lo": "00000000",
+   "hi": "00000000"
+  },
+  {
+   "index": 105,
+   "suite": "cpu",
+   "name": "mrs-slot-imm-pc",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": true,
+   "offset": 16,
+   "mask": "FFFFFFFF",
+   "lo": "00000004",
+   "hi": "00000004"
+  },
+  {
+   "index": 106,
+   "suite": "cpu",
+   "name": "mrs-slot-imm-rn",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": true,
+   "offset": 20,
+   "mask": "FFFFFFFF",
+   "lo": "0000002A",
+   "hi": "0000002A"
+  },
+  {
+   "index": 107,
+   "suite": "cpu",
+   "name": "mrs-slot-imm-rd",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": true,
+   "offset": 24,
+   "mask": "FFFFFFFF",
+   "lo": "0000002A",
+   "hi": "0000002A"
+  },
+  {
+   "index": 108,
+   "suite": "cpu",
+   "name": "mrs-slot-imm-rm-unused",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": true,
+   "offset": 28,
+   "mask": "FFFFFFFF",
+   "lo": "000000FE",
+   "hi": "000000FE"
+  },
+  {
+   "index": 109,
+   "suite": "cpu",
+   "name": "mrs-slot-imm-cmp-form",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": true,
+   "offset": 32,
+   "mask": "FFFFFFFF",
+   "lo": "FE012AFE",
+   "hi": "FE012AFE"
+  },
+  {
+   "index": 110,
+   "suite": "cpu",
+   "name": "thumb-cmp-pc-halfword-restores-spsr",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": true,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "80000012",
+   "hi": "80000012"
+  },
+  {
+   "index": 111,
+   "suite": "cpu",
+   "name": "thumb-cmp-pc-halfword-not-at-a-and-3",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": true,
+   "offset": 4,
+   "mask": "FFFFFFFF",
+   "lo": "00000000",
+   "hi": "00000000"
+  },
+  {
+   "index": 112,
+   "suite": "cpu",
+   "name": "thumb-cmp-pc-halfword-skips-the-add",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": true,
+   "offset": 8,
+   "mask": "000000FF",
+   "lo": "00000000",
+   "hi": "00000000"
+  },
+  {
+   "index": 113,
+   "suite": "cpu",
+   "name": "thumb-cmp-pc-halfword-clean",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": true,
+   "offset": 9,
+   "mask": "000000FF",
+   "lo": "00000001",
+   "hi": "00000001"
+  },
+  {
+   "index": 114,
+   "suite": "cpu",
+   "name": "thumb-cmp-pc-system-mode-no-op",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": true,
+   "offset": 12,
+   "mask": "FFFFFFFF",
+   "lo": "C000001F",
+   "hi": "C000001F"
+  },
+  {
+   "index": 115,
+   "suite": "cpu",
+   "name": "thumb-cmp-pc-system-mode-clean",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": true,
+   "offset": 16,
+   "mask": "000000FF",
+   "lo": "00000001",
+   "hi": "00000001"
+  },
+  {
+   "index": 116,
+   "suite": "cpu",
    "name": "thumb-mul-64-iwram-cycles",
    "kind": "range",
    "cartridge_only": false,
@@ -1265,7 +1445,7 @@
    "hi": "0000013D"
   },
   {
-   "index": 102,
+   "index": 117,
    "suite": "irq",
    "name": "irqwin-ime-store-3-insns",
    "kind": "range",
@@ -1277,7 +1457,7 @@
    "hi": "0000000C"
   },
   {
-   "index": 103,
+   "index": 118,
    "suite": "irq",
    "name": "irqwin-msr-clear-i-2-insns",
    "kind": "range",
@@ -1289,7 +1469,7 @@
    "hi": "00000008"
   },
   {
-   "index": 104,
+   "index": 119,
    "suite": "irq",
    "name": "irqwin-ie-store-3-insns",
    "kind": "range",
@@ -1301,7 +1481,7 @@
    "hi": "0000000C"
   },
   {
-   "index": 105,
+   "index": 120,
    "suite": "irq",
    "name": "irqwin-ewram-load-sled",
    "kind": "range",
@@ -1313,7 +1493,7 @@
    "hi": "00000008"
   },
   {
-   "index": 106,
+   "index": 121,
    "suite": "irq",
    "name": "irqwin-mul-sled",
    "kind": "range",
@@ -1325,7 +1505,7 @@
    "hi": "00000008"
   },
   {
-   "index": 107,
+   "index": 122,
    "suite": "irq",
    "name": "irqwin-rom-load-sled",
    "kind": "range",
@@ -1337,7 +1517,7 @@
    "hi": "00000008"
   },
   {
-   "index": 108,
+   "index": 123,
    "suite": "irq",
    "name": "irqwin-mixed-sled",
    "kind": "range",
@@ -1349,7 +1529,7 @@
    "hi": "0000000C"
   },
   {
-   "index": 109,
+   "index": 124,
    "suite": "irq",
    "name": "irqwin-if-ack-race",
    "kind": "range",
@@ -1361,7 +1541,7 @@
    "hi": "0000000A"
   },
   {
-   "index": 110,
+   "index": 125,
    "suite": "irq",
    "name": "irqstorm-p16-no-dma",
    "kind": "range",
@@ -1373,7 +1553,7 @@
    "hi": "FF01002F"
   },
   {
-   "index": 111,
+   "index": 126,
    "suite": "irq",
    "name": "irqstorm-p1-no-dma",
    "kind": "range",
@@ -1385,7 +1565,7 @@
    "hi": "FF01001E"
   },
   {
-   "index": 112,
+   "index": 127,
    "suite": "irq",
    "name": "irqstorm-p16-64-words",
    "kind": "range",
@@ -1397,7 +1577,7 @@
    "hi": "F1010321"
   },
   {
-   "index": 113,
+   "index": 128,
    "suite": "irq",
    "name": "irqstorm-p16-128-words",
    "kind": "range",
@@ -1409,7 +1589,7 @@
    "hi": "F1010621"
   },
   {
-   "index": 114,
+   "index": 129,
    "suite": "irq",
    "name": "irqstorm-p16-1024-words",
    "kind": "range",
@@ -1421,7 +1601,7 @@
    "hi": "F1013021"
   },
   {
-   "index": 115,
+   "index": 130,
    "suite": "irq",
    "name": "irqstorm-p1-1024-words",
    "kind": "range",
@@ -1433,7 +1613,7 @@
    "hi": "FF01301F"
   },
   {
-   "index": 116,
+   "index": 131,
    "suite": "irq",
    "name": "irqstorm-p64-1024-words",
    "kind": "range",
@@ -1445,7 +1625,7 @@
    "hi": "E1013021"
   },
   {
-   "index": 117,
+   "index": 132,
    "suite": "irq",
    "name": "irqstorm-p256-4096-words",
    "kind": "range",
@@ -1457,7 +1637,7 @@
    "hi": "2101C021"
   },
   {
-   "index": 118,
+   "index": 133,
    "suite": "irq",
    "name": "irqlat-tm2-one-write",
    "kind": "range",
@@ -1469,7 +1649,7 @@
    "hi": "0000007C"
   },
   {
-   "index": 119,
+   "index": 134,
    "suite": "irq",
    "name": "irqlat-tm2-two-writes",
    "kind": "range",
@@ -1481,7 +1661,7 @@
    "hi": "00000085"
   },
   {
-   "index": 120,
+   "index": 135,
    "suite": "irq",
    "name": "irqlat-tm2-reload-0000",
    "kind": "range",
@@ -1493,7 +1673,7 @@
    "hi": "00000072"
   },
   {
-   "index": 121,
+   "index": 136,
    "suite": "irq",
    "name": "irqlat-tm2-reload-0001",
    "kind": "range",
@@ -1505,7 +1685,7 @@
    "hi": "00000072"
   },
   {
-   "index": 122,
+   "index": 137,
    "suite": "irq",
    "name": "irqlat-tm2-haltcnt-ignored",
    "kind": "range",
@@ -1517,7 +1697,7 @@
    "hi": "00000087"
   },
   {
-   "index": 123,
+   "index": 138,
    "suite": "irq",
    "name": "irqlat-hblank",
    "kind": "range",
@@ -1529,7 +1709,7 @@
    "hi": "000003DD"
   },
   {
-   "index": 124,
+   "index": 139,
    "suite": "irq",
    "name": "irqlat-hblank-haltcnt",
    "kind": "range",
@@ -1541,7 +1721,7 @@
    "hi": "000003FD"
   },
   {
-   "index": 125,
+   "index": 140,
    "suite": "irq",
    "name": "irqlat-vblank",
    "kind": "range",
@@ -1553,7 +1733,7 @@
    "hi": "000009A9"
   },
   {
-   "index": 126,
+   "index": 141,
    "suite": "irq",
    "name": "irqlat-vblank-haltcnt",
    "kind": "range",
@@ -1565,7 +1745,7 @@
    "hi": "00000994"
   },
   {
-   "index": 127,
+   "index": 142,
    "suite": "irq",
    "name": "irqlat-dma3",
    "kind": "range",
@@ -1577,7 +1757,7 @@
    "hi": "000000B2"
   },
   {
-   "index": 128,
+   "index": 143,
    "suite": "irq",
    "name": "irqlat-dma3-haltcnt",
    "kind": "range",
@@ -1589,7 +1769,7 @@
    "hi": "000000AC"
   },
   {
-   "index": 129,
+   "index": 144,
    "suite": "irq",
    "name": "if-ack-race-j0-3",
    "kind": "range",
@@ -1601,7 +1781,7 @@
    "hi": "00000000"
   },
   {
-   "index": 130,
+   "index": 145,
    "suite": "irq",
    "name": "if-ack-race-j4-5",
    "kind": "range",
@@ -1613,7 +1793,7 @@
    "hi": "00000000"
   },
   {
-   "index": 131,
+   "index": 146,
    "suite": "irq",
    "name": "if-ack-race-j6-7",
    "kind": "range",
@@ -1625,7 +1805,7 @@
    "hi": "00000020"
   },
   {
-   "index": 132,
+   "index": 147,
    "suite": "irq",
    "name": "irqlat-every-irq-arrived",
    "kind": "range",
@@ -1637,7 +1817,7 @@
    "hi": "00000000"
   },
   {
-   "index": 133,
+   "index": 148,
    "suite": "irq",
    "name": "wakeirq-00",
    "kind": "range",
@@ -1649,7 +1829,7 @@
    "hi": "017009A1"
   },
   {
-   "index": 134,
+   "index": 149,
    "suite": "irq",
    "name": "wakeirq-10",
    "kind": "range",
@@ -1661,7 +1841,7 @@
    "hi": "0000099D"
   },
   {
-   "index": 135,
+   "index": 150,
    "suite": "irq",
    "name": "wakeirq-20",
    "kind": "range",
@@ -1673,7 +1853,7 @@
    "hi": "09CB099E"
   },
   {
-   "index": 136,
+   "index": 151,
    "suite": "irq",
    "name": "wakeirq-28",
    "kind": "range",
@@ -1685,7 +1865,7 @@
    "hi": "095F099E"
   },
   {
-   "index": 137,
+   "index": 152,
    "suite": "irq",
    "name": "wakeirq-60",
    "kind": "range",
@@ -1697,7 +1877,7 @@
    "hi": "0AFA099E"
   },
   {
-   "index": 138,
+   "index": 153,
    "suite": "irq",
    "name": "wakeirq-24",
    "kind": "range",
@@ -1709,7 +1889,7 @@
    "hi": "09B10984"
   },
   {
-   "index": 139,
+   "index": 154,
    "suite": "irq",
    "name": "wakeirq-2c",
    "kind": "range",
@@ -1721,7 +1901,7 @@
    "hi": "093F0984"
   },
   {
-   "index": 140,
+   "index": 155,
    "suite": "irq",
    "name": "wakeirq-64",
    "kind": "range",
@@ -1733,7 +1913,7 @@
    "hi": "0B000984"
   },
   {
-   "index": 141,
+   "index": 156,
    "suite": "irq",
    "name": "wakeirq-22",
    "kind": "range",
@@ -1745,7 +1925,7 @@
    "hi": "099E0000"
   },
   {
-   "index": 142,
+   "index": 157,
    "suite": "irq",
    "name": "wakeirq-26",
    "kind": "range",
@@ -1757,7 +1937,7 @@
    "hi": "09840000"
   },
   {
-   "index": 143,
+   "index": 158,
    "suite": "irq",
    "name": "lyc-write-edge",
    "kind": "range",
@@ -1769,7 +1949,7 @@
    "hi": "64101011"
   },
   {
-   "index": 144,
+   "index": 159,
    "suite": "irq",
    "name": "dmamulirq-mul-k1",
    "kind": "range",
@@ -1781,7 +1961,7 @@
    "hi": "6301007C"
   },
   {
-   "index": 145,
+   "index": 160,
    "suite": "irq",
    "name": "dmamulirq-mul-k2",
    "kind": "range",
@@ -1793,7 +1973,7 @@
    "hi": "6301007C"
   },
   {
-   "index": 146,
+   "index": 161,
    "suite": "irq",
    "name": "dmamulirq-mul-k3",
    "kind": "range",
@@ -1805,7 +1985,7 @@
    "hi": "6301007C"
   },
   {
-   "index": 147,
+   "index": 162,
    "suite": "irq",
    "name": "dmamulirq-mul-k4",
    "kind": "range",
@@ -1817,7 +1997,7 @@
    "hi": "64010081"
   },
   {
-   "index": 148,
+   "index": 163,
    "suite": "irq",
    "name": "dmamulirq-mul-k5",
    "kind": "range",
@@ -1829,7 +2009,7 @@
    "hi": "64010081"
   },
   {
-   "index": 149,
+   "index": 164,
    "suite": "irq",
    "name": "dmamulirq-mul-k6",
    "kind": "range",
@@ -1841,7 +2021,7 @@
    "hi": "64010081"
   },
   {
-   "index": 150,
+   "index": 165,
    "suite": "irq",
    "name": "dmamulirq-mul-k7",
    "kind": "range",
@@ -1853,7 +2033,7 @@
    "hi": "64010081"
   },
   {
-   "index": 151,
+   "index": 166,
    "suite": "irq",
    "name": "dmamulirq-mul-k8",
    "kind": "range",
@@ -1865,7 +2045,7 @@
    "hi": "64010081"
   },
   {
-   "index": 152,
+   "index": 167,
    "suite": "irq",
    "name": "dmamulirq-mul-k9",
    "kind": "range",
@@ -1877,7 +2057,7 @@
    "hi": "64010081"
   },
   {
-   "index": 153,
+   "index": 168,
    "suite": "irq",
    "name": "dmamulirq-mul-k10",
    "kind": "range",
@@ -1889,7 +2069,7 @@
    "hi": "64010081"
   },
   {
-   "index": 154,
+   "index": 169,
    "suite": "irq",
    "name": "dmamulirq-mul-k11",
    "kind": "range",
@@ -1901,7 +2081,7 @@
    "hi": "64010081"
   },
   {
-   "index": 155,
+   "index": 170,
    "suite": "irq",
    "name": "dmamulirq-mul-k12",
    "kind": "range",
@@ -1913,7 +2093,7 @@
    "hi": "64010081"
   },
   {
-   "index": 156,
+   "index": 171,
    "suite": "irq",
    "name": "dmamulirq-mul-k13",
    "kind": "range",
@@ -1925,7 +2105,7 @@
    "hi": "64010081"
   },
   {
-   "index": 157,
+   "index": 172,
    "suite": "irq",
    "name": "dmamulirq-mul-k14",
    "kind": "range",
@@ -1937,7 +2117,7 @@
    "hi": "64010081"
   },
   {
-   "index": 158,
+   "index": 173,
    "suite": "irq",
    "name": "dmamulirq-mul-k15",
    "kind": "range",
@@ -1949,7 +2129,7 @@
    "hi": "64010081"
   },
   {
-   "index": 159,
+   "index": 174,
    "suite": "irq",
    "name": "dmamulirq-mul-k16",
    "kind": "range",
@@ -1961,7 +2141,7 @@
    "hi": "64010081"
   },
   {
-   "index": 160,
+   "index": 175,
    "suite": "irq",
    "name": "dmamulirq-mul-k22",
    "kind": "range",
@@ -1973,7 +2153,7 @@
    "hi": "64010081"
   },
   {
-   "index": 161,
+   "index": 176,
    "suite": "irq",
    "name": "dmamulirq-mul-k42",
    "kind": "range",
@@ -1985,7 +2165,7 @@
    "hi": "64010081"
   },
   {
-   "index": 162,
+   "index": 177,
    "suite": "irq",
    "name": "dmamulirq-mul-k62",
    "kind": "range",
@@ -1997,7 +2177,7 @@
    "hi": "64010081"
   },
   {
-   "index": 163,
+   "index": 178,
    "suite": "irq",
    "name": "dmamulirq-mul-k82",
    "kind": "range",
@@ -2009,7 +2189,7 @@
    "hi": "64010081"
   },
   {
-   "index": 164,
+   "index": 179,
    "suite": "irq",
    "name": "dmamulirq-mul-k102",
    "kind": "range",
@@ -2021,7 +2201,7 @@
    "hi": "64010081"
   },
   {
-   "index": 165,
+   "index": 180,
    "suite": "irq",
    "name": "dmamulirq-mul-k122",
    "kind": "range",
@@ -2033,7 +2213,7 @@
    "hi": "68010095"
   },
   {
-   "index": 166,
+   "index": 181,
    "suite": "irq",
    "name": "dmamulirq-mul-k106",
    "kind": "range",
@@ -2045,7 +2225,7 @@
    "hi": "65010086"
   },
   {
-   "index": 167,
+   "index": 182,
    "suite": "irq",
    "name": "dmamulirq-mul-k110",
    "kind": "range",
@@ -2057,7 +2237,7 @@
    "hi": "6601008B"
   },
   {
-   "index": 168,
+   "index": 183,
    "suite": "irq",
    "name": "dmamulirq-mul-k114",
    "kind": "range",
@@ -2069,7 +2249,7 @@
    "hi": "67010090"
   },
   {
-   "index": 169,
+   "index": 184,
    "suite": "irq",
    "name": "dmamulirq-mul-k118",
    "kind": "range",
@@ -2081,7 +2261,7 @@
    "hi": "67010090"
   },
   {
-   "index": 170,
+   "index": 185,
    "suite": "irq",
    "name": "dmamulirq-ewram-ldr-k1",
    "kind": "range",
@@ -2093,7 +2273,7 @@
    "hi": "92010081"
   },
   {
-   "index": 171,
+   "index": 186,
    "suite": "irq",
    "name": "dmamulirq-ewram-ldr-k2",
    "kind": "range",
@@ -2105,7 +2285,7 @@
    "hi": "92010081"
   },
   {
-   "index": 172,
+   "index": 187,
    "suite": "irq",
    "name": "dmamulirq-ewram-ldr-k3",
    "kind": "range",
@@ -2117,7 +2297,7 @@
    "hi": "92010081"
   },
   {
-   "index": 173,
+   "index": 188,
    "suite": "irq",
    "name": "dmamulirq-ewram-ldr-k4",
    "kind": "range",
@@ -2129,7 +2309,7 @@
    "hi": "92010081"
   },
   {
-   "index": 174,
+   "index": 189,
    "suite": "irq",
    "name": "dmamulirq-ewram-ldr-k5",
    "kind": "range",
@@ -2141,7 +2321,7 @@
    "hi": "92010081"
   },
   {
-   "index": 175,
+   "index": 190,
    "suite": "irq",
    "name": "dmamulirq-ewram-ldr-k6",
    "kind": "range",
@@ -2153,7 +2333,7 @@
    "hi": "92010081"
   },
   {
-   "index": 176,
+   "index": 191,
    "suite": "irq",
    "name": "dmamulirq-ewram-ldr-k7",
    "kind": "range",
@@ -2165,7 +2345,7 @@
    "hi": "93010089"
   },
   {
-   "index": 177,
+   "index": 192,
    "suite": "irq",
    "name": "dmamulirq-ewram-ldr-k8",
    "kind": "range",
@@ -2177,7 +2357,7 @@
    "hi": "93010089"
   },
   {
-   "index": 178,
+   "index": 193,
    "suite": "irq",
    "name": "dmamulirq-ewram-ldr-k9",
    "kind": "range",
@@ -2189,7 +2369,7 @@
    "hi": "93010089"
   },
   {
-   "index": 179,
+   "index": 194,
    "suite": "irq",
    "name": "dmamulirq-ewram-ldr-k10",
    "kind": "range",
@@ -2201,7 +2381,7 @@
    "hi": "93010089"
   },
   {
-   "index": 180,
+   "index": 195,
    "suite": "irq",
    "name": "dmamulirq-ewram-ldr-k11",
    "kind": "range",
@@ -2213,7 +2393,7 @@
    "hi": "93010089"
   },
   {
-   "index": 181,
+   "index": 196,
    "suite": "irq",
    "name": "dmamulirq-ewram-ldr-k12",
    "kind": "range",
@@ -2225,7 +2405,7 @@
    "hi": "93010089"
   },
   {
-   "index": 182,
+   "index": 197,
    "suite": "irq",
    "name": "dmamulirq-ewram-ldr-k13",
    "kind": "range",
@@ -2237,7 +2417,7 @@
    "hi": "93010089"
   },
   {
-   "index": 183,
+   "index": 198,
    "suite": "irq",
    "name": "dmamulirq-ewram-ldr-k14",
    "kind": "range",
@@ -2249,7 +2429,7 @@
    "hi": "93010089"
   },
   {
-   "index": 184,
+   "index": 199,
    "suite": "irq",
    "name": "dmamulirq-ewram-ldr-k15",
    "kind": "range",
@@ -2261,7 +2441,7 @@
    "hi": "93010089"
   },
   {
-   "index": 185,
+   "index": 200,
    "suite": "irq",
    "name": "dmamulirq-ewram-ldr-k16",
    "kind": "range",
@@ -2273,7 +2453,7 @@
    "hi": "93010089"
   },
   {
-   "index": 186,
+   "index": 201,
    "suite": "irq",
    "name": "dmamulirq-ewram-ldr-k22",
    "kind": "range",
@@ -2285,7 +2465,7 @@
    "hi": "93010089"
   },
   {
-   "index": 187,
+   "index": 202,
    "suite": "irq",
    "name": "dmamulirq-ewram-ldr-k42",
    "kind": "range",
@@ -2297,7 +2477,7 @@
    "hi": "93010089"
   },
   {
-   "index": 188,
+   "index": 203,
    "suite": "irq",
    "name": "dmamulirq-ewram-ldr-k62",
    "kind": "range",
@@ -2309,7 +2489,7 @@
    "hi": "93010089"
   },
   {
-   "index": 189,
+   "index": 204,
    "suite": "irq",
    "name": "dmamulirq-ewram-ldr-k82",
    "kind": "range",
@@ -2321,7 +2501,7 @@
    "hi": "93010089"
   },
   {
-   "index": 190,
+   "index": 205,
    "suite": "irq",
    "name": "dmamulirq-ewram-ldr-k102",
    "kind": "range",
@@ -2333,7 +2513,7 @@
    "hi": "93010089"
   },
   {
-   "index": 191,
+   "index": 206,
    "suite": "irq",
    "name": "dmamulirq-ewram-ldr-k122",
    "kind": "range",
@@ -2345,7 +2525,7 @@
    "hi": "95010099"
   },
   {
-   "index": 192,
+   "index": 207,
    "suite": "irq",
    "name": "dmamulirq-ewram-ldr-k106",
    "kind": "range",
@@ -2357,7 +2537,7 @@
    "hi": "93010089"
   },
   {
-   "index": 193,
+   "index": 208,
    "suite": "irq",
    "name": "dmamulirq-ewram-ldr-k110",
    "kind": "range",
@@ -2369,7 +2549,7 @@
    "hi": "93010089"
   },
   {
-   "index": 194,
+   "index": 209,
    "suite": "irq",
    "name": "dmamulirq-ewram-ldr-k114",
    "kind": "range",
@@ -2381,7 +2561,7 @@
    "hi": "94010091"
   },
   {
-   "index": 195,
+   "index": 210,
    "suite": "irq",
    "name": "dmamulirq-ewram-ldr-k118",
    "kind": "range",
@@ -2393,7 +2573,7 @@
    "hi": "94010091"
   },
   {
-   "index": 196,
+   "index": 211,
    "suite": "irq",
    "name": "dmamulirq-no-dma-k2",
    "kind": "range",
@@ -2405,7 +2585,7 @@
    "hi": "CD01001D"
   },
   {
-   "index": 197,
+   "index": 212,
    "suite": "irq",
    "name": "dmamulirq-no-dma-k22",
    "kind": "range",
@@ -2417,7 +2597,7 @@
    "hi": "D1010031"
   },
   {
-   "index": 198,
+   "index": 213,
    "suite": "irq",
    "name": "dmamulirq-no-dma-k42",
    "kind": "range",
@@ -2429,7 +2609,7 @@
    "hi": "D5010045"
   },
   {
-   "index": 199,
+   "index": 214,
    "suite": "irq",
    "name": "dmamulirq-no-dma-k62",
    "kind": "range",
@@ -2441,7 +2621,7 @@
    "hi": "DC010058"
   },
   {
-   "index": 200,
+   "index": 215,
    "suite": "irq",
    "name": "dmamulirq-no-dma-k82",
    "kind": "range",
@@ -2453,7 +2633,7 @@
    "hi": "F001006C"
   },
   {
-   "index": 201,
+   "index": 216,
    "suite": "irq",
    "name": "dmamulirq-no-dma-k102",
    "kind": "range",
@@ -2465,7 +2645,7 @@
    "hi": "38010080"
   },
   {
-   "index": 202,
+   "index": 217,
    "suite": "irq",
    "name": "dmamulirq-no-dma-k122",
    "kind": "range",
@@ -2477,7 +2657,535 @@
    "hi": "38010094"
   },
   {
-   "index": 203,
+   "index": 218,
+   "suite": "irq",
+   "name": "dmairq-poll-iwram-n1",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "6001002B",
+   "hi": "6001002B"
+  },
+  {
+   "index": 219,
+   "suite": "irq",
+   "name": "dmairq-poll-iwram-n2",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "60010037",
+   "hi": "60010037"
+  },
+  {
+   "index": 220,
+   "suite": "irq",
+   "name": "dmairq-poll-iwram-n4",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "6001004F",
+   "hi": "6001004F"
+  },
+  {
+   "index": 221,
+   "suite": "irq",
+   "name": "dmairq-poll-iwram-n16",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "600100DF",
+   "hi": "600100DF"
+  },
+  {
+   "index": 222,
+   "suite": "irq",
+   "name": "dmairq-poll-iwram-n64",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "6001031F",
+   "hi": "6001031F"
+  },
+  {
+   "index": 223,
+   "suite": "irq",
+   "name": "dmairq-poll-ewram-n1",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "68010030",
+   "hi": "68010030"
+  },
+  {
+   "index": 224,
+   "suite": "irq",
+   "name": "dmairq-poll-ewram-n2",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "6801003C",
+   "hi": "6801003C"
+  },
+  {
+   "index": 225,
+   "suite": "irq",
+   "name": "dmairq-poll-ewram-n4",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "68010054",
+   "hi": "68010054"
+  },
+  {
+   "index": 226,
+   "suite": "irq",
+   "name": "dmairq-poll-ewram-n16",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "680100E4",
+   "hi": "680100E4"
+  },
+  {
+   "index": 227,
+   "suite": "irq",
+   "name": "dmairq-poll-ewram-n64",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "68010324",
+   "hi": "68010324"
+  },
+  {
+   "index": 228,
+   "suite": "irq",
+   "name": "dmairq-nop-sled-n1",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "7101002B",
+   "hi": "7101002B"
+  },
+  {
+   "index": 229,
+   "suite": "irq",
+   "name": "dmairq-nop-sled-n2",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "71010037",
+   "hi": "71010037"
+  },
+  {
+   "index": 230,
+   "suite": "irq",
+   "name": "dmairq-nop-sled-n4",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "7101004F",
+   "hi": "7101004F"
+  },
+  {
+   "index": 231,
+   "suite": "irq",
+   "name": "dmairq-nop-sled-n16",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "710100DF",
+   "hi": "710100DF"
+  },
+  {
+   "index": 232,
+   "suite": "irq",
+   "name": "dmairq-nop-sled-n64",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "7101031F",
+   "hi": "7101031F"
+  },
+  {
+   "index": 233,
+   "suite": "irq",
+   "name": "irqwait-iwram-arm-k16",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "0111002A",
+   "hi": "0111002A"
+  },
+  {
+   "index": 234,
+   "suite": "irq",
+   "name": "irqwait-iwram-arm-k24",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "01190032",
+   "hi": "01190032"
+  },
+  {
+   "index": 235,
+   "suite": "irq",
+   "name": "irqwait-ewram-arm-k17",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "0103003A",
+   "hi": "0103003A"
+  },
+  {
+   "index": 236,
+   "suite": "irq",
+   "name": "irqwait-ewram-arm-k18",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "0103003A",
+   "hi": "0103003A"
+  },
+  {
+   "index": 237,
+   "suite": "irq",
+   "name": "irqwait-ewram-arm-k19",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "0103003A",
+   "hi": "0103003A"
+  },
+  {
+   "index": 238,
+   "suite": "irq",
+   "name": "irqwait-ewram-arm-k20",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "0103003A",
+   "hi": "0103003A"
+  },
+  {
+   "index": 239,
+   "suite": "irq",
+   "name": "irqwait-ewram-arm-k21",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "0103003A",
+   "hi": "0103003A"
+  },
+  {
+   "index": 240,
+   "suite": "irq",
+   "name": "irqwait-ewram-arm-k22",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "0103003A",
+   "hi": "0103003A"
+  },
+  {
+   "index": 241,
+   "suite": "irq",
+   "name": "irqwait-ewram-thumb-k17",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "01060031",
+   "hi": "01060031"
+  },
+  {
+   "index": 242,
+   "suite": "irq",
+   "name": "irqwait-ewram-thumb-k18",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "01060031",
+   "hi": "01060031"
+  },
+  {
+   "index": 243,
+   "suite": "irq",
+   "name": "irqwait-ewram-thumb-k19",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "01060031",
+   "hi": "01060031"
+  },
+  {
+   "index": 244,
+   "suite": "irq",
+   "name": "irqwait-iwram-thumb-k16",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "0111002A",
+   "hi": "0111002A"
+  },
+  {
+   "index": 245,
+   "suite": "irq",
+   "name": "irqwait-iwram-thumb-k24",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "01190032",
+   "hi": "01190032"
+  },
+  {
+   "index": 246,
+   "suite": "irq",
+   "name": "haltprobe-strb-haltcnt-tm0",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 256,
+   "mask": "FFFFFFFF",
+   "lo": "0000000B",
+   "hi": "0000000B"
+  },
+  {
+   "index": 247,
+   "suite": "irq",
+   "name": "haltprobe-strb-haltcnt-vcount",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 260,
+   "mask": "0000FFFF",
+   "lo": "00000064",
+   "hi": "00000064"
+  },
+  {
+   "index": 248,
+   "suite": "irq",
+   "name": "haltprobe-swi2-tm0",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 256,
+   "mask": "FFFFFFFF",
+   "lo": "00001343",
+   "hi": "00001349"
+  },
+  {
+   "index": 249,
+   "suite": "irq",
+   "name": "haltprobe-swi2-vcount",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 260,
+   "mask": "0000FFFF",
+   "lo": "00000068",
+   "hi": "00000068"
+  },
+  {
+   "index": 250,
+   "suite": "irq",
+   "name": "vbwait-vblank-t0-T",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 256,
+   "mask": "FFFFFFFF",
+   "lo": "0000094B",
+   "hi": "0000094B"
+  },
+  {
+   "index": 251,
+   "suite": "irq",
+   "name": "vbwait-vblank-t0-R",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 260,
+   "mask": "FFFFFFFF",
+   "lo": "0000210F",
+   "hi": "0000210F"
+  },
+  {
+   "index": 252,
+   "suite": "irq",
+   "name": "vbwait-vblank-t0-H",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 264,
+   "mask": "FFFFFFFF",
+   "lo": "000020BD",
+   "hi": "000020BD"
+  },
+  {
+   "index": 253,
+   "suite": "irq",
+   "name": "vbwait-vblank-t5-T",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 316,
+   "mask": "FFFFFFFF",
+   "lo": "0000094B",
+   "hi": "0000094B"
+  },
+  {
+   "index": 254,
+   "suite": "irq",
+   "name": "vbwait-vblank-t5-R",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 320,
+   "mask": "FFFFFFFF",
+   "lo": "0000210F",
+   "hi": "0000210F"
+  },
+  {
+   "index": 255,
+   "suite": "irq",
+   "name": "vbwait-vblank-t5-H",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 324,
+   "mask": "FFFFFFFF",
+   "lo": "000020BD",
+   "hi": "000020BD"
+  },
+  {
+   "index": 256,
+   "suite": "irq",
+   "name": "vbwait-vcount160-t0-T",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 256,
+   "mask": "FFFFFFFF",
+   "lo": "0000094A",
+   "hi": "0000094A"
+  },
+  {
+   "index": 257,
+   "suite": "irq",
+   "name": "vbwait-vcount160-t0-R",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 260,
+   "mask": "FFFFFFFF",
+   "lo": "00002110",
+   "hi": "00002110"
+  },
+  {
+   "index": 258,
+   "suite": "irq",
+   "name": "vbwait-vcount160-t0-H",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 264,
+   "mask": "FFFFFFFF",
+   "lo": "000020BE",
+   "hi": "000020BE"
+  },
+  {
+   "index": 259,
+   "suite": "irq",
+   "name": "vbwait-vcount160-t5-T",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 316,
+   "mask": "FFFFFFFF",
+   "lo": "0000094A",
+   "hi": "0000094A"
+  },
+  {
+   "index": 260,
+   "suite": "irq",
+   "name": "vbwait-vcount160-t5-R",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 320,
+   "mask": "FFFFFFFF",
+   "lo": "00002110",
+   "hi": "00002110"
+  },
+  {
+   "index": 261,
+   "suite": "irq",
+   "name": "vbwait-vcount160-t5-H",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 324,
+   "mask": "FFFFFFFF",
+   "lo": "000020BE",
+   "hi": "000020BE"
+  },
+  {
+   "index": 262,
    "suite": "timer",
    "name": "start-then-read",
    "kind": "range",
@@ -2489,7 +3197,7 @@
    "hi": "00000007"
   },
   {
-   "index": 204,
+   "index": 263,
    "suite": "timer",
    "name": "second-read",
    "kind": "range",
@@ -2501,7 +3209,7 @@
    "hi": "00000011"
   },
   {
-   "index": 205,
+   "index": 264,
    "suite": "timer",
    "name": "cascade-counts-overflows",
    "kind": "range",
@@ -2513,7 +3221,7 @@
    "hi": "00000033"
   },
   {
-   "index": 206,
+   "index": 265,
    "suite": "timer",
    "name": "cascade-source-reloaded",
    "kind": "range",
@@ -2525,7 +3233,7 @@
    "hi": "0000FFFC"
   },
   {
-   "index": 207,
+   "index": 266,
    "suite": "timer",
    "name": "reload-write-running-no-latch",
    "kind": "range",
@@ -2537,7 +3245,7 @@
    "hi": "00000021"
   },
   {
-   "index": 208,
+   "index": 267,
    "suite": "timer",
    "name": "reload-taken-on-start",
    "kind": "range",
@@ -2549,7 +3257,7 @@
    "hi": "0000123B"
   },
   {
-   "index": 209,
+   "index": 268,
    "suite": "timer",
    "name": "timer-read-vs-stop-00",
    "kind": "range",
@@ -2561,7 +3269,7 @@
    "hi": "0007000F"
   },
   {
-   "index": 210,
+   "index": 269,
    "suite": "timer",
    "name": "timer-read-vs-stop-01",
    "kind": "range",
@@ -2573,7 +3281,7 @@
    "hi": "00080010"
   },
   {
-   "index": 211,
+   "index": 270,
    "suite": "timer",
    "name": "timer-read-vs-stop-02",
    "kind": "range",
@@ -2585,7 +3293,7 @@
    "hi": "00090011"
   },
   {
-   "index": 212,
+   "index": 271,
    "suite": "timer",
    "name": "timer-read-vs-stop-10",
    "kind": "range",
@@ -2597,7 +3305,7 @@
    "hi": "0008000F"
   },
   {
-   "index": 213,
+   "index": 272,
    "suite": "timer",
    "name": "timer-read-vs-stop-11",
    "kind": "range",
@@ -2609,7 +3317,7 @@
    "hi": "00090010"
   },
   {
-   "index": 214,
+   "index": 273,
    "suite": "timer",
    "name": "timer-read-vs-stop-20",
    "kind": "range",
@@ -2621,7 +3329,7 @@
    "hi": "00090011"
   },
   {
-   "index": 215,
+   "index": 274,
    "suite": "timer",
    "name": "timer-read-vs-stop-21",
    "kind": "range",
@@ -2633,7 +3341,7 @@
    "hi": "000A0012"
   },
   {
-   "index": 216,
+   "index": 275,
    "suite": "timer",
    "name": "timer-read-vs-stop-30",
    "kind": "range",
@@ -2645,7 +3353,151 @@
    "hi": "000A0011"
   },
   {
-   "index": 217,
+   "index": 276,
+   "suite": "timer",
+   "name": "timergeo-p1-line100",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "04B404B9",
+   "hi": "04B404B9"
+  },
+  {
+   "index": 277,
+   "suite": "timer",
+   "name": "timergeo-p64-line100",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "001304B9",
+   "hi": "001304B9"
+  },
+  {
+   "index": 278,
+   "suite": "timer",
+   "name": "timergeo-p64-line101",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "001304B9",
+   "hi": "001304B9"
+  },
+  {
+   "index": 279,
+   "suite": "timer",
+   "name": "timergeo-p64-line102",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "001304B9",
+   "hi": "001304B9"
+  },
+  {
+   "index": 280,
+   "suite": "timer",
+   "name": "timergeo-p64-line103",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "001204B9",
+   "hi": "001204B9"
+  },
+  {
+   "index": 281,
+   "suite": "timer",
+   "name": "timergeo-p64-line104",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "001304B9",
+   "hi": "001304B9"
+  },
+  {
+   "index": 282,
+   "suite": "timer",
+   "name": "timergeo-p64-line105",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "001304B9",
+   "hi": "001304B9"
+  },
+  {
+   "index": 283,
+   "suite": "timer",
+   "name": "timergeo-p64-line106",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "001304B9",
+   "hi": "001304B9"
+  },
+  {
+   "index": 284,
+   "suite": "timer",
+   "name": "timergeo-p64-line107",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "001204B9",
+   "hi": "001204B9"
+  },
+  {
+   "index": 285,
+   "suite": "timer",
+   "name": "timergeo-p64-line103-e16",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "001304C9",
+   "hi": "001304C9"
+  },
+  {
+   "index": 286,
+   "suite": "timer",
+   "name": "timergeo-p64-line103-e32",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "001304D9",
+   "hi": "001304D9"
+  },
+  {
+   "index": 287,
+   "suite": "timer",
+   "name": "timergeo-p64-line103-e48",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "001304E9",
+   "hi": "001304E9"
+  },
+  {
+   "index": 288,
    "suite": "dma",
    "name": "cnth-hi-80-runs",
    "kind": "range",
@@ -2657,7 +3509,7 @@
    "hi": "00000001"
   },
   {
-   "index": 218,
+   "index": 289,
    "suite": "dma",
    "name": "cnth-hi-80-reads-0080",
    "kind": "range",
@@ -2669,7 +3521,7 @@
    "hi": "00000080"
   },
   {
-   "index": 219,
+   "index": 290,
    "suite": "dma",
    "name": "cnth-lo-80-no-run",
    "kind": "range",
@@ -2681,7 +3533,7 @@
    "hi": "00000000"
   },
   {
-   "index": 220,
+   "index": 291,
    "suite": "dma",
    "name": "cnth-lo-80-stores-nothing",
    "kind": "range",
@@ -2693,7 +3545,7 @@
    "hi": "00000000"
   },
   {
-   "index": 221,
+   "index": 292,
    "suite": "dma",
    "name": "cnth-lo-44-control",
    "kind": "range",
@@ -2705,7 +3557,7 @@
    "hi": "00000040"
   },
   {
-   "index": 222,
+   "index": 293,
    "suite": "dma",
    "name": "cnth-hi-44-control",
    "kind": "range",
@@ -2717,7 +3569,7 @@
    "hi": "00004400"
   },
   {
-   "index": 223,
+   "index": 294,
    "suite": "dma",
    "name": "cnth-hi-c0-runs",
    "kind": "range",
@@ -2729,7 +3581,7 @@
    "hi": "00000001"
   },
   {
-   "index": 224,
+   "index": 295,
    "suite": "dma",
    "name": "cnth-hi-c0-bit7-only-mirrors",
    "kind": "range",
@@ -2741,7 +3593,7 @@
    "hi": "00004080"
   },
   {
-   "index": 225,
+   "index": 296,
    "suite": "dma",
    "name": "cnth-lo-c0-bit7-dropped",
    "kind": "range",
@@ -2753,7 +3605,7 @@
    "hi": "00000040"
   },
   {
-   "index": 226,
+   "index": 297,
    "suite": "dma",
    "name": "cnth-hi-40-no-run",
    "kind": "range",
@@ -2765,7 +3617,7 @@
    "hi": "00000000"
   },
   {
-   "index": 227,
+   "index": 298,
    "suite": "dma",
    "name": "cnth-hi-40-control",
    "kind": "range",
@@ -2777,7 +3629,7 @@
    "hi": "00004000"
   },
   {
-   "index": 228,
+   "index": 299,
    "suite": "dma",
    "name": "capture-frame-1-every-line",
    "kind": "range",
@@ -2789,7 +3641,7 @@
    "hi": "00000280"
   },
   {
-   "index": 229,
+   "index": 300,
    "suite": "dma",
    "name": "capture-frame-2",
    "kind": "range",
@@ -2801,7 +3653,7 @@
    "hi": "00000280"
   },
   {
-   "index": 230,
+   "index": 301,
    "suite": "dma",
    "name": "capture-frame-3",
    "kind": "range",
@@ -2813,7 +3665,7 @@
    "hi": "00000280"
   },
   {
-   "index": 231,
+   "index": 302,
    "suite": "dma",
    "name": "capture-enable-self-clears",
    "kind": "range",
@@ -2825,7 +3677,7 @@
    "hi": "00003700"
   },
   {
-   "index": 232,
+   "index": 303,
    "suite": "dma",
    "name": "capture-rearm-1",
    "kind": "range",
@@ -2837,7 +3689,7 @@
    "hi": "00000280"
   },
   {
-   "index": 233,
+   "index": 304,
    "suite": "dma",
    "name": "capture-rearm-2",
    "kind": "range",
@@ -2849,7 +3701,7 @@
    "hi": "00000280"
   },
   {
-   "index": 234,
+   "index": 305,
    "suite": "dma",
    "name": "capture-rearm-3",
    "kind": "range",
@@ -2861,7 +3713,7 @@
    "hi": "00000280"
   },
   {
-   "index": 235,
+   "index": 306,
    "suite": "dma",
    "name": "capture-rearm-self-clears",
    "kind": "range",
@@ -2873,7 +3725,7 @@
    "hi": "00003700"
   },
   {
-   "index": 236,
+   "index": 307,
    "suite": "dma",
    "name": "imm-dma-none",
    "kind": "range",
@@ -2885,7 +3737,7 @@
    "hi": "00000006"
   },
   {
-   "index": 237,
+   "index": 308,
    "suite": "dma",
    "name": "imm-dma-1-word",
    "kind": "range",
@@ -2897,7 +3749,7 @@
    "hi": "00000014"
   },
   {
-   "index": 238,
+   "index": 309,
    "suite": "dma",
    "name": "imm-dma-2-words",
    "kind": "range",
@@ -2909,7 +3761,7 @@
    "hi": "00000020"
   },
   {
-   "index": 239,
+   "index": 310,
    "suite": "dma",
    "name": "imm-dma-4-words",
    "kind": "range",
@@ -2921,7 +3773,7 @@
    "hi": "00000038"
   },
   {
-   "index": 240,
+   "index": 311,
    "suite": "dma",
    "name": "imm-dma-64-words",
    "kind": "range",
@@ -2933,7 +3785,7 @@
    "hi": "00000308"
   },
   {
-   "index": 241,
+   "index": 312,
    "suite": "dma",
    "name": "imm-dma-1024-words",
    "kind": "range",
@@ -2945,7 +3797,7 @@
    "hi": "00003008"
   },
   {
-   "index": 242,
+   "index": 313,
    "suite": "dma",
    "name": "imm-dma-4096-words",
    "kind": "range",
@@ -2957,7 +3809,7 @@
    "hi": "0000C008"
   },
   {
-   "index": 243,
+   "index": 314,
    "suite": "dma",
    "name": "imm-dma-1-halfword",
    "kind": "range",
@@ -2969,7 +3821,7 @@
    "hi": "0000000E"
   },
   {
-   "index": 244,
+   "index": 315,
    "suite": "dma",
    "name": "imm-dma-2-halfwords",
    "kind": "range",
@@ -2981,7 +3833,7 @@
    "hi": "00000014"
   },
   {
-   "index": 245,
+   "index": 316,
    "suite": "dma",
    "name": "imm-dma-64-halfwords",
    "kind": "range",
@@ -2993,7 +3845,7 @@
    "hi": "00000188"
   },
   {
-   "index": 246,
+   "index": 317,
    "suite": "dma",
    "name": "unmapped-src-after-ldrsh-odd",
    "kind": "range",
@@ -3005,7 +3857,7 @@
    "hi": "FF24FF24"
   },
   {
-   "index": 247,
+   "index": 318,
    "suite": "dma",
    "name": "unmapped-src-after-ldrh",
    "kind": "range",
@@ -3017,7 +3869,7 @@
    "hi": "FF24FF24"
   },
   {
-   "index": 248,
+   "index": 319,
    "suite": "dma",
    "name": "unmapped-src-after-ldrb",
    "kind": "range",
@@ -3029,7 +3881,7 @@
    "hi": "FFFFFFFF"
   },
   {
-   "index": 249,
+   "index": 320,
    "suite": "dma",
    "name": "unmapped-src-no-load-opcode",
    "kind": "range",
@@ -3041,7 +3893,7 @@
    "hi": "46C046C0"
   },
   {
-   "index": 250,
+   "index": 321,
    "suite": "dma",
    "name": "unmapped-src-after-ldr",
    "kind": "range",
@@ -3053,7 +3905,7 @@
    "hi": "11223344"
   },
   {
-   "index": 251,
+   "index": 322,
    "suite": "dma",
    "name": "bus-iw-thumb-adds",
    "kind": "range",
@@ -3065,7 +3917,7 @@
    "hi": "31033104"
   },
   {
-   "index": 252,
+   "index": 323,
    "suite": "dma",
    "name": "bus-iw-ldrh-lo",
    "kind": "range",
@@ -3077,7 +3929,7 @@
    "hi": "46C03344"
   },
   {
-   "index": 253,
+   "index": 324,
    "suite": "dma",
    "name": "bus-iw-ldrh-hi",
    "kind": "range",
@@ -3089,7 +3941,7 @@
    "hi": "112246C0"
   },
   {
-   "index": 254,
+   "index": 325,
    "suite": "dma",
    "name": "bus-iw-ldrb-0",
    "kind": "range",
@@ -3101,7 +3953,7 @@
    "hi": "46C04644"
   },
   {
-   "index": 255,
+   "index": 326,
    "suite": "dma",
    "name": "bus-iw-ldrb-1",
    "kind": "range",
@@ -3113,7 +3965,7 @@
    "hi": "46C033C0"
   },
   {
-   "index": 256,
+   "index": 327,
    "suite": "dma",
    "name": "bus-iw-ldrb-2",
    "kind": "range",
@@ -3125,7 +3977,7 @@
    "hi": "462246C0"
   },
   {
-   "index": 257,
+   "index": 328,
    "suite": "dma",
    "name": "bus-iw-ldrb-3",
    "kind": "range",
@@ -3137,7 +3989,7 @@
    "hi": "11C046C0"
   },
   {
-   "index": 258,
+   "index": 329,
    "suite": "dma",
    "name": "bus-iw-store-then-fetch",
    "kind": "range",
@@ -3149,7 +4001,7 @@
    "hi": "46C046C0"
   },
   {
-   "index": 259,
+   "index": 330,
    "suite": "dma",
    "name": "bus-iw-ldr",
    "kind": "range",
@@ -3161,7 +4013,7 @@
    "hi": "11223344"
   },
   {
-   "index": 260,
+   "index": 331,
    "suite": "dma",
    "name": "bus-iw-arm-adds",
    "kind": "range",
@@ -3173,7 +4025,7 @@
    "hi": "E2811004"
   },
   {
-   "index": 261,
+   "index": 332,
    "suite": "dma",
    "name": "bus-iw-ldrh-ewram",
    "kind": "range",
@@ -3185,7 +4037,7 @@
    "hi": "55665566"
   },
   {
-   "index": 262,
+   "index": 333,
    "suite": "dma",
    "name": "bus-iw-arm-ldr",
    "kind": "range",
@@ -3197,7 +4049,7 @@
    "hi": "11223344"
   },
   {
-   "index": 263,
+   "index": 334,
    "suite": "dma",
    "name": "bus-iw-arm-ldrh-hi",
    "kind": "range",
@@ -3209,7 +4061,7 @@
    "hi": "11220000"
   },
   {
-   "index": 264,
+   "index": 335,
    "suite": "dma",
    "name": "bus-ew-thumb-adds",
    "kind": "range",
@@ -3221,7 +4073,7 @@
    "hi": "31033103"
   },
   {
-   "index": 265,
+   "index": 336,
    "suite": "dma",
    "name": "bus-ew-ldrh-lo",
    "kind": "range",
@@ -3233,7 +4085,7 @@
    "hi": "46C046C0"
   },
   {
-   "index": 266,
+   "index": 337,
    "suite": "dma",
    "name": "bus-ew-ldrh-hi",
    "kind": "range",
@@ -3245,7 +4097,7 @@
    "hi": "46C046C0"
   },
   {
-   "index": 267,
+   "index": 338,
    "suite": "dma",
    "name": "bus-ew-ldrb-0",
    "kind": "range",
@@ -3257,7 +4109,7 @@
    "hi": "46C046C0"
   },
   {
-   "index": 268,
+   "index": 339,
    "suite": "dma",
    "name": "bus-ew-ldrb-1",
    "kind": "range",
@@ -3269,7 +4121,7 @@
    "hi": "46C046C0"
   },
   {
-   "index": 269,
+   "index": 340,
    "suite": "dma",
    "name": "bus-ew-ldrb-2",
    "kind": "range",
@@ -3281,7 +4133,7 @@
    "hi": "46C046C0"
   },
   {
-   "index": 270,
+   "index": 341,
    "suite": "dma",
    "name": "bus-ew-ldrb-3",
    "kind": "range",
@@ -3293,7 +4145,7 @@
    "hi": "46C046C0"
   },
   {
-   "index": 271,
+   "index": 342,
    "suite": "dma",
    "name": "bus-ew-store-then-fetch",
    "kind": "range",
@@ -3305,7 +4157,7 @@
    "hi": "46C046C0"
   },
   {
-   "index": 272,
+   "index": 343,
    "suite": "dma",
    "name": "bus-ew-ldr",
    "kind": "range",
@@ -3317,7 +4169,7 @@
    "hi": "46C046C0"
   },
   {
-   "index": 273,
+   "index": 344,
    "suite": "dma",
    "name": "bus-ew-arm-adds",
    "kind": "range",
@@ -3329,7 +4181,7 @@
    "hi": "E2811003"
   },
   {
-   "index": 274,
+   "index": 345,
    "suite": "dma",
    "name": "bus-ew-ldrh-ewram",
    "kind": "range",
@@ -3341,7 +4193,7 @@
    "hi": "46C046C0"
   },
   {
-   "index": 275,
+   "index": 346,
    "suite": "dma",
    "name": "bus-ew-arm-ldr",
    "kind": "range",
@@ -3353,7 +4205,7 @@
    "hi": "E1A00000"
   },
   {
-   "index": 276,
+   "index": 347,
    "suite": "dma",
    "name": "bus-ew-arm-ldrh-hi",
    "kind": "range",
@@ -3365,7 +4217,7 @@
    "hi": "E1A00000"
   },
   {
-   "index": 277,
+   "index": 348,
    "suite": "dma",
    "name": "dmatime-imm-1-word-resume",
    "kind": "range",
@@ -3377,7 +4229,7 @@
    "hi": "00000038"
   },
   {
-   "index": 278,
+   "index": 349,
    "suite": "dma",
    "name": "dmatime-enable-clear-baseline",
    "kind": "range",
@@ -3389,7 +4241,7 @@
    "hi": "0000002A"
   },
   {
-   "index": 279,
+   "index": 350,
    "suite": "dma",
    "name": "dmatime-imm-4-words-resume",
    "kind": "range",
@@ -3401,7 +4253,7 @@
    "hi": "00000067"
   },
   {
-   "index": 280,
+   "index": 351,
    "suite": "dma",
    "name": "dmatime-imm-16-words-resume",
    "kind": "range",
@@ -3413,7 +4265,7 @@
    "hi": "000000F7"
   },
   {
-   "index": 281,
+   "index": 352,
    "suite": "dma",
    "name": "dmatime-burst-ewram",
    "kind": "range",
@@ -3425,7 +4277,7 @@
    "hi": "0000011C"
   },
   {
-   "index": 282,
+   "index": 353,
    "suite": "dma",
    "name": "dmatime-burst-iwram",
    "kind": "range",
@@ -3437,7 +4289,7 @@
    "hi": "0000007C"
   },
   {
-   "index": 283,
+   "index": 354,
    "suite": "dma",
    "name": "dmatime-burst-vram-mode3",
    "kind": "range",
@@ -3449,7 +4301,7 @@
    "hi": "000000B1"
   },
   {
-   "index": 284,
+   "index": 355,
    "suite": "dma",
    "name": "dmatime-burst-palette",
    "kind": "range",
@@ -3461,7 +4313,7 @@
    "hi": "0000009C"
   },
   {
-   "index": 285,
+   "index": 356,
    "suite": "dma",
    "name": "dmatime-burst-oam",
    "kind": "range",
@@ -3473,7 +4325,7 @@
    "hi": "0000007C"
   },
   {
-   "index": 286,
+   "index": 357,
    "suite": "dma",
    "name": "dmatime-burst-rom-ewram",
    "kind": "range",
@@ -3485,7 +4337,7 @@
    "hi": "0000011E"
   },
   {
-   "index": 287,
+   "index": 358,
    "suite": "dma",
    "name": "dmatime-hblank-dma-in-hblank",
    "kind": "range",
@@ -3497,7 +4349,7 @@
    "hi": "00000002"
   },
   {
-   "index": 288,
+   "index": 359,
    "suite": "dma",
    "name": "dmatime-vblank-dma-in-vblank",
    "kind": "range",
@@ -3509,7 +4361,7 @@
    "hi": "00000001"
   },
   {
-   "index": 289,
+   "index": 360,
    "suite": "dma",
    "name": "dmatime-vblank-dma-line-160",
    "kind": "range",
@@ -3521,7 +4373,7 @@
    "hi": "000000A0"
   },
   {
-   "index": 290,
+   "index": 361,
    "suite": "dma",
    "name": "dmatime-hblank-flag-to-word",
    "kind": "range",
@@ -3533,7 +4385,7 @@
    "hi": "00000029"
   },
   {
-   "index": 291,
+   "index": 362,
    "suite": "dma",
    "name": "dmatime-vblank-flag-to-word",
    "kind": "range",
@@ -3545,7 +4397,7 @@
    "hi": "00000029"
   },
   {
-   "index": 292,
+   "index": 363,
    "suite": "dma",
    "name": "dmatime-completion-irq-after-resume",
    "kind": "range",
@@ -3557,7 +4409,7 @@
    "hi": "0000006D"
   },
   {
-   "index": 293,
+   "index": 364,
    "suite": "dma",
    "name": "dmatime-cpu-resumes-after-last-word",
    "kind": "range",
@@ -3569,7 +4421,7 @@
    "hi": "00000001"
   },
   {
-   "index": 294,
+   "index": 365,
    "suite": "dma",
    "name": "hdma-nodma-mul-k0",
    "kind": "range",
@@ -3581,7 +4433,7 @@
    "hi": "04800484"
   },
   {
-   "index": 295,
+   "index": 366,
    "suite": "dma",
    "name": "hdma-nodma-mul-k5",
    "kind": "range",
@@ -3593,7 +4445,7 @@
    "hi": "04850489"
   },
   {
-   "index": 296,
+   "index": 367,
    "suite": "dma",
    "name": "hdma-nodma-ewram-k0",
    "kind": "range",
@@ -3605,7 +4457,7 @@
    "hi": "04800484"
   },
   {
-   "index": 297,
+   "index": 368,
    "suite": "dma",
    "name": "hdma-nodma-iwram-k0",
    "kind": "range",
@@ -3617,7 +4469,7 @@
    "hi": "04300434"
   },
   {
-   "index": 298,
+   "index": 369,
    "suite": "dma",
    "name": "hdma-nodma-nop-k0",
    "kind": "range",
@@ -3629,7 +4481,7 @@
    "hi": "04400441"
   },
   {
-   "index": 299,
+   "index": 370,
    "suite": "dma",
    "name": "hdma-mul-k0",
    "kind": "range",
@@ -3641,7 +4493,7 @@
    "hi": "048303D5"
   },
   {
-   "index": 300,
+   "index": 371,
    "suite": "dma",
    "name": "hdma-mul-k1",
    "kind": "range",
@@ -3653,7 +4505,7 @@
    "hi": "048303D5"
   },
   {
-   "index": 301,
+   "index": 372,
    "suite": "dma",
    "name": "hdma-mul-k2",
    "kind": "range",
@@ -3665,7 +4517,7 @@
    "hi": "048303D5"
   },
   {
-   "index": 302,
+   "index": 373,
    "suite": "dma",
    "name": "hdma-mul-k3",
    "kind": "range",
@@ -3677,7 +4529,7 @@
    "hi": "048303D5"
   },
   {
-   "index": 303,
+   "index": 374,
    "suite": "dma",
    "name": "hdma-mul-k4",
    "kind": "range",
@@ -3689,7 +4541,7 @@
    "hi": "048803D5"
   },
   {
-   "index": 304,
+   "index": 375,
    "suite": "dma",
    "name": "hdma-mul-k5",
    "kind": "range",
@@ -3701,7 +4553,7 @@
    "hi": "048803D5"
   },
   {
-   "index": 305,
+   "index": 376,
    "suite": "dma",
    "name": "hdma-mul-k6",
    "kind": "range",
@@ -3713,7 +4565,7 @@
    "hi": "048803D5"
   },
   {
-   "index": 306,
+   "index": 377,
    "suite": "dma",
    "name": "hdma-mul-k7",
    "kind": "range",
@@ -3725,7 +4577,7 @@
    "hi": "048803D5"
   },
   {
-   "index": 307,
+   "index": 378,
    "suite": "dma",
    "name": "hdma-mul-k8",
    "kind": "range",
@@ -3737,7 +4589,7 @@
    "hi": "048803D5"
   },
   {
-   "index": 308,
+   "index": 379,
    "suite": "dma",
    "name": "hdma-mul-k9",
    "kind": "range",
@@ -3749,7 +4601,7 @@
    "hi": "048D03D5"
   },
   {
-   "index": 309,
+   "index": 380,
    "suite": "dma",
    "name": "hdma-ewram-k0",
    "kind": "range",
@@ -3761,7 +4613,7 @@
    "hi": "048303D7"
   },
   {
-   "index": 310,
+   "index": 381,
    "suite": "dma",
    "name": "hdma-ewram-k1",
    "kind": "range",
@@ -3773,7 +4625,7 @@
    "hi": "048403D8"
   },
   {
-   "index": 311,
+   "index": 382,
    "suite": "dma",
    "name": "hdma-ewram-k2",
    "kind": "range",
@@ -3785,7 +4637,7 @@
    "hi": "048503D9"
   },
   {
-   "index": 312,
+   "index": 383,
    "suite": "dma",
    "name": "hdma-ewram-k3",
    "kind": "range",
@@ -3797,7 +4649,7 @@
    "hi": "048603DA"
   },
   {
-   "index": 313,
+   "index": 384,
    "suite": "dma",
    "name": "hdma-ewram-k4",
    "kind": "range",
@@ -3809,7 +4661,7 @@
    "hi": "048803D5"
   },
   {
-   "index": 314,
+   "index": 385,
    "suite": "dma",
    "name": "hdma-ewram-k5",
    "kind": "range",
@@ -3821,7 +4673,7 @@
    "hi": "048903D5"
   },
   {
-   "index": 315,
+   "index": 386,
    "suite": "dma",
    "name": "hdma-ewram-k6",
    "kind": "range",
@@ -3833,7 +4685,7 @@
    "hi": "048903D5"
   },
   {
-   "index": 316,
+   "index": 387,
    "suite": "dma",
    "name": "hdma-ewram-k7",
    "kind": "range",
@@ -3845,7 +4697,7 @@
    "hi": "048A03D6"
   },
   {
-   "index": 317,
+   "index": 388,
    "suite": "dma",
    "name": "hdma-ewram-k8",
    "kind": "range",
@@ -3857,7 +4709,7 @@
    "hi": "048B03D7"
   },
   {
-   "index": 318,
+   "index": 389,
    "suite": "dma",
    "name": "hdma-ewram-k9",
    "kind": "range",
@@ -3869,7 +4721,7 @@
    "hi": "048C03D8"
   },
   {
-   "index": 319,
+   "index": 390,
    "suite": "dma",
    "name": "hdma-ewram-k10",
    "kind": "range",
@@ -3881,7 +4733,7 @@
    "hi": "048D03D9"
   },
   {
-   "index": 320,
+   "index": 391,
    "suite": "dma",
    "name": "hdma-ewram-k11",
    "kind": "range",
@@ -3893,7 +4745,7 @@
    "hi": "048E03DA"
   },
   {
-   "index": 321,
+   "index": 392,
    "suite": "dma",
    "name": "hdma-iwram-k0",
    "kind": "range",
@@ -3905,7 +4757,7 @@
    "hi": "043303D5"
   },
   {
-   "index": 322,
+   "index": 393,
    "suite": "dma",
    "name": "hdma-iwram-k1",
    "kind": "range",
@@ -3917,7 +4769,7 @@
    "hi": "043503D5"
   },
   {
-   "index": 323,
+   "index": 394,
    "suite": "dma",
    "name": "hdma-iwram-k2",
    "kind": "range",
@@ -3929,7 +4781,7 @@
    "hi": "043603D5"
   },
   {
-   "index": 324,
+   "index": 395,
    "suite": "dma",
    "name": "hdma-iwram-k3",
    "kind": "range",
@@ -3941,7 +4793,7 @@
    "hi": "043603D5"
   },
   {
-   "index": 325,
+   "index": 396,
    "suite": "dma",
    "name": "hdma-iwram-k4",
    "kind": "range",
@@ -3953,7 +4805,7 @@
    "hi": "043803D5"
   },
   {
-   "index": 326,
+   "index": 397,
    "suite": "dma",
    "name": "hdma-iwram-k5",
    "kind": "range",
@@ -3965,7 +4817,7 @@
    "hi": "043903D5"
   },
   {
-   "index": 327,
+   "index": 398,
    "suite": "dma",
    "name": "hdma-nop-k0",
    "kind": "range",
@@ -3977,7 +4829,7 @@
    "hi": "044403D5"
   },
   {
-   "index": 328,
+   "index": 399,
    "suite": "dma",
    "name": "hdma-nop-k1",
    "kind": "range",
@@ -3989,7 +4841,7 @@
    "hi": "044503D5"
   },
   {
-   "index": 329,
+   "index": 400,
    "suite": "dma",
    "name": "hdma-nop-k2",
    "kind": "range",
@@ -4001,7 +4853,7 @@
    "hi": "044603D5"
   },
   {
-   "index": 330,
+   "index": 401,
    "suite": "dma",
    "name": "kit-hdma-nodma-mul-k0",
    "kind": "range",
@@ -4013,7 +4865,7 @@
    "hi": "04800484"
   },
   {
-   "index": 331,
+   "index": 402,
    "suite": "dma",
    "name": "kit-hdma-nodma-nop-k0",
    "kind": "range",
@@ -4025,7 +4877,7 @@
    "hi": "04400441"
   },
   {
-   "index": 332,
+   "index": 403,
    "suite": "dma",
    "name": "kit-hdma-mul-k0",
    "kind": "range",
@@ -4037,7 +4889,7 @@
    "hi": "048303D5"
   },
   {
-   "index": 333,
+   "index": 404,
    "suite": "dma",
    "name": "kit-hdma-mul-k1",
    "kind": "range",
@@ -4049,7 +4901,7 @@
    "hi": "048303D5"
   },
   {
-   "index": 334,
+   "index": 405,
    "suite": "dma",
    "name": "kit-hdma-mul-k2",
    "kind": "range",
@@ -4061,7 +4913,7 @@
    "hi": "048303D5"
   },
   {
-   "index": 335,
+   "index": 406,
    "suite": "dma",
    "name": "kit-hdma-mul-k3",
    "kind": "range",
@@ -4073,7 +4925,7 @@
    "hi": "048303D5"
   },
   {
-   "index": 336,
+   "index": 407,
    "suite": "dma",
    "name": "kit-hdma-mul-k4",
    "kind": "range",
@@ -4085,7 +4937,7 @@
    "hi": "048803D5"
   },
   {
-   "index": 337,
+   "index": 408,
    "suite": "dma",
    "name": "kit-hdma-mul-k5",
    "kind": "range",
@@ -4097,7 +4949,7 @@
    "hi": "048803D5"
   },
   {
-   "index": 338,
+   "index": 409,
    "suite": "dma",
    "name": "kit-hdma-mul-k6",
    "kind": "range",
@@ -4109,7 +4961,7 @@
    "hi": "048803D5"
   },
   {
-   "index": 339,
+   "index": 410,
    "suite": "dma",
    "name": "kit-hdma-nop-k0",
    "kind": "range",
@@ -4121,7 +4973,7 @@
    "hi": "044403D5"
   },
   {
-   "index": 340,
+   "index": 411,
    "suite": "dma",
    "name": "kit-hdma-nop-k1",
    "kind": "range",
@@ -4133,7 +4985,7 @@
    "hi": "044503D5"
   },
   {
-   "index": 341,
+   "index": 412,
    "suite": "dma",
    "name": "kit-hdma-nop-k2",
    "kind": "range",
@@ -4145,7 +4997,7 @@
    "hi": "044603D5"
   },
   {
-   "index": 342,
+   "index": 413,
    "suite": "dma",
    "name": "tmrdma-k0",
    "kind": "range",
@@ -4157,7 +5009,7 @@
    "hi": "F303FF81"
   },
   {
-   "index": 343,
+   "index": 414,
    "suite": "dma",
    "name": "tmrdma-k1",
    "kind": "range",
@@ -4169,7 +5021,7 @@
    "hi": "F501FFE9"
   },
   {
-   "index": 344,
+   "index": 415,
    "suite": "dma",
    "name": "tmrdma-k2",
    "kind": "range",
@@ -4181,7 +5033,7 @@
    "hi": "F601FFEA"
   },
   {
-   "index": 345,
+   "index": 416,
    "suite": "dma",
    "name": "tmrdma-k3",
    "kind": "range",
@@ -4193,7 +5045,7 @@
    "hi": "F701FFEB"
   },
   {
-   "index": 346,
+   "index": 417,
    "suite": "dma",
    "name": "tmrdma-k4",
    "kind": "range",
@@ -4205,7 +5057,7 @@
    "hi": "F801FFEC"
   },
   {
-   "index": 347,
+   "index": 418,
    "suite": "dma",
    "name": "tmrdma-k5",
    "kind": "range",
@@ -4217,7 +5069,7 @@
    "hi": "F901FFED"
   },
   {
-   "index": 348,
+   "index": 419,
    "suite": "dma",
    "name": "tmrdma-k6",
    "kind": "range",
@@ -4229,7 +5081,7 @@
    "hi": "FA01FFEE"
   },
   {
-   "index": 349,
+   "index": 420,
    "suite": "dma",
    "name": "tmrdma-k7",
    "kind": "range",
@@ -4241,7 +5093,7 @@
    "hi": "FB01FFEF"
   },
   {
-   "index": 350,
+   "index": 421,
    "suite": "dma",
    "name": "tmrdma-dma1-only",
    "kind": "range",
@@ -4253,7 +5105,7 @@
    "hi": "EC00BEEF"
   },
   {
-   "index": 351,
+   "index": 422,
    "suite": "dma",
    "name": "tmrdma-dma0-only",
    "kind": "range",
@@ -4265,7 +5117,7 @@
    "hi": "8100FF81"
   },
   {
-   "index": 352,
+   "index": 423,
    "suite": "dma",
    "name": "dmastart-arm-none",
    "kind": "range",
@@ -4277,7 +5129,7 @@
    "hi": "00040206"
   },
   {
-   "index": 353,
+   "index": 424,
    "suite": "dma",
    "name": "dmastart-arm-ldr-ewram-dest",
    "kind": "range",
@@ -4289,7 +5141,7 @@
    "hi": "0014000B"
   },
   {
-   "index": 354,
+   "index": 425,
    "suite": "dma",
    "name": "dmastart-arm-ldr-iwram",
    "kind": "range",
@@ -4301,7 +5153,7 @@
    "hi": "000F0206"
   },
   {
-   "index": 355,
+   "index": 426,
    "suite": "dma",
    "name": "dmastart-arm-nop-ldr-ewram",
    "kind": "range",
@@ -4313,7 +5165,7 @@
    "hi": "00160106"
   },
   {
-   "index": 356,
+   "index": 427,
    "suite": "dma",
    "name": "dmastart-arm-nop-nop-ldr-ewram",
    "kind": "range",
@@ -4325,7 +5177,7 @@
    "hi": "00170106"
   },
   {
-   "index": 357,
+   "index": 428,
    "suite": "dma",
    "name": "dmastart-arm-mul-ldr-ewram",
    "kind": "range",
@@ -4337,7 +5189,7 @@
    "hi": "00170106"
   },
   {
-   "index": 358,
+   "index": 429,
    "suite": "dma",
    "name": "dmastart-arm-str-ewram",
    "kind": "range",
@@ -4349,7 +5201,7 @@
    "hi": "0014020B"
   },
   {
-   "index": 359,
+   "index": 430,
    "suite": "dma",
    "name": "dmastart-arm-ldm-iwram-2",
    "kind": "range",
@@ -4361,7 +5213,7 @@
    "hi": "00110206"
   },
   {
-   "index": 360,
+   "index": 431,
    "suite": "dma",
    "name": "dmastart-arm-ldrh-io",
    "kind": "range",
@@ -4373,7 +5225,7 @@
    "hi": "000F0206"
   },
   {
-   "index": 361,
+   "index": 432,
    "suite": "dma",
    "name": "dmastart-arm-ldrh-ewram-dest",
    "kind": "range",
@@ -4385,7 +5237,7 @@
    "hi": "00110008"
   },
   {
-   "index": 362,
+   "index": 433,
    "suite": "dma",
    "name": "dmastart-thumb-none",
    "kind": "range",
@@ -4397,7 +5249,7 @@
    "hi": "00040206"
   },
   {
-   "index": 363,
+   "index": 434,
    "suite": "dma",
    "name": "dmastart-thumb-ldr-ewram-dest",
    "kind": "range",
@@ -4409,7 +5261,7 @@
    "hi": "0014000B"
   },
   {
-   "index": 364,
+   "index": 435,
    "suite": "dma",
    "name": "dmastart-thumb-ldr-iwram",
    "kind": "range",
@@ -4421,7 +5273,7 @@
    "hi": "000F0206"
   },
   {
-   "index": 365,
+   "index": 436,
    "suite": "dma",
    "name": "dmastart-thumb-nop-ldr-ewram",
    "kind": "range",
@@ -4433,7 +5285,7 @@
    "hi": "00160106"
   },
   {
-   "index": 366,
+   "index": 437,
    "suite": "dma",
    "name": "dmastart-thumb-nop-nop-ldr-ewram",
    "kind": "range",
@@ -4445,7 +5297,7 @@
    "hi": "00170106"
   },
   {
-   "index": 367,
+   "index": 438,
    "suite": "dma",
    "name": "dmastart-thumb-mul-ldr-ewram",
    "kind": "range",
@@ -4457,7 +5309,7 @@
    "hi": "00170106"
   },
   {
-   "index": 368,
+   "index": 439,
    "suite": "dma",
    "name": "dmastart-thumb-str-ewram",
    "kind": "range",
@@ -4469,7 +5321,7 @@
    "hi": "0014020B"
   },
   {
-   "index": 369,
+   "index": 440,
    "suite": "dma",
    "name": "dmastart-thumb-ldm-iwram-2",
    "kind": "range",
@@ -4481,7 +5333,7 @@
    "hi": "00110206"
   },
   {
-   "index": 370,
+   "index": 441,
    "suite": "dma",
    "name": "dmastart-thumb-ldrh-io",
    "kind": "range",
@@ -4493,7 +5345,7 @@
    "hi": "000F0206"
   },
   {
-   "index": 371,
+   "index": 442,
    "suite": "dma",
    "name": "dmastart-thumb-ldrh-ewram-dest",
    "kind": "range",
@@ -4505,7 +5357,7 @@
    "hi": "00110008"
   },
   {
-   "index": 372,
+   "index": 443,
    "suite": "dma",
    "name": "dmadur-cpu-starts-tm1-n0",
    "kind": "range",
@@ -4517,7 +5369,7 @@
    "hi": "00000000"
   },
   {
-   "index": 373,
+   "index": 444,
    "suite": "dma",
    "name": "dmadur-iw-iw-32-n0",
    "kind": "range",
@@ -4529,7 +5381,7 @@
    "hi": "00000002"
   },
   {
-   "index": 374,
+   "index": 445,
    "suite": "dma",
    "name": "dmadur-iw-ew-32-n0",
    "kind": "range",
@@ -4541,7 +5393,7 @@
    "hi": "00000002"
   },
   {
-   "index": 375,
+   "index": 446,
    "suite": "dma",
    "name": "dmadur-ew-iw-32-n0",
    "kind": "range",
@@ -4553,7 +5405,7 @@
    "hi": "00000002"
   },
   {
-   "index": 376,
+   "index": 447,
    "suite": "dma",
    "name": "dmadur-iw-iw-16-n0",
    "kind": "range",
@@ -4565,7 +5417,7 @@
    "hi": "00000002"
   },
   {
-   "index": 377,
+   "index": 448,
    "suite": "dma",
    "name": "dmadur-io-iw-32-n0",
    "kind": "range",
@@ -4577,7 +5429,7 @@
    "hi": "00000002"
   },
   {
-   "index": 378,
+   "index": 449,
    "suite": "dma",
    "name": "dmadur-cpu-starts-tm1-n1",
    "kind": "range",
@@ -4589,7 +5441,7 @@
    "hi": "00000001"
   },
   {
-   "index": 379,
+   "index": 450,
    "suite": "dma",
    "name": "dmadur-dma32-starts-tm1-n1",
    "kind": "range",
@@ -4601,7 +5453,7 @@
    "hi": "00000000"
   },
   {
-   "index": 380,
+   "index": 451,
    "suite": "dma",
    "name": "dmadur-dma16-starts-tm1-n1",
    "kind": "range",
@@ -4613,7 +5465,7 @@
    "hi": "00000000"
   },
   {
-   "index": 381,
+   "index": 452,
    "suite": "dma",
    "name": "dmadur-iw-iw-32-n1",
    "kind": "range",
@@ -4625,7 +5477,7 @@
    "hi": "00000007"
   },
   {
-   "index": 382,
+   "index": 453,
    "suite": "dma",
    "name": "dmadur-iw-ew-32-n1",
    "kind": "range",
@@ -4637,7 +5489,7 @@
    "hi": "0000000C"
   },
   {
-   "index": 383,
+   "index": 454,
    "suite": "dma",
    "name": "dmadur-ew-iw-32-n1",
    "kind": "range",
@@ -4649,7 +5501,7 @@
    "hi": "0000000C"
   },
   {
-   "index": 384,
+   "index": 455,
    "suite": "dma",
    "name": "dmadur-iw-iw-16-n1",
    "kind": "range",
@@ -4661,7 +5513,7 @@
    "hi": "00000007"
   },
   {
-   "index": 385,
+   "index": 456,
    "suite": "dma",
    "name": "dmadur-io-iw-32-n1",
    "kind": "range",
@@ -4673,7 +5525,7 @@
    "hi": "00000007"
   },
   {
-   "index": 386,
+   "index": 457,
    "suite": "dma",
    "name": "dmadur-cpu-starts-tm1-n2",
    "kind": "range",
@@ -4685,7 +5537,7 @@
    "hi": "00000002"
   },
   {
-   "index": 387,
+   "index": 458,
    "suite": "dma",
    "name": "dmadur-dma32-starts-tm1-n2",
    "kind": "range",
@@ -4697,7 +5549,7 @@
    "hi": "00000001"
   },
   {
-   "index": 388,
+   "index": 459,
    "suite": "dma",
    "name": "dmadur-dma16-starts-tm1-n2",
    "kind": "range",
@@ -4709,7 +5561,7 @@
    "hi": "00000001"
   },
   {
-   "index": 389,
+   "index": 460,
    "suite": "dma",
    "name": "dmadur-iw-iw-32-n2",
    "kind": "range",
@@ -4721,7 +5573,7 @@
    "hi": "00000008"
   },
   {
-   "index": 390,
+   "index": 461,
    "suite": "dma",
    "name": "dmadur-iw-ew-32-n2",
    "kind": "range",
@@ -4733,7 +5585,7 @@
    "hi": "0000000D"
   },
   {
-   "index": 391,
+   "index": 462,
    "suite": "dma",
    "name": "dmadur-ew-iw-32-n2",
    "kind": "range",
@@ -4745,7 +5597,7 @@
    "hi": "0000000D"
   },
   {
-   "index": 392,
+   "index": 463,
    "suite": "dma",
    "name": "dmadur-iw-iw-16-n2",
    "kind": "range",
@@ -4757,7 +5609,7 @@
    "hi": "00000008"
   },
   {
-   "index": 393,
+   "index": 464,
    "suite": "dma",
    "name": "dmadur-io-iw-32-n2",
    "kind": "range",
@@ -4769,7 +5621,7 @@
    "hi": "00000008"
   },
   {
-   "index": 394,
+   "index": 465,
    "suite": "dma",
    "name": "dmadur-cpu-starts-tm1-n3",
    "kind": "range",
@@ -4781,7 +5633,7 @@
    "hi": "00000003"
   },
   {
-   "index": 395,
+   "index": 466,
    "suite": "dma",
    "name": "dmadur-dma32-starts-tm1-n3",
    "kind": "range",
@@ -4793,7 +5645,7 @@
    "hi": "00000002"
   },
   {
-   "index": 396,
+   "index": 467,
    "suite": "dma",
    "name": "dmadur-dma16-starts-tm1-n3",
    "kind": "range",
@@ -4805,7 +5657,7 @@
    "hi": "00000002"
   },
   {
-   "index": 397,
+   "index": 468,
    "suite": "dma",
    "name": "dmadur-iw-iw-32-n3",
    "kind": "range",
@@ -4817,7 +5669,7 @@
    "hi": "00000009"
   },
   {
-   "index": 398,
+   "index": 469,
    "suite": "dma",
    "name": "dmadur-iw-ew-32-n3",
    "kind": "range",
@@ -4829,7 +5681,7 @@
    "hi": "0000000E"
   },
   {
-   "index": 399,
+   "index": 470,
    "suite": "dma",
    "name": "dmadur-ew-iw-32-n3",
    "kind": "range",
@@ -4841,7 +5693,7 @@
    "hi": "0000000E"
   },
   {
-   "index": 400,
+   "index": 471,
    "suite": "dma",
    "name": "dmadur-iw-iw-16-n3",
    "kind": "range",
@@ -4853,7 +5705,7 @@
    "hi": "00000009"
   },
   {
-   "index": 401,
+   "index": 472,
    "suite": "dma",
    "name": "dmadur-io-iw-32-n3",
    "kind": "range",
@@ -4865,7 +5717,7 @@
    "hi": "00000009"
   },
   {
-   "index": 402,
+   "index": 473,
    "suite": "dma",
    "name": "dmadur-cpu-starts-tm1-n4",
    "kind": "range",
@@ -4877,7 +5729,7 @@
    "hi": "00000004"
   },
   {
-   "index": 403,
+   "index": 474,
    "suite": "dma",
    "name": "dmadur-dma32-starts-tm1-n4",
    "kind": "range",
@@ -4889,7 +5741,7 @@
    "hi": "00000003"
   },
   {
-   "index": 404,
+   "index": 475,
    "suite": "dma",
    "name": "dmadur-dma16-starts-tm1-n4",
    "kind": "range",
@@ -4901,7 +5753,7 @@
    "hi": "00000003"
   },
   {
-   "index": 405,
+   "index": 476,
    "suite": "dma",
    "name": "dmadur-iw-iw-32-n4",
    "kind": "range",
@@ -4913,7 +5765,7 @@
    "hi": "0000000A"
   },
   {
-   "index": 406,
+   "index": 477,
    "suite": "dma",
    "name": "dmadur-iw-ew-32-n4",
    "kind": "range",
@@ -4925,7 +5777,7 @@
    "hi": "0000000F"
   },
   {
-   "index": 407,
+   "index": 478,
    "suite": "dma",
    "name": "dmadur-ew-iw-32-n4",
    "kind": "range",
@@ -4937,7 +5789,7 @@
    "hi": "0000000F"
   },
   {
-   "index": 408,
+   "index": 479,
    "suite": "dma",
    "name": "dmadur-iw-iw-16-n4",
    "kind": "range",
@@ -4949,7 +5801,7 @@
    "hi": "0000000A"
   },
   {
-   "index": 409,
+   "index": 480,
    "suite": "dma",
    "name": "dmadur-io-iw-32-n4",
    "kind": "range",
@@ -4961,7 +5813,7 @@
    "hi": "0000000A"
   },
   {
-   "index": 410,
+   "index": 481,
    "suite": "dma",
    "name": "dmadur-cpu-starts-tm1-n6",
    "kind": "range",
@@ -4973,7 +5825,7 @@
    "hi": "00000006"
   },
   {
-   "index": 411,
+   "index": 482,
    "suite": "dma",
    "name": "dmadur-dma32-starts-tm1-n6",
    "kind": "range",
@@ -4985,7 +5837,7 @@
    "hi": "00000005"
   },
   {
-   "index": 412,
+   "index": 483,
    "suite": "dma",
    "name": "dmadur-dma16-starts-tm1-n6",
    "kind": "range",
@@ -4997,7 +5849,7 @@
    "hi": "00000005"
   },
   {
-   "index": 413,
+   "index": 484,
    "suite": "dma",
    "name": "dmadur-iw-iw-32-n6",
    "kind": "range",
@@ -5009,7 +5861,7 @@
    "hi": "0000000C"
   },
   {
-   "index": 414,
+   "index": 485,
    "suite": "dma",
    "name": "dmadur-iw-ew-32-n6",
    "kind": "range",
@@ -5021,7 +5873,7 @@
    "hi": "00000011"
   },
   {
-   "index": 415,
+   "index": 486,
    "suite": "dma",
    "name": "dmadur-ew-iw-32-n6",
    "kind": "range",
@@ -5033,7 +5885,7 @@
    "hi": "00000011"
   },
   {
-   "index": 416,
+   "index": 487,
    "suite": "dma",
    "name": "dmadur-iw-iw-16-n6",
    "kind": "range",
@@ -5045,7 +5897,7 @@
    "hi": "0000000C"
   },
   {
-   "index": 417,
+   "index": 488,
    "suite": "dma",
    "name": "dmadur-io-iw-32-n6",
    "kind": "range",
@@ -5057,7 +5909,7 @@
    "hi": "0000000C"
   },
   {
-   "index": 418,
+   "index": 489,
    "suite": "dma",
    "name": "dmadur-cpu-starts-tm1-n8",
    "kind": "range",
@@ -5069,7 +5921,7 @@
    "hi": "00000008"
   },
   {
-   "index": 419,
+   "index": 490,
    "suite": "dma",
    "name": "dmadur-dma32-starts-tm1-n8",
    "kind": "range",
@@ -5081,7 +5933,7 @@
    "hi": "00000007"
   },
   {
-   "index": 420,
+   "index": 491,
    "suite": "dma",
    "name": "dmadur-dma16-starts-tm1-n8",
    "kind": "range",
@@ -5093,7 +5945,7 @@
    "hi": "00000007"
   },
   {
-   "index": 421,
+   "index": 492,
    "suite": "dma",
    "name": "dmadur-iw-iw-32-n8",
    "kind": "range",
@@ -5105,7 +5957,7 @@
    "hi": "0000000E"
   },
   {
-   "index": 422,
+   "index": 493,
    "suite": "dma",
    "name": "dmadur-iw-ew-32-n8",
    "kind": "range",
@@ -5117,7 +5969,7 @@
    "hi": "00000013"
   },
   {
-   "index": 423,
+   "index": 494,
    "suite": "dma",
    "name": "dmadur-ew-iw-32-n8",
    "kind": "range",
@@ -5129,7 +5981,7 @@
    "hi": "00000013"
   },
   {
-   "index": 424,
+   "index": 495,
    "suite": "dma",
    "name": "dmadur-iw-iw-16-n8",
    "kind": "range",
@@ -5141,7 +5993,7 @@
    "hi": "0000000E"
   },
   {
-   "index": 425,
+   "index": 496,
    "suite": "dma",
    "name": "dmadur-io-iw-32-n8",
    "kind": "range",
@@ -5153,7 +6005,7 @@
    "hi": "0000000E"
   },
   {
-   "index": 426,
+   "index": 497,
    "suite": "dma",
    "name": "dmadur-cpu-starts-tm1-n12",
    "kind": "range",
@@ -5165,7 +6017,7 @@
    "hi": "0000000C"
   },
   {
-   "index": 427,
+   "index": 498,
    "suite": "dma",
    "name": "dmadur-dma32-starts-tm1-n12",
    "kind": "range",
@@ -5177,7 +6029,7 @@
    "hi": "0000000B"
   },
   {
-   "index": 428,
+   "index": 499,
    "suite": "dma",
    "name": "dmadur-dma16-starts-tm1-n12",
    "kind": "range",
@@ -5189,7 +6041,7 @@
    "hi": "0000000B"
   },
   {
-   "index": 429,
+   "index": 500,
    "suite": "dma",
    "name": "dmadur-iw-iw-32-n12",
    "kind": "range",
@@ -5201,7 +6053,7 @@
    "hi": "00000012"
   },
   {
-   "index": 430,
+   "index": 501,
    "suite": "dma",
    "name": "dmadur-iw-ew-32-n12",
    "kind": "range",
@@ -5213,7 +6065,7 @@
    "hi": "00000017"
   },
   {
-   "index": 431,
+   "index": 502,
    "suite": "dma",
    "name": "dmadur-ew-iw-32-n12",
    "kind": "range",
@@ -5225,7 +6077,7 @@
    "hi": "00000017"
   },
   {
-   "index": 432,
+   "index": 503,
    "suite": "dma",
    "name": "dmadur-iw-iw-16-n12",
    "kind": "range",
@@ -5237,7 +6089,7 @@
    "hi": "00000012"
   },
   {
-   "index": 433,
+   "index": 504,
    "suite": "dma",
    "name": "dmadur-io-iw-32-n12",
    "kind": "range",
@@ -5249,7 +6101,547 @@
    "hi": "00000012"
   },
   {
-   "index": 434,
+   "index": 505,
+   "suite": "dma",
+   "name": "fifodma-k20-n13",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000013",
+   "hi": "00000013"
+  },
+  {
+   "index": 506,
+   "suite": "dma",
+   "name": "fifodma-k20-n14",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000050",
+   "hi": "00000050"
+  },
+  {
+   "index": 507,
+   "suite": "dma",
+   "name": "fifodma-k20-n15",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000015",
+   "hi": "00000015"
+  },
+  {
+   "index": 508,
+   "suite": "dma",
+   "name": "fifodma-k20-n16",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000016",
+   "hi": "00000016"
+  },
+  {
+   "index": 509,
+   "suite": "dma",
+   "name": "fifodma-k20-n17",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000035",
+   "hi": "00000035"
+  },
+  {
+   "index": 510,
+   "suite": "dma",
+   "name": "fifodma-k20-n23",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "0000003B",
+   "hi": "0000003B"
+  },
+  {
+   "index": 511,
+   "suite": "dma",
+   "name": "fifodma-k20-n24",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "0000005A",
+   "hi": "0000005A"
+  },
+  {
+   "index": 512,
+   "suite": "dma",
+   "name": "fifodma-k20-n25",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "0000003D",
+   "hi": "0000003D"
+  },
+  {
+   "index": 513,
+   "suite": "dma",
+   "name": "fifodma-ewram-load-k20-n10",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000036",
+   "hi": "00000036"
+  },
+  {
+   "index": 514,
+   "suite": "dma",
+   "name": "fifodma-ewram-load-k20-n11",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000036",
+   "hi": "00000036"
+  },
+  {
+   "index": 515,
+   "suite": "dma",
+   "name": "fifodma-ewram-load-k20-n16",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "0000003B",
+   "hi": "0000003B"
+  },
+  {
+   "index": 516,
+   "suite": "dma",
+   "name": "fifodma-ewram-load-k20-n17",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "0000005B",
+   "hi": "0000005B"
+  },
+  {
+   "index": 517,
+   "suite": "dma",
+   "name": "fifodma-ewram-load-k20-n18",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "0000003E",
+   "hi": "0000003E"
+  },
+  {
+   "index": 518,
+   "suite": "dma",
+   "name": "fifodma-ewram-load-k20-n20",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "0000005E",
+   "hi": "0000005E"
+  },
+  {
+   "index": 519,
+   "suite": "dma",
+   "name": "fifodma-ewram-load-k20-n21",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "0000005E",
+   "hi": "0000005E"
+  },
+  {
+   "index": 520,
+   "suite": "dma",
+   "name": "fifodma-k33-n29",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000023",
+   "hi": "00000023"
+  },
+  {
+   "index": 521,
+   "suite": "dma",
+   "name": "fifodma-k33-n30",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000042",
+   "hi": "00000042"
+  },
+  {
+   "index": 522,
+   "suite": "dma",
+   "name": "dmasteal-none",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "000004B1",
+   "hi": "000004B1"
+  },
+  {
+   "index": 523,
+   "suite": "dma",
+   "name": "dmasteal-iwram-to-iwram-16bit-n1",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "000004B6",
+   "hi": "000004B6"
+  },
+  {
+   "index": 524,
+   "suite": "dma",
+   "name": "dmasteal-iwram-to-iwram-16bit-n2",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "000004B8",
+   "hi": "000004B8"
+  },
+  {
+   "index": 525,
+   "suite": "dma",
+   "name": "dmasteal-iwram-to-iwram-16bit-n4",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "000004BC",
+   "hi": "000004BC"
+  },
+  {
+   "index": 526,
+   "suite": "dma",
+   "name": "dmasteal-iwram-to-iwram-16bit-n8",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "000004C4",
+   "hi": "000004C4"
+  },
+  {
+   "index": 527,
+   "suite": "dma",
+   "name": "dmasteal-iwram-to-iwram-16bit-n16",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "000004D4",
+   "hi": "000004D4"
+  },
+  {
+   "index": 528,
+   "suite": "dma",
+   "name": "dmasteal-iwram-to-iwram-16bit-n32",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "000004F4",
+   "hi": "000004F4"
+  },
+  {
+   "index": 529,
+   "suite": "dma",
+   "name": "dmasteal-iwram-to-iwram-32bit-n1",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "000004B6",
+   "hi": "000004B6"
+  },
+  {
+   "index": 530,
+   "suite": "dma",
+   "name": "dmasteal-iwram-to-iwram-32bit-n4",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "000004BC",
+   "hi": "000004BC"
+  },
+  {
+   "index": 531,
+   "suite": "dma",
+   "name": "dmasteal-iwram-to-iwram-32bit-n16",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "000004D4",
+   "hi": "000004D4"
+  },
+  {
+   "index": 532,
+   "suite": "dma",
+   "name": "dmasteal-ewram-to-iwram-16bit-n4",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "000004C4",
+   "hi": "000004C4"
+  },
+  {
+   "index": 533,
+   "suite": "dma",
+   "name": "dmasteal-vram-to-iwram-16bit-n4",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "000004BC",
+   "hi": "000004BC"
+  },
+  {
+   "index": 534,
+   "suite": "dma",
+   "name": "dmasteal-pram-to-iwram-16bit-n4",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "000004BC",
+   "hi": "000004BC"
+  },
+  {
+   "index": 535,
+   "suite": "dma",
+   "name": "dmasteal-oam-to-iwram-16bit-n4",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "000004BC",
+   "hi": "000004BC"
+  },
+  {
+   "index": 536,
+   "suite": "dma",
+   "name": "dmasteal-ewram-to-iwram-32bit-n4",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "000004D0",
+   "hi": "000004D0"
+  },
+  {
+   "index": 537,
+   "suite": "dma",
+   "name": "dmasteal-vram-to-iwram-32bit-n4",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "000004C0",
+   "hi": "000004C0"
+  },
+  {
+   "index": 538,
+   "suite": "dma",
+   "name": "dmasteal-iwram-to-ewram-16bit-n4",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "000004C4",
+   "hi": "000004C4"
+  },
+  {
+   "index": 539,
+   "suite": "dma",
+   "name": "dmasteal-iwram-to-pram-16bit-n4",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "000004BC",
+   "hi": "000004BC"
+  },
+  {
+   "index": 540,
+   "suite": "dma",
+   "name": "dmasteal-iwram-to-oam-16bit-n4",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "000004BC",
+   "hi": "000004BC"
+  },
+  {
+   "index": 541,
+   "suite": "dma",
+   "name": "dmasteal-iwram-to-ewram-32bit-n4",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "000004D0",
+   "hi": "000004D0"
+  },
+  {
+   "index": 542,
+   "suite": "dma",
+   "name": "halthb-wake-and-grant-k0",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 256,
+   "mask": "FFFFFFFF",
+   "lo": "03EC03D4",
+   "hi": "03EC03D4"
+  },
+  {
+   "index": 543,
+   "suite": "dma",
+   "name": "halthb-wake-and-grant-k4",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 272,
+   "mask": "FFFFFFFF",
+   "lo": "03EC03D4",
+   "hi": "03EC03D4"
+  },
+  {
+   "index": 544,
+   "suite": "dma",
+   "name": "halthb-wake-and-grant-k9",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 292,
+   "mask": "FFFFFFFF",
+   "lo": "03EC03D4",
+   "hi": "03EC03D4"
+  },
+  {
+   "index": 545,
+   "suite": "dma",
+   "name": "halthb-wake-and-grant-k13",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 308,
+   "mask": "FFFFFFFF",
+   "lo": "03EC03D4",
+   "hi": "03EC03D4"
+  },
+  {
+   "index": 546,
+   "suite": "dma",
+   "name": "vdmageo-wake-and-grant-k0",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 256,
+   "mask": "FFFFFFFF",
+   "lo": "04CD04B5",
+   "hi": "04CD04B5"
+  },
+  {
+   "index": 547,
+   "suite": "dma",
+   "name": "vdmageo-wake-and-grant-k4",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 272,
+   "mask": "FFFFFFFF",
+   "lo": "04CD04B5",
+   "hi": "04CD04B5"
+  },
+  {
+   "index": 548,
+   "suite": "dma",
+   "name": "vdmageo-wake-and-grant-k9",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 292,
+   "mask": "FFFFFFFF",
+   "lo": "04CD04B5",
+   "hi": "04CD04B5"
+  },
+  {
+   "index": 549,
+   "suite": "dma",
+   "name": "vdmageo-wake-and-grant-k13",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 308,
+   "mask": "FFFFFFFF",
+   "lo": "04CD04B5",
+   "hi": "04CD04B5"
+  },
+  {
+   "index": 550,
    "suite": "bus",
    "name": "io-010-bg0hofs-open-bus",
    "kind": "range",
@@ -5261,7 +6653,7 @@
    "hi": "00006001"
   },
   {
-   "index": 435,
+   "index": 551,
    "suite": "bus",
    "name": "io-028-bg2x-open-bus",
    "kind": "range",
@@ -5273,7 +6665,7 @@
    "hi": "00006001"
   },
   {
-   "index": 436,
+   "index": 552,
    "suite": "bus",
    "name": "io-040-win0h-open-bus",
    "kind": "range",
@@ -5285,7 +6677,7 @@
    "hi": "00006001"
   },
   {
-   "index": 437,
+   "index": 553,
    "suite": "bus",
    "name": "io-04c-mosaic-open-bus",
    "kind": "range",
@@ -5297,7 +6689,7 @@
    "hi": "00006001"
   },
   {
-   "index": 438,
+   "index": 554,
    "suite": "bus",
    "name": "io-04e-open-bus",
    "kind": "range",
@@ -5309,7 +6701,7 @@
    "hi": "0000E256"
   },
   {
-   "index": 439,
+   "index": 555,
    "suite": "bus",
    "name": "io-054-bldy-open-bus",
    "kind": "range",
@@ -5321,7 +6713,7 @@
    "hi": "00006001"
   },
   {
-   "index": 440,
+   "index": 556,
    "suite": "bus",
    "name": "io-056-open-bus",
    "kind": "range",
@@ -5333,7 +6725,7 @@
    "hi": "0000E256"
   },
   {
-   "index": 441,
+   "index": 557,
    "suite": "bus",
    "name": "io-066-reads-0",
    "kind": "range",
@@ -5345,7 +6737,7 @@
    "hi": "00000000"
   },
   {
-   "index": 442,
+   "index": 558,
    "suite": "bus",
    "name": "io-06a-reads-0",
    "kind": "range",
@@ -5357,7 +6749,7 @@
    "hi": "00000000"
   },
   {
-   "index": 443,
+   "index": 559,
    "suite": "bus",
    "name": "io-078-reads-0",
    "kind": "range",
@@ -5369,7 +6761,7 @@
    "hi": "00000000"
   },
   {
-   "index": 444,
+   "index": 560,
    "suite": "bus",
    "name": "io-110-open-bus",
    "kind": "range",
@@ -5381,7 +6773,7 @@
    "hi": "00006001"
   },
   {
-   "index": 445,
+   "index": 561,
    "suite": "bus",
    "name": "io-12c-open-bus",
    "kind": "range",
@@ -5393,7 +6785,7 @@
    "hi": "00006001"
   },
   {
-   "index": 446,
+   "index": 562,
    "suite": "bus",
    "name": "io-136-reads-0",
    "kind": "range",
@@ -5405,7 +6797,7 @@
    "hi": "00000000"
   },
   {
-   "index": 447,
+   "index": 563,
    "suite": "bus",
    "name": "io-142-reads-0",
    "kind": "range",
@@ -5417,7 +6809,7 @@
    "hi": "00000000"
   },
   {
-   "index": 448,
+   "index": 564,
    "suite": "bus",
    "name": "io-206-reads-0",
    "kind": "range",
@@ -5429,7 +6821,7 @@
    "hi": "00000000"
   },
   {
-   "index": 449,
+   "index": 565,
    "suite": "bus",
    "name": "io-20a-reads-0",
    "kind": "range",
@@ -5441,7 +6833,7 @@
    "hi": "00000000"
   },
   {
-   "index": 450,
+   "index": 566,
    "suite": "bus",
    "name": "memctl-reads-0d000020",
    "kind": "range",
@@ -5453,7 +6845,7 @@
    "hi": "0D000020"
   },
   {
-   "index": 451,
+   "index": 567,
    "suite": "bus",
    "name": "memctl-mirror-04010800",
    "kind": "range",
@@ -5465,7 +6857,7 @@
    "hi": "0D000020"
   },
   {
-   "index": 452,
+   "index": 568,
    "suite": "bus",
    "name": "memctl-mirror-04ff0800",
    "kind": "range",
@@ -5477,7 +6869,7 @@
    "hi": "0D000020"
   },
   {
-   "index": 453,
+   "index": 569,
    "suite": "bus",
    "name": "memctl-halfword-reads",
    "kind": "range",
@@ -5489,7 +6881,7 @@
    "hi": "0D000020"
   },
   {
-   "index": 454,
+   "index": 570,
    "suite": "bus",
    "name": "memctl-byte-reads",
    "kind": "range",
@@ -5501,7 +6893,7 @@
    "hi": "0D000020"
   },
   {
-   "index": 455,
+   "index": 571,
    "suite": "bus",
    "name": "ewram-16-reads-ws13",
    "kind": "range",
@@ -5513,7 +6905,7 @@
    "hi": "00000141"
   },
   {
-   "index": 456,
+   "index": 572,
    "suite": "bus",
    "name": "ewram-16-reads-ws14",
    "kind": "range",
@@ -5525,7 +6917,7 @@
    "hi": "00000121"
   },
   {
-   "index": 457,
+   "index": 573,
    "suite": "bus",
    "name": "ewram-16-reads-ws4",
    "kind": "range",
@@ -5537,7 +6929,7 @@
    "hi": "00000261"
   },
   {
-   "index": 458,
+   "index": 574,
    "suite": "bus",
    "name": "memctl-ws14-reads-back",
    "kind": "range",
@@ -5549,7 +6941,7 @@
    "hi": "0000000E"
   },
   {
-   "index": 459,
+   "index": 575,
    "suite": "bus",
    "name": "memctl-ws4-reads-back",
    "kind": "range",
@@ -5561,7 +6953,7 @@
    "hi": "00000004"
   },
   {
-   "index": 460,
+   "index": 576,
    "suite": "bus",
    "name": "memctl-ws13-reads-back",
    "kind": "range",
@@ -5573,7 +6965,7 @@
    "hi": "0000000D"
   },
   {
-   "index": 461,
+   "index": 577,
    "suite": "bus",
    "name": "memctl-write-via-mirror",
    "kind": "range",
@@ -5585,7 +6977,7 @@
    "hi": "0000000D"
   },
   {
-   "index": 462,
+   "index": 578,
    "suite": "bus",
    "name": "contend-pram-mode0",
    "kind": "range",
@@ -5597,7 +6989,7 @@
    "hi": "000000E7"
   },
   {
-   "index": 463,
+   "index": 579,
    "suite": "bus",
    "name": "contend-vram-mode0",
    "kind": "range",
@@ -5609,7 +7001,7 @@
    "hi": "000000F6"
   },
   {
-   "index": 464,
+   "index": 580,
    "suite": "bus",
    "name": "contend-oam-mode0",
    "kind": "range",
@@ -5621,7 +7013,7 @@
    "hi": "000000E6"
   },
   {
-   "index": 465,
+   "index": 581,
    "suite": "bus",
    "name": "contend-iwram-control",
    "kind": "range",
@@ -5633,7 +7025,7 @@
    "hi": "000000E6"
   },
   {
-   "index": 466,
+   "index": 582,
    "suite": "bus",
    "name": "contend-pram-mode2",
    "kind": "range",
@@ -5645,7 +7037,7 @@
    "hi": "000000E7"
   },
   {
-   "index": 467,
+   "index": 583,
    "suite": "bus",
    "name": "contend-vram-mode2-locked-out",
    "kind": "range",
@@ -5657,7 +7049,7 @@
    "hi": "0000042A"
   },
   {
-   "index": 468,
+   "index": 584,
    "suite": "bus",
    "name": "contend-oam-mode2",
    "kind": "range",
@@ -5669,7 +7061,7 @@
    "hi": "000000E6"
   },
   {
-   "index": 469,
+   "index": 585,
    "suite": "bus",
    "name": "contend-vram-code-blank",
    "kind": "range",
@@ -5681,7 +7073,7 @@
    "hi": "000000DC"
   },
   {
-   "index": 470,
+   "index": 586,
    "suite": "bus",
    "name": "contend-pram-no-obj",
    "kind": "range",
@@ -5693,7 +7085,7 @@
    "hi": "000000E6"
   },
   {
-   "index": 471,
+   "index": 587,
    "suite": "bus",
    "name": "contend-vram-no-obj",
    "kind": "range",
@@ -5705,7 +7097,7 @@
    "hi": "000000F8"
   },
   {
-   "index": 472,
+   "index": 588,
    "suite": "bus",
    "name": "contend-oam-no-obj",
    "kind": "range",
@@ -5717,7 +7109,7 @@
    "hi": "000000E6"
   },
   {
-   "index": 473,
+   "index": 589,
    "suite": "bus",
    "name": "contend-vram-code-mode0",
    "kind": "range",
@@ -5729,7 +7121,7 @@
    "hi": "000000DD"
   },
   {
-   "index": 474,
+   "index": 590,
    "suite": "bus",
    "name": "contend-vram-hblank-free",
    "kind": "range",
@@ -5741,7 +7133,7 @@
    "hi": "000000F6"
   },
   {
-   "index": 475,
+   "index": 591,
    "suite": "bus",
    "name": "contend-oam-hblank-free",
    "kind": "range",
@@ -5753,7 +7145,7 @@
    "hi": "000000E6"
   },
   {
-   "index": 476,
+   "index": 592,
    "suite": "bus",
    "name": "contend-vram-blank",
    "kind": "range",
@@ -5765,7 +7157,7 @@
    "hi": "000000E6"
   },
   {
-   "index": 477,
+   "index": 593,
    "suite": "bus",
    "name": "contend-iwram-blank",
    "kind": "range",
@@ -5777,7 +7169,7 @@
    "hi": "000000E6"
   },
   {
-   "index": 478,
+   "index": 594,
    "suite": "bus",
    "name": "rom-window-64-reads-ws0-4-2",
    "kind": "range",
@@ -5789,7 +7181,7 @@
    "hi": "0000037E"
   },
   {
-   "index": 479,
+   "index": 595,
    "suite": "bus",
    "name": "rom-window-64-reads-ws0-3-2",
    "kind": "range",
@@ -5801,7 +7193,7 @@
    "hi": "0000033E"
   },
   {
-   "index": 480,
+   "index": 596,
    "suite": "bus",
    "name": "rom-window-64-reads-ws0-2-2",
    "kind": "range",
@@ -5813,7 +7205,7 @@
    "hi": "000002FE"
   },
   {
-   "index": 481,
+   "index": 597,
    "suite": "bus",
    "name": "rom-window-64-reads-ws0-3-1",
    "kind": "range",
@@ -5825,7 +7217,7 @@
    "hi": "000002FE"
   },
   {
-   "index": 482,
+   "index": 598,
    "suite": "bus",
    "name": "rom-window-64-reads-ws0-3-1-pf",
    "kind": "range",
@@ -5837,7 +7229,7 @@
    "hi": "000002FE"
   },
   {
-   "index": 483,
+   "index": 599,
    "suite": "bus",
    "name": "rom-window-64-reads-ws0-4-2-pf",
    "kind": "range",
@@ -5849,7 +7241,7 @@
    "hi": "0000037E"
   },
   {
-   "index": 484,
+   "index": 600,
    "suite": "bus",
    "name": "obus-arm-reads-pc-plus-8",
    "kind": "range",
@@ -5861,7 +7253,7 @@
    "hi": "E58A0000"
   },
   {
-   "index": 485,
+   "index": 601,
    "suite": "bus",
    "name": "obus-thumb-ldr-align-a",
    "kind": "range",
@@ -5873,7 +7265,7 @@
    "hi": "3E0260A8"
   },
   {
-   "index": 486,
+   "index": 602,
    "suite": "bus",
    "name": "obus-thumb-ldr-align-b",
    "kind": "range",
@@ -5885,7 +7277,7 @@
    "hi": "61283E02"
   },
   {
-   "index": 487,
+   "index": 603,
    "suite": "bus",
    "name": "obus-thumb-ldrh-align-a",
    "kind": "range",
@@ -5897,7 +7289,7 @@
    "hi": "000061A8"
   },
   {
-   "index": 488,
+   "index": 604,
    "suite": "bus",
    "name": "obus-thumb-ldrh-align-b",
    "kind": "range",
@@ -5909,7 +7301,7 @@
    "hi": "00003E02"
   },
   {
-   "index": 489,
+   "index": 605,
    "suite": "bus",
    "name": "obus-0-insns-after-dma",
    "kind": "range",
@@ -5921,7 +7313,7 @@
    "hi": "E59F0068"
   },
   {
-   "index": 490,
+   "index": 606,
    "suite": "bus",
    "name": "obus-1-insn-after-dma-dma-word",
    "kind": "range",
@@ -5933,7 +7325,7 @@
    "hi": "DEADBEE3"
   },
   {
-   "index": 491,
+   "index": 607,
    "suite": "bus",
    "name": "obus-2-insns-after-dma",
    "kind": "range",
@@ -5945,7 +7337,7 @@
    "hi": "E59F0024"
   },
   {
-   "index": 492,
+   "index": 608,
    "suite": "bus",
    "name": "obuswin-nothing-burst-not-run",
    "kind": "range",
@@ -5957,7 +7349,7 @@
    "hi": "E59F0198"
   },
   {
-   "index": 493,
+   "index": 609,
    "suite": "bus",
    "name": "obuswin-1-nop-dma-word",
    "kind": "range",
@@ -5969,7 +7361,7 @@
    "hi": "DEADBEE3"
   },
   {
-   "index": 494,
+   "index": 610,
    "suite": "bus",
    "name": "obuswin-2-nops-closed",
    "kind": "range",
@@ -5981,7 +7373,7 @@
    "hi": "E59F0144"
   },
   {
-   "index": 495,
+   "index": 611,
    "suite": "bus",
    "name": "obuswin-mul-closes",
    "kind": "range",
@@ -5993,7 +7385,7 @@
    "hi": "E59F011C"
   },
   {
-   "index": 496,
+   "index": 612,
    "suite": "bus",
    "name": "obuswint-2-nops-half-dma-word",
    "kind": "range",
@@ -6005,7 +7397,7 @@
    "hi": "DEAD6019"
   },
   {
-   "index": 497,
+   "index": 613,
    "suite": "bus",
    "name": "obusbus-iwram-ldr-a",
    "kind": "range",
@@ -6017,7 +7409,7 @@
    "hi": "3E026028"
   },
   {
-   "index": 498,
+   "index": 614,
    "suite": "bus",
    "name": "obusbus-iwram-ldr-b",
    "kind": "range",
@@ -6029,7 +7421,7 @@
    "hi": "60A83E02"
   },
   {
-   "index": 499,
+   "index": 615,
    "suite": "bus",
    "name": "obusbus-iwram-ldrh-a",
    "kind": "range",
@@ -6041,7 +7433,7 @@
    "hi": "00006128"
   },
   {
-   "index": 500,
+   "index": 616,
    "suite": "bus",
    "name": "obusbus-iwram-ldrh-b",
    "kind": "range",
@@ -6053,7 +7445,7 @@
    "hi": "00003E02"
   },
   {
-   "index": 501,
+   "index": 617,
    "suite": "bus",
    "name": "obusbus-ewram-ldr-a",
    "kind": "range",
@@ -6065,7 +7457,7 @@
    "hi": "60286028"
   },
   {
-   "index": 502,
+   "index": 618,
    "suite": "bus",
    "name": "obusbus-ewram-ldr-b",
    "kind": "range",
@@ -6077,7 +7469,7 @@
    "hi": "60A860A8"
   },
   {
-   "index": 503,
+   "index": 619,
    "suite": "bus",
    "name": "obusbus-ewram-ldrh-a",
    "kind": "range",
@@ -6089,7 +7481,7 @@
    "hi": "00006128"
   },
   {
-   "index": 504,
+   "index": 620,
    "suite": "bus",
    "name": "obusbus-ewram-ldrh-b",
    "kind": "range",
@@ -6101,7 +7493,7 @@
    "hi": "000061A8"
   },
   {
-   "index": 505,
+   "index": 621,
    "suite": "bus",
    "name": "obusbus-vram-ldr-a",
    "kind": "range",
@@ -6113,7 +7505,7 @@
    "hi": "60286028"
   },
   {
-   "index": 506,
+   "index": 622,
    "suite": "bus",
    "name": "obusbus-vram-ldr-b",
    "kind": "range",
@@ -6125,7 +7517,7 @@
    "hi": "60A860A8"
   },
   {
-   "index": 507,
+   "index": 623,
    "suite": "bus",
    "name": "obusbus-vram-ldrh-a",
    "kind": "range",
@@ -6137,7 +7529,7 @@
    "hi": "00006128"
   },
   {
-   "index": 508,
+   "index": 624,
    "suite": "bus",
    "name": "obusbus-vram-ldrh-b",
    "kind": "range",
@@ -6149,7 +7541,7 @@
    "hi": "000061A8"
   },
   {
-   "index": 509,
+   "index": 625,
    "suite": "bus",
    "name": "obusbus-oam-ldr-a",
    "kind": "range",
@@ -6161,7 +7553,7 @@
    "hi": "606E6028"
   },
   {
-   "index": 510,
+   "index": 626,
    "suite": "bus",
    "name": "obusbus-oam-ldr-b",
    "kind": "range",
@@ -6173,7 +7565,7 @@
    "hi": "60A83E02"
   },
   {
-   "index": 511,
+   "index": 627,
    "suite": "bus",
    "name": "obusbus-oam-ldrh-a",
    "kind": "range",
@@ -6185,7 +7577,7 @@
    "hi": "00006128"
   },
   {
-   "index": 512,
+   "index": 628,
    "suite": "bus",
    "name": "obusbus-oam-ldrh-b",
    "kind": "range",
@@ -6197,7 +7589,7 @@
    "hi": "00003E02"
   },
   {
-   "index": 513,
+   "index": 629,
    "suite": "ppu",
    "name": "dispstat-lo-byte-write",
    "kind": "range",
@@ -6209,7 +7601,7 @@
    "hi": "00000039"
   },
   {
-   "index": 514,
+   "index": 630,
    "suite": "ppu",
    "name": "dispstat-hi-byte-is-lyc",
    "kind": "range",
@@ -6221,7 +7613,7 @@
    "hi": "00003801"
   },
   {
-   "index": 515,
+   "index": 631,
    "suite": "ppu",
    "name": "dispstat-16-bit-write",
    "kind": "range",
@@ -6233,7 +7625,7 @@
    "hi": "00000039"
   },
   {
-   "index": 516,
+   "index": 632,
    "suite": "ppu",
    "name": "dispstat-lo-byte-clear",
    "kind": "range",
@@ -6245,7 +7637,7 @@
    "hi": "00000001"
   },
   {
-   "index": 517,
+   "index": 633,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k0",
    "kind": "range",
@@ -6257,7 +7649,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 518,
+   "index": 634,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k1",
    "kind": "range",
@@ -6269,7 +7661,7 @@
    "hi": "001B8C00"
   },
   {
-   "index": 519,
+   "index": 635,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k2",
    "kind": "range",
@@ -6281,7 +7673,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 520,
+   "index": 636,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k3",
    "kind": "range",
@@ -6293,7 +7685,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 521,
+   "index": 637,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k4",
    "kind": "range",
@@ -6305,7 +7697,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 522,
+   "index": 638,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k5",
    "kind": "range",
@@ -6317,7 +7709,7 @@
    "hi": "001BF201"
   },
   {
-   "index": 523,
+   "index": 639,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k6",
    "kind": "range",
@@ -6329,7 +7721,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 524,
+   "index": 640,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k7",
    "kind": "range",
@@ -6341,7 +7733,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 525,
+   "index": 641,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k8",
    "kind": "range",
@@ -6353,7 +7745,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 526,
+   "index": 642,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k9",
    "kind": "range",
@@ -6365,7 +7757,7 @@
    "hi": "001C5802"
   },
   {
-   "index": 527,
+   "index": 643,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k10",
    "kind": "range",
@@ -6377,7 +7769,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 528,
+   "index": 644,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k11",
    "kind": "range",
@@ -6389,7 +7781,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 529,
+   "index": 645,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k12",
    "kind": "range",
@@ -6401,7 +7793,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 530,
+   "index": 646,
    "suite": "ppu",
    "name": "breakram-loop-stale-k0",
    "kind": "range",
@@ -6413,7 +7805,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 531,
+   "index": 647,
    "suite": "ppu",
    "name": "breakram-loop-stale-k1",
    "kind": "range",
@@ -6425,7 +7817,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 532,
+   "index": 648,
    "suite": "ppu",
    "name": "breakram-loop-stale-k2",
    "kind": "range",
@@ -6437,7 +7829,7 @@
    "hi": "001B8B00"
   },
   {
-   "index": 533,
+   "index": 649,
    "suite": "ppu",
    "name": "breakram-loop-stale-k3",
    "kind": "range",
@@ -6449,7 +7841,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 534,
+   "index": 650,
    "suite": "ppu",
    "name": "breakram-loop-stale-k4",
    "kind": "range",
@@ -6461,7 +7853,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 535,
+   "index": 651,
    "suite": "ppu",
    "name": "breakram-loop-stale-k5",
    "kind": "range",
@@ -6473,7 +7865,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 536,
+   "index": 652,
    "suite": "ppu",
    "name": "breakram-loop-stale-k6",
    "kind": "range",
@@ -6485,7 +7877,7 @@
    "hi": "001BF101"
   },
   {
-   "index": 537,
+   "index": 653,
    "suite": "ppu",
    "name": "breakram-loop-stale-k7",
    "kind": "range",
@@ -6497,7 +7889,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 538,
+   "index": 654,
    "suite": "ppu",
    "name": "breakram-loop-stale-k8",
    "kind": "range",
@@ -6509,7 +7901,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 539,
+   "index": 655,
    "suite": "ppu",
    "name": "breakram-loop-stale-k9",
    "kind": "range",
@@ -6521,7 +7913,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 540,
+   "index": 656,
    "suite": "ppu",
    "name": "breakram-loop-stale-k10",
    "kind": "range",
@@ -6533,7 +7925,7 @@
    "hi": "001C5702"
   },
   {
-   "index": 541,
+   "index": 657,
    "suite": "ppu",
    "name": "breakram-loop-stale-k11",
    "kind": "range",
@@ -6545,7 +7937,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 542,
+   "index": 658,
    "suite": "ppu",
    "name": "breakram-loop-stale-k12",
    "kind": "range",
@@ -6557,7 +7949,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 543,
+   "index": 659,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k0",
    "kind": "range",
@@ -6569,7 +7961,7 @@
    "hi": "000D170D"
   },
   {
-   "index": 544,
+   "index": 660,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k1",
    "kind": "range",
@@ -6581,7 +7973,7 @@
    "hi": "000CEE0C"
   },
   {
-   "index": 545,
+   "index": 661,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k2",
    "kind": "range",
@@ -6593,7 +7985,7 @@
    "hi": "000C9C0A"
   },
   {
-   "index": 546,
+   "index": 662,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k3",
    "kind": "range",
@@ -6605,7 +7997,7 @@
    "hi": "000C7309"
   },
   {
-   "index": 547,
+   "index": 663,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k4",
    "kind": "range",
@@ -6617,7 +8009,7 @@
    "hi": "000C2107"
   },
   {
-   "index": 548,
+   "index": 664,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k5",
    "kind": "range",
@@ -6629,7 +8021,7 @@
    "hi": "000BF806"
   },
   {
-   "index": 549,
+   "index": 665,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k6",
    "kind": "range",
@@ -6641,7 +8033,7 @@
    "hi": "000BA604"
   },
   {
-   "index": 550,
+   "index": 666,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k7",
    "kind": "range",
@@ -6653,7 +8045,7 @@
    "hi": "000B7D03"
   },
   {
-   "index": 551,
+   "index": 667,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k8",
    "kind": "range",
@@ -6665,7 +8057,7 @@
    "hi": "000B2B01"
   },
   {
-   "index": 552,
+   "index": 668,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k9",
    "kind": "range",
@@ -6677,7 +8069,7 @@
    "hi": "000B0200"
   },
   {
-   "index": 553,
+   "index": 669,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k10",
    "kind": "range",
@@ -6689,7 +8081,7 @@
    "hi": "000D160D"
   },
   {
-   "index": 554,
+   "index": 670,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k11",
    "kind": "range",
@@ -6701,7 +8093,7 @@
    "hi": "000CED0C"
   },
   {
-   "index": 555,
+   "index": 671,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k12",
    "kind": "range",
@@ -6713,7 +8105,7 @@
    "hi": "000C9B0A"
   },
   {
-   "index": 556,
+   "index": 672,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k13",
    "kind": "range",
@@ -6725,7 +8117,7 @@
    "hi": "000C7209"
   },
   {
-   "index": 557,
+   "index": 673,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k14",
    "kind": "range",
@@ -6737,7 +8129,7 @@
    "hi": "000C2007"
   },
   {
-   "index": 558,
+   "index": 674,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k15",
    "kind": "range",
@@ -6749,7 +8141,7 @@
    "hi": "000BF706"
   },
   {
-   "index": 559,
+   "index": 675,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k16",
    "kind": "range",
@@ -6761,7 +8153,7 @@
    "hi": "000BA504"
   },
   {
-   "index": 560,
+   "index": 676,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k17",
    "kind": "range",
@@ -6773,7 +8165,7 @@
    "hi": "000B7C03"
   },
   {
-   "index": 561,
+   "index": 677,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k18",
    "kind": "range",
@@ -6785,7 +8177,7 @@
    "hi": "000B2A01"
   },
   {
-   "index": 562,
+   "index": 678,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k19",
    "kind": "range",
@@ -6797,7 +8189,7 @@
    "hi": "000B0100"
   },
   {
-   "index": 563,
+   "index": 679,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k20",
    "kind": "range",
@@ -6809,7 +8201,7 @@
    "hi": "000D150D"
   },
   {
-   "index": 564,
+   "index": 680,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k21",
    "kind": "range",
@@ -6821,7 +8213,7 @@
    "hi": "000CEC0C"
   },
   {
-   "index": 565,
+   "index": 681,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k22",
    "kind": "range",
@@ -6833,7 +8225,7 @@
    "hi": "000C9A0A"
   },
   {
-   "index": 566,
+   "index": 682,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k23",
    "kind": "range",
@@ -6845,7 +8237,7 @@
    "hi": "000C7109"
   },
   {
-   "index": 567,
+   "index": 683,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k24",
    "kind": "range",
@@ -6857,7 +8249,7 @@
    "hi": "000C1F07"
   },
   {
-   "index": 568,
+   "index": 684,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k25",
    "kind": "range",
@@ -6869,7 +8261,7 @@
    "hi": "000BF606"
   },
   {
-   "index": 569,
+   "index": 685,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k26",
    "kind": "range",
@@ -6881,7 +8273,7 @@
    "hi": "000BA404"
   },
   {
-   "index": 570,
+   "index": 686,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k27",
    "kind": "range",
@@ -6893,7 +8285,7 @@
    "hi": "000B7B03"
   },
   {
-   "index": 571,
+   "index": 687,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k28",
    "kind": "range",
@@ -6905,7 +8297,7 @@
    "hi": "000B2901"
   },
   {
-   "index": 572,
+   "index": 688,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k29",
    "kind": "range",
@@ -6917,7 +8309,7 @@
    "hi": "000B0000"
   },
   {
-   "index": 573,
+   "index": 689,
    "suite": "ppu",
    "name": "breakram-stamp-k0",
    "kind": "range",
@@ -6929,7 +8321,7 @@
    "hi": "4A9FFFFF"
   },
   {
-   "index": 574,
+   "index": 690,
    "suite": "ppu",
    "name": "breakram-stamp-k1",
    "kind": "range",
@@ -6941,7 +8333,7 @@
    "hi": "4A9E1B8C"
   },
   {
-   "index": 575,
+   "index": 691,
    "suite": "ppu",
    "name": "breakram-stamp-k2",
    "kind": "range",
@@ -6953,7 +8345,7 @@
    "hi": "4A9DFFFF"
   },
   {
-   "index": 576,
+   "index": 692,
    "suite": "ppu",
    "name": "breakram-stamp-v160-k0",
    "kind": "range",
@@ -6965,7 +8357,7 @@
    "hi": "4A9E1B8C"
   },
   {
-   "index": 577,
+   "index": 693,
    "suite": "ppu",
    "name": "breakram-stamp-v160-k1",
    "kind": "range",
@@ -6977,7 +8369,7 @@
    "hi": "4A9DFFFF"
   },
   {
-   "index": 578,
+   "index": 694,
    "suite": "ppu",
    "name": "breakram-stamp-v160-k2",
    "kind": "range",
@@ -6989,7 +8381,7 @@
    "hi": "4A9CFFFF"
   },
   {
-   "index": 579,
+   "index": 695,
    "suite": "ppu",
    "name": "breakram-stamp-v30-k0",
    "kind": "range",
@@ -7001,7 +8393,7 @@
    "hi": "035E00AD"
   },
   {
-   "index": 580,
+   "index": 696,
    "suite": "ppu",
    "name": "breakram-stamp-v30-k1",
    "kind": "range",
@@ -7013,7 +8405,7 @@
    "hi": "035DFFFF"
   },
   {
-   "index": 581,
+   "index": 697,
    "suite": "ppu",
    "name": "breakram-stamp-v30-k2",
    "kind": "range",
@@ -7025,7 +8417,7 @@
    "hi": "035CFFFF"
   },
   {
-   "index": 582,
+   "index": 698,
    "suite": "ppu",
    "name": "breakram-stamp-dma0-v30-k0",
    "kind": "range",
@@ -7037,7 +8429,7 @@
    "hi": "035E00AD"
   },
   {
-   "index": 583,
+   "index": 699,
    "suite": "ppu",
    "name": "breakram-stamp-dma0-v30-k1",
    "kind": "range",
@@ -7049,7 +8441,7 @@
    "hi": "035DFFFF"
   },
   {
-   "index": 584,
+   "index": 700,
    "suite": "ppu",
    "name": "breakram-stamp-dma0-v30-k2",
    "kind": "range",
@@ -7061,7 +8453,7 @@
    "hi": "035CFFFF"
   },
   {
-   "index": 585,
+   "index": 701,
    "suite": "ppu",
    "name": "breakram-stamp-vdma-v159-k0",
    "kind": "range",
@@ -7073,7 +8465,7 @@
    "hi": "043FFFFF"
   },
   {
-   "index": 586,
+   "index": 702,
    "suite": "ppu",
    "name": "breakram-stamp-vdma-v159-k1",
    "kind": "range",
@@ -7085,7 +8477,7 @@
    "hi": "043EFFFF"
   },
   {
-   "index": 587,
+   "index": 703,
    "suite": "ppu",
    "name": "breakram-stamp-vdma-v159-k2",
    "kind": "range",
@@ -7097,7 +8489,7 @@
    "hi": "043DFFFF"
   },
   {
-   "index": 588,
+   "index": 704,
    "suite": "ppu",
    "name": "breakram-stamp-hblank-v30-k0",
    "kind": "range",
@@ -7109,7 +8501,7 @@
    "hi": "04620129"
   },
   {
-   "index": 589,
+   "index": 705,
    "suite": "ppu",
    "name": "breakram-stamp-hblank-v30-k1",
    "kind": "range",
@@ -7121,7 +8513,7 @@
    "hi": "0461FFFF"
   },
   {
-   "index": 590,
+   "index": 706,
    "suite": "ppu",
    "name": "breakram-stamp-hblank-v30-k2",
    "kind": "range",
@@ -7133,7 +8525,7 @@
    "hi": "0460FFFF"
   },
   {
-   "index": 591,
+   "index": 707,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k28",
    "kind": "range",
@@ -7145,7 +8537,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 592,
+   "index": 708,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k29",
    "kind": "range",
@@ -7157,7 +8549,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 593,
+   "index": 709,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k30",
    "kind": "range",
@@ -7169,7 +8561,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 594,
+   "index": 710,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k31",
    "kind": "range",
@@ -7181,7 +8573,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 595,
+   "index": 711,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k32",
    "kind": "range",
@@ -7193,7 +8585,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 596,
+   "index": 712,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k33",
    "kind": "range",
@@ -7205,7 +8597,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 597,
+   "index": 713,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k34",
    "kind": "range",
@@ -7217,7 +8609,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 598,
+   "index": 714,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k35",
    "kind": "range",
@@ -7229,7 +8621,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 599,
+   "index": 715,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k36",
    "kind": "range",
@@ -7241,7 +8633,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 600,
+   "index": 716,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k37",
    "kind": "range",
@@ -7253,7 +8645,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 601,
+   "index": 717,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k38",
    "kind": "range",
@@ -7265,7 +8657,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 602,
+   "index": 718,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k39",
    "kind": "range",
@@ -7277,7 +8669,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 603,
+   "index": 719,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k40",
    "kind": "range",
@@ -7289,7 +8681,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 604,
+   "index": 720,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k18",
    "kind": "range",
@@ -7301,7 +8693,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 605,
+   "index": 721,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k19",
    "kind": "range",
@@ -7313,7 +8705,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 606,
+   "index": 722,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k20",
    "kind": "range",
@@ -7325,7 +8717,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 607,
+   "index": 723,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k21",
    "kind": "range",
@@ -7337,7 +8729,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 608,
+   "index": 724,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k22",
    "kind": "range",
@@ -7349,7 +8741,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 609,
+   "index": 725,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k23",
    "kind": "range",
@@ -7361,7 +8753,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 610,
+   "index": 726,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k24",
    "kind": "range",
@@ -7373,7 +8765,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 611,
+   "index": 727,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k25",
    "kind": "range",
@@ -7385,7 +8777,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 612,
+   "index": 728,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k26",
    "kind": "range",
@@ -7397,7 +8789,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 613,
+   "index": 729,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k27",
    "kind": "range",
@@ -7409,7 +8801,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 614,
+   "index": 730,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k28",
    "kind": "range",
@@ -7421,7 +8813,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 615,
+   "index": 731,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k29",
    "kind": "range",
@@ -7433,7 +8825,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 616,
+   "index": 732,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k30",
    "kind": "range",
@@ -7445,7 +8837,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 617,
+   "index": 733,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k28",
    "kind": "range",
@@ -7457,7 +8849,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 618,
+   "index": 734,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k29",
    "kind": "range",
@@ -7469,7 +8861,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 619,
+   "index": 735,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k30",
    "kind": "range",
@@ -7481,7 +8873,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 620,
+   "index": 736,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k31",
    "kind": "range",
@@ -7493,7 +8885,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 621,
+   "index": 737,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k32",
    "kind": "range",
@@ -7505,7 +8897,7 @@
    "hi": "00001F06"
   },
   {
-   "index": 622,
+   "index": 738,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k33",
    "kind": "range",
@@ -7517,7 +8909,7 @@
    "hi": "00001F06"
   },
   {
-   "index": 623,
+   "index": 739,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k34",
    "kind": "range",
@@ -7529,7 +8921,7 @@
    "hi": "00001F06"
   },
   {
-   "index": 624,
+   "index": 740,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k35",
    "kind": "range",
@@ -7541,7 +8933,7 @@
    "hi": "00001F04"
   },
   {
-   "index": 625,
+   "index": 741,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k36",
    "kind": "range",
@@ -7553,7 +8945,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 626,
+   "index": 742,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k37",
    "kind": "range",
@@ -7565,7 +8957,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 627,
+   "index": 743,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k38",
    "kind": "range",
@@ -7577,7 +8969,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 628,
+   "index": 744,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k39",
    "kind": "range",
@@ -7589,7 +8981,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 629,
+   "index": 745,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k40",
    "kind": "range",
@@ -7601,7 +8993,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 630,
+   "index": 746,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k28",
    "kind": "range",
@@ -7613,7 +9005,7 @@
    "hi": "00009F06"
   },
   {
-   "index": 631,
+   "index": 747,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k29",
    "kind": "range",
@@ -7625,7 +9017,7 @@
    "hi": "00009F06"
   },
   {
-   "index": 632,
+   "index": 748,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k30",
    "kind": "range",
@@ -7637,7 +9029,7 @@
    "hi": "00009F06"
   },
   {
-   "index": 633,
+   "index": 749,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k31",
    "kind": "range",
@@ -7649,7 +9041,7 @@
    "hi": "00009F06"
   },
   {
-   "index": 634,
+   "index": 750,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k32",
    "kind": "range",
@@ -7661,7 +9053,7 @@
    "hi": "0000A006"
   },
   {
-   "index": 635,
+   "index": 751,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k33",
    "kind": "range",
@@ -7673,7 +9065,7 @@
    "hi": "0000A006"
   },
   {
-   "index": 636,
+   "index": 752,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k34",
    "kind": "range",
@@ -7685,7 +9077,7 @@
    "hi": "0000A006"
   },
   {
-   "index": 637,
+   "index": 753,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k35",
    "kind": "range",
@@ -7697,7 +9089,7 @@
    "hi": "0000A005"
   },
   {
-   "index": 638,
+   "index": 754,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k36",
    "kind": "range",
@@ -7709,7 +9101,7 @@
    "hi": "0000A001"
   },
   {
-   "index": 639,
+   "index": 755,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k37",
    "kind": "range",
@@ -7721,7 +9113,7 @@
    "hi": "0000A001"
   },
   {
-   "index": 640,
+   "index": 756,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k38",
    "kind": "range",
@@ -7733,7 +9125,7 @@
    "hi": "0000A001"
   },
   {
-   "index": 641,
+   "index": 757,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k39",
    "kind": "range",
@@ -7745,7 +9137,7 @@
    "hi": "0000A001"
   },
   {
-   "index": 642,
+   "index": 758,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k40",
    "kind": "range",
@@ -7757,7 +9149,7 @@
    "hi": "0000A001"
   },
   {
-   "index": 643,
+   "index": 759,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k34",
    "kind": "range",
@@ -7769,7 +9161,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 644,
+   "index": 760,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k35",
    "kind": "range",
@@ -7781,7 +9173,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 645,
+   "index": 761,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k36",
    "kind": "range",
@@ -7793,7 +9185,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 646,
+   "index": 762,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k37",
    "kind": "range",
@@ -7805,7 +9197,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 647,
+   "index": 763,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k38",
    "kind": "range",
@@ -7817,7 +9209,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 648,
+   "index": 764,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k39",
    "kind": "range",
@@ -7829,7 +9221,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 649,
+   "index": 765,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k40",
    "kind": "range",
@@ -7841,7 +9233,7 @@
    "hi": "00001F02"
   },
   {
-   "index": 650,
+   "index": 766,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k41",
    "kind": "range",
@@ -7853,7 +9245,7 @@
    "hi": "00001F02"
   },
   {
-   "index": 651,
+   "index": 767,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k42",
    "kind": "range",
@@ -7865,7 +9257,7 @@
    "hi": "00001F02"
   },
   {
-   "index": 652,
+   "index": 768,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k43",
    "kind": "range",
@@ -7877,7 +9269,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 653,
+   "index": 769,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k44",
    "kind": "range",
@@ -7889,7 +9281,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 654,
+   "index": 770,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k45",
    "kind": "range",
@@ -7901,7 +9293,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 655,
+   "index": 771,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k46",
    "kind": "range",
@@ -7913,7 +9305,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 656,
+   "index": 772,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k32",
    "kind": "range",
@@ -7925,7 +9317,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 657,
+   "index": 773,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k33",
    "kind": "range",
@@ -7937,7 +9329,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 658,
+   "index": 774,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k34",
    "kind": "range",
@@ -7949,7 +9341,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 659,
+   "index": 775,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k35",
    "kind": "range",
@@ -7961,7 +9353,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 660,
+   "index": 776,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k36",
    "kind": "range",
@@ -7973,7 +9365,7 @@
    "hi": "00001F02"
   },
   {
-   "index": 661,
+   "index": 777,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k37",
    "kind": "range",
@@ -7985,7 +9377,7 @@
    "hi": "00001F02"
   },
   {
-   "index": 662,
+   "index": 778,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k38",
    "kind": "range",
@@ -7997,7 +9389,7 @@
    "hi": "00001F02"
   },
   {
-   "index": 663,
+   "index": 779,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k39",
    "kind": "range",
@@ -8009,7 +9401,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 664,
+   "index": 780,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k40",
    "kind": "range",
@@ -8021,7 +9413,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 665,
+   "index": 781,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k41",
    "kind": "range",
@@ -8033,7 +9425,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 666,
+   "index": 782,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k42",
    "kind": "range",
@@ -8045,7 +9437,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 667,
+   "index": 783,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k43",
    "kind": "range",
@@ -8057,7 +9449,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 668,
+   "index": 784,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k44",
    "kind": "range",
@@ -8069,7 +9461,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 669,
+   "index": 785,
    "suite": "apu",
    "name": "sweep-period-0-never-ticks",
    "kind": "range",
@@ -8081,7 +9473,7 @@
    "hi": "00080000"
   },
   {
-   "index": 670,
+   "index": 786,
    "suite": "apu",
    "name": "sweep-trigger-overflow",
    "kind": "range",
@@ -8093,7 +9485,7 @@
    "hi": "00000000"
   },
   {
-   "index": 671,
+   "index": 787,
    "suite": "apu",
    "name": "sweep-trigger-second-check",
    "kind": "range",
@@ -8105,7 +9497,7 @@
    "hi": "00001800"
   },
   {
-   "index": 672,
+   "index": 788,
    "suite": "apu",
    "name": "sweep-first-tick-rechecks",
    "kind": "range",
@@ -8117,7 +9509,7 @@
    "hi": "00001800"
   },
   {
-   "index": 673,
+   "index": 789,
    "suite": "apu",
    "name": "sweep-512-dies-tick-3",
    "kind": "range",
@@ -8129,7 +9521,7 @@
    "hi": "00004000"
   },
   {
-   "index": 674,
+   "index": 790,
    "suite": "apu",
    "name": "sweep-2018-survives-2048",
    "kind": "range",
@@ -8141,7 +9533,7 @@
    "hi": "00001A00"
   },
   {
-   "index": 675,
+   "index": 791,
    "suite": "apu",
    "name": "sweep-940-same-offset",
    "kind": "range",
@@ -8153,7 +9545,7 @@
    "hi": "00001A00"
   },
   {
-   "index": 676,
+   "index": 792,
    "suite": "apu",
    "name": "sweep-2033-dies-at-trigger",
    "kind": "range",
@@ -8165,7 +9557,7 @@
    "hi": "00000200"
   },
   {
-   "index": 677,
+   "index": 793,
    "suite": "apu",
    "name": "psg-ch1-first-trigger-dies",
    "kind": "range",
@@ -8177,7 +9569,7 @@
    "hi": "00000000"
   },
   {
-   "index": 678,
+   "index": 794,
    "suite": "apu",
    "name": "psg-ch2-first-trigger-lives",
    "kind": "range",
@@ -8189,7 +9581,7 @@
    "hi": "00004B3A"
   },
   {
-   "index": 679,
+   "index": 795,
    "suite": "apu",
    "name": "psg-ch3-first-trigger-lives",
    "kind": "range",
@@ -8201,7 +9593,7 @@
    "hi": "00004F53"
   },
   {
-   "index": 680,
+   "index": 796,
    "suite": "apu",
    "name": "psg-ch4-first-trigger-lives",
    "kind": "range",
@@ -8213,7 +9605,7 @@
    "hi": "00004F54"
   },
   {
-   "index": 681,
+   "index": 797,
    "suite": "apu",
    "name": "psg-ch1-nr10-0-dies",
    "kind": "range",
@@ -8225,7 +9617,7 @@
    "hi": "00000000"
   },
   {
-   "index": 682,
+   "index": 798,
    "suite": "apu",
    "name": "psg-ch1-sweep-running-lives",
    "kind": "range",
@@ -8237,7 +9629,7 @@
    "hi": "00000A99"
   },
   {
-   "index": 683,
+   "index": 799,
    "suite": "apu",
    "name": "psg-ch1-after-ch2-lives",
    "kind": "range",
@@ -8249,7 +9641,7 @@
    "hi": "00004CF7"
   },
   {
-   "index": 684,
+   "index": 800,
    "suite": "apu",
    "name": "psg-ch2-before-ch1-lives",
    "kind": "range",
@@ -8261,7 +9653,7 @@
    "hi": "00004F53"
   },
   {
-   "index": 685,
+   "index": 801,
    "suite": "apu",
    "name": "psg-ch1-second-trigger-dies",
    "kind": "range",
@@ -8273,7 +9665,7 @@
    "hi": "00000000"
   },
   {
-   "index": 686,
+   "index": 802,
    "suite": "apu",
    "name": "psg-ch1-third-trigger-lives",
    "kind": "range",
@@ -8285,7 +9677,7 @@
    "hi": "00004F50"
   },
   {
-   "index": 687,
+   "index": 803,
    "suite": "apu",
    "name": "psg-soundcnt-x-after-ch1",
    "kind": "range",
@@ -8297,7 +9689,7 @@
    "hi": "00000080"
   },
   {
-   "index": 688,
+   "index": 804,
    "suite": "apu",
    "name": "psg-soundcnt-x-after-ch2",
    "kind": "range",
@@ -8309,7 +9701,7 @@
    "hi": "00000082"
   },
   {
-   "index": 689,
+   "index": 805,
    "suite": "apu",
    "name": "psg-soundcnt-x-after-ch4",
    "kind": "range",
@@ -8321,7 +9713,7 @@
    "hi": "00000088"
   },
   {
-   "index": 690,
+   "index": 806,
    "suite": "apu",
    "name": "psg-ch1-length-off-never-expires",
    "kind": "range",
@@ -8333,7 +9725,7 @@
    "hi": "0000FFFF"
   },
   {
-   "index": 691,
+   "index": 807,
    "suite": "apu",
    "name": "psg-ch2-length-off-never-expires",
    "kind": "range",
@@ -8345,7 +9737,355 @@
    "hi": "0000FFFF"
   },
   {
-   "index": 692,
+   "index": 808,
+   "suite": "apu",
+   "name": "sweeptrig-shift0-400-d30",
+   "kind": "one-of-two",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000001",
+   "hi": "00040000"
+  },
+  {
+   "index": 809,
+   "suite": "apu",
+   "name": "sweeptrig-shift0-400-d33",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000001",
+   "hi": "00000001"
+  },
+  {
+   "index": 810,
+   "suite": "apu",
+   "name": "sweeptrig-shift0-400-d37",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000001",
+   "hi": "00000001"
+  },
+  {
+   "index": 811,
+   "suite": "apu",
+   "name": "sweeptrig-shift0-400-length-d30",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00040000",
+   "hi": "00040000"
+  },
+  {
+   "index": 812,
+   "suite": "apu",
+   "name": "sweeptrig-shift0-400-length-d33",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000001",
+   "hi": "00000001"
+  },
+  {
+   "index": 813,
+   "suite": "apu",
+   "name": "sweeptrig-shift0-400-length-d37",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000001",
+   "hi": "00000001"
+  },
+  {
+   "index": 814,
+   "suite": "apu",
+   "name": "sweeptrig-shift0-3ff-d30",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00040000",
+   "hi": "00040000"
+  },
+  {
+   "index": 815,
+   "suite": "apu",
+   "name": "sweeptrig-shift0-3ff-d33",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00040000",
+   "hi": "00040000"
+  },
+  {
+   "index": 816,
+   "suite": "apu",
+   "name": "sweeptrig-shift0-3ff-d37",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00040000",
+   "hi": "00040000"
+  },
+  {
+   "index": 817,
+   "suite": "apu",
+   "name": "sweeptrig-shift0-3ff-length-d30",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "0003C000",
+   "hi": "00044000"
+  },
+  {
+   "index": 818,
+   "suite": "apu",
+   "name": "sweeptrig-shift0-3ff-length-d33",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "0003C000",
+   "hi": "00044000"
+  },
+  {
+   "index": 819,
+   "suite": "apu",
+   "name": "sweeptrig-shift0-3ff-length-d37",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "0003C000",
+   "hi": "00044000"
+  },
+  {
+   "index": 820,
+   "suite": "apu",
+   "name": "sweeptrig-sweep21-1300-d30",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00004E25",
+   "hi": "0000634B"
+  },
+  {
+   "index": 821,
+   "suite": "apu",
+   "name": "sweeptrig-sweep21-1300-d33",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00004E33",
+   "hi": "000062C3"
+  },
+  {
+   "index": 822,
+   "suite": "apu",
+   "name": "sweeptrig-sweep21-1300-d37",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "000050E6",
+   "hi": "000064F0"
+  },
+  {
+   "index": 823,
+   "suite": "apu",
+   "name": "sweeptrig-shift0-400-after-rows-d30",
+   "kind": "one-of-two",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000000",
+   "hi": "00000001"
+  },
+  {
+   "index": 824,
+   "suite": "apu",
+   "name": "sweeptrig-shift0-400-after-rows-d33",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000000",
+   "hi": "00000000"
+  },
+  {
+   "index": 825,
+   "suite": "apu",
+   "name": "ram-psg-ch1-first",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 256,
+   "mask": "0000FFFF",
+   "lo": "00000000",
+   "hi": "00009552"
+  },
+  {
+   "index": 826,
+   "suite": "apu",
+   "name": "ram-psg-ch2-first",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 258,
+   "mask": "0000FFFF",
+   "lo": "000070C4",
+   "hi": "00009594"
+  },
+  {
+   "index": 827,
+   "suite": "apu",
+   "name": "ram-psg-ch3-first",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 260,
+   "mask": "0000FFFF",
+   "lo": "000083FB",
+   "hi": "00009594"
+  },
+  {
+   "index": 828,
+   "suite": "apu",
+   "name": "ram-psg-ch4-first",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 262,
+   "mask": "0000FFFF",
+   "lo": "000083FC",
+   "hi": "00009595"
+  },
+  {
+   "index": 829,
+   "suite": "apu",
+   "name": "ram-psg-ch1-nr10-0",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 264,
+   "mask": "0000FFFF",
+   "lo": "00000000",
+   "hi": "00009594"
+  },
+  {
+   "index": 830,
+   "suite": "apu",
+   "name": "ram-psg-ch1-nr10-11",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 266,
+   "mask": "0000FFFF",
+   "lo": "000023FA",
+   "hi": "000028CC"
+  },
+  {
+   "index": 831,
+   "suite": "apu",
+   "name": "ram-psg-ch1-after-ch2",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 268,
+   "mask": "0000FFFF",
+   "lo": "00000001",
+   "hi": "000087FD"
+  },
+  {
+   "index": 832,
+   "suite": "apu",
+   "name": "ram-psg-ch2-before-ch1",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 270,
+   "mask": "0000FFFF",
+   "lo": "000083F9",
+   "hi": "00009593"
+  },
+  {
+   "index": 833,
+   "suite": "apu",
+   "name": "ram-psg-ch1-second",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 272,
+   "mask": "0000FFFF",
+   "lo": "00000000",
+   "hi": "0000A330"
+  },
+  {
+   "index": 834,
+   "suite": "apu",
+   "name": "ram-psg-ch1-again",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 274,
+   "mask": "0000FFFF",
+   "lo": "000083F5",
+   "hi": "0000A331"
+  },
+  {
+   "index": 835,
+   "suite": "apu",
+   "name": "ram-psg-ch1-length-off",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 280,
+   "mask": "0000FFFF",
+   "lo": "0000FFFF",
+   "hi": "0000FFFF"
+  },
+  {
+   "index": 836,
+   "suite": "apu",
+   "name": "ram-psg-ch2-length-off",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 282,
+   "mask": "0000FFFF",
+   "lo": "0000FFFF",
+   "hi": "0000FFFF"
+  },
+  {
+   "index": 837,
    "suite": "bios",
    "name": "get-bios-checksum",
    "kind": "range",
@@ -8357,7 +10097,7 @@
    "hi": "BAAE187F"
   },
   {
-   "index": 693,
+   "index": 838,
    "suite": "bios",
    "name": "div-10-3-quotient",
    "kind": "range",
@@ -8369,7 +10109,7 @@
    "hi": "00000003"
   },
   {
-   "index": 694,
+   "index": 839,
    "suite": "bios",
    "name": "div-10-3-remainder",
    "kind": "range",
@@ -8381,7 +10121,7 @@
    "hi": "00000001"
   },
   {
-   "index": 695,
+   "index": 840,
    "suite": "bios",
    "name": "div-neg7-2-quotient",
    "kind": "range",
@@ -8393,7 +10133,7 @@
    "hi": "FFFFFFFD"
   },
   {
-   "index": 696,
+   "index": 841,
    "suite": "bios",
    "name": "div-neg7-2-remainder",
    "kind": "range",
@@ -8405,7 +10145,7 @@
    "hi": "FFFFFFFF"
   },
   {
-   "index": 697,
+   "index": 842,
    "suite": "bios",
    "name": "div-1-0-quotient",
    "kind": "range",
@@ -8417,7 +10157,7 @@
    "hi": "00000001"
   },
   {
-   "index": 698,
+   "index": 843,
    "suite": "bios",
    "name": "div-1-0-remainder",
    "kind": "range",
@@ -8429,7 +10169,7 @@
    "hi": "00000001"
   },
   {
-   "index": 699,
+   "index": 844,
    "suite": "bios",
    "name": "div-neg1-0-quotient",
    "kind": "range",
@@ -8441,7 +10181,7 @@
    "hi": "FFFFFFFF"
   },
   {
-   "index": 700,
+   "index": 845,
    "suite": "bios",
    "name": "div-min-neg1-quotient",
    "kind": "range",
@@ -8453,7 +10193,7 @@
    "hi": "80000000"
   },
   {
-   "index": 701,
+   "index": 846,
    "suite": "bios",
    "name": "div-min-neg1-remainder",
    "kind": "range",
@@ -8465,7 +10205,7 @@
    "hi": "00000000"
   },
   {
-   "index": 702,
+   "index": 847,
    "suite": "bios",
    "name": "divarm-10-3-quotient",
    "kind": "range",
@@ -8477,7 +10217,7 @@
    "hi": "00000003"
   },
   {
-   "index": 703,
+   "index": 848,
    "suite": "bios",
    "name": "sqrt-0",
    "kind": "range",
@@ -8489,7 +10229,7 @@
    "hi": "00000000"
   },
   {
-   "index": 704,
+   "index": 849,
    "suite": "bios",
    "name": "sqrt-1",
    "kind": "range",
@@ -8501,7 +10241,7 @@
    "hi": "00000001"
   },
   {
-   "index": 705,
+   "index": 850,
    "suite": "bios",
    "name": "sqrt-3fffffff",
    "kind": "range",
@@ -8513,7 +10253,7 @@
    "hi": "00007FFF"
   },
   {
-   "index": 706,
+   "index": 851,
    "suite": "bios",
    "name": "sqrt-ffffffff",
    "kind": "range",
@@ -8525,7 +10265,7 @@
    "hi": "0000FFFF"
   },
   {
-   "index": 707,
+   "index": 852,
    "suite": "bios",
    "name": "arctan-0",
    "kind": "range",
@@ -8537,7 +10277,7 @@
    "hi": "00000000"
   },
   {
-   "index": 708,
+   "index": 853,
    "suite": "bios",
    "name": "arctan-1",
    "kind": "range",
@@ -8549,7 +10289,7 @@
    "hi": "00002000"
   },
   {
-   "index": 709,
+   "index": 854,
    "suite": "bios",
    "name": "arctan-neg1",
    "kind": "range",
@@ -8561,7 +10301,7 @@
    "hi": "FFFFE000"
   },
   {
-   "index": 710,
+   "index": 855,
    "suite": "bios",
    "name": "arctan2-origin",
    "kind": "range",
@@ -8573,7 +10313,7 @@
    "hi": "00000000"
   },
   {
-   "index": 711,
+   "index": 856,
    "suite": "bios",
    "name": "arctan2-pos-x",
    "kind": "range",
@@ -8585,7 +10325,7 @@
    "hi": "00000000"
   },
   {
-   "index": 712,
+   "index": 857,
    "suite": "bios",
    "name": "arctan2-pos-y",
    "kind": "range",
@@ -8597,7 +10337,7 @@
    "hi": "00004000"
   },
   {
-   "index": 713,
+   "index": 858,
    "suite": "bios",
    "name": "arctan2-neg-x",
    "kind": "range",
@@ -8609,7 +10349,7 @@
    "hi": "00008000"
   },
   {
-   "index": 714,
+   "index": 859,
    "suite": "bios",
    "name": "arctan2-neg-y",
    "kind": "range",
@@ -8621,7 +10361,7 @@
    "hi": "0000C000"
   },
   {
-   "index": 715,
+   "index": 860,
    "suite": "bios",
    "name": "arctan2-diagonal",
    "kind": "range",
@@ -8631,6 +10371,282 @@
    "mask": "FFFFFFFF",
    "lo": "00002000",
    "hi": "00002000"
+  },
+  {
+   "index": 861,
+   "suite": "bios",
+   "name": "switime-none",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000000",
+   "hi": "00000000"
+  },
+  {
+   "index": 862,
+   "suite": "bios",
+   "name": "switime-div-10-3",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000053",
+   "hi": "00000053"
+  },
+  {
+   "index": 863,
+   "suite": "bios",
+   "name": "switime-div-7fffffff-3",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "000001BF",
+   "hi": "000001BF"
+  },
+  {
+   "index": 864,
+   "suite": "bios",
+   "name": "switime-divarm-10-3",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000056",
+   "hi": "00000056"
+  },
+  {
+   "index": 865,
+   "suite": "bios",
+   "name": "switime-sqrt-0",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000063",
+   "hi": "00000063"
+  },
+  {
+   "index": 866,
+   "suite": "bios",
+   "name": "switime-sqrt-3fffffff",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000236",
+   "hi": "00000236"
+  },
+  {
+   "index": 867,
+   "suite": "bios",
+   "name": "switime-sqrt-ffffffff",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000256",
+   "hi": "00000256"
+  },
+  {
+   "index": 868,
+   "suite": "bios",
+   "name": "switime-arctan-2000",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000065",
+   "hi": "00000065"
+  },
+  {
+   "index": 869,
+   "suite": "bios",
+   "name": "switime-arctan2-100-100",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "0000016A",
+   "hi": "0000016A"
+  },
+  {
+   "index": 870,
+   "suite": "bios",
+   "name": "switime-arctan2-neg",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000162",
+   "hi": "00000162"
+  },
+  {
+   "index": 871,
+   "suite": "bios",
+   "name": "switime-cpuset-32-halfwords",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "000001C1",
+   "hi": "000001C1"
+  },
+  {
+   "index": 872,
+   "suite": "bios",
+   "name": "switime-cpuset-fill-32-words",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000140",
+   "hi": "00000140"
+  },
+  {
+   "index": 873,
+   "suite": "bios",
+   "name": "switime-cpufastset-256-words",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "0000033E",
+   "hi": "0000033E"
+  },
+  {
+   "index": 874,
+   "suite": "bios",
+   "name": "switime-cpufastset-fill-256-words",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000208",
+   "hi": "00000208"
+  },
+  {
+   "index": 875,
+   "suite": "bios",
+   "name": "switime-getbioschecksum",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "0000A033",
+   "hi": "0000A033"
+  },
+  {
+   "index": 876,
+   "suite": "bios",
+   "name": "switime-bgaffineset-1",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "0000009A",
+   "hi": "0000009A"
+  },
+  {
+   "index": 877,
+   "suite": "bios",
+   "name": "switime-objaffineset-1",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000076",
+   "hi": "00000076"
+  },
+  {
+   "index": 878,
+   "suite": "bios",
+   "name": "switime-bitunpack-4-bytes",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "0000036F",
+   "hi": "0000036F"
+  },
+  {
+   "index": 879,
+   "suite": "bios",
+   "name": "switime-lz77uncompwram-16",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000156",
+   "hi": "00000156"
+  },
+  {
+   "index": 880,
+   "suite": "bios",
+   "name": "switime-rluncompwram-16",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "000000E1",
+   "hi": "000000E1"
+  },
+  {
+   "index": 881,
+   "suite": "bios",
+   "name": "switime-diff8bitunfilterwram-16",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000121",
+   "hi": "00000121"
+  },
+  {
+   "index": 882,
+   "suite": "bios",
+   "name": "switime-midikey2freq",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "0000008C",
+   "hi": "0000008C"
+  },
+  {
+   "index": 883,
+   "suite": "bios",
+   "name": "switime-intrwait-flag-already-set",
+   "kind": "range",
+   "cartridge_only": false,
+   "risky": false,
+   "offset": 0,
+   "mask": "FFFFFFFF",
+   "lo": "00000053",
+   "hi": "00000053"
   }
  ]
 }

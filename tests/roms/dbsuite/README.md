@@ -19,14 +19,14 @@ cartridge are reported `SKIP`.
 
 | suite | cases | what |
 |---|---|---|
-| cpu | 102 | PSR write masks, Thumb `cmp/add/mov pc`, MSR setting T, loose BX decodes, r15 base writeback, user-bank STM/LDM, the LDM^ glitch, empty register lists, the multiply carry flag and timing, undefined CPSR modes |
-| irq | 101 | the dispatch window after IME/IE/`msr`, interrupt latency per source, the IF-acknowledge race, a timer IRQ storm under a DMA burst, a timer IRQ raised as a DMA takes the bus, the halted CPU's wake, the V-count match edge |
-| timer | 14 | start latency, back-to-back reads, cascade, reload writes, a read against a stop |
-| dma | 217 | the CNT_H byte-write anomaly, capture DMA, start delays and per-region burst costs, when an immediate DMA takes the bus from the next instruction, one-unit burst lengths, two DMAs racing on a timer, the completion IRQ against a running CPU, the H-blank DMA's grant against every instruction phase, immediate-DMA length, DMA from unmapped memory reading the data bus |
+| cpu | 117 | PSR write masks, Thumb `cmp/add/mov pc`, MSR setting T, loose BX decodes, r15 base writeback, user-bank STM/LDM, the LDM^ glitch, empty register lists, the multiply carry flag and timing, undefined CPSR modes (reads and lost writes), the MRS slot's immediate form |
+| irq | 145 | the dispatch window after IME/IE/`msr`, interrupt latency per source, the IF-acknowledge race, a timer IRQ storm under a DMA burst, a timer IRQ raised as a DMA takes the bus, a timer IRQ against IWRAM and EWRAM code (one taken inside a fetch's wait states waits an instruction), the halted CPU's wake, the V-count match edge |
+| timer | 26 | start latency, back-to-back reads, cascade, reload writes, a read against a stop, the prescaler-64 phase across lines |
+| dma | 262 | the CNT_H byte-write anomaly, capture DMA, start delays and per-region burst costs, when an immediate DMA takes the bus from the next instruction, one-unit burst lengths, two DMAs racing on a timer, the completion IRQ against a running CPU, the H-blank DMA's grant against every instruction phase, immediate-DMA length, DMA from unmapped memory reading the data bus, an H-blank DMA's cost to the CPU per region, the first sound-FIFO burst against a timer read |
 | bus | 79 | unused/write-only IO read map, 0x04000800 and its EWRAM wait field, renderer contention on PRAM/VRAM/OAM, cartridge-window wait states, open bus from ARM and Thumb in four memories and after a DMA |
 | ppu | 156 | DISPSTAT byte writes; the whole `DMA Prefetch Break` path (V-blank IRQ, BIOS VBlankIntrWait, a table-walking dispatcher, an H-blank DMA), DISPSTAT edges against VCOUNT |
-| apu | 23 | channel 1's sweep at trigger and at its ticks; the first trigger after a PSG master-on |
-| bios | 24 | Div, DivArm, Sqrt, ArcTan and ArcTan2 answers at their edges, GetBiosChecksum |
+| apu | 52 | channel 1's sweep at trigger and at its ticks, its trigger check at sweep shift 0; the first trigger after a PSG master-on, from the cartridge and from RAM |
+| bios | 47 | Div, DivArm, Sqrt, ArcTan and ArcTan2 answers at their edges, GetBiosChecksum, every call's cost from IWRAM, Halt and VBlankIntrWait's way in and out |
 
 `cases.json` lists every case: its index, suite, name, what the check
 compares (offset, mask, expected value or range), and whether it is
@@ -103,7 +103,7 @@ string is written to 0x04FFFA10). Both are probed at boot and used only if
 they answer. One line per case, then one line per suite and a total:
 
 ```
-DBSUITE begin version=1 cases=716 first=0 end=716 mode=cartridge
+DBSUITE begin version=1 cases=884 first=0 end=884 mode=cartridge
 DBSUITE case cpu/psr-f-field-sets-nzcv PASS got=F000001F exp=F000001F
 DBSUITE case irq/irqwin-if-ack-race PASS got=00000008 exp=00000006..0000000A
 DBSUITE case bus/obuswin-1-nop-dma-word FAIL got=E59F0170 exp=DEADBEE3
@@ -155,7 +155,8 @@ Cases keep scratch in 0x02000000-0x02013FFF (the link-rig payloads' own
 addresses: results at 0x02008000, DMA buffers at 0x02010000 and 0x02020000).
 The results block is at 0x02014000, runtime state at 0x02018000, and the
 multiboot body runs at 0x02024000 (`mbstub.s` copies it there). Payloads run
-at 0x03000000, and copied blocks at 0x03000200.
+at 0x03000000, and copied blocks at 0x03000200; `switime` keeps its buffers
+at 0x03004000-0x030047FF.
 
 ## Provenance and what is not here
 
@@ -172,6 +173,24 @@ at 0x03000000, and copied blocks at 0x03000200.
   probes; each header gives the console's answers and any address moved
   out of the multiboot body's way. The `r0-agb.json` and `breakram-agb.json`
   tables become cases at build time.
+- **`sp-agb.json`** is this suite's own console table, recorded by
+  `record.py` (the link rig, three interleaved runs a cell, a cell that
+  answered two ways kept with both). It holds what `r0-agb.json` does not:
+  families dingbat may still fail (that file is frozen into the
+  `test_cyclelaws` gate, which dingbat must pass), and payloads that answer
+  with a block of memory. Its families: `switime` (every BIOS call's cost
+  from IWRAM, `payloads/switime.s`), `sweeptrig` (channel 1's trigger check
+  at sweep shift 0), `fifodma` (the first sound-FIFO burst against a timer
+  read), `dmasteal`, `timergeo` (prescaler 64 only), `halthb`, `vdmageo`,
+  `haltprobe`, `vbwait` and `psgfirst` run from RAM. `build.py` turns each
+  cell into cases (`SP_FAMILIES`): exact where the console gave one answer,
+  either of two where it gave two, and a band where a poll count jitters.
+  `fifodma` and `timergeo` are recorded wider than they are checked
+  (`SP_CASES`), and `irqwait` from `r0-agb.json` likewise (`R0_CASES`; the
+  cycle-law gate holds all 76 of its cells), to keep the multiboot body
+  under its 112 KB -- which it now fills to within a few dozen bytes.
+- The **gbaedge THUMBPC3** page (Thumb `cmp pc` at a halfword boundary, and
+  in System mode) is ported with its own block and watchdog.
 - **Left out on purpose:**
   - the BXDECODE candidate 0xE120FF11, which wedges a console;
   - BIOS-protection and boot-time open-bus values, which are BIOS bytes;
@@ -179,7 +198,8 @@ at 0x03000000, and copied blocks at 0x03000200.
     which depend on what ran before;
   - pages whose cells encode gbaedge's own code layout (OPENBUS, DMALATCH);
   - phase-dependent rig pages whose rows move between runs (hdmageo,
-    hdmasweep, hdmastamp, linegeo, timergeo, psgwhy);
+    hdmasweep, hdmastamp, linegeo, psgwhy), and timergeo's prescaler 256
+    and 1024 rows, whose phase walks with the frame;
   - the empty-slot execution payloads (slot*), which need an empty cartridge
     slot and an emulator image with planted words;
   - SIO: nothing single-console has been measured, and a transfer with the
