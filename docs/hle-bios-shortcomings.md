@@ -4,18 +4,46 @@
 the official BIOS except where noted in `tests/results_mgba_suite.md`. What
 it deliberately does not model:
 
-* **The BIOS-resident MP2K sound driver body.** `SoundGetJumpList` (SWI
-  0x2A) returns the real BIOS's 36 pointers and only entry 35 (channel
-  clear) does anything. `SoundDriverMain` (SWI 0x1C) performs the real
-  ident-magic lock, calls the two game-registered callbacks
-  (`[info+32]([info+36])`, `[info+40](info)`) in SVC mode and unlocks; the
-  PCM/CGB mixer is not modelled, so no BIOS-driver audio is produced, the
-  SoundInfo bookkeeping (`pcmDmaCounter`…) never updates, and the MPlay
-  score handlers behind the jump list are inert. Games that sequence music
-  through the BIOS engine wedge where they block on that state (Cyberdrive
-  Zoids at its title, Saibara Rieko no Dendou Mahjong in its frame loop).
-  Fixing it means the score interpreter (~26 routines) plus the mixer's
-  SoundInfo protocol.
+* **The BIOS-resident MP2K sound driver** (`hle_sound.nim`) is modelled
+  from the real BIOS's observed behaviour (probe ROMs and harness in
+  `tools/biosdrv`, `tests/biosdrv_probe.nim`): SoundDriverInit, Mode, VSync,
+  VSyncOff, VSyncOn, ChannelClear, SoundDriverMain's PCM mixer, MidiKey2Freq
+  and every SoundGetJumpList function (the score commands, TrackStop with
+  its CgbOscOff calls, FadeOutBody, TrkVolPitSet, SampleFreqSet,
+  RealClearChain). Results, register and SoundArea stores are exact in the
+  probes; the setup routines, SampleFreqSet and the jump-list functions are
+  cycle-exact in them too (the jump list for structures and scores in
+  IWRAM, EWRAM and the cartridge), and so is what they leave on the stack
+  below sp. On the real-game set (1800 frames each, HLE vs the real BIOS
+  image) the FIFO A/B byte streams are identical for Namco Museum 50th
+  (U, E), Lizzie McGuire On The Go and (E), Mail de Cute, Pocket Professor,
+  Rampage Puzzle Attack, X-Men Reign of Apocalypse, Phantasy Star Collection
+  (U, E), Cyberdrive Zoids, Saibara Rieko no Dendou Mahjong and Atari
+  Anniversary Advance. Not modelled:
+  - the mixer's time is charged by a per-path model, within 1-3 cycles of
+    the real routine on most passes (a pass that starts many resampled
+    channels at once was 12 short, a one-shot ending in the pass that
+    started it in an EWRAM SoundArea 3 long); its CGB side is the game's
+    +0x28 callback, as on the real BIOS;
+  - SoundDriverMain's mixing locals below sp-48, and the three words under
+    Init's and VSyncOff's real pushes (sp-36..-44 keep the HLE frame);
+    other registers than the ones the probes pin (r1 after the mix is 0);
+  - the MusicPlayer SWIs 0x20-0x24 and the BIOS's own sequencer entry
+    (SoundInfo +0x38, 0x2425) are stubs: no title in the library census
+    calls them;
+  - a MidiKey2Freq key negative as a signed word is clamped (the real
+    routine indexes out of its table);
+  - an ARM callback at exactly 0x03000000 is entered 10 cycles later than
+    by the real call; Cyberdrive Zoids' voice command with its tone table
+    in the cartridge returns a cycle early.
+  Left in that set: Cyberdrive Zoids' frames from 531 (its loop reads stack
+  words the real BIOS's non-sound SWIs leave different), Gameboy Player
+  Controller's stream from byte 11282 (its multiboot LZ77UnCompWram, EWRAM
+  to EWRAM, runs ~243k cycles short of the real one, which moves the sound
+  start), the FFCC loader's frame 3 and last silent FIFO burst (its first
+  SoundDriverMain pass, on a SoundArea it set up itself, runs ~20 cycles
+  long; not pinned down), Phantasy Star Collection's one lag frame, Lizzie
+  McGuire (E)'s frames from 519 and X-Men's from 1718 (streams identical).
 * **Interrupted-copy register remnants.** An IRQ preempting CpuSet /
   CpuFastSet leaves the continuation in r0/r1/r2 (PC rewound onto the SWI).
   On that path only, the halfword forms advance r0/r1 (the real routine

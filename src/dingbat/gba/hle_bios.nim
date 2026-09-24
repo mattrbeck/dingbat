@@ -448,12 +448,16 @@ include hle_sound
 when defined(biosdrvtrace):
   # tests/biosdrv_probe.nim: every SWI the CPU executes (HLE or real BIOS)
   var bdSwiHook*: proc(swi_num: uint32) {.closure.}
+  # ... and the address of every instruction about to execute
+  var bdPcHook*: proc(pc: uint32) {.closure.}
 
 proc hle_takes*(cpu: CPU; swi_num: uint32): bool {.inline.} =
   ## With a real BIOS image mapped (hle_after_bios) the sound-driver SWIs run
   ## the image's own driver: their HLE continues through stub-BIOS code.
-  cpu.gba.bus.stub_bios or swi_num notin {0x1A'u32..0x1E'u32, 0x20'u32..0x24'u32,
-                                          0x28'u32, 0x29'u32}
+  if cpu.gba.bus.stub_bios: return true
+  case swi_num
+  of 0x1A'u32..0x1E'u32, 0x20'u32..0x24'u32, 0x28'u32, 0x29'u32: false
+  else: true
 
 proc hle_swi*(cpu: CPU; swi_num: uint32) =
   ## HLE BIOS SWI dispatch; used when no BIOS image is provided.

@@ -243,3 +243,53 @@ bd_pswi:
         pop     {r4-r11, lr}
         bx      lr
         .pool
+
+@ bd_callfn_stk(fn, r0, r1, r2): bd_callfn with r3 and r6-r11 set to
+@ 0xA3A3A3A3, 0xA6A6A6A6 .. 0xABABABAB (r4 and r5 hold the marker address
+@ and value, as in bd_callfn), and the 16 words below the caller's sp copied
+@ to bd_stk straight after the return, before anything else touches the
+@ stack: what the function left there. r6-r11 after the call follow.
+        .section .iwram, "ax", %progbits
+        .arm
+        .global bd_callfn_stk
+        .global bd_stk
+bd_callfn_stk:
+        push    {r4-r11, lr}
+        mov     r4, #0                  @ the 16 words below sp zeroed first
+        sub     r12, sp, #64
+        .rept   16
+        str     r4, [r12], #4
+        .endr
+        mov     r12, r0
+        mov     r0, r1
+        mov     r1, r2
+        mov     r2, r3
+        ldr     r3, =0xA3A3A3A3
+        ldr     r6, =0xA6A6A6A6
+        ldr     r7, =0xA7A7A7A7
+        ldr     r8, =0xA8A8A8A8
+        ldr     r9, =0xA9A9A9A9
+        ldr     r10, =0xAAAAAAAA
+        ldr     r11, =0xABABABAB
+        mov     r4, #0x04000000
+        add     r4, r4, #0xFF0
+        mov     r5, #0xF0
+        strb    r5, [r4]
+        mov     lr, pc
+        bx      r12
+        ldr     r0, =bd_stk
+        sub     r1, sp, #64
+        .rept   8
+        ldmia   r1!, {r2, r3}
+        stmia   r0!, {r2, r3}
+        .endr
+        stmia   r0!, {r6-r11}
+        mov     r5, #0xF1
+        strb    r5, [r4]
+        pop     {r4-r11, lr}
+        bx      lr
+        .pool
+
+        .section .bss
+        .align 2
+bd_stk: .space 88

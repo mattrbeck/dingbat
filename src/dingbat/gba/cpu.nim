@@ -687,6 +687,9 @@ proc tick*(cpu: CPU) =
         gsProbeIn = inIw
     when defined(pcprofile):
       let prof_region = bits_range(cpu.r[15], 24, 27)
+    when defined(biosdrvtrace):
+      if bdPcHook != nil:
+        bdPcHook(cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32))
     when defined(pftrace):
       pft("INSTR pc=" & toHex(cpu.r[15], 8) & " t=" & $cpu.cpsr.thumb &
           " sched=" & $cpu.gba.scheduler.cycles & " busc=" & $cpu.gba.bus.cycles)

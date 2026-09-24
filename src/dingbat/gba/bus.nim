@@ -443,8 +443,7 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     # SoundGetJumpList (SWI 0x2A): the 36 sound-driver function addresses the
     # real BIOS copies to [r0] (BIOS 0x3738), same values so games that
     # compare the pointers see the real thing. Entry 35 (0x23B0, channel
-    # clear) is implemented because Cyberdrive Zoids calls it; the rest
-    # return immediately (the BIOS-resident MP2K engine is not modeled).
+    # clear) is real code; the others trap into the HLE.
     const JUMP_LIST = [0x2665'u32, 0x26CF, 0x26EF, 0x2709, 0x271D, 0x2665,
                        0x2665, 0x2665, 0x2665, 0x274B, 0x2755, 0x2769,
                        0x277B, 0x27A9, 0x27BB, 0x27CF, 0x27E3, 0x27F5,
@@ -453,10 +452,11 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
                        0x170B, 0x23E7, 0x1535, 0x159D, 0x23C7, 0x23B1]
     for i, v in JUMP_LIST:
       write_stub_u32(result.bios, 0x3738 + i * 4, v)
-      # bx lr at each entry (halfword-aligned thumb targets)
+      # A Thumb `swi 0` at each entry: the HLE runs the function
+      # (hle_sound.nim sd_jl_trap) and returns to lr
       let t = int(v and not 1'u32)
-      result.bios[t]     = 0x70'u8
-      result.bios[t + 1] = 0x47'u8
+      result.bios[t]     = 0x00'u8
+      result.bios[t + 1] = 0xDF'u8
     # Entry 35, the real routine at 0x23B0 (verbatim):
     #   mov ip, r4; movs r1-r4, #0; 4x stmia r0!, {r1-r4}; mov r4, ip; bx lr
     for i, h in [0x46A4'u16, 0x2100, 0x2200, 0x2300, 0x2400,
@@ -485,6 +485,10 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     write_stub_u32(result.bios, 0x3920, 0xE351009F'u32)  # cmp  r1, #159
     write_stub_u32(result.bios, 0x3924, 0x1AFFFFFC'u32)  # bne  0x391C
     write_stub_u32(result.bios, 0x3928, 0xEF000000'u32)  # swi  0
+    # TrackStop's return from the game's CgbOscOff: the real call's lr is
+    # 0x2413 (the game sees it), so the Thumb `swi 0` trap sits there
+    result.bios[0x2412] = 0x00'u8
+    result.bios[0x2413] = 0xDF'u8
   result.gpio = new_gpio(gba)
   # Tilt carts cannot be probed at runtime, so detection is by game code:
   # KYG* = Yoshi's Universal Gravitation / Topsy-Turvy, KHPJ = Koro Koro

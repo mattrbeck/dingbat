@@ -40,6 +40,8 @@ extern volatile u32 bd_irq_count;
 extern volatile u32 bd_irq_vsync;
 extern void bd_irq_handler(void);
 extern void bd_callfn(u32 fn, u32 a, u32 b, u32 c);
+extern void bd_callfn_stk(u32 fn, u32 a, u32 b, u32 c);
+extern u32 bd_stk[22];
 #define W(n) extern u32 bd_swi_##n(u32 a, u32 b, u32 c, u32 d);
 W(1A) W(1B) W(1C) W(1D) W(1E) W(1F) W(20) W(21) W(22) W(23) W(24) W(28) W(29) W(2A)
 #undef W

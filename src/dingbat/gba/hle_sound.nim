@@ -45,16 +45,22 @@ const
   SD_PH_POLL = 3'u32      # delay done, poll VCOUNT next
   SD_PH_VSOFF = 4'u32     # VSyncOff: buffer clear done, unlock and return
   SD_PH_SM_DONE = 5'u32   # SoundDriverMain: mixing time spent, unlock and return
+  SD_PH_SFS_A = 6'u32     # jump-list SampleFreqSet: rate fields next
+  SD_PH_SFS_POLL = 7'u32  # ... poll VCOUNT next, then return to lr
+  SD_PH_SFS_B = 8'u32     # ... Timer 0 and the DMAs next
   # SoundDriverMain's callback returns (the real routine's lr values, 0x1DF1
   # and 0x1DF9, hold Thumb `swi 0` traps in the stub): r15 while they trap
   SD_TRAP_SM_FUNC* = 0x1DF4'u32
   SD_TRAP_SM_CGB* = 0x1DFC'u32
   SD_FRAME_WORDS = 9      # r4-r9, r12, return address, caller CPSR
+  SD_MAIN_FRAME_WORDS = 15  # SoundDriverMain's depth below the dispatcher
 
 # Samples per V-blank for rate indices 1-15 (0 keeps the rate). 1-12 are
 # GBATEK's table; 13 and 14 read 0xFFFF and 15 reads 31 on the real BIOS
 # (mode probe, tools/biosdrv/mode.c and init.c).
-const SD_SPV = [0'u32, 96, 132, 176, 224, 264, 304, 352, 448, 528, 608, 672,
+# Index 0 (only SampleFreqSet takes it: Mode keeps the rate) gave 61857
+# samples (jlist_iw.c), the entry before the table.
+const SD_SPV = [61857'u32, 96, 132, 176, 224, 264, 304, 352, 448, 528, 608, 672,
                 704, 0xFFFF, 0xFFFF, 31]
 
 proc sd_area(cpu: CPU): uint32 {.inline.} =
@@ -97,15 +103,19 @@ proc sd_rate(index: int): SdRate =
   ## 48771 is the wrapped product), divfreq = (2^24 / freq + 1) >> 1, and
   ## Timer 0 reloads 0x10000 - 280896 / spv (one frame's cycles per sample).
   ## Every value matched the real BIOS's stores for all 15 indices.
+  ## The divisions are signed (SampleFreqSet's index 0 makes the product
+  ## negative: freq and divfreq came out -170906 and -49, jlist_iw.c).
   let spv = SD_SPV[index and 15]
   result.spv = spv
   result.period = (1584'u32 div spv) and 0xFF
-  let prod = spv * 597275'u32 + 5000'u32
-  result.freq = prod div 10000'u32
-  result.divfreq = ((16777216'u32 div result.freq) + 1) shr 1
+  let prod = cast[int32](spv * 597275'u32 + 5000'u32)
+  let freq = prod div 10000'i32
+  result.freq = cast[uint32](freq)
+  let q = if freq == 0: 0'i32 else: 16777216'i32 div freq
+  result.divfreq = cast[uint32](ashr(q + 1, 1))
   result.reload = (0x10000'u32 - 280896'u32 div spv) and 0xFFFF
-  result.cost = sd_div_cost(1584, spv) + sd_div_cost(prod, 10000) +
-                sd_div_cost(16777216, result.freq) + sd_div_cost(280896, spv)
+  result.cost = sd_div_cost(1584, spv) + sd_div_cost(uint32(abs(int64(prod))), 10000) +
+                sd_div_cost(16777216, uint32(abs(int64(freq)))) + sd_div_cost(280896, spv)
 
 proc sd_write_rate_fields(cpu: CPU; area: uint32; index: int): SdRate =
   let bus = cpu.gba.bus
@@ -156,13 +166,44 @@ proc sd_delay(cpu: CPU; cycles: int; step: uint32) =
   cpu.r[8] = uint32(n)
   cpu.sd_stub_goto(SD_STUB_DELAY, step)
 
-proc sd_park(cpu: CPU) =
+type SdResid = enum
+  ## What a routine leaves on the System stack below the dispatcher's words
+  rsNone, rsInit, rsMode, rsVsOff, rsMain
+
+proc sd_resid(cpu: CPU; usp: uint32; kind: SdResid; area, index: uint32) =
+  ## The real routine's pushes below the caller's sp, as it leaves them
+  ## (swistk.c: each SWI with r3-r11 set to known values, the 16 words
+  ## below sp captured after it). Offsets from sp: 12 holds the
+  ## dispatcher's return address 0x170 for all, then the saved registers
+  ## and the locals the routine stored. SoundDriverMain's mixing locals
+  ## below sp-48 are not modelled.
+  let bus = cpu.gba.bus
+  template put(off: uint32; v: uint32) = bus.write_word_internal(usp - off, v)
+  if kind == rsNone: return
+  put(12, SD_R3); put(16, cpu.r[7])
+  case kind
+  of rsInit:
+    put(20, 0); put(24, 0x16D3); put(28, area); put(32, cpu.r[4])
+  of rsMode:
+    put(20, cpu.r[5]); put(24, cpu.r[4])
+    if index != 0:
+      put(28, 0x1811); put(32, area); put(36, index shl 16); put(40, 0x18AB)
+      put(44, SD_IDENT); put(48, index shl 16)
+  of rsVsOff:
+    put(20, 0); put(24, 0x18AB); put(28, cpu.r[5]); put(32, cpu.r[4])
+  of rsMain:
+    put(20, cpu.r[6]); put(24, cpu.r[5]); put(28, cpu.r[4]); put(32, 0x1F)
+    put(36, cpu.r[10]); put(40, cpu.r[9]); put(44, cpu.r[8]); put(48, area)
+  of rsNone: discard
+
+proc sd_park(cpu: CPU; words = SD_FRAME_WORDS) =
   ## Park the SWI's caller: its return state goes in a frame on the System
   ## stack below the dispatcher's {r2, lr} (hle_swi wrote that residue; r2
   ## comes back from it), and the CPU switches to System mode with the
-  ## caller's IRQ mask, where the BIOS runs its routines. The frame is as
-  ## deep as the real routine's pushes (nine words: SoundDriverMain's
-  ## callbacks see the same sp; smain.c).
+  ## caller's IRQ mask, where the BIOS runs its routines. The frame (nine
+  ## words) sits at the bottom of `words`: SoundDriverMain's callbacks run
+  ## 15 words below the dispatcher's, as on the real BIOS (swistk.c: the
+  ## callbacks store their sp).
   let step = if cpu.cpsr.thumb: 2'u32 else: 4'u32
   let ret = cpu.r[15] - step
   let caller = uint32(cpu.cpsr)
@@ -180,7 +221,7 @@ proc sd_park(cpu: CPU) =
       else:
         int(bus.wait32_n[page]) + int(bus.wait32_s[page]) + int(bus.wait16_s[page]) - 1
     bus.add_cycles(-(refill - 2) + (int(bus.wait16_n[page]) - 1))
-  let fb = cpu.sys_sp() - 8 - uint32(SD_FRAME_WORDS * 4)
+  let fb = cpu.sys_sp() - 8 - uint32(words * 4)
   let bus = cpu.gba.bus
   for i, v in [cpu.r[4], cpu.r[5], cpu.r[6], cpu.r[7], cpu.r[8], cpu.r[9],
                cpu.r[12], ret, caller]:
@@ -198,16 +239,21 @@ proc sd_enter(cpu: CPU; phase: uint32; delay: int; r4 = 0'u32; r5 = 0'u32) =
   cpu.r[9] = phase
   cpu.sd_delay(delay, step)
 
-proc sd_leave(cpu: CPU; exit_cost: int) =
-  ## Return to the parked caller (a trap is executing: ARM or Thumb stub).
+proc sd_leave(cpu: CPU; exit_cost: int; resid = rsNone; words = SD_FRAME_WORDS) =
+  ## Return to the parked caller (a trap is executing: ARM or Thumb stub),
+  ## leaving the real routine's stack residue.
   let step = if cpu.cpsr.thumb: 2'u32 else: 4'u32
   let bus = cpu.gba.bus
   let fb = cpu.r[13]
+  let area = cpu.r[4]
+  let index = cpu.r[5]
   var v: array[SD_FRAME_WORDS, uint32]
   for i in 0 ..< SD_FRAME_WORDS: v[i] = bus.read_word_internal(fb + uint32(i * 4))
   cpu.r[4] = v[0]; cpu.r[5] = v[1]; cpu.r[6] = v[2]; cpu.r[7] = v[3]
   cpu.r[8] = v[4]; cpu.r[9] = v[5]; cpu.r[12] = v[6]
-  let usp = fb + uint32(SD_FRAME_WORDS * 4) + 8
+  let usp = fb + uint32(words * 4) + 8
+  cpu.sd_resid(usp, resid, if resid == rsInit: bus.read_word_internal(SD_INFO_PTR) else: area,
+               index)
   cpu.r[2] = bus.read_word_internal(usp - 8)   # the dispatcher's pop
   cpu.r[14] = bus.read_word_internal(usp - 4)  # ... of the System lr too
   cpu.r[13] = usp
@@ -273,6 +319,14 @@ const
   SD_MAIN_TO_CGB {.intdefine.} = 20
   SD_FUNC_TO_CGB {.intdefine.} = 6
   SD_MIX_BASE {.intdefine.} = 435
+  # SampleFreqSet (jlist.c, BD_MEMTRACE/BD_IOREAD stamps from the call at
+  # rate 1): the rate fields from +19 (one stamp for all here), Timer 0
+  # stopped at +518 after three of the four divisions, the first VCOUNT read
+  # at +727 after the fourth, the return 41 after the timer start
+  SD_SFS_FIELDS {.intdefine.} = 19
+  SD_SFS_STOP {.intdefine.} = 77
+  SD_SFS_POLL0 {.intdefine.} = 33
+  SD_SFS_EXIT {.intdefine.} = 8
   SD_MAIN_EXIT {.intdefine.} = 60
   SD_TRAP_COST_T {.intdefine.} = 56
   SD_INIT_POLL0 {.intdefine.} = 7893 - 531
@@ -344,6 +398,7 @@ proc sd_mode(cpu: CPU) =
     cost += 12  # + the register write's own cycle
   let index = int((mode shr 16) and 0xF)
   if index == 0:
+    cpu.sd_resid(cpu.sys_sp(), rsMode, area, 0)
     bus.write_word_internal(area, SD_IDENT)
     cpu.r[0] = mode
     cpu.idle(cost + cpu.sd_x(area, true))
@@ -429,6 +484,10 @@ proc sd_channel_clear(cpu: CPU) =
   for i in 0'u32 ..< 12'u32:
     bus.write_byte_internal(area + 0x50 + i * 0x40, 0)
   cpu.r[0] = area + 0x350
+  # pushes r4-r7 (swistk.c)
+  let usp = cpu.sys_sp()
+  for i, v in [cpu.r[4], cpu.r[5], cpu.r[6], cpu.r[7], SD_R3]:
+    bus.write_word_internal(usp - 28 + uint32(i * 4), v)
   cpu.idle(232 - 82 + 4 * cpu.sd_x(area, true) + 12 * cpu.sd_x(area, false))
 
 # --- SoundDriverMain: the PCM mixer ---
@@ -528,7 +587,12 @@ const
   SD_TAIL_RES = 29      # + 4 aw + 1 ab
   SD_TAIL_END = 33      # a one-shot end mid-pass (+18 resampled), + aw + 2 ab
   SD_VISIT = 21         # an idle channel, + aw + ab
-  SD_OFF = 30           # a channel the envelope stops (approximate)
+  # A channel that stops without mixing (mix_rel: each once, exact): note-on
+  # and note-off in the same pass 33, the release reaching an echo volume
+  # of 0 58, the pseudo-echo running out 42
+  SD_OFF_START = 33
+  SD_OFF_REL = 58
+  SD_OFF_IEC = 42
   SD_MIX_PRE {.intdefine.} = 400
   SD_MIX_POST {.intdefine.} = 70
 
@@ -591,12 +655,13 @@ proc sd_mix(cpu: CPU; area: uint32): int =
     let wav = bus.read_word_internal(ch + 0x24)
     var ev = int(bus.read_byte_internal(ch + 9))
     var off = false
+    var off_cost = 0
     let started = (st and 0x80'u8) != 0
     var path: SdPath
     if started:
       if (st and 0x40'u8) != 0:
         bus.write_byte_internal(ch, 0)   # note-on and note-off together
-        result += SD_OFF + aw + 2 * ab
+        result += SD_OFF_START + aw + 2 * ab
         continue
       st = 0x03'u8
       if (bus.read_half_internal(wav + 2) and 0x4000'u16) != 0: st = st or 0x10'u8
@@ -609,14 +674,14 @@ proc sd_mix(cpu: CPU; area: uint32): int =
       # more passes
       let n = bus.read_byte_internal(ch + 0x0D) - 1
       bus.write_byte_internal(ch + 0x0D, n)
-      if n == 0: off = true
+      if n == 0: (off = true; off_cost = SD_OFF_IEC)
       path = SD_P_IEC
     elif (st and 0x40'u8) != 0:
       ev = (ev * int(bus.read_byte_internal(ch + 7))) shr 8
       let evol = int(bus.read_byte_internal(ch + 0x0C))
       path = SD_P_REL
       if ev <= evol:
-        if evol == 0: off = true
+        if evol == 0: (off = true; off_cost = SD_OFF_REL)
         else:
           st = st or 0x04'u8
           ev = evol
@@ -642,7 +707,7 @@ proc sd_mix(cpu: CPU; area: uint32): int =
         path = SD_P_SUS
     if off:
       bus.write_byte_internal(ch, 0)
-      result += SD_OFF + aw + 3 * ab
+      result += off_cost + aw + 3 * ab
       continue
     bus.write_byte_internal(ch, st)
     bus.write_byte_internal(ch + 9, uint8(ev))
@@ -744,6 +809,8 @@ proc sd_mix(cpu: CPU; area: uint32): int =
       # keep their values from before the pass
       bus.write_byte_internal(ch, 0)
       result += SD_TAIL_END + (if fixed: 0 else: 18) + aw + 2 * ab
+      # resampled, in the pass that started it: 10 more (mix_rel)
+      if started and not fixed: result += 10
       continue
     result += wrap_extra
     if fixed: result += SD_TAIL_FIX + 3 * aw + ab
@@ -767,7 +834,7 @@ proc sd_main(cpu: CPU) =
   let bus = cpu.gba.bus
   let step = if cpu.cpsr.thumb: 2'u32 else: 4'u32
   bus.write_word_internal(area, SD_IDENT + 1)
-  cpu.sd_park()
+  cpu.sd_park(SD_MAIN_FRAME_WORDS)
   cpu.r[4] = area
   let fn = bus.read_word_internal(area + 0x20)
   # The callbacks see the flags of the routine's last compare: C for the
@@ -781,10 +848,696 @@ proc sd_main(cpu: CPU) =
     cpu.idle(SD_MAIN_TO_CGB + 4 * cpu.sd_x(area, true))
     cpu.sd_call(bus.read_word_internal(area + 0x28), area, 0x1DF9, step)
 
-proc sd_trap(cpu: CPU): bool =
-  ## A stub-continuation trap (hle_swi 0x00 at SD_TRAP_DELAY/SD_TRAP_POLL).
-  ## False: not ours.
+# --- The jump list's functions (SoundGetJumpList, SWI 0x2A) ---
+#
+# Games whose own MP2K sequencer runs on the BIOS driver (Cyberdrive Zoids,
+# Saibara Rieko no Dendou Mahjong) call these through the table SWI 0x2A
+# copies out: score-command handlers taking (MusicPlayerInfo r0, track r1)
+# with the track's command pointer (+0x40) at the command's parameters, and
+# a few helpers. Each entry in the stub BIOS is a Thumb `swi 0` the HLE
+# answers here, returning to lr. Behaviour from tools/biosdrv/jlist.c: every
+# function called on patterned structures in eight states (pattern levels,
+# repeat counts, unaligned and zero parameters, channel chains), the stores
+# diffed; jlist2.c: TrackStop, FadeOutBody, TrkVolPitSet, fine, endtie,
+# modt and RealClearChain over hundreds of random states; jlrom.c: the
+# score and tone table in the cartridge. jlcmp.py runs any of them on both
+# BIOSes: all stores match and every call's time does. Track fields named as
+# loveemu's MP2K summary names them.
+
+const
+  TR_FLAGS = 0x00'u32
+  TR_LEVEL = 0x02'u32
+  TR_REPN = 0x03'u32
+  TR_KEY = 0x05'u32
+  TR_KEYSH = 0x0A'u32
+  TR_TUNE = 0x0C'u32
+  TR_BEND = 0x0E'u32
+  TR_BENDR = 0x0F'u32
+  TR_VOL = 0x12'u32
+  TR_PAN = 0x14'u32
+  TR_MODM = 0x16'u32
+  TR_MOD = 0x17'u32
+  TR_MODT = 0x18'u32
+  TR_LFOS = 0x19'u32
+  TR_LFODL = 0x1B'u32
+  TR_PRIO = 0x1D'u32
+  TR_CHAN = 0x20'u32
+  TR_TONE = 0x24'u32
+  TR_CMD = 0x40'u32
+  TR_STACK = 0x44'u32
+  CH_TRACK = 0x2C'u32
+  CH_PREV = 0x30'u32
+  CH_NEXT = 0x34'u32
+  CH_KEY = 0x11'u32
+
+type SdJl = enum
+  jlFine, jlGoto, jlPatt, jlPend, jlRept, jlPrio, jlTempo, jlKeysh, jlVoice,
+  jlVol, jlPan, jlBend, jlBendr, jlLfos, jlLfodl, jlMod, jlModt, jlTune,
+  jlPort, jlEndtie, jlRealClearChain, jlTrkVolPitSet
+
+proc sd_jl_kind(trap_pc: uint32; kind: var SdJl): bool =
+  ## The function a jump-list trap (r15 = entry + 4) stands for.
+  result = true
+  case trap_pc
+  of 0x2668: kind = jlFine
+  of 0x26D2: kind = jlGoto
+  of 0x26F2: kind = jlPatt
+  of 0x270C: kind = jlPend
+  of 0x2720: kind = jlRept
+  of 0x274E: kind = jlPrio
+  of 0x2758: kind = jlTempo
+  of 0x276C: kind = jlKeysh
+  of 0x277E: kind = jlVoice
+  of 0x27AC: kind = jlVol
+  of 0x27BE: kind = jlPan
+  of 0x27D2: kind = jlBend
+  of 0x27E6: kind = jlBendr
+  of 0x27F8: kind = jlLfos
+  of 0x2808: kind = jlLfodl
+  of 0x2812: kind = jlMod
+  of 0x2822: kind = jlModt
+  of 0x283A: kind = jlTune
+  of 0x284E: kind = jlPort
+  of 0x262C: kind = jlEndtie
+  of 0x23CA: kind = jlRealClearChain
+  of 0x15A0: kind = jlTrkVolPitSet
+  else: result = false
+
+# Costs. Each function's time was measured with its structures in EWRAM
+# (jlist.c, jlist2.c) and again in IWRAM (jlist_iw.c, jlist2_iw.c): the
+# constants are the IWRAM times beyond the 32 cycles an empty HLE call takes
+# (the bd_callfn wrapper and the trap's return), and every access the HLE
+# makes adds its region's wait over IWRAM's single cycle (sd_xh/sd_xw), so a
+# track in EWRAM or a score in the cartridge costs what it does on the real
+# BIOS. The HLE makes the real routine's accesses -- the same count, widths
+# and addresses, from BD_MEMREAD/BD_MEMTRACE logs of each call (a few
+# re-reads below exist only for that) -- and with them the EWRAM times are
+# the IWRAM ones plus the waits.
+const
+  SD_JL_COST: array[SdJl, int] = [
+    28,   # fine (empty chain)
+    50,   # goto
+    72,   # patt
+    21,   # pend
+    100,  # rept
+    37,   # prio
+    46,   # tempo (47 for a tempo byte of 0x80 up: a longer multiply)
+    44,   # keysh
+    86,   # voice
+    44,   # vol
+    45,   # pan
+    45,   # bend
+    44,   # bendr
+    41,   # lfos
+    37,   # lfodl
+    41,   # mod
+    49,   # modt (a new value)
+    45,   # tune
+    44,   # port (+1 for the I/O write)
+    35,   # endtie (no key byte, empty chain)
+    31,   # RealClearChain
+    58]   # TrkVolPitSet (no update)
+  SD_FINE_CH_ON = 45      # a channel released by fine, 43 with nothing to
+  SD_FINE_CH_OFF = 43     # release, 4 more for each after the first
+  SD_FINE_CH_NEXT = 4
+  SD_PATT_END = 10        # patt past level 3, then fine's costs
+  SD_PEND_NONE = 13       # pend at level 0
+  SD_REPT_FOREVER = 64    # rept with count 0
+  SD_MODT_SAME = 42       # modt with the value the track has
+  SD_RCC_NONE = 13        # RealClearChain on a channel with no track
+                          # (jlist2.c; Cyberdrive Zoids' calls agree)
+  SD_ET_KEY = 3           # endtie with a key byte
+  SD_ET_ON = 16           # a sounding channel endtie looks at, 11 for
+  SD_ET_OFF = 11          # another, 3 more for each after the first
+  SD_ET_NEXT = 3
+  # TrkVolPitSet by path (jlist2.c, 240 tracks): the volume 63, 66 with the
+  # modulation on volume or pan, a cycle less when the pan clamps at 127 and
+  # two less when it clamps at -128; the pitch 42, 46 with the modulation
+  # on pitch. Exact on all 240.
+  SD_TVPS_VOL = 63
+  SD_TVPS_VOL_MOD = 66
+  SD_TVPS_PIT = 42
+  SD_TVPS_PIT_MOD = 46
+
+proc sd_xh(bus: Bus; a: uint32): int {.inline.} =
+  ## A byte/halfword access's wait over IWRAM's single cycle at `a` (none
+  ## above the address space: jlist.c's store through a garbage pointer).
+  if a >= 0x10000000'u32: 0 else: int(bus.wait16_n[int(bits_range(a, 24, 27))]) - 1
+
+proc sd_xw(bus: Bus; a: uint32): int {.inline.} =
+  if a >= 0x10000000'u32: 0 else: int(bus.wait32_n[int(bits_range(a, 24, 27))]) - 1
+
+template sd_acc_templates(bus: Bus; acc: untyped) {.dirty.} =
+  # Accesses that add their region's wait to `acc` (the score and tone table
+  # in the cartridge included: jlrom.c, exact at WAITCNT 0x4014, 0x4317 and
+  # 0)
+  template rb(a: uint32): uint8 {.used.} =
+    (block:
+      let aa = a
+      acc += bus.sd_xh(aa)
+      bus.read_byte_internal(aa))
+  template sb(a: uint32): int {.used.} =
+    (block:
+      let v = rb(a)
+      int(cast[int8](v)))
+  template wb(a: uint32; v: uint8) {.used.} =
+    (block:
+      let aa = a
+      acc += bus.sd_xh(aa)
+      bus.write_byte_internal(aa, v))
+  template rh(a: uint32): uint16 {.used.} =
+    (block:
+      let aa = a
+      acc += bus.sd_xh(aa)
+      bus.read_half_internal(aa))
+  template wh(a: uint32; v: uint16) {.used.} =
+    (block:
+      let aa = a
+      acc += bus.sd_xh(aa)
+      bus.write_half_internal(aa, v))
+  template rw(a: uint32): uint32 {.used.} =
+    (block:
+      let aa = a
+      acc += bus.sd_xw(aa)
+      bus.read_word_internal(aa))
+  template ww(a: uint32; v: uint32) {.used.} =
+    (block:
+      let aa = a
+      acc += bus.sd_xw(aa)
+      bus.write_word_internal(aa, v))
+
+proc sd_jl_run(cpu: CPU; kind: SdJl): int =
+  ## Run the function; its cycles beyond the empty call.
   let bus = cpu.gba.bus
+  let mp = cpu.r[0]
+  let tr = cpu.r[1]
+  var acc = 0
+  sd_acc_templates(bus, acc)
+  result = SD_JL_COST[kind]
+  var partial = 0'u32
+  var port_addr = 0'u32
+  var ended_fine = false
+  template ptr_at(a: uint32): uint32 =
+    # four byte reads, last byte first: the pointer need not be aligned
+    (block:
+      let pa = a
+      let b3 = uint32(rb(pa + 3))
+      let b2 = uint32(rb(pa + 2))
+      let b1 = uint32(rb(pa + 1))
+      let b0 = uint32(rb(pa))
+      partial = (b3 shl 24) or (b2 shl 16) or (b1 shl 8)
+      b0 or (b1 shl 8) or (b2 shl 16) or (b3 shl 24))
+  template cmd_byte(): uint8 =
+    (block:
+      let p = rw(tr + TR_CMD)
+      ww(tr + TR_CMD, p + 1)
+      rb(p))
+  template flags_or(m: uint8) = wb(tr + TR_FLAGS, rb(tr + TR_FLAGS) or m)
+  template fine() =
+    # Every channel on the track: an active one is released (STOP), each is
+    # unlinked from the chain as RealClearChain does; then the track stops
+    var c = rw(tr + TR_CHAN)
+    var first = true
+    while c != 0:
+      let st = rb(c)
+      if (st and 0xC7'u8) != 0:
+        wb(c, st or 0x40'u8)
+        result += SD_FINE_CH_ON
+      else:
+        result += SD_FINE_CH_OFF
+      if not first: result += SD_FINE_CH_NEXT
+      first = false
+      let t = rw(c + CH_TRACK)
+      if t != 0:
+        let next = rw(c + CH_NEXT)
+        let prev = rw(c + CH_PREV)
+        if prev != 0: ww(prev + CH_NEXT, next) else: ww(t + TR_CHAN, next)
+        if next != 0: ww(next + CH_PREV, prev)
+        ww(c + CH_TRACK, 0)
+      c = rw(c + CH_NEXT)
+    wb(tr + TR_FLAGS, 0)
+  template goto_at(p: uint32) =
+    ww(tr + TR_CMD, ptr_at(p))
+  case kind
+  of jlFine: fine()
+  of jlGoto:
+    goto_at(rw(tr + TR_CMD))
+  of jlPatt:
+    let lvl = rb(tr + TR_LEVEL)
+    if lvl < 3:
+      let p = rw(tr + TR_CMD)
+      ww(tr + TR_STACK + uint32(lvl) * 4, p + 4)
+      wb(tr + TR_LEVEL, rb(tr + TR_LEVEL) + 1)
+      goto_at(rw(tr + TR_CMD))
+    else:
+      result = SD_PATT_END + SD_JL_COST[jlFine]
+      ended_fine = true
+      fine()    # nesting past three levels ends the track
+  of jlPend:
+    let lvl = rb(tr + TR_LEVEL)
+    if lvl != 0:
+      wb(tr + TR_LEVEL, lvl - 1)
+      ww(tr + TR_CMD, rw(tr + TR_STACK + uint32(lvl - 1) * 4))
+    else:
+      result = SD_PEND_NONE
+  of jlRept:
+    let p = rw(tr + TR_CMD)
+    let cnt = rb(p)
+    if cnt == 0:
+      # 0 repeats for ever: past the count, then the pointer
+      result = SD_REPT_FOREVER
+      ww(tr + TR_CMD, p + 1)
+      goto_at(rw(tr + TR_CMD))
+    else:
+      let n = rb(tr + TR_REPN) + 1
+      if n < cnt:
+        wb(tr + TR_REPN, n)
+        discard cmd_byte()
+        goto_at(rw(tr + TR_CMD))
+      else:
+        # the last pass: the same accesses, the pointer skipped
+        wb(tr + TR_REPN, 0)
+        discard cmd_byte()
+        discard rw(tr + TR_CMD)
+        discard ptr_at(p + 1)
+        ww(tr + TR_CMD, p + 5)
+  of jlPrio: wb(tr + TR_PRIO, cmd_byte())
+  of jlTempo:
+    let d = uint32(cmd_byte()) * 2
+    if d > 255: result += 1
+    wh(mp + 0x1C, uint16(d))
+    let u = uint32(rh(mp + 0x1E))
+    wh(mp + 0x20, uint16((d * u) shr 8))
+  of jlKeysh:
+    wb(tr + TR_KEYSH, cmd_byte()); flags_or(0x0C)
+  of jlVoice:
+    let b = cmd_byte()
+    let src = rw(mp + 0x30) + uint32(b) * 12
+    for i in 0'u32 ..< 3'u32: ww(tr + TR_TONE + i * 4, rw(src + i * 4))
+  of jlVol:
+    wb(tr + TR_VOL, cmd_byte()); flags_or(0x03)
+  of jlPan:
+    wb(tr + TR_PAN, cmd_byte() - 0x40); flags_or(0x03)
+  of jlBend:
+    wb(tr + TR_BEND, cmd_byte() - 0x40); flags_or(0x0C)
+  of jlBendr:
+    wb(tr + TR_BENDR, cmd_byte()); flags_or(0x0C)
+  of jlLfos:
+    let b = cmd_byte()
+    wb(tr + TR_LFOS, b)
+    if b == 0: wb(tr + TR_MODM, 0)
+  of jlLfodl: wb(tr + TR_LFODL, cmd_byte())
+  of jlMod:
+    let b = cmd_byte()
+    wb(tr + TR_MOD, b)
+    if b == 0: wb(tr + TR_MODM, 0)
+  of jlModt:
+    # a new target sets the update flags; the same one changes nothing
+    # (jlist2.c: 20 calls, half each)
+    let b = cmd_byte()
+    if rb(tr + TR_MODT) != b:
+      wb(tr + TR_MODT, b); flags_or(0x0F)
+    else:
+      result = SD_MODT_SAME
+  of jlTune:
+    wb(tr + TR_TUNE, cmd_byte() - 0x40); flags_or(0x0C)
+  of jlPort:
+    # two bytes read, the pointer written once
+    let p = rw(tr + TR_CMD)
+    let off = rb(p)
+    let v = rb(p + 1)
+    ww(tr + TR_CMD, p + 2)
+    port_addr = 0x04000060'u32 + uint32(off)
+    bus[port_addr] = v
+  of jlEndtie:
+    let p = rw(tr + TR_CMD)
+    let b = rb(p)
+    var key: uint8
+    if b < 0x80:
+      key = b
+      wb(tr + TR_KEY, b)
+      ww(tr + TR_CMD, p + 1)
+      result += SD_ET_KEY
+    else:
+      key = rb(tr + TR_KEY)
+    var c = rw(tr + TR_CHAN)
+    var first = true
+    while c != 0:
+      let st = rb(c)
+      if not first: result += SD_ET_NEXT
+      first = false
+      # the first sounding channel (status & 0x83) on the key stops, unless
+      # it is stopping already; either way the search ends there (jlist2.c:
+      # 90 random chains, the only mask of the 255 that fits all)
+      if (st and 0x83'u8) != 0:
+        result += SD_ET_ON
+        if rb(c + CH_KEY) == key:
+          if (st and 0x40'u8) == 0: wb(c, st or 0x40'u8)
+          break
+      else:
+        result += SD_ET_OFF
+      c = rw(c + CH_NEXT)
+  of jlTrkVolPitSet:
+    # The track's volume/pan (flags bit 0) and pitch (bit 2) updates, both
+    # flags then cleared (jlist2.c: 240 random tracks, a third each with the
+    # modulation aimed at pitch, volume and pan, every result byte matched):
+    #   x = vol * volX >> 5, + modM when modT = 1 (added, not scaled);
+    #   y = 2 * pan + panX, + modM when modT = 2, clamped to -128..127;
+    #   volMR = (y + 128) * x >> 8, volML = (127 - y) * x >> 8;
+    #   p = 4 * (tune + bend * bendRange) + 256 * (keyShift + keyShiftX)
+    #       + pitX, + 16 * modM when modT = 0; keyM = p >> 8, pitM = p & 0xFF
+    # It also reads the SoundInfo pointer and SoundInfo +0x3C every time.
+    let fl = rb(tr + TR_FLAGS)
+    if (fl and 1'u8) != 0:
+      var x = (int(rb(tr + TR_VOL)) * int(rb(tr + 0x13))) shr 5
+      let modt = rb(tr + TR_MODT)
+      if modt == 1: x += sb(tr + TR_MODM)
+      var y = 2 * sb(tr + TR_PAN) + sb(tr + 0x15)
+      if modt == 2: y += sb(tr + TR_MODM)
+      if y > 127: y = 127; result -= 1
+      elif y < -128: y = -128; result -= 2
+      wb(tr + 0x10, uint8(ashr((y + 128) * x, 8) and 0xFF))
+      wb(tr + 0x11, uint8(ashr((127 - y) * x, 8) and 0xFF))
+      result += (if modt == 1 or modt == 2: SD_TVPS_VOL_MOD else: SD_TVPS_VOL)
+    if (fl and 4'u8) != 0:
+      var p = 4 * (sb(tr + TR_TUNE) + sb(tr + TR_BEND) * int(rb(tr + TR_BENDR))) +
+              256 * (sb(tr + TR_KEYSH) + sb(tr + 0x0B)) + int(rb(tr + 0x0D))
+      let modt = rb(tr + TR_MODT)
+      if modt == 0: p += 16 * sb(tr + TR_MODM)
+      wb(tr + 0x08, uint8(ashr(p, 8) and 0xFF))
+      wb(tr + 0x09, uint8(p and 0xFF))
+      result += (if modt == 0: SD_TVPS_PIT_MOD else: SD_TVPS_PIT)
+    discard rw(rw(SD_INFO_PTR) + 0x3C)
+    wb(tr + TR_FLAGS, rb(tr + TR_FLAGS) and not 5'u8)
+  of jlRealClearChain:
+    let c = cpu.r[0]
+    let t = rw(c + CH_TRACK)
+    if t != 0:
+      let next = rw(c + CH_NEXT)
+      let prev = rw(c + CH_PREV)
+      if prev != 0: ww(prev + CH_NEXT, next)
+      else: (ww(t + TR_CHAN, next); result -= 1)   # the head: a cycle less
+      if next != 0: ww(next + CH_PREV, prev)
+      ww(c + CH_TRACK, 0)
+    else:
+      result = SD_RCC_NONE
+  result += acc
+  # What the real routine leaves below sp (jlist_stk.c: registers set to
+  # known values, the stack captured after each call): fine pushes r4, r5
+  # and lr (so does patt past level 3, which ends in it); goto, patt and
+  # rept lr and, below it, the pointer's top three bytes (<< 8) as their
+  # byte reader held them; the one-byte commands r0 (port the register's
+  # address); endtie r4 and lr; TrkVolPitSet r4, r5, r7 and lr; pend and
+  # RealClearChain nothing.
+  let sp = cpu.r[13]
+  template put(off: uint32; v: uint32) = bus.write_word_internal(sp - off, v)
+  template put_fine() =
+    put(12, cpu.r[4]); put(8, cpu.r[5]); put(4, cpu.r[14])
+  case kind
+  of jlFine: put_fine()
+  of jlGoto, jlRept:
+    put(8, partial); put(4, cpu.r[14])
+  of jlPatt:
+    if ended_fine: put_fine()
+    else: (put(8, partial); put(4, cpu.r[14]))
+  of jlPrio, jlTempo, jlKeysh, jlVoice, jlVol, jlPan, jlBend, jlBendr, jlLfos,
+     jlLfodl, jlMod, jlModt, jlTune:
+    put(4, cpu.r[0])
+  of jlPort: put(4, port_addr)
+  of jlEndtie:
+    put(8, cpu.r[4]); put(4, cpu.r[14])
+  of jlTrkVolPitSet:
+    put(16, cpu.r[4]); put(12, cpu.r[5]); put(8, cpu.r[7]); put(4, cpu.r[14])
+  of jlPend, jlRealClearChain: discard
+
+# --- TrackStop and FadeOutBody: loops that call the game ---
+#
+# TrackStop (entry 31, r1 = track) on an active track (flags bit 7) walks its
+# channel chain: every channel with a nonzero status gets status 0 and its
+# track pointer 0 -- after a call to SoundInfo +0x2C (CgbOscOff) with the
+# channel's type & 7 when that is nonzero (a CGB channel); channels with
+# status 0 are left alone. The track's channel pointer becomes 0; its flags
+# stay. An inactive track is untouched. (jlist2.c: chains of 0-4 channels
+# with random statuses and types, the BIOS's 0x1709 and a logging game
+# function at +0x2C; the log shows the call made before the status store.)
+#
+# FadeOutBody (entry 32, r0 = MusicPlayerInfo): nothing when fadeOI (+0x24)
+# is 0; otherwise fadeOC (+0x26) counts down. When it reaches 0, fadeOV
+# (+0x28) drops by 16; if that leaves it 0 or negative (s16), every track
+# (count +0x08, from +0x2C, 0x50 apart) is stopped as above and its flags
+# cleared, fadeOC staying 0; else fadeOC reloads from fadeOI and each active
+# track gets volX (+0x13) = fadeOV >> 2 and flags | 3. No fade-in bit, no
+# status change (jlist2.c: 108 players, 0-3 tracks, fadeOV at and around
+# the stop, fadeOI 0).
+#
+# Stacks as the real routines leave them (jlist_stk.c, jlist2_stk.c: every
+# call with known registers, the words below sp captured after it):
+# TrackStop pushes r4, r5, r6 and lr; FadeOutBody r4-r7 and lr, and calls
+# TrackStop for each track (lr 0x1569) with the track in r4, the tracks
+# left in r5 and 0 in r6; CgbOscOff is called with lr 0x2413 and the
+# channel in r4. The HLE writes those frames, calls CgbOscOff from the same
+# sp, and returns from it through a Thumb `swi 0` at 0x2412 in the stub.
+# Its loop state lives in r4-r7 while the game's function runs (callee-
+# saved): r4 the channel, r5 the track, r6 0 for a lone TrackStop or the
+# MusicPlayerInfo, r7 the tracks left (FadeOutBody).
+#
+# Costs as the jump list's (IWRAM times over the empty call, every access
+# adding its region's wait; jlist2.c and jlist2_iw.c): TrackStop 28 on an
+# inactive track, 35 on an active one, then per channel 11 (status 0) or
+# 21, 3 more for each after the first, and 7 before a CGB channel's call
+# (the BIOS's dummy then totals 17 with sd_call's entry and the trap);
+# FadeOutBody 29 with fadeOI 0, 38 counting down, 64 + 13 per inactive
+# track + 21 per active one setting volumes, 58 + 39 per inactive track +
+# 46 per active one (+ its chain) stopping.
+
+const
+  SD_TS_RET = 0x2412'u32          # CgbOscOff's return (Thumb `swi 0`)
+  SD_TS_RET_TRAP = SD_TS_RET + 4  # r15 while it traps
+  SD_FO_TS_LR = 0x1569'u32        # FadeOutBody's calls of TrackStop
+  SD_TS_OFF = 28
+  SD_TS_ON = 35
+  SD_TS_CH0 = 11
+  SD_TS_CH = 21
+  SD_TS_NEXT = 3
+  SD_TS_CGB = 7
+  SD_FO_OFF = 29
+  SD_FO_COUNT = 38
+  SD_FO_VOL = 64
+  SD_FO_VOL_OFF = 13
+  SD_FO_VOL_ON = 21
+  SD_FO_STOP = 58
+  SD_FO_STOP_OFF = 39
+  SD_FO_STOP_ON = 46
+
+proc sd_jl_return(cpu: CPU) =
+  let lr = cpu.r[14]
+  cpu.cpsr.thumb = (lr and 1'u32) != 0
+  cpu.sd_stub_goto(lr and not 1'u32, 2)
+
+proc sd_push(cpu: CPU; regs: openArray[uint32]) =
+  ## Store `regs` below sp as a push would (lowest register lowest); sp
+  ## moves down past them.
+  let bus = cpu.gba.bus
+  let sp = cpu.r[13] - uint32(regs.len * 4)
+  for i, v in regs: bus.write_word_internal(sp + uint32(i * 4), v)
+  cpu.r[13] = sp
+
+proc sd_ts_track(cpu: CPU) =
+  ## FadeOutBody: TrackStop's frame for the track at r5 (sp at FadeOutBody's
+  ## frame - 16 while it runs).
+  let fb = cpu.r[13]
+  let bus = cpu.gba.bus
+  bus.write_word_internal(fb - 16, cpu.r[5])
+  bus.write_word_internal(fb - 12, cpu.r[7])
+  bus.write_word_internal(fb - 8, 0)
+  bus.write_word_internal(fb - 4, SD_FO_TS_LR)
+
+proc sd_ts_loop(cpu: CPU; cost0: int) =
+  ## Run the stop loop from channel r4 of track r5 until a CGB channel needs
+  ## the game's CgbOscOff (called; SD_TS_RET resumes) or the work is done.
+  let bus = cpu.gba.bus
+  var cost = cost0
+  sd_acc_templates(bus, cost)
+  let fade = cpu.r[6] != 0
+  while true:
+    while cpu.r[4] != 0:
+      let c = cpu.r[4]
+      if rb(c) != 0:
+        let t = rb(c + 1) and 7'u8
+        if t != 0:
+          let fn = rw(rw(SD_INFO_PTR) + 0x2C)
+          cpu.idle(cost + SD_TS_CGB)
+          # the game's function runs below TrackStop's frame
+          if fade: cpu.r[13] -= 16
+          cpu.sd_call(fn, uint32(t), SD_TS_RET or 1'u32, 2)
+          return
+        wb(c, 0)
+        ww(c + CH_TRACK, 0)
+        cost += SD_TS_CH
+      else:
+        cost += SD_TS_CH0
+      cpu.r[4] = rw(c + CH_NEXT)
+      if cpu.r[4] != 0: cost += SD_TS_NEXT
+    # the track's chain is done
+    ww(cpu.r[5] + TR_CHAN, 0)
+    if not fade: break
+    # FadeOutBody: the track's flags cleared, on to the next one
+    var found = false
+    while true:
+      wb(cpu.r[5], 0)
+      dec cpu.r[7]
+      if cpu.r[7] == 0: break
+      cpu.r[5] += 0x50
+      cpu.sd_ts_track()
+      if (rb(cpu.r[5]) and 0x80'u8) != 0:
+        cost += SD_FO_STOP_ON
+        cpu.r[4] = rw(cpu.r[5] + TR_CHAN)
+        found = true
+        break
+      cost += SD_FO_STOP_OFF
+    if not found: break
+  cpu.idle(cost)
+  # pop the frame: TrackStop's r4-r6, FadeOutBody's r4-r7, and lr
+  let sp = cpu.r[13]
+  let n = if fade: 4 else: 3
+  for i in 0 ..< n: cpu.r[4 + i] = bus.read_word_internal(sp + uint32(i * 4))
+  cpu.r[14] = bus.read_word_internal(sp + uint32(n * 4))
+  cpu.r[13] = sp + uint32(n * 4 + 4)
+  cpu.sd_jl_return()
+
+proc sd_ts_resume(cpu: CPU) =
+  ## CgbOscOff returned: the channel at r4 stops, the loop goes on.
+  let bus = cpu.gba.bus
+  if cpu.r[6] != 0: cpu.r[13] += 16
+  var cost = SD_TS_CH
+  sd_acc_templates(bus, cost)
+  let c = cpu.r[4]
+  wb(c, 0)
+  ww(c + CH_TRACK, 0)
+  cpu.r[4] = rw(c + CH_NEXT)
+  if cpu.r[4] != 0: cost += SD_TS_NEXT
+  cpu.sd_ts_loop(cost)
+
+proc sd_track_stop(cpu: CPU) =
+  let bus = cpu.gba.bus
+  var cost = 0
+  sd_acc_templates(bus, cost)
+  let tr = cpu.r[1]
+  if (rb(tr + TR_FLAGS) and 0x80'u8) == 0:
+    let sp = cpu.r[13]
+    cpu.sd_push([cpu.r[4], cpu.r[5], cpu.r[6], cpu.r[14]])
+    cpu.r[13] = sp
+    cpu.idle(cost + SD_TS_OFF)
+    cpu.sd_jl_return()
+    return
+  cpu.sd_push([cpu.r[4], cpu.r[5], cpu.r[6], cpu.r[14]])
+  cpu.r[4] = rw(tr + TR_CHAN)
+  cpu.r[5] = tr
+  cpu.r[6] = 0
+  cpu.sd_ts_loop(cost + SD_TS_ON)
+
+proc sd_fade_out(cpu: CPU) =
+  let bus = cpu.gba.bus
+  var cost = 0
+  sd_acc_templates(bus, cost)
+  let mp = cpu.r[0]
+  let sp0 = cpu.r[13]
+  cpu.sd_push([cpu.r[4], cpu.r[5], cpu.r[6], cpu.r[7], cpu.r[14]])
+  template leave(c: int) =
+    cpu.r[13] = sp0
+    cpu.idle(c)
+    cpu.sd_jl_return()
+  let oi = rh(mp + 0x24)
+  if oi == 0:
+    leave(cost + SD_FO_OFF)
+    return
+  let oc = rh(mp + 0x26) - 1
+  wh(mp + 0x26, oc)
+  if oc != 0:
+    leave(cost + SD_FO_COUNT)
+    return
+  let ov = rh(mp + 0x28) - 16
+  wh(mp + 0x28, ov)
+  if cast[int16](ov) > 0:
+    wh(mp + 0x26, oi)
+    cost += SD_FO_VOL
+    let n = uint32(rb(mp + 0x08))
+    var tr = rw(mp + 0x2C)
+    for i in 0'u32 ..< n:
+      let fl = rb(tr)
+      if (fl and 0x80'u8) != 0:
+        wb(tr + 0x13, uint8((rh(mp + 0x28) shr 2) and 0xFF))
+        wb(tr, fl or 3'u8)
+        cost += SD_FO_VOL_ON
+      else:
+        cost += SD_FO_VOL_OFF
+      tr += 0x50
+    leave(cost)
+    return
+  # Stop every track: TrackStop on each (its frame below this one), the
+  # loop from the first active one, the inactive ones before it here
+  cost += SD_FO_STOP
+  cpu.r[6] = mp
+  cpu.r[7] = uint32(rb(mp + 0x08))
+  cpu.r[5] = rw(mp + 0x2C)
+  while cpu.r[7] != 0:
+    cpu.sd_ts_track()
+    if (rb(cpu.r[5]) and 0x80'u8) != 0: break
+    wb(cpu.r[5], 0)
+    cost += SD_FO_STOP_OFF
+    dec cpu.r[7]
+    cpu.r[5] += 0x50
+  if cpu.r[7] == 0:
+    for i in 0 .. 3: cpu.r[4 + i] = bus.read_word_internal(cpu.r[13] + uint32(i * 4))
+    leave(cost)
+    return
+  cpu.r[4] = rw(cpu.r[5] + TR_CHAN)
+  cpu.sd_ts_loop(cost + SD_FO_STOP_ON)
+
+proc sd_jl_trap(cpu: CPU): bool =
+  ## A jump-list entry's trap: run the function, return to lr.
+  if cpu.r[15] == 0x170E'u32:
+    # SampleFreqSet(r0): the rate change of SoundDriverMode alone, for the
+    # rate index in r0 bits 16-19 -- the rate fields, Timer 0 and the DMAs,
+    # the line-159 start -- in the caller's mode, no lock, no buffer clear
+    # (jlist.c). It runs as stub code like Mode's. The real routine pushes
+    # r4, r7 and lr (jlist_stk.c), and so does this; r4 holds the
+    # SoundArea, r7 the rate index, r9 the phase and r8 the stub's delay
+    # count, the caller's r8 and r9 waiting in r2 and r3 (scratch registers
+    # for the caller; IRQ handlers preserve them).
+    let bus = cpu.gba.bus
+    bus.add_cycles(-SD_TRAP_COST_T)
+    cpu.sd_push([cpu.r[4], cpu.r[7], cpu.r[14]])
+    cpu.r[2] = cpu.r[8]
+    cpu.r[3] = cpu.r[9]
+    cpu.r[4] = cpu.sd_area()
+    cpu.r[7] = (cpu.r[0] shr 16) and 0xF
+    cpu.r[9] = SD_PH_SFS_A
+    cpu.cpsr.thumb = false
+    cpu.sd_delay(SD_SFS_FIELDS, 2)
+    return true
+  case cpu.r[15]
+  of 0x23EA'u32, 0x1538'u32, SD_TS_RET_TRAP:
+    cpu.gba.bus.add_cycles(-SD_TRAP_COST_T)
+    if cpu.r[15] == 0x23EA'u32: cpu.sd_track_stop()
+    elif cpu.r[15] == 0x1538'u32: cpu.sd_fade_out()
+    else: cpu.sd_ts_resume()
+    return true
+  else: discard
+  var kind: SdJl
+  if not sd_jl_kind(cpu.r[15], kind): return false
+  cpu.gba.bus.add_cycles(-SD_TRAP_COST_T)
+  cpu.idle(cpu.sd_jl_run(kind))
+  let lr = cpu.r[14]
+  cpu.cpsr.thumb = (lr and 1'u32) != 0
+  cpu.sd_stub_goto(lr and not 1'u32, 2)
+  true
+
+proc sd_trap(cpu: CPU): bool =
+  ## A stub-continuation trap (hle_swi 0x00 at SD_TRAP_DELAY/SD_TRAP_POLL),
+  ## or a jump-list function's. False: not ours.
+  let bus = cpu.gba.bus
+  if cpu.cpsr.thumb and cpu.sd_jl_trap(): return true
   if cpu.r[15] == SD_TRAP_DELAY:
     bus.add_cycles(-SD_TRAP_COST)
     case cpu.r[9]
@@ -805,6 +1558,20 @@ proc sd_trap(cpu: CPU): bool =
     of SD_PH_POLL:
       cpu.r[0] = 0x04000000'u32
       cpu.sd_stub_goto(SD_STUB_POLL, 4)
+    of SD_PH_SFS_A:
+      let r = cpu.sd_write_rate_fields(cpu.r[4], int(cpu.r[7]))
+      let d4 = sd_div_cost(280896, r.spv)
+      cpu.r[9] = SD_PH_SFS_B
+      let x = 3 * cpu.sd_x(cpu.r[4], true) + 2 * cpu.sd_x(cpu.r[4], false)
+      cpu.sd_delay(SD_SFS_STOP + r.cost - d4 + x, 4)
+    of SD_PH_SFS_B:
+      let r = sd_rate(int(cpu.r[7]))
+      cpu.sd_rate_registers(r)
+      cpu.r[9] = SD_PH_SFS_POLL
+      cpu.sd_delay(SD_SFS_POLL0 + sd_div_cost(280896, r.spv), 4)
+    of SD_PH_SFS_POLL:
+      cpu.r[0] = 0x04000000'u32
+      cpu.sd_stub_goto(SD_STUB_POLL, 4)
     of SD_PH_SM_DONE:
       let area = cpu.r[4]
       bus.write_word_internal(area, SD_IDENT)
@@ -813,14 +1580,14 @@ proc sd_trap(cpu: CPU): bool =
       cpu.r[0] = area + 4
       cpu.r[1] = 0
       cpu.r[3] = SD_R3
-      cpu.sd_leave(SD_MAIN_EXIT + cpu.sd_x(area, true))
+      cpu.sd_leave(SD_MAIN_EXIT + cpu.sd_x(area, true), rsMain, SD_MAIN_FRAME_WORDS)
     of SD_PH_VSOFF:
       let area = cpu.r[4]
       bus.write_word_internal(area, bus.read_word_internal(area) - 1)
       cpu.r[0] = bus.read_word_internal(area)
       cpu.r[1] = area + SD_AREA_BYTES
       cpu.r[3] = SD_R3
-      cpu.sd_leave(SD_VSOFF_EXIT + cpu.sd_x(area, true))
+      cpu.sd_leave(SD_VSOFF_EXIT + cpu.sd_x(area, true), rsVsOff)
     else:
       return false
     return true
@@ -835,9 +1602,6 @@ proc sd_trap(cpu: CPU): bool =
     bus.add_cycles(-SD_TRAP_COST_T)
     let area = cpu.r[4]
     let cost = cpu.sd_mix(area)
-    when defined(biosdrvtrace):
-      if getEnv("BD_MIXCOST") == "1":
-        echo "mixcost ", cost, " at ", int64(cpu.gba.scheduler.cycles) + int64(bus.cycles)
     cpu.r[9] = SD_PH_SM_DONE
     cpu.cpsr.thumb = false
     cpu.sd_delay(cost - SD_MIX_BASE, 2)
@@ -845,6 +1609,23 @@ proc sd_trap(cpu: CPU): bool =
   if cpu.r[15] == SD_TRAP_POLL:
     bus.add_cycles(-SD_TRAP_COST + SD_POLL_TIMER)
     bus.write_half(0x04000102'u32, 0x0080'u16)
+    if cpu.r[9] == SD_PH_SFS_POLL:
+      # SampleFreqSet returns to its caller: r4, r7 and lr from the stack,
+      # r8 and r9 from r2 and r3
+      let sp = cpu.r[13]
+      cpu.r[8] = cpu.r[2]
+      cpu.r[9] = cpu.r[3]
+      cpu.r[4] = bus.read_word_internal(sp)
+      cpu.r[7] = bus.read_word_internal(sp + 4)
+      let lr = bus.read_word_internal(sp + 8)
+      cpu.r[13] = sp + 12
+      cpu.r[14] = lr
+      cpu.r[0] = 0x80
+      cpu.r[1] = 0x9F
+      cpu.idle(SD_SFS_EXIT)
+      cpu.cpsr.thumb = (lr and 1'u32) != 0
+      cpu.sd_stub_goto(lr and not 1'u32, 4)
+      return true
     let area = bus.read_word_internal(SD_INFO_PTR)
     bus.write_word_internal(area, SD_IDENT)
     cpu.r[0] = if cpu.r[9] == SD_PH_INIT: SD_IDENT else: 0x80'u32
@@ -852,6 +1633,7 @@ proc sd_trap(cpu: CPU): bool =
     cpu.r[3] = SD_R3
     # Init's exit runs two cycles longer than Mode's
     let tail = if cpu.r[9] == SD_PH_INIT: 2 else: 0
-    cpu.sd_leave(SD_POLL_EXIT + tail + cpu.sd_x(area, true))
+    cpu.sd_leave(SD_POLL_EXIT + tail + cpu.sd_x(area, true),
+                 if cpu.r[9] == SD_PH_INIT: rsInit else: rsMode)
     return true
   false

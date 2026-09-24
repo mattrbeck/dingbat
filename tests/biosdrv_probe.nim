@@ -96,10 +96,28 @@ proc main() =
         ir.writeLine($frame & " " & $now() & " pc=" & toHex(emu.cpu.r[15], 4) & " " &
                      toHex(address, 8) & " vc=" & $emu.ppu.vcount)
   # BD_MEMREAD=1: every data read the BIOS makes outside I/O
-  let mr = if getEnv("BD_MEMREAD") == "1": newFileStream(prefix & ".memread.txt", fmWrite) else: nil
+  # BD_MEMREAD=bios: every read of the BIOS region from outside it (the
+  # open-bus latch a game sees) with the value read
+  let mr = if getEnv("BD_MEMREAD").len > 0: newFileStream(prefix & ".memread.txt", fmWrite) else: nil
+  let mrbios = getEnv("BD_MEMREAD") == "bios"
+  # BD_MEMREAD=range:LO:HI (hex): every read by code between LO and HI
+  var mrlo, mrhi = 0'u32
+  if getEnv("BD_MEMREAD").startsWith("range:"):
+    let parts = getEnv("BD_MEMREAD").split(':')
+    mrlo = uint32(parseHexInt(parts[1]))
+    mrhi = uint32(parseHexInt(parts[2]))
   if mr != nil:
     bdReadHook = proc(address: uint32; width: int) =
-      if emu.cpu.r[15] < 0x4000'u32 and not emu.bus.dma_active and (address shr 24) != 4:
+      if mrhi != 0:
+        let pc = emu.cpu.r[15]
+        if pc >= mrlo and pc < mrhi and not emu.bus.dma_active:
+          mr.writeLine($frame & " " & $now() & " pc=" & toHex(pc, 8) & " " &
+                       toHex(address, 8) & ":" & $width)
+      elif mrbios:
+        if emu.cpu.r[15] >= 0x4000'u32 and address < 0x4000'u32 and not emu.bus.dma_active:
+          mr.writeLine($frame & " " & $now() & " pc=" & toHex(emu.cpu.r[15], 8) & " " &
+                       toHex(address, 8) & ":" & $width & " latch=" & toHex(emu.bus.bios_latch, 8))
+      elif emu.cpu.r[15] < 0x4000'u32 and not emu.bus.dma_active and (address shr 24) != 4:
         mr.writeLine($frame & " " & $now() & " pc=" & toHex(emu.cpu.r[15], 4) & " " &
                      toHex(address, 8) & ":" & $width)
   # BD_SWILOG=1: every SWI with its caller PC and r0-r3 (driver SWIs and the
@@ -114,6 +132,22 @@ proc main() =
                      " r0=" & toHex(emu.cpu.r[0], 8) & " r1=" & toHex(emu.cpu.r[1], 8) &
                      " r2=" & toHex(emu.cpu.r[2], 8) & " r3=" & toHex(emu.cpu.r[3], 8) &
                      " cpsr=" & toHex(uint32(emu.cpu.cpsr), 8) & " ime=" & $emu.interrupts.ime)
+  # BD_CALLS=1: every entry into BIOS code from outside it other than a SWI
+  # or IRQ vector (a call through a BIOS function pointer): target, lr, r0-r3
+  let cl = if getEnv("BD_CALLS") == "1": newFileStream(prefix & ".calls.txt", fmWrite) else: nil
+  if cl != nil:
+    var prev_pc = 0x08000000'u32
+    bdPcHook = proc(pc: uint32) =
+      if pc < 0x4000'u32 and prev_pc >= 0x4000'u32 and pc >= 0x40'u32:
+        cl.writeLine($frame & " " & $now() & " call " & toHex(pc, 4) &
+                     " from=" & toHex(prev_pc, 8) & " lr=" & toHex(emu.cpu.r[14], 8) &
+                     " r0=" & toHex(emu.cpu.r[0], 8) & " r1=" & toHex(emu.cpu.r[1], 8) &
+                     " r2=" & toHex(emu.cpu.r[2], 8) & " r3=" & toHex(emu.cpu.r[3], 8))
+      elif pc >= 0x4000'u32 and prev_pc < 0x4000'u32 and prev_pc >= 0x40'u32:
+        # back out of BIOS code (a return, or an IRQ handler's entry)
+        cl.writeLine($frame & " " & $now() & " exit " & toHex(pc, 8) &
+                     " from=" & toHex(prev_pc, 4))
+      prev_pc = pc
   let fr = newFileStream(prefix & ".frames.txt", fmWrite)
   for f in 0 ..< frames:
     frame = f
@@ -131,7 +165,9 @@ proc main() =
   bdMemHook = nil
   bdIoReadHook = nil
   bdSwiHook = nil
+  bdPcHook = nil
   if sl != nil: sl.close()
+  if cl != nil: cl.close()
   bdReadHook = nil
   if mr != nil: mr.close()
   if ir != nil: ir.close()
