@@ -87,6 +87,7 @@
 .equ RT_LINKON,    0x40            @ link report armed
 .equ RT_RUNSTART,  0x44
 .equ RT_SAVED_CPSR,0x48
+.equ RT_BEACON,   0x4C            @ the beacon word, re-armed after each read
 .equ RT_LR_STATE,  0x50            @ 12 bytes for linkreport.inc
 .equ RT_SB,        0x100           @ 256-byte output line
 

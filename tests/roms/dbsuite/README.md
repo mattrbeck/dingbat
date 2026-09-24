@@ -59,6 +59,14 @@ the multiboot image over the link rig (`tools/hwlink`). It follows the ROM's
 progress beacons, reads the results block back, and reinstalls the monitor.
 Take the rig's lock first.
 
+`python3 tests/roms/dbsuite/build.py --diag SIZE OUT [--nostub]` builds a
+multiboot smoke test (`mbdiag.s`) padded to SIZE bytes. It turns the screen
+green and keeps 0xDBFF0001 armed on the link forever. With the stub, it is
+built exactly like `dbsuite.mb.gba`, and the stub paints the screen blue
+before it copies the body. `--nostub` starts at 0x020000C0 like the rig's
+monitor. It separates "the image never starts" from "the beacon never
+reaches the host", and a size-dependent upload failure from either.
+
 ## How the ROM behaves
 
 - **Auto-run.** The menu counts down 2.5 s and then runs every suite, unless

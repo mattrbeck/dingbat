@@ -391,7 +391,35 @@ def case_list(image, base, syms):
     return suites, cases
 
 
+def build_diag(size, out, nostub=False):
+    """mbdiag.s as a multiboot image of `size` bytes (see its header)."""
+    with tempfile.TemporaryDirectory(prefix='dbsuite-diag-') as build:
+        def one(pad):
+            if nostub:
+                assemble(os.path.join(HERE, 'mbdiag.s'), out, 0x02000000, build,
+                         defs=('NOSTUB=1', f'PAD={pad}'))
+            else:
+                assemble(os.path.join(HERE, 'mbdiag.s'),
+                         os.path.join(build, 'body.bin'), MB_HOME, build,
+                         defs=('NOSTUB=0', f'PAD={pad}'))
+                assemble(os.path.join(HERE, 'mbstub.s'), out, 0x02000000, build)
+            return os.path.getsize(out)
+        base = one(0)
+        if size > base:
+            one(size - base)
+        img = bytearray(open(out, 'rb').read())
+        while len(img) % 16 or len(img) < 0x200:
+            img.append(0)
+        patch_header(img, 'DBSUITE DIAG', 'ADBE')
+        open(out, 'wb').write(img)
+        romfix.gba_logo(out)
+    print(f'{out}: {len(img)} bytes ({"no stub" if nostub else "stub + body"})')
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == '--diag':
+        build_diag(int(sys.argv[2], 0), sys.argv[3], '--nostub' in sys.argv)
+        return
     for tool in ('arm-none-eabi-as', 'arm-none-eabi-ld', 'arm-none-eabi-objcopy'):
         if not shutil.which(tool):
             sys.exit(f'{tool} not found')

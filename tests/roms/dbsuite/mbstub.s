@@ -23,6 +23,15 @@ stub:
     add r0, r0, #0x208
     mov r1, #0
     strh r1, [r0]                  @ IME off
+    mov r0, #0x04000000            @ a blue screen: the stub ran (the
+    ldr r1, =0x0403                @ body's first screen replaces it)
+    strh r1, [r0]
+    mov r0, #0x06000000
+    ldr r1, =0x7C007C00
+    ldr r2, =240 * 160 / 2
+1:  str r1, [r0], #4
+    subs r2, r2, #1
+    bne 1b
     adr r0, body                   @ PC-relative: the same image also boots
     ldr r3, =BODY_SIZE             @ from a cartridge (0x08000000), which is
     add r1, r0, r3                 @ how an emulator without multiboot runs it

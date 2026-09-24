@@ -46,6 +46,16 @@ main:
     bl  machine_reset
     ldr r0, =0xDBFF0001            @ beacon: booted
     bl  beacon
+.if MB
+    @ the multiboot build keeps the boot beacon armed for 2 s, so a host
+    @ that samples late still sees that the image started
+    mov r4, #120
+1:  bl  wait_vblank
+    bl  beacon_poll
+    subs r4, r4, #1
+    bne 1b
+    ldr r4, =RT
+.endif
     bl  detect_debug_ports
     bl  resume_check               @ r0 = 1: a run was cut short by a reset
     cmp r0, #0
@@ -91,7 +101,26 @@ main_resume:
 @ transfer, no interrupt.  0xDBFF0001 booted, 0xDBFF0002 in the menu,
 @ 0xDB000000 | n case n in flight; the results stream follows a run.
 beacon:
+    ldr r1, =RT
+    str r0, [r1, #RT_BEACON]
     ldr r1, =0x04000120
+    str r0, [r1]
+    ldr r0, =0x1080
+    strh r0, [r1, #8]
+    bx  lr
+
+@ re-arm the beacon once the host has clocked it (not while the results
+@ stream owns the port).  Clobbers r0-r2.
+beacon_poll:
+    ldr r2, =RT
+    ldr r0, [r2, #RT_LINKON]
+    cmp r0, #0
+    bxne lr
+    ldr r1, =0x04000120
+    ldrh r0, [r1, #8]
+    tst r0, #0x80
+    bxne lr
+    ldr r0, [r2, #RT_BEACON]
     str r0, [r1]
     ldr r0, =0x1080
     strh r0, [r1, #8]
@@ -365,6 +394,7 @@ run_case:
     mov r4, r0
     ldr r5, =case_table
     add r5, r5, r4, lsl #5         @ r5 = descriptor
+    bl  beacon_poll
     bl  draw_run_progress
     ldr r0, [r5, #CD_INFO]
     tst r0, #F_RISKY
@@ -508,13 +538,10 @@ call_guarded:
     @ a beacon for a host on the link cable: 0xDB000000 | the case in
     @ flight, as a 32-bit slave transfer (no interrupt, so a case cannot
     @ tell), so a run that stops can be placed without a screen
-    ldr r1, =0x04000120
     ldr r0, =RESULTS
     ldr r0, [r0, #RB_CURRENT]
     orr r0, r0, #0xDB000000
-    str r0, [r1]
-    ldr r0, =0x1080
-    strh r0, [r1, #8]
+    bl  beacon
     ldr r5, =RT
     str sp, [r5, #RT_SAVED_SP]
     mrs r0, cpsr
@@ -1100,6 +1127,7 @@ link_report_init:
 
 link_report_poll:
     stmfd sp!, {r4, lr}
+    bl  beacon_poll
     ldr r0, =RT
     ldr r0, [r0, #RT_LINKON]
     cmp r0, #0
