@@ -3,7 +3,74 @@
 Five models in `DesktopState/` cover `src/dingbat.nim` and the ImGui widgets
 in `src/dingbat/frontend/`, plus the core procs they call (battery-save
 writers, save-state files, config, netlink). Line numbers are `src/dingbat.nim`
-at a2e038f82 unless another file is named. Nothing below is fixed yet.
+at a2e038f82 unless another file is named.
+
+## Status after the fix round (2026-09-24)
+
+Every High and Medium item is fixed except the `.sav`/states/`.cht` half of
+1, which waits on a decision (below). Most fixes have a test in one of five
+new headless binaries, `tests/desktop_{input,settings,netlink,persist,lifecycle}_test.nim`
+(run in CI), each seen failing on the code before the fix. ImGui/SDL wiring
+that cannot build headless has no test and is marked "GUI". Each model's
+fixed step was brought in line with what shipped, its `regress_*` theorems
+re-proved, and every `bug_*` trace kept as the record of the old code.
+
+| # | Fixed in | Test |
+|---|---|---|
+| 1 (config only) | d45cfb35c: `save_config` re-reads and writes only the keys this window changed | settings |
+| 2 | 0aac8a6bb: slots named `<rom>-<identity>[.slotN].state`; the old name is read if it names this cart, never written | persist |
+| 3 | 315afc4d2, 30710ff89 | GUI |
+| 4 | bf6165dfc: both cores catch the write error, retry, and a modal says so once | persist |
+| 5 | 9b2a375e5: the new core is built and checked before the old one is touched; a file too short to be a ROM is refused | lifecycle |
+| 6, 12 | 5e8e077d1: every release applies before any filter; shortcuts fire on the press, repeats ignored | input |
+| 7 | 6ebe5e95d (`finish_link` refuses without a GBA core), 978220bc9 (`load_rom` ends the link) | netlink; GUI |
+| 8 | 25b0f9664 | netlink |
+| 9 | 978220bc9 | GUI |
+| 10 | f546c0132 (one gate in `load_state_slot`), fa61ae7d3 (window's Load greyed) | GUI |
+| 11 | 25b0f9664, 6ebe5e95d: a linked frame hands back to the loop after 8 ms; CLOCK carries a paused bit (older builds ignore it) | netlink |
+| 13 | 4a4a87504 | GUI |
+| 14 | 237f8ead4 | settings |
+| 15 | 5e8e077d1 | input |
+| 16, 17 | cb2981ee4 | settings |
+| 18 | fa5d8824d, 084f6720a (`.sav`, `.state`, `.cht`), d45cfb35c (config; a damaged file is moved to `dingbat.yml.bad`) | persist, settings |
+| 19 | a034da67f | lifecycle |
+| 20 | 25b0f9664, 6ebe5e95d, 978220bc9 | netlink |
+| 21 | 6ebe5e95d | netlink |
+| 22 | 6e3fe73b2 | GUI (checked against the real imgui 1.92.4 headless: a click after 3000 taps lands in 2 frames, was 6002) |
+| 23 | d45cfb35c | settings |
+
+Lows fixed: held input merged per source and the fast-forward trigger
+(5e8e077d1); rewind across a state load (d6aca35ad); Quick Save mid-frame
+(53022e6e0) and dropped by a switch (6be9dc506); Reset after Recent > Clear
+(6be9dc506); zip identity (18171ff6a); extensionless paths (ad1cf0b19); every
+Link Low listed below (6ebe5e95d, f546c0132); the file dialog opening the BIOS
+(aa7379698); Reset to Defaults, frame size, Speed mode on GB (7f8714c1c).
+
+Behaviour that changed on purpose: Cmd/Ctrl shortcuts fire on press, not
+release; F9, F12 and the channel keys no longer repeat; `--hle`, `--run-bios`,
+`--skip-bios` and a BIOS argument apply to that run only; GB files under
+32 KiB and GBA files under 192 bytes are refused with a notice; battery
+writes are fsync'd (about 0.3 ms per 128 KB write on this Mac, not measured
+on Windows).
+
+**Open, for Matt:**
+- Finding 1 proper: two windows on one ROM file still share `.sav`, state
+  slots and `.cht`. What should the second window do (refuse, run on a
+  `-p2` save, share read-only)?
+- GB ROMs under 32 KiB are refused on desktop. Padding them in the core
+  would also fix the web build, which still crashes on them.
+- Should dingbat start fullscreen if it quit fullscreen? Should the Settings
+  window's X ask before discarding edits?
+- Not fixed, recorded: `--listen` waits up to 120 s before the loop starts;
+  the HELLO handshake and a manual Join's connect still block; saves an
+  older build wrote as `<parent>.sav` for extensionless ROMs are not
+  migrated; GBA state identity hashes the first 1 MB; same stem shares
+  `.sav`.
+- Nothing was run in the desktop app (the ask-first rule). What only the
+  running app can confirm is the "GUI" rows above plus: the battery notice
+  (read-only ROM folder), pause while linked (the other window keeps
+  drawing, no drop after 30 s), quit while linked (the peer sees the link
+  end at once), and re-pairing straight after a disconnect.
 
 | File | Machine |
 |---|---|

@@ -1,5 +1,6 @@
 -- What this models, for formal/anchors.mjs (which lists stale models):
--- @models src/dingbat.nim: load_rom process_pending_state load_state_slot handle_input render_imgui render_link_window render_link_advanced teardown_netlink finish_link establish_netlink link_ready link_cancel_setup link_auto_start link_auto_stop link_start_host link_start_join link_auto_listen service_link_setup update_link_auto main
+-- @models src/dingbat.nim: load_rom process_pending_state load_state_slot handle_input render_imgui render_link_window render_link_advanced teardown_netlink finish_link establish_netlink link_ready link_cancel_setup link_auto_stop link_mid_frame service_netlink service_link_setup update_link_auto main
+-- @models src/dingbat/frontend/link_cable.nim: init_link_cable auto_start auto_stop start_host start_join auto_listen cancel_setup finish_link service_setup update_auto teardown parse_host_port
 -- @models src/dingbat/gba/netlink.nim: step_frame poll_socket new_net_link close
 -- @models src/dingbat/gba/netcore.nim: try_advance handle_msg master_complete new_net_core
 

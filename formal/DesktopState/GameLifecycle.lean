@@ -1,5 +1,6 @@
 -- What this models, for formal/anchors.mjs (which lists stale models):
--- @models src/dingbat.nim: flush_saves load_rom reset_game state_file_path cheat_file_path save_state_slot load_state_slot delete_state_slot refresh_state_slots process_pending_state render_imgui handle_input teardown_netlink finish_link link_auto_start link_auto_stop link_start_host service_link_setup render_link_window update_link_auto main
+-- @models src/dingbat.nim: flush_saves load_rom reset_game state_file_path cheat_file_path save_state_slot load_state_slot delete_state_slot refresh_state_slots process_pending_state render_imgui handle_input teardown_netlink finish_link link_auto_stop service_link_setup render_link_window update_link_auto main
+-- @models src/dingbat/frontend/link_cable.nim: auto_start auto_stop start_host cancel_setup finish_link service_setup update_auto teardown
 -- @models src/dingbat/frontend/save_states_widget.nim: render mark_stale
 -- @models src/dingbat/frontend/game_load.nim: build_core flush_batteries zip_cache_dir extract_zip_rom
 -- @models src/dingbat/gba/gba.nim: new_storage handle_saves

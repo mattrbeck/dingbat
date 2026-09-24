@@ -354,7 +354,10 @@ sweep), `test_ppuobjlist`, `test_savestate_compat` (loads `tests/states/` and pi
 EventType ordinals / payload revisions), `test_cheats`, `test_rewind`, `test_clipreplay`
 (clip-capture replay determinism with two negative controls), `test_printer`,
 `test_lcdresponse`, `test_sgb`, `test_gbartc` (GBA cartridge RTC protocol and the
-battery-save RTC trailer). The link-acceptance battery (`linktest`, `speclink`,
+battery-save RTC trailer), `test_desktop` (the desktop frontend's logic that
+builds without SDL/ImGui: held input and key routing, the config file, the
+Link Cable over loopback sockets, battery/state/cheat writes, game loading;
+each replays a `formal/DesktopState` trace). The link-acceptance battery (`linktest`, `speclink`,
 `netlink`, `rollback` modes over `tests/roms/*.gba`) is invoked directly in
 `.github/workflows/test.yml`.
 
