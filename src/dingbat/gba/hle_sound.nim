@@ -47,7 +47,11 @@ const
   SD_PH_SM_DONE = 5'u32   # SoundDriverMain: mixing time spent, unlock and return
   SD_PH_SFS_A = 6'u32     # jump-list SampleFreqSet: rate fields next
   SD_PH_SFS_POLL = 7'u32  # ... poll VCOUNT next, then return to lr
-  SD_PH_SFS_B = 8'u32     # ... Timer 0 and the DMAs next
+  SD_PH_SFS_B = 8'u32     # ... Timer 0 stopped next
+  # The rate registers, one stage each at its real time (Init, Mode and
+  # SampleFreqSet alike): the routine in bits 8+ (1 Init, 2 Mode, 3 SFS)
+  SD_PH_RR = 0x11'u32     # Timer 0's reload next
+  SD_PH_RD = 0x12'u32     # the two sound DMAs, then the VCOUNT poll
   # SoundDriverMain's callback returns (the real routine's lr values, 0x1DF1
   # and 0x1DF9, hold Thumb `swi 0` traps in the stub): r15 while they trap
   SD_TRAP_SM_FUNC* = 0x1DF4'u32
@@ -62,6 +66,43 @@ const
 # samples (jlist_iw.c), the entry before the table.
 const SD_SPV = [61857'u32, 96, 132, 176, 224, 264, 304, 352, 448, 528, 608, 672,
                 704, 0xFFFF, 0xFFFF, 31]
+
+# The SWI's start (hle_swi), for register writes placed at the cycle the
+# real routine makes them: from mode.c, init.c and romcall.c (IO stamps from
+# every caller region), a write lands `stamp` cycles after it, plus the
+# caller region's N16 wait (the dispatcher's read of the SWI number) and the
+# SoundArea accesses before it. A write the HLE reaches later than that
+# (the HLE's dispatch is charged whole up front) lands late.
+var sd_swi_t0*: int64
+# The dispatch charge Init, Mode, VSync and VSyncOff still owe (hle_swi
+# leaves it to them so their first writes can land where the real ones do)
+var sd_owed*: int
+
+proc sd_settle(cpu: CPU; over: int): int =
+  ## Past the SWI's writes: pay what the dispatch still owes if they did not
+  ## run that far, and return how far past the old timeline they ran
+  sd_owed = 0
+  if over < 0:
+    cpu.idle(-over)
+    return 0
+  over
+
+proc sd_pay(cpu: CPU) =
+  ## A path with no placed writes pays the dispatch at once
+  if sd_owed > 0: cpu.idle(sd_owed)
+  sd_owed = 0
+
+proc sd_elapsed(cpu: CPU): int {.inline.} =
+  int(int64(cpu.gba.scheduler.cycles) + int64(cpu.gba.bus.cycles) - sd_swi_t0)
+
+proc sd_at(cpu: CPU; stamp: int) =
+  ## Run on to just before `stamp` (the write's own cycle makes it)
+  let e = cpu.sd_elapsed() + 1
+  if stamp > e: cpu.idle(stamp - e)
+
+proc sd_n16x(cpu: CPU): int {.inline.} =
+  ## The caller region's N16 wait over one cycle (its return address is r15)
+  int(cpu.gba.bus.wait16_n[int(bits_range(cpu.r[15], 24, 27))]) - 1
 
 proc sd_area(cpu: CPU): uint32 {.inline.} =
   cpu.gba.bus.read_word_internal(SD_INFO_PTR)
@@ -125,6 +166,12 @@ proc sd_write_rate_fields(cpu: CPU; area: uint32; index: int): SdRate =
   bus.write_byte_internal(area + 0x0B, uint8(result.period))
   bus.write_word_internal(area + 0x14, result.freq)
   bus.write_word_internal(area + 0x18, result.divfreq)
+
+proc sd_rate_index(cpu: CPU; routine: uint32): int {.inline.} =
+  case routine
+  of 1: 4
+  of 2: int(cpu.r[5])
+  else: int(cpu.r[7])
 
 proc sd_rate_registers(cpu: CPU; r: SdRate) =
   ## Timer 0 stopped and reloaded for the new rate, both sound DMAs armed
@@ -319,6 +366,10 @@ const
   SD_MAIN_TO_CGB {.intdefine.} = 20
   SD_FUNC_TO_CGB {.intdefine.} = 6
   SD_MIX_BASE {.intdefine.} = 435
+  # A pass's writes, from the trap that runs sd_mix: the model's running
+  # cost at each write, plus this
+  SD_TW_OFF {.intdefine.} = -316
+  SD_TW_FIRST {.intdefine.} = 26
   # SampleFreqSet (jlist.c, BD_MEMTRACE/BD_IOREAD stamps from the call at
   # rate 1): the rate fields from +19 (one stamp for all here), Timer 0
   # stopped at +518 after three of the four divisions, the first VCOUNT read
@@ -327,6 +378,23 @@ const
   SD_SFS_STOP {.intdefine.} = 77
   SD_SFS_POLL0 {.intdefine.} = 33
   SD_SFS_EXIT {.intdefine.} = 8
+  # The rate registers (the SampleFreqSet stamps above, mode.c and init.c
+  # for Mode and Init, the same law): Timer 0's reload lands the fourth
+  # division + SD_RS_RELOAD (+ an EWRAM SoundArea word's wait) after the
+  # stop, the DMAs SD_RS_DMA after the reload, and the first VCOUNT read
+  # follows them
+  SD_RS_RELOAD {.intdefine.} = 19
+  SD_RS_DMA {.intdefine.} = 3
+  SD_RS_POLL {.intdefine.} = 3
+  SD_RS_TAIL {.intdefine.} = 18
+  SD_RS_INIT {.intdefine.} = 0
+  # The routines' first register writes, from the SWI's start (see sd_at)
+  SD_IN_DMA {.intdefine.} = 40      # Init: the DMA stops, SOUNDCNT, the DMA addresses
+  SD_MO_BIAS {.intdefine.} = 87     # Mode: the D/A bits after the other fields
+  SD_MO_DMA {.intdefine.} = 26      # ... the DMA stop after them
+  SD_MO_DMA_B {.intdefine.} = 39    # ... after the D/A write
+  SD_VS_DMA {.intdefine.} = 66      # VSync's DMA restart
+  SD_VO_DMA {.intdefine.} = 60      # VSyncOff's DMA stop
   SD_MAIN_EXIT {.intdefine.} = 60
   SD_TRAP_COST_T {.intdefine.} = 56
   SD_INIT_POLL0 {.intdefine.} = 7893 - 531
@@ -338,18 +406,41 @@ const
   SD_ENTRY_SKEW {.intdefine.} = 75
   SD_POLL_TIMER {.intdefine.} = -3
 
+proc sd_rate_tail(cpu: CPU; r: SdRate; area: uint32): int =
+  ## How much sooner than the first VCOUNT read Mode's and Init's staged
+  ## registers begin (the stop)
+  sd_div_cost(280896, r.spv) + SD_RS_RELOAD + SD_RS_DMA + SD_RS_TAIL + cpu.sd_x(area, true)
+
+proc sd_rate_stop(cpu: CPU; routine: uint32; r: SdRate; area: uint32) =
+  ## Timer 0 stops; the reload follows after the fourth division
+  cpu.gba.bus.write_half(0x04000102'u32, 0)
+  cpu.r[9] = SD_PH_RR or (routine shl 8)
+  cpu.sd_delay(sd_div_cost(280896, r.spv) + SD_RS_RELOAD + cpu.sd_x(area, true), 4)
+
 proc sd_init(cpu: CPU) =
   let bus = cpu.gba.bus
   let area = cpu.r[0]
+  let e0 = cpu.sd_elapsed() + sd_owed
+  let p = SD_IN_DMA + cpu.sd_n16x()
+  cpu.sd_at(p)
   bus.write_half(0x040000C6'u32, 0)
+  cpu.sd_at(p + 2)
   bus.write_half(0x040000D2'u32, 0)
+  cpu.sd_at(p + 8)
   bus.write_half(0x04000084'u32, 0x008F'u16)
+  cpu.sd_at(p + 13)
   bus.write_half(0x04000082'u32, 0xA90E'u16)
+  cpu.sd_at(p + 24)
   bus[0x04000089'u32] = (bus.read_byte_internal(0x04000089'u32) and 0x3F'u8) or 0x40'u8
+  cpu.sd_at(p + 27)
   bus.write_word(0x040000BC'u32, area + SD_BUF)
+  cpu.sd_at(p + 34)
   bus.write_word(0x040000C0'u32, 0x040000A0'u32)
+  cpu.sd_at(p + 37)
   bus.write_word(0x040000C8'u32, area + SD_BUF + 0x630)
+  cpu.sd_at(p + 45)
   bus.write_word(0x040000CC'u32, 0x040000A4'u32)
+  let over = cpu.sd_settle(cpu.sd_elapsed() - (e0 + 9))
   bus.write_word_internal(SD_INFO_PTR, area)
   for o in countup(0'u32, SD_AREA_BYTES - 4, 4):
     bus.write_word_internal(area + o, 0)
@@ -363,7 +454,8 @@ proc sd_init(cpu: CPU) =
   # fields (three words, two bytes) and the spv read back; two byte fields
   let x = 1014 * cpu.sd_x(area, true) + 4 * cpu.sd_x(area, false)
   let r = sd_rate(4)
-  cpu.sd_enter(SD_PH_INIT, SD_INIT_POLL0 + r.cost + x - SD_ENTRY_SKEW)
+  cpu.sd_enter(SD_PH_INIT, SD_INIT_POLL0 + r.cost + x - SD_ENTRY_SKEW - cpu.sd_rate_tail(r, area) -
+                           SD_RS_INIT - over)
 
 proc sd_mode(cpu: CPU) =
   let bus = cpu.gba.bus
@@ -373,45 +465,61 @@ proc sd_mode(cpu: CPU) =
   cpu.r[3] = SD_R3
   if area < 0x02000000'u32 or ident != SD_IDENT:
     cpu.r[1] = ident
+    cpu.sd_pay()
     cpu.idle(29)
     return
   cpu.r[1] = 0
   bus.write_word_internal(area, SD_IDENT + 1)
   # 143 cycles with no field set; per field, measured over all 16 subsets
   var cost = 143 - 82 + 2 * cpu.sd_x(area, true)
+  let e0 = cpu.sd_elapsed() + sd_owed
+  var w = 0                     # the register writes' own cycles
+  # (the D/A write lands after the other fields, the DMA stop after it)
+  var p = SD_MO_BIAS + cpu.sd_n16x() + 2 * cpu.sd_x(area, true)
   if (mode and 0xFF'u32) != 0:
     bus.write_byte_internal(area + 5, uint8(mode and 0x7F))
     cost += 2 + cpu.sd_x(area, false)
+    p += 2 + cpu.sd_x(area, false)
   if (mode and 0xF00'u32) != 0:
     bus.write_byte_internal(area + 6, uint8((mode shr 8) and 0xF))
     for i in 0'u32 ..< 12'u32:
       bus.write_byte_internal(area + 0x50 + i * 0x40, 0)
     cost += 87 + 13 * cpu.sd_x(area, false)
+    p += 87 + 13 * cpu.sd_x(area, false)
   if (mode and 0xF000'u32) != 0:
     bus.write_byte_internal(area + 7, uint8((mode shr 12) and 0xF))
     cost += 1 + cpu.sd_x(area, false)
+    p += 1 + cpu.sd_x(area, false)
   if (mode and 0xF00000'u32) != 0:
     let hi = bus.read_byte_internal(0x04000089'u32)
     let nhi = (hi and 0x3F'u8) or uint8(((mode shr 20) and 3) shl 6)
+    cpu.sd_at(p)
     bus[0x04000089'u32] = nhi
+    inc w
     cpu.r[1] = uint32(nhi)
     cost += 12  # + the register write's own cycle
+    p += SD_MO_DMA_B - SD_MO_DMA
   let index = int((mode shr 16) and 0xF)
   if index == 0:
     cpu.sd_resid(cpu.sys_sp(), rsMode, area, 0)
     bus.write_word_internal(area, SD_IDENT)
     cpu.r[0] = mode
-    cpu.idle(cost + cpu.sd_x(area, true))
+    let over = cpu.sd_settle(cpu.sd_elapsed() - (e0 + w))
+    cpu.idle(max(0, cost + cpu.sd_x(area, true) - over))
     return
   # Rate change: the VSyncOff body (nested lock, DMA off, counter 0, buffer
   # clear), then the rate fields and registers, then line 159
   bus.write_word_internal(area, SD_IDENT + 2)
+  p += SD_MO_DMA + 2 * cpu.sd_x(area, true)
+  cpu.sd_at(p)
   bus.write_half(0x040000C6'u32, 0)
+  cpu.sd_at(p + 2)
   bus.write_half(0x040000D2'u32, 0)
+  let over = cpu.sd_settle(cpu.sd_elapsed() - (e0 + w + 2))
   bus.write_byte_internal(area + 4, 0)
   cpu.sd_clear_buffer(area)
   let x_clear = 792 * cpu.sd_x(area, true) + 4 * cpu.sd_x(area, true) + cpu.sd_x(area, false)
-  cpu.sd_enter(SD_PH_MODE_A, SD_MODE_CLEAR_END + (cost - (143 - 82)) + x_clear - SD_ENTRY_SKEW,
+  cpu.sd_enter(SD_PH_MODE_A, SD_MODE_CLEAR_END + (cost - (143 - 82)) + x_clear - SD_ENTRY_SKEW - over,
                area, uint32(index))
 
 proc sd_vsync(cpu: CPU) =
@@ -421,6 +529,7 @@ proc sd_vsync(cpu: CPU) =
   if area < 0x02000000'u32 or ident != SD_IDENT:
     cpu.r[0] = area       # (r1 is left as it was: regs.c)
     cpu.r[3] = ident
+    cpu.sd_pay()
     cpu.idle(16)
     return
   let old = bus.read_byte_internal(area + 4)
@@ -430,18 +539,22 @@ proc sd_vsync(cpu: CPU) =
     # 125 cycles: the counter restarts at pcmDmaPeriod and both sound DMAs
     # are restarted (disable, re-enable: the source reloads)
     bus.write_byte_internal(area + 4, bus.read_byte_internal(area + 0x0B))
-    bus.write_half(0x040000C6'u32, 0)
-    bus.write_half(0x040000D2'u32, 0)
-    bus.write_half(0x040000C6'u32, 0xB600'u16)
-    bus.write_half(0x040000D2'u32, 0xB600'u16)
+    let e0 = cpu.sd_elapsed() + sd_owed
+    let p = SD_VS_DMA + cpu.sd_n16x() + cpu.sd_x(area, true) + 4 * cpu.sd_x(area, false)
+    for i, (a, v) in [(0x040000C6'u32, 0'u16), (0x040000D2'u32, 0'u16),
+                      (0x040000C6'u32, 0xB600'u16), (0x040000D2'u32, 0xB600'u16)]:
+      cpu.sd_at(p + 2 * i)
+      bus.write_half(a, v)
     cpu.r[0] = 0
     cpu.r[1] = 0xB600
     cpu.r[3] = 0x040000D2'u32
-    cpu.idle(125 - 82 - 4 + cpu.sd_x(area, true) + 4 * cpu.sd_x(area, false))
+    let over = cpu.sd_settle(cpu.sd_elapsed() - (e0 + 4))
+    cpu.idle(max(0, 125 - 82 - 4 + cpu.sd_x(area, true) + 4 * cpu.sd_x(area, false) - over))
   else:
     cpu.r[0] = area
     cpu.r[1] = uint32(cnt)
     cpu.r[3] = SD_IDENT
+    cpu.sd_pay()
     cpu.idle(105 - 82 + cpu.sd_x(area, true) + 2 * cpu.sd_x(area, false))
 
 proc sd_vsync_off(cpu: CPU) =
@@ -452,15 +565,21 @@ proc sd_vsync_off(cpu: CPU) =
     cpu.r[0] = ident
     cpu.r[3] = SD_R3
     # An ident below 'Smsh' is refused three cycles sooner (two compares)
+    cpu.sd_pay()
     cpu.idle(if area >= 0x02000000'u32 and ident < SD_IDENT: 27 else: 30)
     return
   bus.write_word_internal(area, ident + 1)
+  let e0 = cpu.sd_elapsed() + sd_owed
+  let p = SD_VO_DMA + cpu.sd_n16x() + 2 * cpu.sd_x(area, true)
+  cpu.sd_at(p)
   bus.write_half(0x040000C6'u32, 0)
+  cpu.sd_at(p + 2)
   bus.write_half(0x040000D2'u32, 0)
+  let over = cpu.sd_settle(cpu.sd_elapsed() - (e0 + 2))
   bus.write_byte_internal(area + 4, 0)
   cpu.sd_clear_buffer(area)
   let x = 792 * cpu.sd_x(area, true) + 3 * cpu.sd_x(area, true) + cpu.sd_x(area, false)
-  cpu.sd_enter(SD_PH_VSOFF, SD_VSOFF_UNLOCK + x - SD_ENTRY_SKEW, area)
+  cpu.sd_enter(SD_PH_VSOFF, SD_VSOFF_UNLOCK + x - SD_ENTRY_SKEW - over, area)
 
 proc sd_vsync_on(cpu: CPU) =
   # No SoundArea check: both sound DMAs are armed as they stand
@@ -610,6 +729,9 @@ proc sd_mix(cpu: CPU; area: uint32): int =
   let slot = if cnt >= 2: period - cnt + 1 else: 0
   let a0 = area + SD_BUF + cast[uint32](int32(slot) * int32(spv))
   let b0 = a0 + 0x630
+  # the slot's writes, timed, for a sound DMA that drains it meanwhile
+  let n = int(spv)
+  bus.sd_tw_begin(a0, n)
   # (the slot multiply takes a cycle more for 256 samples or more)
   # (the SoundInfo reads before the mix: three words, four bytes)
   result = SD_MIX_PRE + 3 * (aw - 1) + 4 * (ab - 1)
@@ -620,6 +742,9 @@ proc sd_mix(cpu: CPU; area: uint32): int =
     for i in 0'u32 ..< spv:
       bus.write_byte_internal(b0 + i, 0)
       bus.write_byte_internal(a0 + i, 0)
+      let t = SD_TW_OFF + result + int(i div 16) * (12 + 8 * aw)
+      bus.sd_tw_rec(n + int(i), t, 0)
+      bus.sd_tw_rec(int(i), t, 0)
     # word stores, 16 bytes of each half per 20 cycles (smain.c: rates 1, 4,
     # 12), the 4 or 8 bytes over a multiple of 16 for 2 or 6 more (rates 2
     # and 5: mix_interp4/5)
@@ -636,6 +761,9 @@ proc sd_mix(cpu: CPU; area: uint32): int =
       if y >= 0x80'u8: y += 1   # a negative byte moves one step toward zero
       bus.write_byte_internal(b0 + i, y)
       bus.write_byte_internal(a0 + i, y)
+      let t = SD_TW_OFF + result + int(i) * (22 + 6 * ab)
+      bus.sd_tw_rec(n + int(i), t, y)
+      bus.sd_tw_rec(int(i), t, y)
     # four byte reads and two stores a sample: 28 each (smain.c)
     result += int(spv) * (22 + 6 * ab) - 1
   let pcmfreq = bus.read_word_internal(area + 0x14)
@@ -797,6 +925,11 @@ proc sd_mix(cpu: CPU; area: uint32): int =
       let yb = (bus.sd_s8(b0 + i) + ashr(smp * el, 8)) and 0xFF
       bus.write_byte_internal(b0 + i, uint8(yb))
       bus.write_byte_internal(a0 + i, uint8(ya))
+      # (the channel's first store comes SD_TW_FIRST before the end of its
+      # setup's cost)
+      let tw = SD_TW_OFF + result - (if i == 0: SD_TW_FIRST else: 0)
+      bus.sd_tw_rec(n + int(i), tw, uint8(yb))
+      bus.sd_tw_rec(int(i), tw, uint8(ya))
       inc outs
       if fixed:
         k = 0
@@ -1544,17 +1677,14 @@ proc sd_trap(cpu: CPU): bool =
     of SD_PH_INIT:
       let area = bus.read_word_internal(SD_INFO_PTR)
       let r = cpu.sd_write_rate_fields(area, 4)
-      cpu.sd_rate_registers(r)
-      cpu.r[0] = 0x04000000'u32
-      cpu.sd_stub_goto(SD_STUB_POLL, 4)
+      cpu.sd_rate_stop(1, r, area)
     of SD_PH_MODE_A:
       let area = cpu.r[4]
       bus.write_word_internal(area, SD_IDENT + 1)
       let r = cpu.sd_write_rate_fields(area, int(cpu.r[5]))
-      cpu.sd_rate_registers(r)
-      cpu.r[9] = SD_PH_POLL
+      cpu.r[9] = SD_PH_SFS_B or (2'u32 shl 8)
       let x = 4 * cpu.sd_x(area, true) + 2 * cpu.sd_x(area, false)
-      cpu.sd_delay(SD_MODE_POLL0 - SD_MODE_CLEAR_END + r.cost + x, 4)
+      cpu.sd_delay(SD_MODE_POLL0 - SD_MODE_CLEAR_END + r.cost + x - cpu.sd_rate_tail(r, area), 4)
     of SD_PH_POLL:
       cpu.r[0] = 0x04000000'u32
       cpu.sd_stub_goto(SD_STUB_POLL, 4)
@@ -1565,15 +1695,32 @@ proc sd_trap(cpu: CPU): bool =
       let x = 3 * cpu.sd_x(cpu.r[4], true) + 2 * cpu.sd_x(cpu.r[4], false)
       cpu.sd_delay(SD_SFS_STOP + r.cost - d4 + x, 4)
     of SD_PH_SFS_B:
-      let r = sd_rate(int(cpu.r[7]))
-      cpu.sd_rate_registers(r)
-      cpu.r[9] = SD_PH_SFS_POLL
-      cpu.sd_delay(SD_SFS_POLL0 + sd_div_cost(280896, r.spv), 4)
+      cpu.sd_rate_stop(3, sd_rate(int(cpu.r[7])), cpu.r[4])
+    of SD_PH_SFS_B or (2'u32 shl 8):
+      cpu.sd_rate_stop(2, sd_rate(int(cpu.r[5])), cpu.r[4])
+    of SD_PH_RR or (1'u32 shl 8), SD_PH_RR or (2'u32 shl 8), SD_PH_RR or (3'u32 shl 8):
+      let routine = cpu.r[9] shr 8
+      bus.write_half(0x04000100'u32, uint16(sd_rate(cpu.sd_rate_index(routine)).reload))
+      cpu.r[9] = SD_PH_RD or (routine shl 8)
+      cpu.sd_delay(SD_RS_DMA, 4)
+    of SD_PH_RD or (1'u32 shl 8), SD_PH_RD or (2'u32 shl 8), SD_PH_RD or (3'u32 shl 8):
+      let routine = cpu.r[9] shr 8
+      bus.write_half(0x040000C6'u32, 0xB600'u16)
+      cpu.idle(1)
+      bus.write_half(0x040000D2'u32, 0xB600'u16)
+      cpu.r[9] = case routine
+        of 1: SD_PH_INIT
+        of 2: SD_PH_POLL
+        else: SD_PH_SFS_POLL
+      cpu.r[0] = 0x04000000'u32
+      cpu.idle(SD_RS_POLL)
+      cpu.sd_stub_goto(SD_STUB_POLL, 4)
     of SD_PH_SFS_POLL:
       cpu.r[0] = 0x04000000'u32
       cpu.sd_stub_goto(SD_STUB_POLL, 4)
     of SD_PH_SM_DONE:
       let area = cpu.r[4]
+      bus.sd_tw_active = false
       bus.write_word_internal(area, SD_IDENT)
       # r0 = &pcmDmaCounter; the real routine's r1 is its last mixing
       # scratch (0, the reverb, a SoundInfo field address), not modelled

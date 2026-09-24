@@ -465,8 +465,15 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     cpu.hle_halt_return()   # the stub's trap at 0x170 (ARM)
     return
   let t_entry = cpu.hle_body_start()
+  sd_swi_t0 = t_entry   # the sound driver places its register writes from here
   let rfs_entry = cpu.gba.bus.rom_free_since
-  cpu.idle(SWI_HLE_BASE)
+  # Init, Mode, VSync and VSyncOff write registers sooner into the SWI than
+  # the whole dispatch charge: they pay it themselves (hle_sound.nim sd_owed)
+  case swi_num
+  of 0x1A, 0x1B, 0x1D, 0x28:
+    if cpu.gba.bus.stub_bios: sd_owed = SWI_HLE_BASE
+    else: cpu.idle(SWI_HLE_BASE)
+  else: cpu.idle(SWI_HLE_BASE)
   # BIOS open-bus latch: the last opcode the BIOS fetches before returning
   # (GBATEK "Reading from BIOS memory"; mGBA suite checks it after VBlankIntrWait)
   cpu.gba.bus.bios_latch = 0xE3A02004'u32

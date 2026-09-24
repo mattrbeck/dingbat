@@ -305,6 +305,9 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
     if word_size == 4:
       if src_accessible:
         dma.latch[channel] = dma.gba.bus.read_word(dma.src[channel])
+        if dma.gba.bus.sd_tw_active and start_timing == 3:
+          # a sound FIFO DMA during an HLE SoundDriverMain pass (bus.nim)
+          dma.latch[channel] = dma.gba.bus.sd_tw_word(dma.src[channel], dma.latch[channel])
       when DMA_PREEMPT_AFTER_READ: preempt_point()
       if dst_writable:
         dma.gba.bus.write_word(dma.dst[channel], dma.latch[channel])

@@ -1153,6 +1153,57 @@ proc read_half*(bus: Bus; address: uint32): uint16 =
     bus.catch_up_access(cost)
   bus.read_half_internal(address)
 
+proc sd_tw_begin*(bus: Bus; a0: uint32; n: int) =
+  ## A SoundDriverMain pass starts writing the slot at a0 (n bytes in each
+  ## pcmBuffer half, the B half 0x630 on): record its writes from here.
+  bus.sd_tw_active = true
+  bus.sd_tw_start = bus.bus_now()
+  bus.sd_tw_a0 = a0
+  bus.sd_tw_n = n
+  bus.sd_tw_pre.setLen(2 * n)
+  bus.sd_tw_head.setLen(2 * n)
+  bus.sd_tw_tail.setLen(2 * n)
+  for i in 0 ..< n:
+    bus.sd_tw_pre[i] = bus.read_byte_internal(a0 + uint32(i))
+    bus.sd_tw_pre[n + i] = bus.read_byte_internal(a0 + 0x630'u32 + uint32(i))
+  for i in 0 ..< 2 * n:
+    bus.sd_tw_head[i] = -1
+  bus.sd_tw_next.setLen(0)
+  bus.sd_tw_t.setLen(0)
+  bus.sd_tw_v.setLen(0)
+
+proc sd_tw_rec*(bus: Bus; o: int; t: int; v: uint8) {.inline.} =
+  ## The pass writes byte o (A half 0..n-1, B half n..2n-1) at cycle t.
+  let e = int32(bus.sd_tw_t.len)
+  bus.sd_tw_t.add(int32(t))
+  bus.sd_tw_v.add(v)
+  bus.sd_tw_next.add(-1)
+  if bus.sd_tw_head[o] < 0: bus.sd_tw_head[o] = e
+  else: bus.sd_tw_next[bus.sd_tw_tail[o]] = e
+  bus.sd_tw_tail[o] = e
+
+proc sd_tw_word*(bus: Bus; address: uint32; word: uint32): uint32 =
+  ## A sound DMA's read of `word` at `address` during a pass: each byte of
+  ## the slot as the real routine had it at this cycle.
+  result = word
+  let now = bus.bus_now()
+  let dt = when CycleCount is uint32: int64(cast[int32](now - bus.sd_tw_start))
+           else: cast[int64](now - bus.sd_tw_start)
+  for k in 0'u32 .. 3'u32:
+    let a = (address and not 3'u32) + k
+    var o = -1
+    let n = uint32(bus.sd_tw_n)
+    if a >= bus.sd_tw_a0 and a < bus.sd_tw_a0 + n: o = int(a - bus.sd_tw_a0)
+    elif a >= bus.sd_tw_a0 + 0x630'u32 and a < bus.sd_tw_a0 + 0x630'u32 + n:
+      o = int(n + (a - bus.sd_tw_a0 - 0x630'u32))
+    if o < 0: continue
+    var v = bus.sd_tw_pre[o]
+    var e = bus.sd_tw_head[o]
+    while e >= 0 and int64(bus.sd_tw_t[e]) <= dt:
+      v = bus.sd_tw_v[e]
+      e = bus.sd_tw_next[e]
+    result = (result and not (0xFF'u32 shl (8 * k))) or (uint32(v) shl (8 * k))
+
 proc read_word*(bus: Bus; address: uint32): uint32 =
   bdWatchRead(address, 4)
   bus.rom_cool()

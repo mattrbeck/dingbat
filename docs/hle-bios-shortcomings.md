@@ -13,8 +13,11 @@ it deliberately does not model:
   RealClearChain). Results, register and SoundArea stores are exact in the
   probes; the setup routines, SampleFreqSet and the jump-list functions are
   cycle-exact in them too (the jump list for structures and scores in
-  IWRAM, EWRAM and the cartridge), and so is what they leave on the stack
-  below sp. On the real-game set (1800 frames each, HLE vs the real BIOS
+  IWRAM, EWRAM and the cartridge), each sound/timer/DMA register write
+  lands on the real routine's cycle from every caller region, and what the
+  routines leave on the stack below sp matches. A sound DMA that drains the
+  slot SoundDriverMain is mixing (the first passes after a start) reads the
+  bytes the real routine had written by then. On the real-game set (1800 frames each, HLE vs the real BIOS
   image) the FIFO A/B byte streams are identical for Namco Museum 50th
   (U, E), Lizzie McGuire On The Go and (E), Mail de Cute, Pocket Professor,
   Rampage Puzzle Attack, X-Men Reign of Apocalypse, Phantasy Star Collection
@@ -28,6 +31,12 @@ it deliberately does not model:
   - SoundDriverMain's mixing locals below sp-48, and the three words under
     Init's and VSyncOff's real pushes (sp-36..-44 keep the HLE frame);
     other registers than the ones the probes pin (r1 after the mix is 0);
+  - the timing of each mixing write is the cost model's (within ~20 cycles
+    of the real stores), so a DMA read racing the pass can differ at the
+    byte the model misplaces;
+  - Init's first two writes (the DMA stops) land up to ~20 cycles late when
+    the caller's region makes the HLE's return refill longer than the real
+    dispatch's lead;
   - the MusicPlayer SWIs 0x20-0x24 and the BIOS's own sequencer entry
     (SoundInfo +0x38, 0x2425) are stubs: no title in the library census
     calls them;
@@ -36,14 +45,14 @@ it deliberately does not model:
   - an ARM callback at exactly 0x03000000 is entered 10 cycles later than
     by the real call; Cyberdrive Zoids' voice command with its tone table
     in the cartridge returns a cycle early.
-  Left in that set: Cyberdrive Zoids' frames from 531 (its loop reads stack
-  words the real BIOS's non-sound SWIs leave different), Gameboy Player
+  Left in that set: Cyberdrive Zoids' frames from 527 (its loop reads stale
+  stack words the real BIOS's SWIs leave different), Gameboy Player
   Controller's stream from byte 11282 (its multiboot LZ77UnCompWram, EWRAM
   to EWRAM, runs ~243k cycles short of the real one, which moves the sound
   start), the FFCC loader's frame 3 and last silent FIFO burst (its first
   SoundDriverMain pass, on a SoundArea it set up itself, runs ~20 cycles
   long; not pinned down), Phantasy Star Collection's one lag frame, Lizzie
-  McGuire (E)'s frames from 519 and X-Men's from 1718 (streams identical).
+  McGuire (E)'s frames from 372 and X-Men's from 1680 (streams identical).
 * **Interrupted-copy register remnants.** An IRQ preempting CpuSet /
   CpuFastSet leaves the continuation in r0/r1/r2 (PC rewound onto the SWI).
   On that path only, the halfword forms advance r0/r1 (the real routine

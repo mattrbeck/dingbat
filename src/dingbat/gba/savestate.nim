@@ -799,6 +799,7 @@ proc gba_apply_state(gba: GBA; payload: string; rev: uint32;
       "handler still running, under an older HLE stack model that cannot be " &
       "reconstructed — it would resume with a corrupted stack pointer")
   load_bus_state(gba.bus, r, rev)
+  gba.bus.sd_tw_active = false   # an HLE sound pass's timing is not stored
   # Derived, not stored: at a frame boundary it is the executing mode's lead
   gba.bus.rom_ahead = (if gba.cpu.cpsr.thumb: 4'i8 else: 8'i8)
   r.expect_tag(GBA_SEC_SCHED)

@@ -415,6 +415,23 @@ type
     # Famicom Mini Metroid, whose table walk off the end of a ROM table stops
     # only on an H-blank DMA's word.
     dma_open_bus*:       uint32
+    # The HLE SoundDriverMain's pass (hle_sound.nim sd_mix) computes the
+    # pcmBuffer slot at once, but the real routine writes it byte by byte
+    # over the pass: a sound DMA that drains that slot meanwhile (the first
+    # passes after a start, when the ring has no lead) reads what the real
+    # routine had written by then. The pass leaves its writes here, timed
+    # from sd_tw_start (bus.nim sd_tw_word); a FIFO DMA read in the window
+    # gets the byte as of its cycle. Not serialized: cleared on state load.
+    sd_tw_active*:       bool
+    sd_tw_start*:        CycleCount
+    sd_tw_a0*:           uint32
+    sd_tw_n*:            int
+    sd_tw_pre*:          seq[uint8]     # the slot before the pass (A, then B)
+    sd_tw_head*:         seq[int32]     # per byte: its first write, or -1
+    sd_tw_tail*:         seq[int32]
+    sd_tw_next*:         seq[int32]     # per write: the byte's next one
+    sd_tw_t*:            seq[int32]     # per write: cycle from sd_tw_start
+    sd_tw_v*:            seq[uint8]     # per write: the byte's new value
     # DMA_READS_CPU_BUS: the CPU's last synced data load (address, size in
     # bytes, and r15 while it ran); 0 = none. A burst's first unmapped read
     # sees that load's value if the CPU has fetched nothing since. Written
@@ -1202,6 +1219,9 @@ proc read_word_internal*(bus: Bus; address: uint32): uint32 {.inline.}
 proc write_byte_internal*(bus: Bus; address: uint32; value: uint8)
 proc write_half_internal*(bus: Bus; address: uint32; value: uint16)
 proc write_word_internal*(bus: Bus; address: uint32; value: uint32)
+proc sd_tw_begin*(bus: Bus; a0: uint32; n: int)
+proc sd_tw_rec*(bus: Bus; o: int; t: int; v: uint8) {.inline.}
+proc sd_tw_word*(bus: Bus; address: uint32; word: uint32): uint32
 proc `[]`*(mmio: MMIO; address: uint32): uint8
 proc `[]=`*(mmio: MMIO; address: uint32; value: uint8)
 proc timer_overflow*(apu: APU; timer: int)
