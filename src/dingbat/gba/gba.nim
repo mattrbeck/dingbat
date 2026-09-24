@@ -53,6 +53,12 @@ type
     memory*:    seq[byte]
     save_path*: string
     dirty*:     bool
+    # Why the last battery write failed ("" once one lands), and whether the
+    # frontend has yet to tell the player about this run of failures: it
+    # clears `save_error_new`, write_save sets it again only after a write
+    # has succeeded in between.
+    save_error*:     string
+    save_error_new*: bool
     # Battery-file RTC trailer (rtc_calendar.nim). rtc_cart: the ROM carries
     # the RTC library (storage.nim). `trailer` holds the 16 bytes found after
     # the chip data when the file had them; `rtc` is set on RTC carts and

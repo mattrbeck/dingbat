@@ -43,6 +43,7 @@ build desktopnetlink  dingbat_desktop_netlink_test  tests/desktop_netlink_test.n
 build gbartc          dingbat_gbartc_test           tests/gba_rtc_test.nim
 build desktopinput    dingbat_desktop_input_test    tests/desktop_input_test.nim
 build desktopsettings dingbat_desktop_settings_test tests/desktop_settings_test.nim
+build desktoppersist  dingbat_desktop_persist_test  tests/desktop_persist_test.nim
 build clipreplay      dingbat_clipreplay_test       tests/clip_replay_test.nim
 build mp2kpass        dingbat_mp2kpass_test         tests/mp2k_pass_test.nim
 build cyclelaws       dingbat_cyclelaws_test        tests/cyclelaws_test.nim

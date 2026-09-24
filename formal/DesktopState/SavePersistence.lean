@@ -87,7 +87,7 @@ proposed change at once. Each flag is one small Nim change:
 | `staleView` | `load_rom` calls `app.save_states.mark_stale()` | `bug_window_shows_previous_games_slots`, `bug_window_delete_hidden_slot` | `fi_ok` (`ViewJ`, `blind = []`) |
 | `identity` | `state_file_path` adds the ROM identity (`rom_identity`) to the name; the old name is only ever read | `bug_same_name_state_overwritten` | `st_ok` |
 | `lock` | a window whose game is already open in another window uses `<name>-p2.sav` / `-p2` states (seeded from the first, as the web's 2P mode does) | `bug_two_windows_lost_update` | `fi_ok` (`Excl`, `BaseJ`, `clobbers = []`) |
-| `catchIo` | `write_save` catches IOError/OSError like `mbc_save` | `bug_gba_save_error_crashes` | `clean_ok` |
+| `catchIo` | `write_save` catches IOError/OSError like `mbc_save`; both record it (`save_error`) and the app shows it until a write lands (`batErr`) | `bug_gba_save_error_crashes`, `gb_save_error_unseen` | `clean_ok`, `regress_gba_save_error` |
 | `flushGba` | `flush_gb_save` also flushes the GBA battery | `bug_gba_quit_drops_battery` | `clean_ok` |
 | `atomic` | every `writeFile` of a persisted file goes to `path.tmp`, then `moveFile` over `path` | `bug_truncated_sav_accepted`, `bug_failed_quick_save_destroys_previous` | `clean_ok` |
 | `cliOver` | CLI BIOS flags are kept out of `app.cfg`; `save_config` re-reads the file and writes only the keys its caller changed | `bug_cli_flag_persisted`, `bug_two_windows_config_lost` | `cfg_ok` |
@@ -253,13 +253,15 @@ structure App where
   viewFiles : Nat → Option StF -- slots[k]: the file each thumbnail/label was read from
   cfg       : Cfg             -- app.cfg (the same ref as ce.cfg / fe.cfg)
   over      : Bool            -- fixed code only: this run's CLI BIOS override, never persisted
+  batErr    : Bool            -- fixed code only: the core's `save_error` is set (the last battery
+                              -- write failed), which the app shows (`poll_battery_notice`)
   base      : Option Bat      -- ghost: the .sav content this process last read or wrote
 
 def App.off : App :=
   { pc := .off, cur := none, core := none, p2 := false, paused := false, running := true,
     pendSave := false, pendLoad := false, linked := false, setup := false, mid := false, rewind := [],
     rewinding := false, notice := false, win := false, wasOpen := false, view := none,
-    viewFiles := fun _ => none, cfg := Cfg.dflt, over := false, base := none }
+    viewFiles := fun _ => none, cfg := Cfg.dflt, over := false, batErr := false, base := none }
 
 structure St where
   app     : Bool → App             -- the two processes
@@ -348,11 +350,19 @@ def cuts (atomic : Bool) : Io → Bool
   | .full | .power => !atomic
   | _ => false
 
+/-- Did this write raise (and the process live on)? -/
+def Io.raises : Io → Bool
+  | .denied | .full => true
+  | _ => false
+
 /-- The per-frame battery flush (`etSaves`): gba `handle_saves` (gba.nim 1530-1532)
     -> `storage.write_save` (storage.nim 90-95, no try: an IOError leaves
     `run_until_frame` (2470) / `step_frame` (2460, which catches only
     NetLinkError), the main loop and `main()`); gb `handle_saves` (gb.nim
-    3494-3498) -> `mbc_save` (3228-3246: caught, reported once, RAM stays dirty). -/
+    3494-3498) -> `mbc_save` (3228-3246: caught, reported once, RAM stays dirty).
+    Fixed (`catchIo`): both catch it, keep the RAM dirty and record the error
+    (`save_error`), which the app shows until a write lands (`batErr`); the
+    once-per-run notice and its dismissal are tests/desktop_persist_test.nim's. -/
 def flushFrame (fx : Fix) (s : St) (i : Bool) (io : Io) : St :=
   let a := s.app i
   match a.cur, a.core with
@@ -365,7 +375,8 @@ def flushFrame (fx : Fix) (s : St) (i : Bool) (io : Io) : St :=
       let w := wr fx.atomic s.sav p b { b with whole := false } io
       let s2 := { s1 with sav := w.1, truncs := s1.truncs + (if cuts fx.atomic io then 1 else 0) }
       let a2 := { a with base := w.1 p,
-                         core := some (if w.2 = .ok then { c with dirty := false } else c) }
+                         core := some (if w.2 = .ok then { c with dirty := false } else c),
+                         batErr := fx.catchIo && w.2 = .raised }
       match w.2 with
       | .ok => setA s2 i a2
       | .raised =>
@@ -460,7 +471,7 @@ def loadRom (fx : Fix) (s0 : St) (i : Bool) (r : Rom) : St :=
   let ram := if p2 && disk.isNone then s.sav (savPath r false) else disk
   let s := noteBoot s r ram                                    -- 735 load_cheats
   let a' := { a with cur := some r, core := some ⟨r.game, s.clock, ram, false⟩, p2 := p2,
-                     base := disk,
+                     base := disk, batErr := false,
                      rewind := [], rewinding := false,                 -- 744-745
                      paused := false, pendSave := false, pendLoad := false,  -- 763-765
                      wasOpen := if fx.staleView then false else a.wasOpen }
@@ -2565,9 +2576,24 @@ theorem regress_window_view :
     ((run fixed init tStalePre).app false).view = some romA ∧ (run fixed init tStale).blind = [] := by
   decide +kernel
 
+/-- The failed write is survived and shown; the next frame retries it, and a
+    write that lands takes the notice down and saves the RAM the failure kept. -/
+def tGbaRecover : List Ev :=
+  tGbaCrash romA ++ [.pend false .ok, .inputDone false, .linkIdle false, .noPresent false, F]
+
 theorem regress_gba_save_error :
     ((run fixed init (tGbaCrash romA)).app false).pc = .pend ∧
-    (run fixed init (tGbaCrash romA)).crashes = 0 := by decide +kernel
+    (run fixed init (tGbaCrash romA)).crashes = 0 ∧
+    ((run fixed init (tGbaCrash romA)).app false).batErr = true ∧
+    ((run fixed init tGbaRecover).app false).batErr = false ∧
+    (run fixed init tGbaRecover).sav (savPath romA false) = some ⟨100, 2, true⟩ := by decide +kernel
+
+/-- The real code's GB flush survives the same failure but tells only stdout. -/
+theorem gb_save_error_unseen : ((run real init (tGbaCrash romG)).app false).batErr = false := by
+  decide +kernel
+
+theorem regress_gb_save_error_shown : ((run fixed init (tGbaCrash romG)).app false).batErr = true := by
+  decide +kernel
 
 theorem regress_gba_quit :
     (run fixed init (tQuit romA)).dropped = [] ∧

@@ -91,8 +91,18 @@ proc write_save*(st: Storage) =
   # Empty save_path = no battery file (web build persists itself; harnesses
   # detach it so a run leaves no .sav). dirty stays set so a rebind flushes.
   if st.dirty and st.save_path.len > 0:
-    writeFile(st.save_path, st.battery_file_bytes())
-    st.dirty = false
+    try:
+      writeFile(st.save_path, st.battery_file_bytes())
+      st.dirty = false
+      st.save_error = ""
+    except IOError, OSError:
+      # A read-only folder, a full disk, a file another program holds: the
+      # game plays on with its RAM still dirty, so every frame retries.
+      # Said once per run of failures; the frontend shows `save_error`.
+      if st.save_error.len == 0:
+        st.save_error_new = true
+        echo "Failed to write save file: ", st.save_path
+      st.save_error = getCurrentExceptionMsg()
 
 proc read_half*(st: Storage; address: uint32): uint16 =
   0x0101'u16 * uint16(st[address])

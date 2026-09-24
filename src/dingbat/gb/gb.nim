@@ -1551,7 +1551,11 @@ type
     sav_path*:     string
     has_battery*:  bool
     ram_dirty*:    bool
-    save_error_reported*: bool
+    # Why the last battery write failed ("" once one lands), and whether the
+    # frontend has yet to tell the player about this run of failures (it
+    # clears the flag; mbc_save sets it again only after a success).
+    save_error*:     string
+    save_error_new*: bool
     # Flat-ROM window cache -- see mbc_sync_rom_map in mbc/mbc.nim. Derived
     # state, never serialized: it is recomputed from the banking registers
     # after every cartridge write and after a state load. `flat_rom` defaults
@@ -3239,10 +3243,12 @@ proc mbc_save*(cart: Mbc) =
         data.add(mbc6_footer(Mbc6(cart)))
       writeFile(cart.sav_path, data)
       cart.ram_dirty = false
+      cart.save_error = ""
     except IOError, OSError:
-      if not cart.save_error_reported:
-        cart.save_error_reported = true
+      if cart.save_error.len == 0:
+        cart.save_error_new = true
         echo "Failed to write save file: ", cart.sav_path
+      cart.save_error = getCurrentExceptionMsg()
 
 proc mbc_load*(cart: Mbc) =
   if cart.has_battery and cart.sav_path.len > 0 and fileExists(cart.sav_path):

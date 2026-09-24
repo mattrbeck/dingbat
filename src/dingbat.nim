@@ -25,6 +25,7 @@ import dingbat/frontend/gb_debug
 import dingbat/frontend/cheats_widget
 import dingbat/frontend/save_states_widget
 import dingbat/frontend/link_cable
+import dingbat/frontend/persist
 import dingbat/common/cheats
 import dingbat/common/serialize
 
@@ -430,6 +431,9 @@ type AppState = ref object
   state_notice_hint: string
   # Command-line BIOS choices: for this run only, never written to cfg
   boot_overrides:  BootOverrides
+  # A battery save that can't be written; shown in the same modal once
+  # state_notice is clear (poll_battery_notice).
+  battery:           BatteryNotice
   rewind:          Rewind
   rewinding:       bool    # true while the rewind key is held
   last_rewind_pop: uint32
@@ -1226,9 +1230,33 @@ proc show_menu_bar(): bool =
 
 proc render_link_window()  # defined below, near the network-link procs
 
+proc poll_battery_notice() =
+  ## Once per loop iteration: the running core's battery-write failures into
+  ## `app.battery` (the first of a run opens the notice; a write that lands
+  ## takes it down).
+  var none = false
+  case app.emu_kind
+  of ekGBA:
+    if app.gba_emu != nil:
+      let st = app.gba_emu.storage
+      app.battery.poll(st.save_path, st.save_error, st.save_error_new)
+  of ekGB:
+    if app.gb_emu != nil:
+      let cart = app.gb_emu.cartridge
+      app.battery.poll(cart.sav_path, cart.save_error, cart.save_error_new)
+  of ekNone: app.battery.poll("", "", none)
+
 proc render_notice(popup: string; text, hint: var string) =
   ## A modal sentence for the user, until OK or the X clears `text`.
-  if text.len == 0: return
+  if text.len == 0:
+    # Cleared from outside (a battery write landed): ImGui keeps a popup
+    # open until it is closed from inside it.
+    if igIsPopupOpen_Str(cstring(popup), 0) and
+       igBeginPopupModal(cstring(popup), nil,
+                         cint(ImGui_WindowFlags_AlwaysAutoResize)):
+      igCloseCurrentPopup()
+      igEndPopup()
+    return
   if not igIsPopupOpen_Str(cstring(popup), 0):
     igOpenPopup_Str(cstring(popup), 0)
   var center = ImVec2(x: 0, y: 0)
@@ -1277,6 +1305,13 @@ proc render_config_notice() =
   var no_hint = ""
   render_notice("Settings##notice", app.cfg.notice, no_hint)
 
+proc render_battery_notice() =
+  ## The running game's battery save can't be written (persist.nim
+  ## BatteryNotice: once per run of failures, down when a write lands).
+  ## Unbidden, so it waits for the other notices.
+  if app.state_notice.len > 0 or app.cfg.notice.len > 0: return
+  render_notice("Save file##battery", app.battery.text, app.battery.hint)
+
 var imgui_skipped = false  # the last render_imgui returned before igNewFrame
 
 proc render_imgui() =
@@ -1296,7 +1331,8 @@ proc render_imgui() =
      not app.save_states.window and
      # The menu bar hides after three idle seconds, exactly the state a Quick
      # Load keypress lands in; the notice must still be drawn then.
-     app.state_notice.len == 0 and app.cfg.notice.len == 0:
+     app.state_notice.len == 0 and app.cfg.notice.len == 0 and
+     app.battery.text.len == 0:
     # Only igNewFrame drains ImGui's input queue, a few events a frame, so
     # every key event of a long keyboard-only session would wait there and
     # the menu would take that long to see a click. Drop the backlog, and
@@ -1513,6 +1549,7 @@ proc render_imgui() =
 
   render_state_notice()
   render_config_notice()
+  render_battery_notice()
 
   app.ce.render()
 
@@ -2438,6 +2475,7 @@ proc main() =
     if (app.pending_save or app.pending_load) and app.emu_kind != ekNone and
        not link_mid_frame():
       process_pending_state()
+    poll_battery_notice()
     if pacing_log and app.emu_kind == ekGBA and app.gba_emu != nil and
        not app.paused:
       let q = app.gba_emu.apu.audio_queued_bytes()

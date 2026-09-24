@@ -127,6 +127,11 @@ jobs:
         # not saved; real BIOS / intro without a file fall back to HLE.
         shell: bash
         run: ./dingbat_desktop_settings_test
+      - name: Desktop save files (battery, save states, cheats)
+        # A battery write that fails keeps the game running and tells the
+        # player once per run of failures. Synthetic ROMs in a temp folder.
+        shell: bash
+        run: ./dingbat_desktop_persist_test
       - name: Clip-capture replay determinism
         # Replays a range from the anchor+input log and asserts every frame's
         # serialized state matches the live run; two negative controls must
