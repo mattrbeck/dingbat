@@ -1,6 +1,7 @@
 -- What this models, for formal/anchors.mjs (which lists stale models):
--- @models src/dingbat.nim: flush_gb_save extract_zip_rom load_rom state_file_path cheat_file_path save_state_slot load_state_slot delete_state_slot refresh_state_slots process_pending_state render_imgui handle_input teardown_netlink finish_link link_auto_start link_auto_stop link_start_host service_link_setup render_link_window update_link_auto main
+-- @models src/dingbat.nim: flush_saves load_rom reset_game state_file_path cheat_file_path save_state_slot load_state_slot delete_state_slot refresh_state_slots process_pending_state render_imgui handle_input teardown_netlink finish_link link_auto_start link_auto_stop link_start_host service_link_setup render_link_window update_link_auto main
 -- @models src/dingbat/frontend/save_states_widget.nim: render mark_stale
+-- @models src/dingbat/frontend/game_load.nim: build_core flush_batteries zip_cache_dir extract_zip_rom
 -- @models src/dingbat/gba/gba.nim: new_storage handle_saves
 -- @models src/dingbat/gba/storage.nim: write_save
 -- @models src/dingbat/gb/gb.nim: mbc_save new_gb handle_saves
@@ -126,7 +127,8 @@ only interleaving points.
   `bug_gba_paused_state_load_not_persisted` (with `gb_same_trace_persists`),
   `bug_empty_gb_crashes`, `bug_readonly_gba_crashes`,
   `bug_reset_while_linked_runs_outgoing_core`, `bug_gb_switch_keeps_link`,
-  `bug_link_setup_crash_after_gb_switch`, `bug_save_states_grid_stale_delete`,
+  `bug_link_setup_crash_after_gb_switch`, `bug_quit_leaves_link_up`,
+  `bug_save_states_grid_stale_delete`,
   `bug_reset_after_clear_is_noop`, `bug_quick_save_dropped_by_switch`, and the
   identity ones `bug_battery_shared_by_stem`, `bug_state_slot_shared_by_file_name`,
   `bug_zip_identity_split`.
@@ -487,9 +489,11 @@ def swapIn (s : St) (p r : Path) (g : Game) : St :=
            paused := false, pendSave := false, pendLoad := false, pendFor := none,
            recents := addRecent p s.recents, curPath := some p }
 
-/-- `load_rom(p)` (694-765). With `fix`: validate the ROM before touching
-anything, save a pending Quick Save, tear the link down, flush whichever core
-is loaded, then swap, and mark the Save States grid stale. -/
+/-- `load_rom(p)` (694-765). With `fix` (as shipped): flush whichever core is
+loaded (before the new core reads the `.sav`), build and check the new core
+(`build_core`); refused, the old game keeps running. Only then tear the link
+down, save a pending Quick Save, flush again (a torn linked frame was just
+finished), swap, and mark the Save States grid stale. -/
 def loadRomX (fix : Bool) (s : St) (p : Path) : St :=
   if s.present p = false then s                                    -- 695-696
   else match romOf p with
@@ -497,9 +501,10 @@ def loadRomX (fix : Bool) (s : St) (p : Path) : St :=
   | some r =>
     let s1 := { s with present := upd s.present r true }           -- extraction wrote r
     if fix then
+      let s2 := flushCur true s1                                   -- flush_saves
       match gameOf r with
-      | none => s1                                                 -- "not a ROM" notice
-      | some g => refresh (swapIn (dropCur (flushCur true (teardown (savePending s1)))) p r g)
+      | none => s2                                                 -- build_core refuses: notice
+      | some g => refresh (swapIn (dropCur (flushCur true (savePending (teardown s2)))) p r g)
     else
       let s2 := flushCur false s1                                  -- 702
       match gameOf r with
@@ -554,9 +559,10 @@ def frameX (fix : Bool) (s : St) (due early late : Bool) : St :=
         else { r.1 with cur := some r.2.1,
                         hist := if s.link == .linked then s.hist else some (c.id, r.2.1.ram) } -- 2478-2486
 
-/-- After the loop (2606): `flush_gb_save()`; the fix flushes either core. -/
+/-- After the loop (2606): `flush_gb_save()`. The fix ends the link (the peer
+hears BYE) and flushes either core. -/
 def exitX (fix : Bool) (s : St) : St :=
-  let s1 := flushCur fix s
+  let s1 := flushCur fix (if fix then teardown s else s)
   { s1 with pc := .done, lost := s1.lost || dirtyW s1.cur || dirtyW s1.orphan }
 
 def isGba (s : St) : Bool :=
@@ -775,6 +781,14 @@ theorem bug_link_setup_crash_after_gb_switch :
     let s := run init (iter idle [.drop .aGba] [.linkOpen] ++
                        [idle, .pend, .drop .cGb, .endInput, .service true])
     s.crashed = true := by decide
+
+/-- **Quitting while linked leaves the link up.** Nothing after the loop
+calls `teardown_netlink` (2606): the process exits with the netlink still
+set, so the peer never hears BYE and takes its error path
+(`NetLink.bug_quit_while_linked_sends_no_bye`). -/
+theorem bug_quit_leaves_link_up :
+    let s := run init (linkA ++ iter idle [.quit] [])
+    s.pc = .done ∧ s.link = .linked := by decide
 
 /-- **The Save States grid keeps the previous game's slots.** `load_rom` does
 not refresh or close the window; its grid (and which slots are `used`, which
@@ -1068,7 +1082,7 @@ theorem keep_loadRomX (fix : Bool) {s : St} (p : Path) (h : Keep s) : Keep (load
       dsimp only
       split
       · split
-        · exact h1
+        · exact keep_flushCur _ h1
         · rename_i g hg
           exact keep_refresh (keep_swapIn _ hr hg)
       · split
@@ -1134,8 +1148,12 @@ theorem keep_frameX (fix : Bool) {s : St} (due early late : Bool) (h : Keep s) :
               · simp only [Option.some.injEq, Prod.mk.injEq] at hh
                 exact Or.inr ⟨c, hc, hh.1⟩
 
-theorem keep_exitX (fix : Bool) {s : St} (h : Keep s) : Keep (exitX fix s) :=
-  keep_eqs (keep_flushCur fix h) rfl rfl rfl rfl rfl rfl rfl rfl
+theorem keep_exitX (fix : Bool) {s : St} (h : Keep s) : Keep (exitX fix s) := by
+  have h0 : Keep (if fix then teardown s else s) := by
+    split
+    · exact keep_teardown h
+    · exact h
+  exact keep_eqs (keep_flushCur fix h0) rfl rfl rfl rfl rfl rfl rfl rfl
 
 theorem keep_setPend {s : St} {c : Core} (h : Keep s) (hc : s.cur = some c) (a b : Bool) :
     Keep { s with pendSave := a || s.pendSave, pendLoad := b || s.pendLoad, pendFor := some c.id } :=
@@ -1359,25 +1377,34 @@ theorem reset_restarts {s : St} (h : Reachable s) (hpc : s.pc = .input) {c : Cor
 
 /-! ## The fix
 
-`stepF` is the code with these changes (Nim, at a2e038f82):
+`stepF` is what shipped (Nim; the procs are named, line numbers moved):
 
-1. `flush_gb_save` (477) becomes `flush_saves`: flush `app.gb_emu`'s
-   `mbc_save` *and* `app.gba_emu.storage.write_save()`, the latter in
-   `try: … except IOError, OSError:` (and the same `try` in gba.nim
-   `handle_saves` 1530-1532, as `mbc_save` already has), so a read-only
-   folder is a notice, not a crash. Called where `flush_gb_save` is (702, 2606).
-2. `load_rom` (694): validate before touching anything: the ROM file is at
-   least 0x150 bytes (GB) / 0xC0 (GBA), and `new_gb`/`new_gba` + `post_init`
-   run inside `try … except CatchableError` into locals; on failure show a
-   notice and return with the old game running. Only then: service a pending
-   Quick Save (`if app.pending_save: process_pending_state()` restricted to the
-   save), `link_auto_stop(); link_cancel_setup(); teardown_netlink()`
-   (forward-declared: they are defined at 1806-1957), `flush_saves()`, swap
-   the cores, and `app.save_states.mark_stale(); app.save_states.notice = ""`.
-3. Reset (1371, 1648) loads `app.cur_path`, set by `load_rom` on success,
-   instead of `app.cfg.recents[0]`.
-4. (Belt and braces, not needed by the proofs:) `finish_link` returns false
-   unless `link_ready()`.
+1. `flush_gb_save` became `flush_saves`, which calls `flush_batteries`
+   (`frontend/game_load.nim`): GB `mbc_save` *and* the GBA
+   `storage.write_save()`. Both catch a failed write themselves
+   (`SavePersistence`'s fix: `save_error`, the battery notice), so a folder
+   dingbat cannot write is a notice, not a crash, per frame, at a switch and
+   at quit (`flushX true`; `frameX true` models it as caught).
+2. `load_rom`: a missing file or a zip with no ROM returns with a notice
+   before anything else. Then `flush_saves()` (before the new core reads the
+   `.sav`: a Reset reloads the same file), then `build_core` builds and
+   post-inits the new core into a value of its own, refusing a GB file under
+   0x8000 bytes or a GBA file under 0xC0 before a constructor indexes into it,
+   and catching `CatchableError`. Refused: a notice, and the old game keeps
+   running, flushed (`gameOf r = none`, the state after `flushCur`). Only
+   then: `link_auto_stop(); link_cancel_setup();
+   teardown_netlink("another game was loaded")` (forward-declared; it
+   finishes a frame the link left torn, which `NetLink` models and this
+   machine's frames never are), a pending Quick Save is saved from the
+   outgoing core (`savePending`), `flush_saves()` again (what that finished
+   frame wrote), the cores swap, `app.cur_path` is set, and
+   `app.save_states.mark_stale()`, which also drops its notice (`refresh`).
+3. Reset (menu and Ctrl+R) is `reset_game`: `load_rom(app.cur_path)`.
+4. After the loop: `link_auto_stop(); link_cancel_setup(); teardown_netlink()`,
+   then `flush_saves()` (`exitX true`).
+
+`finish_link` refusing unless `link_ready()` is `NetLink`'s fix; these proofs
+do not need it (the link is torn down before any GB core is swapped in).
 -/
 
 structure Safe (s : St) : Prop where
@@ -1512,6 +1539,16 @@ theorem safe_refresh {s : St} (h1 : s.crashed = false) (h2 : s.lost = false)
   grid := fun _ => by rw [refresh_shows, refresh_cur]
   seen := by unfold refresh; split <;> exact h6
 
+/-- The fixed flush touches only battery files and the core's dirty flag. -/
+theorem safe_flushCur_true {s : St} (h : Safe s) : Safe (flushCur true s) := by
+  unfold flushCur
+  split
+  · rename_i c hc
+    split
+    · exact safe_eqs h (by simp [hc, flushX_key]) rfl rfl rfl rfl rfl rfl rfl
+    · exact h
+  · exact h
+
 set_option linter.unusedSimpArgs false in
 /-- The fixed `load_rom` from a safe state lands in a safe state. -/
 theorem safe_loadRomF {s : St} (p : Path) (h : Safe s) : Safe (loadRomX true s p) := by
@@ -1524,7 +1561,7 @@ theorem safe_loadRomF {s : St} (p : Path) (h : Safe s) : Safe (loadRomX true s p
       dsimp only
       simp only [ite_true]
       split
-      · exact safe_same h rfl rfl rfl rfl rfl rfl rfl rfl
+      · exact safe_flushCur_true (safe_same h rfl rfl rfl rfl rfl rfl rfl rfl)
       · rename_i g hg
         have ho := h.noorphan
         have hcr := h.nocrash
@@ -1547,10 +1584,13 @@ theorem finishLink_gba {s : St} (h : isGba s = true) :
   · rename_i c hc; rw [hc] at h; simp [h]
   · rename_i hc; rw [hc] at h; cases h
 
-theorem safe_exitF {s : St} (h : Safe s) : Safe (exitX true s) := by
+/-- The old exit (flush, then done) from a safe state. -/
+theorem safe_exit_flush {s : St} (h : Safe s) :
+    Safe (let s1 := flushCur true s
+          { s1 with pc := .done, lost := s1.lost || dirtyW s1.cur || dirtyW s1.orphan }) := by
   have ho := h.noorphan
   have hl := h.nolost
-  unfold exitX flushCur
+  unfold flushCur
   cases hc : s.cur with
   | none =>
     exact safe_same h rfl rfl (by simp [hc, hl, ho, dirtyW]) rfl rfl rfl rfl rfl
@@ -1558,6 +1598,15 @@ theorem safe_exitF {s : St} (h : Safe s) : Safe (exitX true s) := by
     refine safe_eqs h (by simp [hc, flushX_key]) rfl ?_ rfl rfl rfl rfl rfl
     simp [hl, ho, dirtyW]
     exact flushX_true_clean' _ _
+
+theorem safe_teardown {s : St} (h : Safe s) : Safe (teardown s) :=
+  ⟨h.nocrash, by simp [teardown, h.nolost, h.noorphan, dirtyW], rfl,
+    fun hk => absurd rfl hk, h.grid, h.seen⟩
+
+theorem safe_exitF {s : St} (h : Safe s) : Safe (exitX true s) := by
+  unfold exitX
+  simp only [ite_true]
+  exact safe_exit_flush (safe_teardown h)
 
 theorem safe_bodyF {s : St} (e : Ev) (h : Safe s) : Safe (body true s e) := by
   cases e with
@@ -1758,8 +1807,6 @@ theorem fixF_safe {s : St} (h : ReachableF s) : Safe s := by
   | init rs => exact safe_init rs
   | step e _ ih => exact safe_stepF e ih
 
-/-- With the fix, Reset restarts the running game (whatever became of
-`recents`), and the fresh core is the one the loop runs. -/
 theorem savePending_nextId (s : St) : (savePending s).nextId = s.nextId := by
   unfold savePending; split
   · split <;> rfl
@@ -1776,6 +1823,8 @@ theorem refresh_link (s : St) : (refresh s).link = s.link := by
 theorem driven_of_link_idle {t : St} (h : t.link = .idle) : driven t = t.cur := by
   unfold driven; rw [h]; rfl
 
+/-- With the fix, Reset restarts the running game (whatever became of
+`recents`), and the fresh core is the one the loop runs. -/
 theorem resetF_restarts {s : St} (h : ReachableF s) (hpc : s.pc = .input) {c : Core}
     (hc : s.cur = some c) (hp : ∀ p, s.curPath = some p → s.present p = true) :
     ∃ c', (stepF s .ctrlR).cur = some c' ∧ c'.game = c.game ∧ c'.rom = c.rom ∧
@@ -1791,15 +1840,15 @@ theorem resetF_restarts {s : St} (h : ReachableF s) (hpc : s.pc = .input) {c : C
   rw [refresh_cur]
   refine ⟨_, rfl, rfl, rfl, ?_, ?_⟩
   · dsimp only [swapIn]
-    rw [dropCur_nextId, flushCur_nextId]
-    show (savePending _).nextId ≠ c.id
-    rw [savePending_nextId]
+    rw [dropCur_nextId, flushCur_nextId, savePending_nextId]
+    show (flushCur true _).nextId ≠ c.id
+    rw [flushCur_nextId]
     exact Nat.ne_of_gt hid
-  · have hl : (refresh (swapIn (dropCur (flushCur true (teardown (savePending
-        { s with present := upd s.present c.rom true })))) p c.rom c.game)).link = .idle := by
+  · have hl : (refresh (swapIn (dropCur (flushCur true (savePending (teardown (flushCur true
+        { s with present := upd s.present c.rom true }))))) p c.rom c.game)).link = .idle := by
       rw [refresh_link]
       show (dropCur _).link = .idle
-      rw [dropCur_link, flushCur_link]
+      rw [dropCur_link, flushCur_link, savePending_link]
       rfl
     rw [driven_of_link_idle hl, refresh_cur]
     rfl
@@ -1840,6 +1889,10 @@ theorem regress_link_setup_crash_after_gb_switch :
                         [idle, .pend, .drop .cGb, .endInput, .service true])
     s.crashed = false ∧ s.link = .idle := by decide
 
+theorem regress_quit_leaves_link_up :
+    let s := runF init (linkA ++ iter idle [.quit] [])
+    s.pc = .done ∧ s.link = .idle ∧ s.lost = false := by decide
+
 theorem regress_save_states_grid_stale_delete :
     let s := runF init (iter idle [.drop .bGba] [.ssOpen, .ssSave .s1, .ssClose] ++
                         iter idle [.drop .aGba] [.ssOpen, .ssSave .s1] ++
@@ -1860,9 +1913,12 @@ theorem regress_quick_save_dropped_by_switch :
 The identity bugs are not in `load_rom`'s control flow but in the names.
 Keying state files by the ROM identity the state header already checks
 (`states/<file name>-<rom_identity as hex>.state`, falling back to the old
-name for loading), and the zip cache by `absolutePath(zip_path)` hashed with a
-stable function (crc32, not `hashes.hash`, whose value is the standard
-library's to change), would give: -/
+name for loading; `SavePersistence`'s fix) gives `stateKeyF`. The zip cache
+shipped keyed by crc32 of the zip's canonical path (`zip_cache_dir`: relative
+parts and symlinks resolved; not `hashes.hash`, whose value is the standard
+library's to change), adopting the folder an earlier build made for the same
+zip; that is `zipKeyF`. Same stem, other extension (`bug_battery_shared_by_stem`)
+is left as every emulator has it. -/
 
 def stateKeyF (p : Path) : StKey × Option Game := (stateKey p, gameOf p)
 def zipKeyF : Path → Option Path
