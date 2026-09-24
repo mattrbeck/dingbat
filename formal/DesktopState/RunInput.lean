@@ -1,13 +1,16 @@
 -- What this models, for formal/anchors.mjs (which lists stale models):
--- @models src/dingbat.nim: handle_input emu_pad_input bound_button_held set_stick_dir set_fast_forward update_rumble render_imgui show_menu_bar update_fps_title load_rom finish_link process_pending_state main
+-- @models src/dingbat.nim: handle_input emu_pad_input push_held_input apply_trigger new_core_takes_held_input update_rumble render_imgui show_menu_bar update_fps_title load_rom finish_link process_pending_state main
+-- @models src/dingbat/frontend/held_input.nim: held take_changes core_replaced bindable_key route_key pad_added pad_removed pad_button pad_stick pad_trigger trigger_held apply_trigger
 -- @models src/dingbat/frontend/keybindings_widget.nim: wants_input key_released apply reset
 -- @models src/dingbat/frontend/controller_widget.nim: wants_input button_released
--- @models src/dingbat/frontend/config_editor.nim: render do_apply do_reset
+-- @models src/dingbat/frontend/config_editor.nim: capturing_keys capturing_buttons render do_apply do_reset
 
 /-
 # Run/pause state and the input path of the desktop app (src/dingbat.nim)
 
-Written against a2e038f82. Line numbers are src/dingbat.nim unless marked.
+Written against a2e038f82. Line numbers are src/dingbat.nim at a2e038f82
+unless marked; Part 1 is the code as it was then. Part 2's fix shipped
+(src/dingbat/frontend/held_input.nim).
 
 ## The loop
 
@@ -86,8 +89,8 @@ skipped).
 * Counters (`frames`, `ranPaused`, `stepReqs`, `quickSaves`, `pops`, ...) are
   ghost state for stating the properties.
 
-The fields `gz gs gright st1 st2` belong to the fixed model (Part 2) only; the
-code as written never sets them.
+The fields `gz gs gright st1 st2 trigFF trigTurbo` belong to the fixed model
+(Part 2) only; the code as written never sets them.
 
 ## Results
 
@@ -113,7 +116,8 @@ code as written never sets them.
   update_rumble (`no_rumble_while_paused`).
 * Part 3: while render_imgui is skipped ImGui's input queue grows without
   bound, and a menu click then waits 2n frames behind n queued taps
-  (`Backlog.click_waits`).
+  (`Backlog.click_waits`). Fixed: the skip drops the queue
+  (`Backlog.regress_click_after_skip`).
 -/
 namespace DesktopState.RunInput
 
@@ -222,6 +226,8 @@ structure App where
   gright : Bool       -- fix only: Right's press reached the game
   st1 : Bool          -- fix only: pad 1's stick holds RIGHT
   st2 : Bool          -- fix only: pad 2's stick holds RIGHT
+  trigFF : Bool       -- fix only: the trigger's pull turned fast forward on
+  trigTurbo : Bool    -- fix only: 2x Speed before that pull
   pc : Phase
 
 structure State where
@@ -241,7 +247,7 @@ def init : State :=
            menuVis := false, winOpen := false, settingsOpen := false, kbTab := true,
            kbVisible := false, ctlVisible := false, kbSel := 0, ctlSel := 0,
            gz := false, gs := false, gright := false, st1 := false, st2 := false,
-           pc := .emu } }
+           trigFF := false, trigTurbo := false, pc := .emu } }
 
 inductive Ev where
   | emulate (due : Bool)          -- emu: the frame / rewind-pop phase, then process_pending_state
@@ -895,35 +901,41 @@ theorem no_rewind_while_linked {s : State} (h : Reach step s) (hr : s.a.rewindin
 theorem no_rumble_while_paused {s : State} (h : Reach step s) (hp : s.a.pc = .present)
     (hr : s.a.rumble = true) : s.a.paused = false := (inv_reach h).rum hp hr
 
-/-! ## Part 2: the fix, designed and proved
+/-! ## Part 2: the fix, designed, proved, and shipped
 
-The fix, in Nim terms (line numbers at a2e038f82):
+What shipped (`src/dingbat/frontend/held_input.nim`, called from handle_input;
+tests/desktop_input_test.nim replays these traces on it):
 
-1. **Releases first, unfiltered.** At the top of the KeyDown/KeyUp arm (before
-   1640), when `not pressed`: if the key is bound, drop it from a new
-   `kb_held: set[Input]`; if it is Grave, `app.rewinding = false`. Then the
-   existing chain runs as before, except that the game branch (1679-1680)
-   only adds to `kb_held` on a press. A release can no longer be eaten by
-   WantCaptureKeyboard, a binding capture or the Cmd branch.
-2. **Shortcuts on the press.** The Cmd branch (1644-1667) acts on
-   `pressed and kev.repeat == 0` instead of on release, so letting go of a
-   held game key while Cmd is down (or SDL's focus-loss release) fires nothing.
-3. **One merge.** A `push_input(inp)` that writes
-   `inp in kb_held or any open pad's bound button (getButton) or any pad's
-   stick direction` to the core, called after every key/button/axis/hotplug
-   event and at the end of load_rom (so a key held across a reset is seen).
-   `stick_dirs` becomes per pad (keyed by instance id); the removal handler
-   drops that pad's entry instead of releasing everything (1723-1727).
-4. **Trigger fast forward** reads every open pad's trigger, clears `turbo`
-   when it engages (the menu's radio), and does not engage while linked.
+1. **Releases first, unfiltered.** `route_key` drops a released key from the
+   held keys (keycode -> the input its press meant) and ends a rewind on
+   Grave's release before it looks at WantCaptureKeyboard, a binding capture
+   or the Cmd bit. A press reaches the game only past those filters.
+2. **Shortcuts on the press.** The Cmd branch acts on a press that is not a
+   key repeat, so letting go of a held game key while Cmd is down (or SDL's
+   focus-loss release) fires nothing.
+3. **One merge.** The keyboard's holds, each pad's button holds and each
+   pad's stick directions are kept apart (per joystick instance id) and the
+   core is told their union after every key/button/axis/hotplug event
+   (`push_held_input`) and at the end of load_rom (`new_core_takes_held_input`,
+   so a key held across a reset is seen). A removed pad takes only its own
+   holds. A pad button feeds the merge even while the Controller capture is
+   recording its release (`padBtnF`).
+4. **Trigger fast forward** (`apply_trigger`) reads every open pad's
+   trigger. It is momentary: a pull turns fast forward on and clears 2x (the
+   menu's radio); its release restores the speed from before the pull, unless
+   the speed was changed during the hold. A pull while fast forward is already
+   on (Tab latched it) or while linked does nothing, nor does its release.
    load_rom re-applies a held trigger.
-5. **Link gating in one place.** Fast Forward / 2x Speed menu items and the
-   trigger check `app.netlink == nil` like Tab; `stepping` (2430) requires
-   `app.netlink == nil`, which covers the menu item and a link that comes up
-   between the request and the frame.
-6. **Closing Settings ends a capture**: in ConfigEditor.render, when `not
-   ed.open`, clear both selections (or set both `visible = false`).
-7. Tab ignores `kev.repeat`.
+5. **Link gating** (the netlink fix round's, modelled here): the Fast Forward /
+   2x Speed menu items check `app.netlink == nil` like Tab; `stepping` requires
+   `app.netlink == nil`, which covers the Frame Advance item and a link that
+   comes up between the request and the frame.
+6. **A capture ends with Settings.** handle_input consults a capture only
+   while `app.ce.open` (`capturing_keys` / `capturing_buttons`);
+   ConfigEditor.render clears both `visible` flags every frame before the tab
+   bar sets them (so a collapsed window captures nothing), and drops both
+   selections in the frame the window is closed.
+7. Tab (and the other toggles) ignore key repeats.
 
 `stepF` is `step` with these changes; the core's bits are recomputed by
 `coreOf` after every event. -/
@@ -959,7 +971,7 @@ def pressF (a : App) (shift rep : Bool) : Key → App
 /-- The filter chain of the fixed arm, after the release has been applied. -/
 def keyF1 (a : App) (cmd shift rep : Bool) (k : Key) (down : Bool) : App :=
   if a.wck then a
-  else if a.kbVisible && decide (a.kbSel > 0) then
+  else if a.settingsOpen && a.kbVisible && decide (a.kbSel > 0) then
     if down then a else { a with kbSel := a.kbSel - 1 }
   else if cmd then
     if down && !rep then shortcutF a k else a
@@ -974,18 +986,29 @@ def keyStepF (s : State) (k : Key) (d : Bool) : State :=
   let ph := s.ph.setKey k d
   { ph := ph, a := keyF s.a ph.kcmd ph.kshift rep k d }
 
-/-- A pad button only feeds the merge (and a capture still records it). -/
+/-- A pad button only feeds the merge (and a capture, while Settings is open,
+still records its release). -/
 def padBtnF (a : App) (down : Bool) : App :=
-  if a.ctlVisible && decide (a.ctlSel > 0) && !down then { a with ctlSel := a.ctlSel - 1 } else a
+  if a.settingsOpen && a.ctlVisible && decide (a.ctlSel > 0) && !down then
+    { a with ctlSel := a.ctlSel - 1 }
+  else a
 
 def trigHeld (ph : Phys) : Bool := (ph.pad1 && ph.p1tr) || (ph.pad2 && ph.p2tr)
 
-/-- 4: the trigger fast forward. -/
+/-- 4: the trigger fast forward (`apply_trigger`); `padFF` is the trigger as
+last applied. -/
 def ffF (ph : Phys) (a : App) : App :=
   let held := trigHeld ph
   if held == a.padFF then a
-  else if held && a.linked then { a with padFF := held }
-  else { a with padFF := held, sync := !held, turbo := if held then false else a.turbo }
+  else if held then
+    if !a.sync || a.linked then { a with padFF := true }
+    else { a with padFF := true, trigFF := true, trigTurbo := a.turbo, sync := false,
+                  turbo := false }
+  else if a.trigFF then
+    if !a.sync then
+      { a with padFF := false, trigFF := false, sync := true, turbo := a.trigTurbo }
+    else { a with padFF := false, trigFF := false }
+  else { a with padFF := false }
 
 def setStF (a : App) (p on : Bool) : App :=
   if p then { a with st1 := on } else { a with st2 := on }
@@ -996,7 +1019,10 @@ def coreOf (ph : Phys) (a : App) : App :=
            cR := a.gs,
            cRight := a.gright || (ph.pad1 && ph.p1r) || (ph.pad2 && ph.p2r) || a.st1 || a.st2 }
 
-def loadF (a : App) : App := { loadA a with sync := !a.padFF }
+/-- load_rom, then `new_core_takes_held_input`: the fresh core runs at normal
+speed and the trigger is seen afresh, so one still pulled engages again. -/
+def loadF (ph : Phys) (a : App) : App :=
+  ffF ph { loadA a with padFF := false, trigFF := false }
 
 /-- 5: a step request is spent without a frame when linked. -/
 def emulateF (a : App) (due : Bool) : App :=
@@ -1012,7 +1038,7 @@ def stepF0 (s : State) : Ev → State
   | .padRemove p =>
     let ph := (s.ph.rest p).setConn p false
     { ph := ph, a := ffF ph (setStF s.a p false) }
-  | .drop | .menuReset => { s with a := loadF s.a }
+  | .drop | .menuReset => { s with a := loadF s.ph s.a }
   | .menuStep => if s.a.linked then s else step s .menuStep
   | .menuFF => if s.a.linked then s else step s .menuFF
   | .menu2x => if s.a.linked then s else step s .menu2x
@@ -1160,7 +1186,8 @@ theorem emulateF_rpl (a : App) (due : Bool) :
 theorem ffF_radio (ph : Phys) (a : App) (h : ¬ (a.sync = false ∧ a.turbo = true)) :
     ¬ ((ffF ph a).sync = false ∧ (ffF ph a).turbo = true) := by
   unfold ffF
-  cases h1 : trigHeld ph <;> cases h2 : a.padFF <;> cases h3 : a.linked <;> simp_all
+  cases h1 : trigHeld ph <;> cases h2 : a.padFF <;> cases h3 : a.linked <;>
+    cases h4 : a.sync <;> cases h5 : a.trigFF <;> simp_all
 
 theorem ffF_frame (ph : Phys) (a : App) :
     (ffF ph a).rewinding = a.rewinding ∧ (ffF ph a).linked = a.linked ∧
@@ -1169,7 +1196,8 @@ theorem ffF_frame (ph : Phys) (a : App) :
     (ffF ph a).gright = a.gright ∧ (ffF ph a).st1 = a.st1 ∧ (ffF ph a).st2 = a.st2 ∧
     (ffF ph a).ranPausedLinked = a.ranPausedLinked := by
   unfold ffF
-  cases h1 : trigHeld ph <;> cases h2 : a.padFF <;> cases h3 : a.linked <;> simp_all
+  cases h1 : trigHeld ph <;> cases h2 : a.padFF <;> cases h3 : a.linked <;>
+    cases h4 : a.sync <;> cases h5 : a.trigFF <;> simp_all
 
 theorem menuFFA_radio (a : App) (h : ¬ (a.sync = false ∧ a.turbo = true)) :
     ¬ ((menuFFA a).sync = false ∧ (menuFFA a).turbo = true) := by
@@ -1282,8 +1310,12 @@ theorem invF0_step {s : State} {e : Ev} (h : InvF0 s) (he : en s e = true) :
     · exact ⟨h1, h2, h3, h4, h5, h6, menu2xA_radio s.a h7, h8, h9, h10, h11⟩
   | drop | menuReset =>
     obtain ⟨h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11⟩ := h
-    refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;> simp [stepF0, loadF, loadA] <;>
-      simp_all
+    have hr := ffF_radio s.ph { loadA s.a with padFF := false, trigFF := false } (by simp [loadA])
+    obtain ⟨e1, e2, e3, e4, e5, e6, e7, e8, e9, e10, e11⟩ :=
+      ffF_frame s.ph { loadA s.a with padFF := false, trigFF := false }
+    refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;>
+      simp only [stepF0, loadF, e1, e2, e3, e4, e5, e6, e7, e8, e9, e10, e11] <;>
+      simp_all [loadA]
   | _ =>
     obtain ⟨h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11⟩ := h
     simp only [en, Bool.and_eq_true, beq_iff_eq] at he
@@ -1423,6 +1455,62 @@ theorem regress_menu_frame_advance_while_linked :
                       .menuPause] ++ back ++ render ++ [.menuStep] ++ back)
       (fun s => s.a.linked && s.a.paused && s.a.ranPausedLinked == 0) = true := by decide
 
+/-- Grave let go with Cmd down: rewind ends and the game runs on. -/
+theorem regress_rewind_sticks_after_cmd :
+    witnesses stepF ([.emulate true, .key .bq true, .key .cmd true, .key .bq false,
+                      .key .cmd false] ++ idle ++ idle ++ idle)
+      (fun s => !s.a.rewinding && decide (1 < s.a.frames)) = true := by decide
+
+/-- The capture still takes Z's release as the binding, and A is let go. -/
+theorem regress_binding_capture_swallows_release :
+    witnesses stepF ([.emulate true, .mouseMove, .key .z true] ++ render ++ [.openSettings] ++ back
+                     ++ render ++ [.pickKey 10] ++ back ++ [.key .z false, .drained])
+      (fun s => !stuck s && s.a.kbSel == 9) = true := by decide
+
+theorem regress_closed_settings_keeps_capturing_buttons :
+    witnesses stepF ([.emulate true, .mouseMove] ++ render ++ [.openSettings, .switchTab] ++ back
+                     ++ render ++ [.pickBtn 10, .closeSettingsX] ++ back
+                     ++ [.padAdd true, .padBtn true false true])
+      (fun s => !s.a.settingsOpen && s.ph.p1a && s.a.cA) = true := by decide
+
+theorem regress_tab_repeat :
+    witnesses stepF [.emulate true, .key .tab true, .key .tab true, .drained]
+      (fun s => s.ph.ktab && !s.a.sync) = true := by decide
+
+/-- The trigger is momentary over a fast forward Tab latched... -/
+theorem regress_trigger_release_keeps_tab_ff :
+    witnesses stepF [.emulate true, .padAdd true, .key .tab true, .key .tab false,
+                     .trig true true, .trig true false, .drained]
+      (fun s => !s.a.sync && !s.a.padFF) = true := by decide
+
+/-- ...and over 2x Speed, which its release brings back. -/
+theorem regress_trigger_release_restores_2x :
+    witnesses stepF [.emulate true, .padAdd true, .key .shift true, .key .tab true,
+                     .trig true true, .trig true false, .drained]
+      (fun s => s.a.sync && s.a.turbo) = true := by decide
+
+theorem regress_trigger_ff_while_linked :
+    witnesses stepF ([.emulate true, .padAdd true, .drained, .linkUp, .post false,
+                      .present false, .title false, .emulate true, .trig true true])
+      (fun s => s.a.linked && s.a.sync) = true := by decide
+
+/-- A trigger held across a reset fast-forwards the fresh core. -/
+theorem regress_trigger_held_across_reset :
+    witnesses stepF ([.emulate true, .padAdd true, .trig true true, .mouseMove] ++ render
+                     ++ [.menuReset])
+      (fun s => !s.a.sync && s.a.trigFF) = true := by decide
+
+/-- **Fixed: with Settings closed, no key or pad button goes to a capture**,
+whatever the selections and `visible` flags still say. -/
+theorem fix_closed_settings_never_captures (s : State) (h : s.a.settingsOpen = false)
+    (k : Key) (p dp d : Bool) :
+    (stepF s (.key k d)).a.kbSel = s.a.kbSel ∧
+    (stepF s (.padBtn p dp d)).a.ctlSel = s.a.ctlSel := by
+  constructor
+  · simp only [stepF, stepF0, keyStepF, keyF, keyF1, coreOf]
+    cases k <;> cases d <;> simp [relF, shortcutF, pressF, h] <;> (repeat' split) <;> simp
+  · simp [stepF, stepF0, padBtnF, coreOf, h]
+
 /-! ## Part 3: ImGui's input queue while render_imgui is skipped
 
 `ImGui_ImplSDL2_ProcessEvent` (1631) runs for every SDL event, whatever
@@ -1548,6 +1636,39 @@ theorem click_waits (n : Nat) :
       | zero => intro q; rfl
       | succ k ih => intro q; rw [show 1 + (k + 1) = (1 + k) + 1 by omega]; simp only [iter]; rw [ih]
     rw [e, h]
+    simp [frame, drain, click]
+
+/-! ### The fix: render_imgui's skip branch
+
+While render_imgui skips igNewFrame it drops ImGui's queue on every skipped
+present (`ImGuiIO_ClearEventsQueue`), and on the first one also clears the
+key and mouse state (`ClearInputKeys` / `ClearInputMouse`), since a release
+may be among what is dropped. Checked against imgui 1.92.4 headless: after
+3000 queued taps the click is seen on the 2nd frame after the menu comes
+back (the move's frame, then the click's), against the 6002nd before. -/
+
+def skipF (q : Q) : Q := { q with queue := [], zDown := false, mouseDown := false }
+
+theorem iter_one_add (k : Nat) (q : Q) : iter (1 + k) q = frame (iter k q) := by
+  induction k generalizing q with
+  | zero => rfl
+  | succ k ih =>
+    rw [show 1 + (k + 1) = (1 + k) + 1 by omega]; simp only [iter]; rw [ih]
+
+/-- **Fixed:** however long the keyboard-only session was, a click that
+follows the k taps made since the last skipped present (one loop iteration's
+worth) is seen on frame 2k + 1. -/
+theorem regress_click_after_skip (q : Q) (hc : q.clicked = false) (k : Nat) :
+    (iter (2 * k) { skipF q with queue := taps k ++ click }).clicked = false ∧
+    (iter (2 * k + 1) { skipF q with queue := taps k ++ click }).clicked = true := by
+  have e : ({ skipF q with queue := taps k ++ click } : Q) =
+      { queue := taps k ++ click, zDown := false, mouseDown := false, clicked := false,
+        frames := q.frames } := by
+    cases q; simp_all [skipF]
+  rw [e]
+  constructor
+  · rw [iter_taps]
+  · rw [show 2 * k + 1 = 1 + 2 * k by omega, iter_one_add, iter_taps]
     simp [frame, drain, click]
 
 end Backlog
