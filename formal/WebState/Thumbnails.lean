@@ -1,3 +1,6 @@
+-- What this models, for formal/anchors.mjs (which lists stale models):
+-- @models web/index.js: addRecentRom applyLibFilter buildTileMenuHead closeThumbsModal closeTileMenu deleteGameEverywhere deleteGameLocalData deleteKeys frameBlobFromFb getRomArt getRomFrame launchRom loadRom openThumbsOffer openTileMenu persistAutoState refreshHomeRecent removeGameFromDevice renameGame runThumbnailBatch setRomsSort showMainMenu storeLastFrame thumbsPictureOne togglePause unloadGame updatePausedCard writeSyncBytes on:visibilitychange on:contextmenu
+
 /-
 # Thumbnails and library pictures (web/index.js)
 

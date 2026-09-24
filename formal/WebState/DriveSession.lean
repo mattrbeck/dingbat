@@ -1,3 +1,6 @@
+-- What this models, for formal/anchors.mjs (which lists stale models):
+-- @models web/index.js: adoptDriveAccount armDriveRenewOnGesture clearDriveToken driveEnrolled driveFetch driveLinked driveListMap driveSessionGuard driveUploadFile ensureDriveSignedIn flushSync flushSyncInner gdriveAcquireToken gdriveConnect gdriveFetchEmail gdriveSignOut hasUserActivation loadGisScript localSyncFiles markDelete markGameUpload markUpload parseDriveFileName pendingCount pullSync pullSyncInner readDriveLibrary readSyncBytes refreshSyncStatus rememberDriveEmail renewDriveToken resumeDriveOnBoot runExclusive runFullSync saveSyncState scheduleFlush setSyncStatus startSyncTriggers syncActive syncPollTick writeDriveLibrary on:online on:offline on:visibilitychange
+
 /-
 # Google Drive sync: the upload queue and the session (web/index.js)
 

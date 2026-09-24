@@ -69,5 +69,16 @@ clean for the proofs to mean anything.
 
 A model is only as good as its match with the JS. Each file's header lists
 what it abstracts away and why that does not affect the stated properties.
-When `web/index.js` changes one of the cited functions, the model needs
-re-reading against it.
+
+The models are an audit's snapshot, not a contract every commit keeps; the
+regression tests are that. Every bug these models found has a test in
+`web/tests/` that replays its trace against the real `web/index.js`, and those
+run on every push. `lean.yml` only builds the proofs when `formal/` changes.
+
+To start the next audit, run `node formal/anchors.mjs`. Each model's
+`-- @models` lines name the JS functions it describes, and `anchors.json`
+holds a token hash of each one as it was when the model last matched the
+code; comments and whitespace do not count. The script lists the models whose
+functions have changed since. Model those machines again from the current
+code with the method above, turn any new counterexample into a fix and a test,
+then `node formal/anchors.mjs --update`.

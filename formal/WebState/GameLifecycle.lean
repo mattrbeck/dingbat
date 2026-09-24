@@ -1,3 +1,7 @@
+-- What this models, for formal/anchors.mjs (which lists stale models):
+-- @models web/index.js: addRecentRom applyStateBytes autoStateMatchesSave captureStateBytes dbPutRoomy ensureRuntimeReady flushSoloSave getRomBytes handleRomFile handleZipFile installSave isRomLoaded launchRom liveSaveSig loadRom markUpload nextLoadGen offerAutoResume persistAutoState persistSave pullSyncInner resumeGame setPausedCardShown showMainMenu storeLastFrame touchRecent unloadGame updatePausedCard writeSyncBytes on:drop on:visibilitychange
+-- @models web/netplay.js: launchNetRom
+
 /-
 # The game lifecycle: loading, switching, closing and resuming a game
 

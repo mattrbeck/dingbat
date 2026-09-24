@@ -141,6 +141,28 @@ real clock skew between them.
       steal a fresh import. Check once both devices run the new build, and
       do not judge the rename cases until they do.
 
+## State-machine fix round (formal/FINDINGS.md)
+
+Every trace is replayed in `web/tests/`; these need a real account, a real
+core or two real devices.
+
+- [ ] **Switch games, second has no save**: play A until it saves in game,
+      go home, tap B (never played here). B starts with no save, and A's
+      save is still A's on the other device after a sync.
+- [ ] **Rename and rename back** while a second device syncs between the
+      two: files stop moving on Drive, no "renamed on another device" toasts
+      on either device, and a save made afterwards reaches the other device.
+- [ ] **Delete while its save uploads**: delete a game seconds after saving
+      in it. It stays gone on both devices after two syncs each.
+- [ ] **Account switch mid-sync**: sign out during the first big upload,
+      sign in as another account. The second account's library shows none of
+      the first's games or deletions.
+- [ ] **Update in one tab** while another tab plays: the playing tab keeps
+      its game and offers "Reload"; the reload lands on the new build.
+- [ ] **Mixed builds**: one device on the previous build. Renames and
+      deletes from each still reach the other; a second `library` file, if
+      the old device makes one, is merged away by the new device.
+
 ## Drive sync: renames
 
 Engine paths unit-tested (`web/tests/sync.test.mjs`, `rename.test.mjs`).

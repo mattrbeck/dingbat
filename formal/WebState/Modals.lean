@@ -1,3 +1,6 @@
+-- What this models, for formal/anchors.mjs (which lists stale models):
+-- @models web/index.js: anyModalOpen askRomWarn buildSyncModal closeRomWarnModal closeSettingsModal closeUpdateModal confirmSuspectRom confirmTombstones handleRomFile openRenameModal openSettingsModal releaseFocus renameGame renameInventory runFullSync settleRomWarn trapFocus on:popstate on:drop
+
 /-
 # Modal focus management and modal plumbing (web/index.js @ dd7ba741f)
 

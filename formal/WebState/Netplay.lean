@@ -1,3 +1,7 @@
+-- What this models, for formal/anchors.mjs (which lists stale models):
+-- @models web/index.js: dbPutRoomy loadRom netActive persistSave
+-- @models web/netplay.js: armManualFallback launchNetRom makeSession manualConfirmGo manualEnter manualPrepare netDismissModal netFail netHoldsCore netShutdown onSigMessage openNetConnect rbConnect rbStartIfReady rbTeardown rbTryInit sigConnect sigRedial startLocalLink startRtc wireChannel
+
 /-
 # Online link play: connection lifecycle (web/netplay.js, web/index.js @ dd7ba741f)
 

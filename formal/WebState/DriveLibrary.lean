@@ -1,3 +1,6 @@
+-- What this models, for formal/anchors.mjs (which lists stale models):
+-- @models web/index.js: addRecentRom allPerGameKeys applyRemoteRename bumpRecentIndex confirmTombstones dbMoveKeys deleteGameAction deleteGameEverywhere downloadGame downloadGameAction driveListAll driveListMap driveUploadFile flushSyncInner getRecentMeta hasAnyLocalRecord localLibrary markUpload mergeLibrary pendingCount pullSyncInner readDriveLibrary renameGame runExclusive touchRecent updateRecent writeDriveLibrary
+
 /-
 # The cross-device library on Google Drive (web/index.js)
 

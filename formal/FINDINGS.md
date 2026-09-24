@@ -1,5 +1,79 @@
 # Findings: web frontend state machines (models against dd7ba741f)
 
+## Status after the fix round (2026-09-23)
+
+Every High and Medium item below is fixed. Each fix has a regression test in
+`web/tests/` that replays the trace against the real `web/index.js` and fails
+on the code before it. The models now describe the fixed code: each fixed
+`bug_*` is a `regress_*` theorem, and the safety invariants are proved over
+every interleaving of the real `step`.
+
+| # | Fixed in | Regression tests |
+|---|---|---|
+| 1, 2, 3, 9 | ceda0c0ab, 2a0ab74a2, 5ae072e5d, 7e20ac602 | game-switch, library-races |
+| 4, 5 | 82828e847, a4884469b | game-switch |
+| 6, 7 | a29fd75a9 | library-races, drive-listing |
+| 8, 10, 11 | 2dfade3a9 | sync-queue-races, drive-session |
+| 12, 14 | 6d3e1a42b, 5e3b4f8ec | run-pause, link-pause |
+| 13, 16 | 5fdef0fc7 | update-flow, sw-install |
+| 15 | 18ee44cc5 | game-switch |
+
+**Low items fixed along the way:**
+- Resume and saves: Resume over an unflushed save, and the quota retry.
+- Remote pause, link end, link setup error, and a load under the Report or
+  Link modal; the netplay wake-lock leak.
+- The thumbnail load-gap pixels.
+- Found by reading: Drive listing paging, the duplicate `library` file, and a
+  delete outranked by its own upload.
+
+**New bugs the models found while modelling the fixed code, now fixed:**
+- A rename chain across devices folding one game into another
+  (`bug_mergeV1_chain_not_idempotent`).
+- A sign-in whose account check failed going on to sync the previous
+  account's queues.
+- A rename's stale copy of the sync state dropping a save queued while its
+  transaction ran.
+- A reset undone by a pull landing mid-download.
+- A clip export begun during a load running on into the new game.
+- A load landing while a rollback session is set up but not yet started.
+- A save import lost to the outgoing persist, or reverted by Resume.
+- Closing a game dropping a paused core's dirty battery RAM.
+- The SIO link path naming its game before its save was in.
+- A Drive-only tile's download overriding a later tap.
+- Shortcuts on the home screen acting on the hidden game (Tab, F5, F8, F9 and
+  Backquote).
+
+**Proved after the fix round:**
+- The merge is idempotent on every input, rename markers included
+  (`DriveLibrary.merge_idem`).
+- No sync crosses a sign-out or an account switch
+  (`DriveSession.Session.Safe`).
+- `save:<g>` only ever holds game g's battery
+  (`SavePersistence.provenance`).
+- The run/pause invariant holds for every event
+  (`RunPause.inv_reachable`).
+
+**Still open, all low:**
+- The Drive spinner with no token and pending work, and one denied popup
+  counting as two strikes (`DriveSession`).
+- Modals: the nested focus trap, the orphaned suspect-ROM promise, and the
+  swallowed rename error (`Modals`).
+- The manual-code retry, and a cancelled dial marking the server down
+  (`Netplay`).
+- Orphan `frame:` records, and the batch overwriting a pulled frame
+  (`Thumbnails`).
+- A force update's copy into the live cache is not atomic (`ServiceWorker`).
+- The merge is still non-commutative on a same-millisecond rename tie and
+  non-associative on `imp`.
+- Two devices uploading the same save at once can leave duplicate save files
+  on Drive.
+- A set-up rollback session is not ended when 2P link mode starts; this is
+  probably unreachable.
+
+The rest of this file is the original audit, as found at dd7ba741f.
+
+---
+
 Every item below is a `bug_*` theorem in `WebState/`: a concrete event trace from
 the initial state, run through the model and checked by `decide`. Each trace was
 then re-read against the JS for browser ordering (IndexedDB issue order, the

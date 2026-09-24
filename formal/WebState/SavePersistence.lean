@@ -1,3 +1,6 @@
+-- What this models, for formal/anchors.mjs (which lists stale models):
+-- @models web/index.js: applyImportedSave applyStateBytes autoStateMatchesSave dbPutRoomy deleteGameAction deleteGameEverywhere deleteKeys deleteSaveData detachLoadedGame evictOldestRom flushSoloSave installSave isRomLoaded launchRom liveSaveSig loadFromSlot loadRom markDelete markUpload offerAutoResume persistAutoState persistSave resetCurrentSaveFile resetGameAction resetGameSaves resumeGame retireSavePuts saveToSlot showMainMenu sigOfSave storeLastFrame unloadGame writeSyncBytes on:visibilitychange
+
 /-
 # Battery-save and save-state persistence (web/index.js)
 

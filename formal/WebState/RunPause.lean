@@ -1,3 +1,7 @@
+-- What this models, for formal/anchors.mjs (which lists stale models):
+-- @models web/index.js: abortRetroClip closeClipScrubber closeReportModal closeRewindScrubber emulationActive finishRetroClip launchRom loadRom resumeGame shortcutKeyHandler showMainMenu startClipExport syncWakeLock togglePause unloadGame on:visibilitychange on:pointerup
+-- @models web/netplay.js: acquireWakeLock closeNetModal netDismissModal netFail netShutdown openNetConnect rbConnect rbStartIfReady rbTeardown releaseWakeLock
+
 /-
 # Run/pause state of the emulator (web/index.js, web/netplay.js)
 

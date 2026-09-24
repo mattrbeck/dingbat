@@ -1,3 +1,7 @@
+-- What this models, for formal/anchors.mjs (which lists stale models):
+-- @models web/index.js: applyUpdate checkForUpdate fullResetReload maybeCheckForUpdate showUpdateButton on:visibilitychange
+-- @models web/sw.js: fetchAndCache installAssets probeVersion reinstall on:activate on:fetch on:install on:message
+
 /-
 # Service worker, update check and update flow (web/sw.js, web/index.js)
 
