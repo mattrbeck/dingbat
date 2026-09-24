@@ -1,4 +1,4 @@
-import std/[os, hashes, math, parseopt, strformat, strutils, tables, times, algorithm]
+import std/[os, hashes, math, options, parseopt, strformat, strutils, tables, times, algorithm]
 import std/[net, nativesockets]
 import sdl2 except init, quit, glBindTexture, glUnbindTexture
 import sdl2/joystick
@@ -264,8 +264,9 @@ proc print_help() =
   echo "  -h, --help       Show this help message"
   echo "  --hle            Use HLE BIOS (no external BIOS file needed)"
   echo "  --hle-after-bios Run real BIOS for init, then use HLE for SWI calls"
-  echo "  --run-bios       Run the BIOS on startup"
-  echo "  --skip-bios      Skip the BIOS on startup (default)"
+  echo "  --run-bios       Run the BIOS intro"
+  echo "  --skip-bios      Skip the BIOS intro"
+  echo "  (BIOS options and a BIOS argument hold for this run; Settings keep theirs)"
   echo "  --version        Print version"
   echo ""
   echo "Network link (2-player, GBA only — run the same ROM on both sides):"
@@ -431,6 +432,8 @@ type AppState = ref object
   # Set when a save state is refused; render_state_notice draws it.
   state_notice:      string
   state_notice_hint: string
+  # Command-line BIOS choices: for this run only, never written to cfg
+  boot_overrides:  BootOverrides
   rewind:          Rewind
   rewinding:       bool    # true while the rewind key is held
   last_rewind_pop: uint32
@@ -650,7 +653,8 @@ proc input_log_start(rom_path: string) =
     return
   input_log.writeLine "session " & $getTime().toUnix
   input_log.writeLine "rom " & rom_path
-  input_log.writeLine &"bios run_bios={app.cfg.run_bios} use_hle={app.cfg.use_hle} hle_after_bios={app.cfg.hle_after_bios}"
+  let g = app.gba_emu
+  input_log.writeLine &"bios run_bios={g.run_bios} use_hle={g.use_hle} hle_after_bios={g.hle_after_bios}"
   app.gba_emu.enable_deterministic_rtc(INPUT_LOG_RTC_EPOCH)
   input_log.writeLine &"rtc {INPUT_LOG_RTC_EPOCH}"
   input_log.flushFile()
@@ -704,12 +708,13 @@ proc load_rom(path: string) =
     if rom_path == "": return
   flush_gb_save()
   let ext = rom_path.splitFile().ext.toLowerAscii()
+  let boot = boot_settings(app.cfg, app.boot_overrides)
   if ext in [".gb", ".gbc"]:
     # Speed mode forces the cheaper scanline renderer; the FIFO preference
     # is remembered and returns when it is switched off.
     app.gb_emu = new_gb(app.cfg.gb_bootrom_path, rom_path,
                         app.cfg.gb_fifo and not app.cfg.speed_mode,
-                        app.cfg.headless, app.cfg.run_bios)
+                        app.cfg.headless, boot.gb_run_bios)
     # Super Game Boy is opt-in from config but header-gated in the core: a
     # cart without the SGB flag, or one that is CGB-capable, gets nothing.
     app.gb_emu.sgb_requested = app.cfg.sgb_enable
@@ -722,8 +727,9 @@ proc load_rom(path: string) =
     app.dbg = nil
     app.gb_dbg = new_gb_debug(app.gb_emu)
   else:
-    let bios = app.cfg.bios_path
-    app.gba_emu = new_gba(bios, rom_path, app.cfg.run_bios, app.cfg.use_hle, app.cfg.hle_after_bios)
+    if boot.note.len > 0: echo boot.note
+    app.gba_emu = new_gba(boot.bios_path, rom_path, boot.run_bios, boot.use_hle,
+                          boot.hle_after_bios)
     app.gba_emu.post_init()
     input_log_start(rom_path)
     app.gb_emu = nil
@@ -2137,12 +2143,8 @@ proc update_link_auto() =
 # ──────────────────────────── Main ────────────────────────────
 
 proc main() =
-  var bios_path    = ""
   var rom_path     = ""
-  var cli_run_bios = false
-  var has_bios_arg = false
-  var use_hle        = false
-  var hle_after_bios = false
+  var boot_ov: BootOverrides
   var listen_port    = 0
   var connect_to     = ""
   var netlink_delay  = 0
@@ -2158,10 +2160,10 @@ proc main() =
       case p.key
       of "h", "help":  print_help(); system.quit(0)
       of "version":    echo VERSION; system.quit(0)
-      of "hle":            use_hle = true
-      of "hle-after-bios": hle_after_bios = true
-      of "run-bios":       cli_run_bios = true
-      of "skip-bios":  cli_run_bios = false
+      of "hle":            boot_ov.use_hle = true
+      of "hle-after-bios": boot_ov.hle_after_bios = true
+      of "run-bios":       boot_ov.run_bios = some(true)
+      of "skip-bios":      boot_ov.run_bios = some(false)
       of "listen":
         # Values may be attached (--listen:PORT) or space-separated (--listen
         # PORT); pull the next token in the latter case, like the harness.
@@ -2189,22 +2191,13 @@ proc main() =
   case pos_args.len
   of 0: discard
   of 1: rom_path  = pos_args[0]
-  of 2: bios_path = pos_args[0]; rom_path = pos_args[1]; has_bios_arg = true
+  of 2: boot_ov.bios_path = pos_args[0]; rom_path = pos_args[1]
   else: echo "Too many arguments."; system.quit(1)
 
+  # The command-line BIOS choices stay in app.boot_overrides (load_rom's
+  # boot_settings applies them); written into cfg, the next save_config
+  # would have made them permanent.
   let cfg = load_config()
-  if use_hle:
-    cfg.use_hle = true
-    cfg.run_bios = false
-  if hle_after_bios:
-    cfg.hle_after_bios = true
-    cfg.run_bios = true
-  if has_bios_arg:
-    cfg.bios_path = bios_path
-    # An explicit CLI BIOS implies real-BIOS mode unless --hle* was passed
-    if not use_hle and not hle_after_bios:
-      cfg.use_hle = false
-  if cli_run_bios: cfg.run_bios = true
 
   when defined(windows):
     # Per-monitor DPI awareness (SDL >= 2.24): render at native pixels
@@ -2297,7 +2290,9 @@ proc main() =
     last_mouse_tick: getTicks(),
     rewind:          new_rewind(),
     link_port:       LINK_DEFAULT_PORT,
+    boot_overrides:  boot_ov,
   )
+  ce.bios.overrides = describe(boot_ov)
   # Save States widget: the app owns the files, textures and core, so the
   # widget just calls back. Save/Load run synchronously here — render_imgui is
   # always reached at a frame boundary (right after process_pending_state).

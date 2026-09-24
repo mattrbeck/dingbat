@@ -114,8 +114,10 @@ jobs:
         shell: bash
         run: ./dingbat_desktop_input_test
       - name: Desktop settings file
-        # load(save(cfg)) = cfg for every stored setting, including key
-        # bindings with no config-file name (keypad keys, non-US letters).
+        # load(save(cfg)) = cfg for every stored setting (keypad keys
+        # included); two windows' saves merge; a damaged file is moved
+        # aside; an unwritable folder never raises; CLI BIOS options are
+        # not saved; real BIOS / intro without a file fall back to HLE.
         shell: bash
         run: ./dingbat_desktop_settings_test
       - name: Clip-capture replay determinism

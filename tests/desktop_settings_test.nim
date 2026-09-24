@@ -1,10 +1,12 @@
-## Unit tests for the desktop app's settings file (src/dingbat/common/config.nim).
+## Unit tests for the desktop app's settings (src/dingbat/common/config.nim).
 ## Whatever the Settings window can store must come back from the file
-## unchanged: a keypad key or a non-US letter bound to an input used to be
-## written as a blank key and dropped on the next start, leaving that input
-## with no key at all.
+## unchanged (a keypad key bound to an input used to be dropped on the next
+## start); a save must keep what a second dingbat window saved, never
+## overwrite a file it could not read, and never raise; the command line's
+## BIOS options must hold for one run only, and a BIOS mode that needs a
+## file must fall back to HLE when there is none.
 
-import std/[os, tables, tempfiles]
+import std/[os, tables, tempfiles, options]
 import dingbat/common/[config, input]
 
 var failures = 0
@@ -162,6 +164,55 @@ block:
   check cfg.save_error.len == 0, "a later good write clears it"
   save_config_file(cfg, path)
   check cfg.notice.len > 0, "and a new failure is reported again"
+
+echo "Command-line BIOS options hold for one run"
+block:
+  let path = dir / "cli.yml"
+  let bios = dir / "gba_bios.bin"
+  writeFile(bios, newString(0x4000))
+  let chosen = new_config()
+  chosen.bios_path = bios
+  chosen.use_hle = false                 # Settings: real BIOS, with the intro
+  chosen.run_bios = true
+  save_config_file(chosen, path)
+  # `dingbat --hle game.gba`, and that run loads a ROM (which saves)
+  let cfg = load_config_file(path)
+  let boot = boot_settings(cfg, BootOverrides(use_hle: true))
+  check boot.use_hle and not boot.run_bios, "--hle boots HLE without the intro"
+  save_config_file(cfg, path)
+  let next = load_config_file(path)
+  check not next.use_hle and next.run_bios and next.bios_path == bios,
+        "the next start still has the real BIOS the user chose"
+  let skip = boot_settings(next, BootOverrides(run_bios: some(false)))
+  check not skip.run_bios and not skip.use_hle, "--skip-bios skips a saved intro"
+  check boot_settings(new_config(), BootOverrides(run_bios: some(true), bios_path: bios)).run_bios,
+        "--run-bios with a BIOS argument runs the intro"
+  let arg = boot_settings(new_config(), BootOverrides(bios_path: bios))
+  check arg.bios_path == bios and not arg.use_hle, "a BIOS argument means the real BIOS"
+  check describe(BootOverrides(use_hle: true, run_bios: some(false))) == "--hle, --skip-bios",
+        "the Settings window names the overrides"
+
+echo "Real BIOS or the intro without a BIOS file falls back to HLE"
+block:
+  let cfg = new_config()
+  cfg.use_hle = false                     # "Real BIOS", no file set
+  var boot = boot_settings(cfg, BootOverrides())
+  check boot.use_hle and not boot.run_bios and boot.note.len > 0, "real BIOS, no file: HLE, and says why"
+  cfg.use_hle = true
+  cfg.run_bios = true                     # "Run BIOS intro", no file set
+  boot = boot_settings(cfg, BootOverrides())
+  check boot.use_hle and not boot.run_bios and boot.note.len > 0, "intro, no file: skipped, and says why"
+  check boot.gb_run_bios, "the GB boot ROM setting is left alone"
+  cfg.run_bios = false
+  cfg.use_hle = false
+  cfg.hle_after_bios = true               # "Real BIOS init, HLE SWI calls"
+  cfg.bios_path = dir / "moved_away.bin"
+  boot = boot_settings(cfg, BootOverrides())
+  check boot.use_hle and boot.note.len > 0, "BIOS init + HLE, file missing: HLE"
+  cfg.bios_path = dir / "gba_bios.bin"
+  boot = boot_settings(cfg, BootOverrides())
+  check not boot.use_hle and boot.hle_after_bios and boot.note.len == 0, "with the file: as configured"
+  check boot_settings(new_config(), BootOverrides()).note.len == 0, "HLE with no file needs no note"
 
 removeDir(dir)
 

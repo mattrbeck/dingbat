@@ -1,4 +1,4 @@
-import std/[os, json, tables, strutils, algorithm]
+import std/[os, json, tables, strutils, algorithm, options]
 import yaml/tojson
 import input
 import lcd_response
@@ -335,6 +335,65 @@ proc new_config*(): Config =
     mp2k_hle:        false,
     speed_mode:      false,
   )
+
+type
+  BootOverrides* = object
+    ## The command line's BIOS choices. They hold for this run only: kept
+    ## in the app, never written into the Config, so never saved.
+    use_hle*:        bool            # --hle
+    hle_after_bios*: bool            # --hle-after-bios
+    run_bios*:       Option[bool]    # --run-bios / --skip-bios, the last one given
+    bios_path*:      string          # `dingbat BIOS ROM`
+
+  BootSettings* = object
+    ## What a ROM load boots with: the saved settings, then the overrides,
+    ## then the GBA fallback when no BIOS image is there to run.
+    bios_path*:      string
+    run_bios*:       bool   # GBA: boot through the BIOS intro
+    use_hle*:        bool
+    hle_after_bios*: bool
+    gb_run_bios*:    bool   # GB: run the boot ROM (its own path; no fallback needed)
+    note*:           string # why the GBA does not boot as configured; "" when it does
+
+proc gba_bios_file_ok*(path: string): bool =
+  path.len > 0 and fileExists(path)
+
+proc boot_settings*(cfg: Config; ov: BootOverrides): BootSettings =
+  result = BootSettings(bios_path: cfg.bios_path, run_bios: cfg.run_bios,
+                        use_hle: cfg.use_hle, hle_after_bios: cfg.hle_after_bios)
+  if ov.use_hle:
+    result.use_hle = true
+    result.run_bios = false
+  if ov.hle_after_bios:
+    result.hle_after_bios = true
+    result.run_bios = true
+  if ov.bios_path.len > 0:
+    result.bios_path = ov.bios_path
+    # An explicit BIOS implies real-BIOS mode unless --hle* was passed
+    if not ov.use_hle and not ov.hle_after_bios:
+      result.use_hle = false
+  if ov.run_bios.isSome:
+    result.run_bios = ov.run_bios.get()
+  result.gb_run_bios = result.run_bios
+  # Without an image the core maps a stub that answers IRQs only: a BIOS
+  # call from anywhere but HLE, or an intro, would hang at the stub.
+  if not gba_bios_file_ok(result.bios_path) and (not result.use_hle or result.run_bios):
+    result.note =
+      (if result.bios_path.len == 0: "No GBA BIOS file is set"
+       else: "The GBA BIOS file " & result.bios_path & " is missing") &
+      ", so GBA games use HLE and skip the intro."
+    result.use_hle = true
+    result.run_bios = false
+
+proc describe*(ov: BootOverrides): string =
+  ## The overrides in force, as the command line spelled them; "" for none.
+  var parts: seq[string]
+  if ov.use_hle: parts.add("--hle")
+  if ov.hle_after_bios: parts.add("--hle-after-bios")
+  if ov.run_bios.isSome:
+    parts.add(if ov.run_bios.get(): "--run-bios" else: "--skip-bios")
+  if ov.bios_path.len > 0: parts.add("BIOS " & ov.bios_path)
+  parts.join(", ")
 
 proc parse_config(j: JsonNode): Config =
   var cfg = new_config()
