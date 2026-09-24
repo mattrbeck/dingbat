@@ -67,6 +67,10 @@ PAYLOADS = {
     'dmaobus': os.path.join(HERE, 'payloads', 'dmaobus.s'),
     'dmaobus2': os.path.join(HERE, 'payloads', 'dmaobus2.s'),
     'dmatime': os.path.join(HERE, 'payloads', 'dmatime.s'),
+    'tmrdma': os.path.join(ROMS, 'payloads', 'tmrdma.s'),
+    'dmastart': os.path.join(ROMS, 'payloads', 'dmastart.s'),
+    'dmadur': os.path.join(ROMS, 'payloads', 'dmadur.s'),
+    'dmamulirq': os.path.join(ROMS, 'payloads', 'dmamulirq.s'),
 }
 
 
@@ -278,9 +282,22 @@ R0_NAMES = {
     'wakeirq': lambda a: f'wakeirq-{a:02x}',
     'tmrw': lambda a: f'timer-read-vs-stop-{a:02x}',
     'lycwrite': lambda a: 'lyc-write-edge',
+    'tmrdma': lambda a: ('tmrdma-dma1-only' if a == 0x10 else 'tmrdma-dma0-only'
+                         if a == 0x20 else f'tmrdma-k{a}'),
+    'dmastart': lambda a: ('dmastart-' + ('thumb-' if a & 0x10 else 'arm-')
+                           + ['none', 'ldr-ewram-dest', 'ldr-iwram', 'nop-ldr-ewram',
+                              'nop-nop-ldr-ewram', 'mul-ldr-ewram', 'str-ewram',
+                              'ldm-iwram-2', 'ldrh-io', 'ldrh-ewram-dest'][a & 15]),
+    'dmadur': lambda a: ('dmadur-' + ['cpu-starts-tm1', 'dma32-starts-tm1',
+                                      'dma16-starts-tm1', 'iw-iw-32', 'iw-ew-32',
+                                      'ew-iw-32', 'iw-iw-16', 'io-iw-32'][a & 7]
+                         + f'-n{[0, 1, 2, 3, 4, 6, 8, 12][(a >> 4) & 7]}'),
+    'dmamulirq': lambda a: ('dmamulirq-' + ['mul', 'ewram-ldr', 'no-dma'][a >> 16]
+                            + f'-k{0x10000 - (a & 0xFFFF)}'),
 }
 R0_SUITE = {'dmaphase': 'dma', 'kitdemo': 'dma', 'wakeirq': 'irq', 'tmrw': 'timer',
-            'lycwrite': 'irq'}
+            'lycwrite': 'irq', 'tmrdma': 'dma', 'dmastart': 'dma', 'dmadur': 'dma',
+            'dmamulirq': 'irq'}
 R0_WHAT = {
     'dmaphase': 'an H-blank DMA against every phase of one kind of instruction: '
                 'T << 16 | D (T = TM0 after the run, D = TM1 frozen by the DMA)',
@@ -290,6 +307,23 @@ R0_WHAT = {
     'tmrw': 'a timer read against a timer stop in straight-line IWRAM code',
     'lycwrite': 'the V-count match interrupt is the compare\'s rising edge; a '
                 'write of the current line raises it',
+    'tmrdma': 'two immediate DMAs racing on a timer (alyosha timer/timer_reset): '
+              'DMA1 writes TM0CNT, DMA0 armed k NOPs later reads it -- DMA1 runs '
+              'first, DMA0 follows on the next cycle reading the old count under '
+              'the new control, and a DMA-written TMCNT starts the timer where the '
+              'write lands (see the payload header for the answer\'s fields)',
+    'dmastart': 'when an immediate DMA takes the bus from the instruction after '
+                'its enable: it requests at W+2, an access already begun finishes '
+                'first (EWRAM word +5, halfword +2, one-cycle access +0), internal '
+                'cycles run under the burst; ARM and Thumb alike',
+    'dmadur': 'how long a one-unit immediate DMA holds the bus, and where a timer '
+              'a DMA starts begins counting (where the write lands, not where the '
+              'burst began)',
+    'dmamulirq': 'a timer interrupt raised as an immediate DMA takes the bus: the '
+                 'synchroniser keeps counting through the internal cycles the CPU '
+                 'runs under the burst; one due after them waits for the burst\'s '
+                 'end (TM1 at entry | entries << 16 | interrupted address bits 2-9 '
+                 '<< 24)',
 }
 
 

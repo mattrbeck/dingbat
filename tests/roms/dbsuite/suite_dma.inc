@@ -400,5 +400,8 @@ run_dmatime:
     cbyte "dmatime-cpu-resumes-after-last-word", RUN_SAME, 30, 0x01, F_CART
 
     payload_blob pl_dmaphase, "dmaphase.bin"
+    payload_blob pl_tmrdma, "tmrdma.bin"
+    payload_blob pl_dmastart, "dmastart.bin"
+    payload_blob pl_dmadur, "dmadur.bin"
     payload_blob pl_kitdemo, "kitdemo.bin"
     .include "gen_dma.inc"

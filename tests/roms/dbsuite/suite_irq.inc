@@ -480,5 +480,6 @@ v8_race_end:
     cbyte "irqlat-every-irq-arrived", RUN_SAME, 31, 0x00, F_CART
 
     payload_blob pl_wakeirq, "wakeirq.bin"
+    payload_blob pl_dmamulirq, "dmamulirq.bin"
     payload_blob pl_lycwrite, "lycwrite.bin"
     .include "gen_irq.inc"

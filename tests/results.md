@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-09-24 10:31:29 · commit bd7b76c94 · game-boy-test-roms v7.0*
+*Generated: 2026-09-24 10:57:45 · commit aa98ecdac · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
-- **Total:** 1435
-- **Pass:** 1412
-- **Fail:** 23
+- **Total:** 1443
+- **Pass:** 1416
+- **Fail:** 27
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -22,6 +22,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | GBA - PeterLemon BIOS | 25 | 25 |
 | GBA - Other test ROMs | 10 | 12 |
 | GBA - hwverified (AGS-001) | 12 | 12 |
+| GBA - dbsuite (AGS-001) | 4 | 8 |
 | GBA - FuzzARM | 5 | 5 |
 | Game Boy - Acid2 | 2 | 2 |
 | Game Boy - MagenTests | 7 | 7 |
@@ -216,6 +217,21 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 ## GBA - hwverified (AGS-001) (12/12)
 
 **All 12 tests passed.**
+
+## GBA - dbsuite (AGS-001) (4/8)
+
+| Test | Device | Result |
+|------|--------|--------|
+| dbsuite/cpu | — | 👌 102/102 passed |
+| dbsuite/irq | — | 👀 94/101 passed |
+| dbsuite/timer | — | 👌 14/14 passed |
+| dbsuite/dma | — | 👀 215/217 passed |
+| dbsuite/bus | — | 👀 70/79 passed |
+| dbsuite/ppu | — | 👌 156/156 passed |
+| dbsuite/apu | — | 👀 19/23 passed |
+| dbsuite/bios | — | 👌 24/24 passed |
+
+One row per dbsuite sub-suite (tests/roms/dbsuite). See [detailed results](results_dbsuite.md) for every case that is not a pass.
 
 ## GBA - FuzzARM (5/5)
 

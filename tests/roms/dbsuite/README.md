@@ -20,9 +20,9 @@ cartridge are reported `SKIP`.
 | suite | cases | what |
 |---|---|---|
 | cpu | 102 | PSR write masks, Thumb `cmp/add/mov pc`, MSR setting T, loose BX decodes, r15 base writeback, user-bank STM/LDM, the LDM^ glitch, empty register lists, the multiply carry flag and timing, undefined CPSR modes |
-| irq | 42 | the dispatch window after IME/IE/`msr`, interrupt latency per source, the IF-acknowledge race, a timer IRQ storm under a DMA burst, the halted CPU's wake, the V-count match edge |
+| irq | 101 | the dispatch window after IME/IE/`msr`, interrupt latency per source, the IF-acknowledge race, a timer IRQ storm under a DMA burst, a timer IRQ raised as a DMA takes the bus, the halted CPU's wake, the V-count match edge |
 | timer | 14 | start latency, back-to-back reads, cascade, reload writes, a read against a stop |
-| dma | 125 | the CNT_H byte-write anomaly, capture DMA, start delays and per-region burst costs, the completion IRQ against a running CPU, the H-blank DMA's grant against every instruction phase, immediate-DMA length, DMA from unmapped memory reading the data bus |
+| dma | 217 | the CNT_H byte-write anomaly, capture DMA, start delays and per-region burst costs, when an immediate DMA takes the bus from the next instruction, one-unit burst lengths, two DMAs racing on a timer, the completion IRQ against a running CPU, the H-blank DMA's grant against every instruction phase, immediate-DMA length, DMA from unmapped memory reading the data bus |
 | bus | 79 | unused/write-only IO read map, 0x04000800 and its EWRAM wait field, renderer contention on PRAM/VRAM/OAM, cartridge-window wait states, open bus from ARM and Thumb in four memories and after a DMA |
 | ppu | 156 | DISPSTAT byte writes; the whole `DMA Prefetch Break` path (V-blank IRQ, BIOS VBlankIntrWait, a table-walking dispatcher, an H-blank DMA), DISPSTAT edges against VCOUNT |
 | apu | 23 | channel 1's sweep at trigger and at its ticks; the first trigger after a PSG master-on |
@@ -103,13 +103,13 @@ string is written to 0x04FFFA10). Both are probed at boot and used only if
 they answer. One line per case, then one line per suite and a total:
 
 ```
-DBSUITE begin version=1 cases=565 first=0 end=565 mode=cartridge
+DBSUITE begin version=1 cases=716 first=0 end=716 mode=cartridge
 DBSUITE case cpu/psr-f-field-sets-nzcv PASS got=F000001F exp=F000001F
 DBSUITE case irq/irqwin-if-ack-race PASS got=00000008 exp=00000006..0000000A
 DBSUITE case bus/obuswin-1-nop-dma-word FAIL got=E59F0170 exp=DEADBEE3
 DBSUITE case apu/sweep-512-dies-tick-3 SKIP got=- exp=00002A00..00004000
 DBSUITE suite cpu pass=102 fail=0 timeout=0 crash=0 skip=0 total=102
-DBSUITE done pass=541 fail=24 timeout=0 crash=0 skip=0 total=565
+DBSUITE done pass=694 fail=22 timeout=0 crash=0 skip=0 total=716
 DBSUITE ALL DONE
 ```
 
