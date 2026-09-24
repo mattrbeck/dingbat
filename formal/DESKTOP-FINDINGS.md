@@ -7,70 +7,101 @@ at a2e038f82 unless another file is named.
 
 ## Status after the fix round (2026-09-24)
 
-Every High and Medium item is fixed except the `.sav`/states/`.cht` half of
-1, which waits on a decision (below). Most fixes have a test in one of five
+Every High and Medium item is fixed. Most fixes have a test in one of five
 new headless binaries, `tests/desktop_{input,settings,netlink,persist,lifecycle}_test.nim`
-(run in CI), each seen failing on the code before the fix. ImGui/SDL wiring
-that cannot build headless has no test and is marked "GUI". Each model's
-fixed step was brought in line with what shipped, its `regress_*` theorems
-re-proved, and every `bug_*` trace kept as the record of the old code.
+(run in CI, `nimble test_desktop`), each seen failing on the code before the
+fix. Each model's fixed step was brought in line with what shipped, its
+`regress_*` theorems re-proved, and every `bug_*` trace kept as the record of
+the old code. Every row was also driven in the real app (below).
 
 | # | Fixed in | Test |
 |---|---|---|
-| 1 (config only) | d45cfb35c: `save_config` re-reads and writes only the keys this window changed | settings |
-| 2 | 0aac8a6bb: slots named `<rom>-<identity>[.slotN].state`; the old name is read if it names this cart, never written | persist |
-| 3 | 315afc4d2, 30710ff89 | GUI |
-| 4 | bf6165dfc: both cores catch the write error, retry, and a modal says so once | persist |
-| 5 | 9b2a375e5: the new core is built and checked before the old one is touched; a file too short to be a ROM is refused | lifecycle |
-| 6, 12 | 5e8e077d1: every release applies before any filter; shortcuts fire on the press, repeats ignored | input |
-| 7 | 6ebe5e95d (`finish_link` refuses without a GBA core), 978220bc9 (`load_rom` ends the link) | netlink; GUI |
-| 8 | 25b0f9664 | netlink |
-| 9 | 978220bc9 | GUI |
-| 10 | f546c0132 (one gate in `load_state_slot`), fa61ae7d3 (window's Load greyed) | GUI |
-| 11 | 25b0f9664, 6ebe5e95d: a linked frame hands back to the loop after 8 ms; CLOCK carries a paused bit (older builds ignore it) | netlink |
-| 13 | 4a4a87504 | GUI |
-| 14 | 237f8ead4 | settings |
-| 15 | 5e8e077d1 | input |
-| 16, 17 | cb2981ee4 | settings |
-| 18 | fa5d8824d, 084f6720a (`.sav`, `.state`, `.cht`), d45cfb35c (config; a damaged file is moved to `dingbat.yml.bad`) | persist, settings |
-| 19 | a034da67f | lifecycle |
-| 20 | 25b0f9664, 6ebe5e95d, 978220bc9 | netlink |
-| 21 | 6ebe5e95d | netlink |
-| 22 | 6e3fe73b2 | GUI (checked against the real imgui 1.92.4 headless: a click after 3000 taps lands in 2 frames, was 6002) |
-| 23 | d45cfb35c | settings |
+| 1 | 91b1d741b, d13648556: a second window on a game another window has open is refused (OS locks, released when a window dies); e30b49f75: `save_config` writes only the keys this window changed | persist, settings |
+| 2 | bd73cb6f6: slots named `<rom>-<identity>[.slotN].state`; the old name is read if it names this cart, never written | persist |
+| 3 | 68fee8481, f813581a0 | GUI |
+| 4 | 33eaa6d62: both cores catch the write error, retry, and a modal says so once | persist |
+| 5 | c8c49151b, e356fe25a: the new core is built and checked before the old one is touched; a `.gb` too short for a header or an empty `.gba` is refused, a short `.gb` is padded with $FF as a cart bus reads | lifecycle |
+| 6, 12 | 216e9a4d3: every release applies before any filter; shortcuts fire on the press, repeats ignored | input |
+| 7 | 19eba0ba8 (`finish_link` refuses without a GBA core), ef20fc3a7 (`load_rom` ends the link) | netlink; GUI |
+| 8 | 7ecfdab69 | netlink |
+| 9 | ef20fc3a7 | GUI |
+| 10 | 2902c8f39 (one gate in `load_state_slot`), fca2b4f2b (window's Load greyed) | GUI |
+| 11 | 7ecfdab69, 19eba0ba8: a linked frame hands back to the loop after 8 ms; CLOCK carries a paused bit (older builds ignore it) | netlink |
+| 13 | c89f94be0 | GUI |
+| 14 | 72a8449f4 | settings |
+| 15 | 216e9a4d3 | input |
+| 16, 17 | 0dec4823b | settings |
+| 18 | 650ab47af, 5eaac0759 (`.sav`, `.state`, `.cht`), e30b49f75 (config; a damaged file is moved to `dingbat.yml.bad`) | persist, settings |
+| 19 | 1ceda7b87 | lifecycle |
+| 20 | 7ecfdab69, 19eba0ba8, ef20fc3a7 | netlink |
+| 21 | 19eba0ba8 | netlink |
+| 22 | 2c7142cc8 | GUI |
+| 23 | e30b49f75 | settings |
 
 Lows fixed: held input merged per source and the fast-forward trigger
-(5e8e077d1); rewind across a state load (d6aca35ad); Quick Save mid-frame
-(53022e6e0) and dropped by a switch (6be9dc506); Reset after Recent > Clear
-(6be9dc506); zip identity (18171ff6a); extensionless paths (ad1cf0b19); every
-Link Low listed below (6ebe5e95d, f546c0132); the file dialog opening the BIOS
-(aa7379698); Reset to Defaults, frame size, Speed mode on GB (7f8714c1c).
+(216e9a4d3); rewind across a state load (421d78ef7); Quick Save mid-frame
+(29c71dd3f) and dropped by a switch (489bc035f); Reset after Recent > Clear
+(489bc035f); zip identity (46db6439f); extensionless paths (2a30130b8); every
+Link Low listed below (19eba0ba8, 2902c8f39); the file dialog opening the BIOS
+(03a7f027e); Reset to Defaults, frame size, Speed mode on GB (032f85e00);
+fullscreen remembered where the OS restores windows (4f5f317b5: on macOS only
+when "Close windows when quitting an application" is off, as AppKit apps do;
+always on Windows and Linux); the Settings X asks before discarding edits
+(c9a6b73b4).
 
 Behaviour that changed on purpose: Cmd/Ctrl shortcuts fire on press, not
 release; F9, F12 and the channel keys no longer repeat; `--hle`, `--run-bios`,
-`--skip-bios` and a BIOS argument apply to that run only; GB files under
-32 KiB and GBA files under 192 bytes are refused with a notice; battery
-writes are fsync'd (about 0.3 ms per 128 KB write on this Mac, not measured
-on Windows).
+`--skip-bios` and a BIOS argument apply to that run only; a Game Boy file
+shorter than a cartridge or not a whole number of banks reads $FF past its
+end (the majority of emulators, and what rgbfix pads with) instead of
+crashing, desktop and web; battery writes are fsync'd (about 0.3 ms per
+128 KB write on this Mac, not measured on Windows); two windows can link on
+one machine only with different games or a renamed copy of the ROM.
 
-**Open, for Matt:**
-- Finding 1 proper: two windows on one ROM file still share `.sav`, state
-  slots and `.cht`. What should the second window do (refuse, run on a
-  `-p2` save, share read-only)?
-- GB ROMs under 32 KiB are refused on desktop. Padding them in the core
-  would also fix the web build, which still crashes on them.
-- Should dingbat start fullscreen if it quit fullscreen? Should the Settings
-  window's X ask before discarding edits?
-- Not fixed, recorded: `--listen` waits up to 120 s before the loop starts;
-  the HELLO handshake and a manual Join's connect still block; saves an
-  older build wrote as `<parent>.sav` for extensionless ROMs are not
-  migrated; GBA state identity hashes the first 1 MB; same stem shares
-  `.sav`.
-- Nothing was run in the desktop app (the ask-first rule). What only the
-  running app can confirm is the "GUI" rows above plus: the battery notice
-  (read-only ROM folder), pause while linked (the other window keeps
-  drawing, no drop after 30 s), quit while linked (the peer sees the link
-  end at once), and re-pairing straight after a disconnect.
+**Driven in the real app** (2026-09-24, a `-d:gui_driver` build: hidden
+window, injected keys/mouse/drops, whole-window screenshots, scratch HOME).
+Each scenario was also run on main plus the driver as a control where the
+old code had the bug:
+
+| # | What was done | Fixed build | main |
+|---|---|---|---|
+| 6 | hold S (R), Cmd down, release S under Cmd, release Cmd | R released, no Quick Save | R stuck, slot 0 written |
+| 12 | hold Right, Cmd+L with no quick save (modal), release Right | Right released | Right stuck |
+| 13 | start a key capture in Settings, close with X, press Z | game gets A | Z eaten |
+| 5 | drop a 0-byte `.gb` | "Open ROM" notice, game keeps running | IndexDefect, app dies |
+| 3 | Quick Save, Save States window open, switch game | grid shows the new game's slots | grid keeps the old game's |
+| 4 | ROM folder read-only, game writes its save at boot | "Save file" notice, app keeps running | IOError, app dies |
+| 22 | 1000 key taps with the menu hidden, then click File | menu opens in 2 frames | not open after 10 frames |
+| 10 | two windows linked: menus | Frame Advance, 2x, Fast Forward, Quick Load greyed | — |
+| 11 | pause one linked window 37 s | other window draws and answers, "The other player has paused.", link kept, both resume | — |
+| 20 | Disconnect; Cmd+Q while linked | peer shows "Link ended" at once | — |
+| 7, 9 | drop another ROM into a linked window | both sides end the link | — |
+| low | close and reopen Link Cable right after a link | re-paired in ~3 s | — |
+| 1 | second window on the same file / via a symlinked folder / a same-named copy elsewhere / a renamed copy / after `kill -9` of the first | refused, refused, refused, opens, opens | — |
+| 14 | bind Up to Keypad 8, restart | still bound, game gets Up | — |
+| 15, 16 | bind F12; BIOS tab with no BIOS | refused; real-BIOS modes greyed | — |
+| 18 | garbage `dingbat.yml` | notice, file kept as `dingbat.yml.bad` | — |
+| 5 | drop 16 KiB, 8 KiB, 16 KiB+1 `.gb`; a 256-byte one; the 56-byte `inputrec.gba` | play; refused with notice; plays | — |
+| low | saved fullscreen, macOS switch unset (this Mac); Settings X after an edit | starts windowed; asks, Discard drops the edit | — |
+
+Not driven: going fullscreen (it would take over the screen) and the
+macOS "restore windows" path (a system setting), pads (no device), Windows
+and Linux.
+
+**Found while driving, not in the audit:** on main, Link's Awakening died
+about 30 s after boot with rewind on (the default): a GB APU channel
+deadline behind the scheduler made `apu_arm_state_events` raise
+RangeDefect in every rewind snapshot (the web, built without range checks,
+kept running with its noise channel frozen). Since 25c4cc4f0; fixed in
+fc686286c (the noise divisor stage settles before the frame rebase), guarded
+by `tests/gbapu_rebase_test.nim`.
+
+**Still open, recorded:** `--listen` waits up to 120 s before the loop
+starts; the HELLO handshake and a manual Join's connect still block; saves an
+older build wrote as `<parent>.sav` for extensionless ROMs are not migrated;
+GBA state identity hashes the first 1 MB; same stem shares `.sav`; `.cgb`
+files are not recognised as Game Boy ROMs; the Link Cable window is too
+short for its two-windows hint (it scrolls).
 
 | File | Machine |
 |---|---|
@@ -369,9 +400,10 @@ designed, not guessed.
 
 ## Not verified
 
-Nothing here was run in the desktop app itself (Matt's rule: ask before
-driving desktop apps). Items marked "confirmed headless" were checked against
-the real Nim procs in scratch programs; the ImGui backlog against the real
-imgui; SO_REUSEADDR and TIME_WAIT with sockets on macOS. The Cmd+Tab release
-order comes from reading SDL 2.0.22's source. Windows and Linux behaviour is
-modelled from the code, not observed.
+The audit itself ran nothing in the desktop app; the fix round drove it
+afterwards (the status section above). Items marked "confirmed headless" were
+checked against the real Nim procs in scratch programs; the ImGui backlog
+against the real imgui; SO_REUSEADDR and TIME_WAIT with sockets on macOS. The
+Cmd+Tab release order comes from reading SDL 2.0.22's source (the driven
+check injects the events it describes, not a real app switch). Windows and
+Linux behaviour is modelled from the code, not observed.
