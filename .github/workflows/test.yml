@@ -100,6 +100,13 @@ jobs:
         # not parse as a clock. Synthetic ROMs/saves.
         shell: bash
         run: ./dingbat_savefooter_test
+      - name: Desktop Link Cable over loopback sockets
+        # frontend/link_cable.nim + gba/netlink.nim against a scripted peer: a
+        # bad frame, a paused peer, a lost peer mid-exchange, a GB core or a
+        # moved ROM at handshake, wall-time retries, re-pairing after a
+        # session. Localhost ports 47930-47941.
+        shell: bash
+        run: ./dingbat_desktop_netlink_test
       - name: GBA cartridge RTC and battery-save RTC trailer
         # S-3511A protocol writes/reads/strobes, datasheet data validation, the
         # FlashGBX/mGBA 16-byte trailer (real reference bytes), EEPROM sizing,
