@@ -122,15 +122,20 @@ Part C: after a session the port stays in TIME_WAIT (31 s measured on macOS)
 and nobody can auto-host (`bug_repair_waits_for_time_wait`); the leaked
 listener freezes both probers for 30 s (`bug_leaked_listener_freezes_both`).
 
-The fixes (`stepF`, `pstepF`, `rstepF`) are proved to keep every one of
-those properties in every reachable state: `safeF_reachable` (Part A's
+The fixes (`stepF`, `pstepF`, `rstepF`), as shipped on the fix branch
+(`frontend/link_cable.nim`, `gba/netlink.nim`, `gba/netcore.nim` and the
+link procs in `dingbat.nim`; `load_rom` and the after-the-loop teardown are
+the GameLifecycle fix), are proved to keep every one of those properties in
+every reachable state: `safeF_reachable` (Part A's
 (a)-(e) plus an honest window, and no crash), `pairF_reachable` (lead kept,
 no pause-kill, every end a BYE) with `pairF_responsive` (Quit and Pause work
 while waiting on the peer), `raceF_reachable` (the port is held exactly by
 the listener, nobody frozen or stranded). `regress_partA`,
-`regress_peer_pause` and `regress_race` replay the traces on the fixes.
-The freezes on the network (`freeze`: the CLI wait, the HELLO wait, a
-connect to a SYN-dropping host) are recorded, not fixed, in `stepF`.
+`regress_partA_rest`, `regress_peer_pause` and `regress_race` replay the
+traces on the fixes. The freezes on the network (`freeze`: the CLI wait,
+the HELLO wait, a manual Join's connect to a SYN-dropping host, the 3 s
+close drain) are recorded, not fixed, in `stepF`; the 30 s stall wait is
+gone (`step_frame_for` hands back to the loop).
 
 ## Found by reading, not modelled
 
@@ -708,34 +713,36 @@ theorem bug_cli_bad_port_crashes : (run init [.boot .badPort]).pc = .crashed := 
 theorem cli_link_freezes_window :
     (run init [.boot (.link .gba false .ok)]).freeze = .cliWait := by decide
 
-/-! ### The fix, designed
+/-! ### The fix, as shipped
 
-Nim (line numbers at a2e038f82):
+The pairing code moved to `frontend/link_cable.nim` (`LinkCable`); the
+wrappers in `dingbat.nim` keep the old names.
 
-1. `load_rom` (after 701): `teardown_netlink(); link_auto_stop();
-   link_cancel_setup()`. A new game, GBA or GB, or a Reset, ends the link
-   and any pairing in progress.
-2. `load_state_slot` (844): `if app.netlink != nil: return false`, with a
-   "not while linked" reject sentence; grey out File > Quick Load (1311) and
-   the Save States window's Load while linked. This one check also closes
-   Ctrl+L's same-iteration race.
-3. `service_link_setup` (1997-2005): `app.link_server.close()` before
-   branching on the accept error.
-4. `finish_link` (1843): `except CatchableError` (IOError from readFile,
-   OSError from setSockOpt), and on any failure `app.link_auto = false` so
-   the window shows the error instead of "Waiting to pair...". A guard
-   `if not link_ready(): sock.close(); return false` at its top.
-5. `teardown_netlink` (1816): set `app.link_status` to a "Link ended: ..."
-   sentence. netcore.nim: a `RemoteSioDriver.sio_detached` that, when
-   `reply_wait`, completes the round as the BYE branch does (696-704).
-6. After the loop (2606): `teardown_netlink(); link_auto_stop();
-   link_cancel_setup()`, so the peer gets its BYE.
-7. `update_link_auto` (2101): level-triggered, `elif not app.link_window:
-   link_auto_stop(); link_cancel_setup()`: a closed window hosts and joins
-   nothing (a design choice: today a manual Host deliberately or not keeps
-   listening in the background).
-8. Auto-pair connects to a constant "127.0.0.1" (2013), not `link_host_buf`.
-9. `establish_netlink` (1898): `except OSError, ValueError`.
+1. `load_rom`: `teardown_netlink(); link_auto_stop(); link_cancel_setup()`.
+   A new game, GBA or GB, or a Reset, ends the link and any pairing in
+   progress (the GameLifecycle fix; `loadRomF`).
+2. `load_state_slot`: `if app.netlink != nil: return false`, and
+   `state_reject_sentence` says "can't be loaded while the link cable is
+   connected"; File > Quick Load greys out while linked. The check sits at
+   the consumer, so it also closes Ctrl+L's same-iteration race and covers
+   the Save States window's Load.
+3. `LinkCable.service_setup`: an accept error closes the listener before
+   branching.
+4. `LinkCable.finish_link`: refuses with no GBA core (`gba == nil`),
+   `except CatchableError` (IOError from readFile, OSError from
+   setSockOpt), and `auto = false` on every outcome, so the window shows
+   the error instead of "Waiting to pair...".
+5. `LinkCable.teardown`: `NetLink.shutdown` (BYE, close, the no-cable
+   driver) and "Link ended: <why>". netcore.nim: `RemoteSioDriver.
+   sio_detached` completes a `reply_wait` round as the BYE branch does.
+6. After the loop: `teardown_netlink(); link_auto_stop();
+   link_cancel_setup()`, so the peer gets its BYE (the GameLifecycle fix).
+7. `LinkCable.update_auto`: level-triggered; a closed window hosts and
+   joins nothing.
+8. Auto-pair connects to `LINK_AUTO_HOST` = "127.0.0.1", not the Join box.
+9. `establish_netlink`: `parse_host_port` refuses `HOST:x`.
+10. `step_frame_for` hands back to the loop while parked on the peer
+   (Part B), so a stall timeout is a teardown but never a freeze.
 -/
 
 def teardownF (s : St) : St :=
@@ -778,7 +785,7 @@ def emuStepF (s : St) (o : LinkOut) : St :=
     match o with
     | .frame => s
     | .frameBye => teardownF s
-    | .lost _ stalled => { teardownF s with freeze := (if stalled = true then .stallWait else s.freeze) }
+    | .lost _ _ => teardownF s     -- step_frame_for returned to the loop meanwhile
   else s
 
 /-- `process_pending_state` with fix 2: `load_state_slot` refuses while
@@ -971,9 +978,8 @@ theorem inv_emuStepF {s : St} (h : Inv s) (o : LinkOut) : Inv (emuStepF s o) := 
   · split
     · exact h
     · exact inv_teardownF h
-    · exact (inv_teardownF h).frame rfl
+    · exact inv_teardownF h
   · exact h
-
 
 theorem inv_loadStateF {s : St} (h : Inv s) : Inv (loadStateF s) := by
   obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9⟩ := h
@@ -1117,6 +1123,63 @@ theorem regress_partA :
     (runF init (tLinked ++ it (.emu (.lost true false)) false [] .idle [])).stuck = none ∧
     (runF init (tLinked ++ it (.emu (.lost false false)) false [] .idle [])).status = .ended ∧
     (runF init (tLinked ++ it (.emu .frame) false [.quit] .idle [])).byeOwed = false := by
+  decide
+
+/-- The rest of Part A's counterexamples on the fixed step: each ends with
+    the property the bug broke restored. -/
+theorem regress_partA_rest :
+    -- bug_gb_switch_keeps_dead_link: the GB game ends the link
+    (runF init (tLinked ++ it (.emu .frame) false [.drop .gb] .idle [.wClose] ++
+                it (.emu .frame) false [.keyQuickLoad] .idle [.mLinkMenu])).nl = none ∧
+    -- bug_manual_host_gb_switch_crashes: no crash, nothing linked
+    (let s := runF init ([.boot (.rom .gba)] ++
+      it .emuSkip false [.mouse true] .idle [.mLinkMenu] ++
+      it .emuSkip false [] .idle [.wHost true, .wClose] ++
+      it .emuSkip false [.drop .gb] .idle [] ++
+      it .emuSkip false [] (.accept .ok) [])
+     s.pc = .emu ∧ s.nl = none) ∧
+    -- bug_slot_load_while_linked
+    (runF init (tLinked ++ it (.emu .frame) false [] .idle [.mSlotLoad true])).desync = false ∧
+    -- bug_ctrl_l_races_link
+    (runF init ([.boot (.rom .gba)] ++
+      it .emuSkip false [.mouse true] .idle [.mLinkMenu] ++
+      it .emuSkip false [.keyQuickLoad] (.connect .ok) [] ++
+      [.emu .frame, .pend true])).desync = false ∧
+    -- bug_accept_error_leaks_listener: the port is held only by the listener
+    (let s := runF init ([.boot (.rom .gba)] ++
+      it .emuSkip false [.mouse true] .idle [.mLinkMenu] ++
+      it .emuSkip false [] (.refused true true false) [] ++
+      it .emuSkip false [] .acceptErr [] ++
+      it .emuSkip false [] (.refused true true false) [] ++
+      it .emuSkip false [] (.connect .timeout) [])
+     (s.server = true ↔ s.setup = .listening) ∧ s.freeze = .none) ∧
+    -- bug_handshake_fail_strands_auto
+    (let s := runF init ([.boot (.rom .gba)] ++
+      it .emuSkip false [.mouse true] .idle [.mLinkMenu] ++
+      it .emuSkip false [] (.connect .rejected) [] ++
+      it .emuSkip false [] .idle [])
+     s.auto = false ∧ s.status = .hsFailed) ∧
+    -- bug_auto_probes_typed_host: auto never connects to the typed host
+    (runF init ([.boot (.rom .gba)] ++
+      it .emuSkip false [.mouse true] .idle [.mLinkMenu] ++
+      it .emuSkip false [] .idle [.wEditHost .other, .wJoin, .wCancel, .wClose] ++
+      it .emuSkip false [] .idle [.mLinkMenu] ++
+      it .emuSkip false [] (.refused false false true) [])).freeze = .none ∧
+    -- bug_manual_host_survives_window_close
+    (runF init ([.boot (.rom .gba)] ++
+      it .emuSkip false [.mouse true] .idle [.mLinkMenu] ++
+      it .emuSkip false [] .idle [.wHost true, .wClose] ++
+      it .emuSkip false [] .idle [] ++
+      it .emuSkip false [] (.accept .ok) [])).nl = none ∧
+    -- bug_rom_file_gone_crashes
+    (let s := runF init ([.boot (.rom .gba)] ++
+      it .emuSkip false [.mouse true] .idle [.mLinkMenu] ++
+      it .emuSkip false [] (.connect .romGone) [])
+     s.pc = .emu ∧ s.status = .hsFailed) ∧
+    -- bug_cli_bad_port_crashes
+    (runF init [.boot .badPort]).pc = .emu ∧
+    -- a stall timeout ends the link without freezing the window first
+    (runF init (tLinked ++ it (.emu (.lost false true)) false [] .idle [])).freeze = .none := by
   decide
 
 /-! ## Part B: two processes over one socket
@@ -1272,16 +1335,20 @@ theorem bug_peer_pause_ends_link :
 theorem bug_quit_ends_peer_link_without_bye :
     (prun {} [.quit false, .frame true]).eofKill = true := by decide
 
-/-! ### The fix, designed
+/-! ### The fix, as shipped
 
-* `step_frame` returns `naStalled` to the main loop instead of spinning in
-  `pump(1)` (the stall deadline kept in the NetLink across calls): the loop
-  keeps handling input and drawing, and the Link Cable window can say
-  "Waiting for the other player".
-* While paused, the loop still pumps the socket (`nl.pump(0)` when
-  `app.paused and app.netlink != nil`), and CLOCK carries a new flag bit
-  "paused" (linkproto.nim `LINK_CLOCK_*`, docs/multiplayer.md); the peer's
-  stall deadline does not run while that bit is set.
+* The desktop steps a linked frame with `step_frame_for(8 ms)`: parked on
+  the peer, it returns to the main loop with the frame still in progress
+  (`try_advance` resumes it) and the stall deadline kept in the NetLink
+  across calls. The loop keeps handling input and drawing; the Link Cable
+  window says "Waiting for the other player...". The harness keeps the
+  blocking `step_frame`. So a blocked side takes input: `evSF` lets Pause,
+  Quit and Disconnect act while `blocked`.
+* While paused the loop still pumps the socket (`service_netlink`:
+  `NetLink.idle`), and CLOCK carries bit 2 "paused" (`LINK_CLOCK_PAUSED`,
+  docs/multiplayer.md) from `NetLink.set_paused`; the peer's stall deadline
+  is re-armed while that bit is set. Builds without the bit ignore it
+  (only SO is read from CLOCK's flags), so they time out as before.
 * Part A fix 6: a quit sends BYE. -/
 
 def evSF (e : PEv) (me o : Side) : Out :=
