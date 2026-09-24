@@ -9,7 +9,19 @@ import ../common/linkproto
 import ../gba/gba
 import ../gb/gb
 
-const ROM_EXTS* = [".gba", ".gb", ".gbc"]
+# The extensions a Game Boy ROM goes by: `.cgb` and `.sgb` are what some
+# dumps and homebrew name Color-only and Super Game Boy carts. The core
+# reads the mode from the header, never the name. Not `.dmg`: on macOS that
+# is a disk image, which would boot as a Game Boy cart full of noise.
+const GB_ROM_EXTS* = [".gb", ".gbc", ".cgb", ".sgb"]
+const ROM_EXTS* = [".gba", ".gb", ".gbc", ".cgb", ".sgb"]
+
+# The Open ROM dialog's filter: what `is_rom_file` takes, without the dots.
+const ROM_DIALOG_EXTS* = block:
+  var exts: seq[string]
+  for ext in ROM_EXTS: exts.add ext[1 .. ^1]
+  exts.add "zip"
+  exts
 
 # The smallest file taken as a ROM. Both cores run any length (the GB core
 # pads to a whole cartridge with $FF, the GBA core reads open bus past the
@@ -41,7 +53,13 @@ type
     detail*: string  ## the underlying message, for the log / a hint line
 
 proc is_gb_rom*(rom_path: string): bool =
-  rom_path.splitFile().ext.toLowerAscii() in [".gb", ".gbc"]
+  rom_path.splitFile().ext.toLowerAscii() in GB_ROM_EXTS
+
+proc is_rom_file*(path: string): bool =
+  ## A file dingbat opens by its name: a ROM of either core, or a zip.
+  let ext = path.splitFile().ext.toLowerAscii()
+  ext in ROM_EXTS or ext == ".zip"
+
 
 proc build_core*(rom_path: string; o: CoreOptions): BuiltCore =
   ## Builds and post-inits the core for `rom_path` into a value of its own, so
@@ -107,7 +125,7 @@ proc legacy_zip_cache_dir(cache_root, zip_path: string): string =
   cache_root / &"{zip_path.splitFile().name}-{cast[uint32](hash(zip_path)):08x}"
 
 proc extract_zip_rom*(cache_root, zip_path: string): string =
-  ## Extract the first GBA/GB/GBC ROM in a zip into its cache folder and
+  ## Extract the first ROM (`ROM_EXTS`) in a zip into its cache folder and
   ## return its path ("" if none / unreadable). Re-opening the same zip
   ## reuses the folder, which keeps the emulator's .sav (written next to the
   ## ROM) persistent across sessions.

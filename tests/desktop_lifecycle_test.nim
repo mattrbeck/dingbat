@@ -9,7 +9,7 @@
 ## a zip extracts to one cache folder however its path is spelled; a ROM path
 ## with no extension keeps its battery file beside it, not `<parent>.sav`.
 
-import std/[os, hashes, strformat, tables, tempfiles]
+import std/[os, hashes, strformat, strutils, tables, tempfiles]
 import zippy/ziparchives
 import dingbat/frontend/game_load
 import dingbat/gb/gb
@@ -118,6 +118,31 @@ block good_roms_build:
   writeFile(gbap, newString(0x400))
   let a = build_core(gbap, opts())
   doAssert a.error == "" and a.gba != nil and a.gb == nil
+
+block gb_extensions_pick_the_gb_core:
+  # `.cgb` and `.sgb` are Game Boy carts too: they went to the GBA core (a
+  # screen of noise), the file dialog hid them and a drop ignored them.
+  # `.dmg` stays out: on macOS it is a disk image.
+  for name in ["color.cgb", "super.sgb", "LOUD.CGB", "plain.gbc"]:
+    let p = dir / name
+    writeFile(p, short_gb(0x8000))
+    doAssert is_gb_rom(p) and is_rom_file(p), name
+    let b = build_core(p, opts())
+    doAssert b.error == "" and b.gb != nil and b.gba == nil, name
+    b.gb.run_until_frame()
+    doAssert name.splitFile.ext.toLowerAscii()[1 .. ^1] in ROM_DIALOG_EXTS, name
+  doAssert not is_gb_rom(dir / "a.gba") and is_rom_file(dir / "a.gba")
+  doAssert is_rom_file(dir / "a.ZIP") and not is_gb_rom(dir / "a.zip")
+  doAssert not is_rom_file(dir / "installer.dmg") and not is_rom_file(dir / "a.txt")
+  doAssert "gba" in ROM_DIALOG_EXTS and "zip" in ROM_DIALOG_EXTS
+  # The first ROM in a zip, whichever of the names it has.
+  var entries = initTable[string, string]()
+  entries["readme.txt"] = "hi"
+  entries["Color.cgb"] = short_gb(0x8000)
+  writeFile(dir / "color.zip", createZipArchive(entries))
+  let rom = extract_zip_rom(dir / "cgbcache", dir / "color.zip")
+  doAssert rom.extractFilename() == "Color.cgb", rom
+  doAssert build_core(rom, opts()).gb != nil
 
 proc sram_rom(name: string): string =
   ## A GBA ROM the storage scan reads as a 32 KiB SRAM cart.

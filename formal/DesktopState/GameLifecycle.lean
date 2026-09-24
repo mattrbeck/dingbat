@@ -186,7 +186,10 @@ def extract : Path → Option Path
 /-- `load_rom` 698-701: the file the core is built from. -/
 def romOf (p : Path) : Option Path := if p.isZip then extract p else some p
 
-/-- `load_rom` 703-704: `.gb`/`.gbc` build a GB core, anything else a GBA core. -/
+/-- `load_rom` 703-704: `.gb`/`.gbc` build a GB core, anything else a GBA core.
+Since round 3 `.cgb`/`.sgb` do too (`game_load.nim` `GB_ROM_EXTS`, which the
+drop, the file dialog and the zip scan share); no path here has either, so
+the one table is both steps'. -/
 def sysOf : Path → Sys
   | .cGb | .pGb | .pGbc | .eGb => .gb
   | _ => .gba

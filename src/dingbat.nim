@@ -1641,7 +1641,7 @@ proc render_imgui() =
       overlay_h += win_size.y
       igEndMainMenuBar()
 
-  app.fe.render("ROM", open_rom, ["gba", "gb", "gbc", "zip"], proc(path: string) =
+  app.fe.render("ROM", open_rom, ROM_DIALOG_EXTS, proc(path: string) =
     load_rom(path))
 
   render_state_notice()
@@ -1807,8 +1807,7 @@ proc update_rumble() =
 
 proc open_dropped(path: string) =
   ## A file dropped on the window: a ROM or a zip loads, anything else is ignored
-  let ext = path.splitFile().ext.toLowerAscii()
-  if ext in ROM_EXTS or ext == ".zip":
+  if is_rom_file(path):
     load_rom(path)
 
 proc handle_input() =
