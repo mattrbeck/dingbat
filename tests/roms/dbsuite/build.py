@@ -60,7 +60,6 @@ PAYLOADS = {
     'obusbus': os.path.join(ROMS, 'payloads', 'obusbus.s'),
     'obuswin': os.path.join(ROMS, 'payloads', 'obuswin.s'),
     'obuswint': os.path.join(ROMS, 'payloads', 'obuswint.s'),
-    'psgfirst': os.path.join(ROMS, 'payloads', 'psgfirst.s'),
     'ldmglitch1': os.path.join(HERE, 'payloads', 'ldmglitch1.s'),
     'ldmglitch2': os.path.join(HERE, 'payloads', 'ldmglitch2.s'),
     'ldmglitch3': os.path.join(HERE, 'payloads', 'ldmglitch3.s'),

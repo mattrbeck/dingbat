@@ -44,6 +44,8 @@ main:
     strh r0, [r4, #RT_INK]
 
     bl  machine_reset
+    ldr r0, =0xDBFF0001            @ beacon: booted
+    bl  beacon
     bl  detect_debug_ports
     bl  resume_check               @ r0 = 1: a run was cut short by a reset
     cmp r0, #0
@@ -80,6 +82,16 @@ main_resume:
     bl  run_range_continue
     b   summary_view
     .ltorg
+
+@ r0 = a word for a host on the link cable to find: armed as a 32-bit slave
+@ transfer, no interrupt.  0xDBFF0001 booted, 0xDBFF0002 in the menu,
+@ 0xDB000000 | n case n in flight; the results stream follows a run.
+beacon:
+    ldr r1, =0x04000120
+    str r0, [r1]
+    ldr r0, =0x1080
+    strh r0, [r1, #8]
+    bx  lr
 
 @ -> r0 = 1 if the results block is a run of this ROM that a reset cut short
 resume_check:
@@ -477,6 +489,16 @@ call_guarded:
 1:  str r2, [r0], #4
     subs r1, r1, #1
     bne 1b
+    @ a beacon for a host on the link cable: 0xDB000000 | the case in
+    @ flight, as a 32-bit slave transfer (no interrupt, so a case cannot
+    @ tell), so a run that stops can be placed without a screen
+    ldr r1, =0x04000120
+    ldr r0, =RESULTS
+    ldr r0, [r0, #RB_CURRENT]
+    orr r0, r0, #0xDB000000
+    str r0, [r1]
+    ldr r0, =0x1080
+    strh r0, [r1, #8]
     ldr r5, =RT
     str sp, [r5, #RT_SAVED_SP]
     mrs r0, cpsr
@@ -569,9 +591,9 @@ machine_reset:
     strh r3, [r1, #2]
     strh r2, [r1, #2]
     add r1, r0, #0x120             @ SIO: stopped, external clock
-    strh r2, [r1, #8]              @ SIOCNT
-    strh r2, [r1, #0x12]           @ RCNT (0x134)
-    strh r2, [r1, #0x10]           @ KEYCNT (0x132)
+    strh r2, [r1, #8]              @ SIOCNT (0x128)
+    strh r2, [r1, #0x14]           @ RCNT (0x134): serial mode
+    strh r2, [r1, #0x12]           @ KEYCNT (0x132)
     ldr r3, =0x0403                @ mode 3, BG2
     strh r3, [r0]
     strh r2, [r0, #0x50]           @ BLDCNT
@@ -1339,6 +1361,11 @@ menu:
     mov r9, r0                     @ r9 = countdown, 0 = off
     ldr r0, =0x3FF
     str r0, [r4, #RT_KEYS]
+    ldr r0, =RT
+    ldr r0, [r0, #RT_LINKON]
+    cmp r0, #0                     @ results already streaming: keep them
+    ldreq r0, =0xDBFF0002          @ beacon: in the menu
+    bleq beacon
 menu_redraw:
     bl  clear_screen
     mov r0, #4

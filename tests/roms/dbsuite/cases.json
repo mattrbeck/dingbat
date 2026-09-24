@@ -24,11 +24,11 @@
   },
   {
    "name": "ppu",
-   "first": 320
+   "first": 314
   },
   {
    "name": "apu",
-   "first": 472
+   "first": 466
   },
   {
    "name": "bios",
@@ -3240,13 +3240,13 @@
   {
    "index": 291,
    "suite": "bus",
-   "name": "obus-1-insn-after-dma",
+   "name": "obus-1-insn-after-dma-dma-word",
    "kind": "range",
    "cartridge_only": false,
    "offset": 300,
    "mask": "FFFFFFFF",
-   "lo": "E59F0040",
-   "hi": "E59F0040"
+   "lo": "DEADBEE3",
+   "hi": "DEADBEE3"
   },
   {
    "index": 292,
@@ -3262,7 +3262,7 @@
   {
    "index": 293,
    "suite": "bus",
-   "name": "obuswin-nothing",
+   "name": "obuswin-nothing-burst-not-run",
    "kind": "range",
    "cartridge_only": false,
    "offset": 256,
@@ -3273,18 +3273,18 @@
   {
    "index": 294,
    "suite": "bus",
-   "name": "obuswin-1-nop",
+   "name": "obuswin-1-nop-dma-word",
    "kind": "range",
    "cartridge_only": false,
    "offset": 260,
    "mask": "FFFFFFFF",
-   "lo": "E59F0170",
-   "hi": "E59F0170"
+   "lo": "DEADBEE3",
+   "hi": "DEADBEE3"
   },
   {
    "index": 295,
    "suite": "bus",
-   "name": "obuswin-2-nops",
+   "name": "obuswin-2-nops-closed",
    "kind": "range",
    "cartridge_only": false,
    "offset": 264,
@@ -3295,7 +3295,7 @@
   {
    "index": 296,
    "suite": "bus",
-   "name": "obuswin-mul",
+   "name": "obuswin-mul-closes",
    "kind": "range",
    "cartridge_only": false,
    "offset": 268,
@@ -3306,82 +3306,16 @@
   {
    "index": 297,
    "suite": "bus",
-   "name": "obuswin-ldr-iwram",
-   "kind": "range",
-   "cartridge_only": false,
-   "offset": 272,
-   "mask": "FFFFFFFF",
-   "lo": "E59F00F4",
-   "hi": "E59F00F4"
-  },
-  {
-   "index": 298,
-   "suite": "bus",
-   "name": "obuswin-ldr-ewram",
-   "kind": "range",
-   "cartridge_only": false,
-   "offset": 276,
-   "mask": "FFFFFFFF",
-   "lo": "E59F00CC",
-   "hi": "E59F00CC"
-  },
-  {
-   "index": 299,
-   "suite": "bus",
-   "name": "obuswin-ldm-4-regs",
-   "kind": "range",
-   "cartridge_only": false,
-   "offset": 292,
-   "mask": "FFFFFFFF",
-   "lo": "E59F0030",
-   "hi": "E59F0030"
-  },
-  {
-   "index": 300,
-   "suite": "bus",
-   "name": "obuswint-0-nops",
-   "kind": "range",
-   "cartridge_only": false,
-   "offset": 256,
-   "mask": "FFFFFFFF",
-   "lo": "60196028",
-   "hi": "60196028"
-  },
-  {
-   "index": 301,
-   "suite": "bus",
-   "name": "obuswint-1-nop",
-   "kind": "range",
-   "cartridge_only": false,
-   "offset": 260,
-   "mask": "FFFFFFFF",
-   "lo": "60196068",
-   "hi": "60196068"
-  },
-  {
-   "index": 302,
-   "suite": "bus",
-   "name": "obuswint-2-nops",
+   "name": "obuswint-2-nops-half-dma-word",
    "kind": "range",
    "cartridge_only": false,
    "offset": 264,
    "mask": "FFFFFFFF",
-   "lo": "60A86019",
-   "hi": "60A86019"
+   "lo": "DEAD6019",
+   "hi": "DEAD6019"
   },
   {
-   "index": 303,
-   "suite": "bus",
-   "name": "obuswint-3-nops",
-   "kind": "range",
-   "cartridge_only": false,
-   "offset": 268,
-   "mask": "FFFFFFFF",
-   "lo": "60E84770",
-   "hi": "60E84770"
-  },
-  {
-   "index": 304,
+   "index": 298,
    "suite": "bus",
    "name": "obusbus-iwram-ldr-a",
    "kind": "range",
@@ -3392,7 +3326,7 @@
    "hi": "3E026028"
   },
   {
-   "index": 305,
+   "index": 299,
    "suite": "bus",
    "name": "obusbus-iwram-ldr-b",
    "kind": "range",
@@ -3403,7 +3337,7 @@
    "hi": "60A83E02"
   },
   {
-   "index": 306,
+   "index": 300,
    "suite": "bus",
    "name": "obusbus-iwram-ldrh-a",
    "kind": "range",
@@ -3414,7 +3348,7 @@
    "hi": "00006128"
   },
   {
-   "index": 307,
+   "index": 301,
    "suite": "bus",
    "name": "obusbus-iwram-ldrh-b",
    "kind": "range",
@@ -3425,7 +3359,7 @@
    "hi": "00003E02"
   },
   {
-   "index": 308,
+   "index": 302,
    "suite": "bus",
    "name": "obusbus-ewram-ldr-a",
    "kind": "range",
@@ -3436,7 +3370,7 @@
    "hi": "60286028"
   },
   {
-   "index": 309,
+   "index": 303,
    "suite": "bus",
    "name": "obusbus-ewram-ldr-b",
    "kind": "range",
@@ -3447,7 +3381,7 @@
    "hi": "60A860A8"
   },
   {
-   "index": 310,
+   "index": 304,
    "suite": "bus",
    "name": "obusbus-ewram-ldrh-a",
    "kind": "range",
@@ -3458,7 +3392,7 @@
    "hi": "00006128"
   },
   {
-   "index": 311,
+   "index": 305,
    "suite": "bus",
    "name": "obusbus-ewram-ldrh-b",
    "kind": "range",
@@ -3469,7 +3403,7 @@
    "hi": "000061A8"
   },
   {
-   "index": 312,
+   "index": 306,
    "suite": "bus",
    "name": "obusbus-vram-ldr-a",
    "kind": "range",
@@ -3480,7 +3414,7 @@
    "hi": "60286028"
   },
   {
-   "index": 313,
+   "index": 307,
    "suite": "bus",
    "name": "obusbus-vram-ldr-b",
    "kind": "range",
@@ -3491,7 +3425,7 @@
    "hi": "60A860A8"
   },
   {
-   "index": 314,
+   "index": 308,
    "suite": "bus",
    "name": "obusbus-vram-ldrh-a",
    "kind": "range",
@@ -3502,7 +3436,7 @@
    "hi": "00006128"
   },
   {
-   "index": 315,
+   "index": 309,
    "suite": "bus",
    "name": "obusbus-vram-ldrh-b",
    "kind": "range",
@@ -3513,7 +3447,7 @@
    "hi": "000061A8"
   },
   {
-   "index": 316,
+   "index": 310,
    "suite": "bus",
    "name": "obusbus-oam-ldr-a",
    "kind": "range",
@@ -3524,7 +3458,7 @@
    "hi": "606E6028"
   },
   {
-   "index": 317,
+   "index": 311,
    "suite": "bus",
    "name": "obusbus-oam-ldr-b",
    "kind": "range",
@@ -3535,7 +3469,7 @@
    "hi": "60A83E02"
   },
   {
-   "index": 318,
+   "index": 312,
    "suite": "bus",
    "name": "obusbus-oam-ldrh-a",
    "kind": "range",
@@ -3546,7 +3480,7 @@
    "hi": "00006128"
   },
   {
-   "index": 319,
+   "index": 313,
    "suite": "bus",
    "name": "obusbus-oam-ldrh-b",
    "kind": "range",
@@ -3557,7 +3491,7 @@
    "hi": "00003E02"
   },
   {
-   "index": 320,
+   "index": 314,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k0",
    "kind": "range",
@@ -3568,7 +3502,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 321,
+   "index": 315,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k1",
    "kind": "range",
@@ -3579,7 +3513,7 @@
    "hi": "001B8C00"
   },
   {
-   "index": 322,
+   "index": 316,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k2",
    "kind": "range",
@@ -3590,7 +3524,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 323,
+   "index": 317,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k3",
    "kind": "range",
@@ -3601,7 +3535,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 324,
+   "index": 318,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k4",
    "kind": "range",
@@ -3612,7 +3546,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 325,
+   "index": 319,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k5",
    "kind": "range",
@@ -3623,7 +3557,7 @@
    "hi": "001BF201"
   },
   {
-   "index": 326,
+   "index": 320,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k6",
    "kind": "range",
@@ -3634,7 +3568,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 327,
+   "index": 321,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k7",
    "kind": "range",
@@ -3645,7 +3579,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 328,
+   "index": 322,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k8",
    "kind": "range",
@@ -3656,7 +3590,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 329,
+   "index": 323,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k9",
    "kind": "range",
@@ -3667,7 +3601,7 @@
    "hi": "001C5802"
   },
   {
-   "index": 330,
+   "index": 324,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k10",
    "kind": "range",
@@ -3678,7 +3612,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 331,
+   "index": 325,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k11",
    "kind": "range",
@@ -3689,7 +3623,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 332,
+   "index": 326,
    "suite": "ppu",
    "name": "breakram-loop-iwram-k12",
    "kind": "range",
@@ -3700,7 +3634,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 333,
+   "index": 327,
    "suite": "ppu",
    "name": "breakram-loop-stale-k0",
    "kind": "range",
@@ -3711,7 +3645,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 334,
+   "index": 328,
    "suite": "ppu",
    "name": "breakram-loop-stale-k1",
    "kind": "range",
@@ -3722,7 +3656,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 335,
+   "index": 329,
    "suite": "ppu",
    "name": "breakram-loop-stale-k2",
    "kind": "range",
@@ -3733,7 +3667,7 @@
    "hi": "001B8B00"
   },
   {
-   "index": 336,
+   "index": 330,
    "suite": "ppu",
    "name": "breakram-loop-stale-k3",
    "kind": "range",
@@ -3744,7 +3678,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 337,
+   "index": 331,
    "suite": "ppu",
    "name": "breakram-loop-stale-k4",
    "kind": "range",
@@ -3755,7 +3689,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 338,
+   "index": 332,
    "suite": "ppu",
    "name": "breakram-loop-stale-k5",
    "kind": "range",
@@ -3766,7 +3700,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 339,
+   "index": 333,
    "suite": "ppu",
    "name": "breakram-loop-stale-k6",
    "kind": "range",
@@ -3777,7 +3711,7 @@
    "hi": "001BF101"
   },
   {
-   "index": 340,
+   "index": 334,
    "suite": "ppu",
    "name": "breakram-loop-stale-k7",
    "kind": "range",
@@ -3788,7 +3722,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 341,
+   "index": 335,
    "suite": "ppu",
    "name": "breakram-loop-stale-k8",
    "kind": "range",
@@ -3799,7 +3733,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 342,
+   "index": 336,
    "suite": "ppu",
    "name": "breakram-loop-stale-k9",
    "kind": "range",
@@ -3810,7 +3744,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 343,
+   "index": 337,
    "suite": "ppu",
    "name": "breakram-loop-stale-k10",
    "kind": "range",
@@ -3821,7 +3755,7 @@
    "hi": "001C5702"
   },
   {
-   "index": 344,
+   "index": 338,
    "suite": "ppu",
    "name": "breakram-loop-stale-k11",
    "kind": "range",
@@ -3832,7 +3766,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 345,
+   "index": 339,
    "suite": "ppu",
    "name": "breakram-loop-stale-k12",
    "kind": "range",
@@ -3843,7 +3777,7 @@
    "hi": "FFFFFE00"
   },
   {
-   "index": 346,
+   "index": 340,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k0",
    "kind": "range",
@@ -3854,7 +3788,7 @@
    "hi": "000D170D"
   },
   {
-   "index": 347,
+   "index": 341,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k1",
    "kind": "range",
@@ -3865,7 +3799,7 @@
    "hi": "000CEE0C"
   },
   {
-   "index": 348,
+   "index": 342,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k2",
    "kind": "range",
@@ -3876,7 +3810,7 @@
    "hi": "000C9C0A"
   },
   {
-   "index": 349,
+   "index": 343,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k3",
    "kind": "range",
@@ -3887,7 +3821,7 @@
    "hi": "000C7309"
   },
   {
-   "index": 350,
+   "index": 344,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k4",
    "kind": "range",
@@ -3898,7 +3832,7 @@
    "hi": "000C2107"
   },
   {
-   "index": 351,
+   "index": 345,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k5",
    "kind": "range",
@@ -3909,7 +3843,7 @@
    "hi": "000BF806"
   },
   {
-   "index": 352,
+   "index": 346,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k6",
    "kind": "range",
@@ -3920,7 +3854,7 @@
    "hi": "000BA604"
   },
   {
-   "index": 353,
+   "index": 347,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k7",
    "kind": "range",
@@ -3931,7 +3865,7 @@
    "hi": "000B7D03"
   },
   {
-   "index": 354,
+   "index": 348,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k8",
    "kind": "range",
@@ -3942,7 +3876,7 @@
    "hi": "000B2B01"
   },
   {
-   "index": 355,
+   "index": 349,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k9",
    "kind": "range",
@@ -3953,7 +3887,7 @@
    "hi": "000B0200"
   },
   {
-   "index": 356,
+   "index": 350,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k10",
    "kind": "range",
@@ -3964,7 +3898,7 @@
    "hi": "000D160D"
   },
   {
-   "index": 357,
+   "index": 351,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k11",
    "kind": "range",
@@ -3975,7 +3909,7 @@
    "hi": "000CED0C"
   },
   {
-   "index": 358,
+   "index": 352,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k12",
    "kind": "range",
@@ -3986,7 +3920,7 @@
    "hi": "000C9B0A"
   },
   {
-   "index": 359,
+   "index": 353,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k13",
    "kind": "range",
@@ -3997,7 +3931,7 @@
    "hi": "000C7209"
   },
   {
-   "index": 360,
+   "index": 354,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k14",
    "kind": "range",
@@ -4008,7 +3942,7 @@
    "hi": "000C2007"
   },
   {
-   "index": 361,
+   "index": 355,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k15",
    "kind": "range",
@@ -4019,7 +3953,7 @@
    "hi": "000BF706"
   },
   {
-   "index": 362,
+   "index": 356,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k16",
    "kind": "range",
@@ -4030,7 +3964,7 @@
    "hi": "000BA504"
   },
   {
-   "index": 363,
+   "index": 357,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k17",
    "kind": "range",
@@ -4041,7 +3975,7 @@
    "hi": "000B7C03"
   },
   {
-   "index": 364,
+   "index": 358,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k18",
    "kind": "range",
@@ -4052,7 +3986,7 @@
    "hi": "000B2A01"
   },
   {
-   "index": 365,
+   "index": 359,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k19",
    "kind": "range",
@@ -4063,7 +3997,7 @@
    "hi": "000B0100"
   },
   {
-   "index": 366,
+   "index": 360,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k20",
    "kind": "range",
@@ -4074,7 +4008,7 @@
    "hi": "000D150D"
   },
   {
-   "index": 367,
+   "index": 361,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k21",
    "kind": "range",
@@ -4085,7 +4019,7 @@
    "hi": "000CEC0C"
   },
   {
-   "index": 368,
+   "index": 362,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k22",
    "kind": "range",
@@ -4096,7 +4030,7 @@
    "hi": "000C9A0A"
   },
   {
-   "index": 369,
+   "index": 363,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k23",
    "kind": "range",
@@ -4107,7 +4041,7 @@
    "hi": "000C7109"
   },
   {
-   "index": 370,
+   "index": 364,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k24",
    "kind": "range",
@@ -4118,7 +4052,7 @@
    "hi": "000C1F07"
   },
   {
-   "index": 371,
+   "index": 365,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k25",
    "kind": "range",
@@ -4129,7 +4063,7 @@
    "hi": "000BF606"
   },
   {
-   "index": 372,
+   "index": 366,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k26",
    "kind": "range",
@@ -4140,7 +4074,7 @@
    "hi": "000BA404"
   },
   {
-   "index": 373,
+   "index": 367,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k27",
    "kind": "range",
@@ -4151,7 +4085,7 @@
    "hi": "000B7B03"
   },
   {
-   "index": 374,
+   "index": 368,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k28",
    "kind": "range",
@@ -4162,7 +4096,7 @@
    "hi": "000B2901"
   },
   {
-   "index": 375,
+   "index": 369,
    "suite": "ppu",
    "name": "breakram-loop-ewram-k29",
    "kind": "range",
@@ -4173,7 +4107,7 @@
    "hi": "000B0000"
   },
   {
-   "index": 376,
+   "index": 370,
    "suite": "ppu",
    "name": "breakram-stamp-k0",
    "kind": "range",
@@ -4184,7 +4118,7 @@
    "hi": "4A9FFFFF"
   },
   {
-   "index": 377,
+   "index": 371,
    "suite": "ppu",
    "name": "breakram-stamp-k1",
    "kind": "range",
@@ -4195,7 +4129,7 @@
    "hi": "4A9E1B8C"
   },
   {
-   "index": 378,
+   "index": 372,
    "suite": "ppu",
    "name": "breakram-stamp-k2",
    "kind": "range",
@@ -4206,7 +4140,7 @@
    "hi": "4A9DFFFF"
   },
   {
-   "index": 379,
+   "index": 373,
    "suite": "ppu",
    "name": "breakram-stamp-v160-k0",
    "kind": "range",
@@ -4217,7 +4151,7 @@
    "hi": "4A9E1B8C"
   },
   {
-   "index": 380,
+   "index": 374,
    "suite": "ppu",
    "name": "breakram-stamp-v160-k1",
    "kind": "range",
@@ -4228,7 +4162,7 @@
    "hi": "4A9DFFFF"
   },
   {
-   "index": 381,
+   "index": 375,
    "suite": "ppu",
    "name": "breakram-stamp-v160-k2",
    "kind": "range",
@@ -4239,7 +4173,7 @@
    "hi": "4A9CFFFF"
   },
   {
-   "index": 382,
+   "index": 376,
    "suite": "ppu",
    "name": "breakram-stamp-v30-k0",
    "kind": "range",
@@ -4250,7 +4184,7 @@
    "hi": "035E00AD"
   },
   {
-   "index": 383,
+   "index": 377,
    "suite": "ppu",
    "name": "breakram-stamp-v30-k1",
    "kind": "range",
@@ -4261,7 +4195,7 @@
    "hi": "035DFFFF"
   },
   {
-   "index": 384,
+   "index": 378,
    "suite": "ppu",
    "name": "breakram-stamp-v30-k2",
    "kind": "range",
@@ -4272,7 +4206,7 @@
    "hi": "035CFFFF"
   },
   {
-   "index": 385,
+   "index": 379,
    "suite": "ppu",
    "name": "breakram-stamp-dma0-v30-k0",
    "kind": "range",
@@ -4283,7 +4217,7 @@
    "hi": "035E00AD"
   },
   {
-   "index": 386,
+   "index": 380,
    "suite": "ppu",
    "name": "breakram-stamp-dma0-v30-k1",
    "kind": "range",
@@ -4294,7 +4228,7 @@
    "hi": "035DFFFF"
   },
   {
-   "index": 387,
+   "index": 381,
    "suite": "ppu",
    "name": "breakram-stamp-dma0-v30-k2",
    "kind": "range",
@@ -4305,7 +4239,7 @@
    "hi": "035CFFFF"
   },
   {
-   "index": 388,
+   "index": 382,
    "suite": "ppu",
    "name": "breakram-stamp-vdma-v159-k0",
    "kind": "range",
@@ -4316,7 +4250,7 @@
    "hi": "043FFFFF"
   },
   {
-   "index": 389,
+   "index": 383,
    "suite": "ppu",
    "name": "breakram-stamp-vdma-v159-k1",
    "kind": "range",
@@ -4327,7 +4261,7 @@
    "hi": "043EFFFF"
   },
   {
-   "index": 390,
+   "index": 384,
    "suite": "ppu",
    "name": "breakram-stamp-vdma-v159-k2",
    "kind": "range",
@@ -4338,7 +4272,7 @@
    "hi": "043DFFFF"
   },
   {
-   "index": 391,
+   "index": 385,
    "suite": "ppu",
    "name": "breakram-stamp-hblank-v30-k0",
    "kind": "range",
@@ -4349,7 +4283,7 @@
    "hi": "04620129"
   },
   {
-   "index": 392,
+   "index": 386,
    "suite": "ppu",
    "name": "breakram-stamp-hblank-v30-k1",
    "kind": "range",
@@ -4360,7 +4294,7 @@
    "hi": "0461FFFF"
   },
   {
-   "index": 393,
+   "index": 387,
    "suite": "ppu",
    "name": "breakram-stamp-hblank-v30-k2",
    "kind": "range",
@@ -4371,7 +4305,7 @@
    "hi": "0460FFFF"
   },
   {
-   "index": 394,
+   "index": 388,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k28",
    "kind": "range",
@@ -4382,7 +4316,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 395,
+   "index": 389,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k29",
    "kind": "range",
@@ -4393,7 +4327,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 396,
+   "index": 390,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k30",
    "kind": "range",
@@ -4404,7 +4338,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 397,
+   "index": 391,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k31",
    "kind": "range",
@@ -4415,7 +4349,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 398,
+   "index": 392,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k32",
    "kind": "range",
@@ -4426,7 +4360,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 399,
+   "index": 393,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k33",
    "kind": "range",
@@ -4437,7 +4371,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 400,
+   "index": 394,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k34",
    "kind": "range",
@@ -4448,7 +4382,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 401,
+   "index": 395,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k35",
    "kind": "range",
@@ -4459,7 +4393,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 402,
+   "index": 396,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k36",
    "kind": "range",
@@ -4470,7 +4404,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 403,
+   "index": 397,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k37",
    "kind": "range",
@@ -4481,7 +4415,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 404,
+   "index": 398,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k38",
    "kind": "range",
@@ -4492,7 +4426,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 405,
+   "index": 399,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k39",
    "kind": "range",
@@ -4503,7 +4437,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 406,
+   "index": 400,
    "suite": "ppu",
    "name": "breakram-edge200-v30-k40",
    "kind": "range",
@@ -4514,7 +4448,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 407,
+   "index": 401,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k18",
    "kind": "range",
@@ -4525,7 +4459,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 408,
+   "index": 402,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k19",
    "kind": "range",
@@ -4536,7 +4470,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 409,
+   "index": 403,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k20",
    "kind": "range",
@@ -4547,7 +4481,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 410,
+   "index": 404,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k21",
    "kind": "range",
@@ -4558,7 +4492,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 411,
+   "index": 405,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k22",
    "kind": "range",
@@ -4569,7 +4503,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 412,
+   "index": 406,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k23",
    "kind": "range",
@@ -4580,7 +4514,7 @@
    "hi": "00001E04"
   },
   {
-   "index": 413,
+   "index": 407,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k24",
    "kind": "range",
@@ -4591,7 +4525,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 414,
+   "index": 408,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k25",
    "kind": "range",
@@ -4602,7 +4536,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 415,
+   "index": 409,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k26",
    "kind": "range",
@@ -4613,7 +4547,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 416,
+   "index": 410,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k27",
    "kind": "range",
@@ -4624,7 +4558,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 417,
+   "index": 411,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k28",
    "kind": "range",
@@ -4635,7 +4569,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 418,
+   "index": 412,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k29",
    "kind": "range",
@@ -4646,7 +4580,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 419,
+   "index": 413,
    "suite": "ppu",
    "name": "breakram-edge212-running-v30-k30",
    "kind": "range",
@@ -4657,7 +4591,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 420,
+   "index": 414,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k28",
    "kind": "range",
@@ -4668,7 +4602,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 421,
+   "index": 415,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k29",
    "kind": "range",
@@ -4679,7 +4613,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 422,
+   "index": 416,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k30",
    "kind": "range",
@@ -4690,7 +4624,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 423,
+   "index": 417,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k31",
    "kind": "range",
@@ -4701,7 +4635,7 @@
    "hi": "00001E06"
   },
   {
-   "index": 424,
+   "index": 418,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k32",
    "kind": "range",
@@ -4712,7 +4646,7 @@
    "hi": "00001F06"
   },
   {
-   "index": 425,
+   "index": 419,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k33",
    "kind": "range",
@@ -4723,7 +4657,7 @@
    "hi": "00001F06"
   },
   {
-   "index": 426,
+   "index": 420,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k34",
    "kind": "range",
@@ -4734,7 +4668,7 @@
    "hi": "00001F06"
   },
   {
-   "index": 427,
+   "index": 421,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k35",
    "kind": "range",
@@ -4745,7 +4679,7 @@
    "hi": "00001F04"
   },
   {
-   "index": 428,
+   "index": 422,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k36",
    "kind": "range",
@@ -4756,7 +4690,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 429,
+   "index": 423,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k37",
    "kind": "range",
@@ -4767,7 +4701,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 430,
+   "index": 424,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k38",
    "kind": "range",
@@ -4778,7 +4712,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 431,
+   "index": 425,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k39",
    "kind": "range",
@@ -4789,7 +4723,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 432,
+   "index": 426,
    "suite": "ppu",
    "name": "breakram-edge255-v30-k40",
    "kind": "range",
@@ -4800,7 +4734,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 433,
+   "index": 427,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k28",
    "kind": "range",
@@ -4811,7 +4745,7 @@
    "hi": "00009F06"
   },
   {
-   "index": 434,
+   "index": 428,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k29",
    "kind": "range",
@@ -4822,7 +4756,7 @@
    "hi": "00009F06"
   },
   {
-   "index": 435,
+   "index": 429,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k30",
    "kind": "range",
@@ -4833,7 +4767,7 @@
    "hi": "00009F06"
   },
   {
-   "index": 436,
+   "index": 430,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k31",
    "kind": "range",
@@ -4844,7 +4778,7 @@
    "hi": "00009F06"
   },
   {
-   "index": 437,
+   "index": 431,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k32",
    "kind": "range",
@@ -4855,7 +4789,7 @@
    "hi": "0000A006"
   },
   {
-   "index": 438,
+   "index": 432,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k33",
    "kind": "range",
@@ -4866,7 +4800,7 @@
    "hi": "0000A006"
   },
   {
-   "index": 439,
+   "index": 433,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k34",
    "kind": "range",
@@ -4877,7 +4811,7 @@
    "hi": "0000A006"
   },
   {
-   "index": 440,
+   "index": 434,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k35",
    "kind": "range",
@@ -4888,7 +4822,7 @@
    "hi": "0000A005"
   },
   {
-   "index": 441,
+   "index": 435,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k36",
    "kind": "range",
@@ -4899,7 +4833,7 @@
    "hi": "0000A001"
   },
   {
-   "index": 442,
+   "index": 436,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k37",
    "kind": "range",
@@ -4910,7 +4844,7 @@
    "hi": "0000A001"
   },
   {
-   "index": 443,
+   "index": 437,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k38",
    "kind": "range",
@@ -4921,7 +4855,7 @@
    "hi": "0000A001"
   },
   {
-   "index": 444,
+   "index": 438,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k39",
    "kind": "range",
@@ -4932,7 +4866,7 @@
    "hi": "0000A001"
   },
   {
-   "index": 445,
+   "index": 439,
    "suite": "ppu",
    "name": "breakram-edge255-v159-k40",
    "kind": "range",
@@ -4943,7 +4877,7 @@
    "hi": "0000A001"
   },
   {
-   "index": 446,
+   "index": 440,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k34",
    "kind": "range",
@@ -4954,7 +4888,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 447,
+   "index": 441,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k35",
    "kind": "range",
@@ -4965,7 +4899,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 448,
+   "index": 442,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k36",
    "kind": "range",
@@ -4976,7 +4910,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 449,
+   "index": 443,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k37",
    "kind": "range",
@@ -4987,7 +4921,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 450,
+   "index": 444,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k38",
    "kind": "range",
@@ -4998,7 +4932,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 451,
+   "index": 445,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k39",
    "kind": "range",
@@ -5009,7 +4943,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 452,
+   "index": 446,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k40",
    "kind": "range",
@@ -5020,7 +4954,7 @@
    "hi": "00001F02"
   },
   {
-   "index": 453,
+   "index": 447,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k41",
    "kind": "range",
@@ -5031,7 +4965,7 @@
    "hi": "00001F02"
   },
   {
-   "index": 454,
+   "index": 448,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k42",
    "kind": "range",
@@ -5042,7 +4976,7 @@
    "hi": "00001F02"
   },
   {
-   "index": 455,
+   "index": 449,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k43",
    "kind": "range",
@@ -5053,7 +4987,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 456,
+   "index": 450,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k44",
    "kind": "range",
@@ -5064,7 +4998,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 457,
+   "index": 451,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k45",
    "kind": "range",
@@ -5075,7 +5009,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 458,
+   "index": 452,
    "suite": "ppu",
    "name": "breakram-edge12-nodma-hblank-v30-k46",
    "kind": "range",
@@ -5086,7 +5020,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 459,
+   "index": 453,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k32",
    "kind": "range",
@@ -5097,7 +5031,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 460,
+   "index": 454,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k33",
    "kind": "range",
@@ -5108,7 +5042,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 461,
+   "index": 455,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k34",
    "kind": "range",
@@ -5119,7 +5053,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 462,
+   "index": 456,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k35",
    "kind": "range",
@@ -5130,7 +5064,7 @@
    "hi": "00001E02"
   },
   {
-   "index": 463,
+   "index": 457,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k36",
    "kind": "range",
@@ -5141,7 +5075,7 @@
    "hi": "00001F02"
   },
   {
-   "index": 464,
+   "index": 458,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k37",
    "kind": "range",
@@ -5152,7 +5086,7 @@
    "hi": "00001F02"
   },
   {
-   "index": 465,
+   "index": 459,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k38",
    "kind": "range",
@@ -5163,7 +5097,7 @@
    "hi": "00001F02"
   },
   {
-   "index": 466,
+   "index": 460,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k39",
    "kind": "range",
@@ -5174,7 +5108,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 467,
+   "index": 461,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k40",
    "kind": "range",
@@ -5185,7 +5119,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 468,
+   "index": 462,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k41",
    "kind": "range",
@@ -5196,7 +5130,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 469,
+   "index": 463,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k42",
    "kind": "range",
@@ -5207,7 +5141,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 470,
+   "index": 464,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k43",
    "kind": "range",
@@ -5218,7 +5152,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 471,
+   "index": 465,
    "suite": "ppu",
    "name": "breakram-edge12-hblank-v30-k44",
    "kind": "range",
@@ -5229,7 +5163,7 @@
    "hi": "00001F00"
   },
   {
-   "index": 472,
+   "index": 466,
    "suite": "apu",
    "name": "sweep-period-0-never-ticks",
    "kind": "range",
@@ -5240,7 +5174,7 @@
    "hi": "00080000"
   },
   {
-   "index": 473,
+   "index": 467,
    "suite": "apu",
    "name": "sweep-trigger-overflow",
    "kind": "range",
@@ -5251,7 +5185,7 @@
    "hi": "00000000"
   },
   {
-   "index": 474,
+   "index": 468,
    "suite": "apu",
    "name": "sweep-trigger-second-check",
    "kind": "range",
@@ -5262,7 +5196,7 @@
    "hi": "00000000"
   },
   {
-   "index": 475,
+   "index": 469,
    "suite": "apu",
    "name": "sweep-first-tick-rechecks",
    "kind": "range",
@@ -5273,7 +5207,7 @@
    "hi": "00001800"
   },
   {
-   "index": 476,
+   "index": 470,
    "suite": "apu",
    "name": "sweep-512-dies-tick-3",
    "kind": "range",
@@ -5284,7 +5218,7 @@
    "hi": "00004000"
   },
   {
-   "index": 477,
+   "index": 471,
    "suite": "apu",
    "name": "sweep-2018-survives-2048",
    "kind": "range",
@@ -5295,7 +5229,7 @@
    "hi": "00001A00"
   },
   {
-   "index": 478,
+   "index": 472,
    "suite": "apu",
    "name": "sweep-940-same-offset",
    "kind": "range",
@@ -5306,7 +5240,7 @@
    "hi": "00001A00"
   },
   {
-   "index": 479,
+   "index": 473,
    "suite": "apu",
    "name": "sweep-2033-dies-at-trigger",
    "kind": "range",
@@ -5317,100 +5251,166 @@
    "hi": "00000200"
   },
   {
-   "index": 480,
+   "index": 474,
    "suite": "apu",
    "name": "psg-ch1-first-trigger-dies",
    "kind": "range",
-   "cartridge_only": false,
-   "offset": 256,
+   "cartridge_only": true,
+   "offset": 0,
    "mask": "0000FFFF",
    "lo": "00000000",
    "hi": "00000000"
+  },
+  {
+   "index": 475,
+   "suite": "apu",
+   "name": "psg-ch2-first-trigger-lives",
+   "kind": "range",
+   "cartridge_only": true,
+   "offset": 2,
+   "mask": "0000FFFF",
+   "lo": "00003F82",
+   "hi": "00004B3A"
+  },
+  {
+   "index": 476,
+   "suite": "apu",
+   "name": "psg-ch3-first-trigger-lives",
+   "kind": "range",
+   "cartridge_only": true,
+   "offset": 4,
+   "mask": "0000FFFF",
+   "lo": "0000439B",
+   "hi": "00004F53"
+  },
+  {
+   "index": 477,
+   "suite": "apu",
+   "name": "psg-ch4-first-trigger-lives",
+   "kind": "range",
+   "cartridge_only": true,
+   "offset": 6,
+   "mask": "0000FFFF",
+   "lo": "0000439C",
+   "hi": "00004F54"
+  },
+  {
+   "index": 478,
+   "suite": "apu",
+   "name": "psg-ch1-nr10-0-dies",
+   "kind": "range",
+   "cartridge_only": true,
+   "offset": 8,
+   "mask": "0000FFFF",
+   "lo": "00000000",
+   "hi": "00000000"
+  },
+  {
+   "index": 479,
+   "suite": "apu",
+   "name": "psg-ch1-sweep-running-lives",
+   "kind": "range",
+   "cartridge_only": true,
+   "offset": 10,
+   "mask": "0000FFFF",
+   "lo": "00000391",
+   "hi": "00000A99"
+  },
+  {
+   "index": 480,
+   "suite": "apu",
+   "name": "psg-ch1-after-ch2-lives",
+   "kind": "range",
+   "cartridge_only": true,
+   "offset": 12,
+   "mask": "0000FFFF",
+   "lo": "0000413F",
+   "hi": "00004CF7"
   },
   {
    "index": 481,
    "suite": "apu",
-   "name": "psg-ch2-first-trigger-lives",
+   "name": "psg-ch2-before-ch1-lives",
    "kind": "range",
-   "cartridge_only": false,
-   "offset": 258,
+   "cartridge_only": true,
+   "offset": 14,
    "mask": "0000FFFF",
-   "lo": "00001000",
-   "hi": "0000FFFE"
+   "lo": "0000439B",
+   "hi": "00004F53"
   },
   {
    "index": 482,
    "suite": "apu",
-   "name": "psg-ch3-first-trigger-lives",
+   "name": "psg-ch1-second-trigger-dies",
    "kind": "range",
-   "cartridge_only": false,
-   "offset": 260,
+   "cartridge_only": true,
+   "offset": 16,
    "mask": "0000FFFF",
-   "lo": "00001000",
-   "hi": "0000FFFE"
+   "lo": "00000000",
+   "hi": "00000000"
   },
   {
    "index": 483,
    "suite": "apu",
-   "name": "psg-ch4-first-trigger-lives",
+   "name": "psg-ch1-third-trigger-lives",
    "kind": "range",
-   "cartridge_only": false,
-   "offset": 262,
+   "cartridge_only": true,
+   "offset": 18,
    "mask": "0000FFFF",
-   "lo": "00001000",
-   "hi": "0000FFFE"
+   "lo": "00004398",
+   "hi": "00004F50"
   },
   {
    "index": 484,
    "suite": "apu",
-   "name": "psg-ch1-nr10-0-dies",
+   "name": "psg-soundcnt-x-after-ch1",
    "kind": "range",
-   "cartridge_only": false,
-   "offset": 264,
-   "mask": "0000FFFF",
-   "lo": "00000000",
-   "hi": "00000000"
-  },
-  {
-   "index": 485,
-   "suite": "apu",
-   "name": "psg-ch1-sweep-on-lives",
-   "kind": "range",
-   "cartridge_only": false,
-   "offset": 266,
-   "mask": "0000FFFF",
-   "lo": "00000100",
-   "hi": "0000FFFE"
-  },
-  {
-   "index": 486,
-   "suite": "apu",
-   "name": "psg-ch1-second-trigger-dies",
-   "kind": "range",
-   "cartridge_only": false,
-   "offset": 272,
-   "mask": "0000FFFF",
-   "lo": "00000000",
-   "hi": "00000000"
-  },
-  {
-   "index": 487,
-   "suite": "apu",
-   "name": "psg-soundcnt-x-after-dying",
-   "kind": "range",
-   "cartridge_only": false,
-   "offset": 277,
+   "cartridge_only": true,
+   "offset": 21,
    "mask": "000000FF",
    "lo": "00000080",
    "hi": "00000080"
   },
   {
+   "index": 485,
+   "suite": "apu",
+   "name": "psg-soundcnt-x-after-ch2",
+   "kind": "range",
+   "cartridge_only": true,
+   "offset": 22,
+   "mask": "000000FF",
+   "lo": "00000082",
+   "hi": "00000082"
+  },
+  {
+   "index": 486,
+   "suite": "apu",
+   "name": "psg-soundcnt-x-after-ch4",
+   "kind": "range",
+   "cartridge_only": true,
+   "offset": 23,
+   "mask": "000000FF",
+   "lo": "00000088",
+   "hi": "00000088"
+  },
+  {
+   "index": 487,
+   "suite": "apu",
+   "name": "psg-ch1-length-off-never-expires",
+   "kind": "range",
+   "cartridge_only": true,
+   "offset": 24,
+   "mask": "0000FFFF",
+   "lo": "0000FFFF",
+   "hi": "0000FFFF"
+  },
+  {
    "index": 488,
    "suite": "apu",
-   "name": "psg-ch1-length-off-lives",
+   "name": "psg-ch2-length-off-never-expires",
    "kind": "range",
-   "cartridge_only": false,
-   "offset": 280,
+   "cartridge_only": true,
+   "offset": 26,
    "mask": "0000FFFF",
    "lo": "0000FFFF",
    "hi": "0000FFFF"

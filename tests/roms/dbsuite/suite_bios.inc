@@ -12,7 +12,7 @@
 @ PROVENANCE: AGB SP through tools/hwlink (payloadcmp), 2026-09-18, the
 @ real BIOS: 0 of 96 bytes differ from dingbat's HLE (memory note
 @ gba-hardware-link-2026-09-17, "swiedge closed"), and dingbat's answers
-@ are the values below; re-read on the SP by dbsuite's multiboot run.
+@ are the values below.
     payload_blob pl_swiedge, "swiedge.bin"
     cword "get-bios-checksum",      run_payload, 0x100, 0xBAAE187F, 0, pl_swiedge, 0
     cword "div-10-3-quotient",      RUN_SAME, 0x104, 3

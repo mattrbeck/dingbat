@@ -83,25 +83,144 @@ run_sweep:
     crange "sweep-2033-dies-at-trigger", RUN_SAME, 28, 0xFFFFFFFF, 0, 0x200, F_CART
 
 @ ──────────────────────── first trigger after master-on ───────────────────
-@ WHAT: tests/roms/payloads/psgfirst.s (gbaedge page 51 PSGFIRST re-hosted,
-@ rows unchanged): each channel's first trigger after a SOUNDCNT_X
-@ off/on, counter 16, polling until the active bit falls.
+@ WHAT: gbaedge page 51 PSGFIRST, its rows and macros unchanged: each
+@ channel's first trigger after a SOUNDCNT_X off/on, counter 16, polling
+@ until the active bit falls (a 16-bit count; FFFF = never fell).
 @ WHY: channel 1 alone dies at once (0 polls) -- on its first AND second
 @ trigger, with NR10 = 0 -- while ch2/3/4 live; NR10 = 0x11 saves it; a
 @ trigger with the length counter off never expires (FFFF); SOUNDCNT_X
 @ reads 0x80 straight after the dying trigger.  (Later work pinned the
-@ cause on the sweep's f + f overflow check at f = 0x400.)  Lifetimes are
-@ poll counts that depend on the loop's speed: only "lives" is checked.
+@ cause on the sweep's f + f overflow check at f = 0x400.)
 @ PROVENANCE: AGB SP, gbaedge page 51 PSGFIRST (session 6, 2026-09-16, CRC
-@ 4549; agb-sp-6.txt, run from the cartridge).  The rows checked here are
-@ the ones that do not depend on the poll loop's speed.
-    payload_blob pl_psgfirst, "psgfirst.bin"
-    chalf "psg-ch1-first-trigger-dies", run_payload, 0x100, 0x0000, 0, pl_psgfirst
-    crange "psg-ch2-first-trigger-lives", RUN_SAME, 0x102, 0xFFFF, 0x1000, 0xFFFE
-    crange "psg-ch3-first-trigger-lives", RUN_SAME, 0x104, 0xFFFF, 0x1000, 0xFFFE
-    crange "psg-ch4-first-trigger-lives", RUN_SAME, 0x106, 0xFFFF, 0x1000, 0xFFFE
-    chalf "psg-ch1-nr10-0-dies",    RUN_SAME, 0x108, 0x0000
-    crange "psg-ch1-sweep-on-lives", RUN_SAME, 0x10A, 0xFFFF, 0x0100, 0xFFFE
-    chalf "psg-ch1-second-trigger-dies", RUN_SAME, 0x110, 0x0000
-    cbyte "psg-soundcnt-x-after-dying", RUN_SAME, 0x115, 0x80
-    chalf "psg-ch1-length-off-lives", RUN_SAME, 0x118, 0xFFFF
+@ 4549; agb-sp-6.txt), which ran this code from the cartridge at WAITCNT 0:
+@ cartridge only (from RAM the poll loop runs several times faster and the
+@ link-rig re-run of the page, psgwhy, saw some rows move).  Lifetimes are
+@ checked +-1500 polls around the console's (one 256 Hz length tick is
+@ ~1100 polls here); the dying rows, the SOUNDCNT_X reads and the
+@ never-expiring rows exactly.
+.macro pf_wait ctl, trig, bit
+    strh r0, [r4, #\ctl]
+    strh r1, [r4, #\trig]
+    ldrh r6, [r4, #0x84]
+    ldr r2, =0x00060000
+    mov r3, #0
+1:  ldrh r0, [r4, #0x84]
+    tst r0, #\bit
+    beq 2f
+    add r3, r3, #1
+    subs r2, r2, #1
+    bne 1b
+    add r9, r9, #1
+    mvn r3, #0
+2:
+.endm
+.macro pf_reset
+    mov r0, #0
+    strh r0, [r4, #0x84]
+    mov r0, #0x80
+    strh r0, [r4, #0x84]
+    ldr r0, =0xFF77
+    strh r0, [r4, #0x80]
+    mov r0, #2
+    strh r0, [r4, #0x82]
+.endm
+run_psgfirst:
+    push {r4-r11, lr}
+    ldr r8, =SLOT
+    mov r4, #IOBASE
+    mov r9, #0
+    pf_reset
+    ldr r0, =0xF0B0                @ envelope 15, duty 2, counter 16
+    ldr r1, =0xC400                @ trigger + length enable
+    pf_wait 0x62, 0x64, 1
+    strh r3, [r8, #0]
+    strb r6, [r8, #21]
+    pf_reset
+    ldr r0, =0xF0B0
+    ldr r1, =0xC400
+    pf_wait 0x68, 0x6C, 2
+    strh r3, [r8, #2]
+    strb r6, [r8, #22]
+    pf_reset
+    mov r0, #0x80                  @ ch3: DAC on, a non-zero wave
+    strh r0, [r4, #0x70]
+    ldr r0, =0x04000090
+    mvn r1, #0
+    str r1, [r0, #0]
+    str r1, [r0, #4]
+    str r1, [r0, #8]
+    str r1, [r0, #12]
+    ldr r0, =0x20F0
+    ldr r1, =0xC000
+    pf_wait 0x72, 0x74, 4
+    strh r3, [r8, #4]
+    pf_reset
+    ldr r0, =0xF030
+    ldr r1, =0xC000
+    pf_wait 0x78, 0x7C, 8
+    strh r3, [r8, #6]
+    strb r6, [r8, #23]
+    pf_reset
+    mov r0, #0
+    strh r0, [r4, #0x60]           @ NR10 = 0
+    ldr r0, =0xF0B0
+    ldr r1, =0xC400
+    pf_wait 0x62, 0x64, 1
+    strh r3, [r8, #8]
+    pf_reset
+    mov r0, #0x11                  @ NR10: period 1, shift 1
+    strh r0, [r4, #0x60]
+    ldr r0, =0xF0B0
+    ldr r1, =0xC400
+    pf_wait 0x62, 0x64, 1
+    strh r3, [r8, #10]
+    pf_reset
+    ldr r0, =0xF0B0
+    ldr r1, =0xC400
+    pf_wait 0x68, 0x6C, 2          @ ch2 takes the first slot
+    strh r3, [r8, #14]
+    ldr r0, =0xF0B0
+    ldr r1, =0xC400
+    pf_wait 0x62, 0x64, 1          @ ch1 second
+    strh r3, [r8, #12]
+    pf_reset
+    ldr r0, =0xF0B0
+    ldr r1, =0xC400
+    pf_wait 0x62, 0x64, 1          @ discarded
+    ldr r0, =0xF0B0
+    ldr r1, =0xC400
+    pf_wait 0x62, 0x64, 1
+    strh r3, [r8, #16]
+    ldr r0, =0xF0B0
+    ldr r1, =0xC400
+    pf_wait 0x62, 0x64, 1
+    strh r3, [r8, #18]
+    pf_reset
+    ldr r0, =0xF0B0
+    ldr r1, =0x8000                @ length enable clear
+    pf_wait 0x62, 0x64, 1
+    strh r3, [r8, #24]
+    pf_reset
+    ldr r0, =0xF0B0
+    ldr r1, =0x8000
+    pf_wait 0x68, 0x6C, 2
+    strh r3, [r8, #26]
+    mov r0, #0
+    strh r0, [r4, #0x84]
+    pop {r4-r11, pc}
+    .ltorg
+    chalf "psg-ch1-first-trigger-dies", run_psgfirst, 0, 0x0000, F_CART
+    crange "psg-ch2-first-trigger-lives", RUN_SAME, 2, 0xFFFF, 17758 - 1500, 17758 + 1500, F_CART
+    crange "psg-ch3-first-trigger-lives", RUN_SAME, 4, 0xFFFF, 18807 - 1500, 18807 + 1500, F_CART
+    crange "psg-ch4-first-trigger-lives", RUN_SAME, 6, 0xFFFF, 18808 - 1500, 18808 + 1500, F_CART
+    chalf "psg-ch1-nr10-0-dies",    RUN_SAME, 8, 0x0000, F_CART
+    crange "psg-ch1-sweep-running-lives", RUN_SAME, 10, 0xFFFF, 1813 - 900, 1813 + 900, F_CART
+    crange "psg-ch1-after-ch2-lives", RUN_SAME, 12, 0xFFFF, 18203 - 1500, 18203 + 1500, F_CART
+    crange "psg-ch2-before-ch1-lives", RUN_SAME, 14, 0xFFFF, 18807 - 1500, 18807 + 1500, F_CART
+    chalf "psg-ch1-second-trigger-dies", RUN_SAME, 16, 0x0000, F_CART
+    crange "psg-ch1-third-trigger-lives", RUN_SAME, 18, 0xFFFF, 18804 - 1500, 18804 + 1500, F_CART
+    cbyte "psg-soundcnt-x-after-ch1", RUN_SAME, 21, 0x80, F_CART
+    cbyte "psg-soundcnt-x-after-ch2", RUN_SAME, 22, 0x82, F_CART
+    cbyte "psg-soundcnt-x-after-ch4", RUN_SAME, 23, 0x88, F_CART
+    chalf "psg-ch1-length-off-never-expires", RUN_SAME, 24, 0xFFFF, F_CART
+    chalf "psg-ch2-length-off-never-expires", RUN_SAME, 26, 0xFFFF, F_CART
