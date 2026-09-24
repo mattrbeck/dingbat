@@ -5,16 +5,11 @@
 
 import std/[os, hashes, strformat, strutils]
 import zippy/ziparchives
-import ../common/linkproto
+import ../common/[linkproto, rom_exts]
 import ../gba/gba
 import ../gb/gb
 
-# The extensions a Game Boy ROM goes by: `.cgb` and `.sgb` are what some
-# dumps and homebrew name Color-only and Super Game Boy carts. The core
-# reads the mode from the header, never the name. Not `.dmg`: on macOS that
-# is a disk image, which would boot as a Game Boy cart full of noise.
-const GB_ROM_EXTS* = [".gb", ".gbc", ".cgb", ".sgb"]
-const ROM_EXTS* = [".gba", ".gb", ".gbc", ".cgb", ".sgb"]
+export rom_exts
 
 # The Open ROM dialog's filter: what `is_rom_file` takes, without the dots.
 const ROM_DIALOG_EXTS* = block:

@@ -86,7 +86,7 @@ const loadRom = (romName, originalName) => {
 
 const handleRomFile = (file) => {
   let ext = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
-  if (ext !== ".gba" && ext !== ".gb" && ext !== ".gbc") return;
+  if (![".gba", ".gb", ".gbc", ".cgb", ".sgb"].includes(ext)) return;
   let romName = "rom" + ext;
   let reader = new FileReader();
   reader.addEventListener("load", () => {

@@ -15,6 +15,7 @@ import dingbat/gb/rollback as gbrb
 import dingbat/gb/printer
 import dingbat/common/cheats
 import dingbat/common/lcd_response
+import dingbat/common/rom_exts
 
 const GBA_W = 240
 const GBA_H = 160
@@ -1369,7 +1370,7 @@ proc link_init(rom1_path, rom2_path: cstring): cint {.exportc.} =
   if stateTexture != nil:
     destroyTexture(stateTexture)
     stateTexture = nil
-  if ($rom1_path).splitFile().ext.toLowerAscii() in [".gb", ".gbc"]:
+  if ($rom1_path).splitFile().ext.toLowerAscii() in GB_ROM_EXTS:
     return gb_link_init($rom1_path, $rom2_path)
   var cores: seq[GBA] = @[]
   for path in [$rom1_path, $rom2_path]:
@@ -1575,7 +1576,7 @@ proc rollback_init(rom1_path, rom2_path: cstring; localPlayer: cint;
   if localPlayer < 0 or localPlayer > 1: return 0
   rbLocal = int(localPlayer)
   rbEpoch = int64(epoch)
-  if ($rom1_path).splitFile().ext.toLowerAscii() in [".gb", ".gbc"]:
+  if ($rom1_path).splitFile().ext.toLowerAscii() in GB_ROM_EXTS:
     return gb_rollback_init($rom1_path, $rom2_path, int64(epoch))
   var cores: seq[GBA] = @[]
   for path in [$rom1_path, $rom2_path]:
@@ -1730,7 +1731,7 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
   if stateTexture != nil:
     destroyTexture(stateTexture)
     stateTexture = nil
-  if ext in [".gb", ".gbc"]:
+  if ext in GB_ROM_EXTS:
     stateKind = ekGB
     curRomCrcValid = false  # the cached CRC belongs to a GBA cart
     let bootrom = if fileExists("bootrom.bin"): "bootrom.bin" else: ""

@@ -8477,7 +8477,10 @@ const loadRom = async (romName, originalName, opts = {}) => {
 
 // --- File type helpers ---
 
-const ROM_EXTS = [".gba", ".gb", ".gbc"];
+// The same list as src/dingbat/common/rom_exts.nim, which picks the core.
+// .cgb/.sgb are Color-only and Super Game Boy carts some ROM sets name so;
+// the core reads the mode from the header. Not .dmg: a macOS disk image.
+const ROM_EXTS = [".gba", ".gb", ".gbc", ".cgb", ".sgb"];
 const IMG_EXTS = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
 
 const extOf = (n) => {
@@ -8487,7 +8490,7 @@ const extOf = (n) => {
 const baseName = (n) => n.slice(n.lastIndexOf("/") + 1);
 const systemOf = (name) => {
   let e = extOf(name);
-  return e === ".gba" ? "GBA" : e === ".gbc" ? "GBC" : "GB";
+  return e === ".gba" ? "GBA" : e === ".gbc" || e === ".cgb" ? "GBC" : "GB";
 };
 const mimeForImg = (e) =>
   ({ ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -8603,7 +8606,8 @@ const askRomWarn = (title, text) =>
   });
 
 const confirmSuspectRom = (fileName, ext) => {
-  let system = ext === ".gba" ? "GBA" : ext === ".gbc" ? "Game Boy Color" : "Game Boy";
+  let system = ext === ".gba" ? "GBA"
+    : ext === ".gbc" || ext === ".cgb" ? "Game Boy Color" : "Game Boy";
   return askRomWarn("File Check Failed",
     `"${fileName}" doesn't look like a valid ${system} ROM — it may be ` +
     `corrupt or not a game at all. Load it anyway?`);

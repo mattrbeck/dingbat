@@ -226,7 +226,7 @@ document.getElementById("net-connect").addEventListener("click", () => {
     return;
   }
   const oext = extOf(currentOriginalName || "");
-  if (oext !== ".gba" && oext !== ".gb" && oext !== ".gbc") {
+  if (!ROM_EXTS.includes(oext)) {
     showToast("Link cable needs a GB, GBC, or GBA game");
     return;
   }
@@ -1141,7 +1141,7 @@ const rbSendOurRom = () => {
 
 const rbConnect = async () => {
   const oext = extOf(currentOriginalName || "");
-  if (oext !== ".gba" && oext !== ".gb" && oext !== ".gbc")
+  if (!ROM_EXTS.includes(oext))
     throw new Error("link cable needs a GB/GBC/GBA game");
   rbExt = oext === ".gba" ? ".gba" : oext;
   linkIsGb = rbExt !== ".gba";

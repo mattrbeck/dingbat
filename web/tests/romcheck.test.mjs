@@ -128,3 +128,24 @@ test("valid-headered ROM loads without a prompt", async () => {
   assert.ok(!modal.classList.contains("open"));
   eq(app.idb.get("recent").map((r) => r.name), ["Real Game.gba"]);
 });
+
+test(".cgb and .sgb are Game Boy ROMs: checked as one, loaded, in the library", async () => {
+  const app = await loadApp();
+  app.runIn("Module.ccall = () => {}");
+  const modal = app.document.getElementById("rom-warn-modal");
+
+  app.api.handleRomFile(fakeFile("Color.cgb", gbWithChecksum()));
+  await settle();
+  await settle();
+  app.api.handleRomFile(fakeFile("Super.SGB", gbWithChecksum()));
+  await settle();
+  await settle();
+  assert.equal(app.alerts.length, 0, "refused as an unsupported file");
+  assert.ok(!modal.classList.contains("open"), "a valid GB header prompted");
+  eq(app.idb.get("recent").map((r) => r.name).sort(), ["Color.cgb", "Super.SGB"]);
+
+  app.api.handleRomFile(fakeFile("Noise.cgb", new Uint8Array(0x200).fill(7)));
+  await settle();
+  assert.match(app.document.getElementById("rom-warn-text").textContent,
+    /Noise\.cgb.*Game Boy Color ROM/);
+});
