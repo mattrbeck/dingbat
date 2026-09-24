@@ -1,6 +1,6 @@
 # dbsuite - Detailed Results
 
-*Generated: 2026-09-24 14:14:45 · commit fe2a37639 · game-boy-test-roms v7.0*
+*Generated: 2026-09-24 16:59:06 · commit ddc3fad8 · game-boy-test-roms v7.0*
 
 tests/roms/dbsuite/dbsuite.gba (cartridge build) in dingbat. Every expected value is an AGB SP (AGS-001) answer; each case's source comment in tests/roms/dbsuite/ gives its provenance. A case that is not PASS here is dingbat disagreeing with the console.
 
@@ -16,9 +16,9 @@ All pass.
 |------|--------|----------------|
 | irq/irqlat-tm2-one-write | FAIL | got=0000007B exp=0000007C |
 | irq/irqlat-tm2-two-writes | FAIL | got=00000084 exp=00000085 |
-| irq/irqlat-tm2-reload-0000 | FAIL | got=0000006D exp=00000072 |
-| irq/irqlat-tm2-reload-0001 | FAIL | got=0000006D exp=00000072 |
-| irq/irqlat-tm2-haltcnt-ignored | FAIL | got=0000007F exp=00000087 |
+| irq/irqlat-tm2-reload-0000 | FAIL | got=00000073 exp=00000072 |
+| irq/irqlat-tm2-reload-0001 | FAIL | got=00000073 exp=00000072 |
+| irq/irqlat-tm2-haltcnt-ignored | FAIL | got=00000086 exp=00000087 |
 | irq/irqlat-dma3 | FAIL | got=000000B1 exp=000000B2 |
 | irq/irqlat-dma3-haltcnt | FAIL | got=000000AB exp=000000AC |
 

@@ -493,12 +493,11 @@ proc run_pending*(dma: DMA) =
         intr.stall_pushed = bus.sched.delay_pending(etInterrupts, stall_start, held)
         if intr.pipe_raised != 0 and intr.pipe_due > stall_start:
           intr.pipe_due += held
-        intr.stall_open = true
         when DMA_IRQ_FROM_BUS_END:
           if dma.irq_after_burst:
             dma.irq_after_burst = false
             let ahead = if burst_end > bus.sched.cycles: int(burst_end - bus.sched.cycles) else: 0
-            bus.sched.schedule(ahead + IRQ_SYNC_DELAY, etInterrupts)
+            intr.schedule_interrupt_check(ahead + IRQ_SYNC_DELAY)
     when DMA_IRQ_FROM_BUS_END:
       if dma.irq_after_burst:
         dma.irq_after_burst = false

@@ -40,6 +40,8 @@ proc timer_overflow_event*(tim: Timer; num: int) =
     tim.gba.interrupts.raise_synced(IRQ_TIMER_BIT_BASE + num)
   if not tim.tmcnt[num].cascade:
     tim.gba.scheduler.schedule(tim.cycles_until_overflow(num), TIMER_EVENT_TYPES[num])
+    if tim.tmcnt[num].irq_enable:
+      tim.gba.interrupts.window_ahead(tim.cycles_until_overflow(num))
 
 proc new_timer*(gba: GBA): Timer =
   result = Timer(gba: gba)
@@ -156,6 +158,8 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
           let delay = if was_enabled: 0 else: TIMER_START_DELAY
           tim.cycle_enabled[num] = tim.write_now() + CycleCount(delay)
           tim.gba.scheduler.schedule(tim.cycles_until_overflow(num), TIMER_EVENT_TYPES[num])
+          if tim.tmcnt[num].irq_enable:
+            tim.gba.interrupts.window_ahead(tim.cycles_until_overflow(num))
       elif was_enabled:
         when TIMER_STOP_DELAY > 0:
           # The count goes on for a cycle after the write that stops it

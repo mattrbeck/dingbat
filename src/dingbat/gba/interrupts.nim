@@ -1,7 +1,8 @@
 # Interrupts implementation (included by gba.nim)
 
 proc new_interrupts*(gba: GBA): Interrupts =
-  result = Interrupts(gba: gba)
+  result = Interrupts(gba: gba, win_open_at: high(CycleCount),
+                      win_close_at: high(CycleCount))
   result.reg_ie = InterruptReg()
   result.reg_if = InterruptReg()
   result.ime = false
@@ -31,11 +32,62 @@ const UNDER_BURST_CREDIT {.intdefine.} = 1
 # msr clearing CPSR.I) releases an already-parked IF bit. The window is
 # cycle-based, not instruction-based (hardware: gbaedge IRQWIN/IRQWIN2/
 # IRQWIN3 on AGB SP, docs/hwprobe.md). The vector-entry cost itself is in
-# cpu.irq.
+# cpu.irq. Those pages run their sleds from the cartridge at WAITCNT 0, six
+# cycles an instruction, five of them wait states: with IRQ_LAST_WAITS
+# taking an interrupt recognised in them one instruction later, the same
+# counts come from 7 (it was 12 when the last cycle counted).
 const
-  IRQ_GATE_DELAY* = 12
+  IRQ_GATE_DELAY* = 7
+
+proc window_open*(intr: Interrupts) =
+  ## IRQ_LAST_WAITS: until the next check has run, the CPU's fetches and
+  ## stores note their wait states (fetches leave the cache to do it).
+  when IRQ_LAST_WAITS:
+    let bus = intr.gba.bus
+    bus.sync_bits = bus.sync_bits or 8
+    bus.fetch_key = 0xFFFFFFFF'u32
+
+proc window_open_event*(intr: Interrupts) =
+  intr.win_open_at = high(CycleCount)
+  intr.window_open()
+
+proc window_close_event*(intr: Interrupts) =
+  ## The guard close: a raise the window was opened for never came.
+  intr.win_close_at = high(CycleCount)
+  if not intr.gba.scheduler.has_event(etInterrupts):
+    intr.gba.bus.sync_bits = intr.gba.bus.sync_bits and not 8'u8
+
+const IRQ_WINDOW_LEAD* = 16
+  ## How far ahead of a raise whose cycle is known (a timer overflow, the
+  ## PPU's line events) the window opens, so that an instruction spanning
+  ## both the raise and the recognition had its accesses noted: a raise in
+  ## the middle of a six-cycle EWRAM fetch is recognised before it ends.
+  ## Enough for irqwait.s's every cell; each cycle of it costs a little
+  ## (FireRed, same work: +0.06% retired instructions at 16, +0.14% at 32).
+
+proc window_ahead*(intr: Interrupts; raise_in: int) =
+  ## A source will raise an interrupt `raise_in` cycles from now.
+  when IRQ_LAST_WAITS:
+    # One pending open (the soonest) and one close (the latest) serve every
+    # source; a timer overflowing every few cycles books no more.
+    let s = intr.gba.scheduler
+    if raise_in <= IRQ_WINDOW_LEAD: intr.window_open()
+    else:
+      let at = s.cycles + CycleCount(raise_in - IRQ_WINDOW_LEAD)
+      if at < intr.win_open_at:
+        if intr.win_open_at != high(CycleCount): s.clear(etIrqWindowOpen)
+        s.schedule(raise_in - IRQ_WINDOW_LEAD, etIrqWindowOpen)
+        intr.win_open_at = at
+    # Closed by the raise's check; this only guards one that never comes.
+    let close_at = s.cycles + CycleCount(raise_in + 2 * IRQ_WINDOW_LEAD)
+    if intr.win_close_at == high(CycleCount) or close_at > intr.win_close_at:
+      if intr.win_close_at != high(CycleCount): s.clear(etIrqWindowClose)
+      s.schedule(raise_in + 2 * IRQ_WINDOW_LEAD, etIrqWindowClose)
+      intr.win_close_at = close_at
 
 proc schedule_interrupt_check*(intr: Interrupts; delay: int = 0) =
+  ## Book a recognition `delay` cycles out, with the window open until then.
+  intr.window_open()
   intr.gba.scheduler.schedule(delay, etInterrupts)
 
 # A timer's interrupt goes through a synchroniser before the CPU sees it
@@ -115,21 +167,6 @@ proc unstall*(intr: Interrupts; ran: int) =
         intr.pipe_due = max(now, due)
     intr.stall_from = new_from
 
-proc stall_tail*(intr: Interrupts; access_end: CycleCount; cost: int) =
-  ## The CPU's first access after a burst, `cost` cycles ending at
-  ## `access_end`. It is the access the CPU was waiting to make, so its wait
-  ## states stall the synchroniser as the burst did (alyosha
-  ## Internal_Cycle_DMA_IRQ, _ST, _ST_p3, _br: after an H-blank DMA that
-  ## stopped a gamepak load or store, the timer interrupt is taken two
-  ## instructions later, not one; a 4-cycle ROM fetch there delays it by 3).
-  intr.stall_open = false
-  if cost > 1 and access_end == intr.stall_to + CycleCount(cost):
-    let waits = CycleCount(cost - 1)
-    intr.gba.scheduler.delay_pending(etInterrupts, intr.stall_to, waits)
-    if intr.pipe_raised != 0 and intr.pipe_due > intr.stall_to:
-      intr.pipe_due += waits
-    intr.stall_to += waits
-
 proc irq_deliverable*(intr: Interrupts): bool {.inline.} =
   intr.ime and (uint16(intr.reg_ie) and uint16(intr.reg_if)) != 0
 
@@ -161,6 +198,13 @@ proc check_interrupts*(intr: Interrupts) =
     intr.gba.cpu.halted = false
     if intr.ime and intr.gba.scheduler.cycles >= intr.gate_open_at:
       intr.gba.cpu.irq_line = true
+      intr.gba.cpu.irq_line_at = intr.gba.scheduler.cycles
+  when IRQ_LAST_WAITS:
+    # The instruction this check landed in has noted its last access; the
+    # window closes unless another check is still to run (a pending open
+    # reopens it for the next raise).
+    if not intr.gba.scheduler.has_event(etInterrupts):
+      intr.gba.bus.sync_bits = intr.gba.bus.sync_bits and not 8'u8
 
 proc `[]`*(intr: Interrupts; io_addr: uint32): uint8 =
   case io_addr

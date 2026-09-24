@@ -61,6 +61,13 @@ type
     # Sound FIFO A / B DMA request, raised off its timer's overflow
     # (FIFO_DMA_REQUEST_DELAY in gba/apu/dma_channels.nim).
     etFifoARequest, etFifoBRequest
+    # Once per instruction while the GBA CPU is in an undefined mode: r13 and
+    # r14 read 0 there and a write to them is lost (undef_mode_tick in
+    # gba/cpu.nim).
+    etUndefMode
+    # IRQ_LAST_WAITS (gba/interrupts.nim): a window opened ahead of an
+    # interrupt raise whose cycle is known, and its fallback close.
+    etIrqWindowOpen, etIrqWindowClose
 
   Event* = object
     cycles*: CycleCount
@@ -169,6 +176,13 @@ proc advance_pending*(s: Scheduler; kind: EventType; after: CycleCount; by: Cycl
         dec j
       s.evbuf[j] = e
     s.next_event = s.evbuf[s.nevents - 1].cycles
+
+proc pending_at*(s: Scheduler; kind: EventType): CycleCount =
+  ## When the soonest pending event of `kind` is due (high(CycleCount) if none).
+  result = high(CycleCount)
+  for i in 0 ..< s.nevents:
+    if s.evbuf[i].kind == kind and s.evbuf[i].cycles < result:
+      result = s.evbuf[i].cycles
 
 proc has_event*(s: Scheduler; kind: EventType): bool =
   ## Whether an event of this kind is still pending; the GBA state loader uses

@@ -691,12 +691,20 @@ proc arm_psr_transfer*[imm_flag, spsr, msr: static bool](cpu: CPU; instr: uint32
           cpu.gba.interrupts.schedule_interrupt_check()
   else:  # MRS
     let rd = int(bits_range(instr, 12, 15))
-    if spsr and has_spsr:
-      discard cpu.set_reg(rd, uint32(cpu.spsr))
-    elif spsr and bank == UNDEF_BANK:
-      discard cpu.set_reg(rd, 0x10'u32)
+    when imm_flag:
+      # The immediate form of the MRS slot (TST/CMP immediate with S clear,
+      # bit 21 clear) copies Rn to Rd and ignores the immediate, whichever
+      # PSR bit 22 names. AGB SP, tools/hwlink, 2026-09-24: 0xE30F0000 gives
+      # r0 = pc, 0xE3010000 r0 = r1, 0xE3001002 r1 = r0 and 0xE34031F2
+      # r3 = r0 with r1, r2 untouched (png183 psr/psr2 tests 16-20).
+      discard cpu.set_reg(rd, cpu.r[int(bits_range(instr, 16, 19))])
     else:
-      discard cpu.set_reg(rd, uint32(cpu.cpsr))
+      if spsr and has_spsr:
+        discard cpu.set_reg(rd, uint32(cpu.spsr))
+      elif spsr and bank == UNDEF_BANK:
+        discard cpu.set_reg(rd, 0x10'u32)
+      else:
+        discard cpu.set_reg(rd, uint32(cpu.cpsr))
   when not msr:
     if bits_range(instr, 12, 15) != 15: cpu.step_arm()
   else:

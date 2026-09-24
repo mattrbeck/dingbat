@@ -78,6 +78,7 @@ proc set_underclock*(gba: GBA; n: int) =
   gba.underclock = clamp(n, 0, 2)
   gba.bus.update_waitcnt(gba.mmio.waitcnt)
   gba.bus.fetch_page = 0xFFFFFFFF'u32
+  gba.bus.fetch_key = 0xFFFFFFFF'u32
 
 when defined(fetchprof):
   # -d:fetchprof: where the ROM access path goes on a real workload. Indices:
@@ -361,6 +362,7 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
   result.cycles = 0
   result.rom_ahead = 8
   result.fetch_page = 0xFFFFFFFF'u32  # no fetch page cached yet
+  result.fetch_key = 0xFFFFFFFF'u32
   result.bios       = newSeq[byte](0x4000)
   result.wram_board = newSeq[byte](0x40000)
   result.wram_chip  = newSeq[byte](0x08000)
@@ -889,6 +891,8 @@ proc fetch_word_miss(bus: Bus; address: uint32): uint32
 proc install_fetch_cache(bus: Bus; page: uint32): bool =
   when DMA_ACCESS_WINDOW:
     if (bus.sync_bits and 2) != 0: return false
+  when IRQ_LAST_WAITS:
+    if (bus.sync_bits and 8) != 0: return false
   # Only pages whose fetches are plain masked reads are cacheable; BIOS,
   # MMIO, open bus and 0xD (possible EEPROM) take the generic path
   case page
@@ -904,6 +908,7 @@ proc install_fetch_cache(bus: Bus; page: uint32): bool =
   else:
     return false
   bus.fetch_page = page
+  bus.fetch_key = page
   # Via the bus tables so the underclock scaling applies; only consumed on
   # the non-ROM (pages 2/3) fetch path
   bus.fetch_c16 = int(bus.wait16_n[int(page)])
@@ -968,69 +973,77 @@ when defined(obuslatch):
       bus.obus_half_at[0] = now
       bus.obus_half_at[1] = now
 
+proc fetch_half_cached(bus: Bus; address: uint32; page: uint32): uint16 {.inline.} =
+  ## The cached-page fetch: `page` is bus.fetch_page.
+  if page >= 0x8:
+    when defined(flatrom):
+      # -d:flatrom measurement probe: every ROM fetch is a flat S access;
+      # not shippable
+      bus.cycles += int(bus.wait16_s[page])
+    else:
+      # While the fetch stream is hot, a sequential fetch is a plain S
+      # access with no absolute-time bookkeeping
+      if bus.rom_hot and address == bus.rom_next_addr:
+        when defined(fetchprof): fetchprof[0].inc
+        when defined(pftrace):
+          pft("  HOT fetch16 a=" & toHex(address, 8) & " now=" & $bus.bus_now() &
+              " cost=" & $int(bus.wait16_s[page]))
+        bus.cycles += int(bus.wait16_s[page])
+        bus.rom_next_addr = address + 2
+      else:
+        when defined(fetchprof): fetchprof[1].inc
+        bus.rom_cool()
+        let c = if bus.dma_active:
+                  bus.rom_access_cycles(address, is32 = false, fetch = true)
+                else: bus.rom_fetch_cycles(address, int(page), is32 = false)
+        bus.cycles += c
+        # Go hot only when no prefetch credit is left over; leftover credit
+        # must keep flowing through the slow path to be consumed
+        if bus.rom_free_since == bus.bus_now():
+          bus.rom_hot = true
+          when defined(fetchprof): fetchprof[9].inc
+  else:
+    bus.cycles += bus.fetch_c16
+  read_u16_ptr_raw(bus.fetch_ptr, (address and bus.fetch_mask) and not 1'u32)
+
 proc fetch_half*(bus: Bus; address: uint32): uint16 {.inline.} =
   let page = bits_range(address, 24, 27)
-  if page == bus.fetch_page or bus.install_fetch_cache(page):
-    if page >= 0x8:
-      when defined(flatrom):
-        # -d:flatrom measurement probe: every ROM fetch is a flat S access;
-        # not shippable
-        bus.cycles += int(bus.wait16_s[page])
-      else:
-        # While the fetch stream is hot, a sequential fetch is a plain S
-        # access with no absolute-time bookkeeping
-        if bus.rom_hot and address == bus.rom_next_addr:
-          when defined(fetchprof): fetchprof[0].inc
-          when defined(pftrace):
-            pft("  HOT fetch16 a=" & toHex(address, 8) & " now=" & $bus.bus_now() &
-                " cost=" & $int(bus.wait16_s[page]))
-          bus.cycles += int(bus.wait16_s[page])
-          bus.rom_next_addr = address + 2
-        else:
-          when defined(fetchprof): fetchprof[1].inc
-          bus.rom_cool()
-          let c = if bus.dma_active:
-                    bus.rom_access_cycles(address, is32 = false, fetch = true)
-                  else: bus.rom_fetch_cycles(address, int(page), is32 = false)
-          bus.cycles += c
-          # Go hot only when no prefetch credit is left over; leftover credit
-          # must keep flowing through the slow path to be consumed
-          if bus.rom_free_since == bus.bus_now():
-            bus.rom_hot = true
-            when defined(fetchprof): fetchprof[9].inc
-    else:
-      bus.cycles += bus.fetch_c16
-    read_u16_ptr_raw(bus.fetch_ptr, (address and bus.fetch_mask) and not 1'u32)
+  if page == bus.fetch_key or bus.install_fetch_cache(page):
+    bus.fetch_half_cached(address, page)
   else:
     bus.fetch_half_miss(address)
 
+proc fetch_word_cached(bus: Bus; address: uint32; page: uint32): uint32 {.inline.} =
+  ## The cached-page fetch: `page` is bus.fetch_page.
+  if page >= 0x8:
+    when defined(flatrom):
+      bus.cycles += int(bus.wait32_s[page])
+    else:
+      if bus.rom_hot and address == bus.rom_next_addr:
+        when defined(fetchprof): fetchprof[2].inc
+        when defined(pftrace):
+          pft("  HOT fetch32 a=" & toHex(address, 8) & " now=" & $bus.bus_now() &
+              " cost=" & $int(bus.wait32_s[page]))
+        bus.cycles += int(bus.wait32_s[page])
+        bus.rom_next_addr = address + 4
+      else:
+        when defined(fetchprof): fetchprof[3].inc
+        bus.rom_cool()
+        let c = if bus.dma_active:
+                  bus.rom_access_cycles(address, is32 = true, fetch = true)
+                else: bus.rom_fetch_cycles(address, int(page), is32 = true)
+        bus.cycles += c
+        if bus.rom_free_since == bus.bus_now():
+          bus.rom_hot = true
+          when defined(fetchprof): fetchprof[9].inc
+  else:
+    bus.cycles += bus.fetch_c32
+  read_u32_ptr_raw(bus.fetch_ptr, (address and bus.fetch_mask) and not 3'u32)
+
 proc fetch_word*(bus: Bus; address: uint32): uint32 {.inline.} =
   let page = bits_range(address, 24, 27)
-  if page == bus.fetch_page or bus.install_fetch_cache(page):
-    if page >= 0x8:
-      when defined(flatrom):
-        bus.cycles += int(bus.wait32_s[page])
-      else:
-        if bus.rom_hot and address == bus.rom_next_addr:
-          when defined(fetchprof): fetchprof[2].inc
-          when defined(pftrace):
-            pft("  HOT fetch32 a=" & toHex(address, 8) & " now=" & $bus.bus_now() &
-                " cost=" & $int(bus.wait32_s[page]))
-          bus.cycles += int(bus.wait32_s[page])
-          bus.rom_next_addr = address + 4
-        else:
-          when defined(fetchprof): fetchprof[3].inc
-          bus.rom_cool()
-          let c = if bus.dma_active:
-                    bus.rom_access_cycles(address, is32 = true, fetch = true)
-                  else: bus.rom_fetch_cycles(address, int(page), is32 = true)
-          bus.cycles += c
-          if bus.rom_free_since == bus.bus_now():
-            bus.rom_hot = true
-            when defined(fetchprof): fetchprof[9].inc
-    else:
-      bus.cycles += bus.fetch_c32
-    read_u32_ptr_raw(bus.fetch_ptr, (address and bus.fetch_mask) and not 3'u32)
+  if page == bus.fetch_key or bus.install_fetch_cache(page):
+    bus.fetch_word_cached(address, page)
   else:
     bus.fetch_word_miss(address)
 
@@ -1071,8 +1084,6 @@ proc catch_up_access(bus: Bus; cost: int) {.inline.} =
   ## defer_dma_request).
   bus.access_end = bus.bus_now()
   bus.access_start = bus.access_end - CycleCount(cost)
-  when DMA_STALLS_IRQ_SYNC:
-    if bus.gba.interrupts.stall_open: bus.gba.interrupts.stall_tail(bus.access_end, cost)
   bus.catch_up()
 
 proc imm_post_grant(bus: Bus) {.noinline.} =
@@ -1104,7 +1115,8 @@ proc imm_pre_grant(bus: Bus; cost: int) =
   bus.cycles += cost
 
 proc window_fetch_sync(bus: Bus; cost: int) =
-  bus.fetch_page = 0xFFFFFFFF'u32   # stay on the miss path while the window is open
+  bus.fetch_page = 0xFFFFFFFF'u32
+  bus.fetch_key = 0xFFFFFFFF'u32   # stay on the miss path while the window is open
   # A request that fires inside this very fetch leaves the window open for
   # the internal cycles behind it; the fetch after that closes it.
   let closing = bus.window_closing
@@ -1162,22 +1174,23 @@ proc `[]`*(bus: Bus; address: uint32): uint8 =
   let cost = bus.access_cycles(address, is32 = false, fetch = false)
   bus.cycles += cost
   if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active:
-    when DMA_READS_CPU_BUS:
-      bus.load_addr = address
-      bus.load_size = (if bus.ldrsh_odd: 2 else: 1)
-      bus.load_pc = bus.gba.cpu.r[15]
-      bus.load_end = bus.bus_now()
-      bus.load_start = bus.load_end - CycleCount(cost)
-    when IMM_ACCESS_WAIT:
-      bus.access_rom = bus_page(address) >= 0x8
-      bus.access_write = false
-      if bus.imm_pre: bus.imm_pre_grant(cost)
-    bus.catch_up_access(cost)
-    when IMM_ACCESS_WAIT:
-      if bus.imm_post:
-        result = bus.read_byte_internal(address)
-        bus.imm_post_grant()
-        return
+    if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 7) != 0:
+      when DMA_READS_CPU_BUS:
+        bus.load_addr = address
+        bus.load_size = (if bus.ldrsh_odd: 2 else: 1)
+        bus.load_pc = bus.gba.cpu.r[15]
+        bus.load_end = bus.bus_now()
+        bus.load_start = bus.load_end - CycleCount(cost)
+      when IMM_ACCESS_WAIT:
+        bus.access_rom = bus_page(address) >= 0x8
+        bus.access_write = false
+        if bus.imm_pre: bus.imm_pre_grant(cost)
+      bus.catch_up_access(cost)
+      when IMM_ACCESS_WAIT:
+        if bus.imm_post:
+          result = bus.read_byte_internal(address)
+          bus.imm_post_grant()
+          return
   bus.read_byte_internal(address)
 
 proc read_half*(bus: Bus; address: uint32): uint16 =
@@ -1186,22 +1199,23 @@ proc read_half*(bus: Bus; address: uint32): uint16 =
   let cost = bus.access_cycles(address, is32 = false, fetch = false)
   bus.cycles += cost
   if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active:
-    when DMA_READS_CPU_BUS:
-      bus.load_addr = address
-      bus.load_size = 2
-      bus.load_pc = bus.gba.cpu.r[15]
-      bus.load_end = bus.bus_now()
-      bus.load_start = bus.load_end - CycleCount(cost)
-    when IMM_ACCESS_WAIT:
-      bus.access_rom = bus_page(address) >= 0x8
-      bus.access_write = false
-      if bus.imm_pre: bus.imm_pre_grant(cost)
-    bus.catch_up_access(cost)
-    when IMM_ACCESS_WAIT:
-      if bus.imm_post:
-        result = bus.read_half_internal(address)
-        bus.imm_post_grant()
-        return
+    if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 7) != 0:
+      when DMA_READS_CPU_BUS:
+        bus.load_addr = address
+        bus.load_size = 2
+        bus.load_pc = bus.gba.cpu.r[15]
+        bus.load_end = bus.bus_now()
+        bus.load_start = bus.load_end - CycleCount(cost)
+      when IMM_ACCESS_WAIT:
+        bus.access_rom = bus_page(address) >= 0x8
+        bus.access_write = false
+        if bus.imm_pre: bus.imm_pre_grant(cost)
+      bus.catch_up_access(cost)
+      when IMM_ACCESS_WAIT:
+        if bus.imm_post:
+          result = bus.read_half_internal(address)
+          bus.imm_post_grant()
+          return
   bus.read_half_internal(address)
 
 proc sd_tw_begin*(bus: Bus; a0: uint32; n: int) =
@@ -1261,22 +1275,23 @@ proc read_word*(bus: Bus; address: uint32): uint32 =
   let cost = bus.access_cycles(address, is32 = true, fetch = false)
   bus.cycles += cost
   if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active:
-    when DMA_READS_CPU_BUS:
-      bus.load_addr = address
-      bus.load_size = 4
-      bus.load_pc = bus.gba.cpu.r[15]
-      bus.load_end = bus.bus_now()
-      bus.load_start = bus.load_end - CycleCount(cost)
-    when IMM_ACCESS_WAIT:
-      bus.access_rom = bus_page(address) >= 0x8
-      bus.access_write = false
-      if bus.imm_pre: bus.imm_pre_grant(cost)
-    bus.catch_up_access(cost)
-    when IMM_ACCESS_WAIT:
-      if bus.imm_post:
-        result = bus.read_word_internal(address)
-        bus.imm_post_grant()
-        return
+    if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 7) != 0:
+      when DMA_READS_CPU_BUS:
+        bus.load_addr = address
+        bus.load_size = 4
+        bus.load_pc = bus.gba.cpu.r[15]
+        bus.load_end = bus.bus_now()
+        bus.load_start = bus.load_end - CycleCount(cost)
+      when IMM_ACCESS_WAIT:
+        bus.access_rom = bus_page(address) >= 0x8
+        bus.access_write = false
+        if bus.imm_pre: bus.imm_pre_grant(cost)
+      bus.catch_up_access(cost)
+      when IMM_ACCESS_WAIT:
+        if bus.imm_post:
+          result = bus.read_word_internal(address)
+          bus.imm_post_grant()
+          return
   bus.read_word_internal(address)
 
 proc fetch_half_miss(bus: Bus; address: uint32): uint16 =
@@ -1290,6 +1305,22 @@ proc fetch_half_miss(bus: Bus; address: uint32): uint16 =
       bus.sync_bits = bus.sync_bits or 2
       bus.window_fetch_sync(bus.cycles - before)
       return
+  when IRQ_LAST_WAITS:
+    if (bus.sync_bits and 8) != 0:
+      # An interrupt's window keeps fetches off the fast path: fetch as it
+      # does (from the cached page when it still applies) and note the
+      # fetch's wait states.
+      let before = bus.cycles
+      let page = bits_range(address, 24, 27)
+      if page == bus.fetch_page:
+        result = bus.fetch_half_cached(address, page)
+      else:
+        bus.sync_bits = bus.sync_bits and not 8'u8
+        result = bus.fetch_half(address)
+        bus.sync_bits = bus.sync_bits or 8
+        bus.fetch_key = 0xFFFFFFFF'u32
+      bus.note_waits(bus.cycles - before)
+      return
   bus.read_half(address)
 
 proc fetch_word_miss(bus: Bus; address: uint32): uint32 =
@@ -1301,6 +1332,22 @@ proc fetch_word_miss(bus: Bus; address: uint32): uint32 =
       bus.sync_bits = bus.sync_bits or 2
       bus.window_fetch_sync(bus.cycles - before)
       return
+  when IRQ_LAST_WAITS:
+    if (bus.sync_bits and 8) != 0:
+      # An interrupt's window keeps fetches off the fast path: fetch as it
+      # does (from the cached page when it still applies) and note the
+      # fetch's wait states.
+      let before = bus.cycles
+      let page = bits_range(address, 24, 27)
+      if page == bus.fetch_page:
+        result = bus.fetch_word_cached(address, page)
+      else:
+        bus.sync_bits = bus.sync_bits and not 8'u8
+        result = bus.fetch_word(address)
+        bus.sync_bits = bus.sync_bits or 8
+        bus.fetch_key = 0xFFFFFFFF'u32
+      bus.note_waits(bus.cycles - before)
+      return
   bus.read_word(address)
 
 proc `[]=`*(bus: Bus; address: uint32; value: uint8) =
@@ -1309,22 +1356,25 @@ proc `[]=`*(bus: Bus; address: uint32; value: uint8) =
   let cost = bus.access_cycles(address, is32 = false, fetch = false)
   bus.cycles += cost
   if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active:
-    # A store ends the load's claim on the bus (Bus.dma_bus_word): the
-    # console shows a burst the fetched opcode after one, not the load
-    # before it or the store's own data (dmaobus2.s variant 7)
-    when DMA_READS_CPU_BUS: bus.load_size = 0
-    when IMM_ACCESS_WAIT:
-      bus.access_rom = bus_page(address) >= 0x8
-      bus.access_write = true
-      if bus.imm_pre: bus.imm_pre_grant(cost)
-    bus.catch_up_access(cost)
-    when IMM_ACCESS_WAIT:
-      if bus.imm_post:
-        bus.byte_io_write = true
-        bus.write_byte_internal(address, value)
-        bus.byte_io_write = false
-        bus.imm_post_grant()
-        return
+    when IRQ_LAST_WAITS:
+      if (bus.sync_bits and 8) != 0: bus.note_waits(cost)
+    if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 7) != 0:
+      # A store ends the load's claim on the bus (Bus.dma_bus_word): the
+      # console shows a burst the fetched opcode after one, not the load
+      # before it or the store's own data (dmaobus2.s variant 7)
+      when DMA_READS_CPU_BUS: bus.load_size = 0
+      when IMM_ACCESS_WAIT:
+        bus.access_rom = bus_page(address) >= 0x8
+        bus.access_write = true
+        if bus.imm_pre: bus.imm_pre_grant(cost)
+      bus.catch_up_access(cost)
+      when IMM_ACCESS_WAIT:
+        if bus.imm_post:
+          bus.byte_io_write = true
+          bus.write_byte_internal(address, value)
+          bus.byte_io_write = false
+          bus.imm_post_grant()
+          return
   bus.byte_io_write = true
   bus.write_byte_internal(address, value)
   bus.byte_io_write = false
@@ -1335,20 +1385,23 @@ proc write_half*(bus: Bus; address: uint32; value: uint16) =
   let cost = bus.access_cycles(address, is32 = false, fetch = false)
   bus.cycles += cost
   if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active:
-    # A store ends the load's claim on the bus (Bus.dma_bus_word): the
-    # console shows a burst the fetched opcode after one, not the load
-    # before it or the store's own data (dmaobus2.s variant 7)
-    when DMA_READS_CPU_BUS: bus.load_size = 0
-    when IMM_ACCESS_WAIT:
-      bus.access_rom = bus_page(address) >= 0x8
-      bus.access_write = true
-      if bus.imm_pre: bus.imm_pre_grant(cost)
-    bus.catch_up_access(cost)
-    when IMM_ACCESS_WAIT:
-      if bus.imm_post:
-        bus.write_half_internal(address, value)
-        bus.imm_post_grant()
-        return
+    when IRQ_LAST_WAITS:
+      if (bus.sync_bits and 8) != 0: bus.note_waits(cost)
+    if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 7) != 0:
+      # A store ends the load's claim on the bus (Bus.dma_bus_word): the
+      # console shows a burst the fetched opcode after one, not the load
+      # before it or the store's own data (dmaobus2.s variant 7)
+      when DMA_READS_CPU_BUS: bus.load_size = 0
+      when IMM_ACCESS_WAIT:
+        bus.access_rom = bus_page(address) >= 0x8
+        bus.access_write = true
+        if bus.imm_pre: bus.imm_pre_grant(cost)
+      bus.catch_up_access(cost)
+      when IMM_ACCESS_WAIT:
+        if bus.imm_post:
+          bus.write_half_internal(address, value)
+          bus.imm_post_grant()
+          return
   bus.write_half_internal(address, value)
 
 proc write_word*(bus: Bus; address: uint32; value: uint32) =
@@ -1357,20 +1410,23 @@ proc write_word*(bus: Bus; address: uint32; value: uint32) =
   let cost = bus.access_cycles(address, is32 = true, fetch = false)
   bus.cycles += cost
   if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active:
-    # A store ends the load's claim on the bus (Bus.dma_bus_word): the
-    # console shows a burst the fetched opcode after one, not the load
-    # before it or the store's own data (dmaobus2.s variant 7)
-    when DMA_READS_CPU_BUS: bus.load_size = 0
-    when IMM_ACCESS_WAIT:
-      bus.access_rom = bus_page(address) >= 0x8
-      bus.access_write = true
-      if bus.imm_pre: bus.imm_pre_grant(cost)
-    bus.catch_up_access(cost)
-    when IMM_ACCESS_WAIT:
-      if bus.imm_post:
-        bus.write_word_internal(address, value)
-        bus.imm_post_grant()
-        return
+    when IRQ_LAST_WAITS:
+      if (bus.sync_bits and 8) != 0: bus.note_waits(cost)
+    if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 7) != 0:
+      # A store ends the load's claim on the bus (Bus.dma_bus_word): the
+      # console shows a burst the fetched opcode after one, not the load
+      # before it or the store's own data (dmaobus2.s variant 7)
+      when DMA_READS_CPU_BUS: bus.load_size = 0
+      when IMM_ACCESS_WAIT:
+        bus.access_rom = bus_page(address) >= 0x8
+        bus.access_write = true
+        if bus.imm_pre: bus.imm_pre_grant(cost)
+      bus.catch_up_access(cost)
+      when IMM_ACCESS_WAIT:
+        if bus.imm_post:
+          bus.write_word_internal(address, value)
+          bus.imm_post_grant()
+          return
   bus.write_word_internal(address, value)
 
 # For DMA write-word via uint32 subscript

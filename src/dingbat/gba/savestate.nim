@@ -136,7 +136,8 @@ proc load_bus_state(bus: Bus; r: var Reader; rev: uint32) =
     bus.pf_paused = false
     bus.pf_running = false
     bus.pf_count = 0
-  bus.fetch_page = 0xFFFFFFFF'u32  # invalidate the fetch fast path
+  bus.fetch_page = 0xFFFFFFFF'u32
+  bus.fetch_key = 0xFFFFFFFF'u32  # invalidate the fetch fast path
 
 # ---- Interrupts / MMIO / Keypad ----
 
@@ -153,7 +154,16 @@ proc load_irq_state(intr: Interrupts; r: var Reader) =
   intr.ime = r.read_bool()
   # The synchroniser and stall spans are transient and not saved.
   intr.pipe_raised = 0
-  intr.stall_open = false
+  # IRQ_LAST_WAITS's window from the events the state carries (the
+  # scheduler section precedes this one).
+  let s = intr.gba.scheduler
+  intr.win_open_at = s.pending_at(etIrqWindowOpen)
+  intr.win_close_at = s.pending_at(etIrqWindowClose)
+  if s.has_event(etInterrupts):
+    intr.gba.bus.sync_bits = intr.gba.bus.sync_bits or 8
+  else:
+    intr.gba.bus.sync_bits = intr.gba.bus.sync_bits and not 8'u8
+  intr.gba.bus.fetch_key = 0xFFFFFFFF'u32
   intr.stall_from = 0
   intr.stall_to = 0
 

@@ -85,6 +85,25 @@ proc switch_mode*(cpu: CPU; new_mode: CpuMode) =
   # exception return (exception entry overwrites it afterwards itself).
   cpu.spsr          = cast[PSR](cpu.spsr_banks[new_high])
   cpu.cpsr.mode     = uint32(new_mode)
+  if new_bank == UNDEF_BANK:
+    cpu.gba.scheduler.clear(etUndefMode)
+    cpu.gba.scheduler.schedule(cpu.gba.bus.cycles + 1, etUndefMode)
+  elif old_bank == UNDEF_BANK:
+    cpu.gba.scheduler.clear(etUndefMode)
+
+proc undef_mode_tick*(cpu: CPU) =
+  ## An undefined mode selects no r13/r14 bank: both read 0 and a write to
+  ## either is lost. AGB SP: gbaedge UNDMODE reads 0 in modes 0x15, 0x1A and
+  ## 0x1E; tools/hwlink, 2026-09-24, mode 0x0C: `mov r13, #0xFF` and `mov
+  ## r14, #0x77` read back 0, r12 keeps 0x55, and the caller's r13 is
+  ## untouched (png183 psr/psr2 test 13). Zero-cost outside those modes:
+  ## switch_mode books this event on entry and it re-books itself once per
+  ## instruction, putting back the zeros an instruction may have written
+  ## over. A halted CPU writes nothing, so it waits longer then.
+  if mode_bank(cast[CpuMode](cpu.cpsr.mode)) != UNDEF_BANK: return
+  cpu.r[13] = 0
+  cpu.r[14] = 0
+  cpu.gba.scheduler.schedule(if cpu.halted: 256 else: 1, etUndefMode)
 
 proc irq*(cpu: CPU) =
   if not cpu.cpsr.irq_disable: cpu.irq_enter()
@@ -119,17 +138,26 @@ proc irq_enter*(cpu: CPU) =
     # Thumb code around a `bl`, the buffer full or just flushed by the
     # branch) and IRQ_sub, _slow (both waitstates); each alternative in the
     # commit that added this fails some of them.
+    # Code in EWRAM pays for its in-flight fetch too, all of it but the cycle
+    # the entry overlaps: 5 cycles in ARM, 2 in Thumb (tests/roms/payloads/
+    # irqwait.s on an AGB SP, a NOP sled interrupted by TM0, identical from
+    # IWRAM; IWRAM fetches in one cycle and pays nothing).
     var inflight = 0
     if not cpu.halt_wake:
       let page = int(bits_range(lr, 24, 27))
       if page in 8..13:
         let bus = cpu.gba.bus
+        # A hot stream has not stamped where the gamepak went idle.
+        bus.rom_cool()
         if IRQ_FETCH_VIA_PREFETCH and bus.prefetch_on and not bus.pf_paused and
            bus.rom_next_addr == lr - 4:
           let now = bus.sched.cycles + CycleCount(bus.cycles)
           inflight = max(0, bus.pf_serve(now, page, if cpu.cpsr.thumb: 1 else: 2) - 1)
         else:
           inflight = 2 * int(bus.wait16_s[page])
+      elif page == 2:
+        let bus = cpu.gba.bus
+        inflight = (if cpu.cpsr.thumb: int(bus.wait16_n[2]) else: int(bus.wait32_n[2])) - 1
     let old_cpsr = cpu.cpsr
     cpu.switch_mode(modeIRQ)
     cpu.spsr = old_cpsr
@@ -217,11 +245,15 @@ proc clear_pipeline*(cpu: CPU) =
       # first for the same reason: a DMA requested before the refill starts
       # has to cool the burst before the N is charged, not after.
       let bus = cpu.gba.bus
+      # IRQ_LAST_WAITS: whether to note the refill is decided before the
+      # catch-up, which can run the check and close the window.
+      let noting = (bus.sync_bits and 8) != 0
       bus.catch_up()
       bus.rom_cool()
       let (n, s) = if cpu.cpsr.thumb: (int(bus.wait16_n[page]), int(bus.wait16_s[page]))
                    else: (int(bus.wait32_n[page]), int(bus.wait32_s[page]))
       var both = n + s
+      var last = s          # the refill's second access
       var broken = false
       var credit = 0
       var streamed = false  # the refill came through the prefetcher
@@ -250,7 +282,8 @@ proc clear_pipeline*(cpu: CPU) =
           # prefetcher_branch_thumb_3 and _4.
           let halves = if cpu.cpsr.thumb: 1 else: 2
           let first = bus.pf_serve(now, page, halves)
-          both = first + bus.pf_serve(now + CycleCount(first), page, halves)
+          last = bus.pf_serve(now + CycleCount(first), page, halves)
+          both = first + last
           streamed = true
         elif from_rom and not bus.pf_paused and now > bus.rom_free_since:
           # Any other target flushes the buffer. A halfword in its final
@@ -294,6 +327,7 @@ proc clear_pipeline*(cpu: CPU) =
             else:
               both = n
           bus.cycles += both
+          last = both
           bus.access_rom = true
           bus.access_write = false
           bus.catch_up_access(both)
@@ -306,6 +340,8 @@ proc clear_pipeline*(cpu: CPU) =
             else:
               broken = true
       bus.cycles += both
+      when IRQ_LAST_WAITS:
+        if noting: bus.note_waits(last)
       if cpu.cpsr.thumb:
         bus.rom_next_addr = cpu.r[15] and not 1'u32
         cpu.r[15] += 4
@@ -321,12 +357,12 @@ proc clear_pipeline*(cpu: CPU) =
       bus.rom_free_since = bus.sched.cycles + CycleCount(bus.cycles) - CycleCount(credit)
       bus.rom_hot = credit == 0
       return
-  if cpu.cpsr.thumb:
-    cpu.r[15] += 4
-    cpu.gba.bus.add_cycles(2 * int(cpu.gba.bus.wait16_s[page]))
-  else:
-    cpu.r[15] += 8
-    cpu.gba.bus.add_cycles(2 * int(cpu.gba.bus.wait32_s[page]))
+  let s = if cpu.cpsr.thumb: int(cpu.gba.bus.wait16_s[page])
+          else: int(cpu.gba.bus.wait32_s[page])
+  cpu.r[15] += (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
+  cpu.gba.bus.add_cycles(2 * s)
+  when IRQ_LAST_WAITS:
+    if (cpu.gba.bus.sync_bits and 8) != 0: cpu.gba.bus.note_waits(s)
 
 when defined(obuslatch):
   proc obus_drive_pipeline*(cpu: CPU) {.inline.} =
@@ -380,6 +416,10 @@ proc read_instr*(cpu: CPU): uint32 {.inline.} =
 proc idle_synced(cpu: CPU; n: int) {.noinline.} =
   ## idle's out-of-line half: a DMA is armed or close (sync_bits != 0).
   let bus = cpu.gba.bus
+  when IRQ_LAST_WAITS:
+    if (bus.sync_bits and 7) == 0:     # only an interrupt's window
+      bus.add_cycles(n)
+      return
   when DMA_ACCESS_WINDOW:
     if (bus.sync_bits and 2) != 0:
       bus.idle_window(n)
@@ -604,10 +644,23 @@ proc hle_halt_return*(cpu: CPU) =
   cpu.r[15] -= 4                         # arm_software_interrupt steps past the swi
   bus.bios_latch = 0xE3A02004'u32        # as every HLE return leaves it
 
+proc irq_in_last_waits(cpu: CPU): bool {.inline.} =
+  ## IRQ_LAST_WAITS: recognised inside the wait states of the access that
+  ## ended the last instruction, so taken after the next one. A wake from
+  ## Halt has no such access.
+  when IRQ_LAST_WAITS:
+    let bus = cpu.gba.bus
+    let now = bus.sched.cycles
+    not cpu.halt_wake and bus.lw_waits > 0 and bus.lw_end == now and
+      cpu.irq_line_at > now - CycleCount(bus.lw_waits)
+  else:
+    false
+
 proc tick*(cpu: CPU) =
   # IRQ before the IntrWait re-halt check: the handler must run (and set the
   # BIOS mirror flags) or IntrWait re-halts forever.
-  if not cpu.halted and cpu.irq_line and not cpu.cpsr.irq_disable:
+  if not cpu.halted and cpu.irq_line and not cpu.cpsr.irq_disable and
+     not cpu.irq_in_last_waits():
     # A halted CPU's interrupt input is synchronised on a clock that was
     # stopped: the wake comes first and the exception an instruction later.
     # tests/roms/payloads/wakeirq.s on an AGB SP: the handler finds the

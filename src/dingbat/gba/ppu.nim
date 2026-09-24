@@ -195,8 +195,17 @@ proc start_hblank*(ppu: PPU) =
     if (ppu.vcount < 160 and ppu.gba.dma.armed(2)) or (ppu.vcount == 159 and ppu.gba.dma.armed(1)):
       ppu.gba.bus.sync_bits = ppu.gba.bus.sync_bits or 2
       ppu.gba.bus.fetch_page = 0xFFFFFFFF'u32
+      ppu.gba.bus.fetch_key = 0xFFFFFFFF'u32
   ppu.gba.scheduler.schedule(272, etPPUEndHBlank)
   ppu.gba.scheduler.schedule(HBLANK_FLAG_DELAY, etPPUSetHBlankFlag)
+  when IRQ_LAST_WAITS:
+    # The interrupts this line's events will raise (IRQ_WINDOW_LEAD)
+    if ppu.dispstat.hblank_irq_enable:
+      ppu.gba.interrupts.window_ahead(HBLANK_FLAG_DELAY)
+    let next = (int(ppu.vcount) + 1) mod 228
+    if (ppu.dispstat.vblank_irq_enable and next == 160) or
+       (ppu.dispstat.vcounter_irq_enable and next == int(ppu.dispstat.vcount_setting)):
+      ppu.gba.interrupts.window_ahead(272)
   if ppu.vcount < 160:
     ppu.scanline()
     for bg_num in 0..1:

@@ -2011,5 +2011,393 @@
     "want": "7101031F"
    }
   ]
+ },
+ {
+  "payload": "irqwait",
+  "rom": "irqwait.gba",
+  "sha1": "e4f215a701b0e442f2c4eb5cb4ee3d182b865ae5",
+  "frames": 668,
+  "cells": [
+   {
+    "id": "irqwait 0x10",
+    "kind": "hex",
+    "want": "0111002A"
+   },
+   {
+    "id": "irqwait 0x11",
+    "kind": "hex",
+    "want": "0112002B"
+   },
+   {
+    "id": "irqwait 0x12",
+    "kind": "hex",
+    "want": "0113002C"
+   },
+   {
+    "id": "irqwait 0x13",
+    "kind": "hex",
+    "want": "0114002D"
+   },
+   {
+    "id": "irqwait 0x14",
+    "kind": "hex",
+    "want": "0115002E"
+   },
+   {
+    "id": "irqwait 0x15",
+    "kind": "hex",
+    "want": "0116002F"
+   },
+   {
+    "id": "irqwait 0x16",
+    "kind": "hex",
+    "want": "01170030"
+   },
+   {
+    "id": "irqwait 0x17",
+    "kind": "hex",
+    "want": "01180031"
+   },
+   {
+    "id": "irqwait 0x18",
+    "kind": "hex",
+    "want": "01190032"
+   },
+   {
+    "id": "irqwait 0x110",
+    "kind": "hex",
+    "want": "01020034"
+   },
+   {
+    "id": "irqwait 0x111",
+    "kind": "hex",
+    "want": "0103003A"
+   },
+   {
+    "id": "irqwait 0x112",
+    "kind": "hex",
+    "want": "0103003A"
+   },
+   {
+    "id": "irqwait 0x113",
+    "kind": "hex",
+    "want": "0103003A"
+   },
+   {
+    "id": "irqwait 0x114",
+    "kind": "hex",
+    "want": "0103003A"
+   },
+   {
+    "id": "irqwait 0x115",
+    "kind": "hex",
+    "want": "0103003A"
+   },
+   {
+    "id": "irqwait 0x116",
+    "kind": "hex",
+    "want": "0103003A"
+   },
+   {
+    "id": "irqwait 0x117",
+    "kind": "hex",
+    "want": "01040040"
+   },
+   {
+    "id": "irqwait 0x118",
+    "kind": "hex",
+    "want": "01040040"
+   },
+   {
+    "id": "irqwait 0x119",
+    "kind": "hex",
+    "want": "01040040"
+   },
+   {
+    "id": "irqwait 0x11a",
+    "kind": "hex",
+    "want": "01040040"
+   },
+   {
+    "id": "irqwait 0x11b",
+    "kind": "hex",
+    "want": "01040040"
+   },
+   {
+    "id": "irqwait 0x11c",
+    "kind": "hex",
+    "want": "01040040"
+   },
+   {
+    "id": "irqwait 0x11d",
+    "kind": "hex",
+    "want": "01050046"
+   },
+   {
+    "id": "irqwait 0x11e",
+    "kind": "hex",
+    "want": "01050046"
+   },
+   {
+    "id": "irqwait 0x11f",
+    "kind": "hex",
+    "want": "01050046"
+   },
+   {
+    "id": "irqwait 0x120",
+    "kind": "hex",
+    "want": "01050046"
+   },
+   {
+    "id": "irqwait 0x121",
+    "kind": "hex",
+    "want": "01050046"
+   },
+   {
+    "id": "irqwait 0x122",
+    "kind": "hex",
+    "want": "01050046"
+   },
+   {
+    "id": "irqwait 0x123",
+    "kind": "hex",
+    "want": "0106004C"
+   },
+   {
+    "id": "irqwait 0x124",
+    "kind": "hex",
+    "want": "0106004C"
+   },
+   {
+    "id": "irqwait 0x125",
+    "kind": "hex",
+    "want": "0106004C"
+   },
+   {
+    "id": "irqwait 0x126",
+    "kind": "hex",
+    "want": "0106004C"
+   },
+   {
+    "id": "irqwait 0x127",
+    "kind": "hex",
+    "want": "0106004C"
+   },
+   {
+    "id": "irqwait 0x128",
+    "kind": "hex",
+    "want": "0106004C"
+   },
+   {
+    "id": "irqwait 0x129",
+    "kind": "hex",
+    "want": "01070052"
+   },
+   {
+    "id": "irqwait 0x12a",
+    "kind": "hex",
+    "want": "01070052"
+   },
+   {
+    "id": "irqwait 0x12b",
+    "kind": "hex",
+    "want": "01070052"
+   },
+   {
+    "id": "irqwait 0x12c",
+    "kind": "hex",
+    "want": "01070052"
+   },
+   {
+    "id": "irqwait 0x310",
+    "kind": "hex",
+    "want": "0105002E"
+   },
+   {
+    "id": "irqwait 0x311",
+    "kind": "hex",
+    "want": "01060031"
+   },
+   {
+    "id": "irqwait 0x312",
+    "kind": "hex",
+    "want": "01060031"
+   },
+   {
+    "id": "irqwait 0x313",
+    "kind": "hex",
+    "want": "01060031"
+   },
+   {
+    "id": "irqwait 0x314",
+    "kind": "hex",
+    "want": "01070034"
+   },
+   {
+    "id": "irqwait 0x315",
+    "kind": "hex",
+    "want": "01070034"
+   },
+   {
+    "id": "irqwait 0x316",
+    "kind": "hex",
+    "want": "01070034"
+   },
+   {
+    "id": "irqwait 0x317",
+    "kind": "hex",
+    "want": "01080037"
+   },
+   {
+    "id": "irqwait 0x318",
+    "kind": "hex",
+    "want": "01080037"
+   },
+   {
+    "id": "irqwait 0x319",
+    "kind": "hex",
+    "want": "01080037"
+   },
+   {
+    "id": "irqwait 0x31a",
+    "kind": "hex",
+    "want": "0109003A"
+   },
+   {
+    "id": "irqwait 0x31b",
+    "kind": "hex",
+    "want": "0109003A"
+   },
+   {
+    "id": "irqwait 0x31c",
+    "kind": "hex",
+    "want": "0109003A"
+   },
+   {
+    "id": "irqwait 0x31d",
+    "kind": "hex",
+    "want": "010A003D"
+   },
+   {
+    "id": "irqwait 0x31e",
+    "kind": "hex",
+    "want": "010A003D"
+   },
+   {
+    "id": "irqwait 0x31f",
+    "kind": "hex",
+    "want": "010A003D"
+   },
+   {
+    "id": "irqwait 0x320",
+    "kind": "hex",
+    "want": "010B0040"
+   },
+   {
+    "id": "irqwait 0x321",
+    "kind": "hex",
+    "want": "010B0040"
+   },
+   {
+    "id": "irqwait 0x322",
+    "kind": "hex",
+    "want": "010B0040"
+   },
+   {
+    "id": "irqwait 0x323",
+    "kind": "hex",
+    "want": "010C0043"
+   },
+   {
+    "id": "irqwait 0x324",
+    "kind": "hex",
+    "want": "010C0043"
+   },
+   {
+    "id": "irqwait 0x325",
+    "kind": "hex",
+    "want": "010C0043"
+   },
+   {
+    "id": "irqwait 0x326",
+    "kind": "hex",
+    "want": "0100001F"
+   },
+   {
+    "id": "irqwait 0x327",
+    "kind": "hex",
+    "want": "0100001F"
+   },
+   {
+    "id": "irqwait 0x328",
+    "kind": "hex",
+    "want": "010D0046"
+   },
+   {
+    "id": "irqwait 0x329",
+    "kind": "hex",
+    "want": "010E0049"
+   },
+   {
+    "id": "irqwait 0x32a",
+    "kind": "hex",
+    "want": "010E0049"
+   },
+   {
+    "id": "irqwait 0x32b",
+    "kind": "hex",
+    "want": "010E0049"
+   },
+   {
+    "id": "irqwait 0x32c",
+    "kind": "hex",
+    "want": "010F004C"
+   },
+   {
+    "id": "irqwait 0x210",
+    "kind": "hex",
+    "want": "0111002A"
+   },
+   {
+    "id": "irqwait 0x211",
+    "kind": "hex",
+    "want": "0112002B"
+   },
+   {
+    "id": "irqwait 0x212",
+    "kind": "hex",
+    "want": "0113002C"
+   },
+   {
+    "id": "irqwait 0x213",
+    "kind": "hex",
+    "want": "0114002D"
+   },
+   {
+    "id": "irqwait 0x214",
+    "kind": "hex",
+    "want": "0115002E"
+   },
+   {
+    "id": "irqwait 0x215",
+    "kind": "hex",
+    "want": "0116002F"
+   },
+   {
+    "id": "irqwait 0x216",
+    "kind": "hex",
+    "want": "01170030"
+   },
+   {
+    "id": "irqwait 0x217",
+    "kind": "hex",
+    "want": "01180031"
+   },
+   {
+    "id": "irqwait 0x218",
+    "kind": "hex",
+    "want": "01190032"
+   }
+  ]
  }
 ]

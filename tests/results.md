@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-09-24 14:14:45 · commit fe2a37639 · game-boy-test-roms v7.0*
+*Generated: 2026-09-24 16:59:06 · commit ddc3fad8 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1443
-- **Pass:** 1416
-- **Fail:** 27
+- **Pass:** 1418
+- **Fail:** 25
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -18,7 +18,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Mooneye | 152 | 152 |
 | GBA - mGBA Test Suite | 13 | 13 |
 | GBA - jsmolka gba-tests | 13 | 13 |
-| GBA - alyosha gba-tests | 108 | 126 |
+| GBA - alyosha gba-tests | 110 | 126 |
 | GBA - PeterLemon BIOS | 25 | 25 |
 | GBA - Other test ROMs | 10 | 12 |
 | GBA - hwverified (AGS-001) | 12 | 12 |
@@ -62,7 +62,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 13 tests passed.**
 
-## GBA - alyosha gba-tests (108/126)
+## GBA - alyosha gba-tests (110/126)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -146,7 +146,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | alyosha/ppu/Sprite_Last_VRAM_Access_Free | — | 👀 Failed test 119 |
 | alyosha/ppu/start_up | — | 👌 |
 | alyosha/ppu/start_up_vbl | — | 👌 |
-| alyosha/ppu/start_up_vbl_irq | — | 👀 Failed test 049 |
+| alyosha/ppu/start_up_vbl_irq | — | 👌 |
 | alyosha/ppu/start_up_vbl_irq_halt | — | 👌 |
 | alyosha/prefetcher/bounday_test_1 | — | 👀 Failed test 033 |
 | alyosha/prefetcher/prefetcher_boundary_1 | — | 👌 |
@@ -190,7 +190,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | png183/arm/multiply | — | 👌 |
 | png183/irq/halt_pc | — | 👌 |
 | png183/memory/memory | — | 👀 Failed test 104 |
-| png183/psr/psr2 | — | 👀 Failed test 013 |
+| png183/psr/psr2 | — | 👌 |
 | png183/timer/timer_check_count_up_presence | — | 👌 |
 
 ## GBA - PeterLemon BIOS (25/25)

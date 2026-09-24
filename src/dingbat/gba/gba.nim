@@ -128,13 +128,16 @@ type
     pipe_due*:     CycleCount
     # The span the last DMA burst stalled the running CPU (dma.run_pending),
     # for the synchroniser, which stops with it (DMA_STALLS_IRQ_SYNC).
-    # stall_open: the CPU's first access after it is still to come;
     # stall_pushed: the burst delayed a recognition already under way.
     # Transient like the pipe; rebased by end_frame.
     stall_from*:   CycleCount
     stall_to*:     CycleCount
-    stall_open*:   bool
     stall_pushed*: bool
+    # IRQ_LAST_WAITS: when the pending etIrqWindowOpen / Close are due
+    # (high(CycleCount) when none), so booking one needs no queue scan.
+    # Transient; rebased by end_frame.
+    win_open_at*:  CycleCount
+    win_close_at*: CycleCount
 
   Keypad* = ref object
     gba* {.cursor.}:      GBA
@@ -337,6 +340,10 @@ type
     # mirror, so the pointer stays valid; RAM code writes are visible because
     # fetches read the live buffer.
     fetch_page*: uint32
+    # What the fetch fast path compares against: fetch_page, or invalid to
+    # force the miss path without losing which page the CPU fetches from
+    # (IRQ_LAST_WAITS's window; the prefetch logic reads fetch_page).
+    fetch_key*: uint32
     fetch_mask*: uint32
     fetch_c16*:  int
     fetch_c32*:  int
@@ -406,8 +413,14 @@ type
     # (DMA_ACCESS_WINDOW). One test on the data path and none on fetches: the
     # window invalidates the fetch cache and rides its miss path. Bit 2 (with
     # bit 0): the armed immediate DMA's request found the CPU with an access
-    # in flight and waits a cycle for it (IMM_IDLE_GRANT).
+    # in flight and waits a cycle for it (IMM_IDLE_GRANT). Bit 3: an
+    # interrupt is on its way to the CPU, whose accesses record where their
+    # wait states lie (IRQ_LAST_WAITS).
     sync_bits*: uint8
+    # IRQ_LAST_WAITS, recorded while bit 3 is set: where the last CPU access
+    # ended and how many of its cycles were wait states.
+    lw_end*:    CycleCount
+    lw_waits*:  int
     access_end*: CycleCount         # end of the access a window sync is inside
     access_start*: CycleCount       # and its first cycle
     # IMM_ACCESS_WAIT: an immediate DMA's request landed in the CPU access
@@ -531,6 +544,8 @@ type
     # Level-triggered IRQ signal (IE & IF != 0 and IME), maintained by
     # check_interrupts; sampled at instruction boundaries only
     irq_line*:    bool
+    # When the synchroniser raised irq_line (IRQ_LAST_WAITS).
+    irq_line_at*: CycleCount
     # Set when an IRQ wakes the CPU from halt. Nothing reads it any more; it
     # stays because it is serialized CPU state.
     halt_wake*:   bool
@@ -1140,8 +1155,10 @@ proc irq_enter*(cpu: CPU)
 proc und*(cpu: CPU)
 proc run_pending*(dma: DMA)
 proc schedule_interrupt_check*(intr: Interrupts; delay: int = 0)
+proc window_open_event*(intr: Interrupts)
+proc window_close_event*(intr: Interrupts)
+proc window_ahead*(intr: Interrupts; raise_in: int)
 proc unstall*(intr: Interrupts; ran: int)
-proc stall_tail*(intr: Interrupts; access_end: CycleCount; cost: int)
 proc read_open_bus_word*(bus: Bus; address: uint32): uint32
 proc read_open_bus_value*(bus: Bus; address: uint32): uint8
 when defined(obuslatch):
@@ -1199,11 +1216,27 @@ const DMA_LEAD_CYCLES* {.intdefine.} = 1
   ## where accesses end costs a scheduler sync per access, so it is paid only
   ## from the H-blank's start to the request, and only with such a DMA armed.
 const DMA_STALLS_IRQ_SYNC* {.booldefine.} = true
-  ## The stall also covers the wait states of the access the CPU was waiting
-  ## to make (Interrupts.stall_tail), and gives back internal cycles the CPU
-  ## ran under the burst (Interrupts.unstall). Without either, alyosha
-  ## Interactions rows go red: no tail, Internal_Cycle_DMA_IRQ/_ST/_ST_p3/_br;
-  ## no unstall, Internal_Cycle_DMA_IRQ_7/_ldr_IWRAM/_MUL_IRQ.
+  ## The stall gives back internal cycles the CPU ran under the burst
+  ## (Interrupts.unstall); without it alyosha Interactions
+  ## Internal_Cycle_DMA_IRQ_7/_ldr_IWRAM/_MUL_IRQ go red. The access the
+  ## CPU was waiting to make is IRQ_LAST_WAITS's.
+const IRQ_LAST_WAITS* {.booldefine.} = true
+  ## An interrupt is taken after an instruction only if it was recognised
+  ## before the wait states of that instruction's last bus access; one
+  ## recognised during them waits for the next instruction. A wait-stated
+  ## access is one stretched cycle, and the core samples the interrupt as
+  ## that cycle begins. tests/roms/payloads/irqwait.s on an AGB SP: a TM0
+  ## interrupt breaks into a NOP sled one NOP later from EWRAM (ARM: five
+  ## wait states per fetch, Thumb: two) than the cycle count alone says,
+  ## at every phase, and identically from IWRAM (no waits). Also alyosha
+  ## ppu/start_up_vbl_irq (a cartridge VCOUNT poll, one instruction later
+  ## than from Halt) and, through the first fetch after a DMA burst,
+  ## Interactions Internal_Cycle_DMA_IRQ/_ST/_ST_p3/_br, which a tail on the
+  ## burst's stall used to carry. Nearly free while nothing is on its way:
+  ## a window (bus.sync_bits bit 3), opened by schedule_interrupt_check and,
+  ## IRQ_WINDOW_LEAD cycles early, ahead of a timer's or the PPU's raise,
+  ## has the CPU's fetches and stores note their wait states until no check
+  ## is left to run. FireRed, same work: +0.06% retired instructions.
 const DMA_READS_CPU_BUS* {.booldefine.} = true
   ## A DMA read of unmapped memory returns what is on the data bus: the last
   ## word the burst itself moved, or, for its first transfer, the CPU's last
@@ -1326,6 +1359,7 @@ proc idle*(cpu: CPU; n: int) {.inline.}
 proc mul_i_cycles*(rs: uint32; signed_early_term: bool): int {.inline.}
 proc set_neg_and_zero_flags*(cpu: CPU; value: uint32) {.inline.}
 proc switch_mode*(cpu: CPU; new_mode: CpuMode)
+proc undef_mode_tick*(cpu: CPU)
 proc lsl*(cpu: CPU; word: uint32; bits: uint32; carry_out: ptr bool): uint32 {.inline.}
 proc lsr*(cpu: CPU; word: uint32; bits: uint32; immediate: bool; carry_out: ptr bool): uint32 {.inline.}
 proc asr*(cpu: CPU; word: uint32; bits: uint32; immediate: bool; carry_out: ptr bool): uint32 {.inline.}
@@ -1354,6 +1388,11 @@ proc mode_bank*(m: CpuMode): int
 #     arm_* handlers at compile time; a const cannot be forward-declared.
 
 # CPU fetch pipeline
+template note_waits*(bus: Bus; cost: int) =
+  ## IRQ_LAST_WAITS: a CPU access of `cost` cycles just ended.
+  bus.lw_end = bus.sched.cycles + CycleCount(bus.cycles)
+  bus.lw_waits = cost - 1
+
 include pipeline
 # Cartridge: ROM image, save memory, GPIO-attached RTC
 include cartridge
@@ -1602,6 +1641,9 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
     of etLdmGlitch:     gba.cpu.ldm_glitch_restore()
     of etFifoARequest:  gba.dma.trigger_fifo(0)
     of etFifoBRequest:  gba.dma.trigger_fifo(1)
+    of etUndefMode:     gba.cpu.undef_mode_tick()
+    of etIrqWindowOpen:  gba.interrupts.window_open_event()
+    of etIrqWindowClose: gba.interrupts.window_close_event()
     of etHandleInput, etIME, etCameraDone, etGbLycEdge: discard
 
 # Timer prescaler phase at ROM entry when the BIOS boot is skipped. The
@@ -1751,6 +1793,8 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
   else:
     gba.interrupts.stall_from = 0
     gba.interrupts.stall_to = 0
+  for t in [addr gba.interrupts.win_open_at, addr gba.interrupts.win_close_at]:
+    if t[] != high(CycleCount): t[] = (if t[] >= base: t[] - base else: 0)
   if gba.interrupts.pipe_due >= base:
     gba.interrupts.pipe_at -= min(gba.interrupts.pipe_at, base)
     gba.interrupts.pipe_due -= base
