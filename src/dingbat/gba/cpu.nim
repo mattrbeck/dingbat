@@ -45,6 +45,14 @@ proc skip_bios*(cpu: CPU) =
   # (hardware: gbaedge IDENT on AGB SP, docs/hwprobe.md).
   cpu.gba.ppu.dispcnt = cast[DISPCNT](0x0080'u16)
   cpu.gba.mmio.postflg = 1
+  # The boot sound's TM0 (reload 0xFB1A, /1) is stopped with its count at
+  # 0xFF8B, and the BIOS's last write leaves reload and control 0; a timer
+  # read before an enable takes effect still shows it (timer.nim
+  # TIMER_OLD_COUNT). alyosha timer/timer_reset test 1 on hardware; an AGB SP
+  # booted to multiboot reads 0xFF8A-0xFF8C (tools/hwlink, 2026-09-24).
+  # dingbat's own real-BIOS boot stops it at 0xFF89, two cycles short.
+  cpu.gba.timer.tm[0] = 0xFF8B'u16
+  cpu.gba.timer.tm_pre[0] = 0xFF8B'u16
   # BIOS open-bus value after boot (GBATEK, "BIOS Memory": 0xE129F000).
   cpu.gba.bus.bios_latch = 0xE129F000'u32
   cpu.clear_pipeline()
@@ -270,6 +278,8 @@ proc clear_pipeline*(cpu: CPU) =
           # breaks nothing: the prefetcher works through it, and the cycles
           # it held the bus are fetch time the CPU does not pay again.
           bus.cycles += n
+          bus.access_rom = true
+          bus.access_write = false
           bus.catch_up_access(n)
           both = s
           let after_first = bus.dma_end_at == bus.sched.cycles + CycleCount(bus.cycles)
@@ -284,6 +294,8 @@ proc clear_pipeline*(cpu: CPU) =
             else:
               both = n
           bus.cycles += both
+          bus.access_rom = true
+          bus.access_write = false
           bus.catch_up_access(both)
           both = 0
           # One granted at the end of the second leaves the burst broken for
@@ -372,6 +384,10 @@ proc idle_synced(cpu: CPU; n: int) {.noinline.} =
     if (bus.sync_bits and 2) != 0:
       bus.idle_window(n)
       return
+  when IMM_ACCESS_WAIT:
+    if bus.imm_post:
+      bus.catch_up()
+      bus.imm_post_grant()
   when IMM_IDLE_GRANT:
     let now = bus.sched.cycles + CycleCount(bus.cycles)
     bus.imm_idle_from = now
@@ -382,7 +398,8 @@ proc idle_synced(cpu: CPU; n: int) {.noinline.} =
       bus.catch_up()
       bus.sched.clear(etDMA)
       bus.sync_bits = bus.sync_bits and not 4'u8
-      cpu.gba.dma.request_immediate()
+      bus.imm_pre = false
+      cpu.gba.dma.request_immediate(reschedule = true)
       cpu.gba.dma.run_pending()
   bus.add_cycles(n)
 

@@ -192,6 +192,7 @@ proc load_timer_state(tim: Timer; r: var Reader) =
     tim.tmcnt[i] = cast[TMCNT](r.read_u16())
     tim.tmd[i] = r.read_u16()
     tim.tm[i] = r.read_u16()
+    tim.tm_pre[i] = tim.tm[i]
     tim.cycle_enabled[i] = CycleCount(r.read_u64())
 
 proc save_serial_state(serial: Serial; w: var Writer) =

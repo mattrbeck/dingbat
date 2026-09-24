@@ -8,6 +8,7 @@ const DMA_PREEMPT_AFTER_READ {.booldefine.} = true
   ## its write waits for the next read). False (between transfers, as
   ## before) reds _mid_1 and _mid_2; both points reds _mid_2; neither reds
   ## _mid_1 and _end_1.._end_3.
+const DMA_STALL_FROM_CPU_STOP {.booldefine.} = true
 const DMA_ROM_BOUNDARY_HOLD {.booldefine.} = true
   ## A gamepak ROM source whose address does not move (fixed or decrement
   ## control; the data still comes from successive addresses) and sits on
@@ -103,21 +104,69 @@ proc `[]=`*(dma: DMA; io_addr: uint32; value: uint8) =
       if dma.dmacnt_h[channel].start_timing == 0:  # Immediate
         # Requests the bus DMA_START_DELAY cycles after the enable write; the
         # CPU keeps executing until then, and until the third cycle unless it
-        # is idle (IMM_IDLE_GRANT; mGBA suite "Trivial DMA"). The event
-        # re-checks enable, so no per-channel pending state is needed.
+        # is idle (IMM_IDLE_GRANT; mGBA suite "Trivial DMA"), or later while
+        # a CPU access it lands in finishes (IMM_ACCESS_WAIT). Each channel
+        # requests at its own time (imm_due, request_immediate).
+        let due = dma.gba.scheduler.cycles + CycleCount(dma.gba.bus.cycles) +
+                  CycleCount(DMA_START_DELAY)
+        dma.imm_due[channel] = due
+        when IMM_IDLE_GRANT:
+          # Another channel armed a moment earlier keeps its own request.
+          if (dma.gba.bus.sync_bits and 1) == 0 or dma.gba.bus.imm_at < due - CycleCount(DMA_START_DELAY):
+            dma.gba.bus.imm_at = due
         dma.gba.bus.sync_bits = dma.gba.bus.sync_bits or 1
         dma.gba.scheduler.schedule(DMA_START_DELAY, etDMA)
-        when IMM_IDLE_GRANT:
-          dma.gba.bus.imm_at = dma.gba.scheduler.cycles + CycleCount(dma.gba.bus.cycles) +
-                               CycleCount(DMA_START_DELAY)
   else:
     echo "Unmapped DMA write addr: ", hex_str(uint8(io_addr)), " val: ", value
 
-proc request_immediate*(dma: DMA) =
-  dma.gba.bus.sync_bits = dma.gba.bus.sync_bits and not 1'u8
+proc request_immediate*(dma: DMA; reschedule = false) =
+  ## Requests the armed immediate channels whose DMA_START_DELAY is up: one
+  ## armed after them requests at its own time (tests/roms/payloads/tmrdma.s
+  ## on an AGB SP: DMA1 armed, DMA0 armed by the next store, and DMA1 still
+  ## runs first). `reschedule`: the caller cleared the pending etDMA events.
+  let now = dma.gba.scheduler.cycles + CycleCount(dma.gba.bus.cycles)
+  var later = CycleCount(0)
+  var waiting = false
   for channel in 0..3:
     if dma.dmacnt_h[channel].enable and dma.dmacnt_h[channel].start_timing == 0:
-      dma.request(channel)
+      if dma.imm_due[channel] <= now:
+        dma.request(channel)
+      elif not waiting or dma.imm_due[channel] < later:
+        later = dma.imm_due[channel]
+        waiting = true
+  if waiting:
+    when IMM_IDLE_GRANT: dma.gba.bus.imm_at = later
+    if reschedule:
+      dma.gba.scheduler.schedule(int(later - dma.gba.scheduler.cycles), etDMA)
+  else:
+    dma.gba.bus.sync_bits = dma.gba.bus.sync_bits and not 1'u8
+
+proc chain_next(dma: DMA; channel: int): bool =
+  ## DMA_CHAIN: at the end of `channel`'s burst, request every armed
+  ## immediate channel whose request has come due under it.
+  let bus = dma.gba.bus
+  let now = bus.sched.cycles + CycleCount(bus.cycles)
+  var waiting = false
+  var later = CycleCount(0)
+  for ch in 0..3:
+    if ch != channel and dma.dmacnt_h[ch].enable and dma.dmacnt_h[ch].start_timing == 0:
+      if dma.imm_due[ch] <= now:
+        dma.request(ch)
+        result = true
+      elif not waiting or dma.imm_due[ch] < later:
+        waiting = true
+        later = dma.imm_due[ch]
+  if result:
+    dma.chained = true
+    # Their etDMA events are spent; keep one for a channel still to come.
+    bus.sched.clear(etDMA)
+    bus.sync_bits = bus.sync_bits and not 4'u8
+    bus.imm_post = false
+    if waiting:
+      when IMM_IDLE_GRANT: bus.imm_at = later
+      bus.sched.schedule(int(later - bus.sched.cycles), etDMA)
+    else:
+      bus.sync_bits = bus.sync_bits and not 1'u8
 
 proc armed*(dma: DMA; timing: int): bool =
   for channel in 0..3:
@@ -243,7 +292,8 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
   # preempts another mid-burst pays nothing: the bus never returns to the
   # CPU (AGS aging cartridge DMA priority test).
   if not nested:
-    dma.gba.bus.add_cycles(DMA_LEAD_CYCLES)
+    if dma.chained: dma.chained = false
+    else: dma.gba.bus.add_cycles(DMA_LEAD_CYCLES)
 
   dma.gba.bus.dma_active = true
   when DMA_READS_CPU_BUS:
@@ -327,7 +377,8 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
     dma.dst[channel] = uint32(int(dma.dst[channel]) + delta_dest)
 
   if not nested and DMA_LEAD_CYCLES < 2:
-    dma.gba.bus.add_cycles(2 - DMA_LEAD_CYCLES)   # the hand-back
+    if not (DMA_CHAIN and dma.chain_next(channel)):
+      dma.gba.bus.add_cycles(2 - DMA_LEAD_CYCLES)   # the hand-back
 
   if start_timing == 3 and (channel == 1 or channel == 2):
     dma.fifo_xfer_cycle[channel] = int64(dma.gba.scheduler.cycles)
@@ -411,12 +462,18 @@ proc run_pending*(dma: DMA) =
             bus.cycles -= int(free)
             held -= free
         let intr = dma.gba.interrupts
-        intr.stall_pushed = bus.sched.delay_pending(etInterrupts, granted_at, held)
-        if intr.pipe_raised != 0 and intr.pipe_due > granted_at:
-          intr.pipe_due += held
         # And one raised under the burst counts from its end (raise_synced).
         intr.stall_to = if cpu_ran: cpu_back else: bus.sched.cycles + CycleCount(bus.cycles)
         intr.stall_from = intr.stall_to - held
+        # A recognition due before the CPU stopped -- inside internal cycles
+        # it ran under the burst -- is not held back
+        # (tests/roms/payloads/dmamulirq.s on an AGB SP: a timer interrupt
+        # raised in the multiply the burst was granted in, due before its
+        # last internal cycle, is taken after that multiply).
+        let stall_start = if DMA_STALL_FROM_CPU_STOP: intr.stall_from else: granted_at
+        intr.stall_pushed = bus.sched.delay_pending(etInterrupts, stall_start, held)
+        if intr.pipe_raised != 0 and intr.pipe_due > stall_start:
+          intr.pipe_due += held
         intr.stall_open = true
     # The CPU (or a paused outer burst) resumes with a nonsequential access.
     bus.dma_active = saved < 4

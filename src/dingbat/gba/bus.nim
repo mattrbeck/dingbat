@@ -1070,16 +1070,49 @@ proc catch_up_access(bus: Bus; cost: int) {.inline.} =
   ## that fires on the way there landed inside the access (gba.nim,
   ## defer_dma_request).
   bus.access_end = bus.bus_now()
+  bus.access_start = bus.access_end - CycleCount(cost)
   when DMA_STALLS_IRQ_SYNC:
     if bus.gba.interrupts.stall_open: bus.gba.interrupts.stall_tail(bus.access_end, cost)
   bus.catch_up()
+
+proc imm_post_grant(bus: Bus) {.noinline.} =
+  ## IMM_ACCESS_WAIT: the CPU store an immediate DMA's request landed in has
+  ## taken effect; the burst gets the bus now.
+  bus.imm_post = false
+  bus.sync_bits = bus.sync_bits and not 4'u8
+  bus.gba.dma.request_immediate()
+  # A SWP's read and write are one locked transaction: it pumps the request
+  # after its write.
+  if bus.swp_lock: return
+  bus.gba.dma.run_pending()
+
+proc imm_pre_grant(bus: Bus; cost: int) =
+  ## IMM_ACCESS_WAIT: a data access at the cycle an immediate DMA's request
+  ## came due (as the previous access ended) loses the bus to it; the burst
+  ## runs before this access's cycles.
+  bus.cycles -= cost
+  bus.catch_up()                  # the one-cycle retry may take it here
+  bus.cycles += cost
+  if not bus.imm_pre: return
+  bus.imm_pre = false
+  bus.sync_bits = bus.sync_bits and not 4'u8
+  bus.sched.clear(etDMA)
+  bus.cycles -= cost
+  bus.gba.dma.request_immediate(reschedule = true)
+  # A SWP's write belongs to its read: SWP pumps the request after it.
+  if not bus.swp_lock: bus.gba.dma.run_pending()
+  bus.cycles += cost
 
 proc window_fetch_sync(bus: Bus; cost: int) =
   bus.fetch_page = 0xFFFFFFFF'u32   # stay on the miss path while the window is open
   # A request that fires inside this very fetch leaves the window open for
   # the internal cycles behind it; the fetch after that closes it.
   let closing = bus.window_closing
+  bus.access_rom = true
+  bus.access_write = false
   bus.catch_up_access(cost)
+  when IMM_ACCESS_WAIT:
+    if bus.imm_post: bus.imm_post_grant()
   if closing:
     bus.window_closing = false
     bus.sync_bits = bus.sync_bits and not 2'u8
@@ -1135,7 +1168,16 @@ proc `[]`*(bus: Bus; address: uint32): uint8 =
       bus.load_pc = bus.gba.cpu.r[15]
       bus.load_end = bus.bus_now()
       bus.load_start = bus.load_end - CycleCount(cost)
+    when IMM_ACCESS_WAIT:
+      bus.access_rom = bus_page(address) >= 0x8
+      bus.access_write = false
+      if bus.imm_pre: bus.imm_pre_grant(cost)
     bus.catch_up_access(cost)
+    when IMM_ACCESS_WAIT:
+      if bus.imm_post:
+        result = bus.read_byte_internal(address)
+        bus.imm_post_grant()
+        return
   bus.read_byte_internal(address)
 
 proc read_half*(bus: Bus; address: uint32): uint16 =
@@ -1150,7 +1192,16 @@ proc read_half*(bus: Bus; address: uint32): uint16 =
       bus.load_pc = bus.gba.cpu.r[15]
       bus.load_end = bus.bus_now()
       bus.load_start = bus.load_end - CycleCount(cost)
+    when IMM_ACCESS_WAIT:
+      bus.access_rom = bus_page(address) >= 0x8
+      bus.access_write = false
+      if bus.imm_pre: bus.imm_pre_grant(cost)
     bus.catch_up_access(cost)
+    when IMM_ACCESS_WAIT:
+      if bus.imm_post:
+        result = bus.read_half_internal(address)
+        bus.imm_post_grant()
+        return
   bus.read_half_internal(address)
 
 proc sd_tw_begin*(bus: Bus; a0: uint32; n: int) =
@@ -1216,7 +1267,16 @@ proc read_word*(bus: Bus; address: uint32): uint32 =
       bus.load_pc = bus.gba.cpu.r[15]
       bus.load_end = bus.bus_now()
       bus.load_start = bus.load_end - CycleCount(cost)
+    when IMM_ACCESS_WAIT:
+      bus.access_rom = bus_page(address) >= 0x8
+      bus.access_write = false
+      if bus.imm_pre: bus.imm_pre_grant(cost)
     bus.catch_up_access(cost)
+    when IMM_ACCESS_WAIT:
+      if bus.imm_post:
+        result = bus.read_word_internal(address)
+        bus.imm_post_grant()
+        return
   bus.read_word_internal(address)
 
 proc fetch_half_miss(bus: Bus; address: uint32): uint16 =
@@ -1253,7 +1313,18 @@ proc `[]=`*(bus: Bus; address: uint32; value: uint8) =
     # console shows a burst the fetched opcode after one, not the load
     # before it or the store's own data (dmaobus2.s variant 7)
     when DMA_READS_CPU_BUS: bus.load_size = 0
+    when IMM_ACCESS_WAIT:
+      bus.access_rom = bus_page(address) >= 0x8
+      bus.access_write = true
+      if bus.imm_pre: bus.imm_pre_grant(cost)
     bus.catch_up_access(cost)
+    when IMM_ACCESS_WAIT:
+      if bus.imm_post:
+        bus.byte_io_write = true
+        bus.write_byte_internal(address, value)
+        bus.byte_io_write = false
+        bus.imm_post_grant()
+        return
   bus.byte_io_write = true
   bus.write_byte_internal(address, value)
   bus.byte_io_write = false
@@ -1268,7 +1339,16 @@ proc write_half*(bus: Bus; address: uint32; value: uint16) =
     # console shows a burst the fetched opcode after one, not the load
     # before it or the store's own data (dmaobus2.s variant 7)
     when DMA_READS_CPU_BUS: bus.load_size = 0
+    when IMM_ACCESS_WAIT:
+      bus.access_rom = bus_page(address) >= 0x8
+      bus.access_write = true
+      if bus.imm_pre: bus.imm_pre_grant(cost)
     bus.catch_up_access(cost)
+    when IMM_ACCESS_WAIT:
+      if bus.imm_post:
+        bus.write_half_internal(address, value)
+        bus.imm_post_grant()
+        return
   bus.write_half_internal(address, value)
 
 proc write_word*(bus: Bus; address: uint32; value: uint32) =
@@ -1281,7 +1361,16 @@ proc write_word*(bus: Bus; address: uint32; value: uint32) =
     # console shows a burst the fetched opcode after one, not the load
     # before it or the store's own data (dmaobus2.s variant 7)
     when DMA_READS_CPU_BUS: bus.load_size = 0
+    when IMM_ACCESS_WAIT:
+      bus.access_rom = bus_page(address) >= 0x8
+      bus.access_write = true
+      if bus.imm_pre: bus.imm_pre_grant(cost)
     bus.catch_up_access(cost)
+    when IMM_ACCESS_WAIT:
+      if bus.imm_post:
+        bus.write_word_internal(address, value)
+        bus.imm_post_grant()
+        return
   bus.write_word_internal(address, value)
 
 # For DMA write-word via uint32 subscript

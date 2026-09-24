@@ -152,6 +152,9 @@ type
     tmd*:          array[4, uint16]
     tm*:           array[4, uint16]
     cycle_enabled*: array[4, CycleCount]
+    # The count a cold enable found: reads before counting starts still see
+    # it (TIMER_START_DELAY). Not serialized (a load sets it to tm).
+    tm_pre*:       array[4, uint16]
     # Reload writes latch one cycle late relative to an overflow: an overflow
     # on the cycle right after the write still reloads the old value
     tmd_prev*:        array[4, uint16]
@@ -208,6 +211,12 @@ type
     # higher-priority request preempts via a nested run_pending. Always 0/4
     # between instructions, so not serialized.
     pending*:          uint8
+    # When each armed immediate channel requests the bus (DMA_START_DELAY
+    # after its enable write). Only read within that delay; not serialized.
+    imm_due*:          array[4, CycleCount]
+    # DMA_CHAIN: the burst that just ended handed the bus straight to the
+    # next one, which starts without its lead cycle. Instruction scoped.
+    chained*:          bool
     current_priority*: int
     # DMA3 video-capture frame latch: set at line 2, cleared with the enable
     # bit at line 162; a channel armed mid-frame waits for the next frame's
@@ -391,6 +400,17 @@ type
     # in flight and waits a cycle for it (IMM_IDLE_GRANT).
     sync_bits*: uint8
     access_end*: CycleCount         # end of the access a window sync is inside
+    access_start*: CycleCount       # and its first cycle
+    # IMM_ACCESS_WAIT: an immediate DMA's request landed in the CPU access
+    # being synced; the accessor grants it once the access has taken effect.
+    imm_post*: bool
+    # and one that came due in a load or exactly as an access ended: the next CPU step
+    # at that cycle hands over (an internal cycle through IMM_IDLE_GRANT's
+    # path, a data access before it starts; a fetch leaves it to the
+    # one-cycle retry).
+    imm_pre*: bool
+    access_rom*: bool               # the synced access is on the gamepak bus
+    access_write*: bool             # and is a store
     dma_deferred_from*: CycleCount  # a deferred grant's original request cycle
     dma_deferred*: bool
     window_closing*: bool           # the request fired; the next fetch closes the window
@@ -1192,12 +1212,28 @@ const IMM_BOUNDARY_GRANT* {.booldefine.} = true
   ## (HLE and real BIOS) read one fetch late; on, alyosha
   ## prefetcher/prefetcher_dma and AGBEEG cpu_runs_idles_during_dma turn
   ## green and nothing else moves.
+const DMA_CHAIN* {.booldefine.} = true
+  ## An immediate DMA whose request comes due while another burst holds the
+  ## bus follows it with no cycles between: the pair pays one lead and one
+  ## hand-back. tests/roms/payloads/tmrdma.s on an AGB SP: DMA1 armed, DMA0
+  ## armed by the next store (its request lands in DMA1's burst); DMA0 reads
+  ## the timer DMA1 enabled on the very next cycle (old count, new control),
+  ## and the CPU is back two cycles sooner than for two separate bursts.
+const IMM_ACCESS_WAIT* {.booldefine.} = true
+  ## An immediate DMA whose request lands inside a CPU data access that
+  ## began before it waits for that access to end, and the access sees
+  ## memory as it was before the burst; an access beginning on the request
+  ## cycle loses the bus to it. tests/roms/payloads/dmastart.s on an AGB SP,
+  ## the enable store followed from IWRAM by one instruction: an EWRAM ldr,
+  ## ldrh or str there (data from the next cycle on) delays the burst by its
+  ## length less one and reads the old word, while a nop before the ldr, or
+  ## an ldm's second access, lets the burst in first.
 const IMM_IDLE_GRANT* {.booldefine.} = true
   ## An immediate DMA requests the bus two cycles after its enable write. If
   ## the CPU is running internal cycles then, the burst starts there and
-  ## those cycles run under it; if the CPU has an access in flight, the burst
-  ## waits for it and starts on the third cycle, as it always did (mGBA suite
-  ## Trivial DMA). tests/roms/payloads/irqstorm.s on an AGB SP: the enable
+  ## those cycles run under it; if the CPU has a gamepak access in flight,
+  ## the burst starts on the third cycle, as it always did (mGBA suite
+  ## Trivial DMA; any other access: IMM_ACCESS_WAIT). tests/roms/payloads/irqstorm.s on an AGB SP: the enable
   ## is followed by an IWRAM `ldr`, whose internal cycle is the enable's
   ## third, and the CPU comes out of every burst (1 to 4096 words) a cycle
   ## sooner than a third-cycle start gives -- the timer interrupt it then
@@ -1253,10 +1289,12 @@ proc gs_frame_poll*(g: GsBonHle)
 proc gs_render_sample*(g: GsBonHle): tuple[l: int16, r: int16]
 proc trigger_hdma*(dma: DMA)
 proc trigger_vdma*(dma: DMA)
-proc request_immediate*(dma: DMA)
+proc request_immediate*(dma: DMA; reschedule = false)
 proc trigger_video_capture*(dma: DMA; vcount: uint16)
 proc catch_up(bus: Bus) {.inline.}
 proc catch_up_access(bus: Bus; cost: int) {.inline.}
+proc imm_post_grant(bus: Bus) {.noinline.}
+proc imm_pre_grant(bus: Bus; cost: int) {.noinline.}
 proc serial_transfer_complete*(serial: Serial)
 proc trigger_fifo*(dma: DMA; fifo_channel: int)
 proc bitmap*(ppu: PPU): bool
@@ -1496,12 +1534,52 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
           # started, and wins the bus from it.
           at_boundary = not bus.in_catch_up and gba.scheduler.tick_left == 0 and
                         not gba.cpu.halted
-        if (bus.sync_bits and 4) == 0 and not at_boundary and
+        var in_access = false
+        var access_starts = false
+        var at_end = false
+        when IMM_ACCESS_WAIT:
+          # Measured for IWRAM/EWRAM/IO accesses only; a gamepak access keeps
+          # the one-cycle wait (alyosha DMA_pause_timing_mid_1/_mid_2 time a
+          # grant inside a four-cycle ROM fetch).
+          if bus.in_catch_up and not bus.access_rom and not gba.cpu.halted and
+             bus.access_start <= now and now <= bus.access_end:
+            if bus.access_start == now: access_starts = now < bus.access_end
+            elif now < bus.access_end: in_access = true
+            else: at_end = true
+        if (bus.sync_bits and 4) == 0 and in_access and bus.access_write:
+          # A store under way takes effect first; its accessor grants the
+          # burst at its end.
+          bus.sync_bits = bus.sync_bits or 4
+          bus.imm_at = bus.access_end
+          bus.imm_post = true
+        elif (bus.sync_bits and 4) == 0 and in_access:
+          # A load under way reads memory as it was; the CPU's next step at
+          # its end hands over (its internal cycle, which runs under the
+          # burst, or an ldm's next access), as for one ending on the request.
+          bus.sync_bits = bus.sync_bits or 4
+          bus.imm_at = bus.access_end
+          bus.imm_pre = true
+          gba.scheduler.schedule(int(bus.access_end - now) + 1, etDMA)
+        elif (bus.sync_bits and 4) == 0 and at_end and bus.access_write:
+          # A store's last cycle: the fetch after it would lose the bus.
+          bus.sync_bits = bus.sync_bits or 4
+          bus.imm_at = now
+          bus.imm_post = true
+        elif (bus.sync_bits and 4) == 0 and at_end:
+          bus.sync_bits = bus.sync_bits or 4
+          bus.imm_at = now
+          bus.imm_pre = true
+          gba.scheduler.schedule(1, etDMA)
+        elif (bus.sync_bits and 4) == 0 and access_starts:
+          # An access starting on the request cycle loses the bus to it.
+          gba.dma.request_immediate()
+        elif (bus.sync_bits and 4) == 0 and not at_boundary and
            not (bus.imm_idle_from <= now and now < bus.imm_idle_until):
           bus.sync_bits = bus.sync_bits or 4
           gba.scheduler.schedule(1, etDMA)
         else:
           bus.sync_bits = bus.sync_bits and not 4'u8
+          bus.imm_pre = false
           gba.dma.request_immediate()
       else:
         gba.dma.request_immediate()
@@ -1647,6 +1725,11 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
     gba.bus.access_end -= base
   else:
     gba.bus.access_end = 0
+  if gba.bus.access_start >= base: gba.bus.access_start -= base
+  else: gba.bus.access_start = 0
+  for ch in 0..3:
+    if gba.dma.imm_due[ch] >= base: gba.dma.imm_due[ch] -= base
+    else: gba.dma.imm_due[ch] = 0
   if gba.interrupts.gate_open_at >= base:
     gba.interrupts.gate_open_at -= base
   else:

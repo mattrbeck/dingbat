@@ -6,6 +6,7 @@ const
   # Counting starts 2 cycles after the enable write.
   TIMER_START_DELAY = 2
 const TIMER_STOP_DELAY {.intdefine.} = 1
+const TIMER_OLD_COUNT {.booldefine.} = true
 
 # The prescaler is free-running: a timer with period P ticks at absolute
 # cycles divisible by P regardless of when it was enabled. Ticks are counted
@@ -55,16 +56,35 @@ proc get_current_tm(tim: Timer; num: int): uint16 =
     # dispatch, where catch_up is suppressed, and each transfer must see the
     # live count (AGS aging cartridge DMA-captures consecutive timer values).
     let now = tim.gba.scheduler.cycles + CycleCount(tim.gba.bus.cycles)
-    # cycle_enabled sits up to TIMER_START_DELAY in the future after an enable.
-    if now <= tim.cycle_enabled[num]: return tim.tm[num]
+    # cycle_enabled sits up to TIMER_START_DELAY in the future after an
+    # enable, and until then the count is still the one the enable found
+    # (tests/roms/payloads/tmrdma.s on an AGB SP: a DMA reading the timer a
+    # cycle after another DMA enabled it reads the old count under the new
+    # control bits; alyosha timer/timer_reset); on the start cycle it reads
+    # the reload.
+    if now < tim.cycle_enabled[num]:
+      return (if TIMER_OLD_COUNT: tim.tm_pre[num] else: tim.tm[num])
+    if now == tim.cycle_enabled[num]: return tim.tm[num]
     tim.tm[num] + uint16(ticks_between(tim.cycle_enabled[num], now,
                                        TIMER_PERIODS[tim.tmcnt[num].frequency]))
   else:
     tim.tm[num]
 
+proc write_now(tim: Timer): CycleCount {.inline.} =
+  ## The cycle a register write lands on. A CPU store has synced the
+  ## scheduler to its access's end (bus.cycles is 0); a DMA's store runs
+  ## inside event dispatch with its burst's cycles so far still in
+  ## bus.cycles, and lands after them (tests/roms/payloads/dmadur.s on an AGB
+  ## SP: a one-word DMA that starts TM1 leaves it counting two cycles later
+  ## than the burst's grant).
+  tim.gba.scheduler.cycles + CycleCount(tim.gba.bus.cycles)
+
 proc update_tm(tim: Timer; num: int) =
+  let now = tim.write_now()
+  # Not started yet: the reload and the start cycle stand.
+  if tim.tmcnt[num].enable and now < tim.cycle_enabled[num]: return
   tim.tm[num] = tim.get_current_tm(num)
-  tim.cycle_enabled[num] = tim.gba.scheduler.cycles
+  tim.cycle_enabled[num] = now
 
 proc `[]`*(tim: Timer; io_addr: uint32): uint8 =
   let num = int((io_addr and 0xF) div 4)
@@ -123,17 +143,18 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
           # the prescaler ticks on the enable's cycle: the mGBA suite's Timer
           # count-up rows enable a /1024 timer over a 0xFFFF count and take
           # no interrupt there.
-          let now = tim.gba.scheduler.cycles
+          let now = tim.write_now()
           if tim.tm[num] == 0xFFFF'u16 and tim.tmcnt[num].irq_enable and
              not tim.tmcnt[num].cascade and
              ticks_between(now - 1, now, TIMER_PERIODS[tim.tmcnt[num].frequency]) > 0:
             tim.gba.interrupts.raise_synced(IRQ_TIMER_BIT_BASE + num)
+          tim.tm_pre[num] = tim.tm[num]
           tim.tm[num] = tim.tmd[num]
         if tim.tmcnt[num].cascade:
           tim.gba.scheduler.clear(TIMER_EVENT_TYPES[num])
         elif not was_enabled or was_cascade:
           let delay = if was_enabled: 0 else: TIMER_START_DELAY
-          tim.cycle_enabled[num] = tim.gba.scheduler.cycles + CycleCount(delay)
+          tim.cycle_enabled[num] = tim.write_now() + CycleCount(delay)
           tim.gba.scheduler.schedule(tim.cycles_until_overflow(num), TIMER_EVENT_TYPES[num])
       elif was_enabled:
         when TIMER_STOP_DELAY > 0:
@@ -142,7 +163,7 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
           # a stop freeze the count one higher than a stop-at-the-write gives,
           # where the read itself agrees).
           if not was_cascade:
-            let now = tim.gba.scheduler.cycles
+            let now = tim.write_now()
             let extra = ticks_between(now, now + CycleCount(TIMER_STOP_DELAY), old_period)
             if extra > 0:
               if tim.tm[num] == 0xFFFF'u16:
@@ -156,7 +177,7 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
               else: tim.tm[num] += uint16(extra)
         tim.gba.scheduler.clear(TIMER_EVENT_TYPES[num])
   else:
-    let now = tim.gba.scheduler.cycles
+    let now = tim.write_now()
     if tim.tmd_write_cycle[num] != now:
       tim.tmd_prev[num] = tim.tmd[num]
       tim.tmd_write_cycle[num] = now
