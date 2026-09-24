@@ -924,9 +924,16 @@ proc state_identity(): uint32 =
   of ekGB:  app.gb_emu.state_rom_identity()
   of ekNone: 0'u32
 
+proc state_prior_identity(): uint32 =
+  ## What the previous slot names used (persist.nim state_read_path).
+  case app.emu_kind
+  of ekGBA: app.gba_emu.state_prior_rom_identity()
+  of ekGB:  app.gb_emu.state_prior_rom_identity()
+  of ekNone: 0'u32
+
 proc state_is_ours(data: string): bool =
-  ## An older build's slot file (named by the ROM file name alone) belongs
-  ## to this game only if its header says so.
+  ## An older build's slot file (named by the ROM file name alone, or with
+  ## the 1 MB identity) belongs to this game only if the state says so.
   case app.emu_kind
   of ekGBA: app.gba_emu.state_is_for(data)
   of ekGB:  app.gb_emu.state_is_for(data)
@@ -945,7 +952,8 @@ proc state_slot_read_path(slot = 0): string =
   ## game (read only; the next Save writes the new name).
   let rom = current_rom_path()
   if rom.len == 0: return ""
-  state_read_path(states_dir(), rom, state_identity(), slot, state_is_ours)
+  state_read_path(states_dir(), rom, state_identity(), slot, state_is_ours,
+                  state_prior_identity())
 
 proc save_state_slot(slot: int): bool =
   ## Synchronous save of a numbered slot (with a thumbnail). Callers must be at
@@ -1012,7 +1020,7 @@ proc delete_state_slot(slot: int) =
   let rom = current_rom_path()
   if rom.len == 0: return
   for path in state_delete_paths(states_dir(), rom, state_identity(), slot,
-                                 state_is_ours):
+                                 state_is_ours, state_prior_identity()):
     try:
       removeFile(path)
       echo "State deleted: ", path

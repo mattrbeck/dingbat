@@ -47,12 +47,14 @@ const
 
 # ──────────────────────────── Save-state slot files ────────────────────────────
 #
-# A slot file is named by the ROM's file name and its ROM identity (the hash
-# the state header carries), so two different games that share a file name
-# (a hack beside the original, two zips whose inner ROMs share a name) keep
-# separate slots. Older builds used the file name alone; such a file is still
-# read when the slot has no file of its own and its header names this cart,
-# and is never written.
+# A slot file is named by the ROM's file name and its ROM identity (a hash
+# of the whole ROM file: `state_rom_identity`), so two different games that
+# share a file name (a hack beside the original, two zips whose inner ROMs
+# share a name) keep separate slots. Older builds named slots by the file
+# name alone and then, for GBA, by the file name and a hash of the ROM's
+# first 1 MB (`state_prior_rom_identity`); such a file is still read when
+# the slot has no file of its own and the state names this cart, and is
+# never written.
 
 proc state_file_name*(rom_path: string; identity: uint32; slot: int): string =
   ## `<rom file name>-<identity, 8 hex digits>[.slotN].state`; slot 0 is the
@@ -72,20 +74,29 @@ proc legacy_state_is_ours(path: string; ours: proc(data: string): bool): bool =
   try: ours(readFile(path))
   except CatchableError: false
 
+proc older_state_files(dir, rom_path: string; identity, prior: uint32;
+                       slot: int): seq[string] =
+  ## An older build's names for the slot, newest first.
+  if prior != identity: result.add dir / state_file_name(rom_path, prior, slot)
+  result.add dir / legacy_state_file_name(rom_path, slot)
+
 proc state_read_path*(dir, rom_path: string; identity: uint32; slot: int;
-                      ours: proc(data: string): bool): string =
+                      ours: proc(data: string): bool;
+                      prior = identity): string =
   ## The file a slot shows and loads: its own, else an older build's file
-  ## whose header names this cart (`ours`), else its own name (not there).
+  ## that names this cart (`ours`), else its own name (not there). `prior`
+  ## is the identity the previous names used (`state_prior_rom_identity`).
   result = dir / state_file_name(rom_path, identity, slot)
   if fileExists(result): return
-  let old = dir / legacy_state_file_name(rom_path, slot)
-  if legacy_state_is_ours(old, ours): return old
+  for old in older_state_files(dir, rom_path, identity, prior, slot):
+    if legacy_state_is_ours(old, ours): return old
 
 proc state_delete_paths*(dir, rom_path: string; identity: uint32; slot: int;
-                         ours: proc(data: string): bool): seq[string] =
-  ## Every file Delete must remove so the slot shows empty: its own and an
+                         ours: proc(data: string): bool;
+                         prior = identity): seq[string] =
+  ## Every file Delete must remove so the slot shows empty: its own and any
   ## older build's for this cart. Never another game's.
   let own = dir / state_file_name(rom_path, identity, slot)
   if fileExists(own): result.add own
-  let old = dir / legacy_state_file_name(rom_path, slot)
-  if legacy_state_is_ours(old, ours): result.add old
+  for old in older_state_files(dir, rom_path, identity, prior, slot):
+    if legacy_state_is_ours(old, ours): result.add old

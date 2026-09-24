@@ -993,7 +993,12 @@ proc parse_state_image*(gba: GBA; data: string; origin = "state data"):
                       origin, gba.gba_legacy_rom_checksums(), gba.gba_whole_rom())
 
 proc state_rom_identity*(gba: GBA): uint32 =
-  ## The ROM identity a state header carries; the desktop names slot files by it.
+  ## The whole-ROM identity; the desktop names slot files by it.
+  gba.cartridge.rom_identity_whole
+
+proc state_prior_rom_identity*(gba: GBA): uint32 =
+  ## What builds before the whole-ROM identity named slot files by: the
+  ## header's 1 MB hash (the same value for a cart of 1 MB or less).
   gba.gba_rom_checksum()
 
 proc state_is_for*(gba: GBA; data: string): bool =

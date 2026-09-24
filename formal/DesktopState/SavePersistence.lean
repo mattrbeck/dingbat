@@ -45,7 +45,10 @@ write or read it:
   `parse_state_payload` (358-392): refused as `srkNoFile`, `srkTruncated`,
   hash mismatch, or `srkWrongRom` when the header's ROM identity (a hash of
   the ROM file: the first 1 MB for GBA, savestate.nim 867; all of it for GB,
-  943) differs from the loaded cart's. An applied state marks the battery RAM
+  943) differs from the loaded cart's, or, for a GBA state that carries one,
+  its whole-ROM trailer does (serialize.nim `STATE_FLAG_WHOLE_ROM`; written
+  since round 4, so only an older build's GBA state is judged by the first
+  1 MB alone). An applied state marks the battery RAM
   dirty (gba savestate.nim 665, gb 755).
 * **Cheats** `<rom dir>/<rom name minus extension>.cht` (`cheat_file_path`
   777-781), read by `load_rom` (735), rewritten by `on_cheats_changed`
@@ -111,7 +114,8 @@ phase, both after a completed frame, except after a link loss mid-frame
 * A ROM is its folder, its name, its extension and its contents (`game`, which
   stands both for the cartridge and for its save-state ROM identity; distinct
   games are assumed to hash differently, so the model is exact for
-  `srkWrongRom` except for the GBA 1 MB window noted in the report). A zip is
+  `srkWrongRom` except for a GBA state from a build before the whole-ROM
+  trailer, which names only the first 1 MB). A zip is
   its cache folder (`extract_zip_rom` 500-503 keys it by the zip's full path)
   and its inner entry's name, which is what `state_file_path` sees.
 * Battery RAM is a `Bat`: the game that wrote it, a version stamp from a global
@@ -331,13 +335,19 @@ def savPath (r : Rom) : SavPath := (r.dir, r.base)
 /-- state_file_path 823-831: `config_dir/states/<rom.extractFilename()>[.slotN].state`.
     Fixed: named by the ROM identity as well, what shipped
     (frontend/persist.nim `state_file_name`):
-    `<rom file name>-<identity>[.slotN].state`. It also reads, never writes, an older build's
+    `<rom file name>-<identity>[.slotN].state`, the identity a hash of the
+    whole ROM file (`state_rom_identity`; for GBA the round-2 names used the
+    header's 1 MB hash, which a hack differing only past 1 MB shared). It
+    also reads, never writes, an older build's
+    `<rom file name>-<1 MB identity>[.slotN].state` (GBA, over 1 MB) and
     `<rom file name>[.slotN].state` when the slot has no file of its own and
-    that file's header names this cart (`state_read_path`, and Delete removes
-    it too). The model's `init` holds no such files (every run starts on an
+    that file names this cart (`state_read_path`, and Delete removes them
+    too). The model's `init` holds no such files (every run starts on an
     empty disk), so that fallback is not modelled; its loads are guarded by the
-    same header check as any other (`loads_ok`) and it never shows or deletes
-    another game's file (tests/desktop_persist_test.nim). -/
+    same identity check as any other (`loads_ok`) and it never shows or deletes
+    another game's file that says whose it is (tests/desktop_persist_test.nim;
+    an older build's GBA state names only its first 1 MB). `r.game` is the
+    whole-ROM identity. -/
 def stPath (fx : Fix) (r : Rom) (k : Nat) : StPath :=
   (if fx.identity then r.game else 0, r.base, r.ext, k)
 

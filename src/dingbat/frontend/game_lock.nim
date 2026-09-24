@@ -10,8 +10,9 @@
 ##   its name minus the extension, which is what `<rom>.sav` and `<rom>.cht`
 ##   are named from. A zip's ROM lives in the zip's own cache folder, keyed by
 ##   the zip's real path, so this covers a zip opened twice as well;
-## * the save-state slots: `<rom file name>-<identity>` (persist.nim), which
-##   are shared by every folder's copy of a game under the same file name.
+## * the save-state slots: `<rom file name>-<identity>` (persist.nim, the
+##   identity hashing the whole ROM file), which are shared by every folder's
+##   copy of a game under the same file name.
 ##
 ## The OS drops a lock when its process ends, however it ends, so a crash or
 ## a kill never leaves a game unopenable. No SDL here:

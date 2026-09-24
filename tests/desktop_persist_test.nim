@@ -3,8 +3,9 @@
 ## a battery write that fails keeps the game running and tells the player
 ## once per run of failures (finding 4); a battery or save-state write cut
 ## short leaves the previous file whole (finding 18); two games with the same
-## file name keep their own save-state slots (finding 2); a second window on
-## a game another window has open is refused (finding 1).
+## file name keep their own save-state slots (finding 2), also when they
+## differ only past their first 1 MB; a second window on a game another
+## window has open is refused (finding 1).
 
 import std/[os, osproc, streams, strformat, strutils, tempfiles]
 import dingbat/gba/gba
@@ -36,12 +37,15 @@ proc check(cond: bool; msg: string) =
 let dir = createTempDir("dingbat_desktop_persist_", "")
 let nowhere = dir / "missing-folder" / "game.sav"   # open(fmWrite) fails
 
-proc make_gba_rom(name: string; folder = ""; mark = 0'u8): string =
-  ## A 4 KB ROM of zeros carrying the SRAM library ID (32 KB battery SRAM);
-  ## `mark` makes a different game under the same name.
-  var rom = newString(0x1000)
+proc make_gba_rom(name: string; folder = ""; mark = 0'u8; size = 0x1000;
+                  late_mark = 0'u8): string =
+  ## A ROM of zeros (4 KB unless `size`) carrying the SRAM library ID (32 KB
+  ## battery SRAM); `mark` makes a different game under the same name, and
+  ## `late_mark` one that differs only past the first 1 MB.
+  var rom = newString(size)
   for i, c in "SRAM_V113": rom[0x200 + i] = c
   rom[0x800] = char(mark)
+  if late_mark != 0: rom[0x100800] = char(late_mark)
   createDir(dir / folder)
   result = dir / folder / name & ".gba"
   writeFile(result, rom)
@@ -255,6 +259,72 @@ block:  # GB: the same identity test
   let other = boot_gba(make_gba_rom("gba_ident"))
   check(not other.state_is_for(readFile(path)), "a GBA cart does not claim a GB state")
 
+echo "=== A hack that differs only past 1 MB keeps its own slots ==="
+
+proc without_whole_rom(img: string): string =
+  ## A state as a build before the whole-ROM trailer wrote it.
+  result = img[0 ..< img.len - 4 - WHOLE_ROM_TRAILER_LEN]
+  result[14] = char(uint8(result[14]) and not uint8(STATE_FLAG_WHOLE_ROM))
+
+block:
+  let a = boot_gba(make_gba_rom("Emerald", "orig", size = 0x200000))
+  let h = boot_gba(make_gba_rom("Emerald", "hack", size = 0x200000, late_mark = 1))
+  check(a.state_prior_rom_identity() == h.state_prior_rom_identity() and
+        a.state_rom_identity() != h.state_rom_identity(),
+        "the carts share their first 1 MB and not their whole-ROM identity")
+  let sdir = dir / "slots-whole"
+  createDir(sdir)
+  proc a_ours(data: string): bool = a.state_is_for(data)
+  proc h_ours(data: string): bool = h.state_is_for(data)
+  proc a_read(): string =
+    state_read_path(sdir, a.rom_path, a.state_rom_identity(), 0, a_ours,
+                    a.state_prior_rom_identity())
+  proc h_read(): string =
+    state_read_path(sdir, h.rom_path, h.state_rom_identity(), 0, h_ours,
+                    h.state_prior_rom_identity())
+  proc a_dels(): seq[string] =
+    state_delete_paths(sdir, a.rom_path, a.state_rom_identity(), 0, a_ours,
+                       a.state_prior_rom_identity())
+  proc h_dels(): seq[string] =
+    state_delete_paths(sdir, h.rom_path, h.state_rom_identity(), 0, h_ours,
+                       h.state_prior_rom_identity())
+  let a_own = sdir / state_file_name(a.rom_path, a.state_rom_identity(), 0)
+  let h_own = sdir / state_file_name(h.rom_path, h.state_rom_identity(), 0)
+  # The name the previous build gave both carts' Quick slot: the 1 MB identity
+  let prior = sdir / state_file_name(a.rom_path, a.state_prior_rom_identity(), 0)
+  check(a_own != h_own and prior != a_own and prior != h_own,
+        "each cart gets its own Quick slot file, apart from the previous name")
+
+  check(h.save_state(h_own), "the hack's Quick Save writes its own file")
+  check(a_read() == a_own and not fileExists(a_own),
+        "the original's Quick slot does not show the hack's state")
+  check(not a.load_state(h_own), "nor loads it")
+
+  # The previous build's file for the original, under the 1 MB name
+  writeFile(prior, without_whole_rom(a.state_bytes(thumbnail = true)))
+  check(a_read() == prior, "the original reads the previous build's Quick slot")
+  check(a.load_state(a_read()), "and loads it")
+  check(h_read() == h_own, "the hack still shows its own file")
+  check(a_dels() == @[prior], "the original's Delete removes the previous build's file")
+
+  # A file under the previous name that says which cart it is for
+  removeFile(h_own)
+  check(a.save_state(prior), "a state naming the original, under the previous name")
+  check(h_read() == h_own and not fileExists(h_own),
+        "the hack's empty slot does not show it")
+  check(prior notin h_dels(), "the hack's Delete never removes it")
+  check(a_read() == prior, "the original's slot does")
+
+  check(a.save_state(a_own), "the original's next Quick Save writes the new name")
+  check(a_read() == a_own, "and the new file is what the slot shows")
+  check(a_dels() == @[a_own, prior],
+        "Delete then removes both, so the slot shows empty")
+
+  # A cart of 1 MB or less keeps the name it had
+  let s = boot_gba(make_gba_rom("Small"))
+  check(s.state_rom_identity() == s.state_prior_rom_identity(),
+        "a cart under 1 MB keeps its slot names")
+
 echo "=== A second window on an open game is refused (finding 1) ==="
 
 let locks = dir / "locks"
@@ -327,6 +397,12 @@ block:
   check(w5.open_game(other) == rfStates,
         "a copy under the same name elsewhere is refused (shared slots)")
   check(w5.files.key == "" and w5.states.key == "", "and holds nothing")
+  let big_orig = make_gba_rom("Emerald", "lock-orig", size = 0x200000)
+  let big_hack = make_gba_rom("Emerald", "lock-hack", size = 0x200000, late_mark = 1)
+  var w6, w7: GameLock
+  check(w6.open_game(big_orig) == rfNone and w7.open_game(big_hack) == rfNone,
+        "a same-named hack that differs only past 1 MB opens beside the " &
+        "original: its slots are its own")
 
   when defined(macosx) or defined(windows):
     check(files_key(dir / "lock" / "RUBY.gba") == files_key(ruby),

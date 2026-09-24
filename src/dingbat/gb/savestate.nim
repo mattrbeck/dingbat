@@ -1021,7 +1021,14 @@ proc parse_state_image*(gb: GB; data: string; origin = "state data"):
                       gb.gb_rom_size(), origin)
 
 proc state_rom_identity*(gb: GB): uint32 =
-  ## The ROM identity a state header carries; the desktop names slot files by it.
+  ## The ROM identity a state header carries (the whole file, with its real
+  ## length beside it, so GB needs no whole-ROM trailer); the desktop names
+  ## slot files by it.
+  gb.gb_rom_checksum()
+
+proc state_prior_rom_identity*(gb: GB): uint32 =
+  ## The GBA core's slot names moved to a whole-ROM identity; GB's always
+  ## were one, so its older names are its current ones.
   gb.gb_rom_checksum()
 
 proc state_is_for*(gb: GB; data: string): bool =
