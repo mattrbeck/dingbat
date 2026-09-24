@@ -5456,8 +5456,12 @@ const refreshHomeRecent = async () => {
       if (!driveOnly) { launchRom(romName); return; }
       if (missing) { relinkGameAction(romName, { launch: true }); return; }
       if (syncDownloading.has(romName)) return;
+      // The tap takes the load token now, not when the download (seconds)
+      // is done: a tile tapped meanwhile is the later tap, and wins. The
+      // download itself finishes either way.
+      const gen = nextLoadGen();
       if (!(await ensureDriveSignedIn())) return;
-      if (await downloadGame(romName)) launchRom(romName);
+      if (await downloadGame(romName) && gen === loadGen) launchRom(romName);
     });
 
     if (missing) {

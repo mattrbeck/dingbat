@@ -13,7 +13,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { loadApp, jsonRes, bytesRes, u8, eq, settle } from "./helpers.mjs";
+import { loadApp, jsonRes, bytesRes, u8, eq, settle, gameTiles } from "./helpers.mjs";
 
 // A ROM is [id, ...]; a battery save is [id of the game that wrote it, n].
 const ROM = { "A.gba": 0x0a, "B.gba": 0x0b, "C.gba": 0x0c };
@@ -364,6 +364,44 @@ test("the page going away mid-switch writes nothing under the incoming name", as
   assert.equal(app.idb.get("stateauto:B.gba"), undefined, "no B resume point from A's core");
   gate.release();
   await drain();
+});
+
+// A Drive-only tile downloads before it launches, for seconds: a tile tapped
+// meanwhile is the later tap, and wins.
+test("a Drive-only game whose download finishes after another tap does not replace it", async () => {
+  const app = await boot();
+  app.idb.delete("rom:B.gba");       // B is on Drive only
+  app.api.gdriveToken = "test-token";
+  app.api.syncState = { queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [],
+                        sigs: { "rom:B.gba": "s" }, rmt: {}, connected: true };
+  let download;
+  const downloaded = new Promise((r) => { download = r; });
+  app.setFetch(async (url) => {
+    url = String(url);
+    if (url.includes("spaces=appDataFolder")) {
+      return jsonRes({ files: [{ id: "b", name: "rom:B.gba", size: "4",
+                                 modifiedTime: "2026-01-01T00:00:00Z" }] });
+    }
+    if (url.includes("alt=media")) { await downloaded; return bytesRes(u8(0x0b, 1, 2, 3)); }
+    return jsonRes({});
+  });
+  await app.api.refreshHomeRecent();
+  await drain();
+  const launchOf = (name) => gameTiles(app).map((t) =>
+    t.children.find((c) => c.classList.contains("home-tile-launch")))
+    .find((l) => l.title === name || l.title.startsWith(name + " — "));
+  assert.ok(launchOf("B.gba") && launchOf("C.gba"), "both tiles on screen");
+
+  launchOf("B.gba").click();         // the download starts
+  await drain();
+  launchOf("C.gba").click();         // the player changes their mind
+  await drain();
+  assert.equal(named(app), "C.gba");
+  download();
+  await drain(40);
+  assert.ok(app.idb.get("rom:B.gba"), "B did download");
+  assert.equal(named(app), "C.gba", "and did not replace C");
+  assert.equal(core(app).rom, ROM["C.gba"]);
 });
 
 // ── Finding 15: reset save data (SavePersistence) ───────────────────────────
