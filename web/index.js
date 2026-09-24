@@ -4279,29 +4279,37 @@ const isQuotaError = (e) =>
 // write again, and keep going until it fits or there is no file left to give.
 // Only ROM files are given up, never a save - a save is usually the very thing
 // being written, and always the thing no one else has a copy of. False means
-// even an empty library could not hold it.
-const dbPutRoomy = async (key, value, keep) => {
+// even an empty library could not hold it. `superseded()`, asked before each
+// retry, says a newer value of the key went in while a file was given up;
+// the older one is then not put back over it, and the result is null.
+const dbPutRoomy = async (key, value, keep, superseded = () => false) => {
   let freed = 0;
+  let put = true;
   for (;;) {
+    if (freed && superseded()) {
+      put = null;
+      break;
+    }
     try {
       await dbPut(key, value);
-      if (freed) {
-        // Hold the session's line at a figure that demonstrably fit, so the
-        // next launch settles the library down to it instead of walking into
-        // the same wall one failed write at a time.
-        romCeiling = Math.min(romCeiling, await localRomBytes());
-        showToast("This device was full - " + (freed === 1
-          ? "one game gave up its file" : freed + " games gave up their files") +
-          " to make room");
-        refreshHomeRecent();
-      }
-      return true;
+      break;
     } catch (e) {
       if (!isQuotaError(e)) throw e;
       if (!(await evictOldestRom(keep))) return false;
       freed++;
     }
   }
+  if (freed) {
+    // Hold the session's line at a figure that demonstrably fit, so the
+    // next launch settles the library down to it instead of walking into
+    // the same wall one failed write at a time.
+    romCeiling = Math.min(romCeiling, await localRomBytes());
+    showToast("This device was full - " + (freed === 1
+      ? "one game gave up its file" : freed + " games gave up their files") +
+      " to make room");
+    refreshHomeRecent();
+  }
+  return put;
 };
 
 const getRecentMeta = async () => {
@@ -5265,6 +5273,11 @@ const saveSignature = (data) => {
   return h + ":" + data.length;
 };
 
+// Each persist of a game's save takes the next number: a put waiting on a
+// quota eviction gives way to a later persist of the same save that went in
+// meanwhile, instead of putting its older bytes back over it.
+const persistSeq = new Map();
+
 const persistSave = async (romName, originalName) => {
   let savName = romName.substring(0, romName.lastIndexOf(".")) + ".sav";
   try {
@@ -5272,8 +5285,12 @@ const persistSave = async (romName, originalName) => {
     if (data && data.length > 0) {
       const sig = saveSignature(data);
       if (lastSaveSigKey === originalName && sig === lastSaveSig) return;
-      if (!(await dbPutRoomy("save:" + originalName, new Uint8Array(data),
-                             originalName))) {
+      const seq = (persistSeq.get(originalName) || 0) + 1;
+      persistSeq.set(originalName, seq);
+      const put = await dbPutRoomy("save:" + originalName, new Uint8Array(data),
+                                   originalName, () => persistSeq.get(originalName) !== seq);
+      if (put === null) return; // the later persist records its own signature
+      if (!put) {
         // Do not remember a signature that was never written, or the next
         // flush would take this save for already-stored and skip it.
         lastSaveSig = lastSaveSigKey = null;

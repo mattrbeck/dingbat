@@ -205,3 +205,31 @@ for (const [label, call] of [["Reset", `resetGameAction("A.gba")`],
     assert.equal(app.idb.get("save:A.gba"), undefined);
   });
 }
+
+// ── Low: the quota retry (SavePersistence) ──────────────────────────────────
+
+test("a quota retry does not put older bytes back over a newer save", async () => {
+  const app = await boot();
+  await play(app, "A.gba");
+  let failNext = true;
+  app.state.idbFail = (op, key) => {
+    if (op === "put" && key === "save:A.gba" && failNext) {
+      failNext = false;
+      const e = new Error("full"); e.name = "QuotaExceededError";
+      return e;
+    }
+    return false;
+  };
+  const gate = hold(app, "delete", "rom:C.gba");
+  gameSaves(app, 1);
+  const first = autosave(app);       // rejected: gives up C's ROM, then retries
+  await parked(gate);
+  const v2 = gameSaves(app, 2);
+  await autosave(app);               // the newer save lands meanwhile
+  eq(app.idb.get("save:A.gba"), v2);
+  gate.release();
+  await first;
+  await drain();
+  eq(app.idb.get("save:A.gba"), v2, "the newer save stands");
+  assert.ok(app.toasts.some((t) => t.includes("gave up its file")), "the eviction is still told");
+});

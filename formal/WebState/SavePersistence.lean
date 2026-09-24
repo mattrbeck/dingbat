@@ -16,7 +16,11 @@ IndexedDB key `save:<game>` (and from there to Drive's upload queue), and back.
   `await dbPutRoomy("save:" + originalName, ...)` (4260; the put is issued in
   the same segment, a QuotaExceededError evicts a ROM and re-issues the put
   after an await), then remembers the signature and calls
-  `markUpload("save:" + originalName)` (2653).
+  `markUpload("save:" + originalName)` (2653). Each persist that reaches the
+  put takes the next number in `persistSeq` (5261-5271), and a re-issue after
+  an eviction gives way when a later persist of the same save has taken one
+  (dbPutRoomy 4271; as of the commit "web: a quota retry gives way to a newer
+  save"; at dd7ba741f it put its older bytes back over the newer ones).
   Callers: the 5 s `setInterval` (11195), `beforeunload` (11203) and `pagehide`
   (11220) with the *current* names; `loadRom` (7890) for the outgoing game;
   `unloadGame` (9646) with names captured before its awaits.
@@ -126,9 +130,10 @@ deriving DecidableEq, Repr
 inductive Pending where
   /-- persistSave 5252: `dbPutRoomy` put issued and accepted; awaiting it. -/
   | persist (g : Nat) (b : Bytes) (k : After)
-  /-- dbPutRoomy 4276: the put failed with QuotaExceededError; awaiting
-      `evictOldestRom`, after which the SAME bytes are put again. -/
-  | evict (g : Nat) (b : Bytes) (k : After)
+  /-- dbPutRoomy 4280: the put failed with QuotaExceededError; awaiting
+      `evictOldestRom`, after which the same bytes are put again, unless a
+      later persist has taken a number past `t` (4271). -/
+  | evict (g : Nat) (b : Bytes) (k : After) (t : Nat)
   /-- loadRom 7889-7890: awaiting persistAutoState + storeLastFrame. -/
   | loadPre (g : Nat) (gb : Bool)
   /-- loadRom 7915 / restoreSave 5270: awaiting `dbGet("save:"+g)` (= v). -/
@@ -166,6 +171,7 @@ structure St where
   paused  : Bool                 -- paused (7767)
   cur     : Option Nat           -- currentRomName && currentOriginalName (7765)
   lastSig : Option (Nat × Bytes) -- lastSaveSigKey / lastSaveSig (5237)
+  seq     : Nat → Nat            -- persistSeq (5261): the last number a persist of save:g took
   pend    : List Pending         -- in-flight continuations
   toast   : Option (Nat × Snap)  -- the Resume action toast
   -- ghost state (not in the JS; for stating properties)
@@ -178,7 +184,7 @@ structure St where
 
 def init : St :=
   { clock := 1, idb := fun _ => none, auto := fun _ => none, slot := fun _ => none,
-    fs := none, core := none, paused := false, cur := none, lastSig := none,
+    fs := none, core := none, paused := false, cur := none, lastSig := none, seq := fun _ => 0,
     pend := [], toast := none, writes := [], uploads := [], resumes := [],
     deletes := [], wiped := fun _ => none, floor := fun _ => 0 }
 
@@ -225,11 +231,14 @@ def persistCall (fx : Bool) (s : St) (g : Nat) (ok : Bool) (k : After) : St :=
   match s.fs with
   | none => finish fx s k                                  -- 5248 no FS file
   | some b =>
-    if s.lastSig = some (g, b) then finish fx s k           -- 5251 unchanged
-    else if ok then                                        -- 5252 put issued, accepted
-      push (raise { s with idb := upd s.idb g (some b), writes := s.writes ++ [(g, b)] } b)
-        (.persist g b k)
-    else push s (.evict g b k)                             -- 4274 quota: evict, retry
+    if s.lastSig = some (g, b) then finish fx s k           -- 5269 unchanged
+    else
+      let t := s.seq g + 1                                  -- 5270-5271 persistSeq
+      let s := { s with seq := upd s.seq g t }
+      if ok then                                            -- 5272-5273 put issued, accepted
+        push (raise { s with idb := upd s.idb g (some b), writes := s.writes ++ [(g, b)] } b)
+          (.persist g b k)
+      else push s (.evict g b k t)                          -- 4280 quota: evict, retry
 
 /-- persistAutoState 5643-5652 (the dbPut's effect; nobody awaits its tail). -/
 def autoSnap (s : St) : St :=
@@ -288,11 +297,13 @@ def resumeP (fx : Bool) (s : St) (p : Pending) (ok : Bool) : St :=
   match p with
   | .persist g b k =>                                       -- 5260-5263
       finish fx { s with lastSig := some (g, b), uploads := s.uploads ++ [(g, b)] } k
-  | .evict g b k =>
-      if ok then                                            -- 4282: evicted one; put again
-        push (raise { s with idb := upd s.idb g (some b), writes := s.writes ++ [(g, b)] } b)
-          (.persist g b k)
-      else finish fx { s with lastSig := none } k            -- 5256: nothing left to give
+  | .evict g b k t =>
+      if ok then                                            -- 4280: evicted one
+        if s.seq g ≠ t then finish fx s k                   -- 4271, 5274: a later persist went in
+        else                                                -- 4276: put again
+          push (raise { s with idb := upd s.idb g (some b), writes := s.writes ++ [(g, b)] } b)
+            (.persist g b k)
+      else finish fx { s with lastSig := none } k            -- 5275-5280: nothing left to give
   | .loadPre g gb =>                                        -- 7890 (names re-read here)
       match s.cur with
       | some a => persistCall fx s a ok (.load g gb)
@@ -454,7 +465,7 @@ def WF (c : Core) : Prop := ∀ r, c.ram = some r → r.game = c.game
 
 def POK : Pending → Prop
   | .persist g b _ => b.game = g
-  | .evict g b _ => b.game = g
+  | .evict g b _ _ => b.game = g
   | .loadRestore g _ v => ∀ b, v = some b → b.game = g
   | .offerGet _ a => ∀ a', a = some a' → WF a'.core
   | .offerCheck _ a _ => WF a.core
@@ -560,7 +571,7 @@ theorem persistCall_inv {s : St} (g : Nat) (ok : Bool) (k : After) (h : FInv s)
         · exact h.slot
         · exact h.toast
         · exact h.pend
-      · exact push_inv h hbg
+      · exact push_inv (finv_congr h rfl rfl rfl rfl rfl rfl rfl rfl) hbg
 
 theorem autoSnap_inv {s : St} (h : FInv s) : FInv (autoSnap s) := by
   unfold autoSnap
@@ -662,10 +673,12 @@ theorem resumeP_inv {s : St} (p : Pending) (ok : Bool) (h : FInv s) (hp : POK p)
     FInv (resumeP true s p ok) := by
   cases p with
   | persist g b k => exact finish_inv k (finv_congr h rfl rfl rfl rfl rfl rfl rfl rfl)
-  | evict g b k =>
+  | evict g b k t =>
     simp only [resumeP]
     split
-    · refine push_inv ?_ (show POK (.persist g b k) from hp)
+    · split
+      · exact finish_inv k h
+      refine push_inv ?_ (show POK (.persist g b k) from hp)
       apply raise_inv
       constructor
       · intro g' b' hb'
@@ -1121,7 +1134,7 @@ theorem ginv_persistCall {s : St} (fx : Bool) (g : Nat) (ok : Bool) (k : After) 
     · exact ginv_finish fx k h
     · split
       · exact ginv_write g b k h _ rfl rfl rfl rfl
-      · exact ginv_push _ h
+      · exact ginv_push _ (ginv_congr h rfl rfl rfl (fun _ hq => hq))
 
 theorem ginv_autoSnap {s : St} (h : GInv s) : GInv (autoSnap s) := by
   unfold autoSnap
@@ -1415,20 +1428,22 @@ theorem bug_resume_over_unflushed_save :
 open Ev in
 /-- Two persists of the same game race a full disk: the first put fails with
     QuotaExceededError and dbPutRoomy awaits evictOldestRom; a newer save is
-    persisted meanwhile; the eviction completes and the OLD bytes are put
-    again, over the newer ones. -/
+    persisted meanwhile; the eviction completes. At dd7ba741f the OLD bytes
+    were then put again, over the newer ones (and uploaded); the retry now
+    sees the later persist's number and gives way. -/
 def trQuotaPre : List Ev :=
   [launch 0 false, resume 0 true, resume 0 true,
    play, frame, tick false,                           -- v1: put rejected (quota) -> evict
    play, frame, tick true, resume 1 true]             -- v2 persisted
 open Ev in
-def trQuotaPost : List Ev := [resume 0 true, resume 0 true] -- eviction done; v1 re-put
+def trQuotaPost : List Ev := [resume 0 true, resume 0 true] -- eviction done: gives way
 
-theorem bug_quota_retry_writes_older_save :
-    (run false init trQuotaPre).idb 0 = some ⟨0, 2⟩ ∧
-    let s := run false init (trQuotaPre ++ trQuotaPost)
-    Reachable false s ∧ s.idb 0 = some ⟨0, 1⟩ ∧ s.uploads.getLast? = some (0, ⟨0, 1⟩) := by
-  refine ⟨by decide, run_reachable _ _ _ .init, by decide, by decide⟩
+theorem regress_quota_retry_writes_older_save (fx : Bool) :
+    (run fx init trQuotaPre).idb 0 = some ⟨0, 2⟩ ∧
+    let s := run fx init (trQuotaPre ++ trQuotaPost)
+    Reachable fx s ∧ s.idb 0 = some ⟨0, 2⟩ ∧ s.uploads = [(0, ⟨0, 2⟩)] ∧ s.pend = [] := by
+  refine ⟨by cases fx <;> decide, run_reachable _ _ _ .init, by cases fx <;> decide,
+    by cases fx <;> decide, by cases fx <;> decide⟩
 
 open Ev in
 /-- App start on a second device: a Drive pull is downloading game 0's newer
