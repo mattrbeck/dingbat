@@ -1262,6 +1262,8 @@ proc render_state_notice() =
     app.state_notice = ""
     app.state_notice_hint = ""
 
+var imgui_skipped = false  # the last render_imgui returned before igNewFrame
+
 proc render_imgui() =
   # Skip the whole ImGui pass when no UI is visible (menu bar hidden, no
   # dialogs/overlay/debug windows): at uncapped emulation speeds the empty
@@ -1280,7 +1282,18 @@ proc render_imgui() =
      # The menu bar hides after three idle seconds, exactly the state a Quick
      # Load keypress lands in; the notice must still be drawn then.
      app.state_notice.len == 0:
+    # Only igNewFrame drains ImGui's input queue, a few events a frame, so
+    # every key event of a long keyboard-only session would wait there and
+    # the menu would take that long to see a click. Drop the backlog, and
+    # start the UI from nothing held (a release may be among what is dropped).
+    if app.io != nil:
+      if not imgui_skipped:
+        ImGuiIO_ClearInputKeys(app.io)
+        ImGuiIO_ClearInputMouse(app.io)
+      ImGuiIO_ClearEventsQueue(app.io)
+    imgui_skipped = true
     return
+  imgui_skipped = false
 
   ImGui_Impl_OpenGL3_NewFrame()
   ImGui_ImplSDL2_NewFrame()
