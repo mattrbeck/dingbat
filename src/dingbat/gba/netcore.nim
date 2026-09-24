@@ -919,13 +919,15 @@ proc note_input*(nc: NetCore; input: Input; pressed: bool) =
 proc new_net_core*(gba: GBA; id: int; rom_crc: uint32;
                    strict_crc = true; lead: int64 = NETLINK_LEAD;
                    lead_active: int64 = NETLINK_LEAD;
-                   speculative = false): NetCore =
+                   speculative = false; attach = true): NetCore =
   ## Wire a post-init core to the protocol and queue our HELLO. id 0 =
   ## host = multi-mode unit 0. `lead` is the idle bounded-lead window (pick
   ## it to exceed the transport's byte-exchange cadence; the sides need not
   ## agree); `lead_active` the tighter window while a link SIO mode is
   ## active. `speculative` enables rollback: the master predicts REPLYs and
   ## rolls back to a frame checkpoint on a misprediction; off is a no-op.
+  ## `attach = false` leaves the core on its own link-cable driver until the
+  ## transport plugs in a RemoteSioDriver (the handshake is done).
   doAssert id in {0, 1}, "the network link is 2-player: unit id must be 0 or 1"
   result = NetCore(gba: gba, id: id, rom_crc: rom_crc, strict_crc: strict_crc,
                    lead: lead, lead_active: lead_active, peer_mode: 0xFF,
@@ -933,4 +935,5 @@ proc new_net_core*(gba: GBA; id: int; rom_crc: uint32;
                    window_cycles: int64(SPEC_WINDOW_FRAMES) * FRAME_CYCLES,
                    checkpoints: initDeque[Checkpoint]())
   result.send_msg(encode_hello(LINK_SYSTEM_GBA, uint8(id), rom_crc))
-  gba.set_sio_driver(RemoteSioDriver(core: result))
+  if attach:
+    gba.set_sio_driver(RemoteSioDriver(core: result))

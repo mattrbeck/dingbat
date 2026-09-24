@@ -3,13 +3,16 @@
 ## hand-off to gba/netlink.nim, and ending a link. No SDL, ImGui or GL, so
 ## tests/desktop_netlink_test.nim drives it over real loopback sockets.
 ##
-## Nothing here blocks for long except the HELLO handshake (new_net_link):
-## accepts are polled, and connects are one attempt per LINK_PROBE_INTERVAL_MS
-## of wall time, so the window keeps drawing while it waits for a peer.
+## Nothing here waits on the network: accepts are polled, connects are
+## non-blocking (one attempt per LINK_PROBE_INTERVAL_MS of wall time, each
+## checked on later iterations), and the HELLO handshake is polled too
+## (begin_net_link / poll_hello), so the window keeps drawing, and Cancel,
+## closing it or loading a game end the wait, whatever the peer does.
 
 import std/[net, nativesockets, monotimes, strutils]
 when defined(windows):
-  from std/winlean import SOL_SOCKET, SO_EXCLUSIVEADDRUSE
+  from std/winlean import SOL_SOCKET, SO_EXCLUSIVEADDRUSE, TFdSet, FD_ZERO,
+                          FD_SET, FD_ISSET, Timeval
 import ../gba/[gba, netlink]
 
 const
@@ -22,13 +25,15 @@ const
   LINK_AUTO_CONNECT_TRIES* = 3
     ## Auto-pair: refused probes before this side hosts instead (~0.5 s).
   LINK_JOIN_GIVE_UP_MS* = 5000
-    ## Manual Join: stop retrying a host that refuses after this long.
+    ## Manual Join: stop retrying a host that refuses, or never answers,
+    ## after this long.
 
 type
   LinkSetup* = enum
     lsNone        ## no link setup in progress
     lsListening   ## hosting: waiting for a peer to connect
     lsConnecting  ## joining: connect attempts spread over time
+    lsHandshake   ## connected: waiting for the peer's HELLO
 
   LinkCable* = object
     setup*: LinkSetup
@@ -40,8 +45,13 @@ type
     host_buf*: array[64, char]  ## Advanced: the Join address input
     status*: string         ## last error / status line shown in the window
     hello_timeout_ms*: int  ## how long a handshake waits for the peer's HELLO
+    delay_ms*: int          ## --netlink-delay-ms: simulated send latency
     window_prev: bool       ## the window was open last iteration
     server: Socket
+    conn: Socket            ## a connect attempt still in progress
+    conn_ms: int64          ## when that attempt began
+    pending: NetLink        ## lsHandshake: the handshake being polled
+    pending_gba: GBA        ## the core it will drive
     probes: int             ## connect attempts since this setup began
     started_ms: int64       ## wall time of the first attempt
     next_probe_ms: int64
@@ -64,14 +74,33 @@ proc join_host*(lc: LinkCable): string =
     if c == '\0': break
     result.add c
 
+proc set_join_host*(lc: var LinkCable; host: string) =
+  ## Fill the Join address box (`--connect HOST:PORT`); truncated to fit.
+  for i in 0 ..< lc.host_buf.len:
+    lc.host_buf[i] = if i < min(host.len, lc.host_buf.len - 1): host[i] else: '\0'
+
 proc close_server(lc: var LinkCable) =
   if lc.server != nil:
     try: lc.server.close()
     except CatchableError: discard
     lc.server = nil
 
+proc close_conn(lc: var LinkCable) =
+  if lc.conn != nil:
+    try: lc.conn.close()
+    except CatchableError: discard
+    lc.conn = nil
+
+proc drop_pending(lc: var LinkCable) =
+  if lc.pending != nil:
+    lc.pending.abandon()
+    lc.pending = nil
+  lc.pending_gba = nil
+
 proc cancel_setup*(lc: var LinkCable) =
   lc.close_server()
+  lc.close_conn()
+  lc.drop_pending()
   lc.setup = lsNone
 
 proc begin_connecting(lc: var LinkCable) =
@@ -151,42 +180,99 @@ proc auto_listen(lc: var LinkCable): bool =
       except CatchableError: discard
     false  # port already taken (peer is hosting); caller keeps probing it
 
-proc finish_link*(lc: var LinkCable; sock: Socket; id: int; gba: GBA;
-                  rom_path: string; delay_ms = 0): NetLink =
-  ## Run the HELLO handshake over an already-connected socket and wire the
-  ## link to `gba`. nil (socket closed, `status` says why) when there is no
-  ## GBA core to link or the handshake fails; auto-pairing stops either way,
-  ## so the window shows the outcome rather than "Waiting to pair...".
+proc begin_handshake*(lc: var LinkCable; sock: Socket; id: int; gba: GBA;
+                      rom_path: string) =
+  ## A peer is connected: send our HELLO and wait for theirs in lsHandshake,
+  ## which service_setup polls. Refused (the socket closed, `status` says
+  ## why) when there is no GBA core to link or the ROM file can't be read.
+  ## Auto-pairing stops either way, so the window shows the outcome rather
+  ## than "Waiting to pair...".
   lc.auto = false
+  lc.setup = lsNone
   if gba == nil:
     lc.status = "Load a GBA ROM first"
     try: sock.close()
     except CatchableError: discard
-    return nil
+    return
   try:
     # Relaxed CRC: same-ROM sessions still match exactly, and cross-version
     # link games (e.g. Ruby<->Sapphire trades) with differing CRCs link fine.
-    result = new_net_link(gba, sock, id, crc32(readFile(rom_path)), delay_ms,
-                          allow_crc_mismatch = true,
-                          hello_timeout_ms = lc.hello_timeout_ms)
-    echo "NETLINK: linked as unit ", id, (if id == 0: " (host)" else: " (guest)"),
-         (if delay_ms > 0: ", +" & $delay_ms & " ms send delay" else: "")
-    lc.status = "Linked as " & (if id == 0: "host (unit 0)" else: "guest (unit 1)")
+    lc.pending = begin_net_link(gba, sock, id, crc32(readFile(rom_path)),
+                                lc.delay_ms, allow_crc_mismatch = true,
+                                hello_timeout_ms = lc.hello_timeout_ms)
   except CatchableError as e:
-    # NetLinkError, and also IOError (the ROM file moved since it was
-    # loaded) or OSError (socket options): none of them may end the app.
+    # IOError (the ROM file moved since it was loaded) or OSError (socket
+    # options): neither may end the app.
     echo "NETLINK: handshake failed: ", e.msg
     lc.status = "Handshake failed: " & e.msg
     try: sock.close()
     except CatchableError: discard
-    # new_net_link may have plugged the half-made link into the core.
-    gba.set_sio_driver(NullSioDriver())
-    result = nil
+    return
+  lc.pending_gba = gba
+  lc.setup = lsHandshake
+  lc.status = ""
+  echo "NETLINK: connected as unit ", id, " — waiting for the peer's HELLO"
+
+proc poll_handshake(lc: var LinkCable): NetLink =
+  ## lsHandshake, once per iteration, never waiting: the new link once the
+  ## peer's HELLO is in; nil while it is awaited, or when the handshake
+  ## failed (refused, the peer hung up, or hello_timeout_ms of wall time
+  ## passed), with `status` saying why.
+  if lc.setup != lsHandshake: return nil
+  let nl = lc.pending
+  try:
+    if not nl.poll_hello(): return nil
+  except CatchableError as e:
+    echo "NETLINK: handshake failed: ", e.msg
+    lc.status = "Handshake failed: " & e.msg
+    lc.drop_pending()
+    lc.setup = lsNone
+    return nil
+  lc.pending = nil
+  lc.pending_gba = nil
+  lc.setup = lsNone
+  echo "NETLINK: linked as unit ", nl.id,
+       (if nl.id == 0: " (host)" else: " (guest)"),
+       (if lc.delay_ms > 0: ", +" & $lc.delay_ms & " ms send delay" else: "")
+  lc.status = "Linked as " & (if nl.id == 0: "host (unit 0)" else: "guest (unit 1)")
+  nl
+
+proc connect_state(sock: Socket): int =
+  ## A non-blocking connect: 1 connected, -1 failed, 0 still in progress.
+  var fds = @[sock.getFd()]
+  if selectWrite(fds, 0) > 0:
+    return (if getSockOptInt(sock.getFd(), SOL_SOCKET, SO_ERROR) == 0: 1 else: -1)
+  when defined(windows):
+    # Windows reports a failed connect in the exception set, not as writable.
+    var ex: TFdSet
+    FD_ZERO(ex)
+    FD_SET(sock.getFd(), ex)
+    var tv = Timeval(tv_sec: 0, tv_usec: 0)
+    if winlean.select(0, nil, nil, addr ex, addr tv) > 0 and
+       FD_ISSET(sock.getFd(), ex) != 0:
+      return -1
+  0
+
+proc start_connect(host: string; port: int): (Socket, int) =
+  ## Begin a connect that never waits: the socket and its connect_state.
+  let sock = newSocket(buffered = false)
+  try:
+    # timeout 0: std/net starts the connect non-blocking and raises
+    # TimeoutError if it has not finished at once, leaving it in progress.
+    sock.connect(host, Port(port), timeout = 0)
+    (sock, 1)
+  except TimeoutError:
+    (sock, 0)
+  except OSError:
+    try: sock.close()
+    except CatchableError: discard
+    (Socket(nil), -1)
 
 proc service_setup*(lc: var LinkCable; gba: GBA; rom_path: string;
                     now_ms: int64): NetLink =
-  ## Per main-loop iteration: poll the pending accept, or make the next
-  ## connect attempt when one is due. Returns the new link when a peer paired.
+  ## Per main-loop iteration: poll the pending accept, connect or handshake,
+  ## or start the next connect attempt when one is due. Returns the new link
+  ## when a peer paired. Never waits on the network.
   if lc.setup != lsNone and gba == nil:
     # Setup outlived its GBA game: nothing can be linked any more.
     lc.auto_stop()
@@ -209,30 +295,37 @@ proc service_setup*(lc: var LinkCable; gba: GBA; rom_path: string;
         lc.setup = lsNone
       return nil
     lc.close_server()
-    lc.setup = lsNone
-    return lc.finish_link(sock, 0, gba, rom_path)
+    lc.begin_handshake(sock, 0, gba, rom_path)
+    return lc.poll_handshake()
   of lsConnecting:
-    if lc.probes == 0:
+    if lc.probes == 0 and lc.conn == nil:
       lc.started_ms = now_ms
       lc.next_probe_ms = now_ms
     let host = if lc.auto: LINK_AUTO_HOST else: lc.join_host()
     let port = if lc.auto: lc.auto_port else: int(lc.port)
     if not lc.auto and lc.probes > 0 and
        now_ms - lc.started_ms >= LINK_JOIN_GIVE_UP_MS:
+      # Refused throughout, or an attempt still unanswered (a host that
+      # drops SYNs would hold a blocking connect for over a minute).
+      lc.close_conn()
       lc.status = "Couldn't reach " & host & ":" & $port
       lc.setup = lsNone
       return nil
-    if now_ms < lc.next_probe_ms: return nil
-    lc.next_probe_ms = now_ms + LINK_PROBE_INTERVAL_MS
-    inc lc.probes
-    # One blocking connect attempt. On localhost/LAN a connect is instant
-    # (success or refused); a far host that drops SYNs can still hold it.
-    var sock = newSocket(buffered = false)
-    try:
-      sock.connect(host, Port(port))
-    except OSError:
-      try: sock.close()
-      except CatchableError: discard
+    var state: int
+    if lc.conn != nil:
+      state = connect_state(lc.conn)
+      if state == 0 and lc.auto and now_ms - lc.conn_ms >= LINK_PROBE_INTERVAL_MS:
+        state = -1  # 127.0.0.1 answers at once: a silent probe found nobody
+      if state == 0: return nil
+    else:
+      if now_ms < lc.next_probe_ms: return nil
+      lc.next_probe_ms = now_ms + LINK_PROBE_INTERVAL_MS
+      inc lc.probes
+      (lc.conn, state) = start_connect(host, port)
+      lc.conn_ms = now_ms
+      if state == 0: return nil
+    if state < 0:
+      lc.close_conn()
       if lc.auto and lc.probes >= LINK_AUTO_CONNECT_TRIES:
         # After a few quick probes with no host answering, become the host.
         # If the bind is refused (a peer grabbed the port first, or a
@@ -240,8 +333,16 @@ proc service_setup*(lc: var LinkCable; gba: GBA; rom_path: string;
         if not lc.auto_listen():
           lc.probes = 0
       return nil
-    lc.setup = lsNone
-    return lc.finish_link(sock, 1, gba, rom_path)
+    let sock = lc.conn
+    lc.conn = nil
+    lc.begin_handshake(sock, 1, gba, rom_path)
+    return lc.poll_handshake()
+  of lsHandshake:
+    if gba != lc.pending_gba:
+      # Another game under the handshake: it would link the wrong core.
+      lc.cancel_setup()
+      return nil
+    return lc.poll_handshake()
   of lsNone:
     return nil
 
@@ -276,3 +377,26 @@ proc parse_host_port*(s: string): tuple[host: string, port: int, ok: bool] =
       result = (s[0 ..< colon], port, true)
   except ValueError:
     discard
+
+proc start_cli*(lc: var LinkCable; listen_port: int; connect_to: string;
+                ready: bool): bool =
+  ## `--listen PORT` / `--connect HOST:PORT`: Advanced > Host / Join, begun
+  ## before the main loop and serviced by it (service_setup) like the
+  ## window's, never waiting here. true: open the window on the status.
+  if not ready:
+    echo "NETLINK: link mode needs a GBA ROM; continuing single-player"
+    return false
+  if listen_port > 0:
+    lc.port = cint(min(listen_port, 65536))  # port_ok refuses > 65535
+    lc.start_host(true)
+  else:
+    let (host, port, ok) = parse_host_port(connect_to)
+    if not ok:
+      echo "NETLINK: --connect wants HOST:PORT, got ", connect_to
+      lc.status = "--connect wants HOST:PORT, got " & connect_to
+    else:
+      lc.set_join_host(host)
+      lc.port = cint(port)
+      echo "NETLINK: joining ", connect_to
+      lc.start_join(true)
+  true

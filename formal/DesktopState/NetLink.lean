@@ -1,7 +1,7 @@
 -- What this models, for formal/anchors.mjs (which lists stale models):
--- @models src/dingbat.nim: load_rom process_pending_state load_state_slot handle_input render_imgui render_link_window render_link_advanced teardown_netlink finish_link establish_netlink link_ready link_cancel_setup link_auto_stop link_mid_frame service_netlink service_link_setup update_link_auto main
--- @models src/dingbat/frontend/link_cable.nim: init_link_cable auto_start auto_stop start_host start_join auto_listen cancel_setup finish_link service_setup update_auto teardown parse_host_port
--- @models src/dingbat/gba/netlink.nim: step_frame poll_socket new_net_link close
+-- @models src/dingbat.nim: load_rom process_pending_state load_state_slot handle_input render_imgui render_link_window render_link_advanced teardown_netlink establish_netlink link_ready link_cancel_setup link_auto_stop link_mid_frame service_netlink service_link_setup update_link_auto main
+-- @models src/dingbat/frontend/link_cable.nim: init_link_cable auto_start auto_stop start_host start_join auto_listen cancel_setup begin_handshake poll_handshake connect_state start_connect service_setup update_auto teardown parse_host_port start_cli
+-- @models src/dingbat/gba/netlink.nim: step_frame poll_socket begin_net_link poll_hello abandon new_net_link close
 -- @models src/dingbat/gba/netcore.nim: try_advance handle_msg master_complete new_net_core
 
 /-
@@ -133,10 +133,11 @@ no pause-kill, every end a BYE) with `pairF_responsive` (Quit and Pause work
 while waiting on the peer), `raceF_reachable` (the port is held exactly by
 the listener, nobody frozen or stranded). `regress_partA`,
 `regress_partA_rest`, `regress_peer_pause` and `regress_race` replay the
-traces on the fixes. The freezes on the network (`freeze`: the CLI wait,
-the HELLO wait, a manual Join's connect to a SYN-dropping host, the 3 s
-close drain) are recorded, not fixed, in `stepF`; the 30 s stall wait is
-gone (`step_frame_for` hands back to the loop).
+traces on the fixes. The waits on the network (`freeze`) are gone from
+`stepF`: the 30 s stall wait (`step_frame_for` hands back to the loop) and,
+in fix round 3, the CLI wait, the HELLO wait and a manual Join's connect to
+a SYN-dropping host (`noNetWaitF_reachable`, `regress_net_waits`). The 3 s
+close drain on Disconnect is recorded, not fixed.
 
 ## Found by reading, not modelled
 
@@ -174,9 +175,10 @@ def Core.isGba : Core → Bool
   | .gba _ => true
   | _ => false
 
-/-- `app.link_setup` (391-394). -/
+/-- `app.link_setup` (391-394). `handshake` is the fix's (round 3)
+    `lsHandshake`: connected, the peer's HELLO polled once per iteration. -/
 inductive Setup where
-  | none | listening | connecting
+  | none | listening | connecting | handshake
   deriving DecidableEq, Repr
 
 /-- Where `main` is: before the loop (`boot`, 2285-2311), the loop's phases,
@@ -256,6 +258,9 @@ inductive SvcOut where
   | refused (limit : Bool) (bindOk : Bool) (hung : Bool)
       -- connect raised; limit = the retry threshold was reached (2026 / 2029);
       -- bindOk = link_auto_listen's bind succeeded; hung = the connect blocked first
+  | hello (h : Hs)
+      -- the fix's lsHandshake poll (round 3): the peer's HELLO arrived (ok), a
+      -- refusal or hang-up (rejected), or its wall-clock deadline passed (timeout)
   deriving DecidableEq, Repr
 
 /-- What `main` does before the loop (2285-2311). -/
@@ -265,6 +270,8 @@ inductive Boot where
   | link (k : Kind) (peer : Bool) (h : Hs)   -- --listen PORT / --connect HOST:PORT
   | auto (k : Kind)                          -- --link-auto
   | badPort                                  -- --connect HOST:x (parseInt, 1881)
+  | cli (k : Kind) (listen : Bool)           -- --listen PORT (listen) / --connect HOST:PORT, with
+                                             -- nobody there yet: the code as it is waits it out
   deriving DecidableEq, Repr
 
 inductive Ev where
@@ -456,6 +463,8 @@ def bootStep (s : St) : Boot → St
       else { loadRom s .gba with freeze := .cliWait, pc := .emu }  -- 120 s / 40 tries: single-player
   | .auto k => { loadRom s k with win := (k.mk s.gen).isGba, pc := .emu }   -- 2301-2307
   | .badPort => { s with pc := .crashed }               -- ValueError escapes `except OSError` (1898)
+  | .cli .gb _ => { loadRom s .gb with pc := .emu }
+  | .cli .gba _ => { loadRom s .gba with freeze := .cliWait, pc := .emu }   -- 120 s / 40 tries
 
 /-- Phase 5 clicks. -/
 def uiStep (s : St) : Ev → St
@@ -744,6 +753,15 @@ wrappers in `dingbat.nim` keep the old names.
 9. `establish_netlink`: `parse_host_port` refuses `HOST:x`.
 10. `step_frame_for` hands back to the loop while parked on the peer
    (Part B), so a stall timeout is a teardown but never a freeze.
+11. (round 3) Nothing waits on the network before or in the loop:
+   `--listen`/`--connect` are `start_cli`, the window's Host/Join begun
+   before the loop with the window open (`cliF`); a connect is non-blocking
+   and polled (a Join gives up at its 5 s deadline, answered or not); and
+   `begin_handshake` sends our HELLO and moves to `lsHandshake`, which
+   `poll_handshake` services per iteration until the HELLO, a refusal, or the
+   30 s wall-clock deadline (`helloF`). Cancel, closing the window and
+   `load_rom` end it (`cancelSetup`), with a BYE. The core keeps its own
+   cable, and runs single-player, until the HELLO is in.
 -/
 
 def teardownF (s : St) : St :=
@@ -753,12 +771,35 @@ def loadRomF (s : St) (k : Kind) : St := loadRom (cancelSetup (autoStop (teardow
 
 def loadStateF (s : St) : St := if s.nl = none then loadState s else s
 
+/-- `begin_handshake` and, in the same service call, its first
+    `poll_handshake`. `h` is that poll: `ok` = the HELLO was already in,
+    `rejected` = refused or hung up, `timeout` = not in yet, so the wait goes
+    on in `.handshake` (its deadline is a later `hello .timeout`), `romGone` =
+    `readFile` raised, refused at once. Nothing here waits. -/
 def finishLinkF (s : St) (h : Hs) : St :=
   { s with nl := (if s.core.isGba = true ∧ h = .ok then linkOf s.core else s.nl),
            rewinding := (if s.core.isGba = true ∧ h = .ok then false else s.rewinding),
-           status := (if s.core.isGba = true ∧ h = .ok then .linked else .hsFailed),
-           auto := false,
-           freeze := (if h = .timeout then .helloWait else s.freeze) }
+           setup := (if s.core.isGba = true ∧ h = .timeout then .handshake else s.setup),
+           status := (if s.core.isGba = true ∧ h = .ok then .linked
+                      else if s.core.isGba = true ∧ h = .timeout then .empty else .hsFailed),
+           auto := false }
+
+/-- `poll_handshake` in `.handshake` (round 3): the link, or `hsFailed` with
+    the socket closed. -/
+def helloF (s : St) (h : Hs) : St :=
+  { s with nl := (if s.core.isGba = true ∧ h = .ok then linkOf s.core else s.nl),
+           rewinding := (if s.core.isGba = true ∧ h = .ok then false else s.rewinding),
+           setup := .none,
+           status := (if s.core.isGba = true ∧ h = .ok then .linked else .hsFailed) }
+
+/-- `start_cli` (round 3): `--listen` is Advanced > Host, `--connect` Join,
+    begun before the loop with the Link Cable window open on the status; the
+    peer, its connect and its handshake are later phase-4 events. (A refused
+    bind leaves only a status line, as `wHost false` does.) -/
+def cliF (s : St) (listen : Bool) : St :=
+  { loadRom s .gba with pc := .emu, win := true, status := .empty,
+                        setup := (if listen = true then .listening else .connecting),
+                        server := listen }
 
 def updateAutoF (s : St) : St :=
   { s with auto := (if opens s then true else if s.win = false then false else s.auto),
@@ -767,9 +808,10 @@ def updateAutoF (s : St) : St :=
            status := (if opens s then .empty else s.status),
            winPrev := s.win }
 
+/-- Round 3: a connect never blocks (`start_connect`/`connect_state`); an
+    unanswered one is abandoned at the Join's deadline like a refused one. -/
 def refusedStepF (s : St) (limit bindOk hung : Bool) : St :=
-  { refusedStep s limit bindOk hung with
-      freeze := (if hung = true ∧ s.host = .other ∧ s.auto = false then .connectHang else s.freeze) }
+  { refusedStep s limit bindOk hung with freeze := s.freeze }
 
 def serviceSetupF (s : St) (o : SvcOut) : St :=
   match s.setup, o with
@@ -779,6 +821,7 @@ def serviceSetupF (s : St) (o : SvcOut) : St :=
                status := (if s.auto = true then s.status else .acceptFail) }
   | .connecting, .connect h => finishLinkF { s with setup := .none } h
   | .connecting, .refused limit bindOk hung => refusedStepF s limit bindOk hung
+  | .handshake, .hello h => helloF s h
   | _, _ => s
 
 def emuStepF (s : St) (o : LinkOut) : St :=
@@ -800,11 +843,13 @@ def bootStepF (s : St) : Boot → St
   | .none => { s with pc := .emu }
   | .rom k => { loadRom s k with pc := .emu }
   | .link .gb _ _ => { loadRom s .gb with pc := .emu }
-  | .link .gba peer h =>
-      if peer = true then { finishLinkF { loadRom s .gba with freeze := .cliWait } h with pc := .emu }
-      else { loadRom s .gba with freeze := .cliWait, pc := .emu }
+  -- Round 3: nothing happens before the loop but start_cli; a peer that
+  -- arrives, and its handshake, are the loop's phase-4 events.
+  | .link .gba _ _ => cliF s true
   | .auto k => { loadRom s k with win := (k.mk s.gen).isGba, pc := .emu }
   | .badPort => { s with pc := .emu }
+  | .cli .gb _ => { loadRom s .gb with pc := .emu }
+  | .cli .gba listen => cliF s listen
 
 def uiStepF (s : St) : Ev → St
   | .mOpen k => if menuOk s = true then loadRomF s k else s
@@ -878,6 +923,7 @@ structure Inv (s : St) : Prop where
   autoLive   : s.auto = true → s.setup ≠ .none                      -- "Waiting to pair" is true
   byeSent    : s.byeOwed = false                                    -- the peer always gets a BYE
   noRewind   : s.nl.isSome = true → s.rewinding = false
+  hsNotAuto  : s.setup = .handshake → s.auto = false               -- round 3: the window shows the handshake
 
 structure Safe (s : St) : Prop where
   inv       : Inv s
@@ -898,7 +944,7 @@ theorem Inv.congr {s t : St} (h : Inv s) (h1 : t.nl = s.nl) (h2 : t.core = s.cor
     (h3 : t.setup = s.setup) (h4 : t.desync = s.desync) (h5 : t.server = s.server)
     (h6 : t.stuck = s.stuck) (h7 : t.status = s.status) (h8 : t.auto = s.auto)
     (h9 : t.byeOwed = s.byeOwed) (h10 : t.rewinding = s.rewinding) : Inv t := by
-  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9⟩ := h
+  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10⟩ := h
   constructor <;> simp_all
 
 /-- Fields the invariant does not read. -/
@@ -910,19 +956,19 @@ theorem Inv.frame {s t : St} (h : Inv s)
 
 theorem Inv.withStatus {s : St} (h : Inv s) (st : Status) (hst : st ≠ .linked) :
     Inv { s with status := st } := by
-  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9⟩ := h
+  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10⟩ := h
   constructor <;> simp_all
 
 theorem inv_teardownF {s : St} (h : Inv s) : Inv (teardownF s) := by
-  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9⟩ := h
+  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10⟩ := h
   constructor <;> simp only [teardownF] <;> (repeat' split) <;> simp_all
 
 theorem inv_autoStop {s : St} (h : Inv s) : Inv (autoStop s) := by
-  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9⟩ := h
+  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10⟩ := h
   constructor <;> simp only [autoStop] <;> (repeat' split) <;> simp_all
 
 theorem inv_cancel {s : St} (h : Inv s) (ha : s.auto = false) : Inv (cancelSetup s) := by
-  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9⟩ := h
+  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10⟩ := h
   constructor <;> simp only [cancelSetup] <;> (repeat' split) <;> simp_all
 
 theorem cancel_autoStop_clean (s : St) (h : Inv s) :
@@ -938,7 +984,7 @@ theorem inv_cancel_autoStop {s : St} (h : Inv s) : Inv (cancelSetup (autoStop s)
 
 theorem inv_loadRom {s : St} (h : Inv s) (hn : s.nl = none) (hs : s.setup = .none) (k : Kind) :
     Inv (loadRom s k) := by
-  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9⟩ := h
+  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10⟩ := h
   constructor <;> simp_all [loadRom]
 
 theorem inv_loadRomF {s : St} (h : Inv s) (k : Kind) : Inv (loadRomF s k) := by
@@ -951,26 +997,32 @@ theorem loadRomF_pc (s : St) (k : Kind) : (loadRomF s k).pc = s.pc := by
   simp [loadRomF, loadRom, cancelSetup, autoStop, teardownF]
 
 theorem inv_updateAutoF {s : St} (h : Inv s) : Inv (updateAutoF s) := by
-  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9⟩ := h
+  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10⟩ := h
   constructor <;> simp only [updateAutoF] <;> (repeat' split) <;> simp_all [opens, startsAuto]
 
 theorem inv_finishLinkF_accept {s : St} (h : Inv s) (hh : Hs) :
     Inv (finishLinkF { s with server := false, setup := .none } hh) := by
-  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9⟩ := h
+  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10⟩ := h
   constructor <;> simp only [finishLinkF] <;> (repeat' split) <;> simp_all
+
+theorem inv_helloF {s : St} (h : Inv s) (hs : s.setup = .handshake) (hh : Hs) :
+    Inv (helloF s hh) := by
+  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10⟩ := h
+  constructor <;> simp only [helloF] <;> (repeat' split) <;> simp_all
 
 theorem inv_serviceSetupF {s : St} (h : Inv s) (o : SvcOut) : Inv (serviceSetupF s o) := by
   unfold serviceSetupF
   split
   · exact inv_finishLinkF_accept h _
-  · obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9⟩ := h
+  · obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10⟩ := h
     constructor <;> (repeat' split) <;> simp_all
   · rename_i hs
     have e : ({ s with setup := .none } : St) = { s with server := false, setup := .none } := by
       have := h.serverOwn; cases s; simp_all
     rw [e]; exact inv_finishLinkF_accept h _
-  · obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9⟩ := h
+  · obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10⟩ := h
     constructor <;> simp only [refusedStepF, refusedStep] <;> (repeat' split) <;> simp_all
+  · exact inv_helloF h (by assumption) _
   · exact h
 
 theorem inv_emuStepF {s : St} (h : Inv s) (o : LinkOut) : Inv (emuStepF s o) := by
@@ -983,7 +1035,7 @@ theorem inv_emuStepF {s : St} (h : Inv s) (o : LinkOut) : Inv (emuStepF s o) := 
   · exact h
 
 theorem inv_loadStateF {s : St} (h : Inv s) : Inv (loadStateF s) := by
-  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9⟩ := h
+  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10⟩ := h
   constructor <;> simp only [loadStateF, loadState] <;> (repeat' split) <;> simp_all [linkedHere]
 
 theorem inv_pendStepF {s : St} (h : Inv s) (ok : Bool) : Inv (pendStepF s ok) := by
@@ -1001,20 +1053,27 @@ theorem inv_host {s : St} (h : Inv s) (hg : s.core.isGba = true) (ok : Bool) :
     Inv (hostStart (cancelSetup (autoStop s)) ok) := by
   have hc := cancel_autoStop_clean s h
   have hi := inv_cancel_autoStop h
-  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9⟩ := hi
+  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10⟩ := hi
   constructor <;> simp only [hostStart] <;> (repeat' split) <;> simp_all
 
 theorem inv_join {s : St} (h : Inv s) (hg : s.core.isGba = true) :
     Inv { cancelSetup (autoStop s) with setup := .connecting, status := .empty } := by
   have hc := cancel_autoStop_clean s h
   have hi := inv_cancel_autoStop h
-  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9⟩ := hi
+  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10⟩ := hi
   constructor <;> simp_all
 
 theorem inv_rewindKey {s : St} (h : Inv s) (d : Bool) :
     Inv { s with rewinding := (if d = true ∧ s.core ≠ .none ∧ s.nl = none then true else false) } := by
-  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9⟩ := h
+  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10⟩ := h
   constructor <;> (repeat' split) <;> simp_all
+
+/-- `cliF` keeps `Inv` on a freshly loaded GBA game with nothing pairing. -/
+theorem inv_cliF {s : St} (h : Inv (loadRom s .gba)) (ha : (loadRom s .gba).auto = false)
+    (listen : Bool) : Inv (cliF s listen) := by
+  obtain ⟨a1, a2, a3, a4, a5, a6, a7, a8, a9, a10⟩ := h
+  constructor <;> simp only [cliF] <;> (repeat' split) <;>
+    simp_all [loadRom, Kind.mk, Core.isGba]
 
 theorem safe_init : Safe init := by
   refine ⟨?_, ?_, ?_, ?_⟩
@@ -1036,19 +1095,13 @@ theorem safe_bootStepF {s : St} (h : Safe s) (hb : s.pc = .boot) (b : Boot) : Sa
   | link k peer hh =>
     cases k with
     | gb => exact safe_of_inv ((hl .gb).frame rfl) (by simp [bootStepF])
-    | gba =>
-      simp only [bootStepF]
-      split
-      · have hl' : Inv { loadRom s .gba with freeze := .cliWait } := (hl .gba).frame rfl
-        have e : ({ loadRom s .gba with freeze := .cliWait } : St) =
-                 { { loadRom s .gba with freeze := .cliWait } with server := false, setup := .none } := by
-          simp [loadRom, v0, s0]
-        have hf : Inv (finishLinkF { loadRom s .gba with freeze := .cliWait } hh) := by
-          rw [e]; exact inv_finishLinkF_accept hl' hh
-        exact safe_of_inv (hf.frame rfl) (by simp)
-      · exact safe_of_inv ((hl .gba).frame rfl) (by simp)
+    | gba => exact safe_of_inv (inv_cliF (hl .gba) (by simp [loadRom, a0]) _) (by simp [bootStepF, cliF])
   | auto k => exact safe_of_inv ((hl k).frame rfl) (by simp [bootStepF])
   | badPort => exact safe_of_inv (hi.frame rfl) (by simp [bootStepF])
+  | cli k listen =>
+    cases k with
+    | gb => exact safe_of_inv ((hl .gb).frame rfl) (by simp [bootStepF])
+    | gba => exact safe_of_inv (inv_cliF (hl .gba) (by simp [loadRom, a0]) _) (by simp [bootStepF, cliF])
 
 theorem safe_uiStepF {s : St} (h : Safe s) (hu : s.pc = .ui) (e : Ev) : Safe (uiStepF s e) := by
   have hi := h.inv
@@ -1181,6 +1234,63 @@ theorem regress_partA_rest :
     (runF init [.boot .badPort]).pc = .emu ∧
     -- a stall timeout ends the link without freezing the window first
     (runF init (tLinked ++ it (.emu (.lost false true)) false [] .idle [])).freeze = .none := by
+  decide
+
+/-! ### Round 3: nothing waits on the network
+
+The only wait left in the fixed step is Disconnect's 3 s close drain: no
+CLI wait before the loop, no HELLO wait, no blocking connect, no stall. -/
+
+def NoNetWait (s : St) : Prop := s.freeze = .none ∨ s.freeze = .closeDrain
+
+theorem noNetWait_stepF {s : St} (h : NoNetWait s) (e : Ev) : NoNetWait (stepF s e) := by
+  unfold NoNetWait at *
+  cases e <;> simp only [stepF, uiStepF, bootStepF, serviceSetupF, emuStepF, pendStepF] <;>
+    (repeat' split) <;>
+    simp_all [loadRomF, loadRom, teardownF, cancelSetup, autoStop, updateAutoF, loadStateF,
+      loadState, finishLinkF, helloF, cliF, refusedStepF, refusedStep, hostStart] <;>
+    (repeat' split) <;> simp_all
+
+theorem noNetWaitF_reachable {s : St} (h : ReachableF s) : NoNetWait s := by
+  induction h with
+  | init => simp [NoNetWait, init]
+  | step e _ ih => exact noNetWait_stepF ih e
+
+/-- The waits the code as it is has, on the fixed step: `--listen` and
+    `--connect` start the loop at once with the window up
+    (`cli_link_freezes_window`); a peer that never says HELLO is waited for
+    in `.handshake`, the loop running, until its deadline or Cancel; a manual
+    Join to a host that drops SYNs (`bug_auto_probes_typed_host`'s address)
+    does not hang. -/
+theorem regress_net_waits :
+    (let s := runF init [.boot (.link .gba false .ok)]
+     s.freeze = .none ∧ s.pc = .emu ∧ s.setup = .listening ∧ s.win = true) ∧
+    (let s := runF init [.boot (.cli .gba false)]
+     s.freeze = .none ∧ s.pc = .emu ∧ s.setup = .connecting ∧ s.win = true) ∧
+    (let s := runF init ([.boot (.rom .gba)] ++
+       it .emuSkip false [.mouse true] .idle [.mLinkMenu] ++
+       it .emuSkip false [] (.connect .timeout) [])
+     s.freeze = .none ∧ s.setup = .handshake ∧ s.status = .empty ∧ s.nl = none) ∧
+    (let s := runF init ([.boot (.rom .gba)] ++
+       it .emuSkip false [.mouse true] .idle [.mLinkMenu] ++
+       it .emuSkip false [] (.connect .timeout) [] ++
+       it (.emu .frame) false [] .idle [] ++
+       it (.emu .frame) false [] (.hello .timeout) [])
+     s.freeze = .none ∧ s.setup = .none ∧ s.status = .hsFailed ∧ s.auto = false) ∧
+    (let s := runF init ([.boot (.rom .gba)] ++
+       it .emuSkip false [.mouse true] .idle [.mLinkMenu] ++
+       it .emuSkip false [] (.connect .timeout) [.wCancel] ++
+       it .emuSkip false [] (.hello .ok) [])
+     s.setup = .none ∧ s.nl = none) ∧
+    (let s := runF init ([.boot (.rom .gba)] ++
+       it .emuSkip false [.mouse true] .idle [.mLinkMenu] ++
+       it .emuSkip false [] (.connect .timeout) [] ++
+       it .emuSkip false [] (.hello .ok) [])
+     s.nl = some 0 ∧ s.status = .linked ∧ s.setup = .none) ∧
+    (runF init ([.boot (.rom .gba)] ++
+      it .emuSkip false [.mouse true] .idle [.mLinkMenu] ++
+      it .emuSkip false [] .idle [.wEditHost .other, .wJoin] ++
+      it .emuSkip false [] (.refused false false true) [])).freeze = .none := by
   decide
 
 /-! ## Part B: two processes over one socket

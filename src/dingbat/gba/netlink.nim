@@ -42,6 +42,7 @@ type
     stall_timeout_ms*: int
     stalling: bool
     stall_deadline: MonoTime
+    hello_deadline: MonoTime  # wall time by which the peer's HELLO must arrive
 
 # Accessors kept from the pre-netcore API
 proc id*(nl: NetLink): int = nl.core.id
@@ -195,28 +196,67 @@ proc idle*(nl: NetLink) =
 
 # ---------------- construction & handshake ----------------
 
+proc begin_net_link*(gba: GBA; sock: Socket; id: int; rom_crc: uint32;
+                     delay_ms = 0; allow_crc_mismatch = false;
+                     hello_timeout_ms = HELLO_TIMEOUT_MS): NetLink =
+  ## Start the HELLO handshake over a connected socket without waiting for
+  ## the peer's: our HELLO goes out, and poll_hello (once per main-loop
+  ## iteration) finishes it. The core keeps its own link-cable driver, and
+  ## runs single-player, until then. id 0 = listener = multi-mode unit 0.
+  ## allow_crc_mismatch accepts differing ROM CRCs (cross-version trades such
+  ## as Ruby<->Sapphire). The hello_timeout_ms deadline is wall time.
+  sock.setSockOpt(OptNoDelay, true, level = cint(IPPROTO_TCP))
+  # Sends must never block (see wire_out); the HELLO wait is select-polled.
+  sock.getFd().setBlocking(false)
+  result = NetLink(gba: gba, sock: sock, delay_ms: delay_ms,
+                   stall_timeout_ms: STALL_TIMEOUT_MS,
+                   hello_deadline: getMonoTime() +
+                                   initDuration(milliseconds = hello_timeout_ms))
+  result.core = new_net_core(gba, id, rom_crc,
+                             strict_crc = not allow_crc_mismatch, attach = false)
+  result.flush_outgoing()  # our HELLO
+
+proc poll_hello*(nl: NetLink; wait_ms = 0): bool =
+  ## Service a handshake begun by begin_net_link, waiting at most wait_ms for
+  ## bytes: true once the peer's HELLO is in and accepted (the core now talks
+  ## through the link), false while it is still awaited. Raises NetLinkError
+  ## on a refusal (ours goes out as a BYE), a hang-up, or no HELLO by the
+  ## deadline.
+  if nl.core.hello == hsDone: return true
+  nl.flush_outgoing()
+  discard nl.poll_socket(wait_ms)
+  nl.flush_outgoing()  # BYE on rejection / first CLOCK on acceptance
+  case nl.core.hello
+  of hsDone:
+    nl.gba.set_sio_driver(RemoteSioDriver(core: nl.core))
+    true
+  of hsFailed:
+    raise newException(NetLinkError, nl.core.hello_error)
+  of hsWait:
+    if getMonoTime() > nl.hello_deadline:
+      raise newException(NetLinkError, "timed out waiting for peer HELLO")
+    false
+
+proc abandon*(nl: NetLink) =
+  ## Give up a handshake still in progress (Cancel, the window closed,
+  ## another game loaded): a BYE if the socket takes it at once, then close.
+  ## Never waits and never raises; the core was never plugged in.
+  try:
+    nl.send_bye()
+    nl.flush_outgoing()
+  except CatchableError:
+    discard
+  try: nl.sock.close()
+  except CatchableError: discard
+
 proc new_net_link*(gba: GBA; sock: Socket; id: int; rom_crc: uint32;
                    delay_ms = 0; allow_crc_mismatch = false;
                    hello_timeout_ms = HELLO_TIMEOUT_MS): NetLink =
-  ## Wire a post-init core to a connected socket and run the HELLO handshake
-  ## (blocking). id 0 = listener = multi-mode unit 0. allow_crc_mismatch
-  ## accepts differing ROM CRCs (cross-version trades such as Ruby<->Sapphire).
-  sock.setSockOpt(OptNoDelay, true, level = cint(IPPROTO_TCP))
-  result = NetLink(gba: gba, sock: sock, delay_ms: delay_ms,
-                   stall_timeout_ms: STALL_TIMEOUT_MS)
-  result.core = new_net_core(gba, id, rom_crc,
-                             strict_crc = not allow_crc_mismatch)
-  result.flush_outgoing()  # our HELLO (blocking socket: sends immediately)
-  let deadline = getMonoTime() + initDuration(milliseconds = hello_timeout_ms)
-  while result.core.hello == hsWait:
-    discard result.poll_socket(50)
-    if getMonoTime() > deadline:
-      raise newException(NetLinkError, "timed out waiting for peer HELLO")
-  result.flush_outgoing()  # BYE on rejection / first CLOCK on acceptance
-  if result.core.hello == hsFailed:
-    raise newException(NetLinkError, result.core.hello_error)
-  # From here on sends must never block (see wire_out).
-  sock.getFd().setBlocking(false)
+  ## begin_net_link, then wait for the handshake (blocking): for callers with
+  ## no loop to return to, such as the test harness.
+  result = begin_net_link(gba, sock, id, rom_crc, delay_ms, allow_crc_mismatch,
+                          hello_timeout_ms)
+  while not result.poll_hello(50): discard
 
 proc close*(nl: NetLink) =
   ## Flush our remaining bytes (the final BYE), half-close, then drain the

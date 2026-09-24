@@ -1,5 +1,4 @@
 import std/[os, hashes, math, options, parseopt, strformat, strutils, tables, times, algorithm]
-import std/[net, nativesockets]
 import sdl2 except init, quit, glBindTexture, glUnbindTexture
 import sdl2/joystick
 import sdl2/gamecontroller
@@ -2014,66 +2013,15 @@ proc linked_now(nl: NetLink): bool =
   app.rewinding = false
   true
 
-proc finish_link(sock: Socket; id: int; delay_ms = 0): bool =
-  ## Run the HELLO handshake over an already-connected socket. Refused (the
-  ## socket closed) unless a GBA game is loaded; false on a failed handshake.
-  let gba = if link_ready(): app.gba_emu else: nil
-  linked_now(app.link.finish_link(sock, id, gba, current_rom_path(), delay_ms))
-
-proc establish_netlink(rom_path: string; listen_port: int; connect_to: string;
-                       delay_ms: int): NetLink =
-  ## `--listen` becomes unit 0 (host); `--connect HOST:PORT` unit 1 (guest).
-  ## Returns nil (printing the reason) on any failure so the caller falls
-  ## back to single-player.
-  if app.emu_kind != ekGBA or app.gba_emu == nil:
-    echo "NETLINK: link mode needs a GBA ROM; continuing single-player"
-    return nil
-  var sock: Socket
-  var id = 0
-  try:
-    if listen_port > 0:
-      let server = newSocket(buffered = false)
-      server.setSockOpt(OptReuseAddr, true)
-      server.bindAddr(Port(listen_port))
-      server.listen()
-      echo "NETLINK: listening on port ", listen_port, " — waiting for peer..."
-      var fds = @[server.getFd()]
-      if selectRead(fds, 120_000) <= 0:
-        echo "NETLINK: no peer connected within 120 s; continuing single-player"
-        server.close()
-        return nil
-      server.accept(sock)
-      server.close()
-      id = 0
-    else:
-      let (host, port, ok) = parse_host_port(connect_to)
-      if not ok:
-        echo "NETLINK: --connect wants HOST:PORT, got ", connect_to
-        return nil
-      echo "NETLINK: connecting to ", connect_to, " ..."
-      var connected = false
-      for attempt in 0 ..< 40:  # the host may still be starting up
-        sock = newSocket(buffered = false)
-        try:
-          sock.connect(host, Port(port))
-          connected = true
-          break
-        except OSError:
-          sock.close()
-          sleep(250)
-      if not connected:
-        echo "NETLINK: could not connect to ", connect_to,
-             "; continuing single-player"
-        return nil
-      id = 1
-  except OSError as e:
-    echo "NETLINK: socket setup failed: ", e.msg, "; continuing single-player"
-    return nil
-  if finish_link(sock, id, delay_ms):
-    result = app.netlink
-  else:
-    echo "NETLINK: continuing single-player"
-    result = nil
+proc establish_netlink(listen_port: int; connect_to: string; delay_ms: int) =
+  ## `--listen PORT` hosts (unit 0) and `--connect HOST:PORT` joins (unit 1)
+  ## the way the Link Cable window's Advanced Host and Join do, with the
+  ## window open on the status: the loop services the wait
+  ## (service_link_setup), so the game runs single-player and the window
+  ## answers until a peer pairs, and Cancel or closing the window ends it.
+  app.link.delay_ms = delay_ms
+  if app.link.start_cli(listen_port, connect_to, link_ready()):
+    app.link_window = true
 
 proc link_cancel_setup() = app.link.cancel_setup()
 
@@ -2162,6 +2110,10 @@ proc render_link_window() =
       elif app.link.setup == lsConnecting:
         igText("Connecting to %s:%d ...",
                cstring(app.link.join_host()), cint(app.link.port))
+        if igButton("Cancel", ImVec2(x: 0, y: 0)): link_cancel_setup()
+      elif app.link.setup == lsHandshake:
+        igText("Connected. Waiting for the other game to answer")
+        igText("(up to %d s)...", cint(app.link.hello_timeout_ms div 1000))
         if igButton("Cancel", ImVec2(x: 0, y: 0)): link_cancel_setup()
       else:
         igText("Two players, one emulated link cable, over the network.")
@@ -2372,8 +2324,7 @@ proc main() =
     load_rom(rom_path)
     # Bring up the 2-player network link once the core exists (GBA only).
     if listen_port > 0 or connect_to.len > 0:
-      app.netlink = establish_netlink(rom_path, listen_port, connect_to,
-                                      netlink_delay)
+      establish_netlink(listen_port, connect_to, netlink_delay)
     elif link_auto:
       # Opening the window is what update_link_auto's open-edge detection
       # keys on.

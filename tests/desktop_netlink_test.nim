@@ -2,7 +2,9 @@
 ## (src/dingbat/frontend/link_cable.nim, src/dingbat/gba/netlink.nim), with a
 ## scripted peer: a raw socket speaking linkproto, so each case controls
 ## exactly what the other side sends. Guards formal/DESKTOP-FINDINGS.md 7, 8,
-## 11, 20, 21 and the Low link items. No GUI; linktest.gba is the core.
+## 11, 20, 21, the Low link items, and that nothing in pairing waits on the
+## network (--listen, the HELLO handshake, a connect). No GUI; linktest.gba
+## is the core.
 
 import std/[net, nativesockets, monotimes, times, strutils]
 import dingbat/gba/[gba, netlink]
@@ -58,8 +60,8 @@ proc connect_peer(port: int): Peer =
   result.sock.connect("127.0.0.1", Port(port))
 
 proc host_and_pair(lc: var LinkCable; gba: GBA; port: int): (NetLink, Peer) =
-  ## `lc` hosts on `port`; the peer connects and sends its HELLO first (the
-  ## handshake is blocking and single-threaded here), then lc accepts.
+  ## `lc` hosts on `port`; the peer connects and sends its HELLO, and lc
+  ## accepts and finishes the handshake over the next few iterations.
   lc.port = cint(port)
   lc.start_host(ready = true)
   var peer = connect_peer(port)
@@ -189,10 +191,10 @@ block:
   check got_bye, "the peer got a BYE"
   peer.sock.close()
 
-# ---- 7 and the ROM-file case: finish_link refuses rather than crash ----
+# ---- 7 and the ROM-file case: begin_handshake refuses rather than crash ----
 
 block:
-  echo "7: finish_link with no GBA core, or the ROM file gone"
+  echo "7: begin_handshake with no GBA core, or the ROM file gone"
   var lc = init_link_cable()
   let server = newSocket(buffered = false)
   server.setSockOpt(OptReuseAddr, true)
@@ -203,16 +205,17 @@ block:
   var b: Socket
   server.accept(b)
   lc.auto = true
-  let nl = lc.finish_link(a, 1, nil, ROM)
-  check nl == nil, "no GBA core (a GB game is loaded): refused, no crash"
+  lc.begin_handshake(a, 1, nil, ROM)
+  check lc.setup == lsNone and lc.service_setup(nil, ROM, 0) == nil,
+        "no GBA core (a GB game is loaded): refused, no crash"
   check not lc.auto, "auto-pairing stopped, so the window shows why"
   b.close()
   var c = newSocket(buffered = false)
   c.connect("127.0.0.1", Port(BASE_PORT + 4))
   var d: Socket
   server.accept(d)
-  let nl2 = lc.finish_link(c, 1, new_core(), "/nonexistent/moved.gba")
-  check nl2 == nil and lc.status.startsWith("Handshake failed"),
+  lc.begin_handshake(c, 1, new_core(), "/nonexistent/moved.gba")
+  check lc.setup == lsNone and lc.status.startsWith("Handshake failed"),
         "ROM file moved away: refused with a status line, no crash"
   d.close()
   server.close()
@@ -278,7 +281,11 @@ block:
   lc.update_auto(window = true, ready = true, linked = false)
   check lc.auto and lc.setup == lsConnecting, "opening the window starts auto-pairing"
   # The listener never sends HELLO: the handshake times out.
-  let nl = lc.service_setup(new_core(), ROM, 0)
+  let gba = new_core()
+  var nl: NetLink
+  let t0 = getMonoTime()
+  while nl == nil and lc.setup != lsNone and ms_since(t0) < 3000:
+    nl = lc.service_setup(gba, ROM, ms_since(t0))
   var fds = @[listener.getFd()]
   check selectRead(fds, 0) > 0, "the probe went to 127.0.0.1, not the Join box's address"
   check nl == nil and not lc.auto and lc.status.startsWith("Handshake failed"),
@@ -354,6 +361,174 @@ block:
     # SO_EXCLUSIVEADDRUSE instead, whose TIME_WAIT rules are not measured.
     check lc.setup == lsListening, "and hosts again at once, TIME_WAIT or not"
   lc.auto_stop()
+
+# ---- nothing in pairing waits on the network ----
+
+proc silent_listener(port: int): Socket =
+  ## A host that accepts (the kernel does) but never says HELLO.
+  result = newSocket(buffered = false)
+  result.setSockOpt(OptReuseAddr, true)
+  result.bindAddr(Port(port))
+  result.listen()
+
+proc join(lc: var LinkCable; port: int) =
+  lc.set_join_host("127.0.0.1")
+  lc.port = cint(port)
+  lc.start_join(ready = true)
+
+block:
+  echo "Open: a peer that never answers HELLO does not stop the loop"
+  let listener = silent_listener(BASE_PORT + 12)
+  var lc = init_link_cable()
+  lc.hello_timeout_ms = 600
+  let gba = new_core()
+  lc.join(BASE_PORT + 12)
+  var nl: NetLink
+  var worst = 0'i64
+  var saw_handshake = false
+  var plugged = false
+  let t0 = getMonoTime()
+  while nl == nil and lc.setup != lsNone and ms_since(t0) < 5000:
+    let c0 = getMonoTime()
+    nl = lc.service_setup(gba, ROM, ms_since(t0))
+    worst = max(worst, ms_since(c0))
+    if lc.setup == lsHandshake:
+      saw_handshake = true
+      # The game keeps running single-player meanwhile, on its own cable.
+      gba.run_until_frame()
+      if gba.serial.driver of RemoteSioDriver: plugged = true
+  let took = ms_since(t0)
+  check saw_handshake, "connected, then waited for the HELLO in its own phase"
+  check worst < 100, "no call waited on the peer (longest " & $worst & " ms)"
+  check nl == nil and lc.setup == lsNone and
+        lc.status.startsWith("Handshake failed") and
+        "timed out" in lc.status,
+        "gave up with a reason (" & lc.status & ")"
+  check took >= 600 and took < 2000,
+        "at the handshake's deadline, counted in wall time (" & $took & " ms)"
+  check not plugged and not (gba.serial.driver of RemoteSioDriver),
+        "the game ran on its own cable throughout: the link never plugged in"
+  listener.close()
+
+block:
+  echo "Open: Cancel, closing the window, or another game end a handshake"
+  let listener = silent_listener(BASE_PORT + 13)
+  let gba = new_core()
+  for how in ["Cancel", "window closed", "another game"]:
+    var lc = init_link_cable()
+    lc.join(BASE_PORT + 13)
+    let t0 = getMonoTime()
+    while lc.setup != lsHandshake and ms_since(t0) < 2000:
+      discard lc.service_setup(gba, ROM, ms_since(t0))
+    var peer: Peer
+    listener.accept(peer.sock)
+    case how
+    of "Cancel": lc.cancel_setup()
+    of "window closed":
+      lc.update_auto(window = true, ready = true, linked = false)
+      lc.update_auto(window = false, ready = true, linked = false)
+    else: discard lc.service_setup(new_core(), ROM, ms_since(t0))
+    check lc.setup == lsNone and lc.service_setup(gba, ROM, ms_since(t0)) == nil,
+          how & ": the handshake is over"
+    var kinds: seq[LinkMsgKind]
+    for m in peer.read_msgs(300): kinds.add m.kind
+    check kinds == @[lmHello, lmBye],
+          how & ": the peer got our HELLO, then a BYE (" & $kinds & ")"
+    var fds = @[peer.sock.getFd()]
+    var buf: array[16, char]
+    check selectRead(fds, 200) > 0 and peer.sock.recv(addr buf[0], buf.len) == 0,
+          how & ": and the socket is closed"
+    peer.sock.close()
+  listener.close()
+
+block:
+  echo "Open: a Join to a host that drops SYNs does not stop the loop"
+  # A listener whose backlog is full: the kernel drops further SYNs, as a
+  # firewalled or vanished host does, so a connect gets no answer at all.
+  let full = newSocket(buffered = false)
+  full.setSockOpt(OptReuseAddr, true)
+  full.bindAddr(Port(BASE_PORT + 14))
+  full.listen(1)
+  var fill: seq[Socket]
+  var blackhole = false
+  for _ in 0 ..< 32:
+    let s = newSocket(buffered = false)
+    try:
+      s.connect("127.0.0.1", Port(BASE_PORT + 14), timeout = 200)
+      fill.add s
+    except TimeoutError:
+      s.close()
+      blackhole = true
+      break
+    except OSError:
+      s.close()
+      break
+  if not blackhole:
+    echo "  (this OS refuses rather than drops a SYN to a full backlog: skipped)"
+  else:
+    var lc = init_link_cable()
+    lc.join(BASE_PORT + 14)
+    let gba = new_core()
+    var worst = 0'i64
+    var t = 0'i64
+    let t0 = getMonoTime()
+    while lc.setup == lsConnecting and ms_since(t0) < 3000:
+      let c0 = getMonoTime()
+      discard lc.service_setup(gba, ROM, t)
+      worst = max(worst, ms_since(c0))
+      t += 50  # the Join's give-up clock, fast-forwarded
+    check worst < 100, "no call waited on the unanswered connect (longest " &
+          $worst & " ms)"
+    check lc.setup == lsNone and lc.status.startsWith("Couldn't reach"),
+          "and the Join gave up after its " & $LINK_JOIN_GIVE_UP_MS &
+          " ms with a reason (" & lc.status & ")"
+  for s in fill: s.close()
+  full.close()
+
+block:
+  echo "Open: --listen and --connect start at once; the loop pairs them"
+  var host = init_link_cable()
+  var guest = init_link_cable()
+  let t0 = getMonoTime()
+  check host.start_cli(BASE_PORT + 15, "", ready = true) and
+        guest.start_cli(0, "127.0.0.1:" & $(BASE_PORT + 15), ready = true),
+        "both open the window on their status"
+  check ms_since(t0) < 100 and host.setup == lsListening and
+        guest.setup == lsConnecting,
+        "--listen hosts and --connect joins without waiting for the peer (" &
+        $ms_since(t0) & " ms)"
+  check guest.join_host() == "127.0.0.1" and int(guest.port) == BASE_PORT + 15,
+        "--connect fills the Join box"
+  # One thread, both windows' loops interleaved: only possible when neither
+  # the accept, the connect nor the handshake waits on the other side.
+  let ga = new_core()
+  let gb = new_core()
+  var la, lb: NetLink
+  var worst = 0'i64
+  while (la == nil or lb == nil) and ms_since(t0) < 5000:
+    let c0 = getMonoTime()
+    if la == nil: la = host.service_setup(ga, ROM, ms_since(t0))
+    if lb == nil: lb = guest.service_setup(gb, ROM, ms_since(t0))
+    worst = max(worst, ms_since(c0))
+  check la != nil and lb != nil and la.id == 0 and lb.id == 1,
+        "the two paired as host and guest"
+  check worst < 100, "no iteration waited on the other (longest " & $worst & " ms)"
+  check ga.serial.driver of RemoteSioDriver and gb.serial.driver of RemoteSioDriver,
+        "both cores now talk through the link"
+  var frames = 0
+  let t1 = getMonoTime()
+  while frames < 30 and ms_since(t1) < 5000:
+    if la.step_frame_for(8): inc frames
+    discard lb.step_frame_for(8)
+  check frames == 30, "and the link runs frames"
+  host.teardown(la, "")
+  guest.teardown(lb, "")
+  var bad = init_link_cable()
+  check not bad.start_cli(BASE_PORT + 16, "", ready = false) and bad.setup == lsNone,
+        "a GB game: no link, the game runs single-player"
+  check bad.start_cli(0, "host:x", ready = true) and bad.setup == lsNone and
+        bad.status.startsWith("--connect wants HOST:PORT"),
+        "a bad --connect is shown in the window, not a crash"
 
 # ---- Low: --connect HOST:x ----
 
