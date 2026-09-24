@@ -3039,6 +3039,9 @@ const applyRemoteRename = async (from, to) => {
   // detach the session so no write path recreates an old key, reattach
   // after. A link/online session cannot be migrated under; the caller defers.
   if (isRomLoaded(from) && (linkMode || rollbackMode || netActive())) return null;
+  // Nor under a load of the old name: it is reading those records right now
+  // and names its game only when it boots, after this move.
+  if (loadingName === from) return null;
   let loaded = isRomLoaded(from) && !!currentRomName;
   if (loaded) {
     await persistSave(currentRomName, from);
@@ -3181,7 +3184,9 @@ const pullSyncInner = async ({ silent = true } = {}) => {
         }
       } else {
         for (let g of pending) {
-          if (isRomLoaded(g)) continue; // never yank the game being played
+          // Never yank the game being played, nor the one mid-load: its load
+          // has read these records and would boot on them.
+          if (isRomLoaded(g) || loadingName === g) continue;
           // The same local wipe Delete performs.
           await deleteGameLocalData(g);
           live();
@@ -3219,7 +3224,7 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       // one being loaded (loadingName), which will run on the save it read.
       if (isRomLoaded(p.game) || loadingName === p.game) continue;
       if (syncState.rmt[name] === f.modifiedTime) continue; // unchanged remotely
-      let bytes = await driveDownload(f.id);
+      let bytes = live(await driveDownload(f.id));
       // Again, in the run that writes: a tap during the download has booted
       // the game on the older save, and its first flush would write that
       // back over this one and upload it over the other device's.
@@ -3232,7 +3237,7 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       // same segment as the write, sees every such delete.
       if (syncState.queueDel.includes(name)) continue;
       if (sig !== syncState.sigs[name]) {
-        await writeSyncBytes(name, bytes);
+        live(await writeSyncBytes(name, bytes));
         syncState.sigs[name] = sig;
       }
       syncState.rmt[name] = f.modifiedTime;

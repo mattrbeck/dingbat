@@ -410,3 +410,40 @@ test("a key deleted before the flush reaches it is not uploaded at all", async (
   assert.ok(!drive.log.some((e) => e.name === "state:G.gba"),
     "no request ever carried the deleted key");
 });
+
+// ── A pull and a load of the same game ─────────────────────────────────────
+// A load reads a game's records and names the game only when its core boots
+// (game-switch.test.mjs); until then the game is not "loaded", and the pull
+// must not move or wipe the records under it. `loadingName` stands in for a
+// load parked between its reads and the boot.
+
+test("a rename from another device waits while the game it renames is loading", async () => {
+  const { drive, d0, d1 } = await setupA();
+  await play(d1, "Seven.gba", u8(71));
+  assert.equal((await d0.api.renameGame("Seven.gba", "Nine.gba")).ok, true);
+  await flush(d0);
+
+  d1.runIn(`loadingName = "Seven.gba"`);
+  await pull(d1);
+  eq(localKeys(d1, "Seven.gba"), ["rom:Seven.gba", "save:Seven.gba"],
+    "the records the load is reading stay where it reads them");
+  eq(localKeys(d1, "Nine.gba"), []);
+
+  d1.runIn("loadingName = null");
+  await pull(d1);
+  eq(localKeys(d1, "Seven.gba"), []);
+  eq(localKeys(d1, "Nine.gba"), ["rom:Nine.gba", "save:Nine.gba"], "and move once it is done");
+  eq(libNames(drive), ["Nine.gba"]);
+});
+
+test("a game deleted on another device is not wiped here while it is loading", async () => {
+  const { d0, d1 } = await setupA();
+  await play(d1, "Seven.gba", u8(71));
+  await d0.api.deleteGameEverywhere("Seven.gba");
+  await flush(d0);
+
+  d1.runIn(`loadingName = "Seven.gba"`);
+  await pull(d1, "Continue");
+  eq(localKeys(d1, "Seven.gba"), ["rom:Seven.gba", "save:Seven.gba"],
+    "the game being booted keeps its ROM and save");
+});
