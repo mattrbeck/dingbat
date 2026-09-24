@@ -53,6 +53,16 @@ proc exception_return_restore*(cpu: CPU) =
     # No IRQ_GATE_DELAY on an exception return's SPSR restore (mGBA suite
     # multi-IRQ Timer count-up rows); the gate evidence covers IME/IE/msr.
     cpu.gba.interrupts.schedule_interrupt_check()
+  when S_BIT_IRQ_LATE:
+    if not was_irq_disabled and cpu.cpsr.irq_disable:
+      # The restore sets I too late for an interrupt the CPU has already
+      # recognised by the end of this instruction: it is taken after it and
+      # returns into the restored CPSR, I set (alyosha psr, its readme's
+      # "timing of disabling interrupts when disabling via S bit set").
+      # msr has no such evidence and obeys I at once.
+      cpu.gba.bus.catch_up()
+      if cpu.irq_line and not cpu.halted:
+        cpu.irq_enter()
 
 proc arm_unimplemented*(cpu: CPU; instr: uint32) =
   # und() writes PC; no step.

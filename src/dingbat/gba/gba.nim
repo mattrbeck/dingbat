@@ -1061,6 +1061,7 @@ type
 
 # Forward declarations to handle circular include dependencies
 proc irq*(cpu: CPU)
+proc irq_enter*(cpu: CPU)
 proc und*(cpu: CPU)
 proc run_pending*(dma: DMA)
 proc schedule_interrupt_check*(intr: Interrupts; delay: int = 0)
@@ -1101,6 +1102,9 @@ const HALT_WAKE_RUNS_ONE* {.booldefine.} = true
 const IRQ_FETCH_VIA_PREFETCH* {.booldefine.} = true
   ## The IRQ entry's in-flight gamepak fetch comes from the prefetcher when
   ## it runs on the interrupted stream (cpu.irq).
+const S_BIT_IRQ_LATE* {.booldefine.} = true
+  ## An S-bit CPSR restore that sets I still lets an interrupt already
+  ## recognised be taken after it (arm.exception_return_restore).
 const HALT_ENTRY_STALL* {.intdefine.} = 2
   ## Cycles a HALTCNT write stalls the CPU before the halt can end (mmio.nim).
 const HALT_WAKE_INSTR_COST* = 3

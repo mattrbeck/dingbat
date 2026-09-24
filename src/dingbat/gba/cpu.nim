@@ -79,7 +79,12 @@ proc switch_mode*(cpu: CPU; new_mode: CpuMode) =
   cpu.cpsr.mode     = uint32(new_mode)
 
 proc irq*(cpu: CPU) =
-  if not cpu.cpsr.irq_disable:
+  if not cpu.cpsr.irq_disable: cpu.irq_enter()
+
+proc irq_enter*(cpu: CPU) =
+  ## The IRQ exception, whatever CPSR.I holds (irq checks it; an S-bit
+  ## CPSR restore that sets it does not, arm.exception_return_restore).
+  block:
     when defined(irqlog):
       # -d:irqlog: the cycle every IRQ is taken at, to IRQLOG (a file: the
       # playtest driver's stdout is its protocol pipe).
