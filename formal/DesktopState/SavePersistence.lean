@@ -89,7 +89,7 @@ proposed change at once. Each flag is one small Nim change:
 | `lock` | a window whose game is already open in another window uses `<name>-p2.sav` / `-p2` states (seeded from the first, as the web's 2P mode does) | `bug_two_windows_lost_update` | `fi_ok` (`Excl`, `BaseJ`, `clobbers = []`) |
 | `catchIo` | `write_save` catches IOError/OSError like `mbc_save`; both record it (`save_error`) and the app shows it until a write lands (`batErr`) | `bug_gba_save_error_crashes`, `gb_save_error_unseen` | `clean_ok`, `regress_gba_save_error` |
 | `flushGba` | `flush_gb_save` also flushes the GBA battery | `bug_gba_quit_drops_battery` | `clean_ok` |
-| `atomic` | every `writeFile` of a persisted file goes to `path.tmp`, then `moveFile` over `path` | `bug_truncated_sav_accepted`, `bug_failed_quick_save_destroys_previous` | `clean_ok` |
+| `atomic` | every `writeFile` of a persisted file goes through `write_file_atomic` (temp, fsync, rename over `path`); a failed Quick Save says the slot is unchanged | `bug_truncated_sav_accepted`, `bug_failed_quick_save_destroys_previous`, `failed_quick_save_silent` | `clean_ok`, `regress_failed_quick_save_says_so` |
 | `cliOver` | CLI BIOS flags are kept out of `app.cfg`; `save_config` re-reads the file and writes only the keys its caller changed | `bug_cli_flag_persisted`, `bug_two_windows_config_lost` | `cfg_ok` |
 | `rewindClear` | an applied state load clears `app.rewind` | `bug_rewind_crosses_state_load` | `rewind_ok` |
 | `finishFrame` | after `teardown_netlink` on a NetLinkError, `run_until_frame` finishes the torn frame | `bug_state_saved_mid_frame` | `mid_ok` |
@@ -545,14 +545,17 @@ def loopEnd (fx : Fix) (s : St) (i : Bool) : St :=
     let s1 := flushOut fx s i
     setA s1 i { s1.app i with pc := .exited }
 
-/-- `process_pending_state` (925-939), gated at 2522 on a loaded ROM. -/
+/-- `process_pending_state` (925-939), gated at 2522 on a loaded ROM. The real
+    code discards a failed Quick Save's result; fixed (`atomic`), the slot
+    still holds its previous file and the notice says so (`QUICK_SAVE_FAILED`). -/
 def pendStep (fx : Fix) (s : St) (i : Bool) (io : Io) : St :=
   let a := s.app i
   if a.cur.isNone || !(a.pendSave || a.pendLoad) then setA s i { a with pc := .input } else
   let s1 :=
     if a.pendSave then                                         -- 929-933
       let s' := saveSlot fx (setA s i { a with pendSave := false }) i 0 io
-      setA s' i { s'.app i with wasOpen := false }             -- mark_stale
+      setA s' i { s'.app i with wasOpen := false,              -- mark_stale
+                                notice := (s'.app i).notice || (fx.atomic && io.raises) }
     else s
   if (s1.app i).pc = .dead then s1 else
   let a1 := s1.app i
@@ -1874,8 +1877,8 @@ theorem fix_refresh {s : St} {i : Bool} (h : FIx s i) : FI (refresh fixed s i) :
 theorem fi_refresh {s : St} (i : Bool) (h : FI s) : FI (refresh fixed s i) := fix_refresh (fi_to_fix i h)
 
 /-- `mark_stale` (or a load_rom in the fixed code) outside the window phase. -/
-theorem fix_stale {s : St} {i : Bool} (h : FIx s i) (hw : (s.app i).pc ≠ .win) :
-    FI (setA s i { s.app i with wasOpen := false }) :=
+theorem fix_stale {s : St} {i : Bool} (h : FIx s i) (hw : (s.app i).pc ≠ .win) (n : Bool) :
+    FI (setA s i { s.app i with wasOpen := false, notice := n }) :=
   fix_setA_view h rfl rfl rfl rfl (fun hp => absurd hp hw) (fun _ _ _ hwo => by cases hwo)
 
 theorem fi_allDead {t : St} (hd : ∀ j, (t.app j).pc = .dead) (hcl : t.clobbers = [])
@@ -1959,7 +1962,7 @@ theorem pendStep_F {s : St} {i : Bool} (io : Io) (h : FI s) (hpc : (s.app i).pc 
         have hx : ((setA s i { s.app i with pendSave := false }).app i).pc = .pend := by
           rw [setA_self]; exact hpc
         rw [hx] at hp
-        refine ⟨fix_stale hs (by rcases hp with hp | hp <;> rw [hp] <;> simp), ?_⟩
+        refine ⟨fix_stale hs (by rcases hp with hp | hp <;> rw [hp] <;> simp) _, ?_⟩
         rw [setA_self]; exact hp
       · exact ⟨h, Or.inl hpc⟩
     obtain ⟨h1, hp1⟩ := h1
@@ -2604,6 +2607,25 @@ theorem regress_power :
 
 theorem regress_state_cut :
     (run fixed init tStateCut).loads.length = 1 ∧ (run fixed init tStateCut).truncs = 0 := by
+  decide +kernel
+
+/-- Two Quick Saves, the second cut short by a full disk. -/
+def tSaveCut : List Ev :=
+  [.launch false false (some romA)] ++
+  iter false (F) [.keySave false] [] [] ++
+  iter false (F) [.keySave false] [] [] ++
+  [F, .pend false .full]
+
+/-- The real code says nothing and leaves the slot truncated ... -/
+theorem failed_quick_save_silent :
+    ((run real init tSaveCut).app false).notice = false ∧
+    ((run real init tSaveCut).st (stPath real romA false 0)).map (·.whole) = some false := by
+  decide +kernel
+
+/-- ... the fixed code keeps the slot's previous state whole and says so. -/
+theorem regress_failed_quick_save_says_so :
+    ((run fixed init tSaveCut).app false).notice = true ∧
+    ((run fixed init tSaveCut).st (stPath fixed romA false 0)).map (·.whole) = some true := by
   decide +kernel
 
 theorem regress_cli :

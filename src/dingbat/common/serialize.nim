@@ -3,6 +3,7 @@
 # refs, not stable across builds).
 
 import std/[os, strutils]
+import atomicfile
 
 type
   StateError* = object of CatchableError
@@ -312,7 +313,7 @@ proc write_state_file*(path: string; core: CoreKind;
   let parent = path.parentDir
   if parent.len > 0:
     createDir(parent)
-  writeFile(path, make_state_bytes(core, rom_checksum, rom_size, payload))
+  write_file_atomic(path, make_state_bytes(core, rom_checksum, rom_size, payload))
 
 proc write_state_file*(path: string; core: CoreKind;
                        rom_checksum, rom_size: uint32; payload: string;
@@ -320,8 +321,8 @@ proc write_state_file*(path: string; core: CoreKind;
   let parent = path.parentDir
   if parent.len > 0:
     createDir(parent)
-  writeFile(path, make_state_bytes(core, rom_checksum, rom_size, payload,
-                                   thumbnail, thumb_w, thumb_h))
+  write_file_atomic(path, make_state_bytes(core, rom_checksum, rom_size, payload,
+                                           thumbnail, thumb_w, thumb_h))
 
 proc downscale_bgr555*(src: openArray[uint16]; src_w, src_h, dst_w, dst_h: int): seq[byte] =
   ## Nearest-neighbour downscale of a BGR555 framebuffer to little-endian

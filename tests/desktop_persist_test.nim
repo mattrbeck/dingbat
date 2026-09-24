@@ -1,12 +1,16 @@
 ## What the desktop app writes for a game, checked headless against the real
 ## cores (formal/DesktopState/SavePersistence.lean has the traces):
 ## a battery write that fails keeps the game running and tells the player
-## once per run of failures (finding 4).
+## once per run of failures (finding 4); a battery or save-state write cut
+## short leaves the previous file whole (finding 18).
 
-import std/[os, strformat, tempfiles]
+import std/[os, strformat, strutils, tempfiles]
 import dingbat/gba/gba
 import dingbat/gb/gb
+import dingbat/common/serialize
 import dingbat/frontend/persist
+when defined(posix):
+  import std/posix
 
 var failures = 0
 
@@ -113,6 +117,79 @@ block:  # GB: mbc_save caught the error but only said so on stdout, once ever
   cart.mbc_save()
   n.poll(cart.sav_path, cart.save_error, cart.save_error_new)
   check(n.text.len > 0, "GB: a later run of failures is reported again")
+
+echo "=== A write cut short (finding 18) ==="
+
+proc no_temp_left(): bool =
+  for f in walkDirRec(dir):
+    if ".tmp" in f.extractFilename: return false
+  true
+
+when defined(posix):
+  # RLIMIT_FSIZE makes a write past the limit fail part way (EFBIG), the way
+  # a disk that fills mid-save does; SIGXFSZ would otherwise kill the test.
+  var RLIMIT_FSIZE {.importc: "RLIMIT_FSIZE", header: "<sys/resource.h>".}: cint
+  discard signal(SIGXFSZ, SIG_IGN)
+
+  proc cut_at(bytes: int; body: proc()) =
+    var old: RLimit
+    discard getrlimit(RLIMIT_FSIZE, old)
+    var lim = old
+    lim.rlim_cur = bytes
+    discard setrlimit(RLIMIT_FSIZE, lim)
+    try: body()
+    finally: discard setrlimit(RLIMIT_FSIZE, old)
+
+  block:  # GBA battery: the previous .sav survives, whole
+    let g = boot_gba(make_gba_rom("gba_cut"))
+    let st = g.storage
+    for b in st.memory.mitems: b = 0x11
+    st.dirty = true
+    st.write_save()
+    let before = readFile(st.save_path)
+    for cut in [1000, before.len - 16]:
+      for b in st.memory.mitems: b = 0x22
+      st.dirty = true
+      cut_at(cut, proc() = st.write_save())
+      check(readFile(st.save_path) == before,
+            &"GBA: a write cut at {cut} bytes leaves the previous .sav whole")
+      check(st.dirty and st.save_error.len > 0,
+            &"GBA: cut at {cut}: reported, RAM kept dirty for the retry")
+    st.write_save()
+    check(readFile(st.save_path) == repeat(char(0x22), before.len),
+          "GBA: the retry after the cut writes the new RAM")
+
+  block:  # GB battery: the same through mbc_save
+    let g = boot_gb(make_gb_rom("gb_cut"))
+    let cart = g.cartridge
+    for b in cart.ram.mitems: b = 0x33
+    cart.ram_dirty = true
+    cart.mbc_save()
+    let before = readFile(cart.sav_path)
+    for cut in [1000, before.len - 16]:
+      for b in cart.ram.mitems: b = 0x44
+      cart.ram_dirty = true
+      cut_at(cut, proc() = cart.mbc_save())
+      check(readFile(cart.sav_path) == before,
+            &"GB: a write cut at {cut} bytes leaves the previous .sav whole")
+
+  block:  # a Quick Save that fails part way: the slot keeps the last good state
+    let g = boot_gba(make_gba_rom("gba_state"))
+    let path = dir / "states" / "slot.state"
+    check(g.save_state(path, thumbnail = true), "a state saves")
+    let before = readFile(path)
+    g.storage.memory[0] = 0x77   # the next state differs
+    for cut in [1000, before.len - 16]:
+      last_state_error = ""
+      var ok = true
+      cut_at(cut, proc() = ok = g.save_state(path, thumbnail = true))
+      check(not ok and last_state_error.len > 0,
+            &"state cut at {cut}: save_state says it failed, and why")
+      check(readFile(path) == before,
+            &"state cut at {cut}: the previous state file is untouched")
+    check(g.load_state(path), "the surviving state still loads")
+
+  check(no_temp_left(), "no temp file is left behind by a failed write")
 
 removeDir(dir)
 

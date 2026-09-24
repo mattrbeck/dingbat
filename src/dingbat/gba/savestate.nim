@@ -995,7 +995,8 @@ proc save_state*(gba: GBA; path: string; thumbnail = false): bool =
                        GBA_STATE_ROM_TAG, gba.gba_state_payload())
     true
   except CatchableError:
-    echo "Save state failed: ", getCurrentExceptionMsg()
+    last_state_error = getCurrentExceptionMsg()   # the frontend's hint
+    echo "Save state failed: ", last_state_error
     false
 
 proc load_state*(gba: GBA; path: string): bool =

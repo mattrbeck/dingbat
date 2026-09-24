@@ -24,7 +24,11 @@ proc write_file_atomic*(path: string; data: string; sync = true) =
   ## last copy is acceptable but a torn one is not.
   let tmp = path & ".tmp" & $getCurrentProcessId()
   var f: File
-  if not open(f, tmp, fmWrite):
+  # Unbuffered: the whole buffer goes out in writeBuffer, which reports a
+  # short write. Buffered, the tail would leave in flushFile, which ignores
+  # fflush's error, and a disk that fills there renamed a short file over
+  # the good one (tests/desktop_persist_test.nim cuts writes 16 bytes short).
+  if not open(f, tmp, fmWrite, bufSize = 0):
     raise newException(IOError, "cannot open file for writing: " & tmp)
   try:
     try:

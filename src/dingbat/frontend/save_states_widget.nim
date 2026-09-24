@@ -17,7 +17,7 @@ type
     window*:   bool
     selected*: int
     have_rom*: bool
-    notice*:   string  ## last load failure (the core's reason), shown under the grid
+    notice*:   string  ## last Save/Load failure, shown under the grid
     slots*:    array[NUM_SLOTS, StateSlot]
     on_open*:   proc() {.closure.}         ## (re)populate slots + textures
     on_save*:   proc(slot: int) {.closure.}
@@ -189,6 +189,7 @@ proc render*(w: SaveStatesWidget) =
       igSetCursorPosX(max(igGetCursorPosX(),
                           igGetWindowWidth() - (BTN_W * 2 + GAP + PAD)))
       if igButton("Save", ImVec2(x: BTN_W, y: 0)):
+        w.notice = ""
         if w.on_save != nil: w.on_save(w.selected)
         if w.on_open != nil: w.on_open()
       igSameLine(0, GAP)

@@ -2,7 +2,7 @@
 # All types are declared here; implementation files are `include`d.
 
 import std/[bitops, os, strutils, times]
-import ../common/[input, scheduler, emu, resampler, serialize, timestretch, cheats]
+import ../common/[input, scheduler, emu, resampler, serialize, timestretch, cheats, atomicfile]
 import ../common/lut_macros
 when defined(test_harness):
   import ../common/test_output
@@ -3241,7 +3241,8 @@ proc mbc_save*(cart: Mbc) =
         data.add(tama5_footer(Tama5(cart)))
       elif cart of Mbc6:
         data.add(mbc6_footer(Mbc6(cart)))
-      writeFile(cart.sav_path, data)
+      # Never a half-written file: see gba storage.nim write_save.
+      write_file_atomic(cart.sav_path, data)
       cart.ram_dirty = false
       cart.save_error = ""
     except IOError, OSError:

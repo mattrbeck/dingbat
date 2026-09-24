@@ -1,6 +1,7 @@
 ## What the desktop app decides about a game's files that needs no SDL, ImGui
 ## or GL, so tests/desktop_persist_test.nim can run it headless: when to tell
-## the player their battery save is not being written. dingbat.nim draws.
+## the player their battery save is not being written, and what to say when a
+## save state could not be written. dingbat.nim draws.
 
 type
   BatteryNotice* = object
@@ -31,3 +32,12 @@ proc dismiss*(n: var BatteryNotice) =
   ## The player's OK: not shown again until a write succeeds and then fails.
   n.text = ""
   n.hint = ""
+
+const
+  # A state write goes to a temp file and is renamed over the slot only once
+  # it is whole, so a failed one (full disk, unwritable folder) changed nothing.
+  QUICK_SAVE_FAILED* =
+    "Quick Save didn't work, so nothing was changed: the Quick slot still " &
+    "holds what it held before."
+  SLOT_SAVE_FAILED* =
+    "Saving didn't work; that slot still holds what it held before."

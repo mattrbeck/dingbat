@@ -9,6 +9,7 @@ import imguin/glad/gl
 import stb_image/read as stbi
 import stb_image/write as stbiw
 import dingbat/common/config
+import dingbat/common/atomicfile
 import dingbat/common/lcd_response
 import dingbat/common/input
 import dingbat/common/rewind
@@ -800,7 +801,7 @@ proc save_cheats() =
     if eng.cheats.len == 0:
       if fileExists(path): removeFile(path)
     else:
-      writeFile(path, eng.serialize())
+      write_file_atomic(path, eng.serialize())
   except CatchableError as e:
     echo "cheats: could not save ", path, ": ", e.msg
 
@@ -937,7 +938,10 @@ proc process_pending_state() =
   ## act on slot 0.
   if app.pending_save:
     app.pending_save = false
-    discard save_state_slot(0)
+    if not save_state_slot(0):
+      # The write goes to a temp file first, so the slot is as it was.
+      app.state_notice = QUICK_SAVE_FAILED
+      app.state_notice_hint = last_state_error
     # An open Save States window is showing slot 1 stale now — refresh it
     app.save_states.mark_stale()
   if app.pending_load:
@@ -2225,7 +2229,9 @@ proc main() =
   # widget just calls back. Save/Load run synchronously here — render_imgui is
   # always reached at a frame boundary (right after process_pending_state).
   app.save_states.on_open = proc() = refresh_state_slots()
-  app.save_states.on_save = proc(slot: int) = discard save_state_slot(slot)
+  app.save_states.on_save = proc(slot: int) =
+    if not save_state_slot(slot):
+      app.save_states.notice = SLOT_SAVE_FAILED
   app.save_states.on_load = proc(slot: int) =
     if not load_state_slot(slot):
       # Same sentence-per-cause table as Quick Load; raw wording goes to the log.

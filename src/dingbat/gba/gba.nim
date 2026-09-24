@@ -3,7 +3,7 @@
 
 import std/[options, times, os, strutils, math, sets, tables]
 from std/bitops import countLeadingZeroBits, countTrailingZeroBits
-import ../common/[util, input, scheduler, emu, resampler, serialize, timestretch, cheats]
+import ../common/[util, input, scheduler, emu, resampler, serialize, timestretch, cheats, atomicfile]
 when defined(test_harness):
   import ../common/test_output
 import ../common/lut_macros

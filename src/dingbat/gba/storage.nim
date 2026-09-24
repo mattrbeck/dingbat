@@ -92,7 +92,11 @@ proc write_save*(st: Storage) =
   # detach it so a run leaves no .sav). dirty stays set so a rebind flushes.
   if st.dirty and st.save_path.len > 0:
     try:
-      writeFile(st.save_path, st.battery_file_bytes())
+      # Temp file, fsync, rename: a crash, full disk or power cut mid-write
+      # leaves the previous save, never a short one that loads as valid.
+      # Synced although it can run every frame: only frames that changed the
+      # RAM write, and 128 KB costs ~0.3 ms on an SSD.
+      write_file_atomic(st.save_path, st.battery_file_bytes())
       st.dirty = false
       st.save_error = ""
     except IOError, OSError:

@@ -1043,7 +1043,8 @@ proc save_state*(gb: GB; path: string; thumbnail = false): bool =
                        uint32(gb.cartridge.rom.len), gb.gb_state_payload())
     true
   except CatchableError:
-    echo "Save state failed: ", getCurrentExceptionMsg()
+    last_state_error = getCurrentExceptionMsg()   # the frontend's hint
+    echo "Save state failed: ", last_state_error
     false
 
 proc load_state*(gb: GB; path: string): bool =
