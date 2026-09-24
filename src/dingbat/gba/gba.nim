@@ -414,6 +414,18 @@ type
     # Famicom Mini Metroid, whose table walk off the end of a ROM table stops
     # only on an H-blank DMA's word.
     dma_open_bus*:       uint32
+    # DMA_READS_CPU_BUS: the CPU's last synced data load (address, size in
+    # bytes, and r15 while it ran); 0 = none. A burst's first unmapped read
+    # sees that load's value if the CPU has fetched nothing since. Written
+    # only on the syncing access path; not serialized.
+    load_addr*:          uint32
+    load_size*:          int
+    load_pc*:            uint32
+    load_start*:         CycleCount
+    dma_bus_req*:        CycleCount  # when the burst in progress asked for the bus
+    ldrsh_odd*:          bool
+    dma_bus_fresh*:      bool  # no transfer of this burst has driven the bus yet
+    iwram_latch*:        uint32  # the last word a DMA moved to or from IWRAM
     dma_request_at*:     CycleCount
     dma_has_run*:        bool
     # -d:obuslatch: the same bus modelled as a real 32-bit register instead
@@ -1137,6 +1149,11 @@ const DMA_STALLS_IRQ_SYNC* {.booldefine.} = true
   ## ran under the burst (Interrupts.unstall). Without either, alyosha
   ## Interactions rows go red: no tail, Internal_Cycle_DMA_IRQ/_ST/_ST_p3/_br;
   ## no unstall, Internal_Cycle_DMA_IRQ_7/_ldr_IWRAM/_MUL_IRQ.
+const DMA_READS_CPU_BUS* {.booldefine.} = true
+  ## A DMA read of unmapped memory returns what is on the data bus: the last
+  ## word the burst itself moved, or, for its first transfer, the CPU's last
+  ## bus transaction -- its data load if that came after its last opcode
+  ## fetch, else the fetched opcode (Bus.dma_bus_word).
 const IMM_IDLE_GRANT* {.booldefine.} = true
   ## An immediate DMA requests the bus two cycles after its enable write. If
   ## the CPU is running internal cycles then, the burst starts there and

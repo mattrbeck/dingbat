@@ -214,6 +214,11 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
     else: dma.gba.bus.sched.cycles
   dma.gba.bus.dma_deferred = false
   dma.gba.bus.dma_has_run = true
+  when DMA_READS_CPU_BUS:
+    # A load that began after the request came second: the burst went first
+    dma.gba.bus.dma_bus_req =
+      if start_timing == 0 and IMM_IDLE_GRANT: min(dma.gba.bus.dma_request_at, dma.gba.bus.imm_at)
+      else: dma.gba.bus.dma_request_at
   # The prefetch hand-off phase (bus.rom_access_cycles) was pinned with two
   # lead cycles; keep its origin where those rows put it.
   dma.gba.bus.dma_grant_now =
@@ -227,6 +232,9 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
     dma.gba.bus.add_cycles(DMA_LEAD_CYCLES)
 
   dma.gba.bus.dma_active = true
+  when DMA_READS_CPU_BUS:
+    # A nested burst finds the outer one's word on the bus
+    if not nested: dma.gba.bus.dma_bus_fresh = true
   dma.gba.bus.rom_next_addr = 1  # start both burst trackers cold
   dma.gba.bus.rom_next_addr2 = 1
 
@@ -255,6 +263,9 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
       if dma.pending != 0:
         dma.run_pending()
 
+  when DMA_READS_CPU_BUS:
+    let touches_iwram = bits_range(dma.src[channel], 24, 27) == 3 or
+                        bits_range(dma.dst[channel], 24, 27) == 3
   for _ in 0 ..< len:
     when not DMA_PREEMPT_AFTER_READ: preempt_point()
     # TODO: deny-list; misses unmapped gaps such as 0x00004000-0x01FFFFFF.
@@ -283,6 +294,9 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
         dma.gba.bus.write_half(dma.dst[channel], uint16(dma.latch[channel]))
     # The moved word stays on the data bus for open-bus reads (Bus.dma_open_bus).
     dma.gba.bus.dma_open_bus = dma.latch[channel]
+    when DMA_READS_CPU_BUS:
+      dma.gba.bus.dma_bus_fresh = false
+      if touches_iwram: dma.gba.bus.iwram_latch = dma.latch[channel]
     dma.src[channel] = uint32(int(dma.src[channel]) + delta_source)
     dma.dst[channel] = uint32(int(dma.dst[channel]) + delta_dest)
 

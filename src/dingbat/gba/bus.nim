@@ -1114,21 +1114,39 @@ proc `[]`*(bus: Bus; address: uint32): uint8 =
   bus.rom_cool()
   let cost = bus.access_cycles(address, is32 = false, fetch = false)
   bus.cycles += cost
-  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active: bus.catch_up_access(cost)
+  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active:
+    when DMA_READS_CPU_BUS:
+      bus.load_addr = address
+      bus.load_size = (if bus.ldrsh_odd: 2 else: 1)
+      bus.load_pc = bus.gba.cpu.r[15]
+      bus.load_start = bus.bus_now() - CycleCount(cost)
+    bus.catch_up_access(cost)
   bus.read_byte_internal(address)
 
 proc read_half*(bus: Bus; address: uint32): uint16 =
   bus.rom_cool()
   let cost = bus.access_cycles(address, is32 = false, fetch = false)
   bus.cycles += cost
-  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active: bus.catch_up_access(cost)
+  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active:
+    when DMA_READS_CPU_BUS:
+      bus.load_addr = address
+      bus.load_size = 2
+      bus.load_pc = bus.gba.cpu.r[15]
+      bus.load_start = bus.bus_now() - CycleCount(cost)
+    bus.catch_up_access(cost)
   bus.read_half_internal(address)
 
 proc read_word*(bus: Bus; address: uint32): uint32 =
   bus.rom_cool()
   let cost = bus.access_cycles(address, is32 = true, fetch = false)
   bus.cycles += cost
-  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active: bus.catch_up_access(cost)
+  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active:
+    when DMA_READS_CPU_BUS:
+      bus.load_addr = address
+      bus.load_size = 4
+      bus.load_pc = bus.gba.cpu.r[15]
+      bus.load_start = bus.bus_now() - CycleCount(cost)
+    bus.catch_up_access(cost)
   bus.read_word_internal(address)
 
 proc fetch_half_miss(bus: Bus; address: uint32): uint16 =
@@ -1189,7 +1207,13 @@ proc read_half_rotate*(bus: Bus; address: uint32): uint32 =
 
 proc read_half_signed*(bus: Bus; address: uint32): uint32 =
   if bit(address, 0):
-    uint32(cast[int32](cast[int8](bus[address])))
+    # A misaligned LDRSH loads the byte, but over a halfword access
+    # (DMA_READS_CPU_BUS: alyosha Bus/LDRSH_misaligned; dmaobus.s on an AGB
+    # SP puts the whole halfword on the bus)
+    bus.ldrsh_odd = true
+    let b = bus[address]
+    bus.ldrsh_odd = false
+    uint32(cast[int32](cast[int8](b)))
   else:
     uint32(cast[int32](cast[int16](bus.read_half(address))))
 
@@ -1197,6 +1221,9 @@ proc read_word_rotate*(bus: Bus; address: uint32): uint32 =
   let word = bus.read_word(address)
   let bits = (address and 3) * 8
   (word shr bits) or (word shl (32 - bits))
+
+proc fetch_bus_word(bus: Bus; pc: uint32): uint32
+proc dma_bus_word(bus: Bus): uint32
 
 proc read_open_bus_word*(bus: Bus; address: uint32): uint32 =
   ## The whole 32-bit latch, decided ONCE for an access. The verdict turns on
@@ -1246,6 +1273,8 @@ proc read_open_bus_word*(bus: Bus; address: uint32): uint32 =
   # began and no later than this read began; bursts due by now are run
   # first so a request inside this instruction is known.
   if bus.dma_active:
+    when DMA_READS_CPU_BUS:
+      if bus.dma_bus_fresh: return bus.dma_bus_word()
     return bus.dma_open_bus
   # The instruction's opcode fetch is its first charged access, and catch-up
   # moves exactly the cycles it ticks from `cycles` into `synced`, so the
@@ -1283,7 +1312,11 @@ proc read_open_bus_word*(bus: Bus; address: uint32): uint32 =
   if bus.dma_has_run and bus.dma_request_at > fetch_start and
      bus.dma_request_at <= read_start:
     return bus.dma_open_bus
-  let pc = bus.gba.cpu.r[15]
+  bus.fetch_bus_word(bus.gba.cpu.r[15])
+
+proc fetch_bus_word(bus: Bus; pc: uint32): uint32 =
+  ## What the CPU's opcode fetches left on the data bus, `pc` being r15 as
+  ## the instruction that made the last of them sees it.
   # PC in MMIO/unmapped memory would recurse back into this proc
   let pc_region = bits_range(pc, 24, 27)
   if pc_region == 0x1 or pc_region == 0x4 or pc_region > 0xD or
@@ -1342,6 +1375,58 @@ proc read_open_bus_word*(bus: Bus; address: uint32): uint32 =
     else:
       bus.read_word_internal(pc and not 3'u32)
   word
+
+proc dma_bus_word(bus: Bus): uint32 =
+  ## The data bus as a burst's first transfer finds it (DMA_READS_CPU_BUS):
+  ## the CPU's data load if that is the last thing the CPU did on the bus
+  ## (it has fetched nothing since), else its fetched opcode. dmaobus.s on
+  ## an AGB SP, Thumb in IWRAM, the burst granted right after the load:
+  ## EWRAM ldrh / misaligned ldrsh FF24FF24, ldrb FFFFFFFF, ldr 11223344;
+  ## no load 46C046C0. A 16-bit memory puts a halfword on both halves and a
+  ## byte on all four lanes; OAM drives the aligned word (alyosha
+  ## Bus/DMA_OAM_Bus). A load from unused memory drives nothing (alyosha
+  ## Bus/Unused_location_update_bus), and only memories whose reads have no
+  ## side effects are read back here.
+  if bus.load_size != 0 and bus.load_pc == bus.gba.cpu.r[15] and
+     bus.load_start < bus.dma_bus_req:
+    let a = bus.load_addr
+    case bits_range(a, 24, 27)
+    of 0x2, 0x5, 0x6, 0x8, 0x9, 0xA, 0xB, 0xC:
+      if bits_range(a, 28, 31) == 0 and
+         not (bits_range(a, 24, 27) >= 0x8 and address_in_gpio(a)):
+        case bus.load_size
+        of 4: return bus.read_word_internal(a)
+        of 2:
+          let h = uint32(bus.read_half_internal(a))
+          return h or (h shl 16)
+        else: return uint32(bus.read_byte_internal(a)) * 0x01010101'u32
+    of 0x7:
+      if bits_range(a, 28, 31) == 0:
+        return bus.read_word_internal(a and not 3'u32)
+    of 0x3:
+      if bits_range(a, 28, 31) == 0:
+        let w = bus.read_word_internal(a and not 3'u32)
+        if bus.load_size == 4: return w
+        # IWRAM's bus is 32 bits wide and keeps what it last carried: a
+        # narrower load drives only its own lanes (alyosha Bus/DMA_IWRAM_Bus,
+        # ROM code: the other half is the word the previous DMA wrote there).
+        # With the code itself in IWRAM that is its fetched opcodes; else the
+        # last word a DMA moved through IWRAM, as CPU accesses are not
+        # tracked.
+        let other = if bits_range(bus.gba.cpu.r[15], 24, 27) == 3:
+                      bus.fetch_bus_word(bus.gba.cpu.r[15])
+                    else: bus.iwram_latch
+        let mask = if bus.load_size == 2: 0xFFFF'u32 shl ((a and 2) * 8)
+                   else: 0xFF'u32 shl ((a and 3) * 8)
+        return (w and mask) or (other and not mask)
+    else: discard
+  # Granted from the scheduler tick that closes an instruction (nothing of
+  # the instruction synced yet, cpu.tick), r15 has already moved on to the
+  # next one, whose fetch has not happened.
+  var pc = bus.gba.cpu.r[15]
+  if bus.synced == 0 and not bus.gba.cpu.halted:
+    pc -= (if bus.gba.cpu.cpsr.thumb: 2'u32 else: 4'u32)
+  bus.fetch_bus_word(pc)
 
 proc read_open_bus_value*(bus: Bus; address: uint32): uint8 =
   uint8(bus.read_open_bus_word(address) shr ((address and 3) * 8))
