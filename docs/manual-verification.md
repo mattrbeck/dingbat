@@ -143,25 +143,17 @@ real clock skew between them.
 
 ## State-machine fix round (formal/FINDINGS.md)
 
-Every trace is replayed in `web/tests/`; these need a real account, a real
-core or two real devices.
+Driven through the real UI in headless Chromium: the local scenarios, and
+Drive on two browser profiles against a fake Google that follows the Drive v3
+and GIS documentation (see FINDINGS.md). What only a real Google account can
+settle, because the fake assumes it:
 
-- [ ] **Switch games, second has no save**: play A until it saves in game,
-      go home, tap B (never played here). B starts with no save, and A's
-      save is still A's on the other device after a sync.
-- [ ] **Rename and rename back** while a second device syncs between the
-      two: files stop moving on Drive, no "renamed on another device" toasts
-      on either device, and a save made afterwards reaches the other device.
-- [ ] **Delete while its save uploads**: delete a game seconds after saving
-      in it. It stays gone on both devices after two syncs each.
-- [ ] **Account switch mid-sync**: sign out during the first big upload,
-      sign in as another account. The second account's library shows none of
-      the first's games or deletions.
-- [ ] **Update in one tab** while another tab plays: the playing tab keeps
-      its game and offers "Reload"; the reload lands on the new build.
-- [ ] **Mixed builds**: one device on the previous build. Renames and
-      deletes from each still reach the other; a second `library` file, if
-      the old device makes one, is merged away by the new device.
+- [ ] **Renewal popup**: after the token's hour, the first tap renews silently
+      (`prompt: ""` with `login_hint`) and a queued save goes up.
+- [ ] **Account switch**: a browser signed in to two Google accounts. Sign out
+      of one, sign in as the other: the second account's Drive gets only this
+      device's own games, and switching back brings the first account's
+      Drive-only tiles back.
 
 ## Drive sync: renames
 

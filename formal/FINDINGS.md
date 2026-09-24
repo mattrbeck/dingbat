@@ -17,6 +17,22 @@ every interleaving of the real `step`.
 | 12, 14 | 6d3e1a42b, 5e3b4f8ec | run-pause, link-pause |
 | 13, 16 | 5fdef0fc7 | update-flow, sw-install |
 | 15 | 18ee44cc5 | game-switch |
+| UI pass: Resume vs in-flight load, Tab on home | 263ab540d | game-switch, run-pause |
+| UI pass: Sync re-uploading a deleted game, orphans left on Drive | 780ce08b9 | library-races |
+| UI pass: account switch publishing Drive-only games | c9ed53745 | drive-session |
+
+**Driven through the real UI.** Headless Chromium ran every serious and
+medium item's scenario through the visible UI, with the real wasm core. Drive
+ran on two browser profiles against a fake Google that answers like the
+Drive v3 and GIS documentation. The pass found three bugs and fixed them
+(the last three rows). The results:
+- The local scenarios (game switch, resume, close, import, reset, update in
+  another tab, home-screen keys, clip export, modals, double taps,
+  thumbnails, rename, delete, state slots, rewind) all pass.
+- Drive scenarios D0-D8 (baseline, rename back, delete during upload,
+  account switch mid-sync, signed-out quiet, token expiry, paging and a
+  duplicate library, mixed builds with origin/main, game switch) all pass.
+- On origin/main, the same scripts fail where this file says they should.
 
 **Low items fixed along the way:**
 - Resume and saves: Resume over an unflushed save, and the quota retry.
@@ -69,6 +85,15 @@ every interleaving of the real `step`.
   on Drive.
 - A set-up rollback session is not ended when 2P link mode starts; this is
   probably unreachable.
+- **A design question, not low: a deleted game loaded again can get its
+  deleted save back.** Found in the UI pass; origin/main does the same.
+  - Steps: device 1 deletes a game, then loads it again from its file.
+    Device 2 has not pulled the delete. Its next sync uploads its copy of
+    the old save, and device 1 pulls it.
+  - Why: `mergeLibrary` drops a tombstone once a newer entry exists, and it
+    cannot tell a fresh load of the game from a play on another device.
+  - Closing it means deciding whether a save older than the delete may
+    follow a re-import.
 
 The rest of this file is the original audit, as found at dd7ba741f.
 
