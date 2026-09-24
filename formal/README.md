@@ -57,6 +57,10 @@ then `lake env lean AxiomAudit.lean`, which fails if any theorem rests on
   from `init` reaches a bad state, checked by `decide`/`rfl`, and named
   `bug_<what>`. The report says whether that trace is reachable in a browser
   and how to reproduce it.
+- **Regressions**: once the JS is fixed, the model's `step` follows the fixed
+  code (the header names the commit), the invariant the bug broke is proved
+  for every reachable state where the model allows, and each `bug_*` trace
+  becomes a `regress_*` theorem showing the same trace now ends safely.
 
 No `sorry`, `axiom`, `native_decide` or `admit` anywhere: `lake build` must be
 clean for the proofs to mean anything.

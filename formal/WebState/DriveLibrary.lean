@@ -2,43 +2,58 @@
 # The cross-device library on Google Drive (web/index.js)
 
 Model of the Drive "library" file and the code that reads, merges and writes
-it, at commit dd7ba741f:
+it, as fixed on top of 7ca348ebf (the Drive sync fix series; line numbers are
+web/index.js after the whole series). Against dd7ba741f the same model refuted
+the properties below with the `bug_*` traces listed in formal/FINDINGS.md
+(#6, #7); each is now a `regress_*` theorem.
 
-* `mergeLibrary` (web/index.js 2508-2564): the pure join of two libraries,
+* `mergeLibrary` (web/index.js 2619-2688): the pure join of two libraries,
   modelled line for line (`mergeLibrary` below), including JS `Map` insertion
-  order and the stable sorts, because tie-breaking depends on both.
-* the protocol around it: `flushSyncInner` (2706-2825), `pullSyncInner`
-  (2920-3070), `deleteGameEverywhere` (3149-3163), `renameGame` (3252-3367),
-  `applyRemoteRename` (2832-2903), `bumpRecentIndex` (4424-4445) via import
-  (`addRecentRom` 4460) and play (`touchRecent` 4479), and `downloadGame`
-  (3074-3107). Every `await` that matters is an event boundary.
+  order and the stable sorts, because tie-breaking depends on both. Fixed: a
+  marker's move claims its new name (`claim`: the entry at `to` carries
+  `imp >= r.ts`) and spends a processed marker *from* that name (`done`).
+* the protocol around it: `flushSyncInner` (2837-3002), `pullSyncInner`
+  (3103-3270), `deleteGameEverywhere` (3358-3380), `renameGame` (3469-3598),
+  `applyRemoteRename` (3010-3086), `bumpRecentIndex` (4702-4722) via import
+  (`addRecentRom` 4737) and play (`touchRecent` 4756), and `downloadGame`
+  (3282-3316). Every `await` that matters is an event boundary. Fixed: both
+  commits re-merge the library they adopt with the device's library as it is
+  *now*, in the same segment, under `updateRecent` (4556), the one lock every
+  "recent" read-modify-write goes through; `renameGame` stamps the renamed
+  entry `imp: ts` (3573).
 
 Layer 1 (pure merge) proves what *is* a semilattice (the recents join, the
 tombstone join, the rename-marker join, and the whole merge on libraries
 without rename markers, on timestamps), what survives a merge (tombstones,
 markers), where outputs come from (no tombstone or marker is invented), and
-refutes CRDT-ness of the whole merge with concrete libraries.
+that the whole merge, markers included, is idempotent (Layer 1d).
 
 Layer 2 (protocol) models two devices and Drive with no compare-and-swap
-(`driveUploadFile` 2143 sends no If-Match / revision precondition), proves the
-Drive lost-update race only delays a tombstone, and refutes the stronger
-properties the code means to keep with concrete event traces (`bug_*`).
-Layer 2c re-runs the failing traces against the suggested JS fixes.
+(`driveUploadFile` 2209 sends no If-Match / revision precondition), proves the
+Drive lost-update race only delays a tombstone, that no step drops a
+tombstone a device holds except for a newer play or the person's own rename
+or delete, and replays every finding's trace against the fixed code.
 
 Results in one place:
 * semilattice, no markers: `merge_comm_noren`, `merge_idem_noren`,
   `merge_assoc_ts_noren`, `merge_absorb_ts_noren`; marker join:
   `joinN_assoc`, `joinN_idem`, `joinN_comm_of_noTie`, `buildRen_sem`.
-* merge, markers included: `merge_tomb_sub`, `merge_ren_sub`,
-  `merge_tomb_survives`; refuted: `bug_merge_not_idempotent`,
-  `bug_merge_tie_not_comm`, `bug_merge_imp_not_assoc`.
+* merge, markers included: `merge_idem` (idempotent on every input, the order
+  of every list included), via `merge_settled_out` + `merge_settled`;
+  `merge_tomb_sub`, `merge_ren_sub`, `merge_tomb_survives`. Still refuted
+  (not fixed here): `bug_merge_tie_not_comm`, `bug_merge_imp_not_assoc`.
+  The pre-fix merge, kept as `mergeLibraryV1`: `bug_mergeV1_not_idempotent`
+  (the finding) and `bug_mergeV1_chain_not_idempotent` (found by this model:
+  the `renameGame` claim alone was not enough).
 * protocol: `step_tombs`, `tomb_origin`, `tomb_lost_forever`,
-  `step_other_dev`, `resync_reasserts_tomb`, `rename_moves_everything`,
-  `race_delays_tomb`; refuted: `bug_delete_during_flush_resurrects` (+
-  `_permanent`), `bug_delete_during_pull_resurrects`,
-  `bug_import_during_pull_orphans`, `bug_rename_during_pull_orphans`,
-  `bug_rename_undo_oscillates`, `bug_rename_undo_loses_save`,
-  `bug_rename_undo_freezes_recency`, `bug_rename_into_retired_name`.
+  `step_other_dev`, `step_keeps_tomb`, `resync_reasserts_tomb`, `run_flush`,
+  `rename_moves_everything`, `race_delays_tomb`.
+* the findings' traces, fixed: `regress_delete_during_flush`,
+  `regress_delete_during_pull`, `regress_import_during_pull`,
+  `regress_rename_during_pull`, `regress_rename_undo_settles` (a sync cycle is
+  then a fixed point of the whole state), `regress_rename_undo_keeps_save`,
+  `regress_rename_undo_recency`, `regress_rename_into_retired_name`,
+  `regress_revived_chain`, `regress_merge_rename_into_vacated`.
 
 ## Abstractions (and why they do not affect the stated properties)
 
@@ -54,22 +69,26 @@ Results in one place:
   deciding against Drive as it is at that moment; the delete-stamp outrank
   (`delTs`) is not modelled (it only drops deletes, never adds tombstones).
 * A pull's rename pass (one `dbMoveKeys` transaction per marker) is one
-  event; the per-game save/picture download pass and the ROM byte budget are
+  event; the per-game save/picture download pass (and its check that a key
+  queued for deletion is not written back, 3202) and the ROM byte budget are
   not modelled. `renPending` (a link session blocking a migration) is never
   set, as no link session is modelled.
-* `deleteGameEverywhere`, `renameGame`, import and play are atomic events.
-  The JS interleaves their awaits too; making them atomic only removes
-  interleavings, so every `bug_*` below is still reachable, and the
-  invariants proved are about merge/queue code that does not depend on it.
+* `deleteGameEverywhere`, `renameGame`, import and play are atomic events:
+  each writes "recent" (and the sync state) inside one `updateRecent`
+  section, which the commits also take, so no commit interleaves with them.
 * The flush trigger guard (`pendingCount() || tomb || ren`) is dropped: any
   save a player makes queues an upload, so a flush can always be triggered.
-* The "removed on another device" modal (`confirmTombstones` 3559) is the
+* The "removed on another device" modal (`confirmTombstones` 3790) is the
   `restore` flag of `pullTombs`; the traces take "Continue". The wrappers
-  `deleteGameAction` (1920) and `downloadGameAction` (1880) add only an
-  unload and toasts. "Remove from this device" (3114) raises no tombstone
+  `deleteGameAction` (1919) and `downloadGameAction` (1879) add only an
+  unload and toasts. "Remove from this device" (3322) raises no tombstone
   and does not touch the library, so it is not an event here.
-* The Drive listing is taken as complete. (Read, not modelled:
-  `driveListAll` 2100 asks for one page of 1000 and ignores `nextPageToken`.)
+* The Drive listing is taken as complete and as holding one "library" file:
+  `driveListAll` (2155) follows `nextPageToken`, and `driveListMap` /
+  `readDriveLibrary` / `writeDriveLibrary` (2566-2617) merge every copy two
+  devices created, write the oldest and delete the ones they merged.
+* Sessions (sign out / in, another account) are `DriveSession`'s: here one
+  account throughout.
 -/
 
 namespace WebState.DriveLibrary
@@ -96,7 +115,7 @@ structure Ren where
   ts : Nat
 deriving DecidableEq, Repr
 
-/-- The Drive file "library": `{ recents, tomb, ren }` (web/index.js 2278). -/
+/-- The Drive file "library": `{ recents, tomb, ren }` (web/index.js 2348). -/
 structure Lib where
   recents : List Entry
   tomb : List Tomb
@@ -191,14 +210,14 @@ end JMap
 
 /-! ## Stable sorts (`Array.prototype.sort` is stable since ES2019) -/
 
-/-- Insert for the descending sort `(x, y) => y.ts - x.ts` (web/index.js 2560). -/
+/-- Insert for the descending sort `(x, y) => y.ts - x.ts` (web/index.js 2684). -/
 def insDesc (x : Entry) : List Entry → List Entry
   | [] => [x]
   | y :: ys => if y.ts ≤ x.ts then x :: y :: ys else y :: insDesc x ys
 
 def sortDesc (l : List Entry) : List Entry := l.foldr insDesc []
 
-/-- Insert for the ascending sort `(x, y) => x.ts - y.ts` (web/index.js 2531). -/
+/-- Insert for the ascending sort `(x, y) => x.ts - y.ts` (web/index.js 2643). -/
 def insAsc (x : Ren) : List Ren → List Ren
   | [] => [x]
   | y :: ys => if x.ts ≤ y.ts then x :: y :: ys else y :: insAsc x ys
@@ -259,9 +278,9 @@ theorem foldl_sortDesc {β : Type} (f : β → Entry → β)
     simp only [List.foldl]
     exact ih _
 
-/-! ## `mergeLibrary` (web/index.js 2511-2564), line for line -/
+/-! ## `mergeLibrary` (web/index.js 2619-2688), line for line -/
 
-/-- One pass of the recents loop (2511-2521): the newest play wins the entry;
+/-- One pass of the recents loop (2621-2631): the newest play wins the entry;
 the newest import claim from either side is kept alongside it. -/
 def recStep (m : JMap Entry) (e : Entry) : JMap Entry :=
   let prev := m.get e.name
@@ -275,7 +294,7 @@ def recStep (m : JMap Entry) (e : Entry) : JMap Entry :=
     | none => m1
   else m1
 
-/-- The marker loop (2523-2529): newest marker per old name wins; a tie keeps
+/-- The marker loop (2633-2640): newest marker per old name wins; a tie keeps
 the one seen first. Self-renames are skipped. -/
 def renStep (m : JMap Ren) (r : Ren) : JMap Ren :=
   if r.src = r.dst then m else
@@ -283,26 +302,37 @@ def renStep (m : JMap Ren) (r : Ren) : JMap Ren :=
   | none => m.set r.src r
   | some p => if r.ts > p.ts then m.set r.src r else m
 
-/-- One marker applied (2531-2547), oldest first. `reimported` spends it. -/
-def applyRen (st : JMap Entry × JMap Ren) (r : Ren) : JMap Entry × JMap Ren :=
+/-- The claim a rename makes on its new name: whatever holds `n` carries an
+import mark no older than `ts` (`if (r.ts > (at.imp || 0)) at.imp = r.ts`). -/
+def claim (m : JMap Entry) (n ts : Nat) : JMap Entry :=
+  match m.get n with
+  | some x => if ts > x.imp then m.set n { x with imp := ts } else m
+  | none => m
+
+/-- One marker applied, oldest first. The state is the entries, the surviving
+markers, and the old names whose markers have been processed (`done`).
+`reimported` spends the marker. A move claims the new name (`claim`) and
+spends a processed marker *from* the new name: that rename's game left the
+name before this one arrived. -/
+def applyRen (st : JMap Entry × JMap Ren × List Nat) (r : Ren) : JMap Entry × JMap Ren × List Nat :=
   match st.1.get r.src with
-  | none => st
+  | none => (st.1, st.2.1, st.2.2 ++ [r.src])
   | some e =>
-    if e.imp > r.ts then (st.1, st.2.del r.src)
+    if e.imp > r.ts then (st.1, st.2.1.del r.src, st.2.2 ++ [r.src])
     else
       let bn := st.1.del r.src
       let bn' := match bn.get r.dst with
         | none => bn.set r.dst ⟨r.dst, e.ts, e.imp⟩
         | some t => if t.ts < e.ts then bn.set r.dst ⟨r.dst, e.ts, e.imp⟩ else bn
-      (bn', st.2)
+      (claim bn' r.dst r.ts, if r.dst ∈ st.2.2 then st.2.1.del r.dst else st.2.1, st.2.2 ++ [r.src])
 
-/-- The tombstone loop (2549-2553): newest per name, a tie keeps the first. -/
+/-- The tombstone loop (2672-2677): newest per name, a tie keeps the first. -/
 def tombStep (m : JMap Tomb) (t : Tomb) : JMap Tomb :=
   match m.get t.name with
   | none => m.set t.name t
   | some p => if t.ts > p.ts then m.set t.name t else m
 
-/-- The prune loop (2554-2558): a newer entry supersedes the tombstone,
+/-- The prune loop (2678-2682): a newer entry supersedes the tombstone,
 otherwise the tombstone removes the entry. -/
 def pruneStep (st : JMap Entry × JMap Tomb) (n : Nat) : JMap Entry × JMap Tomb :=
   match st.2.get n with
@@ -319,7 +349,8 @@ def buildTomb (l : List Tomb) : JMap Tomb := l.foldl tombStep JMap.empty
 /-- The recents after the markers have been applied, and the surviving markers. -/
 def afterRen (a b : Lib) : JMap Entry × JMap Ren :=
   let rm := buildRen (a.ren ++ b.ren)
-  (sortAsc rm.values).foldl applyRen (buildRecents (a.recents ++ b.recents), rm)
+  let res := (sortAsc rm.values).foldl applyRen (buildRecents (a.recents ++ b.recents), rm, [])
+  (res.1, res.2.1)
 
 def afterPrune (a b : Lib) : JMap Entry × JMap Tomb :=
   let tm := buildTomb (a.tomb ++ b.tomb)
@@ -1089,7 +1120,18 @@ theorem prov_buildRen (l : List Ren) : Prov (buildRen l) l := by
           · exact h _ _ hx
   exact this l JMap.empty l (by intro n x h; simp at h) (fun x hx => hx)
 
-theorem applyRen_ok (st : JMap Entry × JMap Ren) (r : Ren) (h : st.1.WF ∧ NameOK st.1) :
+theorem claim_ok {m : JMap Entry} (h : m.WF ∧ NameOK m) (n ts : Nat) :
+    (claim m n ts).WF ∧ NameOK (claim m n ts) := by
+  obtain ⟨hw, hn⟩ := h
+  unfold claim
+  split
+  · rename_i x hx
+    split
+    · exact ⟨JMap.wf_set hw _ _, keyOK_set hn _ _ (hn _ x hx)⟩
+    · exact ⟨hw, hn⟩
+  · exact ⟨hw, hn⟩
+
+theorem applyRen_ok (st : JMap Entry × JMap Ren × List Nat) (r : Ren) (h : st.1.WF ∧ NameOK st.1) :
     (applyRen st r).1.WF ∧ NameOK (applyRen st r).1 := by
   obtain ⟨hw, hn⟩ := h
   unfold applyRen
@@ -1098,24 +1140,29 @@ theorem applyRen_ok (st : JMap Entry × JMap Ren) (r : Ren) (h : st.1.WF ∧ Nam
   · split
     · exact ⟨hw, hn⟩
     · simp only
+      apply claim_ok
       split
       · exact ⟨JMap.wf_set (JMap.wf_del hw _) _ _, keyOK_set (keyOK_del hn _) _ _ rfl⟩
       · split
         · exact ⟨JMap.wf_set (JMap.wf_del hw _) _ _, keyOK_set (keyOK_del hn _) _ _ rfl⟩
         · exact ⟨JMap.wf_del hw _, keyOK_del hn _⟩
 
-theorem applyRen_prov (st : JMap Entry × JMap Ren) (r : Ren) (S : List Ren) (h : Prov st.2 S) :
-    Prov (applyRen st r).2 S := by
+theorem applyRen_prov (st : JMap Entry × JMap Ren × List Nat) (r : Ren) (S : List Ren)
+    (h : Prov st.2.1 S) : Prov (applyRen st r).2.1 S := by
   unfold applyRen
   split
   · exact h
   · split
     · exact prov_del h _
-    · exact h
+    · simp only
+      split
+      · exact prov_del h _
+      · exact h
 
-theorem foldl_applyRen (L : List Ren) : ∀ (st : JMap Entry × JMap Ren) (S : List Ren),
-    (st.1.WF ∧ NameOK st.1) → Prov st.2 S →
-    ((L.foldl applyRen st).1.WF ∧ NameOK (L.foldl applyRen st).1) ∧ Prov (L.foldl applyRen st).2 S := by
+theorem foldl_applyRen (L : List Ren) : ∀ (st : JMap Entry × JMap Ren × List Nat) (S : List Ren),
+    (st.1.WF ∧ NameOK st.1) → Prov st.2.1 S →
+    ((L.foldl applyRen st).1.WF ∧ NameOK (L.foldl applyRen st).1) ∧
+      Prov (L.foldl applyRen st).2.1 S := by
   induction L with
   | nil => intro st S h1 h2; exact ⟨h1, h2⟩
   | cons r rs ih =>
@@ -1221,6 +1268,10 @@ theorem merge_tomb_survives (a b : Lib) (t : Tomb) (ht : t ∈ a.tomb ++ b.tomb)
 
 /-! ## Layer 1c: the whole merge (markers included) is not a CRDT join
 
+It is not commutative on a same-millisecond tie, nor associative on `imp`
+(neither fixed here). It is idempotent since the fix (Layer 1d), which the
+old merge was not (`bug_mergeV1_not_idempotent`, the finding).
+
 Game names: 1, 2, 3 are the names "B", "A", "C" of the scenario in each
 statement; timestamps are milliseconds. -/
 
@@ -1230,17 +1281,20 @@ def names (l : List Entry) : List Nat := l.map (·.name)
 game "A" (2) was imported at t=5. -/
 def libB2C : Lib := ⟨[⟨3, 10, 0⟩, ⟨2, 5, 0⟩], [], [⟨1, 3, 10⟩]⟩
 /-- The same device after renaming "A" (2) to the freed name "B" (1) at t=20
-(`renameGame` 3280-3284 writes the new entry with a fresh ts and no `imp`,
-and drops its own copy of the old 1→3 marker, 3336). -/
+(`renameGame` before the fix wrote the new entry with a fresh ts and no
+`imp`, and dropped its own copy of the old 1→3 marker). -/
 def libA2B : Lib := ⟨[⟨1, 20, 0⟩, ⟨3, 10, 0⟩], [], [⟨2, 1, 20⟩]⟩
 
-/-- **Not idempotent.** Merging the merged library with itself changes it:
-the first merge keeps "B" (the renamed A); merging that result again applies
-the stale 1→3 marker to it and folds it into "C". A pull followed by a flush
-is exactly such a re-merge, so the renamed game vanishes from the library. -/
-theorem bug_merge_not_idempotent :
-    let m := mergeLibrary libB2C libA2B
-    names m.recents = [3, 1] ∧ names (mergeLibrary m m).recents = [3] := by decide
+/-- **Fixed: renaming into a vacated name keeps both games.** With the claim
+`renameGame` now stamps (`imp` = the rename's time), the stale 1→3 marker is
+spent by the renamed game and both B (the renamed A) and C survive, and the
+result is a fixed point (`merge_idem`). The old merge on the old library
+folded B into C on the second merge (`bug_mergeV1_not_idempotent`). -/
+def libA2Bfix : Lib := ⟨[⟨1, 20, 20⟩, ⟨3, 10, 0⟩], [], [⟨2, 1, 20⟩]⟩
+
+theorem regress_merge_rename_into_vacated :
+    let m := mergeLibrary libB2C libA2Bfix
+    names m.recents = [1, 3] ∧ mergeLibrary m m = m := by decide
 
 /-- **Not commutative on a timestamp tie**: two devices renaming the same
 game to different names in the same millisecond end on whichever marker the
@@ -1287,7 +1341,7 @@ theorem merge_rename_beats_delete_of_old_name :
     names m.recents = [2] ∧ m.tomb = [⟨1, 11⟩] := by decide
 
 /-- Delete then re-add: an import after the tombstone revives the game and
-retires the tombstone; one in the same millisecond does not (`>` at 2556). -/
+retires the tombstone; one in the same millisecond does not (`>` at 2680). -/
 theorem merge_readd_after_delete :
     (mergeLibrary ⟨[], [⟨1, 5⟩], []⟩ ⟨[⟨1, 7, 7⟩], [], []⟩) = ⟨[⟨1, 7, 7⟩], [], []⟩ ∧
     (mergeLibrary ⟨[], [⟨1, 5⟩], []⟩ ⟨[⟨1, 5, 5⟩], [], []⟩) = ⟨[], [⟨1, 5⟩], []⟩ := by decide
@@ -1297,6 +1351,661 @@ migrated (it is not an argument about the name); a fresh import spends it. -/
 theorem merge_play_vs_import_after_rename :
     names (mergeLibrary ⟨[⟨2, 10, 0⟩], [], [⟨1, 2, 10⟩]⟩ ⟨[⟨1, 12, 0⟩], [], []⟩).recents = [2] ∧
     (mergeLibrary ⟨[⟨2, 10, 0⟩], [], [⟨1, 2, 10⟩]⟩ ⟨[⟨1, 12, 12⟩], [], []⟩).ren = [] := by decide
+
+/-! ## Layer 1d: the merge is idempotent, markers included
+
+The fixed merge (a move claims its new name and spends a processed marker
+from that name) is idempotent on everything: `merge_idem`. So a pull after a
+flush (a re-merge of what was just written) changes nothing, which is what
+`bug_mergeV1_not_idempotent` showed the old merge could not promise. The proof
+shows that a merge's output is *settled* (no surviving marker has an entry at
+its old name, no name has both an entry and a tombstone, names are unique and
+the recents are sorted), and that merging a settled library with itself
+rebuilds it verbatim, JS `Map` insertion order included. -/
+
+namespace JMap
+variable {V : Type}
+
+theorem ext' {m m' : JMap V} (hk : m.keys = m'.keys) (hg : ∀ n, m.get n = m'.get n) : m = m' := by
+  cases m; cases m'; simp only at hk hg; subst hk; rw [funext hg]
+
+theorem set_same (m : JMap V) (k : Nat) (v : V) (hv : m.get k = some v) : m.set k v = m := by
+  apply ext'
+  · simp [set, hv]
+  · intro n; by_cases hn : n = k <;> simp [hn, hv]
+
+theorem set_set (m : JMap V) (k : Nat) (v w : V) : (m.set k v).set k w = m.set k w := by
+  apply ext'
+  · simp [set]
+  · intro n; by_cases hn : n = k <;> simp [hn]
+
+theorem del_absent (m : JMap V) (h : m.WF) (k : Nat) (hk : m.get k = none) : m.del k = m := by
+  apply ext'
+  · simp only [del]
+    apply List.filter_eq_self.2
+    intro n hn
+    have : n ≠ k := by
+      intro e; subst e
+      have := (h.2 n).2 hn
+      simp [hk] at this
+    simpa using this
+  · intro n; by_cases hn : n = k <;> simp [hn, hk]
+
+/-- The values of a well-formed map whose keys are its values' keys, in order. -/
+theorem values_map_key {m : JMap V} (key : V → Nat) (h : m.WF) (hk : ∀ n x, m.get n = some x → key x = n) :
+    m.values.map key = m.keys := by
+  unfold values
+  have : ∀ L : List Nat, (∀ n ∈ L, (m.get n).isSome = true) → (L.filterMap m.get).map key = L := by
+    intro L
+    induction L with
+    | nil => intro _; rfl
+    | cons n ns ih =>
+      intro hL
+      obtain ⟨x, hx⟩ := Option.isSome_iff_exists.1 (hL n (by simp))
+      simp only [List.filterMap_cons, hx, List.map_cons, hk n x hx]
+      rw [ih (fun y hy => hL y (by simp [hy]))]
+  exact this _ (fun n hn => (h.2 n).2 hn)
+
+end JMap
+
+/-! ### Building a map from a list with distinct keys -/
+
+section build
+variable {V : Type} (key : V → Nat) (f : JMap V → V → JMap V) (P : V → Prop)
+
+/-- A step that inserts a value under a fresh key, and leaves a map alone that
+already holds that very value. `recStep`, `tombStep` and `renStep` (on a
+non-self rename) are all such steps. -/
+def FreshStep : Prop :=
+  (∀ m x, P x → m.get (key x) = none → f m x = m.set (key x) x) ∧
+  (∀ m x, P x → m.WF → m.get (key x) = some x → f m x = m)
+
+theorem build_fresh (hf : FreshStep key f P) :
+    ∀ (l : List V) (m : JMap V), m.WF → (∀ x ∈ l, P x) → (l.map key).Nodup →
+      (∀ x ∈ l, m.get (key x) = none) →
+      (l.foldl f m).WF ∧ (l.foldl f m).keys = m.keys ++ l.map key ∧
+      (∀ x ∈ l, (l.foldl f m).get (key x) = some x) ∧
+      (∀ n, n ∉ l.map key → (l.foldl f m).get n = m.get n) := by
+  intro l
+  induction l with
+  | nil => intro m hw _ _ _; simp [hw]
+  | cons x xs ih =>
+    intro m hw hP hnd hfr
+    have hx := hfr x (by simp)
+    rw [List.map_cons, List.nodup_cons] at hnd
+    have hnd' := hnd.2
+    have hxk : key x ∉ xs.map key := hnd.1
+    simp only [List.foldl, hf.1 m x (hP x (by simp)) hx]
+    have hw' := JMap.wf_set hw (key x) x
+    obtain ⟨i1, i2, i3, i4⟩ := ih (m.set (key x) x) hw' (fun y hy => hP y (by simp [hy])) hnd'
+      (by
+        intro y hy
+        have : key y ≠ key x := fun e => hxk (e ▸ List.mem_map_of_mem hy)
+        simp [this, hfr y (by simp [hy])])
+    refine ⟨i1, ?_, ?_, ?_⟩
+    · rw [i2]; simp [JMap.set, hx]
+    · intro y hy
+      simp only [List.mem_cons] at hy
+      rcases hy with rfl | hy
+      · rw [i4 _ hxk]; simp
+      · exact i3 y hy
+    · intro n hn
+      simp only [List.map_cons, List.mem_cons, not_or] at hn
+      rw [i4 n hn.2]; simp [hn.1]
+
+theorem build_again (hf : FreshStep key f P) :
+    ∀ (l : List V) (m : JMap V), m.WF → (∀ x ∈ l, P x) → (∀ x ∈ l, m.get (key x) = some x) →
+      l.foldl f m = m := by
+  intro l
+  induction l with
+  | nil => intro _ _ _ _; rfl
+  | cons x xs ih =>
+    intro m hw hP hs
+    simp only [List.foldl, hf.2 m x (hP x (by simp)) hw (hs x (by simp))]
+    exact ih m hw (fun y hy => hP y (by simp [hy])) (fun y hy => hs y (by simp [hy]))
+
+theorem values_build (hf : FreshStep key f P) (l : List V) (hP : ∀ x ∈ l, P x) (hnd : (l.map key).Nodup) :
+    (l.foldl f JMap.empty).values = l := by
+  obtain ⟨_, hk, hg, _⟩ := build_fresh key f P hf l JMap.empty JMap.wf_empty hP hnd (by simp)
+  rw [JMap.values, hk]
+  simp only [JMap.empty, List.nil_append, List.filterMap_map]
+  have : ∀ L : List V, (∀ x ∈ L, (l.foldl f JMap.empty).get (key x) = some x) →
+      L.filterMap ((l.foldl f JMap.empty).get ∘ key) = L := by
+    intro L
+    induction L with
+    | nil => intro _; rfl
+    | cons y ys ih =>
+      intro h
+      simp only [List.filterMap_cons, Function.comp, h y (by simp)]
+      rw [ih (fun z hz => h z (by simp [hz]))]
+  exact this l hg
+
+/-- Building from a list twice over is building from it once. -/
+theorem build_twice (hf : FreshStep key f P) (l : List V) (hP : ∀ x ∈ l, P x) (hnd : (l.map key).Nodup) :
+    (l ++ l).foldl f JMap.empty = l.foldl f JMap.empty := by
+  obtain ⟨hw, _, hg, _⟩ := build_fresh key f P hf l JMap.empty JMap.wf_empty hP hnd (by simp)
+  rw [List.foldl_append]
+  exact build_again key f P hf l _ hw hP hg
+
+end build
+
+theorem recStep_fresh : FreshStep Entry.name recStep (fun _ => True) := by
+  refine ⟨?_, ?_⟩
+  · intro m e _ h
+    obtain ⟨n, ts, i⟩ := e
+    unfold recStep
+    by_cases hi : i = 0
+    · subst hi; simp_all
+    · simp_all [JMap.set_set]
+  · intro m e _ hw h
+    have hs : m.set e.name e = m := JMap.set_same m e.name _ h
+    obtain ⟨n, ts, i⟩ := e
+    unfold recStep
+    simp_all
+
+theorem tombStep_fresh : FreshStep Tomb.name tombStep (fun _ => True) := by
+  refine ⟨?_, ?_⟩
+  · intro m t _ h; unfold tombStep; simp [h]
+  · intro m t _ _ h; unfold tombStep; simp [h]
+
+theorem renStep_fresh : FreshStep Ren.src renStep (fun r => r.src ≠ r.dst) := by
+  refine ⟨?_, ?_⟩
+  · intro m r hr h; unfold renStep; simp [hr, h]
+  · intro m r hr _ h; unfold renStep; simp [hr, h]
+
+/-! ### The sorts are permutations; the descending sort's output is sorted -/
+
+theorem perm_insDesc (x : Entry) : ∀ l : List Entry, (insDesc x l).Perm (x :: l) := by
+  intro l
+  induction l with
+  | nil => exact List.Perm.refl _
+  | cons y ys ih =>
+    simp only [insDesc]
+    split
+    · exact List.Perm.refl _
+    · exact (List.Perm.cons y ih).trans (List.Perm.swap x y ys)
+
+theorem perm_sortDesc : ∀ l : List Entry, (sortDesc l).Perm l := by
+  intro l
+  induction l with
+  | nil => exact List.Perm.refl _
+  | cons y ys ih =>
+    show (insDesc y (sortDesc ys)).Perm (y :: ys)
+    exact (perm_insDesc y _).trans (List.Perm.cons y ih)
+
+theorem perm_insAsc (x : Ren) : ∀ l : List Ren, (insAsc x l).Perm (x :: l) := by
+  intro l
+  induction l with
+  | nil => exact List.Perm.refl _
+  | cons y ys ih =>
+    simp only [insAsc]
+    split
+    · exact List.Perm.refl _
+    · exact (List.Perm.cons y ih).trans (List.Perm.swap x y ys)
+
+theorem perm_sortAsc : ∀ l : List Ren, (sortAsc l).Perm l := by
+  intro l
+  induction l with
+  | nil => exact List.Perm.refl _
+  | cons y ys ih =>
+    show (insAsc y (sortAsc ys)).Perm (y :: ys)
+    exact (perm_insAsc y _).trans (List.Perm.cons y ih)
+
+def DescTs (l : List Entry) : Prop := l.Pairwise (fun x y => y.ts ≤ x.ts)
+
+theorem desc_insDesc (x : Entry) : ∀ l : List Entry, DescTs l → DescTs (insDesc x l) := by
+  intro l
+  induction l with
+  | nil => intro _; simp [insDesc, DescTs]
+  | cons y ys ih =>
+    intro h
+    simp only [DescTs, List.pairwise_cons] at h
+    simp only [insDesc]
+    split
+    · rename_i hyx
+      simp only [DescTs, List.pairwise_cons]
+      refine ⟨?_, h.1, h.2⟩
+      intro z hz
+      simp only [List.mem_cons] at hz
+      rcases hz with rfl | hz
+      · exact hyx
+      · exact Nat.le_trans (h.1 z hz) hyx
+    · rename_i hyx
+      simp only [DescTs, List.pairwise_cons]
+      refine ⟨?_, ih h.2⟩
+      intro z hz
+      rcases mem_insDesc.1 hz with rfl | hz
+      · omega
+      · exact h.1 z hz
+
+theorem desc_sortDesc : ∀ l : List Entry, DescTs (sortDesc l) := by
+  intro l
+  induction l with
+  | nil => simp [sortDesc, DescTs]
+  | cons y ys ih => exact desc_insDesc y _ ih
+
+theorem sortDesc_of_desc : ∀ l : List Entry, DescTs l → sortDesc l = l := by
+  intro l
+  induction l with
+  | nil => intro _; rfl
+  | cons y ys ih =>
+    intro h
+    have h' := h
+    simp only [DescTs, List.pairwise_cons] at h'
+    show insDesc y (sortDesc ys) = y :: ys
+    rw [ih h'.2]
+    cases ys with
+    | nil => rfl
+    | cons z zs => simp [insDesc, h'.1 z (by simp)]
+
+/-! ### Merging a settled library with itself rebuilds it -/
+
+/-- What a merge's output looks like. -/
+structure Settled (m : Lib) : Prop where
+  rnodup : (m.recents.map Entry.name).Nodup
+  rsorted : DescTs m.recents
+  tnodup : (m.tomb.map Tomb.name).Nodup
+  mnodup : (m.ren.map Ren.src).Nodup
+  noself : ∀ r ∈ m.ren, r.src ≠ r.dst
+  /-- no surviving marker has an entry at its old name -/
+  renFree : ∀ r ∈ m.ren, ∀ x ∈ m.recents, x.name ≠ r.src
+  /-- no name has both an entry and a tombstone -/
+  tombFree : ∀ t ∈ m.tomb, ∀ x ∈ m.recents, x.name ≠ t.name
+
+theorem foldl_applyRen_absent (E : JMap Entry) (rm : JMap Ren) :
+    ∀ (L : List Ren) (d : List Nat), (∀ r ∈ L, E.get r.src = none) →
+      L.foldl applyRen (E, rm, d) = (E, rm, d ++ L.map Ren.src) := by
+  intro L
+  induction L with
+  | nil => intro d _; simp
+  | cons r rs ih =>
+    intro d h
+    simp only [List.foldl]
+    have : applyRen (E, rm, d) r = (E, rm, d ++ [r.src]) := by
+      simp [applyRen, h r (by simp)]
+    rw [this, ih _ (fun r' hr' => h r' (by simp [hr']))]
+    simp
+
+theorem foldl_pruneStep_absent (E : JMap Entry) (hE : E.WF) (tm : JMap Tomb) :
+    ∀ (K : List Nat), (∀ n ∈ K, E.get n = none) → K.foldl pruneStep (E, tm) = (E, tm) := by
+  intro K
+  induction K with
+  | nil => intro _; rfl
+  | cons n ns ih =>
+    intro h
+    simp only [List.foldl]
+    have : pruneStep (E, tm) n = (E, tm) := by
+      unfold pruneStep
+      simp only
+      split
+      · rfl
+      · simp only [h n (by simp), JMap.del_absent E hE n (h n (by simp))]
+    rw [this]
+    exact ih (fun m hm => h m (by simp [hm]))
+
+theorem merge_settled (m : Lib) (h : Settled m) : mergeLibrary m m = m := by
+  have fR := build_fresh Entry.name recStep _ recStep_fresh m.recents JMap.empty JMap.wf_empty
+    (fun _ _ => trivial) h.rnodup (by simp)
+  have fT := build_fresh Tomb.name tombStep _ tombStep_fresh m.tomb JMap.empty JMap.wf_empty
+    (fun _ _ => trivial) h.tnodup (by simp)
+  have fM := build_fresh Ren.src renStep _ renStep_fresh m.ren JMap.empty JMap.wf_empty
+    h.noself h.mnodup (by simp)
+  have hE2 : buildRecents (m.recents ++ m.recents) = buildRecents m.recents :=
+    build_twice Entry.name recStep _ recStep_fresh m.recents (fun _ _ => trivial) h.rnodup
+  have hT2 : buildTomb (m.tomb ++ m.tomb) = buildTomb m.tomb :=
+    build_twice Tomb.name tombStep _ tombStep_fresh m.tomb (fun _ _ => trivial) h.tnodup
+  have hM2 : buildRen (m.ren ++ m.ren) = buildRen m.ren :=
+    build_twice Ren.src renStep _ renStep_fresh m.ren h.noself h.mnodup
+  have vR : (buildRecents m.recents).values = m.recents :=
+    values_build Entry.name recStep _ recStep_fresh m.recents (fun _ _ => trivial) h.rnodup
+  have vT : (buildTomb m.tomb).values = m.tomb :=
+    values_build Tomb.name tombStep _ tombStep_fresh m.tomb (fun _ _ => trivial) h.tnodup
+  have vM : (buildRen m.ren).values = m.ren :=
+    values_build Ren.src renStep _ renStep_fresh m.ren h.noself h.mnodup
+  -- a name no entry holds is absent from the rebuilt recents
+  have absent : ∀ n, (∀ x ∈ m.recents, x.name ≠ n) → (buildRecents m.recents).get n = none := by
+    intro n hn
+    have : n ∉ m.recents.map Entry.name := by
+      simp only [List.mem_map, not_exists, not_and]
+      intro x hx e; exact hn x hx e
+    rw [show buildRecents m.recents = m.recents.foldl recStep JMap.empty from rfl, fR.2.2.2 n this]
+    rfl
+  have hRen : afterRen m m = (buildRecents m.recents, buildRen m.ren) := by
+    unfold afterRen
+    simp only [hE2, hM2, vM]
+    rw [foldl_applyRen_absent]
+    intro r hr
+    exact absent r.src (h.renFree r (mem_sortAsc.1 hr))
+  have hPrune : afterPrune m m = (buildRecents m.recents, buildTomb m.tomb) := by
+    unfold afterPrune
+    rw [hRen, hT2]
+    simp only
+    apply foldl_pruneStep_absent _ fR.1
+    intro n hn
+    rw [show buildTomb m.tomb = m.tomb.foldl tombStep JMap.empty from rfl, fT.2.1] at hn
+    simp only [JMap.empty, List.nil_append, List.mem_map] at hn
+    obtain ⟨t, ht, rfl⟩ := hn
+    exact absent t.name (h.tombFree t ht)
+  unfold mergeLibrary
+  rw [hPrune, hRen]
+  simp only [vR, vT, vM, sortDesc_of_desc _ h.rsorted]
+
+/-! ### Every merge output is settled -/
+
+theorem JMap.get_none_of_not_mem {V : Type} {m : JMap V} (h : m.WF) {n : Nat} (hk : n ∉ m.keys) :
+    m.get n = none := by
+  cases hg : m.get n with
+  | none => rfl
+  | some v => exact absurd ((h.2 n).1 (by simp [hg])) hk
+
+def NoSelf (m : JMap Ren) : Prop := ∀ n r, m.get n = some r → r.src ≠ r.dst
+
+theorem noSelf_del {m : JMap Ren} (h : NoSelf m) (k : Nat) : NoSelf (m.del k) := by
+  intro n r hr
+  by_cases hn : n = k <;> simp [hn] at hr
+  exact h n r hr
+
+theorem renStep_ok {m : JMap Ren} (h1 : m.WF) (h2 : KeyOK Ren.src m) (h3 : NoSelf m) (r : Ren) :
+    (renStep m r).WF ∧ KeyOK Ren.src (renStep m r) ∧ NoSelf (renStep m r) := by
+  unfold renStep
+  split
+  · exact ⟨h1, h2, h3⟩
+  · rename_i hs
+    have hset : NoSelf (m.set r.src r) := by
+      intro n x hx
+      by_cases hn : n = r.src <;> simp [hn] at hx
+      · subst hx; exact hs
+      · exact h3 n x hx
+    split
+    · exact ⟨JMap.wf_set h1 _ _, keyOK_set h2 _ _ rfl, hset⟩
+    · split
+      · exact ⟨JMap.wf_set h1 _ _, keyOK_set h2 _ _ rfl, hset⟩
+      · exact ⟨h1, h2, h3⟩
+
+theorem buildRen_ok (l : List Ren) :
+    (buildRen l).WF ∧ KeyOK Ren.src (buildRen l) ∧ NoSelf (buildRen l) := by
+  have : ∀ (l : List Ren) (m : JMap Ren), m.WF → KeyOK Ren.src m → NoSelf m →
+      (l.foldl renStep m).WF ∧ KeyOK Ren.src (l.foldl renStep m) ∧ NoSelf (l.foldl renStep m) := by
+    intro l
+    induction l with
+    | nil => intro m a b c; exact ⟨a, b, c⟩
+    | cons r rs ih =>
+      intro m a b c
+      obtain ⟨a', b', c'⟩ := renStep_ok a b c r
+      exact ih _ a' b' c'
+  exact this l JMap.empty JMap.wf_empty (keyOK_empty _) (by intro n r h; simp at h)
+
+theorem claim_get_ne (m : JMap Entry) (k ts n : Nat) (hn : n ≠ k) : (claim m k ts).get n = m.get n := by
+  unfold claim
+  split
+  · split
+    · simp [hn]
+    · rfl
+  · rfl
+
+/-- The marker loop's invariant: a processed marker still standing has no
+entry at its old name. `done` is the processed prefix of `L`'s old names. -/
+structure RenInv (L : List Ren) (rm : JMap Ren) (st : JMap Entry × JMap Ren × List Nat)
+    (rest : List Ren) : Prop where
+  free : ∀ n ∈ st.2.2, (st.2.1.get n).isSome = true → st.1.get n = none
+  done : st.2.2 ++ rest.map Ren.src = L.map Ren.src
+  sub : ∀ n, (st.2.1.get n).isSome = true → (rm.get n).isSome = true
+  wf : st.2.1.WF
+  key : KeyOK Ren.src st.2.1
+  noself : NoSelf st.2.1
+
+theorem renInv_step (L : List Ren) (rm : JMap Ren) (hnd : (L.map Ren.src).Nodup)
+    (hself : ∀ r ∈ L, r.src ≠ r.dst) (st : JMap Entry × JMap Ren × List Nat) (r : Ren) (rest : List Ren)
+    (hI : RenInv L rm st (r :: rest)) (hr : r ∈ L) : RenInv L rm (applyRen st r) rest := by
+  obtain ⟨E, Mk, D⟩ := st
+  obtain ⟨i1, i2, i3, iw, ik, isf⟩ := hI
+  simp only at i1 i2 i3 iw ik isf
+  have hnd' : (D ++ r.src :: rest.map Ren.src).Nodup := by
+    rw [← List.map_cons, i2]; exact hnd
+  have hrD : r.src ∉ D := by
+    intro h; rw [List.nodup_append] at hnd'
+    exact hnd'.2.2 r.src h r.src (by simp) rfl
+  have hdone : D ++ [r.src] ++ rest.map Ren.src = L.map Ren.src := by
+    rw [← i2]; simp
+  have hsd : r.src ≠ r.dst := hself r hr
+  unfold applyRen
+  simp only
+  split
+  · rename_i he
+    refine ⟨?_, hdone, i3, iw, ik, isf⟩
+    intro n hn hs
+    simp only [List.mem_append, List.mem_singleton] at hn
+    rcases hn with hn | rfl
+    · exact i1 n hn hs
+    · exact he
+  · rename_i e he
+    split
+    · refine ⟨?_, hdone, ?_, JMap.wf_del iw _, keyOK_del ik _, noSelf_del isf _⟩
+      · intro n hn hs
+        simp only [List.mem_append, List.mem_singleton] at hn
+        by_cases hns : n = r.src
+        · simp [hns] at hs
+        · rcases hn with hn | hn
+          · simp [hns] at hs; exact i1 n hn hs
+          · exact absurd hn hns
+      · intro n hs; by_cases hns : n = r.src <;> simp [hns] at hs; exact i3 n hs
+    · have getE : ∀ n, n ≠ r.dst → (claim (match (E.del r.src).get r.dst with
+            | none => (E.del r.src).set r.dst ⟨r.dst, e.ts, e.imp⟩
+            | some t => if t.ts < e.ts then (E.del r.src).set r.dst ⟨r.dst, e.ts, e.imp⟩
+                        else E.del r.src) r.dst r.ts).get n =
+            if n = r.src then none else E.get n := by
+        intro n hn
+        rw [claim_get_ne _ _ _ _ hn]
+        split
+        · simp [hn]
+        · split <;> simp [hn]
+      have hMk : ∀ n, ((if r.dst ∈ D then Mk.del r.dst else Mk).get n).isSome = true →
+          (Mk.get n).isSome = true ∧ (n = r.dst → r.dst ∉ D) := by
+        intro n hs
+        split at hs
+        · by_cases hnd : n = r.dst <;> simp [hnd] at hs
+          exact ⟨hs, fun e => absurd e hnd⟩
+        · rename_i hdD
+          exact ⟨hs, fun _ => hdD⟩
+      refine ⟨?_, hdone, ?_, ?_, ?_, ?_⟩
+      · intro n hn hs
+        obtain ⟨hs', hnd⟩ := hMk n hs
+        simp only [List.mem_append, List.mem_singleton] at hn
+        by_cases hnt : n = r.dst
+        · rcases hn with hn | hn
+          · exact absurd (hnt ▸ hn) (hnd hnt)
+          · exact absurd (hn ▸ hnt) hsd
+        · rw [getE n hnt]
+          split
+          · rfl
+          · rename_i hns
+            rcases hn with hn | hn
+            · exact i1 n hn hs'
+            · exact absurd hn hns
+      · intro n hs; exact i3 n (hMk n hs).1
+      · dsimp only; split
+        · exact JMap.wf_del iw _
+        · exact iw
+      · dsimp only; split
+        · exact keyOK_del ik _
+        · exact ik
+      · dsimp only; split
+        · exact noSelf_del isf _
+        · exact isf
+
+theorem renInv_fold (L : List Ren) (rm : JMap Ren) (hnd : (L.map Ren.src).Nodup)
+    (hself : ∀ r ∈ L, r.src ≠ r.dst) :
+    ∀ (rest : List Ren) (st : JMap Entry × JMap Ren × List Nat), (∀ r ∈ rest, r ∈ L) →
+      RenInv L rm st rest → RenInv L rm (rest.foldl applyRen st) [] := by
+  intro rest
+  induction rest with
+  | nil => intro st _ h; exact h
+  | cons r rs ih =>
+    intro st hsub h
+    exact ih _ (fun x hx => hsub x (by simp [hx]))
+      (renInv_step L rm hnd hself st r rs h (hsub r (by simp)))
+
+/-- **After the marker loop, no surviving marker has an entry at its old name**
+(each was moved away, and a later move into that name spent the marker). -/
+theorem afterRen_free (a b : Lib) :
+    (∀ n, ((afterRen a b).2.get n).isSome = true → (afterRen a b).1.get n = none) ∧
+    (afterRen a b).2.WF ∧ KeyOK Ren.src (afterRen a b).2 ∧ NoSelf (afterRen a b).2 := by
+  obtain ⟨rw', rk, rs⟩ := buildRen_ok (a.ren ++ b.ren)
+  have hperm : ((sortAsc (buildRen (a.ren ++ b.ren)).values).map Ren.src).Perm
+      (buildRen (a.ren ++ b.ren)).keys := by
+    rw [← JMap.values_map_key Ren.src rw' rk]; exact (perm_sortAsc _).map _
+  have hnd := hperm.nodup_iff.2 rw'.1
+  have hself : ∀ r ∈ sortAsc (buildRen (a.ren ++ b.ren)).values, r.src ≠ r.dst := by
+    intro r hr
+    obtain ⟨n, hn⟩ := JMap.mem_values (mem_sortAsc.1 hr)
+    exact rs n r hn
+  have h0 : RenInv (sortAsc (buildRen (a.ren ++ b.ren)).values) (buildRen (a.ren ++ b.ren))
+      (buildRecents (a.recents ++ b.recents), buildRen (a.ren ++ b.ren), [])
+      (sortAsc (buildRen (a.ren ++ b.ren)).values) :=
+    ⟨by simp, by simp, fun _ h => h, rw', rk, rs⟩
+  have hF := renInv_fold _ _ hnd hself _ _ (fun _ h => h) h0
+  obtain ⟨f1, f2, f3, f4, f5, f6⟩ := hF
+  simp only [List.map_nil, List.append_nil] at f2
+  refine ⟨?_, f4, f5, f6⟩
+  intro n hs
+  apply f1 n _ hs
+  rw [f2]
+  exact hperm.mem_iff.2 ((rw'.2 n).1 (f3 n hs))
+
+theorem afterPrune_facts (a b : Lib) :
+    (afterPrune a b).1.WF ∧ NameOK (afterPrune a b).1 ∧ (afterPrune a b).2.WF ∧
+      KeyOK Tomb.name (afterPrune a b).2 ∧
+    (∀ n x, (afterPrune a b).1.get n = some x → (afterRen a b).1.get n = some x) ∧
+    (∀ n, (afterPrune a b).1.get n = none ∨ (afterPrune a b).2.get n = none) := by
+  have hR := (afterRen_ok a b).1
+  have hT := foldl_tombStep_ok (a.tomb ++ b.tomb) JMap.empty JMap.wf_empty (keyOK_empty _)
+  have hP := foldl_pruneStep_ok (buildTomb (a.tomb ++ b.tomb)).keys
+    ((afterRen a b).1, buildTomb (a.tomb ++ b.tomb)) ⟨hR.1, hR.2, hT.1, hT.2⟩
+  refine ⟨hP.1, hP.2.1, hP.2.2.1, hP.2.2.2, ?_, ?_⟩
+  · intro n x hx
+    have hG := foldl_pruneStep_get n (buildTomb (a.tomb ++ b.tomb)).keys hT.1.1
+      ((afterRen a b).1, buildTomb (a.tomb ++ b.tomb))
+    simp only [afterPrune] at hx
+    split at hG
+    · rw [Prod.mk.injEq] at hG
+      rw [hG.1] at hx
+      revert hx
+      unfold pruneAt
+      split
+      · exact id
+      · split
+        · split
+          · rename_i e _ _; intro hx; simp at hx; subst hx; assumption
+          · intro hx; simp at hx
+        · intro hx; simp at hx
+    · rw [Prod.mk.injEq] at hG
+      rw [hG.1] at hx; exact hx
+  · intro n
+    have hG := foldl_pruneStep_get n (buildTomb (a.tomb ++ b.tomb)).keys hT.1.1
+      ((afterRen a b).1, buildTomb (a.tomb ++ b.tomb))
+    simp only [afterPrune]
+    split at hG
+    · rw [Prod.mk.injEq] at hG
+      rw [hG.1, hG.2]
+      unfold pruneAt
+      split
+      · right; rfl
+      · split
+        · split
+          · right; rfl
+          · left; rfl
+        · left; rfl
+    · rename_i hk
+      rw [Prod.mk.injEq] at hG
+      right; rw [hG.2]
+      exact JMap.get_none_of_not_mem hT.1 hk
+
+/-- **Every merge output is settled.** -/
+theorem merge_settled_out (a b : Lib) : Settled (mergeLibrary a b) := by
+  obtain ⟨free, mw, mk, ms⟩ := afterRen_free a b
+  obtain ⟨p1w, p1k, p2w, p2k, pdel, pdis⟩ := afterPrune_facts a b
+  have nameOf : ∀ x ∈ (afterPrune a b).1.values, (afterPrune a b).1.get x.name = some x := by
+    intro x hx
+    obtain ⟨n, hn⟩ := JMap.mem_values hx
+    rw [← p1k n x hn] at hn; exact hn
+  refine ⟨?_, desc_sortDesc _, ?_, ?_, ?_, ?_, ?_⟩
+  · show ((sortDesc (afterPrune a b).1.values).map Entry.name).Nodup
+    rw [((perm_sortDesc _).map Entry.name).nodup_iff, JMap.values_map_key Entry.name p1w p1k]
+    exact p1w.1
+  · show ((afterPrune a b).2.values.map Tomb.name).Nodup
+    rw [JMap.values_map_key Tomb.name p2w p2k]; exact p2w.1
+  · show ((afterRen a b).2.values.map Ren.src).Nodup
+    rw [JMap.values_map_key Ren.src mw mk]; exact mw.1
+  · intro r hr
+    obtain ⟨n, hn⟩ := JMap.mem_values hr
+    exact ms n r hn
+  · intro r hr x hx hxr
+    obtain ⟨n, hn⟩ := JMap.mem_values hr
+    have hn' : (afterRen a b).2.get r.src = some r := by rw [← mk n r hn] at hn; exact hn
+    have hnone := free r.src (by simp [hn'])
+    have hx' := nameOf x (mem_sortDesc.1 hx)
+    rw [hxr] at hx'
+    rw [pdel _ _ hx'] at hnone
+    cases hnone
+  · intro t ht x hx hxt
+    have hx' := nameOf x (mem_sortDesc.1 hx)
+    obtain ⟨n, hn⟩ := JMap.mem_values ht
+    have ht' : (afterPrune a b).2.get t.name = some t := by rw [← p2k n t hn] at hn; exact hn
+    rw [hxt] at hx'
+    rcases pdis t.name with h | h
+    · rw [h] at hx'; cases hx'
+    · rw [h] at ht'; cases ht'
+
+/-- **The merge is idempotent, markers included**: merging a merge's output
+with itself gives it back, entry for entry and in the same order. -/
+theorem merge_idem (a b : Lib) :
+    mergeLibrary (mergeLibrary a b) (mergeLibrary a b) = mergeLibrary a b :=
+  merge_settled _ (merge_settled_out a b)
+
+/-! ### The pre-fix merge, kept to state what it got wrong
+
+`mergeLibraryV1` is `mergeLibrary` as it was at dd7ba741f: a move neither
+claimed its new name nor spent a processed marker from it. -/
+
+def applyRenV1 (st : JMap Entry × JMap Ren) (r : Ren) : JMap Entry × JMap Ren :=
+  match st.1.get r.src with
+  | none => st
+  | some e =>
+    if e.imp > r.ts then (st.1, st.2.del r.src)
+    else
+      let bn := st.1.del r.src
+      let bn' := match bn.get r.dst with
+        | none => bn.set r.dst ⟨r.dst, e.ts, e.imp⟩
+        | some t => if t.ts < e.ts then bn.set r.dst ⟨r.dst, e.ts, e.imp⟩ else bn
+      (bn', st.2)
+
+def mergeLibraryV1 (a b : Lib) : Lib :=
+  let rm := buildRen (a.ren ++ b.ren)
+  let ar := (sortAsc rm.values).foldl applyRenV1 (buildRecents (a.recents ++ b.recents), rm)
+  let tm := buildTomb (a.tomb ++ b.tomb)
+  let ap := tm.keys.foldl pruneStep (ar.1, tm)
+  ⟨sortDesc ap.1.values, ap.2.values, ar.2.values⟩
+
+/-- **The old merge was not idempotent** (the finding, restated against the
+kept copy): merging its output with itself folds the renamed game into C. -/
+theorem bug_mergeV1_not_idempotent :
+    let m := mergeLibraryV1 libB2C libA2B
+    names m.recents = [3, 1] ∧ names (mergeLibraryV1 m m).recents = [3] := by decide
+
+/-- **...and `imp` on the renamed entry alone did not make it so.** Found by
+the model of `renameGame`'s claim without the merge fix (the trace is
+`regress_revived_chain` below): device 0 renamed A (1) to B (2) at t=3;
+device 1 renamed X (3) into the freed A at t=4 and deleted A at t=5; device 0,
+not having pulled, played X at t=6. Device 0's flush merges Drive's library
+`D` with its own `L`: X arrives at A by the 3→1 marker, after the older 1→2
+marker has run, so the output holds both A and 1→2, and the next merge folds
+X into B. -/
+theorem bug_mergeV1_chain_not_idempotent :
+    let D : Lib := ⟨[⟨2, 3, 3⟩], [⟨1, 5⟩], [⟨3, 1, 4⟩, ⟨1, 2, 3⟩]⟩
+    let L : Lib := ⟨[⟨3, 6, 2⟩, ⟨2, 3, 3⟩], [], [⟨1, 2, 3⟩]⟩
+    let m := mergeLibraryV1 D L
+    names m.recents = [1, 2] ∧ names (mergeLibraryV1 m m).recents = [2] ∧
+    names (mergeLibrary D L).recents = [1, 2] := by decide
 
 /-! ## Layer 2: two devices, one Drive, no compare-and-swap -/
 
@@ -1331,22 +2040,22 @@ def putItem (l : List Item) (i : Item) : List Item := l.filter (fun j => j.key !
 /-- The continuation a device's `runExclusive` chain has in flight. -/
 inductive Pend where
   | idle
-  /-- flushSyncInner after `driveListMap` + `readDriveLibrary` (2715-2718). -/
+  /-- flushSyncInner after `driveListMap` + `readDriveLibrary` (2855-2858). -/
   | fRead (d : Lib)
-  /-- ...after `localLibrary` and the merge; queues settled (2718-2746). -/
+  /-- ...after `localLibrary` and the merge; queues settled (2858-2885). -/
   | fMerged (lib : Lib) (revived : List Nat)
-  /-- ...after the rename/delete/upload passes (2748-2800). -/
+  /-- ...after the rename/delete/upload passes (2887-2966). -/
   | fFiles (lib : Lib) (revived : List Nat)
-  /-- ...after `writeDriveLibrary` landed (2801). -/
+  /-- ...after `writeDriveLibrary` landed (2967). -/
   | fWritten (lib : Lib) (revived : List Nat)
-  /-- pullSyncInner after `driveListMap` + `readDriveLibrary` (2927-2928). -/
+  /-- pullSyncInner after `driveListMap` + `readDriveLibrary` (3113-3114). -/
   | pRead (d : Lib) (remote : List Item)
   | pMerged (lib : Lib) (remote : List Item)
-  /-- ...after the remote-rename pass (2932-2955). -/
+  /-- ...after the remote-rename pass (3116-3142). -/
   | pRenamed (lib : Lib) (remote : List Item)
-  /-- ...after the "removed on another device" modal (2957-2980). -/
+  /-- ...after the "removed on another device" modal (3144-3166). -/
   | pTombed (lib : Lib) (remote : List Item)
-  /-- ...after tomb/ren/recent were adopted; `writeDriveLibrary` pending (3031-3049). -/
+  /-- ...after tomb/ren/recent were adopted; `writeDriveLibrary` pending (3233-3255). -/
   | pCommitted (lib : Lib)
 deriving DecidableEq, Repr
 
@@ -1367,7 +2076,7 @@ structure Dev where
   qRen : List (Key × Key)
   /-- the op in flight on `syncChain` -/
   pend : Pend
-  /-- ghost: "…is now…— renamed on another device" toasts shown (2950) -/
+  /-- ghost: "…is now…— renamed on another device" toasts shown (3139) -/
   toasts : Nat
 deriving DecidableEq, Repr
 
@@ -1411,7 +2120,7 @@ def St.setDev (s : St) : Bool → Dev → St
     (s.setDev d v).deleted = s.deleted := by
   cases d <;> rfl
 
-/-- `localLibrary()` (2566-2570). -/
+/-- `localLibrary()` (2690-2694). -/
 def localLib (dv : Dev) : Lib := ⟨dv.recent, dv.tomb, dv.ren⟩
 
 inductive Ev where
@@ -1433,9 +2142,9 @@ inductive Ev where
   | download (d : Bool) (g : Nat)
 deriving DecidableEq, Repr
 
-/-! ### flushSyncInner (2707-2818) -/
+/-! ### flushSyncInner (2837-3002) -/
 
-/-- 2718-2746: merge, then cancel the queued deletes of revived games and the
+/-- 2858-2885: merge, then cancel the queued deletes of revived games and the
 queued renames of spent markers. -/
 def flushMergeDev (dv : Dev) (D : Lib) : Dev :=
   let lib := mergeLibrary D (localLib dv)
@@ -1445,7 +2154,7 @@ def flushMergeDev (dv : Dev) (D : Lib) : Dev :=
             qRen := dv.qRen.filter (fun q => !spent.contains q.1.1),
             pend := .fMerged lib revived }
 
-/-- One queued file rename (2748-2771). -/
+/-- One queued file rename (2888-2910). -/
 def renFile (acc : Dev × List Item) (q : Key × Key) : Dev × List Item :=
   let (dv, files) := acc
   if hasKey files q.1 then
@@ -1455,32 +2164,35 @@ def renFile (acc : Dev × List Item) (q : Key × Key) : Dev × List Item :=
     ({ dv with qUp := dv.qUp ++ [q.2] }, files)                            -- upload instead
   else (dv, files)
 
-/-- One queued upload (2786-2800): a missing file uploads; a present ROM is
+/-- One queued upload (2929-2966): a missing file uploads; a present ROM is
 never re-sent; anything else re-uploads. -/
 def upFile (dv : Dev) (files : List Item) (k : Key) : List Item :=
   match dv.store.find? (fun i => i.key == k) with
   | none => files
   | some it => if hasKey files k && k.2 == 0 then files else putItem files it
 
-/-- 2748-2800 as one event: renames, then deletes, then uploads. -/
+/-- 2888-2966 as one event: renames, then deletes, then uploads. -/
 def flushFilesDev (dv : Dev) (files : List Item) : Dev × List Item :=
   let (dv1, f1) := dv.qRen.foldl renFile (dv, files)
   let f2 := f1.filter (fun i => !dv1.qDel.contains i.key)
   let f3 := dv1.qUp.foldl (upFile dv1) f2
   ({ dv1 with qRen := [], qDel := [], qUp := [] }, f3)
 
-/-- 2802-2814: adopt the merged tombstones and markers; put revived games back. -/
+/-- The commit (under `updateRecent`): merge the library the flush wrote with
+this device's library *as it is now*, adopt that merge's tombstones and
+markers, and put revived games back, all in one segment. -/
 def flushCommitDev (dv : Dev) (lib : Lib) (revived : List Nat) : Dev :=
-  let add := lib.recents.filter (fun r => revived.contains r.name &&
-                                          !dv.recent.any (fun h => h.name == r.name))
-  { dv with tomb := lib.tomb, ren := lib.ren,
+  let L := mergeLibrary lib (localLib dv)
+  let add := L.recents.filter (fun r => revived.contains r.name &&
+                                        !dv.recent.any (fun h => h.name == r.name))
+  { dv with tomb := L.tomb, ren := L.ren,
             recent := if revived.isEmpty || add.isEmpty then dv.recent else sortDesc (dv.recent ++ add),
             pend := .idle }
 
-/-! ### pullSyncInner (2919-3063) -/
+/-! ### pullSyncInner (3103-3270) -/
 
-/-- `applyRemoteRename(r.from, r.to)` (2832-2903) plus the queueing of
-old-name Drive files that follows it (2940-2950). -/
+/-- `applyRemoteRename(r.from, r.to)` (3010-3086) plus the queueing of
+old-name Drive files that follows it (3128-3137). -/
 def remoteRename (remote : List Item) (dv : Dev) (r : Ren) : Dev :=
   if !dv.store.any (fun i => i.game == r.src) then dv else           -- hasAnyLocalRecord
   -- dbMoveKeys(..., { skipCollisions: true })
@@ -1489,7 +2201,7 @@ def remoteRename (remote : List Item) (dv : Dev) (r : Ren) : Dev :=
       (acc.1.map (fun i => if i.key == (r.src, k) then { i with game := r.dst } else i), acc.2 + 1)
     else acc
   let (st1, moved) := kinds.foldl mv (dv.store, 0)
-  -- collided pairs holding identical bytes: the old-name copy is dropped (2895-2900)
+  -- collided pairs holding identical bytes: the old-name copy is dropped (3076-3083)
   let st2 := st1.filter (fun i => !(i.game == r.src &&
                 st1.any (fun j => j.key == (r.dst, i.kind) && j.blob == i.blob)))
   let mapKey : Key → Key := fun k => if k.1 == r.src then (r.dst, k.2) else k
@@ -1500,7 +2212,7 @@ def remoteRename (remote : List Item) (dv : Dev) (r : Ren) : Dev :=
   { dv with store := st2, qUp := dedup (dv.qUp.map mapKey), qDel := dedup (dv.qDel.map mapKey),
             qRen := qRen2, toasts := dv.toasts + (if moved > 0 then 1 else 0) }
 
-/-- 2957-2980: "Games removed on another device". -/
+/-- 3144-3166: "Games removed on another device". -/
 def pullTombsDev (dv : Dev) (lib : Lib) (remote : List Item) (restore : Bool) (now : Nat) : Dev :=
   let pending := (lib.tomb.filter (fun t => dv.store.any (fun i => i.game == t.name))).map (·.name)
   if pending.isEmpty then { dv with pend := .pTombed lib remote }
@@ -1513,16 +2225,19 @@ def pullTombsDev (dv : Dev) (lib : Lib) (remote : List Item) (restore : Bool) (n
   else
     { dv with store := dv.store.filter (fun i => !pending.contains i.game), pend := .pTombed lib remote }
 
-/-- 3017-3048: reconcile upward, then adopt tomb/ren and write "recent". -/
+/-- Reconcile upward, then (under `updateRecent`) merge the pull's library
+with this device's library as it is now and adopt that merge: tombstones,
+markers and "recent" in one segment. The merge is what is written to Drive. -/
 def pullCommitDev (dv : Dev) (lib : Lib) (remote : List Item) : Dev :=
   let missing := (dv.store.filter (fun i => !hasKey remote i.key &&
                     !lib.tomb.any (fun t => t.name == i.game))).map Item.key
-  { dv with qUp := missing.foldl addUniq dv.qUp, tomb := lib.tomb, ren := lib.ren,
-            recent := lib.recents, pend := .pCommitted lib }
+  let L := mergeLibrary lib (localLib dv)
+  { dv with qUp := missing.foldl addUniq dv.qUp, tomb := L.tomb, ren := L.ren,
+            recent := L.recents, pend := .pCommitted L }
 
 /-! ### The user's actions -/
 
-/-- `deleteGameEverywhere` (3149-3163), signed in. -/
+/-- `deleteGameEverywhere` (3358-3380), signed in. -/
 def deleteDev (dv : Dev) (g now : Nat) : Dev :=
   { dv with store := dv.store.filter (fun i => i.game != g),
             recent := dv.recent.filter (fun r => r.name != g),
@@ -1530,7 +2245,7 @@ def deleteDev (dv : Dev) (g now : Nat) : Dev :=
             qUp := dv.qUp.filter (fun k => k.1 != g),
             tomb := dv.tomb.filter (fun t => t.name != g) ++ [⟨g, now⟩] }
 
-/-- `renameGame` (3252-3367) past its checks: one `dbMoveKeys` transaction
+/-- `renameGame` (3469-3598) past its checks: one `dbMoveKeys` transaction
 moves every record, writes "recent" and the new sync state. -/
 def renameOk (dv : Dev) (a b : Nat) : Bool :=
   a != b && !dv.recent.any (fun r => r.name == b) && !dv.store.any (fun i => i.game == b)
@@ -1540,15 +2255,16 @@ def renameDev (dv : Dev) (a b now : Nat) : Dev :=
   let newOf : Key → Key := fun k => if mirrored.contains k then (b, k.2) else k
   { dv with
     store := dv.store.map (fun i => if i.game == a then { i with game := b } else i),
+    -- the new entry claims its name at the rename's moment (`imp: ts`)
     recent := if dv.recent.any (fun r => r.name == a)
-              then ⟨b, now, 0⟩ :: dv.recent.filter (fun r => r.name != a) else dv.recent,
+              then ⟨b, now, now⟩ :: dv.recent.filter (fun r => r.name != a) else dv.recent,
     qUp := dedup (dv.qUp.map newOf),
     qDel := dv.qDel.filter (fun k => !(mirrored.map newOf).contains k),
     qRen := dv.qRen ++ mirrored.map (fun k => (k, (b, k.2))),
     tomb := dv.tomb.filter (fun t => t.name != a && t.name != b),
     ren := dv.ren.filter (fun r => r.src != a && r.src != b) ++ [⟨a, b, now⟩] }
 
-/-- `bumpRecentIndex` (4424-4445). -/
+/-- `bumpRecentIndex` (4702-4722). -/
 def bump (dv : Dev) (g now : Nat) (fresh : Bool) : List Entry :=
   let prev := dv.recent.find? (fun r => r.name == g)
   let ts := if fresh then now else
@@ -1558,7 +2274,7 @@ def bump (dv : Dev) (g now : Nat) (fresh : Bool) : List Entry :=
   let imp := if fresh then now else (prev.map (·.imp)).getD 0
   ⟨g, ts, imp⟩ :: dv.recent.filter (fun r => r.name != g)
 
-/-- `addRecentRom` (4460-4476): ROM bytes, then a fresh import, then upload. -/
+/-- `addRecentRom` (4737-4753): ROM bytes, then a fresh import, then upload. -/
 def importDev (dv : Dev) (g blob now : Nat) : Dev :=
   let st := putItem dv.store ⟨g, 0, blob⟩
   { dv with store := st, recent := bump dv g now true,
@@ -1569,7 +2285,7 @@ def playDev (dv : Dev) (g blob now : Nat) : Dev :=
   { dv with recent := bump dv g now false, store := putItem dv.store ⟨g, 1, blob⟩,
             qUp := addUniq dv.qUp (g, 1) }
 
-/-- `downloadGame` (3074-3107). -/
+/-- `downloadGame` (3282-3316). -/
 def downloadDev (dv : Dev) (files : List Item) (g now : Nat) : Dev :=
   let fs := files.filter (fun f => f.game == g)
   if fs.isEmpty then dv
@@ -1652,6 +2368,13 @@ def pull (d : Bool) : List Ev :=
 
 /-! ## Layer 2a: what the protocol keeps -/
 
+@[simp] theorem dev_with_lib (s : St) (L : Lib) (d : Bool) : ({ s with lib := L } : St).dev d = s.dev d := by
+  cases d <;> rfl
+@[simp] theorem dev_with_files (s : St) (F : List Item) (d : Bool) :
+    ({ s with files := F } : St).dev d = s.dev d := by
+  cases d <;> rfl
+@[simp] theorem localLib_pend (dv : Dev) (p : Pend) : localLib { dv with pend := p } = localLib dv := rfl
+
 /-- Tombstones a continuation carries (its snapshot or its merged library). -/
 def pendTombs : Pend → List Tomb
   | .idle => []
@@ -1712,6 +2435,26 @@ theorem flushFilesDev_tomb (dv : Dev) (files : List Item) : (flushFilesDev dv fi
   unfold flushFilesDev
   exact foldl_renFile_tomb dv.qRen (dv, files)
 
+/-- The file passes leave the device's library alone. -/
+theorem renFile_lib (acc : Dev × List Item) (q : Key × Key) :
+    localLib (renFile acc q).1 = localLib acc.1 := by
+  unfold renFile
+  repeat' split
+  all_goals rfl
+
+theorem foldl_renFile_lib (L : List (Key × Key)) :
+    ∀ acc : Dev × List Item, localLib (L.foldl renFile acc).1 = localLib acc.1 := by
+  induction L with
+  | nil => intro acc; rfl
+  | cons q qs ih => intro acc; simp only [List.foldl]; rw [ih, renFile_lib]
+
+@[simp] theorem flushFilesDev_lib (dv : Dev) (files : List Item) :
+    localLib (flushFilesDev dv files).1 = localLib dv := by
+  have h := foldl_renFile_lib dv.qRen (dv, files)
+  unfold flushFilesDev
+  simp only [localLib] at h ⊢
+  exact h
+
 theorem remoteRename_tomb (remote : List Item) (dv : Dev) (r : Ren) :
     (remoteRename remote dv r).tomb = dv.tomb := by
   unfold remoteRename
@@ -1731,13 +2474,13 @@ theorem foldl_remoteRename_tomb (remote : List Item) (L : List Ren) :
 @[simp] theorem flushMergeDev_pendTombs (dv : Dev) (D : Lib) :
     pendTombs (flushMergeDev dv D).pend = (mergeLibrary D (localLib dv)).tomb := rfl
 @[simp] theorem flushCommitDev_tomb (dv : Dev) (lib : Lib) (rv : List Nat) :
-    (flushCommitDev dv lib rv).tomb = lib.tomb := rfl
+    (flushCommitDev dv lib rv).tomb = (mergeLibrary lib (localLib dv)).tomb := rfl
 @[simp] theorem flushCommitDev_pend (dv : Dev) (lib : Lib) (rv : List Nat) :
     (flushCommitDev dv lib rv).pend = .idle := rfl
 @[simp] theorem pullCommitDev_tomb (dv : Dev) (lib : Lib) (R : List Item) :
-    (pullCommitDev dv lib R).tomb = lib.tomb := rfl
+    (pullCommitDev dv lib R).tomb = (mergeLibrary lib (localLib dv)).tomb := rfl
 @[simp] theorem pullCommitDev_pend (dv : Dev) (lib : Lib) (R : List Item) :
-    (pullCommitDev dv lib R).pend = .pCommitted lib := rfl
+    (pullCommitDev dv lib R).pend = .pCommitted (mergeLibrary lib (localLib dv)) := rfl
 @[simp] theorem deleteDev_tomb (dv : Dev) (g n : Nat) :
     (deleteDev dv g n).tomb = dv.tomb.filter (fun t => t.name != g) ++ [⟨g, n⟩] := rfl
 @[simp] theorem deleteDev_pend (dv : Dev) (g n : Nat) : (deleteDev dv g n).pend = dv.pend := rfl
@@ -1817,12 +2560,21 @@ theorem dsub_pend (dv : Dev) (p : Pend) (hp : ∀ t ∈ pendTombs p, t ∈ devTo
   · exact tomb_sub h
   · exact hp t h
 
+/-- A commit's re-merge only draws on the continuation's library and the
+device's own tombstones. -/
+theorem remerge_tomb_sub (dv : Dev) (lib : Lib) {t : Tomb}
+    (hlib : ∀ t ∈ lib.tomb, t ∈ devTombs dv) (ht : t ∈ (mergeLibrary lib (localLib dv)).tomb) :
+    t ∈ devTombs dv := by
+  rcases List.mem_append.1 (merge_tomb_sub _ _ ht) with h | h
+  · exact hlib t h
+  · exact tomb_sub h
+
 theorem dsub_flushCommit (dv : Dev) (lib : Lib) (rv : List Nat) (hp : dv.pend = .fWritten lib rv) :
     DSub (flushCommitDev dv lib rv) dv := by
   intro t ht
   simp only [devTombs, List.mem_append, flushCommitDev_tomb, flushCommitDev_pend, pendTombs,
     List.not_mem_nil, or_false] at ht
-  exact pend_sub (by rw [hp]; exact ht)
+  exact remerge_tomb_sub dv lib (fun t h => pend_sub (by rw [hp]; exact h)) ht
 
 theorem dsub_pullMerge (dv : Dev) (D : Lib) (R : List Item) (hp : dv.pend = .pRead D R) :
     DSub { dv with pend := .pMerged (mergeLibrary D (localLib dv)) R } dv := by
@@ -1852,7 +2604,7 @@ theorem dsub_pullCommit (dv : Dev) (lib : Lib) (R : List Item) (hp : dv.pend = .
     DSub (pullCommitDev dv lib R) dv := by
   intro t ht
   simp only [devTombs, List.mem_append, pullCommitDev_tomb, pullCommitDev_pend, pendTombs, or_self] at ht
-  exact pend_sub (by rw [hp]; exact ht)
+  exact remerge_tomb_sub dv lib (fun t h => pend_sub (by rw [hp]; exact h)) ht
 
 theorem dsub_rename (dv : Dev) (a b n : Nat) : DSub (renameDev dv a b n) dv := by
   intro t ht
@@ -2006,6 +2758,190 @@ theorem step_other_dev (s : St) (e : Ev) (d : Bool) (h : e.dev ≠ d) : (step s 
     | (cases d <;> rename_i d' <;> cases d' <;> simp_all [St.setDev, St.dev])
     | (cases d <;> simp_all [St.setDev, St.dev])
 
+/-! The steps of one flush, each from the continuation it resumes. -/
+
+/-! ### No commit drops a tombstone the device holds
+
+This is what the stale commits broke (`regress_delete_during_flush`,
+`regress_delete_during_pull`): now, over every interleaving, a tombstone a
+device holds is only ever given up for a newer play of that name in the
+library the commit adopts ("a later play says the delete was not meant"),
+or by the person renaming or deleting that game on this device. -/
+
+/-- The library a commit about to run on this device would adopt: the
+continuation's library re-merged with the device's library as it is now. -/
+def adopting (dv : Dev) : Option Lib :=
+  match dv.pend with
+  | .fWritten lib _ => some (mergeLibrary lib (localLib dv))
+  | .pTombed lib _ => some (mergeLibrary lib (localLib dv))
+  | _ => none
+
+theorem pullTombsDev_tomb (dv : Dev) (lib : Lib) (R : List Item) (r : Bool) (n : Nat) :
+    (pullTombsDev dv lib R r n).tomb = dv.tomb := by
+  unfold pullTombsDev; simp only; split
+  · rfl
+  · split <;> rfl
+
+theorem step_keeps_tomb (s : St) (e : Ev) (d : Bool) (t : Tomb) (ht : t ∈ (s.dev d).tomb) :
+    (∃ t' ∈ ((step s e).dev d).tomb, t'.name = t.name ∧ t.ts ≤ t'.ts) ∨
+    (∃ L, adopting (s.dev d) = some L ∧ ∃ x ∈ L.recents, x.name = t.name ∧ t.ts < x.ts) ∨
+    (∃ b, e = .rename d t.name b ∨ e = .rename d b t.name) ∨
+    e = .delete d t.name := by
+  have keep : ((step s e).dev d).tomb = (s.dev d).tomb →
+      (∃ t' ∈ ((step s e).dev d).tomb, t'.name = t.name ∧ t.ts ≤ t'.ts) :=
+    fun h => ⟨t, h ▸ ht, rfl, Nat.le_refl _⟩
+  by_cases hd : e.dev ≠ d
+  · exact Or.inl (keep (by rw [step_other_dev s e d hd]))
+  have hd : e.dev = d := by simpa using hd
+  have hmem : t ∈ (localLib (s.dev d)).tomb := ht
+  cases e with
+  | flushRead d' =>
+    simp only [Ev.dev] at hd; subst hd
+    exact Or.inl (keep (by simp only [step]; split <;> first | rfl | (cases d' <;> simp [St.setDev, St.dev])))
+  | flushMerge d' =>
+    simp only [Ev.dev] at hd; subst hd
+    exact Or.inl (keep (by simp only [step]; split <;> first | rfl | (cases d' <;> simp [St.setDev, St.dev])))
+  | flushFiles d' =>
+    simp only [Ev.dev] at hd; subst hd
+    exact Or.inl (keep (by simp only [step]; split <;> first | rfl | (cases d' <;> simp [St.setDev, St.dev, flushFilesDev_tomb])))
+  | flushWrite d' =>
+    simp only [Ev.dev] at hd; subst hd
+    exact Or.inl (keep (by simp only [step]; split <;> first | rfl | (cases d' <;> simp [St.setDev, St.dev])))
+  | flushCommit d' =>
+    simp only [Ev.dev] at hd; subst hd
+    cases hp : (s.dev d').pend with
+    | fWritten lib rv =>
+      have hs : (step s (.flushCommit d')).dev d' = flushCommitDev (s.dev d') lib rv := by
+        simp only [step, hp]; simp
+      rcases merge_tomb_survives lib (localLib (s.dev d')) t (List.mem_append_right _ hmem) with h | h
+      · left; rw [hs, flushCommitDev_tomb]; exact h
+      · right; left; exact ⟨_, by simp [adopting, hp], h⟩
+    | _ => exact Or.inl (keep (by simp [step, hp]))
+  | pullRead d' =>
+    simp only [Ev.dev] at hd; subst hd
+    exact Or.inl (keep (by simp only [step]; split <;> first | rfl | (cases d' <;> simp [St.setDev, St.dev])))
+  | pullMerge d' =>
+    simp only [Ev.dev] at hd; subst hd
+    exact Or.inl (keep (by simp only [step]; split <;> first | rfl | (cases d' <;> simp [St.setDev, St.dev])))
+  | pullRenames d' =>
+    simp only [Ev.dev] at hd; subst hd
+    exact Or.inl (keep (by simp only [step]; split <;> first | rfl | (cases d' <;> simp [St.setDev, St.dev, foldl_remoteRename_tomb])))
+  | pullTombs d' restore =>
+    simp only [Ev.dev] at hd; subst hd
+    exact Or.inl (keep (by simp only [step]; split <;> first | rfl | (cases d' <;> simp [St.setDev, St.dev, pullTombsDev_tomb])))
+  | pullCommit d' =>
+    simp only [Ev.dev] at hd; subst hd
+    cases hp : (s.dev d').pend with
+    | pTombed lib R =>
+      have hs : (step s (.pullCommit d')).dev d' = pullCommitDev (s.dev d') lib R := by
+        simp only [step, hp]; simp
+      rcases merge_tomb_survives lib (localLib (s.dev d')) t (List.mem_append_right _ hmem) with h | h
+      · left; rw [hs, pullCommitDev_tomb]; exact h
+      · right; left; exact ⟨_, by simp [adopting, hp], h⟩
+    | _ => exact Or.inl (keep (by simp [step, hp]))
+  | pullWrite d' =>
+    simp only [Ev.dev] at hd; subst hd
+    exact Or.inl (keep (by simp only [step]; split <;> first | rfl | (cases d' <;> simp [St.setDev, St.dev])))
+  | delete d' g =>
+    simp only [Ev.dev] at hd; subst hd
+    by_cases hg : g = t.name
+    · subst hg; exact Or.inr (Or.inr (Or.inr rfl))
+    · left
+      refine ⟨t, ?_, rfl, Nat.le_refl _⟩
+      have : ((step s (.delete d' g)).dev d') = deleteDev (s.dev d') g s.now := by
+        cases d' <;> rfl
+      rw [this, deleteDev_tomb]
+      simp only [List.mem_append, List.mem_filter]
+      left; exact ⟨ht, by simpa using fun h => hg h.symm⟩
+  | rename d' a b =>
+    simp only [Ev.dev] at hd; subst hd
+    by_cases ha : a = t.name
+    · subst ha; exact Or.inr (Or.inr (Or.inl ⟨b, Or.inl rfl⟩))
+    by_cases hb : b = t.name
+    · subst hb; exact Or.inr (Or.inr (Or.inl ⟨a, Or.inr rfl⟩))
+    left
+    refine ⟨t, ?_, rfl, Nat.le_refl _⟩
+    simp only [step]
+    split
+    · have : (({ s.setDev d' (renameDev (s.dev d') a b s.now) with now := s.now + 1 } : St).dev d') =
+          renameDev (s.dev d') a b s.now := by cases d' <;> rfl
+      rw [this, renameDev_tomb, List.mem_filter]
+      refine ⟨ht, ?_⟩
+      simp only [Bool.and_eq_true, bne_iff_ne, ne_eq]
+      exact ⟨fun h => ha h.symm, fun h => hb h.symm⟩
+    · exact ht
+  | importRom d' g blob =>
+    simp only [Ev.dev] at hd; subst hd
+    exact Or.inl (keep (by
+      have : ((step s (.importRom d' g blob)).dev d') = importDev (s.dev d') g blob s.now := by
+        cases d' <;> rfl
+      rw [this]; rfl))
+  | play d' g blob =>
+    simp only [Ev.dev] at hd; subst hd
+    exact Or.inl (keep (by
+      simp only [step]; split
+      · have : (({ s.setDev d' (playDev (s.dev d') g blob s.now) with now := s.now + 1 } : St).dev d') =
+            playDev (s.dev d') g blob s.now := by cases d' <;> rfl
+        rw [this]; rfl
+      · rfl))
+  | download d' g =>
+    simp only [Ev.dev] at hd; subst hd
+    exact Or.inl (keep (by
+      have : ((step s (.download d' g)).dev d') = downloadDev (s.dev d') s.files g s.now := by
+        cases d' <;> rfl
+      rw [this, downloadDev_tomb]))
+
+
+theorem step_flushRead_of (s : St) (d : Bool) (h : (s.dev d).pend = .idle) :
+    (step s (.flushRead d)).dev d = { s.dev d with pend := .fRead s.lib } ∧
+    (step s (.flushRead d)).lib = s.lib := by
+  simp only [step, h]; exact ⟨by simp, by simp⟩
+theorem step_flushMerge_of (s : St) (d : Bool) (D : Lib) (h : (s.dev d).pend = .fRead D) :
+    (step s (.flushMerge d)).dev d = flushMergeDev (s.dev d) D ∧ (step s (.flushMerge d)).lib = s.lib := by
+  simp only [step, h]; exact ⟨by simp, by simp⟩
+theorem step_flushFiles_of (s : St) (d : Bool) (lib : Lib) (rv : List Nat)
+    (h : (s.dev d).pend = .fMerged lib rv) :
+    (step s (.flushFiles d)).dev d = { (flushFilesDev (s.dev d) s.files).1 with pend := .fFiles lib rv } ∧
+    (step s (.flushFiles d)).lib = s.lib := by
+  simp only [step, h]; constructor <;> cases d <;> first | rfl | trivial
+theorem step_flushWrite_of (s : St) (d : Bool) (lib : Lib) (rv : List Nat)
+    (h : (s.dev d).pend = .fFiles lib rv) :
+    (step s (.flushWrite d)).dev d = { s.dev d with pend := .fWritten lib rv } ∧
+    (step s (.flushWrite d)).lib = lib := by
+  simp only [step, h]; constructor <;> cases d <;> first | rfl | trivial
+theorem step_flushCommit_of (s : St) (d : Bool) (lib : Lib) (rv : List Nat)
+    (h : (s.dev d).pend = .fWritten lib rv) :
+    (step s (.flushCommit d)).dev d = flushCommitDev (s.dev d) lib rv ∧
+    (step s (.flushCommit d)).lib = s.lib := by
+  simp only [step, h]; exact ⟨by simp, by simp⟩
+
+/-- **An uninterrupted flush** writes the merge of Drive's library and the
+device's, then commits it into a device whose library is the one it started
+with (the file passes do not touch it). -/
+theorem run_flush (s : St) (d : Bool) (hidle : (s.dev d).pend = .idle) :
+    (run s (flush d)).lib = mergeLibrary s.lib (localLib (s.dev d)) ∧
+    ∃ dv' rv, (run s (flush d)).dev d =
+        flushCommitDev dv' (mergeLibrary s.lib (localLib (s.dev d))) rv ∧
+      localLib dv' = localLib (s.dev d) := by
+  have e : run s (flush d) = step (step (step (step (step s (.flushRead d)) (.flushMerge d))
+      (.flushFiles d)) (.flushWrite d)) (.flushCommit d) := rfl
+  rw [e]
+  obtain ⟨d1, l1⟩ := step_flushRead_of s d hidle
+  generalize step s (.flushRead d) = s1 at d1 l1
+  obtain ⟨d2, l2⟩ := step_flushMerge_of s1 d s.lib (by rw [d1])
+  generalize step s1 (.flushMerge d) = s2 at d2 l2
+  obtain ⟨rv, hrv⟩ : ∃ rv, (s2.dev d).pend = .fMerged (mergeLibrary s.lib (localLib (s.dev d))) rv := by
+    rw [d2, d1]; exact ⟨_, rfl⟩
+  have loc2 : localLib (s2.dev d) = localLib (s.dev d) := by rw [d2, d1]; rfl
+  obtain ⟨d3, l3⟩ := step_flushFiles_of s2 d _ rv hrv
+  generalize step s2 (.flushFiles d) = s3 at d3 l3
+  obtain ⟨d4, l4⟩ := step_flushWrite_of s3 d _ rv (by rw [d3])
+  generalize step s3 (.flushWrite d) = s4 at d4 l4
+  obtain ⟨d5, l5⟩ := step_flushCommit_of s4 d _ rv (by rw [d4])
+  generalize step s4 (.flushCommit d) = s5 at d5 l5
+  refine ⟨by rw [l5, l4], _, rv, d5, ?_⟩
+  rw [d4, localLib_pend, d3, localLib_pend, flushFilesDev_lib, loc2]
+
 /-- **A device's next uninterrupted flush re-asserts every tombstone it
 holds** (or the library now holds a newer entry for that name: a later play
 revived the game). So a Drive lost update delays a tombstone, never loses it,
@@ -2014,10 +2950,15 @@ theorem resync_reasserts_tomb (s : St) (d : Bool) (hidle : (s.dev d).pend = .idl
     (t : Tomb) (ht : t ∈ (s.dev d).tomb) :
     ((∃ t' ∈ (run s (flush d)).lib.tomb, t'.name = t.name ∧ t.ts ≤ t'.ts) ∨
      (∃ e ∈ (run s (flush d)).lib.recents, e.name = t.name ∧ t.ts < e.ts)) ∧
-    ((run s (flush d)).dev d).tomb = (run s (flush d)).lib.tomb := by
-  have key := merge_tomb_survives s.lib (localLib (s.dev d)) t (by simp [localLib, ht])
-  cases d <;> simp only [run, flush, List.foldl, step, St.dev, St.setDev] at hidle ⊢ <;>
-    simp only [hidle] <;> simpa [flushMergeDev, flushCommitDev, localLib, St.dev] using key
+    ((∃ t' ∈ ((run s (flush d)).dev d).tomb, t'.name = t.name ∧ t.ts ≤ t'.ts) ∨
+     (∃ e ∈ (mergeLibrary (run s (flush d)).lib (localLib (s.dev d))).recents,
+        e.name = t.name ∧ t.ts < e.ts)) := by
+  obtain ⟨hlib, dv', rv, hdev, hloc⟩ := run_flush s d hidle
+  have hmem : t ∈ (localLib (s.dev d)).tomb := by simp [localLib, ht]
+  refine ⟨?_, ?_⟩
+  · rw [hlib]; exact merge_tomb_survives _ _ t (List.mem_append_right _ hmem)
+  · rw [hdev, hlib, flushCommitDev_tomb, hloc]
+    exact merge_tomb_survives _ _ t (List.mem_append_right _ hmem)
 
 /-- **A rename moves everything, in one transaction**: every record under the
 old name is under the new one, bytes unchanged, and nothing is left under the
@@ -2052,21 +2993,24 @@ theorem run_reachable {s : St} (h : Reachable s) : ∀ es : List Ev, Reachable (
   | nil => exact h
   | cons e es ih => exact ih (Reachable.step e h)
 
-/-! ## Layer 2b: what the protocol does not keep (concrete traces)
+/-! ## Layer 2b: the findings' traces, run against the fixed code
 
 Each trace is a list of events run from `init`; every event is one JS
-segment between awaits, fired in an order a browser allows. -/
+segment between awaits, fired in an order a browser allows. Each was a
+`bug_*` against dd7ba741f; each is now a `regress_*` showing the same trace
+ends safely. The general statements behind them are `step_keeps_tomb`
+(Layer 2a) and `merge_idem` (Layer 1d). -/
+
+set_option maxRecDepth 8000
 
 /-- Device 0 imports game 7 (ROM bytes 70) and syncs; device 1 pulls the
 library and downloads the game. -/
+
 def setupA : List Ev := [.importRom false 7 70] ++ flush false ++ pull true ++ [.download true 7]
 
 /-- Device 0 plays 7 (save 71), which schedules a flush. While that flush is
-still in flight — past its merge, e.g. while the save or a ROM is uploading
-(2786-2800) or `writeDriveLibrary` is awaiting (2801) — the person taps
-Delete on 7. The flush then writes its stale library and runs
-`syncState.tomb = lib.tomb` (2802), dropping the tombstone the delete just
-pushed (3158-3159). -/
+still in flight (past its merge, while the save is uploading or the library
+write is awaiting) the person taps Delete on 7. -/
 def raceA : List Ev :=
   [.play false 7 71, .flushRead false, .flushMerge false, .flushFiles false,
    .delete false 7, .flushWrite false, .flushCommit false]
@@ -2075,111 +3019,85 @@ def raceA : List Ev :=
 3-minute poll). -/
 def settleA : List Ev := flush false ++ pull false ++ pull true ++ flush true ++ pull false
 
-/-- **BUG: a delete made while a flush is in flight is undone everywhere.**
-Right after the race no tombstone for 7 exists anywhere (Drive, either
-device, anything in flight) though the delete happened; after ordinary syncs
-7 is back in the library, back on device 0's grid, and its ROM is back on
-Drive (device 1 re-uploads its copy, 3017-3029). Device 0 said "Deleted from
-all your devices". -/
-theorem bug_delete_during_flush_resurrects :
+/-- **Fixed: a delete made while a flush is in flight sticks** (was
+`bug_delete_during_flush_resurrects`, where the commit's stale merge dropped
+the tombstone for good and ordinary syncs brought 7 back everywhere). The
+commit's re-merge keeps the tombstone; the syncs carry it to Drive and to
+device 1, which removes the game and its files. -/
+theorem regress_delete_during_flush :
     let s1 := run init (setupA ++ raceA)
     let s2 := run s1 settleA
-    s1.deleted = [⟨7, 4⟩] ∧ noTombFor 7 s1 = true ∧
-    names s2.lib.recents = [7] ∧ names s2.d0.recent = [7] ∧ names s2.d1.recent = [7] ∧
-    hasKey s2.files (7, 0) = true ∧ noTombFor 7 s2 = true := by
+    s1.deleted = [⟨7, 4⟩] ∧ (⟨7, 4⟩ : Tomb) ∈ s1.d0.tomb ∧
+    s2.lib.tomb = [⟨7, 4⟩] ∧ names s2.lib.recents = [] ∧ names s2.d0.recent = [] ∧
+    names s2.d1.recent = [] ∧ s2.d1.store = [] ∧ s2.files = [] := by
   decide
-
-/-- ...and it is permanent: from that state no sequence of events other than
-deleting 7 again ever brings a tombstone for 7 back. -/
-theorem bug_delete_during_flush_permanent (es : List Ev) (h : ∀ e ∈ es, ∀ d, e ≠ .delete d 7) :
-    noTombFor 7 (run (run init (setupA ++ raceA)) es) = true :=
-  tomb_lost_forever 7 es _ (by decide) h
 
 /-- The trace is a run of the model. -/
 theorem raceA_reachable : Reachable (run init (setupA ++ raceA ++ settleA)) :=
   run_reachable Reachable.init _
 
-/-- A pull (visibilitychange, the poll) in flight on device 0; the person
-deletes 7 while it is downloading saves/pictures (2981-3015), after its merge
-(2928). Its commit then runs `syncState.tomb = lib.tomb` (3031) and writes
-"recent" (3048) from the stale merge. -/
+/-- A pull in flight on device 0; the person deletes 7 while it is downloading
+saves/pictures, after its merge. -/
 def raceB : List Ev :=
   [.pullRead false, .pullMerge false, .pullRenames false, .pullTombs false false,
    .delete false 7, .pullCommit false]
 
-/-- **BUG: a delete made while a pull is in flight comes straight back** as
-a tile on this device's grid, with its tombstone gone for good. -/
-theorem bug_delete_during_pull_resurrects :
-    let s := run init (setupA ++ raceB)
-    names s.d0.recent = [7] ∧ s.d0.store = [] ∧ s.deleted = [⟨7, 3⟩] ∧
-    noTombFor 7 (run s [.pullWrite false]) = true := by
+/-- **Fixed: a delete made while a pull is in flight stays deleted** (was
+`bug_delete_during_pull_resurrects`): no tile comes back, the tombstone is
+kept, and the pull's own library write already carries it to Drive. -/
+theorem regress_delete_during_pull :
+    let s := run init (setupA ++ raceB ++ [.pullWrite false])
+    names s.d0.recent = [] ∧ s.d0.tomb = [⟨7, 3⟩] ∧ s.lib.tomb = [⟨7, 3⟩] := by
   decide
 
-/-- A pull in flight on device 0; the person imports game 9 (ROM 90) — e.g.
-the file picker closing fires visibilitychange, whose flush-then-pull (3823)
-races the import. `addRecentRom` writes "recent" (4444); the pull's commit
-writes its stale "recent" over it (3048). -/
+/-- A pull in flight on device 0; the person imports game 9 (ROM 90), e.g.
+the file picker closing fires visibilitychange, whose flush-then-pull races
+the import. -/
 def raceC : List Ev :=
   [.pullRead false, .pullMerge false, .importRom false 9 90, .pullRenames false,
    .pullTombs false false, .pullCommit false, .pullWrite false]
 
-/-- **BUG: a game imported while a pull is in flight is orphaned**: its ROM
-is on the device and (after the flush) on Drive, but no library anywhere
-lists it, so no tile can open it. Only `adoptSaveOnlyGames` at the next
-boot recovers it, and only once it has a save. -/
-theorem bug_import_during_pull_orphans :
+/-- **Fixed: a game imported while a pull is in flight keeps its tile and
+reaches the library** (was `bug_import_during_pull_orphans`). -/
+theorem regress_import_during_pull :
     let s := run init (raceC ++ flush false ++ pull false)
-    hasKey s.d0.store (9, 0) = true ∧ hasKey s.files (9, 0) = true ∧
-    names s.d0.recent = [] ∧ names s.lib.recents = [] := by
+    names s.d0.recent = [9] ∧ names s.lib.recents = [9] ∧ hasKey s.files (9, 0) = true := by
   decide
 
 /-- Import game 1 (ROM 10, save 11); rename 1→2 and sync; rename it back
-2→1 and flush. Every step is the documented flow. -/
+2→1 and flush. -/
 def setupD : List Ev := [.importRom false 1 10, .play false 1 11] ++ flush false ++
   [.rename false 1 2] ++ flush false ++ pull false ++ [.rename false 2 1] ++ flush false
 
 def cycleD : List Ev := pull false ++ flush false
 
-/-- **BUG: renaming a game back (an undo) never settles.** The old 1→2
-marker is never retired (renameGame drops it only locally, 3336; the merge
-brings it back from Drive), so every pull re-applies 1→2 then 2→1 to the
-device's own records (toasting "renamed on another device" twice) and queues
-the Drive files for 1→2 renames, which the next flush performs: the Drive
-files flip between the two names on every sync, forever, while the library
-says 1. -/
-theorem bug_rename_undo_oscillates :
+/-- **Fixed: renaming a game back settles** (was `bug_rename_undo_oscillates`,
+where every pull re-applied 1→2 then 2→1, toasting twice, and the Drive files
+flipped names on every sync). The undo's entry claims name 1, which spends the
+old 1→2 marker: after one sync cycle nothing changes any more. -/
+theorem regress_rename_undo_settles :
     let s1 := run init (setupD ++ cycleD)
-    let s2 := run s1 cycleD
-    let s3 := run s2 cycleD
-    s1.d0.toasts = 2 ∧ s1.files.map (·.game) = [2, 2] ∧
-    s2.d0.toasts = 4 ∧ s2.files.map (·.game) = [1, 1] ∧
-    s3.d0.toasts = 6 ∧ s3.files.map (·.game) = [2, 2] ∧
-    names s3.lib.recents = [1] ∧ s3.d0.store.map (·.game) = [1, 1] := by
-  decide
+    run s1 cycleD = s1 ∧ s1.d0.toasts = 0 ∧ s1.files.map (·.game) = [1, 1] ∧
+    names s1.lib.recents = [1] ∧ s1.d0.store.map (·.game) = [1, 1] := by
+  decide +kernel
 
-set_option maxRecDepth 8000 in
-/-- **BUG: ...and the churn deletes the newest save from Drive.** After one
-flip, the person saves (12). It uploads as a new `save:1` beside the flipped
-`save:2` (11); the next pull queues both directions, and the flush deletes
-the new `save:1` as the "raced duplicate" (2758-2761), then renames the old
-`save:2` onto `save:1`. Drive now holds progress 11 while the device holds
-12; a second device downloading the game gets 11. -/
-theorem bug_rename_undo_loses_save :
+/-- **Fixed: a save made after the undo reaches Drive and stays** (was
+`bug_rename_undo_loses_save`, where the churn deleted the newest save as a
+"raced duplicate" and a second device downloaded the old one). -/
+theorem regress_rename_undo_keeps_save :
     let s := run init (setupD ++ cycleD ++ [.play false 1 12] ++ flush false ++ cycleD ++
       [.download true 1])
-    (⟨1, 1, 12⟩ : Item) ∈ s.d0.store ∧ (⟨1, 1, 11⟩ : Item) ∈ s.files ∧
-    (⟨1, 1, 12⟩ : Item) ∉ s.files ∧ (⟨1, 1, 11⟩ : Item) ∈ s.d1.store := by
+    (⟨1, 1, 12⟩ : Item) ∈ s.d0.store ∧ (⟨1, 1, 12⟩ : Item) ∈ s.files ∧
+    (⟨1, 1, 11⟩ : Item) ∉ s.files ∧ (⟨1, 1, 12⟩ : Item) ∈ s.d1.store := by
   decide
 
-/-- **BUG (minor): after an undo, the game's recency is frozen.** A play at
-t=5 is stamped t=2 (`bumpRecentIndex` pins a play under any marker whose
-`from` is the game, 4432-4435, and the 1→2 marker never retires), so the
-library keeps the undo's t=4 on every later play: the tile never moves up
-the grid and the ROM byte budget (4394-4420) treats the game as stale. -/
-theorem bug_rename_undo_freezes_recency :
+/-- **Fixed: after the undo, a play moves the game up again** (was
+`bug_rename_undo_freezes_recency`: the never-retired 1→2 marker pinned every
+play under it). -/
+theorem regress_rename_undo_recency :
     let s1 := run init (setupD ++ cycleD ++ [.play false 1 12])
     let s2 := run s1 (flush false ++ pull false)
-    s1.now = 6 ∧ s1.d0.recent = [⟨1, 2, 0⟩] ∧ s2.lib.recents = [⟨1, 4, 0⟩] := by
+    s1.now = 6 ∧ s1.d0.recent = [⟨1, 5, 4⟩] ∧ s2.lib.recents = [⟨1, 5, 4⟩] := by
   decide
 
 /-- Games "B" (1, ROM 10, no save) and "A" (2, ROM 20, save 21); rename B→C
@@ -2187,19 +3105,15 @@ theorem bug_rename_undo_freezes_recency :
 def setupE : List Ev := [.importRom false 1 10, .importRom false 2 20, .play false 2 21] ++
   flush false ++ pull false ++ [.rename false 1 3] ++ flush false ++ pull false
 
-/-- **BUG: renaming a game to a name another game was renamed away from
-merges the two.** Rename A→B (2→1): the stale B→C marker (1→3) captures the
-renamed game on the next merge (`bug_merge_not_idempotent`). After the pull,
-A is gone from the library and the grid, its ROM is an orphan record under
-B, and its save has been moved under C — C's ROM now opens A's save. After
-the next flush Drive agrees: A's ROM is deleted there as a "raced
-duplicate" and A's save is C's save. -/
-theorem bug_rename_into_retired_name :
+/-- **Fixed: renaming a game into a name another game was renamed away from
+keeps the two apart** (was `bug_rename_into_retired_name`, where the stale
+B→C marker captured the renamed game and moved its save onto C's ROM). -/
+theorem regress_rename_into_retired_name :
     let s1 := run init (setupE ++ [.rename false 2 1] ++ flush false ++ pull false)
     let s2 := run s1 (flush false)
-    names s1.d0.recent = [3] ∧ names s1.lib.recents = [3] ∧
-    (⟨1, 0, 20⟩ : Item) ∈ s1.d0.store ∧ (⟨3, 1, 21⟩ : Item) ∈ s1.d0.store ∧
-    s2.files = [⟨3, 0, 10⟩, ⟨3, 1, 21⟩] := by
+    names s1.d0.recent = [1, 3] ∧ names s1.lib.recents = [1, 3] ∧
+    (⟨1, 0, 20⟩ : Item) ∈ s1.d0.store ∧ (⟨1, 1, 21⟩ : Item) ∈ s1.d0.store ∧
+    s2.files = [⟨3, 0, 10⟩, ⟨1, 0, 20⟩, ⟨1, 1, 21⟩] := by
   decide
 
 /-- Device 0 imports 5 and syncs; device 1 pulls and downloads it. -/
@@ -2207,7 +3121,7 @@ def setupF : List Ev := [.importRom false 5 50] ++ flush false ++ pull true ++ [
 
 /-- Device 1 reads the library; device 0 deletes 5 and flushes (Drive now
 has the tombstone); device 1 finishes its flush and overwrites the library
-with its stale merge. No If-Match / revision check (2143-2147). -/
+with its stale merge. No If-Match / revision check on the library write. -/
 def raceF : List Ev := [.flushRead true, .delete false 5] ++ flush false ++
   [.flushMerge true, .flushFiles true, .flushWrite true, .flushCommit true]
 
@@ -2222,105 +3136,40 @@ theorem race_delays_tomb :
     s2.lib.tomb = [⟨5, 3⟩] ∧ s2.d1.store = [] ∧ names s2.d1.recent = [] := by
   decide
 
-/-- A pull in flight; the person renames game 1 to 2 while it downloads.
-`renameGame` installs its marker (`syncState = nextSync`, 3354) and writes
-"recent"; the pull's commit then runs `syncState.ren = lib.ren` (3032) and
-writes its stale "recent" (3048). -/
+/-- A pull in flight; the person renames game 1 to 2 while it downloads. -/
 def raceG : List Ev := [.importRom false 1 10] ++ flush false ++
   [.pullRead false, .pullMerge false, .rename false 1 2, .pullRenames false,
    .pullTombs false false, .pullCommit false, .pullWrite false]
 
-/-- **BUG: a rename made while a pull is in flight is half-undone**: the
-marker is gone for good, the grid shows the old name (whose files are gone
-from the device and, after the flush, from Drive), and the renamed records
-are orphans no tile opens. -/
-theorem bug_rename_during_pull_orphans :
+/-- **Fixed: a rename made while a pull is in flight keeps its marker and its
+tile** (was `bug_rename_during_pull_orphans`). -/
+theorem regress_rename_during_pull :
     let s := run init (raceG ++ flush false ++ pull false)
-    names s.d0.recent = [1] ∧ s.d0.store = [⟨2, 0, 10⟩] ∧ s.d0.ren = [] ∧
-    s.lib.ren = [] ∧ s.files = [⟨2, 0, 10⟩] := by
+    names s.d0.recent = [2] ∧ s.d0.store = [⟨2, 0, 10⟩] ∧ s.d0.ren = [⟨1, 2, 2⟩] ∧
+    s.lib.ren = [⟨1, 2, 2⟩] ∧ s.files = [⟨2, 0, 10⟩] := by
   decide
 
-/-! ## Layer 2c: the suggested fixes, checked on the same traces
+/-- Found by the model of the first fix (`renameGame`'s claim alone): device 0
+renames A (1) to B (2); device 1 renames X (3) into the freed A, then deletes
+A; device 0, not having pulled, plays X (a later play overrules the delete, so
+X lives on as A). -/
+def chainH : List Ev :=
+  [.importRom false 1 10, .importRom false 3 30] ++ flush false ++ pull true ++
+  [.rename false 1 2] ++ flush false ++ pull true ++
+  [.rename true 3 1] ++ flush true ++ [.delete true 1] ++ flush true ++
+  [.play false 3 31] ++ flush false
 
-* Commit (2802-2803, 3031-3032, 3048): re-merge the adopted library with the
-  device's *current* library in the same synchronous segment as the
-  assignment (for "recent", read-merge-write in one IDB transaction):
-  `lib = mergeLibrary(lib, { recents: <current recent>, tomb: syncState.tomb,
-  ren: syncState.ren })` before `syncState.tomb = lib.tomb` etc.
-* `renameGame` (3283): stamp the new entry as a claim on the name,
-  `{ name: newName, ts, imp: ts }`, so the merge spends any older marker
-  whose `from` is the new name (the same rule a fresh import uses). -/
-
-set_option maxRecDepth 8000
-
-def flushCommitFix (dv : Dev) (lib : Lib) (rv : List Nat) : Dev :=
-  let L := mergeLibrary lib (localLib dv)
-  { flushCommitDev dv lib rv with tomb := L.tomb, ren := L.ren }
-
-def pullCommitFix (dv : Dev) (lib : Lib) (remote : List Item) : Dev :=
-  let L := mergeLibrary lib (localLib dv)
-  { pullCommitDev dv lib remote with tomb := L.tomb, ren := L.ren, recent := L.recents }
-
-def renameDevFix (dv : Dev) (a b now : Nat) : Dev :=
-  let v := renameDev dv a b now
-  { v with recent := v.recent.map (fun r => if r.name == b then { r with imp := now } else r) }
-
-def stepFix (s : St) : Ev → St
-  | .flushCommit d =>
-    match (s.dev d).pend with
-    | .fWritten lib rv => s.setDev d (flushCommitFix (s.dev d) lib rv)
-    | _ => s
-  | .pullCommit d =>
-    match (s.dev d).pend with
-    | .pTombed lib remote => s.setDev d (pullCommitFix (s.dev d) lib remote)
-    | _ => s
-  | .rename d a b =>
-    if renameOk (s.dev d) a b then
-      { s.setDev d (renameDevFix (s.dev d) a b s.now) with now := s.now + 1 }
-    else s
-  | e => step s e
-
-def runFix (s : St) (es : List Ev) : St := es.foldl stepFix s
-
-/-- Fixed: the delete made during a flush sticks on every device. -/
-theorem fix_delete_during_flush :
-    let s := runFix init (setupA ++ raceA ++ settleA)
-    noTombFor 7 s = false ∧ names s.lib.recents = [] ∧ names s.d0.recent = [] ∧
-    names s.d1.recent = [] ∧ s.d1.store = [] ∧ s.files = [] := by
-  decide
-
-/-- Fixed: the delete made during a pull stays deleted. -/
-theorem fix_delete_during_pull :
-    let s := runFix init (setupA ++ raceB ++ [.pullWrite false] ++ flush false)
-    names s.d0.recent = [] ∧ s.lib.tomb = [⟨7, 3⟩] := by
-  decide
-
-/-- Fixed: the game imported during a pull keeps its tile and reaches the library. -/
-theorem fix_import_during_pull :
-    let s := runFix init (raceC ++ flush false ++ pull false)
-    names s.d0.recent = [9] ∧ names s.lib.recents = [9] := by
-  decide
-
-/-- Fixed: the rename made during a pull keeps its marker and its tile. -/
-theorem fix_rename_during_pull :
-    let s := runFix init (raceG ++ flush false ++ pull false)
-    names s.d0.recent = [2] ∧ names s.lib.recents = [2] := by
-  decide
-
-/-- Fixed: renaming back settles — no toasts, the files stay put. -/
-theorem fix_rename_undo_settles :
-    let s1 := runFix init (setupD ++ cycleD)
-    let s2 := runFix s1 cycleD
-    s1.d0.toasts = 0 ∧ s1.files.map (·.game) = [1, 1] ∧
-    s2.d0.toasts = 0 ∧ s2.files.map (·.game) = [1, 1] := by
-  decide
-
-/-- Fixed: renaming into a retired name keeps the two games apart. -/
-theorem fix_rename_into_retired_name :
-    let s := runFix init (setupE ++ [.rename false 2 1] ++ flush false ++ pull false ++ flush false)
-    names s.d0.recent = [1, 3] ∧
-    (⟨1, 0, 20⟩ : Item) ∈ s.d0.store ∧ (⟨1, 1, 21⟩ : Item) ∈ s.d0.store ∧
-    (⟨1, 1, 21⟩ : Item) ∈ s.files ∧ (⟨3, 0, 10⟩ : Item) ∈ s.files := by
+/-- **Fixed: the game renamed into a retired name by another device is not
+folded on by the old marker.** With the claim on `renameGame` only, the next
+merge applied the stale 1→2 marker to X (now A): the library lost X, and X's
+save (31) was moved under B beside B's ROM (10) (`bug_mergeV1_chain_not_idempotent`
+is the merge that did it). With the merge's claim, X stays A, with its own ROM
+and save, on the device and on Drive. -/
+theorem regress_revived_chain :
+    let s := run init (chainH ++ pull false ++ flush false ++ pull false)
+    names s.d0.recent = [1, 2] ∧ names s.lib.recents = [1, 2] ∧
+    s.d0.store = [⟨2, 0, 10⟩, ⟨1, 0, 30⟩, ⟨1, 1, 31⟩] ∧
+    s.files = [⟨2, 0, 10⟩, ⟨1, 0, 30⟩, ⟨1, 1, 31⟩] := by
   decide
 
 end WebState.DriveLibrary
