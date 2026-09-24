@@ -396,6 +396,7 @@ type EmuKind = enum ekNone, ekGBA, ekGB
 
 type AppState = ref object
   cfg:             Config
+  cur_path:        string  # what load_rom last loaded (a zip: the zip); Reset reloads it
   gba_emu:         GBA
   gb_emu:          GB
   emu_kind:        EmuKind
@@ -619,6 +620,7 @@ proc apply_speed_mode() =
 proc current_cheat_engine(): CheatEngine
 proc load_cheats()
 proc on_cheats_changed()
+proc save_state_slot(slot: int): bool
 # Network link procs, defined below with the rest of the link code
 proc teardown_netlink(why = "")
 proc link_cancel_setup()
@@ -740,7 +742,15 @@ proc load_rom(path: string) =
   link_auto_stop()
   link_cancel_setup()
   teardown_netlink("another game was loaded")
-  # A frame the link left torn was just finished: what it wrote goes too
+  # A Quick Save asked for in this same batch of input is the outgoing
+  # game's: saved now, not dropped. With the link gone the core is at a frame
+  # boundary (teardown finishes a frame the link left torn).
+  if app.pending_save:
+    app.pending_save = false
+    if not save_state_slot(0):
+      app.state_notice = QUICK_SAVE_FAILED
+      app.state_notice_hint = last_state_error
+  # What that finished frame wrote goes too
   flush_saves()
   if built.gb != nil:
     app.gb_emu = built.gb
@@ -783,6 +793,7 @@ proc load_rom(path: string) =
   let (tw, th) = if app.emu_kind == ekGBA: (GBA_W, GBA_H) else: (GB_W, GB_H)
   glTexImage2D(GL_TEXTURE_2D, 0, GLint(GL_RGB5), GLsizei(tw), GLsizei(th), 0,
                GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, nil)
+  app.cur_path = path
   var recs = app.cfg.recents
   let idx = recs.find(path)
   if idx >= 0: recs.delete(idx)
@@ -798,6 +809,11 @@ proc load_rom(path: string) =
   # Load or Delete act on them (mark_stale also drops the old game's notice)
   app.save_states.mark_stale()
   new_core_takes_held_input()
+
+proc reset_game() =
+  ## Restart the running game: the file it was loaded from, whatever became
+  ## of the Recent list since.
+  if app.cur_path.len > 0: load_rom(app.cur_path)
 
 # ──────────────────────────── Save States ────────────────────────────
 
@@ -1511,8 +1527,7 @@ proc render_imgui() =
                                 addr fast_forward, true):
             app.gb_emu.apu.sync = not fast_forward
             if fast_forward: app.gb_emu.apu.turbo = false
-        if should_reset and app.cfg.recents.len > 0:
-          load_rom(app.cfg.recents[0])
+        if should_reset: reset_game()
         igSeparator()
         # Cheats live here, not under Debug: a first-class feature, next to
         # the other things that change a running game.
@@ -1806,7 +1821,7 @@ proc handle_input() =
       of krShortcut:
         case sym
         of K_r:
-          if app.cfg.recents.len > 0: load_rom(app.cfg.recents[0])
+          reset_game()
         of K_p:
           app.paused = not app.paused
         of K_n:
