@@ -29,6 +29,7 @@ test("a peer's pause applies here without echoing back", async () => {
     var __relayed = [];
     window.rbSendPause = (on) => __relayed.push(on);
     rollbackMode = true;
+    document.body.classList.add("running"); // the session on screen, not home
   `);
   app.runIn("window.applyRemotePause(true)");
   assert.equal(app.runIn("paused"), true, "peer's pause froze this side");

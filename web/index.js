@@ -8232,21 +8232,34 @@ document.addEventListener("drop", (e) => {
   if (e.dataTransfer.files?.length > 0) handleDroppedFile(e.dataTransfer.files[0]);
 });
 
+// The pause button's icon/title and body.paused for the player's pause choice.
+const showPauseChoice = (on) => {
+  pauseButton.classList.toggle("paused", on);
+  pauseButton.classList.toggle("active", on);
+  pauseButton.title = on ? "Resume" : "Pause";
+  document.body.classList.toggle("paused", on);
+};
 const togglePause = (fromRemote) => {
   paused = !paused;
   if (paused) storeLastFrame({ force: true }); // the paused picture is the library's
-  pauseButton.classList.toggle("paused", paused);
-  pauseButton.classList.toggle("active", paused);
-  pauseButton.title = paused ? "Resume" : "Pause";
-  document.body.classList.toggle("paused", paused);
+  showPauseChoice(paused);
   // Linked online, pause freezes both sides (a one-sided pause stalls the
   // peer at the prediction limit); relay unless it came from them.
   if (!fromRemote && rollbackMode && typeof window.rbSendPause === "function") {
     window.rbSendPause(paused);
   }
 };
-// The peer paused/resumed: match without echoing back.
+// The peer paused/resumed: match without echoing back. Not through a pause
+// someone else holds: the home screen's lasts until Resume, and Report a Bug
+// (still in the menu while linked) keeps the core frozen until it closes, so
+// there the peer's choice becomes what closing it gives back.
 window.applyRemotePause = (on) => {
+  if (!document.body.classList.contains("running")) return;
+  if (reportModal.classList.contains("open")) {
+    reportWasPaused = !!on;
+    showPauseChoice(!!on);
+    return;
+  }
   if (paused !== on) togglePause(true);
 };
 
@@ -8385,6 +8398,9 @@ const frameAdvance = () => {
 // the range and re-emulates to its first frame; clip_tick then replays at
 // realtime while a MediaRecorder captures the canvas and the audio tap.
 var clipReplayActive = false;
+// `paused` as the export found it: the replay unpauses the core to run, and
+// the live game comes back to the player's choice, not to the replay's.
+var clipExportWasPaused = false;
 var clipRecorder = null;
 var clipChunks = [];
 const clipLastItem = document.getElementById("clip-last");
@@ -8400,6 +8416,7 @@ const clipMimeType = () => {
 
 const finishRetroClip = (save) => {
   clipReplayActive = false;
+  paused = clipExportWasPaused;
   document.body.classList.remove("clip-replaying");
   clipBanner.hidden = true;
   if (clipRecorder && clipRecorder.state !== "inactive") {
@@ -8486,6 +8503,7 @@ const startClipExport = (startAgo, endAgo, slug, label) => {
   document.body.classList.add("clip-replaying");
   clipBanner.hidden = false;
   updateClipBanner(frames);
+  clipExportWasPaused = paused;
   paused = false; // the replay must run even if the game was paused
   return true;
 };
@@ -9074,10 +9092,13 @@ const shortcutKeyHandler = (e, down) => {
   if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
 
   const gameLoaded = !!currentRomName || linkMode || rollbackMode || netActive();
+  // The home screen keeps a loaded game paused behind it (body.running off);
+  // the pause keys there would run or step a game nobody can see.
+  const gameShown = document.body.classList.contains("running");
   let handled = false;
   switch (e.code) {
     case "Space":
-      if (!gameLoaded) break;
+      if (!gameLoaded || !gameShown) break;
       if (!e.repeat) pauseButton.click();
       handled = true; // swallow repeats too (Space would scroll / click)
       break;
@@ -9121,7 +9142,7 @@ const shortcutKeyHandler = (e, down) => {
     case "Period":
       // Frame advance: first press pauses, further presses step one frame.
       // Single-core only.
-      if (e.shiftKey || !currentRomName || !speedControlsOk()) break;
+      if (e.shiftKey || !currentRomName || !gameShown || !speedControlsOk()) break;
       if (!paused) {
         if (!e.repeat) pauseButton.click();
       } else {

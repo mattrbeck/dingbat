@@ -940,7 +940,13 @@ manualShareBtn?.addEventListener("click", async () => {
 let screenLock = null;
 const acquireWakeLock = async () => {
   try {
-    screenLock = (await navigator.wakeLock?.request("screen")) || null;
+    const lock = (await navigator.wakeLock?.request("screen")) || null;
+    // Hold one lock, and only while the modal is up: the session can start
+    // (closeNetModal) while the request is out, and every return to the tab
+    // re-arms, so two requests can be out at once.
+    releaseWakeLock();
+    if (netModalOpen()) screenLock = lock;
+    else lock?.release();
   } catch {} // denied (low power mode etc.)
 };
 const releaseWakeLock = () => {
@@ -1545,17 +1551,20 @@ const netShutdown = async (opts) => {
     clearTimeout(s.redialTimer);
     clearTimeout(s.rtcDeadline);
   }
-  // Thaw the game frozen at modal open, even if rb was never created.
-  if (netFrozeGame) {
+  // Thaw the game frozen at modal open, even if rb was never created; but not
+  // while the modal stays up for a retry (netFail), which the freeze is for.
+  if (netFrozeGame && !(opts?.keepModal && netModalOpen())) {
     netFrozeGame = false;
     paused = false;
     document.body.classList.remove("paused");
     pauseButton.classList.remove("paused", "active");
     pauseButton.title = "Pause";
   }
+  // A session hands the game back in whatever pause state it is in: every
+  // pause still in force has its own undo (Resume, the home screen's Resume,
+  // Report a Bug's close; rbConnect's snapshot freeze is the thaw above).
+  // Unpausing here ran the game behind the home screen and left the Resume icon up.
   if (s?.rb) {
-    paused = false;
-    document.body.classList.remove("paused");
     if (s.rb.inited) {
       net = s; // rbTeardown reads net.rb / currentOriginalName
       await rbTeardown();
