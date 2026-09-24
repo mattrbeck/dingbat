@@ -1098,6 +1098,9 @@ const PREFETCH_TOGGLE_LAW* {.booldefine.} = true
 const HALT_WAKE_RUNS_ONE* {.booldefine.} = true
   ## An interrupt that wakes a halted CPU is taken one instruction after the
   ## wake, not at it (cpu.tick; tests/roms/payloads/wakeirq.s).
+const IRQ_FETCH_VIA_PREFETCH* {.booldefine.} = true
+  ## The IRQ entry's in-flight gamepak fetch comes from the prefetcher when
+  ## it runs on the interrupted stream (cpu.irq).
 const HALT_ENTRY_STALL* {.intdefine.} = 2
   ## Cycles a HALTCNT write stalls the CPU before the halt can end (mmio.nim).
 const HALT_WAKE_INSTR_COST* = 3

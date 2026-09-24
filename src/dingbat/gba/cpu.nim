@@ -94,6 +94,29 @@ proc irq*(cpu: CPU) =
     # instruction, and it reads none of the glitched registers.
     if cpu.ldm_glitch != 0: cpu.ldm_glitch_restore(ran = false)
     let lr = cpu.r[15] - (if cpu.cpsr.thumb: 0'u32 else: 4'u32)
+    # Interrupting code that executes from the gamepak also pays for the
+    # in-flight opcode fetch: +2*S16 (hardware: gbaedge IRQLAT2 and IRQWIN2
+    # on AGB SP, docs/hwprobe.md; the mGBA suite Timer IRQ rows run from
+    # IWRAM and pin the no-stall case). A halt-wake entry fetches nothing, so
+    # it is exempt. With the prefetcher on and the interrupted stream going
+    # on at the next instruction (lr - 4), that fetch is the prefetcher's
+    # (IRQ_FETCH_VIA_PREFETCH): a halfword (Thumb) or word (ARM) it already
+    # holds costs the entry nothing, one still in flight its wait less the
+    # cycle the entry overlaps. alyosha irq/BL_IRQ, _3 (a timer interrupting
+    # Thumb code around a `bl`, the buffer full or just flushed by the
+    # branch) and IRQ_sub, _slow (both waitstates); each alternative in the
+    # commit that added this fails some of them.
+    var inflight = 0
+    if not cpu.halt_wake:
+      let page = int(bits_range(lr, 24, 27))
+      if page in 8..13:
+        let bus = cpu.gba.bus
+        if IRQ_FETCH_VIA_PREFETCH and bus.prefetch_on and not bus.pf_paused and
+           bus.rom_next_addr == lr - 4:
+          let now = bus.sched.cycles + CycleCount(bus.cycles)
+          inflight = max(0, bus.pf_serve(now, page, if cpu.cpsr.thumb: 1 else: 2) - 1)
+        else:
+          inflight = 2 * int(bus.wait16_s[page])
     let old_cpsr = cpu.cpsr
     cpu.switch_mode(modeIRQ)
     cpu.spsr = old_cpsr
@@ -112,15 +135,7 @@ proc irq*(cpu: CPU) =
     # and a stop lands a cycle later than we had it (TIMER_STOP_DELAY): two
     # errors that cancelled everywhere except in a handler that reads.
     cpu.gba.bus.add_cycles(IRQ_ENTRY_EXTRA)
-    # Interrupting code that executes from the gamepak also pays for the
-    # in-flight 32-bit ROM fetch: +2*S16 (hardware: gbaedge IRQLAT2 and
-    # IRQWIN2 on AGB SP, docs/hwprobe.md; the mGBA suite Timer IRQ rows run
-    # from IWRAM and pin the no-stall case). A halt-wake entry fetches
-    # nothing, so it is exempt.
-    if not cpu.halt_wake:
-      let page = int(bits_range(lr, 24, 27))
-      if page in 8..13:
-        cpu.gba.bus.add_cycles(2 * int(cpu.gba.bus.wait16_s[page]))
+    if inflight != 0: cpu.gba.bus.add_cycles(inflight)
 
 proc und*(cpu: CPU) =
   # Undefined Instruction trap; LR_und = the instruction after the faulting one.
