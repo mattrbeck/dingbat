@@ -53,6 +53,14 @@ refused.
   renamed away (left queued for the pull to move); that is library logic,
   modelled in DriveLibrary (`flush_uploads_only_live`), and `no_lost_upload`
   is about the keys of games that exist under their name.
+* Session: an account switch's grid swap (`adoptDriveAccount` ->
+  `swapAccountGames`: tiles with nothing on this device but their picture go
+  with the account that listed them, and that account's come back) is not
+  modelled: this model has no library contents, only which account's state
+  and token a flush holds, and the swap happens inside `gdriveConnect`'s
+  identifying stretch, when no sync can start (`syncActive`). It is pinned by
+  web/tests/drive-session.test.mjs instead.
+
 * Queue: only `queueUp` is modelled; `queueDel`/`queueRen` and tombstones/
   renames (another model) are folded into the prelude await and into
   `libPending` (the flush proceeds with an empty `queueUp` when

@@ -2462,6 +2462,46 @@ const delStamps = () => (syncState.delTs ??= {});
 const blankAccountState = () => ({ queueUp: [], queueDel: [], queueRen: [],
                                    tomb: [], ren: [], sigs: {}, rmt: {}, delTs: {} });
 
+// Anything of the game on this device besides the picture a pull brought.
+const holdsGame = async (name) => {
+  let pic = frameKey(name);
+  for (let k of allPerGameKeys(name)) if (k !== pic && (await dbGet(k)) != null) return true;
+  return false;
+};
+
+// The grid ("recent") and the pictures a pull brings down are this device's,
+// shared by every account that signs in here, and what this device holds of
+// a game (its ROM, a save, a state) goes to whichever account is signed in.
+// But a tile with nothing of it here except its picture is on the grid only
+// because the last account's Drive listed it: it is that account's, and
+// left in place it would be written into the next account's library, its
+// picture uploaded there too. So it leaves with its account: the entry is
+// parked beside that account's queues (`outgoing.recents`), the picture is
+// dropped along with the sigs/rmt that say it is here (that account's next
+// pull fetches it again), and the entries parked for the incoming account
+// come back.
+const swapAccountGames = async (outgoing, incoming) => {
+  let gone = [];
+  await updateRecent(async (list) => {
+    let keep = [];
+    for (let e of list) {
+      if (e?.name && !(await holdsGame(e.name))) gone.push(e);
+      else keep.push(e);
+    }
+    let back = incoming.filter((e) => e?.name && !keep.some((k) => k.name === e.name));
+    if (!gone.length && !back.length) return;
+    return [...keep, ...back].sort((x, y) => (y.ts || 0) - (x.ts || 0));
+  });
+  for (let e of gone) {
+    let pic = frameKey(e.name);
+    await dbDelete(pic);
+    delete outgoing.sigs?.[pic];
+    delete outgoing.rmt?.[pic];
+  }
+  outgoing.recents = gone;
+  if (gone.length || incoming.length) refreshHomeRecent();
+};
+
 // One device, more than one Google account. A different account signing in
 // parks the previous account's state under its own id and starts clean; if
 // that account ever signs back in, its parked work is restored and flushes
@@ -2471,19 +2511,22 @@ const adoptDriveAccount = async (acct) => {
   if (!acct) return;                       // tokeninfo gave no id: leave as is
   if (syncState.acct === acct) return;     // the same account as before
   let parked = { ...(syncState.parked || {}) };
+  let mine = null;
   if (syncState.acct) {
-    let mine = {};
+    mine = {};
     for (let k of PER_ACCOUNT_KEYS) mine[k] = syncState[k];
     parked[syncState.acct] = mine;
   }
   let restored = parked[acct];
   delete parked[acct];
+  let { recents: theirs = [], ...theirState } = restored || {};
   // Drive work still running holds the last account's state: end its session.
   driveSession++;
   syncRemarked.clear();
-  Object.assign(syncState, blankAccountState(), restored || {});
+  Object.assign(syncState, blankAccountState(), theirState);
   syncState.acct = acct;
   syncState.parked = parked;
+  if (mine) await swapAccountGames(mine, theirs);
   await saveSyncState();
   let waiting = restored
     ? (restored.queueDel || []).length + (restored.queueRen || []).length +

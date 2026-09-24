@@ -168,3 +168,53 @@ test("a sign-in that cannot confirm the account does not sync the previous one's
   assert.equal(app.api.gdriveToken, null);
   eq(accounts.drives.a2.log, [], "and account 2's Drive untouched");
 });
+
+// A UI QA run (d3, phase 2b): the grid and the pictures a pull brings down
+// are device-wide, so after syncing as one account, a game that is only on
+// that account's Drive (a tile with its picture and nothing else here) was
+// listed, and its picture uploaded, into the next account's Drive. Games
+// with files here still go to whoever signs in; the other account's
+// Drive-only ones leave with it, and come back when it does.
+test("signing in as another account does not publish the last one's Drive-only games", async () => {
+  const clock = makeClock();
+  const accounts = makeAccounts(clock);
+  const { a1, a2 } = accounts.drives;
+  a1.add("rom:Zeta.gb", u8(1, 2));
+  a1.add("frame:Zeta.gb", u8(9, 9, 9));
+  a1.add("library", new TextEncoder().encode(JSON.stringify(
+    { recents: [{ name: "Zeta.gb", ts: 5 }], tomb: [], ren: [] })));
+  const app = await linked(clock, accounts);
+  const popups = installGis(app);
+  app.api.gdriveToken = "tok1";
+  app.api.gdriveTokenExp = clock.peek() + 3600e3;
+  await app.api.addRecentRom("Mine.gba", u8(7));    // a game with its file here
+  await settle();
+  await app.api.pullSync();
+  await settle();
+  eq((app.idb.get("recent") || []).map((r) => r.name).sort(), ["Mine.gba", "Zeta.gb"]);
+  assert.ok(app.idb.get("frame:Zeta.gb"), "Zeta's picture came down as a1");
+
+  app.api.gdriveSignOut();
+  const signIn = async (tok) => {
+    const n = popups.length;
+    const connecting = app.api.gdriveConnect();
+    await until(() => popups.length === n + 1, "the sign-in popup");
+    popups[n].grant(tok);
+    await connecting;
+    await settle();
+  };
+  await signIn("tok2");
+  assert.equal(app.api.syncState.acct, "a2");
+  const libOf = (d) => JSON.parse(new TextDecoder().decode(d.get("library").bytes));
+  eq(libOf(a2).recents.map((r) => r.name), ["Mine.gba"], "a2's library has this device's game only");
+  eq(a2.names(), ["rom:Mine.gba"], "and none of a1's files");
+  eq((app.idb.get("recent") || []).map((r) => r.name), ["Mine.gba"], "the grid shows a2's games");
+
+  app.api.gdriveSignOut();
+  await signIn("tok1");
+  assert.equal(app.api.syncState.acct, "a1");
+  eq((app.idb.get("recent") || []).map((r) => r.name).sort(), ["Mine.gba", "Zeta.gb"],
+    "a1's Drive-only game is back");
+  assert.ok(app.idb.get("frame:Zeta.gb"), "with its picture");
+  eq(libOf(a1).recents.map((r) => r.name).sort(), ["Mine.gba", "Zeta.gb"]);
+});

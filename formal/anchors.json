@@ -30,7 +30,7 @@
     "web/index.js#writeDriveLibrary": "e4647bbf3e38b1c0"
   },
   "DriveSession": {
-    "web/index.js#adoptDriveAccount": "6b5c2f3c268d5cb7",
+    "web/index.js#adoptDriveAccount": "56c1911f28da875f",
     "web/index.js#armDriveRenewOnGesture": "90875dc9a35f413e",
     "web/index.js#clearDriveToken": "785b0d55e908f7a4",
     "web/index.js#driveEnrolled": "3f36c63527c55d8e",
