@@ -942,10 +942,15 @@ proc gb_apply_state(gb: GB; payload: string; rev: uint32;
 
 proc gb_rom_checksum(gb: GB): uint32 =
   ## The whole ROM file, from the cache taken at load (Mbc.rom_identity), not
-  ## the live buffer, which cheats patch in place. load_cartridge allocates
-  ## exactly the file's length, so unlike gba_rom_checksum there are no legacy
-  ## variants; if a GB mapper ever needs a padded buffer, hash the file length.
+  ## the live buffer, which cheats patch in place. load_cartridge hashes the
+  ## file's own bytes, not its padding, so unlike gba_rom_checksum there are
+  ## no legacy variants.
   gb.cartridge.rom_identity
+
+proc gb_rom_size(gb: GB): uint32 =
+  ## The ROM file's length, as state headers have always carried it: `rom`
+  ## is padded past a short or odd-sized file.
+  uint32(gb.cartridge.rom_file_size)
 
 proc state_payload*(gb: GB): string =
   ## Raw serialized state, no header/validation. For trusted in-process uses
@@ -980,11 +985,11 @@ proc state_bytes*(gb: GB; thumbnail = false): string =
   ## a downscaled BGR555 screenshot trailer is appended (ignored by old readers).
   let payload = gb.gb_state_payload()
   if thumbnail:
-    make_state_bytes(ckGB, gb.gb_rom_checksum(), uint32(gb.cartridge.rom.len),
+    make_state_bytes(ckGB, gb.gb_rom_checksum(), gb.gb_rom_size(),
                      payload, gb.gb_thumbnail(), uint16(GB_THUMB_W), uint16(GB_THUMB_H))
   else:
     make_state_bytes(ckGB, gb.gb_rom_checksum(),
-                     uint32(gb.cartridge.rom.len), payload)
+                     gb.gb_rom_size(), payload)
 
 proc gb_apply_checked(gb: GB; payload: string; rev: uint32): bool =
   ## Apply a validated payload, restoring the live machine if it fails midway.
@@ -1013,7 +1018,7 @@ proc parse_state_image*(gb: GB; data: string; origin = "state data"):
   ## of the GBA proc of the same name, so the format test can ask both cores
   ## the same question instead of assembling a ROM identity itself.
   parse_state_payload(data, ckGB, gb.gb_rom_checksum(),
-                      uint32(gb.cartridge.rom.len), origin)
+                      gb.gb_rom_size(), origin)
 
 proc state_rom_identity*(gb: GB): uint32 =
   ## The ROM identity a state header carries; the desktop names slot files by it.
@@ -1021,7 +1026,7 @@ proc state_rom_identity*(gb: GB): uint32 =
 
 proc state_is_for*(gb: GB; data: string): bool =
   ## Whether a state image's header names this cart.
-  state_names_rom(data, ckGB, gb.gb_rom_checksum(), uint32(gb.cartridge.rom.len))
+  state_names_rom(data, ckGB, gb.gb_rom_checksum(), gb.gb_rom_size())
 
 proc load_state_bytes*(gb: GB; data: string): bool =
   ## Validate and apply a full state image. Mirrors load_state's rollback.
@@ -1043,12 +1048,12 @@ proc save_state*(gb: GB; path: string; thumbnail = false): bool =
   ## echoes a message on failure.
   try:
     if thumbnail:
-      write_state_file(path, ckGB, gb.gb_rom_checksum(), uint32(gb.cartridge.rom.len),
+      write_state_file(path, ckGB, gb.gb_rom_checksum(), gb.gb_rom_size(),
                        gb.gb_state_payload(), gb.gb_thumbnail(),
                        uint16(GB_THUMB_W), uint16(GB_THUMB_H))
     else:
       write_state_file(path, ckGB, gb.gb_rom_checksum(),
-                       uint32(gb.cartridge.rom.len), gb.gb_state_payload())
+                       gb.gb_rom_size(), gb.gb_state_payload())
     true
   except CatchableError:
     last_state_error = getCurrentExceptionMsg()   # the frontend's hint
@@ -1063,7 +1068,7 @@ proc load_state*(gb: GB; path: string): bool =
   var image: tuple[payload: string; rev: uint32]
   try:
     image = read_state_payload(path, ckGB, gb.gb_rom_checksum(),
-                               uint32(gb.cartridge.rom.len))
+                               gb.gb_rom_size())
   except CatchableError:
     last_state_error = getCurrentExceptionMsg()
     echo "Load state failed: ", last_state_error

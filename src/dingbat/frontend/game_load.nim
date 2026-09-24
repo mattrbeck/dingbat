@@ -11,12 +11,11 @@ import ../gb/gb
 
 const ROM_EXTS* = [".gba", ".gb", ".gbc"]
 
-# The smallest file each core can run. Every Game Boy cartridge is at least
-# 32 KiB and the core reads the whole 0x0000-0x7FFF window unchecked (a
-# shorter file is an IndexDefect as soon as the CPU runs past its end); a GBA
-# cartridge header ends at 0xBF.
+# The smallest file taken as a ROM. The GB core runs any length (it pads to a
+# whole cartridge with $FF), so a Game Boy file is refused only when it cannot
+# hold the cartridge header ($0100-$014F); a GBA cartridge header ends at 0xBF.
 const
-  GB_MIN_ROM  = 0x8000
+  GB_MIN_ROM  = 0x150
   GBA_MIN_ROM = 0xC0
 
 type
@@ -45,7 +44,7 @@ proc is_gb_rom*(rom_path: string): bool =
 proc build_core*(rom_path: string; o: CoreOptions): BuiltCore =
   ## Builds and post-inits the core for `rom_path` into a value of its own, so
   ## a file that is not a ROM leaves the running game as it was. A file too
-  ## short for its core is refused before a constructor indexes past its end.
+  ## short to be a game (GB_MIN_ROM) is refused before a constructor runs.
   let name = rom_path.extractFilename()
   let gb = is_gb_rom(rom_path)
   var size = 0'i64

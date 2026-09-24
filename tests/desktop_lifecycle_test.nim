@@ -1,9 +1,11 @@
 ## The desktop's game lifecycle (src/dingbat/frontend/game_load.nim, called by
 ## load_rom in src/dingbat.nim; formal/DesktopState/GameLifecycle.lean):
 ## a file that is not a ROM is refused before anything of the running game is
-## touched, instead of an IndexDefect out of main(); a GBA game's battery is
-## written when its core is dropped or the app quits, including one a state
-## load restored while paused, and a write that fails is reported, not raised;
+## touched, instead of an IndexDefect out of main(), and a .gb shorter than a
+## cartridge plays, padded with $FF, in the core the web shares; a GBA game's
+## battery is written when its core is dropped or the app quits, including one
+## a state load restored while paused, and a write that fails is reported, not
+## raised;
 ## a zip extracts to one cache folder however its path is spelled; a ROM path
 ## with no extension keeps its battery file beside it, not `<parent>.sav`.
 
@@ -12,20 +14,76 @@ import zippy/ziparchives
 import dingbat/frontend/game_load
 import dingbat/gb/gb
 import dingbat/gba/gba
+import dingbat/common/serialize
 
 let dir = createTempDir("dingbat_lifecycle_", "")
 
 proc opts(): CoreOptions =
   CoreOptions(headless: true, use_hle: true)
 
+proc short_gb(n: int; cart_type = 0x00): string =
+  ## The first `n` bytes of a 32 KiB cart that jumps to $0150 and runs NOPs
+  ## to the end of the file and on into whatever lies past it, with marks at
+  ## the bank edges. Past the file the core sees $FF: RST $38 over and over,
+  ## whose pushes walk the stack through the whole address space, cartridge
+  ## registers and RAM included, every eight frames or so.
+  var rom = newString(0x8000)                 # $00 = NOP
+  rom[0x101] = char(0xC3)                     # jp $0150
+  rom[0x102] = char(0x50)
+  rom[0x103] = char(0x01)
+  rom[0x147] = char(cart_type)
+  rom[0x1FFF] = char(0xA1)
+  rom[0x3FFF] = char(0xB2)
+  rom[0x4000] = char(0xC3)
+  rom.setLen(min(n, rom.len))
+  if n > 0x8000: rom.add(newString(n - 0x8000))
+  rom
+
+block short_gb_files_run:
+  # The GB core as the web builds it (no size check in front): a file shorter
+  # than a cart, or not a whole number of 16 KiB banks, ran off the end of
+  # `rom` (IndexDefect in the constructor or at the first frame). It is now
+  # padded with $FF to a power of two, at least 32 KiB, and plays.
+  for (n, kind) in [(0, 0x00), (0x100, 0x00), (0x150, 0x00), (0x2000, 0x00),
+                    (0x4000, 0x00), (0x4001, 0x00), (0x4001, 0x01),
+                    (0x8001, 0x01), (0xC000, 0x01)]:
+    let p = dir / "short.gb"
+    let file = short_gb(n, kind)
+    writeFile(p, file)
+    let g = new_gb("", p, fifo = true, headless = true, run_bios = false)
+    g.post_init()
+    for _ in 0 ..< 30: g.run_until_frame()
+    let rom = g.cartridge.rom
+    var want = 0x8000
+    while want < n: want = want shl 1
+    doAssert rom.len == want, &"{n:#x}: {rom.len:#x}"
+    for i in 0 ..< n: doAssert rom[i] == uint8(file[i]), &"{n:#x} @{i:#x}"
+    for i in n ..< rom.len: doAssert rom[i] == 0xFF, &"{n:#x} @{i:#x}"
+    # Every bank a mapper can select stays inside the image.
+    for bank in [0, 1, 2, 3, 5, 0x1F]:
+      g.cartridge.mbc_write(0x2000, uint8(bank))
+      discard g.cartridge.mbc_read(0x4000)
+      discard g.cartridge.mbc_read(0x7FFF)
+    # Save states name the file as it is on disk, as they always did.
+    let st = g.state_bytes()
+    doAssert g.state_is_for(st)
+    doAssert g.state_rom_identity() == fnv1a(file), &"{n:#x}"
+    doAssert g.load_state_bytes(st)
+
 block short_roms_are_refused:
-  # Zero bytes, a header's worth, and one byte short of the smallest cart:
-  # each one crashed the app (in the constructor or at the first frame).
-  for n in [0, 0x150, 0x7FFF]:
+  # A .gb too short to hold a cartridge header is not a ROM; one that holds
+  # the header builds (the core pads it, above).
+  for n in [0, 0x14F]:
     let p = dir / "short.gb"
     writeFile(p, newString(n))
     let b = build_core(p, opts())
     doAssert b.error.len > 0 and b.gb == nil and b.gba == nil, $n
+  for n in [0x150, 0x4000]:
+    let p = dir / "short.gb"
+    writeFile(p, short_gb(n))
+    let b = build_core(p, opts())
+    doAssert b.error == "" and b.gb != nil, $n
+    for _ in 0 ..< 30: b.gb.run_until_frame()
   for n in [0, 0xBF]:
     let p = dir / "short.gba"
     writeFile(p, newString(n))

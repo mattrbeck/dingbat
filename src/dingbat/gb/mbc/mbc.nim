@@ -115,8 +115,17 @@ method mbc_rumble*(cart: Mbc): bool {.base.} = false
 
 proc load_cartridge*(rom_path: string): Mbc =
   let raw = readFile(rom_path)
-  var rom = newSeq[uint8](raw.len)
+  # Every cartridge's ROM is a power of two and at least 32 KiB (Pan Docs,
+  # "$0148 - ROM size": 32 KiB shifted left by the value), and the CPU reads
+  # the whole $0000-$7FFF window and any bank a mapper selects. A file that is
+  # shorter (homebrew, a truncated dump) or not a whole number of banks is
+  # padded to that shape with $FF, what the bus reads where no chip answers:
+  # its code runs, and a jump past its end meets RST $38, not an IndexDefect.
+  var size = 0x8000
+  while size < raw.len: size = size shl 1
+  var rom = newSeq[uint8](size)
   for i in 0 ..< raw.len: rom[i] = uint8(raw[i])
+  for i in raw.len ..< size: rom[i] = 0xFF
 
   # MMM01 compilations put their real header in the last 32 KiB, where the menu
   # program lives: Pan Docs, "the correct ROM header (with Nintendo logo)
@@ -257,7 +266,10 @@ proc load_cartridge*(rom_path: string): Mbc =
   # both decided from the ROM image here, so the map is only well defined once
   # the cartridge object exists.
   mbc_sync_rom_map(cart)
-  # Identity from the bytes as loaded, once. See the GBA side: hashing the
-  # live buffer let a Game Genie code orphan the player's save states.
-  cart.rom_identity = fnv1a(cart.rom)
+  # Identity from the file's bytes as loaded, once, without the padding, so a
+  # state saved before the padding existed still names this cart. See the GBA
+  # side: hashing the live buffer let a Game Genie code orphan the player's
+  # save states.
+  cart.rom_identity = fnv1a(cart.rom.toOpenArray(0, raw.len - 1))
+  cart.rom_file_size = raw.len
   result = cart

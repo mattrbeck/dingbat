@@ -163,7 +163,7 @@ inductive Path
   | pGb    -- /r/P.gb             game P1
   | pGbc   -- /r/P.gbc            game P2 (another game with the same stem)
   | xGba   -- /s/A.gba            game X (same file name as /r/A.gba, other folder)
-  | eGb    -- /r/E.gb             a zero-byte (or < 0x148-byte) .gb file
+  | eGb    -- /r/E.gb             a .gb too short for a cartridge header (< 0x150 bytes)
   | roGba  -- /ro/R.gba           game R, in a folder dingbat cannot write
   | zRel   -- z.zip               /r/z.zip as typed on the CLI from /r (holds Z.gba)
   | zAbs   -- /r/z.zip            the same zip, dragged or picked in the explorer
@@ -191,9 +191,10 @@ def sysOf : Path → Sys
   | .cGb | .pGb | .pGbc | .eGb => .gb
   | _ => .gba
 
-/-- The game in a ROM file; `none`: the constructor raises (the zero-byte
-`.gb`: `load_cartridge` reads `rom[0x0147]`, an IndexDefect, which no
-`except` in the frontend catches). -/
+/-- The game in a ROM file; `none`: not a game. In the code the constructor
+raises on it (`eGb`: `load_cartridge` reads `rom[0x0147]` past the end of a
+short file, an IndexDefect, which no `except` in the frontend catches); the
+fix's `build_core` refuses it first, by length. -/
 def gameOf : Path → Option Game
   | .aGba => some .A
   | .bGba => some .B
@@ -1389,15 +1390,19 @@ theorem reset_restarts {s : St} (h : Reachable s) (hpc : s.pc = .input) {c : Cor
 2. `load_rom`: a missing file or a zip with no ROM returns with a notice
    before anything else. Then `flush_saves()` (before the new core reads the
    `.sav`: a Reset reloads the same file), then `build_core` builds and
-   post-inits the new core into a value of its own, refusing a GB file under
-   0x8000 bytes or a GBA file under 0xC0 before a constructor indexes into it,
-   and catching `CatchableError`. Refused: a notice, and the old game keeps
+   post-inits the new core into a value of its own, refusing a GB file too
+   short for a cartridge header (under 0x150 bytes, `eGb`) or a GBA file
+   under 0xC0, and catching `CatchableError`. The GB core pads a file shorter than
+   a cartridge, or not a whole number of banks, with $FF to a power of two of
+   at least 32 KiB (`load_cartridge`), so every other `.gb` builds and runs,
+   as the model's other GB paths do. Refused: a notice, and the old game keeps
    running, flushed (`gameOf r = none`, the state after `flushCur`). A
    game another dingbat process holds (`game_lock.nim`, `SavePersistence`'s
    `lock`) is refused at the same point with the same outcome, just before
    or just after `build_core`: the old game running, flushed. Whether that
    happens depends on the other process, outside this machine; the outcome
-   is the refusal step's, which the proofs here cover. Only then: `link_auto_stop(); link_cancel_setup();
+   is the refusal step's, which the proofs here cover. Only
+   then: `link_auto_stop(); link_cancel_setup();
    teardown_netlink("another game was loaded")` (forward-declared; it
    finishes a frame the link left torn, which `NetLink` models and this
    machine's frames never are), a pending Quick Save is saved from the

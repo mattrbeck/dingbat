@@ -1546,6 +1546,8 @@ type
                              # save-state identity reads this, not `rom`,
                              # which cheats patch in place. See
                              # gb_rom_checksum.
+    rom_file_size*: int      # the file's length; `rom` is padded past it
+                             # (load_cartridge). State headers carry this.
     rom*:          seq[uint8]
     ram*:          seq[uint8]
     sav_path*:     string
