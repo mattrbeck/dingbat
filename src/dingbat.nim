@@ -1225,14 +1225,11 @@ proc show_menu_bar(): bool =
 
 proc render_link_window()  # defined below, near the network-link procs
 
-proc render_state_notice() =
-  ## What the app says when a save state is refused (a silent refusal reads
-  ## as "nothing happened"). Modal on purpose: it is always the direct result
-  ## of something the user just did, so it never appears unbidden.
-  if app.state_notice.len == 0: return
-  const POPUP = "State##notice"
-  if not igIsPopupOpen_Str(POPUP, 0):
-    igOpenPopup_Str(POPUP, 0)
+proc render_notice(popup: string; text, hint: var string) =
+  ## A modal sentence for the user, until OK or the X clears `text`.
+  if text.len == 0: return
+  if not igIsPopupOpen_Str(cstring(popup), 0):
+    igOpenPopup_Str(cstring(popup), 0)
   var center = ImVec2(x: 0, y: 0)
   let vp = igGetMainViewport()
   if vp != nil:
@@ -1245,26 +1242,39 @@ proc render_state_notice() =
   igSetNextWindowSizeConstraints(ImVec2(x: 380, y: 0), ImVec2(x: 560, y: 400),
                                  nil, nil)
   var stay_open = true
-  if igBeginPopupModal(POPUP, addr stay_open,
+  if igBeginPopupModal(cstring(popup), addr stay_open,
                        cint(ImGui_WindowFlags_AlwaysAutoResize)):
     igPushTextWrapPos(0)
-    igTextUnformatted(cstring(app.state_notice), nil)
-    if app.state_notice_hint.len > 0:
+    igTextUnformatted(cstring(text), nil)
+    if hint.len > 0:
       igSpacing()
       # Through "%s", not as the format string: the hint carries core wording
       # built from the FILE's own bytes, and a '%' in there would read
       # arguments that were never pushed.
-      igTextDisabled("%s", cstring(app.state_notice_hint))
+      igTextDisabled("%s", cstring(hint))
     igPopTextWrapPos()
     igSpacing()
     if igButton("OK", ImVec2(x: 120, y: 0)):
-      app.state_notice = ""
-      app.state_notice_hint = ""
+      text = ""
+      hint = ""
       igCloseCurrentPopup()
     igEndPopup()
   if not stay_open:
-    app.state_notice = ""
-    app.state_notice_hint = ""
+    text = ""
+    hint = ""
+
+proc render_state_notice() =
+  ## What the app says when a save state is refused (a silent refusal reads
+  ## as "nothing happened"). Modal on purpose: it is always the direct result
+  ## of something the user just did, so it never appears unbidden.
+  render_notice("State##notice", app.state_notice, app.state_notice_hint)
+
+proc render_config_notice() =
+  ## The settings file was moved aside or could not be written (config.nim
+  ## reports each cause once). Shown after the state notice, never over it.
+  if app.state_notice.len > 0: return
+  var no_hint = ""
+  render_notice("Settings##notice", app.cfg.notice, no_hint)
 
 var imgui_skipped = false  # the last render_imgui returned before igNewFrame
 
@@ -1285,7 +1295,7 @@ proc render_imgui() =
      not app.save_states.window and
      # The menu bar hides after three idle seconds, exactly the state a Quick
      # Load keypress lands in; the notice must still be drawn then.
-     app.state_notice.len == 0:
+     app.state_notice.len == 0 and app.cfg.notice.len == 0:
     # Only igNewFrame drains ImGui's input queue, a few events a frame, so
     # every key event of a long keyboard-only session would wait there and
     # the menu would take that long to see a click. Drop the backlog, and
@@ -1491,6 +1501,7 @@ proc render_imgui() =
     load_rom(path))
 
   render_state_notice()
+  render_config_notice()
 
   app.ce.render()
 

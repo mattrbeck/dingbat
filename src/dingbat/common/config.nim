@@ -1,7 +1,8 @@
-import std/[os, json, tables, strutils]
+import std/[os, json, tables, strutils, algorithm]
 import yaml/tojson
 import input
 import lcd_response
+import atomicfile
 
 # Keycode name <-> SDL keycode table, mirroring the Crystal LibSDL::Keycode enum
 # names (lowercased, e.g. "semicolon") so config files stay compatible. SDL's
@@ -297,6 +298,14 @@ type
     # Speed mode for low-end devices: GBA frameskip + 2x CPU underclock, GB
     # scanline renderer at next load; less accurate, other niceties suspended.
     speed_mode*:        bool
+    # Each file key's text as this process last read or wrote it. save_config
+    # writes only the keys whose value differs and takes the rest from the
+    # file as it is now, so a second dingbat window's changes survive.
+    file_entries:       Table[string, string]
+    # For the user, once per cause: the file was moved aside, or could not be
+    # written. The app shows it and clears it.
+    notice*:            string
+    save_error*:        string   # the last write's failure; "" once one succeeds
 
 proc new_config*(): Config =
   Config(
@@ -427,18 +436,28 @@ proc parse_config(j: JsonNode): Config =
       except: discard
   result = cfg
 
-proc load_config_file*(path: string): Config =
-  if not fileExists(path):
-    return new_config()
+proc parse_config_text(text: string): Config =
+  ## nil when the text is not a config file (not YAML, or not a mapping).
   try:
-    let docs = loadToJson(readFile(path))
-    if docs.len == 0 or docs[0].kind != JObject:
-      return new_config()
-    return parse_config(docs[0])
-  except:
-    return new_config()
+    let docs = loadToJson(text)
+    if docs.len > 0 and docs[0].kind == JObject:
+      return parse_config(docs[0])
+  except CatchableError:
+    discard
+  nil
 
-proc load_config*(): Config = load_config_file(expandTilde(CONFIG_FILE))
+proc move_aside(path: string): string =
+  ## Renames an unreadable config file out of the way, never over an earlier
+  ## one; the new name, or "" when it could not be moved.
+  result = path & ".bad"
+  var n = 1
+  while fileExists(result) or dirExists(result):
+    inc n
+    result = path & ".bad" & $n
+  try:
+    moveFile(path, result)
+  except CatchableError:
+    result = ""
 
 # Quote YAML values containing special chars (or empty) so they round-trip
 # through Crystal's YAML parser.
@@ -458,51 +477,126 @@ proc yaml_str(s: string): string =
   else:
     result = s
 
-proc save_config_file*(cfg: Config; path: string) =
-  createDir(parentDir(path))
-  var lines: seq[string]
-  lines.add("---")
-  lines.add("explorer_dir: " & yaml_str(cfg.explorer_dir))
-  lines.add("keybindings:")
+type ConfigEntry = tuple[key, text: string]  # "gba.hle" sits under "gba:"
+
+proc config_entries(cfg: Config): seq[ConfigEntry] =
+  ## The file, one entry per key, each rendered as the lines it writes.
+  ## Bindings are sorted so the same bindings always read the same.
+  var kb: seq[(int, string)]
   for k, v in cfg.keybindings.pairs:
-    lines.add("  " & keycode_file_name(k) & ": " & toLowerAscii($v))
-  lines.add("controller_bindings:")
+    kb.add((ord(v), "  " & keycode_file_name(k) & ": " & toLowerAscii($v)))
+  kb.sort()
+  var pad: seq[(cint, string)]
   for k, v in cfg.controller_bindings.pairs:
     let name = controller_button_name(k)
     if name.len > 0:
-      lines.add("  " & name & ": " & toLowerAscii($v))
-  lines.add("recents:")
-  for r in cfg.recents:
-    lines.add("- " & yaml_str(r))
-  lines.add("run_bios: " & $cfg.run_bios)
-  lines.add("volume: " & $cfg.volume)
-  lines.add("mute: " & $cfg.mute)
-  lines.add("color_correction: " & $cfg.color_correction)
-  lines.add("video_filter: " & $cfg.video_filter)
-  lines.add("lcd_response: " & $cfg.lcd_response)
-  lines.add("preserve_aspect: " & $cfg.preserve_aspect)
-  lines.add("rewind: " & $cfg.rewind)
-  lines.add("pitch_correct_ff: " & $cfg.pitch_correct_ff)
-  lines.add("audio_lowpass: " & $cfg.audio_lowpass)
-  lines.add("fifo_interp: " & $cfg.fifo_interp)
-  lines.add("mp2k_hle: " & $cfg.mp2k_hle)
-  lines.add("speed_mode: " & $cfg.speed_mode)
-  lines.add("gba:")
-  if cfg.bios_path.len > 0:
-    lines.add("  bios: " & yaml_str(cfg.bios_path))
-  else:
-    lines.add("  bios:")
-  lines.add("  hle: " & $cfg.use_hle)
-  lines.add("  hle_after_bios: " & $cfg.hle_after_bios)
-  lines.add("gb:")
-  if cfg.gb_bootrom_path.len > 0:
-    lines.add("  bootrom: " & yaml_str(cfg.gb_bootrom_path))
-  else:
-    lines.add("  bootrom:")
-  lines.add("  fifo: " & $cfg.gb_fifo)
-  lines.add("  rumble: " & $cfg.gb_rumble)
-  lines.add("  sgb: " & $cfg.sgb_enable)
-  lines.add("  sgb_border: " & $cfg.sgb_border)
-  writeFile(path, lines.join("\n") & "\n")
+      pad.add((k, "  " & name & ": " & toLowerAscii($v)))
+  pad.sort()
+  var kb_text = "keybindings:"
+  for (_, line) in kb: kb_text &= "\n" & line
+  var pad_text = "controller_bindings:"
+  for (_, line) in pad: pad_text &= "\n" & line
+  var recents_text = "recents:"
+  for r in cfg.recents: recents_text &= "\n- " & yaml_str(r)
+  let bios = if cfg.bios_path.len > 0: " " & yaml_str(cfg.bios_path) else: ""
+  let bootrom = if cfg.gb_bootrom_path.len > 0: " " & yaml_str(cfg.gb_bootrom_path) else: ""
+  @[
+    ("explorer_dir",       "explorer_dir: " & yaml_str(cfg.explorer_dir)),
+    ("keybindings",        kb_text),
+    ("controller_bindings", pad_text),
+    ("recents",            recents_text),
+    ("run_bios",           "run_bios: " & $cfg.run_bios),
+    ("volume",             "volume: " & $cfg.volume),
+    ("mute",               "mute: " & $cfg.mute),
+    ("color_correction",   "color_correction: " & $cfg.color_correction),
+    ("video_filter",       "video_filter: " & $cfg.video_filter),
+    ("lcd_response",       "lcd_response: " & $cfg.lcd_response),
+    ("preserve_aspect",    "preserve_aspect: " & $cfg.preserve_aspect),
+    ("rewind",             "rewind: " & $cfg.rewind),
+    ("pitch_correct_ff",   "pitch_correct_ff: " & $cfg.pitch_correct_ff),
+    ("audio_lowpass",      "audio_lowpass: " & $cfg.audio_lowpass),
+    ("fifo_interp",        "fifo_interp: " & $cfg.fifo_interp),
+    ("mp2k_hle",           "mp2k_hle: " & $cfg.mp2k_hle),
+    ("speed_mode",         "speed_mode: " & $cfg.speed_mode),
+    ("gba.bios",           "  bios:" & bios),
+    ("gba.hle",            "  hle: " & $cfg.use_hle),
+    ("gba.hle_after_bios", "  hle_after_bios: " & $cfg.hle_after_bios),
+    ("gb.bootrom",         "  bootrom:" & bootrom),
+    ("gb.fifo",            "  fifo: " & $cfg.gb_fifo),
+    ("gb.rumble",          "  rumble: " & $cfg.gb_rumble),
+    ("gb.sgb",             "  sgb: " & $cfg.sgb_enable),
+    ("gb.sgb_border",      "  sgb_border: " & $cfg.sgb_border),
+  ]
+
+proc entry_table(entries: seq[ConfigEntry]): Table[string, string] =
+  for (key, text) in entries: result[key] = text
+
+proc render_entries(entries: seq[ConfigEntry]): string =
+  var lines = @["---"]
+  var section = ""
+  for (key, text) in entries:
+    let dot = key.find('.')
+    let sec = if dot > 0: key[0 ..< dot] else: ""
+    if sec != section and sec.len > 0: lines.add(sec & ":")
+    section = sec
+    lines.add(text)
+  lines.join("\n") & "\n"
+
+proc load_config_file*(path: string): Config =
+  ## The settings at `path`, or the defaults when there is no file. A file
+  ## that does not parse is moved aside rather than left for the next save to
+  ## overwrite with defaults, and `notice` says where it went.
+  result = nil
+  if fileExists(path):
+    var text = ""
+    try: text = readFile(path)
+    except CatchableError: discard
+    result = parse_config_text(text)
+    if result == nil:
+      result = new_config()
+      let aside = move_aside(path)
+      result.notice =
+        if aside.len > 0:
+          "Your settings file could not be read, so dingbat started with " &
+          "default settings. The old file was kept as " & aside & "."
+        else:
+          "Your settings file " & path & " could not be read, so dingbat " &
+          "started with default settings. Changes will not be saved over it."
+  if result == nil: result = new_config()
+  result.file_entries = entry_table(config_entries(result))
+
+proc load_config*(): Config = load_config_file(expandTilde(CONFIG_FILE))
+
+proc save_config_file*(cfg: Config; path: string) =
+  ## Writes the keys this process changed since it last read or wrote the
+  ## file, over the file as it is now: another dingbat window's changes to
+  ## any other key survive. The write replaces the file in one step, so a
+  ## crash never leaves half a file. Never raises: a failure is kept in
+  ## `save_error` and reported once in `notice`, until a write succeeds.
+  let current = config_entries(cfg)
+  var merged = current
+  try:
+    createDir(parentDir(path))
+    if fileExists(path):
+      let on_disk = parse_config_text(readFile(path))
+      if on_disk == nil:
+        let aside = move_aside(path)
+        if aside.len == 0:
+          raise newException(IOError, path & " does not parse and could not be moved aside")
+        cfg.notice = "Your settings file had been damaged. It was kept as " &
+                     aside & " and replaced with the current settings."
+      else:
+        let theirs = entry_table(config_entries(on_disk))
+        for e in merged.mitems:
+          if cfg.file_entries.getOrDefault(e.key) == e.text and e.key in theirs:
+            e.text = theirs[e.key]
+    write_file_atomic(path, render_entries(merged))
+    cfg.file_entries = entry_table(current)
+    cfg.save_error = ""
+  except CatchableError as e:
+    if cfg.save_error.len == 0:
+      cfg.notice = "Settings could not be saved (" & e.msg & "). " &
+                   "Changes last until dingbat quits."
+    cfg.save_error = e.msg
 
 proc save_config*(cfg: Config) = save_config_file(cfg, expandTilde(CONFIG_FILE))

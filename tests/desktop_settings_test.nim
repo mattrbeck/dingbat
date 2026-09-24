@@ -88,6 +88,81 @@ block:
   save_config_file(new_config(), path)
   check same_settings(load_config_file(path), new_config()), "defaults round-trip too"
 
+echo "Two windows: each save keeps the other window's changes"
+block:
+  # Two dingbat processes read the file at start; each save used to write
+  # its whole, stale copy over the other's changes.
+  let path = dir / "two.yml"
+  save_config_file(new_config(), path)
+  let a = load_config_file(path)
+  let b = load_config_file(path)
+  a.volume = 40
+  save_config_file(a, path)
+  b.keybindings[KP_8] = Input.START
+  save_config_file(b, path)
+  var back = load_config_file(path)
+  check back.volume == 40, "A's volume survives B's save"
+  check back.keybindings.getOrDefault(KP_8, Input.R) == Input.START, "B's binding is saved"
+  # A saves again (its recents change): B's binding stays, A still has no
+  # copy of it in memory.
+  a.recents = @["/roms/x.gba"]
+  save_config_file(a, path)
+  back = load_config_file(path)
+  check back.keybindings.getOrDefault(KP_8, Input.R) == Input.START, "B's binding survives A's next save"
+  check back.recents == @["/roms/x.gba"] and back.volume == 40, "A's own changes are there"
+  # A key both changed: the later save wins, as with one window.
+  b.volume = 70
+  save_config_file(b, path)
+  check load_config_file(path).volume == 70, "the later change to one key wins"
+
+echo "A damaged file is moved aside, never overwritten"
+block:
+  let path = dir / "bad.yml"
+  const GARBAGE = "keybindings: [unclosed\n  volume: {\n"
+  writeFile(path, GARBAGE)
+  let cfg = load_config_file(path)
+  check cfg.volume == 100 and cfg.notice.len > 0, "defaults, and a notice for the user"
+  check not fileExists(path), "the damaged file is gone from the settings path"
+  check fileExists(path & ".bad") and readFile(path & ".bad") == GARBAGE, "kept byte for byte as .bad"
+  cfg.volume = 55
+  save_config_file(cfg, path)
+  check load_config_file(path).volume == 55, "the next save writes a good file"
+  check readFile(path & ".bad") == GARBAGE, "and leaves the old one alone"
+  # Damaged while running: the save moves it aside too, and a second damaged
+  # file does not replace the first.
+  writeFile(path, GARBAGE & "#2")
+  cfg.notice = ""
+  save_config_file(cfg, path)
+  check load_config_file(path).volume == 55 and cfg.notice.len > 0, "a save over a damaged file says so"
+  check readFile(path & ".bad2") == GARBAGE & "#2" and readFile(path & ".bad") == GARBAGE,
+        "each damaged file keeps its own name"
+
+echo "A settings folder that cannot be written"
+block:
+  # The parent is a plain file, so no folder can be created there (this
+  # holds for any user, root included).
+  let blocker = dir / "not_a_dir"
+  writeFile(blocker, "")
+  let path = blocker / "dingbat.yml"
+  let cfg = new_config()
+  var raised = false
+  try:
+    save_config_file(cfg, path)
+  except CatchableError:
+    raised = true
+  check not raised, "save_config does not raise"
+  check cfg.save_error.len > 0 and cfg.notice.len > 0, "the failure is kept and reported"
+  cfg.notice = ""
+  try:
+    save_config_file(cfg, path)
+  except CatchableError:
+    raised = true
+  check not raised and cfg.notice.len == 0, "reported once, not on every save"
+  save_config_file(cfg, dir / "writable.yml")
+  check cfg.save_error.len == 0, "a later good write clears it"
+  save_config_file(cfg, path)
+  check cfg.notice.len > 0, "and a new failure is reported again"
+
 removeDir(dir)
 
 if failures > 0:
