@@ -2,6 +2,7 @@ import std/[tables, options]
 import sdl2 except init, quit
 import imguin/[cimgui, impl_opengl, impl_sdl2]
 import ../common/[input, config]
+import held_input
 
 type
   KeybindingsWidget* = ref object
@@ -25,6 +26,9 @@ proc wants_input*(w: KeybindingsWidget): bool =
   w.visible and w.selection.isSome()
 
 proc key_released*(w: KeybindingsWidget; keycode: cint) =
+  # A key the game can never receive is refused; the capture stays on the
+  # input, which keeps its old key.
+  if not bindable_key(keycode): return
   if w.selection.isSome():
     let sel = w.selection.get()
     var old_key: cint = -1

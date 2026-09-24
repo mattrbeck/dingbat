@@ -19,6 +19,7 @@ import dingbat/frontend/file_explorer
 import dingbat/frontend/config_editor
 import dingbat/frontend/keybindings_widget
 import dingbat/frontend/controller_widget
+import dingbat/frontend/held_input
 import dingbat/frontend/gba_debug
 import dingbat/frontend/gb_debug
 import dingbat/frontend/cheats_widget
@@ -691,6 +692,8 @@ proc input_log_close() =
   input_log.close()
   input_log_open = false
 
+proc new_core_takes_held_input()  # defined below, with the controllers
+
 proc load_rom(path: string) =
   if not fileExists(path):
     echo "ROM not found: ", path; return
@@ -763,6 +766,7 @@ proc load_rom(path: string) =
   app.paused = false
   app.pending_save = false
   app.pending_load = false
+  new_core_takes_held_input()
 
 # ──────────────────────────── Save States ────────────────────────────
 
@@ -1573,12 +1577,14 @@ proc render_imgui() =
 # handling below covers startup too. Every opened controller feeds player 1.
 var controllers: Table[int32, GameControllerPtr]
 
-# Left-stick-as-dpad and right-trigger fast-forward state (hardcoded, not
-# part of the rebindable button table)
+# Left-stick-as-dpad and right-trigger fast-forward thresholds (hardcoded,
+# not part of the rebindable button table)
 const STICK_DEADZONE     = 8000'i16
 const TRIGGER_THRESHOLD  = 8000'i16
-var stick_dirs: array[Input.UP..Input.RIGHT, bool]
-var pad_ff_held = false
+
+# What the keyboard, each pad and each pad's stick hold, merged for the core
+# (frontend/held_input.nim)
+var held: HeldInput
 
 proc emu_pad_input(inp: Input; pressed: bool) =
   case app.emu_kind
@@ -1588,31 +1594,32 @@ proc emu_pad_input(inp: Input; pressed: bool) =
     if app.gb_emu != nil: app.gb_emu.handle_input(inp, pressed)
   of ekNone: discard
 
-proc bound_button_held(inp: Input): bool =
-  for btn, v in app.cfg.controller_bindings.pairs:
-    if v == inp:
-      for pad in controllers.values:
-        if pad.getButton(GameControllerButton(btn)) != 0: return true
-  false
+proc push_held_input() =
+  ## Tell the core what changed in the merged held state
+  let (pressed, released) = held.take_changes()
+  for inp in released: emu_pad_input(inp, false)
+  for inp in pressed: emu_pad_input(inp, true)
 
-proc set_stick_dir(inp: Input; active: bool) =
-  if stick_dirs[inp] == active: return
-  stick_dirs[inp] = active
-  # Don't release a direction the d-pad (or any button bound to it) still holds
-  if not active and bound_button_held(inp): return
-  emu_pad_input(inp, active)
-
-proc set_fast_forward(held: bool) =
-  # Audio sync is a toggle elsewhere in the UI, so track the trigger's held
-  # state and assign sync directly instead of toggling per event
-  if held == pad_ff_held: return
-  pad_ff_held = held
+proc apply_trigger() =
+  ## The right trigger's fast forward, onto the running core's speed toggles
+  template onto(apu: untyped) =
+    var speed = Speed(sync: apu.sync, turbo: apu.turbo)
+    held.apply_trigger(speed, linked = app.netlink != nil)
+    apu.sync = speed.sync
+    apu.turbo = speed.turbo
   case app.emu_kind
   of ekGBA:
-    if app.gba_emu != nil: app.gba_emu.apu.sync = not held
+    if app.gba_emu != nil: onto(app.gba_emu.apu)
   of ekGB:
-    if app.gb_emu != nil: app.gb_emu.apu.sync = not held
+    if app.gb_emu != nil: onto(app.gb_emu.apu)
   of ekNone: discard
+
+proc new_core_takes_held_input() =
+  ## A fresh core holds nothing: press what the player still holds, and
+  ## fast-forward again under a trigger still pulled
+  held.core_replaced()
+  push_held_input()
+  apply_trigger()
 
 proc update_rumble() =
   ## 80 ms effects re-triggered every 50 ms chain into a continuous buzz
@@ -1650,73 +1657,71 @@ proc handle_input() =
       let sym     = kev.keysym.sym
       let mods    = kev.keysym.modstate
 
-      if app.io != nil and app.io[].WantCaptureKeyboard: continue
-
-      if app.ce.keybindings.wants_input():
-        if not pressed: app.ce.keybindings.key_released(sym)
-      elif (mods and MOD_KEY_MASK) != 0:
-        if not pressed:
-          case sym
-          of K_r:
-            if app.cfg.recents.len > 0: load_rom(app.cfg.recents[0])
-          of K_p:
-            app.paused = not app.paused
-          of K_n:
-            # Frame advance would desync a live link; suppress it there.
-            if app.paused and app.emu_kind != ekNone and app.netlink == nil:
-              app.pending_step = true
-          of K_s:
-            if app.emu_kind != ekNone: app.pending_save = true
-          of K_l:
-            # Loading a save state mid-link would desync the pair.
-            if app.emu_kind != ekNone and app.netlink == nil:
-              app.pending_load = true
-          of K_f:
-            app.fullscreen = not app.fullscreen
-            let flags = if app.fullscreen: SDL_WINDOW_FULLSCREEN_DESKTOP else: 0'u32
-            discard setFullscreen(app.window, flags)
-          of K_q:
-            app.running = false
-          else: discard
-      elif sym == K_F9:
+      # Releases are applied before any of these filters (held_input.nim)
+      let route = held.route_key(app.cfg.keybindings, sym, pressed, kev.repeat,
+                                 shortcut_mod = (mods and MOD_KEY_MASK) != 0,
+                                 imgui_keyboard = app.io != nil and
+                                                  app.io[].WantCaptureKeyboard,
+                                 capturing = app.ce.keybindings.wants_input())
+      push_held_input()
+      case route
+      of krNone: discard
+      of krCapture:
+        app.ce.keybindings.key_released(sym)
+      of krShortcut:
+        case sym
+        of K_r:
+          if app.cfg.recents.len > 0: load_rom(app.cfg.recents[0])
+        of K_p:
+          app.paused = not app.paused
+        of K_n:
+          # Frame advance would desync a live link; suppress it there.
+          if app.paused and app.emu_kind != ekNone and app.netlink == nil:
+            app.pending_step = true
+        of K_s:
+          if app.emu_kind != ekNone: app.pending_save = true
+        of K_l:
+          # Loading a save state mid-link would desync the pair.
+          if app.emu_kind != ekNone and app.netlink == nil:
+            app.pending_load = true
+        of K_f:
+          app.fullscreen = not app.fullscreen
+          let flags = if app.fullscreen: SDL_WINDOW_FULLSCREEN_DESKTOP else: 0'u32
+          discard setFullscreen(app.window, flags)
+        of K_q:
+          app.running = false
+        else: discard
+      of krMark:
         # playtest recording: mark this screen as a checkpoint
-        if pressed: input_log_mark()
-      elif sym == K_F12:
-        # Screenshot to config_dir/screenshots (fires on press, not release)
-        if pressed: save_screenshot()
-      elif sym == K_BACKQUOTE:
+        input_log_mark()
+      of krScreenshot:
+        # Screenshot to config_dir/screenshots
+        save_screenshot()
+      of krRewind:
         # Hold-to-rewind, core-agnostic (disabled while linked — it desyncs)
         app.rewinding = pressed and app.cfg.rewind and
                         app.emu_kind != ekNone and app.netlink == nil
-      elif app.emu_kind == ekGBA and app.gba_emu != nil:
-        if app.cfg.keybindings.hasKey(sym):
-          app.gba_emu.handle_input(app.cfg.keybindings[sym], pressed)
-        elif sym == K_TAB and pressed and app.netlink == nil:
-          # Suppressed while linked (would run ahead of the peer). Shift+Tab
-          # = 2x, Tab = unbounded; mutually exclusive, since fast forward
-          # would silently dominate 2x
+      of krFastForward:
+        # Shift+Tab = 2x, Tab = unbounded; mutually exclusive, since fast
+        # forward would silently dominate 2x
+        template toggle(apu: untyped) =
           if (mods and KMOD_SHIFT_MASK) != 0:
-            app.gba_emu.apu.turbo = not app.gba_emu.apu.turbo
-            if app.gba_emu.apu.turbo: app.gba_emu.apu.sync = true
+            apu.turbo = not apu.turbo
+            if apu.turbo: apu.sync = true
           else:
-            app.gba_emu.apu.sync = not app.gba_emu.apu.sync
-            if not app.gba_emu.apu.sync: app.gba_emu.apu.turbo = false
-        elif pressed and sym >= K_1 and sym <= K_6:
-          # Feedback is visible in the Audio/Video > Channels submenu
-          let ch = int(sym) - int(K_1)
+            apu.sync = not apu.sync
+            if not apu.sync: apu.turbo = false
+        # Suppressed while linked (would run ahead of the peer)
+        if app.emu_kind == ekGBA and app.gba_emu != nil and app.netlink == nil:
+          toggle(app.gba_emu.apu)
+        elif app.emu_kind == ekGB and app.gb_emu != nil:
+          toggle(app.gb_emu.apu)
+      of krChannel:
+        # Feedback is visible in the Audio/Video > Channels submenu
+        let ch = int(sym) - int(K_1)
+        if app.emu_kind == ekGBA and app.gba_emu != nil:
           app.gba_emu.apu.channel_mask[ch] = not app.gba_emu.apu.channel_mask[ch]
-      elif app.emu_kind == ekGB and app.gb_emu != nil:
-        if app.cfg.keybindings.hasKey(sym):
-          app.gb_emu.handle_input(app.cfg.keybindings[sym], pressed)
-        elif sym == K_TAB and pressed:
-          if (mods and KMOD_SHIFT_MASK) != 0:
-            app.gb_emu.apu.turbo = not app.gb_emu.apu.turbo
-            if app.gb_emu.apu.turbo: app.gb_emu.apu.sync = true
-          else:
-            app.gb_emu.apu.toggle_sync()
-            if not app.gb_emu.apu.sync: app.gb_emu.apu.turbo = false
-        elif pressed and sym >= K_1 and sym <= K_4:
-          let ch = int(sym) - int(K_1)
+        elif app.emu_kind == ekGB and app.gb_emu != nil and ch < 4:
           app.gb_emu.apu.channel_mask[ch] = not app.gb_emu.apu.channel_mask[ch]
 
     of ControllerDeviceAdded:
@@ -1725,7 +1730,9 @@ proc handle_input() =
       if isGameController(cint(idx)):
         let pad = gameControllerOpen(cint(idx))
         if pad != nil:
-          controllers[pad.getJoystick().instanceID()] = pad
+          let id = pad.getJoystick().instanceID()
+          controllers[id] = pad
+          held.pad_added(id)
 
     of ControllerDeviceRemoved:
       # `which` is a joystick instance id for the Removed event
@@ -1733,33 +1740,34 @@ proc handle_input() =
       if controllers.hasKey(id):
         controllers[id].close()
         controllers.del(id)
-      if controllers.len == 0:
-        # Unplugged mid-press: release anything the pad was holding
-        for inp in Input.UP .. Input.RIGHT: stick_dirs[inp] = false
-        for inp in Input: emu_pad_input(inp, false)
-        set_fast_forward(false)
+      # Unplugged mid-press: let go of what this pad held, and only that
+      held.pad_removed(id)
+      push_held_input()
+      apply_trigger()
 
     of ControllerButtonDown, ControllerButtonUp:
       let pressed = evt.kind == ControllerButtonDown
       let button  = cint(cbutton(evt).button)
-      if app.ce.controller.wants_input():
-        if not pressed: app.ce.controller.button_released(button)
-      elif app.cfg.controller_bindings.hasKey(button):
-        let inp = app.cfg.controller_bindings[button]
-        # Don't release a direction the left stick still holds
-        if pressed or not (inp in stick_dirs.low .. stick_dirs.high and stick_dirs[inp]):
-          emu_pad_input(inp, pressed)
+      let bound   = app.cfg.controller_bindings.hasKey(button)
+      held.pad_button(cbutton(evt).which, button, bound,
+                      if bound: app.cfg.controller_bindings[button] else: Input.low,
+                      pressed)
+      push_held_input()
+      if not pressed and app.ce.controller.wants_input():
+        app.ce.controller.button_released(button)
 
     of ControllerAxisMotion:
       let ax = caxis(evt)
       if ax.axis == uint8(SDL_CONTROLLER_AXIS_LEFTX):
-        set_stick_dir(Input.LEFT,  ax.value < -STICK_DEADZONE)
-        set_stick_dir(Input.RIGHT, ax.value > STICK_DEADZONE)
+        held.pad_stick(ax.which, Input.LEFT,  ax.value < -STICK_DEADZONE)
+        held.pad_stick(ax.which, Input.RIGHT, ax.value > STICK_DEADZONE)
       elif ax.axis == uint8(SDL_CONTROLLER_AXIS_LEFTY):
-        set_stick_dir(Input.UP,   ax.value < -STICK_DEADZONE)
-        set_stick_dir(Input.DOWN, ax.value > STICK_DEADZONE)
+        held.pad_stick(ax.which, Input.UP,   ax.value < -STICK_DEADZONE)
+        held.pad_stick(ax.which, Input.DOWN, ax.value > STICK_DEADZONE)
       elif ax.axis == uint8(SDL_CONTROLLER_AXIS_TRIGGERRIGHT):
-        set_fast_forward(ax.value > TRIGGER_THRESHOLD)
+        held.pad_trigger(ax.which, ax.value > TRIGGER_THRESHOLD)
+      push_held_input()
+      apply_trigger()
 
     of WindowEvent:
       let wev = window(evt)

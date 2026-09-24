@@ -106,6 +106,13 @@ jobs:
         # save-state migration. Synthetic ROMs plus the committed corpus.
         shell: bash
         run: ./dingbat_gbartc_test
+      - name: Desktop held input and key routing
+        # Keyboard, pads and sticks merged into one held set; a release is
+        # applied before ImGui, a binding capture or Cmd/Ctrl can take it;
+        # shortcuts fire on the press; trigger fast forward; unbindable keys.
+        # The Lean model's (RunInput) traces. No ROMs.
+        shell: bash
+        run: ./dingbat_desktop_input_test
       - name: Clip-capture replay determinism
         # Replays a range from the anchor+input log and asserts every frame's
         # serialized state matches the live run; two negative controls must
