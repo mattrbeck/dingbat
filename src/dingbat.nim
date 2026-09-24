@@ -459,6 +459,7 @@ type AppState = ref object
   # ImGui "Link Cable" window; establishment is non-blocking so the UI keeps
   # rendering while waiting for a peer.
   link_window:     bool
+  link_window_min_h: float32  # its content's height last frame
   link:            LinkCable  # pairing state (frontend/link_cable.nim)
   fullscreen:      bool
   fs_track:        FullscreenTrack  # the window's real state (window_restore.nim)
@@ -2081,6 +2082,12 @@ proc render_link_window() =
   ## "Advanced" for cross-machine / custom-port play.
   if not app.link_window: return
   igSetNextWindowSize(ImVec2(x: 340, y: 0), cint(ImGui_Cond_FirstUseEver))
+  # Never shorter than last frame's content, so the wrapped two-windows hint
+  # and an opened Advanced do not scroll, whatever height imgui.ini kept;
+  # the user can still make it wider or taller.
+  if app.link_window_min_h > 0:
+    igSetNextWindowSizeConstraints(ImVec2(x: 0, y: app.link_window_min_h),
+                                   ImVec2(x: 1e9, y: 1e9), nil, nil)
   if igBegin("Link Cable", addr app.link_window,
              cint(ImGui_WindowFlags_NoCollapse)):
     if app.netlink != nil:
@@ -2122,6 +2129,11 @@ proc render_link_window() =
     if app.link.status.len > 0 and app.netlink == nil:
       igSeparator()
       igText("%s", cstring(app.link.status))
+    # The content's bottom (the cursor sits one item spacing below the last
+    # item, in window coordinates, title bar included) plus the padding.
+    let style = igGetStyle()
+    app.link_window_min_h = igGetCursorPosY() - style.ItemSpacing.y +
+                            style.WindowPadding.y
   igEnd()
 
 proc update_link_auto() =
