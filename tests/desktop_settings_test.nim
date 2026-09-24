@@ -334,6 +334,44 @@ block:
   else:
     check system_restores_windows(), "Windows and Linux restore"
 
+echo "Fullscreen the OS entered or left is taken up; the window fits the game after"
+block:
+  # The app's side of dingbat.nim's track_fullscreen, one reading per window
+  # resize. `believed` is app.fullscreen (the checkmark, the saved flag).
+  var believed = false
+  var t: FullscreenTrack
+  proc reading(real: bool): FullscreenChange =
+    result = t.observe(real, believed)
+    if result != fcNone: believed = real          # remember_fullscreen
+  # macOS's green button, both ways
+  check reading(false) == fcNone, "a resize in a window: nothing"
+  check reading(true) == fcEntered and believed, "green button in: fullscreen, checked"
+  check reading(true) == fcNone, "a resize while fullscreen: nothing"
+  check reading(false) == fcLeft and not believed, "green button out: a window, unchecked"
+  # The menu's own toggle lands late: a resize read before the Space is up
+  # must not turn it back off
+  believed = true                                  # set_fullscreen(true)
+  check reading(false) == fcNone and believed, "the menu's fullscreen survives a stale resize"
+  check reading(true) == fcNone and believed, "and stays when the Space is up"
+  # A Game Boy game loaded while fullscreen (resize_to_output defers), then
+  # the menu leaves: the window is sized when it is a window again
+  t.refit = true
+  believed = false                                 # set_fullscreen(false)
+  check not t.take_refit(true), "not sized while still fullscreen"
+  check reading(false) == fcNone and t.take_refit(false), "sized once it is a window"
+  check not t.take_refit(false), "sized once"
+  # ...and when the green button leaves
+  check reading(true) == fcEntered, "green button in again"
+  t.refit = true
+  check reading(false) == fcLeft and t.take_refit(false),
+        "green button out after a GB load: sized to the GB picture"
+  # Started fullscreen: the window is created windowed and animates in
+  var t2: FullscreenTrack
+  check t2.observe(false, true) == fcNone and t2.observe(true, true) == fcNone,
+        "starting fullscreen is not undone by the first resize"
+  when defined(macosx):
+    check not ns_window_fullscreen(nil), "no window: not fullscreen"
+
 removeDir(dir)
 
 if failures > 0:

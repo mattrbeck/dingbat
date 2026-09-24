@@ -462,6 +462,7 @@ type AppState = ref object
   link_window:     bool
   link:            LinkCable  # pairing state (frontend/link_cable.nim)
   fullscreen:      bool
+  fs_track:        FullscreenTrack  # the window's real state (window_restore.nim)
   enable_overlay:  bool
   last_mouse_tick: uint32
 
@@ -510,20 +511,54 @@ proc output_size(): (int, int) =
   of ekNone: (GBA_W, GBA_H)
 
 proc resize_to_output() =
-  ## Size the window to an integer multiple of the native picture. Skipped in
-  ## fullscreen, where the letterbox does the work instead.
-  if app.fullscreen: return
+  ## Size the window to an integer multiple of the native picture. In
+  ## fullscreen the letterbox does the work, and the window is sized once
+  ## it is a window again (track_fullscreen).
+  if app.fullscreen:
+    app.fs_track.refit = true
+    return
   let (w, h) = output_size()
   setSize(app.window, cint(w * app.scale), cint(h * app.scale))
 
-proc set_fullscreen(on: bool) =
-  ## Menu and Cmd/Ctrl+F. Saved, so the next start can come back this way
-  ## (window_restore.nim).
+proc remember_fullscreen(on: bool) =
+  ## The menu's checkmark, and saved, so the next start can come back this
+  ## way (window_restore.nim).
   app.fullscreen = on
-  discard setFullscreen(app.window, if on: SDL_WINDOW_FULLSCREEN_DESKTOP else: 0'u32)
   if app.cfg.fullscreen != on:
     app.cfg.fullscreen = on
     save_config(app.cfg)
+
+proc set_fullscreen(on: bool) =
+  ## Menu and Cmd/Ctrl+F.
+  remember_fullscreen(on)
+  discard setFullscreen(app.window, if on: SDL_WINDOW_FULLSCREEN_DESKTOP else: 0'u32)
+
+proc window_is_fullscreen(): bool =
+  ## What the window really is. On macOS AppKit is asked: a fullscreen Space
+  ## entered from the green button or Ctrl+Cmd+F sets no SDL 2 flag.
+  when defined(macosx):
+    var info: WMinfo
+    getVersion(info.version)
+    if getWMInfo(app.window, info) and info.subsystem == SysWM_Cocoa:
+      # SDL_SysWMinfo.info.cocoa.window, the union's first member
+      return ns_window_fullscreen(cast[ptr pointer](addr info.padding[0])[])
+  (getFlags(app.window) and SDL_WINDOW_FULLSCREEN) != 0
+
+proc track_fullscreen() =
+  ## On a window resize: take up a fullscreen the OS entered or left for the
+  ## window, and size a window back from fullscreen to the picture if a
+  ## sizing was deferred meanwhile (else a Game Boy game loaded while
+  ## fullscreen came back in a GBA-shaped window, letterboxed).
+  let real = window_is_fullscreen()
+  case app.fs_track.observe(real, app.fullscreen)
+  of fcNone: discard
+  of fcEntered, fcLeft:
+    remember_fullscreen(real)
+    # SDL 2 on macOS adopts a Space it did not make ("already there"), so
+    # the menu's toggle can leave it; where SDL already agrees, a no-op.
+    discard setFullscreen(app.window,
+                          if real: SDL_WINDOW_FULLSCREEN_DESKTOP else: 0'u32)
+  if app.fs_track.take_refit(real): resize_to_output()
 
 proc game_viewport(): (GLint, GLint, GLint, GLint) =
   ## The letterboxed rect the game quad is drawn into. An SGB border switches
@@ -1900,6 +1935,9 @@ proc handle_input() =
         var w, h: cint
         getSize(app.window, w, h)
         glViewport(0, 0, w, h)
+        # Every fullscreen change resizes; SDL 2 on macOS sends it once the
+        # transition is over, when the window is where it will stay
+        track_fullscreen()
 
     of MouseMotion:
       app.last_mouse_tick = motion(evt).timestamp
