@@ -794,6 +794,9 @@ proc load_rom(path: string) =
   app.paused = false
   app.pending_save = false
   app.pending_load = false
+  # An open Save States window re-reads the new game's slots before its Save,
+  # Load or Delete act on them (mark_stale also drops the old game's notice)
+  app.save_states.mark_stale()
   new_core_takes_held_input()
 
 # ──────────────────────────── Save States ────────────────────────────
