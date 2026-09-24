@@ -8,6 +8,15 @@ const DMA_PREEMPT_AFTER_READ {.booldefine.} = true
   ## its write waits for the next read). False (between transfers, as
   ## before) reds _mid_1 and _mid_2; both points reds _mid_2; neither reds
   ## _mid_1 and _end_1.._end_3.
+const DMA_ROM_BOUNDARY_HOLD {.booldefine.} = true
+  ## A gamepak ROM source whose address does not move (fixed or decrement
+  ## control; the data still comes from successive addresses) and sits on
+  ## the last unit before a 0x20000 boundary is read nonsequentially on
+  ## every transfer: the burst decides N or S from its own address, and
+  ## that address is always next to the boundary (alyosha DMA/readme.txt).
+  ## DMA_ROM_Fixed, 32 words from 0x0801FFFC, reads 62 cycles long without
+  ## it (31 S reads that are N); applied to every non-moving ROM source,
+  ## DMA_pause_timing_ROM_to_IWRAM goes red.
 const DMA_START_DELAY {.intdefine.} = (if IMM_IDLE_GRANT: 2 else: 3)
 const
   DMA_SRC_MASK = [0x07FFFFFF'u32, 0x0FFFFFFF'u32, 0x0FFFFFFF'u32, 0x0FFFFFFF'u32]
@@ -266,8 +275,17 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
   when DMA_READS_CPU_BUS:
     let touches_iwram = bits_range(dma.src[channel], 24, 27) == 3 or
                         bits_range(dma.dst[channel], 24, 27) == 3
+  let rom_src_held = DMA_ROM_BOUNDARY_HOLD and src_in_rom and
+                     (source_control == 1 or source_control == 2) and
+                     (dma.src[channel] and 0x1FFFF'u32) >= uint32(0x20000 - word_size)
+  var first = true
   for _ in 0 ..< len:
     when not DMA_PREEMPT_AFTER_READ: preempt_point()
+    if rom_src_held and not first:
+      let bus = dma.gba.bus
+      if bus.rom_next_addr == dma.src[channel]: bus.rom_next_addr = 1
+      elif bus.rom_next_addr2 == dma.src[channel]: bus.rom_next_addr2 = 1
+    first = false
     # TODO: deny-list; misses unmapped gaps such as 0x00004000-0x01FFFFFF.
     let src_region = bits_range(dma.src[channel], 24, 27)
     let src_accessible = src_region != 0x0 and src_region != 0x1 and dma.src[channel] < 0x10000000'u32
