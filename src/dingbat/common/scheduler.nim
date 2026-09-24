@@ -55,6 +55,9 @@ type
     # V-blank DMA request, raised off the V-blank flag
     # (VBLANK_DMA_REQUEST_DELAY in gba/ppu.nim).
     etVDMARequest
+    # End of the instruction after a GBA LDM^ (ldm_user_glitch in
+    # gba/arm/arm.nim). Never in a state file: a save settles it first.
+    etLdmGlitch
 
   Event* = object
     cycles*: CycleCount

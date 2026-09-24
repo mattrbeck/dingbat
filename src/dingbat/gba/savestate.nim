@@ -726,6 +726,9 @@ proc gba_state_payload(gba: GBA; in_process = false): string =
     template mark(name: string) = payloadSections.add((name, w.buf.len))
   else:
     template mark(name: string) = discard
+  # Settle an LDM^ glitch (its instruction has not run yet) rather than
+  # serialize it: no state carries it, or its event.
+  if gba.cpu.ldm_glitch != 0: gba.cpu.ldm_glitch_restore(ran = false)
   mark("cpu")
   save_cpu_state(gba.cpu, w)
   mark("bus(+ewram+iwram)")

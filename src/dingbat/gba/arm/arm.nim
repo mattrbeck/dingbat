@@ -405,6 +405,148 @@ proc arm_single_data_transfer*[imm_flag, pre_addressing, add_offset, byte_quanti
       discard cpu.set_reg(rn, address)
   if not (load and rd == 15): cpu.step_arm()
 
+# The LDM^ glitch. After an LDM that loads the user bank (S bit, no r15 in
+# the list) from a mode with banked registers, the NEXT instruction's
+# first-cycle register reads return the banked register OR the user one, for
+# every register the mode banks, loaded or not. Later-cycle reads (a store's
+# data, a multiply-accumulate's multiplicands) and all writes are normal.
+# Measured on an AGB SP (AGS-001) from IWRAM and EWRAM, FIQ banked r8=1248
+# r9=8421, user r8=2481 r9=4218: `ldm r1,{r8,r9}^; add r2,r8,r9` gives FD02
+# and `mul` the OR'd product; one `mov r0,r0` between them, STM^, or a plain
+# LDM cancels it; `ldm r1,{r2}^` still ORs r8 and r9; `str r8,[r1,#16]`
+# stores 1248. alyosha LDM/* (tested there on a Game Boy Player) pin the
+# multiply, load/store, SWP and BX operand cycles.
+#
+# Zero-cost while idle: ldm_user_glitch decodes the next instruction, ORs
+# the registers it reads first into the live file, and books etLdmGlitch for
+# its end; ldm_glitch_restore puts back those it did not write. A mode switch
+# (switch_mode) settles it first, so no bank ever stores an OR'd value.
+
+proc arm_glitch_regs(instr: uint32): tuple[reads, writes: uint16] =
+  ## The registers `instr` reads in its first cycle and those it writes in
+  ## the current bank.
+  let rn = int(bits_range(instr, 16, 19))
+  let rd = int(bits_range(instr, 12, 15))
+  let rs = int(bits_range(instr, 8, 11))
+  let rm = int(bits_range(instr, 0, 3))
+  template r(i: int): uint16 = 1'u16 shl i
+  let transfer_wb = if bit(instr, 21) or not bit(instr, 24): r(rn) else: 0'u16
+  case bits_range(instr, 25, 27)
+  of 0b000:
+    if (instr and 0x0FFFFFF0'u32) == 0x012FFF10'u32:          # BX
+      (r(rm), 0'u16)
+    elif (instr and 0x0FC000F0'u32) == 0x00000090'u32:        # MUL, MLA
+      # MLA reads its accumulator first; its multiplicands are not OR'd
+      # (alyosha LDM_ALU t003). MUL reads both multiplicands first.
+      let reads = if bit(instr, 21): r(rd) else: r(rm) or r(rs)
+      (reads, r(rn))
+    elif (instr and 0x0F8000F0'u32) == 0x00800090'u32:        # UMULL..SMLAL
+      # The accumulating forms read RdHi:RdLo first (alyosha LDM_MUL_UL_32,
+      # LDM_MUL_UL_SL); the plain ones are assumed to read as MUL does.
+      let reads = if bit(instr, 21): r(rd) or r(rn) else: r(rm) or r(rs)
+      (reads, r(rd) or r(rn))
+    elif (instr and 0x0FB00FF0'u32) == 0x01000090'u32:        # SWP, SWPB
+      (r(rn), r(rd))                   # the stored Rm is a later read (LDM_Swap)
+    elif (instr and 0x90'u32) == 0x90'u32:                    # LDRH/STRH/LDRSB/LDRSH
+      let reads = if bit(instr, 22): r(rn) else: r(rn) or r(rm)
+      (reads, (if bit(instr, 20): r(rd) else: 0'u16) or transfer_wb)
+    elif (instr and 0x0FBF0FFF'u32) == 0x010F0000'u32:        # MRS
+      (0'u16, r(rd))
+    elif (instr and 0x0FB0FFF0'u32) == 0x0120F000'u32:        # MSR, register
+      (r(rm), 0'u16)                   # assumed first-cycle
+    else:                                                     # data processing
+      let op = bits_range(instr, 21, 24)
+      # A register-specified shift reads Rs in its first cycle and the
+      # operands in its second (assumed; no row or console cell pins it).
+      let reads =
+        if bit(instr, 4): r(rs)
+        elif op == 13 or op == 15: r(rm)
+        else: r(rn) or r(rm)
+      (reads, if op in 8'u32..11'u32: 0'u16 else: r(rd))
+  of 0b001:
+    if (instr and 0x0FB0F000'u32) == 0x0320F000'u32:          # MSR, immediate
+      (0'u16, 0'u16)
+    else:
+      let op = bits_range(instr, 21, 24)
+      ((if op == 13 or op == 15: 0'u16 else: r(rn)),
+       (if op in 8'u32..11'u32: 0'u16 else: r(rd)))
+  of 0b010, 0b011:                                            # LDR, STR
+    if bits_range(instr, 25, 27) == 0b011 and bit(instr, 4):
+      (0'u16, 0'u16)                   # undefined
+    else:
+      # Base and offset register are both OR'd (alyosha LDM_LD); the stored
+      # register is a second-cycle read (console: `str r8` stores 1248).
+      let reads = if bits_range(instr, 25, 27) == 0b011: r(rn) or r(rm) else: r(rn)
+      (reads, (if bit(instr, 20): r(rd) else: 0'u16) or transfer_wb)
+  of 0b100:                                                   # LDM, STM
+    let list = uint16(instr and 0xFFFF'u32)
+    let user_bank = bit(instr, 22) and not (bit(instr, 20) and bit(list, 15))
+    if user_bank: (r(rn), 0'u16)      # transfers and writeback in the user bank
+    else:
+      ((r(rn)), (if bit(instr, 20): list else: 0'u16) or
+               (if bit(instr, 21): r(rn) else: 0'u16))
+  of 0b101:                                                   # B, BL
+    (0'u16, if bit(instr, 24): r(14) else: 0'u16)
+  else: (0'u16, 0'u16)                                        # SWI, coprocessor
+
+proc glitch_cond(cpu: CPU; cond: uint32): bool =
+  # check_cond, kept apart: one more caller of that one tips clang into
+  # outlining it from arm_execute (+0.2% retired instructions on FireRed).
+  let (n, z, c, v) = (cpu.cpsr.negative, cpu.cpsr.zero, cpu.cpsr.carry,
+                      cpu.cpsr.overflow)
+  case cond
+  of 0x0: z
+  of 0x1: not z
+  of 0x2: c
+  of 0x3: not c
+  of 0x4: n
+  of 0x5: not n
+  of 0x6: v
+  of 0x7: not v
+  of 0x8: c and not z
+  of 0x9: not c or z
+  of 0xA: n == v
+  of 0xB: n != v
+  of 0xC: not z and n == v
+  of 0xD: z or n != v
+  of 0xE: true
+  else: false
+
+proc ldm_glitch_restore*(cpu: CPU; ran = true) {.noinline.} =
+  ## The instruction after the LDM^ has run, or is leaving the mode (`ran`),
+  ## or will not run under the glitch at all (an interrupt taken first, a
+  ## state save): the registers it did not write get their own values back.
+  let (_, writes) = arm_glitch_regs(cpu.ldm_glitch_instr)
+  let keep = if ran and cpu.glitch_cond(cpu.ldm_glitch_instr shr 28): writes
+             else: 0'u16
+  for i in 8 .. 14:
+    if bit(cpu.ldm_glitch, i) and not bit(keep, i):
+      cpu.r[i] = cpu.ldm_glitch_saved[i]
+  cpu.ldm_glitch = 0
+  cpu.gba.scheduler.clear(etLdmGlitch)
+
+proc ldm_user_glitch(cpu: CPU) {.noinline.} =
+  let mode = cast[CpuMode](cpu.cpsr.mode)
+  let banked =
+    case mode_bank(mode)
+    of 1: 0x7F00'u16                   # FIQ: r8-r14
+    of 2, 3, 4, 5: 0x6000'u16          # IRQ, SVC, ABT, UND: r13-r14
+    else: 0'u16                        # User/System, undefined patterns
+  if banked == 0: return
+  let instr = cpu.gba.bus.read_word_internal(cpu.r[15] - 4)
+  let reads = arm_glitch_regs(instr).reads and banked
+  if reads == 0 or not cpu.glitch_cond(instr shr 28): return
+  let user_bank = mode_bank(modeUSR)
+  for i in 8 .. 14:
+    if bit(reads, i):
+      cpu.ldm_glitch_saved[i] = cpu.r[i]
+      cpu.r[i] = cpu.r[i] or cpu.reg_banks[user_bank][i - 8]
+  cpu.ldm_glitch = reads
+  cpu.ldm_glitch_instr = instr
+  # Due inside the next instruction, so dispatched at its end (or at a bus
+  # sync within it, after its first-cycle reads)
+  cpu.gba.scheduler.schedule(cpu.gba.bus.cycles + 1, etLdmGlitch)
+
 proc arm_block_data_transfer*[pre_address, add, s_bit, write_back, load: static bool](cpu: CPU; instr: uint32) =
   let rn = int(bits_range(instr, 16, 19))
   var list = bits_range(instr, 0, 15)
@@ -458,6 +600,7 @@ proc arm_block_data_transfer*[pre_address, add, s_bit, write_back, load: static 
   when s_bit:
     if user_bank:
       cpu.switch_mode(cast[CpuMode](saved_mode))
+      when load: cpu.ldm_user_glitch()
     else:
       cpu.exception_return_restore()
   if not (load and bit(list, 15)): cpu.step_arm()

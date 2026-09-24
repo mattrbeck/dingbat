@@ -50,6 +50,9 @@ proc skip_bios*(cpu: CPU) =
   cpu.clear_pipeline()
 
 proc switch_mode*(cpu: CPU; new_mode: CpuMode) =
+  # The LDM^ glitch's OR'd values belong to the registers as the instruction
+  # after the LDM^ reads them, never to a bank.
+  if cpu.ldm_glitch != 0: cpu.ldm_glitch_restore()
   let old_mode  = cast[CpuMode](cpu.cpsr.mode)
   if new_mode == old_mode: return
   let new_bank  = mode_bank(new_mode)
@@ -87,6 +90,9 @@ proc irq*(cpu: CPU) =
             " pc=" & toHex(cpu.r[15], 8) & " wake=" & $cpu.halt_wake &
             " vcount=" & $cpu.gba.ppu.vcount & " if=" & toHex(uint16(cpu.gba.interrupts.reg_if), 4))
           f.close()
+    # Taken between an LDM^ and its next instruction: the entry is that
+    # instruction, and it reads none of the glitched registers.
+    if cpu.ldm_glitch != 0: cpu.ldm_glitch_restore(ran = false)
     let lr = cpu.r[15] - (if cpu.cpsr.thumb: 0'u32 else: 4'u32)
     let old_cpsr = cpu.cpsr
     cpu.switch_mode(modeIRQ)

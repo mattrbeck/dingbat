@@ -503,6 +503,13 @@ type
     wl_period*:                  int64
     wl_dispatch_mark*:           uint32
     waitloop_instr_lut*:         seq[WLInstrKind]
+    # The LDM^ glitch (arm/arm.nim, ldm_user_glitch): the current-bank
+    # registers holding banked OR user for the one instruction after an LDM^,
+    # their own values, and that instruction. Never serialized: a state is
+    # taken with it settled (gba_state_payload).
+    ldm_glitch*:       uint16
+    ldm_glitch_instr*: uint32
+    ldm_glitch_saved*: array[16, uint32]
 
   SpritePixel* = object
     priority*: uint16
@@ -1395,6 +1402,7 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
       if not gba.defer_dma_request(kind): gba.dma.trigger_hdma()
     of etVDMARequest:
       if not gba.defer_dma_request(kind): gba.dma.trigger_vdma()
+    of etLdmGlitch:     gba.cpu.ldm_glitch_restore()
     of etHandleInput, etIME, etCameraDone, etGbLycEdge: discard
 
 # Timer prescaler phase at ROM entry when the BIOS boot is skipped. The
