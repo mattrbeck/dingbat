@@ -32,6 +32,7 @@ const installFakeGis = (app, { grant }) => {
 
 test("driveFetch retries once after a 401 with a silently refreshed token", async () => {
   const app = await loadApp();
+  await connected(app); // a signed-out tab gets no re-grant (drive-session.test.mjs)
   app.api.gdriveToken = "stale-token";
   installFakeGis(app, { grant: true });
 

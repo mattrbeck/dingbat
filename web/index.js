@@ -2029,11 +2029,40 @@ const loadGisScript = () => {
 // a beat before the Sign in button's own handler).
 let gdriveTokenInFlight = null;
 
+// The Drive session. Everything Drive work does after an await rests on the
+// token and the loaded account state being the ones it started with, and
+// Sign out and Sign in change both while a flush, a pull or a renewal popup
+// is still out. So each of those takes a new session number: Sign out,
+// the grant a sign-in receives (it may be another account), the sign-in's
+// end, and a switch of the loaded account (adoptDriveAccount). Work checks
+// the number after every await (driveSessionGuard) and stops when it moved.
+let driveSession = 0;
+// gdriveConnect calls between asking for a token and knowing whose it is.
+// Nothing syncs meanwhile (syncActive): the token may be another account's
+// while the loaded state is still the last one's.
+let driveConnecting = 0;
+// A sign-in is waiting on the token request in flight (it made it, or joined
+// the one it found). Only then may a grant start a new session.
+let gdriveTokenForConnect = false;
+class DriveSessionEnded extends Error {}
+const driveSessionGuard = () => {
+  const at = driveSession;
+  return (v) => {
+    if (driveSession !== at) throw new DriveSessionEnded("The Drive session ended");
+    return v;
+  };
+};
+
 // promptMode "" = silent refresh; undefined = the account-chooser popup.
 // login_hint skips account selection: without it a browser signed in to
 // more than one Google account shows the chooser on every re-grant.
-const gdriveAcquireToken = (promptMode, hint = syncState.email) => {
-  if (gdriveTokenInFlight) return gdriveTokenInFlight;
+const gdriveAcquireToken = (promptMode, hint = syncState.email, { connect = false } = {}) => {
+  if (gdriveTokenInFlight) {
+    if (connect) gdriveTokenForConnect = true;
+    return gdriveTokenInFlight;
+  }
+  const issued = driveSession;
+  gdriveTokenForConnect = connect;
   gdriveTokenInFlight = (async () => {
     await loadGisScript();
     gdriveTokenClient ??= google.accounts.oauth2.initTokenClient({
@@ -2045,6 +2074,18 @@ const gdriveAcquireToken = (promptMode, hint = syncState.email) => {
       gdriveTokenClient.callback = (resp) => {
         if (resp.error) {
           reject(new Error("Google sign-in failed: " + resp.error));
+          return;
+        }
+        // A grant is only as good as the session that asked for it. The tap
+        // on "Sign out" can itself open the renewal popup (the capture
+        // listener runs first), and its answer lands after the sign-out:
+        // kept, it would sign the tab back in behind the person's back and
+        // sync on. A sign-in waiting on this request is what asks for a
+        // grant while signed out; the grant may be another account, so it
+        // starts a new session there and then.
+        if (gdriveTokenForConnect) driveSession++;
+        else if (!syncState.connected || issued !== driveSession) {
+          reject(new Error("Signed out of Google Drive"));
           return;
         }
         gdriveToken = resp.access_token;
@@ -2079,17 +2120,24 @@ const hasUserActivation = () =>
 // `sub` is what the queues hang on: it is not an address, so it can outlive
 // sign-out without leaving one behind, and it survives the user changing
 // their email, which a hash of that email would not.
+// Resolves to the account id, or null when it could not be learned.
 const gdriveFetchEmail = async () => {
+  let tok = gdriveToken;
   try {
     let res = await fetch(
       "https://oauth2.googleapis.com/tokeninfo?access_token=" +
-        encodeURIComponent(gdriveToken),
+        encodeURIComponent(tok),
     );
-    if (!res.ok) return;
+    if (!res.ok) return null;
     let info = await res.json();
+    // The tab holds another token by now (signed out, or in as someone
+    // else): this answer is about an account it no longer holds.
+    if (gdriveToken !== tok) return null;
     rememberDriveEmail(info.email);
-    await adoptDriveAccount(typeof info.sub === "string" ? info.sub : null);
-  } catch {}
+    let sub = typeof info.sub === "string" ? info.sub : null;
+    await adoptDriveAccount(sub);
+    return sub;
+  } catch { return null; }
 };
 
 // Authenticated fetch; on a 401 one silent re-grant and replay. The re-grant
@@ -2097,6 +2145,7 @@ const gdriveFetchEmail = async () => {
 // failure here does not sign out: it drops the token and hands off to the
 // gesture-armed renewal.
 const driveFetch = async (url, opts = {}) => {
+  const live = driveSessionGuard();
   const send = () => fetch(url, {
     ...opts,
     headers: { ...(opts.headers || {}), Authorization: "Bearer " + gdriveToken },
@@ -2105,6 +2154,8 @@ const driveFetch = async (url, opts = {}) => {
   if (res.status === 401) {
     try {
       if (!hasUserActivation()) throw new Error("no activation for a popup");
+      // Signed out since the request left: no popup, the answer is refused.
+      if (!driveLinked()) throw new Error("signed out");
       await gdriveAcquireToken("");
     } catch {
       clearDriveToken();
@@ -2114,6 +2165,9 @@ const driveFetch = async (url, opts = {}) => {
       // picks up a token.
       throw new Error("Drive is reconnecting — your changes are saved");
     }
+    // Replayed only in the session it was first sent in: the re-grant may
+    // have been answered for whoever signed in since.
+    live();
     res = await send();
   }
   if (!res.ok) throw new Error("Drive request failed (HTTP " + res.status + ")");
@@ -2226,6 +2280,9 @@ const makeGdriveButton = (label, ghost, onClick) => {
 };
 
 const gdriveSignOut = () => {
+  // Ends the session: a flush or pull still running stops at its next
+  // await, and a token popup still open is refused when it answers.
+  driveSession++;
   if (gdriveToken && typeof google !== "undefined" && google.accounts?.oauth2) {
     google.accounts.oauth2.revoke(gdriveToken, () => {});
   }
@@ -2406,6 +2463,9 @@ const adoptDriveAccount = async (acct) => {
   }
   let restored = parked[acct];
   delete parked[acct];
+  // Drive work still running holds the last account's state: end its session.
+  driveSession++;
+  syncRemarked.clear();
   Object.assign(syncState, blankAccountState(), restored || {});
   syncState.acct = acct;
   syncState.parked = parked;
@@ -2416,7 +2476,9 @@ const adoptDriveAccount = async (acct) => {
     : 0;
   if (waiting) showToast("Applying changes saved for this account");
 };
-const syncActive = () => !!gdriveToken;
+// A token alone is not a session: a signed-out tab can still come to hold
+// one, and a sign-in holds one before it knows whose it is.
+const syncActive = () => !!gdriveToken && driveLinked() && !driveConnecting;
 
 const sigOfBytes = (bytes) => saveSignature(bytes); // FNV-1a + length
 
@@ -2737,10 +2799,17 @@ const scheduleFlush = () => {
   if (!syncCapTimer) syncCapTimer = setTimeout(flushSync, SYNC_MAX_WAIT_MS);
   refreshSyncStatus();
 };
+// Keys saved again while already queued. Queued is not enough to be safe:
+// the running flush may have read that key's bytes already and be sending
+// them, and it takes the key off the queue once they land. It takes it off
+// only if the key is not in here, and clears a key from here just before it
+// reads it (flushSyncInner).
+const syncRemarked = new Set();
 const markUpload = (name) => {
   if (!driveEnrolled()) return;
   if (!parseDriveFileName(name)) return;
   if (!syncState.queueUp.includes(name)) syncState.queueUp.push(name);
+  else syncRemarked.add(name);
   saveSyncState();
   scheduleFlush();
 };
@@ -2802,13 +2871,16 @@ const flushSyncInner = async () => {
     refreshSyncStatus();
     return;
   }
+  // Every await below is followed by live(): the flush stops there if the
+  // session it started in has ended (driveSessionGuard).
+  const live = driveSessionGuard();
   syncBusy = true;
   setSyncStatus("syncing");
   try {
-    let remote = await driveListMap();
+    let remote = live(await driveListMap());
     // What the library says about existence and naming, settled before a
     // single file is touched, so the files cannot end up disagreeing with it.
-    let lib = mergeLibrary(await readDriveLibrary(remote), await localLibrary());
+    let lib = mergeLibrary(live(await readDriveLibrary(remote)), live(await localLibrary()));
     // A tombstone the merge dropped: a later play on another device says the
     // delete was not meant. Its queued file deletes are cancelled. Only a
     // game delete raises a tombstone, so a save reset's deletes - whose game
@@ -2841,7 +2913,8 @@ const flushSyncInner = async () => {
     for (let r of syncState.queueRen.slice()) {
       let f = remote.get(r.from);
       if (f && !remote.has(r.to)) {
-        let meta = await (await driveRenameFile(f.id, r.to)).json().catch(() => null);
+        let res = live(await driveRenameFile(f.id, r.to));
+        let meta = live(await res.json().catch(() => null));
         remote.delete(r.from);
         remote.set(r.to, { ...f, name: r.to,
                            modifiedTime: meta?.modifiedTime || f.modifiedTime });
@@ -2851,9 +2924,10 @@ const flushSyncInner = async () => {
       } else if (f) {
         // Another device raced us with the same rename: the old file is a duplicate.
         await driveDelete(f.id);
+        live();
         remote.delete(r.from);
       } else if (!remote.has(r.to) && !syncState.queueUp.includes(r.to) &&
-                 await readSyncBytes(r.to)) {
+                 live(await readSyncBytes(r.to))) {
         // Drive holds neither name but this device holds the bytes: upload.
         syncState.queueUp.push(r.to);
       }
@@ -2866,7 +2940,10 @@ const flushSyncInner = async () => {
       // what is known about it alone.
       let asked = delStamps()[name] || 0;
       let outranked = !!r && !!asked && Date.parse(r.modifiedTime || 0) > asked;
-      if (r && !outranked) await driveDelete(r.id);
+      if (r && !outranked) {
+        await driveDelete(r.id);
+        live();
+      }
       if (!outranked) {
         delete syncState.sigs[name];
         delete syncState.rmt[name];
@@ -2878,7 +2955,9 @@ const flushSyncInner = async () => {
       // Gone from the queue since this pass began: a delete asked for it
       // (markDelete unqueues), or a rename moved it to its new name.
       if (!syncState.queueUp.includes(name)) continue;
-      let bytes = await readSyncBytes(name);
+      // A save of this key from here on is newer than the bytes read below.
+      syncRemarked.delete(name);
+      let bytes = live(await readSyncBytes(name));
       if (bytes) {
         let r = remote.get(name);
         let sig = sigOfBytes(bytes);
@@ -2886,7 +2965,7 @@ const flushSyncInner = async () => {
         // uploaded. A file missing remotely uploads regardless of its sig.
         // Present: ROMs are immutable, anything else re-uploads on change.
         if (!r || (!name.startsWith("rom:") && sig !== syncState.sigs[name])) {
-          let res = await driveUploadFile(name, bytes, r?.id);
+          let res = live(await driveUploadFile(name, bytes, r?.id));
           // Deleted while this upload was on the wire: the delete is the
           // later word, but the delete pass lets any write to the file after
           // the delete's stamp outrank it, and this write is exactly such a
@@ -2894,7 +2973,7 @@ const flushSyncInner = async () => {
           // device's later write still can; with no time to go on, the
           // delete simply goes ahead.
           if (syncState.queueDel.includes(name)) {
-            let meta = await res?.json?.().catch(() => null);
+            let meta = live(await res?.json?.().catch(() => null));
             let mt = Date.parse(meta?.modifiedTime || "");
             if (mt) delStamps()[name] = Math.max(delStamps()[name] || 0, mt);
             else delete delStamps()[name];
@@ -2904,9 +2983,14 @@ const flushSyncInner = async () => {
         // upload of an already-present ROM is still proof of a copy there.
         syncState.sigs[name] = sig;
       }
-      syncState.queueUp = syncState.queueUp.filter((n) => n !== name);
+      // Saved again while it was being read or sent: what went up is
+      // already stale, so it stays queued for the next flush.
+      if (!syncRemarked.has(name)) {
+        syncState.queueUp = syncState.queueUp.filter((n) => n !== name);
+      }
     }
-    await writeDriveLibrary(lib, await driveListMap(), remote);
+    await writeDriveLibrary(lib, live(await driveListMap()), remote);
+    live();
     // `lib` was merged before the awaits above. A delete, import or rename
     // made here since then is in this device's library now and not in
     // `lib`: adopting `lib` as it stands would drop that delete's
@@ -2915,6 +2999,7 @@ const flushSyncInner = async () => {
     // step under the "recent" lock.
     let addedBack = false;
     await updateRecent((here) => {
+      live();
       let now = mergeLibrary(lib, { recents: here, tomb: syncState.tomb, ren: syncState.ren });
       syncState.tomb = now.tomb;
       syncState.ren = now.ren;
@@ -2932,6 +3017,9 @@ const flushSyncInner = async () => {
     setSyncStatus("done");
   } catch (e) {
     syncBusy = false;
+    // Signed out, or in as someone else: nothing failed, and this flush's
+    // work (still queued) belongs to the session that ended.
+    if (e instanceof DriveSessionEnded) { refreshSyncStatus(); return; }
     await saveSyncState();
     setSyncStatus("offline");
     console.warn("Drive sync flush failed:", e);
@@ -3039,20 +3127,23 @@ const pullSync = (opts = {}) => {
 };
 const pullSyncInner = async ({ silent = true } = {}) => {
   if (!syncActive()) return;
+  // As in flushSyncInner: the pull stops after any await that finds the
+  // session it started in over.
+  const live = driveSessionGuard();
   syncBusy = true;
   if (!silent) setSyncStatus("syncing");
   let gridDirty = false;
   let queuedMissing = false;
   try {
-    let remote = await driveListMap();
-    let lib = mergeLibrary(await readDriveLibrary(remote), await localLibrary());
+    let remote = live(await driveListMap());
+    let lib = mergeLibrary(live(await readDriveLibrary(remote)), live(await localLibrary()));
 
     // Remote renames before the tombstone pass, so anything still under an
     // old name is genuinely deleted data. Oldest-first so chains replay in order.
     let renPending = new Set();
     for (let r of [...(lib.ren || [])].sort((x, y) => (x.ts || 0) - (y.ts || 0))) {
-      if (!await hasAnyLocalRecord(r.from)) continue;
-      let applied = await applyRemoteRename(r.from, r.to);
+      if (!live(await hasAnyLocalRecord(r.from))) continue;
+      let applied = live(await applyRemoteRename(r.from, r.to));
       if (!applied) {
         renPending.add(r.from);
         continue;
@@ -3076,9 +3167,9 @@ const pullSyncInner = async ({ silent = true } = {}) => {
     }
 
     let pending = [];
-    for (let t of lib.tomb) if (await hasLocalData(t.name)) pending.push(t.name);
+    for (let t of lib.tomb) if (live(await hasLocalData(t.name))) pending.push(t.name);
     if (pending.length) {
-      let keep = await confirmTombstones(pending);
+      let keep = live(await confirmTombstones(pending));
       if (keep === "restore") {
         // Un-delete: drop the tombstones and re-upload.
         lib.tomb = lib.tomb.filter((t) => !pending.includes(t.name));
@@ -3093,6 +3184,7 @@ const pullSyncInner = async ({ silent = true } = {}) => {
           if (isRomLoaded(g)) continue; // never yank the game being played
           // The same local wipe Delete performs.
           await deleteGameLocalData(g);
+          live();
           gridDirty = true;
         }
       }
@@ -3101,8 +3193,9 @@ const pullSyncInner = async ({ silent = true } = {}) => {
     // Pull saves/states for games this device holds, and pictures for every
     // game in the library: a Drive-only tile shows the screen another device
     // last saw (20 KB, and the whole point of the picture).
-    let local = await localSyncFiles();
+    let local = live(await localSyncFiles());
     for (let [name, f] of remote) {
+      live(); // the downloads below await, and write the sync state after
       if (name === LIBRARY_FILE) continue;
       let p = parseDriveFileName(name);
       if (!p) continue;
@@ -3146,6 +3239,7 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       local.delete(name);
     }
 
+    live();
     // Reconcile upward: queue anything held here that the listing lacks
     // (sigs only remember what was once uploaded). Tombstoned games stay deleted.
     for (let [name, p] of local) {
@@ -3168,6 +3262,7 @@ const pullSyncInner = async ({ silent = true } = {}) => {
     // the deleted game's tile back, drop the import's, and lose the delete's
     // tombstone or the rename's marker for good.
     await updateRecent((here) => {
+      live();
       lib = mergeLibrary(lib, { recents: here, tomb: syncState.tomb, ren: syncState.ren });
       syncState.tomb = lib.tomb;
       syncState.ren = lib.ren;
@@ -3189,11 +3284,13 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       return recents;
     });
     await writeDriveLibrary(lib, remote);
+    live();
     await saveSyncState();
     gridDirty = true;
   } catch (e) {
-    console.warn("Drive pull failed:", e);
     syncBusy = false;
+    if (e instanceof DriveSessionEnded) { refreshSyncStatus(); return; }
+    console.warn("Drive pull failed:", e);
     setSyncStatus("offline");
     return;
   }
@@ -3817,8 +3914,22 @@ const buildSyncModal = ({ title, hint, onDismiss }) => {
 
 // --- Connect / disconnect -------------------------------------------------
 const gdriveConnect = async () => {
-  await gdriveAcquireToken();
-  await gdriveFetchEmail();
+  let acct;
+  driveConnecting++;
+  try {
+    await gdriveAcquireToken(undefined, syncState.email, { connect: true });
+    acct = await gdriveFetchEmail();
+  } finally {
+    driveConnecting--;
+  }
+  // Whose token this is could not be learned, and another account's queued
+  // work, tombstones and renames are what is loaded: syncing now could send
+  // them to this one. Better to ask again.
+  if (!acct && syncState.acct) {
+    clearDriveToken();
+    throw new Error("Couldn't confirm which Google account signed in — try again");
+  }
+  driveSession++; // a new session, whichever account it is
   driveRenewFails = 0; // fresh grant: the silent-renew budget starts over
   syncState.connected = true; // remembered so a reload can re-grant silently
   await saveSyncState();
@@ -3892,10 +4003,18 @@ const renewDriveToken = async () => {
   if (appUpdating) return; // reload imminent: a popup now would be orphaned
   if (navigator.onLine === false) { armDriveRenewOnGesture(); return; }
   const wasSignedOut = !gdriveToken;
+  // Signed out (or in again) while this was waiting: not this renewal's
+  // business any more.
+  const live = driveSessionGuard();
+  const over = () => {
+    try { live(); } catch { return true; }
+    return !syncState.connected;
+  };
 
   // A script-load failure (offline) must not count against the fail budget.
   try { await loadGisScript(); }
   catch { armDriveRenewOnGesture(); return; }
+  if (over()) return;
 
   // Activation lasts about five seconds and may have aged out while the
   // script loaded; a refused popup would spend a strike, so wait.
@@ -3904,6 +4023,8 @@ const renewDriveToken = async () => {
   try {
     await gdriveAcquireToken("");
   } catch {
+    // Refused because the session ended: not a strike.
+    if (over()) return;
     // Popup blocked or grant gone: retry on the next gesture until the
     // budget runs out.
     if (++driveRenewFails >= DRIVE_RENEW_MAX_FAILS) {
@@ -3917,9 +4038,11 @@ const renewDriveToken = async () => {
     return;
   }
 
+  if (over()) return;
   driveRenewFails = 0;
   if (!wasSignedOut) return; // pure rollover: nothing user-visible changed
   await gdriveFetchEmail();
+  if (over()) return;
   renderGdriveSection();
   refreshSyncUI();
   refreshHomeRecent();
