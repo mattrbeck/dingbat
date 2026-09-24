@@ -473,11 +473,11 @@ var rumble_last_pulse = 0'u32
 
 # ──────────────────────────── ROM Loading ────────────────────────────
 
-proc flush_gb_save() =
-  # Battery saves are also flushed once per frame while running; this covers
-  # switching ROMs and quitting mid-frame
-  if app.gb_emu != nil:
-    app.gb_emu.cartridge.mbc_save()
+proc flush_saves() =
+  ## Before a core is dropped (a switch, a Reset) and at quit: the last
+  ## frame's battery write, or a state loaded while paused, is on disk. A
+  ## failure is the core's to log (once) and poll_battery_notice's to show.
+  discard flush_batteries(app.gba_emu, app.gb_emu)
 
 const ROM_EXTS = [".gba", ".gb", ".gbc"]
 
@@ -712,7 +712,7 @@ proc load_rom(path: string) =
       load_notice(&"No Game Boy or GBA ROM could be read from {path.extractFilename()}.", "")
       return
   # Before the new core reads the .sav: a Reset reloads the same file
-  flush_gb_save()
+  flush_saves()
   # The new core is built and checked before anything of the old one goes
   let boot = boot_settings(app.cfg, app.boot_overrides)
   if boot.note.len > 0 and not is_gb_rom(rom_path): echo boot.note
@@ -2626,7 +2626,7 @@ proc main() =
     if not emulated and not presented:
       # Idle until audio drains or the next present slot; don't busy-spin
       delay(1)
-  flush_gb_save()
+  flush_saves()
   input_log_close()
 
 main()

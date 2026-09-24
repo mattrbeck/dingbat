@@ -1,5 +1,6 @@
 ## The parts of the desktop's `load_rom` that need no window: building the
-## next core without touching the running one. No SDL, ImGui or GL here, so
+## next core without touching the running one, and writing battery RAM out
+## before a core is dropped. No SDL, ImGui or GL here, so
 ## tests/desktop_lifecycle_test.nim builds headless.
 
 import std/[os, strformat, strutils]
@@ -66,3 +67,19 @@ proc build_core*(rom_path: string; o: CoreOptions): BuiltCore =
       result.gba = g
   except CatchableError as e:
     result = BuiltCore(error: &"Couldn't load {name}.", detail: e.msg)
+
+proc flush_batteries*(gba: GBA; gb: GB): string =
+  ## Writes the loaded core's battery RAM if the game changed it. The core
+  ## writes once a frame while running; this covers what no frame will: the
+  ## last frame's write before the core is dropped for another game or at
+  ## quit, and a state loaded while paused (restoring one marks the battery
+  ## dirty). `mbc_save` / `write_save` catch a failed write (the RAM stays
+  ## dirty, `save_error` says why); returns that reason, "" when the write
+  ## landed or nothing was dirty.
+  if gb != nil:
+    gb.cartridge.mbc_save()
+    if gb.cartridge.save_error.len > 0: return gb.cartridge.save_error
+  if gba != nil and gba.storage != nil:
+    gba.storage.write_save()
+    return gba.storage.save_error
+  ""

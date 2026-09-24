@@ -137,8 +137,9 @@ jobs:
         shell: bash
         run: ./dingbat_desktop_persist_test
       - name: Desktop game lifecycle (load_rom's headless half)
-        # A file that is not a ROM is refused with the running game kept.
-        # Synthetic ROMs.
+        # A file that is not a ROM is refused with the running game kept; a
+        # GBA battery is written on a switch/quit (and a failed write is
+        # reported, not raised). Synthetic ROMs.
         shell: bash
         run: ./dingbat_desktop_lifecycle_test
       - name: Clip-capture replay determinism
