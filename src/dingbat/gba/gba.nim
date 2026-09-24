@@ -223,6 +223,9 @@ type
     # DMA_CHAIN: the burst that just ended handed the bus straight to the
     # next one, which starts without its lead cycle. Instruction scoped.
     chained*:          bool
+    # DMA_IRQ_FROM_BUS_END: the burst just run raised its interrupt; run_pending
+    # books the check. Instruction scoped.
+    irq_after_burst*:  bool
     current_priority*: int
     # DMA3 video-capture frame latch: set at line 2, cleared with the enable
     # bit at line 162; a channel armed mid-frame waits for the next frame's

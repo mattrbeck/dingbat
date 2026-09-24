@@ -9,6 +9,14 @@ const DMA_PREEMPT_AFTER_READ {.booldefine.} = true
   ## before) reds _mid_1 and _mid_2; both points reds _mid_2; neither reds
   ## _mid_1 and _end_1.._end_3.
 const DMA_STALL_FROM_CPU_STOP {.booldefine.} = true
+const DMA_IRQ_FROM_BUS_END {.booldefine.} = true
+  ## A burst's end-of-transfer interrupt is recognised IRQ_SYNC_DELAY cycles
+  ## after the burst lets go of the bus, even when the CPU ran internal
+  ## cycles under it (tests/roms/payloads/dmairq.s on an AGB SP: DMA3, 1 to
+  ## 64 words, the CPU polling a flag -- the load's internal cycle under the
+  ## burst -- takes the interrupt one cycle and one instruction later than
+  ## a check booked from the CPU's clock gives; with NOPs, where nothing
+  ## overlaps, the two agree).
 const DMA_ROM_BOUNDARY_HOLD {.booldefine.} = true
   ## A gamepak ROM source whose address does not move (fixed or decrement
   ## control; the data still comes from successive addresses) and sits on
@@ -394,7 +402,15 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
 
   if dma.dmacnt_h[channel].irq_enable:
     dma.gba.interrupts.set_interrupt_flag(IRQ_DMA_BIT_BASE + channel)
-    dma.gba.interrupts.schedule_interrupt_check(IRQ_SYNC_DELAY)
+    when DMA_IRQ_FROM_BUS_END:
+      # run_pending books the check from where the burst let go of the bus
+      # when the CPU was running under it; anything else books it here.
+      if nested or dma.gba.cpu.halted:
+        dma.gba.interrupts.schedule_interrupt_check(IRQ_SYNC_DELAY)
+      else:
+        dma.irq_after_burst = true
+    else:
+      dma.gba.interrupts.schedule_interrupt_check(IRQ_SYNC_DELAY)
 
 proc run_pending*(dma: DMA) =
   ## Arbitration pump: grants latched requests in priority order (channel 0
@@ -436,7 +452,10 @@ proc run_pending*(dma: DMA) =
       # not. A wall-clock delay loses one cycle to it, not four.
       # A halted CPU has no clock to stop; its wake is cpu.nim's business.
       if saved == 4 and not dma.gba.cpu.halted:
-        var held = bus.sched.cycles + CycleCount(bus.cycles) - granted_at
+        # where the burst let go of the bus, before any cycles the CPU ran
+        # under it are taken back out of the clock below
+        let burst_end = bus.sched.cycles + CycleCount(bus.cycles)
+        var held = burst_end - granted_at
         # When the CPU stopped and started again, if not as the burst did
         var cpu_back = CycleCount(0)
         var cpu_ran = false
@@ -475,6 +494,15 @@ proc run_pending*(dma: DMA) =
         if intr.pipe_raised != 0 and intr.pipe_due > stall_start:
           intr.pipe_due += held
         intr.stall_open = true
+        when DMA_IRQ_FROM_BUS_END:
+          if dma.irq_after_burst:
+            dma.irq_after_burst = false
+            let ahead = if burst_end > bus.sched.cycles: int(burst_end - bus.sched.cycles) else: 0
+            bus.sched.schedule(ahead + IRQ_SYNC_DELAY, etInterrupts)
+    when DMA_IRQ_FROM_BUS_END:
+      if dma.irq_after_burst:
+        dma.irq_after_burst = false
+        dma.gba.interrupts.schedule_interrupt_check(IRQ_SYNC_DELAY)
     # The CPU (or a paused outer burst) resumes with a nonsequential access.
     bus.dma_active = saved < 4
     when defined(pftrace):

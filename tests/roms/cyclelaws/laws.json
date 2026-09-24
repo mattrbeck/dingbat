@@ -1928,5 +1928,88 @@
     "want": "38010094"
    }
   ]
+ },
+ {
+  "payload": "dmairq",
+  "rom": "dmairq.gba",
+  "sha1": "576282c59f59b26946730b1982034a9105a9125b",
+  "frames": 180,
+  "cells": [
+   {
+    "id": "dmairq 0x1",
+    "kind": "hex",
+    "want": "6001002B"
+   },
+   {
+    "id": "dmairq 0x2",
+    "kind": "hex",
+    "want": "60010037"
+   },
+   {
+    "id": "dmairq 0x4",
+    "kind": "hex",
+    "want": "6001004F"
+   },
+   {
+    "id": "dmairq 0x10",
+    "kind": "hex",
+    "want": "600100DF"
+   },
+   {
+    "id": "dmairq 0x40",
+    "kind": "hex",
+    "want": "6001031F"
+   },
+   {
+    "id": "dmairq 0x101",
+    "kind": "hex",
+    "want": "68010030"
+   },
+   {
+    "id": "dmairq 0x102",
+    "kind": "hex",
+    "want": "6801003C"
+   },
+   {
+    "id": "dmairq 0x104",
+    "kind": "hex",
+    "want": "68010054"
+   },
+   {
+    "id": "dmairq 0x110",
+    "kind": "hex",
+    "want": "680100E4"
+   },
+   {
+    "id": "dmairq 0x140",
+    "kind": "hex",
+    "want": "68010324"
+   },
+   {
+    "id": "dmairq 0x201",
+    "kind": "hex",
+    "want": "7101002B"
+   },
+   {
+    "id": "dmairq 0x202",
+    "kind": "hex",
+    "want": "71010037"
+   },
+   {
+    "id": "dmairq 0x204",
+    "kind": "hex",
+    "want": "7101004F"
+   },
+   {
+    "id": "dmairq 0x210",
+    "kind": "hex",
+    "want": "710100DF"
+   },
+   {
+    "id": "dmairq 0x240",
+    "kind": "hex",
+    "want": "7101031F"
+   }
+  ]
  }
 ]

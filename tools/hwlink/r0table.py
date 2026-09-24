@@ -49,6 +49,9 @@ TABLE = {
                                 (1, list(range(1, 17)) + list(range(22, 123, 20)) + [106, 110, 114, 118]),
                                 (2, list(range(2, 123, 20))))
                   for k in ks],
+    # a DMA's end-of-transfer interrupt against a running CPU: N = 1..64
+    # words, polling from IWRAM / EWRAM, or a NOP sled
+    'dmairq': [v << 8 | n for v in (0, 1, 2) for n in (1, 2, 4, 16, 64)],
 }
 
 
