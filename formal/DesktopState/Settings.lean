@@ -7,12 +7,15 @@
 -- @models src/dingbat/frontend/video_widget.nim: reset apply
 -- @models src/dingbat/frontend/file_explorer.nim: new_file_explorer render close
 -- @models src/dingbat/frontend/cheats_widget.nim: attach
--- @models src/dingbat/common/config.nim: new_config parse_config load_config save_config key_name_to_code key_code_to_name
+-- @models src/dingbat/common/config.nim: new_config reset_to_defaults parse_config load_config_file load_config save_config_file save_config key_name_to_code key_code_to_name keycode_file_name keycode_from_file_name boot_settings
 
 /-
 # Settings: the config editor, the input-capture widgets, and config.nim
 
-Written against a2e038f82 (branch lean-desktop-state). No Nim was changed.
+Written against a2e038f82 (branch lean-desktop-state); the `fixed` switches
+were then brought in line with the settings fix round (branch
+worktree-agent-a08659528cd06b57b), so the `regress_*` theorems describe what
+shipped. Every `bug_*` theorem still describes the code at a2e038f82.
 
 | Nim                                                          | lines            |
 |--------------------------------------------------------------|------------------|
@@ -117,14 +120,47 @@ cfg in every reachable state, Reset to Defaults included),
 `cheatsOK_reachable`, `apply_menu_commute` / `apply_keeps_menu_fields` (the
 Settings window and the menus cannot overwrite each other), `persist_idem`.
 
+Also refuted for the code as it is: `bug_skip_bios_cannot_undo_saved_intro`,
+`bug_bad_file_destroyed` (the overwrite as a history bit).
+
 The fixes are the `Fix` switches; `fixed` turns them on. Proved for it:
 `invF_reachable` and its corollaries `fixed_roundtrip`,
 `fixed_bound_key_reaches_game`, `fixed_bios`, `fixed_never_loads_bios_as_rom`,
 plus `fixed_closed_never_captures`, `fixed_reset_is_defaults`,
-`liveOK_fixed`, and a `regress_*` replay of the traces.
-`capture_fix_needs_both_halves` and
+`fixed_never_destroys_bad_file`, `liveOK_fixed`, and a `regress_*` replay of
+the traces. `capture_fix_needs_both_halves` and
 `bug_naive_reset_fix_leaves_core_in_speed_mode` show why each fix has the
 parts it has.
+
+What shipped, switch by switch:
+* `numericKeys` (14): save_config writes an unnamed key as its decimal
+  keycode and parse_config reads it back, so `persist fixed` keeps every
+  binding and `fixed_roundtrip` is load(save(cfg)) = cfg with no condition on
+  the keys. The capture filter (`captureFilter`, finding 15, the input fix's
+  keybindings_widget.nim) therefore refuses only keys `handle_input` takes
+  before the bindings; `obs_unnamed_refusal_keeps_old_key` is the filter as
+  first proposed, which would refuse a key that now works.
+* `cliApart` (17): the command line's BIOS options are `S.cli`
+  (`app.boot_overrides`); only `loadRom` reads them (`boot_settings`), and
+  --skip-bios overrides a saved intro.
+* `biosGate` (16): `boot_settings` falls back to HLE without the intro when
+  there is no image. The shipped BIOS tab also disables "Run BIOS intro" and
+  the two real-BIOS modes while there is no file; the model keeps those
+  controls enabled, a superset of the shipped behaviour, so the gate is
+  proved for configs the controls cannot produce (older files, a file that
+  went missing).
+* `moveAside` (18, config): a file that does not parse is renamed aside at
+  start or by the save that finds it. Writes also go through
+  write_file_atomic and never raise (23); a write failure is not modelled
+  here (the model's save always succeeds).
+* `resetAll`: Reset to Defaults is `Config.reset_to_defaults` (everything
+  but paths, recents and the explorer folder) and live_sync calls
+  apply_speed_mode.
+* `feFresh`: each file dialog opens (and each folder change starts) with
+  nothing selected.
+* The config half of finding 1 (save_config writes only the keys this
+  process changed, over a fresh read) is a two-process property; it is
+  modelled in `SavePersistence` (`cliOver`, `cfg_ok`), not here.
 -/
 namespace DesktopState.Settings
 
@@ -186,6 +222,42 @@ def FileE.kind : FileE → Kind
   | .gbaRom => .gba
   | .biosBin => .junk   -- load_rom 722: any extension but .gb/.gbc is a GBA cart
 
+/-! ## The fixes, as switches (all off = the code at a2e038f82) -/
+
+structure Fix where
+  /-- wants_input also requires the editor to be open. -/
+  openGate : Bool := false
+  /-- render clears `visible` every frame before the tab bar sets it. -/
+  visGate : Bool := false
+  /-- key_released refuses keys that never reach the game (and, without
+  `numericKeys`, keys the file cannot name). -/
+  captureFilter : Bool := false
+  /-- do_factory_reset also resets fifo_interp and speed_mode, and live_sync
+  calls apply_speed_mode. -/
+  resetAll : Bool := false
+  /-- resets them WITHOUT apply_speed_mode (to show that half is needed). -/
+  resetNaive : Bool := false
+  /-- load_rom maps "no BIOS image" to HLE and no intro. -/
+  biosGate : Bool := false
+  /-- fe.render clears the selection when a dialog opens. -/
+  feFresh : Bool := false
+  /-- save_config writes an unnamed key as its decimal keycode, and
+  parse_config reads it back (finding 14, as shipped). -/
+  numericKeys : Bool := false
+  /-- The command-line BIOS options live in `app.boot_overrides`, never in
+  cfg; load_rom applies them through `boot_settings`, and --skip-bios
+  overrides a saved intro (finding 17, as shipped). -/
+  cliApart : Bool := false
+  /-- A config file that does not parse is renamed aside (at start, or when
+  a save finds it), never overwritten (finding 18, as shipped). -/
+  moveAside : Bool := false
+
+def real : Fix := {}
+def fixed : Fix :=
+  { openGate := true, visGate := true, captureFilter := true, resetAll := true, biosGate := true,
+    feFresh := true, numericKeys := true, cliApart := true, moveAside := true }
+def naive : Fix := { resetNaive := true }
+
 /-! ## Config and the file -/
 
 structure Cfg where
@@ -220,9 +292,12 @@ scratch HOME): KP_1 and e-acute bound to A and B came back as neither, the
 other eight bindings and every other field intact, and the file still
 parsed. Controller buttons: save writes only named ones (456-458), and the
 widget binds only named ones. Everything else round-trips (bools, the
-clamped volume, the recents list through yaml_str's quoting). -/
-def persist (c : Cfg) : Cfg :=
-  { c with kb := fun k => if k.named then c.kb k else none,
+clamped volume, the recents list through yaml_str's quoting).
+With `numericKeys` an unnamed key is written as its decimal keycode and
+parsed back, so every binding survives (tests/desktop_settings_test.nim
+round-trips a keypad key and e-acute through the real config.nim). -/
+def persist (fx : Fix) (c : Cfg) : Cfg :=
+  { c with kb := fun k => if k.named || fx.numericKeys then c.kb k else none,
            pad := fun b => if b < 15 then c.pad b else none }
 
 inductive Disk where
@@ -230,27 +305,35 @@ inductive Disk where
   | ok (c : Cfg)      -- the file save_config(c) wrote
   | bad               -- a file loadToJson rejects
 
-/-- load_config (config 415-425): any exception -> new_config(), silently. -/
-def loadDisk : Disk → Cfg
+/-- load_config (config 415-425): any exception -> new_config(), silently.
+Fixed, the same defaults, but the bad file is first moved aside (`launch`). -/
+def loadDisk (fx : Fix) : Disk → Cfg
   | .missing => defaults
-  | .ok c => persist c
+  | .ok c => persist fx c
   | .bad => defaults
 
-/-- The command-line overrides `main` writes INTO cfg (2164-2175). -/
+/-- The command-line BIOS overrides. The code as it is writes them INTO cfg
+(2164-2175); fixed, they stay in `S.cli` and only `loadRom` reads them. -/
 structure Cli where
   hle       : Bool := false          -- --hle
   afterBios : Bool := false          -- --hle-after-bios
-  runBios   : Bool := false          -- --run-bios
+  runBios   : Option Bool := none    -- --run-bios (some true) / --skip-bios (some false), the last given
   biosArg   : Option Bool := none    -- `dingbat BIOS ROM`: some (the file exists)
 
-def cliApply (a : Cli) (c : Cfg) : Cfg :=
+/-- `main` 2164-2175 (real) / `boot_settings` before its fallback (fixed).
+In the code as it is --skip-bios only clears the flag an earlier --run-bios
+set (2129), so it cannot turn a saved intro off. -/
+def cliApply (fx : Fix) (a : Cli) (c : Cfg) : Cfg :=
   let c := if a.hle then { c with useHle := true, runBios := false } else c        -- 2164-2166
   let c := if a.afterBios then { c with afterBios := true, runBios := true } else c -- 2167-2169
   let c := match a.biosArg with                                                     -- 2170-2174
     | some ex => if !a.hle && !a.afterBios then { c with biosFile := ex, useHle := false }
                  else { c with biosFile := ex }
     | none => c
-  if a.runBios then { c with runBios := true } else c                               -- 2175
+  match a.runBios with                                                              -- 2175
+  | some true => { c with runBios := true }
+  | some false => if fx.cliApart then { c with runBios := false } else c
+  | none => c
 
 /-! ## The editor, the explorer, the core -/
 
@@ -337,36 +420,20 @@ structure S where
   wck         : Bool             -- io.WantCaptureKeyboard, as of the last igNewFrame
   modHeld     : Bool             -- MOD_KEY bit of SDL's modstate
   lastRoute   : Route            -- where the last key event went
-
-/-! ## The fixes, as switches (all off = the code at a2e038f82) -/
-
-structure Fix where
-  /-- wants_input also requires the editor to be open. -/
-  openGate : Bool := false
-  /-- render clears `visible` every frame before the tab bar sets it. -/
-  visGate : Bool := false
-  /-- key_released refuses keys it cannot save or that never reach the game. -/
-  captureFilter : Bool := false
-  /-- do_factory_reset also resets fifo_interp and speed_mode, and live_sync
-  calls apply_speed_mode. -/
-  resetAll : Bool := false
-  /-- resets them WITHOUT apply_speed_mode (to show that half is needed). -/
-  resetNaive : Bool := false
-  /-- load_rom maps "no BIOS image" to HLE and no intro. -/
-  biosGate : Bool := false
-  /-- fe.render clears the selection when a dialog opens. -/
-  feFresh : Bool := false
-
-def real : Fix := {}
-def fixed : Fix :=
-  { openGate := true, visGate := true, captureFilter := true, resetAll := true, biosGate := true,
-    feFresh := true }
-def naive : Fix := { resetNaive := true }
+  cli         : Cli              -- this run's command line (fixed: app.boot_overrides)
+  lostBad     : Bool             -- a file that did not parse was overwritten (history)
 
 /-! ## Helpers: the Nim procs -/
 
-/-- save_config (config 445-491). -/
-def save (s : S) : S := { s with disk := .ok s.cfg }
+def Disk.isBad : Disk → Bool
+  | .bad => true
+  | _ => false
+
+/-- save_config (config 445-491). Truncate-and-write replaces a file that
+does not parse; fixed (`moveAside`), save_config renames it aside first. -/
+def save (fx : Fix) (s : S) : S :=
+  { s with disk := .ok s.cfg,
+           lostBad := if fx.moveAside then s.lostBad else s.lostBad || s.disk.isBad }
 
 /-- apply_master_volume (570-574). -/
 def applyVolume (s : S) : S :=
@@ -386,22 +453,25 @@ def applyColor (s : S) : S := { s with shaderColor := s.cfg.color }
 
 /-- load_rom (694-767), after its early returns. The cheats widget is
 re-attached to the new core (732); recents[0] := the file and the whole cfg
-is saved (755-761). -/
+is saved (755-761). Fixed, the BIOS fields come from
+`boot_settings(cfg, boot_overrides)`: the command line (`cliApart`), then the
+fallback to HLE without an image (`biosGate`). -/
 def loadRom (fx : Fix) (s : S) (f : FileE) : S :=
   let c := s.cfg
-  let hle := if fx.biosGate then c.useHle || !c.biosFile else c.useHle
-  let rb  := if fx.biosGate then c.runBios && c.biosFile else c.runBios
+  let b := if fx.cliApart then cliApply fx s.cli c else c
+  let hle := if fx.biosGate then b.useHle || !b.biosFile else b.useHle
+  let rb  := if fx.biosGate then b.runBios && b.biosFile else b.runBios
   let core : Core :=
     { kind := f.kind, gen := s.gen + 1,
       fifo := c.gbFifo && !c.speed,                     -- 707-709
       sgb := c.sgb,                                     -- 712
-      hle := hle, afterBios := c.afterBios, runBios := rb,
-      biosFile := c.biosFile,                           -- 723, bus.nim 370
+      hle := hle, afterBios := b.afterBios, runBios := rb,
+      biosFile := b.biosFile,                           -- 723, bus.nim 370
       volume := c.volume,                               -- 736 apply_master_volume
       interp := c.interp && !c.speed,                   -- 739 apply_fifo_interp
       frameskip := c.speed }                            -- 741 apply_speed_mode
-  save { s with core := some core, gen := s.gen + 1, cheatsGen := some (s.gen + 1),
-                cfg := { c with recent := some f } }
+  save fx { s with core := some core, gen := s.gen + 1, cheatsGen := some (s.gen + 1),
+                   cfg := { c with recent := some f } }
 
 /-- The widgets' reset() procs, i.e. do_reset (config_editor 35-39). -/
 def edLoad (c : Cfg) (e : Ed) : Ed :=
@@ -419,8 +489,8 @@ def edStore (e : Ed) (c : Cfg) : Cfg :=
            gbFifo := e.vFifo, sgb := e.vSgb }                      -- video 101-107
 
 /-- do_apply (config_editor 41-46). -/
-def doApply (s : S) : S :=
-  save { s with cfg := edStore s.ed s.cfg, ed := { s.ed with kbSel := none, padSel := none } }
+def doApply (fx : Fix) (s : S) : S :=
+  save fx { s with cfg := edStore s.ed s.cfg, ed := { s.ed with kbSel := none, padSel := none } }
 
 /-- do_factory_reset's cfg writes (config_editor 52-71). fifo_interp and
 speed_mode are not among them. -/
@@ -437,7 +507,7 @@ def factoryCfg (fx : Fix) (c : Cfg) : Cfg :=
 live_sync (main 2235-2241: color, volume, pitch, low-pass, interp, mp2k). -/
 def factoryReset (fx : Fix) (s : S) : S :=
   let s1 := { s with cfg := factoryCfg fx s.cfg }
-  let s2 := doApply { s1 with ed := edLoad s1.cfg s1.ed }
+  let s2 := doApply fx { s1 with ed := edLoad s1.cfg s1.ed }
   let s3 := applyInterp (applyVolume (applyColor s2))
   let s4 := if fx.resetAll then applySpeed s3 else s3
   { s4 with ed := { s4.ed with resetPopup := false } }
@@ -488,7 +558,7 @@ def captureKey (fx : Fix) (e : Ed) (k : Key) : Ed :=
   match e.kbSel with
   | none => e
   | some sel =>
-    if fx.captureFilter && (!k.named || k.reserved) then e
+    if fx.captureFilter && (k.reserved || (!fx.numericKeys && !k.named)) then e
     else { e with kbEdit := fun k' => if k' = k then some sel
                                       else if e.kbEdit k' = some sel then none else e.kbEdit k',
                   kbSel := nextInp sel }
@@ -515,17 +585,19 @@ def onPad (fx : Fix) (s : S) (b : Nat) (down : Bool) : S :=
   { s with ed := if wantsPad fx s && !down then capturePad s.ed b else s.ed }
 
 /-- The app as `main` leaves it before the loop (2160-2256), from whatever
-file is on disk: load_config, the CLI overrides written into cfg,
-new_file_explorer (selected_idx 0 is a directory), new_config_editor,
-apply_color_correction (2287). A quit (the loop's end) or a crash, then a
-relaunch, is this with the old disk. -/
-def launch (d : Disk) (a : Cli) (gen : Nat) : S :=
-  let c := cliApply a (loadDisk d)
-  { pc := .emu, cfg := c, disk := d, ed := initEd, fe := { dlg := .none, sel := none },
+file is on disk: load_config, the CLI overrides written into cfg (fixed: kept
+beside it), new_file_explorer (selected_idx 0 is a directory),
+new_config_editor, apply_color_correction (2287). A quit (the loop's end) or
+a crash, then a relaunch, is this with the old disk. Fixed, a file that does
+not parse is moved aside, so the disk has none. -/
+def launch (fx : Fix) (d : Disk) (a : Cli) (gen : Nat) (lost : Bool) : S :=
+  let c := if fx.cliApart then loadDisk fx d else cliApply fx a (loadDisk fx d)
+  { pc := .emu, cfg := c, disk := if fx.moveAside && d.isBad then .missing else d,
+    ed := initEd, fe := { dlg := .none, sel := none },
     core := none, gen := gen, cheatsGen := none, shaderColor := c.color, wck := false,
-    modHeld := false, lastRoute := .none }
+    modHeld := false, lastRoute := .none, cli := a, lostBad := lost }
 
-def init : S := launch .missing {} 0
+def init : S := launch real .missing {} 0 false
 
 /-! ## Events and the step -/
 
@@ -598,27 +670,27 @@ def stepO (fx : Fix) (s : S) : Ev → Option S
   | .menuSpeed =>
     -- 1342-1347: flip, (rewind.clear), apply_speed_mode, save
     if uiFree s then
-      some (save (applySpeed { s with cfg := { s.cfg with speed := !s.cfg.speed } }))
+      some (save fx (applySpeed { s with cfg := { s.cfg with speed := !s.cfg.speed } }))
     else none
   | .menuInterp =>
     -- 1404-1409: enabled for a GBA core outside speed mode
     if uiFree s && gbaCore s && !s.cfg.speed then
-      some (save (applyInterp { s with cfg := { s.cfg with interp := !s.cfg.interp } }))
+      some (save fx (applyInterp { s with cfg := { s.cfg with interp := !s.cfg.interp } }))
     else none
   | .menuColor =>
     -- 1422-1425
     if uiFree s then
-      some (save (applyColor { s with cfg := { s.cfg with color := !s.cfg.color } }))
+      some (save fx (applyColor { s with cfg := { s.cfg with color := !s.cfg.color } }))
     else none
   | .menuRewind =>
     -- 1335-1339: enabled outside speed mode
     if uiFree s && !s.cfg.speed then
-      some (save { s with cfg := { s.cfg with rewind := !s.cfg.rewind } })
+      some (save fx { s with cfg := { s.cfg with rewind := !s.cfg.rewind } })
     else none
   | .menuVolume v =>
     -- 1383-1390: the slider applies live, saves when released
     if uiFree s && v ≤ 100 then
-      some (save (applyVolume { s with cfg := { s.cfg with volume := v } }))
+      some (save fx (applyVolume { s with cfg := { s.cfg with volume := v } }))
     else none
   | .menuOpenRom =>
     -- 1296 open_rom, then fe.render("ROM", true, ...) (1473): fe.open, igOpenPopup
@@ -633,7 +705,7 @@ def stepO (fx : Fix) (s : S) : Ev → Option S
             | none => s)
     else none
   | .menuClearRecent =>
-    if uiFree s then some (save { s with cfg := { s.cfg with recent := none } }) else none
+    if uiFree s then some (save fx { s with cfg := { s.cfg with recent := none } }) else none
   | .winClose =>
     -- igBegin's X writes ed.open = false (92); nothing else runs
     if inWin s then some { s with ed := { s.ed with isOpen := false } } else none
@@ -662,12 +734,12 @@ def stepO (fx : Fix) (s : S) : Ev → Option S
     else none
   | .setFifo b => if inTab s .video then some { s with ed := { s.ed with vFifo := b } } else none
   | .setSgb b => if inTab s .video then some { s with ed := { s.ed with vSgb := b } } else none
-  | .apply => if inWin s && !s.ed.collapsed then some (doApply s) else none
+  | .apply => if inWin s && !s.ed.collapsed then some (doApply fx s) else none
   | .revert =>
     if inWin s && !s.ed.collapsed then some { s with ed := edLoad s.cfg s.ed } else none
   | .ok =>
     if inWin s && !s.ed.collapsed then
-      some (let s' := doApply s; { s' with ed := { s'.ed with isOpen := false } })
+      some (let s' := doApply fx s; { s' with ed := { s'.ed with isOpen := false } })
     else none
   | .resetDefaults =>
     if inWin s && !s.ed.collapsed then some { s with ed := { s.ed with resetPopup := true } }
@@ -684,7 +756,7 @@ def stepO (fx : Fix) (s : S) : Ev → Option S
   | .feNavigate =>
     -- 113-125: selected_idx := 0 (".." or a directory sorts first), explorer_dir saved
     if s.pc == .ui && s.fe.dlg != .none then
-      some (save { s with fe := { s.fe with sel := none } })
+      some (save fx { s with fe := { s.fe with sel := none } })
     else none
   | .feOpen =>
     -- 128-132: entries[selected_idx] if it is a file, NOT re-checked against the filter
@@ -700,7 +772,7 @@ def stepO (fx : Fix) (s : S) : Ev → Option S
   | .feCancel =>
     if s.pc == .ui && s.fe.dlg != .none then some { s with fe := { s.fe with dlg := .none } }
     else none
-  | .restart a => some (launch s.disk a s.gen)
+  | .restart a => some (launch fx s.disk a s.gen s.lostBad)
   | .corruptFile => some { s with disk := .bad }
 
 def step (fx : Fix) (s : S) (e : Ev) : S := (stepO fx s e).getD s
@@ -877,7 +949,7 @@ theorem bug_numpad_binding_lost_on_restart :
 
 /-- The round trip loses only unnamed keys: `persist` is idempotent, and it
 is the identity on a cfg whose bound keys all have names. -/
-theorem persist_idem (c : Cfg) : persist (persist c) = persist c := by
+theorem persist_idem (fx : Fix) (c : Cfg) : persist fx (persist fx c) = persist fx c := by
   simp only [persist]
   congr 1
   · funext k; split <;> simp_all
@@ -885,8 +957,8 @@ theorem persist_idem (c : Cfg) : persist (persist c) = persist c := by
 
 def KbNamed (c : Cfg) : Prop := ∀ k i, c.kb k = some i → k.named = true
 
-theorem persist_id_of_named (c : Cfg) (h : KbNamed c) (hp : ∀ b i, c.pad b = some i → b < 15) :
-    persist c = c := by
+theorem persist_id_of_named (fx : Fix) (c : Cfg) (h : KbNamed c ∨ fx.numericKeys = true)
+    (hp : ∀ b i, c.pad b = some i → b < 15) : persist fx c = c := by
   cases c with
   | mk kb pad a b c' d e f g h' i j k' l =>
     simp only [persist, Cfg.mk.injEq, and_true]
@@ -894,7 +966,10 @@ theorem persist_id_of_named (c : Cfg) (h : KbNamed c) (hp : ∀ b i, c.pad b = s
     · funext x
       cases hx : kb x with
       | none => simp
-      | some v => simp [h x v hx]
+      | some v =>
+        rcases h with h | h
+        · simp [h x v hx]
+        · simp [h]
     · funext x
       cases hx : pad x with
       | none => simp
@@ -923,6 +998,44 @@ theorem bug_bad_file_overwritten :
     ((run real init (iter [.menuVolume 40] ++ [.corruptFile, .restart {}] ++
         keys [.drop .gbRom])).map fun s =>
       (match s.disk with | .ok c => c.volume | _ => 0)) = some 100 := by
+  decide
+
+/-- --skip-bios cannot turn off an intro saved in Settings: it only clears
+the flag an earlier --run-bios set on the same command line (2129). -/
+def trSkipBios : List Ev :=
+  openSettingsGba ++ iter [.selectTab .bios] ++ iter [.biosBrowse] ++
+    iter [.feSelect .biosBin, .feOpen] ++ iter [.setRunBios true, .ok] ++
+    [.restart { runBios := some false }] ++ keys [.drop .gbaRom]
+
+theorem bug_skip_bios_cannot_undo_saved_intro :
+    ((run real init trSkipBios).map fun s => s.core.map (·.runBios)) = some (some true) := by
+  decide
+
+/-- The overwrite, as a history bit: the user's damaged file is gone, at a
+relaunch's first save or at any save once the file stopped parsing. -/
+theorem bug_bad_file_destroyed :
+    ((run real init (iter [.menuVolume 40] ++ [.corruptFile, .restart {}] ++
+        keys [.drop .gbRom])).map (·.lostBad)) = some true ∧
+    ((run real init (iter [.menuVolume 40] ++ [.corruptFile] ++ iter [.menuVolume 50])).map
+      (·.lostBad)) = some true := by
+  decide
+
+/-- Fixed (`cliApart`): the --hle run boots HLE, and the next plain start is
+back on the real BIOS the user chose; --skip-bios skips the saved intro. -/
+theorem regress_cli_flag_persists :
+    ((run fixed init (trCliChoose ++ [.restart { hle := true }] ++ keys [.drop .gbaRom])).map
+      fun s => s.core.map fun c => (c.hle, c.runBios)) = some (some (true, false)) ∧
+    ((run fixed init trCli).map fun s => (s.cfg.useHle, s.cfg.biosFile)) = some (false, true) ∧
+    ((run fixed init trSkipBios).map fun s => s.core.map (·.runBios)) = some (some false) := by
+  decide
+
+/-- Fixed (`moveAside`): the damaged file is renamed aside at the relaunch
+(or by the save that finds it), so no save replaces it. -/
+theorem regress_bad_file_overwritten :
+    ((run fixed init (iter [.menuVolume 40] ++ [.corruptFile, .restart {}] ++
+        keys [.drop .gbRom])).map (·.lostBad)) = some false ∧
+    ((run fixed init (iter [.menuVolume 40] ++ [.corruptFile] ++ iter [.menuVolume 50])).map
+      (·.lostBad)) = some false := by
   decide
 
 /-! ## (a) BIOS settings the running app cannot honour -/
@@ -957,12 +1070,22 @@ theorem regress_real_bios_without_file :
       s.core.map fun c => (c.hle, c.runBios)) = some (some (true, false)) := by
   decide
 
-/-- The capture fixes, replayed: the keypad key and Ctrl are refused, the
-input keeps its old key, and the capture stays on that input. -/
+/-- The fixes, replayed. The keypad key is written as its keycode and comes
+back after the restart (`numericKeys`); Ctrl is refused by the capture, so
+the input keeps its old key and the capture stays on that input. -/
 theorem regress_numpad_and_modifier :
-    ((run fixed init trNumpad).map fun s => keysFor s.cfg 0) = some [.plain 0] ∧
+    ((run fixed init trNumpad).map fun s => keysFor s.cfg 0) = some [.unnamed] ∧
     ((run fixed init trBindMod).map fun s => (s.cfg.kb .modKey, keysFor s.cfg 5)) =
       some (none, [.plain 5]) := by
+  decide
+
+/-- The capture half alone (the filter as first proposed, refusing keys the
+file could not name) also keeps UP bound, to its old key: the keypad key
+never becomes a binding. With the numeric keycodes shipped, refusing it
+would only take a working key away, so the fixed filter does not. -/
+theorem obs_unnamed_refusal_keeps_old_key :
+    ((run { captureFilter := true } init trNumpad).map fun s => keysFor s.cfg 0) =
+      some [.plain 0] := by
   decide
 
 /-! ## The file explorer's remembered selection -/
@@ -1056,14 +1179,14 @@ def CheatsOK (s : S) : Prop := s.cheatsGen = s.core.map (·.gen)
 /-! ### Field lemmas -/
 
 section fields
-variable (s : S)
-@[simp] theorem save_cfg : (save s).cfg = s.cfg := rfl
-@[simp] theorem save_core : (save s).core = s.core := rfl
-@[simp] theorem save_color : (save s).shaderColor = s.shaderColor := rfl
-@[simp] theorem save_ed : (save s).ed = s.ed := rfl
-@[simp] theorem save_fe : (save s).fe = s.fe := rfl
-@[simp] theorem save_disk : (save s).disk = .ok s.cfg := rfl
-@[simp] theorem save_cheats : (save s).cheatsGen = s.cheatsGen := rfl
+variable (s : S) (fx : Fix)
+@[simp] theorem save_cfg : (save fx s).cfg = s.cfg := rfl
+@[simp] theorem save_core : (save fx s).core = s.core := rfl
+@[simp] theorem save_color : (save fx s).shaderColor = s.shaderColor := rfl
+@[simp] theorem save_ed : (save fx s).ed = s.ed := rfl
+@[simp] theorem save_fe : (save fx s).fe = s.fe := rfl
+@[simp] theorem save_disk : (save fx s).disk = .ok s.cfg := rfl
+@[simp] theorem save_cheats : (save fx s).cheatsGen = s.cheatsGen := rfl
 @[simp] theorem applyVolume_cfg : (applyVolume s).cfg = s.cfg := rfl
 @[simp] theorem applyVolume_color : (applyVolume s).shaderColor = s.shaderColor := rfl
 @[simp] theorem applyVolume_ed : (applyVolume s).ed = s.ed := rfl
@@ -1156,11 +1279,12 @@ theorem liveOK_loadRom (fx : Fix) (s : S) (f : FileE) (hc : s.shaderColor = s.cf
   subst hc'
   exact ⟨rfl, rfl, Or.inr rfl⟩
 
-theorem liveOK_launch (d : Disk) (a : Cli) (g : Nat) : LiveOK (launch d a g) := by
+theorem liveOK_launch (fx : Fix) (d : Disk) (a : Cli) (g : Nat) (l : Bool) :
+    LiveOK (launch fx d a g l) := by
   refine ⟨rfl, ?_⟩
   intro c hc; simp [launch] at hc
 
-theorem liveOK_save {s : S} (h : LiveOK s) : LiveOK (save s) := h
+theorem liveOK_save {fx : Fix} {s : S} (h : LiveOK s) : LiveOK (save fx s) := h
 
 /-- Changing nothing LiveOK reads keeps it. -/
 theorem liveOK_of_eq {s t : S} (h : LiveOK s) (hc : t.shaderColor = s.shaderColor)
@@ -1179,16 +1303,16 @@ theorem onKey_shape (fx : Fix) (s : S) (k : Key) (d : Bool) :
 theorem onPad_shape (fx : Fix) (s : S) (b : Nat) (d : Bool) :
     ∃ e, onPad fx s b d = { s with ed := e } := ⟨_, rfl⟩
 
-theorem doApply_live (s : S) :
-    (doApply s).core = s.core ∧ (doApply s).shaderColor = s.shaderColor ∧
-    (doApply s).cfg.color = s.cfg.color ∧ (doApply s).cfg.volume = s.cfg.volume ∧
-    (doApply s).cfg.speed = s.cfg.speed ∧ (doApply s).cfg.interp = s.cfg.interp ∧
-    (doApply s).cheatsGen = s.cheatsGen :=
+theorem doApply_live (fx : Fix) (s : S) :
+    (doApply fx s).core = s.core ∧ (doApply fx s).shaderColor = s.shaderColor ∧
+    (doApply fx s).cfg.color = s.cfg.color ∧ (doApply fx s).cfg.volume = s.cfg.volume ∧
+    (doApply fx s).cfg.speed = s.cfg.speed ∧ (doApply fx s).cfg.interp = s.cfg.interp ∧
+    (doApply fx s).cheatsGen = s.cheatsGen :=
   ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
 
 theorem liveOK_factory (fx : Fix) (hfx : fx.resetNaive = true → fx.resetAll = true) (s : S)
     (h : LiveOK s) : LiveOK (factoryReset fx s) := by
-  let s2 := doApply { s with cfg := factoryCfg fx s.cfg, ed := edLoad (factoryCfg fx s.cfg) s.ed }
+  let s2 := doApply fx { s with cfg := factoryCfg fx s.cfg, ed := edLoad (factoryCfg fx s.cfg) s.ed }
   have h2core : s2.core = s.core := rfl
   unfold factoryReset
   cases hA : fx.resetAll
@@ -1230,7 +1354,7 @@ theorem liveOK_stepO (fx : Fix) (hfx : fx.resetNaive = true → fx.resetAll = tr
     | exact h
     | exact liveOK_loadRom fx s _ hc
     | exact liveOK_factory fx hfx s h
-    | exact liveOK_launch _ _ _
+    | exact liveOK_launch _ _ _ _ _
     | (obtain ⟨_, _, _, hk⟩ := onKey_shape fx s _ _; rw [hk]; exact h)
     | (obtain ⟨_, hk⟩ := onPad_shape fx s _ _; rw [hk]; exact h)
     | exact liveOK_save (liveOK_applySpeed _ hc (fun c hc' => (h.2 c hc').1))
@@ -1255,7 +1379,7 @@ theorem reachable_induct {P : S → Prop} (fx : Fix) (h0 : P init)
     | none => simpa using ih
     | some t => exact hs _ _ _ ih h
 
-theorem liveOK_init : LiveOK init := liveOK_launch _ _ _
+theorem liveOK_init : LiveOK init := liveOK_launch _ _ _ _ _
 
 /-- (a)/(d), proved: for the code as it is (and for the fixed code), every
 live setting agrees with cfg in every reachable state. The live side is
@@ -1273,7 +1397,7 @@ theorem liveOK_fixed : ∀ s, Reachable fixed s → LiveOK s :=
 /-! ### The Cheats window follows the core -/
 
 section gens
-variable (s : S)
+variable (s : S) (fx : Fix)
 theorem gen_applyVolume : (applyVolume s).core.map (·.gen) = s.core.map (·.gen) := by
   cases h : s.core <;> simp [applyVolume, h]
 theorem gen_applyInterp : (applyInterp s).core.map (·.gen) = s.core.map (·.gen) := by
@@ -1294,7 +1418,7 @@ theorem cheatsOK_factory (fx : Fix) (s : S) (h : CheatsOK s) : CheatsOK (factory
   · show s.cheatsGen = _
     rw [gen_applyInterp, gen_applyVolume]; exact h
 
-theorem cheatsOK_save {t : S} (h : CheatsOK t) : CheatsOK (save t) := h
+theorem cheatsOK_save {fx : Fix} {t : S} (h : CheatsOK t) : CheatsOK (save fx t) := h
 theorem cheatsOK_applySpeed {t : S} (h : CheatsOK t) : CheatsOK (applySpeed t) := by
   unfold CheatsOK; rw [gen_applySpeed]; exact h
 theorem cheatsOK_applyInterp {t : S} (h : CheatsOK t) : CheatsOK (applyInterp t) := by
@@ -1342,7 +1466,9 @@ theorem apply_keeps_menu_fields (e : Ed) (c : Cfg) :
 
 /-! ## The fixed code: what the fixes buy -/
 
-def KbOk (k : Key) : Bool := k.named && !k.reserved
+/-- A key the fixed capture accepts: any key `handle_input` does not take
+before the bindings. Unnamed keys are fine now that the file keeps them. -/
+def KbOk (k : Key) : Bool := !k.reserved
 
 def CfgGood (c : Cfg) : Prop :=
   (∀ k i, c.kb k = some i → KbOk k = true) ∧ (∀ b i, c.pad b = some i → b < 15) ∧
@@ -1376,7 +1502,7 @@ theorem cfgGood_defaults : CfgGood defaults := by
     | 0, _ | 1, _ | 2, _ | 3, _ | 4, _ | 6, _ | 9, _ | 10, _ | 11, _ | 12, _ | 13, _
     | 14, _ => decide
 
-theorem cfgGood_persist (c : Cfg) (h : CfgGood c) : CfgGood (persist c) := by
+theorem cfgGood_persist (fx : Fix) (c : Cfg) (h : CfgGood c) : CfgGood (persist fx c) := by
   refine ⟨?_, ?_, h.2.2⟩
   · intro k i hk
     simp only [persist] at hk
@@ -1389,32 +1515,42 @@ theorem cfgGood_persist (c : Cfg) (h : CfgGood c) : CfgGood (persist c) := by
     · assumption
     · cases hb
 
-theorem cliApply_keep (a : Cli) (c : Cfg) :
-    (cliApply a c).kb = c.kb ∧ (cliApply a c).pad = c.pad ∧ (cliApply a c).recent = c.recent := by
+theorem cliApply_keep (fx : Fix) (a : Cli) (c : Cfg) :
+    (cliApply fx a c).kb = c.kb ∧ (cliApply fx a c).pad = c.pad ∧
+    (cliApply fx a c).recent = c.recent := by
   unfold cliApply
   cases a with
   | mk h ab rb ba =>
-    cases h <;> cases ab <;> cases rb <;> cases ba <;> simp
+    cases h <;> cases ab <;> rcases rb with _ | ⟨_ | _⟩ <;> cases ba <;> simp <;> split <;> simp
 
-theorem cfgGood_cli (a : Cli) (c : Cfg) (h : CfgGood c) : CfgGood (cliApply a c) := by
-  obtain ⟨h1, h2, h3⟩ := cliApply_keep a c
+theorem cfgGood_cli (fx : Fix) (a : Cli) (c : Cfg) (h : CfgGood c) : CfgGood (cliApply fx a c) := by
+  obtain ⟨h1, h2, h3⟩ := cliApply_keep fx a c
   exact ⟨by rw [h1]; exact h.1, by rw [h2]; exact h.2.1, by rw [h3]; exact h.2.2⟩
 
-theorem cfgGood_loadDisk (d : Disk) (h : DiskGood d) : CfgGood (loadDisk d) := by
+theorem cfgGood_loadDisk (fx : Fix) (d : Disk) (h : DiskGood d) : CfgGood (loadDisk fx d) := by
   cases d with
   | missing => exact cfgGood_defaults
-  | ok c => exact cfgGood_persist c h
+  | ok c => exact cfgGood_persist fx c h
   | bad => exact cfgGood_defaults
 
-theorem invF_launch (d : Disk) (a : Cli) (g : Nat) (h : DiskGood d) : InvF (launch d a g) where
-  cfg := cfgGood_cli a _ (cfgGood_loadDisk d h)
-  disk := h
+theorem invF_launch (fx : Fix) (d : Disk) (a : Cli) (g : Nat) (l : Bool) (h : DiskGood d) :
+    InvF (launch fx d a g l) where
+  cfg := by
+    unfold launch; dsimp only
+    split
+    · exact cfgGood_loadDisk fx d h
+    · exact cfgGood_cli fx a _ (cfgGood_loadDisk fx d h)
+  disk := by
+    unfold launch; dsimp only
+    split
+    · trivial
+    · exact h
   kbEdit := by intro k i hk; simp [launch, initEd] at hk
   padEdit := by intro b i hb; simp [launch, initEd] at hb
   fe := by simp [launch]
   core := by intro c hc; simp [launch] at hc
 
-theorem invF_init : InvF init := invF_launch _ _ _ trivial
+theorem invF_init : InvF init := invF_launch _ _ _ _ _ trivial
 
 /-- InvF reads only cfg, disk, the widgets' edits, the explorer and the core. -/
 theorem invF_same {s t : S} (h : InvF s) (h1 : t.cfg = s.cfg) (h2 : t.disk = s.disk)
@@ -1428,7 +1564,7 @@ theorem invF_same {s t : S} (h : InvF s) (h1 : t.cfg = s.cfg) (h2 : t.disk = s.d
   · rw [h5]; exact h.fe
   · rw [h6]; exact h.core
 
-theorem invF_save {s : S} (h : InvF s) : InvF (save s) :=
+theorem invF_save {s : S} (h : InvF s) : InvF (save fixed s) :=
   ⟨h.cfg, h.cfg, h.kbEdit, h.padEdit, h.fe, h.core⟩
 
 theorem invF_applyVolume {s : S} (h : InvF s) : InvF (applyVolume s) := by
@@ -1456,6 +1592,13 @@ theorem invF_applySpeed {s : S} (h : InvF s) : InvF (applySpeed s) := by
 theorem invF_applyColor {s : S} (h : InvF s) : InvF (applyColor s) :=
   ⟨h.cfg, h.disk, h.kbEdit, h.padEdit, h.fe, h.core⟩
 
+/-- The gate `boot_settings` ends with, for whatever the command line made
+of cfg: something answers BIOS calls, and the intro runs only from an image. -/
+theorem gate_ok (b : Cfg) :
+    ((b.useHle || !b.biosFile) || b.afterBios || b.biosFile) = true ∧
+    (!(b.runBios && b.biosFile) || b.biosFile) = true := by
+  cases b.useHle <;> cases b.biosFile <;> cases b.runBios <;> cases b.afterBios <;> simp
+
 theorem invF_loadRom {s : S} (h : InvF s) (f : FileE) (hf : f ≠ .biosBin) :
     InvF (loadRom fixed s f) where
   cfg := ⟨h.cfg.1, h.cfg.2.1, by simp [loadRom, save]; exact hf⟩
@@ -1470,9 +1613,7 @@ theorem invF_loadRom {s : S} (h : InvF s) (f : FileE) (hf : f ≠ .biosBin) :
     refine ⟨by cases f <;> simp_all [FileE.kind], ?_⟩
     cases f with
     | gbRom => exact Or.inl rfl
-    | _ =>
-      refine Or.inr ⟨?_, ?_⟩ <;>
-      cases s.cfg.useHle <;> cases s.cfg.biosFile <;> cases s.cfg.runBios <;> simp [fixed]
+    | _ => exact Or.inr (gate_ok (cliApply fixed s.cli s.cfg))
 
 def FeGood (s : S) : Prop := s.fe.dlg = .rom → s.fe.sel ≠ some .biosBin
 
@@ -1534,7 +1675,7 @@ theorem invF_ceTop {s : S} (h : InvF s) (e : Ed)
     · exact he2 b i (by rw [← k']; exact hb)
     · exact h.cfg.2.1 b i (by rw [← k']; exact hb)
 
-theorem invF_doApply {s : S} (h : InvF s) : InvF (doApply s) := by
+theorem invF_doApply {s : S} (h : InvF s) : InvF (doApply fixed s) := by
   have hc : CfgGood (edStore s.ed s.cfg) := ⟨h.kbEdit, h.padEdit, h.cfg.2.2⟩
   exact { cfg := hc, disk := hc, kbEdit := h.kbEdit, padEdit := h.padEdit, fe := h.fe,
           core := h.core }
@@ -1555,7 +1696,7 @@ theorem captureKey_good (e : Ed) (k : Key)
   unfold captureKey at hk
   split at hk
   · exact he k' i hk
-  · simp only [fixed, Bool.true_and] at hk
+  · simp only [fixed, Bool.true_and, Bool.not_true, Bool.false_and, Bool.or_false] at hk
     split at hk
     · exact he k' i hk
     · rename_i hno
@@ -1563,7 +1704,7 @@ theorem captureKey_good (e : Ed) (k : Key)
       split at hk
       · rename_i hkk; subst hkk
         simp only [KbOk]
-        revert hno; cases k'.named <;> cases k'.reserved <;> simp
+        revert hno; cases k'.reserved <;> simp
       · split at hk
         · cases hk
         · exact he k' i hk
@@ -1626,7 +1767,7 @@ theorem invF_stepO {s t : S} (h : InvF s) (e : Ev) (he : stepO fixed s e = some 
       t.ed.padEdit = s.ed.padEdit → t.fe = s.fe → t.core = s.core → InvF t :=
     fun h _ h1 h2 h3 h4 h5 h6 => invF_same h h1 h2 h3 h4 h5 h6
   cases e with
-  | restart a => simp only [stepO] at he; cases he; exact invF_launch _ _ _ h.disk
+  | restart a => simp only [stepO] at he; cases he; exact invF_launch _ _ _ _ _ h.disk
   | corruptFile =>
     simp only [stepO] at he; cases he; exact ⟨h.cfg, trivial, h.kbEdit, h.padEdit, h.fe, h.core⟩
   | renderTop =>
@@ -1721,10 +1862,9 @@ theorem invF_reachable : ∀ s, Reachable fixed s → InvF s :=
 
 /-- (b), fixed: whatever a user binds, save then load gives it back (the
 file round trip is the identity on every reachable cfg). -/
-theorem fixed_roundtrip (s : S) (hs : Reachable fixed s) : loadDisk (.ok s.cfg) = s.cfg := by
-  have h := (invF_reachable s hs).cfg
-  exact persist_id_of_named s.cfg (fun k i hk => by
-    have := h.1 k i hk; simp only [KbOk, Bool.and_eq_true] at this; exact this.1) h.2.1
+theorem fixed_roundtrip (s : S) (hs : Reachable fixed s) :
+    loadDisk fixed (.ok s.cfg) = s.cfg :=
+  persist_id_of_named fixed s.cfg (Or.inr rfl) (invF_reachable s hs).cfg.2.1
 
 /-- (c), fixed: with no capture, no ImGui modal and no modifier held, every
 bound key reaches the game as its input. -/
@@ -1735,7 +1875,7 @@ theorem fixed_bound_key_reaches_game (s : S) (hs : Reachable fixed s) (k : Key) 
   cases hco : s.core with
   | none => simp [hco] at hcore
   | some c =>
-    cases k <;> simp_all [keyRoute, KbOk, Key.named, Key.reserved]
+    cases k <;> simp_all [keyRoute, KbOk, Key.reserved]
 
 /-- (a), fixed: every GBA core has something to answer its BIOS calls, and
 boots the intro only from a real image. -/
@@ -1747,6 +1887,17 @@ theorem fixed_bios (s : S) (hs : Reachable fixed s) (c : Core) (hc : s.core = so
 theorem fixed_never_loads_bios_as_rom (s : S) (hs : Reachable fixed s) (c : Core)
     (hc : s.core = some c) : c.kind ≠ .junk :=
   ((invF_reachable s hs).core c hc).1
+
+theorem lost_stepO {s t : S} (h : s.lostBad = false) (e : Ev) (he : stepO fixed s e = some t) :
+    t.lostBad = false := by
+  cases e <;> simp only [stepO] at he <;> (try split at he) <;> (try cases he) <;>
+    first
+    | exact h
+    | (split <;> first | exact h | (split <;> exact h))
+
+/-- (18), fixed: no save ever replaces a config file that does not parse. -/
+theorem fixed_never_destroys_bad_file : ∀ s, Reachable fixed s → s.lostBad = false :=
+  reachable_induct fixed rfl fun _ _ e h he => lost_stepO h e he
 
 /-- (d), fixed: Reset to Defaults restores every modelled setting (and keeps
 the BIOS path and the recents, as its popup says). -/
