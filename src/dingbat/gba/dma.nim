@@ -8,8 +8,8 @@ const DMA_PREEMPT_AFTER_READ {.booldefine.} = true
   ## its write waits for the next read). False (between transfers, as
   ## before) reds _mid_1 and _mid_2; both points reds _mid_2; neither reds
   ## _mid_1 and _end_1.._end_3.
+const DMA_START_DELAY {.intdefine.} = (if IMM_IDLE_GRANT: 2 else: 3)
 const
-  DMA_START_DELAY = 3
   DMA_SRC_MASK = [0x07FFFFFF'u32, 0x0FFFFFFF'u32, 0x0FFFFFFF'u32, 0x0FFFFFFF'u32]
   # DAD keeps 28 bits on every channel; channels 0-2 DROP gamepak-bus
   # destinations at transfer time (run_channel) rather than masking them to
@@ -92,11 +92,15 @@ proc `[]=`*(dma: DMA; io_addr: uint32; value: uint8) =
       dma.dst[channel] = dma.dmadad[channel] and align
       dma.count[channel] = dma.dmacnt_l[channel]
       if dma.dmacnt_h[channel].start_timing == 0:  # Immediate
-        # Starts DMA_START_DELAY cycles after the enable write; the CPU keeps
-        # executing until then (mGBA suite "Trivial DMA"). The event re-checks
-        # enable, so no per-channel pending state is needed.
+        # Requests the bus DMA_START_DELAY cycles after the enable write; the
+        # CPU keeps executing until then, and until the third cycle unless it
+        # is idle (IMM_IDLE_GRANT; mGBA suite "Trivial DMA"). The event
+        # re-checks enable, so no per-channel pending state is needed.
         dma.gba.bus.sync_bits = dma.gba.bus.sync_bits or 1
         dma.gba.scheduler.schedule(DMA_START_DELAY, etDMA)
+        when IMM_IDLE_GRANT:
+          dma.gba.bus.imm_at = dma.gba.scheduler.cycles + CycleCount(dma.gba.bus.cycles) +
+                               CycleCount(DMA_START_DELAY)
   else:
     echo "Unmapped DMA write addr: ", hex_str(uint8(io_addr)), " val: ", value
 
@@ -342,6 +346,9 @@ proc run_pending*(dma: DMA) =
       # A halted CPU has no clock to stop; its wake is cpu.nim's business.
       if saved == 4 and not dma.gba.cpu.halted:
         var held = bus.sched.cycles + CycleCount(bus.cycles) - granted_at
+        # When the CPU stopped and started again, if not as the burst did
+        var cpu_back = CycleCount(0)
+        var cpu_ran = false
         when DMA_ACCESS_WINDOW:
           if (bus.sync_bits and 2) != 0:
             if bus.idle_until > granted_at:
@@ -354,12 +361,21 @@ proc run_pending*(dma: DMA) =
             else:
               bus.dma_held = int(held)
             bus.dma_end_at = bus.sched.cycles + CycleCount(bus.cycles)
+          elif IMM_IDLE_GRANT and dma.dmacnt_h[ch].start_timing == 0 and
+               bus.imm_idle_from <= granted_at and granted_at < bus.imm_idle_until:
+            # An immediate burst granted inside internal cycles: they ran
+            # under it, and the CPU was stopped only from their end.
+            let free = min(held, bus.imm_idle_until - granted_at)
+            cpu_back = bus.sched.cycles + CycleCount(bus.cycles)
+            cpu_ran = true
+            bus.cycles -= int(free)
+            held -= free
         let intr = dma.gba.interrupts
         intr.stall_pushed = bus.sched.delay_pending(etInterrupts, granted_at, held)
         if intr.pipe_raised != 0 and intr.pipe_due > granted_at:
           intr.pipe_due += held
-        # And one raised under the burst starts at its end (raise_synced).
-        intr.stall_to = bus.sched.cycles + CycleCount(bus.cycles)
+        # And one raised under the burst counts from its end (raise_synced).
+        intr.stall_to = if cpu_ran: cpu_back else: bus.sched.cycles + CycleCount(bus.cycles)
         intr.stall_from = intr.stall_to - held
         intr.stall_open = true
     # The CPU (or a paused outer burst) resumes with a nonsequential access.

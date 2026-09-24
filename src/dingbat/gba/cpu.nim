@@ -371,6 +371,20 @@ proc idle*(cpu: CPU; n: int) {.inline.} =
     if (cpu.gba.bus.sync_bits and 2) != 0:
       cpu.gba.bus.idle_window(n)
       return
+  when IMM_IDLE_GRANT:
+    let bus = cpu.gba.bus
+    if bus.sync_bits != 0:
+      let now = bus.sched.cycles + CycleCount(bus.cycles)
+      bus.imm_idle_from = now
+      bus.imm_idle_until = now + CycleCount(n)
+      if (bus.sync_bits and 4) != 0 and now == bus.imm_at and not bus.dma_active:
+        # The request found the CPU going idle: granted now, and these
+        # internal cycles run under the burst.
+        bus.catch_up()
+        bus.sched.clear(etDMA)
+        bus.sync_bits = bus.sync_bits and not 4'u8
+        cpu.gba.dma.request_immediate()
+        cpu.gba.dma.run_pending()
   cpu.gba.bus.add_cycles(n)
 
 proc mul_i_cycles*(rs: uint32; signed_early_term: bool): int {.inline.} =

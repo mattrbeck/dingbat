@@ -386,13 +386,21 @@ type
     # Every data access syncs the scheduler while either bit is set: bit 0 an
     # immediate DMA is armed, bit 1 a PPU-timed DMA request is close
     # (DMA_ACCESS_WINDOW). One test on the data path and none on fetches: the
-    # window invalidates the fetch cache and rides its miss path.
+    # window invalidates the fetch cache and rides its miss path. Bit 2 (with
+    # bit 0): the armed immediate DMA's request found the CPU with an access
+    # in flight and waits a cycle for it (IMM_IDLE_GRANT).
     sync_bits*: uint8
     access_end*: CycleCount         # end of the access a window sync is inside
     dma_deferred_from*: CycleCount  # a deferred grant's original request cycle
     dma_deferred*: bool
     window_closing*: bool           # the request fired; the next fetch closes the window
     idle_until*: CycleCount         # end of the internal cycles a window sync is inside
+    # IMM_IDLE_GRANT: the internal cycles the CPU charged last while an
+    # immediate DMA was armed, [imm_idle_from, imm_idle_until). Only read
+    # within DMA_START_DELAY of the arming write; not serialized.
+    imm_idle_from*: CycleCount
+    imm_idle_until*: CycleCount
+    imm_at*: CycleCount             # when the armed immediate DMA requests the bus
     dma_end_at*: CycleCount         # when the last CPU-interrupting burst let go
     dma_held*: int                  # and how long it had held the bus
     # Open-bus latch left by DMA: the last word a DMA moved stays on the data
@@ -1129,6 +1137,18 @@ const DMA_STALLS_IRQ_SYNC* {.booldefine.} = true
   ## ran under the burst (Interrupts.unstall). Without either, alyosha
   ## Interactions rows go red: no tail, Internal_Cycle_DMA_IRQ/_ST/_ST_p3/_br;
   ## no unstall, Internal_Cycle_DMA_IRQ_7/_ldr_IWRAM/_MUL_IRQ.
+const IMM_IDLE_GRANT* {.booldefine.} = true
+  ## An immediate DMA requests the bus two cycles after its enable write. If
+  ## the CPU is running internal cycles then, the burst starts there and
+  ## those cycles run under it; if the CPU has an access in flight, the burst
+  ## waits for it and starts on the third cycle, as it always did (mGBA suite
+  ## Trivial DMA). tests/roms/payloads/irqstorm.s on an AGB SP: the enable
+  ## is followed by an IWRAM `ldr`, whose internal cycle is the enable's
+  ## third, and the CPU comes out of every burst (1 to 4096 words) a cycle
+  ## sooner than a third-cycle start gives -- the timer interrupt it then
+  ## takes is a cycle earlier at every period. hades dma-start-delay's two
+  ## IWRAM rows turn green with it. Off: irqstorm's ten DMA cells read one
+  ## late.
 const DMA_REGRAB* {.intdefine.} = 1
   ## A PPU-timed request landing within this many cycles of the last burst's
   ## end is granted at once, not deferred to the end of the CPU access in
@@ -1406,7 +1426,19 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
     of etTimer2:        gba.timer.timer_overflow_event(2)
     of etTimer3:        gba.timer.timer_overflow_event(3)
     of etSerial:        gba.serial.serial_transfer_complete()
-    of etDMA:           gba.dma.request_immediate()
+    of etDMA:
+      when IMM_IDLE_GRANT:
+        let bus = gba.bus
+        let now = gba.scheduler.cycles
+        if (bus.sync_bits and 4) == 0 and
+           not (bus.imm_idle_from <= now and now < bus.imm_idle_until):
+          bus.sync_bits = bus.sync_bits or 4
+          gba.scheduler.schedule(1, etDMA)
+        else:
+          bus.sync_bits = bus.sync_bits and not 4'u8
+          gba.dma.request_immediate()
+      else:
+        gba.dma.request_immediate()
     of etRtcSecond:     gba.rtc_irq_poll()
     of etHDMARequest:
       if not gba.defer_dma_request(kind): gba.dma.trigger_hdma()
@@ -1536,6 +1568,10 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
     gba.bus.dma_request_at = 0
   if gba.bus.idle_until >= base: gba.bus.idle_until -= base
   else: gba.bus.idle_until = 0
+  gba.bus.imm_idle_from = 0
+  gba.bus.imm_idle_until = 0
+  if gba.bus.imm_at >= base: gba.bus.imm_at -= base
+  else: gba.bus.imm_at = 0
   if gba.bus.dma_end_at >= base: gba.bus.dma_end_at -= base
   else: gba.bus.dma_end_at = 0
   if gba.bus.access_end >= base:
