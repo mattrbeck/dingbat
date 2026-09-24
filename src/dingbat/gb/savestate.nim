@@ -57,13 +57,19 @@ proc load_cpu_state(cpu: GbCpu; r: var Reader; rev: uint32) =
 
 proc save_irq_state(irq: GbInterrupts; w: var Writer) =
   w.write_tag(GB_SEC_IRQ)
-  w.write_u8(irq_read(irq, 0xFF0F))
+  # The pending flags themselves, not irq_read(0xFF0F): that is what a CPU
+  # read sees, the byte latched at the last $FF0F read (IF_READ_SAMPLE_T), so
+  # a state would drop an interrupt raised since and bring back one taken.
+  w.write_u8(irq_packed(irq))
   w.write_u8(irq_read(irq, 0xFFFF))
 
 proc load_irq_state(irq: GbInterrupts; r: var Reader) =
   r.expect_tag(GB_SEC_IRQ)
   irq_write(irq, 0xFF0F, r.read_u8())
   irq_write(irq, 0xFFFF, r.read_u8())
+  # Only a $FF0F read's own M-cycle uses the latch, and it re-latches first;
+  # keep it the byte just loaded so nothing stale from before the load shows.
+  when IF_READ_SAMPLE_T < 4: irq.if_prev = irq_packed(irq)
 
 proc save_timer_state(t: GbTimer; w: var Writer) =
   w.write_tag(GB_SEC_TIMER)
