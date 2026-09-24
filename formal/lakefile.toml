@@ -1,5 +1,8 @@
 name = "webstate"
-defaultTargets = ["WebState"]
+defaultTargets = ["WebState", "DesktopState"]
 
 [[lean_lib]]
 name = "WebState"
+
+[[lean_lib]]
+name = "DesktopState"

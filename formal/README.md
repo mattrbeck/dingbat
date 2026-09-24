@@ -1,14 +1,18 @@
-# Lean models of the web frontend's state machines
+# Lean models of the frontends' state machines
 
 Each file in `WebState/` models one state machine in `web/` (mostly
-`web/index.js`), states the properties the code is meant to keep, and proves
-them, or proves by a concrete trace that the code does not keep them.
+`web/index.js`), and each file in `DesktopState/` one in the native desktop
+app (`src/dingbat.nim` and `src/dingbat/frontend/`). Each states the
+properties the code is meant to keep, and proves them, or proves by a
+concrete trace that the code does not keep them.
 
 Check everything with `lake build` from this directory (Lean 4.34, no Mathlib),
 then `lake env lean AxiomAudit.lean`, which fails if any theorem rests on
 `sorry`, `native_decide` or an axiom beyond Lean's standard three. CI runs both
 (`.github/workflows/lean.yml`). Check one file with
 `lake env lean WebState/<File>.lean`.
+
+### Web (`WebState/`)
 
 | File | Machine |
 |---|---|
@@ -22,7 +26,20 @@ then `lake env lean AxiomAudit.lean`, which fails if any theorem rests on
 | `Netplay` | web/netplay.js signaling, redial ladder, channel race, rollback entry/exit |
 | `ServiceWorker` | update check, web/sw.js install/activate/fetch, reload on controllerchange |
 
-`FINDINGS.md` ranks every counterexample the models found.
+`FINDINGS.md` ranks every counterexample the web models found.
+
+### Desktop (`DesktopState/`)
+
+| File | Machine |
+|---|---|
+| `GameLifecycle` | load_rom and its callers, zip cache, flush on switch/quit, what leaks between games |
+| `RunInput` | pause, frame advance, rewind, fast forward, keyboard + pad held state, ImGui capture |
+| `SavePersistence` | .sav / .state / .cht / config writes, Save States window, two processes on one file system, torn writes |
+| `NetLink` | Link Cable setup, auto-pair race, two processes on one socket, pause/quit/BYE |
+| `Settings` | config editor, key/pad capture, BIOS selection, file dialog, config round trip |
+
+`DESKTOP-FINDINGS.md` ranks what they found and maps each web finding to its
+desktop form, if any.
 
 ## How a model is built
 
@@ -44,6 +61,14 @@ then `lake env lean AxiomAudit.lean`, which fails if any theorem rests on
   carries a comment with the JS function name and line numbers at the commit
   the model was written against.
 - **`Reachable`** is the inductive closure of `step` from `init`.
+- **The desktop has no awaits.** Its one loop runs fixed phases (emulate,
+  pending states, SDL events, link service, present with ImGui), so a desktop
+  model is a program counter over those phases: SDL events land only in the
+  input phase, ImGui clicks only when ImGui draws. The nondeterminism moves
+  to the environment (a write that fails, stops part-way or is cut by power
+  loss; a peer that sends anything or vanishes; a second dingbat process
+  sharing the files), and an uncaught Nim exception is a `crashed` state
+  that records what is lost on disk.
 
 ## What gets proved
 
@@ -76,9 +101,9 @@ regression tests are that. Every bug these models found has a test in
 run on every push. `lean.yml` only builds the proofs when `formal/` changes.
 
 To start the next audit, run `node formal/anchors.mjs`. Each model's
-`-- @models` lines name the JS functions it describes, and `anchors.json`
+`-- @models` lines name the JS functions or Nim procs it describes, and `anchors.json`
 holds a token hash of each one as it was when the model last matched the
 code; comments and whitespace do not count. The script lists the models whose
 functions have changed since. Model those machines again from the current
 code with the method above, turn any new counterexample into a fix and a test,
-then `node formal/anchors.mjs --update`.
+then `node formal/anchors.mjs --update <Dir>/<Model>`.

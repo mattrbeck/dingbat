@@ -1,6 +1,7 @@
 name: Lean models
-# The web frontend's state machines, modelled and proved in formal/.
-# The proofs read no JS, so only a change under formal/ can break them.
+# The web and desktop frontends' state machines, modelled and proved in
+# formal/. The proofs read no JS or Nim, so only a change under formal/ can
+# break them.
 on:
   push:
     paths: ["formal/**", ".github/workflows/lean.yml"]
