@@ -70,6 +70,16 @@ past it, running the busy window D from its own clock. Latency slows
 emulation; it cannot desync it. `NetLink.stalled` is the "waiting for peer"
 flag for frontends.
 
+The native stall clock (`NetLink.stall_timeout_ms`, 30 s) ends a link whose
+peer went silent. A paused side keeps reading its socket and sets CLOCK's
+paused bit, and the other side's stall clock does not run while that bit is
+set, so a pause never drops the link. The desktop steps a linked frame with
+`step_frame_for` (hands back to the UI loop after a few ms parked on the
+peer, resuming the frame next call) rather than the blocking `step_frame`,
+so waiting on the peer never freezes the window. Unplugging the core
+(`NetLink.shutdown`, or any driver swap) completes an exchange parked on a
+REPLY as a pulled cable, as a BYE does.
+
 `NETLINK_LEAD` (16384 cycles) suits a transport pumped every slice (native
 socket). The browser uses `NETLINK_LEAD_RAF` (3 frames ≈ 50 ms) because JS
 delivers DataChannel messages only between rAF ticks; a 1 ms lead there
@@ -92,7 +102,7 @@ Little-endian throughout. Clocks are emulated cycles since link start, u64.
 | # | Message | Payload after the type byte |
 |---|---|---|
 | 1 | HELLO | `u8 version` (=1), `u8 system` (0 GBA, 1 GB), `u8 unit` (0 listener, 1 connector), `u8 reserved`, `u32 rom_crc` (CRC-32/IEEE of the ROM file). First both ways; mismatch → BYE(2) |
-| 2 | CLOCK | `u64 clock`, `u8 sio_mode` (0 normal8, 1 normal32, 2 multi, 3 uart, 4 gpio, 5 joybus), `u8 flags` (bit0 SO level, bit1 sender blocked on us) |
+| 2 | CLOCK | `u64 clock`, `u8 sio_mode` (0 normal8, 1 normal32, 2 multi, 3 uart, 4 gpio, 5 joybus), `u8 flags` (bit0 SO level, bit1 sender blocked on us, bit2 sender's user paused: a stall on it is not a lost peer; older builds ignore the bit) |
 | 3 | TRANSFER | `u64 clock` (start S), `u32 duration`, `u8 mode` (0/1/2), `u8 reserved`, `u32 data` (initiator's word) |
 | 4 | REPLY | `u64 clock`, `u64 cycle` (echo of S), `u8 mode`, `u8 flags` (bit0 responder was in a compatible mode; else the initiator reads all-1s/absent), `u32 data` |
 | 5 | BYE | `u8 reason` (0 finished, 1 shutdown, 2 HELLO mismatch). A finished peer's clock is treated as infinite |

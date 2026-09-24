@@ -32,8 +32,8 @@ type
     rom_crc*: uint32  # HELLO: CRC-32 of the ROM file
     clock*: int64     # CLOCK/TRANSFER/REPLY: sender's emulated clock (cycles)
     mode*: uint8      # CLOCK: sender's SIO mode; TRANSFER/REPLY: transfer mode
-    flags*: uint8     # CLOCK: bit0 SO level, bit1 blocked; REPLY: bit0
-                      # listening; BYE: reason
+    flags*: uint8     # CLOCK: bit0 SO level, bit1 blocked, bit2 paused;
+                      # REPLY: bit0 listening; BYE: reason
     duration*: uint32 # TRANSFER: transfer length in cycles
     cycle*: int64     # REPLY: echo of the TRANSFER's start clock
     data*: uint32     # TRANSFER: initiator's word; REPLY: responder's word
@@ -55,6 +55,9 @@ const
   # CLOCK `flags`
   LINK_CLOCK_SO* = 0x01'u8       # sender's SO output level (SIOCNT bit 3)
   LINK_CLOCK_BLOCKED* = 0x02'u8  # sender's emulated clock is stalled on us
+  LINK_CLOCK_PAUSED* = 0x04'u8   # sender's user paused: its clock stops on
+                                 # purpose, so a stall on it is not a lost
+                                 # peer. Builds before this bit ignore it.
 
   # REPLY `flags`
   LINK_REPLY_LISTENING* = 0x01'u8  # responder was in a compatible SIO mode

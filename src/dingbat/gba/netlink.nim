@@ -37,12 +37,19 @@ type
     # buffers deadlock the pair.
     wire_out: string
     wire_pos: int
+    # The stall clock: a peer silent this long is gone. Kept across
+    # step_frame_for calls so a stall the UI keeps returning from still ends.
+    stall_timeout_ms*: int
+    stalling: bool
+    stall_deadline: MonoTime
 
 # Accessors kept from the pre-netcore API
 proc id*(nl: NetLink): int = nl.core.id
 proc peer_done*(nl: NetLink): bool = nl.core.peer_done
 proc stalled*(nl: NetLink): bool = nl.core.stalled
 proc stall_count*(nl: NetLink): int = nl.core.stall_count
+proc peer_paused*(nl: NetLink): bool = nl.core.peer_paused
+proc mid_frame*(nl: NetLink): bool = nl.core.mid_frame
 proc send_bye*(nl: NetLink; reason = LINK_BYE_FINISHED) =
   nl.core.send_bye(reason)
 
@@ -108,7 +115,12 @@ proc poll_socket(nl: NetLink; timeout_ms: int): bool =
   if n == 0:
     if nl.core.peer_done: return false  # orderly close after BYE
     raise newException(NetLinkError, "peer disconnected")
-  nl.core.feed(buf.toOpenArray(0, n - 1))
+  try:
+    nl.core.feed(buf.toOpenArray(0, n - 1))
+  except LinkProtoError as e:
+    # A malformed stream is a broken link, not a crash: callers handle
+    # NetLinkError (the peer is untrusted input).
+    raise newException(NetLinkError, "bad data from peer: " & e.msg)
   true
 
 proc pump(nl: NetLink; timeout_ms = 0) =
@@ -120,52 +132,84 @@ proc pump(nl: NetLink; timeout_ms = 0) =
 
 # ---------------- frame loop ----------------
 
-proc step_frame*(nl: NetLink) =
-  ## Advance the local core one video frame, servicing the socket between
-  ## slices. When the core parks on the peer this blocks until socket traffic
-  ## unparks it or STALL_TIMEOUT_MS expires.
-  var stall_deadline: MonoTime
-  var stalling = false
+proc advance(nl: NetLink; budget_ms: int): bool =
+  ## Run the local core until a video frame completes (true) or, parked on
+  ## the peer, until budget_ms of wall time has passed (false; budget_ms < 0
+  ## waits as long as the stall clock allows). Raises NetLinkError when the
+  ## peer has been silent for stall_timeout_ms, not counting time it
+  ## reported itself paused.
+  let give_up = getMonoTime() + initDuration(milliseconds = max(budget_ms, 0))
   while true:
     let r = nl.core.try_advance()
     nl.flush_outgoing()
     case r
     of naFrame:
-      return
+      nl.stalling = false
+      return true
     of naProgress:
-      stalling = false
+      nl.stalling = false
       nl.pump(0)
     of naStalled:
-      if not stalling:
-        stalling = true
-        stall_deadline = getMonoTime() +
-                         initDuration(milliseconds = STALL_TIMEOUT_MS)
+      if not nl.stalling:
+        nl.stalling = true
+        nl.stall_deadline = getMonoTime() +
+                            initDuration(milliseconds = nl.stall_timeout_ms)
       nl.pump(1)
-      if getMonoTime() > stall_deadline:
+      let now = getMonoTime()
+      if nl.core.peer_paused:
+        # A paused peer is not a lost one: its stall clock starts again
+        # when it resumes.
+        nl.stall_deadline = now + initDuration(milliseconds = nl.stall_timeout_ms)
+      if now > nl.stall_deadline:
         raise newException(NetLinkError,
-          "stalled waiting for peer for " & $STALL_TIMEOUT_MS & " ms")
+          "stalled waiting for peer for " & $nl.stall_timeout_ms & " ms")
+      if budget_ms >= 0 and now >= give_up:
+        return false
     of naHello:
       raise newException(NetLinkError,
         "link not established: " & nl.core.hello_error)
 
+proc step_frame*(nl: NetLink) =
+  ## Advance the local core one video frame, servicing the socket between
+  ## slices. When the core parks on the peer this blocks until socket traffic
+  ## unparks it or the stall clock runs out. For a loop that must keep
+  ## handling input and drawing, use step_frame_for.
+  discard nl.advance(-1)
+
+proc step_frame_for*(nl: NetLink; budget_ms: int): bool =
+  ## step_frame that hands back after budget_ms parked on the peer: true when
+  ## a frame completed, false when the core is still inside one (the next
+  ## call resumes it; the stall clock keeps running across calls).
+  nl.advance(budget_ms)
+
+proc set_paused*(nl: NetLink; paused: bool) =
+  ## Mirror the user's pause to the peer (CLOCK's paused bit).
+  nl.core.set_paused(paused)
+  nl.flush_outgoing()
+
+proc idle*(nl: NetLink) =
+  ## Service the socket without emulating (the user paused): the peer's BYE
+  ## or loss is still seen, and the stall clock restarts on resume.
+  nl.stalling = false
+  nl.pump(0)
+
 # ---------------- construction & handshake ----------------
 
 proc new_net_link*(gba: GBA; sock: Socket; id: int; rom_crc: uint32;
-                   delay_ms = 0; allow_crc_mismatch = false): NetLink =
+                   delay_ms = 0; allow_crc_mismatch = false;
+                   hello_timeout_ms = HELLO_TIMEOUT_MS): NetLink =
   ## Wire a post-init core to a connected socket and run the HELLO handshake
   ## (blocking). id 0 = listener = multi-mode unit 0. allow_crc_mismatch
   ## accepts differing ROM CRCs (cross-version trades such as Ruby<->Sapphire).
   sock.setSockOpt(OptNoDelay, true, level = cint(IPPROTO_TCP))
-  result = NetLink(gba: gba, sock: sock, delay_ms: delay_ms)
+  result = NetLink(gba: gba, sock: sock, delay_ms: delay_ms,
+                   stall_timeout_ms: STALL_TIMEOUT_MS)
   result.core = new_net_core(gba, id, rom_crc,
                              strict_crc = not allow_crc_mismatch)
   result.flush_outgoing()  # our HELLO (blocking socket: sends immediately)
-  let deadline = getMonoTime() + initDuration(milliseconds = HELLO_TIMEOUT_MS)
+  let deadline = getMonoTime() + initDuration(milliseconds = hello_timeout_ms)
   while result.core.hello == hsWait:
-    try:
-      discard result.poll_socket(50)
-    except LinkProtoError as e:
-      raise newException(NetLinkError, "bad handshake: " & e.msg)
+    discard result.poll_socket(50)
     if getMonoTime() > deadline:
       raise newException(NetLinkError, "timed out waiting for peer HELLO")
   result.flush_outgoing()  # BYE on rejection / first CLOCK on acceptance
@@ -195,3 +239,14 @@ proc close*(nl: NetLink) =
     var buf: array[4096, char]
     if nl.sock.recv(addr buf[0], buf.len) <= 0: break  # EOF/error: peer gone
   nl.sock.close()
+
+proc shutdown*(nl: NetLink; reason = LINK_BYE_FINISHED) =
+  ## End the link from this side: BYE, close, and unplug the core (the
+  ## no-cable driver; an exchange parked on the peer completes as a pulled
+  ## cable). Never raises: the peer may already be gone.
+  try:
+    nl.send_bye(reason)
+    nl.close()
+  except CatchableError:
+    discard  # peer already gone; nothing to flush
+  nl.gba.set_sio_driver(NullSioDriver())

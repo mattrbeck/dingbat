@@ -136,6 +136,8 @@ type
     peer_mode: uint8      # peer's wire SIO mode from its last CLOCK; 0xFF unknown
     peer_so: bool         # peer's SO output level (normal-mode SI status)
     peer_done*: bool      # peer sent BYE
+    peer_paused*: bool    # peer's last CLOCK said its user paused
+    paused: bool          # our user paused (sent in CLOCK's paused bit)
     last_clock_sent: int64
     # The in-flight exchange (master or slave role per round)
     phase: NetPhase
@@ -234,8 +236,20 @@ proc send_clock(nc: NetCore; blocked = false) =
   var flags = 0'u8
   if bit(serial.siocnt, 3): flags = flags or LINK_CLOCK_SO
   if blocked: flags = flags or LINK_CLOCK_BLOCKED
+  if nc.paused: flags = flags or LINK_CLOCK_PAUSED
   nc.send_msg(encode_clock(nc.now(), wire_mode(serial.sio_mode()), flags))
   nc.last_clock_sent = nc.now()
+
+proc set_paused*(nc: NetCore; paused: bool) =
+  ## The user paused or resumed: tell the peer at once, so its stall on our
+  ## stopped clock is read as a pause rather than a lost link.
+  if paused == nc.paused: return
+  nc.paused = paused
+  nc.send_clock()
+
+proc mid_frame*(nc: NetCore): bool =
+  ## A stall left the core inside a frame (try_advance resumes it).
+  nc.in_frame
 
 proc send_bye*(nc: NetCore; reason = LINK_BYE_FINISHED) =
   nc.send_msg(encode_bye(reason))
@@ -635,6 +649,16 @@ proc handle_hello(nc: NetCore; m: LinkMsg) =
 
 # ---------------- message dispatch ----------------
 
+proc finish_unanswered(nc: NetCore) =
+  ## No REPLY is coming (the peer said BYE, or the link is gone): complete an
+  ## exchange parked at S+D as a yanked cable (all-1s data), or SIOCNT's busy
+  ## bit would stay set for good.
+  if nc.reply_wait:
+    nc.reply_wait = false
+    nc.exit_stall()
+    nc.round_predicted = false
+    nc.master_finish()
+
 proc handle_msg(nc: NetCore; m: LinkMsg) =
   if nc.hello == hsWait:
     case m.kind
@@ -652,6 +676,7 @@ proc handle_msg(nc: NetCore; m: LinkMsg) =
     if m.clock > nc.peer_clock: nc.peer_clock = m.clock
     nc.peer_mode = m.mode
     nc.peer_so = (m.flags and LINK_CLOCK_SO) != 0
+    nc.peer_paused = (m.flags and LINK_CLOCK_PAUSED) != 0
   of lmTransfer:
     if m.clock > nc.peer_clock: nc.peer_clock = m.clock
     nc.handle_remote_transfer(m)
@@ -696,12 +721,7 @@ proc handle_msg(nc: NetCore; m: LinkMsg) =
   of lmBye:
     nc.peer_done = true
     nc.peer_clock = high(int64) shr 2  # never lead-stall on a finished peer
-    if nc.reply_wait:
-      # No reply is coming; complete as a yanked cable (all-1s data).
-      nc.reply_wait = false
-      nc.exit_stall()
-      nc.round_predicted = false
-      nc.master_finish()
+    nc.finish_unanswered()
   of lmHello:
     discard  # post-handshake HELLO: ignore
 
@@ -758,6 +778,12 @@ method sio_complete*(drv: RemoteSioDriver; serial: Serial; mode: SioMode) =
   of npSlaveSample: nc.slave_sample()
   of npSlaveFinish: nc.slave_finish()
   of npIdle: serial.finish_sio_transfer()  # stray event (mode switched away)
+
+method sio_detached*(drv: RemoteSioDriver; serial: Serial) =
+  # The link is being unplugged (teardown swaps in the no-cable driver):
+  # an exchange still waiting on the peer ends as a pulled cable, as a BYE
+  # would end it.
+  drv.core.finish_unanswered()
 
 method sio_mode_changed*(drv: RemoteSioDriver; serial: Serial;
                          old_mode, new_mode: SioMode) =
