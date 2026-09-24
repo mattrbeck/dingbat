@@ -1,11 +1,15 @@
 ## The parts of the desktop's `load_rom` that need no window: building the
-## next core without touching the running one, and writing battery RAM out
-## before a core is dropped. No SDL, ImGui or GL here, so
-## tests/desktop_lifecycle_test.nim builds headless.
+## next core without touching the running one, writing battery RAM out before
+## a core is dropped, and where a zip's ROM is extracted to. No SDL, ImGui or
+## GL here, so tests/desktop_lifecycle_test.nim builds headless.
 
-import std/[os, strformat, strutils]
+import std/[os, hashes, strformat, strutils]
+import zippy/ziparchives
+import ../common/linkproto
 import ../gba/gba
 import ../gb/gb
+
+const ROM_EXTS* = [".gba", ".gb", ".gbc"]
 
 # The smallest file each core can run. Every Game Boy cartridge is at least
 # 32 KiB and the core reads the whole 0x0000-0x7FFF window unchecked (a
@@ -83,3 +87,55 @@ proc flush_batteries*(gba: GBA; gb: GB): string =
     gba.storage.write_save()
     return gba.storage.save_error
   ""
+
+proc canonical_path(path: string): string =
+  ## The file's one absolute name: relative parts and symlinks resolved.
+  try: expandFilename(path)
+  except OSError: absolutePath(path)
+
+proc zip_cache_dir*(cache_root, zip_path: string): string =
+  ## One folder per zip file however its path was spelled (relative from a
+  ## terminal, absolute from a drop or the file dialog), so the .sav written
+  ## next to the extracted ROM is found again. crc32 of the canonical path,
+  ## not `hashes.hash`, whose value is the standard library's to change.
+  let canon = canonical_path(zip_path)
+  cache_root / &"{canon.splitFile().name}-{crc32(canon):08x}"
+
+proc legacy_zip_cache_dir(cache_root, zip_path: string): string =
+  ## Where earlier builds put it: keyed by the path as given.
+  cache_root / &"{zip_path.splitFile().name}-{cast[uint32](hash(zip_path)):08x}"
+
+proc extract_zip_rom*(cache_root, zip_path: string): string =
+  ## Extract the first GBA/GB/GBC ROM in a zip into its cache folder and
+  ## return its path ("" if none / unreadable). Re-opening the same zip
+  ## reuses the folder, which keeps the emulator's .sav (written next to the
+  ## ROM) persistent across sessions.
+  try:
+    let reader = openZipArchive(zip_path)
+    defer: reader.close()
+    var entry = ""
+    for name in reader.walkFiles:
+      if name.splitFile().ext.toLowerAscii() in ROM_EXTS:
+        entry = name
+        break
+    if entry == "":
+      echo "No ROM found in zip: ", zip_path
+      return ""
+    let dest_dir = zip_cache_dir(cache_root, zip_path)
+    if not dirExists(dest_dir):
+      # Earlier builds keyed the folder by `hash` of the path as given;
+      # adopt one, since it holds this zip's save.
+      for spelling in [absolutePath(zip_path), canonical_path(zip_path), zip_path]:
+        let old = legacy_zip_cache_dir(cache_root, spelling)
+        if dirExists(old):
+          try:
+            moveDir(old, dest_dir)
+            break
+          except OSError: discard
+    createDir(dest_dir)
+    let dest = dest_dir / entry.extractFilename()
+    writeFile(dest, reader.extractFile(entry))
+    dest
+  except ZippyError, IOError, OSError:
+    echo "Failed to read zip: ", getCurrentExceptionMsg()
+    ""

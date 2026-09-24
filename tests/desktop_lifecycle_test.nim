@@ -3,9 +3,11 @@
 ## a file that is not a ROM is refused before anything of the running game is
 ## touched, instead of an IndexDefect out of main(); a GBA game's battery is
 ## written when its core is dropped or the app quits, including one a state
-## load restored while paused, and a write that fails is reported, not raised.
+## load restored while paused, and a write that fails is reported, not raised;
+## a zip extracts to one cache folder however its path is spelled.
 
-import std/[os, tempfiles]
+import std/[os, hashes, strformat, tables, tempfiles]
+import zippy/ziparchives
 import dingbat/frontend/game_load
 import dingbat/gb/gb
 import dingbat/gba/gba
@@ -92,6 +94,35 @@ block gb_battery_flushed:
   g.cartridge.ram_dirty = true
   doAssert flush_batteries(nil, g) == ""
   doAssert readFile(dir / "gbflush.sav")[0] == char(9)
+
+block zip_one_identity:
+  # `dingbat z.zip` from a terminal and dragging the same zip in used to
+  # extract to two folders, each with its own .sav.
+  let zdir = dir / "zips"
+  createDir(zdir)
+  var entries = initTable[string, string]()
+  entries["Z.gba"] = newString(0x400)
+  writeFile(zdir / "z.zip", createZipArchive(entries))
+  let cache = dir / "cache"
+  let absolute = extract_zip_rom(cache, zdir / "z.zip")
+  let here = getCurrentDir()
+  setCurrentDir(zdir)
+  let relative = extract_zip_rom(cache, "z.zip")
+  setCurrentDir(here)
+  doAssert absolute.len > 0 and absolute.extractFilename() == "Z.gba"
+  doAssert relative == absolute, relative & " vs " & absolute
+
+block zip_adopts_earlier_folder:
+  # The folder an earlier build made (keyed by `hash` of the path as given)
+  # holds the zip's save; the new key takes it over rather than orphan it.
+  let zip = dir / "zips" / "z.zip"
+  let cache = dir / "cache2"
+  let old = cache / &"z-{cast[uint32](hash(zip)):08x}"
+  createDir(old)
+  writeFile(old / "Z.sav", "progress")
+  let rom = extract_zip_rom(cache, zip)
+  doAssert rom.len > 0 and readFile(rom.parentDir / "Z.sav") == "progress"
+  doAssert not dirExists(old)
 
 removeDir(dir)
 echo "ok"

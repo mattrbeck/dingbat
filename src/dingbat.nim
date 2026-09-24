@@ -3,7 +3,6 @@ import std/[net, nativesockets]
 import sdl2 except init, quit, glBindTexture, glUnbindTexture
 import sdl2/joystick
 import sdl2/gamecontroller
-import zippy/ziparchives
 import imguin/[cimgui, impl_opengl, impl_sdl2]
 import imguin/glad/gl
 import stb_image/read as stbi
@@ -480,35 +479,6 @@ proc flush_saves() =
   ## failure is the core's to log (once) and poll_battery_notice's to show.
   discard flush_batteries(app.gba_emu, app.gb_emu)
 
-const ROM_EXTS = [".gba", ".gb", ".gbc"]
-
-proc extract_zip_rom(zip_path: string): string =
-  ## Extract the first GBA/GB/GBC ROM in a zip and return its path ("" if
-  ## none / unreadable). The destination is a stable per-zip cache dir keyed
-  ## by the zip's full path, so re-opening the same zip reuses the same
-  ## extracted ROM — which keeps the emulator's .sav (written next to the
-  ## ROM) persistent across sessions.
-  try:
-    let reader = openZipArchive(zip_path)
-    defer: reader.close()
-    var entry = ""
-    for name in reader.walkFiles:
-      if name.splitFile().ext.toLowerAscii() in ROM_EXTS:
-        entry = name
-        break
-    if entry == "":
-      echo "No ROM found in zip: ", zip_path
-      return ""
-    let dest_dir = config_dir() / "zip-cache" /
-                   &"{zip_path.splitFile().name}-{cast[uint32](hash(zip_path)):08x}"
-    createDir(dest_dir)
-    let dest = dest_dir / entry.extractFilename()
-    writeFile(dest, reader.extractFile(entry))
-    dest
-  except ZippyError, IOError, OSError:
-    echo "Failed to read zip: ", getCurrentExceptionMsg()
-    ""
-
 proc apply_color_correction() =
   glUseProgram(app.game_shader)
   let loc = glGetUniformLocation(app.game_shader, "color_correct")
@@ -713,7 +683,7 @@ proc load_rom(path: string) =
   # Zips: load the first ROM inside; recents keep the zip path itself
   var rom_path = path
   if path.splitFile().ext.toLowerAscii() == ".zip":
-    rom_path = extract_zip_rom(path)
+    rom_path = extract_zip_rom(config_dir() / "zip-cache", path)
     if rom_path == "":
       load_notice(&"No Game Boy or GBA ROM could be read from {path.extractFilename()}.", "")
       return
