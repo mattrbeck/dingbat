@@ -1769,7 +1769,20 @@ proc update_rumble() =
 
 # ──────────────────────────── Input ────────────────────────────
 
+proc open_dropped(path: string) =
+  ## A file dropped on the window: a ROM or a zip loads, anything else is ignored
+  let ext = path.splitFile().ext.toLowerAscii()
+  if ext in ROM_EXTS or ext == ".zip":
+    load_rom(path)
+
 proc handle_input() =
+  when defined(gui_driver):
+    # A pushed drop event cannot carry its path through SDL's own event
+    # memory, so the driver hands it over here, where SDL's would arrive.
+    if gui_driver.dropped.len > 0:
+      let path = gui_driver.dropped
+      gui_driver.dropped = ""
+      open_dropped(path)
   var evt = defaultEvent
   while pollEvent(evt):
     discard ImGui_ImplSDL2_ProcessEvent(cast[ptr SDL_Event](addr evt))
@@ -1907,9 +1920,7 @@ proc handle_input() =
       let dropped = drop(evt)
       let path = $dropped.file
       sdl_free(dropped.file)
-      let ext = path.splitFile().ext.toLowerAscii()
-      if ext in ROM_EXTS or ext == ".zip":
-        load_rom(path)
+      open_dropped(path)
 
     of QuitEvent:
       app.running = false

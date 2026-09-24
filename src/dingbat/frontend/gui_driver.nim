@@ -9,7 +9,8 @@
 ##
 ##   key <name> down|up [cmd] [ctrl] [shift] [alt] [repeat]
 ##                                     name as SDL_GetKeyFromName ("S", "Left",
-##                                     "Return", "Tab", "`", "Left GUI", "F12")
+##                                     "Return", "Tab", "`", "F12"), `_` for a
+##                                     space, or a raw keycode (0x400000E3 = LGUI)
 ##   text <utf-8>                      text typed into a focused field
 ##   move <x> <y>                      mouse to window point (x, y)
 ##   down <x> <y> [right] / up <x> <y> [right]
@@ -32,8 +33,6 @@ import sdl2
 import imguin/glad/gl
 import stb_image/write as stbiw
 
-proc sdl_malloc(size: csize_t): pointer {.importc: "SDL_malloc", cdecl.}
-
 type
   Step = object
     id: string
@@ -50,6 +49,8 @@ var
   shot_id = ""
   mouse_x, mouse_y: cint
   mouse_in* = false
+  dropped* = ""       # a `drop` path for handle_input (a pushed SDL drop
+                      # event cannot own its path under sdl2-compat)
 
 proc driver_enabled*(): bool = drive_dir.len > 0
 
@@ -89,7 +90,8 @@ proc push(e: var Event) =
 
 proc push_key(window: WindowPtr; w: seq[string]) =
   if w.len < 3: raise newException(ValueError, "key <name> down|up")
-  let sym = getKeyFromName(cstring(w[1]))
+  let sym = if w[1].startsWith("0x"): cint(parseHexInt(w[1]))   # raw SDL keycode
+            else: getKeyFromName(cstring(w[1].replace('_', ' ')))  # Left_Shift
   if sym == 0: raise newException(ValueError, "unknown key " & w[1])
   var mods = 0'i16
   var repeat = false
@@ -194,13 +196,7 @@ proc run(window: WindowPtr; s: Step): bool =
     m.y = cint(parseInt(w[1]))
     push(e)
   of "drop":
-    var e: Event
-    let d = cast[DropEventPtr](addr e)
-    d.kind = DropFile
-    let p = cast[cstring](sdl_malloc(csize_t(s.rest.len + 1)))
-    copyMem(p, cstring(s.rest), s.rest.len + 1)
-    d.file = p
-    push(e)
+    dropped = s.rest  # handle_input takes it where SDL's drop would arrive
   of "window": push_window(window, w[1])
   of "quit":
     var e: Event
