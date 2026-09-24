@@ -447,3 +447,109 @@ test("a game deleted on another device is not wiped here while it is loading", a
   eq(localKeys(d1, "Seven.gba"), ["rom:Seven.gba", "save:Seven.gba"],
     "the game being booted keeps its ROM and save");
 });
+
+// ── A Sync tap on a device that has not pulled yet ─────────────────────────
+
+// The Sync button (runFullSync): queue every local file, flush, then pull,
+// answering "Games removed on another device" with `answer`.
+const syncTap = async (app, answer = "Continue") => {
+  let done = false;
+  const p = app.runIn("runFullSync()").then(() => { done = true; });
+  for (let i = 0; i < 400 && !done; i++) {
+    await new Promise((r) => setTimeout(r, 0));
+    const m = openModal(app);
+    if (m) { await findButton(m, answer).click(); m.classList.remove("sync-modal"); }
+  }
+  await p;
+  await settle();
+};
+
+// DriveLibrary.regress_sync_tap_after_remote_delete (a UI QA run, d2/d2r):
+// the flush uploaded any queued key Drive lacked without asking the library
+// it had just merged, so a device that had not pulled a delete put the
+// deleted game's files back on Drive, where nothing ever removed them; and a
+// later re-import of the game on the deleting device pulled its OLD save back.
+test("a Sync tap on a device that missed a delete does not put the game back on Drive", async () => {
+  const clock = makeClock();
+  const drive = makeDrive({ clock });
+  const d0 = await device(drive, clock);
+  const d1 = await device(drive, clock);
+  await importGame(d0, "G.gba", u8(10));
+  await play(d0, "G.gba", u8(11));
+  await flush(d0);
+  await pull(d1);
+  assert.equal(await d1.api.downloadGame("G.gba"), true);
+  await d0.api.deleteGameEverywhere("G.gba");
+  await flush(d0);
+  eq(drive.names(), [], "the delete reached Drive");
+
+  await syncTap(d1);                       // d1 had not pulled the delete
+  eq(drive.names(), [], "the Sync tap put nothing back");
+  eq(recentNames(d1), [], "and d1 took the delete");
+  assert.ok(drive.lib().tomb.some((t) => t.name === "G.gba"));
+
+  await importGame(d0, "G.gba", u8(10));   // the same game, imported afresh
+  await flush(d0);
+  await pull(d0);
+  assert.equal(d0.idb.get("save:G.gba"), undefined, "no old save comes back with it");
+});
+
+// Files of a deleted game that are on Drive anyway (put there by a build
+// without the fix above, which a mixed-build household still runs) are
+// removed by the next pull that sees the tombstone.
+test("a pull removes Drive files of a game the library has deleted", async () => {
+  const clock = makeClock();
+  const drive = makeDrive({ clock, seed: {
+    "rom:G.gba": u8(10), "save:G.gba": u8(11),
+    library: { recents: [], tomb: [{ name: "G.gba", ts: 5 }], ren: [] },
+  } });
+  const d1 = await device(drive, clock);
+  await pull(d1);
+  await flush(d1);
+  eq(drive.names(), [], "the orphans are gone");
+});
+
+// The same cause (d1 in the QA run): a device that had not pulled a rename
+// uploaded the game once more under its old name.
+test("a Sync tap on a device that missed a rename does not upload the old name", async () => {
+  const clock = makeClock();
+  const drive = makeDrive({ clock });
+  const d0 = await device(drive, clock);
+  const d1 = await device(drive, clock);
+  await importGame(d0, "A.gba", u8(10));
+  await play(d0, "A.gba", u8(11));
+  await flush(d0);
+  await pull(d1);
+  assert.equal(await d1.api.downloadGame("A.gba"), true);
+  assert.equal((await d0.api.renameGame("A.gba", "B.gba")).ok, true);
+  await flush(d0);
+  eq(drive.names(), ["rom:B.gba", "save:B.gba"]);
+
+  await syncTap(d1);
+  eq(drive.names(), ["rom:B.gba", "save:B.gba"], "no old-name file on Drive");
+  eq(recentNames(d1), ["B.gba"], "and d1 took the rename");
+  eq(d1.idb.get("save:B.gba"), u8(11));
+  // The files the flush held back are queued under the new name now, and a
+  // flush is on its way for them (else the lamp spins, the Sync button
+  // disabled, until the next poll).
+  assert.ok(d1.runIn("!!syncTimer"), "a flush is scheduled");
+  await flush(d1);
+  eq(d1.api.syncState.queueUp, [], "and it drains the queue");
+  eq(drive.names(), ["rom:B.gba", "save:B.gba"]);
+});
+
+// Noticed in the same run (D5): an upload did not record the modifiedTime
+// Drive gave it, so the next pull downloaded the file it had just sent.
+test("a pull does not download what this device has just uploaded", async () => {
+  const clock = makeClock();
+  const drive = makeDrive({ clock });
+  const d0 = await device(drive, clock);
+  await importGame(d0, "G.gba", u8(10));
+  await play(d0, "G.gba", u8(11));
+  await flush(d0);
+  const id = drive.get("save:G.gba").id;
+  const before = drive.log.length;
+  await pull(d0);
+  eq(drive.log.slice(before).filter((e) => e.url.includes("/" + id + "?alt=media")), [],
+    "save:G.gba was not fetched back");
+});

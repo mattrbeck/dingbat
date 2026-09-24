@@ -48,6 +48,11 @@ refused.
 
 ## Abstractions (and why they do not affect the stated properties)
 
+* Queue: every queued name is a live game's. The upload pass also skips a
+  key whose game the merged library has deleted (dropped from the queue) or
+  renamed away (left queued for the pull to move); that is library logic,
+  modelled in DriveLibrary (`flush_uploads_only_live`), and `no_lost_upload`
+  is about the keys of games that exist under their name.
 * Queue: only `queueUp` is modelled; `queueDel`/`queueRen` and tombstones/
   renames (another model) are folded into the prelude await and into
   `libPending` (the flush proceeds with an empty `queueUp` when

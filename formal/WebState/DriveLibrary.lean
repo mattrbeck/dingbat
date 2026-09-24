@@ -1,5 +1,5 @@
 -- What this models, for formal/anchors.mjs (which lists stale models):
--- @models web/index.js: addRecentRom allPerGameKeys applyRemoteRename bumpRecentIndex confirmTombstones dbMoveKeys deleteGameAction deleteGameEverywhere downloadGame downloadGameAction driveListAll driveListMap driveUploadFile flushSyncInner getRecentMeta hasAnyLocalRecord localLibrary markUpload mergeLibrary pendingCount pullSyncInner readDriveLibrary renameGame runExclusive touchRecent updateRecent writeDriveLibrary
+-- @models web/index.js: addRecentRom allPerGameKeys applyRemoteRename bumpRecentIndex confirmTombstones dbMoveKeys deleteGameAction deleteGameEverywhere downloadGame downloadGameAction driveListAll driveListMap driveUploadFile flushSyncInner getRecentMeta hasAnyLocalRecord localLibrary markUpload mergeLibrary pendingCount pullSyncInner readDriveLibrary renameGame runExclusive runFullSync touchRecent updateRecent writeDriveLibrary
 
 /-
 # The cross-device library on Google Drive (web/index.js)
@@ -24,6 +24,15 @@ the properties below with the `bug_*` traces listed in formal/FINDINGS.md
   *now*, in the same segment, under `updateRecent` (4556), the one lock every
   "recent" read-modify-write goes through; `renameGame` stamps the renamed
   entry `imp: ts` (3573).
+* Fixed after a two-device UI run (the Sync button, `runFullSync` 3402, is
+  the `syncTap` event): the flush's upload pass asks the library it merged
+  (3025) and leaves a deleted game's keys off Drive, a renamed game's queued
+  for the pull to move; the pull's commit queues the deletion of every Drive
+  file of a game the library it adopts has deleted (3354). Before, a device
+  that had not pulled a delete put the game back on Drive for good.
+  (Line numbers in this file predate the integration of the fix series and
+  may be off by a few dozen; the function names are what formal/anchors.mjs
+  tracks.)
 
 Layer 1 (pure merge) proves what *is* a semilattice (the recents join, the
 tombstone join, the rename-marker join, and the whole merge on libraries
@@ -48,6 +57,10 @@ Results in one place:
   The pre-fix merge, kept as `mergeLibraryV1`: `bug_mergeV1_not_idempotent`
   (the finding) and `bug_mergeV1_chain_not_idempotent` (found by this model:
   the `renameGame` claim alone was not enough).
+* uploads and orphans: `flush_uploads_only_live`, `step_flushFiles_live`
+  (a flush uploads nothing the library it merged deletes or renames away),
+  `pull_queues_orphans`; traces `regress_sync_tap_after_remote_delete`,
+  `regress_sync_tap_after_remote_rename`, `regress_orphans_removed`.
 * protocol: `step_tombs`, `tomb_origin`, `tomb_lost_forever`,
   `step_other_dev`, `step_keeps_tomb`, `resync_reasserts_tomb`, `run_flush`,
   `rename_moves_everything`, `race_delays_tomb`.
@@ -2143,6 +2156,9 @@ inductive Ev where
   | importRom (d : Bool) (g blob : Nat)
   | play (d : Bool) (g blob : Nat)
   | download (d : Bool) (g : Nat)
+  /-- the Sync button (`runFullSync`): every local file queued for upload;
+  its flush and pull are the ordinary events -/
+  | syncTap (d : Bool)
 deriving DecidableEq, Repr
 
 /-! ### flushSyncInner (2837-3002) -/
@@ -2174,12 +2190,23 @@ def upFile (dv : Dev) (files : List Item) (k : Key) : List Item :=
   | none => files
   | some it => if hasKey files k && k.2 == 0 then files else putItem files it
 
-/-- 2888-2966 as one event: renames, then deletes, then uploads. -/
-def flushFilesDev (dv : Dev) (files : List Item) : Dev × List Item :=
+/-- The merged library overrules a queued key: its game is deleted (no later
+play), or renamed and not yet migrated here. -/
+def tombed (lib : Lib) (k : Key) : Bool := lib.tomb.any (fun t => t.name == k.1)
+def renamedAway (lib : Lib) (k : Key) : Bool := lib.ren.any (fun r => r.src == k.1)
+
+/-- The rename and delete passes. -/
+def flushPrePass (dv : Dev) (files : List Item) : Dev × List Item :=
   let (dv1, f1) := dv.qRen.foldl renFile (dv, files)
-  let f2 := f1.filter (fun i => !dv1.qDel.contains i.key)
-  let f3 := dv1.qUp.foldl (upFile dv1) f2
-  ({ dv1 with qRen := [], qDel := [], qUp := [] }, f3)
+  (dv1, f1.filter (fun i => !dv1.qDel.contains i.key))
+
+/-- 2888-2966 as one event: renames, then deletes, then uploads. The upload
+pass asks the library the flush merged (`lib`): a deleted game's keys leave
+the queue unsent, a renamed game's wait in it for the pull to move them. -/
+def flushFilesDev (dv : Dev) (files : List Item) (lib : Lib) : Dev × List Item :=
+  let (dv1, f2) := flushPrePass dv files
+  let f3 := (dv1.qUp.filter (fun k => !tombed lib k && !renamedAway lib k)).foldl (upFile dv1) f2
+  ({ dv1 with qRen := [], qDel := [], qUp := dv1.qUp.filter (fun k => !tombed lib k && renamedAway lib k) }, f3)
 
 /-- The commit (under `updateRecent`): merge the library the flush wrote with
 this device's library *as it is now*, adopt that merge's tombstones and
@@ -2235,7 +2262,11 @@ def pullCommitDev (dv : Dev) (lib : Lib) (remote : List Item) : Dev :=
   let missing := (dv.store.filter (fun i => !hasKey remote i.key &&
                     !lib.tomb.any (fun t => t.name == i.game))).map Item.key
   let L := mergeLibrary lib (localLib dv)
-  { dv with qUp := missing.foldl addUniq dv.qUp, tomb := L.tomb, ren := L.ren,
+  -- Drive files of a game the adopted library has deleted: queued for
+  -- deletion (`markDelete`, which also unqueues them)
+  let orphans := (remote.filter (fun i => tombed L i.key)).map Item.key
+  { dv with qUp := (missing.foldl addUniq dv.qUp).filter (fun k => !orphans.contains k),
+            qDel := orphans.foldl addUniq dv.qDel, tomb := L.tomb, ren := L.ren,
             recent := L.recents, pend := .pCommitted L }
 
 /-! ### The user's actions -/
@@ -2294,6 +2325,9 @@ def downloadDev (dv : Dev) (files : List Item) (g now : Nat) : Dev :=
   if fs.isEmpty then dv
   else { dv with store := fs.foldl putItem dv.store, recent := bump dv g now false }
 
+/-- `runFullSync`'s queueing: every key this device holds. -/
+def syncTapDev (dv : Dev) : Dev := { dv with qUp := (dv.store.map Item.key).foldl addUniq dv.qUp }
+
 /-! ### The step function -/
 
 def step (s : St) : Ev → St
@@ -2308,7 +2342,7 @@ def step (s : St) : Ev → St
   | .flushFiles d =>
     match (s.dev d).pend with
     | .fMerged lib rv =>
-      let r := flushFilesDev (s.dev d) s.files
+      let r := flushFilesDev (s.dev d) s.files lib
       { s.setDev d { r.1 with pend := .fFiles lib rv } with files := r.2 }
     | _ => s
   | .flushWrite d =>
@@ -2357,6 +2391,7 @@ def step (s : St) : Ev → St
       { s.setDev d (playDev (s.dev d) g blob s.now) with now := s.now + 1 }
     else s
   | .download d g => { s.setDev d (downloadDev (s.dev d) s.files g s.now) with now := s.now + 1 }
+  | .syncTap d => s.setDev d (syncTapDev (s.dev d))
 
 def run (s : St) (es : List Ev) : St := es.foldl step s
 
@@ -2434,8 +2469,9 @@ theorem foldl_renFile_tomb (L : List (Key × Key)) :
   | nil => intro acc; rfl
   | cons q qs ih => intro acc; simp only [List.foldl]; rw [ih, renFile_tomb]
 
-theorem flushFilesDev_tomb (dv : Dev) (files : List Item) : (flushFilesDev dv files).1.tomb = dv.tomb := by
-  unfold flushFilesDev
+theorem flushFilesDev_tomb (dv : Dev) (files : List Item) (lib : Lib) :
+    (flushFilesDev dv files lib).1.tomb = dv.tomb := by
+  unfold flushFilesDev flushPrePass
   exact foldl_renFile_tomb dv.qRen (dv, files)
 
 /-- The file passes leave the device's library alone. -/
@@ -2451,10 +2487,10 @@ theorem foldl_renFile_lib (L : List (Key × Key)) :
   | nil => intro acc; rfl
   | cons q qs ih => intro acc; simp only [List.foldl]; rw [ih, renFile_lib]
 
-@[simp] theorem flushFilesDev_lib (dv : Dev) (files : List Item) :
-    localLib (flushFilesDev dv files).1 = localLib dv := by
+@[simp] theorem flushFilesDev_lib (dv : Dev) (files : List Item) (lib : Lib) :
+    localLib (flushFilesDev dv files lib).1 = localLib dv := by
   have h := foldl_renFile_lib dv.qRen (dv, files)
-  unfold flushFilesDev
+  unfold flushFilesDev flushPrePass
   simp only [localLib] at h ⊢
   exact h
 
@@ -2548,7 +2584,7 @@ theorem dsub_flushMerge (dv : Dev) (D : Lib) (hp : dv.pend = .fRead D) : DSub (f
     · exact tomb_sub h'
 
 theorem dsub_flushFiles (dv : Dev) (F : List Item) (lib : Lib) (rv : List Nat)
-    (hp : dv.pend = .fMerged lib rv) : DSub { (flushFilesDev dv F).1 with pend := .fFiles lib rv } dv := by
+    (hp : dv.pend = .fMerged lib rv) : DSub { (flushFilesDev dv F lib).1 with pend := .fFiles lib rv } dv := by
   intro t ht
   simp only [devTombs, List.mem_append, flushFilesDev_tomb, pendTombs] at ht
   rcases ht with h | h
@@ -2710,6 +2746,9 @@ theorem step_tombs (s : St) (e : Ev) :
   | download d g =>
     left; dsimp only [step] at ht
     exact setDev_sub s d _ (dsub_same _ _ (downloadDev_tomb _ _ _ _) (downloadDev_pend _ _ _ _)) ht
+  | syncTap d =>
+    left; dsimp only [step] at ht
+    exact setDev_sub s d (syncTapDev (s.dev d)) (dsub_same _ _ rfl rfl) ht
 
 theorem step_deleted_sub (s : St) (e : Ev) : ∀ t ∈ s.deleted, t ∈ (step s e).deleted := by
   intro t ht
@@ -2749,6 +2788,7 @@ def Ev.dev : Ev → Bool
   | .flushRead d | .flushMerge d | .flushFiles d | .flushWrite d | .flushCommit d => d
   | .pullRead d | .pullMerge d | .pullRenames d | .pullTombs d _ | .pullCommit d | .pullWrite d => d
   | .delete d _ | .rename d _ _ | .importRom d _ _ | .play d _ _ | .download d _ => d
+  | .syncTap d => d
 
 /-- **The other device cannot touch this one's sync state**: in particular a
 Drive lost update can take a tombstone or marker off Drive, never out of the
@@ -2893,6 +2933,11 @@ theorem step_keeps_tomb (s : St) (e : Ev) (d : Bool) (t : Tomb) (ht : t ∈ (s.d
       have : ((step s (.download d' g)).dev d') = downloadDev (s.dev d') s.files g s.now := by
         cases d' <;> rfl
       rw [this, downloadDev_tomb]))
+  | syncTap d' =>
+    simp only [Ev.dev] at hd; subst hd
+    exact Or.inl (keep (by
+      have : ((step s (.syncTap d')).dev d') = syncTapDev (s.dev d') := by cases d' <;> rfl
+      rw [this]; rfl))
 
 
 theorem step_flushRead_of (s : St) (d : Bool) (h : (s.dev d).pend = .idle) :
@@ -2904,7 +2949,7 @@ theorem step_flushMerge_of (s : St) (d : Bool) (D : Lib) (h : (s.dev d).pend = .
   simp only [step, h]; exact ⟨by simp, by simp⟩
 theorem step_flushFiles_of (s : St) (d : Bool) (lib : Lib) (rv : List Nat)
     (h : (s.dev d).pend = .fMerged lib rv) :
-    (step s (.flushFiles d)).dev d = { (flushFilesDev (s.dev d) s.files).1 with pend := .fFiles lib rv } ∧
+    (step s (.flushFiles d)).dev d = { (flushFilesDev (s.dev d) s.files lib).1 with pend := .fFiles lib rv } ∧
     (step s (.flushFiles d)).lib = s.lib := by
   simp only [step, h]; constructor <;> cases d <;> first | rfl | trivial
 theorem step_flushWrite_of (s : St) (d : Bool) (lib : Lib) (rv : List Nat)
@@ -3172,7 +3217,145 @@ theorem regress_revived_chain :
     let s := run init (chainH ++ pull false ++ flush false ++ pull false)
     names s.d0.recent = [1, 2] ∧ names s.lib.recents = [1, 2] ∧
     s.d0.store = [⟨2, 0, 10⟩, ⟨1, 0, 30⟩, ⟨1, 1, 31⟩] ∧
-    s.files = [⟨2, 0, 10⟩, ⟨1, 0, 30⟩, ⟨1, 1, 31⟩] := by
+    s.files = [⟨2, 0, 10⟩, ⟨1, 1, 31⟩, ⟨1, 0, 30⟩] := by
+  decide
+
+
+/-! ### What a flush may put on Drive, and what a pull takes back down
+
+Found by a two-device UI run: a device that had not pulled a delete re-uploaded
+the deleted game on a Sync tap (its flush uploaded every queued key Drive
+lacked, without asking the library it had just merged), and nothing ever took
+those files down. -/
+
+theorem mem_putItem {l : List Item} {it i : Item} (h : i ∈ putItem l it) : i ∈ l ∨ i = it := by
+  simp only [putItem, List.mem_append, List.mem_filter, List.mem_singleton] at h
+  rcases h with ⟨h, _⟩ | h
+  · exact Or.inl h
+  · exact Or.inr h
+
+theorem upFile_mem (dv : Dev) (f : List Item) (k : Key) {i : Item} (h : i ∈ upFile dv f k) :
+    i ∈ f ∨ i.key = k := by
+  unfold upFile at h
+  split at h
+  · exact Or.inl h
+  · rename_i it hit
+    have hk : (it.key == k) = true := List.find?_some (p := fun (i : Item) => i.key == k) hit
+    split at h
+    · exact Or.inl h
+    · rcases mem_putItem h with h | rfl
+      · exact Or.inl h
+      · exact Or.inr (by simpa using hk)
+
+theorem foldl_upFile_mem (dv : Dev) (P : Key → Prop) : ∀ (ks : List Key) (f : List Item),
+    (∀ k ∈ ks, P k) → ∀ i ∈ ks.foldl (upFile dv) f, i ∈ f ∨ P i.key := by
+  intro ks
+  induction ks with
+  | nil => intro f _ i hi; exact Or.inl hi
+  | cons k ks ih =>
+    intro f hP i hi
+    rcases ih (upFile dv f k) (fun k' hk' => hP k' (by simp [hk'])) i hi with h | h
+    · rcases upFile_mem dv f k h with h | h
+      · exact Or.inl h
+      · exact Or.inr (h ▸ hP k (by simp))
+    · exact Or.inr h
+
+/-- **A flush uploads nothing the library it merged overrules**: every file
+Drive holds after the flush's file passes was there after its renames and
+deletes, or is a key whose game the merged library neither deleted nor
+renamed away. -/
+theorem flush_uploads_only_live (dv : Dev) (files : List Item) (lib : Lib) :
+    ∀ i ∈ (flushFilesDev dv files lib).2,
+      i ∈ (flushPrePass dv files).2 ∨ (tombed lib i.key = false ∧ renamedAway lib i.key = false) := by
+  intro i hi
+  unfold flushFilesDev at hi
+  simp only at hi
+  rcases foldl_upFile_mem _ (fun k => tombed lib k = false ∧ renamedAway lib k = false) _ _
+      (by intro k hk; simp only [List.mem_filter, Bool.and_eq_true, Bool.not_eq_true'] at hk; exact hk.2)
+      i hi with h | h
+  · exact Or.inl h
+  · exact Or.inr h
+
+/-- ...and in the protocol: the step's new Drive files are the pre-passes' or live. -/
+theorem step_flushFiles_live (s : St) (d : Bool) (lib : Lib) (rv : List Nat)
+    (h : (s.dev d).pend = .fMerged lib rv) :
+    ∀ i ∈ (step s (.flushFiles d)).files,
+      i ∈ (flushPrePass (s.dev d) s.files).2 ∨ (tombed lib i.key = false ∧ renamedAway lib i.key = false) := by
+  have e : (step s (.flushFiles d)).files = (flushFilesDev (s.dev d) s.files lib).2 := by
+    simp only [step, h]
+  rw [e]; exact flush_uploads_only_live _ _ _
+
+/-- **A pull queues the deletion of every Drive file of a game the library it
+adopts has deleted**, however it got there (a device that had not pulled the
+delete, or a build without `flush_uploads_only_live`). -/
+theorem pull_queues_orphans (dv : Dev) (lib : Lib) (remote : List Item) :
+    ∀ i ∈ remote, tombed (mergeLibrary lib (localLib dv)) i.key = true →
+      i.key ∈ (pullCommitDev dv lib remote).qDel := by
+  intro i hi ht
+  simp only [pullCommitDev]
+  have : i.key ∈ (remote.filter (fun i => tombed (mergeLibrary lib (localLib dv)) i.key)).map Item.key :=
+    List.mem_map.2 ⟨i, List.mem_filter.2 ⟨hi, ht⟩, rfl⟩
+  generalize (remote.filter (fun i => tombed (mergeLibrary lib (localLib dv)) i.key)).map Item.key = os at this
+  have hos := this
+  have addUniq_mem : ∀ (l : List Key) (x y : Key), y ∈ l → y ∈ addUniq l x := by
+    intro l x y hy; unfold addUniq; split
+    · exact hy
+    · exact List.mem_append_left _ hy
+  have addUniq_self : ∀ (l : List Key) (x : Key), x ∈ addUniq l x := by
+    intro l x; unfold addUniq; split
+    · assumption
+    · simp
+  have : ∀ (os : List Key) (acc : List Key), i.key ∈ os ∨ i.key ∈ acc → i.key ∈ os.foldl addUniq acc := by
+    intro os
+    induction os with
+    | nil => intro acc h; simpa using h
+    | cons o os ih =>
+      intro acc h
+      apply ih
+      rcases h with h | h
+      · simp only [List.mem_cons] at h
+        rcases h with rfl | h
+        · exact Or.inr (addUniq_self _ _)
+        · exact Or.inl h
+      · exact Or.inr (addUniq_mem _ _ _ h)
+  exact this os dv.qDel (Or.inl hos)
+
+/-- Device 0 imports 7 and saves, syncs; device 1 pulls and downloads it;
+device 0 then deletes 7 and flushes. Device 1 has not pulled since. -/
+def setupT : List Ev := [.importRom false 7 70, .play false 7 71] ++ flush false ++ pull true ++
+  [.download true 7, .delete false 7] ++ flush false
+
+/-- **Fixed: a Sync tap on a device that missed a delete puts nothing back**
+(the UI run's d2: its flush uploaded 7's ROM and save again, for good). The
+tap queues every local file; the flush's merge knows 7 is deleted and leaves
+them off Drive; the pull takes the delete here. -/
+theorem regress_sync_tap_after_remote_delete :
+    let s0 := run init setupT
+    let s := run s0 ([.syncTap true] ++ flush true ++ pull true)
+    s0.files = [] ∧ s.files = [] ∧ names s.d1.recent = [] ∧ s.d1.store = [] ∧
+    s.lib.tomb.map (·.name) = [7] := by
+  decide
+
+/-- Files of a deleted game that are on Drive anyway (an old build put them
+there): the next pull queues them and its flush deletes them. -/
+theorem regress_orphans_removed :
+    let s := run { init with files := [⟨7, 0, 70⟩, ⟨7, 1, 71⟩], lib := ⟨[], [⟨7, 1⟩], []⟩, now := 2 }
+      (pull true ++ flush true)
+    s.files = [] ∧ s.lib.tomb = [⟨7, 1⟩] := by
+  decide
+
+/-- Device 0 renames 1 to 2 after device 1 downloaded it. -/
+def setupR : List Ev := [.importRom false 1 10, .play false 1 11] ++ flush false ++ pull true ++
+  [.download true 1, .rename false 1 2] ++ flush false
+
+/-- **Fixed: a Sync tap on a device that missed a rename uploads nothing under
+the old name** (the UI run's d1); the pull then moves its files and nothing
+is left to send. -/
+theorem regress_sync_tap_after_remote_rename :
+    let s1 := run init (setupR ++ [.syncTap true] ++ flush true)
+    let s2 := run s1 (pull true ++ flush true)
+    s1.files.map (·.game) = [2, 2] ∧ s2.files.map (·.game) = [2, 2] ∧
+    s2.d1.store.map (·.game) = [2, 2] ∧ names s2.d1.recent = [2] ∧ s2.d1.qUp = [] := by
   decide
 
 end WebState.DriveLibrary

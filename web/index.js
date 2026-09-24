@@ -2970,6 +2970,20 @@ const flushSyncInner = async () => {
       // Gone from the queue since this pass began: a delete asked for it
       // (markDelete unqueues), or a rename moved it to its new name.
       if (!syncState.queueUp.includes(name)) continue;
+      // The library merged above has the last word on which games exist and
+      // what they are called, and a device that has not pulled yet can hold
+      // files it has overruled (a Sync tap queues every local file). A game
+      // deleted elsewhere, with no later play: its files stay off Drive (a
+      // missing file would otherwise upload regardless, and nothing would
+      // ever take it down again), and the pull's tombstone pass deals with
+      // the local copy. A game renamed elsewhere: its old-name files wait,
+      // still queued, for the pull to move them under the new name.
+      let game = parseDriveFileName(name)?.game;
+      if (game && lib.tomb.some((t) => t.name === game)) {
+        syncState.queueUp = syncState.queueUp.filter((n) => n !== name);
+        continue;
+      }
+      if (game && lib.ren.some((r) => r.from === game)) continue;
       // A save of this key from here on is newer than the bytes read below.
       syncRemarked.delete(name);
       let bytes = live(await readSyncBytes(name));
@@ -2981,6 +2995,10 @@ const flushSyncInner = async () => {
         // Present: ROMs are immutable, anything else re-uploads on change.
         if (!r || (!name.startsWith("rom:") && sig !== syncState.sigs[name])) {
           let res = live(await driveUploadFile(name, bytes, r?.id));
+          let meta = live(await res?.json?.().catch(() => null));
+          // Drive's stamp for this write, so the next pull knows the file
+          // is unchanged since and does not fetch back what was just sent.
+          if (meta?.modifiedTime) syncState.rmt[name] = meta.modifiedTime;
           // Deleted while this upload was on the wire: the delete is the
           // later word, but the delete pass lets any write to the file after
           // the delete's stamp outrank it, and this write is exactly such a
@@ -2988,7 +3006,6 @@ const flushSyncInner = async () => {
           // device's later write still can; with no time to go on, the
           // delete simply goes ahead.
           if (syncState.queueDel.includes(name)) {
-            let meta = live(await res?.json?.().catch(() => null));
             let mt = Date.parse(meta?.modifiedTime || "");
             if (mt) delStamps()[name] = Math.max(delStamps()[name] || 0, mt);
             else delete delStamps()[name];
@@ -3177,6 +3194,11 @@ const pullSyncInner = async ({ silent = true } = {}) => {
           queuedMissing = true;
         }
       }
+      // Uploads the flush held back while this game was still under its
+      // old name here are queued under the new one now: send them.
+      if (syncState.queueUp.some((n) => parseDriveFileName(n)?.game === r.to)) {
+        queuedMissing = true;
+      }
       gridDirty = true;
       if (applied.moved) {
         showToast("“" + displayName(r.from) + "” is now “" + displayName(r.to) +
@@ -3286,6 +3308,20 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       lib = mergeLibrary(lib, { recents: here, tomb: syncState.tomb, ren: syncState.ren });
       syncState.tomb = lib.tomb;
       syncState.ren = lib.ren;
+      // Files on Drive of a game the library has deleted (no later play):
+      // put back by a device that had not pulled the delete, or by a build
+      // that uploaded before asking the library. Nothing else would ever
+      // take them down, and a later import of the game would pull their old
+      // save back in. Queued for deletion like a local delete (and so
+      // cancelled by the flush if a later play revives the game), from the
+      // tombstones as adopted here, after this device's own changes.
+      for (let t of lib.tomb) {
+        for (let n of remote.keys()) {
+          if (parseDriveFileName(n)?.game === t.name && !syncState.queueDel.includes(n)) {
+            markDelete(n);
+          }
+        }
+      }
       // A deferred rename keeps its old name on the local grid (else a
       // "Drive only" tile for a local game, whose download forks the library),
       // with ts pinned under the marker so it still folds forward next merge.

@@ -677,10 +677,13 @@ test("field repro: rename elsewhere while installed+open here with a queued quic
   await settle();
   assert.ok(drive.byName.has("rom:B.gba") && !drive.byName.has("rom:A.gba"));
 
-  // Back to browser 1: flush (under the old name, racing the rename), then pull.
+  // Back to browser 1: flush (racing the rename), then pull. The flush's own
+  // merge already knows A is now B, so the quick save waits, still queued,
+  // instead of landing on Drive under the retired name.
   await b1.api.flushSync();
   await settle();
-  assert.ok(drive.byName.has("state:A.gba"), "the raced upload landed old-named");
+  assert.ok(!drive.byName.has("state:A.gba"), "nothing lands old-named");
+  assert.ok(b1.api.syncState.queueUp.includes("state:A.gba"), "the quick save waits, queued");
   await b1.api.pullSync();
   await settle();
 
