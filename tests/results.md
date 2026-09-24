@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-09-23 21:15:22 · commit 3cfa7847a · game-boy-test-roms v7.0*
+*Generated: 2026-09-23 22:00:50 · commit 26b624c81 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1435
-- **Pass:** 1408
-- **Fail:** 27
+- **Pass:** 1410
+- **Fail:** 25
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -18,9 +18,9 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Mooneye | 152 | 152 |
 | GBA - mGBA Test Suite | 13 | 13 |
 | GBA - jsmolka gba-tests | 13 | 13 |
-| GBA - alyosha gba-tests | 106 | 126 |
+| GBA - alyosha gba-tests | 107 | 126 |
 | GBA - PeterLemon BIOS | 24 | 25 |
-| GBA - Other test ROMs | 9 | 12 |
+| GBA - Other test ROMs | 10 | 12 |
 | GBA - hwverified (AGS-001) | 12 | 12 |
 | GBA - FuzzARM | 5 | 5 |
 | Game Boy - Acid2 | 2 | 2 |
@@ -61,7 +61,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 13 tests passed.**
 
-## GBA - alyosha gba-tests (106/126)
+## GBA - alyosha gba-tests (107/126)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -161,7 +161,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | alyosha/prefetcher/prefetcher_branch_thumb_arm | — | 👌 |
 | alyosha/prefetcher/prefetcher_branch_thumb_arm_3 | — | 👀 Failed test 078 |
 | alyosha/prefetcher/prefetcher_branch_thumb_arm_4 | — | 👌 |
-| alyosha/prefetcher/prefetcher_dma | — | 👀 Failed test 059 |
+| alyosha/prefetcher/prefetcher_dma | — | 👌 |
 | alyosha/prefetcher/prefetcher_full_arm | — | 👌 |
 | alyosha/prefetcher/prefetcher_full_arm_2 | — | 👌 |
 | alyosha/prefetcher/prefetcher_full_thumb | — | 👌 |
@@ -222,7 +222,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | peterlemon/BIOSSoundGetJumpList | — | 👌 |
 | peterlemon/BIOSMidiKey2Freq | — | 👌 |
 
-## GBA - Other test ROMs (9/12)
+## GBA - Other test ROMs (10/12)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -237,7 +237,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | agbeeg/swp_locks_bus | — | 👌 |
 | agbeeg/ldm_does_not_lock_bus | — | 👌 |
 | agbeeg/stm_does_not_lock_bus | — | 👌 |
-| agbeeg/cpu_runs_idles_during_dma | — | 👀 FAIL |
+| agbeeg/cpu_runs_idles_during_dma | — | 👌 |
 
 ## GBA - hwverified (AGS-001) (12/12)
 

@@ -401,6 +401,7 @@ type
     imm_idle_from*: CycleCount
     imm_idle_until*: CycleCount
     imm_at*: CycleCount             # when the armed immediate DMA requests the bus
+    in_catch_up*: bool              # a dispatch from inside an access's sync (catch_up_slow)
     dma_end_at*: CycleCount         # when the last CPU-interrupting burst let go
     dma_held*: int                  # and how long it had held the bus
     # Open-bus latch left by DMA: the last word a DMA moved stays on the data
@@ -1155,6 +1156,18 @@ const DMA_READS_CPU_BUS* {.booldefine.} = true
   ## word the burst itself moved, or, for its first transfer, the CPU's last
   ## bus transaction -- its data load if that came after its last opcode
   ## fetch, else the fetched opcode (Bus.dma_bus_word).
+const IMM_BOUNDARY_GRANT* {.booldefine.} = true
+  ## An immediate DMA whose request (two cycles after the enable) falls
+  ## exactly between two instructions is granted there, ahead of the next
+  ## opcode fetch, instead of waiting a cycle as for an access in flight.
+  ## dmaobus2.s on an AGB SP, the enable store followed by one-cycle
+  ## instructions from IWRAM: the burst's word is the opcodes fetched
+  ## before the third instruction (Thumb 31033104, ARM E2811004), one fetch
+  ## earlier than without it (31053104, E2811005); from EWRAM, where the
+  ## request lands inside a 3-cycle fetch, both agree. Off: those two cells
+  ## (HLE and real BIOS) read one fetch late; on, alyosha
+  ## prefetcher/prefetcher_dma and AGBEEG cpu_runs_idles_during_dma turn
+  ## green and nothing else moves.
 const IMM_IDLE_GRANT* {.booldefine.} = true
   ## An immediate DMA requests the bus two cycles after its enable write. If
   ## the CPU is running internal cycles then, the burst starts there and
@@ -1448,7 +1461,14 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
       when IMM_IDLE_GRANT:
         let bus = gba.bus
         let now = gba.scheduler.cycles
-        if (bus.sync_bits and 4) == 0 and
+        var at_boundary = false
+        when IMM_BOUNDARY_GRANT:
+          # Due exactly as an instruction ends (the CPU's closing tick, not
+          # an access's sync): the request finds the next fetch not yet
+          # started, and wins the bus from it.
+          at_boundary = not bus.in_catch_up and gba.scheduler.tick_left == 0 and
+                        not gba.cpu.halted
+        if (bus.sync_bits and 4) == 0 and not at_boundary and
            not (bus.imm_idle_from <= now and now < bus.imm_idle_until):
           bus.sync_bits = bus.sync_bits or 4
           gba.scheduler.schedule(1, etDMA)

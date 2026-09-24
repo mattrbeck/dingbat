@@ -82,6 +82,11 @@ type
     # preemption). Nil for GB. Only invoked when a handler set pump_requested.
     pump*: proc() {.closure.}
     pump_requested*: bool
+    # Of the quota tick_slow was advancing, what is left after the event
+    # being dispatched: 0 = the event is due exactly at the end of it (for
+    # a CPU's closing tick, the instruction boundary). Written on the slow
+    # path only; meaningful only inside a dispatch.
+    tick_left*: CycleCount
 
 proc new_scheduler*(): Scheduler =
   result = Scheduler(next_event: high(CycleCount))
@@ -197,6 +202,7 @@ proc tick_slow(s: Scheduler; cycles: CycleCount) =
   while s.cycles + remaining >= s.next_event:
     remaining -= s.next_event - s.cycles
     s.cycles = s.next_event
+    s.tick_left = remaining
     s.call_current()
   s.cycles += remaining
 

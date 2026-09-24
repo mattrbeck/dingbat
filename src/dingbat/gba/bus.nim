@@ -1040,11 +1040,13 @@ proc fetch_word*(bus: Bus; address: uint32): uint32 {.inline.} =
 proc catch_up_slow(bus: Bus) =
   # Loops because a fired event can itself consume bus time (a DMA stalling
   # the CPU) that must also be ticked before the access observes the clock.
+  bus.in_catch_up = true
   while bus.cycles > 0:
     let pending = bus.cycles
     bus.cycles = 0
     bus.synced += pending
     bus.gba.scheduler.tick(pending)
+  bus.in_catch_up = false
 
 proc catch_up(bus: Bus) {.inline.} =
   # Advance the scheduler to the current mid-instruction cycle so MMIO
