@@ -1926,7 +1926,14 @@ proc teardown_netlink(why = "") =
   ## peer a BYE, drain/close the socket, and swap the RemoteSioDriver back for
   ## the default no-cable driver so the game sees the cable unplug cleanly.
   ## `why` (empty for the user's own Disconnect) is shown as "Link ended: ...".
+  ## A core the link left inside a frame (parked on the peer, or step_frame
+  ## raised part way) finishes that frame single-player: link_mid_frame no
+  ## longer holds a Quick Save/Load back once the link is gone, and the state
+  ## format assumes a frame boundary.
+  let torn = app.netlink != nil and app.netlink.mid_frame
   app.link.teardown(app.netlink, why)
+  if torn and app.gba_emu != nil:
+    app.gba_emu.run_until_frame()
 
 proc linked_now(nl: NetLink): bool =
   ## Bind a new link to the app; drops rewind history, which would desync.

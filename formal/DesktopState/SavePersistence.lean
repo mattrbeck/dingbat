@@ -92,7 +92,7 @@ proposed change at once. Each flag is one small Nim change:
 | `atomic` | every `writeFile` of a persisted file goes through `write_file_atomic` (temp, fsync, rename over `path`); a failed Quick Save says the slot is unchanged | `bug_truncated_sav_accepted`, `bug_failed_quick_save_destroys_previous`, `failed_quick_save_silent` | `clean_ok`, `regress_failed_quick_save_says_so` |
 | `cliOver` | CLI BIOS flags are kept out of `app.cfg`; `save_config` re-reads the file and writes only the keys its caller changed | `bug_cli_flag_persisted`, `bug_two_windows_config_lost` | `cfg_ok` |
 | `rewindClear` | an applied state load clears `app.rewind` | `bug_rewind_crosses_state_load` | `rewind_ok` |
-| `finishFrame` | after `teardown_netlink` on a NetLinkError, `run_until_frame` finishes the torn frame | `bug_state_saved_mid_frame` | `mid_ok` |
+| `finishFrame` | `teardown_netlink` finishes a frame the link left torn (`run_until_frame`) before anything else runs; this machine's only torn frame is the NetLinkError one | `bug_state_saved_mid_frame` | `mid_ok` |
 
 The real code keeps: a state is only ever applied from a whole file made for
 the cart it goes into (`loads_ok`, any `Fix`), and the refusal notice is never
