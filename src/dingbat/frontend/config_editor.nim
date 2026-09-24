@@ -1,5 +1,6 @@
+import std/options
 import imguin/[cimgui, impl_opengl, impl_sdl2]
-import ../common/config
+import ../common/[config, input]
 import file_explorer
 import bios_selection
 import video_widget
@@ -74,11 +75,23 @@ proc do_factory_reset(ed: ConfigEditor) =
   if ed.live_sync != nil:
     ed.live_sync()
 
+proc capturing_keys*(ed: ConfigEditor): bool =
+  ## A Keybindings capture takes key releases only while Settings is open and
+  ## its tab is on screen
+  ed.open and ed.keybindings.wants_input()
+
+proc capturing_buttons*(ed: ConfigEditor): bool =
+  ed.open and ed.controller.wants_input()
+
 proc render*(ed: ConfigEditor) =
   if ed.open and not ed.prev_open:
     ed.do_reset()
   ed.prev_open = ed.open
 
+  # Only the tab bar below says a tab is on screen: closed, or collapsed
+  # (igBegin false), none is, so no capture keeps taking keys.
+  ed.keybindings.visible = false
+  ed.controller.visible = false
   if not ed.open: return
 
   # Sized window, not AlwaysAutoResize: auto-resize re-fits on every tab switch
@@ -154,3 +167,7 @@ proc render*(ed: ConfigEditor) =
       igEndPopup()
 
   igEnd()
+  # Closed with the X this frame: a capture in progress ends with the window
+  if not ed.open:
+    ed.keybindings.selection = none(Input)
+    ed.controller.selection = none(Input)

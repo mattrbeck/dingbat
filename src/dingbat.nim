@@ -1662,7 +1662,7 @@ proc handle_input() =
                                  shortcut_mod = (mods and MOD_KEY_MASK) != 0,
                                  imgui_keyboard = app.io != nil and
                                                   app.io[].WantCaptureKeyboard,
-                                 capturing = app.ce.keybindings.wants_input())
+                                 capturing = app.ce.capturing_keys())
       push_held_input()
       case route
       of krNone: discard
@@ -1753,7 +1753,7 @@ proc handle_input() =
                       if bound: app.cfg.controller_bindings[button] else: Input.low,
                       pressed)
       push_held_input()
-      if not pressed and app.ce.controller.wants_input():
+      if not pressed and app.ce.capturing_buttons():
         app.ce.controller.button_released(button)
 
     of ControllerAxisMotion:
