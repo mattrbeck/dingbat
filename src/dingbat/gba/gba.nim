@@ -422,6 +422,7 @@ type
     load_size*:          int
     load_pc*:            uint32
     load_start*:         CycleCount
+    load_end*:           CycleCount
     dma_bus_req*:        CycleCount  # when the burst in progress asked for the bus
     ldrsh_odd*:          bool
     dma_bus_fresh*:      bool  # no transfer of this burst has driven the bus yet
@@ -1588,6 +1589,7 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
   if gba.bus.idle_until >= base: gba.bus.idle_until -= base
   else: gba.bus.idle_until = 0
   gba.bus.imm_idle_from = 0
+  gba.bus.load_size = 0   # its stamps are not rebased; a frame edge ends it
   gba.bus.imm_idle_until = 0
   if gba.bus.imm_at >= base: gba.bus.imm_at -= base
   else: gba.bus.imm_at = 0

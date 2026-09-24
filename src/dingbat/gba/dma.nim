@@ -228,6 +228,11 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
     dma.gba.bus.dma_bus_req =
       if start_timing == 0 and IMM_IDLE_GRANT: min(dma.gba.bus.dma_request_at, dma.gba.bus.imm_at)
       else: dma.gba.bus.dma_request_at
+    # and one the CPU has moved on from (its internal cycle is the most a
+    # load leaves between its data and the next fetch) is not on the bus
+    if not nested and dma.gba.bus.load_size != 0 and
+       dma.gba.bus.sched.cycles + CycleCount(dma.gba.bus.cycles) > dma.gba.bus.load_end + 1:
+      dma.gba.bus.load_size = 0
   # The prefetch hand-off phase (bus.rom_access_cycles) was pinned with two
   # lead cycles; keep its origin where those rows put it.
   dma.gba.bus.dma_grant_now =

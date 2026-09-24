@@ -1119,7 +1119,8 @@ proc `[]`*(bus: Bus; address: uint32): uint8 =
       bus.load_addr = address
       bus.load_size = (if bus.ldrsh_odd: 2 else: 1)
       bus.load_pc = bus.gba.cpu.r[15]
-      bus.load_start = bus.bus_now() - CycleCount(cost)
+      bus.load_end = bus.bus_now()
+      bus.load_start = bus.load_end - CycleCount(cost)
     bus.catch_up_access(cost)
   bus.read_byte_internal(address)
 
@@ -1132,7 +1133,8 @@ proc read_half*(bus: Bus; address: uint32): uint16 =
       bus.load_addr = address
       bus.load_size = 2
       bus.load_pc = bus.gba.cpu.r[15]
-      bus.load_start = bus.bus_now() - CycleCount(cost)
+      bus.load_end = bus.bus_now()
+      bus.load_start = bus.load_end - CycleCount(cost)
     bus.catch_up_access(cost)
   bus.read_half_internal(address)
 
@@ -1145,7 +1147,8 @@ proc read_word*(bus: Bus; address: uint32): uint32 =
       bus.load_addr = address
       bus.load_size = 4
       bus.load_pc = bus.gba.cpu.r[15]
-      bus.load_start = bus.bus_now() - CycleCount(cost)
+      bus.load_end = bus.bus_now()
+      bus.load_start = bus.load_end - CycleCount(cost)
     bus.catch_up_access(cost)
   bus.read_word_internal(address)
 
@@ -1177,7 +1180,12 @@ proc `[]=`*(bus: Bus; address: uint32; value: uint8) =
   bus.rom_cool()
   let cost = bus.access_cycles(address, is32 = false, fetch = false)
   bus.cycles += cost
-  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active: bus.catch_up_access(cost)
+  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active:
+    # A store ends the load's claim on the bus (Bus.dma_bus_word): the
+    # console shows a burst the fetched opcode after one, not the load
+    # before it or the store's own data (dmaobus2.s variant 7)
+    when DMA_READS_CPU_BUS: bus.load_size = 0
+    bus.catch_up_access(cost)
   bus.byte_io_write = true
   bus.write_byte_internal(address, value)
   bus.byte_io_write = false
@@ -1186,14 +1194,24 @@ proc write_half*(bus: Bus; address: uint32; value: uint16) =
   bus.rom_cool()
   let cost = bus.access_cycles(address, is32 = false, fetch = false)
   bus.cycles += cost
-  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active: bus.catch_up_access(cost)
+  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active:
+    # A store ends the load's claim on the bus (Bus.dma_bus_word): the
+    # console shows a burst the fetched opcode after one, not the load
+    # before it or the store's own data (dmaobus2.s variant 7)
+    when DMA_READS_CPU_BUS: bus.load_size = 0
+    bus.catch_up_access(cost)
   bus.write_half_internal(address, value)
 
 proc write_word*(bus: Bus; address: uint32; value: uint32) =
   bus.rom_cool()
   let cost = bus.access_cycles(address, is32 = true, fetch = false)
   bus.cycles += cost
-  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active: bus.catch_up_access(cost)
+  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active:
+    # A store ends the load's claim on the bus (Bus.dma_bus_word): the
+    # console shows a burst the fetched opcode after one, not the load
+    # before it or the store's own data (dmaobus2.s variant 7)
+    when DMA_READS_CPU_BUS: bus.load_size = 0
+    bus.catch_up_access(cost)
   bus.write_word_internal(address, value)
 
 # For DMA write-word via uint32 subscript
