@@ -59,7 +59,11 @@ task test_rewind, "Run the rewind-ring property tests (IDs, eviction, keyframes)
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_rewind_test tests/rewind_test.nim"
 
-task test_cyclelaws, "Hold the core to the cycle laws recorded from an AGB SP":
+task test_gbapurebase, "Run the GB APU deadline checks across the per-frame scheduler rebase":
+  exec "nim c -r -d:test_harness -d:release --path:src " &
+       "-o:dingbat_gbapurebase_test tests/gbapu_rebase_test.nim"
+
+task test_cyclelaws,"Hold the core to the cycle laws recorded from an AGB SP":
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_cyclelaws_test tests/cyclelaws_test.nim"
 

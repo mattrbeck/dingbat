@@ -61,7 +61,7 @@ proc ch4_advance_divisor(ch: GbChannel4; gb: GB) =
   ## `div_next` is exact at every point the increment period could have
   ## changed, so the increments since are one division away. Callers must have
   ## run ch4_catchup first (next rising edge strictly in the future).
-  ## apu_rebase calls it once a frame, bounding `now - div_next`.
+  ## gb_rebase calls it once a frame, bounding `now - div_next`.
   if ch.div_next == GB_NO_STEP: return
   let now = gb.scheduler.cycles
   if ch.div_next > now: return

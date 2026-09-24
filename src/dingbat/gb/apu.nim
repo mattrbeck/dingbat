@@ -130,12 +130,10 @@ proc apu_catchup_all*(apu: GbApu; gb: GB) {.inline.} =
 
 proc apu_rebase*(apu: GbApu; gb: GB; base: CycleCount) {.inline.} =
   ## Shift every channel deadline by the base scheduler.rebase just subtracted
-  ## from the events. Callers must have caught the channels up first.
+  ## from the events. Callers must have caught the channels up and settled
+  ## channel 4's divisor stage first, both at the pre-rebase clock (gb_rebase).
   template adj(ch: untyped) =
     if ch.next_step != GB_NO_STEP: ch.next_step -= base
-  # Channel 4's divisor deadline can be in the past (the catch-up stops at the
-  # last LFSR shift); settle it so the subtraction cannot underflow.
-  ch4_advance_divisor(apu.channel4, gb)
   if apu.channel4.div_next != GB_NO_STEP: apu.channel4.div_next -= base
   template adj_sweep(field: untyped) =
     if apu.channel1.field != GB_NO_STEP: apu.channel1.field -= base
@@ -222,7 +220,7 @@ proc apu_rescale_speed*(apu: GbApu; gb: GB; old_speed, new_speed: uint8) =
   adj(apu.channel2)
   adj(apu.channel3)
   adj(apu.channel4)
-  # Settle the divisor stage first; it can be in the past (see apu_rebase).
+  # Settle the divisor stage first; it can be in the past (see gb_rebase).
   ch4_advance_divisor(apu.channel4, gb)
   if apu.channel4.div_next != GB_NO_STEP:
     apu.channel4.div_next = conv(apu.channel4.div_next)
@@ -236,6 +234,13 @@ proc gb_rebase*(gb: GB): CycleCount {.discardable.} =
   ## Frame-boundary scheduler rebase. Catching the channels up first keeps every
   ## deadline within one frame of staleness (CH4's shift loop; wasm uint32).
   gb.apu.apu_catchup_all(gb)
+  # Channel 4's divisor deadline can be in the past (the catch-up stops at the
+  # last LFSR shift). Settle it here, while scheduler.cycles is still the clock
+  # it is measured against: once rebase has moved that clock back it looks like
+  # the future, is left alone, and the subtraction wraps it. A wrapped stage
+  # turns the next NR43 write's LFSR deadline into a far-future one (the noise
+  # stops shifting) that apu_arm_state_events cannot convert.
+  ch4_advance_divisor(gb.apu.channel4, gb)
   result = gb.scheduler.rebase()
   gb.apu.apu_rebase(gb, result)
   when APU_CLOCK_CARRY != 0:

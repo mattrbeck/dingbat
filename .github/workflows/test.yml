@@ -84,6 +84,12 @@ jobs:
         # the delta chain. Synthetic payloads; no ROMs.
         shell: bash
         run: ./dingbat_rewind_test
+      - name: GB APU deadlines across the frame rebase
+        # Channel 4 runs across frame boundaries, then NR43 is written: the
+        # noise must keep shifting and every state payload must build (the
+        # rewind ring's crash). A program assembled in the test; no ROMs.
+        shell: bash
+        run: ./dingbat_gbapurebase_test
       - name: LCD panel-response model invariants
         # Self-comparing panel-model invariants: static frames bit-exact,
         # transitions reach their target, 30 Hz alternation settles. No ROMs.
