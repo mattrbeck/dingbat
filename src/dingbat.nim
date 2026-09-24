@@ -619,6 +619,10 @@ proc apply_speed_mode() =
 proc current_cheat_engine(): CheatEngine
 proc load_cheats()
 proc on_cheats_changed()
+# Network link procs, defined below with the rest of the link code
+proc teardown_netlink(why = "")
+proc link_cancel_setup()
+proc link_auto_stop()
 
 # ──────────────────────────── Input log ────────────────────────────
 # DINGBAT_INPUT_LOG=<path> records a GBA session's keypad as "<frame> <mask>"
@@ -728,6 +732,16 @@ proc load_rom(path: string) =
   if built.error.len > 0:
     load_notice(built.error, built.detail)
     return
+  # The link, or a setup still waiting for a peer, belongs to the outgoing
+  # core: left up, the netlink keeps driving that core unseen, and a peer
+  # arriving later is bound to whatever is loaded then, a GB game included
+  if app.netlink == nil and app.link.setup != lsNone:
+    app.link.status = "Link ended: another game was loaded."
+  link_auto_stop()
+  link_cancel_setup()
+  teardown_netlink("another game was loaded")
+  # A frame the link left torn was just finished: what it wrote goes too
+  flush_saves()
   if built.gb != nil:
     app.gb_emu = built.gb
     app.gba_emu = nil
@@ -2626,6 +2640,10 @@ proc main() =
     if not emulated and not presented:
       # Idle until audio drains or the next present slot; don't busy-spin
       delay(1)
+  # The peer hears BYE (a pulled cable) instead of waiting out its timeout
+  link_auto_stop()
+  link_cancel_setup()
+  teardown_netlink()
   flush_saves()
   input_log_close()
 
