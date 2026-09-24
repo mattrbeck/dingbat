@@ -1,5 +1,5 @@
 -- What this models, for formal/anchors.mjs (which lists stale models):
--- @models src/dingbat.nim: flush_saves load_rom current_rom_path cheat_file_path save_cheats load_cheats on_cheats_changed state_file_path save_state_slot load_state_slot delete_state_slot refresh_state_slots process_pending_state render_state_notice poll_battery_notice render_battery_notice render_imgui handle_input finish_link teardown_netlink main
+-- @models src/dingbat.nim: flush_saves load_rom current_rom_path cheat_file_path save_cheats load_cheats on_cheats_changed state_file_path save_state_slot load_state_slot delete_state_slot refresh_state_slots process_pending_state render_state_notice poll_battery_notice render_battery_notice render_imgui handle_input teardown_netlink main
 -- @models src/dingbat/frontend/save_states_widget.nim: mark_stale render
 -- @models src/dingbat/frontend/notice.nim: modal_key render_notice
 -- @models src/dingbat/frontend/persist.nim: poll dismiss state_file_name legacy_state_file_name state_read_path state_delete_paths

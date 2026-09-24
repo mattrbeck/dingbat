@@ -1,5 +1,5 @@
 -- What this models, for formal/anchors.mjs (which lists stale models):
--- @models src/dingbat.nim: handle_input emu_pad_input push_held_input apply_trigger new_core_takes_held_input update_rumble render_imgui show_menu_bar update_fps_title load_rom finish_link process_pending_state main
+-- @models src/dingbat.nim: handle_input emu_pad_input push_held_input apply_trigger new_core_takes_held_input update_rumble render_imgui show_menu_bar update_fps_title load_rom process_pending_state main
 -- @models src/dingbat/frontend/held_input.nim: held take_changes core_replaced bindable_key route_key pad_added pad_removed pad_button pad_stick pad_trigger trigger_held apply_trigger
 -- @models src/dingbat/frontend/keybindings_widget.nim: wants_input key_released apply reset
 -- @models src/dingbat/frontend/controller_widget.nim: wants_input button_released

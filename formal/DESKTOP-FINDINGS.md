@@ -96,12 +96,26 @@ kept running with its noise channel frozen). Since 25c4cc4f0; fixed in
 fc686286c (the noise divisor stage settles before the frame rebase), guarded
 by `tests/gbapu_rebase_test.nim`.
 
-**Still open, recorded:** `--listen` waits up to 120 s before the loop
-starts; the HELLO handshake and a manual Join's connect still block; saves an
-older build wrote as `<parent>.sav` for extensionless ROMs are not migrated;
-GBA state identity hashes the first 1 MB; same stem shares `.sav`; `.cgb`
-files are not recognised as Game Boy ROMs; the Link Cable window is too
-short for its two-windows hint (it scrolls).
+**Round 3, the items rounds 1-2 left open:**
+
+| Item | Fixed in | Test | Driven |
+|---|---|---|---|
+| `--listen` froze the app up to 120 s before the loop; the HELLO handshake (30 s) and a manual Join's connect blocked the loop | 0c5a726c2: all run in the loop with wall-clock deadlines, the status line and Cancel; the core stays on its own cable until the peer's HELLO | netlink (a silent peer, a SYN-dropping listener, two cables pairing in one thread) | `--listen` opens at once hosting; `--connect` pairs; a silent peer: menus work, 30.0 s later "Handshake failed", BYE sent |
+| Link Cable window too short for its hint | 74b99475b: minimum height = last frame's content | scratch ImGui run | fits, no scrollbar |
+| `.cgb`/`.sgb` went to the GBA core (web: "Unsupported file") | 1f1e69ec3, f3f0377cf: one extension list; not `.dmg` (a macOS disk image) | lifecycle, web romcheck | both open in the GB core |
+| notices ignored Return/Escape | 9d141938e: Return/Enter/Escape = OK; "Discard changes?"/"Reset settings?": Escape = Cancel, Return does nothing; a key pressed as a notice appears is ignored | input, modal (needs imguin: `nimble test_desktop`, not CI) | Return and Escape close the State notice; the game saw neither |
+| green-button fullscreen untracked; a GB game left a GBA-shaped window after fullscreen | 3e802556e | settings | not driven (would take over the screen) |
+
+Left alone, with reasons: saves an older build wrote for an extensionless
+ROM (`<parent>.sav`) are not migrated, because that name is also the save of
+a different game (`/g/v1.2/zelda` wrote `/g/v1.sav`, which is `/g/v1.gba`'s)
+and a `.sav` carries no ROM identity. GBA state identity still hashes the
+first 1 MB: a whole-ROM identity would make every new state of a large cart
+unreadable to older builds (stale web tabs, Drive-synced devices), the
+version churn avoided so far; a compatible route is an optional trailer
+carrying the whole-ROM hash, if wanted. Same stem sharing `.sav` stays (every
+emulator does it; two windows on the same stem are now refused). A hostname
+typed into Join still resolves by a blocking DNS lookup.
 
 | File | Machine |
 |---|---|
