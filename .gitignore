@@ -53,6 +53,7 @@ web/rom.gbc
 /rewind_codec_nopad
 /dingbat_test_runner
 /dingbat_bench
+/dingbat_desktop_netlink_test
 /dingbat_bench_native
 /dingbat_ts_test
 /dingbat_sdl3
