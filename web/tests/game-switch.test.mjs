@@ -13,6 +13,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import vm from "node:vm";
 import { loadApp, jsonRes, bytesRes, u8, eq, settle, gameTiles } from "./helpers.mjs";
 
 // A ROM is [id, ...]; a battery save is [id of the game that wrote it, n].
@@ -416,6 +417,55 @@ test("a Drive-only game whose download finishes after another tap does not repla
   assert.ok(app.idb.get("rom:B.gba"), "B did download");
   assert.equal(named(app), "C.gba", "and did not replace C");
   assert.equal(core(app).rom, ROM["C.gba"]);
+});
+
+// The SIO link path (`?rollback=0`): launchNetRom boots the host's ROM the way
+// loadRom boots a tile, and named it before its save was read the way loadRom
+// used to.
+const withNetplay = (app) => {
+  const { sandbox } = app;
+  sandbox.WebSocket = class { constructor() { this.readyState = 0; } send() {} close() {} };
+  sandbox.RTCPeerConnection = class {};
+  sandbox.BroadcastChannel = class { postMessage() {} close() {} };
+  sandbox.navigator.onLine = true;
+  sandbox.location.hostname = "localhost";
+  sandbox.crypto = { getRandomValues: (a) => a };
+  vm.runInContext(
+    readFileSync(new URL("../sdputil.js", import.meta.url), "utf8") + "\n" +
+    readFileSync(new URL("../netplay.js", import.meta.url), "utf8"),
+    app.context, { filename: "web/netplay.js" });
+  app.runIn(`
+    const init = Module.ccall;
+    Module.ccall = (fn, ret, types, args) =>
+      fn === "netlink_init" ? (init("initFromEmscripten", null, ["string"], [args[0]]), 1)
+                            : init(fn, ret, types, args);
+  `);
+};
+
+test("the SIO link path names its game only once the core and save are in", async () => {
+  const app = await boot();
+  withNetplay(app);
+  const b = u8(0x0b, 5);
+  app.idb.set("save:B.gba", b);
+  await playAThenHome(app);
+  const a2 = gameSaves(app, 2); // unflushed, so pagehide has something to write
+
+  const gate = hold(app, "get", "save:B.gba");
+  app.runIn(`
+    net = { rom: { name: "B.gba", data: new Uint8Array([0x0b, 1, 2, 3]) },
+            isHost: true, attach: false, rxQueue: [] };
+    globalThis.__launched = launchNetRom();
+  `);
+  await parked(gate);
+  await app.dispatchWin("pagehide");  // the page goes away in the gap
+  await drain();
+  eq(app.idb.get("save:B.gba"), b, "save:B untouched");
+  eq(app.idb.get("save:A.gba"), a2, "A's newest save went to save:A");
+  gate.release();
+  await app.runIn("__launched");
+  assert.equal(named(app), "B.gba");
+  eq(core(app).ram, [...b], "B booted on its own save");
+  coherent(app);
 });
 
 // ── Finding 15: reset save data (SavePersistence) ───────────────────────────

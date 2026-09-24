@@ -1452,20 +1452,26 @@ const launchNetRom = async () => {
     if (ok !== 1) throw new Error("attach failed");
   } else {
     const rom = net.rom;
+    nextLoadGen(); // the session owns the core now: a load in flight gives way
     if (currentRomName && currentOriginalName) {
       await persistSave(currentRomName, currentOriginalName);
     }
     const romFile = "rom" + extOf(rom.name);
+    const save = await dbGet("save:" + rom.name);
+    // As loadRom: the ROM, its battery file and the core in one synchronous
+    // run, and only then the name. Named any earlier, a flush in the gap
+    // (the 5 s autosave, pagehide) would file the outgoing game's battery,
+    // still in rom.sav, under this one.
     writeToFS(romFile, rom.data);
-    currentRomName = romFile;
-    currentOriginalName = rom.name;
-    await restoreSave(romFile, rom.name);
+    installSave(romFile, rom.name, save);
     const ok = Module.ccall(
       "netlink_init",
       "number",
       ["string", "number", "number"],
       [romFile, net.isHost ? 1 : 0, 1]
     );
+    currentRomName = romFile;
+    currentOriginalName = rom.name;
     if (ok !== 1) throw new Error("core init failed");
   }
 
