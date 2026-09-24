@@ -130,6 +130,21 @@ proc key_name_to_code(name: string): cint =
 proc key_code_to_name(code: cint): string =
   CODE_TO_NAME.getOrDefault(code, "")
 
+proc keycode_file_name(code: cint): string =
+  ## A key as the config file names it: the table name, else the decimal
+  ## keycode. Keypad keys and non-US letters have no table name, and without
+  ## the number their binding was written as a blank key and lost.
+  result = key_code_to_name(code)
+  if result.len == 0: result = $code
+
+proc keycode_from_file_name(name: string): cint =
+  result = key_name_to_code(name)
+  if result < 0 and name.len > 0 and name.allCharsInSet(Digits):
+    try:
+      let v = parseInt(name)
+      if v <= int(high(cint)): result = cint(v)
+    except ValueError: discard
+
 proc input_from_name(name: string): Input =
   case toLowerAscii(name)
   of "up":     Input.UP
@@ -396,7 +411,7 @@ proc parse_config(j: JsonNode): Config =
     cfg.keybindings = initTable[cint, Input]()
     for k, v in j["keybindings"].pairs:
       try:
-        let keycode   = key_name_to_code(k)
+        let keycode   = keycode_from_file_name(k)
         let input_val = input_from_name(v.getStr())
         if keycode >= 0:
           cfg.keybindings[keycode] = input_val
@@ -412,8 +427,7 @@ proc parse_config(j: JsonNode): Config =
       except: discard
   result = cfg
 
-proc load_config*(): Config =
-  let path = expandTilde(CONFIG_FILE)
+proc load_config_file*(path: string): Config =
   if not fileExists(path):
     return new_config()
   try:
@@ -423,6 +437,8 @@ proc load_config*(): Config =
     return parse_config(docs[0])
   except:
     return new_config()
+
+proc load_config*(): Config = load_config_file(expandTilde(CONFIG_FILE))
 
 # Quote YAML values containing special chars (or empty) so they round-trip
 # through Crystal's YAML parser.
@@ -442,15 +458,14 @@ proc yaml_str(s: string): string =
   else:
     result = s
 
-proc save_config*(cfg: Config) =
-  let path = expandTilde(CONFIG_FILE)
-  createDir(expandTilde(CONFIG_DIR))
+proc save_config_file*(cfg: Config; path: string) =
+  createDir(parentDir(path))
   var lines: seq[string]
   lines.add("---")
   lines.add("explorer_dir: " & yaml_str(cfg.explorer_dir))
   lines.add("keybindings:")
   for k, v in cfg.keybindings.pairs:
-    lines.add("  " & key_code_to_name(k) & ": " & toLowerAscii($v))
+    lines.add("  " & keycode_file_name(k) & ": " & toLowerAscii($v))
   lines.add("controller_bindings:")
   for k, v in cfg.controller_bindings.pairs:
     let name = controller_button_name(k)
@@ -489,3 +504,5 @@ proc save_config*(cfg: Config) =
   lines.add("  sgb: " & $cfg.sgb_enable)
   lines.add("  sgb_border: " & $cfg.sgb_border)
   writeFile(path, lines.join("\n") & "\n")
+
+proc save_config*(cfg: Config) = save_config_file(cfg, expandTilde(CONFIG_FILE))

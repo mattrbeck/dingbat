@@ -113,6 +113,11 @@ jobs:
         # The Lean model's (RunInput) traces. No ROMs.
         shell: bash
         run: ./dingbat_desktop_input_test
+      - name: Desktop settings file
+        # load(save(cfg)) = cfg for every stored setting, including key
+        # bindings with no config-file name (keypad keys, non-US letters).
+        shell: bash
+        run: ./dingbat_desktop_settings_test
       - name: Clip-capture replay determinism
         # Replays a range from the anchor+input log and asserts every frame's
         # serialized state matches the live run; two negative controls must
