@@ -385,6 +385,7 @@ def case_list(image, base, syms):
         cases.append({'index': i, 'suite': suite, 'name': cstr(word(d + 12)),
                       'kind': ['range', 'one-of-two', 'slot'][info & 15],
                       'cartridge_only': bool(info & 0x10),
+                      'risky': bool(info & 0x20),
                       'offset': (info >> 16) & 0xFFF, 'mask': f'{word(d + 20):08X}',
                       'lo': f'{word(d + 24):08X}', 'hi': f'{word(d + 28):08X}'})
     return suites, cases

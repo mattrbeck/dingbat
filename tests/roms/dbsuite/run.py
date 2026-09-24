@@ -21,7 +21,9 @@ beacons (0xDB000000 | case index before each case) while it runs, then reads
 the results block it streams ('LRPT', tools/hwlink/gblink.py read_report),
 saves the words to OUT.json and decodes them.  A run that stops names the
 case it stopped in; --from=N starts the next run past it (the image's
-rom_config word is patched: run at once, from case N).  Afterwards it sends BOOT (the ROM answers with the
+rom_config word is patched: run at once, from case N).  --no-risky skips
+the cases that provoke UNPREDICTABLE CPU state (undefined CPSR modes),
+so a first pass on a console isolates everything else.  Afterwards it sends BOOT (the ROM answers with the
 BIOS's HardReset) and reinstalls the monitor.  Take the rig's lock first.
 
 Exits 0 iff nothing failed, timed out or crashed.
@@ -96,16 +98,16 @@ def decode_block(words):
     return got
 
 
-def patched_image(start):
+def patched_image(start, risky=True):
     """The multiboot image with rom_config set to run at once from `start`."""
     info = json.load(open(os.path.join(HERE, 'cases.json')))
     off = int(info['rom_config_offset']['multiboot'], 16)
     image = bytearray(open(os.path.join(HERE, 'dbsuite.mb.gba'), 'rb').read())
-    struct.pack_into('<I', image, off, 1 | (start << 16))
+    struct.pack_into('<I', image, off, 1 | (0 if risky else 4) | (start << 16))
     return bytes(image)
 
 
-def on_console(out_path, start=0):
+def on_console(out_path, start=0, risky=True):
     sys.path.insert(0, os.path.join(ROOT, 'tools', 'hwlink'))
     import gblink
     import await_console
@@ -123,7 +125,7 @@ def on_console(out_path, start=0):
         state = await_console.console_state()
     if state != 'multiboot':
         sys.exit(f'the console is not waiting for an upload (state {state})')
-    image = patched_image(start)
+    image = patched_image(start, risky)
     with gblink.GBLink() as link:
         link.set_voltage_3v3()
         time.sleep(0.15)
@@ -174,7 +176,7 @@ def main(argv):
         out = next(a for a in argv[1:] if not a.startswith('--'))
         start = next((int(f.split('=', 1)[1], 0) for f in flags
                       if f.startswith('--from=')), 0)
-        got = on_console(out, start)
+        got = on_console(out, start, '--no-risky' not in flags)
         return 1 if report('AGB SP, multiboot image', got, True, show_all) else 0
     roms = ['dbsuite.gba'] + (['dbsuite.mb.gba'] if '--mb' in flags else [])
     for rom in roms:

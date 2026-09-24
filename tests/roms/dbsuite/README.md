@@ -66,7 +66,9 @@ Take the rig's lock first.
   word in the multiboot image; `cases.json` gives both file offsets) can be
   patched. Bit 0 runs at once, with no menu, from case number bits 16-31 to
   the end (so a run can restart past a case that hung). Bit 1 never
-  auto-runs.
+  auto-runs. Bit 2 reports the cases marked risky in `cases.json` as SKIP.
+  Those are the undefined-CPSR-mode cases, which provoke UNPREDICTABLE CPU
+  state. `run.py --sp --no-risky` sets this bit for a console's first pass.
 - **Menu.** A runs the selected suite, START runs everything. After a run,
   the summary lists each suite and the first failures. A on a suite opens
   every case, with got and expected. B goes back.

@@ -332,18 +332,18 @@ und_recover:
     strb r0, [r8, #30]
     pop {r4-r11, pc}
     .ltorg
-    cword "mode-15-r13-reads-0",    run_undmode, 0, 0
-    cbyte "mode-15-latches",        RUN_SAME, 4, 0x15
-    cbyte "mode-15-r14-reads-0",    RUN_SAME, 5, 0x00
-    cword "mode-1a-r13-reads-0",    RUN_SAME, 8, 0
-    cbyte "mode-1a-latches",        RUN_SAME, 12, 0x1A
-    cbyte "mode-1a-r14-reads-0",    RUN_SAME, 13, 0x00
-    cword "mode-1e-r13-reads-0",    RUN_SAME, 16, 0
-    cbyte "mode-1e-latches",        RUN_SAME, 20, 0x1E
-    cbyte "mode-1e-r14-reads-0",    RUN_SAME, 21, 0x00
-    cword "system-r13-survives",    RUN_SAME, 24, 0x51515151
-    cbyte "undefined-modes-finish", RUN_SAME, 28, 0x04
-    cbyte "undefined-modes-clean",  RUN_SAME, 29, 0x01
+    cword "mode-15-r13-reads-0",    run_undmode, 0, 0, F_RISKY
+    cbyte "mode-15-latches",        RUN_SAME, 4, 0x15, F_RISKY
+    cbyte "mode-15-r14-reads-0",    RUN_SAME, 5, 0x00, F_RISKY
+    cword "mode-1a-r13-reads-0",    RUN_SAME, 8, 0, F_RISKY
+    cbyte "mode-1a-latches",        RUN_SAME, 12, 0x1A, F_RISKY
+    cbyte "mode-1a-r14-reads-0",    RUN_SAME, 13, 0x00, F_RISKY
+    cword "mode-1e-r13-reads-0",    RUN_SAME, 16, 0, F_RISKY
+    cbyte "mode-1e-latches",        RUN_SAME, 20, 0x1E, F_RISKY
+    cbyte "mode-1e-r14-reads-0",    RUN_SAME, 21, 0x00, F_RISKY
+    cword "system-r13-survives",    RUN_SAME, 24, 0x51515151, F_RISKY
+    cbyte "undefined-modes-finish", RUN_SAME, 28, 0x04, F_RISKY
+    cbyte "undefined-modes-clean",  RUN_SAME, 29, 0x01, F_RISKY
 
 @ ──────────────────────────── Thumb multiply ──────────────────────────────
 @ WHAT/PROVENANCE: tests/roms/payloads/thumbmul.s -- 64 Thumb multiplies

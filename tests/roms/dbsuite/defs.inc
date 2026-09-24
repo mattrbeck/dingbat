@@ -104,7 +104,9 @@
 .equ K_RANGE,  0                   @ lo <= got <= hi (lo = hi: exact)
 .equ K_TWO,    1                   @ got = lo or got = hi (two answers seen)
 .equ K_SLOT,   2                   @ got = the SLOT word at byte lo, masked
-.equ F_CART,   0x10                @ needs the cartridge bus: SKIP when the
+.equ F_RISKY,  0x20                @ provokes UNPREDICTABLE CPU state: SKIP
+                                   @ when rom_config bit 2 is set
+.equ F_CART,   0x10               @ needs the cartridge bus: SKIP when the
                                    @ multiboot build runs from EWRAM
 
 .set NCASES, 0

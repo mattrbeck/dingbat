@@ -367,6 +367,18 @@ run_case:
     add r5, r5, r4, lsl #5         @ r5 = descriptor
     bl  draw_run_progress
     ldr r0, [r5, #CD_INFO]
+    tst r0, #F_RISKY
+    beq 0f
+    ldr r1, =rom_config
+    ldr r1, [r1]
+    tst r1, #4                     @ rom_config bit 2: leave these out
+    beq 0f
+    mov r0, r4
+    mov r1, #ST_SKIP
+    mov r2, #0
+    bl  record_status
+    b   8f
+0:  ldr r0, [r5, #CD_INFO]
     tst r0, #F_CART
     beq 1f
 .if MB

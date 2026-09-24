@@ -35,7 +35,8 @@ header_end:                        @ 0xC0
 @ rom_config, at 0x080000C4 in the cartridge image (the body's second word
 @ in the multiboot one; cases.json gives both file offsets): a harness may
 @ patch it.  bit 0: run at once, without the menu's countdown, from case
-@ bits 16-31 to the end; bit 1: never auto-run.
+@ bits 16-31 to the end; bit 1: never auto-run; bit 2: SKIP the cases
+@ flagged F_RISKY (undefined CPSR modes).
 rom_config:
     .word 0
 rom_version:
