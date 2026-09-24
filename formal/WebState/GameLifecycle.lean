@@ -1,31 +1,42 @@
 /-
 # The game lifecycle: loading, switching, closing and resuming a game
 
-Models `web/index.js` at commit dd7ba741f (branch worktree-lean-web-state):
+Models `web/index.js` as fixed by the commit "web: a game is named only once
+its core and save are in; loads and closes take a token" (line numbers at that
+commit). The model at dd7ba741f, and the eight counterexamples it proved there,
+are in the history of this file; each of those traces is replayed here against
+the fixed code as a `regress_*` theorem.
 
 | JS                                             | lines        |
 |------------------------------------------------|--------------|
-| `launchRom`                                    | 4484-4497    |
-| library tile click (resume-if-loaded shortcut) | 5127-5138    |
-| `handleRomFile` / `handleZipFile` (open, drop) | 8083-8142    |
-| `loadRom`: L0 7881-7888, L1 7889, L2 7890,     | 7881-7936    |
-|   L3 7892-7920, L4 7920-7922, L5 7922-7935     |              |
-| `restoreSave` / `persistSave`                  | 5245-5274    |
-| `persistAutoState` / `autoStateMatchesSave`    | 5643-5657    |
-| `offerAutoResume` + the Resume toast action    | 5669-5688    |
-| `pushToast` (an offer's tap handler)           | 5368-5416    |
-| `showMainMenu` (go home) / `resumeGame`        | 9352-9380    |
-| `setPausedCardShown` / `updatePausedCard`      | 9588-9613    |
-| `unloadGame`: U0 9636-9641, U1 9642,           | 9636-9673    |
-|   U2 9644-9646, U3 9648-9665; the card's X     |              |
-| 5 s autosave, `beforeunload`, `pagehide`,      | 11195-11238  |
+| `launchRom` (takes the load token)             | 4505-4520    |
+| library tile click (resume-if-loaded shortcut) | 5151-5161    |
+| `handleRomFile` / `handleZipFile` (open, drop) | 8187-8253    |
+| `loadGen` / `loadingName` / `nextLoadGen`      | 7821-7835    |
+| `loadRom`: L0 7954-7969, L1 7970-7971,         | 7954-8044    |
+|   L2 7972-7973, L3 7974-7980 (loadingName,     |              |
+|   dbGet save:), L4 7981-8028 (ROM +            |              |
+|   installSave + init + names, one segment),    |              |
+|   L5 8029-8044                                 |              |
+| `installSave` / `persistSave`                  | 5263-5319    |
+| `persistAutoState` / `autoStateMatchesSave`    | 5687-5708    |
+| `offerAutoResume` + the Resume toast action    | 5720-5743    |
+| `pushToast` (an offer's tap handler)           | 5413-5461    |
+| `showMainMenu` (go home) / `resumeGame`        | 9468-9491    |
+| `setPausedCardShown` / `updatePausedCard`      | 9698-9723    |
+| `unloadGame`: U0 9749-9755, U1 9756-9757,      | 9749-9788    |
+|   U2 9758-9788 (detach, flush, unlink: one     |              |
+|   segment); the card's X 9790                  |              |
+| 5 s autosave, `beforeunload`, `pagehide`,      | 11314-11363  |
 |   `visibilitychange` (hidden)                  |              |
-| `pullSyncInner`'s per-save download            | 2990-3016    |
-| `flushSyncInner`'s upload (blind: no remote    | 2786-2800    |
+| `pullSyncInner`'s per-save download (checks    | 3012-3027    |
+|   before and after the download)               |              |
+| `flushSyncInner`'s upload (blind: no remote    | 2791-2806    |
 |   modifiedTime check)                          |              |
-| RAF `tick` (runs the core whenever !paused)    | 11321-11470  |
-| core: `initFromEmscripten` reads `rom.<ext>` and `rom.sav`; the cores flush dirty cart
-|   RAM to `rom.sav` once per frame (`handle_saves`, `storage.nim`)                  |
+| RAF `tick` (runs the core whenever !paused)    | 11444-11598  |
+| core: `initFromEmscripten` reads `rom.<ext>` and `rom.sav` (no flush of the
+|   outgoing core, dingbat_wasm.nim); the cores flush dirty cart RAM to `rom.sav`
+|   once per frame (`handle_saves`, `storage.nim`)                               |
 
 ## State
 
@@ -33,12 +44,12 @@ Exactly the variables these functions read or write (see the field comments).
 
 ## Abstractions, and why they do not affect the stated properties
 
-* **Games**: three names `A B C`, all with the same extension. `launchRom` writes
-  every game to the one FS file `"rom" + ext`, and `stripExt` maps `rom.gba`,
-  `rom.gb` and `rom.gbc` all to the one battery file **`rom.sav`**, so `fsSav` is
-  one slot for every game (true for mixed systems too); `fsRom` is one slot per
-  extension, modelled as one slot (the ROM-collision trace needs same-extension
-  games; the `rom.sav` traces do not).
+* **Games**: three names `A B C`, all with the same extension. Every game is
+  the one FS file `"rom" + ext`, and `stripExt` maps `rom.gba`, `rom.gb` and
+  `rom.gbc` all to the one battery file **`rom.sav`**, so `fsSav` is one slot
+  for every game (true for mixed systems too); `fsRom` is one slot per
+  extension, modelled as one slot. The ROM is written at the boot (loadRom's
+  `opts.rom`), with the save, in the segment that builds the core.
 * **Save bytes** are a `Sav` = (the game whose code produced them, a version
   number that is fresh at each production). Two saves are equal iff their bytes
   are, so `saveSignature` is the identity (no FNV collisions).
@@ -48,40 +59,36 @@ Exactly the variables these functions read or write (see the field comments).
 * **IndexedDB**: every `dbGet`/`dbPut` is a one-request transaction on one store,
   so IDB runs them in issue order: a request's effect is taken at the segment
   that issues it, and the `await` on it is a separate event. `dbPutRoomy`'s
-  quota path is not modelled (a failed write only removes behaviour).
+  quota path is not modelled (SavePersistence has it).
 * **Toasts** never expire and are never de-duplicated: that only adds
-  behaviour (safety proofs stay sound; each bug trace says why it fits in 8 s).
+  behaviour (safety proofs stay sound).
 * **Scheduling is free**: any pending continuation may fire next. That is a
-  superset of what a browser does (IDB completes requests in issue order,
-  `storeLastFrame` calls resolve in call order through `frameStoreChain`, a
-  microtask-only await resumes before any task), so the fixed model's proofs
-  cover every real order; each bug trace was checked by hand against those
-  orderings (its comment gives the argument).
+  superset of what a browser does, so the proofs cover every real order.
 * **Frames / pictures / cheats / audio / clips / brand flight**: no state these
-  properties read. `storeLastFrame`'s await is kept as an interleaving point.
+  properties read. `storeLastFrame`'s await is kept as an interleaving point;
+  `restoreCheats`' await is the L5 split.
 * **Link, rollback, netplay**, the reset button, save import, the per-game
-  menu's Delete/Remove, "library pictures" and renames are not modelled: every
-  persist path returns early in the link modes, and the others are separate
-  entry points that need a menu interaction inside a millisecond window.
+  menu's Delete/Remove/Reset, "library pictures" and renames are not modelled:
+  every persist path returns early in the link modes (and loadRom abandons a
+  load a link session overtook, Netplay.lean), and the others are separate
+  entry points (Reset and import take the load token too).
 * **Drive**: one remote copy of `save:g` and the per-file `syncState.sigs`
   (`synced`); another device writing a newer save is `remoteSave`. A page load
   (`reload`) keeps IndexedDB and Drive and drops everything else.
-* `fresh`, `gFlow`, `gIsLoad` are proof-only (ghost) fields; `loadGen` and
-  `loading` exist only in the fixed model (`stepF`) and are inert in `step`.
+* `fresh`, `gFlow`, `gIsLoad` are proof-only (ghost) fields.
 
 ## Contents
 
-* `step`: the code as it is. Kept: `tap_loaded_resumes`,
-  `unload_flush_keyed_by_outgoing`, `resume_applies_only_matched`. Broken, by
-  concrete traces from `init`: `bug_stale_sav_inherited`,
-  `bug_unload_race_writes_incoming_save`, `bug_double_tap_boots_wrong_rom`,
-  `bug_double_tap_resume_point_of_other_rom`,
-  `bug_double_tap_overwrites_resume_point`, `bug_pagehide_in_load_gap`,
-  `bug_pull_mid_load_loses_remote_save`, `bug_resume_restores_older_battery`.
-* `stepF`: the same machine with the six fixes listed at its section. Proved
-  for every reachable state: `fixed_save_owner`, `fixed_auto_owner`,
-  `fixed_cur_coherent`, `fixed_ui_agree`, `fixed_resume_keeps_battery`,
-  `fixed_pull_blocked_during_load`, `fixed_stale_noop`, `fixed_every_trace`.
+* `step`: the code. Kept, for every reachable state (`Reachable`, arbitrary
+  interleavings): `save_owner`, `auto_owner`, `cur_coherent`, `ui_agree`,
+  `resume_keeps_battery`, `pull_blocked_during_load`, `stale_noop`,
+  `every_trace`; and the one-step facts `tap_loaded_resumes`,
+  `unload_flush_keyed_by_outgoing`, `resume_applies_only_matched`.
+* The dd7ba741f counterexamples, now safe: `regress_stale_sav_inherited`,
+  `regress_unload_race_writes_incoming_save`, `regress_double_tap_boots_wrong_rom`,
+  `regress_double_tap_resume_point_of_other_rom`,
+  `regress_double_tap_overwrites_resume_point`, `regress_pagehide_in_load_gap`,
+  `regress_pull_mid_load_loses_remote_save`, `regress_resume_restores_older_battery`.
 -/
 
 namespace WebState.GameLifecycle
@@ -107,25 +114,22 @@ structure Snap where
 inductive After
   | none
   | l3 (g : G) (t : Nat)
-  | u3 (g : G) (t : Nat)
   deriving DecidableEq, Repr
 
-/-- A call in flight, with the locals it captured. `t` is the load token
-(fixed model only). -/
+/-- A call in flight, with the locals it captured; `t` is its load token. -/
 inductive Pend
-  | launchW (g : G) (t : Nat)                 -- launchRom/handleRomFile before writeToFS
+  | launchW (g : G) (t : Nat)                 -- launchRom after ensureRuntimeReady/getRomBytes
   | launchL (g : G) (t : Nat)                 -- after touchRecent/addRecentRom: calls loadRom
   | l1 (g : G) (t : Nat)                      -- loadRom after `await persistAutoState()`
   | l2 (g : G) (t : Nat)                      -- after `await storeLastFrame`
   | l3 (g : G) (t : Nat)                      -- after `await persistSave(outgoing)`
-  | l4 (g : G) (t : Nat) (v : Option Sav)     -- after restoreSave's dbGet (value v)
+  | l4 (g : G) (t : Nat) (v : Option Sav)     -- after the dbGet of save:g (value v)
   | l5 (g : G) (t : Nat)                      -- after `await restoreCheats()`
   | offer1 (n : G) (a : Option Snap)          -- offerAutoResume after dbGet(stateauto:)
   | offer2 (n : G) (a : Snap) (v : Option Sav) -- after autoStateMatchesSave's dbGet
   | res1 (n : G) (a : Snap) (v : Option Sav)  -- the Resume tap, after its dbGet
   | u1 (g : G) (t : Nat)                      -- unloadGame after `await persistAutoState()`
   | u2 (g : G) (t : Nat)                      -- after `await storeLastFrame`
-  | u3 (g : G) (t : Nat)                      -- after `await persistSave(romName, g)`
   | psDone (g : G) (d : Sav) (k : After)      -- persistSave after its dbPutRoomy
   | pullW (g : G) (d : Sav)                   -- pull: driveDownload came back with d
   deriving DecidableEq, Repr
@@ -150,8 +154,8 @@ structure St where
   toasts : List (G × Snap) -- live "Last session saved — Resume" offers
   pend : List Pend         -- continuations in flight
   clock : Nat              -- source of fresh save versions
-  loadGen : Nat            -- FIX: load generation token
-  loading : Option G       -- FIX: the game whose restoreSave is in flight
+  loadGen : Nat            -- loadGen
+  loading : Option G       -- loadingName
   gFlow : G                -- ghost: the game of the flow holding the current token
   gIsLoad : Bool           -- ghost: ...and whether that flow is a load
 
@@ -209,9 +213,8 @@ def push (s : St) (p : Pend) : St := { s with pend := s.pend ++ [p] }
 def pushAfter (s : St) : After → St
   | .none => s
   | .l3 g t => push s (.l3 g t)
-  | .u3 g t => push s (.u3 g t)
 
-/-- `persistSave(romName, g)` up to its first await (5245-5256): read FS
+/-- `persistSave(romName, g)` up to its first await (5273-5283): read FS
 rom.sav synchronously; nothing, or the signature last written for `g`, returns;
 otherwise the dbPutRoomy is issued, and lastSig/markUpload follow its await. -/
 def persistSave (s : St) (g : G) (k : After) : St :=
@@ -221,7 +224,7 @@ def persistSave (s : St) (g : G) (k : After) : St :=
     if s.lastSig = some (g, d) then pushAfter s k
     else push { s with idb := upd s.idb g (some d) } (.psDone g d k)
 
-/-- `persistAutoState()` (5643-5651): no name or no core returns; the dbPut
+/-- `persistAutoState()` (5687-5694): no name or no core returns; the dbPut
 is issued with the snapshot and the signature of FS rom.sav. -/
 def persistAuto (s : St) : St :=
   match s.cur, s.core with
@@ -230,11 +233,11 @@ def persistAuto (s : St) : St :=
     { s with auto := upd s.auto g (some a) }
   | _, _ => s
 
-/-- `resumeGame` (9373-9380). -/
+/-- `resumeGame` (9483-9491). -/
 def resumeGame (s : St) : St :=
   if s.cur.isSome then { s with paused := false, running := true } else s
 
-/-- `offerAutoResume` up to its first await (5669-5675). -/
+/-- `offerAutoResume` up to its first await (5720-5726). -/
 def offerStart (s : St) : St :=
   match s.cur with
   | none => s
@@ -246,21 +249,21 @@ def orKeep (x y : Option Sav) : Option Sav :=
   | some d => some d
   | none => y
 
-/-- `applyStateBytes` (5504-5513); the core rejects a state for another ROM
-(WRONG_ROM). Restored cart RAM is dirty, so it reaches rom.sav. -/
+/-- `applyStateBytes`; the core rejects a state for another ROM (WRONG_ROM).
+Restored cart RAM is dirty, so it reaches rom.sav. -/
 def applyState (s : St) (a : Snap) : St :=
   if s.core = some a.rom then
     { s with coreRam := a.ram, fsSav := orKeep a.ram s.fsSav, fresh := a.fresh }
   else s
 
-/-- `showMainMenu` (9352-9366) with `updatePausedCard` (9593-9613). -/
+/-- `showMainMenu` (9468-9481) with `updatePausedCard` (9703-9723). -/
 def goHome (s : St) : St :=
   match s.cur with
   | none => s
   | some c => { s with paused := true, running := false,
                        card := if s.core.isSome then some c else none }
 
-/-- The RAF tick runs the core whenever `!paused` (11326). -/
+/-- The RAF tick runs the core whenever `!paused`. -/
 def frame (s : St) : St :=
   if !s.paused && s.core.isSome then { s with fresh := false } else s
 
@@ -271,13 +274,13 @@ def gameSave (s : St) : St :=
     { s with coreRam := some d, fsSav := some d, clock := s.clock + 1, fresh := false }
   | _, _ => s
 
-/-- The 5 s interval (11195-11201). -/
+/-- The 5 s interval (11314-11320). -/
 def tick (s : St) : St :=
   match s.cur with
   | some g => persistSave s g .none
   | none => s
 
-/-- `pagehide` / `beforeunload` (11203-11238): persistSave, then persistAutoState. -/
+/-- `pagehide` / `beforeunload` (11322-11363): persistSave, then persistAutoState. -/
 def pagehide (s : St) : St :=
   match s.cur with
   | some g => persistAuto (persistSave s g .none)
@@ -286,7 +289,7 @@ def pagehide (s : St) : St :=
 def remoteSave (s : St) (g : G) : St :=
   { s with drive := upd s.drive g (some ⟨g, s.clock⟩), clock := s.clock + 1 }
 
-/-- `flushSyncInner`'s upload of save:g (2786-2800): re-uploads whenever the
+/-- `flushSyncInner`'s upload of save:g (2791-2806): re-uploads whenever the
 bytes differ from the last synced signature. No remote-version check. -/
 def upload (s : St) (g : G) : St :=
   if s.dirty g then
@@ -304,7 +307,7 @@ def reload (s : St) : St :=
   { init with idb := s.idb, auto := s.auto, drive := s.drive, synced := s.synced,
               dirty := s.dirty, clock := s.clock, loadGen := s.loadGen }
 
-/-- The pull's per-save write (3007-3012): written when its signature differs
+/-- The pull's per-save write (3021-3025): written when its signature differs
 from the last synced one. -/
 def pullWrite (s : St) (g : G) (d : Sav) : St :=
   if some d ≠ s.synced g then
@@ -316,73 +319,101 @@ def toastTap (s : St) (i : Nat) : St :=
   | none => s
   | some (n, a) =>
     -- pushToast's onclick: dismiss, then fn(); fn checks the name and awaits
-    -- autoStateMatchesSave (5679-5682)
+    -- autoStateMatchesSave (5730-5735)
     let s := { s with toasts := s.toasts.eraseIdx i }
     if s.cur = some n then push s (.res1 n a (s.idb n)) else s
 
-/-! ## The code as it is (`step`) -/
+/-! ## The code (`step`)
 
-/-- loadRom's segment that ends in `await restoreSave` (7892-7916). -/
+1. **Load token.** A tile tap, a file open and a close take `nextLoadGen()`
+   synchronously (which also clears `loadingName`); every continuation of
+   launchRom/handleRomFile/loadRom/unloadGame returns when `gen !== loadGen`.
+2. **The game is named only when the core holds it.** loadRom sets
+   `loadingName` and reads `save:<g>`, then in one synchronous segment writes
+   the ROM, installs the save (writes `rom.sav`, or unlinks it when there is
+   none; `lastSaveSig` := what was read), runs `initFromEmscripten` (which no
+   longer flushes the outgoing GB core), clears `loadingName` and names the
+   game, `paused = false`, `has-game running`.
+3. **unloadGame** detaches, calls persistSave (its FS read is synchronous) and
+   unlinks in the same segment.
+4. **Resume** re-checks the snapshot's signature against FS rom.sav, the live
+   battery, synchronously just before `applyStateBytes`.
+5. **The pull** treats `loadingName` as loaded, and re-checks after the
+   download, just before writeSyncBytes.
+-/
+
+def bump (s : St) (g : G) (isLoad : Bool) : St :=
+  { s with loadGen := s.loadGen + 1, loading := none, gFlow := g, gIsLoad := isLoad }
+
+/-- loadRom L3 (7974-7980): `loadingName = name`, dbGet(save:name) issued. -/
 def l3Seg (s : St) (g : G) (t : Nat) : St :=
-  push { s with cur := some g, paused := false, hasGame := true, running := true }
-    (.l4 g t (s.idb g))
+  push { s with loading := some g } (.l4 g t (s.idb g))
 
-/-- loadRom's first segment (7881-7889). No link session is modelled. -/
+/-- loadRom L0 (7954-7967): with a game in, persistAutoState; else straight to L3. -/
 def loadStart (s : St) (g : G) (t : Nat) : St :=
   if s.cur.isSome then push (persistAuto s) (.l1 g t) else l3Seg s g t
 
+/-- loadRom L4 (7981-8028): ROM, save, core, names: one segment. -/
+def l4Seg (s : St) (g : G) (t : Nat) (v : Option Sav) : St :=
+  push { s with fsRom := some g, fsSav := v, core := some g, coreRam := v, fresh := true,
+                lastSig := v.map (fun d => (g, d)), loading := none, cur := some g,
+                paused := false, hasGame := true, running := true } (.l5 g t)
+
+/-- unloadGame U2 (9758-9788): detach, flush, unlink, pause, one segment. -/
+def u2Seg (s : St) (g : G) : St :=
+  let s1 := persistSave { s with cur := none } g .none
+  { s1 with fsSav := none, paused := true, hasGame := false, running := false, card := none }
+
 def fire (s : St) : Pend → St
-  | .launchW g t => push { s with fsRom := some g } (.launchL g t)   -- writeToFS (4492-4494)
-  | .launchL g t => loadStart s g t                                   -- loadRom(romFile, name)
-  | .l1 g t => push s (.l2 g t)                                       -- storeLastFrame (7889)
-  | .l2 g t =>                                                        -- 7890: args read NOW
-    match s.cur with
-    | none => s              -- persistSave(null, null): TypeError, loadRom rejects
-    | some c => persistSave s c (.l3 g t)
-  | .l3 g t => l3Seg s g t
-  | .l4 g t v =>                                                      -- restoreSave 5270-5273,
-    let fs := orKeep v s.fsSav                                        -- then initFromEmscripten
-    push { s with fsSav := fs, core := s.fsRom, coreRam := fs, fresh := true } (.l5 g t)
-  | .l5 _ _ => offerStart s                                           -- 7932
-  | .offer1 n a =>                                                    -- 5676-5677
+  | .launchW g t => if t = s.loadGen then push s (.launchL g t) else s
+  | .launchL g t => if t = s.loadGen then loadStart s g t else s
+  | .l1 g t => if t = s.loadGen then push s (.l2 g t) else s
+  | .l2 g t =>                                                      -- 7972: args read now
+    if t = s.loadGen then
+      match s.cur with
+      | none => s
+      | some c => persistSave s c (.l3 g t)
+    else s
+  | .l3 g t => if t = s.loadGen then l3Seg s g t else s
+  | .l4 g t v => if t = s.loadGen then l4Seg s g t v else s
+  | .l5 _ t => if t = s.loadGen then offerStart s else s            -- 8029, 8042
+  | .offer1 n a =>                                                  -- 5727-5728
     match a with
     | none => s
     | some a => if s.cur = some n then push s (.offer2 n a (s.idb n)) else s
-  | .offer2 n a v =>                                                  -- 5677-5679
+  | .offer2 n a v =>                                                -- 5728-5730
     if a.sig = v ∧ s.cur = some n then { s with toasts := s.toasts ++ [(n, a)] } else s
-  | .res1 n a v =>                                                    -- 5682-5687
-    if a.sig = v ∧ s.cur = some n then applyState s a else s
-  | .u1 g t => push s (.u2 g t)                                       -- 9642
-  | .u2 g t => persistSave { s with cur := none } g (.u3 g t)         -- 9644-9646
-  | .u3 _ _ =>                                                        -- 9648-9665
-    { s with fsSav := none, paused := true, hasGame := false, running := false, card := none }
-  | .psDone g d k =>                                                  -- 5260-5263
-    pushAfter { s with lastSig := some (g, d), dirty := upd s.dirty g true } k
-  | .pullW g d => pullWrite s g d
+  | .res1 n a v =>                                                  -- 5735-5741
+    if a.sig = v ∧ s.cur = some n ∧ a.sig = s.fsSav then applyState s a else s
+  | .u1 g t => if t = s.loadGen then push s (.u2 g t) else s        -- 9756
+  | .u2 g t => if t = s.loadGen then u2Seg s g else s               -- 9758
+  | .psDone g d k => pushAfter { s with lastSig := some (g, d), dirty := upd s.dirty g true } k
+  | .pullW g d => if s.cur = some g ∨ s.loading = some g then s else pullWrite s g d -- 3020
 
 def step (s : St) : Ev → St
   | .tap g =>
     if s.running then s                                   -- #home hidden: no tile
-    else if s.cur = some g then resumeGame s              -- 5132
-    else push s (.launchW g s.loadGen)                    -- launchRom (4484)
-  | .openFile g => push s (.launchW g s.loadGen)
+    else if s.cur = some g then resumeGame s              -- 5155
+    else push (bump s g true) (.launchW g (s.loadGen + 1)) -- launchRom 4506
+  | .openFile g => push (bump s g true) (.launchW g (s.loadGen + 1))
   | .goHome => goHome s
   | .resume => if s.running then s else resumeGame s
   | .closeCard =>
     if s.running || s.card.isNone then s
-    else match s.cur with                                 -- unloadGame (9636-9641)
+    else match s.cur with                                 -- unloadGame 9749-9755
       | none => s
-      | some g => push (persistAuto s) (.u1 g s.loadGen)
+      | some g => push (persistAuto (bump s g false)) (.u1 g (s.loadGen + 1))
   | .frame => frame s
   | .gameSave => gameSave s
   | .tick => tick s
-  | .hide => persistAuto s                                -- 11217-11221
+  | .hide => persistAuto s                                -- 11339-11343
   | .pagehide => pagehide s
   | .toastTap i => toastTap s i
   | .remoteSave g => remoteSave s g
-  | .pullCheck g =>                                       -- 3005-3007
+  | .pullCheck g =>                                       -- 3014-3016
     match s.drive g with
-    | some d => if s.cur ≠ some g ∧ some d ≠ s.synced g then push s (.pullW g d) else s
+    | some d =>
+      if s.cur ≠ some g ∧ s.loading ≠ some g ∧ some d ≠ s.synced g then push s (.pullW g d) else s
     | none => s
   | .upload g => upload s g
   | .reload => reload s
@@ -428,313 +459,55 @@ def SnapOK (n : G) (a : Snap) : Prop :=
 def ResumeKeepsBattery (stp : St → Ev → St) (s : St) : Prop :=
   ∀ i n a v, s.pend[i]? = some (.res1 n a v) → (stp s (.fire i)).fsSav = s.fsSav
 
-/-! ## What the code as it is does keep -/
+/-! ## One-step facts -/
 
 /-- Tapping the tile of the game in memory resumes it: no load starts, the
-core is untouched, and it runs (5132). -/
+core is untouched, and it runs (5155). -/
 theorem tap_loaded_resumes (s : St) (g : G) (hr : s.running = false) (hc : s.cur = some g) :
     step s (.tap g) = { s with paused := false, running := true } := by
   simp [step, hr, hc, resumeGame]
 
 /-- unloadGame's final flush is addressed to the outgoing game's key: every
-other `save:` key is untouched (9644-9646). (What it writes there is another
-matter: `bug_unload_race_writes_incoming_save`.) -/
-theorem unload_flush_keyed_by_outgoing (s : St) (g h : G) (t : Nat) (hne : h ≠ g) :
-    (fire s (.u2 g t)).idb h = s.idb h := by
-  simp only [fire, persistSave]
+other `save:` key is untouched (9763-9766). -/
+theorem unload_flush_keyed_by_outgoing (s : St) (g h : G) (hne : h ≠ g) :
+    (u2Seg s g).idb h = s.idb h := by
+  simp only [u2Seg, persistSave]
   split
-  · simp [pushAfter, push]
+  · simp [pushAfter]
   · split
-    · simp [pushAfter, push]
+    · simp [pushAfter]
     · simp [push, upd, hne]
 
 /-- The Resume action applies a snapshot only to the game still current, and
-only when the save it read matched the snapshot's signature (5680-5687). -/
+only when both the stored save and the live battery match its signature
+(5735-5741). -/
 theorem resume_applies_only_matched (s : St) (n : G) (a : Snap) (v : Option Sav)
-    (h : fire s (.res1 n a v) ≠ s) : a.sig = v ∧ s.cur = some n := by
+    (h : fire s (.res1 n a v) ≠ s) : a.sig = v ∧ s.cur = some n ∧ a.sig = s.fsSav := by
   simp only [fire] at h
   split at h
   · assumption
   · exact absurd rfl h
 
-/-! ## Counterexamples: the code does not keep what it means to
-
-Each trace runs from a fresh install (`init`). `boot g` is "open g's file and
-let the load finish"; `abHome` plays B (saves in game), closes it, plays A
-(saves in game) and goes home, leaving A paused behind the card. The traces
-use only orders a browser can produce; the ordering argument is in each
-comment (IDB runs requests in issue order; `storeLastFrame` calls resolve in
-call order, being one promise chain; a Drive download is network time).
--/
-
-def boot (g : G) : List Ev := [.openFile g, .fire 0, .fire 0, .fire 0, .fire 0, .fire 0]
-def playA : List Ev := boot .A ++ [.gameSave, .tick, .fire 0]
-def abHome : List Ev :=
-  boot .B ++ [.gameSave, .tick, .fire 0, .goHome, .closeCard, .fire 0, .fire 0, .fire 0] ++
-  boot .A ++ [.gameSave, .tick, .fire 0, .goHome]
-
-theorem not_saveOwner {s : St} (g : G) (d : Sav) (h : s.idb g = some d) (hne : d.owner ≠ g) :
-    ¬ SaveOwner s := fun hs => hne (hs g d h)
-
-theorem not_autoOwner {s : St} (g : G) (a : Snap) (h : s.auto g = some a) (hne : a.rom ≠ g) :
-    ¬ AutoOwner s := fun hs => hne (hs g a h).1
-
-/-- **No race needed.** Play A (it saves), go home, tap B, which has never
-saved. `restoreSave` returns without touching FS `rom.sav` when there is no
-stored save (5270-5271), so B's core boots with A's battery file
-(`new_storage`/`mbc_load` read `rom.sav`), and the next 5 s autosave writes A's
-bytes to `save:B` (and queues them for Drive). -/
-def trStaleSav : List Ev :=
-  playA ++ [.goHome, .tap .B, .fire 0, .fire 0, .fire 0, .fire 0, .fire 0, .fire 0, .fire 0,
-            .fire 0, .tick]
-
-theorem bug_stale_sav_inherited :
-    (run init trStaleSav).idb .B = some ⟨.A, 0⟩ ∧ ¬ SaveOwner (run init trStaleSav) :=
-  ⟨by decide, not_saveOwner .B ⟨.A, 0⟩ (by decide) (by decide)⟩
-
-/-- **Close the paused game while another tile's load is in flight.** A is
-paused behind the card; tap B, then the card's X. Order: B's loadRom issues
-its persistAutoState put (L0) before unloadGame issues its own (U0), so its
-`storeLastFrame` joins the frame chain first (l1 before u1), so its
-continuation resolves first; B's persistSave(A) skips (A was flushed), so L3
-sets current = B and issues dbGet(save:B) in the same microtask run, before
-the unload's frame encode has even issued its put: IDB order then forces L4
-(rom.sav := B's save) before u2. u2 then does `persistSave(romName, "A")`,
-which reads FS rom.sav — B's save — into `save:A`. A's battery save is
-replaced by B's, locally and on Drive. -/
-def trUnloadRace : List Ev :=
-  abHome ++ [.tap .B, .fire 0, .fire 0, .closeCard, .fire 0, .fire 0, .fire 0, .fire 1, .fire 1,
-             .fire 0]
-
-theorem bug_unload_race_writes_incoming_save :
-    (run init trUnloadRace).idb .A = some ⟨.B, 0⟩ ∧ ¬ SaveOwner (run init trUnloadRace) :=
-  ⟨by decide, not_saveOwner .A ⟨.B, 0⟩ (by decide) (by decide)⟩
-
-/-- **Double-tap two tiles** (B then C, the second tap before B's load hides
-the home screen at its L3). launchRom writes both to the one FS file
-`rom.gba`; C's `getRomBytes` get is issued at the second tap, before B's L3
-issues dbGet(save:B), so IDB order forces C's writeToFS before B's L4, and
-B's `initFromEmscripten("rom.gba")` boots **C's ROM under B's name with B's
-save**. C's load then persists "the outgoing game" — which is B by name — so
-`stateauto:B` becomes a state of C's core (B's real resume point is gone;
-offered next time, the core rejects it as WRONG_ROM). -/
-def trDoubleTapTwo : List Ev :=
-  abHome ++ [.tap .B, .tap .C, .fire 0, .fire 0, .fire 0, .fire 1, .fire 1, .fire 1, .fire 1]
-
-theorem bug_double_tap_boots_wrong_rom :
-    (run init trDoubleTapTwo).cur = some .B ∧ (run init trDoubleTapTwo).core = some .C ∧
-    ¬ CurCoherent (run init trDoubleTapTwo) := by
-  refine ⟨by decide, by decide, fun h => ?_⟩
-  have := (h .B (by decide)).1
-  exact absurd this (by decide)
-
-theorem bug_double_tap_resume_point_of_other_rom :
-    ¬ AutoOwner (run init (trDoubleTapTwo ++ [.fire 0])) := by
-  refine not_autoOwner .B ⟨.C, some ⟨.B, 0⟩, some ⟨.B, 0⟩, true⟩ ?_ (by decide)
-  decide
-
-/-- **Double-tap the same tile** from a fresh page (the likeliest race here).
-Session 1 played A and was hidden (a real resume point). New page: tap A
-twice, the second before the first load's L3 hides the home screen. Both
-taps miss the "already loaded" shortcut (current is set only at L3). The
-first load reaches L4 one dbGet after L3; the second loadRom starts after its
-own getRomBytes + touchRecent chain (tens of ms later), sees current = A, and
-snapshots "the outgoing game": A's core seconds after boot. The real resume
-point is overwritten by a fresh boot (`fresh = true`). -/
-def sessionA : List Ev := playA ++ [.hide, .reload]
-def trDoubleTapSame : List Ev :=
-  sessionA ++ [.tap .A, .tap .A, .fire 0, .fire 0, .fire 0, .fire 1, .fire 0]
-
-theorem bug_double_tap_overwrites_resume_point :
-    (run init sessionA).auto .A = some ⟨.A, some ⟨.A, 0⟩, some ⟨.A, 0⟩, false⟩ ∧
-    (run init trDoubleTapSame).auto .A = some ⟨.A, some ⟨.A, 0⟩, some ⟨.A, 0⟩, true⟩ := by
-  decide
-
-/-- **pagehide in the L3–L4 gap.** L3 names B current while FS rom.sav still
-holds A's battery until restoreSave's dbGet returns (7892 vs 7916). Any
-synchronous flusher in that gap — pagehide, beforeunload, the 5 s tick, a
-second loadRom's L2 — writes A's battery to `save:B` (and A's core state to
-`stateauto:B`). The 5 s tick case heals at the next tick if B stays current;
-pagehide ends the page, so nothing heals it. -/
-def trPagehideGap : List Ev :=
-  abHome ++ [.tap .B, .fire 0, .fire 0, .fire 0, .fire 0, .fire 0, .pagehide]
-
-theorem bug_pagehide_in_load_gap :
-    (run init trPagehideGap).idb .B = some ⟨.A, 1⟩ ∧ ¬ SaveOwner (run init trPagehideGap) ∧
-    ¬ AutoOwner (run init trPagehideGap) :=
-  ⟨by decide, not_saveOwner .B ⟨.A, 1⟩ (by decide) (by decide),
-   not_autoOwner .B ⟨.A, some ⟨.A, 1⟩, some ⟨.A, 1⟩, false⟩ (by decide) (by decide)⟩
-
-/-- **A Drive pull lands mid-load.** A was played and synced; another device
-then saves A (version 1). New page: the pull checks `isRomLoaded(A)` (false),
-starts the download; the player taps A; its L3 reads `save:A` (version 0) and
-L4 boots it; the download lands and writes version 1 to `save:A`; the 5 s
-autosave writes FS rom.sav (version 0) back over it and marks it for upload;
-the upload sees bytes differing from the last synced signature and replaces
-Drive's version 1. The other device's save now survives nowhere (its next pull
-brings version 0 down over it too). -/
-def trPullRace : List Ev :=
-  playA ++ [.upload .A, .reload, .remoteSave .A, .pullCheck .A, .tap .A, .fire 1, .fire 1, .fire 1,
-            .fire 0, .tick, .fire 1, .upload .A]
-
-theorem bug_pull_mid_load_loses_remote_save :
-    (run init (playA ++ [.upload .A, .reload, .remoteSave .A])).drive .A = some ⟨.A, 1⟩ ∧
-    (run init trPullRace).idb .A = some ⟨.A, 0⟩ ∧
-    (run init trPullRace).drive .A = some ⟨.A, 0⟩ ∧
-    (run init trPullRace).fsSav = some ⟨.A, 0⟩ := by
-  decide
-
-/-- **Resume after an unflushed in-game save.** The offer's check (and its
-re-check at the tap, 5682) compares the snapshot's signature with IndexedDB
-`save:A`, which lags the live battery (FS rom.sav) by up to the 5 s autosave.
-The game saves in game (version 1), the player taps Resume before the next
-tick: IDB still holds version 0, the check passes, the snapshot's version-0
-RAM is restored over version 1, and the next flush makes the loss durable. -/
-def trResumeUnflushed : List Ev :=
-  sessionA ++ [.tap .A, .fire 0, .fire 0, .fire 0, .fire 0, .fire 0, .fire 0, .gameSave,
-               .toastTap 0]
-
-theorem bug_resume_restores_older_battery :
-    (run init trResumeUnflushed).fsSav = some ⟨.A, 1⟩ ∧
-    (step (run init trResumeUnflushed) (.fire 0)).fsSav = some ⟨.A, 0⟩ ∧
-    ¬ ResumeKeepsBattery step (run init trResumeUnflushed) := by
-  refine ⟨by decide, by decide, fun h => ?_⟩
-  have := h 0 .A ⟨.A, some ⟨.A, 0⟩, some ⟨.A, 0⟩, false⟩ (some ⟨.A, 0⟩) (by decide)
-  exact absurd this (by decide)
-
-/-- All of the above are reachable. -/
-theorem bug_traces_reachable :
-    Reachable (run init trStaleSav) ∧ Reachable (run init trUnloadRace) ∧
-    Reachable (run init (trDoubleTapTwo ++ [.fire 0])) ∧ Reachable (run init trDoubleTapSame) ∧
-    Reachable (run init trPagehideGap) ∧ Reachable (run init trPullRace) ∧
-    Reachable (run init trResumeUnflushed) :=
-  ⟨reachable_run _ _ .init, reachable_run _ _ .init, reachable_run _ _ .init,
-   reachable_run _ _ .init, reachable_run _ _ .init, reachable_run _ _ .init,
-   reachable_run _ _ .init⟩
-
-/-! ## The fixed code (`stepF`)
-
-The smallest JS change set the model shows sufficient:
-
-1. **Load token.** `let loadGen = 0;` — a tile tap, a file open and a close
-   take `const gen = ++loadGen;` synchronously, and every continuation of
-   launchRom/handleRomFile/loadRom/unloadGame returns when `gen !== loadGen`.
-2. **Name the game only when the core holds it.** In loadRom, move
-   `currentRomName = romName; currentOriginalName = …`, `paused = false` and
-   the `has-game running` classes from before `await restoreSave` to after
-   `initFromEmscripten` (one synchronous segment: write/unlink rom.sav, init,
-   name), and set `loadingName = originalName` before the dbGet instead.
-3. **restoreSave unlinks** `rom.sav` when there is no stored save.
-4. **unloadGame** detaches, calls persistSave (its FS read is synchronous)
-   and unlinks/tears down in the same segment: no `await` before the unlink.
-5. **Resume** re-checks the snapshot's signature against FS rom.sav — the live
-   battery — synchronously, just before `applyStateBytes`.
-6. **The pull** treats `loadingName` as loaded (`isRomLoaded`) and re-checks
-   after the download, just before writeSyncBytes.
--/
-
-def bump (s : St) (g : G) (isLoad : Bool) : St :=
-  { s with loadGen := s.loadGen + 1, gFlow := g, gIsLoad := isLoad }
-
-def l3SegF (s : St) (g : G) (t : Nat) : St :=
-  push { s with loading := some g } (.l4 g t (s.idb g))
-
-def loadStartF (s : St) (g : G) (t : Nat) : St :=
-  if s.cur.isSome then push (persistAuto s) (.l1 g t) else l3SegF s g t
-
-def l4SegF (s : St) (g : G) (t : Nat) (v : Option Sav) : St :=
-  push { s with fsSav := v, core := s.fsRom, coreRam := v, fresh := true, cur := some g,
-                paused := false, hasGame := true, running := true } (.l5 g t)
-
-def u2SegF (s : St) (g : G) : St :=
-  let s1 := persistSave { s with cur := none } g .none
-  { s1 with fsSav := none, paused := true, hasGame := false, running := false, card := none,
-            loading := none }
-
-def fireF (s : St) : Pend → St
-  | .launchW g t => if t = s.loadGen then push { s with fsRom := some g } (.launchL g t) else s
-  | .launchL g t => if t = s.loadGen then loadStartF s g t else s
-  | .l1 g t => if t = s.loadGen then push s (.l2 g t) else s
-  | .l2 g t =>
-    if t = s.loadGen then
-      match s.cur with
-      | none => s
-      | some c => persistSave s c (.l3 g t)
-    else s
-  | .l3 g t => if t = s.loadGen then l3SegF s g t else s
-  | .l4 g t v => if t = s.loadGen then l4SegF s g t v else s
-  | .l5 _ _ => offerStart s
-  | .offer1 n a =>
-    match a with
-    | none => s
-    | some a => if s.cur = some n then push s (.offer2 n a (s.idb n)) else s
-  | .offer2 n a v =>
-    if a.sig = v ∧ s.cur = some n then { s with toasts := s.toasts ++ [(n, a)] } else s
-  | .res1 n a v =>
-    if a.sig = v ∧ s.cur = some n ∧ a.sig = s.fsSav then applyState s a else s
-  | .u1 g t => if t = s.loadGen then push s (.u2 g t) else s
-  | .u2 g t => if t = s.loadGen then u2SegF s g else s
-  | .u3 _ _ => s
-  | .psDone g d k => pushAfter { s with lastSig := some (g, d), dirty := upd s.dirty g true } k
-  | .pullW g d => if s.cur = some g ∨ s.loading = some g then s else pullWrite s g d
-
-def stepF (s : St) : Ev → St
-  | .tap g =>
-    if s.running then s
-    else if s.cur = some g then resumeGame s
-    else push (bump s g true) (.launchW g (s.loadGen + 1))
-  | .openFile g => push (bump s g true) (.launchW g (s.loadGen + 1))
-  | .goHome => goHome s
-  | .resume => if s.running then s else resumeGame s
-  | .closeCard =>
-    if s.running || s.card.isNone then s
-    else match s.cur with
-      | none => s
-      | some g => push (persistAuto (bump s g false)) (.u1 g (s.loadGen + 1))
-  | .frame => frame s
-  | .gameSave => gameSave s
-  | .tick => tick s
-  | .hide => persistAuto s
-  | .pagehide => pagehide s
-  | .toastTap i => toastTap s i
-  | .remoteSave g => remoteSave s g
-  | .pullCheck g =>
-    match s.drive g with
-    | some d =>
-      if s.cur ≠ some g ∧ s.loading ≠ some g ∧ some d ≠ s.synced g then push s (.pullW g d) else s
-    | none => s
-  | .upload g => upload s g
-  | .reload => reload s
-  | .fire i =>
-    match s.pend[i]? with
-    | none => s
-    | some p => fireF { s with pend := s.pend.eraseIdx i } p
-
-inductive ReachableF : St → Prop
-  | init : ReachableF init
-  | step {s} (e : Ev) : ReachableF s → ReachableF (stepF s e)
-
-/-! ### The invariant of the fixed code -/
+/-! ## The invariant -/
 
 /-- The part of the state the pending continuations' claims read. -/
 structure K where
   loadGen : Nat
   gFlow : G
   gIsLoad : Bool
-  fsRom : Option G
   cur : Option G
   fsSav : Option Sav
   paused : Bool
   loading : Option G
 
 def St.kv (s : St) : K :=
-  ⟨s.loadGen, s.gFlow, s.gIsLoad, s.fsRom, s.cur, s.fsSav, s.paused, s.loading⟩
+  ⟨s.loadGen, s.gFlow, s.gIsLoad, s.cur, s.fsSav, s.paused, s.loading⟩
 
 def SavOK (g : G) (v : Option Sav) : Prop := ∀ d, v = some d → d.owner = g
 
-/-- A load holding the current token owns FS rom.<ext>. -/
+/-- A load holding the current token is the current flow. -/
 def LoadClaim (k : K) (g : G) (t : Nat) : Prop :=
-  t ≤ k.loadGen ∧ (t = k.loadGen → k.gIsLoad = true ∧ k.gFlow = g ∧ k.fsRom = some g)
+  t ≤ k.loadGen ∧ (t = k.loadGen → k.gIsLoad = true ∧ k.gFlow = g)
 
 /-- An unload holding the current token: its game is still current, or it
 has already detached it. -/
@@ -745,22 +518,20 @@ def UnloadClaim (k : K) (g : G) (t : Nat) : Prop :=
 def AfterOK (k : K) : After → Prop
   | .none => True
   | .l3 g t => LoadClaim k g t
-  | .u3 _ _ => False
 
 def PendOK (k : K) : Pend → Prop
-  | .launchW g t => t ≤ k.loadGen ∧ (t = k.loadGen → k.gIsLoad = true ∧ k.gFlow = g)
+  | .launchW g t => LoadClaim k g t
   | .launchL g t => LoadClaim k g t
   | .l1 g t => LoadClaim k g t
   | .l2 g t => LoadClaim k g t
   | .l3 g t => LoadClaim k g t
-  | .l4 g t v => SavOK g v ∧ LoadClaim k g t ∧ (t = k.loadGen → k.loading = some g)
+  | .l4 g t v => SavOK g v ∧ LoadClaim k g t ∧ (t = k.loadGen → k.loading = some g ∨ k.cur = some g)
   | .l5 _ _ => True
   | .offer1 n a => ∀ a', a = some a' → SnapOK n a'
   | .offer2 n a _ => SnapOK n a
   | .res1 n a _ => SnapOK n a
   | .u1 g t => UnloadClaim k g t
   | .u2 g t => UnloadClaim k g t
-  | .u3 _ _ => False
   | .psDone _ _ a => AfterOK k a
   | .pullW g d => d.owner = g
 
@@ -773,12 +544,11 @@ structure Inv (s : St) : Prop where
   toasts : ∀ x ∈ s.toasts, SnapOK x.1 x.2
   pend : ∀ p ∈ s.pend, PendOK s.kv p
 
-/-! #### Shapes of the shared segments -/
+/-! ### Shapes of the shared segments -/
 
 def afterList : After → List Pend
   | .none => []
   | .l3 g t => [.l3 g t]
-  | .u3 g t => [.u3 g t]
 
 theorem pushAfter_eq (s : St) (a : After) :
     pushAfter s a = { s with pend := s.pend ++ afterList a } := by
@@ -825,7 +595,7 @@ theorem persistAuto_shape (s : St) :
     · exact .inl ha
   · exact ⟨s.auto, rfl, fun h a ha => .inl ha⟩
 
-/-! #### Invariant lemmas for the shared segments -/
+/-! ### Invariant lemmas for the shared segments -/
 
 theorem snap_of_capture {s : St} (hI : Inv s) {h : G} {a : Snap} (hc : s.cur = some h)
     (hr : s.core = some a.rom) (hram : a.ram = s.coreRam) (hsig : a.sig = s.fsSav) :
@@ -874,7 +644,7 @@ theorem inv_erase {s : St} (i : Nat) (hI : Inv s) : Inv { s with pend := s.pend.
   ⟨hI.save, hI.auto, hI.drive, hI.coh, hI.ui, hI.toasts,
    fun q hq => hI.pend q (List.mem_of_mem_eraseIdx hq)⟩
 
-/-! #### Transfer of the pending claims across a change of `kv` -/
+/-! ### Transfer of the pending claims across a change of `kv` -/
 
 theorem loadClaim_bump {k k' : K} {g : G} {t : Nat} (h : LoadClaim k g t)
     (hlt : k.loadGen < k'.loadGen) : LoadClaim k' g t :=
@@ -888,7 +658,7 @@ theorem unloadClaim_bump {k k' : K} {g : G} {t : Nat} (h : UnloadClaim k g t)
 theorem pendOK_bump {k k' : K} {q : Pend} (hq : PendOK k q) (hlt : k.loadGen < k'.loadGen) :
     PendOK k' q := by
   cases q with
-  | launchW g t => exact ⟨by have := hq.1; omega, fun h => absurd h (by have := hq.1; omega)⟩
+  | launchW g t => exact loadClaim_bump hq hlt
   | launchL g t => exact loadClaim_bump hq hlt
   | l1 g t => exact loadClaim_bump hq hlt
   | l2 g t => exact loadClaim_bump hq hlt
@@ -901,64 +671,47 @@ theorem pendOK_bump {k k' : K} {q : Pend} (hq : PendOK k q) (hlt : k.loadGen < k
   | res1 => exact hq
   | u1 g t => exact unloadClaim_bump hq hlt
   | u2 g t => exact unloadClaim_bump hq hlt
-  | u3 => exact hq.elim
   | psDone g d a =>
     cases a with
     | none => trivial
     | l3 g t => exact loadClaim_bump hq hlt
-    | u3 => exact hq.elim
   | pullW => exact hq
-
-/-- The current load writes FS rom.<ext>: its own game, which is what every
-current load claims. -/
-theorem pendOK_fsRom {k : K} {g : G} {q : Pend} (hq : PendOK k q)
-    (hf : k.gIsLoad = true ∧ k.gFlow = g) : PendOK { k with fsRom := some g } q := by
-  have lc : ∀ g' t, LoadClaim k g' t → LoadClaim { k with fsRom := some g } g' t :=
-    fun g' t h => ⟨h.1, fun ht => by
-      obtain ⟨h1, h2, _⟩ := h.2 ht
-      exact ⟨h1, h2, by simp only; rw [← h2, hf.2]⟩⟩
-  cases q with
-  | launchL g' t => exact lc g' t hq
-  | l1 g' t => exact lc g' t hq
-  | l2 g' t => exact lc g' t hq
-  | l3 g' t => exact lc g' t hq
-  | l4 g' t v => exact ⟨hq.1, lc g' t hq.2.1, hq.2.2⟩
-  | psDone g' d a =>
-    cases a with
-    | l3 g'' t => exact lc g'' t hq
-    | _ => exact hq
-  | _ => exact hq
 
 /-- The current load names its game in `loading`. -/
 theorem pendOK_loading {k : K} {g : G} {q : Pend} (hq : PendOK k q)
     (hf : k.gIsLoad = true ∧ k.gFlow = g) : PendOK { k with loading := some g } q := by
   cases q with
   | l4 g' t v =>
-    refine ⟨hq.1, hq.2.1, fun ht => ?_⟩
-    obtain ⟨_, h2, _⟩ := hq.2.1.2 ht
+    refine ⟨hq.1, hq.2.1, fun ht => .inl ?_⟩
+    obtain ⟨_, h2⟩ := hq.2.1.2 ht
     simp only; rw [← h2, hf.2]
   | _ => exact hq
 
-/-- The current load's L4: a current unload cannot exist beside it. -/
+/-- The current load's boot: a current unload cannot exist beside it, and
+every current load claim is about the game it names. -/
 theorem pendOK_l4 {k : K} {g : G} {v : Option Sav} {q : Pend} (hq : PendOK k q)
-    (hl : k.gIsLoad = true) :
-    PendOK { k with cur := some g, fsSav := v, paused := false } q := by
+    (hl : k.gIsLoad = true) (hf : k.gFlow = g) :
+    PendOK { k with cur := some g, fsSav := v, paused := false, loading := none } q := by
   have uc : ∀ g' t, UnloadClaim k g' t →
-      UnloadClaim { k with cur := some g, fsSav := v, paused := false } g' t :=
+      UnloadClaim { k with cur := some g, fsSav := v, paused := false, loading := none } g' t :=
     fun g' t h => ⟨h.1, fun ht => by
       have := (h.2 ht).1
       rw [hl] at this
       exact absurd this (by decide)⟩
   cases q with
+  | l4 g' t v' =>
+    refine ⟨hq.1, hq.2.1, fun ht => .inr ?_⟩
+    obtain ⟨_, h2⟩ := hq.2.1.2 ht
+    simp only; rw [← h2, hf]
   | u1 g' t => exact uc g' t hq
   | u2 g' t => exact uc g' t hq
   | _ => exact hq
 
 /-- The current unload's detach: a current load cannot exist beside it. -/
 theorem pendOK_u2 {k : K} {q : Pend} (hq : PendOK k q) (hl : k.gIsLoad = false) :
-    PendOK { k with cur := none, fsSav := none, paused := true, loading := none } q := by
+    PendOK { k with cur := none, fsSav := none, paused := true } q := by
   have uc : ∀ g' t, UnloadClaim k g' t →
-      UnloadClaim { k with cur := none, fsSav := none, paused := true, loading := none } g' t :=
+      UnloadClaim { k with cur := none, fsSav := none, paused := true } g' t :=
     fun g' t h => ⟨h.1, fun ht => by
       obtain ⟨h1, h2, _⟩ := h.2 ht
       exact ⟨h1, h2, .inr ⟨rfl, rfl, rfl⟩⟩⟩
@@ -1015,15 +768,11 @@ theorem pendOK_unpause {k : K} {q : Pend} (hq : PendOK k q) (hc : k.cur.isSome =
   | u2 g' t => exact uc g' t hq
   | _ => exact hq
 
-/-! #### Preservation -/
+/-! ### Preservation -/
 
 theorem persistAuto_kv (s : St) : (persistAuto s).kv = s.kv := by
   obtain ⟨A, heq, _⟩ := persistAuto_shape s
   rw [heq]; rfl
-
-theorem persistAuto_cur (s : St) : (persistAuto s).cur = s.cur := by
-  obtain ⟨A, heq, _⟩ := persistAuto_shape s
-  rw [heq]
 
 theorem savOK_cur {s : St} (hI : Inv s) {g : G} (hc : s.cur = some g) : SavOK g s.fsSav :=
   (hI.coh g hc).2.2
@@ -1040,44 +789,39 @@ theorem inv_resumeGame {s : St} (hI : Inv s) : Inv (resumeGame s) := by
       hI.toasts, fun q hq => pendOK_unpause (hI.pend q hq) hc⟩
   · exact hI
 
-theorem inv_l3SegF {s : St} {g : G} {t : Nat} (hI : Inv s) (hp : LoadClaim s.kv g t)
-    (ht : t = s.loadGen) : Inv (l3SegF s g t) := by
-  obtain ⟨hl, hf, _⟩ := hp.2 ht
+theorem inv_l3Seg {s : St} {g : G} {t : Nat} (hI : Inv s) (hp : LoadClaim s.kv g t)
+    (ht : t = s.loadGen) : Inv (l3Seg s g t) := by
+  obtain ⟨hl, hf⟩ := hp.2 ht
   have h1 : Inv { s with loading := some g } :=
     ⟨hI.save, hI.auto, hI.drive, hI.coh, hI.ui, hI.toasts,
      fun q hq => pendOK_loading (hI.pend q hq) ⟨hl, hf⟩⟩
-  exact inv_push h1 ⟨fun d hd => hI.save g d hd, hp, fun _ => rfl⟩
+  exact inv_push h1 ⟨fun d hd => hI.save g d hd, hp, fun _ => .inl rfl⟩
 
-theorem inv_fireF {s : St} {p : Pend} (hI : Inv s) (hp : PendOK s.kv p) : Inv (fireF s p) := by
+theorem inv_fire {s : St} {p : Pend} (hI : Inv s) (hp : PendOK s.kv p) : Inv (fire s p) := by
   cases p with
   | launchW g t =>
-    simp only [fireF]
+    simp only [fire]
     split
-    · rename_i ht
-      obtain ⟨hl, hf⟩ := hp.2 ht
-      have h1 : Inv { s with fsRom := some g } :=
-        ⟨hI.save, hI.auto, hI.drive, hI.coh, hI.ui, hI.toasts,
-         fun q hq => pendOK_fsRom (hI.pend q hq) ⟨hl, hf⟩⟩
-      exact inv_push h1 ⟨by simp [St.kv, ht], fun _ => ⟨hl, hf, rfl⟩⟩
+    · exact inv_push hI hp
     · exact hI
   | launchL g t =>
-    simp only [fireF]
+    simp only [fire]
     split
     · rename_i ht
-      unfold loadStartF
+      unfold loadStart
       split
       · have h1 := inv_persistAuto hI
         refine inv_push h1 ?_
         rw [persistAuto_kv]; exact hp
-      · exact inv_l3SegF hI hp ht
+      · exact inv_l3Seg hI hp ht
     · exact hI
   | l1 g t =>
-    simp only [fireF]
+    simp only [fire]
     split
     · exact inv_push hI hp
     · exact hI
   | l2 g t =>
-    simp only [fireF]
+    simp only [fire]
     split
     · split
       · exact hI
@@ -1085,39 +829,42 @@ theorem inv_fireF {s : St} {p : Pend} (hI : Inv s) (hp : PendOK s.kv p) : Inv (f
         exact inv_persistSave hI (savOK_cur hI hc) hp
     · exact hI
   | l3 g t =>
-    simp only [fireF]
+    simp only [fire]
     split
-    · rename_i ht; exact inv_l3SegF hI hp ht
+    · rename_i ht; exact inv_l3Seg hI hp ht
     · exact hI
   | l4 g t v =>
-    simp only [fireF]
+    simp only [fire]
     split
     · rename_i ht
       obtain ⟨hv, hlc, _⟩ := hp
-      obtain ⟨hl, _, hrom⟩ := hlc.2 ht
-      unfold l4SegF
+      obtain ⟨hl, hf⟩ := hlc.2 ht
+      unfold l4Seg
       refine inv_push ⟨hI.save, hI.auto, hI.drive, ?_, ?_, hI.toasts, ?_⟩ trivial
       · intro g' hg'
         simp only [Option.some.injEq] at hg'
         subst hg'
-        exact ⟨hrom, rfl, hv⟩
+        exact ⟨rfl, rfl, hv⟩
       · exact ⟨by simp, fun _ => rfl, fun _ _ h => by simp at h⟩
-      · exact fun q hq => pendOK_l4 (hI.pend q hq) hl
+      · exact fun q hq => pendOK_l4 (hI.pend q hq) hl hf
     · exact hI
-  | l5 =>
-    simp only [fireF, offerStart]
+  | l5 g t =>
+    simp only [fire]
     split
+    · simp only [offerStart]
+      split
+      · exact hI
+      · exact inv_push hI (fun a' ha' => hI.auto _ a' ha')
     · exact hI
-    · exact inv_push hI (fun a' ha' => hI.auto _ a' ha')
   | offer1 n a =>
-    simp only [fireF]
+    simp only [fire]
     split
     · exact hI
     · split
       · exact inv_push hI (hp _ rfl)
       · exact hI
   | offer2 n a v =>
-    simp only [fireF]
+    simp only [fire]
     split
     · refine ⟨hI.save, hI.auto, hI.drive, hI.coh, hI.ui, ?_, hI.pend⟩
       intro x hx
@@ -1127,7 +874,7 @@ theorem inv_fireF {s : St} {p : Pend} (hI : Inv s) (hp : PendOK s.kv p) : Inv (f
       · exact hp
     · exact hI
   | res1 n a v =>
-    simp only [fireF]
+    simp only [fire]
     split
     · rename_i h
       obtain ⟨_, hc, hsig⟩ := h
@@ -1143,12 +890,12 @@ theorem inv_fireF {s : St} {p : Pend} (hI : Inv s) (hp : PendOK s.kv p) : Inv (f
       · exact hI
     · exact hI
   | u1 g t =>
-    simp only [fireF]
+    simp only [fire]
     split
     · exact inv_push hI hp
     · exact hI
   | u2 g t =>
-    simp only [fireF]
+    simp only [fire]
     split
     · rename_i ht
       obtain ⟨hl, _, hcur⟩ := hp.2 ht
@@ -1156,7 +903,7 @@ theorem inv_fireF {s : St} {p : Pend} (hI : Inv s) (hp : PendOK s.kv p) : Inv (f
         rcases hcur with hc | ⟨_, hn, _⟩
         · exact savOK_cur hI hc
         · intro d hd; change s.fsSav = none at hn; rw [hn] at hd; exact absurd hd (by simp)
-      unfold u2SegF
+      unfold u2Seg
       obtain ⟨I, P, heq, hIdb, hP⟩ := persistSave_shape { s with cur := none } g .none
       rw [heq]
       refine ⟨?_, hI.auto, hI.drive, fun _ h => absurd h (by simp), ?_, hI.toasts, ?_⟩
@@ -1173,9 +920,8 @@ theorem inv_fireF {s : St} {p : Pend} (hI : Inv s) (hp : PendOK s.kv p) : Inv (f
           · trivial
           · simp [afterList] at hq'
     · exact hI
-  | u3 => exact hp.elim
   | psDone g d a =>
-    simp only [fireF]
+    simp only [fire]
     rw [pushAfter_eq]
     refine ⟨hI.save, hI.auto, hI.drive, hI.coh, hI.ui, hI.toasts, ?_⟩
     intro q hq
@@ -1185,9 +931,8 @@ theorem inv_fireF {s : St} {p : Pend} (hI : Inv s) (hp : PendOK s.kv p) : Inv (f
     · cases a with
       | none => simp [afterList] at hq
       | l3 g t => simp [afterList] at hq; subst hq; exact hp
-      | u3 => exact hp.elim
   | pullW g d =>
-    simp only [fireF]
+    simp only [fire]
     split
     · exact hI
     · unfold pullWrite
@@ -1200,10 +945,10 @@ theorem inv_fireF {s : St} {p : Pend} (hI : Inv s) (hp : PendOK s.kv p) : Inv (f
         · exact hI.save h d' hd'
       · exact hI
 
-theorem inv_stepF {s : St} (e : Ev) (hI : Inv s) : Inv (stepF s e) := by
+theorem inv_step {s : St} (e : Ev) (hI : Inv s) : Inv (step s e) := by
   cases e with
   | tap g =>
-    simp only [stepF]
+    simp only [step]
     split
     · exact hI
     · split
@@ -1212,7 +957,7 @@ theorem inv_stepF {s : St} (e : Ev) (hI : Inv s) : Inv (stepF s e) := by
   | openFile g =>
     exact inv_push (inv_bump hI g true) ⟨by simp [bump, St.kv], fun _ => ⟨rfl, rfl⟩⟩
   | goHome =>
-    simp only [stepF, goHome]
+    simp only [step, goHome]
     split
     · exact hI
     · rename_i c hc
@@ -1224,12 +969,12 @@ theorem inv_stepF {s : St} (e : Ev) (hI : Inv s) : Inv (stepF s e) := by
       · simp only [Option.some.injEq] at hc'; subst hc'; exact hc
       · exact absurd hc' (by simp)
   | resume =>
-    simp only [stepF]
+    simp only [step]
     split
     · exact hI
     · exact inv_resumeGame hI
   | closeCard =>
-    simp only [stepF]
+    simp only [step]
     split
     · exact hI
     · split
@@ -1239,12 +984,12 @@ theorem inv_stepF {s : St} (e : Ev) (hI : Inv s) : Inv (stepF s e) := by
         rw [persistAuto_kv]
         exact ⟨by simp [bump, St.kv], fun _ => ⟨rfl, rfl, .inl hg⟩⟩
   | frame =>
-    simp only [stepF, frame]
+    simp only [step, frame]
     split
     · exact ⟨hI.save, hI.auto, hI.drive, hI.coh, hI.ui, hI.toasts, hI.pend⟩
     · exact hI
   | gameSave =>
-    simp only [stepF, gameSave]
+    simp only [step, gameSave]
     split
     · rename_i r hp hr
       refine ⟨hI.save, hI.auto, hI.drive, ?_, hI.ui, hI.toasts,
@@ -1257,19 +1002,19 @@ theorem inv_stepF {s : St} (e : Ev) (hI : Inv s) : Inv (stepF s e) := by
       exact ⟨hr, rfl, fun d hd => by simp only [Option.some.injEq] at hd; subst hd; rfl⟩
     · exact hI
   | tick =>
-    simp only [stepF, tick]
+    simp only [step, tick]
     split
     · rename_i g hg; exact inv_persistSave hI (savOK_cur hI hg) trivial
     · exact hI
   | hide => exact inv_persistAuto hI
   | pagehide =>
-    simp only [stepF, pagehide]
+    simp only [step, pagehide]
     split
     · rename_i g hg
       exact inv_persistAuto (inv_persistSave hI (savOK_cur hI hg) trivial)
     · exact hI
   | toastTap i =>
-    simp only [stepF, toastTap]
+    simp only [step, toastTap]
     split
     · exact hI
     · rename_i n a hx
@@ -1283,12 +1028,12 @@ theorem inv_stepF {s : St} (e : Ev) (hI : Inv s) : Inv (stepF s e) := by
   | remoteSave g =>
     refine ⟨hI.save, hI.auto, ?_, hI.coh, hI.ui, hI.toasts, hI.pend⟩
     intro h d hd
-    simp only [stepF, remoteSave, upd] at hd
+    simp only [step, remoteSave, upd] at hd
     split at hd
     · subst_vars; simp only [Option.some.injEq] at hd; subst hd; rfl
     · exact hI.drive h d hd
   | pullCheck g =>
-    simp only [stepF]
+    simp only [step]
     split
     · rename_i d hd
       split
@@ -1296,7 +1041,7 @@ theorem inv_stepF {s : St} (e : Ev) (hI : Inv s) : Inv (stepF s e) := by
       · exact hI
     · exact hI
   | upload g =>
-    simp only [stepF, upload]
+    simp only [step, upload]
     split
     · split
       · rename_i d hd
@@ -1311,16 +1056,16 @@ theorem inv_stepF {s : St} (e : Ev) (hI : Inv s) : Inv (stepF s e) := by
       · exact ⟨hI.save, hI.auto, hI.drive, hI.coh, hI.ui, hI.toasts, hI.pend⟩
     · exact hI
   | reload =>
-    refine ⟨hI.save, hI.auto, hI.drive, fun _ h => absurd h (by simp [stepF, reload, init]),
-      ?_, fun _ h => absurd h (by simp [stepF, reload, init]),
-      fun _ h => absurd h (by simp [stepF, reload, init])⟩
-    simp [UIAgree, stepF, reload, init]
+    refine ⟨hI.save, hI.auto, hI.drive, fun _ h => absurd h (by simp [step, reload, init]),
+      ?_, fun _ h => absurd h (by simp [step, reload, init]),
+      fun _ h => absurd h (by simp [step, reload, init])⟩
+    simp [UIAgree, step, reload, init]
   | fire i =>
-    simp only [stepF]
+    simp only [step]
     split
     · exact hI
     · rename_i p hp
-      exact inv_fireF (inv_erase i hI) (hI.pend p (List.mem_of_getElem? hp))
+      exact inv_fire (inv_erase i hI) (hI.pend p (List.mem_of_getElem? hp))
 
 theorem inv_init : Inv init :=
   ⟨fun _ _ h => absurd h (by simp [init]), fun _ _ h => absurd h (by simp [init]),
@@ -1328,34 +1073,34 @@ theorem inv_init : Inv init :=
    by simp [UIAgree, init], fun _ h => absurd h (by simp [init]),
    fun _ h => absurd h (by simp [init])⟩
 
-theorem reachableF_inv {s : St} (h : ReachableF s) : Inv s := by
+theorem reachable_inv {s : St} (h : Reachable s) : Inv s := by
   induction h with
   | init => exact inv_init
-  | step e _ ih => exact inv_stepF e ih
+  | step e _ ih => exact inv_step e ih
 
-/-! ### What the fixed code keeps, under every interleaving -/
+/-! ## What the code keeps, under every interleaving -/
 
 /-- No `save:<g>` ever holds another game's battery. -/
-theorem fixed_save_owner {s : St} (h : ReachableF s) : SaveOwner s := (reachableF_inv h).save
+theorem save_owner {s : St} (h : Reachable s) : SaveOwner s := (reachable_inv h).save
 
 /-- No `stateauto:<g>` is ever a state of another game, or carries RAM other
 than the battery its signature names. -/
-theorem fixed_auto_owner {s : St} (h : ReachableF s) : AutoOwner s := (reachableF_inv h).auto
+theorem auto_owner {s : St} (h : Reachable s) : AutoOwner s := (reachable_inv h).auto
 
 /-- The named game is the game in the core, running on its own battery. -/
-theorem fixed_cur_coherent {s : St} (h : ReachableF s) : CurCoherent s := (reachableF_inv h).coh
+theorem cur_coherent {s : St} (h : Reachable s) : CurCoherent s := (reachable_inv h).coh
 
 /-- body.has-game, body.running and the visible paused card agree with it. -/
-theorem fixed_ui_agree {s : St} (h : ReachableF s) : UIAgree s := (reachableF_inv h).ui
+theorem ui_agree {s : St} (h : Reachable s) : UIAgree s := (reachable_inv h).ui
 
 /-- A Resume never changes the battery: it can only restore a snapshot whose
 RAM is the live save. -/
-theorem fixed_resume_keeps_battery {s : St} (h : ReachableF s) : ResumeKeepsBattery stepF s := by
+theorem resume_keeps_battery {s : St} (h : Reachable s) : ResumeKeepsBattery step s := by
   intro i n a v hi
-  have hI := reachableF_inv h
+  have hI := reachable_inv h
   have hp : SnapOK n a := hI.pend _ (List.mem_of_getElem? hi)
   obtain ⟨_, hram, _⟩ := hp
-  simp only [stepF, hi, fireF]
+  simp only [step, hi, fire]
   split
   · rename_i hc
     obtain ⟨_, _, hsig⟩ := hc
@@ -1368,60 +1113,169 @@ theorem fixed_resume_keeps_battery {s : St} (h : ReachableF s) : ResumeKeepsBatt
 
 /-- While the current load of `g` is between reading `save:g` and booting
 it, a Drive pull cannot write `save:g`. -/
-theorem fixed_pull_blocked_during_load {s : St} (h : ReachableF s) {g : G} {t : Nat}
+theorem pull_blocked_during_load {s : St} (h : Reachable s) {g : G} {t : Nat}
     {v : Option Sav} (hl : Pend.l4 g t v ∈ s.pend) (ht : t = s.loadGen) {i : Nat} {d : Sav}
-    (hi : s.pend[i]? = some (.pullW g d)) : (stepF s (.fire i)).idb g = s.idb g := by
-  have hload : s.loading = some g := ((reachableF_inv h).pend _ hl).2.2 ht
-  simp [stepF, hi, fireF, hload]
+    (hi : s.pend[i]? = some (.pullW g d)) : (step s (.fire i)).idb g = s.idb g := by
+  have hload : s.loading = some g ∨ s.cur = some g := ((reachable_inv h).pend _ hl).2.2 ht
+  rcases hload with hload | hload <;> simp [step, hi, fire, hload]
 
 def tokOf : Pend → Option Nat
-  | .launchW _ t | .launchL _ t | .l1 _ t | .l2 _ t | .l3 _ t | .l4 _ t _ | .u1 _ t | .u2 _ t => some t
+  | .launchW _ t | .launchL _ t | .l1 _ t | .l2 _ t | .l3 _ t | .l4 _ t _ | .l5 _ t
+  | .u1 _ t | .u2 _ t => some t
   | _ => none
 
 /-- A superseded load or close does nothing when it resumes. -/
-theorem fixed_stale_noop (s : St) (i : Nat) (p : Pend) (t : Nat) (hp : s.pend[i]? = some p)
+theorem stale_noop (s : St) (i : Nat) (p : Pend) (t : Nat) (hp : s.pend[i]? = some p)
     (ht : tokOf p = some t) (hne : t ≠ s.loadGen) :
-    stepF s (.fire i) = { s with pend := s.pend.eraseIdx i } := by
-  simp only [stepF, hp]
+    step s (.fire i) = { s with pend := s.pend.eraseIdx i } := by
+  simp only [step, hp]
   cases p <;> simp only [tokOf, Option.some.injEq, reduceCtorEq] at ht <;> subst ht <;>
-    simp [fireF, hne]
-
-def runF (s : St) (es : List Ev) : St := es.foldl stepF s
-
-theorem reachableF_runF (es : List Ev) : ∀ s, ReachableF s → ReachableF (runF s es) := by
-  induction es with
-  | nil => intro s h; exact h
-  | cons e es ih => intro s h; exact ih _ (ReachableF.step e h)
+    simp [fire, hne]
 
 /-- Whatever the user, the timers, the page and Drive do, in whatever order. -/
-theorem fixed_every_trace (es : List Ev) :
-    SaveOwner (runF init es) ∧ AutoOwner (runF init es) ∧ CurCoherent (runF init es) ∧
-    UIAgree (runF init es) := by
-  have h := reachableF_runF es init .init
-  exact ⟨fixed_save_owner h, fixed_auto_owner h, fixed_cur_coherent h, fixed_ui_agree h⟩
+theorem every_trace (es : List Ev) :
+    SaveOwner (run init es) ∧ AutoOwner (run init es) ∧ CurCoherent (run init es) ∧
+    UIAgree (run init es) := by
+  have h := reachable_run es init .init
+  exact ⟨save_owner h, auto_owner h, cur_coherent h, ui_agree h⟩
 
-/-! ### The fix is not vacuous: it still loads, switches and closes games -/
+/-! ## The code still loads, switches and closes games -/
 
-def bootF (g : G) : List Ev := [.openFile g, .fire 0, .fire 0, .fire 0, .fire 0, .fire 0]
+def boot (g : G) : List Ev := [.openFile g, .fire 0, .fire 0, .fire 0, .fire 0, .fire 0]
 
 /-- Opening a file loads it. -/
-example : (runF init (bootF .A)).cur = some .A ∧ (runF init (bootF .A)).core = some .A := by
+example : (run init (boot .A)).cur = some .A ∧ (run init (boot .A)).core = some .A := by
   decide
 
 /-- Double-tapping two tiles: the later tap wins, the earlier load is dropped,
 and B is never named or booted. -/
 example :
-    let s := runF init (bootF .A ++ [.gameSave, .goHome, .tap .B, .tap .C, .fire 0, .fire 0,
-                                      .fire 0, .fire 0, .fire 0, .fire 0, .fire 0, .fire 0])
+    let s := run init (boot .A ++ [.gameSave, .goHome, .tap .B, .tap .C, .fire 0, .fire 0,
+                                    .fire 0, .fire 0, .fire 0, .fire 0, .fire 0, .fire 0])
     s.cur = some .C ∧ s.core = some .C ∧ s.fsSav = none ∧ s.pend = [.l5 .C 3] := by
   decide
 
 /-- Closing the paused game while a tile's load is in flight: the close
 supersedes the load, and A's save is A's. -/
 example :
-    let s := runF init (bootF .A ++ [.gameSave, .goHome, .tap .B, .fire 0, .fire 0, .closeCard,
-                                      .fire 0, .fire 0, .fire 0, .fire 0, .fire 0])
+    let s := run init (boot .A ++ [.gameSave, .goHome, .tap .B, .fire 0, .fire 0, .closeCard,
+                                    .fire 0, .fire 0, .fire 0, .fire 0, .fire 0])
     s.cur = none ∧ s.idb .A = some ⟨.A, 0⟩ ∧ s.hasGame = false := by
   decide
+
+/-! ## The dd7ba741f counterexamples, replayed against the code
+
+Each trace below reached a bad state at dd7ba741f (its comment says how). Run
+through `step`, the same events end in a good state: `every_trace` covers the
+properties, and each theorem pins what now happens instead. -/
+
+def playA : List Ev := boot .A ++ [.gameSave, .tick, .fire 0]
+def abHome : List Ev :=
+  boot .B ++ [.gameSave, .tick, .fire 0, .goHome, .closeCard, .fire 0, .fire 0, .fire 0] ++
+  boot .A ++ [.gameSave, .tick, .fire 0, .goHome]
+def sessionA : List Ev := playA ++ [.hide, .reload]
+
+/-- Play A (it saves), go home, tap B, which has never saved. At dd7ba741f
+`restoreSave` returned without touching FS `rom.sav`, B booted on A's battery,
+and the next 5 s autosave wrote A's bytes to `save:B`. Now B boots with no
+battery file, and `save:B` stays empty. -/
+def trStaleSav : List Ev :=
+  playA ++ [.goHome, .tap .B, .fire 0, .fire 0, .fire 0, .fire 0, .fire 0, .fire 0, .fire 0,
+            .fire 0, .tick]
+
+theorem regress_stale_sav_inherited :
+    let s := run init trStaleSav
+    s.cur = some .B ∧ s.core = some .B ∧ s.fsSav = none ∧ s.idb .B = none ∧
+      s.idb .A = some ⟨.A, 0⟩ ∧ SaveOwner s :=
+  ⟨by decide, by decide, by decide, by decide, by decide, (every_trace _).1⟩
+
+/-- Close the paused game while another tile's load is in flight. At
+dd7ba741f the load's L3 named B and put B's save in `rom.sav` before the
+close's flush read it into `save:A`. The close now supersedes the load: A is
+closed with its own save, and B never boots. -/
+def trUnloadRace : List Ev :=
+  abHome ++ [.tap .B, .fire 0, .fire 0, .closeCard, .fire 0, .fire 0, .fire 0, .fire 1, .fire 1,
+             .fire 0]
+
+theorem regress_unload_race_writes_incoming_save :
+    let s := run init trUnloadRace
+    s.cur = none ∧ s.idb .A = some ⟨.A, 1⟩ ∧ s.idb .B = some ⟨.B, 0⟩ ∧ SaveOwner s :=
+  ⟨by decide, by decide, by decide, (every_trace _).1⟩
+
+/-- Double-tap two tiles. At dd7ba741f both launches wrote the one FS file
+`rom.gba`, B booted C's ROM under B's name, and C's load then snapshotted it
+as B's resume point. Now C's tap supersedes B's load: C boots under its own
+name, and `stateauto:B` is untouched. -/
+def trDoubleTapTwo : List Ev :=
+  abHome ++ [.tap .B, .tap .C, .fire 0, .fire 0, .fire 0, .fire 1, .fire 1, .fire 1, .fire 1]
+
+theorem regress_double_tap_boots_wrong_rom :
+    let s := run init (trDoubleTapTwo ++ [.fire 0, .fire 0, .fire 0, .fire 0, .fire 0])
+    s.cur = some .C ∧ s.core = some .C ∧ CurCoherent s :=
+  ⟨by decide, by decide, (every_trace _).2.2.1⟩
+
+theorem regress_double_tap_resume_point_of_other_rom :
+    (run init (trDoubleTapTwo ++ [.fire 0])).auto .B =
+      some ⟨.B, some ⟨.B, 0⟩, some ⟨.B, 0⟩, false⟩ ∧
+    AutoOwner (run init (trDoubleTapTwo ++ [.fire 0])) :=
+  ⟨by decide, (every_trace _).2.1⟩
+
+/-- Double-tap the same tile from a fresh page, over a real resume point. At
+dd7ba741f the second load found A named (by the first's L3) and snapshotted
+the fresh boot over the real resume point. Now the second tap supersedes the
+first before it names anything, and the resume point survives. -/
+def trDoubleTapSame : List Ev :=
+  sessionA ++ [.tap .A, .tap .A, .fire 0, .fire 0, .fire 0, .fire 1, .fire 0]
+
+theorem regress_double_tap_overwrites_resume_point :
+    (run init sessionA).auto .A = some ⟨.A, some ⟨.A, 0⟩, some ⟨.A, 0⟩, false⟩ ∧
+    (run init (trDoubleTapSame ++ [.fire 0, .fire 0, .fire 0])).auto .A =
+      some ⟨.A, some ⟨.A, 0⟩, some ⟨.A, 0⟩, false⟩ ∧
+    (run init (trDoubleTapSame ++ [.fire 0, .fire 0, .fire 0])).cur = some .A := by
+  decide
+
+/-- The page going away between a load's L3 and its boot. At dd7ba741f L3
+had already named B while `rom.sav` still held A's battery: pagehide wrote
+A's battery to `save:B` and A's core state to `stateauto:B`. Now A is still
+named until the boot, so pagehide persists A under A. -/
+def trPagehideGap : List Ev :=
+  abHome ++ [.tap .B, .fire 0, .fire 0, .fire 0, .fire 0, .fire 0, .pagehide]
+
+theorem regress_pagehide_in_load_gap :
+    let s := run init trPagehideGap
+    s.cur = some .A ∧ s.idb .B = some ⟨.B, 0⟩ ∧ s.auto .B = some ⟨.B, some ⟨.B, 0⟩, some ⟨.B, 0⟩, false⟩ ∧
+      s.auto .A = some ⟨.A, some ⟨.A, 1⟩, some ⟨.A, 1⟩, false⟩ ∧ SaveOwner s ∧ AutoOwner s :=
+  ⟨by decide, by decide, by decide, by decide, (every_trace _).1, (every_trace _).2.1⟩
+
+/-- A Drive pull lands mid-load. At dd7ba741f the pull checked
+`isRomLoaded(A)` only before its download; the load booted version 0, the
+download wrote version 1, the first autosave wrote version 0 back and the
+upload replaced Drive's version 1. Now the pull re-checks after the download
+and skips the loaded game, and the boot remembers the signature it
+installed, so the first autosave writes nothing: Drive keeps version 1. -/
+def trPullRace : List Ev :=
+  playA ++ [.upload .A, .reload, .remoteSave .A, .pullCheck .A, .tap .A, .fire 1, .fire 1, .fire 1,
+            .fire 0, .tick, .fire 1, .upload .A]
+
+theorem regress_pull_mid_load_loses_remote_save :
+    (run init (playA ++ [.upload .A, .reload, .remoteSave .A])).drive .A = some ⟨.A, 1⟩ ∧
+    (run init trPullRace).drive .A = some ⟨.A, 1⟩ ∧
+    (run init trPullRace).idb .A = some ⟨.A, 0⟩ ∧
+    (run init trPullRace).dirty .A = false := by
+  decide
+
+/-- Resume after an unflushed in-game save. At dd7ba741f the tap's check
+compared the snapshot with IndexedDB `save:A`, which lags the live battery by
+up to one autosave, and restored version 0 over version 1. The check now also
+reads FS rom.sav, and refuses. -/
+def trResumeUnflushed : List Ev :=
+  sessionA ++ [.tap .A, .fire 0, .fire 0, .fire 0, .fire 0, .fire 0, .fire 0, .gameSave,
+               .toastTap 0]
+
+theorem regress_resume_restores_older_battery :
+    (run init trResumeUnflushed).fsSav = some ⟨.A, 1⟩ ∧
+    (step (run init trResumeUnflushed) (.fire 0)).fsSav = some ⟨.A, 1⟩ ∧
+    ResumeKeepsBattery step (run init trResumeUnflushed) :=
+  ⟨by decide, by decide, resume_keeps_battery (reachable_run _ _ .init)⟩
 
 end WebState.GameLifecycle

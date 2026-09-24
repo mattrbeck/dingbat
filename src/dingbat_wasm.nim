@@ -1703,8 +1703,11 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
   stateNet = nil  # JS closes the channel
   netOut.setLen(0)
   netErrorMsg.setLen(0)
-  if stateGb != nil:
-    stateGb.cartridge.mbc_save()
+  # No flush of the outgoing GB core here. Every solo game's battery file is
+  # the one `rom.sav`, and by now JS has persisted the outgoing game and
+  # written the incoming game's save to that file: a flush would put the old
+  # cart's RAM under the new game, and the first autosave would make it that
+  # game's save.
   let path = $rom_path
   let ext = path.splitFile().ext.toLowerAscii()
   if stateTexture != nil:

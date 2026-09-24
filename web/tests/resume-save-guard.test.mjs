@@ -84,8 +84,11 @@ test("tapping Resume after the game has saved restores nothing", async () => {
   const pill = offer(app);
   assert.ok(pill);
 
-  app.idb.set("save:A.gbc", u8(4, 5, 6)); // saved while the toast was up
-  pill.children.find((c) => c.tagName === "BUTTON").click();
+  // saved while the toast was up, and already flushed (the FS .sav is left as
+  // the snapshot's, so only the stored save can refuse it)
+  app.sandbox.FS.files.set("rom.sav", u8(1, 2, 3));
+  app.idb.set("save:A.gbc", u8(4, 5, 6));
+  pill.onclick(); // the whole pill is the tap target (pushToast)
   await settle(); await settle();
   assert.equal(app.runIn("__loads"), 0, "the stale state was not applied");
 });

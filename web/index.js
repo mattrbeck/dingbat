@@ -1591,11 +1591,13 @@ const resetCurrentSaveFile = async () => {
 // Detach the loaded game ahead of deleting its stored save: drop its FS .sav
 // and null its names, so no flush path can write the in-memory save back -
 // neither the 5 s autosave landing between the deletes nor loadRom's
-// "persist the outgoing game" step at the reboot. Returns the names to
+// "persist the outgoing game" step at the reboot. It also takes the load
+// token, so no load or close in flight finishes on it. Returns the names to
 // reboot under (loadRom), or null when no game is loaded.
 const detachLoadedGame = () => {
   if (!currentRomName || !currentOriginalName) return null;
   const game = { romName: currentRomName, originalName: currentOriginalName };
+  nextLoadGen();
   try { FS.unlink(stripExt(game.romName) + ".sav"); } catch {}
   currentRomName = null;
   currentOriginalName = null;
@@ -3025,9 +3027,15 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       } else if (!(await hasLocalRom(p.game))) {
         continue;                                  // Drive-only: pull on demand
       }
-      if (isRomLoaded(p.game)) continue;           // don't fight the autosave
+      // Don't fight the autosave: not for the game being played, nor for the
+      // one being loaded (loadingName), which will run on the save it read.
+      if (isRomLoaded(p.game) || loadingName === p.game) continue;
       if (syncState.rmt[name] === f.modifiedTime) continue; // unchanged remotely
       let bytes = await driveDownload(f.id);
+      // Again, in the run that writes: a tap during the download has booted
+      // the game on the older save, and its first flush would write that
+      // back over this one and upload it over the other device's.
+      if (isRomLoaded(p.game) || loadingName === p.game) continue;
       let sig = sigOfBytes(bytes);
       if (sig !== syncState.sigs[name]) {
         await writeSyncBytes(name, bytes);
@@ -4513,18 +4521,20 @@ const touchRecent = async (name) => {
 };
 
 const launchRom = async (name) => {
+  const gen = nextLoadGen(); // a later tap supersedes this one (loadGen)
   // The grid renders before the wasm runtime is up; wait here.
   await ensureRuntimeReady();
+  if (gen !== loadGen) return;
   let data = await getRomBytes(name);
+  if (gen !== loadGen) return;
   if (!data) {
     showToast("This game's ROM is no longer stored — load the file again");
     return;
   }
-  let ext = name.substring(name.lastIndexOf(".")).toLowerCase();
-  let romFile = "rom" + ext;
-  writeToFS(romFile, data);
   await touchRecent(name);
-  loadRom(romFile, name);
+  if (gen !== loadGen) return;
+  let ext = name.substring(name.lastIndexOf(".")).toLowerCase();
+  loadRom("rom" + ext, name, { gen, rom: data });
 };
 
 // Home-screen recent grid: the game library.
@@ -5306,11 +5316,23 @@ const persistSave = async (romName, originalName) => {
   } catch {}
 };
 
-const restoreSave = async (romName, originalName) => {
-  let data = await dbGet("save:" + originalName);
-  if (!data) return;
+// Put a game's stored battery save in its FS file, right before the core is
+// built on it, or remove the file when the game has none: every solo game is
+// "rom.<ext>", so a file left behind is the last game's battery, which the
+// core would boot on and the next flush would store as this game's save. The
+// signature is remembered as written, so the first flush does not write the
+// save it was just read from back (and queue it for Drive, over whatever
+// newer copy another device put there meanwhile).
+const installSave = (romName, originalName, data) => {
   let savName = romName.substring(0, romName.lastIndexOf(".")) + ".sav";
-  writeToFS(savName, data);
+  if (data && data.length) writeToFS(savName, data);
+  else try { FS.unlink(savName); } catch {}
+  lastSaveSig = data && data.length ? saveSignature(data) : null;
+  lastSaveSigKey = lastSaveSig === null ? null : originalName;
+};
+
+const restoreSave = async (romName, originalName) => {
+  installSave(romName, originalName, await dbGet("save:" + originalName));
 };
 
 document.getElementById("export-save").addEventListener("click", async () => {
@@ -5685,10 +5707,17 @@ const persistAutoState = () => {
   if (linkMode || rollbackMode || netActive()) return; // frame-synced modes
   const bytes = captureStateBytes();
   if (!bytes) return;
+  return dbPut(autoStateKey(currentOriginalName),
+               { bytes, ts: Date.now(), saveSig: liveSaveSig() }).catch(() => {});
+};
+
+// The loaded game's battery as it is now: its FS .sav, which the core writes
+// the moment the game saves and save:<name> catches up with only at the next
+// flush (up to 5 s later).
+const liveSaveSig = () => {
   let sav = null;
   try { sav = FS.readFile(stripExt(currentRomName) + ".sav"); } catch {}
-  return dbPut(autoStateKey(currentOriginalName),
-               { bytes, ts: Date.now(), saveSig: sigOfSave(sav) }).catch(() => {});
+  return sigOfSave(sav);
 };
 
 // Snapshots from before saveSig have no proof either way and are not offered.
@@ -5718,8 +5747,11 @@ const offerAutoResume = async () => {
   if (name !== currentOriginalName) return;
   showActionToast("Last session saved " + fmtAgo(auto.ts), "Resume", async () => {
     if (currentOriginalName !== name) return; // switched games since
-    // The toast outlives the check above; the game may have saved since.
-    if (!(await autoStateMatchesSave(name, auto)) || currentOriginalName !== name) {
+    // The toast outlives the check above; the game may have saved since -
+    // in save:<name>, or only in its FS .sav so far (the live battery is
+    // read in the same run as the apply, after the await).
+    if (!(await autoStateMatchesSave(name, auto)) || currentOriginalName !== name ||
+        auto.saveSig !== liveSaveSig()) {
       showToast("The game has saved since — that session is gone");
       return;
     }
@@ -7804,6 +7836,21 @@ kbPreset.addEventListener("change", () => {
 
 var currentRomName = null;
 var currentOriginalName = null;
+// The load/close token. A tile tap, a file open, a reset, an import and a
+// close each take the next number synchronously, and every continuation of
+// that flow (launchRom, handleRomFile, loadRom, unloadGame) returns after an
+// await once a later one has taken it: two taps in a row boot the second
+// game, never one game's ROM under the other's name, and a close cannot
+// finish on a game a newer load swapped in under it.
+let loadGen = 0;
+// The game whose save loadRom has read and not yet booted. Until the boot it
+// is not named, but a Drive pull must leave its save alone all the same: the
+// game will run on what was read, and its first flush would write that back.
+let loadingName = null;
+const nextLoadGen = () => {
+  loadingName = null;
+  return ++loadGen;
+};
 var paused = false;
 var fastForward = false;
 var speed2x = false;
@@ -7918,7 +7965,15 @@ window.addEventListener("load", () =>
   }, 1500)
 );
 
+// `opts.rom`: the ROM's bytes, written to `romName` only at the boot (a caller
+// that writes it itself writes over the file the named game was built from,
+// before this load has won). `opts.gen`: the caller's load token, when it took
+// one at the tap; otherwise this call takes one.
 const loadRom = async (romName, originalName, opts = {}) => {
+  const gen = opts.gen ?? nextLoadGen();
+  // A later load or close has taken over, or a link session has started and
+  // owns the core.
+  const abandoned = () => gen !== loadGen || linkMode || rollbackMode || netActive();
   // A capture spanning a ROM switch would splice two games.
   if (typeof abortRetroClip === "function") abortRetroClip();
   if (typeof stopClipRecording === "function") stopClipRecording();
@@ -7927,16 +7982,34 @@ const loadRom = async (romName, originalName, opts = {}) => {
   // teardown persists the session's battery under currentOriginalName, so it
   // runs while that still names the session's game.
   if (typeof netShutdown === "function" && (netActive() || rollbackMode)) await netShutdown();
+  if (abandoned()) return;
   if (currentRomName && currentOriginalName) {
     await persistAutoState(); // where the outgoing game was left
+    if (abandoned()) return;
     await storeLastFrame({ force: true }); // the outgoing game's picture
+    if (abandoned()) return;
     await persistSave(currentRomName, currentOriginalName);
+    if (abandoned()) return;
   }
-  // A link session that started during the awaits owns the core now; naming
-  // another game under it would have its teardown persist into that game.
-  if (rollbackMode || netActive()) return;
+  // The outgoing game stays named, running on its own rom.sav, until the
+  // core is replaced below: every flush until then is still its own.
+  const name = originalName || romName;
+  loadingName = name;
+  const save = await dbGet("save:" + name);
+  if (abandoned()) {
+    if (gen === loadGen) loadingName = null; // a link session, not a later load
+    return;
+  }
+  // One synchronous run from here to the names: the ROM and its battery file
+  // go down, the core is built on them, and only then is the game named. So
+  // no flush, snapshot or picture ever pairs one game's name with another
+  // game's core or battery.
+  if (opts.rom) writeToFS(romName, opts.rom);
+  installSave(romName, name, save);
+  Module.ccall("initFromEmscripten", null, ["string"], [romName]);
+  loadingName = null;
   currentRomName = romName;
-  currentOriginalName = originalName || romName;
+  currentOriginalName = name;
   lastFrameSig = null; // a new game: the tick's skip must not carry over
   // Before `paused` is reset: closing a scrubber restores the paused state
   // it captured, which must land on the old session's value.
@@ -7970,9 +8043,8 @@ const loadRom = async (romName, originalName, opts = {}) => {
   flyBrand(true);
   document.body.classList.add("has-game", "running");
   setBrandP(1);
-  await restoreSave(romName, currentOriginalName);
-  Module.ccall("initFromEmscripten", null, ["string"], [romName]);
   await restoreCheats();  // fresh core: re-apply this game's saved cheats
+  if (gen !== loadGen) return; // the next load re-applies all of this to its core
   applyPitchCorrectFF();  // fresh core: re-push the local audio preference
   mp2kHleSessionOff = false; // the note-icon A/B belongs to the previous game
   applyMp2kHle();         // (covers loadAudioSettings racing Module init)
@@ -8131,6 +8203,7 @@ romWarnModal.addEventListener("click", (e) => {
 });
 
 const handleZipFile = async (file) => {
+  const gen = nextLoadGen(); // a later tap or open supersedes this one (loadGen)
   let zip;
   try {
     zip = await unzip(await file.arrayBuffer());
@@ -8167,11 +8240,11 @@ const handleZipFile = async (file) => {
   let innerExt = extOf(innerName);
   if (!looksLikeValidRom(romBytes, innerExt) &&
       !(await confirmSuspectRom(innerName, innerExt))) return;
-  let romFile = "rom" + innerExt;
   await ensureRuntimeReady(); // a zip dropped before the wasm runtime is up
-  writeToFS(romFile, romBytes);
   await addRecentRom(innerName, romBytes, art);
-  loadRom(romFile, innerName);
+  // In the library either way; booted only if nothing was opened since.
+  if (gen !== loadGen) return;
+  loadRom("rom" + innerExt, innerName, { gen, rom: romBytes });
 };
 
 let handleRomFile = (file) => {
@@ -8182,15 +8255,17 @@ let handleRomFile = (file) => {
     return;
   }
   let romName = "rom" + ext;
+  const gen = nextLoadGen(); // a later tap or open supersedes this one (loadGen)
   let reader = new FileReader();
   reader.addEventListener("load", async () => {
     let bytes = new Uint8Array(/** @type {ArrayBuffer} */ (reader.result));
     if (!looksLikeValidRom(bytes, ext) &&
         !(await confirmSuspectRom(file.name, ext))) return;
     await ensureRuntimeReady(); // a ROM picked/dropped before the runtime is up
-    writeToFS(romName, bytes);
     await addRecentRom(file.name, bytes);
-    loadRom(romName, file.name);
+    // In the library either way; booted only if nothing was opened since.
+    if (gen !== loadGen) return;
+    loadRom(romName, file.name, { gen, rom: bytes });
   });
   reader.readAsArrayBuffer(file);
 };
@@ -9707,18 +9782,26 @@ homePausedMore.addEventListener("click", () => {
 // Close the paused game: flush its save once, detach it from every later
 // flush path. The core stays frozen in wasm memory until the next loadRom
 // re-inits over it. False when there is nothing to unload or a link session is up.
+// A close takes the load token too (loadGen): a load in flight when the X is
+// tapped is dropped, and a tap after it drops the close (false), whose game
+// the load then persists as the outgoing one.
 const unloadGame = async ({ flushSave = true } = {}) => {
   if (!currentRomName || linkMode || rollbackMode || netActive()) return false;
+  const gen = nextLoadGen();
   const romName = currentRomName;
   const originalName = currentOriginalName;
   // The closing picture and session, taken while the name is still attached.
   if (flushSave) await persistAutoState();
+  if (gen !== loadGen) return false;
   await storeLastFrame({ force: true });
-  // Detach first: once null, no flush path can re-persist this game's save.
+  if (gen !== loadGen) return false;
+  // Detach, flush and drop the FS .sav with no await between them: once the
+  // names are null no flush path can re-persist this game's save, the flush
+  // reads the file before its first await, and the unlink keeps a later load
+  // from picking up stale battery data.
   currentRomName = null;
   currentOriginalName = null;
-  if (flushSave) await persistSave(romName, originalName);
-  // Drop the FS .sav so a later load cannot pick up stale battery data.
+  const flushed = flushSave ? persistSave(romName, originalName) : null;
   try { FS.unlink(stripExt(romName) + ".sav"); } catch {}
   // The cheat list belongs to the game that left; restoreCheats refills it.
   cheatList = [];
@@ -9739,6 +9822,7 @@ const unloadGame = async ({ flushSave = true } = {}) => {
   setPausedCardShown(false);
   refreshHomeRecent();
   updateCanvasScaling();
+  await flushed; // callers go on to the stored records (Remove keeps this save)
   return true;
 };
 

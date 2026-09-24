@@ -135,7 +135,99 @@ const coherent = (app) => {
   if (core(app).ram) assert.equal(core(app).ram[0], ROM[n], "on its own battery");
 };
 
-// ── Findings 4 and 5: rollback link sessions ────────────────────────────────
+// ── Finding 1: the shared rom.sav (GameLifecycle, SavePersistence) ──────────
+
+test("a game with no save boots with none, not the last game's battery", async () => {
+  const app = await boot();
+  await playAThenHome(app);
+
+  await play(app, "B.gba");
+  assert.equal(core(app).ram, null, "B booted on no battery file");
+  await autosave(app);
+  assert.equal(app.idb.get("save:B.gba"), undefined, "save:B was never written");
+});
+
+// ── Finding 2: the outgoing core's flush at init (SavePersistence) ──────────
+// The stand-in core above cannot run the real initFromEmscripten, so this is
+// read from the source: by the time it runs, JS has persisted the outgoing
+// game and written the incoming game's save to rom.sav, and a flush of the
+// outgoing GB cart (dirty after a state load while paused) would replace it.
+
+test("initFromEmscripten flushes no outgoing core over the incoming game's save", () => {
+  const src = readFileSync(new URL("../../src/dingbat_wasm.nim", import.meta.url), "utf8");
+  const start = src.indexOf("proc initFromEmscripten(");
+  assert.ok(start >= 0);
+  const body = src.slice(start, src.indexOf("\nproc ", start));
+  assert.ok(body.includes("make_gba(path)"), "the whole proc");
+  assert.doesNotMatch(body, /mbc_save|write_save/);
+});
+
+test("a game with a save boots on its own save", async () => {
+  const app = await boot();
+  const b = u8(0x0b, 7);
+  app.idb.set("save:B.gba", b);
+  await playAThenHome(app);
+  await play(app, "B.gba");
+  eq(core(app).ram, [...b]);
+});
+
+// ── Finding 3: a Drive pull landing during a load (both) ────────────────────
+
+const FILES_URL = "https://www.googleapis.com/drive/v3/files";
+const UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files";
+
+test("a Drive pull landing mid-load is neither overwritten nor overwrites Drive", async () => {
+  const app = await boot({ games: ["A.gba"] });
+  const local = u8(0x0a, 1);    // what this device last synced
+  const remote = u8(0x0a, 2);   // another device's newer save
+  app.idb.set("save:A.gba", local);
+  const sig = app.runIn(`sigOfBytes(new Uint8Array(${JSON.stringify([...local])}))`);
+  app.api.gdriveToken = "test-token";
+  app.api.syncState = { queueUp: [], queueDel: [], queueRen: [], tomb: [], ren: [],
+                        sigs: { "save:A.gba": sig }, rmt: { "save:A.gba": "t1" },
+                        connected: true };
+  const drive = new Map([["save:A.gba", { id: "s", bytes: remote, modifiedTime: "t2" }]]);
+  let download;
+  const downloaded = new Promise((r) => { download = r; });
+  let downloading = false;
+  app.setFetch(async (url, opts = {}) => {
+    url = String(url);
+    const method = opts.method || "GET";
+    if (url.startsWith(FILES_URL + "?spaces=appDataFolder")) {
+      return jsonRes({ files: [...drive].map(([name, f]) => ({
+        id: f.id, name, size: String(f.bytes.length), modifiedTime: f.modifiedTime })) });
+    }
+    if (url.includes("?alt=media")) {
+      downloading = true;
+      await downloaded;
+      return bytesRes(drive.get("save:A.gba").bytes);
+    }
+    if (url.startsWith(UPLOAD_URL)) {
+      const f = drive.get("save:A.gba");
+      if (method === "PATCH") f.bytes = new Uint8Array(await opts.body.arrayBuffer());
+      return jsonRes({ id: f.id });
+    }
+    return jsonRes({ id: "x" });
+  });
+
+  const pulling = app.api.pullSync();
+  for (let i = 0; i < 50 && !downloading; i++) await settle();
+  assert.ok(downloading, "the pull is downloading A's save");
+  await play(app, "A.gba");          // the player taps A meanwhile
+  eq(core(app).ram, [...local]);
+  download();
+  await pulling;
+  await drain();
+  await autosave(app);               // the first 5 s tick after the boot
+  await app.api.flushSync();
+  await drain();
+
+  eq(drive.get("save:A.gba").bytes, remote, "Drive keeps the other device's save");
+  assert.ok(!app.api.syncState.queueUp.includes("save:A.gba"),
+    "the unchanged local save is not queued over it");
+});
+
+// ── Findings 4 and 5: rollback link sessions (Netplay) ──────────────────────
 
 const inRollback = (app) => app.runIn(`
   rollbackMode = true;
@@ -176,6 +268,80 @@ test("closing the tab during a rollback session tears it down (and persists it)"
   }
 });
 
+// ── Finding 9: switches racing closes, taps, the page going away (GameLifecycle)
+
+test("closing the paused game while another loads keeps each save its own", async () => {
+  const app = await boot();
+  const b = u8(0x0b, 5);
+  app.idb.set("save:B.gba", b);
+  const a = await playAThenHome(app);
+
+  const gate = hold(app, "get", "save:B.gba");
+  app.runIn(`launchRom("B.gba")`);        // tap B...
+  await parked(gate);
+  await app.runIn("unloadGame()");        // ...and the card's X
+  gate.release();
+  await drain();
+
+  eq(app.idb.get("save:A.gba"), a, "save:A is A's");
+  eq(app.idb.get("save:B.gba"), b, "save:B is B's");
+  assert.equal(app.idb.get("stateauto:B.gba"), undefined, "no B resume point from A's core");
+  coherent(app);
+});
+
+test("double-tapping two tiles boots the later game under its own name", async () => {
+  const app = await boot();
+  const b = u8(0x0b, 5);
+  app.idb.set("save:B.gba", b);
+  await playAThenHome(app);
+
+  const gate = hold(app, "get", "save:B.gba");
+  app.runIn(`launchRom("B.gba")`);
+  await parked(gate);
+  app.runIn(`launchRom("C.gba")`);        // the second tap, before B's boot
+  await drain(30);
+  gate.release();
+  await drain(30);
+
+  assert.equal(named(app), "C.gba");
+  assert.equal(core(app).rom, ROM["C.gba"], "the core holds C");
+  assert.equal(core(app).ram, null, "on C's (absent) battery");
+  eq(app.idb.get("save:B.gba"), b, "save:B untouched");
+  assert.equal(app.idb.get("stateauto:B.gba"), undefined, "no B resume point from another core");
+});
+
+test("double-tapping the same tile keeps the real resume point", async () => {
+  const app = await boot();
+  const real = { bytes: u8(0x0a, 9), ts: 1, saveSig: null };
+  app.idb.set("stateauto:A.gba", real);
+
+  app.runIn(`launchRom("A.gba"); launchRom("A.gba")`);
+  await drain(30);
+
+  assert.equal(named(app), "A.gba");
+  eq(app.idb.get("stateauto:A.gba"), real, "not replaced by a snapshot of the fresh boot");
+});
+
+test("the page going away mid-switch writes nothing under the incoming name", async () => {
+  const app = await boot();
+  const b = u8(0x0b, 5);
+  app.idb.set("save:B.gba", b);
+  await playAThenHome(app);
+  const a2 = gameSaves(app, 2); // unflushed, so pagehide has something to write
+
+  const gate = hold(app, "get", "save:B.gba");
+  app.runIn(`launchRom("B.gba")`);
+  await parked(gate);
+  await app.dispatchWin("pagehide");
+  await drain();
+
+  eq(app.idb.get("save:B.gba"), b, "save:B untouched");
+  eq(app.idb.get("save:A.gba"), a2, "A's newest save went to save:A");
+  assert.equal(app.idb.get("stateauto:B.gba"), undefined, "no B resume point from A's core");
+  gate.release();
+  await drain();
+});
+
 // ── Finding 15: reset save data (SavePersistence) ───────────────────────────
 
 // The library's Reset (resetGameAction) and the Saves panel's "Reset save
@@ -205,6 +371,39 @@ for (const [label, call] of [["Reset", `resetGameAction("A.gba")`],
     assert.equal(app.idb.get("save:A.gba"), undefined);
   });
 }
+
+// ── Low: Resume after an unflushed save (both) ─────────────────────────────
+
+const resumeOffered = async (app) => {
+  const a1 = u8(0x0a, 1);
+  app.idb.set("save:A.gba", a1);
+  app.idb.set("stateauto:A.gba", {
+    bytes: u8(0x0a, 1), ts: Date.now(),
+    saveSig: app.runIn(`saveSignature(new Uint8Array(${JSON.stringify([...a1])}))`),
+  });
+  await play(app, "A.gba");
+  const pill = app.document.getElementById("toast").children.find((c) =>
+    c.classList.contains("has-action") && !c.classList.contains("leaving"));
+  assert.ok(pill, "Resume offered: the snapshot matches the save");
+  return pill;
+};
+
+test("Resume applies a snapshot taken with the live battery", async () => {
+  const app = await boot();
+  const pill = await resumeOffered(app);
+  pill.onclick();     // the whole pill is the tap target
+  await drain();
+  assert.equal(core(app).applied, 1);
+});
+
+test("Resume is refused once the game has saved in game, before any autosave", async () => {
+  const app = await boot();
+  const pill = await resumeOffered(app);
+  gameSaves(app, 2); // saved in game; the autosave has not run yet
+  pill.onclick();
+  await drain();
+  assert.equal(core(app).applied, 0, "the older snapshot was not applied");
+});
 
 // ── Low: the quota retry (SavePersistence) ──────────────────────────────────
 
@@ -272,4 +471,46 @@ test("a game loaded under the Link Cable modal does not run behind it", async ()
   `);
   await play(app, "B.gba");
   assert.ok(!(app.runIn("__netModal") && !app.runIn("paused")), "not running behind the modal");
+});
+
+// ── Low: the picture filed during a switch (Thumbnails) ─────────────────────
+
+test("a tab switch during a load files no picture under the incoming name", async () => {
+  const app = await boot();
+  // Pictures: the canvas stand-in "encodes" the framebuffer's first byte.
+  app.runIn(`
+    Module._wasm_fb_ptr = () => 16;
+    Module.memory = { buffer: new ArrayBuffer(16 + 240 * 160 * 4) };
+  `);
+  let lastPut = 0;
+  const realCreate = app.document.createElement;
+  app.document.createElement = (tag) => {
+    const el = realCreate(tag);
+    if (tag === "canvas") {
+      el.getContext = () => new Proxy({}, { get: (_t, p) => {
+        if (p === "createImageData") {
+          return (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) });
+        }
+        if (p === "putImageData") return (img) => { lastPut = img.data[0]; };
+        return () => undefined;
+      } });
+      el.toBlob = (cb) => cb({ owner: lastPut });
+    }
+    return el;
+  };
+  const paint = () => new Uint8Array(app.runIn("Module.memory.buffer"), 16, 4).fill(core(app).rom);
+
+  await play(app, "A.gba");
+  paint();
+  await goHome(app);
+  const gate = hold(app, "get", "save:B.gba");
+  app.runIn(`launchRom("B.gba")`);
+  await parked(gate);
+  app.document.hidden = true;
+  await app.dispatchDoc("visibilitychange");
+  await drain();
+  const f = app.idb.get("frame:B.gba");
+  assert.ok(!f || f.owner === ROM["B.gba"], "frame:B is not A's screen");
+  gate.release();
+  await drain();
 });

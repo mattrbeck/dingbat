@@ -20,13 +20,16 @@ that shuts down with the modal kept and re-arms a fresh session.
 index.js side: `rollbackMode` (7154) is set by `enterRollbackMode` (9250) from
 `rbStartIfReady` (netplay.js 1294), which also sets `netMode = false`; the rAF
 `tick` runs exactly one branch: rollback, else netMode (SIO), else linkMode,
-else the solo core (11321-11400). `loadRom` (7881) and the `pagehide` /
+else the solo core (11321-11400). `loadRom` (7954) and the `pagehide` /
 `beforeunload` handlers tear the session down `if (netActive() ||
-rollbackMode)`. Those three, and loadRom's return when a session started
-during its awaits, model the code as fixed by the commit "web: a rollback
-session ends before a launch or a page close" (line numbers at that commit;
-the rest of this file is still at dd7ba741f): at dd7ba741f they tore down only
-`if (netMode)`, and `netMode` is false in a rollback session.
+rollbackMode)`. Those, loadRom's return when a session started during its
+awaits, and its dismissal of an open Link Cable modal where it names the new
+game, model the code as fixed on this branch ("web: a rollback session ends
+before a launch or a page close", "web: a game loaded under Report a Bug or
+the Link Cable modal does not run behind it"; their line numbers are at "web:
+a game is named only once its core and save are in; loads and closes take a
+token"; the rest of this file is still at dd7ba741f). At dd7ba741f they tore
+down only `if (netMode)`, and `netMode` is false in a rollback session.
 
 ## What is modelled
 
@@ -59,7 +62,7 @@ the rest of this file is still at dd7ba741f): at dd7ba741f they tore down only
   currentOriginalName)` evaluates its arguments, reads the FS and issues the
   IndexedDB put synchronously (dbPutRoomy -> dbPut, index.js 4260/537), so the
   write's key is fixed at teardown time and is modelled there.
-* `loadRom`'s awaits before its commit (7885-7897) are `launch`/`loadCommit`.
+* `loadRom`'s awaits before its commit (7960-7984) are `launch`/`loadCommit`.
 * One "waiting"/"paired" reply stands for any server message; SDP/ICE
   contents are not modelled (a pc either yields its channel or not).
 * `navigator.onLine` is true; BroadcastChannel exists.
@@ -517,14 +520,14 @@ def step (s : State) : Event → State
                modal := false, manualView := false }
   | .rbProgress => { s with rbV := s.rbV + 1 }
   | .disconnect => shutdown false s
-  -- loadRom (7881-7889): `if (netActive() || rollbackMode) await netShutdown()`:
+  -- loadRom (7954-7966): `if (netActive() || rollbackMode) await netShutdown()`:
   -- the session ends while currentOriginalName still names its game.
   | .launch g =>
     let s := if s.netMode || s.rollbackMode then shutdown false s else s
     { s with loadPending := some g }
   -- persistSave(outgoing) ... currentOriginalName = g; restoreSave; initFromEmscripten.
-  -- 7897: a session that started during the awaits owns the core: the load
-  -- returns without naming its game. 7932: an open Link Cable modal is
+  -- 7967-7984: a session that started during the awaits owns the core: the load
+  -- returns without naming its game. 8006: an open Link Cable modal is
   -- dismissed in the segment that names the new game.
   | .loadCommit =>
     match s.loadPending with
@@ -534,7 +537,7 @@ def step (s : State) : Event → State
       let s := if s.modal then dismissModal s else s
       let s := { s with store := put s.game s.solo s.store }
       { s with game := g, solo := s.store g, loadPending := none }
-  -- pagehide (11235) / beforeunload (11209): `if (netActive() || rollbackMode)
+  -- pagehide (11348) / beforeunload (11322): `if (netActive() || rollbackMode)
   -- netShutdown()` (its put is issued synchronously), then
   -- persistSave(currentRomName, ...). `lostProgress`: the page died in a
   -- session whose progress is not in the store.
@@ -1767,7 +1770,7 @@ theorem regress_launch_during_rollback_splits_identity :
       (fun s => !(s.rollbackMode && s.game != s.sessGame)) = true := by decide
 
 /-- A session that starts while a load is between its first segment and its
-    commit: the load names nothing (loadRom's return at 7897), and ending the
+    commit: the load names nothing (loadRom's return at 7981), and ending the
     session later persists it under its own game. -/
 theorem regress_session_starts_mid_load :
     witnesses [.openModal, .joinClick, .localPair, .launch 1, .rbStart, .rbProgress,

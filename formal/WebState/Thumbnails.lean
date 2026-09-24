@@ -5,7 +5,10 @@ The library tile's picture: the last screen a game showed ("frame:<name>",
 a JPEG Blob) or its box art ("art:<name>"), fetched lazily by the grid and
 by the per-game menu's head, shown through object URLs.
 
-Line numbers are web/index.js at commit dd7ba741f.
+Line numbers are web/index.js at commit dd7ba741f, except the load path
+(`loadBegin`/`loadOutDone`/`loadInit`), which models loadRom as fixed by the
+commit "web: a game is named only once its core and save are in; loads and
+closes take a token", at that commit's lines.
 
 ## Writers of "frame:<name>"
 * `storeLastFrame` (4359–4381): copies the wasm framebuffer and the name
@@ -60,7 +63,10 @@ relabels `owner` (the same game under a new name) – a modelling device only.
 **Fixes.** `step` takes `fix : Bool`. `fix = false` is the code as it is;
 `fix = true` adds the three smallest changes proposed in the report:
 (1) `storeLastFrame`/`updatePausedCard` bail unless the core holds
-`currentOriginalName` (a JS `fbGame` set right after `initFromEmscripten`);
+`currentOriginalName` (a JS `fbGame` set right after `initFromEmscripten`)
+-- no longer needed: loadRom now names a game only in the segment that
+boots it (the load events of `step`, both `fix`), and `fix1_redundant`
+proves the guard never fires;
 (2) a synchronous `goneNames` set, filled at the start of delete and rename,
 emptied by an import / a rename onto the name, checked right before every
 frame `dbPut` (the chain, the batch, the pull);
@@ -410,24 +416,28 @@ def paintMenu (fix : Bool) (s : State) (e : Nat) (mp : MPic) (p : Pic) (k : Key)
   else s1
 
 def step (fix : Bool) (s : State) : Ev → State
-  -- loadRom 7881–7890: with a game in, persistAutoState then storeLastFrame
-  -- (the outgoing picture) is awaited; with none, straight to 7892.
+  -- loadRom 7954–7971: with a game in, persistAutoState then storeLastFrame
+  -- (the outgoing picture) is awaited; with none, straight to 7978. (The load
+  -- path, loadBegin/loadOutDone/loadInit, is as of the commit "web: a game is
+  -- named only once its core and save are in; loads and closes take a token";
+  -- at dd7ba741f the names switched before `await restoreSave`.)
   | .loadBegin b =>
     if s.sess = .idle ∧ b ∈ s.lib ∧ b ∉ s.delPending then
       match s.cur with
       | some _ => let r := storeFrame fix s; { r.1 with sess := .loadOut b r.2 }
-      | none => { s with cur := some b, paused := false, sess := .loadRestore b }
+      | none => { s with sess := .loadRestore b }
     else s
-  -- loadRom 7891–7920: persistSave awaited; currentRomName/currentOriginalName
-  -- := the new game, lastFrameSig := null, paused := false; await restoreSave.
+  -- loadRom 7972–7980: persistSave awaited; `await dbGet(save:b)`. The
+  -- outgoing game stays named (and paused as it was) until the boot.
   | .loadOutDone =>
     match s.sess with
-    | .loadOut b w => if ready s w then { s with cur := some b, paused := false, sess := .loadRestore b } else s
+    | .loadOut b w => if ready s w then { s with sess := .loadRestore b } else s
     | _ => s
-  -- loadRom 7921: initFromEmscripten — only now does the framebuffer hold b.
+  -- loadRom 7981–8007: initFromEmscripten, and in the same segment
+  -- currentRomName/currentOriginalName := b, lastFrameSig := null, paused := false.
   | .loadInit =>
     match s.sess with
-    | .loadRestore b => { s with core := some b, sess := .idle }
+    | .loadRestore b => { s with core := some b, cur := some b, paused := false, sess := .idle }
     | _ => s
   -- unloadGame 9636–9642: await storeLastFrame({force:true}).
   | .unloadBegin =>
@@ -686,44 +696,50 @@ def tileShowsForeign (s : State) (t : Nat) : Bool :=
     | none => false
   | none => false
 
-/-- Game 0 running; launch game 1. Its names are set before its core is
-loaded; the tab is hidden during `await restoreSave` (visibilitychange →
-storeLastFrame({force:true})), so game 0's framebuffer is filed as
-"frame:1". The grid then shows game 0's screen on game 1's tile. -/
+/-- Game 0 running; launch game 1. At dd7ba741f its names were set before its
+core was loaded, and the tab hidden during `await restoreSave`
+(visibilitychange → storeLastFrame({force:true})) filed game 0's
+framebuffer as "frame:1": the grid showed game 0's screen on game 1's tile.
+Game 1 is now named only in the segment that boots it, so the capture in
+that window files game 0's screen under game 0. (`cur_is_core` below: for
+every reachable state, whatever `fix`, the named game is the one in the core.) -/
 def switchTrace : List Ev :=
   [.importGame 0, .importGame 1, .loadBegin 0, .loadInit,   -- game 0 running
    .loadBegin 1,                  -- launch game 1: outgoing capture of 0 queued
    .encodeDone, .putDone,         -- game 0's picture filed as frame:0
-   .loadOutDone,                  -- names := game 1; await restoreSave
-   .forced,                       -- visibilitychange: core still holds game 0
-   .loadInit,                     -- initFromEmscripten(game 1)
-   .encodeDone, .putDone,         -- frame:1 := game 0's pixels; markUpload
+   .loadOutDone,                  -- await dbGet(save:1): game 0 still named
+   .forced,                       -- visibilitychange: files game 0's screen as 0's
+   .loadInit,                     -- initFromEmscripten(game 1), names := 1
+   .encodeDone, .putDone,
    .renderStart, .renderMeta 0, .renderKeys 0, .renderCommit 0,
    .fetchFrame 0, .fetchFrame 1]
 
-theorem bug_switch_files_old_pixels_under_new_name :
-    ((run false init switchTrace).frame 1).map Pic.owner = some 0 ∧
-    (run false init switchTrace).upQ 1 = true ∧
-    ∃ t, tileShowsForeign (run false init switchTrace) t = true :=
-  ⟨by decide, by decide, ⟨0, by decide⟩⟩
+theorem regress_switch_files_old_pixels_under_new_name :
+    (run false init switchTrace).frame 1 = none ∧
+    ((run false init switchTrace).frame 0).map Pic.owner = some 0 ∧
+    (run false init switchTrace).upQ 1 = false ∧
+    tileShowsForeign (run false init switchTrace) 0 = false ∧
+    tileShowsForeign (run false init switchTrace) 1 = false := by decide
 
 /-- The same window from a closed game: the core keeps the closed game
-(unloadGame 9632) and the next launch files it. -/
+(unloadGame), and at dd7ba741f the next launch named game 1 at once, so the
+60 s tick filed game 0's screen as "frame:1". The launch no longer names
+anything before its boot, and the closed game stays paused. -/
 def switchAfterCloseTrace : List Ev :=
   [.importGame 0, .importGame 1, .loadBegin 0, .loadInit,
    .unloadBegin, .encodeDone, .putDone, .unloadFinish,       -- Close game 0
-   .loadBegin 1,                                           -- names := 1; await restoreSave
-   .tick,                                                  -- the 60 s tick (paused = false)
+   .loadBegin 1,                                           -- await dbGet(save:1)
+   .tick,                                                  -- the 60 s tick
    .encodeDone]
 
-theorem bug_switch_after_close :
-    ((run false init switchAfterCloseTrace).frame 1).map Pic.owner = some 0 := by decide
+theorem regress_switch_after_close :
+    (run false init switchAfterCloseTrace).frame 1 = none := by decide
 
-/-- The paused card can be labelled with one game and painted with another
-in the same window. -/
-theorem bug_card_label_mismatch :
+/-- At dd7ba741f the paused card could be labelled with one game and painted
+with another in the same window; now it is game 0's, both ways. -/
+theorem regress_card_label_mismatch :
     (run false init [.importGame 0, .importGame 1, .loadBegin 0, .loadInit,
-       .loadBegin 1, .encodeDone, .putDone, .loadOutDone, .pause]).card = some (1, 0) := by
+       .loadBegin 1, .encodeDone, .putDone, .loadOutDone, .pause]).card = some (0, 0) := by
   decide
 
 /-- An orphan frame: a picture record for a game that is not in the library
@@ -1796,7 +1812,7 @@ structure FCore (s : State) : Prop where
   tjobRun : s.tJob.isSome → s.tRun = true
   modalSess : s.tRun = true → s.tCancel = false →
     (∀ w, s.sess ≠ .unloading w) ∧ (∀ x y l, s.sess ≠ .renaming x y l)
-  restoreCur : ∀ b, s.sess = .loadRestore b → s.cur = some b
+  curCore : ∀ g, s.cur = some g → s.core = some g
   card : ∀ g c, s.card = some (g, c) → g = c
   libFrame : ∀ n, (s.frame n).isSome → n ∈ s.lib ∨ n ∈ s.delPending
   delGone : ∀ n ∈ s.delPending, s.frame n = none ∧ s.gone n = true
@@ -1804,7 +1820,7 @@ structure FCore (s : State) : Prop where
   outLib : ∀ b w, s.sess = .loadOut b w → b ∈ s.lib ∧ b ∉ s.delPending
   restLib : ∀ b, s.sess = .loadRestore b → b ∈ s.lib ∧ b ∉ s.delPending
   renLib : ∀ x y l, s.sess = .renaming x y l → x ∈ s.lib ∧ s.gone x = true ∧ x ∉ s.delPending ∧
-    y ∉ s.delPending ∧ (l = true → s.cur = none) ∧ (l = false → s.cur ≠ some x)
+    y ∉ s.delPending ∧ (l = true → s.cur = none ∧ s.core = some x) ∧ (l = false → s.cur ≠ some x)
   wChain : ∀ j ∈ s.chain, s.gone j.name = false → j.name ∈ s.lib
   wPull : ∀ i n p, s.pulls i = some (n, p) → s.gone n = false → n ∈ s.lib
   wTJob : ∀ n e, s.tJob = some ⟨n, e⟩ → s.gone n = false → n ∈ s.lib
@@ -1874,15 +1890,11 @@ theorem fcore_step (s : State) (h : FCore s) (e : Ev) : FCore (step true s e) :=
         rw [hsf] at h1 ⊢
         exact { h1 with
           modalSess := fun _ _ => ⟨fun _ => by simp, fun _ _ _ => by simp⟩
-          restoreCur := by intro b' hb'; simp at hb'
           outLib := by intro b' w hb'; simp at hb'; obtain ⟨rfl, -⟩ := hb'; exact ⟨hb, hbd⟩
           restLib := by intro b' hb'; simp at hb'
           renLib := by intro x y l hr; simp at hr }
       · exact { h with
-          thumbCore := by intro _ _ n _ hc; simp at hc
           modalSess := fun _ _ => ⟨fun _ => by simp, fun _ _ _ => by simp⟩
-          restoreCur := by intro b' hb'; simp at hb'; subst hb'; rfl
-          curLib := by intro n hn; simp at hn; subst hn; exact ⟨hb, hbd⟩
           outLib := by intro b' w hb'; simp at hb'
           restLib := by intro b' hb'; simp at hb'; subst hb'; exact ⟨hb, hbd⟩
           renLib := by intro x y l hr; simp at hr }
@@ -1894,10 +1906,7 @@ theorem fcore_step (s : State) (h : FCore s) (e : Ev) : FCore (step true s e) :=
       split
       · have hb := h.outLib b w hs
         exact { h with
-          thumbCore := by intro _ _ n _ hc; simp at hc
           modalSess := fun _ _ => ⟨fun _ => by simp, fun _ _ _ => by simp⟩
-          restoreCur := by intro b' hb'; simp at hb'; subst hb'; rfl
-          curLib := by intro n hn; simp at hn; subst hn; exact hb
           outLib := by intro b' w' hb'; simp at hb'
           restLib := by intro b' hb'; simp at hb'; subst hb'; exact hb
           renLib := by intro x y l hr; simp at hr }
@@ -1907,11 +1916,12 @@ theorem fcore_step (s : State) (h : FCore s) (e : Ev) : FCore (step true s e) :=
     simp only [step]
     split
     · rename_i b hs
-      have hc := h.restoreCur b hs
+      have hb := h.restLib b hs
       exact { h with
-        thumbCore := by intro _ _ n _ hc'; rw [hc] at hc'; cases hc'
+        thumbCore := by intro _ _ n _ hc; simp at hc
         modalSess := fun _ _ => ⟨fun _ => by simp, fun _ _ _ => by simp⟩
-        restoreCur := by intro b' hb'; simp at hb'
+        curCore := by intro g hg; simp at hg; subst hg; rfl
+        curLib := by intro n hn; simp at hn; subst hn; exact hb
         outLib := by intro b' w hb'; simp at hb'
         restLib := by intro b' hb'; simp at hb'
         renLib := by intro x y l hr; simp at hr }
@@ -1927,7 +1937,6 @@ theorem fcore_step (s : State) (h : FCore s) (e : Ev) : FCore (step true s e) :=
       exact { h1 with
         modalSess := by
           intro ht hc; simp only [modalUp] at hm; dsimp only at ht hc; simp [ht, hc] at hm
-        restoreCur := by intro b' hb'; simp at hb'
         outLib := by intro b' w hb'; simp at hb'
         restLib := by intro b' hb'; simp at hb'
         renLib := by intro x y l hr; simp at hr }
@@ -1940,7 +1949,7 @@ theorem fcore_step (s : State) (h : FCore s) (e : Ev) : FCore (step true s e) :=
       · exact { h with
           thumbCore := by intro ht hc; exact absurd hs ((h.modalSess ht hc).1 w)
           modalSess := fun _ _ => ⟨fun _ => by simp, fun _ _ _ => by simp⟩
-          restoreCur := by intro b' hb'; simp at hb'
+          curCore := by intro g hg; simp at hg
           curLib := by intro n hn; simp at hn
           outLib := by intro b' w hb'; simp at hb'
           restLib := by intro b' hb'; simp at hb'
@@ -2173,7 +2182,10 @@ theorem fcore_step (s : State) (h : FCore s) (e : Ev) : FCore (step true s e) :=
       exact { h with
         thumbCore := by intro a b; exact absurd ⟨a, b⟩ hmod
         modalSess := by intro a b; exact absurd ⟨a, b⟩ hmod
-        restoreCur := by intro b hb; simp at hb
+        curCore := by
+          intro m hc; dsimp only at hc; split at hc
+          · cases hc
+          · exact h.curCore m hc
         delGone := by
           intro m hmd; dsimp only at hmd; refine ⟨(h.delGone m hmd).1, ?_⟩
           simp only [upd_apply]; split
@@ -2190,6 +2202,7 @@ theorem fcore_step (s : State) (h : FCore s) (e : Ev) : FCore (step true s e) :=
           obtain ⟨rfl, rfl, rfl⟩ := hr
           refine ⟨hx, by simp, hxd, hyd, ?_, ?_⟩
           · intro hl; dsimp only; rw [ifp hl]
+            exact ⟨rfl, h.curCore x (of_decide_eq_true hl)⟩
           · intro hl; dsimp only; rw [ifn (by simp [hl])]; exact of_decide_eq_false hl
         wChain := fun j hj hg => h.wChain j hj (gonex _ hg).1
         wPull := fun i m p hp hg => h.wPull i m p hp (gonex _ hg).1
@@ -2208,7 +2221,10 @@ theorem fcore_step (s : State) (h : FCore s) (e : Ev) : FCore (step true s e) :=
         exact { h with
           thumbCore := fun a b => (hnomod a b).elim
           modalSess := fun _ _ => ⟨fun _ => by simp, fun _ _ _ => by simp⟩
-          restoreCur := by intro b hb; simp at hb
+          curCore := by
+            intro m hc; dsimp only at hc; split at hc
+            · rename_i hlt; cases hc; exact (hl1 hlt).2
+            · exact h.curCore m hc
           delGone := by
             intro m hmd; dsimp only at hmd; refine ⟨(h.delGone m hmd).1, ?_⟩
             simp only [upd_apply]; rw [ifn (fun (e : m = x) => hxd (e ▸ hmd))]; exact (h.delGone m hmd).2
@@ -2273,7 +2289,12 @@ theorem fcore_step (s : State) (h : FCore s) (e : Ev) : FCore (step true s e) :=
               · exact h.ownArt m p hp
           thumbCore := fun a b => (hnomod a b).elim
           modalSess := fun _ _ => ⟨fun _ => by simp, fun _ _ _ => by simp⟩
-          restoreCur := by intro b hb; simp at hb
+          curCore := by
+            intro m hc; dsimp only at hc; split at hc
+            · rename_i hlt; cases hc; rw [(hl1 hlt).2]; simp [relabel]
+            · rename_i hlf
+              have hmx : m ≠ x := fun e => hl0 (by simpa using hlf) (e ▸ hc)
+              rw [h.curCore m hc]; simp [relabel, hmx]
           card := by
             intro g c hc
             cases hcd : s.card with
@@ -2397,10 +2418,23 @@ theorem fcore_step (s : State) (h : FCore s) (e : Ev) : FCore (step true s e) :=
         · exact { h with
             wCands := by
               intro m hm; exact h.wCands m (by rw [hc]; exact List.mem_cons_of_mem _ hm) }
-        · exact { h with
+        · rename_i hnc
+          have hcn : s.cur = none := by
+            cases hcur : s.cur with
+            | none => rfl
+            | some _ => exact absurd (Or.inr (by simp [hcur])) hnc
+          have htc : s.tCancel = false := by
+            cases hh : s.tCancel with
+            | false => rfl
+            | true => exact absurd (Or.inl hh) hnc
+          exact { h with
             ownTJob := by intro m p hp; simp at hp
             thumbCore := by intro _ _ m hm _; simp at hm; subst hm; rfl
             tjobRun := fun _ => hrun
+            curCore := by intro g hg'; simp only [hcn] at hg'; cases hg'
+            renLib := by
+              intro x y l hr
+              exact absurd hr ((h.modalSess hrun htc).2 x y l)
             wTJob := by
               intro m e hm; simp at hm; obtain ⟨rfl, -⟩ := hm
               exact h.wCands _ (by rw [hc]; exact List.mem_cons_self) }
@@ -2926,5 +2960,202 @@ theorem chain_writes_in_capture_order {fix : Bool} {s : State} (h : Reachable fi
   have := (chainOk_reachable h).1
   rw [hc, List.pairwise_cons] at this
   exact this.1
+
+/-! ### The named game is the game in the core (any `fix`)
+
+loadRom names the new game in the segment that boots it (the load path of
+`step`, as fixed), a close nulls the name, a rename relabels both, and the
+batch boots its games only with no game named. So whenever a game is named,
+the framebuffer is its own: `storeLastFrame` and `updatePausedCard` file and
+paint the named game's pixels under its name, and fix (1) above, the `fbGame`
+guard, never fires (`fix1_redundant`). -/
+
+structure CInv (s : State) : Prop where
+  cc : ∀ g, s.cur = some g → s.core = some g
+  renT : ∀ x y, s.sess = .renaming x y true → s.cur = none ∧ s.core = some x
+  renF : ∀ x y, s.sess = .renaming x y false → s.cur ≠ some x
+  modal : s.tRun = true → s.tCancel = false → ∀ x y l, s.sess ≠ .renaming x y l
+
+theorem cinv_of {s t : State} (h : CInv s) (hc : t.cur = s.cur) (hk : t.core = s.core)
+    (hs : t.sess = s.sess) (hr : t.tRun = s.tRun) (hx : t.tCancel = s.tCancel) : CInv t :=
+  ⟨by rw [hc, hk]; exact h.cc, by rw [hs, hc, hk]; exact h.renT, by rw [hs, hc]; exact h.renF,
+   by rw [hr, hx, hs]; exact h.modal⟩
+
+/-- A state whose session is no rename and whose named game is in the core. -/
+theorem cinv_noRen {t : State} (hc : ∀ g, t.cur = some g → t.core = some g)
+    (hs : ∀ x y l, t.sess ≠ .renaming x y l) : CInv t :=
+  ⟨hc, fun x y h => absurd h (hs x y true), fun x y h => absurd h (hs x y false),
+   fun _ _ => hs⟩
+
+theorem cinv_storeFrame {s : State} (fix : Bool) (h : CInv s) : CInv (storeFrame fix s).1 := by
+  obtain ⟨h1, h2, h3, h4, h5, -⟩ := storeFrame_fields fix s
+  exact cinv_of h h1 h5 h2 h3 h4
+
+theorem cinv_step (fix : Bool) (s : State) (h : CInv s) (e : Ev) : CInv (step fix s e) := by
+  cases e
+  case loadBegin b =>
+    simp only [step]
+    split
+    · rename_i hg
+      split
+      · have h1 := cinv_storeFrame fix h
+        obtain ⟨-, -, -, -, h5, -⟩ := storeFrame_fields fix s
+        exact cinv_noRen (fun g hg' => h1.cc g hg') (fun _ _ _ => by simp)
+      · exact cinv_noRen h.cc (fun _ _ _ => by simp)
+    · exact h
+  case loadOutDone =>
+    simp only [step]
+    split
+    · split
+      · exact cinv_noRen h.cc (fun _ _ _ => by simp)
+      · exact h
+    · exact h
+  case loadInit =>
+    simp only [step]
+    split
+    · exact cinv_noRen (fun g hg => by simp at hg; subst hg; rfl) (fun _ _ _ => by simp)
+    · exact h
+  case unloadBegin =>
+    simp only [step]
+    split
+    · have h1 := cinv_storeFrame fix h
+      exact cinv_noRen (fun g hg' => h1.cc g hg') (fun _ _ _ => by simp)
+    · exact h
+  case unloadFinish =>
+    simp only [step]
+    split
+    · split
+      · exact cinv_noRen (fun g hg => by simp at hg) (fun _ _ _ => by simp)
+      · exact h
+    · exact h
+  case tick =>
+    simp only [step]; split
+    · exact cinv_storeFrame fix h
+    · exact h
+  case forced => exact cinv_storeFrame fix h
+  case pause =>
+    simp only [step]; split
+    · have h1 := cinv_storeFrame fix (s := { s with paused := true }) (cinv_of h rfl rfl rfl rfl rfl)
+      exact cinv_of h1 rfl rfl rfl rfl rfl
+    · exact h
+  case renBegin x y =>
+    simp only [step]
+    split
+    · rename_i hg
+      obtain ⟨hidle, hm, -, -, -, -⟩ := hg
+      refine ⟨?_, ?_, ?_, ?_⟩
+      · intro m hc; dsimp only at hc; split at hc
+        · cases hc
+        · exact h.cc m hc
+      · intro x' y' hr; simp only [Sess.renaming.injEq] at hr
+        obtain ⟨rfl, rfl, hl⟩ := hr
+        dsimp only; rw [ifp hl]; exact ⟨rfl, h.cc x (of_decide_eq_true hl)⟩
+      · intro x' y' hr; simp only [Sess.renaming.injEq] at hr
+        obtain ⟨rfl, rfl, hl⟩ := hr
+        dsimp only; rw [ifn (by simp [hl])]; exact of_decide_eq_false hl
+      · intro ht hc; dsimp only at ht hc; simp [modalUp, ht, hc] at hm
+    · exact h
+  case renMove =>
+    simp only [step]
+    split
+    · rename_i x y l hs
+      split
+      · refine cinv_noRen ?_ (fun _ _ _ => by simp)
+        intro m hc; dsimp only at hc; split at hc
+        · rename_i hlt; cases hc; subst hlt; exact (h.renT x y hs).2
+        · exact h.cc m hc
+      · refine cinv_noRen ?_ (fun _ _ _ => by simp)
+        intro m hc; dsimp only at hc; split at hc
+        · rename_i hlt; cases hc; subst hlt; rw [(h.renT x y hs).2]; simp [relabel]
+        · rename_i hlf
+          have hl : l = false := by simpa using hlf
+          subst hl
+          have hmx : m ≠ x := fun e => h.renF x y hs (e ▸ hc)
+          rw [h.cc m hc]; simp [relabel, hmx]
+    · exact h
+  case thumbStart =>
+    simp only [step]; split
+    · rename_i hg
+      obtain ⟨-, -, hidle⟩ := hg
+      exact cinv_noRen h.cc (fun _ _ _ => by rw [hidle]; simp)
+    · exact h
+  case thumbInit =>
+    simp only [step]; split
+    · rename_i hg
+      obtain ⟨hrun, -⟩ := hg
+      split
+      · split
+        · exact cinv_of h rfl rfl rfl rfl rfl
+        · rename_i hnc
+          have hcn : s.cur = none := by
+            cases hcur : s.cur with
+            | none => rfl
+            | some _ => exact absurd (Or.inr (by simp [hcur])) hnc
+          have htc : s.tCancel = false := by
+            cases hh : s.tCancel with
+            | false => rfl
+            | true => exact absurd (Or.inl hh) hnc
+          exact cinv_noRen (fun g hg' => by simp only [hcn] at hg'; cases hg')
+            (h.modal hrun htc)
+      · exact h
+    · exact h
+  case thumbCancel =>
+    simp only [step]; split
+    · exact ⟨h.cc, h.renT, h.renF, fun _ hc => by simp at hc⟩
+    · exact h
+  case thumbEnd =>
+    simp only [step]; split
+    · exact ⟨h.cc, h.renT, h.renF, fun hr => by simp at hr⟩
+    · exact h
+  all_goals
+    simp only [step]
+    repeat' split
+    all_goals first
+      | exact h
+      | exact cinv_of h rfl rfl rfl rfl rfl
+      | (unfold paintTile; exact cinv_of h rfl rfl rfl rfl rfl)
+      | (unfold paintMenu; dsimp only; split <;> exact cinv_of h rfl rfl rfl rfl rfl)
+      | (unfold closeMenu; split <;> exact cinv_of h rfl rfl rfl rfl rfl)
+
+theorem cinv_reachable {fix : Bool} {s : State} (h : Reachable fix s) : CInv s := by
+  induction h with
+  | init => exact ⟨fun _ h => by simp [init] at h, fun _ _ h => by simp [init] at h,
+      fun _ _ h => by simp [init] at h, fun h => by simp [init] at h⟩
+  | step e _ ih => exact cinv_step fix _ ih e
+
+/-- Whatever `fix`: whenever a game is named, the core holds it. -/
+theorem cur_is_core {fix : Bool} {s : State} (h : Reachable fix s) (g : Nat)
+    (hc : s.cur = some g) : s.core = some g :=
+  (cinv_reachable h).cc g hc
+
+/-- ... so fix (1), the `fbGame` guard in `storeLastFrame` and
+`updatePausedCard`, never fires: in every reachable state of the code as it
+is, the capture and the card are what the guarded code would produce, and
+every capture files the named game's own pixels, every card paints its
+label's. -/
+theorem fix1_redundant {fix : Bool} {s : State} (h : Reachable fix s) :
+    storeFrame false s = storeFrame true s ∧ cardOf false s = cardOf true s ∧
+    (∀ g c, cardOf fix s = some (g, c) → g = c) := by
+  have hcc := cur_is_core h
+  refine ⟨?_, ?_, ?_⟩
+  · unfold storeFrame
+    split
+    · rename_i g c hg hco
+      rw [hcc g hg] at hco; cases hco; simp
+    · rfl
+  · unfold cardOf
+    split
+    · rename_i g c hg hco
+      rw [hcc g hg] at hco; cases hco; simp
+    · rfl
+  · intro g c hgc
+    unfold cardOf at hgc
+    split at hgc
+    · rename_i g' c' hg hco
+      rw [hcc g' hg] at hco; cases hco
+      split at hgc
+      · cases hgc
+      · simp at hgc; obtain ⟨rfl, rfl⟩ := hgc; rfl
+    · cases hgc
 
 end WebState.Thumbnails
