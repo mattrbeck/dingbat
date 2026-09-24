@@ -23,7 +23,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 
 ROMS = ["msrtbit", "psrmask", "thumbcmp", "ldmuser", "pcwb", "bxdecode",
-        "irqwin", "dmabyte", "capdma", "sweep", "iomap"]
+        "irqwin", "dmabyte", "capdma", "sweep", "iomap", "irqstorm"]
 
 TIMEOUT_FRAMES = 600   # sweep's capped poll rows are the slowest (~1 emulated s)
 

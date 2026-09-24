@@ -41,6 +41,7 @@ same grey. Local runner only; not in CI.
 | capdma | capture DMA runs every line of every armed frame; enable self-clears | exact |
 | sweep | trigger runs the overflow check twice (same offset, strictly >2048) with no write-back; the tick path writes back and re-checks at >=2048; divider 0 never ticks | poll-count ranges at tick-bucket midpoints |
 | iomap | unused/write-only IO: which registers read zero vs open bus (open-bus cells are the ROM's own prefetch) | exact |
+| irqstorm | a timer interrupt raised every 1-256 cycles under a DMA burst of up to 4096 words is taken once, at a fixed cycle after the burst; crash repro for an emulator that books one event per raise (white = never finished) | exact |
 
 msrtbit is the experiment that crashes emulators which mishandle the MSR; a crash shows as
 INCONCLUSIVE, which is itself the finding.

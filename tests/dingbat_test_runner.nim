@@ -311,7 +311,7 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
       removeFile(tmp_ppm)
       let got = px[^3].toHex(2) & px[^2].toHex(2) & px[^1].toHex(2)
       return TestResult(name: test.name, passed: got == test.pass_rgb.toUpperAscii,
-                        output: &"backdrop #{got}, pass is #{test.pass_rgb.toUpperAscii}")
+                        output: &"bottom-right pixel #{got}, pass is #{test.pass_rgb.toUpperAscii}")
     if test.expected_hash.len > 0:
       # No reference image ships with these ROMs; the gate is a pinned frame
       # hash (build_jsmolka_tests).
@@ -1631,6 +1631,24 @@ proc build_gba_misc_tests(): seq[TestDef] =
       agbeeg_check: check,
     ))
 
+proc build_hwverified_tests(): seq[TestDef] =
+  ## This repo's own proof ROMs (tests/roms/hwverified), each carrying the
+  ## values an AGS-001 gave and painting a green verdict pixel at (239,159)
+  ## only if every checked cell matched (red otherwise; white = never
+  ## finished). irqstorm is also the crash repro for a per-raise interrupt
+  ## synchroniser (see its header).
+  for rom in ["msrtbit", "psrmask", "thumbcmp", "ldmuser", "pcwb", "bxdecode",
+              "irqwin", "dmabyte", "capdma", "sweep", "iomap", "irqstorm"]:
+    result.add(TestDef(
+      name: "hwverified/" & rom,
+      rom_path: "tests/roms/hwverified" / (rom & ".gba"),
+      mode: tmScreenshot,
+      timeout: 600,
+      color: true,
+      no_save: true,
+      pass_rgb: "00FF00",
+    ))
+
 proc build_jsmolka_tests(dir: string): seq[TestDef] =
   ## arm, thumb, memory, bios, save/*, unsafe report through the r12 protocol
   ## --mode=jsmolka reads, all-or-nothing, naming the first failed check. The
@@ -2555,6 +2573,8 @@ proc main() =
                              harness, no_previous, gba_regressions))
     gba_suites.add(run_suite("GBA - Other test ROMs", build_gba_misc_tests(),
                              harness, no_previous, gba_regressions))
+    gba_suites.add(run_suite("GBA - hwverified (AGS-001)", build_hwverified_tests(),
+                             harness, no_previous, gba_regressions))
     echo ""
     for suite in gba_suites:
       echo &"{suite.suite_name}: {suite.results.countIt(it.passed)}/{suite.results.len} pass"
@@ -2601,6 +2621,9 @@ proc main() =
                            harness, previous, regressions))
 
   all_suites.add(run_suite("GBA - Other test ROMs", build_gba_misc_tests(),
+                           harness, previous, regressions))
+
+  all_suites.add(run_suite("GBA - hwverified (AGS-001)", build_hwverified_tests(),
                            harness, previous, regressions))
 
   let fuzzarm_tests = build_fuzzarm_tests(ensure_fuzzarm_test_roms())

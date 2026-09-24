@@ -358,8 +358,13 @@ battery-save RTC trailer). The link-acceptance battery (`linktest`, `speclink`,
 `netlink`, `rollback` modes over `tests/roms/*.gba`) is invoked directly in
 `.github/workflows/test.yml`.
 
-`tests/roms/hwverified/`: eleven GBA ROMs carrying hardware-verified expected values with
-a self-painted verdict pixel; `python3 tests/roms/hwverified/run.py` (local only).
+`tests/roms/hwverified/`: twelve GBA ROMs (this repo's own, committed with their `.s`)
+carrying the values an AGS-001 gave, each painting a verdict pixel at (239,159): green if
+every checked cell matched, red otherwise, white if it never finished. The runner scores
+them as "GBA - hwverified (AGS-001)" on that pixel (`pass_rgb`); `python3
+tests/roms/hwverified/run.py` runs them alone. `irqstorm` is a crash repro: a timer
+interrupt raised every 1-256 cycles under a DMA burst of up to 4096 words, which an
+emulator booking one event per raise cannot survive (see its header).
 
 ## Where test ROMs come from
 

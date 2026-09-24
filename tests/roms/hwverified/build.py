@@ -26,8 +26,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 ROMS = [
     "msrtbit", "psrmask", "thumbcmp", "ldmuser", "pcwb", "bxdecode",
-    "irqwin", "dmabyte", "capdma", "sweep", "iomap",
+    "irqwin", "dmabyte", "capdma", "sweep", "iomap", "irqstorm",
 ]
+
+# ROMs that carry a link-rig payload (tests/roms/payloads/<name>.s) byte for
+# byte: it is assembled for its IWRAM home first and .incbin'd, so the ROM
+# and the console run identical code at the identical address.
+PAYLOADS = {"irqstorm": ("irqstorm", 0x03000000)}
 
 # The compressed Nintendo logo every bootable cart carries at 0x04-0x9F.
 
@@ -41,7 +46,25 @@ def gen_font_inc():
         raise SystemExit("font_gen.inc is missing")
 
 
+def build_payload(name):
+    payload, home = PAYLOADS[name]
+    src = os.path.join(os.path.dirname(HERE), "payloads", payload + ".s")
+    o, elf = (os.path.join(HERE, payload + "_payload" + ext)
+              for ext in (".o", ".elf"))
+    subprocess.run(["arm-none-eabi-as", "-mcpu=arm7tdmi", "-o", o, src],
+                   check=True, cwd=HERE)
+    subprocess.run(["arm-none-eabi-ld", f"-Ttext={home:#x}", "-o", elf, o],
+                   check=True, cwd=HERE)
+    subprocess.run(["arm-none-eabi-objcopy", "-O", "binary", elf,
+                    os.path.join(HERE, payload + "_payload.bin")],
+                   check=True, cwd=HERE)
+    os.unlink(o)
+    os.unlink(elf)
+
+
 def build(name):
+    if name in PAYLOADS:
+        build_payload(name)
     src = os.path.join(HERE, name + ".s")
     o, elf, gba = (os.path.join(HERE, name + ext)
                    for ext in (".o", ".elf", ".gba"))
@@ -65,6 +88,8 @@ def build(name):
     romfix.gba_logo(gba)
     os.unlink(o)
     os.unlink(elf)
+    if name in PAYLOADS:
+        os.unlink(os.path.join(HERE, PAYLOADS[name][0] + "_payload.bin"))
     print(f"{gba}: {len(rom)} bytes")
 
 
