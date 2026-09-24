@@ -495,6 +495,50 @@ test("the SIO link path names its game only once the core and save are in", asyn
   coherent(app);
 });
 
+// A rollback session owns the core from rollback_init (rbTryInit), before it
+// starts: "Ready — waiting for your friend…" can last a whole cross-game ROM
+// transfer. A game loaded then must end the session before it boots, not
+// after (Netplay.regress_load_during_rollback_setup).
+test("a load during a rollback session's setup ends the session first", async () => {
+  const app = await boot();
+  withNetplay(app);
+  const a = await playAThenHome(app);
+  app.runIn(`
+    // rbTryInit: the session's cores replace the solo one (A's, flushed)
+    net = { rb: { inited: true, localPlayer: 0 }, started: false, isHost: true };
+    rbExt = ".gba";
+    FS.files.set("rbrom0.gba", new Uint8Array([0x0a, 1, 2, 3]));
+    FS.files.set("rbrom0.sav", new Uint8Array(core.ram));
+    globalThis.__rbCore = { rom: 0x0a, ram: core.ram.slice() };
+    core.rom = 0; core.ram = null;
+    Module._rollback_exit_to_single = () => {
+      if (!__rbCore) return 0;
+      core.rom = __rbCore.rom; core.ram = __rbCore.ram; __rbCore = null;
+      return 1;
+    };
+    Module._rollback_exit = () => { __rbCore = null; };
+    document.getElementById("net-modal").classList.add("open"); // "Ready — waiting…"
+  `);
+  const b = u8(0x0b, 5);
+  app.idb.set("save:B.gba", b);
+  await play(app, "B.gba");
+  await drain();
+  eq(app.idb.get("save:B.gba"), b, "save:B is B's");
+  eq(app.idb.get("save:A.gba"), a, "save:A is A's");
+  assert.equal(core(app).rom, ROM["B.gba"], "the core B booted is the one running");
+  assert.equal(app.api.currentRomName, "rom.gba");
+  assert.equal(app.runIn("net"), null, "the session is gone");
+});
+
+// ...and the core itself drops a session's cores when a solo game boots, so a
+// session JS failed to end cannot be promoted over it later.
+test("initFromEmscripten drops a leftover rollback session", () => {
+  const src = readFileSync(new URL("../../src/dingbat_wasm.nim", import.meta.url), "utf8");
+  const start = src.indexOf("proc initFromEmscripten(");
+  const body = src.slice(start, src.indexOf("\nproc ", start));
+  assert.match(body, /\n\s+rollback_exit\(\)/);
+});
+
 // ── Finding 15: reset save data (SavePersistence) ───────────────────────────
 
 // The library's Reset (resetGameAction) and the Saves panel's "Reset save

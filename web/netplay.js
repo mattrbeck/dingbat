@@ -37,6 +37,11 @@ const NET_BUF_CAP = 16384; // wasm-side shuttle buffer (frames are tiny)
 
 var netMode = false; // read by the index.js RAF loop, like linkMode
 let net = null;      // active session (from modal open to shutdown)
+// A rollback session owns the core from rollback_init (rbTryInit), before it
+// has started (rollbackMode): the solo core is gone, and its teardown puts the
+// session's core back and persists it under currentOriginalName. index.js
+// ends such a session before it names or boots another game.
+const netHoldsCore = () => !!net?.rb?.inited;
 
 const netModal = document.getElementById("net-modal");
 const netTitle = document.getElementById("net-title");

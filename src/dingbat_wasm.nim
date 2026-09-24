@@ -1710,6 +1710,11 @@ proc load_cheats(text: cstring): cstring {.exportc.} =
 
 proc initFromEmscripten(rom_path: cstring) {.exportc.} =
   link_exit()
+  # A rollback session's cores go too (their files are their own, rbrom*.sav).
+  # JS ends a session before it boots a solo game; one left behind would be
+  # promoted over this core by its teardown (rollback_exit_to_single), and
+  # persisted under this game's name.
+  rollback_exit()
   clip_reset()  # capture history belongs to the previous core
   statePrinter = nil  # the printer belongs to the previous core
   stateNet = nil  # JS closes the channel

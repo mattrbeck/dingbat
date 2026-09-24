@@ -8293,17 +8293,23 @@ window.addEventListener("load", () =>
 // one at the tap; otherwise this call takes one.
 const loadRom = async (romName, originalName, opts = {}) => {
   const gen = opts.gen ?? nextLoadGen();
+  // An online session holds the core: running (netMode, rollbackMode), or a
+  // rollback session set up and waiting for the peer (netHoldsCore), whose
+  // cores have replaced the solo one.
+  const sessionHoldsCore = () => netActive() || rollbackMode ||
+    (typeof netHoldsCore === "function" && netHoldsCore());
   // A later load or close has taken over, or a link session has started and
   // owns the core.
-  const abandoned = () => gen !== loadGen || linkMode || rollbackMode || netActive();
+  const abandoned = () => gen !== loadGen || linkMode || sessionHoldsCore();
   // A capture spanning a ROM switch would splice two games.
   if (typeof abortRetroClip === "function") abortRetroClip();
   if (typeof stopClipRecording === "function") stopClipRecording();
   if (linkMode) await exitLinkMode();
   // Rollback is a link session too, though netMode is false in it: its
   // teardown persists the session's battery under currentOriginalName, so it
-  // runs while that still names the session's game.
-  if (typeof netShutdown === "function" && (netActive() || rollbackMode)) await netShutdown();
+  // runs while that still names the session's game - before this load boots
+  // anything, since it also puts the session's core back as the solo one.
+  if (typeof netShutdown === "function" && sessionHoldsCore()) await netShutdown();
   if (abandoned()) return;
   if (currentRomName && currentOriginalName) {
     await persistAutoState(); // where the outgoing game was left
