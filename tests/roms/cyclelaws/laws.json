@@ -964,9 +964,7 @@
    {
     "id": "wakeirq 0x0",
     "kind": "hex",
-    "want": "017009A1",
-    "hle_want": "00FC09A1",
-    "hle_why": "bits 16..31 are the BIOS address the interrupt returns to; the HLE has no BIOS instruction to be inside. The cycle (09A1) is the console's."
+    "want": "017009A1"
    },
    {
     "id": "wakeirq 0x10",

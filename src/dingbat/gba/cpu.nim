@@ -521,6 +521,32 @@ proc waitloop_skip(cpu: CPU; remaining: int) {.noinline.} =
     cpu.wl_time += int64(adv)
     if s.cycles == s.next_event: s.call_current()
 
+proc hle_halt_return*(cpu: CPU) =
+  ## The stub BIOS's trap at 0x170 (an ARM `swi 0`), where a Halt parked by
+  ## hle_halt goes on after its `bx lr`, woken directly or back from the
+  ## interrupt it woke for: the dispatcher's return, from the frames hle_halt
+  ## pushed (so nested halts and anything parked meanwhile keep their own).
+  ## Cycles: HALT_BIOS_RETURN from reaching 0x170 to the return's refill, of
+  ## which the trap's own fetch is one.
+  let bus = cpu.gba.bus
+  cpu.idle(HALT_BIOS_RETURN - 1)
+  # System stack: the dispatcher's {r2, lr}
+  cpu.r[2] = bus.read_word_internal(cpu.r[13])
+  cpu.r[14] = bus.read_word_internal(cpu.r[13] + 4)
+  cpu.r[13] += 8
+  # SVC stack: {caller CPSR, r12, return address}, then `movs pc, lr`
+  cpu.switch_mode(modeSVC)
+  cpu.cpsr = cast[PSR](uint32(modeSVC) or 0xC0'u32)
+  let sp = cpu.r[13]
+  cpu.spsr = cast[PSR](bus.read_word_internal(sp))
+  cpu.r[12] = bus.read_word_internal(sp + 4)
+  cpu.r[14] = bus.read_word_internal(sp + 8)
+  cpu.r[13] = sp + 12
+  discard cpu.set_reg(15, cpu.r[14])     # refills in the caller's region
+  cpu.exception_return_restore()
+  cpu.r[15] -= 4                         # arm_software_interrupt steps past the swi
+  bus.bios_latch = 0xE3A02004'u32        # as every HLE return leaves it
+
 proc tick*(cpu: CPU) =
   # IRQ before the IntrWait re-halt check: the handler must run (and set the
   # BIOS mirror flags) or IntrWait re-halts forever.
@@ -530,7 +556,9 @@ proc tick*(cpu: CPU) =
     # tests/roms/payloads/wakeirq.s on an AGB SP: the handler finds the
     # BIOS's `bx lr` after its HALTCNT write already executed, where a plain
     # wake (IME clear) resumes on the same cycle as here.
-    if HALT_WAKE_RUNS_ONE and cpu.halt_wake and not cpu.gba.bus.stub_bios:
+    # The HLE's Halt is parked in the stub BIOS and runs its `bx lr` too.
+    if HALT_WAKE_RUNS_ONE and cpu.halt_wake and
+       (not cpu.gba.bus.stub_bios or cpu.r[15] < 0x4000'u32):
       discard
     else:
       if HALT_WAKE_RUNS_ONE and cpu.halt_wake:

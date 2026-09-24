@@ -371,8 +371,86 @@ proc hle_div_body_cost(numer, denom: int32): int {.inline.} =
   div_body_cycles(uint32(abs(int64(numer)) and 0xFFFFFFFF),
                   uint32(abs(int64(denom)) and 0xFFFFFFFF))
 
+# Halt (SWI 2) runs where Nintendo's does: parked on the `bx lr` after the
+# routine's HALTCNT write (stub 0x1B4) in System mode, so a wake runs that
+# instruction to the dispatcher's return at 0x170 and an interrupt is taken
+# with the BIOS address the console's handlers find on the IRQ stack
+# (alyosha irq/halt_pc, Interactions/Halt_IRQ, Halt_DMA_IRQ read it: lr 0x174
+# after a sleep, 0x1B8 when the interrupt was recognised by the write). The
+# return is a trap at 0x170 (cpu.hle_halt_return) that pops what this pushed:
+# every piece of the halt is architectural, nothing rides in HLE fields.
+#
+# Cycles, measured against Nintendo's BIOS in this core (halt from ROM ARM,
+# ROM Thumb and IWRAM, woken by a timer with and without IME, and ending at
+# once on a pending flag): the dispatcher reads the swi's comment byte in the
+# caller's region HALT_COMMENT_READ_AT cycles after the swi's dispatch
+# starts, and the HALTCNT write lands HALT_WRITE_AT cycles after that read;
+# after the wake, `bx lr` (3), then HALT_BIOS_RETURN cycles of BIOS code
+# before the return's refill.
+const HALT_COMMENT_READ_AT {.intdefine.} = 10
+const HALT_WRITE_AT {.intdefine.} = 25
+const HALT_BIOS_RETURN {.intdefine.} = 16
+
+proc hle_halt(cpu: CPU; t_entry: int64; rfs_entry: CycleCount) =
+  let bus = cpu.gba.bus
+  let isa_step = if cpu.cpsr.thumb: 2'u32 else: 4'u32
+  let ret = cpu.r[15] - isa_step               # the instruction after the swi
+  # Back to the dispatch start (hle_swi's generic charge is not this
+  # routine's), then the dispatcher's own gamepak access: `ldrb [lr, #-2]`,
+  # which the prefetcher and the burst see as the console's does.
+  let charged = int(cpu.hle_body_start() - t_entry)
+  if charged <= bus.cycles:
+    bus.cycles -= charged
+    bus.rom_free_since = rfs_entry
+    bus.add_cycles(HALT_COMMENT_READ_AT)
+    discard bus[ret - 2]
+    bus.add_cycles(HALT_WRITE_AT)
+  else:
+    # Part of the dispatch already reached the scheduler (an armed DMA's
+    # access window): keep it, and land on the write as near as it allows
+    let page = int(bits_range(ret, 24, 27))
+    let adj = HALT_COMMENT_READ_AT + int(bus.wait16_n[page]) + HALT_WRITE_AT - charged
+    bus.add_cycles(max(adj, -bus.cycles))
+  bus.catch_up()
+  # The write (mmio.nim, HALTCNT): an interrupt already recognised is taken
+  # after the stall at the `bx lr`, without halting
+  let seen = cpu.irq_line
+  bus.add_cycles(HALT_ENTRY_STALL)
+  # The SWI's own state, on the SVC stack where each halt keeps its own:
+  # {caller CPSR, r12, return address} (r12 at [sp_svc - 8] as the console's
+  # dispatcher leaves it). Then the dispatcher's System mode with the
+  # caller's I bit, and the routine's handler-visible registers: ip =
+  # 0x04000000, r2 = 0, lr = 0x170, the {r2, lr} frame hle_swi wrote live
+  # below sp.
+  let caller = cpu.cpsr
+  cpu.switch_mode(modeSVC)
+  cpu.r[13] -= 12
+  bus.write_word_internal(cpu.r[13], uint32(caller))
+  bus.write_word_internal(cpu.r[13] + 4, cpu.r[12])
+  bus.write_word_internal(cpu.r[13] + 8, ret)
+  cpu.switch_mode(modeSYS)
+  cpu.cpsr = cast[PSR](uint32(modeSYS) or (uint32(caller) and 0x80'u32))
+  cpu.r[12] = 0x04000000'u32
+  cpu.r[2] = 0
+  cpu.r[14] = 0x170'u32
+  cpu.r[13] -= 8
+  # PC on the `bx lr`. The pipeline the HALTCNT store left is already paid
+  # for: take back the refill set_reg charges.
+  let before = bus.cycles
+  discard cpu.set_reg(15, 0x1B4'u32 - isa_step)  # the SWI handler steps isa_step
+  bus.cycles = before
+  if seen: return
+  cpu.halted = true
+  # Halt exits on IE & IF != 0 regardless of IME, including already-pending
+  cpu.gba.interrupts.schedule_interrupt_check()
+
 proc hle_swi*(cpu: CPU; swi_num: uint32) =
   ## HLE BIOS SWI dispatch; used when no BIOS image is provided.
+  if cpu.r[15] == 0x178'u32 and swi_num == 0 and not cpu.cpsr.thumb:
+    cpu.hle_halt_return()   # the stub's trap at 0x170 (ARM)
+    return
+  let t_entry = cpu.hle_body_start()
+  let rfs_entry = cpu.gba.bus.rom_free_since
   cpu.idle(SWI_HLE_BASE)
   # BIOS open-bus latch: the last opcode the BIOS fetches before returning
   # (GBATEK "Reading from BIOS memory"; mGBA suite checks it after VBlankIntrWait)
@@ -502,22 +580,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       let reset_addr = if return_flag == 0: 0x08000000'u32 else: 0x02000000'u32
       discard cpu.set_reg(15, reset_addr - isa_step)  # see isa_step
   of 0x02:  # Halt
-    # Defer the post-wake return cost to the resume boundary (HALT_RETURN_COST)
-    cpu.gba.bus.add_cycles(-HALT_RETURN_COST)
-    cpu.halt_resume_charge = HALT_RETURN_COST
-    cpu.halt_resume_addr = if cpu.cpsr.thumb: cpu.r[15] - 2 else: cpu.r[15] - 4
-    # The routine (0x1A0) halts with ip = 0x04000000, r2 = 0, lr_sys = 0x170
-    # (the dispatcher trampoline), observable by user IRQ dispatchers (see
-    # hle_intr_wait); r12/r2/lr come back from the stack slots on resume
-    cpu.gba.bus.write_word_internal(cpu.svc_sp() - 8, cpu.r[12])
-    cpu.r[12] = 0x04000000'u32
-    cpu.r[2] = 0
-    cpu.set_sys_lr(0x170'u32)
-    cpu.set_sys_sp(cpu.sys_sp() - 8)  # dispatcher {r2, lr} frame stays live
-    cpu.halt_resume_pop = true        # ...and the resume pops it back
-    cpu.halted = true
-    # Halt exits on IE & IF != 0 regardless of IME, including already-pending
-    cpu.gba.interrupts.schedule_interrupt_check()
+    cpu.hle_halt(t_entry, rfs_entry)
   of 0x03:  # Stop
     # Peripherals keep running (hardware stops sound/video/timers); the wake
     # sources are only keypad/cartridge/SIO as on hardware

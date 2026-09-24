@@ -43,6 +43,11 @@ it deliberately does not model:
 * **Handler-visible r2/r4/lr/r11 during a wait** keep caller values (real:
   mirror value / 1 / BIOS return address / spsr scratch). No known convention
   reads them. r12 = 0x04000000 is modelled (the devkitARM crt0 IntrWait ack).
-* **Nested IntrWait** (a handler calling IntrWait/Halt while one is active)
+* **Nested IntrWait** (a handler calling IntrWait/Stop while one is active)
   overwrites the single set of resume fields; the real BIOS nests through the
   stack. The parked decompression/RamReset remainder shares those fields.
+  Halt is exempt: it parks in the stub BIOS on the `bx lr` after its HALTCNT
+  write, keeps its return on the SVC and System stacks, and returns through
+  a trap at 0x170 (`hle_halt`), so it nests, and an interrupt taken during
+  it pushes the BIOS address the console's does. Its SVC frame holds the
+  caller's CPSR where the console's dispatcher keeps r11.

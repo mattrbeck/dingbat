@@ -31,10 +31,10 @@ import tables
 
 OUT = os.path.join(payloadcmp.ROMS, 'cyclelaws')
 
-HLE_EXCEPTIONS = {
-    'wakeirq 0x0': ('00FC09A1', "bits 16..31 are the BIOS address the interrupt returns to; "
-                                "the HLE has no BIOS instruction to be inside. The cycle (09A1) is the console's."),
-}
+# Cells the HLE BIOS may answer differently, {id: (hle_want, why)}. Empty
+# since the HLE's Halt parks in its stub BIOS (hle_bios.hle_halt): wakeirq
+# 0x0's return address used to be the one exception.
+HLE_EXCEPTIONS = {}
 
 
 def kind_of(row, arg):

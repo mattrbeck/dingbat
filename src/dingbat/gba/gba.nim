@@ -1202,6 +1202,7 @@ proc sbc*(cpu: CPU; operand_1, operand_2: uint32; set_conditions: bool): uint32 
 proc add*(cpu: CPU; operand_1, operand_2: uint32; set_conditions: bool): uint32 {.inline.}
 proc adc*(cpu: CPU; operand_1, operand_2: uint32; set_conditions: bool): uint32 {.inline.}
 proc clear_pipeline*(cpu: CPU)
+proc hle_halt_return*(cpu: CPU)
 proc read_instr*(cpu: CPU): uint32 {.inline.}
 # The bank an undefined CPSR mode pattern selects: r13 and r14 read 0 there
 # and the mode field holds the pattern (hardware: gbaedge UNDMODE on AGB SP,
