@@ -971,6 +971,15 @@ proc parse_state_image*(gba: GBA; data: string; origin = "state data"):
   parse_state_payload(data, ckGBA, gba.gba_rom_checksum(), GBA_STATE_ROM_TAG,
                       origin, gba.gba_legacy_rom_checksums())
 
+proc state_rom_identity*(gba: GBA): uint32 =
+  ## The ROM identity a state header carries; the desktop names slot files by it.
+  gba.gba_rom_checksum()
+
+proc state_is_for*(gba: GBA; data: string): bool =
+  ## Whether a state image's header names this cart (legacy identities too).
+  state_names_rom(data, ckGBA, gba.gba_rom_checksum(), GBA_STATE_ROM_TAG,
+                  gba.gba_legacy_rom_checksums())
+
 proc load_state_bytes*(gba: GBA; data: string): bool =
   ## Validate and apply a full state image. Mirrors load_state's rollback.
   last_state_reject_kind = srkNone

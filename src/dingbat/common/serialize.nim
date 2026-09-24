@@ -386,6 +386,22 @@ proc parse_state_payload*(data: string; core: CoreKind;
   if fnv1a(result.payload) != payload_hash:
     raise state_error("save state payload hash mismatch (corrupt file)")
 
+proc state_names_rom*(data: string; core: CoreKind; rom_checksum, rom_size: uint32;
+                      legacy_checksums: seq[uint32] = @[]): bool =
+  ## Whether a state image's header says it was made in this core for this
+  ## cart, the identity test parse_state_payload applies, and nothing else:
+  ## a damaged or too-new state for this cart still counts. Never raises and
+  ## leaves last_state_reject_kind alone.
+  if data.len < STATE_HEADER_SIZE or data[0 ..< STATE_MAGIC.len] != STATE_MAGIC:
+    return false
+  var r = Reader(buf: data, pos: 12)   # core byte
+  if r.read_u8() != uint8(core): return false
+  r.pos = 16                           # rom_checksum, rom_size
+  let file_checksum = r.read_u32()
+  let file_rom_size = r.read_u32()
+  file_rom_size == rom_size and
+    (file_checksum == rom_checksum or file_checksum in legacy_checksums)
+
 proc parse_state_thumbnail*(data: string): tuple[w, h: int; pixels: seq[byte]] =
   ## The optional thumbnail trailer (BGR555), (0,0,@[]) if absent. Never
   ## raises, so a malformed trailer cannot break state loading.

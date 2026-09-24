@@ -821,15 +821,36 @@ proc on_cheats_changed() =
   refresh_cheat_rom_patches()
   save_cheats()
 
+proc states_dir(): string = config_dir() / "states"
+
+proc state_identity(): uint32 =
+  case app.emu_kind
+  of ekGBA: app.gba_emu.state_rom_identity()
+  of ekGB:  app.gb_emu.state_rom_identity()
+  of ekNone: 0'u32
+
+proc state_is_ours(data: string): bool =
+  ## An older build's slot file (named by the ROM file name alone) belongs
+  ## to this game only if its header says so.
+  case app.emu_kind
+  of ekGBA: app.gba_emu.state_is_for(data)
+  of ekGB:  app.gb_emu.state_is_for(data)
+  of ekNone: false
+
 proc state_file_path(slot = 0): string =
-  ## Per-ROM state files. Slot 0 is the "Quick" slot and keeps the historical
-  ## `<rom>.state` name so existing saves stay loadable; slots 1..8 add a
-  ## `.slotN` suffix.
+  ## Where a slot is written: named by the ROM's file name and identity
+  ## (persist.nim), so same-named games keep their own slots. Slot 0 is the
+  ## Quick slot.
   let rom = current_rom_path()
   if rom.len == 0: return ""
-  let base = config_dir() / "states" / rom.extractFilename()
-  if slot == 0: base & ".state"
-  else: base & ".slot" & $slot & ".state"
+  states_dir() / state_file_name(rom, state_identity(), slot)
+
+proc state_slot_read_path(slot = 0): string =
+  ## Where a slot is read from: its own file, else an older build's for this
+  ## game (read only; the next Save writes the new name).
+  let rom = current_rom_path()
+  if rom.len == 0: return ""
+  state_read_path(states_dir(), rom, state_identity(), slot, state_is_ours)
 
 proc save_state_slot(slot: int): bool =
   ## Synchronous save of a numbered slot (with a thumbnail). Callers must be at
@@ -849,7 +870,7 @@ proc load_state_slot(slot: int): bool =
   if app.netlink != nil:
     last_state_error = ""
     return false
-  let path = state_file_path(slot)
+  let path = state_slot_read_path(slot)
   if path.len == 0: return false
   result = case app.emu_kind
     of ekGBA: app.gba_emu.load_state(path)
@@ -889,8 +910,10 @@ proc state_reject_sentence(): string =
     "That save state couldn't be loaded."
 
 proc delete_state_slot(slot: int) =
-  let path = state_file_path(slot)
-  if path.len > 0 and fileExists(path):
+  let rom = current_rom_path()
+  if rom.len == 0: return
+  for path in state_delete_paths(states_dir(), rom, state_identity(), slot,
+                                 state_is_ours):
     try:
       removeFile(path)
       echo "State deleted: ", path
@@ -904,7 +927,7 @@ proc refresh_state_slots() =
   let w = app.save_states
   w.have_rom = app.emu_kind != ekNone
   for i in 0 ..< NUM_SLOTS:
-    let path = state_file_path(i)
+    let path = state_slot_read_path(i)
     if path.len == 0 or not fileExists(path):
       w.set_slot(i, used = false, label = "", tex = 0, tw = 0, th = 0)
       continue

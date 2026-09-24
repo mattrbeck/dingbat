@@ -1015,6 +1015,14 @@ proc parse_state_image*(gb: GB; data: string; origin = "state data"):
   parse_state_payload(data, ckGB, gb.gb_rom_checksum(),
                       uint32(gb.cartridge.rom.len), origin)
 
+proc state_rom_identity*(gb: GB): uint32 =
+  ## The ROM identity a state header carries; the desktop names slot files by it.
+  gb.gb_rom_checksum()
+
+proc state_is_for*(gb: GB; data: string): bool =
+  ## Whether a state image's header names this cart.
+  state_names_rom(data, ckGB, gb.gb_rom_checksum(), uint32(gb.cartridge.rom.len))
+
 proc load_state_bytes*(gb: GB; data: string): bool =
   ## Validate and apply a full state image. Mirrors load_state's rollback.
   ## The reject kind is cleared first: not every failure classifies itself,

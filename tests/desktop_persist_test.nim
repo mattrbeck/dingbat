@@ -2,7 +2,8 @@
 ## cores (formal/DesktopState/SavePersistence.lean has the traces):
 ## a battery write that fails keeps the game running and tells the player
 ## once per run of failures (finding 4); a battery or save-state write cut
-## short leaves the previous file whole (finding 18).
+## short leaves the previous file whole (finding 18); two games with the same
+## file name keep their own save-state slots (finding 2).
 
 import std/[os, strformat, strutils, tempfiles]
 import dingbat/gba/gba
@@ -24,11 +25,14 @@ proc check(cond: bool; msg: string) =
 let dir = createTempDir("dingbat_desktop_persist_", "")
 let nowhere = dir / "missing-folder" / "game.sav"   # open(fmWrite) fails
 
-proc make_gba_rom(name: string): string =
-  ## A 4 KB ROM of zeros carrying the SRAM library ID (32 KB battery SRAM).
+proc make_gba_rom(name: string; folder = ""; mark = 0'u8): string =
+  ## A 4 KB ROM of zeros carrying the SRAM library ID (32 KB battery SRAM);
+  ## `mark` makes a different game under the same name.
   var rom = newString(0x1000)
   for i, c in "SRAM_V113": rom[0x200 + i] = c
-  result = dir / name & ".gba"
+  rom[0x800] = char(mark)
+  createDir(dir / folder)
+  result = dir / folder / name & ".gba"
   writeFile(result, rom)
 
 proc make_gb_rom(name: string): string =
@@ -44,7 +48,8 @@ proc boot_gba(rom: string): GBA =
   result.post_init()
 
 proc boot_gb(rom: string): GB =
-  new_gb("", rom, fifo = true, headless = true, run_bios = false)
+  result = new_gb("", rom, fifo = true, headless = true, run_bios = false)
+  result.post_init()
 
 echo "=== A battery write that fails (finding 4) ==="
 
@@ -190,6 +195,54 @@ when defined(posix):
     check(g.load_state(path), "the surviving state still loads")
 
   check(no_temp_left(), "no temp file is left behind by a failed write")
+
+echo "=== Same file name, different game (finding 2) ==="
+
+block:
+  let a = boot_gba(make_gba_rom("Pokemon", "usa"))
+  let b = boot_gba(make_gba_rom("Pokemon", "hacks", mark = 1))
+  let sdir = dir / "slots"
+  createDir(sdir)
+  let a_own = sdir / state_file_name(a.rom_path, a.state_rom_identity(), 0)
+  let b_own = sdir / state_file_name(b.rom_path, b.state_rom_identity(), 0)
+  check(a_own != b_own, "two games named Pokemon.gba get different Quick slot files")
+  check(state_file_name(a.rom_path, a.state_rom_identity(), 3) !=
+        state_file_name(a.rom_path, a.state_rom_identity(), 0),
+        "each slot has its own file")
+  proc a_ours(data: string): bool = a.state_is_for(data)
+  proc b_ours(data: string): bool = b.state_is_for(data)
+
+  check(b.save_state(b_own, thumbnail = true), "B's Quick Save writes its own file")
+  check(state_read_path(sdir, a.rom_path, a.state_rom_identity(), 0, a_ours) == a_own and
+        not fileExists(a_own), "A's Quick slot does not show B's state")
+
+  # A state an older build wrote under the bare file name, for A.
+  let legacy = sdir / legacy_state_file_name(a.rom_path, 0)
+  check(a.save_state(legacy), "an older build's Quick slot file for A")
+  check(state_read_path(sdir, a.rom_path, a.state_rom_identity(), 0, a_ours) == legacy,
+        "A reads its older-build Quick slot")
+  check(a.load_state(state_read_path(sdir, a.rom_path, a.state_rom_identity(), 0, a_ours)),
+        "and loads it")
+  check(state_read_path(sdir, b.rom_path, b.state_rom_identity(), 0, b_ours) == b_own,
+        "B never reads A's older-build file")
+  check(legacy notin state_delete_paths(sdir, b.rom_path, b.state_rom_identity(), 0, b_ours),
+        "B's Delete never removes A's older-build file")
+  check(state_delete_paths(sdir, a.rom_path, a.state_rom_identity(), 0, a_ours) == @[legacy],
+        "A's Delete removes its older-build file")
+  check(a.save_state(a_own), "A's next Quick Save writes the new name")
+  check(state_read_path(sdir, a.rom_path, a.state_rom_identity(), 0, a_ours) == a_own,
+        "and the new file is what the slot shows")
+  check(state_delete_paths(sdir, a.rom_path, a.state_rom_identity(), 0, a_ours) ==
+        @[a_own, legacy], "A's Delete then removes both, so the slot shows empty")
+  check(fileExists(b_own) and b.load_state(b_own), "B's own state is untouched throughout")
+
+block:  # GB: the same identity test
+  let g = boot_gb(make_gb_rom("gb_ident"))
+  let path = dir / "gb_ident.state"
+  check(g.save_state(path), "a GB state saves")
+  check(g.state_is_for(readFile(path)), "its header names its cart")
+  let other = boot_gba(make_gba_rom("gba_ident"))
+  check(not other.state_is_for(readFile(path)), "a GBA cart does not claim a GB state")
 
 removeDir(dir)
 

@@ -85,7 +85,7 @@ proposed change at once. Each flag is one small Nim change:
 |---|---|---|---|
 | `linkGate` | `process_pending_state`, `on_load` and File > Quick Load refuse while `app.netlink != nil` | `bug_menu_quick_load_while_linked`, `bug_window_load_while_linked`, `bug_quick_load_races_link` | `loads_ok` |
 | `staleView` | `load_rom` calls `app.save_states.mark_stale()` | `bug_window_shows_previous_games_slots`, `bug_window_delete_hidden_slot` | `fi_ok` (`ViewJ`, `blind = []`) |
-| `identity` | `state_file_path` adds the ROM identity (`rom_identity`) to the name; the old name is only ever read | `bug_same_name_state_overwritten` | `st_ok` |
+| `identity` | `state_file_path` adds the ROM identity (`state_rom_identity`) to the name; the old name is only ever read, and only when its header names this cart | `bug_same_name_state_overwritten` | `st_ok` |
 | `lock` | a window whose game is already open in another window uses `<name>-p2.sav` / `-p2` states (seeded from the first, as the web's 2P mode does) | `bug_two_windows_lost_update` | `fi_ok` (`Excl`, `BaseJ`, `clobbers = []`) |
 | `catchIo` | `write_save` catches IOError/OSError like `mbc_save`; both record it (`save_error`) and the app shows it until a write lands (`batErr`) | `bug_gba_save_error_crashes`, `gb_save_error_unseen` | `clean_ok`, `regress_gba_save_error` |
 | `flushGba` | `flush_gb_save` also flushes the GBA battery | `bug_gba_quit_drops_battery` | `clean_ok` |
@@ -315,7 +315,17 @@ def fixed : Fix := ⟨true, true, true, true, true, true, true, true, true, true
 def savPath (r : Rom) (p2 : Bool) : SavPath := (r.dir, r.base, p2)
 
 /-- state_file_path 823-831: `config_dir/states/<rom.extractFilename()>[.slotN].state`.
-    Fixed: named by the ROM identity (and -p2). -/
+    Fixed: named by the ROM identity (and -p2). What shipped
+    (frontend/persist.nim `state_file_name`) is
+    `<rom file name>-<identity>[.slotN].state`: the file name only splits one
+    game's slots further, and every property below reads only the identity
+    part. It also reads, never writes, an older build's
+    `<rom file name>[.slotN].state` when the slot has no file of its own and
+    that file's header names this cart (`state_read_path`, and Delete removes
+    it too). The model's `init` holds no such files (every run starts on an
+    empty disk), so that fallback is not modelled; its loads are guarded by the
+    same header check as any other (`loads_ok`) and it never shows or deletes
+    another game's file (tests/desktop_persist_test.nim). -/
 def stPath (fx : Fix) (r : Rom) (p2 : Bool) (k : Nat) : StPath :=
   if fx.identity then (r.game, (if p2 then 1 else 0), k) else (r.base, r.ext, k)
 

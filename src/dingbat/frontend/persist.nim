@@ -1,7 +1,10 @@
 ## What the desktop app decides about a game's files that needs no SDL, ImGui
 ## or GL, so tests/desktop_persist_test.nim can run it headless: when to tell
-## the player their battery save is not being written, and what to say when a
-## save state could not be written. dingbat.nim draws.
+## the player their battery save is not being written, what to say when a
+## save state could not be written, and what the save-state slot files are
+## called. dingbat.nim draws and does the file work.
+
+import std/[os, strutils]
 
 type
   BatteryNotice* = object
@@ -41,3 +44,48 @@ const
     "holds what it held before."
   SLOT_SAVE_FAILED* =
     "Saving didn't work; that slot still holds what it held before."
+
+# ──────────────────────────── Save-state slot files ────────────────────────────
+#
+# A slot file is named by the ROM's file name and its ROM identity (the hash
+# the state header carries), so two different games that share a file name
+# (a hack beside the original, two zips whose inner ROMs share a name) keep
+# separate slots. Older builds used the file name alone; such a file is still
+# read when the slot has no file of its own and its header names this cart,
+# and is never written.
+
+proc state_file_name*(rom_path: string; identity: uint32; slot: int): string =
+  ## `<rom file name>-<identity, 8 hex digits>[.slotN].state`; slot 0 is the
+  ## Quick slot.
+  result = rom_path.extractFilename() & "-" & identity.toHex(8)
+  if slot != 0: result.add ".slot" & $slot
+  result.add ".state"
+
+proc legacy_state_file_name*(rom_path: string; slot: int): string =
+  ## What builds before the identity names called the slot.
+  result = rom_path.extractFilename()
+  if slot != 0: result.add ".slot" & $slot
+  result.add ".state"
+
+proc legacy_state_is_ours(path: string; ours: proc(data: string): bool): bool =
+  if not fileExists(path): return false
+  try: ours(readFile(path))
+  except CatchableError: false
+
+proc state_read_path*(dir, rom_path: string; identity: uint32; slot: int;
+                      ours: proc(data: string): bool): string =
+  ## The file a slot shows and loads: its own, else an older build's file
+  ## whose header names this cart (`ours`), else its own name (not there).
+  result = dir / state_file_name(rom_path, identity, slot)
+  if fileExists(result): return
+  let old = dir / legacy_state_file_name(rom_path, slot)
+  if legacy_state_is_ours(old, ours): return old
+
+proc state_delete_paths*(dir, rom_path: string; identity: uint32; slot: int;
+                         ours: proc(data: string): bool): seq[string] =
+  ## Every file Delete must remove so the slot shows empty: its own and an
+  ## older build's for this cart. Never another game's.
+  let own = dir / state_file_name(rom_path, identity, slot)
+  if fileExists(own): result.add own
+  let old = dir / legacy_state_file_name(rom_path, slot)
+  if legacy_state_is_ours(old, ours): result.add old
