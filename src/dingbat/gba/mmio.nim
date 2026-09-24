@@ -81,6 +81,16 @@ proc `[]=`*(mmio: MMIO; address: uint32; value: uint8) =
     # anywhere, so a game could halt itself by a route hardware ignores.
     # SWI 2 is unaffected: hle_bios sets cpu.halted directly.
     if (mmio.gba.cpu.r[15] and 0x0F000000'u32) != 0: return
+    # Entering the halt stalls the CPU HALT_ENTRY_STALL cycles, and an
+    # interrupt the CPU had already recognised by the write is taken at the
+    # boundary after them, with no halt and no wake instruction (alyosha
+    # irq/halt_pc_2..4, a timer overflowing across Halt's HALTCNT write:
+    # recognised on or before the write's cycle, the handler finds the
+    # BIOS's `bx lr` not yet run, 2 cycles after the write; recognised a
+    # cycle after it, `bx lr` has run, from 2 cycles after the write).
+    let seen = mmio.gba.cpu.irq_line and not bit(value, 7)
+    mmio.gba.bus.add_cycles(HALT_ENTRY_STALL)
+    if seen: return
     mmio.gba.cpu.halted = true
     mmio.gba.cpu.stopped = bit(value, 7)
     # Stop blanks the LCD without a memory write.

@@ -1098,6 +1098,8 @@ const PREFETCH_TOGGLE_LAW* {.booldefine.} = true
 const HALT_WAKE_RUNS_ONE* {.booldefine.} = true
   ## An interrupt that wakes a halted CPU is taken one instruction after the
   ## wake, not at it (cpu.tick; tests/roms/payloads/wakeirq.s).
+const HALT_ENTRY_STALL* {.intdefine.} = 2
+  ## Cycles a HALTCNT write stalls the CPU before the halt can end (mmio.nim).
 const HALT_WAKE_INSTR_COST* = 3
   ## What that instruction costs in Nintendo's BIOS: `bx lr` after Halt's
   ## HALTCNT write, `bl` after IntrWait's. The HLE charges it by number.
