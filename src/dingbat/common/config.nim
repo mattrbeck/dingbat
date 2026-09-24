@@ -618,6 +618,11 @@ proc config_entries(cfg: Config): seq[ConfigEntry] =
 proc entry_table(entries: seq[ConfigEntry]): Table[string, string] =
   for (key, text) in entries: result[key] = text
 
+proc same_file*(a, b: Config): bool =
+  ## save_config would write the same settings for both (bindings compared
+  ## as sets, whatever order they were made in).
+  config_entries(a) == config_entries(b)
+
 proc render_entries(entries: seq[ConfigEntry]): string =
   var lines = @["---"]
   var section = ""

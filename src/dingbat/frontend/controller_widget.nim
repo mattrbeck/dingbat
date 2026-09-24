@@ -99,9 +99,12 @@ proc reset*(w: ControllerWidget) =
   for k, v in w.cfg.controller_bindings.pairs:
     w.editing[k] = v
 
-proc apply*(w: ControllerWidget) =
-  w.cfg.controller_bindings = initTable[cint, Input]()
+proc apply_to*(w: ControllerWidget; cfg: Config) =
+  cfg.controller_bindings = initTable[cint, Input]()
   for k, v in w.editing.pairs:
-    w.cfg.controller_bindings[k] = v
-  w.cfg.gb_rumble = w.rumble
+    cfg.controller_bindings[k] = v
+  cfg.gb_rumble = w.rumble
+
+proc apply*(w: ControllerWidget) =
+  w.apply_to(w.cfg)
   w.selection = none(Input)

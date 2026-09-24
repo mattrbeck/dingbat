@@ -46,6 +46,20 @@ proc do_apply(ed: ConfigEditor) =
   ed.controller.apply()
   save_config(ed.cfg)
 
+proc has_unapplied_edits*(ed: ConfigEditor): bool =
+  ## Apply would change the settings file: the X asks before dropping them.
+  let pending = Config()
+  pending[] = ed.cfg[]
+  ed.bios.apply_to(pending)
+  ed.video.apply_to(pending)
+  ed.keybindings.apply_to(pending)
+  ed.controller.apply_to(pending)
+  not same_file(pending, ed.cfg)
+
+proc end_captures(ed: ConfigEditor) =
+  ed.keybindings.selection = none(Input)
+  ed.controller.selection = none(Input)
+
 # Restore every setting to its default while keeping the user's data (file
 # paths, recents, explorer directory, the runtime headless flag); the list of
 # what is kept lives in reset_to_defaults, so a new setting resets too.
@@ -83,7 +97,15 @@ proc render*(ed: ConfigEditor) =
                      ImVec2(x: 0, y: 0))
   igSetNextWindowSize(ImVec2(x: 560, y: min(460.0'f32, work_h - 56.0'f32)),
                       cint(ImGui_Cond_FirstUseEver))
-  if igBegin("Settings", addr ed.open, 0):
+  let shown = igBegin("Settings", addr ed.open, 0)
+  # The X: a capture in progress ends with it; edits Apply would save are
+  # asked about first, and the window stays open until the answer.
+  if not ed.open:
+    ed.end_captures()
+    if ed.has_unapplied_edits():
+      ed.open = true
+      igOpenPopup_Str("Discard changes?", 0)
+  if shown:
     # The tab pane reserves room for the action row: a too-short window
     # scrolls the pane, never the buttons.
     let footer = igGetFrameHeightWithSpacing() + 10.0'f32
@@ -147,8 +169,22 @@ proc render*(ed: ConfigEditor) =
         igCloseCurrentPopup()
       igEndPopup()
 
+  # Outside `shown`: the X of a collapsed window asks too
+  if igBeginPopupModal("Discard changes?", nil,
+                       cint(ImGui_WindowFlags_AlwaysAutoResize)):
+    igText("These settings have not been applied.")
+    igSeparator()
+    if igButton("Apply", ImVec2(x: 100, y: 0)):
+      ed.do_apply()
+      ed.open = false
+      igCloseCurrentPopup()
+    igSameLine(0, -1)
+    if igButton("Discard", ImVec2(x: 100, y: 0)):
+      ed.open = false
+      igCloseCurrentPopup()
+    igSameLine(0, -1)
+    if igButton("Cancel", ImVec2(x: 100, y: 0)):
+      igCloseCurrentPopup()
+    igEndPopup()
+
   igEnd()
-  # Closed with the X this frame: a capture in progress ends with the window
-  if not ed.open:
-    ed.keybindings.selection = none(Input)
-    ed.controller.selection = none(Input)

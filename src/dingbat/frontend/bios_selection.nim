@@ -88,8 +88,10 @@ proc reset*(b: BiosSelection) =
                 elif b.cfg.use_hle: 0'i32
                 else: 1'i32
 
-proc apply*(b: BiosSelection) =
-  b.cfg.bios_path      = b.bios_buf_str()
-  b.cfg.run_bios       = b.run_bios
-  b.cfg.use_hle        = b.bios_mode == 0
-  b.cfg.hle_after_bios = b.bios_mode == 2
+proc apply_to*(b: BiosSelection; cfg: Config) =
+  cfg.bios_path      = b.bios_buf_str()
+  cfg.run_bios       = b.run_bios
+  cfg.use_hle        = b.bios_mode == 0
+  cfg.hle_after_bios = b.bios_mode == 2
+
+proc apply*(b: BiosSelection) = b.apply_to(b.cfg)

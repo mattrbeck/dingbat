@@ -87,8 +87,11 @@ proc reset*(w: KeybindingsWidget) =
   for k, v in w.cfg.keybindings.pairs:
     w.editing[k] = v
 
-proc apply*(w: KeybindingsWidget) =
-  w.cfg.keybindings = initTable[cint, Input]()
+proc apply_to*(w: KeybindingsWidget; cfg: Config) =
+  cfg.keybindings = initTable[cint, Input]()
   for k, v in w.editing.pairs:
-    w.cfg.keybindings[k] = v
+    cfg.keybindings[k] = v
+
+proc apply*(w: KeybindingsWidget) =
+  w.apply_to(w.cfg)
   w.selection = none(Input)

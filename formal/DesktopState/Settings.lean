@@ -1,13 +1,13 @@
 -- What this models, for formal/anchors.mjs (which lists stale models):
 -- @models src/dingbat.nim: load_rom apply_color_correction apply_master_volume apply_fifo_interp apply_speed_mode set_fullscreen render_imgui handle_input main
--- @models src/dingbat/frontend/config_editor.nim: new_config_editor do_reset do_apply do_factory_reset render
--- @models src/dingbat/frontend/keybindings_widget.nim: wants_input key_released load_preset render reset apply
--- @models src/dingbat/frontend/controller_widget.nim: wants_input button_released render reset apply
--- @models src/dingbat/frontend/bios_selection.nim: render reset apply
--- @models src/dingbat/frontend/video_widget.nim: reset apply
+-- @models src/dingbat/frontend/config_editor.nim: new_config_editor do_reset do_apply has_unapplied_edits end_captures do_factory_reset render
+-- @models src/dingbat/frontend/keybindings_widget.nim: wants_input key_released load_preset render reset apply_to apply
+-- @models src/dingbat/frontend/controller_widget.nim: wants_input button_released render reset apply_to apply
+-- @models src/dingbat/frontend/bios_selection.nim: render reset apply_to apply
+-- @models src/dingbat/frontend/video_widget.nim: reset apply_to apply
 -- @models src/dingbat/frontend/file_explorer.nim: new_file_explorer render close
 -- @models src/dingbat/frontend/cheats_widget.nim: attach
--- @models src/dingbat/common/config.nim: new_config reset_to_defaults parse_config load_config_file load_config save_config_file save_config key_name_to_code key_code_to_name keycode_file_name keycode_from_file_name boot_settings
+-- @models src/dingbat/common/config.nim: new_config reset_to_defaults parse_config same_file load_config_file load_config save_config_file save_config key_name_to_code key_code_to_name keycode_file_name keycode_from_file_name boot_settings
 -- @models src/dingbat/frontend/window_restore.nim: restores_windows system_restores_windows start_fullscreen
 
 /-
@@ -171,6 +171,11 @@ What shipped, switch by switch:
   `fsOK_reachable`: cfg, the file and the window always agree;
   `fixed_restart_fullscreen`: a restart is fullscreen iff the window was and
   the platform restores windows.
+* `confirmDiscard` (fix round 2): the X ends a capture, and with edits Apply
+  would save opens "Discard changes?" (Apply / Discard / Cancel) with the
+  window kept open behind it (`regress_close_discards_edits`).
+  `fixed_close_drops_nothing`: the X closes only when Apply would change
+  nothing (via `discOK_reachable`).
 -/
 namespace DesktopState.Settings
 
@@ -265,11 +270,16 @@ structure Fix where
   it quit fullscreen and the platform restores windows (window_restore.nim),
   and otherwise clears the saved flag (fix round 2, as shipped). -/
   fsRestore : Bool := false
+  /-- The Settings window's X ends a capture, and with edits Apply would
+  save it opens "Discard changes?" (Apply / Discard / Cancel) instead of
+  closing (fix round 2, as shipped). -/
+  confirmDiscard : Bool := false
 
 def real : Fix := {}
 def fixed : Fix :=
   { openGate := true, visGate := true, captureFilter := true, resetAll := true, biosGate := true,
-    feFresh := true, numericKeys := true, cliApart := true, moveAside := true, fsRestore := true }
+    feFresh := true, numericKeys := true, cliApart := true, moveAside := true, fsRestore := true,
+    confirmDiscard := true }
 def naive : Fix := { resetNaive := true }
 
 /-! ## Config and the file -/
@@ -373,6 +383,14 @@ structure Ed where
   vFifo      : Bool             -- video.gb_renderer == 0
   vSgb       : Bool             -- video.sgb_enable
   resetPopup : Bool             -- the "Reset settings?" modal is open
+  /-- A control that writes a widget value was used since the widgets were
+  last loaded or applied. The shipped check (has_unapplied_edits: the
+  widgets applied to a copy of cfg, compared by same_file) is exact; this
+  over-approximates it (an edit put back by hand still counts), which only
+  adds prompts to the model. `discOK_reachable` shows that whenever it is
+  false, Apply would change nothing, so the shipped check is silent too. -/
+  edited     : Bool
+  discardPopup : Bool           -- the "Discard changes?" modal is open
 
 /-- new_config_editor (config_editor 23-32): widgets are created empty; the
 first open's do_reset fills them. The first tab is ImGui's default. -/
@@ -381,7 +399,7 @@ def initEd : Ed :=
     kbVis := false, kbSel := none, kbEdit := fun _ => none,
     padVis := false, padSel := none, padEdit := fun _ => none,
     bMode := 0, bRun := false, bFile := false, vFifo := false, vSgb := false,
-    resetPopup := false }
+    resetPopup := false, edited := false, discardPopup := false }
 
 inductive Dlg where
   | none | rom | bios
@@ -499,7 +517,8 @@ def edLoad (c : Cfg) (e : Ed) : Ed :=
            padSel := none, padEdit := c.pad,                       -- controller 95-100
            bMode := if c.afterBios then 2 else if c.useHle then 0 else 1,  -- bios 66-76
            bRun := c.runBios, bFile := c.biosFile,
-           vFifo := c.gbFifo, vSgb := c.sgb }                      -- video 93-99
+           vFifo := c.gbFifo, vSgb := c.sgb,                       -- video 93-99
+           edited := false }
 
 /-- The widgets' apply() procs (config_editor 41-45), before save_config. -/
 def edStore (e : Ed) (c : Cfg) : Cfg :=
@@ -510,7 +529,8 @@ def edStore (e : Ed) (c : Cfg) : Cfg :=
 
 /-- do_apply (config_editor 41-46). -/
 def doApply (fx : Fix) (s : S) : S :=
-  save fx { s with cfg := edStore s.ed s.cfg, ed := { s.ed with kbSel := none, padSel := none } }
+  save fx { s with cfg := edStore s.ed s.cfg,
+                   ed := { s.ed with kbSel := none, padSel := none, edited := false } }
 
 /-- do_factory_reset's cfg writes (config_editor 52-71). fifo_interp and
 speed_mode are not among them. -/
@@ -581,7 +601,7 @@ def captureKey (fx : Fix) (e : Ed) (k : Key) : Ed :=
     if fx.captureFilter && (k.reserved || (!fx.numericKeys && !k.named)) then e
     else { e with kbEdit := fun k' => if k' = k then some sel
                                       else if e.kbEdit k' = some sel then none else e.kbEdit k',
-                  kbSel := nextInp sel }
+                  kbSel := nextInp sel, edited := true }
 
 /-- button_released (controller 31-46). -/
 def capturePad (e : Ed) (b : Nat) : Ed :=
@@ -591,7 +611,7 @@ def capturePad (e : Ed) (b : Nat) : Ed :=
   | some sel =>
     { e with padEdit := fun b' => if b' = b then some sel
                                   else if e.padEdit b' = some sel then none else e.padEdit b',
-             padSel := nextInp sel }
+             padSel := nextInp sel, edited := true }
 
 /-- One KeyDown (`down`) / KeyUp. -/
 def onKey (fx : Fix) (s : S) (k : Key) (down : Bool) : S :=
@@ -652,6 +672,7 @@ inductive Ev where
   | setBiosMode (m : Nat) | setRunBios (b : Bool) | biosBrowse
   | setFifo (b : Bool) | setSgb (b : Bool)
   | apply | revert | ok | resetDefaults | resetConfirm | resetCancel
+  | discardApply | discardConfirm | discardCancel   -- the "Discard changes?" modal (fixed)
   -- ImGui: the file explorer modal
   | feSelect (f : FileE) | feNavigate | feOpen | feCancel
   -- the window: Audio/Video > Fullscreen, or Cmd/Ctrl+F (set_fullscreen)
@@ -662,7 +683,8 @@ inductive Ev where
   | setSys (b : Bool)      -- the user flips macOS's Close-windows switch
 
 /-- No modal popup is up, so the menu bar and the Settings window take clicks. -/
-def uiFree (s : S) : Bool := s.pc == .ui && !s.ed.resetPopup && s.fe.dlg == .none
+def uiFree (s : S) : Bool :=
+  s.pc == .ui && !s.ed.resetPopup && !s.ed.discardPopup && s.fe.dlg == .none
 /-- The Settings window's title bar takes clicks. -/
 def inWin (s : S) : Bool := uiFree s && s.ed.isOpen
 /-- A tab's contents take clicks. -/
@@ -690,7 +712,7 @@ def stepO (fx : Fix) (s : S) : Ev → Option S
     -- igNewFrame computes WantCaptureKeyboard from the popups open now
     -- (imgui.cpp 5515-5521: ActiveId or a modal), then ce.render's top.
     if s.pc == .present then
-      some { s with pc := .ui, wck := s.ed.resetPopup || s.fe.dlg != .none,
+      some { s with pc := .ui, wck := s.ed.resetPopup || s.ed.discardPopup || s.fe.dlg != .none,
                     ed := ceTop fx s.cfg s.ed }
     else none
   | .noRender => if s.pc == .present then some { s with pc := .emu } else none
@@ -743,8 +765,14 @@ def stepO (fx : Fix) (s : S) : Ev → Option S
   | .menuClearRecent =>
     if uiFree s then some (save fx { s with cfg := { s.cfg with recent := none } }) else none
   | .winClose =>
-    -- igBegin's X writes ed.open = false (92); nothing else runs
-    if inWin s then some { s with ed := { s.ed with isOpen := false } } else none
+    -- igBegin's X writes ed.open = false (92); nothing else runs. Fixed:
+    -- captures end, and edits keep the window open behind the modal.
+    if inWin s then
+      some (if fx.confirmDiscard then
+              { s with ed := { s.ed with kbSel := none, padSel := none, isOpen := s.ed.edited,
+                                         discardPopup := s.ed.edited } }
+            else { s with ed := { s.ed with isOpen := false } })
+    else none
   | .winCollapse b =>
     if inWin s then some { s with ed := { s.ed with collapsed := b } } else none
   | .selectTab t =>
@@ -757,19 +785,23 @@ def stepO (fx : Fix) (s : S) : Ev → Option S
     if inTab s .pad && i < 10 then some { s with ed := { s.ed with padSel := some i } } else none
   | .kbPresetDefault =>
     -- keybindings 43-47, 52-53
-    if inTab s .kb then some { s with ed := { s.ed with kbEdit := defaultKb, kbSel := none } }
+    if inTab s .kb then
+      some { s with ed := { s.ed with kbEdit := defaultKb, kbSel := none, edited := true } }
     else none
   | .setBiosMode m =>
-    if inTab s .bios && m < 3 then some { s with ed := { s.ed with bMode := m } } else none
+    if inTab s .bios && m < 3 then some { s with ed := { s.ed with bMode := m, edited := true } }
+    else none
   | .setRunBios b =>
-    if inTab s .bios then some { s with ed := { s.ed with bRun := b } } else none
+    if inTab s .bios then some { s with ed := { s.ed with bRun := b, edited := true } } else none
   | .biosBrowse =>
     -- bios 45, 59: fe.render("GBA BIOS", browse, ...)
     if inTab s .bios then
       some { s with fe := { dlg := .bios, sel := if fx.feFresh then none else s.fe.sel } }
     else none
-  | .setFifo b => if inTab s .video then some { s with ed := { s.ed with vFifo := b } } else none
-  | .setSgb b => if inTab s .video then some { s with ed := { s.ed with vSgb := b } } else none
+  | .setFifo b =>
+    if inTab s .video then some { s with ed := { s.ed with vFifo := b, edited := true } } else none
+  | .setSgb b =>
+    if inTab s .video then some { s with ed := { s.ed with vSgb := b, edited := true } } else none
   | .apply => if inWin s && !s.ed.collapsed then some (doApply fx s) else none
   | .revert =>
     if inWin s && !s.ed.collapsed then some { s with ed := edLoad s.cfg s.ed } else none
@@ -784,6 +816,19 @@ def stepO (fx : Fix) (s : S) : Ev → Option S
     if s.pc == .ui && s.ed.resetPopup then some (factoryReset fx s) else none
   | .resetCancel =>
     if s.pc == .ui && s.ed.resetPopup then some { s with ed := { s.ed with resetPopup := false } }
+    else none
+  | .discardApply =>
+    if s.pc == .ui && s.ed.discardPopup then
+      some (let s' := doApply fx s
+            { s' with ed := { s'.ed with isOpen := false, discardPopup := false } })
+    else none
+  | .discardConfirm =>
+    -- the edits stay in the widgets; the next open's do_reset drops them
+    if s.pc == .ui && s.ed.discardPopup then
+      some { s with ed := { s.ed with isOpen := false, discardPopup := false } }
+    else none
+  | .discardCancel =>
+    if s.pc == .ui && s.ed.discardPopup then some { s with ed := { s.ed with discardPopup := false } }
     else none
   | .feSelect f =>
     -- file_explorer 104-108
@@ -803,7 +848,7 @@ def stepO (fx : Fix) (s : S) : Ev → Option S
           let s' := { s with fe := { s.fe with dlg := .none } }
           match s.fe.dlg with
           | .rom => loadRom fx s' f                                   -- 1473-1474
-          | _ => { s' with ed := { s'.ed with bFile := true } })      -- bios 59-64
+          | _ => { s' with ed := { s'.ed with bFile := true, edited := true } })  -- bios 59-64
     else none
   | .feCancel =>
     if s.pc == .ui && s.fe.dlg != .none then some { s with fe := { s.fe with dlg := .none } }
@@ -1182,7 +1227,8 @@ theorem regress_reset_defaults :
 /-! ## Other observations -/
 
 /-- The X is Cancel: edits made before it are dropped at the next open (the
-open edge's do_reset). No prompt; the Revert button does the same. -/
+open edge's do_reset). No prompt; the Revert button does the same. Fixed
+(`confirmDiscard`): `regress_close_discards_edits`. -/
 theorem obs_close_discards_edits :
     ((run real init (openSettingsGba ++ iter [.selectTab .video] ++ iter [.setFifo false] ++
         iter [.winClose] ++ iter [.menuSettings])).map fun s =>
@@ -1880,6 +1926,10 @@ theorem invF_stepO {s t : S} (h : InvF s) (e : Ev) (he : stepO fixed s e = some 
     simp only [stepO] at he; split at he <;> cases he
     have h' := invF_doApply h
     exact invF_mk' h' h'.cfg h'.disk rfl rfl h'.fe rfl
+  | discardApply =>
+    simp only [stepO] at he; split at he <;> cases he
+    have h' := invF_doApply h
+    exact invF_mk' h' h'.cfg h'.disk rfl rfl h'.fe rfl
   | revert =>
     simp only [stepO] at he; split at he <;> cases he
     exact ⟨h.cfg, h.disk, h.cfg.1, h.cfg.2.1, h.fe, h.core⟩
@@ -1972,6 +2022,261 @@ theorem fixed_reset_is_defaults (c : Cfg) :
 theorem real_reset_keeps (c : Cfg) :
     (factoryCfg real c).interp = c.interp ∧ (factoryCfg real c).speed = c.speed :=
   ⟨rfl, rfl⟩
+
+/-! ## The Settings window's X
+
+The code as it is drops the widgets' edits on the X without asking
+(`obs_close_discards_edits`). Fixed (`confirmDiscard`), the X asks
+"Discard changes?" when Apply would change the file, and closes at once
+otherwise. -/
+
+/-- The edit, then the X: the window stays open behind the modal, the edit
+still in the widget. Cancel goes back to it; Discard closes and the next
+open shows the saved value; Apply saves it. With nothing edited the X
+closes at once. -/
+def trEditThenX : List Ev :=
+  openSettingsGba ++ iter [.selectTab .video] ++ iter [.setFifo false] ++ iter [.winClose]
+
+theorem regress_close_discards_edits :
+    ((run fixed init trEditThenX).map fun s =>
+      (s.ed.isOpen, s.ed.discardPopup, s.ed.vFifo, s.cfg.gbFifo)) = some (true, true, false, true) ∧
+    ((run fixed init (trEditThenX ++ iter [.discardCancel])).map fun s =>
+      (s.ed.isOpen, s.ed.discardPopup, s.ed.vFifo)) = some (true, false, false) ∧
+    ((run fixed init (trEditThenX ++ iter [.discardConfirm] ++ iter [.menuSettings])).map fun s =>
+      (s.ed.vFifo, s.cfg.gbFifo)) = some (true, true) ∧
+    ((run fixed init (trEditThenX ++ iter [.discardApply])).map fun s =>
+      (s.ed.isOpen, s.cfg.gbFifo, match s.disk with | .ok c => c.gbFifo | _ => true)) =
+      some (false, false, false) ∧
+    ((run fixed init (openSettingsGba ++ iter [.winClose])).map fun s =>
+      (s.ed.isOpen, s.ed.discardPopup)) = some (false, false) := by
+  decide
+
+/-- While the modal is up nothing else in the window or the menus takes a
+click, and a capture the X interrupted is over. -/
+theorem fixed_x_ends_capture :
+    ((run fixed init (openSettingsGba ++ iter [.kbPresetDefault] ++ iter [.bindKey 0, .winClose])).map
+      fun s => (s.ed.discardPopup, s.ed.kbSel, wantsKb fixed s)) = some (true, none, false) ∧
+    (run fixed init (trEditThenX ++ [.frame, .endInput, .renderTop, .menuSettings])).isNone := by
+  decide
+
+/-- The widget-owned fields of cfg, and what the widgets would write there. -/
+def wf (c : Cfg) :=
+  (c.kb, c.pad, c.useHle, c.afterBios, c.runBios, c.biosFile, c.gbFifo, c.sgb)
+def wfE (e : Ed) :=
+  (e.kbEdit, e.padEdit, e.bMode == 0, e.bMode == 2, e.bRun, e.bFile, e.vFifo, e.vSgb)
+
+theorem edStore_eq_iff (e : Ed) (c : Cfg) : edStore e c = c ↔ wfE e = wf c := by
+  constructor
+  · intro h; rw [← h]; rfl
+  · intro h
+    cases c
+    simp only [wfE, wf, Prod.mk.injEq] at h
+    obtain ⟨h1, h2, h3, h4, h5, h6, h7, h8⟩ := h
+    simp only [edStore, h1, h2, h3, h4, h5, h6, h7, h8]
+
+/-- No saved file holds both HLE and real-BIOS-then-HLE; edStore never
+writes both. -/
+def Norm (c : Cfg) : Prop := (c.useHle && c.afterBios) = false
+
+theorem norm_edStore (e : Ed) (c : Cfg) : Norm (edStore e c) := by
+  simp only [Norm, edStore]
+  cases h : e.bMode == 0 <;> simp_all
+
+theorem wfE_edLoad (c : Cfg) (e : Ed) (h : Norm c) : wfE (edLoad c e) = wf c := by
+  simp only [wfE, wf, edLoad, Prod.mk.injEq, true_and]
+  simp only [Norm] at h
+  cases hu : c.useHle <;> cases ha : c.afterBios <;> simp_all
+
+structure DiscOK (s : S) : Prop where
+  norm  : Norm s.cfg
+  disk  : ∀ c, s.disk = .ok c → Norm c
+  /-- Once loaded (the window open, or closed but not yet drawn closed), a
+  widget set with nothing edited holds exactly cfg. -/
+  clean : (s.ed.isOpen || s.ed.prevOpen) = true → s.ed.edited = false → wfE s.ed = wf s.cfg
+
+theorem discOK_init : DiscOK init :=
+  ⟨rfl, (fun c hc => by cases hc), (fun h => by simp [init, launch, initEd] at h)⟩
+
+theorem norm_persist (c : Cfg) (h : Norm c) : Norm (persist fixed c) := h
+
+theorem discOK_launch (d : Disk) (a : Cli) (g : Nat) (l y : Bool) (hd : ∀ c, d = .ok c → Norm c) :
+    DiscOK (launch fixed d a g l y) := by
+  have h0 : Norm (cfg0 fixed d a) := by
+    show Norm (loadDisk fixed d)
+    cases d with
+    | missing => rfl
+    | ok c => exact norm_persist c (hd c rfl)
+    | bad => rfl
+  refine ⟨?_, ?_, fun h => by simp [launch, initEd] at h⟩
+  · simp only [launch]; split
+    · exact h0
+    · exact h0
+  · intro c hc
+    simp only [launch] at hc
+    split at hc
+    · cases hc; exact h0
+    · split at hc
+      · cases hc
+      · exact hd c hc
+
+theorem discOK_save {s : S} (h : DiscOK s) : DiscOK (save fixed s) :=
+  ⟨h.norm, (fun c hc => by cases hc; exact h.norm), h.clean⟩
+
+theorem discOK_doApply {s : S} (h : DiscOK s) : DiscOK (doApply fixed s) :=
+  discOK_save ⟨norm_edStore _ _, h.disk, fun _ _ => rfl⟩
+
+/-- The top of render: an open edge loads the widgets from cfg. -/
+theorem discOK_ceTop {s t : S} (h : DiscOK s) (e : Ed) (hw : wfE e = wfE s.ed)
+    (hed : e.edited = s.ed.edited)
+    (hop : e.isOpen = true → e.prevOpen = true → (s.ed.isOpen || s.ed.prevOpen) = true)
+    (ht : t.ed = ceTop fixed s.cfg e) (hc : t.cfg = s.cfg) (hd : t.disk = s.disk) : DiscOK t := by
+  refine ⟨hc ▸ h.norm, hd ▸ h.disk, ?_⟩
+  intro ho he'
+  rw [ht] at ho he' ⊢
+  rw [hc]
+  cases hA : e.isOpen <;> cases hB : e.prevOpen <;>
+    simp only [ceTop, hA, hB, Bool.and_true, Bool.and_false, Bool.not_true, Bool.not_false,
+      Bool.false_eq_true, ↓reduceIte, Bool.or_self] at ho he' ⊢
+  · exact wfE_edLoad s.cfg e h.norm
+  · exact hw.trans (h.clean (hop hA hB) (hed ▸ he'))
+
+theorem captureKey_clean (e : Ed) (k : Key) (h : (captureKey fixed e k).edited = false) :
+    captureKey fixed e k = e := by
+  unfold captureKey at h ⊢
+  cases hs : e.kbSel with
+  | none => rfl
+  | some sel =>
+    simp only [hs] at h ⊢
+    split
+    · rfl
+    · rename_i hn; simp [hn] at h
+
+theorem capturePad_clean (e : Ed) (b : Nat) (h : (capturePad e b).edited = false) :
+    capturePad e b = e := by
+  unfold capturePad at h ⊢
+  by_cases hb : b ≥ 15
+  · simp [hb]
+  · simp only [hb, ↓reduceIte] at h ⊢
+    cases hs : e.padSel with
+    | none => rfl
+    | some sel => simp [hs] at h
+
+theorem discOK_onKey {s : S} (h : DiscOK s) (k : Key) (d : Bool) : DiscOK (onKey fixed s k d) := by
+  obtain ⟨b, hb⟩ : ∃ b : Bool,
+      (onKey fixed s k d).ed = if b then captureKey fixed s.ed k else s.ed := ⟨_, rfl⟩
+  refine ⟨h.norm, h.disk, ?_⟩
+  intro ho hed
+  rw [hb] at ho hed ⊢
+  show _ = wf s.cfg
+  cases b
+  · exact h.clean ho hed
+  · simp only [↓reduceIte] at ho hed ⊢
+    have hc := captureKey_clean _ _ hed
+    rw [hc] at ho hed ⊢
+    exact h.clean ho hed
+
+theorem discOK_onPad {s : S} (h : DiscOK s) (b : Nat) (d : Bool) : DiscOK (onPad fixed s b d) := by
+  obtain ⟨c, hb⟩ : ∃ c : Bool,
+      (onPad fixed s b d).ed = if c then capturePad s.ed b else s.ed := ⟨_, rfl⟩
+  refine ⟨h.norm, h.disk, ?_⟩
+  intro ho hed
+  rw [hb] at ho hed ⊢
+  show _ = wf s.cfg
+  cases c
+  · exact h.clean ho hed
+  · simp only [↓reduceIte] at ho hed ⊢
+    have hc := capturePad_clean _ _ hed
+    rw [hc] at ho hed ⊢
+    exact h.clean ho hed
+
+theorem discOK_factory {s : S} (h : DiscOK s) : DiscOK (factoryReset fixed s) := by
+  have h1 := discOK_doApply
+    (s := { s with cfg := factoryCfg fixed s.cfg, ed := edLoad (factoryCfg fixed s.cfg) s.ed })
+    ⟨rfl, h.disk, fun _ _ => wfE_edLoad _ _ rfl⟩
+  exact ⟨h1.norm, h1.disk, h1.clean⟩
+
+/-- Same cfg and disk (up to the widget fields), same widget contents. -/
+theorem discOK_same {s t : S} (h : DiscOK s) (h1 : wf t.cfg = wf s.cfg)
+    (hn : Norm t.cfg) (h2 : t.disk = s.disk ∨ t.disk = .ok t.cfg) (h3 : wfE t.ed = wfE s.ed)
+    (h4 : (t.ed.isOpen || t.ed.prevOpen) = true → (s.ed.isOpen || s.ed.prevOpen) = true)
+    (h5 : t.ed.edited = s.ed.edited) : DiscOK t := by
+  refine ⟨hn, ?_, ?_⟩
+  · intro c hc
+    rcases h2 with h2 | h2
+    · exact h.disk c (h2 ▸ hc)
+    · rw [h2] at hc; cases hc; exact hn
+  · intro ho hed
+    rw [h3, h1]; exact h.clean (h4 ho) (h5 ▸ hed)
+
+theorem discOK_stepO {s t : S} (h : DiscOK s) (e : Ev) (he : stepO fixed s e = some t) : DiscOK t := by
+  cases e with
+  | restart a => simp only [stepO] at he; cases he; exact discOK_launch _ _ _ _ _ h.disk
+  | corruptFile =>
+    simp only [stepO] at he; cases he; exact ⟨h.norm, (fun c hc => by cases hc), h.clean⟩
+  | setSys b => simp only [stepO] at he; cases he; exact ⟨h.norm, h.disk, h.clean⟩
+  | renderTop =>
+    simp only [stepO] at he; split at he <;> cases he
+    exact discOK_ceTop h s.ed rfl rfl (fun hA _ => by simp [hA]) rfl rfl rfl
+  | menuSettings =>
+    simp only [stepO] at he; split at he <;> cases he
+    exact discOK_ceTop h { s.ed with isOpen := true } rfl rfl
+      (fun _ hB => by simp only [Bool.or_eq_true]; exact Or.inr hB) rfl rfl rfl
+  | key k d => simp only [stepO] at he; split at he <;> cases he; exact discOK_onKey h k d
+  | padBtn b d => simp only [stepO] at he; split at he <;> cases he; exact discOK_onPad h b d
+  | apply => simp only [stepO] at he; split at he <;> cases he; exact discOK_doApply h
+  | ok =>
+    simp only [stepO] at he; split at he <;> cases he
+    have h' := discOK_doApply h
+    exact ⟨h'.norm, h'.disk, fun _ _ => rfl⟩
+  | discardApply =>
+    simp only [stepO] at he; split at he <;> cases he
+    have h' := discOK_doApply h
+    exact ⟨h'.norm, h'.disk, fun _ _ => rfl⟩
+  | discardConfirm =>
+    simp only [stepO] at he; split at he <;> cases he
+    exact discOK_same h rfl h.norm (Or.inl rfl) rfl (fun ho => by simp at ho; simp [ho]) rfl
+  | revert =>
+    simp only [stepO] at he; split at he <;> cases he
+    exact ⟨h.norm, h.disk, fun _ _ => wfE_edLoad _ _ h.norm⟩
+  | resetConfirm => simp only [stepO] at he; split at he <;> cases he; exact discOK_factory h
+  | winClose =>
+    simp only [stepO] at he; split at he <;> cases he
+    rename_i hw
+    simp only [inWin, Bool.and_eq_true] at hw
+    exact discOK_same h rfl h.norm (Or.inl rfl) rfl (fun _ => by simp [hw.2]) rfl
+  | _ =>
+    simp only [stepO] at he <;> (try split at he) <;> (try cases he) <;>
+    first
+    | exact ⟨h.norm, h.disk, h.clean⟩
+    | exact discOK_save ⟨h.norm, h.disk, h.clean⟩
+    | exact ⟨h.norm, h.disk, fun _ hed => by simp at hed⟩
+    | exact discOK_save ⟨h.norm, h.disk, fun _ hed => by simp at hed⟩
+    | (split <;> first
+        | exact ⟨h.norm, h.disk, h.clean⟩
+        | exact discOK_save ⟨h.norm, h.disk, h.clean⟩
+        | exact ⟨h.norm, h.disk, fun _ hed => by simp at hed⟩
+        | (split <;> first
+            | exact ⟨h.norm, h.disk, h.clean⟩
+            | exact discOK_save ⟨h.norm, h.disk, h.clean⟩
+            | exact ⟨h.norm, h.disk, fun _ hed => by simp at hed⟩))
+
+theorem discOK_reachable : ∀ s, Reachable fixed s → DiscOK s :=
+  reachable_induct fixed discOK_init fun _ _ e h he => discOK_stepO h e he
+
+/-- Fixed: the X closes the window only when Apply would change nothing,
+so no edit is dropped without the "Discard changes?" answer. -/
+theorem fixed_close_drops_nothing (s t : S) (hs : Reachable fixed s)
+    (he : stepO fixed s .winClose = some t) (hc : t.ed.isOpen = false) :
+    edStore s.ed s.cfg = s.cfg := by
+  simp only [stepO] at he
+  split at he
+  · rename_i hw
+    cases he
+    simp only [fixed, ite_true] at hc
+    simp only [inWin, Bool.and_eq_true] at hw
+    rw [edStore_eq_iff]
+    exact (discOK_reachable s hs).clean (by simp [hw.2]) hc
+  · cases he
 
 /-! ## Fullscreen at start
 

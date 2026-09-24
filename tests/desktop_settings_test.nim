@@ -268,6 +268,47 @@ block:
   writeFile(path, "---\nframe_size: 99\n")
   check load_config_file(path).frame_size == 8, "a hand-edited size is clamped"
 
+echo "The Settings window's X asks only when Apply would change the file"
+block:
+  # has_unapplied_edits applies the widgets to a copy of cfg and compares
+  # what save_config would write.
+  let cfg = load_config_file(dir / "none.yml")
+  cfg.keybindings[KP_8] = Input.SELECT
+  let pending = Config()
+  pending[] = cfg[]
+  check same_file(pending, cfg), "an untouched copy: nothing to ask about"
+  pending.keybindings[E_ACUTE] = Input.A
+  pending.controller_bindings[cint(3)] = Input.START
+  check not cfg.keybindings.hasKey(E_ACUTE) and cfg.controller_bindings[cint(3)] == Input.B,
+        "the copy's edits never reach the live settings"
+  check not same_file(pending, cfg), "a new binding is an edit"
+  # The widget rebuilds its tables on Apply: order must not count
+  pending[] = cfg[]
+  pending.keybindings = initTable[cint, Input]()
+  var pairs: seq[(cint, Input)]
+  for k, v in cfg.keybindings.pairs: pairs.add((k, v))
+  for i in countdown(pairs.high, 0): pending.keybindings[pairs[i][0]] = pairs[i][1]
+  check same_file(pending, cfg), "the same bindings made in another order: no edit"
+  # Every field a Settings tab writes
+  proc edited(change: proc(c: Config)): bool =
+    let p = Config()
+    p[] = cfg[]
+    change(p)
+    not same_file(p, cfg)
+  check edited(proc(c: Config) = c.bios_path = "/x/gba_bios.bin"), "BIOS file"
+  check edited(proc(c: Config) = c.run_bios = true), "Run BIOS intro"
+  check edited(proc(c: Config) = c.use_hle = false), "SWI handling: real BIOS"
+  check edited(proc(c: Config) = c.hle_after_bios = true), "SWI handling: BIOS init + HLE"
+  check edited(proc(c: Config) = c.gb_fifo = false), "GB renderer"
+  check edited(proc(c: Config) = c.video_filter = vfHq4x), "Filter"
+  check edited(proc(c: Config) = c.lcd_response = true), "LCD response"
+  check edited(proc(c: Config) = c.preserve_aspect = false), "Preserve aspect ratio"
+  check edited(proc(c: Config) = c.sgb_enable = true), "Super Game Boy mode"
+  check edited(proc(c: Config) = c.sgb_border = false), "Show SGB border"
+  check edited(proc(c: Config) = c.gb_rumble = false), "Rumble"
+  check edited(proc(c: Config) = c.keybindings.del(KP_8)), "an unbound key"
+  check edited(proc(c: Config) = c.controller_bindings[cint(0)] = Input.R), "a pad button"
+
 echo "Fullscreen at start follows the platform"
 block:
   let path = dir / "fs.yml"

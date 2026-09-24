@@ -98,10 +98,12 @@ proc reset*(v: VideoWidget) =
   v.sgb_enable  = v.cfg.sgb_enable
   v.sgb_border  = v.cfg.sgb_border
 
-proc apply*(v: VideoWidget) =
-  v.cfg.gb_fifo     = v.gb_renderer == 0
-  v.cfg.video_filter = VideoFilter(v.filter)
-  v.cfg.lcd_response = v.lcd_resp
-  v.cfg.preserve_aspect = v.preserve_aspect
-  v.cfg.sgb_enable  = v.sgb_enable
-  v.cfg.sgb_border  = v.sgb_border
+proc apply_to*(v: VideoWidget; cfg: Config) =
+  cfg.gb_fifo     = v.gb_renderer == 0
+  cfg.video_filter = VideoFilter(v.filter)
+  cfg.lcd_response = v.lcd_resp
+  cfg.preserve_aspect = v.preserve_aspect
+  cfg.sgb_enable  = v.sgb_enable
+  cfg.sgb_border  = v.sgb_border
+
+proc apply*(v: VideoWidget) = v.apply_to(v.cfg)
