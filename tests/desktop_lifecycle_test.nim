@@ -84,11 +84,25 @@ block short_roms_are_refused:
     let b = build_core(p, opts())
     doAssert b.error == "" and b.gb != nil, $n
     for _ in 0 ..< 30: b.gb.run_until_frame()
-  for n in [0, 0xBF]:
+  # A .gba is refused only when empty: its core reads open bus past any file,
+  # and this repo's own test ROMs include a 56-byte one.
+  block:
+    let p = dir / "short.gba"
+    writeFile(p, "")
+    let b = build_core(p, opts())
+    doAssert b.error.len > 0 and b.gb == nil and b.gba == nil
+  for n in [1, 0xBF]:
     let p = dir / "short.gba"
     writeFile(p, newString(n))
     let b = build_core(p, opts())
-    doAssert b.error.len > 0 and b.gb == nil and b.gba == nil, $n
+    doAssert b.error == "" and b.gba != nil, $n
+    for _ in 0 ..< 5: b.gba.run_until_frame()
+  let inputrec = dir / "inputrec.gba"     # a copy: nothing written in tests/
+  copyFile(currentSourcePath().parentDir / "roms" / "inputrec.gba", inputrec)
+  doAssert getFileSize(inputrec) == 56
+  let b = build_core(inputrec, opts())
+  doAssert b.error == "" and b.gba != nil
+  for _ in 0 ..< 5: b.gba.run_until_frame()
 
 block missing_file_is_refused:
   let b = build_core(dir / "gone.gba", opts())

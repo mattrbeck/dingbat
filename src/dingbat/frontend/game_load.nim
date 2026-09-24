@@ -11,12 +11,14 @@ import ../gb/gb
 
 const ROM_EXTS* = [".gba", ".gb", ".gbc"]
 
-# The smallest file taken as a ROM. The GB core runs any length (it pads to a
-# whole cartridge with $FF), so a Game Boy file is refused only when it cannot
-# hold the cartridge header ($0100-$014F); a GBA cartridge header ends at 0xBF.
+# The smallest file taken as a ROM. Both cores run any length (the GB core
+# pads to a whole cartridge with $FF, the GBA core reads open bus past the
+# file), so this is only what is too short to be a game: a Game Boy file
+# that cannot hold the cartridge header ($0100-$014F), or an empty file.
+# GBA test ROMs as short as 56 bytes exist, header or not.
 const
   GB_MIN_ROM  = 0x150
-  GBA_MIN_ROM = 0xC0
+  GBA_MIN_ROM = 1
 
 type
   CoreOptions* = object

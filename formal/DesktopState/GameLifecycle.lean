@@ -1391,8 +1391,8 @@ theorem reset_restarts {s : St} (h : Reachable s) (hpc : s.pc = .input) {c : Cor
    before anything else. Then `flush_saves()` (before the new core reads the
    `.sav`: a Reset reloads the same file), then `build_core` builds and
    post-inits the new core into a value of its own, refusing a GB file too
-   short for a cartridge header (under 0x150 bytes, `eGb`) or a GBA file
-   under 0xC0, and catching `CatchableError`. The GB core pads a file shorter than
+   short for a cartridge header (under 0x150 bytes, `eGb`) or an empty GBA
+   file, and catching `CatchableError`. The GB core pads a file shorter than
    a cartridge, or not a whole number of banks, with $FF to a power of two of
    at least 32 KiB (`load_cartridge`), so every other `.gb` builds and runs,
    as the model's other GB paths do. Refused: a notice, and the old game keeps
