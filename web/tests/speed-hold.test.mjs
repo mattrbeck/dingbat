@@ -7,7 +7,8 @@ import { loadApp } from "./helpers.mjs";
 
 const withGame = async () => {
   const app = await loadApp();
-  app.runIn(`currentRomName = "game.gba"; currentOriginalName = "game.gba";`);
+  app.runIn(`currentRomName = "game.gba"; currentOriginalName = "game.gba";
+             document.body.classList.add("running");`); // in the game view, not home
   return app;
 };
 

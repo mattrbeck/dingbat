@@ -8299,6 +8299,10 @@ const loadRom = async (romName, originalName, opts = {}) => {
   currentRomName = romName;
   currentOriginalName = name;
   lastFrameSig = null; // a new game: the tick's skip must not carry over
+  // Again, for a capture started on the outgoing game during the awaits
+  // above: it would run on into this one.
+  if (typeof abortRetroClip === "function") abortRetroClip();
+  if (typeof stopClipRecording === "function") stopClipRecording();
   // Before `paused` is reset: closing a scrubber restores the paused state
   // it captured, which must land on the old session's value.
   closeRewindScrubber();
@@ -9489,14 +9493,17 @@ const shortcutKeyHandler = (e, down) => {
   const t = e.target;
   if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
 
-  const gameLoaded = !!currentRomName || linkMode || rollbackMode || netActive();
-  // The home screen keeps a loaded game paused behind it (body.running off);
-  // the pause keys there would run or step a game nobody can see.
+  // The game keys act on a game in the game view only. The home screen keeps
+  // a loaded game paused behind it (body.running off), and there they would
+  // run, step, speed up, rewind, save, load or photograph a game nobody can
+  // see (and Tab would stop moving focus).
   const gameShown = document.body.classList.contains("running");
+  const gameInSession = !!currentRomName || linkMode || rollbackMode || netActive();
+  const gameLoaded = gameInSession && gameShown;
   let handled = false;
   switch (e.code) {
     case "Space":
-      if (!gameLoaded || !gameShown) break;
+      if (!gameLoaded) break;
       if (!e.repeat) pauseButton.click();
       handled = true; // swallow repeats too (Space would scroll / click)
       break;
@@ -9565,7 +9572,10 @@ const shortcutKeyHandler = (e, down) => {
       handled = true;
       break;
     case "F5": // save state (F5 default is reload — must be swallowed)
-      if (e.shiftKey || !gameLoaded || !speedControlsOk()) break;
+      if (e.shiftKey) break;
+      // On the home screen too: the reload would drop the paused game's session.
+      if (gameInSession && !gameShown) { handled = true; break; }
+      if (!gameLoaded || !speedControlsOk()) break;
       if (!e.repeat) saveStateItem.click();
       handled = true;
       break;
@@ -9576,7 +9586,7 @@ const shortcutKeyHandler = (e, down) => {
       break;
     case "F9": // screenshot (F12 opens devtools). OK in net mode: this
       // side's canvas is the only one here — matches the hidden-button CSS.
-      if (e.shiftKey || !currentRomName || linkMode || rollbackMode) break;
+      if (e.shiftKey || !currentRomName || !gameShown || linkMode || rollbackMode) break;
       if (!e.repeat) takeScreenshot();
       handled = true;
       break;

@@ -108,6 +108,25 @@ test("a clip exported from a paused game leaves it paused (bug_clip_export_drops
     assert.equal(icon(app), "Resume");
   });
 
+// RunPause.lean's loadRom is two events, its first segment (abortRetroClip)
+// and its commit; an export can start between them, on the outgoing game.
+test("a clip export started while a load is in flight does not run on into the new game",
+  async () => {
+    const app = await inGame(CLIP_STUBS + "Module.ccall = () => 0;");
+    await app.document.getElementById("pause").dispatch("click");
+    const loading = app.runIn(`loadRom("B.gba", "B.gba")`); // parked at its first await
+    app.runIn("openClipScrubber()");
+    app.document.getElementById("clip-save").dispatch("click");
+    assert.equal(app.runIn("clipReplayActive"), true, "the export armed on the outgoing game");
+    await loading;
+    assert.equal(app.api.currentOriginalName, "B.gba");
+    assert.equal(app.runIn("clipReplayActive"), false,
+                 "a capture spanning the switch would splice two games");
+    app.runIn("if (clipReplayActive) finishRetroClip(true)"); // the tick, when it ends
+    assert.equal(paused(app), false, "the new game runs");
+    assert.equal(icon(app), "Pause");
+  });
+
 test("a clip exported from a running game leaves it running", async () => {
   const app = await inGame(CLIP_STUBS);
   await exportClip(app);
@@ -153,4 +172,66 @@ test("the peer pausing and resuming leaves a game on the home screen frozen " +
   app.runIn("window.applyRemotePause(true)");
   app.runIn("window.applyRemotePause(false)");
   assert.equal(paused(app), true, "the core must not run behind the library");
+});
+
+// --- The rest of the game keys on the home screen ----------------------------
+
+// What each game key did: the hidden game's frames, the fast-forward and
+// rewind holds, the state menu items' clicks; and whether the key event was
+// swallowed (preventDefault), which the handler does exactly when it acts.
+const withKeySpies = () => inGame(`
+  globalThis.__ticks = 0;
+  globalThis.Module = { _loop_tick: () => { __ticks++; } };
+  globalThis.__saves = 0; globalThis.__loads = 0;
+  saveStateItem.click = () => { __saves++; };  // what the keys call
+  loadStateItem.click = () => { __loads++; };
+  rewindOn = true;
+  document.getElementById("canvas").toBlob = () => {}; // the screenshot's grab
+`);
+const press = async (app, code, extra = {}) => {
+  let swallowed = false;
+  await app.dispatchDoc("keydown", { code, target: app.document.body, repeat: false,
+                                     preventDefault: () => { swallowed = true; }, ...extra });
+  return swallowed;
+};
+const acted = (app) => app.runIn(
+  "JSON.stringify({ ticks: __ticks, ff: kbFastForward, speed2x, rewind: kbRewindHeld, " +
+  "slowMotion, saves: __saves, loads: __loads })");
+
+test("on the home screen the game keys leave the hidden game alone", async () => {
+  const app = await withKeySpies();
+  app.runIn("showMainMenu()");
+  const before = acted(app);
+  for (const [code, extra] of [["Tab", {}], ["Tab", { shiftKey: true }], ["Backquote", {}],
+                               ["Backquote", { shiftKey: true }], ["F8", {}], ["F9", {}]]) {
+    const swallowed = await press(app, code, extra);
+    assert.equal(swallowed, false, `${code} is the page's on the home screen (Tab moves focus)`);
+  }
+  assert.equal(acted(app), before, "no frame, speed, rewind, state load or screenshot");
+  assert.equal(paused(app), true);
+});
+
+test("F5 on the home screen neither saves a state nor reloads the page", async () => {
+  const app = await withKeySpies();
+  app.runIn("showMainMenu()");
+  const swallowed = await press(app, "F5");
+  assert.equal(app.runIn("__saves"), 0, "no state saved from a game nobody can see");
+  assert.equal(swallowed, true, "the browser's reload would drop the paused session");
+});
+
+test("in the game view the same keys act", async () => {
+  const app = await withKeySpies();
+  assert.equal(await press(app, "Tab"), true);
+  assert.equal(app.runIn("kbFastForward"), true, "Tab holds fast-forward");
+  await app.dispatchDoc("keyup", { code: "Tab", target: app.document.body });
+  assert.equal(await press(app, "Backquote"), true);
+  assert.equal(app.runIn("kbRewindHeld"), true, "Backquote holds rewind");
+  await app.dispatchDoc("keyup", { code: "Backquote", target: app.document.body });
+  assert.equal(await press(app, "F5"), true);
+  assert.equal(app.runIn("__saves"), 1, "F5 saves a state");
+  assert.equal(await press(app, "F8"), true);
+  assert.equal(app.runIn("__loads"), 1, "F8 loads one");
+  app.runIn("paused = true");
+  assert.equal(await press(app, "F9"), true);
+  assert.equal(app.runIn("__ticks"), 1, "F9 renders the paused frame to grab it");
 });
