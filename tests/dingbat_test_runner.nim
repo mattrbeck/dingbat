@@ -1,4 +1,4 @@
-import std/[os, osproc, strutils, strformat, tables, sequtils, times, algorithm, parseopt, sha1]
+import std/[os, osproc, strutils, strformat, tables, sequtils, times, algorithm, parseopt, sha1, json]
 import zippy/ziparchives
 import png_reader
 
@@ -1921,6 +1921,10 @@ proc generate_results_md(suites: seq[SuiteResults]): string =
     if suite.suite_name == "GBA - mGBA Test Suite":
       lines.add("")
       lines.add("See [detailed results](results_mgba_suite.md) for individual test outcomes.")
+    elif suite.suite_name == "GBA - dbsuite (AGS-001)":
+      lines.add("")
+      lines.add("One row per dbsuite sub-suite (tests/roms/dbsuite). See " &
+        "[detailed results](results_dbsuite.md) for every case that is not a pass.")
     elif suite.suite_name == "Game Boy - gambatte":
       lines.add("")
       lines.add("Each row is one gambatte subdirectory. See " &
@@ -2150,6 +2154,113 @@ proc run_microtest_suite(name: string; tests: seq[TestDef]; harness: string;
     if was_passing(previous, name, t.name) and not passed:
       regressions.add(t.name)
   SuiteResults(suite_name: name, results: results)
+
+type
+  DbsuiteCase = object
+    name: string       # "<suite>/<case>"
+    status: string     # PASS FAIL TIMEOUT CRASH SKIP, or "NOT REACHED"
+    detail: string     # "got=.. exp=.." as the ROM printed it
+
+  DbsuiteGroup = object
+    name: string
+    passes: int
+    total: int
+    cases: seq[DbsuiteCase]
+
+const DbsuiteSuiteName = "GBA - dbsuite (AGS-001)"
+
+proc run_dbsuite(harness: string; previous: Table[string, bool];
+                 previous_counts: Table[string, int];
+                 regressions: var seq[string];
+                 groups: var seq[DbsuiteGroup];
+                 bios_path = ""): SuiteResults =
+  ## tests/roms/dbsuite: one ROM of every behaviour this project has
+  ## measured on its AGB SP, each case carrying the console's answer. The ROM
+  ## prints `DBSUITE case <suite>/<name> <STATUS> got=.. exp=..` per case
+  ## through the mGBA debug registers and `DBSUITE ALL DONE` at the end;
+  ## tests/roms/dbsuite/cases.json lists every case, so one the run never
+  ## reached (a hang) is a row too. One row per sub-suite with its pass count
+  ## (gated like gambatte's: all-green going red, or the count dropping);
+  ## every case is in tests/results_dbsuite.md.
+  echo &"\n=== {DbsuiteSuiteName} ==="
+  let rom = "tests" / "roms" / "dbsuite" / "dbsuite.gba"
+  var cmd = &"{harness.quoteShell} {rom.quoteShell} --mode=mgba-suite --timeout=20000"
+  if bios_path.len > 0:
+    cmd.add(&" --bios={bios_path.quoteShell}")
+  let (output, _) = execCmdEx(cmd, options = {poUsePath})
+  var reported = initTable[string, DbsuiteCase]()
+  for line in output.splitLines():
+    let s = line.strip()
+    if not s.startsWith("DBSUITE case "): continue
+    let words = s["DBSUITE case ".len .. ^1].splitWhitespace()
+    if words.len < 2: continue
+    reported[words[0]] = DbsuiteCase(name: words[0], status: words[1],
+                                     detail: words[2 .. ^1].join(" "))
+  let listing = parseJson(readFile("tests" / "roms" / "dbsuite" / "cases.json"))
+  var order: seq[string]
+  var by_suite = initTable[string, DbsuiteGroup]()
+  for c in listing["cases"]:
+    let suite = c["suite"].getStr
+    let name = suite & "/" & c["name"].getStr
+    if suite notin by_suite:
+      order.add(suite)
+      by_suite[suite] = DbsuiteGroup(name: suite)
+    let got = reported.getOrDefault(name,
+      DbsuiteCase(name: name, status: "NOT REACHED",
+                  detail: "the run stopped before this case"))
+    by_suite.withValue(suite, g):
+      inc g.total
+      if got.status == "PASS": inc g.passes
+      g.cases.add(got)
+  var results: seq[TestResult]
+  for suite in order:
+    let g = by_suite[suite]
+    groups.add(g)
+    let all_pass = g.passes == g.total
+    let short_name = "dbsuite/" & suite
+    echo &"  [{(if all_pass: \"PASS\" else: \"FAIL\")}] {short_name} - {g.passes}/{g.total} passed"
+    for c in g.cases:
+      if c.status != "PASS":
+        echo &"      {c.status} {c.name} {c.detail}"
+    results.add(TestResult(name: short_name, passed: all_pass,
+                           output: &"{g.passes}/{g.total} passed",
+                           always_detail: true))
+    if was_passing(previous, DbsuiteSuiteName, short_name) and not all_pass:
+      regressions.add(short_name)
+    elif previous_counts.hasKey(short_name) and g.passes < previous_counts[short_name]:
+      regressions.add(&"{short_name} ({previous_counts[short_name]} -> {g.passes} passing)")
+  SuiteResults(suite_name: DbsuiteSuiteName, results: results)
+
+proc generate_dbsuite_detail_md(groups: seq[DbsuiteGroup]): string =
+  var lines: seq[string]
+  lines.add("# dbsuite - Detailed Results")
+  lines.add("")
+  lines.add(provenance_line())
+  lines.add("")
+  lines.add("tests/roms/dbsuite/dbsuite.gba (cartridge build) in dingbat. Every " &
+    "expected value is an AGB SP (AGS-001) answer; each case's source " &
+    "comment in tests/roms/dbsuite/ gives its provenance. A case that is not " &
+    "PASS here is dingbat disagreeing with the console.")
+  lines.add("")
+  var p, t = 0
+  for g in groups:
+    p += g.passes
+    t += g.total
+  lines.add(&"**Total: {p}/{t}**")
+  lines.add("")
+  for g in groups:
+    lines.add(&"## {g.name} ({g.passes}/{g.total})")
+    lines.add("")
+    var bad = g.cases.filterIt(it.status != "PASS")
+    if bad.len == 0:
+      lines.add("All pass.")
+    else:
+      lines.add("| Case | Status | Got / expected |")
+      lines.add("|------|--------|----------------|")
+      for c in bad:
+        lines.add(&"| {c.name} | {c.status} | {c.detail.replace(\"|\", \"/\")} |")
+    lines.add("")
+  lines.join("\n")
 
 proc run_mgba_suite(harness: string; previous: Table[string, bool];
                     regressions: var seq[string];
@@ -2575,6 +2686,9 @@ proc main() =
                              harness, no_previous, gba_regressions))
     gba_suites.add(run_suite("GBA - hwverified (AGS-001)", build_hwverified_tests(),
                              harness, no_previous, gba_regressions))
+    var dbsuite_groups: seq[DbsuiteGroup]
+    gba_suites.add(run_dbsuite(harness, no_previous, initTable[string, int](),
+                               gba_regressions, dbsuite_groups, bios_path))
     echo ""
     for suite in gba_suites:
       echo &"{suite.suite_name}: {suite.results.countIt(it.passed)}/{suite.results.len} pass"
@@ -2626,6 +2740,10 @@ proc main() =
   all_suites.add(run_suite("GBA - hwverified (AGS-001)", build_hwverified_tests(),
                            harness, previous, regressions))
 
+  var dbsuite_groups: seq[DbsuiteGroup]
+  all_suites.add(run_dbsuite(harness, previous, previous_counts, regressions,
+                             dbsuite_groups, bios_path))
+
   let fuzzarm_tests = build_fuzzarm_tests(ensure_fuzzarm_test_roms())
   all_suites.add(run_suite("GBA - FuzzARM", fuzzarm_tests, harness,
                            previous, regressions))
@@ -2673,11 +2791,14 @@ proc main() =
   writeFile(results_path, generate_results_md(all_suites))
   let mgba_detail_path = getCurrentDir() / "tests" / "results_mgba_suite.md"
   writeFile(mgba_detail_path, generate_mgba_detail_md(mgba_detail))
+  let dbsuite_detail_path = getCurrentDir() / "tests" / "results_dbsuite.md"
+  writeFile(dbsuite_detail_path, generate_dbsuite_detail_md(dbsuite_groups))
   let gambatte_detail_path = getCurrentDir() / "tests" / "results_gambatte.md"
   if gambatte_groups.len > 0:
     writeFile(gambatte_detail_path, generate_gambatte_detail_md(gambatte_groups))
   echo &"\nResults written to {results_path}"
   echo &"mGBA detail written to {mgba_detail_path}"
+  echo &"dbsuite detail written to {dbsuite_detail_path}"
   if gambatte_groups.len > 0:
     echo &"gambatte detail written to {gambatte_detail_path}"
 
