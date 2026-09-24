@@ -27,19 +27,11 @@ jobs:
           path: ${{ github.workspace }}/rom-cache
           key: test-roms-${{ runner.os }}-gb7.0-dmg1.0-cgb1.1-suite35d330ee-jsmolka-a6447c5-fuzzarm-a675329-magen0.5.0-shootout38b926b-alyosha66f5f1d-png183-8793745-rtcr2-plemon-efdb535-hades29274ce-swp1.0.0-agbeeg0.0.2
       - name: Install dependencies
-        # Only zippy: the full dep tree pulls GUI-only packages whose install
-        # fails on the Windows runner. Retry, then prove the import works.
+        # zippy, yaml and imguin, each from outside the checkout, retried and
+        # proven by an import; the why of each (and imguin on Windows) is in
+        # the script.
         shell: bash
-        run: |
-          echo 'import zippy/ziparchives' > depcheck.nim
-          for i in 1 2 3; do
-            # cd out of the checkout: inside it nimble resolves the whole graph
-            (cd "$RUNNER_TEMP" && nimble install -y zippy) || true
-            if nim check --hints:off depcheck.nim; then rm depcheck.nim; exit 0; fi
-            echo "dependencies incomplete after attempt $i, retrying"
-            sleep 10
-          done
-          exit 1
+        run: .github/scripts/install-test-deps.sh
       - name: Build test binaries (in parallel)
         # Independent `nim c` runs in parallel; the steps below only run
         # what this built. Flag rationale lives in the script.
@@ -152,6 +144,15 @@ jobs:
         # ROMs.
         shell: bash
         run: ./dingbat_desktop_lifecycle_test
+      - name: Desktop modal notices (Dear ImGui, headless)
+        # notice.nim in a real ImGui context with no window: Return, keypad
+        # Enter and Escape close a notice as OK does; the press it appears
+        # on, or the one that closed the notice before it, does not; a held
+        # key closes one; the keyboard is ImGui's while one is up. Skipped
+        # only where imguin could not be installed (install-test-deps.sh).
+        if: env.DINGBAT_NO_IMGUIN != '1'
+        shell: bash
+        run: ./dingbat_desktop_modal_test
       - name: Clip-capture replay determinism
         # Replays a range from the anchor+input log and asserts every frame's
         # serialized state matches the live run; two negative controls must

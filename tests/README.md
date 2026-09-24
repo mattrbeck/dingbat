@@ -359,9 +359,10 @@ random register-writing program per core; known core issues print `[KNOWN]`,
 `DINGBAT_SOAK_STRICT=1` fails on them; an argument filters the cases), `test_printer`,
 `test_lcdresponse`, `test_sgb`, `test_gbartc` (GBA cartridge RTC protocol and the
 battery-save RTC trailer), `test_desktop` (the desktop frontend's logic that
-builds without SDL/ImGui: held input and key routing, the config file, the
-Link Cable over loopback sockets, battery/state/cheat writes, game loading;
-each replays a `formal/DesktopState` trace). The link-acceptance battery (`linktest`, `speclink`,
+builds without SDL: held input and key routing, the config file, the
+Link Cable over loopback sockets, battery/state/cheat writes, game loading,
+each replaying a `formal/DesktopState` trace, and the modal notices in a real
+Dear ImGui context with no window, which needs imguin). The link-acceptance battery (`linktest`, `speclink`,
 `netlink`, `rollback` modes over `tests/roms/*.gba`) is invoked directly in
 `.github/workflows/test.yml`.
 

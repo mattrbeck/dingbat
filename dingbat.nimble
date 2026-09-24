@@ -51,8 +51,8 @@ task test_gbartc, "Run the GBA cartridge RTC + battery-save RTC trailer tests":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_gbartc_test tests/gba_rtc_test.nim"
 
 task test_desktop, "Run the desktop frontend tests (input, settings, link, saves, game loading, modals)":
-  # modal drives Dear ImGui headless, so it needs imguin: CI's test job
-  # (zippy only) builds the others through .github/scripts/build-tests.sh.
+  # modal drives Dear ImGui headless, so it needs imguin (CI's test job
+  # installs it: .github/scripts/install-test-deps.sh).
   for t in ["input", "settings", "netlink", "persist", "lifecycle", "modal"]:
     exec "nim c -r -d:test_harness -d:release --path:src " &
          "-o:dingbat_desktop_" & t & "_test tests/desktop_" & t & "_test.nim"

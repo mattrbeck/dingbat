@@ -6,8 +6,9 @@
 ## (WantCaptureKeyboard) for as long as one is up, which is what keeps the
 ## key from the game (held_input.nim `modal_key_of`, desktop_input_test).
 ##
-## Needs imguin, so it runs under `nimble test_desktop` but not in CI's test
-## job, which installs only zippy.
+## Needs imguin (its C++ compiles into this binary; nothing else of the GUI:
+## no SDL, no GL). CI's test job installs it (.github/scripts/
+## install-test-deps.sh); also `nimble test_desktop`.
 
 import imguin/cimgui
 import dingbat/frontend/notice

@@ -51,6 +51,11 @@ build cyclelaws       dingbat_cyclelaws_test        tests/cyclelaws_test.nim
 build mgbavideo       dingbat_mgba_video            tests/mgba_video.nim
 build gbapurebase     dingbat_gbapurebase_test      tests/gbapu_rebase_test.nim
 build statesoak       dingbat_state_soak_test       tests/state_soak_test.nim
+# Dear ImGui through imguin, which compiles its C++ in the same build. Skipped
+# only where install-test-deps.sh could not install imguin (Windows).
+if [ "${DINGBAT_NO_IMGUIN:-}" != 1 ]; then
+  build desktopmodal  dingbat_desktop_modal_test    tests/desktop_modal_test.nim
+fi
 
 # Wait on every build even after one fails so all broken targets are reported.
 rc=0
