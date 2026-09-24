@@ -879,6 +879,10 @@ proc load_state_slot(slot: int): bool =
   if result:
     echo "State loaded: ", path
     input_log_event("state_load")
+    # The ring holds the timeline the load just replaced; rewinding into it
+    # would step back through frames that never led here (the web drops it
+    # the same way).
+    app.rewind.clear()
 
 proc state_reject_sentence(): string =
   ## One sentence per StateRejectKind, saying what to do about it; never raw
