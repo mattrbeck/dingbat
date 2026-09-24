@@ -34,9 +34,13 @@ proc set_slot*(w: SaveStatesWidget; i: int; used: bool; label: string;
   w.slots[i] = StateSlot(used: used, label: label, tex: tex, w: tw, h: th)
 
 proc mark_stale*(w: SaveStatesWidget) =
-  ## Re-run on_open on the next render; call after a state file changes
-  ## outside the widget (Quick Save while the window is open).
+  ## Re-run on_open on the next render, before any Save/Load/Delete can act
+  ## on the grid, and drop the notice under it; call after a state file
+  ## changes outside the widget (Quick Save while the window is open) and
+  ## when another game loads (its slots are other files, and the notice was
+  ## about the last game's).
   w.was_open = false
+  w.notice = ""
 
 proc dim(): ImVec4 = ImVec4(x: 0.6, y: 0.6, z: 0.6, w: 1.0)
 proc sel_col(): ImVec4 = ImVec4(x: 0.26, y: 0.59, z: 0.98, w: 1.0)
