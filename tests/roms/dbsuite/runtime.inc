@@ -58,8 +58,12 @@ main:
     b   menu
 
 main_runall:
-    mov r0, #0
+    ldr r0, =rom_config            @ bits 16-31: the case to start from
+    ldr r0, [r0]
+    mov r0, r0, lsr #16
     ldr r1, =N_CASES
+    cmp r0, r1
+    movhs r0, #0
     bl  run_range
     b   summary_view
 

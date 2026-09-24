@@ -1,6 +1,10 @@
 {
  "version": 1,
  "results_block": "0x02014000",
+ "rom_config_offset": {
+  "cartridge": "0xC4",
+  "multiboot": "0x134"
+ },
  "suites": [
   {
    "name": "cpu",

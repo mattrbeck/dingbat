@@ -421,7 +421,8 @@ def main():
         if size > MB_BODY_MAX:
             sys.exit(f'multiboot body is {size} bytes, over {MB_BODY_MAX}')
         mb = os.path.join(HERE, 'dbsuite.mb.gba')
-        assemble(os.path.join(HERE, 'mbstub.s'), mb, 0x02000000, build)
+        stub_elf = assemble(os.path.join(HERE, 'mbstub.s'), mb, 0x02000000, build)
+        mb_config = symbols(stub_elf)['body'] - 0x02000000 + 4
         img = bytearray(open(mb, 'rb').read())
         while len(img) % 16:
             img.append(0)
@@ -433,7 +434,9 @@ def main():
         msuites, mcases = case_list(open(body, 'rb').read(), MB_HOME, symbols(melf))
         assert [c['name'] for c in mcases] == [c['name'] for c in cases]
 
-    json.dump({'version': 1, 'results_block': '0x02014000', 'suites':
+    json.dump({'version': 1, 'results_block': '0x02014000',
+               'rom_config_offset': {'cartridge': '0xC4', 'multiboot': f'{mb_config:#x}'},
+               'suites':
                [{'name': n, 'first': f} for n, f in suites], 'cases': cases},
               open(os.path.join(HERE, 'cases.json'), 'w'), indent=1)
     print(f'{cart}: {len(rom)} bytes, {len(cases)} cases in {len(suites)} suites')

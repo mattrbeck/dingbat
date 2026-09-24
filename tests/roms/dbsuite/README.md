@@ -63,8 +63,10 @@ Take the rig's lock first.
 
 - **Auto-run.** The menu counts down 2.5 s and then runs every suite, unless
   a key is pressed. `rom_config` (the word at `0x080000C4`, the body's second
-  word in the multiboot image) can be patched: bit 0 runs everything at once,
-  with no menu; bit 1 never auto-runs.
+  word in the multiboot image; `cases.json` gives both file offsets) can be
+  patched. Bit 0 runs at once, with no menu, from case number bits 16-31 to
+  the end (so a run can restart past a case that hung). Bit 1 never
+  auto-runs.
 - **Menu.** A runs the selected suite, START runs everything. After a run,
   the summary lists each suite and the first failures. A on a suite opens
   every case, with got and expected. B goes back.

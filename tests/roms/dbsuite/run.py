@@ -5,7 +5,8 @@
     python3 tests/roms/dbsuite/run.py --mb          # ... and the multiboot one
     python3 tests/roms/dbsuite/run.py --bios=PATH   # through a real BIOS
     python3 tests/roms/dbsuite/run.py --all         # list passes too
-    python3 tests/roms/dbsuite/run.py --sp OUT.json # on the GBA SP over the
+    python3 tests/roms/dbsuite/run.py --sp OUT.json [--from=N]
+                                                    # on the GBA SP over the
                                                     # link rig (see below)
 
 Emulator runs drive `./dingbat_test <rom> --mode=mgba-suite`, which stops at
@@ -19,13 +20,15 @@ resident tools/hwlink monitor is sent BOOT first), follows the ROM's link
 beacons (0xDB000000 | case index before each case) while it runs, then reads
 the results block it streams ('LRPT', tools/hwlink/gblink.py read_report),
 saves the words to OUT.json and decodes them.  A run that stops names the
-case it stopped in.  Afterwards it sends BOOT (the ROM answers with the
+case it stopped in; --from=N starts the next run past it (the image's
+rom_config word is patched: run at once, from case N).  Afterwards it sends BOOT (the ROM answers with the
 BIOS's HardReset) and reinstalls the monitor.  Take the rig's lock first.
 
 Exits 0 iff nothing failed, timed out or crashed.
 """
 import json
 import os
+import struct
 import subprocess
 import sys
 import time
@@ -93,7 +96,16 @@ def decode_block(words):
     return got
 
 
-def on_console(out_path):
+def patched_image(start):
+    """The multiboot image with rom_config set to run at once from `start`."""
+    info = json.load(open(os.path.join(HERE, 'cases.json')))
+    off = int(info['rom_config_offset']['multiboot'], 16)
+    image = bytearray(open(os.path.join(HERE, 'dbsuite.mb.gba'), 'rb').read())
+    struct.pack_into('<I', image, off, 1 | (start << 16))
+    return bytes(image)
+
+
+def on_console(out_path, start=0):
     sys.path.insert(0, os.path.join(ROOT, 'tools', 'hwlink'))
     import gblink
     import await_console
@@ -111,7 +123,7 @@ def on_console(out_path):
         state = await_console.console_state()
     if state != 'multiboot':
         sys.exit(f'the console is not waiting for an upload (state {state})')
-    image = open(os.path.join(HERE, 'dbsuite.mb.gba'), 'rb').read()
+    image = patched_image(start)
     with gblink.GBLink() as link:
         link.set_voltage_3v3()
         time.sleep(0.15)
@@ -160,7 +172,9 @@ def main(argv):
     bad = 0
     if '--sp' in flags:
         out = next(a for a in argv[1:] if not a.startswith('--'))
-        got = on_console(out)
+        start = next((int(f.split('=', 1)[1], 0) for f in flags
+                      if f.startswith('--from=')), 0)
+        got = on_console(out, start)
         return 1 if report('AGB SP, multiboot image', got, True, show_all) else 0
     roms = ['dbsuite.gba'] + (['dbsuite.mb.gba'] if '--mb' in flags else [])
     for rom in roms:
