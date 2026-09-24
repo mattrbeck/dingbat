@@ -271,6 +271,12 @@ def shutdown (keep : Bool) (s : State) : State :=
     store := if rb then put s.game (s.sessGame, s.rbV) s.store else s.store,
     modal := keep && s.modal, manualView := keep && s.manualView }
 
+/-- netDismissModal (1605), as loadRom calls it when the modal is open: a
+    session still pairing is shut down; otherwise the modal just closes. (The
+    Dismiss event below is the same code.) -/
+def dismissModal (s : State) : State :=
+  if (curSess s).started || s.cur.isNone then { s with modal := false } else shutdown false s
+
 /-- netFail (235): setup failure (or peer gone once started). -/
 def netFail (s : State) : State :=
   match s.cur with
@@ -518,12 +524,14 @@ def step (s : State) : Event → State
     { s with loadPending := some g }
   -- persistSave(outgoing) ... currentOriginalName = g; restoreSave; initFromEmscripten.
   -- 7897: a session that started during the awaits owns the core: the load
-  -- returns without naming its game.
+  -- returns without naming its game. 7932: an open Link Cable modal is
+  -- dismissed in the segment that names the new game.
   | .loadCommit =>
     match s.loadPending with
     | none => s
     | some g =>
       if s.netMode || s.rollbackMode then { s with loadPending := none } else
+      let s := if s.modal then dismissModal s else s
       let s := { s with store := put s.game s.solo s.store }
       { s with game := g, solo := s.store g, loadPending := none }
   -- pagehide (11235) / beforeunload (11209): `if (netActive() || rollbackMode)
@@ -1101,7 +1109,16 @@ theorem ninv_ev_loadCommit {s : State}  (h : NInv s) (he : en s (.loadCommit) = 
   · exact h
   · split
     · exact obs _ ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
-    · exact obs _ ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
+    · have hd : NInv (if s.modal then dismissModal s else s) := by
+        split
+        · rename_i hm
+          have hen : en s .dismiss = true := by
+            simp only [en, Bool.and_eq_true, Bool.not_eq_eq_eq_not, Bool.not_true] at he ⊢
+            exact ⟨he.1, hm⟩
+          exact ninv_ev_dismiss h hen
+        · exact h
+      generalize (if s.modal then dismissModal s else s) = t at hd ⊢
+      exact ninv_congr hd ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
 
 theorem ninv_ev_pagehide {s : State}  (h : NInv s) (he : en s (.pagehide) = true) :
     NInv (step s (.pagehide)) := by
@@ -1200,6 +1217,8 @@ variable (s : State)
 @[simp] theorem tr_updS (sid : Nat) (f : Sess → Sess) : Tr (updS sid f s) = Tr s := rfl
 @[simp] theorem tr_updK (k : Nat) (g : Sock → Sock) : Tr (updK k g s) = Tr s := rfl
 @[simp] theorem tr_shutdown (keep : Bool) : Tr (shutdown keep s) = Tr s := rfl
+@[simp] theorem tr_dismissModal : Tr (dismissModal s) = Tr s := by
+  unfold dismissModal; split <;> rfl
 @[simp] theorem tr_newSession : Tr (newSession s) = Tr s := rfl
 @[simp] theorem tr_closeWsOpt (o : Option Nat) : Tr (closeWsOpt o s) = Tr s := by
   cases o <;> rfl
@@ -1272,6 +1291,16 @@ theorem linv_step {s : State} (h : LInv s) (e : Event) : LInv (step s e) := by
       · exact linv_tr (linv_wireChannel h _) (tr_updS _ _ _)
       · exact linv_wireChannel h _
     · exact h
+  | loadCommit =>
+    apply linv_tr h
+    simp only [step]
+    split
+    · rfl
+    · split
+      · rfl
+      · split
+        · exact tr_dismissModal s
+        · rfl
   | _ =>
     apply linv_tr h
     simp only [step]
@@ -1279,9 +1308,9 @@ theorem linv_step {s : State} (h : LInv s) (e : Event) : LInv (step s e) := by
       first
         | rfl
         | (simp only [tr_updS, tr_updK, tr_shutdown, tr_newSession, tr_closeWsOpt, tr_netFail,
-            tr_manualEnter, tr_manualPrepare, tr_sigConnect, tr_sigRedial, tr_dcOnOpen]; done)
+            tr_manualEnter, tr_manualPrepare, tr_sigConnect, tr_sigRedial, tr_dcOnOpen, tr_dismissModal]; done)
         | (simp only [tr_updS, tr_updK, tr_shutdown, tr_newSession, tr_closeWsOpt, tr_netFail,
-            tr_manualEnter, tr_manualPrepare, tr_sigConnect, tr_sigRedial, tr_dcOnOpen]; rfl)
+            tr_manualEnter, tr_manualPrepare, tr_sigConnect, tr_sigRedial, tr_dcOnOpen, tr_dismissModal]; rfl)
 
 /-- Every channel ever handed to wireChannel is either installed as a
     session's `net.dc` or was closed by the race: the loser is always torn down.
@@ -1555,18 +1584,31 @@ theorem sinv_step {s : State} {e : Event} (hn : NInv s) (h : SInv s) (he : en s 
       · rename_i hn
         have hb : s.rollbackMode = false := by
           revert hn; cases s.netMode <;> cases s.rollbackMode <;> simp
-        obtain ⟨a1, a2, a3, a4, a5⟩ := h
+        have ht : SInv (if s.modal then dismissModal s else s) := by
+          split
+          · unfold dismissModal; split
+            · exact sinv_sv h rfl
+            · exact sinv_shutdown h false
+          · exact h
+        have hrb : (if s.modal then dismissModal s else s).rollbackMode = false := by
+          split
+          · unfold dismissModal; split
+            · exact hb
+            · exact shutdown_rb_false h false
+          · exact hb
+        generalize (if s.modal then dismissModal s else s) = t at ht hrb ⊢
+        obtain ⟨a1, a2, a3, a4, a5⟩ := ht
         refine ⟨?_, ?_, ?_, ?_, a5⟩
         · intro x; simp only [put]
-          by_cases hx : x = s.game
+          by_cases hx : x = t.game
           · subst hx; simp [a2]
           · simp [hx, a1 x]
         · simp only [put]
-          by_cases hx : g = s.game
+          by_cases hx : g = t.game
           · subst hx; simp [a2]
           · simp [hx, a1 g]
-        · intro hr; simp [hb] at hr
-        · intro hr; simp [hb] at hr
+        · intro hr; simp [hrb] at hr
+        · intro hr; simp [hrb] at hr
   | pagehide =>
     cases hr : s.rollbackMode with
     | false =>
@@ -1738,5 +1780,12 @@ theorem regress_session_starts_mid_load :
 theorem regress_pagehide_in_rollback_loses_progress :
     witnesses [.openModal, .joinClick, .localPair, .rbStart, .rbProgress, .pagehide]
       (fun s => !s.lostProgress && s.store 0 == (0, 1)) = true := by decide
+
+/-- A game loaded under the Link Cable modal while a session is still pairing
+    (RunPause's `bug_load_under_link_modal_runs`): the load dismisses the
+    modal, shutting the pairing session down, in the segment that names it. -/
+theorem load_dismisses_pairing_modal :
+    witnesses [.openModal, .joinClick, .launch 1, .loadCommit]
+      (fun s => !s.modal && s.cur.isNone && s.game == 1) = true := by decide
 
 end WebState.Netplay

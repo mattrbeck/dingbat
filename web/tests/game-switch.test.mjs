@@ -233,3 +233,43 @@ test("a quota retry does not put older bytes back over a newer save", async () =
   eq(app.idb.get("save:A.gba"), v2, "the newer save stands");
   assert.ok(app.toasts.some((t) => t.includes("gave up its file")), "the eviction is still told");
 });
+
+// ── Medium: a load under a pausing overlay (RunPause) ──────────────────────
+// A game paused (so the Link modal did not freeze it), an overlay opened over
+// it, and a ROM dropped meanwhile (or a download that finishes): the new game
+// must not run behind the overlay, nor be frozen by it once it closes.
+
+const reportOpen = (app) => app.document.getElementById("report-modal").classList.contains("open");
+const pauseLit = (app) => app.document.getElementById("pause").classList.contains("paused");
+
+test("a game loaded under Report a Bug does not run behind it", async () => {
+  const app = await boot();
+  await play(app, "A.gba");
+  app.runIn("togglePause(); openReportModal()");
+  assert.equal(reportOpen(app), true);
+  await play(app, "B.gba");
+  assert.ok(!(reportOpen(app) && !app.runIn("paused")), "not running behind the report");
+});
+
+test("closing Report a Bug after a load does not freeze the new game", async () => {
+  const app = await boot();
+  await play(app, "A.gba");
+  app.runIn("togglePause(); openReportModal()");
+  await play(app, "B.gba");
+  app.runIn("closeReportModal()");
+  assert.equal(app.runIn("paused"), pauseLit(app), "the pause button tells the truth");
+  assert.equal(app.runIn("paused"), false, "the new game runs");
+});
+
+test("a game loaded under the Link Cable modal does not run behind it", async () => {
+  const app = await boot();
+  await play(app, "A.gba");
+  app.runIn(`
+    togglePause();
+    globalThis.__netModal = true;  // openNetConnect over a paused game
+    globalThis.netModalOpen = () => __netModal;
+    globalThis.netDismissModal = () => { __netModal = false; };
+  `);
+  await play(app, "B.gba");
+  assert.ok(!(app.runIn("__netModal") && !app.runIn("paused")), "not running behind the modal");
+});

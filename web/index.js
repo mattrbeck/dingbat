@@ -7942,6 +7942,13 @@ const loadRom = async (romName, originalName, opts = {}) => {
   // it captured, which must land on the old session's value.
   closeRewindScrubber();
   closeClipScrubber();
+  // The same for the overlays that pause the game under them: a ROM dropped,
+  // or a download that finished, while Report a Bug is open would otherwise
+  // run behind it, and closing it later would write the old game's paused
+  // state onto the new one. The Link Cable modal is dismissed (a session
+  // still pairing is shut down, synchronously): it froze the old game only.
+  closeReportModal();
+  if (typeof netModalOpen === "function" && netModalOpen()) netDismissModal();
   paused = false;
   document.body.classList.remove("paused");
   fastForward = false;
