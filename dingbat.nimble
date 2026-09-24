@@ -70,6 +70,10 @@ task test_gbapurebase, "Run the GB APU deadline checks across the per-frame sche
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_gbapurebase_test tests/gbapu_rebase_test.nim"
 
+task test_statesoak, "Run the range-checked serialize-while-running soak (both cores)":
+  exec "nim c -r -d:test_harness -d:release --path:src " &
+       "-o:dingbat_state_soak_test tests/state_soak_test.nim"
+
 task test_cyclelaws,"Hold the core to the cycle laws recorded from an AGB SP":
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_cyclelaws_test tests/cyclelaws_test.nim"

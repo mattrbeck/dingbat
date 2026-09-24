@@ -50,6 +50,7 @@ build mp2kpass        dingbat_mp2kpass_test         tests/mp2k_pass_test.nim
 build cyclelaws       dingbat_cyclelaws_test        tests/cyclelaws_test.nim
 build mgbavideo       dingbat_mgba_video            tests/mgba_video.nim
 build gbapurebase     dingbat_gbapurebase_test      tests/gbapu_rebase_test.nim
+build statesoak       dingbat_state_soak_test       tests/state_soak_test.nim
 
 # Wait on every build even after one fails so all broken targets are reported.
 rc=0

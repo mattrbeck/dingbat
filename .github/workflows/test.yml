@@ -90,6 +90,14 @@ jobs:
         # rewind ring's crash). A program assembled in the test; no ROMs.
         shell: bash
         run: ./dingbat_gbapurebase_test
+      - name: Save states while running (range-checked soak, both cores)
+        # Every committed ROM and a seeded random register-writing program
+        # per core, a payload built into a real rewind ring every frame, with
+        # rewinds, replays and loads into a newly built core. Built with
+        # checks on: the web's -d:danger hides a Defect (fc686286c). Known
+        # core issues print [KNOWN]; DINGBAT_SOAK_STRICT=1 fails on them.
+        shell: bash
+        run: ./dingbat_state_soak_test
       - name: LCD panel-response model invariants
         # Self-comparing panel-model invariants: static frames bit-exact,
         # transitions reach their target, 30 Hz alternation settles. No ROMs.

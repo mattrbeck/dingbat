@@ -352,7 +352,11 @@ CI step: `test_timestretch` (WSOLA), `test_ppucomposite` (GBA compositor invaria
 `test_ppubgunpack` (4bpp SWAR unpack vs scalar; `DINGBAT_BG4_EXHAUSTIVE=1` for the full
 sweep), `test_ppuobjlist`, `test_savestate_compat` (loads `tests/states/` and pins
 EventType ordinals / payload revisions), `test_cheats`, `test_rewind`, `test_clipreplay`
-(clip-capture replay determinism with two negative controls), `test_printer`,
+(clip-capture replay determinism with two negative controls), `test_statesoak`
+(both cores built with checks on, a payload into a real rewind ring every frame with
+rewinds, replays and loads into a newly built core, over every committed ROM and a seeded
+random register-writing program per core; known core issues print `[KNOWN]`,
+`DINGBAT_SOAK_STRICT=1` fails on them; an argument filters the cases), `test_printer`,
 `test_lcdresponse`, `test_sgb`, `test_gbartc` (GBA cartridge RTC protocol and the
 battery-save RTC trailer), `test_desktop` (the desktop frontend's logic that
 builds without SDL/ImGui: held input and key routing, the config file, the
