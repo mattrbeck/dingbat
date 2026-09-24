@@ -138,6 +138,16 @@ proc set_sys_lr(cpu: CPU; v: uint32) {.inline.} =
   if mode_bank(cast[CpuMode](cpu.cpsr.mode)) == 0: cpu.r[14] = v
   else: cpu.reg_banks[0][6] = v
 
+proc swi_residue(cpu: CPU; words: openArray[uint32]) =
+  ## A routine's own pushes on the System stack, just below the
+  ## dispatcher's {r2, lr}: what a caller finds under its sp afterwards
+  ## (tools/biosdrv/swistk2.c: each SWI with r3-r11 set to known values and
+  ## the stack captured after it; games that read stale stack words see
+  ## them -- Cyberdrive Zoids does). Div, DivArm, CpuSet, CpuFastSet and
+  ## VBlankIntrWait push nothing there.
+  let base = cpu.sys_sp() - 8 - uint32(words.len * 4)
+  for i, v in words: cpu.gba.bus.write_word_internal(base + uint32(i * 4), v)
+
 proc set_sys_sp(cpu: CPU; v: uint32) {.inline.} =
   if mode_bank(cast[CpuMode](cpu.cpsr.mode)) == 0: cpu.r[13] = v
   else: cpu.reg_banks[0][5] = v
@@ -621,6 +631,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
     cpu.r[1] = 1
     cpu.hle_intr_wait(true, 1'u16)
   of 0x08:  # Sqrt
+    cpu.swi_residue([cpu.r[4]])
     # The BIOS routine (0x404) is Newton from above: start from the power
     # of two at or above sqrt(x), take x_next = (x_n + x / x_n) / 2 with a
     # restoring shift-subtract divide whose divisor is first doubled while
@@ -685,6 +696,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
   of 0x09:  # ArcTan
     cpu.idle(bios_arctan(cpu))
   of 0x0A:  # ArcTan2(x, y) -> angle, 0x10000 = 2 pi
+    cpu.swi_residue([cpu.r[4], cpu.r[5], cpu.r[6], cpu.r[7], 0x170'u32])
     # Behaviour taken from the real BIOS under LLE (77 inputs, values exact):
     # the ratio handed to ArcTan is the smaller coordinate over the larger,
     # so it stays inside the polynomial's 1.14 range; ties take the y/x form
@@ -1125,6 +1137,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       count -= 1
     cpu.hle_charge_body_interruptible(body_t0, affine_model + mul_cycles)  # as BgAffineSet
   of 0x11:  # LZ77UnCompWram (8-bit writes)
+    cpu.swi_residue([cpu.r[4], cpu.r[5], cpu.r[6], 0x170'u32])
     var src = cpu.r[0]
     let src_page = int(bits_range(src, 24, 27))
     let dst_page = int(bits_range(cpu.r[1], 24, 27))
@@ -1173,6 +1186,8 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
         n_flags * (9 + rn) + n_lit * (16 + rn + db) +
         n_tok * (22 + 3 * rn) + n_runb * (7 + 2 * db))
   of 0x12:  # LZ77UnCompVram (16-bit writes)
+    cpu.swi_residue([cpu.r[4], cpu.r[5], cpu.r[6], cpu.r[7], cpu.r[8], cpu.r[9],
+                     cpu.r[10], 0x170'u32])
     # Decompress into a local buffer, then copy out as halfwords: direct
     # VRAM decompression breaks back-references into an unflushed byte.
     var src = cpu.r[0]
@@ -1622,6 +1637,7 @@ proc hle_swi*(cpu: CPU; swi_num: uint32) =
       let dst_page = int(bits_range(cpu.r[0], 24, 27))
       cpu.hle_charge_body(body_t0, 3 + 36 * (32 + int(cpu.gba.bus.wait32_n[dst_page])))
   of 0x1F:  # MidiKey2Freq
+    cpu.swi_residue([cpu.r[4], cpu.r[5], cpu.r[6], cpu.r[7], 0x170'u32])
     let base_freq = cpu.gba.bus.read_word(cpu.r[0] + 4)
     var key = cast[int32](cpu.r[1])
     var pitch = cast[int32](cpu.r[2])

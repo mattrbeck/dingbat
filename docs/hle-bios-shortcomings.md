@@ -46,7 +46,8 @@ it deliberately does not model:
     by the real call; Cyberdrive Zoids' voice command with its tone table
     in the cartridge returns a cycle early.
   Left in that set: Cyberdrive Zoids' frames from 527 (its loop reads stale
-  stack words the real BIOS's SWIs leave different), Gameboy Player
+  stack words: with the other SWIs' pushes now left as the real BIOS leaves
+  them, what still differs is SoundDriverMain's mixing locals), Gameboy Player
   Controller's stream from byte 11282 (its multiboot LZ77UnCompWram, EWRAM
   to EWRAM, runs ~243k cycles short of the real one, which moves the sound
   start), the FFCC loader's frame 3 and last silent FIFO burst (its first
