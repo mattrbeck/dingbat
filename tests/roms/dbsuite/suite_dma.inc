@@ -211,6 +211,194 @@ cap_pattern:
     cpay "bus-ew-arm-ldr",          pl_dmaobus2, 0x10B, 0xE1A00000
     cpay "bus-ew-arm-ldrh-hi",      pl_dmaobus2, 0x10C, 0xE1A00000
 
+@ ───────────────── DMA start, per-region burst, trigger instant ────────────
+@ WHAT: gbaedge page 46 DMATIME, its code unchanged: (a) TM0 read by the
+@ instruction right after the store enabling an immediate DMA0 of 1/4/16
+@ words, with the enable-clear stream as baseline; (b) 16-word DMA3 bursts
+@ between EWRAM, IWRAM, VRAM, palette, OAM and from ROM, timed by the
+@ cartridge stopwatch; (c) the H-blank and V-blank DMA's word landing
+@ against the polled flag rise; (d) a 16-word DMA3 with its completion IRQ:
+@ the handler's TM0 stamp less the CPU's own resume stamp, and whether the
+@ last word was already in memory when the CPU resumed.
+@ WHY: an emulator's DMA start delay, per-region access costs (a VRAM
+@ burst pays mode-3 contention) and completion-interrupt latency against a
+@ running CPU all show up as cycle counts.
+@ PROVENANCE: AGB SP, gbaedge page 46 DMATIME (session 5, 2026-09-04, CRC
+@ 8367; agb-sp-5.txt).  The code runs from the cartridge at WAITCNT 0:
+@ cartridge only.  VCOUNT at the H-blank DMA (+21) depends on where the
+@ page happened to start and is not checked; the two flag-to-word rows
+@ include a polling loop and are checked +-4.
+.equ V8SRC, 0x0200A000
+.equ V8DST, 0x0200E000
+fill_words:
+1:  str r1, [r0], #4
+    subs r2, r2, #1
+    bne 1b
+    bx  lr
+.macro dt_burst src, dst, off
+    ldr r0, =\src
+    str r0, [r6]
+    ldr r0, =\dst
+    str r0, [r6, #4]
+    bl  tm_start
+    ldr r1, =0x84000010
+    str r1, [r6, #8]
+    bl  tm_stop
+    strh r0, [r8, #\off]
+.endm
+.macro dt_start cnt, off
+    ldr r0, =V8SRC
+    str r0, [r5]
+    ldr r0, =V8DST
+    str r0, [r5, #4]
+    bl  tm_start
+    ldr r1, =\cnt
+    str r1, [r5, #8]
+    ldrh r9, [r10]
+    bl  tm_stop
+    strh r9, [r8, #\off]
+.endm
+run_dmatime:
+    push {r4-r11, lr}
+    bl  sp_irq_ewram               @ as the photographed run (suite_irq.inc)
+    ldr r8, =SLOT
+    ldr r7, =SCRATCH
+    mov r4, #IOBASE
+    ldr r10, =0x04000100
+    ldr r5, =0x040000B0
+    ldr r6, =0x040000D4
+    ldr r0, =V8SRC
+    ldr r1, =0xC0FFEE46
+    mov r2, #64
+    bl  fill_words
+    dt_start 0x84000001, 0
+    dt_start 0x04000001, 2
+    dt_start 0x84000004, 4
+    dt_start 0x84000010, 6
+    dt_burst V8SRC,      V8DST,      8
+    dt_burst 0x03001000, 0x03001100, 10
+    dt_burst 0x06010000, 0x06010100, 12
+    dt_burst 0x05000000, 0x05000100, 14
+    dt_burst 0x07000000, 0x07000100, 16
+    dt_burst db_pattern, V8DST,      18
+    ldr r11, =V8DST + 0x400
+    mov r0, #0
+    str r0, [r11]
+    ldr r0, =V8SRC
+    str r0, [r6]
+    str r11, [r6, #4]
+1:  ldrh r0, [r4, #4]
+    tst r0, #2
+    beq 1b
+2:  ldrh r0, [r4, #4]
+    tst r0, #2
+    bne 2b
+    ldr r0, =0xA4000001
+    str r0, [r6, #8]
+    bl  tm_start
+3:  ldrh r0, [r4, #4]
+    tst r0, #2
+    beq 3b
+    ldrh r9, [r10]
+4:  ldr r0, [r11]
+    cmp r0, #0
+    beq 4b
+    ldrh r1, [r10]
+    sub r1, r1, r9
+    ldrh r2, [r4, #4]
+    strb r2, [r8, #20]
+    ldrh r2, [r4, #6]
+    strb r2, [r8, #21]
+    strh r1, [r8, #24]
+    bl  tm_stop
+    mov r0, #0
+    str r0, [r11]
+    ldr r0, =V8SRC
+    str r0, [r6]
+    str r11, [r6, #4]
+1:  ldrh r0, [r4, #6]
+    cmp r0, #100
+    bne 1b
+    ldr r0, =0x94000001
+    str r0, [r6, #8]
+    bl  tm_start
+2:  ldrh r0, [r4, #4]
+    tst r0, #1
+    beq 2b
+    ldrh r9, [r10]
+3:  ldr r0, [r11]
+    cmp r0, #0
+    beq 3b
+    ldrh r1, [r10]
+    sub r1, r1, r9
+    ldrh r2, [r4, #4]
+    strb r2, [r8, #22]
+    ldrh r2, [r4, #6]
+    strb r2, [r8, #23]
+    strh r1, [r8, #26]
+    bl  tm_stop
+    ldr r0, =V8DST
+    mov r1, #0
+    mov r2, #16
+    bl  fill_words
+    mov r0, #0
+    str r0, [r7, #0x4C]
+    ldr r0, =0x04000200
+    mov r1, #0x0800
+    strh r1, [r0]
+    ldr r1, =0x3FFF
+    strh r1, [r0, #2]
+    mov r1, #1
+    strh r1, [r0, #8]
+    ldr r0, =V8SRC
+    str r0, [r6]
+    ldr r0, =V8DST
+    str r0, [r6, #4]
+    ldr r12, =V8DST + 60
+    bl  tm_start
+    ldr r1, =0xC4000010
+    str r1, [r6, #8]
+    ldrh r9, [r10]
+    ldr r11, [r12]
+    ldr r6, =0x00080000
+5:  ldr r0, [r7, #0x4C]
+    cmp r0, #0
+    bne 6f
+    subs r6, r6, #1
+    bne 5b
+6:  ldrh r0, [r7, #0x48]
+    sub r0, r0, r9
+    strh r0, [r8, #28]
+    ldr r3, =0xC0FFEE46
+    cmp r11, r3
+    moveq r0, #1
+    movne r0, #0
+    strb r0, [r8, #30]
+    bl  tm_stop
+    ldr r0, =0x04000200
+    mov r1, #0
+    strh r1, [r0, #8]
+    strh r1, [r0]
+    pop {r4-r11, pc}
+    .ltorg
+    chalf "dmatime-imm-1-word-resume", run_dmatime, 0, 0x0038, F_CART
+    chalf "dmatime-enable-clear-baseline", RUN_SAME, 2, 0x002A, F_CART
+    chalf "dmatime-imm-4-words-resume", RUN_SAME, 4, 0x0067, F_CART
+    chalf "dmatime-imm-16-words-resume", RUN_SAME, 6, 0x00F7, F_CART
+    chalf "dmatime-burst-ewram",    RUN_SAME, 8, 0x011C, F_CART
+    chalf "dmatime-burst-iwram",    RUN_SAME, 10, 0x007C, F_CART
+    chalf "dmatime-burst-vram-mode3", RUN_SAME, 12, 0x00B1, F_CART
+    chalf "dmatime-burst-palette",  RUN_SAME, 14, 0x009C, F_CART
+    chalf "dmatime-burst-oam",      RUN_SAME, 16, 0x007C, F_CART
+    chalf "dmatime-burst-rom-ewram", RUN_SAME, 18, 0x011E, F_CART
+    cbyte "dmatime-hblank-dma-in-hblank", RUN_SAME, 20, 0x02, F_CART
+    cbyte "dmatime-vblank-dma-in-vblank", RUN_SAME, 22, 0x01, F_CART
+    cbyte "dmatime-vblank-dma-line-160", RUN_SAME, 23, 0xA0, F_CART
+    crange "dmatime-hblank-flag-to-word", RUN_SAME, 24, 0xFFFF, 0x0025 - 4, 0x0025 + 4, F_CART
+    crange "dmatime-vblank-flag-to-word", RUN_SAME, 26, 0xFFFF, 0x0025 - 4, 0x0025 + 4, F_CART
+    chalf "dmatime-completion-irq-after-resume", RUN_SAME, 28, 0x006D, F_CART
+    cbyte "dmatime-cpu-resumes-after-last-word", RUN_SAME, 30, 0x01, F_CART
+
     payload_blob pl_dmaphase, "dmaphase.bin"
     payload_blob pl_kitdemo, "kitdemo.bin"
     .include "gen_dma.inc"

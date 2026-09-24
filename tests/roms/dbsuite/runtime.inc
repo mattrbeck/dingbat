@@ -610,6 +610,22 @@ machine_reset:
     ldr r1, =0x03007FFC            @ our IRQ handler
     ldr r3, =irq_handler
     str r3, [r1]
+    mrs r3, cpsr                   @ the BIOS's IRQ stack, wherever a case
+    msr cpsr_c, #0xD2              @ left it
+    ldr sp, =0x03007FA0
+    msr cpsr_c, r3
+    bx  lr
+    .ltorg
+
+@ Put the IRQ stack in EWRAM at SCRATCH+0xF0 for the rest of the case, as
+@ gbaedge's pages ran with it (its THUMBPC and LDMUSER pages moved sp_irq
+@ there and never put it back): the BIOS dispatcher's push and pop then
+@ cost what they cost on the photographed run.  machine_reset undoes it.
+sp_irq_ewram:
+    mrs r0, cpsr
+    msr cpsr_c, #0xD2
+    ldr sp, =SCRATCH + 0xF0
+    msr cpsr_c, r0
     bx  lr
     .ltorg
 
