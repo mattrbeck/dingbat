@@ -109,13 +109,32 @@ by `tests/gbapu_rebase_test.nim`.
 Left alone, with reasons: saves an older build wrote for an extensionless
 ROM (`<parent>.sav`) are not migrated, because that name is also the save of
 a different game (`/g/v1.2/zelda` wrote `/g/v1.sav`, which is `/g/v1.gba`'s)
-and a `.sav` carries no ROM identity. GBA state identity still hashes the
-first 1 MB: a whole-ROM identity would make every new state of a large cart
-unreadable to older builds (stale web tabs, Drive-synced devices), the
-version churn avoided so far; a compatible route is an optional trailer
-carrying the whole-ROM hash, if wanted. Same stem sharing `.sav` stays (every
+and a `.sav` carries no ROM identity. Same stem sharing `.sav` stays (every
 emulator does it; two windows on the same stem are now refused). A hostname
 typed into Join still resolves by a blocking DNS lookup.
+
+**Round 4:** GBA state identity now covers the whole ROM through an optional
+trailer (9b79c81e: flag bit 1, the whole-ROM FNV-1a and length after the
+thumbnail; every v7 reader ignores unknown flags and trailing bytes, checked
+against a real build of the previous reader), and desktop slots and the
+states lock follow it (df85c295; the round-2 name is read as a fallback).
+Driven: a same-named hack differing past 1 MB opens beside the original and
+finds its own, empty Quick slot. CI had been red since the first desktop
+landing (the test job lacked the `yaml` package `desktop_settings_test`
+needs); 23a3b930 installs yaml and imguin and runs the modal test.
+`tests/state_soak_test.nim` (cfdf1882) builds a state every frame, range
+checks on, over every committed ROM and a seeded random-register program per
+core; reverting fc686286c makes it fail within 39 frames. It found two GB
+bookkeeping bugs, fixed (d28e5c95: states saved the last $FF0F read instead
+of the pending flags; 04fd7e1a: the first frame after loading a state into a
+fresh core was white), and lists core issues it cannot fix by bookkeeping as
+`[KNOWN]` (`DINGBAT_SOAK_STRICT=1` fails on them): a GB state taken on the
+LCD-on frame (LY 0, mode 2) is refused on load; a GBA H-blank DMA burst
+longer than a line overflows the event queue; and six fields missing from
+the payloads make a replay diverge (GB `apu.noise_phase`,
+`ppu.stat_drop_pending`; GBA `bus.sync_bits` bit 1, `dma.video_active`, the
+forced-low `cpu.irq_line` on load, the IRQ synchroniser's stamps), which
+matters for rollback netplay as well as rewind.
 
 | File | Machine |
 |---|---|
