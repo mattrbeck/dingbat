@@ -838,6 +838,12 @@ proc save_state_slot(slot: int): bool =
   if result: echo "State saved: ", path
 
 proc load_state_slot(slot: int): bool =
+  # A linked core's state is half of a two-player session: loading one would
+  # put the two games out of step. Refused here, whoever asks (menu, hotkey,
+  # the Save States window), so no caller can miss it.
+  if app.netlink != nil:
+    last_state_error = ""
+    return false
   let path = state_file_path(slot)
   if path.len == 0: return false
   result = case app.emu_kind
@@ -851,6 +857,9 @@ proc load_state_slot(slot: int): bool =
 proc state_reject_sentence(): string =
   ## One sentence per StateRejectKind, saying what to do about it; never raw
   ## exception text, never two causes on one message.
+  if app.netlink != nil:
+    return "Save states can't be loaded while the link cable is connected. " &
+           "Disconnect first."
   case last_state_reject_kind
   of srkNotAState:
     "That file isn't a dingbat save state."
@@ -1328,7 +1337,7 @@ proc render_imgui() =
                            nil, false, game_loaded):
           app.pending_save = true
         if igMenuItem_Bool(cstring("Quick Load  " & MOD_KEY_STR & "+L"),
-                           nil, false, game_loaded):
+                           nil, false, game_loaded and app.netlink == nil):
           app.pending_load = true
         if igMenuItem_Bool("Save States...", nil, false, game_loaded):
           app.save_states.window = true
@@ -1348,8 +1357,12 @@ proc render_imgui() =
                                    nil, addr should_reset, true)
         discard igMenuItem_BoolPtr(cstring("Pause  " & MOD_KEY_STR & "+P"),
                                    nil, addr app.paused, true)
+        # Frame advance, 2x and fast forward can't run ahead of a linked
+        # peer (it paces both), so they are off while linked, like Tab.
+        let unlinked = app.netlink == nil
         if igMenuItem_Bool(cstring("Frame Advance  " & MOD_KEY_STR & "+N"),
-                           nil, false, app.paused and app.emu_kind != ekNone):
+                           nil, false, app.paused and app.emu_kind != ekNone and
+                           unlinked):
           app.pending_step = true
         if igMenuItem_BoolPtr("Rewind (hold `)", nil, addr app.cfg.rewind,
                               not app.cfg.speed_mode):
@@ -1374,11 +1387,11 @@ proc render_imgui() =
         # dominate 2x, so enabling either clears the other.
         if app.emu_kind == ekGBA and app.gba_emu != nil:
           if igMenuItem_BoolPtr("2x Speed", "Shift+Tab",
-                                addr app.gba_emu.apu.turbo, true):
+                                addr app.gba_emu.apu.turbo, unlinked):
             if app.gba_emu.apu.turbo: app.gba_emu.apu.sync = true
           var fast_forward = not app.gba_emu.apu.sync
           if igMenuItem_BoolPtr("Fast Forward", "Tab",
-                                addr fast_forward, true):
+                                addr fast_forward, unlinked):
             app.gba_emu.apu.sync = not fast_forward
             if fast_forward: app.gba_emu.apu.turbo = false
         elif app.emu_kind == ekGB and app.gb_emu != nil:
