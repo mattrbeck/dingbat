@@ -908,6 +908,11 @@ proc gb_apply_state(gb: GB; payload: string; rev: uint32;
   r.expect_tag(GB_SEC_SCHED)
   gb.scheduler.load_from(r, pad = in_process)
   load_ppu_state(gb.ppu, r, rev)
+  # Derived, not serialized: set by an LCD-on and cleared by the V-blank entry
+  # that ends that frame, which is where a state is written. Whatever the core
+  # held before the load (a fresh core boots with it set) would turn the next
+  # frame white; with the LCD off, the next LCD-on sets it again.
+  gb.ppu.lcd_on_first_frame = false
   load_apu_state(gb.apu, r)
   gb.apu_extract_state_events()
   # Derived, not serialized: channel 4's divisor stage, re-derived from the

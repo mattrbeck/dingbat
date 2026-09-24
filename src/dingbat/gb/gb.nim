@@ -1974,7 +1974,8 @@ type
     hdma_held*:       array[16, uint8]
     # The frame drawn right after LCDC.7 goes high is not shown: the panel
     # stays blank until the first vblank (Pan Docs, LCDC). Not on SGB, where
-    # the TV keeps the frozen picture. Transient, not serialized.
+    # the TV keeps the frozen picture. Not serialized: false at every frame
+    # boundary a state loads from, and gb_apply_state sets it so.
     lcd_on_first_frame*: bool
     # window state: a WY match seen with LCDC.5 set this frame (ppu.nim
     # `mode_flag=`, ppu_latch_wy, ppu_store_lcdc)
