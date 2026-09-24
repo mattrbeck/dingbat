@@ -153,7 +153,9 @@ proc load_cartridge*(rom_path: string): Mbc =
     of 0x05: 0x2000 * 8
     else:    0
 
-  let sav_path = rom_path[0 ..< rom_path.rfind('.')] & ".sav"
+  # changeFileExt, not "up to the last dot": an extensionless path (the
+  # command line takes any) would otherwise name `<parent>.sav` or `.sav`
+  let sav_path = rom_path.changeFileExt(".sav")
 
   var cart: Mbc
   case cart_type

@@ -1441,7 +1441,9 @@ include ppu
 include mmio
 
 proc new_storage*(gba: GBA; rom_path: string): Storage =
-  let save_path = rom_path[0 ..< rom_path.rfind('.')] & ".sav"
+  # changeFileExt, not "up to the last dot": an extensionless path (the
+  # command line takes any) would otherwise name `<parent>.sav` or `.sav`
+  let save_path = rom_path.changeFileExt(".sav")
   let content = readFile(rom_path)
   var t = find_storage_type(content)
   when defined(yoshi_eeprom_pin):

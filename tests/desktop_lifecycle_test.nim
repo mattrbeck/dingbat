@@ -4,7 +4,8 @@
 ## touched, instead of an IndexDefect out of main(); a GBA game's battery is
 ## written when its core is dropped or the app quits, including one a state
 ## load restored while paused, and a write that fails is reported, not raised;
-## a zip extracts to one cache folder however its path is spelled.
+## a zip extracts to one cache folder however its path is spelled; a ROM path
+## with no extension keeps its battery file beside it, not `<parent>.sav`.
 
 import std/[os, hashes, strformat, tables, tempfiles]
 import zippy/ziparchives
@@ -123,6 +124,23 @@ block zip_adopts_earlier_folder:
   let rom = extract_zip_rom(cache, zip)
   doAssert rom.len > 0 and readFile(rom.parentDir / "Z.sav") == "progress"
   doAssert not dirExists(old)
+
+block extensionless_paths:
+  # The command line takes any path; with no extension, "up to the last dot"
+  # cut into the folder name ("<dir>/d.sav") or left ".sav" in the cwd.
+  let sub = dir / "d.x"
+  createDir(sub)
+  var rom = newString(0x400)
+  for i, c in "SRAM_V113": rom[0x200 + i] = c
+  writeFile(sub / "game", rom)
+  let a = build_core(sub / "game", opts()).gba
+  doAssert a != nil and a.storage.save_path == sub / "game.sav", a.storage.save_path
+  var gbrom = newString(0x8000)
+  gbrom[0x147] = char(0x03)
+  gbrom[0x149] = char(0x02)
+  writeFile(sub / "gbgame", gbrom)
+  let g = new_gb("", sub / "gbgame", fifo = true, headless = true, run_bios = false)
+  doAssert g.cartridge.sav_path == sub / "gbgame.sav", g.cartridge.sav_path
 
 removeDir(dir)
 echo "ok"

@@ -140,7 +140,8 @@ jobs:
         # A file that is not a ROM is refused with the running game kept; a
         # GBA battery is written on a switch/quit (and a failed write is
         # reported, not raised); a zip has one cache folder however its path
-        # is spelled. Synthetic ROMs.
+        # is spelled; an extensionless ROM's .sav sits beside it. Synthetic
+        # ROMs.
         shell: bash
         run: ./dingbat_desktop_lifecycle_test
       - name: Clip-capture replay determinism

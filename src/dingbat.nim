@@ -799,7 +799,7 @@ proc cheat_file_path(): string =
   ## Sidecar cheat list, next to the ROM (mirrors the .sav convention).
   let rp = current_rom_path()
   if rp.len == 0: return ""
-  rp[0 ..< rp.rfind('.')] & ".cht"
+  rp.changeFileExt(".cht")
 
 proc current_cheat_engine(): CheatEngine =
   case app.emu_kind
