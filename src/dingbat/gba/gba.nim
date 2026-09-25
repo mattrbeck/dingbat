@@ -1198,6 +1198,7 @@ proc window_open_event*(intr: Interrupts)
 proc window_close_event*(intr: Interrupts)
 proc window_ahead*(intr: Interrupts; raise_in: int)
 proc unstall*(intr: Interrupts; ran: int)
+proc imm_refill_handover*(bus: Bus)
 proc read_open_bus_word*(bus: Bus; address: uint32): uint32
 proc read_open_bus_value*(bus: Bus; address: uint32): uint8
 when defined(obuslatch):
@@ -1309,6 +1310,19 @@ const IMM_ACCESS_WAIT* {.booldefine.} = true
   ## ldrh or str there (data from the next cycle on) delays the burst by its
   ## length less one and reads the old word, while a nop before the ldr, or
   ## an ldm's second access, lets the burst in first.
+const IMM_FETCH_WAIT* {.booldefine.} = true
+  ## An immediate DMA whose request lands inside a CPU instruction fetch
+  ## waits for the whole fetch, as for a data access (IMM_ACCESS_WAIT), and
+  ## takes the bus as it ends. On an AGB SP: Hades-Tests dma-start-delay's
+  ## own code run from board WRAM (tests/roms/payloads/hadesdsd.s): the DMA
+  ## reads TM0 3 cycles later than the one-cycle retry gave, after the whole
+  ## 6-cycle ARM fetch, while the CPU is back on the same cycle; and a Thumb
+  ## store executed from the empty cartridge slot (slotimm.s): the request
+  ## lands in the next opcode's 5-cycle gamepak fetch and the DMA reads TM0
+  ## 2 cycles later than the retry gave, at the fetch's end; with the
+  ## prefetcher on the fetch is 2 cycles and the burst starts at its end,
+  ## a cycle sooner than the retry. The ROM rows of dma-start-delay (ARM,
+  ## N+S fetches, with and without the prefetcher) turn green with it.
 const IMM_IDLE_GRANT* {.booldefine.} = true
   ## An immediate DMA requests the bus two cycles after its enable write. If
   ## the CPU is running internal cycles then, the burst starts there and
@@ -1321,12 +1335,13 @@ const IMM_IDLE_GRANT* {.booldefine.} = true
   ## takes is a cycle earlier at every period. hades dma-start-delay's two
   ## IWRAM rows turn green with it. Off: irqstorm's ten DMA cells read one
   ## late.
-const DMA_REGRAB* {.intdefine.} = 1
+const DMA_REGRAB* {.intdefine.} = 0
   ## A PPU-timed request landing within this many cycles of the last burst's
   ## end is granted at once, not deferred to the end of the CPU access in
-  ## flight: the CPU's access after a burst has not yet taken the bus. alyosha
-  ## DMA_pause_timing_end_4 (request one cycle after its immediate burst ends)
-  ## is red at 0, _end_3 (two cycles after) at 2.
+  ## flight. It was 1, fitted to alyosha DMA_pause_timing_end_4 while that
+  ## row's immediate burst (armed from ROM) started a cycle early; with the
+  ## gamepak fetch waited out (IMM_FETCH_WAIT) _end_4's request lands on the
+  ## burst's last cycle and _end_3's one after it, and 0 holds both.
 proc add_cycles*(bus: Bus; n: int) {.inline.}
 proc idle_window*(bus: Bus; n: int)
 proc `[]`*(bus: Bus; address: uint32): uint8
@@ -1631,9 +1646,9 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
         var access_starts = false
         var at_end = false
         when IMM_ACCESS_WAIT:
-          # Measured for IWRAM/EWRAM/IO accesses only; a gamepak access keeps
-          # the one-cycle wait (alyosha DMA_pause_timing_mid_1/_mid_2 time a
-          # grant inside a four-cycle ROM fetch).
+          # Measured for IWRAM/EWRAM/IO data accesses and (IMM_FETCH_WAIT)
+          # EWRAM and gamepak fetches; a gamepak data access keeps the
+          # one-cycle wait (none can be in flight at W+2 after the enable).
           if bus.in_catch_up and not bus.access_rom and not gba.cpu.halted and
              bus.access_start <= now and now <= bus.access_end:
             if bus.access_start == now: access_starts = now < bus.access_end

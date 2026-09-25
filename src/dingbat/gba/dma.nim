@@ -1,13 +1,12 @@
 # DMA implementation (included by gba.nim)
 
-const DMA_PREEMPT_AFTER_READ {.booldefine.} = true
-  ## A higher-priority request preempts a burst between a transfer's read and
-  ## its write, and only there: not between one transfer's write and the
-  ## next one's read (alyosha DMA_pause_timing_*: an H-blank DMA0 landing on
-  ## an immediate DMA1's read is granted before its write, one landing on
-  ## its write waits for the next read). False (between transfers, as
-  ## before) reds _mid_1 and _mid_2; both points reds _mid_2; neither reds
-  ## _mid_1 and _end_1.._end_3.
+const DMA_PREEMPT_AFTER_READ {.booldefine.} = false
+  ## True: a higher-priority request preempts a burst only between a
+  ## transfer's read and its write. False: only between two transfers. True
+  ## was fitted to alyosha DMA_pause_timing_mid_1/_mid_2 while an immediate
+  ## DMA armed from ROM started a cycle early (the one-cycle retry inside
+  ## the gamepak fetch); with that fetch waited out (IMM_FETCH_WAIT, AGB SP)
+  ## both rows are green between transfers and red after the read.
 const DMA_STALL_FROM_CPU_STOP {.booldefine.} = true
 const DMA_IRQ_FROM_BUS_END {.booldefine.} = true
   ## A burst's end-of-transfer interrupt is recognised IRQ_SYNC_DELAY cycles
@@ -129,6 +128,9 @@ proc `[]=`*(dma: DMA; io_addr: uint32; value: uint8) =
           if (dma.gba.bus.sync_bits and 1) == 0 or dma.gba.bus.imm_at < due - CycleCount(DMA_START_DELAY):
             dma.gba.bus.imm_at = due
         dma.gba.bus.sync_bits = dma.gba.bus.sync_bits or 1
+        when IMM_FETCH_WAIT:
+          # fetches leave the fast path while the request is pending
+          dma.gba.bus.fetch_key = 0xFFFFFFFF'u32
         dma.gba.scheduler.schedule(DMA_START_DELAY, etDMA)
   else:
     echo "Unmapped DMA write addr: ", hex_str(uint8(io_addr)), " val: ", value

@@ -966,9 +966,17 @@ proc window_fetch_sync(bus: Bus; cost: int)
 proc fetch_half_miss(bus: Bus; address: uint32): uint16
 proc fetch_word_miss(bus: Bus; address: uint32): uint32
 
+proc imm_fetch_page(page: uint32): bool {.inline.} =
+  ## IMM_FETCH_WAIT's pages: those whose fetches last more than a cycle and
+  ## were measured (board WRAM, the gamepak). IWRAM fetches take one cycle,
+  ## so no request lands inside one.
+  page == 0x2 or (page >= 0x8 and page <= 0xD)
+
 proc install_fetch_cache(bus: Bus; page: uint32): bool =
   when DMA_ACCESS_WINDOW:
     if (bus.sync_bits and 2) != 0: return false
+  when IMM_FETCH_WAIT:
+    if (bus.sync_bits and 1) != 0 and imm_fetch_page(page): return false
   when IRQ_LAST_WAITS:
     if (bus.sync_bits and 8) != 0: return false
   # Only pages whose fetches are plain masked reads are cacheable; BIOS,
@@ -1372,7 +1380,40 @@ proc read_word*(bus: Bus; address: uint32): uint32 =
           return
   bus.read_word_internal(address)
 
+proc imm_refill_handover*(bus: Bus) =
+  ## IMM_FETCH_WAIT: the CPU's next bus step after a fetch an immediate DMA's
+  ## request landed in (another fetch, or a branch's refill): the burst takes
+  ## the bus first, and the step is priced after it (a gamepak fetch after a
+  ## burst is nonsequential).
+  if bus.imm_pre and not bus.dma_active: bus.imm_pre_grant(0)
+
+template imm_fetch(bus: Bus; address: uint32; fetch: untyped) =
+  ## IMM_FETCH_WAIT: while an immediate DMA's request is pending (the few
+  ## cycles after its enable; dma.nim drops the fetch cache for them), a
+  ## board-WRAM or gamepak fetch syncs to its end like a load, so a request
+  ## landing inside it waits for the whole fetch (imm_pre) and the CPU's
+  ## next step hands over (an internal cycle through IMM_IDLE_GRANT, a data
+  ## access through imm_pre_grant, a fetch or a refill here).
+  when IMM_FETCH_WAIT:
+    if (bus.sync_bits and 3) == 1 and not bus.dma_active and
+       imm_fetch_page(bits_range(address, 24, 27)):
+      bus.imm_refill_handover()
+      if (bus.sync_bits and 3) == 1 and not bus.dma_active:
+        bus.sync_bits = bus.sync_bits and not 1'u8
+        let before = bus.cycles
+        result = fetch
+        bus.sync_bits = bus.sync_bits or 1
+        let cost = bus.cycles - before
+        bus.fetch_key = 0xFFFFFFFF'u32
+        bus.access_rom = false
+        bus.access_write = false
+        bus.catch_up_access(cost)
+      else:
+        result = fetch
+      return
+
 proc fetch_half_miss(bus: Bus; address: uint32): uint16 =
+  bus.imm_fetch(address, bus.fetch_half(address))
   when DMA_ACCESS_WINDOW:
     if (bus.sync_bits and 2) != 0:
       # The window vetoed the fetch cache to get here. Charge the fetch the
@@ -1402,6 +1443,7 @@ proc fetch_half_miss(bus: Bus; address: uint32): uint16 =
   bus.read_half(address)
 
 proc fetch_word_miss(bus: Bus; address: uint32): uint32 =
+  bus.imm_fetch(address, bus.fetch_word(address))
   when DMA_ACCESS_WINDOW:
     if (bus.sync_bits and 2) != 0:
       bus.sync_bits = bus.sync_bits and not 2'u8

@@ -231,6 +231,8 @@ proc contend_refill(cpu: CPU; s: int) {.noinline.} =
     if (bus.sync_bits and 8) != 0: bus.note_waits(s)
 
 proc clear_pipeline*(cpu: CPU) =
+  when IMM_FETCH_WAIT:
+    if cpu.gba.bus.imm_pre: cpu.gba.bus.imm_refill_handover()
   cpu.pipeline.clear()
   cpu.refill_pending = true
   # Refill = two sequential fetches at the destination.
