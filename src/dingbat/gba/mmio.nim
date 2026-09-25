@@ -10,6 +10,7 @@ when defined(biosdrvtrace):
 
 proc `[]`*(mmio: MMIO; address: uint32): uint8 =
   let io_addr = 0xFFFFFF'u32 and address
+  when WL_QUIET_EVENTS: mmio.gba.wl_unsafe = true
   when defined(biosdrvtrace):
     if bdIoReadHook != nil: bdIoReadHook(address)
   case io_addr

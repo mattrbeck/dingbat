@@ -206,5 +206,13 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
                else: cpu.last_waitloop_first_load
     let pc = cpu.gba.last_dispatch_pc
     fresh = pc >= start_addr + 4 and pc <= last + 4
+    when WL_QUIET_EVENTS:
+      # One that ran after the read is harmless if it could not have changed
+      # what was read: FireRed's WaitForVBlank (an IWRAM flag) otherwise ran
+      # an extra iteration for real after each line event, or not, by where
+      # in the loop the line happened to fall.
+      if not fresh and not cpu.gba.wl_unsafe and not cpu.irq_line:
+        fresh = true
+  when WL_QUIET_EVENTS: cpu.gba.wl_unsafe = false
   if not (stable and fresh and not volatile):
     cpu.entered_waitloop = false

@@ -223,6 +223,13 @@ proc main() =
         emu.step_frame()
         h = fnv(h, emu.ppu.framebuffer)
         echo f, " ", toHex(h)
+      # The whole machine at the end, not just what it drew
+      var sh = 0xCBF29CE484222325'u64
+      for c in emu.state_payload():
+        sh = (sh xor uint64(ord(c))) * 0x100000001B3'u64
+      echo "state ", toHex(sh)
+      if getEnv("DINGBAT_BENCH_STATE_OUT").len > 0:
+        writeFile(getEnv("DINGBAT_BENCH_STATE_OUT"), emu.state_payload())
       return
     template run_scripted(f: int) =
       for ev in script:

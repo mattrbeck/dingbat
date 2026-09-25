@@ -1077,6 +1077,7 @@ proc gba_apply_state(gba: GBA; payload: string; rev: uint32;
       "reconstructed — it would resume with a corrupted stack pointer")
   load_bus_state(gba.bus, r, rev)
   gba.bus.sd_tw_active = false   # an HLE sound pass's timing is not stored
+  gba.wl_unsafe = true           # the waitloop detector starts over
   # Derived, not stored: at a frame boundary it is the executing mode's lead,
   # or 0 while the CPU runs off the gamepak (PF_RUNS_OFF_ROM, cpu.nim)
   let pc_page = int(bits_range(gba.cpu.r[15], 24, 27))

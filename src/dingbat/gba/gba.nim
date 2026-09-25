@@ -1188,6 +1188,11 @@ type
     # the waitloop detector's staleness test (waitloop.nim)
     dispatch_count*:   uint32
     last_dispatch_pc*: uint32
+    # WL_QUIET_EVENTS: since the waitloop detector last looked, something
+    # ran that could change what a loop reads -- an event not known to leave
+    # memory alone, a DMA transfer, or an IO read. Not serialized: a state
+    # load sets it.
+    wl_unsafe*:        bool
     bios_path*:  string
     rom_path*:   string
     run_bios*:   bool
@@ -1304,6 +1309,10 @@ const DMA_STALLS_IRQ_SYNC* {.booldefine.} = true
   ## (Interrupts.unstall); without it alyosha Interactions
   ## Internal_Cycle_DMA_IRQ_7/_ldr_IWRAM/_MUL_IRQ go red. The access the
   ## CPU was waiting to make is IRQ_LAST_WAITS's.
+const WL_QUIET_EVENTS* {.booldefine.} = true
+  ## The waitloop detector counts an event that ran after the loop's load as
+  ## harmless when it cannot have changed what the loop read: it writes no
+  ## memory, no DMA ran, and the loop read no IO (waitloop.analyze_loop).
 const IRQ_LAST_WAITS* {.booldefine.} = true
   ## An interrupt is taken after an instruction only if it was recognised
   ## before the wait states of that instruction's last bus access; one
@@ -1690,6 +1699,17 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
     # Waitloop exactness: when, and at which PC, the last event ran
     inc gba.dispatch_count
     gba.last_dispatch_pc = gba.cpu.r[15]
+    when WL_QUIET_EVENTS:
+      # These write no memory: the PPU's line events (a video-capture DMA
+      # they start marks itself, dma.run_channel), the APU's clocks (the
+      # MP2K HLE's render reads only), the interrupt controller and the
+      # timers (a FIFO refill they ask for is its own event). Anything else
+      # might.
+      const quiet = {etPPUStartLine, etPPUStartHBlank, etPPUSetHBlankFlag,
+                     etPPUEndHBlank, etAPUFrameSeq, etAPUSample, etInterrupts,
+                     etTimer0, etTimer1, etTimer2, etTimer3, etIrqWindowOpen,
+                     etIrqWindowClose}
+      if kind notin quiet: gba.wl_unsafe = true
     case kind
     of etAPUFrameSeq:   gba.apu.tick_frame_sequencer()
     of etAPUSample:     gba.apu.get_sample()
