@@ -333,7 +333,7 @@ R0_SKIP = {
     # by tests/roms/cyclelaws until the image makes room
     'c2code', 'c2seq', 'contmap', 'vramexec', 'fifodma', 'fifomap',
     'hadesdsd', 'hdmaoam', 'hpreempt', 'memcnt', 'tmrffff', 'tmrffirq',
-    'haltswap', 'dmavram',
+    'haltswap', 'dmavram', 'fsfirst', 's0trig',
 }
 R0_SUITE = {'dmaphase': 'dma', 'kitdemo': 'dma', 'wakeirq': 'irq', 'tmrw': 'timer',
             'lycwrite': 'irq', 'tmrdma': 'dma', 'dmastart': 'dma', 'dmadur': 'dma',
