@@ -119,17 +119,27 @@ proc ensure_gameboy_test_roms(): string =
   createDir(RomCacheDir)
   let url = "https://github.com/c-sp/game-boy-test-roms/releases/download/" &
     GbBundleVersion & "/game-boy-test-roms-" & GbBundleVersion & ".zip"
-  let zipfile = RomCacheDir / "gb-roms.zip"
+  # Download and extract under this process's own names, then rename into
+  # place: runners sharing the cache otherwise find each other's
+  # half-extracted tree, judge it empty and delete it mid-extraction.
+  let pid = $getCurrentProcessId()
+  let zipfile = RomCacheDir / "gb-roms-" & pid & ".zip"
+  let staging = RomCacheDir / "game-boy-test-roms-" & pid
   download_file(url, zipfile)
   try:
-    # extractAll requires that dir not exist yet; it creates it
-    extractAll(zipfile, dir)
+    # extractAll requires that staging not exist yet; it creates it
+    extractAll(zipfile, staging)
   except ZippyError, IOError, OSError:
     echo "Failed to extract: ", getCurrentExceptionMsg()
-    if dirExists(dir): removeDir(dir)
+    if dirExists(staging): removeDir(staging)
     removeFile(zipfile)
     quit(1)
   removeFile(zipfile)
+  try:
+    moveDir(staging, dir)
+  except OSError:
+    # Another runner put its copy in place first
+    removeDir(staging)
   dir
 
 
@@ -271,7 +281,8 @@ proc run_test(test: TestDef; harness_path: string): TestResult =
     of tmMagenNoRed: "magen-nored"
     of tmMicrotest: "microtest"
   if test.mode == tmScreenshot:
-    let tmp_ppm = getTempDir() / "dingbat_test_" & test.rom_path.splitFile().name & ".ppm"
+    let tmp_ppm = getTempDir() / "dingbat_test_" & test.rom_path.splitFile().name &
+                  "-" & $getCurrentProcessId() & ".ppm"
     var cmd = &"{harness_path.quoteShell} {test.rom_path.quoteShell} --mode=screenshot --timeout={test.timeout} --screenshot={tmp_ppm.quoteShell}"
     if test.color:
       cmd.add(" --color")
@@ -2090,7 +2101,9 @@ proc run_sharded_batch(harness, mode, work_name, prefix: string;
   ## blocks.
   result = newSeq[string](list_lines.len)
   if list_lines.len == 0: return
-  let work_dir = getTempDir() / work_name
+  # Per process: concurrent runners (one per worktree) shared one directory
+  # and deleted each other's shards
+  let work_dir = getTempDir() / work_name & "-" & $getCurrentProcessId()
   removeDir(work_dir)
   createDir(work_dir)
   defer: removeDir(work_dir)
