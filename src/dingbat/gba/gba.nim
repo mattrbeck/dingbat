@@ -1700,6 +1700,7 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
       # Changes nothing a program can read (FIFO_DMA_WINDOW), so a waitloop
       # need not count it: the skip it stopped resumes after one iteration
       gba.apu.dma_channels.fifo_window_open()
+      when WL_QUIET_EVENTS: gba.wl_unsafe = true   # but it opens a window
       return
     # Waitloop exactness: when, and at which PC, the last event ran
     inc gba.dispatch_count
@@ -1715,6 +1716,11 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
                      etTimer0, etTimer1, etTimer2, etTimer3, etIrqWindowOpen,
                      etIrqWindowClose}
       if kind notin quiet: gba.wl_unsafe = true
+      # Nor is one that opens or closes an access window, or raises an
+      # interrupt flag (interrupts.nim): Duke Nukem Advance (U) [f_5], whose
+      # timer overflows open the sound FIFO's window, drew a different frame
+      # 251 than the unskipped run until both counted.
+      let sync_before = gba.bus.sync_bits
     case kind
     of etAPUFrameSeq:   gba.apu.tick_frame_sequencer()
     of etAPUSample:     gba.apu.get_sample()
@@ -1809,6 +1815,8 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
     of etIrqWindowOpen:  gba.interrupts.window_open_event()
     of etIrqWindowClose: gba.interrupts.window_close_event()
     of etHandleInput, etIME, etCameraDone, etGbLycEdge: discard
+    when WL_QUIET_EVENTS:
+      if gba.bus.sync_bits != sync_before: gba.wl_unsafe = true
 
 # Timer prescaler phase at ROM entry when the BIOS boot is skipped. The
 # prescaler runs free from power-on (timer.nim) and this core counts it from

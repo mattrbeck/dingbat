@@ -15,6 +15,7 @@ const
 
 proc set_interrupt_flag*(intr: Interrupts; bit: int) {.inline.} =
   intr.reg_if = cast[InterruptReg](uint16(intr.reg_if) or (1'u16 shl bit))
+  when WL_QUIET_EVENTS: intr.gba.wl_unsafe = true
 
 # Cycles from a peripheral raising IF to CPU recognition (mGBA suite Timer
 # IRQ rows). Register writes (IE/IF/IME) re-evaluate with no delay.
@@ -42,6 +43,9 @@ const
 proc window_open*(intr: Interrupts) =
   ## IRQ_LAST_WAITS: until the next check has run, the CPU's fetches and
   ## stores note their wait states (fetches leave the cache to do it).
+  ## An interrupt on its way is not a quiet event for the waitloop
+  ## detector (WL_QUIET_EVENTS): every raise and check books one of these.
+  when WL_QUIET_EVENTS: intr.gba.wl_unsafe = true
   when IRQ_LAST_WAITS:
     let bus = intr.gba.bus
     bus.sync_bits = bus.sync_bits or 8
