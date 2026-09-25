@@ -3659,6 +3659,18 @@ proc step_frame*(gb: GB) =
   gb.apply_cheats()
   while not gb.ppu.frame:
     gb.cpu.tick(gb)
+  # A frame can end inside one long instruction: the speed switch's stall
+  # (SPEED_SWITCH_STALL_CPU, most of a frame) runs the PPU on past the V-blank
+  # that set `frame`, so the instruction can retire with the PPU anywhere,
+  # mode 3 included. A frame boundary is where every state is written
+  # (rewind, rollback, the slots), and a mode-3 state cannot be loaded: the
+  # renderer's per-line scratch is not in the format (load_ppu_state). Run on
+  # to the end of mode 3; the machine runs the same instructions either way,
+  # only the host's frame edge moves (by under a line). A CPU in STOP mode
+  # freezes the PPU (mem_tick_stopped), so it is left where it is.
+  while (gb.ppu.lcd_status and 3'u8) == 3'u8 and gb.ppu.lcd_enabled and
+        not gb.cpu.stopped:
+    gb.cpu.tick(gb)
   gb.ppu.frame = false
   if gb.sgb != nil: sgb_frame_end(gb)
   gb.gb_rebase()
