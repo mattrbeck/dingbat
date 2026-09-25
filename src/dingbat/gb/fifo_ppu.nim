@@ -2311,6 +2311,11 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             if unlikely(ppu.scan_line == int32(ppu.ly) or gb.memory.dma_busy):
               oam_scan_advance(ppu, gb, OAM_SCAN_DOTS,
                                blocked = gb.memory.dma_busy)
+              # The line's scan is complete. Its progress must not outlive
+              # it: the same LY a frame later would otherwise match
+              # `scan_line`, skip its own scan and keep the previous line's
+              # objects.
+              ppu.scan_line = -1
             else:
               ppu.sprites = fifo_get_sprites(ppu, gb)
               when OAM_SCAN_DMA_HOLD != 0:
