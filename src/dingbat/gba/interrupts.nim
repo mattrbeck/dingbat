@@ -125,8 +125,10 @@ proc stalled_for(intr: Interrupts; now: CycleCount): int {.inline.} =
   if now >= intr.stall_from and now < intr.stall_to: int(intr.stall_to - now)
   else: 0
 
-proc raise_synced*(intr: Interrupts; bit: int) =
-  let now = intr.gba.scheduler.cycles
+proc raise_synced*(intr: Interrupts; bit: int; late = 0) =
+  ## `late`: the raise belongs to a cycle that far ahead of now (a timer's
+  ## enable over 0xFFFF overflows when the timer starts, not at the write).
+  let now = intr.gba.scheduler.cycles + CycleCount(late)
   when defined(itrace):
     itl("RAISE " & $bit & " t=" & $now & " stalled=" & $intr.stalled_for(now))
   if intr.pipe_raised == 0:
@@ -139,7 +141,7 @@ proc raise_synced*(intr: Interrupts; bit: int) =
     intr.pipe_due = now + CycleCount(delay)
     # Only a bit this raise sets is hidden from a read on its cycle.
     intr.pipe_new = (1'u16 shl bit) and not uint16(intr.reg_if)
-    intr.schedule_interrupt_check(delay)
+    intr.schedule_interrupt_check(delay + late)
   # A raise while another is in flight rides with it, on that one's check:
   # a timer overflowing every cycle would otherwise push the recognition out
   # forever, and under a long burst (every raise waiting for its end) book

@@ -4818,5 +4818,164 @@
     "want": "89ABCDEF"
    }
   ]
+ },
+ {
+  "payload": "tmrffff",
+  "rom": "tmrffff.gba",
+  "sha1": "6c5a03036c775661f5fc1cb4404442f7e27c3206",
+  "frames": 140,
+  "cells": [
+   {
+    "id": "tmrffff 0xf008",
+    "kind": "hex",
+    "want": "FFFD0F70"
+   },
+   {
+    "id": "tmrffff 0xf009",
+    "kind": "hex",
+    "want": "FFFE0F70"
+   },
+   {
+    "id": "tmrffff 0xf00a",
+    "kind": "hex",
+    "want": "FFFF0F72"
+   },
+   {
+    "id": "tmrffff 0xf00b",
+    "kind": "hex",
+    "want": "FFF00F71"
+   },
+   {
+    "id": "tmrffff 0xf00c",
+    "kind": "hex",
+    "want": "FFF10F71"
+   },
+   {
+    "id": "tmrffff 0x1f009",
+    "kind": "hex",
+    "want": "FFFE0060"
+   },
+   {
+    "id": "tmrffff 0x1f00a",
+    "kind": "hex",
+    "want": "FFFF0062"
+   },
+   {
+    "id": "tmrffff 0x1f00b",
+    "kind": "hex",
+    "want": "FFF00061"
+   },
+   {
+    "id": "tmrffff 0x2f009",
+    "kind": "hex",
+    "want": "FFFE0000"
+   },
+   {
+    "id": "tmrffff 0x2f00a",
+    "kind": "hex",
+    "want": "FFFF0000"
+   }
+  ]
+ },
+ {
+  "payload": "hdmaoam",
+  "rom": "hdmaoam.gba",
+  "sha1": "434b8d63ca87c168171b8bb4998e6f24f4611a6c",
+  "frames": 148,
+  "cells": [
+   {
+    "id": "hdmaoam 0x808c",
+    "kind": "hex",
+    "want": "00000AF3"
+   },
+   {
+    "id": "hdmaoam 0x8c",
+    "kind": "hex",
+    "want": "00000D25"
+   },
+   {
+    "id": "hdmaoam 0x108c",
+    "kind": "hex",
+    "want": "00000D25"
+   },
+   {
+    "id": "hdmaoam 0x308c",
+    "kind": "hex",
+    "want": "00000D25"
+   },
+   {
+    "id": "hdmaoam 0x408c",
+    "kind": "hex",
+    "want": "00000D25"
+   },
+   {
+    "id": "hdmaoam 0x1",
+    "kind": "hex",
+    "want": "00000AF9"
+   },
+   {
+    "id": "hdmaoam 0x1001",
+    "kind": "hex",
+    "want": "00000AF9"
+   },
+   {
+    "id": "hdmaoam 0x3001",
+    "kind": "hex",
+    "want": "00000AF9"
+   },
+   {
+    "id": "hdmaoam 0x8001",
+    "kind": "hex",
+    "want": "00000AF3"
+   },
+   {
+    "id": "hdmaoam 0x3040",
+    "kind": "hex",
+    "want": "00000BF5"
+   },
+   {
+    "id": "hdmaoam 0x40",
+    "kind": "hex",
+    "want": "00000BF5"
+   }
+  ]
+ },
+ {
+  "payload": "tmrffirq",
+  "rom": "tmrffirq.gba",
+  "sha1": "6d51fbd45055a328a71a5b59e8c47c0ac377d3f5",
+  "frames": 108,
+  "cells": [
+   {
+    "id": "tmrffirq 0x0",
+    "kind": "hex",
+    "want": "0025FFF9"
+   },
+   {
+    "id": "tmrffirq 0x1",
+    "kind": "hex",
+    "want": "0045FFF9"
+   },
+   {
+    "id": "tmrffirq 0x10",
+    "kind": "hex",
+    "want": "0026FFF9"
+   },
+   {
+    "id": "tmrffirq 0x30",
+    "kind": "hex",
+    "want": "0028FFF9"
+   },
+   {
+    "id": "tmrffirq 0x31",
+    "kind": "hex",
+    "want": "0048FFF9"
+   },
+   {
+    "id": "tmrffirq 0x70",
+    "kind": "hex",
+    "want": "002CFFF9"
+   }
+  ]
  }
 ]

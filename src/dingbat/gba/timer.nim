@@ -155,12 +155,17 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
           # timer/timer_disable test 2, prescaler 1; its readme). Only when
           # the prescaler ticks on the enable's cycle: the mGBA suite's Timer
           # count-up rows enable a /1024 timer over a 0xFFFF count and take
-          # no interrupt there.
+          # no interrupt there. The tick is the timer's first, when it starts
+          # counting (TIMER_START_DELAY after the write): tests/roms/payloads/
+          # tmrffirq.s on an AGB SP takes that interrupt two cycles later
+          # than a raise on the write, by a clock started before it and by
+          # the reloaded count alike (tmrffff.s: the flag is set by then).
           let now = tim.write_now()
           if tim.tm[num] == 0xFFFF'u16 and tim.tmcnt[num].irq_enable and
              not tim.tmcnt[num].cascade and
              ticks_between(now - 1, now, TIMER_PERIODS[tim.tmcnt[num].frequency]) > 0:
-            tim.gba.interrupts.raise_synced(IRQ_TIMER_BIT_BASE + num)
+            tim.gba.interrupts.raise_synced(IRQ_TIMER_BIT_BASE + num,
+              late = int(now - tim.gba.scheduler.cycles) + TIMER_START_DELAY)
           tim.tm_pre[num] = tim.tm[num]
           tim.tm[num] = tim.tmd[num]
         if tim.tmcnt[num].cascade:

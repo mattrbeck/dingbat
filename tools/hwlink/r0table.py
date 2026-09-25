@@ -115,6 +115,19 @@ TABLE = {
     'vramexec': ([b | w << 4 for b in (0, 1, 3, 6, 7, 9) for w in (0, 2, 3)]
                  + [0x100 | b | w << 4 for b in (0, 1) for w in (0, 2)]
                  + [0x40, 0x50, 0x41, 0x51]),
+    # a timer stopped across its overflow one cycle at a time (reload 0xFFF0),
+    # then enabled again by a halfword or a word store, or not at all
+    # (alyosha timer/timer_disable test 2, irq/BL_IRQ_2 cases c/d)
+    'tmrffff': ([0xF000 | k for k in range(8, 13)] + [0x1F009, 0x1F00A, 0x1F00B]
+                + [0x2F009, 0x2F00A]),
+    # the interrupt an enable-at-0xFFFF raises, against a sled: when the
+    # handler runs (TM1) and what it reads (TM0); 0xFFFE controls
+    'tmrffirq': [0x00, 0x01, 0x10, 0x30, 0x31, 0x70],
+    # an H-blank DMA from EWRAM into OAM running into the next line: 140 and
+    # 64 halfwords with sprites on/off, the row's OAM pattern, into IWRAM,
+    # and the no-DMA control (alyosha Interactions/Halt_DMA_IRQ_Read_OAM)
+    'hdmaoam': [0x808C, 0x008C, 0x108C, 0x308C, 0x408C, 0x0001, 0x1001, 0x3001,
+                0x8001, 0x3040, 0x0040],
 }
 
 
