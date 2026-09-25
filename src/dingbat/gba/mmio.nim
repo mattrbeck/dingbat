@@ -111,10 +111,16 @@ proc `[]=`*(mmio: MMIO; address: uint32; value: uint8) =
     mmio.gba.interrupts.schedule_interrupt_check()
   else:
     if (io_addr and 0xFFFF'u32) in 0x800'u32..0x803'u32:
-      # Internal memory control: the EWRAM wait field is live (see
-      # update_waitcnt); the disable and swap bits are readback only.
+      # Internal memory control: the EWRAM wait field and the board WRAM
+      # enable (bit 5) are live (see update_waitcnt); the swap (bit 0) is
+      # readback only.
+      let was_off = mmio.gba.bus.ewram_off
       write(mmio.memctrl, value, io_addr and 3)
       mmio.gba.bus.update_waitcnt(mmio.waitcnt)
+      if mmio.gba.bus.ewram_off != was_off:
+        # the cached fetch page may point at the other RAM
+        mmio.gba.bus.fetch_page = 0xFFFFFFFF'u32
+        mmio.gba.bus.fetch_key = 0xFFFFFFFF'u32
       return
     when defined(test_harness):
       if mmio.gba.test_output != nil:

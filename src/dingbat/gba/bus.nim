@@ -34,11 +34,9 @@ proc update_waitcnt*(bus: Bus; w: WAITCNT) =
   # MEMCNT bit 5 clear switches the board WRAM off: its region reads and
   # writes the chip WRAM, at the chip's timing (png183 memory t104-t106;
   # tests/roms/payloads/memcnt.s on an AGB SP).
+  # Derived state only: a state load restores the fetch page after this.
   let ewram_off = not bit(bus.gba.mmio.memctrl, 5)
-  if ewram_off != bus.ewram_off:
-    bus.ewram_off = ewram_off
-    bus.fetch_page = 0xFFFFFFFF'u32
-    bus.fetch_key = 0xFFFFFFFF'u32
+  bus.ewram_off = ewram_off
   if ewram_off:
     bus.ew_ptr = cast[ptr UncheckedArray[byte]](addr bus.wram_chip[0])
     bus.ew_mask = 0x7FFF'u32
