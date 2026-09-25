@@ -1,9 +1,11 @@
 # GB/GBC save-state serialization (included by gb.nim).
 #
-# States are written only at frame boundaries (start of vblank). Renderer
-# per-line scratch is not serialized: both renderers rebuild it on the mode
-# 2 -> 3 transition, so states are renderer-agnostic. The ROM is not stored;
-# the header carries a checksum + size.
+# States are written only at frame boundaries: the start of V-blank, an
+# LCD-off frame, or the LCD-on frame (LY 0, early mode 2); step_frame never
+# leaves one in mode 3 (gb.nim). Renderer per-line scratch is not serialized:
+# both renderers rebuild it on the mode 2 -> 3 transition, so states are
+# renderer-agnostic. The ROM is not stored; the header carries a checksum +
+# size.
 
 const
   GB_SEC_CPU   = 0xB1'u8
@@ -17,6 +19,7 @@ const
   GB_SEC_MBC   = 0xB9'u8
   GB_SEC_SER   = 0xBA'u8
   GB_SEC_SGB   = 0xBB'u8
+  GB_SEC_MACH  = 0xBC'u8   # rev 6: fields of the GB object itself
   GB_SEC_END   = 0xBF'u8
 
 # ---- CPU ----
@@ -30,12 +33,12 @@ proc save_cpu_state(cpu: GbCpu; w: var Writer) =
   w.write_u16(cpu.pc)
   w.write_u16(cpu.sp)
   w.write_bool(cpu.ime)
-  # `stopped` is not in the payload and STOP sets `halted` and `locked`
-  # together, so write both without it: a state captured in STOP mode loads as
-  # a running CPU after the STOP, where the joypad wake would put it.
-  w.write_bool(cpu.halted and not cpu.stopped)
+  w.write_bool(cpu.halted)
   w.write_bool(cpu.halt_bug)
-  w.write_bool(cpu.locked and not cpu.stopped)
+  w.write_bool(cpu.locked)
+  # rev 6: STOP mode. `halted` and `locked` above are the raw pair STOP sets
+  # with it (before rev 6 both were written `and not stopped`).
+  w.write_bool(cpu.stopped)
 
 proc load_cpu_state(cpu: GbCpu; r: var Reader; rev: uint32) =
   r.expect_tag(GB_SEC_CPU)
@@ -50,6 +53,15 @@ proc load_cpu_state(cpu: GbCpu; r: var Reader; rev: uint32) =
   cpu.halt_bug = r.read_bool()
   # rev 4 added the undefined-opcode lockup flag; missing means "not locked".
   cpu.locked = if rev >= 4: r.read_bool() else: false
+  # rev 6 added STOP mode. Earlier writers stored `halted` and `locked` with
+  # `stopped` masked out, so a state taken in STOP loads as the running CPU
+  # after the STOP, which is what those builds did.
+  cpu.stopped = if rev >= 6: r.read_bool() else: false
+  # STOP always sets all three; a file that says otherwise would run a
+  # stopped machine as a halted one (or never wake it).
+  if cpu.stopped and not (cpu.halted and cpu.locked):
+    raise state_error("save state has the CPU in STOP mode without the halt " &
+                      "that goes with it")
   cpu.cached_hl = -1  # per-instruction scratch
   cpu.ime_set_cycle = 0  # ditto; see the field in gb.nim
 
@@ -145,6 +157,53 @@ proc load_joypad_state(j: GbJoypad; r: var Reader) =
   # from what is held now, or a phantom press interrupt can fire.
   joypad_sync(j)
 
+# ---- The machine object (rev 6) ----
+#
+# Fields that live on GB itself rather than on a component. The rest of GB's
+# scratch (the HBlank-DMA halt/switch rules, the comparator leads, the CGB
+# write-in-flight slots) is live only inside an M-cycle, a halt or a stall,
+# never at the frame boundary a state is written on.
+
+proc save_machine_state(gb: GB; w: var Writer) =
+  w.write_tag(GB_SEC_MACH)
+  # The silicon revision the quirks were resolved from (gb_set_revision).
+  w.write_u8(uint8(ord(gb.revision)))
+  # STOP_OPERAND_LATCH: a speed switch that found an HBlank DMA request runs
+  # STOP's operand byte as the next opcode, parked behind halted + locked.
+  w.write_i16(gb.stop_op_latch)
+  # DMG_LYC_BOUNDARY_OPEN: LYC before a DMG LYC write still parked.
+  w.write_i16(gb.lyc_write_old)
+  # APU_DS_TRIGGER_SNAP: the scheduler cycle of the last APU power-on, raw
+  # (it is not rebased with the scheduler; the snap reads it mod 16).
+  w.write_u64(cast[uint64](gb.apu_power_on_at))
+  # HDMA_BLOCK_SWALLOW: the dot an HBlank block's swallow window ends on, in
+  # the line counter, or -1. Consumed by the next mode-0 edge an armed
+  # transfer sees, which can be frames later.
+  w.write_i32(gb.hdma_swallow_end)
+
+proc load_machine_state(gb: GB; r: var Reader; rev: uint32) =
+  if rev < 6:
+    # Before rev 6 none of these was carried and a load kept the running
+    # machine's revision and power-on stamp. The two latches are empty at
+    # every boundary an older build wrote (it had no way to resume them).
+    gb.stop_op_latch = 0
+    gb.lyc_write_old = 0
+    gb.hdma_swallow_end = -1
+    return
+  r.expect_tag(GB_SEC_MACH)
+  let revb = int(r.read_u8())
+  check_range(revb, 0, ord(high(GbRevision)), "gb.revision")
+  let loaded = GbRevision(revb)
+  if loaded != gb.revision: gb.gb_set_revision(loaded)
+  gb.stop_op_latch = r.read_i16()
+  # An opcode byte + 1, or 0 for none.
+  check_range(int(gb.stop_op_latch), 0, 0x100, "gb.stop_op_latch")
+  gb.lyc_write_old = r.read_i16()
+  check_range(int(gb.lyc_write_old), 0, 0x100, "gb.lyc_write_old")
+  gb.apu_power_on_at = cast[int64](r.read_u64())
+  gb.hdma_swallow_end = r.read_i32()
+  check_range(int(gb.hdma_swallow_end), -1, 1024, "gb.hdma_swallow_end")
+
 # ---- Memory ----
 
 proc save_mem_state(mem: GbMemory; w: var Writer) =
@@ -165,8 +224,13 @@ proc save_mem_state(mem: GbMemory; w: var Writer) =
   w.write_u8(mem.next_dma_counter)
   w.write_bool(mem.requested_speed_switch)
   w.write_u8(mem.current_speed)
+  # rev 6: $FEA0-$FEFF (real RAM on CGB 0-D, GbQuirks.unusable_region), RP,
+  # and SVBK's raw readback byte.
+  w.write_bytes(mem.unusable)
+  w.write_u8(mem.rp)
+  w.write_u8(mem.svbk_raw)
 
-proc load_mem_state(mem: GbMemory; r: var Reader) =
+proc load_mem_state(mem: GbMemory; r: var Reader; rev: uint32) =
   r.expect_tag(GB_SEC_MEM)
   for i in 0 ..< 8: r.read_bytes(mem.wram[i])
   # Indexes `wram` (array[8, ...]). Mask as the SVBK write path does rather
@@ -191,6 +255,14 @@ proc load_mem_state(mem: GbMemory; r: var Reader) =
   # every cycle worth zero PPU dots and the frame never ends. 0 or 1 only.
   mem.current_speed = r.read_u8()
   check_range(int(mem.current_speed), 0, 1, "mem.current_speed")
+  if rev >= 6:
+    r.read_bytes(mem.unusable)
+    mem.rp = r.read_u8() and 0xC1'u8
+    # Only what a read of SVBK returns (a written 0 reads back 0, mapped as
+    # bank 1); three bits, as the write path keeps it.
+    mem.svbk_raw = r.read_u8() and 0x7'u8
+  # Before rev 6 none of the three was carried and a load kept the running
+  # machine's: $FEA0-$FEFF and RP as they were, SVBK reconstructed above.
   mem.cycle_tick_count = 0  # per-instruction scratch, zero between frames
   # Derived, not payload. dma_bus / dma_drive / dma_latch are re-derived in
   # gb_apply_state once the cartridge and PPU sections have landed.
@@ -241,8 +313,30 @@ proc save_ppu_state(ppu: GbPpu; w: var Writer) =
   w.write_i32(ppu.cycle_counter)
   w.write_bool(ppu.ran_bios)
   w.write_seq_u16(ppu.framebuffer)
+  # rev 6. The frame drawn after an LCD-on is not shown; a state written on
+  # the LCD-on frame (LY 0, mode 2) is inside it.
+  w.write_bool(ppu.lcd_on_first_frame)
+  # A STAT/LYC write's pending line drop (stat_drop_arm): the dot is in the
+  # line's own counter, like cycle_counter.
+  w.write_bool(ppu.stat_drop_pending)
+  w.write_bool(ppu.stat_drop_level)
+  w.write_i32(ppu.stat_drop_dot)
+  # The DMG window start owed to the next line (DMG_WIN_LAST_PX_CARRY), a
+  # FIFO renderer field: false from the scanline one.
+  let fp = if ppu of GbFifoPpu: GbFifoPpu(ppu) else: nil
+  w.write_bool(fp != nil and fp.win_carry)
+  w.write_bool(fp != nil and fp.win_carry_gap)
+  # The mode-2 comparator's Y/X input latches (OAM_SCAN_DMA_HOLD), which keep
+  # the last entry a scan read across lines and frames: a transfer holding
+  # the bus at the next scan's start compares against them. The scanline
+  # renderer has no such latches; it writes what an undisturbed scan leaves.
+  w.write_u8(if fp != nil: fp.scan_y_bus else: ppu.sprite_table[0x9C])
+  w.write_u8(if fp != nil: fp.scan_x_bus else: ppu.sprite_table[0x9D])
+  # CGB_TDSEL_GLITCH's address latch: the last $8000-region tile-data read,
+  # a bus register that keeps it through H-Blank and V-blank alike.
+  w.write_i32(if fp != nil: fp.tdsel_addr else: TDSEL_ADDR_OFF)
 
-proc load_ppu_state(ppu: GbPpu; r: var Reader; rev: uint32) =
+proc load_ppu_state(ppu: GbPpu; gb: GB; r: var Reader; rev: uint32) =
   r.expect_tag(GB_SEC_PPU)
   ppu.lcd_control = r.read_u8()
   ppu.lcd_status = r.read_u8()
@@ -252,15 +346,18 @@ proc load_ppu_state(ppu: GbPpu; r: var Reader; rev: uint32) =
   # The renderers write `framebuffer[ly * 160 + x]`; 154+ indexes past it.
   # (LYC is only ever compared, so any byte is legal.)
   check_range(int(ppu.ly), 0, 153, "ppu.ly")
-  # States are written at frame boundaries only, so modes 2 and 3 cannot
-  # appear in one (the renderer's per-line scratch is not serialized). A
-  # counter past its own mode's exact stop dot (fifo_ppu: mode 2 at 80, modes
-  # 0/1 at 456) is never reset and climbs until int32 overflow, and no
-  # per-field bound can catch the pair, so refuse it.
+  # States are written at frame boundaries, which are V-blank entries (mode
+  # 1 at LY 144), LCD-off frames (mode 0), or the frame an LCD-on ends: that
+  # write restarts the PPU at LY 0 in mode 2 and pushes the frame from inside
+  # the instruction, so the state is a few dots into mode 2. Mode 3 cannot
+  # appear (the renderer's per-line scratch is not serialized, and how long
+  # mode 3 still needs depends on it); mode 2 can, because nothing in it is
+  # renderer scratch -- the OAM scan runs as one burst at its end -- and is
+  # checked against its stop dot once the counter is read, below.
   let ppu_mode = int(ppu.lcd_status) and 3
-  if ppu_mode >= 2:
-    raise state_error("save state has PPU mode " & $ppu_mode & " on line " &
-                      $int(ppu.ly) & ": no state is written mid-scanline")
+  if ppu_mode == 3:
+    raise state_error("save state has PPU mode 3 on line " & $int(ppu.ly) &
+                      ": no state is written mid-scanline")
   # A vblank line must be in vblank mode: mode 0 at LY 144 walks LY to 145,
   # the `== GB_HEIGHT` vblank entry never fires again, and the PPU renders
   # past the 160x144 framebuffer. Real states are LY 144 mode 1 (LCD on) or
@@ -323,9 +420,41 @@ proc load_ppu_state(ppu: GbPpu; r: var Reader; rev: uint32) =
   # Dots within the LINE, not the frame: past 456 no line stop is ever
   # reached and the counter climbs until int32 overflow.
   check_range(int(ppu.cycle_counter), 0, 456, "ppu.cycle_counter")
+  # Every mode leaves on an EXACT dot (fifo_ppu: mode 2 at m3_start_dot,
+  # modes 0/1 at the line end), so a mode-2 counter past that stop would
+  # climb the same way; the pair is what no per-field bound can catch
+  # (b5dddb0c). The LCD-on frame's state is a few dots into mode 2.
+  if ppu_mode == 2 and ppu.cycle_counter > m3_start_dot(gb):
+    raise state_error("save state has PPU mode 2 at dot " &
+                      $ppu.cycle_counter & " of line " & $int(ppu.ly) &
+                      ", past the end of mode 2")
   ppu.ran_bios = r.read_bool()
   r.read_seq_u16_into(ppu.framebuffer)
   ppu.frame = false
+  var carry, carry_gap = false
+  var scan_y, scan_x: uint8
+  var tdsel = TDSEL_ADDR_OFF
+  if rev >= 6:
+    ppu.lcd_on_first_frame = r.read_bool()
+    ppu.stat_drop_pending = r.read_bool()
+    ppu.stat_drop_level = r.read_bool()
+    ppu.stat_drop_dot = r.read_i32()
+    # Within a line of the counter (the settle compares the two).
+    check_range(int(ppu.stat_drop_dot), -1024, 1024, "ppu.stat_drop_dot")
+    carry = r.read_bool()
+    carry_gap = r.read_bool()
+    scan_y = r.read_u8()
+    scan_x = r.read_u8()
+    tdsel = r.read_i32()
+    # TDSEL_ADDR_OFF, or a VRAM offset with the bank at bit 13 and a dot from
+    # bit 14 up (TDSEL_IDX_SHIFT).
+    check_range(int(tdsel), int(TDSEL_ADDR_OFF), 1 shl 26, "ppu.tdsel_addr")
+  else:
+    # Not carried before rev 6. The LCD-on frame flag is clear at the V-blank
+    # every older state was written on; a pending drop from the machine the
+    # state replaces must not land on the loaded one.
+    ppu.lcd_on_first_frame = false
+    ppu.stat_drop_pending = false
   # Derived, not payload: the interrupt line's copy of mode/LY leads the
   # readable one by under an M-cycle, and a state is captured at vblank, where
   # re-deriving is exact.
@@ -337,6 +466,20 @@ proc load_ppu_state(ppu: GbPpu; r: var Reader; rev: uint32) =
   # Renderer scratch isn't serialized; clear it so a load onto a running
   # core (rollback) can't inherit stale per-line fetch state.
   ppu.reset_render_scratch()
+  # ...except what outlives a line, which is (rev 6): the window start owed to
+  # the next line, the OAM comparator's latches and the tile-data address
+  # latch. Before rev 6 the OAM latches take what an undisturbed scan of the
+  # loaded OAM ends holding, and the address latch is empty, as it was.
+  if rev < 6:
+    scan_y = ppu.sprite_table[0x9C]
+    scan_x = ppu.sprite_table[0x9D]
+  if ppu of GbFifoPpu:
+    let fp = GbFifoPpu(ppu)
+    fp.win_carry = carry
+    fp.win_carry_gap = carry_gap
+    fp.scan_y_bus = scan_y
+    fp.scan_x_bus = scan_x
+    fp.tdsel_addr = tdsel
 
 # ---- APU ----
 
@@ -370,7 +513,23 @@ proc load_channel_env(ch: GbVolumeEnvChannel; r: var Reader) =
   ch.current_volume = r.read_u8()
   ch.vol_env_is_updating = r.read_bool()
 
-proc save_apu_state(apu: GbApu; w: var Writer) =
+proc write_deadline(w: var Writer; at, now: CycleCount) =
+  ## An absolute scheduler deadline, as its distance from the payload's own
+  ## `scheduler.cycles` (the two platforms' CycleCount differ in width);
+  ## GB_NO_STEP as a flag.
+  w.write_bool(at != GB_NO_STEP)
+  w.write_i32(if at == GB_NO_STEP: 0'i32 else: int32(int64(at) - int64(now)))
+
+proc read_deadline(r: var Reader; now: CycleCount; field: string): CycleCount =
+  let pending = r.read_bool()
+  let d = int(r.read_i32())
+  if not pending: return GB_NO_STEP
+  # Every deadline carried is settled at the frame rebase, so it is within a
+  # frame of the payload's clock; anything further is damage.
+  check_range(d, -(1 shl 20), 1 shl 20, field)
+  CycleCount(int64(now) + int64(d))
+
+proc save_apu_state(apu: GbApu; gb: GB; w: var Writer) =
   w.write_tag(GB_SEC_APU)
   w.write_bool(apu.sound_enabled)
   w.write_u8(uint8(apu.frame_sequencer_stage))
@@ -419,8 +578,32 @@ proc save_apu_state(apu: GbApu; w: var Writer) =
     w.write_u8(ch.clock_shift)
     w.write_u8(ch.width_mode)
     w.write_u8(ch.divisor_code)
+  # rev 6: the 1 MHz and 512 kHz grids' phases, the power-on DIV skip, the
+  # KEY1 tap lag, and the per-channel latches the waveform catch-up keeps.
+  let now = gb.scheduler.cycles
+  w.write_u8(uint8(apu.tick_phase))
+  w.write_u8(uint8(apu.noise_phase))
+  w.write_bool(apu.div_skip)
+  w.write_bool(apu.spsw_fs_lag)
+  block:
+    let ch = apu.channel1
+    w.write_u8(ch.sample_bit)
+    w.write_bool(ch.env_extra_tick)
+    w.write_deadline(ch.sweep_check_at, now)
+    w.write_deadline(ch.sweep_stop_at, now)
+    w.write_deadline(ch.sweep_load_at, now)
+    w.write_u16(ch.sweep_load_value)
+  w.write_u8(apu.channel2.sample_bit)
+  w.write_bool(apu.channel2.env_extra_tick)
+  w.write_bool(apu.channel3.wave_fetched)
+  w.write_bool(apu.channel4.env_extra_tick)
+  # Channel 4's divisor stage: a free-running counter NR43's clock shift picks
+  # a bit of, so the LFSR deadline alone cannot rebuild it (a later NR43 write
+  # that moves the shift reads bits the deadline says nothing about).
+  w.write_u16(apu.channel4.div_counter)
+  w.write_deadline(apu.channel4.div_next, now)
 
-proc load_apu_state(apu: GbApu; r: var Reader) =
+proc load_apu_state(apu: GbApu; gb: GB; r: var Reader; rev: uint32) =
   r.expect_tag(GB_SEC_APU)
   apu.sound_enabled = r.read_bool()
   apu.frame_sequencer_stage = int(r.read_u8())
@@ -445,12 +628,9 @@ proc load_apu_state(apu: GbApu; r: var Reader) =
     ch.duty = r.read_u8() and 3
     ch.length_load = r.read_u8()
     ch.frequency = r.read_u16()
-    # The sweep deadlines and last_step_at are not in the payload (gb.nim);
-    # clear them or a deadline from the replaced state fires against the
-    # loaded registers.
-    ch.sweep_check_at = GB_NO_STEP
-    ch.sweep_stop_at  = GB_NO_STEP
-    ch.sweep_load_at  = GB_NO_STEP
+    # last_step_at is not in the payload: the frame rebase clears it, so it
+    # is GB_NO_STEP at every boundary a state is written on. The sweep
+    # deadlines are read at the end of the section (rev 6).
     ch.last_step_at   = GB_NO_STEP
   block:
     let ch = apu.channel2
@@ -481,6 +661,40 @@ proc load_apu_state(apu: GbApu; r: var Reader) =
     ch.clock_shift = r.read_u8() and 0x0F
     ch.width_mode = r.read_u8() and 1
     ch.divisor_code = r.read_u8() and 7
+  if rev >= 6:
+    # Phases of grids (4 shl speed) and (8 shl speed) cycles wide.
+    let tick = int(gb_apu_tick(gb))
+    apu.tick_phase = CycleCount(r.read_u8())
+    check_range(int(apu.tick_phase), 0, tick - 1, "apu.tick_phase")
+    apu.noise_phase = CycleCount(r.read_u8())
+    check_range(int(apu.noise_phase), 0, 2 * tick - 1, "apu.noise_phase")
+    apu.div_skip = r.read_bool()
+    apu.spsw_fs_lag = r.read_bool()
+    let now = gb.scheduler.cycles
+    block:
+      let ch = apu.channel1
+      ch.sample_bit = r.read_u8() and 1
+      ch.env_extra_tick = r.read_bool()
+      ch.sweep_check_at = r.read_deadline(now, "ch1.sweep_check_at")
+      ch.sweep_stop_at  = r.read_deadline(now, "ch1.sweep_stop_at")
+      ch.sweep_load_at  = r.read_deadline(now, "ch1.sweep_load_at")
+      ch.sweep_load_value = r.read_u16()
+    apu.channel2.sample_bit = r.read_u8() and 1
+    apu.channel2.env_extra_tick = r.read_bool()
+    apu.channel3.wave_fetched = r.read_bool()
+    apu.channel4.env_extra_tick = r.read_bool()
+    apu.channel4.div_counter = r.read_u16()
+    apu.channel4.div_next = r.read_deadline(now, "ch4.div_next")
+  else:
+    # Before rev 6: the grids' phases and the KEY1 lag stayed whatever the
+    # running machine had, as those builds did; the rest is live for a few
+    # M-cycles at most and those builds dropped it, which is idle.
+    apu.div_skip = false
+    for ch in [GbVolumeEnvChannel(apu.channel1), apu.channel2, apu.channel4]:
+      ch.env_extra_tick = false
+    apu.channel1.sweep_check_at = GB_NO_STEP
+    apu.channel1.sweep_stop_at  = GB_NO_STEP
+    apu.channel1.sweep_load_at  = GB_NO_STEP
   # Restart audio pacing cleanly (see GBA load_apu_state)
   apu.buffer_pos = 0
   when not defined(test_harness) and not defined(emscripten):
@@ -874,12 +1088,13 @@ proc gb_state_payload(gb: GB; in_process = false): string =
   save_joypad_state(gb.joypad, w)
   save_mem_state(gb.memory, w)
   w.write_bool(gb.cgb_enabled)
+  save_machine_state(gb, w)
   w.write_tag(GB_SEC_SCHED)
   gb.apu_arm_state_events()
   gb.scheduler.save_to(w, pad = in_process)
   gb.apu_disarm_state_events()
   save_ppu_state(gb.ppu, w)
-  save_apu_state(gb.apu, w)
+  save_apu_state(gb.apu, gb, w)
   save_mbc_state(gb.cartridge, w)
   if gb.sgb != nil: save_sgb_state(gb.sgb, w)
   w.write_tag(GB_SEC_END)
@@ -893,8 +1108,9 @@ proc gb_apply_state(gb: GB; payload: string; rev: uint32;
   load_timer_state(gb.timer, r)
   load_serial_state(gb.serial, r, rev)
   load_joypad_state(gb.joypad, r)
-  load_mem_state(gb.memory, r)
+  load_mem_state(gb.memory, r, rev)
   gb.cgb_enabled = r.read_bool()
+  load_machine_state(gb, r, rev)
   # Derived: a function of the console, the cart header and whether the boot
   # ROM is still mapped, which load_mem_state has just restored.
   gb_sync_cgb_native(gb)
@@ -907,17 +1123,13 @@ proc gb_apply_state(gb: GB; payload: string; rev: uint32;
       else: 0'i32
   r.expect_tag(GB_SEC_SCHED)
   gb.scheduler.load_from(r, pad = in_process)
-  load_ppu_state(gb.ppu, r, rev)
-  # Derived, not serialized: set by an LCD-on and cleared by the V-blank entry
-  # that ends that frame, which is where a state is written. Whatever the core
-  # held before the load (a fresh core boots with it set) would turn the next
-  # frame white; with the LCD off, the next LCD-on sets it again.
-  gb.ppu.lcd_on_first_frame = false
-  load_apu_state(gb.apu, r)
+  load_ppu_state(gb.ppu, gb, r, rev)
+  load_apu_state(gb.apu, gb, r, rev)
   gb.apu_extract_state_events()
-  # Derived, not serialized: channel 4's divisor stage, re-derived from the
-  # LFSR deadline the events above just restored. See ch4_resync_divisor.
-  ch4_resync_divisor(gb.apu.channel4, gb)
+  # Channel 4's divisor stage is in the payload from rev 6; before that it is
+  # re-derived from the LFSR deadline the events above just restored (exact
+  # until an NR43 write moves the clock shift; see ch4_resync_divisor).
+  if rev < 6: ch4_resync_divisor(gb.apu.channel4, gb)
   load_mbc_state(gb.cartridge, r)
   # The SGB section is present when the WRITING machine had an adapter, and
   # the reading one may not (it is a frontend setting): decide from the

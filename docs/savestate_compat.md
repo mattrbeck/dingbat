@@ -76,6 +76,41 @@ The reader migrates older revisions instead of refusing:
 | GBA 6→7 | RTC `status` = `02h \| irq<<3 \| m24<<6`; `bias_set=false`, `bias=0`, `wday_bias=0`, `bias_host=false` | rev ≤ 6 read status back with bit 1 forced and ignored clock writes, so the clock was always the source clock |
 | GB 4→5 | no `GB_SEC_SGB` section → fresh `SgbState` | see `docs/sgb.md` |
 | GBA 7→8 | bus `pf_paused=false`, `pf_running=false`, `pf_count=0` | rev ≤ 7 had no pause state; a full buffer re-pauses on the next fetch, and a running prefetcher with credit is running again at once, so at most one branch's refill differs |
+| GB 5→6 | below | the batched carry |
+
+**GB rev 6, the batched carry.** Every field the GB core had been holding
+back for one revision, plus what the state soak (`tests/state_soak_test.nim`)
+found a loaded core needs to run on bit for bit with the machine that wrote
+the state (a scratch tool loaded every frame boundary of the soak's random
+programs, over 20 seeds, into a new core and a rewound one, and moved the
+live values across one field at a time until nothing diverged):
+
+| section | added | an older state gets |
+|---|---|---|
+| CPU | `stopped`; `halted`/`locked` now written raw | `stopped=false` (older writers masked STOP out: it loads as the running CPU after the STOP, as it did) |
+| `GB_SEC_MACH` (new, after `cgb_enabled`) | `revision`, `stop_op_latch`, `lyc_write_old`, `apu_power_on_at` (raw), `hdma_swallow_end` | the running machine's revision and power-on stamp (as before); both latches empty, swallow window closed |
+| MEM | `$FEA0-$FEFF`, RP, SVBK readback | the running machine's, as before (SVBK readback from the bank) |
+| PPU | `lcd_on_first_frame`, the pending STAT drop (`pending`, `level`, `dot`), FIFO `win_carry`/`win_carry_gap`, the OAM comparator's Y/X latches, the tile-data address latch | LCD-on flag clear, no pending drop, no carry, latches as an undisturbed scan of the loaded OAM leaves them, address latch empty |
+| APU | `tick_phase`, `noise_phase`, `div_skip`, `spsw_fs_lag`, CH1/CH2 `sample_bit` and `env_extra_tick`, CH1's sweep deadlines and `sweep_load_value`, CH3 `wave_fetched`, CH4 `env_extra_tick`, `div_counter`, `div_next` | the running machine's phases, lag and latches (as before); no extra envelope tick or sweep deadline in flight; CH4's divisor stage rebuilt from its LFSR deadline (`ch4_resync_divisor`) |
+
+Deadlines (the sweep's, CH4's divisor) are written as a signed distance from
+the payload's own `scheduler.cycles` with a pending flag, because
+`CycleCount` is 32 bits in the web build and 64 on desktop. The inert
+`APU_CLOCK_CARRY` fields (`sh_*`) are not carried: the mechanism ships off
+(`APU_CLOCK_CARRY = 0`) and nothing in the shipping build reads or writes
+them. `lcdon_lines` and the other fields that exist only under a `when`
+of a control that ships off are left out for the same reason; a payload
+never depends on a compile-time switch.
+
+Rev 6 also changes which states load. The LCD-on frame's state (the LCDC
+write pushes the frame from inside the instruction, leaving the PPU at LY 0
+a few dots into mode 2) loads: nothing in mode 2 is renderer scratch, and the
+counter is still bounded by mode 2's stop dot, which is what b5dddb0c's
+refusal protected. Mode 3 stays refused. `step_frame` no longer leaves one:
+the speed switch's stall (most of a frame) can retire with the PPU anywhere,
+so the frame runs on to the end of mode 3 (a CPU in STOP mode, whose PPU is
+frozen, is left where it is, so a STOP entered in mode 3 on a CGB is the one
+refused state a writer can still produce).
 
 **IntrWait retrofit.** Rev 4 made the HLE IntrWait push `{r2, lr}` + `{r4, lr}`
 on the System stack for the whole wait and pop all four on resume. A rev-3
@@ -161,9 +196,13 @@ is a bug to chase, and none of it justifies a payload revision.
   `state_payload` / `apply_state_payload` thousands of times and assert
   bit-identical replay; run them after any reader/writer change.
 
-## User-facing messages (open)
+## User-facing messages
 
-Web (`loadFromSlot`) collapses every rejection to "State didn't match this
-game"; native `load_state_slot` discards the result and shows nothing.
-`parse_state_payload` already raises distinct messages — plumb the reason
-out. Files are never deleted on a failed load; keep that.
+`parse_state_payload` classifies each refusal (`StateRejectKind`, left in
+`last_state_reject_kind`), and both frontends turn the kind into one
+sentence: `state_reject_sentence` on desktop, `STATE_REJECT_COPY` in
+`web/index.js` (via `wasm_state_error_kind`). A state from a newer payload
+revision is `srkTooNew` and reads "made by a newer version of dingbat"
+(update, or on the web reload), never "a different game": the revision is
+checked before the ROM identity. Files are never deleted on a failed load;
+keep that.

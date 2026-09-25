@@ -1732,9 +1732,8 @@ type
     locked*:     bool
     # Set by STOP entering STOP mode (stop_instr, memory.nim) on top of
     # `halted` and `locked`: the rest of the machine is stopped too, and a
-    # joypad line going low clears all three. NOT serialized: a state captured
-    # inside STOP loads as a running CPU after the STOP, which nothing licensed
-    # can observe (Pan Docs, "Using the STOP Instruction").
+    # joypad line going low clears all three. Serialized from GB payload rev
+    # 6; an older state taken inside STOP loads as a running CPU after it.
     stopped*:    bool
     # Dots of PPU time a halted CGB CPU is holding back (CGB_HALT_PPU_LEAD,
     # cpu_halt_tick). The same value for a whole halt, so not serialized:
@@ -1984,8 +1983,10 @@ type
     old_stat_flag*:      bool
     # A STAT write's cleared enable bits let the line DROP at the commit (+ the
     # CGB latency), ahead of the M-cycle boundary the rest of the byte waits
-    # for (stat_drop_arm, ppu.nim). Live only inside that M-cycle: not
-    # serialized, a state is never taken mid-M-cycle.
+    # for (stat_drop_arm, ppu.nim). Settled lazily, at the next source change
+    # past its dot, so it can still be set at a frame boundary; serialized
+    # from GB payload rev 6. The dot is in cycle_counter's terms, which the
+    # scanline renderer restarts at every mode boundary (stat_drop_rebase).
     win_check_dot*:      int32     # WIN_CHECK_DEFER: dot the comparator samples on, -1 none
     stat_set_dot*:       int32     # STAT_SET_LANDING_EVAL: dot a STAT write's set bits land, -1 none
     stat_drop_pending*:  bool
@@ -2104,12 +2105,13 @@ type
     # line's last pixel, which a DMG's end-of-line cleanup cannot clear
     # (DMG_WIN_LAST_PX_CARRY). Consumed at the head of the next line whose
     # LCDC.5 is set, possibly in the next frame, so not per-line scratch; never
-    # set on a CGB. Not serialized: costs at most one line of one frame.
+    # set on a CGB. Serialized from GB payload rev 6 (0 from the scanline
+    # renderer, which has no such carry).
     win_carry*:           bool
     # LCDC.5 has been low since the carry above was owed, so spending it has to
     # REACTIVATE the window and not merely continue it -- worth
     # WIN_CARRY_REACT_LINES on the window line counter. Same lifetime as
-    # win_carry and not serialized for the same reason.
+    # win_carry, and serialized with it.
     win_carry_gap*:       bool
     # Dots of WIN_EN_HOLD left on a WX match LCDC.5 refused; while nonzero
     # `win_lx` is the hold's retry pixel. Per-line scratch. Down here in the
@@ -2185,7 +2187,8 @@ type
     # (TDSEL_IDX_SHIFT): both written by every unsigned bitplane read, and a
     # second field measured more than the rule costs. `tdsel_dot` and the
     # arming bits are per-line scratch; the address survives H-Blank because
-    # the bus register it models does (CGB_TDSEL_GLITCH). Not serialized.
+    # the bus register it models does (CGB_TDSEL_GLITCH), so the address is
+    # serialized (GB payload rev 6).
     tdsel_dot*:           int32
     tdsel_addr*:          int32
     # CGB only. `map_dot` is the dot the last change to either tile-map select
@@ -2265,7 +2268,7 @@ type
     # An NRx2 write taking the envelope period from zero to non-zero makes the
     # next EVEN DIV-APU tick clock that channel's envelope (SameSuite
     # channel_1_nrx2_speed_change); see write_NRx2 and tick_frame_sequencer.
-    # Not serialized: lives for at most one 512 Hz step.
+    # Serialized from GB payload rev 6: a 512 Hz step can span a frame edge.
     env_extra_tick*:         bool
 
   GbChannel1* = ref object of GbVolumeEnvChannel
@@ -2274,7 +2277,7 @@ type
     # held, so a mid-sample NR11 duty change is not audible until the next
     # step (SameSuite channel_1_duty_delay) and a trigger keeps emitting the
     # previous sample through the startup delay (channel_1_duty, _align).
-    # Refreshed only by ch1_catchup_slow. Not serialized.
+    # Refreshed only by ch1_catchup_slow. Serialized from GB payload rev 6.
     sample_bit*:         uint8
     # Absolute scheduler cycle of the next duty step, or GB_NO_STEP when the
     # channel has never been triggered. Replaces a per-period scheduler event:
@@ -2291,9 +2294,9 @@ type
     negate_used*:        bool
     # Absolute scheduler cycle of the sweep's second overflow check, or
     # GB_NO_STEP: it trails the frequency writeback by 7 M-cycles and re-reads
-    # NR10 (GB_SWEEP_CHECK_DELAY). Not serialized, nor are the two sweep
-    # deadlines below: pending for at most 8 M-cycles and rebuilt by the next
-    # sweep step; part of the deferred payload batch.
+    # NR10 (GB_SWEEP_CHECK_DELAY). Serialized from GB payload rev 6, with the
+    # two sweep deadlines below and sweep_load_value, as distances from the
+    # payload's scheduler clock.
     sweep_check_at*:     CycleCount
     # Absolute scheduler cycle at which a sweep overflow STOP reaches NR52, or
     # GB_NO_STEP when none is in flight. Every sweep calculation's stop is one
@@ -2329,8 +2332,8 @@ type
     wave_ram_position*:      uint8
     # Whether CH3 has fetched a byte since its last trigger: a trigger reloads
     # the timer with period + 6 (Pan Docs), so until then there is no "byte CH3
-    # is on" for a DMG wave RAM access to land on (ch3_wave_open). Not
-    # serialized: false only inside that startup window.
+    # is on" for a DMG wave RAM access to land on (ch3_wave_open). Serialized
+    # from GB payload rev 6.
     wave_fetched*:           bool
     wave_ram_sample_buffer*: uint8
     length_load*:            uint8
@@ -2348,8 +2351,9 @@ type
     # The noise timer is two counters: `div_counter` free-runs off the divisor
     # stage and `clock_shift` picks which bit clocks the LFSR; `div_next` is the
     # divisor stage's next increment (ch4_steps_to_rise). NR43 selects a new
-    # view of both without restarting either. Not serialized: re-derived from
-    # `next_step` on load (ch4_resync_divisor).
+    # view of both without restarting either. Serialized from GB payload rev
+    # 6; an older state re-derives them from `next_step` (ch4_resync_divisor),
+    # which a later NR43 write moving the clock shift can tell apart.
     div_counter*:  uint16
     div_next*:     CycleCount
 
@@ -2361,20 +2365,20 @@ type
     # Phase of the APU's 1 MHz tick grid, in scheduler cycles (an edge on every
     # cycle congruent to this modulo (4 shl speed)). The square channels'
     # frequency timers are clocked by it, so a trigger between edges waits for
-    # the next (SameSuite channel_1_align_cpu). Reset by an APU power-on. Not
-    # serialized: a rollback replays the power-on; a disk load costs at most
-    # half a tick of pulse phase.
+    # the next (SameSuite channel_1_align_cpu). Reset by an APU power-on.
+    # Serialized from GB payload rev 6 (an older state keeps the running
+    # machine's phase).
     tick_phase*:          CycleCount
     # Phase of the half-rate (512 kHz) grid the noise channel's divisor stage
     # is clocked by: the power-on cycle modulo (8 shl speed), edges on the odd
     # 1 MHz ticks. NR43's divisor counts on it and a trigger cannot reset it
-    # (SameSuite channel_4_frequency_alignment; gb_noise_deadline). Not
-    # serialized, as tick_phase.
+    # (SameSuite channel_4_frequency_alignment; gb_noise_deadline).
+    # Serialized as tick_phase.
     noise_phase*:         CycleCount
     # The first DIV-APU event after a power-on is skipped when DIV's tap bit
     # was already high (SameSuite div_write_trigger_10): the divider clocks
-    # the sequencer, and that edge has already been accounted for. Not
-    # serialized: live under 2 ms, written only by a power-on.
+    # the sequencer, and that edge has already been accounted for. Live under
+    # 2 ms, written only by a power-on; serialized from GB payload rev 6.
     div_skip*:            bool
     # Whether the sequencer's next step does not clock the length counter (the
     # "extra length clocking" gate on NRx4). A property of the divider's phase,
@@ -2383,7 +2387,8 @@ type
     # The DIV-APU tap runs one M-cycle behind after an ODD number of switches
     # into double speed (AGE `speed-switch/spsw-ch2-lc-delay`; see
     # APU_SPSW_TAP_LAG_T in timer.nim). Toggled on each KEY1 switch into
-    # double speed, cleared by an APU power-off. Not serialized.
+    # double speed, cleared by an APU power-off. Serialized from GB payload
+    # rev 6.
     spsw_fs_lag*:         bool
     left_enable*:         bool
     left_volume*:         uint8
@@ -2443,13 +2448,12 @@ type
     # is all this models. hardware: gbedge p00 on AGS reads $3E at boot.
     rp*:                   uint8
     # SVBK readback is the raw written byte; only the mapping aliases 0 -> 1
-    # (a written 0 reads back $F8). Neither field is serialized.
+    # (a written 0 reads back $F8). Both serialized from GB payload rev 6.
     svbk_raw*:             uint8
     hram*:                 array[0x7F, uint8]
     # $FEA0-$FEFF: real RAM on CGB 0-D (Pan Docs, "FEA0-FEFF range"); which
-    # model applies is GbQuirks.unusable_region. NOT serialized (a payload
-    # bump is being batched); the only ROMs known to seed it do so once at
-    # setup. IF A GB PAYLOAD BUMP HAPPENS FOR ANY OTHER REASON, ADD THIS ONE.
+    # model applies is GbQuirks.unusable_region. Serialized from GB payload
+    # rev 6, with `rp` and `svbk_raw`.
     unusable*:             array[0x60, uint8]
     bootrom*:              seq[uint8]
     cycle_tick_count*:     int
@@ -2529,11 +2533,9 @@ type
     ram_size*:       int
     cgb_flag*:       CgbFlag
     boot_model*:     GbBootModel
-    # Set once by gb_set_revision (new_gb, then any --model= override). NOT
-    # serialized, nor is boot_model: both are construction-time properties of
-    # the machine. A state saved on --model=cgb0 loads onto the default
-    # revision silently; only the harness can reach a non-default one.
-    # IF A GB PAYLOAD BUMP HAPPENS FOR ANY OTHER REASON, ADD `revision`.
+    # Set by gb_set_revision (new_gb, then any --model= override). Serialized
+    # from GB payload rev 6: a load re-resolves boot_model and the quirks
+    # from it, so a --model=cgb0 state loads as that revision.
     revision*:       GbRevision
     quirks*:         GbQuirks
     rom_title*:      string
@@ -2560,7 +2562,9 @@ type
     # HDMA_SWITCH_*, HDMA_WAKE_BLIND_DOTS, HDMA_BLOCK_SWALLOW). Kept here, at
     # the end of the machine object, and not in GbPpu: a field inserted into
     # GbPpu moves GbFifoPpu's hot state (+0.5% retired instructions measured).
-    # Live only across a halt or a stall, like hdma_block_due; not serialized.
+    # Live only across a halt or a stall, like hdma_block_due; not serialized,
+    # except hdma_swallow_end (GB payload rev 6): the next mode-0 edge an armed
+    # transfer sees consumes it, and that can be frames later.
     hdma_due_forced*:  bool    # requested before the HALT: paid at the wake
     hdma_stalled*:     bool    # inside a speed switch's stall
     hdma_stop_req*:    bool    # the switch found a request: STOP's operand runs
@@ -2603,8 +2607,8 @@ type
     sh_l1*:            int64
     sh_skip_div*:      bool    # APU_CLOCK_CARRY: the switch's own DIV reset is booked by stop_instr
     apu_power_on_at*:  int64   # APU_DS_TRIGGER_SNAP: the scheduler cycle of the last APU power-on.
-                               # Not serialized (waits on the batched GB_PAYLOAD_VERSION bump, as
-                               # GbApu.tick_phase): a load keeps the running value.
+                               # Serialized raw from GB payload rev 6 (it is not rebased with the
+                               # scheduler); with stop_op_latch and lyc_write_old, in GB_SEC_MACH.
     lyc_write_old*:    int16   # DMG_LYC_BOUNDARY_OPEN: LYC before a parked DMG LYC write (+1; 0 = none)
     when defined(test_harness):
       test_output*:  TestOutput

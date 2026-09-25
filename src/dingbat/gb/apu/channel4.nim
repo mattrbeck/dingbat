@@ -103,9 +103,9 @@ proc ch4_catchup_slow(ch: GbChannel4; gb: GB; observer_period: uint32) =
   ch.next_step += steps * period
 
 proc ch4_resync_divisor*(ch: GbChannel4; gb: GB) =
-  ## Rebuild the two stages from `next_step` alone after a state load (the
-  ## counter and divisor deadline are not serialized, see
-  ## GbChannel4.div_counter): counter one increment short of the rising edge,
+  ## Rebuild the two stages from `next_step` alone after loading a state older
+  ## than GB payload rev 6, which did not carry them (GbChannel4.div_counter):
+  ## counter one increment short of the rising edge,
   ## that increment due on the deadline. Only an NR43 write inside the first
   ## period after the load could tell. An assignment, not a subtraction, so it
   ## cannot underflow.

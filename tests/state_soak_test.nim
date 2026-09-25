@@ -35,14 +35,12 @@
 ##
 ## Known core issues this soak found, reported as [KNOWN] rather than failed
 ## until they are fixed (DINGBAT_SOAK_STRICT=1 fails on every one):
-##   - GB: a payload written on the frame the LCD is switched on (LY 0, mode
-##     2) is refused by load_ppu_state (KnownRefusal).
-##   - Replays of the random programs diverge: state the payload does not
-##     carry. GB: apu.noise_phase (with the other fields held for the batched
-##     GB_PAYLOAD_VERSION bump), ppu.stat_drop_pending living past its
-##     M-cycle. GBA: bus.sync_bits bit 1, dma.video_active (KnownReplay),
+##   - GBA replays of the random program diverge: state the payload does not
+##     carry: bus.sync_bits bit 1, dma.video_active (KnownReplay),
 ##     cpu.irq_line forced low on load with a check pending, the IRQ
 ##     synchroniser's pipe/stall stamps with the bus DMA stamps.
+##     (GB's, and its refused LCD-on-frame payloads, were fixed by GB payload
+##     revision 6; the GB cases must replay bit for bit.)
 ##   - GBA: an H-blank DMA burst longer than a line books an interrupt check
 ##     per line that each burst pushes back, until the event queue overflows
 ##     (AssertionDefect here, an out-of-bounds write under -d:danger). The
@@ -60,19 +58,13 @@ const
   RewindSpan = 60
   RewindMaxDepth = 20     ## snapshots undone per rewind: 1 + rand(RewindMaxDepth)
 
-  KnownRefusal = "PPU mode 2 on line 0"
-    ## GB: the frame after the LCD is switched on ends at LY 0 in mode 2, and
-    ## load_ppu_state refuses every mode-2 state (b5dddb0c), so a payload the
-    ## core wrote cannot be loaded. Reported, not failed, until the core is
-    ## fixed; DINGBAT_SOAK_STRICT=1 fails on it.
-
   KnownReplay = [
     ("gbaedge-auto.gba", "DMA3 video capture runs across the frame boundary " &
      "and dma.video_active is not in the payload")]
     ## Committed ROMs whose replay is known to diverge, and why. Every other
     ## committed ROM must replay bit for bit.
   RandomReplayKnown = "machine state the payload does not carry"
-    ## The random programs reach several (see the header); reported only.
+    ## The GBA random program reaches several (see the header); reported only.
 
 var failures = 0
 var only = ""             # case-name filter from the command line
@@ -433,8 +425,8 @@ proc gba_program(seed: uint64): string =
 # ---- the soak itself ---------------------------------------------------------
 
 proc known(label, what: string) =
-  ## A known core issue (see KnownRefusal and the header): reported, and a
-  ## failure only under DINGBAT_SOAK_STRICT=1.
+  ## A known core issue (see the header): reported, and a failure only under
+  ## DINGBAT_SOAK_STRICT=1.
   if strict: fail(label & ": " & what)
   else: echo "  [KNOWN] ", label, ": ", what
 
@@ -455,7 +447,7 @@ proc soak[T](label: string; make: proc(): T; frames: int; seed: uint64;
   var next_rewind = RewindMin + r.below(RewindSpan)
   var stage = "step_frame"
   var rewinds, replayed = 0
-  var diverged, refused, twin_diverged = false
+  var diverged, twin_diverged = false
   var distinct_seen: seq[uint64]
   proc run_frame(g: int): string =
     if poke != nil: poke(emu, seed, g)
@@ -483,20 +475,9 @@ proc soak[T](label: string; make: proc(): T; frames: int; seed: uint64;
       var snap = ""
       for _ in 0 .. depth: snap = ring.pop()
       stage = "apply_state_payload"
-      try:
-        emu.apply_state_payload(snap)
-      except StateError as e:
-        # A payload this core wrote a moment ago must load.
-        if KnownRefusal notin e.msg or strict: raise
-        if not refused:
-          refused = true
-          known(label, &"a payload the core wrote after frame {f - 1 - depth} " &
-                &"is refused: {e.msg}")
-        # The apply stopped partway: back to where the run was, and on.
-        let cur = recent[(f - 1) mod recent.len]
-        emu.apply_state_payload(cur)
-        ring.push(cur)
-        continue
+      # A payload this core wrote a moment ago must load (a StateError is a
+      # failure, caught below).
+      emu.apply_state_payload(snap)
       stage = "state_payload after apply"
       let again = emu.state_payload()
       if again != snap:
@@ -614,7 +595,7 @@ when not defined(soak_lib):
         let path = tmp / &"random_{seed:x}_{ord(cgb)}.gb"
         writeFile(path, gb_program(seed, cgb))
         soak(label, gb_maker(path, fifo), RandomFrames, seed, gb_harness_poke,
-             replay_known = RandomReplayKnown)
+             replay_known = "")
 
   for seed in [0xA901'u64, 0xA902, 0xA903]:
     let label = &"random gba {seed:#x}"

@@ -59,8 +59,13 @@ const
   #      · 8 bus prefetch buffer pause/run state (pf_paused, pf_running, pf_count)
   # GB:  1 initial · 2 serial port section · 3 PPU dots_since_frame
   #      · 4 CPU undefined-opcode lockup flag · 5 Super Game Boy section
+  #      · 6 the batched carry (docs/savestate_compat.md): STOP mode, the
+  #        machine section (revision, STOP operand latch, parked LYC, APU
+  #        power-on stamp), $FEA0-$FEFF / RP / SVBK readback, the APU tick
+  #        grids and per-channel latches, the PPU's LCD-on frame flag and
+  #        pending STAT drop; mode-2 states load
   GBA_PAYLOAD_VERSION* = 8'u32
-  GB_PAYLOAD_VERSION*  = 5'u32
+  GB_PAYLOAD_VERSION*  = 6'u32
 
   # magic(8) version(4) core(1) payload_version(1) flags(2) rom_checksum(4)
   # rom_size(4) payload_len(4) payload_hash(4). Byte 13 was an always-zero

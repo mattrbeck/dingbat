@@ -16,12 +16,16 @@
 ##
 ## Run with: nimble test_savestate_compat
 ## Regenerate the current-version corpus: <this binary> --write-corpus
-## (older entries can only come from an old checkout)
+## (older entries can only come from an old checkout). A payload revision
+## inside container 7 gets its own entry beside the ones already there:
+## `<this binary> --write-corpus gb gbrev6` writes <rom>.v7-gbrev6.state for
+## the GB ROMs only.
 
 import std/[os, strutils, algorithm]
 import tables
 import dingbat/common/serialize
 import dingbat/common/scheduler
+import dingbat/common/input
 import dingbat/gb/gb
 import dingbat/gba/gba
 
@@ -182,23 +186,30 @@ proc new_gb_for(rom: string): GB =
                   run_bios = false)
   result.post_init()
 
-proc write_corpus() =
+proc write_corpus(only = ""; suffix = "") =
   ## Regenerate the reference states at the CURRENT format version. Only ever
   ## run deliberately, and never as a way to make a red test go green — read
-  ## the header of this file first.
+  ## the header of this file first. `only` = "gba" / "gb" limits it to one
+  ## core; `suffix` names a later shape within the container (`-<suffix>`),
+  ## so existing entries are never overwritten.
   createDir(CORPUS_DIR)
-  for (rom, frames) in GBA_ROMS:
-    let emu = new_gba_for(rom)
-    for _ in 0 ..< frames: emu.step_frame()
-    let path = CORPUS_DIR / corpus_name(rom, STATE_VERSION)
-    writeFile(path, emu.state_bytes(thumbnail = true))
-    echo "wrote ", path
-  for (rom, frames) in GB_ROMS:
-    let emu = new_gb_for(rom)
-    for _ in 0 ..< frames: emu.step_frame()
-    let path = CORPUS_DIR / corpus_name(rom, STATE_VERSION)
-    writeFile(path, emu.state_bytes(thumbnail = true))
-    echo "wrote ", path
+  proc name_of(rom: string): string =
+    if suffix.len == 0: corpus_name(rom, STATE_VERSION)
+    else: rom & ".v" & $STATE_VERSION & "-" & suffix & ".state"
+  if only in ["", "gba"]:
+    for (rom, frames) in GBA_ROMS:
+      let emu = new_gba_for(rom)
+      for _ in 0 ..< frames: emu.step_frame()
+      let path = CORPUS_DIR / name_of(rom)
+      writeFile(path, emu.state_bytes(thumbnail = true))
+      echo "wrote ", path
+  if only in ["", "gb"]:
+    for (rom, frames) in GB_ROMS:
+      let emu = new_gb_for(rom)
+      for _ in 0 ..< frames: emu.step_frame()
+      let path = CORPUS_DIR / name_of(rom)
+      writeFile(path, emu.state_bytes(thumbnail = true))
+      echo "wrote ", path
 
 proc file_version(data: string): uint32 =
   var r = Reader(buf: data, pos: STATE_MAGIC.len)
@@ -295,8 +306,8 @@ proc run_corpus() =
   check(revs_seen[ckGBA] >= {3'u8, 4'u8},
         "corpus covers GBA payload revisions 3 and 4",
         "GBA revisions present: " & $revs_seen[ckGBA])
-  check(revs_seen[ckGB] >= {1'u8, 2'u8, 3'u8},
-        "corpus covers GB payload revisions 1, 2 and 3",
+  check(revs_seen[ckGB] >= {1'u8, 2'u8, 3'u8, 5'u8, 6'u8},
+        "corpus covers GB payload revisions 1, 2, 3, 5 and 6",
         "GB revisions present: " & $revs_seen[ckGB])
   check(whole_rom_seen > 0, "corpus has a state with the whole-ROM trailer")
 
@@ -1022,10 +1033,211 @@ proc run_in_process_boundary() =
       caught = true
     check(caught, "a pad-flag mismatch is caught at the next section tag")
 
+
+# 5. GB payload revision 6: the states a frame boundary can be taken in
+# besides V-blank, and the machine state that outlives one.
+#   - the LCD-on frame: the LCDC write pushes the frame from inside the
+#     instruction and restarts the PPU at LY 0 in mode 2 (refused before);
+#   - a speed switch whose ~2^17-cycle stall spans a V-blank: step_frame runs
+#     on to the end of mode 3, so no boundary is left in it;
+#   - STOP mode, carried rather than loaded as a running CPU.
+# Each state must load into a NEW core (a slot loaded after a restart) and
+# run on bit for bit with the machine that wrote it.
+
+proc gb_test_rom(name: string; cgb: bool; code: openArray[int]): string =
+  ## A 32 KB ROM-only cart: RETI at the vectors, `code` at $0150.
+  var rom = newString(0x8000)
+  for v in [0x40, 0x48, 0x50, 0x58, 0x60]: rom[v] = char(0xD9)
+  for i, b in [0x00, 0xC3, 0x50, 0x01]: rom[0x100 + i] = char(b)
+  rom[0x143] = char(if cgb: 0x80 else: 0x00)
+  for i, b in code: rom[0x150 + i] = char(b and 0xFF)
+  var sum = 0
+  for a in 0x134 .. 0x14C: sum = sum - int(uint8(rom[a])) - 1
+  rom[0x14D] = char(sum and 0xFF)
+  result = getTempDir() / ("dingbat_gbrev6_" & name & ".gb")
+  writeFile(result, rom)
+
+proc new_gb_at(path: string; fifo = true): GB =
+  result = new_gb("", path, fifo = fifo, headless = true, run_bios = false)
+  result.post_init()
+
+proc replays_in_new_core(emu: GB; path: string; frames: int;
+                         fifo = true): bool =
+  ## Load `emu`'s state image into a new core and run both `frames` frames;
+  ## true when every payload agrees. Advances `emu`.
+  let twin = new_gb_at(path, fifo)
+  if not twin.load_state_bytes(emu.state_bytes()): return false
+  for _ in 0 ..< frames:
+    emu.step_frame()
+    twin.step_frame()
+    if twin.state_payload() != emu.state_payload(): return false
+  true
+
+proc run_gb_rev6() =
+  echo "GB rev 6: LCD-on frame, speed-switch stall, STOP mode, revision"
+  # LCD off, ~1.6 frames of delay loop, LCD on, ~2.4 frames, repeat.
+  let lcdon = gb_test_rom("lcdon", cgb = false, [
+    0xF3,                                    # di
+    0x3E, 0x00, 0xE0, 0x40,                  # LCDC = $00
+    0x01, 0x00, 0x10,                        # ld bc,$1000
+    0x0B, 0x78, 0xB1, 0x20, 0xFB,            # dec bc; ld a,b; or c; jr nz
+    0x3E, 0x91, 0xE0, 0x40,                  # LCDC = $91
+    0x01, 0x00, 0x18,                        # ld bc,$1800
+    0x0B, 0x78, 0xB1, 0x20, 0xFB,
+    0xC3, 0x51, 0x01])                       # jp $0151
+  # KEY1 = 1; STOP, forever: every stall spans most of a frame.
+  let spsw = gb_test_rom("spsw", cgb = true, [
+    0xF3, 0x3E, 0x01, 0xE0, 0x4D, 0x10, 0x00, 0xC3, 0x51, 0x01])
+  # LCD off, both P1 groups selected, STOP (no button held: STOP mode).
+  let stop = gb_test_rom("stop", cgb = false, [
+    0xF3, 0x3E, 0x00, 0xE0, 0x40, 0xE0, 0x00, 0x10, 0x00, 0x18, 0xFE])
+  defer:
+    for p in [lcdon, spsw, stop]:
+      removeFile(p)
+      removeFile(p[0 ..< p.rfind('.')] & ".sav")
+
+  for fifo in [true, false]:
+    let tag = if fifo: "" else: " (scanline renderer)"
+    let emu = new_gb_at(lcdon, fifo)
+    var seen = 0
+    for f in 0 ..< 40:
+      emu.step_frame()
+      if emu.ppu.lcd_enabled and emu.ppu.ly == 0 and
+         (emu.ppu.lcd_status and 3) == 2:
+        inc seen
+        if seen <= 3:
+          check(replays_in_new_core(emu, lcdon, 12, fifo),
+                "GB LCD-on frame state (LY 0, mode 2) loads and replays" & tag,
+                "frame " & $f)
+    check(seen > 0, "the LCD-on test ROM ends frames on the LCD-on write" & tag)
+
+  block:
+    let emu = new_gb_at(spsw)
+    var mode3, mid = 0
+    var replay_ok = true
+    for f in 0 ..< 40:
+      emu.step_frame()
+      if emu.ppu.lcd_enabled and (emu.ppu.lcd_status and 3) == 3: inc mode3
+      if int(emu.ppu.ly) < 144: inc mid
+      if f < 20 and not replays_in_new_core(emu, spsw, 2): replay_ok = false
+    check(mid > 0, "speed switches end frames mid-screen (the test reaches the case)")
+    check(mode3 == 0, "no frame boundary is left in mode 3",
+          $mode3 & " of 40 were")
+    check(replay_ok, "every state across speed-switch stalls loads and replays")
+
+  block:
+    let emu = new_gb_at(stop)
+    for _ in 0 ..< 3: emu.step_frame()
+    check(emu.cpu.stopped, "the STOP test ROM is in STOP mode")
+    let twin = new_gb_at(stop)
+    check(twin.load_state_bytes(emu.state_bytes()) and twin.cpu.stopped,
+          "a state taken in STOP mode loads in STOP mode")
+    var same = true
+    for i in 0 ..< 6:
+      if i == 2:
+        emu.handle_input(A, true)
+        twin.handle_input(A, true)
+      emu.step_frame()
+      twin.step_frame()
+      if twin.state_payload() != emu.state_payload(): same = false
+    check(same and not twin.cpu.stopped,
+          "the loaded STOP wakes on a button, in step with the original")
+
+  block:
+    let emu = new_gb_for(GB_ROMS[1][0])
+    emu.gb_set_revision(grDmg0)
+    for _ in 0 ..< 5: emu.step_frame()
+    let twin = new_gb_for(GB_ROMS[1][0])
+    check(twin.load_state_bytes(emu.state_bytes()) and twin.revision == grDmg0 and
+          twin.quirks == emu.quirks,
+          "the silicon revision (and its quirks) travel with the state")
+
+  # Line-relative state must not outlive its line. Both were found live at
+  # frame boundaries by the state soak, long past the line that set them.
+  let idle = gb_test_rom("idle", cgb = true, [0x18, 0xFE])        # jr -2
+  # Copy an OAM-DMA routine to HRAM, then run it every frame as LY hits 50
+  # (early in that line's mode 2).
+  var dmacode = @[0xF3]
+  for i, b in [0xE0, 0x46, 0x3E, 0x28, 0x3D, 0x20, 0xFD, 0xC9]:
+    dmacode.add([0x3E, b, 0xE0, 0x80 + i])
+  let loop_at = 0x150 + dmacode.len
+  dmacode.add([0xF0, 0x44, 0xFE, 50, 0x20, 0xFA,     # wait LY == 50
+               0x3E, 0xC0, 0xCD, 0x80, 0xFF,         # OAM DMA from $C000
+               0xF0, 0x44, 0xFE, 50, 0x28, 0xFA,     # wait LY != 50
+               0xC3, loop_at and 0xFF, loop_at shr 8])
+  let oamdma = gb_test_rom("oamdma", cgb = false, dmacode)
+  defer:
+    for p in [idle, oamdma]:
+      removeFile(p)
+      removeFile(p[0 ..< p.rfind('.')] & ".sav")
+  for fifo in [true, false]:
+    let emu = new_gb_at(idle, fifo)
+    for _ in 0 ..< 3: emu.step_frame()
+    template tick_until(cond: untyped) =
+      var guard = 0
+      while not (cond) and guard < 200_000:
+        emu.cpu.tick(emu)
+        inc guard
+    # A STAT write on a CGB arms a drop CGB_STAT_ENABLE_LATENCY dots out, to
+    # land at the next source change past that dot. The scanline renderer
+    # restarts its counter at every mode boundary, so a dot armed late in
+    # mode 2 had to be moved with it or it stayed "in the future" for good.
+    tick_until(emu.ppu.ly == 9 and (emu.ppu.lcd_status and 3) == 2 and
+               emu.ppu.cycle_counter >= 60)
+    write_byte(emu.memory, emu, 0xFF41, 0x00)
+    mem_flush_deferred(emu.memory, emu)
+    let armed = emu.ppu.stat_drop_pending
+    tick_until(emu.ppu.ly == 11)
+    check(armed and not emu.ppu.stat_drop_pending,
+          "a STAT write's pending line drop is settled within its line" &
+          (if fifo: "" else: " (scanline renderer)"),
+          "armed " & $armed & ", still pending at LY 11 dot " &
+          $emu.ppu.cycle_counter & " (drop dot " & $emu.ppu.stat_drop_dot & ")")
+  block:
+    let emu = new_gb_at(oamdma)
+    var stale = 0
+    for _ in 0 ..< 20:
+      emu.step_frame()
+      if emu.fifo_ppu.scan_line != -1: inc stale
+    check(stale == 0,
+          "an OAM scan an OAM DMA interrupted does not claim the same LY a " &
+          "frame later", $stale & " of 20 boundaries still held its line")
+
+  # Refusals: what stays impossible, and a newer payload revision.
+  block:
+    let emu = new_gb_for(GB_ROMS[1][0])
+    for _ in 0 ..< 30: emu.step_frame()
+    let before = emu.state_payload()
+    let good = emu.state_bytes()
+    proc shaped(mode: uint8; cc: int32): string =
+      let e = new_gb_for(GB_ROMS[1][0])
+      discard e.load_state_bytes(good)
+      e.ppu.lcd_status = (e.ppu.lcd_status and not 3'u8) or mode
+      e.ppu.ly = 10
+      e.ppu.cycle_counter = cc
+      e.state_bytes()
+    check(not emu.load_state_bytes(shaped(3, 100)) and
+          last_state_reject_kind == srkCorrupt and
+          "mode 3" in last_state_error,
+          "a mode-3 state is refused (its renderer scratch is not in the format)")
+    check(not emu.load_state_bytes(shaped(2, 81)) and
+          "past the end of mode 2" in last_state_error,
+          "a mode-2 state past mode 2's stop dot is refused")
+    check(emu.load_state_bytes(shaped(2, 40)),
+          "a mode-2 state before its stop dot loads")
+    discard emu.load_state_bytes(good)
+    var newer = good
+    newer[13] = char(uint8(GB_PAYLOAD_VERSION) + 1)
+    check(not emu.load_state_bytes(newer) and last_state_reject_kind == srkTooNew,
+          "a GB state from a newer payload revision is refused as too new " &
+          "(the frontends say to update), not as another game's")
+    check(emu.state_payload() == before, "emulator untouched after those refusals")
+
 when isMainModule:
   # Run from the repo root: the ROM and corpus paths are relative to it.
   if paramCount() >= 1 and paramStr(1) == "--write-corpus":
-    write_corpus()
+    write_corpus(if paramCount() >= 2: paramStr(2) else: "",
+                 if paramCount() >= 3: paramStr(3) else: "")
     quit(0)
   run_roundtrip()
   run_rom_identity()
@@ -1035,6 +1247,7 @@ when isMainModule:
   run_intr_wait_migration()
   run_corpus()
   run_in_process_boundary()
+  run_gb_rev6()
   echo ""
   if failures > 0:
     echo failures, " save-state compatibility check(s) FAILED"

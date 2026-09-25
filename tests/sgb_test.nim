@@ -186,7 +186,7 @@ block:
       let want = if ci == 0: 0'u16 else: BORDER_COLORS[ci] or 0x8000'u16
       if s.border[py * 256 + px] != want: inc post_bad
   check(post_bad == 0, &"border image wrong after a state load: {post_bad} px")
-  check(GB_PAYLOAD_VERSION == 5'u32, "GB payload revision should be 5 for the SGB section")
+  check(GB_PAYLOAD_VERSION >= 5'u32, "the SGB section needs GB payload revision 5 or later")
 
 # ---- direct packet-injection tests --------------------------------------
 # Command shapes the synthetic ROM cannot reach, driven through the SAME
