@@ -55,6 +55,9 @@ TABLE = {
     # Thumb `cmp pc, r0` at a halfword boundary restoring a T-clear SPSR:
     # the halfword behind it a Thumb `bx`, then a Thumb `movs`
     'thumbpc3c': [0, 1],
+    # a DMA's end-of-transfer interrupt when its burst's request lands in an
+    # opcode fetch: EWRAM body / IWRAM / no ldrh / ldrh then a nop, N = 1, 4, 16
+    'dmairqf': [v << 8 | n for v in (0, 1, 2, 3) for n in (1, 4, 16)],
     # a timer interrupt against a NOP sled: IWRAM (ARM, Thumb) and EWRAM
     # (ARM, Thumb), k = 16..44 cycles to the overflow
     'irqwait': ([k for k in range(16, 25)] + [0x100 | k for k in range(16, 45)] +

@@ -16,7 +16,8 @@
 @   variant 2  EWRAM, with a `mov r0, r0` where the ldrh was (and r9 = 0)
 @   variant 3  EWRAM, the ldrh but no EWRAM load after it (a nop)
 @
-@ AGB SP through tools/hwlink, 2026-09-25 (two passes a cell, agreeing):
+@ AGB SP through tools/hwlink, 2026-09-25 (two passes a cell, agreeing;
+@ recorded as the r0-agb.json family dmairqf with those two):
 @   N=1/4/16, variant 0: 401A045 403E069 40CE0F9 -- entered after the EWRAM
 @     `ldr` (address bits 0x04), the resume stamp as dingbat has it
 @   variant 1 (IWRAM): 84002030 84002054 840020E4 -- as dingbat
