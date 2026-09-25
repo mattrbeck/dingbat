@@ -115,3 +115,28 @@ test("an unclassified refusal still says something useful", async () => {
   app.api.applyImportedState(realState());
   assert.match(app.toasts.at(-1), /couldn't be loaded/);
 });
+
+test("a session snapshot a newer dingbat wrote says so when Resume is refused", async () => {
+  // The Resume offer re-applies a local snapshot; a refusal names its cause
+  // like every other state load (it once said only "Couldn't restore").
+  const app = await loadApp();
+  app.api.gdriveToken = null;
+  app.runIn("currentRomName = 'A.gba'; currentOriginalName = 'A.gba'");
+  const save = new Uint8Array([7, 7]);
+  app.idb.set("save:A.gba", save);
+  app.sandbox.FS.files.set("A.sav", save);
+  app.idb.set("stateauto:A.gba", {
+    bytes: realState(), ts: Date.now() - 120000,
+    saveSig: app.runIn("saveSignature(new Uint8Array([7, 7]))"),
+  });
+  app.sandbox.Module = fakeModule(0, SRK.TOO_NEW);
+  await app.runIn("offerAutoResume()");
+  const toast = app.document.getElementById("toast");
+  const pill = toast.children.find((c) => c.classList.contains("has-action"));
+  assert.ok(pill, "the Resume offer is up");
+  pill.onclick();
+  for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
+  assert.match(app.toasts.at(-1), /newer version of dingbat/);
+  assert.match(app.toasts.at(-1), /Reload/);
+  assert.doesNotMatch(app.toasts.at(-1), /different game|didn't match/);
+});

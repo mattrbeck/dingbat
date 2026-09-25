@@ -5931,7 +5931,7 @@ const STATE_REJECT_COPY = {
   [SRK.WRONG_ROM]:
     "That save state belongs to a different game. Load the game it was made in, then try again.",
   [SRK.TOO_NEW]:
-    "That save state was made by a newer version of dingbat than this one. Update dingbat and try again.",
+    "That save state was made by a newer version of dingbat than this one. Reload the page to update dingbat, then try again.",
   [SRK.TRUNCATED]:
     "That save state file is incomplete — the download or copy was cut short. Try getting the file again.",
   [SRK.CORRUPT]:
@@ -6167,7 +6167,7 @@ const offerAutoResume = async () => {
       showToast("The game has saved since — that session is gone");
       return;
     }
-    showToast(applyStateBytes(auto.bytes) ? "Resumed" : "Couldn't restore the session");
+    showToast(applyStateBytes(auto.bytes) ? "Resumed" : stateRejectMessage(auto.bytes));
   });
 };
 
