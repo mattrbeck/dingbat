@@ -1,10 +1,10 @@
 # dbsuite - Detailed Results
 
-*Generated: 2026-09-25 08:02:44 · commit d21c947a · game-boy-test-roms v7.0*
+*Generated: 2026-09-25 09:15:48 · commit 03b0c276 · game-boy-test-roms v7.0*
 
 tests/roms/dbsuite/dbsuite.gba (cartridge build) in dingbat. Every expected value is an AGB SP (AGS-001) answer; each case's source comment in tests/roms/dbsuite/ gives its provenance. A case that is not PASS here is dingbat disagreeing with the console.
 
-**Total: 867/884**
+**Total: 870/884**
 
 ## cpu (117/117)
 
@@ -18,22 +18,19 @@ All pass.
 
 All pass.
 
-## dma (258/262)
+## dma (261/262)
 
 | Case | Status | Got / expected |
 |------|--------|----------------|
 | dma/dmatime-burst-vram-mode3 | FAIL | got=000000B2 exp=000000B1 |
-| dma/fifodma-k20-n14 | FAIL | got=00000014 exp=00000050 |
-| dma/fifodma-k20-n24 | FAIL | got=0000003C exp=0000005A |
-| dma/fifodma-ewram-load-k20-n17 | FAIL | got=0000003D exp=0000005B |
 
 ## bus (76/79)
 
 | Case | Status | Got / expected |
 |------|--------|----------------|
 | bus/contend-pram-mode0 | FAIL | got=000000E6 exp=000000E7 |
-| bus/contend-vram-mode0 | FAIL | got=000000F4 exp=000000F6 |
-| bus/contend-vram-mode2-locked-out | FAIL | got=0000042E exp=0000042A |
+| bus/contend-vram-mode0 | FAIL | got=000000F0 exp=000000F6 |
+| bus/contend-vram-mode2-locked-out | FAIL | got=00000444 exp=0000042A |
 
 ## ppu (156/156)
 

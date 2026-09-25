@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-09-25 08:02:44 · commit d21c947a · game-boy-test-roms v7.0*
+*Generated: 2026-09-25 09:15:48 · commit 03b0c276 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1443
-- **Pass:** 1431
-- **Fail:** 12
+- **Pass:** 1432
+- **Fail:** 11
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -18,7 +18,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Mooneye | 152 | 152 |
 | GBA - mGBA Test Suite | 13 | 13 |
 | GBA - jsmolka gba-tests | 13 | 13 |
-| GBA - alyosha gba-tests | 121 | 126 |
+| GBA - alyosha gba-tests | 122 | 126 |
 | GBA - PeterLemon BIOS | 25 | 25 |
 | GBA - Other test ROMs | 11 | 12 |
 | GBA - hwverified (AGS-001) | 12 | 12 |
@@ -62,7 +62,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 13 tests passed.**
 
-## GBA - alyosha gba-tests (121/126)
+## GBA - alyosha gba-tests (122/126)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -189,7 +189,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | png183/arm/halfword_transfer | — | 👌 |
 | png183/arm/multiply | — | 👌 |
 | png183/irq/halt_pc | — | 👌 |
-| png183/memory/memory | — | 👀 Failed test 107 |
+| png183/memory/memory | — | 👌 |
 | png183/psr/psr2 | — | 👌 |
 | png183/timer/timer_check_count_up_presence | — | 👌 |
 
@@ -225,7 +225,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | dbsuite/cpu | — | 👌 117/117 passed |
 | dbsuite/irq | — | 👌 145/145 passed |
 | dbsuite/timer | — | 👌 26/26 passed |
-| dbsuite/dma | — | 👀 258/262 passed |
+| dbsuite/dma | — | 👀 261/262 passed |
 | dbsuite/bus | — | 👀 76/79 passed |
 | dbsuite/ppu | — | 👌 156/156 passed |
 | dbsuite/apu | — | 👀 42/52 passed |
