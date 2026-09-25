@@ -31,6 +31,25 @@ proc update_waitcnt*(bus: Bus; w: WAITCNT) =
     bus.wait16_s[2] = half
     bus.wait32_n[2] = 2 * half
     bus.wait32_s[2] = 2 * half
+  # MEMCNT bit 5 clear switches the board WRAM off: its region reads and
+  # writes the chip WRAM, at the chip's timing (png183 memory t104-t106;
+  # tests/roms/payloads/memcnt.s on an AGB SP).
+  let ewram_off = not bit(bus.gba.mmio.memctrl, 5)
+  if ewram_off != bus.ewram_off:
+    bus.ewram_off = ewram_off
+    bus.fetch_page = 0xFFFFFFFF'u32
+    bus.fetch_key = 0xFFFFFFFF'u32
+  if ewram_off:
+    bus.ew_ptr = cast[ptr UncheckedArray[byte]](addr bus.wram_chip[0])
+    bus.ew_mask = 0x7FFF'u32
+  else:
+    bus.ew_ptr = cast[ptr UncheckedArray[byte]](addr bus.wram_board[0])
+    bus.ew_mask = 0x3FFFF'u32
+  if ewram_off:
+    bus.wait16_n[2] = 1
+    bus.wait16_s[2] = 1
+    bus.wait32_n[2] = 1
+    bus.wait32_s[2] = 1
   let n_first = [int(w.wait_state_0_first_access),
                  int(w.wait_state_1_first_access),
                  int(w.wait_state_2_first_access)]
@@ -686,7 +705,7 @@ proc read_byte_internal*(bus: Bus; address: uint32): uint8 {.inline.} =
       let shift = (address and 3) * 8
       uint8(bus.bios_latch shr shift)
   of 0x1: bus.read_open_bus_value(address)
-  of 0x2: bus.wram_board[address and 0x3FFFF'u32]
+  of 0x2: bus.ew_ptr[address and bus.ew_mask]
   of 0x3: bus.wram_chip[address and 0x7FFF'u32]
   of 0x4: bus.gba.mmio[address]
   of 0x5: bus.gba.ppu.pram[address and 0x3FF'u32]
@@ -724,7 +743,7 @@ proc read_half_internal*(bus: Bus; address: uint32): uint16 {.inline.} =
       let shift = (address and 2) * 8
       uint16(bus.bios_latch shr shift)
   of 0x1: uint16(bus.read_open_bus_word(address) shr ((address and 2) * 8))
-  of 0x2: read_u16_ptr(bus.wram_board, address and 0x3FFFF'u32)
+  of 0x2: read_u16_ptr_raw(bus.ew_ptr, address and bus.ew_mask)
   of 0x3: read_u16_ptr(bus.wram_chip, address and 0x7FFF'u32)
   of 0x4:
     uint16(bus.read_byte_internal(address)) or
@@ -764,7 +783,7 @@ proc read_word_internal*(bus: Bus; address: uint32): uint32 {.inline.} =
       bus.bios_latch
   of 0x1:
     bus.read_open_bus_word(address)
-  of 0x2: read_u32_ptr(bus.wram_board, address and 0x3FFFF'u32)
+  of 0x2: read_u32_ptr_raw(bus.ew_ptr, address and bus.ew_mask)
   of 0x3: read_u32_ptr(bus.wram_chip, address and 0x7FFF'u32)
   of 0x4:
     uint32(bus.read_byte_internal(address)) or
@@ -824,7 +843,7 @@ proc write_byte_internal*(bus: Bus; address: uint32; value: uint8) =
   case bits_range(address, 24, 27)
   of 0x2:
     sndWatch(bus, address, 1, uint32(value))
-    bus.wram_board[address and 0x3FFFF'u32] = value
+    bus.ew_ptr[address and bus.ew_mask] = value
     wcWatch(bus, address, 1)
   of 0x3:
     sndWatch(bus, address, 1, uint32(value))
@@ -863,7 +882,7 @@ proc write_half_internal*(bus: Bus; address: uint32; value: uint16) =
   case bits_range(address, 24, 27)
   of 0x2:
     sndWatch(bus, address, 2, uint32(value))
-    write_u16_ptr(bus.wram_board, address and 0x3FFFF'u32, value)
+    cast[ptr uint16](addr bus.ew_ptr[address and bus.ew_mask])[] = value
     wcWatch(bus, address, 2)
   of 0x3:
     sndWatch(bus, address, 2, uint32(value))
@@ -916,7 +935,7 @@ proc write_word_internal*(bus: Bus; address: uint32; value: uint32) =
   case bits_range(address, 24, 27)
   of 0x2:
     sndWatch(bus, address, 4, value)
-    write_u32_ptr(bus.wram_board, address and 0x3FFFF'u32, value)
+    cast[ptr uint32](addr bus.ew_ptr[address and bus.ew_mask])[] = value
     wcWatch(bus, address, 4)
   of 0x3:
     sndWatch(bus, address, 4, value)
@@ -983,8 +1002,8 @@ proc install_fetch_cache(bus: Bus; page: uint32): bool =
   # MMIO, open bus and 0xD (possible EEPROM) take the generic path
   case page
   of 0x2:
-    bus.fetch_ptr = cast[ptr UncheckedArray[byte]](addr bus.wram_board[0])
-    bus.fetch_mask = 0x3FFFF'u32
+    bus.fetch_ptr = bus.ew_ptr
+    bus.fetch_mask = bus.ew_mask
   of 0x3:
     bus.fetch_ptr = cast[ptr UncheckedArray[byte]](addr bus.wram_chip[0])
     bus.fetch_mask = 0x7FFF'u32

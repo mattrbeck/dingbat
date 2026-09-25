@@ -1,6 +1,6 @@
 # dbsuite - Detailed Results
 
-*Generated: 2026-09-24 17:15:50 · commit f5bca4e2 · game-boy-test-roms v7.0*
+*Generated: 2026-09-24 23:38:31 · commit ea5e0019 · game-boy-test-roms v7.0*
 
 tests/roms/dbsuite/dbsuite.gba (cartridge build) in dingbat. Every expected value is an AGB SP (AGS-001) answer; each case's source comment in tests/roms/dbsuite/ gives its provenance. A case that is not PASS here is dingbat disagreeing with the console.
 
@@ -33,7 +33,7 @@ All pass.
 | Case | Status | Got / expected |
 |------|--------|----------------|
 | dma/dmatime-burst-vram-mode3 | FAIL | got=0000009C exp=000000B1 |
-| dma/dmatime-completion-irq-after-resume | FAIL | got=0000005D exp=0000006D |
+| dma/dmatime-completion-irq-after-resume | FAIL | got=0000006C exp=0000006D |
 | dma/fifodma-k20-n14 | FAIL | got=00000014 exp=00000050 |
 | dma/fifodma-k20-n24 | FAIL | got=0000003C exp=0000005A |
 | dma/fifodma-ewram-load-k20-n11 | FAIL | got=00000037 exp=00000036 |

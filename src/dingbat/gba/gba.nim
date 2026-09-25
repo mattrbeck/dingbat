@@ -342,6 +342,13 @@ type
     byte_io_write*: bool
     wram_board*: seq[byte]
     wram_chip*:  seq[byte]
+    # What 02000000-02FFFFFF reads and writes: the 256K board WRAM, or with
+    # MEMCNT (0x04000800) bit 5 clear the 32K chip WRAM, at chip WRAM timing.
+    # Derived from mmio.memctrl in update_waitcnt; a raw pointer, so the
+    # switch costs the hot path nothing.
+    ewram_off*:  bool
+    ew_ptr*:     ptr UncheckedArray[byte]
+    ew_mask*:    uint32
     gpio*:       GPIO
     # Tilt sensor (Yoshi's Universal Gravitation, Koro Koro Puzzle): byte
     # registers at 0x0E008000-0x0E008500 (GBATEK "GBA Cart Tilt Sensor").
