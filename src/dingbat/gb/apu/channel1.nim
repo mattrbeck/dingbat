@@ -68,9 +68,9 @@ proc ch1_sweep_run(ch: GbChannel1; gb: GB) =
       # (channel_1_sweep_restart rounds 3-5). Gated on the shift, not the period:
       # a trigger arms this with sweep period 0 (blargg 06-overflow on trigger).
       if ch.sweep_enabled and ch.shift > 0:
-        # One calculation whether armed by a trigger or a writeback. AGB
-        # silicon adds a second at the trigger check (hardware: gbaedge
-        # SWEEPQ/SWEEP2 on AGS-001); DMG/CGB do not (blargg 06-overflow on trigger).
+        # One calculation whether armed by a trigger or a writeback (blargg
+        # 06-overflow on trigger). The AGB's trigger check can also see the
+        # shadow's previous frequency (gba/apu/channel1.nim); not modelled here.
         discard ch1_frequency_calc(ch, gb, at)
   if ch.sweep_check_at < ch.sweep_load_at:
     do_check(); do_load()

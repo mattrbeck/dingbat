@@ -15,6 +15,15 @@ const CPU_CLOCK_SPEED*    = 1 shl 24
 const APU_SAMPLE_PERIOD*  = CPU_CLOCK_SPEED div APU_SAMPLE_RATE
 const FRAME_SEQ_RATE*     = 512
 const FRAME_SEQ_PERIOD*   = CPU_CLOCK_SPEED div FRAME_SEQ_RATE
+const PSG_SEQ_RESTART_LEAD* = 24
+  ## SOUNDCNT_X master-on restarts the PSG's 512 Hz clock (there is no DIV to
+  ## keep running on the AGB): its first step, a length step, lands this many
+  ## cycles short of one full period after the write. AGB SP (link rig,
+  ## tests/roms/payloads/psgfirst.s from IWRAM, nine runs): channel 3 and 4
+  ## counter-16 notes triggered straight after a master-on live 0x18CC7-
+  ## 0x18CC9 polls of 10 cycles, i.e. 31 steps, with no run-to-run spread; a
+  ## free-running clock would spread them over a whole step (3277 polls).
+  ## Those counts fix it to +-10 cycles; payloads/fsfirst.s would pin it to one.
 # One-pole low-pass coefficient for the optional analog-output filter:
 # alpha = 1 - exp(-2*pi*fc/fs) with fc ~= 12 kHz, fs = 32768 Hz
 const AUDIO_LOWPASS_ALPHA* = 0.90'f32
@@ -578,12 +587,20 @@ proc `[]=`*(apu: APU; io_addr: uint32; value: uint8) =
         for addr in 0x60'u32..0x81'u32:
           apu[addr] = 0x00'u8
         apu.sound_enabled = false
+        # The sweep unit's shadow frequency goes with the power: a note after
+        # a master off/on is checked as fresh (channel1.nim, trigger check).
+        apu.channel1.frequency_shadow = 0
         when FIFO_MASTER_RESET:
           apu.dma_channels.fifo_reset(0)
           apu.dma_channels.fifo_reset(1)
       elif (value and 0x80) > 0 and not apu.sound_enabled:
         apu.sound_enabled = true
         apu.frame_sequencer_stage = 0
+        # The 512 Hz clock restarts here (PSG_SEQ_RESTART_LEAD); its next
+        # step clocks length, so a length enable now is not in the first half.
+        apu.first_half_of_length_period = false
+        apu.gba.scheduler.clear(etAPUFrameSeq)
+        apu.gba.scheduler.schedule(FRAME_SEQ_PERIOD - PSG_SEQ_RESTART_LEAD, etAPUFrameSeq)
         apu.channel1.length_counter = 0
         apu.channel2.length_counter = 0
         apu.channel3.length_counter = 0

@@ -125,20 +125,27 @@ proc ch1_write*(ch: Channel1; address: uint32; value: uint8) =
       ch.next_step = ch.gba.scheduler.cycles + CycleCount(arm1)
       ch.arm_delay = arm1
       ch.init_volume_envelope()
+      let stale = ch.frequency_shadow
       ch.frequency_shadow     = ch.frequency_ch1
       ch.sweep_timer          = if ch.sweep_period > 0: ch.sweep_period else: 8
       ch.sweep_enabled        = ch.sweep_period > 0 or ch.shift_ch1 > 0
       ch.negate_has_been_used = false
       if ch.shift_ch1 > 0:
-        # The trigger overflow check runs TWICE (hardware: gbaedge SWEEPQ page
-        # on AGS): shadow + offset, then the SAME offset again on that result
-        # without writing it back, killing the channel iff > 2048 STRICTLY
-        # (freq 1024 survives: 1536, 2048).
+        # The trigger's overflow check (Pan Docs: with a non-zero shift) runs
+        # on the new frequency AND on the one the shadow still held (AGB SP,
+        # link rig 2026-09-24, tests/roms/dbsuite/payloads/sweeptrig.s): sweep
+        # 0x21 at 1300 lives to its first tick after a master off/on at every
+        # 16-cycle phase, but straight after a 1400 note that overflowed it
+        # dies at the trigger (hwverified/sweep, cartridge; half the phases
+        # over the rig). That is 1400 + 700 still in the shadow, not a second
+        # pass over 1300 (1950 + 650), which the lone rows rule out. The
+        # hardware's stale view is phase-dependent; this takes it always.
         let offset = int(ch.frequency_shadow shr ch.shift_ch1)
-        let signed_off = if ch.negate: -offset else: offset
+        let stale_offset = int(stale shr ch.shift_ch1)
         if ch.negate: ch.negate_has_been_used = true
-        let first = int(ch.frequency_shadow) + signed_off
-        if first > 0x7FF or first + signed_off > 2048:
+        let fresh = int(ch.frequency_shadow) + (if ch.negate: -offset else: offset)
+        let old = int(stale) + (if ch.negate: -stale_offset else: stale_offset)
+        if fresh > 0x7FF or old > 0x7FF:
           ch.enabled = false
   of 0x66, 0x67: discard
   else: echo "Writing to invalid Channel1 register: ", hex_str(uint16(address))
