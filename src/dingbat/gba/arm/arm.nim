@@ -4,34 +4,34 @@ proc exception_return_restore*(cpu: CPU) =
   ## CPSR <- SPSR after an instruction that loaded r15 with the S bit set
   ## (subs pc, lr, #4 / ldmfd sp!, {..., pc}^). Assumes set_reg(15) already
   ## ran, so the pipeline offset is corrected when returning to thumb.
-  # An IRQ return costs what the instruction costs, plus one cycle when it
-  # refills from the gamepak, where restarting the ROM fetch stream costs it
-  # (hardware: gbaedge IRQLAT2 on AGB SP, docs/hwprobe.md). The arithmetic
-  # below is that, written against IRQ_ENTRY_EXTRA so the old uneven split
+  # An IRQ return costs what the instruction costs. The arithmetic below is
+  # that, written against IRQ_ENTRY_EXTRA so the old uneven split
   # (-d:IRQ_ENTRY_EXTRA=2: a cycle more going in, a cycle given back here)
   # can still be built; see cpu.irq for why it was wrong. SWI entry/return
   # splits evenly (mGBA suite BIOS timing rows).
-  # An IRQ that woke an HLE Halt or IntrWait returns, notionally, to the
-  # caller -- but on the console it returns into the BIOS routine that was
-  # halted, never to the gamepak, so the cycle comes back whatever the
-  # caller's region. Without this the HLE left a cartridge-resident caller
-  # one cycle later than the real BIOS does in our own core (the mGBA suite's
-  # `DMA Prefetch Break` reads that cycle as a whole scanline).
-  let into_halted_bios = cpu.gba.bus.stub_bios and
-    (cpu.intr_wait_active or cpu.halt_resume_charge != 0)
-  if cast[CpuMode](cpu.cpsr.mode) == modeIRQ and
-     (into_halted_bios or int(bits_range(cpu.r[15], 24, 27)) notin 8..13):
+  # A return into the gamepak used to pay one cycle more, read off gbaedge
+  # IRQLAT2 (AGB SP) as the cost of restarting the ROM fetch stream. That
+  # cycle is the prefetcher's: it goes on fetching while the handler runs
+  # from the BIOS (PF_RUNS_OFF_ROM), and a refill elsewhere waits out a
+  # halfword in its last cycle (clear_pipeline) -- which it did not, because
+  # leaving the gamepak never stamped when the stream stopped. With the
+  # stamp the cycle comes and goes with the prefetcher's phase: alyosha
+  # irq/IRQ_sub_2 needs it gone where IRQ_sub and IRQ_sub_slow keep it, and
+  # gbaedge IRQLAT2, IRQDECOMP and HDMAPHASE move to the console's numbers.
+  if cast[CpuMode](cpu.cpsr.mode) == modeIRQ:
     cpu.gba.bus.add_cycles(-1 + (2 - IRQ_ENTRY_EXTRA))
-  elif cast[CpuMode](cpu.cpsr.mode) == modeIRQ:
-    cpu.gba.bus.add_cycles(2 - IRQ_ENTRY_EXTRA)
-  if cpu.spsr.thumb:
+  if cpu.ret_refilled_thumb and cpu.r[15] == cpu.ret_refill_at + 4:
+    # clear_pipeline refilled at Thumb width, from the prefetcher's stream
+    cpu.ret_refilled_thumb = false
+  elif cpu.spsr.thumb:
     cpu.r[15] -= 4
     # set_reg(15) refilled at ARM width; a Thumb return refills with two
     # halfword fetches, so charge the difference.
     let page = int(bits_range(cpu.r[15], 24, 27))
     cpu.gba.bus.add_cycles(2 * (int(cpu.gba.bus.wait16_s[page]) -
                                 int(cpu.gba.bus.wait32_s[page])))
-    cpu.gba.bus.rom_ahead = 4  # clear_pipeline set the ARM lead
+    if page >= 0x8 and page <= 0xD:
+      cpu.gba.bus.rom_ahead = 4  # clear_pipeline set the ARM lead
     when ROM_REFILL_ORDERED:
       if page >= 0x8 and page <= 0xD and (ROM_REFILL_ORDERED_PF or not cpu.gba.bus.prefetch_on):
         # clear_pipeline left the burst continuing at the ARM-aligned target

@@ -630,6 +630,12 @@ type
     ldm_glitch*:       uint16
     ldm_glitch_instr*: uint32
     ldm_glitch_saved*: array[16, uint32]
+    # Transient, within one instruction (never serialized): a return to
+    # Thumb code refilled from the gamepak prefetcher's stream, at Thumb
+    # width already, at ret_refill_at (cpu.refill_from_head), so
+    # exception_return_restore must not redo it.
+    ret_refilled_thumb*: bool
+    ret_refill_at*: uint32
 
   SpritePixel* = object
     priority*: uint16
@@ -1241,6 +1247,10 @@ const HALT_WAKE_RUNS_ONE* {.booldefine.} = true
 const IRQ_FETCH_VIA_PREFETCH* {.booldefine.} = true
   ## The IRQ entry's in-flight gamepak fetch comes from the prefetcher when
   ## it runs on the interrupted stream (cpu.irq).
+const PF_RUNS_OFF_ROM* {.booldefine.} = true
+  ## The gamepak prefetcher keeps fetching while the CPU runs from the BIOS
+  ## or RAM: it goes on at the address the CPU would have fetched next, and a
+  ## branch back to that address takes what it fetched (cpu.clear_pipeline).
 const S_BIT_IRQ_LATE* {.booldefine.} = true
   ## An S-bit CPSR restore that sets I still lets an interrupt already
   ## recognised be taken after it (arm.exception_return_restore).

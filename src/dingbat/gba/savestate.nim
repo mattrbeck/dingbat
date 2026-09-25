@@ -1077,8 +1077,13 @@ proc gba_apply_state(gba: GBA; payload: string; rev: uint32;
       "reconstructed — it would resume with a corrupted stack pointer")
   load_bus_state(gba.bus, r, rev)
   gba.bus.sd_tw_active = false   # an HLE sound pass's timing is not stored
-  # Derived, not stored: at a frame boundary it is the executing mode's lead
-  gba.bus.rom_ahead = (if gba.cpu.cpsr.thumb: 4'i8 else: 8'i8)
+  # Derived, not stored: at a frame boundary it is the executing mode's lead,
+  # or 0 while the CPU runs off the gamepak (PF_RUNS_OFF_ROM, cpu.nim)
+  let pc_page = int(bits_range(gba.cpu.r[15], 24, 27))
+  gba.bus.rom_ahead =
+    if PF_RUNS_OFF_ROM and (pc_page < 0x8 or pc_page > 0xD): 0'i8
+    elif gba.cpu.cpsr.thumb: 4'i8
+    else: 8'i8
   r.expect_tag(GBA_SEC_SCHED)
   gba.scheduler.load_from(r, pad = in_process)
   # Only the PPU event chain increments ppu.frame, and a running machine

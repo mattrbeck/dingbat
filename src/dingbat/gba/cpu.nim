@@ -229,6 +229,57 @@ proc contend_refill(cpu: CPU; s: int) {.noinline.} =
   cpu.r[15] += (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
   when IRQ_LAST_WAITS:
     if (bus.sync_bits and 8) != 0: bus.note_waits(s)
+proc leave_rom(bus: Bus; old_ahead: int8) {.noinline.} =
+  ## PF_RUNS_OFF_ROM: the CPU branches out of the gamepak. The prefetcher
+  ## goes on at the console's next fetch, from the end of the CPU's last
+  ## gamepak access, unless a load had stopped it; bus.rom_next_addr keeps
+  ## that address with bit 0 set, which no fetch or load ever matches.
+  bus.rom_cool()
+  if bus.prefetch_on and not bus.pf_paused and bus.fetch_page - 0x8 <= 5 and
+     (bus.rom_next_addr and 1) == 0:
+    bus.rom_next_addr = (bus.rom_next_addr + uint32(old_ahead)) or 1
+  else:
+    bus.rom_next_addr = 1
+
+proc refill_from_head(cpu: CPU; page: int; noting: bool): bool {.noinline.} =
+  ## PF_RUNS_OFF_ROM: a branch from outside the gamepak to the address the
+  ## prefetcher went on at when the CPU left it (bus.rom_next_addr, odd)
+  ## takes the refill from the stream like a sequential fetch. Called from
+  ## clear_pipeline's ordered refill, events caught up.
+  ## An exception return (`subs pc` / `ldm ^`) sets CPSR after this runs;
+  ## one from an exception mode whose SPSR is Thumb, landing on the head, is
+  ## taken to be returning to Thumb and refills at Thumb width here, which
+  ## exception_return_restore then leaves alone. (A plain branch there that
+  ## hits the head exactly would be misread; the dispatcher's `ldr pc` to a
+  ## handler never lands on the interrupted code's head.)
+  let bus = cpu.gba.bus
+  let head = bus.rom_next_addr and not 1'u32
+  var thumb = cpu.cpsr.thumb
+  if not thumb and cpu.spsr.thumb and (cpu.r[15] and not 1'u32) == head:
+    let b = mode_bank(cast[CpuMode](cpu.cpsr.mode))
+    thumb = b != 0 and b != UNDEF_BANK
+  let target = cpu.r[15] and (if thumb: not 1'u32 else: not 3'u32)
+  if not bus.prefetch_on or bus.pf_paused or head != target:
+    return false
+  let now = bus.sched.cycles + CycleCount(bus.cycles)
+  if now <= bus.rom_free_since: return false
+  let halves = if thumb: 1 else: 2
+  let first = bus.pf_serve(now, page, halves)
+  let last = bus.pf_serve(now + CycleCount(first), page, halves)
+  bus.cycles += first + last
+  when IRQ_LAST_WAITS:
+    if noting: bus.note_waits(last)
+  bus.rom_next_addr = target
+  if thumb:
+    cpu.r[15] = target + 4
+    if not cpu.cpsr.thumb:
+      cpu.ret_refilled_thumb = true
+      cpu.ret_refill_at = target
+  else:
+    cpu.r[15] = target + 8
+  bus.rom_ahead = (if thumb: 4'i8 else: 8'i8)
+  bus.rom_hot = bus.rom_free_since == bus.sched.cycles + CycleCount(bus.cycles)
+  true
 
 proc clear_pipeline*(cpu: CPU) =
   when IMM_FETCH_WAIT:
@@ -243,10 +294,20 @@ proc clear_pipeline*(cpu: CPU) =
   let old_ahead = cpu.gba.bus.rom_ahead
   cpu.gba.bus.rom_ahead = (if cpu.cpsr.thumb: 4'i8 else: 8'i8)
   if page < 0x8 or page > 0xD:
-    # The prefetcher only runs while executing from ROM; leaving the gamepak
-    # abandons the buffered stream (mGBA suite BIOS timing, prefetch columns).
-    cpu.gba.bus.rom_next_addr = 1
-    cpu.gba.bus.rom_hot = false
+    # Leaving the gamepak: the CPU stops fetching from it. The mGBA suite's
+    # BIOS timing prefetch columns return behind the prefetcher's head (after
+    # a SWI) and see a flushed stream either way.
+    let bus = cpu.gba.bus
+    when PF_RUNS_OFF_ROM:
+      # rom_ahead 0: the CPU is off the gamepak, and a head left in
+      # rom_next_addr survives its branches there. Anything else a load from
+      # the gamepak left behind is forgotten, as before.
+      if old_ahead != 0: bus.leave_rom(old_ahead)
+      elif (bus.rom_next_addr and 1) == 0: bus.rom_next_addr = 1
+      bus.rom_ahead = 0
+    else:
+      bus.rom_next_addr = 1
+    bus.rom_hot = false
   when ROM_REFILL_ORDERED:
     if page >= 0x8 and page <= 0xD and (ROM_REFILL_ORDERED_PF or not cpu.gba.bus.prefetch_on):
       # The refill in the order the console makes it: a nonsequential fetch
@@ -267,6 +328,11 @@ proc clear_pipeline*(cpu: CPU) =
       let noting = (bus.sync_bits and 8) != 0
       bus.catch_up()
       bus.rom_cool()
+      when PF_RUNS_OFF_ROM:
+        # Back from outside the gamepak onto the prefetcher's head
+        if old_ahead == 0 and bus.rom_next_addr != 1 and
+           (bus.rom_next_addr and 1) != 0 and (bus.sync_bits and 2) == 0:
+          if cpu.refill_from_head(page, noting): return
       let (n, s) = if cpu.cpsr.thumb: (int(bus.wait16_n[page]), int(bus.wait16_s[page]))
                    else: (int(bus.wait32_n[page]), int(bus.wait32_s[page]))
       var both = n + s
