@@ -11,9 +11,10 @@ const TIMER_START_OVERFLOW {.booldefine.} = true
   ## The overflow of an enable over a count stopped at 0xFFFF (the tick
   ## before the reload, on the start cycle) is a whole overflow, not just its
   ## interrupt: a sound FIFO the timer drives takes a sample and may ask for
-  ## a refill there, and a cascaded timer counts it. tools/hwlink fifospk on
-  ## an AGB SP: a sound-FIFO page run right after one whose exit froze TM0
-  ## at 0xFFFF reads two refill bursts (60 cycles) more at every NOP count,
+  ## a refill there (and a cascaded timer counts it: assumed, unmeasured).
+  ## tests/roms/payloads/fifospk.s on an AGB SP: a sound-FIFO page run right
+  ## after one whose exit froze TM0 at 0xFFFF reads two refill bursts (60
+  ## cycles) more at every NOP count,
   ## where the page run after any other count reads what it always does --
   ## the "spikes" of tests/roms/dbsuite fifodma, whose cases run in NOP
   ## order and so each n = 14 and 24 case follows the n = 13 and 23 that

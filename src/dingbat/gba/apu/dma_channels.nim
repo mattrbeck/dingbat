@@ -30,10 +30,10 @@ const FIFO_OWN_BURST_NO_REQUEST {.booldefine.} = true
   ## drives does not ask for another one. Events only run inside a burst when
   ## a higher-priority DMA channel is armed on a trigger (dma.run_channel's
   ## preemption drain); without this the overflow saw the FIFO half filled
-  ## and chained a second burst. tools/hwlink fifospk on an AGB SP with DMA0
-  ## armed on V-blank (idle): k = 20, the first refill costs the CPU one
-  ## burst at every NOP count, as it does with DMA0 off (n = 17 reads 53,
-  ## not 83).
+  ## and chained a second burst. tests/roms/payloads/fifospk.s on an AGB SP
+  ## with DMA0 armed on V-blank (idle): k = 20, the first refill costs the
+  ## CPU one burst at every NOP count, as it does with DMA0 off (n = 17
+  ## reads 53, not 83).
 
 const FIFO_WORD_WRAP {.booldefine.} = true
   ## The FIFO holds eight words, and the eighth written into it leaves it
