@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-09-24 22:31:21 · commit 65440868 · game-boy-test-roms v7.0*
+*Generated: 2026-09-25 01:12:18 · commit 965273e9 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1443
-- **Pass:** 1419
-- **Fail:** 24
+- **Pass:** 1424
+- **Fail:** 19
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -18,7 +18,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Mooneye | 152 | 152 |
 | GBA - mGBA Test Suite | 13 | 13 |
 | GBA - jsmolka gba-tests | 13 | 13 |
-| GBA - alyosha gba-tests | 112 | 126 |
+| GBA - alyosha gba-tests | 117 | 126 |
 | GBA - PeterLemon BIOS | 25 | 25 |
 | GBA - Other test ROMs | 10 | 12 |
 | GBA - hwverified (AGS-001) | 12 | 12 |
@@ -62,7 +62,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 13 tests passed.**
 
-## GBA - alyosha gba-tests (112/126)
+## GBA - alyosha gba-tests (117/126)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -94,7 +94,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | alyosha/Interactions/Internal_Cycle_DMA_IRQ_br1_IWRAM | — | 👌 |
 | alyosha/Interactions/Internal_Cycle_DMA_IRQ_ldr_IWRAM | — | 👌 |
 | alyosha/Interactions/Internal_Cycle_DMA_IRQ_nop_IWRAM | — | 👌 |
-| alyosha/Interactions/Internal_Cycle_DMA_MUL_IRQ | — | 👀 Failed test 189 |
+| alyosha/Interactions/Internal_Cycle_DMA_MUL_IRQ | — | 👌 |
 | alyosha/Interactions/Internal_Cycle_DMA_Mul | — | 👌 |
 | alyosha/LDM/LDM_ALU | — | 👌 |
 | alyosha/LDM/LDM_ALU_IMM | — | 👌 |
@@ -117,7 +117,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | alyosha/arm/Coprocessor_14 | — | 👌 |
 | alyosha/fifo_dma/fifo | — | 👀 Failed test 002 |
 | alyosha/fifo_dma/fifo_2 | — | 👌 |
-| alyosha/fifo_dma/fifo_3 | — | 👀 Failed test 174 |
+| alyosha/fifo_dma/fifo_3 | — | 👌 |
 | alyosha/fifo_dma/fifo_4 | — | 👌 |
 | alyosha/fifo_dma/fifo_5 | — | 👀 Failed test 059 |
 | alyosha/fifo_dma/fifo_6 | — | 👀 Failed test 155 |
@@ -126,15 +126,15 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | alyosha/fifo_dma/fifo_dma_disable_5 | — | 👌 |
 | alyosha/irq/BL_1 | — | 👌 |
 | alyosha/irq/BL_IRQ | — | 👌 |
-| alyosha/irq/BL_IRQ_2 | — | 👀 Failed test 251 |
+| alyosha/irq/BL_IRQ_2 | — | 👌 |
 | alyosha/irq/BL_IRQ_3 | — | 👌 |
 | alyosha/irq/BL_IRQ_R14 | — | 👌 |
 | alyosha/irq/IE | — | 👌 |
 | alyosha/irq/IF | — | 👌 |
 | alyosha/irq/IF_Timer | — | 👌 |
 | alyosha/irq/IRQ_sub | — | 👌 |
-| alyosha/irq/IRQ_sub_2 | — | 👀 Failed test 201 |
-| alyosha/irq/IRQ_sub_2_slow | — | 👀 no verdict on screen |
+| alyosha/irq/IRQ_sub_2 | — | 👌 |
+| alyosha/irq/IRQ_sub_2_slow | — | 👌 |
 | alyosha/irq/IRQ_sub_slow | — | 👌 |
 | alyosha/irq/halt_pc | — | 👌 |
 | alyosha/irq/halt_pc_2 | — | 👌 |

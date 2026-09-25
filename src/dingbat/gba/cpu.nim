@@ -153,17 +153,24 @@ proc irq_enter*(cpu: CPU) =
            bus.rom_next_addr == lr - 4:
           let now = bus.sched.cycles + CycleCount(bus.cycles)
           inflight = max(0, bus.pf_serve(now, page, if cpu.cpsr.thumb: 1 else: 2) - 1)
-        elif IRQ_INFLIGHT_AFTER_BURST and
-             bus.dma_end_at == bus.sched.cycles + CycleCount(bus.cycles):
-          # Right after an H-blank burst (the access window's) the fetch is
-          # nonsequential -- the burst broke the stream -- and costs what
-          # EWRAM's does, all but the cycle the entry overlaps. alyosha
-          # Interactions/Internal_Cycle_DMA_MUL_IRQ: a timer interrupt
-          # recognised in a multiply's internal cycles under a burst from
-          # Thumb gamepak code (prefetch off) stops the handler's timer a
-          # cycle early on the console; the no-interrupt fetch after the same
-          # burst (Internal_Cycle_DMA_Mul) and the IWRAM version
-          # (tests/roms/payloads/dmamulirq.s) already read right.
+        elif IRQ_INFLIGHT_NONSEQ and
+             (bus.dma_end_at == bus.sched.cycles + CycleCount(bus.cycles) or
+              (bus.prefetch_on and bus.pf_paused and bus.pf_count == 0)):
+          # The stream is broken -- by an H-blank burst that just ended (the
+          # access window's), or by a gamepak load that stopped the
+          # prefetcher -- so the fetch is nonsequential, and it costs what
+          # EWRAM's does: the access less the cycle the entry overlaps.
+          # alyosha Interactions/Internal_Cycle_DMA_MUL_IRQ: a timer
+          # interrupt recognised in a multiply's internal cycles under a
+          # burst from Thumb gamepak code (prefetch off) stops the handler's
+          # timer a cycle early on the console; the no-interrupt fetch after
+          # the same burst (Internal_Cycle_DMA_Mul) and the IWRAM version of
+          # the sequence (tests/roms/payloads/dmamulirq.s) already read right.
+          # alyosha irq/BL_IRQ_2 case d: an interrupt recognised during a
+          # Thumb `ldr` from the gamepak (prefetch on) is entered a cycle
+          # sooner on the console than 2*S16 gives. alyosha fifo_dma/fifo_3
+          # turns green with it too. Not every mismatch of the stream: taken
+          # that widely it breaks dbsuite irqlat-hblank-haltcnt.
           inflight = (if cpu.cpsr.thumb: int(bus.wait16_n[page])
                       else: int(bus.wait32_n[page])) - 1
         else:
