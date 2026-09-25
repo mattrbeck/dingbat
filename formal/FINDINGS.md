@@ -85,15 +85,25 @@ Drive v3 and GIS documentation. The pass found three bugs and fixed them
   on Drive.
 - A set-up rollback session is not ended when 2P link mode starts; this is
   probably unreachable.
-- **A design question, not low: a deleted game loaded again can get its
-  deleted save back.** Found in the UI pass; origin/main does the same.
-  - Steps: device 1 deletes a game, then loads it again from its file.
-    Device 2 has not pulled the delete. Its next sync uploads its copy of
-    the old save, and device 1 pulls it.
-  - Why: `mergeLibrary` drops a tombstone once a newer entry exists, and it
-    cannot tell a fresh load of the game from a play on another device.
-  - Closing it means deciding whether a save older than the delete may
-    follow a re-import.
+- **Fixed 2026-09-25 (c577df15, Matt's call: respect the delete, keep the
+  old save restorable for 30 days): a deleted game loaded again got its
+  deleted save back.** Device 1 deleted a game and loaded it again; device 2,
+  not yet pulled, uploaded its old save and device 1 took it, because
+  `mergeLibrary` dropped a tombstone once a newer entry existed. Library
+  entries, tombstones and Drive files now carry a generation (new on a
+  re-import after a delete; absent = 0, so old libraries merge as before); a
+  save from an older generation is never applied, but kept as "a save from
+  before you deleted this game" with Restore (swap, so undoable) in the
+  game's menu and Manage Saves, for 30 days, then dropped everywhere.
+  Deleting and re-importing on one device before a sync no longer cancels
+  the queued Drive deletes. `DriveLibrary` Layer 3 models it
+  (`bug_reimport_gets_deleted_save`, `regress_reimport_keeps_deleted_save_aside`);
+  `web/tests/deleted-save.test.mjs` (8 tests, all failing on the old code)
+  and the two-device UI rig guard it. The anchors of DriveSession,
+  GameLifecycle, Modals, SavePersistence and Thumbnails now list functions
+  this change touched: re-model them at the next audit. Kept aside, not
+  lost: a new file an old build (no generation stamp) creates for a
+  re-imported game, until that device's service worker updates.
 
 The rest of this file is the original audit, as found at dd7ba741f.
 
