@@ -1854,6 +1854,16 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
     gba.interrupts.gate_open_at -= base
   else:
     gba.interrupts.gate_open_at = 0
+  # IRQ_LAST_WAITS compares these with the scheduler's clock at the next
+  # boundary. The frame ends on line 160, four cycles before the V-blank
+  # interrupt is recognised, so left behind they never matched for it: every
+  # V-blank interrupt skipped the rule (alyosha irq/IRQ_sub_2_slow).
+  if gba.cpu.irq_line_at >= base: gba.cpu.irq_line_at -= base
+  else: gba.cpu.irq_line_at = 0
+  if gba.bus.lw_end >= base: gba.bus.lw_end -= base
+  else:
+    gba.bus.lw_end = 0
+    gba.bus.lw_waits = 0
   if gba.interrupts.stall_to >= base:
     gba.interrupts.stall_from -= min(gba.interrupts.stall_from, base)
     gba.interrupts.stall_to -= base
