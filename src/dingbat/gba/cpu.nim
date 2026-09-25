@@ -262,24 +262,24 @@ proc clear_pipeline*(cpu: CPU) =
         windowed = (bus.sync_bits and 2) != 0
       if not windowed and bus.prefetch_on:
         let now = bus.sched.cycles + CycleCount(bus.cycles)
-        let target = cpu.r[15] and (if cpu.cpsr.thumb: not 1'u32 else: not 3'u32)
+        let target = cpu.r[15] and not 1'u32
         let from_rom = bus.fetch_page - 0x8 <= 5
         if from_rom and bus.rom_next_addr + uint32(old_ahead) == target and
-           (bus.pf_paused or now > bus.rom_free_since or
-            (bus.pf_running and old_ahead == 4)):
+           (cpu.cpsr.thumb or (target and 2) == 0) and
+           (bus.pf_paused or now > bus.rom_free_since or bus.pf_running):
           # A branch to the halfword the prefetcher reads next keeps the
           # buffer: the target comes out of it, or out of the halfword in
           # flight, like any sequential fetch (alyosha prefetcher_full_arm
           # t001c, prefetcher_branch_thumb). With nothing buffered or in
-          # flight, a Thumb branch still meets the prefetcher starting on the
+          # flight, a branch still meets the prefetcher starting on the
           # target at S if it has been running since the CPU's own last
-          # access (prefetcher_branch_thumb_4), and fetches nonsequentially
-          # if it has not (prefetcher_branch_thumb_2). An ARM branch there
-          # fetches nonsequentially either way (ppu/start_up_vbl's startup
-          # `bx` after eight back-to-back ARM fetches). Bracketed: counting
-          # the running prefetcher for ARM too fails ppu/start_up_vbl and
-          # prefetcher_branch_thumb_arm_3's first check; for neither mode,
-          # prefetcher_branch_thumb_3 and _4.
+          # access (prefetcher_branch_thumb_4; from ARM, the `bx` into Thumb
+          # after ARM fetches that opens prefetcher_branch_thumb_arm_3, N+S
+          # there reads its first check 2 high), and fetches nonsequentially
+          # if it has not (prefetcher_branch_thumb_2; ppu/start_up_vbl's
+          # startup `bx`). Counting it for neither state fails
+          # prefetcher_branch_thumb_3 and _4. An ARM target with bit 1 set
+          # never matches the prefetcher's aligned halfwords.
           let halves = if cpu.cpsr.thumb: 1 else: 2
           let first = bus.pf_serve(now, page, halves)
           last = bus.pf_serve(now + CycleCount(first), page, halves)
@@ -346,7 +346,7 @@ proc clear_pipeline*(cpu: CPU) =
         bus.rom_next_addr = cpu.r[15] and not 1'u32
         cpu.r[15] += 4
       else:
-        bus.rom_next_addr = cpu.r[15] and not 3'u32
+        bus.rom_next_addr = cpu.r[15] and not 1'u32
         cpu.r[15] += 8
       if broken:
         bus.rom_next_addr = 1
@@ -404,11 +404,13 @@ proc read_instr*(cpu: CPU): uint32 {.inline.} =
         cpu.gba.bus.bios_latch = ahead or (ahead shl 16)
       v
     else:
-      cpu.r[15] = cpu.r[15] and not 3'u32
+      # Bit 1 survives: a `bx` to an address with it set leaves the ARM PC
+      # there (bus.rom_fetch_unbuffered). The fetched word is the aligned one.
+      cpu.r[15] = cpu.r[15] and not 1'u32
       let fetch_addr = cpu.r[15] - 8
       let v = cpu.gba.bus.fetch_word(fetch_addr)
       if bits_range(fetch_addr, 24, 27) == 0:
-        cpu.gba.bus.bios_latch = cpu.gba.bus.read_word_internal((fetch_addr + 8) and 0x3FFF'u32)
+        cpu.gba.bus.bios_latch = cpu.gba.bus.read_word_internal((fetch_addr + 8) and 0x3FFC'u32)
       v
   else:
     cpu.pipeline.shift()

@@ -302,6 +302,42 @@ proc rom_access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int 
   bus.rom_free_since = new_free_since
   cost
 
+proc rom_fetch_unbuffered(bus: Bus; now: CycleCount; page: int; halves: int): int {.noinline.} =
+  ## An opcode fetch continuing the prefetcher's stream that the buffer
+  ## cannot serve: the CPU fetches it itself, nonsequentially, as after a
+  ## branch elsewhere -- after the halfword still in flight, and after one
+  ## in its final cycle, which has committed (the flush in
+  ## cpu.clear_pipeline). The prefetcher's bus phase runs on regardless.
+  ## Two cases, both rare, so out of line:
+  ##
+  ## * The first halfword of a 128 KiB block. The prefetcher behaves as
+  ##   though full at a 0x20000 boundary (alyosha prefetcher/readme.txt) and
+  ##   GBATEK has the block start nonsequential. alyosha bounday_test_1 (six
+  ##   Thumb `adds` across 0x08020000 behind two EWRAM loads) reads 8 cycles
+  ##   short served from the buffer, 1 short without the final-cycle wait;
+  ##   prefetcher_boundary_1-4, which branch to the boundary one cycle apart
+  ##   and read in pairs, show the same phase.
+  ## * An ARM fetch with address bit 1 set. Only a `bx` to such an address
+  ##   puts the ARM PC there (cpu.read_instr keeps the bit, as the console
+  ##   does: alyosha prefetcher_branch_thumb_arm_3 is written for `adr`
+  ##   results two bytes past the label). The gamepak returns the aligned
+  ##   word, but the prefetcher's halfwords never match the CPU's address.
+  ##   prefetcher_branch_thumb_arm_3's second check: the ARM fetch after an
+  ##   I/O load, 2 cycles from the buffer, is N (6) there. A fetch that
+  ##   continues an unbroken burst (no cycle off the gamepak) is plain S.
+  let s = int(bus.wait16_s[page])
+  var wait = 0
+  if bus.rom_free_since >= now:
+    wait = int(bus.rom_free_since - now)
+  elif not bus.pf_paused:
+    let elapsed = int(now - bus.rom_free_since)
+    if elapsed < 8 * s and elapsed mod s == s - 1: wait = 1
+  let cost = wait + int(bus.wait16_n[page]) + (halves - 1) * s
+  bus.rom_free_since = now + CycleCount(cost)
+  bus.pf_paused = false
+  bus.pf_running = false
+  cost
+
 proc rom_fetch_cycles(bus: Bus; address: uint32; page: int;
                       is32: static bool): int {.inline.} =
   ## Fetch-only specialisation of `rom_access_cycles` for the instruction
@@ -314,7 +350,17 @@ proc rom_fetch_cycles(bus: Bus; address: uint32; page: int;
   when defined(pftrace):
     let rfs_in = bus.rom_free_since
   if address == bus.rom_next_addr and (bus.prefetch_on or bus.pf_paused):
-    cost = bus.pf_serve(now, page, when is32: 2 else: 1)
+    # The console fetches rom_ahead bytes past the executing opcode, where
+    # dingbat charges the fetch
+    let unbuffered =
+      ((address + uint32(bus.rom_ahead)) and 0x1FFFF'u32) == 0 or
+      (when is32: (address and 2) != 0 and
+                  (bus.pf_paused or now > bus.rom_free_since)
+       else: false)
+    if unbuffered:
+      cost = bus.rom_fetch_unbuffered(now, page, when is32: 2 else: 1)
+    else:
+      cost = bus.pf_serve(now, page, when is32: 2 else: 1)
   else:
     cost =
       if address == bus.rom_next_addr and now == bus.rom_free_since:

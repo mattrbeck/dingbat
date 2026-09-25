@@ -14,7 +14,9 @@ when defined(pftrace):
   # -d:pftrace: dump ROM-bus activity inside each mGBA-suite Timing window
   # (between TM0's enable and disable writes) that contained a DMA grant; this
   # is how bus.rom_access_cycles' hand-off predicate is re-derived. Every call
-  # site is `when defined(pftrace)`, so a normal build pays nothing.
+  # site is `when defined(pftrace)`, so a normal build pays nothing. With
+  # -d:pftrace_all too, every window prints, flushed at each TM0 read (the
+  # alyosha timing rows read a running timer and never disable it).
   var pft_on*: bool
   var pft_dma*: bool
 

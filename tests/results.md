@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-09-24 17:15:50 · commit f5bca4e2 · game-boy-test-roms v7.0*
+*Generated: 2026-09-24 22:31:21 · commit 65440868 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1443
-- **Pass:** 1417
-- **Fail:** 26
+- **Pass:** 1419
+- **Fail:** 24
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -18,7 +18,7 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Mooneye | 152 | 152 |
 | GBA - mGBA Test Suite | 13 | 13 |
 | GBA - jsmolka gba-tests | 13 | 13 |
-| GBA - alyosha gba-tests | 110 | 126 |
+| GBA - alyosha gba-tests | 112 | 126 |
 | GBA - PeterLemon BIOS | 25 | 25 |
 | GBA - Other test ROMs | 10 | 12 |
 | GBA - hwverified (AGS-001) | 12 | 12 |
@@ -62,7 +62,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 13 tests passed.**
 
-## GBA - alyosha gba-tests (110/126)
+## GBA - alyosha gba-tests (112/126)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -148,7 +148,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | alyosha/ppu/start_up_vbl | — | 👌 |
 | alyosha/ppu/start_up_vbl_irq | — | 👌 |
 | alyosha/ppu/start_up_vbl_irq_halt | — | 👌 |
-| alyosha/prefetcher/bounday_test_1 | — | 👀 Failed test 033 |
+| alyosha/prefetcher/bounday_test_1 | — | 👌 |
 | alyosha/prefetcher/prefetcher_boundary_1 | — | 👌 |
 | alyosha/prefetcher/prefetcher_boundary_2 | — | 👌 |
 | alyosha/prefetcher/prefetcher_boundary_3 | — | 👌 |
@@ -160,7 +160,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | alyosha/prefetcher/prefetcher_branch_thumb_5 | — | 👌 |
 | alyosha/prefetcher/prefetcher_branch_thumb_6 | — | 👌 |
 | alyosha/prefetcher/prefetcher_branch_thumb_arm | — | 👌 |
-| alyosha/prefetcher/prefetcher_branch_thumb_arm_3 | — | 👀 Failed test 078 |
+| alyosha/prefetcher/prefetcher_branch_thumb_arm_3 | — | 👌 |
 | alyosha/prefetcher/prefetcher_branch_thumb_arm_4 | — | 👌 |
 | alyosha/prefetcher/prefetcher_dma | — | 👌 |
 | alyosha/prefetcher/prefetcher_full_arm | — | 👌 |

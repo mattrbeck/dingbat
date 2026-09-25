@@ -100,6 +100,10 @@ proc `[]`*(tim: Timer; io_addr: uint32): uint8 =
       if num == 0 and (io_addr and 1) == 0:
         pft("TMREAD raw=" & $v & " sched=" & $tim.gba.scheduler.cycles &
             " busc=" & $tim.gba.bus.cycles)
+        when defined(pftrace_all):
+          for l in pft_lines: echo "PFT ", l
+          echo "PFT ---- (read)"
+          pft_lines.setLen(0)
     read(v, io_addr and 1)
 
 proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
@@ -133,7 +137,7 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
               " s16=" & $tim.gba.bus.wait16_s[8] & " n16=" & $tim.gba.bus.wait16_n[8] &
               " pf=" & $tim.gba.bus.prefetch_on)
           elif (not tim.tmcnt[0].enable) and was_enabled:
-            if pft_dma:
+            if pft_dma or defined(pftrace_all):
               for l in pft_lines: echo "PFT ", l
               echo "PFT ----"
             pft_on = false
