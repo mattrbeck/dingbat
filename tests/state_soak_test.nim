@@ -41,10 +41,15 @@
 ##     payload revision 9 GBA's (bus.sync_bits, dma.video_active,
 ##     cpu.irq_line, the interrupt synchroniser, the DMA stamps, the fetch
 ##     page, memory control); every case must replay bit for bit.
-##   - GBA: an H-blank DMA burst longer than a line books an interrupt check
-##     per line that each burst pushes back, until the event queue overflows
-##     (AssertionDefect here, an out-of-bounds write under -d:danger). The
-##     program keeps H-blank bursts short unless strict.
+##   - GBA: a repeating H-blank DMA whose bursts need more bus time than the
+##     visible lines have (0xA903 at frame 142: ~2.3 lines a burst) never
+##     lets the CPU run again: each line's request is granted a whole burst
+##     on the lagging scheduler clock, so the backlog outgrows V-blank and
+##     one CPU step never ends. Until the core has a rule for a request that
+##     arrives while its channel's burst is still running, the program keeps
+##     H-blank bursts short, strict or not. (Those bursts also used to book an
+##     interrupt check each until the event queue overflowed, which is what
+##     the soak saw first; the "gba hblank dma over a line" case covers that.)
 
 import std/[os, strutils, strformat, times]
 import dingbat/gb/gb
@@ -67,8 +72,7 @@ const
 var failures = 0
 var only = ""             # case-name filter from the command line
 let strict = existsEnv("DINGBAT_SOAK_STRICT")
-  ## Known core issues fail instead of being reported, and the GBA program
-  ## may run H-blank DMA bursts longer than a line (see gba_program).
+  ## Known core issues fail instead of being reported.
 
 proc fail(msg: string) =
   echo "  [FAIL] ", msg
@@ -384,9 +388,9 @@ proc gba_program(seed: uint64): string =
         else:
           dst = 0x07000100'u32 + (uint32(r.below(0x200)) and not 3'u32)
           count = min(count, 0x40)
-      # An H-blank burst longer than a line piles up interrupt checks until
-      # the event queue overflows (reported; strict mode lets it happen).
-      if timing == 2 and not strict: count = min(count, 0x40)
+      # Short H-blank bursts: longer ones can take more bus time than the
+      # frame has, and the core then never returns (see the header).
+      if timing == 2: count = min(count, 0x40)
       ctl = ctl or (timing shl 12)
       if r.chance(30): ctl = ctl or 0x4000             # IRQ at the end
       if r.chance(85): ctl = ctl or 0x8000             # enable
@@ -416,6 +420,32 @@ proc gba_program(seed: uint64): string =
     emit(0x1AFFFFFD'u32)                               # bne (back one)
   let back = int32(loop_start) - int32(code.len) - 2
   emit(0xEA000000'u32 or (cast[uint32](back) and 0xFFFFFF))
+  result = newString(code.len * 4)
+  for i, w in code:
+    for b in 0 .. 3: result[i * 4 + b] = char((w shr (8 * b)) and 0xFF)
+
+proc gba_long_hblank_program(units: int): string =
+  ## ARM from 0x08000000: DMA1 on H-blank, repeating, interrupt at the end,
+  ## `units` halfwords EWRAM -> VRAM (4 cycles a halfword; the destination
+  ## reloads), then a counting loop (a waitloop would be skipped rather than
+  ## stalled). At 440 a burst is ~1.4 lines, so they run back to back through
+  ## the visible lines, each one's interrupt check pushed past the next
+  ## burst's end (DMA_STALLS_IRQ_SYNC), and the CPU has the bus again in
+  ## V-blank.
+  var code: seq[uint32]
+  proc load(rd: int; v: uint32) =
+    code.add(0xE3A00000'u32 or (uint32(rd) shl 12) or (v and 0xFF))
+    for (sh, rot) in [(8'u32, 12'u32), (16'u32, 8'u32), (24'u32, 4'u32)]:
+      if ((v shr sh) and 0xFF) != 0:
+        code.add(0xE3800000'u32 or (uint32(rd) shl 16) or (uint32(rd) shl 12) or
+                 (rot shl 8) or ((v shr sh) and 0xFF))
+  load(9, 0x040000BC'u32)                            # DMA1SAD
+  load(5, 0x02000000'u32); code.add(0xE5895000'u32)   # str r5, [r9]
+  load(5, 0x06000000'u32); code.add(0xE5895004'u32)   # str r5, [r9, #4]
+  load(5, uint32(units));  code.add(0xE1C950B8'u32)   # strh r5, [r9, #8]
+  load(5, 0xE260'u32);     code.add(0xE1C950BA'u32)   # strh r5, [r9, #10]
+  code.add(0xE2800001'u32)                      # loop: add r0, r0, #1
+  code.add(0xEAFFFFFD'u32)                      # b loop
   result = newString(code.len * 4)
   for i, w in code:
     for b in 0 .. 3: result[i * 4 + b] = char((w shr (8 * b)) and 0xFF)
@@ -601,6 +631,16 @@ when not defined(soak_lib):
     writeFile(path, gba_program(seed))
     soak(label, gba_maker(path), RandomFrames, seed, gba_harness_poke,
          replay_known = "")
+
+  block:
+    # Back-to-back H-blank bursts, each raising its interrupt: they booked a
+    # check per burst, each pushed past the next burst, until the event queue
+    # overflowed (schedule_raise_check).
+    let label = "gba hblank dma over a line"
+    if wanted(label):
+      let path = tmp / "long_hblank.gba"
+      writeFile(path, gba_long_hblank_program(440))
+      soak(label, gba_maker(path), RomFrames, 0x1B1A'u64, nil, replay_known = "")
 
   try: removeDir(tmp)
   except OSError: discard

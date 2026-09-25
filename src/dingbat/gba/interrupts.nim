@@ -90,6 +90,20 @@ proc schedule_interrupt_check*(intr: Interrupts; delay: int = 0) =
   intr.window_open()
   intr.gba.scheduler.schedule(delay, etInterrupts)
 
+proc schedule_raise_check*(intr: Interrupts; was_set: bool; delay: int) =
+  ## The check for a raise of an IF bit, `delay` cycles out -- unless the
+  ## raise found the bit already set and a check is booked at or before then:
+  ## IF did not change, and that check re-evaluates the same level first (a
+  ## write that clears the bit books its own), so this one would only repeat
+  ## it. Bookkeeping: back-to-back DMA bursts hold the CPU off the bus and
+  ## push every booked check past their end (DMA_STALLS_IRQ_SYNC), so an
+  ## H-blank DMA longer than a line, raising its interrupt at the end of each
+  ## burst, booked one more check per burst until the event queue overflowed.
+  let s = intr.gba.scheduler
+  if was_set and s.pending_at(etInterrupts) <= s.cycles + CycleCount(delay):
+    return
+  intr.schedule_interrupt_check(delay)
+
 # A timer's interrupt goes through a synchroniser before the CPU sees it
 # (alyosha irq/IF, irq/IE, both hardware-verified by their author):
 # - the raising cycle's own register writes still count: an IF acknowledge

@@ -401,16 +401,19 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
     dma.count[channel] = dma.dmacnt_l[channel]
 
   if dma.dmacnt_h[channel].irq_enable:
-    dma.gba.interrupts.set_interrupt_flag(IRQ_DMA_BIT_BASE + channel)
+    let bit = IRQ_DMA_BIT_BASE + channel
+    let was_set = (uint16(dma.gba.interrupts.reg_if) and (1'u16 shl bit)) != 0
+    dma.gba.interrupts.set_interrupt_flag(bit)
     when DMA_IRQ_FROM_BUS_END:
       # run_pending books the check from where the burst let go of the bus
       # when the CPU was running under it; anything else books it here.
       if nested or dma.gba.cpu.halted:
-        dma.gba.interrupts.schedule_interrupt_check(IRQ_SYNC_DELAY)
+        dma.gba.interrupts.schedule_raise_check(was_set, IRQ_SYNC_DELAY)
       else:
         dma.irq_after_burst = true
+        dma.irq_was_set = was_set
     else:
-      dma.gba.interrupts.schedule_interrupt_check(IRQ_SYNC_DELAY)
+      dma.gba.interrupts.schedule_raise_check(was_set, IRQ_SYNC_DELAY)
 
 proc run_pending*(dma: DMA) =
   ## Arbitration pump: grants latched requests in priority order (channel 0
@@ -497,11 +500,11 @@ proc run_pending*(dma: DMA) =
           if dma.irq_after_burst:
             dma.irq_after_burst = false
             let ahead = if burst_end > bus.sched.cycles: int(burst_end - bus.sched.cycles) else: 0
-            intr.schedule_interrupt_check(ahead + IRQ_SYNC_DELAY)
+            intr.schedule_raise_check(dma.irq_was_set, ahead + IRQ_SYNC_DELAY)
     when DMA_IRQ_FROM_BUS_END:
       if dma.irq_after_burst:
         dma.irq_after_burst = false
-        dma.gba.interrupts.schedule_interrupt_check(IRQ_SYNC_DELAY)
+        dma.gba.interrupts.schedule_raise_check(dma.irq_was_set, IRQ_SYNC_DELAY)
     # The CPU (or a paused outer burst) resumes with a nonsequential access.
     bus.dma_active = saved < 4
     when defined(pftrace):

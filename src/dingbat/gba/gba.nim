@@ -230,8 +230,10 @@ type
     # next one, which starts without its lead cycle. Instruction scoped.
     chained*:          bool
     # DMA_IRQ_FROM_BUS_END: the burst just run raised its interrupt; run_pending
-    # books the check. Instruction scoped.
+    # books the check. Instruction scoped, as is irq_was_set: the raise found
+    # the IF bit already set (schedule_raise_check).
     irq_after_burst*:  bool
+    irq_was_set*:      bool
     current_priority*: int
     # DMA3 video-capture frame latch: set at line 2, cleared with the enable
     # bit at line 162; a channel armed mid-frame waits for the next frame's
