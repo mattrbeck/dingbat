@@ -215,6 +215,21 @@ proc fill_pipeline*(cpu: CPU) {.inline.} =
         cpu.gba.bus.bios_latch = v
       cpu.pipeline.push(v)
 
+proc contend_refill(cpu: CPU; s: int) {.noinline.} =
+  ## clear_pipeline's refill in palette RAM / VRAM / OAM while the renderer
+  ## may hold them: each of the two fetches waits for it like any other
+  ## access (contention.nim; tests/roms/payloads/c2code.s, a stub entered in
+  ## VRAM).
+  let bus = cpu.gba.bus
+  let target = cpu.r[15] and (if cpu.cpsr.thumb: not 1'u32 else: not 3'u32)
+  let step = if cpu.cpsr.thumb: 2'u32 else: 4'u32
+  for f in 0'u32 .. 1'u32:
+    bus.add_cycles(s)
+    bus.add_cycles(bus.contend_wait(target + f * step, not cpu.cpsr.thumb, s))
+  cpu.r[15] += (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
+  when IRQ_LAST_WAITS:
+    if (bus.sync_bits and 8) != 0: bus.note_waits(s)
+
 proc clear_pipeline*(cpu: CPU) =
   cpu.pipeline.clear()
   cpu.refill_pending = true
@@ -359,6 +374,9 @@ proc clear_pipeline*(cpu: CPU) =
       return
   let s = if cpu.cpsr.thumb: int(cpu.gba.bus.wait16_s[page])
           else: int(cpu.gba.bus.wait32_s[page])
+  if cpu.gba.bus.contended[page]:
+    cpu.contend_refill(s)
+    return
   cpu.r[15] += (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
   cpu.gba.bus.add_cycles(2 * s)
   when IRQ_LAST_WAITS:

@@ -66,6 +66,46 @@ TABLE = {
                  for w in (1, 10, 11, 14)]
                 + [8 << 8 | 2, 22 << 8 | 1, 22 << 8 | 11]
                 + [c << 8 | w for c in (12, 13, 14) for w in (1, 6)]),
+    # renderer contention, one access at k (dot k + 37 of this core's line):
+    # (scene, access, first k, count) -- text BGs, 8bpp, fine scroll 7 and
+    # 5 at the line's end, mode 2's lock-out, mode 1, the bitmap, palette
+    # reads (one a pixel, two under alpha, mode 5's backdrop), the OBJ scan
+    # (one sprite, entry 127, affine, OAM after a sprite, the budget's end
+    # with and without H-blank free, OAM's last read), forced blank with
+    # OBJ on, line 159's tail, a word's halves, a store
+    'contmap': [0x800 | a << 16 | (s & 15) << 12 | (s >> 4) << 20 | k
+                for s, a, k0, n in ((0x00, 1, 23, 16), (0x07, 1, 21, 11),
+                                    (0x16, 1, 957, 7), (0x2C, 1, 965, 7),
+                                    (0x01, 1, 963, 9), (0x0D, 1, 23, 12),
+                                    (0x05, 1, 0, 8), (0x00, 0, 7, 8),
+                                    (0x00, 0, 963, 7), (0x19, 0, 7, 8),
+                                    (0x14, 0, 645, 9), (0x1C, 2, 63, 11),
+                                    (0x1D, 2, 257, 7), (0x1E, 2, 13, 7),
+                                    (0x1C, 3, 65, 9), (0x25, 2, 1229, 11),
+                                    (0x26, 2, 957, 9), (0x03, 3, 961, 7),
+                                    (0x04, 2, 7, 6), (0x40, 2, 0, 5),
+                                    (0x00, 5, 11, 5), (0x00, 6, 13, 6))
+                for k in range(k0, k0 + n)],
+    # gbaedge CONTEND2's sixteen reads from IWRAM at a ten-cycle period, k
+    # cycles into line 40: PRAM / VRAM / OAM, modes 0 and 2, H-blank free,
+    # no OBJ layer
+    # (Two cells are left out: the console once in nine answered them as if
+    # nothing were drawn, the value every row reads with the renderer off.)
+    'c2seq': [a << 16 | (s & 15) << 12 | (s >> 4) << 20 | k
+              for s, a in ((0, 1), (1, 1), (3, 1), (2, 1), (0, 0), (2, 0), (0, 3))
+              for k in range(100, 112)
+              if (a << 16 | s << 12 | k) not in (0x10068, 0x12067)],
+    # its code-in-VRAM rows: the stub in OBJ VRAM under 128 OBJs, under
+    # forced blank with OBJ on, with the OBJ layer off, in BG VRAM under
+    # four text BGs; and entered late (8, 0, 1, 2 loads)
+    'c2code': ([a << 16 | (s & 15) << 12 | k
+                for s, a in ((0, 0), (4, 0), (2, 0), (0, 1)) for k in range(100, 112)]
+               + [a << 16 | k for a in (3, 4, 5, 6) for k in (100, 101)]),
+    # code fetched from PRAM / VRAM / OAM under forced blank against IWRAM
+    # and EWRAM, called from IWRAM and from EWRAM
+    'vramexec': ([b | w << 4 for b in (0, 1, 3, 6, 7, 9) for w in (0, 2, 3)]
+                 + [0x100 | b | w << 4 for b in (0, 1) for w in (0, 2)]
+                 + [0x40, 0x50, 0x41, 0x51]),
 }
 
 

@@ -440,6 +440,12 @@ proc load_ppu_state(ppu: PPU; r: var Reader; rev: uint32) =
   ppu.frame_static = false
   # The per-line OBJ candidate list is derived scratch, not in the payload
   ppu.obj_list_dirty = true
+  # So are the renderer contention maps and the pages they route
+  ppu.cont_bg_key = 0xFFFFFFFF'u32
+  ppu.cont_pram_key = 0xFFFFFFFF'u32
+  ppu.cont_obj_key = -1
+  ppu.cont_regs_stale = true
+  ppu.contend_mask_update()
   ppu.obj_list_rebuilds = 0
 
 # ---- APU ----

@@ -38,6 +38,12 @@ when defined(dmacount):
 
 include reg
 
+# Renderer contention maps (contention.nim): 32-bit words covering a line's
+# 1232 dots and the first 48 of the next.
+const CONT_WORDS* = 40
+# -d:CONTENTION=false: no renderer contention (every access as in blank)
+const CONTENTION* {.booldefine.} = true
+
 # All GBA types in one block for forward-reference support.
 
 type
@@ -522,6 +528,10 @@ type
     # dingbat charges it, so that is the cycle the fetch actually drove the
     # bus at. Timing-neutral: only the latch stamps move.
     obus_prev_at*:       CycleCount
+    # Per page: true for palette RAM / VRAM / OAM while the renderer may
+    # hold that memory, so an access there asks contention.nim how long it
+    # waits (ppu.contend_mask_update). Derived, not serialized.
+    contended*:          array[16, bool]
 
   WLInstrKind* = enum
     wlLongBranchLink, wlUnconditionalBranch, wlSoftwareInterrupt,
@@ -731,6 +741,18 @@ type
     # Forces composite() to build per-column window tables even on uniform
     # lines; only tests/ppucomposite_test.nim sets it.
     disable_uniform_window*: bool
+    # Renderer contention (contention.nim): which dots of a line the
+    # renderer holds BG VRAM / palette RAM / OBJ VRAM / OAM, one bit a dot.
+    # Derived from registers and OAM on demand, keyed by what they depend
+    # on; never serialized (a key that cannot occur forces a rebuild).
+    cont_regs_stale*: bool          # DISPCNT/BGxCNT/BGxHOFS/BLDCNT written
+    cont_bg_key*:   uint32
+    cont_bg*:       array[CONT_WORDS, uint32]
+    cont_pram_key*: uint32
+    cont_pram*:     array[CONT_WORDS, uint32]
+    cont_obj_key*:  int64
+    cont_objv*:     array[CONT_WORDS, uint32]
+    cont_oam*:      array[CONT_WORDS, uint32]
 
   SoundChannel* = ref object of RootObj
     gba* {.cursor.}:            GBA
@@ -1386,6 +1408,9 @@ proc sbc*(cpu: CPU; operand_1, operand_2: uint32; set_conditions: bool): uint32 
 proc add*(cpu: CPU; operand_1, operand_2: uint32; set_conditions: bool): uint32 {.inline.}
 proc adc*(cpu: CPU; operand_1, operand_2: uint32; set_conditions: bool): uint32 {.inline.}
 proc clear_pipeline*(cpu: CPU)
+# Renderer contention's wait for one access (contention.nim)
+proc contend_wait(bus: Bus; address: uint32; is32: bool; cost: int): int
+proc contend_slow(bus: Bus; address: uint32; is32: bool; cost: int): int {.noinline, raises: [].}
 proc hle_halt_return*(cpu: CPU)
 proc read_instr*(cpu: CPU): uint32 {.inline.}
 # The bank an undefined CPSR mode pattern selects: r13 and r14 read 0 there
@@ -1497,6 +1522,7 @@ proc palette_bank*(s: Sprite): uint32 = bits_range(s.attr2, 12, 15)
 
 # Video, then the I/O register dispatch over everything above
 include ppu
+include contention
 include mmio
 
 proc new_storage*(gba: GBA; rom_path: string): Storage =

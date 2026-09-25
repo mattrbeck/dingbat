@@ -378,6 +378,35 @@ proc rom_fetch_cycles(bus: Bus; address: uint32; page: int;
   bus.rom_next_addr = address + (when is32: 4'u32 else: 2'u32)
   cost
 
+{.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
+proc contend_cost(bus: Bus; address: uint32; is32: bool; cost: int): int {.noinline.} =
+  ## An access starting now: its cost plus the renderer's wait. The common
+  ## case -- palette RAM or BG VRAM on a drawn line with the maps current --
+  ## is answered here from the next 33+ dots of the map; everything else
+  ## goes to contention.nim.
+  let ppu {.cursor.} = bus.gba.ppu
+  let dot = int(int64(bus.sched.cycles) + int64(bus.cycles) - ppu.line_start_cycle)
+  if dot >= 0 and dot < 1232 and ppu.vcount < 160 and not ppu.cont_regs_stale and
+     address < 0x10000000'u32:
+    let page = bits_range(address, 24, 27)
+    let wi = dot shr 5
+    var win: uint64
+    if page == 5:
+      win = (uint64(ppu.cont_pram[wi]) or (uint64(ppu.cont_pram[wi + 1]) shl 32)) shr (dot and 31)
+    elif page == 6 and (address and 0x1FFFF'u32) <
+         (if ppu.dispcnt.bg_mode >= 3: 0x14000'u32 else: 0x10000'u32):
+      win = (uint64(ppu.cont_bg[wi]) or (uint64(ppu.cont_bg[wi + 1]) shl 32)) shr (dot and 31)
+    else:
+      return bus.contend_slow(address, is32, cost)
+    # the first free dot (a halfword's), and for a word the one after it
+    let f1 = countTrailingZeroBits(not win)
+    if f1 < 16:
+      if not is32: return cost + f1
+      let f2 = countTrailingZeroBits(not (win shr (f1 + 1)))
+      if f2 < 16: return cost + f1 + f2
+  bus.contend_slow(address, is32, cost)
+{.pop.}
+
 proc access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int {.inline.} =
   if bits_range(address, 28, 31) > 0:
     # Unmapped (open bus): one internal cycle, and the ROM burst trackers are
@@ -394,7 +423,10 @@ proc access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int {.in
       int(bus.wait16_n[page])  # SRAM: 8-bit bus, same cost either way
   else:
     # Via the bus tables so the speed-mode underclock scaling applies
-    int(if is32: bus.wait32_n[page] else: bus.wait16_n[page])
+    let c = int(if is32: bus.wait32_n[page] else: bus.wait16_n[page])
+    # Palette RAM, VRAM and OAM while the renderer may hold them
+    # (Bus.contended, contention.nim): the access waits for its dots
+    if bus.contended[page]: bus.contend_cost(address, is32, c) else: c
 
 proc write_stub_u32(bios: var seq[byte]; offset: int; value: uint32) =
   bios[offset + 0] = byte(value)

@@ -61,6 +61,10 @@ proc new_ppu*(gba: GBA): PPU =
     result.sprite_pixels[i] = SPRITE_PIXEL_DEFAULT
   result.render_dirty = true
   result.debug_layer_mask = 0x1F
+  result.cont_bg_key = 0xFFFFFFFF'u32
+  result.cont_regs_stale = true
+  result.cont_pram_key = 0xFFFFFFFF'u32
+  result.cont_obj_key = -1
   result.start_line()
 
 proc skip_boot_phase*(ppu: PPU) =
@@ -85,6 +89,16 @@ proc skip_boot_phase*(ppu: PPU) =
   ppu.vcount = ENTRY_LINE
   ppu.line_start_cycle = int64(ppu.gba.scheduler.cycles) - ENTRY_LINE_POS
   ppu.gba.scheduler.schedule(960 - ENTRY_LINE_POS, etPPUStartHBlank)
+
+proc contend_mask_update*(ppu: PPU) =
+  ## Which pages ask contention.nim for a wait (Bus.contended): palette
+  ## RAM, VRAM and OAM while the renderer may be drawing (the OBJ layer
+  ## fetches line 0 on line 227, and keeps fetching under forced blank).
+  let on = CONTENTION and
+           (not ppu.dispcnt.forced_blank or bit(uint16(ppu.dispcnt), 12)) and
+           (ppu.vcount < 160 or ppu.vcount == 227)
+  if ppu.gba.bus != nil:
+    for page in 5 .. 7: ppu.gba.bus.contended[page] = on
 
 proc bitmap*(ppu: PPU): bool =
   ppu.dispcnt.bg_mode >= 3
@@ -233,6 +247,8 @@ proc end_hblank*(ppu: PPU) =
   ppu.dispstat.hblank = false
   ppu.vcount = uint16((int(ppu.vcount) + 1) mod 228)
   ppu.latch_line_start()
+  if ppu.vcount == 160 or ppu.vcount == 227 or ppu.vcount == 0:
+    ppu.contend_mask_update()
   ppu.gba.dma.trigger_video_capture(ppu.vcount)
   ppu.dispstat.vcounter = (ppu.vcount == uint16(ppu.dispstat.vcount_setting))
   var raised_if = false
@@ -617,6 +633,7 @@ proc oam_touched*(ppu: PPU) {.inline.} =
   ## Backstops: scanline() force-rebuilds once per frame, and -d:objListVerify
   ## cross-checks the list against a full scan every line.
   ppu.oam_view_stale = true
+  ppu.cont_obj_key = -1   # the OBJ layer's contention map reads live OAM
 
 proc render_sprites_impl(ppu: PPU; force_scan: bool) =
   if not bit(uint16(ppu.dispcnt), 12): return
@@ -1481,6 +1498,8 @@ proc `[]=`*(ppu: PPU; io_addr: uint32; value: uint8) =
   of 0x000..0x001:
     let before = (uint16(ppu.dispcnt) shr 8) and 0xF
     write(ppu.dispcnt, value, io_addr and 1)
+    ppu.contend_mask_update()
+    ppu.cont_regs_stale = true
     let rose = ((uint16(ppu.dispcnt) shr 8) and 0xF) and not before
     if rose != 0:
       let t = int32(int64(ppu.gba.scheduler.cycles) + int64(ppu.gba.bus.cycles) -
@@ -1512,9 +1531,12 @@ proc `[]=`*(ppu: PPU; io_addr: uint32; value: uint8) =
       ppu.gba.interrupts.reg_if.vcounter = true
       ppu.gba.interrupts.schedule_interrupt_check(PPU_IRQ_SYNC_DELAY)
   of 0x006..0x007: discard  # vcount
-  of 0x008..0x00F: write(ppu.bgcnt[int((io_addr - 0x008) shr 1)], value, io_addr and 1)
+  of 0x008..0x00F:
+    write(ppu.bgcnt[int((io_addr - 0x008) shr 1)], value, io_addr and 1)
+    ppu.cont_regs_stale = true
   of 0x010..0x01F:
     let bg_num = int((io_addr - 0x010) shr 2)
+    ppu.cont_regs_stale = true
     if bit(io_addr, 1):
       write(ppu.bgvofs[bg_num], value, io_addr and 1)
     else:
@@ -1535,7 +1557,9 @@ proc `[]=`*(ppu: PPU; io_addr: uint32; value: uint8) =
   of 0x048..0x049: write(ppu.winin, value, io_addr and 1)
   of 0x04A..0x04B: write(ppu.winout, value, io_addr and 1)
   of 0x04C..0x04D: write(ppu.mosaic, value, io_addr and 1)
-  of 0x050..0x051: write(ppu.bldcnt, value, io_addr and 1)
+  of 0x050..0x051:
+    write(ppu.bldcnt, value, io_addr and 1)
+    ppu.cont_regs_stale = true
   of 0x052..0x053: write(ppu.bldalpha, value, io_addr and 1)
   of 0x054..0x055: write(ppu.bldy, value, io_addr and 1)
   else: discard
