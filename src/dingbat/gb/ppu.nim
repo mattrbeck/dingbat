@@ -1487,6 +1487,10 @@ template stat_write_drop_enables*(ppu: GbPpu; val: uint8): uint8 =
   else:
     (ppu.lcd_status and 0b1000_0111'u8) or (val and 0b0111_1000'u8)
 
+const STAT_DROP_DOT_FLOOR* = -1024'i32
+  ## Where stat_drop_rebase stops moving an expired drop's dot (well past any
+  ## line, well inside int32).
+
 proc stat_drop_arm*(ppu: GbPpu; gb: GB; en, lyc: uint8; lat_dots: int32) =
   ## A STAT or LYC write commits: its effect reaches the line
   ## STAT_ENABLE_LATENCY dots later (CGB_STAT_ENABLE_LATENCY on CGB), and a
@@ -1510,6 +1514,20 @@ proc stat_drop_arm*(ppu: GbPpu; gb: GB; en, lyc: uint8; lat_dots: int32) =
     ppu.stat_drop_pending = true
     ppu.stat_drop_level = level
     ppu.stat_drop_dot = ppu.cycle_counter + lat
+
+template stat_drop_rebase*(ppu: GbPpu; by: int32) =
+  ## The scanline renderer restarts its counter at every mode boundary
+  ## (`by` = the dots it gives back): move a pending drop's dot with it, so
+  ## stat_drop_settle measures it in the same counter. Without this a drop
+  ## armed late in a mode was measured against a counter just restarted near
+  ## 0, read as still in the future at every later source change, and stayed
+  ## pending for good -- across lines, V-blank and frames (the state soak
+  ## found it at frame boundaries), its level refreshed against sources it
+  ## never saw. The FIFO renderer's counter runs the whole line and its
+  ## settle already allows for the wrap. An expired drop only goes further
+  ## into the past, floored so it cannot wrap; it lands at the next settle.
+  if ppu.stat_drop_pending:
+    ppu.stat_drop_dot = max(ppu.stat_drop_dot - by, STAT_DROP_DOT_FLOOR)
 
 proc stat_drop_settle(ppu: GbPpu; gb: GB) {.noinline.} =
   ## The pending drop of stat_drop_arm, at a source change: past the latency

@@ -179,11 +179,13 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
     if ppu.mode_flag == 2:       # OAM search
       if ppu.cycle_counter >= 80:
         ppu.cycle_counter -= 80
+        stat_drop_rebase(ppu, 80'i32)
         ppu.`mode_flag=`(3'u8, gb)
         if ppu.ly == ppu.wy: ppu.window_trigger = true
     elif ppu.mode_flag == 3:     # Drawing
       if ppu.cycle_counter >= 172:
         ppu.cycle_counter -= 172
+        stat_drop_rebase(ppu, 172'i32)
         ppu.`mode_flag=`(0'u8, gb)
         # Speed-mode frameskip, decided once per frame at LY 0 (fs_counter == 0
         # renders). Everything CPU-visible still happens; do_scanline's only
@@ -201,6 +203,7 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
     elif ppu.mode_flag == 0:     # H-Blank
       if ppu.cycle_counter >= 204:
         ppu.cycle_counter -= 204
+        stat_drop_rebase(ppu, 204'i32)
         ppu.ly += 1
         when STAT_IRQ_SPLIT: ppu.irq_ly = ppu.ly
         # The comparator's blind window across an LY advance, at the scope the
@@ -220,6 +223,7 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
     elif ppu.mode_flag == 1:     # V-Blank
       if ppu.cycle_counter >= 456:
         ppu.cycle_counter -= 456
+        stat_drop_rebase(ppu, 456'i32)
         if ppu.ly != 0:
           ppu.ly += 1
           when STAT_IRQ_SPLIT: ppu.irq_ly = ppu.ly
