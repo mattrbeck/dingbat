@@ -1275,10 +1275,12 @@ const HALT_WAKE_RUNS_ONE* {.booldefine.} = true
 const IRQ_FETCH_VIA_PREFETCH* {.booldefine.} = true
   ## The IRQ entry's in-flight gamepak fetch comes from the prefetcher when
   ## it runs on the interrupted stream (cpu.irq).
-const IRQ_INFLIGHT_NONSEQ* {.booldefine.} = true
-  ## An IRQ entry's in-flight gamepak fetch right after a DMA burst, or after
-  ## a gamepak load that stopped the prefetcher, is nonsequential and costs
-  ## N - 1, as EWRAM's does (cpu.irq_enter).
+const IRQ_INFLIGHT_SEQ* {.booldefine.} = true
+  ## An IRQ entry's in-flight gamepak fetch, when the prefetcher is not
+  ## serving it, costs what the stream makes it -- N or S -- less the cycle
+  ## the entry overlaps; off, a flat 2*S16 (cpu.irq_enter). Subsumes the
+  ## former IRQ_INFLIGHT_NONSEQ (after a burst; after a gamepak load that
+  ## stopped the prefetcher).
 const PF_RUNS_OFF_ROM* {.booldefine.} = true
   ## The gamepak prefetcher keeps fetching while the CPU runs from the BIOS
   ## or RAM: it goes on at the address the CPU would have fetched next, and a

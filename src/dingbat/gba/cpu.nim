@@ -127,14 +127,25 @@ proc irq_enter*(cpu: CPU) =
     if cpu.ldm_glitch != 0: cpu.ldm_glitch_restore(ran = false)
     let lr = cpu.r[15] - (if cpu.cpsr.thumb: 0'u32 else: 4'u32)
     # Interrupting code that executes from the gamepak also pays for the
-    # in-flight opcode fetch: +2*S16 (hardware: gbaedge IRQLAT2 and IRQWIN2
-    # on AGB SP, docs/hwprobe.md; the mGBA suite Timer IRQ rows run from
-    # IWRAM and pin the no-stall case). A halt-wake entry fetches nothing, so
-    # it is exempt. With the prefetcher on and the interrupted stream going
-    # on at the next instruction (lr - 4), that fetch is the prefetcher's
-    # (IRQ_FETCH_VIA_PREFETCH): a halfword (Thumb) or word (ARM) it already
-    # holds costs the entry nothing, one still in flight its wait less the
-    # cycle the entry overlaps. alyosha irq/BL_IRQ, _3 (a timer interrupting
+    # in-flight opcode fetch, all of it but the cycle the entry overlaps, as
+    # from EWRAM below -- and with the prefetcher off that fetch is
+    # sequential only if the stream ran unbroken up to the entry
+    # (IRQ_INFLIGHT_SEQ): after a data access or an internal cycle it is
+    # nonsequential. gbaedge IRQDECOMP on an AGB SP (tests/roms/expected/
+    # agb-sp-5.txt, dbsuite irq/irqlat-*), ARM code at WAITCNT 0: a TM2 or
+    # DMA3 interrupt taken after a load or a store (the next fetch N+S, 8
+    # cycles) costs 7, one taken after a `subs` (S+S, 6) costs 5; the flat
+    # 2*S16 = 6 read one cycle short and one long. IRQLAT2 and IRQWIN2 on
+    # the same console agree (their three latencies each and three window
+    # cells, a cycle off before), and alyosha irq/BL_IRQ_2 (Thumb) and
+    # Interactions/Internal_Cycle_DMA_MUL_IRQ turn green. The mGBA suite
+    # Timer IRQ rows run from IWRAM and pin the no-stall case. A halt-wake
+    # entry fetches nothing, so it is exempt. With the prefetcher on and the
+    # interrupted stream going on at the next instruction (lr - 4), that
+    # fetch is the prefetcher's (IRQ_FETCH_VIA_PREFETCH): a halfword (Thumb)
+    # or word (ARM) it already holds costs the entry nothing, one still in
+    # flight its wait less the cycle the entry overlaps. alyosha irq/BL_IRQ,
+    # _3 (a timer interrupting
     # Thumb code around a `bl`, the buffer full or just flushed by the
     # branch) and IRQ_sub, _slow (both waitstates); each alternative in the
     # commit that added this fails some of them.
@@ -153,26 +164,23 @@ proc irq_enter*(cpu: CPU) =
            bus.rom_next_addr == lr - 4:
           let now = bus.sched.cycles + CycleCount(bus.cycles)
           inflight = max(0, bus.pf_serve(now, page, if cpu.cpsr.thumb: 1 else: 2) - 1)
-        elif IRQ_INFLIGHT_NONSEQ and
-             (bus.dma_end_at == bus.sched.cycles + CycleCount(bus.cycles) or
-              (bus.prefetch_on and bus.pf_paused and bus.pf_count == 0)):
-          # The stream is broken -- by an H-blank burst that just ended (the
-          # access window's), or by a gamepak load that stopped the
-          # prefetcher -- so the fetch is nonsequential, and it costs what
-          # EWRAM's does: the access less the cycle the entry overlaps.
-          # alyosha Interactions/Internal_Cycle_DMA_MUL_IRQ: a timer
-          # interrupt recognised in a multiply's internal cycles under a
-          # burst from Thumb gamepak code (prefetch off) stops the handler's
-          # timer a cycle early on the console; the no-interrupt fetch after
-          # the same burst (Internal_Cycle_DMA_Mul) and the IWRAM version of
-          # the sequence (tests/roms/payloads/dmamulirq.s) already read right.
-          # alyosha irq/BL_IRQ_2 case d: an interrupt recognised during a
-          # Thumb `ldr` from the gamepak (prefetch on) is entered a cycle
-          # sooner on the console than 2*S16 gives. alyosha fifo_dma/fifo_3
-          # turns green with it too. Not every mismatch of the stream: taken
-          # that widely it breaks dbsuite irqlat-hblank-haltcnt.
-          inflight = (if cpu.cpsr.thumb: int(bus.wait16_n[page])
-                      else: int(bus.wait32_n[page])) - 1
+        elif IRQ_INFLIGHT_SEQ:
+          # The fetch the stream makes next, less the cycle the entry
+          # overlaps: sequential only if the stream ran unbroken up to here.
+          # A burst that just ended, a data access, an internal cycle or a
+          # gamepak load that stopped the prefetcher all break it (this
+          # replaces IRQ_INFLIGHT_NONSEQ, whose two cases -- right after an
+          # H-blank burst, alyosha Interactions/Internal_Cycle_DMA_MUL_IRQ;
+          # after a Thumb gamepak `ldr` with the prefetcher on, alyosha
+          # irq/BL_IRQ_2 case d and fifo_dma/fifo_3 -- are nonsequential here
+          # too).
+          let now = bus.sched.cycles + CycleCount(bus.cycles)
+          let seq = bus.rom_next_addr == lr - 4 and now == bus.rom_free_since
+          inflight =
+            if cpu.cpsr.thumb:
+              int(if seq: bus.wait16_s[page] else: bus.wait16_n[page]) - 1
+            else:
+              int(if seq: bus.wait32_s[page] else: bus.wait32_n[page]) - 1
         else:
           inflight = 2 * int(bus.wait16_s[page])
       elif page == 2:
