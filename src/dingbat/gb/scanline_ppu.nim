@@ -163,6 +163,23 @@ proc do_scanline*(ppu: GbScanlinePpu; gb: GB) =
                   cast[ptr uint16](unsafeAddr ppu.obj_pram[pal_idx])[]
 
 method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
+  # The steps below take at most one mode boundary per call, which an
+  # M-cycle's 4 dots never outrun (the shortest mode is 80). The speed
+  # switch's stall hands the PPU its whole length at once when no interrupt
+  # can end it (mem_stall_until_irq: 2^17 cycles with IE = 0, most games'
+  # switch): taken whole, the counter overshot by tens of thousands of dots,
+  # one boundary was taken per later tick, and the int16 STAT stamp of the
+  # first one raised RangeDefect on desktop (speed mode runs this renderer;
+  # the web's -d:danger build wrapped it). Walk a long tick in M-cycle-sized
+  # steps, which is every boundary it crosses, as the FIFO renderer walks
+  # its dots.
+  if cycles > 4:
+    var left = cycles
+    while left > 0:
+      let n = min(left, 4)
+      ppu.tick(gb, n)
+      left -= n
+    return
   # Snapshot the mode as a CPU read sampling this M-cycle sees it (read_byte
   # runs after this tick). See GbPpu.read_mode.
   ppu.read_mode = ppu.mode_flag

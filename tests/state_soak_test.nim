@@ -22,11 +22,12 @@
 ## Inputs:
 ##   (a) every ROM committed under tests/roms (copied to a temp folder, so no
 ##       .sav lands beside them), each for RomFrames frames;
-##   (b) a seeded random program per core (GB as DMG and as CGB, on both PPUs
-##       for one seed; GBA) that writes random values to the APU / timer /
-##       DMA / PPU / interrupt registers at random points in the frame, with
-##       delay loops of random length between clusters, halts that wake on
-##       V-blank, OAM DMA and (CGB) HDMA and speed switches, (GBA) DMA incl.
+##   (b) a seeded random program per core (GB as DMG and as CGB, on both PPUs:
+##       speed mode runs the scanline one; GBA) that writes random values to
+##       the APU / timer / DMA / PPU / interrupt registers at random points in
+##       the frame, with delay loops of random length between clusters,
+##       halts that wake on V-blank, OAM DMA and (CGB) HDMA and speed
+##       switches, (GBA) DMA incl.
 ##       sound-FIFO and video-capture timing; on top of that the harness pokes
 ##       random APU / timer / PPU values at the frame boundary itself, where
 ##       the rebase has just run.
@@ -588,7 +589,6 @@ when not defined(soak_lib):
   for seed in gb_seeds:
     for cgb in [false, true]:
       for fifo in [true, false]:
-        if not fifo and seed != gb_seeds[0]: continue    # scanline PPU: one seed
         let label = &"random gb {(if cgb: \"cgb\" else: \"dmg\")}" &
                     &"{(if fifo: \"\" else: \" scanline\")} {seed:#x}"
         if not wanted(label): continue
