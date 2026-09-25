@@ -251,6 +251,14 @@ proc check_intr_wait*(cpu: CPU) =
     cpu.r[2] = uint32(cpu.read_intr_mirror())
     cpu.r[4] = 1
     cpu.set_sys_lr(0x34C'u32)
+    if cpu.cpsr.irq_disable:
+      # Waiting with IRQs masked in CPSR: the halt wakes at once on any
+      # pending source, no handler can run to set the flags, and the BIOS
+      # spins round its check loop for ever. That loop takes time; without
+      # it the HLE re-halted and woke on the same cycle and never returned
+      # from the frame (the state soak's random GBA program, once a stray DMA
+      # had switched board WRAM off and the stack had gone astray).
+      cpu.gba.bus.add_cycles(INTRWAIT_TUNE)
     cpu.halted = true
     cpu.gba.interrupts.schedule_interrupt_check()
 
