@@ -257,7 +257,7 @@ proc apu_park_steps*(apu: APU) =
   apu.channel3.next_step = GBA_NO_STEP
   apu.channel4.next_step = GBA_NO_STEP
 
-proc timer_overflow*(apu: APU; timer: int) =
+proc timer_overflow*(apu: APU; timer: int): bool =
   apu.dma_channels.timer_overflow(timer)
 
 proc tick_frame_sequencer*(apu: APU) =

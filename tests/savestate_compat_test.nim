@@ -84,7 +84,8 @@ static:
   doAssert ord(etUndefMode) == 28
   doAssert ord(etIrqWindowOpen) == 29
   doAssert ord(etIrqWindowClose) == 30
-  doAssert ord(high(EventType)) == 30,
+  doAssert ord(etFifoWindow) == 31
+  doAssert ord(high(EventType)) == 31,
     "an EventType was appended without pinning its ordinal here"
 
   # Every other enum whose ordinal (or `set` bit position) reaches a state
@@ -1106,7 +1107,7 @@ proc run_gba_inflight() =
   for i in 1 .. 3: wild_page[at + 1 + 26 + i] = '\0'
   check(refuses(wild_page), "a fetch page the cache never holds is refused")
   var wild_bits = p
-  wild_bits[at + 1 + 26 + 7] = '\x10'      # sync_bits bit 4
+  wild_bits[at + 1 + 26 + 7] = '\x40'      # sync_bits bit 6 (bits 4, 5: FIFO_DMA_WINDOW)
   check(refuses(wild_bits), "an undefined sync bit is refused")
   var wild_stamp = p
   for i in 0 .. 7: wild_stamp[at + 1 + 1 + i] = '\xFF'   # irq_line_at

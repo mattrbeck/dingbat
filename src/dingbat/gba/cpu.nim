@@ -535,11 +535,11 @@ proc idle_synced(cpu: CPU; n: int) {.noinline.} =
   ## idle's out-of-line half: a DMA is armed or close (sync_bits != 0).
   let bus = cpu.gba.bus
   when IRQ_LAST_WAITS:
-    if (bus.sync_bits and 7) == 0:     # only an interrupt's window
+    if (bus.sync_bits and 23) == 0:    # only an interrupt's window
       bus.add_cycles(n)
       return
   when DMA_ACCESS_WINDOW:
-    if (bus.sync_bits and 2) != 0:
+    if (bus.sync_bits and 18) != 0:
       bus.idle_window(n)
       return
   when IMM_ACCESS_WAIT:

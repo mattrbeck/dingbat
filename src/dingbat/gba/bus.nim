@@ -1240,6 +1240,8 @@ proc idle_window*(bus: Bus; n: int) =
   ## back to its fetch, and a load 3 rather than 4 when the grant falls just
   ## before its internal cycle (tests/roms/payloads/dmaphase.s).
   bus.rom_cool()
+  # FIFO_DMA_WINDOW: the internal cycles after a refill's grant close its window
+  let closing = (bus.sync_bits and 32) != 0
   var n = n
   let now = bus.bus_now()
   if bus.dma_end_at == now and bus.dma_held > 0:
@@ -1252,6 +1254,7 @@ proc idle_window*(bus: Bus; n: int) =
   bus.cycles += n
   bus.idle_until = bus.bus_now()
   bus.catch_up()
+  if closing and (bus.sync_bits and 32) != 0: bus.sync_bits = bus.sync_bits and not 48'u8
 
 # The sync_bits leg (identical in all six accessors): an immediate DMA
 # fires DMA_START_DELAY cycles after arming while the CPU keeps executing; an
@@ -1277,7 +1280,7 @@ proc `[]`*(bus: Bus; address: uint32): uint8 =
   let cost = bus.access_cycles(address, is32 = false, fetch = false)
   bus.cycles += cost
   if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active:
-    if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 7) != 0:
+    if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 23) != 0:
       when DMA_READS_CPU_BUS:
         bus.load_addr = address
         bus.load_size = (if bus.ldrsh_odd: 2 else: 1)
@@ -1302,7 +1305,7 @@ proc read_half*(bus: Bus; address: uint32): uint16 =
   let cost = bus.access_cycles(address, is32 = false, fetch = false)
   bus.cycles += cost
   if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active:
-    if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 7) != 0:
+    if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 23) != 0:
       when DMA_READS_CPU_BUS:
         bus.load_addr = address
         bus.load_size = 2
@@ -1378,7 +1381,7 @@ proc read_word*(bus: Bus; address: uint32): uint32 =
   let cost = bus.access_cycles(address, is32 = true, fetch = false)
   bus.cycles += cost
   if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active:
-    if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 7) != 0:
+    if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 23) != 0:
       when DMA_READS_CPU_BUS:
         bus.load_addr = address
         bus.load_size = 4
@@ -1495,7 +1498,7 @@ proc `[]=`*(bus: Bus; address: uint32; value: uint8) =
   if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active:
     when IRQ_LAST_WAITS:
       if (bus.sync_bits and 8) != 0: bus.note_waits(cost)
-    if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 7) != 0:
+    if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 23) != 0:
       # A store ends the load's claim on the bus (Bus.dma_bus_word): the
       # console shows a burst the fetched opcode after one, not the load
       # before it or the store's own data (dmaobus2.s variant 7)
@@ -1524,7 +1527,7 @@ proc write_half*(bus: Bus; address: uint32; value: uint16) =
   if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active:
     when IRQ_LAST_WAITS:
       if (bus.sync_bits and 8) != 0: bus.note_waits(cost)
-    if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 7) != 0:
+    if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 23) != 0:
       # A store ends the load's claim on the bus (Bus.dma_bus_word): the
       # console shows a burst the fetched opcode after one, not the load
       # before it or the store's own data (dmaobus2.s variant 7)
@@ -1549,7 +1552,7 @@ proc write_word*(bus: Bus; address: uint32; value: uint32) =
   if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active:
     when IRQ_LAST_WAITS:
       if (bus.sync_bits and 8) != 0: bus.note_waits(cost)
-    if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 7) != 0:
+    if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 23) != 0:
       # A store ends the load's claim on the bus (Bus.dma_bus_word): the
       # console shows a burst the fetched opcode after one, not the load
       # before it or the store's own data (dmaobus2.s variant 7)

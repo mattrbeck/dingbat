@@ -458,7 +458,10 @@ type
     # bit 0): the armed immediate DMA's request found the CPU with an access
     # in flight and waits a cycle for it (IMM_IDLE_GRANT). Bit 3: an
     # interrupt is on its way to the CPU, whose accesses record where their
-    # wait states lie (IRQ_LAST_WAITS).
+    # wait states lie (IRQ_LAST_WAITS). Bit 4: a sound FIFO's refill request
+    # is close; data accesses and internal cycles sync,
+    # fetches stay on the fast path (FIFO_DMA_WINDOW). Bit 5 (with bit 4): the
+    # refill was granted; the CPU's next internal cycles close the window.
     sync_bits*: uint8
     # IRQ_LAST_WAITS, recorded while bit 3 is set: where the last CPU access
     # ended and how many of its cycles were wait states.
@@ -479,6 +482,8 @@ type
     dma_deferred_from*: CycleCount  # a deferred grant's original request cycle
     dma_deferred*: bool
     window_closing*: bool           # the request fired; the next fetch closes the window
+    dma_before_access*: bool        # FIFO_DMA_WINDOW: the grant came first; nothing ran under it
+    dma_idle_edge*: bool            # FIFO_DMA_WINDOW: internal cycles ended on the grant; the last ran under it
     idle_until*: CycleCount         # end of the internal cycles a window sync is inside
     # IMM_IDLE_GRANT: the internal cycles the CPU charged last while an
     # immediate DMA was armed, [imm_idle_from, imm_idle_until). Only read
@@ -1226,6 +1231,7 @@ proc run_pending*(dma: DMA)
 proc schedule_interrupt_check*(intr: Interrupts; delay: int = 0)
 proc window_open_event*(intr: Interrupts)
 proc window_close_event*(intr: Interrupts)
+proc fifo_window_open*(dc: DMAChannels)
 proc window_ahead*(intr: Interrupts; raise_in: int)
 proc unstall*(intr: Interrupts; ran: int)
 proc imm_refill_handover*(bus: Bus)
@@ -1401,7 +1407,7 @@ proc sd_tw_rec*(bus: Bus; o: int; t: int; v: uint8) {.inline.}
 proc sd_tw_word*(bus: Bus; address: uint32; word: uint32): uint32
 proc `[]`*(mmio: MMIO; address: uint32): uint8
 proc `[]=`*(mmio: MMIO; address: uint32; value: uint8)
-proc timer_overflow*(apu: APU; timer: int)
+proc timer_overflow*(apu: APU; timer: int): bool
 proc tick_frame_sequencer*(apu: APU)
 proc get_sample*(apu: APU)
 proc apu_park_steps*(apu: APU)
@@ -1644,10 +1650,43 @@ proc defer_dma_request(gba: GBA; kind: EventType): bool =
       return true
   false
 
+proc defer_fifo_request(gba: GBA; kind: EventType): bool =
+  ## FIFO_DMA_WINDOW (gba/apu/dma_channels.nim). The refill request takes the bus a cycle ahead of this
+  ## event (FIFO_DMA_REQUEST_DELAY counts to the first cycle the CPU can
+  ## lose): a CPU access begun before that cycle holds the burst off to its
+  ## end, and an internal cycle on it runs under the burst; an access begun
+  ## on it, or on this one, waits the whole burst (tests/roms/dbsuite
+  ## fifodma on an AGB SP: EWRAM loads against the first request, one cycle
+  ## apart, cost the CPU the burst less its internal cycle while they hold
+  ## it off, the burst when they begin on it).
+  when DMA_ACCESS_WINDOW:
+    let bus = gba.bus
+    let now = gba.scheduler.cycles
+    if bus.dma_deferred and now != bus.access_end:
+      bus.dma_deferred = false
+    if (bus.sync_bits and 16) != 0 and not gba.cpu.halted:
+      if bus.access_end > now:
+        if bus.access_start + 2 <= now and now > bus.dma_end_at + CycleCount(DMA_REGRAB):
+          bus.dma_deferred = true
+          bus.dma_deferred_from = now
+          gba.scheduler.schedule(int(bus.access_end - now), kind)
+          return true
+        bus.dma_before_access = true
+      elif bus.access_end == now:
+        if bus.access_start + 1 == now: bus.dma_before_access = true
+      elif bus.idle_until == now:
+        bus.dma_idle_edge = true
+  false
+
 proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
   # Non-owning capture: the closure lives on the GBA's scheduler
   let gba {.cursor.} = gba
   result = proc(kind: EventType) =
+    if kind == etFifoWindow:
+      # Changes nothing a program can read (FIFO_DMA_WINDOW), so a waitloop
+      # need not count it: the skip it stopped resumes after one iteration
+      gba.apu.dma_channels.fifo_window_open()
+      return
     # Waitloop exactness: when, and at which PC, the last event ran
     inc gba.dispatch_count
     gba.last_dispatch_pc = gba.cpu.r[15]
@@ -1735,9 +1774,13 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
     of etVDMARequest:
       if not gba.defer_dma_request(kind): gba.dma.trigger_vdma()
     of etLdmGlitch:     gba.cpu.ldm_glitch_restore()
-    of etFifoARequest:  gba.dma.trigger_fifo(0)
-    of etFifoBRequest:  gba.dma.trigger_fifo(1)
+    of etFifoARequest, etFifoBRequest:
+      let f = (if kind == etFifoARequest: 0 else: 1)
+      let d = gba.dma.dmacnt_h[f + 1]
+      if d.enable and d.start_timing == 3:  # Special: a sound DMA to request
+        if not gba.defer_fifo_request(kind): gba.dma.trigger_fifo(f)
     of etUndefMode:     gba.cpu.undef_mode_tick()
+    of etFifoWindow:    discard   # handled above
     of etIrqWindowOpen:  gba.interrupts.window_open_event()
     of etIrqWindowClose: gba.interrupts.window_close_event()
     of etHandleInput, etIME, etCameraDone, etGbLycEdge: discard

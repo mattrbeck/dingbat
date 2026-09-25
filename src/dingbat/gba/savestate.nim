@@ -809,7 +809,7 @@ proc load_inflight_state(gba: GBA; r: var Reader) =
   bus.fetch_c16 = int(r.read_u8())
   bus.fetch_c32 = int(r.read_u8())
   let sb = r.read_u8()
-  check_no_undefined_bits(uint32(sb), 4, "bus.sync_bits")
+  check_no_undefined_bits(uint32(sb), 6, "bus.sync_bits")
   bus.sync_bits = sb
   bus.window_closing = r.read_bool()
   bus.dma_end_at = r.read_stamp(now, "bus.dma_end_at")

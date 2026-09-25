@@ -33,6 +33,20 @@ const FIFO_WORD_WRAP {.booldefine.} = true
   ## nothing (tests/roms/payloads/fifomap.s on an AGB SP; alyosha
   ## fifo_dma/fifo_5 stores eight and reads the burst, fifo_4 stores four).
 
+const FIFO_DMA_WINDOW {.booldefine.} = true
+  ## A refill request that lands inside a CPU data access is granted at the
+  ## access's end, and internal cycles behind it run under the burst
+  ## (defer_fifo_request, gba.nim): tests/roms/dbsuite fifodma on an AGB SP,
+  ## an EWRAM load against the first request -- a load in flight costs the
+  ## CPU the burst less its internal cycle (and alyosha fifo_dma/fifo_5's
+  ## burst, landing in a ROM load, gives its read the console's count).
+  ## Knowing where data accesses end takes a sync per access (Bus.sync_bits
+  ## bit 4; instruction fetches stay on the fast path), paid from
+  ## FIFO_WINDOW_LEAD cycles before a request the next overflow will make
+  ## (a timer's overflows are known in advance) to the internal cycles after
+  ## its grant, which may run under the burst.
+const FIFO_WINDOW_LEAD {.intdefine.} = 16
+
 proc dma_channels_in_range*(address: uint32): bool =
   address >= DMA_CHANNELS_RANGE_LOW and address <= DMA_CHANNELS_RANGE_HIGH
 
@@ -107,7 +121,9 @@ proc push_fifo_sample(dc: DMAChannels; channel: int; sample: int16) {.inline.} =
     dc.inv_period[channel] = 1.0'f32 / float32(delta)
   dc.last_update_cycle[channel] = now
 
-proc timer_overflow*(dc: DMAChannels; timer: int) =
+proc timer_overflow*(dc: DMAChannels; timer: int): bool =
+  ## Also whether a FIFO this timer drives will ask for a refill at its
+  ## next overflow (FIFO_DMA_WINDOW books the window for it).
   when FIFO_MASTER_RESET:
     # With the master enable off both FIFOs are held empty and request no
     # DMA (alyosha fifo_dma/fifo: an armed sound DMA and a running timer
@@ -158,6 +174,59 @@ proc timer_overflow*(dc: DMAChannels; timer: int) =
                                     if channel == 0: etFifoARequest else: etFifoBRequest)
         else:
           dc.gba.dma.trigger_fifo(channel)
+      elif FIFO_DMA_WINDOW and dc.sizes[channel] < 16:
+        let d = dc.gba.dma.dmacnt_h[channel + 1]
+        if d.enable and d.start_timing == 3: result = true
+
+proc fifo_window_open*(dc: DMAChannels) =
+  ## etFifoWindow
+  let bus = dc.gba.bus
+  bus.sync_bits = (bus.sync_bits or 16) and not 32'u8
+
+proc fifo_window_book*(dc: DMAChannels; overflow_in: int) =
+  ## FIFO_DMA_WINDOW: a refill will be asked for at the overflow
+  ## `overflow_in` cycles from now; open the window FIFO_WINDOW_LEAD cycles
+  ## ahead of the request. The grant closes it (dma.run_pending).
+  when FIFO_DMA_WINDOW:
+    let s = dc.gba.scheduler
+    let open_in = overflow_in + FIFO_DMA_REQUEST_DELAY - FIFO_WINDOW_LEAD
+    if open_in <= 0: dc.fifo_window_open()
+    else:
+      let cur = s.pending_at(etFifoWindow)
+      if s.cycles + CycleCount(open_in) < cur:
+        if cur != high(CycleCount): s.clear(etFifoWindow)
+        s.schedule(open_in, etFifoWindow)
+
+proc fifo_window_stale*(dc: DMAChannels) =
+  ## FIFO_DMA_WINDOW, at an overflow that booked nothing with the window open:
+  ## one with no request on its way was not needed (a stopped timer's)
+  ## (a request for a FIFO with no sound DMA armed on it books no burst; one
+  ## granted is closed by the internal cycles after it, which may run under
+  ## the burst)
+  when FIFO_DMA_WINDOW:
+    let s = dc.gba.scheduler
+    if (dc.gba.bus.sync_bits and 32) != 0: return
+    for channel in 0..1:
+      let d = dc.gba.dma.dmacnt_h[channel + 1]
+      if d.enable and d.start_timing == 3 and
+         s.has_event(if channel == 0: etFifoARequest else: etFifoBRequest):
+        return
+    dc.gba.bus.sync_bits = dc.gba.bus.sync_bits and not 48'u8
+
+proc fifo_window_at_start*(dc: DMAChannels; timer: int; overflow_in: int) =
+  ## FIFO_DMA_WINDOW, at `timer`'s start: its first overflow asks for a
+  ## refill if a FIFO it drives holds fewer than 16 bytes.
+  when FIFO_DMA_WINDOW:
+    if not dc.gba.apu.sound_enabled: return
+    for channel in 0..1:
+      let ch_timer = if channel == 0:
+        int(dc.gba.apu.soundcnt_h.dma_sound_a_timer)
+      else:
+        int(dc.gba.apu.soundcnt_h.dma_sound_b_timer)
+      let d = dc.gba.dma.dmacnt_h[channel + 1]
+      if ch_timer == timer and d.enable and d.start_timing == 3 and dc.sizes[channel] < 16:
+        dc.fifo_window_book(overflow_in)
+        return
 
 proc cubic4(y0, y1, y2, y3: int16; mu: float32): int16 {.inline.} =
   ## Four-point cubic through y1 and y2 at fraction mu (Paul Bourke, "Cubic

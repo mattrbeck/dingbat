@@ -452,6 +452,12 @@ proc run_pending*(dma: DMA) =
     if ch >= dma.current_priority:
       break  # waits for the equal/higher-priority burst in progress
     dma.pending = dma.pending and not uint8(1 shl ch)
+    # FIFO_DMA_WINDOW: a sound FIFO's grant closes the window its request
+    # was made in at the CPU's next internal cycles, which may run under
+    # the burst (dma_channels.fifo_window_ahead)
+    let fifo_window = (dma.gba.bus.sync_bits and 16) != 0 and (ch == 1 or ch == 2) and
+                      dma.dmacnt_h[ch].start_timing == 3
+    if fifo_window: dma.gba.bus.sync_bits = dma.gba.bus.sync_bits or 32
     # A burst between request and grant may have rewritten this channel's CNT_H.
     if not dma.dmacnt_h[ch].enable: continue
     # FIFO requests are level-conditioned on the FIFO, not edge-latched: a
@@ -489,16 +495,18 @@ proc run_pending*(dma: DMA) =
         var cpu_back = CycleCount(0)
         var cpu_ran = false
         when DMA_ACCESS_WINDOW:
-          if (bus.sync_bits and 2) != 0:
-            if bus.idle_until > granted_at:
+          if (bus.sync_bits and 2) != 0 or fifo_window:
+            if bus.idle_until > granted_at or
+               (bus.dma_idle_edge and bus.idle_until == granted_at):
               # Granted inside a run of internal cycles: the rest of them ran
-              # under the burst (bus.idle_window).
-              let free = min(held, bus.idle_until - granted_at)
+              # under the burst (bus.idle_window). A FIFO request that comes
+              # due as they end took the bus on the last (defer_fifo_request).
+              let free = min(held, max(bus.idle_until - granted_at, CycleCount(1)))
               bus.cycles -= int(free)
               held -= free
               bus.dma_held = 0
             else:
-              bus.dma_held = int(held)
+              bus.dma_held = if bus.dma_before_access: 0 else: int(held)
             bus.dma_end_at = bus.sched.cycles + CycleCount(bus.cycles)
           elif IMM_IDLE_GRANT and dma.dmacnt_h[ch].start_timing == 0 and
                bus.imm_idle_from <= granted_at and granted_at < bus.imm_idle_until:
@@ -546,3 +554,5 @@ proc run_pending*(dma: DMA) =
       if saved == 4 and bus.prefetch_on and bus.dma_first_rom and cpu_stream != 1:
         bus.rom_next_addr = cpu_stream
         bus.rom_free_since = cpu_free
+  dma.gba.bus.dma_before_access = false
+  dma.gba.bus.dma_idle_edge = false

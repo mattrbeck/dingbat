@@ -36,14 +36,17 @@ proc timer_overflow_event*(tim: Timer; num: int) =
     tim.tm[num + 1] += 1
     if tim.tm[num + 1] == 0:
       tim.timer_overflow_event(num + 1)
-  if num <= 1:
-    tim.gba.apu.timer_overflow(num)
+  let fifo_next = num <= 1 and tim.gba.apu.timer_overflow(num)
   if tim.tmcnt[num].irq_enable:
     tim.gba.interrupts.raise_synced(IRQ_TIMER_BIT_BASE + num)
   if not tim.tmcnt[num].cascade:
     tim.gba.scheduler.schedule(tim.cycles_until_overflow(num), TIMER_EVENT_TYPES[num])
     if tim.tmcnt[num].irq_enable:
       tim.gba.interrupts.window_ahead(tim.cycles_until_overflow(num))
+    if fifo_next:
+      tim.gba.apu.dma_channels.fifo_window_book(tim.cycles_until_overflow(num))
+    elif num <= 1 and (tim.gba.bus.sync_bits and 16) != 0:
+      tim.gba.apu.dma_channels.fifo_window_stale()
 
 proc new_timer*(gba: GBA): Timer =
   result = Timer(gba: gba)
@@ -176,6 +179,8 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
           tim.gba.scheduler.schedule(tim.cycles_until_overflow(num), TIMER_EVENT_TYPES[num])
           if tim.tmcnt[num].irq_enable:
             tim.gba.interrupts.window_ahead(tim.cycles_until_overflow(num))
+          if num <= 1:
+            tim.gba.apu.dma_channels.fifo_window_at_start(num, tim.cycles_until_overflow(num))
       elif was_enabled:
         when TIMER_STOP_DELAY > 0:
           # The count goes on for a cycle after the write that stops it

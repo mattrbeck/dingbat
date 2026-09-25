@@ -68,6 +68,9 @@ type
     # IRQ_LAST_WAITS (gba/interrupts.nim): a window opened ahead of an
     # interrupt raise whose cycle is known, and its fallback close.
     etIrqWindowOpen, etIrqWindowClose
+    # FIFO_DMA_WINDOW (gba/apu/dma_channels.nim): open the access window
+    # ahead of a sound FIFO's refill request.
+    etFifoWindow
 
   Event* = object
     cycles*: CycleCount
