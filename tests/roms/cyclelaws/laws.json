@@ -5532,5 +5532,93 @@
     "want": "00000000"
    }
   ]
+ },
+ {
+  "payload": "dmavram",
+  "rom": "dmavram.gba",
+  "sha1": "b580020b1f53b237d5aae67566b01e40afbf85a6",
+  "frames": 188,
+  "cells": [
+   {
+    "id": "dmavram 0x60",
+    "kind": "hex",
+    "want": "000001E5"
+   },
+   {
+    "id": "dmavram 0x62",
+    "kind": "hex",
+    "want": "000001E5"
+   },
+   {
+    "id": "dmavram 0x63",
+    "kind": "hex",
+    "want": "000001E6"
+   },
+   {
+    "id": "dmavram 0x64",
+    "kind": "hex",
+    "want": "000001E5"
+   },
+   {
+    "id": "dmavram 0x66",
+    "kind": "hex",
+    "want": "000001E5"
+   },
+   {
+    "id": "dmavram 0x67",
+    "kind": "hex",
+    "want": "000001E6"
+   },
+   {
+    "id": "dmavram 0x68",
+    "kind": "hex",
+    "want": "000001E5"
+   },
+   {
+    "id": "dmavram 0x69",
+    "kind": "hex",
+    "want": "000001E5"
+   },
+   {
+    "id": "dmavram 0x6a",
+    "kind": "hex",
+    "want": "000001E5"
+   },
+   {
+    "id": "dmavram 0x6b",
+    "kind": "hex",
+    "want": "000001E6"
+   },
+   {
+    "id": "dmavram 0x160",
+    "kind": "hex",
+    "want": "000001D0"
+   },
+   {
+    "id": "dmavram 0x161",
+    "kind": "hex",
+    "want": "000001D0"
+   },
+   {
+    "id": "dmavram 0x260",
+    "kind": "hex",
+    "want": "000001E5"
+   },
+   {
+    "id": "dmavram 0x261",
+    "kind": "hex",
+    "want": "000001E5"
+   },
+   {
+    "id": "dmavram 0x262",
+    "kind": "hex",
+    "want": "000001E5"
+   },
+   {
+    "id": "dmavram 0x263",
+    "kind": "hex",
+    "want": "000001E6"
+   }
+  ]
  }
 ]

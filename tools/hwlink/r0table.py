@@ -76,6 +76,14 @@ TABLE = {
     # a HALTCNT write from the chip WRAM under the swap: from 01xxxxxx it
     # halts, with r15 at 02000000 (the BIOS) it does not; IWRAM control
     'haltswap': [0, 1, 2, 3],
+    # an immediate DMA3 burst, 16 words VRAM -> VRAM, while the mode-3 bitmap
+    # is fetched: k = 0..11 cycles after a V-count-9 wake (it pays one more
+    # at one phase in four), under forced blank, and as 32 halfwords. About
+    # one run in 80 answers 0x1D0 (the forced-blank value: the wake landed
+    # off the bitmap) at a random cell -- 0x61, 0x65, 0x67 so far, 8:1 each
+    # -- so k = 1 and 5 are left out and the rest were unanimous
+    'dmavram': ([0x60, 0x62, 0x63, 0x64] + list(range(0x66, 0x6C)) + [0x160, 0x161]
+                + [0x260, 0x261, 0x262, 0x263]),
     # an H-blank DMA whose bursts outlast the line (configuration << 8 | word):
     # bursts, last start and last unit from the first, burst 1's gap; one
     # channel of 0.5 to 3.5 lines, near the V-blank edge, about a line, and
