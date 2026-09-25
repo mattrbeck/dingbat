@@ -25,6 +25,7 @@ when defined(pftrace):
     # Bounded: a game can leave TM0 running for whole frames.
     if pft_on and pft_lines.len < 4096: pft_lines.add(s)
 
+
 when defined(bgtrace):
   var bgtrace_n*: int
 
@@ -1247,6 +1248,9 @@ const HALT_WAKE_RUNS_ONE* {.booldefine.} = true
 const IRQ_FETCH_VIA_PREFETCH* {.booldefine.} = true
   ## The IRQ entry's in-flight gamepak fetch comes from the prefetcher when
   ## it runs on the interrupted stream (cpu.irq).
+const IRQ_INFLIGHT_AFTER_BURST* {.booldefine.} = true
+  ## An IRQ entry's in-flight gamepak fetch right after a DMA burst is
+  ## nonsequential and costs N - 1, as EWRAM's does (cpu.irq_enter).
 const PF_RUNS_OFF_ROM* {.booldefine.} = true
   ## The gamepak prefetcher keeps fetching while the CPU runs from the BIOS
   ## or RAM: it goes on at the address the CPU would have fetched next, and a
