@@ -329,6 +329,10 @@ R0_SKIP = {
     # its row (a), and cyclelaws both cells
     'thumbpc3c',
     'dmairqf',
+    # recorded after the multiboot body filled up (114648/114688 bytes); held
+    # by tests/roms/cyclelaws until the image makes room
+    'c2code', 'c2seq', 'contmap', 'vramexec', 'fifodma', 'fifomap',
+    'hadesdsd', 'hdmaoam', 'hpreempt', 'memcnt', 'tmrffff', 'tmrffirq',
 }
 R0_SUITE = {'dmaphase': 'dma', 'kitdemo': 'dma', 'wakeirq': 'irq', 'tmrw': 'timer',
             'lycwrite': 'irq', 'tmrdma': 'dma', 'dmastart': 'dma', 'dmadur': 'dma',
