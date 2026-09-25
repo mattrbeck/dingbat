@@ -429,9 +429,12 @@ run_undwrite:
 @ no compare of pc against 0 can produce.
 @ WHY: the Thumb `cmp pc` form restores CPSR from SPSR (the thumb-cmp-pc
 @ cases above); where ARM execution then resumes is UNPREDICTABLE.  The
-@ console restored the SPSR (0x80000012) and resumed past BOTH overlay words
-@ and the add -- at A+10 or A+14 -- where resuming at (A+2) & ~3 runs the
-@ add (r6 = 2) and resuming at A & ~3 stores the breadcrumb.  In System
+@ console restored the SPSR (0x80000012) and neither stored the breadcrumb
+@ nor ran the add: the halfword behind the compare, W+4 = Thumb `bx r5`,
+@ runs as Thumb (tests/roms/payloads/thumbpc3c.s, 2026-09-25: no ARM word
+@ of an extended ladder runs, and a Thumb `movs` there sets the flags
+@ before ARM goes on at W+4 or W+8), where resuming ARM at (A+2) & ~3 runs
+@ the add (r6 = 2) and resuming at A & ~3 stores the breadcrumb.  In System
 @ mode the restore is a no-op: CPSR reads C000001F, not a compare's flags.
 @ PROVENANCE: AGB SP, gbaedge page 35 THUMBPC3 (session 4, 2026-08-11, CRC
 @ 104A; tests/roms/expected/agb-sp-4.txt): 80000012, scratch 0, r6 0,

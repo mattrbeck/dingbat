@@ -325,6 +325,9 @@ R0_SKIP = {
     # its stamp buffers are 0x02010000-0x0203FFFF, over this ROM's results
     # block, runtime and multiboot body
     'hdmalag',
+    # the multiboot image is full; the cpu suite's THUMBPC3 port carries
+    # its row (a), and cyclelaws both cells
+    'thumbpc3c',
 }
 R0_SUITE = {'dmaphase': 'dma', 'kitdemo': 'dma', 'wakeirq': 'irq', 'tmrw': 'timer',
             'lycwrite': 'irq', 'tmrdma': 'dma', 'dmastart': 'dma', 'dmadur': 'dma',

@@ -5358,5 +5358,23 @@
     "want": "00000068"
    }
   ]
+ },
+ {
+  "payload": "thumbpc3c",
+  "rom": "thumbpc3c.gba",
+  "sha1": "5e7f12215d25b7c1c2485b8a8e5d650e432754fd",
+  "frames": 76,
+  "cells": [
+   {
+    "id": "thumbpc3c 0x0",
+    "kind": "hex",
+    "want": "80120000"
+   },
+   {
+    "id": "thumbpc3c 0x1",
+    "kind": "hex",
+    "want": "00120427"
+   }
+  ]
  }
 ]

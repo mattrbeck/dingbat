@@ -227,6 +227,8 @@ proc thumb_pc_relative_load*(cpu: CPU; instr: uint32) =
   discard cpu.set_reg(rd, value)
   cpu.step_thumb()
 
+proc thumb_restore_runs_next(cpu: CPU) {.noinline.}
+
 proc thumb_high_reg_branch_exchange*[op: static uint32, h1, h2: static bool](cpu: CPU; instr: uint32) =
   var rs = int(bits_range(instr, 3, 5))
   var rd = int(bits_range(instr, 0, 2))
@@ -255,10 +257,21 @@ proc thumb_high_reg_branch_exchange*[op: static uint32, h1, h2: static bool](cpu
             # SPSR-restore path: no gate delay (see exception_return_restore).
             cpu.gba.interrupts.schedule_interrupt_check()
           if not cpu.cpsr.thumb:
-            # T cleared: execution resumes in ARM state at the next word boundary
-            # (gbaedge THUMBPC/THUMBPC2).
-            discard cpu.set_reg(15, cpu.r[15] and not 3'u32)
-            return
+            # T cleared. The halfword behind the compare was already decoded
+            # as Thumb, and runs as Thumb; ARM execution starts after it, at
+            # the word holding the halfword after that. tests/roms/payloads/
+            # thumbpc3c.s on an AGB SP, `cmp pc, r0` at A with A % 4 == 2: a
+            # Thumb `bx r5` at A+2 is taken (no ARM word of the block runs),
+            # and a Thumb `movs r6, #0x20` there runs -- its flags land in
+            # CPSR -- and ARM goes on at (A+4) & ~3 or the word after it,
+            # never before. gbaedge THUMBPC/THUMBPC2 (A % 4 == 0, a Thumb
+            # `bx` at A+2) and THUMBPC3 (a) agree.
+            when THUMB_RESTORE_RUNS_NEXT:
+              cpu.thumb_restore_runs_next()
+              return
+            else:
+              discard cpu.set_reg(15, cpu.r[15] and not 3'u32)
+              return
       else:
         discard cpu.sub(cpu.r[rd], cpu.r[rs], true)
     else:
@@ -390,3 +403,19 @@ const thumbLut = thumbLutBuilder()
 
 proc thumb_execute*(cpu: CPU; instr: uint32) =
   thumbLut[instr shr 6](cpu, instr)
+
+proc thumb_restore_runs_next(cpu: CPU) {.noinline.} =
+  ## THUMB_RESTORE_RUNS_NEXT (thumb_high_reg_branch_exchange): the Thumb
+  ## `cmp pc` has restored a T-clear SPSR; run the halfword behind it as
+  ## Thumb, then resume ARM at the word holding the one after that.
+  let next_word = cpu.r[15] and not 3'u32   # (A+4) & ~3
+  cpu.cpsr.thumb = true
+  cpu.step_thumb()
+  # Fetched and dispatched here rather than through read_instr and
+  # thumb_execute: a second caller of either keeps the compiler from inlining
+  # it into cpu.tick (+4.9% retired instructions on FireRed).
+  let next = uint32(cpu.gba.bus.fetch_half(cpu.r[15] - 4))
+  thumbLut[next shr 6](cpu, next)
+  if cpu.cpsr.thumb and not cpu.refill_pending:
+    cpu.cpsr.thumb = false
+    discard cpu.set_reg(15, next_word)

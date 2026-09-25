@@ -1285,6 +1285,9 @@ const PF_RUNS_OFF_ROM* {.booldefine.} = true
   ## The gamepak prefetcher keeps fetching while the CPU runs from the BIOS
   ## or RAM: it goes on at the address the CPU would have fetched next, and a
   ## branch back to that address takes what it fetched (cpu.clear_pipeline).
+const THUMB_RESTORE_RUNS_NEXT* {.booldefine.} = true
+  ## A Thumb `cmp pc` whose SPSR restore clears T still runs the next
+  ## halfword as Thumb before ARM takes over (thumb.nim).
 const S_BIT_IRQ_LATE* {.booldefine.} = true
   ## An S-bit CPSR restore that sets I still lets an interrupt already
   ## recognised be taken after it (arm.exception_return_restore).
