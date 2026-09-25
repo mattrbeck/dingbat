@@ -59,6 +59,11 @@ const
   #      · 8 bus prefetch buffer pause/run state (pf_paused, pf_running, pf_count)
   #      · 9 in-flight section (irq line, fetch page, sync bits, DMA stamps,
   #        interrupt synchroniser, timer/DMA latches, memory control)
+  #      Owed at 10 (gba/savestate.nim, save_apu_state): ch1's s0_slow,
+  #      s0_anchor, sweep_armed and pending shift-0 stop ride in spare bits of
+  #      sweep_period / sweep_timer / frequency_shadow (a v9 build loading a
+  #      newer state misreads them); apu.power_on_at is not saved at all.
+  #      Give all five real fields.
   # GB:  1 initial · 2 serial port section · 3 PPU dots_since_frame
   #      · 4 CPU undefined-opcode lockup flag · 5 Super Game Boy section
   #      · 6 the batched carry (docs/savestate_compat.md): STOP mode, the
