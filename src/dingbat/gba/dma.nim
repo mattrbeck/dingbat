@@ -276,6 +276,12 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
                      else: dma_addr_delta(source_control, word_size)
   let delta_dest   = dma_addr_delta(dest_ctrl,  word_size)
 
+  when defined(itrace):
+    block:
+      let now = int64(dma.gba.scheduler.cycles) + int64(dma.gba.bus.cycles)
+      itl("DMA" & $channel & " GRANT t=" & $now & " dot=" & $(now - dma.gba.ppu.line_start_cycle) &
+          " src=" & toHex(dma.src[channel], 8) & " dst=" & toHex(dma.dst[channel], 8) &
+          " len=" & $len & " ws=" & $word_size)
   when defined(pftrace):
     pft_dma = pft_dma or pft_on
     pft("DMA" & $channel & " GRANT sched=" & $dma.gba.scheduler.cycles &
@@ -527,6 +533,10 @@ proc run_pending*(dma: DMA) =
         dma.gba.interrupts.schedule_raise_check(dma.irq_was_set, IRQ_SYNC_DELAY)
     # The CPU (or a paused outer burst) resumes with a nonsequential access.
     bus.dma_active = saved < 4
+    when defined(itrace):
+      block:
+        let now = int64(bus.sched.cycles) + int64(bus.cycles)
+        itl("DMA" & $ch & " END t=" & $now & " dot=" & $(now - dma.gba.ppu.line_start_cycle))
     when defined(pftrace):
       pft("DMA" & $ch & " END sched=" & $bus.sched.cycles & " busc=" & $bus.cycles &
           " rfs=" & $bus.rom_free_since & " hot=" & $bus.rom_hot)

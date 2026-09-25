@@ -171,6 +171,11 @@ proc irq_enter*(cpu: CPU) =
       elif page == 2:
         let bus = cpu.gba.bus
         inflight = (if cpu.cpsr.thumb: int(bus.wait16_n[2]) else: int(bus.wait32_n[2])) - 1
+    when defined(itrace):
+      let now = int64(cpu.gba.scheduler.cycles) + int64(cpu.gba.bus.cycles)
+      itl("IRQ lr=" & toHex(lr, 8) & " t=" & $now & " dot=" & $(now - cpu.gba.ppu.line_start_cycle) &
+          " inflight=" & $inflight & " line_at=" & $cpu.irq_line_at & " lw_end=" & $cpu.gba.bus.lw_end &
+          " lw_waits=" & $cpu.gba.bus.lw_waits & " if=" & toHex(uint16(cpu.gba.interrupts.reg_if), 4))
     let old_cpsr = cpu.cpsr
     cpu.switch_mode(modeIRQ)
     cpu.spsr = old_cpsr
@@ -435,6 +440,11 @@ proc clear_pipeline*(cpu: CPU) =
               credit = bus.dma_held
             else:
               broken = true
+      when defined(itrace):
+        itl("REFILL pc=" & toHex(cpu.r[15], 8) & " now=" & $(bus.sched.cycles + CycleCount(bus.cycles)) &
+            " both=" & $both & " n=" & $n & " s=" & $s & " streamed=" & $streamed &
+            " rna=" & toHex(bus.rom_next_addr, 8) & " rfs=" & $bus.rom_free_since &
+            " fpage=" & toHex(bus.fetch_page, 8) & " paused=" & $bus.pf_paused & " old_ahead=" & $old_ahead)
       bus.cycles += both
       when IRQ_LAST_WAITS:
         if noting: bus.note_waits(last)
@@ -880,6 +890,14 @@ proc tick*(cpu: CPU) =
     when defined(pftrace):
       pft("INSTR pc=" & toHex(cpu.r[15], 8) & " t=" & $cpu.cpsr.thumb &
           " sched=" & $cpu.gba.scheduler.cycles & " busc=" & $cpu.gba.bus.cycles)
+    when defined(itrace):
+      it_init()
+      block:
+        let cur = cpu.r[15] - (if cpu.cpsr.thumb: 4'u32 else: 8'u32)
+        if not it_on and cur >= it_lo and cur <= it_hi: it_on = true
+        let now = int64(cpu.gba.scheduler.cycles) + int64(cpu.gba.bus.cycles)
+        itl("I " & toHex(cur, 8) & " t=" & $now & " vc=" & $cpu.gba.ppu.vcount &
+            " dot=" & $(now - cpu.gba.ppu.line_start_cycle))
     let instr = cpu.read_instr()
     if cpu.cpsr.thumb:
       cpu.thumb_execute(instr)

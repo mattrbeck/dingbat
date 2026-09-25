@@ -25,6 +25,22 @@ when defined(pftrace):
     # Bounded: a game can leave TM0 running for whole frames.
     if pft_on and pft_lines.len < 4096: pft_lines.add(s)
 
+when defined(itrace):
+  # -d:itrace: per-instruction trace to stderr, for chasing a cycle through a
+  # test ROM. Starts when the PC first enters [ITRACE_LO, ITRACE_HI] (hex)
+  # and runs ITRACE_N lines; timer, interrupt and DMA events interleave.
+  var it_lo*, it_hi*: uint32
+  var it_left* = -1
+  var it_on*: bool
+  proc it_init*() =
+    if it_left == -1:
+      it_lo = uint32(parseHexInt(getEnv("ITRACE_LO", "0")))
+      it_hi = uint32(parseHexInt(getEnv("ITRACE_HI", "0")))
+      it_left = parseInt(getEnv("ITRACE_N", "400"))
+  proc itl*(s: string) =
+    if it_on and it_left > 0:
+      dec it_left
+      stderr.writeLine(s)
 
 when defined(bgtrace):
   var bgtrace_n*: int

@@ -127,6 +127,8 @@ proc stalled_for(intr: Interrupts; now: CycleCount): int {.inline.} =
 
 proc raise_synced*(intr: Interrupts; bit: int) =
   let now = intr.gba.scheduler.cycles
+  when defined(itrace):
+    itl("RAISE " & $bit & " t=" & $now & " stalled=" & $intr.stalled_for(now))
   if intr.pipe_raised == 0:
     let st = intr.stalled_for(now)
     let delay = if st == 0: IRQ_SYNC_DELAY
@@ -213,6 +215,10 @@ proc check_interrupts*(intr: Interrupts) =
     if intr.ime and intr.gba.scheduler.cycles >= intr.gate_open_at:
       intr.gba.cpu.irq_line = true
       intr.gba.cpu.irq_line_at = intr.gba.scheduler.cycles
+      when defined(itrace):
+        itl("ILINE t=" & $intr.gba.scheduler.cycles & " dot=" &
+            $(int64(intr.gba.scheduler.cycles) - intr.gba.ppu.line_start_cycle) &
+            " pend=" & toHex(pending, 4))
   when IRQ_LAST_WAITS:
     # The instruction this check landed in has noted its last access; the
     # window closes unless another check is still to run (a pending open

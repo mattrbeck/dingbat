@@ -28,6 +28,8 @@ proc effective_reload(tim: Timer; num: int): uint16 {.inline.} =
     tim.tmd[num]
 
 proc timer_overflow_event*(tim: Timer; num: int) =
+  when defined(itrace):
+    itl("TOVF " & $num & " t=" & $tim.gba.scheduler.cycles)
   tim.tm[num] = tim.effective_reload(num)
   tim.cycle_enabled[num] = tim.gba.scheduler.cycles
   if num < 3 and tim.tmcnt[num + 1].cascade and tim.tmcnt[num + 1].enable:
@@ -96,6 +98,9 @@ proc `[]`*(tim: Timer; io_addr: uint32): uint8 =
     read(cast[uint16](tim.tmcnt[num]) and 0x00C7'u16, io_addr and 1)
   else:
     let v = tim.get_current_tm(num)
+    when defined(itrace):
+      if (io_addr and 1) == 0:
+        itl("TREAD " & $num & " v=" & toHex(v, 4) & " t=" & $(tim.gba.scheduler.cycles + CycleCount(tim.gba.bus.cycles)))
     when defined(pftrace):
       if num == 0 and (io_addr and 1) == 0:
         pft("TMREAD raw=" & $v & " sched=" & $tim.gba.scheduler.cycles &
@@ -116,6 +121,8 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
       let old_period = TIMER_PERIODS[tim.tmcnt[num].frequency]
       let old_ctrl = tim.tmcnt[num]
       write(tim.tmcnt[num], value, 0)
+      when defined(itrace):
+        itl("TCNT " & $num & " v=" & toHex(value, 2) & " t=" & $tim.write_now())
       if num == 0:
         # TM0CNT_H's count-up bit is unimplemented and reads back 0 (GBATEK,
         # "Timer Control").

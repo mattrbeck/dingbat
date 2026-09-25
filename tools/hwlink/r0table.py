@@ -15,7 +15,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import payloadcmp
 
-EMULATORS = ('dingbat', 'dingbat-bios', 'mgba')
+EMULATORS = tuple(os.environ.get('R0_EMULATORS', 'dingbat,dingbat-bios,mgba').split(','))
 TABLE_FILE = os.path.join(HERE, 'r0-agb.json')
 
 # payload -> the arguments worth keeping
