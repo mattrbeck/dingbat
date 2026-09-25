@@ -46,12 +46,12 @@ const PSG_POWER_ON_WINDOW* {.intdefine.} = 8
   ## Cycles after a SOUNDCNT_X master-on write during which an NRx4 length
   ## enable is clocked as in the first half of a length period whatever the
   ## sequencer says. AGB SP (link rig 2026-09-25): payloads/fsfirst.s triggers
-  ## ch2 with counter 1 four cycles after master-on, and in all 31 cells, at
-  ## every 512 Hz phase, the extra clock takes it to 0 and the trigger
-  ## reloads it to 63 (the note outlives the 0x20000-poll cap); psgfirst.s
-  ## triggers sixteen cycles after and gets the extra clock only when the
-  ## tap rule gives it (ch2's first note lives 15 or 16 steps). So
-  ## 4 < window <= 16.
+  ## ch2 with counter 1 four cycles after master-on, and in all 31 cells
+  ## (six sessions' runs), at every 512 Hz phase, the extra clock takes it to
+  ## 0 and the trigger reloads it to 63 (the note outlives the 0x20000-poll
+  ## cap); payloads/fsgap.s triggers 8..39 cycles after, and every cell is
+  ## two-valued with the 512 Hz tap -- the cap, or no extra clock and death
+  ## at the first step 16.6k..32.6k cycles on. So 4 < window <= 8.
 
 proc length_half*(apu: APU): bool {.inline.} =
   ## Whether an NRx4 length enable now gets the extra length clock
@@ -59,23 +59,6 @@ proc length_half*(apu: APU): bool {.inline.} =
   apu.first_half_of_length_period or
     (apu.power_on_at != GBA_NO_STEP and
      apu.gba.scheduler.cycles - apu.power_on_at < CycleCount(PSG_POWER_ON_WINDOW))
-
-const PSG_SETTLE* {.intdefine.} = 256
-  ## psg_settling's window, in cycles. AGB SP: sweeptrig.s's lone shift-0 row
-  ## (128..255 cycles after its master-on in dingbat's timing) is read on at
-  ## the first poll 4 cycles after the trigger, as in the slow timing; with
-  ## 512, s0trig.s cell 0x4008 falls inside the window after a 512 Hz step
-  ## and no longer matches. Only bracketed; payloads/s0time.s would pin it.
-
-proc psg_settling*(apu: APU): bool =
-  ## Whether the PSG is within PSG_SETTLE cycles of a SOUNDCNT_X master-on
-  ## or of a 512 Hz sequencer step (channel1.nim's shift-0 kill timing).
-  let now = apu.gba.scheduler.cycles
-  if apu.power_on_at != GBA_NO_STEP and now - apu.power_on_at < CycleCount(PSG_SETTLE):
-    return true
-  if apu.frame_sequencer_stage >= 8: return false   # no step since the master-on
-  let last = apu.gba.scheduler.pending_at(etAPUFrameSeq) - CycleCount(32768)
-  now - last < CycleCount(PSG_SETTLE)
 
 proc agb_length_on_nrx4*(ch: SoundChannel; length_enable, triggered: bool;
                          max_len: int) =

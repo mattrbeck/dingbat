@@ -492,10 +492,10 @@ proc save_apu_state(apu: APU; w: var Writer) =
     let ch = apu.channel1
     save_channel_env(ch, w)
     w.write_i32(int32(ch.wave_duty_position))
-    w.write_u8(ch.sweep_period)
+    w.write_u8(ch.sweep_period or (if ch.s0_slow: 0x80'u8 else: 0'u8))   # s0_slow: bit 7
     w.write_bool(ch.negate)
     w.write_u8(ch.shift_ch1)
-    w.write_u8(ch.sweep_timer)
+    w.write_u8((ch.sweep_timer and 0x0F) or (ch.s0_anchor shl 4))   # s0_anchor: high nibble
     # Bits 11..15 of the shadow's field carry the shift-0 check (channel1.nim):
     # bits 11..14 a pending kill's distance in cycles (0 = none), bit 15 the
     # arming. A kill already due is applied first: every reader would.
@@ -557,10 +557,14 @@ proc load_apu_state(apu: APU; r: var Reader) =
     let ch = apu.channel1
     load_channel_env(ch, r)
     ch.wave_duty_position = int(r.read_i32())
-    ch.sweep_period = r.read_u8()
+    let period = r.read_u8()
+    ch.sweep_period = period and 0x7F
+    ch.s0_slow = (period and 0x80) != 0
     ch.negate = r.read_bool()
     ch.shift_ch1 = r.read_u8()
-    ch.sweep_timer = r.read_u8()
+    let timer = r.read_u8()
+    ch.sweep_timer = timer and 0x0F
+    ch.s0_anchor = timer shr 4
     let shadow = r.read_u16()
     ch.frequency_shadow = shadow and 0x7FF'u16
     let kill_in = (shadow shr 11) and 0xF'u16

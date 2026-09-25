@@ -835,6 +835,13 @@ type
     # The AGB's shift-0 trigger check is armed (channel1.nim). Saved in
     # bit 15 of frequency_shadow's field; the format has no bit of its own.
     sweep_armed*:        bool
+    # scheduler.cycles mod 16 of the 4 MHz edge a master-on restarted the
+    # PSG's dividers on (channel1.nim ch1_s0_kill_at). Saved in the high
+    # nibble of sweep_timer's byte.
+    s0_anchor*:          uint8
+    # The shift-0 check's slow timing (channel1.nim ch1_s0_kill_at). Saved in
+    # bit 7 of sweep_period's byte.
+    s0_slow*:            bool
     # Cycle a failed shift-0 trigger check stops the channel, or GBA_NO_STEP
     # (at most 13 cycles ahead). Saved as a distance in bits 11..14 of
     # frequency_shadow's field.
@@ -908,9 +915,8 @@ type
     frame_sequencer_stage*: int
     first_half_of_length_period*: bool
     # Cycle of the last SOUNDCNT_X master-on, or GBA_NO_STEP (dropped at a
-    # rebase that passes it). Read only within PSG_POWER_ON_WINDOW and
-    # PSG_SETTLE of it. NOT serialized: a state saved in those 256 cycles
-    # loads without them (needs a field at the next payload revision).
+    # rebase that passes it). Read only within PSG_POWER_ON_WINDOW of it. NOT
+    # serialized: a state saved in those 8 cycles loads without the window.
     power_on_at*: CycleCount
     channel1*:          Channel1
     channel2*:          Channel2

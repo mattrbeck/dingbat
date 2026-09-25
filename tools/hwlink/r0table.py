@@ -172,6 +172,20 @@ TABLE = {
     's0trig': list(range(16)) + [b | k for b in (0x100, 0x200, 0x400, 0x800, 0x1800,
                                                  0x2000, 0x4000, 0x8000)
                                  for k in range(16) if b | k != 0x4001],
+    # s0trig's trigger as the first after a master-on, SPIN[m] x 4 cycles
+    # after it: the slow timing is counted from the master-on's 4 MHz edge
+    # (the page's step-synced half answers a spread; not a law)
+    's0time': [m << 4 | k for m in (0, 2, 4, 6, 8, 10, 12, 13, 14, 15) for k in range(16)],
+    # the same trigger 16k..262k cycles after the master-on by a spin, or
+    # 12320 cycles after it across a halt (parks on lines 40 and 50): the
+    # slow timing holds throughout
+    's0long': [b | m << 4 | k for b in (0, 0x100) for m in range(8) for k in range(16)],
+    # the same trigger with one sound-control write between the master-on
+    # and it (none, SOUNDCNT_X again, SOUNDCNT_H, SOUNDCNT_L), before or
+    # after a spin: every cell slow
+    's0write': ([w << 8 | k for w in range(4) for k in range(16)]
+                + [0x400 | 1 << 4 | w << 8 | k for w in range(4) for k in range(16)]
+                + [0x400 | w << 8 | k for w in range(4) for k in range(16)]),
 }
 
 

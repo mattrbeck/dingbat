@@ -20,8 +20,7 @@ const PSG_SEQ_SKIP* = 8
   ## (the DMG power-on rule, GbApu.div_skip): that edge makes no step.
 const PSG_SEQ_FIRST* = 9
   ## frame_sequencer_stage after a master-on with no edge to skip: the next
-  ## edge is step 0. Both values mean no edge has passed since the master-on
-  ## (psg_settling).
+  ## edge is step 0.
 # One-pole low-pass coefficient for the optional analog-output filter:
 # alpha = 1 - exp(-2*pi*fc/fs) with fc ~= 12 kHz, fs = 32768 Hz
 const AUDIO_LOWPASS_ALPHA* = 0.90'f32
@@ -288,6 +287,14 @@ proc tick_frame_sequencer*(apu: APU) =
     apu.gba.scheduler.schedule(FRAME_SEQ_PERIOD, etAPUFrameSeq)
     return
   if apu.frame_sequencer_stage == PSG_SEQ_FIRST: apu.frame_sequencer_stage = 0
+  # A step while the CPU is halted ends channel 1's slow shift-0 timing
+  # (channel1.nim ch1_s0_kill_at). AGB SP: s0path.s / s0trig.s bit 14 switch
+  # the PSG on at payload entry and halt until line 50 -- a halt that spans
+  # a step -- and are off the slow timing; s0long.s's halt cells halt 12320
+  # cycles from their master-on, less than the earliest step (16384), and
+  # stay on it, as do s0long's 262144-cycle spins (steps, but no halt) and
+  # s0path's no-halt row. The skipped edge (above) does not count.
+  if apu.gba.cpu.halted: apu.channel1.s0_slow = false
   apu.first_half_of_length_period = (apu.frame_sequencer_stage and 1) == 0
   case apu.frame_sequencer_stage
   of 0:
@@ -619,13 +626,28 @@ proc `[]=`*(apu: APU; io_addr: uint32; value: uint8) =
         # fsfirst.s's counter-2 notes after a master-on die 16921..48031
         # cycles later over nine runs; psgfirst.s's first ch2 notes live 15
         # or 16 steps, and those right after a length step always 16.
-        let to_edge = apu.gba.scheduler.pending_at(etAPUFrameSeq) - apu.gba.scheduler.cycles
+        # It restarts the PSG's 2 MHz / 1 MHz dividers on the first 4 MHz
+        # edge AFTER the write (a write on an edge is seen by the next one,
+        # as a trigger is; only such a write tells "after" from "at or
+        # after", and with "after" all five of dbsuite's lone sweeptrig.s
+        # rows land as on the console), and the 512 Hz edges move onto their
+        # grid (PSG_SEQ_GRID). Channel 1's shift-0 check is armed and on its
+        # slow timing (channel1.nim ch1_s0_kill_at).
+        let at = apu.gba.scheduler.cycles + 1
+        let anchor = at + CycleCount((PSG_S0_APU_PHASE + 4 - uint32(at and 3)) and 3)
+        apu.channel1.s0_anchor = uint8(anchor and 15)
+        apu.channel1.sweep_armed = true
+        apu.channel1.s0_slow = true
+        let e = apu.gba.scheduler.pending_at(etAPUFrameSeq)
+        let move = (anchor + CycleCount(PSG_SEQ_GRID) - e) and 15
+        if move != 0:
+          apu.gba.scheduler.clear(etAPUFrameSeq)
+          apu.gba.scheduler.schedule(int(e + move - apu.gba.scheduler.cycles), etAPUFrameSeq)
+        let to_edge = e + move - apu.gba.scheduler.cycles
         let skip = to_edge < CycleCount(FRAME_SEQ_PERIOD div 2)
         apu.frame_sequencer_stage = if skip: PSG_SEQ_SKIP else: PSG_SEQ_FIRST
         apu.first_half_of_length_period = skip
         apu.power_on_at = apu.gba.scheduler.cycles
-        # ...and arms channel 1's shift-0 trigger check (channel1.nim)
-        apu.channel1.sweep_armed = true
         apu.channel1.length_counter = 0
         apu.channel2.length_counter = 0
         apu.channel3.length_counter = 0

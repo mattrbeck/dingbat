@@ -16,7 +16,7 @@ main:
     adr r0, payload
     ldr r1, =0x03000000
     ldr r2, =payload_end
-    adr r3, payload
+    mov r3, r0                     @ = payload (a second adr can fall out of range)
     sub r2, r2, r3                 @ byte length
 1:  ldr r4, [r0], #4
     str r4, [r1], #4
