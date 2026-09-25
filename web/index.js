@@ -1239,6 +1239,7 @@ const savesModal = document.getElementById("saves-modal");
 
 const openSavesModal = () => {
   menuDropdown.hidden = true;
+  refreshKeptSaveRow().catch(() => {});
   savesModal.classList.add("open");
   trapFocus(savesModal);
 };
@@ -1543,6 +1544,9 @@ const isRomLoaded = (name) =>
 //            their meta; the only group Drive mirrors besides the ROM
 //   session  the auto-resume snapshot; regenerated, never synced
 //   prefs    the cheat list; never synced
+//   kept     a save from before the game was deleted and loaded again
+//            (keptSaveKey), mirrored; a save reset leaves it, being a way
+//            back rather than the game's progress
 const perGameKeys = (name) => {
   let saves = ["save:" + name, "save:" + name + "-p2"];
   // Slot 0 is the legacy un-suffixed "state:<name>" / "statemeta:<name>" pair.
@@ -1554,6 +1558,7 @@ const perGameKeys = (name) => {
     saves,
     session: [autoStateKey(name)],
     prefs: [CHEATS_KEY(name)],
+    kept: [keptSaveKey(name)],
   };
 };
 
@@ -1630,6 +1635,33 @@ if (resetSaveSlot) {
   });
   resetSaveSlot.appendChild(resetSaveBtn);
 }
+
+// A kept save (see genOf) for the loaded game: shown only while there is
+// one, with when it was saved and how long it stays.
+const keptSaveRow = document.getElementById("kept-save-row");
+const keptSaveBtn = makeConfirmButton({
+  label: "Restore",
+  confirmLabel: "Replace current save?",
+  className: "button button-sm",
+  onConfirm: async () => {
+    let game = currentOriginalName;
+    if (game) await restoreKeptSave(game);
+    keptSaveBtn.disabled = false;
+    keptSaveBtn.disarm();
+    closeSavesModal();
+  },
+});
+document.getElementById("kept-save-slot")?.appendChild(keptSaveBtn);
+const refreshKeptSaveRow = async () => {
+  if (!keptSaveRow) return;
+  let game = currentOriginalName;
+  let rec = game ? await getKeptSave(game) : null;
+  if (game !== currentOriginalName) return; // another game since
+  keptSaveRow.hidden = !rec;
+  if (!rec) return;
+  document.getElementById("kept-save-label").textContent = keptSaveTitle(rec);
+  document.getElementById("kept-save-sub").textContent = keptSaveSub(rec);
+};
 
 
 // --- Library sort + filter --------------------------------------------------
@@ -2205,7 +2237,7 @@ const driveListAll = async () => {
   let page = null;
   do {
     let url = GDRIVE_FILES + "?spaces=appDataFolder&pageSize=1000&fields=" +
-      encodeURIComponent("nextPageToken,files(id,name,size,modifiedTime,createdTime)") +
+      encodeURIComponent("nextPageToken,files(id,name,size,modifiedTime,createdTime,appProperties)") +
       (page ? "&pageToken=" + encodeURIComponent(page) : "");
     let body = await (await driveFetch(url)).json();
     files.push(...(body.files || []));
@@ -2218,29 +2250,37 @@ const driveListAll = async () => {
 // it to tell its own write from another device's).
 const UPLOAD_FIELDS = "&fields=" + encodeURIComponent("id,modifiedTime");
 
-// Create + upload in one multipart request; bytes go in as a Blob, never
+// The generation stamp a file is written with (see genOf). Absent is 0, so
+// a generation-0 write sends no metadata a build before generations did not;
+// a file restamped down to 0 drops the key (Drive removes a null property).
+const genMeta = (gen) => (gen > 0 ? { appProperties: { gen: String(gen) } } : {});
+
+// Metadata and bytes in one multipart body; bytes go in as a Blob, never
 // string-converted.
-const driveCreateMultipart = (name, bytes) => {
+const multipartBody = (meta, bytes) => {
   let boundary = "dingbat" + Math.random().toString(36).slice(2);
   let body = new Blob([
     `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` +
-      JSON.stringify({ name, parents: ["appDataFolder"] }) +
+      JSON.stringify(meta) +
       `\r\n--${boundary}\r\nContent-Type: application/octet-stream\r\n\r\n`,
     bytes,
     `\r\n--${boundary}--`,
   ]);
-  return driveFetch(GDRIVE_UPLOAD + "?uploadType=multipart" + UPLOAD_FIELDS, {
-    method: "POST",
-    headers: { "Content-Type": "multipart/related; boundary=" + boundary },
-    body,
-  });
+  return { headers: { "Content-Type": "multipart/related; boundary=" + boundary }, body };
 };
 
-const driveCreateEmpty = async (name) => {
+// Create + upload in one multipart request.
+const driveCreateMultipart = (name, bytes, gen = 0) =>
+  driveFetch(GDRIVE_UPLOAD + "?uploadType=multipart" + UPLOAD_FIELDS, {
+    method: "POST",
+    ...multipartBody({ name, parents: ["appDataFolder"], ...genMeta(gen) }, bytes),
+  });
+
+const driveCreateEmpty = async (name, gen = 0) => {
   let res = await driveFetch(GDRIVE_FILES, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, parents: ["appDataFolder"] }),
+    body: JSON.stringify({ name, parents: ["appDataFolder"], ...genMeta(gen) }),
   });
   return (await res.json()).id;
 };
@@ -2252,12 +2292,37 @@ const driveUpdateContent = (fileId, bytes) =>
     body: new Blob([bytes]),
   });
 
+// New bytes under a new generation stamp, in one request, so no one ever
+// lists the new bytes under the old stamp or the reverse.
+const driveUpdateMultipart = (fileId, bytes, gen) =>
+  driveFetch(GDRIVE_UPLOAD + "/" + fileId + "?uploadType=multipart" + UPLOAD_FIELDS, {
+    method: "PATCH",
+    ...multipartBody({ appProperties: { gen: gen > 0 ? String(gen) : null } }, bytes),
+  });
+
+// Metadata only: the stamp, after the bytes of a file too big for multipart.
+const driveStampGen = (fileId, gen) =>
+  driveFetch(GDRIVE_FILES + "/" + fileId + "?fields=" + encodeURIComponent("id,modifiedTime"), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ appProperties: { gen: gen > 0 ? String(gen) : null } }),
+  });
+
 // Drive caps multipart bodies at 5 MB, so big files go as metadata create
-// + media PATCH.
-const driveUploadFile = async (name, bytes, existingId) => {
-  if (existingId) return driveUpdateContent(existingId, bytes);
-  if (bytes.length <= 4 * 1024 * 1024) return driveCreateMultipart(name, bytes);
-  return driveUpdateContent(await driveCreateEmpty(name), bytes);
+// + media PATCH. `gen` is the generation the bytes belong to; `restamp` says
+// the existing file carries another one. A big file restamped gets its bytes
+// first and its stamp second: the other order would, between the two, show
+// the old bytes as the new game's, which is the one thing the stamp is for.
+const driveUploadFile = async (name, bytes, existingId, gen = 0, restamp = false) => {
+  let small = bytes.length <= 4 * 1024 * 1024;
+  if (existingId) {
+    if (!restamp) return driveUpdateContent(existingId, bytes);
+    if (small) return driveUpdateMultipart(existingId, bytes, gen);
+    await driveUpdateContent(existingId, bytes);
+    return driveStampGen(existingId, gen);
+  }
+  if (small) return driveCreateMultipart(name, bytes, gen);
+  return driveUpdateContent(await driveCreateEmpty(name, gen), bytes);
 };
 
 const driveDownload = async (fileId) => {
@@ -2286,6 +2351,8 @@ const parseDriveFileName = (n) => {
       ? { game: g.slice(0, -3), kind: "save2" }
       : { game: g, kind: "save" };
   }
+  // A save kept from before the game was deleted (keptSaveKey).
+  if (n.startsWith("oldsave:")) return { game: n.slice(8), kind: "oldsave" };
   return null;
 };
 
@@ -2393,10 +2460,12 @@ const renderGdriveSection = () => {
 // ============================================================================
 // Google Drive sync. Signing in is turning sync on. The library lives in
 // one Drive file, "library":
-//     { recents: [{ name, ts }], tomb: [{ name, ts }], ren: [{ from, to, ts }] }
+//     { recents: [{ name, ts, imp?, gen? }], tomb: [{ name, ts, gen? }],
+//       ren: [{ from, to, ts }] }
 // `recents` is the merged cross-device play history (the home grid). `tomb`
 // are tombstones, so a union-merge cannot resurrect a deleted game; a
-// re-upload supersedes one. `ren` are rename markers: every other device
+// re-upload supersedes one, and a game loaded again after its delete stands
+// beside it as the next generation (see genOf). `ren` are rename markers: every other device
 // migrates its records for `from` to `to` on its next sync; a newer recents
 // entry under `from` supersedes the marker. ROMs are never bulk-downloaded
 // (Drive-only tiles download on demand). Uploads go through a persisted
@@ -2553,6 +2622,7 @@ const kindLabel = (kind) => {
   if (kind === "rom") return "ROM";
   if (kind === "save") return "save file";
   if (kind === "save2") return "P2 link save";
+  if (kind === "oldsave") return "save from before it was deleted";
   if (kind === "state" || kind === "statemeta") return "save state (Quick)";
   let m = String(kind).match(/:(\d+)$/);
   if (m) return "save state (slot " + (Number(m[1]) + 1) + ")";
@@ -2606,6 +2676,7 @@ const readSyncBytes = async (key) => {
     }
     return null;
   }
+  if (key.startsWith("oldsave:")) return keptRecordBytes(v);
   if (v instanceof ArrayBuffer) v = new Uint8Array(v);
   return v instanceof Uint8Array && v.length ? v : null;
 };
@@ -2625,6 +2696,20 @@ const writeSyncBytes = async (name, bytes) => {
   if (name.startsWith("statemeta:")) {
     try { await dbPut(name, JSON.parse(new TextDecoder().decode(bytes))); }
     catch {}
+    return;
+  }
+  if (name.startsWith("oldsave:")) {
+    let rec = keptRecordFrom(bytes);
+    if (!rec) return;
+    let game = parseDriveFileName(name).game;
+    let had = await getKeptSave(game);
+    // Kept by another device (it held the game when it was deleted and
+    // loaded again): said here once, as the device that kept it said it.
+    if ((await storeKeptRecord(game, rec)) && !had && keptOffer(rec) && rec.why === "deleted") {
+      showToast("A save of “" + displayName(game) + "” from before you deleted it came " +
+                "back from another device. It is kept for 30 days — Restore it from the " +
+                "game's menu.");
+    }
     return;
   }
   // A save or a state: the person's own, and worth a ROM file to land. Left
@@ -2707,16 +2792,53 @@ const writeDriveLibrary = async (lib, remote, readFrom = remote) => {
   }
 };
 
+// --- Generations -----------------------------------------------------------
+// A game deleted and then loaded again is a new game under the old name, and
+// nothing of the deleted one may follow it in: not from a device that had
+// not pulled the delete, and not from Drive. So a library entry carries a
+// generation (`gen`; absent is 0, which is every entry and tombstone written
+// before generations existed), and loading a game again after its delete
+// starts the next one (bumpRecentIndex). A tombstone records the generation
+// it deleted and stands beside an entry of a newer one instead of giving way
+// to it (mergeLibrary), so a device holding the deleted game can tell. A
+// Drive file carries the generation it was written for in
+// appProperties.gen (absent is 0), its name and bytes saying nothing of it.
+//
+// A save of an older generation is never applied to the newer game. It is
+// kept aside under "oldsave:<name>" ("a save from before you deleted this
+// game"), offered in the game's menu and in Manage Saves with a Restore, for
+// KEPT_SAVE_MS from the delete, then dropped here and on Drive.
+const genOf = (x) => (Number.isInteger(x?.gen) && x.gen > 0 ? x.gen : 0);
+const withGen = (o, gen) => (gen > 0 ? { ...o, gen } : o);
+const fileGen = (f) => {
+  let g = Number(f?.appProperties?.gen);
+  return Number.isInteger(g) && g > 0 ? g : 0;
+};
+const KEPT_SAVE_MS = 30 * 24 * 3600 * 1000;
+const keptSaveKey = (name) => "oldsave:" + name;
+// The Drive kinds that belong to one generation of a game: its progress and
+// its picture. A ROM carries no progress, and a kept save says for itself
+// which game it came from.
+const genBound = (kind) => kind !== "rom" && kind !== "oldsave";
+// Deleted: a tombstone with no entry of a newer generation beside it (in a
+// merged library the two stand together only then).
+const deletedIn = (lib, name) =>
+  lib.tomb.some((t) => t.name === name) && !lib.recents.some((e) => e.name === name);
+const libGen = (lib, name) => genOf(lib.recents.find((e) => e.name === name));
+
 const mergeLibrary = (a, b) => {
   let byName = new Map();
   for (let e of [...(a.recents || []), ...(b.recents || [])]) {
     if (!e?.name) continue;
     let prev = byName.get(e.name);
-    // The newest play wins the entry; the newest import claim from either
-    // side is kept alongside it, whichever entry that was.
+    // A newer generation wins the entry outright; within one, the newest
+    // play. The newest import claim from either side is kept alongside it,
+    // whichever entry that was.
     let imp = Math.max(prev?.imp || 0, e.imp || 0);
-    if (!prev || (e.ts || 0) > (prev.ts || 0)) {
-      byName.set(e.name, { name: e.name, ts: e.ts || 0 });
+    let g = genOf(e);
+    let pg = prev ? genOf(prev) : -1;
+    if (!prev || g > pg || (g === pg && (e.ts || 0) > (prev.ts || 0))) {
+      byName.set(e.name, withGen({ name: e.name, ts: e.ts || 0 }, g));
     }
     if (imp) byName.get(e.name).imp = imp;
   }
@@ -2740,10 +2862,11 @@ const mergeLibrary = (a, b) => {
     let reimported = !!e && (e.imp || 0) > r.ts;
     if (e && !reimported) {
       byName.delete(r.from);
+      // The game keeps its generation under its new name.
       let t = byName.get(r.to);
-      if (!t || (t.ts || 0) < (e.ts || 0)) {
-        byName.set(r.to, e.imp ? { name: r.to, ts: e.ts || 0, imp: e.imp }
-                                : { name: r.to, ts: e.ts || 0 });
+      if (!t || genOf(t) < genOf(e) || (genOf(t) === genOf(e) && (t.ts || 0) < (e.ts || 0))) {
+        byName.set(r.to, withGen(e.imp ? { name: r.to, ts: e.ts || 0, imp: e.imp }
+                                        : { name: r.to, ts: e.ts || 0 }, genOf(e)));
       }
       // A rename claims its new name, as an import does (and as renameGame
       // stamps it on the renaming device). A game renamed into a name that
@@ -2764,11 +2887,22 @@ const mergeLibrary = (a, b) => {
   for (let t of [...(a.tomb || []), ...(b.tomb || [])]) {
     if (!t?.name) continue;
     let prev = tomb.get(t.name);
-    if (!prev || (t.ts || 0) > (prev.ts || 0)) tomb.set(t.name, { name: t.name, ts: t.ts || 0 });
+    let g = genOf(t);
+    let pg = prev ? genOf(prev) : -1;
+    if (!prev || g > pg || (g === pg && (t.ts || 0) > (prev.ts || 0))) {
+      tomb.set(t.name, withGen({ name: t.name, ts: t.ts || 0 }, g));
+    }
   }
   for (let [name, t] of tomb) {
     let e = byName.get(name);
-    if (e && (e.ts || 0) > (t.ts || 0)) tomb.delete(name); // re-upload supersedes
+    // Loaded again after the delete: a new game under the old name. Both
+    // stand, the tombstone being how a device that holds the deleted game
+    // learns that it was.
+    if (e && genOf(e) > genOf(t)) continue;
+    // Within one generation a later play says the delete was not meant (a
+    // re-upload supersedes); an entry of an older generation than the
+    // delete is of a game already gone.
+    if (e && genOf(e) === genOf(t) && (e.ts || 0) > (t.ts || 0)) tomb.delete(name);
     else byName.delete(name);
   }
   return {
@@ -2783,6 +2917,156 @@ const localLibrary = async () => ({
   tomb: syncState.tomb.slice(),
   ren: syncState.ren.slice(),
 });
+
+// --- Kept saves (see genOf) --------------------------------------------------
+// "oldsave:<name>" holds { data, at, del, kept, why }: the save's bytes (null
+// once a restore found no save to put in its place), when it was saved as
+// near as is known, when the game was deleted (the 30 days run from there),
+// when this record was written, and what it is - "deleted" (a save from
+// before you deleted this game), "replaced" (the save a restore put aside),
+// "restored" (nothing left to offer). On Drive it is JSON, the bytes base64.
+const keptRecordBytes = (v) => {
+  if (!v || typeof v !== "object" || ArrayBuffer.isView(v)) return null;
+  let d = ArrayBuffer.isView(v.data)
+    ? new Uint8Array(v.data.buffer, v.data.byteOffset, v.data.byteLength) : null;
+  return new TextEncoder().encode(JSON.stringify({
+    at: v.at || 0, del: v.del || 0, kept: v.kept || 0, why: v.why || "deleted",
+    data: d && d.length ? base64FromBytes(d) : null,
+  }));
+};
+const keptRecordFrom = (bytes) => {
+  try {
+    let o = JSON.parse(new TextDecoder().decode(bytes));
+    if (!o || typeof o !== "object") return null;
+    let data = null;
+    if (typeof o.data === "string" && o.data) {
+      let bin = atob(o.data);
+      data = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) data[i] = bin.charCodeAt(i);
+    }
+    return { data, at: Number(o.at) || 0, del: Number(o.del) || 0,
+             kept: Number(o.kept) || 0, why: typeof o.why === "string" ? o.why : "deleted" };
+  } catch {
+    return null;
+  }
+};
+// A save the kept record still offers (a "restored" one offers nothing).
+const keptOffer = (rec) =>
+  rec && typeof rec === "object" && ArrayBuffer.isView(rec.data) && rec.data.byteLength > 0
+    ? rec : null;
+const getKeptSave = async (game) => keptOffer(await dbGet(keptSaveKey(game)));
+
+// Two copies of one game's kept save (this device's, and another device's
+// from Drive): the one written later stands. A capture is stamped with when
+// its save was made, so the newest save from before the delete wins; a
+// restore with the moment of the restore, so it outranks every copy of the
+// save it restored. True when `rec` was stored. Ours being the newer, Drive
+// gets ours back.
+const storeKeptRecord = async (game, rec) => {
+  let key = keptSaveKey(game);
+  let cur = await dbGet(key);
+  if (cur && typeof cur === "object" && (cur.kept || 0) >= (rec.kept || 0)) {
+    if ((cur.kept || 0) > (rec.kept || 0)) markUpload(key);
+    return false;
+  }
+  await dbPut(key, rec);
+  return true;
+};
+const keepOldSave = async (game, rec) => {
+  let stored = await storeKeptRecord(game, rec);
+  if (stored) markUpload(keptSaveKey(game));
+  return stored;
+};
+
+// Past its 30 days, a kept save leaves this device and (queued) Drive.
+const expireKeptSaves = async () => {
+  let now = Date.now();
+  for (let k of await dbKeys()) {
+    if (typeof k !== "string" || !k.startsWith("oldsave:")) continue;
+    let rec = await dbGet(k);
+    if (rec && typeof rec === "object" && now < (rec.del || 0) + KEPT_SAVE_MS) continue;
+    await dbDelete(k);
+    markDelete(k);
+  }
+};
+
+// This device's records of `game` are of an older generation than the
+// library's: the game was deleted and loaded again elsewhere before this
+// device pulled the delete. They go, as the delete would have taken them had
+// it arrived in time, except the battery save, which is kept aside. Queued
+// uploads of them are dropped (the flush holds them back meanwhile). True
+// when a save was kept.
+const convertStaleGame = async (game, lib, entry) => {
+  let kept = keptSaveKey(game);
+  let bytes = await readSyncBytes("save:" + game);
+  let keptIt = false;
+  if (bytes) {
+    // When it was saved, as near as this device knows: when Drive last took
+    // it from here, or when the game was last started.
+    let at = Math.max(Date.parse(syncState.rmt["save:" + game] || "") || 0,
+                      entry?.ts || 0) || Date.now();
+    let t = lib.tomb.find((x) => x.name === game);
+    keptIt = await keepOldSave(game, { data: bytes, at, del: t?.ts || Date.now(),
+                                       kept: at, why: "deleted" });
+  }
+  let old = allPerGameKeys(game).filter((k) => k !== kept);
+  syncState.queueUp = syncState.queueUp.filter((n) => !old.includes(n));
+  await deleteKeys(old);
+  // What sigs/rmt remember is of the deleted game's files.
+  for (let k of old) {
+    delete syncState.sigs[k];
+    delete syncState.rmt[k];
+  }
+  return keptIt;
+};
+
+// Kept-save wording, shared by the game's menu and Manage Saves.
+const fmtKeptDay = (ts) => {
+  try { return new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" }); }
+  catch { return ""; }
+};
+const keptSaveTitle = (rec) => rec.why === "replaced"
+  ? "The save you replaced" : "Save from before you deleted this game";
+const keptSaveSub = (rec) => (rec.at ? "Saved " + fmtStateTime(rec.at) + " · " : "") +
+  "kept until " + fmtKeptDay((rec.del || 0) + KEPT_SAVE_MS);
+
+// Restore: the kept save becomes the game's save, and the game's save is kept
+// in its place, so a second Restore undoes the first. No save to keep in its
+// place leaves a record that offers nothing (and outranks every older copy
+// of the save just restored, which another device may still hold).
+const restoreKeptSave = async (game) => {
+  let key = keptSaveKey(game);
+  let rec = keptOffer(await dbGet(key));
+  if (!rec) return false;
+  if (isRomLoaded(game) && (linkMode || rollbackMode || netActive())) {
+    showToast("Exit the online session first");
+    return false;
+  }
+  // The running game's save as it is now is the one being replaced: flushed,
+  // then detached, as an imported save is (applyImportedSave).
+  let game0 = null;
+  if (currentOriginalName === game && currentRomName) {
+    await persistSave(currentRomName, game);
+    game0 = detachLoadedGame();
+  }
+  let cur = await readSyncBytes("save:" + game);
+  let now = Date.now();
+  let at = !cur ? 0 : game0 || syncState.queueUp.includes("save:" + game)
+    ? now : Date.parse(syncState.rmt["save:" + game] || "") || now;
+  retireSavePuts(game); // a waiting quota retry gives way (persistSeq)
+  await dbPut("save:" + game, new Uint8Array(rec.data));
+  // The resume snapshot holds the save being replaced.
+  await deleteKeys(perGameKeys(game).session);
+  markUpload("save:" + game);
+  await dbPut(key, cur
+    ? { data: cur, at, del: rec.del, kept: now, why: "replaced" }
+    : { data: null, at: 0, del: rec.del, kept: now, why: "restored" });
+  markUpload(key);
+  if (game0) loadRom(game0.romName, game0.originalName);
+  showToast(cur ? "Old save restored — Restore again to switch back"
+                : "Old save restored");
+  return true;
+};
 
 // --- Sync status indicator ---------
 const SYNC_ICONS = {
@@ -3009,6 +3293,10 @@ const flushSyncInner = async () => {
       if (r && !outranked) {
         await driveDelete(r.id);
         live();
+        // Gone from the listing too: the upload pass below then creates the
+        // file afresh if it is queued again (a game deleted and loaded again
+        // before this flush) rather than writing to the deleted one.
+        remote.delete(name);
       }
       if (!outranked) {
         delete syncState.sigs[name];
@@ -3029,12 +3317,24 @@ const flushSyncInner = async () => {
       // ever take it down again), and the pull's tombstone pass deals with
       // the local copy. A game renamed elsewhere: its old-name files wait,
       // still queued, for the pull to move them under the new name.
-      let game = parseDriveFileName(name)?.game;
-      if (game && lib.tomb.some((t) => t.name === game)) {
+      let parsed = parseDriveFileName(name);
+      let game = parsed?.game;
+      if (game && deletedIn(lib, game)) {
         syncState.queueUp = syncState.queueUp.filter((n) => n !== name);
         continue;
       }
       if (game && lib.ren.some((r) => r.from === game)) continue;
+      // The generation this device holds the game at, read now: an import
+      // made since the merge starts a new one.
+      let gen = game
+        ? genOf(live(await getRecentMeta()).find((e) => e?.name === game)) : 0;
+      // What this device holds of a game deleted and loaded again elsewhere
+      // is the deleted game's, and never goes up as the new one's. The pull
+      // keeps its save aside and drops the rest (convertStaleGame).
+      if (game && genBound(parsed.kind) && libGen(lib, game) > gen) {
+        syncState.queueUp = syncState.queueUp.filter((n) => n !== name);
+        continue;
+      }
       // A save of this key from here on is newer than the bytes read below.
       syncRemarked.delete(name);
       let bytes = live(await readSyncBytes(name));
@@ -3043,9 +3343,13 @@ const flushSyncInner = async () => {
         let sig = sigOfBytes(bytes);
         // The listing is the truth; sigs only remember what this device once
         // uploaded. A file missing remotely uploads regardless of its sig.
-        // Present: ROMs are immutable, anything else re-uploads on change.
-        if (!r || (!name.startsWith("rom:") && sig !== syncState.sigs[name])) {
-          let res = live(await driveUploadFile(name, bytes, r?.id));
+        // Present: ROMs are immutable, anything else re-uploads on change;
+        // and a file written for an older generation is replaced whatever
+        // its bytes, taking this one's stamp.
+        let restamp = !!r && fileGen(r) !== gen;
+        if (!r || (restamp && fileGen(r) < gen) ||
+            (!name.startsWith("rom:") && sig !== syncState.sigs[name])) {
+          let res = live(await driveUploadFile(name, bytes, r?.id, gen, restamp));
           let meta = live(await res?.json?.().catch(() => null));
           // Drive's stamp for this write, so the next pull knows the file
           // is unchanged since and does not fetch back what was just sent.
@@ -3258,18 +3562,24 @@ const pullSyncInner = async ({ silent = true } = {}) => {
     }
 
     let pending = [];
-    for (let t of lib.tomb) if (live(await hasLocalData(t.name))) pending.push(t.name);
+    for (let t of lib.tomb) {
+      // A tombstone beside a newer generation is of a game loaded again
+      // since: the pass below deals with what is held of the deleted one.
+      if (deletedIn(lib, t.name) && live(await hasLocalData(t.name))) pending.push(t.name);
+    }
     if (pending.length) {
       let keep = live(await confirmTombstones(pending));
       if (keep === "restore") {
-        // Un-delete: drop the tombstones and re-upload.
-        lib.tomb = lib.tomb.filter((t) => !pending.includes(t.name));
+        // Un-delete: drop the tombstones and re-upload, at the generation
+        // that was deleted.
         let now = Date.now();
         for (let g of pending) {
+          let gen = genOf(lib.tomb.find((t) => t.name === g));
           lib.recents = lib.recents.filter((r) => r.name !== g);
-          lib.recents.unshift({ name: g, ts: now });
+          lib.recents.unshift(withGen({ name: g, ts: now }, gen));
           markGameUpload(g);
         }
+        lib.tomb = lib.tomb.filter((t) => !pending.includes(t.name));
       } else {
         for (let g of pending) {
           // Never yank the game being played, nor the one mid-load: its load
@@ -3282,6 +3592,37 @@ const pullSyncInner = async ({ silent = true } = {}) => {
         }
       }
     }
+
+    // Games deleted and loaded again elsewhere while this device held them:
+    // what it holds is the deleted game's (its entry is of an older
+    // generation than the library's). Its save is kept aside and the rest
+    // goes. Not the game being played or loaded, which keeps its generation
+    // here (`stale`, pinned at the commit below) until the next pull.
+    let stale = new Map();
+    let hereList = live(await getRecentMeta());
+    for (let e of lib.recents) {
+      let h = hereList.find((x) => x?.name === e.name);
+      if (genOf(e) <= genOf(h)) continue;
+      let held = false;
+      for (let k of allPerGameKeys(e.name)) {
+        if (k !== keptSaveKey(e.name) && live(await dbGet(k)) != null) { held = true; break; }
+      }
+      if (!held) continue;
+      if (isRomLoaded(e.name) || loadingName === e.name) {
+        stale.set(e.name, genOf(h));
+        continue;
+      }
+      let keptIt = live(await convertStaleGame(e.name, lib, h));
+      gridDirty = true;
+      if (keptIt) {
+        showToast("“" + displayName(e.name) + "” was deleted and loaded again on another " +
+                  "device. Your save from before is kept for 30 days — Restore it from " +
+                  "the game's menu.");
+      }
+    }
+    // Past their 30 days: kept saves held here (Drive's copies follow in
+    // the listing pass).
+    live(await expireKeptSaves());
 
     // Pull saves/states for games this device holds, and pictures for every
     // game in the library: a Drive-only tile shows the screen another device
@@ -3303,15 +3644,49 @@ const pullSyncInner = async ({ silent = true } = {}) => {
         if (f.size) await noteRomSize(p.game, Number(f.size) || 0);
         continue;
       }
+      if (p.kind === "oldsave") {
+        // A kept save past its 30 days, whoever kept it: from the delete the
+        // library records, or failing that from when it reached Drive.
+        let t = lib.tomb.find((x) => x.name === p.game);
+        let from = t?.ts || Date.parse(f.modifiedTime || "") || 0;
+        if (Date.now() >= from + KEPT_SAVE_MS) {
+          if (!syncState.queueDel.includes(name)) markDelete(name);
+          continue;
+        }
+      }
       if (p.kind === "frame") {
         if (!lib.recents.some((r) => r.name === p.game)) continue; // not a library game
-      } else if (!(await hasLocalRom(p.game))) {
+      } else if (!(await hasLocalRom(p.game)) &&
+                 // A kept save held here follows Drive's (a restore elsewhere).
+                 !(p.kind === "oldsave" && local.has(name))) {
         continue;                                  // Drive-only: pull on demand
       }
       // Don't fight the autosave: not for the game being played, nor for the
       // one being loaded (loadingName), which will run on the save it read.
       if (isRomLoaded(p.game) || loadingName === p.game) continue;
       if (syncState.rmt[name] === f.modifiedTime) continue; // unchanged remotely
+      // Written for an older generation of the game: a device that had not
+      // pulled the delete sent it. Never applied. A save is kept aside; then
+      // Drive's copy is replaced by this device's (the new game's) or, with
+      // none here, taken down - by a device holding the game, so the save is
+      // kept before it goes.
+      if (genBound(p.kind) && fileGen(f) < libGen(lib, p.game)) {
+        if (p.kind === "save") {
+          let old = live(await driveDownload(f.id));
+          let at = Date.parse(f.modifiedTime || "") || Date.now();
+          let t = lib.tomb.find((x) => x.name === p.game);
+          if (old.length && live(await keepOldSave(p.game, {
+            data: old, at, del: t?.ts || Date.now(), kept: at, why: "deleted" }))) {
+            showToast("A save of “" + displayName(p.game) + "” from before you deleted " +
+                      "it came back from another device. It is kept for 30 days — " +
+                      "Restore it from the game's menu.");
+          }
+        }
+        if (syncState.queueDel.includes(name)) continue;
+        if (live(await readSyncBytes(name))) markUpload(name);
+        else markDelete(name);
+        continue;
+      }
       let bytes = live(await driveDownload(f.id));
       // Again, in the run that writes: a tap during the download has booted
       // the game on the older save, and its first flush would write that
@@ -3337,7 +3712,7 @@ const pullSyncInner = async ({ silent = true } = {}) => {
     // (sigs only remember what was once uploaded). Tombstoned games stay deleted.
     for (let [name, p] of local) {
       if (remote.has(name)) continue;
-      if (lib.tomb.some((t) => t.name === p.game)) continue;
+      if (deletedIn(lib, p.game)) continue;
       // A deferred rename still holds files under the old name; re-uploading
       // them would resurrect the retired names.
       if (renPending.has(p.game)) continue;
@@ -3367,6 +3742,7 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       // cancelled by the flush if a later play revives the game), from the
       // tombstones as adopted here, after this device's own changes.
       for (let t of lib.tomb) {
+        if (!deletedIn(lib, t.name)) continue; // loaded again since: its files are its own
         for (let n of remote.keys()) {
           if (parseDriveFileName(n)?.game === t.name && !syncState.queueDel.includes(n)) {
             markDelete(n);
@@ -3377,6 +3753,15 @@ const pullSyncInner = async ({ silent = true } = {}) => {
       // "Drive only" tile for a local game, whose download forks the library),
       // with ts pinned under the marker so it still folds forward next merge.
       let recents = lib.recents;
+      // A game still held at an older generation (being played) keeps it
+      // here, so the next pull knows its records are the deleted game's.
+      if (stale.size) {
+        recents = recents.map((e) => {
+          if (!stale.has(e.name)) return e;
+          let { gen, ...rest } = e;
+          return withGen(rest, stale.get(e.name));
+        });
+      }
       if (renPending.size) {
         let back = new Map();
         for (let m of lib.ren) if (renPending.has(m.from)) back.set(m.to, m);
@@ -3432,14 +3817,29 @@ const downloadGame = async (game) => {
       (f) => parseDriveFileName(f.name)?.game === game);
     if (!files.length) { showToast("That game isn't on Drive anymore"); }
     else {
+      // The newest generation any of it was written for (see genOf); a file
+      // of an older one is the deleted game's, not applied (its save kept
+      // aside), and left for the next pull to replace or take down.
+      let entry = (await getRecentMeta()).find((e) => e?.name === game);
+      let gen = Math.max(genOf(entry), ...files.map(fileGen));
       for (let f of files) {
+        let p = parseDriveFileName(f.name);
+        if (p && genBound(p.kind) && fileGen(f) < gen) {
+          if (p.kind === "save") {
+            let at = Date.parse(f.modifiedTime || "") || Date.now();
+            let t = syncState.tomb.find((x) => x?.name === game);
+            await keepOldSave(game, { data: await driveDownload(f.id), at,
+                                      del: t?.ts || Date.now(), kept: at, why: "deleted" });
+          }
+          continue;
+        }
         let bytes = await driveDownload(f.id);
         await writeSyncBytes(f.name, bytes);
         if (f.name === romKey(game)) await noteRomSize(game, bytes.length);
         syncState.sigs[f.name] = sigOfBytes(bytes);
         syncState.rmt[f.name] = f.modifiedTime;
       }
-      await bumpRecentIndex(game);
+      await bumpRecentIndex(game, { gen });
       await saveSyncState();
       requestPersistentStorage();
       ok = true;
@@ -3506,8 +3906,10 @@ const deleteGameEverywhere = async (game) => {
   // commit (which re-reads both under the same lock) sees both or neither.
   await updateRecent((list) => {
     if (driveEnrolled()) {
+      // The generation deleted: loading the game again starts the next.
+      let gen = genOf(list.find((r) => r?.name === game));
       syncState.tomb = syncState.tomb.filter((t) => t.name !== game);
-      syncState.tomb.push({ name: game, ts: Date.now() });
+      syncState.tomb.push(withGen({ name: game, ts: Date.now() }, gen));
     }
     return list.filter((r) => r.name !== game);
   });
@@ -3586,6 +3988,7 @@ const renameInventory = async (name) => {
     states,
     session: await has(autoStateKey(name)),
     cheats: await has(CHEATS_KEY(name)),
+    kept: !!(await getKeptSave(name)),
     prints: Array.isArray(prints)
       ? prints.filter((p) => p?.game === name).length : 0,
   };
@@ -3599,6 +4002,7 @@ const renameInventoryLines = (inv) => {
   if (inv.states) out.push(inv.states + (inv.states === 1 ? " save state" : " save states"));
   if (inv.session) out.push("The resume snapshot");
   if (inv.cheats) out.push("Your cheat list");
+  if (inv.kept) out.push("The save kept from before you deleted it");
   if (inv.prints) out.push(inv.prints + (inv.prints === 1 ? " printed photo" : " printed photos"));
   return out;
 };
@@ -3708,7 +4112,8 @@ const renameGame = async (oldName, newName) => {
       // drags the files back and forth on every sync.
       if (recents.some((r) => r?.name === oldName)) {
         let list = recents.filter((r) => r?.name !== oldName);
-        list.unshift({ name: newName, ts, imp: ts });
+        list.unshift(withGen({ name: newName, ts, imp: ts },
+                             genOf(recents.find((r) => r?.name === oldName))));
         all.push(["recent", list]);
       }
       if (renamed) all.push(["gdrive_sync", renamed(syncState)]);
@@ -4845,7 +5250,7 @@ const enforceRomBudget = async (list) => {
 
 // Move `name` to the front of the index and spend the byte budget over the
 // result (ROM files only, never saves).
-const bumpRecentIndex = (name, { fresh = false } = {}) => updateRecent(async (all) => {
+const bumpRecentIndex = (name, { fresh = false, gen: atLeast = 0 } = {}) => updateRecent(async (all) => {
   let prev = all.find((r) => r?.name === name);
   let list = all.filter((r) => r.name !== name);
   let ts = Date.now();
@@ -4862,7 +5267,15 @@ const bumpRecentIndex = (name, { fresh = false } = {}) => updateRecent(async (al
   // by a fresh import claiming the old name, which is a different game now.
   // mergeLibrary is what reads it.
   let imp = fresh ? ts : prev?.imp;
-  list.unshift(imp ? { name, ts, imp } : { name, ts });
+  // The generation (see genOf) carries over, raised to `atLeast` (a download
+  // of files written for a newer one); a game loaded again after this device
+  // deleted it starts the next one after the generation deleted.
+  let gen = Math.max(genOf(prev), atLeast);
+  if (fresh) {
+    let t = syncState.tomb.find((x) => x?.name === name);
+    if (t) gen = Math.max(gen, genOf(t) + 1);
+  }
+  list.unshift(withGen(imp ? { name, ts, imp } : { name, ts }, gen));
   await enforceRomBudget(list);
   return list;
 });
@@ -5181,6 +5594,19 @@ const tileMenuEntries = (name, f) => {
     confirmLabel: "Delete all save data?",
     run: () => resetGameAction(name),
   }));
+  // A save from before the game was deleted and loaded again (see genOf),
+  // or the one a Restore put aside: the only item that says what it is,
+  // because nothing else on screen can.
+  if (f.kept) {
+    items.push(tileMenuItem({
+      label: "Restore old save",
+      sub: (f.kept.why === "replaced" ? "The save you replaced" : "From before you deleted it") +
+           (f.kept.at ? " · saved " + fmtStateTime(f.kept.at) : ""),
+      disabled: busy,
+      confirmLabel: "Replace the current save?",
+      run: () => restoreKeptSave(name),
+    }));
+  }
   if (!f.driveOnly && f.linked) {
     items.push(tileMenuItem({
       label: "Remove from this device",
@@ -5297,8 +5723,9 @@ const placeTileMenu = (anchor, at) => {
 // `at` = {x, y} for a right-click; else the menu hangs off `anchor`.
 const openTileMenu = async (name, anchor, tile, at = null, session = false) => {
   closeTileMenu();
-  let [localRoms, withSaves] = await Promise.all([localRomSet(), romsWithSaveData()]);
-  let f = gameFlags(name, localRoms, new Set(withSaves));
+  let [localRoms, withSaves, kept] = await Promise.all(
+    [localRomSet(), romsWithSaveData(), getKeptSave(name)]);
+  let f = { ...gameFlags(name, localRoms, new Set(withSaves)), kept };
   tileMenuFor = name;
   tileMenuAnchor = anchor;
   // A tile is a picture in a grid of them, so the menu has to say which game
@@ -11519,6 +11946,9 @@ const initStorage = async () => {
   // After loadSyncState, which reads the tombstones it consults, and before
   // the first render: an adopted game is a library game from the start.
   await adoptSaveOnlyGames();
+  // Kept saves past their 30 days (see genOf), whether or not Drive is
+  // reachable today: the delete to Drive is queued.
+  await expireKeptSaves().catch(() => {});
   refreshSyncUI();
   startSyncTriggers();
   resumeDriveOnBoot();

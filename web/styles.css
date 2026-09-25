@@ -3522,7 +3522,8 @@ body.debug-2p .home-tile-link {
 /* .modal-toggle-row is display:flex, which would defeat [hidden]. */
 #thumbs-progress[hidden],
 #thumbs-offer[hidden],
-#thumbs-drive-row[hidden] {
+#thumbs-drive-row[hidden],
+#kept-save-row[hidden] {
   display: none;
 }
 

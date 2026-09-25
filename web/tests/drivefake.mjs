@@ -30,6 +30,15 @@ export const makeDrive = ({ seed = {}, clock, pageSize = Infinity } = {}) => {
       ? new TextEncoder().encode(typeof b === "string" ? b : JSON.stringify(b)) : b);
   }
   const byId = (id) => files.find((f) => f.id === id);
+  // Drive merges appProperties key by key on an update; null removes a key.
+  const setProps = (f, props) => {
+    const next = { ...(f.appProperties || {}) };
+    for (const [k, v] of Object.entries(props)) {
+      if (v == null) delete next[k];
+      else next[k] = String(v);
+    }
+    f.appProperties = Object.keys(next).length ? next : undefined;
+  };
   const log = [];
   const holds = [];
 
@@ -65,9 +74,12 @@ export const makeDrive = ({ seed = {}, clock, pageSize = Infinity } = {}) => {
       const q = new URL(url).searchParams;
       const size = Math.min(Number(q.get("pageSize")) || 100, pageSize);
       const start = Number(q.get("pageToken") || 0);
+      // Drive returns appProperties only to a listing that asks for them.
+      const props = (q.get("fields") || "").includes("appProperties");
       const page = files.slice(start, start + size).map((f) => ({
         id: f.id, name: f.name, size: String(f.bytes.length),
         modifiedTime: f.modifiedTime, createdTime: f.createdTime,
+        ...(props && f.appProperties ? { appProperties: { ...f.appProperties } } : {}),
       }));
       const more = start + size < files.length;
       return jsonRes(more ? { files: page, nextPageToken: String(start + size) }
@@ -82,7 +94,9 @@ export const makeDrive = ({ seed = {}, clock, pageSize = Infinity } = {}) => {
     if (meta && method === "PATCH") {
       const f = byId(meta[1]);
       if (!f) return jsonRes({}, 404);
-      f.name = JSON.parse(opts.body).name;
+      const body = JSON.parse(opts.body);
+      if (body.name) f.name = body.name;
+      if (body.appProperties) setProps(f, body.appProperties);
       f.modifiedTime = iso(now());
       entry.name = f.name;
       return jsonRes({ id: f.id, name: f.name, modifiedTime: f.modifiedTime });
@@ -95,19 +109,39 @@ export const makeDrive = ({ seed = {}, clock, pageSize = Infinity } = {}) => {
       files.splice(i, 1);
       return jsonRes({}, 204);
     }
-    if (url.startsWith(UPLOAD + "?uploadType=multipart") && method === "POST") {
+    const multipart = async () => {
       const text = await opts.body.text();
-      const name = JSON.parse(text.match(/\r\n\r\n(\{.*?\})\r\n--/s)[1]).name;
+      const meta = JSON.parse(text.match(/\r\n\r\n(\{.*?\})\r\n--/s)[1]);
       const mark = "application/octet-stream\r\n\r\n";
       const payload = text.slice(text.indexOf(mark) + mark.length, text.lastIndexOf("\r\n--"));
-      const f = add(name, new TextEncoder().encode(payload));
-      entry.name = name;
+      return { meta, bytes: new TextEncoder().encode(payload) };
+    };
+    if (url.startsWith(UPLOAD + "?uploadType=multipart") && method === "POST") {
+      const { meta, bytes } = await multipart();
+      const f = add(meta.name, bytes);
+      if (meta.appProperties) setProps(f, meta.appProperties);
+      entry.name = meta.name;
       return jsonRes({ id: f.id, modifiedTime: f.modifiedTime });
     }
     if (url === FILES && method === "POST") {           // driveCreateEmpty
-      const f = add(JSON.parse(opts.body).name, u8());
+      const meta = JSON.parse(opts.body);
+      const f = add(meta.name, u8());
+      if (meta.appProperties) setProps(f, meta.appProperties);
       entry.name = f.name;
       return jsonRes({ id: f.id });
+    }
+    // Content and metadata in one update (files.update, uploadType=multipart).
+    const mpatch = url.match(/\/upload\/drive\/v3\/files\/([^/?]+)\?uploadType=multipart/);
+    if (mpatch && method === "PATCH") {
+      const f = byId(mpatch[1]);
+      if (!f) return jsonRes({}, 404);
+      const { meta, bytes } = await multipart();
+      f.bytes = bytes;
+      if (meta.name) f.name = meta.name;
+      if (meta.appProperties) setProps(f, meta.appProperties);
+      f.modifiedTime = iso(now());
+      entry.name = f.name;
+      return jsonRes({ id: f.id, modifiedTime: f.modifiedTime });
     }
     const media = url.match(/\/upload\/drive\/v3\/files\/([^/?]+)\?uploadType=media/);
     if (media && method === "PATCH") {

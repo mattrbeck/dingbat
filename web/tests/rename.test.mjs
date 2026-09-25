@@ -18,6 +18,7 @@ const perGameKeys = (n) => [
   "save:" + n + "-p2",
   "stateauto:" + n,
   "cheats:" + n,
+  "oldsave:" + n,
   "state:" + n, "statemeta:" + n,
   ...[1, 2, 3, 4, 5, 6, 7, 8].flatMap((s) =>
     ["state:" + n + ":slot" + s, "statemeta:" + n + ":slot" + s]),
@@ -33,6 +34,8 @@ const seedValue = (key, name) => {
   if (key.startsWith("statemeta:")) return { thumb: "data:image/png;base64,AA==", ts: 1000 };
   if (key.startsWith("stateauto:")) return { bytes: u8(5, 5), ts: 1000 };
   if (key.startsWith("cheats:")) return "[x] Infinite HP\n01ABCD01\n";
+  // Deleted just now: within its 30 days, so no pull expires it.
+  if (key.startsWith("oldsave:")) return { data: u8(6, 6), at: 900, del: Date.now(), kept: 900, why: "deleted" };
   return u8(7, 7);
 };
 

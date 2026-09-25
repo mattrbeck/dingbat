@@ -27,6 +27,7 @@ const perGameKeys = (n) => [
   "save:" + n + "-p2",        // the 2P link partner's battery save
   "stateauto:" + n,           // auto-resume snapshot ("Resume" toast)
   "cheats:" + n,              // this game's cheat list
+  "oldsave:" + n,             // a save kept from before the game was deleted
   // Nine save-state slots; slot 0 is the legacy un-suffixed key pair.
   "state:" + n, "statemeta:" + n,
   ...[1, 2, 3, 4, 5, 6, 7, 8].flatMap((s) =>
@@ -37,9 +38,11 @@ const perGameKeys = (n) => [
 const syncableKeys = (n) =>
   perGameKeys(n).filter((k) =>
     !k.startsWith("art:") && !k.startsWith("stateauto:") && !k.startsWith("cheats:"));
-// ...of which the save data: everything mirrored but the ROM and its picture.
+// ...of which the save data: everything mirrored but the ROM, its picture
+// and a kept save (a way back, which a save reset leaves).
 const saveKeys = (n) =>
-  syncableKeys(n).filter((k) => !k.startsWith("rom:") && !k.startsWith("frame:"));
+  syncableKeys(n).filter((k) => !k.startsWith("rom:") && !k.startsWith("frame:") &&
+                                !k.startsWith("oldsave:"));
 
 // A plausible stored value per key shape (statemeta object, cheats text, bytes).
 const seedValue = (key, name) => {
@@ -47,6 +50,8 @@ const seedValue = (key, name) => {
   if (key.startsWith("statemeta:")) return { thumb: "data:image/png;base64,AA==", ts: 1000 };
   if (key.startsWith("stateauto:")) return { bytes: u8(5, 5, 5, 5), ts: 1000 };
   if (key.startsWith("cheats:")) return "[x] Infinite HP\n01ABCD01\n";
+  // Deleted just now: within its 30 days, so no pull expires it.
+  if (key.startsWith("oldsave:")) return { data: u8(6, 6), at: 900, del: Date.now(), kept: 900, why: "deleted" };
   return u8(7, 7);
 };
 
@@ -115,6 +120,7 @@ test("index.js's perGameKeys is exactly the per-game inventory this file pins", 
   eq(sorted(groups.bytes), ["art:A.gba", "frame:A.gba", "rom:A.gba"]);
   eq(groups.session, ["stateauto:A.gba"], "the resume snapshot is its own group");
   eq(groups.prefs, ["cheats:A.gba"]);
+  eq(groups.kept, ["oldsave:A.gba"], "a kept save is its own group");
   eq(sorted(groups.saves), sorted(saveKeys("A.gba")));
 });
 
