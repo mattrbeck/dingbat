@@ -25,6 +25,16 @@ const FIFO_DMA_REQUEST_DELAY {.intdefine.} = 4
   ## from 3 to 5. Bounded: at most one request per overflow per FIFO, and
   ## a grant re-checks the FIFO level (dma.run_pending).
 
+const FIFO_OWN_BURST_NO_REQUEST {.booldefine.} = true
+  ## A timer overflow that lands inside the refill burst of the FIFO it
+  ## drives does not ask for another one. Events only run inside a burst when
+  ## a higher-priority DMA channel is armed on a trigger (dma.run_channel's
+  ## preemption drain); without this the overflow saw the FIFO half filled
+  ## and chained a second burst. tools/hwlink fifospk on an AGB SP with DMA0
+  ## armed on V-blank (idle): k = 20, the first refill costs the CPU one
+  ## burst at every NOP count, as it does with DMA0 off (n = 17 reads 53,
+  ## not 83).
+
 const FIFO_WORD_WRAP {.booldefine.} = true
   ## The FIFO holds eight words, and the eighth written into it leaves it
   ## reading empty (its word count wraps): with the sound on, eight words
@@ -135,7 +145,13 @@ proc timer_overflow*(dc: DMAChannels; timer: int): bool =
     else:
       int(dc.gba.apu.soundcnt_h.dma_sound_b_timer)
     if timer == ch_timer:
-      let want = dc.sizes[channel] < 16
+      # FIFO_OWN_BURST_NO_REQUEST: an overflow in the middle of this FIFO's
+      # own refill burst (a burst that drains events because a higher DMA
+      # channel is armed) asks for nothing; the burst's words still to come
+      # were counted when it was asked for
+      let want = dc.sizes[channel] < 16 and
+                 not (FIFO_OWN_BURST_NO_REQUEST and
+                      dc.gba.dma.busy_until[channel + 1] == high(CycleCount))
       if dc.sizes[channel] > 0:
         when defined(mp2kwav):
           inc dbgFifoServed[channel]

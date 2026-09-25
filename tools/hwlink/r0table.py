@@ -84,12 +84,14 @@ TABLE = {
     # channel starts two cycles late here (the payload's header)
     # the first sound-FIFO bursts against a TM1 read, k = 20 and 33 cycles to
     # TM0's overflow, n NOPs, and an EWRAM load in flight (variant 1 << 16).
-    # Recorded by tests/roms/dbsuite/record.py (sp-agb.json, same code); not
-    # the three cells where the console runs an extra burst (k20 n14 and n24,
-    # the load at n17), which nothing here models
-    'fifodma': ([20 << 8 | n for n in range(10, 31) if n not in (14, 24)]
+    # Recorded by tests/roms/dbsuite/record.py (sp-agb.json, same code), run
+    # in this order: each cell starts TM0 over the count the cell before
+    # stopped it at, and the three that follow a cell stopping it at 0xFFFF
+    # (k20 n14 and n24, the load at n17) take that enable's own overflow and
+    # its refill (timer.nim TIMER_START_OVERFLOW)
+    'fifodma': ([20 << 8 | n for n in range(10, 31)]
                 + [33 << 8 | n for n in range(20, 44)]
-                + [1 << 16 | 20 << 8 | n for n in range(10, 31) if n != 17]),
+                + [1 << 16 | 20 << 8 | n for n in range(10, 31)]),
     # fifodma's k = 20 staircase after w = 0, 4, 6, 7, 8 words stored to the
     # FIFO: the eighth word leaves it reading empty (payloads/fifomap.s)
     'fifomap': [w << 26 | 20 << 8 | n for w in (0, 4, 6, 7, 8) for n in (17, 40)],

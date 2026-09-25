@@ -5084,8 +5084,8 @@
  {
   "payload": "fifodma",
   "rom": "fifodma.gba",
-  "sha1": "d8711e6c8656001bbbb92fcbf8095a15c6fc2b29",
-  "frames": 564,
+  "sha1": "96e16bf3313069296d9809b1baaf7ab86129df69",
+  "frames": 588,
   "cells": [
    {
     "id": "fifodma 0x140a",
@@ -5106,6 +5106,11 @@
     "id": "fifodma 0x140d",
     "kind": "hex",
     "want": "00000013"
+   },
+   {
+    "id": "fifodma 0x140e",
+    "kind": "hex",
+    "want": "00000050"
    },
    {
     "id": "fifodma 0x140f",
@@ -5151,6 +5156,11 @@
     "id": "fifodma 0x1417",
     "kind": "hex",
     "want": "0000003B"
+   },
+   {
+    "id": "fifodma 0x1418",
+    "kind": "hex",
+    "want": "0000005A"
    },
    {
     "id": "fifodma 0x1419",
@@ -5336,6 +5346,11 @@
     "id": "fifodma 0x11410",
     "kind": "hex",
     "want": "0000003B"
+   },
+   {
+    "id": "fifodma 0x11411",
+    "kind": "hex",
+    "want": "0000005B"
    },
    {
     "id": "fifodma 0x11412",

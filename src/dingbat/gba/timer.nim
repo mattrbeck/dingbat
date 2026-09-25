@@ -7,6 +7,17 @@ const
   TIMER_START_DELAY = 2
 const TIMER_STOP_DELAY {.intdefine.} = 1
 const TIMER_OLD_COUNT {.booldefine.} = true
+const TIMER_START_OVERFLOW {.booldefine.} = true
+  ## The overflow of an enable over a count stopped at 0xFFFF (the tick
+  ## before the reload, on the start cycle) is a whole overflow, not just its
+  ## interrupt: a sound FIFO the timer drives takes a sample and may ask for
+  ## a refill there, and a cascaded timer counts it. tools/hwlink fifospk on
+  ## an AGB SP: a sound-FIFO page run right after one whose exit froze TM0
+  ## at 0xFFFF reads two refill bursts (60 cycles) more at every NOP count,
+  ## where the page run after any other count reads what it always does --
+  ## the "spikes" of tests/roms/dbsuite fifodma, whose cases run in NOP
+  ## order and so each n = 14 and 24 case follows the n = 13 and 23 that
+  ## freeze TM0 on its overflow.
 
 # The prescaler is free-running: a timer with period P ticks at absolute
 # cycles divisible by P regardless of when it was enabled. Ticks are counted
@@ -27,17 +38,23 @@ proc effective_reload(tim: Timer; num: int): uint16 {.inline.} =
   else:
     tim.tmd[num]
 
-proc timer_overflow_event*(tim: Timer; num: int) =
+proc timer_overflow_event*(tim: Timer; num: int; scheduled = true) =
   when defined(itrace):
     itl("TOVF " & $num & " t=" & $tim.gba.scheduler.cycles)
-  tim.tm[num] = tim.effective_reload(num)
-  tim.cycle_enabled[num] = tim.gba.scheduler.cycles
+  # TIMER_START_OVERFLOW: the overflow of an enable over a stopped 0xFFFF
+  # count lands on the start cycle itself; the enable has reloaded the count
+  # and raised the interrupt already
+  let at_start = TIMER_START_OVERFLOW and scheduled and
+                 tim.gba.scheduler.cycles == tim.cycle_enabled[num]
+  if not at_start:
+    tim.tm[num] = tim.effective_reload(num)
+    tim.cycle_enabled[num] = tim.gba.scheduler.cycles
   if num < 3 and tim.tmcnt[num + 1].cascade and tim.tmcnt[num + 1].enable:
     tim.tm[num + 1] += 1
     if tim.tm[num + 1] == 0:
-      tim.timer_overflow_event(num + 1)
+      tim.timer_overflow_event(num + 1, scheduled = false)
   let fifo_next = num <= 1 and tim.gba.apu.timer_overflow(num)
-  if tim.tmcnt[num].irq_enable:
+  if tim.tmcnt[num].irq_enable and not at_start:
     tim.gba.interrupts.raise_synced(IRQ_TIMER_BIT_BASE + num)
   if not tim.tmcnt[num].cascade:
     tim.gba.scheduler.schedule(tim.cycles_until_overflow(num), TIMER_EVENT_TYPES[num])
@@ -151,6 +168,7 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
               for l in pft_lines: echo "PFT ", l
               echo "PFT ----"
             pft_on = false
+      var start_ovf = false
       if tim.tmcnt[num].enable:
         if not was_enabled:
           # A counter stopped at 0xFFFF ticks once more before the enable
@@ -164,11 +182,12 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
           # than a raise on the write, by a clock started before it and by
           # the reloaded count alike (tmrffff.s: the flag is set by then).
           let now = tim.write_now()
-          if tim.tm[num] == 0xFFFF'u16 and tim.tmcnt[num].irq_enable and
-             not tim.tmcnt[num].cascade and
+          if tim.tm[num] == 0xFFFF'u16 and not tim.tmcnt[num].cascade and
              ticks_between(now - 1, now, TIMER_PERIODS[tim.tmcnt[num].frequency]) > 0:
-            tim.gba.interrupts.raise_synced(IRQ_TIMER_BIT_BASE + num,
-              late = int(now - tim.gba.scheduler.cycles) + TIMER_START_DELAY)
+            start_ovf = TIMER_START_OVERFLOW
+            if tim.tmcnt[num].irq_enable:
+              tim.gba.interrupts.raise_synced(IRQ_TIMER_BIT_BASE + num,
+                late = int(now - tim.gba.scheduler.cycles) + TIMER_START_DELAY)
           tim.tm_pre[num] = tim.tm[num]
           tim.tm[num] = tim.tmd[num]
         if tim.tmcnt[num].cascade:
@@ -176,11 +195,14 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
         elif not was_enabled or was_cascade:
           let delay = if was_enabled: 0 else: TIMER_START_DELAY
           tim.cycle_enabled[num] = tim.write_now() + CycleCount(delay)
-          tim.gba.scheduler.schedule(tim.cycles_until_overflow(num), TIMER_EVENT_TYPES[num])
-          if tim.tmcnt[num].irq_enable:
-            tim.gba.interrupts.window_ahead(tim.cycles_until_overflow(num))
+          # TIMER_START_OVERFLOW: the extra tick's overflow is the first one
+          let first = if start_ovf: int(tim.cycle_enabled[num] - tim.gba.scheduler.cycles)
+                      else: tim.cycles_until_overflow(num)
+          tim.gba.scheduler.schedule(first, TIMER_EVENT_TYPES[num])
+          if tim.tmcnt[num].irq_enable and not start_ovf:
+            tim.gba.interrupts.window_ahead(first)
           if num <= 1:
-            tim.gba.apu.dma_channels.fifo_window_at_start(num, tim.cycles_until_overflow(num))
+            tim.gba.apu.dma_channels.fifo_window_at_start(num, first)
       elif was_enabled:
         when TIMER_STOP_DELAY > 0:
           # The count goes on for a cycle after the write that stops it
@@ -197,7 +219,7 @@ proc `[]=`*(tim: Timer; io_addr: uint32; value: uint8) =
                 # timer/timer_disable).
                 let new_ctrl = tim.tmcnt[num]
                 tim.tmcnt[num] = old_ctrl
-                tim.timer_overflow_event(num)
+                tim.timer_overflow_event(num, scheduled = false)
                 tim.tmcnt[num] = new_ctrl
               else: tim.tm[num] += uint16(extra)
         tim.gba.scheduler.clear(TIMER_EVENT_TYPES[num])
