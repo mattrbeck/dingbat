@@ -1019,6 +1019,10 @@ proc install_fetch_cache(bus: Bus; page: uint32): bool =
   true
 
 const OBUS_LEAD {.intdefine.} = 0
+const OBUS_BOUNDARY_HALF {.booldefine.} = true
+  ## Thumb code in IWRAM/BIOS reading open bus right after a burst that won
+  ## the bus from its own fetch sees half DMA word, half opcode
+  ## (read_open_bus_word).
   ## -d:OBUS_LEAD=N: the pipeline issues the NEXT fetch while this
   ## instruction executes, so the last thing to drive the bus before a load's
   ## data cycle is a fetch dingbat has not charged yet. N cycles of lead
@@ -1685,6 +1689,23 @@ proc read_open_bus_word*(bus: Bus; address: uint32): uint32 =
   if bus.dma_has_run and bus.dma_request_at > fetch_start and
      bus.dma_request_at <= read_start:
     return bus.dma_open_bus
+  when OBUS_BOUNDARY_HALF:
+    # A burst requested exactly as this instruction began won the bus from
+    # its opcode fetch (IMM_BOUNDARY_GRANT): that fetch came after the burst,
+    # the previous one before it. Where one Thumb fetch drives only its own
+    # half of the latch (IWRAM, BIOS) the other half still holds the DMA's
+    # word. tests/roms/payloads/obuswint.s on an AGB SP, Thumb in IWRAM, two
+    # NOPs after the burst: DEAD6019 -- the DMA word's high half beside the
+    # opcode this load fetched (docs/playtest-bugs.md section 13).
+    if bus.dma_has_run and bus.dma_request_at == fetch_start and
+       bus.gba.cpu.cpsr.thumb:
+      let pc = bus.gba.cpu.r[15]
+      let pc_region = bits_range(pc, 24, 27)
+      if (pc_region == 0x0 or pc_region == 0x3) and bits_range(pc, 28, 31) == 0 and
+         pc >= 2:
+        let newer = uint32(bus.read_half_internal(pc and not 1'u32))
+        return if (pc and 2) != 0: (newer shl 16) or (bus.dma_open_bus and 0xFFFF'u32)
+               else: (bus.dma_open_bus and 0xFFFF0000'u32) or newer
   bus.fetch_bus_word(bus.gba.cpu.r[15])
 
 proc fetch_bus_word(bus: Bus; pc: uint32): uint32 =
