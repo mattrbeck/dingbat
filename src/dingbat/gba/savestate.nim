@@ -496,7 +496,14 @@ proc save_apu_state(apu: APU; w: var Writer) =
     w.write_bool(ch.negate)
     w.write_u8(ch.shift_ch1)
     w.write_u8(ch.sweep_timer)
-    w.write_u16(ch.frequency_shadow)
+    # Bits 11..15 of the shadow's field carry the shift-0 check (channel1.nim):
+    # bits 11..14 a pending kill's distance in cycles (0 = none), bit 15 the
+    # arming. A kill already due is applied first: every reader would.
+    ch.ch1_settle()
+    let kill_in = if ch.kill_at == GBA_NO_STEP: 0'u16
+                  else: uint16(min(ch.kill_at - apu.gba.scheduler.cycles, 15))
+    w.write_u16((ch.frequency_shadow and 0x7FF'u16) or (kill_in shl 11) or
+                (if ch.sweep_armed: 0x8000'u16 else: 0'u16))
     w.write_bool(ch.sweep_enabled)
     w.write_bool(ch.negate_has_been_used)
     w.write_u8(ch.duty)
@@ -554,7 +561,12 @@ proc load_apu_state(apu: APU; r: var Reader) =
     ch.negate = r.read_bool()
     ch.shift_ch1 = r.read_u8()
     ch.sweep_timer = r.read_u8()
-    ch.frequency_shadow = r.read_u16()
+    let shadow = r.read_u16()
+    ch.frequency_shadow = shadow and 0x7FF'u16
+    let kill_in = (shadow shr 11) and 0xF'u16
+    ch.kill_at = if kill_in == 0: GBA_NO_STEP
+                 else: apu.gba.scheduler.cycles + CycleCount(kill_in)
+    ch.sweep_armed = (shadow and 0x8000'u16) != 0
     ch.sweep_enabled = r.read_bool()
     ch.negate_has_been_used = r.read_bool()
     ch.duty = r.read_u8()

@@ -25,6 +25,7 @@ proc new_channel1*(gba: GBA): Channel1 =
     sweep_timer: 0, frequency_shadow: 0, sweep_enabled: false, negate_has_been_used: false,
     duty: 0, length_load: 0, frequency_ch1: 0,
     next_step: GBA_NO_STEP, arm_delay: 0,
+    sweep_armed: true, kill_at: GBA_NO_STEP,
   )
 
 proc ch1_frequency_timer*(ch: Channel1): uint32 =
@@ -60,6 +61,42 @@ proc ch1_catchup_at*(ch: Channel1; observer_period: uint32) {.inline.} =
 
 proc ch1_catchup*(ch: Channel1) {.inline.} =
   ch1_catchup_at(ch, GBA_OBS_CPU)
+
+const PSG_S0_APU_PHASE = 2'u32
+  ## scheduler.cycles mod 4 of the PSG's 4 MHz clock edges (the frame is a
+  ## multiple of 16 cycles, so this is fixed against the video frame).
+
+proc ch1_s0_kill_at(t: CycleCount; settling: bool): CycleCount =
+  ## When a trigger written at cycle t that failed the shift-0 check stops
+  ## the channel, or GBA_NO_STEP when the check never sees the trigger.
+  ## AGB SP, payloads/s0trig.s (SOUNDCNT_X read 3 cycles apart after the
+  ## trigger, 16 phases, every cell stable over three passes):
+  ## - long after a master-on (bit 14): the first 4 MHz edge at least 3
+  ##   cycles after the write -- the channel reads on once, or twice at
+  ##   every fourth phase;
+  ## - 40 cycles after one (psg_settling: within PSG_SETTLE of a master-on
+  ##   or a 512 Hz step): the trigger is taken on the next 2 MHz edge, a
+  ##   write landing ON that edge is missed and the note lives, and the stop
+  ##   comes on the next of two edges 4 cycles apart in every 16 -- 2 to 12
+  ##   cycles after the write, one phase in 8 escaping.
+  ## Both are fits to those cells in dingbat's cycle numbering (which the
+  ## cells pin to the video frame), not a derived circuit.
+  if not settling:
+    result = t + 3
+    result += CycleCount((PSG_S0_APU_PHASE + 4 - uint32(result and 3)) and 3)
+  else:
+    # 2 MHz edges at cycles = 1 mod 8; the stops at 6 and 10 mod 16
+    let into = uint32(t + 7) and 7                      # 0 = on an edge
+    if into == 0: return GBA_NO_STEP
+    let taken = t + CycleCount(8 - into)
+    result = taken + (if (uint32(taken) and 15) == 1: 5 else: 1)
+
+proc ch1_settle*(ch: Channel1) {.inline.} =
+  ## Apply a shift-0 kill that has come due (ch1_s0_kill_at); every reader of
+  ## the channel's enable runs this first.
+  if ch.kill_at <= ch.gba.scheduler.cycles:
+    ch.kill_at = GBA_NO_STEP
+    ch.enabled = false
 
 proc ch1_frequency_calculation*(ch: Channel1): uint16 =
   let shifted    = ch.frequency_shadow shr ch.shift_ch1
@@ -130,6 +167,8 @@ proc ch1_write*(ch: Channel1; address: uint32; value: uint8) =
       ch.sweep_timer          = if ch.sweep_period > 0: ch.sweep_period else: 8
       ch.sweep_enabled        = ch.sweep_period > 0 or ch.shift_ch1 > 0
       ch.negate_has_been_used = false
+      # A pending shift-0 kill from an earlier trigger does not survive this one
+      ch.kill_at = GBA_NO_STEP
       if ch.shift_ch1 > 0:
         # The trigger's overflow check (Pan Docs: with a non-zero shift) runs
         # on the new frequency AND on the one the shadow still held (AGB SP,
@@ -147,5 +186,29 @@ proc ch1_write*(ch: Channel1; address: uint32; value: uint8) =
         let old = int(stale) + (if ch.negate: -stale_offset else: stale_offset)
         if fresh > 0x7FF or old > 0x7FF:
           ch.enabled = false
+        ch.sweep_armed = true
+      elif ch.sweep_armed:
+        # Shift 0. Pan Docs has no check here, and games retrigger shift-0
+        # notes above 0x400 all the time; but the AGB runs it -- f + f, which
+        # overflows from 0x400 -- while the unit is ARMED: from a master-on,
+        # or from a trigger with a non-zero shift, until a trigger's check has
+        # run at shift 0. AGB SP (link rig 2026-09-25, payloads/s0trig.s, 144
+        # cells, all stable): f = 0x400 dies at every 16-cycle phase when it
+        # is the first trigger after a master-on (a frame before it, or 40
+        # cycles; the latter spares 2 phases in 16), and lives at every
+        # phase after a f = 0x100 trigger (playing, or stopped by its DAC), at
+        # f = 0x3FF and with negate. psgfirst.s's third ch1 trigger in a row
+        # lives in all 9 runs; sweeptrig.s's shift-0 row dies after shift-1
+        # rows; gbaedge SWEEPQ's length-63 controls (f = 1024, NR10 = 0, after
+        # shift-1 rows) died at poll 0.
+        let at = ch1_s0_kill_at(ch.gba.scheduler.cycles, ch.gba.apu.psg_settling())
+        if at != GBA_NO_STEP:
+          # The check ran (a trigger it missed leaves the unit armed); the
+          # stop is not at once: the channel reads as on for a few cycles.
+          let offset = int(ch.frequency_shadow)
+          if ch.negate: ch.negate_has_been_used = true
+          let calc = int(ch.frequency_shadow) + (if ch.negate: -offset else: offset)
+          if calc > 0x7FF and ch.enabled: ch.kill_at = at
+          ch.sweep_armed = false
   of 0x66, 0x67: discard
   else: echo "Writing to invalid Channel1 register: ", hex_str(uint16(address))

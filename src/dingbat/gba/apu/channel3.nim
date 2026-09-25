@@ -136,7 +136,7 @@ proc ch3_write*(ch: Channel3; address: uint32; value: uint8) =
     let length_enable = (value and 0x40) > 0
     let triggered = (value and 0x80) > 0
     if triggered and ch.dac_enabled: ch.enabled = true
-    ch.agb_length_on_nrx4(length_enable, triggered, 0x100)  # AGB order; see abstract_channels
+    ch.agb_length_on_nrx4(length_enable, triggered, 0x100)  # Pan Docs order; see abstract_channels
     if triggered:
       # Re-arm period + 6 from now (the +6 is outside ch3_frequency_timer's *4).
       let arm3 = ch.ch3_frequency_timer() + 6

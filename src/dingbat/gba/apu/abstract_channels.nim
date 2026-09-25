@@ -42,22 +42,63 @@ template gba_steps_due*(d, period: CycleCount; arm_delay: uint32;
 proc new_sound_channel*(gba: GBA): SoundChannel =
   SoundChannel(gba: gba, enabled: false, dac_enabled: false, length_counter: 0, length_enable: false)
 
+const PSG_POWER_ON_WINDOW* {.intdefine.} = 8
+  ## Cycles after a SOUNDCNT_X master-on write during which an NRx4 length
+  ## enable is clocked as in the first half of a length period whatever the
+  ## sequencer says. AGB SP (link rig 2026-09-25): payloads/fsfirst.s triggers
+  ## ch2 with counter 1 four cycles after master-on, and in all 31 cells, at
+  ## every 512 Hz phase, the extra clock takes it to 0 and the trigger
+  ## reloads it to 63 (the note outlives the 0x20000-poll cap); psgfirst.s
+  ## triggers sixteen cycles after and gets the extra clock only when the
+  ## tap rule gives it (ch2's first note lives 15 or 16 steps). So
+  ## 4 < window <= 16.
+
+proc length_half*(apu: APU): bool {.inline.} =
+  ## Whether an NRx4 length enable now gets the extra length clock
+  ## (PSG_POWER_ON_WINDOW; first_half_of_length_period otherwise).
+  apu.first_half_of_length_period or
+    (apu.power_on_at != GBA_NO_STEP and
+     apu.gba.scheduler.cycles - apu.power_on_at < CycleCount(PSG_POWER_ON_WINDOW))
+
+const PSG_SETTLE* {.intdefine.} = 256
+  ## psg_settling's window, in cycles. AGB SP: sweeptrig.s's lone shift-0 row
+  ## (128..255 cycles after its master-on in dingbat's timing) is read on at
+  ## the first poll 4 cycles after the trigger, as in the slow timing; with
+  ## 512, s0trig.s cell 0x4008 falls inside the window after a 512 Hz step
+  ## and no longer matches. Only bracketed; payloads/s0time.s would pin it.
+
+proc psg_settling*(apu: APU): bool =
+  ## Whether the PSG is within PSG_SETTLE cycles of a SOUNDCNT_X master-on
+  ## or of a 512 Hz sequencer step (channel1.nim's shift-0 kill timing).
+  let now = apu.gba.scheduler.cycles
+  if apu.power_on_at != GBA_NO_STEP and now - apu.power_on_at < CycleCount(PSG_SETTLE):
+    return true
+  if apu.frame_sequencer_stage >= 8: return false   # no step since the master-on
+  let last = apu.gba.scheduler.pending_at(etAPUFrameSeq) - CycleCount(32768)
+  now - last < CycleCount(PSG_SETTLE)
+
 proc agb_length_on_nrx4*(ch: SoundChannel; length_enable, triggered: bool;
                          max_len: int) =
-  ## AGB NRx4 order (hardware: gbaedge SWEEPQ/PSGSTAT pages on AGS): the
-  ## trigger's reload-if-zero happens FIRST, then a RISING length-enable clocks
-  ## length once if the frame sequencer is in the length half, so trigger+enable
-  ## with one tick left kills the note at once. The DMG order is the reverse
-  ## (the GB core keeps it); this helper is GBA-only.
-  let rising = length_enable and not ch.length_enable
+  ## NRx4's length rules in Pan Docs' (DMG) order: a RISING length enable in
+  ## the first half of a length period clocks the counter once, THEN a
+  ## trigger reloads a zero counter to max_len (less the same extra clock).
+  ## So a trigger + enable with one tick left reloads to a full note. AGB SP,
+  ## payloads/fsfirst.s (link rig 2026-09-25): ch2, counter 1, trigger + length
+  ## enable just after a master-on reaches the 0x20000-poll cap in all 31
+  ## cells; with no master-on it reaches it when the sequencer is in the first
+  ## half (4 of 9 runs) and dies at the next length step otherwise. The
+  ## "reload first" order this replaced came from ch1 rows at f = 0x400 and
+  ## NR10 = 0, which die to channel 1's shift-0 overflow check instead
+  ## (channel1.nim), not to the length counter.
+  let half = ch.gba.apu.length_half()
+  if half and length_enable and not ch.length_enable and ch.length_counter > 0:
+    ch.length_counter -= 1
+    # a trigger in the same write re-enables it (the caller set enabled)
+    if ch.length_counter == 0 and not triggered: ch.enabled = false
   ch.length_enable = length_enable
   if triggered and ch.length_counter == 0:
     ch.length_counter = max_len
-    if length_enable and not rising and ch.gba.apu.first_half_of_length_period:
-      ch.length_counter -= 1
-  if rising and ch.gba.apu.first_half_of_length_period and ch.length_counter > 0:
-    ch.length_counter -= 1
-    if ch.length_counter == 0: ch.enabled = false
+    if length_enable and half: ch.length_counter -= 1
 
 proc length_step*(ch: SoundChannel) =
   if ch.length_enable and ch.length_counter > 0:

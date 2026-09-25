@@ -1,6 +1,6 @@
 # Dingbat Test Results
 
-*Generated: 2026-09-25 09:15:48 · commit 03b0c276 · game-boy-test-roms v7.0*
+*Generated: 2026-09-25 10:55:32 · commit aa3f3c13 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
@@ -228,7 +228,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | dbsuite/dma | — | 👀 261/262 passed |
 | dbsuite/bus | — | 👀 76/79 passed |
 | dbsuite/ppu | — | 👌 156/156 passed |
-| dbsuite/apu | — | 👀 42/52 passed |
+| dbsuite/apu | — | 👀 46/52 passed |
 | dbsuite/bios | — | 👌 47/47 passed |
 
 One row per dbsuite sub-suite (tests/roms/dbsuite). See [detailed results](results_dbsuite.md) for every case that is not a pass.

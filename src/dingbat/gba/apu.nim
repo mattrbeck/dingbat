@@ -15,15 +15,13 @@ const CPU_CLOCK_SPEED*    = 1 shl 24
 const APU_SAMPLE_PERIOD*  = CPU_CLOCK_SPEED div APU_SAMPLE_RATE
 const FRAME_SEQ_RATE*     = 512
 const FRAME_SEQ_PERIOD*   = CPU_CLOCK_SPEED div FRAME_SEQ_RATE
-const PSG_SEQ_RESTART_LEAD* = 24
-  ## SOUNDCNT_X master-on restarts the PSG's 512 Hz clock (there is no DIV to
-  ## keep running on the AGB): its first step, a length step, lands this many
-  ## cycles short of one full period after the write. AGB SP (link rig,
-  ## tests/roms/payloads/psgfirst.s from IWRAM, nine runs): channel 3 and 4
-  ## counter-16 notes triggered straight after a master-on live 0x18CC7-
-  ## 0x18CC9 polls of 10 cycles, i.e. 31 steps, with no run-to-run spread; a
-  ## free-running clock would spread them over a whole step (3277 polls).
-  ## Those counts fix it to +-10 cycles; payloads/fsfirst.s would pin it to one.
+const PSG_SEQ_SKIP* = 8
+  ## frame_sequencer_stage while a master-on's skipped 512 Hz edge is pending
+  ## (the DMG power-on rule, GbApu.div_skip): that edge makes no step.
+const PSG_SEQ_FIRST* = 9
+  ## frame_sequencer_stage after a master-on with no edge to skip: the next
+  ## edge is step 0. Both values mean no edge has passed since the master-on
+  ## (psg_settling).
 # One-pole low-pass coefficient for the optional analog-output filter:
 # alpha = 1 - exp(-2*pi*fc/fs) with fc ~= 12 kHz, fs = 32768 Hz
 const AUDIO_LOWPASS_ALPHA* = 0.90'f32
@@ -111,6 +109,7 @@ proc new_apu*(gba: GBA): APU =
     soundbias: cast[SOUNDBIAS](0x200'u16),
     buffer_pos: 0,
     frame_sequencer_stage: 0,
+    power_on_at: GBA_NO_STEP,
     first_half_of_length_period: false,
     sync: true,
     channel_mask: [true, true, true, true, true, true],
@@ -252,6 +251,10 @@ proc apu_rebase*(apu: APU; base: CycleCount) {.inline.} =
   adj(apu.channel2)
   adj(apu.channel3)
   adj(apu.channel4)
+  apu.channel1.ch1_settle()
+  if apu.channel1.kill_at != GBA_NO_STEP: apu.channel1.kill_at -= base
+  if apu.power_on_at != GBA_NO_STEP:
+    apu.power_on_at = if apu.power_on_at >= base: apu.power_on_at - base else: GBA_NO_STEP
   # FIFO latch timestamps are on the same clock (signed: one just before the
   # base may go slightly negative)
   apu.dma_channels.last_update_cycle[0] -= int64(base)
@@ -273,10 +276,18 @@ proc tick_frame_sequencer*(apu: APU) =
   # sweep_step rewrites CH1's frequency (its step period), so every channel
   # has to be current first
   const OBS = uint32(FRAME_SEQ_PERIOD)
+  apu.channel1.ch1_settle()
   apu.channel1.ch1_catchup_at(OBS)
   apu.channel2.ch2_catchup_at(OBS)
   apu.channel3.ch3_catchup_at(OBS)
   apu.channel4.ch4_catchup_at(OBS)
+  if apu.frame_sequencer_stage == PSG_SEQ_SKIP:
+    # The edge a master-on skipped: no step; the next one is step 0
+    apu.frame_sequencer_stage = 0
+    apu.first_half_of_length_period = false
+    apu.gba.scheduler.schedule(FRAME_SEQ_PERIOD, etAPUFrameSeq)
+    return
+  if apu.frame_sequencer_stage == PSG_SEQ_FIRST: apu.frame_sequencer_stage = 0
   apu.first_half_of_length_period = (apu.frame_sequencer_stage and 1) == 0
   case apu.frame_sequencer_stage
   of 0:
@@ -311,6 +322,7 @@ proc get_sample*(apu: APU) =
   # channel_mask (a debug mute): CH4's shift loop relies on the once-a-frame
   # bound.
   const OBS = uint32(APU_SAMPLE_PERIOD)
+  apu.channel1.ch1_settle()
   if apu.channel1.enabled: apu.channel1.ch1_catchup_at(OBS)
   if apu.channel2.enabled: apu.channel2.ch2_catchup_at(OBS)
   if apu.channel3.enabled: apu.channel3.ch3_catchup_at(OBS)
@@ -541,6 +553,7 @@ proc `[]`*(apu: APU; io_addr: uint32): uint8 =
     of 0x80..0x81: read(apu.soundcnt_l, io_addr and 1)
     of 0x82..0x83: read(apu.soundcnt_h, io_addr and 1)
     of 0x84:
+      apu.channel1.ch1_settle()
       (if apu.sound_enabled: 0x80'u8 else: 0'u8) or
       (if apu.channel4.enabled: 0b1000'u8 else: 0'u8) or
       (if apu.channel3.enabled: 0b0100'u8 else: 0'u8) or
@@ -558,13 +571,16 @@ proc `[]=`*(apu: APU; io_addr: uint32; value: uint8) =
     return
   # Materialize the target channel BEFORE the write lands, so a period /
   # duty / bank / trigger change only affects steps from this cycle on
-  if ch1_in_range(io_addr):      apu.channel1.ch1_catchup()
+  if ch1_in_range(io_addr):
+    apu.channel1.ch1_settle()
+    apu.channel1.ch1_catchup()
   elif ch2_in_range(io_addr):    apu.channel2.ch2_catchup()
   elif ch3_in_range(io_addr):    apu.channel3.ch3_catchup()
   elif ch4_in_range(io_addr):    apu.channel4.ch4_catchup()
   elif io_addr == 0x84:
     # SOUNDCNT_X: sync all four so the power-on reset does not depend on the
     # power-off arm's recursion through the branches above
+    apu.channel1.ch1_settle()
     apu.apu_catchup_all()
   if ch1_in_range(io_addr):      apu.channel1.ch1_write(io_addr, value)
   elif ch2_in_range(io_addr):    apu.channel2.ch2_write(io_addr, value)
@@ -595,12 +611,21 @@ proc `[]=`*(apu: APU; io_addr: uint32; value: uint8) =
           apu.dma_channels.fifo_reset(1)
       elif (value and 0x80) > 0 and not apu.sound_enabled:
         apu.sound_enabled = true
-        apu.frame_sequencer_stage = 0
-        # The 512 Hz clock restarts here (PSG_SEQ_RESTART_LEAD); its next
-        # step clocks length, so a length enable now is not in the first half.
-        apu.first_half_of_length_period = false
-        apu.gba.scheduler.clear(etAPUFrameSeq)
-        apu.gba.scheduler.schedule(FRAME_SEQ_PERIOD - PSG_SEQ_RESTART_LEAD, etAPUFrameSeq)
+        # The 512 Hz clock runs on (it does not restart), but the sequencer
+        # restarts at step 0 under the DMG power-on rule: with the tap bit
+        # set -- the next edge less than half a period away -- that edge is
+        # skipped, so the first step comes 16384..49151 cycles after the
+        # write, and a length enable until it is in the first half. AGB SP:
+        # fsfirst.s's counter-2 notes after a master-on die 16921..48031
+        # cycles later over nine runs; psgfirst.s's first ch2 notes live 15
+        # or 16 steps, and those right after a length step always 16.
+        let to_edge = apu.gba.scheduler.pending_at(etAPUFrameSeq) - apu.gba.scheduler.cycles
+        let skip = to_edge < CycleCount(FRAME_SEQ_PERIOD div 2)
+        apu.frame_sequencer_stage = if skip: PSG_SEQ_SKIP else: PSG_SEQ_FIRST
+        apu.first_half_of_length_period = skip
+        apu.power_on_at = apu.gba.scheduler.cycles
+        # ...and arms channel 1's shift-0 trigger check (channel1.nim)
+        apu.channel1.sweep_armed = true
         apu.channel1.length_counter = 0
         apu.channel2.length_counter = 0
         apu.channel3.length_counter = 0

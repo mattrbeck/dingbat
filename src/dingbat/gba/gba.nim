@@ -832,6 +832,13 @@ type
     duty*:               uint8
     length_load*:        uint8
     frequency_ch1*:      uint16
+    # The AGB's shift-0 trigger check is armed (channel1.nim). Saved in
+    # bit 15 of frequency_shadow's field; the format has no bit of its own.
+    sweep_armed*:        bool
+    # Cycle a failed shift-0 trigger check stops the channel, or GBA_NO_STEP
+    # (at most 13 cycles ahead). Saved as a distance in bits 11..14 of
+    # frequency_shadow's field.
+    kill_at*:            CycleCount
 
   Channel2* = ref object of VolumeEnvelopeChannel
     wave_duty_position*: int
@@ -900,6 +907,11 @@ type
     buffer_pos*:        int
     frame_sequencer_stage*: int
     first_half_of_length_period*: bool
+    # Cycle of the last SOUNDCNT_X master-on, or GBA_NO_STEP (dropped at a
+    # rebase that passes it). Read only within PSG_POWER_ON_WINDOW and
+    # PSG_SETTLE of it. NOT serialized: a state saved in those 256 cycles
+    # loads without them (needs a field at the next payload revision).
+    power_on_at*: CycleCount
     channel1*:          Channel1
     channel2*:          Channel2
     channel3*:          Channel3

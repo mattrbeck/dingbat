@@ -5620,5 +5620,896 @@
     "want": "000001E6"
    }
   ]
+ },
+ {
+  "payload": "fsfirst",
+  "rom": "fsfirst.gba",
+  "sha1": "bbea6c5018cf8d700cfa1022c7c4d1c9dec61105",
+  "frames": 308,
+  "cells": [
+   {
+    "id": "fsfirst 0x0",
+    "kind": "hex",
+    "want": "0000000C"
+   },
+   {
+    "id": "fsfirst 0x1",
+    "kind": "hex",
+    "want": "0000000D"
+   },
+   {
+    "id": "fsfirst 0x2",
+    "kind": "hex",
+    "want": "0000000E"
+   },
+   {
+    "id": "fsfirst 0x3",
+    "kind": "hex",
+    "want": "0000000F"
+   },
+   {
+    "id": "fsfirst 0x4",
+    "kind": "hex",
+    "want": "00000010"
+   },
+   {
+    "id": "fsfirst 0x5",
+    "kind": "hex",
+    "want": "00000011"
+   },
+   {
+    "id": "fsfirst 0x6",
+    "kind": "hex",
+    "want": "00000012"
+   },
+   {
+    "id": "fsfirst 0x7",
+    "kind": "hex",
+    "want": "00000013"
+   },
+   {
+    "id": "fsfirst 0x8",
+    "kind": "hex",
+    "want": "00000014"
+   },
+   {
+    "id": "fsfirst 0x9",
+    "kind": "hex",
+    "want": "00000015"
+   },
+   {
+    "id": "fsfirst 0xa",
+    "kind": "hex",
+    "want": "00000016"
+   },
+   {
+    "id": "fsfirst 0xb",
+    "kind": "hex",
+    "want": "00000017"
+   },
+   {
+    "id": "fsfirst 0xc",
+    "kind": "hex",
+    "want": "00000018"
+   },
+   {
+    "id": "fsfirst 0xd",
+    "kind": "hex",
+    "want": "00000019"
+   },
+   {
+    "id": "fsfirst 0xe",
+    "kind": "hex",
+    "want": "0000001A"
+   },
+   {
+    "id": "fsfirst 0xf",
+    "kind": "hex",
+    "want": "0000001B"
+   },
+   {
+    "id": "fsfirst 0x10",
+    "kind": "hex",
+    "want": "0000000C"
+   },
+   {
+    "id": "fsfirst 0x20",
+    "kind": "hex",
+    "want": "0000000C"
+   },
+   {
+    "id": "fsfirst 0x30",
+    "kind": "hex",
+    "want": "0000000C"
+   },
+   {
+    "id": "fsfirst 0x40",
+    "kind": "hex",
+    "want": "0000000C"
+   },
+   {
+    "id": "fsfirst 0x50",
+    "kind": "hex",
+    "want": "0000000C"
+   },
+   {
+    "id": "fsfirst 0x60",
+    "kind": "hex",
+    "want": "0000000C"
+   },
+   {
+    "id": "fsfirst 0x70",
+    "kind": "hex",
+    "want": "0000000C"
+   },
+   {
+    "id": "fsfirst 0x80",
+    "kind": "hex",
+    "want": "0000000C"
+   },
+   {
+    "id": "fsfirst 0x90",
+    "kind": "hex",
+    "want": "0000000C"
+   },
+   {
+    "id": "fsfirst 0xa0",
+    "kind": "hex",
+    "want": "0000000C"
+   },
+   {
+    "id": "fsfirst 0xb0",
+    "kind": "hex",
+    "want": "0000000C"
+   },
+   {
+    "id": "fsfirst 0xc0",
+    "kind": "hex",
+    "want": "0000000C"
+   },
+   {
+    "id": "fsfirst 0xd0",
+    "kind": "hex",
+    "want": "0000000C"
+   },
+   {
+    "id": "fsfirst 0xe0",
+    "kind": "hex",
+    "want": "0000000C"
+   },
+   {
+    "id": "fsfirst 0xf0",
+    "kind": "hex",
+    "want": "0000000C"
+   }
+  ]
+ },
+ {
+  "payload": "s0trig",
+  "rom": "s0trig.gba",
+  "sha1": "7a050c90be589298bc5cfa07e74fef4c83b17575",
+  "frames": 1212,
+  "cells": [
+   {
+    "id": "s0trig 0x0",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "s0trig 0x1",
+    "kind": "hex",
+    "want": "00000000"
+   },
+   {
+    "id": "s0trig 0x2",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x3",
+    "kind": "hex",
+    "want": "0000000F"
+   },
+   {
+    "id": "s0trig 0x4",
+    "kind": "hex",
+    "want": "00000007"
+   },
+   {
+    "id": "s0trig 0x5",
+    "kind": "hex",
+    "want": "00000007"
+   },
+   {
+    "id": "s0trig 0x6",
+    "kind": "hex",
+    "want": "00000007"
+   },
+   {
+    "id": "s0trig 0x7",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0x8",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0x9",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0xa",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0xb",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0xc",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0xd",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0xe",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "s0trig 0xf",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "s0trig 0x100",
+    "kind": "hex",
+    "want": "0000000F"
+   },
+   {
+    "id": "s0trig 0x101",
+    "kind": "hex",
+    "want": "00000007"
+   },
+   {
+    "id": "s0trig 0x102",
+    "kind": "hex",
+    "want": "00000007"
+   },
+   {
+    "id": "s0trig 0x103",
+    "kind": "hex",
+    "want": "00000007"
+   },
+   {
+    "id": "s0trig 0x104",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0x105",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0x106",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0x107",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x108",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0x109",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0x10a",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0x10b",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "s0trig 0x10c",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "s0trig 0x10d",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "s0trig 0x10e",
+    "kind": "hex",
+    "want": "00000000"
+   },
+   {
+    "id": "s0trig 0x10f",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x200",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "s0trig 0x201",
+    "kind": "hex",
+    "want": "00000000"
+   },
+   {
+    "id": "s0trig 0x202",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x203",
+    "kind": "hex",
+    "want": "0000000F"
+   },
+   {
+    "id": "s0trig 0x204",
+    "kind": "hex",
+    "want": "00000007"
+   },
+   {
+    "id": "s0trig 0x205",
+    "kind": "hex",
+    "want": "00000007"
+   },
+   {
+    "id": "s0trig 0x206",
+    "kind": "hex",
+    "want": "00000007"
+   },
+   {
+    "id": "s0trig 0x207",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0x208",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0x209",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0x20a",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x20b",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0x20c",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0x20d",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0x20e",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "s0trig 0x20f",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "s0trig 0x400",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "s0trig 0x401",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "s0trig 0x402",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "s0trig 0x403",
+    "kind": "hex",
+    "want": "00000000"
+   },
+   {
+    "id": "s0trig 0x404",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x405",
+    "kind": "hex",
+    "want": "0000000F"
+   },
+   {
+    "id": "s0trig 0x406",
+    "kind": "hex",
+    "want": "00000007"
+   },
+   {
+    "id": "s0trig 0x407",
+    "kind": "hex",
+    "want": "00000007"
+   },
+   {
+    "id": "s0trig 0x408",
+    "kind": "hex",
+    "want": "00000007"
+   },
+   {
+    "id": "s0trig 0x409",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0x40a",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0x40b",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0x40c",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x40d",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0x40e",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0x40f",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0x800",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x801",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x802",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x803",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x804",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x805",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x806",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x807",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x808",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x809",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x80a",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x80b",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x80c",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x80d",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x80e",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x80f",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x1800",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x1801",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x1802",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x1803",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x1804",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x1805",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x1806",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x1807",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x1808",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x1809",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x180a",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x180b",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x180c",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x180d",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x180e",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x180f",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x2000",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x2001",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x2002",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x2003",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x2004",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x2005",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x2006",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x2007",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x2008",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x2009",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x200a",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x200b",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x200c",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x200d",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x200e",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x200f",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x4000",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "s0trig 0x4001",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "s0trig 0x4002",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0x4003",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "s0trig 0x4004",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "s0trig 0x4005",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "s0trig 0x4006",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0x4007",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "s0trig 0x4008",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "s0trig 0x4009",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "s0trig 0x400a",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0x400b",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "s0trig 0x400c",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "s0trig 0x400d",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "s0trig 0x400e",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "s0trig 0x400f",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "s0trig 0x8000",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x8001",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x8002",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x8003",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x8004",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x8005",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x8006",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x8007",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x8008",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x8009",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x800a",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x800b",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x800c",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x800d",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x800e",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   },
+   {
+    "id": "s0trig 0x800f",
+    "kind": "hex",
+    "want": "FFFF00FF"
+   }
+  ]
  }
 ]

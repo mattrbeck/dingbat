@@ -160,6 +160,16 @@ TABLE = {
     # and the no-DMA control (alyosha Interactions/Halt_DMA_IRQ_Read_OAM)
     'hdmaoam': [0x808C, 0x008C, 0x108C, 0x308C, 0x408C, 0x0001, 0x1001, 0x3001,
                 0x8001, 0x3040, 0x0040],
+    # ch2 counter 1, trigger + length enable 4 cycles after a master-on,
+    # against a sled after it and one before it: the extra length clock and
+    # Pan Docs' reload order (every cell runs to the 0x20000-poll cap). The
+    # counter-2 and no-master-on cells spread with the 512 Hz phase.
+    'fsfirst': list(range(16)) + list(range(0x10, 0x100, 0x10)),
+    # ch1 at shift 0 and f = 0x400 (0x3FF): which triggers the sweep unit's
+    # overflow check kills, and when, over the 16-cycle phase
+    's0trig': list(range(16)) + [b | k for b in (0x100, 0x200, 0x400, 0x800, 0x1800,
+                                                 0x2000, 0x4000, 0x8000)
+                                 for k in range(16)],
 }
 
 

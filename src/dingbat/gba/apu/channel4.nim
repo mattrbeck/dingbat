@@ -85,7 +85,7 @@ proc ch4_write*(ch: Channel4; address: uint32; value: uint8) =
     let length_enable = (value and 0x40) > 0
     let triggered = (value and 0x80) > 0
     if triggered and ch.dac_enabled: ch.enabled = true
-    ch.agb_length_on_nrx4(length_enable, triggered, 0x40)  # AGB order; see abstract_channels
+    ch.agb_length_on_nrx4(length_enable, triggered, 0x40)  # Pan Docs order; see abstract_channels
     if triggered:
       # Re-arm a full period from now; see ch1_write.
       let arm4 = ch.ch4_frequency_timer()
