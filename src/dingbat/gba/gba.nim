@@ -1506,7 +1506,10 @@ proc mode_bank*(m: CpuMode): int
 template note_waits*(bus: Bus; cost: int) =
   ## IRQ_LAST_WAITS: a CPU access of `cost` cycles just ended.
   bus.lw_end = bus.sched.cycles + CycleCount(bus.cycles)
-  bus.lw_waits = cost - 1
+  # An uncached fetch that synced on the way (a FIFO window open under the
+  # interrupt's) has handed its cycles to the scheduler and reads as 0; it
+  # has no wait states to note either way, and a state carries 0..1023.
+  bus.lw_waits = max(cost - 1, 0)
 
 include pipeline
 # Cartridge: ROM image, save memory, GPIO-attached RTC
