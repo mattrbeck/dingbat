@@ -1,5 +1,5 @@
 -- What this models, for formal/anchors.mjs (which lists stale models):
--- @models web/index.js: addRecentRom allPerGameKeys applyRemoteRename bumpRecentIndex confirmTombstones dbMoveKeys deleteGameAction deleteGameEverywhere downloadGame downloadGameAction driveListAll driveListMap driveUploadFile flushSyncInner getRecentMeta hasAnyLocalRecord localLibrary markUpload mergeLibrary pendingCount pullSyncInner readDriveLibrary renameGame runExclusive runFullSync touchRecent updateRecent writeDriveLibrary
+-- @models web/index.js: addRecentRom allPerGameKeys applyRemoteRename bumpRecentIndex confirmTombstones convertStaleGame dbMoveKeys deleteGameAction deleteGameEverywhere deletedIn downloadGame downloadGameAction driveListAll driveListMap driveUploadFile fileGen flushSyncInner genBound genOf getRecentMeta hasAnyLocalRecord keepOldSave libGen localLibrary markUpload mergeLibrary pendingCount pullSyncInner readDriveLibrary renameGame restoreKeptSave runExclusive runFullSync touchRecent updateRecent withGen writeDriveLibrary
 
 /-
 # The cross-device library on Google Drive (web/index.js)
@@ -57,6 +57,12 @@ Results in one place:
   The pre-fix merge, kept as `mergeLibraryV1`: `bug_mergeV1_not_idempotent`
   (the finding) and `bug_mergeV1_chain_not_idempotent` (found by this model:
   the `renameGame` claim alone was not enough).
+* generations (Layer 3, a game deleted and loaded again): `mergeName_gen0`
+  (at generation 0 the merge is Layers 1-2's), `mergeName_tomb_beside_newer`,
+  `mergeName_entry_survives`, `pullG_applies_current_gen`,
+  `flushG_uploads_current_gen`; the finding `bug_reimport_gets_deleted_save`
+  and its fixed trace `regress_reimport_keeps_deleted_save_aside`, with
+  `regress_reimport_before_sync`.
 * uploads and orphans: `flush_uploads_only_live`, `step_flushFiles_live`
   (a flush uploads nothing the library it merged deletes or renames away),
   `pull_queues_orphans`; traces `regress_sync_tap_after_remote_delete`,
@@ -3358,4 +3364,680 @@ theorem regress_sync_tap_after_remote_rename :
     s2.d1.store.map (·.game) = [2, 2] ∧ names s2.d1.recent = [2] ∧ s2.d1.qUp = [] := by
   decide
 
+
+/-! ## Layer 3: generations (a game deleted and loaded again)
+
+The UI pass left one question open (FINDINGS.md, "a deleted game loaded again
+can get its deleted save back"): device 0 deletes a game and loads it again
+from its file; device 1, which has not pulled the delete, syncs its save; and
+device 0's next pull puts that save into the game it has just loaded again.
+`mergeLibrary` drops a tombstone once a newer entry exists, and cannot tell a
+fresh load from a play elsewhere; the pull's download pass (not in Layer 2)
+then applies any newer save of a game held here. Matt's decision: respect the
+delete, and keep the save from before it restorable for 30 days.
+
+The fix (web/index.js, the block above `mergeLibrary` that starts with
+`genOf`): every entry and tombstone has a generation (absent is 0); loading a
+game again after its delete starts the next one (`bumpRecentIndex`); a
+tombstone stands beside an entry of a newer generation (`mergeLibrary`); a
+Drive file carries the generation it was written for (`appProperties.gen`,
+`driveUploadFile`); a device never uploads a game's files while it holds the
+game at an older generation than the library's (`flushSyncInner`); the pull
+keeps aside, instead of applying, a save written for an older generation
+(`pullSyncInner`, `keepOldSave`), and a device holding the older generation
+gives way, keeping its save aside too (`convertStaleGame`); Restore swaps the
+kept save with the game's (`restoreKeptSave`).
+
+* Layer 3a, the merge name by name (the JS keeps one `Map` slot per name, so
+  a name's result depends only on the records of that name): at generation 0
+  it is Layer 1's merge (`mergeName_gen0`), so every property proved above
+  holds of every library in which no deleted game was loaded again; and a
+  tombstone stands beside a newer generation (`mergeName_tomb_beside_newer`).
+* Layer 3b, a protocol small enough to run the finding: two devices, every
+  flush and every pull one atomic event (Layer 2 has the interleavings), the
+  download pass included, under the rules before (`gens := false`) and after
+  (`gens := true`). `bug_reimport_gets_deleted_save` is the finding;
+  `regress_reimport_keeps_deleted_save_aside` the same trace fixed, the save
+  kept aside, reaching the deleting device and restorable there. In general
+  (`pullG_applies_current_gen`, `flushG_uploads_current_gen`) a pull writes
+  into a game's save only a Drive file written for the library's generation
+  of it, and a flush sends a save only at the generation this device holds,
+  never one the library has moved past.
+
+Abstractions beyond Layer 2's: no rename markers (Layers 1-2 cover them; a
+rename carries its generation to the new name, `mergeLibrary` 2769); the
+library's lists up to order; a kept save is the kind-2 file of its game
+(`oldsave:`), synced like any other, its newer-wins rule (`storeKeptRecord`)
+and the 30-day expiry (`expireKeptSaves`) not modelled (each trace keeps one
+save, within the 30 days); no game is open while a pull runs (the pinned
+generation of a running game is web/tests/deleted-save.test.mjs's). -/
+
+/-- A `recents` entry with its generation (`gen` absent is 0). -/
+structure EntryG where
+  name : Nat
+  ts : Nat
+  imp : Nat
+  gen : Nat
+deriving DecidableEq, Repr
+
+/-- A tombstone with the generation it deleted. -/
+structure TombG where
+  name : Nat
+  ts : Nat
+  gen : Nat
+deriving DecidableEq, Repr
+
+/-! ### Layer 3a: the merge with generations, name by name -/
+
+/-- The recents loop, one name: a newer generation wins the entry outright,
+within one the newest play; the newest `imp` from either is kept. -/
+def recStepG (acc : Option EntryG) (e : EntryG) : Option EntryG :=
+  match acc with
+  | none => some e
+  | some p =>
+    let w := if e.gen > p.gen || (e.gen == p.gen && e.ts > p.ts) then e else p
+    some { w with imp := max p.imp e.imp }
+
+/-- The tombstone loop, one name: a newer generation, then the newest. -/
+def tombStepG (acc : Option TombG) (t : TombG) : Option TombG :=
+  match acc with
+  | none => some t
+  | some p => if t.gen > p.gen || (t.gen == p.gen && t.ts > p.ts) then some t else acc
+
+/-- The prune loop, one name: an entry of a newer generation stands beside the
+tombstone; within one, a newer play supersedes it; otherwise the tombstone
+removes the entry. -/
+def pruneG : Option EntryG → Option TombG → Option EntryG × Option TombG
+  | some e, some t =>
+    if e.gen > t.gen then (some e, some t)
+    else if e.gen == t.gen && e.ts > t.ts then (some e, none)
+    else (none, some t)
+  | e, t => (e, t)
+
+/-- `mergeLibrary` (markers aside) for the records of one name. -/
+def mergeName (es : List EntryG) (ts : List TombG) : Option EntryG × Option TombG :=
+  pruneG (es.foldl recStepG none) (ts.foldl tombStepG none)
+
+def EntryG.old (e : EntryG) : Entry := ⟨e.name, e.ts, e.imp⟩
+def TombG.old (t : TombG) : Tomb := ⟨t.name, t.ts⟩
+
+def projEG (x : Option EntryG) : Option (Nat × Nat) := x.map (fun e => (e.ts, e.imp))
+def projTG (x : Option TombG) : Option Nat := x.map (·.ts)
+
+theorem foldl_recStepG_gen0 (n : Nat) : ∀ (es : List EntryG) (acc : Option EntryG),
+    (∀ e ∈ es, e.gen = 0 ∧ e.name = n) → (∀ p, acc = some p → p.gen = 0) →
+    projEG (es.foldl recStepG acc) = (es.map EntryG.old).foldl (semStep n) (projEG acc) ∧
+    (∀ p, es.foldl recStepG acc = some p → p.gen = 0) := by
+  intro es
+  induction es with
+  | nil => intro acc _ h; exact ⟨rfl, h⟩
+  | cons e es ih =>
+    intro acc hes hacc
+    have he := hes e (List.mem_cons_self ..)
+    have hes' : ∀ x ∈ es, x.gen = 0 ∧ x.name = n := fun x hx => hes x (List.mem_cons_of_mem _ hx)
+    have hstep : projEG (recStepG acc e) = semStep n (projEG acc) e.old ∧
+        (∀ p, recStepG acc e = some p → p.gen = 0) := by
+      cases acc with
+      | none =>
+        refine ⟨?_, ?_⟩
+        · simp [recStepG, projEG, semStep, EntryG.old, he.2]
+        · intro p hp; simp [recStepG] at hp; subst hp; exact he.1
+      | some p =>
+        have hp := hacc p rfl
+        refine ⟨?_, ?_⟩
+        · by_cases hlt : e.ts > p.ts
+          · simp [recStepG, projEG, semStep, EntryG.old, he.2, he.1, hp, hlt, joinO,
+                  Nat.max_def]
+            omega
+          · simp [recStepG, projEG, semStep, EntryG.old, he.2, he.1, hp, hlt, joinO,
+                  Nat.max_def]
+            omega
+        · intro q hq
+          by_cases hlt : e.ts > p.ts
+          · simp [recStepG, he.1, hp, hlt] at hq; subst hq; rfl
+          · simp [recStepG, he.1, hp, hlt] at hq; subst hq; rfl
+    simp only [List.foldl, List.map]
+    have := ih (recStepG acc e) hes' hstep.2
+    rw [this.1, hstep.1]
+    exact ⟨rfl, this.2⟩
+
+theorem foldl_tombStepG_gen0 (n : Nat) : ∀ (ts : List TombG) (acc : Option TombG),
+    (∀ t ∈ ts, t.gen = 0 ∧ t.name = n) → (∀ p, acc = some p → p.gen = 0) →
+    projTG (ts.foldl tombStepG acc) = (ts.map TombG.old).foldl (semTStep n) (projTG acc) ∧
+    (∀ p, ts.foldl tombStepG acc = some p → p.gen = 0) := by
+  intro ts
+  induction ts with
+  | nil => intro acc _ h; exact ⟨rfl, h⟩
+  | cons t ts ih =>
+    intro acc hts hacc
+    have ht := hts t (List.mem_cons_self ..)
+    have hts' : ∀ x ∈ ts, x.gen = 0 ∧ x.name = n := fun x hx => hts x (List.mem_cons_of_mem _ hx)
+    have hstep : projTG (tombStepG acc t) = semTStep n (projTG acc) t.old ∧
+        (∀ p, tombStepG acc t = some p → p.gen = 0) := by
+      cases acc with
+      | none =>
+        refine ⟨?_, ?_⟩
+        · simp [tombStepG, projTG, semTStep, TombG.old, ht.2]
+        · intro p hp; simp [tombStepG] at hp; subst hp; exact ht.1
+      | some p =>
+        have hp := hacc p rfl
+        refine ⟨?_, ?_⟩
+        · by_cases hlt : t.ts > p.ts
+          · simp [tombStepG, projTG, semTStep, TombG.old, ht.2, ht.1, hp, hlt, joinT,
+                  Nat.max_def]
+            omega
+          · simp [tombStepG, projTG, semTStep, TombG.old, ht.2, ht.1, hp, hlt, joinT,
+                  Nat.max_def]
+            omega
+        · intro q hq
+          by_cases hlt : t.ts > p.ts
+          · simp [tombStepG, ht.1, hp, hlt] at hq; subst hq; exact ht.1
+          · simp [tombStepG, ht.1, hp, hlt] at hq; subst hq; exact hp
+    simp only [List.foldl, List.map]
+    have := ih (tombStepG acc t) hts' hstep.2
+    rw [this.1, hstep.1]
+    exact ⟨rfl, this.2⟩
+
+/-- **At generation 0 the merge is Layer 1's**: for the records of one name,
+none with a generation, the result is Layer 1's name-by-name meaning (join
+both sides' newest play, newest import and newest tombstone, then prune;
+`merge_sem_noren`). Libraries written before generations existed, and every
+library in which no deleted game was loaded again, merge as they always did. -/
+theorem mergeName_gen0 (n : Nat) (es : List EntryG) (ts : List TombG)
+    (he : ∀ e ∈ es, e.gen = 0 ∧ e.name = n) (ht : ∀ t ∈ ts, t.gen = 0 ∧ t.name = n) :
+    (projEG (mergeName es ts).1, projTG (mergeName es ts).2) =
+      normP (semR (es.map EntryG.old) n) (semT (ts.map TombG.old) n) := by
+  have hE := foldl_recStepG_gen0 n es none he (by intro p h; cases h)
+  have hT := foldl_tombStepG_gen0 n ts none ht (by intro p h; cases h)
+  have hE1 : projEG (es.foldl recStepG none) = (es.map EntryG.old).foldl (semStep n) none := hE.1
+  have hT1 : projTG (ts.foldl tombStepG none) = (ts.map TombG.old).foldl (semTStep n) none := hT.1
+  unfold mergeName semR semT
+  rw [← hE1, ← hT1]
+  have hE2 := hE.2
+  have hT2 := hT.2
+  generalize es.foldl recStepG none = x at hE2
+  generalize ts.foldl tombStepG none = y at hT2
+  rcases x with _ | e <;> rcases y with _ | t
+  · rfl
+  · rfl
+  · rfl
+  · have he0 := hE2 e rfl
+    have ht0 := hT2 t rfl
+    by_cases hlt : e.ts > t.ts <;> simp [pruneG, normP, projEG, projTG, he0, ht0, hlt]
+
+/-- **A tombstone stands beside a newer generation**: whenever the winning
+entry is of a newer generation than the winning tombstone, both survive the
+merge. It is how a device holding the deleted game learns that it was. -/
+theorem mergeName_tomb_beside_newer (es : List EntryG) (ts : List TombG) (e : EntryG) (t : TombG)
+    (he : es.foldl recStepG none = some e) (ht : ts.foldl tombStepG none = some t)
+    (hg : e.gen > t.gen) : mergeName es ts = (some e, some t) := by
+  simp [mergeName, he, ht, pruneG, hg]
+
+/-- **Nothing of a generation at or below a tombstone's outlives it**, unless
+a later play of the very generation it deleted overruled it (as before). -/
+theorem mergeName_entry_survives (es : List EntryG) (ts : List TombG) (e : EntryG) (t : TombG)
+    (ht : ts.foldl tombStepG none = some t) (hr : (mergeName es ts).1 = some e) :
+    e.gen > t.gen ∨ (e.gen = t.gen ∧ e.ts > t.ts) := by
+  unfold mergeName at hr
+  rw [ht] at hr
+  generalize es.foldl recStepG none = x at hr
+  rcases x with _ | x
+  · simp [pruneG] at hr
+  · simp only [pruneG] at hr
+    split at hr
+    · rename_i h1; simp at hr; subst hr; exact Or.inl h1
+    · split at hr
+      · rename_i h2; simp at hr; subst hr; simp at h2; exact Or.inr ⟨h2.1, h2.2⟩
+      · simp at hr
+
+/-- The cases web/tests/deleted-save.test.mjs's merge test runs. -/
+theorem mergeName_cases :
+    -- no generations: a newer play drops the tombstone, an older one is dropped
+    mergeName [⟨1, 20, 0, 0⟩] [⟨1, 10, 0⟩] = (some ⟨1, 20, 0, 0⟩, none) ∧
+    mergeName [⟨1, 5, 0, 0⟩] [⟨1, 10, 0⟩] = (none, some ⟨1, 10, 0⟩) ∧
+    -- loaded again after the delete: both stand
+    mergeName [⟨1, 20, 20, 1⟩] [⟨1, 10, 0⟩] = (some ⟨1, 20, 20, 1⟩, some ⟨1, 10, 0⟩) ∧
+    -- a play of the deleted generation, however late, does not replace it
+    mergeName [⟨1, 20, 20, 1⟩, ⟨1, 30, 0, 0⟩] [⟨1, 10, 0⟩] =
+      (some ⟨1, 20, 20, 1⟩, some ⟨1, 10, 0⟩) ∧
+    -- a delete of generation 1 supersedes generation 0's and removes either
+    mergeName [⟨1, 20, 20, 1⟩] [⟨1, 10, 0⟩, ⟨1, 25, 1⟩] = (none, some ⟨1, 25, 1⟩) ∧
+    mergeName [⟨1, 40, 0, 0⟩] [⟨1, 25, 1⟩] = (none, some ⟨1, 25, 1⟩) := by
+  decide
+
+/-! ### Layer 3b: two devices, one Drive, the download pass -/
+
+/-- The Drive-side library, markers aside, up to order. -/
+structure LibG where
+  recents : List EntryG
+  tomb : List TombG
+deriving DecidableEq, Repr
+
+/-- A per-game record or Drive file: kind 0 `rom:`, 1 `save:`, 2 `oldsave:`
+(the kept save). `gen` is the Drive file's `appProperties.gen`; a local record
+has none (0): what a device holds is of the generation its entry says. -/
+structure FileG where
+  game : Nat
+  kind : Nat
+  blob : Nat
+  gen : Nat
+deriving DecidableEq, Repr
+
+def FileG.key (f : FileG) : Nat × Nat := (f.game, f.kind)
+
+def putF (l : List FileG) (f : FileG) : List FileG := l.filter (fun j => j.key != f.key) ++ [f]
+def findF (l : List FileG) (k : Nat × Nat) : Option FileG := l.find? (fun j => j.key == k)
+
+/-- `mergeLibrary`, name by name. -/
+def mergeG (a b : LibG) : LibG :=
+  let es := a.recents ++ b.recents
+  let ts := a.tomb ++ b.tomb
+  let ns := dedup (es.map (·.name) ++ ts.map (·.name))
+  let res := ns.map (fun n => mergeName (es.filter (·.name == n)) (ts.filter (·.name == n)))
+  ⟨res.filterMap (·.1), res.filterMap (·.2)⟩
+
+/-- `genOf` of a game's entry in a list (0 when absent). -/
+def genIn (l : List EntryG) (g : Nat) : Nat := ((l.find? (·.name == g)).map (·.gen)).getD 0
+
+/-- `deletedIn`: tombstoned, with no entry beside it. -/
+def deadIn (L : LibG) (g : Nat) : Bool := L.tomb.any (·.name == g) && !L.recents.any (·.name == g)
+
+structure DevG where
+  /-- IndexedDB "recent" -/
+  recent : List EntryG
+  /-- syncState.tomb -/
+  tomb : List TombG
+  /-- the per-game records -/
+  store : List FileG
+  /-- syncState.queueUp -/
+  qUp : List (Nat × Nat)
+  /-- syncState.queueDel -/
+  qDel : List (Nat × Nat)
+deriving DecidableEq, Repr
+
+def DevG.empty : DevG := ⟨[], [], [], [], []⟩
+
+structure StG where
+  d0 : DevG
+  d1 : DevG
+  lib : LibG
+  files : List FileG
+  now : Nat
+deriving DecidableEq, Repr
+
+def StG.init : StG := ⟨DevG.empty, DevG.empty, ⟨[], []⟩, [], 1⟩
+
+def StG.dev (s : StG) : Bool → DevG
+  | false => s.d0
+  | true => s.d1
+
+def StG.setDev (s : StG) : Bool → DevG → StG
+  | false, v => { s with d0 := v }
+  | true, v => { s with d1 := v }
+
+def localLibG (dv : DevG) : LibG := ⟨dv.recent, dv.tomb⟩
+
+/-- `bumpRecentIndex`: the entry to the front, its generation carried (or
+raised to `atLeast`); with `gens`, a fresh import after this device deleted
+the game starts the generation after the one deleted. -/
+def bumpG (gens : Bool) (dv : DevG) (g now : Nat) (fresh : Bool) (atLeast : Nat) : List EntryG :=
+  let prev := dv.recent.find? (·.name == g)
+  let g0 := if gens then max ((prev.map (·.gen)).getD 0) atLeast else 0
+  let gen := if gens && fresh then
+      match dv.tomb.find? (·.name == g) with
+      | some t => max g0 (t.gen + 1)
+      | none => g0
+    else g0
+  let imp := if fresh then now else (prev.map (·.imp)).getD 0
+  ⟨g, now, imp, gen⟩ :: dv.recent.filter (·.name != g)
+
+def keysOfG (g : Nat) : List (Nat × Nat) := [(g, 0), (g, 1), (g, 2)]
+
+/-- `addRecentRom` (+ `markGameUpload`, which queues every record of it). -/
+def importG (gens : Bool) (dv : DevG) (g blob now : Nat) : DevG :=
+  let st := putF dv.store ⟨g, 0, blob, 0⟩
+  { dv with store := st, recent := bumpG gens dv g now true 0,
+            qUp := ((st.filter (·.game == g)).map FileG.key).foldl addUniq dv.qUp }
+
+/-- A launch and a battery save. -/
+def playG (gens : Bool) (dv : DevG) (g blob now : Nat) : DevG :=
+  { dv with recent := bumpG gens dv g now false 0, store := putF dv.store ⟨g, 1, blob, 0⟩,
+            qUp := addUniq dv.qUp (g, 1) }
+
+/-- `deleteGameEverywhere`: the tombstone records the generation deleted. -/
+def deleteG (dv : DevG) (g now : Nat) : DevG :=
+  { dv with store := dv.store.filter (·.game != g),
+            recent := dv.recent.filter (·.name != g),
+            qDel := (keysOfG g).foldl addUniq dv.qDel,
+            qUp := dv.qUp.filter (·.1 != g),
+            tomb := dv.tomb.filter (·.name != g) ++ [⟨g, now, genIn dv.recent g⟩] }
+
+/-- One queued upload (`flushSyncInner`'s upload pass), against the merged
+library `L`. With `gens`: a game held here at an older generation than the
+library's sends nothing (its save is the deleted game's); a file goes up
+stamped with the generation held here, and one on Drive stamped older is
+replaced whatever its bytes. A ROM present on Drive is never re-sent; a
+kept save (kind 2) is no generation's. -/
+def upG (gens : Bool) (dv : DevG) (L : LibG) (files : List FileG) (k : Nat × Nat) : List FileG :=
+  if deadIn L k.1 then files
+  else if gens && k.2 == 1 && genIn L.recents k.1 > genIn dv.recent k.1 then files
+  else match findF dv.store k with
+    | none => files
+    | some it =>
+      let here := if gens then genIn dv.recent k.1 else 0
+      match findF files k with
+      | none => putF files { it with gen := here }
+      | some r =>
+        if (gens && r.gen < here) || (k.2 != 0 && r.blob != it.blob)
+        then putF files { it with gen := here } else files
+
+/-- `flushSyncInner` as one event: merge; cancel the queued deletes of games
+a newer play revived; delete; upload; write the library; adopt its
+tombstones (and put revived games back on the grid). -/
+def flushG (gens : Bool) (dv : DevG) (lib : LibG) (files : List FileG) : DevG × LibG × List FileG :=
+  let L := mergeG lib (localLibG dv)
+  let revived := (dv.tomb.filter (fun t => !L.tomb.any (·.name == t.name))).map (·.name)
+  let qDel := dv.qDel.filter (fun k => !revived.contains k.1)
+  let f1 := files.filter (fun f => !qDel.contains f.key)
+  let f2 := dv.qUp.foldl (upG gens dv L) f1
+  let add := L.recents.filter (fun r => revived.contains r.name && !dv.recent.any (·.name == r.name))
+  ({ dv with qDel := [], qUp := [], tomb := L.tomb, recent := dv.recent ++ add }, L, f2)
+
+/-- `convertStaleGame`: the device holds `g` at an older generation than the
+library's; its save is kept aside (kind 2) and queued up, the rest goes. -/
+def convertG (dv : DevG) (g : Nat) : DevG :=
+  let kept := match findF dv.store (g, 1) with
+    | some s => [⟨g, 2, s.blob, 0⟩]
+    | none => (dv.store.filter (fun f => f.key == (g, 2)))
+  { dv with store := dv.store.filter (·.game != g) ++ kept,
+            qUp := (dv.qUp.filter (·.1 != g)) ++ kept.map FileG.key }
+
+/-- One Drive file in the download pass. A save or a kept save of a game this
+device holds; with `gens`, a save written for an older generation than the
+library's is kept aside (kind 2, queued up) and never applied, and Drive's
+copy is queued to be replaced by this device's or taken down. -/
+def downG (gens : Bool) (L : LibG) (dv : DevG) (f : FileG) : DevG :=
+  if f.kind == 0 then dv
+  -- a game held here; or a kept save held here, which follows Drive's
+  else if findF dv.store (f.game, 0) == none &&
+          !(f.kind == 2 && (findF dv.store f.key).isSome) then dv
+  else if dv.qDel.contains f.key then dv
+  else if gens && f.kind == 1 && f.gen < genIn L.recents f.game then
+    let fix := if (findF dv.store f.key).isSome
+      then { dv with qUp := addUniq dv.qUp f.key } else { dv with qDel := addUniq dv.qDel f.key }
+    { fix with store := putF fix.store ⟨f.game, 2, f.blob, 0⟩, qUp := addUniq fix.qUp (f.game, 2) }
+  else { dv with store := putF dv.store { f with gen := 0 } }
+
+/-- `pullSyncInner` as one event: merge; the tombstone pass ("Continue");
+with `gens`, the stale-generation pass; the download pass; reconcile
+upward; queue the deleted games' Drive files for deletion; adopt the merge. -/
+def pullG (gens : Bool) (dv : DevG) (lib : LibG) (files : List FileG) : DevG × LibG :=
+  let L := mergeG lib (localLibG dv)
+  let d1 := { dv with store := dv.store.filter (fun i => !deadIn L i.game) }
+  let stale := if gens then (L.recents.filter (fun e => e.gen > genIn dv.recent e.name &&
+                  d1.store.any (fun i => i.game == e.name && i.kind != 2))).map (·.name) else []
+  let d2 := stale.foldl convertG d1
+  let d3 := files.foldl (downG gens L) d2
+  let missing := (d3.store.filter (fun i => !files.any (·.key == i.key) && !deadIn L i.game)).map FileG.key
+  let orphans := (files.filter (fun f => deadIn L f.game)).map FileG.key
+  ({ d3 with qUp := (missing.foldl addUniq d3.qUp).filter (fun k => !orphans.contains k),
+             qDel := orphans.foldl addUniq d3.qDel, tomb := L.tomb, recent := L.recents }, L)
+
+/-- `downloadGame`: every file of the game, at the newest generation any of
+them was written for; with `gens`, a save of an older one is kept aside. -/
+def downloadG (gens : Bool) (dv : DevG) (files : List FileG) (g now : Nat) : DevG :=
+  let fs := files.filter (·.game == g)
+  if fs.isEmpty then dv else
+  let top := fs.foldl (fun m f => max m f.gen) (genIn dv.recent g)
+  let st := fs.foldl (fun st f =>
+    if gens && f.kind == 1 && f.gen < top then putF st ⟨g, 2, f.blob, 0⟩
+    else putF st { f with gen := 0 }) dv.store
+  { dv with store := st, recent := bumpG gens dv g now false (if gens then top else 0) }
+
+/-- `restoreKeptSave`: the kept save and the game's save change places. With
+no save to put aside, the kept record becomes one that offers nothing (blob
+0, the JS `data: null`), which replaces the older copies other devices hold. -/
+def restoreG (dv : DevG) (g : Nat) : DevG :=
+  match findF dv.store (g, 2) with
+  | none => dv
+  | some k =>
+    if k.blob == 0 then dv else
+    let cur := ((findF dv.store (g, 1)).map (·.blob)).getD 0
+    let st := putF (putF dv.store ⟨g, 1, k.blob, 0⟩) ⟨g, 2, cur, 0⟩
+    { dv with store := st, qUp := addUniq (addUniq dv.qUp (g, 1)) (g, 2) }
+
+inductive EvG where
+  | importRom (d : Bool) (g blob : Nat)
+  | play (d : Bool) (g blob : Nat)
+  | delete (d : Bool) (g : Nat)
+  | flush (d : Bool)
+  | pull (d : Bool)
+  | download (d : Bool) (g : Nat)
+  | restore (d : Bool) (g : Nat)
+deriving DecidableEq, Repr
+
+def stepG (gens : Bool) (s : StG) : EvG → StG
+  | .importRom d g blob => { s.setDev d (importG gens (s.dev d) g blob s.now) with now := s.now + 1 }
+  | .play d g blob =>
+    if (findF (s.dev d).store (g, 0)).isSome
+    then { s.setDev d (playG gens (s.dev d) g blob s.now) with now := s.now + 1 } else s
+  | .delete d g => { s.setDev d (deleteG (s.dev d) g s.now) with now := s.now + 1 }
+  | .flush d =>
+    let r := flushG gens (s.dev d) s.lib s.files
+    { s.setDev d r.1 with lib := r.2.1, files := r.2.2 }
+  | .pull d =>
+    let r := pullG gens (s.dev d) s.lib s.files
+    { s.setDev d r.1 with lib := r.2 }
+  | .download d g => { s.setDev d (downloadG gens (s.dev d) s.files g s.now) with now := s.now + 1 }
+  | .restore d g => s.setDev d (restoreG (s.dev d) g)
+
+def runG (gens : Bool) (s : StG) (es : List EvG) : StG := es.foldl (stepG gens) s
+
+/-- Device 0 imports game 1 and saves (11), syncs; device 1 pulls,
+downloads it and plays on (12, not yet sent); device 0 deletes the game,
+syncs, loads it again from its file (10) and syncs; device 1, not having
+pulled, syncs; device 0 pulls. -/
+def reimportTrace : List EvG :=
+  [.importRom false 1 10, .play false 1 11, .flush false, .pull true, .download true 1,
+   .play true 1 12, .delete false 1, .flush false, .importRom false 1 10, .flush false,
+   .flush true, .pull false]
+
+def saves (dv : DevG) (k : Nat) : List Nat := (dv.store.filter (·.kind == k)).map (·.blob)
+
+/-- **The finding** (the UI pass; FINDINGS.md "a design question"): with the
+rules before generations, device 0's game, loaded again after its delete,
+gets the deleted game's save back from device 1. -/
+theorem bug_reimport_gets_deleted_save :
+    let s := runG false StG.init reimportTrace
+    saves s.d0 1 = [12] ∧ s.lib.tomb = [] := by
+  decide
+
+/-- **Fixed.** The same trace starts the game loaded again without a save;
+device 1's sync sent nothing, and Drive holds no save. Once device 1 pulls
+(its copy gives way, its save kept aside) and syncs, device 0 pulls the kept
+save, not applied, and Restore makes it the game's save, on Drive at the new
+generation; the kept record then offers nothing, on either device. The
+tombstone of the deleted generation stands beside the new one throughout. -/
+theorem regress_reimport_keeps_deleted_save_aside :
+    let s := runG true StG.init reimportTrace
+    let s2 := runG true s [.pull true, .flush true, .pull false]
+    let s3 := runG true s2 [.restore false 1, .flush false, .pull true, .pull false]
+    saves s.d0 1 = [] ∧ (s.files.filter (·.kind == 1)) = [] ∧
+    s.lib.tomb = [⟨1, 5, 0⟩] ∧ s.lib.recents.map (·.gen) = [1] ∧
+    saves s2.d1 1 = [] ∧ saves s2.d1 2 = [12] ∧ saves s2.d1 0 = [] ∧
+    saves s2.d0 1 = [] ∧ saves s2.d0 2 = [12] ∧
+    saves s3.d0 1 = [12] ∧ saves s3.d0 2 = [0] ∧ saves s3.d1 2 = [0] ∧
+    (s3.files.filter (·.kind == 1)).map (fun f => (f.blob, f.gen)) = [(12, 1)] ∧
+    s3.lib.tomb = [⟨1, 5, 0⟩] := by
+  decide
+
+/-- Deleted and loaded again on one device before a sync: the old save still
+leaves Drive (the flush used to read the newer entry as "the delete was not
+meant" and cancel the queued deletes), and a device downloading the game
+later gets no save. -/
+theorem regress_reimport_before_sync :
+    let es := [EvG.importRom false 1 10, .play false 1 11, .flush false,
+               .delete false 1, .importRom false 1 10, .flush false,
+               .pull true, .download true 1]
+    let old := runG false StG.init es
+    let s := runG true StG.init es
+    saves old.d1 1 = [11] ∧
+    s.files.map FileG.key = [(1, 0)] ∧ saves s.d1 1 = [] := by
+  decide
+
+/-! What the pull may write into a game's save, and what the flush may send. -/
+
+theorem mem_putF {l : List FileG} {f i : FileG} (h : i ∈ putF l f) : i ∈ l ∨ i = f := by
+  unfold putF at h
+  rcases List.mem_append.1 h with h | h
+  · exact Or.inl (List.mem_filter.1 h).1
+  · exact Or.inr (List.mem_singleton.1 h)
+
+theorem mem_filter_append_kept {l : List FileG} {p : FileG → Bool} {k : List FileG}
+    (hk : ∀ x ∈ k, x.kind = 2) {i : FileG} (h : i ∈ l.filter p ++ k) (h1 : i.kind = 1) : i ∈ l := by
+  rcases List.mem_append.1 h with h | h
+  · exact (List.mem_filter.1 h).1
+  · have := hk i h; omega
+
+/-- A save of the conversion's output was in its input. -/
+theorem convertG_save (dv : DevG) (g : Nat) (i : FileG) (hi : i ∈ (convertG dv g).store)
+    (h1 : i.kind = 1) : i ∈ dv.store := by
+  unfold convertG at hi
+  simp only at hi
+  apply mem_filter_append_kept _ hi h1
+  intro x hx
+  split at hx
+  · simp at hx; subst hx; rfl
+  · have := (List.mem_filter.1 hx).2
+    simp [FileG.key] at this
+    exact this.2
+
+theorem foldl_convertG_save (L : List Nat) : ∀ (dv : DevG) (i : FileG),
+    i ∈ (L.foldl convertG dv).store → i.kind = 1 → i ∈ dv.store := by
+  induction L with
+  | nil => intro dv i h _; exact h
+  | cons g gs ih => intro dv i h h1; exact convertG_save dv g i (ih _ i h h1) h1
+
+/-- The download pass writes a save only from a Drive file of this pass,
+and, with generations, only one written for the library's generation of it. -/
+theorem downG_save (L : LibG) (dv : DevG) (f : FileG) (i : FileG)
+    (hi : i ∈ (downG true L dv f).store) (h1 : i.kind = 1) :
+    i ∈ dv.store ∨ (i = { f with gen := 0 } ∧ f.gen ≥ genIn L.recents f.game) := by
+  unfold downG at hi
+  split at hi
+  · exact Or.inl hi
+  split at hi
+  · exact Or.inl hi
+  split at hi
+  · exact Or.inl hi
+  split at hi
+  · simp only at hi
+    rcases mem_putF hi with h | h
+    · left; split at h <;> simpa using h
+    · subst h; simp at h1
+  · rename_i hold
+    rcases mem_putF hi with h | h
+    · exact Or.inl h
+    · refine Or.inr ⟨h, ?_⟩
+      subst h
+      have hk : f.kind = 1 := by simpa using h1
+      simp [hk] at hold
+      omega
+
+theorem foldl_downG_save (L : LibG) (files : List FileG) : ∀ (dv : DevG) (i : FileG),
+    i ∈ (files.foldl (downG true L) dv).store → i.kind = 1 →
+    i ∈ dv.store ∨ ∃ f ∈ files, i = { f with gen := 0 } ∧ f.gen ≥ genIn L.recents f.game := by
+  induction files with
+  | nil => intro dv i h _; exact Or.inl h
+  | cons f fs ih =>
+    intro dv i h h1
+    rcases ih _ i h h1 with h | ⟨f', hf', he⟩
+    · rcases downG_save L dv f i h h1 with h | h
+      · exact Or.inl h
+      · exact Or.inr ⟨f, List.mem_cons_self .., h⟩
+    · exact Or.inr ⟨f', List.mem_cons_of_mem _ hf', he⟩
+
+/-- **A pull writes into a game's save only a Drive file written for the
+library's generation of that game** (the library it merges). Every save
+after the pull was already here, or is such a file: a save written for an
+older generation, the deleted game's, is never applied. -/
+theorem pullG_applies_current_gen (dv : DevG) (lib : LibG) (files : List FileG) (i : FileG)
+    (hi : i ∈ (pullG true dv lib files).1.store) (h1 : i.kind = 1) :
+    i ∈ dv.store ∨ ∃ f ∈ files, i = { f with gen := 0 } ∧
+      f.gen ≥ genIn (mergeG lib (localLibG dv)).recents f.game := by
+  simp only [pullG] at hi
+  rcases foldl_downG_save _ files _ i hi h1 with h | h
+  · exact Or.inl (List.mem_filter.1 (foldl_convertG_save _ _ i h h1)).1
+  · exact Or.inr h
+
+theorem upG_save (dv : DevG) (L : LibG) (files : List FileG) (k : Nat × Nat) (i : FileG)
+    (hi : i ∈ upG true dv L files k) :
+    i ∈ files ∨ (i.gen = genIn dv.recent i.game ∧
+      (i.kind = 1 → genIn L.recents i.game ≤ genIn dv.recent i.game)) := by
+  unfold upG at hi
+  split at hi
+  · exact Or.inl hi
+  split at hi
+  · exact Or.inl hi
+  rename_i hnot
+  cases hit : findF dv.store k with
+  | none => rw [hit] at hi; exact Or.inl hi
+  | some it =>
+  rw [hit] at hi
+  have hkey : it.key = k := by
+    have h' : dv.store.find? (fun j => j.key == k) = some it := hit
+    simpa using List.find?_some h'
+  have hg : it.game = k.1 := by rw [← hkey]; rfl
+  have hkd : it.kind = k.2 := by rw [← hkey]; rfl
+  have fresh : ∀ j, j = { it with gen := genIn dv.recent k.1 } →
+      j.gen = genIn dv.recent j.game ∧
+        (j.kind = 1 → genIn L.recents j.game ≤ genIn dv.recent j.game) := by
+    intro j hj
+    subst hj
+    refine ⟨by simp [hg], fun hk1 => ?_⟩
+    have : k.2 = 1 := by rw [← hkd]; exact hk1
+    simp [this] at hnot
+    simpa [hg] using hnot
+  simp only [↓reduceIte] at hi
+  cases hr : findF files k with
+  | none =>
+    rw [hr] at hi; dsimp only at hi
+    rcases mem_putF hi with h | h
+    · exact Or.inl h
+    · exact Or.inr (fresh i h)
+  | some r =>
+    rw [hr] at hi; dsimp only at hi
+    split at hi
+    · rcases mem_putF hi with h | h
+      · exact Or.inl h
+      · exact Or.inr (fresh i h)
+    · exact Or.inl hi
+
+theorem foldl_upG_save (dv : DevG) (L : LibG) : ∀ (ks : List (Nat × Nat)) (files : List FileG) (i : FileG),
+    i ∈ ks.foldl (upG true dv L) files →
+    i ∈ files ∨ (i.gen = genIn dv.recent i.game ∧
+      (i.kind = 1 → genIn L.recents i.game ≤ genIn dv.recent i.game)) := by
+  intro ks
+  induction ks with
+  | nil => intro files i h; exact Or.inl h
+  | cons k ks ih =>
+    intro files i h
+    rcases ih _ i h with h | h
+    · exact upG_save dv L files k i h
+    · exact Or.inr h
+
+/-- **A flush sends a save only at the generation this device holds its game,
+and only when the library has not moved past it**: every file on Drive after
+the flush was there before, or is stamped with this device's generation of
+its game, which for a save is no older than the merged library's. A device
+that missed a delete and a reload elsewhere sends nothing of the deleted
+game. -/
+theorem flushG_uploads_current_gen (dv : DevG) (lib : LibG) (files : List FileG) (i : FileG)
+    (hi : i ∈ (flushG true dv lib files).2.2) :
+    i ∈ files ∨ (i.gen = genIn dv.recent i.game ∧
+      (i.kind = 1 → genIn (mergeG lib (localLibG dv)).recents i.game ≤ genIn dv.recent i.game)) := by
+  simp only [flushG] at hi
+  rcases foldl_upG_save dv _ _ _ i hi with h | h
+  · exact Or.inl (List.mem_filter.1 h).1
+  · exact Or.inr h
 end WebState.DriveLibrary
