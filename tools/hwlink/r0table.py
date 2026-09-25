@@ -56,6 +56,15 @@ TABLE = {
     # (ARM, Thumb), k = 16..44 cycles to the overflow
     'irqwait': ([k for k in range(16, 25)] + [0x100 | k for k in range(16, 45)] +
                 [0x300 | k for k in range(16, 45)] + [0x200 | k for k in range(16, 25)]),
+    # Hades-Tests dma-start-delay's two checks as compiled: from IWRAM, then
+    # from board WRAM (the request lands in a 6-cycle ARM fetch)
+    'hadesdsd': [0, 1, 2, 3],
+    # an H-blank DMA landing in a running immediate burst: which gap it takes
+    'hpreempt': [0xC0 + k for k in range(8)] + [0x100 + k for k in range(4)],
+    # MEMCNT bit 5 clear: board WRAM's region is the chip WRAM (reads, writes,
+    # 32K mirror, one-cycle timing); MEMCNT's reset value. Not the swap (bit
+    # 0) cells 8-12, which dingbat does not model (payload header)
+    'memcnt': [13] + list(range(0, 8)),
     # an H-blank DMA whose bursts outlast the line (configuration << 8 | word):
     # bursts, last start and last unit from the first, burst 1's gap; one
     # channel of 0.5 to 3.5 lines, near the V-blank edge, about a line, and

@@ -4669,5 +4669,154 @@
     "want": "00000037"
    }
   ]
+ },
+ {
+  "payload": "hadesdsd",
+  "rom": "hadesdsd.gba",
+  "sha1": "cb281a1791ca4159a04d999f1ebad0ab9197727c",
+  "frames": 92,
+  "cells": [
+   {
+    "id": "hadesdsd 0x0",
+    "kind": "hex",
+    "want": "00002216"
+   },
+   {
+    "id": "hadesdsd 0x1",
+    "kind": "hex",
+    "want": "00322016"
+   },
+   {
+    "id": "hadesdsd 0x2",
+    "kind": "hex",
+    "want": "00008C5B"
+   },
+   {
+    "id": "hadesdsd 0x3",
+    "kind": "hex",
+    "want": "00CE855B"
+   }
+  ]
+ },
+ {
+  "payload": "hpreempt",
+  "rom": "hpreempt.gba",
+  "sha1": "600c4b512381d9d2f160f410ff4889328af5ba28",
+  "frames": 156,
+  "cells": [
+   {
+    "id": "hpreempt 0xc0",
+    "kind": "hex",
+    "want": "023B0202"
+   },
+   {
+    "id": "hpreempt 0xc1",
+    "kind": "hex",
+    "want": "023A0202"
+   },
+   {
+    "id": "hpreempt 0xc2",
+    "kind": "hex",
+    "want": "023A0202"
+   },
+   {
+    "id": "hpreempt 0xc3",
+    "kind": "hex",
+    "want": "02390202"
+   },
+   {
+    "id": "hpreempt 0xc4",
+    "kind": "hex",
+    "want": "02390202"
+   },
+   {
+    "id": "hpreempt 0xc5",
+    "kind": "hex",
+    "want": "02380202"
+   },
+   {
+    "id": "hpreempt 0xc6",
+    "kind": "hex",
+    "want": "02380202"
+   },
+   {
+    "id": "hpreempt 0xc7",
+    "kind": "hex",
+    "want": "02370202"
+   },
+   {
+    "id": "hpreempt 0x100",
+    "kind": "hex",
+    "want": "02330202"
+   },
+   {
+    "id": "hpreempt 0x101",
+    "kind": "hex",
+    "want": "02320202"
+   },
+   {
+    "id": "hpreempt 0x102",
+    "kind": "hex",
+    "want": "02320202"
+   },
+   {
+    "id": "hpreempt 0x103",
+    "kind": "hex",
+    "want": "02310202"
+   }
+  ]
+ },
+ {
+  "payload": "memcnt",
+  "rom": "memcnt.gba",
+  "sha1": "d4d59e921b51ca0336bffc91415ffc5c5d3dcbb9",
+  "frames": 132,
+  "cells": [
+   {
+    "id": "memcnt 0xd",
+    "kind": "hex",
+    "want": "0D000020"
+   },
+   {
+    "id": "memcnt 0x0",
+    "kind": "hex",
+    "want": "89ABCDEF"
+   },
+   {
+    "id": "memcnt 0x1",
+    "kind": "hex",
+    "want": "01234567"
+   },
+   {
+    "id": "memcnt 0x2",
+    "kind": "hex",
+    "want": "55AA55AA"
+   },
+   {
+    "id": "memcnt 0x3",
+    "kind": "hex",
+    "want": "11223344"
+   },
+   {
+    "id": "memcnt 0x4",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "memcnt 0x5",
+    "kind": "hex",
+    "want": "00000008"
+   },
+   {
+    "id": "memcnt 0x6",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "memcnt 0x7",
+    "kind": "hex",
+    "want": "89ABCDEF"
+   }
+  ]
  }
 ]
