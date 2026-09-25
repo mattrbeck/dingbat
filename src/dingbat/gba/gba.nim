@@ -113,13 +113,13 @@ type
     ime*:    bool
     # IRQ recognition is held off until this cycle after a register write
     # opens the last gate on a parked IF (IRQ_GATE_DELAY, interrupts.nim).
-    # Not serialized (a ~12-cycle window); rebased by end_frame.
+    # Rebased by end_frame; in the state's in-flight section (rev 9).
     gate_open_at*: CycleCount
     # A timer interrupt in the synchroniser (raise_synced, interrupts.nim):
     # raised at pipe_at (pipe_new: the IF bits it set), IE & IF sampled into
     # pipe_bits after that cycle's register writes, recognised at pipe_due.
-    # Not serialized (a few cycles long; load_irq_state drops it); rebased
-    # by end_frame.
+    # Rebased by end_frame; in the state's in-flight section (rev 9), as is
+    # the stall span below.
     pipe_raised*:  uint16
     pipe_new*:     uint16
     pipe_bits*:    uint16
@@ -150,9 +150,10 @@ type
     waitcnt*: WAITCNT
     # POSTFLG (0x04000300): boot value 1 at ROM entry (gbaedge IDENT page).
     postflg*: uint8
-    # Internal memory control (0x04000800, mirrored every 64K): readback only;
-    # the waitstate/WRAM-disable effects are unimplemented. Reset value
-    # 0x0D000020 (gbaedge IDENT page). Neither field is serialized.
+    # Internal memory control (0x04000800, mirrored every 64K): the EWRAM
+    # wait field is live (bus.update_waitcnt); the disable and swap bits are
+    # readback only. Reset value 0x0D000020 (gbaedge IDENT page). Both fields
+    # are in the state's in-flight section (rev 9).
     memctrl*: uint32
 
   Timer* = ref object
@@ -162,7 +163,8 @@ type
     tm*:           array[4, uint16]
     cycle_enabled*: array[4, CycleCount]
     # The count a cold enable found: reads before counting starts still see
-    # it (TIMER_START_DELAY). Not serialized (a load sets it to tm).
+    # it (TIMER_START_DELAY). With the reload latch below, in the state's
+    # in-flight section (rev 9).
     tm_pre*:       array[4, uint16]
     # Reload writes latch one cycle late relative to an overflow: an overflow
     # on the cycle right after the write still reloads the old value
@@ -221,7 +223,8 @@ type
     # between instructions, so not serialized.
     pending*:          uint8
     # When each armed immediate channel requests the bus (DMA_START_DELAY
-    # after its enable write). Only read within that delay; not serialized.
+    # after its enable write). Only read within that delay; in the state's
+    # in-flight section (rev 9).
     imm_due*:          array[4, CycleCount]
     # DMA_CHAIN: the burst that just ended handed the bus straight to the
     # next one, which starts without its lead cycle. Instruction scoped.
@@ -232,7 +235,8 @@ type
     current_priority*: int
     # DMA3 video-capture frame latch: set at line 2, cleared with the enable
     # bit at line 162; a channel armed mid-frame waits for the next frame's
-    # line 2 (gbaedge CAPDMA page). Not serialized.
+    # line 2 (gbaedge CAPDMA page). In the state's in-flight section (rev 9):
+    # a capture runs across the frame boundary.
     video_active*:     bool
   RtcState* = enum
     rtcWaiting, rtcCommand, rtcReading, rtcWriting,
@@ -567,7 +571,7 @@ type
     # the continuation in r0-r2 (hle_bios.nim); these name that SWI and
     # state so the re-dispatch is known as the same routine resuming (it
     # pays no dispatch or entry again, as the real one returns into its
-    # loop). Not serialized: after a state load the resume pays them once.
+    # loop). In the state's in-flight section (rev 9).
     copy_cont_pc*:          uint32
     copy_cont_regs*:        array[3, uint32]
     # Waitloop fields
@@ -743,7 +747,8 @@ type
     next_step*:          CycleCount
     # Delay the pending step was armed with; reproduces the scheduler's
     # tie-break when a step lands exactly on an observer's cycle
-    # (gba_steps_due). Rebuilt from the period on load.
+    # (gba_steps_due). In the state's in-flight section (rev 9); rebuilt
+    # from the period on loading an older state.
     arm_delay*:          uint32
     sweep_period*:       uint8
     negate*:             bool

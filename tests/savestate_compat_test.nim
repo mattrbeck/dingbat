@@ -306,6 +306,9 @@ proc run_corpus() =
   check(revs_seen[ckGBA] >= {3'u8, 4'u8},
         "corpus covers GBA payload revisions 3 and 4",
         "GBA revisions present: " & $revs_seen[ckGBA])
+  check(revs_seen[ckGBA] >= {8'u8, 9'u8},
+        "corpus covers GBA payload revisions 8 and 9 (the in-flight section)",
+        "GBA revisions present: " & $revs_seen[ckGBA])
   check(revs_seen[ckGB] >= {1'u8, 2'u8, 3'u8, 5'u8, 6'u8},
         "corpus covers GB payload revisions 1, 2, 3, 5 and 6",
         "GB revisions present: " & $revs_seen[ckGB])
@@ -817,6 +820,35 @@ const
   BUS_PRE_LEN     = 1 + 4 + 4 + 0x40000 + 0x8000 + 4 + 4 + 8 + 1 + 1
   BUS_PF_LEN      = 1 + 1 + 1
 
+# Rev 9 added one section, the machine state a frame boundary can leave in
+# flight (GBA_SEC_INFLIGHT, gba/savestate.nim save_inflight_state), last
+# before the END tag. Fixed length, pinned here: a field added to it without
+# a revision bump changes the length and fails the strip below.
+const
+  INFLIGHT_TAG     = 0xCE'u8
+  END_TAG          = 0xCF'u8
+  INFLIGHT_SEC_LEN =
+    1 +                                   # tag
+    1 + 8 + 1 + 4 + 3 * 4 +               # cpu: irq_line(+at), refill, CpuSet cont
+    4 + 1 + 1 + 1 + 1 + 1 +               # bus: fetch page/key/costs, sync bits, closing
+    8 + 4 + 8 + 1 + 4 + 4 +               #   DMA end/held/request/has_run, open bus, IWRAM
+    1 + 8 + 8 + 8 + 1 + 1 + 8 +           #   deferral, access window, idle_until
+    8 + 1 + 1 + 8 + 4 +                   #   immediate DMA, IRQ_LAST_WAITS record
+    8 + 2 + 2 + 2 + 1 + 8 + 8 + 8 + 8 + 1 + # interrupts: gate, pipe, stall
+    4 * (2 + 2 + 8) +                     # timers: tm_pre, tmd_prev, write cycle
+    1 + 4 * 8 +                           # DMA: video latch, immediate due
+    4 + 1 +                               # MMIO: memory control, POSTFLG
+    4 * 4 +                               # APU: PSG arm delays
+    4                                     # PPU: frames owed to step_frame
+
+proc strip_inflight(payload: var string): bool =
+  ## Rewrite a payload this build wrote into the pre-rev-9 layout.
+  let at = payload.len - 1 - INFLIGHT_SEC_LEN
+  if at < 0 or payload[at] != char(INFLIGHT_TAG) or payload[^1] != char(END_TAG):
+    return false
+  payload.delete(at ..< payload.len - 1)
+  true
+
 proc strip_bus_prefetch(payload: var string): bool =
   ## Rewrite a payload this build wrote into the pre-rev-8 bus layout.
   var found = -1
@@ -919,10 +951,12 @@ proc run_intr_wait_migration() =
   b.bus.gpio.rtc.status = 0x42
   var rev3 = b.state_payload()
   # A rev-3 payload has no halt_resume_pop byte (rev 4) and no per-channel
-  # DMA `count` (rev 5), PPU line-start latches (rev 6), RTC clock (rev 7) nor
-  # bus prefetch state (rev 8); every later field addition belongs here too.
+  # DMA `count` (rev 5), PPU line-start latches (rev 6), RTC clock (rev 7),
+  # bus prefetch state (rev 8) nor in-flight section (rev 9); every later
+  # field addition belongs here too.
   check(rev3.len == rev4.len, "the two parked payloads differ only by the flag")
   rev3.delete(HALT_RESUME_POP_OFFSET .. HALT_RESUME_POP_OFFSET)
+  check(strip_inflight(rev3), "rev-9 in-flight section located and removed")
   check(strip_dma_count(rev3), "rev-5 DMA count fields located and removed")
   check(strip_ppu_latches(rev3), "rev-6 PPU latch fields located and removed")
   check(strip_rtc_clock(rev3), "rev-7 RTC status/clock fields located and removed")
@@ -938,7 +972,10 @@ proc run_intr_wait_migration() =
   except CatchableError:
     check(false, "rev-3 IntrWait state applies", getCurrentExceptionMsg())
   if migrated:
-    check(c.state_payload() == rev4,
+    # Up to the rev-9 section, which a rev-3 state never had: its load gives
+    # it a fresh machine's values, where (a) has its own run's.
+    let keep = rev4.len - 1 - INFLIGHT_SEC_LEN
+    check(c.state_payload()[0 ..< keep] == rev4[0 ..< keep],
           "migrated rev-3 payload is byte-identical to the rev-4 one")
     check(c.cpu.r[13] == 0x03007F00'u32 - 16, "System sp lowered by the frame")
     check(c.bus.read_word_internal(0x03007F00'u32 - 8) == 0xCAFEBABE'u32,
@@ -956,6 +993,7 @@ proc run_intr_wait_migration() =
   d.cpu.halted = false
   var rev3_running = d.state_payload()
   rev3_running.delete(HALT_RESUME_POP_OFFSET .. HALT_RESUME_POP_OFFSET)
+  check(strip_inflight(rev3_running), "rev-9 in-flight section located and removed (running)")
   check(strip_dma_count(rev3_running), "rev-5 DMA count fields located and removed (running)")
   check(strip_ppu_latches(rev3_running), "rev-6 PPU latch fields located and removed (running)")
   check(strip_rtc_clock(rev3_running), "rev-7 RTC status/clock fields located and removed (running)")
@@ -974,6 +1012,112 @@ proc run_intr_wait_migration() =
   e.apply_state_payload(untouched)
   check(e.state_payload() == untouched, "the pre-load state restores cleanly")
 
+
+proc run_gba_inflight() =
+  ## Rev 9's section: what a frame boundary can leave in flight is carried,
+  ## a rev-8 state still loads with the old build's handling of it, and the
+  ## section's fields are bounded like every other field of a stranger's file.
+  echo "GBA rev 9: the in-flight section"
+  let a = new_gba_for(GBA_ROMS[0][0])
+  for _ in 0 ..< 30: a.step_frame()
+  let now = a.scheduler.cycles
+  # The soak's case: an interrupt line already up with another check still in
+  # flight, which rev 8 loaded as low.
+  a.interrupts.reg_ie = cast[InterruptReg](1'u16)
+  a.interrupts.reg_if = cast[InterruptReg](1'u16)
+  a.interrupts.ime = true
+  a.cpu.irq_line = true
+  a.cpu.irq_line_at = now - 2
+  a.scheduler.schedule(3, etInterrupts)
+  # A timer raise in the synchroniser, the span a burst stalled it, the gate
+  a.interrupts.pipe_raised = 0x08
+  a.interrupts.pipe_new = 0x08
+  a.interrupts.pipe_at = now - 1
+  a.interrupts.pipe_due = now + 2
+  a.interrupts.stall_from = now - 40
+  a.interrupts.stall_to = now + 5
+  a.interrupts.stall_pushed = true
+  a.interrupts.gate_open_at = now + 7
+  # A PPU-timed DMA's window open, the capture latch, memory control
+  a.bus.sync_bits = a.bus.sync_bits or 2
+  a.bus.window_closing = true
+  a.bus.dma_request_at = now - 9
+  a.bus.dma_has_run = true
+  a.bus.dma_open_bus = 0xDEADBEEF'u32
+  a.bus.iwram_latch = 0x12345678'u32
+  a.dma.video_active = true
+  a.mmio.memctrl = 0x0E000020'u32
+  a.bus.update_waitcnt(a.mmio.waitcnt)
+  a.timer.tmd_prev[1] = 0x1234
+  a.timer.tmd_write_cycle[1] = now
+  let p = a.state_payload()
+
+  let b = new_gba_for(GBA_ROMS[0][0])
+  b.apply_state_payload(p)
+  check(b.state_payload() == p, "a rev-9 payload loads into a new core and re-serializes identically")
+  check(b.cpu.irq_line and b.cpu.irq_line_at == now - 2,
+        "the interrupt line stays up with a check in flight")
+  check(b.interrupts.pipe_raised == 0x08 and b.interrupts.pipe_due == now + 2 and
+        b.interrupts.stall_to == now + 5 and b.interrupts.gate_open_at == now + 7,
+        "the synchroniser, the stall span and the gate are carried")
+  check((b.bus.sync_bits and 2) != 0 and b.bus.window_closing and
+        b.bus.dma_open_bus == 0xDEADBEEF'u32 and b.dma.video_active,
+        "the DMA window, open-bus word and capture latch are carried")
+  check(b.mmio.memctrl == 0x0E000020'u32 and b.bus.wait16_n[2] == 2,
+        "memory control is carried and sets the EWRAM waits")
+  check(b.bus.fetch_page == a.bus.fetch_page and b.bus.fetch_page != 0xFFFFFFFF'u32,
+        "the page the CPU fetches from is carried",
+        "a " & $a.bus.fetch_page & ", b " & $b.bus.fetch_page)
+  var ran = true
+  try:
+    for _ in 0 ..< 30: b.step_frame()
+  except CatchableError, Defect:
+    ran = false
+  check(ran, "and the loaded core runs")
+
+  # Rev 8: the same payload without the section loads as that build did.
+  var p8 = p
+  check(strip_inflight(p8), "rev-9 in-flight section located and removed")
+  let c = new_gba_for(GBA_ROMS[0][0])
+  for _ in 0 ..< 30: c.step_frame()
+  let c_memctrl = c.mmio.memctrl
+  var loaded = true
+  try: c.apply_state_payload(p8, 8)
+  except CatchableError: loaded = false
+  check(loaded, "a rev-8 payload still loads")
+  if loaded:
+    check(not c.cpu.irq_line, "rev 8: the line is taken as low with a check pending, as before")
+    check(c.interrupts.pipe_raised == 0 and c.interrupts.stall_to == 0 and
+          c.interrupts.gate_open_at == 0 and (c.bus.sync_bits and 7) == 0 and
+          not c.dma.video_active and c.bus.fetch_page == 0xFFFFFFFF'u32,
+          "rev 8: the rest starts as a new machine has it")
+    check(c.mmio.memctrl == c_memctrl,
+          "rev 8: memory control keeps the running game's value, as before")
+
+  # Every field of the section is bounded.
+  let at = p.len - 1 - INFLIGHT_SEC_LEN
+  proc refuses(q: string): bool =
+    let d = new_gba_for(GBA_ROMS[0][0])
+    try: d.apply_state_payload(q)
+    except StateError: return true
+    false
+  var wild_page = p
+  wild_page[at + 1 + 26] = '\x05'          # fetch_page = 5 (MMIO: never cached)
+  for i in 1 .. 3: wild_page[at + 1 + 26 + i] = '\0'
+  check(refuses(wild_page), "a fetch page the cache never holds is refused")
+  var wild_bits = p
+  wild_bits[at + 1 + 26 + 7] = '\x10'      # sync_bits bit 4
+  check(refuses(wild_bits), "an undefined sync bit is refused")
+  var wild_stamp = p
+  for i in 0 .. 7: wild_stamp[at + 1 + 1 + i] = '\xFF'   # irq_line_at
+  check(refuses(wild_stamp), "a cycle stamp far past the clock is refused")
+
+  # The next revision is refused as a newer build's, not as another game's.
+  var future = a.state_bytes()
+  future[13] = char(uint8(GBA_PAYLOAD_VERSION) + 1)
+  check(not a.load_state_bytes(future) and last_state_reject_kind == srkTooNew,
+        "a state from the next GBA revision is refused as made by a newer dingbat",
+        "kind " & $last_state_reject_kind)
 
 proc run_in_process_boundary() =
   ## The rewind ring, rollback snapshots and clip history are padded to a
@@ -1245,6 +1389,7 @@ when isMainModule:
   run_cart_shapes()
   run_rejections()
   run_intr_wait_migration()
+  run_gba_inflight()
   run_corpus()
   run_in_process_boundary()
   run_gb_rev6()

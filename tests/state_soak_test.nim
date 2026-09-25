@@ -36,12 +36,11 @@
 ##
 ## Known core issues this soak found, reported as [KNOWN] rather than failed
 ## until they are fixed (DINGBAT_SOAK_STRICT=1 fails on every one):
-##   - GBA replays of the random program diverge: state the payload does not
-##     carry: bus.sync_bits bit 1, dma.video_active (KnownReplay),
-##     cpu.irq_line forced low on load with a check pending, the IRQ
-##     synchroniser's pipe/stall stamps with the bus DMA stamps.
-##     (GB's, and its refused LCD-on-frame payloads, were fixed by GB payload
-##     revision 6; the GB cases must replay bit for bit.)
+##   - Replays diverged: state the payloads did not carry. GB payload
+##     revision 6 carries GB's (and loads the LCD-on frame's state), GBA
+##     payload revision 9 GBA's (bus.sync_bits, dma.video_active,
+##     cpu.irq_line, the interrupt synchroniser, the DMA stamps, the fetch
+##     page, memory control); every case must replay bit for bit.
 ##   - GBA: an H-blank DMA burst longer than a line books an interrupt check
 ##     per line that each burst pushes back, until the event queue overflows
 ##     (AssertionDefect here, an out-of-bounds write under -d:danger). The
@@ -59,13 +58,11 @@ const
   RewindSpan = 60
   RewindMaxDepth = 20     ## snapshots undone per rewind: 1 + rand(RewindMaxDepth)
 
-  KnownReplay = [
-    ("gbaedge-auto.gba", "DMA3 video capture runs across the frame boundary " &
-     "and dma.video_active is not in the payload")]
+  KnownReplay: array[0, (string, string)] = []
     ## Committed ROMs whose replay is known to diverge, and why. Every other
-    ## committed ROM must replay bit for bit.
-  RandomReplayKnown = "machine state the payload does not carry"
-    ## The GBA random program reaches several (see the header); reported only.
+    ## committed ROM must replay bit for bit. (gbaedge-auto.gba was here:
+    ## DMA3 video capture ran across the frame boundary and dma.video_active
+    ## was not in the payload until GBA rev 9.)
 
 var failures = 0
 var only = ""             # case-name filter from the command line
@@ -603,7 +600,7 @@ when not defined(soak_lib):
     let path = tmp / &"random_{seed:x}.gba"
     writeFile(path, gba_program(seed))
     soak(label, gba_maker(path), RandomFrames, seed, gba_harness_poke,
-         replay_known = RandomReplayKnown)
+         replay_known = "")
 
   try: removeDir(tmp)
   except OSError: discard

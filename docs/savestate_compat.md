@@ -77,6 +77,7 @@ The reader migrates older revisions instead of refusing:
 | GB 4→5 | no `GB_SEC_SGB` section → fresh `SgbState` | see `docs/sgb.md` |
 | GBA 7→8 | bus `pf_paused=false`, `pf_running=false`, `pf_count=0` | rev ≤ 7 had no pause state; a full buffer re-pauses on the next fetch, and a running prefetcher with credit is running again at once, so at most one branch's refill differs |
 | GB 5→6 | below | the batched carry |
+| GBA 8→9 | no `GBA_SEC_INFLIGHT` section: `irq_line` recomputed (low with a check pending), fetch page dropped, as rev 8 did; memory control and POSTFLG keep the running game's value, as rev 8 did; every other field a new machine's value (sync bits 0-2 clear, stamps 0, no synchroniser raise or stall, capture latch clear, `tm_pre = tm`, PSG `arm_delay` = the current period) | rev 8 dropped these or kept whatever the machine held before the load; the fresh values are what it did when loading into a just-booted game, and they make the load independent of what ran before it |
 
 **GB rev 6, the batched carry.** Every field the GB core had been holding
 back for one revision, plus what the state soak (`tests/state_soak_test.nim`)
@@ -120,7 +121,23 @@ them and lowers sp by 16 — dead stack the new build clobbers anyway. The one
 unreconstructible case, `intr_wait_active` set but the CPU not halted (the
 user IRQ handler is mid-flight on that stack), raises a named `StateError`.
 The test builds both shapes from `hle_intr_wait`'s definition, converts new →
-old → new and asserts a byte-identical payload.
+old → new and asserts a byte-identical payload (up to the rev-9 section, which
+a rev-3 state never had).
+
+**The in-flight section (GBA rev 9).** A frame boundary is an instruction
+boundary, not a quiet one: an interrupt line already up with another check
+still booked, a timer raise inside the synchroniser, a PPU-timed DMA's access
+window open, the video-capture latch set, the page the CPU fetches from (the
+prefetch logic reads it; it is not only the fetch cache's key), the DMA
+stamps behind open bus and the prefetch hand-off, the frames a DMA backlog
+already finished ahead of `step_frame`. Rev ≤ 8 dropped these or
+kept whatever the machine held before the load, so a state loaded into a
+running core and one loaded into a new core replayed differently
+(`tests/state_soak_test.nim` found each). `GBA_SEC_INFLIGHT`, one fixed-length
+section just before `GBA_SEC_END`, carries them, with the internal memory
+control register (EWRAM wait states) and POSTFLG, the two registers a game
+writes that no section had. Its layout is pinned by length in the compat
+test; every cycle stamp in it is bounded like a scheduler event.
 
 Two states stay refused: GBA rev ≤ 3 taken mid-IntrWait with the handler
 running, and sub-1 MiB GBA carts' states from before the ROM-buffer resize

@@ -19,6 +19,7 @@ const
   GBA_SEC_PPU     = 0xCB'u8
   GBA_SEC_APU     = 0xCC'u8
   GBA_SEC_STORAGE = 0xCD'u8
+  GBA_SEC_INFLIGHT = 0xCE'u8   # rev 9, last before END
   GBA_SEC_END     = 0xCF'u8
 
 # ---- CPU ----
@@ -138,6 +139,9 @@ proc load_bus_state(bus: Bus; r: var Reader; rev: uint32) =
     bus.pf_count = 0
   bus.fetch_page = 0xFFFFFFFF'u32
   bus.fetch_key = 0xFFFFFFFF'u32  # invalidate the fetch fast path
+  # A frame boundary is between instructions, where cpu.tick has folded the
+  # cycles catch-up handed the scheduler back in
+  bus.synced = 0
 
 # ---- Interrupts / MMIO / Keypad ----
 
@@ -152,7 +156,8 @@ proc load_irq_state(intr: Interrupts; r: var Reader) =
   intr.reg_ie = cast[InterruptReg](r.read_u16())
   intr.reg_if = cast[InterruptReg](r.read_u16())
   intr.ime = r.read_bool()
-  # The synchroniser and stall spans are transient and not saved.
+  # The synchroniser and stall span: rev 9 carries them in the in-flight
+  # section (read later); older revisions start them empty.
   intr.pipe_raised = 0
   # IRQ_LAST_WAITS's window from the events the state carries (the
   # scheduler section precedes this one).
@@ -675,6 +680,238 @@ proc load_storage_state(st: Storage; r: var Reader) =
     ep.busy_until = 0
   st.dirty = true  # persist to the .sav on the next flush
 
+# ---- In-flight machine state (rev 9) ----
+#
+# What a frame boundary can leave in motion and revs <= 8 did not carry, so a
+# load either dropped it or kept whatever the machine held before the load
+# (the rewound core and a freshly started one then replayed differently;
+# tests/state_soak_test.nim found each of these):
+#   - CPU: the interrupt line as the last check left it and when it rose
+#     (IRQ_LAST_WAITS), the refill flag, an HLE CpuSet's preempted state;
+#   - bus: the page the CPU fetches from (the prefetch logic reads it, not
+#     just the fetch cache) and that page's cached costs, the sync bits (an
+#     immediate DMA armed, a PPU-timed DMA's window open, an interrupt's
+#     window open), the DMA stamps the access window, open bus and the
+#     prefetch hand-off read, and IRQ_LAST_WAITS' record of the last access;
+#   - the interrupt synchroniser (a timer raise in flight, the span the last
+#     burst stalled it, the IRQ_GATE_DELAY gate);
+#   - timers: the count a cold enable found, the reload a write replaced;
+#   - DMA: the video-capture frame latch, the immediate channels' request
+#     cycles;
+#   - MMIO: the internal memory control register (EWRAM wait states) and
+#     POSTFLG, both registers a game writes;
+#   - APU: the delay each PSG channel's pending step was armed with;
+#   - PPU: frames finished that step_frame has not returned yet (a DMA
+#     backlog can run one CPU step through several; step_frame then returns
+#     at once until they are spent).
+# One section at the end keeps every older section's layout as it was.
+
+proc write_stamp(w: var Writer; c: CycleCount) {.inline.} = w.write_u64(uint64(c))
+
+proc read_stamp(r: var Reader; now: CycleCount; field: string): CycleCount =
+  ## A cycle stamp, at most MAX_EVENT_HORIZON past the scheduler's clock (the
+  ## same bound its events get): every one is compared with, or subtracted
+  ## from, the clock.
+  let v = r.read_u64()
+  if v > uint64(now) + uint64(MAX_EVENT_HORIZON) or v > uint64(high(CycleCount)):
+    raise state_error("save state field '" & field & "' is an implausible cycle")
+  CycleCount(v)
+
+proc save_inflight_state(gba: GBA; w: var Writer) =
+  w.write_tag(GBA_SEC_INFLIGHT)
+  let cpu = gba.cpu
+  w.write_bool(cpu.irq_line)
+  w.write_stamp(cpu.irq_line_at)
+  w.write_bool(cpu.refill_pending)
+  w.write_u32(cpu.copy_cont_pc)
+  for i in 0 .. 2: w.write_u32(cpu.copy_cont_regs[i])
+  let bus = gba.bus
+  w.write_u32(bus.fetch_page)
+  w.write_bool(bus.fetch_key == bus.fetch_page)
+  w.write_u8(uint8(bus.fetch_c16))
+  w.write_u8(uint8(bus.fetch_c32))
+  w.write_u8(bus.sync_bits)
+  w.write_bool(bus.window_closing)
+  w.write_stamp(bus.dma_end_at)
+  w.write_i32(int32(bus.dma_held))
+  w.write_stamp(bus.dma_request_at)
+  w.write_bool(bus.dma_has_run)
+  w.write_u32(bus.dma_open_bus)
+  w.write_u32(bus.iwram_latch)
+  w.write_bool(bus.dma_deferred)
+  w.write_stamp(bus.dma_deferred_from)
+  w.write_stamp(bus.access_end)
+  w.write_stamp(bus.access_start)
+  w.write_bool(bus.access_rom)
+  w.write_bool(bus.access_write)
+  w.write_stamp(bus.idle_until)
+  w.write_stamp(bus.imm_at)
+  w.write_bool(bus.imm_pre)
+  w.write_bool(bus.imm_post)
+  w.write_stamp(bus.lw_end)
+  w.write_i32(int32(bus.lw_waits))
+  let intr = gba.interrupts
+  w.write_stamp(intr.gate_open_at)
+  w.write_u16(intr.pipe_raised)
+  w.write_u16(intr.pipe_new)
+  w.write_u16(intr.pipe_bits)
+  w.write_bool(intr.pipe_sampled)
+  w.write_stamp(intr.pipe_at)
+  w.write_stamp(intr.pipe_due)
+  w.write_stamp(intr.stall_from)
+  w.write_stamp(intr.stall_to)
+  w.write_bool(intr.stall_pushed)
+  let tim = gba.timer
+  for i in 0 .. 3:
+    w.write_u16(tim.tm_pre[i])
+    w.write_u16(tim.tmd_prev[i])
+    w.write_stamp(tim.tmd_write_cycle[i])
+  w.write_bool(gba.dma.video_active)
+  for i in 0 .. 3: w.write_stamp(gba.dma.imm_due[i])
+  w.write_u32(gba.mmio.memctrl)
+  w.write_u8(gba.mmio.postflg)
+  w.write_u32(gba.apu.channel1.arm_delay)
+  w.write_u32(gba.apu.channel2.arm_delay)
+  w.write_u32(gba.apu.channel3.arm_delay)
+  w.write_u32(gba.apu.channel4.arm_delay)
+  w.write_u32(uint32(gba.ppu.frame))
+
+proc load_inflight_state(gba: GBA; r: var Reader) =
+  ## Rev >= 9. Read after every other section (the scheduler's clock bounds
+  ## the stamps); gba_apply_state finishes the fetch page once the wait tables
+  ## are rebuilt.
+  r.expect_tag(GBA_SEC_INFLIGHT)
+  let now = gba.scheduler.cycles
+  let cpu = gba.cpu
+  cpu.irq_line = r.read_bool()
+  cpu.irq_line_at = r.read_stamp(now, "cpu.irq_line_at")
+  cpu.refill_pending = r.read_bool()
+  cpu.copy_cont_pc = r.read_u32()
+  for i in 0 .. 2: cpu.copy_cont_regs[i] = r.read_u32()
+  let bus = gba.bus
+  let page = r.read_u32()
+  # Only install_fetch_cache sets it, and only to a cacheable page
+  if page != 0xFFFFFFFF'u32 and page notin [2'u32, 3, 8, 9, 0xA, 0xB, 0xC]:
+    raise state_error("save state field 'bus.fetch_page' has an impossible value (" &
+                      $page & ")")
+  bus.fetch_page = page
+  # The fast path is keyed on the page unless a window sent fetches to the
+  # miss path (and a key that was dropped reinstalls, recosting the page)
+  bus.fetch_key = if r.read_bool(): page else: 0xFFFFFFFF'u32
+  bus.fetch_c16 = int(r.read_u8())
+  bus.fetch_c32 = int(r.read_u8())
+  let sb = r.read_u8()
+  check_no_undefined_bits(uint32(sb), 4, "bus.sync_bits")
+  bus.sync_bits = sb
+  bus.window_closing = r.read_bool()
+  bus.dma_end_at = r.read_stamp(now, "bus.dma_end_at")
+  bus.dma_held = int(r.read_i32())
+  check_range(bus.dma_held, 0, 1 shl 26, "bus.dma_held")
+  bus.dma_request_at = r.read_stamp(now, "bus.dma_request_at")
+  bus.dma_has_run = r.read_bool()
+  bus.dma_open_bus = r.read_u32()
+  bus.iwram_latch = r.read_u32()
+  bus.dma_deferred = r.read_bool()
+  bus.dma_deferred_from = r.read_stamp(now, "bus.dma_deferred_from")
+  bus.access_end = r.read_stamp(now, "bus.access_end")
+  bus.access_start = r.read_stamp(now, "bus.access_start")
+  bus.access_rom = r.read_bool()
+  bus.access_write = r.read_bool()
+  bus.idle_until = r.read_stamp(now, "bus.idle_until")
+  bus.imm_at = r.read_stamp(now, "bus.imm_at")
+  bus.imm_pre = r.read_bool()
+  bus.imm_post = r.read_bool()
+  bus.lw_end = r.read_stamp(now, "bus.lw_end")
+  bus.lw_waits = int(r.read_i32())
+  check_range(bus.lw_waits, 0, 1023, "bus.lw_waits")
+  let intr = gba.interrupts
+  intr.gate_open_at = r.read_stamp(now, "intr.gate_open_at")
+  intr.pipe_raised = r.read_u16()
+  intr.pipe_new = r.read_u16()
+  intr.pipe_bits = r.read_u16()
+  for (v, name) in [(intr.pipe_raised, "intr.pipe_raised"),
+                    (intr.pipe_new, "intr.pipe_new"),
+                    (intr.pipe_bits, "intr.pipe_bits")]:
+    check_no_undefined_bits(uint32(v), 14, name)
+  intr.pipe_sampled = r.read_bool()
+  intr.pipe_at = r.read_stamp(now, "intr.pipe_at")
+  intr.pipe_due = r.read_stamp(now, "intr.pipe_due")
+  intr.stall_from = r.read_stamp(now, "intr.stall_from")
+  intr.stall_to = r.read_stamp(now, "intr.stall_to")
+  intr.stall_pushed = r.read_bool()
+  let tim = gba.timer
+  for i in 0 .. 3:
+    tim.tm_pre[i] = r.read_u16()
+    tim.tmd_prev[i] = r.read_u16()
+    tim.tmd_write_cycle[i] = r.read_stamp(now, "timer.tmd_write_cycle")
+  gba.dma.video_active = r.read_bool()
+  for i in 0 .. 3: gba.dma.imm_due[i] = r.read_stamp(now, "dma.imm_due")
+  gba.mmio.memctrl = r.read_u32()
+  let pf = r.read_u8()
+  check_range(int(pf), 0, 1, "mmio.postflg")
+  gba.mmio.postflg = pf
+  gba.apu.channel1.arm_delay = r.read_u32()
+  gba.apu.channel2.arm_delay = r.read_u32()
+  gba.apu.channel3.arm_delay = r.read_u32()
+  gba.apu.channel4.arm_delay = r.read_u32()
+  let owed = int(r.read_u32())
+  check_range(owed, 0, 1 shl 20, "ppu.frame")
+  gba.ppu.frame = owed
+
+proc default_inflight_state(gba: GBA) =
+  ## Rev <= 8: that build dropped some of this at load and left the rest as
+  ## the machine had it before the load. The dropped values stay as they
+  ## were; the rest start as a freshly booted machine has them, so a load no
+  ## longer depends on what ran before it -- except the two registers a game
+  ## writes (memory control, POSTFLG), which keep the running game's value:
+  ## that is what the older build did, and a game writes them at boot, so a
+  ## state loaded into it after booting finds the value its game set.
+  ## irq_line and the fetch page are settled in gba_apply_state as before.
+  let cpu = gba.cpu
+  cpu.irq_line_at = 0
+  cpu.refill_pending = false
+  cpu.copy_cont_pc = 0
+  cpu.copy_cont_regs = [0'u32, 0, 0]
+  let bus = gba.bus
+  bus.sync_bits = bus.sync_bits and 8'u8   # load_irq_state derived bit 3
+  bus.window_closing = false
+  bus.dma_end_at = 0
+  bus.dma_held = 0
+  bus.dma_request_at = 0
+  bus.dma_has_run = false
+  bus.dma_open_bus = 0
+  bus.iwram_latch = 0
+  bus.dma_deferred = false
+  bus.dma_deferred_from = 0
+  bus.access_end = 0
+  bus.access_start = 0
+  bus.access_rom = false
+  bus.access_write = false
+  bus.idle_until = 0
+  bus.imm_at = 0
+  bus.imm_pre = false
+  bus.imm_post = false
+  bus.lw_end = 0
+  bus.lw_waits = 0
+  let intr = gba.interrupts
+  intr.gate_open_at = 0
+  intr.pipe_raised = 0
+  intr.pipe_new = 0
+  intr.pipe_bits = 0
+  intr.pipe_sampled = false
+  intr.pipe_at = 0
+  intr.pipe_due = 0
+  intr.stall_from = 0
+  intr.stall_to = 0
+  intr.stall_pushed = false
+  for i in 0 .. 3:
+    gba.timer.tmd_prev[i] = 0
+    gba.timer.tmd_write_cycle[i] = 0   # tm_pre: load_timer_state set it to tm
+  gba.dma.video_active = false
+  for i in 0 .. 3: gba.dma.imm_due[i] = 0
+  # arm_delay: apu_extract_state_events set the current period, and
+  # ppu.frame: load_ppu_state cleared it, as before
+
 # ---- PSG waveform deadlines <-> scheduler events ----
 #
 # The channels' next_step deadlines replaced one etAPUChannel<N> event per
@@ -709,6 +946,7 @@ proc apu_extract_state_events(gba: GBA) =
     # arm_delay is not recoverable from an event's target; the current
     # period is right except across an unstepped frequency write, and it
     # only breaks an exact-cycle tie (one sample off, once, after a load).
+    # Rev 9 carries it (the in-flight section, read after this).
     ch.arm_delay = arm
   take(gba.apu.channel1, etAPUChannel1, gba.apu.channel1.ch1_frequency_timer())
   take(gba.apu.channel2, etAPUChannel2, gba.apu.channel2.ch2_frequency_timer())
@@ -769,9 +1007,29 @@ proc gba_state_payload(gba: GBA; in_process = false): string =
   save_apu_state(gba.apu, w)
   mark("storage(sram)")
   save_storage_state(gba.storage, w)
+  mark("inflight")
+  save_inflight_state(gba, w)
   mark("end")
   w.write_tag(GBA_SEC_END)
   w.buf
+
+proc restore_fetch_page(bus: Bus) =
+  ## Rev >= 9: point the fetch cache at the carried page again (its buffer
+  ## pointer is this process's), keeping the carried key and costs: a key
+  ## the window dropped stays dropped, and costs cached before a memory
+  ## control write stay what the running machine had.
+  let page = bus.fetch_page
+  if page == 0xFFFFFFFF'u32: return
+  let key = bus.fetch_key
+  let c16 = bus.fetch_c16
+  let c32 = bus.fetch_c32
+  let sb = bus.sync_bits
+  bus.sync_bits = 0      # the windows veto the install; this is not a fetch
+  discard bus.install_fetch_cache(page)
+  bus.sync_bits = sb
+  bus.fetch_key = key
+  bus.fetch_c16 = c16
+  bus.fetch_c32 = c32
 
 # ---- rev <= 3 -> 4: retrofit the HLE IntrWait System-stack frames ----
 #
@@ -840,31 +1098,36 @@ proc gba_apply_state(gba: GBA; payload: string; rev: uint32;
   load_apu_state(gba.apu, r)
   gba.apu_extract_state_events()
   load_storage_state(gba.storage, r)
+  if rev >= 9: gba.load_inflight_state(r)
+  else: gba.default_inflight_state()
   r.expect_tag(GBA_SEC_END)
   # After the payload, so the stack it writes into is the restored WRAM
   if rev < 4 and gba.cpu.intr_wait_active:
     gba.migrate_intr_wait_frame()
-  # irq_line and the WAITCNT timing tables are derived, not serialized.
-  # check_interrupts also resolves the halt, and a frame-boundary state is
-  # written the instant vblank raises IF, so it nearly always carries a
-  # pending etInterrupts event: letting the recompute wake the CPU here
-  # fires that event IRQ_SYNC_DELAY cycles early (save -> load -> save was
-  # not idempotent). Every path that raises IF schedules the check, so the
-  # event owns the wake: keep halted/halt_wake/stopped. Likewise irq_line is
-  # the result of the last check, so with a check pending it must stay
-  # false or the IRQ moves one instruction (Golden Sun drifted lr_irq and
-  # the user sp on every restore). With no check pending the recompute is
-  # exact: IF only gains bits between checks.
-  let checkPending = gba.scheduler.has_event(etInterrupts)
-  let halted  = gba.cpu.halted
-  let wake    = gba.cpu.halt_wake
-  let stopped = gba.cpu.stopped
-  gba.interrupts.check_interrupts()
-  gba.cpu.halted    = halted
-  gba.cpu.halt_wake = wake
-  gba.cpu.stopped   = stopped
-  if checkPending: gba.cpu.irq_line = false
+  if rev < 9:
+    # Rev <= 8 did not carry irq_line: recompute it. check_interrupts also
+    # resolves the halt, and a frame-boundary state is written the instant
+    # vblank raises IF, so it nearly always carries a pending etInterrupts
+    # event: letting the recompute wake the CPU here fires that event
+    # IRQ_SYNC_DELAY cycles early (save -> load -> save was not idempotent).
+    # Every path that raises IF schedules the check, so the event owns the
+    # wake: keep halted/halt_wake/stopped. With a check pending, irq_line is
+    # taken as low -- the old build's choice, which is wrong when the line
+    # was already up (a vblank check ran and another source's check is still
+    # in flight): rev 9 carries it. With no check pending the recompute is
+    # exact: IF only gains bits between checks.
+    let checkPending = gba.scheduler.has_event(etInterrupts)
+    let halted  = gba.cpu.halted
+    let wake    = gba.cpu.halt_wake
+    let stopped = gba.cpu.stopped
+    gba.interrupts.check_interrupts()
+    gba.cpu.halted    = halted
+    gba.cpu.halt_wake = wake
+    gba.cpu.stopped   = stopped
+    if checkPending: gba.cpu.irq_line = false
+  # The WAITCNT timing tables are derived (memory control is loaded by now)
   gba.bus.update_waitcnt(gba.mmio.waitcnt)
+  if rev >= 9: gba.bus.restore_fetch_page()
   # The audio HLE shadow mixers are not serialized (state files are
   # byte-identical with the HLE on or off); they re-latch from restored RAM.
   if gba.mp2k != nil:
