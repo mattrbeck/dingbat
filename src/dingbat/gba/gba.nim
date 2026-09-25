@@ -1705,41 +1705,43 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
     # Waitloop exactness: when, and at which PC, the last event ran
     inc gba.dispatch_count
     gba.last_dispatch_pc = gba.cpu.r[15]
-    when WL_QUIET_EVENTS:
-      # These write no memory: the PPU's line events (a video-capture DMA
-      # they start marks itself, dma.run_channel), the APU's clocks (the
-      # MP2K HLE's render reads only), the interrupt controller and the
-      # timers (a FIFO refill they ask for is its own event). Anything else
-      # might.
-      const quiet = {etPPUStartLine, etPPUStartHBlank, etPPUSetHBlankFlag,
-                     etPPUEndHBlank, etAPUFrameSeq, etAPUSample, etInterrupts,
-                     etTimer0, etTimer1, etTimer2, etTimer3, etIrqWindowOpen,
-                     etIrqWindowClose}
-      if kind notin quiet: gba.wl_unsafe = true
-      # Nor is one that opens or closes an access window, or raises an
-      # interrupt flag (interrupts.nim): Duke Nukem Advance (U) [f_5], whose
-      # timer overflows open the sound FIFO's window, drew a different frame
-      # 251 than the unskipped run until both counted.
-      let sync_before = gba.bus.sync_bits
+    # WL_QUIET_EVENTS: the PPU's line events, the APU's clocks, the
+    # interrupt controller, the timers and the IRQ windows write no memory
+    # (a video-capture DMA marks itself, dma.run_channel; the MP2K HLE's
+    # render only reads; a FIFO refill is its own event). Every other arm
+    # marks the waitloop detector's `wl_unsafe` (wl_mark). So does anything
+    # that opens or closes an access window, or raises an interrupt flag,
+    # where it does it (interrupts.nim, ppu.start_hblank, the sound FIFO's
+    # window): Duke Nukem Advance (U) [f_5], whose timer overflows open the
+    # FIFO's window, drew a different frame 251 than the unskipped run until
+    # those counted. Marked in place, not tested per dispatch: that cost
+    # Golden Sun 0.3% of its instructions.
+    template wl_mark() =
+      when WL_QUIET_EVENTS: gba.wl_unsafe = true
     case kind
     of etAPUFrameSeq:   gba.apu.tick_frame_sequencer()
     of etAPUSample:     gba.apu.get_sample()
     # PSG channels carry next_step deadlines instead of per-period events
     # (apu.nim); these arms remain only for events in a state saved by an
     # older build, which gba_apply_state drains into next_step first.
-    of etAPUChannel1, etAPUChannel2, etAPUChannel3, etAPUChannel4: discard
+    of etAPUChannel1, etAPUChannel2, etAPUChannel3, etAPUChannel4: wl_mark()
     of etPPUStartLine:     gba.ppu.start_line()
     of etPPUStartHBlank:   gba.ppu.start_hblank()
     of etPPUSetHBlankFlag: gba.ppu.set_hblank_flag()
     of etPPUEndHBlank:     gba.ppu.end_hblank()
-    of etSaves:         gba.handle_saves()
+    of etSaves:
+      wl_mark()
+      gba.handle_saves()
     of etInterrupts:    gba.interrupts.check_interrupts()
     of etTimer0:        gba.timer.timer_overflow_event(0)
     of etTimer1:        gba.timer.timer_overflow_event(1)
     of etTimer2:        gba.timer.timer_overflow_event(2)
     of etTimer3:        gba.timer.timer_overflow_event(3)
-    of etSerial:        gba.serial.serial_transfer_complete()
+    of etSerial:
+      wl_mark()
+      gba.serial.serial_transfer_complete()
     of etDMA:
+      wl_mark()
       when IMM_IDLE_GRANT:
         let bus = gba.bus
         let now = gba.scheduler.cycles
@@ -1799,24 +1801,31 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
           gba.dma.request_immediate()
       else:
         gba.dma.request_immediate()
-    of etRtcSecond:     gba.rtc_irq_poll()
+    of etRtcSecond:
+      wl_mark()
+      gba.rtc_irq_poll()
     of etHDMARequest:
+      wl_mark()
       if not gba.defer_dma_request(kind): gba.dma.trigger_hdma()
     of etVDMARequest:
+      wl_mark()
       if not gba.defer_dma_request(kind): gba.dma.trigger_vdma()
-    of etLdmGlitch:     gba.cpu.ldm_glitch_restore()
+    of etLdmGlitch:
+      wl_mark()
+      gba.cpu.ldm_glitch_restore()
     of etFifoARequest, etFifoBRequest:
+      wl_mark()
       let f = (if kind == etFifoARequest: 0 else: 1)
       let d = gba.dma.dmacnt_h[f + 1]
       if d.enable and d.start_timing == 3:  # Special: a sound DMA to request
         if not gba.defer_fifo_request(kind): gba.dma.trigger_fifo(f)
-    of etUndefMode:     gba.cpu.undef_mode_tick()
+    of etUndefMode:
+      wl_mark()
+      gba.cpu.undef_mode_tick()
     of etFifoWindow:    discard   # handled above
     of etIrqWindowOpen:  gba.interrupts.window_open_event()
     of etIrqWindowClose: gba.interrupts.window_close_event()
-    of etHandleInput, etIME, etCameraDone, etGbLycEdge: discard
-    when WL_QUIET_EVENTS:
-      if gba.bus.sync_bits != sync_before: gba.wl_unsafe = true
+    of etHandleInput, etIME, etCameraDone, etGbLycEdge: wl_mark()
 
 # Timer prescaler phase at ROM entry when the BIOS boot is skipped. The
 # prescaler runs free from power-on (timer.nim) and this core counts it from

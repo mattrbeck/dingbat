@@ -207,6 +207,8 @@ const VBLANK_DMA_REQUEST_DELAY {.intdefine.} = 2
 proc start_hblank*(ppu: PPU) =
   when DMA_ACCESS_WINDOW:
     if (ppu.vcount < 160 and ppu.gba.dma.armed(2)) or (ppu.vcount == 159 and ppu.gba.dma.armed(1)):
+      when WL_QUIET_EVENTS:
+        if (ppu.gba.bus.sync_bits and 2) == 0: ppu.gba.wl_unsafe = true
       ppu.gba.bus.sync_bits = ppu.gba.bus.sync_bits or 2
       ppu.gba.bus.fetch_page = 0xFFFFFFFF'u32
       ppu.gba.bus.fetch_key = 0xFFFFFFFF'u32

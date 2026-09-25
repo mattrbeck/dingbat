@@ -59,6 +59,8 @@ proc window_close_event*(intr: Interrupts) =
   ## The guard close: a raise the window was opened for never came.
   intr.win_close_at = high(CycleCount)
   if not intr.gba.scheduler.has_event(etInterrupts):
+    when WL_QUIET_EVENTS:
+      if (intr.gba.bus.sync_bits and 8) != 0: intr.gba.wl_unsafe = true
     intr.gba.bus.sync_bits = intr.gba.bus.sync_bits and not 8'u8
 
 const IRQ_WINDOW_LEAD* = 16
@@ -230,6 +232,8 @@ proc check_interrupts*(intr: Interrupts) =
     # window closes unless another check is still to run (a pending open
     # reopens it for the next raise).
     if not intr.gba.scheduler.has_event(etInterrupts):
+      when WL_QUIET_EVENTS:
+        if (intr.gba.bus.sync_bits and 8) != 0: intr.gba.wl_unsafe = true
       intr.gba.bus.sync_bits = intr.gba.bus.sync_bits and not 8'u8
 
 proc `[]`*(intr: Interrupts; io_addr: uint32): uint8 =

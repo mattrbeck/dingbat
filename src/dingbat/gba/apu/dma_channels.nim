@@ -181,6 +181,8 @@ proc timer_overflow*(dc: DMAChannels; timer: int): bool =
 proc fifo_window_open*(dc: DMAChannels) =
   ## etFifoWindow
   let bus = dc.gba.bus
+  when WL_QUIET_EVENTS:
+    if (bus.sync_bits and 48) != 16: dc.gba.wl_unsafe = true
   bus.sync_bits = (bus.sync_bits or 16) and not 32'u8
 
 proc fifo_window_book*(dc: DMAChannels; overflow_in: int) =
@@ -211,6 +213,8 @@ proc fifo_window_stale*(dc: DMAChannels) =
       if d.enable and d.start_timing == 3 and
          s.has_event(if channel == 0: etFifoARequest else: etFifoBRequest):
         return
+    when WL_QUIET_EVENTS:
+      if (dc.gba.bus.sync_bits and 48) != 0: dc.gba.wl_unsafe = true
     dc.gba.bus.sync_bits = dc.gba.bus.sync_bits and not 48'u8
 
 proc fifo_window_at_start*(dc: DMAChannels; timer: int; overflow_in: int) =
