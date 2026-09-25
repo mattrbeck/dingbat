@@ -68,9 +68,14 @@ TABLE = {
     # an H-blank DMA landing in a running immediate burst: which gap it takes
     'hpreempt': [0xC0 + k for k in range(8)] + [0x100 + k for k in range(4)],
     # MEMCNT bit 5 clear: board WRAM's region is the chip WRAM (reads, writes,
-    # 32K mirror, one-cycle timing); MEMCNT's reset value. Not the swap (bit
-    # 0) cells 8-12, which dingbat does not model (payload header)
-    'memcnt': [13] + list(range(0, 8)),
+    # 32K mirror, one-cycle timing); MEMCNT's reset value. The swap (bit 0):
+    # what 00-03xxxxxx hold, and whether the BIOS answers a read made by code
+    # in the chip WRAM, the board WRAM or VRAM under it, or by code whose
+    # newest fetch is the BIOS's
+    'memcnt': [13] + list(range(0, 8)) + list(range(8, 13)) + [14, 15, 16, 17],
+    # a HALTCNT write from the chip WRAM under the swap: from 01xxxxxx it
+    # halts, with r15 at 02000000 (the BIOS) it does not; IWRAM control
+    'haltswap': [0, 1, 2, 3],
     # an H-blank DMA whose bursts outlast the line (configuration << 8 | word):
     # bursts, last start and last unit from the first, burst 1's gap; one
     # channel of 0.5 to 3.5 lines, near the V-blank edge, about a line, and

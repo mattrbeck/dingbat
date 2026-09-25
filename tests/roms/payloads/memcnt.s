@@ -12,10 +12,19 @@
 @ On an AGB SP (2026-09-25): 0 B, 1 A, 2 C, 3 D, 4 3 cycles (5: 8, 6: 3),
 @ 7 B -- board WRAM off, 02xxxxxx is the chip WRAM, mirrored every 32K, at
 @ its timing, and the board WRAM keeps its contents -- and 13 0x0D000020
-@ (cells 0-7 and 13 are laws). The swap (not modelled): 8 reads what 9 does
-@ (0xE3A02004, the BIOS's protected latch: 02000000 is the BIOS, still
-@ read-protected from VRAM code), 10 A and 11 B (00/01 are board and chip
-@ WRAM), 12 the open bus (0xE12FFF1E, the prefetched `bx lr`).
+@ (cells 0-7 and 13 are laws). The swap: 8 reads what 9 does (0xE3A02004,
+@ the BIOS's protected latch: 02000000 is the BIOS, still read-protected
+@ from VRAM code), 10 A and 11 B (00/01 are board and chip WRAM), 12 the
+@ open bus (the prefetched opcode; 0xE12FFF1E, `bx lr`, before the swap
+@ variants called SWI 8 and the routine grew).
+@
+@ Again (2026-09-25, all cells laws): 8, 9 0xE3A02004, 10 A, 11 B, 12
+@ 0x11A0E00F (the `movne lr, pc` two ahead of the load), and the BIOS
+@ answers by the memory the newest fetch came from, not by its address:
+@ 14, 15 and 16 read the latch (0xE3A02004) from code at 01xxxxxx,
+@ 00xxxxxx and in VRAM, and 17 reads the BIOS's own word (0xEA000042) from
+@ 01FFFFF8, whose r15 is 02000000. (A HALTCNT write goes by address:
+@ haltswap.s.)
 @
 @ r0 = variant; answer:
 @   0  0x02016000 read with board WRAM off           (B if it aliases IWRAM)
@@ -30,6 +39,15 @@
 @  11  0x01006000 with the swap on (B if chip WRAM is there)
 @  12  0x03006000 with the swap on
 @  13  MEMCNT as found
+@  14  0x02000018 with the swap on, read by code in the chip WRAM (01xxxxxx)
+@  15  the same, by code in the board WRAM (00016100)
+@  16  the same, by the VRAM code (the latch, as 8)
+@  17  the same, by code in the chip WRAM at 01FFFFF8, whose newest fetch
+@      (r15) is the BIOS's first word at 02000000
+@
+@ Every swap variant (8-12, 14-17) first calls SWI 8 so the BIOS latch is
+@ what a SWI leaves (0xE3A02004) wherever the payload runs, and runs with
+@ the CPU's IRQs masked: the exception vectors are RAM while the swap is on.
     .arm
     .text
     .global _start
@@ -105,17 +123,34 @@ v7: ldr r2, =0x02026000
     str r7, [r4]
     b done
 swap:
+    @ the BIOS latch as every SWI leaves it, whatever ran before: 8, 9
+    @ and 16 read it, and a cartridge wrapper has not been through a SWI
+    mov r0, #4
+    swi 0x080000                   @ Sqrt
     @ copy the routine into VRAM
     adr r0, vr
     ldr r1, =VR
-    ldr r2, [r0], #4
-    str r2, [r1], #4
-    ldr r2, [r0], #4
-    str r2, [r1], #4
-    ldr r2, [r0], #4
-    str r2, [r1], #4
-    ldr r2, [r0], #4
-    str r2, [r1], #4
+    mov r2, #9
+1:  ldr r3, [r0], #4
+    str r3, [r1], #4
+    subs r2, r2, #1
+    bne 1b
+    @ and the read into board WRAM (15), clear of A and D
+    adr r0, cw
+    ldr r1, =0x02016100
+    ldr r3, [r0]
+    str r3, [r1]
+    ldr r3, [r0, #4]
+    str r3, [r1, #4]
+    @ and into the chip WRAM's last two words (17), where the BIOS keeps
+    @ its IRQ flags and vector: those wait in board WRAM meanwhile
+    ldr r0, =0x03007FF8
+    ldmia r0, {r1, r2}
+    ldr r12, =0x02016200
+    stmia r12, {r1, r2}
+    adr r12, cw
+    ldmia r12, {r1, r2}
+    stmia r0, {r1, r2}
     orr r1, r7, #1                 @ swap on (board WRAM on)
     mov r2, r7
     cmp r11, #9
@@ -123,10 +158,27 @@ swap:
     ldr r12, =addrs
     sub r3, r11, #8
     ldr r3, [r12, r3, lsl #2]
+    @ where the read runs: in VRAM, or (14) the chip WRAM at 01xxxxxx, or
+    @ (15) the board WRAM at 00xxxxxx
+    mov r9, #0
+    cmp r11, #14
+    ldreq r9, =cw - 0x02000000
+    cmp r11, #15
+    ldreq r9, =0x00016100
+    cmp r11, #17
+    ldreq r9, =0x01FFFFF8
     mov r0, r4
+    mrs r8, cpsr                   @ no interrupt while the vectors are RAM
+    orr r12, r8, #0x80
+    msr cpsr_c, r12
     ldr r12, =VR
     mov lr, pc
     bx r12
+    msr cpsr_c, r8
+    ldr r12, =0x02016200
+    ldmia r12, {r1, r2}
+    ldr r12, =0x03007FF8
+    stmia r12, {r1, r2}
     mov r0, r3
     str r7, [r4]
 done:
@@ -137,9 +189,17 @@ done:
     bx lr
 addrs:
     .word 0x02000000, 0x00000000, 0x00016000, 0x01006000, 0x03006000
+    .word 0, 0x02000018, 0x02000018, 0x02000018, 0x02000018
     .align 2
 vr: str r1, [r0]
-    ldr r3, [r3]
+    cmp r9, #0
+    ldreq r3, [r3]
+    movne r12, lr
+    movne lr, pc
+    bxne r9
+    movne lr, r12
     str r2, [r0]
+    bx lr
+cw: ldr r3, [r3]
     bx lr
     .ltorg

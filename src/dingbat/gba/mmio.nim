@@ -92,7 +92,14 @@ proc `[]=`*(mmio: MMIO; address: uint32; value: uint8) =
     # on the same scanline, and mGBA agrees. We honoured the write from
     # anywhere, so a game could halt itself by a route hardware ignores.
     # SWI 2 is unaffected: hle_bios sets cpu.halted directly.
-    if (mmio.gba.cpu.r[15] and 0x0F000000'u32) != 0: return
+    # What counts is where the newest fetch (r15) was made, by address, not
+    # which memory answered it: with MEMCNT's swap on, a `strb` from the
+    # chip WRAM at 01007000 or 01FFFFF0 (r15 01FFFFF8) halts the CPU and one
+    # from 01FFFFF8 (r15 02000000, where the BIOS now is) does not
+    # (tests/roms/payloads/haltswap.s on an AGB SP; png183 memory t110/t111).
+    # The BIOS's read protection goes by memory instead (bus.nim,
+    # swap_privileged).
+    if mmio.gba.cpu.r[15] >= 0x02000000'u32: return
     # Entering the halt stalls the CPU HALT_ENTRY_STALL cycles, and an
     # interrupt the CPU had already recognised by the write is taken at the
     # boundary after them, with no halt and no wake instruction (alyosha
@@ -112,14 +119,14 @@ proc `[]=`*(mmio: MMIO; address: uint32; value: uint8) =
     mmio.gba.interrupts.schedule_interrupt_check()
   else:
     if (io_addr and 0xFFFF'u32) in 0x800'u32..0x803'u32:
-      # Internal memory control: the EWRAM wait field and the board WRAM
-      # enable (bit 5) are live (see update_waitcnt); the swap (bit 0) is
-      # readback only.
-      let was_off = mmio.gba.bus.ewram_off
+      # Internal memory control: the EWRAM wait field, the board WRAM
+      # enable (bit 5) and the swap (bit 0) are live (see update_waitcnt).
+      let was = mmio.memctrl and 0x21'u32
       write(mmio.memctrl, value, io_addr and 3)
       mmio.gba.bus.update_waitcnt(mmio.waitcnt)
-      if mmio.gba.bus.ewram_off != was_off:
-        # the cached fetch page may point at the other RAM
+      if (mmio.memctrl and 0x21'u32) != was:
+        # the cached fetch page may point at the other RAM, or at a region
+        # the swap moved
         mmio.gba.bus.fetch_page = 0xFFFFFFFF'u32
         mmio.gba.bus.fetch_key = 0xFFFFFFFF'u32
       return

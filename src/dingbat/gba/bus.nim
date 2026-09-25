@@ -48,6 +48,17 @@ proc update_waitcnt*(bus: Bus; w: WAITCNT) =
     bus.wait16_s[2] = 1
     bus.wait32_n[2] = 1
     bus.wait32_s[2] = 1
+  # MEMCNT bit 0 set swaps the low regions in pairs (swap_read_word): each
+  # memory keeps its own timing at its new address.
+  if bit(bus.gba.mmio.memctrl, 0):
+    bus.sync_bits = bus.sync_bits or SB_SWAP
+    for (a, b) in [(0, 2), (1, 3)]:
+      swap(bus.wait16_n[a], bus.wait16_n[b])
+      swap(bus.wait16_s[a], bus.wait16_s[b])
+      swap(bus.wait32_n[a], bus.wait32_n[b])
+      swap(bus.wait32_s[a], bus.wait32_s[b])
+  else:
+    bus.sync_bits = bus.sync_bits and not SB_SWAP
   let n_first = [int(w.wait_state_0_first_access),
                  int(w.wait_state_1_first_access),
                  int(w.wait_state_2_first_access)]
@@ -977,11 +988,120 @@ proc write_word_internal*(bus: Bus; address: uint32; value: uint32) =
     else: bus.gba.storage[orig] = b
   else: log("Unmapped write word: " & hex_str(address))
 
+# ---- MEMCNT bit 0: the swap ----
+#
+# With MEMCNT (0x04000800) bit 0 set the address decoder swaps the low
+# regions in pairs: 00xxxxxx is the board WRAM, 01xxxxxx the chip WRAM,
+# 02xxxxxx the BIOS, still read-protected, and 03xxxxxx unused memory (an AGB
+# SP, tests/roms/payloads/memcnt.s cells 8-12: 00016000 reads what was
+# written to 02016000, 01006000 what was written to 03006000, 02000000 the
+# BIOS latch as 00000000 does unswapped, and 03006000 the prefetched opcode).
+# update_waitcnt sets SB_SWAP in bus.sync_bits, so accesses leave the fast
+# path through its one test and nothing is added to the hot path; fetches
+# from pages 0-3 are kept off the fetch cache.
+
+proc swap_privileged(bus: Bus): bool {.inline.} =
+  ## Whether the BIOS answers a read with its contents: when the newest
+  ## fetch (r15) is its own, at its swapped home, as at 00000000 unswapped.
+  ## Not by address, as HALTCNT is (mmio.nim): on an AGB SP code in the
+  ## chip WRAM at 01xxxxxx or the board WRAM at 00xxxxxx reads the latch
+  ## (memcnt.s cells 14, 15). A fetch always gets them.
+  (bus.swap_fetching and not bus.dma_active) or
+    bits_range(bus.gba.cpu.r[15], 24, 31) == 0x02'u32
+
+proc swap_bios_word(bus: Bus; address: uint32): uint32 =
+  ## A word read of the BIOS at 02000000, as read_word_internal's page 0
+  ## reads it at home.
+  if bus.swap_privileged():
+    read_u32_ptr(bus.bios, address and 0x3FFC'u32)
+  elif (address and 0x00FFFFFF'u32) >= 0x4000'u32 and not bus.dma_active:
+    bus.read_open_bus_word(address)
+  else:
+    bus.bios_latch
+
+proc swap_low_word(bus: Bus; address: uint32): uint32 =
+  ## The aligned word at `address` in page 2 or 3 of the swapped map.
+  if bits_range(address, 24, 27) == 0x2: bus.swap_bios_word(address)
+  else: bus.read_open_bus_word(address)
+
+proc swap_read_byte(bus: Bus; address: uint32): uint8 {.noinline.} =
+  if bits_range(address, 24, 27) < 0x2:
+    bus.read_byte_internal(address xor 0x02000000'u32)
+  else:
+    uint8(bus.swap_low_word(address and not 3'u32) shr ((address and 3) * 8))
+
+proc swap_read_half(bus: Bus; address: uint32): uint16 {.noinline.} =
+  if bits_range(address, 24, 27) < 0x2:
+    bus.read_half_internal(address xor 0x02000000'u32)
+  else:
+    uint16(bus.swap_low_word(address and not 3'u32) shr ((address and 2) * 8))
+
+proc swap_read_word(bus: Bus; address: uint32): uint32 {.noinline.} =
+  if bits_range(address, 24, 27) < 0x2:
+    bus.read_word_internal(address xor 0x02000000'u32)
+  else:
+    bus.swap_low_word(address and not 3'u32)
+
+template swap_smc(bus: Bus; address: uint32) =
+  # write_*_internal's pipeline capture, made at the address the CPU fetched
+  # from (it compares the translated one)
+  let a = address and not 3'u32
+  if not bus.gba.cpu.refill_pending and
+     a <= bus.gba.cpu.r[15] and a >= bus.gba.cpu.r[15] - 4:
+    bus.gba.cpu.fill_pipeline()
+
+proc swap_write_byte(bus: Bus; address: uint32; value: uint8) {.noinline.} =
+  if bits_range(address, 24, 27) < 0x2:   # the BIOS and unused memory ignore it
+    bus.swap_smc(address)
+    bus.write_byte_internal(address xor 0x02000000'u32, value)
+
+proc swap_write_half(bus: Bus; address: uint32; value: uint16) {.noinline.} =
+  if bits_range(address, 24, 27) < 0x2:
+    bus.swap_smc(address)
+    bus.write_half_internal(address xor 0x02000000'u32, value)
+
+proc swap_write_word(bus: Bus; address: uint32; value: uint32) {.noinline.} =
+  if bits_range(address, 24, 27) < 0x2:
+    bus.swap_smc(address)
+    bus.write_word_internal(address xor 0x02000000'u32, value)
+
+proc read_byte_mapped(bus: Bus; address: uint32): uint8 =
+  if address < 0x04000000'u32 and (bus.sync_bits and SB_SWAP) != 0:
+    bus.swap_read_byte(address)
+  else: bus.read_byte_internal(address)
+
+proc read_half_mapped(bus: Bus; address: uint32): uint16 =
+  if address < 0x04000000'u32 and (bus.sync_bits and SB_SWAP) != 0:
+    bus.swap_read_half(address)
+  else: bus.read_half_internal(address)
+
+proc read_word_mapped(bus: Bus; address: uint32): uint32 =
+  if address < 0x04000000'u32 and (bus.sync_bits and SB_SWAP) != 0:
+    bus.swap_read_word(address)
+  else: bus.read_word_internal(address)
+
+proc write_byte_mapped(bus: Bus; address: uint32; value: uint8) =
+  if address < 0x04000000'u32 and (bus.sync_bits and SB_SWAP) != 0:
+    bus.swap_write_byte(address, value)
+  else: bus.write_byte_internal(address, value)
+
+proc write_half_mapped(bus: Bus; address: uint32; value: uint16) =
+  if address < 0x04000000'u32 and (bus.sync_bits and SB_SWAP) != 0:
+    bus.swap_write_half(address, value)
+  else: bus.write_half_internal(address, value)
+
+proc write_word_mapped(bus: Bus; address: uint32; value: uint32) =
+  if address < 0x04000000'u32 and (bus.sync_bits and SB_SWAP) != 0:
+    bus.swap_write_word(address, value)
+  else: bus.write_word_internal(address, value)
+
 # ---- Instruction-fetch fast path ----
 
 proc window_fetch_sync(bus: Bus; cost: int)
 proc fetch_half_miss(bus: Bus; address: uint32): uint16
 proc fetch_word_miss(bus: Bus; address: uint32): uint32
+proc swap_fetch_half(bus: Bus; address: uint32): uint16 {.noinline.}
+proc swap_fetch_word(bus: Bus; address: uint32): uint32 {.noinline.}
 
 proc imm_fetch_page(page: uint32): bool {.inline.} =
   ## IMM_FETCH_WAIT's pages: those whose fetches last more than a cycle and
@@ -997,12 +1117,15 @@ proc install_fetch_cache(bus: Bus; page: uint32): bool =
   when IRQ_LAST_WAITS:
     if (bus.sync_bits and 8) != 0: return false
   # Only pages whose fetches are plain masked reads are cacheable; BIOS,
-  # MMIO, open bus and 0xD (possible EEPROM) take the generic path
+  # MMIO, open bus and 0xD (possible EEPROM) take the generic path, and so
+  # do pages 0-3 while MEMCNT's swap is on (swap_fetch_word)
   case page
   of 0x2:
+    if (bus.sync_bits and SB_SWAP) != 0: return false
     bus.fetch_ptr = bus.ew_ptr
     bus.fetch_mask = bus.ew_mask
   of 0x3:
+    if (bus.sync_bits and SB_SWAP) != 0: return false
     bus.fetch_ptr = cast[ptr UncheckedArray[byte]](addr bus.wram_chip[0])
     bus.fetch_mask = 0x7FFF'u32
   of 0x8, 0x9, 0xA, 0xB, 0xC:
@@ -1278,29 +1401,65 @@ else:
   template bdWatch(a: uint32; w: int; v: uint32) = discard
   template bdWatchRead(a: uint32; w: int) = discard
 
+template load_sync(bus: Bus; address: uint32; cost: int; size: int;
+                   access: untyped) =
+  ## A timed load's sync leg (the three loads below): see the note above.
+  if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 23) != 0:
+    when DMA_READS_CPU_BUS:
+      bus.load_addr = address
+      bus.load_size = size
+      bus.load_pc = bus.gba.cpu.r[15]
+      bus.load_end = bus.bus_now()
+      bus.load_start = bus.load_end - CycleCount(cost)
+    when IMM_ACCESS_WAIT:
+      bus.access_rom = bus_page(address) >= 0x8
+      bus.access_write = false
+      if bus.imm_pre: bus.imm_pre_grant(cost)
+    bus.catch_up_access(cost)
+    when IMM_ACCESS_WAIT:
+      if bus.imm_post:
+        result = access
+        bus.imm_post_grant()
+        return
+
+template store_sync(bus: Bus; address: uint32; cost: int; access: untyped) =
+  ## A timed store's sync leg (the three stores below).
+  when IRQ_LAST_WAITS:
+    if (bus.sync_bits and 8) != 0: bus.note_waits(cost)
+  if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 23) != 0:
+    # A store ends the load's claim on the bus (Bus.dma_bus_word): the
+    # console shows a burst the fetched opcode after one, not the load
+    # before it or the store's own data (dmaobus2.s variant 7)
+    when DMA_READS_CPU_BUS: bus.load_size = 0
+    when IMM_ACCESS_WAIT:
+      bus.access_rom = bus_page(address) >= 0x8
+      bus.access_write = true
+      if bus.imm_pre: bus.imm_pre_grant(cost)
+    bus.catch_up_access(cost)
+    when IMM_ACCESS_WAIT:
+      if bus.imm_post:
+        access
+        bus.imm_post_grant()
+        return
+
+# Each timed access takes its sync leg for an MMIO address or while a
+# sync_bits window is open. MMIO has its own copy of the leg, so the swap's
+# test (SB_SWAP, swap_read_word) sits only where MEMCNT's swap can reach and
+# costs an MMIO access nothing.
+
 proc `[]`*(bus: Bus; address: uint32): uint8 =
   bdWatchRead(address, 1)
   bus.rom_cool()
   let cost = bus.access_cycles(address, is32 = false, fetch = false)
   bus.cycles += cost
-  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active:
-    if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 23) != 0:
-      when DMA_READS_CPU_BUS:
-        bus.load_addr = address
-        bus.load_size = (if bus.ldrsh_odd: 2 else: 1)
-        bus.load_pc = bus.gba.cpu.r[15]
-        bus.load_end = bus.bus_now()
-        bus.load_start = bus.load_end - CycleCount(cost)
-      when IMM_ACCESS_WAIT:
-        bus.access_rom = bus_page(address) >= 0x8
-        bus.access_write = false
-        if bus.imm_pre: bus.imm_pre_grant(cost)
-      bus.catch_up_access(cost)
-      when IMM_ACCESS_WAIT:
-        if bus.imm_post:
-          result = bus.read_byte_internal(address)
-          bus.imm_post_grant()
-          return
+  if bus_page(address) == 0x4:
+    if not bus.dma_active:
+      bus.load_sync(address, cost, (if bus.ldrsh_odd: 2 else: 1), bus.read_byte_internal(address))
+  elif bus.sync_bits != 0:
+    if not bus.dma_active:
+      bus.load_sync(address, cost, (if bus.ldrsh_odd: 2 else: 1), bus.read_byte_mapped(address))
+    if address < 0x04000000'u32 and (bus.sync_bits and SB_SWAP) != 0:
+      return bus.swap_read_byte(address)
   bus.read_byte_internal(address)
 
 proc read_half*(bus: Bus; address: uint32): uint16 =
@@ -1308,24 +1467,14 @@ proc read_half*(bus: Bus; address: uint32): uint16 =
   bus.rom_cool()
   let cost = bus.access_cycles(address, is32 = false, fetch = false)
   bus.cycles += cost
-  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active:
-    if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 23) != 0:
-      when DMA_READS_CPU_BUS:
-        bus.load_addr = address
-        bus.load_size = 2
-        bus.load_pc = bus.gba.cpu.r[15]
-        bus.load_end = bus.bus_now()
-        bus.load_start = bus.load_end - CycleCount(cost)
-      when IMM_ACCESS_WAIT:
-        bus.access_rom = bus_page(address) >= 0x8
-        bus.access_write = false
-        if bus.imm_pre: bus.imm_pre_grant(cost)
-      bus.catch_up_access(cost)
-      when IMM_ACCESS_WAIT:
-        if bus.imm_post:
-          result = bus.read_half_internal(address)
-          bus.imm_post_grant()
-          return
+  if bus_page(address) == 0x4:
+    if not bus.dma_active:
+      bus.load_sync(address, cost, 2, bus.read_half_internal(address))
+  elif bus.sync_bits != 0:
+    if not bus.dma_active:
+      bus.load_sync(address, cost, 2, bus.read_half_mapped(address))
+    if address < 0x04000000'u32 and (bus.sync_bits and SB_SWAP) != 0:
+      return bus.swap_read_half(address)
   bus.read_half_internal(address)
 
 proc sd_tw_begin*(bus: Bus; a0: uint32; n: int) =
@@ -1384,25 +1533,40 @@ proc read_word*(bus: Bus; address: uint32): uint32 =
   bus.rom_cool()
   let cost = bus.access_cycles(address, is32 = true, fetch = false)
   bus.cycles += cost
-  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active:
-    if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 23) != 0:
-      when DMA_READS_CPU_BUS:
-        bus.load_addr = address
-        bus.load_size = 4
-        bus.load_pc = bus.gba.cpu.r[15]
-        bus.load_end = bus.bus_now()
-        bus.load_start = bus.load_end - CycleCount(cost)
-      when IMM_ACCESS_WAIT:
-        bus.access_rom = bus_page(address) >= 0x8
-        bus.access_write = false
-        if bus.imm_pre: bus.imm_pre_grant(cost)
-      bus.catch_up_access(cost)
-      when IMM_ACCESS_WAIT:
-        if bus.imm_post:
-          result = bus.read_word_internal(address)
-          bus.imm_post_grant()
-          return
+  if bus_page(address) == 0x4:
+    if not bus.dma_active:
+      bus.load_sync(address, cost, 4, bus.read_word_internal(address))
+  elif bus.sync_bits != 0:
+    if not bus.dma_active:
+      bus.load_sync(address, cost, 4, bus.read_word_mapped(address))
+    if address < 0x04000000'u32 and (bus.sync_bits and SB_SWAP) != 0:
+      return bus.swap_read_word(address)
   bus.read_word_internal(address)
+
+proc swap_fetch_half(bus: Bus; address: uint32): uint16 {.noinline.} =
+  ## A fetch from pages 0-3 under MEMCNT's swap: priced and synced as the
+  ## miss path prices any fetch it cannot cache (read_half), read through the
+  ## swapped map, where the BIOS answers a fetch with its contents; and the
+  ## BIOS latch follows the newest fetch (r15) when that is the BIOS, as
+  ## read_instr has it at home -- which here includes code in the chip WRAM
+  ## just below it (01FFFFF8, r15 02000000: png183 memory t108, memcnt.s
+  ## cell 17).
+  bus.swap_fetching = true
+  result = bus.read_half(address)
+  bus.swap_fetching = false
+  let pc = bus.gba.cpu.r[15]
+  if bits_range(pc, 24, 31) == 0x02'u32:
+    let v = uint32(read_u16_ptr(bus.bios, pc and 0x3FFE'u32))
+    bus.bios_latch = v or (v shl 16)
+
+proc swap_fetch_word(bus: Bus; address: uint32): uint32 {.noinline.} =
+  ## swap_fetch_half's ARM twin.
+  bus.swap_fetching = true
+  result = bus.read_word(address)
+  bus.swap_fetching = false
+  let pc = bus.gba.cpu.r[15]
+  if bits_range(pc, 24, 31) == 0x02'u32:
+    bus.bios_latch = read_u32_ptr(bus.bios, pc and 0x3FFC'u32)
 
 proc imm_refill_handover*(bus: Bus) =
   ## IMM_FETCH_WAIT: the CPU's next bus step after a fetch an immediate DMA's
@@ -1438,16 +1602,19 @@ template imm_fetch(bus: Bus; address: uint32; fetch: untyped) =
 
 proc fetch_half_miss(bus: Bus; address: uint32): uint16 =
   bus.imm_fetch(address, bus.fetch_half(address))
-  when DMA_ACCESS_WINDOW:
-    if (bus.sync_bits and 2) != 0:
-      # The window vetoed the fetch cache to get here. Charge the fetch the
-      # way the fast path does, then sync to its end.
-      bus.sync_bits = bus.sync_bits and not 2'u8
-      let before = bus.cycles
-      result = bus.fetch_half(address)
-      bus.sync_bits = bus.sync_bits or 2
-      bus.window_fetch_sync(bus.cycles - before)
-      return
+  if (bus.sync_bits and (SB_SWAP or 2'u8)) != 0:
+    if (bus.sync_bits and SB_SWAP) != 0 and address < 0x04000000'u32:
+      return bus.swap_fetch_half(address)
+    when DMA_ACCESS_WINDOW:
+      if (bus.sync_bits and 2) != 0:
+        # The window vetoed the fetch cache to get here. Charge the fetch the
+        # way the fast path does, then sync to its end.
+        bus.sync_bits = bus.sync_bits and not 2'u8
+        let before = bus.cycles
+        result = bus.fetch_half(address)
+        bus.sync_bits = bus.sync_bits or 2
+        bus.window_fetch_sync(bus.cycles - before)
+        return
   when IRQ_LAST_WAITS:
     if (bus.sync_bits and 8) != 0:
       # An interrupt's window keeps fetches off the fast path: fetch as it
@@ -1468,14 +1635,17 @@ proc fetch_half_miss(bus: Bus; address: uint32): uint16 =
 
 proc fetch_word_miss(bus: Bus; address: uint32): uint32 =
   bus.imm_fetch(address, bus.fetch_word(address))
-  when DMA_ACCESS_WINDOW:
-    if (bus.sync_bits and 2) != 0:
-      bus.sync_bits = bus.sync_bits and not 2'u8
-      let before = bus.cycles
-      result = bus.fetch_word(address)
-      bus.sync_bits = bus.sync_bits or 2
-      bus.window_fetch_sync(bus.cycles - before)
-      return
+  if (bus.sync_bits and (SB_SWAP or 2'u8)) != 0:
+    if (bus.sync_bits and SB_SWAP) != 0 and address < 0x04000000'u32:
+      return bus.swap_fetch_word(address)
+    when DMA_ACCESS_WINDOW:
+      if (bus.sync_bits and 2) != 0:
+        bus.sync_bits = bus.sync_bits and not 2'u8
+        let before = bus.cycles
+        result = bus.fetch_word(address)
+        bus.sync_bits = bus.sync_bits or 2
+        bus.window_fetch_sync(bus.cycles - before)
+        return
   when IRQ_LAST_WAITS:
     if (bus.sync_bits and 8) != 0:
       # An interrupt's window keeps fetches off the fast path: fetch as it
@@ -1499,26 +1669,21 @@ proc `[]=`*(bus: Bus; address: uint32; value: uint8) =
   bus.rom_cool()
   let cost = bus.access_cycles(address, is32 = false, fetch = false)
   bus.cycles += cost
-  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active:
-    when IRQ_LAST_WAITS:
-      if (bus.sync_bits and 8) != 0: bus.note_waits(cost)
-    if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 23) != 0:
-      # A store ends the load's claim on the bus (Bus.dma_bus_word): the
-      # console shows a burst the fetched opcode after one, not the load
-      # before it or the store's own data (dmaobus2.s variant 7)
-      when DMA_READS_CPU_BUS: bus.load_size = 0
-      when IMM_ACCESS_WAIT:
-        bus.access_rom = bus_page(address) >= 0x8
-        bus.access_write = true
-        if bus.imm_pre: bus.imm_pre_grant(cost)
-      bus.catch_up_access(cost)
-      when IMM_ACCESS_WAIT:
-        if bus.imm_post:
-          bus.byte_io_write = true
-          bus.write_byte_internal(address, value)
-          bus.byte_io_write = false
-          bus.imm_post_grant()
-          return
+  if bus_page(address) == 0x4:
+    if not bus.dma_active:
+      bus.store_sync(address, cost):
+        bus.byte_io_write = true
+        bus.write_byte_internal(address, value)
+        bus.byte_io_write = false
+  elif bus.sync_bits != 0:
+    if not bus.dma_active:
+      bus.store_sync(address, cost):
+        bus.byte_io_write = true
+        bus.write_byte_mapped(address, value)
+        bus.byte_io_write = false
+    if address < 0x04000000'u32 and (bus.sync_bits and SB_SWAP) != 0:
+      bus.swap_write_byte(address, value)
+      return
   bus.byte_io_write = true
   bus.write_byte_internal(address, value)
   bus.byte_io_write = false
@@ -1528,24 +1693,17 @@ proc write_half*(bus: Bus; address: uint32; value: uint16) =
   bus.rom_cool()
   let cost = bus.access_cycles(address, is32 = false, fetch = false)
   bus.cycles += cost
-  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active:
-    when IRQ_LAST_WAITS:
-      if (bus.sync_bits and 8) != 0: bus.note_waits(cost)
-    if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 23) != 0:
-      # A store ends the load's claim on the bus (Bus.dma_bus_word): the
-      # console shows a burst the fetched opcode after one, not the load
-      # before it or the store's own data (dmaobus2.s variant 7)
-      when DMA_READS_CPU_BUS: bus.load_size = 0
-      when IMM_ACCESS_WAIT:
-        bus.access_rom = bus_page(address) >= 0x8
-        bus.access_write = true
-        if bus.imm_pre: bus.imm_pre_grant(cost)
-      bus.catch_up_access(cost)
-      when IMM_ACCESS_WAIT:
-        if bus.imm_post:
-          bus.write_half_internal(address, value)
-          bus.imm_post_grant()
-          return
+  if bus_page(address) == 0x4:
+    if not bus.dma_active:
+      bus.store_sync(address, cost):
+        bus.write_half_internal(address, value)
+  elif bus.sync_bits != 0:
+    if not bus.dma_active:
+      bus.store_sync(address, cost):
+        bus.write_half_mapped(address, value)
+    if address < 0x04000000'u32 and (bus.sync_bits and SB_SWAP) != 0:
+      bus.swap_write_half(address, value)
+      return
   bus.write_half_internal(address, value)
 
 proc write_word*(bus: Bus; address: uint32; value: uint32) =
@@ -1553,24 +1711,17 @@ proc write_word*(bus: Bus; address: uint32; value: uint32) =
   bus.rom_cool()
   let cost = bus.access_cycles(address, is32 = true, fetch = false)
   bus.cycles += cost
-  if (bus_page(address) == 0x4 or bus.sync_bits != 0) and not bus.dma_active:
-    when IRQ_LAST_WAITS:
-      if (bus.sync_bits and 8) != 0: bus.note_waits(cost)
-    if not IRQ_LAST_WAITS or bus_page(address) == 0x4 or (bus.sync_bits and 23) != 0:
-      # A store ends the load's claim on the bus (Bus.dma_bus_word): the
-      # console shows a burst the fetched opcode after one, not the load
-      # before it or the store's own data (dmaobus2.s variant 7)
-      when DMA_READS_CPU_BUS: bus.load_size = 0
-      when IMM_ACCESS_WAIT:
-        bus.access_rom = bus_page(address) >= 0x8
-        bus.access_write = true
-        if bus.imm_pre: bus.imm_pre_grant(cost)
-      bus.catch_up_access(cost)
-      when IMM_ACCESS_WAIT:
-        if bus.imm_post:
-          bus.write_word_internal(address, value)
-          bus.imm_post_grant()
-          return
+  if bus_page(address) == 0x4:
+    if not bus.dma_active:
+      bus.store_sync(address, cost):
+        bus.write_word_internal(address, value)
+  elif bus.sync_bits != 0:
+    if not bus.dma_active:
+      bus.store_sync(address, cost):
+        bus.write_word_mapped(address, value)
+    if address < 0x04000000'u32 and (bus.sync_bits and SB_SWAP) != 0:
+      bus.swap_write_word(address, value)
+      return
   bus.write_word_internal(address, value)
 
 # For DMA write-word via uint32 subscript
@@ -1601,6 +1752,33 @@ proc read_word_rotate*(bus: Bus; address: uint32): uint32 =
 
 proc fetch_bus_word(bus: Bus; pc: uint32): uint32
 proc dma_bus_word(bus: Bus): uint32
+
+proc code_home(bus: Bus; pc: uint32): uint32 =
+  ## The page the memory code at `pc` is fetched from lives at unswapped and
+  ## switched on: what the open bus's composition turns on. png183 memory
+  ## t114: Thumb code at 02FFFFF8 with board WRAM off runs from the chip
+  ## WRAM and leaves the chip WRAM's composition on the bus.
+  result = bits_range(pc, 24, 27)
+  if pc < 0x04000000'u32 and (bus.sync_bits and SB_SWAP) != 0:
+    result = result xor 2
+  if result == 0x2 and bus.ewram_off: result = 0x3
+
+proc code_half(bus: Bus; a: uint32): uint32 =
+  ## The halfword a fetch at `a` reads (the BIOS unprotected).
+  if a < 0x04000000'u32 and (bus.sync_bits and SB_SWAP) != 0:
+    let p = bits_range(a, 24, 27)
+    if p == 0x2: uint32(read_u16_ptr(bus.bios, a and 0x3FFE'u32))
+    elif p < 0x2: uint32(bus.read_half_internal(a xor 0x02000000'u32))
+    else: 0'u32
+  else: uint32(bus.read_half_internal(a))
+
+proc code_word(bus: Bus; a: uint32): uint32 =
+  if a < 0x04000000'u32 and (bus.sync_bits and SB_SWAP) != 0:
+    let p = bits_range(a, 24, 27)
+    if p == 0x2: read_u32_ptr(bus.bios, a and 0x3FFC'u32)
+    elif p < 0x2: bus.read_word_internal(a xor 0x02000000'u32)
+    else: 0'u32
+  else: bus.read_word_internal(a)
 
 proc read_open_bus_word*(bus: Bus; address: uint32): uint32 =
   ## The whole 32-bit latch, decided ONCE for an access. The verdict turns on
@@ -1700,10 +1878,10 @@ proc read_open_bus_word*(bus: Bus; address: uint32): uint32 =
     if bus.dma_has_run and bus.dma_request_at == fetch_start and
        bus.gba.cpu.cpsr.thumb:
       let pc = bus.gba.cpu.r[15]
-      let pc_region = bits_range(pc, 24, 27)
+      let pc_region = bus.code_home(pc)
       if (pc_region == 0x0 or pc_region == 0x3) and bits_range(pc, 28, 31) == 0 and
          pc >= 2:
-        let newer = uint32(bus.read_half_internal(pc and not 1'u32))
+        let newer = bus.code_half(pc and not 1'u32)
         return if (pc and 2) != 0: (newer shl 16) or (bus.dma_open_bus and 0xFFFF'u32)
                else: (bus.dma_open_bus and 0xFFFF0000'u32) or newer
   bus.fetch_bus_word(bus.gba.cpu.r[15])
@@ -1712,7 +1890,7 @@ proc fetch_bus_word(bus: Bus; pc: uint32): uint32 =
   ## What the CPU's opcode fetches left on the data bus, `pc` being r15 as
   ## the instruction that made the last of them sees it.
   # PC in MMIO/unmapped memory would recurse back into this proc
-  let pc_region = bits_range(pc, 24, 27)
+  let pc_region = bus.code_home(pc)
   if pc_region == 0x1 or pc_region == 0x4 or pc_region > 0xD or
      bits_range(pc, 28, 31) > 0:  # PC itself in unmapped space would recurse
     return 0'u32
@@ -1758,16 +1936,16 @@ proc fetch_bus_word(bus: Bus; pc: uint32): uint32 =
         # pc < 2 (a wild jump that wrapped): $+2 is at 0xFFFFFFFE, unmapped,
         # and its read would come back here with the same PC; the one
         # fetched halfword stands in for both
-        let older = if pc < 2: uint32(bus.read_half_internal(pc and not 1'u32))
-                    else: uint32(bus.read_half_internal((pc - 2) and not 1'u32))
-        let newer = uint32(bus.read_half_internal(pc and not 1'u32))
+        let older = if pc < 2: bus.code_half(pc and not 1'u32)
+                    else: bus.code_half((pc - 2) and not 1'u32)
+        let newer = bus.code_half(pc and not 1'u32)
         if (pc and 2) != 0: (newer shl 16) or older
         else:               (older shl 16) or newer
       else:
-        let opcode = uint32(bus.read_half_internal(pc and not 1'u32))
+        let opcode = bus.code_half(pc and not 1'u32)
         (opcode shl 16) or opcode
     else:
-      bus.read_word_internal(pc and not 3'u32)
+      bus.code_word(pc and not 3'u32)
   word
 
 proc dma_bus_word(bus: Bus): uint32 =

@@ -130,6 +130,10 @@ proc judge_loop(cpu: CPU; start_addr: uint32; end_addr: uint32) =
     if start_addr in cpu.identified_non_waitloops:
       cpu.last_non_waitloop = start_addr
       return
+  # RAM code under MEMCNT's swap: the loop's own reads below are unswapped
+  if not cacheable and start_addr < 0x04000000'u32 and
+     (cpu.gba.bus.sync_bits and SB_SWAP) != 0:
+    return
   var written_bits: uint16 = 0
   var never_write: uint16  = 0
   var first_load = WL_NO_LOAD

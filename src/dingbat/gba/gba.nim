@@ -176,9 +176,9 @@ type
     # POSTFLG (0x04000300): boot value 1 at ROM entry (gbaedge IDENT page).
     postflg*: uint8
     # Internal memory control (0x04000800, mirrored every 64K): the EWRAM
-    # wait field is live (bus.update_waitcnt); the disable and swap bits are
-    # readback only. Reset value 0x0D000020 (gbaedge IDENT page). Both fields
-    # are in the state's in-flight section (rev 9).
+    # wait field, the board WRAM enable (bit 5) and the swap (bit 0) are live
+    # (bus.update_waitcnt). Reset value 0x0D000020 (gbaedge IDENT page). Both
+    # fields are in the state's in-flight section (rev 9).
     memctrl*: uint32
 
   Timer* = ref object
@@ -462,7 +462,13 @@ type
     # is close; data accesses and internal cycles sync,
     # fetches stay on the fast path (FIFO_DMA_WINDOW). Bit 5 (with bit 4): the
     # refill was granted; the CPU's next internal cycles close the window.
+    # Bit 6 (SB_SWAP): MEMCNT's swap bit is set, and accesses to 00000000-
+    # 03FFFFFF go through the swapped map (bus.nim, swap_read_word); derived
+    # from mmio.memctrl in update_waitcnt, never serialized.
     sync_bits*: uint8
+    # A fetch is going through the swapped map: it reads the BIOS whoever
+    # asks (transient).
+    swap_fetching*: bool
     # IRQ_LAST_WAITS, recorded while bit 3 is set: where the last CPU access
     # ended and how many of its cycles were wait states.
     lw_end*:    CycleCount
@@ -1299,6 +1305,8 @@ const HALT_WAKE_INSTR_COST* = 3
 const IRQ_ENTRY_EXTRA* {.intdefine.} = 1
   ## Cycles an IRQ entry costs beyond its pipeline refill (cpu.irq).
 const DMA_ACCESS_WINDOW* {.booldefine.} = true
+const SB_SWAP* = 64'u8
+  ## bus.sync_bits bit 6: MEMCNT's swap is on (bus.nim, swap_read_word).
 const DMA_LEAD_CYCLES* {.intdefine.} = 1
   ## Of a burst's two hand-off cycles, how many come before its first
   ## transfer; the rest follow its last. One and one: with both in front the

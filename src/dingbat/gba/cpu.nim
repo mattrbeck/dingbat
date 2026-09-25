@@ -223,28 +223,34 @@ proc und*(cpu: CPU) =
   discard cpu.set_reg(15, 0x04'u32)
 
 proc fill_pipeline*(cpu: CPU) {.inline.} =
+  # Page 0 is the BIOS unless MEMCNT's swap is on (then swap_fetch_* keep
+  # the latch)
   if cpu.cpsr.thumb:
     let pc = cpu.r[15] and not 1'u32
     if cpu.pipeline.size == 0:
       let v = uint32(cpu.gba.bus.fetch_half(pc - 2))
-      if bits_range(pc - 2, 24, 27) == 0:
+      if bits_range(pc - 2, 24, 27) == 0 and
+         (cpu.gba.bus.sync_bits and SB_SWAP) == 0:
         cpu.gba.bus.bios_latch = v or (v shl 16)
       cpu.pipeline.push(v)
     if cpu.pipeline.size == 1:
       let v = uint32(cpu.gba.bus.fetch_half(pc))
-      if bits_range(pc, 24, 27) == 0:
+      if bits_range(pc, 24, 27) == 0 and
+         (cpu.gba.bus.sync_bits and SB_SWAP) == 0:
         cpu.gba.bus.bios_latch = v or (v shl 16)
       cpu.pipeline.push(v)
   else:
     let pc = cpu.r[15] and not 3'u32
     if cpu.pipeline.size == 0:
       let v = cpu.gba.bus.fetch_word(pc - 4)
-      if bits_range(pc - 4, 24, 27) == 0:
+      if bits_range(pc - 4, 24, 27) == 0 and
+         (cpu.gba.bus.sync_bits and SB_SWAP) == 0:
         cpu.gba.bus.bios_latch = v
       cpu.pipeline.push(v)
     if cpu.pipeline.size == 1:
       let v = cpu.gba.bus.fetch_word(pc)
-      if bits_range(pc, 24, 27) == 0:
+      if bits_range(pc, 24, 27) == 0 and
+         (cpu.gba.bus.sync_bits and SB_SWAP) == 0:
         cpu.gba.bus.bios_latch = v
       cpu.pipeline.push(v)
 
@@ -521,7 +527,8 @@ proc read_instr*(cpu: CPU): uint32 {.inline.} =
       cpu.r[15] = cpu.r[15] and not 1'u32
       let fetch_addr = cpu.r[15] - 4
       let v = uint32(cpu.gba.bus.fetch_half(fetch_addr))
-      if bits_range(fetch_addr, 24, 27) == 0:
+      if bits_range(fetch_addr, 24, 27) == 0 and
+         (cpu.gba.bus.sync_bits and SB_SWAP) == 0:   # else swap_fetch_half
         # The BIOS latch is the newest pipeline fetch, two instructions ahead
         # of execution (hardware: gbaedge IDENT on AGB SP, docs/hwprobe.md).
         let ahead = uint32(cpu.gba.bus.read_half_internal((fetch_addr + 4) and 0x3FFF'u32))
@@ -533,7 +540,8 @@ proc read_instr*(cpu: CPU): uint32 {.inline.} =
       cpu.r[15] = cpu.r[15] and not 1'u32
       let fetch_addr = cpu.r[15] - 8
       let v = cpu.gba.bus.fetch_word(fetch_addr)
-      if bits_range(fetch_addr, 24, 27) == 0:
+      if bits_range(fetch_addr, 24, 27) == 0 and
+         (cpu.gba.bus.sync_bits and SB_SWAP) == 0:   # else swap_fetch_word
         cpu.gba.bus.bios_latch = cpu.gba.bus.read_word_internal((fetch_addr + 8) and 0x3FFC'u32)
       v
   else:

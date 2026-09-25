@@ -4769,8 +4769,8 @@
  {
   "payload": "memcnt",
   "rom": "memcnt.gba",
-  "sha1": "d4d59e921b51ca0336bffc91415ffc5c5d3dcbb9",
-  "frames": 132,
+  "sha1": "17e96cb9530f93082c1fe582dc46ff36d8d1c335",
+  "frames": 204,
   "cells": [
    {
     "id": "memcnt 0xd",
@@ -4816,6 +4816,51 @@
     "id": "memcnt 0x7",
     "kind": "hex",
     "want": "89ABCDEF"
+   },
+   {
+    "id": "memcnt 0x8",
+    "kind": "hex",
+    "want": "E3A02004"
+   },
+   {
+    "id": "memcnt 0x9",
+    "kind": "hex",
+    "want": "E3A02004"
+   },
+   {
+    "id": "memcnt 0xa",
+    "kind": "hex",
+    "want": "01234567"
+   },
+   {
+    "id": "memcnt 0xb",
+    "kind": "hex",
+    "want": "89ABCDEF"
+   },
+   {
+    "id": "memcnt 0xc",
+    "kind": "hex",
+    "want": "11A0E00F"
+   },
+   {
+    "id": "memcnt 0xe",
+    "kind": "hex",
+    "want": "E3A02004"
+   },
+   {
+    "id": "memcnt 0xf",
+    "kind": "hex",
+    "want": "E3A02004"
+   },
+   {
+    "id": "memcnt 0x10",
+    "kind": "hex",
+    "want": "E3A02004"
+   },
+   {
+    "id": "memcnt 0x11",
+    "kind": "hex",
+    "want": "EA000042"
    }
   ]
  },
@@ -5442,6 +5487,34 @@
     "id": "dmairqf 0x310",
     "kind": "hex",
     "want": "040CE0F2"
+   }
+  ]
+ },
+ {
+  "payload": "haltswap",
+  "rom": "haltswap.gba",
+  "sha1": "431216c2bb7f3745e1bda7f99acaf32dd588479a",
+  "frames": 92,
+  "cells": [
+   {
+    "id": "haltswap 0x0",
+    "kind": "hex",
+    "want": "000000A0"
+   },
+   {
+    "id": "haltswap 0x1",
+    "kind": "hex",
+    "want": "00000000"
+   },
+   {
+    "id": "haltswap 0x2",
+    "kind": "hex",
+    "want": "000000A0"
+   },
+   {
+    "id": "haltswap 0x3",
+    "kind": "hex",
+    "want": "00000000"
    }
   ]
  }
