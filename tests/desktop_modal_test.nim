@@ -13,6 +13,11 @@
 import imguin/cimgui
 import dingbat/frontend/notice
 
+# imgui.cpp's default Windows IME hooks call imm32; the GUI build links it
+# through nim.cfg, which -d:test_harness leaves out.
+when defined(windows):
+  {.passL: "-limm32".}
+
 discard igCreateContext(nil)
 let io = igGetIO_Nil()
 io.DisplaySize = ImVec2(x: 800, y: 600)
