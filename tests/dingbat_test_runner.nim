@@ -1584,12 +1584,14 @@ proc build_gba_misc_tests(): seq[TestDef] =
   ))
 
   # hades-emu/Hades-Tests (GPL-2.0): per-check PASS/FAIL and a "Total: a/b"
-  # line. dma-latch (2/4) and dma-start-delay (0/8) have never drawn their
-  # all-pass frame here, so nothing is pinned for them yet.
+  # line. dma-start-delay's eight values match an AGB SP where the rig can
+  # run them (its IWRAM and board-WRAM rows, tests/roms/payloads/hadesdsd.s).
+  # dma-latch (3/4) has never drawn its all-pass frame here, so nothing is
+  # pinned for it yet.
   for (rom, hash) in [("bios-openbus", "2E1EF1B0B52F22CA"),
                       ("timer-basic", "65ABD86A89664A82"),
                       ("dma-latch", "unpinned"),
-                      ("dma-start-delay", "unpinned")]:
+                      ("dma-start-delay", "827A85AE0D672D8E")]:
     result.add(TestDef(
       name: "hades/" & rom,
       rom_path: ensure_rom_download(
