@@ -1,14 +1,14 @@
 # Dingbat Test Results
 
-*Generated: 2026-09-25 01:12:18 · commit 965273e9 · game-boy-test-roms v7.0*
+*Generated: 2026-09-25 02:22:34 · commit a5854d68 · game-boy-test-roms v7.0*
 
 Device column: the hardware the row is scored on. `cart` = the cart header picks the device (DMG-ABC for a DMG cart, CPU CGB C for a CGB one); `DMG`/`CGB`/`SGB` = forced; a trailing token is a specific boot table/revision (`--model`); `—` = GBA, which has no device axis here. A row name ending `@<model>` is one ARM of a test whose name declares several machines: a ROM that states the devices it was verified on (AGE's `ei-halt-dmgC-cgbBCE`, mealybug's `_cgb_c`/`_cgb_d` capture pair, mooneye's `-GS` family) gets one row per revision rather than one row on whichever machine happened to be the default, so each revision is actually covered. Sections where every row passes are collapsed to a single line — the per-row table comes back as soon as anything in them fails.
 
 ## Summary
 
 - **Total:** 1443
-- **Pass:** 1424
-- **Fail:** 19
+- **Pass:** 1431
+- **Fail:** 12
 
 | Suite | Pass | Total |
 |-------|------|-------|
@@ -18,11 +18,11 @@ Device column: the hardware the row is scored on. `cart` = the cart header picks
 | Game Boy - Mooneye | 152 | 152 |
 | GBA - mGBA Test Suite | 13 | 13 |
 | GBA - jsmolka gba-tests | 13 | 13 |
-| GBA - alyosha gba-tests | 117 | 126 |
+| GBA - alyosha gba-tests | 121 | 126 |
 | GBA - PeterLemon BIOS | 25 | 25 |
-| GBA - Other test ROMs | 10 | 12 |
+| GBA - Other test ROMs | 11 | 12 |
 | GBA - hwverified (AGS-001) | 12 | 12 |
-| GBA - dbsuite (AGS-001) | 3 | 8 |
+| GBA - dbsuite (AGS-001) | 5 | 8 |
 | GBA - FuzzARM | 5 | 5 |
 | Game Boy - Acid2 | 2 | 2 |
 | Game Boy - MagenTests | 7 | 7 |
@@ -62,7 +62,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 13 tests passed.**
 
-## GBA - alyosha gba-tests (117/126)
+## GBA - alyosha gba-tests (121/126)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -82,7 +82,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | alyosha/DMA/DMA_pause_timing_mid_1 | — | 👌 |
 | alyosha/DMA/DMA_pause_timing_mid_2 | — | 👌 |
 | alyosha/Interactions/Halt_DMA_IRQ | — | 👌 |
-| alyosha/Interactions/Halt_DMA_IRQ_Read_OAM | — | 👀 Failed test 219 |
+| alyosha/Interactions/Halt_DMA_IRQ_Read_OAM | — | 👌 |
 | alyosha/Interactions/Halt_IRQ | — | 👌 |
 | alyosha/Interactions/Internal_Cycle_DMA_IRQ | — | 👌 |
 | alyosha/Interactions/Internal_Cycle_DMA_IRQ_7 | — | 👌 |
@@ -119,8 +119,8 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | alyosha/fifo_dma/fifo_2 | — | 👌 |
 | alyosha/fifo_dma/fifo_3 | — | 👌 |
 | alyosha/fifo_dma/fifo_4 | — | 👌 |
-| alyosha/fifo_dma/fifo_5 | — | 👀 Failed test 059 |
-| alyosha/fifo_dma/fifo_6 | — | 👀 Failed test 155 |
+| alyosha/fifo_dma/fifo_5 | — | 👌 |
+| alyosha/fifo_dma/fifo_6 | — | 👀 Failed test 156 |
 | alyosha/fifo_dma/fifo_dma_disable_3 | — | 👌 |
 | alyosha/fifo_dma/fifo_dma_disable_4 | — | 👌 |
 | alyosha/fifo_dma/fifo_dma_disable_5 | — | 👌 |
@@ -142,8 +142,8 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | alyosha/irq/halt_pc_4 | — | 👌 |
 | alyosha/memory/PAL_8_bit_writes | — | 👌 |
 | alyosha/memory/VRAM_8_bit_writes | — | 👌 |
-| alyosha/ppu/Sprite_Last_VRAM_Access | — | 👀 Failed test 141 |
-| alyosha/ppu/Sprite_Last_VRAM_Access_Free | — | 👀 Failed test 119 |
+| alyosha/ppu/Sprite_Last_VRAM_Access | — | 👌 |
+| alyosha/ppu/Sprite_Last_VRAM_Access_Free | — | 👌 |
 | alyosha/ppu/start_up | — | 👌 |
 | alyosha/ppu/start_up_vbl | — | 👌 |
 | alyosha/ppu/start_up_vbl_irq | — | 👌 |
@@ -175,7 +175,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | alyosha/timer/timer_disable | — | 👌 |
 | alyosha/timer/timer_reset | — | 👌 |
 | alyosha/timing/cpy_data_bios | — | 👌 |
-| alyosha/timing/dma_from_bios | — | 👀 Failed test 014 |
+| alyosha/timing/dma_from_bios | — | 👀 Failed test 142 |
 | alyosha/timing/dma_long | — | 👌 |
 | alyosha/timing/prefetch_enable | — | 👌 |
 | alyosha/timing/prefetch_enable_2 | — | 👌 |
@@ -189,7 +189,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | png183/arm/halfword_transfer | — | 👌 |
 | png183/arm/multiply | — | 👌 |
 | png183/irq/halt_pc | — | 👌 |
-| png183/memory/memory | — | 👀 Failed test 104 |
+| png183/memory/memory | — | 👀 Failed test 107 |
 | png183/psr/psr2 | — | 👌 |
 | png183/timer/timer_check_count_up_presence | — | 👌 |
 
@@ -197,7 +197,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 25 tests passed.**
 
-## GBA - Other test ROMs (10/12)
+## GBA - Other test ROMs (11/12)
 
 | Test | Device | Result |
 |------|--------|--------|
@@ -205,7 +205,7 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 | hades/bios-openbus | — | 👌 |
 | hades/timer-basic | — | 👌 |
 | hades/dma-latch | — | 👀 no all-pass frame pinned yet (frame hash 009077408465C7EE) |
-| hades/dma-start-delay | — | 👀 no all-pass frame pinned yet (frame hash 58A8421328C709E6) |
+| hades/dma-start-delay | — | 👌 |
 | swp/SwpBusLocking | — | 👌 |
 | agbeeg/rom_access_during_prefetch | — | 👌 |
 | agbeeg/toggle_prefetcher | — | 👌 |
@@ -218,15 +218,15 @@ See [detailed results](results_mgba_suite.md) for individual test outcomes.
 
 **All 12 tests passed.**
 
-## GBA - dbsuite (AGS-001) (3/8)
+## GBA - dbsuite (AGS-001) (5/8)
 
 | Test | Device | Result |
 |------|--------|--------|
-| dbsuite/cpu | — | 👀 116/117 passed |
-| dbsuite/irq | — | 👀 138/145 passed |
+| dbsuite/cpu | — | 👌 117/117 passed |
+| dbsuite/irq | — | 👌 145/145 passed |
 | dbsuite/timer | — | 👌 26/26 passed |
-| dbsuite/dma | — | 👀 254/262 passed |
-| dbsuite/bus | — | 👀 70/79 passed |
+| dbsuite/dma | — | 👀 258/262 passed |
+| dbsuite/bus | — | 👀 76/79 passed |
 | dbsuite/ppu | — | 👌 156/156 passed |
 | dbsuite/apu | — | 👀 36/52 passed |
 | dbsuite/bios | — | 👌 47/47 passed |
