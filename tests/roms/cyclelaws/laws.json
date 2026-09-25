@@ -4977,5 +4977,63 @@
     "want": "002CFFF9"
    }
   ]
+ },
+ {
+  "payload": "fifomap",
+  "rom": "fifomap.gba",
+  "sha1": "c69a32bdadb708b639e95c1b6604e99b1f2bb809",
+  "frames": 140,
+  "cells": [
+   {
+    "id": "fifomap 0x1411",
+    "kind": "hex",
+    "want": "00000035"
+   },
+   {
+    "id": "fifomap 0x1428",
+    "kind": "hex",
+    "want": "0000006A"
+   },
+   {
+    "id": "fifomap 0x10001411",
+    "kind": "hex",
+    "want": "00000017"
+   },
+   {
+    "id": "fifomap 0x10001428",
+    "kind": "hex",
+    "want": "0000004C"
+   },
+   {
+    "id": "fifomap 0x18001411",
+    "kind": "hex",
+    "want": "00000017"
+   },
+   {
+    "id": "fifomap 0x18001428",
+    "kind": "hex",
+    "want": "0000002E"
+   },
+   {
+    "id": "fifomap 0x1c001411",
+    "kind": "hex",
+    "want": "00000017"
+   },
+   {
+    "id": "fifomap 0x1c001428",
+    "kind": "hex",
+    "want": "0000002E"
+   },
+   {
+    "id": "fifomap 0x20001411",
+    "kind": "hex",
+    "want": "00000035"
+   },
+   {
+    "id": "fifomap 0x20001428",
+    "kind": "hex",
+    "want": "0000006A"
+   }
+  ]
  }
 ]

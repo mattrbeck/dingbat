@@ -25,6 +25,14 @@ const FIFO_DMA_REQUEST_DELAY {.intdefine.} = 4
   ## from 3 to 5. Bounded: at most one request per overflow per FIFO, and
   ## a grant re-checks the FIFO level (dma.run_pending).
 
+const FIFO_WORD_WRAP {.booldefine.} = true
+  ## The FIFO holds eight words, and the eighth written into it leaves it
+  ## reading empty (its word count wraps): with the sound on, eight words
+  ## stored and TM0 started, the first overflow requests a refill exactly as
+  ## it does for an empty FIFO, where four, six or seven words request
+  ## nothing (tests/roms/payloads/fifomap.s on an AGB SP; alyosha
+  ## fifo_dma/fifo_5 stores eight and reads the burst, fifo_4 stores four).
+
 proc dma_channels_in_range*(address: uint32): bool =
   address >= DMA_CHANNELS_RANGE_LOW and address <= DMA_CHANNELS_RANGE_HIGH
 
@@ -77,6 +85,8 @@ proc dma_channels_write*(dc: DMAChannels; address: uint32; value: uint8) =
     dc.tags[channel][(dc.positions[channel] + dc.sizes[channel]) mod 32] = tag
     dc.fifos[channel][(dc.positions[channel] + dc.sizes[channel]) mod 32] = cast[int8](value)
     dc.sizes[channel] += 1
+    when FIFO_WORD_WRAP:
+      if dc.sizes[channel] == 32: dc.sizes[channel] = 0
   else:
     when defined(mp2kwav): inc dbgFifoDrop[channel]
     log("Writing " & hex_str(value) & " to fifo " & $channel & " but it's already full")

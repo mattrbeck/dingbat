@@ -71,6 +71,9 @@ TABLE = {
     # with nothing else armed; the V-blank arming's first start; two
     # channels' burst counts. Not the configurations 23-30, whose second
     # channel starts two cycles late here (the payload's header)
+    # fifodma's k = 20 staircase after w = 0, 4, 6, 7, 8 words stored to the
+    # FIFO: the eighth word leaves it reading empty (payloads/fifomap.s)
+    'fifomap': [w << 26 | 20 << 8 | n for w in (0, 4, 6, 7, 8) for n in (17, 40)],
     'hdmalag': ([c << 8 | w for c in list(range(0, 12)) + [15, 16, 17, 18, 19, 20, 31, 32, 33, 34]
                  for w in (1, 10, 11, 14)]
                 + [8 << 8 | 2, 22 << 8 | 1, 22 << 8 | 11]
