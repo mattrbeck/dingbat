@@ -10,6 +10,13 @@ import std/[net, nativesockets, monotimes, times, strutils]
 import dingbat/gba/[gba, netlink]
 import dingbat/frontend/link_cable
 
+when defined(windows):
+  # The app runs under SDL, which raises the system timer to 1 ms
+  # (SDL_HINT_TIMER_RESOLUTION); without it a 1 ms socket wait lasts a
+  # whole 15.6 ms tick, and the one-thread pairing below crawls.
+  proc timeBeginPeriod(ms: cuint): cuint {.stdcall, dynlib: "winmm", importc.}
+  discard timeBeginPeriod(1)
+
 var failures = 0
 
 proc check(cond: bool; msg: string) =
@@ -244,7 +251,14 @@ block:
   check lc.setup == lsConnecting, "and a Join is still trying"
   discard lc.service_setup(gba, ROM, LINK_PROBE_INTERVAL_MS - 1)
   discard lc.service_setup(gba, ROM, LINK_PROBE_INTERVAL_MS)
-  check lc.probes == 2, "the next attempt waits LINK_PROBE_INTERVAL_MS"
+  when defined(windows):
+    # Windows retries a refused localhost connect for about 2 s before
+    # reporting it, so the first attempt may still be in flight here: the
+    # pacing law is "no more than one attempt per interval".
+    check lc.probes in 1 .. 2, "the next attempt waits LINK_PROBE_INTERVAL_MS (" &
+          $lc.probes & ")"
+  else:
+    check lc.probes == 2, "the next attempt waits LINK_PROBE_INTERVAL_MS"
   discard lc.service_setup(gba, ROM, LINK_JOIN_GIVE_UP_MS - 1)
   check lc.setup == lsConnecting, "Join keeps trying for its five seconds"
   discard lc.service_setup(gba, ROM, LINK_JOIN_GIVE_UP_MS)
@@ -520,7 +534,8 @@ block:
   while frames < 30 and ms_since(t1) < 5000:
     if la.step_frame_for(8): inc frames
     discard lb.step_frame_for(8)
-  check frames == 30, "and the link runs frames"
+  check frames == 30, "and the link runs frames (" & $frames & " in " &
+        $ms_since(t1) & " ms)"
   host.teardown(la, "")
   guest.teardown(lb, "")
   var bad = init_link_cable()
