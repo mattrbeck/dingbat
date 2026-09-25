@@ -166,10 +166,12 @@ TABLE = {
     # counter-2 and no-master-on cells spread with the 512 Hz phase.
     'fsfirst': list(range(16)) + list(range(0x10, 0x100, 0x10)),
     # ch1 at shift 0 and f = 0x400 (0x3FF): which triggers the sweep unit's
-    # overflow check kills, and when, over the 16-cycle phase
+    # overflow check kills, and when, over the 16-cycle phase. Not 0x4001:
+    # with sound left on from the cell before it answered 1, 3 or 7 over nine
+    # runs of a second session (history-dependent), 1 in the first
     's0trig': list(range(16)) + [b | k for b in (0x100, 0x200, 0x400, 0x800, 0x1800,
                                                  0x2000, 0x4000, 0x8000)
-                                 for k in range(16)],
+                                 for k in range(16) if b | k != 0x4001],
 }
 
 

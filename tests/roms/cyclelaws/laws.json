@@ -5787,8 +5787,8 @@
  {
   "payload": "s0trig",
   "rom": "s0trig.gba",
-  "sha1": "7a050c90be589298bc5cfa07e74fef4c83b17575",
-  "frames": 1212,
+  "sha1": "e2628334b813959c3b5724359f096536c3ab83ed",
+  "frames": 1204,
   "cells": [
    {
     "id": "s0trig 0x0",
@@ -6352,11 +6352,6 @@
    },
    {
     "id": "s0trig 0x4000",
-    "kind": "hex",
-    "want": "00000001"
-   },
-   {
-    "id": "s0trig 0x4001",
     "kind": "hex",
     "want": "00000001"
    },
