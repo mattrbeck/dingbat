@@ -27,6 +27,12 @@ const DMA_ROM_BOUNDARY_HOLD {.booldefine.} = true
   ## it (31 S reads that are N); applied to every non-moving ROM source,
   ## DMA_pause_timing_ROM_to_IWRAM goes red.
 const DMA_START_DELAY {.intdefine.} = (if IMM_IDLE_GRANT: 2 else: 3)
+const HDMA_DROP_BUSY {.booldefine.} = true
+  ## An H-blank request that arrives while the same channel's burst still
+  ## holds the bus is dropped, not latched (trigger_hdma). False latches it
+  ## like any other; a burst's requests then reach the pump after it on the
+  ## lagging clock, each is granted a burst, and at more than a line a burst
+  ## the CPU never runs again (the state soak's seed 0xA903).
 const
   DMA_SRC_MASK = [0x07FFFFFF'u32, 0x0FFFFFFF'u32, 0x0FFFFFFF'u32, 0x0FFFFFFF'u32]
   # DAD keeps 28 bits on every channel; channels 0-2 DROP gamepak-bus
@@ -191,6 +197,16 @@ proc trigger_hdma*(dma: DMA) =
   if not (dma.gba.ppu.vcount == 159 and dma.armed(1)): dma.close_access_window()
   for channel in 0..3:
     if dma.dmacnt_h[channel].enable and dma.dmacnt_h[channel].start_timing == 2:  # HBlank
+      # HDMA_DROP_BUSY: a request that finds the channel's own burst still
+      # running is lost; the next burst waits for the next H-blank after it
+      # (tests/roms/payloads/hdmalag.s on an AGB SP: bursts of 1.1 to 3.5
+      # lines start only on H-blanks, every 2nd, 3rd or 4th line). One that
+      # finds another channel's burst running stays latched and runs after
+      # it. This event runs at the request's own cycle, which is behind the
+      # bus while a burst's cycles are still to be ticked (the burst was
+      # granted in this catch-up); busy_until covers that as well.
+      if HDMA_DROP_BUSY and dma.gba.scheduler.cycles < dma.busy_until[channel]:
+        continue
       dma.request(channel)
 
 proc trigger_vdma*(dma: DMA) =
@@ -304,6 +320,7 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
     else: dma.gba.bus.add_cycles(DMA_LEAD_CYCLES)
 
   dma.gba.bus.dma_active = true
+  dma.busy_until[channel] = high(CycleCount)
   when DMA_READS_CPU_BUS:
     # A nested burst finds the outer one's word on the bus
     if not nested: dma.gba.bus.dma_bus_fresh = true
@@ -387,6 +404,7 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
   if not nested and DMA_LEAD_CYCLES < 2:
     if not (DMA_CHAIN and dma.chain_next(channel)):
       dma.gba.bus.add_cycles(2 - DMA_LEAD_CYCLES)   # the hand-back
+  dma.busy_until[channel] = dma.gba.bus.sched.cycles + CycleCount(dma.gba.bus.cycles)
 
   if start_timing == 3 and (channel == 1 or channel == 2):
     dma.fifo_xfer_cycle[channel] = int64(dma.gba.scheduler.cycles)

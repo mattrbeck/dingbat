@@ -56,6 +56,16 @@ TABLE = {
     # (ARM, Thumb), k = 16..44 cycles to the overflow
     'irqwait': ([k for k in range(16, 25)] + [0x100 | k for k in range(16, 45)] +
                 [0x300 | k for k in range(16, 45)] + [0x200 | k for k in range(16, 25)]),
+    # an H-blank DMA whose bursts outlast the line (configuration << 8 | word):
+    # bursts, last start and last unit from the first, burst 1's gap; one
+    # channel of 0.5 to 3.5 lines, near the V-blank edge, about a line, and
+    # with nothing else armed; the V-blank arming's first start; two
+    # channels' burst counts. Not the configurations 23-30, whose second
+    # channel starts two cycles late here (the payload's header)
+    'hdmalag': ([c << 8 | w for c in list(range(0, 12)) + [15, 16, 17, 18, 19, 20, 31, 32, 33, 34]
+                 for w in (1, 10, 11, 14)]
+                + [8 << 8 | 2, 22 << 8 | 1, 22 << 8 | 11]
+                + [c << 8 | w for c in (12, 13, 14) for w in (1, 6)]),
 }
 
 

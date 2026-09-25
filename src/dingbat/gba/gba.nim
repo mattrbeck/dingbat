@@ -226,6 +226,11 @@ type
     # after its enable write). Only read within that delay; in the state's
     # in-flight section (rev 9).
     imm_due*:          array[4, CycleCount]
+    # HDMA_DROP_BUSY: until when each channel's burst holds the bus (its
+    # last write and the hand-back; high(CycleCount) while it runs). An
+    # H-blank request earlier than this is lost. Never ahead of the clock
+    # between instructions, so not serialized: a load clears it.
+    busy_until*:       array[4, CycleCount]
     # DMA_CHAIN: the burst that just ended handed the bus straight to the
     # next one, which starts without its lead cycle. Instruction scoped.
     chained*:          bool
@@ -1793,6 +1798,8 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
   for ch in 0..3:
     if gba.dma.imm_due[ch] >= base: gba.dma.imm_due[ch] -= base
     else: gba.dma.imm_due[ch] = 0
+    if gba.dma.busy_until[ch] >= base: gba.dma.busy_until[ch] -= base
+    else: gba.dma.busy_until[ch] = 0
   if gba.interrupts.gate_open_at >= base:
     gba.interrupts.gate_open_at -= base
   else:

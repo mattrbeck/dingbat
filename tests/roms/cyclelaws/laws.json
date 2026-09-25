@@ -2399,5 +2399,498 @@
     "want": "01190032"
    }
   ]
+ },
+ {
+  "payload": "hdmalag",
+  "rom": "hdmalag.gba",
+  "sha1": "3d677a3eaa51c141e1f5168cd12eb51de548c6a7",
+  "frames": 836,
+  "cells": [
+   {
+    "id": "hdmalag 0x1",
+    "kind": "hex",
+    "want": "0000003C"
+   },
+   {
+    "id": "hdmalag 0xa",
+    "kind": "hex",
+    "want": "00011BF0"
+   },
+   {
+    "id": "hdmalag 0xb",
+    "kind": "hex",
+    "want": "00011E56"
+   },
+   {
+    "id": "hdmalag 0xe",
+    "kind": "hex",
+    "want": "0000026C"
+   },
+   {
+    "id": "hdmalag 0x101",
+    "kind": "hex",
+    "want": "0000003C"
+   },
+   {
+    "id": "hdmalag 0x10a",
+    "kind": "hex",
+    "want": "00011BF0"
+   },
+   {
+    "id": "hdmalag 0x10b",
+    "kind": "hex",
+    "want": "00012042"
+   },
+   {
+    "id": "hdmalag 0x10e",
+    "kind": "hex",
+    "want": "00000080"
+   },
+   {
+    "id": "hdmalag 0x201",
+    "kind": "hex",
+    "want": "0000001E"
+   },
+   {
+    "id": "hdmalag 0x20a",
+    "kind": "hex",
+    "want": "00011720"
+   },
+   {
+    "id": "hdmalag 0x20b",
+    "kind": "hex",
+    "want": "00011BEC"
+   },
+   {
+    "id": "hdmalag 0x20e",
+    "kind": "hex",
+    "want": "000004D4"
+   },
+   {
+    "id": "hdmalag 0x301",
+    "kind": "hex",
+    "want": "0000001E"
+   },
+   {
+    "id": "hdmalag 0x30a",
+    "kind": "hex",
+    "want": "00011720"
+   },
+   {
+    "id": "hdmalag 0x30b",
+    "kind": "hex",
+    "want": "00011C68"
+   },
+   {
+    "id": "hdmalag 0x30e",
+    "kind": "hex",
+    "want": "00000458"
+   },
+   {
+    "id": "hdmalag 0x401",
+    "kind": "hex",
+    "want": "0000001E"
+   },
+   {
+    "id": "hdmalag 0x40a",
+    "kind": "hex",
+    "want": "00011720"
+   },
+   {
+    "id": "hdmalag 0x40b",
+    "kind": "hex",
+    "want": "00011DDA"
+   },
+   {
+    "id": "hdmalag 0x40e",
+    "kind": "hex",
+    "want": "000002E8"
+   },
+   {
+    "id": "hdmalag 0x501",
+    "kind": "hex",
+    "want": "00000014"
+   },
+   {
+    "id": "hdmalag 0x50a",
+    "kind": "hex",
+    "want": "00011250"
+   },
+   {
+    "id": "hdmalag 0x50b",
+    "kind": "hex",
+    "want": "00011BEC"
+   },
+   {
+    "id": "hdmalag 0x50e",
+    "kind": "hex",
+    "want": "000004D4"
+   },
+   {
+    "id": "hdmalag 0x601",
+    "kind": "hex",
+    "want": "00000014"
+   },
+   {
+    "id": "hdmalag 0x60a",
+    "kind": "hex",
+    "want": "00011250"
+   },
+   {
+    "id": "hdmalag 0x60b",
+    "kind": "hex",
+    "want": "00011D5E"
+   },
+   {
+    "id": "hdmalag 0x60e",
+    "kind": "hex",
+    "want": "00000364"
+   },
+   {
+    "id": "hdmalag 0x701",
+    "kind": "hex",
+    "want": "0000000F"
+   },
+   {
+    "id": "hdmalag 0x70a",
+    "kind": "hex",
+    "want": "00010D80"
+   },
+   {
+    "id": "hdmalag 0x70b",
+    "kind": "hex",
+    "want": "00011E56"
+   },
+   {
+    "id": "hdmalag 0x70e",
+    "kind": "hex",
+    "want": "0000026C"
+   },
+   {
+    "id": "hdmalag 0x801",
+    "kind": "hex",
+    "want": "000000A0"
+   },
+   {
+    "id": "hdmalag 0x80a",
+    "kind": "hex",
+    "want": "0002FD30"
+   },
+   {
+    "id": "hdmalag 0x80b",
+    "kind": "hex",
+    "want": "0002FD54"
+   },
+   {
+    "id": "hdmalag 0x80e",
+    "kind": "hex",
+    "want": "000004AC"
+   },
+   {
+    "id": "hdmalag 0x901",
+    "kind": "hex",
+    "want": "00000004"
+   },
+   {
+    "id": "hdmalag 0x90a",
+    "kind": "hex",
+    "want": "00002B50"
+   },
+   {
+    "id": "hdmalag 0x90b",
+    "kind": "hex",
+    "want": "0000365E"
+   },
+   {
+    "id": "hdmalag 0x90e",
+    "kind": "hex",
+    "want": "00000364"
+   },
+   {
+    "id": "hdmalag 0xa01",
+    "kind": "hex",
+    "want": "00000002"
+   },
+   {
+    "id": "hdmalag 0xa0a",
+    "kind": "hex",
+    "want": "00000E70"
+   },
+   {
+    "id": "hdmalag 0xa0b",
+    "kind": "hex",
+    "want": "0000197E"
+   },
+   {
+    "id": "hdmalag 0xa0e",
+    "kind": "hex",
+    "want": "00000364"
+   },
+   {
+    "id": "hdmalag 0xb01",
+    "kind": "hex",
+    "want": "00000001"
+   },
+   {
+    "id": "hdmalag 0xb0a",
+    "kind": "hex",
+    "want": "00000000"
+   },
+   {
+    "id": "hdmalag 0xb0b",
+    "kind": "hex",
+    "want": "00000548"
+   },
+   {
+    "id": "hdmalag 0xb0e",
+    "kind": "hex",
+    "want": "FFFFF6E3"
+   },
+   {
+    "id": "hdmalag 0xf01",
+    "kind": "hex",
+    "want": "00000014"
+   },
+   {
+    "id": "hdmalag 0xf0a",
+    "kind": "hex",
+    "want": "00011250"
+   },
+   {
+    "id": "hdmalag 0xf0b",
+    "kind": "hex",
+    "want": "00011D5E"
+   },
+   {
+    "id": "hdmalag 0xf0e",
+    "kind": "hex",
+    "want": "00000364"
+   },
+   {
+    "id": "hdmalag 0x1001",
+    "kind": "hex",
+    "want": "00000014"
+   },
+   {
+    "id": "hdmalag 0x100a",
+    "kind": "hex",
+    "want": "00005B70"
+   },
+   {
+    "id": "hdmalag 0x100b",
+    "kind": "hex",
+    "want": "00006032"
+   },
+   {
+    "id": "hdmalag 0x100e",
+    "kind": "hex",
+    "want": "00000010"
+   },
+   {
+    "id": "hdmalag 0x1101",
+    "kind": "hex",
+    "want": "00000014"
+   },
+   {
+    "id": "hdmalag 0x110a",
+    "kind": "hex",
+    "want": "00005B70"
+   },
+   {
+    "id": "hdmalag 0x110b",
+    "kind": "hex",
+    "want": "00006036"
+   },
+   {
+    "id": "hdmalag 0x110e",
+    "kind": "hex",
+    "want": "0000000C"
+   },
+   {
+    "id": "hdmalag 0x1201",
+    "kind": "hex",
+    "want": "00000014"
+   },
+   {
+    "id": "hdmalag 0x120a",
+    "kind": "hex",
+    "want": "00005B70"
+   },
+   {
+    "id": "hdmalag 0x120b",
+    "kind": "hex",
+    "want": "0000603A"
+   },
+   {
+    "id": "hdmalag 0x120e",
+    "kind": "hex",
+    "want": "00000008"
+   },
+   {
+    "id": "hdmalag 0x1301",
+    "kind": "hex",
+    "want": "0000000A"
+   },
+   {
+    "id": "hdmalag 0x130a",
+    "kind": "hex",
+    "want": "000056A0"
+   },
+   {
+    "id": "hdmalag 0x130b",
+    "kind": "hex",
+    "want": "00005B6C"
+   },
+   {
+    "id": "hdmalag 0x130e",
+    "kind": "hex",
+    "want": "000004D4"
+   },
+   {
+    "id": "hdmalag 0x1401",
+    "kind": "hex",
+    "want": "0000000A"
+   },
+   {
+    "id": "hdmalag 0x140a",
+    "kind": "hex",
+    "want": "000056A0"
+   },
+   {
+    "id": "hdmalag 0x140b",
+    "kind": "hex",
+    "want": "00005B70"
+   },
+   {
+    "id": "hdmalag 0x140e",
+    "kind": "hex",
+    "want": "000004D0"
+   },
+   {
+    "id": "hdmalag 0x1f01",
+    "kind": "hex",
+    "want": "0000001E"
+   },
+   {
+    "id": "hdmalag 0x1f0a",
+    "kind": "hex",
+    "want": "00011720"
+   },
+   {
+    "id": "hdmalag 0x1f0b",
+    "kind": "hex",
+    "want": "00011C68"
+   },
+   {
+    "id": "hdmalag 0x1f0e",
+    "kind": "hex",
+    "want": "00000458"
+   },
+   {
+    "id": "hdmalag 0x2001",
+    "kind": "hex",
+    "want": "00000014"
+   },
+   {
+    "id": "hdmalag 0x200a",
+    "kind": "hex",
+    "want": "0000B6E0"
+   },
+   {
+    "id": "hdmalag 0x200b",
+    "kind": "hex",
+    "want": "0000BD98"
+   },
+   {
+    "id": "hdmalag 0x200e",
+    "kind": "hex",
+    "want": "000002E8"
+   },
+   {
+    "id": "hdmalag 0x2101",
+    "kind": "hex",
+    "want": "00000007"
+   },
+   {
+    "id": "hdmalag 0x210a",
+    "kind": "hex",
+    "want": "000056A0"
+   },
+   {
+    "id": "hdmalag 0x210b",
+    "kind": "hex",
+    "want": "000061AC"
+   },
+   {
+    "id": "hdmalag 0x210e",
+    "kind": "hex",
+    "want": "00000364"
+   },
+   {
+    "id": "hdmalag 0x2201",
+    "kind": "hex",
+    "want": "00000003"
+   },
+   {
+    "id": "hdmalag 0x220a",
+    "kind": "hex",
+    "want": "00002680"
+   },
+   {
+    "id": "hdmalag 0x220b",
+    "kind": "hex",
+    "want": "00003754"
+   },
+   {
+    "id": "hdmalag 0x220e",
+    "kind": "hex",
+    "want": "0000026C"
+   },
+   {
+    "id": "hdmalag 0x802",
+    "kind": "hex",
+    "want": "00001245"
+   },
+   {
+    "id": "hdmalag 0x1601",
+    "kind": "hex",
+    "want": "0000001E"
+   },
+   {
+    "id": "hdmalag 0x160b",
+    "kind": "hex",
+    "want": "00011DDA"
+   },
+   {
+    "id": "hdmalag 0xc01",
+    "kind": "hex",
+    "want": "0000001E"
+   },
+   {
+    "id": "hdmalag 0xc06",
+    "kind": "hex",
+    "want": "0000001E"
+   },
+   {
+    "id": "hdmalag 0xd01",
+    "kind": "hex",
+    "want": "0000003C"
+   },
+   {
+    "id": "hdmalag 0xd06",
+    "kind": "hex",
+    "want": "0000001E"
+   },
+   {
+    "id": "hdmalag 0xe01",
+    "kind": "hex",
+    "want": "0000003C"
+   },
+   {
+    "id": "hdmalag 0xe06",
+    "kind": "hex",
+    "want": "0000001E"
+   }
+  ]
  }
 ]

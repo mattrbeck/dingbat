@@ -264,6 +264,8 @@ proc load_dma_state(dma: DMA; r: var Reader; rev: uint32) =
   # Arbitration state is idle at frame boundaries; not serialized
   dma.pending = 0
   dma.current_priority = 4
+  # Every burst has let go of the bus by an instruction boundary
+  for i in 0 .. 3: dma.busy_until[i] = 0
 
 # ---- GPIO + RTC ----
 

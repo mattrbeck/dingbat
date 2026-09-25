@@ -320,6 +320,12 @@ R0_CASES = {
     'irqwait': ({16, 24} | {0x100 | k for k in range(17, 23)}
                 | {0x300 | k for k in range(17, 20)} | {0x200 | k for k in (16, 24)}),
 }
+# Families left out of the ROM: tests/roms/cyclelaws holds them for CI.
+R0_SKIP = {
+    # its stamp buffers are 0x02010000-0x0203FFFF, over this ROM's results
+    # block, runtime and multiboot body
+    'hdmalag',
+}
 R0_SUITE = {'dmaphase': 'dma', 'kitdemo': 'dma', 'wakeirq': 'irq', 'tmrw': 'timer',
             'lycwrite': 'irq', 'tmrdma': 'dma', 'dmastart': 'dma', 'dmadur': 'dma',
             'dmamulirq': 'irq', 'dmairq': 'irq', 'irqwait': 'irq'}
@@ -368,6 +374,8 @@ def gen_tables(build):
     per_suite = {s: [] for s in ('irq', 'timer', 'dma', 'ppu')}
     r0 = json.load(open(os.path.join(HWLINK, 'r0-agb.json')))
     for name, cells in r0.items():
+        if name in R0_SKIP:
+            continue
         suite = R0_SUITE[name]
         lines = per_suite[suite]
         lines.append(f'@ {name}: {R0_WHAT[name]}.')

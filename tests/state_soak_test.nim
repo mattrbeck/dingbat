@@ -43,13 +43,15 @@
 ##     page, memory control); every case must replay bit for bit.
 ##   - GBA: a repeating H-blank DMA whose bursts need more bus time than the
 ##     visible lines have (0xA903 at frame 142: ~2.3 lines a burst) never
-##     lets the CPU run again: each line's request is granted a whole burst
-##     on the lagging scheduler clock, so the backlog outgrows V-blank and
-##     one CPU step never ends. Until the core has a rule for a request that
-##     arrives while its channel's burst is still running, the program keeps
-##     H-blank bursts short, strict or not. (Those bursts also used to book an
-##     interrupt check each until the event queue overflowed, which is what
-##     the soak saw first; the "gba hblank dma over a line" case covers that.)
+##     let the CPU run again: each line's request was granted a whole burst
+##     on the lagging scheduler clock, so the backlog outgrew V-blank and one
+##     CPU step never ended. The console drops a request that finds its own
+##     channel's burst still running (dma.nim HDMA_DROP_BUSY, measured with
+##     tests/roms/payloads/hdmalag.s), so the random programs' H-blank bursts
+##     are as long as any other channel's again and 0xA903 runs. (Those
+##     bursts also used to book an interrupt check each until the event queue
+##     overflowed, which is what the soak saw first; see the "gba hblank dma
+##     over a line" case.)
 
 import std/[os, strutils, strformat, times]
 import dingbat/gb/gb
@@ -388,9 +390,6 @@ proc gba_program(seed: uint64): string =
         else:
           dst = 0x07000100'u32 + (uint32(r.below(0x200)) and not 3'u32)
           count = min(count, 0x40)
-      # Short H-blank bursts: longer ones can take more bus time than the
-      # frame has, and the core then never returns (see the header).
-      if timing == 2: count = min(count, 0x40)
       ctl = ctl or (timing shl 12)
       if r.chance(30): ctl = ctl or 0x4000             # IRQ at the end
       if r.chance(85): ctl = ctl or 0x8000             # enable
@@ -428,10 +427,14 @@ proc gba_long_hblank_program(units: int): string =
   ## ARM from 0x08000000: DMA1 on H-blank, repeating, interrupt at the end,
   ## `units` halfwords EWRAM -> VRAM (4 cycles a halfword; the destination
   ## reloads), then a counting loop (a waitloop would be skipped rather than
-  ## stalled). At 440 a burst is ~1.4 lines, so they run back to back through
-  ## the visible lines, each one's interrupt check pushed past the next
-  ## burst's end (DMA_STALLS_IRQ_SYNC), and the CPU has the bus again in
-  ## V-blank.
+  ## stalled). At 440 a burst is ~1.4 lines. Under the rule the core had
+  ## until HDMA_DROP_BUSY they ran back to back through the visible lines,
+  ## each one's interrupt check pushed past the next burst's end
+  ## (DMA_STALLS_IRQ_SYNC); on the console, as now, the request on the line
+  ## a burst is still running is lost, so they run every other line and the
+  ## CPU runs between them. The case replays long bursts; the check pile-up
+  ## it was written for is out of one channel's reach now (two and three
+  ## channels of the same do not reach it either).
   var code: seq[uint32]
   proc load(rd: int; v: uint32) =
     code.add(0xE3A00000'u32 or (uint32(rd) shl 12) or (v and 0xFF))
@@ -633,9 +636,10 @@ when not defined(soak_lib):
          replay_known = "")
 
   block:
-    # Back-to-back H-blank bursts, each raising its interrupt: they booked a
-    # check per burst, each pushed past the next burst, until the event queue
-    # overflowed (schedule_raise_check).
+    # H-blank bursts longer than a line, each raising its interrupt: back to
+    # back they booked a check per burst, each pushed past the next burst,
+    # until the event queue overflowed (schedule_raise_check). They run every
+    # other line now (gba_long_hblank_program).
     let label = "gba hblank dma over a line"
     if wanted(label):
       let path = tmp / "long_hblank.gba"
