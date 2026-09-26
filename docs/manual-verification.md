@@ -114,35 +114,20 @@ binary), and every client path against a fake broker
 (`web/tests/driveauth.test.mjs`). Not gated: real Google, the consent
 popup's trip back through `oauth-callback.html`, and iOS.
 
-- [ ] **Fresh sign-in, broker up.** Signed out, tap Sign in: one Google
-      consent screen (offline access), then synced. An hour later (or
-      after clearing the stored token's expiry), tap around: no popup
-      flashes, and Drive keeps syncing.
-- [ ] **Old sign-ins move over by themselves.** On a device signed in
-      before the broker (or while it was down), the first tap after a
-      load shows Google's consent screen once, then a "You'll stay signed
-      in" toast, and no popup after that. Close the consent window
-      instead: no second window follows, the hourly popup carries on, and
-      the offer comes back a day later.
-- [ ] **Broker down.** Stop the signaling server: the next renewal is
-      today's popup-on-tap, the refresh token is kept, and once the server
-      is back renewals are silent again with no new consent.
-- [ ] **Second device.** Sign in on a phone after the laptop: the phone
-      gets its own consent screen and its own refresh token; the laptop
-      keeps renewing silently.
-- [ ] **iPhone, Safari and home-screen app.** The consent popup comes back
-      and signs in on both. The home-screen app is the doubtful one: if
-      the popup finishes but the page never signs in, the callback could
-      not reach the app (report it; the popup flow still works).
-- [ ] **Sign out is this device only.** Sign out on the laptop: the
-      phone keeps syncing, and myaccount.google.com → Security →
-      Third-party access still lists dingbat.
-- [ ] **Sign out everywhere (do this last).** First tap asks "Tap again
-      to confirm"; the second signs this device out and dingbat leaves
-      Third-party access. Every other device shows Signed out at its next
-      renewal (within about an hour, or on returning to the tab) and
-      opens no Google window until you tap Sign in. With the network off,
-      it says it couldn't reach Google and stays signed in.
+Seen working on 2026-09-25 (laptop + iPhone Safari): fresh sign-in,
+the automatic move of an old sign-in, broker down and back, a second
+device, Sign out on one device, Sign out everywhere.
+
+- [ ] **A day later, no popup.** Open dingbat on the laptop and the
+      iPhone the next day and tap around: no Google window, and a save
+      made on one reaches the other.
+- [ ] **Home-screen app.** Its first launch shows the consent screen once
+      and lands back in the app signed in. If the popup finishes but the
+      app never signs in, the callback could not reach it (report it; the
+      hourly popup flow still works there).
+- [ ] **Declining the consent screen.** Close it instead of accepting:
+      no second window follows, the hourly popup carries on, and the
+      offer comes back a day later.
 
 ## Drive sync: away from the account
 
