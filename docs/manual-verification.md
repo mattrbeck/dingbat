@@ -134,10 +134,15 @@ popup's trip back through `oauth-callback.html`, and iOS.
       and signs in on both. The home-screen app is the doubtful one: if
       the popup finishes but the page never signs in, the callback could
       not reach the app (report it; the popup flow still works).
-- [ ] **Sign out (do this last).** Sign out, then check
-      myaccount.google.com → Security → Third-party access: dingbat's
-      access is gone. Revoking ends the grant for the whole account, so
-      every other device drops back to Sign in too, as it did before.
+- [ ] **Sign out is this device only.** Sign out on the laptop: the
+      phone keeps syncing, and myaccount.google.com → Security →
+      Third-party access still lists dingbat.
+- [ ] **Sign out everywhere (do this last).** First tap asks "Tap again
+      to confirm"; the second signs this device out and dingbat leaves
+      Third-party access. Every other device shows Signed out at its next
+      renewal (within about an hour, or on returning to the tab) and
+      opens no Google window until you tap Sign in. With the network off,
+      it says it couldn't reach Google and stays signed in.
 
 ## Drive sync: away from the account
 

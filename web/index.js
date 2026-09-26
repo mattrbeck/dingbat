@@ -2255,9 +2255,11 @@ const driveRefreshSilently = ({ force = false } = {}) => {
         adoptGrantedToken(j);
         return true;
       }
+      // The grant is gone: signed out everywhere, or expired unused. This
+      // device is signed out too, not left to pop a sign-in on a tap.
       if (status === 400 && j?.error === "invalid_grant" && syncState.refresh === rt) {
-        syncState.refresh = null;
-        saveSyncState();
+        gdriveSignOut({ message: "Signed out of Google Drive — sign in again to keep syncing" });
+        return false;
       }
     } catch {}
     driveBrokerRetryAt = Date.now() + DRIVE_BROKER_RETRY_MS;
@@ -2438,14 +2440,18 @@ const driveFetch = async (url, opts = {}) => {
   });
   let res = await send();
   if (res.status === 401) {
+    const wasLinked = driveLinked();
     try {
       // Signed out since the request left: no re-grant, the answer is refused.
       if (!driveLinked()) throw new Error("signed out");
       if (!(await driveRefreshSilently({ force: true }))) {
+        if (!driveLinked()) throw new Error("signed out");
         if (!hasUserActivation()) throw new Error("no activation for a popup");
         await driveRegrantPopup();
       }
     } catch {
+      // The grant was gone, and this device has just signed itself out.
+      if (wasLinked && !driveLinked()) throw new Error("Signed out of Google Drive");
       clearDriveToken();
       armDriveRenewOnGesture();
       renderGdriveSection();
@@ -2602,22 +2608,14 @@ const makeGdriveButton = (label, ghost, onClick) => {
   return btn;
 };
 
-const gdriveSignOut = () => {
+// Signs this device out: its tokens are forgotten, and nothing is revoked,
+// so the account's other devices stay signed in. (Google cannot revoke one
+// device: any revoke ends the whole grant. That is gdriveSignOutEverywhere.)
+const gdriveSignOut = ({ message = "Signed out of Google Drive" } = {}) => {
   // Ends the session: a flush or pull still running stops at its next
   // await, and a token popup still open is refused when it answers.
   driveSession++;
-  if (syncState.refresh) {
-    // Revoking the refresh token ends the whole grant, access token included.
-    fetch("https://oauth2.googleapis.com/revoke", {
-      method: "POST",
-      mode: "no-cors",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: "token=" + encodeURIComponent(syncState.refresh),
-    }).catch(() => {});
-    syncState.refresh = null;
-  } else if (gdriveToken && typeof google !== "undefined" && google.accounts?.oauth2) {
-    google.accounts.oauth2.revoke(gdriveToken, () => {});
-  }
+  syncState.refresh = null;
   rememberDriveEmail(null); // no hint left behind: the next sign-in may be another account
   syncState.connected = false;
   clearDriveToken(); // also drops the persisted token + saves
@@ -2628,7 +2626,30 @@ const gdriveSignOut = () => {
   renderGdriveSection();
   refreshSyncUI();
   refreshHomeRecent();
-  showToast("Signed out of Google Drive");
+  showToast(message);
+};
+
+// Ends dingbat's Drive access for the whole Google account. Each other
+// device finds out at its next renewal (invalid_grant) and signs itself
+// out. Signs this device out only once Google has said yes.
+const gdriveSignOutEverywhere = async () => {
+  // A popup-flow device with a lapsed token has nothing Google would take.
+  if (!syncState.refresh && driveTokenStale() && !(await ensureDriveSignedIn())) return;
+  let tokens = [syncState.refresh, driveTokenStale() ? null : gdriveToken].filter(Boolean);
+  for (let token of tokens) {
+    try {
+      let r = await fetchWithin("https://oauth2.googleapis.com/revoke", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "token=" + encodeURIComponent(token),
+      }, 8000);
+      if (r.ok) {
+        gdriveSignOut({ message: "Signed out of Google Drive on every device" });
+        return;
+      }
+    } catch {}
+  }
+  showToast("Couldn't reach Google to sign out everywhere — try again");
 };
 
 // One Settings row: what it is on the left, the controls that act on it on
@@ -2697,6 +2718,29 @@ const renderGdriveSection = () => {
   out.title = "Your games and saves stay on this device";
   gdriveBody.appendChild(gdriveRow(
     gdriveEmail || "Connected to Google Drive", state, sync, out));
+
+  // Two taps: it reaches every device, and the first could be a slip.
+  let armTimer = null;
+  let everywhere = makeGdriveButton("Sign out everywhere", true, async () => {
+    if (!everywhere.classList.contains("armed")) {
+      everywhere.classList.add("armed");
+      everywhere.textContent = "Tap again to confirm";
+      armTimer = setTimeout(() => {
+        everywhere.classList.remove("armed");
+        everywhere.textContent = "Sign out everywhere";
+      }, 4000);
+      return;
+    }
+    clearTimeout(armTimer);
+    everywhere.disabled = true;
+    await gdriveSignOutEverywhere();
+    everywhere.disabled = false;
+    everywhere.classList.remove("armed");
+    everywhere.textContent = "Sign out everywhere";
+  });
+  gdriveBody.appendChild(gdriveRow(
+    "Every device",
+    "Signs this Google account out of dingbat on all your devices.", everywhere));
 };
 
 // ============================================================================
@@ -4719,7 +4763,10 @@ const ensureDriveSignedIn = async () => {
   if (driveLinked()) {
     try {
       let upgrade = driveWantsUpgrade();
-      if (!(await driveRefreshSilently({ force: true }))) await driveRegrantPopup();
+      if (!(await driveRefreshSilently({ force: true }))) {
+        if (!driveLinked()) throw new Error("signed out"); // → Sign in below
+        await driveRegrantPopup();
+      }
       driveRenewFails = 0;
       // The consent screen offers the account chooser too.
       if (!gdriveEmail || upgrade) await gdriveFetchEmail();

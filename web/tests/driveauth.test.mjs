@@ -436,14 +436,29 @@ test("a 502 from the broker also keeps the refresh token", async () => {
   assert.equal(app.api.syncState.refresh, "rt-1");
 });
 
-test("a revoked grant drops the refresh token: back on popups for good", async () => {
+test("a grant revoked elsewhere signs this device out, with no popup after", async () => {
   const app = await loadApp();
   await withBroker(app);
+  const gis = installFakeGis(app, { grant: true });
+  let opened = 0;
+  app.sandbox.open = () => { opened++; return null; };
   brokerFetch(app, { "/oauth/refresh": [400, { error: "invalid_grant" }] });
-  assert.equal(await app.api.driveRefreshSilently(), false);
+  app.api.driveBrokerOk = true;
+  app.api.driveBrokerProbedAt = Date.now();
+  app.api.gdriveToken = "old-token";
+  app.api.gdriveTokenExp = Date.now() + 60 * 1000;
+
+  app.api.syncPollTick();
+  await settle(); await settle();
+  assert.equal(app.api.syncState.connected, false, "signed out");
   assert.equal(app.api.syncState.refresh, null);
+  assert.equal(app.api.gdriveToken, null);
   const saved = await app.api.dbGet("gdrive_sync");
   assert.equal(saved.refresh, null, "and the drop is saved");
+
+  await app.dispatchWin("pointerdown");
+  await settle();
+  assert.equal(gis.length + opened, 0, "a tap opens nothing");
 });
 
 test("a broker misconfiguration (400 invalid_client) keeps the token", async () => {
@@ -491,16 +506,49 @@ test("driveFetch's 401 retry goes through the broker before any popup", async ()
   assert.equal(calls.length, 0, "no popup");
 });
 
-test("signing out revokes the refresh token and forgets it", async () => {
+test("Sign out forgets this device's tokens and revokes nothing", async () => {
   const app = await loadApp();
   await withBroker(app);
-  app.sandbox.google = { accounts: { oauth2: { revoke: () => {} } } };
+  let gisRevokes = 0;
+  app.sandbox.google = { accounts: { oauth2: { revoke: () => { gisRevokes++; } } } };
+  app.api.gdriveToken = "at";
   app.setFetch(async () => jsonRes({}));
   app.runIn("gdriveSignOut()");
+  assert.equal(app.fetchCalls.filter((c) => c.url.includes("/revoke")).length, 0);
+  assert.equal(gisRevokes, 0, "the other devices keep their access");
+  assert.equal(app.api.syncState.refresh, null);
+  assert.equal(app.api.syncState.connected, false);
+});
+
+test("Sign out everywhere revokes the grant, then signs this device out", async () => {
+  const app = await loadApp();
+  await withBroker(app);
+  app.api.gdriveToken = "at";
+  app.api.gdriveTokenExp = Date.now() + 50 * 60 * 1000;
+  app.setFetch(async () => jsonRes({}));
+  await app.api.gdriveSignOutEverywhere();
   const revoke = app.fetchCalls.find((c) => c.url.startsWith("https://oauth2.googleapis.com/revoke"));
   assert.ok(revoke, "revoke called");
   assert.equal(revoke.opts.body, "token=rt-1");
+  assert.notEqual(revoke.opts.mode, "no-cors", "its answer is read");
+  assert.equal(app.api.syncState.connected, false);
   assert.equal(app.api.syncState.refresh, null);
+});
+
+test("Sign out everywhere that Google refuses leaves this device signed in", async () => {
+  const app = await loadApp();
+  await withBroker(app);
+  app.api.gdriveToken = "at";
+  app.api.gdriveTokenExp = Date.now() + 50 * 60 * 1000;
+  app.setFetch(async (url) => {
+    if (String(url).includes("/revoke")) throw new Error("offline");
+    return jsonRes({});
+  });
+  await app.api.gdriveSignOutEverywhere();
+  assert.equal(app.fetchCalls.filter((c) => c.url.includes("/revoke")).length, 2,
+    "the refresh token, then the live access token");
+  assert.equal(app.api.syncState.connected, true, "not claimed as done");
+  assert.equal(app.api.syncState.refresh, "rt-1");
 });
 
 test("the refresh token survives a reload", async () => {
