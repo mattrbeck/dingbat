@@ -106,29 +106,6 @@ needs a second real device.
       intact. Picking a file of a different size asks first; picking one
       with the wrong extension is refused.
 
-## Drive sign-in: staying signed in
-
-Gated: the broker routes on both servers against a fake Google
-(`web/signaling/server.test.mjs`, also with `SIGNAL_CMD` on the Nim
-binary), and every client path against a fake broker
-(`web/tests/driveauth.test.mjs`). Not gated: real Google, the consent
-popup's trip back through `oauth-callback.html`, and iOS.
-
-Seen working on 2026-09-25 (laptop + iPhone Safari): fresh sign-in,
-the automatic move of an old sign-in, broker down and back, a second
-device, Sign out on one device, Sign out everywhere.
-
-- [ ] **A day later, no popup.** Open dingbat on the laptop and the
-      iPhone the next day and tap around: no Google window, and a save
-      made on one reaches the other.
-- [ ] **Home-screen app.** Its first launch shows the consent screen once
-      and lands back in the app signed in. If the popup finishes but the
-      app never signs in, the callback could not reach it (report it; the
-      hourly popup flow still works there).
-- [ ] **Declining the consent screen.** Close it instead of accepting:
-      no second window follows, the hourly popup carries on, and the
-      offer comes back a day later.
-
 ## Drive sync: away from the account
 
 Gated: what is queued and how conflicts settle
