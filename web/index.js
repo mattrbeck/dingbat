@@ -2374,6 +2374,33 @@ const driveCodeGrant = async (hint, { connect = false } = {}) => {
   await saveSyncState();
 };
 
+// A device signed in on the popup flow is moved onto the broker at its next
+// tap once the broker answers: the consent screen once, then no more
+// popups. A decline, or a trip that never came back (a home-screen app the
+// callback cannot reach), rests the offer a day so it is never a popup per
+// tap; the token flow renews meanwhile.
+const DRIVE_UPGRADE_REST_MS = 24 * 60 * 60 * 1000;
+class DriveUpgradeDeclined extends Error {}
+const driveWantsUpgrade = () =>
+  !!GDRIVE_CLIENT_ID && !!syncState.connected && !syncState.refresh &&
+  driveBrokerOk && !!driveBrokerBase() &&
+  Date.now() >= (syncState.upgradeRestUntil || 0);
+
+// The popup re-grant for a linked account: the consent screen that ends
+// the popups when it can be had, else the token flow's silent re-grant.
+// Must run inside a user gesture.
+const driveRegrantPopup = async () => {
+  if (!driveWantsUpgrade()) return gdriveAcquireToken("");
+  let failure = null;
+  try { await driveCodeGrant(syncState.email); }
+  catch (e) { failure = e; }
+  if (failure || !syncState.refresh) {
+    syncState.upgradeRestUntil = Date.now() + DRIVE_UPGRADE_REST_MS;
+    saveSyncState();
+  }
+  if (failure) throw new DriveUpgradeDeclined(failure.message);
+};
+
 // Works because GDRIVE_SCOPE includes "email".
 // tokeninfo carries the account's stable subject id beside the address.
 // `sub` is what the queues hang on: it is not an address, so it can outlive
@@ -2416,7 +2443,7 @@ const driveFetch = async (url, opts = {}) => {
       if (!driveLinked()) throw new Error("signed out");
       if (!(await driveRefreshSilently({ force: true }))) {
         if (!hasUserActivation()) throw new Error("no activation for a popup");
-        await gdriveAcquireToken("");
+        await driveRegrantPopup();
       }
     } catch {
       clearDriveToken();
@@ -2670,18 +2697,6 @@ const renderGdriveSection = () => {
   out.title = "Your games and saves stay on this device";
   gdriveBody.appendChild(gdriveRow(
     gdriveEmail || "Connected to Google Drive", state, sync, out));
-
-  // Signed in on the popup flow while the broker answers: offer the switch.
-  if (!syncState.refresh && driveBrokerOk) {
-    let stay = makeGdriveButton("Stay signed in", false, async () => {
-      stay.disabled = true;
-      try { await driveStaySignedIn(); }
-      catch (e) { showToast(e.message); stay.disabled = false; }
-    });
-    gdriveBody.appendChild(gdriveRow(
-      "Stay signed in",
-      "Stops the Google window that reconnects Drive about once an hour.", stay));
-  }
 };
 
 // ============================================================================
@@ -2739,6 +2754,8 @@ const loadSyncState = async () => {
       tokenExp: typeof s.tokenExp === "number" ? s.tokenExp : 0,
       // Refresh token from the broker's code exchange (driveCodeGrant).
       refresh: typeof s.refresh === "string" ? s.refresh : null,
+      // No consent screen offered before this (driveWantsUpgrade).
+      upgradeRestUntil: typeof s.upgradeRestUntil === "number" ? s.upgradeRestUntil : 0,
       email: typeof s.email === "string" ? s.email : null,
     };
     gdriveEmail = syncState.email;
@@ -4701,13 +4718,17 @@ const ensureDriveSignedIn = async () => {
   if (syncActive()) return true;
   if (driveLinked()) {
     try {
-      if (!(await driveRefreshSilently({ force: true }))) await gdriveAcquireToken("");
+      let upgrade = driveWantsUpgrade();
+      if (!(await driveRefreshSilently({ force: true }))) await driveRegrantPopup();
       driveRenewFails = 0;
-      if (!gdriveEmail) await gdriveFetchEmail();
+      // The consent screen offers the account chooser too.
+      if (!gdriveEmail || upgrade) await gdriveFetchEmail();
       refreshSyncUI();
       refreshHomeRecent();
       return true;
-    } catch {
+    } catch (e) {
+      // Declined the consent screen: not a reason to show it again now.
+      if (e instanceof DriveUpgradeDeclined) { showToast(e.message); return false; }
       // Grant gone or popup blocked: ask properly.
     }
   }
@@ -4788,20 +4809,33 @@ const renewDriveToken = async ({ gesture = true } = {}) => {
   }
   if (!gesture) { armDriveRenewListener(); return; }
 
+  const upgrade = driveWantsUpgrade();
+  // Armed only to offer the upgrade, which has lapsed since: nothing to do.
+  if (!upgrade && !driveTokenStale()) return;
+
   // A script-load failure (offline) must not count against the fail budget.
-  try { await loadGisScript(); }
-  catch { armDriveRenewListener(); return; }
-  if (over()) return;
+  // (The consent screen is our own popup and needs no script.)
+  if (!upgrade) {
+    try { await loadGisScript(); }
+    catch { armDriveRenewListener(); return; }
+    if (over()) return;
+  }
 
   // Activation lasts about five seconds and may have aged out while the
   // script loaded; a refused popup would spend a strike, so wait.
   if (!hasUserActivation()) { armDriveRenewListener(); return; }
 
   try {
-    await gdriveAcquireToken("");
-  } catch {
+    await driveRegrantPopup();
+  } catch (e) {
     // Refused because the session ended: not a strike.
     if (over()) return;
+    // Declined the consent screen: not a strike either. The token flow
+    // takes the next tap, if the token needs one.
+    if (e instanceof DriveUpgradeDeclined) {
+      if (driveTokenStale()) armDriveRenewListener();
+      return;
+    }
     // Popup blocked or grant gone: retry on the next gesture until the
     // budget runs out.
     if (++driveRenewFails >= DRIVE_RENEW_MAX_FAILS) {
@@ -4817,7 +4851,12 @@ const renewDriveToken = async ({ gesture = true } = {}) => {
 
   if (over()) return;
   driveRenewFails = 0;
-  if (!wasSignedOut) return; // pure rollover: nothing user-visible changed
+  if (upgrade && syncState.refresh) {
+    showToast("You'll stay signed in to Drive on this device");
+  }
+  // A pure rollover changed nothing the user sees; the consent screen may
+  // have changed the account.
+  if (!wasSignedOut && !upgrade) return;
   await driveSessionResumed(over);
 };
 
@@ -4832,30 +4871,14 @@ const driveSessionResumed = async (over) => {
   await pullSync();
 };
 
-// Moves a popup-renewed device onto the broker: one consent screen, and
-// the hourly reconnect popup stops. Offered in Settings while the broker
-// answers and this device has no refresh token.
-const driveStaySignedIn = async () => {
-  await driveCodeGrant(syncState.email);
-  driveRenewFails = 0;
-  await gdriveFetchEmail(); // the chooser may have landed on another account
-  renderGdriveSection();
-  refreshSyncUI();
-  refreshHomeRecent();
-  showToast(syncState.refresh
-    ? "You'll stay signed in to Drive on this device"
-    : "Google didn't grant offline access. Try again later.");
-  pullSync();
-};
-
 // Boot resume: reuse a persisted token within its lifetime, confirmed via
 // tokeninfo (a plain fetch); otherwise arm the first-gesture re-grant.
 const resumeDriveOnBoot = async () => {
   // Learn early whether the broker answers: a signed-out device's Sign in
   // must choose its popup inside the tap (gdriveConnect), and a popup-flow
-  // device may be offered "Stay signed in".
+  // device is moved onto the broker at its next tap.
   if (GDRIVE_CLIENT_ID && !syncState.refresh) {
-    probeDriveBroker().then((ok) => { if (ok) renderGdriveSection(); });
+    probeDriveBroker().then(() => { if (driveWantsUpgrade()) armDriveRenewListener(); });
   }
   if (!GDRIVE_CLIENT_ID || !syncState.connected) return;
   if (gdriveToken) return;
@@ -4900,8 +4923,11 @@ const resumeDriveOnBoot = async () => {
 // online fires no `online` event).
 const syncPollTick = () => {
   // Before the syncActive() gate: this heartbeat also arms the renewal.
-  if (GDRIVE_CLIENT_ID && syncState.connected && driveTokenStale()) {
-    armDriveRenewOnGesture();
+  if (GDRIVE_CLIENT_ID && syncState.connected) {
+    if (driveTokenStale()) armDriveRenewOnGesture();
+    else if (!syncState.refresh) probeDriveBroker().then(() => {
+      if (driveWantsUpgrade()) armDriveRenewListener();
+    });
   }
   if (!syncActive()) return;
   if (pendingCount()) flushSync().then(() => pullSync());

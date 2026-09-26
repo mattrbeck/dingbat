@@ -642,7 +642,7 @@ test("a broker renewal that lands after sign-out is refused", async () => {
   assert.equal(app.api.syncState.token, null, "and nothing was persisted");
 });
 
-test("a Stay signed in grant that lands after sign-out is refused", async () => {
+test("a consent-screen grant that lands after sign-out is refused", async () => {
   const app = await loadApp();
   await withBroker(app, null);
   app.sandbox.google = { accounts: { oauth2: { revoke: () => {} } } };
@@ -692,4 +692,105 @@ test("a sign-in through the token flow drops a refresh token left from before", 
   await app.api.gdriveConnect().catch(() => {});
   assert.equal(app.api.gdriveToken, "fresh-token");
   assert.equal(app.api.syncState.refresh, null, "it may be another account's grant");
+});
+
+// --- Moving a popup-flow device onto the broker ------------------------------
+// Signed in before the broker (or while it was down): its next tap gets the
+// consent screen, no button needed.
+
+const popupFlowDevice = async (app, { stale = false } = {}) => {
+  await withBroker(app, null);
+  app.api.syncState = { ...app.api.syncState, email: "p@example.com" };
+  app.api.driveBrokerOk = true;
+  app.api.driveBrokerProbedAt = Date.now();
+  app.api.gdriveToken = "hour-token";
+  app.api.gdriveTokenExp = Date.now() + (stale ? 60 : 50 * 60) * 1000;
+};
+
+test("a popup-flow device gets the consent screen at its next tap, then no popups", async () => {
+  const app = await loadApp();
+  await popupFlowDevice(app);
+  const gis = installFakeGis(app, { grant: true });
+  const { popup } = installCodeFlow(app);
+  brokerFetch(app, {
+    "/oauth/exchange": [200, { access_token: "at-1", expires_in: 3599, refresh_token: "rt-new" }],
+  });
+  assert.equal(app.api.driveWantsUpgrade(), true);
+
+  app.api.syncPollTick(); // the heartbeat arms it, token still fresh
+  await settle();
+  await app.dispatchWin("pointerdown");
+  const url = await deliverCode(app, popup);
+  for (let i = 0; i < 10; i++) await settle();
+
+  assert.equal(url.searchParams.get("prompt"), "consent");
+  assert.equal(url.searchParams.get("login_hint"), "p@example.com");
+  assert.equal(gis.length, 0, "no token-flow popup");
+  assert.equal(app.api.syncState.refresh, "rt-new");
+  assert.equal(app.api.gdriveToken, "at-1");
+  assert.equal(app.api.driveWantsUpgrade(), false, "offered once");
+});
+
+test("declining the consent screen rests the offer a day and costs no strike", async () => {
+  const app = await loadApp();
+  await popupFlowDevice(app, { stale: true });
+  const gis = installFakeGis(app, { grant: true });
+  const { popup } = installCodeFlow(app);
+  brokerFetch(app, {});
+
+  app.api.syncPollTick();
+  await settle();
+  await app.dispatchWin("pointerdown");
+  const state = await popupState(popup);
+  await app.dispatchWin("message", {
+    origin: "https://dingbat.gg", data: { type: "dingbat-oauth", state, error: "access_denied" },
+  });
+  for (let i = 0; i < 10; i++) await settle();
+
+  assert.equal(app.api.driveRenewFails, 0, "a decline is not a failed renewal");
+  assert.equal(app.api.driveWantsUpgrade(), false);
+  assert.ok(app.api.syncState.upgradeRestUntil > Date.now() + 23 * 3600 * 1000);
+  const saved = await app.api.dbGet("gdrive_sync");
+  assert.ok(saved.upgradeRestUntil > Date.now(), "the rest survives a reload");
+
+  // The stale token still renews on the next tap, the old way.
+  await app.dispatchWin("pointerdown");
+  await settle();
+  assert.equal(gis.length, 1, "the token flow's popup");
+  assert.equal(gis[0].prompt, "");
+  assert.equal(app.api.gdriveToken, "fresh-token");
+});
+
+test("with the broker down, a popup-flow device renews exactly as before", async () => {
+  const app = await loadApp();
+  await popupFlowDevice(app, { stale: true });
+  app.api.driveBrokerOk = false;
+  const gis = installFakeGis(app, { grant: true });
+  let opened = 0;
+  app.sandbox.open = () => { opened++; return null; };
+  brokerFetch(app, {});
+
+  app.api.syncPollTick();
+  await app.dispatchWin("pointerdown");
+  await settle();
+  assert.equal(opened, 0, "no consent screen");
+  assert.equal(gis.length, 1);
+  assert.equal(app.api.gdriveToken, "fresh-token");
+});
+
+test("a tap armed for the upgrade does nothing once the offer has lapsed", async () => {
+  const app = await loadApp();
+  await popupFlowDevice(app);
+  const gis = installFakeGis(app, { grant: true });
+  let opened = 0;
+  app.sandbox.open = () => { opened++; return null; };
+  brokerFetch(app, {});
+
+  app.api.syncPollTick();
+  await settle();
+  app.api.driveBrokerOk = false; // the broker went away before the tap
+  await app.dispatchWin("pointerdown");
+  await settle();
+  assert.equal(opened, 0);
+  assert.equal(gis.length, 0, "a fresh token needs no popup");
 });

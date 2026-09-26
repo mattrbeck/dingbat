@@ -118,9 +118,12 @@ popup's trip back through `oauth-callback.html`, and iOS.
       consent screen (offline access), then synced. An hour later (or
       after clearing the stored token's expiry), tap around: no popup
       flashes, and Drive keeps syncing.
-- [ ] **Stay signed in.** On a device signed in before this build,
-      Settings shows "Stay signed in" while the broker answers; tapping it
-      shows the consent screen once, and the row goes away.
+- [ ] **Old sign-ins move over by themselves.** On a device signed in
+      before the broker (or while it was down), the first tap after a
+      load shows Google's consent screen once, then a "You'll stay signed
+      in" toast, and no popup after that. Close the consent window
+      instead: no second window follows, the hourly popup carries on, and
+      the offer comes back a day later.
 - [ ] **Broker down.** Stop the signaling server: the next renewal is
       today's popup-on-tap, the refresh token is kept, and once the server
       is back renewals are silent again with no new consent.
