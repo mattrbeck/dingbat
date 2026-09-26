@@ -409,10 +409,46 @@ const HALT_COMMENT_READ_AT {.intdefine.} = 10
 const HALT_WRITE_AT {.intdefine.} = 25
 const HALT_BIOS_RETURN {.intdefine.} = 16
 
+# Cycles from the comment read to the interrupt check after the dispatcher's
+# `msr`. Measured against Nintendo's BIOS in this core: a Halt from IWRAM
+# Thumb with an H-blank IRQ pending (the mGBA suite's `H-blank bit start`
+# re-run from its results page) enters the vector 32 cycles after the swi,
+# wakes 855 after it and is back 98 after the wake, on both.
+const HALT_MSR_AT {.intdefine.} = 18
+
+proc push_halt_svc_frame(cpu: CPU; ret: uint32) =
+  ## The SWI's own state, on the SVC stack where each halt keeps its own:
+  ## {caller CPSR, r12, return address} (r12 at [sp_svc - 8] as the
+  ## console's dispatcher leaves it); hle_halt_return pops it. Leaves the CPU
+  ## in the dispatcher's System mode with the caller's I bit.
+  let bus = cpu.gba.bus
+  let caller = cpu.cpsr
+  cpu.switch_mode(modeSVC)
+  cpu.r[13] -= 12
+  bus.write_word_internal(cpu.r[13], uint32(caller))
+  bus.write_word_internal(cpu.r[13] + 4, cpu.r[12])
+  bus.write_word_internal(cpu.r[13] + 8, ret)
+  cpu.switch_mode(modeSYS)
+  cpu.cpsr = cast[PSR](uint32(modeSYS) or (uint32(caller) and 0x80'u32))
+
+proc halt_from_dispatcher(cpu: CPU; ret, isa_step: uint32) =
+  ## Hands a Halt over to the stub BIOS at 0x164, the instruction after the
+  ## dispatcher's `msr`: push {r2, lr}; lr = 0x170; bx ip (ip = the table's
+  ## 0x1A0); mov r2, #0; mov ip, #0x04000000; strb r2, [ip, #0x301]; bx lr.
+  ## The {r2, lr} frame is the stub's own push, so sp stays where hle_swi
+  ## left it.
+  let bus = cpu.gba.bus
+  cpu.push_halt_svc_frame(ret)
+  cpu.r[12] = 0x1A0'u32
+  let before = bus.cycles
+  discard cpu.set_reg(15, 0x164'u32 - isa_step)  # the SWI handler steps isa_step
+  bus.cycles = before
+
 proc hle_halt(cpu: CPU; t_entry: int64; rfs_entry: CycleCount) =
   let bus = cpu.gba.bus
   let isa_step = if cpu.cpsr.thumb: 2'u32 else: 4'u32
   let ret = cpu.r[15] - isa_step               # the instruction after the swi
+  let caller_i = cpu.cpsr.irq_disable
   # Back to the dispatch start (hle_swi's generic charge is not this
   # routine's), then the dispatcher's own gamepak access: `ldrb [lr, #-2]`,
   # which the prefetcher and the burst see as the console's does.
@@ -422,7 +458,17 @@ proc hle_halt(cpu: CPU; t_entry: int64; rfs_entry: CycleCount) =
     bus.rom_free_since = rfs_entry
     bus.add_cycles(HALT_COMMENT_READ_AT)
     discard bus[ret - 2]
-    bus.add_cycles(HALT_WRITE_AT)
+    bus.add_cycles(HALT_MSR_AT)
+    bus.catch_up()
+    if cpu.irq_line and not caller_i:
+      # The dispatcher's `msr` (0x160) has just handed back the caller's I
+      # bit with an interrupt already recognised: the console takes it
+      # there, before the routine, and the routine's HALTCNT write then
+      # sleeps. Park on the stub's copy of the code after the `msr` so the
+      # interrupt, the write and the halt all run architecturally.
+      cpu.halt_from_dispatcher(ret, isa_step)
+      return
+    bus.add_cycles(HALT_WRITE_AT - HALT_MSR_AT)
   else:
     # Part of the dispatch already reached the scheduler (an armed DMA's
     # access window): keep it, and land on the write as near as it allows
@@ -434,20 +480,10 @@ proc hle_halt(cpu: CPU; t_entry: int64; rfs_entry: CycleCount) =
   # after the stall at the `bx lr`, without halting
   let seen = cpu.irq_line
   bus.add_cycles(HALT_ENTRY_STALL)
-  # The SWI's own state, on the SVC stack where each halt keeps its own:
-  # {caller CPSR, r12, return address} (r12 at [sp_svc - 8] as the console's
-  # dispatcher leaves it). Then the dispatcher's System mode with the
-  # caller's I bit, and the routine's handler-visible registers: ip =
+  # The SWI's frame, then the routine's handler-visible registers: ip =
   # 0x04000000, r2 = 0, lr = 0x170, the {r2, lr} frame hle_swi wrote live
   # below sp.
-  let caller = cpu.cpsr
-  cpu.switch_mode(modeSVC)
-  cpu.r[13] -= 12
-  bus.write_word_internal(cpu.r[13], uint32(caller))
-  bus.write_word_internal(cpu.r[13] + 4, cpu.r[12])
-  bus.write_word_internal(cpu.r[13] + 8, ret)
-  cpu.switch_mode(modeSYS)
-  cpu.cpsr = cast[PSR](uint32(modeSYS) or (uint32(caller) and 0x80'u32))
+  cpu.push_halt_svc_frame(ret)
   cpu.r[12] = 0x04000000'u32
   cpu.r[2] = 0
   cpu.r[14] = 0x170'u32

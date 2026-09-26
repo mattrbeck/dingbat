@@ -523,6 +523,16 @@ proc new_bus*(gba: GBA; bios_path: string): Bus =
     # (cpu.hle_halt_return).
     write_stub_u32(result.bios, 0x1B4, 0xE12FFF1E'u32)  # bx lr
     write_stub_u32(result.bios, 0x170, 0xEF000000'u32)  # swi 0 (halt return)
+    # The rest of the dispatcher after its `msr` and the Halt routine, as the
+    # real BIOS has them: a Halt entered with an interrupt already pending
+    # takes it at 0x164 and runs on from there (hle_bios halt_from_dispatcher)
+    write_stub_u32(result.bios, 0x164, 0xE92D4004'u32)  # push {r2, lr}
+    write_stub_u32(result.bios, 0x168, 0xE28FE000'u32)  # add  lr, pc, #0
+    write_stub_u32(result.bios, 0x16C, 0xE12FFF1C'u32)  # bx   ip
+    write_stub_u32(result.bios, 0x1A0, 0xE3A02000'u32)  # mov  r2, #0
+    write_stub_u32(result.bios, 0x1A4, 0xEA000000'u32)  # b    0x1AC
+    write_stub_u32(result.bios, 0x1AC, 0xE3A0C301'u32)  # mov  ip, #0x04000000
+    write_stub_u32(result.bios, 0x1B0, 0xE5CC2301'u32)  # strb r2, [ip, #0x301]
     # Never executed: the two words after the IRQ return, so the two-ahead
     # pipeline latch reads the same values as the real BIOS leaves
     write_stub_u32(result.bios, 0x140, 0xE92D5800'u32)
