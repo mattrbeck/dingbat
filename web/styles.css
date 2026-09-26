@@ -6761,6 +6761,16 @@ body.net-mode #saves-modal .modal-toggle-row:has(#reset-save-slot) {
   gap: 8px;
 }
 
+/* The signed-in row: Sync and Sign out on one line, Sign out everywhere
+   under them at their combined width. */
+.gdrive-actions.gdrive-actions-stack {
+  display: grid;
+  grid-template-columns: auto auto;
+}
+.gdrive-actions-stack > .gdrive-action-wide {
+  grid-column: 1 / -1;
+}
+
 /* A settings row is a grid (see "Settings rows"), which would size this one
    by the column rather than by what is in it. Flex instead, so the buttons
    move below the address exactly when the two would not fit on a line

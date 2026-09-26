@@ -2675,6 +2675,10 @@ const gdriveRow = (label, sub, ...controls) => {
   if (live.length) {
     let actions = document.createElement("div");
     actions.className = "gdrive-actions";
+    // A wide control goes under the others, across their combined width.
+    if (live.some((c) => c.classList.contains("gdrive-action-wide"))) {
+      actions.classList.add("gdrive-actions-stack");
+    }
     actions.append(...live);
     row.appendChild(actions);
   }
@@ -2716,9 +2720,6 @@ const renderGdriveSection = () => {
   let out = makeGdriveButton("Sign out", true, gdriveSignOut);
   // The row has no space to say it, and it is the one thing worth saying.
   out.title = "Your games and saves stay on this device";
-  gdriveBody.appendChild(gdriveRow(
-    gdriveEmail || "Connected to Google Drive", state, sync, out));
-
   // Two taps: it reaches every device, and the first could be a slip.
   let armTimer = null;
   let everywhere = makeGdriveButton("Sign out everywhere", true, async () => {
@@ -2738,9 +2739,10 @@ const renderGdriveSection = () => {
     everywhere.classList.remove("armed");
     everywhere.textContent = "Sign out everywhere";
   });
+  everywhere.title = "Signs this Google account out of dingbat on all your devices";
+  everywhere.classList.add("gdrive-action-wide");
   gdriveBody.appendChild(gdriveRow(
-    "Every device",
-    "Signs this Google account out of dingbat on all your devices.", everywhere));
+    gdriveEmail || "Connected to Google Drive", state, sync, out, everywhere));
 };
 
 // ============================================================================
