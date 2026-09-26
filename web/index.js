@@ -1761,6 +1761,35 @@ const setLibFit = (count) => {
   else homeInner.dataset.n = String(Math.max(1, count));
 };
 
+// Wide screens show the paused game once. The card at the top is that game,
+// so its tile stands down from the grid (.is-current, hidden by styles.css
+// unless a search or filter is running - asked for by name, it must be
+// found), and a library holding nothing but that game folds away entirely
+// (body.home-solo) rather than draw it a third time under the card and the
+// backdrop. Phones keep both: there the card is a picture at the top of one
+// column and the grid is the list below it, and nothing reads as repeated.
+//
+// The width is the one where the card first came loose: below it the
+// library's floor already fills the column (--lib-floor), so card and grid
+// share both edges anyway. A phone on its side clears that width too and
+// keeps the phone layout: the second clause is "not a touch screen under
+// 500px tall". The same query as the "Wide screens" block in styles.css.
+const homeWideQuery = matchMedia(
+  "(min-width: 830px) and (pointer: fine), (min-width: 830px) and (min-height: 501px)");
+let libNames = []; // the library as refreshHomeRecent last saw it
+
+const syncHomeCurrent = () => {
+  const cur = document.body.classList.contains("home-card") ? currentOriginalName : null;
+  const inLib = !!cur && libNames.includes(cur);
+  document.body.classList.toggle("home-solo", inLib && libNames.length === 1);
+  for (let t of /** @type {HTMLCollectionOf<HTMLElement>} */ (homeRecent.children)) {
+    if (t.classList.contains("home-tile")) t.classList.toggle("is-current", t.dataset.rom === cur);
+  }
+  // The add tile is a cell too; the stood-down tile is not.
+  setLibFit(libNames.length + 1 - (inLib && homeWideQuery.matches ? 1 : 0));
+};
+homeWideQuery.addEventListener?.("change", syncHomeCurrent);
+
 // Hide the tiles the filter excludes; the count and the empty note follow.
 const applyLibFilter = () => {
   let shown = 0, total = 0;
@@ -1779,6 +1808,8 @@ const applyLibFilter = () => {
     if (m) shown++;
   }
   if (libNone) libNone.hidden = !(total > 0 && shown === 0);
+  // A search or filter brings the paused game's tile back (syncHomeCurrent).
+  document.body.classList.toggle("lib-filtering", libFilterActive());
   if (libCountEl) {
     libCountEl.textContent = shown === total
       ? total + (total === 1 ? " game" : " games")
@@ -6240,13 +6271,16 @@ const refreshHomeRecent = async () => {
     homeThumbsBtn.hidden = true;
     closeTileMenu();
     homeRecent.replaceChildren();
+    libNames = [];
+    syncHomeCurrent();
     homeArtUrls.forEach(URL.revokeObjectURL);
     homeArtUrls = artUrls;
     return;
   }
   libraryEmpty = false;
   refreshHomeEmptyActions();
-  setLibFit(roms.length + 1); // the add tile is a cell too
+  libNames = roms.map((r) => r.name);
+  syncHomeCurrent(); // the fit (the add tile is a cell too) and home-solo
   if (homeRecentHead) homeRecentHead.hidden = false;
   homeRecentWrap.hidden = false;
   // One game: nothing to sort or filter.
@@ -6286,6 +6320,7 @@ const refreshHomeRecent = async () => {
       (missing ? " home-tile-missing" : driveOnly ? " home-tile-cloud" : "");
     // What the filter reads: the name folded the way the search folds it.
     tile.dataset.name = libFold(displayName(romName));
+    tile.dataset.rom = romName; // what syncHomeCurrent matches the card by
     tile.dataset.system = system;
     // "missing" is on neither side of the location chips, so neither claims
     // it and either filter hides it (libTileMatches).
@@ -6425,6 +6460,7 @@ const refreshHomeRecent = async () => {
   tiles.unshift(buildAddTile());
   // The one DOM commit, atomic: no zero-height moment.
   homeRecent.replaceChildren(...tiles);
+  syncHomeCurrent(); // mark the new tiles
   // A menu open on a game that just left the library (deleted elsewhere).
   if (tileMenuFor && !roms.some((r) => r.name === tileMenuFor)) closeTileMenu();
   applyLibFilter(); // the count and the empty note
@@ -10985,7 +11021,11 @@ const homePausedName = document.getElementById("home-paused-name");
 const setPausedCardShown = (on) => {
   homePausedCard.hidden = !on;
   document.body.classList.toggle("home-card", on);
+  syncHomeCurrent();
 };
+
+const homeBackdropCanvas = /** @type {HTMLCanvasElement} */ (document.getElementById("home-backdrop-canvas"));
+const homePausedSys = document.getElementById("home-paused-sys");
 
 const updatePausedCard = () => {
   setPausedCardShown(false);
@@ -11004,8 +11044,15 @@ const updatePausedCard = () => {
   // The wasm fb's alpha is not meaningful; force opaque.
   for (let i = 3; i < img.data.length; i += 4) img.data[i] = 255;
   ctx.putImageData(img, 0, 0);
+  // The backdrop is the same frame; CSS scales and blurs it (wide only).
+  homeBackdropCanvas.width = w;
+  homeBackdropCanvas.height = h;
+  homeBackdropCanvas.getContext("2d").drawImage(homePausedCanvas, 0, 0);
   homePausedName.textContent = displayName(currentOriginalName);
   homePausedName.title = currentOriginalName;
+  const system = systemOf(currentOriginalName);
+  homePausedSys.className = "sys-chip badge-" + system.toLowerCase();
+  homePausedSys.textContent = system;
   setPausedCardShown(true);
 };
 

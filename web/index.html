@@ -339,6 +339,13 @@
 
       <!-- Home / empty state (shown until a ROM is loaded) -->
       <section id="home">
+        <!-- Wide screens only, while the paused card is up: the paused frame
+             again, blown up and blurred behind the top of the page. It is
+             atmosphere, not a picture - the card's own frame is the one to
+             look at. index.js draws it alongside the card's. -->
+        <div id="home-backdrop" aria-hidden="true">
+          <canvas id="home-backdrop-canvas" width="240" height="160"></canvas>
+        </div>
         <div id="home-inner">
           <!-- Brand first in the DOM (above the paused card on desktop); the
                touch layout reorders via flex `order` in styles.css. It stays
@@ -350,9 +357,10 @@
             <p id="home-tagline">a game boy &amp; game boy advance emulator</p>
           </div>
           <!-- Paused-game card: the game Main Menu left behind. JS fills the
-               canvas from the framebuffer. It takes the library's own width
-               (--lib-width) so the home screen reads as one column, and it
-               carries every action that is about this game: resume it, close
+               canvas from the framebuffer. On phones it takes the library's
+               own width (--lib-width) so the home screen reads as one column;
+               from 830px it is the page's centred heading instead (styles.css,
+               "Wide screens"). Either way it carries every action that is about this game: resume it, close
                it, or the same ⋯ menu its tile in the grid would give.
                The picture is still the resume target - it is the biggest,
                most obvious thing on the card - with the button beside it for
@@ -362,6 +370,12 @@
               <canvas id="home-paused-canvas" width="240" height="160"></canvas>
             </button>
             <div id="home-paused-body">
+              <!-- Wide screens only: what the picture is, over its name. -->
+              <div id="home-paused-kicker">
+                <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M1 1h3v8H1zM6 1h3v8H6z"/></svg>
+                <span>Paused</span>
+                <span id="home-paused-sys" class="sys-chip"></span>
+              </div>
               <div id="home-paused-title">
                 <span id="home-paused-name"></span>
               </div>

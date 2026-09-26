@@ -2214,6 +2214,172 @@ body.has-game #home-load:hover {
   }
 }
 
+/* --- Wide screens: the paused game heads the page ----------------------
+   From 830px the library's floor no longer fills the column, and a card
+   sized off the grid came loose from it: flush left over a centred one-game
+   library, or stopped at 1000px beside a full one. So here it is not a card
+   at all but the page's heading, centred on the same axis as everything
+   under it: a small sharp frame beside the name and the buttons, with the
+   same frame blown up and blurred behind the top of the page.
+
+   The game is shown once. Its tile stands down from the grid while the card
+   is up, and a library that is only this game folds away, leaving the add
+   button under the heading (index.js, syncHomeCurrent). Phones, either way
+   up, keep the card above: there it is a picture at the top of one column,
+   and it reads fine. */
+#home-backdrop,
+#home-paused-kicker {
+  display: none;
+}
+
+@keyframes home-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+/* A phone on its side is 830px wide too, and keeps the phone card: the
+   second clause is "not a touch screen under 500px tall". Kept in step with
+   homeWideQuery in index.js. */
+@media (min-width: 830px) and (pointer: fine), (min-width: 830px) and (min-height: 501px) {
+  /* Exactly #home's own height and no more, so it adds nothing to the scroll:
+     it scrolls away with the page, under the library. z-index -1 inside
+     #home's stacking context puts it over the home background and under
+     every in-flow thing on the page. */
+  body.home-card #home-backdrop {
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: -1;
+    height: 100%;
+    overflow: hidden;
+    pointer-events: none;
+    -webkit-mask-image: linear-gradient(180deg, #000 15%, transparent 75%);
+    mask-image: linear-gradient(180deg, #000 15%, transparent 75%);
+    animation: home-fade 0.6s ease-out both;
+  }
+
+  /* On its own the heading is centred in the window, so the glow is too. */
+  body.home-card.home-solo #home-backdrop {
+    -webkit-mask-image: radial-gradient(60% 55% at 50% 50%, #000 20%, transparent 100%);
+    mask-image: radial-gradient(60% 55% at 50% 50%, #000 20%, transparent 100%);
+  }
+
+  /* Scaled past the clip: a blur pulls transparency in from the edges, and
+     that soft rim belongs outside the window, not down its sides. */
+  #home-backdrop-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0.5;
+    filter: blur(64px) saturate(1.3);
+    transform: scale(1.2);
+  }
+
+  #home-paused {
+    align-items: center;
+    gap: 28px;
+    width: auto;
+    max-width: 100%;
+    margin-inline: auto;
+    padding: 0;
+    background: none;
+    border: 0;
+    border-radius: 0;
+  }
+
+  #home-paused-shot {
+    flex: 0 0 auto;
+    width: clamp(192px, 15vw, 264px);
+    max-width: none;
+    border-color: rgba(var(--hi-rgb), 0.16);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 20px 50px -18px rgba(0, 0, 0, 0.9);
+  }
+
+  #home-paused-body {
+    flex: 0 1 auto;
+    gap: 10px;
+    padding: 0;
+  }
+
+  #home-paused-kicker {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  #home-paused-kicker svg {
+    width: 9px;
+    height: 9px;
+    fill: currentColor;
+  }
+
+  #home-paused-kicker .sys-chip {
+    width: 34px;
+    height: 18px;
+    margin-left: 1px;
+    letter-spacing: 0.03em;
+  }
+
+  #home-paused-name {
+    font-size: clamp(26px, 2.2vw, 34px);
+    /* Over a bright frame's glow the name still has an edge: a halo of the
+       stage colour, so it is dark under light text and light under dark. */
+    text-shadow: 0 1px 16px rgba(var(--stage-rgb), 0.6);
+  }
+
+  #home-paused-actions {
+    margin-top: 4px;
+  }
+
+  /* The paused game's tile, while the card above is it. A search or filter
+     brings it back: asked for by name, it must be found. */
+  body.home-card:not(.lib-filtering) .home-tile.is-current {
+    display: none;
+  }
+
+  /* A library of just the paused game: the heading is the library. What
+     is left of it is the way to add a second game, as a quiet dashed pill
+     in the add tile's own idiom. */
+  body.home-solo.home-card #home-recent-wrap {
+    display: none;
+  }
+  body.home-solo.home-card #home-actions {
+    display: flex;
+  }
+  body.home-solo.home-card #home-load {
+    display: inline-flex;
+    gap: 8px;
+    padding: 9px 18px 9px 14px;
+    font-size: 13px;
+    color: var(--text-dim);
+    background: rgba(var(--stage-rgb), 0.35);
+    border: 1px dashed var(--border-2);
+    box-shadow: none;
+  }
+  body.home-solo.home-card #home-load::before {
+    content: "+";
+    font-size: 17px;
+    font-weight: 400;
+    line-height: 1;
+  }
+  body.home-solo.home-card #home-load:hover {
+    color: var(--text);
+    border-color: rgba(var(--accent-rgb), 0.55);
+    background: rgba(var(--accent-rgb), 0.06);
+  }
+}
+
 /* --- The brand, twice ---------------------------------------------------
    The hero keeps its own (a centred column with the tagline under it) and
    simply scrolls away; this is the bar's copy, which comes up to meet it.
