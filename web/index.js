@@ -1761,21 +1761,11 @@ const setLibFit = (count) => {
   else homeInner.dataset.n = String(Math.max(1, count));
 };
 
-// Wide screens show the paused game once. The card at the top is that game,
-// so its tile stands down from the grid (.is-current, hidden by styles.css
-// unless a search or filter is running - asked for by name, it must be
-// found), and a library holding nothing but that game folds away entirely
-// (body.home-solo) rather than draw it a third time under the card and the
-// backdrop. Phones keep both: there the card is a picture at the top of one
-// column and the grid is the list below it, and nothing reads as repeated.
-//
-// The width is the one where the card first came loose: below it the
-// library's floor already fills the column (--lib-floor), so card and grid
-// share both edges anyway. A phone on its side clears that width too and
-// keeps the phone layout: the second clause is "not a touch screen under
-// 500px tall". The same query as the "Wide screens" block in styles.css.
-const homeWideQuery = matchMedia(
-  "(min-width: 830px) and (pointer: fine), (min-width: 830px) and (min-height: 501px)");
+// The paused game is shown once. The card at the top is that game, so its
+// tile stands down from the grid (.is-current, hidden by styles.css unless a
+// search or filter is running - asked for by name, it must be found), and a
+// library holding nothing but that game folds away entirely (body.home-solo)
+// rather than draw it again under the card.
 let libNames = []; // the library as refreshHomeRecent last saw it
 
 const syncHomeCurrent = () => {
@@ -1786,9 +1776,8 @@ const syncHomeCurrent = () => {
     if (t.classList.contains("home-tile")) t.classList.toggle("is-current", t.dataset.rom === cur);
   }
   // The add tile is a cell too; the stood-down tile is not.
-  setLibFit(libNames.length + 1 - (inLib && homeWideQuery.matches ? 1 : 0));
+  setLibFit(libNames.length + 1 - (inLib ? 1 : 0));
 };
-homeWideQuery.addEventListener?.("change", syncHomeCurrent);
 
 // Hide the tiles the filter excludes; the count and the empty note follow.
 const applyLibFilter = () => {

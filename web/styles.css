@@ -2040,14 +2040,9 @@ body.has-game #home-load:hover {
   width: 100%;
   max-width: var(--lib-width);
   padding: 12px;
-  /* A hero has a maximum; a grid does not. Past four cells the grid is the
-     whole 1400px row, and a card that followed it there put its caption alone
-     in five hundred pixels of nothing. So it stops at 1000px - and stops
-     FLUSH LEFT, not centred, so the picture's left edge still lines up with
-     the first tile and the search field below it. That alignment is the
-     reason the card was given the grid's width in the first place; the right
-     edge was never the part doing the work. */
-  margin-inline: 0 auto;
+  /* Centred: below the wide layout the card is never wider than the library
+     it sits over, so centring it puts both its edges on the grid's. */
+  margin-inline: auto;
   background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -2220,16 +2215,84 @@ body.has-game #home-load:hover {
    library, or stopped at 1000px beside a full one. So here it is not a card
    at all but the page's heading, centred on the same axis as everything
    under it: a small sharp frame beside the name and the buttons, with the
-   same frame blown up and blurred behind the top of the page.
-
-   The game is shown once. Its tile stands down from the grid while the card
-   is up, and a library that is only this game folds away, leaving the add
-   button under the heading (index.js, syncHomeCurrent). Phones, either way
-   up, keep the card above: there it is a picture at the top of one column,
-   and it reads fine. */
-#home-backdrop,
-#home-paused-kicker {
+   same frame blown up and blurred behind the top of the page. Phones, either
+   way up, keep the card: there it is a picture across the top of one column,
+   and a backdrop would only show as strips down its sides. */
+#home-backdrop {
   display: none;
+}
+
+/* The paused game is shown once, at every width. Its tile stands down from
+   the grid while the card is up, and a library that is only this game
+   folds away, leaving the add button under the card (index.js,
+   syncHomeCurrent). What the phone card keeps is its own shape: a picture
+   across the top of one column, name and buttons under it. */
+#home-paused-kicker {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+#home-paused-kicker svg {
+  width: 9px;
+  height: 9px;
+  fill: currentColor;
+}
+
+#home-paused-kicker .sys-chip {
+  width: 34px;
+  height: 18px;
+  margin-left: 1px;
+  letter-spacing: 0.03em;
+}
+
+/* The paused game's tile, while the card above is it. A search or filter
+   brings it back: asked for by name, it must be found. */
+body.home-card:not(.lib-filtering) .home-tile.is-current {
+  display: none;
+}
+
+/* A library of just the paused game: the heading is the library. What
+   is left of it is the way to add a second game, as a quiet dashed pill
+   in the add tile's own idiom. */
+body.home-solo.home-card #home-recent-wrap {
+  display: none;
+}
+body.home-solo.home-card #home-actions {
+  display: flex;
+}
+body.home-solo.home-card #home-load {
+  display: inline-flex;
+  gap: 8px;
+  padding: 9px 18px 9px 14px;
+  font-size: 13px;
+  color: var(--text-dim);
+  background: rgba(var(--stage-rgb), 0.35);
+  border: 1px dashed var(--border-2);
+  box-shadow: none;
+}
+body.home-solo.home-card #home-load::before {
+  content: "+";
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1;
+}
+body.home-solo.home-card #home-load:hover {
+  color: var(--text);
+  border-color: rgba(var(--accent-rgb), 0.55);
+  background: rgba(var(--accent-rgb), 0.06);
+}
+
+/* With the library folded there is no grid for the card to take its width
+   from, so it takes the width a two-cell library would have had, centred. */
+body.home-solo.home-card #home-paused {
+  max-width: min(100%, 780px);
 }
 
 @keyframes home-fade {
@@ -2239,8 +2302,7 @@ body.has-game #home-load:hover {
 }
 
 /* A phone on its side is 830px wide too, and keeps the phone card: the
-   second clause is "not a touch screen under 500px tall". Kept in step with
-   homeWideQuery in index.js. */
+   second clause is "not a touch screen under 500px tall". */
 @media (min-width: 830px) and (pointer: fine), (min-width: 830px) and (min-height: 501px) {
   /* Exactly #home's own height and no more, so it adds nothing to the scroll:
      it scrolls away with the page, under the library. z-index -1 inside
@@ -2306,31 +2368,6 @@ body.has-game #home-load:hover {
     padding: 0;
   }
 
-  #home-paused-kicker {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--accent);
-  }
-
-  #home-paused-kicker svg {
-    width: 9px;
-    height: 9px;
-    fill: currentColor;
-  }
-
-  #home-paused-kicker .sys-chip {
-    width: 34px;
-    height: 18px;
-    margin-left: 1px;
-    letter-spacing: 0.03em;
-  }
-
   #home-paused-name {
     font-size: clamp(26px, 2.2vw, 34px);
     /* Over a bright frame's glow the name still has an edge: a halo of the
@@ -2342,42 +2379,6 @@ body.has-game #home-load:hover {
     margin-top: 4px;
   }
 
-  /* The paused game's tile, while the card above is it. A search or filter
-     brings it back: asked for by name, it must be found. */
-  body.home-card:not(.lib-filtering) .home-tile.is-current {
-    display: none;
-  }
-
-  /* A library of just the paused game: the heading is the library. What
-     is left of it is the way to add a second game, as a quiet dashed pill
-     in the add tile's own idiom. */
-  body.home-solo.home-card #home-recent-wrap {
-    display: none;
-  }
-  body.home-solo.home-card #home-actions {
-    display: flex;
-  }
-  body.home-solo.home-card #home-load {
-    display: inline-flex;
-    gap: 8px;
-    padding: 9px 18px 9px 14px;
-    font-size: 13px;
-    color: var(--text-dim);
-    background: rgba(var(--stage-rgb), 0.35);
-    border: 1px dashed var(--border-2);
-    box-shadow: none;
-  }
-  body.home-solo.home-card #home-load::before {
-    content: "+";
-    font-size: 17px;
-    font-weight: 400;
-    line-height: 1;
-  }
-  body.home-solo.home-card #home-load:hover {
-    color: var(--text);
-    border-color: rgba(var(--accent-rgb), 0.55);
-    background: rgba(var(--accent-rgb), 0.06);
-  }
 }
 
 /* --- The brand, twice ---------------------------------------------------
