@@ -2783,6 +2783,108 @@ body.lib-has-games #home-start {
   }
 }
 
+/* --- Flights (index.js, "Flights") -----------------------------------------
+   The copy of the game's picture that travels between the hero, a tile and
+   the screen. Laid out at its destination and transformed from its start,
+   so its corner is the origin. */
+.home-flier {
+  position: fixed;
+  z-index: 900;
+  box-sizing: border-box;
+  overflow: hidden;
+  transform-origin: 0 0;
+  pointer-events: none;
+  background: #000;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+
+.home-flier > canvas,
+.home-flier > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  image-rendering: pixelated;
+}
+
+.home-flier > .home-tile-thumb {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+}
+
+/* Where a picture is not the frame about to be shown, it goes to black on
+   the way (the tail of its animation is this opacity). */
+.home-flier-shade {
+  position: absolute;
+  inset: 0;
+  background: #000;
+}
+
+/* The screen coming on, over the new game's first frames. */
+.home-poweron {
+  position: fixed;
+  z-index: 899;
+  pointer-events: none;
+  background: #000;
+  opacity: 0;
+}
+
+/* The real screen is hidden while the copy is on its way to it. */
+body.home-flying #canvas {
+  visibility: hidden;
+}
+
+/* Arriving home: the page rises in under the landing picture, the words
+   first and the library after, a tile at a time. #home-inner's own entrance
+   stands down so the hero is where the picture is aimed. */
+#home.home-arriving #home-inner {
+  animation: none;
+}
+
+#home.home-arriving #home-paused-body,
+#home.home-arriving .home-recent-head,
+#home.home-arriving .lib-bar,
+#home.home-arriving .home-tile,
+#home.home-arriving #home-actions {
+  animation: home-rise 0.5s cubic-bezier(.2, .8, .2, 1) backwards;
+  animation-delay: 0.2s;
+}
+
+#home.home-arriving .home-recent-head,
+#home.home-arriving .lib-bar,
+#home.home-arriving #home-actions {
+  animation-delay: 0.28s;
+}
+
+#home.home-arriving .home-tile:nth-child(1) { animation-delay: 0.32s; }
+#home.home-arriving .home-tile:nth-child(2) { animation-delay: 0.36s; }
+#home.home-arriving .home-tile:nth-child(3) { animation-delay: 0.4s; }
+#home.home-arriving .home-tile:nth-child(4) { animation-delay: 0.44s; }
+#home.home-arriving .home-tile:nth-child(n + 5) { animation-delay: 0.48s; }
+
+@keyframes home-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+
+/* Close: the screen switches off, dipping to dark before settling on the
+   dimmed look (the stylesheet's own filter for a closed hero). */
+#home-paused.lcd-off #home-paused-canvas {
+  animation: hero-lcd-off 0.9s ease-out;
+}
+
+@keyframes hero-lcd-off {
+  0% {
+    filter: none;
+  }
+  28% {
+    filter: brightness(0.3) saturate(0.3);
+  }
+}
+
 /* A short library under a hero: the block is at least the hero's width, and
    its tiles start at the hero's left edge rather than centring in it. The
    grid takes the block's width itself (its tracks are worked out from its
@@ -8004,7 +8106,10 @@ body.running.sync-shown #status {
      home-in uses "both", so animation:none simply lands on the final frame. */
   #menu-dropdown,
   #home-inner,
-  .modal {
+  .modal,
+  #account-pop,
+  #home-paused-led,
+  #home-paused.lcd-off #home-paused-canvas {
     animation: none;
   }
 

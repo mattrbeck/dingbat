@@ -5841,7 +5841,7 @@ const touchRecent = async (name) => {
 // afterwards, the choice having been made on the home screen. Without it the
 // boot ends in the "Last session saved" offer, which is what a file dropped
 // on the page gets.
-const launchRom = async (name, { resume = false, fresh = false } = {}) => {
+const launchRom = async (name, { resume = false, fresh = false, flyFrom = null } = {}) => {
   const gen = nextLoadGen(); // a later tap supersedes this one (loadGen)
   // The grid renders before the wasm runtime is up; wait here.
   await ensureRuntimeReady();
@@ -5854,6 +5854,9 @@ const launchRom = async (name, { resume = false, fresh = false } = {}) => {
   }
   let session = resume ? await resumeSessionFor(name) : null;
   if (gen !== loadGen) return;
+  // Measured now, while the picture is still on screen: the flight lands
+  // intact only when it is the frame the session goes back to.
+  if (flyFrom) armFlight(name, flyFrom, !session);
   await touchRecent(name);
   if (gen !== loadGen) return;
   let ext = name.substring(name.lastIndexOf(".")).toLowerCase();
@@ -6351,9 +6354,9 @@ const wireTileMenu = (tile, launch, romName) => {
 // to exactly that moment - the picture on the tile is the screen the player
 // returns to. Otherwise it boots from its in-game save. The loaded game
 // carries on instead: a reboot would drop what happened since the snapshot.
-const openLibraryGame = async (romName, { driveOnly = false, missing = false } = {}) => {
+const openLibraryGame = async (romName, { driveOnly = false, missing = false, flyFrom = null } = {}) => {
   if (currentOriginalName === romName && !linkMode) { resumeGame(); return; }
-  if (!driveOnly) { launchRom(romName, { resume: true }); return; }
+  if (!driveOnly) { launchRom(romName, { resume: true, flyFrom }); return; }
   if (missing) { relinkGameAction(romName, { launch: true }); return; }
   if (syncDownloading.has(romName)) return;
   // The tap takes the load token now, not when the download (seconds)
@@ -6361,7 +6364,7 @@ const openLibraryGame = async (romName, { driveOnly = false, missing = false } =
   // download itself finishes either way.
   const gen = nextLoadGen();
   if (!(await ensureDriveSignedIn())) return;
-  if (await downloadGame(romName) && gen === loadGen) launchRom(romName, { resume: true });
+  if (await downloadGame(romName) && gen === loadGen) launchRom(romName, { resume: true, flyFrom });
 };
 
 const libFilterActive = () =>
@@ -6505,7 +6508,7 @@ const refreshHomeRecent = async () => {
     // The tile body downloads and launches; the glyph downloads only.
     launch.addEventListener("click", () => {
       if (consumedByPress()) return; // the long press opened the menu
-      openLibraryGame(romName, { driveOnly, missing });
+      openLibraryGame(romName, { driveOnly, missing, flyFrom: thumb });
     });
 
     if (missing) {
@@ -9486,6 +9489,7 @@ const loadRom = async (romName, originalName, opts = {}) => {
   flyBrand(true);
   document.body.classList.add("has-game", "running");
   setBrandP(1);
+  takePendingFlight(); // a launch from the home screen lands on the screen
   await restoreCheats();  // fresh core: re-apply this game's saved cheats
   if (gen !== loadGen) return; // the next load re-applies all of this to its core
   applyPitchCorrectFF();  // fresh core: re-push the local audio preference
@@ -10963,7 +10967,11 @@ const launchLinkRom = async (rom) => {
 const showMainMenu = () => {
   menuDropdown.hidden = true;
   if (!currentRomName && !linkMode) return;
+  // Where the screen is, before it goes: the picture flies from here.
+  const from = !linkMode && document.body.classList.contains("running")
+    ? canvasEl.getBoundingClientRect() : null;
   stopClipRecording(); // don't keep recording a frozen frame from the menu
+  releaseFlight();
   paused = true;
   // The tile behind this menu shows the picture the player just left: the
   // grid renders now and again once the picture is stored.
@@ -10973,6 +10981,7 @@ const showMainMenu = () => {
   updatePausedCard();
   refreshHomeRecent();
   updateCanvasScaling();
+  if (from?.width) flyHome(from);
 };
 
 const resumeGame = () => {
@@ -11329,9 +11338,19 @@ const renderClosedHero = async (name, file, keys) => {
     drawHeroGlow();
     heroDrawnFor = name;
   }
+  // The paused game just closed, in place: the screen switches off - a dip
+  // to dark that settles on the dimmed "not in memory" look.
+  const closing = !homePausedCard.hidden && heroName === name &&
+    homePausedCard.dataset.mode === "paused";
   heroSession = session;
   heroFile = file;
   setHeroMode("closed", name);
+  if (closing && canFly()) {
+    homePausedCard.classList.remove("lcd-off");
+    void homePausedCard.offsetWidth; // restart the animation if it was mid-run
+    homePausedCard.classList.add("lcd-off");
+    setTimeout(() => homePausedCard.classList.remove("lcd-off"), 950);
+  }
 };
 
 // Whenever the library renders: with nothing loaded, the hero is its most
@@ -11352,16 +11371,188 @@ const refreshHero = (roms, localRoms, keys) => {
 
 // The picture and the labelled button do the same thing.
 const heroPrimary = () => {
-  if (homePausedCard.dataset.mode === "paused") { resumeGame(); return; }
+  if (homePausedCard.dataset.mode === "paused") { resumeFromHero(); return; }
   if (!heroName) return;
-  if (heroSession) { launchRom(heroName, { resume: true }); return; }
-  openLibraryGame(heroName, heroFile);
+  if (heroSession) { launchRom(heroName, { resume: true, flyFrom: homePausedShot }); return; }
+  openLibraryGame(heroName, { ...heroFile, flyFrom: homePausedShot });
 };
 homePausedShot.addEventListener("click", heroPrimary);
 document.getElementById("home-paused-resume").addEventListener("click", heroPrimary);
 homePausedRestart.addEventListener("click", () => {
-  if (heroName && homePausedCard.dataset.mode === "closed") launchRom(heroName, { fresh: true });
+  if (heroName && homePausedCard.dataset.mode === "closed") {
+    launchRom(heroName, { fresh: true, flyFrom: homePausedShot });
+  }
 });
+
+// --- Flights -----------------------------------------------------------------
+// The game's picture travels between the hero (or a tile) and the screen, so
+// going home and coming back read as the same thing moving rather than one
+// page replacing another. What flies is a copy - a canvas or a cloned tile
+// picture - laid out at the DESTINATION'S size and transformed back to the
+// start, so the one property animated is a composited transform. The real
+// screen stays hidden (body.home-flying) and the game held (paused) until
+// the copy lands on it, so no frame runs underneath.
+//
+// Two kinds of landing. A picture that IS the first frame the game will show
+// (the paused game, or a session that goes back in) lands intact. One that is
+// not - a Restart, or a game with no session to resume - darkens to black on
+// the way and the screen powers on from black: the picture was the last one
+// seen, not the one about to be.
+//
+// Nothing fills forwards (see "The brand, twice"): every element made here is
+// removed when its animation ends, and every animation is tagged.
+const FLIGHT_MS = 460;
+const FLIGHT_EASE = "cubic-bezier(.2,.8,.2,1)";
+const POWER_ON_MS = 700;
+const FLIGHT_ID = "home-flight";
+
+const canFly = () =>
+  typeof document.body.animate === "function" &&
+  !matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// A copy of what is on screen: a canvas's pixels, or any other picture cloned.
+const flierContent = (src) => {
+  if (typeof HTMLCanvasElement !== "undefined" && src instanceof HTMLCanvasElement) {
+    const c = document.createElement("canvas");
+    c.width = src.width;
+    c.height = src.height;
+    c.getContext("2d")?.drawImage(src, 0, 0);
+    return c;
+  }
+  return /** @type {Element} */ (src.cloneNode?.(true) ?? document.createElement("div"));
+};
+
+const flyPicture = (content, from, to, { dark = false, radius = 0 } = {}) =>
+  new Promise((resolve) => {
+    if (!canFly() || !from?.width || !to?.width) { resolve(false); return; }
+    const el = document.createElement("div");
+    el.className = "home-flier";
+    el.style.left = to.left + "px";
+    el.style.top = to.top + "px";
+    el.style.width = to.width + "px";
+    el.style.height = to.height + "px";
+    el.style.borderRadius = radius + "px";
+    el.appendChild(content);
+    let shade = null;
+    if (dark) {
+      shade = document.createElement("div");
+      shade.className = "home-flier-shade";
+      el.appendChild(shade);
+    }
+    document.body.appendChild(el);
+    const sx = from.width / to.width;
+    const sy = from.height / to.height;
+    const a = el.animate(
+      [{ transform: `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${sx}, ${sy})` },
+       { transform: "none" }],
+      { duration: FLIGHT_MS, easing: FLIGHT_EASE, fill: "backwards" });
+    a.id = FLIGHT_ID;
+    // Linear and full length, so the offsets are wall clock (iteration easing
+    // would remap them); its tail agrees with the stylesheet (opacity 1).
+    if (shade) {
+      shade.animate([{ opacity: 0 }, { opacity: 0, offset: 0.15 }, { opacity: 1, offset: 0.8 }, { opacity: 1 }],
+        { duration: FLIGHT_MS, easing: "linear", fill: "backwards" }).id = FLIGHT_ID;
+    }
+    const done = () => { el.remove(); resolve(true); };
+    a.finished.then(done, done);
+  });
+
+// The screen coming on: black over the new game, fading as its first frames
+// draw.
+const powerOn = (rect) => {
+  if (!canFly() || !rect?.width) return;
+  const el = document.createElement("div");
+  el.className = "home-poweron";
+  el.style.left = rect.left + "px";
+  el.style.top = rect.top + "px";
+  el.style.width = rect.width + "px";
+  el.style.height = rect.height + "px";
+  document.body.appendChild(el);
+  const a = el.animate([{ opacity: 1 }, { opacity: 1, offset: 0.15 }, { opacity: 0 }],
+    { duration: POWER_ON_MS, easing: "ease-out", fill: "backwards" });
+  a.id = FLIGHT_ID;
+  const done = () => el.remove();
+  a.finished.then(done, done);
+};
+
+// Holding the game for a flight, and letting it go. `flightHeld` is only ours:
+// a pause the player makes meanwhile is theirs and is kept.
+let flightHeld = false;
+const holdForFlight = () => {
+  flightHeld = true;
+  paused = true;
+  document.body.classList.add("home-flying");
+};
+const releaseFlight = () => {
+  document.body.classList.remove("home-flying");
+  if (!flightHeld) return;
+  flightHeld = false;
+  if (document.body.classList.contains("running") &&
+      !pauseButton.classList.contains("paused")) paused = false;
+};
+
+// Main Menu: the screen shrinks into the hero's frame while the page rises
+// in under it.
+const HOME_ARRIVE_MS = 900;
+let homeArriveTimer = null;
+const arriveHome = () => {
+  clearTimeout(homeArriveTimer);
+  homeScroller.classList.add("home-arriving");
+  homeArriveTimer = setTimeout(() => homeScroller.classList.remove("home-arriving"), HOME_ARRIVE_MS);
+};
+const flyHome = (from) => {
+  if (!canFly() || homePausedCard.hidden) return;
+  homeScroller.scrollTop = 0; // the hero is where the game comes back to
+  arriveHome();
+  const to = homePausedShot.getBoundingClientRect();
+  homePausedShot.style.visibility = "hidden";
+  flyPicture(flierContent(homePausedCanvas), from, to, { radius: 14 })
+    .then(() => { homePausedShot.style.visibility = ""; });
+};
+
+// The hero's Resume, for the game still in memory: the frame grows back into
+// the screen, and play goes on when it gets there.
+const resumeFromHero = () => {
+  const from = canFly() && !homePausedCard.hidden ? homePausedShot.getBoundingClientRect() : null;
+  const content = from ? flierContent(homePausedCanvas) : null;
+  resumeGame();
+  if (!from?.width || !content) return;
+  holdForFlight();
+  flyPicture(content, from, canvasEl.getBoundingClientRect()).then(releaseFlight);
+};
+
+// A launch from the home screen (the closed hero, a tile): armed when the
+// launch knows whether it resumes, flown once the new game is on screen.
+/** @type {{ name: string, from: DOMRect, content: Element, dark: boolean, at: number } | null} */
+let pendingFlight = null;
+const armFlight = (name, fromEl, dark) => {
+  pendingFlight = null;
+  if (!canFly() || !fromEl) return;
+  const from = fromEl.getBoundingClientRect();
+  if (!from.width) return;
+  const src = fromEl === homePausedShot ? homePausedCanvas : fromEl;
+  pendingFlight = { name, from, content: flierContent(src), dark, at: Date.now() };
+};
+// From loadRom, the moment the game is on screen: hold it, give the layout a
+// frame to size the screen, then fly onto it.
+const takePendingFlight = () => {
+  const f = pendingFlight;
+  pendingFlight = null;
+  if (!f || f.name !== currentOriginalName || Date.now() - f.at > 5000) return;
+  holdForFlight();
+  // A flight that never gets to run (a tab put away mid-launch) must not
+  // hold the game for good.
+  const safety = setTimeout(releaseFlight, 2500);
+  requestAnimationFrame(() => {
+    if (f.name !== currentOriginalName) { clearTimeout(safety); releaseFlight(); return; }
+    const to = canvasEl.getBoundingClientRect();
+    flyPicture(f.content, f.from, to, { dark: f.dark }).then((flew) => {
+      clearTimeout(safety);
+      releaseFlight();
+      if (flew && f.dark) powerOn(canvasEl.getBoundingClientRect());
+    });
+  });
+};
 
 // The card's ⋯ is the game's ⋯: the loaded game's own tile in the grid
 // opens the same menu with the same entries, so there is one menu per game
@@ -11410,6 +11601,7 @@ const unloadGame = async ({ flushSave = true } = {}) => {
   // The cheat list belongs to the game that left; restoreCheats refills it.
   cheatList = [];
   renderCheatList();
+  releaseFlight();
   paused = true; // keep the orphaned core frozen
   pauseButton.classList.remove("paused", "active");
   pauseButton.title = "Pause";

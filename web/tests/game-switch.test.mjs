@@ -881,3 +881,38 @@ test("a launch that did not choose (a file dropped on the page) still offers", a
   await drain(20);
   assert.ok(offered(app), "positive control for the two tests above");
 });
+
+// The flight from the home screen to the screen: the game is held - no frame
+// runs - until the picture lands on it, then play goes on.
+test("a launch from the home screen holds the game until its picture lands", async () => {
+  const app = await closedWithSession();
+  app.runIn("globalThis.requestAnimationFrame = (f) => { f(0); return 0; }");
+  app.document.getElementById("home-paused-shot").setBox(10, 10, 384, 256);
+  app.runIn("canvasEl.setBox(0, 56, 960, 640)");
+  app.runIn(`launchRom("A.gba", { resume: true, flyFrom: document.getElementById("home-paused-shot") })`);
+  await drain();
+  assert.equal(named(app), "A.gba");
+  assert.equal(app.runIn("paused"), true, "held while the picture flies");
+  assert.ok(app.document.body.classList.contains("home-flying"), "the real screen hidden");
+  const flier = app.document.body.children.find((c) => c.className === "home-flier");
+  assert.ok(flier, "a copy is in flight");
+  assert.equal(flier.children.length, 1, "intact: a session goes back in, so no shade");
+  flier.getAnimations().forEach((a) => a.finish());
+  await drain();
+  assert.equal(app.runIn("paused"), false, "and play goes on when it lands");
+  assert.ok(!app.document.body.classList.contains("home-flying"));
+});
+
+test("Restart's flight goes dark on the way", async () => {
+  const app = await closedWithSession();
+  app.runIn("globalThis.requestAnimationFrame = (f) => { f(0); return 0; }");
+  app.document.getElementById("home-paused-shot").setBox(10, 10, 384, 256);
+  app.runIn("canvasEl.setBox(0, 56, 960, 640)");
+  app.runIn(`launchRom("A.gba", { fresh: true, flyFrom: document.getElementById("home-paused-shot") })`);
+  await drain();
+  const flier = app.document.body.children.find((c) => c.className === "home-flier");
+  assert.ok(flier.children.some((c) => c.className === "home-flier-shade"), "it darkens");
+  flier.getAnimations().forEach((a) => a.finish());
+  await drain();
+  assert.equal(app.runIn("paused"), false);
+});
