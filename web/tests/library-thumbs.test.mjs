@@ -29,7 +29,7 @@ test("a stored frame renders as the tile's picture", async () => {
   assert.ok(!tile.className.includes("no-art"), "the chip stands down");
 });
 
-test("the frame outranks the box art; the art outranks the chip", async () => {
+test("the frame outranks the box art; the art outranks the cartridge", async () => {
   const app = await loadApp();
   seedLibrary(app, ["A.gba", "B.gba", "C.gb"]);
   app.idb.set("frame:A.gba", new Blob([u8(1)]));
@@ -41,10 +41,10 @@ test("the frame outranks the box art; the art outranks the chip", async () => {
   const [a, b, c] = grid(app).children;
   assert.ok(thumbOf(a).children[0].className.includes("home-tile-frame"));
   assert.ok(thumbOf(b).children[0].className.includes("home-tile-art"));
-  // Never opened, no art: the chip, and the caption does not repeat it.
-  const chip = thumbOf(c).children[0];
-  assert.ok(chip.className.includes("sys-chip"), chip.className);
-  assert.equal(chip.textContent, "GB");
+  // Never opened, no art: its system's cartridge, with its mark.
+  const cart = thumbOf(c).children[0];
+  assert.equal(cart.className, "lib-cart cart-gb");
+  assert.equal(cart.children[0].textContent, "C");
   assert.ok(c.className.includes("no-art"));
   assert.equal(captionOf(c).children[0].textContent, "C");
 });

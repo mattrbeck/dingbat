@@ -6468,10 +6468,7 @@ const refreshHomeRecent = async () => {
     // deserialized here.
     let thumb = document.createElement("div");
     thumb.className = "home-tile-thumb";
-    let icon = document.createElement("span");
-    icon.className = "sys-chip badge-" + system.toLowerCase();
-    icon.textContent = system;
-    thumb.appendChild(icon);
+    thumb.appendChild(buildCart(romName));
     const showPicture = (blob, cls) => {
       if (!blob || gen !== homeRenderGen) return false;
       let url = URL.createObjectURL(blob);
@@ -6705,6 +6702,63 @@ document.getElementById("export-save").addEventListener("click", async () => {
 
 const stripExt = (name) => name.substring(0, name.lastIndexOf("."));
 const displayName = (name) => stripExt(name) || name;
+
+// --- Cartridge labels ------------------------------------------------------
+// A game with no picture yet gets a cartridge of its system's shape, and on
+// its label a short mark to tell it from the next one: two initials and a
+// sequel's number. The mark comes from a tidied title - file names carry dump
+// tags and release numbers that name nothing about the game - which is used
+// for the label only; the tile's own name is the library's.
+//   "0412 - Metroid Fusion (U) [!].gba"          -> Metroid Fusion       -> MF
+//   "Legend of Zelda, The - The Minish Cap (U)"  -> The Legend of ...    -> LZ
+//   "GoodboyGalaxy.gba" -> GG   "advance_wars_2.gba" -> AW2
+//   "Final Fantasy VI Advance (J)" -> FF6   "TETRIS.gb" -> Te
+const cartTitle = (name) => {
+  let s = stripExt(name) || name;
+  s = s.replace(/\s*[([][^)\]]*[)\]]/g, "");            // (U) [!] (Rev 1) (En,Fr)
+  s = s.replace(/^\s*\d{3,5}\s*-\s*/, "");                // "0412 - "
+  s = s.replace(/^([^,]+),\s*(The|A|An)\b/i, "$2 $1");     // "Zelda, The"
+  return s.replace(/_/g, " ").replace(/\s+/g, " ").trim() || name;
+};
+const CART_SMALL_WORDS = new Set(["the", "a", "an", "of", "and", "version", "edition"]);
+// No V or X: "Mega Man X" is not the tenth.
+const CART_ROMAN = { ii: 2, iii: 3, iv: 4, vi: 6, vii: 7, viii: 8, ix: 9 };
+const cartLabelFor = (name) => {
+  const bare = cartTitle(name).replace(/['\u2019]/g, "");
+  // One run with no spaces is split where its capitals and digits start.
+  const src = /[\s_]/.test(bare) ? bare
+    : bare.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/([A-Za-z])(\d)/g, "$1 $2");
+  let words = src.split(/[\s\-\u2013:.,&!_]+/).filter(Boolean);
+  let num = "";
+  for (let i = 1; i < words.length; i++) {
+    const w = words[i].toLowerCase();
+    if (/^\d{1,3}$/.test(w) || CART_ROMAN[w]) {
+      num = /^\d/.test(w) ? w : String(CART_ROMAN[w]);
+      words.splice(i, 1);
+      break;
+    }
+  }
+  let sig = words.filter((w) => !CART_SMALL_WORDS.has(w.toLowerCase()));
+  if (!sig.length) sig = words;
+  if (!sig.length) return "";
+  if (sig.length === 1) {
+    const c = Array.from(sig[0]);
+    return (c[0] || "").toUpperCase() + (c[1] || "").toLowerCase() + num;
+  }
+  return sig.slice(0, 2).map((w) => Array.from(w)[0].toUpperCase()).join("") + num;
+};
+
+// The cartridge itself: its system's shape, the mark on its label.
+const buildCart = (name, el = document.createElement("span")) => {
+  const system = systemOf(name);
+  el.className = "lib-cart cart-" + system.toLowerCase();
+  const label = document.createElement("span");
+  label.className = "lib-cart-label";
+  label.textContent = cartLabelFor(name);
+  el.replaceChildren(label);
+  el.setAttribute("aria-hidden", "true");
+  return el;
+};
 
 // Overwrite the loaded game's battery save with imported bytes and reboot.
 // GameShark-family containers are unwrapped first (saveimport.js).
@@ -11231,6 +11285,7 @@ const updatePausedCard = () => {
   ctx.putImageData(img, 0, 0);
   drawHeroGlow();
   homePausedPlaceholder.hidden = true;
+  homePausedCard.classList.remove("no-picture");
   heroDrawnFor = currentOriginalName;
   setHeroMode("paused", currentOriginalName);
 };
@@ -11267,9 +11322,10 @@ const renderClosedHero = async (name, file, keys) => {
       homePausedCanvas.height = h;
       if (ctx) { ctx.fillStyle = "#000"; ctx.fillRect?.(0, 0, w, h); }
     }
+    buildCart(name, homePausedPlaceholder);
     homePausedPlaceholder.hidden = !!bitmap;
-    homePausedPlaceholder.className = "sys-chip badge-" + systemOf(name).toLowerCase();
-    homePausedPlaceholder.textContent = systemOf(name);
+    homePausedCard.classList.toggle("no-picture", !bitmap);
+    homePausedCard.dataset.system = systemOf(name);
     drawHeroGlow();
     heroDrawnFor = name;
   }

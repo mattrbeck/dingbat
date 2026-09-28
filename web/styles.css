@@ -2577,14 +2577,27 @@ body.lib-has-games #home-start {
   filter: saturate(0.75) brightness(0.82);
 }
 
-/* A game never pictured has no frame, and gets no invented one: its system
-   chip stands in, as on its tile. */
+/* A game never pictured has no frame, and gets no invented one: its
+   cartridge stands in, as on its tile. */
+#home-paused.no-picture #home-paused-shot {
+  background: var(--badge-gba-bg);
+}
+#home-paused.no-picture[data-system="GB"] #home-paused-shot {
+  background: var(--badge-gb-bg);
+}
+#home-paused.no-picture[data-system="GBC"] #home-paused-shot {
+  background: var(--badge-gbc-bg);
+}
+#home-paused.no-picture #home-paused-canvas,
+#home-paused.no-picture #home-backdrop-canvas {
+  opacity: 0;
+}
+
 #home-paused-placeholder {
   position: absolute;
-  inset: 0;
-  margin: auto;
-  width: max-content;
-  height: max-content;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
 }
 
 #home-paused-placeholder[hidden] {
@@ -3523,23 +3536,83 @@ body.runtime-ready #boot-progress {
   object-fit: cover;
 }
 
-/* No picture yet: the chip sits on the card's own surface, not on black. */
+/* No picture yet: the cartridge sits on a field tinted by its system, not
+   on black. */
 .home-tile.no-art .home-tile-thumb {
-  background: rgba(var(--hi-rgb), 0.03);
+  background: var(--badge-gba-bg);
+}
+.home-tile.no-art[data-system="GB"] .home-tile-thumb {
+  background: var(--badge-gb-bg);
+}
+.home-tile.no-art[data-system="GBC"] .home-tile-thumb {
+  background: var(--badge-gbc-bg);
 }
 
-/* The chip standing in for a picture is the same chip (.sys-chip, below),
-   a size up. */
-.home-tile-thumb .sys-chip {
-  width: auto;
-  height: 28px;
-  padding: 0 12px;
+/* --- The cartridge ---------------------------------------------------------
+   Standing in for a picture: its system's shape - a GBA cart wide, a Game
+   Boy one tall with its corner cut - and on the label the game's mark
+   (index.js, cartLabelFor). Sized off the picture box, so one rule serves a
+   tile and the hero. */
+.home-tile-thumb,
+#home-paused-shot {
+  container-type: inline-size;
+}
+
+.lib-cart {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 40%;
+  aspect-ratio: 8 / 5;
+  padding-top: 5%;
+  border-radius: 10% 10% 6% 6% / 16% 16% 10% 10%;
+  background: linear-gradient(180deg, var(--cart-gba-top), var(--cart-gba-bottom));
+  box-shadow: inset 0 1px 0 rgba(var(--hi-rgb), 0.16), 0 10px 22px rgba(0, 0, 0, 0.4);
+}
+
+.lib-cart-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64%;
+  height: 50%;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-size: clamp(9px, 5.4cqi, 22px);
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  color: rgba(10, 10, 20, 0.78);
+  background: var(--badge-gba-fg);
+}
+
+.lib-cart.cart-gb,
+.lib-cart.cart-gbc {
+  width: 25%;
+  aspect-ratio: 5 / 6;
+  padding-top: 7%;
+  border-radius: 4% 4% 10% 10%;
+  clip-path: polygon(0 0, 80% 0, 100% 14%, 100% 100%, 0 100%);
+  background: linear-gradient(180deg, var(--cart-gb-top), var(--cart-gb-bottom));
+  box-shadow: inset 0 1px 0 rgba(var(--hi-rgb), 0.16);
+}
+
+.lib-cart.cart-gbc {
+  background: linear-gradient(180deg, var(--cart-gbc-top), var(--cart-gbc-bottom));
+}
+
+.cart-gb .lib-cart-label,
+.cart-gbc .lib-cart-label {
+  width: 76%;
+  height: 48%;
   font-size: 12px;
+  font-size: clamp(8px, 4.6cqi, 20px);
+  background: var(--badge-gb-fg);
 }
 
-/* ...and then the caption does not repeat it. */
-.home-tile.no-art .home-tile-caption .sys-chip {
-  display: none;
+.cart-gbc .lib-cart-label {
+  background: var(--badge-gbc-fg);
 }
 
 /* The footer: name and chip, on the card's own surface. */
