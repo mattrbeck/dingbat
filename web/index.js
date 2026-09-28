@@ -1761,46 +1761,31 @@ const setLibFit = (count) => {
   else homeInner.dataset.n = String(Math.max(1, count));
 };
 
-// Wide screens show the paused game once. The card at the top is that game,
-// so its tile stands down from the grid (.is-current, hidden by styles.css
-// unless a search or filter is running - asked for by name, it must be
-// found), and a library holding nothing but that game folds away entirely
-// (body.home-solo) rather than draw it a third time under the card and the
-// backdrop. Phones keep both: there the card is a picture at the top of one
-// column and the grid is the list below it, and nothing reads as repeated.
-//
-// The width is the one where the card first came loose: below it the
-// library's floor already fills the column (--lib-floor), so card and grid
-// share both edges anyway. A phone on its side clears that width too and
-// keeps the phone layout: the second clause is "not a touch screen under
-// 500px tall". The same query as the "Wide screens" block in styles.css.
-const homeWideQuery = matchMedia(
-  "(min-width: 830px) and (pointer: fine), (min-width: 830px) and (min-height: 501px)");
+// The hero shows one game, and that game is shown once. Its tile stands down
+// from the grid (.is-current, hidden by styles.css unless a search or filter
+// is running - asked for by name, it must be found), and a library holding
+// nothing but that game folds away entirely (body.home-solo): the hero IS the
+// library then, with a quiet way to add a second game under it. The same at
+// every width - on a phone the same game twice, one above the other, read as
+// two things.
 let libNames = []; // the library as refreshHomeRecent last saw it
+let heroName = null; // the game the hero is showing, while it is up
 
 const syncHomeCurrent = () => {
-  const cur = document.body.classList.contains("home-card") ? currentOriginalName : null;
+  const cur = document.body.classList.contains("home-card") ? heroName : null;
   const inLib = !!cur && libNames.includes(cur);
   document.body.classList.toggle("home-solo", inLib && libNames.length === 1);
   for (let t of /** @type {HTMLCollectionOf<HTMLElement>} */ (homeRecent.children)) {
     if (t.classList.contains("home-tile")) t.classList.toggle("is-current", t.dataset.rom === cur);
   }
-  // The add tile is a cell too; the stood-down tile is not.
-  setLibFit(libNames.length + 1 - (inLib && homeWideQuery.matches ? 1 : 0));
+  // The stood-down tile is not a cell.
+  setLibFit(libNames.length - (inLib ? 1 : 0));
 };
-homeWideQuery.addEventListener?.("change", syncHomeCurrent);
 
 // Hide the tiles the filter excludes; the count and the empty note follow.
 const applyLibFilter = () => {
   let shown = 0, total = 0;
   for (let t of /** @type {HTMLCollectionOf<HTMLElement>} */ (homeRecent.children)) {
-    // The add tile: shown while the grid is the whole library, gone while it
-    // is an answer to a question about it. Decided here rather than at render
-    // because a search re-filters the grid that is already on screen.
-    if (t.classList.contains("add-tile")) {
-      t.hidden = libFilterActive();
-      continue;
-    }
     if (!t.classList.contains("home-tile")) continue;
     total++;
     let m = libTileMatches(t);
@@ -5059,22 +5044,38 @@ const refreshHomeSyncButton = () => {
 // Same two labels the head uses, so the slot has one name wherever it
 // appears. It withdraws the moment there is a library to head.
 const homeDriveBtn = /** @type {HTMLButtonElement} */ (document.getElementById("home-drive"));
+const homeDriveRow = document.getElementById("home-drive-row");
 let libraryEmpty = false;
 
+// Google's mark, in its own colours: its branding rules allow no other.
+const GOOGLE_G_SVG =
+  '<svg viewBox="0 0 48 48" aria-hidden="true">' +
+  '<path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>' +
+  '<path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>' +
+  '<path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>' +
+  '<path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>' +
+  '</svg>';
+
 const refreshHomeEmptyActions = () => {
-  // Which way in from a file is on screen: the hero's button with no library
+  // Which way in from a file is on screen: the empty state's with no library
   // to speak of, the library head's #lib-add once there is one. Stated the
   // positive way round on purpose - before the first refresh neither class
-  // is set, and the hero's button is the right thing to be showing then.
+  // is set, and the empty state is the right thing to be showing then.
   document.body.classList.toggle("lib-has-games", !libraryEmpty);
   if (!homeDriveBtn) return;
-  if (!libraryEmpty || !GDRIVE_CLIENT_ID) {
-    homeDriveBtn.hidden = true;
-    return;
-  }
-  homeDriveBtn.hidden = false;
+  const shown = libraryEmpty && !!GDRIVE_CLIENT_ID;
+  homeDriveBtn.hidden = !shown;
+  if (homeDriveRow) homeDriveRow.hidden = !shown;
+  if (!shown) return;
   homeDriveBtn.disabled = false;
-  homeDriveBtn.textContent = driveLinked() ? "Sync" : "Sign in";
+  // Signed out it is a Google sign-in button, drawn the way Google's rules
+  // require; signed in to an account with nothing on it yet, a plain Sync.
+  const linked = driveLinked();
+  homeDriveBtn.className = linked ? "button" : "gsi-btn";
+  if (linked) homeDriveBtn.textContent = "Sync";
+  else homeDriveBtn.innerHTML = GOOGLE_G_SVG + "<span>Sign in with Google</span>";
+  const lead = document.getElementById("home-drive-lead");
+  if (lead) lead.hidden = linked;
 };
 
 if (homeDriveBtn) {
@@ -5717,7 +5718,12 @@ const touchRecent = async (name) => {
   refreshHomeRecent();
 };
 
-const launchRom = async (name) => {
+// `resume`: go back into the game's session if it still matches the save
+// (resumeSessionFor), else boot from the save - either way with no offer
+// afterwards, the choice having been made on the home screen. Without it the
+// boot ends in the "Last session saved" offer, which is what a file dropped
+// on the page gets.
+const launchRom = async (name, { resume = false, fresh = false } = {}) => {
   const gen = nextLoadGen(); // a later tap supersedes this one (loadGen)
   // The grid renders before the wasm runtime is up; wait here.
   await ensureRuntimeReady();
@@ -5728,10 +5734,13 @@ const launchRom = async (name) => {
     showToast("This game's ROM is no longer stored — load the file again");
     return;
   }
+  let session = resume ? await resumeSessionFor(name) : null;
+  if (gen !== loadGen) return;
   await touchRecent(name);
   if (gen !== loadGen) return;
   let ext = name.substring(name.lastIndexOf(".")).toLowerCase();
-  loadRom("rom" + ext, name, { gen, rom: data });
+  loadRom("rom" + ext, name,
+    { gen, rom: data, resume: session, skipResumeOffer: resume || fresh });
 };
 
 // Home-screen recent grid: the game library.
@@ -6219,37 +6228,33 @@ const wireTileMenu = (tile, launch, romName) => {
   return () => { let p = pressed; pressed = false; return p; };
 };
 
-// The first cell of the grid: the way in from a file, shaped like the thing
-// it produces. Deliberately NOT a .home-tile - applyLibFilter, the count and
-// the "No games match" note all walk the grid's children and read that class
-// to mean "a game", and this is not one.
-//
-// It is a library-only affordance. With nothing in the library the hero's own
-// "Load a game" is front and centre and this would be a second, smaller copy
-// of it; while a filter or search is running the grid is answering a question
-// about the games that are there, and a cell that is not a game is in the way.
-const buildAddTile = () => {
-  let tile = document.createElement("div");
-  tile.className = "add-tile";
-  let b = document.createElement("button");
-  b.type = "button";
-  b.className = "add-tile-btn";
-  b.title = "Load a game from a file";
-  b.setAttribute("aria-label", "Load a game from a file");
-  let plus = document.createElement("span");
-  plus.className = "add-tile-plus";
-  plus.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
-  let label = document.createElement("span");
-  label.className = "add-tile-label";
-  label.textContent = "Load a game";
-  b.append(plus, label);
-  b.addEventListener("click", openRomPicker);
-  tile.appendChild(b);
-  return tile;
+// A library game chosen from the home screen, from its tile or from the hero.
+// Where the game has a session that still matches its save, it goes back
+// to exactly that moment - the picture on the tile is the screen the player
+// returns to. Otherwise it boots from its in-game save. The loaded game
+// carries on instead: a reboot would drop what happened since the snapshot.
+const openLibraryGame = async (romName, { driveOnly = false, missing = false } = {}) => {
+  if (currentOriginalName === romName && !linkMode) { resumeGame(); return; }
+  if (!driveOnly) { launchRom(romName, { resume: true }); return; }
+  if (missing) { relinkGameAction(romName, { launch: true }); return; }
+  if (syncDownloading.has(romName)) return;
+  // The tap takes the load token now, not when the download (seconds)
+  // is done: a tile tapped meanwhile is the later tap, and wins. The
+  // download itself finishes either way.
+  const gen = nextLoadGen();
+  if (!(await ensureDriveSignedIn())) return;
+  if (await downloadGame(romName) && gen === loadGen) launchRom(romName, { resume: true });
 };
 
 const libFilterActive = () =>
   !!libFilter.q || libFilter.systems.size > 0 || libFilter.loc !== "all";
+
+// Search, chips and sort are for finding a game in a library too big to
+// take in at a glance. Under two rows of a wide screen they are furniture.
+// A running filter keeps them, so a delete that crosses the line cannot
+// strand the grid filtered with no way to clear it.
+const LIB_BAR_MIN = 9;
+
 
 // Rebuilt off-DOM and swapped in with one replaceChildren, never emptied
 // first: #home is the scroll container, and an empty grid collapses its
@@ -6272,19 +6277,20 @@ const refreshHomeRecent = async () => {
     closeTileMenu();
     homeRecent.replaceChildren();
     libNames = [];
+    if (!currentRomName) setPausedCardShown(false);
     syncHomeCurrent();
     homeArtUrls.forEach(URL.revokeObjectURL);
     homeArtUrls = artUrls;
+    syncBrand(); // the big brand is back, and the bar's copy gives way
     return;
   }
   libraryEmpty = false;
   refreshHomeEmptyActions();
   libNames = roms.map((r) => r.name);
-  syncHomeCurrent(); // the fit (the add tile is a cell too) and home-solo
+  syncHomeCurrent(); // the fit and home-solo
   if (homeRecentHead) homeRecentHead.hidden = false;
   homeRecentWrap.hidden = false;
-  // One game: nothing to sort or filter.
-  if (libBar) libBar.hidden = roms.length < 2;
+  if (libBar) libBar.hidden = roms.length < LIB_BAR_MIN && !libFilterActive();
   updateStorageInfo();
   // Entries without local bytes render as Drive-only download tiles, signed
   // in or not (a tap prompts sign-in).
@@ -6295,6 +6301,7 @@ const refreshHomeRecent = async () => {
   for (let k of keys) {
     if (typeof k === "string" && k.startsWith("rom:")) localRoms.add(k.slice(4));
   }
+  refreshHero(roms, localRoms, keys);
   renderLibChips(roms, localRoms);
   // Sizes ride along with the render that needs them, and lose the games
   // that have left the library.
@@ -6381,20 +6388,9 @@ const refreshHomeRecent = async () => {
     let consumedByPress = wireTileMenu(tile, launch, romName);
     if (romName === tileMenuFor) tile.classList.add("menu-open");
     // The tile body downloads and launches; the glyph downloads only.
-    launch.addEventListener("click", async () => {
+    launch.addEventListener("click", () => {
       if (consumedByPress()) return; // the long press opened the menu
-      // The game already in memory carries on; a reboot would drop what
-      // happened since the last snapshot.
-      if (currentOriginalName === romName && !linkMode) { resumeGame(); return; }
-      if (!driveOnly) { launchRom(romName); return; }
-      if (missing) { relinkGameAction(romName, { launch: true }); return; }
-      if (syncDownloading.has(romName)) return;
-      // The tap takes the load token now, not when the download (seconds)
-      // is done: a tile tapped meanwhile is the later tap, and wins. The
-      // download itself finishes either way.
-      const gen = nextLoadGen();
-      if (!(await ensureDriveSignedIn())) return;
-      if (await downloadGame(romName) && gen === loadGen) launchRom(romName);
+      openLibraryGame(romName, { driveOnly, missing });
     });
 
     if (missing) {
@@ -6457,7 +6453,6 @@ const refreshHomeRecent = async () => {
     .catch(() => {});
   // Filtered before the commit: a fresh render is already filtered.
   for (let t of tiles) t.hidden = !libTileMatches(t);
-  tiles.unshift(buildAddTile());
   // The one DOM commit, atomic: no zero-height moment.
   homeRecent.replaceChildren(...tiles);
   syncHomeCurrent(); // mark the new tiles
@@ -6968,6 +6963,18 @@ const liveSaveSig = () => {
 const autoStateMatchesSave = async (name, auto) =>
   auto.saveSig !== undefined &&
   auto.saveSig === sigOfSave(await dbGet("save:" + name).catch(() => null));
+
+// A game's session where it can be resumed: a snapshot taken with the save
+// that is stored now. Null otherwise - none, one from before saveSig, or one
+// the game has saved past. What the hero's Resume and a tile's tap go back
+// into, with no offer to ask.
+const resumeSessionFor = async (name) => {
+  let auto = null;
+  try { auto = await dbGet(autoStateKey(name)); } catch {}
+  if (!auto?.bytes) return null;
+  if (!(await autoStateMatchesSave(name, auto))) return null;
+  return { bytes: auto.bytes, saveSig: auto.saveSig };
+};
 
 const fmtAgo = (ts) => {
   const m = Math.round((Date.now() - ts) / 60000);
@@ -9261,6 +9268,16 @@ const loadRom = async (romName, originalName, opts = {}) => {
   currentRomName = romName;
   currentOriginalName = name;
   lastFrameSig = null; // a new game: the tick's skip must not carry over
+  // The session the home screen chose to go back into, put back in this same
+  // synchronous run so no frame of the boot is ever drawn. Checked once more
+  // against the battery just installed, as the offer's Resume checks it.
+  if (opts.resume) {
+    if (opts.resume.saveSig !== liveSaveSig()) {
+      showToast("The game has saved since — starting from that save");
+    } else if (!applyStateBytes(opts.resume.bytes)) {
+      showToast(stateRejectMessage(opts.resume.bytes));
+    }
+  }
   // Again, for a capture started on the outgoing game during the awaits
   // above: it would run on into this one.
   if (typeof abortRetroClip === "function") abortRetroClip();
@@ -9568,8 +9585,11 @@ const openRomPicker = () => {
   input.click();
 };
 
-// Mobile "Load a game" button (no drag-and-drop on touch).
-document.getElementById("home-load").addEventListener("click", openRomPicker);
+// Every "Add a game": the empty state's, the library head's, and the pill
+// under a hero that is the whole library.
+for (let id of ["home-load", "lib-add", "home-solo-add"]) {
+  document.getElementById(id)?.addEventListener("click", openRomPicker);
+}
 
 let dropOverlay = document.getElementById("drop-overlay");
 let dragCounter = 0;
@@ -10842,7 +10862,10 @@ const setBrandP = (p) => {
 };
 
 const brandProgress = () => {
-  if (document.body.classList.contains("has-game")) return 1;
+  // With a library the hero is a game, not the brand, so the bar has it
+  // from the top. The scroll crossover is the empty state's alone.
+  if (document.body.classList.contains("has-game") ||
+      document.body.classList.contains("lib-has-games")) return 1;
   let s = homeScroller.getBoundingClientRect?.();
   let b = brandEl.getBoundingClientRect?.();
   if (!s || !b || !b.height) return brandP;
@@ -11020,20 +11043,64 @@ const homePausedName = document.getElementById("home-paused-name");
 // the only way back and the only way to disconnect.
 const setPausedCardShown = (on) => {
   homePausedCard.hidden = !on;
+  if (!on) heroName = null;
   document.body.classList.toggle("home-card", on);
   syncHomeCurrent();
 };
 
 const homeBackdropCanvas = /** @type {HTMLCanvasElement} */ (document.getElementById("home-backdrop-canvas"));
 const homePausedSys = document.getElementById("home-paused-sys");
+const homePausedShot = document.getElementById("home-paused-shot");
+const homePausedState = document.getElementById("home-paused-state");
+const homePausedMeta = document.getElementById("home-paused-meta");
+const homePausedResumeLabel = document.getElementById("home-paused-resume-label");
+const homePausedClose = document.getElementById("home-paused-close");
+const homePausedRestart = document.getElementById("home-paused-restart");
+const homePausedPlaceholder = document.getElementById("home-paused-placeholder");
+
+// What the closed hero's buttons act on: whether its game can go straight
+// back into a session, and where its file is (as its tile would say).
+let heroSession = false;
+let heroFile = { driveOnly: false, missing: false };
+// Which game's picture the canvas holds, so a close - the same game, the
+// same frame - does not redraw it from the stored JPEG.
+let heroDrawnFor = null;
+
+// The blurred glow behind the frame is the same picture.
+const drawHeroGlow = () => {
+  homeBackdropCanvas.width = homePausedCanvas.width;
+  homeBackdropCanvas.height = homePausedCanvas.height;
+  homeBackdropCanvas.getContext("2d")?.drawImage?.(homePausedCanvas, 0, 0);
+};
+
+// The words and buttons for a mode. The frame and the name are the callers'.
+const setHeroMode = (mode, name) => {
+  heroName = name;
+  homePausedCard.dataset.mode = mode;
+  const paused = mode === "paused";
+  const resumable = paused || heroSession;
+  homePausedState.textContent = paused ? "Paused" : "Last played";
+  homePausedResumeLabel.textContent = resumable ? "Resume" : "Play";
+  homePausedClose.hidden = !paused;
+  homePausedRestart.hidden = paused || !heroSession;
+  homePausedMeta.hidden = paused || !heroSession;
+  const label = (resumable ? "Resume " : "Play ") + displayName(name);
+  homePausedShot.title = label;
+  homePausedShot.setAttribute("aria-label", label);
+  homePausedName.textContent = displayName(name);
+  homePausedName.title = name;
+  const system = systemOf(name);
+  homePausedSys.className = "sys-chip badge-" + system.toLowerCase();
+  homePausedSys.textContent = system;
+  setPausedCardShown(true);
+};
 
 const updatePausedCard = () => {
-  setPausedCardShown(false);
   // Single-core only: the link modes render to their own canvases.
-  if (!currentRomName || linkMode || rollbackMode || netActive()) return;
-  if (typeof Module === "undefined" || !Module._wasm_fb_ptr) return;
+  if (!currentRomName || linkMode || rollbackMode || netActive()) { setPausedCardShown(false); return; }
+  if (typeof Module === "undefined" || !Module._wasm_fb_ptr) { setPausedCardShown(false); return; }
   const ptr = Module._wasm_fb_ptr();
-  if (!ptr) return;
+  if (!ptr) { setPausedCardShown(false); return; }
   const [w, h] = gameRes(); // GBA 240x160, GB/GBC 160x144
   const heap = new Uint8Array(Module.memory.buffer, ptr, w * h * 4);
   homePausedCanvas.width = w;
@@ -11044,20 +11111,83 @@ const updatePausedCard = () => {
   // The wasm fb's alpha is not meaningful; force opaque.
   for (let i = 3; i < img.data.length; i += 4) img.data[i] = 255;
   ctx.putImageData(img, 0, 0);
-  // The backdrop is the same frame; CSS scales and blurs it (wide only).
-  homeBackdropCanvas.width = w;
-  homeBackdropCanvas.height = h;
-  homeBackdropCanvas.getContext("2d").drawImage(homePausedCanvas, 0, 0);
-  homePausedName.textContent = displayName(currentOriginalName);
-  homePausedName.title = currentOriginalName;
-  const system = systemOf(currentOriginalName);
-  homePausedSys.className = "sys-chip badge-" + system.toLowerCase();
-  homePausedSys.textContent = system;
-  setPausedCardShown(true);
+  drawHeroGlow();
+  homePausedPlaceholder.hidden = true;
+  heroDrawnFor = currentOriginalName;
+  setHeroMode("paused", currentOriginalName);
 };
 
-document.getElementById("home-paused-shot").addEventListener("click", resumeGame);
-document.getElementById("home-paused-resume").addEventListener("click", resumeGame);
+// The last game played, with nothing loaded: its stored last screen (else
+// its box art, else its system chip standing in, as on its tile), and what
+// the hero can do with it. Renders are numbered so a slower one cannot land
+// over a newer one.
+let heroGen = 0;
+const renderClosedHero = async (name, file, keys) => {
+  const gen = ++heroGen;
+  const local = !file.driveOnly;
+  const session = local && !!(await resumeSessionFor(name));
+  const redraw = heroDrawnFor !== name;
+  let picture = null;
+  if (redraw) {
+    picture = keys.includes(frameKey(name)) ? await getRomFrame(name).catch(() => null) : null;
+    if (!picture) picture = await getRomArt(name).catch(() => null);
+  }
+  let bitmap = null;
+  if (picture && typeof createImageBitmap === "function") {
+    try { bitmap = await createImageBitmap(picture); } catch {}
+  }
+  if (gen !== heroGen || currentRomName || loadingName) return;
+  if (redraw) {
+    const ctx = homePausedCanvas.getContext("2d");
+    if (bitmap) {
+      homePausedCanvas.width = bitmap.width;
+      homePausedCanvas.height = bitmap.height;
+      ctx?.drawImage?.(bitmap, 0, 0);
+    } else {
+      const [w, h] = systemOf(name) === "GBA" ? [240, 160] : [160, 144];
+      homePausedCanvas.width = w;
+      homePausedCanvas.height = h;
+      if (ctx) { ctx.fillStyle = "#000"; ctx.fillRect?.(0, 0, w, h); }
+    }
+    homePausedPlaceholder.hidden = !!bitmap;
+    homePausedPlaceholder.className = "sys-chip badge-" + systemOf(name).toLowerCase();
+    homePausedPlaceholder.textContent = systemOf(name);
+    drawHeroGlow();
+    heroDrawnFor = name;
+  }
+  heroSession = session;
+  heroFile = file;
+  setHeroMode("closed", name);
+};
+
+// Whenever the library renders: with nothing loaded, the hero is its most
+// recent game. A loaded game is the paused card's (updatePausedCard), and a
+// link or online session has no hero at all.
+const refreshHero = (roms, localRoms, keys) => {
+  if (currentRomName || loadingName) return;
+  if (linkMode || rollbackMode || netActive() || !roms.length) {
+    setPausedCardShown(false);
+    return;
+  }
+  let latest = roms[0];
+  for (let r of roms) if ((r.ts || 0) > (latest.ts || 0)) latest = r;
+  const driveOnly = !localRoms.has(latest.name);
+  renderClosedHero(latest.name,
+    { driveOnly, missing: driveOnly && !driveHasRom(latest.name) }, keys);
+};
+
+// The picture and the labelled button do the same thing.
+const heroPrimary = () => {
+  if (homePausedCard.dataset.mode === "paused") { resumeGame(); return; }
+  if (!heroName) return;
+  if (heroSession) { launchRom(heroName, { resume: true }); return; }
+  openLibraryGame(heroName, heroFile);
+};
+homePausedShot.addEventListener("click", heroPrimary);
+document.getElementById("home-paused-resume").addEventListener("click", heroPrimary);
+homePausedRestart.addEventListener("click", () => {
+  if (heroName && homePausedCard.dataset.mode === "closed") launchRom(heroName, { fresh: true });
+});
 
 // The card's ⋯ is the game's ⋯: the loaded game's own tile in the grid
 // opens the same menu with the same entries, so there is one menu per game
@@ -11069,9 +11199,12 @@ document.getElementById("home-paused-resume").addEventListener("click", resumeGa
 // player is, demonstrably, playing.
 const homePausedMore = document.getElementById("home-paused-more");
 homePausedMore.addEventListener("click", () => {
-  if (!currentOriginalName) return;
-  if (tileMenuFor === currentOriginalName) closeTileMenu();
-  else openTileMenu(currentOriginalName, homePausedMore, null, null, true);
+  // Closed, the hero is a library game like any tile, and gets its file menu.
+  const paused = homePausedCard.dataset.mode !== "closed";
+  const name = paused ? currentOriginalName : heroName;
+  if (!name) return;
+  if (tileMenuFor === name) closeTileMenu();
+  else openTileMenu(name, homePausedMore, null, null, paused);
 });
 
 // Close the paused game: flush its save once, detach it from every later
@@ -11116,7 +11249,8 @@ const unloadGame = async ({ flushSave = true } = {}) => {
   // No cart, no sensor: drop the camera and its button.
   stopWebcam();
   camNoticeShown = null;
-  setPausedCardShown(false);
+  // The hero stays up: the render turns it from the paused game into the
+  // last one played - the same game, in place, now with its session.
   refreshHomeRecent();
   updateCanvasScaling();
   await flushed; // callers go on to the stored records (Remove keeps this save)

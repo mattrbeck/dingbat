@@ -339,52 +339,54 @@
 
       <!-- Home / empty state (shown until a ROM is loaded) -->
       <section id="home">
-        <!-- Wide screens only, while the paused card is up: the paused frame
-             again, blown up and blurred behind the top of the page. It is
-             atmosphere, not a picture - the card's own frame is the one to
-             look at. index.js draws it alongside the card's. -->
-        <div id="home-backdrop" aria-hidden="true">
-          <canvas id="home-backdrop-canvas" width="240" height="160"></canvas>
-        </div>
         <div id="home-inner">
-          <!-- Brand first in the DOM (above the paused card on desktop); the
-               touch layout reorders via flex `order` in styles.css. It stays
-               here always and simply scrolls away; the bar carries its own
-               copy. -->
+          <!-- The big brand is the empty state's: with a library on screen the
+               bar carries it (body.lib-has-games). It stays in the DOM
+               always, so the first game's flight has somewhere to start. -->
           <div id="home-brand">
             <img src="favicon.svg" alt="" id="home-logo" />
             <h1>dingbat</h1>
             <p id="home-tagline">a game boy &amp; game boy advance emulator</p>
           </div>
-          <!-- Paused-game card: the game Main Menu left behind. JS fills the
-               canvas from the framebuffer. On phones it takes the library's
-               own width (--lib-width) so the home screen reads as one column;
-               from 830px it is the page's centred heading instead (styles.css,
-               "Wide screens"). Either way it carries every action that is about this game: resume it, close
-               it, or the same ⋯ menu its tile in the grid would give.
-               The picture is still the resume target - it is the biggest,
-               most obvious thing on the card - with the button beside it for
-               anyone who wants a labelled control. -->
-          <div id="home-paused" hidden>
-            <button type="button" id="home-paused-shot" title="Resume game" aria-label="Resume game">
-              <canvas id="home-paused-canvas" width="240" height="160"></canvas>
-            </button>
+          <!-- The hero: the library's most recent game, heading the page.
+               data-mode says which of two things it is showing. "paused" is
+               the game Main Menu left behind, drawn from the live
+               framebuffer, with Resume / Close. "closed" is the last game
+               played, with nothing loaded: its stored last screen, and
+               Resume / Restart when a session snapshot can put it back
+               exactly, else Play. The game is shown once: its tile stands
+               down from the grid (index.js, syncHomeCurrent), and closing it
+               changes the hero's mode in place instead of moving anything.
+               The picture is the main target; the buttons are for anyone
+               who wants a labelled control. -->
+          <div id="home-paused" hidden data-mode="paused">
+            <div id="home-paused-frame">
+              <!-- The same frame again, blurred behind the sharp one: a glow
+                   the colour of the game, not a picture of it. -->
+              <canvas id="home-backdrop-canvas" width="240" height="160" aria-hidden="true"></canvas>
+              <button type="button" id="home-paused-shot" title="Resume game" aria-label="Resume game">
+                <canvas id="home-paused-canvas" width="240" height="160"></canvas>
+                <span id="home-paused-placeholder" class="sys-chip" hidden></span>
+              </button>
+            </div>
             <div id="home-paused-body">
-              <!-- Wide screens only: what the picture is, over its name. -->
               <div id="home-paused-kicker">
-                <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M1 1h3v8H1zM6 1h3v8H6z"/></svg>
-                <span>Paused</span>
+                <span id="home-paused-led" aria-hidden="true"></span>
+                <span id="home-paused-state">Paused</span>
                 <span id="home-paused-sys" class="sys-chip"></span>
               </div>
               <div id="home-paused-title">
                 <span id="home-paused-name"></span>
               </div>
+              <p id="home-paused-meta" hidden>Resume picks up where you closed it. Restart boots from your in-game save.</p>
               <div id="home-paused-actions">
                 <button type="button" id="home-paused-resume" class="button button-primary">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></svg>
-                  <span>Resume</span>
+                  <span id="home-paused-resume-label">Resume</span>
                 </button>
                 <button type="button" id="home-paused-close" class="button" title="Close the game &mdash; your save is kept">Close</button>
+                <button type="button" id="home-paused-restart" class="button" hidden
+                        title="Start the game again from its in-game save">Restart</button>
                 <button type="button" id="home-paused-more" class="button home-paused-more"
                         title="More for this game" aria-label="More for this game" aria-haspopup="menu">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
@@ -392,20 +394,34 @@
               </div>
             </div>
           </div>
-          <!-- pointer:coarse: a row of Resume + "Load a game"; desktop:
-               display:contents. -->
+          <!-- The empty state's ways in: a file (dropped anywhere, or picked),
+               or an account that already has a library. -->
+          <div id="home-start">
+            <div id="home-drop">
+              <svg class="home-drop-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4m0 0 4 4m-4-4-4 4M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
+              <p class="home-drop-title">Drop a game file anywhere on the page</p>
+              <button type="button" id="home-load" class="button button-primary">Add a game</button>
+              <p class="home-drop-hint">.gba, .gb, .gbc or a .zip. Your games stay in this browser.</p>
+            </div>
+            <!-- Signed out: Google's own button, per its branding rules.
+                 Signed in with nothing here yet: a plain Sync. -->
+            <div id="home-drive-row" hidden>
+              <span id="home-drive-lead">Already playing on another device?</span>
+              <button type="button" id="home-drive" class="button"></button>
+            </div>
+          </div>
+          <!-- The rungs under the hero: Resume for the sessions the hero
+               cannot draw (2P link, rollback, online), and a quiet Add a
+               game while the hero is the whole library. -->
           <div id="home-actions">
             <button type="button" id="home-resume">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></svg>
               <span>Resume game</span>
             </button>
-            <!-- The empty library's way in. Once there are games the
-                 library head carries it (#lib-add) and this one stands down;
-                 body.lib-empty is the switch. -->
-            <button type="button" id="home-load" class="button button-primary">Load a game</button>
-            <!-- Empty library only: the library head carries the Drive slot
-                 the rest of the time, and the head is not on screen then. -->
-            <button type="button" id="home-drive" class="button" hidden></button>
+            <button type="button" id="home-solo-add" class="home-add-pill">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              <span>Add a game</span>
+            </button>
           </div>
 
           <!-- Wasm-boot progress. CSS delays its fade-in so fast loads never
@@ -423,6 +439,10 @@
                 <!-- Shown only while some game has no picture; index.js
                      "Library pictures, in one go" hides it again once none do. -->
                 <button type="button" class="home-manage-link" id="home-thumbs" hidden>Add pictures</button>
+                <button type="button" class="button lib-add" id="lib-add">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                  <span>Add a game</span>
+                </button>
               </span>
             </div>
             <!-- Search, filter chips (built by index.js) and sort. A sibling
@@ -455,7 +475,7 @@
       <div id="drop-overlay">
         <div id="drop-overlay-inner">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V5m0 0 4 4m-4-4-4 4M5 15v3a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3"/></svg>
-          <span>Drop ROM to load</span>
+          <span>Drop to add the game</span>
         </div>
       </div>
 

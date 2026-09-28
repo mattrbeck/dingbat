@@ -194,15 +194,33 @@ test("system chips carry counts, toggle, and combine with search", async () => {
   eq(visible(app), ["Mario"], "search alone");
 });
 
-test("no system chips for a one-system library; no bar for one game", async () => {
+test("no system chips for a one-system library; no bar under nine games", async () => {
   const app = await loadApp();
-  seed(app, ["A.gba", "B.gba"]);
+  const names = (n) => Array.from({ length: n }, (_, i) => `G${i}.gba`);
+  seed(app, names(2));
   await app.api.refreshHomeRecent();
   await settle();
   eq(chips(app), []);
-  assert.equal(app.document.getElementById("lib-bar").hidden, false);
+  assert.equal(app.document.getElementById("lib-bar").hidden, true, "two games: nothing to search");
 
-  seed(app, ["A.gba"]);
+  seed(app, names(8));
+  await app.api.refreshHomeRecent();
+  await settle();
+  assert.equal(app.document.getElementById("lib-bar").hidden, true, "eight: still at a glance");
+
+  seed(app, names(9));
+  await app.api.refreshHomeRecent();
+  await settle();
+  assert.equal(app.document.getElementById("lib-bar").hidden, false, "nine: the bar arrives");
+
+  // A filter still running when the library drops under the line keeps the
+  // bar, or nothing on screen could clear it.
+  await search(app, "G1");
+  seed(app, names(3));
+  await app.api.refreshHomeRecent();
+  await settle();
+  assert.equal(app.document.getElementById("lib-bar").hidden, false);
+  await search(app, "");
   await app.api.refreshHomeRecent();
   await settle();
   assert.equal(app.document.getElementById("lib-bar").hidden, true);
@@ -255,29 +273,19 @@ test("a filter that stops meaning anything is dropped, not stuck", async () => {
 });
 
 
-// ── The add tile ────────────────────────────────────────────────────────────
-// The grid's first cell is the way in from a file. It is not a game, and
-// everything that counts, filters or names games has to know that.
+// ── The grid holds games ────────────────────────────────────────────────────
+// The way in from a file is the library head's Add a game, not a cell: every
+// child of the grid is a game, and the count counts them.
 
-test("the add tile leads the grid, counts as no game, and steps aside for a filter", async () => {
+test("the grid holds only games; the head carries Add a game", async () => {
   const app = await loadApp();
   seed(app, ["Zelda.gbc", "Metroid.gba"]);
   await app.api.refreshHomeRecent();
   await settle();
 
   const cells = app.document.getElementById("home-recent").children;
-  assert.ok(cells[0].classList.contains("add-tile"), "first cell");
-  assert.ok(!cells[0].classList.contains("home-tile"), "and not a game");
-  assert.equal(gameTiles(app).length, 2);
-  assert.equal(count(app), "2 games", "the count is of games, not cells");
-  assert.equal(cells[0].hidden, false);
-
-  // Searching asks a question about the games that are there; a cell that is
-  // not a game is in the way of the answer.
+  assert.ok(cells.every((c) => c.classList.contains("home-tile")), "no cell that is not a game");
+  assert.equal(count(app), "2 games");
   await search(app, "zel");
-  assert.equal(cells[0].hidden, true, "gone while a search runs");
   assert.equal(count(app), "1 of 2");
-
-  await search(app, "");
-  assert.equal(cells[0].hidden, false, "and back when the grid is the library again");
 });

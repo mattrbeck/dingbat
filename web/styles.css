@@ -1921,7 +1921,25 @@ body.running #home {
   }
 }
 
-/* Resume button — only when a game is loaded (returning from Main Menu) */
+/* The rungs under the hero. Resume is for the sessions the hero cannot draw
+   (2P link, rollback, online - two cores, no single framebuffer), where it is
+   the only way back; the Add pill is for a hero that is the whole library.
+   With neither the row would still cost #home-inner's gap, so it is off
+   unless one of them is on. */
+#home-actions {
+  display: none;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 480px;
+}
+
+body.has-game:not(.home-card) #home-actions,
+body.home-solo.home-card #home-actions {
+  display: flex;
+}
+
 #home-resume {
   display: none;
   align-items: center;
@@ -1952,142 +1970,262 @@ body.running #home {
   transform: translateY(1px);
 }
 
-/* The hero's Resume is the fallback way back, not the usual one: with the
-   card up it sits inside the card instead. What is left for it is the modes
-   the card cannot draw - 2P link, rollback, an online session - where it is
-   the only way back to the game. */
 body.has-game:not(.home-card) #home-resume {
   display: inline-flex;
 }
 
-/* Resume + the mobile-only "Load a game" button. Desktop: display: contents;
-   the touch layout is in the (pointer: coarse) home block. Drag-and-drop
-   still works document-wide (#drop-overlay). */
-#home-actions {
+/* A quiet dashed pill in the add tile's old idiom: a second game is a thing
+   to offer, not to push. */
+.home-add-pill {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px 10px 16px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1.5px dashed var(--border-2);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.14s, border-color 0.14s, background 0.14s;
+}
+
+.home-add-pill svg,
+.lib-add svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.home-add-pill:hover {
+  color: var(--text);
+  border-color: rgba(var(--accent-rgb), 0.55);
+  background: rgba(var(--accent-rgb), 0.06);
+}
+
+body.home-solo.home-card #home-solo-add {
+  display: inline-flex;
+}
+
+/* --- The empty state's ways in ---------------------------------------------
+   A file first, as a place to drop it (the whole page takes the drop; the
+   panel says so) with the picker's button inside. Touch screens have
+   nothing to drop, so there it is just the button. Then, quieter, the way
+   in for someone whose library is already on another device. */
+#home-start {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 10px;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
   width: 100%;
-  max-width: 480px;
+  max-width: 560px;
+}
+
+body.lib-has-games #home-start {
+  display: none;
+}
+
+#home-drop {
+  box-sizing: border-box;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 30px 28px 26px;
+  text-align: center;
+  border: 1.5px dashed rgba(var(--accent-rgb), 0.38);
+  border-radius: var(--radius-lg);
+  background: rgba(var(--accent-rgb), 0.035);
+}
+
+.home-drop-icon {
+  width: 30px;
+  height: 30px;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.home-drop-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.home-drop-hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-faint);
 }
 
 #home-load {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 11px 24px;
+  padding: 12px 28px;
   font-size: 15px;
   border-radius: 999px;
 }
 
-/* With a library on screen the way in from a file is #lib-add, in the head
-   of the thing it adds to. The hero's button is the empty state and nothing
-   else, so only one of the two is ever up. */
-body.lib-has-games #home-load {
-  display: none;
+@media (pointer: coarse) {
+  #home-drop {
+    gap: 12px;
+    padding: 0;
+    border: 0;
+    background: none;
+  }
+  .home-drop-icon,
+  .home-drop-title {
+    display: none;
+  }
+  #home-load {
+    width: 100%;
+    max-width: 360px;
+    padding: 15px 28px;
+    font-size: 17px;
+  }
 }
 
-/* ...which can empty the rung completely: with a library and either no game
-   or a card carrying its own Resume, all three of its buttons are down. An
-   empty flex child still costs #home-inner's 26px gap, so it leaves too. */
-body.lib-has-games.home-card #home-actions,
-body.lib-has-games:not(.has-game) #home-actions {
-  display: none;
-}
-
-/* The Drive way in, beside the file way in - same pill, quieter fill, so
-   the rung reads as two choices with one of them recommended. */
-#home-drive {
-  display: inline-flex;
+#home-drive-row {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  padding: 11px 22px;
-  font-size: 15px;
-  border-radius: 999px;
+  gap: 10px 16px;
+  font-size: 14px;
+  color: var(--text-dim);
 }
 
-#home-drive[hidden] {
+#home-drive-row[hidden],
+#home-drive-lead[hidden] {
   display: none;
 }
 
-/* When a game is paused, Resume is the primary action, so Load drops to the
-   neutral (secondary) button look. */
-body.has-game #home-load {
-  color: var(--text);
-  background: linear-gradient(180deg, var(--surface-3), var(--surface-2));
-  border-color: var(--border-2);
-  box-shadow: inset 0 1px 0 var(--inset-hi);
-}
-body.has-game #home-load:hover {
-  background: linear-gradient(180deg, var(--surface-hover), var(--surface-3));
+#home-drive.button {
+  padding: 10px 22px;
+  font-size: 14px;
+  border-radius: 999px;
 }
 
-/* Paused-game card — the frozen frame of the game Resume returns to, at the
-   library grid's own width (--lib-width, inherited from #home-inner) so the
-   home screen is one column from the card to the last tile rather than a
-   narrow box floating over a wide grid.
+/* Google's sign-in button, to its branding guidelines: the full-colour G on
+   the dark or light fill, its stroke and text colours, 12px in, 10px after
+   the mark. Fixed colours on purpose - a theme may not recolour it. */
+.gsi-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  padding: 0 12px;
+  font-family: "Google Sans", Roboto, var(--font-ui);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  color: #e3e3e3;
+  background: #131314;
+  border: 1px solid #8e918f;
+  border-radius: 999px;
+  cursor: pointer;
+}
 
-   Desktop: picture left, name and actions right, because the width is there.
-   Phones (<=560px): the picture goes full-bleed across the top with the name
-   and actions under it, which is the only way a 3:2 frame stays a picture at
-   360pt. Both are the same two children in the same order; only the axis
-   changes. */
+.gsi-btn svg {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+}
+
+.gsi-btn[disabled] {
+  opacity: 0.6;
+  cursor: default;
+}
+
+:root[data-theme="light"] .gsi-btn {
+  color: #1f1f1f;
+  background: #fff;
+  border-color: #747775;
+}
+
+@media (pointer: coarse) {
+  .gsi-btn {
+    height: 44px;
+    padding: 0 16px 0 12px;
+  }
+}
+
+/* --- The hero ---------------------------------------------------------------
+   The library's most recent game, heading the page (index.js: "paused" -
+   Main Menu left it behind - or "closed" - the last game played). One
+   column on phones: the frame across the top, the words and the buttons
+   under it. From 760px, frame left and words right, spanning the library's
+   own width so its left edge is the grid's; a hero that is the whole
+   library (body.home-solo) is its own centred block instead, a size up.
+
+   The frame sits in a glow of its own colours - the same picture, blurred
+   behind it - bright for a game held in memory, faint for one that is not. */
 #home-paused {
   display: flex;
-  align-items: stretch;
-  gap: 14px;
+  flex-direction: column;
+  gap: 16px;
   width: 100%;
   max-width: var(--lib-width);
-  padding: 12px;
-  /* A hero has a maximum; a grid does not. Past four cells the grid is the
-     whole 1400px row, and a card that followed it there put its caption alone
-     in five hundred pixels of nothing. So it stops at 1000px - and stops
-     FLUSH LEFT, not centred, so the picture's left edge still lines up with
-     the first tile and the search field below it. That alignment is the
-     reason the card was given the grid's width in the first place; the right
-     edge was never the part doing the work. */
-  margin-inline: 0 auto;
-  background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  margin-inline: auto;
 }
 
 #home-paused[hidden] {
   display: none;
 }
 
-/* The picture is still the resume target: it is the largest thing on the
-   card and the one every returning player already aims at. The labelled
-   Resume beside it is for everyone who wants to be told. */
+#home-paused-frame {
+  position: relative;
+  margin-bottom: 2px;
+}
+
+#home-backdrop-canvas {
+  position: absolute;
+  left: -8%;
+  top: -10%;
+  width: 116%;
+  height: 120%;
+  z-index: 0;
+  pointer-events: none;
+  filter: blur(36px) saturate(1.5);
+  opacity: 0.45;
+  transition: opacity 0.6s ease;
+}
+
+#home-paused[data-mode="closed"] #home-backdrop-canvas {
+  opacity: 0.14;
+}
+
 #home-paused-shot {
+  position: relative;
+  z-index: 1;
   display: block;
+  width: 100%;
   padding: 0;
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 6px;
   overflow: hidden;
+  background: var(--screen-off);
+  border: 1px solid rgba(var(--hi-rgb), 0.14);
+  border-radius: 14px;
+  box-shadow: 0 20px 50px -14px rgba(0, 0, 0, 0.75);
   cursor: pointer;
   transition: border-color 0.14s, transform 0.06s;
 }
 
 #home-paused-shot:hover {
-  border-color: var(--border-2);
+  border-color: rgba(var(--hi-rgb), 0.28);
 }
 
 #home-paused-shot:active {
   transform: translateY(1px);
-}
-
-/* The frame scales with the CARD, not with the window: the card takes the
-   library grid's width, which is narrow next to a one-game library, and a
-   picture sized off the viewport bursts straight out of it. A share of the
-   card's own width instead, capped so a very wide screen does not turn
-   240x160 pixels into a mural. */
-#home-paused-shot {
-  flex: 0 1 auto;
-  width: 46%;
-  max-width: 460px;
 }
 
 #home-paused-canvas {
@@ -2096,76 +2234,148 @@ body.has-game #home-load:hover {
   height: auto;
   background: var(--screen-off);
   image-rendering: pixelated;
+  transition: filter 0.5s ease;
 }
 
-/* Name over actions as one centred block. Pinning them to the card's two
-   ends filled the height but read as two unrelated things at opposite ends
-   of a box; together they read as one caption beside a picture. */
+/* Not in memory: the picture is a memory, and looks a little like one. */
+#home-paused[data-mode="closed"] #home-paused-canvas {
+  filter: saturate(0.75) brightness(0.82);
+}
+
+/* A game never pictured has no frame, and gets no invented one: its system
+   chip stands in, as on its tile. */
+#home-paused-placeholder {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: max-content;
+  height: max-content;
+}
+
+#home-paused-placeholder[hidden] {
+  display: none;
+}
+
 #home-paused-body {
-  flex: 1 1 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  gap: 16px;
-  padding: 4px 4px 4px 0;
+  gap: 12px;
+}
+
+#home-paused-kicker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+/* The lamp: lit and breathing while the game is held in memory, out once it
+   is closed. */
+#home-paused-led {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.8);
+  animation: hero-led 2.4s ease-in-out infinite;
+}
+
+@keyframes hero-led {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+#home-paused[data-mode="closed"] #home-paused-kicker {
+  color: var(--text-dim);
+}
+
+#home-paused[data-mode="closed"] #home-paused-led {
+  background: var(--text-faint);
+  opacity: 0.55;
+  box-shadow: none;
+  animation: none;
+}
+
+#home-paused-kicker .sys-chip {
+  width: 34px;
+  height: 18px;
+  letter-spacing: 0.03em;
 }
 
 #home-paused-title {
   display: flex;
   align-items: center;
-  gap: 8px;
   min-width: 0;
 }
 
 #home-paused-name {
-  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: clamp(17px, 2.2vw, 26px);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  text-align: left;
+  font-size: clamp(24px, 6.5vw, 30px);
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
   color: var(--text);
 }
 
+#home-paused-meta {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+#home-paused-meta[hidden] {
+  display: none;
+}
 
 #home-paused-actions {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  margin-top: 2px;
 }
 
 #home-paused-actions .button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  padding: 10px 20px;
-  font-size: 14px;
+  gap: 8px;
+  min-height: 48px;
+  padding: 0 22px;
+  font-size: 15px;
   border-radius: 999px;
 }
 
-#home-paused-resume svg {
-  width: 16px;
-  height: 16px;
+#home-paused-actions .button[hidden] {
+  display: none;
 }
 
-/* ⋯ is the same menu the game's tile opens, with the session items on top.
-   Square, so it reads as a handle beside two worded buttons rather than a
-   third thing to read. */
-/* Square, and the same height as the two worded buttons beside it: stretch,
-   because the row's height is set by their padding and this one has none.
-   Selected through #home-paused-actions so it beats that rule's own padding -
-   which otherwise leaves a 42px button with 40px of padding and no room for
-   the glyph at all. */
+#home-paused-resume {
+  flex: 1 1 auto;
+}
+
+#home-paused-resume svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* ⋯ is the game's menu. Square, so it reads as a handle beside the worded
+   buttons rather than a third thing to read; selected through the actions
+   row so it beats that row's padding. */
 #home-paused-actions .home-paused-more {
   flex: 0 0 auto;
-  align-self: stretch;
-  width: 42px;
+  width: 48px;
   padding: 0;
   color: var(--text-dim);
 }
@@ -2181,8 +2391,7 @@ body.has-game #home-load:hover {
   color: var(--text);
 }
 
-/* Close is the one destructive-looking action here, but it is not
-   destructive: the save is kept and the game stays in the library. So it
+/* Close is not destructive - the save and the session are kept - so it
    stays a plain button and only says danger on hover. */
 #home-paused-close:hover {
   color: var(--danger);
@@ -2191,193 +2400,56 @@ body.has-game #home-load:hover {
 
 @media (min-width: 760px) {
   #home-paused {
-    max-width: min(var(--lib-width), 1000px);
+    flex-direction: row;
+    align-items: center;
+    gap: 40px;
   }
-}
-
-@media (max-width: 560px) {
-  #home-paused {
-    flex-direction: column;
-    gap: 10px;
-    padding: 10px;
+  #home-paused-frame {
+    flex: 0 0 auto;
+    width: clamp(280px, 30vw, 384px);
+    margin-bottom: 0;
   }
-  #home-paused-shot {
-    align-self: stretch;
-    width: auto;
-    max-width: 100%;
+  #home-paused-body {
+    flex: 0 1 460px;
   }
-  #home-paused-actions .button {
-    flex: 1 1 auto;
-  }
-  .home-paused-more {
+  #home-paused-resume {
     flex: 0 0 auto;
   }
+  #home-paused-name {
+    font-size: clamp(28px, 2.8vw, 36px);
+  }
+  /* The whole library: a centred block, a size up. */
+  body.home-solo #home-paused {
+    width: auto;
+    max-width: 100%; /* not the library's width: it has no tiles to measure */
+    gap: 48px;
+  }
+  body.home-solo #home-paused-frame {
+    width: clamp(320px, 36vw, 480px);
+  }
+  body.home-solo #home-paused-body {
+    flex-basis: 380px;
+  }
+  body.home-solo #home-paused-name {
+    font-size: clamp(30px, 3.2vw, 42px);
+  }
 }
 
-/* --- Wide screens: the paused game heads the page ----------------------
-   From 830px the library's floor no longer fills the column, and a card
-   sized off the grid came loose from it: flush left over a centred one-game
-   library, or stopped at 1000px beside a full one. So here it is not a card
-   at all but the page's heading, centred on the same axis as everything
-   under it: a small sharp frame beside the name and the buttons, with the
-   same frame blown up and blurred behind the top of the page.
-
-   The game is shown once. Its tile stands down from the grid while the card
-   is up, and a library that is only this game folds away, leaving the add
-   button under the heading (index.js, syncHomeCurrent). Phones, either way
-   up, keep the card above: there it is a picture at the top of one column,
-   and it reads fine. */
-#home-backdrop,
-#home-paused-kicker {
+/* The hero's own tile, while the hero is it. A search or filter brings it
+   back: asked for by name, it must be found. */
+body.home-card:not(.lib-filtering) .home-tile.is-current {
   display: none;
 }
 
-@keyframes home-fade {
-  from {
-    opacity: 0;
-  }
+/* A library of just the hero's game: the hero is the library. */
+body.home-solo.home-card #home-recent-wrap {
+  display: none;
 }
 
-/* A phone on its side is 830px wide too, and keeps the phone card: the
-   second clause is "not a touch screen under 500px tall". Kept in step with
-   homeWideQuery in index.js. */
-@media (min-width: 830px) and (pointer: fine), (min-width: 830px) and (min-height: 501px) {
-  /* Exactly #home's own height and no more, so it adds nothing to the scroll:
-     it scrolls away with the page, under the library. z-index -1 inside
-     #home's stacking context puts it over the home background and under
-     every in-flow thing on the page. */
-  body.home-card #home-backdrop {
-    display: block;
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: -1;
-    height: 100%;
-    overflow: hidden;
-    pointer-events: none;
-    -webkit-mask-image: linear-gradient(180deg, #000 15%, transparent 75%);
-    mask-image: linear-gradient(180deg, #000 15%, transparent 75%);
-    animation: home-fade 0.6s ease-out both;
-  }
-
-  /* On its own the heading is centred in the window, so the glow is too. */
-  body.home-card.home-solo #home-backdrop {
-    -webkit-mask-image: radial-gradient(60% 55% at 50% 50%, #000 20%, transparent 100%);
-    mask-image: radial-gradient(60% 55% at 50% 50%, #000 20%, transparent 100%);
-  }
-
-  /* Scaled past the clip: a blur pulls transparency in from the edges, and
-     that soft rim belongs outside the window, not down its sides. */
-  #home-backdrop-canvas {
-    display: block;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    opacity: 0.5;
-    filter: blur(64px) saturate(1.3);
-    transform: scale(1.2);
-  }
-
-  #home-paused {
-    align-items: center;
-    gap: 28px;
-    width: auto;
-    max-width: 100%;
-    margin-inline: auto;
-    padding: 0;
-    background: none;
-    border: 0;
-    border-radius: 0;
-  }
-
-  #home-paused-shot {
-    flex: 0 0 auto;
-    width: clamp(192px, 15vw, 264px);
-    max-width: none;
-    border-color: rgba(var(--hi-rgb), 0.16);
-    border-radius: var(--radius-sm);
-    box-shadow: 0 20px 50px -18px rgba(0, 0, 0, 0.9);
-  }
-
-  #home-paused-body {
-    flex: 0 1 auto;
-    gap: 10px;
-    padding: 0;
-  }
-
-  #home-paused-kicker {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--accent);
-  }
-
-  #home-paused-kicker svg {
-    width: 9px;
-    height: 9px;
-    fill: currentColor;
-  }
-
-  #home-paused-kicker .sys-chip {
-    width: 34px;
-    height: 18px;
-    margin-left: 1px;
-    letter-spacing: 0.03em;
-  }
-
-  #home-paused-name {
-    font-size: clamp(26px, 2.2vw, 34px);
-    /* Over a bright frame's glow the name still has an edge: a halo of the
-       stage colour, so it is dark under light text and light under dark. */
-    text-shadow: 0 1px 16px rgba(var(--stage-rgb), 0.6);
-  }
-
-  #home-paused-actions {
-    margin-top: 4px;
-  }
-
-  /* The paused game's tile, while the card above is it. A search or filter
-     brings it back: asked for by name, it must be found. */
-  body.home-card:not(.lib-filtering) .home-tile.is-current {
-    display: none;
-  }
-
-  /* A library of just the paused game: the heading is the library. What
-     is left of it is the way to add a second game, as a quiet dashed pill
-     in the add tile's own idiom. */
-  body.home-solo.home-card #home-recent-wrap {
-    display: none;
-  }
-  body.home-solo.home-card #home-actions {
-    display: flex;
-  }
-  body.home-solo.home-card #home-load {
-    display: inline-flex;
-    gap: 8px;
-    padding: 9px 18px 9px 14px;
-    font-size: 13px;
-    color: var(--text-dim);
-    background: rgba(var(--stage-rgb), 0.35);
-    border: 1px dashed var(--border-2);
-    box-shadow: none;
-  }
-  body.home-solo.home-card #home-load::before {
-    content: "+";
-    font-size: 17px;
-    font-weight: 400;
-    line-height: 1;
-  }
-  body.home-solo.home-card #home-load:hover {
-    color: var(--text);
-    border-color: rgba(var(--accent-rgb), 0.55);
-    background: rgba(var(--accent-rgb), 0.06);
-  }
+/* Under a hero, the library begins at a rule. */
+body.home-card .home-recent-head {
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
 }
 
 /* --- The brand, twice ---------------------------------------------------
@@ -2470,7 +2542,8 @@ body.has-game #home-load:hover {
    down - otherwise a game paused at the home screen shows both at once. Not
    body.running, which is only the playing case: a paused game is on this
    screen with the card, and the bar has the brand then too. */
-body.has-game #home-brand {
+body.has-game #home-brand,
+body.lib-has-games #home-brand {
   display: none;
 }
 
@@ -2549,7 +2622,7 @@ body.runtime-ready #boot-progress {
 .home-recent-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 6px 8px;
   margin-bottom: 10px;
@@ -2573,7 +2646,7 @@ body.runtime-ready #boot-progress {
 .home-recent-meta {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   justify-content: flex-end;
   gap: 4px 12px;
   margin-left: auto;
@@ -2607,6 +2680,17 @@ body.runtime-ready #boot-progress {
 
 .home-manage-link:hover {
   color: var(--text);
+}
+
+/* The library's way in from a file, in its head. */
+.lib-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 14px 0 11px;
+  font-size: 13px;
+  border-radius: 999px;
 }
 
 /* The count beside the label: "LIBRARY 12 games", or "3 of 12" filtered. */
@@ -3047,70 +3131,6 @@ body.runtime-ready #boot-progress {
 
 .home-tile-launch:active {
   transform: translateY(1px);
-}
-
-/* --- The add tile ------------------------------------------------------
-   The first cell of the grid: the way in from a file, in the shape of the
-   thing it produces. Dashed and unfilled so it reads as an empty slot
-   waiting for a game rather than as a game - it is the one cell in the grid
-   with no picture, and it should look like it.
-
-   It stretches to the row's height rather than setting one: the games decide
-   how tall a row is (3:2 picture plus a name), and this follows them. */
-.add-tile {
-  display: flex;
-}
-
-.add-tile[hidden] {
-  display: none;
-}
-
-.add-tile-btn {
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  width: 100%;
-  padding: 12px;
-  color: var(--text-dim);
-  background: none;
-  border: 1px dashed var(--border-2);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: color 0.14s, border-color 0.14s, background 0.14s;
-}
-
-.add-tile-btn:hover {
-  color: var(--text);
-  border-color: rgba(var(--accent-rgb), 0.55);
-  background: rgba(var(--accent-rgb), 0.06);
-}
-
-.add-tile-plus {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  border: 1px solid currentColor;
-}
-
-.add-tile-plus svg {
-  width: 18px;
-  height: 18px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2.2;
-  stroke-linecap: round;
-}
-
-.add-tile-label {
-  font-size: 12.5px;
-  font-weight: 600;
-  text-align: center;
 }
 
 .home-tile-thumb {

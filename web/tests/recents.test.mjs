@@ -293,7 +293,11 @@ test("deleting the last game empties the library and the hero takes over", async
   await settle();
   assert.equal(app.elements.get("home-recent-wrap").hidden, true);
   assert.equal(app.elements.get("home-drive").hidden, false);
-  assert.equal(app.elements.get("home-drive").textContent, "Sign in");
+  assert.equal(app.elements.get("home-drive-row").hidden, false);
+  // Google's own button, by its branding rules: its mark and its words.
+  assert.equal(app.elements.get("home-drive").className, "gsi-btn");
+  assert.match(app.elements.get("home-drive").innerHTML, /Sign in with Google/);
+  assert.equal(app.elements.get("home-paused").hidden, true, "no hero for no game");
 });
 
 test("a library with games withdraws the hero's Drive slot", async () => {
@@ -304,17 +308,17 @@ test("a library with games withdraws the hero's Drive slot", async () => {
   assert.equal(app.elements.get("home-drive").hidden, true);
 });
 
-// On #home-inner rather than the grid's own wrap, because the paused card
-// reads the same width tokens and is the wrap's sibling. The count is CELLS,
-// not games: the "Load a game" tile is the grid's first cell and takes a
-// column like any other, so a one-game library still draws two.
+// On #home-inner rather than the grid's own wrap, because the hero reads the
+// same width tokens and is the wrap's sibling. The count is the tiles ON
+// SCREEN: with nothing loaded the hero is the most recent game, and its tile
+// stands down, so N games draw N-1 cells (one game: the hero is all of it).
 test("the grid draws only the columns it fills, and stops at five", async () => {
   const app = await loadApp();
   const inner = app.elements.get("home-inner");
   for (let i = 1; i <= 7; i++) {
     await app.api.addRecentRom(`G${i}.gba`, u8(i));
-    await settle();
-    const cells = i + 1;
+    for (let k = 0; k < 5; k++) await settle();
+    const cells = Math.max(1, i - 1);
     assert.equal(inner.dataset.n, cells <= 5 ? String(cells) : undefined,
       `${i} games`);
   }

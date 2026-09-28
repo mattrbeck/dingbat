@@ -824,3 +824,60 @@ test("tapping back to the paused game while another tile loads keeps the paused 
   assert.equal(core(app).rom, ROM["A.gba"], "and still the core");
   assert.equal(app.document.body.classList.contains("running"), true);
 });
+
+// ── The home screen chooses: Resume or Restart ──────────────────────────────
+// A closed game's session goes back in during the boot itself when the home
+// screen asks for it (the hero's Resume, a tile's tap), and a Restart boots
+// from the save. Either way the choice was made before the boot, so there is
+// no "Last session saved" offer after it.
+
+const offered = (app) => app.toasts.some((t) => /Last session saved/.test(t));
+
+const closedWithSession = async () => {
+  const app = await boot();
+  await play(app, "A.gba");
+  gameSaves(app, 1);
+  await autosave(app);
+  await goHome(app);
+  await app.runIn("unloadGame()");
+  await drain();
+  assert.ok(app.idb.get("stateauto:A.gba")?.bytes, "closing keeps the session");
+  return app;
+};
+
+test("Resume from the home screen puts the session back in the boot, unasked", async () => {
+  const app = await closedWithSession();
+  const before = core(app).applied;
+  app.runIn(`launchRom("A.gba", { resume: true })`);
+  await drain();
+  assert.equal(named(app), "A.gba");
+  assert.equal(core(app).applied, before + 1, "the session went back in");
+  assert.ok(!offered(app), "and nothing offers it again");
+});
+
+test("Restart boots from the save, and offers nothing", async () => {
+  const app = await closedWithSession();
+  const before = core(app).applied;
+  app.runIn(`launchRom("A.gba", { fresh: true })`);
+  await drain();
+  assert.equal(named(app), "A.gba");
+  assert.equal(core(app).applied, before, "no session");
+  assert.ok(!offered(app));
+});
+
+test("Resume after the game has saved past its session boots from the save", async () => {
+  const app = await closedWithSession();
+  app.idb.set("save:A.gba", u8(ROM["A.gba"], 9)); // saved since (another device, say)
+  const before = core(app).applied;
+  app.runIn(`launchRom("A.gba", { resume: true })`);
+  await drain();
+  assert.equal(core(app).applied, before, "a stale session never goes back in");
+  eq(core(app).ram, [ROM["A.gba"], 9], "the newer save is what booted");
+});
+
+test("a launch that did not choose (a file dropped on the page) still offers", async () => {
+  const app = await closedWithSession();
+  app.runIn(`launchRom("A.gba")`);
+  await drain(20);
+  assert.ok(offered(app), "positive control for the two tests above");
+});
