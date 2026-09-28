@@ -1,6 +1,7 @@
-// The home-screen Drive slot: Sync when linked, Sign in otherwise, swapped
-// by refreshSyncUI. "Linked" follows syncState.connected, not the ~1h token:
-// keyed on the token, an hourly rollover looked like a logout.
+// The account slot in the bar: Sign in when signed out, the account (with a
+// sync badge) when linked, swapped by refreshSyncUI. Both open the account
+// menu. "Linked" follows syncState.connected, not the ~1h token: keyed on
+// the token, an hourly rollover looked like a logout.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -29,65 +30,68 @@ const installFakeGis = (app, { grant = true } = {}) => {
   return calls;
 };
 
-const slot = (app) => ({
-  signin: app.elements.get("home-signin"),
-  sync: app.elements.get("home-sync"),
+const el = (app, id) => app.elements.get(id) ?? app.document.getElementById(id);
+const signedIn = (app) => el(app, "account-btn").classList.contains("signed-in");
+// The account menu's Google button, as a click on the slot leaves it.
+const openMenu = (app) => {
+  el(app, "account-btn").dispatch("click");
+  return el(app, "account-google");
+};
+
+test("signed out, the slot says Sign in and its menu holds Google's button", async () => {
+  const app = await loadApp();
+  assert.equal(el(app, "account-slot").hidden, false);
+  assert.equal(signedIn(app), false);
+  assert.equal(el(app, "account-label").hidden, false, "the word is the signed-out affordance");
+  openMenu(app);
+  assert.equal(el(app, "account-pop").hidden, false);
+  assert.equal(el(app, "acct-out").hidden, false, "the signed-out face, with Google's button");
+  assert.equal(el(app, "acct-in").hidden, true);
 });
 
-test("signed out, the slot shows Sign in instead of Sync", async () => {
+test("the slot becomes the account when it links, and Sign in when it goes", async () => {
   const app = await loadApp();
-  const { signin, sync } = slot(app);
-  assert.equal(signin.hidden, false, "Sign in is the signed-out affordance");
-  assert.equal(sync.hidden, true, "Sync has nothing to sync");
-});
-
-test("the slot swaps to Sync when the account links, and back when it goes", async () => {
-  const app = await loadApp();
-  const { signin, sync } = slot(app);
-
   app.api.syncState = { ...app.api.syncState, connected: true };
   app.api.gdriveToken = "a-token";
   app.runIn("refreshSyncUI()");
-  assert.equal(signin.hidden, true, "signed in: no Sign in link");
-  assert.equal(sync.hidden, false, "signed in: Sync is back");
+  assert.equal(signedIn(app), true);
+  assert.equal(el(app, "account-label").hidden, true);
+  assert.equal(el(app, "account-btn").dataset.sync, "ok");
 
   app.sandbox.google = { accounts: { oauth2: { revoke: () => {} } } };
   app.runIn("gdriveSignOut()");
-  assert.equal(signin.hidden, false, "signed out again: Sign in returns");
-  assert.equal(sync.hidden, true);
+  assert.equal(signedIn(app), false, "signed out again: Sign in returns");
 });
 
 // Spending the renewal budget drops the token but keeps the account linked;
-// Sync buys the new token at a moment the user chose.
-test("a spent renewal budget keeps Sync, not Sign in", async () => {
+// Sync now buys the new token at a moment the user chose.
+test("a spent renewal budget keeps the account, not Sign in", async () => {
   const app = await loadApp();
-  const { signin, sync } = slot(app);
   app.api.syncState = { ...app.api.syncState, connected: true };
   installFakeGis(app, { grant: false });
   app.api.gdriveToken = "old-token";
   app.api.gdriveTokenExp = Date.now() + 60 * 1000;
   app.runIn("refreshSyncUI()");
-  assert.equal(sync.hidden, false, "starts linked");
+  assert.equal(signedIn(app), true, "starts linked");
 
   app.api.driveRenewFails = app.api.DRIVE_RENEW_MAX_FAILS - 1;
   await app.api.renewDriveToken();
   await settle();
 
   assert.equal(app.api.gdriveToken, null, "the dead token is dropped");
-  assert.equal(sync.hidden, false, "but the slot still says Sync");
-  assert.equal(signin.hidden, true, "and never demands a sign-in");
+  assert.equal(signedIn(app), true, "but the slot is still the account");
 });
 
-test("clicking Sign in asks Google for a token and then shows Sync", async () => {
+test("Google's button asks for a token on the click, then the slot is the account", async () => {
   const app = await loadApp();
-  const { signin, sync } = slot(app);
   const calls = installFakeGis(app, { grant: true });
   app.setFetch(async () => jsonRes({ files: [] }));
 
-  const done = signin.dispatch("click");
+  const google = openMenu(app);
+  const done = google.dispatch("click");
   // gdriveConnect() must run on the click itself (the OAuth popup needs the
   // transient activation): nothing may be awaited before it.
-  assert.equal(signin.disabled, true, "the control is busy from the click on");
+  assert.equal(google.disabled, true, "the control is busy from the click on");
   await done;
   await settle();
 
@@ -95,24 +99,23 @@ test("clicking Sign in asks Google for a token and then shows Sync", async () =>
   assert.equal(calls[0].prompt, undefined,
     "and it's the full consent popup, not the silent prompt:'' re-grant");
   assert.equal(app.api.gdriveToken, "fresh-token");
-  assert.equal(signin.hidden, true, "the slot swapped to Sync");
-  assert.equal(sync.hidden, false);
+  assert.equal(signedIn(app), true);
   assert.ok(app.toasts.includes("Connected to Google Drive"));
 });
 
-test("a cancelled sign-in leaves the Sign in link visible and clickable", async () => {
+test("a cancelled sign-in leaves Google's button there and clickable", async () => {
   const app = await loadApp();
-  const { signin, sync } = slot(app);
   const calls = installFakeGis(app, { grant: false });
 
-  await signin.dispatch("click");
+  const google = openMenu(app);
+  await google.dispatch("click");
   await settle();
 
   assert.equal(calls.length, 1);
   assert.equal(app.api.gdriveToken, null);
-  assert.equal(signin.hidden, false, "still offered");
-  assert.equal(signin.disabled, false, "and re-armed for another try");
-  assert.equal(sync.hidden, true);
+  assert.equal(signedIn(app), false);
+  assert.equal(el(app, "account-pop").hidden, false, "the menu is still open");
+  assert.equal(el(app, "account-google").disabled, false, "and re-armed for another try");
   assert.ok(app.toasts.some((t) => /Sign-in was canceled/.test(t)),
     "the failure is reported: " + JSON.stringify(app.toasts));
 });

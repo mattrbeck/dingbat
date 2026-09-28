@@ -1366,7 +1366,27 @@ body:not(.running) .cart-btn {
 @media (max-width: 560px) {
   body:not(.running) #vol-slider {
     display: block;
-    max-width: 108px;
+    max-width: 64px;
+  }
+}
+
+/* The phone bar on the home screen, measured to fit: brand, account, mute,
+   the slider and Settings come to 356px at 375 (an iPhone 13 mini) with the
+   gaps at 4px. Full screen leaves it - iPhone Safari cannot take a page full
+   screen, and the in-game bar keeps its own. Under 360px (a first iPhone SE)
+   the wordmark gives way and the bat stays. */
+@media (max-width: 560px) {
+  body:not(.running) #topbar {
+    gap: 4px;
+  }
+  body:not(.running) #fullscreen-btn {
+    display: none;
+  }
+}
+
+@media (max-width: 359px) {
+  #bar-word {
+    display: none;
   }
 }
 
@@ -1529,6 +1549,319 @@ body:not(.running) .cart-btn {
 
 .menu-volume .vol-range {
   flex: 1 1 auto;
+}
+
+/* --- The account slot (home screen only) ---------------------------------
+   Signed out, a quiet worded button; signed in, the account's initial in a
+   circle with a badge for how sync is doing. Either opens #account-pop. */
+#account-slot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+}
+
+/* ...and not in the empty state, whose own Sign in with Google is on the
+   page already. */
+#account-slot[hidden],
+body.running #account-slot,
+body:not(.lib-has-games) #account-slot {
+  display: none;
+}
+
+#account-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  padding: 0 14px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--chrome-ink);
+  background: transparent;
+  border: 1px solid var(--chrome-btn-border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+@media (hover: hover) {
+  #account-btn:hover {
+    background: var(--chrome-btn-top);
+  }
+}
+
+#account-label[hidden],
+#account-avatar:empty {
+  display: none;
+}
+
+#account-btn.signed-in {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+}
+
+#account-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--badge-gba-fg);
+  background: var(--badge-gba-bg);
+  box-shadow: inset 0 0 0 1px rgba(var(--hi-rgb), 0.08);
+}
+
+#account-avatar svg,
+.acct-avatar svg {
+  width: 60%;
+  height: 60%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+
+/* The badge: a tick while all is well, an amber mark when changes wait on
+   Drive, and nothing - the ring below turns instead - while it syncs. */
+#account-badge {
+  display: none;
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+
+#account-btn[data-sync="ok"] #account-badge {
+  display: block;
+  background: var(--topbar-bottom) no-repeat center / 11px 11px
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234fd583' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E");
+}
+
+#account-btn[data-sync="attention"] #account-badge {
+  display: block;
+  background: var(--accent) no-repeat center / 9px 9px
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232a1800' stroke-width='4' stroke-linecap='round'%3E%3Cpath d='M12 4v10M12 19.5v.5'/%3E%3C/svg%3E");
+  border: 2px solid var(--topbar-bottom);
+}
+
+#account-btn[data-sync="syncing"]::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--accent);
+  border-right-color: var(--accent);
+  animation: acct-spin 1s linear infinite;
+}
+
+@keyframes acct-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 560px) {
+  #account-btn:not(.signed-in) {
+    height: 44px;
+    padding: 0 8px;
+    font-size: 14px;
+    border: 0;
+  }
+  #account-btn.signed-in {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+/* The menu under it. */
+#account-pop {
+  position: fixed;
+  z-index: 400;
+  top: calc(var(--safe-t) + var(--bar-h) + 6px);
+  right: calc(10px + var(--safe-r));
+  box-sizing: border-box;
+  width: min(340px, calc(100vw - 20px - var(--safe-l) - var(--safe-r)));
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  animation: acct-pop-in 0.16s ease-out;
+}
+
+#account-pop[hidden],
+#acct-out[hidden],
+#acct-in[hidden],
+.acct-email[hidden] {
+  display: none;
+}
+
+#acct-out,
+#acct-in {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+@keyframes acct-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.acct-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.acct-body {
+  margin: -6px 0 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+#account-pop .gsi-btn {
+  align-self: flex-start;
+}
+
+.acct-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.acct-avatar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  font-size: 16px;
+  font-weight: 650;
+  color: var(--badge-gba-fg);
+  background: var(--badge-gba-bg);
+}
+
+.acct-who {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.acct-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.acct-email {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.acct-status {
+  display: flex;
+  gap: 10px;
+  padding: 12px;
+  font-size: 14px;
+  border-radius: 12px;
+  background: var(--surface-1);
+}
+
+.acct-status.acct-attention {
+  background: rgba(var(--accent-rgb), 0.08);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.25);
+}
+
+.acct-status-mark {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border-radius: 50%;
+  background: no-repeat center / 16px 16px
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234fd583' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E");
+}
+
+.acct-attention .acct-status-mark {
+  background: var(--accent) no-repeat center / 11px 11px
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232a1800' stroke-width='4' stroke-linecap='round'%3E%3Cpath d='M12 4v10M12 19.5v.5'/%3E%3C/svg%3E");
+}
+
+.acct-syncing .acct-status-mark {
+  background: none;
+  border: 2px solid transparent;
+  border-top-color: var(--accent);
+  border-right-color: var(--accent);
+  box-sizing: border-box;
+  animation: acct-spin 1s linear infinite;
+}
+
+.acct-status-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.acct-sub {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+
+#account-sync {
+  min-height: 40px;
+  font-size: 14px;
+  border-radius: 10px;
+}
+
+.acct-links {
+  display: flex;
+  flex-direction: column;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.acct-links button {
+  min-height: 40px;
+  padding: 0 4px;
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  color: var(--text);
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.acct-links button:hover {
+  background: var(--surface-3);
 }
 
 /* --- Update badge --- */
@@ -2037,28 +2370,30 @@ body.lib-has-games #home-start {
   flex-direction: column;
   align-items: center;
   gap: 14px;
-  padding: 30px 28px 26px;
+  padding: 24px 28px 22px;
   text-align: center;
-  border: 1.5px dashed rgba(var(--accent-rgb), 0.38);
+  /* Quiet on purpose: a hairline dash in the page's own grey, no fill, so
+     the logo keeps the top of the page and the button is the one strong
+     thing in here. */
+  border: 1px dashed var(--border-2);
   border-radius: var(--radius-lg);
-  background: rgba(var(--accent-rgb), 0.035);
 }
 
 .home-drop-icon {
-  width: 30px;
-  height: 30px;
+  width: 22px;
+  height: 22px;
   fill: none;
-  stroke: var(--accent);
+  stroke: var(--text-faint);
   stroke-width: 1.8;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
 .home-drop-title {
-  margin: 0;
-  font-size: 17px;
-  font-weight: 600;
-  color: var(--text);
+  margin: -4px 0 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-dim);
 }
 
 .home-drop-hint {
@@ -2432,6 +2767,31 @@ body.lib-has-games #home-start {
   }
   body.home-solo #home-paused-name {
     font-size: clamp(30px, 3.2vw, 42px);
+  }
+}
+
+/* A short library under a hero: the block is at least the hero's width, and
+   its tiles start at the hero's left edge rather than centring in it. The
+   grid takes the block's width itself (its tracks are worked out from its
+   own box, so they come out the same), which is what lets them sit left. */
+@media (min-width: 760px) {
+  body.home-card #home-inner[data-n="1"],
+  body.home-card #home-inner[data-n="2"] {
+    --lib-floor: min(100%, 860px);
+  }
+  body.home-card #home-recent {
+    width: var(--lib-width);
+    margin-inline: auto;
+    justify-content: start;
+  }
+}
+
+/* Phones keep their two columns under a hero, even for one game: the tile
+   is a half-width card at the left, like every other, not a lone 300px one
+   centred under a full-width picture. */
+@media (max-width: 759px) {
+  body.home-card #home-inner[data-n="1"] {
+    --lib-fit: var(--lib-cols);
   }
 }
 

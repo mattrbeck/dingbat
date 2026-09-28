@@ -5018,26 +5018,161 @@ document.addEventListener("visibilitychange", () => {
 });
 
 // --- Sync UI surfaces -----------------------------------------------------
-const homeSyncBtn = /** @type {HTMLButtonElement} */ (document.getElementById("home-sync"));
-// Same slot as Sync, shown while signed out.
-const homeSignInBtn = /** @type {HTMLButtonElement} */ (document.getElementById("home-signin"));
+// The account slot in the bar (home screen only): "Sign in" signed out, the
+// account's initial with a sync badge signed in. Both open the account menu,
+// #account-pop - so the bar never carries Google's mark, and the menu has
+// room to say what signing in is for before Google's own button asks.
+const accountSlot = document.getElementById("account-slot");
+const accountBtn = /** @type {HTMLButtonElement} */ (document.getElementById("account-btn"));
+const accountLabel = document.getElementById("account-label");
+const accountAvatar = document.getElementById("account-avatar");
+const accountPop = document.getElementById("account-pop");
+let accountPopOpen = false;
 
-// The grid's Sync link doubles as its progress readout.
-const refreshHomeSyncButton = () => {
-  // Exactly one is visible; a build with no client ID shows neither.
-  if (homeSignInBtn) {
-    homeSignInBtn.hidden = !GDRIVE_CLIENT_ID || driveLinked();
-    if (!homeSignInBtn.hidden) homeSignInBtn.disabled = false;
-  }
-  if (!homeSyncBtn) return;
-  homeSyncBtn.hidden = !driveLinked();
-  const busy = syncStatus === "syncing";
-  homeSyncBtn.disabled = busy;
-  homeSyncBtn.innerHTML = busy
-    ? '<svg class="sync-spin" viewBox="0 0 24 24" aria-hidden="true">' +
-      '<path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v3.5h-3.5"/></svg>Syncing…'
-    : "Sync";
+// How sync is doing, as the badge says it: fine, busy, or asking for you.
+// "Linked" (syncState.connected), not the hour-long token: a token rolling
+// over is not a sign-out, and the slot never demands one for it.
+const accountSyncKind = () =>
+  syncStatus === "syncing" ? "syncing"
+  : syncStatus === "offline" || syncStatus === "paused" ? "attention"
+  : "ok";
+
+const accountInitial = () => {
+  const who = gdriveEmail || syncState.email || "";
+  const c = Array.from(who.trim())[0];
+  return c ? c.toUpperCase() : "";
 };
+
+const PERSON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="9" r="3.6"/>' +
+  '<path d="M5 19.5c1.2-3.3 3.9-5 7-5s5.8 1.7 7 5"/></svg>';
+
+// The status box in the signed-in menu: a heading and a line under it.
+const accountStatusText = () => {
+  const n = pendingCount();
+  const waiting = n + (n === 1 ? " change" : " changes");
+  if (syncStatus === "syncing") return ["Syncing with Google Drive…", n ? waiting + " going up." : "Checking for changes."];
+  if (syncStatus === "offline") return ["Can't reach Google Drive",
+    (n ? waiting + " waiting. They" : "Your changes") + " are safe on this device and upload when Drive is back."];
+  if (syncStatus === "paused") return ["Google Drive needs you again",
+    "Sync now reconnects. Your changes are safe on this device."];
+  if (!gdriveToken) return ["Games and saves are in your Drive", "Reconnects when you next sync."];
+  return ["Games and saves are in your Drive", n ? waiting + " waiting to go up." : "Everything is synced."];
+};
+
+const acctOut = document.getElementById("acct-out");
+const acctIn = document.getElementById("acct-in");
+const acctAvatar = document.getElementById("acct-avatar");
+const acctEmail = document.getElementById("acct-email");
+const acctStatus = document.getElementById("acct-status");
+const acctStatusTitle = document.getElementById("acct-status-title");
+const acctStatusSub = document.getElementById("acct-status-sub");
+const accountGoogle = /** @type {HTMLButtonElement} */ (document.getElementById("account-google"));
+const accountSync = /** @type {HTMLButtonElement} */ (document.getElementById("account-sync"));
+
+// The menu's two faces, filled in place: its buttons are the same elements
+// all along, so a sync that re-renders it mid-click never swaps the button
+// being pressed.
+const renderAccountPop = () => {
+  if (!accountPop) return;
+  const linked = driveLinked();
+  acctOut.hidden = linked;
+  acctIn.hidden = !linked;
+  if (!linked) return;
+  const kind = accountSyncKind();
+  const [title, sub] = accountStatusText();
+  const who = gdriveEmail || syncState.email || "";
+  const initial = accountInitial();
+  if (initial) acctAvatar.textContent = initial;
+  else acctAvatar.innerHTML = PERSON_SVG;
+  acctEmail.textContent = who;
+  acctEmail.hidden = !who;
+  acctStatus.className = "acct-status acct-" + kind;
+  acctStatusTitle.textContent = title;
+  acctStatusSub.textContent = sub;
+  accountSync.textContent = kind === "syncing" ? "Syncing…" : "Sync now";
+  accountSync.disabled = kind === "syncing";
+};
+
+// gdriveConnect() must be reached with the click's activation live, so
+// nothing may be awaited before the call.
+accountGoogle?.addEventListener("click", async () => {
+  accountGoogle.disabled = true;
+  try { await gdriveConnect(); }
+  catch (e) { showToast(e.message); }
+  accountGoogle.disabled = false;
+  refreshSyncUI();
+});
+accountSync?.addEventListener("click", async () => {
+  // Linked but tokenless: this gesture buys the new token.
+  if (!(await ensureDriveSignedIn())) return;
+  runFullSync({ label: "Syncing" });
+});
+document.getElementById("account-settings")?.addEventListener("click", () => {
+  closeAccountPop();
+  openSettingsModal();
+  openSettingsSection("general");
+});
+document.getElementById("account-signout")?.addEventListener("click", () => {
+  closeAccountPop();
+  gdriveSignOut();
+});
+
+const refreshHomeSyncButton = () => {
+  if (!accountSlot) return;
+  // A build with no client ID has no account to speak of.
+  accountSlot.hidden = !GDRIVE_CLIENT_ID;
+  const linked = driveLinked();
+  accountBtn.classList.toggle("signed-in", linked);
+  accountLabel.hidden = linked;
+  accountBtn.dataset.sync = linked ? accountSyncKind() : "";
+  if (linked) {
+    const initial = accountInitial();
+    if (initial) accountAvatar.textContent = initial;
+    else accountAvatar.innerHTML = PERSON_SVG;
+    const label = "Google Drive: " + (SYNC_WORDS[syncStatus] || "Signed in");
+    accountBtn.title = label;
+    accountBtn.setAttribute("aria-label", label);
+  } else {
+    accountAvatar.textContent = "";
+    accountBtn.title = "Sign in";
+    accountBtn.removeAttribute("aria-label");
+  }
+  if (accountPopOpen) renderAccountPop();
+};
+
+const closeAccountPop = () => {
+  if (!accountPop || !accountPopOpen) return;
+  accountPopOpen = false;
+  accountPop.hidden = true;
+  accountBtn.setAttribute("aria-expanded", "false");
+};
+
+const openAccountPop = () => {
+  renderAccountPop();
+  accountPopOpen = true;
+  accountPop.hidden = false;
+  accountBtn.setAttribute("aria-expanded", "true");
+  accountPop.querySelector?.("button")?.focus?.({ preventScroll: true });
+};
+
+if (accountBtn) {
+  accountPop.hidden = true;
+  accountBtn.addEventListener("click", (e) => {
+    e.stopPropagation?.();
+    if (accountPopOpen) closeAccountPop();
+    else openAccountPop();
+  });
+  // Anywhere else closes it, as Escape does.
+  document.addEventListener("pointerdown", (e) => {
+    if (!accountPopOpen) return;
+    const t = /** @type {Node} */ (e.target);
+    if (accountPop.contains?.(t) || accountBtn.contains?.(t)) return;
+    closeAccountPop();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeAccountPop();
+  });
+}
 
 // With no games there is no library head, so the hero carries the Drive
 // slot: the two ways to get a game sit on one rung, the quieter one second.
@@ -5100,24 +5235,7 @@ const refreshSyncUI = () => {
   renderSyncIndicator();
   if (settingsModal.classList.contains("open")) renderGdriveSection();
 };
-if (homeSyncBtn) {
-  homeSyncBtn.addEventListener("click", async () => {
-    // Linked but tokenless: this gesture buys the new token.
-    if (!(await ensureDriveSignedIn())) return;
-    runFullSync({ label: "Syncing" });
-  });
-}
-if (homeSignInBtn) {
-  // gdriveConnect() must be reached with the click's activation live, so
-  // nothing may be awaited before the call.
-  homeSignInBtn.addEventListener("click", async () => {
-    homeSignInBtn.disabled = true;
-    try { await gdriveConnect(); }
-    catch (e) { showToast(e.message); }
-    refreshHomeSyncButton();
-  });
-}
-// The markup starts both buttons hidden; seed the signed-out boot state.
+// The markup starts the slot hidden; seed the signed-out boot state.
 refreshHomeSyncButton();
 
 // --- Core-construction settings ---
