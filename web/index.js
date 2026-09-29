@@ -13451,6 +13451,38 @@ var Module = {
     const FRAME_TIME = 1000.0 / TARGET_FPS;
     let lastFrameTime = 0;
     let accumulator = 0;
+    // Fast-forward pacing. A tick's frames have to end before the vsync
+    // they aim at: where rAF keeps to the display, one that overruns it
+    // waits for the next and the time between idles. A fixed 16 ms budget
+    // ends past a 60 Hz vsync once the present is added, so at ~5 ms a frame
+    // (an iPhone SE) a tick ran 4 frames per 33 ms, and 3 once a frame took
+    // over 16/3 ms: 120 fps to 90 on a few percent of frame cost.
+    let ffFrameMs = 4;      // running mean of one fast-forward frame
+    let ffVsyncMs = 1000 / 60; // running mean of the rAF interval at play
+    let ffOverMs = 2;       // running mean of the tick's own work after them
+    let ffReserveMs = 2;    // and of the browser's, learnt from late ticks
+    let ffEmuEnd = 0;       // when the last fast-forward tick's frames ended
+    let tickEnd = 0;        // when the last tick returned
+    let ffAimed = 0;        // vsyncs the last fast-forward tick aimed at
+    let ffLastTs = 0;
+    // Fast-forward diagnostics for the log, every ~5 s of it: what a frame
+    // costs here and how the ticks land on the display.
+    let ffStat = { since: 0, frames: 0, ticks: 0, emuMs: 0, late: 0 };
+    const ffStatNote = (timestamp, frames, emuMs, late) => {
+      const st = ffStat;
+      if (st.since === 0 || timestamp - st.since > 10000) {
+        ffStat = { since: timestamp, frames: 0, ticks: 0, emuMs: 0, late: 0 };
+        return;
+      }
+      st.frames += frames; st.ticks++; st.emuMs += emuMs; if (late) st.late++;
+      const span = timestamp - st.since;
+      if (span < 5000) return;
+      log(`ff: ${(1000 * st.frames / span).toFixed(0)} fps, ` +
+        `${(st.emuMs / st.frames).toFixed(2)} ms/frame, ${(st.frames / st.ticks).toFixed(1)} frames/tick, ` +
+        `${(span / st.ticks).toFixed(1)} ms/tick (vsync ${ffVsyncMs.toFixed(1)}), ` +
+        `${st.late} late of ${st.ticks}, after ${ffOverMs.toFixed(1)} + ${ffReserveMs.toFixed(1)} ms`);
+      ffStat = { since: timestamp, frames: 0, ticks: 0, emuMs: 0, late: 0 };
+    };
 
     // Push-based Web Audio playback: samples at SAMPLE_RATE scheduled at
     // precise times; the browser resamples to the device rate.
@@ -13814,6 +13846,8 @@ var Module = {
         return;
       }
       if (lastFrameTime === 0) lastFrameTime = timestamp;
+      const rafIv = timestamp - lastFrameTime;
+      if (!fastForward && rafIv > 4 && rafIv < 40) ffVsyncMs += (rafIv - ffVsyncMs) * 0.05;
       accumulator += timestamp - lastFrameTime;
       lastFrameTime = timestamp;
       if (rollbackMode) {
@@ -13894,12 +13928,30 @@ var Module = {
         }
         accumulator = 0;
       } else if (fastForward) {
-        // As many frames as fit in a ~16ms budget. playTime stays continuous
-        // and only frames whose audio fits within FF_MAX_AUDIO_LEAD play;
-        // the rest are dropped, so audio stays realtime-rate.
-        const budget = 16;
-        const start = performance.now();
-        while (performance.now() - start < budget) {
+        // As many frames as end, by their running mean, before the vsync
+        // aimed at less what follows them: the rest of this tick (measured)
+        // and the browser's present (a reserve, widened by each tick that
+        // missed its vsync). The aim spans enough vsyncs for 4 frames and
+        // what follows them, so the partial frame lost at the end stays
+        // small. playTime
+        // stays continuous and only frames whose audio fits within
+        // FF_MAX_AUDIO_LEAD play; the rest are dropped, so audio stays
+        // realtime-rate.
+        const iv = timestamp - ffLastTs;
+        ffLastTs = timestamp;
+        const late = ffAimed > 0 && iv < 200 && iv > (ffAimed + 0.5) * ffVsyncMs;
+        if (late) ffReserveMs = Math.min(ffReserveMs + 1, 60);
+        else if (ffAimed > 0 && iv < 200) ffReserveMs = Math.max(ffReserveMs - 0.05, 1);
+        if (ffEmuEnd > 0 && tickEnd > ffEmuEnd && iv < 200)
+          ffOverMs += (Math.min(tickEnd - ffEmuEnd, 100) - ffOverMs) * 0.2;
+        let t = performance.now();
+        const after = ffOverMs + ffReserveMs;
+        ffAimed = Math.min(6, Math.max(1, Math.ceil(
+          (Math.max(0, t - timestamp) + 4 * ffFrameMs + after) / ffVsyncMs)));
+        const deadline = timestamp + ffAimed * ffVsyncMs - after;
+        const t0 = t;
+        let n = 0;
+        do {
           Module._loop_tick();
           if (audioCtx && audioCtx.state === "running" &&
               playTime - audioCtx.currentTime < FF_MAX_AUDIO_LEAD) {
@@ -13908,7 +13960,13 @@ var Module = {
             Module._clearAudioBuffer(); // discard this frame's audio; keep the WASM buffer bounded
           }
           frameCount++;
-        }
+          const now = performance.now();
+          ffFrameMs += (Math.min(now - t, 50) - ffFrameMs) * 0.1;
+          t = now;
+          n++;
+        } while (t + ffFrameMs < deadline);
+        ffEmuEnd = t;
+        ffStatNote(timestamp, n, t - t0, late);
         accumulator = 0;
       } else {
         // Catch up, capped. At 2x each frame consumes half the step.
@@ -13952,6 +14010,7 @@ var Module = {
       updateGlow();
       updateRumble(timestamp);
       watchCanvasBacking();
+      tickEnd = performance.now();
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
