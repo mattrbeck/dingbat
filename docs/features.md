@@ -4,8 +4,8 @@ The full feature list for both front-ends and both emulated systems.
 
 ## Web front-end ([dingbat.gg](https://dingbat.gg))
 
-- Installable offline-capable PWA; the home screen is headed by the last game played, with
-  the rest of the library below it (see [home-screen.md](home-screen.md))
+- Installable offline-capable PWA; the home screen opens on the library, and the game
+  you are playing heads it when you step out (see [home-screen.md](home-screen.md))
 - Touch controls (phone and tablet layouts, both orientations); gamepad support
 - Save states: nine per-ROM slots with thumbnails, Quick Save / Quick Load, and a session
   saved on exit that a game picks up again from the library (or, by setting, offers after

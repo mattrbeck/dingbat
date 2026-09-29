@@ -2220,15 +2220,10 @@ body.running #home {
 }
 
 /* A library the last visit had, not read yet (index.js, "The first
-   picture"): the bar is up, the content waits - its entrance held at its
-   first frame - and appears once, as itself. */
-html.home-pending #home-inner {
+   picture"): the brand is up at once, and what goes under it - the library,
+   not the empty state's drop box - waits and then fades in. */
+html.home-pending #home-inner > :not(#home-brand) {
   visibility: hidden;
-  animation-play-state: paused;
-}
-
-html.home-pending #brand-slot {
-  --brand-p: 1;
 }
 
 @keyframes home-in {
@@ -2991,12 +2986,13 @@ body.home-card .home-recent-head {
   text-align: center;
 }
 
-/* With a game loaded the bar carries the brand, so the hero's copy stands
-   down - otherwise a game paused at the home screen shows both at once. Not
-   body.running, which is only the playing case: a paused game is on this
-   screen with the card, and the bar has the brand then too. */
+/* A fresh visit opens on the brand, over the library or the empty state.
+   Once a game is played the hero heads the page and the bar carries the
+   brand, so this copy stands down - with a game loaded (paused, on this
+   screen with the hero; not body.running, only the playing case) and while
+   the hero stays up after a close. */
 body.has-game #home-brand,
-body.lib-has-games #home-brand {
+body.home-card #home-brand {
   display: none;
 }
 

@@ -5174,14 +5174,15 @@ const GOOGLE_BUTTON_HTML =
   '<img class="gsi-light" src="google-signin-light.svg" alt="" width="180" height="40">';
 
 // --- The first picture -----------------------------------------------------
-// The library comes out of IndexedDB a few frames after the page paints.
-// Painting before then showed the empty state (the big logo and Add a
-// game), then the grid without its top game, then the real layout. Where
-// the last visit had games, index.html's head adds html.home-pending: the
-// bar paints at once, the home's content waits (styles.css) and is shown
-// once, as itself, when the first render has its top game and pictures.
-// With no hint - a first visit, an empty library - nothing waits, and the
-// empty state paints as early as it always did.
+// A fresh visit opens on the brand with the library under it (the hero
+// appears only once a game is played in this visit: playedThisVisit). The
+// library comes out of IndexedDB a few frames after the page paints, and
+// painting under the brand before then showed the empty state's drop box
+// first. Where the last visit had games, index.html's head adds
+// html.home-pending: the brand paints at once, what goes under it waits
+// (styles.css) and fades in once the first render has its pictures. With
+// no hint - a first visit, an empty library - nothing waits, and the empty
+// state paints as early as it always did.
 const LIB_HINT_KEY = "dingbat_library";
 // However the read goes, the page shows by then.
 const HOME_REVEAL_MAX_MS = 2000;
@@ -5190,12 +5191,24 @@ const HOME_PICTURES_MAX_MS = 400;
 let libHint = null;
 try { libHint = localStorage.getItem(LIB_HINT_KEY); } catch {}
 let homePending = !!document.documentElement.classList?.contains("home-pending");
-// The bar's side of a library - its brand, the account - from the start.
+// A library's side of the page - no drop box, the account in the bar -
+// from the start.
 if (homePending) document.body.classList.add("lib-has-games");
+// Set by a launch: from then on the page is headed by that game's hero
+// (paused, then Last played after a close) rather than the brand.
+let playedThisVisit = false;
+
 const revealHome = () => {
   if (!homePending) return;
   homePending = false;
   document.documentElement.classList.remove("home-pending");
+  // The brand was up all along; what was held under it fades in.
+  const inner = document.getElementById("home-inner");
+  for (const el of /** @type {HTMLCollectionOf<HTMLElement>} */ (inner?.children ?? [])) {
+    if (el.id !== "home-brand" && el.animate) {
+      el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 260, easing: "ease-out" });
+    }
+  }
 };
 if (homePending) setTimeout(revealHome, HOME_REVEAL_MAX_MS);
 const noteLibraryHint = () => {
@@ -9597,6 +9610,7 @@ const loadRom = async (romName, originalName, opts = {}) => {
   document.body.classList.add("has-game", "running");
   setBrandP(1);
   takePendingFlight(); // a launch from the home screen lands on the screen
+  playedThisVisit = true;
   await restoreCheats();  // fresh core: re-apply this game's saved cheats
   if (gen !== loadGen) return; // the next load re-applies all of this to its core
   applyPitchCorrectFF();  // fresh core: re-push the local audio preference
@@ -11151,10 +11165,11 @@ const setBrandP = (p) => {
 };
 
 const brandProgress = () => {
-  // With a library the hero is a game, not the brand, so the bar has it
-  // from the top. The scroll crossover is the empty state's alone.
+  // Under a hero the page is headed by a game, so the bar has the brand from
+  // the top. Otherwise the big brand is up and the bar's crosses over on
+  // the scroll.
   if (document.body.classList.contains("has-game") ||
-      document.body.classList.contains("lib-has-games")) return 1;
+      document.body.classList.contains("home-card")) return 1;
   let s = homeScroller.getBoundingClientRect?.();
   let b = brandEl.getBoundingClientRect?.();
   if (!s || !b || !b.height) return brandP;
@@ -11491,11 +11506,12 @@ const renderClosedHero = async (name, file, keys) => {
 };
 
 // Whenever the library renders: with nothing loaded, the hero is its most
-// recent game. A loaded game is the paused card's (drawPausedHero), and a
-// link or online session has no hero at all.
+// recent game - once a game has been played in this visit; a fresh visit
+// opens on the brand. A loaded game is the paused card's (drawPausedHero),
+// and a link or online session has no hero at all.
 const refreshHero = (roms, localRoms, keys) => {
   if (currentRomName || loadingName) return;
-  if (linkMode || rollbackMode || netActive() || !roms.length) {
+  if (linkMode || rollbackMode || netActive() || !roms.length || !playedThisVisit) {
     setHeroShown(false);
     return;
   }

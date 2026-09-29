@@ -27,7 +27,7 @@ test("a library render writes the hint; an empty one takes it back", async () =>
   assert.equal(app.lsMap.get("dingbat_library"), "empty");
 });
 
-test("held: the bar has the library's side at once, the content waits for the top game", async () => {
+test("held: the page has the library's side at once, and what goes under the brand waits", async () => {
   const app = await loadApp({ htmlClasses: ["home-pending"], localStorageSeed: { dingbat_library: "games" } });
   assert.ok(pending(app), "held from the start");
   assert.ok(app.document.body.classList.contains("lib-has-games"), "no empty state underneath");
@@ -35,7 +35,7 @@ test("held: the bar has the library's side at once, the content waits for the to
   await app.api.refreshHomeRecent();
   await drain();
   assert.ok(!pending(app), "shown once the first render is done");
-  assert.equal(app.document.getElementById("hero").hidden, false, "with its top game");
+  assert.equal(app.document.getElementById("hero").hidden, true, "a fresh visit: the brand heads the page");
 });
 
 test("held, but the library turned out empty: the empty state shows at once", async () => {

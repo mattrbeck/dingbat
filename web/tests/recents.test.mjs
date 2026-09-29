@@ -319,7 +319,7 @@ test("the grid draws only the columns it fills, and stops at five", async () => 
   for (let i = 1; i <= 7; i++) {
     await app.api.addRecentRom(`G${i}.gba`, u8(i));
     for (let k = 0; k < 5; k++) await settle();
-    const cells = Math.max(1, i - 1);
+    const cells = i; // a fresh visit has no hero: every game is a cell
     assert.equal(inner.dataset.n, cells <= 5 ? String(cells) : undefined,
       `${i} games`);
   }

@@ -3,25 +3,30 @@
 What the home screen shows in each state, what its buttons do, and the
 records behind them. Code: `web/index.js` (search the section names below),
 `web/styles.css`, tests in `web/tests/home-current.test.mjs`,
-`game-switch.test.mjs` and `home-signin.test.mjs`.
+`home-brand.test.mjs`, `game-switch.test.mjs` and `home-signin.test.mjs`.
 
-## One rule
+## Two rules
 
-**The last game played heads the page, paused or not** (the *hero*,
-`#hero`). Every other game is in the grid below it. The hero's game
-is shown once: its tile stands down from the grid (`.is-current`) except
-while a search or filter is running, and a library of only that game folds
-the grid away (`body.home-solo`). Closing a game changes the hero in place;
-nothing in the grid moves.
+**A fresh visit opens on the brand**: the big logo and slogan, with the
+whole library under it (the last game played is first in the grid, which
+is sorted by play). Scrolling hands the brand to the bar.
+
+**Once a game is played in this visit, it heads the page, paused or not**
+(the *hero*, `#hero`; `playedThisVisit`). Every other game is in the grid
+below it. The hero's game is shown once: its tile stands down from the
+grid (`.is-current`) except while a search or filter is running, and a
+library of only that game folds the grid away (`body.home-solo`). Closing
+a game changes the hero in place; nothing in the grid moves. The next
+fresh visit opens on the brand again.
 
 ## The states
 
-| Library | Nothing loaded | A game paused (Main Menu) |
-|---|---|---|
-| empty | Logo, slogan, the drop box with **Add a game**, and *Already playing on another device?* with Google's button | — |
-| one game | The hero alone, with an **Add a game** pill under it | The hero alone, paused |
-| a few | The hero, then the other games | the same |
-| more than 8 | The hero, then search, chips and sort above the grid | the same |
+| Library | A fresh visit | A game played this visit, now paused (Main Menu) | … then closed |
+|---|---|---|---|
+| empty | Logo, slogan, the drop box with **Add a game**, and *Already playing on another device?* with Google's button | — | — |
+| one game | Logo, slogan, the game's tile | The hero alone, paused, with an **Add a game** pill under it | The hero alone, Last played |
+| a few | Logo, slogan, the games | The hero, then the other games | the same, Last played |
+| more than 8 | Logo, slogan, then search, chips and sort above the grid | The hero, then search, chips and sort above the grid | the same, Last played |
 
 Search and filters appear only above 8 games (`LIB_BAR_MIN = 9`); a running
 filter keeps them so it can always be cleared. Phones use the full-width
@@ -89,14 +94,13 @@ and back: putting the name back restarts it (the arrival sets
 ## The first picture
 
 The library is read from IndexedDB a few frames after the page first
-paints. So that a returning player does not see the empty state and then a
-half-built grid first, the page keeps a hint in localStorage
+paints. So that a returning player does not see the empty state's drop box
+under the brand first, the page keeps a hint in localStorage
 (`dingbat_library`: `games` or `empty`, written on every library render).
 Where it says `games`, a script in `index.html`'s head adds
-`html.home-pending`: the bar paints at once, with its brand; the home's
-content is hidden, its entrance held, until the first render has its top
-game and its tiles' pictures (at most 400 ms more), and it is shown once.
-No hint, or `empty`, and nothing waits. `libraryEmpty` is `null` until the
+`html.home-pending`: the brand paints at once, and what goes under it is
+hidden until the first render has its tiles' pictures (at most 400 ms
+more), then fades in. No hint, or `empty`, and nothing waits. `libraryEmpty` is `null` until the
 first read, so nothing before it (the boot sync refresh) decides either way.
 
 ## Account

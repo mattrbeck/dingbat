@@ -28,9 +28,12 @@ const pausedOn = async (names, current = names[0]) => {
   return app;
 };
 
-// Nothing loaded: the hero is the last game played, from the library alone.
+// Nothing loaded, after a game was played this visit (a fresh visit opens
+// on the brand: home-brand.test.mjs): the hero is the last game played,
+// from the library alone.
 const closedOn = async (names) => {
   const app = await loadApp();
+  app.runIn("playedThisVisit = true");
   seed(app, names);
   await app.api.refreshHomeRecent();
   await drain();
@@ -61,6 +64,7 @@ test("a library of only the hero's game folds away", async () => {
 
 test("nothing loaded: the hero is the most recently played game, closed", async () => {
   const app = await loadApp();
+  app.runIn("playedThisVisit = true");
   // Play order, not the grid's sort: the newest timestamp wins wherever it is.
   app.idb.set("recent", [{ name: "A.gba", ts: 5 }, { name: "B.gba", ts: 9 }, { name: "C.gba", ts: 1 }]);
   for (const n of ["A.gba", "B.gba", "C.gba"]) app.idb.set("rom:" + n, { name: n, data: u8(1) });
@@ -83,6 +87,7 @@ test("closed, with no session to go back into: Play, and no Restart", async () =
 
 test("closed, with a session that matches the save: Resume and Restart", async () => {
   const app = await loadApp();
+  app.runIn("playedThisVisit = true");
   seed(app, ["A.gba", "B.gba"]);
   app.idb.set("save:A.gba", u8(1, 2, 3));
   const sig = app.runIn("saveSignature(new Uint8Array([1, 2, 3]))");
