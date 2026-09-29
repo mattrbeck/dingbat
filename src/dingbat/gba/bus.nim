@@ -412,6 +412,7 @@ proc contend_cost(bus: Bus; address: uint32; is32: bool; cost: int): int {.noinl
   ## case -- palette RAM or BG VRAM on a drawn line with the maps current --
   ## is answered here from the next 33+ dots of the map; everything else
   ## goes to contention.nim.
+  bus.contended_access = true
   let ppu {.cursor.} = bus.gba.ppu
   let dot = int(int64(bus.sched.cycles) + int64(bus.cycles) - ppu.line_start_cycle)
   if dot >= 0 and dot < 1232 and ppu.vcount < 160 and not ppu.cont_regs_stale and

@@ -261,6 +261,7 @@ proc contend_refill(cpu: CPU; s: int) {.noinline.} =
   ## access (contention.nim; tests/roms/payloads/c2code.s, a stub entered in
   ## VRAM).
   let bus = cpu.gba.bus
+  bus.contended_access = true
   let target = cpu.r[15] and (if cpu.cpsr.thumb: not 1'u32 else: not 3'u32)
   let step = if cpu.cpsr.thumb: 2'u32 else: 4'u32
   for f in 0'u32 .. 1'u32:
@@ -731,18 +732,24 @@ when defined(gsprobe):
 
 proc wl_crossable(cpu: CPU; land: CycleCount): bool {.inline.} =
   ## Whether the loop's iteration ending at `land` can be skipped although
-  ## events fall inside it: only output samples do. get_sample reads nothing
-  ## an iteration changes (no memory is written, and the CPU's registers and
-  ## bus state are not its inputs), writes nothing the loop reads, and books
-  ## only its own next sample, a sample period on: past `land` while the
-  ## loop's period is shorter. A loop that reads IO keeps its iterations:
-  ## each IO read stamps the bus's access window (catch_up_access), which a
-  ## skip would leave older than running them does.
-  if not cpu.wl_cross_events or cpu.wl_reads_io or
-     cpu.wl_period >= APU_SAMPLE_PERIOD:
+  ## events fall inside it: each must be one whose handler cannot tell
+  ## whether the iteration ran (gba.wl_passable), and the loop must be one
+  ## that cannot see the handler. So the loop read no IO in the iteration
+  ## its verdict closed (each IO read also stamps the bus's access window,
+  ## catch_up_access, which a skip would leave older than running it does),
+  ## and waited on no renderer-contended memory (that wait moves with the
+  ## dot); no access window is open and no interrupt pending. Output
+  ## samples book only their next sample, 512 cycles on; anything else
+  ## needs a period short enough that what its handler books lands past
+  ## `land` (WL_CROSS_PERIOD_MAX).
+  if not cpu.wl_cross_events or cpu.wl_reads_io or cpu.wl_contended or
+     cpu.wl_period >= APU_SAMPLE_PERIOD or cpu.irq_line or
+     (cpu.gba.bus.sync_bits and not SB_SWAP) != 0:
     return false
   for kind in cpu.gba.scheduler.due_before(land):
-    if kind != etAPUSample: return false
+    if kind != etAPUSample and
+       (cpu.wl_period > WL_CROSS_PERIOD_MAX or not cpu.gba.wl_passable(kind)):
+      return false
   true
 
 proc waitloop_skip(cpu: CPU; remaining: int) {.noinline.} =
@@ -790,6 +797,9 @@ proc waitloop_skip(cpu: CPU; remaining: int) {.noinline.} =
     let land = at + period
     if not cpu.wl_crossable(land): break
     while s.next_event < land:
+      when defined(wlcheck):
+        for kind in s.due_before(s.next_event + 1):
+          doAssert kind == etAPUSample or cpu.gba.wl_passable(kind), $kind
       s.cycles = s.next_event
       s.call_current()
     at = land

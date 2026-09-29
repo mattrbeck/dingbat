@@ -203,6 +203,8 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
   cpu.gba.bus.volatile_read = false
   cpu.wl_reads_io = cpu.gba.bus.io_read
   cpu.gba.bus.io_read = false
+  cpu.wl_contended = cpu.gba.bus.contended_access
+  cpu.gba.bus.contended_access = false
   var fresh = true
   if dispatched:
     # r15 reads instruction + 4 while an instruction runs (a catch-up at its

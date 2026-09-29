@@ -433,6 +433,9 @@ type
     # skip runs through events only for a loop that reads none: cpu.nim,
     # wl_crossable)
     io_read*:        bool
+    # A CPU access waited on the renderer (contend_cost, cpu.contend_refill)
+    # since the waitloop detector last looked
+    contended_access*: bool
     # Second burst tracker for DMA: src and dst streams interleave on the ROM
     # bus yet each stays sequential, without needing back-to-back bus cycles
     rom_next_addr2*: uint32
@@ -664,6 +667,8 @@ type
     wl_cross_events*:            bool
     # The iteration the last verdict closed read an IO register
     wl_reads_io*:                bool
+    # ... or waited on the renderer (its cost then moves with the dot)
+    wl_contended*:               bool
     waitloop_instr_lut*:         seq[WLInstrKind]
     # The LDM^ glitch (arm/arm.nim, ldm_user_glitch): the current-bank
     # registers holding banked OR user for the one instruction after an LDM^,
@@ -1284,6 +1289,7 @@ when defined(obuslatch):
   proc obus_drive_word*(bus: Bus; value: uint32) {.inline.}
   proc obus_drive_half*(bus: Bus; address: uint32; value: uint16) {.inline.}
 proc rom_cool*(bus: Bus) {.inline.}
+proc wl_passable(gba: GBA; kind: EventType): bool
 # The prefetch serve sits on the ROM fetch slow path, which runs once per
 # instruction outside a hot stream; clang left it out of line, costing ~1% of
 # retired instructions. Pinned where the attribute exists (GCC makes a failed
@@ -1358,6 +1364,12 @@ const DMA_STALLS_IRQ_SYNC* {.booldefine.} = true
 const APU_SAMPLE_RATE*    = 32768
 const CPU_CLOCK_SPEED*    = 1 shl 24
 const APU_SAMPLE_PERIOD*  = CPU_CLOCK_SPEED div APU_SAMPLE_RATE
+const WL_CROSS_PERIOD_MAX* = 46
+  ## The longest loop period a skip crosses anything but output samples in
+  ## (cpu.wl_crossable): shorter than every booking a passable handler makes
+  ## (wl_passable) other than its own +0 and +2 chains, so nothing it books
+  ## falls inside the iteration being skipped. HBLANK_FLAG_DELAY (47) is the
+  ## shortest.
 const WL_QUIET_EVENTS* {.booldefine.} = true
   ## The waitloop detector counts an event that ran after the loop's load as
   ## harmless when it cannot have changed what the loop read: it writes no
@@ -1738,6 +1750,67 @@ proc defer_fifo_request(gba: GBA; kind: EventType): bool =
       elif bus.idle_until == now:
         bus.dma_idle_edge = true
   false
+
+static: doAssert WL_CROSS_PERIOD_MAX < HBLANK_FLAG_DELAY
+
+proc wl_passable(gba: GBA; kind: EventType): bool =
+  ## Whether a waitloop skip may dispatch `kind` inside an iteration it skips
+  ## (cpu.wl_crossable, which has already required a loop that reads no IO
+  ## and no renderer-contended memory, no access window open and no
+  ## interrupt pending). True only where the handler's path reads neither
+  ## the CPU nor the bus -- so it cannot tell where in the loop the CPU is --
+  ## writes no memory, raises no interrupt, requests no DMA, opens no access
+  ## window, ends no frame, and books nothing inside the iteration that is
+  ## not passable too (EndHBlank's StartLine at +0 is; SetHBlankFlag's
+  ## HDMARequest at +2 is whenever SetHBlankFlag is). DISPSTAT, VCOUNT and
+  ## the PSG change under it, but the loop reads no IO.
+  let ppu = gba.ppu
+  let st = ppu.dispstat
+  case kind
+  of etAPUSample, etAPUFrameSeq, etPPUStartLine: true
+  of etPPUStartHBlank:
+    # Its access window for an H-blank / V-blank DMA, the interrupt windows
+    # it opens ahead of this line's raises (IRQ_LAST_WAITS)
+    let next = (int(ppu.vcount) + 1) mod 228
+    not st.hblank_irq_enable and not (st.vblank_irq_enable and next == 160) and
+      not (st.vcounter_irq_enable and next == int(st.vcount_setting)) and
+      not (ppu.vcount < 160 and gba.dma.armed(2)) and
+      not (ppu.vcount == 159 and gba.dma.armed(1))
+  of etPPUSetHBlankFlag:
+    not st.hblank_irq_enable and
+      (ppu.vcount >= 160 or (not gba.bus.dma_deferred and not gba.dma.armed(2)))
+  of etHDMARequest:
+    # defer_dma_request reads the CPU's access only for a deferral or with a
+    # window open; trigger_hdma requests nothing with no channel armed
+    not gba.bus.dma_deferred and not gba.dma.armed(2)
+  of etPPUEndHBlank:
+    # Not the frame's end (160), the V-blank flag's fall (227) or the frame's
+    # first line (0), where contention and the flags change; no V-count
+    # match to raise, no video capture to request
+    let next = (int(ppu.vcount) + 1) mod 228
+    next != 0 and next != 160 and next != 227 and
+      not (st.vcounter_irq_enable and next == int(st.vcount_setting)) and
+      not (gba.dma.dmacnt_h[3].enable and gba.dma.dmacnt_h[3].start_timing == 3)
+  of etTimer0, etTimer1, etTimer2, etTimer3:
+    let tim = gba.timer
+    let num = ord(kind) - ord(etTimer0)
+    let c = tim.tmcnt[num]
+    if c.irq_enable: return false
+    if num < 3 and tim.tmcnt[num + 1].cascade and tim.tmcnt[num + 1].enable:
+      return false
+    # Its next overflow lands past the iteration (either reload it may take)
+    let reload = max(tim.tmd[num], tim.tmd_prev[num])
+    if (0x10000 - int(reload)) * TIMER_PERIODS[c.frequency] < 2 * WL_CROSS_PERIOD_MAX + 2:
+      return false
+    if num <= 1 and (gba.apu.sound_enabled or not FIFO_MASTER_RESET):
+      # A FIFO it drives neither asks for a refill nor books a window for
+      # one (dma_channels.timer_overflow): 17 bytes or more before the pop
+      let sh = gba.apu.soundcnt_h
+      for ch in 0 .. 1:
+        let t = if ch == 0: int(sh.dma_sound_a_timer) else: int(sh.dma_sound_b_timer)
+        if t == num and gba.apu.dma_channels.sizes[ch] < 17: return false
+    true
+  else: false
 
 proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
   # Non-owning capture: the closure lives on the GBA's scheduler
