@@ -184,8 +184,17 @@ proc write_seq_u8*(w: var Writer; data: openArray[byte]) =
   w.write_bytes(data)
 
 proc write_seq_u16*(w: var Writer; data: openArray[uint16]) =
+  ## Length-prefixed little-endian halfwords. One copy on a little-endian
+  ## host: element by element, the framebuffer alone was 153,600 appends a
+  ## payload, the rewind ring's largest serializing cost.
   w.write_u32(uint32(data.len))
-  for v in data: w.write_u16(v)
+  when cpuEndian == littleEndian:
+    if data.len > 0:
+      let start = w.buf.len
+      w.buf.setLen(start + 2 * data.len)
+      copyMem(addr w.buf[start], unsafeAddr data[0], 2 * data.len)
+  else:
+    for v in data: w.write_u16(v)
 
 proc write_tag*(w: var Writer; tag: uint8) {.inline.} =
   ## Section marker, validated on read to catch format desyncs early

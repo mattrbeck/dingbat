@@ -994,7 +994,7 @@ when defined(deltachar):
 # on the next section (tests/savestate_compat_test.nim covers it).
 
 proc gba_state_payload(gba: GBA; in_process = false): string =
-  var w = Writer()
+  var w = Writer(buf: newStringOfCap(gba.payload_len_hint))
   when defined(deltachar):
     payloadSections.setLen(0)
     template mark(name: string) = payloadSections.add((name, w.buf.len))
@@ -1036,6 +1036,7 @@ proc gba_state_payload(gba: GBA; in_process = false): string =
   save_inflight_state(gba, w)
   mark("end")
   w.write_tag(GBA_SEC_END)
+  gba.payload_len_hint = w.buf.len
   w.buf
 
 proc restore_fetch_page(bus: Bus) =

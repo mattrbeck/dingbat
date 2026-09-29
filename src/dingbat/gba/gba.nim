@@ -1245,6 +1245,9 @@ type
     # Emulated cycle at which the current frame started; frame progress is
     # derived from it rather than counted per instruction.
     frame_start_cycles*: CycleCount
+    # Length of the last state payload: the next is written into a buffer
+    # of that capacity rather than grown from empty (savestate.nim)
+    payload_len_hint: int
     cartridge*:  Cartridge
     storage*:    Storage
     mmio*:       MMIO
