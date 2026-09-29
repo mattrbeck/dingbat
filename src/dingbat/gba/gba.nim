@@ -660,6 +660,18 @@ type
     # At that visit: nothing since the visit before made an event after the
     # loop's read matter (WL_QUIET_EVENTS; waitloop_skip)
     wl_quiet*:                   bool
+    # That visit's verdict: the loop may be skipped (waitloop_skip still
+    # requires the iteration to have repeated exactly, below)
+    wl_skip_ok*:                 bool
+    # Where the last judged iteration ended (the loop's start again), for
+    # which loop, and the prefetcher's state there relative to that cycle
+    # (waitloop_skip): an iteration that starts in the state the previous
+    # one started in, and takes as long, repeats until an event
+    wl_bound*:                   int64
+    wl_bound_addr*:              uint32
+    wl_sig_next*:                uint32
+    wl_sig_free*:                int64
+    wl_sig_bits*:                uint32
     # Whether a skip may run through events that cannot tell it from the
     # loop (cpu.wl_crossable). Off on cores stepped in lockstep with another
     # (link.nim, netcore.nim): a longer skip changes how the cores

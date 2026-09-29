@@ -764,8 +764,32 @@ proc waitloop_skip(cpu: CPU; remaining: int) {.noinline.} =
   ## the per-instruction path in tick sits on the inlining threshold.
   cpu.entered_waitloop = false
   let s = cpu.gba.scheduler
+  let bus = cpu.gba.bus
   let boundary = s.cycles + CycleCount(remaining)
-  if boundary >= s.next_event:
+  # The prefetcher's state as this iteration ends and the next begins, time
+  # made relative. Two equal verdict-to-verdict periods do not prove the
+  # loop is periodic: the verdict is taken inside the branch, and where the
+  # branch falls in its iteration moves with the prefetcher. Iridion II (E)
+  # polls DISPSTAT in a loop that runs 16 cycles, but after a prefetch
+  # disturbance (an iteration of 20, then 14) its verdicts read 17 and 17;
+  # skipped on a 17-cycle grid it left the loop 5 cycles early. An iteration
+  # that began in the state the previous one began in, and took as long,
+  # is the previous one again, and so is every one after it until an event.
+  let sig_free = int64(bus.rom_free_since) - int64(boundary)
+  let sig_bits = uint32(bus.rom_hot) or (uint32(bus.pf_paused) shl 1) or
+                 (uint32(bus.pf_running) shl 2) or
+                 (uint32(cast[uint8](bus.pf_count)) shl 8) or
+                 (uint32(cast[uint8](bus.rom_ahead)) shl 16)
+  let repeated = cpu.wl_bound_addr == cpu.wl_addr and
+                 int64(boundary) - cpu.wl_bound == cpu.wl_period and
+                 cpu.wl_sig_next == bus.rom_next_addr and
+                 cpu.wl_sig_free == sig_free and cpu.wl_sig_bits == sig_bits
+  cpu.wl_bound_addr = cpu.wl_addr
+  cpu.wl_bound = int64(boundary)
+  cpu.wl_sig_next = bus.rom_next_addr
+  cpu.wl_sig_free = sig_free
+  cpu.wl_sig_bits = sig_bits
+  if boundary >= s.next_event or not cpu.wl_skip_ok or not repeated:
     s.tick(remaining)
     return
   if (cpu.gba.bus.sync_bits and not SB_SWAP) != 0:
@@ -805,6 +829,7 @@ proc waitloop_skip(cpu: CPU; remaining: int) {.noinline.} =
     at = land
     s.cycles = at
   let adv = at - boundary
+  cpu.wl_bound = int64(at)   # the loop starts there, in the same state
   if adv > 0:
     cpu.gba.bus.rom_free_since += adv
     cpu.wl_time += int64(adv)

@@ -225,5 +225,6 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
     # For events the branch's own refill dispatches after this (waitloop_skip)
     cpu.wl_quiet = not cpu.gba.wl_unsafe and not cpu.irq_line
     cpu.gba.wl_unsafe = false
-  if not (stable and fresh and not volatile):
-    cpu.entered_waitloop = false
+  # A judged iteration always reaches waitloop_skip, which records where it
+  # ends whether or not it skips
+  cpu.wl_skip_ok = stable and fresh and not volatile

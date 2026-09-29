@@ -81,6 +81,7 @@ proc load_cpu_state(cpu: CPU; r: var Reader; rev: uint32) =
     # its frame (migrate_intr_wait_frame) where that is safe.
     cpu.halt_resume_pop = false
   cpu.entered_waitloop = false
+  cpu.wl_bound_addr = 0   # the next iteration measures afresh
 
 # ---- Bus ----
 
