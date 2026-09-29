@@ -168,6 +168,46 @@ largest). Gains, from boot: Adventures of Mr. Bean -97 %, Koala Brothers
 -65 %, Tringo -55 %, Polly Pocket -53 %, Rampage Puzzle Attack -43 %,
 Horse & Pony -36 %, Iridion 3D -34 %.
 
+### Third round (2026-09-29): loops the scan cannot prove
+
+* **A dynamic verifier (`waitloop.dyn_loop`).** The static scan now says
+  accept, never (a loop-carried register, a PC write) or *dynamic*: a body
+  with calls, stores or shapes it cannot parse, up to `DYN_BODY_MAX` bytes,
+  hooked on unconditional backward branches too. A dynamic loop is armed at
+  its head: registers and CPSR snapshotted, stores tracked (`note_store`; a
+  work-RAM store of the value already there does not count, any store near
+  the PC or into the MP2K sound area does), and SWIs, interrupts taken, DMA
+  bursts and event kinds counted. The next arrival at the head with all of
+  it unchanged, no IO read an event could have moved and no interrupt line
+  up is an iteration that repeated the last, and the skip machinery takes
+  it from there. A failed check rests the loop for `DYN_REST` arrivals, so
+  loops that do work cost little. Verdicts live in `WLTables` (a ref: big
+  arrays in the CPU object cost ~0.3 % in layout alone), a direct-mapped
+  table ahead of the hash sets; a verdict on RAM code keeps the body's bytes
+  and holds only while they still match.
+* **Interrupt-heavy loops keep their verdict.** A loop that read no IO
+  cannot have been changed by an event that writes no memory
+  (`WL_MEMORY_QUIET_KINDS`), so the per-line H-blank interrupt no longer
+  costs it its verdict every line; StartHBlank with the H-blank interrupt
+  on passes only for periods shorter than the 31 cycles to the interrupt's
+  window. Passing that window itself (the rest of Tekken Advance's and
+  Guilty Gear X's time) would mean skipping IRQ_LAST_WAITS' notes, which
+  are serialized; not done.
+* The verifier's one exactness hole on the archive: it skipped with an
+  interrupt line already up, so Franklin the Turtle took an H-blank
+  interrupt three iterations (180 cycles) late; frames and audio still
+  matched, the stack's stale bytes did not. `-d:wlcheck` now asserts no
+  skip passes a deliverable interrupt.
+
+Skip on equals skip off over the whole archive again, audio included.
+Instructions from boot, main -> this round: Magical Quest 3 -45 %, Final
+Fight One -37 %, Powerpuff Girls -19 %, Land Before Time -17 %, Super
+Monkey Ball Jr -17 %, Quiere ser Millonario -17 %, Oshare Princess 3 -15 %,
+WarioWare trial (RAM code) -11 %, Guilty Gear X -9 %, Tekken Advance -8 %,
+Scooby-Doo -7 %; titles it does not help at most +0.6 %. Gameplay states:
+FireRed +0.30 %, Emerald +0.27 %, Kirby +0.03 %, Golden Sun +0.27 %,
+Minish Cap +0.21 %.
+
 `fetch_half` / `fetch_word` and their cached halves were `{.inline.}` and
 out of line anyway, natively and in wasm: now `always_inline` under clang
 (-3.4 % FireRed native, +4 % web). The rewind ring's serializer wrote the
