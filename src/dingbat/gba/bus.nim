@@ -413,6 +413,7 @@ proc contend_cost(bus: Bus; address: uint32; is32: bool; cost: int): int {.noinl
   ## is answered here from the next 33+ dots of the map; everything else
   ## goes to contention.nim.
   bus.contended_access = true
+  bus.dyn_cont = true
   let ppu {.cursor.} = bus.gba.ppu
   let dot = int(int64(bus.sched.cycles) + int64(bus.cycles) - ppu.line_start_cycle)
   if dot >= 0 and dot < 1232 and ppu.vcount < 160 and not ppu.cont_regs_stale and
@@ -1675,8 +1676,30 @@ proc fetch_word_miss(bus: Bus; address: uint32): uint32 =
       return
   bus.read_word(address)
 
+proc note_store(bus: Bus; address: uint32; width: int; value: uint32) {.noinline.} =
+  ## dyn_loop's store tracking: count a CPU store unless it leaves memory as
+  ## it was -- a work-RAM store of the value already there, nowhere near the
+  ## code being fetched and outside the MP2K HLE's watched window (a push of
+  ## the same registers to the same stack slots, every iteration).
+  if int64(bus.sched.cycles) + int64(bus.cycles) > bus.dyn_deadline:
+    # The armed loop has not come back: it was left. Stop paying for this.
+    bus.track_changes = false
+    bus.gba.cpu.dyn_key = 0
+    return
+  let page = address shr 24
+  let pc = bus.gba.cpu.r[15]
+  if (page == 2 or page == 3) and (address - bus.snd_wbase) >= bus.snd_wlen and
+     not (address + 8 >= pc and address <= pc + 8):
+    let same = case width
+      of 1: uint32(bus.read_byte_internal(address)) == value
+      of 2: uint32(bus.read_half_internal(address)) == (value and 0xFFFF'u32)
+      else: bus.read_word_internal(address) == value
+    if same: return
+  inc bus.dyn_changes
+
 proc `[]=`*(bus: Bus; address: uint32; value: uint8) =
   bdWatch(address, 1, uint32(value))
+  if bus.track_changes: bus.note_store(address, 1, uint32(value))
   bus.rom_cool()
   let cost = bus.access_cycles(address, is32 = false, fetch = false)
   bus.cycles += cost
@@ -1701,6 +1724,7 @@ proc `[]=`*(bus: Bus; address: uint32; value: uint8) =
 
 proc write_half*(bus: Bus; address: uint32; value: uint16) =
   bdWatch(address, 2, uint32(value))
+  if bus.track_changes: bus.note_store(address, 2, uint32(value))
   bus.rom_cool()
   let cost = bus.access_cycles(address, is32 = false, fetch = false)
   bus.cycles += cost
@@ -1719,6 +1743,7 @@ proc write_half*(bus: Bus; address: uint32; value: uint16) =
 
 proc write_word*(bus: Bus; address: uint32; value: uint32) =
   bdWatch(address, 4, value)
+  if bus.track_changes: bus.note_store(address, 4, value)
   bus.rom_cool()
   let cost = bus.access_cycles(address, is32 = true, fetch = false)
   bus.cycles += cost

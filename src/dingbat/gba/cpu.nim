@@ -26,6 +26,7 @@ proc new_cpu*(gba: GBA): CPU =
     branch_dest: 0,
     entered_waitloop: false,
     wl_cross_events: true,
+    wlt: WLTables(),
   )
   for i in 0..15: result.r[i] = 0
   for bank in 0..5:
@@ -113,6 +114,7 @@ proc irq_enter*(cpu: CPU) =
   ## The IRQ exception, whatever CPSR.I holds (irq checks it; an S-bit
   ## CPSR restore that sets it does not, arm.exception_return_restore).
   cpu.wl_volatile_at = 0   # a handler can stop what made a loop volatile
+  inc cpu.irq_count
   block:
     when defined(irqlog):
       # -d:irqlog: the cycle every IRQ is taken at, to IRQLOG (a file: the
@@ -263,6 +265,7 @@ proc contend_refill(cpu: CPU; s: int) {.noinline.} =
   ## VRAM).
   let bus = cpu.gba.bus
   bus.contended_access = true
+  bus.dyn_cont = true
   let target = cpu.r[15] and (if cpu.cpsr.thumb: not 1'u32 else: not 3'u32)
   let step = if cpu.cpsr.thumb: 2'u32 else: 4'u32
   for f in 0'u32 .. 1'u32:
@@ -755,6 +758,11 @@ proc wl_crossable(cpu: CPU; land: CycleCount): bool {.inline.} =
        (cpu.wl_period > WL_CROSS_PERIOD_MAX or not cpu.gba.wl_passable(kind) or
         (reads_status and kind in {etPPUSetHBlankFlag, etPPUEndHBlank})):
       return false
+    # StartHBlank books the H-blank raise's interrupt window HBLANK_FLAG_DELAY
+    # - IRQ_WINDOW_LEAD (31) cycles on: past the iteration only if it is shorter
+    if kind == etPPUStartHBlank and cpu.gba.ppu.dispstat.hblank_irq_enable and
+       cpu.wl_period > 30:
+      return false
   true
 
 proc waitloop_skip(cpu: CPU; remaining: int) {.noinline.} =
@@ -841,6 +849,8 @@ proc waitloop_skip(cpu: CPU; remaining: int) {.noinline.} =
     at = land
     s.cycles = at
   let adv = at - boundary
+  when defined(wlcheck):
+    doAssert adv == 0 or not cpu.irq_line or cpu.cpsr.irq_disable, "skipped a raised IRQ"
   when defined(wltrace):
     echo "SKIP loop=", toHex(cpu.wl_addr, 8), " from=", boundary, " to=", at, " per=", period,
          " io=", cpu.wl_reads_io
@@ -848,6 +858,9 @@ proc waitloop_skip(cpu: CPU; remaining: int) {.noinline.} =
   if adv > 0:
     cpu.gba.bus.rom_free_since += adv
     cpu.wl_time += int64(adv)
+    if cpu.dyn_key == cpu.wl_addr:
+      cpu.dyn_time += int64(adv)
+      cpu.gba.bus.dyn_deadline += int64(adv)
     if cpu.wl_reads_io != 0:
       # Each iteration's IO load stamped where it ran (load_sync,
       # catch_up_access); the skipped ones would have moved the stamps on

@@ -63,6 +63,9 @@ const CONTENTION* {.booldefine.} = true
 
 # All GBA types in one block for forward-reference support.
 
+const WL_VERDICT_SLOTS* = 256   # judge_loop's direct-mapped verdicts
+const DYN_REST_SLOTS* = 256   # dyn_loop's direct-mapped rest (waitloop.nim)
+
 type
   Pipeline* = object
     buffer*: array[2, uint32]
@@ -430,6 +433,15 @@ type
     # waitloop detector last looked; such a loop is never skipped.
     volatile_read*:  bool
     volatile_pc*:    uint32   # r15 at the latest such read
+    # The dynamic loop check's own view since it last armed (waitloop.nim,
+    # dyn_loop): the IO classes read, a volatile read, a contended access,
+    # and stores that changed memory (counted only while track_changes)
+    dyn_io*:         uint8
+    dyn_vol*:        bool
+    dyn_cont*:       bool
+    track_changes*:  bool
+    dyn_changes*:    uint32
+    dyn_deadline*:   int64    # when the armed loop counts as left
     # Which IO registers were read since the waitloop detector last looked
     # (IO_PPU_STATUS, IO_KEYPAD, IO_OTHER; mmio.nim): the skip runs through
     # an event only if it changes none of them (cpu.nim, wl_crossable)
@@ -585,6 +597,16 @@ type
     wlAluOperations, wlMoveCompareAddSubtract, wlAddSubtract,
     wlMoveShiftedRegister, wlUnimplemented
 
+  WLTables* = ref object
+    ## Out of CPU's own object: ~11 KB in its middle cost the hot fields
+    ## after it measurably
+    verdict_key*:  array[WL_VERDICT_SLOTS, uint32]
+    verdict*:      array[WL_VERDICT_SLOTS, uint8]
+    verdict_load*: array[WL_VERDICT_SLOTS, uint32]
+    verdict_body*: array[WL_VERDICT_SLOTS, array[32, uint8]]
+    rest_key*:     array[DYN_REST_SLOTS, uint32]
+    rest*:         array[DYN_REST_SLOTS, int32]
+
   WLParsed* = object
     read_only*:  bool
     read_bits*:  uint16
@@ -647,6 +669,13 @@ type
     # are even / 0 = no entry; a waitloop start is always a ROM address)
     last_non_waitloop*:          uint32
     last_waitloop*:              uint32
+    # Loops the scan could not follow but might repeat (judge_loop, WL_DYN)
+    identified_dyn_loops*:       HashSet[uint32]
+    last_dyn_loop*:              uint32
+    never_keys*:                 array[4, uint32]   # waitloop.note_never
+    wlt*:                        WLTables   # judge_loop's and dyn_loop's tables
+    branch_dest2*:               uint32             # the target before branch_dest
+    wl_dyn*:                     bool
     entered_waitloop*:           bool
     # A waitloop's first memory load (0xFFFFFFFF: none), per cached start
     waitloop_first_load*:        Table[uint32, uint32]
@@ -667,6 +696,19 @@ type
     # A loop whose current run read something volatile (waitloop.nim)
     wl_volatile_at*:             uint32
     wl_volatile_rest*:           int32
+    # The dynamic loop check (waitloop.nim, dyn_loop): the armed loop, when
+    # it armed, the registers (r15's slot holds CPSR) and counters then, and
+    # a direct-mapped rest for loops that failed it
+    dyn_key*:                    uint32
+    dyn_time*:                   int64
+    dyn_regs*:                   array[16, uint32]
+    dyn_mark_changes*:           uint32
+    dyn_mark_swi*:               uint32
+    dyn_mark_irq*:               uint32
+    dyn_mark_dma*:               uint32
+    dyn_mark_dispatch*:          uint32
+    swi_count*:                  uint32
+    irq_count*:                  uint32
     # Where the last judged iteration ended (the loop's start again), for
     # which loop, and the prefetcher's state there relative to that cycle
     # (waitloop_skip): an iteration that starts in the state the previous
@@ -677,6 +719,7 @@ type
     wl_sig_free*:                int64
     wl_sig_bits*:                uint32
     wl_bound_dma*:               uint32   # gba.dma_bursts there
+    wl_verdict_dma*:             uint32   # ... and at the last verdict
     # Whether a skip may run through events that cannot tell it from the
     # loop (cpu.wl_crossable). Off on cores stepped in lockstep with another
     # (link.nim, netcore.nim): a longer skip changes how the cores
@@ -1248,6 +1291,8 @@ type
     # the waitloop detector's staleness test (waitloop.nim)
     dispatch_count*:   uint32
     dma_bursts*:       uint32   # DMA bursts granted (waitloop_skip's steadiness)
+    dyn_kinds*:        uint64   # event kinds dispatched since dyn_loop armed
+    verdict_kinds*:    uint64   # ... and since analyze_loop's last verdict
     last_dispatch_pc*: uint32
     # WL_QUIET_EVENTS: since the waitloop detector last looked, something
     # ran that could change what a loop reads -- an event not known to leave
@@ -1311,6 +1356,7 @@ when defined(obuslatch):
   proc obus_drive_half*(bus: Bus; address: uint32; value: uint16) {.inline.}
 proc rom_cool*(bus: Bus) {.inline.}
 proc wl_passable(gba: GBA; kind: EventType): bool
+proc dyn_loop*(cpu: CPU; start_addr, end_addr: uint32; arm: bool)
 # The prefetch serve sits on the ROM fetch slow path, which runs once per
 # instruction outside a hot stream; clang left it out of line, costing ~1% of
 # retired instructions. Pinned where the attribute exists (GCC makes a failed
@@ -1387,9 +1433,16 @@ const CPU_CLOCK_SPEED*    = 1 shl 24
 const APU_SAMPLE_PERIOD*  = CPU_CLOCK_SPEED div APU_SAMPLE_RATE
 const WL_VOLATILE_REST* = 32
   ## Iterations of a loop not judged after one read something volatile
-const WL_BODY_MAX* = 32
+const WL_BODY_MAX* = 30
   ## The longest Thumb loop body (bytes before its branch) the waitloop
   ## detector judges; Adventures of Mr. Bean's IO poll is 22
+const DYN_BODY_MAX* = 512
+  ## The longest loop (bytes before its branch) the dynamic check takes on
+const DYN_FIRST* = 1024
+  ## Cycles an armed dynamic check waits for its loop's first return; after
+  ## that, twice its period
+const DYN_REST* = 64
+  ## Arrivals a loop that failed the dynamic check is not checked again
 const WL_ARM_BODY_MAX* = 32
   ## The same for ARM loops (eight instructions before the branch)
 const WL_CROSS_PERIOD_MAX* = 46
@@ -1809,12 +1862,11 @@ proc wl_passable(gba: GBA; kind: EventType): bool =
   case kind
   of etAPUSample, etAPUFrameSeq, etPPUStartLine: true
   of etPPUStartHBlank:
-    # Its access window for an H-blank / V-blank DMA, the interrupt windows
-    # it opens ahead of this line's raises (IRQ_LAST_WAITS)
-    let next = (int(ppu.vcount) + 1) mod 228
-    not st.hblank_irq_enable and not (st.vblank_irq_enable and next == 160) and
-      not (st.vcounter_irq_enable and next == int(st.vcount_setting)) and
-      not (ppu.vcount < 160 and gba.dma.armed(2)) and
+    # Its access window for an H-blank / V-blank DMA. The interrupt windows
+    # it books ahead of this line's raises (IRQ_LAST_WAITS) are only
+    # bookings: IrqWindowOpen is not passable, and the one for the H-blank
+    # raise lands 31 cycles on (wl_crossable keeps the period under it).
+    not (ppu.vcount < 160 and gba.dma.armed(2)) and
       not (ppu.vcount == 159 and gba.dma.armed(1))
   of etPPUSetHBlankFlag:
     not st.hblank_irq_enable and
@@ -1856,6 +1908,8 @@ proc gba_dispatch(gba: GBA): proc(kind: EventType) {.closure.} =
   # Non-owning capture: the closure lives on the GBA's scheduler
   let gba {.cursor.} = gba
   result = proc(kind: EventType) =
+    gba.dyn_kinds = gba.dyn_kinds or (1'u64 shl ord(kind))
+    gba.verdict_kinds = gba.verdict_kinds or (1'u64 shl ord(kind))
     if kind == etFifoWindow:
       # Changes nothing a program can read (FIFO_DMA_WINDOW), so a waitloop
       # need not count it: the skip it stopped resumes after one iteration

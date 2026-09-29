@@ -15,9 +15,15 @@ proc thumb_long_branch_link*[second_instr: static bool](cpu: CPU; instr: uint32)
 proc thumb_unconditional_branch*(cpu: CPU; instr: uint32) =
   let offset = bits_range(instr, 0, 10)
   let off_signed = cast[int32](cast[int16](uint16(offset shl 5))) shr 4
+  if off_signed < 0 and off_signed >= -(DYN_BODY_MAX + 4):
+    # A loop closed by an unconditional branch (waitloop.nim)
+    let dest = uint32(int(cpu.r[15]) + off_signed)
+    if cpu.loop_worth(dest, cpu.r[15] - 4, arm = false):
+      cpu.analyze_loop(dest, cpu.r[15] - 4)
   discard cpu.set_reg(15, uint32(int(cpu.r[15]) + off_signed))
 
 proc thumb_software_interrupt*(cpu: CPU; instr: uint32) =
+  inc cpu.swi_count
   let use_hle = cpu.gba.use_hle or (cpu.gba.hle_after_bios and cpu.r[15] >= 0x08000000'u32)
   let swi_num = bits_range(instr, 0, 7)
   when defined(biosdrvtrace):
@@ -43,7 +49,8 @@ proc thumb_conditional_branch*[cond: static uint32](cpu: CPU; instr: uint32) =
     # it must not be judged: a waitloop verdict there fast-forwards past the
     # exit to the next deadline (mGBA suite "H-blank bit start" Flip rows,
     # Video tests "Layer toggle 2").
-    cpu.analyze_loop(branch_dest, cpu.r[15] - 4)
+    if branch_dest < cpu.r[15] - 4 and cpu.loop_worth(branch_dest, cpu.r[15] - 4, arm = false):
+      cpu.analyze_loop(branch_dest, cpu.r[15] - 4)
     discard cpu.set_reg(15, branch_dest)
   else:
     cpu.step_thumb()

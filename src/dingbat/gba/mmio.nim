@@ -11,10 +11,11 @@ when defined(biosdrvtrace):
 proc `[]`*(mmio: MMIO; address: uint32): uint8 =
   let io_addr = 0xFFFFFF'u32 and address
   when WL_QUIET_EVENTS: mmio.gba.wl_unsafe = true
-  mmio.gba.bus.io_read = mmio.gba.bus.io_read or
-    (if io_addr in 0x004'u32 .. 0x007'u32: IO_PPU_STATUS
-     elif io_addr in 0x130'u32 .. 0x133'u32: IO_KEYPAD
-     else: IO_OTHER)
+  let io_class = if io_addr in 0x004'u32 .. 0x007'u32: IO_PPU_STATUS
+                 elif io_addr in 0x130'u32 .. 0x133'u32: IO_KEYPAD
+                 else: IO_OTHER
+  mmio.gba.bus.io_read = mmio.gba.bus.io_read or io_class
+  mmio.gba.bus.dyn_io = mmio.gba.bus.dyn_io or io_class
   when defined(biosdrvtrace):
     if bdIoReadHook != nil: bdIoReadHook(address)
   case io_addr
@@ -23,6 +24,7 @@ proc `[]`*(mmio: MMIO; address: uint32): uint8 =
     # PSG state advances on lazily caught-up deadlines, not events
     mmio.gba.bus.volatile_read = true
     mmio.gba.bus.volatile_pc = mmio.gba.cpu.r[15]
+    mmio.gba.bus.dyn_vol = true
     mmio.gba.apu[io_addr]
   of 0x0B0..0x0DF: mmio.gba.dma[io_addr]
   of 0x100..0x10F: mmio.gba.timer[io_addr]

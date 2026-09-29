@@ -82,6 +82,8 @@ proc load_cpu_state(cpu: CPU; r: var Reader; rev: uint32) =
     cpu.halt_resume_pop = false
   cpu.entered_waitloop = false
   cpu.wl_bound_addr = 0   # the next iteration measures afresh
+  cpu.dyn_key = 0
+  cpu.gba.bus.track_changes = false
 
 # ---- Bus ----
 

@@ -621,11 +621,14 @@ proc arm_branch*[link: static bool](cpu: CPU; instr: uint32) =
   else:
     # A taken backward branch closes a loop (waitloop.nim); r15 is the
     # branch + 8
-    if offset < 0 and offset >= -(WL_ARM_BODY_MAX + 8):
-      cpu.analyze_loop(uint32(int(cpu.r[15]) + offset), cpu.r[15] - 8, arm = true)
+    if offset < 0 and offset >= -(DYN_BODY_MAX + 8):
+      let dest = uint32(int(cpu.r[15]) + offset)
+      if cpu.loop_worth(dest, cpu.r[15] - 8, arm = true):
+        cpu.analyze_loop(dest, cpu.r[15] - 8, arm = true)
   discard cpu.set_reg(15, uint32(int(cpu.r[15]) + offset))
 
 proc arm_software_interrupt*(cpu: CPU; instr: uint32) =
+  inc cpu.swi_count
   let use_hle = cpu.gba.use_hle or (cpu.gba.hle_after_bios and cpu.r[15] >= 0x08000000'u32)
   let swi_num = bits_range(instr, 16, 23)
   when defined(biosdrvtrace):

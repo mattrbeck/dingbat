@@ -1480,6 +1480,7 @@ proc `[]`*(ppu: PPU; io_addr: uint32): uint8 =
       # changes a cycle on with no event: a waitloop must not skip on it
       ppu.gba.bus.volatile_read = true
       ppu.gba.bus.volatile_pc = ppu.gba.cpu.r[15]
+      ppu.gba.bus.dyn_vol = true
     let live = line == int(ppu.dispstat.vcount_setting)
     (read(ppu.dispstat, 0) and not 0x04'u8) or (if live: 0x04'u8 else: 0'u8)
   of 0x005: read(ppu.dispstat, 1)
