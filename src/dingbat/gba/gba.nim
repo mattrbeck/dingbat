@@ -429,6 +429,10 @@ type
     # timer's count, a PSG status, an EEPROM ready poll) happened since the
     # waitloop detector last looked; such a loop is never skipped.
     volatile_read*:  bool
+    # An IO register was read since the waitloop detector last looked (the
+    # skip runs through events only for a loop that reads none: cpu.nim,
+    # wl_crossable)
+    io_read*:        bool
     # Second burst tracker for DMA: src and dst streams interleave on the ROM
     # bus yet each stays sequential, without needing back-to-back bus cycles
     rom_next_addr2*: uint32
@@ -653,6 +657,13 @@ type
     # At that visit: nothing since the visit before made an event after the
     # loop's read matter (WL_QUIET_EVENTS; waitloop_skip)
     wl_quiet*:                   bool
+    # Whether a skip may run through events that cannot tell it from the
+    # loop (cpu.wl_crossable). Off on cores stepped in lockstep with another
+    # (link.nim, netcore.nim): a longer skip changes how the cores
+    # interleave. Configuration, not serialized.
+    wl_cross_events*:            bool
+    # The iteration the last verdict closed read an IO register
+    wl_reads_io*:                bool
     waitloop_instr_lut*:         seq[WLInstrKind]
     # The LDM^ glitch (arm/arm.nim, ldm_user_glitch): the current-bank
     # registers holding banked OR user for the one instruction after an LDM^,
@@ -1343,6 +1354,10 @@ const DMA_STALLS_IRQ_SYNC* {.booldefine.} = true
   ## (Interrupts.unstall); without it alyosha Interactions
   ## Internal_Cycle_DMA_IRQ_7/_ldr_IWRAM/_MUL_IRQ go red. The access the
   ## CPU was waiting to make is IRQ_LAST_WAITS's.
+# The output sample clock (apu.nim); the waitloop skip reads the period too
+const APU_SAMPLE_RATE*    = 32768
+const CPU_CLOCK_SPEED*    = 1 shl 24
+const APU_SAMPLE_PERIOD*  = CPU_CLOCK_SPEED div APU_SAMPLE_RATE
 const WL_QUIET_EVENTS* {.booldefine.} = true
   ## The waitloop detector counts an event that ran after the loop's load as
   ## harmless when it cannot have changed what the loop read: it writes no

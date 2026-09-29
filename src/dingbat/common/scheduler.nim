@@ -194,6 +194,13 @@ proc has_event*(s: Scheduler; kind: EventType): bool =
     if s.evbuf[i].kind == kind: return true
   false
 
+iterator due_before*(s: Scheduler; t: CycleCount): EventType =
+  ## The kinds of the pending events due before `t`, soonest first.
+  var i = s.nevents - 1
+  while i >= 0 and s.evbuf[i].cycles < t:
+    yield s.evbuf[i].kind
+    dec i
+
 proc call_current*(s: Scheduler) =
   while s.nevents > 0:
     let ev = s.evbuf[s.nevents - 1]

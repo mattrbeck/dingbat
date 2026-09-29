@@ -935,5 +935,6 @@ proc new_net_core*(gba: GBA; id: int; rom_crc: uint32;
                    window_cycles: int64(SPEC_WINDOW_FRAMES) * FRAME_CYCLES,
                    checkpoints: initDeque[Checkpoint]())
   result.send_msg(encode_hello(LINK_SYSTEM_GBA, uint8(id), rom_crc))
+  gba.cpu.wl_cross_events = false   # the slice loop steps one event at most
   if attach:
     gba.set_sio_driver(RemoteSioDriver(core: result))

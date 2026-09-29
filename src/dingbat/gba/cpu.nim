@@ -25,6 +25,7 @@ proc new_cpu*(gba: GBA): CPU =
     cache_waitloop_results: true,
     branch_dest: 0,
     entered_waitloop: false,
+    wl_cross_events: true,
   )
   for i in 0..15: result.r[i] = 0
   for bank in 0..5:
@@ -728,14 +729,32 @@ when defined(gsprobe):
   var gsProbeLog*: seq[(uint32, uint32, uint32, uint32, uint32, uint32)] = @[]
   var gsProbeIn*: bool
 
+proc wl_crossable(cpu: CPU; land: CycleCount): bool {.inline.} =
+  ## Whether the loop's iteration ending at `land` can be skipped although
+  ## events fall inside it: only output samples do. get_sample reads nothing
+  ## an iteration changes (no memory is written, and the CPU's registers and
+  ## bus state are not its inputs), writes nothing the loop reads, and books
+  ## only its own next sample, a sample period on: past `land` while the
+  ## loop's period is shorter. A loop that reads IO keeps its iterations:
+  ## each IO read stamps the bus's access window (catch_up_access), which a
+  ## skip would leave older than running them does.
+  if not cpu.wl_cross_events or cpu.wl_reads_io or
+     cpu.wl_period >= APU_SAMPLE_PERIOD:
+    return false
+  for kind in cpu.gba.scheduler.due_before(land):
+    if kind != etAPUSample: return false
+  true
+
 proc waitloop_skip(cpu: CPU; remaining: int) {.noinline.} =
   ## Skip whole iterations of the loop's period, stopping at or before the
   ## next event (waitloop.nim "Transparency"). The loop is back at its first
   ## instruction at `boundary`; after k more iterations it is there again at
   ## boundary + k*period with nothing else changed, so time and the
   ## time-anchored bus state move by that much. An event exactly on the
-  ## landing cycle dispatches there, as a real tick would. Out of line: the
-  ## per-instruction path in tick sits on the inlining threshold.
+  ## landing cycle dispatches there, as a real tick would. An iteration
+  ## whose events cannot tell whether it ran (wl_crossable) is skipped as
+  ## well, each event dispatched at its own cycle on the way. Out of line:
+  ## the per-instruction path in tick sits on the inlining threshold.
   cpu.entered_waitloop = false
   let s = cpu.gba.scheduler
   let boundary = s.cycles + CycleCount(remaining)
@@ -754,15 +773,23 @@ proc waitloop_skip(cpu: CPU; remaining: int) {.noinline.} =
     if not quiet:
       s.tick(remaining)
       return
-  s.cycles = boundary
   let period = CycleCount(cpu.wl_period)
-  let k = (s.next_event - boundary) div period
-  if k > 0:
-    let adv = k * period
-    s.cycles = boundary + adv
+  var at = boundary
+  while true:
+    at += (s.next_event - at) div period * period
+    s.cycles = at
+    let land = at + period
+    if not cpu.wl_crossable(land): break
+    while s.next_event < land:
+      s.cycles = s.next_event
+      s.call_current()
+    at = land
+    s.cycles = at
+  let adv = at - boundary
+  if adv > 0:
     cpu.gba.bus.rom_free_since += adv
     cpu.wl_time += int64(adv)
-    if s.cycles == s.next_event: s.call_current()
+  if s.cycles == s.next_event: s.call_current()
 
 proc hle_halt_return*(cpu: CPU) =
   ## The stub BIOS's trap at 0x170 (an ARM `swi 0`), where a Halt parked by

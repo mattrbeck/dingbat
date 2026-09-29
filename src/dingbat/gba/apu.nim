@@ -10,9 +10,6 @@ const APU_BUFFER_SIZE*    = 256
 # 2-8 KB range because blocking in get_sample stalls emulation mid-frame.
 const APU_SYNC_AHEAD_BYTES*    = 2048'u32
 const APU_SYNC_BACKSTOP_BYTES* = 16384'u32
-const APU_SAMPLE_RATE*    = 32768
-const CPU_CLOCK_SPEED*    = 1 shl 24
-const APU_SAMPLE_PERIOD*  = CPU_CLOCK_SPEED div APU_SAMPLE_RATE
 const FRAME_SEQ_RATE*     = 512
 const FRAME_SEQ_PERIOD*   = CPU_CLOCK_SPEED div FRAME_SEQ_RATE
 const PSG_SEQ_SKIP* = 8

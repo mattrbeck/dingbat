@@ -272,6 +272,7 @@ proc new_link*(cores: seq[GBA]): Link =
   )
   for i, core in cores:
     core.set_sio_driver(LockstepSioDriver(link: result, id: i))
+    core.cpu.wl_cross_events = false   # advance_once's step stays one event
 
 # ---------------- rollback support (see rollback.nim) ----------------
 # Snapshots are valid at frame boundaries only (where state_payload is

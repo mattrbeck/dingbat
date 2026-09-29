@@ -201,6 +201,8 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
   cpu.wl_dispatch_mark = cpu.gba.dispatch_count
   let volatile = cpu.gba.bus.volatile_read
   cpu.gba.bus.volatile_read = false
+  cpu.wl_reads_io = cpu.gba.bus.io_read
+  cpu.gba.bus.io_read = false
   var fresh = true
   if dispatched:
     # r15 reads instruction + 4 while an instruction runs (a catch-up at its
