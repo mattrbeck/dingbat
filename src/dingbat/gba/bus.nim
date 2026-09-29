@@ -1214,7 +1214,7 @@ when defined(obuslatch):
       bus.obus_half_at[0] = now
       bus.obus_half_at[1] = now
 
-proc fetch_half_cached(bus: Bus; address: uint32; page: uint32): uint16 {.inline.} =
+proc fetch_half_cached(bus: Bus; address: uint32; page: uint32): uint16 {.fetch_inline.} =
   ## The cached-page fetch: `page` is bus.fetch_page.
   if page >= 0x8:
     when defined(flatrom):
@@ -1247,14 +1247,14 @@ proc fetch_half_cached(bus: Bus; address: uint32; page: uint32): uint16 {.inline
     bus.cycles += bus.fetch_c16
   read_u16_ptr_raw(bus.fetch_ptr, (address and bus.fetch_mask) and not 1'u32)
 
-proc fetch_half*(bus: Bus; address: uint32): uint16 {.inline.} =
+proc fetch_half*(bus: Bus; address: uint32): uint16 {.fetch_inline.} =
   let page = bits_range(address, 24, 27)
   if page == bus.fetch_key or bus.install_fetch_cache(page):
     bus.fetch_half_cached(address, page)
   else:
     bus.fetch_half_miss(address)
 
-proc fetch_word_cached(bus: Bus; address: uint32; page: uint32): uint32 {.inline.} =
+proc fetch_word_cached(bus: Bus; address: uint32; page: uint32): uint32 {.fetch_inline.} =
   ## The cached-page fetch: `page` is bus.fetch_page.
   if page >= 0x8:
     when defined(flatrom):
@@ -1281,7 +1281,7 @@ proc fetch_word_cached(bus: Bus; address: uint32; page: uint32): uint32 {.inline
     bus.cycles += bus.fetch_c32
   read_u32_ptr_raw(bus.fetch_ptr, (address and bus.fetch_mask) and not 3'u32)
 
-proc fetch_word*(bus: Bus; address: uint32): uint32 {.inline.} =
+proc fetch_word*(bus: Bus; address: uint32): uint32 {.fetch_inline.} =
   let page = bits_range(address, 24, 27)
   if page == bus.fetch_key or bus.install_fetch_cache(page):
     bus.fetch_word_cached(address, page)
