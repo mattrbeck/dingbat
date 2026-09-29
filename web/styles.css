@@ -1079,21 +1079,6 @@ button {
   stroke: var(--accent);
 }
 
-.menu-item-muted {
-  color: var(--text-dim);
-  font-size: 13px;
-  padding: 7px 12px;
-}
-
-.menu-heading {
-  padding: 8px 12px 4px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-}
-
 .menu-sep {
   border: none;
   border-top: 1px solid var(--border);
@@ -1292,18 +1277,6 @@ body.link-mode .menu-quickrow,
 body.rollback-mode .menu-quickrow,
 body.net-mode .menu-quickrow {
   display: none;
-}
-
-/* Save State | Load State share one half-width row */
-.menu-split {
-  display: flex;
-  gap: 4px;
-}
-
-.menu-split .menu-item {
-  flex: 1 1 0;
-  min-width: 0;
-  width: auto;
 }
 
 #pause .ico-play,
@@ -3312,8 +3285,7 @@ body.runtime-ready #boot-progress {
 }
 
 /* A gap between the system chips and the location chips. */
-.lib-chip.lib-chip-loc:first-of-type,
-.lib-chip-sep {
+.lib-chip.lib-chip-loc:first-of-type {
   margin-left: 6px;
 }
 
@@ -4227,12 +4199,6 @@ body.debug-2p .home-tile-link {
 #thumbs-drive-row[hidden],
 #kept-save-row[hidden] {
   display: none;
-}
-
-/* The Manage entry's button keeps to one line beside its two-line label. */
-#roms-thumbs {
-  flex: 0 0 auto;
-  white-space: nowrap;
 }
 
 /* ---- Save States modal ---- */
@@ -7533,34 +7499,6 @@ body.net-mode #saves-modal .modal-toggle-row:has(#reset-save-slot) {
   overflow-wrap: break-word;
 }
 
-.gdrive-progress {
-  font-size: 12px;
-  color: var(--text-faint);
-  margin: 0 0 10px;
-  min-height: 15px;
-  overflow-wrap: anywhere;
-}
-
-.gdrive-restore-name {
-  flex: 1 1 140px;
-  min-width: 0;
-  font-size: 13px;
-}
-
-.gdrive-restore-title {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.gdrive-restore-sub {
-  display: block;
-  margin-top: 1px;
-  font-size: 11.5px;
-  color: var(--text-faint);
-}
-
 /* ───────────────────────── Google Drive sync ───────────────────────── */
 /* Sync status indicator. Muted: the accent belongs to the enhanced-audio
    indicator. */
@@ -7603,9 +7541,9 @@ body.net-mode #saves-modal .modal-toggle-row:has(#reset-save-slot) {
   }
 }
 /* The status row is normally running-only; sync must be able to reveal it —
-   but only over a running game. On the home screen the library head carries
-   the same state (#home-sync), and two live readouts of one thing, one of
-   them in the chrome, is one too many. */
+   but only over a running game. On the home screen the account slot's badge
+   (#account-btn) carries the same state, and two live readouts of one
+   thing is one too many. */
 body.running.sync-shown #status {
   display: inline-flex;
 }
@@ -7616,32 +7554,6 @@ body.running.sync-shown #status {
   .fps-unit {
     display: none;
   }
-}
-
-/* The grid's Sync link doubles as a progress readout while a sync runs. */
-#home-sync {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-/* display:inline-flex above would otherwise defeat the [hidden] attribute
-   used to keep this out of the bar when signed out. */
-#home-sync[hidden] {
-  display: none;
-}
-#home-sync svg {
-  width: 11px;
-  height: 11px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2.4;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-#home-sync[disabled] {
-  cursor: default;
-  text-decoration: none;
-  color: var(--text-faint);
 }
 
 /* Manage ROMs sort toggle */
@@ -8241,7 +8153,6 @@ body.net-mode #menu-btn.has-new-photo::after {
    banner is the one live element. */
 body.clip-replaying #playback-controls,
 body.clip-replaying #topbar .icon-btn,
-body.clip-replaying #topbar .menu-wrap,
 body.clip-replaying #controls {
   pointer-events: none;
   opacity: 0.45;

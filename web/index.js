@@ -2928,22 +2928,6 @@ const syncActive = () => !!gdriveToken && driveLinked() && !driveConnecting;
 
 const sigOfBytes = (bytes) => saveSignature(bytes); // FNV-1a + length
 
-// --- Naming helpers ------------------------------------------------------
-const kindLabel = (kind) => {
-  if (kind === "rom") return "ROM";
-  if (kind === "save") return "save file";
-  if (kind === "save2") return "P2 link save";
-  if (kind === "oldsave") return "save from before it was deleted";
-  if (kind === "state" || kind === "statemeta") return "save state (Quick)";
-  let m = String(kind).match(/:(\d+)$/);
-  if (m) return "save state (slot " + (Number(m[1]) + 1) + ")";
-  return String(kind);
-};
-const prettyName = (name) => {
-  let p = parseDriveFileName(name);
-  return p ? p.game + " — " + kindLabel(p.kind) : name;
-};
-
 // --- Local <-> Drive byte plumbing --------------------------------------
 // Drive file names are the IndexedDB keys, so parseDriveFileName classifies
 // local keys too.
