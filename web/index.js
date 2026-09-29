@@ -6347,11 +6347,13 @@ const wireTileMenu = (tile, launch, romName) => {
 };
 
 // A library game chosen from the home screen, from its tile or from the hero.
-// A tile boots the game from its in-game save and offers the session after
-// ("Last session saved"); the hero, which says Resume or Play before the
-// tap, passes `resume` and goes straight back in. The loaded game carries
-// on instead: a reboot would drop what happened since the snapshot.
-const openLibraryGame = async (romName, { driveOnly = false, missing = false, flyFrom = null, resume = false } = {}) => {
+// The hero says Resume or Play before the tap and passes `resume`; a tile
+// does what the "Opening a game from the library" setting says - go back
+// into the session where one still matches the save (the default), or boot
+// from the in-game save and offer the session after ("Last session saved").
+// The loaded game carries on instead: a reboot would drop what happened
+// since the snapshot.
+const openLibraryGame = async (romName, { driveOnly = false, missing = false, flyFrom = null, resume = libraryOpen === "resume" } = {}) => {
   if (currentOriginalName === romName && !linkMode) { resumeGame(); return; }
   if (!driveOnly) { launchRom(romName, { resume, flyFrom }); return; }
   if (missing) { relinkGameAction(romName, { launch: true }); return; }
@@ -8946,6 +8948,30 @@ const loadControlStyleFromStorage = async () => {
   applyJoystickMode(await dbGet("joystick-mode"));
 };
 
+// --- Opening a game from the library ---
+// "library-open": "resume" (a tile goes back into the game's session, where
+// one still matches its save) or "save" (it boots from the in-game save and
+// offers the session). openLibraryGame reads it.
+let libraryOpen = "resume";
+const libraryOpenChips = Array.from(/** @type {NodeListOf<HTMLElement>} */ (
+  document.querySelectorAll("#library-open-picker .choice-chip")));
+
+const applyLibraryOpen = (v) => {
+  libraryOpen = v === "save" ? "save" : "resume";
+  syncChipGroup(libraryOpenChips, libraryOpen);
+};
+
+libraryOpenChips.forEach((chip) =>
+  chip.addEventListener("click", async () => {
+    applyLibraryOpen(chip.dataset.value);
+    await dbPut("library-open", libraryOpen);
+  })
+);
+
+const loadLibraryOpenFromStorage = async () => {
+  applyLibraryOpen(await dbGet("library-open"));
+};
+
 // --- Run-ahead (opt-in) ---
 // 0 = off: plain loop_tick, zero cost. N > 0 swaps in runahead_tick(N)
 // (docs/run-ahead.md). Not during fast-forward/2x, never in the link modes.
@@ -9164,7 +9190,7 @@ const SETTINGS_KEYS = [
   "system", "audio", "colorCorrect", "video",
   "keybindings", "large-controls", "opaque-controls",
   "control-style", "joystick-mode", "hide-touch-on-gamepad",
-  "runahead", "gb-palette", "input-display",
+  "runahead", "gb-palette", "input-display", "library-open",
 ];
 
 const resetAllSettings = async () => {
@@ -9218,6 +9244,7 @@ const resetAllSettings = async () => {
   applyJoystickMode("fixed");
   applyHideTouchOnGamepad(true);
   applyInputDisplay(false);
+  applyLibraryOpen("resume");
 
   applyRunahead(0);
 
@@ -12835,6 +12862,7 @@ const initStorage = async () => {
   await loadHideTouchOnGamepadFromStorage();
   await loadInputDisplayFromStorage();
   await loadControlStyleFromStorage();
+  await loadLibraryOpenFromStorage();
   await loadRunaheadFromStorage();
   await loadAudioSettings();
   await loadColorCorrect();

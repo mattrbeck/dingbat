@@ -829,8 +829,8 @@ test("tapping back to the paused game while another tile loads keeps the paused 
 // A closed game's session goes back in during the boot itself when the hero
 // asks for it (its Resume), and its Restart boots from the save. Either way
 // the choice was made before the boot, so there is no "Last session saved"
-// offer after it. A tile makes no such choice: it boots from the save and
-// offers the session.
+// offer after it. A tile does what the library-open setting says: resume
+// (the default), or boot from the save and offer the session.
 
 const offered = (app) => app.toasts.some((t) => /Last session saved/.test(t));
 
@@ -883,9 +883,20 @@ test("a launch that did not choose (a file dropped on the page) still offers", a
   assert.ok(offered(app), "positive control for the two tests above");
 });
 
-test("a tile's tap boots from the save and offers the session", async () => {
+test("a tile's tap goes back into the session by default, unasked", async () => {
   const app = await closedWithSession();
   const before = core(app).applied;
+  app.runIn(`openLibraryGame("A.gba")`);
+  await drain(20);
+  assert.equal(named(app), "A.gba");
+  assert.equal(core(app).applied, before + 1, "the session went back in");
+  assert.ok(!offered(app));
+});
+
+test("set to From save, a tile's tap boots from the save and offers the session", async () => {
+  const app = await closedWithSession();
+  const before = core(app).applied;
+  app.runIn(`applyLibraryOpen("save")`);
   app.runIn(`openLibraryGame("A.gba")`);
   await drain(20);
   assert.equal(named(app), "A.gba");
