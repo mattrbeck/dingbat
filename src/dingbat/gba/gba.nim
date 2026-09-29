@@ -650,6 +650,9 @@ type
     wl_time*:                    int64
     wl_period*:                  int64
     wl_dispatch_mark*:           uint32
+    # At that visit: nothing since the visit before made an event after the
+    # loop's read matter (WL_QUIET_EVENTS; waitloop_skip)
+    wl_quiet*:                   bool
     waitloop_instr_lut*:         seq[WLInstrKind]
     # The LDM^ glitch (arm/arm.nim, ldm_user_glitch): the current-bank
     # registers holding banked OR user for the one instruction after an LDM^,

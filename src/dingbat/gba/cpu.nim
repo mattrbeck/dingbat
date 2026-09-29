@@ -742,6 +742,18 @@ proc waitloop_skip(cpu: CPU; remaining: int) {.noinline.} =
   if boundary >= s.next_event:
     s.tick(remaining)
     return
+  if cpu.gba.dispatch_count != cpu.wl_dispatch_mark:
+    # The verdict came before the branch's refill, which caught the bus up
+    # (clear_pipeline) and ran the events that fell inside the branch: after
+    # the loop's read. Advance Guardian Heroes (J) polls VCOUNT for line 159
+    # and read 158 a few cycles before the line changed under its branch;
+    # skipped, it went on polling to the next event instead of leaving.
+    var quiet = false
+    when WL_QUIET_EVENTS:
+      quiet = cpu.wl_quiet and not cpu.gba.wl_unsafe and not cpu.irq_line
+    if not quiet:
+      s.tick(remaining)
+      return
   s.cycles = boundary
   let period = CycleCount(cpu.wl_period)
   let k = (s.next_event - boundary) div period

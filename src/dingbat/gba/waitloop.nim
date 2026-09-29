@@ -217,6 +217,9 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
       # in the loop the line happened to fall.
       if not fresh and not cpu.gba.wl_unsafe and not cpu.irq_line:
         fresh = true
-  when WL_QUIET_EVENTS: cpu.gba.wl_unsafe = false
+  when WL_QUIET_EVENTS:
+    # For events the branch's own refill dispatches after this (waitloop_skip)
+    cpu.wl_quiet = not cpu.gba.wl_unsafe and not cpu.irq_line
+    cpu.gba.wl_unsafe = false
   if not (stable and fresh and not volatile):
     cpu.entered_waitloop = false
