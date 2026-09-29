@@ -5,9 +5,17 @@
 * **Native:** `tests/dingbat_bench.nim`. `DINGBAT_BENCH_STATE=<file.state>`
   resumes an in-game scene; `DINGBAT_BENCH_COUNTERS=1` reports retired
   instructions; `DINGBAT_BENCH_HASH=1` prints a rolling framebuffer hash.
+  `DINGBAT_BENCH_HASH=1` also prints a hash of the final state payload;
+  `DINGBAT_BENCH_RTC_EPOCH=<unix seconds>` freezes a cartridge RTC so RTC
+  games compare state for state.
 * **Web:** `web/bench/bench.html` drives `_benchFrames` through the wasm
   exports; `web/bench/cdp.mjs` runs expressions over CDP. See
   `web/bench/README.md`.
+* **Web core, headless:** `web/bench/node_wasm.sh build <out.js>` compiles
+  the native harness with the web build's flags for Node (same V8 wasm
+  engine as Chrome, a foreground process, every `DINGBAT_BENCH_*` variable
+  passed through); `--passL:--profiling-funcs` keeps names for
+  `node --cpu-prof`. Wasm inlining differs from native: profile both.
 * Profile with macOS `sample` (1 ms, 10 s), leaf-weighted, Nim mangling
   stripped and generic instantiations summed.
 
@@ -23,6 +31,11 @@
   boots from build A's SRAM. Give each build its own ROM copy.
 * **Gate every change on `DINGBAT_BENCH_HASH=1`** being byte-identical across
   the ROM set, and on the mGBA suite score.
+* **A waitloop or scheduler change is gated on the library, against
+  `DINGBAT_NO_WAITLOOP=1`.** Every 8th title of the archive (988), 300
+  frames, framebuffer hashes plus the final state payload with the RTC
+  frozen, each build on its own symlinked ROM: skip on must equal skip off.
+  Framebuffers alone missed 85 titles where the skip had moved emulation.
 * **Probe the ceiling before writing the optimisation.** Stub the stage out
   and measure; a stub that deletes render work is valid (the emulated CPU
   never reads the framebuffer), a stub that skips CPU work is not (it stops
@@ -92,6 +105,42 @@ compare, the HLE's overhead fell from 1.22 B to 0.30 B on Emerald and from
 What remains on Beast Shooter is mostly the stretched kernel for its
 decimated voices (about 0.6 B). A per-step table would save only the kernel
 lookups, not the 64-tap products, so it was left alone.
+
+## Idle loops (2026-09-28)
+
+An idle loop's skip used to stop at every scheduler event and run the
+iteration that crossed it for real. FireRed dispatches ~1930 events a frame
+(548 output samples, four PPU events a line, 224 sound-timer overflows), so
+its WaitForVBlank loop still ran ~1370 real iterations a frame, 17 % of the
+CPU's executed cycles. The skip now runs through an event whose handler
+cannot tell whether the iteration ran (`gba.wl_passable`: samples, and line,
+H-blank and timer events on their plain paths), for a loop that cannot see
+it (no IO read, no renderer-contended access, no window open, no interrupt
+pending, period at most `WL_CROSS_PERIOD_MAX`). Measuring it exposed two
+places the old skip was not exact (a verdict taken before the branch's
+refill dispatched events after the loop's read; skipped iterations leaving
+an open access window's stamps stale); both are fixed, and skip on now
+equals skip off on 987 of the 988 sampled titles.
+
+Retired instructions from gameplay states, before this round -> after it
+(including the fetch inlining and serializer fixes below): FireRed 10.08 B
+-> 8.74 B, Emerald 10.15 B -> 8.80 B, Kirby NiDL 7.01 B -> 5.81 B, Golden
+Sun 8.53 B -> 8.34 B, Minish Cap 8.98 B -> 8.65 B (the last two idle in
+Halt). Web build (wasm under Node, best of 5): FireRed +17 %, Emerald +16 to
++18 %, Kirby +22 to +24 %, Golden Sun +3 to +5 %, Minish Cap +4 to +6 %.
+
+Left: loops that poll VCOUNT or DISPSTAT (the PPU events change what they
+read; an IO read also stamps the access window) and loops under a per-line
+H-blank interrupt (Tekken Advance, Guilty Gear X). Across the sample's first
+600 frames, real iterations of recognised idle loops are 2.6 % of executed
+cycles. Iridion II (E) is the one title where skip on and off still differ:
+its DISPSTAT loops alternate 16- and 17-cycle iterations.
+
+`fetch_half` / `fetch_word` and their cached halves were `{.inline.}` and
+out of line anyway, natively and in wasm: now `always_inline` under clang
+(-3.4 % FireRed native, +4 % web). The rewind ring's serializer wrote the
+framebuffer a halfword at a time into a buffer grown from empty; one copy
+into a pre-sized buffer halves rewind's cost.
 
 ## Old and constrained devices
 

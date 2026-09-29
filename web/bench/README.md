@@ -30,6 +30,8 @@ node web/bench/cdp.mjs 'window.benchTrial(300, 7)'
 hardware (it scales compute, not cache or memory latency). Full speed on FireRed with
 audio HLE holds to roughly a 7x throttle on an M2 performance core; read that as headroom,
 not a device list. `nbench.sh` is the native counterpart with noise rejection.
+`node_wasm.sh` builds the native harness (`tests/dingbat_bench.nim`) as wasm with the web
+build's flags for Node: the emulation core's web codegen, measured and profiled headless.
 
 ## Measure in a real window, not headless
 
