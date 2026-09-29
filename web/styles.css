@@ -5092,6 +5092,27 @@ body.debug-2p .home-tile-link {
   display: none;
 }
 
+/* Phones: stacked like the .row-flow rows around it (label, description,
+   field), not the two-column grid, whose row gap reads as a stray blank. */
+@media (max-width: 419px) {
+  .settings-pane #save-hook-row {
+    display: block;
+  }
+
+  .settings-pane #save-hook-row > .modal-row-label {
+    margin-bottom: 2px;
+  }
+
+  .settings-pane #save-hook-row > .save-hook-input,
+  .settings-pane #save-hook-row > .save-hook-status {
+    display: block;
+  }
+
+  .settings-pane #save-hook-row > .save-hook-status:empty {
+    display: none;
+  }
+}
+
 /* Hairline between consecutive rows. Sibling selector, not :has(), so it
    also works where :has() does not; a hidden row contributes nothing. */
 .settings-pane .modal-toggle-row + .modal-toggle-row {
