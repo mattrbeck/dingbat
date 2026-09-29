@@ -296,7 +296,8 @@ test("deleting the last game empties the library and the hero takes over", async
   assert.equal(app.elements.get("home-drive-row").hidden, false);
   // Google's own button, by its branding rules: its mark and its words.
   assert.equal(app.elements.get("home-drive").className, "gsi-btn");
-  assert.match(app.elements.get("home-drive").innerHTML, /Sign in with Google/);
+  assert.match(app.elements.get("home-drive").innerHTML, /google-signin-dark\.svg/);
+  assert.equal(app.elements.get("home-drive").getAttribute("aria-label"), "Sign in with Google");
   assert.equal(app.elements.get("home-paused").hidden, true, "no hero for no game");
 });
 

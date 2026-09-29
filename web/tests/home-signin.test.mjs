@@ -1,7 +1,8 @@
-// The account slot in the bar: Sign in when signed out, the account (with a
-// sync badge) when linked, swapped by refreshSyncUI. Both open the account
-// menu. "Linked" follows syncState.connected, not the ~1h token: keyed on
-// the token, an hourly rollover looked like a logout.
+// The account slot in the bar: a person's outline labelled Sign in when
+// signed out, the account (with a sync badge) when linked, swapped by
+// refreshSyncUI. Both open the account menu. "Linked" follows
+// syncState.connected, not the ~1h token: keyed on the token, an hourly
+// rollover looked like a logout.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -38,11 +39,11 @@ const openMenu = (app) => {
   return el(app, "account-google");
 };
 
-test("signed out, the slot says Sign in and its menu holds Google's button", async () => {
+test("signed out, the slot is labelled Sign in and its menu holds Google's button", async () => {
   const app = await loadApp();
   assert.equal(el(app, "account-slot").hidden, false);
   assert.equal(signedIn(app), false);
-  assert.equal(el(app, "account-label").hidden, false, "the word is the signed-out affordance");
+  assert.equal(el(app, "account-btn").getAttribute("aria-label"), "Sign in");
   openMenu(app);
   assert.equal(el(app, "account-pop").hidden, false);
   assert.equal(el(app, "acct-out").hidden, false, "the signed-out face, with Google's button");
@@ -55,7 +56,7 @@ test("the slot becomes the account when it links, and Sign in when it goes", asy
   app.api.gdriveToken = "a-token";
   app.runIn("refreshSyncUI()");
   assert.equal(signedIn(app), true);
-  assert.equal(el(app, "account-label").hidden, true);
+  assert.match(el(app, "account-btn").getAttribute("aria-label"), /^Google Drive/);
   assert.equal(el(app, "account-btn").dataset.sync, "ok");
 
   app.sandbox.google = { accounts: { oauth2: { revoke: () => {} } } };

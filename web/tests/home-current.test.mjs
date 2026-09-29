@@ -79,7 +79,6 @@ test("closed, with no session to go back into: Play, and no Restart", async () =
   assert.equal(app.document.getElementById("home-paused-resume-label").textContent, "Play");
   assert.ok(!shown("home-paused-restart", app));
   assert.ok(!shown("home-paused-close", app));
-  assert.ok(!shown("home-paused-meta", app));
 });
 
 test("closed, with a session that matches the save: Resume and Restart", async () => {
@@ -92,7 +91,6 @@ test("closed, with a session that matches the save: Resume and Restart", async (
   await drain();
   assert.equal(app.document.getElementById("home-paused-resume-label").textContent, "Resume");
   assert.ok(shown("home-paused-restart", app));
-  assert.ok(shown("home-paused-meta", app));
 
   // The game saved since: the session is not the game any more.
   app.idb.set("save:A.gba", u8(4, 5, 6));

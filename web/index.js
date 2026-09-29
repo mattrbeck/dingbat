@@ -5024,7 +5024,6 @@ document.addEventListener("visibilitychange", () => {
 // room to say what signing in is for before Google's own button asks.
 const accountSlot = document.getElementById("account-slot");
 const accountBtn = /** @type {HTMLButtonElement} */ (document.getElementById("account-btn"));
-const accountLabel = document.getElementById("account-label");
 const accountAvatar = document.getElementById("account-avatar");
 const accountPop = document.getElementById("account-pop");
 let accountPopOpen = false;
@@ -5123,20 +5122,15 @@ const refreshHomeSyncButton = () => {
   accountSlot.hidden = !GDRIVE_CLIENT_ID;
   const linked = driveLinked();
   accountBtn.classList.toggle("signed-in", linked);
-  accountLabel.hidden = linked;
   accountBtn.dataset.sync = linked ? accountSyncKind() : "";
-  if (linked) {
-    const initial = accountInitial();
-    if (initial) accountAvatar.textContent = initial;
-    else accountAvatar.innerHTML = PERSON_SVG;
-    const label = "Google Drive: " + (SYNC_WORDS[syncStatus] || "Signed in");
-    accountBtn.title = label;
-    accountBtn.setAttribute("aria-label", label);
-  } else {
-    accountAvatar.textContent = "";
-    accountBtn.title = "Sign in";
-    accountBtn.removeAttribute("aria-label");
-  }
+  // Signed out it is a quiet outline of a person, not a word: the bar's one
+  // word is the wordmark.
+  const initial = linked ? accountInitial() : "";
+  if (initial) accountAvatar.textContent = initial;
+  else accountAvatar.innerHTML = PERSON_SVG;
+  const label = linked ? "Google Drive: " + (SYNC_WORDS[syncStatus] || "Signed in") : "Sign in";
+  accountBtn.title = label;
+  accountBtn.setAttribute("aria-label", label);
   if (accountPopOpen) renderAccountPop();
 };
 
@@ -5182,14 +5176,12 @@ const homeDriveBtn = /** @type {HTMLButtonElement} */ (document.getElementById("
 const homeDriveRow = document.getElementById("home-drive-row");
 let libraryEmpty = false;
 
-// Google's mark, in its own colours: its branding rules allow no other.
-const GOOGLE_G_SVG =
-  '<svg viewBox="0 0 48 48" aria-hidden="true">' +
-  '<path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>' +
-  '<path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>' +
-  '<path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>' +
-  '<path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>' +
-  '</svg>';
+// Google's own button, as it supplies it (signin-assets.zip, Android + Web,
+// pill with text): its branding rules allow no redrawing. One file per
+// theme; the stylesheet shows the one that matches.
+const GOOGLE_BUTTON_HTML =
+  '<img class="gsi-dark" src="google-signin-dark.svg" alt="" width="180" height="40">' +
+  '<img class="gsi-light" src="google-signin-light.svg" alt="" width="180" height="40">';
 
 const refreshHomeEmptyActions = () => {
   // Which way in from a file is on screen: the empty state's with no library
@@ -5207,8 +5199,13 @@ const refreshHomeEmptyActions = () => {
   // require; signed in to an account with nothing on it yet, a plain Sync.
   const linked = driveLinked();
   homeDriveBtn.className = linked ? "button" : "gsi-btn";
-  if (linked) homeDriveBtn.textContent = "Sync";
-  else homeDriveBtn.innerHTML = GOOGLE_G_SVG + "<span>Sign in with Google</span>";
+  if (linked) {
+    homeDriveBtn.textContent = "Sync";
+    homeDriveBtn.removeAttribute("aria-label");
+  } else {
+    homeDriveBtn.innerHTML = GOOGLE_BUTTON_HTML;
+    homeDriveBtn.setAttribute("aria-label", "Sign in with Google");
+  }
   const lead = document.getElementById("home-drive-lead");
   if (lead) lead.hidden = linked;
 };
@@ -5839,8 +5836,8 @@ const touchRecent = async (name) => {
 // `resume`: go back into the game's session if it still matches the save
 // (resumeSessionFor), else boot from the save - either way with no offer
 // afterwards, the choice having been made on the home screen. Without it the
-// boot ends in the "Last session saved" offer, which is what a file dropped
-// on the page gets.
+// boot ends in the "Last session saved" offer, which is what a library tile
+// and a file dropped on the page get.
 const launchRom = async (name, { resume = false, fresh = false, flyFrom = null } = {}) => {
   const gen = nextLoadGen(); // a later tap supersedes this one (loadGen)
   // The grid renders before the wasm runtime is up; wait here.
@@ -6350,13 +6347,13 @@ const wireTileMenu = (tile, launch, romName) => {
 };
 
 // A library game chosen from the home screen, from its tile or from the hero.
-// Where the game has a session that still matches its save, it goes back
-// to exactly that moment - the picture on the tile is the screen the player
-// returns to. Otherwise it boots from its in-game save. The loaded game
-// carries on instead: a reboot would drop what happened since the snapshot.
-const openLibraryGame = async (romName, { driveOnly = false, missing = false, flyFrom = null } = {}) => {
+// A tile boots the game from its in-game save and offers the session after
+// ("Last session saved"); the hero, which says Resume or Play before the
+// tap, passes `resume` and goes straight back in. The loaded game carries
+// on instead: a reboot would drop what happened since the snapshot.
+const openLibraryGame = async (romName, { driveOnly = false, missing = false, flyFrom = null, resume = false } = {}) => {
   if (currentOriginalName === romName && !linkMode) { resumeGame(); return; }
-  if (!driveOnly) { launchRom(romName, { resume: true, flyFrom }); return; }
+  if (!driveOnly) { launchRom(romName, { resume, flyFrom }); return; }
   if (missing) { relinkGameAction(romName, { launch: true }); return; }
   if (syncDownloading.has(romName)) return;
   // The tap takes the load token now, not when the download (seconds)
@@ -6364,7 +6361,7 @@ const openLibraryGame = async (romName, { driveOnly = false, missing = false, fl
   // download itself finishes either way.
   const gen = nextLoadGen();
   if (!(await ensureDriveSignedIn())) return;
-  if (await downloadGame(romName) && gen === loadGen) launchRom(romName, { resume: true, flyFrom });
+  if (await downloadGame(romName) && gen === loadGen) launchRom(romName, { resume, flyFrom });
 };
 
 const libFilterActive = () =>
@@ -7141,8 +7138,8 @@ const autoStateMatchesSave = async (name, auto) =>
 
 // A game's session where it can be resumed: a snapshot taken with the save
 // that is stored now. Null otherwise - none, one from before saveSig, or one
-// the game has saved past. What the hero's Resume and a tile's tap go back
-// into, with no offer to ask.
+// the game has saved past. What the hero's Resume goes back into, with no
+// offer to ask.
 const resumeSessionFor = async (name) => {
   let auto = null;
   try { auto = await dbGet(autoStateKey(name)); } catch {}
@@ -11233,7 +11230,6 @@ const homeBackdropCanvas = /** @type {HTMLCanvasElement} */ (document.getElement
 const homePausedSys = document.getElementById("home-paused-sys");
 const homePausedShot = document.getElementById("home-paused-shot");
 const homePausedState = document.getElementById("home-paused-state");
-const homePausedMeta = document.getElementById("home-paused-meta");
 const homePausedResumeLabel = document.getElementById("home-paused-resume-label");
 const homePausedClose = document.getElementById("home-paused-close");
 const homePausedRestart = document.getElementById("home-paused-restart");
@@ -11264,7 +11260,6 @@ const setHeroMode = (mode, name) => {
   homePausedResumeLabel.textContent = resumable ? "Resume" : "Play";
   homePausedClose.hidden = !paused;
   homePausedRestart.hidden = paused || !heroSession;
-  homePausedMeta.hidden = paused || !heroSession;
   const label = (resumable ? "Resume " : "Play ") + displayName(name);
   homePausedShot.title = label;
   homePausedShot.setAttribute("aria-label", label);
@@ -11338,19 +11333,11 @@ const renderClosedHero = async (name, file, keys) => {
     drawHeroGlow();
     heroDrawnFor = name;
   }
-  // The paused game just closed, in place: the screen switches off - a dip
-  // to dark that settles on the dimmed "not in memory" look.
-  const closing = !homePausedCard.hidden && heroName === name &&
-    homePausedCard.dataset.mode === "paused";
+  // A game closed in place dims to the closed look by the canvas's own
+  // filter transition.
   heroSession = session;
   heroFile = file;
   setHeroMode("closed", name);
-  if (closing && canFly()) {
-    homePausedCard.classList.remove("lcd-off");
-    void homePausedCard.offsetWidth; // restart the animation if it was mid-run
-    homePausedCard.classList.add("lcd-off");
-    setTimeout(() => homePausedCard.classList.remove("lcd-off"), 950);
-  }
 };
 
 // Whenever the library renders: with nothing loaded, the hero is its most
@@ -11374,7 +11361,7 @@ const heroPrimary = () => {
   if (homePausedCard.dataset.mode === "paused") { resumeFromHero(); return; }
   if (!heroName) return;
   if (heroSession) { launchRom(heroName, { resume: true, flyFrom: homePausedShot }); return; }
-  openLibraryGame(heroName, { ...heroFile, flyFrom: homePausedShot });
+  openLibraryGame(heroName, { ...heroFile, flyFrom: homePausedShot, resume: true });
 };
 homePausedShot.addEventListener("click", heroPrimary);
 document.getElementById("home-paused-resume").addEventListener("click", heroPrimary);
@@ -11624,7 +11611,7 @@ const unloadGame = async ({ flushSave = true } = {}) => {
 };
 
 document.getElementById("home-paused-close").addEventListener("click", async () => {
-  if (await unloadGame()) showToast("Game closed — save kept");
+  await unloadGame();
 });
 
 // --- Library pictures, in one go ------------------------------------------

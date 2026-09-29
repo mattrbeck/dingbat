@@ -1573,36 +1573,15 @@ body:not(.lib-has-games) #account-slot {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 36px;
-  padding: 0 14px;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--chrome-ink);
-  background: transparent;
-  border: 1px solid var(--chrome-btn-border);
-  border-radius: 999px;
-  cursor: pointer;
-  transition: background 0.12s, border-color 0.12s;
-}
-
-@media (hover: hover) {
-  #account-btn:hover {
-    background: var(--chrome-btn-top);
-  }
-}
-
-#account-label[hidden],
-#account-avatar:empty {
-  display: none;
-}
-
-#account-btn.signed-in {
   width: 40px;
   height: 40px;
   padding: 0;
+  font: inherit;
+  color: var(--chrome-ink);
+  background: transparent;
   border: 0;
   border-radius: 50%;
+  cursor: pointer;
 }
 
 #account-avatar {
@@ -1617,6 +1596,28 @@ body:not(.lib-has-games) #account-slot {
   color: var(--badge-gba-fg);
   background: var(--badge-gba-bg);
   box-shadow: inset 0 0 0 1px rgba(var(--hi-rgb), 0.08);
+}
+
+/* Signed out: the outline alone, dimmer than the wordmark, brightening
+   under the pointer. */
+#account-btn:not(.signed-in) #account-avatar {
+  color: var(--chrome-ink);
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px currentColor;
+  opacity: 0.55;
+  transition: opacity 0.12s;
+}
+
+@media (hover: hover) {
+  #account-btn:not(.signed-in):hover #account-avatar {
+    opacity: 0.9;
+  }
+}
+
+#account-btn:not(.signed-in) #account-avatar svg {
+  width: 66%;
+  height: 66%;
+  margin-top: 3px;
 }
 
 #account-avatar svg,
@@ -1673,13 +1674,7 @@ body:not(.lib-has-games) #account-slot {
 }
 
 @media (max-width: 560px) {
-  #account-btn:not(.signed-in) {
-    height: 44px;
-    padding: 0 8px;
-    font-size: 14px;
-    border: 0;
-  }
-  #account-btn.signed-in {
+  #account-btn {
     width: 44px;
     height: 44px;
   }
@@ -2222,6 +2217,10 @@ body.rumbling #canvas {
   flex-direction: column;
   padding: var(--home-pad);
   overflow-y: auto;
+  /* The hero's glow is wider than its frame, and on a phone the frame is
+     the page's width: the glow is cut at the screen's edges, never a
+     sideways scroll. */
+  overflow-x: hidden;
   /* Home stays dark even when a device theme paints the stage the shell
      colour (--home-bg defaults to transparent for non-device themes). */
   background: var(--home-bg);
@@ -2422,11 +2421,11 @@ body.lib-has-games #home-start {
   .home-drop-title {
     display: none;
   }
+  /* The desktop pill's size, only taller for a thumb: a full-width bar
+     here outweighed the logo above it. */
   #home-load {
-    width: 100%;
-    max-width: 360px;
-    padding: 15px 28px;
-    font-size: 17px;
+    min-height: 44px;
+    padding: 11px 30px;
   }
 }
 
@@ -2451,30 +2450,32 @@ body.lib-has-games #home-start {
   border-radius: 999px;
 }
 
-/* Google's sign-in button, to its branding guidelines: the full-colour G on
-   the dark or light fill, its stroke and text colours, 12px in, 10px after
-   the mark. Fixed colours on purpose - a theme may not recolour it. */
+/* Google's sign-in button: its own artwork (the dark and light pills from
+   Google's download), untouched and unrecoloured - the button is only a
+   frame with no chrome of its own. The dark one everywhere but the light
+   theme. */
 .gsi-btn {
   display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  height: 40px;
-  padding: 0 12px;
-  font-family: "Google Sans", Roboto, var(--font-ui);
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 20px;
-  color: #e3e3e3;
-  background: #131314;
-  border: 1px solid #8e918f;
+  padding: 0;
+  background: none;
+  border: 0;
   border-radius: 999px;
   cursor: pointer;
 }
 
-.gsi-btn svg {
-  width: 20px;
-  height: 20px;
-  flex: 0 0 auto;
+.gsi-btn img {
+  display: block;
+  height: 40px;
+  width: auto;
+}
+
+.gsi-btn .gsi-light,
+:root[data-theme="light"] .gsi-btn .gsi-dark {
+  display: none;
+}
+
+:root[data-theme="light"] .gsi-btn .gsi-light {
+  display: block;
 }
 
 .gsi-btn[disabled] {
@@ -2482,16 +2483,14 @@ body.lib-has-games #home-start {
   cursor: default;
 }
 
-:root[data-theme="light"] .gsi-btn {
-  color: #1f1f1f;
-  background: #fff;
-  border-color: #747775;
+.gsi-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 @media (pointer: coarse) {
-  .gsi-btn {
+  .gsi-btn img {
     height: 44px;
-    padding: 0 16px 0 12px;
   }
 }
 
@@ -2676,17 +2675,6 @@ body.lib-has-games #home-start {
   color: var(--text);
 }
 
-#home-paused-meta {
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.5;
-  color: var(--text-dim);
-}
-
-#home-paused-meta[hidden] {
-  display: none;
-}
-
 #home-paused-actions {
   display: flex;
   align-items: center;
@@ -2837,9 +2825,11 @@ body.home-flying #canvas {
 
 /* Arriving home: the page rises in under the landing picture, the words
    first and the library after, a tile at a time. #home-inner's own entrance
-   stands down so the hero is where the picture is aimed. */
+   stands down so the hero is where the picture is aimed - by running in no
+   time, not by going to none: a name that comes back when the class goes
+   is a new animation, and the page would rise in a second time. */
 #home.home-arriving #home-inner {
-  animation: none;
+  animation-duration: 0s;
 }
 
 #home.home-arriving #home-paused-body,
@@ -2867,21 +2857,6 @@ body.home-flying #canvas {
   from {
     opacity: 0;
     transform: translateY(14px);
-  }
-}
-
-/* Close: the screen switches off, dipping to dark before settling on the
-   dimmed look (the stylesheet's own filter for a closed hero). */
-#home-paused.lcd-off #home-paused-canvas {
-  animation: hero-lcd-off 0.9s ease-out;
-}
-
-@keyframes hero-lcd-off {
-  0% {
-    filter: none;
-  }
-  28% {
-    filter: brightness(0.3) saturate(0.3);
   }
 }
 
@@ -6184,6 +6159,29 @@ body.debug-2p .home-tile-link {
   }
 }
 
+/* Opening or resuming a game: the controls rise a little into place as the
+   picture lands on the screen - the portrait strip as one piece, the
+   landscape rails (no strip, only buttons) button group by group. An
+   entrance only: it runs whenever #controls goes from none to shown. */
+@media (pointer: coarse) and (orientation: portrait) {
+  body.running #controls {
+    animation: controls-in 0.42s cubic-bezier(.2, .8, .2, 1) 0.08s backwards;
+  }
+}
+
+@media (pointer: coarse) and (orientation: landscape) {
+  body.running #controls > * {
+    animation: controls-in 0.42s cubic-bezier(.2, .8, .2, 1) 0.08s backwards;
+  }
+}
+
+@keyframes controls-in {
+  from {
+    opacity: 0;
+    transform: translateY(28px);
+  }
+}
+
 /* Tactile key base */
 .pad-btn {
   display: flex;
@@ -8109,7 +8107,8 @@ body.running.sync-shown #status {
   .modal,
   #account-pop,
   #home-paused-led,
-  #home-paused.lcd-off #home-paused-canvas {
+  body.running #controls,
+  body.running #controls > * {
     animation: none;
   }
 

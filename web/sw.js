@@ -17,6 +17,8 @@ const ASSETS = [
   "./apple-touch-icon-precomposed.png",
   "./favicon.svg",
   "./favicon-96x96.png",
+  "./google-signin-dark.svg",
+  "./google-signin-light.svg",
   "./version.txt",
 ];
 
