@@ -429,10 +429,10 @@ type
     # timer's count, a PSG status, an EEPROM ready poll) happened since the
     # waitloop detector last looked; such a loop is never skipped.
     volatile_read*:  bool
-    # An IO register was read since the waitloop detector last looked (the
-    # skip runs through events only for a loop that reads none: cpu.nim,
-    # wl_crossable)
-    io_read*:        bool
+    # Which IO registers were read since the waitloop detector last looked
+    # (IO_PPU_STATUS, IO_KEYPAD, IO_OTHER; mmio.nim): the skip runs through
+    # an event only if it changes none of them (cpu.nim, wl_crossable)
+    io_read*:        uint8
     # A CPU access waited on the renderer (contend_cost, cpu.contend_refill)
     # since the waitloop detector last looked
     contended_access*: bool
@@ -677,8 +677,8 @@ type
     # (link.nim, netcore.nim): a longer skip changes how the cores
     # interleave. Configuration, not serialized.
     wl_cross_events*:            bool
-    # The iteration the last verdict closed read an IO register
-    wl_reads_io*:                bool
+    # The IO registers the iteration the last verdict closed read (io_read)
+    wl_reads_io*:                uint8
     # ... or waited on the renderer (its cost then moves with the dot)
     wl_contended*:               bool
     waitloop_instr_lut*:         seq[WLInstrKind]
@@ -1385,6 +1385,10 @@ const WL_CROSS_PERIOD_MAX* = 46
   ## (wl_passable) other than its own +0 and +2 chains, so nothing it books
   ## falls inside the iteration being skipped. HBLANK_FLAG_DELAY (47) is the
   ## shortest.
+const
+  IO_PPU_STATUS* = 1'u8   ## DISPSTAT, VCOUNT (bus.io_read)
+  IO_KEYPAD*     = 2'u8   ## KEYINPUT, KEYCNT: change only between frames
+  IO_OTHER*      = 128'u8
 const WL_QUIET_EVENTS* {.booldefine.} = true
   ## The waitloop detector counts an event that ran after the loop's load as
   ## harmless when it cannot have changed what the loop read: it writes no

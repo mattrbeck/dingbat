@@ -186,6 +186,14 @@ proc judge_loop(cpu: CPU; start_addr: uint32; end_addr: uint32) =
 # A verdict that fails any of these runs the next iteration at real speed.
 proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
   if not cpu.attempt_waitloop_detection: return
+  # Code outside real memory -- unmapped space, or the gamepak past the end
+  # of the ROM -- is open bus: nothing a crashed program runs there is a
+  # loop the detector can reason about (Guilty Gear X - Advance Edition (J)
+  # [b2], a bad dump, "waits" at 0x08800364 of an 8 MB ROM)
+  if start_addr >= 0x10000000'u32 or
+     (start_addr >= 0x08000000'u32 and
+      (start_addr and 0x01FFFFFF'u32) >= cpu.gba.bus.rom_len):
+    return
   cpu.judge_loop(start_addr, end_addr)
   if not cpu.entered_waitloop: return
   # Consecutive verdicts on one loop are consecutive iterations: the period,
@@ -202,7 +210,7 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32) =
   let volatile = cpu.gba.bus.volatile_read
   cpu.gba.bus.volatile_read = false
   cpu.wl_reads_io = cpu.gba.bus.io_read
-  cpu.gba.bus.io_read = false
+  cpu.gba.bus.io_read = 0
   cpu.wl_contended = cpu.gba.bus.contended_access
   cpu.gba.bus.contended_access = false
   var fresh = true

@@ -1477,6 +1477,8 @@ proc `[]`*(ppu: PPU; io_addr: uint32): uint8 =
     var line = int(ppu.vcount)
     if int64(ppu.gba.scheduler.cycles) - ppu.line_start_cycle < VCOUNT_MATCH_DELAY:
       line = (line + 227) mod 228
+      # changes a cycle on with no event: a waitloop must not skip on it
+      ppu.gba.bus.volatile_read = true
     let live = line == int(ppu.dispstat.vcount_setting)
     (read(ppu.dispstat, 0) and not 0x04'u8) or (if live: 0x04'u8 else: 0'u8)
   of 0x005: read(ppu.dispstat, 1)
