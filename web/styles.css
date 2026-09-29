@@ -2477,7 +2477,7 @@ body.lib-has-games #home-start {
 
    The frame sits in a glow of its own colours - the same picture, blurred
    behind it - bright for a game held in memory, faint for one that is not. */
-#home-paused {
+#hero {
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -2486,16 +2486,16 @@ body.lib-has-games #home-start {
   margin-inline: auto;
 }
 
-#home-paused[hidden] {
+#hero[hidden] {
   display: none;
 }
 
-#home-paused-frame {
+#hero-frame {
   position: relative;
   margin-bottom: 2px;
 }
 
-#home-backdrop-canvas {
+#hero-glow {
   position: absolute;
   left: -8%;
   top: -10%;
@@ -2508,23 +2508,23 @@ body.lib-has-games #home-start {
   transition: opacity 0.6s ease;
 }
 
-#home-paused[data-mode="closed"] #home-backdrop-canvas {
+#hero[data-mode="closed"] #hero-glow {
   opacity: 0.14;
 }
 
 /* On a light page a blurred picture has little light to add, and the frame
    covers most of it: the colour carries it instead - more saturated, and
    stronger, the closed game's most of all. */
-:root[data-theme="light"] #home-backdrop-canvas {
+:root[data-theme="light"] #hero-glow {
   filter: blur(36px) saturate(2.6);
   opacity: 0.7;
 }
 
-:root[data-theme="light"] #home-paused[data-mode="closed"] #home-backdrop-canvas {
+:root[data-theme="light"] #hero[data-mode="closed"] #hero-glow {
   opacity: 0.42;
 }
 
-#home-paused-shot {
+#hero-shot {
   position: relative;
   z-index: 1;
   display: block;
@@ -2539,15 +2539,15 @@ body.lib-has-games #home-start {
   transition: border-color 0.14s, transform 0.06s;
 }
 
-#home-paused-shot:hover {
+#hero-shot:hover {
   border-color: rgba(var(--hi-rgb), 0.28);
 }
 
-#home-paused-shot:active {
+#hero-shot:active {
   transform: translateY(1px);
 }
 
-#home-paused-canvas {
+#hero-canvas {
   display: block;
   width: 100%;
   height: auto;
@@ -2557,45 +2557,45 @@ body.lib-has-games #home-start {
 }
 
 /* Not in memory: the picture is a memory, and looks a little like one. */
-#home-paused[data-mode="closed"] #home-paused-canvas {
+#hero[data-mode="closed"] #hero-canvas {
   filter: saturate(0.75) brightness(0.82);
 }
 
 /* A game never pictured has no frame, and gets no invented one: its
    cartridge stands in, as on its tile. */
-#home-paused.no-picture #home-paused-shot {
+#hero.no-picture #hero-shot {
   background: var(--badge-gba-bg);
 }
-#home-paused.no-picture[data-system="GB"] #home-paused-shot {
+#hero.no-picture[data-system="GB"] #hero-shot {
   background: var(--badge-gb-bg);
 }
-#home-paused.no-picture[data-system="GBC"] #home-paused-shot {
+#hero.no-picture[data-system="GBC"] #hero-shot {
   background: var(--badge-gbc-bg);
 }
-#home-paused.no-picture #home-paused-canvas,
-#home-paused.no-picture #home-backdrop-canvas {
+#hero.no-picture #hero-canvas,
+#hero.no-picture #hero-glow {
   opacity: 0;
 }
 
-#home-paused-placeholder {
+#hero-placeholder {
   position: absolute;
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
 }
 
-#home-paused-placeholder[hidden] {
+#hero-placeholder[hidden] {
   display: none;
 }
 
-#home-paused-body {
+#hero-body {
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-#home-paused-kicker {
+#hero-kicker {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -2609,46 +2609,46 @@ body.lib-has-games #home-start {
 
 /* The lamp: lit and breathing while the game is held in memory, out once it
    is closed. */
-#home-paused-led {
+#hero-led {
   flex: 0 0 auto;
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.8);
-  animation: hero-led 2.4s ease-in-out infinite;
+  animation: hero-led-pulse 2.4s ease-in-out infinite;
 }
 
-@keyframes hero-led {
+@keyframes hero-led-pulse {
   50% {
     opacity: 0.35;
   }
 }
 
-#home-paused[data-mode="closed"] #home-paused-kicker {
+#hero[data-mode="closed"] #hero-kicker {
   color: var(--text-dim);
 }
 
-#home-paused[data-mode="closed"] #home-paused-led {
+#hero[data-mode="closed"] #hero-led {
   background: var(--text-faint);
   opacity: 0.55;
   box-shadow: none;
   animation: none;
 }
 
-#home-paused-kicker .sys-chip {
+#hero-kicker .sys-chip {
   width: 34px;
   height: 18px;
   letter-spacing: 0.03em;
 }
 
-#home-paused-title {
+#hero-title {
   display: flex;
   align-items: center;
   min-width: 0;
 }
 
-#home-paused-name {
+#hero-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2660,14 +2660,14 @@ body.lib-has-games #home-start {
   color: var(--text);
 }
 
-#home-paused-actions {
+#hero-actions {
   display: flex;
   align-items: center;
   gap: 10px;
   margin-top: 2px;
 }
 
-#home-paused-actions .button {
+#hero-actions .button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2678,15 +2678,15 @@ body.lib-has-games #home-start {
   border-radius: 999px;
 }
 
-#home-paused-actions .button[hidden] {
+#hero-actions .button[hidden] {
   display: none;
 }
 
-#home-paused-resume {
+#hero-resume {
   flex: 1 1 auto;
 }
 
-#home-paused-resume svg {
+#hero-resume svg {
   width: 15px;
   height: 15px;
 }
@@ -2694,64 +2694,64 @@ body.lib-has-games #home-start {
 /* ⋯ is the game's menu. Square, so it reads as a handle beside the worded
    buttons rather than a third thing to read; selected through the actions
    row so it beats that row's padding. */
-#home-paused-actions .home-paused-more {
+#hero-actions .hero-more {
   flex: 0 0 auto;
   width: 48px;
   padding: 0;
   color: var(--text-dim);
 }
 
-.home-paused-more svg {
+.hero-more svg {
   width: 18px;
   height: 18px;
   fill: currentColor;
   stroke: none;
 }
 
-.home-paused-more:hover {
+.hero-more:hover {
   color: var(--text);
 }
 
 /* Close is not destructive - the save and the session are kept - so it
    stays a plain button and only says danger on hover. */
-#home-paused-close:hover {
+#hero-close:hover {
   color: var(--danger);
   border-color: rgba(var(--danger-rgb), 0.4);
 }
 
 @media (min-width: 760px) {
-  #home-paused {
+  #hero {
     flex-direction: row;
     align-items: center;
     gap: 40px;
   }
-  #home-paused-frame {
+  #hero-frame {
     flex: 0 0 auto;
     width: clamp(280px, 30vw, 384px);
     margin-bottom: 0;
   }
-  #home-paused-body {
+  #hero-body {
     flex: 0 1 460px;
   }
-  #home-paused-resume {
+  #hero-resume {
     flex: 0 0 auto;
   }
-  #home-paused-name {
+  #hero-name {
     font-size: clamp(28px, 2.8vw, 36px);
   }
   /* The whole library: a centred block, a size up. */
-  body.home-solo #home-paused {
+  body.home-solo #hero {
     width: auto;
     max-width: 100%; /* not the library's width: it has no tiles to measure */
     gap: 48px;
   }
-  body.home-solo #home-paused-frame {
+  body.home-solo #hero-frame {
     width: clamp(320px, 36vw, 480px);
   }
-  body.home-solo #home-paused-body {
+  body.home-solo #hero-body {
     flex-basis: 380px;
   }
-  body.home-solo #home-paused-name {
+  body.home-solo #hero-name {
     font-size: clamp(30px, 3.2vw, 42px);
   }
 }
@@ -2823,7 +2823,7 @@ body.home-flying #canvas {
   animation-duration: 0s;
 }
 
-#home.home-arriving #home-paused-body,
+#home.home-arriving #hero-body,
 #home.home-arriving .home-recent-head,
 #home.home-arriving .lib-bar,
 #home.home-arriving .home-tile,
@@ -3621,7 +3621,7 @@ body.runtime-ready #boot-progress {
    (index.js, cartLabelFor). Sized off the picture box, so one rule serves a
    tile and the hero. */
 .home-tile-thumb,
-#home-paused-shot {
+#hero-shot {
   container-type: inline-size;
 }
 
@@ -8036,7 +8036,7 @@ body.running.sync-shown #status {
   #home-inner,
   .modal,
   #account-pop,
-  #home-paused-led,
+  #hero-led,
   body.running #controls,
   body.running #controls > * {
     animation: none;
@@ -8130,11 +8130,11 @@ body.running.sync-shown #status {
 
 /* The same badge on the card's ⋯, which is where the trail continues on the
    home screen now that the hamburger is not there to carry it. */
-.home-paused-more.has-new-photo {
+.hero-more.has-new-photo {
   position: relative;
 }
 
-.home-paused-more.has-new-photo::after {
+.hero-more.has-new-photo::after {
   content: "";
   position: absolute;
   top: 5px;

@@ -3781,7 +3781,7 @@ const applyRemoteRename = async (from, to) => {
   if (rwUndoName === from) rwUndoName = to;
   if (loaded) {
     currentOriginalName = to;
-    if (homePausedCard && !homePausedCard.hidden) updatePausedCard();
+    if (heroCard && !heroCard.hidden) drawPausedHero();
   }
   // Collided pairs: identical bytes drop the old-name copy; anything else
   // is kept and counted. Kinds readSyncBytes cannot serialize stay put.
@@ -4430,7 +4430,7 @@ const renameGame = async (oldName, newName) => {
   if (rwUndoName === oldName) rwUndoName = newName;
   if (loaded) {
     currentOriginalName = newName;
-    if (homePausedCard && !homePausedCard.hidden) updatePausedCard();
+    if (heroCard && !heroCard.hidden) drawPausedHero();
   }
   return { ok: true, moved: moved.length };
 };
@@ -5849,7 +5849,7 @@ const launchRom = async (name, { resume = false, fresh = false, flyFrom = null }
   // which the flying one turns into on the way. With neither it goes dark.
   // Measured now, while the picture is still on screen.
   if (flyFrom) {
-    const shown = flyFrom === homePausedShot && heroShowsSession;
+    const shown = flyFrom === heroShot && heroShowsSession;
     const land = session && !shown ? await sessionPicFor(name, session) : null;
     if (gen !== loadGen) return;
     armFlight(name, flyFrom, !(session && (shown || land)), land);
@@ -6397,7 +6397,7 @@ const refreshHomeRecent = async () => {
     closeTileMenu();
     homeRecent.replaceChildren();
     libNames = [];
-    if (!currentRomName) setPausedCardShown(false);
+    if (!currentRomName) setHeroShown(false);
     syncHomeCurrent();
     homeArtUrls.forEach(URL.revokeObjectURL);
     homeArtUrls = artUrls;
@@ -11038,7 +11038,7 @@ const showMainMenu = () => {
   storeLastFrame({ force: true }).then(() => refreshHomeRecent());
   document.body.classList.add("paused");
   document.body.classList.remove("running");
-  updatePausedCard();
+  drawPausedHero();
   refreshHomeRecent();
   updateCanvasScaling();
   if (from?.width) flyHome(from);
@@ -11272,9 +11272,9 @@ barBrand.addEventListener("click", () => {
 // --- Paused-game card ---
 // Pixels come from the wasm framebuffer: the canvas is a WebGL context
 // without preserveDrawingBuffer, so reading it after pausing yields nothing.
-const homePausedCard = document.getElementById("home-paused");
-const homePausedCanvas = /** @type {HTMLCanvasElement} */ (document.getElementById("home-paused-canvas"));
-const homePausedName = document.getElementById("home-paused-name");
+const heroCard = document.getElementById("hero");
+const heroCanvas = /** @type {HTMLCanvasElement} */ (document.getElementById("hero-canvas"));
+const heroNameEl = document.getElementById("hero-name");
 
 // body.home-card is set exactly while the card is up, and it is what the
 // hamburger and the hero read to stand their own copies down. It is NOT the
@@ -11282,21 +11282,21 @@ const homePausedName = document.getElementById("home-paused-name");
 // the home screen with a game loaded and no card (two cores, no single
 // framebuffer to draw), and there the menu items and the hero's Resume are
 // the only way back and the only way to disconnect.
-const setPausedCardShown = (on) => {
-  homePausedCard.hidden = !on;
+const setHeroShown = (on) => {
+  heroCard.hidden = !on;
   if (!on) heroName = null;
   document.body.classList.toggle("home-card", on);
   syncHomeCurrent();
 };
 
-const homeBackdropCanvas = /** @type {HTMLCanvasElement} */ (document.getElementById("home-backdrop-canvas"));
-const homePausedSys = document.getElementById("home-paused-sys");
-const homePausedShot = document.getElementById("home-paused-shot");
-const homePausedState = document.getElementById("home-paused-state");
-const homePausedResumeLabel = document.getElementById("home-paused-resume-label");
-const homePausedClose = document.getElementById("home-paused-close");
-const homePausedRestart = document.getElementById("home-paused-restart");
-const homePausedPlaceholder = document.getElementById("home-paused-placeholder");
+const heroGlow = /** @type {HTMLCanvasElement} */ (document.getElementById("hero-glow"));
+const heroSys = document.getElementById("hero-sys");
+const heroShot = document.getElementById("hero-shot");
+const heroStateLabel = document.getElementById("hero-state");
+const heroResumeLabel = document.getElementById("hero-resume-label");
+const heroClose = document.getElementById("hero-close");
+const heroPlay = document.getElementById("hero-play");
+const heroPlaceholder = document.getElementById("hero-placeholder");
 
 // What the closed hero's buttons act on: whether its game can go straight
 // back into a session, and where its file is (as its tile would say).
@@ -11311,9 +11311,9 @@ let heroShowsSession = false;
 
 // The blurred glow behind the frame is the same picture.
 const drawHeroGlow = () => {
-  homeBackdropCanvas.width = homePausedCanvas.width;
-  homeBackdropCanvas.height = homePausedCanvas.height;
-  homeBackdropCanvas.getContext("2d")?.drawImage?.(homePausedCanvas, 0, 0);
+  heroGlow.width = heroCanvas.width;
+  heroGlow.height = heroCanvas.height;
+  heroGlow.getContext("2d")?.drawImage?.(heroCanvas, 0, 0);
 };
 
 // The words and buttons for a mode. The frame and the name are the callers'.
@@ -11331,59 +11331,59 @@ const heroSwapIn = (els) => {
 
 const setHeroMode = (mode, name) => {
   // The same game staying up: what changes is animated.
-  const same = !homePausedCard.hidden && heroName === name;
+  const same = !heroCard.hidden && heroName === name;
   const was = same ? {
-    state: homePausedState.textContent,
-    resume: homePausedResumeLabel.textContent,
-    close: homePausedClose.hidden,
-    restart: homePausedRestart.hidden,
+    state: heroStateLabel.textContent,
+    resume: heroResumeLabel.textContent,
+    close: heroClose.hidden,
+    restart: heroPlay.hidden,
   } : null;
   heroName = name;
-  homePausedCard.dataset.mode = mode;
+  heroCard.dataset.mode = mode;
   const paused = mode === "paused";
   const resumable = paused || heroSession;
-  homePausedState.textContent = paused ? "Paused" : "Last played";
-  homePausedResumeLabel.textContent = resumable ? "Resume" : "Play";
-  homePausedClose.hidden = !paused;
-  homePausedRestart.hidden = paused || !heroSession;
+  heroStateLabel.textContent = paused ? "Paused" : "Last played";
+  heroResumeLabel.textContent = resumable ? "Resume" : "Play";
+  heroClose.hidden = !paused;
+  heroPlay.hidden = paused || !heroSession;
   if (was) {
     heroSwapIn([
-      was.state !== homePausedState.textContent && homePausedState,
-      was.resume !== homePausedResumeLabel.textContent && homePausedResumeLabel,
-      was.close && !homePausedClose.hidden && homePausedClose,
-      was.restart && !homePausedRestart.hidden && homePausedRestart,
+      was.state !== heroStateLabel.textContent && heroStateLabel,
+      was.resume !== heroResumeLabel.textContent && heroResumeLabel,
+      was.close && !heroClose.hidden && heroClose,
+      was.restart && !heroPlay.hidden && heroPlay,
     ].filter(Boolean));
   }
   const label = (resumable ? "Resume " : "Play ") + displayName(name);
-  homePausedShot.title = label;
-  homePausedShot.setAttribute("aria-label", label);
-  homePausedName.textContent = displayName(name);
-  homePausedName.title = name;
+  heroShot.title = label;
+  heroShot.setAttribute("aria-label", label);
+  heroNameEl.textContent = displayName(name);
+  heroNameEl.title = name;
   const system = systemOf(name);
-  homePausedSys.className = "sys-chip badge-" + system.toLowerCase();
-  homePausedSys.textContent = system;
-  setPausedCardShown(true);
+  heroSys.className = "sys-chip badge-" + system.toLowerCase();
+  heroSys.textContent = system;
+  setHeroShown(true);
 };
 
-const updatePausedCard = () => {
+const drawPausedHero = () => {
   // Single-core only: the link modes render to their own canvases.
-  if (!currentRomName || linkMode || rollbackMode || netActive()) { setPausedCardShown(false); return; }
-  if (typeof Module === "undefined" || !Module._wasm_fb_ptr) { setPausedCardShown(false); return; }
+  if (!currentRomName || linkMode || rollbackMode || netActive()) { setHeroShown(false); return; }
+  if (typeof Module === "undefined" || !Module._wasm_fb_ptr) { setHeroShown(false); return; }
   const ptr = Module._wasm_fb_ptr();
-  if (!ptr) { setPausedCardShown(false); return; }
+  if (!ptr) { setHeroShown(false); return; }
   const [w, h] = gameRes(); // GBA 240x160, GB/GBC 160x144
   const heap = new Uint8Array(Module.memory.buffer, ptr, w * h * 4);
-  homePausedCanvas.width = w;
-  homePausedCanvas.height = h;
-  const ctx = homePausedCanvas.getContext("2d");
+  heroCanvas.width = w;
+  heroCanvas.height = h;
+  const ctx = heroCanvas.getContext("2d");
   const img = ctx.createImageData(w, h);
   img.data.set(heap);
   // The wasm fb's alpha is not meaningful; force opaque.
   for (let i = 3; i < img.data.length; i += 4) img.data[i] = 255;
   ctx.putImageData(img, 0, 0);
   drawHeroGlow();
-  homePausedPlaceholder.hidden = true;
-  homePausedCard.classList.remove("no-picture");
+  heroPlaceholder.hidden = true;
+  heroCard.classList.remove("no-picture");
   heroDrawnFor = currentOriginalName;
   heroShowsSession = true; // closing snapshots this very screen
   setHeroMode("paused", currentOriginalName);
@@ -11416,21 +11416,21 @@ const renderClosedHero = async (name, file, keys) => {
   }
   if (gen !== heroGen || currentRomName || loadingName) return;
   if (redraw) {
-    const ctx = homePausedCanvas.getContext("2d");
+    const ctx = heroCanvas.getContext("2d");
     if (bitmap) {
-      homePausedCanvas.width = bitmap.width;
-      homePausedCanvas.height = bitmap.height;
+      heroCanvas.width = bitmap.width;
+      heroCanvas.height = bitmap.height;
       ctx?.drawImage?.(bitmap, 0, 0);
     } else {
       const [w, h] = systemOf(name) === "GBA" ? [240, 160] : [160, 144];
-      homePausedCanvas.width = w;
-      homePausedCanvas.height = h;
+      heroCanvas.width = w;
+      heroCanvas.height = h;
       if (ctx) { ctx.fillStyle = "#000"; ctx.fillRect?.(0, 0, w, h); }
     }
-    buildCart(name, homePausedPlaceholder);
-    homePausedPlaceholder.hidden = !!bitmap;
-    homePausedCard.classList.toggle("no-picture", !bitmap);
-    homePausedCard.dataset.system = systemOf(name);
+    buildCart(name, heroPlaceholder);
+    heroPlaceholder.hidden = !!bitmap;
+    heroCard.classList.toggle("no-picture", !bitmap);
+    heroCard.dataset.system = systemOf(name);
     drawHeroGlow();
     heroDrawnFor = name;
     heroShowsSession = ofSession;
@@ -11443,12 +11443,12 @@ const renderClosedHero = async (name, file, keys) => {
 };
 
 // Whenever the library renders: with nothing loaded, the hero is its most
-// recent game. A loaded game is the paused card's (updatePausedCard), and a
+// recent game. A loaded game is the paused card's (drawPausedHero), and a
 // link or online session has no hero at all.
 const refreshHero = (roms, localRoms, keys) => {
   if (currentRomName || loadingName) return;
   if (linkMode || rollbackMode || netActive() || !roms.length) {
-    setPausedCardShown(false);
+    setHeroShown(false);
     return;
   }
   let latest = roms[0];
@@ -11460,16 +11460,16 @@ const refreshHero = (roms, localRoms, keys) => {
 
 // The picture and the labelled button do the same thing.
 const heroPrimary = () => {
-  if (homePausedCard.dataset.mode === "paused") { resumeFromHero(); return; }
+  if (heroCard.dataset.mode === "paused") { resumeFromHero(); return; }
   if (!heroName) return;
-  if (heroSession) { launchRom(heroName, { resume: true, flyFrom: homePausedShot }); return; }
-  openLibraryGame(heroName, { ...heroFile, flyFrom: homePausedShot, resume: true });
+  if (heroSession) { launchRom(heroName, { resume: true, flyFrom: heroShot }); return; }
+  openLibraryGame(heroName, { ...heroFile, flyFrom: heroShot, resume: true });
 };
-homePausedShot.addEventListener("click", heroPrimary);
-document.getElementById("home-paused-resume").addEventListener("click", heroPrimary);
-homePausedRestart.addEventListener("click", () => {
-  if (heroName && homePausedCard.dataset.mode === "closed") {
-    launchRom(heroName, { fresh: true, flyFrom: homePausedShot });
+heroShot.addEventListener("click", heroPrimary);
+document.getElementById("hero-resume").addEventListener("click", heroPrimary);
+heroPlay.addEventListener("click", () => {
+  if (heroName && heroCard.dataset.mode === "closed") {
+    launchRom(heroName, { fresh: true, flyFrom: heroShot });
   }
 });
 
@@ -11606,20 +11606,20 @@ const arriveHome = () => {
   homeArriveTimer = setTimeout(() => homeScroller.classList.remove("home-arriving"), HOME_ARRIVE_MS);
 };
 const flyHome = (from) => {
-  if (!canFly() || homePausedCard.hidden) return;
+  if (!canFly() || heroCard.hidden) return;
   homeScroller.scrollTop = 0; // the hero is where the game comes back to
   arriveHome();
-  const to = homePausedShot.getBoundingClientRect();
-  homePausedShot.style.visibility = "hidden";
-  flyPicture(flierContent(homePausedCanvas), from, to, { radius: 14 })
-    .then(() => { homePausedShot.style.visibility = ""; });
+  const to = heroShot.getBoundingClientRect();
+  heroShot.style.visibility = "hidden";
+  flyPicture(flierContent(heroCanvas), from, to, { radius: 14 })
+    .then(() => { heroShot.style.visibility = ""; });
 };
 
 // The hero's Resume, for the game still in memory: the frame grows back into
 // the screen, and play goes on when it gets there.
 const resumeFromHero = () => {
-  const from = canFly() && !homePausedCard.hidden ? homePausedShot.getBoundingClientRect() : null;
-  const content = from ? flierContent(homePausedCanvas) : null;
+  const from = canFly() && !heroCard.hidden ? heroShot.getBoundingClientRect() : null;
+  const content = from ? flierContent(heroCanvas) : null;
   resumeGame();
   if (!from?.width || !content) return;
   holdForFlight();
@@ -11635,7 +11635,7 @@ const armFlight = (name, fromEl, dark, land = null) => {
   if (!canFly() || !fromEl) return;
   const from = fromEl.getBoundingClientRect();
   if (!from.width) return;
-  const src = fromEl === homePausedShot ? homePausedCanvas : fromEl;
+  const src = fromEl === heroShot ? heroCanvas : fromEl;
   pendingFlight = { name, from, content: flierContent(src), dark, land, at: Date.now() };
 };
 // From loadRom, the moment the game is on screen: hold it, give the layout a
@@ -11667,14 +11667,14 @@ const takePendingFlight = () => {
 // sanitised one. Address a game by the wrong one and every flag reads false -
 // the menu decides the file is missing and offers to go and find a file the
 // player is, demonstrably, playing.
-const homePausedMore = document.getElementById("home-paused-more");
-homePausedMore.addEventListener("click", () => {
+const heroMore = document.getElementById("hero-more");
+heroMore.addEventListener("click", () => {
   // Closed, the hero is a library game like any tile, and gets its file menu.
-  const paused = homePausedCard.dataset.mode !== "closed";
+  const paused = heroCard.dataset.mode !== "closed";
   const name = paused ? currentOriginalName : heroName;
   if (!name) return;
   if (tileMenuFor === name) closeTileMenu();
-  else openTileMenu(name, homePausedMore, null, null, paused);
+  else openTileMenu(name, heroMore, null, null, paused);
 });
 
 // Close the paused game: flush its save once, detach it from every later
@@ -11728,7 +11728,7 @@ const unloadGame = async ({ flushSave = true } = {}) => {
   return true;
 };
 
-document.getElementById("home-paused-close").addEventListener("click", async () => {
+document.getElementById("hero-close").addEventListener("click", async () => {
   await unloadGame();
 });
 
@@ -12372,7 +12372,7 @@ var photoDots = {
 const applyPhotoDots = () => {
   menuBtn.classList.toggle("has-new-photo", photoDots.menu);
   // The home screen has no hamburger to carry the dot; its card's ⋯ does.
-  homePausedMore.classList.toggle("has-new-photo", photoDots.menu);
+  heroMore.classList.toggle("has-new-photo", photoDots.menu);
   captureToggle.classList.toggle("has-new-photo", photoDots.capture);
   printsItem.classList.toggle("has-new-photo", photoDots.gallery);
 };

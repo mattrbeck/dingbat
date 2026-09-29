@@ -38,7 +38,7 @@ const closedOn = async (names) => {
 };
 
 const body = (app) => app.document.body.classList;
-const hero = (app) => app.document.getElementById("home-paused");
+const hero = (app) => app.document.getElementById("hero");
 const fit = (app) => app.document.getElementById("home-inner").dataset.n;
 const current = (app) =>
   gameTiles(app).filter((t) => t.classList.contains("is-current")).map((t) => t.dataset.rom);
@@ -50,8 +50,8 @@ test("paused: the loaded game's tile stands down and the fit drops by one", asyn
   assert.deepEqual(current(app), ["A.gba"]);
   assert.equal(fit(app), "2", "B + C");
   assert.ok(!body(app).contains("home-solo"));
-  assert.ok(shown("home-paused-close", app));
-  assert.ok(!shown("home-paused-restart", app));
+  assert.ok(shown("hero-close", app));
+  assert.ok(!shown("hero-play", app));
 });
 
 test("a library of only the hero's game folds away", async () => {
@@ -68,17 +68,17 @@ test("nothing loaded: the hero is the most recently played game, closed", async 
   await drain();
   assert.equal(hero(app).hidden, false);
   assert.equal(hero(app).dataset.mode, "closed");
-  assert.equal(app.document.getElementById("home-paused-name").textContent, "B");
+  assert.equal(app.document.getElementById("hero-name").textContent, "B");
   assert.deepEqual(current(app), ["B.gba"]);
   assert.equal(fit(app), "2");
-  assert.equal(app.document.getElementById("home-paused-state").textContent, "Last played");
+  assert.equal(app.document.getElementById("hero-state").textContent, "Last played");
 });
 
 test("closed, with no session to go back into: Play, and no Restart", async () => {
   const app = await closedOn(["A.gba", "B.gba"]);
-  assert.equal(app.document.getElementById("home-paused-resume-label").textContent, "Play");
-  assert.ok(!shown("home-paused-restart", app));
-  assert.ok(!shown("home-paused-close", app));
+  assert.equal(app.document.getElementById("hero-resume-label").textContent, "Play");
+  assert.ok(!shown("hero-play", app));
+  assert.ok(!shown("hero-close", app));
 });
 
 test("closed, with a session that matches the save: Resume and Restart", async () => {
@@ -89,15 +89,15 @@ test("closed, with a session that matches the save: Resume and Restart", async (
   app.idb.set("stateauto:A.gba", { bytes: u8(9), ts: 1, saveSig: sig });
   await app.api.refreshHomeRecent();
   await drain();
-  assert.equal(app.document.getElementById("home-paused-resume-label").textContent, "Resume");
-  assert.ok(shown("home-paused-restart", app));
+  assert.equal(app.document.getElementById("hero-resume-label").textContent, "Resume");
+  assert.ok(shown("hero-play", app));
 
   // The game saved since: the session is not the game any more.
   app.idb.set("save:A.gba", u8(4, 5, 6));
   await app.api.refreshHomeRecent();
   await drain();
-  assert.equal(app.document.getElementById("home-paused-resume-label").textContent, "Play");
-  assert.ok(!shown("home-paused-restart", app));
+  assert.equal(app.document.getElementById("hero-resume-label").textContent, "Play");
+  assert.ok(!shown("hero-play", app));
 });
 
 test("a session the card cannot draw (2P link): no hero, nothing stands down", async () => {

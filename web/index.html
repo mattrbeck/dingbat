@@ -403,34 +403,34 @@
                changes the hero's mode in place instead of moving anything.
                The picture is the main target; the buttons are for anyone
                who wants a labelled control. -->
-          <div id="home-paused" hidden data-mode="paused">
-            <div id="home-paused-frame">
+          <div id="hero" hidden data-mode="paused">
+            <div id="hero-frame">
               <!-- The same frame again, blurred behind the sharp one: a glow
                    the colour of the game, not a picture of it. -->
-              <canvas id="home-backdrop-canvas" width="240" height="160" aria-hidden="true"></canvas>
-              <button type="button" id="home-paused-shot" title="Resume game" aria-label="Resume game">
-                <canvas id="home-paused-canvas" width="240" height="160"></canvas>
-                <span id="home-paused-placeholder" class="sys-chip" hidden></span>
+              <canvas id="hero-glow" width="240" height="160" aria-hidden="true"></canvas>
+              <button type="button" id="hero-shot" title="Resume game" aria-label="Resume game">
+                <canvas id="hero-canvas" width="240" height="160"></canvas>
+                <span id="hero-placeholder" class="sys-chip" hidden></span>
               </button>
             </div>
-            <div id="home-paused-body">
-              <div id="home-paused-kicker">
-                <span id="home-paused-led" aria-hidden="true"></span>
-                <span id="home-paused-state">Paused</span>
-                <span id="home-paused-sys" class="sys-chip"></span>
+            <div id="hero-body">
+              <div id="hero-kicker">
+                <span id="hero-led" aria-hidden="true"></span>
+                <span id="hero-state">Paused</span>
+                <span id="hero-sys" class="sys-chip"></span>
               </div>
-              <div id="home-paused-title">
-                <span id="home-paused-name"></span>
+              <div id="hero-title">
+                <span id="hero-name"></span>
               </div>
-              <div id="home-paused-actions">
-                <button type="button" id="home-paused-resume" class="button button-primary">
+              <div id="hero-actions">
+                <button type="button" id="hero-resume" class="button button-primary">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></svg>
-                  <span id="home-paused-resume-label">Resume</span>
+                  <span id="hero-resume-label">Resume</span>
                 </button>
-                <button type="button" id="home-paused-close" class="button" title="Close the game &mdash; your save is kept">Close</button>
-                <button type="button" id="home-paused-restart" class="button" hidden
+                <button type="button" id="hero-close" class="button" title="Close the game &mdash; your save is kept">Close</button>
+                <button type="button" id="hero-play" class="button" hidden
                         title="Start the game from its in-game save">Play</button>
-                <button type="button" id="home-paused-more" class="button home-paused-more"
+                <button type="button" id="hero-more" class="button hero-more"
                         title="More for this game" aria-label="More for this game" aria-haspopup="menu">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
                 </button>

@@ -581,7 +581,7 @@ test("the card's ⋯ finds the loaded game under the library's own key", async (
   await boot(app);
   app.api.currentRomName = "zelda_u.gbc";          // the FS name
   app.api.currentOriginalName = "Zelda (U) [!].gbc"; // the library key
-  await app.document.getElementById("home-paused-more").click();
+  await app.document.getElementById("hero-more").click();
   await settle();
   assert.equal(app.api.tileMenuFor, "Zelda (U) [!].gbc");
   assert.ok(!labels(app).includes("Find the file…"),
@@ -599,12 +599,12 @@ test("body.home-card tracks the card itself, and clears with it", async () => {
   const app = await loadApp();
   const body = app.document.body;
   assert.equal(body.classList.contains("home-card"), false, "nothing on screen yet");
-  app.api.setPausedCardShown(true);
+  app.api.setHeroShown(true);
   assert.equal(body.classList.contains("home-card"), true);
-  assert.equal(app.document.getElementById("home-paused").hidden, false);
-  app.api.setPausedCardShown(false);
+  assert.equal(app.document.getElementById("hero").hidden, false);
+  app.api.setHeroShown(false);
   assert.equal(body.classList.contains("home-card"), false);
-  assert.equal(app.document.getElementById("home-paused").hidden, true);
+  assert.equal(app.document.getElementById("hero").hidden, true);
 });
 
 // body.lib-has-games decides which way in from a file is on screen: the hero's

@@ -922,9 +922,9 @@ test("a launch from the home screen holds the game until its picture lands", asy
   const app = await closedWithSession();
   app.runIn("heroShowsSession = true"); // the paused screen, closed in place
   app.runIn("globalThis.requestAnimationFrame = (f) => { f(0); return 0; }");
-  app.document.getElementById("home-paused-shot").setBox(10, 10, 384, 256);
+  app.document.getElementById("hero-shot").setBox(10, 10, 384, 256);
   app.runIn("canvasEl.setBox(0, 56, 960, 640)");
-  app.runIn(`launchRom("A.gba", { resume: true, flyFrom: document.getElementById("home-paused-shot") })`);
+  app.runIn(`launchRom("A.gba", { resume: true, flyFrom: document.getElementById("hero-shot") })`);
   await drain();
   assert.equal(named(app), "A.gba");
   assert.equal(app.runIn("paused"), true, "held while the picture flies");
@@ -946,9 +946,9 @@ test("a Resume whose picture is not the session's moment goes dark", async () =>
   const app = await closedWithSession();
   app.runIn("heroShowsSession = false");
   app.runIn("globalThis.requestAnimationFrame = (f) => { f(0); return 0; }");
-  app.document.getElementById("home-paused-shot").setBox(10, 10, 384, 256);
+  app.document.getElementById("hero-shot").setBox(10, 10, 384, 256);
   app.runIn("canvasEl.setBox(0, 56, 960, 640)");
-  app.runIn(`launchRom("A.gba", { resume: true, flyFrom: document.getElementById("home-paused-shot") })`);
+  app.runIn(`launchRom("A.gba", { resume: true, flyFrom: document.getElementById("hero-shot") })`);
   await drain();
   const flier = app.document.body.children.find((c) => c.className === "home-flier");
   assert.ok(flier);
@@ -970,9 +970,9 @@ test("a session picture from another snapshot is not the session's", async () =>
 test("Restart's flight goes dark on the way", async () => {
   const app = await closedWithSession();
   app.runIn("globalThis.requestAnimationFrame = (f) => { f(0); return 0; }");
-  app.document.getElementById("home-paused-shot").setBox(10, 10, 384, 256);
+  app.document.getElementById("hero-shot").setBox(10, 10, 384, 256);
   app.runIn("canvasEl.setBox(0, 56, 960, 640)");
-  app.runIn(`launchRom("A.gba", { fresh: true, flyFrom: document.getElementById("home-paused-shot") })`);
+  app.runIn(`launchRom("A.gba", { fresh: true, flyFrom: document.getElementById("hero-shot") })`);
   await drain();
   const flier = app.document.body.children.find((c) => c.className === "home-flier");
   assert.ok(flier.children.some((c) => c.className === "home-flier-shade"), "it darkens");

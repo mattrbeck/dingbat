@@ -8,7 +8,7 @@ records behind them. Code: `web/index.js` (search the section names below),
 ## One rule
 
 **The last game played heads the page, paused or not** (the *hero*,
-`#home-paused`). Every other game is in the grid below it. The hero's game
+`#hero`). Every other game is in the grid below it. The hero's game
 is shown once: its tile stands down from the grid (`.is-current`) except
 while a search or filter is running, and a library of only that game folds
 the grid away (`body.home-solo`). Closing a game changes the hero in place;
@@ -29,7 +29,7 @@ hero in every state.
 
 ## The hero's buttons
 
-`data-mode` on `#home-paused` is `paused` or `closed`.
+`data-mode` on `#hero` is `paused` or `closed`.
 
 | Mode | Buttons | Resume does | The second button does |
 |---|---|---|---|
