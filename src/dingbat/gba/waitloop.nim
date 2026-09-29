@@ -99,6 +99,17 @@ proc parse_wl_instr*(kind: WLInstrKind; instr: uint16): Option[WLParsed] =
     let rs = bits_range(instr, 3, 5)
     let rd = bits_range(instr, 0, 2)
     some(WLParsed(read_only: true, read_bits: 1'u16 shl rs, write_bits: 1'u16 shl rd))
+  of wlLoadStoreRegisterOffset, wlLoadStoreSignExtended:
+    # ldr / ldrb / ldrh / ldrsb / ldrsh [rb, ro] (Oshare Princess 3's
+    # `ldrsh r0, [r0, r2]`); the stores, str / strb / strh, are not reads
+    let load = if kind == wlLoadStoreRegisterOffset: bit(instr, 11)
+               else: bit(instr, 10) or bit(instr, 11)
+    if not load: return none(WLParsed)
+    let ro = bits_range(instr, 6, 8)
+    let rb = bits_range(instr, 3, 5)
+    let rd = bits_range(instr, 0, 2)
+    some(WLParsed(read_only: true, read_bits: (1'u16 shl ro) or (1'u16 shl rb),
+                  write_bits: 1'u16 shl rd))
   of wlHighRegBranchExchange:
     # ADD / CMP / MOV with a high register (Crash Nitro Kart's `mov r1, sl`
     # ahead of its VCOUNT poll); BX / BLX leave the loop's analysis
@@ -106,6 +117,10 @@ proc parse_wl_instr*(kind: WLInstrKind; instr: uint16): Option[WLParsed] =
     let rd = bits_range(instr, 0, 2) or (bits_range(instr, 7, 7) shl 3)
     let rs = bits_range(instr, 3, 6)
     if op == 3 or rd == 15: return none(WLParsed)
+    # `mov r8, r8` is the Thumb NOP (Horse & Pony: Let's Ride 2 pads its
+    # poll with one): no register moves
+    if op == 2 and rd == rs:
+      return some(WLParsed(read_only: true, read_bits: 0'u16, write_bits: 0'u16))
     # r15 as an operand is this instruction's address + 4: loop-invariant
     let rs_b: uint16 = if rs == 15: 0'u16 else: 1'u16 shl rs
     case op
@@ -148,7 +163,8 @@ proc scan_thumb_loop(cpu: CPU; start_addr, end_addr: uint32; first_load: var uin
     if parsed.isNone or not parsed.get.read_only: return false
     let p = parsed.get
     if first_load == WL_NO_LOAD and
-       kind in {wlMultipleLoadStore, wlLoadStoreHalfword, wlLoadStoreImmediateOffset}:
+       kind in {wlMultipleLoadStore, wlLoadStoreHalfword, wlLoadStoreImmediateOffset,
+                wlLoadStoreRegisterOffset, wlLoadStoreSignExtended}:
       first_load = cur_addr
     never_write = never_write or (p.read_bits and not written_bits)
     # Fold in this instruction's writes before checking, so a read-modify-
@@ -170,6 +186,12 @@ proc scan_arm_loop(cpu: CPU; start_addr, end_addr: uint32; first_load: var uint3
   var cur_addr = start_addr
   while cur_addr < end_addr:
     let i = cpu.gba.bus.read_word_internal(cur_addr)
+    if (i and 0x0F000000'u32) == 0x0A000000'u32 and (i shr 28) < 0xE'u32:
+      # B<cond> out of the loop, on flags this iteration set (as in Thumb)
+      let target = uint32(int(cur_addr) + 8 + (cast[int32](bits_range(i, 0, 23) shl 8) shr 6))
+      if not flags_set or (target >= start_addr and target <= end_addr): return false
+      cur_addr += 4
+      continue
     if (i shr 28) != 0xE'u32: return false
     let rd = bits_range(i, 12, 15)
     let rn = bits_range(i, 16, 19)
@@ -223,12 +245,20 @@ proc scan_arm_loop(cpu: CPU; start_addr, end_addr: uint32; first_load: var uint3
     cur_addr += 4
   true
 
+proc wl_key(start_addr, end_addr: uint32; arm: static bool): uint32 {.inline.} =
+  ## A loop's identity in the verdict caches: its start, bit 0 for ARM, and
+  ## its length in bits 28-31 (addresses there are open bus, never judged).
+  ## Two loops can share a start: Rockman Zero 4's inner `bcc` and outer
+  ## `bne` both go back to 0x08000906, and only the inner is a waitloop.
+  when arm: start_addr or 1 or (((end_addr - start_addr) shr 2) shl 28)
+  else: start_addr or (((end_addr - start_addr - 2) shr 1) shl 28)
+
 proc judge_loop[arm: static bool](cpu: CPU; start_addr: uint32; end_addr: uint32) =
   # Analyze only when the same backward-branch target arrives twice in a row
   # (branch_dest; the defer records every call's target). ARM loops are
   # keyed with bit 0 set (their addresses are word-aligned), so the caches
   # never mistake one for Thumb code at the same address.
-  let key = when arm: start_addr or 1 else: start_addr
+  let key = wl_key(start_addr, end_addr, arm)
   defer: cpu.branch_dest = key
   if key != cpu.branch_dest:
     cpu.wl_volatile_at = 0
@@ -248,22 +278,26 @@ proc judge_loop[arm: static bool](cpu: CPU; start_addr: uint32; end_addr: uint32
             (end_addr - start_addr) >= 2 and
             (end_addr - start_addr) <= WL_BODY_MAX):
       return
-  # Cache verdicts only for ROM addresses; RAM code can be overwritten.
+  # Cache a waitloop verdict only for ROM addresses: RAM code can be
+  # overwritten. A rejection is cached anywhere -- it can only ever cost a
+  # skip, never make one -- or a hot RAM loop (an IWRAM mixer's ARM code)
+  # would be scanned again on every iteration.
   let cacheable = cpu.cache_waitloop_results and
                   bits_range(start_addr, 24, 27) in 0x8'u32 .. 0xD'u32
+  if cpu.cache_waitloop_results:
+    if key == cpu.last_non_waitloop:
+      return
+    if key in cpu.identified_non_waitloops:
+      cpu.last_non_waitloop = key
+      return
   if cacheable:
     if key == cpu.last_waitloop:
       cpu.entered_waitloop = true
-      return
-    if key == cpu.last_non_waitloop:
       return
     if key in cpu.identified_waitloops:
       cpu.last_waitloop = key
       cpu.last_waitloop_first_load = cpu.waitloop_first_load.getOrDefault(key, WL_NO_LOAD)
       cpu.entered_waitloop = true
-      return
-    if key in cpu.identified_non_waitloops:
-      cpu.last_non_waitloop = key
       return
   # RAM code under MEMCNT's swap: the loop's own reads below are unswapped
   if not cacheable and start_addr < 0x04000000'u32 and
@@ -273,7 +307,7 @@ proc judge_loop[arm: static bool](cpu: CPU; start_addr: uint32; end_addr: uint32
   let ok = when arm: cpu.scan_arm_loop(start_addr, end_addr, first_load)
            else: cpu.scan_thumb_loop(start_addr, end_addr, first_load)
   if not ok:
-    if cacheable:
+    if cpu.cache_waitloop_results:
       cpu.identified_non_waitloops.incl(key)
       cpu.last_non_waitloop = key
     return
@@ -309,7 +343,7 @@ proc analyze_loop*(cpu: CPU; start_addr: uint32; end_addr: uint32; arm: static b
     return
   cpu.judge_loop[:arm](start_addr, end_addr)
   if not cpu.entered_waitloop: return
-  let key = when arm: start_addr or 1 else: start_addr
+  let key = wl_key(start_addr, end_addr, arm)
   const LEAD = when arm: 8'u32 else: 4'u32   # r15's lead on the instruction
   # Consecutive verdicts on one loop are consecutive iterations: the period,
   # the dispatches and the volatile reads below are all since the last one.
