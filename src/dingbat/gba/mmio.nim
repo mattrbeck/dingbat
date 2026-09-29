@@ -22,6 +22,7 @@ proc `[]`*(mmio: MMIO; address: uint32): uint8 =
   of 0x060..0x0A7:
     # PSG state advances on lazily caught-up deadlines, not events
     mmio.gba.bus.volatile_read = true
+    mmio.gba.bus.volatile_pc = mmio.gba.cpu.r[15]
     mmio.gba.apu[io_addr]
   of 0x0B0..0x0DF: mmio.gba.dma[io_addr]
   of 0x100..0x10F: mmio.gba.timer[io_addr]

@@ -112,6 +112,7 @@ proc irq*(cpu: CPU) =
 proc irq_enter*(cpu: CPU) =
   ## The IRQ exception, whatever CPSR.I holds (irq checks it; an S-bit
   ## CPSR restore that sets it does not, arm.exception_return_restore).
+  cpu.wl_volatile_at = 0   # a handler can stop what made a loop volatile
   block:
     when defined(irqlog):
       # -d:irqlog: the cycle every IRQ is taken at, to IRQLOG (a file: the
@@ -784,10 +785,17 @@ proc waitloop_skip(cpu: CPU; remaining: int) {.noinline.} =
                  (uint32(bus.pf_running) shl 2) or
                  (uint32(cast[uint8](bus.pf_count)) shl 8) or
                  (uint32(cast[uint8](bus.rom_ahead)) shl 16)
+  # ... and took as long by itself: no DMA held the bus during it, and none
+  # of its accesses waited on the renderer. Famicom Mini Vol. 28 (J) [f_4]
+  # waits on an ARM loop that runs 22 cycles; one iteration 29, the next
+  # 21, then a DMA stalling the load for 6 made three measures agree on 28,
+  # and the skip put the loop on a 28-cycle grid.
   let repeated = cpu.wl_bound_addr == cpu.wl_addr and
                  int64(boundary) - cpu.wl_bound == cpu.wl_period and
                  cpu.wl_sig_next == bus.rom_next_addr and
-                 cpu.wl_sig_free == sig_free and cpu.wl_sig_bits == sig_bits
+                 cpu.wl_sig_free == sig_free and cpu.wl_sig_bits == sig_bits and
+                 cpu.wl_bound_dma == cpu.gba.dma_bursts and not cpu.wl_contended
+  cpu.wl_bound_dma = cpu.gba.dma_bursts
   cpu.wl_bound_addr = cpu.wl_addr
   cpu.wl_bound = int64(boundary)
   cpu.wl_sig_next = bus.rom_next_addr

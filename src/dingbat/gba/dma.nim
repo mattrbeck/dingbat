@@ -304,6 +304,7 @@ proc run_channel(dma: DMA; channel: int; nested: bool) =
     else: dma.gba.bus.sched.cycles
   dma.gba.bus.dma_deferred = false
   dma.gba.bus.dma_has_run = true
+  inc dma.gba.dma_bursts
   when WL_QUIET_EVENTS: dma.gba.wl_unsafe = true
   when DMA_READS_CPU_BUS:
     # A load that began after the request came second: the burst went first
