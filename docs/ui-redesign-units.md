@@ -1,5 +1,9 @@
 # Web UI redesign — implementation units
 
+> **History.** This is an earlier redesign plan. The home screen and the
+> account control have since been redesigned again: for how they work now,
+> read [home-screen.md](home-screen.md). §0's Do-not-break table still holds.
+
 **Read this instead of `ui-redesign-spec.md` if you are implementing.** The
 older file is prose and left decisions unmade; four separate rounds of device
 testing found gaps in it. This file is the same design expressed as **20

@@ -1,5 +1,9 @@
 # Web UI redesign — implementation spec
 
+> **History.** This is an earlier redesign plan. The home screen and the
+> account control have since been redesigned again: for how they work now,
+> read [home-screen.md](home-screen.md). §0's Do-not-break table still holds.
+
 Companion to the design canvas. Every value here is either lifted from
 `web/styles.css` / `web/index.html` as it stands, or is a proposed change
 stated against the value it replaces. Where a number is proposed, the

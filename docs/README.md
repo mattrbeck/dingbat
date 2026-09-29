@@ -24,6 +24,7 @@ One line per document: what it is for and who reads it. Scores live only in
 - [fifo_ppu_changes.md](fifo_ppu_changes.md) — the GB FIFO PPU model against Pan Docs' pixel FIFO. GB PPU maintainers.
 - [lcd_response.md](lcd_response.md) — the LCD panel response model (ghosting) and its test. Video maintainers.
 - [lcd_ghost_delta.md](lcd_ghost_delta.md) — parked: LCD ghosting per upscale-filter cell. Video maintainers.
+- [home-screen.md](home-screen.md) — the web home screen: its states, Resume and Play, sessions and their pictures, flights, the account slot. Web maintainers.
 - [web_audio_pacing.md](web_audio_pacing.md) — the web audio scheduling-lead servo and how to measure it. Web maintainers.
 - [hle-bios-shortcomings.md](hle-bios-shortcomings.md) — what the built-in GBA HLE BIOS does not do. GBA maintainers.
 - [gba-rtc.md](gba-rtc.md) — the GBA cartridge clock: host time unless a game sets it, the battery-save RTC trailer, behaviour next to mGBA and real carts. GBA maintainers, anyone moving saves between emulators.

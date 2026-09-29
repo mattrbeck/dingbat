@@ -4,10 +4,12 @@ The full feature list for both front-ends and both emulated systems.
 
 ## Web front-end ([dingbat.gg](https://dingbat.gg))
 
-- Installable offline-capable PWA with a home-screen library grid
+- Installable offline-capable PWA; the home screen is headed by the last game played, with
+  the rest of the library below it (see [home-screen.md](home-screen.md))
 - Touch controls (phone and tablet layouts, both orientations); gamepad support
-- Save states: nine per-ROM slots with thumbnails, Quick Save / Quick Load, auto-save on
-  exit with "Resume last session", Undo for state loads and Reset
+- Save states: nine per-ROM slots with thumbnails, Quick Save / Quick Load, and a session
+  saved on exit that a game picks up again from the library (or, by setting, offers after
+  booting from the in-game save); Undo for state loads and Reset
 - Rewind, fast forward, 2x, slow motion, frame step; a film-strip rewind scrubber
   (menu, or double-tap the rewind button) that warns before rolling back an in-game save
 - Run-ahead (opt-in, 1–2 frames); disabled while linked
