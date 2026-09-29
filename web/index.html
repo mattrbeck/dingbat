@@ -397,8 +397,8 @@
                the game Main Menu left behind, drawn from the live
                framebuffer, with Resume / Close. "closed" is the last game
                played, with nothing loaded: its stored last screen, and
-               Resume / Restart when a session snapshot can put it back
-               exactly, else Play. The game is shown once: its tile stands
+               Resume / Play when a session snapshot can put it back exactly
+               (Play boots from the in-game save), else Play alone. The game is shown once: its tile stands
                down from the grid (index.js, syncHomeCurrent), and closing it
                changes the hero's mode in place instead of moving anything.
                The picture is the main target; the buttons are for anyone
@@ -429,7 +429,7 @@
                 </button>
                 <button type="button" id="home-paused-close" class="button" title="Close the game &mdash; your save is kept">Close</button>
                 <button type="button" id="home-paused-restart" class="button" hidden
-                        title="Start the game again from its in-game save">Restart</button>
+                        title="Start the game from its in-game save">Play</button>
                 <button type="button" id="home-paused-more" class="button home-paused-more"
                         title="More for this game" aria-label="More for this game" aria-haspopup="menu">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>

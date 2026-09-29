@@ -11382,9 +11382,10 @@ homePausedRestart.addEventListener("click", () => {
 //
 // Two kinds of landing. A picture that IS the first frame the game will show
 // (the paused game, or a session that goes back in) lands intact. One that is
-// not - a Restart, or a game with no session to resume - darkens to black on
-// the way and the screen powers on from black: the picture was the last one
-// seen, not the one about to be.
+// not - the closed hero's second button (Play, from the in-game save), or a
+// game with no session to resume - darkens to black on the way and the
+// screen powers on from black: the picture was the last one seen, not the
+// one about to be.
 //
 // Nothing fills forwards (see "The brand, twice"): every element made here is
 // removed when its animation ends, and every animation is tagged.
