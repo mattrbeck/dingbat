@@ -23,6 +23,16 @@
         }
       } catch (e) {}
     </script>
+    <script>
+      // A library the last visit had: hold the home screen's content until
+      // it is read, so its first picture is the real one (index.js, "The
+      // first picture"). No hint - a first visit, an empty library - no wait.
+      try {
+        if (localStorage.getItem("dingbat_library") === "games") {
+          document.documentElement.classList.add("home-pending");
+        }
+      } catch (e) {}
+    </script>
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <!-- No apple-mobile-web-app-status-bar-style: black-translucent offsets
@@ -519,7 +529,9 @@
         </div>
       </div>
 
-      <div id="log">
+      <!-- hidden in the markup, not only by index.js: a paint before the
+           script runs would otherwise show the developer log for a frame. -->
+      <div id="log" hidden>
         <div id="log-toolbar">
           <span id="log-context"></span>
           <button type="button" id="log-copy">Copy</button>

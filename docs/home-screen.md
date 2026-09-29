@@ -86,6 +86,19 @@ is removed when it lands, and every animation is tagged (`home-flight`,
 and back: putting the name back restarts it (the arrival sets
 `#home-inner`'s duration to 0 instead).
 
+## The first picture
+
+The library is read from IndexedDB a few frames after the page first
+paints. So that a returning player does not see the empty state and then a
+half-built grid first, the page keeps a hint in localStorage
+(`dingbat_library`: `games` or `empty`, written on every library render).
+Where it says `games`, a script in `index.html`'s head adds
+`html.home-pending`: the bar paints at once, with its brand; the home's
+content is hidden, its entrance held, until the first render has its top
+game and its tiles' pictures (at most 400 ms more), and it is shown once.
+No hint, or `empty`, and nothing waits. `libraryEmpty` is `null` until the
+first read, so nothing before it (the boot sync refresh) decides either way.
+
 ## Account
 
 The bar's account slot (`#account-slot`, home screen only, not in the empty

@@ -5161,7 +5161,10 @@ if (accountBtn) {
 // appears. It withdraws the moment there is a library to head.
 const homeDriveBtn = /** @type {HTMLButtonElement} */ (document.getElementById("home-drive"));
 const homeDriveRow = document.getElementById("home-drive-row");
-let libraryEmpty = false;
+// null until the library has been read: the sync UI refreshes at boot,
+// before that, and must not decide either way (a false here marked an empty
+// library as having games, hiding the empty state for a frame or two).
+let libraryEmpty = /** @type {boolean | null} */ (null);
 
 // Google's own button, as it supplies it (signin-assets.zip, Android + Web,
 // pill with text): its branding rules allow no redrawing. One file per
@@ -5170,14 +5173,48 @@ const GOOGLE_BUTTON_HTML =
   '<img class="gsi-dark" src="google-signin-dark.svg" alt="" width="180" height="40">' +
   '<img class="gsi-light" src="google-signin-light.svg" alt="" width="180" height="40">';
 
+// --- The first picture -----------------------------------------------------
+// The library comes out of IndexedDB a few frames after the page paints.
+// Painting before then showed the empty state (the big logo and Add a
+// game), then the grid without its top game, then the real layout. Where
+// the last visit had games, index.html's head adds html.home-pending: the
+// bar paints at once, the home's content waits (styles.css) and is shown
+// once, as itself, when the first render has its top game and pictures.
+// With no hint - a first visit, an empty library - nothing waits, and the
+// empty state paints as early as it always did.
+const LIB_HINT_KEY = "dingbat_library";
+// However the read goes, the page shows by then.
+const HOME_REVEAL_MAX_MS = 2000;
+// How long the first render waits on its pictures before it shows anyway.
+const HOME_PICTURES_MAX_MS = 400;
+let libHint = null;
+try { libHint = localStorage.getItem(LIB_HINT_KEY); } catch {}
+let homePending = !!document.documentElement.classList?.contains("home-pending");
+// The bar's side of a library - its brand, the account - from the start.
+if (homePending) document.body.classList.add("lib-has-games");
+const revealHome = () => {
+  if (!homePending) return;
+  homePending = false;
+  document.documentElement.classList.remove("home-pending");
+};
+if (homePending) setTimeout(revealHome, HOME_REVEAL_MAX_MS);
+const noteLibraryHint = () => {
+  if (libraryEmpty === null) return;
+  const v = libraryEmpty ? "empty" : "games";
+  if (v === libHint) return;
+  libHint = v;
+  try { localStorage.setItem(LIB_HINT_KEY, v); } catch {}
+};
+
 const refreshHomeEmptyActions = () => {
   // Which way in from a file is on screen: the empty state's with no library
   // to speak of, the library head's #lib-add once there is one. Stated the
   // positive way round on purpose - before the first refresh neither class
   // is set, and the empty state is the right thing to be showing then.
-  document.body.classList.toggle("lib-has-games", !libraryEmpty);
+  if (libraryEmpty !== null) document.body.classList.toggle("lib-has-games", !libraryEmpty);
+  noteLibraryHint();
   if (!homeDriveBtn) return;
-  const shown = libraryEmpty && !!GDRIVE_CLIENT_ID;
+  const shown = libraryEmpty === true && !!GDRIVE_CLIENT_ID;
   homeDriveBtn.hidden = !shown;
   if (homeDriveRow) homeDriveRow.hidden = !shown;
   if (!shown) return;
@@ -6402,6 +6439,7 @@ const refreshHomeRecent = async () => {
     homeArtUrls.forEach(URL.revokeObjectURL);
     homeArtUrls = artUrls;
     syncBrand(); // the big brand is back, and the bar's copy gives way
+    revealHome();
     return;
   }
   libraryEmpty = false;
@@ -6421,7 +6459,7 @@ const refreshHomeRecent = async () => {
   for (let k of keys) {
     if (typeof k === "string" && k.startsWith("rom:")) localRoms.add(k.slice(4));
   }
-  refreshHero(roms, localRoms, keys);
+  const heroReady = refreshHero(roms, localRoms, keys);
   renderLibChips(roms, localRoms);
   // Sizes ride along with the render that needs them, and lose the games
   // that have left the library.
@@ -6435,6 +6473,7 @@ const refreshHomeRecent = async () => {
   }
   roms = sortRoms(roms);
   let tiles = [];
+  let pictures = []; // each tile's picture, decoded (The first picture)
   for (let { name: romName } of roms) {
     let system = systemOf(romName);
     let driveOnly = !localRoms.has(romName);
@@ -6472,7 +6511,7 @@ const refreshHomeRecent = async () => {
     thumb.className = "home-tile-thumb";
     thumb.appendChild(buildCart(romName));
     const showPicture = (blob, cls) => {
-      if (!blob || gen !== homeRenderGen) return false;
+      if (!blob || gen !== homeRenderGen) return null;
       let url = URL.createObjectURL(blob);
       artUrls.push(url);
       let img = document.createElement("img");
@@ -6481,12 +6520,13 @@ const refreshHomeRecent = async () => {
       img.alt = "";
       thumb.replaceChildren(img);
       tile.classList.remove("no-art");
-      return true;
+      return img;
     };
-    getRomFrame(romName)
+    pictures.push(getRomFrame(romName)
       .then((frame) => showPicture(frame, "home-tile-frame") ||
                        getRomArt(romName).then((art) => showPicture(art, "home-tile-art")))
-      .catch(() => {});
+      .then((img) => img?.decode?.())
+      .catch(() => {}));
 
     // The footer under the picture: name and system chip.
     let caption = document.createElement("span");
@@ -6580,6 +6620,14 @@ const refreshHomeRecent = async () => {
   homeArtUrls = artUrls;
   // The page just changed height: the crossover point moved with it.
   syncBrand();
+  // The first render shows once its top game and pictures are in, or after
+  // HOME_PICTURES_MAX_MS if a picture is slow.
+  if (homePending) {
+    Promise.race([
+      Promise.allSettled([heroReady, ...pictures]),
+      new Promise((r) => setTimeout(r, HOME_PICTURES_MAX_MS)),
+    ]).then(revealHome);
+  }
 };
 
 // Escape closes every modal (the net modal's dismissal is netplay.js's).
@@ -11454,7 +11502,7 @@ const refreshHero = (roms, localRoms, keys) => {
   let latest = roms[0];
   for (let r of roms) if ((r.ts || 0) > (latest.ts || 0)) latest = r;
   const driveOnly = !localRoms.has(latest.name);
-  renderClosedHero(latest.name,
+  return renderClosedHero(latest.name,
     { driveOnly, missing: driveOnly && !driveHasRom(latest.name) }, keys);
 };
 

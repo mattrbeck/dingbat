@@ -2219,6 +2219,18 @@ body.running #home {
   animation: home-in 0.4s ease-out both;
 }
 
+/* A library the last visit had, not read yet (index.js, "The first
+   picture"): the bar is up, the content waits - its entrance held at its
+   first frame - and appears once, as itself. */
+html.home-pending #home-inner {
+  visibility: hidden;
+  animation-play-state: paused;
+}
+
+html.home-pending #brand-slot {
+  --brand-p: 1;
+}
+
 @keyframes home-in {
   from {
     opacity: 0;

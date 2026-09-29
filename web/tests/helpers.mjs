@@ -281,7 +281,7 @@ const PIN_TIMER_MS = 100;
 
 export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
                                 touch = false, mediaDevices = true,
-                                serviceWorker = false } = {}) => {
+                                serviceWorker = false, htmlClasses = [] } = {}) => {
   const idb = new Map();          // the fake IndexedDB "blobs" store
   const fetchCalls = [];          // every fetch: { url, opts, method }
   const alerts = [];
@@ -388,7 +388,13 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     readyState: "loading",
     body: new FakeElement("body"),
     head: new FakeElement("head"),
-    documentElement: new FakeElement("html"),
+    // htmlClasses: what index.html's head scripts would have put on <html>
+    // before index.js runs (they are not evaluated here).
+    documentElement: (() => {
+      const el = new FakeElement("html");
+      for (const c of htmlClasses) el.classList.add(c);
+      return el;
+    })(),
   };
 
   const sandbox = {
