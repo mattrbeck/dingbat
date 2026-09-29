@@ -1832,6 +1832,14 @@ body:not(.lib-has-games) #account-slot {
   background: var(--surface-3);
 }
 
+/* Sign out everywhere, waiting for its second tap: the red of every armed
+   destructive button. */
+.acct-links button.armed,
+.acct-links button.armed:hover {
+  color: var(--accent-ink);
+  background: linear-gradient(180deg, var(--danger-hi), var(--danger));
+}
+
 /* --- Update badge --- */
 #update-btn {
   display: inline-flex;

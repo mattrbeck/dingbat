@@ -5093,14 +5093,31 @@ accountSync?.addEventListener("click", async () => {
   if (!(await ensureDriveSignedIn())) return;
   runFullSync({ label: "Syncing" });
 });
-document.getElementById("account-settings")?.addEventListener("click", () => {
-  closeAccountPop();
-  openSettingsModal();
-  openSettingsSection("general");
-});
 document.getElementById("account-signout")?.addEventListener("click", () => {
   closeAccountPop();
   gdriveSignOut();
+});
+// Two taps, as in Settings: it reaches every device, and the first could be
+// a slip. The menu closing, or a pause, disarms it.
+const accountEverywhere = /** @type {HTMLButtonElement | null} */ (document.getElementById("account-everywhere"));
+const EVERYWHERE_LABEL = "Sign out everywhere";
+let everywhereTimer = null;
+const disarmEverywhere = () => {
+  clearTimeout(everywhereTimer);
+  if (!accountEverywhere) return;
+  accountEverywhere.classList.remove("armed");
+  accountEverywhere.textContent = EVERYWHERE_LABEL;
+};
+accountEverywhere?.addEventListener("click", async () => {
+  if (!accountEverywhere.classList.contains("armed")) {
+    accountEverywhere.classList.add("armed");
+    accountEverywhere.textContent = "Tap again to sign out everywhere";
+    everywhereTimer = setTimeout(disarmEverywhere, 4000);
+    return;
+  }
+  disarmEverywhere();
+  closeAccountPop();
+  await gdriveSignOutEverywhere();
 });
 
 const refreshHomeSyncButton = () => {
@@ -5125,6 +5142,7 @@ const closeAccountPop = () => {
   if (!accountPop || !accountPopOpen) return;
   accountPopOpen = false;
   accountPop.hidden = true;
+  disarmEverywhere();
   accountBtn.setAttribute("aria-expanded", "false");
 };
 

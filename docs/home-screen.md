@@ -110,4 +110,5 @@ state). Signed out: a dim outline of a person; it opens a menu holding
 Google's own button (`google-signin-dark.svg` / `-light.svg`, from Google's
 sign-in assets, unaltered). Signed in: the email's initial with a sync
 badge (a tick, a turning ring, an amber mark); its menu has the sync status,
-Sync now, Drive settings and Sign out.
+Sync now, Sign out, and Sign out everywhere (two taps; it signs every
+device out).

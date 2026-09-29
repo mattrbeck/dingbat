@@ -120,3 +120,42 @@ test("a cancelled sign-in leaves Google's button there and clickable", async () 
   assert.ok(app.toasts.some((t) => /Sign-in was canceled/.test(t)),
     "the failure is reported: " + JSON.stringify(app.toasts));
 });
+
+// The menu's Sign out everywhere takes two taps: the first only arms it, the
+// second revokes the grant (and so signs every device out).
+test("Sign out everywhere in the account menu takes a second tap", async () => {
+  const app = await loadApp();
+  app.api.syncState = { ...app.api.syncState, connected: true, refresh: "rt-1" };
+  app.api.gdriveToken = "at";
+  app.api.gdriveTokenExp = Date.now() + 50 * 60 * 1000;
+  app.setFetch(async () => jsonRes({}));
+  app.runIn("refreshSyncUI()");
+  el(app, "account-btn").dispatch("click");
+  const btn = el(app, "account-everywhere");
+  const revokes = () => app.fetchCalls.filter((c) => c.url.includes("/revoke")).length;
+
+  btn.dispatch("click");
+  await settle();
+  assert.equal(revokes(), 0, "the first tap only arms it");
+  assert.ok(btn.classList.contains("armed"));
+  assert.equal(app.api.syncState.connected, true);
+
+  btn.dispatch("click");
+  for (let i = 0; i < 6; i++) await settle();
+  assert.equal(revokes(), 1, "the second revokes the grant");
+  assert.equal(app.api.syncState.connected, false, "and this device is signed out");
+  assert.ok(!btn.classList.contains("armed"));
+});
+
+test("closing the menu disarms Sign out everywhere", async () => {
+  const app = await loadApp();
+  app.api.syncState = { ...app.api.syncState, connected: true, refresh: "rt-1" };
+  app.runIn("refreshSyncUI()");
+  el(app, "account-btn").dispatch("click");
+  const btn = el(app, "account-everywhere");
+  btn.dispatch("click");
+  assert.ok(btn.classList.contains("armed"));
+  app.runIn("closeAccountPop()");
+  assert.ok(!btn.classList.contains("armed"));
+  assert.equal(btn.textContent, "Sign out everywhere");
+});
