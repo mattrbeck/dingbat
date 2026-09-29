@@ -5562,16 +5562,15 @@ const syncSaveHook = async (remote, live) => {
   if (saveHook.ts === sent.ts) await adoptSaveHook({ ...sent, dirty: false });
 };
 
-// Fire and forget. `player` is 0, or 1 for link mode's second save.
-const postSaveToHook = (game, player, data) => {
+// Fire and forget.
+const postSaveToHook = (game, data) => {
   let url = saveHook.url;
   if (!url || !data || !data.length) return;
   let form = new FormData();
   form.append("game", game);
-  form.append("player", String(player + 1));
   form.append("savedAt", new Date().toISOString());
   form.append("save", new Blob([new Uint8Array(data)], { type: "application/octet-stream" }),
-              stripExt(game) + (player ? "-p2" : "") + ".sav");
+              stripExt(game) + ".sav");
   // keepalive lets a save written as the page is hidden still leave, but
   // keepalive bodies share a 64 KiB budget, so only then.
   let keepalive = document.visibilityState === "hidden" && data.length <= 48 * 1024;
@@ -6850,7 +6849,7 @@ const persistSave = async (romName, originalName) => {
       lastSaveSigKey = originalName;
       requestPersistentStorage();
       markUpload("save:" + originalName); // truly-dirty save -> Drive soon
-      postSaveToHook(originalName, 0, data);
+      postSaveToHook(originalName, data);
 
     }
   } catch {}
@@ -11146,10 +11145,10 @@ window.leaveRollbackMode = () => {
   updateCanvasScaling();
 };
 
-// Persist both players' battery saves. Every call writes both; only a
-// changed one goes to the save webhook (linkSaveSigs, seeded at link start
-// with the saves the cores boot on).
-const linkSaveSigs = [null, null];
+// Persist both players' battery saves. Every call writes both; P1's goes to
+// the save webhook when it changed (linkSaveSig, seeded at link start with
+// the save the core boots on). P2's is the local second copy, never sent.
+let linkSaveSig = null;
 const persistLinkSaves = async () => {
   if (!linkRomEntry) return;
   for (let p = 0; p < 2; p++) {
@@ -11157,10 +11156,10 @@ const persistLinkSaves = async () => {
       let data = FS.readFile(LINK_FS_SAVS[p]);
       if (data && data.length > 0) {
         await dbPut(linkSaveKey(linkRomEntry.name, p), new Uint8Array(data));
-        let sig = saveSignature(data);
-        if (sig !== linkSaveSigs[p]) {
-          linkSaveSigs[p] = sig;
-          postSaveToHook(linkRomEntry.name, p, data);
+        let sig = p === 0 ? saveSignature(data) : linkSaveSig;
+        if (sig !== linkSaveSig) {
+          linkSaveSig = sig;
+          postSaveToHook(linkRomEntry.name, data);
         }
       }
     } catch {}
@@ -11204,8 +11203,7 @@ const launchLinkRom = async (rom) => {
   if (s1) writeToFS(LINK_FS_SAVS[0], s1);
   if (s2) writeToFS(LINK_FS_SAVS[1], s2);
   // What the cores boot on is not news to the save webhook.
-  linkSaveSigs[0] = s1 ? saveSignature(s1) : null;
-  linkSaveSigs[1] = s2 ? saveSignature(s2) : null;
+  linkSaveSig = s1 ? saveSignature(s1) : null;
   setFastForward(false);
   setSpeed2x(false);
   setRewindHeld(false);

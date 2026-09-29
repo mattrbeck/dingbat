@@ -48,8 +48,8 @@ Signing in turns sync on; signed out, none of it runs.
   Restore).
 - The save webhook URL (Settings > General > Advanced) rides the pull in its own
   "save-hook" file, `{ url, ts }`, newest wins. When set, every in-game save the web app
-  writes (solo, and each player's in link mode) is also POSTed there as multipart form
-  data: `save` (the file), `game`, `player`, `savedAt`. It goes no-cors, so the receiver
+  writes (solo, and player 1's in link mode; never player 2's) is also POSTed there as
+  multipart form data: `save` (the file), `game`, `savedAt`. It goes no-cors, so the receiver
   needs no CORS headers, and its response is never read.
 
 Scope is `drive.appdata` (dingbat sees only its own hidden app folder). The OAuth client
