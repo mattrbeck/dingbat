@@ -129,12 +129,44 @@ Sun 8.53 B -> 8.34 B, Minish Cap 8.98 B -> 8.65 B (the last two idle in
 Halt). Web build (wasm under Node, best of 5): FireRed +17 %, Emerald +16 to
 +18 %, Kirby +22 to +24 %, Golden Sun +3 to +5 %, Minish Cap +4 to +6 %.
 
-Left: loops that poll VCOUNT or DISPSTAT (the PPU events change what they
-read; an IO read also stamps the access window) and loops under a per-line
-H-blank interrupt (Tekken Advance, Guilty Gear X). Across the sample's first
-600 frames, real iterations of recognised idle loops are 2.6 % of executed
-cycles. Iridion II (E) is the one title where skip on and off still differ:
-its DISPSTAT loops alternate 16- and 17-cycle iterations.
+### Second round (2026-09-29)
+
+* **A skip needs a repeated iteration, not two equal verdict gaps.** The
+  verdict is taken inside the branch, whose position in its iteration moves
+  with the prefetcher (Iridion II read 17 and 17 on a 16-cycle loop).
+  `waitloop_skip` records the prefetcher's time-relative state and the
+  boundary at every judged iteration's end, and skips only after an
+  iteration that began in the previous one's state, took the verdict's
+  period, and had no DMA and no renderer-contended access in it.
+* **IO pollers pass events that leave their register alone**
+  (`Bus.io_read` classes): DISPSTAT/VCOUNT readers stop only at
+  SetHBlankFlag and EndHBlank, keypad readers at nothing. The skip moves
+  the IO load's access stamps with the time it skips.
+* **More loop shapes judged:** Thumb bodies up to `WL_BODY_MAX` (32),
+  high-register ADD/CMP/MOV and the `mov r8, r8` NOP, register-offset
+  loads, a second, forward exit; ARM loops (`scan_arm_loop`, hooked in
+  `arm_branch`). Verdicts are keyed by start, state and length
+  (`wl_key`). A volatile read inside the loop rests its judgement for
+  `WL_VOLATILE_REST` iterations (Nintendo's EEPROM wait).
+* **Never judged:** code outside real memory (a crashed bad dump).
+
+Skip on equals skip off over the whole archive, audio included (frames,
+final state, every emitted sample; 7897 titles, the two bad dumps that
+crash on every build aside). Probe for what is left:
+`-d:idle2`-style counting of executed cycles in iterations that start in
+the previous one's registers and write nothing; in a 1/8 sample's clean
+dumps that was 15.5 % of executed cycles before this round and 6.4 %
+after. What it still finds: loops that call a function (`bl`) or close
+with an unconditional branch, and loops under a per-line H-blank
+interrupt (Tekken Advance, Guilty Gear X).
+
+Cost on games this round does not help (FireRed, Emerald, Kirby, Golden
+Sun, Minish Cap from gameplay states): +0.2 to +0.4 % retired
+instructions, in steps of 0.03-0.11 % each (the ARM branch hook the
+largest). Gains, from boot: Adventures of Mr. Bean -97 %, Koala Brothers
+-70 %, Rockman Zero 4 -67 %, Digimon Battle Spirit -66 %, Super Bubble Pop
+-65 %, Tringo -55 %, Polly Pocket -53 %, Rampage Puzzle Attack -43 %,
+Horse & Pony -36 %, Iridion 3D -34 %.
 
 `fetch_half` / `fetch_word` and their cached halves were `{.inline.}` and
 out of line anyway, natively and in wasm: now `always_inline` under clang
