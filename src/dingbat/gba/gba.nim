@@ -429,6 +429,7 @@ type
     # timer's count, a PSG status, an EEPROM ready poll) happened since the
     # waitloop detector last looked; such a loop is never skipped.
     volatile_read*:  bool
+    volatile_pc*:    uint32   # r15 at the latest such read
     # Which IO registers were read since the waitloop detector last looked
     # (IO_PPU_STATUS, IO_KEYPAD, IO_OTHER; mmio.nim): the skip runs through
     # an event only if it changes none of them (cpu.nim, wl_crossable)
@@ -663,6 +664,9 @@ type
     # That visit's verdict: the loop may be skipped (waitloop_skip still
     # requires the iteration to have repeated exactly, below)
     wl_skip_ok*:                 bool
+    # A loop whose current run read something volatile (waitloop.nim)
+    wl_volatile_at*:             uint32
+    wl_volatile_rest*:           int32
     # Where the last judged iteration ended (the loop's start again), for
     # which loop, and the prefetcher's state there relative to that cycle
     # (waitloop_skip): an iteration that starts in the state the previous
@@ -672,6 +676,7 @@ type
     wl_sig_next*:                uint32
     wl_sig_free*:                int64
     wl_sig_bits*:                uint32
+    wl_bound_dma*:               uint32   # gba.dma_bursts there
     # Whether a skip may run through events that cannot tell it from the
     # loop (cpu.wl_crossable). Off on cores stepped in lockstep with another
     # (link.nim, netcore.nim): a longer skip changes how the cores
@@ -1242,6 +1247,7 @@ type
     # Events dispatched so far (wrapping) and cpu.r[15] at the last one;
     # the waitloop detector's staleness test (waitloop.nim)
     dispatch_count*:   uint32
+    dma_bursts*:       uint32   # DMA bursts granted (waitloop_skip's steadiness)
     last_dispatch_pc*: uint32
     # WL_QUIET_EVENTS: since the waitloop detector last looked, something
     # ran that could change what a loop reads -- an event not known to leave
@@ -1379,6 +1385,13 @@ const DMA_STALLS_IRQ_SYNC* {.booldefine.} = true
 const APU_SAMPLE_RATE*    = 32768
 const CPU_CLOCK_SPEED*    = 1 shl 24
 const APU_SAMPLE_PERIOD*  = CPU_CLOCK_SPEED div APU_SAMPLE_RATE
+const WL_VOLATILE_REST* = 32
+  ## Iterations of a loop not judged after one read something volatile
+const WL_BODY_MAX* = 32
+  ## The longest Thumb loop body (bytes before its branch) the waitloop
+  ## detector judges; Adventures of Mr. Bean's IO poll is 22
+const WL_ARM_BODY_MAX* = 32
+  ## The same for ARM loops (eight instructions before the branch)
 const WL_CROSS_PERIOD_MAX* = 46
   ## The longest loop period a skip crosses anything but output samples in
   ## (cpu.wl_crossable): shorter than every booking a passable handler makes

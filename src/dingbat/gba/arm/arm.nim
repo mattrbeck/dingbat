@@ -618,6 +618,11 @@ proc arm_block_data_transfer*[pre_address, add, s_bit, write_back, load: static 
 proc arm_branch*[link: static bool](cpu: CPU; instr: uint32) =
   let offset = cast[int32](bits_range(instr, 0, 23) shl 8) shr 6
   when link: discard cpu.set_reg(14, cpu.r[15] - 4)
+  else:
+    # A taken backward branch closes a loop (waitloop.nim); r15 is the
+    # branch + 8
+    if offset < 0 and offset >= -(WL_ARM_BODY_MAX + 8):
+      cpu.analyze_loop(uint32(int(cpu.r[15]) + offset), cpu.r[15] - 8, arm = true)
   discard cpu.set_reg(15, uint32(int(cpu.r[15]) + offset))
 
 proc arm_software_interrupt*(cpu: CPU; instr: uint32) =
