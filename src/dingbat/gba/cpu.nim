@@ -734,21 +734,25 @@ proc wl_crossable(cpu: CPU; land: CycleCount): bool {.inline.} =
   ## Whether the loop's iteration ending at `land` can be skipped although
   ## events fall inside it: each must be one whose handler cannot tell
   ## whether the iteration ran (gba.wl_passable), and the loop must be one
-  ## that cannot see the handler. So the loop read no IO in the iteration
-  ## its verdict closed (each IO read also stamps the bus's access window,
-  ## catch_up_access, which a skip would leave older than running it does),
-  ## and waited on no renderer-contended memory (that wait moves with the
-  ## dot); no access window is open and no interrupt pending. Output
+  ## that cannot see the handler. So the only IO the loop read in the
+  ## iteration its verdict closed is DISPSTAT / VCOUNT, which only the
+  ## H-blank flag and the line's end change, or the keypad, which changes
+  ## between frames (the skip moves the stamps each IO read leaves on the
+  ## bus with the time it skips); it waited on no renderer-contended memory
+  ## (that wait moves with the dot); no access window is open and no
+  ## interrupt pending. Output
   ## samples book only their next sample, 512 cycles on; anything else
   ## needs a period short enough that what its handler books lands past
   ## `land` (WL_CROSS_PERIOD_MAX).
-  if not cpu.wl_cross_events or cpu.wl_reads_io or cpu.wl_contended or
-     cpu.wl_period >= APU_SAMPLE_PERIOD or cpu.irq_line or
+  if not cpu.wl_cross_events or (cpu.wl_reads_io and IO_OTHER) != 0 or
+     cpu.wl_contended or cpu.wl_period >= APU_SAMPLE_PERIOD or cpu.irq_line or
      (cpu.gba.bus.sync_bits and not SB_SWAP) != 0:
     return false
+  let reads_status = (cpu.wl_reads_io and IO_PPU_STATUS) != 0
   for kind in cpu.gba.scheduler.due_before(land):
     if kind != etAPUSample and
-       (cpu.wl_period > WL_CROSS_PERIOD_MAX or not cpu.gba.wl_passable(kind)):
+       (cpu.wl_period > WL_CROSS_PERIOD_MAX or not cpu.gba.wl_passable(kind) or
+        (reads_status and kind in {etPPUSetHBlankFlag, etPPUEndHBlank})):
       return false
   true
 
@@ -829,10 +833,20 @@ proc waitloop_skip(cpu: CPU; remaining: int) {.noinline.} =
     at = land
     s.cycles = at
   let adv = at - boundary
+  when defined(wltrace):
+    echo "SKIP loop=", toHex(cpu.wl_addr, 8), " from=", boundary, " to=", at, " per=", period,
+         " io=", cpu.wl_reads_io
   cpu.wl_bound = int64(at)   # the loop starts there, in the same state
   if adv > 0:
     cpu.gba.bus.rom_free_since += adv
     cpu.wl_time += int64(adv)
+    if cpu.wl_reads_io != 0:
+      # Each iteration's IO load stamped where it ran (load_sync,
+      # catch_up_access); the skipped ones would have moved the stamps on
+      bus.access_start += adv
+      bus.access_end += adv
+      bus.load_start += adv
+      bus.load_end += adv
   if s.cycles == s.next_event: s.call_current()
 
 proc hle_halt_return*(cpu: CPU) =

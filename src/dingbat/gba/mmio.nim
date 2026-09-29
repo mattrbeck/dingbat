@@ -11,7 +11,10 @@ when defined(biosdrvtrace):
 proc `[]`*(mmio: MMIO; address: uint32): uint8 =
   let io_addr = 0xFFFFFF'u32 and address
   when WL_QUIET_EVENTS: mmio.gba.wl_unsafe = true
-  mmio.gba.bus.io_read = true
+  mmio.gba.bus.io_read = mmio.gba.bus.io_read or
+    (if io_addr in 0x004'u32 .. 0x007'u32: IO_PPU_STATUS
+     elif io_addr in 0x130'u32 .. 0x133'u32: IO_KEYPAD
+     else: IO_OTHER)
   when defined(biosdrvtrace):
     if bdIoReadHook != nil: bdIoReadHook(address)
   case io_addr
