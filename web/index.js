@@ -710,9 +710,10 @@ const migrateRecentFormat = async () => {
   await dbPut("recent", meta);
 };
 
-// Sweep auto-resume snapshots whose game is neither stored nor in the
-// library. "stateauto:" only: the one per-game record the app regenerates
-// itself; user-authored records (cheats) are left alone even when orphaned.
+// Sweep auto-resume snapshots (and their pictures) whose game is neither
+// stored nor in the library. The session records only: the one per-game
+// pair the app regenerates itself; user-authored records (cheats) are left
+// alone even when orphaned.
 const sweepOrphanedAutoStates = async () => {
   let keys = await dbKeys();
   let known = new Set();
@@ -721,8 +722,9 @@ const sweepOrphanedAutoStates = async () => {
   }
   for (let r of await getRecentMeta()) if (r?.name) known.add(r.name);
   for (let k of keys) {
-    if (typeof k !== "string" || !k.startsWith("stateauto:")) continue;
-    if (!known.has(k.slice("stateauto:".length))) await dbDelete(k);
+    if (typeof k !== "string") continue;
+    const prefix = ["stateauto:", "sessionpic:"].find((p) => k.startsWith(p));
+    if (prefix && !known.has(k.slice(prefix.length))) await dbDelete(k);
   }
 };
 
@@ -1542,7 +1544,8 @@ const isRomLoaded = (name) =>
 //            next time the game runs, and Remove from device keeps it)
 //   saves    battery saves (P1 + 2P partner) and the nine state slots with
 //            their meta; the only group Drive mirrors besides the ROM
-//   session  the auto-resume snapshot; regenerated, never synced
+//   session  the auto-resume snapshot and its picture; regenerated, never
+//            synced
 //   prefs    the cheat list; never synced
 //   kept     a save from before the game was deleted and loaded again
 //            (keptSaveKey), mirrored; a save reset leaves it, being a way
@@ -1556,7 +1559,7 @@ const perGameKeys = (name) => {
   return {
     bytes: [romKey(name), artKey(name), frameKey(name)],
     saves,
-    session: [autoStateKey(name)],
+    session: [autoStateKey(name), sessionPicKey(name)],
     prefs: [CHEATS_KEY(name)],
     kept: [keptSaveKey(name)],
   };
@@ -5701,14 +5704,20 @@ const frameBlobFromFb = (heap, w, h) => new Promise((resolve) => {
 // through one chain, so a forced capture landing during the tick's encode
 // still stores last (the tick's picture is the older one).
 let frameStoreChain = Promise.resolve();
+// The screen as it is now, copied out of the wasm heap; null with no core.
+const copyFramebuffer = () => {
+  if (typeof Module === "undefined" || !Module._wasm_fb_ptr) return null;
+  const ptr = Module._wasm_fb_ptr();
+  if (!ptr) return null;
+  const [w, h] = gameRes();
+  return { heap: new Uint8Array(Module.memory.buffer, ptr, w * h * 4).slice(), w, h };
+};
 const storeLastFrame = ({ force = false } = {}) => {
   if (!currentRomName || !currentOriginalName) return Promise.resolve();
   if (linkMode || rollbackMode || netActive()) return Promise.resolve();
-  if (typeof Module === "undefined" || !Module._wasm_fb_ptr) return Promise.resolve();
-  const ptr = Module._wasm_fb_ptr();
-  if (!ptr) return Promise.resolve();
-  const [w, h] = gameRes();
-  const heap = new Uint8Array(Module.memory.buffer, ptr, w * h * 4).slice();
+  const fb = copyFramebuffer();
+  if (!fb) return Promise.resolve();
+  const { heap, w, h } = fb;
   const sig = framebufferSig(heap);
   if (!force && sig === lastFrameSig) return Promise.resolve();
   lastFrameSig = sig;
@@ -5851,9 +5860,16 @@ const launchRom = async (name, { resume = false, fresh = false, flyFrom = null }
   }
   let session = resume ? await resumeSessionFor(name) : null;
   if (gen !== loadGen) return;
-  // Measured now, while the picture is still on screen: the flight lands
-  // intact only when it is the frame the session goes back to.
-  if (flyFrom) armFlight(name, flyFrom, !session);
+  // The flight lands intact only on the frame the session goes back to: the
+  // hero, when it is already showing it, else the session's own picture,
+  // which the flying one turns into on the way. With neither it goes dark.
+  // Measured now, while the picture is still on screen.
+  if (flyFrom) {
+    const shown = flyFrom === homePausedShot && heroShowsSession;
+    const land = session && !shown ? await sessionPicFor(name, session) : null;
+    if (gen !== loadGen) return;
+    armFlight(name, flyFrom, !(session && (shown || land)), land);
+  }
   await touchRecent(name);
   if (gen !== loadGen) return;
   let ext = name.substring(name.lastIndexOf(".")).toLowerCase();
@@ -7109,6 +7125,12 @@ const loadFromSlot = async (slot) => {
 // it was taken with: saveSig is the .sav's signature at capture, and a save
 // written since (in game, or pulled from Drive) retires the snapshot.
 const autoStateKey = (name) => "stateauto:" + name;
+// The snapshot's own picture, { ts, blob }: the screen at the moment it
+// was taken, stamped with its ts. The library's picture (frameKey) is not
+// it - another device's, a later tick's, one the closing page never
+// finished - so what a resume flies and lands on is this, and only while
+// its ts is the snapshot's.
+const sessionPicKey = (name) => "sessionpic:" + name;
 
 const sigOfSave = (data) => (data && data.length ? saveSignature(data) : null);
 
@@ -7117,9 +7139,20 @@ const persistAutoState = () => {
   if (linkMode || rollbackMode || netActive()) return; // frame-synced modes
   const bytes = captureStateBytes();
   if (!bytes) return;
+  const name = currentOriginalName;
+  const ts = Date.now();
+  const fb = copyFramebuffer();
   // liveSaveSig flushes first: the signature is the battery this state carries.
-  return dbPut(autoStateKey(currentOriginalName),
-               { bytes, ts: Date.now(), saveSig: liveSaveSig() }).catch(() => {});
+  // The snapshot is written at once and its picture after the encode: a
+  // closing page may cut the encode short, which leaves the older picture
+  // and its older ts, so it is not taken for this one.
+  const put = dbPut(autoStateKey(name), { bytes, ts, saveSig: liveSaveSig() }).catch(() => {});
+  if (fb) {
+    frameBlobFromFb(fb.heap, fb.w, fb.h)
+      .then((blob) => blob && dbPut(sessionPicKey(name), { ts, blob }))
+      .catch(() => {});
+  }
+  return put;
 };
 
 // The loaded game's battery as it is now: its FS .sav, which the core writes
@@ -7147,7 +7180,17 @@ const resumeSessionFor = async (name) => {
   try { auto = await dbGet(autoStateKey(name)); } catch {}
   if (!auto?.bytes) return null;
   if (!(await autoStateMatchesSave(name, auto))) return null;
-  return { bytes: auto.bytes, saveSig: auto.saveSig };
+  return { bytes: auto.bytes, saveSig: auto.saveSig, ts: auto.ts };
+};
+
+// The session's picture, decoded, if it is this session's (see
+// sessionPicKey); null otherwise, or where nothing can decode it.
+const sessionPicFor = async (name, session) => {
+  if (!session || typeof createImageBitmap !== "function") return null;
+  let rec = null;
+  try { rec = await dbGet(sessionPicKey(name)); } catch {}
+  if (!rec?.blob || rec.ts !== session.ts) return null;
+  try { return await createImageBitmap(rec.blob); } catch { return null; }
 };
 
 const fmtAgo = (ts) => {
@@ -11267,8 +11310,11 @@ const homePausedPlaceholder = document.getElementById("home-paused-placeholder")
 let heroSession = false;
 let heroFile = { driveOnly: false, missing: false };
 // Which game's picture the canvas holds, so a close - the same game, the
-// same frame - does not redraw it from the stored JPEG.
+// same frame - does not redraw it from the stored JPEG; and whether that
+// picture is the moment its session goes back to (the paused screen, or
+// the session's own picture), which a Resume can fly intact.
 let heroDrawnFor = null;
+let heroShowsSession = false;
 
 // The blurred glow behind the frame is the same picture.
 const drawHeroGlow = () => {
@@ -11318,27 +11364,34 @@ const updatePausedCard = () => {
   homePausedPlaceholder.hidden = true;
   homePausedCard.classList.remove("no-picture");
   heroDrawnFor = currentOriginalName;
+  heroShowsSession = true; // closing snapshots this very screen
   setHeroMode("paused", currentOriginalName);
 };
 
-// The last game played, with nothing loaded: its stored last screen (else
-// its box art, else its system chip standing in, as on its tile), and what
-// the hero can do with it. Renders are numbered so a slower one cannot land
-// over a newer one.
+// The last game played, with nothing loaded: the moment its session goes
+// back to, where it has one with its picture; else its stored last screen
+// (else its box art, else its system chip standing in, as on its tile);
+// and what the hero can do with it. Renders are numbered so a slower one
+// cannot land over a newer one.
 let heroGen = 0;
 const renderClosedHero = async (name, file, keys) => {
   const gen = ++heroGen;
   const local = !file.driveOnly;
-  const session = local && !!(await resumeSessionFor(name));
+  const session = local ? await resumeSessionFor(name) : null;
   const redraw = heroDrawnFor !== name;
-  let picture = null;
-  if (redraw) {
-    picture = keys.includes(frameKey(name)) ? await getRomFrame(name).catch(() => null) : null;
-    if (!picture) picture = await getRomArt(name).catch(() => null);
-  }
   let bitmap = null;
-  if (picture && typeof createImageBitmap === "function") {
-    try { bitmap = await createImageBitmap(picture); } catch {}
+  let ofSession = false;
+  if (redraw) {
+    bitmap = await sessionPicFor(name, session);
+    ofSession = !!bitmap;
+    let picture = null;
+    if (!bitmap) {
+      picture = keys.includes(frameKey(name)) ? await getRomFrame(name).catch(() => null) : null;
+      if (!picture) picture = await getRomArt(name).catch(() => null);
+    }
+    if (picture && typeof createImageBitmap === "function") {
+      try { bitmap = await createImageBitmap(picture); } catch {}
+    }
   }
   if (gen !== heroGen || currentRomName || loadingName) return;
   if (redraw) {
@@ -11359,10 +11412,11 @@ const renderClosedHero = async (name, file, keys) => {
     homePausedCard.dataset.system = systemOf(name);
     drawHeroGlow();
     heroDrawnFor = name;
+    heroShowsSession = ofSession;
   }
   // A game closed in place dims to the closed look by the canvas's own
   // filter transition.
-  heroSession = session;
+  heroSession = !!session;
   heroFile = file;
   setHeroMode("closed", name);
 };
@@ -11437,7 +11491,7 @@ const flierContent = (src) => {
   return /** @type {Element} */ (src.cloneNode?.(true) ?? document.createElement("div"));
 };
 
-const flyPicture = (content, from, to, { dark = false, radius = 0 } = {}) =>
+const flyPicture = (content, from, to, { dark = false, land = null, radius = 0 } = {}) =>
   new Promise((resolve) => {
     if (!canFly() || !from?.width || !to?.width) { resolve(false); return; }
     const el = document.createElement("div");
@@ -11448,6 +11502,17 @@ const flyPicture = (content, from, to, { dark = false, radius = 0 } = {}) =>
     el.style.height = to.height + "px";
     el.style.borderRadius = radius + "px";
     el.appendChild(content);
+    // The picture it lands as, where that is not the one it left as: laid
+    // over it and faded in over the middle of the flight.
+    let landing = null;
+    if (land) {
+      landing = document.createElement("canvas");
+      landing.className = "home-flier-land";
+      landing.width = land.width;
+      landing.height = land.height;
+      landing.getContext("2d")?.drawImage(land, 0, 0);
+      el.appendChild(landing);
+    }
     let shade = null;
     if (dark) {
       shade = document.createElement("div");
@@ -11466,6 +11531,10 @@ const flyPicture = (content, from, to, { dark = false, radius = 0 } = {}) =>
     // would remap them); its tail agrees with the stylesheet (opacity 1).
     if (shade) {
       shade.animate([{ opacity: 0 }, { opacity: 0, offset: 0.15 }, { opacity: 1, offset: 0.8 }, { opacity: 1 }],
+        { duration: FLIGHT_MS, easing: "linear", fill: "backwards" }).id = FLIGHT_ID;
+    }
+    if (landing) {
+      landing.animate([{ opacity: 0 }, { opacity: 0, offset: 0.1 }, { opacity: 1, offset: 0.6 }, { opacity: 1 }],
         { duration: FLIGHT_MS, easing: "linear", fill: "backwards" }).id = FLIGHT_ID;
     }
     const done = () => { el.remove(); resolve(true); };
@@ -11538,15 +11607,15 @@ const resumeFromHero = () => {
 
 // A launch from the home screen (the closed hero, a tile): armed when the
 // launch knows whether it resumes, flown once the new game is on screen.
-/** @type {{ name: string, from: DOMRect, content: Element, dark: boolean, at: number } | null} */
+/** @type {{ name: string, from: DOMRect, content: Element, dark: boolean, land: ImageBitmap | null, at: number } | null} */
 let pendingFlight = null;
-const armFlight = (name, fromEl, dark) => {
+const armFlight = (name, fromEl, dark, land = null) => {
   pendingFlight = null;
   if (!canFly() || !fromEl) return;
   const from = fromEl.getBoundingClientRect();
   if (!from.width) return;
   const src = fromEl === homePausedShot ? homePausedCanvas : fromEl;
-  pendingFlight = { name, from, content: flierContent(src), dark, at: Date.now() };
+  pendingFlight = { name, from, content: flierContent(src), dark, land, at: Date.now() };
 };
 // From loadRom, the moment the game is on screen: hold it, give the layout a
 // frame to size the screen, then fly onto it.
@@ -11561,7 +11630,7 @@ const takePendingFlight = () => {
   requestAnimationFrame(() => {
     if (f.name !== currentOriginalName) { clearTimeout(safety); releaseFlight(); return; }
     const to = canvasEl.getBoundingClientRect();
-    flyPicture(f.content, f.from, to, { dark: f.dark }).then((flew) => {
+    flyPicture(f.content, f.from, to, { dark: f.dark, land: f.land }).then((flew) => {
       clearTimeout(safety);
       releaseFlight();
       if (flew && f.dark) powerOn(canvasEl.getBoundingClientRect());

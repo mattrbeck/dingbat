@@ -26,6 +26,7 @@ const perGameKeys = (n) => [
   "save:" + n,                // battery save
   "save:" + n + "-p2",        // the 2P link partner's battery save
   "stateauto:" + n,           // auto-resume snapshot ("Resume" toast)
+  "sessionpic:" + n,          // the snapshot's own picture, for its flight
   "cheats:" + n,              // this game's cheat list
   "oldsave:" + n,             // a save kept from before the game was deleted
   // Nine save-state slots; slot 0 is the legacy un-suffixed key pair.
@@ -37,7 +38,8 @@ const perGameKeys = (n) => [
 // The keys Drive mirrors (what parseDriveFileName recognises).
 const syncableKeys = (n) =>
   perGameKeys(n).filter((k) =>
-    !k.startsWith("art:") && !k.startsWith("stateauto:") && !k.startsWith("cheats:"));
+    !k.startsWith("art:") && !k.startsWith("stateauto:") && !k.startsWith("sessionpic:") &&
+    !k.startsWith("cheats:"));
 // ...of which the save data: everything mirrored but the ROM, its picture
 // and a kept save (a way back, which a save reset leaves).
 const saveKeys = (n) =>
@@ -49,6 +51,7 @@ const seedValue = (key, name) => {
   if (key.startsWith("rom:")) return { name, data: u8(1, 2, 3, 4, 5, 6, 7, 8) };
   if (key.startsWith("statemeta:")) return { thumb: "data:image/png;base64,AA==", ts: 1000 };
   if (key.startsWith("stateauto:")) return { bytes: u8(5, 5, 5, 5), ts: 1000 };
+  if (key.startsWith("sessionpic:")) return { ts: 1000, blob: u8(9, 9) };
   if (key.startsWith("cheats:")) return "[x] Infinite HP\n01ABCD01\n";
   // Deleted just now: within its 30 days, so no pull expires it.
   if (key.startsWith("oldsave:")) return { data: u8(6, 6), at: 900, del: Date.now(), kept: 900, why: "deleted" };
@@ -118,7 +121,8 @@ test("index.js's perGameKeys is exactly the per-game inventory this file pins", 
 
   const groups = app.runIn("perGameKeys('A.gba')");
   eq(sorted(groups.bytes), ["art:A.gba", "frame:A.gba", "rom:A.gba"]);
-  eq(groups.session, ["stateauto:A.gba"], "the resume snapshot is its own group");
+  eq(groups.session, ["stateauto:A.gba", "sessionpic:A.gba"],
+    "the resume snapshot and its picture are their own group");
   eq(groups.prefs, ["cheats:A.gba"]);
   eq(groups.kept, ["oldsave:A.gba"], "a kept save is its own group");
   eq(sorted(groups.saves), sorted(saveKeys("A.gba")));
@@ -270,7 +274,7 @@ test("Remove from device frees the ROM-shaped data and keeps every save", async 
   await settle();
 
   // The picture stays: it is on Drive, and the Drive-only tile keeps its face.
-  const freed = ["rom:A.gba", "art:A.gba", "stateauto:A.gba"];
+  const freed = ["rom:A.gba", "art:A.gba", "stateauto:A.gba", "sessionpic:A.gba"];
   const kept = perGameKeys("A.gba").filter((k) => !freed.includes(k));
   eq(keysLeft(app),
     sorted([...GLOBAL_KEYS, ...kept, ...perGameKeys("B.gb")]),

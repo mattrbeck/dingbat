@@ -2801,6 +2801,12 @@ body.lib-has-games #home-start {
   aspect-ratio: auto;
 }
 
+/* The session's own picture, over the one that left, where they differ. */
+.home-flier > .home-flier-land {
+  position: absolute;
+  inset: 0;
+}
+
 /* Where a picture is not the frame about to be shown, it goes to black on
    the way (the tail of its animation is this opacity). */
 .home-flier-shade {

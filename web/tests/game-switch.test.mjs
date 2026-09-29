@@ -908,6 +908,7 @@ test("set to From save, a tile's tap boots from the save and offers the session"
 // runs - until the picture lands on it, then play goes on.
 test("a launch from the home screen holds the game until its picture lands", async () => {
   const app = await closedWithSession();
+  app.runIn("heroShowsSession = true"); // the paused screen, closed in place
   app.runIn("globalThis.requestAnimationFrame = (f) => { f(0); return 0; }");
   app.document.getElementById("home-paused-shot").setBox(10, 10, 384, 256);
   app.runIn("canvasEl.setBox(0, 56, 960, 640)");
@@ -923,6 +924,35 @@ test("a launch from the home screen holds the game until its picture lands", asy
   await drain();
   assert.equal(app.runIn("paused"), false, "and play goes on when it lands");
   assert.ok(!app.document.body.classList.contains("home-flying"));
+});
+
+// The picture only lands intact when it is the moment the session goes
+// back to. The hero showing some other picture (the library's, which a
+// tick, another device or an unfinished encode may have left) and no
+// picture of the session's own to turn into on the way: it goes dark.
+test("a Resume whose picture is not the session's moment goes dark", async () => {
+  const app = await closedWithSession();
+  app.runIn("heroShowsSession = false");
+  app.runIn("globalThis.requestAnimationFrame = (f) => { f(0); return 0; }");
+  app.document.getElementById("home-paused-shot").setBox(10, 10, 384, 256);
+  app.runIn("canvasEl.setBox(0, 56, 960, 640)");
+  app.runIn(`launchRom("A.gba", { resume: true, flyFrom: document.getElementById("home-paused-shot") })`);
+  await drain();
+  const flier = app.document.body.children.find((c) => c.className === "home-flier");
+  assert.ok(flier);
+  assert.ok(flier.children.some((c) => c.className === "home-flier-shade"), "dark on the way");
+});
+
+// A session's picture is its own only while its ts is the session's: an
+// older one (the encode for this snapshot never finished) is not used.
+test("a session picture from another snapshot is not the session's", async () => {
+  const app = await closedWithSession();
+  app.sandbox.createImageBitmap = async (b) => ({ width: 240, height: 160, from: b });
+  const ts = app.idb.get("stateauto:A.gba").ts;
+  app.idb.set("sessionpic:A.gba", { ts: ts - 1, blob: { stale: true } });
+  assert.equal(await app.runIn(`sessionPicFor("A.gba", { ts: ${ts} })`), null);
+  app.idb.set("sessionpic:A.gba", { ts, blob: { fresh: true } });
+  assert.deepEqual((await app.runIn(`sessionPicFor("A.gba", { ts: ${ts} })`)).from, { fresh: true });
 });
 
 test("Restart's flight goes dark on the way", async () => {
