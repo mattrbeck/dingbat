@@ -2512,6 +2512,18 @@ body.lib-has-games #home-start {
   opacity: 0.14;
 }
 
+/* On a light page a blurred picture has little light to add, and the frame
+   covers most of it: the colour carries it instead - more saturated, and
+   stronger, the closed game's most of all. */
+:root[data-theme="light"] #home-backdrop-canvas {
+  filter: blur(36px) saturate(2.6);
+  opacity: 0.7;
+}
+
+:root[data-theme="light"] #home-paused[data-mode="closed"] #home-backdrop-canvas {
+  opacity: 0.42;
+}
+
 #home-paused-shot {
   position: relative;
   z-index: 1;
