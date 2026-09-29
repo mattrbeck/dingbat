@@ -3821,6 +3821,8 @@ const pullSyncInner = async ({ silent = true } = {}) => {
   let queuedMissing = false;
   try {
     let remote = live(await driveListMap());
+    // Not the library's business: a setting riding the same pull.
+    live(await syncSaveHook(remote, live));
     let lib = mergeLibrary(live(await readDriveLibrary(remote)), live(await localLibrary()));
 
     // Remote renames before the tombstone pass, so anything still under an
@@ -5470,6 +5472,118 @@ const loadSystemSettings = async () => {
   applySystemSettings();
 };
 
+// --- Save webhook (Settings > General > Advanced) ---
+// Every in-game save, as it is written, is also POSTed to a URL of the
+// player's: multipart form data, fields "save" (the file), "game", "player"
+// and "savedAt". Form data keeps it a CORS-simple request, sent no-cors, so
+// it lands whether or not the receiver answers with CORS headers; the answer
+// is never read, and only a network failure is seen.
+// Synced across a Drive account's devices in its own Drive file (not the
+// library, which older builds rewrite with only the fields they know; they
+// skip a file they cannot name, parseDriveFileName): { url, ts }, the newest
+// ts wins (syncSaveHook). `dirty` = changed here and not yet on Drive.
+const SAVE_HOOK_KEY = "save-hook";
+const SAVE_HOOK_FILE = "save-hook";
+let saveHook = { url: "", ts: 0, dirty: false };
+const saveHookInput = /** @type {HTMLInputElement} */ (document.getElementById("save-hook-url"));
+const saveHookStatus = document.getElementById("save-hook-status");
+
+const setSaveHookStatus = (text) => {
+  if (saveHookStatus) saveHookStatus.textContent = text;
+};
+
+// "" or an absolute http(s) URL; null for anything else.
+const normalizeSaveHookUrl = (s) => {
+  s = String(s || "").trim();
+  if (!s) return "";
+  try {
+    let u = new URL(s);
+    return u.protocol === "http:" || u.protocol === "https:" ? u.href : null;
+  } catch { return null; }
+};
+
+const adoptSaveHook = async (rec) => {
+  let changed = rec.url !== saveHook.url;
+  saveHook = { url: rec.url, ts: rec.ts, dirty: !!rec.dirty };
+  if (db) await dbPut(SAVE_HOOK_KEY, saveHook);
+  if (saveHookInput && document.activeElement !== saveHookInput) saveHookInput.value = saveHook.url;
+  if (changed) setSaveHookStatus("");
+};
+
+const loadSaveHook = async () => {
+  let s = await dbGet(SAVE_HOOK_KEY);
+  if (s && typeof s === "object") {
+    let url = normalizeSaveHookUrl(s.url);
+    saveHook = { url: url || "", ts: Number(s.ts) || 0, dirty: !!s.dirty };
+  }
+  if (saveHookInput) saveHookInput.value = saveHook.url;
+};
+
+// A change made here: kept, stamped, and sent to Drive at once when signed
+// in (an enrolled device that is signed out sends it at its next pull).
+const setSaveHookUrl = async (url) => {
+  if (url === saveHook.url) return;
+  await adoptSaveHook({ url, ts: Date.now(), dirty: true });
+  if (syncActive()) pullSync();
+};
+
+if (saveHookInput) saveHookInput.addEventListener("change", async () => {
+  let url = normalizeSaveHookUrl(saveHookInput.value);
+  if (url === null) {
+    setSaveHookStatus("Not a web address — it must start with http:// or https://");
+    return;
+  }
+  saveHookInput.value = url;
+  await setSaveHookUrl(url);
+  setSaveHookStatus(url ? "Saves will be sent here" : "");
+});
+
+// The Drive side, inside a pull (pullSyncInner): Drive's copy when it changed
+// since last seen and is newer than this device's, then this device's when
+// it has a change Drive has not had.
+const syncSaveHook = async (remote, live) => {
+  let f = remote.get(SAVE_HOOK_FILE);
+  if (f && syncState.rmt[SAVE_HOOK_FILE] !== f.modifiedTime) {
+    let bytes = live(await driveDownload(f.id));
+    let o = null;
+    try { o = JSON.parse(new TextDecoder().decode(bytes)); } catch {}
+    syncState.rmt[SAVE_HOOK_FILE] = f.modifiedTime;
+    let ts = Number(o?.ts) || 0;
+    let url = normalizeSaveHookUrl(o?.url);
+    if (url !== null && ts > saveHook.ts) live(await adoptSaveHook({ url, ts, dirty: false }));
+  }
+  if (!saveHook.dirty) return;
+  let sent = { url: saveHook.url, ts: saveHook.ts };
+  let res = live(await driveUploadFile(SAVE_HOOK_FILE,
+    new TextEncoder().encode(JSON.stringify(sent)), f?.id));
+  let meta = live(await res?.json?.().catch(() => null));
+  if (meta?.modifiedTime) syncState.rmt[SAVE_HOOK_FILE] = meta.modifiedTime;
+  // Changed again while on the wire: still dirty, sent next time.
+  if (saveHook.ts === sent.ts) await adoptSaveHook({ ...sent, dirty: false });
+};
+
+// Fire and forget. `player` is 0, or 1 for link mode's second save.
+const postSaveToHook = (game, player, data) => {
+  let url = saveHook.url;
+  if (!url || !data || !data.length) return;
+  let form = new FormData();
+  form.append("game", game);
+  form.append("player", String(player + 1));
+  form.append("savedAt", new Date().toISOString());
+  form.append("save", new Blob([new Uint8Array(data)], { type: "application/octet-stream" }),
+              stripExt(game) + (player ? "-p2" : "") + ".sav");
+  // keepalive lets a save written as the page is hidden still leave, but
+  // keepalive bodies share a 64 KiB budget, so only then.
+  let keepalive = document.visibilityState === "hidden" && data.length <= 48 * 1024;
+  fetch(url, { method: "POST", mode: "no-cors", body: form, keepalive })
+    .then(() => setSaveHookStatus("Last sent " + new Date().toLocaleTimeString() +
+                                  " · " + displayName(game)))
+    .catch((e) => {
+      console.warn("Save webhook POST failed:", e);
+      setSaveHookStatus("Couldn't reach it at " + new Date().toLocaleTimeString());
+    });
+};
+
 // --- Recent ROMs ---
 //   "recent"      metadata index: [{ name, ts }], most-recent-first, capped
 //   "rom:<name>"  { name, data: Uint8Array }, fetched only at launch/backup
@@ -6736,6 +6850,7 @@ const persistSave = async (romName, originalName) => {
       lastSaveSigKey = originalName;
       requestPersistentStorage();
       markUpload("save:" + originalName); // truly-dirty save -> Drive soon
+      postSaveToHook(originalName, 0, data);
 
     }
   } catch {}
@@ -9371,6 +9486,10 @@ const resetAllSettings = async () => {
   applySystemSettings();
   syncSystemSettingsUI();
 
+  // Synced: turning it off here turns it off on the account's other devices.
+  await setSaveHookUrl("");
+  setSaveHookStatus("");
+
   try { localStorage.removeItem(THEME_KEY); } catch (e) {}
   applyTheme("amber");
 };
@@ -11027,7 +11146,10 @@ window.leaveRollbackMode = () => {
   updateCanvasScaling();
 };
 
-// Persist both players' battery saves.
+// Persist both players' battery saves. Every call writes both; only a
+// changed one goes to the save webhook (linkSaveSigs, seeded at link start
+// with the saves the cores boot on).
+const linkSaveSigs = [null, null];
 const persistLinkSaves = async () => {
   if (!linkRomEntry) return;
   for (let p = 0; p < 2; p++) {
@@ -11035,6 +11157,11 @@ const persistLinkSaves = async () => {
       let data = FS.readFile(LINK_FS_SAVS[p]);
       if (data && data.length > 0) {
         await dbPut(linkSaveKey(linkRomEntry.name, p), new Uint8Array(data));
+        let sig = saveSignature(data);
+        if (sig !== linkSaveSigs[p]) {
+          linkSaveSigs[p] = sig;
+          postSaveToHook(linkRomEntry.name, p, data);
+        }
       }
     } catch {}
   }
@@ -11076,6 +11203,9 @@ const launchLinkRom = async (rom) => {
   if (!s2 && s1) s2 = s1;
   if (s1) writeToFS(LINK_FS_SAVS[0], s1);
   if (s2) writeToFS(LINK_FS_SAVS[1], s2);
+  // What the cores boot on is not news to the save webhook.
+  linkSaveSigs[0] = s1 ? saveSignature(s1) : null;
+  linkSaveSigs[1] = s2 ? saveSignature(s2) : null;
   setFastForward(false);
   setSpeed2x(false);
   setRewindHeld(false);
@@ -13039,6 +13169,7 @@ const initStorage = async () => {
   await loadAudioSettings();
   await loadColorCorrect();
   await loadSystemSettings();
+  await loadSaveHook();
   await loadVideoSettings();
   await loadGbPalette();
   // Must run before anything can print: storePrint writes the whole array

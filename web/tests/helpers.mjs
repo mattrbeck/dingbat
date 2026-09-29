@@ -483,7 +483,11 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
       },
       width: 390, height: 844,
     },
-    URL: { createObjectURL: () => "blob:fake", revokeObjectURL() {} },
+    // Node's URL (the app parses with it), minus real blob URLs.
+    URL: class extends URL {
+      static createObjectURL() { return "blob:fake"; }
+      static revokeObjectURL() {}
+    },
     ResizeObserver: class { observe() {} unobserve() {} disconnect() {} },
     // Observed at module scope; inert here.
     MutationObserver: class { observe() {} disconnect() {} takeRecords() { return []; } },
@@ -589,6 +593,8 @@ export const loadApp = async ({ localStorageSeed = {}, confirmResult = true,
     deleteGameEverywhere, resetGameSaves, queueSaveDataDeletes,
     get syncState() { return syncState; },
     set syncState(v) { syncState = v; },
+    setSaveHookUrl, loadSaveHook, SAVE_HOOK_FILE,
+    get saveHook() { return saveHook; },
     applyImportedState, applyStateBytes, stateRejectMessage, looksLikeStateFile,
     refreshHomeRecent, handleRomFile, loadRom,
     setRomsSort, sortRoms, applyLibFilter, renderLibChips, libSearchMatch, libFold,

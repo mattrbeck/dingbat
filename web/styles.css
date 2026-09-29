@@ -5059,6 +5059,39 @@ body.debug-2p .home-tile-link {
   margin: 2px 0 0;
 }
 
+/* Save webhook: a URL needs the row's full width, so the field takes a
+   third line under the label and description. 16px keeps iOS from zooming. */
+.settings-pane #save-hook-row > .save-hook-input {
+  grid-area: 3 / 1 / span 1 / span 2;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  color: var(--text);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.settings-pane #save-hook-row > .save-hook-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.settings-pane #save-hook-row > .save-hook-status {
+  grid-area: 4 / 1 / span 1 / span 2;
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.settings-pane #save-hook-row > .save-hook-status:empty {
+  display: none;
+}
+
 /* Hairline between consecutive rows. Sibling selector, not :has(), so it
    also works where :has() does not; a hidden row contributes nothing. */
 .settings-pane .modal-toggle-row + .modal-toggle-row {

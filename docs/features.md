@@ -46,6 +46,11 @@ Signing in turns sync on; signed out, none of it runs.
   "Sync now".
 - Deleting a game writes a tombstone; other devices ask before dropping it (Continue /
   Restore).
+- The save webhook URL (Settings > General > Advanced) rides the pull in its own
+  "save-hook" file, `{ url, ts }`, newest wins. When set, every in-game save the web app
+  writes (solo, and each player's in link mode) is also POSTed there as multipart form
+  data: `save` (the file), `game`, `player`, `savedAt`. It goes no-cors, so the receiver
+  needs no CORS headers, and its response is never read.
 
 Scope is `drive.appdata` (dingbat sees only its own hidden app folder). The OAuth client
 ID ships in source (GIS implicit flow, no secret; gated by the Authorized JavaScript
