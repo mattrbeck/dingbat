@@ -260,18 +260,6 @@
         </svg>
       </button>
 
-      <!-- The account, on the home screen only. Signed out it says Sign in;
-           signed in it is the account's initial with a badge for how sync is
-           doing (a tick, a turning ring, or an amber mark when changes are
-           waiting). Either way it opens #account-pop, which holds Google's
-           own sign-in button, or Sync now and the rest. -->
-      <div id="account-slot" hidden>
-        <button type="button" id="account-btn" title="Sign in" aria-label="Sign in" aria-haspopup="dialog" aria-expanded="false">
-          <span id="account-avatar" aria-hidden="true"></span>
-          <span id="account-badge" aria-hidden="true"></span>
-        </button>
-      </div>
-
       <div id="volume-control">
         <button type="button" class="icon-btn" id="mute-btn" title="Mute" aria-label="Mute">
           <svg class="ico-vol" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9v6h3l5 4V5L8 9zM16 9a3 3 0 0 1 0 6M18.5 7a6 6 0 0 1 0 10"/></svg>
@@ -293,6 +281,19 @@
         <svg class="ico-expand" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
         <svg class="ico-collapse" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>
       </button>
+
+      <!-- The account, on the home screen only, last in the bar, where an
+           account is looked for. Signed out it is a person's outline, labelled
+           Sign in; signed in it is the account's initial with a badge for how
+           sync is doing (a tick, a turning ring, or an amber mark when changes
+           are waiting). Either way it opens #account-pop, which holds Google's
+           own sign-in button, or Sync now and the rest. -->
+      <div id="account-slot" hidden>
+        <button type="button" id="account-btn" title="Sign in" aria-label="Sign in" aria-haspopup="dialog" aria-expanded="false">
+          <span id="account-avatar" aria-hidden="true"></span>
+          <span id="account-badge" aria-hidden="true"></span>
+        </button>
+      </div>
     </header>
 
     <!-- The account menu. Out of the bar, which a phone's landscape layout
