@@ -893,6 +893,18 @@ test("a tile's tap goes back into the session by default, unasked", async () => 
   assert.ok(!offered(app));
 });
 
+test("going home takes the game's offers with it", async () => {
+  const app = await closedWithSession();
+  app.runIn(`applyLibraryOpen("save")`);
+  app.runIn(`openLibraryGame("A.gba")`);
+  await drain(20);
+  app.runIn(`showToast("Photo saved")`); // not about the game's moment
+  assert.ok(app.liveToasts().some((t) => /Last session saved/.test(t)), "offered in game");
+  await goHome(app);
+  assert.ok(!app.liveToasts().some((t) => /Last session saved/.test(t)), "gone on the home screen");
+  assert.ok(app.liveToasts().includes("Photo saved"), "a plain message stays");
+});
+
 test("set to From save, a tile's tap boots from the save and offers the session", async () => {
   const app = await closedWithSession();
   const before = core(app).applied;

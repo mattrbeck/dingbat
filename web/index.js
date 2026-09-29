@@ -6832,8 +6832,10 @@ document.getElementById("load-save").addEventListener("click", () => {
 const TOAST_MAX = 3;
 const TOAST_FADE_MS = 220; // keep in sync with .toast-item.leaving in styles.css
 const toastHost = document.getElementById("toast");
-// Live toasts, newest first: { el, msg, label, timer, gone } records
-// (expandos on the element fail the types/ typecheck).
+// Live toasts, newest first: { el, msg, label, game, timer, gone } records
+// (expandos on the element fail the types/ typecheck). `game`: an offer
+// about the moment in the running game (Resume a session, Undo a load, a
+// rewind or a reset), which the home screen has no business showing.
 let toastItems = [];
 
 const dismissToast = (rec) => {
@@ -6853,7 +6855,7 @@ const armToastTimer = (rec, ms) => {
   rec.timer = setTimeout(() => dismissToast(rec), ms);
 };
 
-// `action` is null for a plain toast, or { label, fn } for a tappable one.
+// `action` is null for a plain toast, or { label, fn, game } for a tappable one.
 const pushToast = (msg, ms, action) => {
   msg = String(msg);
   // A repeated plain message extends in place; a repeated offer is replaced
@@ -6873,7 +6875,8 @@ const pushToast = (msg, ms, action) => {
   span.className = "toast-msg";
   span.textContent = msg;
   item.append(span);
-  const rec = { el: item, msg, label: action ? action.label : null, timer: 0, gone: false };
+  const rec = { el: item, msg, label: action ? action.label : null, game: !!action?.game,
+                timer: 0, gone: false };
 
   if (action) {
     const btn = document.createElement("button");
@@ -6912,8 +6915,13 @@ const pushToast = (msg, ms, action) => {
 const showToast = (msg) => pushToast(msg, 2200, null);
 
 // Toast with a single action; lingers longer than a plain toast.
-const showActionToast = (msg, label, fn, ms = 8000) =>
-  pushToast(msg, ms, { label, fn });
+const showActionToast = (msg, label, fn, ms = 8000, { game = false } = {}) =>
+  pushToast(msg, ms, { label, fn, game });
+
+// Leaving the game for the home screen: its offers go with it.
+const dismissGameToasts = () => {
+  for (const rec of toastItems.slice()) if (rec.game) dismissToast(rec);
+};
 
 const stateKey = (name) => "state:" + name;
 
@@ -7108,7 +7116,7 @@ const loadFromSlot = async (slot) => {
   if (ok && undo) {
     stateUndoBytes = undo;
     stateUndoName = currentOriginalName;
-    showActionToast("State loaded", "Undo", undoStateLoad, 6000);
+    showActionToast("State loaded", "Undo", undoStateLoad, 6000, { game: true });
   } else {
     showToast(ok ? "State loaded" : stateRejectMessage(bytes));
   }
@@ -7224,7 +7232,7 @@ const offerAutoResume = async () => {
       return;
     }
     showToast(applyStateBytes(auto.bytes) ? "Resumed" : stateRejectMessage(auto.bytes));
-  });
+  }, 8000, { game: true });
 };
 
 document.getElementById("save-state").addEventListener("click", async () => {
@@ -7992,7 +8000,7 @@ const rwCommit = () => {
   if (undo) {
     rwUndoBytes = undo;
     rwUndoName = currentOriginalName;
-    showActionToast("Rewound " + cost, "Undo", rwUndoCommit, 8000);
+    showActionToast("Rewound " + cost, "Undo", rwUndoCommit, 8000, { game: true });
   } else {
     showToast("Rewound " + cost);
   }
@@ -9937,7 +9945,7 @@ resetButton.addEventListener("click", async () => {
     showActionToast("Game reset", "Undo", () => {
       if (currentOriginalName !== name) return; // switched games since
       if (applyStateBytes(undo)) showToast("Back to before the reset");
-    });
+    }, 8000, { game: true });
   }
 });
 
@@ -11039,6 +11047,7 @@ const showMainMenu = () => {
     ? canvasEl.getBoundingClientRect() : null;
   stopClipRecording(); // don't keep recording a frozen frame from the menu
   releaseFlight();
+  dismissGameToasts();
   paused = true;
   // The tile behind this menu shows the picture the player just left: the
   // grid renders now and again once the picture is stored.
@@ -11324,7 +11333,27 @@ const drawHeroGlow = () => {
 };
 
 // The words and buttons for a mode. The frame and the name are the callers'.
+// A word or a button that changes under the player's eye (Close giving
+// way to Play as the game closes, Resume to Play) fades in rather than
+// popping. Nothing fills forwards; tagged like the flights.
+const HERO_SWAP_ID = "hero-swap";
+const heroSwapIn = (els) => {
+  if (!canFly()) return;
+  for (const el of els) {
+    el.animate([{ opacity: 0 }, { opacity: 1 }],
+      { duration: 260, easing: "ease-out" }).id = HERO_SWAP_ID;
+  }
+};
+
 const setHeroMode = (mode, name) => {
+  // The same game staying up: what changes is animated.
+  const same = !homePausedCard.hidden && heroName === name;
+  const was = same ? {
+    state: homePausedState.textContent,
+    resume: homePausedResumeLabel.textContent,
+    close: homePausedClose.hidden,
+    restart: homePausedRestart.hidden,
+  } : null;
   heroName = name;
   homePausedCard.dataset.mode = mode;
   const paused = mode === "paused";
@@ -11333,6 +11362,14 @@ const setHeroMode = (mode, name) => {
   homePausedResumeLabel.textContent = resumable ? "Resume" : "Play";
   homePausedClose.hidden = !paused;
   homePausedRestart.hidden = paused || !heroSession;
+  if (was) {
+    heroSwapIn([
+      was.state !== homePausedState.textContent && homePausedState,
+      was.resume !== homePausedResumeLabel.textContent && homePausedResumeLabel,
+      was.close && !homePausedClose.hidden && homePausedClose,
+      was.restart && !homePausedRestart.hidden && homePausedRestart,
+    ].filter(Boolean));
+  }
   const label = (resumable ? "Resume " : "Play ") + displayName(name);
   homePausedShot.title = label;
   homePausedShot.setAttribute("aria-label", label);
