@@ -761,6 +761,15 @@ proc waitloop_skip(cpu: CPU; remaining: int) {.noinline.} =
   if boundary >= s.next_event:
     s.tick(remaining)
     return
+  if (cpu.gba.bus.sync_bits and not SB_SWAP) != 0:
+    # An access window is open (a DMA or FIFO grant, or an interrupt, on its
+    # way): every access of a real iteration stamps where it ends
+    # (catch_up_access, note_waits), and the event the window is for reads
+    # the stamp. Skipped, the stamp would be an older iteration's. B-Legend
+    # Battle B-Daman (J) and Tringo (E) differed from DINGBAT_NO_WAITLOOP=1
+    # there.
+    s.tick(remaining)
+    return
   if cpu.gba.dispatch_count != cpu.wl_dispatch_mark:
     # The verdict came before the branch's refill, which caught the bus up
     # (clear_pipeline) and ran the events that fell inside the branch: after
