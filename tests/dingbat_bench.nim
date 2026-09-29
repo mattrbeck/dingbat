@@ -165,6 +165,10 @@ proc main() =
     let emu = new_gba(bios, rom_path, run_bios = false, use_hle = bios.len == 0)
     emu.test_output = test_out
     emu.post_init()
+    # DINGBAT_BENCH_RTC_EPOCH freezes a cartridge RTC's clock (unix seconds),
+    # so two runs of an RTC game can be compared state for state
+    if getEnv("DINGBAT_BENCH_RTC_EPOCH").len > 0:
+      emu.enable_deterministic_rtc(parseBiggestInt(getEnv("DINGBAT_BENCH_RTC_EPOCH")))
     # DINGBAT_BENCH_STATE loads a .state image before the warmup, to measure
     # a specific in-game scene; it must come from the same ROM.
     let state_path = getEnv("DINGBAT_BENCH_STATE")
