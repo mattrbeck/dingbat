@@ -13465,6 +13465,16 @@ var Module = {
     let tickEnd = 0;        // when the last tick returned
     let ffAimed = 0;        // vsyncs the last fast-forward tick aimed at
     let ffLastTs = 0;
+    // Whether running past a vsync costs one here. Where rAF does not keep
+    // to the display (a late tick is called straight back), aiming only
+    // leaves the reserve idle and the plain 16 ms budget runs more. Every
+    // FF_PROBE_TICKS an aimed tick overruns its vsync on purpose; called back
+    // before the next vsync, the overrun was free. A free tick called back a
+    // vsync after it ended says it no longer is.
+    const FF_PROBE_TICKS = 120;
+    let ffFree = false;
+    let ffProbing = false;
+    let ffProbeIn = 10;
     // Fast-forward diagnostics for the log, every ~5 s of it: what a frame
     // costs here and how the ticks land on the display.
     let ffStat = { since: 0, frames: 0, ticks: 0, emuMs: 0, late: 0 };
@@ -13480,7 +13490,8 @@ var Module = {
       log(`ff: ${(1000 * st.frames / span).toFixed(0)} fps, ` +
         `${(st.emuMs / st.frames).toFixed(2)} ms/frame, ${(st.frames / st.ticks).toFixed(1)} frames/tick, ` +
         `${(span / st.ticks).toFixed(1)} ms/tick (vsync ${ffVsyncMs.toFixed(1)}), ` +
-        `${st.late} late of ${st.ticks}, after ${ffOverMs.toFixed(1)} + ${ffReserveMs.toFixed(1)} ms`);
+        `${st.late} late of ${st.ticks}, after ${ffOverMs.toFixed(1)} + ${ffReserveMs.toFixed(1)} ms, ` +
+        `${ffFree ? "free (16 ms budget)" : "aimed"}`);
       ffStat = { since: timestamp, frames: 0, ticks: 0, emuMs: 0, late: 0 };
     };
 
@@ -13938,17 +13949,39 @@ var Module = {
         // FF_MAX_AUDIO_LEAD play; the rest are dropped, so audio stays
         // realtime-rate.
         const iv = timestamp - ffLastTs;
+        const busy = tickEnd - ffLastTs; // the last tick, from its rAF time
         ffLastTs = timestamp;
-        const late = ffAimed > 0 && iv < 200 && iv > (ffAimed + 0.5) * ffVsyncMs;
-        if (late) ffReserveMs = Math.min(ffReserveMs + 1, 60);
-        else if (ffAimed > 0 && iv < 200) ffReserveMs = Math.max(ffReserveMs - 0.05, 1);
+        let late = ffAimed > 0 && iv < 200 && iv > (ffAimed + 0.5) * ffVsyncMs;
+        if (ffProbing) {
+          ffProbing = false;
+          ffFree = !late && iv < 200;
+          late = false; // that overrun was the probe's own
+          ffProbeIn = FF_PROBE_TICKS;
+        } else if (ffFree) {
+          if (iv < 200 && iv > busy + 0.5 * ffVsyncMs) ffFree = false;
+        } else if (late) {
+          ffReserveMs = Math.min(ffReserveMs + 1, 60);
+        } else if (ffAimed > 0 && iv < 200) {
+          ffReserveMs = Math.max(ffReserveMs - 0.05, 1);
+        }
         if (ffEmuEnd > 0 && tickEnd > ffEmuEnd && iv < 200)
           ffOverMs += (Math.min(tickEnd - ffEmuEnd, 100) - ffOverMs) * 0.2;
         let t = performance.now();
-        const after = ffOverMs + ffReserveMs;
-        ffAimed = Math.min(6, Math.max(1, Math.ceil(
-          (Math.max(0, t - timestamp) + 4 * ffFrameMs + after) / ffVsyncMs)));
-        const deadline = timestamp + ffAimed * ffVsyncMs - after;
+        let deadline;
+        if (ffFree) {
+          ffAimed = 0;
+          deadline = t + 16 + ffFrameMs; // frames start until 16 ms in
+        } else {
+          const after = ffOverMs + ffReserveMs;
+          ffAimed = Math.min(6, Math.max(1, Math.ceil(
+            (Math.max(0, t - timestamp) + 4 * ffFrameMs + after) / ffVsyncMs)));
+          deadline = timestamp + ffAimed * ffVsyncMs - after;
+          if (--ffProbeIn <= 0) {
+            // Frames until the vsync itself: the last ends past it
+            ffProbing = true;
+            deadline = timestamp + ffAimed * ffVsyncMs + ffFrameMs;
+          }
+        }
         const t0 = t;
         let n = 0;
         do {
