@@ -7658,14 +7658,113 @@ body.running.sync-shown #status {
 /* A tile with no file behind it - waiting on Drive, or on the user finding
    it again. Dashed and dimmed either way: still a game, not a game that can
    be started from here. */
+/* The picture and the name dim, not the tile: what the tile says while it
+   downloads (.home-tile-load) sits over them at full strength. */
 .home-tile-cloud .home-tile-launch,
 .home-tile-missing .home-tile-launch {
   border-style: dashed;
-  opacity: 0.72;
 }
-.home-tile-cloud .home-tile-launch:hover,
-.home-tile-missing .home-tile-launch:hover {
-  opacity: 1;
+.home-tile-cloud .home-tile-thumb,
+.home-tile-cloud .home-tile-caption,
+.home-tile-missing .home-tile-thumb,
+.home-tile-missing .home-tile-caption {
+  opacity: 0.72;
+  transition: opacity 0.14s;
+}
+/* Brightening on hover says "this is what you'd open" - with a mouse only.
+   On touch the hover sticks after the tap, and a lit tile read as a game
+   already here while it was still coming down. */
+@media (hover: hover) and (pointer: fine) {
+  .home-tile-cloud:not(.is-loading) .home-tile-launch:hover .home-tile-thumb,
+  .home-tile-cloud:not(.is-loading) .home-tile-launch:hover .home-tile-caption,
+  .home-tile-missing .home-tile-launch:hover .home-tile-thumb,
+  .home-tile-missing .home-tile-launch:hover .home-tile-caption {
+    opacity: 1;
+  }
+}
+
+/* A Drive-only game coming down (index.js paintTileLoad): over the picture,
+   what is happening and how far along, and a bar on its bottom edge. The
+   picture's own box, placed on the button so a picture arriving (which
+   replaces the thumb's children) cannot take it away. */
+.home-tile-load {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 0 8px;
+  box-sizing: border-box;
+  text-align: center;
+  background: rgba(var(--surface-1-rgb), 0.7);
+  pointer-events: none;
+}
+.home-tile-load-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.home-tile-load-sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+.home-tile-load-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(var(--text-rgb), 0.16);
+}
+.home-tile-load-bar[hidden] {
+  display: none;
+}
+.home-tile-load-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s linear;
+}
+.home-tile.is-failed .home-tile-load-label {
+  color: var(--danger);
+}
+.home-tile.is-failed .home-tile-load-bar > span {
+  background: var(--danger);
+}
+/* The one that will open when it lands: the tap, marked. */
+.home-tile.is-opening .home-tile-launch,
+.home-tile.is-opening .home-tile-launch:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.55);
+}
+/* A plain download landed: a check in the ↓'s place, for a moment. */
+.home-tile-done {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  display: flex;
+  padding: 6px;
+  color: var(--live);
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  pointer-events: none;
+}
+.home-tile-done svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 /* Its own tap target (a real button): download-without-launch, over the
    picture's top-right corner. */
@@ -7720,11 +7819,20 @@ body.running.sync-shown #status {
   height: 15px;
   fill: currentColor;
 }
-.home-tile-dl.is-busy {
+/* Busy keeps its chip: without one the spinner vanished into the picture. */
+.home-tile-dl.is-busy,
+.home-tile-dl.is-busy:hover {
   cursor: default;
-  color: var(--text-faint);
-  background: none;
-  border-color: transparent;
+  color: var(--accent);
+  background: rgba(0, 0, 0, 0.55);
+  border-color: rgba(var(--accent-rgb), 0.35);
+}
+.home-tile-dl.is-busy:active {
+  transform: none;
+}
+/* The light theme's accent is dark enough to vanish on the chip. */
+:root[data-theme="light"] .home-tile-dl.is-busy {
+  color: var(--accent-hi);
 }
 .home-tile-dl svg {
   width: 15px;
@@ -8122,6 +8230,11 @@ body.running.sync-shown #status {
      still has to communicate "in progress". */
   .sync-spin {
     animation-duration: 3s;
+  }
+
+  /* A tile's download bar steps with the bytes instead of gliding. */
+  .home-tile-load-bar > span {
+    transition: none;
   }
 
   /* Sliding chrome snaps instead of gliding. Toasts keep their fade but lose

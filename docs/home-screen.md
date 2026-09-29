@@ -60,6 +60,33 @@ Either way, the top bar's reset, or closing the game and choosing Play,
 boots from the save. A file dropped on the page always boots from the save
 and offers the session.
 
+### A game that is only on Drive
+
+Its tile is dashed, its picture and name dimmed, with ↓ in the corner. The
+dimming is on the picture and the name, not the tile, and the hover that
+lifts it is mouse-only: on touch the hover stuck after the tap and the tile
+looked ready while it was still coming down. While it comes down
+(`fetchTileGame`, painted by `paintTileLoad`), the tile says so over the
+picture:
+
+| | Over the picture | Bar | Corner |
+|---|---|---|---|
+| Tapped, not signed in | *Signing in…* / Google Drive | — | spinner |
+| Tapped | *Opening* / 3.1 of 8.0 MB, amber ring | bytes | spinner |
+| Downloaded, player coming | *Starting…* | full | spinner |
+| ↓ or the menu's Download | *Downloading* / bytes, no ring | bytes | spinner |
+| ↓ finished | nothing; a check for 2 s | — | ✓ |
+| Failed | *Couldn't download* / Tap to try again, until the next tap | red | ↓ |
+
+The total is the Drive listing's sizes of the files it fetches, so the bytes
+are real from the first one. A tap elsewhere while one is opening is the
+later tap and wins (`loadGen`): the first tile turns back into *Downloading*
+and gets its check instead of opening. A tap on the picture during a ↓
+download joins it and opens it when it lands; nothing is fetched twice.
+The hero's game has its tile stood down, so when the hero shows a
+Drive-only game its button says it instead: *Signing in…*, *Opening · 38%*,
+*Starting…*, *Try again*.
+
 ## Pictures
 
 - `frame:<game>` is the library's picture: the last screen stored (a slow

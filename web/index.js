@@ -1974,10 +1974,10 @@ const removeFromDeviceAction = async (name) => {
   refreshHomeRecent();
   updateStorageInfo();
 };
-// Download = the inverse (downloadGame). Signs in first when needed.
+// Download = the inverse (downloadGame). Signs in first when needed, with
+// the progress on the game's tile (fetchTileGame).
 const downloadGameAction = async (name) => {
-  if (!(await ensureDriveSignedIn())) return false;
-  let ok = await downloadGame(name);
+  let ok = await fetchTileGame(name);
   if (ok) showToast("Synced to this device");
   refreshHomeRecent();
   updateStorageInfo();
@@ -2583,9 +2583,28 @@ const driveUploadFile = async (name, bytes, existingId, gen = 0, restamp = false
   return driveUpdateContent(await driveCreateEmpty(name, gen), bytes);
 };
 
-const driveDownload = async (fileId) => {
+// `onBytes(n)` hears each chunk as it lands, for a tile's progress bar.
+const driveDownload = async (fileId, onBytes = null) => {
   let res = await driveFetch(GDRIVE_FILES + "/" + fileId + "?alt=media");
-  return new Uint8Array(await res.arrayBuffer());
+  let reader = onBytes && res.body?.getReader?.();
+  if (!reader) {
+    let bytes = new Uint8Array(await res.arrayBuffer());
+    onBytes?.(bytes.length);
+    return bytes;
+  }
+  let parts = [];
+  let len = 0;
+  for (;;) {
+    let { done, value } = await reader.read();
+    if (done) break;
+    parts.push(value);
+    len += value.length;
+    onBytes(value.length);
+  }
+  let out = new Uint8Array(len);
+  let at = 0;
+  for (let p of parts) { out.set(p, at); at += p.length; }
+  return out;
 };
 
 // Drive file name -> { game, kind }; null for anything unknown. `kind` is
@@ -4099,7 +4118,9 @@ const runFullSync = async ({ label } = /** @type {{label?: string}} */ ({})) => 
 };
 
 // --- On-demand download of one Drive-only game ---------------------------
-const downloadGame = async (game) => {
+// `onProgress(got, total)` counts bytes across every file this fetches; the
+// total is from the listing's sizes, so it is known before the first byte.
+const downloadGame = async (game, { onProgress = null } = {}) => {
   // Re-auths for itself (a token can age out between opening the modal and
   // the tap); a never-linked account is refused.
   if (!driveLinked()) { showToast("Sign in to Google Drive first"); return false; }
@@ -4119,18 +4140,28 @@ const downloadGame = async (game) => {
       // aside), and left for the next pull to replace or take down.
       let entry = (await getRecentMeta()).find((e) => e?.name === game);
       let gen = Math.max(genOf(entry), ...files.map(fileGen));
+      const stale = (f) => {
+        let p = parseDriveFileName(f.name);
+        return p && genBound(p.kind) && fileGen(f) < gen;
+      };
+      // An older generation's files are skipped, bar its save.
+      let total = files.reduce((n, f) =>
+        stale(f) && parseDriveFileName(f.name).kind !== "save" ? n : n + (Number(f.size) || 0), 0);
+      let got = 0;
+      const tick = onProgress && ((n) => { got += n; onProgress(got, total); });
+      onProgress?.(0, total);
       for (let f of files) {
         let p = parseDriveFileName(f.name);
-        if (p && genBound(p.kind) && fileGen(f) < gen) {
+        if (stale(f)) {
           if (p.kind === "save") {
             let at = Date.parse(f.modifiedTime || "") || Date.now();
             let t = syncState.tomb.find((x) => x?.name === game);
-            await keepOldSave(game, { data: await driveDownload(f.id), at,
+            await keepOldSave(game, { data: await driveDownload(f.id, tick), at,
                                       del: t?.ts || Date.now(), kept: at, why: "deleted" });
           }
           continue;
         }
-        let bytes = await driveDownload(f.id);
+        let bytes = await driveDownload(f.id, tick);
         await writeSyncBytes(f.name, bytes);
         if (f.name === romKey(game)) await noteRomSize(game, bytes.length);
         syncState.sigs[f.name] = sigOfBytes(bytes);
@@ -6538,13 +6569,189 @@ const openLibraryGame = async (romName, { driveOnly = false, missing = false, fl
   if (currentOriginalName === romName && !linkMode) { resumeGame(); return; }
   if (!driveOnly) { launchRom(romName, { resume, flyFrom }); return; }
   if (missing) { relinkGameAction(romName, { launch: true }); return; }
-  if (syncDownloading.has(romName)) return;
-  // The tap takes the load token now, not when the download (seconds)
-  // is done: a tile tapped meanwhile is the later tap, and wins. The
-  // download itself finishes either way.
-  const gen = nextLoadGen();
-  if (!(await ensureDriveSignedIn())) return;
-  if (await downloadGame(romName) && gen === loadGen) launchRom(romName, { resume, flyFrom });
+  await fetchTileGame(romName, { open: { resume, flyFrom } });
+};
+
+// --- A Drive-only game coming down, on its tile --------------------------
+// The tile says what is happening over its picture: "Signing in…", then
+// "Opening" (tapped to play) or "Downloading" (↓ or the menu) with the bytes
+// and a bar, "Starting…" as the player takes over, a check for a moment
+// after a plain download, and "Couldn't download" until the next tap if it
+// fails. name -> { open, gen, stage, got, total, run }; stage is one of
+// signin, download, start, done, failed.
+const tileLoads = new Map();
+const TILE_DONE_MS = 2000;
+const tileLoadBusy = (s) => !!s && (s.stage === "signin" || s.stage === "download" ||
+                                     s.stage === "start");
+// "Opening" only while the tap's load token is the latest: a later tap on
+// anything else wins (loadGen), and this one is back to a plain download.
+const tileLoadOpening = (s) => tileLoadBusy(s) && !!s.open && s.gen === loadGen;
+
+const tileBytes = (got, total) => {
+  if (!total) return got ? formatBytes(got) : "";
+  let [div, unit, dp] = total >= 1024 * 1024 ? [1024 * 1024, " MB", 1] : [1024, " KB", 0];
+  return (Math.min(got, total) / div).toFixed(dp) + " of " + (total / div).toFixed(dp) + unit;
+};
+
+const gameTileEls = () => /** @type {HTMLElement[]} */ ([...homeRecent.children])
+  .filter((t) => t.classList.contains("home-tile"));
+const tileOf = (name) => gameTileEls().find((t) => t.dataset.rom === name);
+const childOf = (el, cls) => el && [...el.children].find((c) => c.classList.contains(cls));
+
+const DL_ICON = '<svg viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M5 19h14"/></svg>';
+const SPIN_ICON = '<svg class="sync-spin" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v3.5h-3.5"/></svg>';
+
+// Brings one tile in line with its entry, or its absence. Every render calls
+// it, so the state outlives the grid being rebuilt under it.
+const paintTileLoad = (tile) => {
+  if (!tile) return;
+  let name = tile.dataset.rom;
+  let s = tileLoads.get(name);
+  let launch = childOf(tile, "home-tile-launch");
+  let busy = tileLoadBusy(s);
+  let opening = tileLoadOpening(s);
+  let failed = s?.stage === "failed";
+  tile.classList.toggle("is-loading", busy);
+  tile.classList.toggle("is-opening", opening);
+  tile.classList.toggle("is-failed", failed);
+
+  let over = childOf(launch, "home-tile-load");
+  if (!busy && !failed) { if (over) launch.removeChild(over); }
+  else if (launch) {
+    if (!over) {
+      over = document.createElement("span");
+      over.className = "home-tile-load";
+      let label = document.createElement("span");
+      label.className = "home-tile-load-label";
+      let sub = document.createElement("span");
+      sub.className = "home-tile-load-sub";
+      sub.setAttribute("aria-hidden", "true"); // the bytes would churn the name
+      let bar = document.createElement("span");
+      bar.className = "home-tile-load-bar";
+      bar.appendChild(document.createElement("span"));
+      over.append(label, sub, bar);
+      launch.appendChild(over);
+    }
+    let [label, sub, bar] = over.children;
+    label.textContent = s.stage === "signin" ? "Signing in…"
+      : failed ? "Couldn’t download"
+      : s.stage === "start" ? "Starting…"
+      : opening ? "Opening" : "Downloading";
+    sub.textContent = s.stage === "signin" ? "Google Drive"
+      : failed ? "Tap to try again"
+      : tileBytes(s.got, s.total);
+    let pct = s.stage === "start" ? 100 : s.total ? Math.min(100, 100 * s.got / s.total) : 0;
+    bar.hidden = s.stage === "signin" || (!s.total && s.stage !== "start");
+    bar.children[0].style.width = pct + "%";
+  }
+
+  // The corner ↓ spins, on its chip, for as long as anything is fetching
+  // this game; a failed one offers ↓ again.
+  if (tile.classList.contains("home-tile-cloud")) {
+    let dl = childOf(tile, "home-tile-dl");
+    let spin = busy || syncDownloading.has(name);
+    if (dl && dl.classList.contains("is-busy") !== spin) {
+      dl.classList.toggle("is-busy", spin);
+      dl.disabled = spin;
+      dl.innerHTML = spin ? SPIN_ICON : DL_ICON;
+    }
+  }
+
+  let check = childOf(tile, "home-tile-done");
+  if (s?.stage === "done" && !check) {
+    check = document.createElement("span");
+    check.className = "home-tile-done";
+    check.setAttribute("role", "img");
+    check.setAttribute("aria-label", "On this device");
+    check.innerHTML = '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></svg>';
+    tile.appendChild(check);
+  } else if (s?.stage !== "done" && check) tile.removeChild(check);
+};
+
+// The hero's game has its tile stood down (syncHomeCurrent), so the hero's
+// own button carries the state instead, in a word and a percentage.
+const paintHeroLoad = (name) => {
+  if (name !== heroName || heroCard.dataset.mode !== "closed") return;
+  let s = tileLoads.get(name);
+  let pct = s?.total ? " · " + Math.floor(100 * Math.min(s.got, s.total) / s.total) + "%" : "";
+  heroResumeLabel.textContent = !s || s.stage === "done" ? (heroSession ? "Resume" : "Play")
+    : s.stage === "signin" ? "Signing in…"
+    : s.stage === "start" ? "Starting…"
+    : s.stage === "failed" ? "Try again"
+    : (tileLoadOpening(s) ? "Opening" : "Downloading") + pct;
+};
+
+const paintLoadOf = (name) => {
+  paintTileLoad(tileOf(name));
+  paintHeroLoad(name);
+};
+
+const setTileLoad = (name, s) => {
+  if (s) tileLoads.set(name, s); else tileLoads.delete(name);
+  paintLoadOf(name);
+};
+
+// Fetches a Drive-only game with its tile showing it. `open` ({ resume,
+// flyFrom }) plays it after, unless a later tap has taken the load token by
+// then. A call while one runs joins it rather than starting another, so a
+// tap on the picture during a ↓ download turns it into an open. Resolves
+// true once the game is on this device.
+const fetchTileGame = async (name, { open = null } = {}) => {
+  // The tap takes the load token now, not when the download (seconds) is
+  // done: a tile tapped meanwhile is the later tap, and wins. The download
+  // itself finishes either way.
+  let gen = open ? nextLoadGen() : 0;
+  // Every tile, and the hero: an Opening elsewhere gives way to this tap.
+  const paintAll = () => {
+    gameTileEls().forEach(paintTileLoad);
+    if (heroName) paintHeroLoad(heroName);
+  };
+  let s = tileLoads.get(name);
+  if (tileLoadBusy(s)) {
+    if (open) {
+      Object.assign(s, { open, gen });
+      paintAll();
+    }
+    return !!(await s.run);
+  }
+  s = { open, gen, stage: syncActive() ? "download" : "signin", got: 0, total: 0, run: null };
+  tileLoads.set(name, s);
+  paintAll();
+  s.run = (async () => {
+    if (!(await ensureDriveSignedIn())) return null; // declined: never tried
+    s.stage = "download";
+    paintLoadOf(name);
+    return downloadGame(name, { onProgress: (got, total) => {
+      s.got = got;
+      s.total = total;
+      paintLoadOf(name);
+    } });
+  })();
+  let ok = await s.run;
+  if (tileLoads.get(name) !== s) return !!ok;
+  if (ok === null) { setTileLoad(name, null); return false; }
+  if (!ok) { s.stage = "failed"; paintLoadOf(name); return false; }
+  if (tileLoadOpening(s)) {
+    s.stage = "start";
+    paintLoadOf(name);
+    // The tile the tap came from has been rebuilt since: fly from the one
+    // standing in its place.
+    let from = s.open.flyFrom;
+    if (from && !from.isConnected) {
+      from = childOf(childOf(tileOf(name), "home-tile-launch"), "home-tile-thumb") || null;
+    }
+    try {
+      await launchRom(name, { resume: s.open.resume, flyFrom: from });
+    } finally {
+      // Booted or not, the game is here now: an ordinary tile.
+      if (tileLoads.get(name) === s) setTileLoad(name, null);
+    }
+  } else {
+    s.stage = "done";
+    paintLoadOf(name);
+    setTimeout(() => { if (tileLoads.get(name) === s) setTileLoad(name, null); }, TILE_DONE_MS);
+  }
+  return true;
 };
 
 const libFilterActive = () =>
@@ -6623,7 +6830,6 @@ const refreshHomeRecent = async () => {
     let driveOnly = !localRoms.has(romName);
     // Byte-less with nothing to fetch: the file has to be found again.
     let missing = driveOnly && !driveHasRom(romName);
-    let busy = syncDownloading.has(romName);
     let tile = document.createElement("div");
     // no-art until a picture arrives: the chip stands in for it.
     tile.className = "home-tile no-art" +
@@ -6712,18 +6918,13 @@ const refreshHomeRecent = async () => {
     } else if (driveOnly) {
       let dl = document.createElement("button");
       dl.type = "button";
-      dl.className = "home-tile-dl" + (busy ? " is-busy" : "");
-      dl.disabled = busy;
+      dl.className = "home-tile-dl";
       dl.title = romName + " — download without launching";
       dl.setAttribute("aria-label", "Download " + displayName(romName));
-      dl.innerHTML = busy
-        ? '<svg class="sync-spin" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v3.5h-3.5"/></svg>'
-        : '<svg viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M5 19h14"/></svg>';
-      dl.addEventListener("click", async (e) => {
+      dl.innerHTML = DL_ICON; // paintTileLoad spins it while one runs
+      dl.addEventListener("click", (e) => {
         e.stopPropagation();
-        if (syncDownloading.has(romName)) return;
-        if (!(await ensureDriveSignedIn())) return;
-        await downloadGame(romName); // download only — no launch
+        fetchTileGame(romName); // download only — no launch
       });
       tile.appendChild(dl);
     } else {
@@ -6745,6 +6946,7 @@ const refreshHomeRecent = async () => {
       });
       tile.appendChild(link2p);
     }
+    paintTileLoad(tile);
     tiles.push(tile);
   }
   // The pictures offer is worth showing only while something lacks one.
@@ -11555,6 +11757,7 @@ const setHeroMode = (mode, name) => {
   heroResumeLabel.textContent = resumable ? "Resume" : "Play";
   heroClose.hidden = !paused;
   heroPlay.hidden = paused || !heroSession;
+  paintHeroLoad(name);
   if (was) {
     heroSwapIn([
       was.state !== heroStateLabel.textContent && heroStateLabel,
