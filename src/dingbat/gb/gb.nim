@@ -1746,7 +1746,9 @@ type
     cached_hl*:  int   # -1 = invalid
     # Idle-loop skip (GB_IDLE_SKIP, cpu.nim). Scratch, not serialized: a
     # loaded state starts a fresh verdict. `wl_edge` is set by a taken
-    # backward JR/JP (`wl_from` its address) and answered at the next fetch.
+    # backward JR/JP (`wl_from` its address) and answered at the next fetch;
+    # only with `wl_on`, the FIFO renderer (the scanline one has no horizon).
+    wl_on*:        bool
     wl_edge*:      bool
     wl_from*:      uint16
     wl_head*:      int32      # loop head the snapshot was taken at, -1 none
@@ -3618,6 +3620,7 @@ proc post_init*(gb: GB) =
   # Needs the memory: whether the boot ROM is mapped is one of its three inputs.
   gb_sync_cgb_native(gb)
   gb.cpu    = new_gb_cpu()
+  gb.cpu.wl_on = gb.fifo_ppu != nil
   # Super Game Boy. A cart that unlocks SGB functions and is NOT being run as
   # a CGB gets the adapter: the two are mutually exclusive on hardware (an SGB
   # has no CGB in it, and a CGB ignores the packet stream), so a CGB-flagged

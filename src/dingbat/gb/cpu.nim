@@ -759,14 +759,19 @@ proc wl_horizon(gb: GB; reads_ly, reads_stat: bool; period = 0): int =
      serial_peer_committed(gb.serial.driver): return 0
   let t = gb.timer
   if t.countdown >= 0 or t.hold_t != 0: return 0
-  let ppu = gb.fifo_ppu
-  if ppu == nil or not ppu.lcd_enabled: return 0
-  let m = ppu.lcd_status and 3'u8
   var dots: int32
-  if m == 3:
+  let ppu = gb.fifo_ppu
+  if ppu == nil:
+    # The scanline renderer: a halted CPU only (no loop marks a head on it,
+    # wl_on), to its next mode boundary.
+    if reads_ly or reads_stat: return 0
+    dots = scanline_idle_dots(gb.ppu, gb)
+  elif not ppu.lcd_enabled: return 0
+  elif (ppu.lcd_status and 3'u8) == 3'u8:
     if ppu.lazy_end == 0: return 0
     dots = ppu.lazy_end - ppu.cycle_counter
   else:
+    let m = ppu.lcd_status and 3'u8
     if m == 1 and ppu.cycle_counter <= LYC_RELATCH_DOT: return 0
     dots = fifo_skip_target(ppu, gb, m) - ppu.cycle_counter
   if reads_ly:
@@ -856,7 +861,11 @@ proc wl_head_check(cpu: GbCpu; gb: GB) {.noinline.} =
   if int32(cpu.pc) == cpu.wl_head and cpu.wl_from == cpu.wl_head_from and
      gb.memory.write_count == cpu.wl_writes and regs == cpu.wl_snap and
      gb.wl_mark <= cpu.wl_stamp and
-     not (cpu.ime and interrupt_ready(gb.interrupts)):
+     not (cpu.ime and interrupt_ready(gb.interrupts)) and
+     wl_horizon(gb, false, false) > 0:
+    # The horizon before the decode: the reads it adds only shorten it, and a
+    # repeating loop mostly meets 0 (mode 3 not deferred, the scanline
+    # renderer), where decoding the body every iteration cost up to 20 %.
     let sc = wl_scan(cpu, gb, int(cpu.pc), int(cpu.wl_from))
     if sc.ok and now - cpu.wl_stamp == CycleCount(sc.period):
       let h = wl_horizon(gb, sc.reads_ly, sc.reads_stat, sc.period)

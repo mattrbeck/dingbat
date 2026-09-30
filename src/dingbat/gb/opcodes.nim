@@ -99,13 +99,13 @@ proc cpu_read_u16(cpu: GbCpu; gb: GB): uint16 {.inline.} =
 template wl_jr_back(cpu: GbCpu; offset: int8) =
   when GB_IDLE_SKIP != 0:
     if offset <= -2'i8:
-      cpu.wl_edge = true
+      cpu.wl_edge = cpu.wl_on
       cpu.wl_from = cpu.pc - 2
 
 template wl_jp_back(cpu: GbCpu; target: uint16) =
   when GB_IDLE_SKIP != 0:
     if target <= cpu.pc - 3:
-      cpu.wl_edge = true
+      cpu.wl_edge = cpu.wl_on
       cpu.wl_from = cpu.pc - 3
 
 # Dispatch table

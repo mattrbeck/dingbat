@@ -162,6 +162,24 @@ proc do_scanline*(ppu: GbScanlinePpu; gb: GB) =
                 ppu.framebuffer[GB_WIDTH * int(ppu.ly) + x] =
                   cast[ptr uint16](unsafeAddr ppu.obj_pram[pal_idx])[]
 
+proc scanline_idle_dots*(ppu: GbPpu; gb: GB): int32 =
+  ## Dots a halted CPU can be advanced over in one step (wl_horizon): up to
+  ## the next mode boundary, where everything this renderer raises happens,
+  ## and short of line 153's LY snap. Not past the LYC relatch after it,
+  ## which the tick asks about on every step from its dot on. 0 = none.
+  if not lcd_enabled(ppu): return 0
+  let cc = ppu.cycle_counter
+  case ppu.mode_flag
+  of 2: 80'i32 - cc
+  of 3: 172'i32 - cc
+  of 0: 204'i32 - cc
+  else:
+    if ppu.ly == 153'u8: min(456'i32, LY153_SNAP_DOT) - cc
+    elif ppu.ly == 0'u8:
+      let r = lyc_src_relatch_dot(gb)
+      if cc >= r: 0'i32 else: min(456'i32, r) - cc
+    else: 456'i32 - cc
+
 method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
   # The steps below take at most one mode boundary per call, which an
   # M-cycle's 4 dots never outrun (the shortest mode is 80). The speed
@@ -174,6 +192,15 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
   # steps, which is every boundary it crosses, as the FIFO renderer walks
   # its dots.
   if cycles > 4:
+    # A long tick that reaches no boundary (the halt skip's, wl_horizon) is
+    # only the steps' bookkeeping below, done once.
+    if cycles < scanline_idle_dots(ppu, gb):
+      ppu.read_mode = ppu.mode_flag
+      ppu.stat_chg_dot = STAT_NO_HOLD
+      ppu.dots_since_frame += int32(cycles)
+      when defined(gb_dot_counter): gb_total_dots += uint64(cycles)
+      ppu.cycle_counter += int32(cycles)
+      return
     var left = cycles
     while left > 0:
       let n = min(left, 4)
@@ -195,12 +222,14 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
   if lcd_enabled(ppu):
     if ppu.mode_flag == 2:       # OAM search
       if ppu.cycle_counter >= 80:
+        gb.wl_mark = gb.scheduler.cycles   # a halted CPU asks again (wl_horizon)
         ppu.cycle_counter -= 80
         stat_drop_rebase(ppu, 80'i32)
         ppu.`mode_flag=`(3'u8, gb)
         if ppu.ly == ppu.wy: ppu.window_trigger = true
     elif ppu.mode_flag == 3:     # Drawing
       if ppu.cycle_counter >= 172:
+        gb.wl_mark = gb.scheduler.cycles
         ppu.cycle_counter -= 172
         stat_drop_rebase(ppu, 172'i32)
         ppu.`mode_flag=`(0'u8, gb)
@@ -219,6 +248,7 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
           do_scanline(ppu, gb)
     elif ppu.mode_flag == 0:     # H-Blank
       if ppu.cycle_counter >= 204:
+        gb.wl_mark = gb.scheduler.cycles
         ppu.cycle_counter -= 204
         stat_drop_rebase(ppu, 204'i32)
         ppu.ly += 1
@@ -239,6 +269,7 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
           ly_advance_line(ppu, gb)
     elif ppu.mode_flag == 1:     # V-Blank
       if ppu.cycle_counter >= 456:
+        gb.wl_mark = gb.scheduler.cycles
         ppu.cycle_counter -= 456
         stat_drop_rebase(ppu, 456'i32)
         if ppu.ly != 0:
@@ -253,6 +284,7 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
       # This renderer steps in whole events, so it asks on every tick from
       # LY153_SNAP_DOT on; the detector is idempotent.
       if ppu.ly == 153 and ppu.cycle_counter >= LY153_SNAP_DOT:
+        gb.wl_mark = gb.scheduler.cycles
         ppu.ly = 0
         when STAT_IRQ_SPLIT: ppu.irq_ly = 0
         ppu_handle_stat_interrupt(ppu, gb)
