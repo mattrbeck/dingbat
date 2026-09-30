@@ -329,14 +329,35 @@ Ages +106 %, Metal Gear Solid +95 %, Super Mario Bros. DX +58 %, Tetris DX
 Link's Awakening DX +12 %, Wario Land 3 +10 %, Alone in the Dark and Shantae
 flat.
 
+Second round, from a count of why each general mode-3 dot was not plain
+(line head ~12 a line everywhere; objects up to 2.9 M per 600 frames on
+Link's Awakening; the window 1.25-1.5 M on Oracle of Ages and Metal Gear
+Solid) and of where a halted CPU's retries went:
+
+* `wl_horizon`'s component locals were owning refs: seven ARC copies and
+  destroys a call. `{.cursor.}`: -0.5 to -2.6 %.
+* A halted CPU that met a mode 3 run dot by dot (no horizon, and the mark
+  moves every M-cycle) asked again every M-cycle; it now waits for the mode
+  to end or defer (`wl_halt_m3`): Oracle of Ages -5.2 %.
+* Window lines past the restart's first push take the plain span, compiled
+  once per source: Oracle of Ages -9.5 %, Metal Gear Solid -3.3 %.
+* A switched-off LCD settles once (`off_wc`): until the next write a tick
+  only moves the panel clock, and idle loops and HALT skip to the dot before
+  the blank frame. Metal Gear Solid -4.5 %.
+* The plain span drains an object's pixels from the OBJ FIFO: Link's
+  Awakening -2.1 %.
+
+Together -0.2 % (Alone in the Dark) to -16 % (Oracle of Ages) instructions;
+main before either round -> now, -20 % (Shantae) to -55 % (Metal Gear
+Solid).
+
 Tried and dropped: caching fifo_tick's idle target (`fast_end`), with and
 without splitting the compare out to inline: at most -3 % instructions,
-within noise in wall time. Left: the line head (the throw-away fetch and
-fine-scroll discard) and object fetches still run the general dot; a halted
-CPU retries the horizon on every PPU slow step, which in a mode 3 that is
-not deferred is every M-cycle (`wl_horizon` + `wl_halt_skip` 5-7 % of
-native time); loops do not skip on the scanline renderer, which leaves its
-loop-polling titles (Alone in the Dark) where they were.
+within noise in wall time; plain dots up to the horizon inside a tick that
+reaches an object (+1.5 to +3 %: the second eligibility test near every
+object costs more than the dots). Left: the line head (~0.4 % by count, and
+the most timing-bound dots of the line); the object fetch itself; the
+steady block's per-pixel FIFO shifts.
 
 ## Old and constrained devices
 
