@@ -294,11 +294,47 @@ Wasm in JavaScriptCore (the shell, same build flags as the web): Crystal
 1643 -> 2436 fps, Alone in the Dark 1111 -> 2277, Link's Awakening 1400 ->
 1959, Shantae 1000 -> 1284.
 
+Where the gain came from, each change stacked on the last (fps, share of
+main's frame rate; best of three, 1800 frames). The hooks alone (every
+switch off, the `fifo_sync` tests and `write_count` still in) cost 1-3 %.
+Idle skip is most of the gain, but only on top of deferred mode 3: without
+it mode 3 has no horizon, a third of every line, and the skip alone was
+-11 % to +16 %.
+
+| title | stripped span | deferred mode 3 | idle skip |
+|---|---|---|---|
+| Super Mario Bros. DX | +8 % | +23 % | +68 % |
+| Wario Land 3 | +11 % | +16 % | +60 % |
+| Metal Gear Solid | +11 % | +19 % | +59 % |
+| Alone in the Dark | +13 % | +15 % | +54 % |
+| Donkey Kong Country | +12 % | +17 % | +52 % |
+| Link's Awakening DX | +11 % | +19 % | +51 % |
+| Oracle of Ages | +7 % | +13 % | +37 % |
+| Tetris DX | +22 % | +15 % | +26 % |
+| Link's Awakening (DMG) | +19 % | +16 % | +16 % |
+| Pokémon Crystal | +21 % | +20 % | +8 % |
+| Shantae | +9 % | +19 % | -3 % |
+
+Speed mode (the scanline renderer, frameskip 1) has no deferred mode 3 and
+first paid for the skip without getting it: a repeating loop decoded its
+body every iteration to meet a zero horizon, up to 20 % of its instructions.
+The horizon is now asked before the decode, loops mark no head on the
+scanline renderer (`wl_on`), and a halted CPU there is advanced to the next
+mode boundary (`scanline_idle_dots`, short of line 153's LY snap and the
+LYC relatch), the renderer taking a long tick that reaches no boundary as
+one step's bookkeeping. Speed mode, main -> this: Oracle of Ages +106 %,
+Metal Gear Solid +95 %, Super Mario Bros. DX +58 %, Tetris DX +52 %, Crystal
++24 %, Donkey Kong Country +23 %, Link's Awakening +13 %, Link's Awakening
+DX +12 %, Wario Land 3 +10 %, Alone in the Dark and Shantae flat.
+
 Tried and dropped: caching fifo_tick's idle target (`fast_end`), with and
 without splitting the compare out to inline: at most -3 % instructions,
 within noise in wall time. Left: the line head (the throw-away fetch and
 fine-scroll discard) and object fetches still run the general dot; a halted
-CPU stops at every PPU stop even when none of them can wake it.
+CPU retries the horizon on every PPU slow step, which in a mode 3 that is
+not deferred is every M-cycle (`wl_horizon` + `wl_halt_skip` 5-7 % of
+native time); loops do not skip on the scanline renderer, which leaves
+speed mode's loop-polling titles (Alone in the Dark) where they were.
 
 ## Old and constrained devices
 
