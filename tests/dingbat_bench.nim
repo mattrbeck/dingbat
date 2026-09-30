@@ -331,8 +331,15 @@ proc main() =
     if renderer notin ["fifo", "scanline"]:
       echo "bench: DINGBAT_BENCH_RENDERER must be fifo or scanline, got: ", renderer
       quit(1)
+    # DINGBAT_BENCH_RTC_EPOCH freezes an MBC3/HuC3/TAMA5 clock, as on the GBA
+    # path, so a cartridge clock cannot make two runs differ.
+    if getEnv("DINGBAT_BENCH_RTC_EPOCH").len > 0:
+      enable_deterministic_gb_rtc(parseBiggestInt(getEnv("DINGBAT_BENCH_RTC_EPOCH")))
+    # DINGBAT_BENCH_GB_DMG=1 runs a CGB-flagged cart on DMG hardware (a
+    # dual-mode cart as a DMG would run it).
     let emu = new_gb("", rom_path, fifo = renderer == "fifo",
-                     headless = true, run_bios = false)
+                     headless = true, run_bios = false,
+                     force_dmg = getEnv("DINGBAT_BENCH_GB_DMG") == "1")
     emu.test_output = test_out
     emu.post_init()
     # As on the GBA path: load an in-game scene; a title screen exercises
@@ -369,6 +376,11 @@ proc main() =
         run_scripted(f)
         h = fnv(h, emu.ppu.framebuffer)
         echo f, " ", toHex(h)
+      # The whole machine at the end, as on the GBA path
+      var sh = 0xCBF29CE484222325'u64
+      for c in emu.state_payload():
+        sh = (sh xor uint64(ord(c))) * 0x100000001B3'u64
+      echo "state ", toHex(sh)
       return
     # Writes a .state after the warmup, so a scripted run can manufacture the
     # in-game scene that later runs load with DINGBAT_BENCH_STATE.
