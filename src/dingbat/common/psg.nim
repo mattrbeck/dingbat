@@ -123,8 +123,9 @@ type
     # GBA: the AGB's shift-0 trigger check is armed (ch1_write). Saved in
     # bit 15 of frequency_shadow's field; the format has no bit of its own.
     sweep_armed*:        bool
-    # GBA: scheduler.cycles mod 16 of the 4 MHz edge a master-on restarted the
-    # PSG's dividers on (ch1_s0_kill_at). Saved in the high nibble of
+    # GBA: scheduler.cycles mod 32 of the 4 MHz edge a master-on restarted the
+    # PSG's dividers on (ch1_s0_kill_at, psg_edge, psg_noise_phase). In the
+    # rev-10 PSG section; revs <= 9 kept it mod 16 in the high nibble of
     # sweep_timer's byte.
     s0_anchor*:          uint8
     # GBA: the shift-0 check's slow timing (ch1_s0_kill_at). Saved in bit 7
@@ -161,12 +162,12 @@ type
     clock_shift*:  uint8
     width_mode*:   uint8
     divisor_code*: uint8
-    # GB: the noise timer is two counters: `div_counter` free-runs off the
+    # The noise timer is two counters: `div_counter` free-runs off the
     # divisor stage and `clock_shift` picks which bit clocks the LFSR;
     # `div_next` is the divisor stage's next increment (ch4_steps_to_rise).
     # NR43 selects a new view of both without restarting either. Serialized
-    # from GB payload rev 6; an older state re-derives them from `next_step`
-    # (ch4_resync_divisor).
+    # from GB payload rev 6 and GBA rev 10; an older state re-derives them
+    # from `next_step` (ch4_resync_divisor).
     div_counter*:  uint16
     div_next*:     CycleCount
 
@@ -237,6 +238,19 @@ proc ch4_steps_to_rise*(counter: uint16; shift: uint8): uint32 =
   let t = 1'u32 shl int(shift)
   let c = uint32(counter) and (m - 1)
   ((t + m - c - 1) and (m - 1)) + 1
+
+proc ch4_resync_divisor*(ch: PsgNoise) =
+  ## Rebuild the two stages from `next_step` alone after loading a state that
+  ## did not carry them (GB payload rev < 6, GBA rev < 10): counter one
+  ## increment short of the rising edge, that increment due on the deadline.
+  ## Only an NR43 write inside the first period after the load could tell. An
+  ## assignment, not a subtraction, so it cannot underflow.
+  if ch.next_step == PSG_NO_STEP:
+    ch.div_next = PSG_NO_STEP
+    ch.div_counter = 0
+    return
+  ch.div_counter = (1'u16 shl int(ch.clock_shift)) - 1
+  ch.div_next = ch.next_step
 
 # ---- Register numbering ----
 #

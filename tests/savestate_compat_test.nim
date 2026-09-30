@@ -852,7 +852,8 @@ const
     1 + 1 + 1 + (1 + 4) +                 # ch1 shift-0 check: slow, anchor, armed, stop
     (1 + 4) +                             # master-on stamp
     1 + 1 +                               # ch1 / ch2 latched duty output
-    3                                     # ch1 / ch2 / ch4 envelope extra tick
+    3 +                                   # ch1 / ch2 / ch4 envelope extra tick
+    2 + (1 + 4)                           # ch4 divisor stage: counter, next increment
 
 proc strip_psg(payload: var string): bool =
   ## Rewrite a payload this build wrote into the pre-rev-10 layout. The

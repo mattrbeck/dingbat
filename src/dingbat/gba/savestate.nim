@@ -953,7 +953,8 @@ proc default_inflight_state(gba: GBA) =
 # the older sections have no field for: the shift-0 check's state, which revs
 # <= 9 carried in spare bits of channel 1's sweep fields, the master-on
 # stamp PSG_POWER_ON_WINDOW reads (not carried at all before), and the
-# channels' latched duty outputs and pending envelope ticks.
+# channels' latched duty outputs, pending envelope ticks and the noise
+# channel's divisor stage.
 
 proc write_deadline(w: var Writer; at, now: CycleCount) =
   ## An absolute deadline as its distance from the payload's clock, which may
@@ -986,6 +987,8 @@ proc save_psg_state(gba: GBA; w: var Writer) =
   w.write_bool(ch1.env_extra_tick)
   w.write_bool(apu.channel2.env_extra_tick)
   w.write_bool(apu.channel4.env_extra_tick)
+  w.write_u16(apu.channel4.div_counter)
+  w.write_deadline(apu.channel4.div_next, now)
 
 proc load_psg_state(gba: GBA; r: var Reader) =
   ## Rev >= 10.
@@ -994,7 +997,7 @@ proc load_psg_state(gba: GBA; r: var Reader) =
   let now = gba.scheduler.cycles
   let ch1 = apu.channel1
   ch1.s0_slow = r.read_bool()
-  ch1.s0_anchor = r.read_u8() and 15
+  ch1.s0_anchor = r.read_u8() and 31
   ch1.sweep_armed = r.read_bool()
   ch1.kill_at = r.read_deadline(now, "ch1.kill_at")
   apu.power_on_at = r.read_deadline(now, "apu.power_on_at")
@@ -1003,6 +1006,8 @@ proc load_psg_state(gba: GBA; r: var Reader) =
   ch1.env_extra_tick = r.read_bool()
   apu.channel2.env_extra_tick = r.read_bool()
   apu.channel4.env_extra_tick = r.read_bool()
+  apu.channel4.div_counter = r.read_u16()
+  apu.channel4.div_next = r.read_deadline(now, "ch4.div_next")
   # Not in the payload: the frame rebase clears it, so it is GBA_NO_STEP at
   # every boundary a state is written on.
   ch1.last_step_at = GBA_NO_STEP
@@ -1019,6 +1024,7 @@ proc default_psg_state(gba: GBA) =
     ch.last_step_at = GBA_NO_STEP
   for ch in [PsgEnvChannel(apu.channel1), apu.channel2, apu.channel4]:
     ch.env_extra_tick = false
+  ch4_resync_divisor(apu.channel4)
 
 # ---- PSG waveform deadlines <-> scheduler events ----
 #

@@ -1133,7 +1133,7 @@ proc gb_apply_state(gb: GB; payload: string; rev: uint32;
   # Channel 4's divisor stage is in the payload from rev 6; before that it is
   # re-derived from the LFSR deadline the events above just restored (exact
   # until an NR43 write moves the clock shift; see ch4_resync_divisor).
-  if rev < 6: ch4_resync_divisor(gb.apu.channel4, gb)
+  if rev < 6: ch4_resync_divisor(gb.apu.channel4)
   load_mbc_state(gb.cartridge, r)
   # The SGB section is present when the WRITING machine had an adapter, and
   # the reading one may not (it is a frontend setting): decide from the

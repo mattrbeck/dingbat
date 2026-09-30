@@ -151,41 +151,8 @@ template psg_trigger_deadline(h: GB; period: CycleCount;
                               extra_ticks: int): CycleCount =
   gb_trigger_deadline(h, period, extra_ticks)
 
-proc gb_noise_deadline*(gb: GB; period: CycleCount; divisor_code: uint8;
-                        restarting: bool): CycleCount =
-  ## Absolute cycle of channel 4's first LFSR shift after a trigger. Two parts:
-  ## the first period is half-length (a trigger clears the divide-by-two on the
-  ## divisor stage's output; a restart of a running channel leaves it alone and
-  ## waits a full period) -- SameSuite channel_4_delay's rows are
-  ## `period/2 + 2` M-cycles, channel_4_lfsr_restart pins the restart -- and
-  ## the divisor stage is clocked by a 512 kHz grid a trigger cannot reset
-  ## (GbApu.noise_phase): divisor code 0 starts on the 1 MHz tick, code 1
-  ## rounds it up to the grid, codes >= 2 round it down
-  ## (channel_4_frequency_alignment; cross-checked by
-  ## channel_4_equivalent_frequencies and channel_4_align). Codes 5-7 are not
-  ## exercised by any test and follow the >= 2 case.
-  let tick = gb_apu_tick(gb)
-  let edge = gb_apu_edge(gb)
-  var extra = 2 * tick
-  if divisor_code != 0:
-    let half = 2 * tick
-    if ((edge + half - gb.apu.noise_phase) mod half) != tick:
-      # Off the 512 kHz grid. Adjusting `extra` rather than `edge` keeps the
-      # sum from underflowing in the down-rounding case.
-      extra = (if divisor_code == 1: extra + tick else: extra - tick)
-  edge + (if restarting: period else: period div 2) + extra
-
-template psg_noise_deadline(h: GB; period: CycleCount; divisor_code: uint8;
-                            restarting: bool): CycleCount =
-  gb_noise_deadline(h, period, divisor_code, restarting)
-
-proc psg_noise_grid_up(gb: GB; t: CycleCount; divisor_code: uint8): CycleCount {.inline.} =
-  ## Round a divisor-stage reload up onto the 512 kHz grid GbApu.noise_phase
-  ## anchors. Divisor code 0 taps the 1 MHz half-step and has no grid to miss.
-  if divisor_code == 0: return t
-  let tick = gb_apu_tick(gb)
-  let half = 2 * tick
-  t + ((tick + gb.apu.noise_phase + half - (t mod half)) mod half)
+template psg_noise_phase(h: GB): CycleCount = h.apu.noise_phase
+  ## The 512 kHz grid channel 4's divisor stage counts on (GbApu.noise_phase).
 
 # Forward declaration: timer.nim is included after the APU (gb.nim, which
 # already forward-declares apu_div_phase).

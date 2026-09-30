@@ -97,6 +97,11 @@ proc psg_edge(gba: GBA): CycleCount =
   let past = (now + 16 - CycleCount(gba.apu.channel1.s0_anchor)) and 15
   if past == 0: now else: now + (16 - past)
 
+template psg_noise_phase(h: GBA): CycleCount = CycleCount(h.apu.channel1.s0_anchor)
+  ## The 512 kHz grid channel 4's divisor stage counts on: restarted with the
+  ## PSG's other dividers at a master-on (s0_anchor, mod 32), as the GB's at
+  ## its APU power-on (GbApu.noise_phase). Assumed like psg_edge's phase.
+
 proc psg_trigger_deadline(gba: GBA; period: CycleCount;
                           extra_ticks: int): CycleCount =
   ## A square channel's first duty step after a trigger: picked up on the

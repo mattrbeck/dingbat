@@ -241,6 +241,7 @@ proc apu_rebase*(apu: APU; base: CycleCount) {.inline.} =
   adj(apu.channel2)
   adj(apu.channel3)
   adj(apu.channel4)
+  if apu.channel4.div_next != GBA_NO_STEP: apu.channel4.div_next -= base
   # last_step_at is in the past; losing a one-cycle tie at a frame boundary
   # is unobservable (as the GB's apu_rebase).
   apu.channel1.last_step_at = GBA_NO_STEP
@@ -262,6 +263,7 @@ proc apu_park_steps*(apu: APU) =
   apu.channel2.next_step = GBA_NO_STEP
   apu.channel3.next_step = GBA_NO_STEP
   apu.channel4.next_step = GBA_NO_STEP
+  apu.channel4.div_next  = GBA_NO_STEP
 
 proc timer_overflow*(apu: APU; timer: int): bool =
   apu.dma_channels.timer_overflow(timer)
@@ -601,6 +603,9 @@ proc `[]=`*(apu: APU; io_addr: uint32; value: uint8) =
         apu.channel2.next_step = GBA_NO_STEP
         apu.channel3.next_step = GBA_NO_STEP
         apu.channel4.next_step = GBA_NO_STEP
+        # ...and the noise divisor stage behind it, counter and all.
+        apu.channel4.div_next    = GBA_NO_STEP
+        apu.channel4.div_counter = 0
         # The sweep unit's shadow frequency goes with the power: a note after
         # a master off/on is checked as fresh (psg_channels.nim ch1_trigger_sweep).
         apu.channel1.frequency_shadow = 0
@@ -626,7 +631,7 @@ proc `[]=`*(apu: APU; io_addr: uint32; value: uint8) =
         # slow timing (apu/psg_host.nim ch1_s0_kill_at).
         let at = apu.gba.scheduler.cycles + 1
         let anchor = at + CycleCount((PSG_S0_APU_PHASE + 4 - uint32(at and 3)) and 3)
-        apu.channel1.s0_anchor = uint8(anchor and 15)
+        apu.channel1.s0_anchor = uint8(anchor and 31)
         apu.channel1.sweep_armed = true
         apu.channel1.s0_slow = true
         let e = apu.gba.scheduler.pending_at(etAPUFrameSeq)

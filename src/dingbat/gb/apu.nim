@@ -121,20 +121,6 @@ when not defined(test_harness):
 # is on: switching it off freezes the phase and only an APU power-off resets it
 # (SameSuite channel_1_stop_restart), so both park next_step at GB_NO_STEP.
 
-proc ch4_resync_divisor*(ch: GbChannel4; gb: GB) =
-  ## Rebuild the two stages from `next_step` alone after loading a state older
-  ## than GB payload rev 6, which did not carry them (PsgNoise.div_counter):
-  ## counter one increment short of the rising edge,
-  ## that increment due on the deadline. Only an NR43 write inside the first
-  ## period after the load could tell. An assignment, not a subtraction, so it
-  ## cannot underflow.
-  if ch.next_step == GB_NO_STEP:
-    ch.div_next = GB_NO_STEP
-    ch.div_counter = 0
-    return
-  ch.div_counter = (1'u16 shl int(ch.clock_shift)) - 1
-  ch.div_next = ch.next_step
-
 proc apu_catchup_reg(h: GB; nr: int) {.inline.} =
   ## Catch up the channel register `nr` belongs to before it is written.
   let apu = h.apu

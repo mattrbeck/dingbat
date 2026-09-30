@@ -2030,6 +2030,10 @@ proc end_frame*(gba: GBA): CycleCount {.discardable.} =
   # them with the events. This also bounds how far behind an unobserved
   # channel can fall. end_frame is the single funnel for every GBA rebase.
   gba.apu.apu_catchup_all()
+  # Channel 4's divisor deadline can be in the past (the catch-up stops at
+  # the last LFSR shift): settle it while the clock it is measured against
+  # still stands (the GB's gb_rebase).
+  ch4_advance_divisor(gba.apu.channel4, gba)
   let base = gba.scheduler.rebase(keep_phase_mask = 1023)
   gba.apu.apu_rebase(base)
   # FIFO transfer stamps and the MP2K HLE's pending slot hooks are absolute

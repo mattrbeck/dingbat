@@ -2289,7 +2289,7 @@ type
     # Phase of the half-rate (512 kHz) grid the noise channel's divisor stage
     # is clocked by: the power-on cycle modulo (8 shl speed), edges on the odd
     # 1 MHz ticks. NR43's divisor counts on it and a trigger cannot reset it
-    # (SameSuite channel_4_frequency_alignment; gb_noise_deadline).
+    # (SameSuite channel_4_frequency_alignment; psg_noise_deadline).
     # Serialized as tick_phase.
     noise_phase*:         CycleCount
     # The first DIV-APU event after a power-on is skipped when DIV's tap bit

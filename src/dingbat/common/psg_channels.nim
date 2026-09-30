@@ -17,13 +17,12 @@
 #   psg_q_length_defer(h)     CGB A/B's deferred wave length stop (GBA: never)
 #   psg_tick(h), psg_edge(h)  one 1 MHz APU tick; the grid's next edge
 #   psg_trigger_deadline      a square trigger's first step, on that grid
+#   psg_noise_phase(h)        the 512 kHz grid's phase (noise divisor stage)
 #   psg_q_backstep(h)         GbQuirks.square_freq_backstep_halftick
 #   psg_fs_next_edge_in(h), psg_fs_next_stage(h)
 #                             scheduler cycles to the frame sequencer's next
 #                             step, and which step it is
-# and, so far only where the GB model runs (the `when not PSG_AGB` arms):
-#   psg_noise_deadline, psg_noise_grid_up
-#                             a noise trigger's first shift, on that grid
+# and, only where the GB model runs (the `when not PSG_AGB` arms):
 #   psg_sweep_trigger_extra   a trigger's phase against the frame sequencer
 # and the GBA's ch1_settle / ch1_s0_kill_at (its measured shift-0 law).
 #
@@ -681,49 +680,80 @@ proc ch4_timer(ch: PsgNoise): uint32 {.inline.} =
   ## Full LFSR period in T-cycles.
   (if ch.divisor_code == 0: 8'u32 else: uint32(ch.divisor_code) shl 4) shl ch.clock_shift
 
-when not PSG_AGB:
-  # Two-stage frequency timer. NR43's `divisor << shift` is the LFSR period,
-  # not the counter: SameSuite channel_4_freq_change switches between two
-  # encodings of the same period mid-note and gets different answers, so an
-  # NR43 write re-interprets existing state. Model: a divisor stage that
-  # increments a counter every 4 T-cycles for code 0 and every 8*code
-  # otherwise (half the quoted divisor), and a free-running counter whose bit
-  # `clock_shift` clocks the LFSR on its rising edge. A write selects a
-  # different bit of the same counter and leaves the stage's countdown
-  # running; only a write landing on the cycle of an increment reloads with
-  # the new divisor, rounded up to the 512 kHz grid (a code != 0 stage can
-  # only reload on a grid edge).
+# Two-stage frequency timer. NR43's `divisor << shift` is the LFSR period,
+# not the counter: SameSuite channel_4_freq_change switches between two
+# encodings of the same period mid-note and gets different answers, so an
+# NR43 write re-interprets existing state. Model: a divisor stage that
+# increments a counter every 4 T-cycles for code 0 and every 8*code
+# otherwise (half the quoted divisor), and a free-running counter whose bit
+# `clock_shift` clocks the LFSR on its rising edge. A write selects a
+# different bit of the same counter and leaves the stage's countdown
+# running; only a write landing on the cycle of an increment reloads with
+# the new divisor, rounded up to the 512 kHz grid (a code != 0 stage can
+# only reload on a grid edge).
 
-  proc ch4_lfsr_frozen(ch: PsgNoise): bool {.inline.} =
-    ## Shifts 14 and 15 tap a bit the counter does not have, so the LFSR is
-    ## never clocked (Pan Docs, NR43). next_step parks at PSG_NO_STEP while
-    ## the divisor stage keeps counting, so a later NR43 write that lowers
-    ## the shift resumes from the held count. A state saved while frozen
-    ## loses that count (ch4_resync_divisor).
-    ch.clock_shift >= 14'u8
+proc ch4_lfsr_frozen(ch: PsgNoise): bool {.inline.} =
+  ## Shifts 14 and 15 tap a bit the counter does not have, so the LFSR is
+  ## never clocked (Pan Docs, NR43). next_step parks at PSG_NO_STEP while
+  ## the divisor stage keeps counting, so a later NR43 write that lowers
+  ## the shift resumes from the held count. A state saved while frozen
+  ## loses that count (ch4_resync_divisor).
+  ch.clock_shift >= 14'u8
 
-  proc ch4_inc_period(ch: PsgNoise; h: PsgHost): CycleCount {.inline.} =
-    ## One divisor-stage increment, in scheduler cycles.
-    psg_period(if ch.divisor_code == 0: 4'u32 else: uint32(ch.divisor_code) shl 3, h)
+proc ch4_inc_period(ch: PsgNoise; h: PsgHost): CycleCount {.inline.} =
+  ## One divisor-stage increment, in scheduler cycles.
+  psg_period(if ch.divisor_code == 0: 4'u32 else: uint32(ch.divisor_code) shl 3, h)
 
-  proc ch4_next_shift(ch: PsgNoise; h: PsgHost): CycleCount {.inline.} =
-    ## Rebuild the derived LFSR deadline from the two stages.
-    ch.div_next + CycleCount(ch4_steps_to_rise(ch.div_counter, ch.clock_shift) - 1) *
-                  ch4_inc_period(ch, h)
+proc ch4_next_shift(ch: PsgNoise; h: PsgHost): CycleCount {.inline.} =
+  ## Rebuild the derived LFSR deadline from the two stages.
+  ch.div_next + CycleCount(ch4_steps_to_rise(ch.div_counter, ch.clock_shift) - 1) *
+                ch4_inc_period(ch, h)
 
-  proc ch4_advance_divisor(ch: PsgNoise; h: PsgHost) =
-    ## Run the divisor stage to the current cycle without touching the LFSR.
-    ## `div_next` is exact at every point the increment period could have
-    ## changed, so the increments since are one division away. Callers must
-    ## have run ch4_catchup first (next rising edge strictly in the future).
-    ## The frame rebase calls it once a frame, bounding `now - div_next`.
-    if ch.div_next == PSG_NO_STEP: return
-    let now = psg_now(h)
-    if ch.div_next > now: return
-    let inc = ch4_inc_period(ch, h)
-    let n   = (now - ch.div_next) div inc + 1
-    ch.div_counter += uint16(n and CycleCount(0xFFFF))
-    ch.div_next    += n * inc
+proc ch4_advance_divisor(ch: PsgNoise; h: PsgHost) =
+  ## Run the divisor stage to the current cycle without touching the LFSR.
+  ## `div_next` is exact at every point the increment period could have
+  ## changed, so the increments since are one division away. Callers must
+  ## have run ch4_catchup first (next rising edge strictly in the future).
+  ## The frame rebase calls it once a frame, bounding `now - div_next`.
+  if ch.div_next == PSG_NO_STEP: return
+  let now = psg_now(h)
+  if ch.div_next > now: return
+  let inc = ch4_inc_period(ch, h)
+  let n   = (now - ch.div_next) div inc + 1
+  ch.div_counter += uint16(n and CycleCount(0xFFFF))
+  ch.div_next    += n * inc
+
+proc psg_noise_grid_up(h: PsgHost; t: CycleCount; divisor_code: uint8): CycleCount {.inline.} =
+  ## Round a divisor-stage reload up onto the 512 kHz grid (psg_noise_phase).
+  ## Divisor code 0 taps the 1 MHz half-step and has no grid to miss.
+  if divisor_code == 0: return t
+  let tick = psg_tick(h)
+  let half = 2 * tick
+  t + ((tick + psg_noise_phase(h) + half - (t mod half)) mod half)
+
+proc psg_noise_deadline(h: PsgHost; period: CycleCount; divisor_code: uint8;
+                        restarting: bool): CycleCount =
+  ## Absolute cycle of channel 4's first LFSR shift after a trigger. Two
+  ## parts: the first period is half-length (a trigger clears the
+  ## divide-by-two on the divisor stage's output; a restart of a running
+  ## channel leaves it alone and waits a full period) -- SameSuite
+  ## channel_4_delay's rows are `period/2 + 2` M-cycles,
+  ## channel_4_lfsr_restart pins the restart -- and the divisor stage is
+  ## clocked by a 512 kHz grid a trigger cannot reset (psg_noise_phase):
+  ## divisor code 0 starts on the 1 MHz tick, code 1 rounds it up to the
+  ## grid, codes >= 2 round it down (channel_4_frequency_alignment;
+  ## cross-checked by channel_4_equivalent_frequencies and channel_4_align).
+  ## Codes 5-7 are not exercised by any test and follow the >= 2 case.
+  let tick = psg_tick(h)
+  let edge = psg_edge(h)
+  var extra = 2 * tick
+  if divisor_code != 0:
+    let half = 2 * tick
+    if ((edge + half - psg_noise_phase(h)) mod half) != tick:
+      # Off the 512 kHz grid. Adjusting `extra` rather than `edge` keeps the
+      # sum from underflowing in the down-rounding case.
+      extra = (if divisor_code == 1: extra + tick else: extra - tick)
+  edge + (if restarting: period else: period div 2) + extra
 
 proc ch4_catchup_slow(ch: PsgNoise; h: PsgHost; observer_period: uint32) =
   let now    = psg_now(h)
@@ -772,56 +802,46 @@ proc ch4_write(ch: PsgNoise; nr: int; val: uint8; h: PsgHost) =
   of NR42:
     write_nrx2(ch, val)
   of NR43:
-    when PSG_AGB:
-      ch.clock_shift   = val shr 4
-      ch.width_mode    = (val and 0x08) shr 3
-      ch.divisor_code  = val and 0x07
-    else:
-      # The caller caught the channel up (no rising edge pending); bring the
-      # divisor stage the rest of the way.
-      let old_inc = ch4_inc_period(ch, h)
-      ch4_advance_divisor(ch, h)
-      let running = ch.div_next != PSG_NO_STEP
-      # `== old_inc`: an increment landed on this very cycle, so the
-      # countdown sits at a fresh reload and the reload rule applies.
-      let on_reload = running and ch.div_next - psg_now(h) == old_inc
-      ch.clock_shift   = val shr 4
-      ch.width_mode    = (val and 0x08) shr 3
-      ch.divisor_code  = val and 0x07
-      if running:
-        if on_reload:
-          ch.div_next = psg_noise_grid_up(h, psg_now(h) + ch4_inc_period(ch, h),
-                                          ch.divisor_code)
-        # Shift 14/15 parks the LFSR (ch4_lfsr_frozen); the divisor stage
-        # keeps running so a later write can thaw it.
-        ch.next_step = if ch4_lfsr_frozen(ch): PSG_NO_STEP
-                       else: ch4_next_shift(ch, h)
+    # The caller caught the channel up (no rising edge pending); bring the
+    # divisor stage the rest of the way.
+    let old_inc = ch4_inc_period(ch, h)
+    ch4_advance_divisor(ch, h)
+    let running = ch.div_next != PSG_NO_STEP
+    # `== old_inc`: an increment landed on this very cycle, so the countdown
+    # sits at a fresh reload and the reload rule applies.
+    let on_reload = running and ch.div_next - psg_now(h) == old_inc
+    ch.clock_shift   = val shr 4
+    ch.width_mode    = (val and 0x08) shr 3
+    ch.divisor_code  = val and 0x07
+    if running:
+      if on_reload:
+        ch.div_next = psg_noise_grid_up(h, psg_now(h) + ch4_inc_period(ch, h),
+                                        ch.divisor_code)
+      # Shift 14/15 parks the LFSR (ch4_lfsr_frozen); the divisor stage keeps
+      # running so a later write can thaw it.
+      ch.next_step = if ch4_lfsr_frozen(ch): PSG_NO_STEP
+                     else: ch4_next_shift(ch, h)
+      when PSG_AGB: ch.arm_delay = uint32(ch4_timer(ch)) shl psg_shl(h)
   of NR44:
     psg_nrx4_length(ch, h, val, defer_off = false)
     if (val and 0x80) != 0:
       let was_enabled = ch.enabled
       psg_trigger_length(ch, h, 0x40)
-      when PSG_AGB:
-        # GBA: a full period from the write.
-        let arm = uint32(psg_period(ch4_timer(ch), h))
-        ch.next_step = psg_now(h) + CycleCount(arm)
-        ch.arm_delay = arm
-        discard was_enabled
-      else:
-        # Noise startup: half a period plus two ticks off the 512 kHz grid,
-        # a full period on a restart; see psg_noise_deadline.
-        let deadline = psg_noise_deadline(h, psg_period(ch4_timer(ch), h),
-                                          ch.divisor_code, was_enabled)
-        # Shift 14/15: the divisor stage starts but the LFSR never fires.
-        ch.next_step = if ch4_lfsr_frozen(ch): PSG_NO_STEP else: deadline
-        # Split the deadline into its two stages: a fresh start leaves the
-        # counter at 0 (half a period from the rising edge), a restart
-        # leaves it on the edge it just produced (a full period). Both put
-        # the first increment at the same place, so the subtraction is exact.
-        ch.div_counter = (if was_enabled: 1'u16 shl int(ch.clock_shift) else: 0'u16)
-        ch.div_next = deadline -
-          CycleCount(ch4_steps_to_rise(ch.div_counter, ch.clock_shift) - 1) *
-          ch4_inc_period(ch, h)
+      # Noise startup: half a period plus two ticks off the 512 kHz grid, a
+      # full period on a restart; see psg_noise_deadline.
+      let deadline = psg_noise_deadline(h, psg_period(ch4_timer(ch), h),
+                                        ch.divisor_code, was_enabled)
+      # Shift 14/15: the divisor stage starts but the LFSR never fires.
+      ch.next_step = if ch4_lfsr_frozen(ch): PSG_NO_STEP else: deadline
+      when PSG_AGB: ch.arm_delay = uint32(deadline - psg_now(h))
+      # Split the deadline into its two stages: a fresh start leaves the
+      # counter at 0 (half a period from the rising edge), a restart leaves
+      # it on the edge it just produced (a full period). Both put the first
+      # increment at the same place, so the subtraction is exact.
+      ch.div_counter = (if was_enabled: 1'u16 shl int(ch.clock_shift) else: 0'u16)
+      ch.div_next = deadline -
+        CycleCount(ch4_steps_to_rise(ch.div_counter, ch.clock_shift) - 1) *
+        ch4_inc_period(ch, h)
       psg_trigger_envelope(ch, h)
       ch.lfsr = 0x7FFF'u16
   else: discard
