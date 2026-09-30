@@ -469,19 +469,19 @@ proc save_channel_env(ch: VolumeEnvelopeChannel; w: var Writer) =
   save_channel_base(ch, w)
   w.write_u8(ch.starting_volume)
   w.write_bool(ch.envelope_add_mode)
-  w.write_u8(ch.period_ve)
+  w.write_u8(ch.period)
   w.write_u8(ch.volume_envelope_timer)
   w.write_u8(ch.current_volume)
-  w.write_bool(ch.volume_envelope_is_updating)
+  w.write_bool(ch.vol_env_is_updating)
 
 proc load_channel_env(ch: VolumeEnvelopeChannel; r: var Reader) =
   load_channel_base(ch, r)
   ch.starting_volume = r.read_u8()
   ch.envelope_add_mode = r.read_bool()
-  ch.period_ve = r.read_u8()
+  ch.period = r.read_u8()
   ch.volume_envelope_timer = r.read_u8()
   ch.current_volume = r.read_u8()
-  ch.volume_envelope_is_updating = r.read_bool()
+  ch.vol_env_is_updating = r.read_bool()
 
 proc save_apu_state(apu: APU; w: var Writer) =
   w.write_tag(GBA_SEC_APU)
@@ -497,46 +497,46 @@ proc save_apu_state(apu: APU; w: var Writer) =
     w.write_i32(int32(ch.wave_duty_position))
     w.write_u8(ch.sweep_period or (if ch.s0_slow: 0x80'u8 else: 0'u8))   # s0_slow: bit 7
     w.write_bool(ch.negate)
-    w.write_u8(ch.shift_ch1)
+    w.write_u8(ch.shift)
     w.write_u8((ch.sweep_timer and 0x0F) or (ch.s0_anchor shl 4))   # s0_anchor: high nibble
-    # Bits 11..15 of the shadow's field carry the shift-0 check (channel1.nim):
+    # Bits 11..15 of the shadow's field carry the shift-0 check (psg_channels.nim ch1_trigger_sweep):
     # bits 11..14 a pending kill's distance in cycles (0 = none), bit 15 the
     # arming. A kill already due is applied first: every reader would.
-    ch.ch1_settle()
+    ch1_settle(ch, apu.gba)
     let kill_in = if ch.kill_at == GBA_NO_STEP: 0'u16
                   else: uint16(min(ch.kill_at - apu.gba.scheduler.cycles, 15))
     w.write_u16((ch.frequency_shadow and 0x7FF'u16) or (kill_in shl 11) or
                 (if ch.sweep_armed: 0x8000'u16 else: 0'u16))
     w.write_bool(ch.sweep_enabled)
-    w.write_bool(ch.negate_has_been_used)
+    w.write_bool(ch.negate_used)
     w.write_u8(ch.duty)
     w.write_u8(ch.length_load)
-    w.write_u16(ch.frequency_ch1)
+    w.write_u16(ch.frequency)
   block:
     let ch = apu.channel2
     save_channel_env(ch, w)
     w.write_i32(int32(ch.wave_duty_position))
     w.write_u8(ch.duty)
     w.write_u8(ch.length_load)
-    w.write_u16(ch.frequency_ch2)
+    w.write_u16(ch.frequency)
   block:
     let ch = apu.channel3
     save_channel_base(ch, w)
-    w.write_bytes(ch.wave_ram[0])
-    w.write_bytes(ch.wave_ram[1])
+    w.write_bytes(ch.wave_ram.toOpenArray(0, PSG_WAVE_BANK - 1))
+    w.write_bytes(ch.wave_ram.toOpenArray(PSG_WAVE_BANK, 2 * PSG_WAVE_BANK - 1))
     w.write_u8(ch.wave_ram_position)
     w.write_u8(ch.wave_ram_sample_buffer)
     w.write_bool(ch.wave_ram_dimension)
     w.write_u8(ch.wave_ram_bank)
-    w.write_u8(ch.length_load_ch3)
+    w.write_u8(ch.length_load)
     w.write_u8(ch.volume_code)
     w.write_bool(ch.volume_force)
-    w.write_u16(ch.frequency_ch3)
+    w.write_u16(ch.frequency)
   block:
     let ch = apu.channel4
     save_channel_env(ch, w)
     w.write_u16(ch.lfsr)
-    w.write_u8(ch.length_load_ch4)
+    w.write_u8(ch.length_load)
     w.write_u8(ch.clock_shift)
     w.write_u8(ch.width_mode)
     w.write_u8(ch.divisor_code)
@@ -564,7 +564,7 @@ proc load_apu_state(apu: APU; r: var Reader) =
     ch.sweep_period = period and 0x7F
     ch.s0_slow = (period and 0x80) != 0
     ch.negate = r.read_bool()
-    ch.shift_ch1 = r.read_u8()
+    ch.shift = r.read_u8()
     let timer = r.read_u8()
     ch.sweep_timer = timer and 0x0F
     ch.s0_anchor = timer shr 4
@@ -575,35 +575,35 @@ proc load_apu_state(apu: APU; r: var Reader) =
                  else: apu.gba.scheduler.cycles + CycleCount(kill_in)
     ch.sweep_armed = (shadow and 0x8000'u16) != 0
     ch.sweep_enabled = r.read_bool()
-    ch.negate_has_been_used = r.read_bool()
+    ch.negate_used = r.read_bool()
     ch.duty = r.read_u8()
     ch.length_load = r.read_u8()
-    ch.frequency_ch1 = r.read_u16()
+    ch.frequency = r.read_u16()
   block:
     let ch = apu.channel2
     load_channel_env(ch, r)
     ch.wave_duty_position = int(r.read_i32())
     ch.duty = r.read_u8()
     ch.length_load = r.read_u8()
-    ch.frequency_ch2 = r.read_u16()
+    ch.frequency = r.read_u16()
   block:
     let ch = apu.channel3
     load_channel_base(ch, r)
-    r.read_bytes(ch.wave_ram[0])
-    r.read_bytes(ch.wave_ram[1])
+    r.read_bytes(ch.wave_ram.toOpenArray(0, PSG_WAVE_BANK - 1))
+    r.read_bytes(ch.wave_ram.toOpenArray(PSG_WAVE_BANK, 2 * PSG_WAVE_BANK - 1))
     ch.wave_ram_position = r.read_u8()
     ch.wave_ram_sample_buffer = r.read_u8()
     ch.wave_ram_dimension = r.read_bool()
     ch.wave_ram_bank = r.read_u8()
-    ch.length_load_ch3 = r.read_u8()
+    ch.length_load = r.read_u8()
     ch.volume_code = r.read_u8()
     ch.volume_force = r.read_bool()
-    ch.frequency_ch3 = r.read_u16()
+    ch.frequency = r.read_u16()
   block:
     let ch = apu.channel4
     load_channel_env(ch, r)
     ch.lfsr = r.read_u16()
-    ch.length_load_ch4 = r.read_u8()
+    ch.length_load = r.read_u8()
     ch.clock_shift = r.read_u8()
     ch.width_mode = r.read_u8()
     ch.divisor_code = r.read_u8()
@@ -982,10 +982,10 @@ proc apu_extract_state_events(gba: GBA) =
     # only breaks an exact-cycle tie (one sample off, once, after a load).
     # Rev 9 carries it (the in-flight section, read after this).
     ch.arm_delay = arm
-  take(gba.apu.channel1, etAPUChannel1, gba.apu.channel1.ch1_frequency_timer())
-  take(gba.apu.channel2, etAPUChannel2, gba.apu.channel2.ch2_frequency_timer())
-  take(gba.apu.channel3, etAPUChannel3, gba.apu.channel3.ch3_frequency_timer())
-  take(gba.apu.channel4, etAPUChannel4, gba.apu.channel4.ch4_frequency_timer())
+  take(gba.apu.channel1, etAPUChannel1, uint32(sq_period(gba.apu.channel1, gba)))
+  take(gba.apu.channel2, etAPUChannel2, uint32(sq_period(gba.apu.channel2, gba)))
+  take(gba.apu.channel3, etAPUChannel3, uint32(psg_period(ch3_timer(gba.apu.channel3), gba)))
+  take(gba.apu.channel4, etAPUChannel4, uint32(psg_period(ch4_timer(gba.apu.channel4), gba)))
 
 when defined(deltachar):
   # -d:deltachar: byte offset of each payload section for delta histograms

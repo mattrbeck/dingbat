@@ -103,7 +103,7 @@ proc skip_boot*(mem: GbMemory; gb: GB) =
     const step = 252
     phase = phase mod (8 * step)
     ch.wave_duty_position = phase div step
-    ch.sample_bit = WAVE_DUTY1[ch.duty][ch.wave_duty_position]
+    ch.sample_bit = PSG_DUTY[ch.duty][ch.wave_duty_position]
     ch.next_step = gb.scheduler.cycles + CycleCount(step - phase mod step)
     # The sequencer's step at the hand-off (BOOT_FS_STAGE_*); post_init aims
     # its next edge from the divider phase timer.skip_boot seeds.
@@ -377,13 +377,13 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
   of 0xFF76:
     if gb.cgb_enabled:
       apu_catchup_all(gb.apu, gb)
-      var lo = gb.apu.channel1.ch1_dac_input()
-      var hi = gb.apu.channel2.ch2_dac_input()
+      var lo = sq_dac_input(gb.apu.channel1)
+      var hi = sq_dac_input(gb.apu.channel2)
       # CGB 0/A/B/C: a read on a rising duty step answers 0 for that channel
       # (GbQuirks.pcm_read_edge_zero).
       if gb.quirks.pcm_read_edge_zero:
-        if gb.apu.channel1.ch1_pcm_edge_zero(gb): lo = 0
-        if gb.apu.channel2.ch2_pcm_edge_zero(gb): hi = 0
+        if sq_pcm_edge_zero(gb.apu.channel1, gb): lo = 0
+        if sq_pcm_edge_zero(gb.apu.channel2, gb): hi = 0
       lo or (hi shl 4)
     else: 0xFF'u8
   of 0xFF77:

@@ -121,6 +121,30 @@ when not defined(test_harness):
 # is on: switching it off freezes the phase and only an APU power-off resets it
 # (SameSuite channel_1_stop_restart), so both park next_step at GB_NO_STEP.
 
+proc ch4_resync_divisor*(ch: GbChannel4; gb: GB) =
+  ## Rebuild the two stages from `next_step` alone after loading a state older
+  ## than GB payload rev 6, which did not carry them (PsgNoise.div_counter):
+  ## counter one increment short of the rising edge,
+  ## that increment due on the deadline. Only an NR43 write inside the first
+  ## period after the load could tell. An assignment, not a subtraction, so it
+  ## cannot underflow.
+  if ch.next_step == GB_NO_STEP:
+    ch.div_next = GB_NO_STEP
+    ch.div_counter = 0
+    return
+  ch.div_counter = (1'u16 shl int(ch.clock_shift)) - 1
+  ch.div_next = ch.next_step
+
+proc apu_catchup_reg(h: GB; nr: int) {.inline.} =
+  ## Catch up the channel register `nr` belongs to before it is written.
+  let apu = h.apu
+  case nr
+  of NR10 .. NR14: ch1_catchup(apu.channel1, h)
+  of NR21 .. NR24: ch2_catchup(apu.channel2, h)
+  of NR30 .. NR34: ch3_catchup(apu.channel3, h)
+  of NR41 .. NR44: ch4_catchup(apu.channel4, h)
+  else: discard
+
 proc apu_catchup_all*(apu: GbApu; gb: GB) {.inline.} =
   ## Materialize all four channels at the current cycle.
   ch1_catchup(apu.channel1, gb)
@@ -157,7 +181,7 @@ const APU_SPSW_EXTRA_DOTS* {.intdefine.} = 10
 const APU_SPSW_EXTRA_DOTS_SINGLE* {.intdefine.} = 7
 const APU_SPSW_EXTRA_DOTS_CARRY* {.intdefine.} = 5
 const APU_SPSW_EXTRA_DOTS_CARRY_SINGLE* {.intdefine.} = 1
-  ## The same shares under APU_CLOCK_CARRY (abstract_channels.nim).
+  ## The same shares under APU_CLOCK_CARRY (apu/psg_host.nim).
   ## T-cycles the APU's 4 MHz domain runs across the KEY1 stall beyond what
   ## the CPU clock counts, for a switch ending in double / single speed (the
   ## PPU's SPEED_SWITCH_PPU_EXTRA_DOTS = 8 / 3). Pinned by the single-switch
@@ -260,36 +284,7 @@ proc tick_frame_sequencer*(apu: GbApu; gb: GB) =
     apu.div_skip = false
     apu.first_half_of_length_period = false
     return
-  apu.first_half_of_length_period = (apu.frame_sequencer_stage and 1) == 0
-  case apu.frame_sequencer_stage
-  of 0:
-    length_step(apu.channel1); length_step(apu.channel2)
-    length_step(apu.channel3); length_step(apu.channel4)
-  of 2:
-    length_step(apu.channel1); length_step(apu.channel2)
-    length_step(apu.channel3); length_step(apu.channel4)
-    sweep_step(apu.channel1, gb)
-  of 4:
-    length_step(apu.channel1); length_step(apu.channel2)
-    length_step(apu.channel3); length_step(apu.channel4)
-  of 6:
-    length_step(apu.channel1); length_step(apu.channel2)
-    length_step(apu.channel3); length_step(apu.channel4)
-    sweep_step(apu.channel1, gb)
-  of 7:
-    volume_step(apu.channel1); volume_step(apu.channel2); volume_step(apu.channel4)
-  else: discard
-  if (apu.frame_sequencer_stage and 1) == 1:
-    # Envelope-enable glitch's extra tick; see GbVolumeEnvChannel.env_extra_tick.
-    template extra(ch: untyped) =
-      if ch.env_extra_tick:
-        ch.env_extra_tick = false
-        volume_step(ch)
-    extra(apu.channel1)
-    extra(apu.channel2)
-    extra(apu.channel4)
-  apu.frame_sequencer_stage += 1
-  if apu.frame_sequencer_stage > 7: apu.frame_sequencer_stage = 0
+  psg_seq_step(apu, gb)
 
 proc get_sample*(apu: GbApu; gb: GB) =
   # Gated on `enabled` (a disabled channel's amplitude does not depend on its
@@ -301,10 +296,11 @@ proc get_sample*(apu: GbApu; gb: GB) =
   if apu.channel2.enabled: ch2_catchup_at(apu.channel2, gb, OBS)
   if apu.channel3.enabled: ch3_catchup_at(apu.channel3, gb, OBS)
   if apu.channel4.enabled: ch4_catchup_at(apu.channel4, gb, OBS)
-  let c1 = if apu.channel_mask[0]: ch1_get_amplitude(apu.channel1) else: 0.0'f32
-  let c2 = if apu.channel_mask[1]: ch2_get_amplitude(apu.channel2) else: 0.0'f32
-  let c3 = if apu.channel_mask[2]: ch3_get_amplitude(apu.channel3) else: 0.0'f32
-  let c4 = if apu.channel_mask[3]: ch4_get_amplitude(apu.channel4) else: 0.0'f32
+  template amp(ch: untyped; input: uint8): float32 = psg_amplitude(ch, input)
+  let c1 = if apu.channel_mask[0]: amp(apu.channel1, sq_dac_input(apu.channel1)) else: 0.0'f32
+  let c2 = if apu.channel_mask[1]: amp(apu.channel2, sq_dac_input(apu.channel2)) else: 0.0'f32
+  let c3 = if apu.channel_mask[2]: amp(apu.channel3, ch3_dac_input(apu.channel3)) else: 0.0'f32
+  let c4 = if apu.channel_mask[3]: amp(apu.channel4, ch4_dac_input(apu.channel4)) else: 0.0'f32
   # Pan Docs, Audio Details: NR51 selects which analog outputs (-1..1 each)
   # each side sums; NR50 scales the sum by (V+1)/8, so volume 0 is one eighth,
   # not silence. GB_MASTER_VOLUME has GB_MIX_SCALE folded in.
@@ -428,10 +424,10 @@ proc new_gb_apu*(gb: GB; headless: bool): GbApu =
     master_volume_factor: 1.0'f32,
   )
   result.buffer   = newSeq[float32](GB_APU_BUFFER_SIZE)
-  result.channel1 = new_channel1(gb)
-  result.channel2 = new_channel2(gb)
-  result.channel3 = new_channel3(gb)
-  result.channel4 = new_channel4(gb)
+  result.channel1 = new_psg_square_sweep()
+  result.channel2 = new_psg_square()
+  result.channel3 = new_psg_wave(banks = 1)
+  result.channel4 = new_psg_noise()
   when not defined(emscripten):
     gb_audio_dump_claim()
   when defined(test_harness):
@@ -466,10 +462,7 @@ proc apu_read*(apu: GbApu; idx: int; gb: GB): uint8 =
   if idx >= 0xFF30: ch3_catchup(apu.channel3, gb)
   elif idx == 0xFF26: ch1_sweep_due(apu.channel1, gb)
   case idx
-  of 0xFF10..0xFF14: ch1_read(apu.channel1, idx)
-  of 0xFF16..0xFF19: ch2_read(apu.channel2, idx)
-  of 0xFF1A..0xFF1E: ch3_read(apu.channel3, idx, gb)
-  of 0xFF20..0xFF23: ch4_read(apu.channel4, idx)
+  of 0xFF10..0xFF23: psg_read_bits(gb, idx - 0xFF10) or GB_PSG_READ_OR[idx - 0xFF10]
   of 0xFF24:
     (if apu.left_enable: 0x80'u8 else: 0'u8) or (apu.left_volume shl 4) or
     (if apu.right_enable: 0x08'u8 else: 0'u8) or apu.right_volume
@@ -480,7 +473,7 @@ proc apu_read*(apu: GbApu; idx: int; gb: GB): uint8 =
     (if apu.channel3.enabled: 0b0100'u8 else: 0'u8) or
     (if apu.channel2.enabled: 0b0010'u8 else: 0'u8) or
     (if apu.channel1.enabled: 0b0001'u8 else: 0'u8)
-  of 0xFF30..0xFF3F: ch3_read(apu.channel3, idx, gb)
+  of 0xFF30..0xFF3F: ch3_wave_read(apu.channel3, gb, idx - 0xFF30)
   else: 0xFF'u8
 
 proc apu_drop_spsw_lag(apu: GbApu; gb: GB) =
@@ -519,18 +512,13 @@ proc apu_write*(apu: GbApu; idx: int; val: uint8; gb: GB) =
   # Catch the target channel up first: a period / duty / trigger change
   # affects only steps from this cycle on.
   case idx
-  of 0xFF10..0xFF14: ch1_catchup(apu.channel1, gb)
-  of 0xFF16..0xFF19: ch2_catchup(apu.channel2, gb)
-  of 0xFF1A..0xFF1E, 0xFF30..0xFF3F: ch3_catchup(apu.channel3, gb)
-  of 0xFF20..0xFF23: ch4_catchup(apu.channel4, gb)
+  of 0xFF10..0xFF23: apu_catchup_reg(gb, idx - 0xFF10)
+  of 0xFF30..0xFF3F: ch3_catchup(apu.channel3, gb)
   # NR52 power-off rewrites every channel register; sync all four up front.
   of 0xFF26: apu_catchup_all(apu, gb)
   else: discard
   case idx
-  of 0xFF10..0xFF14: ch1_write(apu.channel1, idx, val, gb)
-  of 0xFF16..0xFF19: ch2_write(apu.channel2, idx, val, gb)
-  of 0xFF1A..0xFF1E: ch3_write(apu.channel3, idx, val, gb)
-  of 0xFF20..0xFF23: ch4_write(apu.channel4, idx, val, gb)
+  of 0xFF10..0xFF23: psg_write_reg(gb, idx - 0xFF10, val)
   of 0xFF24:
     apu.left_enable  = (val and 0x80) != 0
     apu.left_volume  = (val and 0x70) shr 4
@@ -594,5 +582,5 @@ proc apu_write*(apu: GbApu; idx: int; val: uint8; gb: GB) =
       # write (gambatte sound/ch2_init_reset_env_counter_timing_{5,7}).
       apu.div_skip = (((gb.timer.tdiv + uint16(APU_POWERON_TAP_LEAD)) shr tap) and 1) != 0
       apu.first_half_of_length_period = apu.div_skip
-  of 0xFF30..0xFF3F: ch3_write(apu.channel3, idx, val, gb)
+  of 0xFF30..0xFF3F: ch3_wave_write(apu.channel3, gb, idx - 0xFF30, val)
   else: discard

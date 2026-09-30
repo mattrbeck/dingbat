@@ -2,7 +2,7 @@
 # All types are declared here; implementation files are `include`d.
 
 import std/[bitops, os, strutils, times]
-import ../common/[input, scheduler, emu, resampler, serialize, timestretch, cheats, atomicfile]
+import ../common/[input, scheduler, emu, resampler, serialize, timestretch, cheats, atomicfile, psg]
 import ../common/lut_macros
 when defined(test_harness):
   import ../common/test_output
@@ -2266,111 +2266,13 @@ type
       wd_tail_dot0*:      int32
       wd_mix_run*:        int32
 
-  # ---- APU Channels (base types) ----
-  GbSoundChannel* = ref object of RootObj
-    enabled*:        bool
-    dac_enabled*:    bool
-    length_counter*: int
-    length_enable*:  bool
-
-  GbVolumeEnvChannel* = ref object of GbSoundChannel
-    starting_volume*:        uint8
-    envelope_add_mode*:      bool
-    period*:                 uint8
-    volume_envelope_timer*:  uint8
-    current_volume*:         uint8
-    vol_env_is_updating*:    bool
-    # An NRx2 write taking the envelope period from zero to non-zero makes the
-    # next EVEN DIV-APU tick clock that channel's envelope (SameSuite
-    # channel_1_nrx2_speed_change); see write_NRx2 and tick_frame_sequencer.
-    # Serialized from GB payload rev 6: a 512 Hz step can span a frame edge.
-    env_extra_tick*:         bool
-
-  GbChannel1* = ref object of GbVolumeEnvChannel
-    wave_duty_position*: int
-    # The square channel's latched duty output: sampled once per duty step and
-    # held, so a mid-sample NR11 duty change is not audible until the next
-    # step (SameSuite channel_1_duty_delay) and a trigger keeps emitting the
-    # previous sample through the startup delay (channel_1_duty, _align).
-    # Refreshed only by ch1_catchup_slow. Serialized from GB payload rev 6.
-    sample_bit*:         uint8
-    # Absolute scheduler cycle of the next duty step, or GB_NO_STEP when the
-    # channel has never been triggered. Replaces a per-period scheduler event:
-    # the duty counter is advanced in closed form when something observes it
-    # (see ch1_catchup). NOT serialized as a field -- savestate.nim converts
-    # it to/from an etAPUChannel1 event so the state format is unchanged.
-    next_step*:          CycleCount
-    sweep_period*:       uint8
-    negate*:             bool
-    shift*:              uint8
-    sweep_timer*:        uint8
-    frequency_shadow*:   uint16
-    sweep_enabled*:      bool
-    negate_used*:        bool
-    # Absolute scheduler cycle of the sweep's second overflow check, or
-    # GB_NO_STEP: it trails the frequency writeback by 7 M-cycles and re-reads
-    # NR10 (GB_SWEEP_CHECK_DELAY). Serialized from GB payload rev 6, with the
-    # two sweep deadlines below and sweep_load_value, as distances from the
-    # payload's scheduler clock.
-    sweep_check_at*:     CycleCount
-    # Absolute scheduler cycle at which a sweep overflow STOP reaches NR52, or
-    # GB_NO_STEP when none is in flight. Every sweep calculation's stop is one
-    # APU tick behind the calculation itself; see GB_SWEEP_STOP_DELAY.
-    sweep_stop_at*:      CycleCount
-    # A trigger's frequency-shadow load in flight: the value NR13/NR14 held when
-    # the channel was triggered, and the absolute scheduler cycle it reaches the
-    # sweep unit's shadow register (GB_NO_STEP when none is pending). The load
-    # does NOT happen on the write; see GB_SWEEP_SHADOW_DELAY.
-    sweep_load_at*:      CycleCount
-    sweep_load_value*:   uint16
-    # Absolute scheduler cycle of the most recent duty step (GB_NO_STEP if
-    # none since the trigger); only ch1_reload_is_now reads it, to tell a
-    # reload on this very cycle from a start delay one period away. Not
-    # serialized: rewritten by the next duty step.
-    last_step_at*:       CycleCount
-    duty*:               uint8
-    length_load*:        uint8
-    frequency*:          uint16
-
-  GbChannel2* = ref object of GbVolumeEnvChannel
-    wave_duty_position*: int
-    sample_bit*:         uint8        # see GbChannel1.sample_bit
-    next_step*:          CycleCount   # see GbChannel1.next_step
-    last_step_at*:       CycleCount   # see GbChannel1.last_step_at; unserialized
-    duty*:               uint8
-    length_load*:        uint8
-    frequency*:          uint16
-
-  GbChannel3* = ref object of GbSoundChannel
-    next_step*:              CycleCount   # see GbChannel1.next_step
-    wave_ram*:               array[16, uint8]
-    wave_ram_position*:      uint8
-    # Whether CH3 has fetched a byte since its last trigger: a trigger reloads
-    # the timer with period + 6 (Pan Docs), so until then there is no "byte CH3
-    # is on" for a DMG wave RAM access to land on (ch3_wave_open). Serialized
-    # from GB payload rev 6.
-    wave_fetched*:           bool
-    wave_ram_sample_buffer*: uint8
-    length_load*:            uint8
-    volume_code*:            uint8
-    volume_code_shift*:      uint8
-    frequency*:              uint16
-
-  GbChannel4* = ref object of GbVolumeEnvChannel
-    next_step*:    CycleCount   # see GbChannel1.next_step
-    lfsr*:         uint16
-    length_load*:  uint8
-    clock_shift*:  uint8
-    width_mode*:   uint8
-    divisor_code*: uint8
-    # The noise timer is two counters: `div_counter` free-runs off the divisor
-    # stage and `clock_shift` picks which bit clocks the LFSR; `div_next` is the
-    # divisor stage's next increment (ch4_steps_to_rise). NR43 selects a new
-    # view of both without restarting either. Serialized from GB payload rev
-    # 6; an older state re-derives them from `next_step` (ch4_resync_divisor),
-    # which a later NR43 write moving the clock shift can tell apart.
-    div_counter*:  uint16
-    div_next*:     CycleCount
+  # ---- APU channels: the shared PSG (common/psg.nim) ----
+  GbSoundChannel* = PsgChannel
+  GbVolumeEnvChannel* = PsgEnvChannel
+  GbChannel1* = PsgSweepSquare
+  GbChannel2* = PsgSquare
+  GbChannel3* = PsgWave
+  GbChannel4* = PsgNoise
 
   GbApu* = ref object
     sound_enabled*:       bool
@@ -3332,11 +3234,8 @@ include mbc/tama5
 # below): an APU power cycle re-aims the DIV-APU edge, because the lag a speed
 # switch leaves on the tap does not survive the power. See APU_SPSW_TAP_LAG_T.
 proc apu_div_phase*(t: GbTimer; gb: GB): int
-include apu/abstract_channels
-include apu/channel1
-include apu/channel2
-include apu/channel3
-include apu/channel4
+include apu/psg_host
+include ../common/psg_channels
 include apu
 # Peripherals: interrupt controller, link port, timer, input
 proc gb_sync_cgb_native*(gb: GB) {.inline.} =
@@ -3554,7 +3453,7 @@ proc gb_dispatch(gb: GB): proc(kind: EventType) {.closure.} =
       gb.scheduler.schedule(apu_div_period(gb), etAPUFrameSeq)
     of etAPUSample:    get_sample(gb.apu, gb)
     # Channels carry a closed-form next_step deadline instead of per-period
-    # events (gb/apu/channel1.nim); these arms are only reachable from a state
+    # events (common/psg.nim PsgChannel.next_step); these arms are only reachable from a state
     # saved by an older build, and dropping the event is the right answer.
     of etAPUChannel1, etAPUChannel2, etAPUChannel3, etAPUChannel4: discard
     of etIME:

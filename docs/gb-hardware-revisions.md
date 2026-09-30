@@ -151,7 +151,7 @@ in `docs/samesuite-apu.md` "Unserialized state".
   later, periods 2 and 7) is the independent check. Only CGB E is tested
   upstream ("Currently, only revision E is tested and documented"); no ROM
   asserts a DMG or CGB ≤ D variant, so none is modelled. Site:
-  `apu/abstract_channels.nim`.
+  `common/psg_channels.nim` (`write_nrx2`).
 - **mealybug's `_dmg_b` captures** (`m3_lcdc_bg_en_change`,
   `m3_lcdc_win_en_change_multiple_wx`, the only two) differ from `_dmg_blob`
   by 228 px and 3 px; dingbat's error on the same rows is 2193 px and

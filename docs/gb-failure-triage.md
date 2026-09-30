@@ -857,7 +857,7 @@ still stepping at the hand-off (NR52 = $F1), frequency $7C1, and
 `ch1_init_pos_{1..8}` pin where in its 2016-cycle duty cycle each boot ROM
 leaves it (728 / 1612, one value of 504). `BOOT_FS_STAGE_{DMG,CGB}`: the
 frame sequencer's step at the hand-off (1 / 0, `ch2_init_env_counter_timing`).
-`ENV_TRIGGER_PRECLOCK_SKIP` (abstract_channels.nim): a trigger inside the
+`ENV_TRIGGER_PRECLOCK_SKIP` (gb/apu/psg_host.nim): a trigger inside the
 sequencer step before the envelope clock, taken 4 T early, misses that clock.
 `SWEEP_TRIGGER_LEAD_T_{DMG,CGB}` = 4 / 8: a trigger that close before a sweep
 clock misses it. `APU_POWERON_TAP_LEAD` = 4 (apu.nim): the tap bit that
@@ -903,7 +903,7 @@ APU power-on keeps the counter's low bits and re-aligns `last` to four
 cycles, a DIV reset re-aligns the counter to 4096, a switch re-reads the
 carried remainder at the new speed, and a square trigger starts from the
 1 MHz edge at or BEFORE the write, the edge picked by the counter's parity.
-`APU_CLOCK_CARRY = 1` (abstract_channels.nim) shadows that clock, takes the
+`APU_CLOCK_CARRY = 1` (gb/apu/psg_host.nim) shadows that clock, takes the
 trigger edge from it and carries every APU deadline across a switch by its
 2 MHz distance (stall extras 5 / 1): all fourteen red rows of H1 and H2 go
 green, nothing else in gambatte moves, and SameSuite

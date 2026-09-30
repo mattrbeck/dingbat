@@ -112,10 +112,10 @@ proc new_apu*(gba: GBA): APU =
     master_volume_factor: 256,
   )
   result.buffer = newSeq[int16](APU_BUFFER_SIZE)
-  result.channel1 = new_channel1(gba)
-  result.channel2 = new_channel2(gba)
-  result.channel3 = new_channel3(gba)
-  result.channel4 = new_channel4(gba)
+  result.channel1 = new_psg_square_sweep()
+  result.channel2 = new_psg_square()
+  result.channel3 = new_psg_wave(banks = 2)
+  result.channel4 = new_psg_noise()
   result.dma_channels = new_dma_channels(gba)
   when not defined(emscripten):
     gba_audio_dump_claim()
@@ -223,10 +223,10 @@ when not defined(test_harness) and not defined(emscripten):
 proc apu_catchup_all*(apu: APU) {.inline.} =
   ## Materialize all four channels at the current cycle (frame sequencer,
   ## SOUNDCNT_X writes, the per-frame rebase, save states).
-  apu.channel1.ch1_catchup()
-  apu.channel2.ch2_catchup()
-  apu.channel3.ch3_catchup()
-  apu.channel4.ch4_catchup()
+  ch1_catchup(apu.channel1, apu.gba)
+  ch2_catchup(apu.channel2, apu.gba)
+  ch3_catchup(apu.channel3, apu.gba)
+  ch4_catchup(apu.channel4, apu.gba)
 
 proc apu_next_step*(apu: APU): CycleCount {.inline.} =
   ## Soonest pending waveform step across the four channels, or GBA_NO_STEP.
@@ -247,7 +247,7 @@ proc apu_rebase*(apu: APU; base: CycleCount) {.inline.} =
   adj(apu.channel2)
   adj(apu.channel3)
   adj(apu.channel4)
-  apu.channel1.ch1_settle()
+  ch1_settle(apu.channel1, apu.gba)
   if apu.channel1.kill_at != GBA_NO_STEP: apu.channel1.kill_at -= base
   if apu.power_on_at != GBA_NO_STEP:
     apu.power_on_at = if apu.power_on_at >= base: apu.power_on_at - base else: GBA_NO_STEP
@@ -272,11 +272,11 @@ proc tick_frame_sequencer*(apu: APU) =
   # sweep_step rewrites CH1's frequency (its step period), so every channel
   # has to be current first
   const OBS = uint32(FRAME_SEQ_PERIOD)
-  apu.channel1.ch1_settle()
-  apu.channel1.ch1_catchup_at(OBS)
-  apu.channel2.ch2_catchup_at(OBS)
-  apu.channel3.ch3_catchup_at(OBS)
-  apu.channel4.ch4_catchup_at(OBS)
+  ch1_settle(apu.channel1, apu.gba)
+  ch1_catchup_at(apu.channel1, apu.gba, OBS)
+  ch2_catchup_at(apu.channel2, apu.gba, OBS)
+  ch3_catchup_at(apu.channel3, apu.gba, OBS)
+  ch4_catchup_at(apu.channel4, apu.gba, OBS)
   if apu.frame_sequencer_stage == PSG_SEQ_SKIP:
     # The edge a master-on skipped: no step; the next one is step 0
     apu.frame_sequencer_stage = 0
@@ -285,39 +285,14 @@ proc tick_frame_sequencer*(apu: APU) =
     return
   if apu.frame_sequencer_stage == PSG_SEQ_FIRST: apu.frame_sequencer_stage = 0
   # A step while the CPU is halted ends channel 1's slow shift-0 timing
-  # (channel1.nim ch1_s0_kill_at). AGB SP: s0path.s / s0trig.s bit 14 switch
+  # (apu/psg_host.nim ch1_s0_kill_at). AGB SP: s0path.s / s0trig.s bit 14 switch
   # the PSG on at payload entry and halt until line 50 -- a halt that spans
   # a step -- and are off the slow timing; s0long.s's halt cells halt 12320
   # cycles from their master-on, less than the earliest step (16384), and
   # stay on it, as do s0long's 262144-cycle spins (steps, but no halt) and
   # s0path's no-halt row. The skipped edge (above) does not count.
   if apu.gba.cpu.halted: apu.channel1.s0_slow = false
-  apu.first_half_of_length_period = (apu.frame_sequencer_stage and 1) == 0
-  case apu.frame_sequencer_stage
-  of 0:
-    apu.channel1.length_step(); apu.channel2.length_step()
-    apu.channel3.length_step(); apu.channel4.length_step()
-  of 1: discard
-  of 2:
-    apu.channel1.length_step(); apu.channel2.length_step()
-    apu.channel3.length_step(); apu.channel4.length_step()
-    apu.channel1.sweep_step()
-  of 3: discard
-  of 4:
-    apu.channel1.length_step(); apu.channel2.length_step()
-    apu.channel3.length_step(); apu.channel4.length_step()
-  of 5: discard
-  of 6:
-    apu.channel1.length_step(); apu.channel2.length_step()
-    apu.channel3.length_step(); apu.channel4.length_step()
-    apu.channel1.sweep_step()
-  of 7:
-    apu.channel1.volume_step()
-    apu.channel2.volume_step()
-    apu.channel4.volume_step()
-  else: discard
-  apu.frame_sequencer_stage += 1
-  if apu.frame_sequencer_stage > 7: apu.frame_sequencer_stage = 0
+  psg_seq_step(apu, apu.gba)
   apu.gba.scheduler.schedule(FRAME_SEQ_PERIOD, etAPUFrameSeq)
 
 proc get_sample*(apu: APU) =
@@ -326,13 +301,13 @@ proc get_sample*(apu: APU) =
   # channel_mask (a debug mute): CH4's shift loop relies on the once-a-frame
   # bound.
   const OBS = uint32(APU_SAMPLE_PERIOD)
-  apu.channel1.ch1_settle()
-  if apu.channel1.enabled: apu.channel1.ch1_catchup_at(OBS)
-  if apu.channel2.enabled: apu.channel2.ch2_catchup_at(OBS)
-  if apu.channel3.enabled: apu.channel3.ch3_catchup_at(OBS)
-  if apu.channel4.enabled: apu.channel4.ch4_catchup_at(OBS)
-  let ch1 = if apu.channel_mask[0]: apu.channel1.ch1_get_amplitude() else: 0'i16
-  let ch2 = if apu.channel_mask[1]: apu.channel2.ch2_get_amplitude() else: 0'i16
+  ch1_settle(apu.channel1, apu.gba)
+  if apu.channel1.enabled: ch1_catchup_at(apu.channel1, apu.gba, OBS)
+  if apu.channel2.enabled: ch2_catchup_at(apu.channel2, apu.gba, OBS)
+  if apu.channel3.enabled: ch3_catchup_at(apu.channel3, apu.gba, OBS)
+  if apu.channel4.enabled: ch4_catchup_at(apu.channel4, apu.gba, OBS)
+  let ch1 = if apu.channel_mask[0]: sq_get_amplitude(apu.channel1) else: 0'i16
+  let ch2 = if apu.channel_mask[1]: sq_get_amplitude(apu.channel2) else: 0'i16
   let ch3 = if apu.channel_mask[2]: apu.channel3.ch3_get_amplitude() else: 0'i16
   let ch4 = if apu.channel_mask[3]: apu.channel4.ch4_get_amplitude() else: 0'i16
   # PSG volume, GBATEK SOUNDCNT_H bits 0-1: "0=25%, 1=50%, 2=100%,
@@ -542,22 +517,32 @@ proc get_sample*(apu: APU) =
       apu.buffer_pos = 0
   apu.gba.scheduler.schedule(APU_SAMPLE_PERIOD, etAPUSample)
 
+proc gba_psg_read(gba: GBA; address: uint32): uint8 =
+  ## Unused and write-only bits read 0 (the mGBA suite's I/O read tests).
+  let nr = int(GBA_PSG_NR[int(address)])
+  if nr < 0: return 0'u8
+  result = psg_read_bits(gba, nr)
+  let ch3 = gba.apu.channel3
+  if nr == NR30:
+    result = result or (ch3.wave_ram_bank shl 6) or
+             (if ch3.wave_ram_dimension: 0x20'u8 else: 0'u8)
+  elif nr == NR32:
+    result = result or (if ch3.volume_force: 0x80'u8 else: 0'u8)
+
 proc `[]`*(apu: APU; io_addr: uint32): uint8 =
   # Only wave RAM needs a sync (it resolves against wave_ram_position while
   # CH3 is enabled); no catch-up ever writes `enabled`
   if io_addr >= WAVE_RAM_LOW and io_addr <= WAVE_RAM_HIGH:
-    apu.channel3.ch3_catchup()
-  if ch1_in_range(io_addr):      apu.channel1.ch1_read(io_addr)
-  elif ch2_in_range(io_addr):    apu.channel2.ch2_read(io_addr)
-  elif ch3_in_range(io_addr):    apu.channel3.ch3_read(io_addr)
-  elif ch4_in_range(io_addr):    apu.channel4.ch4_read(io_addr)
+    ch3_catchup(apu.channel3, apu.gba)
+    ch3_wave_read(apu.channel3, apu.gba, int(io_addr - WAVE_RAM_LOW))
+  elif psg_in_range(io_addr):    gba_psg_read(apu.gba, io_addr)
   elif dma_channels_in_range(io_addr): apu.dma_channels.dma_channels_read(io_addr)
   else:
     case io_addr
     of 0x80..0x81: read(apu.soundcnt_l, io_addr and 1)
     of 0x82..0x83: read(apu.soundcnt_h, io_addr and 1)
     of 0x84:
-      apu.channel1.ch1_settle()
+      ch1_settle(apu.channel1, apu.gba)
       (if apu.sound_enabled: 0x80'u8 else: 0'u8) or
       (if apu.channel4.enabled: 0b1000'u8 else: 0'u8) or
       (if apu.channel3.enabled: 0b0100'u8 else: 0'u8) or
@@ -576,20 +561,21 @@ proc `[]=`*(apu: APU; io_addr: uint32; value: uint8) =
   # Materialize the target channel BEFORE the write lands, so a period /
   # duty / bank / trigger change only affects steps from this cycle on
   if ch1_in_range(io_addr):
-    apu.channel1.ch1_settle()
-    apu.channel1.ch1_catchup()
-  elif ch2_in_range(io_addr):    apu.channel2.ch2_catchup()
-  elif ch3_in_range(io_addr):    apu.channel3.ch3_catchup()
-  elif ch4_in_range(io_addr):    apu.channel4.ch4_catchup()
+    ch1_settle(apu.channel1, apu.gba)
+    ch1_catchup(apu.channel1, apu.gba)
+  elif ch2_in_range(io_addr):    ch2_catchup(apu.channel2, apu.gba)
+  elif ch3_in_range(io_addr):    ch3_catchup(apu.channel3, apu.gba)
+  elif ch4_in_range(io_addr):    ch4_catchup(apu.channel4, apu.gba)
   elif io_addr == 0x84:
     # SOUNDCNT_X: sync all four so the power-on reset does not depend on the
     # power-off arm's recursion through the branches above
-    apu.channel1.ch1_settle()
+    ch1_settle(apu.channel1, apu.gba)
     apu.apu_catchup_all()
-  if ch1_in_range(io_addr):      apu.channel1.ch1_write(io_addr, value)
-  elif ch2_in_range(io_addr):    apu.channel2.ch2_write(io_addr, value)
-  elif ch3_in_range(io_addr):    apu.channel3.ch3_write(io_addr, value)
-  elif ch4_in_range(io_addr):    apu.channel4.ch4_write(io_addr, value)
+  if psg_in_range(io_addr):
+    let nr = int(GBA_PSG_NR[int(io_addr)])
+    if nr >= 0: psg_write_reg(apu.gba, nr, value)
+  elif io_addr >= WAVE_RAM_LOW and io_addr <= WAVE_RAM_HIGH:
+    ch3_wave_write(apu.channel3, apu.gba, int(io_addr - WAVE_RAM_LOW), value)
   elif dma_channels_in_range(io_addr): apu.dma_channels.dma_channels_write(io_addr, value)
   else:
     case io_addr
@@ -608,7 +594,7 @@ proc `[]=`*(apu: APU; io_addr: uint32; value: uint8) =
           apu[addr] = 0x00'u8
         apu.sound_enabled = false
         # The sweep unit's shadow frequency goes with the power: a note after
-        # a master off/on is checked as fresh (channel1.nim, trigger check).
+        # a master off/on is checked as fresh (psg_channels.nim ch1_trigger_sweep).
         apu.channel1.frequency_shadow = 0
         when FIFO_MASTER_RESET:
           apu.dma_channels.fifo_reset(0)
@@ -629,7 +615,7 @@ proc `[]=`*(apu: APU; io_addr: uint32; value: uint8) =
         # after", and with "after" all five of dbsuite's lone sweeptrig.s
         # rows land as on the console), and the 512 Hz edges move onto their
         # grid (PSG_SEQ_GRID). Channel 1's shift-0 check is armed and on its
-        # slow timing (channel1.nim ch1_s0_kill_at).
+        # slow timing (apu/psg_host.nim ch1_s0_kill_at).
         let at = apu.gba.scheduler.cycles + 1
         let anchor = at + CycleCount((PSG_S0_APU_PHASE + 4 - uint32(at and 3)) and 3)
         apu.channel1.s0_anchor = uint8(anchor and 15)

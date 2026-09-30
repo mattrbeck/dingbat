@@ -559,7 +559,7 @@ proc save_apu_state(apu: GbApu; gb: GB; w: var Writer) =
   block:
     let ch = apu.channel3
     save_channel_base(ch, w)
-    w.write_bytes(ch.wave_ram)
+    w.write_bytes(ch.wave_ram.toOpenArray(0, PSG_WAVE_BANK - 1))
     w.write_u8(ch.wave_ram_position)
     w.write_u8(ch.wave_ram_sample_buffer)
     w.write_u8(ch.length_load)
@@ -639,7 +639,7 @@ proc load_apu_state(apu: GbApu; gb: GB; r: var Reader; rev: uint32) =
   block:
     let ch = apu.channel3
     load_channel_base(ch, r)
-    r.read_bytes(ch.wave_ram)
+    r.read_bytes(ch.wave_ram.toOpenArray(0, PSG_WAVE_BANK - 1))
     # 5-bit nibble counter: indexes `wave_ram[wave_ram_position div 2]`.
     ch.wave_ram_position = r.read_u8() and 31
     ch.wave_ram_sample_buffer = r.read_u8()

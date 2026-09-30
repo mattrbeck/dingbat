@@ -3,7 +3,7 @@
 
 import std/[options, times, os, strutils, math, sets, tables]
 from std/bitops import countLeadingZeroBits, countTrailingZeroBits
-import ../common/[util, input, scheduler, emu, resampler, serialize, timestretch, cheats, atomicfile]
+import ../common/[util, input, scheduler, emu, resampler, serialize, timestretch, cheats, atomicfile, psg]
 when defined(test_harness):
   import ../common/test_output
 import ../common/lut_macros
@@ -869,87 +869,13 @@ type
     cont_objv*:     array[CONT_WORDS, uint32]
     cont_oam*:      array[CONT_WORDS, uint32]
 
-  SoundChannel* = ref object of RootObj
-    gba* {.cursor.}:            GBA
-    enabled*:        bool
-    dac_enabled*:    bool
-    length_counter*: int
-    length_enable*:  bool
-
-  VolumeEnvelopeChannel* = ref object of SoundChannel
-    starting_volume*:          uint8
-    envelope_add_mode*:        bool
-    period_ve*:                uint8
-    volume_envelope_timer*:    uint8
-    current_volume*:           uint8
-    volume_envelope_is_updating*: bool
-
-  Channel1* = ref object of VolumeEnvelopeChannel
-    wave_duty_position*: int
-    # Absolute cycle of the next waveform step, or GBA_NO_STEP if never
-    # triggered. Advanced in closed form at observation points (apu.nim)
-    # rather than by a scheduler event. Not serialized as a field:
-    # savestate.nim converts it to/from an etAPUChannel1 event.
-    next_step*:          CycleCount
-    # Delay the pending step was armed with; reproduces the scheduler's
-    # tie-break when a step lands exactly on an observer's cycle
-    # (gba_steps_due). In the state's in-flight section (rev 9); rebuilt
-    # from the period on loading an older state.
-    arm_delay*:          uint32
-    sweep_period*:       uint8
-    negate*:             bool
-    shift_ch1*:          uint8
-    sweep_timer*:        uint8
-    frequency_shadow*:   uint16
-    sweep_enabled*:      bool
-    negate_has_been_used*: bool
-    duty*:               uint8
-    length_load*:        uint8
-    frequency_ch1*:      uint16
-    # The AGB's shift-0 trigger check is armed (channel1.nim). Saved in
-    # bit 15 of frequency_shadow's field; the format has no bit of its own.
-    sweep_armed*:        bool
-    # scheduler.cycles mod 16 of the 4 MHz edge a master-on restarted the
-    # PSG's dividers on (channel1.nim ch1_s0_kill_at). Saved in the high
-    # nibble of sweep_timer's byte.
-    s0_anchor*:          uint8
-    # The shift-0 check's slow timing (channel1.nim ch1_s0_kill_at). Saved in
-    # bit 7 of sweep_period's byte.
-    s0_slow*:            bool
-    # Cycle a failed shift-0 trigger check stops the channel, or GBA_NO_STEP
-    # (at most 13 cycles ahead). Saved as a distance in bits 11..14 of
-    # frequency_shadow's field.
-    kill_at*:            CycleCount
-
-  Channel2* = ref object of VolumeEnvelopeChannel
-    wave_duty_position*: int
-    next_step*:          CycleCount   # see Channel1.next_step
-    arm_delay*:          uint32       # see Channel1.arm_delay
-    duty*:               uint8
-    length_load*:        uint8
-    frequency_ch2*:      uint16
-
-  Channel3* = ref object of SoundChannel
-    next_step*:             CycleCount   # see Channel1.next_step
-    arm_delay*:             uint32       # see Channel1.arm_delay
-    wave_ram*:              array[2, seq[byte]]
-    wave_ram_position*:     uint8
-    wave_ram_sample_buffer*: uint8
-    wave_ram_dimension*:    bool
-    wave_ram_bank*:         uint8
-    length_load_ch3*:       uint8
-    volume_code*:           uint8
-    volume_force*:          bool
-    frequency_ch3*:         uint16
-
-  Channel4* = ref object of VolumeEnvelopeChannel
-    next_step*:     CycleCount   # see Channel1.next_step
-    arm_delay*:     uint32       # see Channel1.arm_delay
-    lfsr*:          uint16
-    length_load_ch4*: uint8
-    clock_shift*:   uint8
-    width_mode*:    uint8
-    divisor_code*:  uint8
+  # ---- PSG channels: the shared PSG (common/psg.nim) ----
+  SoundChannel* = PsgChannel
+  VolumeEnvelopeChannel* = PsgEnvChannel
+  Channel1* = PsgSweepSquare
+  Channel2* = PsgSquare
+  Channel3* = PsgWave
+  Channel4* = PsgNoise
 
   DMAChannels* = ref object
     gba* {.cursor.}:       GBA
@@ -1704,11 +1630,8 @@ when defined(mp2kwav):  # throwaway A/B capture buffers (see mp2k.nim)
   var dbgStartIgnored*: int = 0
   var dbgStartUnclear*: int = 0
 # Audio: PSG channels 1-4 + the two FIFO (DMA) channels, then the mixer
-include apu/abstract_channels
-include apu/channel1
-include apu/channel2
-include apu/channel3
-include apu/channel4
+include apu/psg_host
+include ../common/psg_channels
 include apu/dma_channels
 include apu
 # Scheduler-driven peripherals: timers, SIO, DMA
@@ -2088,9 +2011,8 @@ proc post_init*(gba: GBA) =
     # writes alongside these are write-only.
     gba.apu.soundcnt_h = cast[SOUNDCNT_H](0x000E'u16)
     # The BIOS clears wave RAM; a cold Channel3 holds the GB power-on pattern
-    for bank in 0..1:
-      for idx in 0 ..< WAVE_RAM_SIZE:
-        gba.apu.channel3.wave_ram[bank][idx] = 0
+    for i in 0 ..< 2 * PSG_WAVE_BANK:
+      gba.apu.channel3.wave_ram[i] = 0
     gba.ppu.skip_boot_phase()
 
 proc handle_saves*(gba: GBA) =

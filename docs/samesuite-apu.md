@@ -197,9 +197,9 @@ reconstructs it. Serialising them costs a GB payload revision bump; if one happe
 reason, add all of them:
 
 `GbApu.tick_phase`, `GbApu.div_skip`, `GbApu.noise_phase`, `GbChannel1/2.sample_bit`,
-`GbChannel1/2.last_step_at` (cleared by `apu_rebase`), `GbChannel1.sweep_check_at`
+`PsgSquare.last_step_at` (cleared by `apu_rebase`), `PsgSweepSquare.sweep_check_at`
 (cleared on CH1 state load so a stale deadline cannot fire against loaded registers),
-`GbChannel3.wave_fetched`, `GbVolumeEnvChannel.env_extra_tick`, `GbChannel4.div_counter` /
+`PsgWave.wave_fetched`, `PsgEnvChannel.env_extra_tick`, `PsgNoise.div_counter` /
 `div_next` (re-derived from the restored `next_step` by `ch4_resync_divisor`),
 `GB.revision`, and `GbMemory.unusable` (the 96 bytes of `$FEA0-$FEFF` a CGB 0–D answers
 reads from; plain RAM, the weakest member on principle, but only test ROMs are known to
