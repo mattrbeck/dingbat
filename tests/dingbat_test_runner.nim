@@ -85,11 +85,26 @@ type
     timed_out: bool
 
 
-proc has_rom_files(dir: string): bool =
-  for path in walkDirRec(dir):
-    if path.endsWith(".gb"):
-      return true
-  false
+const TreeStamp = ".dingbat-files"
+
+proc stamp_tree(dir: string) =
+  ## List every file an extracted tree holds, for tree_intact. The local
+  ## cache lives in /tmp, where the OS deletes files nobody has read for a
+  ## while (macOS: three days) and leaves the directories: a tree that still
+  ## looked populated was missing ROMs, and those rows failed as regressions.
+  var files: seq[string]
+  for path in walkDirRec(dir, relative = true):
+    files.add path
+  writeFile(dir / TreeStamp, files.join("\n"))
+
+proc tree_intact(dir: string): bool =
+  ## Is every file stamp_tree listed still there? No stamp (a cache from
+  ## before the stamp) counts as not intact, so it is fetched again once.
+  let stamp = dir / TreeStamp
+  if not fileExists(stamp): return false
+  for rel in readFile(stamp).splitLines:
+    if rel.len > 0 and not fileExists(dir / rel): return false
+  true
 
 proc download_file(url, path: string) =
   ## Fetch `url` to `path`. curl retries transient failures itself
@@ -110,10 +125,10 @@ const GbBundleVersion = "v7.0"
 
 proc ensure_gameboy_test_roms(): string =
   let dir = RomCacheDir / "game-boy-test-roms"
-  if dirExists(dir) and has_rom_files(dir):
+  if dirExists(dir) and tree_intact(dir):
     return dir
   if dirExists(dir):
-    echo "Cached game-boy-test-roms directory has no ROMs, re-downloading..."
+    echo "Cached game-boy-test-roms directory is incomplete, re-downloading..."
     removeDir(dir)
   echo "Downloading game-boy-test-roms release..."
   createDir(RomCacheDir)
@@ -135,6 +150,7 @@ proc ensure_gameboy_test_roms(): string =
     removeFile(zipfile)
     quit(1)
   removeFile(zipfile)
+  stamp_tree(staging)
   try:
     moveDir(staging, dir)
   except OSError:
@@ -1452,7 +1468,7 @@ proc ensure_jsmolka_test_roms(): string =
   ## so there is nothing to build.
   let dir = RomCacheDir / "gba-tests-" & JsmolkaRev[0 ..< 7]
   let inner = dir / "gba-tests-" & JsmolkaRev
-  if fileExists(inner / "arm" / "arm.gba"):
+  if tree_intact(dir):
     return inner
   if dirExists(dir): removeDir(dir)
   echo "Downloading jsmolka/gba-tests..."
@@ -1467,6 +1483,7 @@ proc ensure_jsmolka_test_roms(): string =
     removeFile(zipfile)
     quit(1)
   removeFile(zipfile)
+  stamp_tree(dir)
   inner
 
 # alyosha-tas/gba-tests (MIT), which extends the jsmolka framework with DMA,
@@ -1479,7 +1496,7 @@ proc ensure_github_tree(repo, rev, prefix: string): string =
   ## Fetch (and cache) a GitHub repo at a commit; returns the extracted tree.
   let dir = RomCacheDir / prefix & "-" & rev[0 ..< 7]
   let inner = dir / repo.split('/')[1] & "-" & rev
-  if dirExists(inner): return inner
+  if tree_intact(dir): return inner
   if dirExists(dir): removeDir(dir)
   echo &"Downloading {repo}..."
   createDir(RomCacheDir)
@@ -1493,6 +1510,7 @@ proc ensure_github_tree(repo, rev, prefix: string): string =
     removeFile(zipfile)
     quit(1)
   removeFile(zipfile)
+  stamp_tree(dir)
   inner
 
 proc build_alyosha_tests(alyosha, png183, jsmolka: string): seq[TestDef] =
