@@ -94,14 +94,7 @@ proc new_ppu_base(cgb: bool): GbPpu =
   result.hdma_dst = 0xFFF0'u16
   result.ran_bios = cgb
 
-method reset_render_scratch*(ppu: GbPpu) {.base.} =
-  ## Reset the renderer's per-line scratch. Save states do not serialize it
-  ## (it is rebuilt at every mode 2 -> 3 edge and never read at vblank), so a
-  ## rollback restore onto a RUNNING core must clear it here. The scanline
-  ## renderer rebuilds per line and needs nothing.
-  discard
-
-method skip_boot*(ppu: GbPpu; gb: GB) {.base.} =
+proc skip_boot*(ppu: GbPpu; gb: GB) =
   # The HLE hand-off writes LCDC = $91 with LY still 0, which latches
   # window_trigger against WY = 0 and carries it into the first drawn frame
   # (gambatte window/*). The boot ROM ends in VBlank with the latch clear.
@@ -271,9 +264,8 @@ template mixer_write_repaint(gb: GB; back: int32; latency: int32;
   ## of write latency for that register, `skip` = pixels the caller already
   ## painted. `-d:MIXER_DOT_LAG=0` compiles the mixer's dot out (A/B control).
   when MIXER_DOT_LAG != 0:
-    if gb.fifo_ppu != nil:
-      let n = back - latency
-      if n > 0: fifo_recompose_last(gb.fifo_ppu, gb, n, skip)
+    let n = back - latency
+    if n > 0: fifo_recompose_last(gb.fifo_ppu, gb, n, skip)
 
 proc bg_window_tile_data*(ppu: GbPpu): uint8 {.inline.} = ppu.lcd_control and 0x10
 proc bg_tile_map*(ppu: GbPpu): uint8 {.inline.} = ppu.lcd_control and 0x08
@@ -611,8 +603,7 @@ proc cpu_oam_open*(ppu: GbPpu; is_write: bool; mcycle_dots: int32 = 0;
             return true
         # Mode 2 always ends at dot 80 and the OAM scan releases the bus before
         # the CPU's write strobe, so "does this M-cycle span dot 80" is the
-        # test. mcycle_dots is 4, or 2 in double speed. Exact for the FIFO
-        # renderer; the scanline renderer can answer an M-cycle early here.
+        # test. mcycle_dots is 4, or 2 in double speed.
         return ppu.cycle_counter + mcycle_dots > 80
       return true
     else:
@@ -745,13 +736,12 @@ proc oam_bug_access*(gb: GB; kind: OamBugKind) {.noinline.} =
   # The LCD-on line's mode 2 does not lock OAM (cpu_oam_open); whether it
   # corrupts is not pinned by any blargg row, so follow the lock.
   if ppu.first_line: return
-  # cycle_counter is the dot this M-cycle starts on (1-based in the FIFO
-  # renderer) and the scan reads one row per four dots, so this M-cycle is on
+  # cycle_counter is the dot this M-cycle starts on (1-based) and the scan
+  # reads one row per four dots, so this M-cycle is on
   # row ceil(cc / 4). Rows 1..19 only: row 20 reaches dot 80, where the scan
   # has let go (blargg 4-scanline_timing test 5), and row 0 is Pan Docs'
   # "objects 0 and 1 are not affected". The absolute row assignment is pinned
-  # by blargg 7-timing_effect's CRC ($7D792E7C). The scanline renderer's
-  # counter restarts per mode, so there the window is one M-cycle out of phase.
+  # by blargg 7-timing_effect's CRC ($7D792E7C).
   let row = (int(ppu.cycle_counter) + 3) shr 2
   if row <= 0 or row >= 20: return
   when defined(gb_oam_trace): echo "  -> corrupt row ", row
@@ -878,8 +868,7 @@ proc stat_m0_tail(ppu: GbPpu; gb: GB): int32 {.noinline.} =
     # (gambatte sprites/*_m3stat_ds_1). Off by default; the shipping tail is 0.
     tail = tail shr gb.memory.current_speed
   when STAT_M0_TAIL_ANY and STAT_M0_FIELD_TAIL_ABSORB:
-    if gb.fifo_ppu != nil:
-      tail = max(0'i32, tail - gb.fifo_ppu.obj_dots_line)
+    tail = max(0'i32, tail - gb.fifo_ppu.obj_dots_line)
   when STAT_M0_TAIL_MAX_MC != 0:
     # Which M-cycle of its own instruction this read is. Only the forms that
     # can address $FF41 need distinguishing; nothing else can be reading STAT.
@@ -1014,10 +1003,7 @@ const STAT_M2_EARLY* = STAT_M2_LEAD != 0 or STAT_M2_LEAD_CGB != 0
 
 template m2_lead_console_cgb*(gb: GB): bool =
   ## The console the lead is gated on; must match CGB_PIPE_MCYCLES's gate.
-  ## Read off `gb`, not `fifo_ppu`: the scanline renderer reaches these readers
-  ## with `gb.fifo_ppu == nil` (ppu_handle_stat_interrupt runs during
-  ## skip_boot), and a nil guard in the dot loop costs +0.67% of retired
-  ## instructions on cgb-acid-hell.
+  ## Read off `gb`, not `fifo_ppu`: one dereference fewer in the dot loop.
   gb.cgb_enabled
 
 template m2_lead_mcycles*(gb: GB): int32 =
@@ -1488,10 +1474,6 @@ template stat_write_drop_enables*(ppu: GbPpu; val: uint8): uint8 =
   else:
     (ppu.lcd_status and 0b1000_0111'u8) or (val and 0b0111_1000'u8)
 
-const STAT_DROP_DOT_FLOOR* = -1024'i32
-  ## Where stat_drop_rebase stops moving an expired drop's dot (well past any
-  ## line, well inside int32).
-
 proc stat_drop_arm*(ppu: GbPpu; gb: GB; en, lyc: uint8; lat_dots: int32) =
   ## A STAT or LYC write commits: its effect reaches the line
   ## STAT_ENABLE_LATENCY dots later (CGB_STAT_ENABLE_LATENCY on CGB), and a
@@ -1515,20 +1497,6 @@ proc stat_drop_arm*(ppu: GbPpu; gb: GB; en, lyc: uint8; lat_dots: int32) =
     ppu.stat_drop_pending = true
     ppu.stat_drop_level = level
     ppu.stat_drop_dot = ppu.cycle_counter + lat
-
-template stat_drop_rebase*(ppu: GbPpu; by: int32) =
-  ## The scanline renderer restarts its counter at every mode boundary
-  ## (`by` = the dots it gives back): move a pending drop's dot with it, so
-  ## stat_drop_settle measures it in the same counter. Without this a drop
-  ## armed late in a mode was measured against a counter just restarted near
-  ## 0, read as still in the future at every later source change, and stayed
-  ## pending for good -- across lines, V-blank and frames (the state soak
-  ## found it at frame boundaries), its level refreshed against sources it
-  ## never saw. The FIFO renderer's counter runs the whole line and its
-  ## settle already allows for the wrap. An expired drop only goes further
-  ## into the past, floored so it cannot wrap; it lands at the next settle.
-  if ppu.stat_drop_pending:
-    ppu.stat_drop_dot = max(ppu.stat_drop_dot - by, STAT_DROP_DOT_FLOOR)
 
 proc stat_drop_settle(ppu: GbPpu; gb: GB) {.noinline.} =
   ## The pending drop of stat_drop_arm, at a source change: past the latency
@@ -1887,7 +1855,7 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
   # of the frame draws nothing (hardware: gbprobe probe_g_wy1 on AGB SP,
   # docs/hwprobe-questions.md row 19).
   elif mode == 2 and WIN_LINE0_CHECK_DOT_CGB != 0 and ppu.ly == 0'u8 and
-       gb.cgb_enabled and gb.fifo_ppu != nil:
+       gb.cgb_enabled:
     # Line 0's check runs WIN_LINE0_CHECK_DOT_CGB dots in (gb.nim).
     ppu.win_check_dot =
       if gb.memory.current_speed != 0'u8: int32(WIN_LINE0_CHECK_DOT_CGB_DS)
@@ -1896,7 +1864,7 @@ proc `mode_flag=`*(ppu: GbPpu; mode: uint8; gb: GB) =
     when defined(gb_win_trace):
       echo "WYLATCH ly=", ppu.ly, " wy=", ppu.wy, " dot=", ppu.cycle_counter
     ppu.window_trigger = true
-    if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
+    fifo_arm_window(gb.fifo_ppu)
   if mode != prev_mode:
     # The one write the STAT readback needs: `cycle_counter` is the FIRST dot
     # of the new mode, which stat_read_mode's threshold is measured from.
@@ -2249,15 +2217,14 @@ proc ppu_store_scx*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   ppu.scx = val
   # The fetcher's SCX term carries a borrow off the line's latched fine scroll
   # (SCX_FINE_BORROW, fifo_ppu); re-derived here, not at every fetch.
-  if gb.fifo_ppu != nil:
-    fifo_arm_scx(gb.fifo_ppu)
-    when SCX_STORE_STALL_DOTS != 0:
-      fifo_scx_store_stall(gb.fifo_ppu, old_scx)
+  fifo_arm_scx(gb.fifo_ppu)
+  when SCX_STORE_STALL_DOTS != 0:
+    fifo_scx_store_stall(gb.fifo_ppu, old_scx)
 
 proc ppu_store_wx*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   fifo_sync(gb)
   ppu.wx = val
-  if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
+  fifo_arm_window(gb.fifo_ppu)
 
 template win_check_defer*(gb: GB): int32 =
   ## WIN_CHECK_DEFER_* for this console, in dots of this speed.
@@ -2285,13 +2252,12 @@ proc win_check_now*(ppu: GbPpu; gb: GB) =
       echo "WYCHECK ly=", ppu.ly, " cmp=", cmp_ly, " wy=", ppu.wy, " dot=", ppu.cycle_counter
     let was = ppu.window_trigger
     ppu.window_trigger = true
-    if gb.fifo_ppu != nil:
-      fifo_arm_window(gb.fifo_ppu)
-      when WIN_HEAD_LATE_DOT != 0:
-        # A match just past the head's window-line decision (WIN_HEAD_LATE_DOT).
-        if not was and (ppu.lcd_status and 3'u8) == 3'u8 and
-           ppu.cycle_counter <= int32(WIN_HEAD_LATE_DOT) + int32(ppu.scx and 7):
-          fifo_head_window_late(gb.fifo_ppu)
+    fifo_arm_window(gb.fifo_ppu)
+    when WIN_HEAD_LATE_DOT != 0:
+      # A match just past the head's window-line decision (WIN_HEAD_LATE_DOT).
+      if not was and (ppu.lcd_status and 3'u8) == 3'u8 and
+         ppu.cycle_counter <= int32(WIN_HEAD_LATE_DOT) + int32(ppu.scx and 7):
+        fifo_head_window_late(gb.fifo_ppu)
   when WIN_CHECK_TWO_SLOTS != 0:
     # A later sample queued behind this one (win_check_schedule).
     if gb.win_check_gap > 0:
@@ -2323,12 +2289,12 @@ proc ppu_latch_wy*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   ## CGB_WY_LATCH_LATENCY); `ppu.ly` is read here for that reason.
   fifo_sync(gb)
   when WIN_CHECK_DEFER_ANY:
-    if gb.fifo_ppu != nil and win_check_defer(gb) != 0: return
+    if win_check_defer(gb) != 0: return
   if ppu.ly == val and (ppu.lcd_status and 3'u8) != 1'u8 and ppu.lcd_enabled and
      window_enabled(ppu) and
      (WIN_LATCH_END_DMG == 0 or ppu.cycle_counter < int32(WIN_LATCH_END_DMG)):
     ppu.window_trigger = true
-    if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
+    fifo_arm_window(gb.fifo_ppu)
 
 proc ppu_store_lcdc*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   fifo_sync(gb)
@@ -2339,7 +2305,7 @@ proc ppu_store_lcdc*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   let moved = ppu.lcd_control xor val
   let flip2 = (moved and 0x04'u8) != 0
   when WIN_CHECK_DEFER_ANY:
-    if (moved and val and 0x20'u8) != 0 and gb.fifo_ppu != nil and
+    if (moved and val and 0x20'u8) != 0 and
        win_check_defer(gb) != 0:
       win_check_schedule(ppu, gb, win_check_defer(gb))
   when defined(gb_lcdc2_trace):
@@ -2354,46 +2320,45 @@ proc ppu_store_lcdc*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   if (moved and val and 0x20'u8) != 0 and ppu.ly == ppu.wy and
      (ppu.lcd_status and 3'u8) != 1'u8 and ppu.lcd_enabled:
     when WIN_CHECK_DEFER_ANY:
-      if gb.fifo_ppu == nil or win_check_defer(gb) == 0: ppu.window_trigger = true
+      if win_check_defer(gb) == 0: ppu.window_trigger = true
     else:
       ppu.window_trigger = true
-  if gb.fifo_ppu != nil:
-    when CGB_WE_DISABLE_LATE != 0:
-      # The fall's own latency to the window abort (CGB_WE_DISABLE_LATE).
-      if (moved and 0x20'u8) != 0 and (val and 0x20'u8) == 0'u8:
-        gb.we_off_dot = ppu.cycle_counter + int32(CGB_WE_DISABLE_LATE)
-    fifo_arm_window(gb.fifo_ppu)
-    when WIN_REVOKE_DS_PUSH != 0:
-      if (moved and 0x20'u8) != 0 and (val and 0x20'u8) == 0'u8 and gb.wd_ds_push:
-        win_revoke_ds_push(gb.fifo_ppu, gb)
-    when CGB_WE_ENABLE_LATE != 0:
-      # A CGB LCDC.5 rise reaches the comparator a dot late at single speed,
-      # like a WX store (CGB_WX_LATE_SS): a match on this very dot is missed.
-      if (moved and val and 0x20'u8) != 0 and gb.fifo_ppu.cgb and
-         gb.memory.current_speed == 0'u8 and (ppu.lcd_status and 3'u8) == 3'u8 and
-         not gb.fifo_ppu.fetching_window and gb.fifo_ppu.lx == gb.fifo_ppu.win_lx and
-         gb.fifo_ppu.fifo.size > 0:
-        gb.fifo_ppu.win_lx = WIN_LX_OFF_V
-    when CGB_TDSEL_ANY:
-      if (moved and 0x10'u8) != 0 and gb.fifo_ppu.cgb:
-        # The dot the fetcher sees it on. A CPU-clock delay, so a double-speed
-        # M-cycle spends it inside itself (gambatte bgtiledata brackets it;
-        # CGB_TDSEL_LATENCY, gb.nim).
-        gb.fifo_ppu.tdsel_dot = ppu.cycle_counter +
-          int32(max(0, CGB_TDSEL_LATENCY - int(gb.memory.current_speed)))
-    when CGB_MAP_ANY:
-      # LCDC.3 and LCDC.6 at the fetcher's map-address read; same shape.
-      # `map_old` is the pair BEFORE this write, which a read still inside the
-      # latency uses (CGB_MAP_LATENCY, gb.nim).
-      if (moved and 0x48'u8) != 0 and gb.fifo_ppu.cgb:
-        gb.fifo_ppu.map_old = (val xor moved) and 0x48'u8
-        gb.fifo_ppu.map_dot = ppu.cycle_counter +
-          int32(max(0, CGB_MAP_LATENCY - int(gb.memory.current_speed)))
-    if flip2:
-      ppu.lcdc2_flip[1] = ppu.lcdc2_flip[0]
-      ppu.lcdc2_flip[0] = ppu.cycle_counter
-      if gb.fifo_ppu.obj_fix_from <= ppu.cycle_counter:
-        fifo_obj_size_write(gb.fifo_ppu, gb)
+  when CGB_WE_DISABLE_LATE != 0:
+    # The fall's own latency to the window abort (CGB_WE_DISABLE_LATE).
+    if (moved and 0x20'u8) != 0 and (val and 0x20'u8) == 0'u8:
+      gb.we_off_dot = ppu.cycle_counter + int32(CGB_WE_DISABLE_LATE)
+  fifo_arm_window(gb.fifo_ppu)
+  when WIN_REVOKE_DS_PUSH != 0:
+    if (moved and 0x20'u8) != 0 and (val and 0x20'u8) == 0'u8 and gb.wd_ds_push:
+      win_revoke_ds_push(gb.fifo_ppu, gb)
+  when CGB_WE_ENABLE_LATE != 0:
+    # A CGB LCDC.5 rise reaches the comparator a dot late at single speed,
+    # like a WX store (CGB_WX_LATE_SS): a match on this very dot is missed.
+    if (moved and val and 0x20'u8) != 0 and gb.fifo_ppu.cgb and
+       gb.memory.current_speed == 0'u8 and (ppu.lcd_status and 3'u8) == 3'u8 and
+       not gb.fifo_ppu.fetching_window and gb.fifo_ppu.lx == gb.fifo_ppu.win_lx and
+       gb.fifo_ppu.fifo.size > 0:
+      gb.fifo_ppu.win_lx = WIN_LX_OFF_V
+  when CGB_TDSEL_ANY:
+    if (moved and 0x10'u8) != 0 and gb.fifo_ppu.cgb:
+      # The dot the fetcher sees it on. A CPU-clock delay, so a double-speed
+      # M-cycle spends it inside itself (gambatte bgtiledata brackets it;
+      # CGB_TDSEL_LATENCY, gb.nim).
+      gb.fifo_ppu.tdsel_dot = ppu.cycle_counter +
+        int32(max(0, CGB_TDSEL_LATENCY - int(gb.memory.current_speed)))
+  when CGB_MAP_ANY:
+    # LCDC.3 and LCDC.6 at the fetcher's map-address read; same shape.
+    # `map_old` is the pair BEFORE this write, which a read still inside the
+    # latency uses (CGB_MAP_LATENCY, gb.nim).
+    if (moved and 0x48'u8) != 0 and gb.fifo_ppu.cgb:
+      gb.fifo_ppu.map_old = (val xor moved) and 0x48'u8
+      gb.fifo_ppu.map_dot = ppu.cycle_counter +
+        int32(max(0, CGB_MAP_LATENCY - int(gb.memory.current_speed)))
+  if flip2:
+    ppu.lcdc2_flip[1] = ppu.lcdc2_flip[0]
+    ppu.lcdc2_flip[0] = ppu.cycle_counter
+    if gb.fifo_ppu.obj_fix_from <= ppu.cycle_counter:
+      fifo_obj_size_write(gb.fifo_ppu, gb)
 
 when CGB_WRITE_LATENCY_ANY:
   proc ppu_apply_pipeline_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
@@ -2636,8 +2601,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     # m3_lcdc_obj_en_change_variant band 0).
     when OBJ_ABORT != 0:
       if (val and 0x02'u8) == 0 and
-         (CGB_OBJ_ABORT != 0 or not gb.cgb_enabled) and
-         gb.fifo_ppu != nil:
+         (CGB_OBJ_ABORT != 0 or not gb.cgb_enabled):
         if gb.fifo_ppu.fetching_sprite and gb.fifo_ppu.obj_penalty > 0:
           fifo_obj_abort(gb.fifo_ppu, gb)
         else:
@@ -2671,7 +2635,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       # CGB: the write's own interrupt is decided by rule; the line takes the
       # level the old OR new enables give without an edge (inside the latency
       # a source sees both, stat_enables_leading).
-      if gb.cgb_enabled and ppu.lcd_enabled and gb.fifo_ppu != nil:
+      if gb.cgb_enabled and ppu.lcd_enabled:
         rule_mode = true
         if cgb_stat_write_trigger(ppu, gb, ppu.lcd_status, val):
           gb.interrupts.lcd_stat_interrupt = true
@@ -2690,7 +2654,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
                   int32(if gb.cgb_enabled: CGB_STAT_ENABLE_LATENCY
                         else: STAT_ENABLE_LATENCY))
     when STAT_M2_ENABLE_WINDOW_CGB:
-      if not rule_mode and gb.cgb_enabled and ppu.lcd_enabled and gb.fifo_ppu != nil and
+      if not rule_mode and gb.cgb_enabled and ppu.lcd_enabled and
          (val and 0x20'u8) != 0 and (ppu.lcd_status and 0x20'u8) == 0 and
          (val and 0x08'u8) == 0 and
          not ((ppu.lcd_status and 0x40'u8) != 0 and ppu.irq_ly_of == ppu.lyc):
@@ -2709,7 +2673,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
           ppu.old_stat_flag = true
     when STAT_SET_LANDING_EVAL:
       # The set bits' landing is an evaluation of its own (gb.nim).
-      if gb.fifo_ppu != nil and (val and not ppu.lcd_status and 0b0111_1000'u8) != 0:
+      if (val and not ppu.lcd_status and 0b0111_1000'u8) != 0:
         let lat = int32(if gb.cgb_enabled: CGB_STAT_ENABLE_LATENCY
                         else: STAT_ENABLE_LATENCY) shr gb.memory.current_speed
         if lat > 0: ppu.stat_set_dot = ppu.cycle_counter + lat
@@ -2741,7 +2705,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     when CGB_LYC_WRITE_RULE != 0:
       # CGB: the write's own interrupt by rule (CGB_LYC_WRITE_RULE); the line
       # takes the new level without an edge where the byte lands.
-      if gb.cgb_enabled and ppu.lcd_enabled and gb.fifo_ppu != nil and
+      if gb.cgb_enabled and ppu.lcd_enabled and
          (CGB_LYC_WRITE_RULE_DS != 0 or gb.memory.current_speed == 0'u8):
         let trig = cgb_lyc_write_trigger(ppu, gb, ppu.lyc, val)
         if gb.memory.current_speed == 0'u8:
@@ -2787,7 +2751,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
         return
     when DMG_LYC_WRITE_RULE != 0:
       # DMG: the same rule; the request goes up at the write.
-      if not gb.cgb_enabled and ppu.lcd_enabled and gb.fifo_ppu != nil:
+      if not gb.cgb_enabled and ppu.lcd_enabled:
         let trig = cgb_lyc_write_trigger(ppu, gb, ppu.lyc, val)
         when DMG_LYC_EVENT_HOLD > 0 and CGB_LYC_EVENT_HOLD_DS > 0:
           # As CGB_LYC_EVENT_HOLD_DS: too close to the next line's event.
@@ -2840,7 +2804,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
     # write latency (CGB_MIXER_LATENCY) puts that pixel out of reach.
     var or_pixel = false
     when MIXER_PALETTE_OR != 0:
-      or_pixel = MIXER_DOT_LAG != 0 and gb.fifo_ppu != nil and
+      or_pixel = MIXER_DOT_LAG != 0 and
                  not gb.cgb_enabled and MIXER_PALETTE_BACK > 0
       if or_pixel:
         let cur = case idx
@@ -2861,7 +2825,7 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       echo "WY ly=", ppu.ly, " dot=", ppu.cycle_counter, " mode=",
            (ppu.lcd_status and 3), " old=", ppu.wy, " new=", val
     when WIN_CHECK_DEFER_ANY:
-      if gb.fifo_ppu != nil and win_check_defer(gb) != 0:
+      if win_check_defer(gb) != 0:
         win_check_schedule(ppu, gb, win_check_defer(gb))
     when CGB_WY_LATENCY_ANY:
       if gb.cgb_enabled:
@@ -2930,5 +2894,3 @@ proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
       if ppu.obj_auto_increment:
         ppu.obj_palette_index = (ppu.obj_palette_index + 1) and 0x3F
   else: discard
-
-method tick*(ppu: GbPpu; gb: GB; cycles: int) {.base.} = discard

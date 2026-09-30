@@ -29,7 +29,7 @@ proc same_settings(a, b: Config): bool =
   a.explorer_dir == b.explorer_dir and a.keybindings == b.keybindings and
     a.controller_bindings == b.controller_bindings and a.recents == b.recents and
     a.run_bios == b.run_bios and a.bios_path == b.bios_path and
-    a.gb_bootrom_path == b.gb_bootrom_path and a.gb_fifo == b.gb_fifo and
+    a.gb_bootrom_path == b.gb_bootrom_path and
     a.gb_rumble == b.gb_rumble and a.use_hle == b.use_hle and
     a.hle_after_bios == b.hle_after_bios and a.volume == b.volume and
     a.mute == b.mute and a.color_correction == b.color_correction and
@@ -65,7 +65,6 @@ block:
   cfg.run_bios = true
   cfg.bios_path = dir / "gba_bios.bin"
   cfg.gb_bootrom_path = dir / "cgb_boot.bin"
-  cfg.gb_fifo = false
   cfg.gb_rumble = false
   cfg.use_hle = false
   cfg.hle_after_bios = true
@@ -227,7 +226,6 @@ block:
   cfg.run_bios = true
   cfg.use_hle = false
   cfg.hle_after_bios = true
-  cfg.gb_fifo = false
   cfg.gb_rumble = false
   cfg.volume = 12
   cfg.mute = true
@@ -307,7 +305,6 @@ block:
   check edited(proc(c: Config) = c.run_bios = true), "Run BIOS intro"
   check edited(proc(c: Config) = c.use_hle = false), "SWI handling: real BIOS"
   check edited(proc(c: Config) = c.hle_after_bios = true), "SWI handling: BIOS init + HLE"
-  check edited(proc(c: Config) = c.gb_fifo = false), "GB renderer"
   check edited(proc(c: Config) = c.video_filter = vfHq4x), "Filter"
   check edited(proc(c: Config) = c.lcd_response = true), "LCD response"
   check edited(proc(c: Config) = c.preserve_aspect = false), "Preserve aspect ratio"

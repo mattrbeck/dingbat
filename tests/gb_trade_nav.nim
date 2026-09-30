@@ -20,7 +20,7 @@ proc write_ppm(path: string; buf: seq[uint16]) =
   f.close()
 proc make_gb(rom: string): GB =
   enable_deterministic_gb_rtc(1_700_000_000)
-  result = new_gb("", rom, fifo = true, headless = true, run_bios = false)
+  result = new_gb("", rom, headless = true, run_bios = false)
   result.post_init()
 
 proc main() =

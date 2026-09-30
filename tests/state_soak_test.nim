@@ -565,9 +565,9 @@ proc soak[T](label: string; make: proc(): T; frames: int; seed: uint64;
 
 proc wanted(label: string): bool = only.len == 0 or label.contains(only)
 
-proc gb_maker(path: string; fifo: bool): proc(): GB =
+proc gb_maker(path: string): proc(): GB =
   result = proc(): GB =
-    result = new_gb("", path, fifo = fifo, headless = true, run_bios = false)
+    result = new_gb("", path, headless = true, run_bios = false)
     result.post_init()
 
 proc gba_maker(path: string): proc(): GBA =
@@ -610,21 +610,19 @@ when not defined(soak_lib):
       soak(label, gba_maker(copy), RomFrames, seed, nil,
            replay_known = known_replay(rel))
     else:
-      soak(label, gb_maker(copy, fifo = true), RomFrames, seed, nil,
+      soak(label, gb_maker(copy), RomFrames, seed, nil,
            replay_known = known_replay(rel))
 
   # (b) random programs
   const gb_seeds = [0x6B01'u64, 0x6B02, 0x6B03]
   for seed in gb_seeds:
     for cgb in [false, true]:
-      for fifo in [true, false]:
-        let label = &"random gb {(if cgb: \"cgb\" else: \"dmg\")}" &
-                    &"{(if fifo: \"\" else: \" scanline\")} {seed:#x}"
-        if not wanted(label): continue
-        let path = tmp / &"random_{seed:x}_{ord(cgb)}.gb"
-        writeFile(path, gb_program(seed, cgb))
-        soak(label, gb_maker(path, fifo), RandomFrames, seed, gb_harness_poke,
-             replay_known = "")
+      let label = &"random gb {(if cgb: \"cgb\" else: \"dmg\")} {seed:#x}"
+      if not wanted(label): continue
+      let path = tmp / &"random_{seed:x}_{ord(cgb)}.gb"
+      writeFile(path, gb_program(seed, cgb))
+      soak(label, gb_maker(path), RandomFrames, seed, gb_harness_poke,
+           replay_known = "")
 
   for seed in [0xA901'u64, 0xA902, 0xA903]:
     let label = &"random gba {seed:#x}"

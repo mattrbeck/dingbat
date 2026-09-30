@@ -273,7 +273,6 @@ type
     bios_path*:         string   # GBA BIOS path
     headless*:          bool
     gb_bootrom_path*:   string   # GB/GBC boot ROM path
-    gb_fifo*:           bool     # use FIFO PPU renderer (default true)
     gb_rumble*:         bool     # controller rumble + screen shake on rumble carts
                                  # (GB MBC5 and GBA GPIO; "gb_" kept for config-file compat)
     use_hle*:           bool     # use HLE BIOS for SWI calls
@@ -319,7 +318,6 @@ proc new_config*(): Config =
     bios_path:       "",
     headless:        false,
     gb_bootrom_path: "",
-    gb_fifo:         true,
     gb_rumble:       true,
     volume:          100,
     mute:            false,
@@ -486,8 +484,6 @@ proc parse_config(j: JsonNode): Config =
     let gb = j["gb"]
     if gb.hasKey("bootrom") and gb["bootrom"].kind == JString:
       cfg.gb_bootrom_path = gb["bootrom"].getStr("")
-    if gb.hasKey("fifo") and gb["fifo"].kind == JBool:
-      cfg.gb_fifo = gb["fifo"].getBool(true)
     if gb.hasKey("rumble") and gb["rumble"].kind == JBool:
       cfg.gb_rumble = gb["rumble"].getBool(true)
     # No key -> OFF: a config predating the feature does not silently gain it.
@@ -602,7 +598,6 @@ proc config_entries(cfg: Config): seq[ConfigEntry] =
     ("gba.hle",            "  hle: " & $cfg.use_hle),
     ("gba.hle_after_bios", "  hle_after_bios: " & $cfg.hle_after_bios),
     ("gb.bootrom",         "  bootrom:" & bootrom),
-    ("gb.fifo",            "  fifo: " & $cfg.gb_fifo),
     ("gb.rumble",          "  rumble: " & $cfg.gb_rumble),
     ("gb.sgb",             "  sgb: " & $cfg.sgb_enable),
     ("gb.sgb_border",      "  sgb_border: " & $cfg.sgb_border),

@@ -100,7 +100,7 @@ proc state_roundtrip(rom_path, bios_path: string; warmup: int): int =
       echo "ROUNDTRIP: re-save failed"; return 1
   else:
     proc make_gb(): GB =
-      result = new_gb("", rom_path, fifo = true, headless = true, run_bios = false)
+      result = new_gb("", rom_path, headless = true, run_bios = false)
       result.test_output = new_test_output()
       result.post_init()
     let emu1 = make_gb()
@@ -294,7 +294,7 @@ proc link_test(rom1, rom2, bios_path: string; timeout: int;
 # serial-IF count at 0xC808, and 0xCAFE at 0xC800 when done.
 proc gb_link_test(rom1, rom2: string; timeout: int): int =
   proc make_gb(rom: string; role: uint8): GB =
-    result = new_gb("", rom, fifo = true, headless = true, run_bios = false)
+    result = new_gb("", rom, headless = true, run_bios = false)
     result.test_output = new_test_output()
     result.post_init()
     result.memory.wram[0][0x7FF] = role
@@ -763,7 +763,7 @@ proc magen_test(rom_path: string; timeout_frames: int;
     MagenRed   = 0x001F'u16
     MagenGreen = 0x03E0'u16
     MagenBlue  = 0x7C00'u16
-  let emu = new_gb("", rom_path, fifo = true, headless = true, run_bios = false)
+  let emu = new_gb("", rom_path, headless = true, run_bios = false)
   emu.test_output = new_test_output()
   emu.post_init()
   for _ in 0 ..< timeout_frames:
@@ -835,7 +835,7 @@ proc rewind_test(rom_path, bios_path: string): int =
     emu.post_init()
     drive(emu)
   else:
-    let emu = new_gb("", rom_path, fifo = true, headless = true, run_bios = false)
+    let emu = new_gb("", rom_path, headless = true, run_bios = false)
     emu.test_output = new_test_output()
     emu.post_init()
     drive(emu)
@@ -1383,7 +1383,7 @@ proc gambatte_digit(t: array[8, uint8]): char =
 const GambatteAudioProbePeriod = 2
 
 proc gambatte_run(rom: string; cgb: bool; frames: int; audio = false): GB =
-  result = new_gb("", rom, fifo = true, headless = true, run_bios = false,
+  result = new_gb("", rom, headless = true, run_bios = false,
                   force_cgb = cgb, force_dmg = not cgb)
   result.test_output = new_test_output()
   result.post_init()
@@ -1523,7 +1523,7 @@ proc gambatte_batch(list_path, out_path: string; frames, dump_tiles: int): int =
 proc microtest_run(rom: string; frames: int): GB =
   ## One GBMicrotest ROM, built and stepped exactly as the single-ROM path does
   ## (`--mode=microtest` with `--nosave`, which is how the runner invokes it).
-  result = new_gb("", rom, fifo = true, headless = true, run_bios = false)
+  result = new_gb("", rom, headless = true, run_bios = false)
   result.test_output = new_test_output()
   result.post_init()
   # `--nosave` in the single-ROM path: blank the RAM mbc_load just filled and
@@ -1920,7 +1920,7 @@ proc main() =
     # with $0143 = $80 is silently scored on the wrong hardware (the same
     # contract as --mode=gambatte). Other modes let the header pick.
     let dmg = force_dmg or (mode == tmScreenshot and not force_cgb)
-    let emu = new_gb("", rom_path, fifo = true, headless = true, run_bios = false,
+    let emu = new_gb("", rom_path, headless = true, run_bios = false,
                      force_cgb = force_cgb, force_dmg = dmg)
     if force_sgb:
       # --sgb names the device the way --cgb does; the core still header-gates

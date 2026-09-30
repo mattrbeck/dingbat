@@ -77,7 +77,7 @@ proc load_rom_impl(path, bios: string): cint =
     if ext in [".gb", ".gbc"]:
       stateKind = ekGB
       let bootrom = if bios.len > 0 and fileExists(bios): bios else: ""
-      stateGb = new_gb(bootrom, path, true, false, bootrom.len > 0)
+      stateGb = new_gb(bootrom, path, false, bootrom.len > 0)
       stateGb.post_init()
       rgbaBuffer.setLen(GB_W * GB_H)
     else:

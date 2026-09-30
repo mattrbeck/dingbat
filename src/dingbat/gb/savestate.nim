@@ -3,9 +3,8 @@
 # States are written only at frame boundaries: the start of V-blank, an
 # LCD-off frame, or the LCD-on frame (LY 0, early mode 2); step_frame never
 # leaves one in mode 3 (gb.nim). Renderer per-line scratch is not serialized:
-# both renderers rebuild it on the mode 2 -> 3 transition, so states are
-# renderer-agnostic. The ROM is not stored; the header carries a checksum +
-# size.
+# the renderer rebuilds it on the mode 2 -> 3 transition. The ROM is not
+# stored; the header carries a checksum + size.
 
 const
   GB_SEC_CPU   = 0xB1'u8
@@ -321,20 +320,18 @@ proc save_ppu_state(ppu: GbPpu; w: var Writer) =
   w.write_bool(ppu.stat_drop_pending)
   w.write_bool(ppu.stat_drop_level)
   w.write_i32(ppu.stat_drop_dot)
-  # The DMG window start owed to the next line (DMG_WIN_LAST_PX_CARRY), a
-  # FIFO renderer field: false from the scanline one.
-  let fp = if ppu of GbFifoPpu: GbFifoPpu(ppu) else: nil
-  w.write_bool(fp != nil and fp.win_carry)
-  w.write_bool(fp != nil and fp.win_carry_gap)
+  # The DMG window start owed to the next line (DMG_WIN_LAST_PX_CARRY).
+  let fp = GbFifoPpu(ppu)
+  w.write_bool(fp.win_carry)
+  w.write_bool(fp.win_carry_gap)
   # The mode-2 comparator's Y/X input latches (OAM_SCAN_DMA_HOLD), which keep
   # the last entry a scan read across lines and frames: a transfer holding
-  # the bus at the next scan's start compares against them. The scanline
-  # renderer has no such latches; it writes what an undisturbed scan leaves.
-  w.write_u8(if fp != nil: fp.scan_y_bus else: ppu.sprite_table[0x9C])
-  w.write_u8(if fp != nil: fp.scan_x_bus else: ppu.sprite_table[0x9D])
+  # the bus at the next scan's start compares against them.
+  w.write_u8(fp.scan_y_bus)
+  w.write_u8(fp.scan_x_bus)
   # CGB_TDSEL_GLITCH's address latch: the last $8000-region tile-data read,
   # a bus register that keeps it through H-Blank and V-blank alike.
-  w.write_i32(if fp != nil: fp.tdsel_addr else: TDSEL_ADDR_OFF)
+  w.write_i32(fp.tdsel_addr)
 
 proc load_ppu_state(ppu: GbPpu; gb: GB; r: var Reader; rev: uint32) =
   r.expect_tag(GB_SEC_PPU)
@@ -465,7 +462,8 @@ proc load_ppu_state(ppu: GbPpu; gb: GB; r: var Reader; rev: uint32) =
   ppu.stat_chg_dot = STAT_NO_HOLD
   # Renderer scratch isn't serialized; clear it so a load onto a running
   # core (rollback) can't inherit stale per-line fetch state.
-  ppu.reset_render_scratch()
+  let fp = GbFifoPpu(ppu)
+  fp.reset_render_scratch()
   # ...except what outlives a line, which is (rev 6): the window start owed to
   # the next line, the OAM comparator's latches and the tile-data address
   # latch. Before rev 6 the OAM latches take what an undisturbed scan of the
@@ -473,13 +471,11 @@ proc load_ppu_state(ppu: GbPpu; gb: GB; r: var Reader; rev: uint32) =
   if rev < 6:
     scan_y = ppu.sprite_table[0x9C]
     scan_x = ppu.sprite_table[0x9D]
-  if ppu of GbFifoPpu:
-    let fp = GbFifoPpu(ppu)
-    fp.win_carry = carry
-    fp.win_carry_gap = carry_gap
-    fp.scan_y_bus = scan_y
-    fp.scan_x_bus = scan_x
-    fp.tdsel_addr = tdsel
+  fp.win_carry = carry
+  fp.win_carry_gap = carry_gap
+  fp.scan_y_bus = scan_y
+  fp.scan_x_bus = scan_x
+  fp.tdsel_addr = tdsel
 
 # ---- APU ----
 

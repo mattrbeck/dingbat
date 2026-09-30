@@ -5326,7 +5326,6 @@ refreshHomeSyncButton();
 // --- Core-construction settings ---
 // JS mirrors of the wasm-side option vars; effective at the next core construction.
 
-var gbFifo = true;
 var gbaBiosMode = 0; // 0 = HLE, 1 = real BIOS, 2 = real BIOS boot + HLE calls
 var gbaRunBios = true;
 // Presentation-side only: no wasm setter in applySystemSettings.
@@ -5359,7 +5358,6 @@ const sgbBorderRow = document.getElementById("sgb-border-row");
 
 const applySystemSettings = () => {
   if (typeof Module === "undefined") return;
-  if (Module._wasm_set_gb_renderer) Module._wasm_set_gb_renderer(gbFifo ? 1 : 0);
   if (Module._wasm_set_gba_bios_mode) Module._wasm_set_gba_bios_mode(gbaBiosMode);
   if (Module._wasm_set_gba_run_bios) Module._wasm_set_gba_run_bios(gbaRunBios ? 1 : 0);
   if (Module._wasm_sgb_enable) Module._wasm_sgb_enable(sgbEnable ? 1 : 0);
@@ -5370,9 +5368,6 @@ const applySystemSettings = () => {
 };
 
 const syncSystemSettingsUI = () => {
-  for (let r of /** @type {NodeListOf<HTMLInputElement>} */ (document.querySelectorAll('input[name="gb-renderer"]'))) {
-    r.checked = r.value === (gbFifo ? "fifo" : "scanline");
-  }
   for (let r of /** @type {NodeListOf<HTMLInputElement>} */ (document.querySelectorAll('input[name="gba-bios-mode"]'))) {
     r.checked = Number(r.value) === gbaBiosMode;
   }
@@ -5392,17 +5387,8 @@ const saveSystemSettings = () => {
   applySystemSettings();
   applyRewindUI();
   if (db) dbPut("system",
-    { gbFifo, gbaBiosMode, gbaRunBios, gbRumble, rewindOn, sgbEnable, sgbBorder });
+    { gbaBiosMode, gbaRunBios, gbRumble, rewindOn, sgbEnable, sgbBorder });
 };
-
-for (let r of /** @type {NodeListOf<HTMLInputElement>} */ (document.querySelectorAll('input[name="gb-renderer"]'))) {
-  r.addEventListener("change", () => {
-    if (r.checked) {
-      gbFifo = r.value === "fifo";
-      saveSystemSettings();
-    }
-  });
-}
 
 for (let r of /** @type {NodeListOf<HTMLInputElement>} */ (document.querySelectorAll('input[name="gba-bios-mode"]'))) {
   r.addEventListener("change", () => {
@@ -5447,7 +5433,6 @@ rewindToggle.addEventListener("change", () => {
 const loadSystemSettings = async () => {
   let s = await dbGet("system");
   if (s) {
-    if (typeof s.gbFifo === "boolean") gbFifo = s.gbFifo;
     if ([0, 1, 2].includes(s.gbaBiosMode)) gbaBiosMode = s.gbaBiosMode;
     if (typeof s.gbaRunBios === "boolean") gbaRunBios = s.gbaRunBios;
     if (typeof s.gbRumble === "boolean") gbRumble = s.gbRumble;
@@ -9581,7 +9566,7 @@ const resetAllSettings = async () => {
   for (const k of SETTINGS_KEYS) await dbDelete(k);
   try { localStorage.removeItem(UPDATE_CHECK_KEY); } catch (e) {}
 
-  gbFifo = true; gbaBiosMode = 0; gbaRunBios = true; gbRumble = true;
+  gbaBiosMode = 0; gbaRunBios = true; gbRumble = true;
   rewindOn = true;
   syncSystemSettingsUI();   // also re-applies the rewind-off body class
   applySystemSettings();

@@ -433,17 +433,10 @@ proc sgb_backdrop*(gb: GB): uint16 {.inline.} =
   ## border is transparent and the Game Boy window is not.
   gb.sgb.pal[0]
 
-proc sgb_screen_color*(ppu: GbPpu; x: int; shade: uint8): uint16 {.inline.} =
-  ## The colour an SGB puts on the screen for a pixel at column `x` of line
-  ## `ppu.ly` whose GB shade (already through BGP/OBP) is `shade`. Used by the
-  ## scanline renderer; the FIFO renderer open-codes the same expression.
-  let cell = (int(ppu.ly) shr 3) * SGB_ATTR_W + (x shr 3)
-  ppu.sgb_pal[int(ppu.sgb_attr[cell]) * 4 + int(shade)]
-
 proc sgb_attach*(gb: GB) =
   ## Wire the renderer's two SGB hooks: the flat 4x4 palette table and the
   ## 20x18 attribute map. Both stay nil on a non-SGB machine, and the
-  ## renderers test `sgb_attr` for nil per emitted pixel.
+  ## renderer tests `sgb_attr` for nil per emitted pixel.
   if gb.sgb == nil: return
   gb.ppu.sgb_pal = cast[ptr UncheckedArray[uint16]](addr gb.sgb.pal[0])
   gb.ppu.sgb_attr = cast[ptr UncheckedArray[uint8]](addr gb.sgb.attr[0])

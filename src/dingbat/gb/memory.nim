@@ -205,9 +205,7 @@ proc mem_tick_bus*(mem: GbMemory; gb: GB; cycles: int; from_cpu = true;
 proc mem_tick_ppu*(mem: GbMemory; gb: GB; cycles: int; ignore_speed = false) {.hot_bus_inline.} =
   ## The PPU half of an M-cycle, in dots (half as many in double speed).
   let ppu_cycles = if ignore_speed: cycles else: cycles shr mem.current_speed
-  # Direct call for the shipping renderer; the scanline one uses the method table.
-  if gb.fifo_ppu != nil: fifo_tick(gb.fifo_ppu, gb, ppu_cycles)
-  else: gb.ppu.tick(gb, ppu_cycles)
+  fifo_tick(gb.fifo_ppu, gb, ppu_cycles)
   when CGB_LYC_EDGE_DEFER and CGB_LYC_EDGE_POLL:
     # A CGB LYC write's STAT edge, one M-cycle boundary after its byte landed.
     # Harness control; shipping books a scheduler event (CGB_LYC_EDGE_POLL).
@@ -336,15 +334,14 @@ proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8 =
   of 0xFF04..0xFF07: timer_read(gb.timer, idx)
   of 0xFF0F:
     when defined(gb_if_trace):
-      if gb.fifo_ppu != nil:
-        echo "IFREAD ly=", gb.fifo_ppu.ly, " dot=", gb.fifo_ppu.cycle_counter,
-             " if=", toHex(irq_read(gb.interrupts, idx), 2)
+      echo "IFREAD ly=", gb.fifo_ppu.ly, " dot=", gb.fifo_ppu.cycle_counter,
+           " if=", toHex(irq_read(gb.interrupts, idx), 2)
     irq_read(gb.interrupts, idx)
   of 0xFF10..0xFF3F: apu_read(gb.apu, idx, gb)
   of 0xFF46:         mem.dma  # always the last written value (mooneye oam_dma/reg_read)
   of 0xFF40..0xFF45, 0xFF47..0xFF4B:
     when defined(gb_dma_trace):
-      if (idx == 0xFF41 or idx == 0xFF44) and gb.fifo_ppu != nil:
+      if idx == 0xFF41 or idx == 0xFF44:
         echo "REGREAD a=", toHex(idx, 4), " ly=", gb.fifo_ppu.ly,
              " dot=", gb.fifo_ppu.cycle_counter,
              " v=", toHex(ppu_read(gb.ppu, gb, idx), 2)
@@ -842,15 +839,13 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
                                      else: 8)
                                   else: 8):
         when defined(gb_dma_trace):
-          if gb.fifo_ppu != nil:
-            echo "DMASTART ly=", gb.fifo_ppu.ly,
-                 " dot=", gb.fifo_ppu.cycle_counter,
-                 " src=", toHex(uint16(mem.dma) shl 8, 4)
+          echo "DMASTART ly=", gb.fifo_ppu.ly,
+               " dot=", gb.fifo_ppu.cycle_counter,
+               " src=", toHex(uint16(mem.dma) shl 8, 4)
         when OAM_SCAN_DMA_LOCK != 0:
           # The transfer takes OAM on this dot; a running mode-2 scan reads
           # nothing more until it is given back.
-          if gb.fifo_ppu != nil:
-            fifo_oam_lock_change(gb.fifo_ppu, gb, taking = true)
+          fifo_oam_lock_change(gb.fifo_ppu, gb, taking = true)
         mem.requested_oam_dma  = false
         mem.current_dma_source = uint16(mem.dma) shl 8
         mem.dma_position       = 0
@@ -890,7 +885,7 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int) =
             write_byte(mem, gb, 0xFE00 + mem.dma_position, mem.dma_latch)
         inc mem.dma_position
         when OAM_SCAN_DMA_LOCK != 0:
-          if mem.dma_position > 0xA0 and mem.dma_busy and gb.fifo_ppu != nil:
+          if mem.dma_position > 0xA0 and mem.dma_busy:
             # The transfer gives OAM back on this dot.
             fifo_oam_lock_change(gb.fifo_ppu, gb, taking = false)
         mem.dma_busy = mem.dma_position <= 0xA0
@@ -987,8 +982,7 @@ proc mem_tick_stalled(mem: GbMemory; gb: GB; cycles: int;
     if not first_chunk: 0
     elif mem.current_speed == 1: SPEED_SWITCH_PPU_EXTRA_DOTS else: extra_single
   let ppu_cycles = (cycles shr mem.current_speed) + extra
-  if gb.fifo_ppu != nil: fifo_tick(gb.fifo_ppu, gb, ppu_cycles)
-  else: gb.ppu.tick(gb, ppu_cycles)
+  fifo_tick(gb.fifo_ppu, gb, ppu_cycles)
   # The APU's share of the same oscillator restart (APU_SPSW_EXTRA_DOTS).
   if first_chunk:
     var carry = false

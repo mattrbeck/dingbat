@@ -49,7 +49,7 @@ proc build_rom(): string =
 
 let rom_path = getTempDir() / "dingbat_gbapurebase.gb"
 writeFile(rom_path, build_rom())
-let emu = new_gb("", rom_path, fifo = true, headless = true, run_bios = false)
+let emu = new_gb("", rom_path, headless = true, run_bios = false)
 emu.post_init()
 
 var payload_ok = true

@@ -50,7 +50,7 @@ block short_gb_files_run:
     let p = dir / "short.gb"
     let file = short_gb(n, kind)
     writeFile(p, file)
-    let g = new_gb("", p, fifo = true, headless = true, run_bios = false)
+    let g = new_gb("", p, headless = true, run_bios = false)
     g.post_init()
     for _ in 0 ..< 30: g.run_until_frame()
     let rom = g.cartridge.rom
@@ -236,7 +236,7 @@ block extensionless_paths:
   gbrom[0x147] = char(0x03)
   gbrom[0x149] = char(0x02)
   writeFile(sub / "gbgame", gbrom)
-  let g = new_gb("", sub / "gbgame", fifo = true, headless = true, run_bios = false)
+  let g = new_gb("", sub / "gbgame", headless = true, run_bios = false)
   doAssert g.cartridge.sav_path == sub / "gbgame.sav", g.cartridge.sav_path
 
 removeDir(dir)

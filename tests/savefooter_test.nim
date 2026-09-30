@@ -31,7 +31,7 @@ proc make_rom(name: string; cart_type: uint8): string =
   writeFile(result, rom)
 
 proc boot(rom_path: string): GB =
-  new_gb("", rom_path, fifo = true, headless = true, run_bios = false)
+  new_gb("", rom_path, headless = true, run_bios = false)
 
 proc add_u32(s: var string; v: uint32) =
   for i in 0 .. 3: s.add(char((v shr (8 * i)) and 0xFF))

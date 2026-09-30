@@ -736,7 +736,6 @@ proc load_rom(path: string) =
   if boot.note.len > 0 and not is_gb_rom(rom_path): echo boot.note
   let built = build_core(rom_path, CoreOptions(
     gb_bootrom: app.cfg.gb_bootrom_path,
-    gb_fifo: app.cfg.gb_fifo,
     headless: app.cfg.headless, gb_run_bios: boot.gb_run_bios,
     sgb: app.cfg.sgb_enable, bios_path: boot.bios_path,
     run_bios: boot.run_bios, use_hle: boot.use_hle,

@@ -848,7 +848,7 @@
                 </button>
                 <button type="button" class="settings-tab" id="settings-tab-gb" data-tab="gb" data-name="Game Boy" role="tab" aria-selected="false" tabindex="-1" aria-controls="settings-pane-gb">
                   <span class="settings-tab-name">Game Boy</span>
-                  <span class="settings-tab-desc">Palette, Super Game Boy, boot ROM, renderer</span>
+                  <span class="settings-tab-desc">Palette, Super Game Boy, boot ROM</span>
                   <svg class="settings-row-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
                 </button>
                 <button type="button" class="settings-tab" id="settings-tab-gba" data-tab="gba" data-name="GBA" role="tab" aria-selected="false" tabindex="-1" aria-controls="settings-pane-gba">
@@ -1056,18 +1056,6 @@
                   <button type="button" class="button button-sm button-ghost" id="remove-gbc-bootrom">Remove</button>
                 </div>
                 <p class="modal-hint">With a boot ROM set, Game Boy games play the startup animation first.</p>
-                <div class="modal-subhead">Renderer</div>
-                <div class="radio-group" role="radiogroup" aria-label="Game Boy renderer">
-                  <label class="radio-row">
-                    <input type="radio" name="gb-renderer" value="fifo" checked />
-                    <span>Pixel FIFO<span class="radio-sub">Slower. Gets every visual trick right</span></span>
-                  </label>
-                  <label class="radio-row">
-                    <input type="radio" name="gb-renderer" value="scanline" />
-                    <span>Scanline<span class="radio-sub">Faster. Right for almost every game</span></span>
-                  </label>
-                </div>
-                
               </div>
 
               <div class="settings-pane" id="settings-pane-gba" role="tabpanel" aria-labelledby="settings-tab-gba" hidden>

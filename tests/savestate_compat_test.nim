@@ -183,7 +183,7 @@ proc new_gba_for(rom: string): GBA =
   result.post_init()
 
 proc new_gb_for(rom: string): GB =
-  result = new_gb("", ROM_DIR / rom, fifo = true, headless = true,
+  result = new_gb("", ROM_DIR / rom, headless = true,
                   run_bios = false)
   result.post_init()
 
@@ -646,10 +646,10 @@ proc run_whole_rom() =
   defer:
     removeFile(gb_a)
     removeFile(gb_a2)
-  let g = new_gb("", gb_a, fifo = true, headless = true, run_bios = false)
+  let g = new_gb("", gb_a, headless = true, run_bios = false)
   g.post_init()
   for _ in 0 ..< 30: g.step_frame()
-  let g2 = new_gb("", gb_a2, fifo = true, headless = true, run_bios = false)
+  let g2 = new_gb("", gb_a2, headless = true, run_bios = false)
   g2.post_init()
   let gimg = g.state_bytes(thumbnail = true)
   check(parse_state_whole_rom(gimg).kind == wrAbsent, "a GB state has no trailer")
@@ -721,7 +721,7 @@ proc run_cart_shapes() =
     defer:
       removeFile(path)
       removeFile(path[0 ..< path.rfind('.')] & ".sav")
-    let emu = new_gb("", path, fifo = false, headless = true, run_bios = false)
+    let emu = new_gb("", path, headless = true, run_bios = false)
     emu.post_init()
     for _ in 0 ..< 30: emu.step_frame()
     let img = emu.state_bytes()
@@ -1202,15 +1202,14 @@ proc gb_test_rom(name: string; cgb: bool; code: openArray[int]): string =
   result = getTempDir() / ("dingbat_gbrev6_" & name & ".gb")
   writeFile(result, rom)
 
-proc new_gb_at(path: string; fifo = true): GB =
-  result = new_gb("", path, fifo = fifo, headless = true, run_bios = false)
+proc new_gb_at(path: string): GB =
+  result = new_gb("", path, headless = true, run_bios = false)
   result.post_init()
 
-proc replays_in_new_core(emu: GB; path: string; frames: int;
-                         fifo = true): bool =
+proc replays_in_new_core(emu: GB; path: string; frames: int): bool =
   ## Load `emu`'s state image into a new core and run both `frames` frames;
   ## true when every payload agrees. Advances `emu`.
-  let twin = new_gb_at(path, fifo)
+  let twin = new_gb_at(path)
   if not twin.load_state_bytes(emu.state_bytes()): return false
   for _ in 0 ..< frames:
     emu.step_frame()
@@ -1241,9 +1240,8 @@ proc run_gb_rev6() =
       removeFile(p)
       removeFile(p[0 ..< p.rfind('.')] & ".sav")
 
-  for fifo in [true, false]:
-    let tag = if fifo: "" else: " (scanline renderer)"
-    let emu = new_gb_at(lcdon, fifo)
+  block:
+    let emu = new_gb_at(lcdon)
     var seen = 0
     for f in 0 ..< 40:
       emu.step_frame()
@@ -1251,10 +1249,10 @@ proc run_gb_rev6() =
          (emu.ppu.lcd_status and 3) == 2:
         inc seen
         if seen <= 3:
-          check(replays_in_new_core(emu, lcdon, 12, fifo),
-                "GB LCD-on frame state (LY 0, mode 2) loads and replays" & tag,
+          check(replays_in_new_core(emu, lcdon, 12),
+                "GB LCD-on frame state (LY 0, mode 2) loads and replays",
                 "frame " & $f)
-    check(seen > 0, "the LCD-on test ROM ends frames on the LCD-on write" & tag)
+    check(seen > 0, "the LCD-on test ROM ends frames on the LCD-on write")
 
   block:
     let emu = new_gb_at(spsw)
@@ -1315,8 +1313,8 @@ proc run_gb_rev6() =
     for p in [idle, oamdma]:
       removeFile(p)
       removeFile(p[0 ..< p.rfind('.')] & ".sav")
-  for fifo in [true, false]:
-    let emu = new_gb_at(idle, fifo)
+  block:
+    let emu = new_gb_at(idle)
     for _ in 0 ..< 3: emu.step_frame()
     template tick_until(cond: untyped) =
       var guard = 0
@@ -1324,9 +1322,7 @@ proc run_gb_rev6() =
         emu.cpu.tick(emu)
         inc guard
     # A STAT write on a CGB arms a drop CGB_STAT_ENABLE_LATENCY dots out, to
-    # land at the next source change past that dot. The scanline renderer
-    # restarts its counter at every mode boundary, so a dot armed late in
-    # mode 2 had to be moved with it or it stayed "in the future" for good.
+    # land at the next source change past that dot.
     tick_until(emu.ppu.ly == 9 and (emu.ppu.lcd_status and 3) == 2 and
                emu.ppu.cycle_counter >= 60)
     write_byte(emu.memory, emu, 0xFF41, 0x00)
@@ -1334,8 +1330,7 @@ proc run_gb_rev6() =
     let armed = emu.ppu.stat_drop_pending
     tick_until(emu.ppu.ly == 11)
     check(armed and not emu.ppu.stat_drop_pending,
-          "a STAT write's pending line drop is settled within its line" &
-          (if fifo: "" else: " (scanline renderer)"),
+          "a STAT write's pending line drop is settled within its line",
           "armed " & $armed & ", still pending at LY 11 dot " &
           $emu.ppu.cycle_counter & " (drop dot " & $emu.ppu.stat_drop_dot & ")")
   block:

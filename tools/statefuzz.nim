@@ -80,7 +80,7 @@ when isMainModule:
                e.post_init()
                e.load_state_bytes(data)
              else:
-               let e = new_gb("", rom, fifo = true, headless = true,
+               let e = new_gb("", rom, headless = true,
                               run_bios = false)
                e.test_output = new_test_output()
                e.post_init()
@@ -105,7 +105,7 @@ when isMainModule:
       for _ in 0 ..< frames: e.step_frame()
       good = e.state_bytes()
     else:
-      let e = new_gb("", rom, fifo = true, headless = true, run_bios = false)
+      let e = new_gb("", rom, headless = true, run_bios = false)
       e.test_output = new_test_output()
       e.post_init()
       for _ in 0 ..< frames: e.step_frame()
@@ -129,7 +129,7 @@ when isMainModule:
     for _ in 0 ..< 120: e.step_frame()
     base = strip_trailers(e.state_bytes())
   else:
-    let e = new_gb("", rom, fifo = true, headless = true, run_bios = false)
+    let e = new_gb("", rom, headless = true, run_bios = false)
     e.test_output = new_test_output()
     e.post_init()
     for _ in 0 ..< 120: e.step_frame()
@@ -152,7 +152,7 @@ when isMainModule:
         echo "  frame ", i
         e.step_frame()
     else:
-      let e = new_gb("", rom, fifo = true, headless = true, run_bios = false)
+      let e = new_gb("", rom, headless = true, run_bios = false)
       e.test_output = new_test_output()
       e.post_init()
       echo "  load -> ", e.load_state_bytes(mutant)
@@ -185,7 +185,7 @@ when isMainModule:
             for _ in 0 ..< post: e.step_frame()
           else: inc refused
         else:
-          let e = new_gb("", rom, fifo = true, headless = true, run_bios = false)
+          let e = new_gb("", rom, headless = true, run_bios = false)
           e.test_output = new_test_output()
           e.post_init()
           if e.load_state_bytes(mutant):
@@ -225,7 +225,7 @@ when isMainModule:
         else:
           inc rejected
       else:
-        let e = new_gb("", rom, fifo = true, headless = true, run_bios = false)
+        let e = new_gb("", rom, headless = true, run_bios = false)
         e.test_output = new_test_output()
         e.post_init()
         if e.load_state_bytes(mutant):

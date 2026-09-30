@@ -88,7 +88,7 @@ proc main() =
   createDir(shotdir)
 
   let cmds = loadScript(script)
-  let emu = new_gb("", rom, fifo = true, headless = true, run_bios = false)
+  let emu = new_gb("", rom, headless = true, run_bios = false)
   emu.post_init()
 
   var held: set[Input]

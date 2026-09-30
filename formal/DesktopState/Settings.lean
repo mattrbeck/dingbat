@@ -286,7 +286,6 @@ structure Cfg where
   afterBios : Bool               -- cfg.hle_after_bios
   runBios   : Bool               -- cfg.run_bios
   biosFile  : Bool               -- cfg.bios_path names an existing file
-  gbFifo    : Bool               -- cfg.gb_fifo
   sgb       : Bool               -- cfg.sgb_enable
   volume    : Nat                -- cfg.volume
   color     : Bool               -- cfg.color_correction
@@ -298,7 +297,7 @@ structure Cfg where
 /-- new_config (config 286-313). -/
 def defaults : Cfg :=
   { kb := defaultKb, pad := defaultPad, useHle := true, afterBios := false,
-    runBios := false, biosFile := false, gbFifo := true, sgb := false,
+    runBios := false, biosFile := false, sgb := false,
     volume := 100, color := true, interp := true, rewind := true,
     recent := none, fullscreen := false }
 
@@ -374,7 +373,6 @@ structure Ed where
   bMode      : Nat              -- bios.bios_mode (0 HLE, 1 real BIOS, 2 real init + HLE SWIs)
   bRun       : Bool             -- bios.run_bios
   bFile      : Bool             -- bios.bios_buf names an existing file
-  vFifo      : Bool             -- video.gb_renderer == 0
   vSgb       : Bool             -- video.sgb_enable
   resetPopup : Bool             -- the "Reset settings?" modal is open
   /-- A control that writes a widget value was used since the widgets were
@@ -392,7 +390,7 @@ def initEd : Ed :=
   { isOpen := false, prevOpen := false, collapsed := false, tab := .kb,
     kbVis := false, kbSel := none, kbEdit := fun _ => none,
     padVis := false, padSel := none, padEdit := fun _ => none,
-    bMode := 0, bRun := false, bFile := false, vFifo := false, vSgb := false,
+    bMode := 0, bRun := false, bFile := false, vSgb := false,
     resetPopup := false, edited := false, discardPopup := false }
 
 inductive Dlg where
@@ -406,7 +404,6 @@ structure Fe where
 structure Core where
   kind      : Kind
   gen       : Nat       -- identity of this load
-  fifo      : Bool      -- GB: the FIFO renderer (new_gb's `fifo` argument)
   sgb       : Bool      -- gb_emu.sgb_requested
   hle       : Bool      -- gba.use_hle
   afterBios : Bool      -- gba.hle_after_bios
@@ -490,7 +487,6 @@ def loadRom (fx : Fix) (s : S) (f : FileE) : S :=
   let rb  := if fx.biosGate then b.runBios && b.biosFile else b.runBios
   let core : Core :=
     { kind := f.kind, gen := s.gen + 1,
-      fifo := c.gbFifo,                                 -- 707-709
       sgb := c.sgb,                                     -- 712
       hle := hle, afterBios := b.afterBios, runBios := rb,
       biosFile := b.biosFile,                           -- 723, bus.nim 370
@@ -505,7 +501,7 @@ def edLoad (c : Cfg) (e : Ed) : Ed :=
            padSel := none, padEdit := c.pad,                       -- controller 95-100
            bMode := if c.afterBios then 2 else if c.useHle then 0 else 1,  -- bios 66-76
            bRun := c.runBios, bFile := c.biosFile,
-           vFifo := c.gbFifo, vSgb := c.sgb,                       -- video 93-99
+           vSgb := c.sgb,                                          -- video 93-99
            edited := false }
 
 /-- The widgets' apply() procs (config_editor 41-45), before save_config. -/
@@ -513,7 +509,7 @@ def edStore (e : Ed) (c : Cfg) : Cfg :=
   { c with kb := e.kbEdit, pad := e.padEdit,                       -- keybindings 87-90, controller 102-107
            biosFile := e.bFile, runBios := e.bRun,                 -- bios 78-82
            useHle := e.bMode == 0, afterBios := e.bMode == 2,
-           gbFifo := e.vFifo, sgb := e.vSgb }                      -- video 101-107
+           sgb := e.vSgb }                                         -- video 101-107
 
 /-- do_apply (config_editor 41-46). -/
 def doApply (fx : Fix) (s : S) : S :=
@@ -525,7 +521,7 @@ among them. -/
 def factoryCfg (fx : Fix) (c : Cfg) : Cfg :=
   { c with kb := defaults.kb, pad := defaults.pad, runBios := defaults.runBios,
            useHle := defaults.useHle, afterBios := defaults.afterBios,
-           gbFifo := defaults.gbFifo, volume := defaults.volume,
+           volume := defaults.volume,
            color := defaults.color, sgb := defaults.sgb, rewind := defaults.rewind,
            interp := if fx.resetAll then defaults.interp else c.interp }
 
@@ -655,7 +651,7 @@ inductive Ev where
   | winClose | winCollapse (b : Bool) | selectTab (t : Tab)
   | bindKey (i : Inp) | bindPad (i : Inp) | kbPresetDefault
   | setBiosMode (m : Nat) | setRunBios (b : Bool) | biosBrowse
-  | setFifo (b : Bool) | setSgb (b : Bool)
+  | setSgb (b : Bool)
   | apply | revert | ok | resetDefaults | resetConfirm | resetCancel
   | discardApply | discardConfirm | discardCancel   -- the "Discard changes?" modal (fixed)
   -- ImGui: the file explorer modal
@@ -778,8 +774,6 @@ def stepO (fx : Fix) (s : S) : Ev → Option S
     if inTab s .bios then
       some { s with fe := { dlg := .bios, sel := if fx.feFresh then none else s.fe.sel } }
     else none
-  | .setFifo b =>
-    if inTab s .video then some { s with ed := { s.ed with vFifo := b, edited := true } } else none
   | .setSgb b =>
     if inTab s .video then some { s with ed := { s.ed with vSgb := b, edited := true } } else none
   | .apply => if inWin s && !s.ed.collapsed then some (doApply fx s) else none
@@ -1029,7 +1023,7 @@ def KbNamed (c : Cfg) : Prop := ∀ k i, c.kb k = some i → k.named = true
 theorem persist_id_of_named (fx : Fix) (c : Cfg) (h : KbNamed c ∨ fx.numericKeys = true)
     (hp : ∀ b i, c.pad b = some i → b < 15) : persist fx c = c := by
   cases c with
-  | mk kb pad a b c' d e f g h' i j k' l =>
+  | mk kb pad a b c' d f g h' i j k' l =>
     simp only [persist, Cfg.mk.injEq, and_true]
     constructor
     · funext x
@@ -1200,9 +1194,9 @@ theorem regress_reset_defaults :
 open edge's do_reset). No prompt; the Revert button does the same. Fixed
 (`confirmDiscard`): `regress_close_discards_edits`. -/
 theorem obs_close_discards_edits :
-    ((run real init (openSettingsGba ++ iter [.selectTab .video] ++ iter [.setFifo false] ++
+    ((run real init (openSettingsGba ++ iter [.selectTab .video] ++ iter [.setSgb true] ++
         iter [.winClose] ++ iter [.menuSettings])).map fun s =>
-      (s.ed.vFifo, s.cfg.gbFifo)) = some (true, true) := by
+      (s.ed.vSgb, s.cfg.sgb)) = some (false, false) := by
   decide
 
 /-- Emulation > Reset after File > Recent > Clear does nothing, silently. -/
@@ -1893,10 +1887,10 @@ theorem fixed_reset_is_defaults (c : Cfg) :
     let r := factoryCfg fixed c
     r.kb = defaults.kb ∧ r.pad = defaults.pad ∧ r.useHle = defaults.useHle ∧
     r.afterBios = defaults.afterBios ∧ r.runBios = defaults.runBios ∧
-    r.gbFifo = defaults.gbFifo ∧ r.sgb = defaults.sgb ∧ r.volume = defaults.volume ∧
+    r.sgb = defaults.sgb ∧ r.volume = defaults.volume ∧
     r.color = defaults.color ∧ r.interp = defaults.interp ∧
     r.rewind = defaults.rewind ∧ r.biosFile = c.biosFile ∧ r.recent = c.recent :=
-  ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
+  ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
 
 /-- The same statement for the code as it is fails exactly on that one. -/
 theorem real_reset_keeps (c : Cfg) : (factoryCfg real c).interp = c.interp := rfl
@@ -1913,18 +1907,18 @@ still in the widget. Cancel goes back to it; Discard closes and the next
 open shows the saved value; Apply saves it. With nothing edited the X
 closes at once. -/
 def trEditThenX : List Ev :=
-  openSettingsGba ++ iter [.selectTab .video] ++ iter [.setFifo false] ++ iter [.winClose]
+  openSettingsGba ++ iter [.selectTab .video] ++ iter [.setSgb true] ++ iter [.winClose]
 
 theorem regress_close_discards_edits :
     ((run fixed init trEditThenX).map fun s =>
-      (s.ed.isOpen, s.ed.discardPopup, s.ed.vFifo, s.cfg.gbFifo)) = some (true, true, false, true) ∧
+      (s.ed.isOpen, s.ed.discardPopup, s.ed.vSgb, s.cfg.sgb)) = some (true, true, true, false) ∧
     ((run fixed init (trEditThenX ++ iter [.discardCancel])).map fun s =>
-      (s.ed.isOpen, s.ed.discardPopup, s.ed.vFifo)) = some (true, false, false) ∧
+      (s.ed.isOpen, s.ed.discardPopup, s.ed.vSgb)) = some (true, false, true) ∧
     ((run fixed init (trEditThenX ++ iter [.discardConfirm] ++ iter [.menuSettings])).map fun s =>
-      (s.ed.vFifo, s.cfg.gbFifo)) = some (true, true) ∧
+      (s.ed.vSgb, s.cfg.sgb)) = some (false, false) ∧
     ((run fixed init (trEditThenX ++ iter [.discardApply])).map fun s =>
-      (s.ed.isOpen, s.cfg.gbFifo, match s.disk with | .ok c => c.gbFifo | _ => true)) =
-      some (false, false, false) ∧
+      (s.ed.isOpen, s.cfg.sgb, match s.disk with | .ok c => c.sgb | _ => false)) =
+      some (false, true, true) ∧
     ((run fixed init (openSettingsGba ++ iter [.winClose])).map fun s =>
       (s.ed.isOpen, s.ed.discardPopup)) = some (false, false) := by
   decide
@@ -1939,9 +1933,9 @@ theorem fixed_x_ends_capture :
 
 /-- The widget-owned fields of cfg, and what the widgets would write there. -/
 def wf (c : Cfg) :=
-  (c.kb, c.pad, c.useHle, c.afterBios, c.runBios, c.biosFile, c.gbFifo, c.sgb)
+  (c.kb, c.pad, c.useHle, c.afterBios, c.runBios, c.biosFile, c.sgb)
 def wfE (e : Ed) :=
-  (e.kbEdit, e.padEdit, e.bMode == 0, e.bMode == 2, e.bRun, e.bFile, e.vFifo, e.vSgb)
+  (e.kbEdit, e.padEdit, e.bMode == 0, e.bMode == 2, e.bRun, e.bFile, e.vSgb)
 
 theorem edStore_eq_iff (e : Ed) (c : Cfg) : edStore e c = c ↔ wfE e = wf c := by
   constructor
@@ -1949,8 +1943,8 @@ theorem edStore_eq_iff (e : Ed) (c : Cfg) : edStore e c = c ↔ wfE e = wf c := 
   · intro h
     cases c
     simp only [wfE, wf, Prod.mk.injEq] at h
-    obtain ⟨h1, h2, h3, h4, h5, h6, h7, h8⟩ := h
-    simp only [edStore, h1, h2, h3, h4, h5, h6, h7, h8]
+    obtain ⟨h1, h2, h3, h4, h5, h6, h7⟩ := h
+    simp only [edStore, h1, h2, h3, h4, h5, h6, h7]
 
 /-- No saved file holds both HLE and real-BIOS-then-HLE; edStore never
 writes both. -/

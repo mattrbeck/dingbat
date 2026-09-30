@@ -15,7 +15,7 @@ template check(label: string; cond: untyped) =
 
 echo "== GB GameShark writes WRAM via apply_cheats =="
 block:
-  let gb = new_gb("", "tests/roms/gblinktest.gb", fifo = false, headless = true, run_bios = false)
+  let gb = new_gb("", "tests/roms/gblinktest.gb", headless = true, run_bios = false)
   gb.post_init()
   # 014200C0 -> write 0x42 to 0xC000 (WRAM, byte-swapped address).
   var c = Cheat(name: "poke", codes: "014200C0", enabled: true)

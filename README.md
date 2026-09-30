@@ -29,7 +29,7 @@ PPU.
 
 - [**Downloads**](docs/downloads.md) — prebuilt desktop binaries for Linux, macOS, Windows
 - [**Features**](docs/features.md) — what both front-ends and both systems support
-- [**Usage**](docs/usage.md) — loading ROMs, BIOS files, save files, GB renderer choice
+- [**Usage**](docs/usage.md) — loading ROMs, BIOS files, save files
 - [**Multiplayer**](docs/link-usage.md) — local 2P, online room codes, native TCP
 - [**Building**](docs/building.md) — native, WebAssembly, and Windows cross-builds
 - [**Everything else**](docs/README.md) — the index of every reference doc: hardware derivations, test-suite sources and triage, hardware-probe catalogue, tool kits

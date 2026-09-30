@@ -11,7 +11,7 @@ proc main() =
     quit(1)
   let frames = if args.len > 1: parseInt(args[1]) else: 120
   let model  = if args.len > 2: args[2] else: "mgb"
-  let emu = new_gb("", args[0], fifo = true, headless = true, run_bios = false)
+  let emu = new_gb("", args[0], headless = true, run_bios = false)
   let (rev, _) = gb_revision_from_name(model)
   emu.gb_set_revision(rev)
   emu.post_init()

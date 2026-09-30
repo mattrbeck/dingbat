@@ -100,7 +100,7 @@ In one-player mode the mask is 0, so P1 reads the same `$F` a handheld does.
 
 **Colour is applied in the pixel emit, not a post-pass.** `GbPpu.sgb_pal` /
 `sgb_attr` are nil on every non-SGB machine and tested once per pixel
-(3 sites in `scanline_ppu.nim`, 1 in `fifo_ppu.nim`; the substitution sits in
+(one site in `fifo_ppu.nim`; the substitution sits in
 `fifo_mix`, so `fifo_recompose_last` recolours too). Cost is +0.23 % retired
 instructions (`DINGBAT_BENCH_COUNTERS=1`), the price of not carrying a second
 framebuffer: a post-pass reverse-mapping `DMG_COLORS` is ambiguous once the

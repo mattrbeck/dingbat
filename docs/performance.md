@@ -223,8 +223,8 @@ interpreter 27-41 %, the APU 2 %. Emulated time is mostly idle: halted plus
 exact-repeat polling loops were 70-85 % of cycles on nine of the eleven (LY
 polls, HALT waiting for V-blank); Shantae is the busy exception. Plain lines
 (no object, no window, no mode-3 register write) were 59-89 % of lines.
-The scanline renderer is no ceiling for the PPU: its own `do_scanline` and
-per-M-cycle tick were half its time.
+The scanline renderer (removed 2026-09-30, below) was no ceiling for the
+PPU: its own `do_scanline` and per-M-cycle tick were half its time.
 
 Three changes, each exact by construction and each with a check build:
 
@@ -315,14 +315,11 @@ it mode 3 has no horizon, a third of every line, and the skip alone was
 | Pokémon Crystal | +21 % | +20 % | +8 % |
 | Shantae | +9 % | +19 % | -3 % |
 
-The scanline renderer has no deferred mode 3 and first paid for the skip
+The scanline renderer had no deferred mode 3 and first paid for the skip
 without getting it: a repeating loop decoded its body every iteration to
 meet a zero horizon, up to 20 % of its instructions. The horizon is now
-asked before the decode, loops mark no head on the scanline renderer
-(`wl_on`), and a halted CPU there is advanced to the next mode boundary
-(`scanline_idle_dots`, short of line 153's LY snap and the LYC relatch), the
-renderer taking a long tick that reaches no boundary as one step's
-bookkeeping. Measured as speed mode (the scanline renderer drawing every
+asked before the decode; the scanline renderer also marked no loop heads
+and advanced a halted CPU to its next mode boundary. Measured as speed mode (the scanline renderer drawing every
 other frame; the mode was removed on 2026-09-29), main -> this: Oracle of
 Ages +106 %, Metal Gear Solid +95 %, Super Mario Bros. DX +58 %, Tetris DX
 +52 %, Crystal +24 %, Donkey Kong Country +23 %, Link's Awakening +13 %,
@@ -358,6 +355,16 @@ reaches an object (+1.5 to +3 %: the second eligibility test near every
 object costs more than the dots). Left: the line head (~0.4 % by count, and
 the most timing-bound dots of the line); the object fetch itself; the
 steady block's per-pixel FIFO shifts.
+
+After both rounds the scanline renderer was no longer the fast one (fps,
+best of three, 1800 frames): the FIFO renderer led on eight of eleven
+titles, by up to half again (Alone in the Dark +50 %, Wario Land 3 +49 %,
+Link's Awakening DX +34 %, Donkey Kong Country +27 %, Super Mario Bros. DX
++17 %, Metal Gear Solid +7 %, Crystal +4 %, Shantae +1 %), and trailed by
+5-8 % on Link's Awakening, Tetris DX and Oracle of Ages. The FIFO renderer
+also retired fewer instructions on every title but Oracle of Ages (+0.8 %).
+The scanline
+renderer was removed on 2026-09-30, with the setting that chose it.
 
 ## Old and constrained devices
 

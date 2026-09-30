@@ -82,7 +82,7 @@ proc main() =
 
   # The probe ROMs carry the CGB-compatible header flag ($80), so the model
   # token is what decides which machine they run on, not the cartridge.
-  let emu = new_gb("", args[0], fifo = true, headless = true, run_bios = false,
+  let emu = new_gb("", args[0], headless = true, run_bios = false,
                    force_cgb = want_cgb, force_dmg = not want_cgb)
   emu.gb_set_revision(rev)
   emu.post_init()

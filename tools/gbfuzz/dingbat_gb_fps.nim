@@ -41,8 +41,6 @@ proc main() =
   let skip = if args.len > 3: parseInt(args[3]) else: 0
   let script = if args.len > 4: parse_script(args[4]) else: @[]
   let window = if args.len > 5: parseInt(args[5]) else: 0
-  let fifo = getEnv("GBFUZZ_SCANLINE") == ""
-
   let run_bios = getEnv("GBFUZZ_SKIP_BIOS") == "" and bootdir != "none"
   var bootrom = ""
   if run_bios:
@@ -52,7 +50,7 @@ proc main() =
     fh.close()
     bootrom = bootdir / (if (hdr[0x143] and 0x80) != 0: "cgb_boot.bin" else: "dmg_boot.bin")
 
-  let emu = new_gb(bootrom, rom_path, fifo = fifo, headless = true,
+  let emu = new_gb(bootrom, rom_path, headless = true,
                    run_bios = run_bios)
   emu.post_init()
 

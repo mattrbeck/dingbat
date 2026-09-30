@@ -24,7 +24,7 @@ proc main() =
   let frames = if args.len > 1: parseInt(args[1]) else: 400
   let model  = if args.len > 2: args[2] else: "cgbE"
   let count  = if args.len > 3: parseInt(args[3]) else: 16
-  let emu = new_gb("", args[0], fifo = true, headless = true, run_bios = false)
+  let emu = new_gb("", args[0], headless = true, run_bios = false)
   let (rev, ok) = gb_revision_from_name(model)
   if not ok:
     echo "unknown model: ", model

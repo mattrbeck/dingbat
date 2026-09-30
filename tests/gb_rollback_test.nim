@@ -39,7 +39,7 @@ proc make_gb(rom: string): GB =
   # Fixed RTC epoch so both peers + the ground truth load identical MBC3 clock
   # state (real netplay passes a shared epoch from the host's hello).
   enable_deterministic_gb_rtc(1_700_000_000)
-  result = new_gb("", rom, fifo = true, headless = true, run_bios = false)
+  result = new_gb("", rom, headless = true, run_bios = false)
   result.post_init()
 
 proc make_link(rom1, rom2: string): GbLink =

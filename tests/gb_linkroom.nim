@@ -38,7 +38,7 @@ proc write_ppm(path: string; buf: seq[uint16]) =
   f.close()
 
 proc make_gb(rom: string): GB =
-  result = new_gb("", rom, fifo = true, headless = true, run_bios = false)
+  result = new_gb("", rom, headless = true, run_bios = false)
   result.post_init()
 
 var traceRemaining = 0

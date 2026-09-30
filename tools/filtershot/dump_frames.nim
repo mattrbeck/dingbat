@@ -85,7 +85,7 @@ proc main() =
     echo "240 160"
     run(emu, 240, 160)
   else:
-    let emu = new_gb("", rom_path, fifo = true, headless = true,
+    let emu = new_gb("", rom_path, headless = true,
                      run_bios = false)
     emu.post_init()
     resp.set_panel(parse_panel(panel_arg, gba = false, cgb = emu.cgb_enabled))

@@ -320,20 +320,13 @@ proc main() =
           echo toHex(0x03000000'u32 + uint32(b) * 1024, 8), ": ", gba.prof_iwram[b], "  ",
             formatFloat(gba.prof_iwram[b].float * 100.0 / tot.float, ffDecimal, 2), "%"
   else:
-    # DINGBAT_BENCH_RENDERER: "fifo" (the shipping per-dot default) or
-    # "scanline". Anything else is rejected rather than silently falling back.
-    let renderer = getEnv("DINGBAT_BENCH_RENDERER", "fifo")
-    if renderer notin ["fifo", "scanline"]:
-      echo "bench: DINGBAT_BENCH_RENDERER must be fifo or scanline, got: ", renderer
-      quit(1)
     # DINGBAT_BENCH_RTC_EPOCH freezes an MBC3/HuC3/TAMA5 clock, as on the GBA
     # path, so a cartridge clock cannot make two runs differ.
     if getEnv("DINGBAT_BENCH_RTC_EPOCH").len > 0:
       enable_deterministic_gb_rtc(parseBiggestInt(getEnv("DINGBAT_BENCH_RTC_EPOCH")))
     # DINGBAT_BENCH_GB_DMG=1 runs a CGB-flagged cart on DMG hardware (a
     # dual-mode cart as a DMG would run it).
-    let emu = new_gb("", rom_path, fifo = renderer == "fifo",
-                     headless = true, run_bios = false,
+    let emu = new_gb("", rom_path, headless = true, run_bios = false,
                      force_dmg = getEnv("DINGBAT_BENCH_GB_DMG") == "1")
     emu.test_output = test_out
     emu.post_init()

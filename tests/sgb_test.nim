@@ -62,7 +62,7 @@ if not fileExists(ROM):
   echo "missing ", ROM, " -- run `python3 tests/roms/sgbtest.py`"
   quit(1)
 
-var m = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+var m = new_gb("", ROM, headless = true, run_bios = false)
 # The core defaults to no adapter, so consumers that have not asked for one
 # keep stock Game Boy behaviour.
 m.sgb_requested = true
@@ -128,22 +128,9 @@ for py in 40 ..< 184:
     if (s.border[py * 256 + px] and 0x8000'u16) != 0: inc hole_opaque
 check(hole_opaque == 0, &"{hole_opaque} opaque pixels inside the GB window")
 
-# ---- the scanline renderer must colorize identically ----
-block:
-  var sl = new_gb("", ROM, fifo = false, headless = true, run_bios = false)
-  sl.sgb_requested = true
-  sl.post_init()
-  for _ in 0 ..< 20: sl.step_frame()
-  check(sl.sgb != nil, "scanline renderer: no SGB adapter")
-  var diff = 0
-  for i in 0 ..< 160 * 144:
-    if sl.ppu.framebuffer[i] != m.ppu.framebuffer[i]: inc diff
-  check(diff == 0, &"scanline vs FIFO renderer disagree on {diff} SGB pixels")
-
 # ---- a non-SGB cart must be untouched ----
 block:
-  var plain = new_gb("", "tests/roms/gblinktest.gb", fifo = true,
-                     headless = true, run_bios = false)
+  var plain = new_gb("", "tests/roms/gblinktest.gb", headless = true, run_bios = false)
   plain.sgb_requested = true
   plain.post_init()
   check(plain.sgb == nil, "a cart without the SGB header bits got an adapter")
@@ -151,7 +138,7 @@ block:
 
 # ---- and the adapter is OPT-IN: an SGB cart gets nothing by default ----
 block:
-  var dflt = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+  var dflt = new_gb("", ROM, headless = true, run_bios = false)
   check(not dflt.sgb_requested, "sgb_requested must default to false")
   dflt.post_init()
   for _ in 0 ..< 20: dflt.step_frame()
@@ -215,7 +202,7 @@ proc packet(cmd: int; total: int; data: openArray[uint8]): seq[uint8] =
 block multi_packet_attr_chr:
   # ATTR_CHR with 40 data sets, which needs two packets: 4 header/param bytes
   # plus 10 data bytes fit in packet 0, the rest continue in packet 1.
-  var m2 = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+  var m2 = new_gb("", ROM, headless = true, run_bios = false)
   m2.sgb_requested = true
   m2.post_init()
   for _ in 0 ..< 20: m2.step_frame()
@@ -289,7 +276,7 @@ block multi_packet_attr_chr:
   check(s2.mask == 0, "ATTR_SET bit 6 did not cancel the mask")
 
 block mask_en:
-  var m3 = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+  var m3 = new_gb("", ROM, headless = true, run_bios = false)
   m3.sgb_requested = true
   m3.post_init()
   for _ in 0 ..< 30: m3.step_frame()
@@ -330,7 +317,7 @@ block mask_en:
   check(restored, "MASK_EN 0 did not release the screen")
 
 block mlt_req:
-  var m4 = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+  var m4 = new_gb("", ROM, headless = true, run_bios = false)
   m4.sgb_requested = true
   m4.post_init()
   for _ in 0 ..< 20: m4.step_frame()
@@ -358,7 +345,7 @@ block mlt_req:
 
 # ---- a state written WITH the adapter must load WITHOUT it, and back ----
 block cross_config_state:
-  var withsgb = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+  var withsgb = new_gb("", ROM, headless = true, run_bios = false)
   withsgb.sgb_requested = true
   withsgb.post_init()
   for _ in 0 ..< 20: withsgb.step_frame()
@@ -367,7 +354,7 @@ block cross_config_state:
 
   # Super Game Boy is a frontend setting, so this is an ordinary thing for a
   # user to do: save with it on, turn it off, load.
-  var without = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+  var without = new_gb("", ROM, headless = true, run_bios = false)
   without.post_init()
   check(without.sgb == nil, "cross-config: control machine got an adapter")
   var ok_off = true
@@ -387,7 +374,7 @@ block cross_config_state:
   # And the other way: a state written without the section into a machine
   # that has an adapter.
   let plain_payload = without.state_payload()
-  var back = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+  var back = new_gb("", ROM, headless = true, run_bios = false)
   back.sgb_requested = true
   back.post_init()
   var ok_on = true
@@ -408,7 +395,7 @@ block state_shapes:
   const WARM = 40
 
   proc runref(n: int): (seq[uint64], seq[uint64]) =
-    var r = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+    var r = new_gb("", ROM, headless = true, run_bios = false)
     r.sgb_requested = true
     r.post_init()
     for _ in 0 ..< WARM: r.step_frame()
@@ -437,7 +424,7 @@ block state_shapes:
 
   # Save + restore on every frame must be invisible.
   block:
-    var g = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+    var g = new_gb("", ROM, headless = true, run_bios = false)
     g.sgb_requested = true
     g.post_init()
     for _ in 0 ..< WARM: g.step_frame()
@@ -451,7 +438,7 @@ block state_shapes:
 
   # Run-ahead: save, run a speculative frame, roll back.
   block:
-    var g = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+    var g = new_gb("", ROM, headless = true, run_bios = false)
     g.sgb_requested = true
     g.post_init()
     for _ in 0 ..< WARM: g.step_frame()
@@ -467,7 +454,7 @@ block state_shapes:
 
   # Rewind: jump six frames back and replay forward.
   block:
-    var g = new_gb("", ROM, fifo = true, headless = true, run_bios = false)
+    var g = new_gb("", ROM, headless = true, run_bios = false)
     g.sgb_requested = true
     g.post_init()
     for _ in 0 ..< WARM: g.step_frame()

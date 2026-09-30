@@ -135,7 +135,7 @@ proc fifo_arm_window*(ppu: GbFifoPpu) =
         target
     else:                       WIN_LX_OFF
 
-method reset_render_scratch*(ppu: GbFifoPpu) =
+proc reset_render_scratch*(ppu: GbFifoPpu) =
   ## Clear the FIFO/fetcher scratch to its pre-line state so a state load onto
   ## a running core cannot leave a runaway lx or stale FIFO contents. None of
   ## this is read at vblank (where states are captured) and all of it is reset
@@ -1065,8 +1065,7 @@ const OBJ_PLANE1_HEAD {.intdefine.} = 6'i32
 # hardware draws exactly one bar (object 7, screen x 71). The read lands one
 # M-cycle AHEAD of the fetch's own dots. Moving the DMA's start instead costs
 # sixteen mooneye oam_dma rows; the read is not inside the fetch (swept all
-# six dots and out to eleven). scanline_ppu draws a whole line at once and
-# cannot model this.
+# six dots and out to eleven).
 const OBJ_DMA_BUS_LEAD {.intdefine.} = 1
   ## M-cycles the object fetch's OAM read leads the DMA unit's bus by on a
   ## console whose pipeline is not advanced (0 = the byte the unit drives on
@@ -2340,19 +2339,19 @@ when defined(gb_plaincheck) or defined(gb_spancheck):
   proc plain_take(ppu: GbFifoPpu; s: var PlainSnap) =
     if s.p == nil: new(s.p)
     for name, dst, src in fieldPairs(s.p[], ppu[]):
-      when name notin ["vram", "framebuffer", "sprite_table", "scanline_color_vals"]:
+      when name notin ["vram", "framebuffer", "sprite_table"]:
         dst = src
     let row = GB_WIDTH * int(ppu.ly)
     for i in 0 ..< GB_WIDTH: s.line[i] = ppu.framebuffer[row + i]
   proc plain_put(ppu: GbFifoPpu; s: PlainSnap) =
     for name, dst, src in fieldPairs(ppu[], s.p[]):
-      when name notin ["vram", "framebuffer", "sprite_table", "scanline_color_vals"]:
+      when name notin ["vram", "framebuffer", "sprite_table"]:
         dst = src
     let row = GB_WIDTH * int(ppu.ly)
     for i in 0 ..< GB_WIDTH: ppu.framebuffer[row + i] = s.line[i]
   proc plain_diff(ppu: GbFifoPpu; s: PlainSnap): string =
     for name, a, b in fieldPairs(ppu[], s.p[]):
-      when name notin ["vram", "framebuffer", "sprite_table", "scanline_color_vals"]:
+      when name notin ["vram", "framebuffer", "sprite_table"]:
         if a != b: return name
     let row = GB_WIDTH * int(ppu.ly)
     for i in 0 ..< GB_WIDTH:
@@ -2912,7 +2911,3 @@ proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =
       ppu.cycle_counter = next
       return
   fifo_tick_slow(ppu, gb, cycles)
-
-method tick*(ppu: GbFifoPpu; gb: GB; cycles: int) =
-  ## Polymorphic entry point; the hot path calls fifo_tick directly.
-  fifo_tick(ppu, gb, cycles)

@@ -73,8 +73,7 @@ origins allowlist — https required off localhost, raw IPs rejected).
 ## Game Boy / Game Boy Color
 
 - Sound with an output-stage DC blocker (the coupling capacitor between mixer and jack)
-- Two PPU implementations: cycle-accurate FIFO (default) and a faster scanline renderer
-  — see [fifo_ppu_changes.md](fifo_ppu_changes.md)
+- A cycle-accurate pixel-FIFO PPU — see [fifo_ppu_changes.md](fifo_ppu_changes.md)
 - Mappers: MBC1 (incl. MBC1M multicarts), MBC2, MBC3 with RTC, MBC5 with rumble, MBC6,
   MBC7 (tilt + EEPROM), MMM01, HuC1, HuC3, TAMA5, Pocket Camera
 - CGB: HDMA, double speed, palettes; SGB border/palette packets

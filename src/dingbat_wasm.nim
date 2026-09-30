@@ -140,7 +140,6 @@ proc wasm_set_color_correction(on: cint) {.exportc.} =
 # --- Core-construction settings ---
 # Take effect at the next core construction (ROM load / reset), not on the
 # running core.
-var optGbFifo = true
 # sgbRequested defaults OFF: the embed never calls applySystemSettings, and an
 # embedded game should play the cart as the cart is.
 var sgbRequested  = false
@@ -149,9 +148,6 @@ var optGbaBiosMode: cint = 0  # 0 = HLE, 1 = real BIOS, 2 = real BIOS boot + HLE
 var optGbaRunBios = true
 var optMp2kHle = false        # MP2K sound-engine HLE (opt-in, engages on detection)
 var optFifoInterp = true      # GBA FIFO interpolation (off = bit-true DAC output)
-proc wasm_set_gb_renderer(fifo: cint) {.exportc.} =
-  optGbFifo = fifo != 0
-
 proc wasm_set_gba_bios_mode(mode: cint) {.exportc.} =
   optGbaBiosMode = clamp(mode, 0, 2)
 
@@ -1309,7 +1305,7 @@ proc gb_link_init(rom1_path, rom2_path: string): cint =
   let bootrom = if fileExists("bootrom.bin"): "bootrom.bin" else: ""
   for path in [rom1_path, rom2_path]:
     if not fileExists(path): return 0
-    let core = new_gb(bootrom, path, optGbFifo, false, bootrom.len > 0)
+    let core = new_gb(bootrom, path, false, bootrom.len > 0)
     core.post_init()
     cores.add(core)
   let orig_dispatch = cores[1].scheduler.dispatch
@@ -1471,7 +1467,7 @@ proc gb_rollback_init(rom1_path, rom2_path: string; epoch: int64): cint =
   enable_deterministic_gb_rtc(epoch)  # applies to cartridge/state loads below
   for path in [rom1_path, rom2_path]:
     if not fileExists(path): return 0
-    let core = new_gb(bootrom, path, optGbFifo, false, bootrom.len > 0)
+    let core = new_gb(bootrom, path, false, bootrom.len > 0)
     core.post_init()
     cores.add(core)
   wrap_gb_rollback_audio(cores[rbLocal], alwaysMute = false)
@@ -1708,7 +1704,7 @@ proc initFromEmscripten(rom_path: cstring) {.exportc.} =
     stateKind = ekGB
     curRomCrcValid = false  # the cached CRC belongs to a GBA cart
     let bootrom = if fileExists("bootrom.bin"): "bootrom.bin" else: ""
-    stateGb = new_gb(bootrom, path, optGbFifo, false, bootrom.len > 0)
+    stateGb = new_gb(bootrom, path, false, bootrom.len > 0)
     stateGb.sgb_requested = sgbRequested
     stateGb.post_init()
     printer_attach()  # a printer is always plugged in on solo GB

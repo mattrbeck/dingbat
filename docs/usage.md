@@ -27,13 +27,6 @@ emulators.
 
 Save states are separate: nine slots per ROM with thumbnails, plus Quick Save / Quick Load.
 
-## Game Boy renderer
-
-Two PPU implementations, chosen in settings (takes effect on the next load or reset):
-
-- **FIFO** (default) — cycle-accurate; needed by games such as Prehistorik Man.
-- **Scanline** — faster; fine for the large majority of games.
-
 ## Multiplayer
 
 See [link-usage.md](link-usage.md).

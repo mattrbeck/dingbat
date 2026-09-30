@@ -191,7 +191,7 @@ proc main() =
   var emu: GBA = nil
   var gbEmu: GB = nil
   if isGb:
-    gbEmu = new_gb("", rom, fifo = true, headless = true, run_bios = false)
+    gbEmu = new_gb("", rom, headless = true, run_bios = false)
     gbEmu.test_output = new_test_output()
     gbEmu.post_init()
     if statePath.len > 0 and not gbEmu.load_state_bytes(readFile(statePath)):

@@ -2,12 +2,10 @@
 ## Same CLI contract as sameboy_runner.c / mgba_gb_runner.c, plus save states.
 ##
 ## Usage: dingbat_gb_nav <rom.gb> <bootromdir|none> <outprefix> <script> <shots>
-##                       [--state] [--scanline]
+##                       [--state]
 ##   script: comma-separated FRAME:KEY[:HOLD] ("" for none)
 ##   shots:  comma-separated frames; writes <outprefix>.f<frame>.ppm
 ##   --state:    also save_state to <outprefix>.f<frame>.state at each shot
-##   --scanline: use the scanline PPU (default is the FIFO PPU, which is what
-##               the native and web frontends ship)
 ##
 ## Build: nim c -d:release --path:src -o:tools/gbfuzz/dingbat_gb_nav \
 ##            tools/gbfuzz/dingbat_gb_nav.nim
@@ -76,7 +74,7 @@ proc main() =
   let args = commandLineParams()
   if args.len < 5:
     echo "Usage: dingbat_gb_nav <rom> <bootromdir|none> <outprefix> <script> <shots> " &
-         "[--state] [--scanline]"
+         "[--state]"
     quit(2)
   let rom_path = args[0]
   let bootdir = args[1]
@@ -87,10 +85,6 @@ proc main() =
     if tok.len > 0: shots.add(parseInt(tok))
   let flags = args[5 .. ^1]
   let want_state = "--state" in flags
-  # GBFUZZ_SCANLINE runs the whole sweep on the scanline renderer, to
-  # separate renderer bugs from core bugs.
-  let fifo = "--scanline" notin flags and getEnv("GBFUZZ_SCANLINE") == ""
-
   # All three runners play the boot ROM out of <bootromdir> by default and
   # count frame 0 from power-on, so no emulator's skip-boot shortcut can show
   # up as animation-phase drift. GBFUZZ_SKIP_BIOS=1 selects dingbat's shipping
@@ -105,7 +99,7 @@ proc main() =
     fh.close()
     bootrom = bootdir / (if (hdr[0x143] and 0x80) != 0: "cgb_boot.bin" else: "dmg_boot.bin")
 
-  let emu = new_gb(bootrom, rom_path, fifo = fifo, headless = true,
+  let emu = new_gb(bootrom, rom_path, headless = true,
                    run_bios = run_bios)
   emu.post_init()
   let dmg = not emu.cgb_enabled

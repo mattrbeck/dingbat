@@ -38,7 +38,7 @@ test("a fresh install has rewind on, and says so to wasm", async () => {
 
 // A "system" record with no rewindOn key (pre-setting installs) must read as on.
 test("a system record written before this setting existed stays on", async () => {
-  const app = await bootWith({ gbFifo: true, gbaBiosMode: 1, gbaRunBios: false });
+  const app = await bootWith({ gbaBiosMode: 1, gbaRunBios: false });
   assert.equal(rewindOn(app), true, "a missing key must resolve to ON, not undefined");
   assert.equal(hidden(app), false);
   eq(setCalls(app), [1]);

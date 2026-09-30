@@ -1345,8 +1345,7 @@ const CGB_WRITE_LATENCY_ANY* = CGB_WX_LATENCY != 0 or CGB_SCY_LATENCY != 0 or
 # boot-hand-off rows say -2, gambatte `enable_display` (later lines/frames)
 # says 0. `LINE0_TRIM=2, LINE1_TRIM=-2` is the closest fit and is not shipped
 # because nothing derives it. ppu.skip_boot must clear the window these open,
-# since the HLE hand-off's LCDC write fires the LCD-enable branch too. FIFO
-# renderer only (`gb_line_end`).
+# since the HLE hand-off's LCDC write fires the LCD-enable branch too.
 const LCD_ON_LINE0_TRIM* {.intdefine.} = 0'i32
 const LCD_ON_LINE1_TRIM* {.intdefine.} = 0'i32
 const LCD_ON_TRIM_ANY* = LCD_ON_LINE0_TRIM != 0 or LCD_ON_LINE1_TRIM != 0
@@ -1746,9 +1745,7 @@ type
     cached_hl*:  int   # -1 = invalid
     # Idle-loop skip (GB_IDLE_SKIP, cpu.nim). Scratch, not serialized: a
     # loaded state starts a fresh verdict. `wl_edge` is set by a taken
-    # backward JR/JP (`wl_from` its address) and answered at the next fetch;
-    # only with `wl_on`, the FIFO renderer (the scanline one has no horizon).
-    wl_on*:        bool
+    # backward JR/JP (`wl_from` its address) and answered at the next fetch.
     wl_edge*:      bool
     wl_from*:      uint16
     wl_head*:      int32      # loop head the snapshot was taken at, -1 none
@@ -1759,7 +1756,7 @@ type
     # gb.wl_mark as of the last halted M-cycle that could not skip: nothing
     # the answer depends on moves until the mark does.
     wl_halt_fail*: CycleCount
-    # That failure met a mode 3 the FIFO renderer was running dot by dot,
+    # That failure met a mode 3 the renderer was running dot by dot,
     # which moves the mark every M-cycle and has no horizon until it ends or
     # defers: no retry before then.
     wl_halt_m3*:   bool
@@ -2004,8 +2001,7 @@ type
     # CGB latency), ahead of the M-cycle boundary the rest of the byte waits
     # for (stat_drop_arm, ppu.nim). Settled lazily, at the next source change
     # past its dot, so it can still be set at a frame boundary; serialized
-    # from GB payload rev 6. The dot is in cycle_counter's terms, which the
-    # scanline renderer restarts at every mode boundary (stat_drop_rebase).
+    # from GB payload rev 6. The dot is in cycle_counter's terms.
     win_check_dot*:      int32     # WIN_CHECK_DEFER: dot the comparator samples on, -1 none
     stat_set_dot*:       int32     # STAT_SET_LANDING_EVAL: dot a STAT write's set bits land, -1 none
     stat_drop_pending*:  bool
@@ -2070,9 +2066,6 @@ type
     frame*:         bool
     ran_bios*:      bool
 
-  GbScanlinePpu* = ref object of GbPpu
-    scanline_color_vals*: array[160, tuple[color: uint8, priority: bool]]
-
   FetchStage* = enum
     fsSleep, fsGetTile, fsGetTileDataLow, fsGetTileDataHigh, fsPushPixel
 
@@ -2118,8 +2111,7 @@ type
     # line's last pixel, which a DMG's end-of-line cleanup cannot clear
     # (DMG_WIN_LAST_PX_CARRY). Consumed at the head of the next line whose
     # LCDC.5 is set, possibly in the next frame, so not per-line scratch; never
-    # set on a CGB. Serialized from GB payload rev 6 (0 from the scanline
-    # renderer, which has no such carry).
+    # set on a CGB. Serialized from GB payload rev 6.
     win_carry*:           bool
     # LCDC.5 has been low since the carry above was owed, so spending it has to
     # REACTIVATE the window and not merely continue it -- worth
@@ -2554,7 +2546,6 @@ type
     # Frontend opt-in for Super Game Boy emulation; default off. Consulted only
     # at post_init, where the cart header has the final say.
     sgb_requested*:  bool
-    fifo*:           bool
     headless*:       bool
     run_bios*:       bool
     cartridge*:      Mbc
@@ -2573,10 +2564,8 @@ type
     interrupts*:     GbInterrupts
     joypad*:         GbJoypad
     ppu*:            GbPpu
-    # The same object as `ppu` when the FIFO renderer is selected, nil for the
-    # scanline one. Lets the per-M-cycle component tick reach the shipping
-    # renderer as a direct call instead of a method dispatch (which showed up
-    # as ~2-3% of a profile in chckNilDisp alone). Non-owning: `ppu` owns it.
+    # The same object as `ppu`, typed as the renderer that extends the shared
+    # base. Non-owning: `ppu` owns it.
     fifo_ppu* {.cursor.}: GbFifoPpu
     timer*:          GbTimer
     serial*:         GbSerial
@@ -3361,7 +3350,7 @@ include serial
 include timer
 include sgb
 include joypad
-# Video: shared PPU base + the two interchangeable renderers
+# Video: shared PPU base + the FIFO renderer
 # Forward declarations needed by ppu.nim (defined in memory.nim included later).
 # hot_bus_inline is defined here rather than in memory.nim because the forward
 # declarations below must carry the same pragma as their implementations: on
@@ -3392,11 +3381,10 @@ const GB_APU_EVENTS* = {etAPUFrameSeq, etAPUSample, etAPUChannel1,
                         etAPUChannel2, etAPUChannel3, etAPUChannel4}
   ## Events that change nothing but the APU: an idle skip runs through them.
 template fifo_sync*(gb: GB) =
-  if gb.fifo_ppu != nil and gb.fifo_ppu.lazy_end != 0:
+  if gb.fifo_ppu.lazy_end != 0:
     fifo_lazy_sync(gb.fifo_ppu, gb)
 
 include ppu
-include scanline_ppu
 include fifo_ppu
 # Memory bus (mem_read/mem_write dispatch, DMA/HDMA, I/O registers)
 include memory
@@ -3490,7 +3478,7 @@ proc gb_revision_from_name*(name: string): (GbRevision, bool) =
 
 # ==================== NEW_GB + POST_INIT ====================
 
-proc new_gb*(bootrom_path: string; rom_path: string; fifo: bool; headless: bool; run_bios: bool; force_cgb = false; force_dmg = false): GB =
+proc new_gb*(bootrom_path: string; rom_path: string; headless: bool; run_bios: bool; force_cgb = false; force_dmg = false): GB =
   ## force_cgb runs a DMG-flagged cart in CGB mode (a DMG cart in a Game Boy
   ## Color; mooneye misc/ asserts it). force_dmg runs a CGB-flagged cart as a
   ## DMG, which no console does but gambatte's suite needs: it selects the
@@ -3498,7 +3486,6 @@ proc new_gb*(bootrom_path: string; rom_path: string; fifo: bool; headless: bool;
   result = GB(
     bootrom_path: bootrom_path,
     rom_path:     rom_path,
-    fifo:         fifo,
     headless:     headless,
     run_bios:     run_bios,
     sgb_requested: false,
@@ -3610,20 +3597,15 @@ proc post_init*(gb: GB) =
   gb.interrupts = new_gb_interrupts()
   gb.apu        = new_gb_apu(gb, gb.headless)
   gb.joypad     = new_gb_joypad()
-  if gb.fifo:
-    let p = new_gb_fifo_ppu(gb)
-    gb.ppu = p
-    gb.fifo_ppu = p
-  else:
-    gb.ppu = new_gb_scanline_ppu(gb)
-    gb.fifo_ppu = nil
+  let p = new_gb_fifo_ppu(gb)
+  gb.ppu = p
+  gb.fifo_ppu = p
   gb.timer  = new_gb_timer()
   gb.serial = new_gb_serial()
   gb.memory = new_gb_memory(gb)
   # Needs the memory: whether the boot ROM is mapped is one of its three inputs.
   gb_sync_cgb_native(gb)
   gb.cpu    = new_gb_cpu()
-  gb.cpu.wl_on = gb.fifo_ppu != nil
   # Super Game Boy. A cart that unlocks SGB functions and is NOT being run as
   # a CGB gets the adapter: the two are mutually exclusive on hardware (an SGB
   # has no CGB in it, and a CGB ignores the packet stream), so a CGB-flagged

@@ -202,8 +202,7 @@ clipCase("GBA gbaedge", new_gba("", roms / "gbaedge.gba", run_bios = false,
 clipCase("GBA inputrec", new_gba("", roms / "inputrec.gba", run_bios = false,
                                  use_hle = true),
          hasPicture = false, readsInput = true)
-clipCase("GB gbedge", new_gb("", roms / "gbedge.gb", fifo = true,
-                             headless = true, run_bios = false),
+clipCase("GB gbedge", new_gb("", roms / "gbedge.gb", headless = true, run_bios = false),
          hasPicture = true, readsInput = true)
 
 if failures > 0:

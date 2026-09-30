@@ -26,7 +26,7 @@ proc write_ppm(path: string; buf: seq[uint16]) =
 
 proc load(rom, state: string): GB =
   enable_deterministic_gb_rtc(1_700_000_000)  # freeze; state carries the value
-  result = new_gb("", rom, fifo = true, headless = true, run_bios = false)
+  result = new_gb("", rom, headless = true, run_bios = false)
   result.post_init()
   if not result.load_state_bytes(readFile(state)):
     raise newException(ValueError, "failed to load state " & state & " onto " & rom)

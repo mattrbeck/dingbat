@@ -35,7 +35,6 @@ interface EmscriptenModule {
   // --- wasm exports generated from src/dingbat_wasm.nim ---
   _netlink_set_speculative?(on: number): void;
   _wasm_set_color_correction?(on: number): void;
-  _wasm_set_gb_renderer?(fifo: number): void;
   _wasm_set_gba_bios_mode?(mode: number): void;
   _wasm_set_gba_run_bios?(on: number): void;
   _wasm_set_lcd_response?(on: number): void;

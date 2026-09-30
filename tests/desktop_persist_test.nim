@@ -63,7 +63,7 @@ proc boot_gba(rom: string): GBA =
   result.post_init()
 
 proc boot_gb(rom: string): GB =
-  result = new_gb("", rom, fifo = true, headless = true, run_bios = false)
+  result = new_gb("", rom, headless = true, run_bios = false)
   result.post_init()
 
 echo "=== A battery write that fails (finding 4) ==="

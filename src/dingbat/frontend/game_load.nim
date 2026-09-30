@@ -31,7 +31,6 @@ type
   CoreOptions* = object
     ## What `build_core` hands the constructors, from the config.
     gb_bootrom*:     string
-    gb_fifo*:        bool
     headless*:       bool
     gb_run_bios*:    bool
     sgb*:            bool
@@ -73,7 +72,7 @@ proc build_core*(rom_path: string; o: CoreOptions): BuiltCore =
                      detail: &"{size} bytes")
   try:
     if gb:
-      let g = new_gb(o.gb_bootrom, rom_path, o.gb_fifo, o.headless, o.gb_run_bios)
+      let g = new_gb(o.gb_bootrom, rom_path, o.headless, o.gb_run_bios)
       # Super Game Boy is opt-in from config but header-gated in the core: a
       # cart without the SGB flag, or one that is CGB-capable, gets nothing.
       g.sgb_requested = o.sgb

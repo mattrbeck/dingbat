@@ -49,7 +49,7 @@ in the hub is the diagram.
 
 `src/dingbat/gb/` (hub `gb.nim`; `link` and `rollback` import it): `mbc/` (one file per
 mapper), `apu/` + `apu`, `interrupts`, `serial`, `timer`, `joypad`, `sgb`, `ppu` (shared
-base), `scanline_ppu`, `fifo_ppu`, `memory`, `cb_opcodes`, `opcodes`, `cpu`, `savestate`.
+base), `fifo_ppu`, `memory`, `cb_opcodes`, `opcodes`, `cpu`, `savestate`.
 
 `src/dingbat/frontend/`: the native GUI's ImGui widgets.
 

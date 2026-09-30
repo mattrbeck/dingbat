@@ -222,7 +222,7 @@ when HDMA_EDGE_BEATS_DISPATCH != 0:
     ## HBlank request now, and it takes the bus ahead of the dispatch.
     fifo_sync(gb)
     if gb.ppu.hdma_active and not gb.ppu.hdma_block_due and
-       gb.fifo_ppu != nil and (gb.ppu.lcd_status and 3'u8) == 3'u8 and
+       (gb.ppu.lcd_status and 3'u8) == 3'u8 and
        fetcher_retired(gb.fifo_ppu) and gb.fifo_ppu.m3_hold == 0:
       ppu_step_hdma(gb.ppu, gb)
 
@@ -265,10 +265,9 @@ proc dispatch_interrupt(cpu: GbCpu; gb: GB) {.noinline.} =
     echo "IRQDISP tdiv=", gb.timer.tdiv, " pc=", toHex(cpu.pc, 4)
   when defined(gb_irq_trace):
     # One line per interrupt taken, with the PPU dot (diagnostic, tools only).
-    if gb.fifo_ppu != nil:
-      echo "IRQ ly=", gb.fifo_ppu.ly, " dot=", gb.fifo_ppu.cycle_counter,
-           " if=", toHex(irq_read(gb.interrupts, 0xFF0F), 2),
-           " pc=", toHex(cpu.pc, 4)
+    echo "IRQ ly=", gb.fifo_ppu.ly, " dot=", gb.fifo_ppu.cycle_counter,
+         " if=", toHex(irq_read(gb.interrupts, 0xFF0F), 2),
+         " pc=", toHex(cpu.pc, 4)
   when IRQ_PUSH_T > 0:
     mem_tick_components(gb.memory, gb, IRQ_PUSH_T)
   # The same OAM-bug M-cycles as PUSH (cpu_push16; Pan Docs lists interrupt
@@ -580,11 +579,10 @@ proc cpu_halt_wake(cpu: GbCpu; gb: GB) {.noinline.} =
       return
   when defined(gb_halt_trace):
     # One line per halt exit, with the PPU dot the CPU resumed on.
-    if gb.fifo_ppu != nil:
-      echo "HALTWAKE ly=", gb.fifo_ppu.ly, " dot=", gb.fifo_ppu.cycle_counter,
-           " mode=", (gb.ppu.lcd_status and 3'u8),
-           " if=", toHex(irq_read(gb.interrupts, 0xFF0F), 2),
-           " ime=", (if cpu.ime: 1 else: 0)
+    echo "HALTWAKE ly=", gb.fifo_ppu.ly, " dot=", gb.fifo_ppu.cycle_counter,
+         " mode=", (gb.ppu.lcd_status and 3'u8),
+         " if=", toHex(irq_read(gb.interrupts, 0xFF0F), 2),
+         " ime=", (if cpu.ime: 1 else: 0)
   # CGB halt-exit charge (CGB_HALT_EXIT_MCYCLES in gb.nim; ships at 0).
   # Here rather than at the dispatch because the IME-clear wakes want it
   # too (gambatte halt/*_irq_*), and ahead of the HBlank DMA block.
@@ -762,12 +760,7 @@ proc wl_horizon(gb: GB; reads_ly, reads_stat: bool; period = 0): int =
   var dots: int32
   var lcd_off = false
   let ppu {.cursor.} = gb.fifo_ppu
-  if ppu == nil:
-    # The scanline renderer: a halted CPU only (no loop marks a head on it,
-    # wl_on), to its next mode boundary.
-    if reads_ly or reads_stat: return 0
-    dots = scanline_idle_dots(gb.ppu, gb)
-  elif not ppu.lcd_enabled:
+  if not ppu.lcd_enabled:
     # Switched off and settled (fifo_tick): LY, STAT and the rest hold still
     # up to the dot before the blank frame.
     if ppu.off_wc != mem.write_count or ppu.hdma_bytes_held: return 0
@@ -870,8 +863,8 @@ proc wl_head_check(cpu: GbCpu; gb: GB) {.noinline.} =
      not (cpu.ime and interrupt_ready(gb.interrupts)) and
      wl_horizon(gb, false, false) > 0:
     # The horizon before the decode: the reads it adds only shorten it, and a
-    # repeating loop mostly meets 0 (mode 3 not deferred, the scanline
-    # renderer), where decoding the body every iteration cost up to 20 %.
+    # repeating loop mostly meets 0 (mode 3 not deferred), where decoding the
+    # body every iteration cost up to 20 %.
     let sc = wl_scan(cpu, gb, int(cpu.pc), int(cpu.wl_from))
     if sc.ok and now - cpu.wl_stamp == CycleCount(sc.period):
       let h = wl_horizon(gb, sc.reads_ly, sc.reads_stat, sc.period)
@@ -901,7 +894,7 @@ proc wl_halt_skip(cpu: GbCpu; gb: GB): bool {.noinline.} =
   let h = wl_horizon(gb, false, false)
   let n = (h - 1) div 4
   if n < 2:
-    cpu.wl_halt_m3 = h <= 0 and gb.fifo_ppu != nil and wl_m3_undeferred(gb)
+    cpu.wl_halt_m3 = h <= 0 and wl_m3_undeferred(gb)
     return false
   when defined(gb_idlecheck):
     if not wl_chk_on: wl_chk_arm(cpu, gb, n * 4, true)
