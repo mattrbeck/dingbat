@@ -770,7 +770,7 @@ proc wl_horizon(gb: GB; reads_ly, reads_stat: bool; period = 0): int =
   elif not ppu.lcd_enabled:
     # Switched off and settled (fifo_tick): LY, STAT and the rest hold still
     # up to the dot before the blank frame.
-    if ppu.off_wc != mem.write_count: return 0
+    if ppu.off_wc != mem.write_count or ppu.hdma_bytes_held: return 0
     dots = DOTS_PER_FRAME - 1'i32 - ppu.dots_since_frame
     lcd_off = true
   elif (ppu.lcd_status and 3'u8) == 3'u8:

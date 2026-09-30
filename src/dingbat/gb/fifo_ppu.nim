@@ -2866,11 +2866,15 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
     ppu.stat_chg_dot = STAT_NO_HOLD
     lcd_off_frame(ppu, gb)
     # Settled: every store that could unsettle it is a write_byte, or one in
-    # flight that a later tick lands.
+    # flight that a later tick lands. The mode-0 re-assert above also clocks
+    # the HBlank DMA edge detector, which a halted CPU holds back
+    # (HDMA_HALT_M0_BLIND): settled only running, with the detector at 0.
     let mem = gb.memory
     ppu.off_wc =
       if mem.write_deferred or (when CGB_WRITE_LATENCY_ANY: mem.pipe_reg != 0
-                                else: false): -1
+                                else: false) or
+         gb.cpu.halted or gb.hdma_stalled or ppu.hdma_bytes_held or
+         ppu.hdma_seen_mode != 0'u8: -1
       else: mem.write_count
 
 proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =
@@ -2897,7 +2901,9 @@ proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =
   elif (ppu.lcd_control and 0x80'u8) == 0:
     # Switched off and settled: nothing to redo until a write or the blank
     # frame (lcd_off_frame).
-    if ppu.off_wc == gb.memory.write_count and
+    # A HBlank DMA block copied meanwhile holds bytes the mode-0 re-assert
+    # flushes (HDMA_VISIBLE_DOTS).
+    if ppu.off_wc == gb.memory.write_count and not ppu.hdma_bytes_held and
        ppu.dots_since_frame < DOTS_PER_FRAME: return
   elif PLAIN_LAZY_ON:
     # A deferred mode 3 costs one compare a tick, as an idle span does.
