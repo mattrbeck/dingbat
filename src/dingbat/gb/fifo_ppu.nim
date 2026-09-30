@@ -2205,7 +2205,7 @@ proc fifo_plain_ok(ppu: GbFifoPpu; gb: GB; n: int): bool {.inline.} =
   let cc = ppu.cycle_counter
   result = ppu.m3_delay == 0 and ppu.dropped_first_fetch and
     not ppu.head_cycle and ppu.smooth_scroll_sampled and
-    not ppu.fetching_sprite and ppu.fifo_sprite.size == 0 and
+    not ppu.fetching_sprite and
     # A window past its restart's first push, still enabled: the fetch reads
     # its own map column and row, the abort at the map read cannot fire, and
     # the retire owes no tail fetch (fetcher_retired).
@@ -2226,10 +2226,11 @@ proc fifo_plain_ok(ppu: GbFifoPpu; gb: GB; n: int): bool {.inline.} =
     result = result and cc > ppu.tdsel_dot
 
 proc fifo_plain_span_of(ppu: GbFifoPpu; gb: GB; n: int; blocks: bool;
-                        win: static bool) =
+                        win, spr: static bool) =
   ## `n` dots of tick_bg_fetcher + tick_shifter under fifo_plain_ok, fetching
-  ## the window (`win`) or the background: one copy each, so neither pays
-  ## the other's branch in the block.
+  ## the window (`win`) or the background, with an object's pixels still in
+  ## the OBJ FIFO (`spr`) or none: one copy each, so none pays another's
+  ## branch in the block.
   let row = GB_WIDTH * int(ppu.ly)
   # fifo_mix with an empty OBJ FIFO: sprite_wins refuses colour 0, so the
   # pixel is the BG entry through LCDC.0 (BG_EN_AT_MIX) and its palette. The
@@ -2239,13 +2240,20 @@ proc fifo_plain_span_of(ppu: GbFifoPpu; gb: GB; n: int; blocks: bool;
   let bg_on = bg_display(ppu) or native
   let sgb = ppu.sgb_attr != nil
   template emit() =
+    # As fifo_emit_pixel: the OBJ FIFO pops with the BG one, on or off screen.
     let bg_px = fifo_shift(ppu.fifo)
+    when spr:
+      let has_sp = ppu.fifo_sprite.size > 0
+      let sp_px = if has_sp: fifo_shift(ppu.fifo_sprite) else: GbPixel()
+    else:
+      const has_sp = false
+      let sp_px = GbPixel()
     if ppu.lx >= 0:
       when MIXER_DOT_LAG != 0:
-        ppu.mix[ppu.lx and (MIX_HOLD - 1)] = GbMixHold(bg: bg_px, sp: GbPixel())
-      if sgb:
+        ppu.mix[ppu.lx and (MIX_HOLD - 1)] = GbMixHold(bg: bg_px, sp: sp_px)
+      if has_sp or sgb:
         ppu.framebuffer[row + int(ppu.lx)] =
-          fifo_mix(ppu, gb, bg_px, GbPixel(), ppu.lx)
+          fifo_mix(ppu, gb, bg_px, sp_px, ppu.lx)
       else:
         let c = if bg_on: bg_px.color else: 0'u8
         let final = if native: int(c) else: int(ppu.bgp[c])
@@ -2318,8 +2326,11 @@ proc fifo_plain_span_of(ppu: GbFifoPpu; gb: GB; n: int; blocks: bool;
     dec left
 
 proc fifo_plain_span(ppu: GbFifoPpu; gb: GB; n: int; blocks = true) {.inline.} =
-  if ppu.fetching_window: fifo_plain_span_of(ppu, gb, n, blocks, true)
-  else: fifo_plain_span_of(ppu, gb, n, blocks, false)
+  if ppu.fifo_sprite.size > 0:
+    if ppu.fetching_window: fifo_plain_span_of(ppu, gb, n, blocks, true, true)
+    else: fifo_plain_span_of(ppu, gb, n, blocks, false, true)
+  elif ppu.fetching_window: fifo_plain_span_of(ppu, gb, n, blocks, true, false)
+  else: fifo_plain_span_of(ppu, gb, n, blocks, false, false)
 
 when defined(gb_plaincheck) or defined(gb_spancheck):
   type PlainSnap = object
@@ -2380,7 +2391,7 @@ when defined(gb_lazypoison):
     lx: int32
     fetch_counter: int
     fetcher_x: int
-    fifo: GbPixelFifo
+    fifo, fifo_sprite: GbPixelFifo
     mix: array[MIX_HOLD, GbMixHold]
     tile_num, tile_attrs, tile_data_low, tile_data_high, fetch_scy: uint8
     tdsel_addr: int32
@@ -2395,6 +2406,7 @@ proc fifo_lazy_sync*(ppu: GbFifoPpu; gb: GB) {.noinline.} =
     ppu.fetch_counter = typeof(ppu.fetch_counter)(lazy_held.fetch_counter)
     ppu.fetcher_x = lazy_held.fetcher_x
     ppu.fifo = lazy_held.fifo
+    ppu.fifo_sprite = lazy_held.fifo_sprite
     ppu.mix = lazy_held.mix
     ppu.tile_num = lazy_held.tile_num
     ppu.tile_attrs = lazy_held.tile_attrs
@@ -2425,7 +2437,8 @@ proc fifo_lazy_enter(ppu: GbFifoPpu; gb: GB; remaining: int; h: int32) =
   ppu.cycle_counter += int32(remaining)
   when defined(gb_lazypoison):
     lazy_held = LazyHeld(lx: ppu.lx, fetch_counter: int(ppu.fetch_counter),
-      fetcher_x: ppu.fetcher_x, fifo: ppu.fifo, mix: ppu.mix,
+      fetcher_x: ppu.fetcher_x, fifo: ppu.fifo, fifo_sprite: ppu.fifo_sprite,
+      mix: ppu.mix,
       tile_num: ppu.tile_num, tile_attrs: ppu.tile_attrs,
       tile_data_low: ppu.tile_data_low, tile_data_high: ppu.tile_data_high,
       fetch_scy: ppu.fetch_scy, tdsel_addr: ppu.tdsel_addr)
@@ -2433,6 +2446,8 @@ proc fifo_lazy_enter(ppu: GbFifoPpu; gb: GB; remaining: int; h: int32) =
     ppu.fetch_counter = typeof(ppu.fetch_counter)(90)
     ppu.fetcher_x = 1 shl 24
     ppu.fifo.size = 99; ppu.fifo.head = 1 shl 20; ppu.fifo.tail = -7
+    ppu.fifo_sprite.size = 99; ppu.fifo_sprite.head = 1 shl 20
+    ppu.fifo_sprite.tail = -7
     for i in 0 ..< MIX_HOLD:
       ppu.mix[i] = GbMixHold(bg: GbPixel(color: 3, palette: 7, obj_to_bg: 1),
                              sp: GbPixel(color: 2, palette: 5, obj_to_bg: 1))
