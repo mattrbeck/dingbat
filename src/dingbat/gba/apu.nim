@@ -614,6 +614,9 @@ proc `[]=`*(apu: APU; io_addr: uint32; value: uint8) =
           apu.dma_channels.fifo_reset(1)
       elif (value and 0x80) > 0 and not apu.sound_enabled:
         apu.sound_enabled = true
+        # Pan Docs, Power Control: power-on resets the wave sample buffer;
+        # CH3 emits it through its trigger's start-up delay.
+        apu.channel3.wave_ram_sample_buffer = 0
         # The 512 Hz clock runs on (it does not restart), but the sequencer
         # restarts at step 0 under the DMG power-on rule: with the tap bit
         # set -- the next edge less than half a period away -- that edge is

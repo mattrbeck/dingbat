@@ -1025,6 +1025,13 @@ proc default_psg_state(gba: GBA) =
   for ch in [PsgEnvChannel(apu.channel1), apu.channel2, apu.channel4]:
     ch.env_extra_tick = false
   ch4_resync_divisor(apu.channel4)
+  # The wave channel held the fetched nibble; it holds the byte now. The
+  # byte under the pointer is the one it fetched (wave RAM only changes
+  # under a catch-up).
+  let ch3 = apu.channel3
+  ch3.wave_ram_sample_buffer =
+    ch3.wave_ram[int(ch3.wave_ram_bank and 1) * PSG_WAVE_BANK +
+                 int((ch3.wave_ram_position and 31) div 2)]
 
 # ---- PSG waveform deadlines <-> scheduler events ----
 #

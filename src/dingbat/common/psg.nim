@@ -145,7 +145,8 @@ type
     # "byte CH3 is on" for a DMG wave RAM access to land on (ch3_wave_open).
     # Serialized from GB payload rev 6.
     wave_fetched*:           bool
-    # GB: the byte last fetched; GBA: the nibble last fetched.
+    # The byte last fetched; the DAC plays the nibble the position selects.
+    # (GBA revs <= 9 held the nibble.)
     wave_ram_sample_buffer*: uint8
     length_load*:            uint8
     volume_code*:            uint8

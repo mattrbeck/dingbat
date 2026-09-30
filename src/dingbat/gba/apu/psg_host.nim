@@ -188,7 +188,9 @@ proc ch3_get_amplitude(ch: PsgWave): int16 =
   ## (GBATEK). Full scale is +-128 (a multiple of 16), so the quarters below
   ## divide exactly.
   if not (ch.enabled and ch.dac_enabled): return 0'i16
-  let full = (int(ch.wave_ram_sample_buffer) - 8) * 16
+  let nibble = if (ch.wave_ram_position and 1) == 0: ch.wave_ram_sample_buffer shr 4
+               else: ch.wave_ram_sample_buffer and 0x0F
+  let full = (int(nibble) - 8) * 16
   let quarter = full div 4
   if ch.volume_force: return int16(full - quarter)
   case ch.volume_code

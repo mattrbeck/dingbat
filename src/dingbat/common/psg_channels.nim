@@ -514,47 +514,38 @@ proc ch3_catchup_slow(ch: PsgWave; h: PsgHost; observer_period: uint32) =
   let steps = psg_steps_due(ch, now - ch.next_step, period, ticks,
                             observer_period)
   if steps == 0: return
-  when PSG_AGB:
-    # The GBA wave channel is the CGB one with a second 32-nibble bank: the
-    # pointer is a free-running mod-32 counter and, in 64-step mode
-    # (dimension), the bank flips every time it wraps to 0 (GBATEK
-    # SOUND3CNT_L bit 5). So N steps land at (pos + N) mod 32 with the bank
-    # toggled once per wrap -- wraps = (pos + N) div 32, and only its parity
-    # matters.
-    when defined(psgverify):
-      # Per-period loop the closed form must agree with.
-      var wpos  = ch.wave_ram_position
-      var wbank = ch.wave_ram_bank
-      var wbuf  = ch.wave_ram_sample_buffer
-      for _ in 0 ..< steps:
-        wpos = uint8(int(wpos + 1) mod (PSG_WAVE_BANK * 2))
+  when defined(psgverify):
+    # Per-period loop the closed form must agree with.
+    var wpos  = ch.wave_ram_position
+    var wbank = ch.wave_ram_bank
+    for _ in 0 ..< steps:
+      wpos = uint8(int(wpos + 1) mod (PSG_WAVE_BANK * 2))
+      when PSG_AGB:
         if wpos == 0 and ch.wave_ram_dimension: wbank = wbank xor 1
-        let fs = ch.wave_ram[int(wbank) * PSG_WAVE_BANK + int(wpos div 2)]
-        wbuf = (fs shr (if (wpos and 1) == 0: 4 else: 0)) and 0xF
-    let total = CycleCount(ch.wave_ram_position) + steps
-    ch.wave_ram_position = uint8(total and 31)
+  # The pointer is a free-running mod-32 counter, so N steps land at
+  # (pos + N) mod 32.
+  let total = CycleCount(ch.wave_ram_position) + steps
+  ch.wave_ram_position = uint8(total and 31)
+  when PSG_AGB:
+    # The GBA wave channel is the CGB one with a second 32-nibble bank: in
+    # 64-step mode (dimension) the bank flips every time the pointer wraps to
+    # 0 (GBATEK SOUND3CNT_L bit 5) -- once per wrap, wraps = (pos + N) div
+    # 32, and only its parity matters.
     if ch.wave_ram_dimension and ((total shr 5) and 1) != 0:
       ch.wave_ram_bank = ch.wave_ram_bank xor 1
-    # Only the LAST read matters: wave RAM and the dimension/bank bits cannot
-    # change between catch-ups (every wave RAM access and SOUND3CNT write
-    # catches this channel up first).
-    let full_sample = ch.wave_ram[ch3_bank_base(ch) + int(ch.wave_ram_position div 2)]
-    ch.wave_ram_sample_buffer =
-      (full_sample shr (if (ch.wave_ram_position and 1) == 0: 4 else: 0)) and 0xF
-    when defined(psgverify):
-      doAssert wpos  == ch.wave_ram_position, "ch3 pointer closed form != naive loop"
-      doAssert wbank == ch.wave_ram_bank, "ch3 bank closed form != naive loop"
-      doAssert wbuf  == ch.wave_ram_sample_buffer, "ch3 sample buffer != naive loop"
-    ch.next_step += steps * period
+  when defined(psgverify):
+    doAssert wpos  == ch.wave_ram_position, "ch3 pointer closed form != naive loop"
+    doAssert wbank == ch.wave_ram_bank, "ch3 bank closed form != naive loop"
+  # Only the last fetch matters: wave RAM and the dimension/bank bits cannot
+  # change between catch-ups (every wave RAM access and NR30 write catches
+  # this channel up first). The byte is held; the DAC picks its nibble.
+  ch.wave_fetched = true
+  ch.wave_ram_sample_buffer = ch.wave_ram[ch3_bank_base(ch) + int(ch.wave_ram_position div 2)]
+  ch.next_step += steps * period
+  when PSG_AGB:
     # The step now pending was armed by the one before it, i.e. one CURRENT
     # period ago.
     ch.arm_delay = uint32(period)
-  else:
-    # Only the last fetch matters: wave_ram is immutable between catch-ups.
-    ch.wave_ram_position = uint8((int(ch.wave_ram_position) + int(steps mod 32)) mod 32)
-    ch.wave_fetched = true
-    ch.wave_ram_sample_buffer = ch.wave_ram[ch.wave_ram_position div 2]
-    ch.next_step += steps * period
 
 proc ch3_catchup_at(ch: PsgWave; h: PsgHost; observer_period: uint32) {.inline.} =
   ## See sq_catchup_at. The wave pointer is a free-running mod-32 counter.
@@ -613,13 +604,12 @@ proc ch3_write(ch: PsgWave; nr: int; val: uint8; h: PsgHost) =
     ch.dac_enabled = (val and 0x80) != 0
     if not ch.dac_enabled:
       ch.enabled = false
-      when not PSG_AGB:
-        # The sample buffer clears with the DAC: SameSuite
-        # channel_3_restart_stop_delay (restart after an NR30 stop is silent
-        # through the startup delay) vs channel_3_restart_delay (a plain
-        # restart keeps the old sample). Power-off reaches here through
-        # NR30 = 0.
-        ch.wave_ram_sample_buffer = 0
+      # The sample buffer clears with the DAC: SameSuite
+      # channel_3_restart_stop_delay (restart after an NR30 stop is silent
+      # through the startup delay) vs channel_3_restart_delay (a plain
+      # restart keeps the old sample). Power-off reaches here through
+      # NR30 = 0.
+      ch.wave_ram_sample_buffer = 0
     when PSG_AGB:
       ch.wave_ram_dimension = (val and 0x20) != 0
       ch.wave_ram_bank      = (val shr 6) and 1
