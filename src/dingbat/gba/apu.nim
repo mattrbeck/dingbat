@@ -593,6 +593,16 @@ proc `[]=`*(apu: APU; io_addr: uint32; value: uint8) =
         for addr in 0x60'u32..0x81'u32:
           apu[addr] = 0x00'u8
         apu.sound_enabled = false
+        # Power-off resets the channels' internal phase and stops their
+        # frequency timers (Pan Docs, Power Control; SameSuite channel_1 /
+        # channel_2 bracket every subtest with an off/on); wave RAM survives.
+        apu.channel1.wave_duty_position = 0
+        apu.channel2.wave_duty_position = 0
+        apu.channel3.wave_ram_position = 0
+        apu.channel1.next_step = GBA_NO_STEP
+        apu.channel2.next_step = GBA_NO_STEP
+        apu.channel3.next_step = GBA_NO_STEP
+        apu.channel4.next_step = GBA_NO_STEP
         # The sweep unit's shadow frequency goes with the power: a note after
         # a master off/on is checked as fresh (psg_channels.nim ch1_trigger_sweep).
         apu.channel1.frequency_shadow = 0

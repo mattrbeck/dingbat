@@ -186,13 +186,13 @@ proc sq_catchup_at(ch: PsgSquare; h: PsgHost; observer_period: uint32) {.inline.
   ## before anything observes the position or changes the period.
   ## observer_period (PSG_OBS_CPU for a CPU access) only affects a step
   ## landing on this exact cycle.
-  when not PSG_AGB:
-    if not ch.enabled:
-      # GB: switching off freezes the phase; only an APU power-off resets it
-      # (SameSuite channel_1_stop_restart). Parking the deadline keeps it
-      # from going stale enough to underflow apu_rebase.
-      ch.next_step = PSG_NO_STEP
-      return
+  if not ch.enabled:
+    # Switching off freezes the phase: the frequency timer is only clocked
+    # while the channel runs, and only an APU power-off resets the position
+    # (SameSuite channel_1_stop_restart). Parking the deadline keeps it from
+    # going stale enough to underflow apu_rebase.
+    ch.next_step = PSG_NO_STEP
+    return
   if ch.next_step > psg_now(h): return   # not due (or never triggered)
   sq_catchup_slow(ch, h, observer_period)
 
@@ -732,28 +732,26 @@ proc ch4_catchup_slow(ch: PsgNoise; h: PsgHost; observer_period: uint32) =
   # steps == 0: the tie went to the observer; checking `enabled` first would
   # park the channel a step early.
   if steps == 0: return
-  when not PSG_AGB:
-    # GB: a disabled channel shifts once more, then parks. Every path that
-    # clears `enabled` catches this channel up first, so next_step is past
-    # the moment of disabling.
-    if not ch.enabled:
-      psg_lfsr_shift(ch)
-      ch.next_step = PSG_NO_STEP
-      ch.div_next  = PSG_NO_STEP
-      return
-  # No cheap closed form for the LFSR, so this iterates; bounded by the
-  # per-frame catch-up (<= 8778 shifts at the shortest divisor). A scheduler
-  # event per shift would pin the event horizon at 32 cycles and defeat
-  # HALT/fast_forward. The GB's divisor stage is not advanced here: it only
-  # changes at NR43 writes, triggers and speed switches, each of which
-  # settles it (ch4_advance_divisor); advancing it per sample would cost
-  # every sample.
-  for _ in 0 ..< steps: psg_lfsr_shift(ch)
+  # A disabled channel shifts once more, then parks. Every path that clears
+  # `enabled` catches this channel up first, so next_step is past the moment
+  # of disabling. One call site for the shift: a second one tips clang into
+  # outlining it, and this loop is the PSG's hottest (<= 8778 shifts a
+  # frame at the shortest divisor, bounded by the per-frame catch-up). There
+  # is no cheap closed form for the LFSR. A scheduler event per shift would
+  # pin the event horizon at 32 cycles and defeat HALT/fast_forward. The
+  # GB's divisor stage is not advanced here: it only changes at NR43 writes,
+  # triggers and speed switches, each of which settles it
+  # (ch4_advance_divisor); advancing it per sample would cost every sample.
+  let running = ch.enabled
+  for _ in 0 ..< (if running: steps else: 1): psg_lfsr_shift(ch)
+  if not running:
+    ch.next_step = PSG_NO_STEP
+    ch.div_next  = PSG_NO_STEP
+    return
   ch.next_step += steps * period
   when PSG_AGB:
     # The step now pending was armed by the one before it, i.e. one CURRENT
-    # period ago. GBA: the chain is not gated on `enabled`: once triggered
-    # it runs until RegisterRamReset or a re-trigger.
+    # period ago.
     ch.arm_delay = uint32(period)
 
 proc ch4_catchup_at(ch: PsgNoise; h: PsgHost; observer_period: uint32) {.inline.} =
