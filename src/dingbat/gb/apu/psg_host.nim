@@ -167,15 +167,6 @@ proc fs_next_edge_in*(gb: GB): int =
 template psg_fs_next_edge_in(h: GB): int = fs_next_edge_in(h)
 template psg_fs_next_stage(h: GB): int = h.apu.frame_sequencer_stage
 
-proc psg_sweep_trigger_extra(gb: GB): uint8 =
-  ## Extra sweep clocks for a trigger now (SWEEP_TRIGGER_LEAD_T_*).
-  let lead_t = (if gb.cgb_enabled: SWEEP_TRIGGER_LEAD_T_CGB
-                else: SWEEP_TRIGGER_LEAD_T_DMG)
-  if lead_t == 0: return 0
-  let d = fs_next_edge_in(gb)
-  let stage = gb.apu.frame_sequencer_stage
-  if (stage == 2 or stage == 6) and d <= (lead_t shl gb.scheduler.speed): 1
-  else: 0
 
 # ---- The output stage: DAC and PCM12/PCM34 ----
 

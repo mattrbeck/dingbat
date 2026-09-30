@@ -22,8 +22,6 @@
 #   psg_fs_next_edge_in(h), psg_fs_next_stage(h)
 #                             scheduler cycles to the frame sequencer's next
 #                             step, and which step it is
-# and, only where the GB model runs (the `when not PSG_AGB` arms):
-#   psg_sweep_trigger_extra   a trigger's phase against the frame sequencer
 # and the GBA's ch1_settle / ch1_s0_kill_at (its measured shift-0 law).
 #
 # `when PSG_AGB` gates the places the GBA instance runs its own model: the
@@ -149,6 +147,17 @@ proc psg_env_trigger_extra(h: PsgHost): int =
     let lead = 4 shl psg_shl(h)
     let stage = psg_fs_next_stage(h)
     if (stage == 7 and d > lead) or (stage == 6 and d <= lead): 1 else: 0
+
+proc psg_sweep_trigger_extra(h: PsgHost): uint8 =
+  ## Extra sweep clocks for a trigger now (SWEEP_TRIGGER_LEAD_T_*): one for a
+  ## trigger within the lead before a sweep clock (steps 2 and 6).
+  let lead_t = (if psg_cgb(h): SWEEP_TRIGGER_LEAD_T_CGB
+                else: SWEEP_TRIGGER_LEAD_T_DMG)
+  if lead_t == 0: return 0
+  let d = psg_fs_next_edge_in(h)
+  let stage = psg_fs_next_stage(h)
+  if (stage == 2 or stage == 6) and d <= (lead_t shl psg_shl(h)): 1
+  else: 0
 
 template psg_trigger_envelope(ch: PsgEnvChannel; h: PsgHost) =
   init_volume_envelope(ch, psg_env_trigger_extra(h))
@@ -383,6 +392,8 @@ proc ch1_trigger_sweep(ch: PsgSweepSquare; h: PsgHost) =
     let slow = ch.s0_slow   # (ch1_s0_kill_at) as the trigger finds it
     ch.frequency_shadow = ch.frequency
     ch.sweep_timer      = if ch.sweep_period > 0: ch.sweep_period else: 8
+    when PSG_AGB_SWEEP_TRIGGER_LEAD != 0:
+      ch.sweep_timer += psg_sweep_trigger_extra(h)
     ch.sweep_enabled    = ch.sweep_period > 0 or ch.shift > 0
     ch.negate_used      = false
     # A pending shift-0 kill from an earlier trigger does not survive this one
@@ -582,19 +593,32 @@ proc ch3_wave_fetching(ch: PsgWave; h: PsgHost): bool {.inline.} =
   let window = CycleCount(GB_WAVE_ACCESS_WINDOW) shl psg_shl(h)
   ch.next_step - psg_now(h) <= window
 
+template ch3_cpu_other_bank(): bool =
+  ## GBATEK, SOUND3CNT_L: "reading/writing to/from wave RAM will address the
+  ## other (not selected) bank", so a CPU access never meets the byte being
+  ## played (PSG_WAVE_CPU_OTHER_BANK, GBA only).
+  when PSG_AGB: PSG_WAVE_CPU_OTHER_BANK != 0
+  else:         false
+
 proc ch3_wave_read(ch: PsgWave; h: PsgHost; i: int): uint8 =
   ## CPU read of wave RAM byte i (0..15). While enabled it returns the byte
   ## being played; the caller caught the pointer up first.
-  if not ch3_wave_open(ch, h): 0xFF'u8
-  elif ch.enabled: ch.wave_ram[ch3_bank_base(ch) + int(ch.wave_ram_position div 2)]
-  else:            ch.wave_ram[ch3_bank_base(ch) + i]
+  when ch3_cpu_other_bank():
+    ch.wave_ram[(int(ch.wave_ram_bank) xor 1) * PSG_WAVE_BANK + i]
+  else:
+    if not ch3_wave_open(ch, h): 0xFF'u8
+    elif ch.enabled: ch.wave_ram[ch3_bank_base(ch) + int(ch.wave_ram_position div 2)]
+    else:            ch.wave_ram[ch3_bank_base(ch) + i]
 
 proc ch3_wave_write(ch: PsgWave; h: PsgHost; i: int; val: uint8) =
   ## A write lands at the position CH3 is playing while enabled; a DMG write
   ## outside the access window is dropped.
-  if not ch3_wave_open(ch, h): discard
-  elif ch.enabled: ch.wave_ram[ch3_bank_base(ch) + int(ch.wave_ram_position div 2)] = val
-  else:            ch.wave_ram[ch3_bank_base(ch) + i] = val
+  when ch3_cpu_other_bank():
+    ch.wave_ram[(int(ch.wave_ram_bank) xor 1) * PSG_WAVE_BANK + i] = val
+  else:
+    if not ch3_wave_open(ch, h): discard
+    elif ch.enabled: ch.wave_ram[ch3_bank_base(ch) + int(ch.wave_ram_position div 2)] = val
+    else:            ch.wave_ram[ch3_bank_base(ch) + i] = val
 
 proc ch3_write(ch: PsgWave; nr: int; val: uint8; h: PsgHost) =
   # The caller caught the wave pointer up, so a period/dimension/bank/trigger
@@ -651,8 +675,10 @@ proc ch3_write(ch: PsgWave; nr: int; val: uint8; h: PsgHost) =
           for i in 0 ..< 4: ch.wave_ram[i] = ch.wave_ram[base + i]
       psg_trigger_length(ch, h, 0x100)
       when PSG_AGB:
-        # GBA: period + 6 from now, the +6 outside the x4 clock scale.
-        let arm = uint32(psg_period(ch3_timer(ch), h)) + 6
+        # GBA: period + 6 from now, the +6 outside the x4 clock scale unless
+        # PSG_WAVE_DELAY_SCALED.
+        let arm = uint32(psg_period(ch3_timer(ch), h)) +
+                  (when PSG_WAVE_DELAY_SCALED != 0: 6'u32 shl psg_shl(h) else: 6'u32)
         ch.next_step = psg_now(h) + CycleCount(arm)
         ch.arm_delay = arm
       else:

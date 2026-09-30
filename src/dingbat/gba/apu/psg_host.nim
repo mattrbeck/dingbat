@@ -15,6 +15,20 @@ template psg_q_length_any(h: GBA): bool = false
 template psg_q_length_defer(h: GBA): bool = false
 template psg_q_backstep(h: GBA): bool = false
 
+# Open questions for the AGB SP (tests/roms/payloads/wavebank.s, wavedly.s,
+# swplead.s); each 0 is the behaviour before the probe.
+const PSG_WAVE_CPU_OTHER_BANK* {.intdefine.} = 0
+  ## 1: a CPU wave RAM access addresses the bank NOT selected for playback,
+  ## and never the byte being played (GBATEK SOUND3CNT_L). 0: the selected
+  ## bank, and while CH3 plays, the byte under its pointer (the CGB's rule).
+const PSG_WAVE_DELAY_SCALED* {.intdefine.} = 0
+  ## 1: CH3's 6 T-cycle trigger start-up is in the PSG's 4 MHz clock, 24 GBA
+  ## cycles, like every other PSG delay. 0: 6 GBA cycles.
+const PSG_AGB_SWEEP_TRIGGER_LEAD* {.intdefine.} = 0
+  ## 1: a channel 1 trigger within SWEEP_TRIGGER_LEAD_T_CGB T-cycles before a
+  ## sweep clock misses it (the GB's rule; gambatte
+  ## sound/ch1_init_reset_sweep_counter_timing_*).
+
 const GBA_NO_STEP* = PSG_NO_STEP
 const GBA_OBS_CPU* = PSG_OBS_CPU
 
