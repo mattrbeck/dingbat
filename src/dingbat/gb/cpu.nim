@@ -690,7 +690,7 @@ proc wl_scan(cpu: GbCpu; gb: GB; head, last: int): WlScan =
   ## Anything outside the safe subset rejects the loop.
   if last < head or last - head > 64 or not wl_code_ok(head) or
      not wl_code_ok(last + 2): return
-  let mem = gb.memory
+  let mem {.cursor.} = gb.memory
   template rd(a: int): int = int(read_byte(mem, gb, a))
   var pc = head
   var cyc = 0
@@ -745,7 +745,7 @@ proc wl_horizon(gb: GB; reads_ly, reads_stat: bool; period = 0): int =
   ## change: a scheduler event other than the APU's own, the PPU's next stop
   ## (the dot fifo_tick stops bumping the counter on), a timer overflow. 0 when
   ## something in flight rules a skip out altogether.
-  let mem = gb.memory
+  let mem {.cursor.} = gb.memory
   if mem.requested_oam_dma or mem.dma_position <= 0xA0 or mem.dma_busy or
      mem.write_deferred: return 0
   when CGB_WRITE_LATENCY_ANY:
@@ -757,10 +757,10 @@ proc wl_horizon(gb: GB; reads_ly, reads_stat: bool; period = 0): int =
   # peer it never ends, and a game listening for one (SC = $80) skips.
   if (gb.serial.sc and 0x80'u8) != 0 and gb.serial.driver != nil and
      serial_peer_committed(gb.serial.driver): return 0
-  let t = gb.timer
+  let t {.cursor.} = gb.timer
   if t.countdown >= 0 or t.hold_t != 0: return 0
   var dots: int32
-  let ppu = gb.fifo_ppu
+  let ppu {.cursor.} = gb.fifo_ppu
   if ppu == nil:
     # The scanline renderer: a halted CPU only (no loop marks a head on it,
     # wl_on), to its next mode boundary.
@@ -788,7 +788,7 @@ proc wl_horizon(gb: GB; reads_ly, reads_stat: bool; period = 0): int =
          int32(period shr mem.current_speed) < 32'i32: return 0
   if dots <= 0: return 0
   result = int(dots) shl mem.current_speed
-  let s = gb.scheduler
+  let s {.cursor.} = gb.scheduler
   for ev in s.pending:
     if ev.kind notin GB_APU_EVENTS:
       result = min(result, int(ev.cycles - s.cycles))
