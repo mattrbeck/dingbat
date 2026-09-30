@@ -2204,7 +2204,12 @@ proc fifo_plain_ok(ppu: GbFifoPpu; gb: GB; n: int): bool {.inline.} =
   result = ppu.m3_delay == 0 and ppu.dropped_first_fetch and
     not ppu.head_cycle and ppu.smooth_scroll_sampled and
     not ppu.fetching_sprite and ppu.fifo_sprite.size == 0 and
-    not ppu.fetching_window and ppu.fetch_counter >= 0 and
+    # A window past its restart's first push, still enabled: the fetch reads
+    # its own map column and row, the abort at the map read cannot fire, and
+    # the retire owes no tail fetch (fetcher_retired).
+    (not ppu.fetching_window or
+     (ppu.fetcher_x != 0 and window_enabled(ppu) and not ppu.win_revoking)) and
+    ppu.fetch_counter >= 0 and
     lx_end < ppu.m3_retire_lx and
     (ppu.win_lx < ppu.lx or ppu.win_lx > lx_end) and
     (not obj_fetch_on(ppu) or ppu.sprites.len == 0 or
@@ -2218,8 +2223,11 @@ proc fifo_plain_ok(ppu: GbFifoPpu; gb: GB; n: int): bool {.inline.} =
   when CGB_TDSEL_ANY:
     result = result and cc > ppu.tdsel_dot
 
-proc fifo_plain_span(ppu: GbFifoPpu; gb: GB; n: int; blocks = true) =
-  ## `n` dots of tick_bg_fetcher + tick_shifter under fifo_plain_ok.
+proc fifo_plain_span_of(ppu: GbFifoPpu; gb: GB; n: int; blocks: bool;
+                        win: static bool) =
+  ## `n` dots of tick_bg_fetcher + tick_shifter under fifo_plain_ok, fetching
+  ## the window (`win`) or the background: one copy each, so neither pays
+  ## the other's branch in the block.
   let row = GB_WIDTH * int(ppu.ly)
   # fifo_mix with an empty OBJ FIFO: sprite_wins refuses colour 0, so the
   # pixel is the BG entry through LCDC.0 (BG_EN_AT_MIX) and its palette. The
@@ -2244,10 +2252,15 @@ proc fifo_plain_span(ppu: GbFifoPpu; gb: GB; n: int; blocks = true) =
           uint16(ppu.pram[o]) or (uint16(ppu.pram[o + 1]) shl 8)
     inc ppu.lx
   template get_tile() =
-    let m = if (ppu.lcd_control and 0x08'u8) == 0: 0x1800 else: 0x1C00
-    ppu.fetch_scy = ppu.scy
-    let o = ((ppu.fetcher_x + ppu.scx_tile) and 0x1F) +
-            (((int(ppu.ly) + int(ppu.scy)) shr 3) * 32) and 0x3FF
+    when win:
+      let m = if (ppu.lcd_control and 0x40'u8) == 0: 0x1800 else: 0x1C00
+      let o = (ppu.fetcher_x and 0x1F) +
+              ((((ppu.current_window_line shr 3) * 32)) and 0x3FF)
+    else:
+      let m = if (ppu.lcd_control and 0x08'u8) == 0: 0x1800 else: 0x1C00
+      ppu.fetch_scy = ppu.scy
+      let o = ((ppu.fetcher_x + ppu.scx_tile) and 0x1F) +
+              (((int(ppu.ly) + int(ppu.scy)) shr 3) * 32) and 0x3FF
     ppu.tile_num   = ppu.vram[0][m + o]
     ppu.tile_attrs = ppu.vram[1][m + o]
   template get_data(low_plane: bool): uint8 =
@@ -2256,10 +2269,12 @@ proc fifo_plain_span(ppu: GbFifoPpu; gb: GB; n: int; blocks = true) =
                    else: int(cast[int8](ppu.tile_num))
     let tile_ptr = (if sel: 0x0000 else: 0x1000) + 16 * tile_num
     let bank_num = int((ppu.tile_attrs and 0b0000_1000) shr 3)
-    var tile_row = if gb.quirks.scy_fetch_latch:
-                     (int(ppu.ly) + int(ppu.fetch_scy)) and 7
+    var tile_row = when win: ppu.current_window_line and 7
                    else:
-                     (int(ppu.ly) + int(ppu.scy)) and 7
+                     if gb.quirks.scy_fetch_latch:
+                       (int(ppu.ly) + int(ppu.fetch_scy)) and 7
+                     else:
+                       (int(ppu.ly) + int(ppu.scy)) and 7
     if (ppu.tile_attrs and 0b0100_0000) != 0: tile_row = 7 - tile_row
     let off = tile_ptr + tile_row * 2 + (if low_plane: 0 else: 1)
     when CGB_TDSEL_GLITCH:
@@ -2299,6 +2314,10 @@ proc fifo_plain_span(ppu: GbFifoPpu; gb: GB; n: int; blocks = true) =
     if ppu.fifo.size > 0: emit()
     ppu.cycle_counter += 1
     dec left
+
+proc fifo_plain_span(ppu: GbFifoPpu; gb: GB; n: int; blocks = true) {.inline.} =
+  if ppu.fetching_window: fifo_plain_span_of(ppu, gb, n, blocks, true)
+  else: fifo_plain_span_of(ppu, gb, n, blocks, false)
 
 when defined(gb_plaincheck) or defined(gb_spancheck):
   type PlainSnap = object

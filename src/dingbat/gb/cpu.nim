@@ -883,6 +883,9 @@ proc wl_head_check(cpu: GbCpu; gb: GB) {.noinline.} =
   cpu.wl_stamp = now
   cpu.wl_writes = gb.memory.write_count
 
+template wl_m3_undeferred(gb: GB): bool =
+  (gb.fifo_ppu.lcd_status and 3'u8) == 3'u8 and gb.fifo_ppu.lazy_end == 0
+
 proc wl_halt_skip(cpu: GbCpu; gb: GB): bool {.noinline.} =
   ## A halted CPU with nothing to wake it before the horizon spends those
   ## M-cycles as cpu_halt_tick would, in one step. true = advanced.
@@ -891,7 +894,9 @@ proc wl_halt_skip(cpu: GbCpu; gb: GB): bool {.noinline.} =
     if halt_lead_live(gb): return false
   let h = wl_horizon(gb, false, false)
   let n = (h - 1) div 4
-  if n < 2: return false
+  if n < 2:
+    cpu.wl_halt_m3 = h <= 0 and gb.fifo_ppu != nil and wl_m3_undeferred(gb)
+    return false
   when defined(gb_idlecheck):
     if not wl_chk_on: wl_chk_arm(cpu, gb, n * 4, true)
     false
@@ -915,7 +920,8 @@ proc tick*(cpu: GbCpu; gb: GB) =
     when defined(gb_idlecheck):
       if wl_chk_on: wl_chk_tick(cpu, gb)
     when GB_IDLE_SKIP != 0:
-      if gb.wl_mark != cpu.wl_halt_fail:
+      if gb.wl_mark != cpu.wl_halt_fail and
+         not (cpu.wl_halt_m3 and wl_m3_undeferred(gb)):
         if wl_halt_skip(cpu, gb): return
         cpu.wl_halt_fail = gb.wl_mark
     # The halt ends on IF & IE whether or not IME lets the interrupt be taken;

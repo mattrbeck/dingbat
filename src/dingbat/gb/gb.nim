@@ -1759,6 +1759,10 @@ type
     # gb.wl_mark as of the last halted M-cycle that could not skip: nothing
     # the answer depends on moves until the mark does.
     wl_halt_fail*: CycleCount
+    # That failure met a mode 3 the FIFO renderer was running dot by dot,
+    # which moves the mark every M-cycle and has no horizon until it ends or
+    # defers: no retry before then.
+    wl_halt_m3*:   bool
     # The opcode executing, so an IO read can say which M-cycle of its own
     # instruction it is (STAT_M0_TAIL_MAX_MC). Guarded out of a default build.
     when STAT_M0_TAIL_MAX_MC != 0:
