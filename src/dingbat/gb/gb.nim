@@ -2227,6 +2227,11 @@ type
     # deferred. Never in a save state: every writer syncs first.
     lazy_dot*:            int32
     lazy_end*:            int32
+    # With the LCD off, the memory write count as of the last tick that left
+    # the switched-off state settled (counter, mode, LY and markers reset,
+    # no store in flight); -1 = unsettled. Until the next write, a tick only
+    # moves the panel clock (fifo_tick). Scratch, not serialized.
+    off_wc*:              int
     # The dot this line's pixel 0 would have left the shifter on if the current
     # unbroken run had started there (`cycle_counter - lx`, written at each
     # place the shifter stops, mixer_note_stop). The shifter's position reads

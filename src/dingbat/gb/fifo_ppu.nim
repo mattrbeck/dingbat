@@ -61,7 +61,7 @@ proc new_gb_fifo_ppu*(gb: GB): GbFifoPpu =
     pram: base.pram, palette_index: base.palette_index, auto_increment: base.auto_increment,
     obj_pram: base.obj_pram, obj_palette_index: base.obj_palette_index,
     obj_auto_increment: base.obj_auto_increment,
-    hdma5: base.hdma5,
+    hdma5: base.hdma5, off_wc: -1,
     hdma_src: base.hdma_src, hdma_dst: base.hdma_dst,
     hdma_active: base.hdma_active,
     window_trigger: base.window_trigger,
@@ -144,8 +144,10 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
   fifo_clear(ppu.fifo_sprite)
   ppu.fetch_counter = 0
   ppu.fetcher_x = 0
-  # A deferred mode 3 belongs to the machine the state replaces.
+  # A deferred mode 3 belongs to the machine the state replaces, and so does
+  # a settled switched-off LCD.
   ppu.lazy_end = 0
+  ppu.off_wc = -1
   ppu.scx_fine = 0
   when SCX_FINE_LATCH_LIVE:
     ppu.scx_latch_until = -1'i32
@@ -2848,6 +2850,13 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
     when STAT_IRQ_SPLIT: ppu.irq_ly = 0
     ppu.stat_chg_dot = STAT_NO_HOLD
     lcd_off_frame(ppu, gb)
+    # Settled: every store that could unsettle it is a write_byte, or one in
+    # flight that a later tick lands.
+    let mem = gb.memory
+    ppu.off_wc =
+      if mem.write_deferred or (when CGB_WRITE_LATENCY_ANY: mem.pipe_reg != 0
+                                else: false): -1
+      else: mem.write_count
 
 proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =
   # The mode a CPU read in this M-cycle observes (GbPpu.read_mode). Written
@@ -2870,6 +2879,11 @@ proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =
        (m != 1 or ppu.cycle_counter > LYC_RELATCH_DOT):
       ppu.cycle_counter = next
       return
+  elif (ppu.lcd_control and 0x80'u8) == 0:
+    # Switched off and settled: nothing to redo until a write or the blank
+    # frame (lcd_off_frame).
+    if ppu.off_wc == gb.memory.write_count and
+       ppu.dots_since_frame < DOTS_PER_FRAME: return
   elif PLAIN_LAZY_ON:
     # A deferred mode 3 costs one compare a tick, as an idle span does.
     let next = ppu.cycle_counter + int32(cycles)

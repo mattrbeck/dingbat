@@ -760,13 +760,19 @@ proc wl_horizon(gb: GB; reads_ly, reads_stat: bool; period = 0): int =
   let t {.cursor.} = gb.timer
   if t.countdown >= 0 or t.hold_t != 0: return 0
   var dots: int32
+  var lcd_off = false
   let ppu {.cursor.} = gb.fifo_ppu
   if ppu == nil:
     # The scanline renderer: a halted CPU only (no loop marks a head on it,
     # wl_on), to its next mode boundary.
     if reads_ly or reads_stat: return 0
     dots = scanline_idle_dots(gb.ppu, gb)
-  elif not ppu.lcd_enabled: return 0
+  elif not ppu.lcd_enabled:
+    # Switched off and settled (fifo_tick): LY, STAT and the rest hold still
+    # up to the dot before the blank frame.
+    if ppu.off_wc != mem.write_count: return 0
+    dots = DOTS_PER_FRAME - 1'i32 - ppu.dots_since_frame
+    lcd_off = true
   elif (ppu.lcd_status and 3'u8) == 3'u8:
     if ppu.lazy_end == 0: return 0
     dots = ppu.lazy_end - ppu.cycle_counter
@@ -774,12 +780,12 @@ proc wl_horizon(gb: GB; reads_ly, reads_stat: bool; period = 0): int =
     let m = ppu.lcd_status and 3'u8
     if m == 1 and ppu.cycle_counter <= LYC_RELATCH_DOT: return 0
     dots = fifo_skip_target(ppu, gb, m) - ppu.cycle_counter
-  if reads_ly:
+  if reads_ly and not lcd_off:
     # LY ripples on the line's last dot (ly_edge_rippling) and line 153 reads
     # 0 part way through (LY153_READ_SPLIT).
     if ppu.ly == 153'u8: return 0
     dots = min(dots, gb_line_end(ppu) - 2'i32 - ppu.cycle_counter)
-  if reads_stat:
+  if reads_stat and not lcd_off:
     # STAT reads the mode a few dots back from a change (stat_read_mode): the
     # iteration being copied, which began `period` cycles ago, must have
     # started clear of it too.
