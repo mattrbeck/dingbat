@@ -842,8 +842,30 @@ const
     4 * 4 +                               # APU: PSG arm delays
     4                                     # PPU: frames owed to step_frame
 
+# Rev 10 added the PSG section (GBA_SEC_PSG, gba/savestate.nim
+# save_psg_state) after it, last before END; fixed length, pinned the same
+# way.
+const
+  PSG_TAG     = 0xD0'u8
+  PSG_SEC_LEN =
+    1 +                                   # tag
+    1 + 1 + 1 + (1 + 4) +                 # ch1 shift-0 check: slow, anchor, armed, stop
+    (1 + 4) +                             # master-on stamp
+    1 + 1                                 # ch1 / ch2 latched duty output
+
+proc strip_psg(payload: var string): bool =
+  ## Rewrite a payload this build wrote into the pre-rev-10 layout. The
+  ## shift-0 check's spare bits in the APU section are left clear, which a
+  ## rev-9 reader takes as a disarmed check.
+  let at = payload.len - 1 - PSG_SEC_LEN
+  if at < 0 or payload[at] != char(PSG_TAG) or payload[^1] != char(END_TAG):
+    return false
+  payload.delete(at ..< payload.len - 1)
+  true
+
 proc strip_inflight(payload: var string): bool =
   ## Rewrite a payload this build wrote into the pre-rev-9 layout.
+  if not strip_psg(payload): return false
   let at = payload.len - 1 - INFLIGHT_SEC_LEN
   if at < 0 or payload[at] != char(INFLIGHT_TAG) or payload[^1] != char(END_TAG):
     return false
@@ -973,9 +995,9 @@ proc run_intr_wait_migration() =
   except CatchableError:
     check(false, "rev-3 IntrWait state applies", getCurrentExceptionMsg())
   if migrated:
-    # Up to the rev-9 section, which a rev-3 state never had: its load gives
-    # it a fresh machine's values, where (a) has its own run's.
-    let keep = rev4.len - 1 - INFLIGHT_SEC_LEN
+    # Up to the rev-9 and rev-10 sections, which a rev-3 state never had: its
+    # load gives them a fresh machine's values, where (a) has its own run's.
+    let keep = rev4.len - 1 - PSG_SEC_LEN - INFLIGHT_SEC_LEN
     check(c.state_payload()[0 ..< keep] == rev4[0 ..< keep],
           "migrated rev-3 payload is byte-identical to the rev-4 one")
     check(c.cpu.r[13] == 0x03007F00'u32 - 16, "System sp lowered by the frame")
@@ -1095,8 +1117,23 @@ proc run_gba_inflight() =
     check(c.mmio.memctrl == c_memctrl,
           "rev 8: memory control keeps the running game's value, as before")
 
+  # Rev 9: the same payload without the PSG section loads as that build did.
+  var p9 = p
+  check(strip_psg(p9), "rev-10 PSG section located and removed")
+  let e = new_gba_for(GBA_ROMS[0][0])
+  for _ in 0 ..< 30: e.step_frame()
+  var loaded9 = true
+  try: e.apply_state_payload(p9, 9)
+  except CatchableError: loaded9 = false
+  check(loaded9, "a rev-9 payload still loads")
+  if loaded9:
+    check(e.apu.power_on_at == GBA_NO_STEP,
+          "rev 9: no master-on window (the stamp was never carried)")
+    check(e.apu.channel1.kill_at == GBA_NO_STEP and not e.apu.channel1.sweep_armed,
+          "rev 9: clear spare bits read as a disarmed shift-0 check")
+
   # Every field of the section is bounded.
-  let at = p.len - 1 - INFLIGHT_SEC_LEN
+  let at = p.len - 1 - PSG_SEC_LEN - INFLIGHT_SEC_LEN
   proc refuses(q: string): bool =
     let d = new_gba_for(GBA_ROMS[0][0])
     try: d.apply_state_payload(q)

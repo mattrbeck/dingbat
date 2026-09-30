@@ -127,16 +127,11 @@ proc ch4_in_range*(address: uint32): bool {.inline.} =
 
 # ---- The output stage ----
 
-const GBA_DUTY_CENTRED = block:
-  ## PSG_DUTY as -8 / +8: the GBA's output is centred.
-  var t: array[4, array[8, int16]]
-  for d in 0 .. 3:
-    for i in 0 .. 7: t[d][i] = int16(PSG_DUTY[d][i]) * 16 - 8
-  t
-
 proc sq_get_amplitude(ch: PsgSquare): int16 =
+  ## The latched duty output (PsgSquare.sample_bit), centred: -8 / +8 x
+  ## volume.
   if ch.enabled and ch.dac_enabled:
-    GBA_DUTY_CENTRED[ch.duty][ch.wave_duty_position] * int16(ch.current_volume)
+    (int16(ch.sample_bit) * 16 - 8) * int16(ch.current_volume)
   else:
     0'i16
 

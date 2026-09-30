@@ -19,7 +19,8 @@ const
   GBA_SEC_PPU     = 0xCB'u8
   GBA_SEC_APU     = 0xCC'u8
   GBA_SEC_STORAGE = 0xCD'u8
-  GBA_SEC_INFLIGHT = 0xCE'u8   # rev 9, last before END
+  GBA_SEC_INFLIGHT = 0xCE'u8   # rev 9
+  GBA_SEC_PSG     = 0xD0'u8   # rev 10, last before END
   GBA_SEC_END     = 0xCF'u8
 
 # ---- CPU ----
@@ -495,18 +496,16 @@ proc save_apu_state(apu: APU; w: var Writer) =
     let ch = apu.channel1
     save_channel_env(ch, w)
     w.write_i32(int32(ch.wave_duty_position))
-    w.write_u8(ch.sweep_period or (if ch.s0_slow: 0x80'u8 else: 0'u8))   # s0_slow: bit 7
+    # Revs 9 and earlier carried the shift-0 check (s0_slow, s0_anchor, the
+    # arming, a pending stop) in spare bits of these three fields; rev 10
+    # writes them clear and carries the check in the PSG section. A stop
+    # already due is applied first: every reader would.
+    ch1_settle(ch, apu.gba)
+    w.write_u8(ch.sweep_period)
     w.write_bool(ch.negate)
     w.write_u8(ch.shift)
-    w.write_u8((ch.sweep_timer and 0x0F) or (ch.s0_anchor shl 4))   # s0_anchor: high nibble
-    # Bits 11..15 of the shadow's field carry the shift-0 check (psg_channels.nim ch1_trigger_sweep):
-    # bits 11..14 a pending kill's distance in cycles (0 = none), bit 15 the
-    # arming. A kill already due is applied first: every reader would.
-    ch1_settle(ch, apu.gba)
-    let kill_in = if ch.kill_at == GBA_NO_STEP: 0'u16
-                  else: uint16(min(ch.kill_at - apu.gba.scheduler.cycles, 15))
-    w.write_u16((ch.frequency_shadow and 0x7FF'u16) or (kill_in shl 11) or
-                (if ch.sweep_armed: 0x8000'u16 else: 0'u16))
+    w.write_u8(ch.sweep_timer and 0x0F)
+    w.write_u16(ch.frequency_shadow and 0x7FF'u16)
     w.write_bool(ch.sweep_enabled)
     w.write_bool(ch.negate_used)
     w.write_u8(ch.duty)
@@ -560,6 +559,8 @@ proc load_apu_state(apu: APU; r: var Reader) =
     let ch = apu.channel1
     load_channel_env(ch, r)
     ch.wave_duty_position = int(r.read_i32())
+    # Rev <= 9: spare bits carry the shift-0 check (see save_apu_state);
+    # rev 10 writes them clear and load_psg_state sets the real fields.
     let period = r.read_u8()
     ch.sweep_period = period and 0x7F
     ch.s0_slow = (period and 0x80) != 0
@@ -946,6 +947,66 @@ proc default_inflight_state(gba: GBA) =
   # arm_delay: apu_extract_state_events set the current period, and
   # ppu.frame: load_ppu_state cleared it, as before
 
+# ---- The PSG's in-flight state (rev 10) ----
+#
+# What the shared PSG (common/psg*.nim) keeps between register writes that
+# the older sections have no field for: the shift-0 check's state, which revs
+# <= 9 carried in spare bits of channel 1's sweep fields, the master-on
+# stamp PSG_POWER_ON_WINDOW reads (not carried at all before), and the
+# channels' latched duty outputs.
+
+proc write_deadline(w: var Writer; at, now: CycleCount) =
+  ## An absolute deadline as its distance from the payload's clock, which may
+  ## be negative for a stamp in the past; GBA_NO_STEP as a flag.
+  w.write_bool(at != GBA_NO_STEP)
+  w.write_i32(if at == GBA_NO_STEP: 0'i32 else: int32(int64(at) - int64(now)))
+
+proc read_deadline(r: var Reader; now: CycleCount; field: string): CycleCount =
+  let pending = r.read_bool()
+  let d = int64(r.read_i32())
+  if not pending: return GBA_NO_STEP
+  # Every one carried is settled at the frame rebase (a stamp older than the
+  # frame is dropped there), so it is within a frame of the clock.
+  check_range(int(d), -(1 shl 20), 1 shl 20, field)
+  if int64(now) + d < 0: return GBA_NO_STEP
+  CycleCount(int64(now) + d)
+
+proc save_psg_state(gba: GBA; w: var Writer) =
+  w.write_tag(GBA_SEC_PSG)
+  let apu = gba.apu
+  let now = gba.scheduler.cycles
+  let ch1 = apu.channel1
+  w.write_bool(ch1.s0_slow)
+  w.write_u8(ch1.s0_anchor)
+  w.write_bool(ch1.sweep_armed)
+  w.write_deadline(ch1.kill_at, now)
+  w.write_deadline(apu.power_on_at, now)
+  w.write_u8(ch1.sample_bit)
+  w.write_u8(apu.channel2.sample_bit)
+
+proc load_psg_state(gba: GBA; r: var Reader) =
+  ## Rev >= 10.
+  r.expect_tag(GBA_SEC_PSG)
+  let apu = gba.apu
+  let now = gba.scheduler.cycles
+  let ch1 = apu.channel1
+  ch1.s0_slow = r.read_bool()
+  ch1.s0_anchor = r.read_u8() and 15
+  ch1.sweep_armed = r.read_bool()
+  ch1.kill_at = r.read_deadline(now, "ch1.kill_at")
+  apu.power_on_at = r.read_deadline(now, "apu.power_on_at")
+  ch1.sample_bit = r.read_u8() and 1
+  apu.channel2.sample_bit = r.read_u8() and 1
+
+proc default_psg_state(gba: GBA) =
+  ## Rev <= 9: the shift-0 check came from the spare bits (load_apu_state);
+  ## no master-on window, and each square's latched output is the one its
+  ## position selects.
+  let apu = gba.apu
+  apu.power_on_at = GBA_NO_STEP
+  for ch in [PsgSquare(apu.channel1), apu.channel2]:
+    ch.sample_bit = PSG_DUTY[ch.duty and 3][ch.wave_duty_position and 7]
+
 # ---- PSG waveform deadlines <-> scheduler events ----
 #
 # The channels' next_step deadlines replaced one etAPUChannel<N> event per
@@ -1043,6 +1104,8 @@ proc gba_state_payload(gba: GBA; in_process = false): string =
   save_storage_state(gba.storage, w)
   mark("inflight")
   save_inflight_state(gba, w)
+  mark("psg")
+  save_psg_state(gba, w)
   mark("end")
   w.write_tag(GBA_SEC_END)
   gba.payload_len_hint = w.buf.len
@@ -1141,6 +1204,8 @@ proc gba_apply_state(gba: GBA; payload: string; rev: uint32;
   load_storage_state(gba.storage, r)
   if rev >= 9: gba.load_inflight_state(r)
   else: gba.default_inflight_state()
+  if rev >= 10: gba.load_psg_state(r)
+  else: gba.default_psg_state()
   r.expect_tag(GBA_SEC_END)
   # After the payload, so the stack it writes into is the restored WRAM
   if rev < 4 and gba.cpu.intr_wait_active:

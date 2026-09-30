@@ -59,11 +59,6 @@ const
   #      · 8 bus prefetch buffer pause/run state (pf_paused, pf_running, pf_count)
   #      · 9 in-flight section (irq line, fetch page, sync bits, DMA stamps,
   #        interrupt synchroniser, timer/DMA latches, memory control)
-  #      Owed at 10 (gba/savestate.nim, save_apu_state): ch1's s0_slow,
-  #      s0_anchor, sweep_armed and pending shift-0 stop ride in spare bits of
-  #      sweep_period / sweep_timer / frequency_shadow (a v9 build loading a
-  #      newer state misreads them); apu.power_on_at is not saved at all.
-  #      Give all five real fields.
   # GB:  1 initial · 2 serial port section · 3 PPU dots_since_frame
   #      · 4 CPU undefined-opcode lockup flag · 5 Super Game Boy section
   #      · 6 the batched carry (docs/savestate_compat.md): STOP mode, the
@@ -71,7 +66,10 @@ const
   #        power-on stamp), $FEA0-$FEFF / RP / SVBK readback, the APU tick
   #        grids and per-channel latches, the PPU's LCD-on frame flag and
   #        pending STAT drop; mode-2 states load
-  GBA_PAYLOAD_VERSION* = 9'u32
+  #      · 10 the PSG section: the shift-0 check's four fields as real ones
+  #        (they had ridden in spare bits of channel 1's sweep fields),
+  #        apu.power_on_at, and the shared PSG's per-channel latches
+  GBA_PAYLOAD_VERSION* = 10'u32
   GB_PAYLOAD_VERSION*  = 6'u32
 
   # magic(8) version(4) core(1) payload_version(1) flags(2) rom_checksum(4)

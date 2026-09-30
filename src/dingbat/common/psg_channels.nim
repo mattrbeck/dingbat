@@ -168,17 +168,16 @@ proc sq_catchup_slow(ch: PsgSquare; h: PsgHost; observer_period: uint32) =
   ch.wave_duty_position = (ch.wave_duty_position + int(steps and 7)) and 7
   when defined(psgverify):
     doAssert want == ch.wave_duty_position, "square closed form != naive loop"
+  # Latching here (not in the DAC input) makes a duty change take effect
+  # from the next step and holds the pre-trigger sample through the startup
+  # delay.
+  ch.sample_bit = PSG_DUTY[ch.duty][ch.wave_duty_position]
+  ch.next_step += steps * period
   when PSG_AGB:
-    ch.next_step += steps * period
     # The step now pending was armed by the one before it, i.e. one CURRENT
     # period ago.
     ch.arm_delay = uint32(period)
   else:
-    # Latching here (not in the DAC input) makes a duty change take effect
-    # from the next step and holds the pre-trigger sample through the
-    # startup delay.
-    ch.sample_bit = PSG_DUTY[ch.duty][ch.wave_duty_position]
-    ch.next_step += steps * period
     ch.last_step_at = ch.next_step - period
 
 proc sq_catchup_at(ch: PsgSquare; h: PsgHost; observer_period: uint32) {.inline.} =
@@ -240,18 +239,17 @@ proc sq_write_freq_hi(ch: PsgSquare; h: PsgHost; val: uint8) =
 proc sq_trigger(ch: PsgSquare; h: PsgHost) =
   ## The duty position carries across a trigger (Pan Docs: only an APU
   ## power-off resets it).
-  when not PSG_AGB:
-    let was_enabled = ch.enabled
+  let was_enabled = ch.enabled
   psg_trigger_length(ch, h, 0x40)
+  # The latched sample carries too, so a channel that was off stays at 0
+  # until its first step.
+  if not was_enabled: ch.sample_bit = 0
   when PSG_AGB:
     # GBA: a full period from the write.
     let arm = uint32(sq_period(ch, h))
     ch.next_step = psg_now(h) + CycleCount(arm)
     ch.arm_delay = arm
   else:
-    # The latched sample carries too, so a channel that was off stays at 0
-    # until its first step.
-    if not was_enabled: ch.sample_bit = 0
     ch.next_step = psg_trigger_deadline(h, sq_period(ch, h),
                                         if was_enabled: 1 else: 2)
   psg_trigger_envelope(ch, h)
