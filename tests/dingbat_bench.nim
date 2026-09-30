@@ -182,11 +182,6 @@ proc main() =
     # A/B a scheduler change.
     if getEnv("DINGBAT_NO_WAITLOOP") == "1":
       emu.cpu.attempt_waitloop_detection = false
-    # Speed-mode knobs, for bucket-by-bucket A/B measurement
-    if getEnv("DINGBAT_BENCH_FRAMESKIP").len > 0:
-      emu.ppu.frameskip = parseInt(getEnv("DINGBAT_BENCH_FRAMESKIP"))
-    if getEnv("DINGBAT_BENCH_UNDERCLOCK").len > 0:
-      emu.set_underclock(parseInt(getEnv("DINGBAT_BENCH_UNDERCLOCK")))
     if getEnv("DINGBAT_MP2K") == "1":
       emu.mp2k_hle = true
     if getEnv("DINGBAT_MP2K_DUMP") == "1":
@@ -349,9 +344,6 @@ proc main() =
       if not emu.load_state_bytes(readFile(state_path)):
         echo "bench: state load REJECTED (ROM/version mismatch): ", state_path
         quit(1)
-    # Speed-mode knob (scanline renderer only — the FIFO PPU ignores it)
-    if getEnv("DINGBAT_BENCH_FRAMESKIP").len > 0:
-      emu.ppu.frameskip = parseInt(getEnv("DINGBAT_BENCH_FRAMESKIP"))
 
     # The GB core emits frames while the LCD is off (lcd_off_frame), so a fixed
     # frame count is not a fixed amount of work. Stepping by hand lets the

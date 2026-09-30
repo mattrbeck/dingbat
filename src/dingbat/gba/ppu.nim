@@ -298,7 +298,7 @@ proc draw*(ppu: PPU) =
   when defined(bgtrace): inc bgtrace_n
   # True only when every scanline was skipped (framebuffer unchanged), so
   # frontends can skip the texture upload
-  ppu.frame_static = ppu.skip_render or ppu.forced_skip
+  ppu.frame_static = ppu.skip_render
 
 proc se_address*(ppu: PPU; tx, ty, screen_size: int): int {.inline.} =
   var n = tx + ty * 32
@@ -1365,25 +1365,12 @@ proc scanline*(ppu: PPU) =
   # registers the framebuffer already holds every line, so skip until
   # something changes (a mid-frame change only affects lines below it)
   if ppu.vcount == 0:
-    # Speed-mode frameskip: render_dirty is NOT consumed on a skipped frame,
-    # so the next rendered frame repaints everything that changed
-    if ppu.frameskip > 0:
-      # fs_counter == 0 renders, the next `frameskip` frames are skipped
-      ppu.forced_skip = ppu.fs_counter != 0
-      inc ppu.fs_counter
-      if ppu.fs_counter > ppu.frameskip:
-        ppu.fs_counter = 0
-    else:
-      ppu.forced_skip = false
-    if not ppu.forced_skip:
-      ppu.skip_render = not ppu.render_dirty
-      ppu.render_dirty = false
+    ppu.skip_render = not ppu.render_dirty
+    ppu.render_dirty = false
     # New frame: rebuild budget comes back, plus one forced rebuild as the
     # missed-oam_touched backstop
     ppu.obj_list_rebuilds = 0
     ppu.obj_list_dirty = true
-  if ppu.forced_skip:
-    return
   if ppu.skip_render:
     if ppu.render_dirty:
       ppu.skip_render = false

@@ -1,5 +1,5 @@
 -- What this models, for formal/anchors.mjs (which lists stale models):
--- @models src/dingbat.nim: load_rom apply_color_correction apply_master_volume apply_fifo_interp apply_speed_mode set_fullscreen render_imgui handle_input main
+-- @models src/dingbat.nim: load_rom apply_color_correction apply_master_volume apply_fifo_interp set_fullscreen render_imgui handle_input main
 -- @models src/dingbat/frontend/config_editor.nim: new_config_editor do_reset do_apply has_unapplied_edits end_captures do_factory_reset render
 -- @models src/dingbat/frontend/keybindings_widget.nim: wants_input key_released load_preset render reset apply_to apply
 -- @models src/dingbat/frontend/controller_widget.nim: wants_input button_released render reset apply_to apply
@@ -43,8 +43,8 @@ shipped. Every `bug_*` theorem still describes the code at a2e038f82.
 `main`'s `while app.running` loop is a program counter `pc`:
 
 * `emu` -- phases 1-2 (emulate, `process_pending_state`). Nothing there
-  writes this machine's state; the emulate phase only reads `cfg.rewind` and
-  `cfg.speed_mode`. One event, `frame`, moves on to `input`.
+  writes this machine's state; the emulate phase only reads `cfg.rewind`. One
+  event, `frame`, moves on to `input`.
 * `input` -- phase 3, `handle_input`: any number of SDL events (`key`,
   `padBtn`, `drop`), then `endInput`. Phase 4 (`update_rumble`, link
   services) touches nothing here and is folded into `endInput`.
@@ -84,8 +84,8 @@ shipped. Every `bug_*` theorem still describes the code at a2e038f82.
   preserve-aspect and the SGB border are read by `render_game` at every
   present (1126, 1047 and 1152, 545, 1161), so they are live by construction and not
   modelled. Pitch correction, the low-pass and the MP2K HLE follow exactly the
-  `fifo_interp` pattern (an apply proc that reads `speed_mode`, called from
-  the menu, `load_rom` and `live_sync`), so `interp` stands for all four.
+  `fifo_interp` pattern (an apply proc called from the menu, `load_rom` and
+  `live_sync`), so `interp` stands for all four.
   `explorer_dir` is written only by the file explorer (and saved), never by a
   widget snapshot, so it is left out. Rumble (`gb_rumble`) is read live by
   `update_rumble` (1614).
@@ -114,7 +114,7 @@ Refuted for the code as it is (`real`), each a concrete trace from `init`:
   `bug_bad_file_overwritten`.
 * (a) `bug_real_bios_without_file`, `bug_run_bios_without_file`.
 * `bug_rom_dialog_opens_hidden_selection`.
-* (d) `bug_reset_defaults_keeps_interp_and_speed`.
+* (d) `bug_reset_defaults_keeps_interp`.
 * `bug_fullscreen_forgotten`: fullscreen is never saved; every start is
   windowed.
 
@@ -131,9 +131,8 @@ The fixes are the `Fix` switches; `fixed` turns them on. Proved for it:
 `fixed_bound_key_reaches_game`, `fixed_bios`, `fixed_never_loads_bios_as_rom`,
 plus `fixed_closed_never_captures`, `fixed_reset_is_defaults`,
 `fixed_never_destroys_bad_file`, `liveOK_fixed`, and a `regress_*` replay of
-the traces. `capture_fix_needs_both_halves` and
-`bug_naive_reset_fix_leaves_core_in_speed_mode` show why each fix has the
-parts it has.
+the traces. `capture_fix_needs_both_halves` shows why the capture fix has
+the parts it has.
 
 What shipped, switch by switch:
 * `numericKeys` (14): save_config writes an unnamed key as its decimal
@@ -157,8 +156,8 @@ What shipped, switch by switch:
   write_file_atomic and never raise (23); a write failure is not modelled
   here (the model's save always succeeds).
 * `resetAll`: Reset to Defaults is `Config.reset_to_defaults` (everything
-  but paths, recents and the explorer folder) and live_sync calls
-  apply_speed_mode.
+  but paths, recents and the explorer folder), and live_sync re-applies the
+  audio niceties.
 * `feFresh`: each file dialog opens (and each folder change starts) with
   nothing selected.
 * The config half of finding 1 (save_config writes only the keys this
@@ -247,11 +246,8 @@ structure Fix where
   /-- key_released refuses keys that never reach the game (and, without
   `numericKeys`, keys the file cannot name). -/
   captureFilter : Bool := false
-  /-- do_factory_reset also resets fifo_interp and speed_mode, and live_sync
-  calls apply_speed_mode. -/
+  /-- do_factory_reset also resets fifo_interp. -/
   resetAll : Bool := false
-  /-- resets them WITHOUT apply_speed_mode (to show that half is needed). -/
-  resetNaive : Bool := false
   /-- load_rom maps "no BIOS image" to HLE and no intro. -/
   biosGate : Bool := false
   /-- fe.render clears the selection when a dialog opens. -/
@@ -280,7 +276,6 @@ def fixed : Fix :=
   { openGate := true, visGate := true, captureFilter := true, resetAll := true, biosGate := true,
     feFresh := true, numericKeys := true, cliApart := true, moveAside := true, fsRestore := true,
     confirmDiscard := true }
-def naive : Fix := { resetNaive := true }
 
 /-! ## Config and the file -/
 
@@ -296,7 +291,6 @@ structure Cfg where
   volume    : Nat                -- cfg.volume
   color     : Bool               -- cfg.color_correction
   interp    : Bool               -- cfg.fifo_interp (stands for the audio niceties)
-  speed     : Bool               -- cfg.speed_mode
   rewind    : Bool               -- cfg.rewind
   recent    : Option FileE       -- cfg.recents[0]
   fullscreen : Bool              -- cfg.fullscreen (fixed; the code as it is has no such key)
@@ -305,7 +299,7 @@ structure Cfg where
 def defaults : Cfg :=
   { kb := defaultKb, pad := defaultPad, useHle := true, afterBios := false,
     runBios := false, biosFile := false, gbFifo := true, sgb := false,
-    volume := 100, color := true, interp := true, speed := false, rewind := true,
+    volume := 100, color := true, interp := true, rewind := true,
     recent := none, fullscreen := false }
 
 /-- `parse_config(loadToJson(save_config(c)))`. save_config writes each binding
@@ -419,8 +413,7 @@ structure Core where
   runBios   : Bool      -- gba.run_bios
   biosFile  : Bool      -- a BIOS image is mapped (not bus.stub_bios)
   volume    : Nat       -- apu master volume
-  interp    : Bool      -- GBA apu fifo_interp (effective)
-  frameskip : Bool      -- ppu.frameskip = 1 (+ GBA underclock)
+  interp    : Bool      -- GBA apu fifo_interp
 
 inductive Pc where
   | emu | input | present | ui
@@ -480,11 +473,7 @@ def applyVolume (s : S) : S :=
 /-- apply_fifo_interp (596-600): GBA core only. -/
 def applyInterp (s : S) : S :=
   { s with core := s.core.map fun c =>
-      if c.kind = .gb then c else { c with interp := s.cfg.interp && !s.cfg.speed } }
-
-/-- apply_speed_mode (602-618): frameskip on either core, then the audio niceties. -/
-def applySpeed (s : S) : S :=
-  applyInterp { s with core := s.core.map fun c => { c with frameskip := s.cfg.speed } }
+      if c.kind = .gb then c else { c with interp := s.cfg.interp } }
 
 /-- apply_color_correction (512-515). -/
 def applyColor (s : S) : S := { s with shaderColor := s.cfg.color }
@@ -501,13 +490,12 @@ def loadRom (fx : Fix) (s : S) (f : FileE) : S :=
   let rb  := if fx.biosGate then b.runBios && b.biosFile else b.runBios
   let core : Core :=
     { kind := f.kind, gen := s.gen + 1,
-      fifo := c.gbFifo && !c.speed,                     -- 707-709
+      fifo := c.gbFifo,                                 -- 707-709
       sgb := c.sgb,                                     -- 712
       hle := hle, afterBios := b.afterBios, runBios := rb,
       biosFile := b.biosFile,                           -- 723, bus.nim 370
       volume := c.volume,                               -- 736 apply_master_volume
-      interp := c.interp && !c.speed,                   -- 739 apply_fifo_interp
-      frameskip := c.speed }                            -- 741 apply_speed_mode
+      interp := c.interp }                              -- 739 apply_fifo_interp
   save fx { s with core := some core, gen := s.gen + 1, cheatsGen := some (s.gen + 1),
                    cfg := { c with recent := some f } }
 
@@ -532,16 +520,14 @@ def doApply (fx : Fix) (s : S) : S :=
   save fx { s with cfg := edStore s.ed s.cfg,
                    ed := { s.ed with kbSel := none, padSel := none, edited := false } }
 
-/-- do_factory_reset's cfg writes (config_editor 52-71). fifo_interp and
-speed_mode are not among them. -/
+/-- do_factory_reset's cfg writes (config_editor 52-71). fifo_interp is not
+among them. -/
 def factoryCfg (fx : Fix) (c : Cfg) : Cfg :=
-  let r := fx.resetAll || fx.resetNaive
   { c with kb := defaults.kb, pad := defaults.pad, runBios := defaults.runBios,
            useHle := defaults.useHle, afterBios := defaults.afterBios,
            gbFifo := defaults.gbFifo, volume := defaults.volume,
            color := defaults.color, sgb := defaults.sgb, rewind := defaults.rewind,
-           interp := if r then defaults.interp else c.interp,
-           speed := if r then defaults.speed else c.speed }
+           interp := if fx.resetAll then defaults.interp else c.interp }
 
 /-- do_factory_reset (51-75): cfg writes, do_reset, do_apply (saves), then
 live_sync (main 2235-2241: color, volume, pitch, low-pass, interp, mp2k). -/
@@ -549,8 +535,7 @@ def factoryReset (fx : Fix) (s : S) : S :=
   let s1 := { s with cfg := factoryCfg fx s.cfg }
   let s2 := doApply fx { s1 with ed := edLoad s1.cfg s1.ed }
   let s3 := applyInterp (applyVolume (applyColor s2))
-  let s4 := if fx.resetAll then applySpeed s3 else s3
-  { s4 with ed := { s4.ed with resetPopup := false } }
+  { s3 with ed := { s3.ed with resetPopup := false } }
 
 /-- The top of ConfigEditor.render (77-99): the open edge reloads the
 widgets, `prev_open` follows `open`, and while the window is open and
@@ -663,7 +648,7 @@ inductive Ev where
   | drop (f : FileE)
   -- ImGui: menus (render_imgui 1290-1470)
   | menuSettings
-  | menuSpeed | menuInterp | menuColor | menuRewind
+  | menuInterp | menuColor | menuRewind
   | menuVolume (v : Nat)
   | menuOpenRom | menuReset | menuClearRecent
   -- ImGui: the Settings window
@@ -725,14 +710,9 @@ def stepO (fx : Fix) (s : S) : Ev → Option S
   | .menuSettings =>
     -- 1319: open = true; ce.render runs later in the same frame (1478)
     if uiFree s then some { s with ed := ceTop fx s.cfg { s.ed with isOpen := true } } else none
-  | .menuSpeed =>
-    -- 1342-1347: flip, (rewind.clear), apply_speed_mode, save
-    if uiFree s then
-      some (save fx (applySpeed { s with cfg := { s.cfg with speed := !s.cfg.speed } }))
-    else none
   | .menuInterp =>
-    -- 1404-1409: enabled for a GBA core outside speed mode
-    if uiFree s && gbaCore s && !s.cfg.speed then
+    -- 1404-1409: enabled for a GBA core
+    if uiFree s && gbaCore s then
       some (save fx (applyInterp { s with cfg := { s.cfg with interp := !s.cfg.interp } }))
     else none
   | .menuColor =>
@@ -741,8 +721,8 @@ def stepO (fx : Fix) (s : S) : Ev → Option S
       some (save fx (applyColor { s with cfg := { s.cfg with color := !s.cfg.color } }))
     else none
   | .menuRewind =>
-    -- 1335-1339: enabled outside speed mode
-    if uiFree s && !s.cfg.speed then
+    -- 1335-1339
+    if uiFree s then
       some (save fx { s with cfg := { s.cfg with rewind := !s.cfg.rewind } })
     else none
   | .menuVolume v =>
@@ -1200,28 +1180,18 @@ theorem regress_rom_dialog_opens_hidden_selection :
 
 /-! ## (d) Reset to Defaults -/
 
-/-- "Restore all settings to their defaults?" leaves Audio interpolation off
-and Speed mode on: do_factory_reset lists neither. -/
-theorem bug_reset_defaults_keeps_interp_and_speed :
-    ((run real init (openSettingsGba ++ iter [.menuInterp] ++ iter [.menuSpeed] ++
+/-- "Restore all settings to their defaults?" leaves Audio interpolation
+off: do_factory_reset does not list it. -/
+theorem bug_reset_defaults_keeps_interp :
+    ((run real init (openSettingsGba ++ iter [.menuInterp] ++
         iter [.resetDefaults] ++ iter [.resetConfirm])).map fun s =>
-      (s.cfg.interp, s.cfg.speed)) = some (false, true) := by
-  decide
-
-/-- Resetting speed_mode in cfg without calling apply_speed_mode (live_sync
-does not) leaves the running GBA core frameskipping and underclocked while
-the menu shows Speed mode off. -/
-theorem bug_naive_reset_fix_leaves_core_in_speed_mode :
-    ((run naive init (openSettingsGba ++ iter [.menuSpeed] ++ iter [.resetDefaults] ++
-        iter [.resetConfirm])).map fun s =>
-      (s.cfg.speed, s.core.map (·.frameskip))) = some (false, some true) := by
+      s.cfg.interp) = some false := by
   decide
 
 theorem regress_reset_defaults :
-    ((run fixed init (openSettingsGba ++ iter [.menuInterp] ++ iter [.menuSpeed] ++
+    ((run fixed init (openSettingsGba ++ iter [.menuInterp] ++
         iter [.resetDefaults] ++ iter [.resetConfirm])).map fun s =>
-      (s.cfg.interp, s.cfg.speed, s.core.map fun c => (c.interp, c.frameskip))) =
-      some (true, false, some (true, false)) := by
+      (s.cfg.interp, s.core.map (·.interp))) = some (true, some true) := by
   decide
 
 /-! ## Other observations -/
@@ -1235,15 +1205,6 @@ theorem obs_close_discards_edits :
       (s.ed.vFifo, s.cfg.gbFifo)) = some (true, true) := by
   decide
 
-/-- Speed mode on a running GB game: the menu item is checked, cfg and the
-file say on, but the FIFO renderer (which ignores frameskip) keeps running
-until the next load. The menu label does not say "next load" (the code
-comment at 1340 does). -/
-theorem obs_speed_mode_waits_for_gb_load :
-    ((run real init (keys [.drop .gbRom] ++ iter [.menuSpeed])).map fun s =>
-      (s.cfg.speed, s.core.map (·.fifo))) = some (true, some true) := by
-  decide
-
 /-- Emulation > Reset after File > Recent > Clear does nothing, silently. -/
 theorem obs_reset_noop_after_clear :
     ((run real init (keys [.drop .gbaRom] ++ iter [.menuClearRecent] ++ iter [.menuReset])).map
@@ -1253,14 +1214,13 @@ theorem obs_reset_noop_after_clear :
 /-! ## What holds, for the code as it is -/
 
 /-- (a)/(d): every setting applied live agrees with cfg: the colour uniform,
-and the running core's volume, frameskip and (GBA) FIFO interpolation. This
+and the running core's volume and (GBA) FIFO interpolation. This
 holds through the menus, the Settings window's Apply/OK, a ROM load, a
 relaunch and Reset to Defaults (live_sync). -/
 def LiveOK (s : S) : Prop :=
   s.shaderColor = s.cfg.color ∧
   ∀ c, s.core = some c →
-    c.volume = s.cfg.volume ∧ c.frameskip = s.cfg.speed ∧
-    (c.kind = .gb ∨ c.interp = (s.cfg.interp && !s.cfg.speed))
+    c.volume = s.cfg.volume ∧ (c.kind = .gb ∨ c.interp = s.cfg.interp)
 
 /-- The Cheats window edits the running core's engine (attach in every load,
 732-734). -/
@@ -1287,11 +1247,6 @@ variable (s : S) (fx : Fix)
 @[simp] theorem applyInterp_ed : (applyInterp s).ed = s.ed := rfl
 @[simp] theorem applyInterp_fe : (applyInterp s).fe = s.fe := rfl
 @[simp] theorem applyInterp_disk : (applyInterp s).disk = s.disk := rfl
-@[simp] theorem applySpeed_cfg : (applySpeed s).cfg = s.cfg := rfl
-@[simp] theorem applySpeed_color : (applySpeed s).shaderColor = s.shaderColor := rfl
-@[simp] theorem applySpeed_ed : (applySpeed s).ed = s.ed := rfl
-@[simp] theorem applySpeed_fe : (applySpeed s).fe = s.fe := rfl
-@[simp] theorem applySpeed_disk : (applySpeed s).disk = s.disk := rfl
 @[simp] theorem applyColor_cfg : (applyColor s).cfg = s.cfg := rfl
 @[simp] theorem applyColor_core : (applyColor s).core = s.core := rfl
 @[simp] theorem applyColor_color : (applyColor s).shaderColor = s.cfg.color := rfl
@@ -1307,58 +1262,36 @@ theorem core_applyVolume (c : Core) (h : (applyVolume s).core = some c) :
 
 theorem core_applyInterp (c : Core) (h : (applyInterp s).core = some c) :
     ∃ c0, s.core = some c0 ∧
-      c = if c0.kind = .gb then c0 else { c0 with interp := s.cfg.interp && !s.cfg.speed } := by
+      c = if c0.kind = .gb then c0 else { c0 with interp := s.cfg.interp } := by
   cases h0 : s.core with
   | none => simp [applyInterp, h0] at h
   | some c0 => simp only [applyInterp, h0, Option.map_some, Option.some.injEq] at h; exact ⟨c0, rfl, h.symm⟩
-
-theorem core_applySpeed (c : Core) (h : (applySpeed s).core = some c) :
-    ∃ c0, s.core = some c0 ∧
-      c = if c0.kind = .gb then { c0 with frameskip := s.cfg.speed }
-          else { c0 with frameskip := s.cfg.speed, interp := s.cfg.interp && !s.cfg.speed } := by
-  cases h0 : s.core with
-  | none => simp [applySpeed, applyInterp, h0] at h
-  | some c0 =>
-    simp only [applySpeed, applyInterp, h0, Option.map_some, Option.some.injEq] at h
-    refine ⟨c0, rfl, ?_⟩
-    rw [← h]
 end fields
 
 /-! ### LiveOK -/
 
 theorem liveOK_applyVolume (t : S) (hc : t.shaderColor = t.cfg.color)
-    (h : ∀ c, t.core = some c → c.frameskip = t.cfg.speed ∧
-      (c.kind = .gb ∨ c.interp = (t.cfg.interp && !t.cfg.speed))) : LiveOK (applyVolume t) := by
+    (h : ∀ c, t.core = some c → (c.kind = .gb ∨ c.interp = t.cfg.interp)) :
+    LiveOK (applyVolume t) := by
   refine ⟨hc, ?_⟩
   intro c hc'
   obtain ⟨c0, h0, rfl⟩ := core_applyVolume t c hc'
-  obtain ⟨a, b⟩ := h c0 h0
-  exact ⟨rfl, a, b⟩
+  exact ⟨rfl, h c0 h0⟩
 
 theorem liveOK_applyInterp (t : S) (hc : t.shaderColor = t.cfg.color)
-    (h : ∀ c, t.core = some c → c.volume = t.cfg.volume ∧ c.frameskip = t.cfg.speed) :
+    (h : ∀ c, t.core = some c → c.volume = t.cfg.volume) :
     LiveOK (applyInterp t) := by
   refine ⟨hc, ?_⟩
   intro c hc'
   obtain ⟨c0, h0, rfl⟩ := core_applyInterp t c hc'
-  obtain ⟨a, b⟩ := h c0 h0
-  by_cases hk : c0.kind = .gb
-  · rw [ite_eq_left hk]; exact ⟨a, b, Or.inl hk⟩
-  · rw [ite_eq_right hk]; exact ⟨a, b, Or.inr rfl⟩
-
-theorem liveOK_applySpeed (t : S) (hc : t.shaderColor = t.cfg.color)
-    (h : ∀ c, t.core = some c → c.volume = t.cfg.volume) : LiveOK (applySpeed t) := by
-  refine ⟨hc, ?_⟩
-  intro c hc'
-  obtain ⟨c0, h0, rfl⟩ := core_applySpeed t c hc'
   have a := h c0 h0
   by_cases hk : c0.kind = .gb
-  · rw [ite_eq_left hk]; exact ⟨a, rfl, Or.inl hk⟩
-  · rw [ite_eq_right hk]; exact ⟨a, rfl, Or.inr rfl⟩
+  · rw [ite_eq_left hk]; exact ⟨a, Or.inl hk⟩
+  · rw [ite_eq_right hk]; exact ⟨a, Or.inr rfl⟩
 
 theorem liveOK_applyColor (t : S)
-    (h : ∀ c, t.core = some c → c.volume = t.cfg.volume ∧ c.frameskip = t.cfg.speed ∧
-      (c.kind = .gb ∨ c.interp = (t.cfg.interp && !t.cfg.speed))) : LiveOK (applyColor t) :=
+    (h : ∀ c, t.core = some c → c.volume = t.cfg.volume ∧
+      (c.kind = .gb ∨ c.interp = t.cfg.interp)) : LiveOK (applyColor t) :=
   ⟨rfl, h⟩
 
 theorem liveOK_loadRom (fx : Fix) (s : S) (f : FileE) (hc : s.shaderColor = s.cfg.color) :
@@ -1367,7 +1300,7 @@ theorem liveOK_loadRom (fx : Fix) (s : S) (f : FileE) (hc : s.shaderColor = s.cf
   intro c hc'
   simp only [loadRom, save, Option.some.injEq] at hc'
   subst hc'
-  exact ⟨rfl, rfl, Or.inr rfl⟩
+  exact ⟨rfl, Or.inr rfl⟩
 
 theorem liveOK_launch (fx : Fix) (d : Disk) (a : Cli) (g : Nat) (l y : Bool) :
     LiveOK (launch fx d a g l y) := by
@@ -1379,12 +1312,12 @@ theorem liveOK_save {fx : Fix} {s : S} (h : LiveOK s) : LiveOK (save fx s) := h
 /-- Changing nothing LiveOK reads keeps it. -/
 theorem liveOK_of_eq {s t : S} (h : LiveOK s) (hc : t.shaderColor = s.shaderColor)
     (hcore : t.core = s.core) (h1 : t.cfg.color = s.cfg.color) (h2 : t.cfg.volume = s.cfg.volume)
-    (h3 : t.cfg.speed = s.cfg.speed) (h4 : t.cfg.interp = s.cfg.interp) : LiveOK t := by
+    (h4 : t.cfg.interp = s.cfg.interp) : LiveOK t := by
   refine ⟨by rw [hc, h1]; exact h.1, ?_⟩
   intro c hc'
   rw [hcore] at hc'
-  obtain ⟨a, b, d⟩ := h.2 c hc'
-  exact ⟨by rw [h2]; exact a, by rw [h3]; exact b, by rw [h4, h3]; exact d⟩
+  obtain ⟨a, d⟩ := h.2 c hc'
+  exact ⟨by rw [h2]; exact a, by rw [h4]; exact d⟩
 
 theorem onKey_shape (fx : Fix) (s : S) (k : Key) (d : Bool) :
     ∃ e m r, onKey fx s k d = { s with ed := e, modHeld := m, lastRoute := r } :=
@@ -1396,61 +1329,33 @@ theorem onPad_shape (fx : Fix) (s : S) (b : Nat) (d : Bool) :
 theorem doApply_live (fx : Fix) (s : S) :
     (doApply fx s).core = s.core ∧ (doApply fx s).shaderColor = s.shaderColor ∧
     (doApply fx s).cfg.color = s.cfg.color ∧ (doApply fx s).cfg.volume = s.cfg.volume ∧
-    (doApply fx s).cfg.speed = s.cfg.speed ∧ (doApply fx s).cfg.interp = s.cfg.interp ∧
-    (doApply fx s).cheatsGen = s.cheatsGen :=
-  ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
+    (doApply fx s).cfg.interp = s.cfg.interp ∧ (doApply fx s).cheatsGen = s.cheatsGen :=
+  ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩
 
-theorem liveOK_factory (fx : Fix) (hfx : fx.resetNaive = true → fx.resetAll = true) (s : S)
-    (h : LiveOK s) : LiveOK (factoryReset fx s) := by
+theorem liveOK_factory (fx : Fix) (s : S) : LiveOK (factoryReset fx s) := by
   let s2 := doApply fx { s with cfg := factoryCfg fx s.cfg, ed := edLoad (factoryCfg fx s.cfg) s.ed }
-  have h2core : s2.core = s.core := rfl
   unfold factoryReset
-  cases hA : fx.resetAll
-  · have hN : fx.resetNaive = false := by
-      cases hN : fx.resetNaive
-      · rfl
-      · exact absurd (hfx hN) (by simp [hA])
-    have hsp : s2.cfg.speed = s.cfg.speed := by
-      simp [s2, doApply, save, edStore, factoryCfg, hA, hN]
-    simp only [Bool.false_eq_true, ite_false]
-    apply liveOK_of_eq (s := applyInterp (applyVolume (applyColor s2)))
-    · apply liveOK_applyInterp
-      · rfl
-      · intro c hc
-        obtain ⟨c0, h0, rfl⟩ := core_applyVolume _ c hc
-        refine ⟨rfl, ?_⟩
-        rw [applyColor_core, h2core] at h0
-        obtain ⟨_, b, _⟩ := h.2 c0 h0
-        show c0.frameskip = s2.cfg.speed
-        rw [hsp, b]
-    all_goals rfl
-  · simp only [ite_true]
-    apply liveOK_of_eq (s := applySpeed (applyInterp (applyVolume (applyColor s2))))
-    · apply liveOK_applySpeed
-      · rfl
-      · intro c hc
-        obtain ⟨c0, h0, rfl⟩ := core_applyInterp _ c hc
-        obtain ⟨c1, h1, rfl⟩ := core_applyVolume _ c0 h0
-        by_cases hk : c1.kind = .gb
-        · rw [ite_eq_left hk]; rfl
-        · rw [ite_eq_right hk]; rfl
-    all_goals rfl
+  apply liveOK_of_eq (s := applyInterp (applyVolume (applyColor s2)))
+  · apply liveOK_applyInterp
+    · rfl
+    · intro c hc
+      obtain ⟨c0, _, rfl⟩ := core_applyVolume _ c hc
+      rfl
+  all_goals rfl
 
-theorem liveOK_stepO (fx : Fix) (hfx : fx.resetNaive = true → fx.resetAll = true)
-    {s t : S} (h : LiveOK s) (e : Ev) (he : stepO fx s e = some t) : LiveOK t := by
+theorem liveOK_stepO (fx : Fix) {s t : S} (h : LiveOK s) (e : Ev) (he : stepO fx s e = some t) : LiveOK t := by
   have hc := h.1
   cases e <;> simp only [stepO] at he <;> (try split at he) <;> (try cases he) <;>
     first
     | exact h
     | exact liveOK_loadRom fx s _ hc
-    | exact liveOK_factory fx hfx s h
+    | exact liveOK_factory fx s
     | exact liveOK_launch _ _ _ _ _ _
     | (obtain ⟨_, _, _, hk⟩ := onKey_shape fx s _ _; rw [hk]; exact h)
     | (obtain ⟨_, hk⟩ := onPad_shape fx s _ _; rw [hk]; exact h)
-    | exact liveOK_save (liveOK_applySpeed _ hc (fun c hc' => (h.2 c hc').1))
-    | exact liveOK_save (liveOK_applyInterp _ hc (fun c hc' => ⟨(h.2 c hc').1, (h.2 c hc').2.1⟩))
+    | exact liveOK_save (liveOK_applyInterp _ hc (fun c hc' => (h.2 c hc').1))
     | exact liveOK_save (liveOK_applyColor _ (fun c hc' => h.2 c hc'))
-    | exact liveOK_save (liveOK_applyVolume _ hc (fun c hc' => ⟨(h.2 c hc').2.1, (h.2 c hc').2.2⟩))
+    | exact liveOK_save (liveOK_applyVolume _ hc (fun c hc' => (h.2 c hc').2))
     | (split <;> first
         | exact h
         | exact liveOK_loadRom fx _ _ hc
@@ -1473,16 +1378,13 @@ theorem liveOK_init : LiveOK init := liveOK_launch _ _ _ _ _ _
 
 /-- (a)/(d), proved: for the code as it is (and for the fixed code), every
 live setting agrees with cfg in every reachable state. The live side is
-consistent after Reset to Defaults; what Reset does not do is reset two
-settings (`bug_reset_defaults_keeps_interp_and_speed`). -/
-theorem liveOK_reachable (fx : Fix) (hfx : fx.resetNaive = true → fx.resetAll = true) :
-    ∀ s, Reachable fx s → LiveOK s :=
-  reachable_induct fx liveOK_init fun _ _ e h he => liveOK_stepO fx hfx h e he
+consistent after Reset to Defaults; what Reset does not do is reset Audio
+interpolation (`bug_reset_defaults_keeps_interp`). -/
+theorem liveOK_reachable (fx : Fix) : ∀ s, Reachable fx s → LiveOK s :=
+  reachable_induct fx liveOK_init fun _ _ e h he => liveOK_stepO fx h e he
 
-theorem liveOK_real : ∀ s, Reachable real s → LiveOK s :=
-  liveOK_reachable real (by intro h; cases h)
-theorem liveOK_fixed : ∀ s, Reachable fixed s → LiveOK s :=
-  liveOK_reachable fixed (fun _ => rfl)
+theorem liveOK_real : ∀ s, Reachable real s → LiveOK s := liveOK_reachable real
+theorem liveOK_fixed : ∀ s, Reachable fixed s → LiveOK s := liveOK_reachable fixed
 
 /-! ### The Cheats window follows the core -/
 
@@ -1494,23 +1396,14 @@ theorem gen_applyInterp : (applyInterp s).core.map (·.gen) = s.core.map (·.gen
   cases h : s.core with
   | none => simp [applyInterp, h]
   | some c => simp only [applyInterp, h, Option.map_some]; split <;> rfl
-theorem gen_applySpeed : (applySpeed s).core.map (·.gen) = s.core.map (·.gen) := by
-  unfold applySpeed
-  rw [gen_applyInterp]
-  cases s.core <;> simp
 end gens
 
 theorem cheatsOK_factory (fx : Fix) (s : S) (h : CheatsOK s) : CheatsOK (factoryReset fx s) := by
   unfold factoryReset CheatsOK
-  split
-  · show s.cheatsGen = _
-    rw [gen_applySpeed, gen_applyInterp, gen_applyVolume]; exact h
-  · show s.cheatsGen = _
-    rw [gen_applyInterp, gen_applyVolume]; exact h
+  show s.cheatsGen = _
+  rw [gen_applyInterp, gen_applyVolume]; exact h
 
 theorem cheatsOK_save {fx : Fix} {t : S} (h : CheatsOK t) : CheatsOK (save fx t) := h
-theorem cheatsOK_applySpeed {t : S} (h : CheatsOK t) : CheatsOK (applySpeed t) := by
-  unfold CheatsOK; rw [gen_applySpeed]; exact h
 theorem cheatsOK_applyInterp {t : S} (h : CheatsOK t) : CheatsOK (applyInterp t) := by
   unfold CheatsOK; rw [gen_applyInterp]; exact h
 theorem cheatsOK_applyVolume {t : S} (h : CheatsOK t) : CheatsOK (applyVolume t) := by
@@ -1523,7 +1416,6 @@ theorem cheatsOK_stepO (fx : Fix) {s t : S} (h : CheatsOK s) (e : Ev)
     | exact h
     | rfl
     | exact cheatsOK_factory fx s h
-    | exact cheatsOK_save (cheatsOK_applySpeed h)
     | exact cheatsOK_save (cheatsOK_applyInterp h)
     | exact cheatsOK_save (cheatsOK_applyVolume h)
     | (split <;> first | exact h | rfl | (split <;> first | exact h | rfl))
@@ -1539,20 +1431,19 @@ theorem cheatsOK_reachable (fx : Fix) : ∀ s, Reachable fx s → CheatsOK s :=
 theirs, so a menu change made while Settings is open survives its Apply,
 and an Apply survives any later menu change, in either order. -/
 theorem apply_menu_commute (e : Ed) (c : Cfg) (v : Nat) :
-    edStore e { c with speed := !c.speed } = { edStore e c with speed := !(edStore e c).speed } ∧
     edStore e { c with interp := !c.interp } = { edStore e c with interp := !(edStore e c).interp } ∧
     edStore e { c with color := !c.color } = { edStore e c with color := !(edStore e c).color } ∧
     edStore e { c with rewind := !c.rewind } = { edStore e c with rewind := !(edStore e c).rewind } ∧
     edStore e { c with volume := v } = { edStore e c with volume := v } ∧
     edStore e { c with recent := none } = { edStore e c with recent := none } :=
-  ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩
+  ⟨rfl, rfl, rfl, rfl, rfl⟩
 
 /-- The one writer of both sets is Reset to Defaults, on purpose. -/
 theorem apply_keeps_menu_fields (e : Ed) (c : Cfg) :
-    (edStore e c).speed = c.speed ∧ (edStore e c).interp = c.interp ∧
+    (edStore e c).interp = c.interp ∧
     (edStore e c).color = c.color ∧ (edStore e c).volume = c.volume ∧
     (edStore e c).rewind = c.rewind ∧ (edStore e c).recent = c.recent :=
-  ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩
+  ⟨rfl, rfl, rfl, rfl, rfl⟩
 
 /-! ## The fixed code: what the fixes buy -/
 
@@ -1681,14 +1572,6 @@ theorem invF_applyInterp {s : S} (h : InvF s) : InvF (applyInterp s) := by
   · exact h.core c0 h0
   · exact h.core c0 h0
 
-theorem invF_applySpeed {s : S} (h : InvF s) : InvF (applySpeed s) := by
-  refine ⟨h.cfg, h.disk, h.kbEdit, h.padEdit, h.fe, ?_⟩
-  intro c hc
-  obtain ⟨c0, h0, rfl⟩ := core_applySpeed s c hc
-  split
-  · exact h.core c0 h0
-  · exact h.core c0 h0
-
 theorem invF_applyColor {s : S} (h : InvF s) : InvF (applyColor s) :=
   ⟨h.cfg, h.disk, h.kbEdit, h.padEdit, h.fe, h.core⟩
 
@@ -1785,7 +1668,7 @@ theorem invF_factory {s : S} (h : InvF s) : InvF (factoryReset fixed s) := by
     ⟨cfgGood_defaults.1, cfgGood_defaults.2.1, h.cfg.2.2⟩
   have h1 : InvF { s with cfg := factoryCfg fixed s.cfg, ed := edLoad (factoryCfg fixed s.cfg) s.ed } :=
     { cfg := hf, disk := h.disk, kbEdit := hf.1, padEdit := hf.2.1, fe := h.fe, core := h.core }
-  have h4 := invF_applySpeed (invF_applyInterp (invF_applyVolume (invF_applyColor (invF_doApply h1))))
+  have h4 := invF_applyInterp (invF_applyVolume (invF_applyColor (invF_doApply h1)))
   unfold factoryReset
   exact { h4 with }
 
@@ -1886,9 +1769,6 @@ theorem invF_stepO {s t : S} (h : InvF s) (e : Ev) (he : stepO fixed s e = some 
     simp only [stepO] at he; split at he <;> cases he
     rename_i hc
     exact invF_loadRom h f (by simp at hc; exact hc.2)
-  | menuSpeed =>
-    simp only [stepO] at he; split at he <;> cases he
-    exact invF_save (invF_applySpeed (invF_mk' h h.cfg h.disk rfl rfl h.fe rfl))
   | menuInterp =>
     simp only [stepO] at he; split at he <;> cases he
     exact invF_save (invF_applyInterp (invF_mk' h h.cfg h.disk rfl rfl h.fe rfl))
@@ -2014,14 +1894,12 @@ theorem fixed_reset_is_defaults (c : Cfg) :
     r.kb = defaults.kb ∧ r.pad = defaults.pad ∧ r.useHle = defaults.useHle ∧
     r.afterBios = defaults.afterBios ∧ r.runBios = defaults.runBios ∧
     r.gbFifo = defaults.gbFifo ∧ r.sgb = defaults.sgb ∧ r.volume = defaults.volume ∧
-    r.color = defaults.color ∧ r.interp = defaults.interp ∧ r.speed = defaults.speed ∧
+    r.color = defaults.color ∧ r.interp = defaults.interp ∧
     r.rewind = defaults.rewind ∧ r.biosFile = c.biosFile ∧ r.recent = c.recent :=
-  ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
+  ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
 
-/-- The same statement for the code as it is fails exactly on those two. -/
-theorem real_reset_keeps (c : Cfg) :
-    (factoryCfg real c).interp = c.interp ∧ (factoryCfg real c).speed = c.speed :=
-  ⟨rfl, rfl⟩
+/-- The same statement for the code as it is fails exactly on that one. -/
+theorem real_reset_keeps (c : Cfg) : (factoryCfg real c).interp = c.interp := rfl
 
 /-! ## The Settings window's X
 

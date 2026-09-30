@@ -315,17 +315,19 @@ it mode 3 has no horizon, a third of every line, and the skip alone was
 | Pokémon Crystal | +21 % | +20 % | +8 % |
 | Shantae | +9 % | +19 % | -3 % |
 
-Speed mode (the scanline renderer, frameskip 1) has no deferred mode 3 and
-first paid for the skip without getting it: a repeating loop decoded its
-body every iteration to meet a zero horizon, up to 20 % of its instructions.
-The horizon is now asked before the decode, loops mark no head on the
-scanline renderer (`wl_on`), and a halted CPU there is advanced to the next
-mode boundary (`scanline_idle_dots`, short of line 153's LY snap and the
-LYC relatch), the renderer taking a long tick that reaches no boundary as
-one step's bookkeeping. Speed mode, main -> this: Oracle of Ages +106 %,
-Metal Gear Solid +95 %, Super Mario Bros. DX +58 %, Tetris DX +52 %, Crystal
-+24 %, Donkey Kong Country +23 %, Link's Awakening +13 %, Link's Awakening
-DX +12 %, Wario Land 3 +10 %, Alone in the Dark and Shantae flat.
+The scanline renderer has no deferred mode 3 and first paid for the skip
+without getting it: a repeating loop decoded its body every iteration to
+meet a zero horizon, up to 20 % of its instructions. The horizon is now
+asked before the decode, loops mark no head on the scanline renderer
+(`wl_on`), and a halted CPU there is advanced to the next mode boundary
+(`scanline_idle_dots`, short of line 153's LY snap and the LYC relatch), the
+renderer taking a long tick that reaches no boundary as one step's
+bookkeeping. Measured as speed mode (the scanline renderer drawing every
+other frame; the mode was removed on 2026-09-29), main -> this: Oracle of
+Ages +106 %, Metal Gear Solid +95 %, Super Mario Bros. DX +58 %, Tetris DX
++52 %, Crystal +24 %, Donkey Kong Country +23 %, Link's Awakening +13 %,
+Link's Awakening DX +12 %, Wario Land 3 +10 %, Alone in the Dark and Shantae
+flat.
 
 Tried and dropped: caching fifo_tick's idle target (`fast_end`), with and
 without splitting the compare out to inline: at most -3 % instructions,
@@ -333,8 +335,8 @@ within noise in wall time. Left: the line head (the throw-away fetch and
 fine-scroll discard) and object fetches still run the general dot; a halted
 CPU retries the horizon on every PPU slow step, which in a mode 3 that is
 not deferred is every M-cycle (`wl_horizon` + `wl_halt_skip` 5-7 % of
-native time); loops do not skip on the scanline renderer, which leaves
-speed mode's loop-polling titles (Alone in the Dark) where they were.
+native time); loops do not skip on the scanline renderer, which leaves its
+loop-polling titles (Alone in the Dark) where they were.
 
 ## Old and constrained devices
 
@@ -358,6 +360,6 @@ buys more frames than micro-optimisation there.
   can reach. The fix is a wasm-side reset that rebuilds the core from the
   cartridge it holds. Re-staging from IndexedDB was rejected (async, and
   fails in private mode or when quota-bound).
-* Unmeasured: the 16 MB iOS rewind ring (see `docs/speed-mode.md`), startup
+* Unmeasured: the 16 MB iOS rewind ring, startup
   compile of 1.2 MB of wasm under the baseline compiler, audio buffer margin
   on a device at 1.2x realtime.

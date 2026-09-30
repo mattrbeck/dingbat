@@ -38,8 +38,7 @@ proc same_settings(a, b: Config): bool =
     a.sgb_border == b.sgb_border and a.rewind == b.rewind and
     a.pitch_correct_ff == b.pitch_correct_ff and a.audio_lowpass == b.audio_lowpass and
     a.fifo_interp == b.fifo_interp and a.mp2k_hle == b.mp2k_hle and
-    a.speed_mode == b.speed_mode and a.frame_size == b.frame_size and
-    a.fullscreen == b.fullscreen
+    a.frame_size == b.frame_size and a.fullscreen == b.fullscreen
 
 echo "Key bindings survive a restart"
 block:
@@ -83,7 +82,6 @@ block:
   cfg.audio_lowpass = true
   cfg.fifo_interp = false
   cfg.mp2k_hle = true
-  cfg.speed_mode = true
   cfg.fullscreen = true
   cfg.keybindings = homerow_keybindings()
   cfg.keybindings[KP_8] = Input.SELECT
@@ -244,7 +242,6 @@ block:
   cfg.audio_lowpass = true
   cfg.fifo_interp = false
   cfg.mp2k_hle = true
-  cfg.speed_mode = true
   cfg.frame_size = 5
   cfg.fullscreen = true
   cfg.reset_to_defaults()
@@ -254,7 +251,7 @@ block:
   want.recents = @[dir / "a.gba"]
   want.bios_path = dir / "gba_bios.bin"
   want.gb_bootrom_path = dir / "dmg_boot.bin"
-  check cfg.fifo_interp and not cfg.speed_mode, "Audio interpolation back on, Speed mode off"
+  check cfg.fifo_interp, "Audio interpolation back on"
   check same_settings(cfg, want) and cfg.frame_size == want.frame_size,
         "every other setting is the default; paths and recents kept"
 
@@ -267,6 +264,17 @@ block:
   check load_config_file(path).frame_size == 6, "6x comes back"
   writeFile(path, "---\nframe_size: 99\n")
   check load_config_file(path).frame_size == 8, "a hand-edited size is clamped"
+
+echo "A key this build no longer knows is ignored and dropped on the next save"
+block:
+  let path = dir / "retired.yml"
+  writeFile(path, "---\nspeed_mode: true\nrewind: false\n")
+  let cfg = load_config_file(path)
+  check cfg.notice.len == 0 and not cfg.rewind, "the file loads; its other keys hold"
+  cfg.volume = 50
+  save_config_file(cfg, path)
+  check "speed_mode" notin readFile(path), "the retired key is gone after a save"
+  check not load_config_file(path).rewind, "the kept keys survive the save"
 
 echo "The Settings window's X asks only when Apply would change the file"
 block:

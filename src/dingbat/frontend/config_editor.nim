@@ -19,7 +19,8 @@ type
     open*:        bool
     prev_open:    bool
     # Pushes settings no widget owns (color-correction uniform, master volume,
-    # speed mode, frame size) into the live core. Set by the app; may be nil.
+    # the audio niceties, frame size) into the live core. Set by the app; may
+    # be nil.
     live_sync*:   proc() {.closure.}
 
 proc new_config_editor*(cfg: Config; fe: FileExplorer): ConfigEditor =

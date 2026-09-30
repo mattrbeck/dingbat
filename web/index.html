@@ -1224,20 +1224,6 @@
                 <!-- Rewind defaults on: a missing rewindOn key resolves to on
                      (loadSystemSettings). Off drops the ring entirely and hides
                      every rewind control (body.rewind-off). -->
-                <!-- Speed mode: GBA skips every other rendered frame and
-                     underclocks 2x; GB loads the scanline renderer and skips
-                     too; rewind / HLE audio / interpolation / glow / run-ahead
-                     are suspended, their stored preferences restored on off. -->
-                <div class="modal-toggle-row">
-                  <div>
-                    <span class="modal-row-label">Speed mode</span>
-                    <span class="modal-toggle-sub">Runs games much faster on slow devices by cutting accuracy: shows every other frame, underclocks the emulated CPU, and turns off rewind, run-ahead and audio extras. Games may lag, effects that rely on flicker may look wrong, and some games can misbehave.</span>
-                  </div>
-                  <label class="switch">
-                    <input type="checkbox" id="speed-mode-toggle" />
-                    <span class="switch-track"></span>
-                  </label>
-                </div>
                 <div class="modal-toggle-row">
                   <div>
                     <span class="modal-row-label">Rewind</span>

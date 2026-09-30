@@ -2065,12 +2065,6 @@ type
     framebuffer*:   seq[uint16]   # 160×144 BGR555
     frame*:         bool
     ran_bios*:      bool
-    # Speed-mode frameskip, honoured only by the scanline renderer (its timing
-    # is analytic, so skipping pixel work is timing-neutral; the FIFO renderer's
-    # mode-3 length comes from running the pipeline). Decided at LY 0. 0 = off.
-    frameskip*:     int
-    fs_counter*:    int
-    forced_skip*:   bool
 
   GbScanlinePpu* = ref object of GbPpu
     scanline_color_vals*: array[160, tuple[color: uint8, priority: bool]]

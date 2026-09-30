@@ -126,7 +126,7 @@ proc schedule*(s: Scheduler; cycles: int; kind: EventType) =
 proc schedule_gb*(s: Scheduler; cycles: int; kind: EventType) =
   var c = cycles
   # etIME and etGbLycEdge are counted in M-cycles (4 CPU cycles at either
-  # speed), so they are not scaled; `speed_mode=` exempts the same two.
+  # speed), so they are not scaled; set_speed exempts the same two.
   if kind != etIME and kind != etGbLycEdge:
     c = c shl s.current_speed
   s.schedule(c, kind)
@@ -325,7 +325,7 @@ proc load_from*(s: Scheduler; r: var Reader; pad = false) =
       discard r.read_u64()
   s.next_event = if n > 0: s.evbuf[n - 1].cycles else: high(CycleCount)
 
-proc `speed_mode=`*(s: Scheduler; speed: uint8) =
+proc set_speed*(s: Scheduler; speed: uint8) =
   ## The GB APU's per-channel deadlines live outside evbuf; gb/memory.nim
   ## stop_instr rescales them around this call.
   let old = s.current_speed

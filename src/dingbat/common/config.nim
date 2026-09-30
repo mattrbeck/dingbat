@@ -295,9 +295,6 @@ type
     # noise; OFF is the bit-true DAC output.
     fifo_interp*:       bool
     mp2k_hle*:          bool     # experimental MP2K sound-engine HLE (auto-engages on detection)
-    # Speed mode for low-end devices: GBA frameskip + 2x CPU underclock, GB
-    # scanline renderer at next load; less accurate, other niceties suspended.
-    speed_mode*:        bool
     frame_size*:        int      # window size, a multiple of the native picture (1..8)
     # The window was fullscreen when dingbat last quit (or last toggled it);
     # window_restore.nim decides whether the next start honours it.
@@ -337,7 +334,6 @@ proc new_config*(): Config =
     audio_lowpass:   false,
     fifo_interp:     true,
     mp2k_hle:        false,
-    speed_mode:      false,
     frame_size:      3,
     fullscreen:      false,
   )
@@ -467,8 +463,6 @@ proc parse_config(j: JsonNode): Config =
     cfg.fifo_interp = j["fifo_interp"].getBool(true)
   if j.hasKey("mp2k_hle"):
     cfg.mp2k_hle = j["mp2k_hle"].getBool(false)
-  if j.hasKey("speed_mode"):
-    cfg.speed_mode = j["speed_mode"].getBool(false)
   if j.hasKey("frame_size") and j["frame_size"].kind == JInt:
     cfg.frame_size = clamp(j["frame_size"].getInt(3), 1, 8)
   if j.hasKey("fullscreen"):
@@ -602,7 +596,6 @@ proc config_entries(cfg: Config): seq[ConfigEntry] =
     ("audio_lowpass",      "audio_lowpass: " & $cfg.audio_lowpass),
     ("fifo_interp",        "fifo_interp: " & $cfg.fifo_interp),
     ("mp2k_hle",           "mp2k_hle: " & $cfg.mp2k_hle),
-    ("speed_mode",         "speed_mode: " & $cfg.speed_mode),
     ("frame_size",         "frame_size: " & $cfg.frame_size),
     ("fullscreen",         "fullscreen: " & $cfg.fullscreen),
     ("gba.bios",           "  bios:" & bios),

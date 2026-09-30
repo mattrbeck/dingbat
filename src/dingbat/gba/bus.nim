@@ -80,17 +80,6 @@ proc update_waitcnt*(bus: Bus; w: WAITCNT) =
     bus.wait32_n[page] = sram
     bus.wait32_s[page] = sram
   bus.prefetch_on = w.gamepack_prefetch_buffer
-  # Speed-mode underclock: every access costs 2^underclock times its real
-  # cycles; scaling these tables keeps the hot path free, and all prefetch
-  # arithmetic runs in the same scaled units. int8 tables cap the shift at 2
-  # (worst entry 18 shl 2 = 72).
-  let uc = clamp(bus.gba.underclock, 0, 2)
-  if uc > 0:
-    for page in 0 .. 0xF:
-      bus.wait16_n[page] = bus.wait16_n[page] shl uc
-      bus.wait16_s[page] = bus.wait16_s[page] shl uc
-      bus.wait32_n[page] = bus.wait32_n[page] shl uc
-      bus.wait32_s[page] = bus.wait32_s[page] shl uc
   # Prefetch hand-off lookup (see rom_access_cycles): bit e set iff a halfword
   # started e cycles ago is in its last cycle and the buffer is not yet full.
   for page in 0x8 .. 0xD:
@@ -99,14 +88,6 @@ proc update_waitcnt*(bus: Bus; w: WAITCNT) =
     for e in 0 ..< min(64, 8 * s):
       if e mod s == s - 1: m = m or (1'u64 shl e)
     bus.pf_commit[page] = m
-
-proc set_underclock*(gba: GBA; n: int) =
-  ## Speed-mode knob: 0 = off, 1 = half effective CPU speed, 2 = quarter.
-  ## Rebuilds the waitstate tables and drops the fetch cache.
-  gba.underclock = clamp(n, 0, 2)
-  gba.bus.update_waitcnt(gba.mmio.waitcnt)
-  gba.bus.fetch_page = 0xFFFFFFFF'u32
-  gba.bus.fetch_key = 0xFFFFFFFF'u32
 
 when defined(fetchprof):
   # -d:fetchprof: where the ROM access path goes on a real workload. Indices:
@@ -445,14 +426,11 @@ proc access_cycles(bus: Bus; address: uint32; is32: bool; fetch: bool): int {.in
   let page = int(bits_range(address, 24, 27))
   if page >= 0x8:
     if page <= 0xD:
-      when defined(flatrom):
-        int(if is32: bus.wait32_s[page] else: bus.wait16_s[page])
-      else:
-        bus.rom_access_cycles(address, is32, fetch)
+      bus.rom_access_cycles(address, is32, fetch)
     else:
       int(bus.wait16_n[page])  # SRAM: 8-bit bus, same cost either way
   else:
-    # Via the bus tables so the speed-mode underclock scaling applies
+    # Via the bus tables, which carry the MEMCNT EWRAM waits and region swap
     let c = int(if is32: bus.wait32_n[page] else: bus.wait16_n[page])
     # Palette RAM, VRAM and OAM while the renderer may hold them
     # (Bus.contended, contention.nim): the access waits for its dots
@@ -1147,8 +1125,8 @@ proc install_fetch_cache(bus: Bus; page: uint32): bool =
     return false
   bus.fetch_page = page
   bus.fetch_key = page
-  # Via the bus tables so the underclock scaling applies; only consumed on
-  # the non-ROM (pages 2/3) fetch path
+  # Via the bus tables, which carry the MEMCNT EWRAM waits and region swap;
+  # only consumed on the non-ROM (pages 2/3) fetch path
   bus.fetch_c16 = int(bus.wait16_n[int(page)])
   bus.fetch_c32 = int(bus.wait32_n[int(page)])
   true
@@ -1218,32 +1196,27 @@ when defined(obuslatch):
 proc fetch_half_cached(bus: Bus; address: uint32; page: uint32): uint16 {.fetch_inline.} =
   ## The cached-page fetch: `page` is bus.fetch_page.
   if page >= 0x8:
-    when defined(flatrom):
-      # -d:flatrom measurement probe: every ROM fetch is a flat S access;
-      # not shippable
+    # While the fetch stream is hot, a sequential fetch is a plain S
+    # access with no absolute-time bookkeeping
+    if bus.rom_hot and address == bus.rom_next_addr:
+      when defined(fetchprof): fetchprof[0].inc
+      when defined(pftrace):
+        pft("  HOT fetch16 a=" & toHex(address, 8) & " now=" & $bus.bus_now() &
+            " cost=" & $int(bus.wait16_s[page]))
       bus.cycles += int(bus.wait16_s[page])
+      bus.rom_next_addr = address + 2
     else:
-      # While the fetch stream is hot, a sequential fetch is a plain S
-      # access with no absolute-time bookkeeping
-      if bus.rom_hot and address == bus.rom_next_addr:
-        when defined(fetchprof): fetchprof[0].inc
-        when defined(pftrace):
-          pft("  HOT fetch16 a=" & toHex(address, 8) & " now=" & $bus.bus_now() &
-              " cost=" & $int(bus.wait16_s[page]))
-        bus.cycles += int(bus.wait16_s[page])
-        bus.rom_next_addr = address + 2
-      else:
-        when defined(fetchprof): fetchprof[1].inc
-        bus.rom_cool()
-        let c = if bus.dma_active:
-                  bus.rom_access_cycles(address, is32 = false, fetch = true)
-                else: bus.rom_fetch_cycles(address, int(page), is32 = false)
-        bus.cycles += c
-        # Go hot only when no prefetch credit is left over; leftover credit
-        # must keep flowing through the slow path to be consumed
-        if bus.rom_free_since == bus.bus_now():
-          bus.rom_hot = true
-          when defined(fetchprof): fetchprof[9].inc
+      when defined(fetchprof): fetchprof[1].inc
+      bus.rom_cool()
+      let c = if bus.dma_active:
+                bus.rom_access_cycles(address, is32 = false, fetch = true)
+              else: bus.rom_fetch_cycles(address, int(page), is32 = false)
+      bus.cycles += c
+      # Go hot only when no prefetch credit is left over; leftover credit
+      # must keep flowing through the slow path to be consumed
+      if bus.rom_free_since == bus.bus_now():
+        bus.rom_hot = true
+        when defined(fetchprof): fetchprof[9].inc
   else:
     bus.cycles += bus.fetch_c16
   read_u16_ptr_raw(bus.fetch_ptr, (address and bus.fetch_mask) and not 1'u32)
@@ -1258,26 +1231,23 @@ proc fetch_half*(bus: Bus; address: uint32): uint16 {.fetch_inline.} =
 proc fetch_word_cached(bus: Bus; address: uint32; page: uint32): uint32 {.fetch_inline.} =
   ## The cached-page fetch: `page` is bus.fetch_page.
   if page >= 0x8:
-    when defined(flatrom):
+    if bus.rom_hot and address == bus.rom_next_addr:
+      when defined(fetchprof): fetchprof[2].inc
+      when defined(pftrace):
+        pft("  HOT fetch32 a=" & toHex(address, 8) & " now=" & $bus.bus_now() &
+            " cost=" & $int(bus.wait32_s[page]))
       bus.cycles += int(bus.wait32_s[page])
+      bus.rom_next_addr = address + 4
     else:
-      if bus.rom_hot and address == bus.rom_next_addr:
-        when defined(fetchprof): fetchprof[2].inc
-        when defined(pftrace):
-          pft("  HOT fetch32 a=" & toHex(address, 8) & " now=" & $bus.bus_now() &
-              " cost=" & $int(bus.wait32_s[page]))
-        bus.cycles += int(bus.wait32_s[page])
-        bus.rom_next_addr = address + 4
-      else:
-        when defined(fetchprof): fetchprof[3].inc
-        bus.rom_cool()
-        let c = if bus.dma_active:
-                  bus.rom_access_cycles(address, is32 = true, fetch = true)
-                else: bus.rom_fetch_cycles(address, int(page), is32 = true)
-        bus.cycles += c
-        if bus.rom_free_since == bus.bus_now():
-          bus.rom_hot = true
-          when defined(fetchprof): fetchprof[9].inc
+      when defined(fetchprof): fetchprof[3].inc
+      bus.rom_cool()
+      let c = if bus.dma_active:
+                bus.rom_access_cycles(address, is32 = true, fetch = true)
+              else: bus.rom_fetch_cycles(address, int(page), is32 = true)
+      bus.cycles += c
+      if bus.rom_free_since == bus.bus_now():
+        bus.rom_hot = true
+        when defined(fetchprof): fetchprof[9].inc
   else:
     bus.cycles += bus.fetch_c32
   read_u32_ptr_raw(bus.fetch_ptr, (address and bus.fetch_mask) and not 3'u32)

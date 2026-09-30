@@ -598,48 +598,27 @@ proc apply_master_volume() =
     app.gb_emu.apu.set_master_volume(app.cfg.volume, app.cfg.mute)
 
 proc apply_pitch_correct_ff() =
-  let eff = app.cfg.pitch_correct_ff and not app.cfg.speed_mode
   if app.gba_emu != nil:
-    app.gba_emu.apu.set_pitch_correct_ff(eff)
+    app.gba_emu.apu.set_pitch_correct_ff(app.cfg.pitch_correct_ff)
   if app.gb_emu != nil:
-    app.gb_emu.apu.set_pitch_correct_ff(eff)
+    app.gb_emu.apu.set_pitch_correct_ff(app.cfg.pitch_correct_ff)
 
 proc apply_audio_lowpass() =
   # Analog-output low-pass models the GBA's cap/speaker smoothing; only the
   # GBA DirectSound path has the FIFO imaging it targets.
   if app.gba_emu != nil:
-    app.gba_emu.apu.set_audio_lowpass(app.cfg.audio_lowpass and
-                                      not app.cfg.speed_mode)
+    app.gba_emu.apu.set_audio_lowpass(app.cfg.audio_lowpass)
 
 proc apply_mp2k_hle() =
   # Arming costs nothing: the HLE engages only when mp2k.nim's runtime
   # detection recognizes the engine in the loaded game.
   if app.gba_emu != nil:
-    app.gba_emu.mp2k_hle = app.cfg.mp2k_hle and not app.cfg.speed_mode
+    app.gba_emu.mp2k_hle = app.cfg.mp2k_hle
 
 proc apply_fifo_interp() =
   # DirectSound FIFO interpolation (cubic). Off is bit-true DAC output.
   if app.gba_emu != nil:
-    app.gba_emu.apu.set_fifo_interp(app.cfg.fifo_interp and
-                                    not app.cfg.speed_mode)
-
-proc apply_speed_mode() =
-  # Speed mode (low-end devices): GBA renders every other frame and the
-  # emulated CPU is charged double cycles. Live on the running GBA core; the
-  # GB renderer choice (scanline while on) applies at the next ROM load.
-  if app.gba_emu != nil:
-    app.gba_emu.ppu.frameskip = if app.cfg.speed_mode: 1 else: 0
-    app.gba_emu.set_underclock(if app.cfg.speed_mode: 1 else: 0)
-  if app.gb_emu != nil:
-    # Honored only by the scanline renderer (forced at the next ROM load
-    # while the mode is on); the FIFO renderer ignores the field.
-    app.gb_emu.ppu.frameskip = if app.cfg.speed_mode: 1 else: 0
-  # The audio niceties are suspended (not overwritten) while speed mode is
-  # on; each apply proc reads speed_mode itself
-  apply_mp2k_hle()
-  apply_fifo_interp()
-  apply_pitch_correct_ff()
-  apply_audio_lowpass()
+    app.gba_emu.apu.set_fifo_interp(app.cfg.fifo_interp)
 
 proc current_cheat_engine(): CheatEngine
 proc load_cheats()
@@ -757,9 +736,7 @@ proc load_rom(path: string) =
   if boot.note.len > 0 and not is_gb_rom(rom_path): echo boot.note
   let built = build_core(rom_path, CoreOptions(
     gb_bootrom: app.cfg.gb_bootrom_path,
-    # Speed mode forces the cheaper scanline renderer; the FIFO preference
-    # is remembered and returns when it is switched off.
-    gb_fifo: app.cfg.gb_fifo and not app.cfg.speed_mode,
+    gb_fifo: app.cfg.gb_fifo,
     headless: app.cfg.headless, gb_run_bios: boot.gb_run_bios,
     sgb: app.cfg.sgb_enable, bios_path: boot.bios_path,
     run_bios: boot.run_bios, use_hle: boot.use_hle,
@@ -824,7 +801,6 @@ proc load_rom(path: string) =
   apply_audio_lowpass()
   apply_fifo_interp()
   apply_mp2k_hle()
-  apply_speed_mode()
   apply_panel_uniforms()
   lcd_resp.reset()  # fresh core: don't ghost the previous game's frame
   app.rewind.clear()
@@ -1184,10 +1160,9 @@ proc upload_frame(fb: ptr uint16; w, h: int) =
   ## same way whatever the window's refresh rate is.
   let src = cast[ptr UncheckedArray[uint16]](fb)
   let gb = app.emu_kind == ekGB and app.gb_emu != nil
-  # Speed mode suspends the panel model — per-pixel CPU work every frame
   # The GBA color-correction shader linearizes with lcdGamma 4.0, so while it
   # is on, the AGB table must be built for that chain (see set_panel).
-  lcd_resp.set_panel((app.cfg.lcd_response and not app.cfg.speed_mode).resolve(
+  lcd_resp.set_panel(app.cfg.lcd_response.resolve(
     gba = app.emu_kind == ekGBA,
     cgb = gb and app.gb_emu.cgb_enabled,
     sgb = gb and app.gb_emu.sgb_active()),
@@ -1265,8 +1240,8 @@ proc render_game() =
     # Pushed every present: the Settings window's Apply has no callback into
     # this module, so a cached value could go stale. The grid and subpixel
     # looks are separate shader stages; filter_mode only carries the
-    # smoothing algorithms. Speed mode suspends the whole selector.
-    let vf = if app.cfg.speed_mode: vfNone else: app.cfg.video_filter
+    # smoothing algorithms.
+    let vf = app.cfg.video_filter
     glUniform1i(glGetUniformLocation(app.game_shader, "lcd_grid"),
                 GLint(if vf == vfGrid: 1 else: 0))
     glUniform1i(glGetUniformLocation(app.game_shader, "subpixel"),
@@ -1292,8 +1267,7 @@ proc render_game() =
                 GLfloat(GBA_W))
     # The panel model must be fed static frames too, or a cell still on its
     # way to its target would freeze part-settled instead of finishing
-    if (app.cfg.lcd_response and not app.cfg.speed_mode) or
-       not app.gba_emu.ppu.frame_static:
+    if app.cfg.lcd_response or not app.gba_emu.ppu.frame_static:
       upload_frame(addr app.gba_emu.ppu.framebuffer[0], GBA_W, GBA_H)
     when defined(gputime): gpu_begin()
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
@@ -1498,22 +1472,10 @@ proc render_imgui() =
                            unlinked):
           app.pending_step = true
         if igMenuItem_BoolPtr("Rewind (hold `)", nil, addr app.cfg.rewind,
-                              not app.cfg.speed_mode):
+                              true):
           if not app.cfg.rewind:
             app.rewind.clear()  # free the history when disabled
           save_config(app.cfg)
-        # Speed mode: GBA frameskip + 2x emulated-CPU underclock, GB scanline
-        # renderer at next load, rewind suspended.
-        if igMenuItem_BoolPtr("Speed mode (less accurate)", nil,
-                              addr app.cfg.speed_mode, true):
-          if app.cfg.speed_mode:
-            app.rewind.clear()  # suspended while on; history would go stale
-          apply_speed_mode()
-          save_config(app.cfg)
-        # The GB renderer swap waits for a load; say so where it is chosen
-        if app.emu_kind == ekGB:
-          igSetItemTooltip("On a Game Boy game this takes effect at the next " &
-                           "load or Reset.")
         # 2x Speed stays audio-paced (at double rate); Fast Forward is
         # inverted audio sync — unsynced emulation runs uncapped, so
         # checked == not sync. Radio-style: fast forward would silently
@@ -1559,31 +1521,26 @@ proc render_imgui() =
         if igMenuItem_BoolPtr("Mute", nil, addr app.cfg.mute, true):
           apply_master_volume()
           save_config(app.cfg)
-        # WSOLA time-stretch keeps 2x audio at normal pitch. The audio
-        # niceties below (and Rewind above) gray out while speed mode is on:
-        # a live-looking control that does nothing is worse than a disabled one.
+        # WSOLA time-stretch keeps 2x audio at normal pitch.
         if igMenuItem_BoolPtr("Pitch-correct fast-forward", nil,
-                              addr app.cfg.pitch_correct_ff,
-                              not app.cfg.speed_mode):
+                              addr app.cfg.pitch_correct_ff, true):
           apply_pitch_correct_ff()
           save_config(app.cfg)
         # ON: reconstructs the waveform between FIFO samples. OFF: bit-true
         # GBA DAC output, grit included.
         if igMenuItem_BoolPtr("Audio interpolation", nil,
-                              addr app.cfg.fifo_interp,
-                              app.emu_kind == ekGBA and not app.cfg.speed_mode):
+                              addr app.cfg.fifo_interp, app.emu_kind == ekGBA):
           apply_fifo_interp()
           save_config(app.cfg)
         # Pair with interpolation off for the closest real-hardware sound.
         if igMenuItem_BoolPtr("Analog filter", nil,
-                              addr app.cfg.audio_lowpass,
-                              app.emu_kind == ekGBA and not app.cfg.speed_mode):
+                              addr app.cfg.audio_lowpass, app.emu_kind == ekGBA):
           apply_audio_lowpass()
           save_config(app.cfg)
         # Sound-engine HLE: changes the mix character and supersedes
         # interpolation for the music stream when engaged (per-game detection).
         if igMenuItem_BoolPtr("Enhanced music synthesis (HLE)", nil,
-                              addr app.cfg.mp2k_hle, not app.cfg.speed_mode):
+                              addr app.cfg.mp2k_hle, true):
           apply_mp2k_hle()
           save_config(app.cfg)
         igSeparator()
@@ -2276,12 +2233,15 @@ proc main() =
   let fe = new_file_explorer(cfg)
   let ce = new_config_editor(cfg, fe)
   # "Reset to Defaults" changes settings no widget owns (color correction,
-  # volume, speed mode and the audio niceties, frame size) — push them into
-  # the live GL uniform, core and window here.
+  # volume, the audio niceties, frame size) — push them into the live GL
+  # uniform, core and window here.
   ce.live_sync = proc() =
     apply_color_correction()
     apply_master_volume()
-    apply_speed_mode()  # also re-applies pitch, low-pass, interpolation, MP2K
+    apply_mp2k_hle()
+    apply_fifo_interp()
+    apply_pitch_correct_ff()
+    apply_audio_lowpass()
     if app.scale != app.cfg.frame_size:
       app.scale = app.cfg.frame_size
       if app.emu_kind != ekNone: resize_to_output()
@@ -2522,8 +2482,7 @@ proc main() =
       of ekNone: discard
       if emulated and is_paced():
         scheduler_frame_ran()
-      if emulated and app.cfg.rewind and not app.cfg.speed_mode and
-         app.netlink == nil:
+      if emulated and app.cfg.rewind and app.netlink == nil:
         case app.emu_kind
         of ekGBA:
           discard app.rewind.maybe_push(proc(): string = app.gba_emu.state_payload())

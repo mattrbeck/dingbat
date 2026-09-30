@@ -187,10 +187,9 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
   # can end it (mem_stall_until_irq: 2^17 cycles with IE = 0, most games'
   # switch): taken whole, the counter overshot by tens of thousands of dots,
   # one boundary was taken per later tick, and the int16 STAT stamp of the
-  # first one raised RangeDefect on desktop (speed mode runs this renderer;
-  # the web's -d:danger build wrapped it). Walk a long tick in M-cycle-sized
-  # steps, which is every boundary it crosses, as the FIFO renderer walks
-  # its dots.
+  # first one raised RangeDefect on desktop (the web's -d:danger build
+  # wrapped it). Walk a long tick in M-cycle-sized steps, which is every
+  # boundary it crosses, as the FIFO renderer walks its dots.
   if cycles > 4:
     # A long tick that reaches no boundary (the halt skip's, wl_horizon) is
     # only the steps' bookkeeping below, done once.
@@ -233,19 +232,7 @@ method tick*(ppu: GbScanlinePpu; gb: GB; cycles: int) =
         ppu.cycle_counter -= 172
         stat_drop_rebase(ppu, 172'i32)
         ppu.`mode_flag=`(0'u8, gb)
-        # Speed-mode frameskip, decided once per frame at LY 0 (fs_counter == 0
-        # renders). Everything CPU-visible still happens; do_scanline's only
-        # cross-line state (current_window_line) resets at its own LY-0 call.
-        if ppu.ly == 0:
-          if ppu.frameskip > 0:
-            ppu.forced_skip = ppu.fs_counter != 0
-            inc ppu.fs_counter
-            if ppu.fs_counter > ppu.frameskip:
-              ppu.fs_counter = 0
-          else:
-            ppu.forced_skip = false
-        if not ppu.forced_skip:
-          do_scanline(ppu, gb)
+        do_scanline(ppu, gb)
     elif ppu.mode_flag == 0:     # H-Blank
       if ppu.cycle_counter >= 204:
         gb.wl_mark = gb.scheduler.cycles

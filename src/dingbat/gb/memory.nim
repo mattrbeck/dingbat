@@ -1105,9 +1105,9 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
     mem.current_speed = mem.current_speed xor 1
     # The channels' next_step deadlines live outside the scheduler's events.
     gb.apu.apu_rescale_speed(gb, old_speed, mem.current_speed)
-    gb.scheduler.`speed_mode=`(mem.current_speed)
+    gb.scheduler.set_speed(mem.current_speed)
     # Re-aim the DIV-APU edge at the NEW speed: the aim above went through
-    # `speed_mode=`'s rescale, which would also scale the tap's lag
+    # set_speed's rescale, which would also scale the tap's lag
     # (APU_SPSW_TAP_LAG_T in timer.nim).
     gb.scheduler.clear(etAPUFrameSeq)
     gb.scheduler.schedule(apu_div_phase(gb.timer, gb), etAPUFrameSeq)

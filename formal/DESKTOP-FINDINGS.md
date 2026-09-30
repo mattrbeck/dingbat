@@ -43,8 +43,8 @@ Lows fixed: held input merged per source and the fast-forward trigger
 (29c71dd3f) and dropped by a switch (489bc035f); Reset after Recent > Clear
 (489bc035f); zip identity (46db6439f); extensionless paths (2a30130b8); every
 Link Low listed below (19eba0ba8, 2902c8f39); the file dialog opening the BIOS
-(03a7f027e); Reset to Defaults, frame size, Speed mode on GB (032f85e00);
-fullscreen remembered where the OS restores windows (4f5f317b5: on macOS only
+(03a7f027e); Reset to Defaults and frame size (032f85e00); fullscreen
+remembered where the OS restores windows (4f5f317b5: on macOS only
 when "Close windows when quitting an application" is off, as AppKit apps do;
 always on Windows and Linux); the Settings X asks before discarding edits
 (c9a6b73b4).
@@ -380,10 +380,9 @@ every interleaving the web audit lived on. What replaces it:
   the `link_auto_listen` comment about macOS SO_REUSEADDR is wrong
   (measured).
 - The file dialog can open the BIOS as a ROM (`selected_idx` survives
-  between dialogs); Reset to Defaults skips Audio interpolation and Speed
-  mode; the window's X discards edits without asking; Speed mode on a GB
-  game waits for the next load without saying so; frame size and
-  fullscreen are not saved.
+  between dialogs); Reset to Defaults skips Audio interpolation; the
+  window's X discards edits without asking; frame size and fullscreen are
+  not saved.
 - GBA state identity hashes only the first 1 MB of the ROM, so a hack that
   differs past 1 MB accepts the original's states.
 - Extensionless CLI ROM paths save to `<parent>.sav` or `./.sav`.
@@ -406,7 +405,7 @@ every interleaving the web audit lived on. What replaces it:
   than a frame apart (`NetLink.lead_bounded`); two auto-pairing windows
   never both host and never pair as the same unit (`race_inv`).
 - The menus and the Settings window never overwrite each other's fields;
-  the live core always agrees with `cfg` for colour, volume, frameskip and
+  the live core always agrees with `cfg` for colour, volume and
   interpolation, Reset to Defaults included; the Cheats window always edits
   the running core (`Settings.liveOK_real`, `apply_menu_commute`,
   `cheatsOK_reachable`).

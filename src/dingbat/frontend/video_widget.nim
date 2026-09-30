@@ -38,14 +38,11 @@ proc render*(v: VideoWidget) =
               "subpixels, so there it is a stylised look). None keeps crisp " &
               "nearest-neighbor pixels. Color correction still applies on top.")
   igIndent(106)
-  # Speed mode suspends the GPU filter; the choice keeps its state.
-  igBeginDisabled(v.cfg.speed_mode)
   discard igRadioButton_IntPtr("None (crisp)", addr v.filter, 0)
   discard igRadioButton_IntPtr("hq4x", addr v.filter, 1)
   discard igRadioButton_IntPtr("xBR", addr v.filter, 2)
   discard igRadioButton_IntPtr("LCD grid", addr v.filter, 3)
   discard igRadioButton_IntPtr("RGB subpixels", addr v.filter, 4)
-  igEndDisabled()
   igUnindent(106)
   igSeparator()
   discard igCheckbox("Preserve aspect ratio", addr v.preserve_aspect)
@@ -53,10 +50,7 @@ proc render*(v: VideoWidget) =
   help_marker("Letterbox the picture instead of stretching it to fill the " &
               "window. Only visible when the window is not an exact multiple " &
               "of the console's resolution — fullscreen, or after a manual resize.")
-  # Speed mode suspends the panel model (per-pixel CPU work every frame).
-  igBeginDisabled(v.cfg.speed_mode)
   discard igCheckbox("LCD response", addr v.lcd_resp)
-  igEndDisabled()
   igSameLine(0, -1)
   help_marker("Emulate how slowly the real screen's pixels settle: quick to " &
               "darken, slow to fade back to light, which is why a moving dark " &

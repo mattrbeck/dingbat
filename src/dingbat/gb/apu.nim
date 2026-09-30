@@ -193,7 +193,7 @@ proc apu_stall_extra*(apu: GbApu; gb: GB; dots: int) =
 
 proc apu_rescale_speed*(apu: GbApu; gb: GB; old_speed, new_speed: uint8) =
   ## CGB speed switch: remaining delays are in CPU cycles, so entering double
-  ## speed doubles them and leaving halves them (as Scheduler.`speed_mode=`).
+  ## speed doubles them and leaving halves them (as Scheduler.set_speed).
   apu_catchup_all(apu, gb)
   var now = gb.scheduler.cycles
   var base_new = now

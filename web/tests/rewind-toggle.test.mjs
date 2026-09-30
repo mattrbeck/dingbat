@@ -47,6 +47,20 @@ test("a system record written before this setting existed stays on", async () =>
   assert.equal(app.runIn("gbaRunBios"), false);
 });
 
+// Older records carry a speedMode key from a setting that no longer exists.
+test("a system record with a retired key loads and loses it on the next save", async () => {
+  const app = await bootWith({ gbaBiosMode: 2, rewindOn: true, speedMode: true });
+  assert.equal(rewindOn(app), true);
+  assert.equal(app.document.getElementById("rewind-toggle").disabled, false);
+  eq(setCalls(app), [1]);
+  assert.equal(app.runIn("gbaBiosMode"), 2);
+  const toggle = app.document.getElementById("rewind-toggle");
+  toggle.checked = false;
+  await toggle.dispatch("change");
+  await settle();
+  assert.equal("speedMode" in (await app.api.dbGet("system")), false);
+});
+
 test("a saved OFF is honoured, and hides the UI from the first frame", async () => {
   const app = await bootWith({ rewindOn: false });
   assert.equal(rewindOn(app), false);

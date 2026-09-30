@@ -5335,11 +5335,6 @@ var gbRumble = true;
 // (loadSystemSettings). Off stops allocating the wasm ring.
 var rewindOn = true;
 
-// Speed mode: wasm_set_speed_mode (GBA renders every other frame at half
-// clock; GB loads the scanline renderer), and rewind / MP2K HLE / FIFO
-// interpolation / glow / run-ahead are suspended, not overwritten.
-var speedMode = false;
-
 const gbaRunBiosToggle = /** @type {HTMLInputElement} */ (document.getElementById("gba-run-bios-toggle"));
 const gbRumbleToggle = /** @type {HTMLInputElement} */ (document.getElementById("gb-rumble-toggle"));
 const rewindToggle = /** @type {HTMLInputElement} */ (document.getElementById("rewind-toggle"));
@@ -5370,15 +5365,8 @@ const applySystemSettings = () => {
   if (Module._wasm_sgb_enable) Module._wasm_sgb_enable(sgbEnable ? 1 : 0);
   // The border switch is live: it only hides a layer the core has.
   if (Module._wasm_sgb_border_show) Module._wasm_sgb_border_show(sgbBorder ? 1 : 0);
-  // Live in both directions; speed mode suspends it.
-  if (Module._setRewindEnabled) Module._setRewindEnabled((rewindOn && !speedMode) ? 1 : 0);
-  if (Module._wasm_set_speed_mode) Module._wasm_set_speed_mode(speedMode ? 1 : 0);
-  // Re-push the suspended audio settings' effective values on a flip.
-  applyMp2kHle();
-  applyFifoInterp();
-  applyPitchCorrectFF();
-  applyAudioLowpass();
-  applyLcdResponse();
+  // Live in both directions.
+  if (Module._setRewindEnabled) Module._setRewindEnabled(rewindOn ? 1 : 0);
 };
 
 const syncSystemSettingsUI = () => {
@@ -5396,21 +5384,7 @@ const syncSystemSettingsUI = () => {
     sgbBorderToggle.disabled = !sgbEnable;
   }
   if (sgbBorderRow) sgbBorderRow.classList.toggle("row-disabled", !sgbEnable);
-  const sm = /** @type {HTMLInputElement} */ (document.getElementById("speed-mode-toggle"));
-  if (sm) sm.checked = speedMode;
-  // Show suspended controls as suspended; stored preferences are untouched.
   rewindToggle.checked = rewindOn;
-  rewindToggle.disabled = speedMode;
-  const ra = /** @type {HTMLSelectElement} */ (document.getElementById("runahead-select"));
-  if (ra) ra.disabled = speedMode;
-  // Volume/mute, scanlines and color correction stay live (free or ~0.2%).
-  for (const id of ["fifo-interp-toggle", "mp2k-hle-toggle",
-                    "audio-lowpass-toggle", "pitch-correct-ff-toggle",
-                    "upscale-filter-select", "ambient-glow-toggle",
-                    "lcd-response-toggle"]) {
-    const el = /** @type {HTMLInputElement} */ (document.getElementById(id));
-    if (el) el.disabled = speedMode;
-  }
   applyRewindUI();
 };
 
@@ -5418,8 +5392,7 @@ const saveSystemSettings = () => {
   applySystemSettings();
   applyRewindUI();
   if (db) dbPut("system",
-    { gbFifo, gbaBiosMode, gbaRunBios, gbRumble, rewindOn, sgbEnable, sgbBorder,
-      speedMode });
+    { gbFifo, gbaBiosMode, gbaRunBios, gbRumble, rewindOn, sgbEnable, sgbBorder });
 };
 
 for (let r of /** @type {NodeListOf<HTMLInputElement>} */ (document.querySelectorAll('input[name="gb-renderer"]'))) {
@@ -5471,21 +5444,6 @@ rewindToggle.addEventListener("change", () => {
   saveSystemSettings();
 });
 
-{
-  const sm = /** @type {HTMLInputElement} */ (document.getElementById("speed-mode-toggle"));
-  if (sm) sm.addEventListener("change", () => {
-    speedMode = sm.checked;
-    saveSystemSettings();
-    syncSystemSettingsUI();
-    // Refresh layout (the RGB look changes the backing-store scale) and the frame.
-    if (typeof updateCanvasScaling === "function") updateCanvasScaling();
-    if (typeof drawGame === "function") drawGame();
-    if (speedMode && currentRomName) {
-      showToast("Speed mode is on — a running Game Boy game switches renderer at the next load");
-    }
-  });
-}
-
 const loadSystemSettings = async () => {
   let s = await dbGet("system");
   if (s) {
@@ -5497,7 +5455,6 @@ const loadSystemSettings = async () => {
     if (typeof s.sgbBorder === "boolean") sgbBorder = s.sgbBorder;
     // Only a real boolean: a record predating the setting leaves the default.
     if (typeof s.rewindOn === "boolean") rewindOn = s.rewindOn;
-    if (typeof s.speedMode === "boolean") speedMode = s.speedMode;
   }
   syncSystemSettingsUI();
   applySystemSettings();
@@ -8560,7 +8517,7 @@ const pcffToggle = /** @type {HTMLInputElement} */ (document.getElementById("pit
 
 const applyPitchCorrectFF = () => {
   if (typeof Module !== "undefined" && Module._wasm_set_pitch_correct_ff) {
-    Module._wasm_set_pitch_correct_ff((pitchCorrectFF && !speedMode) ? 1 : 0);
+    Module._wasm_set_pitch_correct_ff(pitchCorrectFF ? 1 : 0);
   }
 };
 
@@ -8580,7 +8537,7 @@ const fifoInterpToggle = /** @type {HTMLInputElement} */ (document.getElementByI
 
 const applyFifoInterp = () => {
   if (typeof Module !== "undefined" && Module._wasm_set_fifo_interp) {
-    Module._wasm_set_fifo_interp((fifoInterp && !speedMode) ? 1 : 0);
+    Module._wasm_set_fifo_interp(fifoInterp ? 1 : 0);
   }
 };
 
@@ -8604,7 +8561,7 @@ const mp2kHleToggle = /** @type {HTMLInputElement} */ (document.getElementById("
 
 const applyMp2kHle = () => {
   if (typeof Module !== "undefined" && Module._wasm_set_mp2k_hle) {
-    Module._wasm_set_mp2k_hle((mp2kHle && !speedMode && !mp2kHleSessionOff) ? 1 : 0);
+    Module._wasm_set_mp2k_hle((mp2kHle && !mp2kHleSessionOff) ? 1 : 0);
   }
 };
 
@@ -8651,13 +8608,11 @@ var ambientGlow = false;
 // The screen looks are not u_filter values; drawGame maps them to their own
 // uniforms.
 var upscaleFilter = "none";
-// Speed mode suspends the whole selector; every consumer goes through this.
-const effectiveFilter = () => (speedMode ? "none" : upscaleFilter);
 
 // Backing store = native * glScale(); NEAREST sampling makes it a crisp
 // integer upscale. The RGB look needs 6: two whole backing pixels per
 // stripe, where 4 gives 4/3 and aliases into moire.
-const glScale = () => (effectiveFilter() === "rgb" ? 6 : 4);
+const glScale = () => (upscaleFilter === "rgb" ? 6 : 4);
 
 const canvasEl = /** @type {HTMLCanvasElement} */ (document.getElementById("canvas"));
 const stageEl = document.getElementById("stage");
@@ -8737,9 +8692,8 @@ const updateCanvasScaling = () => {
     canvasEl.style.width = "";
     canvasEl.style.height = "";
   }
-  // Keep the glow canvas pinned to the canvas rect; speed mode suspends it
-  // (a visible canvas would show a stale glow).
-  const singleCore = running && !linkMode && !rollbackMode && !speedMode;
+  // Keep the glow canvas pinned to the canvas rect.
+  const singleCore = running && !linkMode && !rollbackMode;
   if (ambientGlow && singleCore) {
     const c = canvasEl.getBoundingClientRect();
     const s = stageEl.getBoundingClientRect();
@@ -8768,7 +8722,7 @@ const glowPackHex = (c) => {
 };
 
 const updateGlow = () => {
-  if (glowCanvas.hidden || !currentRomName || speedMode) return;
+  if (glowCanvas.hidden || !currentRomName) return;
   if (typeof Module === "undefined" || !Module._wasm_glow_sample) return;
   if (glowTick++ % 6 !== 0) return;
   const gw = glowCanvas.width;
@@ -8861,9 +8815,9 @@ const drawGame = () => {
       : extOf(currentRomName) !== ".gba",
     // Screen looks are their own uniforms; smoothing values pass through and
     // glpresent maps anything else to u_filter 0.
-    grid: effectiveFilter() === "grid",
-    subpixel: effectiveFilter() === "rgb",
-    filter: effectiveFilter(),
+    grid: upscaleFilter === "grid",
+    subpixel: upscaleFilter === "rgb",
+    filter: upscaleFilter,
   });
 };
 
@@ -8873,7 +8827,7 @@ const saveVideoSettings = () => {
 
 const applyLcdResponse = () => {
   if (typeof Module !== "undefined" && Module._wasm_set_lcd_response) {
-    Module._wasm_set_lcd_response((lcdResponse && !speedMode) ? 1 : 0);
+    Module._wasm_set_lcd_response(lcdResponse ? 1 : 0);
   }
 };
 
@@ -9629,7 +9583,6 @@ const resetAllSettings = async () => {
 
   gbFifo = true; gbaBiosMode = 0; gbaRunBios = true; gbRumble = true;
   rewindOn = true;
-  speedMode = false;
   syncSystemSettingsUI();   // also re-applies the rewind-off body class
   applySystemSettings();
 
@@ -10378,10 +10331,10 @@ const setSlowMotion = (on) => {
 
 // The three speed flags collapse to one value; momentary keys snapshot it
 // on press and restore it on release.
-const currentSpeedMode = () =>
+const currentSpeed = () =>
   fastForward ? "ffw" : speed2x ? "2x" : slowMotion ? "slow" : "normal";
 // The setters clear each other, so the wanted one goes last.
-const applySpeedMode = (mode) => {
+const applySpeed = (mode) => {
   if (mode !== "slow") setSlowMotion(false);
   setFastForward(mode === "ffw");
   setSpeed2x(mode === "2x");
@@ -11073,7 +11026,7 @@ const endKbFastForward = () => {
   kbFastForward = false;
   // Something else claimed the speed while the key was down: leave it.
   if (!fastForward) return;
-  applySpeedMode(kbSpeedBeforeHold);
+  applySpeed(kbSpeedBeforeHold);
 };
 const releaseKbHolds = () => {
   endKbFastForward();
@@ -11143,7 +11096,7 @@ const shortcutKeyHandler = (e, down) => {
         if (!speedControlsOk()) break;
         if (!kbFastForward) {
           kbFastForward = true;
-          kbSpeedBeforeHold = fastForward ? "normal" : currentSpeedMode();
+          kbSpeedBeforeHold = fastForward ? "normal" : currentSpeed();
           setFastForward(true);
           setSpeed2x(false);
         }
@@ -13437,6 +13390,7 @@ var Module = {
     applyColorCorrect();
     applyPitchCorrectFF();
     applyMp2kHle();
+    applyFifoInterp();
     applyLcdResponse();
     // Unblock queued launches and retire the boot progress strip.
     markRuntimeReady();
@@ -13511,7 +13465,7 @@ var Module = {
     const routeOutput = () => {
       if (!audioCtx || !gainNode) return;
       try { gainNode.disconnect(); } catch (e) {}
-      if (typeof audioLowpass !== "undefined" && audioLowpass && !speedMode) {
+      if (typeof audioLowpass !== "undefined" && audioLowpass) {
         if (!lowpassNode) {
           lowpassNode = audioCtx.createBiquadFilter();
           lowpassNode.type = "lowpass";
@@ -13788,7 +13742,7 @@ var Module = {
     let hleActive = false;
     let hlePressed = true;
     const updateHleIndicator = () => {
-      const avail = mp2kHle && !speedMode && !!(
+      const avail = mp2kHle && !!(
         Module._wasm_mp2k_available && Module._wasm_mp2k_available()
       );
       const on = avail && !!(
@@ -14007,7 +13961,7 @@ var Module = {
         const maxFrames = speed2x ? 4 : 2;
         // Run-ahead only at normal speed; off, this is plain loop_tick.
         const useRunahead = runaheadFrames > 0 && !speed2x && !slowMotion &&
-          !speedMode && typeof Module._runahead_tick === "function";
+          typeof Module._runahead_tick === "function";
         let framesRun = 0;
         while (accumulator >= step && framesRun < maxFrames) {
           if (useRunahead) Module._runahead_tick(runaheadFrames);

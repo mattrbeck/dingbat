@@ -19,7 +19,7 @@ Gated: replay determinism (`tests/clip_replay_test.nim`), range arithmetic
       tap moves the NEARER marker; portrait, landscape, rotate with the
       picker open.
 - [ ] **Safari** produces .mp4; confirm it plays with audio.
-- [ ] **Rewind off** (or speed mode on): the picker still shows a full strip.
+- [ ] **Rewind off**: the picker still shows a full strip.
 - [ ] **iOS memory**: several minutes with the 6 MB clip cap, no reload or
       JIT demotion; oldest frame still ~a minute back on a GB game.
 - [ ] **Rewind scrubber** (shared film-strip component): drag, tap,

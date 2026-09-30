@@ -849,11 +849,6 @@ type
     render_dirty*: bool
     skip_render*:  bool
     frame_static*: bool
-    # Speed mode: render every (frameskip+1)th frame; a skipped frame leaves
-    # render_dirty accumulated. 0 = off.
-    frameskip*:    int
-    fs_counter*:   int
-    forced_skip*:  bool
     # Debug-UI layer visibility (bits 0-3 = BG0-3, bit 4 = OBJ; 1 = shown).
     # ANDed into the per-scanline enable computation only, so the per-pixel
     # compositing hot path is untouched.
@@ -1326,10 +1321,6 @@ type
     mp2k_hle*:   bool
     # Camelot "Bon" driver HLE (Golden Sun), gs_bon.nim
     gs_bon*:     GsBonHle
-    # Speed mode: every memory access costs 2^underclock times its real
-    # cycles (scaled into the bus waitstate tables, see update_waitcnt)
-    # against an unchanged video/timer clock. 0 = off.
-    underclock*: int
     dma*:        DMA
     serial*:     Serial
     cheats*:     CheatEngine
