@@ -13,6 +13,7 @@ template psg_shl(h: GBA): untyped = 2
 template psg_cgb(h: GBA): bool = true
 template psg_q_length_any(h: GBA): bool = false
 template psg_q_length_defer(h: GBA): bool = false
+template psg_q_backstep(h: GBA): bool = false
 
 const GBA_NO_STEP* = PSG_NO_STEP
 const GBA_OBS_CPU* = PSG_OBS_CPU
@@ -81,6 +82,28 @@ proc ch1_s0_kill_at(t: CycleCount; slow: bool; anchor: uint8): CycleCount =
     if into == 0: return GBA_NO_STEP
     let taken = t + CycleCount(8 - into)
     result = taken + (if (uint32(taken - CycleCount(anchor)) and 15) == 15: 5 else: 1)
+
+template psg_tick(h: GBA): CycleCount = CycleCount(16)
+  ## One APU tick (1 MHz): 4 T-cycles of the GB's clock, 16 of the GBA's.
+
+proc psg_edge(gba: GBA): CycleCount =
+  ## The first edge of the PSG's 1 MHz grid at or after the current cycle.
+  ## A master-on restarts the PSG's dividers on 4 MHz edge `s0_anchor` (mod
+  ## 16; SOUNDCNT_X, apu.nim), and this takes the 1 MHz edges to fall there,
+  ## as the GB's grid restarts at its APU power-on (GbApu.tick_phase). Where
+  ## in the 16 cycles they fall is assumed: nothing the CPU reads on the GBA
+  ## shows a trigger's start-up.
+  let now = gba.scheduler.cycles
+  let past = (now + 16 - CycleCount(gba.apu.channel1.s0_anchor)) and 15
+  if past == 0: now else: now + (16 - past)
+
+proc psg_trigger_deadline(gba: GBA; period: CycleCount;
+                          extra_ticks: int): CycleCount =
+  ## A square channel's first duty step after a trigger: picked up on the
+  ## next 1 MHz edge, then one period plus the start-up delay -- 2 ticks
+  ## from off, 1 on a restart (the GB's gb_trigger_deadline, without CGB
+  ## double speed's snaps).
+  psg_edge(gba) + period + CycleCount(extra_ticks) * psg_tick(gba)
 
 proc ch1_settle*(ch: Channel1; gba: GBA) {.inline.} =
   ## Apply a shift-0 kill that has come due (ch1_s0_kill_at); every reader of

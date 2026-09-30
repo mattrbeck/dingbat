@@ -15,13 +15,14 @@
 #   psg_cgb(h)                CGB-family silicon (GBA: always)
 #   psg_q_length_any(h)       GbQuirks.length_clock_any_nrx4 (GBA: never)
 #   psg_q_length_defer(h)     CGB A/B's deferred wave length stop (GBA: never)
-# and, so far only where the GB model runs (the `when not PSG_AGB` arms):
 #   psg_tick(h), psg_edge(h)  one 1 MHz APU tick; the grid's next edge
-#   psg_trigger_deadline, psg_noise_deadline, psg_noise_grid_up
-#                             a trigger's first step, on that grid
+#   psg_trigger_deadline      a square trigger's first step, on that grid
+#   psg_q_backstep(h)         GbQuirks.square_freq_backstep_halftick
+# and, so far only where the GB model runs (the `when not PSG_AGB` arms):
+#   psg_noise_deadline, psg_noise_grid_up
+#                             a noise trigger's first shift, on that grid
 #   psg_env_trigger_extra, psg_sweep_trigger_extra
 #                             a trigger's phase against the frame sequencer
-#   psg_q_backstep(h)         GbQuirks.square_freq_backstep_halftick
 # and the GBA's ch1_settle / ch1_s0_kill_at (its measured shift-0 law).
 #
 # The GBA instance still runs its own, older model in the places gated
@@ -173,12 +174,11 @@ proc sq_catchup_slow(ch: PsgSquare; h: PsgHost; observer_period: uint32) =
   # delay.
   ch.sample_bit = PSG_DUTY[ch.duty][ch.wave_duty_position]
   ch.next_step += steps * period
+  ch.last_step_at = ch.next_step - period
   when PSG_AGB:
     # The step now pending was armed by the one before it, i.e. one CURRENT
     # period ago.
     ch.arm_delay = uint32(period)
-  else:
-    ch.last_step_at = ch.next_step - period
 
 proc sq_catchup_at(ch: PsgSquare; h: PsgHost; observer_period: uint32) {.inline.} =
   ## Bring the duty position up to the current cycle in closed form; must run
@@ -195,45 +195,42 @@ proc sq_catchup_at(ch: PsgSquare; h: PsgHost; observer_period: uint32) {.inline.
   if ch.next_step > psg_now(h): return   # not due (or never triggered)
   sq_catchup_slow(ch, h, observer_period)
 
-when not PSG_AGB:
-  proc sq_reload_is_now(ch: PsgSquare; h: PsgHost): bool {.inline.} =
-    ## True when a duty step landed on this cycle (the timer is reloading): an
-    ## NR13/NR14 write landing here wins the reload (SameSuite
-    ## channel_1_freq_change_timing); one M-cycle later it leaves the pending
-    ## step alone (channel_1_freq_change). next_step alone will not do: a
-    ## trigger's start delay makes a write two M-cycles after it look like
-    ## one.
-    ch.enabled and ch.last_step_at == psg_now(h)
+proc sq_reload_is_now(ch: PsgSquare; h: PsgHost): bool {.inline.} =
+  ## True when a duty step landed on this cycle (the timer is reloading): an
+  ## NR13/NR14 write landing here wins the reload (SameSuite
+  ## channel_1_freq_change_timing); one M-cycle later it leaves the pending
+  ## step alone (channel_1_freq_change). next_step alone will not do: a
+  ## trigger's start delay makes a write two M-cycles after it look like one.
+  ch.enabled and ch.last_step_at == psg_now(h)
+
+template sq_reload(ch: PsgSquare; h: PsgHost) =
+  ## The write won the reload: the next step is one new period from now.
+  ch.next_step = psg_now(h) + sq_period(ch, h)
+  when PSG_AGB: ch.arm_delay = uint32(sq_period(ch, h))
 
 proc sq_write_freq_lo(ch: PsgSquare; h: PsgHost; val: uint8) =
-  when PSG_AGB:
-    ch.frequency = (ch.frequency and 0x0700'u16) or uint16(val)
-  else:
-    let reload_now = sq_reload_is_now(ch, h)
-    ch.frequency = (ch.frequency and 0x0700'u16) or uint16(val)
-    if reload_now: ch.next_step = psg_now(h) + sq_period(ch, h)
+  let reload_now = sq_reload_is_now(ch, h)
+  ch.frequency = (ch.frequency and 0x0700'u16) or uint16(val)
+  if reload_now: sq_reload(ch, h)
 
 proc sq_write_freq_hi(ch: PsgSquare; h: PsgHost; val: uint8) =
   ## NRx4's frequency bits and length enable; the trigger is the caller's.
-  when PSG_AGB:
-    ch.frequency = (ch.frequency and 0x00FF'u16) or ((uint16(val) and 0x07'u16) shl 8)
-  else:
-    let reload_now = sq_reload_is_now(ch, h)
-    # CGB D/E (GbQuirks.square_freq_backstep_halftick): a non-triggering
-    # write dropping the frequency high bits out of 7 undoes the duty step it
-    # lands within one 2 MHz tick of. `reload_now` covers the on-the-step half
-    # on every revision; this is D/E's extra half tick. Unreachable at single
-    # speed.
-    if psg_q_backstep(h) and (val and 0x80) == 0 and
-       ch.enabled and (ch.frequency and 0x0700'u16) == 0x0700'u16 and
-       (val and 0x07) != 0x07 and not reload_now and
-       ch.last_step_at != PSG_NO_STEP and
-       psg_now(h) - ch.last_step_at == psg_tick(h) div 2:
-      # Only the position moves; the latched sample stays where the undone
-      # step put it. Assumed; no ROM pins this.
-      ch.wave_duty_position = (ch.wave_duty_position + 7) and 7
-    ch.frequency = (ch.frequency and 0x00FF'u16) or ((uint16(val) and 0x07'u16) shl 8)
-    if reload_now: ch.next_step = psg_now(h) + sq_period(ch, h)
+  let reload_now = sq_reload_is_now(ch, h)
+  # CGB D/E (GbQuirks.square_freq_backstep_halftick): a non-triggering write
+  # dropping the frequency high bits out of 7 undoes the duty step it lands
+  # within one 2 MHz tick of. `reload_now` covers the on-the-step half on
+  # every revision; this is D/E's extra half tick. Unreachable at single
+  # speed.
+  if psg_q_backstep(h) and (val and 0x80) == 0 and
+     ch.enabled and (ch.frequency and 0x0700'u16) == 0x0700'u16 and
+     (val and 0x07) != 0x07 and not reload_now and
+     ch.last_step_at != PSG_NO_STEP and
+     psg_now(h) - ch.last_step_at == psg_tick(h) div 2:
+    # Only the position moves; the latched sample stays where the undone
+    # step put it. Assumed; no ROM pins this.
+    ch.wave_duty_position = (ch.wave_duty_position + 7) and 7
+  ch.frequency = (ch.frequency and 0x00FF'u16) or ((uint16(val) and 0x07'u16) shl 8)
+  if reload_now: sq_reload(ch, h)
   psg_nrx4_length(ch, h, val, defer_off = false)
 
 proc sq_trigger(ch: PsgSquare; h: PsgHost) =
@@ -244,14 +241,9 @@ proc sq_trigger(ch: PsgSquare; h: PsgHost) =
   # The latched sample carries too, so a channel that was off stays at 0
   # until its first step.
   if not was_enabled: ch.sample_bit = 0
-  when PSG_AGB:
-    # GBA: a full period from the write.
-    let arm = uint32(sq_period(ch, h))
-    ch.next_step = psg_now(h) + CycleCount(arm)
-    ch.arm_delay = arm
-  else:
-    ch.next_step = psg_trigger_deadline(h, sq_period(ch, h),
-                                        if was_enabled: 1 else: 2)
+  ch.next_step = psg_trigger_deadline(h, sq_period(ch, h),
+                                      if was_enabled: 1 else: 2)
+  when PSG_AGB: ch.arm_delay = uint32(ch.next_step - psg_now(h))
   psg_trigger_envelope(ch, h)
 
 proc sq_write_duty(ch: PsgSquare; val: uint8) =

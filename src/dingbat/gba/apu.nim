@@ -247,6 +247,10 @@ proc apu_rebase*(apu: APU; base: CycleCount) {.inline.} =
   adj(apu.channel2)
   adj(apu.channel3)
   adj(apu.channel4)
+  # last_step_at is in the past; losing a one-cycle tie at a frame boundary
+  # is unobservable (as the GB's apu_rebase).
+  apu.channel1.last_step_at = GBA_NO_STEP
+  apu.channel2.last_step_at = GBA_NO_STEP
   ch1_settle(apu.channel1, apu.gba)
   if apu.channel1.kill_at != GBA_NO_STEP: apu.channel1.kill_at -= base
   if apu.power_on_at != GBA_NO_STEP:

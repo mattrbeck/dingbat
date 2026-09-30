@@ -997,6 +997,10 @@ proc load_psg_state(gba: GBA; r: var Reader) =
   apu.power_on_at = r.read_deadline(now, "apu.power_on_at")
   ch1.sample_bit = r.read_u8() and 1
   apu.channel2.sample_bit = r.read_u8() and 1
+  # Not in the payload: the frame rebase clears it, so it is GBA_NO_STEP at
+  # every boundary a state is written on.
+  ch1.last_step_at = GBA_NO_STEP
+  apu.channel2.last_step_at = GBA_NO_STEP
 
 proc default_psg_state(gba: GBA) =
   ## Rev <= 9: the shift-0 check came from the spare bits (load_apu_state);
@@ -1006,6 +1010,7 @@ proc default_psg_state(gba: GBA) =
   apu.power_on_at = GBA_NO_STEP
   for ch in [PsgSquare(apu.channel1), apu.channel2]:
     ch.sample_bit = PSG_DUTY[ch.duty and 3][ch.wave_duty_position and 7]
+    ch.last_step_at = GBA_NO_STEP
 
 # ---- PSG waveform deadlines <-> scheduler events ----
 #
