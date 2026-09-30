@@ -191,37 +191,14 @@ proc psg_noise_grid_up(gb: GB; t: CycleCount; divisor_code: uint8): CycleCount {
 # already forward-declares apu_div_phase).
 proc apu_div_period*(gb: GB): int {.inline.}
 
-const ENV_TRIGGER_PRECLOCK_SKIP* {.intdefine.} = 1
-  ## 1: a trigger landing in the frame-sequencer step before the envelope
-  ## clock (step 6), taken 4 T-cycles early, does not get that clock: its
-  ## first envelope period is one clock longer. gambatte
-  ## sound/ch2_init_{,reset_}env_counter_timing_* (40 rows, both devices):
-  ## 0 loses `reset_` 11, 13, 14 [dmg] and 15 [cgb], which trigger inside
-  ## step 6 and expect the envelope still at volume 0 after the clock.
-const SWEEP_TRIGGER_LEAD_T_DMG* {.intdefine.} = 4
-const SWEEP_TRIGGER_LEAD_T_CGB* {.intdefine.} = 8
-  ## A trigger within this many T-cycles before a sweep clock (steps 2 and 6)
-  ## misses that clock: the sweep timer starts one clock later. gambatte
-  ## sound/ch1_init_reset_sweep_counter_timing_* (22 rows): 0 loses
-  ## timing_4 [dmg] and timing_10 [cgb], whose triggers sit one NOP before a
-  ## sweep clock and expect the channel still running (no overflow yet) when
-  ## the ROM turns the sweep off.
-
 proc fs_next_edge_in*(gb: GB): int =
   ## Raw scheduler cycles until the frame sequencer's next step runs
   ## (stage `gb.apu.frame_sequencer_stage`), including a pending skipped edge.
   result = apu_div_phase(gb.timer, gb)
   if gb.apu.div_skip: result += apu_div_period(gb)
 
-proc psg_env_trigger_extra(gb: GB): int =
-  ## Extra envelope clocks for a trigger now (ENV_TRIGGER_PRECLOCK_SKIP).
-  when ENV_TRIGGER_PRECLOCK_SKIP == 0:
-    0
-  else:
-    let d = fs_next_edge_in(gb)
-    let lead = 4 shl gb.scheduler.speed
-    let stage = gb.apu.frame_sequencer_stage
-    if (stage == 7 and d > lead) or (stage == 6 and d <= lead): 1 else: 0
+template psg_fs_next_edge_in(h: GB): int = fs_next_edge_in(h)
+template psg_fs_next_stage(h: GB): int = h.apu.frame_sequencer_stage
 
 proc psg_sweep_trigger_extra(gb: GB): uint8 =
   ## Extra sweep clocks for a trigger now (SWEEP_TRIGGER_LEAD_T_*).

@@ -953,7 +953,7 @@ proc default_inflight_state(gba: GBA) =
 # the older sections have no field for: the shift-0 check's state, which revs
 # <= 9 carried in spare bits of channel 1's sweep fields, the master-on
 # stamp PSG_POWER_ON_WINDOW reads (not carried at all before), and the
-# channels' latched duty outputs.
+# channels' latched duty outputs and pending envelope ticks.
 
 proc write_deadline(w: var Writer; at, now: CycleCount) =
   ## An absolute deadline as its distance from the payload's clock, which may
@@ -983,6 +983,9 @@ proc save_psg_state(gba: GBA; w: var Writer) =
   w.write_deadline(apu.power_on_at, now)
   w.write_u8(ch1.sample_bit)
   w.write_u8(apu.channel2.sample_bit)
+  w.write_bool(ch1.env_extra_tick)
+  w.write_bool(apu.channel2.env_extra_tick)
+  w.write_bool(apu.channel4.env_extra_tick)
 
 proc load_psg_state(gba: GBA; r: var Reader) =
   ## Rev >= 10.
@@ -997,6 +1000,9 @@ proc load_psg_state(gba: GBA; r: var Reader) =
   apu.power_on_at = r.read_deadline(now, "apu.power_on_at")
   ch1.sample_bit = r.read_u8() and 1
   apu.channel2.sample_bit = r.read_u8() and 1
+  ch1.env_extra_tick = r.read_bool()
+  apu.channel2.env_extra_tick = r.read_bool()
+  apu.channel4.env_extra_tick = r.read_bool()
   # Not in the payload: the frame rebase clears it, so it is GBA_NO_STEP at
   # every boundary a state is written on.
   ch1.last_step_at = GBA_NO_STEP
@@ -1011,6 +1017,8 @@ proc default_psg_state(gba: GBA) =
   for ch in [PsgSquare(apu.channel1), apu.channel2]:
     ch.sample_bit = PSG_DUTY[ch.duty and 3][ch.wave_duty_position and 7]
     ch.last_step_at = GBA_NO_STEP
+  for ch in [PsgEnvChannel(apu.channel1), apu.channel2, apu.channel4]:
+    ch.env_extra_tick = false
 
 # ---- PSG waveform deadlines <-> scheduler events ----
 #

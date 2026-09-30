@@ -28,6 +28,22 @@ const PSG_DUTY*: array[4, array[8, uint8]] = [
   [0'u8, 1, 1, 1, 1, 1, 1, 0],  # 75%
 ]
 
+const ENV_TRIGGER_PRECLOCK_SKIP* {.intdefine.} = 1
+  ## 1: a trigger landing in the frame-sequencer step before the envelope
+  ## clock (step 6), taken 4 T-cycles early, does not get that clock: its
+  ## first envelope period is one clock longer. gambatte
+  ## sound/ch2_init_{,reset_}env_counter_timing_* (40 rows, both devices):
+  ## 0 loses `reset_` 11, 13, 14 [dmg] and 15 [cgb], which trigger inside
+  ## step 6 and expect the envelope still at volume 0 after the clock.
+const SWEEP_TRIGGER_LEAD_T_DMG* {.intdefine.} = 4
+const SWEEP_TRIGGER_LEAD_T_CGB* {.intdefine.} = 8
+  ## A trigger within this many T-cycles before a sweep clock (steps 2 and 6)
+  ## misses that clock: the sweep timer starts one clock later. gambatte
+  ## sound/ch1_init_reset_sweep_counter_timing_* (22 rows): 0 loses
+  ## timing_4 [dmg] and timing_10 [cgb], whose triggers sit one NOP before a
+  ## sweep clock and expect the channel still running (no overflow yet) when
+  ## the ROM turns the sweep off.
+
 const PSG_WAVE_BANK* = 16
   ## Bytes in one wave RAM bank. The GB has one; the GBA two (SOUND3CNT_L).
 

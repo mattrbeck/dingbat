@@ -12,12 +12,6 @@ const APU_SYNC_AHEAD_BYTES*    = 2048'u32
 const APU_SYNC_BACKSTOP_BYTES* = 16384'u32
 const FRAME_SEQ_RATE*     = 512
 const FRAME_SEQ_PERIOD*   = CPU_CLOCK_SPEED div FRAME_SEQ_RATE
-const PSG_SEQ_SKIP* = 8
-  ## frame_sequencer_stage while a master-on's skipped 512 Hz edge is pending
-  ## (the DMG power-on rule, GbApu.div_skip): that edge makes no step.
-const PSG_SEQ_FIRST* = 9
-  ## frame_sequencer_stage after a master-on with no edge to skip: the next
-  ## edge is step 0.
 # One-pole low-pass coefficient for the optional analog-output filter:
 # alpha = 1 - exp(-2*pi*fc/fs) with fc ~= 12 kHz, fs = 32768 Hz
 const AUDIO_LOWPASS_ALPHA* = 0.90'f32

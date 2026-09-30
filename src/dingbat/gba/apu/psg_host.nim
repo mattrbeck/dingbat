@@ -105,6 +105,25 @@ proc psg_trigger_deadline(gba: GBA; period: CycleCount;
   ## double speed's snaps).
   psg_edge(gba) + period + CycleCount(extra_ticks) * psg_tick(gba)
 
+const PSG_SEQ_SKIP* = 8
+  ## frame_sequencer_stage while a master-on's skipped 512 Hz edge is pending
+  ## (the DMG power-on rule, GbApu.div_skip): that edge makes no step.
+const PSG_SEQ_FIRST* = 9
+  ## frame_sequencer_stage after a master-on with no edge to skip: the next
+  ## edge is step 0.
+
+proc psg_fs_next_edge_in(gba: GBA): int =
+  ## Scheduler cycles to the frame sequencer's next edge (its event). The
+  ## skipped edge after a master-on counts as a step that is not 6 or 7
+  ## (psg_fs_next_stage), which is all its readers ask.
+  int(gba.scheduler.pending_at(etAPUFrameSeq) - gba.scheduler.cycles)
+
+proc psg_fs_next_stage(gba: GBA): int =
+  ## The step the frame sequencer's next edge runs; PSG_SEQ_SKIP and
+  ## PSG_SEQ_FIRST (a master-on's first edges) both lead to step 0.
+  let s = gba.apu.frame_sequencer_stage
+  if s >= PSG_SEQ_SKIP: 0 else: s
+
 proc ch1_settle*(ch: Channel1; gba: GBA) {.inline.} =
   ## Apply a shift-0 kill that has come due (ch1_s0_kill_at); every reader of
   ## the channel's enable runs this first.

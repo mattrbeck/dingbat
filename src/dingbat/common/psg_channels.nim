@@ -18,11 +18,13 @@
 #   psg_tick(h), psg_edge(h)  one 1 MHz APU tick; the grid's next edge
 #   psg_trigger_deadline      a square trigger's first step, on that grid
 #   psg_q_backstep(h)         GbQuirks.square_freq_backstep_halftick
+#   psg_fs_next_edge_in(h), psg_fs_next_stage(h)
+#                             scheduler cycles to the frame sequencer's next
+#                             step, and which step it is
 # and, so far only where the GB model runs (the `when not PSG_AGB` arms):
 #   psg_noise_deadline, psg_noise_grid_up
 #                             a noise trigger's first shift, on that grid
-#   psg_env_trigger_extra, psg_sweep_trigger_extra
-#                             a trigger's phase against the frame sequencer
+#   psg_sweep_trigger_extra   a trigger's phase against the frame sequencer
 # and the GBA's ch1_settle / ch1_s0_kill_at (its measured shift-0 law).
 #
 # The GBA instance still runs its own, older model in the places gated
@@ -98,52 +100,55 @@ proc write_nrx2(ch: PsgEnvChannel; value: uint8) =
   let new_period   = value and 0x07
   if ch.enabled:
     # "Zombie mode": an NRx2 write to a running channel perturbs the live
-    # volume.
-    when PSG_AGB:
-      # GBA: Pan Docs' rule alone -- +1 if old period 0 and still updating,
-      # else +1 if old direction was decrease, then 16 - volume on a
-      # direction flip.
-      if (ch.period == 0 and ch.vol_env_is_updating) or not ch.envelope_add_mode:
-        ch.current_volume += 1
-    else:
-      # Pan Docs' rule is only the `new inc` column. The full increment `d`,
-      # applied before the flip, solved from SameSuite channel_1_volume and
-      # channel_1_nrx2_glitch (and their channel_2 twins); rows old
-      # period/direction, columns new:
-      #
-      #                 | new dec, per 0 | new dec, per != 0 | new inc |
-      #   old per 0 dec |       0        |        -1         |   +1    |
-      #   old per!=0 dec|       0        |         0         |   +2    |
-      #   old per 0 inc |       0        |        +1         |   +1    |
-      #   old per!=0 inc|       0        |         0         |    0    |
-      var d = 0
-      if new_add_mode:
-        d = if ch.period == 0 and ch.vol_env_is_updating: 1
-            elif not ch.envelope_add_mode: 2
-            else: 0
-      elif new_period != 0 and ch.period == 0:
-        d = if ch.envelope_add_mode: 1 else: -1
-      ch.current_volume = uint8((int(ch.current_volume) + d) and 0x0F)
+    # volume. Pan Docs' rule (+1 if old period 0 and still updating, else +2
+    # if old direction was decrease, then 16 - volume on a direction flip) is
+    # only the `new inc` column. The full increment `d`, applied before the
+    # flip, solved from SameSuite channel_1_volume and channel_1_nrx2_glitch
+    # (and their channel_2 twins); rows old period/direction, columns new:
+    #
+    #                 | new dec, per 0 | new dec, per != 0 | new inc |
+    #   old per 0 dec |       0        |        -1         |   +1    |
+    #   old per!=0 dec|       0        |         0         |   +2    |
+    #   old per 0 inc |       0        |        +1         |   +1    |
+    #   old per!=0 inc|       0        |         0         |    0    |
+    var d = 0
+    if new_add_mode:
+      d = if ch.period == 0 and ch.vol_env_is_updating: 1
+          elif not ch.envelope_add_mode: 2
+          else: 0
+    elif new_period != 0 and ch.period == 0:
+      d = if ch.envelope_add_mode: 1 else: -1
+    ch.current_volume = uint8((int(ch.current_volume) + d) and 0x0F)
     if new_add_mode != ch.envelope_add_mode:
       ch.current_volume = 0x10'u8 - ch.current_volume
     ch.current_volume = ch.current_volume and 0x0F
-  when not PSG_AGB:
-    # Envelope-enable glitch: taking the period from zero to non-zero costs
-    # one extra envelope tick at the next odd frame-sequencer stage
-    # (psg_seq_step; SameSuite channel_1_nrx2_speed_change tests 3/4/6/7).
-    if ch.enabled and ch.period == 0 and new_period != 0:
-      ch.env_extra_tick = true
-    elif new_period == 0:
-      ch.env_extra_tick = false
+  # Envelope-enable glitch: taking the period from zero to non-zero costs one
+  # extra envelope tick at the next odd frame-sequencer stage (psg_seq_step;
+  # SameSuite channel_1_nrx2_speed_change tests 3/4/6/7).
+  if ch.enabled and ch.period == 0 and new_period != 0:
+    ch.env_extra_tick = true
+  elif new_period == 0:
+    ch.env_extra_tick = false
   ch.starting_volume   = value shr 4
   ch.envelope_add_mode = new_add_mode
   ch.period            = new_period
   ch.dac_enabled       = (value and 0xF8) != 0
   if not ch.dac_enabled: ch.enabled = false
 
+proc psg_env_trigger_extra(h: PsgHost): int =
+  ## Extra envelope clocks for a trigger now (ENV_TRIGGER_PRECLOCK_SKIP): one
+  ## for a trigger inside step 6's period, or taken within 4 T-cycles of its
+  ## edge.
+  when ENV_TRIGGER_PRECLOCK_SKIP == 0:
+    0
+  else:
+    let d = psg_fs_next_edge_in(h)
+    let lead = 4 shl psg_shl(h)
+    let stage = psg_fs_next_stage(h)
+    if (stage == 7 and d > lead) or (stage == 6 and d <= lead): 1 else: 0
+
 template psg_trigger_envelope(ch: PsgEnvChannel; h: PsgHost) =
-  when PSG_AGB: init_volume_envelope(ch)
-  else:         init_volume_envelope(ch, psg_env_trigger_extra(h))
+  init_volume_envelope(ch, psg_env_trigger_extra(h))
 
 # ---- Square channels (1 and 2) ----
 
@@ -872,15 +877,14 @@ proc psg_seq_step(apu: typeof(PsgHost().apu); h: PsgHost) =
   of 7:
     volume_step(apu.channel1); volume_step(apu.channel2); volume_step(apu.channel4)
   else: discard
-  when not PSG_AGB:
-    if (apu.frame_sequencer_stage and 1) == 1:
-      # Envelope-enable glitch's extra tick; see PsgEnvChannel.env_extra_tick.
-      template extra(ch: untyped) =
-        if ch.env_extra_tick:
-          ch.env_extra_tick = false
-          volume_step(ch)
-      extra(apu.channel1)
-      extra(apu.channel2)
-      extra(apu.channel4)
+  if (apu.frame_sequencer_stage and 1) == 1:
+    # Envelope-enable glitch's extra tick; see PsgEnvChannel.env_extra_tick.
+    template extra(ch: untyped) =
+      if ch.env_extra_tick:
+        ch.env_extra_tick = false
+        volume_step(ch)
+    extra(apu.channel1)
+    extra(apu.channel2)
+    extra(apu.channel4)
   apu.frame_sequencer_stage += 1
   if apu.frame_sequencer_stage > 7: apu.frame_sequencer_stage = 0
