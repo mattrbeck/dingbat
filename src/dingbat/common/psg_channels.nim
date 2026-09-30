@@ -27,9 +27,13 @@
 #   psg_sweep_trigger_extra   a trigger's phase against the frame sequencer
 # and the GBA's ch1_settle / ch1_s0_kill_at (its measured shift-0 law).
 #
-# The GBA instance still runs its own, older model in the places gated
-# `when PSG_AGB` below; the GB one is the model SameSuite, blargg and
-# gambatte pin. Each gate says what differs.
+# `when PSG_AGB` gates the places the GBA instance runs its own model: the
+# sweep unit's checks, which the AGB SP measured to differ in GBA mode from
+# the GB's (and from the same console running a GB cartridge); the
+# scheduler tie-break each core inherited from its old per-period events;
+# and the hardware only the GBA has (the second wave bank, the forced 75%
+# level). Everything else is the GB model SameSuite, blargg and gambatte
+# pin. Each gate says what differs.
 
 # ---- Timing ----
 
@@ -353,20 +357,23 @@ proc sweep_step(ch: PsgSweepSquare; h: PsgHost) =
       when PSG_AGB: ch.s0_slow = false   # a calculation has run (ch1_s0_kill_at)
       let calc = ch1_sweep_calc(ch, h, psg_now(h))
       if calc <= 0x07FF and ch.shift > 0:
+        # The sweep's frequency write races the timer reload like an
+        # NR13/NR14 write (sq_reload_is_now); at $7ff a step lands every
+        # M-cycle, so the sweep tick always coincides (SameSuite
+        # channel_1_sweep_restart round 1).
+        let reload_now = sq_reload_is_now(ch, h)
+        ch.frequency_shadow = calc
+        ch.frequency        = calc
+        if reload_now: sq_reload(ch, h)
         when PSG_AGB:
-          ch.frequency_shadow = calc
-          ch.frequency        = calc
-          # GBA: the second calculation, for its overflow check, at once.
+          # AGB-native, measured: the second calculation, for its overflow
+          # check, runs at once on the new shadow (AGB SP page 1F SWEEP2:
+          # 2018/s7 dies at tick 1, the tick check >= 2048). A GB cartridge on
+          # the same console runs the GB's pipeline below -- the AGS GB-slot
+          # page is byte-identical to the MGB's (docs/hwprobe-questions.md
+          # row 16) -- so this is the GBA mode's own, not a port to make.
           discard ch1_sweep_calc(ch, h, psg_now(h))
         else:
-          # The sweep's frequency write races the timer reload like an
-          # NR13/NR14 write (sq_reload_is_now); at $7ff a step lands every
-          # M-cycle, so the sweep tick always coincides (SameSuite
-          # channel_1_sweep_restart round 1).
-          let reload_now = sq_reload_is_now(ch, h)
-          ch.frequency_shadow = calc
-          ch.frequency        = calc
-          if reload_now: ch.next_step = psg_now(h) + sq_period(ch, h)
           # ...and the check on that value is 7 M-cycles away
           # (GB_SWEEP_CHECK_DELAY).
           ch.sweep_check_at = psg_now(h) + (GB_SWEEP_CHECK_DELAY shl psg_shl(h))
