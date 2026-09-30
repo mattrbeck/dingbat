@@ -94,6 +94,20 @@ proc cpu_read_u16(cpu: GbCpu; gb: GB): uint16 {.inline.} =
 # CB_PREFIXED is a const built in cb_opcodes.nim, which gb.nim must include
 # before this file (a const cannot be forward-declared).
 
+# A taken backward branch marks a candidate idle-loop head for the next
+# fetch (GB_IDLE_SKIP, cpu.nim). `cpu.pc` is past the branch here.
+template wl_jr_back(cpu: GbCpu; offset: int8) =
+  when GB_IDLE_SKIP != 0:
+    if offset <= -2'i8:
+      cpu.wl_edge = true
+      cpu.wl_from = cpu.pc - 2
+
+template wl_jp_back(cpu: GbCpu; target: uint16) =
+  when GB_IDLE_SKIP != 0:
+    if target <= cpu.pc - 3:
+      cpu.wl_edge = true
+      cpu.wl_from = cpu.pc - 3
+
 # Dispatch table
 
 var UNPREFIXED* = [
@@ -257,6 +271,7 @@ var UNPREFIXED* = [
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
     let offset = cast[int8](mem_read(gb.memory, gb, int(cpu.pc))); cpu_inc_pc(cpu)
+    wl_jr_back(cpu, offset)
     cpu.pc = uint16(int(cpu.pc) + int(offset))
     12,
 
@@ -311,6 +326,7 @@ var UNPREFIXED* = [
     cpu_inc_pc(cpu)
     let offset = cast[int8](mem_read(gb.memory, gb, int(cpu.pc))); cpu_inc_pc(cpu)
     if not cpu.fz:
+      wl_jr_back(cpu, offset)
       cpu.pc = uint16(int(cpu.pc) + int(offset))
       return 12
     8,
@@ -375,6 +391,7 @@ var UNPREFIXED* = [
     cpu_inc_pc(cpu)
     let offset = cast[int8](mem_read(gb.memory, gb, int(cpu.pc))); cpu_inc_pc(cpu)
     if cpu.fz:
+      wl_jr_back(cpu, offset)
       cpu.pc = uint16(int(cpu.pc) + int(offset))
       return 12
     8,
@@ -433,6 +450,7 @@ var UNPREFIXED* = [
     cpu_inc_pc(cpu)
     let offset = cast[int8](mem_read(gb.memory, gb, int(cpu.pc))); cpu_inc_pc(cpu)
     if not cpu.fc:
+      wl_jr_back(cpu, offset)
       cpu.pc = uint16(int(cpu.pc) + int(offset))
       return 12
     8,
@@ -492,6 +510,7 @@ var UNPREFIXED* = [
     cpu_inc_pc(cpu)
     let offset = cast[int8](mem_read(gb.memory, gb, int(cpu.pc))); cpu_inc_pc(cpu)
     if cpu.fc:
+      wl_jr_back(cpu, offset)
       cpu.pc = uint16(int(cpu.pc) + int(offset))
       return 12
     8,
@@ -1097,6 +1116,7 @@ var UNPREFIXED* = [
     cpu_inc_pc(cpu)
     let u16 = cpu_read_u16(cpu, gb)
     if not cpu.fz:
+      wl_jp_back(cpu, u16)
       cpu.pc = u16
       return 16
     12,
@@ -1104,7 +1124,9 @@ var UNPREFIXED* = [
   # 0xC3 JP u16
   proc(cpu: GbCpu; gb: GB): int =
     cpu_inc_pc(cpu)
-    cpu.pc = cpu_read_u16(cpu, gb)
+    let u16 = cpu_read_u16(cpu, gb)
+    wl_jp_back(cpu, u16)
+    cpu.pc = u16
     16,
 
   # 0xC4 CALL NZ,u16
@@ -1157,6 +1179,7 @@ var UNPREFIXED* = [
     cpu_inc_pc(cpu)
     let u16 = cpu_read_u16(cpu, gb)
     if cpu.fz:
+      wl_jp_back(cpu, u16)
       cpu.pc = u16
       return 16
     12,
@@ -1219,6 +1242,7 @@ var UNPREFIXED* = [
     cpu_inc_pc(cpu)
     let u16 = cpu_read_u16(cpu, gb)
     if not cpu.fc:
+      wl_jp_back(cpu, u16)
       cpu.pc = u16
       return 16
     12,
@@ -1278,6 +1302,7 @@ var UNPREFIXED* = [
     cpu_inc_pc(cpu)
     let u16 = cpu_read_u16(cpu, gb)
     if cpu.fc:
+      wl_jp_back(cpu, u16)
       cpu.pc = u16
       return 16
     12,

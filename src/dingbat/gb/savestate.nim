@@ -1080,6 +1080,9 @@ proc load_sgb_state(s: SgbState; r: var Reader) =
 # expect_tag on the next section (tests/savestate_compat_test.nim).
 
 proc gb_state_payload(gb: GB; in_process = false): string =
+  # A deferred mode 3 is run first: the line's pixels and tdsel_addr are in
+  # the state (fifo_lazy_sync).
+  fifo_sync(gb)
   var w = Writer()
   save_cpu_state(gb.cpu, w)
   save_irq_state(gb.interrupts, w)

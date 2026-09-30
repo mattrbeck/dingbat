@@ -144,6 +144,8 @@ method reset_render_scratch*(ppu: GbFifoPpu) =
   fifo_clear(ppu.fifo_sprite)
   ppu.fetch_counter = 0
   ppu.fetcher_x = 0
+  # A deferred mode 3 belongs to the machine the state replaces.
+  ppu.lazy_end = 0
   ppu.scx_fine = 0
   when SCX_FINE_LATCH_LIVE:
     ppu.scx_latch_until = -1'i32
@@ -2180,9 +2182,249 @@ when M3_PIPE_LEAD_ANY:
       fifo_pipeline_dot(ppu, gb)
       inc guard
 
+# Mode 3's steady state, stripped. Once the head's throw-away fetch and the
+# fine-scroll latch are behind it, a line with no object, window start or
+# special dot in reach runs only the BG fetcher and the shifter: the same
+# state changes as fifo_pipeline_dot, dot for dot, without the tests for
+# everything that cannot happen. A span is one tick's dots, or a deferred
+# stretch replayed before anything can see it (PLAIN_LAZY), so every register
+# write still lands between the dots it lands between on the general path.
+# -d:gb_plaincheck runs both on every tick's span and compares the PPU;
+# -d:gb_spancheck compares a replay's eight-dot blocks against single dots.
+const PLAIN_SPAN* {.intdefine.} = 1
+const PLAIN_SPAN_ON = PLAIN_SPAN != 0 and M3_THROWAWAY_DOTS == 4 and
+  SCX_STORE_STALL_DOTS == 0 and not STAT_SET_LANDING_EVAL and
+  not (STAT_IRQ_SPLIT and M0_LOOKAHEAD_REACHABLE) and BG_EN_AT_MIX != 0
+
+proc fifo_plain_ok(ppu: GbFifoPpu; gb: GB; n: int): bool {.inline.} =
+  ## May the next `n` dots take fifo_plain_span? Each term rules out one
+  ## branch of the general dot that the span leaves out.
+  let lx_end = ppu.lx + int32(n)
+  let cc = ppu.cycle_counter
+  result = ppu.m3_delay == 0 and ppu.dropped_first_fetch and
+    not ppu.head_cycle and ppu.smooth_scroll_sampled and
+    not ppu.fetching_sprite and ppu.fifo_sprite.size == 0 and
+    not ppu.fetching_window and ppu.fetch_counter >= 0 and
+    lx_end < ppu.m3_retire_lx and
+    (ppu.win_lx < ppu.lx or ppu.win_lx > lx_end) and
+    (not obj_fetch_on(ppu) or ppu.sprites.len == 0 or
+     lx_end + 8 < int32(ppu.sprites[0].x))
+  when WIN_CHECK_DEFER_ANY:
+    result = result and (ppu.win_check_dot < cc or ppu.win_check_dot >= cc + int32(n))
+  when WIN_EN_REVOKE_ANY:
+    result = result and ppu.win_defer == 0'u8
+  when CGB_MAP_ANY:
+    result = result and cc >= ppu.map_dot
+  when CGB_TDSEL_ANY:
+    result = result and cc > ppu.tdsel_dot
+
+proc fifo_plain_span(ppu: GbFifoPpu; gb: GB; n: int; blocks = true) =
+  ## `n` dots of tick_bg_fetcher + tick_shifter under fifo_plain_ok.
+  let row = GB_WIDTH * int(ppu.ly)
+  # fifo_mix with an empty OBJ FIFO: sprite_wins refuses colour 0, so the
+  # pixel is the BG entry through LCDC.0 (BG_EN_AT_MIX) and its palette. The
+  # inputs cannot change inside a span (a write ends it). SGB colours per cell
+  # and takes the general mixer.
+  let native = gb.cgb_native
+  let bg_on = bg_display(ppu) or native
+  let sgb = ppu.sgb_attr != nil
+  template emit() =
+    let bg_px = fifo_shift(ppu.fifo)
+    if ppu.lx >= 0:
+      when MIXER_DOT_LAG != 0:
+        ppu.mix[ppu.lx and (MIX_HOLD - 1)] = GbMixHold(bg: bg_px, sp: GbPixel())
+      if sgb:
+        ppu.framebuffer[row + int(ppu.lx)] =
+          fifo_mix(ppu, gb, bg_px, GbPixel(), ppu.lx)
+      else:
+        let c = if bg_on: bg_px.color else: 0'u8
+        let final = if native: int(c) else: int(ppu.bgp[c])
+        let o = (int(bg_px.palette) * 4 + final) * 2
+        ppu.framebuffer[row + int(ppu.lx)] =
+          uint16(ppu.pram[o]) or (uint16(ppu.pram[o + 1]) shl 8)
+    inc ppu.lx
+  template get_tile() =
+    let m = if (ppu.lcd_control and 0x08'u8) == 0: 0x1800 else: 0x1C00
+    ppu.fetch_scy = ppu.scy
+    let o = ((ppu.fetcher_x + ppu.scx_tile) and 0x1F) +
+            (((int(ppu.ly) + int(ppu.scy)) shr 3) * 32) and 0x3FF
+    ppu.tile_num   = ppu.vram[0][m + o]
+    ppu.tile_attrs = ppu.vram[1][m + o]
+  template get_data(low_plane: bool): uint8 =
+    let sel = bg_window_tile_data(ppu) != 0
+    let tile_num = if sel: int(ppu.tile_num)
+                   else: int(cast[int8](ppu.tile_num))
+    let tile_ptr = (if sel: 0x0000 else: 0x1000) + 16 * tile_num
+    let bank_num = int((ppu.tile_attrs and 0b0000_1000) shr 3)
+    var tile_row = if gb.quirks.scy_fetch_latch:
+                     (int(ppu.ly) + int(ppu.fetch_scy)) and 7
+                   else:
+                     (int(ppu.ly) + int(ppu.scy)) and 7
+    if (ppu.tile_attrs and 0b0100_0000) != 0: tile_row = 7 - tile_row
+    let off = tile_ptr + tile_row * 2 + (if low_plane: 0 else: 1)
+    when CGB_TDSEL_GLITCH:
+      if sel: ppu.tdsel_addr = int32(off or (bank_num shl TDSEL_ADDR_BANK))
+    ppu.vram[bank_num][off]
+  var left = n
+  while left > 0:
+    # The steady cycle, eight dots from a push: the shifter drains the seven
+    # pixels left while the fetcher reads the next tile, which the Push step
+    # lands on the dot the FIFO empties (and which pops one). Exact per dot;
+    # only the dispatch is gone.
+    if blocks and left >= 8 and ppu.fetch_counter == 0 and ppu.fifo.size == 7:
+      for _ in 0 ..< 7: emit()
+      get_tile()
+      ppu.tile_data_low = get_data(true)
+      ppu.tile_data_high = get_data(false)
+      discard try_push_bg_pixels(ppu, gb)
+      emit()
+      ppu.cycle_counter += 8
+      left -= 8
+      continue
+    case FETCHER_ORDER[ppu.fetch_counter]
+    of fsGetTile:
+      get_tile()
+      inc ppu.fetch_counter
+    of fsGetTileDataLow:
+      ppu.tile_data_low = get_data(true)
+      inc ppu.fetch_counter
+    of fsGetTileDataHigh:
+      ppu.tile_data_high = get_data(false)
+      inc ppu.fetch_counter
+      if try_push_bg_pixels(ppu, gb): ppu.fetch_counter = 0
+    of fsPushPixel:
+      if try_push_bg_pixels(ppu, gb): ppu.fetch_counter = 0
+    of fsSleep:
+      inc ppu.fetch_counter
+    if ppu.fifo.size > 0: emit()
+    ppu.cycle_counter += 1
+    dec left
+
+when defined(gb_plaincheck) or defined(gb_spancheck):
+  type PlainSnap = object
+    p: GbFifoPpu
+    line: array[GB_WIDTH, uint16]
+  var plain_checked*, plain_bad*: int
+  proc plain_take(ppu: GbFifoPpu; s: var PlainSnap) =
+    if s.p == nil: new(s.p)
+    for name, dst, src in fieldPairs(s.p[], ppu[]):
+      when name notin ["vram", "framebuffer", "sprite_table", "scanline_color_vals"]:
+        dst = src
+    let row = GB_WIDTH * int(ppu.ly)
+    for i in 0 ..< GB_WIDTH: s.line[i] = ppu.framebuffer[row + i]
+  proc plain_put(ppu: GbFifoPpu; s: PlainSnap) =
+    for name, dst, src in fieldPairs(ppu[], s.p[]):
+      when name notin ["vram", "framebuffer", "sprite_table", "scanline_color_vals"]:
+        dst = src
+    let row = GB_WIDTH * int(ppu.ly)
+    for i in 0 ..< GB_WIDTH: ppu.framebuffer[row + i] = s.line[i]
+  proc plain_diff(ppu: GbFifoPpu; s: PlainSnap): string =
+    for name, a, b in fieldPairs(ppu[], s.p[]):
+      when name notin ["vram", "framebuffer", "sprite_table", "scanline_color_vals"]:
+        if a != b: return name
+    let row = GB_WIDTH * int(ppu.ly)
+    for i in 0 ..< GB_WIDTH:
+      if ppu.framebuffer[row + i] != s.line[i]: return "pixel " & $i
+    ""
+  var plain_s0, plain_sf: PlainSnap
+  import std/exitprocs
+  addExitProc(proc() =
+    stderr.writeLine "plaincheck spans=", plain_checked, " bad=", plain_bad)
+
+const PLAIN_LAZY* {.intdefine.} = 1
+  ## Deferred mode 3: a plain span longer than the tick is not run at all
+  ## until something could see it or change what it reads; the tick only moves
+  ## the dot, as it does across modes 0-2. fifo_lazy_sync replays the dots
+  ## with fifo_plain_span, which reads nothing but the PPU's own state, VRAM
+  ## and palettes, all of which sync before they change.
+const PLAIN_LAZY_ON* = PLAIN_SPAN_ON and PLAIN_LAZY != 0
+const PLAIN_LAZY_MIN = 8'i32   # fewer dots than this past the tick: run them
+
+proc fifo_plain_horizon(ppu: GbFifoPpu): int32 {.inline.} =
+  ## The most dots fifo_plain_ok accepts from here, each term the bound its
+  ## own test puts on `n`.
+  result = ppu.m3_retire_lx - ppu.lx - 1
+  if ppu.win_lx >= ppu.lx: result = min(result, ppu.win_lx - ppu.lx - 1)
+  if obj_fetch_on(ppu) and ppu.sprites.len > 0:
+    result = min(result, int32(ppu.sprites[0].x) - 9 - ppu.lx)
+  when WIN_CHECK_DEFER_ANY:
+    if ppu.win_check_dot >= ppu.cycle_counter:
+      result = min(result, ppu.win_check_dot - ppu.cycle_counter)
+
+when defined(gb_lazypoison):
+  # Check build: while deferred, the pipeline's own fields hold garbage, so a
+  # reader that should have synced first reads nonsense (or trips a bounds
+  # check) instead of plausible stale values.
+  type LazyHeld = object
+    lx: int32
+    fetch_counter: int
+    fetcher_x: int
+    fifo: GbPixelFifo
+    mix: array[MIX_HOLD, GbMixHold]
+    tile_num, tile_attrs, tile_data_low, tile_data_high, fetch_scy: uint8
+    tdsel_addr: int32
+  var lazy_held: LazyHeld
+
+proc fifo_lazy_sync*(ppu: GbFifoPpu; gb: GB) {.noinline.} =
+  ## Run the dots deferred since `lazy_dot`, leaving the pipeline where the
+  ## general path would have it on this dot.
+  let now = ppu.cycle_counter
+  when defined(gb_lazypoison):
+    ppu.lx = lazy_held.lx
+    ppu.fetch_counter = typeof(ppu.fetch_counter)(lazy_held.fetch_counter)
+    ppu.fetcher_x = lazy_held.fetcher_x
+    ppu.fifo = lazy_held.fifo
+    ppu.mix = lazy_held.mix
+    ppu.tile_num = lazy_held.tile_num
+    ppu.tile_attrs = lazy_held.tile_attrs
+    ppu.tile_data_low = lazy_held.tile_data_low
+    ppu.tile_data_high = lazy_held.tile_data_high
+    ppu.fetch_scy = lazy_held.fetch_scy
+    ppu.tdsel_addr = lazy_held.tdsel_addr
+  ppu.cycle_counter = ppu.lazy_dot
+  ppu.lazy_end = 0
+  when defined(gb_spancheck):
+    # Blocks against dot-by-dot over the same replay.
+    plain_take(ppu, plain_s0)
+    fifo_plain_span(ppu, gb, int(now - ppu.lazy_dot), blocks = false)
+    plain_take(ppu, plain_sf)
+    plain_put(ppu, plain_s0)
+    fifo_plain_span(ppu, gb, int(now - ppu.lazy_dot))
+    inc plain_checked
+    let d = plain_diff(ppu, plain_sf)
+    if d.len > 0:
+      inc plain_bad
+      if plain_bad <= 20: stderr.writeLine "SPANCHECK ly=", ppu.ly, " field=", d
+  else:
+    fifo_plain_span(ppu, gb, int(now - ppu.lazy_dot))
+
+proc fifo_lazy_enter(ppu: GbFifoPpu; gb: GB; remaining: int; h: int32) =
+  ppu.lazy_dot = ppu.cycle_counter
+  ppu.lazy_end = ppu.cycle_counter + h
+  ppu.cycle_counter += int32(remaining)
+  when defined(gb_lazypoison):
+    lazy_held = LazyHeld(lx: ppu.lx, fetch_counter: int(ppu.fetch_counter),
+      fetcher_x: ppu.fetcher_x, fifo: ppu.fifo, mix: ppu.mix,
+      tile_num: ppu.tile_num, tile_attrs: ppu.tile_attrs,
+      tile_data_low: ppu.tile_data_low, tile_data_high: ppu.tile_data_high,
+      fetch_scy: ppu.fetch_scy, tdsel_addr: ppu.tdsel_addr)
+    ppu.lx = 100_000
+    ppu.fetch_counter = typeof(ppu.fetch_counter)(90)
+    ppu.fetcher_x = 1 shl 24
+    ppu.fifo.size = 99; ppu.fifo.head = 1 shl 20; ppu.fifo.tail = -7
+    for i in 0 ..< MIX_HOLD:
+      ppu.mix[i] = GbMixHold(bg: GbPixel(color: 3, palette: 7, obj_to_bg: 1),
+                             sp: GbPixel(color: 2, palette: 5, obj_to_bg: 1))
+    ppu.tile_num = 0xA5; ppu.tile_attrs = 0x5A
+    ppu.tile_data_low = 0x3C; ppu.tile_data_high = 0xC3; ppu.fetch_scy = 0x77
+    ppu.tdsel_addr = 0x1234567
+
 proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
   ## Everything the PPU can do in a span that is not a pure idle skip; the
   ## idle case inlines into fifo_tick.
+  gb.wl_mark = gb.scheduler.cycles
+  when PLAIN_LAZY_ON:
+    if ppu.lazy_end != 0: fifo_lazy_sync(ppu, gb)
   if lcd_enabled(ppu):
     var remaining = cycles
     when STAT_IRQ_SPLIT and (STAT_M0_LEAD_DOMAIN or M0_LOOKAHEAD_REACHABLE):
@@ -2231,6 +2473,40 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
           let px_lead = ppu.m0_source_lead(lead) - int32(ppu.m3_hold)
           let m0_hook_lx = if px_lead > 0: ppu.m3_retire_lx - px_lead
                            else: high(int32)
+        when PLAIN_SPAN_ON:
+          if remaining > 0 and fifo_plain_ok(ppu, gb, remaining):
+            when defined(gb_plaincheck):
+              let cc0 = ppu.cycle_counter
+              plain_take(ppu, plain_s0)
+              fifo_plain_span(ppu, gb, remaining)
+              plain_take(ppu, plain_sf)
+              plain_put(ppu, plain_s0)
+              # The general dots below, over the same span, are the ones kept.
+              var left = remaining
+              while left > 0 and not fetcher_retired(ppu):
+                when WIN_CHECK_DEFER_ANY:
+                  if ppu.cycle_counter == ppu.win_check_dot: win_check_now(ppu, gb)
+                fifo_pipeline_dot(ppu, gb)
+                ppu.cycle_counter += 1
+                dec left
+              inc plain_checked
+              let d = plain_diff(ppu, plain_sf)
+              if d.len > 0 or left != 0:
+                inc plain_bad
+                if plain_bad <= 20:
+                  stderr.writeLine "PLAINCHECK ly=", ppu.ly, " dot=", cc0,
+                    " n=", remaining, " left=", left, " field=", d
+            else:
+              when PLAIN_LAZY_ON:
+                let h = fifo_plain_horizon(ppu)
+                if h >= int32(remaining) + PLAIN_LAZY_MIN and ppu.sgb_attr == nil:
+                  fifo_lazy_enter(ppu, gb, remaining, h)
+                else:
+                  fifo_plain_span(ppu, gb, remaining)
+              else:
+                fifo_plain_span(ppu, gb, remaining)
+            remaining = 0
+            continue
         while remaining > 0 and not fetcher_retired(ppu):
           when STAT_IRQ_SPLIT and M0_LOOKAHEAD_REACHABLE:
             if ppu.lx >= m0_hook_lx and ppu.irq_mode == 3 and
@@ -2573,6 +2849,12 @@ proc fifo_tick*(ppu: GbFifoPpu; gb: GB; cycles: int) {.inline.} =
     # entry, as the loop does.
     if next <= target and
        (m != 1 or ppu.cycle_counter > LYC_RELATCH_DOT):
+      ppu.cycle_counter = next
+      return
+  elif PLAIN_LAZY_ON:
+    # A deferred mode 3 costs one compare a tick, as an idle span does.
+    let next = ppu.cycle_counter + int32(cycles)
+    if next <= ppu.lazy_end:
       ppu.cycle_counter = next
       return
   fifo_tick_slow(ppu, gb, cycles)

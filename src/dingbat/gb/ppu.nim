@@ -220,6 +220,7 @@ when defined(gb_m3_len):
 proc ppu_blank_frame*(ppu: GbPpu; gb: GB) =
   ## Push a frame the PPU did not draw: the panel shows white with the PPU
   ## switched off.
+  fifo_sync(gb)
   let blank = if gb.cgb_enabled: 0x7FFF'u16 else: DMG_COLORS[0]
   for i in 0 ..< ppu.framebuffer.len: ppu.framebuffer[i] = blank
   ppu.frame = true
@@ -2192,6 +2193,7 @@ proc ppu_start_hdma*(ppu: GbPpu; gb: GB; val: uint8) =
 # GBMicrotest vblank_int_if_c, lyc1_int_if_edge_c). LCDC's byte moves and only
 # its STAT effect is held back (stat_write_pending).
 proc ppu_write_machinery*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
+  fifo_sync(gb)
   case idx
   of 0xFF41:
     ppu.lcd_status = (ppu.lcd_status and 0b1000_0111'u8) or (val and 0b0111_1000'u8)
@@ -2237,9 +2239,11 @@ proc ppu_defer_machinery_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
 # (mem_tick_ppu_latched). Each is only what the write does to the pixel
 # pipeline; the parts that do not move stay in ppu_write.
 proc ppu_store_scy*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
+  fifo_sync(gb)
   ppu.scy = val
 
 proc ppu_store_scx*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
+  fifo_sync(gb)
   when SCX_STORE_STALL_DOTS != 0:
     let old_scx = ppu.scx
   ppu.scx = val
@@ -2251,6 +2255,7 @@ proc ppu_store_scx*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
       fifo_scx_store_stall(gb.fifo_ppu, old_scx)
 
 proc ppu_store_wx*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
+  fifo_sync(gb)
   ppu.wx = val
   if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
 
@@ -2306,6 +2311,7 @@ proc win_check_schedule*(ppu: GbPpu; gb: GB; dots: int32) {.inline.} =
   ppu.win_check_dot = at
 
 proc ppu_store_wy*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
+  fifo_sync(gb)
   ppu.wy = val
 
 proc ppu_latch_wy*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
@@ -2315,6 +2321,7 @@ proc ppu_latch_wy*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
   ## cleared entering it. Split from ppu_store_wy because the CGB takes the
   ## register and the latch at different latencies (CGB_WY_LATENCY,
   ## CGB_WY_LATCH_LATENCY); `ppu.ly` is read here for that reason.
+  fifo_sync(gb)
   when WIN_CHECK_DEFER_ANY:
     if gb.fifo_ppu != nil and win_check_defer(gb) != 0: return
   if ppu.ly == val and (ppu.lcd_status and 3'u8) != 1'u8 and ppu.lcd_enabled and
@@ -2324,6 +2331,7 @@ proc ppu_latch_wy*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
     if gb.fifo_ppu != nil: fifo_arm_window(gb.fifo_ppu)
 
 proc ppu_store_lcdc*(ppu: GbPpu; gb: GB; val: uint8) {.inline.} =
+  fifo_sync(gb)
   # LCDC.2 is read twice by an object fetch, once per bitplane: the change's
   # dot goes into the history obj_height_at walks, and a fetch whose high
   # plane is not read yet is redone. LCDC.4 is read by a background bitplane
@@ -2552,6 +2560,7 @@ proc ppu_read*(ppu: GbPpu; gb: GB; idx: int): uint8 =
   else: 0xFF'u8
 
 proc ppu_write*(ppu: GbPpu; gb: GB; idx: int; val: uint8) =
+  fifo_sync(gb)
   case idx
   of 0x8000..0x9FFF: ppu.vram[ppu.vram_bank][idx - 0x8000] = val
   of 0xFE00..0xFE9F: ppu.sprite_table[idx - 0xFE00] = val

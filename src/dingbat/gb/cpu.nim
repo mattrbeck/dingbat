@@ -2,7 +2,7 @@
 
 proc new_gb_cpu*(): GbCpu =
   GbCpu(pc: 0, sp: 0, ime: false, halted: false, halt_bug: false,
-        locked: false, stopped: false, cached_hl: -1)
+        locked: false, stopped: false, cached_hl: -1, wl_head: -1)
 
 proc skip_boot*(cpu: GbCpu; gb: GB) =
   # Registers at PC=0x100 per model (mooneye boot_regs-*, misc/boot_regs-*;
@@ -220,6 +220,7 @@ when HDMA_EDGE_BEATS_DISPATCH != 0:
   proc hdma_edge_lookahead(gb: GB) {.noinline.} =
     ## HDMA_EDGE_BEATS_DISPATCH: mode 3 retiring on this very dot raises the
     ## HBlank request now, and it takes the bus ahead of the dispatch.
+    fifo_sync(gb)
     if gb.ppu.hdma_active and not gb.ppu.hdma_block_due and
        gb.fifo_ppu != nil and (gb.ppu.lcd_status and 3'u8) == 3'u8 and
        fetcher_retired(gb.fifo_ppu) and gb.fifo_ppu.m3_hold == 0:
@@ -438,6 +439,20 @@ when STAT_M2_EARLY and M2_LEAD_HALT_BLIND:
       m2_lead_active(gb) and ppu.m2_early and
       ppu.cycle_counter >= ppu.m2_early_dot(gb)
 
+template halt_lead_live(gb: GB): bool =
+  ## Is this halted M-cycle the head of a CGB halt, whose PPU half is held
+  ## back (CGB_HALT_PPU_LEAD)? Shared with wl_halt_skip.
+  gb.cgb_enabled and
+    gb.cpu.halt_ppu_debt < int32(CGB_HALT_PPU_LEAD_DOTS shr gb.memory.current_speed) and
+    (when CGB_HALT_LEAD_SKIP_LYC0 != 0:
+       not (gb.ppu.lyc == 0'u8 and (gb.ppu.lcd_status and 0x40'u8) != 0'u8)
+     else: true) and
+    (when CGB_HALT_LEAD_LYC_ONLY != 0:
+       # Experiment: is the lead the LYC comparator's alone, absent for a
+       # mode-sourced STAT edge (gambatte halt/m0*_m0stat_scx*)?
+       (gb.ppu.lcd_status and 0x38'u8) == 0'u8
+     else: true)
+
 proc cpu_halt_tick(gb: GB): bool {.inline.} =
   ## One halted M-cycle, answering "does it end with the CPU awake". The whole
   ## M-cycle is spent either way; only the latch point moves.
@@ -452,16 +467,7 @@ proc cpu_halt_tick(gb: GB): bool {.inline.} =
     # not carry the lead: daid ppu_scanline_bgp, whose wake is LYC = 0, is
     # exact only without it; that the lead holds on every other line is
     # assumed; no ROM pins it. Tested last so its loads run once per halt.
-    if gb.cgb_enabled and
-       gb.cpu.halt_ppu_debt < int32(CGB_HALT_PPU_LEAD_DOTS shr gb.memory.current_speed) and
-       (when CGB_HALT_LEAD_SKIP_LYC0 != 0:
-          not (gb.ppu.lyc == 0'u8 and (gb.ppu.lcd_status and 0x40'u8) != 0'u8)
-        else: true) and
-       (when CGB_HALT_LEAD_LYC_ONLY != 0:
-          # Experiment: is the lead the LYC comparator's alone, absent for a
-          # mode-sourced STAT edge (gambatte halt/m0*_m0stat_scx*)?
-          (gb.ppu.lcd_status and 0x38'u8) == 0'u8
-        else: true):
+    if halt_lead_live(gb):
       let mdots = int32(4 shr gb.memory.current_speed)
       let lead  = int32(CGB_HALT_PPU_LEAD_DOTS shr gb.memory.current_speed)
       # What the head holds back is exactly what the wake pays.
@@ -648,6 +654,242 @@ when STOP_OPERAND_LATCH != 0:
     gb.stop_op_latch = 0
     cpu_exec_fetched(cpu, gb, opcode)
 
+# ==================== IDLE-LOOP SKIP ====================
+# A loop that polls memory until an interrupt or the PPU changes it runs the
+# same iteration over and over: same registers at the head, no writes, the
+# same reads answering the same values. Once one iteration has been seen to
+# repeat another, and every read the body can make is of something that only
+# changes at a scheduler event, a PPU stop or a timer overflow, the
+# iterations up to the next such point are replicas, and the machine is
+# advanced over them in one step (mem_tick_components, as the iterations'
+# own M-cycles would have). A halted CPU is advanced the same way up to the
+# same horizon. -d:gb_idlecheck runs the iterations instead and checks they
+# came back to the head unchanged on the cycle the skip would have landed.
+
+type WlScan = object
+  ok: bool
+  period: int          # CPU cycles of the straight-line iteration
+  reads_ly, reads_stat: bool
+
+proc wl_read_ok(gb: GB; a: int; sc: var WlScan): bool =
+  ## Is a read of `a` side-effect free, and constant between idle stops?
+  case a
+  of 0x0000..0x7FFF, 0xC000..0xFDFF, 0xFF80..0xFFFF, 0xFF0F: true
+  of 0xFF00: gb.sgb == nil
+  of 0xFF44: sc.reads_ly = true; true
+  of 0xFF41: sc.reads_stat = true; true
+  of 0xFF40, 0xFF42, 0xFF43, 0xFF45, 0xFF47..0xFF4B, 0xFF4D: true
+  else: false
+
+proc wl_code_ok(a: int): bool {.inline.} =
+  a < 0x8000 or (a >= 0xC000 and a < 0xE000) or (a >= 0xFF80 and a < 0xFFFF)
+
+proc wl_scan(cpu: GbCpu; gb: GB; head, last: int): WlScan =
+  ## Decode head..last as one straight line (no internal branch taken) of
+  ## side-effect-free instructions ending in the backward branch at `last`.
+  ## Anything outside the safe subset rejects the loop.
+  if last < head or last - head > 64 or not wl_code_ok(head) or
+     not wl_code_ok(last + 2): return
+  let mem = gb.memory
+  template rd(a: int): int = int(read_byte(mem, gb, a))
+  var pc = head
+  var cyc = 0
+  while pc <= last:
+    let op = rd(pc)
+    var len = 1
+    var c = 4
+    var ra = -1                    # address read, if any
+    case op
+    of 0x00: discard                                             # NOP
+    of 0x07, 0x0F, 0x17, 0x1F, 0x27, 0x2F, 0x37, 0x3F: discard   # A rotates, DAA, CPL, SCF, CCF
+    of 0x04, 0x05, 0x0C, 0x0D, 0x14, 0x15, 0x1C, 0x1D,
+       0x24, 0x25, 0x2C, 0x2D, 0x3C, 0x3D: discard               # INC/DEC r
+    of 0x06, 0x0E, 0x16, 0x1E, 0x26, 0x2E, 0x3E: len = 2; c = 8  # LD r,n
+    of 0x01, 0x11, 0x21, 0x31: len = 3; c = 12                   # LD rr,nn
+    of 0x0A: ra = int(cpu.bc); c = 8                             # LD A,(BC)
+    of 0x1A: ra = int(cpu.de); c = 8                             # LD A,(DE)
+    of 0x40..0x6F, 0x78..0xBF:                                   # LD r,r' and ALU A,r
+      if (op and 7) == 6: ra = int(cpu.hl); c = 8
+    of 0xC6, 0xCE, 0xD6, 0xDE, 0xE6, 0xEE, 0xF6, 0xFE: len = 2; c = 8   # ALU A,n
+    of 0xF0: len = 2; c = 12; ra = 0xFF00 + rd(pc + 1)           # LDH A,(n)
+    of 0xF2: c = 8; ra = 0xFF00 + int(cpu.c)                     # LD A,(C)
+    of 0xFA: len = 3; c = 16; ra = rd(pc + 1) or (rd(pc + 2) shl 8)   # LD A,(nn)
+    of 0xCB:
+      let cb = rd(pc + 1)
+      len = 2; c = 8
+      if (cb and 7) == 6:
+        if cb >= 0x40 and cb < 0x80: ra = int(cpu.hl); c = 12    # BIT b,(HL)
+        else: return                                             # writes (HL)
+    of 0x20, 0x28, 0x30, 0x38, 0x18:                             # JR
+      len = 2
+      if pc == last: c = 12
+      elif op == 0x18: return                                    # always taken
+      else: c = 8
+    of 0xC2, 0xCA, 0xD2, 0xDA, 0xC3:                             # JP
+      len = 3
+      if pc == last: c = 16
+      elif op == 0xC3: return
+      else: c = 12
+    else: return
+    if ra >= 0 and not wl_read_ok(gb, ra, result): return
+    cyc += c
+    if pc == last:
+      result.ok = true
+      result.period = cyc
+      return
+    pc += len
+  # Ran past `last` without landing on it: not the branch we came from.
+
+proc wl_horizon(gb: GB; reads_ly, reads_stat: bool; period = 0): int =
+  ## CPU cycles from now to the first point anything an idle loop reads can
+  ## change: a scheduler event other than the APU's own, the PPU's next stop
+  ## (the dot fifo_tick stops bumping the counter on), a timer overflow. 0 when
+  ## something in flight rules a skip out altogether.
+  let mem = gb.memory
+  if mem.requested_oam_dma or mem.dma_position <= 0xA0 or mem.dma_busy or
+     mem.write_deferred: return 0
+  when CGB_WRITE_LATENCY_ANY:
+    if mem.pipe_reg != 0: return 0
+  if gb.ppu.hdma_block_due or gb.serial.shifting: return 0
+  # A requested transfer with a peer on the cable: an external-clock one ends
+  # when the peer's coordinator catches this core up to the master's time
+  # (link.nim complete_transfer), which a skip would have run past. With no
+  # peer it never ends, and a game listening for one (SC = $80) skips.
+  if (gb.serial.sc and 0x80'u8) != 0 and gb.serial.driver != nil and
+     serial_peer_committed(gb.serial.driver): return 0
+  let t = gb.timer
+  if t.countdown >= 0 or t.hold_t != 0: return 0
+  let ppu = gb.fifo_ppu
+  if ppu == nil or not ppu.lcd_enabled: return 0
+  let m = ppu.lcd_status and 3'u8
+  var dots: int32
+  if m == 3:
+    if ppu.lazy_end == 0: return 0
+    dots = ppu.lazy_end - ppu.cycle_counter
+  else:
+    if m == 1 and ppu.cycle_counter <= LYC_RELATCH_DOT: return 0
+    dots = fifo_skip_target(ppu, gb, m) - ppu.cycle_counter
+  if reads_ly:
+    # LY ripples on the line's last dot (ly_edge_rippling) and line 153 reads
+    # 0 part way through (LY153_READ_SPLIT).
+    if ppu.ly == 153'u8: return 0
+    dots = min(dots, gb_line_end(ppu) - 2'i32 - ppu.cycle_counter)
+  if reads_stat:
+    # STAT reads the mode a few dots back from a change (stat_read_mode): the
+    # iteration being copied, which began `period` cycles ago, must have
+    # started clear of it too.
+    if ppu.first_line or
+       ppu.cycle_counter - ppu.stat_chg_dot -
+         int32(period shr mem.current_speed) < 32'i32: return 0
+  if dots <= 0: return 0
+  result = int(dots) shl mem.current_speed
+  let s = gb.scheduler
+  for ev in s.pending:
+    if ev.kind notin GB_APU_EVENTS:
+      result = min(result, int(ev.cycles - s.cycles))
+      break
+  if t.enabled:
+    if t.previous_bit != ((t.tdiv and (1'u16 shl t.bit_for_tima)) != 0): return 0
+    let sh = t.bit_for_tima + 1
+    let to_ovf = (((int(t.tdiv) shr sh) + (256 - int(t.tima))) shl sh) - int(t.tdiv)
+    result = min(result, to_ovf)
+
+when defined(gb_idlecheck):
+  var wl_chk_until: CycleCount
+  var wl_chk_on: bool
+  var wl_chk_halt: bool
+  var wl_chk_pc: uint16
+  var wl_chk_regs: array[5, uint16]
+  var wl_chk_writes: int
+  var wl_checked*, wl_bad*: int
+  import std/exitprocs
+  addExitProc(proc() =
+    stderr.writeLine "idlecheck skips=", wl_checked, " bad=", wl_bad)
+  var wl_chk_desc: string
+  proc wl_chk_arm(cpu: GbCpu; gb: GB; adv: int; halt: bool) =
+    wl_chk_desc = "arm ly=" & $gb.ppu.ly & " dot=" & $gb.ppu.cycle_counter &
+      " mode=" & $(gb.ppu.lcd_status and 3'u8) & " adv=" & $adv &
+      " spd=" & $gb.memory.current_speed & " next_ev=" &
+      $(int(gb.scheduler.next_event) - int(gb.scheduler.cycles))
+    wl_chk_on = true
+    wl_chk_halt = halt
+    wl_chk_until = gb.scheduler.cycles + CycleCount(adv)
+    wl_chk_pc = cpu.pc
+    wl_chk_regs = [cpu.af and 0xFFF0'u16, cpu.bc, cpu.de, cpu.hl, cpu.sp]
+    wl_chk_writes = gb.memory.write_count
+  proc wl_chk_tick(cpu: GbCpu; gb: GB) =
+    ## At every instruction / halted M-cycle boundary while a check is armed:
+    ## the run the skip replaced must stay put (halted, or looping without a
+    ## write) and be back at the head, unchanged, on the cycle it would land.
+    let now = gb.scheduler.cycles
+    let regs = [cpu.af and 0xFFF0'u16, cpu.bc, cpu.de, cpu.hl, cpu.sp]
+    var bad = ""
+    if gb.memory.write_count != wl_chk_writes: bad = "write"
+    elif wl_chk_halt and not cpu.halted: bad = "woke"
+    elif now > wl_chk_until: bad = "overshot"
+    elif now == wl_chk_until:
+      if cpu.pc != wl_chk_pc: bad = "pc"
+      elif regs != wl_chk_regs: bad = "regs"
+      else:
+        wl_chk_on = false
+        inc wl_checked
+    if bad.len > 0:
+      wl_chk_on = false
+      inc wl_bad
+      if wl_bad <= 20:
+        stderr.writeLine "IDLECHECK ", bad, " pc=", toHex(wl_chk_pc, 4),
+          " halt=", wl_chk_halt, " ly=", gb.ppu.ly, " dot=", gb.ppu.cycle_counter,
+          " | ", wl_chk_desc
+
+proc wl_advance(gb: GB; adv: int) {.inline.} =
+  mem_tick_components(gb.memory, gb, adv)
+  mem_reset_cycle_count(gb.memory)
+
+proc wl_head_check(cpu: GbCpu; gb: GB) {.noinline.} =
+  ## The fetch after a taken backward branch: is this the head of an
+  ## iteration that repeated the last one, and how far can it be skipped?
+  cpu.wl_edge = false
+  let now = gb.scheduler.cycles
+  let regs = [cpu.af and 0xFFF0'u16, cpu.bc, cpu.de, cpu.hl, cpu.sp]
+  # The iteration just finished read what the next ones will only if nothing
+  # it reads changed since it started (gb.wl_mark).
+  if int32(cpu.pc) == cpu.wl_head and cpu.wl_from == cpu.wl_head_from and
+     gb.memory.write_count == cpu.wl_writes and regs == cpu.wl_snap and
+     gb.wl_mark <= cpu.wl_stamp and
+     not (cpu.ime and interrupt_ready(gb.interrupts)):
+    let sc = wl_scan(cpu, gb, int(cpu.pc), int(cpu.wl_from))
+    if sc.ok and now - cpu.wl_stamp == CycleCount(sc.period):
+      let h = wl_horizon(gb, sc.reads_ly, sc.reads_stat, sc.period)
+      let n = (h - 1) div sc.period
+      if n >= 1:
+        when defined(gb_idlecheck):
+          if not wl_chk_on: wl_chk_arm(cpu, gb, n * sc.period, false)
+        else:
+          wl_advance(gb, n * sc.period)
+          cpu.wl_stamp = gb.scheduler.cycles
+          return
+  cpu.wl_head = int32(cpu.pc)
+  cpu.wl_head_from = cpu.wl_from
+  cpu.wl_snap = regs
+  cpu.wl_stamp = now
+  cpu.wl_writes = gb.memory.write_count
+
+proc wl_halt_skip(cpu: GbCpu; gb: GB): bool {.noinline.} =
+  ## A halted CPU with nothing to wake it before the horizon spends those
+  ## M-cycles as cpu_halt_tick would, in one step. true = advanced.
+  if interrupt_ready(gb.interrupts): return false
+  when CGB_HALT_PPU_LEAD_ANY:
+    if halt_lead_live(gb): return false
+  let h = wl_horizon(gb, false, false)
+  let n = (h - 1) div 4
+  if n < 2: return false
+  when defined(gb_idlecheck):
+    if not wl_chk_on: wl_chk_arm(cpu, gb, n * 4, true)
+    false
+  else:
+    wl_advance(gb, n * 4)
+    true
+
 proc tick*(cpu: GbCpu; gb: GB) =
   # `locked` is only tested behind the `halted` branch, so the running CPU
   # pays nothing for it.
@@ -661,6 +903,12 @@ proc tick*(cpu: GbCpu; gb: GB) =
       elif STOP_OPERAND_LATCH != 0 and gb.stop_op_latch > 0: cpu_run_latched(cpu, gb)
       else:           mem_tick_extra(gb.memory, gb, 4)
       return
+    when defined(gb_idlecheck):
+      if wl_chk_on: wl_chk_tick(cpu, gb)
+    when GB_IDLE_SKIP != 0:
+      if gb.wl_mark != cpu.wl_halt_fail:
+        if wl_halt_skip(cpu, gb): return
+        cpu.wl_halt_fail = gb.wl_mark
     # The halt ends on IF & IE whether or not IME lets the interrupt be taken;
     # where in the M-cycle that is asked is HALT_IF_SAMPLE_T.
     if cpu_halt_tick(gb): cpu_halt_wake(cpu, gb)
@@ -668,5 +916,9 @@ proc tick*(cpu: GbCpu; gb: GB) =
   when defined(gbfuzz_trace):
     if gbfuzz_trace_hook != nil:
       gbfuzz_trace_hook(cpu.pc, read_byte(gb.memory, gb, int(cpu.pc)))
+  when defined(gb_idlecheck):
+    if wl_chk_on: wl_chk_tick(cpu, gb)
+  when GB_IDLE_SKIP != 0:
+    if unlikely(cpu.wl_edge): wl_head_check(cpu, gb)
   let opcode = mem_read(gb.memory, gb, int(cpu.pc))
   cpu_exec_fetched(cpu, gb, opcode)

@@ -7,7 +7,8 @@
   instructions; `DINGBAT_BENCH_HASH=1` prints a rolling framebuffer hash.
   `DINGBAT_BENCH_HASH=1` also prints a hash of the final state payload;
   `DINGBAT_BENCH_RTC_EPOCH=<unix seconds>` freezes a cartridge RTC so RTC
-  games compare state for state.
+  games compare state for state (both cores). `DINGBAT_BENCH_GB_DMG=1` runs
+  a CGB-flagged cart on DMG hardware.
 * **Web:** `web/bench/bench.html` drives `_benchFrames` through the wasm
   exports; `web/bench/cdp.mjs` runs expressions over CDP. See
   `web/bench/README.md`.
@@ -213,6 +214,91 @@ out of line anyway, natively and in wasm: now `always_inline` under clang
 (-3.4 % FireRed native, +4 % web). The rewind ring's serializer wrote the
 framebuffer a halfword at a time into a buffer grown from empty; one copy
 into a pre-sized buffer halves rewind's cost.
+
+## Game Boy / Game Boy Color (2026-09-29)
+
+Where the time went (native, `sample`, 11 GBC titles and one DMG): the FIFO
+PPU's mode-3 pipeline 56-69 %, the per-M-cycle machine tick and the SM83
+interpreter 27-41 %, the APU 2 %. Emulated time is mostly idle: halted plus
+exact-repeat polling loops were 70-85 % of cycles on nine of the eleven (LY
+polls, HALT waiting for V-blank); Shantae is the busy exception. Plain lines
+(no object, no window, no mode-3 register write) were 59-89 % of lines.
+The scanline renderer is no ceiling for the PPU: its own `do_scanline` and
+per-M-cycle tick were half its time.
+
+Three changes, each exact by construction and each with a check build:
+
+* **A stripped steady state (`fifo_plain_span`).** Past the head's
+  throw-away fetch and fine-scroll latch, a span with no object, window
+  start or special dot in reach (`fifo_plain_ok`) runs only the BG fetcher
+  and shifter, with fifo_mix reduced to the BG palette lookup. The steady
+  eight-dot cycle (drain seven, fetch, push on the dot the FIFO empties,
+  pop one) runs as one block. `-d:gb_plaincheck` runs the general dots over
+  every span and compares every PPU field and the line's pixels;
+  `-d:gb_spancheck` compares blocks against single dots.
+* **Deferred mode 3 (`PLAIN_LAZY`).** A plain span longer than the tick is
+  not run: the tick moves the dot, one compare, as modes 0-2 already did,
+  up to the horizon `fifo_plain_horizon` computes (retire pixel, window
+  start, next object, WX check dot). Everything that reads the pipeline or
+  changes what it reads calls `fifo_sync` first: `write_byte` for VRAM, OAM
+  and I/O, `ppu_write`, the CGB late pipeline stores, `ppu_write_machinery`,
+  `ppu_blank_frame`, `stop_instr`, `hdma_edge_lookahead`, the state writer;
+  a state load drops the deferral. `-d:gb_lazypoison` fills the deferred
+  fields with garbage so a missed reader shows up in a sweep.
+* **Idle loops and HALT (`GB_IDLE_SKIP`).** A taken backward JR/JP marks a
+  head. An iteration that repeated the last one (registers, no
+  `write_byte`, the straight-line period `wl_scan` computes over a body of
+  side-effect-free instructions whose reads are all of ROM, work RAM, HRAM,
+  IE/IF, LY, STAT, P1 or constant PPU registers) is skipped with the
+  iterations after it, in whole periods, up to `wl_horizon`: the next
+  non-APU scheduler event, the PPU's next stop (idle target or `lazy_end`),
+  the next TIMA overflow. The machine is advanced with
+  `mem_tick_components`, as the iterations would have. The iteration copied
+  must have started after the last point anything it reads could change
+  (`gb.wl_mark`: PPU slow path, non-APU event, timer slow path, input,
+  STOP), or a loop that straddled a line change carries the old LY into the
+  skip. LY loops stop two dots short of the line end (the read ripples) and
+  never skip on line 153 (the snap); STAT loops need the copied iteration
+  clear of STAT's read-back window. A halted CPU is advanced to the same
+  horizon once the CGB halt lead is paid. No skip with OAM DMA, a due
+  H-blank block, a parked CGB store, an internal-clock transfer, or a
+  requested transfer with a peer on the cable (the coordinator catches the
+  slave up to the master's time; `link.nim`). `-d:gb_idlecheck` runs the
+  iterations instead and checks they are back at the head, unchanged, on
+  the cycle the skip would have landed.
+
+Gates: every GBC title of the local 1G1R set (538), 1500 frames, framebuffer
+hashes, final state payload and every mixed sample, against the same tree
+with `-d:PLAIN_SPAN=0 -d:GB_IDLE_SKIP=0`; the 143 dual-mode carts again on
+DMG hardware (`DINGBAT_BENCH_GB_DMG=1`); each check build over the library;
+the test-ROM runner; `gblinktest`, the Crystal lockstep-link stability run
+and `gb_rollback_test`. All identical, all clean.
+
+Main -> this (native, 1800 frames from boot):
+
+| title | fps | instructions |
+|---|---|---|
+| Super Mario Bros. DX | +96 % | -50 % |
+| Wario Land 3 | +87 % | -50 % |
+| Metal Gear Solid | +86 % | -50 % |
+| Link's Awakening DX | +79 % | -46 % |
+| Donkey Kong Country | +78 % | -47 % |
+| Alone in the Dark | +77 % | -46 % |
+| Tetris DX | +66 % | -44 % |
+| Oracle of Ages | +53 % | -40 % |
+| Link's Awakening (DMG) | +51 % | -36 % |
+| Pokémon Crystal | +49 % | -35 % |
+| Shantae | +26 % | -19 % |
+
+Wasm in JavaScriptCore (the shell, same build flags as the web): Crystal
+1643 -> 2436 fps, Alone in the Dark 1111 -> 2277, Link's Awakening 1400 ->
+1959, Shantae 1000 -> 1284.
+
+Tried and dropped: caching fifo_tick's idle target (`fast_end`), with and
+without splitting the compare out to inline: at most -3 % instructions,
+within noise in wall time. Left: the line head (the throw-away fetch and
+fine-scroll discard) and object fetches still run the general dot; a halted
+CPU stops at every PPU stop even when none of them can wake it.
 
 ## Old and constrained devices
 

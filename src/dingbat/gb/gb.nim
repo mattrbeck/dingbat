@@ -1744,6 +1744,19 @@ type
     # serialized: 0 answers "not set during this fetch", right at any boundary.
     ime_set_cycle*: CycleCount
     cached_hl*:  int   # -1 = invalid
+    # Idle-loop skip (GB_IDLE_SKIP, cpu.nim). Scratch, not serialized: a
+    # loaded state starts a fresh verdict. `wl_edge` is set by a taken
+    # backward JR/JP (`wl_from` its address) and answered at the next fetch.
+    wl_edge*:      bool
+    wl_from*:      uint16
+    wl_head*:      int32      # loop head the snapshot was taken at, -1 none
+    wl_head_from*: uint16
+    wl_snap*:      array[5, uint16]
+    wl_stamp*:     CycleCount
+    wl_writes*:    int
+    # gb.wl_mark as of the last halted M-cycle that could not skip: nothing
+    # the answer depends on moves until the mark does.
+    wl_halt_fail*: CycleCount
     # The opcode executing, so an IO read can say which M-cycle of its own
     # instruction it is (STAT_M0_TAIL_MAX_MC). Guarded out of a default build.
     when STAT_M0_TAIL_MAX_MC != 0:
@@ -2209,6 +2222,11 @@ type
     # because neither ring can be indexed backwards safely. MIX_HOLD deep
     # because the tail burst emits `m3_lead` pixels ahead of their dots.
     mix*:                 array[MIX_HOLD, GbMixHold]
+    # Deferred mode 3 (PLAIN_LAZY, fifo_ppu): the pipeline stands at
+    # `lazy_dot` while `cycle_counter` runs on, up to `lazy_end`; 0 = not
+    # deferred. Never in a save state: every writer syncs first.
+    lazy_dot*:            int32
+    lazy_end*:            int32
     # The dot this line's pixel 0 would have left the shifter on if the current
     # unbroken run had started there (`cycle_counter - lx`, written at each
     # place the shifter stops, mixer_note_stop). The shifter's position reads
@@ -2457,6 +2475,7 @@ type
     unusable*:             array[0x60, uint8]
     bootrom*:              seq[uint8]
     cycle_tick_count*:     int
+    write_count*:          int   # every write_byte, for the idle-loop verdict
     # A CPU write this M-cycle left something for the M-cycle boundary (an IF
     # store, a STAT interrupt-line edge). The byte lands before the M-cycle's
     # PPU dots; the interrupt half stays on the boundary. See mem_flush_deferred.
@@ -2509,6 +2528,11 @@ type
 
   # ---- Main GB type ----
   GB* = ref object of EmuObj
+    # Idle-loop skip (cpu.nim): the scheduler cycle of the last point anything
+    # a polling loop reads could have changed (a PPU stop, a non-APU event, the
+    # timer's slow path, input, STOP). A skip needs the iteration it copies to
+    # have started after it. Scratch.
+    wl_mark*:        CycleCount
     bootrom_path*:   string
     rom_path*:       string
     # Two model axes. `cgb_enabled` is the CONSOLE: a CGB/AGB SoC, which decides
@@ -3353,6 +3377,19 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int)
 proc mem_vdma_bus_capture*(mem: GbMemory; gb: GB; src_lo: uint8; val: uint8)
 proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8
 proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8)
+# Deferred mode 3 (PLAIN_LAZY, fifo_ppu.nim): anything that reads the
+# pipeline, or changes what it reads, runs the deferred dots first.
+proc fifo_lazy_sync*(ppu: GbFifoPpu; gb: GB) {.noinline.}
+const GB_IDLE_SKIP* {.intdefine.} = 1
+  ## Idle loops and HALT skipped up to the next point they can observe
+  ## (cpu.nim, wl_head_check / wl_halt_skip); 0 runs every M-cycle.
+const GB_APU_EVENTS* = {etAPUFrameSeq, etAPUSample, etAPUChannel1,
+                        etAPUChannel2, etAPUChannel3, etAPUChannel4}
+  ## Events that change nothing but the APU: an idle skip runs through them.
+template fifo_sync*(gb: GB) =
+  if gb.fifo_ppu != nil and gb.fifo_ppu.lazy_end != 0:
+    fifo_lazy_sync(gb.fifo_ppu, gb)
+
 include ppu
 include scanline_ppu
 include fifo_ppu
@@ -3516,6 +3553,7 @@ proc gb_dispatch(gb: GB): proc(kind: EventType) {.closure.} =
   # owning capture would form a reference cycle back to the GB.
   let gb {.cursor.} = gb
   result = proc(kind: EventType) =
+    if kind notin GB_APU_EVENTS: gb.wl_mark = gb.scheduler.cycles
     case kind
     of etAPUFrameSeq:
       # Models the falling edge of the divider's APU tap. Free-running at the

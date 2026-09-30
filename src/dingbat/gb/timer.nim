@@ -103,6 +103,7 @@ proc apu_div_bit(gb: GB): int {.inline.} =
   12 + int(gb.memory.current_speed)
 
 proc timer_tick_slow(t: GbTimer; gb: GB; cycles: int) =
+  gb.wl_mark = gb.scheduler.cycles
   let serial = gb.serial
   var cycles = cycles
   when SPEED_SWITCH_IRQ_LEAF_HOLD_T != 0:

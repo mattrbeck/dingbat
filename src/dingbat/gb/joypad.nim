@@ -49,6 +49,7 @@ proc joypad_write*(j: GbJoypad; gb: GB; val: uint8) =
   joypad_update(j, gb)
 
 proc handle_input*(j: GbJoypad; gb: GB; inp: Input; pressed: bool) =
+  gb.wl_mark = gb.scheduler.cycles
   case inp
   of Input.UP:     j.up     = pressed
   of Input.DOWN:   j.down   = pressed

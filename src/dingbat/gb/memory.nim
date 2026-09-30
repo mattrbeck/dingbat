@@ -560,6 +560,10 @@ proc mem_dma_restart_bus(mem: GbMemory; gb: GB; source: uint8) =
       mem.dma_drive = dma_drive_of(gb, bus_src)
 
 proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8) =
+  inc mem.write_count
+  # VRAM, OAM and I/O feed the pipeline; a deferred mode 3 runs first.
+  if (idx >= 0x8000 and idx < 0xA000) or (idx >= 0xFE00 and idx < 0xFF80):
+    fifo_sync(gb)
   # Any write with bit 0 set unmaps the boot ROM (the CGB boot ROM writes
   # 0x11, the DMG one 0x01).
   when defined(gb_io_trace):
@@ -1063,6 +1067,10 @@ proc stop_instr*(mem: GbMemory; gb: GB): bool =
   ## chart's IME split on the last leaf ("glitches non-deterministically")
   ## takes the defined leaf. Not modelled: whether the skipped byte is read,
   ## and an oscillator restart delay on leaving STOP mode.
+  # The speed switch and stop_panel both reach the pipeline and the idle
+  # skip's horizon.
+  fifo_sync(gb)
+  gb.wl_mark = gb.scheduler.cycles
   let button_held = joypad_lines(gb.joypad) != 0x0F'u8
   let irq_pending = interrupt_ready(gb.interrupts)
   # The second byte is consumed exactly when no interrupt is pending.
