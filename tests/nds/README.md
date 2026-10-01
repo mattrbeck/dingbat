@@ -5,7 +5,7 @@ Fixtures for the DS core, ordered roughly from "first thing that can work" to
 
 ## Where the ROMs live
 
-Only our own `fb_*.nds`, `2d_*.nds`, `snd_tone.nds` and `gx_tri.nds` are committed. The third-party
+Only our own `fb_*.nds`, `2d_*.nds`, `snd_tone.nds`, `snd_suite.nds` and `gx_tri.nds` are committed. The third-party
 ROMs below carry no licence (gbe-plus-nds-tests is GPLv2), so they are
 gitignored and kept in **`~/.cache/dingbat-nds/roms/`** (same layout as
 `roms/`), where every worktree can reach them. Rebuild them with the scripts
@@ -21,6 +21,7 @@ under Building if the cache is lost.
 | `roms/2d_bitmap.nds` | `src/2d_bitmap` (ours, C) | 2D engines | rotated direct-colour bitmap with alpha holes under a 256-colour bitmap frame; engine B 16-bit-entry affine tiled BG zoomed 2x |
 | `roms/2d_sprites.nds` | `src/2d_sprites` (ours, C) | 2D engines | tile/bitmap/affine/semi-transparent/OBJ-window sprites, WIN0, brightness, Y wrap; engine B OBJ ext palettes and priority order |
 | `roms/snd_tone.nds` | `src/snd_tone` (ours) | ARM7 I/O stores, SPU | green top, blue bottom; sound: 440 Hz PSG square (ch 8, panned left) + 220 Hz PCM8 saw (ch 0, panned right). `ndsrun --wav` dumps it |
+| `roms/snd_suite.nds` | `src/snd_suite` (ours, C on both CPUs) | ARM7 timers/VCOUNT, SPU, capture | ~14 s timeline of SPU sections (formats, PSG duties, noise, repeat modes, hold, volume/divider/pan/master, output selectors, capture echo, timer extremes, SOUNDBIAS, 16 channels, start/busy timing) then register/capture readbacks drawn as bit rows on the top screen; bottom turns white when done. Measure with `tools/snd_analyze.py OUT.wav --png OUT.png` (section list in `arm7.c`) |
 | `roms/gx_tri.nds` | `src/gx_tri` (ours) | + 3D geometry/rendering, engine A BG0 = 3D | top: RGB-shaded triangle (left, command ports) and yellow quad (right, packed GXFIFO) over a dark blue (0x2042) rear plane |
 | `roms/armwrestler.nds` | [mic-/armwrestler](https://github.com/mic-/armwrestler), built by `tools/build_wrestlers.sh` | ARM9 ARM/Thumb, LCDC VRAM display, KEYINPUT, DISPSTAT polling | menu of ARM9 instruction tests (ALU, LDR/STR, LDM/STM, Thumb), pass/fail per row |
 | `roms/arm7wrestler.nds` | [Arisotura/arm7wrestler](https://github.com/Arisotura/arm7wrestler), same script | both CPUs; ARM7 runs the tests, ARM9 copies its frame | same menu run on the ARM7, including v5 opcodes that must be undefined/no-op there |
@@ -32,7 +33,7 @@ under Building if the cache is lost.
 
 Load/entry addresses:
 
-- `fb_*`, `snd_tone`, `arm7wrestler`: ARM9 0x02000000, ARM7 0x037F8000.
+- `fb_*`, `snd_tone`, `snd_suite`, `arm7wrestler`: ARM9 0x02000000, ARM7 0x037F8000.
 - `armwrestler`: ARM9 0x02004000, ARM7 0x03800000. Its crt0 puts the stacks at
   0x00803EC0/0x00803FA0 without touching CP15, so it relies on ITCM being
   mirrored across 0x00000000-0x01FFFFFF as it is after a normal boot.
@@ -57,9 +58,10 @@ devkitARM) and python3:
 `tools/mknds.py` writes the cartridge header (CRC16 included, boot logo left
 zeroed; `--logo-from` copies one if a firmware boot is ever wanted).
 
-### No library, C (2d_*)
+### No library, C (2d_*, snd_suite)
 
     tests/nds/tools/build_2d.sh
+    tests/nds/tools/build_snd.sh     # snd_suite
 
 needs an `arm-none-eabi-gcc` (devkitARM's in `/opt/devkitpro` is used when
 none is on PATH). `src/common2d/` holds the crt0, linker script and a register

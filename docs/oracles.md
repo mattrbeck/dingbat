@@ -102,3 +102,30 @@ so only direct boot is comparable. Open differences seen on first use: the
 touch ADC values (firmware calibration) while the reported pixel matches;
 ndsrun writes 0.2% fewer samples per frame than 32728 Hz x frame time
 (snd_tone, 120 frames: 65499 vs 65646).
+
+## NDS core
+
+Sound rows come from `tests/nds/src/snd_suite` (our ROM: timed SPU sections
+plus register/capture readbacks drawn as bit rows), dumped by `ndsrun --wav`
+and by `tools/ndsref` on each core, and measured with
+`tests/nds/tools/snd_analyze.py` (levels, frequencies, LFSR correlation,
+envelopes, edge timing; resampling-robust). Cores and settings as in the
+section above; libnds builds need `--bios` on melonDS DS to make sound.
+Where every core agrees with GBATEK (and with dingbat) nothing is listed:
+start delays 3/1/11 samples, PSG duties, the noise LFSR, PCM8/16 and ADPCM
+decode, volume/divider/pan/master steps, the SOUNDCNT output selectors and
+ch1/ch3 mixer bits, mixer capture and its clip, register masks.
+
+| Where | Behaviour | Compared against | How | Independent evidence |
+|---|---|---|---|---|
+| `nds/io/spu.nim` channel FIFO | channels read sample words ahead of playback (FIFO_WORDS = 8), so a channel replaying a buffer that capture is filling hears it one loop late: echo period = buffer + 2 samples (4194 output samples for a 4096-sample loop at 31979 Hz) | melonDS DS 1.4.0 (sample-identical period), DeSmuME (same at 4 ms resolution) | run — snd_suite `echo`; reading at play time gave a 3-sample feedback loop instead | GBATEK's block diagram shows the FIFOs; maxmod's reverb depends on the loop-late reading; the depth is Assumed |
+| `spu.nim` repeat mode 0 | "Manual" plays on past PNT+LEN through the following memory, busy until stopped | melonDS DS plays through; melonDS 0.9.3 loops; DeSmuME stops | run — snd_suite `repeat` | GBATEK names the mode only; Assumed from the bit layout (neither the loop nor the one-shot bit set); a hardware run of snd_suite |
+| `spu.nim` repeat mode 3 | "Prohibited" loops like mode 1 | both melonDS cores loop; DeSmuME stops | run — snd_suite `repeat` | Assumed; a hardware run |
+| `spu.nim` one-shot busy bit | cleared at the start of the last sample (GBATEK kept); melonDS DS and DeSmuME clear it a sample later, at its end (readbacks: 67/43/11 sample periods for 64-sample PCM8, 32-sample ADPCM, 8-sample PCM16 vs GBATEK's 66/42/10) | melonDS DS, DeSmuME, melonDS 0.9.3 (mixed) | run — snd_suite `start_timing` (a 1 MHz reference channel stopped by the CPU when busy drops) and RES[3/4/19] | GBATEK "Sound Stop (timing note)"; unclear until a hardware run |
+| `spu.nim` Hold flag | the last sample of a one-shot stays out while Hold is set | no core holds it (DeSmuME and melonDS 0.9.3 drop to 0) | run — snd_suite `hold` | GBATEK "Hold Flag" (kept) |
+| `spu.nim` capture from ch(a) | both-negative bug (-8000h), overflow bug (AND FFFFh), source before panning | melonDS (both) capture ch(a)'s panned left + ch(b); DeSmuME plain ch(a), clipped sum | run — snd_suite RES[15-17] | GBATEK "Capture Bugs" (kept) |
+| `spu.nim` PCM8 capture rounding | 8.16 fraction MSB set rounds towards zero (-4080h -> C0h) | all three floor (BFh) | run — snd_suite RES[14] | GBATEK "Capture Clipping/Rounding" (kept) |
+| `spu.nim` SNDCAPxCNT bit 0 | reads back as written | DeSmuME agrees; melonDS (both) read 0 | run — snd_suite RES[9] | GBATEK lists it R/W (kept) |
+| `spu.nim` output sampling | the PWM word is the mixer's value at each 1024-cycle tick: a channel above the output rate aliases at full level (a 47.6 kHz tone comes out at 14.9 kHz, full scale) | melonDS 0.9.3 the same; melonDS DS -14 dB (it also low-passes ~7 kHz and high-passes its output); DeSmuME resamples to 44.1 kHz | run — snd_suite `timer` | GBATEK gives the 1.04876 MHz mixer and 32.768 kHz PWM, not how the PWM word is taken; Assumed |
+| `spu.nim` SOUNDBIAS | output is bias - 200h as DC, also with master enable off | melonDS 0.9.3 identical ramp; melonDS DS high-passes it away; DeSmuME ignores bias | run — snd_suite `bias` | GBATEK SOUNDBIAS ("always enabled") |
+| `nds/io/timers.nim` write_reg | writing TMxCNT_H of a running timer without changing start/prescaler/cascade (an IRQ-enable toggle) keeps the count and prescaler phase | melonDS DS | run — maxmod `basic_sound` music drifted 4 ms/s (0.4%) late against melonDS DS until fixed (maxmod toggles TM1's IRQ enable every tick); after it the envelopes line up over 10 s | GBATEK timers (control writes do not reload); the prescaler phase surviving is Assumed |

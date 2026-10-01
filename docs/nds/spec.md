@@ -125,7 +125,7 @@ Third-party test ROMs: `~/.cache/dingbat-nds/roms/` (tests/nds/README.md).
 | IRQ / timers / DMA / IPC / maths | gbeplus irq/math/dma, rockwrestler system tests, `pxi`, `timercallback` |
 | Input / touch / SPI / RTC | `touch_test` tracks the mouse |
 | 3D | `Simple_Tri`, `Simple_Quad` |
-| Sound | maxmod example plays (so far: tests/nds_spu_test.nim and `snd_tone.nds`) |
+| Sound | maxmod examples and Pokemon SoulSilver play (tests/nds_spu_test.nim, `snd_suite.nds` against the reference cores: docs/oracles.md NDS core) |
 | Card + backup | a commercial ROM's B7 reads + save detection |
 | Timing | wait states, cache model, frame-rate-stable commercial boot |
 | Frontend | desktop SDL target with both screens; main web UI integration |
