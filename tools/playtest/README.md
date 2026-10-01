@@ -1,20 +1,42 @@
 # playtest — cross-emulator gameplay and save-file harness
 
-Plays a game from a recorded script in dingbat and two reference emulators,
-compares the screens at named checkpoints, saves in-game in each, compares the
-battery files, then boots every emulator's save in every emulator.
+Plays a game from a recorded input timeline in dingbat and two reference
+emulators, compares the screens at named checkpoints and the audio throughout,
+saves in-game in each, compares the battery files, then boots every
+emulator's save in every emulator.
+
+dingbat runs four ways, so a difference can be pinned on one feature:
+
+| name | BIOS | waitloop skipping |
+|---|---|---|
+| `dingbat` | HLE (the shipped default) | on |
+| `dingbat-nowl` | HLE | off |
+| `dingbat-bios` | official | on |
+| `dingbat-bios-nowl` | official | off |
+
+The references (`mgba`, `nba`) always run the official BIOS.
 
 ```
 tools/playtest/build.sh                                  # drivers + OCR tool -> bin/
 tools/playtest/playtest.py run  ~/roms/game.gba          # needs scripts/<sha1>.play
 tools/playtest/playtest.py run  f3ae088181bf583e55daf962a92bb46f4f1d07b7   # by sha1
-tools/playtest/playtest.py suite [emerald ...]           # every script (or a filter)
+tools/playtest/playtest.py suite [emerald ...] --jobs 2  # every script (or a filter)
+tools/playtest/report.py out/suites/<tag>                # findings.json: who stands alone where
 ```
 
 Output lands in `out/runs/<title>-<sha1>/<timestamp>/` (`latest` symlink):
 `results.json`, `report.html`, `cmp/*.png` side-by-side composites, every
-emulator's environment directory and battery file. Exit status is 0 when every
-dingbat variant passes.
+emulator's environment directory and battery file, `audio/*.wav` clips of
+differing audio. Exit status is 0 when every dingbat variant passes. A suite
+writes `out/suites/<tag>/index.json` (one row per game, logs beside it); a
+second suite with the same `--tag` extends it.
+
+`report.py` reduces a suite to findings: at each checkpoint the six emulators
+fall into groups that show the same screen, and a finding is a grouping
+(reported where it first appears) with the group that stands alone named as
+the suspect: `dingbat`, `dingbat:hle-bios`, `dingbat:waitloop`, `mgba`,
+`nba`, or `unclear`. Audio, save files and each save's readers are grouped the
+same way.
 
 ## What a run checks
 
@@ -33,21 +55,38 @@ dingbat variant passes.
    games with a decoder in `saves.py`, structural validity and the decoded
    player-chosen fields (Pokémon Gen 3: section checksums, name, gender).
 4. **Cross-load** — `[load]` runs with each emulator's save seeded into each
-   emulator. A cell passes when its checkpoints match that emulator's run with
-   its own save, and booting must leave the battery file byte-identical.
+   emulator (once per distinct save file: the dingbat configurations usually
+   write identical ones). A cell passes when its checkpoints match that
+   emulator's run with its own save, and booting must leave the battery file
+   byte-identical.
+5. **Audio** — every driver dumps its output (`--audio`, s16le stereo at
+   32768 Hz) for the whole `[new]` run; `audio.py` compares quarter-second
+   windows aligned by emulated frame (level after each emulator's own gain,
+   band shape, stereo width) and counts a window against dingbat only where
+   the references agree. Only features and clips of differing spans are kept.
 
 ## Scripts
 
 `scripts/<rom sha1>.play` — the ROM itself is never committed; `@file` names
 the file it was recorded on so `run <sha1>` can find it in the library
 (`PLAYTEST_LIBRARY`, colon-separated; default `~/Documents/emu/gba` and its
-`archive/roms`). The language is documented in `script.py`. Steps wait on
-screen conditions (`until text "CONTINUE"`, `until stable 20`, `mash A until
-text "GIRL"`) rather than fixed frame counts wherever pacing can differ between
-emulators, so one script replays on all of them.
+`archive/roms`). The language is documented in `script.py`.
+
+Scripts are **frozen**: a fixed input timeline (`wait`, `press`, `hold`,
+`tap`, `checkpoint`) that reads no screen, so every emulator gets the same
+keys on the same frames and a screen that differs at a checkpoint is a
+finding. They are written by playing in a live session (below; AUTHORING.md is
+the full how-to), where conditions such as `until text "CONTINUE"` or `mash A
+until text "GIRL"` are resolved on the slowest emulator and recorded as frames,
+the condition kept as a comment. `playtest.py freeze` converts an older
+condition script the same way (`freeze_all.py` for every one), keeping the
+original in `scripts/source/`.
 
 `@status` other than `ready` (e.g. `@status wip: stuck at intro`) makes
-`suite` skip the script.
+`suite` skip the script. `@save none` marks a game with no battery save,
+`@save skip: why` a script that stops before the first save (play and audio
+are still compared). `@frozen` names the emulators the timeline was resolved
+on.
 
 ## Writing a script: live sessions
 
@@ -60,11 +99,17 @@ playtest.py do emerald log                               # the recorded script s
 playtest.py do emerald stop                              # quits emulators, keeps saves
 ```
 
-`look` writes a side-by-side PNG and prints each emulator's OCR text and the
-guessed selected menu entry. A step that fails on any emulator is rolled back
-everywhere (and a failure screenshot kept), so the recorded script always
-reproduces the emulators' state. `serve --save FILE` seeds a battery file to
-develop the `[load]` section.
+`serve` runs the official-BIOS emulators (`dingbat-bios`, `mgba`, `nba`) in
+lockstep: every step ends with all of them on the same frame after the same
+input. `look` writes a PNG (one frame when they all agree, side by side when
+not) and prints each emulator's OCR text and the guessed selected menu entry.
+A step that fails on any emulator is rolled back everywhere, held keys
+included (and a failure screenshot kept), so the recorded script always
+reproduces the emulators' state; rewinding to a mark forgets the marks made
+after it. `serve --save-dir DIR` boots each emulator with the save it wrote
+itself (a stopped session's `saves/`) to develop the `[load]` section.
+`saveinfo` says whether a battery file holds data. `statecheck.py` checks that
+saving (and loading) a state changes nothing in any emulator.
 
 ## Writing a script: recording a human
 
@@ -117,11 +162,16 @@ found in the ROM.
 | `saves.py` | battery-file description, comparison, game decoders |
 | `pipeline.py` | `run`: the whole flow and report |
 | `library.py` | ROM lookup by SHA-1 |
+| `freeze.py` / `freeze_all.py` | condition script -> frozen input timeline |
+| `audio.py` | audio features, comparison, WAV clips |
+| `report.py` | suite -> findings (who stands alone at each difference) |
+| `statecheck.py` | save-state round-trip check per emulator |
 
 ## Driver protocol
 
-Each driver is started as `<driver> <rom> <bios.bin|hle> [--run-bios] [--rtc EPOCH]`,
-prints `ready ...`, then answers one line per command with `ok [...]` or `err ...`:
+Each driver is started as `<driver> <rom> <bios.bin|hle> [--run-bios] [--rtc EPOCH] [--audio PATH]`
+(dingbat also `--no-waitloop`), prints `ready ...`, then answers one line per
+command with `ok [...]` or `err ...`:
 
 | command | effect |
 |---|---|
