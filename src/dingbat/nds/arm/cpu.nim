@@ -40,6 +40,10 @@ const
   FLAG_F* = 1'u32 shl 6
   FLAG_T* = 1'u32 shl 5
 
+const
+  ABORT_DATA* = 1'u8        ## a data access the protection unit refused
+  ABORT_PREFETCH* = 2'u8    ## an opcode fetch it refused
+
 type
   ArmCpu*[B] = ref object
     r*: array[16, uint32]
@@ -63,6 +67,9 @@ type
                             ## in this CPU's clocks (step converts)
     trace*: int             ## instructions left to log to stderr (debug)
     exc_count*: int         ## undefined-instruction / abort exceptions taken
+    abort*: uint8           ## set by the bus: ABORT_DATA / ABORT_PREFETCH
+    bank_xfer*: bool        ## an LDM/STM^ is moving user-bank registers: the
+                            ## mode reads USR but the accesses stay privileged
     exc_pc*: uint32         ## the instruction that raised the last one
     when defined(ndsdebug):
       profiling*: bool      ## count executed instructions per 64-byte block
@@ -145,10 +152,6 @@ proc jump_load[B](cpu: ArmCpu[B]; target: uint32) {.inline.} =
     cpu.jump(target)
 
 proc exception*[B](cpu: ArmCpu[B]; mode: CpuMode; vector: uint32; lr: uint32) =
-  if mode in {mUND, mABT}:
-    # counted for tools/ndssweep.nim's crash check
-    inc cpu.exc_count
-    cpu.exc_pc = cpu.cur_pc
   let old = cpu.cpsr
   cpu.switch_mode(uint32(mode))
   cpu.spsr = old
@@ -157,10 +160,17 @@ proc exception*[B](cpu: ArmCpu[B]; mode: CpuMode; vector: uint32; lr: uint32) =
   if mode == mFIQ: cpu.cpsr = cpu.cpsr or FLAG_F
   cpu.next_pc = cpu.vector_base + vector
 
+proc count_exc(cpu: ArmCpu) {.noinline.} =
+  ## Undefined-instruction and abort exceptions, for tools/ndssweep.nim's
+  ## crash check.
+  inc cpu.exc_count
+  cpu.exc_pc = cpu.cur_pc
+
 proc undefined_instr*[B](cpu: ArmCpu[B]) =
   when defined(ndstrace) or not defined(release):
     stderr.writeLine("nds cpu: undefined instruction at 0x" & toHex(cpu.cur_pc, 8) &
                      (if cpu.thumb: " (thumb)" else: ""))
+  cpu.count_exc()
   cpu.exception(mUND, 0x04, cpu.next_pc)
 
 proc software_interrupt*[B](cpu: ArmCpu[B]; comment: uint32) =
@@ -553,6 +563,7 @@ proc arm_block_transfer[B](cpu: ArmCpu[B]; instr: uint32) =
   if user_bank:
     old_mode = cpu.mode
     cpu.switch_mode(uint32(mUSR))
+    cpu.bank_xfer = old_mode != uint32(mUSR)
   var a = start
   if load:
     inc cpu.icycles
@@ -569,7 +580,7 @@ proc arm_block_transfer[B](cpu: ArmCpu[B]; instr: uint32) =
         a += 4
         if i == 15: pc_val = v
         else: cpu.r[i] = v
-    if user_bank: cpu.switch_mode(old_mode)
+    if user_bank: cpu.switch_mode(old_mode); cpu.bank_xfer = false
     if wb: cpu.r[rn] = new_base
     if (list and 0x8000) != 0:
       if s:
@@ -588,7 +599,7 @@ proc arm_block_transfer[B](cpu: ArmCpu[B]; instr: uint32) =
           if i == rn and w and first_bit != rn_bit: v = new_base
         write32(cpu.bus, a and not 3'u32, v)
         a += 4
-    if user_bank: cpu.switch_mode(old_mode)
+    if user_bank: cpu.switch_mode(old_mode); cpu.bank_xfer = false
     if w: cpu.r[rn] = new_base
 
 proc arm_branch[B](cpu: ArmCpu[B]; instr: uint32) =
@@ -1004,6 +1015,19 @@ proc trace_instr(cpu: ArmCpu; instr: uint32) {.noinline.} =
   line.add(" " & toHex(cpu.cpsr, 8))
   stderr.writeLine(line)
 
+proc take_abort[B](cpu: ArmCpu[B]; a: uint32) {.noinline.} =
+  ## ARM946E-S aborts (protection unit, GBATEK "ARM CP15 Protection Unit"):
+  ## a refused fetch takes the prefetch abort instead of running the opcode
+  ## (lr = opcode + 4), a refused data access the data abort after it
+  ## (lr = opcode + 8, in both states: the ARM ARM's exception table). The
+  ## refused access itself did nothing; a base register the aborted opcode
+  ## wrote back stays written (the ARM9's base-restored model is not
+  ## modelled).
+  cpu.count_exc()
+  if cpu.abort == ABORT_PREFETCH: cpu.exception(mABT, 0x0C, a + 4)
+  else: cpu.exception(mABT, 0x10, a + 8)
+  cpu.abort = 0
+
 proc step*[B](cpu: ArmCpu[B]) {.inline.} =
   mixin fetch16, fetch32, irq_line, access_cycles, armv5
   if irq_line(cpu.bus) and (cpu.cpsr and FLAG_I) == 0:
@@ -1017,13 +1041,19 @@ proc step*[B](cpu: ArmCpu[B]) {.inline.} =
     if unlikely(cpu.trace > 0): cpu.trace_instr(instr)
     cpu.next_pc = a + 2
     cpu.r[15] = a + 4
-    cpu.execute_thumb(instr)
+    when armv5(B):
+      if likely(cpu.abort == 0): cpu.execute_thumb(instr)
+    else: cpu.execute_thumb(instr)
   else:
     let instr = fetch32(cpu.bus, a)
     if unlikely(cpu.trace > 0): cpu.trace_instr(instr)
     cpu.next_pc = a + 4
     cpu.r[15] = a + 8
-    cpu.execute_arm(instr)
+    when armv5(B):
+      if likely(cpu.abort == 0): cpu.execute_arm(instr)
+    else: cpu.execute_arm(instr)
+  when armv5(B):
+    if unlikely(cpu.abort != 0): cpu.take_abort(a)
   inc cpu.instr_count
   # an ARM7 cycle is two master cycles, an ARM9 cycle one
   let ic = when armv5(B): cpu.icycles else: cpu.icycles * 2
