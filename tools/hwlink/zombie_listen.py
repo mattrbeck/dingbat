@@ -70,61 +70,84 @@ def runs(x, rate):
     return out
 
 
+def level(x, rate, a, b):
+    """Tone strength over [a, b): the mean of 10 ms windows' projections, each
+    phase-independent, so a splice where the capture dropped audio does not
+    cancel it (one projection over the whole span did)."""
+    w = rate // 100
+    v = [tone(x, rate, i, i + w) for i in range(a, b - w + 1, w)]
+    return float(np.mean(v)) if v else 0.0
+
+
 def analyse(path):
     x, rate = load(path)
-    # Anchor on the Z tones (0.25, 0.25, 0.5, 0.25, 0.5, 0.25 s): the sync
-    # tone can be missed by a late recording start.
     rs = [r for r in runs(x, rate) if r[1] >= 0.15]
+    # Anchors: the six Z tones by their lengths, and the sync tone (0.2 s)
+    # before them. The console plays the schedule exactly (the payload's
+    # call takes 9.0 s on the SP); a capture that drops audio shortens the
+    # recording between anchors, so expected times are mapped onto it
+    # piecewise linearly.
     want = [0.25, 0.25, 0.5, 0.25, 0.5, 0.25]
-    z1 = None
+    zk = None
     for k in range(len(rs) - 5):
         if all(abs(rs[k + j][1] - want[j]) <= 0.12 for j in range(6)):
-            z1 = rs[k][0]
-    if z1 is None:
+            zk = k
+    if zk is None:
         print(f'{os.path.basename(path)}: the Z tone pattern is not in this recording'); return
-    sync = z1 - 5.00
-    T = lambda s: int((sync + s) * rate)
+    sched = [5.00, 5.50, 6.00, 6.75, 7.25, 8.00]
+    anchors = [(e, rs[zk + j][0]) for j, e in enumerate(sched)]
+    if zk >= 1 and rs[zk - 1][1] <= 0.35 and rs[zk - 1][0] < anchors[0][1] - 3.0:
+        anchors.insert(0, (0.0, rs[zk - 1][0]))
+    es, ts = zip(*anchors)
+    if len(anchors) == 7:
+        slope = (ts[1] - ts[0]) / (es[1] - es[0])
+    else:
+        slope = (ts[-1] - ts[0]) / (es[-1] - es[0])
+    def T(e):
+        if e <= es[0]: t = ts[0] + (e - es[0]) * slope
+        elif e >= es[-1]: t = ts[-1] + (e - es[-1]) * slope
+        else: t = float(np.interp(e, es, ts))
+        return int(t * rate)
     def mid(s, d):                          # the middle 60% of a segment
         return T(s + 0.2 * d), T(s + 0.8 * d)
-    print(f'{os.path.basename(path)}: Z1 at {z1:.2f} s, so the sync tone at {sync:.2f} s')
+    print(f'{os.path.basename(path)}: {"sync and " if len(anchors) == 7 else ""}Z tones found; '
+          f'the recording runs at {slope:.3f}x the console\'s time')
     # noise: a trigger loads the LFSR with 0x7FFF, so its output holds for
     # the 15 steps until the first 0 reaches bit 0 -- 234 ms at shift 13 and,
     # on the old GBA rule, 470 ms at shift 14 -- and then varies. Compare the
     # loudest 50 ms of 0.55..1.15 s into each segment, past that start-up.
-    def onset(s):
-        a, b = T(s + 0.55), T(s + 1.15)       # past the LFSR start-up (below)
+    def busy(s):
+        a, b = T(s + 0.55), T(s + 1.15)
         if a < 0: return None
         w = rate // 20
         return max(ac_rms(x, i, i + w) for i in range(a, b - w, w // 2))
-    gap = max(np.median([ac_rms(x, *mid(s, 0.3)) for s in (1.70, 3.20, 4.70) if T(s) >= 0]), 1.0)
-    n = {name: onset(s) for name, s in (('N1 shift 13', 0.50), ('N2 shift 14', 2.00), ('N3 shift 13', 3.50))}
-    print('  noise onset loudness re the gaps: ' +
+    gaps = [ac_rms(x, *mid(s, 0.3)) for s in (1.70, 3.20, 4.70) if T(s) >= 0]
+    gap = max(float(np.median(gaps)) if gaps else 1.0, 1.0)
+    n = {name: busy(s) for name, s in (('N1 shift 13', 0.50), ('N2 shift 14', 2.00), ('N3 shift 13', 3.50))}
+    print('  noise loudness re the gaps: ' +
           ', '.join(f'{k} {"(before the recording)" if v is None else f"{v / gap:.1f}x"}' for k, v in n.items()))
     ctl = [v for k, v in n.items() if v is not None and 'shift 13' in k]
     if not ctl or n['N2 shift 14'] is None or min(ctl) / gap < 3:
         print('  noise verdict: none -- no shift-13 control stands above the gaps')
     else:
-        print('  noise verdict: shift 14', 'frozen (GB rule)' if n['N2 shift 14'] < 0.25 * min(ctl)
+        print('  noise verdict: shift 14', 'frozen (GB rule)' if n['N2 shift 14'] - gap < 0.25 * (min(ctl) - gap)
               else 'steps (old GBA rule)')
-    seg = {'Z1 ref 8': (5.00, .25), 'Z2 ref 12': (5.50, .25), 'Z3a 8': (6.00, .25),
-           'Z3b 4x 0x80': (6.25, .25), 'Z4 ref 8': (6.75, .25), 'Z5a 8': (7.25, .25),
-           'Z5b 0x88': (7.50, .25), 'Z6 ref 7': (8.00, .25)}
-    # each tone measured from where it really starts (a dropped buffer moves
-    # everything after it); the 0.5 s runs Z3 / Z5 split into halves
-    zr = [r for r in rs if r[0] >= z1 - 0.01][:6]
-    starts = {'Z1 ref 8': zr[0][0], 'Z2 ref 12': zr[1][0], 'Z3a 8': zr[2][0],
-              'Z3b 4x 0x80': zr[2][0] + 0.25, 'Z4 ref 8': zr[3][0], 'Z5a 8': zr[4][0],
-              'Z5b 0x88': zr[4][0] + 0.25, 'Z6 ref 7': zr[5][0]}
-    amp = {k: tone(x, rate, int((starts[k] + 0.05) * rate), int((starts[k] + 0.20) * rate))
-           for k in seg}
+    seg = {'Z1 ref 8': 5.00, 'Z2 ref 12': 5.50, 'Z3a 8': 6.00, 'Z3b 4x 0x80': 6.25,
+           'Z4 ref 8': 6.75, 'Z5a 8': 7.25, 'Z5b 0x88': 7.50, 'Z6 ref 7': 8.00}
+    amp = {k: level(x, rate, *mid(e, 0.25)) for k, e in seg.items()}
     ref = np.mean([amp['Z1 ref 8'], amp['Z4 ref 8']])
     for k in seg:
         print(f'  {k:12s} ~volume {8 * amp[k] / ref:5.2f}')
     z3 = amp['Z3b 4x 0x80'] / amp['Z3a 8']
     z5 = amp['Z5b 0x88'] / amp['Z5a 8']
     lin = amp['Z2 ref 12'] / amp['Z1 ref 8']
-    print(f'  check: Z2/Z1 = {lin:.3f} (want 1.500); control Z5b/Z5a = {z5:.3f} (want 0.875)')
-    if abs(lin - 1.5) > 0.15 or abs(z5 - 0.875) > 0.1:
+    lin7 = amp['Z6 ref 7'] / amp['Z1 ref 8']
+    print(f'  check: Z2/Z1 = {lin:.3f} (want 1.500), Z6/Z1 = {lin7:.3f} (want 0.875)')
+    # Z5b was meant as a control (both rules: 7) until the SP answered 6.0
+    # (2026-09-30): +2 then 16 - v, i.e. a period-0 envelope is not "still
+    # updating" on the AGB. Reported, not used as a check.
+    print(f'  Z5b (0x88 over a playing volume 8): ~volume {8 * z5:.2f} -- CGB table 7, AGB SP 6')
+    if abs(lin - 1.5) > 0.15 or abs(lin7 - 0.875) > 0.1:
         print('  zombie verdict: none -- the levels in this take are not linear (checks above)')
     else:
         print(f'  zombie verdict: Z3b/Z3a = {z3:.3f} ->',

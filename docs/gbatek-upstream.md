@@ -272,7 +272,15 @@ stamped by its own write:
   "+1 if the old direction was decrease" rule gives 12. Heard, not read
   (`tests/roms/payloads/zombie.s`, `tools/hwlink/zombie_listen.py`: the SP's
   speaker recorded by a microphone, 1000.5 Hz amplitudes within one take):
-  volume 12 / 8 = 1.49, the written note 1.00 of its own volume-8 start.
+  volume 12 / 8 = 1.49, the written note 1.00 of its own volume-8 start; a
+  second take (zombie.s v2) again 0.99. But not every cell matches the CGB:
+  one write of 0x88 (increase, period 0) over a playing volume-8 note leaves
+  it at 6.0 (a steady plateau, the volume-7 reference beside it reading
+  7.0), where the CGB's table gives 7 -- +2 then 16 - v, as if a period-0
+  envelope were not "still updating". One cell, one take.
+* Worth adding: noise shift 14 freezes the LFSR on the AGB as Pan Docs says
+  for the GB (zombie.s v2: shift 14 at 1.2x the silence around it, the
+  shift-13 controls 6.0x and 5.0x, measured past the LFSR's 15-step start-up).
 * Worth adding: no trigger lead before a sweep clock. The CGB misses a sweep
   clock for a trigger within 8 T-cycles before it (4 on DMG); on the AGB a
   note triggered closer and closer to the clock goes on taking it.
