@@ -82,7 +82,7 @@ def analyse(path):
             z1 = rs[k][0]
     if z1 is None:
         print(f'{os.path.basename(path)}: the Z tone pattern is not in this recording'); return
-    sync = z1 - 3.20
+    sync = z1 - 5.00
     T = lambda s: int((sync + s) * rate)
     def mid(s, d):                          # the middle 60% of a segment
         return T(s + 0.2 * d), T(s + 0.8 * d)
@@ -90,14 +90,14 @@ def analyse(path):
     # noise: a trigger loads the LFSR with 0x7FFF, so its output holds for
     # the 15 steps until the first 0 reaches bit 0 -- 234 ms at shift 13 and,
     # on the old GBA rule, 470 ms at shift 14 -- and then varies. Compare the
-    # loudest 50 ms of 0.30..0.58 s into each segment, past that start-up.
+    # loudest 50 ms of 0.55..1.15 s into each segment, past that start-up.
     def onset(s):
-        a, b = T(s + 0.30), T(s + 0.58)       # past the LFSR start-up (below)
+        a, b = T(s + 0.55), T(s + 1.15)       # past the LFSR start-up (below)
         if a < 0: return None
         w = rate // 20
         return max(ac_rms(x, i, i + w) for i in range(a, b - w, w // 2))
-    gap = max(np.median([ac_rms(x, *mid(s, 0.3)) for s in (1.10, 2.00, 2.90) if T(s) >= 0]), 1.0)
-    n = {name: onset(s) for name, s in (('N1 shift 13', 0.50), ('N2 shift 14', 1.40), ('N3 shift 13', 2.30))}
+    gap = max(np.median([ac_rms(x, *mid(s, 0.3)) for s in (1.70, 3.20, 4.70) if T(s) >= 0]), 1.0)
+    n = {name: onset(s) for name, s in (('N1 shift 13', 0.50), ('N2 shift 14', 2.00), ('N3 shift 13', 3.50))}
     print('  noise onset loudness re the gaps: ' +
           ', '.join(f'{k} {"(before the recording)" if v is None else f"{v / gap:.1f}x"}' for k, v in n.items()))
     ctl = [v for k, v in n.items() if v is not None and 'shift 13' in k]
@@ -106,9 +106,9 @@ def analyse(path):
     else:
         print('  noise verdict: shift 14', 'frozen (GB rule)' if n['N2 shift 14'] < 0.25 * min(ctl)
               else 'steps (old GBA rule)')
-    seg = {'Z1 ref 8': (3.20, .25), 'Z2 ref 12': (3.70, .25), 'Z3a 8': (4.20, .25),
-           'Z3b 4x 0x80': (4.45, .25), 'Z4 ref 8': (4.95, .25), 'Z5a 8': (5.45, .25),
-           'Z5b 0x88': (5.70, .25), 'Z6 ref 7': (6.20, .25)}
+    seg = {'Z1 ref 8': (5.00, .25), 'Z2 ref 12': (5.50, .25), 'Z3a 8': (6.00, .25),
+           'Z3b 4x 0x80': (6.25, .25), 'Z4 ref 8': (6.75, .25), 'Z5a 8': (7.25, .25),
+           'Z5b 0x88': (7.50, .25), 'Z6 ref 7': (8.00, .25)}
     amp = {k: tone(x, rate, *mid(*v)) for k, v in seg.items()}
     ref = np.mean([amp['Z1 ref 8'], amp['Z4 ref 8']])
     for k in seg:
@@ -136,6 +136,8 @@ def record(seconds):
     code = assemble(os.path.join(HERE, '..', '..', 'tests', 'roms', 'payloads', 'zombie.s'), out_dir='/tmp')
     with Monitor() as m:
         m.ping()
+        call = m.call                       # the payload plays ~9 s; calls wait 10 s
+        m.call = lambda address, arg=0, timeout=20.0: call(address, arg, timeout)
         print('payload answered', hex(m.run_payload(code, 0)))
     rec.wait()
     analyse(out)
@@ -143,7 +145,7 @@ def record(seconds):
 
 if __name__ == '__main__':
     if sys.argv[1] == 'record':
-        record(int(sys.argv[2]) if len(sys.argv) > 2 else 12)
+        record(int(sys.argv[2]) if len(sys.argv) > 2 else 14)
     else:
         for p in sys.argv[2:]:
             analyse(p)
