@@ -242,10 +242,12 @@ proc apply_normal(g: Geometry; p: uint32) =
   let ny = sext10(p shr 10)
   let nz = sext10(p shr 20)
   if (g.teximage shr 30) == 2:
-    # texcoord from the normal: (N, 1.0) * texture matrix with S, T as row 3
+    # texcoord from the normal: (N, 1.0) * texture matrix with S, T as row 3;
+    # N has 9 fraction bits and the matrix 12, S/T keep 4: shift 21 - 4 = 17
+    # (GBATEK "DS 3D Texture Coordinates", parts table)
     let m = g.tex
-    g.s = wrap16(((int64(nx) * m[0] + int64(ny) * m[4] + int64(nz) * m[8]) shr 21) + g.s_in)
-    g.t = wrap16(((int64(nx) * m[1] + int64(ny) * m[5] + int64(nz) * m[9]) shr 21) + g.t_in)
+    g.s = wrap16(((int64(nx) * m[0] + int64(ny) * m[4] + int64(nz) * m[8]) shr 17) + g.s_in)
+    g.t = wrap16(((int64(nx) * m[1] + int64(ny) * m[5] + int64(nz) * m[9]) shr 17) + g.t_in)
   let n = g.vec_mul3(nx shl 3, ny shl 3, nz shl 3)
   var col = [int64(g.emission[0]), int64(g.emission[1]), int64(g.emission[2])]
   for i in 0..3:
@@ -427,10 +429,11 @@ proc transform(g: Geometry; x, y, z: int32): array[4, int32] =
 
 proc submit_vertex(g: Geometry) =
   if (g.teximage shr 30) == 3:
-    # texcoord from the vertex: (V, 1.0) * texture matrix, S, T as row 3
+    # texcoord from the vertex: (V, 1.0) * texture matrix, S, T as row 3;
+    # V and the matrix have 12 fraction bits each, S/T keep 4: shift 20
     let m = g.tex
-    g.s = wrap16(((int64(g.vx) * m[0] + int64(g.vy) * m[4] + int64(g.vz) * m[8]) shr 24) + g.s_in)
-    g.t = wrap16(((int64(g.vx) * m[1] + int64(g.vy) * m[5] + int64(g.vz) * m[9]) shr 24) + g.t_in)
+    g.s = wrap16(((int64(g.vx) * m[0] + int64(g.vy) * m[4] + int64(g.vz) * m[8]) shr 20) + g.s_in)
+    g.t = wrap16(((int64(g.vx) * m[1] + int64(g.vy) * m[5] + int64(g.vz) * m[9]) shr 20) + g.t_in)
   let c = g.transform(g.vx, g.vy, g.vz)
   g.add_vertex(Vertex(x: c[0], y: c[1], z: c[2], w: c[3], r: g.cr, g: g.cg, b: g.cb,
                       s: g.s, t: g.t))
