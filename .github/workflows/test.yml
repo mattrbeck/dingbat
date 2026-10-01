@@ -259,32 +259,30 @@ jobs:
         # Asserts the live `v_uv` expression in web/glpresent.js maps the
         # screen to the full [0,1] texture, row 0 at the top.
         run: node web/uv.test.mjs
-      - name: Cache Playwright's browsers
+      - name: Cache Playwright's Chromium
         # Exact key on the lockfile: a playwright bump must miss and re-download.
-        # The browser set is in the key: a hit restores only what was saved.
         if: runner.os == 'Linux'
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-chromium-webkit-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
 
-      - name: Web browser tests (headless Chromium and WebKit)
+      - name: Web browser tests (headless Chromium)
         # render.test.mjs compiles the real present shaders and checks corner
         # mapping (needs WebGL2); manualpair.test.mjs round-trips the manual-
-        # code link fallback over real RTCPeerConnections. Each in both
-        # engines: WebKit is Safari's, so the iPhone's.
+        # code link fallback over real RTCPeerConnections. Chromium here, whose
+        # system libraries the runner mostly has; WebKit runs them in
+        # web-e2e-macos, where it needs none and is Apple's own.
         if: runner.os == 'Linux'
         timeout-minutes: 30
         working-directory: web
-        # npm ci and the browser downloads are idempotent network fetches.
+        # npm ci and the Chromium download are idempotent network fetches.
         run: |
           set -e
           ../.github/scripts/retry.sh 3 npm ci
-          ../.github/scripts/retry.sh 3 npx playwright install --with-deps chromium webkit
+          ../.github/scripts/retry.sh 3 npx playwright install --with-deps chromium
           node render.test.mjs chromium
-          node render.test.mjs webkit
           node manualpair.test.mjs chromium
-          node manualpair.test.mjs webkit
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
@@ -338,6 +336,12 @@ jobs:
         with:
           name: wasm
           path: web
+      - name: Let a stalled package download fail over
+        # Ubuntu's mirror has stalled for minutes on single packages, and
+        # WebKit's dependencies are a hundred of them (28 min once).
+        run: |
+          printf 'Acquire::http::Timeout "20";\nAcquire::Retries "5";\n' |
+            sudo tee /etc/apt/apt.conf.d/99dingbat-timeouts
       - name: Cache Playwright's browsers
         uses: actions/cache@v4
         with:
@@ -385,3 +389,11 @@ jobs:
           ../.github/scripts/retry.sh 3 npx playwright install chromium webkit
           node e2e/speed-probe.mjs || true   # how fast each browser runs the game here
           node --test e2e/*.e2e.mjs
+      - name: Web browser tests in WebKit (Safari's engine, the iPhone's)
+        # The shaders and the manual-code pairing, as the Linux test job runs
+        # them in Chromium.
+        working-directory: web
+        run: |
+          set -e
+          node render.test.mjs webkit
+          node manualpair.test.mjs webkit
