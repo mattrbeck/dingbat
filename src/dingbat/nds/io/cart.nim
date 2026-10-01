@@ -46,11 +46,14 @@ proc chip_id_for(size: int): uint32 =
   while p < mb: p = p shl 1
   0xC2'u32 or (uint32(p - 1) shl 8)
 
-proc new_cart*(rom: seq[uint8]; irq9, irq7: IrqCtl; sched: NdsScheduler): Cart =
-  result = Cart(rom: rom, chip_id: chip_id_for(rom.len), irq9: irq9, irq7: irq7,
+proc new_cart*(rom: sink seq[uint8]; irq9, irq7: IrqCtl; sched: NdsScheduler): Cart =
+  let size = rom.len
+  let infrared = size > 0x0C and rom[0x0C] == uint8('I')
+  # `rom` is moved in last: a sink parameter used afterwards would be copied
+  result = Cart(rom: rom, chip_id: chip_id_for(size), irq9: irq9, irq7: irq7,
                 sched: sched, backup: new_backup())
   # Game code 'I...' = cart with an infrared port (GBATEK "NDS Gamecodes")
-  result.backup.ir = rom.len > 0x0C and rom[0x0C] == uint8('I')
+  result.backup.ir = infrared
 
 proc byte_cycles(c: Cart): int64 {.inline.} =
   ## Master cycles per card byte (bus/5 or bus/8 clock, 2 master per bus).

@@ -237,7 +237,7 @@ proc read_file_bytes(path: string): seq[uint8] =
   result = newSeq[uint8](s.len)
   if s.len > 0: copyMem(addr result[0], unsafeAddr s[0], s.len)
 
-proc new_nds*(rom: seq[uint8]; bios9, bios7, firmware: seq[uint8];
+proc new_nds*(rom: sink seq[uint8]; bios9, bios7, firmware: seq[uint8];
               force_hle = false): NDS =
   ## A missing BIOS dump (or `force_hle`) gets the HLE BIOS for that CPU.
   let n = NDS(sched: new_nds_scheduler(), vcount_write: -1)
