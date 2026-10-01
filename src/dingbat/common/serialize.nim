@@ -217,14 +217,25 @@ proc read_u8*(r: var Reader): uint8 =
 proc read_bool*(r: var Reader): bool =
   r.read_u8() != 0
 
-proc read_u16*(r: var Reader): uint16 =
-  uint16(r.read_u8()) or (uint16(r.read_u8()) shl 8)
+# Multi-byte fields: one bounds check and one load on a little-endian host.
+# A restore runs every frame under run-ahead, and byte-at-a-time reads were
+# most of its cost.
+template read_le(r: var Reader; T: typedesc): untyped =
+  r.need(sizeof(T))
+  var v: T
+  when cpuEndian == littleEndian:
+    copyMem(addr v, unsafeAddr r.buf[r.pos], sizeof(T))
+  else:
+    for i in 0 ..< sizeof(T):
+      v = v or (T(uint8(r.buf[r.pos + i])) shl (8 * i))
+  r.pos += sizeof(T)
+  v
 
-proc read_u32*(r: var Reader): uint32 =
-  for i in 0 .. 3: result = result or (uint32(r.read_u8()) shl (8 * i))
+proc read_u16*(r: var Reader): uint16 = r.read_le(uint16)
 
-proc read_u64*(r: var Reader): uint64 =
-  for i in 0 .. 7: result = result or (uint64(r.read_u8()) shl (8 * i))
+proc read_u32*(r: var Reader): uint32 = r.read_le(uint32)
+
+proc read_u64*(r: var Reader): uint64 = r.read_le(uint64)
 
 proc read_i8*(r: var Reader): int8 = cast[int8](r.read_u8())
 proc read_i16*(r: var Reader): int16 = cast[int16](r.read_u16())
@@ -244,11 +255,25 @@ proc read_seq_u8*(r: var Reader): seq[byte] =
   result = newSeq[byte](n)
   r.read_bytes(result)
 
+proc read_seq_u8_len*(r: var Reader): int =
+  ## The length of a write_seq_u8, its bytes known to follow: for a caller
+  ## that checks it and then read_bytes into a buffer it already owns,
+  ## rather than taking a fresh seq per restore.
+  result = int(r.read_u32())
+  r.need(result)
+
 proc read_seq_u16_into*(r: var Reader; dest: var openArray[uint16]) =
+  ## write_seq_u16's mirror: one copy on a little-endian host.
   let n = int(r.read_u32())
   if n != dest.len:
     raise state_error("state buffer size mismatch")
-  for i in 0 ..< n: dest[i] = r.read_u16()
+  when cpuEndian == littleEndian:
+    if n > 0:
+      r.need(2 * n)
+      copyMem(addr dest[0], unsafeAddr r.buf[r.pos], 2 * n)
+      r.pos += 2 * n
+  else:
+    for i in 0 ..< n: dest[i] = r.read_u16()
 
 proc peek_tag*(r: Reader): uint8 =
   ## Next section marker without consuming it, 0 at end of payload: lets a

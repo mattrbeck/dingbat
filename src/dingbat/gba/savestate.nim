@@ -655,17 +655,23 @@ proc load_storage_state(st: Storage; r: var Reader) =
   let kind = r.read_u8()
   if kind != storage_kind_tag(st):
     raise newException(StateError, "save state backup type mismatch")
-  let mem = r.read_seq_u8()
+  # Into the live buffer (a failed load rolls back from its backup), not a
+  # fresh seq: a restore runs every frame under run-ahead.
+  let n = r.read_seq_u8_len()
   if st of EEPROM:
     # EEPROM buffers are sized lazily, so the file chooses the length. The
     # write path indexes an UncheckedArray over `memory`, so an undersized
     # buffer is a heap write primitive: only the two legal sizes pass.
-    check_one_of(mem.len, [0x200, 0x2000], "eeprom.memory.len")
-    st.memory = mem
-  else:
-    if mem.len != st.memory.len:
-      raise state_error("save state backup size mismatch")
-    st.memory = mem
+    check_one_of(n, [0x200, 0x2000], "eeprom.memory.len")
+  elif n != st.memory.len:
+    raise state_error("save state backup size mismatch")
+  # The .sav is rewritten only if the state's RAM differs from what the
+  # cart holds: run-ahead restores every frame, and marking it dirty
+  # unconditionally rewrote the save file (fsync'd, natively) every frame.
+  let changed = n != st.memory.len or
+    (n > 0 and not equalMem(addr st.memory[0], unsafeAddr r.buf[r.pos], n))
+  st.memory.setLen(n)
+  r.read_bytes(st.memory)
   if st of Flash:
     let fl = Flash(st)
     let ft = r.read_u8()
@@ -705,7 +711,7 @@ proc load_storage_state(st: Storage; r: var Reader) =
                         $ep.memory.len & "-byte EEPROM")
     # busy_until is not in the format: treat in-flight programming as settled
     ep.busy_until = 0
-  st.dirty = true  # persist to the .sav on the next flush
+  if changed: st.dirty = true  # persist to the .sav on the next flush
 
 # ---- In-flight machine state (rev 9) ----
 #
