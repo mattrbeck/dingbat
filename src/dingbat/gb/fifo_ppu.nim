@@ -2225,19 +2225,23 @@ proc fifo_plain_ok(ppu: GbFifoPpu; gb: GB; n: int): bool {.inline.} =
     result = result and cc > ppu.tdsel_dot
 
 proc fifo_plain_span_of(ppu: GbFifoPpu; gb: GB; n: int; blocks: bool;
-                        win, spr: static bool) =
+                        win, spr, sgb: static bool) =
   ## `n` dots of tick_bg_fetcher + tick_shifter under fifo_plain_ok, fetching
   ## the window (`win`) or the background, with an object's pixels still in
-  ## the OBJ FIFO (`spr`) or none: one copy each, so none pays another's
-  ## branch in the block.
+  ## the OBJ FIFO (`spr`) or none, colouring through the SGB (`sgb`) or not:
+  ## one copy each, so none pays another's branch in the block.
   let row = GB_WIDTH * int(ppu.ly)
   # fifo_mix with an empty OBJ FIFO: sprite_wins refuses colour 0, so the
   # pixel is the BG entry through LCDC.0 (BG_EN_AT_MIX) and its palette. The
-  # inputs cannot change inside a span (a write ends it). SGB colours per cell
-  # and takes the general mixer.
+  # inputs cannot change inside a span (a write ends it; an SGB packet syncs a
+  # deferred one first, sgb_execute). SGB colours the same shade by its 8x8
+  # cell's palette, fifo_mix's last step. SGB pixels through fifo_mix measured
+  # +83 % on Pokemon Blue; an SGB test in the shared copies, +0.2-0.4 % on
+  # every other game.
   let native = gb.cgb_native
   let bg_on = bg_display(ppu) or native
-  let sgb = ppu.sgb_attr != nil
+  when sgb:
+    let cell_row = (int(ppu.ly) shr 3) * SGB_ATTR_W
   template emit() =
     # As fifo_emit_pixel: the OBJ FIFO pops with the BG one, on or off screen.
     let bg_px = fifo_shift(ppu.fifo)
@@ -2250,15 +2254,20 @@ proc fifo_plain_span_of(ppu: GbFifoPpu; gb: GB; n: int; blocks: bool;
     if ppu.lx >= 0:
       when MIXER_DOT_LAG != 0:
         ppu.mix[ppu.lx and (MIX_HOLD - 1)] = GbMixHold(bg: bg_px, sp: sp_px)
-      if has_sp or sgb:
+      if has_sp:
         ppu.framebuffer[row + int(ppu.lx)] =
           fifo_mix(ppu, gb, bg_px, sp_px, ppu.lx)
       else:
         let c = if bg_on: bg_px.color else: 0'u8
         let final = if native: int(c) else: int(ppu.bgp[c])
-        let o = (int(bg_px.palette) * 4 + final) * 2
-        ppu.framebuffer[row + int(ppu.lx)] =
-          uint16(ppu.pram[o]) or (uint16(ppu.pram[o + 1]) shl 8)
+        when sgb:
+          let cell = cell_row + int(ppu.lx shr 3)
+          ppu.framebuffer[row + int(ppu.lx)] =
+            ppu.sgb_pal[int(ppu.sgb_attr[cell]) * 4 + final]
+        else:
+          let o = (int(bg_px.palette) * 4 + final) * 2
+          ppu.framebuffer[row + int(ppu.lx)] =
+            uint16(ppu.pram[o]) or (uint16(ppu.pram[o + 1]) shl 8)
     inc ppu.lx
   template get_tile() =
     when win:
@@ -2324,12 +2333,21 @@ proc fifo_plain_span_of(ppu: GbFifoPpu; gb: GB; n: int; blocks: bool;
     ppu.cycle_counter += 1
     dec left
 
-proc fifo_plain_span(ppu: GbFifoPpu; gb: GB; n: int; blocks = true) {.inline.} =
+proc fifo_plain_span_sgb(ppu: GbFifoPpu; gb: GB; n: int; blocks: bool) {.noinline.} =
+  ## The SGB copies, out of line so the common dispatch below stays as small.
   if ppu.fifo_sprite.size > 0:
-    if ppu.fetching_window: fifo_plain_span_of(ppu, gb, n, blocks, true, true)
-    else: fifo_plain_span_of(ppu, gb, n, blocks, false, true)
-  elif ppu.fetching_window: fifo_plain_span_of(ppu, gb, n, blocks, true, false)
-  else: fifo_plain_span_of(ppu, gb, n, blocks, false, false)
+    if ppu.fetching_window: fifo_plain_span_of(ppu, gb, n, blocks, true, true, true)
+    else: fifo_plain_span_of(ppu, gb, n, blocks, false, true, true)
+  elif ppu.fetching_window: fifo_plain_span_of(ppu, gb, n, blocks, true, false, true)
+  else: fifo_plain_span_of(ppu, gb, n, blocks, false, false, true)
+
+proc fifo_plain_span(ppu: GbFifoPpu; gb: GB; n: int; blocks = true) {.inline.} =
+  if ppu.sgb_attr != nil: fifo_plain_span_sgb(ppu, gb, n, blocks)
+  elif ppu.fifo_sprite.size > 0:
+    if ppu.fetching_window: fifo_plain_span_of(ppu, gb, n, blocks, true, true, false)
+    else: fifo_plain_span_of(ppu, gb, n, blocks, false, true, false)
+  elif ppu.fetching_window: fifo_plain_span_of(ppu, gb, n, blocks, true, false, false)
+  else: fifo_plain_span_of(ppu, gb, n, blocks, false, false, false)
 
 when defined(gb_plaincheck) or defined(gb_spancheck):
   type PlainSnap = object
@@ -2534,7 +2552,7 @@ proc fifo_tick_slow(ppu: GbFifoPpu; gb: GB; cycles: int) =
             else:
               when PLAIN_LAZY_ON:
                 let h = fifo_plain_horizon(ppu)
-                if h >= int32(remaining) + PLAIN_LAZY_MIN and ppu.sgb_attr == nil:
+                if h >= int32(remaining) + PLAIN_LAZY_MIN:
                   fifo_lazy_enter(ppu, gb, remaining, h)
                 else:
                   fifo_plain_span(ppu, gb, remaining)

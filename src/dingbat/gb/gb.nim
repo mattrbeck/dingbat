@@ -3348,6 +3348,12 @@ proc gb_sync_cgb_native*(gb: GB) {.inline.} =
 include interrupts
 include serial
 include timer
+# Deferred mode 3 (PLAIN_LAZY, fifo_ppu.nim): anything that reads the
+# pipeline, or changes what it reads, runs the deferred dots first.
+proc fifo_lazy_sync*(ppu: GbFifoPpu; gb: GB) {.noinline.}
+template fifo_sync*(gb: GB) =
+  if gb.fifo_ppu.lazy_end != 0:
+    fifo_lazy_sync(gb.fifo_ppu, gb)
 include sgb
 include joypad
 # Video: shared PPU base + the FIFO renderer
@@ -3371,18 +3377,12 @@ proc mem_dma_tick*(mem: GbMemory; gb: GB; cycles: int)
 proc mem_vdma_bus_capture*(mem: GbMemory; gb: GB; src_lo: uint8; val: uint8)
 proc read_byte*(mem: GbMemory; gb: GB; idx: int): uint8
 proc write_byte*(mem: GbMemory; gb: GB; idx: int; val: uint8)
-# Deferred mode 3 (PLAIN_LAZY, fifo_ppu.nim): anything that reads the
-# pipeline, or changes what it reads, runs the deferred dots first.
-proc fifo_lazy_sync*(ppu: GbFifoPpu; gb: GB) {.noinline.}
 const GB_IDLE_SKIP* {.intdefine.} = 1
   ## Idle loops and HALT skipped up to the next point they can observe
   ## (cpu.nim, wl_head_check / wl_halt_skip); 0 runs every M-cycle.
 const GB_APU_EVENTS* = {etAPUFrameSeq, etAPUSample, etAPUChannel1,
                         etAPUChannel2, etAPUChannel3, etAPUChannel4}
   ## Events that change nothing but the APU: an idle skip runs through them.
-template fifo_sync*(gb: GB) =
-  if gb.fifo_ppu.lazy_end != 0:
-    fifo_lazy_sync(gb.fifo_ppu, gb)
 
 include ppu
 include fifo_ppu

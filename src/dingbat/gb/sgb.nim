@@ -289,6 +289,9 @@ proc sgb_execute(gb: GB; d: openArray[uint8]) =
     let nm = if int(cmd) < SGB_CMD_NAMES.len: SGB_CMD_NAMES[int(cmd)] else: "?"
     echo "SGB cmd $" & toHex(cmd, 2) & " " & nm & " len " & $(d[0] and 7) & hex
   if s.packets_locked: return       # ICON_EN bit 2 latched — see SgbState
+  # The palettes and attribute map are mixer inputs: a deferred mode-3
+  # stretch (PLAIN_LAZY) is coloured with the ones in force before this.
+  fifo_sync(gb)
   case cmd
   of 0x0E:                          # ICON_EN
     if (d[1] and 0x04) != 0: s.packets_locked = true
