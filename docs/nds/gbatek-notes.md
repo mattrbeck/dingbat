@@ -1352,22 +1352,22 @@ quirky titles: Over the Hedge, and Rune Factory, which should be forced to
 **CPU registers**
 | CPU | r0–r11 | r12, lr, pc | sp_sys | sp_irq | sp_svc | Mode |
 |---|---|---|---|---|---|---|
-| NDS9 | 0 | entry | `0x3002F7C` | `0x3003F80` | `0x3003FC0` | system, ARM, IRQs off **[not GBATEK]** |
-| NDS7 | 0 | entry | `0x380FD80` | `0x380FF80` | `0x380FFC0` | system, ARM |
+| NDS9 | 0 | entry | `0x0803EC0` | `0x0803FA0` | `0x0803FC0` | system, ARM, CPSR `0x5F` |
+| NDS7 | 0 | entry | `0x380FF00` | `0x380FFB0` | `0x380FFDC` | system, ARM, CPSR `0x5F` |
+
+**[not GBATEK]** These are what the BIOSes' own hand-off code writes on the
+way to the entry point (ARM9 BIOS `0x21C`, ARM7 BIOS `0x2D78`, reached from
+both the firmware boot and SoftReset): the ARM9 stacks are in DTCM at
+`0x00800000`, and the top 0x200 bytes of each stack area are zeroed.
 
 lr and SPSR in irq and svc modes are 0. Entry bit 0 is not used for T at boot,
 since the header entries are ARM.
 
-**CP15** (GBATEK gives no post-firmware dump; these values are derived)
-- Control: `0x00012078` (the value SoftReset sets: high vectors, DTCM on, PU and
-  caches off). The SDK crt0 reprograms CP15 anyway.
-- DTCM (c9,c1,0): `0x027C000A` (0x027C0000, 16K) per the GBATEK default. The
-  BIOS SoftReset assumes `0x0080000A`.
-- ITCM (c9,c1,1): `0x00000020` (32 MB virtual size, which the firmware uses).
-- The PU regions can be set per §1.5, or left disabled.
-- **[not GBATEK]** A post-firmware CP15 dump from hardware would settle this.
-  The `gba-hardware` skill can't do it (it is GBA-only), so this needs a DS
-  homebrew probe.
+**CP15** **[not GBATEK]**: the ARM9 BIOS's hand-off writes control
+`0x00012078` (DTCM on, ITCM off, high vectors, PU and caches off) and DTCM
+(c9,c1,0) `0x0080000A` (0x00800000, 16 KB); ITCM is left disabled. The SDK
+crt0 reprograms CP15 anyway; code that doesn't (armwrestler) keeps its stacks
+in that DTCM.
 
 **I/O**
 | Register | Value |

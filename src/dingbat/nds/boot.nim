@@ -110,25 +110,26 @@ proc direct_boot*(n: NDS) =
   n.powcnt2 = 1
   n.biosprot = 0x1204
   n.cart.romctrl = 0x2000_0000'u32  # reset released, KEY2 data mode
-  # CP15 (derived; the crt0 reprograms it): DTCM 0x027C0000 16 KB, ITCM
-  # 32 MB window from 0, high vectors.
+  # CP15 and CPUs as the BIOS's own hand-off leaves them: on its way to the
+  # entry point (SoftReset and the firmware boot both pass through it) the
+  # ARM9 BIOS writes control = 0x00012078 (DTCM on, ITCM off, high vectors),
+  # DTCM = 0x0080000A (0x00800000, 16 KB) and sets the stacks in that DTCM;
+  # the ARM7 BIOS sets its stacks at the top of its WRAM. Both end in system
+  # mode with IRQs unmasked in the CPSR (IME is 0) and FIQs masked.
   n.cp15.reset()
-  n.cp15.write(0, 9, 1, 0, 0x027C000A'u32)
-  n.cp15.write(0, 9, 1, 1, 0x00000020'u32)
-  n.cp15.write(0, 1, 0, 0, 0x00052078'u32)  # + ITCM on
+  n.cp15.write(0, 9, 1, 0, 0x0080000A'u32)
+  n.cp15.write(0, 1, 0, 0, 0x00012078'u32)
   n.arm9.vector_base = n.cp15.vector_base()
-  # CPUs: system mode, ARM, stacks per GBATEK.
-  for cpu9 in [n.arm9]:
-    cpu9.set_cpsr(uint32(mSYS) or FLAG_I or FLAG_F)
-    cpu9.set_mode_sp(mSYS, 0x03002F7C'u32)
-    cpu9.set_mode_sp(mIRQ, 0x03003F80'u32)
-    cpu9.set_mode_sp(mSVC, 0x03003FC0'u32)
-    cpu9.r[12] = arm9_entry; cpu9.r[14] = arm9_entry
-    cpu9.next_pc = arm9_entry
-  n.arm7.set_cpsr(uint32(mSYS) or FLAG_I or FLAG_F)
-  n.arm7.set_mode_sp(mSYS, 0x0380FD80'u32)
-  n.arm7.set_mode_sp(mIRQ, 0x0380FF80'u32)
-  n.arm7.set_mode_sp(mSVC, 0x0380FFC0'u32)
+  n.arm9.set_cpsr(uint32(mSYS) or FLAG_F)
+  n.arm9.set_mode_sp(mSYS, 0x00803EC0'u32)
+  n.arm9.set_mode_sp(mIRQ, 0x00803FA0'u32)
+  n.arm9.set_mode_sp(mSVC, 0x00803FC0'u32)
+  n.arm9.r[12] = arm9_entry; n.arm9.r[14] = arm9_entry
+  n.arm9.next_pc = arm9_entry
+  n.arm7.set_cpsr(uint32(mSYS) or FLAG_F)
+  n.arm7.set_mode_sp(mSYS, 0x0380FF00'u32)
+  n.arm7.set_mode_sp(mIRQ, 0x0380FFB0'u32)
+  n.arm7.set_mode_sp(mSVC, 0x0380FFDC'u32)
   n.arm7.r[12] = arm7_entry; n.arm7.r[14] = arm7_entry
   n.arm7.next_pc = arm7_entry
   n.arm7.vector_base = 0
