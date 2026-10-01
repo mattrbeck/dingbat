@@ -48,7 +48,7 @@ proc io7_read(n: NDS; a: uint32): uint32 =
   of 0x138: uint32(n.rtc.read_reg())
   of 0x180: n.ipc.read_sync(false)
   of 0x184: n.ipc.read_fifocnt(false)
-  of 0x1A0 .. 0x1AC: (if n.cart.owner_arm7: n.cart.read_reg(o) else: 0'u32)
+  of 0x1A0 .. 0x1B8: (if n.cart.owner_arm7: n.cart.read_reg(o) else: 0'u32)
   of 0x1C0: n.spi.read_reg(o)
   of 0x204: uint32((n.exmemcnt and 0xFF80'u16) or n.exmem7_lo)
   of 0x208, 0x210, 0x214: n.irq7.read_reg(o)
@@ -88,8 +88,8 @@ proc io7_write(n: NDS; a: uint32; v, mask: uint32) =
   of 0x180: n.ipc.write_sync(false, v, mask)
   of 0x184: n.ipc.write_fifocnt(false, v, mask)
   of 0x188: n.ipc.send(false, v)
-  of 0x1A0 .. 0x1AC:
-    if n.cart.owner_arm7: n.cart.write_reg(o, v, mask, n.arm7.cur_pc)
+  of 0x1A0 .. 0x1B8:
+    if n.cart.owner_arm7: n.cart.write_reg(o, v, mask, n.arm7.cur_pc, from7 = true)
   of 0x1C0:
     if (mask and 0xFFFF) != 0: n.spi.write_cnt(v, mask)
     if (mask and 0x00FF_0000'u32) != 0: n.spi.write_data(uint8(v shr 16))

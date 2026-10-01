@@ -43,6 +43,12 @@ on a dev page (`web/nds.html`). Hardware reference: `docs/nds/gbatek-notes.md`
   synthesized when missing, and a missing BIOS gets the HLE BIOS (below).
   `DINGBAT_NDS_HLE=1` (or `new_nds(..., force_hle = true)`) forces the HLE
   BIOS with dumps present, to compare the two on one ROM.
+- **Boot:** direct boot by default (the card's binaries loaded, the
+  post-BIOS state written; encrypted, decrypted and ID-overwritten secure
+  areas all handled). `--boot firmware` / `new_nds(..., boot = nbFirmware)`
+  runs the real BIOSes and firmware from power-on through the card's KEY1/
+  KEY2 handshake and the DS menu (all three dumps needed; no ROM = empty
+  slot). docs/nds/boot.md.
 
 ## Timeline and timing
 
@@ -71,7 +77,8 @@ src/dingbat/nds/
   nds.nim          NDS object, construction, event dispatch, frame loop
   bus9.nim         ARM9 map + I/O dispatch     (included by nds.nim)
   bus7.nim         ARM7 map + I/O dispatch     (included by nds.nim)
-  boot.nim         direct boot, synthesized firmware, CRC16
+  boot.nim         direct boot, firmware boot (power-on), synthesized
+                   firmware, CRC16
   hle_bios.nim     HLE BIOS: synthesized images + SWIs answered in Nim
   hle_bios.s       its guest code (vectors, IRQ/SWI dispatch, IntrWait,
                    callback decompressors); tools/nds_hle_bios.sh assembles
@@ -93,7 +100,8 @@ src/dingbat/nds/
   io/divsqrt.nim   ARM9 maths unit
   io/input.nim     KEYINPUT/KEYCNT/EXTKEYIN, touch, lid
   io/spi.nim       ARM7 SPI: power manager, firmware flash, touchscreen
-  io/cart.nim      card slot (ROMCTRL, B7 reads, AUXSPI)
+  io/cart.nim      card slot (ROMCTRL, raw/KEY1/KEY2 protocol, seeds, AUXSPI)
+  io/cartcrypt.nim KEY1 (BIOS7 table at run time), KEY2, secure-area forms
   io/backup.nim    save chip: EEPROM/FRAM/FLASH, IR-cart front-end
   io/slot2.nim     GBA slot: open bus, GBA cart (ROM, SRAM/FLASH/EEPROM via
                    gba/storage_chip.nim, GPIO), Rumble Pak, Expansion Pak
@@ -108,6 +116,7 @@ tests/nds/                         ROM sources, build tools, README
 tests/nds_3d_test.nim              3D engine driven through write_reg -> checks + PNGs
 tests/nds_hle_bios_test.nim        every HLE SWI against the real BIOS
 tests/nds_slot2_test.nim           GBA-slot devices + the slot2_probe ROM
+tests/nds_boot_test.nim            KEY1/KEY2, card handshake, secure area, direct boot
 ```
 
 I/O registers are reached as aligned 32-bit words with a byte mask
@@ -141,8 +150,8 @@ Third-party test ROMs: `~/.cache/dingbat-nds/roms/` (tests/nds/README.md).
 | Input / touch / SPI / RTC | `touch_test` tracks the mouse |
 | 3D | `Simple_Tri`, `Simple_Quad` |
 | Sound | maxmod examples and Pokemon SoulSilver play (tests/nds_spu_test.nim, `snd_suite.nds` against the reference cores: docs/oracles.md NDS core) |
-| Card + backup | a commercial ROM's B7 reads + save detection |
 | GBA slot | `slot2_probe` under each device; SoulSilver's MIGRATE FROM <GBA game> with a Generation 3 cart (docs/nds/slot2.md) |
+| Card + backup | a commercial ROM's B7 reads + save detection; the KEY1/KEY2 boot handshake (docs/nds/boot.md) |
 | Timing | wait states, cache model, frame-rate-stable commercial boot |
 | Frontend | desktop SDL target with both screens; main web UI integration |
 
@@ -202,4 +211,7 @@ BIOS or the HLE BIOS (identical frames). Driven by `ndsrun --press` scripts
 script gives the same frames as the reference core at most checkpoints
 (`tools/ndsref`, docs/oracles.md). Open: 3D rasterisation differs from the
 reference by edge pixels (bedroom, overworld), the title screen's 3D Lugia
-differs, a 2D alpha fade is one step off in places.
+differs, a 2D alpha fade is one step off in places. It also boots through
+the real BIOS, firmware and DS menu (`--boot firmware --press A@300,A@460`)
+from any of its dump forms, frame for frame with the reference core's
+firmware boot after the menu (docs/nds/boot.md).

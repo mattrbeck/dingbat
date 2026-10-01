@@ -1211,10 +1211,11 @@ CRC16 is the BIOS GetCRC16 algorithm with initial 0xFFFF (§12.4).
 - The first 8 bytes, once decrypted, read "encryObj". The BIOS replaces them
   with `0xE7FFDEFF 0xE7FFDEFF`. With a bad ID it fills the whole 2 KB with
   `0xE7FFDEFF`.
-- Direct boot needs a **decrypted** dump, as most dumps are. If the first 8
-  bytes read "encryObj", replace them with `E7FFDEFF E7FFDEFF`.
+- Direct boot of a **decrypted** dump (most are): if the first 8 bytes read
+  "encryObj", replace them with `E7FFDEFF E7FFDEFF`.
 - An encrypted dump needs KEY1 (Blowfish), whose 0x1048-byte P/S table comes
-  from ARM7 BIOS `0x30–0x1077`.
+  from ARM7 BIOS `0x30–0x1077`. dingbat handles every form either way:
+  docs/nds/boot.md.
 - Retail carts can't read ROM `0x1000–0x3FFF`.
 
 ### 11.3 Registers (owner set by `EXMEMCNT.11`)
@@ -1292,8 +1293,9 @@ every 4 bytes.
   - Each step: `x = (((x>>5)^(x>>17)^(x>>18)^(x>>31))&0xFF) + (x<<8)`.
     y follows the same form with taps 5, 23, 18, 31.
   - `data ^= x^y`.
-  - The hardware decrypts on both ends, so the CPU never sees ciphertext. An
-    emulator can ignore KEY2.
+  - The hardware decrypts on both ends, so the CPU sees plaintext as long
+    as ROMCTRL.13/.22 are set and both seeds agree (dingbat models both
+    streams: docs/nds/boot.md).
 - KEY1 (Blowfish keyed by the gamecode) only matters for real-BIOS boot and
   encrypted secure areas.
 
