@@ -58,6 +58,7 @@ type
     wait9*, wait7*: int64       ## bus cycles charged to the running instruction
     last_fetch9*, last_data9*: uint32  ## sequential-access tracking
     last_fetch7*, last_data7*: uint32
+    mmem_armed*: array[4, bool] ## DMA mode 4 channels running this frame
     frame_done*: bool
     line_start*: int64          ## master cycle the current line began
     unmapped_log*: int          ## first few unmapped accesses are logged
@@ -134,7 +135,6 @@ include bus9, bus7, boot
 
 const
   GX_DMA_BURST = 112          ## words per geometry-FIFO request (GBATEK)
-  MMEM_LINE_WORDS = 128       ## one line of main-memory display, 256 px
 
 proc gx_dma(n: NDS) =
   ## ARM9 DMA mode 7: bursts into the geometry FIFO while it is less than
@@ -170,17 +170,18 @@ proc gx_service(n: NDS; appended = false) =
   if at == high(int64): n.sched.cancel(evGxFifo)
   else: n.sched.schedule(max(at, n.sched.now + 1), evGxFifo)
 
-proc mmem_dma(n: NDS) =
-  ## ARM9 DMA mode 4: feed one line of main-memory display (engine A
-  ## display mode 3) through the display FIFO, a channel block at a time.
-  if n.gpu.engine_a.display_mode() != 3: return
-  let bus = Arm9Bus(nds: n)
+proc mmem_request(ctx: pointer): bool {.nimcall.} =
+  ## ARM9 DMA mode 4: the main-memory display FIFO has room for 4 words;
+  ## the first channel armed for this frame moves one block (its count:
+  ## GBATEK sets it to 4, larger blocks overflow the FIFO and the rest is
+  ## dropped). A channel enabled mid-frame waits for the next frame
+  ## ("Transfer starts at next frame", GBATEK).
+  let n = cast[NDS](ctx)
   for i in 0..3:
-    var left = uint32(MMEM_LINE_WORDS)
-    while left > 0 and n.dma9.ch[i].enabled and n.dma9.timing(i) == dtMainMemDisplay:
-      let units = min(left, n.dma9.ch[i].cur_count)
-      n.dma9.transfer_units(bus, i, units)
-      left -= units
+    if n.mmem_armed[i] and n.dma9.ch[i].enabled and n.dma9.timing(i) == dtMainMemDisplay:
+      n.dma9.transfer_units(Arm9Bus(nds: n), i, n.dma9.ch[i].cur_count)
+      return true
+  false
 
 # ---------------------------------------------------------------------------
 # Display timing events
@@ -229,7 +230,8 @@ proc on_line_end(n: NDS) =
     g.in_vblank = false
   elif g.vcount == 0:
     n.dma9.trigger(Arm9Bus(nds: n), dtDisplayStart)
-  if g.vcount < VISIBLE_LINES: n.mmem_dma()
+    for i in 0..3:
+      n.mmem_armed[i] = n.dma9.ch[i].enabled and n.dma9.timing(i) == dtMainMemDisplay
   if g.vcount == int(g.stat9.vcount_setting): n.dispstat_irqs(g.stat9, n.irq9, irqVCount)
   if g.vcount == int(g.stat7.vcount_setting): n.dispstat_irqs(g.stat7, n.irq7, irqVCount)
   n.sched.schedule(n.line_start + HBLANK_CYCLES, evHBlank)
@@ -282,6 +284,8 @@ proc new_nds*(rom: seq[uint8]; bios9, bios7, firmware: seq[uint8];
   n.gpu3d.sched = n.sched
   n.gpu3d.next_vblank = int64(VISIBLE_LINES) * LINE_CYCLES
   n.gpu.gpu3d = n.gpu3d
+  n.gpu.mmem_req = mmem_request
+  n.gpu.mmem_ctx = cast[pointer](n)
   n.timers9 = Timers(sched: n.sched, irq: n.irq9, first_event: evTimer9_0)
   n.timers7 = Timers(sched: n.sched, irq: n.irq7, first_event: evTimer7_0)
   n.dma9 = new_dma(true, n.irq9)

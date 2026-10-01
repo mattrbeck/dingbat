@@ -101,7 +101,12 @@ proc io9_write(n: NDS; a: uint32; v, mask: uint32) =
     if (mask and 0xFFFF_0000'u32) != 0: n.write_vcount(v shr 16)
   of 0x060: n.gpu3d.write_reg(o, v, mask)
   of 0x0B0 .. 0x0EC:
+    var was: array[4, bool]
+    for i in 0..3: was[i] = n.dma9.ch[i].enabled
     n.dma9.write_reg(Arm9Bus(nds: n), o, v, mask)
+    # a channel (re)started mid-frame waits for the next frame in mode 4
+    for i in 0..3:
+      if n.dma9.ch[i].enabled and not was[i]: n.mmem_armed[i] = false
     n.gx_service()
   of 0x100 .. 0x10C: n.timers9.write_reg(o, v, mask)
   of 0x130:
