@@ -2,7 +2,7 @@
 
 Status: **prototype**. The DS core lives beside the GB and GBA cores
 (`src/dingbat/nds/`), boots homebrew by direct boot, and renders both screens
-on a dev page (`web/nds.html`). Hardware reference: `docs/nds/gbatek-notes.md`
+on a dev page (`web/nds.html`) and in the main web app (`docs/nds/web.md`). Hardware reference: `docs/nds/gbatek-notes.md`
 (GBATEK distilled into shared / changed / new against the GBA).
 
 ## What the DS is, against what dingbat already has
@@ -44,6 +44,12 @@ on a dev page (`web/nds.html`). Hardware reference: `docs/nds/gbatek-notes.md`
   synthesized when missing, and a missing BIOS gets the HLE BIOS (below).
   `DINGBAT_NDS_HLE=1` (or `new_nds(..., force_hle = true)`) forces the HLE
   BIOS with dumps present, to compare the two on one ROM.
+- **Boot:** direct boot by default (the card's binaries loaded, the
+  post-BIOS state written; encrypted, decrypted and ID-overwritten secure
+  areas all handled). `--boot firmware` / `new_nds(..., boot = nbFirmware)`
+  runs the real BIOSes and firmware from power-on through the card's KEY1/
+  KEY2 handshake and the DS menu (all three dumps needed; no ROM = empty
+  slot). docs/nds/boot.md.
 
 ## Timeline and timing
 
@@ -60,7 +66,20 @@ the protection unit; instructions add their internal cycles. An ARM9 cycle is
 one master cycle, an ARM7 cycle two. The few unpublished values are marked
 Assumed in `timing.nim`. The card (`cart.nim`) times ROM words by its CLK,
 gap1 and gap2, and both SPI buses keep their busy flags for the byte's time at
-the selected baud rate. With these, SoulSilver runs frame-locked with the
+the selected baud rate. GBA-slot accesses take their times from the
+accessing CPU's own EXMEMCNT bits 0-4 (the table's rows are the default
+setting). With these, SoulSilver runs frame-locked with the reference core
+(docs/oracles.md, "NDS core").
+
+The geometry engine takes GBATEK's cycles per command, a full GX FIFO holds
+the writing CPU (and the ARM7), SWAP_BUFFERS waits for V-blank + 392, DMA
+mode 7 and the GXFIFO IRQ follow the FIFO level through an `evGxFifo`
+booking, and DMA mode 4 feeds the main-memory display FIFO 4 words per
+request as the display reads it. The renderer's line budget gives
+RDLINES_COUNT and the underflow flag. docs/nds/3d-timing.md has the model
+and its evidence.
+the selected baud rate (the ARM7 bus delivers its reply and IRQ at the end:
+docs/nds/peripherals.md). With these, SoulSilver runs frame-locked with the
 reference core (docs/oracles.md, "NDS core").
 
 ## Layout
@@ -70,7 +89,8 @@ src/dingbat/nds/
   nds.nim          NDS object, construction, event dispatch, frame loop
   bus9.nim         ARM9 map + I/O dispatch     (included by nds.nim)
   bus7.nim         ARM7 map + I/O dispatch     (included by nds.nim)
-  boot.nim         direct boot, synthesized firmware, CRC16
+  boot.nim         direct boot, firmware boot (power-on), synthesized
+                   firmware, CRC16
   hle_bios.nim     HLE BIOS: synthesized images + SWIs answered in Nim
   hle_bios.s       its guest code (vectors, IRQ/SWI dispatch, IntrWait,
                    callback decompressors); tools/nds_hle_bios.sh assembles
@@ -81,30 +101,47 @@ src/dingbat/nds/
   arm/cp15.nim     CP15 registers, TCM regions
   mem/vram.nim     VRAM banks A-I, VRAMCNT page tables
   gpu/gpu.nim      display timing, DISPSTAT, POWCNT1, screen routing
-  gpu/engine2d.nim 2D engine A/B registers + line renderer
-  gpu3d/gpu3d.nim  3D engine: GXFIFO/ports, GXSTAT, registers, BG0 line output
+  gpu/engine2d.nim 2D engine A/B registers + line renderer, main-memory display FIFO
+  gpu3d/gpu3d.nim  3D engine: GXFIFO/ports, command timing, GXSTAT, registers, BG0 line output
   gpu3d/geometry.nim matrices, lighting, polygon assembly, clipping, tests
-  gpu3d/render.nim  whole-frame rasteriser: textures, depth, blending, fog, edges
+  gpu3d/render.nim  whole-frame rasteriser: textures, depth, blending, fog, edges,
+                   line budget (RDLINES)
   io/irq.nim       IME/IE/IF per CPU
   io/timers.nim    4 timers per CPU
   io/dma.nim       4 channels per CPU (+ ARM9 fill regs)
   io/ipc.nim       IPCSYNC + FIFOs
   io/divsqrt.nim   ARM9 maths unit
-  io/input.nim     KEYINPUT/KEYCNT/EXTKEYIN, touch, lid
+  io/input.nim     KEYINPUT/KEYCNT/EXTKEYIN, touch, lid (IF.22)
   io/spi.nim       ARM7 SPI: power manager, firmware flash, touchscreen
-  io/cart.nim      card slot (ROMCTRL, B7 reads, AUXSPI)
+                   (docs/nds/peripherals.md)
+  io/mic.nim       microphone sample queue, read by the TSC's AUX channel
+  io/cart.nim      card slot (ROMCTRL, raw/KEY1/KEY2 protocol, seeds, AUXSPI)
+  io/cartcrypt.nim KEY1 (BIOS7 table at run time), KEY2, secure-area forms
   io/backup.nim    save chip: EEPROM/FRAM/FLASH, IR-cart front-end
+  io/slot2.nim     GBA slot: open bus, GBA cart (ROM, SRAM/FLASH/EEPROM via
+                   gba/storage_chip.nim, GPIO), Rumble Pak, Expansion Pak
+                   (docs/nds/slot2.md)
   io/spu.nim       ARM7 sound: 16 channels, capture, stereo out at 32728.5 Hz
-  io/rtc.nim       ARM7 RTC (host clock, or emulated time from a date)
-  io/wifi.nim      wifi MAC/BB/RF without a radio (nothing is received)
+  io/rtc.nim       ARM7 RTC (host clock, or emulated time from a date),
+                   INT1/INT2 interrupts to SIO SI, RCNT
+  io/wifi.nim      wifi MAC/BB/RF, transmitter, receiver, the Air between
+                   consoles (docs/nds/wifi.md)
+  air.nim          several machines in lockstep on one Air (local wireless)
   savestate.nim    save states: the machine walked field by field
                    (docs/nds/savestate.md)
-src/dingbat_nds_wasm.nim(+.nims)  wasm exports for web/nds.html
+src/dingbat_nds_wasm.nim(+.nims)  wasm exports (createNdsCore) for the app and web/nds.html
 tools/ndsrun.nim                   headless runner: ROM -> PNG of both screens
-web/nds.html, web/nds/             dev page (two canvases, keys, touch)
+tools/ndsair.nim                   the same for N machines on one Air
+web/nds.html, web/nds/             dev page (two canvases, keys, touch); ndsutil.js,
+                                   ndsaudio.js for the main app (docs/nds/web.md)
 tests/nds/                         ROM sources, build tools, README
-tests/nds_3d_test.nim              3D engine driven through write_reg -> checks + PNGs
+tests/nds_3d_test.nim              3D engine driven through write_reg -> checks + PNGs,
+                                   command timing, the 3d_* ROM hashes
 tests/nds_hle_bios_test.nim        every HLE SWI against the real BIOS
+tests/nds_slot2_test.nim           GBA-slot devices + the slot2_probe ROM
+tests/nds_boot_test.nim            KEY1/KEY2, card handshake, secure area, direct boot
+tests/nds_wifi_test.nim            wifi blocks on an Air; wifi_link on two machines
+tests/nds_periph_test.nim          RTC interrupts, SPI, power manager, TSC, mic, sleep/lid
 tests/nds_savestate_test.nim       save states: round trips at awkward moments, refusals
 ```
 
@@ -124,6 +161,9 @@ nim c -d:release -d:test_harness --path:src -o:ndsrun tools/ndsrun.nim
 nim c -d:emscripten src/dingbat_nds_wasm.nim      # -> web/nds/nds.{js,wasm}
 cp ~/.cache/dingbat-nds/roms/fb_both.nds web/nds/demos/   # demos are gitignored
 python3 -m http.server 8791 -d web                # open /nds.html?rom=nds/demos/fb_both.nds
+
+# the main app on the LAN over HTTPS (builds both cores; docs/nds/web.md)
+tools/serve_nds_dev.sh
 ```
 
 Third-party test ROMs: `~/.cache/dingbat-nds/roms/` (tests/nds/README.md).
@@ -136,12 +176,14 @@ Third-party test ROMs: `~/.cache/dingbat-nds/roms/` (tests/nds/README.md).
 | Memory / boot / BIOS | libnds `hello_world` and `template_combined` boot through both CPUs' crt0 + IPC handshake; HLE BIOS so no dump is required |
 | 2D engines | libnds console (`hello_world`, `ansi_console`), `16bit_color_bmp`, `256_color_bmp`, `simple` sprites, window tests |
 | IRQ / timers / DMA / IPC / maths | gbeplus irq/math/dma, rockwrestler system tests, `pxi`, `timercallback` |
-| Input / touch / SPI / RTC | `touch_test` tracks the mouse |
+| Input / touch / SPI / RTC | `touch_test` tracks the mouse; periph_suite (RTC interrupts, SPI timing, power manager, TSC channels, mic, sleep/lid: docs/nds/peripherals.md) |
 | 3D | `Simple_Tri`, `Simple_Quad` |
 | Sound | maxmod examples and Pokemon SoulSilver play (tests/nds_spu_test.nim, `snd_suite.nds` against the reference cores: docs/oracles.md NDS core) |
-| Card + backup | a commercial ROM's B7 reads + save detection |
+| GBA slot | `slot2_probe` under each device; SoulSilver's MIGRATE FROM <GBA game> with a Generation 3 cart (docs/nds/slot2.md) |
+| Card + backup | a commercial ROM's B7 reads + save detection; the KEY1/KEY2 boot handshake (docs/nds/boot.md) |
+| Wireless | two machines on one Air: wifi_link's beacon scan, data frames and multiplay rounds (tests/nds_wifi_test.nim); network play is a plan (docs/nds/wifi.md) |
 | Timing | wait states, cache model, frame-rate-stable commercial boot |
-| Frontend | desktop SDL target with both screens; main web UI integration |
+| Frontend | desktop SDL target with both screens; main web UI integration (first cut: docs/nds/web.md) |
 
 Milestone 1 (this skeleton): fb_hello / fb_both render on both screens in
 `ndsrun` and on `web/nds.html`.
@@ -199,4 +241,7 @@ BIOS or the HLE BIOS (identical frames). Driven by `ndsrun --press` scripts
 script gives the same frames as the reference core at most checkpoints
 (`tools/ndsref`, docs/oracles.md). Open: 3D rasterisation differs from the
 reference by edge pixels (bedroom, overworld), the title screen's 3D Lugia
-differs, a 2D alpha fade is one step off in places.
+differs, a 2D alpha fade is one step off in places. It also boots through
+the real BIOS, firmware and DS menu (`--boot firmware --press A@300,A@460`)
+from any of its dump forms, frame for frame with the reference core's
+firmware boot after the menu (docs/nds/boot.md).

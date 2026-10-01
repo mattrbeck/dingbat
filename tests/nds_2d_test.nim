@@ -397,6 +397,18 @@ proc scene_window_wrap() =
   g.expect_px(true, 220, 50, 0, "inside (right part)")
   g.expect_px(true, 10, 120, rgb(0, 0, 31), "below Y2")
 
+var mmem_src: seq[uint32]
+var mmem_pos: int
+
+proc mmem_feed(ctx: pointer): bool {.nimcall.} =
+  ## A DMA mode 4 stand-in: 4 words per request from mmem_src.
+  let a = cast[Engine2D](ctx)
+  if mmem_pos >= mmem_src.len: return false
+  for i in 0..3:
+    a.write_reg(0x68, mmem_src[mmem_pos], 0xFFFF_FFFF'u32)
+    inc mmem_pos
+  true
+
 proc scene_3d_capture() =
   echo "BG0 as 3D (alpha blend over 2nd target), display capture"
   let g = fresh()
@@ -452,13 +464,38 @@ proc scene_3d_capture() =
   let c = g.vram.bank_ptr(vbC)
   let blended = uint16(c[(5 * 256 + 5) * 2]) or (uint16(c[(5 * 256 + 5) * 2 + 1]) shl 8)
   check(blended == (rgb(15, 0, 15) or 0x8000), "capture blend A 8/16 + B 8/16", hex4(blended))
-  # main-memory display (mode 3): a frame of words pushed through 0x4000068
+  # main-memory display (mode 3): a frame of words through 0x4000068, fed
+  # 4 words per FIFO request as DMA mode 4 would
   a.reg32(0, 0x0003_0000)
-  for i in 0 ..< 256 * 192 div 2:
-    let y = (i * 2) div 256
-    a.reg32(0x68, uint32(rgb(0, y div 8, 0)) * 0x10001'u32)
+  mmem_src = newSeq[uint32](256 * 192 div 2)
+  for i in 0 ..< mmem_src.len:
+    mmem_src[i] = uint32(rgb(0, (i * 2) div 256 div 8, 0)) * 0x10001'u32
+  mmem_pos = 0
+  g.mmem_req = mmem_feed
+  g.mmem_ctx = cast[pointer](a)
   g.frame()
-  g.expect_px(true, 7, 100, rgb(0, 100 div 8, 0), "main-memory display FIFO stub")
+  g.expect_px(true, 7, 100, rgb(0, 100 div 8, 0), "main-memory display through the FIFO")
+  check(mmem_pos == 256 * 192 div 2, "the FIFO asked for exactly one frame", $mmem_pos)
+  # with the feed gone the FIFO runs dry and the last pixel repeats
+  g.mmem_req = nil
+  g.frame()
+  g.expect_px(true, 7, 100, rgb(0, 191 div 8, 0), "dry FIFO repeats the last pixel")
+  # a CPU write overflowing the 16-word FIFO is dropped
+  for i in 0 ..< 20: a.reg32(0x68, uint32(rgb(i, 0, 0)) * 0x10001'u32)
+  g.frame()
+  g.expect_px(true, 31, 0, rgb(15, 0, 0), "16 words kept: pixel 31 is word 15")
+  g.expect_px(true, 32, 0, rgb(15, 0, 0), "then the last pixel repeats")
+  # capture busy stays set to line 192 whatever the size (GBATEK)
+  a.reg32(0, 0x0001_0000)
+  a.reg32(0x64, 0x8000_0000'u32 or (2 shl 16) or (1 shl 20))   # 256x64 into C
+  for v in 0 ..< 192:
+    g.vcount = v
+    g.start_line()
+    g.render_line(v)
+  check((a.dispcapcnt and 0x8000_0000'u32) != 0, "256x64 capture still busy on line 191")
+  g.vcount = 192
+  g.start_line()
+  check((a.dispcapcnt and 0x8000_0000'u32) == 0, "capture busy cleared at line 192")
 
 when isMainModule:
   scene_text()

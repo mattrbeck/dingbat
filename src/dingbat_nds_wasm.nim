@@ -1,11 +1,18 @@
-## WASM entry for the DS prototype (web/nds.html). Separate from
-## dingbat_wasm.nim while the DS core is a prototype: no rewind or link yet.
-## Build: nim c -d:emscripten src/dingbat_nds_wasm.nim
+## WASM entry for the DS core: the main web app (web/index.js, lazy-loads
+## web/nds/nds.js when a .nds game starts) and the standalone dev page
+## (web/nds.html). Separate from dingbat_wasm.nim while the DS core is a
+## prototype. Built MODULARIZE'd (createNdsCore) so its Module never meets
+## em.js's global one. Build: nim c -d:emscripten src/dingbat_nds_wasm.nim
+##
+## Loading a game: nds_rom_alloc(len) returns a buffer inside the core, the
+## page writes the ROM there once, then nds_boot(...) builds the core on it
+## (moved, not copied: a 128 MB ROM must not exist twice in the heap).
 
 import dingbat/nds/[nds, savestate]
 from std/strutils import toHex
 
 var core: NDS
+var romBuf: seq[uint8]
 var fbTop, fbBottom: seq[uint32]
 var status: string
 var stateImage: string     # the last nds_state_size() result
@@ -14,23 +21,78 @@ proc copy_in(p: pointer; len: cint): seq[uint8] =
   result = newSeq[uint8](int(len))
   if len > 0: copyMem(addr result[0], p, int(len))
 
-proc nds_load(rom: pointer; rom_len: cint; b9: pointer; b9_len: cint;
-              b7: pointer; b7_len: cint; fw: pointer; fw_len: cint): cint {.exportc.} =
-  core = new_nds(copy_in(rom, rom_len), copy_in(b9, b9_len), copy_in(b7, b7_len),
-                 copy_in(fw, fw_len))
-  fbTop.setLen(256 * 192)
-  fbBottom.setLen(256 * 192)
+proc nds_rom_alloc(len: cint): pointer {.exportc.} =
+  ## The ROM's buffer, `len` bytes, for the page to fill before nds_boot.
+  ## Drops the running core first: it holds the previous ROM.
+  core = nil
+  romBuf = newSeqUninit[uint8](int(len))
+  if len > 0: addr romBuf[0] else: nil
+
+var lastBios9, lastBios7, lastFirmware: seq[uint8]  ## what nds_reboot reuses
+
+proc boot_with(rom: sink seq[uint8]; save: pointer; save_len: cint) =
+  core = new_nds(rom, lastBios9, lastBios7, lastFirmware)
+  if save_len > 0: core.cart.backup.set_data(copy_in(save, save_len))
+
+proc nds_boot(b9: pointer; b9_len: cint; b7: pointer; b7_len: cint;
+              fw: pointer; fw_len: cint; save: pointer; save_len: cint): cint {.exportc.} =
+  ## Build the core on the buffer nds_rom_alloc handed out. A BIOS/firmware
+  ## left out (len 0) gets the HLE BIOS / synthesized firmware. `save` is the
+  ## cart backup to start from (its size picks the chip; 0 = detect).
+  if romBuf.len == 0: return 0
+  lastBios9 = copy_in(b9, b9_len)
+  lastBios7 = copy_in(b7, b7_len)
+  lastFirmware = copy_in(fw, fw_len)
+  boot_with(move(romBuf), save, save_len)
   1
 
-proc nds_run_frame() {.exportc.} =
-  if core == nil: return
-  core.run_frame()
-  for i in 0 ..< 256 * 192:
-    fbTop[i] = bgr555_to_rgba(core.gpu.top[i])
-    fbBottom[i] = bgr555_to_rgba(core.gpu.bottom[i])
+proc nds_reboot(save: pointer; save_len: cint): cint {.exportc.} =
+  ## Power-cycle the running game: a fresh core on the same ROM (moved out of
+  ## the old one) and BIOS/firmware, starting from `save`.
+  if core == nil or core.cart.rom.len == 0: return 0
+  var rom = move(core.cart.rom)
+  core = nil
+  boot_with(move(rom), save, save_len)
+  1
 
-proc nds_fb_top(): pointer {.exportc.} = addr fbTop[0]
-proc nds_fb_bottom(): pointer {.exportc.} = addr fbBottom[0]
+proc nds_unload() {.exportc.} =
+  ## Drop the core and its ROM (a GB/GBA game takes over).
+  core = nil
+  romBuf = @[]
+
+proc nds_load(rom: pointer; rom_len: cint; b9: pointer; b9_len: cint;
+              b7: pointer; b7_len: cint; fw: pointer; fw_len: cint): cint {.exportc.} =
+  ## One-call load from a page-owned ROM copy (small homebrew; tests).
+  romBuf = copy_in(rom, rom_len)
+  nds_boot(b9, b9_len, b7, b7_len, fw, fw_len, nil, 0)
+
+proc nds_run_frame() {.exportc.} =
+  if core != nil: core.run_frame()
+
+proc nds_frame_count(): cint {.exportc.} =
+  if core == nil: 0 else: cint(core.gpu.frame_count)
+
+# Video: each screen is 256x192 BGR555 (bit 15 unused), read in place by the
+# app's WebGL presenter (web/glpresent.js). nds_fb_top/nds_fb_bottom convert
+# to RGBA8888 on demand for 2D-canvas pages.
+
+proc nds_fb555_top(): pointer {.exportc.} =
+  if core == nil: nil else: addr core.gpu.top[0]
+
+proc nds_fb555_bottom(): pointer {.exportc.} =
+  if core == nil: nil else: addr core.gpu.bottom[0]
+
+proc nds_fb_top(): pointer {.exportc.} =
+  fbTop.setLen(256 * 192)
+  if core != nil:
+    for i in 0 ..< 256 * 192: fbTop[i] = bgr555_to_rgba(core.gpu.top[i])
+  addr fbTop[0]
+
+proc nds_fb_bottom(): pointer {.exportc.} =
+  fbBottom.setLen(256 * 192)
+  if core != nil:
+    for i in 0 ..< 256 * 192: fbBottom[i] = bgr555_to_rgba(core.gpu.bottom[i])
+  addr fbBottom[0]
 
 proc nds_set_button(id: cint; pressed: cint) {.exportc.} =
   if core != nil and id >= 0 and id <= ord(high(NdsButton)):
@@ -51,6 +113,45 @@ proc nds_audio_ptr(): pointer {.exportc.} =
 
 proc nds_audio_clear() {.exportc.} =
   if core != nil: core.spu.clear_samples()
+
+# GBA slot (io/slot2.nim): kind 0 = empty, 1 = GBA cart (rom + its .sav),
+# 2 = Rumble Pak, 3 = Memory Expansion Pak. Insert right after nds_load
+# (power-on insertion). The cart's save is read from nds_slot2_save_ptr /
+# _len when nds_slot2_save_dirty() is 1 (reading clears it).
+
+proc nds_insert_slot2(kind: cint; rom: pointer; rom_len: cint; save: pointer;
+                      save_len: cint): cint {.exportc.} =
+  if core == nil or kind < 0 or kind > ord(high(Slot2Kind)): return 0
+  core.insert_slot2(Slot2Kind(kind), copy_in(rom, rom_len), copy_in(save, save_len))
+  1
+
+proc nds_slot2_save_len(): cint {.exportc.} =
+  if core == nil: 0 else: cint(core.slot2.save.len)
+
+proc nds_slot2_save_ptr(): pointer {.exportc.} =
+  if core == nil or core.slot2.save.len == 0: nil else: addr core.slot2.save[0]
+
+proc nds_slot2_save_dirty(): cint {.exportc.} =
+  if core == nil or not core.slot2.dirty: return 0
+  core.slot2.dirty = false
+  1
+
+proc nds_rumble(): cint {.exportc.} =
+  ## Slot-2 rumble strength 0..255 (Rumble Pak, or a GBA cart's GPIO motor),
+  ## for navigator.vibrate / gamepad rumble; polled once per frame.
+  if core == nil: 0 else: cint(core.slot2_rumble())
+# The cart's save chip (io/backup.nim). The page polls nds_save_dirty and
+# stores nds_save_size bytes from nds_save_ptr, then nds_save_clean. Size 0
+# until the game first touches the chip (the type is detected then).
+proc nds_save_size(): cint {.exportc.} =
+  if core == nil: 0 else: cint(core.cart.backup.data.len)
+proc nds_save_ptr(): pointer {.exportc.} =
+  if core == nil or core.cart.backup.data.len == 0: nil
+  else: addr core.cart.backup.data[0]
+proc nds_save_dirty(): cint {.exportc.} =
+  if core != nil and core.cart.backup.dirty: 1 else: 0
+proc nds_save_clean() {.exportc.} =
+  if core != nil: core.cart.backup.dirty = false
 
 proc nds_status(): cstring {.exportc.} =
   if core == nil: return "no ROM"

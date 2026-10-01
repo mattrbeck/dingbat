@@ -13,7 +13,10 @@
 
 import std/[os, strutils, monotimes, times]
 import dingbat/nds/[nds, savestate]
-import dingbat/nds/io/dma
+import std/importutils
+import dingbat/nds/air
+import dingbat/nds/io/[dma, rtc, cart, slot2, wifi]
+import dingbat/gba/rtc_calendar
 import dingbat/nds/gpu3d/gpu3d
 import dingbat/common/serialize
 
@@ -29,12 +32,18 @@ proc check(cond: bool; msg: string; detail = "") =
 let rom_dir = getEnv("DINGBAT_NDS_ROMS", getHomeDir() / ".cache/dingbat-nds/roms")
 let bios_dir = getEnv("DINGBAT_NDS_BIOS")
 
-proc machine(rom: string; force_hle = false): NDS =
+proc file(p: string): seq[uint8] =
+  if p.len == 0 or not fileExists(p): @[] else: cast[seq[uint8]](readFile(p))
+
+proc machine(rom: string; force_hle = false; boot = nbDirect;
+             firmware: seq[uint8] = @[]): NDS =
   let b = if bios_dir.len > 0: bios_dir else: ""
-  proc file(p: string): seq[uint8] =
-    if p.len == 0 or not fileExists(p): @[] else: cast[seq[uint8]](readFile(p))
-  new_nds(file(rom), file(b / "bios9.bin"), file(b / "bios7.bin"),
-          file(b / "firmware.bin"), force_hle = force_hle)
+  let fw = if firmware.len > 0: firmware else: file(b / "firmware.bin")
+  result = new_nds(file(rom), file(b / "bios9.bin"), file(b / "bios7.bin"), fw,
+                   force_hle = force_hle, boot = boot)
+  # the RTC on emulated time (as ndsrun --rtc): on the host clock two runs
+  # read different times, and the clock's last-update time is saved
+  result.rtc.set_fixed_clock(result.sched, to_calendar_seconds(2004, 1, 1, 0, 0, 0))
 
 proc run_hash(n: NDS; frames: int): uint32 =
   ## Both screens after every frame and all the sound, hashed together.
@@ -62,6 +71,8 @@ type Case = object
   moment: string                    ## what the state catches
   cond: proc (n: NDS): bool         ## step until this holds (nil: mid-frame)
   setup: proc (n: NDS)              ## pokes the machine first (nil: none)
+  prep: proc (n: NDS)               ## supplies both machines (a slot-2 cart...)
+  boot: NdsBoot                     ## nbFirmware: needs the dumps
 
 proc gx_dma_setup(n: NDS) =
   ## A geometry-FIFO DMA (mode 7) of 1000 words behind a pending
@@ -77,8 +88,9 @@ proc gx_dma_setup(n: NDS) =
 
 proc dma_running(n: NDS): bool =
   for d in [n.dma9, n.dma7]:
-    for c in d.ch:
-      if c.enabled and c.cur_count > 0 and d.timing(0) != dtNone: return true
+    for i in 0 .. 3:
+      if d.ch[i].enabled and d.ch[i].cur_count > 0 and d.timing(i) != dtImmediate:
+        return true
 
 proc gx_queued(n: NDS): bool =
   let st = n.gpu3d.read_reg(0x600'u32)
@@ -92,12 +104,37 @@ proc sound_playing(n: NDS): bool =
     if c.active: inc k
   k >= 2
 
+proc key1_transfer(n: NDS): bool =
+  ## The BIOS talking to the card in KEY1 mode, a command in flight.
+  n.cart.mode == cmKey1 and card_busy(n)
+
+proc gba_cart(): seq[uint8] =
+  ## A synthetic 1 MB GBA cart with a FLASH 128K save (its ID string).
+  result = newSeq[uint8](0x10_0000)
+  for i in 0 ..< result.len: result[i] = uint8((i * 7 + (i shr 8)) and 0xFF)
+  for i, ch in "TEST": result[0xAC + i] = uint8(ch)
+  for i, ch in "FLASH1M_V103": result[0x1000 + i] = uint8(ch)
+
+proc mic_setup(n: NDS) =
+  var tone = newSeq[int16](8000)
+  for i in 0 ..< tone.len: tone[i] = int16(((i * 37) mod 2000) - 1000)
+  n.push_mic(tone, 16000)
+
+proc sleep_setup(n: NDS) =
+  n.sleeping = true          # ARM7 HALTCNT sleep: only the RTC runs
+
 proc round_trip(c: Case) =
   let path = rom_dir / c.rom
   echo c.name, " (", c.moment, ")"
   if not fileExists(path):
     check(false, "missing " & path)
     return
+  if c.boot == nbFirmware and bios_dir.len == 0:
+    echo "  (no BIOS/firmware dumps: skipped)"
+    return
+  proc machine(path: string): NDS =
+    result = machine(path, boot = c.boot)
+    if c.prep != nil: c.prep(result)
   let a = machine(path)
   for _ in 0 ..< c.frames: a.run_frame()
   if c.setup != nil: c.setup(a)
@@ -132,6 +169,46 @@ proc round_trip(c: Case) =
         c.name & ": the packed state does the same")
   echo "    state ", image.len, " bytes, packed ", packed.len, "; save ", t_save,
        " us, load ", t_load, " us"
+
+proc wifi_pair() =
+  ## Two machines on one Air with the wifi_link ROM, saved while frames are
+  ## in flight; the pair rebuilt from the two states and linked again runs on
+  ## as the original pair did. (The Air holds no frames of its own: each
+  ## machine's transmitter and receiver keep theirs, in its state.)
+  echo "wifi_link pair (frames in flight between two machines)"
+  let path = rom_dir / "wifi_link.nds"
+  if not fileExists(path):
+    check(false, "missing " & path)
+    return
+  var fw = file(if bios_dir.len > 0: bios_dir / "firmware.bin" else: "")
+  if fw.len == 0: fw = synth_firmware()
+  var mac2: array[6, uint8]
+  for i in 0..5: mac2[i] = fw[0x36 + i]
+  mac2[5] = mac2[5] xor 0x5A
+  let fw2 = firmware_with_mac(fw, mac2)
+  let host = machine(path, firmware = fw)
+  let client = machine(path, firmware = fw2)
+  host.set_button(nbA, true)
+  let link = new_air_link(@[host, client])
+  link.run_frames(10)
+  host.set_button(nbA, false)
+  var steps = 0
+  privateAccess(Wifi)
+  while steps < 600 * 300 and host.wifi.tx_frame == nil and client.wifi.rx.len == 0:
+    link.step(1001)
+    inc steps
+  check(host.wifi.tx_frame != nil or client.wifi.rx.len > 0, "a frame is in flight")
+  let sh = host.state_bytes()
+  let sc = client.state_bytes()
+  link.run_frames(120)
+  let h2 = machine(path, firmware = fw)
+  let c2 = machine(path, firmware = fw2)
+  check(h2.load_state_bytes(sh) and c2.load_state_bytes(sc), "both states load", last_state_error)
+  let link2 = new_air_link(@[h2, c2])
+  link2.run_frames(120)
+  check(h2.state_payload() == host.state_payload() and
+        c2.state_payload() == client.state_payload(),
+        "120 frames on, both machines match the original pair in every saved field")
 
 proc refusals() =
   echo "refusals"
@@ -197,6 +274,11 @@ proc refusals() =
           "an HLE-BIOS state is refused on the real BIOS (srkIncompatible)", last_state_error)
     check(not h.load_state_bytes(image) and last_state_reject_kind == srkIncompatible,
           "and a real-BIOS state on the HLE BIOS", last_state_error)
+  let g = machine(path)
+  g.insert_slot2(s2GbaCart, gba_cart())
+  check(not a.load_state_bytes(g.state_bytes()) and last_state_reject_kind == srkIncompatible and
+        a.state_payload() == before,
+        "a state with a GBA cart in the slot is refused by a machine without it", last_state_error)
   check(a.load_state_bytes(image) and a.state_payload() == before, "and the good one loads")
 
 when isMainModule:
@@ -213,8 +295,22 @@ when isMainModule:
          moment: "a card transfer in flight", cond: card_busy),
     Case(name: "Simple_Quad", rom: "built/Simple_Quad.nds", frames: 25, moment: "mid-frame"),
     Case(name: "2Dplus3D", rom: "homebrew-ex/2Dplus3D.nds", frames: 40, moment: "mid-frame"),
+    Case(name: "slot2_probe + GBA cart", rom: "slot2_probe.nds", frames: 3,
+         moment: "mid-frame, a GBA cart with FLASH in the slot",
+         prep: proc (n: NDS) = n.insert_slot2(s2GbaCart, gba_cart())),
+    Case(name: "slot2_probe + Expansion Pak", rom: "slot2_probe.nds", frames: 3,
+         moment: "mid-frame, 8 MB of pak RAM",
+         prep: proc (n: NDS) = n.insert_slot2(s2ExpansionPak)),
+    Case(name: "periph_suite + mic", rom: "periph_suite.nds", frames: 20,
+         moment: "microphone samples queued, mid-frame", setup: mic_setup),
+    Case(name: "fb_both asleep", rom: "fb_both.nds", frames: 5,
+         moment: "the ARM7 in sleep mode", setup: sleep_setup),
+    Case(name: "firmware boot", rom: "built/hello_world.nds", frames: 0,
+         moment: "the BIOS's KEY1 card handshake in flight", cond: key1_transfer,
+         boot: nbFirmware),
   ]
   for c in cases: round_trip(c)
+  wifi_pair()
   refusals()
   if failures > 0:
     echo failures, " check(s) failed"

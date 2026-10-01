@@ -33,7 +33,8 @@ import arm/[cpu, cp15]
 import mem/vram
 import gpu/[gpu, engine2d]
 import gpu3d/[gpu3d, geometry, render]
-import io/[irq, timers, ipc, divsqrt, dma, input, spi, cart, backup, spu, rtc, wifi]
+import io/[irq, timers, ipc, divsqrt, dma, input, spi, cart, backup, spu, rtc, wifi,
+           mic, slot2]
 
 export StateRejectKind, last_state_reject_kind, last_state_error, pack_state,
        unpack_state, parse_state_thumbnail
@@ -47,19 +48,20 @@ const
     # owned subsystems: sections of their own (io_machine)
     "sched", "arm9", "arm7", "gpu", "gpu3d", "irq9", "irq7", "timers9", "timers7",
     "dma9", "dma7", "ipc", "divsqrt", "input", "spi", "cart", "spu", "rtc", "wifi",
-    "tm",                        # its own section, without the derived tables
+    "slot2", "tm",                        # its own section, without the derived tables
     "bios9", "bios7",            # supplied on load
     "hle_bios9", "hle_bios7",    # checked against the loading machine (preamble)
     "unmapped_log", "iolog", "watch", "io_last", "io_repeat"]   # debug logging
   CPU_SKIP = ["bus", "trace", "profiling", "profile", "cprofile"]
   # cachability by address and the cache enables: update_regions(cp15)
   TIMING_SKIP = ["ic_on", "dc_on", "icode", "idata", "ibuf", "mcode", "mdata", "mbuf"]
-  GPU_SKIP = ["vram", "engine_a", "engine_b", "gpu3d"]
+  # mmem_req/mmem_ctx: the machine's DMA mode 4 hook, set at construction
+  GPU_SKIP = ["vram", "engine_a", "engine_b", "gpu3d", "mmem_req", "mmem_ctx"]
   # page tables, fast pointers and VRAMSTAT: remap() rebuilds them from cnt
   VRAM_SKIP = ["pages", "fast", "wfast", "zero", "vramstat"]
   # pointers into Gpu's palette/OAM (kept); line3d is set before each use
   ENGINE_SKIP = ["vram", "palette", "oam", "line3d"]
-  GPU3D_SKIP = ["geo", "ren", "vram", "irq"]
+  GPU3D_SKIP = ["geo", "ren", "vram", "irq", "sched"]
   # Per-frame scratch: render_frame's clear() rewrites depth, IDs, flags and
   # coverage before anything reads them, `below` is written with every
   # coverage < 31 that reads it, the page pointers and `order` are rebuilt
@@ -71,26 +73,39 @@ const
   IPC_SKIP = ["arm9", "arm7"]
   IPC_END_SKIP = ["irq"]
   DIVSQRT_SKIP = ["sched"]
-  SPI_SKIP = ["firmware", "irq", "input", "sched"]   # firmware supplied on load
-  CART_SKIP = ["rom", "irq9", "irq7", "sched", "backup", "spilog"]
+  SPI_SKIP = ["firmware", "irq", "input", "sched", "mic"]   # firmware supplied on load
+  MIC_SKIP = ["sched"]
+  # key1_table (from BIOS7), key1 (from it and the game code) and secure (the
+  # secure area in card form) are rebuilt by set_key1_table at construction
+  # from the ROM and BIOS7, both identity-checked, and never change after
+  CART_SKIP = ["rom", "irq9", "irq7", "sched", "backup", "spilog", "cartlog",
+               "key1_table", "key1", "secure"]
   BACKUP_SKIP = ["dirty"]        # frontend bookkeeping; set after a load
   SPU_SKIP = ["samples"]         # host output queue, emptied on load
-  # `sched` set = the clock follows emulated time: the loading frontend's
+  # `fixed` = the clock follows emulated time: the loading frontend's
   # setting (ndsrun --rtc), not the state's
-  RTC_SKIP = ["sched"]
-  WIFI_SKIP = ["sched", "irq", "masks"]   # masks: constant per register
+  RTC_SKIP = ["sched", "irq", "fixed"]
+  # masks: constant per register. The Air (`air`, `station`, `air_offset`)
+  # is the frontend's link between machines, not one machine's state; the
+  # firmware image is supplied. Frames in flight (tx_frame, rx) are saved.
+  WIFI_SKIP = ["sched", "irq", "masks", "air", "station", "air_offset", "firmware",
+               "log_last", "log_repeat"]
+  # the GBA cart ROM is supplied (and identity-checked, preamble); `dirty`
+  # is set after a load as for the card's save chip
+  SLOT2_SKIP = ["rom", "dirty"]
   NO_SKIP: array[0, string] = []
 
-  # Seqs whose length varies at run time, with the longest a machine makes;
-  # every other seq must match the loading machine's length.
-  MMEM_PIXELS = 256 * 192
-
+# Seqs whose length varies at run time, with the longest a machine makes;
+# every other seq must match the loading machine's length.
 template var_seq_max(name: static string): int =
   when name == "events": 64                    # NdsScheduler: one per kind
-  elif name == "buf": 0x4000                   # Cart: one ROMCTRL block
+  elif name == "buf": 1 shl 20                 # Cart: one ROMCTRL block (after_load
+                                               # holds it to 16 KB); Mic: its queue
   elif name == "data": 16 * 1024 * 1024        # Backup: the save chip
   elif name == "detect": 64                    # Backup: bytes held in bkAuto
-  elif name == "mmem": MMEM_PIXELS             # Engine2D: 0 or a whole frame
+  elif name == "save": 1 shl 20                # Slot2: the GBA cart's save chip
+  elif name == "rx": 256                       # Wifi: frames being received
+  elif name == "bytes": 1 shl 16               # AirFrame: one frame
   elif name == "polys": MAX_POLYS              # Polygon RAM (either side)
   elif name == "verts": MAX_POLYS * 10         # clipped polygons: up to 10 each
   elif name == "fifo": 1 shl 20                # GX FIFO: unbounded behind a swap
@@ -194,7 +209,21 @@ proc io[S, T](s: var S; x: var T; name: static string) =
       s.note(name, $T & set_names(e_of_set(x)))
     else:
       s.note(name, $T)
-  when T is (ref or ptr or pointer or proc or cstring or string):
+  when T is AirFrame:
+    # a frame in flight, owned by this machine's transmitter or receiver:
+    # saved by value (present flag, then its fields)
+    when S is Layout:
+      var one = AirFrame()
+      inc s.depth
+      walk(s, one[], NO_SKIP)
+      dec s.depth
+    else:
+      var present = x != nil
+      io(s, present, name)
+      when S is Loader:
+        x = if present: AirFrame() else: nil
+      if present: walk(s, x[], NO_SKIP)
+  elif T is (ref or ptr or pointer or proc or cstring or string):
     {.error: "DS save state: field '" & name & "' is a reference, pointer or " &
              "string; add it to its object's *_SKIP table and save what it " &
              "points to explicitly (nds/savestate.nim)".}
@@ -350,6 +379,7 @@ proc io_machine[S](s: var S; n: NDS) =
   obj_section(s, 22, "DIV/SQRT", n.divsqrt[], DIVSQRT_SKIP)
   obj_section(s, 23, "input", n.input[], NO_SKIP)
   obj_section(s, 24, "SPI (power manager, firmware flash, touch)", n.spi[], SPI_SKIP)
+  obj_section(s, 31, "GBA slot", n.slot2[], SLOT2_SKIP)
   obj_section(s, 27, "sound", n.spu[], SPU_SKIP)
   obj_section(s, 28, "RTC", n.rtc[], RTC_SKIP)
   obj_section(s, 29, "wifi", n.wifi[], WIFI_SKIP)
@@ -361,6 +391,7 @@ proc io_machine[S](s: var S; n: NDS) =
   # lengths that change frame to frame
   obj_section(s, 25, "card", n.cart[], CART_SKIP)
   obj_section(s, 19, "IPC FIFOs", n.ipc[], IPC_SKIP)
+  obj_section(s, 30, "microphone queue", n.spi.mic[], MIC_SKIP)
   obj_section(s, 2, "scheduler", n.sched[], NO_SKIP)
   obj_section(s, 10, "3D engine (Gpu3d)", n.gpu3d[], GPU3D_SKIP)
   obj_section(s, 11, "3D geometry", n.gpu3d.geo[], NO_SKIP)
@@ -410,14 +441,23 @@ proc bios_identity(n: NDS; arm9: bool): uint32 =
 
 const PREAMBLE_MAGIC = 0x5344_534E'u32   ## "NDSS"
 
+proc slot2_identity(n: NDS): uint32 =
+  ## What is in the GBA slot: the device, and for a GBA cart fnv1a over its
+  ## header (0xC0 bytes: title, game code, version, checksum) and length.
+  ## Its ROM is supplied like the card's, so a state needs the same one.
+  let r = n.slot2.rom
+  result = fnv1a(r.toOpenArray(0, min(r.len, 0xC0) - 1))
+  result = (result xor uint32(r.len)) * 0x01000193'u32
+
 proc write_preamble(s: var Saver; n: NDS) =
   var w = [PREAMBLE_MAGIC, n.layout_hash(),
            uint32(ord(n.hle_bios9)) or (uint32(ord(n.hle_bios7)) shl 1),
-           n.bios_identity(true), n.bios_identity(false)]
+           n.bios_identity(true), n.bios_identity(false),
+           uint32(ord(n.slot2.kind)), n.slot2_identity()]
   s.put(addr w[0], sizeof(w))
 
 proc check_preamble(l: var Loader; n: NDS) =
-  var w: array[5, uint32]
+  var w: array[7, uint32]
   l.get(addr w[0], sizeof(w))
   if w[0] != PREAMBLE_MAGIC:
     raise state_error("DS state payload has no preamble")
@@ -435,6 +475,9 @@ proc check_preamble(l: var Loader; n: NDS) =
     if w[if arm9: 3 else: 4] != n.bios_identity(arm9):
       raise state_error("DS state was made with a different " & name &
                         " BIOS image", srkIncompatible)
+  if w[5] != uint32(ord(n.slot2.kind)) or w[6] != n.slot2_identity():
+    raise state_error("DS state was made with something else in the GBA " &
+                      "slot (insert the same cart or pak first)", srkIncompatible)
 
 # ---------------------------------------------------------------------------
 # Payload
@@ -459,13 +502,16 @@ proc after_load(n: NDS) =
   privateAccess(Rtc)
   privateAccess(Spi)
   privateAccess(Wifi)
+  privateAccess(Mic)
+  privateAccess(Engine2D)
   privateAccess(NdsScheduler)
   let g = n.gpu3d.geo
   check_range(g.nbuf, 0, 3, "geometry.nbuf")
-  check_range(n.gpu3d.ex_n, 0, 31, "gpu3d.ex_n")
   check_range(n.gpu3d.pk_left, 0, 32, "gpu3d.pk_left")
   let c = n.cart
+  check_range(c.buf.len, 0, 0x4000, "cart.buf")
   check_range(c.pos, 0, c.buf.len, "cart.pos")
+  check_range(c.sec_pos, 0, high(int32), "cart.sec_pos")
   if (c.pos and 3) != 0 or (c.buf.len and 3) != 0:
     raise state_error("DS state card transfer is not word aligned")
   let b = c.backup
@@ -478,14 +524,14 @@ proc after_load(n: NDS) =
   check_range(n.rtc.command, 0, 7, "rtc.command")
   check_range(n.spi.fid_idx, 0, high(int32), "spi.fid_idx")
   check_range(n.spi.pm_index, -1, 0xFF, "spi.pm_index")
-  check_range(n.wifi.tx_loc, 0, 3, "wifi.tx_loc")
+  check_range(n.wifi.tx_src, -1, 6, "wifi.tx_src")
+  check_range(n.spi.mic.rd, 0, n.spi.mic.buf.len, "mic.rd")
   for ch in n.spu.ch:
     check_range(ch.adpcm_index, 0, 88, "spu.adpcm_index")
     check_range(ch.loop_index, 0, 88, "spu.loop_index")
   for e in [n.gpu.engine_a, n.gpu.engine_b]:
-    check_one_of(e.mmem.len, [0, MMEM_PIXELS], "engine.mmem")
-    check_range(e.mmem_wr, 0, MMEM_PIXELS - 2, "engine.mmem_wr")
-    if (e.mmem_wr and 1) != 0: raise state_error("DS state engine.mmem_wr is odd")
+    check_range(e.mmem_rd, 0, MMEM_FIFO_WORDS * 2 - 1, "engine.mmem_rd")
+    check_range(e.mmem_n, 0, MMEM_FIFO_WORDS * 2, "engine.mmem_n")
   check_range(n.gpu.vcount, 0, LINES - 1, "gpu.vcount")
   check_range(n.vcount_write, -1, LINES - 1, "vcount_write")
   var seen: set[NdsEvent]
@@ -510,6 +556,7 @@ proc apply_new(n: NDS; payload: string) =
   n.apply_payload(payload)
   n.spu.clear_samples()
   n.cart.backup.dirty = true
+  if n.slot2.save.len > 0: n.slot2.dirty = true
 
 # ---------------------------------------------------------------------------
 # Images
@@ -557,6 +604,7 @@ proc apply_checked(n: NDS; payload: string): bool =
   ## Apply a payload; on any refusal put the machine back as it was.
   let before = n.state_payload()
   let dirty = n.cart.backup.dirty
+  let dirty2 = n.slot2.dirty
   try:
     n.apply_new(payload)
     last_state_reject_kind = srkNone
@@ -567,6 +615,7 @@ proc apply_checked(n: NDS; payload: string): bool =
     let kind = last_state_reject_kind
     restore_backup(n.apply_payload(before))
     n.cart.backup.dirty = dirty
+    n.slot2.dirty = dirty2
     last_state_reject_kind = kind
     return false
 

@@ -23,6 +23,9 @@
 import ../mem/vram
 import ../gpu3d/gpu3d
 
+const
+  MMEM_FIFO_WORDS* = 16   ## DISP_MMEM_FIFO depth (Assumed: 4 requests of 4 words)
+
 type
   EngineId* = enum engA, engB
 
@@ -51,13 +54,13 @@ type
     # line latches
     win_inside*: array[2, bool]
     mos_bgx, mos_bgy: array[2, int32]     ## affine refs latched on a mosaic block's first line
-    # main-memory display FIFO (DISP_MMEM_FIFO 0x4000068). STUB: each
-    # 32-bit write is two pixels into a whole-frame buffer (wrapping at
-    # 256x192) that display mode 3 and capture source B read line y of, so
-    # a frame pushed by an immediate DMA or CPU loop shows; the real
-    # 16-word FIFO and DMA mode 4's per-line pacing are not modelled.
-    mmem*: seq[uint16]
-    mmem_wr*: int
+    # main-memory display FIFO (DISP_MMEM_FIFO 0x4000068): pixels in from
+    # the CPU or DMA mode 4, 256 out per visible line into mmem_line for
+    # display mode 3 and capture source B (gpu.nim drives the line)
+    mmem_fifo: array[MMEM_FIFO_WORDS * 2, uint16]
+    mmem_rd, mmem_n: int                  ## ring read index, pixels held
+    mmem_last: uint16                     ## repeated while the FIFO is dry
+    mmem_line*: array[256, uint16]
     # per-line scratch
     bgpix: array[4, array[256, uint16]]   ## bit 15 = opaque
     objpix: array[256, uint16]
@@ -128,16 +131,29 @@ proc merge16(old: uint16; v, mask: uint32; shift: int): uint16 {.inline.} =
   let m = uint16((mask shr shift) and 0xFFFF)
   (old and not m) or (uint16((v shr shift) and 0xFFFF) and m)
 
-const MMEM_PIXELS = 256 * 192
-
 proc mmem_push(e: Engine2D; v: uint32) =
-  if e.mmem.len == 0: e.mmem = newSeq[uint16](MMEM_PIXELS)
-  e.mmem[e.mmem_wr] = uint16(v and 0xFFFF)
-  e.mmem[e.mmem_wr + 1] = uint16(v shr 16)
-  e.mmem_wr = (e.mmem_wr + 2) mod MMEM_PIXELS
+  ## A word into DISP_MMEM_FIFO: two pixels, dropped when the FIFO is full
+  ## (Assumed: GBATEK gives the 4-word request size, not the overflow rule).
+  if e.mmem_n > MMEM_FIFO_WORDS * 2 - 2: return
+  for p in [uint16(v and 0xFFFF), uint16(v shr 16)]:
+    e.mmem_fifo[(e.mmem_rd + e.mmem_n) mod (MMEM_FIFO_WORDS * 2)] = p
+    inc e.mmem_n
 
-proc mmem_pixel*(e: Engine2D; y, x: int): uint16 {.inline.} =
-  if e.mmem.len == 0: 0'u16 else: e.mmem[y * 256 + x]
+proc mmem_room*(e: Engine2D): bool {.inline.} =
+  ## Room for a 4-word (8-pixel) request (GBATEK: "The FIFO can receive 4
+  ## words (8 pixels) at a time").
+  e.mmem_n <= MMEM_FIFO_WORDS * 2 - 8
+
+proc mmem_take*(e: Engine2D; x0: int) =
+  ## The display takes 8 pixels for mmem_line[x0 ..< x0 + 8]; a dry FIFO
+  ## repeats the last pixel taken (Assumed; the reference runs show a
+  ## repeated pixel too: disp_mmem phase E).
+  for x in x0 ..< x0 + 8:
+    if e.mmem_n > 0:
+      e.mmem_last = e.mmem_fifo[e.mmem_rd]
+      e.mmem_rd = (e.mmem_rd + 1) mod (MMEM_FIFO_WORDS * 2)
+      dec e.mmem_n
+    e.mmem_line[x] = e.mmem_last
 
 proc write_reg*(e: Engine2D; offset: uint32; v, mask: uint32) =
   ## Aligned 32-bit write; `mask` selects the bytes actually written.
@@ -796,8 +812,8 @@ proc render_line*(e: Engine2D; y: int; need_gfx = false) =
       let i = base + x * 2
       e.line[x] = (uint16(src[i]) or (uint16(src[i + 1]) shl 8)) and 0x7FFF
   else:
-    # main-memory display: the FIFO stub's frame buffer
-    for x in 0 ..< 256: e.line[x] = e.mmem_pixel(y, x) and 0x7FFF
+    # main-memory display: the line the FIFO delivered (bit 15 unused)
+    for x in 0 ..< 256: e.line[x] = e.mmem_line[x] and 0x7FFF
   e.apply_master_brightness()
 
 {.pop.}

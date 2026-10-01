@@ -8485,3 +8485,151 @@ body.clip-replaying #controls {
     width: 140px;
   }
 }
+
+/*
+ * ==========================================================
+ * Nintendo DS (body.nds-mode; index.js "Nintendo DS")
+ * ==========================================================
+ * A DS game is the loaded game, on its own core. Its system colour, its
+ * card, the X/Y face buttons, the screens button, and the features its core
+ * does not have yet taken out of the menus.
+ */
+:root {
+  --badge-ds-fg: #ff9f80;
+  --badge-ds-bg: rgba(255, 128, 96, 0.16);
+  --cart-ds-top: #5d6170;
+  --cart-ds-bottom: #3c3f4b;
+}
+:root[data-theme="light"] {
+  --badge-ds-fg: #b0472a;
+  --badge-ds-bg: rgba(210, 90, 60, 0.14);
+}
+
+.badge-ds {
+  color: var(--badge-ds-fg);
+  background: var(--badge-ds-bg);
+}
+.home-tile.no-art[data-system="DS"] .home-tile-thumb,
+#hero.no-picture[data-system="DS"] #hero-shot {
+  background: var(--badge-ds-bg);
+}
+
+/* The DS card: small and nearly square, its top-right corner cut. */
+.lib-cart.cart-ds {
+  width: 28%;
+  aspect-ratio: 33 / 35;
+  padding-top: 8%;
+  border-radius: 6% 6% 8% 8%;
+  clip-path: polygon(0 0, 84% 0, 100% 12%, 100% 100%, 0 100%);
+  background: linear-gradient(180deg, var(--cart-ds-top), var(--cart-ds-bottom));
+  box-shadow: inset 0 1px 0 rgba(var(--hi-rgb), 0.16);
+}
+.cart-ds .lib-cart-label {
+  width: 78%;
+  height: 46%;
+  font-size: 12px;
+  font-size: clamp(8px, 4.6cqi, 20px);
+  background: var(--badge-ds-fg);
+}
+
+/* The screens button: a DS game in front of you only. */
+body:not(.nds-mode) #nds-layout-btn,
+body:not(.running) #nds-layout-btn {
+  display: none !important;
+}
+body.nds-side #nds-layout-btn svg {
+  transform: rotate(90deg);
+}
+
+/* Not on the DS core yet: rewind, the link cable, cheats, clips (the
+   retroactive one needs the rewind ring; recording goes with it, as every
+   mode keeps the two together), and save states until the core has them
+   (body.nds-states). */
+body.nds-mode #rewind,
+body.nds-mode #open-rewind-scrub,
+body.nds-mode #kb-shortcut-rewind,
+body.nds-mode #report-slider,
+body.nds-mode #clip-last,
+body.nds-mode #record-clip,
+body.nds-mode #net-connect,
+body.nds-mode #open-cheats,
+body.nds-mode:not(.nds-states) #save-state,
+body.nds-mode:not(.nds-states) #load-state,
+body.nds-mode:not(.nds-states) #open-states {
+  display: none !important;
+}
+
+/* The stylus: no scrolling, zooming or callouts from a finger on the
+   screens. */
+body.nds-mode #canvas {
+  touch-action: none;
+  -webkit-touch-callout: none;
+}
+
+/* X / Y: the DS's other two face buttons. The four make a diamond (X top,
+   Y left, A right, B bottom) of the same buttons, 0.75 of a button from the
+   centre each way: just clear of one another, and narrow enough to sit
+   beside the d-pad at every control size. */
+#x,
+#y {
+  display: none;
+}
+body.nds-mode #x,
+body.nds-mode #y {
+  display: flex;
+}
+body.nds-mode #ab,
+body.nds-mode.large-controls #ab {
+  width: calc(var(--btn-size) * 2.5);
+}
+body.nds-mode #a,
+body.nds-mode #y {
+  top: calc(50% - var(--btn-size) / 2);
+  bottom: auto;
+}
+body.nds-mode #a {
+  left: auto;
+  right: 0;
+}
+body.nds-mode #y {
+  left: 0;
+  right: auto;
+}
+body.nds-mode #x,
+body.nds-mode #b {
+  left: calc(50% - var(--btn-size) / 2);
+  right: auto;
+}
+body.nds-mode #x {
+  top: calc(50% - var(--btn-size) * 1.25);
+  bottom: auto;
+}
+body.nds-mode #b {
+  top: calc(50% + var(--btn-size) * 0.25);
+  bottom: auto;
+}
+
+#nds-hinge {
+  display: none;
+  position: absolute;
+  z-index: 1;
+  background: var(--stage);
+  pointer-events: none;
+}
+body.nds-mode.running #nds-hinge {
+  display: block;
+}
+
+/* Phone held sideways: Select/Start leave the bottom middle, where the
+   touch screen is, for the right rail just under R (the console has them
+   on its right too). Same circles, same order, same gap. */
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
+  body.nds-mode #select-start {
+    grid-column: 2 / 3;
+    grid-row: 1 / 2;
+    justify-self: end;
+    align-self: start;
+    margin-top: 58px;
+    margin-right: 33px;
+  }
+}

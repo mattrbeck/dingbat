@@ -19,6 +19,16 @@
 ## ARM9 opcode fetches are always nonsequential 32-bit (a Thumb pair shares
 ## one fetch); data may be sequential (LDM/STM/LDRD after the first word).
 ##
+## The GBA-slot rows are for EXMEMCNT's default access times (ROM 10 + 6,
+## SRAM 10); each CPU's own EXMEMCNT bits 0-4 pick them (GBATEK "DS Memory
+## Control - Cartridges and Main RAM": 10/8/6/18 first, 6/4 second, SRAM
+## 10/8/6/18), so the rows are formulas over SlotTiming: a halfword is the
+## first (N) or second (S) access time, a word two halfwords, ARM9
+## nonsequential accesses add the 3-cycle penalty and ARM7 nonsequential
+## data is 1 cycle faster (both as the table shows). SRAM is an 8-bit bus
+## with one access per load or store whatever its width (the table's N32 =
+## N16 for GBA RAM).
+##
 ## The ARM946E-S caches (GBATEK "DS Memory Control - Cache and TCM"): 8 KB
 ## instruction / 4 KB data, 4-way, 32-byte lines, read-allocate; whether a
 ## region is cached comes from the protection unit (CP15 c6 regions, c2
@@ -35,6 +45,10 @@
 import arm/cp15
 
 type
+  SlotTiming* = object
+    ## GBA-slot access times in bus cycles, from EXMEMCNT bits 0-4
+    rom_n*, rom_s*, ram*: int64
+
   TagCache* = object
     tags: seq[uint32]       ## sets * 4: line number + 1 (0 = empty)
     rr: seq[uint8]          ## round-robin victim per set
@@ -59,11 +73,20 @@ const
   CODE9_MAIN* = 18'i64
   CODE9_FAST* = 8'i64         ## WRAM, BIOS, I/O, OAM
   CODE9_VRAM* = 10'i64
-  CODE9_GBA* = 38'i64
   FILL_MAIN* = 46'i64         ## cache line fill from main RAM
   FILL_BIOS* = 22'i64
   BRANCH9* = 2'i64
   WBUF_WRITE* = 2'i64
+
+proc slot_timing*(exmem: uint16): SlotTiming =
+  const first = [10'i64, 8, 6, 18]
+  SlotTiming(ram: first[exmem and 3], rom_n: first[(exmem shr 2) and 3],
+             rom_s: if (exmem and 0x10) != 0: 4 else: 6)
+
+proc slot_rom(st: SlotTiming; width: int; seq: bool): int64 {.inline.} =
+  ## bus cycles for one ROM-region access
+  if width == 32: (if seq: 2 * st.rom_s else: st.rom_n + st.rom_s)
+  else: (if seq: st.rom_s else: st.rom_n)
 
 proc init_cache(c: var TagCache; size: int) =
   let sets = size div (32 * 4)
@@ -141,40 +164,39 @@ template data_cachable*(t: MemTiming; a: uint32): bool =
 template data_buffered*(t: MemTiming; a: uint32): bool =
   (if (a shr 24) == 2: t.mbuf[(a shr 12) and 0xFFF] else: t.ibuf[a shr 24])
 
-proc code9_uncached*(top: uint32): int64 {.inline.} =
+proc code9_uncached*(top: uint32; st: SlotTiming): int64 {.inline.} =
   case top
   of 0x02: CODE9_MAIN
   of 0x05, 0x06: CODE9_VRAM
-  of 0x08, 0x09: CODE9_GBA
+  of 0x08, 0x09: 2 * (slot_rom(st, 32, false) + 3)
+  of 0x0A: 2 * (st.ram + 3)
   else: CODE9_FAST
 
-proc data9*(top: uint32; width: int; seq: bool): int64 {.inline.} =
+proc data9*(top: uint32; width: int; seq: bool; st: SlotTiming): int64 {.inline.} =
   ## Uncached ARM9 data access (8-bit = 16-bit), master cycles.
   case top
   of 0x02:
     if width == 32: (if seq: 4 else: 20) else: (if seq: 2 else: 18)
   of 0x05, 0x06:
     if width == 32: (if seq: 4 else: 10) else: (if seq: 2 else: 8)
-  of 0x08, 0x09:
-    if width == 32: (if seq: 24 else: 38) else: (if seq: 12 else: 26)
-  of 0x0A: (if seq: 20 else: 26)
+  of 0x08, 0x09: 2 * (slot_rom(st, width, seq) + (if seq: 0 else: 3))
+  of 0x0A: 2 * (st.ram + (if seq: 0 else: 3))
   else: (if seq: 2 else: 8)
 
-proc code7*(top: uint32; width: int; seq: bool): int64 {.inline.} =
+proc code7*(top: uint32; width: int; seq: bool; st: SlotTiming): int64 {.inline.} =
   case top
   of 0x02:
     if width == 32: (if seq: 4 else: 18) else: (if seq: 2 else: 16)
   of 0x06: (if width == 32: 4 else: 2)
-  of 0x08, 0x09:
-    if width == 32: (if seq: 24 else: 32) else: (if seq: 12 else: 20)
+  of 0x08, 0x09: 2 * slot_rom(st, width, seq)
+  of 0x0A: 2 * st.ram
   else: 2
 
-proc data7*(top: uint32; width: int; seq: bool): int64 {.inline.} =
+proc data7*(top: uint32; width: int; seq: bool; st: SlotTiming): int64 {.inline.} =
   case top
   of 0x02:
     if width == 32: (if seq: 4 else: 20) else: (if seq: 2 else: 18)
   of 0x06: (if width == 32 and seq: 4 else: 2)
-  of 0x08, 0x09:
-    if width == 32: (if seq: 24 else: 30) else: (if seq: 12 else: 18)
-  of 0x0A: (if seq: 20 else: 18)
+  of 0x08, 0x09: 2 * (slot_rom(st, width, seq) - (if seq: 0 else: 1))
+  of 0x0A: 2 * (st.ram - (if seq: 0 else: 1))
   else: 2

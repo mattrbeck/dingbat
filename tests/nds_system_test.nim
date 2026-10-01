@@ -229,7 +229,9 @@ block cart_unit:
   c.write_reg(0x1A8, 0x8000_00B7'u32, ALL)         # B7 00 00 80 00 -> 0x8000
   c.write_reg(0x1AC, 0, ALL)
   s.now = 100
-  c.write_reg(0x1A4, 0xA100_0000'u32, ALL)         # start, 0x200 bytes, bus/5
+  # start, 0x200 bytes, bus/5, KEY2 on commands and data (the card is in
+  # KEY2 main mode, as after a boot, so the streams cancel)
+  c.write_reg(0x1A4, 0xA140_6000'u32, ALL)
   check not c.data_ready(), "no word at the start of the transfer"
   # 8 command + 4 data bytes at 5 bus cycles (10 master) each
   check s.next_at() == 100 + 12 * 10, "first word due after 12 card bytes", $s.next_at()

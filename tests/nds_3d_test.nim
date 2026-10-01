@@ -11,6 +11,7 @@ import dingbat/nds/mem/vram
 import dingbat/nds/io/irq
 import dingbat/nds/gpu3d/gpu3d
 import dingbat/nds/nds
+import dingbat/nds/sched
 
 # --- PNG (as tools/ndsrun.nim) --------------------------------------------
 
@@ -551,6 +552,98 @@ proc scene_registers() =
   g2.reg(0x600, 2'u32 shl 30, 0xC000_0000'u32)
   check((irq.iff and (1'u32 shl 21)) != 0, "GX FIFO empty IRQ raised")
 
+proc scene_timing() =
+  echo "command timing (GBATEK cycles), FIFO stall, swap"
+  let g = new_gpu3d(new_vram(), IrqCtl())
+  let sc = new_nds_scheduler()
+  g.sched = sc
+  sc.now = 1000
+  # BOX_TEST: 103 bus cycles = 206 master; GXSTAT.0/27 until then
+  g.cmd(0x70, 0, fx16(0.5) shl 16, fx16(0.5) or (fx16(0.5) shl 16))
+  check((g.read_reg(0x600) and 0x0800_0001'u32) == 0x0800_0001'u32, "BOX_TEST busy at its start")
+  sc.now = 1000 + 205
+  check((g.read_reg(0x600) and 1) == 1, "BOX_TEST still busy 1 cycle before 103")
+  sc.now = 1000 + 206
+  check((g.read_reg(0x600) and 0x0800_0001'u32) == 0, "BOX_TEST done after 103 bus cycles")
+  # MTX_PUSH sets GXSTAT.14 for 17 cycles; the level changes at once
+  g.cmd(0x10, 1)
+  g.cmd(0x11)
+  check(((g.read_reg(0x600) shr 8) and 31) == 0, "push waits for MTX_MODE's cycle")
+  sc.now += 2
+  let st = g.read_reg(0x600)
+  check((st and 0x4000) != 0 and ((st shr 8) and 31) == 1, "push: stack busy, level 1: " & toHex(st))
+  sc.now += 33
+  check((g.read_reg(0x600) and 0x4000) != 0, "push busy at 16.5 cycles")
+  sc.now += 1
+  check((g.read_reg(0x600) and 0x4000) == 0, "push done after 17 cycles")
+  # commands queue behind a busy engine: 10 IDENTITY = 190 cycles
+  let t0 = sc.now
+  for i in 0 ..< 10: g.cmd(0x15)
+  sc.now = t0 + 2 * 190 - 1
+  check((g.read_reg(0x600) and (1'u32 shl 27)) != 0, "10 x MTX_IDENTITY busy until 190 cycles")
+  sc.now = t0 + 2 * 190
+  check((g.read_reg(0x600) and (1'u32 shl 27)) == 0, "10 x MTX_IDENTITY done at 190 cycles")
+  # NORMAL: 9, 9, 10, 11, 12 cycles for 0..4 lights (docs/oracles.md)
+  for (mask, want) in [(0, 9), (1, 9), (3, 10), (7, 11), (15, 12)]:
+    g.cmd(0x29, uint32(mask) or 0x1F0080'u32)
+    g.cmd(0x40, 0)
+    sc.now += 100
+    let t1 = sc.now
+    g.cmd(0x21, 0)
+    sc.now = t1 + 2 * want - 1
+    check((g.read_reg(0x600) and (1'u32 shl 27)) != 0, "NORMAL with mask " & $mask & " busy at " & $(want - 1))
+    sc.now = t1 + 2 * want
+    check((g.read_reg(0x600) and (1'u32 shl 27)) == 0, "NORMAL with mask " & $mask & " done at " & $want)
+  g.cmd(0x41)
+  # MTX_TRANS in mode 2: 22 + 30
+  g.cmd(0x10, 2)
+  sc.now += 100
+  let t2 = sc.now
+  g.cmd(0x1C, 0, 0, 0)
+  sc.now = t2 + 2 * 52 - 1
+  check((g.read_reg(0x600) and (1'u32 shl 27)) != 0, "MTX_TRANS mode 2 busy at 51")
+  sc.now = t2 + 2 * 52
+  check((g.read_reg(0x600) and (1'u32 shl 27)) == 0, "MTX_TRANS mode 2 done at 52")
+  # SWAP_BUFFERS: busy to V-blank + 392; a full FIFO behind it stalls the writer
+  sc.now += 100
+  g.next_vblank = sc.now + 50_000
+  g.cmd(0x50, 0)
+  for i in 0 ..< 260: g.cmd(0x15)
+  check(g.stall_until == 0 or g.stall_until <= sc.now, "260 entries fit (FIFO + PIPE)")
+  g.cmd(0x15)
+  check(g.stall_until == g.next_vblank + 2 * 392, "the 261st waits for V-blank + 392: " & $g.stall_until)
+  check(((g.read_reg(0x600) shr 16) and 0x1FF) == 256, "GXSTAT shows a full FIFO")
+  sc.now = g.next_vblank
+  g.on_vblank()
+  check((g.read_reg(0x600) and (1'u32 shl 27)) != 0, "busy for 392 cycles after the swap")
+  sc.now = g.next_vblank + 2 * 392
+  let lv = (g.read_reg(0x600) shr 16) and 0x1FF
+  check(lv == 256, "the first command behind the swap starts at V-blank + 392: " & $lv)
+  # 260 entries left: below half (FIFO 127, PIPE 4) after 260 - 131 more
+  # starts, 19 cycles apart
+  let w = g.wake_at(128)
+  check(w == g.next_vblank + 2 * 392 + 2 * 19 * (260 - 131),
+        "wake_at(128): " & $(w - g.next_vblank))
+
+proc scene_budget() =
+  echo "render line budget (RDLINES_COUNT, DISP3DCNT.12)"
+  for (n, want, under) in [(1, 46'u32, false), (16, 42'u32, false), (64, 0'u32, true)]:
+    let (g, _) = fresh()
+    g.setup()
+    g.cmd(0x29, poly_attr(31, back = true))
+    for i in 0 ..< n:
+      g.cmd(0x40, 1)
+      g.vtx(-1, -1, 0); g.vtx(1, -1, 0); g.vtx(1, 1, 0); g.vtx(-1, 1, 0)
+    g.finish("budget" & $n)
+    check(g.ren.rdlines == want and g.ren.underflow == under,
+          $n & " full-screen quads: RDLINES " & $g.ren.rdlines & ", underflow " & $g.ren.underflow)
+    # latched at the next V-blank, the underflow flag until acknowledged
+    g.on_vblank()
+    check(g.read_reg(0x320) == want, "RDLINES_COUNT reads the frame's value")
+    check(((g.read_reg(0x060) and 0x1000) != 0) == under, "DISP3DCNT.12 set on underflow")
+    g.reg(0x060, 0x1000, 0xFFFF)
+    check((g.read_reg(0x060) and 0x1000) == 0, "DISP3DCNT.12 acknowledged by writing 1")
+
 # --- the 3d_* test ROMs through the whole machine ---------------------------
 #
 # Each ROM's 3D colour buffer after 30 frames, as a CRC32 of its pixels.
@@ -644,6 +737,8 @@ when isMainModule:
   scene_shadow()
   scene_wbuffer()
   scene_registers()
+  scene_timing()
+  scene_budget()
   rom_scenes()
   if failures > 0:
     echo failures, " check(s) failed"

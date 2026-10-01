@@ -27,7 +27,7 @@ header (`libretro.h`, MIT, vendored here) is used.
         [--wav OUT.wav] [--bios DIR] [--sysfile NAME=PATH]
         [--opt KEY=VALUE].. [--opts-file FILE].. [--no-core-opts]
         [--list-opts] [--layout auto|tb|bt|lr|rl] [--depth5]
-        [--workdir DIR] [--no-final] [-v|-vv]
+        [--workdir DIR] [--no-final] [--slot2 GBA[,SAVE]] [--rumble-log] [-v|-vv]
 
 - `--core` takes a path to a libretro core, or a short NAME looked up as
   `NAME`, `NAME_libretro.dylib/.so/.dll` in `$NDSREF_CORES`, then
@@ -70,6 +70,11 @@ header (`libretro.h`, MIT, vendored here) is used.
 - `--depth5` keeps the top 5 bits of each channel and widens them as
   `ndsrun` does (`(c << 3) | (c >> 2)`). Cores that output RGB565 or 6-bit
   widened XRGB8888 differ from `ndsrun` by 2-4 per channel without it.
+- `--slot2 GBA[,SAVE]` loads the ROM with a GBA ROM (and its save) in the
+  GBA slot through the core's first subsystem that takes two or more files
+  (`-v` lists the subsystems; melonDS DS calls it `gba`, "Slot 1 & 2
+  Boot"). `--rumble-log` takes the core's rumble interface and prints each
+  strength change with its frame (`rumble frame=F strong=S`).
 - Nothing is written outside `--out`, `--wav` and the scratch directory:
   system/ and save/ go under `--workdir DIR` or a fresh `$TMPDIR/ndsref.*`
   that is removed at exit. The core's stdout/stderr are silenced unless

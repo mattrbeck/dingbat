@@ -74,14 +74,17 @@ proc direct_boot*(n: NDS) =
   for i in 0 ..< arm7_size:
     if arm7_off + i < rom.len:
       n.write7(arm7_ram + uint32(i), uint32(rom[arm7_off + i]), 8)
-  # Secure area: a decrypted dump starts its first 8 bytes with "encryObj";
-  # the BIOS replaces them with E7FFDEFF E7FFDEFF.
-  if arm9_off == 0x4000 and arm9_size >= 8 and rom.len >= 0x4008:
-    var tag = ""
-    for i in 0..7: tag.add(char(rom[0x4000 + i]))
-    if tag == "encryObj":
-      wr32(n.main_ram, int(arm9_ram and 0x3FFFFF), 0xE7FFDEFF'u32)
-      wr32(n.main_ram, int((arm9_ram + 4) and 0x3FFFFF), 0xE7FFDEFF'u32)
+  # Secure area (GBATEK "DS Cartridge Secure Area"): the BIOS decrypts the
+  # first 2 KB, checks the "encryObj" ID and overwrites it with E7FFDEFF
+  # E7FFDEFF. Dumps come decrypted (ID kept or already overwritten) or
+  # encrypted; the encrypted form needs the BIOS7 dump's KEY1 table.
+  if arm9_off == 0x4000 and arm9_size >= 0x800 and rom.has_secure_area():
+    var area = rom[0x4000 ..< 0x4800]
+    if boot_secure_area(rom, n.cart.key1_table, area):
+      for i in 0 ..< 0x800: n.write9(arm9_ram + uint32(i), uint32(area[i]), 8)
+    elif n.cart.key1_table.len == 0 and area.anyIt(it != 0):
+      stderr.writeLine("nds: the secure area looks encrypted and there is no BIOS7 " &
+                       "dump to decrypt it (--bios); the game will likely crash")
   # Header to 0x27FFE00
   for i in 0 ..< 0x170: n.main_ram[0x3FFE00 + i] = rom[i]
   # Boot info (GBATEK 12.2)
@@ -96,7 +99,8 @@ proc direct_boot*(n: NDS) =
   m16(0x027FF850'u32, 0x5835); m16(0x027FFC10'u32, 0x5835)
   m32(0x027FF880'u32, 7); m32(0x027FF884'u32, 6)
   m32(0x027FF868'u32, uint32(n.spi.user_settings_offset()))
-  for i in 0 ..< 12: n.main_ram[0x3FFC30 + i] = 0xFF   # no GBA cart
+  let gba = n.slot2.gba_header_info()                   # 0xFF: no GBA cart
+  for i in 0 ..< 12: n.main_ram[0x3FFC30 + i] = gba[i]
   m16(0x027FFC40'u32, 1)                                 # boot indicator
   let us = n.spi.user_settings()
   for i in 0 ..< 0x70: n.main_ram[0x3FFC80 + i] = n.spi.firmware[us + i]
@@ -106,6 +110,8 @@ proc direct_boot*(n: NDS) =
   n.postflg7 = 1
   n.exmemcnt = 0x6000
   n.exmem7_lo = 0
+  n.slot9_t = slot_timing(n.exmemcnt)
+  n.slot7_t = slot_timing(n.exmem7_lo)
   n.gpu.write_powcnt1(0x0203)
   n.powcnt2 = 1
   n.biosprot = 0x1204
@@ -135,3 +141,26 @@ proc direct_boot*(n: NDS) =
   n.arm7.vector_base = 0
   discard b9
   discard b7
+
+proc firmware_boot*(n: NDS) =
+  ## Power-on: both CPUs at their reset vectors in the real BIOSes, which
+  ## load the firmware from SPI flash; the firmware shows its menu and
+  ## boots the card through the KEY1/KEY2 handshake (cart.nim). Values not
+  ## given by GBATEK are marked Assumed.
+  n.wramcnt = 0                      # Assumed: all shared WRAM to the ARM9
+  n.exmemcnt = 0x2000                # bit 13 reads set (GBATEK); ARM9 owns the slots
+  n.cart.owner_arm7 = false
+  n.exmem7_lo = 0
+  n.postflg9 = 0
+  n.postflg7 = 0
+  n.biosprot = 0                     # GBATEK "BIOSPROT": zero on power-up
+  n.gpu.write_powcnt1(0)             # Assumed: everything off
+  n.powcnt2 = 1                      # GBATEK "POWCNT2": speakers on, wifi off
+  n.cart.power_on()
+  n.cp15.reset()
+  n.arm9.vector_base = n.cp15.vector_base()
+  n.arm9.set_cpsr(uint32(mSVC) or FLAG_I or FLAG_F)
+  n.arm9.next_pc = n.arm9.vector_base
+  n.arm7.set_cpsr(uint32(mSVC) or FLAG_I or FLAG_F)
+  n.arm7.vector_base = 0
+  n.arm7.next_pc = 0

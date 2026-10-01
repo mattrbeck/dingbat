@@ -4,18 +4,22 @@
 ## The bus maps are in bus9.nim / bus7.nim and the boot path in boot.nim,
 ## included here so they see the NDS type. docs/nds/spec.md is the map.
 
-import std/[os, strutils]
+import std/[os, strutils, sequtils]
 import arm/[cpu, cp15]
 import sched, timing
 import mem/vram
 import gpu/[gpu, engine2d]
 import gpu3d/gpu3d
-import io/[irq, timers, ipc, divsqrt, dma, input, spi, cart, spu, rtc, wifi]
+import io/[irq, timers, ipc, divsqrt, dma, input, spi, cart, spu, rtc, wifi, slot2, mic]
 import hle_bios
 
-export cpu, sched, gpu, engine2d, input, vram, cart, spu
+export cpu, sched, gpu, engine2d, input, vram, cart, spu, slot2
 
 type
+  NdsBoot* = enum
+    nbDirect      ## load the card's binaries and start them (boot.nim)
+    nbFirmware    ## run the real BIOSes and firmware from power-on
+
   Arm9Bus* = object
     nds* {.cursor.}: NDS
   Arm7Bus* = object
@@ -37,6 +41,8 @@ type
     wramcnt*: uint8
     exmemcnt*: uint16           ## ARM9 EXMEMCNT; bits 7-15 are shared
     exmem7_lo*: uint16          ## ARM7 EXMEMSTAT bits 0-6 (its own copy)
+    slot9_t*, slot7_t*: SlotTiming  ## GBA-slot access times from each CPU's bits 0-4
+    slot2*: Slot2               ## what is in the GBA slot (io/slot2.nim)
     vcount_write*: int          ## VCOUNT written in lines 202-212, else -1
     postflg9*, postflg7*: uint8
     powcnt2*: uint16
@@ -58,7 +64,9 @@ type
     wait9*, wait7*: int64       ## bus cycles charged to the running instruction
     last_fetch9*, last_data9*: uint32  ## sequential-access tracking
     last_fetch7*, last_data7*: uint32
+    mmem_armed*: array[4, bool] ## DMA mode 4 channels running this frame
     frame_done*: bool
+    sleeping*: bool             ## ARM7 HALTCNT sleep: every clock but the RTC's stopped
     line_start*: int64          ## master cycle the current line began
     unmapped_log*: int          ## first few unmapped accesses are logged
     # -d:ndsdebug only (tools/ndsrun.nim flags)
@@ -99,24 +107,48 @@ template watch_write(n: NDS; who: string; cpu: untyped; a, v: uint32) =
                        " pc=" & toHex(cpu.cur_pc, 8) & " line=" & $n.gpu.vcount)
 
 proc slot2_read(n: NDS; a: uint32; is9: bool; width: static int): uint32 =
-  ## GBA slot with no cartridge (GBATEK "GBA Slot"): the owning CPU
-  ## (EXMEMCNT.7) sees open bus -- ROM halfwords read addr/2, ORed with 0xFE08
-  ## at the 10-cycle setting and 0xFFFF at 18; SRAM reads 0xFF -- and the
-  ## other CPU reads zeros.
+  ## The GBA slot (io/slot2.nim) as one CPU sees it: the CPU that EXMEMCNT.7
+  ## gives it to reads the device or open bus, the other reads zeros
+  ## (GBATEK "GBA Slot"). The ROM region is a 16-bit bus (a word is two
+  ## halfword accesses), the SRAM region an 8-bit one, whose byte a 16/32-bit
+  ## load reads repeated (as on the GBA: Assumed for the DS).
   let owner9 = (n.exmemcnt and 0x80) == 0
   if owner9 != is9: return 0
+  let s {.cursor.} = n.slot2
   if a >= 0x0A00_0000'u32:
-    return when width == 32: 0xFFFF_FFFF'u32 elif width == 16: 0xFFFF'u32 else: 0xFF'u32
-  let lo = if is9: n.exmemcnt else: n.exmem7_lo
-  proc half(n: NDS; a: uint32; lo: uint16): uint32 =
-    case (lo shr 2) and 3
-    of 0: ((a shr 1) and 0xFFFF) or 0xFE08
-    of 3: 0xFFFF
-    else: (a shr 1) and 0xFFFF
-  when width == 32:
-    half(n, a, lo) or (half(n, a + 2, lo) shl 16)
-  elif width == 16: half(n, a, lo)
-  else: (half(n, a, lo) shr ((a and 1) * 8)) and 0xFF
+    let b = s.ram_read8(a)
+    result = when width == 32: b * 0x0101_0101'u32 elif width == 16: b * 0x0101'u32 else: b
+  else:
+    let rom_n = int(if is9: n.slot9_t.rom_n else: n.slot7_t.rom_n)
+    result =
+      when width == 32:
+        s.rom_read16(a and not 3'u32, rom_n) or (s.rom_read16((a and not 3'u32) + 2, rom_n) shl 16)
+      elif width == 16: s.rom_read16(a and not 1'u32, rom_n)
+      else: (s.rom_read16(a and not 1'u32, rom_n) shr ((a and 1) * 8)) and 0xFF
+  when defined(ndsdebug):
+    if n.iolog:
+      n.log_io(if is9: "9" else: "7", a, result, 0xFFFF_FFFF'u32, false,
+               if is9: n.arm9.cur_pc else: n.arm7.cur_pc)
+
+proc slot2_write(n: NDS; a: uint32; v: uint32; is9: bool; width: static int) =
+  ## Stores from the CPU that does not own the slot go nowhere (Assumed: its
+  ## reads see zeros, GBATEK). A store to the 8-bit SRAM bus keeps the byte
+  ## its address selects (GBA rule, Assumed for the DS).
+  let owner9 = (n.exmemcnt and 0x80) == 0
+  when defined(ndsdebug):
+    if n.iolog:
+      n.log_io(if is9: "9" else: "7", a, v, 0xFFFF_FFFF'u32, true,
+               if is9: n.arm9.cur_pc else: n.arm7.cur_pc)
+  if owner9 != is9: return
+  let s {.cursor.} = n.slot2
+  if a >= 0x0A00_0000'u32:
+    let b = when width == 8: uint8(v) else: uint8(v shr (8 * (a and (width div 8 - 1))))
+    s.ram_write8(a, b)
+  else:
+    when width == 32:
+      s.rom_write(a and not 3'u32, v and 0xFFFF, 16)
+      s.rom_write((a and not 3'u32) + 2, v shr 16, 16)
+    else: s.rom_write(a, v, width)
 
 template rd16(s: seq[uint8]; i: int): uint32 =
   uint32(s[i]) or (uint32(s[i + 1]) shl 8)
@@ -134,7 +166,6 @@ include bus9, bus7, boot
 
 const
   GX_DMA_BURST = 112          ## words per geometry-FIFO request (GBATEK)
-  MMEM_LINE_WORDS = 128       ## one line of main-memory display, 256 px
 
 proc gx_dma(n: NDS) =
   ## ARM9 DMA mode 7: bursts into the geometry FIFO while it is less than
@@ -149,17 +180,39 @@ proc gx_dma(n: NDS) =
       n.dma9.transfer_units(bus, i, units)
       left -= units
 
-proc mmem_dma(n: NDS) =
-  ## ARM9 DMA mode 4: feed one line of main-memory display (engine A
-  ## display mode 3) through the display FIFO, a channel block at a time.
-  if n.gpu.engine_a.display_mode() != 3: return
-  let bus = Arm9Bus(nds: n)
+proc gx_service(n: NDS; appended = false) =
+  ## After anything that moves the geometry FIFO: run the engine up to now,
+  ## raise the level-triggered FIFO IRQ, let DMA mode 7 refill it, and book
+  ## evGxFifo for when the FIFO next drops below half (DMA, IRQ mode 1) or
+  ## empties (IRQ mode 2). With nothing listening the engine just runs
+  ## lazily. `appended`: only writes happened since the last booking, which
+  ## can only push the crossing later, so a booked wake-up stands.
+  let g = n.gpu3d
+  let mode = g.fifo_irq_mode
+  let want_dma = n.dma9.waiting(dtGxFifo)
+  if mode == 0 and not want_dma: return
+  if appended and n.sched.is_scheduled(evGxFifo): return
+  g.catch_up(n.sched.now)
+  g.update_irq()
+  if want_dma: n.gx_dma()
+  var at = high(int64)
+  if want_dma or mode == 1: at = g.wake_at(128)
+  if mode == 2: at = min(at, g.wake_at(1))
+  if at == high(int64): n.sched.cancel(evGxFifo)
+  else: n.sched.schedule(max(at, n.sched.now + 1), evGxFifo)
+
+proc mmem_request(ctx: pointer): bool {.nimcall.} =
+  ## ARM9 DMA mode 4: the main-memory display FIFO has room for 4 words;
+  ## the first channel armed for this frame moves one block (its count:
+  ## GBATEK sets it to 4, larger blocks overflow the FIFO and the rest is
+  ## dropped). A channel enabled mid-frame waits for the next frame
+  ## ("Transfer starts at next frame", GBATEK).
+  let n = cast[NDS](ctx)
   for i in 0..3:
-    var left = uint32(MMEM_LINE_WORDS)
-    while left > 0 and n.dma9.ch[i].enabled and n.dma9.timing(i) == dtMainMemDisplay:
-      let units = min(left, n.dma9.ch[i].cur_count)
-      n.dma9.transfer_units(bus, i, units)
-      left -= units
+    if n.mmem_armed[i] and n.dma9.ch[i].enabled and n.dma9.timing(i) == dtMainMemDisplay:
+      n.dma9.transfer_units(Arm9Bus(nds: n), i, n.dma9.ch[i].cur_count)
+      return true
+  false
 
 # ---------------------------------------------------------------------------
 # Display timing events
@@ -190,6 +243,9 @@ proc on_line_end(n: NDS) =
     inc g.vcount
     if g.vcount == LINES: g.vcount = 0
   n.line_start = n.sched.now
+  # the next line 192, for a write stalled behind a pending swap
+  let to_vblank = (VISIBLE_LINES - g.vcount + LINES) mod LINES
+  n.gpu3d.next_vblank = n.line_start + int64(if to_vblank == 0: LINES else: to_vblank) * LINE_CYCLES
   g.start_line()
   if g.vcount == VISIBLE_LINES:
     g.in_vblank = true
@@ -200,12 +256,13 @@ proc on_line_end(n: NDS) =
     n.dma9.trigger(Arm9Bus(nds: n), dtVBlank)
     n.dma7.trigger(Arm7Bus(nds: n), dtVBlank)
     n.gpu3d.on_vblank()
-    n.gx_dma()             # the swap drained the FIFO
+    n.gx_service()         # the swap releases the FIFO
   elif g.vcount == LINES - 1:
     g.in_vblank = false
   elif g.vcount == 0:
     n.dma9.trigger(Arm9Bus(nds: n), dtDisplayStart)
-  if g.vcount < VISIBLE_LINES: n.mmem_dma()
+    for i in 0..3:
+      n.mmem_armed[i] = n.dma9.ch[i].enabled and n.dma9.timing(i) == dtMainMemDisplay
   if g.vcount == int(g.stat9.vcount_setting): n.dispstat_irqs(g.stat9, n.irq9, irqVCount)
   if g.vcount == int(g.stat7.vcount_setting): n.dispstat_irqs(g.stat7, n.irq7, irqVCount)
   n.sched.schedule(n.line_start + HBLANK_CYCLES, evHBlank)
@@ -225,8 +282,10 @@ proc dispatch(n: NDS; ev: NdsEvent) =
     n.spu.tick(Arm7Bus(nds: n))
     n.spu.next_tick += SPU_TICK_CYCLES
     n.sched.schedule(n.spu.next_tick, evSpuSample)
-  of evGxFifo: discard
+  of evGxFifo: n.gx_service()
   of evWifi: n.wifi.on_event()
+  of evSpi: n.spi.transfer_end()
+  of evRtc: n.rtc.on_event()
 
 # ---------------------------------------------------------------------------
 # Construction and the frame loop
@@ -237,9 +296,17 @@ proc read_file_bytes(path: string): seq[uint8] =
   result = newSeq[uint8](s.len)
   if s.len > 0: copyMem(addr result[0], unsafeAddr s[0], s.len)
 
-proc new_nds*(rom: seq[uint8]; bios9, bios7, firmware: seq[uint8];
-              force_hle = false): NDS =
+proc can_firmware_boot*(bios9, bios7, firmware: seq[uint8]): bool =
+  ## A firmware boot runs the real BIOSes and the real firmware: all three
+  ## dumps are needed (the synthesized firmware has no boot code).
+  bios9.len >= BIOS9_SIZE and bios7.len >= BIOS7_SIZE and firmware.len >= 256 * 1024
+
+proc new_nds*(rom: sink seq[uint8]; bios9, bios7, firmware: seq[uint8];
+              force_hle = false; boot = nbDirect): NDS =
   ## A missing BIOS dump (or `force_hle`) gets the HLE BIOS for that CPU.
+  ## `boot = nbFirmware` starts from power-on in the real BIOS + firmware
+  ## (an empty `rom` = no card: the firmware menu); without all three dumps
+  ## it says so on stderr and direct-boots instead.
   let n = NDS(sched: new_nds_scheduler(), vcount_write: -1)
   n.main_ram = newSeq[uint8](MAIN_RAM_SIZE)
   n.shared_wram = newSeq[uint8](32 * 1024)
@@ -255,7 +322,11 @@ proc new_nds*(rom: seq[uint8]; bios9, bios7, firmware: seq[uint8];
   n.input = Input()
   n.gpu = new_gpu()
   n.gpu3d = new_gpu3d(n.gpu.vram, n.irq9)
+  n.gpu3d.sched = n.sched
+  n.gpu3d.next_vblank = int64(VISIBLE_LINES) * LINE_CYCLES
   n.gpu.gpu3d = n.gpu3d
+  n.gpu.mmem_req = mmem_request
+  n.gpu.mmem_ctx = cast[pointer](n)
   n.timers9 = Timers(sched: n.sched, irq: n.irq9, first_event: evTimer9_0)
   n.timers7 = Timers(sched: n.sched, irq: n.irq7, first_event: evTimer7_0)
   n.dma9 = new_dma(true, n.irq9)
@@ -263,11 +334,15 @@ proc new_nds*(rom: seq[uint8]; bios9, bios7, firmware: seq[uint8];
   n.ipc = new_ipc(n.irq9, n.irq7)
   n.divsqrt = new_divsqrt(n.sched)
   n.spi = new_spi(if firmware.len > 0: firmware else: synth_firmware(), n.irq7, n.input)
-  n.spi.sched = n.sched
+  n.spi.set_sched(n.sched)
   n.cart = new_cart(rom, n.irq9, n.irq7, n.sched)
+  n.cart.set_key1_table(key1_table_from_bios7(bios7))
   n.spu = new_spu()
   n.rtc = new_rtc()
+  n.rtc.sched = n.sched
+  n.rtc.irq = n.irq7
   n.wifi = new_wifi(n.sched, n.irq7)
+  n.slot2 = new_slot2()
   n.arm9 = new_arm_cpu(Arm9Bus(nds: n), ARM9_CYCLES_PER_INSTR)
   n.arm7 = new_arm_cpu(Arm7Bus(nds: n), ARM7_CYCLES_PER_INSTR)
   n.cp15.reset()
@@ -275,26 +350,65 @@ proc new_nds*(rom: seq[uint8]; bios9, bios7, firmware: seq[uint8];
   n.tm.update_regions(n.cp15)
   n.last_fetch9 = NO_ADDR; n.last_data9 = NO_ADDR
   n.last_fetch7 = NO_ADDR; n.last_data7 = NO_ADDR
-  n.direct_boot()
+  if boot == nbFirmware and not force_hle and can_firmware_boot(bios9, bios7, firmware):
+    n.firmware_boot()
+  else:
+    if boot == nbFirmware:
+      stderr.writeLine("nds: firmware boot needs bios9.bin, bios7.bin and firmware.bin " &
+                       "dumps (and no forced HLE); direct boot instead")
+    n.direct_boot()
   n.sched.schedule(HBLANK_CYCLES, evHBlank)
   n.sched.schedule(LINE_CYCLES, evLineEnd)
   n.sched.schedule(n.spu.next_tick, evSpuSample)
   n
 
-proc load_nds*(rom_path: string; bios_dir = ""): NDS =
+proc load_nds*(rom_path: string; bios_dir = ""; boot = nbDirect): NDS =
   ## Load a ROM; BIOS/firmware come from `bios_dir` (bios9.bin, bios7.bin,
   ## firmware.bin), else $DINGBAT_NDS_BIOS, else none (firmware synthesized,
   ## HLE BIOS). DINGBAT_NDS_HLE=1 forces the HLE BIOS even with dumps.
+  ## An empty `rom_path` is an empty card slot.
   let dir = if bios_dir.len > 0: bios_dir else: getEnv("DINGBAT_NDS_BIOS")
   new_nds(read_file_bytes(rom_path),
           read_file_bytes(dir / "bios9.bin"), read_file_bytes(dir / "bios7.bin"),
           read_file_bytes(dir / "firmware.bin"),
-          force_hle = getEnv("DINGBAT_NDS_HLE") == "1")
+          force_hle = getEnv("DINGBAT_NDS_HLE") == "1", boot = boot)
+
+# ---------------------------------------------------------------------------
+# Sleep (GBATEK "DS Power Control", HALTCNT; "BIOS Halt Functions", Stop/Sleep)
+
+const SLEEP_WAKE = (1'u32 shl ord(irqSerial)) or (1'u32 shl ord(irqKeypad)) or
+                   (1'u32 shl ord(irqGbaSlot)) or (1'u32 shl ord(irqLid))
+  ## What ends sleep, as far as IE allows: the GBA's Stop list (keypad, game
+  ## pak, general-purpose SIO, which carries the RTC) plus the hinge.
+
+proc wake_pending(n: NDS): bool {.inline.} =
+  (n.irq7.ie and n.irq7.iff and SLEEP_WAKE) != 0
+
+proc asleep*(n: NDS): bool {.inline.} = n.sleeping or n.spi.power_off
+
+proc wake_from_sleep(n: NDS) =
+  if n.sleeping and n.wake_pending(): n.sleeping = false
+
+proc sleep_for(n: NDS; cycles: int64) =
+  ## Asleep, both CPUs, video, sound, timers and DMA stand still (Assumed
+  ## for the ARM9 and video: GBATEK says "most of the hardware ... paused"),
+  ## so the master clock does not move; the RTC's crystal runs on and an
+  ## alarm can end the sleep. Powered off (power manager), nothing ends it.
+  if n.spi.power_off: return
+  n.wake_from_sleep()
+  if not n.sleeping: return
+  n.rtc.sleep_advance(cycles, proc(): bool = n.wake_pending())
+  n.wake_from_sleep()
 
 proc run_until*(n: NDS; target: int64) =
+  ## Asleep, `target - now` is spent as sleep and the master clock stays.
   var ev: NdsEvent
   var at: int64
+  if n.asleep():
+    n.sleep_for(max(0'i64, target - n.sched.now))
+    return
   while n.sched.now < target:
+    if n.asleep(): return     # the ARM7 went to sleep in the last slice
     var slice_end = min(target, n.sched.next_at())
     let both_halted = n.arm9.halted and n.arm7.halted
     if not both_halted: slice_end = min(slice_end, n.sched.now + SLICE)
@@ -309,14 +423,62 @@ proc run_until*(n: NDS; target: int64) =
 proc run_frame*(n: NDS) =
   ## Run to the start of the next V-blank (line 192).
   n.frame_done = false
+  if n.asleep():
+    # a frame's worth of sleep; the screens show what they last showed
+    n.sleep_for(FRAME_CYCLES)
+    if n.asleep(): return
   let limit = n.sched.now + 2 * FRAME_CYCLES
   while not n.frame_done and n.sched.now < limit:
     n.run_until(min(limit, n.sched.now + LINE_CYCLES))
+    if n.asleep(): break
+  n.slot2.end_frame()
+
+proc insert_slot2*(n: NDS; kind: Slot2Kind; rom: seq[uint8] = @[];
+                   save: seq[uint8] = @[]) =
+  ## Put a device in the GBA slot (`rom`/`save` for s2GbaCart; s2Empty
+  ## ejects). Before the first instruction runs this is power-on insertion,
+  ## and the boot info the firmware leaves about the slot (0x027FFC30) is
+  ## rewritten to match.
+  case kind
+  of s2Empty: n.slot2.eject()
+  of s2GbaCart: n.slot2.insert_gba(rom, save)
+  of s2RumblePak: n.slot2.insert_rumble_pak()
+  of s2ExpansionPak: n.slot2.insert_expansion_pak()
+  if n.arm9.instr_count == 0:
+    let info = n.slot2.gba_header_info()
+    for i in 0 ..< 12: n.main_ram[0x3FFC30 + i] = info[i]
+
+proc slot2_save*(n: NDS): seq[uint8] =
+  ## The slot-2 GBA cart's backup chip contents (empty without one), in the
+  ## .sav layout GBA emulators use; clears the dirty flag.
+  n.slot2.dirty = false
+  n.slot2.save
+
+proc slot2_rumble*(n: NDS): int =
+  ## Rumble strength 0..255 for the frontend (Rumble Pak or a GBA cart's
+  ## GPIO motor); 0 with nothing rumbling.
+  n.slot2.rumble()
 
 proc set_button*(n: NDS; b: NdsButton; pressed: bool) =
   if pressed: n.input.held.incl(b) else: n.input.held.excl(b)
   n.input.check_keypad_irq(n.input.keycnt9, n.irq9)
   n.input.check_keypad_irq(n.input.keycnt7, n.irq7)
+
+proc set_lid*(n: NDS; closed: bool) =
+  ## Close or open the hinge (EXTKEYIN bit 7; opening raises IF.22).
+  n.input.set_lid(closed, n.irq7)
+
+proc push_mic*(n: NDS; samples: openArray[int16]; rate: int) =
+  ## Queue microphone input (mono, `rate` Hz) behind what is queued; the
+  ## ARM7 reads it through the TSC's AUX channel (io/mic.nim).
+  n.spi.mic.push(samples, rate)
+
+proc set_battery_low*(n: NDS; low: bool) = n.spi.battery_low = low
+proc set_external_power*(n: NDS; on: bool) = n.spi.ext_power = on
+
+proc backlight*(n: NDS; top: bool): bool =
+  ## Whether the power manager has that screen's backlight on.
+  n.spi.backlight(top)
 
 proc set_touch*(n: NDS; x, y: int; down: bool) =
   n.input.touching = down

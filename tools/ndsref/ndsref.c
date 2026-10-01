@@ -52,6 +52,21 @@ typedef struct {
   int user;                              /* cur came from --opt */
 } Option;
 
+static struct retro_subsystem_info subsys[16];
+static int n_subsys;
+static int rumble_log, cur_frame;
+static uint16_t rumble_now[2];
+
+static bool RETRO_CALLCONV set_rumble_state(unsigned port, enum retro_rumble_effect effect,
+                                            uint16_t strength) {
+  if (port == 0 && (unsigned)effect < 2 && rumble_now[effect] != strength) {
+    rumble_now[effect] = strength;
+    fprintf(outf, "rumble frame=%d %s=%u\n", cur_frame,
+            effect == RETRO_RUMBLE_STRONG ? "strong" : "weak", strength);
+  }
+  return true;
+}
+
 static Option opts[512];
 static int n_opts;
 static struct { char *key, *val; int used; } user_opts[128];
@@ -264,7 +279,18 @@ static bool environment(unsigned cmd, void *data) {
   case EXP(RETRO_ENVIRONMENT_SET_GEOMETRY):
   case EXP(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS):
   case EXP(RETRO_ENVIRONMENT_SET_CONTROLLER_INFO):
-  case EXP(RETRO_ENVIRONMENT_SET_SUBSYSTEM_INFO):
+  case EXP(RETRO_ENVIRONMENT_SET_SUBSYSTEM_INFO): {
+    /* kept for --slot2: the descriptions stay the core's (static) strings */
+    const struct retro_subsystem_info *si = data;
+    n_subsys = 0;
+    for (; si && si->ident && n_subsys < 16; si++) subsys[n_subsys++] = *si;
+    return true;
+  }
+  case EXP(RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE):
+    /* --rumble-log: the core's rumble requests are printed, frame by frame */
+    if (!rumble_log) return false;
+    ((struct retro_rumble_interface *)data)->set_rumble_state = set_rumble_state;
+    return true;
   case EXP(RETRO_ENVIRONMENT_SET_PERFORMANCE_LEVEL):
   case EXP(RETRO_ENVIRONMENT_SET_SUPPORT_ACHIEVEMENTS):
   case EXP(RETRO_ENVIRONMENT_SET_MEMORY_MAPS):
@@ -678,6 +704,9 @@ static void usage(void) {
     "  --list-opts        print the core's options (key, default, values) and exit\n"
     "  --layout auto|tb|bt|lr|rl  how the core's frame holds the two screens\n"
     "  --sram FILE        load the cart's save memory from FILE (not written back)\n"
+    "  --slot2 FILE[,SAVE] load ROM plus a GBA ROM (and its save) through the\n"
+    "                     core's two-cart subsystem (-v lists the subsystems)\n"
+    "  --rumble-log       print every rumble strength change with its frame\n"
     "  --workdir DIR      system/ and save/ dirs here (default: a temp dir, removed)\n"
     "  --no-final         don't write PREFIX.png\n"
     "  --depth5           reduce PNG colour to 5 bits per channel, widened as ndsrun does\n"
@@ -688,7 +717,7 @@ static void usage(void) {
 int main(int argc, char **argv) {
   const char *core_arg = NULL, *rom = NULL, *outp = "ndsref_out", *wav = NULL,
              *bios = NULL, *workdir_arg = NULL;
-  const char *sram = NULL;
+  const char *sram = NULL, *slot2 = NULL;
   int frames = 60, list_opts = 0, no_final = 0, no_core_opts = 0;
   const char *cli_opts[128], *opt_files[16];
   int n_cli_opts = 0, n_opt_files = 0;
@@ -706,6 +735,8 @@ int main(int argc, char **argv) {
     else if (!strcmp(a, "--out")) outp = NEXT();
     else if (!strcmp(a, "--wav")) wav = NEXT();
     else if (!strcmp(a, "--sram")) sram = NEXT();
+    else if (!strcmp(a, "--slot2")) slot2 = NEXT();
+    else if (!strcmp(a, "--rumble-log")) rumble_log = 1;
     else if (!strcmp(a, "--bios")) bios = NEXT();
     else if (!strcmp(a, "--workdir")) workdir_arg = NEXT();
     else if (!strcmp(a, "--sysfile")) { if (n_sysfiles < 64) sysfiles[n_sysfiles++] = NEXT(); }
@@ -839,7 +870,44 @@ int main(int argc, char **argv) {
     char abs[4096];
     if (!realpath(rom, abs)) snprintf(abs, sizeof abs, "%s", rom);
     struct retro_game_info gi = {abs, data, len, NULL};
-    if (!p_retro_load_game(&gi)) die("core refused to load %s", rom);
+    if (slot2) {
+      /* the first subsystem taking two or more files: DS ROM, GBA ROM,
+         then (optional) the GBA save, in the core's declared order */
+      __typeof__(&retro_load_game_special) p_special =
+          (__typeof__(&retro_load_game_special))dlsym(lib, "retro_load_game_special");
+      if (!p_special) die("core lacks retro_load_game_special");
+      int k = 0;
+      for (; k < n_subsys; k++) {
+        if (verbose) {
+          fprintf(errf, "subsystem %u '%s' (%s):", subsys[k].id, subsys[k].ident, subsys[k].desc);
+          for (unsigned r = 0; r < subsys[k].num_roms; r++)
+            fprintf(errf, " [%s%s .%s]", subsys[k].roms[r].desc,
+                    subsys[k].roms[r].required ? "" : "?", subsys[k].roms[r].valid_extensions);
+          fprintf(errf, "\n");
+        }
+        if (subsys[k].num_roms >= 2) break;
+      }
+      if (k == n_subsys) die("core declares no two-cart subsystem");
+      char gpath[4096], spath[4096] = "";
+      snprintf(gpath, sizeof gpath, "%s", slot2);
+      char *comma = strchr(gpath, ',');
+      if (comma) { *comma = 0; snprintf(spath, sizeof spath, "%s", comma + 1); }
+      struct retro_game_info infos[3] = {{0}};
+      size_t glen, slen = 0;
+      uint8_t *gdata = read_file(gpath, &glen), *sdata = NULL;
+      char gabs[4096], sabs[4096];
+      if (!realpath(gpath, gabs)) snprintf(gabs, sizeof gabs, "%s", gpath);
+      infos[0] = gi;
+      infos[1] = (struct retro_game_info){gabs, gdata, glen, NULL};
+      unsigned num = 2;
+      if (spath[0] && subsys[k].num_roms >= 3) {
+        sdata = read_file(spath, &slen);
+        if (!realpath(spath, sabs)) snprintf(sabs, sizeof sabs, "%s", spath);
+        infos[2] = (struct retro_game_info){sabs, sdata, slen, NULL};
+        num = 3;
+      }
+      if (!p_special(subsys[k].id, infos, num)) die("core refused the %s subsystem", subsys[k].ident);
+    } else if (!p_retro_load_game(&gi)) die("core refused to load %s", rom);
     p_retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
     if (sram) {
       /* --sram: the cart's save memory starts as this file (read only; the
@@ -888,6 +956,7 @@ int main(int argc, char **argv) {
   if (pl > 4 && !strcasecmp(prefix + pl - 4, ".png")) prefix[pl - 4] = 0;
 
   for (int f = 0; f < frames; f++) {
+    cur_frame = f;
     apply_presses(f);
     if (frame_time_cb.callback)
       frame_time_cb.callback(frame_time_cb.reference ? frame_time_cb.reference

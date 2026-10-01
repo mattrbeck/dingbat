@@ -44,11 +44,11 @@ proc io7_read(n: NDS; a: uint32): uint32 =
   of 0x0B0 .. 0x0DC: n.dma7.read_reg(o)
   of 0x100 .. 0x10C: n.timers7.read_reg(o)
   of 0x130: uint32(n.input.keyinput()) or (uint32(n.input.keycnt7) shl 16)
-  of 0x134: 0x8000'u32 or (uint32(n.input.extkeyin()) shl 16)  # RCNT | EXTKEYIN
+  of 0x134: uint32(n.rtc.read_rcnt()) or (uint32(n.input.extkeyin()) shl 16)  # RCNT | EXTKEYIN
   of 0x138: uint32(n.rtc.read_reg())
   of 0x180: n.ipc.read_sync(false)
   of 0x184: n.ipc.read_fifocnt(false)
-  of 0x1A0 .. 0x1AC: (if n.cart.owner_arm7: n.cart.read_reg(o) else: 0'u32)
+  of 0x1A0 .. 0x1B8: (if n.cart.owner_arm7: n.cart.read_reg(o) else: 0'u32)
   of 0x1C0: n.spi.read_reg(o)
   of 0x204: uint32((n.exmemcnt and 0xFF80'u16) or n.exmem7_lo)
   of 0x208, 0x210, 0x214: n.irq7.read_reg(o)
@@ -76,19 +76,20 @@ proc io7_write(n: NDS; a: uint32; v, mask: uint32) =
     # EXMEMSTAT: the ARM7 sets only its own bits 0-6
     if (mask and 0x7F) != 0:
       n.exmem7_lo = (n.exmem7_lo and not uint16(mask and 0x7F)) or uint16(v and mask and 0x7F)
+      n.slot7_t = slot_timing(n.exmem7_lo)
   of 0x0B0 .. 0x0DC: n.dma7.write_reg(Arm7Bus(nds: n), o, v, mask)
   of 0x100 .. 0x10C: n.timers7.write_reg(o, v, mask)
   of 0x130:
     if (mask and 0xFFFF_0000'u32) != 0:
       n.input.keycnt7 = uint16(v shr 16)
       n.input.check_keypad_irq(n.input.keycnt7, n.irq7)
-  of 0x134: discard   # RCNT: TODO(sio)
+  of 0x134: (if (mask and 0xFFFF) != 0: n.rtc.write_rcnt(uint16(v), uint16(mask)))  # RCNT (io/rtc.nim)
   of 0x138: (if (mask and 0xFFFF) != 0: n.rtc.write_reg(uint16(v)))
   of 0x180: n.ipc.write_sync(false, v, mask)
   of 0x184: n.ipc.write_fifocnt(false, v, mask)
   of 0x188: n.ipc.send(false, v)
-  of 0x1A0 .. 0x1AC:
-    if n.cart.owner_arm7: n.cart.write_reg(o, v, mask, n.arm7.cur_pc)
+  of 0x1A0 .. 0x1B8:
+    if n.cart.owner_arm7: n.cart.write_reg(o, v, mask, n.arm7.cur_pc, from7 = true)
   of 0x1C0:
     if (mask and 0xFFFF) != 0: n.spi.write_cnt(v, mask)
     if (mask and 0x00FF_0000'u32) != 0: n.spi.write_data(uint8(v shr 16))
@@ -98,9 +99,11 @@ proc io7_write(n: NDS; a: uint32; v, mask: uint32) =
     if (mask and 0xFF) != 0 and n.arm7.cur_pc < 0x4000:
       n.postflg7 = n.postflg7 or uint8(v and 1)
     if (mask and 0xFF00) != 0:
-      # HALTCNT: 2 = halt, 3 = sleep (TODO: sleep wakes on key/lid only)
+      # HALTCNT: 2 = halt, 3 = sleep (nds.nim `sleep_for`); 1 (GBA mode)
+      # is not supported and does nothing
       let mode = (v shr 14) and 3
       if mode >= 2: n.arm7.halted = true
+      if mode == 3: n.sleeping = true
   of 0x304: (if (mask and 0xFFFF) != 0: n.powcnt2 = uint16(v) and 3)
   of 0x308:
     # write-once (the BIOS sets 0x1205; bit 0 is ignored)
@@ -194,7 +197,8 @@ proc write7(n: NDS; a: uint32; v: uint32; width: static int) =
     when width == 32: n.gpu.vram.write32(vrArm7, off, v)
     elif width == 16: n.gpu.vram.write16(vrArm7, off, uint16(v))
     else: n.gpu.vram.write8(vrArm7, off, uint8(v))
-  of 0x00, 0x08, 0x09, 0x0A: discard
+  of 0x08, 0x09, 0x0A: n.slot2_write(a, v, false, width)
+  of 0x00: discard
   else: n.note_unmapped("arm7", a, true)
 
 # --- CPU mixins --------------------------------------------------------
@@ -204,7 +208,7 @@ proc data_cost7(n: NDS; a: uint32; width: static int) {.inline.} =
   if n.dma7.dma_access: return
   let seq = a == n.last_data7 + (when width == 32: 4'u32 else: 2'u32)
   n.last_data7 = a
-  n.wait7 += data7(a shr 24, width, seq)
+  n.wait7 += data7(a shr 24, width, seq, n.slot7_t)
 
 proc fetch_cost7(n: NDS; a: uint32; width: static int) {.inline.} =
   ## A nonsequential fetch (a branch) also pays the refill's second fetch.
@@ -212,8 +216,8 @@ proc fetch_cost7(n: NDS; a: uint32; width: static int) {.inline.} =
   let seq = a == n.last_fetch7 + (when width == 32: 4'u32 else: 2'u32)
   n.last_fetch7 = a
   let top = a shr 24
-  n.wait7 += code7(top, width, seq)
-  if not seq: n.wait7 += code7(top, width, true)
+  n.wait7 += code7(top, width, seq, n.slot7_t)
+  if not seq: n.wait7 += code7(top, width, true, n.slot7_t)
 
 proc read8*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
   b.nds.data_cost7(a, 8)
@@ -251,7 +255,10 @@ proc spu_read32*(b: Arm7Bus; a: uint32): uint32 = b.nds.read7(a, 32)
 proc spu_write32*(b: Arm7Bus; a: uint32; v: uint32) = b.nds.write7(a, v, 32)
 
 proc irq_line*(b: Arm7Bus): bool {.inline.} = b.nds.irq7.line()
-proc irq_wake*(b: Arm7Bus): bool {.inline.} = b.nds.irq7.wake()
+proc irq_wake*(b: Arm7Bus): bool {.inline.} =
+  ## Halt ends on (IE and IF) != 0 whatever IME says; sleep only through
+  ## `wake_from_sleep` (nds.nim).
+  not b.nds.sleeping and b.nds.irq7.wake()
 proc access_cycles*(b: Arm7Bus): int64 {.inline.} =
   result = b.nds.wait7
   b.nds.wait7 = 0

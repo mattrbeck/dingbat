@@ -226,7 +226,7 @@ document.getElementById("net-connect").addEventListener("click", () => {
     return;
   }
   const oext = extOf(currentOriginalName || "");
-  if (!ROM_EXTS.includes(oext)) {
+  if (!ROM_EXTS.includes(oext) || oext === ".nds") { // the DS core has no link yet
     showToast("Link cable needs a GB, GBC, or GBA game");
     return;
   }

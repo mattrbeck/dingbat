@@ -331,27 +331,45 @@ void main() {
 
   return {
     // Draw the current wasm game frame. opts drives the color/scanline uniforms.
+    // opts.frame, when given, is the picture instead of the em.js core's: a
+    // w x h frame assembled from BGR555 parts ({ view: Uint16Array, x, y, w,
+    // h }), texels no part covers left black. The DS's two screens come in
+    // this way (index.js "Nintendo DS"); there is no SGB border then.
     draw(opts) {
       if (!ensure()) return;
-      const ptr = Module._wasm_game_fb_ptr && Module._wasm_game_fb_ptr();
-      if (!ptr) return;
+      const frame = opts.frame || null;
+      const ptr = frame ? 0 : Module._wasm_game_fb_ptr && Module._wasm_game_fb_ptr();
+      if (!frame && !ptr) return;
       // nativeRes() is the OUTPUT size, which an SGB border makes 256x224.
       // The game texture is always the console's own framebuffer.
-      const border = !!(Module._wasm_sgb_border && Module._wasm_sgb_border());
-      const [ow, oh] = nativeRes();
+      const border = !frame && !!(Module._wasm_sgb_border && Module._wasm_sgb_border());
+      const [ow, oh] = frame ? [frame.w, frame.h] : nativeRes();
       const w = border ? 160 : ow, h = border ? 144 : oh;
-      // Fresh view each frame: ALLOW_MEMORY_GROWTH can detach the old buffer.
-      const view = new Uint16Array(Module.memory.buffer, ptr, w * h);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.pixelStorei(gl.UNPACK_ALIGNMENT, 2);
-      if (w !== lastW || h !== lastH) {
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16UI, w, h, 0,
-          gl.RED_INTEGER, gl.UNSIGNED_SHORT, view);
-        lastW = w; lastH = h;
+      if (frame) {
+        if (w !== lastW || h !== lastH) {
+          // Zero-filled: the gap between parts reads as black.
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16UI, w, h, 0,
+            gl.RED_INTEGER, gl.UNSIGNED_SHORT, new Uint16Array(w * h));
+          lastW = w; lastH = h;
+        }
+        for (const p of frame.parts) {
+          gl.texSubImage2D(gl.TEXTURE_2D, 0, p.x, p.y, p.w, p.h,
+            gl.RED_INTEGER, gl.UNSIGNED_SHORT, p.view);
+        }
       } else {
-        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h,
-          gl.RED_INTEGER, gl.UNSIGNED_SHORT, view);
+        // Fresh view each frame: ALLOW_MEMORY_GROWTH can detach the old buffer.
+        const view = new Uint16Array(Module.memory.buffer, ptr, w * h);
+        if (w !== lastW || h !== lastH) {
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16UI, w, h, 0,
+            gl.RED_INTEGER, gl.UNSIGNED_SHORT, view);
+          lastW = w; lastH = h;
+        } else {
+          gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h,
+            gl.RED_INTEGER, gl.UNSIGNED_SHORT, view);
+        }
       }
       // --- SGB border layer ---
       if (border) {

@@ -27,7 +27,18 @@ proc dma_stall*(b: Arm9Bus; cycles: int64) =
 
 # --- I/O ---------------------------------------------------------------
 
-proc gx_dma(n: NDS)
+proc gx_service(n: NDS; appended = false)
+
+proc gx_write(n: NDS; o, v, mask: uint32) =
+  ## A geometry engine write; a full FIFO holds the bus, so the writer and
+  ## the ARM7 wait (GBATEK "DS 3D Geometry Commands": "the bus cannot be
+  ## used even by DMA, interrupts, or by the NDS7 CPU").
+  n.gpu3d.write_reg(o, v, mask)
+  let t = n.gpu3d.stall_until
+  if t > n.arm9.cycles:
+    n.arm9.cycles = t
+    n.arm7.cycles = max(n.arm7.cycles, t)
+  if not n.dma9.dma_access and o >= 0x400: n.gx_service(appended = o < 0x600)
 
 proc write_vcount(n: NDS; v: uint32) =
   ## VCOUNT is writable (GBATEK "DS Video", for syncing linked consoles):
@@ -61,7 +72,7 @@ proc io9_read(n: NDS; a: uint32): uint32 =
   of 0x130: uint32(n.input.keyinput()) or (uint32(n.input.keycnt9) shl 16)
   of 0x180: n.ipc.read_sync(true)
   of 0x184: n.ipc.read_fifocnt(true)
-  of 0x1A0 .. 0x1AC: (if n.cart.owner_arm7: 0'u32 else: n.cart.read_reg(o))
+  of 0x1A0 .. 0x1B8: (if n.cart.owner_arm7: 0'u32 else: n.cart.read_reg(o))
   of 0x204: uint32(n.exmemcnt)
   of 0x208, 0x210, 0x214: n.irq9.read_reg(o)
   of 0x240:
@@ -90,8 +101,13 @@ proc io9_write(n: NDS; a: uint32; v, mask: uint32) =
     if (mask and 0xFFFF_0000'u32) != 0: n.write_vcount(v shr 16)
   of 0x060: n.gpu3d.write_reg(o, v, mask)
   of 0x0B0 .. 0x0EC:
+    var was: array[4, bool]
+    for i in 0..3: was[i] = n.dma9.ch[i].enabled
     n.dma9.write_reg(Arm9Bus(nds: n), o, v, mask)
-    n.gx_dma()
+    # a channel (re)started mid-frame waits for the next frame in mode 4
+    for i in 0..3:
+      if n.dma9.ch[i].enabled and not was[i]: n.mmem_armed[i] = false
+    n.gx_service()
   of 0x100 .. 0x10C: n.timers9.write_reg(o, v, mask)
   of 0x130:
     if (mask and 0xFFFF_0000'u32) != 0:
@@ -100,14 +116,17 @@ proc io9_write(n: NDS; a: uint32; v, mask: uint32) =
   of 0x180: n.ipc.write_sync(true, v, mask)
   of 0x184: n.ipc.write_fifocnt(true, v, mask)
   of 0x188: n.ipc.send(true, v)
-  of 0x1A0 .. 0x1AC:
+  of 0x1A0 .. 0x1B8:
     if not n.cart.owner_arm7: n.cart.write_reg(o, v, mask, n.arm9.cur_pc)
   of 0x204:
     if (mask and 0xFFFF) != 0:
-      # bits 8-10 and 12 read zero, bit 13 reads set (GBATEK)
-      let m = uint16(mask) and 0xC8FF'u16
+      # bits 8-10 and 12 read zero, bit 13 reads set (GBATEK); writes to
+      # bit 14 are ignored (GBATEK "appear to be ignored?"; slot2_probe in
+      # the reference runs, docs/oracles.md) and it stays set from boot
+      let m = uint16(mask) and 0x88FF'u16
       n.exmemcnt = (n.exmemcnt and not m) or (uint16(v) and m) or 0x2000
       n.cart.owner_arm7 = (n.exmemcnt and 0x800) != 0
+      n.slot9_t = slot_timing(n.exmemcnt)
   of 0x208, 0x210, 0x214:
     n.irq9.write_reg(o, v, mask)
     if o == 0x214: n.gpu3d.update_irq()   # IF.21 is level-triggered
@@ -127,7 +146,7 @@ proc io9_write(n: NDS; a: uint32; v, mask: uint32) =
     if (mask and 0xFF) != 0: n.postflg9 = (n.postflg9 and 1) or uint8(v and 3)
   of 0x304:
     if (mask and 0xFFFF) != 0: n.gpu.write_powcnt1(uint16(v))
-  of 0x320 .. 0x6A0: n.gpu3d.write_reg(o, v, mask)
+  of 0x320 .. 0x6A0: n.gx_write(o, v, mask)
   of 0x1000 .. 0x106C: n.gpu.engine_b.write_reg(o - 0x1000, v, mask)
   else: n.note_unmapped("arm9 io", a, true)
 
@@ -162,14 +181,14 @@ proc charge9(n: NDS; a: uint32; width: static int; write: bool) {.inline.} =
   if n.tm.dc_on and n.tm.data_cachable(a):
     if write:
       if not n.tm.dcache.lookup(a, false):
-        n.wait9 += (if n.tm.data_buffered(a): WBUF_WRITE else: data9(top, width, seq))
+        n.wait9 += (if n.tm.data_buffered(a): WBUF_WRITE else: data9(top, width, seq, n.slot9_t))
     elif not n.tm.dcache.lookup(a, true):
       n.wait9 += (if top == 0xFF: FILL_BIOS else: FILL_MAIN)
     return
   if write and top == 2 and n.tm.data_buffered(a):
     n.wait9 += WBUF_WRITE
     return
-  n.wait9 += data9(top, width, seq)
+  n.wait9 += data9(top, width, seq, n.slot9_t)
 
 template charge9_tcm(n: NDS; a: uint32; itcm: bool) =
   ## DTCM data is free; ITCM data costs a cycle (GBATEK: no parallel access)
@@ -268,7 +287,7 @@ proc write9(n: NDS; a: uint32; v: uint32; width: static int; timed: static bool 
       let r = arm9_region(a, off)
       when width == 32: n.gpu.vram.write32(r, off, v)
       else: n.gpu.vram.write16(r, off, uint16(v))
-  of 0x08, 0x09, 0x0A: discard
+  of 0x08, 0x09, 0x0A: n.slot2_write(a, v, true, width)
   else: n.note_unmapped("arm9", a, true)
 
 # --- CPU mixins --------------------------------------------------------
@@ -286,7 +305,7 @@ proc fetch_cost9(n: NDS; a: uint32) {.inline.} =
     if not n.tm.icache.lookup(a, true):
       c += (if (a shr 24) == 0xFF: FILL_BIOS else: FILL_MAIN)
   else:
-    c += code9_uncached(a shr 24)
+    c += code9_uncached(a shr 24, n.slot9_t)
   n.wait9 += c
 
 proc read8*(b: Arm9Bus; a: uint32): uint32 {.inline.} = b.nds.read9(a, 8, true)
