@@ -131,6 +131,17 @@ proc xor_bytes(dst: var string; src: string; k: int) =
   for i in (words * 8) ..< k:
     dst[i] = char(uint8(dst[i]) xor uint8(src[i]))
 
+proc xor_bytes_at(dst: var string; d0: int; src: string; s0, k: int) =
+  ## dst[d0 ..< d0+k] ^= src[s0 ..< s0+k]
+  var i = 0
+  while i + 8 <= k:
+    let dp = cast[ptr uint64](addr dst[d0 + i])
+    dp[] = dp[] xor cast[ptr uint64](unsafeAddr src[s0 + i])[]
+    i += 8
+  while i < k:
+    dst[d0 + i] = char(uint8(dst[d0 + i]) xor uint8(src[s0 + i]))
+    inc i
+
 
 # Sparse-block pre-pass on the delta (the ring's codec). The delta is an XOR,
 # so "unchanged" is a zero byte and the payload is ~99% zeros; a bitmap of
@@ -195,17 +206,57 @@ proc sparse_decode*(src: string): string =
       copyMem(addr result[lo], unsafeAddr src[p], hi - lo)
       p += hi - lo
 
+proc sparse_xor_encode*(prev, cur: string; bs = SparseBlock): string =
+  ## sparse_encode(prev XOR cur) without building the XOR: one pass over the
+  ## two payloads, the same bytes out. The XOR covers the overlapping
+  ## prefix; where prev extends past cur its bytes go raw.
+  let n = prev.len
+  if n == 0: return ""
+  let k = min(prev.len, cur.len)
+  let nblocks = (n + bs - 1) div bs
+  let bitmapBytes = (nblocks + 7) div 8
+  result = newString(8 + bitmapBytes)   # zeroed: the bitmap starts empty
+  cast[ptr uint32](addr result[0])[] = uint32(n)
+  cast[ptr uint32](addr result[4])[] = uint32(bs)
+  let p = cast[ptr UncheckedArray[byte]](unsafeAddr prev[0])
+  let c = cast[ptr UncheckedArray[byte]](unsafeAddr cur[0])
+  for b in 0 ..< nblocks:
+    let lo = b * bs
+    let hi = min(lo + bs, n)
+    let xhi = min(hi, k)
+    var any = false
+    var i = lo
+    while i + 8 <= xhi:
+      if (cast[ptr uint64](addr p[i])[] xor cast[ptr uint64](addr c[i])[]) != 0:
+        any = true; break
+      i += 8
+    if not any:
+      while i < xhi:
+        if (p[i] xor c[i]) != 0: any = true; break
+        i.inc
+    if not any:
+      i = max(i, xhi)
+      while i < hi:
+        if p[i] != 0: any = true; break
+        i.inc
+    if any:
+      result[8 + b div 8] = char(uint8(result[8 + b div 8]) or (1'u8 shl (b mod 8)))
+      let at = result.len
+      result.setLen(at + hi - lo)
+      copyMem(addr result[at], addr p[lo], hi - lo)
+      if lo < k:
+        xor_bytes_at(result, at, cur, lo, xhi - lo)
+
 proc encode_delta(prev, cur: string): string =
   ## Delta body reconstructs `prev` given `cur`: XOR over the overlapping
-  ## prefix, raw tail where prev extends past cur.
-  var body = prev
-  rp(0 + 1):  # RpXor
-    xor_bytes(body, cur, min(prev.len, cur.len))
+  ## prefix, raw tail where prev extends past cur. Built and scanned in one
+  ## pass (sparse_xor_encode): copying prev to XOR it in place first was a
+  ## third of a push's time outside zlib.
   rp(0 + 2):  # RpCompress
-    result = compress(sparse_encode(body), BestSpeed, dfZlib)
+    result = compress(sparse_xor_encode(prev, cur), BestSpeed, dfZlib)
   when defined(rewindprof):
     rewindprof_bytes[2] += result.len
-    rewindprof_bytes[1] += body.len
+    rewindprof_bytes[1] += prev.len
 
 proc decode_delta(cur, packed: string): string =
   result = sparse_decode(uncompress(packed, dfZlib))
