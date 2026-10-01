@@ -17,6 +17,13 @@ proc write32*(b: Arm7Bus; a: uint32; v: uint32) {.inline.}
 
 # --- I/O ---------------------------------------------------------------
 
+template sync7(n: NDS) =
+  ## Bring the timeline to this CPU's clock before a register access, so
+  ## timers, busy flags and new events see the access's time. A DMA started
+  ## by an event keeps the event's time.
+  if not n.dma7.dma_access: n.sched.now = n.arm7.cycles
+
+
 proc io7_read(n: NDS; a: uint32): uint32 =
   if (a and 0x00F0_0000'u32) == 0x0010_0000'u32:
     case a and 0x00FF_FFFC'u32
@@ -112,6 +119,7 @@ proc read7(n: NDS; a: uint32; width: static int): uint32 =
     let i = n.wram7(a, shared)
     if shared: rd(n.shared_wram, i) else: rd(n.arm7_wram, i)
   of 0x04:
+    n.sync7()
     let w = n.io7_read(a and not 3'u32)
     when defined(ndsdebug):
       if n.iolog: n.log_io("7", a, w, 0xFFFF_FFFF'u32, false)
@@ -163,13 +171,13 @@ proc read16*(b: Arm7Bus; a: uint32): uint32 {.inline.} = b.nds.read7(a, 16)
 proc read32*(b: Arm7Bus; a: uint32): uint32 {.inline.} = b.nds.read7(a, 32)
 
 proc write8*(b: Arm7Bus; a: uint32; v: uint8) {.inline.} =
-  b.nds.sched.now = b.nds.arm7.cycles
+  b.nds.sync7()
   b.nds.write7(a, uint32(v), 8)
 proc write16*(b: Arm7Bus; a: uint32; v: uint16) {.inline.} =
-  b.nds.sched.now = b.nds.arm7.cycles
+  b.nds.sync7()
   b.nds.write7(a, uint32(v), 16)
 proc write32*(b: Arm7Bus; a: uint32; v: uint32) {.inline.} =
-  b.nds.sched.now = b.nds.arm7.cycles
+  b.nds.sync7()
   b.nds.write7(a, v, 32)
 
 proc fetch32*(b: Arm7Bus; a: uint32): uint32 {.inline.} =

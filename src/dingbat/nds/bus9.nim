@@ -21,6 +21,13 @@ proc write32*(b: Arm9Bus; a: uint32; v: uint32) {.inline.}
 
 # --- I/O ---------------------------------------------------------------
 
+template sync9(n: NDS) =
+  ## Bring the timeline to this CPU's clock before a register access, so
+  ## timers, busy flags and new events see the access's time. A DMA started
+  ## by an event keeps the event's time.
+  if not n.dma9.dma_access: n.sched.now = n.arm9.cycles
+
+
 proc io9_read(n: NDS; a: uint32): uint32 =
   let o = a and 0x00FF_FFFC'u32
   if (a and 0x00F0_0000'u32) == 0x0010_0000'u32:
@@ -104,12 +111,16 @@ proc io9_write(n: NDS; a: uint32; v, mask: uint32) =
 
 # --- Memory ------------------------------------------------------------
 
-proc in_itcm(n: NDS; a: uint32): bool {.inline.} =
-  n.cp15.itcm_enabled and a < n.cp15.itcm_size and not n.dma9.dma_access
+proc in_itcm(n: NDS; a: uint32; write: bool): bool {.inline.} =
+  ## Load mode (CP15 control bit 19) makes the TCM write-only for data:
+  ## reads fall through to the memory behind it.
+  n.cp15.itcm_enabled and a < n.cp15.itcm_size and not n.dma9.dma_access and
+    (write or not n.cp15.itcm_load_mode)
 
-proc in_dtcm(n: NDS; a: uint32): bool {.inline.} =
+proc in_dtcm(n: NDS; a: uint32; write: bool): bool {.inline.} =
   n.cp15.dtcm_enabled and a >= n.cp15.dtcm_base and
-    a - n.cp15.dtcm_base < n.cp15.dtcm_size and not n.dma9.dma_access
+    a - n.cp15.dtcm_base < n.cp15.dtcm_size and not n.dma9.dma_access and
+    (write or not n.cp15.dtcm_load_mode)
 
 proc shared_wram9(n: NDS; a: uint32; ok: var bool): int {.inline.} =
   ok = true
@@ -124,8 +135,8 @@ proc read9(n: NDS; a: uint32; width: static int): uint32 =
     when width == 32: rd32(s, i)
     elif width == 16: rd16(s, i)
     else: uint32(s[i])
-  if n.in_itcm(a): return rd(n.itcm, int(a and 0x7FFF))
-  if n.in_dtcm(a): return rd(n.dtcm, int((a - n.cp15.dtcm_base) and 0x3FFF))
+  if n.in_itcm(a, false): return rd(n.itcm, int(a and 0x7FFF))
+  if n.in_dtcm(a, false): return rd(n.dtcm, int((a - n.cp15.dtcm_base) and 0x3FFF))
   case a shr 24
   of 0x02: rd(n.main_ram, int(a and 0x3FFFFF))
   of 0x03:
@@ -133,6 +144,7 @@ proc read9(n: NDS; a: uint32; width: static int): uint32 =
     let i = n.shared_wram9(a, ok)
     if ok: rd(n.shared_wram, i) else: 0'u32
   of 0x04:
+    n.sync9()
     let w = n.io9_read(a and not 3'u32)
     when defined(ndsdebug):
       if n.iolog: n.log_io("9", a, w, 0xFFFF_FFFF'u32, false)
@@ -171,8 +183,8 @@ proc write9(n: NDS; a: uint32; v: uint32; width: static int) =
     when width == 32: wr32(s, i, v)
     elif width == 16: wr16(s, i, v)
     else: s[i] = uint8(v)
-  if n.in_itcm(a): wr(n.itcm, int(a and 0x7FFF)); return
-  if n.in_dtcm(a): wr(n.dtcm, int((a - n.cp15.dtcm_base) and 0x3FFF)); return
+  if n.in_itcm(a, true): wr(n.itcm, int(a and 0x7FFF)); return
+  if n.in_dtcm(a, true): wr(n.dtcm, int((a - n.cp15.dtcm_base) and 0x3FFF)); return
   case a shr 24
   of 0x02: wr(n.main_ram, int(a and 0x3FFFFF))
   of 0x03:
@@ -211,13 +223,13 @@ proc read16*(b: Arm9Bus; a: uint32): uint32 {.inline.} = b.nds.read9(a, 16)
 proc read32*(b: Arm9Bus; a: uint32): uint32 {.inline.} = b.nds.read9(a, 32)
 
 proc write8*(b: Arm9Bus; a: uint32; v: uint8) {.inline.} =
-  b.nds.sched.now = b.nds.arm9.cycles
+  b.nds.sync9()
   b.nds.write9(a, uint32(v), 8)
 proc write16*(b: Arm9Bus; a: uint32; v: uint16) {.inline.} =
-  b.nds.sched.now = b.nds.arm9.cycles
+  b.nds.sync9()
   b.nds.write9(a, uint32(v), 16)
 proc write32*(b: Arm9Bus; a: uint32; v: uint32) {.inline.} =
-  b.nds.sched.now = b.nds.arm9.cycles
+  b.nds.sync9()
   b.nds.write9(a, v, 32)
 
 template trace_fetch(n: NDS; cpu: untyped; left: untyped; tag: string; a: uint32) =
