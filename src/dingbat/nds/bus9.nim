@@ -240,6 +240,7 @@ proc cp15_write*(b: Arm9Bus; op1, cn, cm, op2, v: uint32) =
   let n = b.nds
   n.cp15.write(op1, cn, cm, op2, v)
   n.arm9.vector_base = n.cp15.vector_base()
+  n.arm9.no_load_interwork = (n.cp15.control and 0x8000) != 0
   if n.cp15.halt_request:
     n.cp15.halt_request = false
     n.arm9.halted = true
