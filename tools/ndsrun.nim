@@ -16,6 +16,9 @@
 ##   --watch HEX               log every write to that word (pc, line)
 ## --text B0[,A0..]  print a text BG's tile map as characters (tile index =
 ##                   ASCII, as the libnds console font; --text-offset N)
+## --bgshot A0       draw that text BG straight from VRAM into the PNG's top
+##                   half (no scroll/priority/blending): readable text before
+##                   the 2D engine renders BGs
 
 import std/[os, strutils, parseopt]
 import zippy
@@ -120,6 +123,39 @@ proc bg_text*(n: NDS; engine_b: bool; bg: int; offset: int): string =
       line.add(if t >= 32 and t < 127: char(t) else: '.')
     result.add(line.strip(leading = false) & "\n")
 
+proc bg_shot*(n: NDS; engine_b: bool; bg: int): seq[uint16] =
+  ## A text BG drawn straight from VRAM (no scroll, priority or blending):
+  ## lets a ROM's text be read before the 2D engine renders it.
+  let bus = Arm9Bus(nds: n)
+  let io = if engine_b: 0x0400_1000'u32 else: 0x0400_0000'u32
+  let vram = if engine_b: 0x0620_0000'u32 else: 0x0600_0000'u32
+  let pal = if engine_b: 0x0500_0400'u32 else: 0x0500_0000'u32
+  let dispcnt = bus.read32(io)
+  let bgcnt = bus.read16(io + 8 + uint32(bg) * 2)
+  var map = vram + ((bgcnt shr 8) and 0x1F) * 0x800
+  var chars = vram + ((bgcnt shr 2) and 0xF) * 0x4000
+  if not engine_b:
+    map += ((dispcnt shr 27) and 7) * 0x10000
+    chars += ((dispcnt shr 24) and 7) * 0x10000
+  let bpp8 = (bgcnt and 0x80) != 0
+  result = newSeq[uint16](256 * 192)
+  for y in 0 ..< 192:
+    for x in 0 ..< 256:
+      let e = bus.read16(map + uint32((y div 8) * 32 + x div 8) * 2)
+      var tx = x and 7
+      var ty = y and 7
+      if (e and 0x400) != 0: tx = 7 - tx
+      if (e and 0x800) != 0: ty = 7 - ty
+      let t = e and 0x3FF
+      var c: uint32
+      if bpp8:
+        c = bus.read8(chars + t * 64 + uint32(ty * 8 + tx))
+      else:
+        let b = bus.read8(chars + t * 32 + uint32(ty * 4 + tx div 2))
+        c = (if (tx and 1) != 0: b shr 4 else: b and 0xF)
+        if c != 0: c += (e shr 12) * 16
+      result[y * 256 + x] = uint16(bus.read16(pal + c * 2))
+
 when isMainModule:
   var rom = ""
   var frames = 60
@@ -132,6 +168,7 @@ when isMainModule:
   var text = ""
   var text_offset = 0
   var presses: seq[Press]
+  var shot = ""
   var p = initOptParser(commandLineParams(), shortNoVal = {'h'},
                         longNoVal = @["help", "iolog", "pcs"])
   for kind, key, val in p.getopt():
@@ -152,6 +189,7 @@ when isMainModule:
       of "text": text = val
       of "text-offset": text_offset = parseInt(val)
       of "press": presses.add parse_presses(val)
+      of "bgshot": shot = val
       else: quit("unknown option --" & key)
     of cmdEnd: discard
   if rom.len == 0: quit("usage: ndsrun ROM [--frames N] [--out PNG] [--bios DIR]")
@@ -171,6 +209,10 @@ when isMainModule:
       echo "frame ", f, " arm9 pc=", toHex(n.arm9.next_pc, 8),
            (if n.arm9.halted: " H" else: "  "), " arm7 pc=", toHex(n.arm7.next_pc, 8),
            (if n.arm7.halted: " H" else: "")
+  if shot.len == 2:
+    # --bgshot A0: that BG replaces the top half of the PNG
+    let px = n.bg_shot(shot[0] == 'B', ord(shot[1]) - ord('0'))
+    for i in 0 ..< 256 * 192: n.gpu.top[i] = px[i]
   write_png(outp, 256, 384, n.screens_rgba())
   echo "frames=", frames, " arm9 instrs=", n.arm9.instr_count, " pc=0x",
        toHex(n.arm9.next_pc, 8), " arm7 instrs=", n.arm7.instr_count, " pc=0x",

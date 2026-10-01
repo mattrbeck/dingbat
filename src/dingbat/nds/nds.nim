@@ -150,7 +150,11 @@ proc dispatch(n: NDS; ev: NdsEvent) =
   of evLineEnd: n.on_line_end()
   of evTimer9_0 .. evTimer9_3: n.timers9.on_event(ev)
   of evTimer7_0 .. evTimer7_3: n.timers7.on_event(ev)
-  of evCartDone, evGxFifo, evSpuSample: discard
+  of evCartDone:
+    n.cart.word_ready()
+    if n.cart.owner_arm7: n.dma7.trigger(Arm7Bus(nds: n), dtCart)
+    else: n.dma9.trigger(Arm9Bus(nds: n), dtCart)
+  of evGxFifo, evSpuSample: discard
 
 # ---------------------------------------------------------------------------
 # Construction and the frame loop
@@ -184,7 +188,7 @@ proc new_nds*(rom: seq[uint8]; bios9, bios7, firmware: seq[uint8]): NDS =
   n.ipc = new_ipc(n.irq9, n.irq7)
   n.divsqrt = new_divsqrt(n.sched)
   n.spi = new_spi(if firmware.len > 0: firmware else: synth_firmware(), n.irq7, n.input)
-  n.cart = new_cart(rom, n.irq9, n.irq7)
+  n.cart = new_cart(rom, n.irq9, n.irq7, n.sched)
   n.spu = new_spu()
   n.rtc = new_rtc()
   n.wifi = Wifi()

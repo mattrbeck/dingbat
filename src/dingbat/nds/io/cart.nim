@@ -2,10 +2,20 @@
 ## chip), ROMCTRL 0x40001A4, command bytes 0x40001A8-AF, data 0x4100010.
 ## After a direct boot the card is in KEY2 main-data mode; KEY2 is undone by
 ## the hardware on both ends, so plaintext is served (docs/nds/gbatek-notes.md
-## 11.4). KEY1 (real-BIOS boot), backup EEPROM/flash and transfer timing are
-## TODO(cart).
+## 11.4).
+##
+## Transfers are timed: the first word is ready (ROMCTRL.23, DRQ) after the
+## 8 command bytes, gap1 and 4 data bytes have gone by at the card clock
+## (ROMCTRL.27: 5 or 8 bus cycles per byte), each further word 4 bytes later
+## (plus gap2 after each 0x200 bytes when ROMCTRL.28 is set). A word waits
+## until 0x4100010 is read (by the CPU, or by slot-1 DMA -- nds.nim triggers
+## the owner's DMA on each DRQ), then the next one starts; the last read
+## ends the transfer (busy off, IF.19 if AUXSPICNT.14).
+##
+## TODO(cart): KEY1 (real-BIOS boot), backup EEPROM/flash/FRAM, writes.
 
 import irq
+import ../sched
 
 type
   Cart* = ref object
@@ -16,7 +26,9 @@ type
     command*: array[8, uint8]
     buf: seq[uint8]           ## reply bytes of the running transfer
     pos: int
+    last_word: uint32
     irq9* {.cursor.}, irq7* {.cursor.}: IrqCtl
+    sched* {.cursor.}: NdsScheduler
     owner_arm7*: bool         ## EXMEMCNT bit 11
     backup*: seq[uint8]
     spi_out*: uint8
@@ -27,8 +39,20 @@ proc chip_id_for(size: int): uint32 =
   while p < mb: p = p shl 1
   0xC2'u32 or (uint32(p - 1) shl 8)
 
-proc new_cart*(rom: seq[uint8]; irq9, irq7: IrqCtl): Cart =
-  Cart(rom: rom, chip_id: chip_id_for(rom.len), irq9: irq9, irq7: irq7)
+proc new_cart*(rom: seq[uint8]; irq9, irq7: IrqCtl; sched: NdsScheduler): Cart =
+  Cart(rom: rom, chip_id: chip_id_for(rom.len), irq9: irq9, irq7: irq7, sched: sched)
+
+proc byte_cycles(c: Cart): int64 {.inline.} =
+  ## Master cycles per card byte (bus/5 or bus/8 clock, 2 master per bus).
+  if (c.romctrl and (1'u32 shl 27)) != 0: 16 else: 10
+
+proc schedule_word(c: Cart; first: bool) =
+  var bytes = 4'i64
+  if first:
+    bytes += 8 + int64(c.romctrl and 0x1FFF)            # command + gap1
+  elif (c.pos and 0x1FF) == 0 and (c.romctrl and (1'u32 shl 28)) != 0:
+    bytes += int64((c.romctrl shr 16) and 0x3F)         # gap2 per 0x200 bytes
+  c.sched.schedule(c.sched.now + bytes * c.byte_cycles(), evCartDone)
 
 proc rom_byte(c: Cart; a: int): uint8 =
   if c.rom.len == 0: return 0xFF
@@ -61,16 +85,26 @@ proc start_transfer(c: Cart) =
     c.romctrl = c.romctrl and not 0x8080_0000'u32
     c.finish_irq()
   else:
-    c.romctrl = c.romctrl or 0x0080_0000'u32   # word ready at once (TODO timing)
+    c.schedule_word(true)
+
+proc word_ready*(c: Cart) =
+  ## evCartDone: the next word sits in the data register (DRQ).
+  if (c.romctrl and 0x8000_0000'u32) != 0 and c.pos < c.buf.len:
+    c.romctrl = c.romctrl or 0x0080_0000'u32
 
 proc read_data*(c: Cart): uint32 =
-  if (c.romctrl and 0x0080_0000'u32) == 0: return 0xFFFF_FFFF'u32
+  ## 0x4100010. Without a word ready it returns the last word again.
+  if (c.romctrl and 0x0080_0000'u32) == 0: return c.last_word
   for i in 0..3:
     result = result or (uint32(c.buf[c.pos + i]) shl (8 * i))
+  c.last_word = result
   c.pos += 4
+  c.romctrl = c.romctrl and not 0x0080_0000'u32
   if c.pos >= c.buf.len:
-    c.romctrl = c.romctrl and not 0x8080_0000'u32
+    c.romctrl = c.romctrl and not 0x8000_0000'u32
     c.finish_irq()
+  else:
+    c.schedule_word(false)
 
 proc data_ready*(c: Cart): bool = (c.romctrl and 0x0080_0000'u32) != 0
 
@@ -93,6 +127,9 @@ proc write_reg*(c: Cart; offset: uint32; v, mask: uint32) =
     c.romctrl = (((c.romctrl and not mask) or (v and mask)) and not 0x0080_0000'u32) or ready
     if (c.romctrl and 0x8000_0000'u32) != 0 and not was_busy:
       c.start_transfer()
+    elif was_busy and (c.romctrl and 0x8000_0000'u32) == 0:
+      c.sched.cancel(evCartDone)       # transfer abandoned
+      c.romctrl = c.romctrl and not 0x0080_0000'u32
   of 0x1A8, 0x1AC:
     let base = int(offset - 0x1A8)
     for i in 0..3:

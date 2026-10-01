@@ -22,6 +22,7 @@ under Building if the cache is lost.
 | `roms/rockwrestler.nds` | [RockPolish/rockwrestler](https://github.com/RockPolish/rockwrestler) (prebuilt upstream) | both CPUs, IPCSYNC/IPCFIFO, DIV/SQRT, WRAMCNT, VRAMCNT, TCM, CP15 | ARMv4/v5 extras + DS system tests, LCDC display |
 | `roms/gbeplus/arm9_{memory,thumb,irq,math,dma}.nds` | [shonumi/gbe-plus-nds-tests](https://github.com/shonumi/gbe-plus-nds-tests) (GPLv2), rebuilt with libnds 2 | libnds runtime (see below) | ARM9 memory/mirrors, Thumb, IRQ, DIV/SQRT, DMA. (Timer test does not assemble upstream: duplicate labels in `common.s`.) |
 | `roms/window/window-{basic,hblank,midframe}.nds` | [StrikerX3/nds-tests](https://github.com/StrikerX3/nds-tests), rebuilt with libnds 2 | libnds runtime, 2D windows | window registers, H-blank and mid-frame window changes |
+| `roms/built/cardread.nds` | `src/cardread` (ours, libnds) | libnds runtime, slot-1 card | bottom console: PASS/FAIL per card read check (CPU and slot-1 DMA reads, main-mode low-address redirect, chip ID) |
 | `roms/built/*.nds` | [devkitPro/nds-examples](https://github.com/devkitPro/nds-examples) | libnds runtime | `hello_world`, `ansi_console` (text console), `template_arm9`, `template_combined`, `16bit_color_bmp`, `256_color_bmp`, `Double_Buffer` (bitmap BGs), `simple` (sprites), `Simple_Tri`, `Simple_Quad` (3D), `pxi` (IPC), `timercallback`, `touch_test` |
 
 Load/entry addresses:
@@ -61,6 +62,9 @@ devkitPro's GitHub sources into a user prefix (a few minutes, no root):
 
     tests/nds/tools/setup_libnds.sh ~/.cache/dingbat-dkp
     tests/nds/tools/with_libnds.sh ~/.cache/dingbat-dkp make -C <nds-examples>/hello_world
+
+`src/cardread` builds the same way (`make -C tests/nds/src/cardread`; copy
+`cardread.nds` into `roms/built/`).
 
 Output is byte-identical to what produced `roms/built/`. Every nds-examples
 project builds except the three dswifi ones, the nitrofs/libfat filesystem
