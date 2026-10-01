@@ -1,28 +1,61 @@
 // DS prototype page: loads the wasm core (nds.js), feeds it a ROM plus
 // optional BIOS/firmware, blits the two 256x192 RGBA framebuffers and plays
 // the sound output (NdsAudio below). The main app's audio path (web/index.js)
-// is far more elaborate; this one only has to be simple and not glitch much.
+// is far more elaborate; this one only has to be simple and not glitch.
 'use strict';
 
-// Stereo ring buffer + linear resampler from the core's 32728.5 Hz to the
-// AudioContext rate. The read step is nudged (+-0.5%) to hold the fill near
-// `target`, absorbing the drift between requestAnimationFrame emulation
-// pacing and the audio clock; an underrun goes silent until refilled.
-// Shared by the AudioWorklet (its source is stringified into the worklet)
-// and the ScriptProcessor fallback (insecure origins have no worklet).
+// Stereo ring buffer + band-limited resampler from the core's 32728.5 Hz to
+// the AudioContext rate (windowed sinc, TAPS input frames per output frame,
+// cut off just under the lower Nyquist). Shared by the AudioWorklet (its
+// source is stringified into the worklet) and the ScriptProcessor fallback
+// (insecure origins have no worklet).
+//
+// The page paces emulation from the audio clock (NdsAudio.fillFrames), so
+// the fill hovers at `target`; the read step is still nudged (at most
+// +-0.2%, from a smoothed fill) to absorb what pacing leaves. An underrun
+// fades the last output to zero instead of cutting it (no click) and plays
+// silence until `target` is buffered again, then fades back in.
 class NdsAudioRing {
-  constructor(inRate, outRate) {
-    this.size = 32768;                     // frames, ~1 s
+  constructor(inRate, outRate, targetFrames) {
+    this.size = 16384;                     // frames, 0.5 s
     this.buf = new Float32Array(this.size * 2);
     this.w = 0;                            // frames written (monotonic)
     this.r = 0;                            // read position, fractional frames
     this.step = inRate / outRate;
-    this.target = Math.round(inRate * 0.06);
+    this.target = targetFrames;
+    this.primed = false;
+    this.avg = targetFrames;               // smoothed fill
+    this.gain = 0;                         // fade in/out
+    this.fade = 1 / (0.004 * outRate);     // 4 ms
+    this.lastL = 0; this.lastR = 0;
+    this.underruns = 0; this.overruns = 0; this.minFill = Infinity;
+    // Windowed-sinc table: PHASES fractional offsets x TAPS taps.
+    const T = this.TAPS = 24, P = this.PHASES = 512;
+    const fc = 0.94 * Math.min(1, outRate / inRate) / 2;   // cycles per input frame
+    this.kern = new Float32Array((P + 1) * T);
+    for (let p = 0; p <= P; p++) {
+      let sum = 0;
+      for (let k = 0; k < T; k++) {
+        const x = k - (T / 2 - 1) - p / P;   // tap position minus read position
+        const s = x === 0 ? 2 * fc : Math.sin(2 * Math.PI * fc * x) / (Math.PI * x);
+        const u = (x + T / 2) / T;            // 0..1 across the window
+        const win = 0.42 - 0.5 * Math.cos(2 * Math.PI * u) + 0.08 * Math.cos(4 * Math.PI * u);
+        this.kern[p * T + k] = s * win;
+        sum += s * win;
+      }
+      for (let k = 0; k < T; k++) this.kern[p * T + k] /= sum;
+    }
+  }
+  reset() {
+    this.r = this.w;
     this.primed = false;
   }
   push(data) {
     const n = data.length >> 1, m = this.size - 1;
-    if (this.w + n - this.r > this.size - 4) this.r = this.w + n - this.target;  // overrun: skip
+    if (this.w + n - this.r > this.size - this.TAPS) {    // overrun: drop the oldest
+      this.r = this.w + n - this.target;
+      this.overruns++;
+    }
     for (let i = 0; i < n; i++) {
       const j = ((this.w + i) & m) * 2;
       this.buf[j] = data[2 * i];
@@ -31,44 +64,88 @@ class NdsAudioRing {
     this.w += n;
   }
   pull(L, R) {
-    const m = this.size - 1;
+    const m = this.size - 1, T = this.TAPS, P = this.PHASES, kern = this.kern, buf = this.buf;
+    const fill0 = this.w - this.r;
+    this.avg += (fill0 - this.avg) * 0.02;
+    if (this.primed && fill0 < this.minFill) this.minFill = fill0;
+    const err = Math.max(-1, Math.min(1, (this.avg - this.target) / this.target));
+    const step = this.step * (1 + 0.002 * err);
     for (let i = 0; i < L.length; i++) {
       const fill = this.w - this.r;
-      if (!this.primed) this.primed = fill >= this.target;
-      if (!this.primed || fill < 2) {
+      if (!this.primed && fill >= this.target) this.primed = true;
+      if (this.primed && fill < T) {
         this.primed = false;
-        L[i] = R[i] = 0;
+        this.underruns++;
+      }
+      if (!this.primed) {
+        // Fade the last output out: no step to zero.
+        this.gain = Math.max(0, this.gain - this.fade);
+        L[i] = this.lastL * this.gain;
+        R[i] = this.lastR * this.gain;
         continue;
       }
       const k = Math.floor(this.r), f = this.r - k;
-      const a = (k & m) * 2, b = ((k + 1) & m) * 2;
-      L[i] = this.buf[a] + (this.buf[b] - this.buf[a]) * f;
-      R[i] = this.buf[a + 1] + (this.buf[b + 1] - this.buf[a + 1]) * f;
-      const err = Math.max(-1, Math.min(1, (fill - this.target) / this.target));
-      this.r += this.step * (1 + 0.005 * err);
+      const base = Math.round(f * P) * T;
+      let l = 0, rr = 0;
+      for (let t = 0, j = k - (T / 2 - 1); t < T; t++, j++) {
+        const c = kern[base + t], a = (j & m) * 2;
+        l += buf[a] * c;
+        rr += buf[a + 1] * c;
+      }
+      this.gain = Math.min(1, this.gain + this.fade);
+      this.lastL = l; this.lastR = rr;
+      L[i] = l * this.gain;
+      R[i] = rr * this.gain;
+      this.r += step;
     }
+  }
+  stats() {
+    const s = { r: this.r, fill: this.w - this.r, primed: this.primed,
+                underruns: this.underruns, overruns: this.overruns,
+                minFill: this.minFill === Infinity ? null : this.minFill };
+    this.minFill = Infinity;
+    return s;
   }
 }
 
 const NdsAudio = (() => {
   const IN_RATE = 33513982 / 1024;         // io/spu.nim SAMPLE_RATE
-  let ctx = null, send = null, muted = false;
+  const TARGET = Math.round(IN_RATE * 0.065);  // 65 ms buffered (4 video frames)
+  let ctx = null, gainNode = null, send = null, reset = null, ring = null, muted = false;
+  let sent = 0;                            // frames handed to the ring
+  let last = null;                         // latest ring stats + the time they were taken
+  const totals = { underruns: 0, overruns: 0, minFill: Infinity };
+
+  function onStats(s, t) {
+    last = { ...s, t };
+    totals.underruns = s.underruns;
+    totals.overruns = s.overruns;
+    if (s.minFill !== null && s.minFill < totals.minFill) totals.minFill = s.minFill;
+  }
 
   async function start() {
     if (ctx) return;
     try {
-      ctx = new AudioContext();
+      ctx = new AudioContext({ latencyHint: 'interactive' });
+      gainNode = ctx.createGain();
+      gainNode.gain.value = muted ? 0 : 1;
+      gainNode.connect(ctx.destination);
       if (ctx.audioWorklet) {
         const src = NdsAudioRing.toString() + `
           registerProcessor('nds-audio', class extends AudioWorkletProcessor {
             constructor(o) {
               super();
-              this.ring = new NdsAudioRing(o.processorOptions.inRate, sampleRate);
-              this.port.onmessage = e => this.ring.push(e.data);
+              const p = o.processorOptions;
+              this.ring = new NdsAudioRing(p.inRate, sampleRate, p.target);
+              this.n = 0;
+              this.port.onmessage = e => {
+                if (e.data === 'reset') this.ring.reset(); else this.ring.push(e.data);
+              };
             }
             process(_, outs) {
               const o = outs[0];
               this.ring.pull(o[0], o[1] || o[0]);
+              if ((++this.n & 3) === 0) this.port.postMessage({ s: this.ring.stats(), t: currentTime });
               return true;
             }
           });`;
@@ -76,38 +153,73 @@ const NdsAudio = (() => {
         await ctx.audioWorklet.addModule(url);
         URL.revokeObjectURL(url);
         const node = new AudioWorkletNode(ctx, 'nds-audio', {
-          outputChannelCount: [2], processorOptions: { inRate: IN_RATE } });
-        node.connect(ctx.destination);
+          outputChannelCount: [2], processorOptions: { inRate: IN_RATE, target: TARGET } });
+        node.port.onmessage = e => onStats(e.data.s, e.data.t);
+        node.connect(gainNode);
         send = d => node.port.postMessage(d, [d.buffer]);
+        reset = () => node.port.postMessage('reset');
       } else {
-        const ring = new NdsAudioRing(IN_RATE, ctx.sampleRate);
-        const node = ctx.createScriptProcessor(2048, 0, 2);
-        node.onaudioprocess = e =>
+        ring = new NdsAudioRing(IN_RATE, ctx.sampleRate, TARGET);
+        const node = ctx.createScriptProcessor(1024, 0, 2);
+        node.onaudioprocess = e => {
           ring.pull(e.outputBuffer.getChannelData(0), e.outputBuffer.getChannelData(1));
-        node.connect(ctx.destination);
+          onStats(ring.stats(), ctx.currentTime);
+        };
+        node.connect(gainNode);
         send = d => ring.push(d);
+        reset = () => ring.reset();
       }
-      if (muted) ctx.suspend();
+      last = null;
+      sent = 0;
     } catch (e) {
       console.warn('nds audio unavailable', e);
+      ctx = null;
     }
   }
 
   return {
     start,
+    IN_RATE,
+    TARGET,
+    // Input frames buffered ahead of the audio clock, or null when audio is
+    // not running (pace by wall time then).
+    fillFrames() {
+      if (!ctx || ctx.state !== 'running' || !send) return null;
+      if (ring) return ring.w - ring.r;
+      if (!last) return sent;              // nothing consumed yet
+      const used = last.primed ? Math.max(0, ctx.currentTime - last.t) * IN_RATE : 0;
+      return sent - (last.r + used);
+    },
     // After each emulated frame: hand the core's samples on, then clear.
     drain() {
       const n = Module._nds_audio_frames();
-      if (n > 0 && send && !muted) {
+      if (n > 0 && send) {
         const p = Module._nds_audio_ptr();
         send(new Float32Array(Module.HEAPU8.buffer, p, n * 2).slice());
+        sent += n;
       }
       Module._nds_audio_clear();
     },
+    // Tab hidden: stop the clock (the page stops emulating); visible again:
+    // drop what was queued and refill from scratch.
+    pause() { if (ctx) ctx.suspend(); },
+    resume() {
+      if (!ctx) return;
+      if (reset) reset();
+      if (last) last = { ...last, r: sent, primed: false };
+      ctx.resume();
+    },
     toggleMute() {
       muted = !muted;
-      if (ctx) muted ? ctx.suspend() : ctx.resume();
+      if (gainNode) gainNode.gain.value = muted ? 0 : 1;
       return muted;
+    },
+    stats() {
+      return { state: ctx ? ctx.state : 'none', rate: ctx ? ctx.sampleRate : 0,
+               baseLatency: ctx ? ctx.baseLatency : 0, outputLatency: ctx ? ctx.outputLatency || 0 : 0,
+               sent, fill: this.fillFrames(), underruns: totals.underruns,
+               overruns: totals.overruns,
+               minFill: totals.minFill === Infinity ? null : totals.minFill };
     },
   };
 })();
@@ -174,15 +286,28 @@ const NdsPage = (() => {
     statusEl.textContent = Module.UTF8ToString(Module._nds_status());
   }
 
+  // Pacing: with audio running, emulate whenever less than the audio
+  // target is buffered (the audio clock sets the speed, so there is no drift
+  // to correct); without audio, by wall time. At most 4 frames per callback.
+  const FRAME_FRAMES = NdsAudio.IN_RATE / 59.8261;
   function tick(now) {
     if (loaded && !paused) {
-      acc += Math.min(100, now - last);
+      let fill = NdsAudio.fillFrames();
       let n = 0;
-      while (acc >= FRAME_MS && n < 3) { frame(); acc -= FRAME_MS; n++; }
+      if (fill !== null) {
+        while (fill < NdsAudio.TARGET && n < 4) { frame(); fill += FRAME_FRAMES; n++; }
+        acc = 0;
+      } else {
+        acc += Math.min(100, now - last);
+        while (acc >= FRAME_MS && n < 4) { frame(); acc -= FRAME_MS; n++; }
+      }
     }
     last = now;
     requestAnimationFrame(tick);
   }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) NdsAudio.pause(); else NdsAudio.resume();
+  });
 
   // Buttons: ids follow NdsButton in src/dingbat/nds/io/input.nim
   const KEYS = { KeyX: 0, KeyZ: 1, ShiftLeft: 2, ShiftRight: 2, Enter: 3, ArrowRight: 4,
