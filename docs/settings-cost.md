@@ -46,6 +46,24 @@ read within 0.1 % on FireRed.
 | GB rumble | **on** | one wasm call per frame | nothing measurable | | |
 | Input display, large / opaque controls, hide touch on gamepad (**on**), theme, volume | | DOM / CSS | nothing per frame | | |
 
+### The same on one scale
+
+For the rows that do not run in the emulation loop, the ms they add per
+frame as a share of the default FireRed frame's emulation time (1.16 ms on
+the M2), with the share of the resource they actually load second:
+
+| Setting | Before | After |
+|---|---|---|
+| Ambient glow | +22–55 % (GPU process +63–156 %) | +6–7 % (GPU process +16–18 %), main thread +0.6 %, 0 while still |
+| Colour correction | +1.1 % (13 % of drawing the frame) | unchanged |
+| Filter: grid / hq4x / RGB / xBR | +0.1 / 3.6 / 14.5 / 19.8 % (1 / 37 / 150 / 205 % of drawing the frame) | unchanged |
+| Analog filter | +1.1 %, on the audio thread | unchanged |
+
+These run beside emulation, so they slow a game only on a device whose GPU
+or spare cores are already saturated. `web/bench/glowshots.mjs` captures
+the real app with the glow on, at an identical held frame per build, for
+before/after pictures.
+
 ## What changed (each commit on the branch)
 
 * **SGB mode, +83 % → +6 % (native instr).** An active SGB attribute map
