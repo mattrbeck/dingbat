@@ -20,20 +20,30 @@
 ## ASCII, as the libnds console font; --text-offset N).
 ## --bgshot A0 draws that text BG straight from VRAM into the PNG's top half
 ## (no scroll/priority/blending).
+## --dump9/--dump7 ADDR:LEN:FILE writes LEN bytes read through that CPU's bus at the
+## end of the run to FILE (hex ADDR/LEN), for disassembly.
 ## --wav writes the sound output of the whole run (16-bit stereo, 32728 Hz).
 ##
 ## --save FILE loads the card's save chip from FILE (its size picks the
 ## chip) and writes it back when the run changed it.
+## --rtc YYYY-MM-DD[THH:MM:SS] starts the RTC at that time and clocks it from
+## emulated time, so runs are reproducible (default: host local time).
+## --perf-from F times frames F..end (printed as fps; default the whole run).
 ## --pcs prints both CPUs' pc / halted state after each frame.
 ##
 ## Debug flags (build with -d:ndsdebug):
 ##   --iolog            log every I/O access (repeats folded), from frame
 ##                      --iolog-from F
 ##   --watch HEX        log every write to that word (pc, line)
+##   --prof F0-F1       count instructions and master cycles per 64-byte code
+##                      block over frames F0..F1-1; print the costliest blocks
+##   --spilog           log every card-SPI (save chip) byte: sent -> reply, pc
 
-import std/[os, strutils, parseopt]
+import std/[os, strutils, parseopt, tables, sequtils, monotimes, times]
 import zippy
 import dingbat/nds/nds
+import dingbat/nds/io/rtc
+import dingbat/gba/rtc_calendar
 
 proc crc32(data: openArray[uint8]): uint32 =
   var table {.global.}: array[256, uint32]
@@ -180,7 +190,8 @@ when isMainModule:
   var bios = ""
   var trace9, trace7, trace_at = 0
   var iolog_from = 0
-  var iolog, pcs = false
+  var iolog, pcs, spilog = false
+  var prof_from, prof_to = -1
   var watch = 0'u32
   var text = ""
   var text_offset = 0
@@ -189,10 +200,14 @@ when isMainModule:
   var shots: seq[int]
   var tops: seq[seq[uint32]]
   var peek9, peek7: seq[uint32]
+  var dumps: seq[(bool, uint32, int, string)]
   var wav = ""
   var save = ""
+  var rtc_at = ""
+  var perf_from = 0
+  var perf_t0: MonoTime
   var p = initOptParser(commandLineParams(), shortNoVal = {'h'},
-                        longNoVal = @["help", "iolog", "pcs"])
+                        longNoVal = @["help", "iolog", "pcs", "spilog"])
   for kind, key, val in p.getopt():
     case kind
     of cmdArgument: rom = key
@@ -206,14 +221,23 @@ when isMainModule:
       of "trace-at": trace_at = parseInt(val)
       of "wav": wav = val
       of "save": save = val
+      of "rtc": rtc_at = val
+      of "perf-from": perf_from = parseInt(val)
       of "press": presses.add parse_presses(val)
       of "peek9":
         for a in val.split(','): peek9.add uint32(parseHexInt(a))
+      of "dump9", "dump7":
+        let d = val.split(':')
+        dumps.add (key == "dump7", uint32(parseHexInt(d[0])), parseHexInt(d[1]), d[2])
       of "peek7":
         for a in val.split(','): peek7.add uint32(parseHexInt(a))
       of "shots":
         for f in val.split(','): shots.add parseInt(f)
       of "iolog": iolog = true
+      of "spilog": spilog = true
+      of "prof":
+        let r = val.split('-')
+        prof_from = parseInt(r[0]); prof_to = parseInt(r[1])
       of "iolog-from": iolog_from = parseInt(val)
       of "pcs": pcs = true
       of "watch": watch = uint32(parseHexInt(val))
@@ -225,14 +249,43 @@ when isMainModule:
   if rom.len == 0: quit("usage: ndsrun ROM [--frames N] [--out PNG] [--bios DIR]")
   let n = load_nds(rom, bios)
   n.watch = watch
+  n.cart.spilog = spilog
+  if rtc_at.len > 0:
+    # --rtc YYYY-MM-DD[THH:MM:SS]: the RTC starts there and follows emulated time
+    let d = rtc_at.replace('T', '-').replace(':', '-').split('-')
+    var f: array[6, int]
+    for i in 0 ..< min(6, d.len): f[i] = parseInt(d[i])
+    n.rtc.set_fixed_clock(n.sched, to_calendar_seconds(f[0], f[1], f[2], f[3], f[4], f[5]))
   if save.len > 0 and fileExists(save):
     n.cart.backup.set_data(cast[seq[uint8]](readFile(save)))
   var audio: seq[float32]
   for f in 0 ..< frames:
+    if f == perf_from: perf_t0 = getMonoTime()
     if f == trace_at:
       n.arm9.trace = trace9
       n.arm7.trace = trace7
     if f == iolog_from: n.iolog = iolog
+    when defined(ndsdebug):
+      if f == prof_from: n.arm9.profiling = true; n.arm7.profiling = true
+      if f == prof_to:
+        n.arm9.profiling = false; n.arm7.profiling = false
+        for (name, ip, cp) in [("arm9", n.arm9.profile, n.arm9.cprofile),
+                               ("arm7", n.arm7.profile, n.arm7.cprofile)]:
+          var p = cp
+          p.sort()
+          var total, itotal = 0
+          for _, c in p: total += c
+          for _, c in ip: itotal += c
+          echo name, " profile: ", itotal, " instrs, ", total, " busy master cycles (",
+               formatFloat(total / ((prof_to - prof_from) * FRAME_CYCLES) * 100, ffDecimal, 1),
+               "% of the frames)"
+          var k = 0
+          for blk, c in p:
+            echo "  ", toHex(blk, 8), " ", formatFloat(100 * c / max(total, 1), ffDecimal, 1),
+                 "% cycles, ", ip.getOrDefault(blk), " instrs, ",
+                 formatFloat(c / max(ip.getOrDefault(blk), 1), ffDecimal, 2), " cyc/instr"
+            inc k
+            if k == 25: break
     for p in presses:
       if f == p.first or f == p.last:
         if p.touch: n.set_touch(p.x, p.y, f == p.first)
@@ -247,6 +300,10 @@ when isMainModule:
       let px = n.screens_rgba()
       write_png(outp.changeFileExt("") & "_" & $(f + 1) & ".png", 256, 384, px)
       tops.add px[0 ..< 256 * 192]
+  if frames > perf_from:
+    let secs = (getMonoTime() - perf_t0).inNanoseconds.float / 1e9
+    echo "speed: frames ", perf_from, "-", frames, " in ", formatFloat(secs, ffDecimal, 2), " s = ",
+         formatFloat(float(frames - perf_from) / secs, ffDecimal, 1), " fps"
   if tops.len > 0:
     let cols = min(tops.len, 4)
     let rows = (tops.len + cols - 1) div cols
@@ -278,7 +335,17 @@ when isMainModule:
     if spec.len == 2:
       echo "--- engine ", spec[0], " BG", spec[1]
       stdout.write(n.bg_text(spec[0] == 'B', ord(spec[1]) - ord('0'), text_offset))
+  if pcs:
+    echo "cp15 control=", toHex(n.cp15.control, 8), " icache=", n.tm.ic_on, " dcache=", n.tm.dc_on,
+         " regions=", n.cp15.prot_regions.mapIt(toHex(it, 8)).join(","),
+         " ic=", toHex(n.cp15.icache_cfg, 2), " dc=", toHex(n.cp15.dcache_cfg, 2),
+         " wb=", toHex(n.cp15.wbuf_cfg, 2)
   echo "arm9 ", n.arm9.reg_dump()
   echo "arm7 ", n.arm7.reg_dump()
+  for (is7, a, len, file) in dumps:
+    var bytes = newString(len)
+    for i in 0 ..< len:
+      bytes[i] = char(if is7: read8(n.arm7.bus, a + uint32(i)) else: read8(n.arm9.bus, a + uint32(i)))
+    writeFile(file, bytes)
   for a in peek9: echo "arm9 [", toHex(a, 8), "] = ", toHex(read32(n.arm9.bus, a), 8)
   for a in peek7: echo "arm7 [", toHex(a, 8), "] = ", toHex(read32(n.arm7.bus, a), 8)

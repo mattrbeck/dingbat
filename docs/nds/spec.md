@@ -51,10 +51,16 @@ cycles = 4260 master cycles, H-blank at 3212, 263 lines, 59.8261 Hz.
 `NDS.run_until` runs the ARM9 then the ARM7 up to the same slice end (at most
 64 master cycles, or the next event), then dispatches due events.
 
-Placeholder timing: 2 master cycles per ARM9 instruction, 4 per ARM7
-instruction, no memory wait states (`access_cycles` mixin returns 0). Real
-timing (GBATEK section 3: N32+3 ARM9 fetches outside TCM/cache, main-RAM
-waits, cache hits) is its own subsystem.
+CPU timing (`timing.nim`, hooked in by bus9/bus7): every code fetch and
+data access is charged from GBATEK's "DS Memory Timings" tables (per region,
+N/S, 16/32-bit; ARM9 opcode fetches always N32, a Thumb pair sharing one);
+the ARM9's 8 KB I / 4 KB D caches are modelled as tags only, cachability from
+the protection unit; instructions add their internal cycles. An ARM9 cycle is
+one master cycle, an ARM7 cycle two. The few unpublished values are marked
+Assumed in `timing.nim`. The card (`cart.nim`) times ROM words by its CLK,
+gap1 and gap2, and both SPI buses keep their busy flags for the byte's time at
+the selected baud rate. With these, SoulSilver runs frame-locked with the
+reference core (docs/oracles.md, "NDS core").
 
 ## Layout
 
@@ -69,6 +75,7 @@ src/dingbat/nds/
                    callback decompressors); tools/nds_hle_bios.sh assembles
                    it into hle_bios_image.nim
   sched.nim        event scheduler, timing constants
+  timing.nim       CPU memory timing: access tables, ARM9 cache tags
   arm/cpu.nim      ArmCpu[B]: ARM + Thumb, ARMv4T/v5TE
   arm/cp15.nim     CP15 registers, TCM regions
   mem/vram.nim     VRAM banks A-I, VRAMCNT page tables
@@ -84,10 +91,11 @@ src/dingbat/nds/
   io/divsqrt.nim   ARM9 maths unit
   io/input.nim     KEYINPUT/KEYCNT/EXTKEYIN, touch, lid
   io/spi.nim       ARM7 SPI: power manager, firmware flash, touchscreen
-  io/cart.nim      card slot (ROMCTRL, B7 reads), backup (stub)
+  io/cart.nim      card slot (ROMCTRL, B7 reads, AUXSPI)
+  io/backup.nim    save chip: EEPROM/FRAM/FLASH, IR-cart front-end
   io/spu.nim       ARM7 sound: 16 channels, capture, stereo out at 32728.5 Hz
-  io/rtc.nim       ARM7 RTC (stub)
-  io/wifi.nim      wifi registers (stub)
+  io/rtc.nim       ARM7 RTC (host clock, or emulated time from a date)
+  io/wifi.nim      wifi MAC/BB/RF without a radio (nothing is received)
 src/dingbat_nds_wasm.nim(+.nims)  wasm exports for web/nds.html
 tools/ndsrun.nim                   headless runner: ROM -> PNG of both screens
 web/nds.html, web/nds/             dev page (two canvases, keys, touch)
@@ -125,7 +133,7 @@ Third-party test ROMs: `~/.cache/dingbat-nds/roms/` (tests/nds/README.md).
 | IRQ / timers / DMA / IPC / maths | gbeplus irq/math/dma, rockwrestler system tests, `pxi`, `timercallback` |
 | Input / touch / SPI / RTC | `touch_test` tracks the mouse |
 | 3D | `Simple_Tri`, `Simple_Quad` |
-| Sound | maxmod example plays (so far: tests/nds_spu_test.nim and `snd_tone.nds`) |
+| Sound | maxmod examples and Pokemon SoulSilver play (tests/nds_spu_test.nim, `snd_suite.nds` against the reference cores: docs/oracles.md NDS core) |
 | Card + backup | a commercial ROM's B7 reads + save detection |
 | Timing | wait states, cache model, frame-rate-stable commercial boot |
 | Frontend | desktop SDL target with both screens; main web UI integration |
@@ -174,3 +182,16 @@ beyond GBATEK:
   Diff advance their pointers, the callback forms return the close pointer
   in r1. BIOS-internal addresses left in r3 (and ARM7 RL's r0) are not
   reproduced.
+
+## Commercial game status
+
+Pokemon SoulSilver (IPGE, the one commercial ROM used in development; never
+in the repo) plays from boot through the intro, title, the professor's
+introduction, name entry and the 3D bedroom to New Bark Town, saves (512 KB
+FLASH behind the IR controller) and continues from that save, with the real
+BIOS or the HLE BIOS (identical frames). Driven by `ndsrun --press` scripts
+(`TOUCH:x:y` for the touch-screen buttons) with `--rtc 2004-01-01`, the same
+script gives the same frames as the reference core at most checkpoints
+(`tools/ndsref`, docs/oracles.md). Open: 3D rasterisation differs from the
+reference by edge pixels (bedroom, overworld), the title screen's 3D Lugia
+differs, a 2D alpha fade is one step off in places.

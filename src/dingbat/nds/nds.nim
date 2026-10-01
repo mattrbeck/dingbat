@@ -6,7 +6,7 @@
 
 import std/[os, strutils]
 import arm/[cpu, cp15]
-import sched
+import sched, timing
 import mem/vram
 import gpu/[gpu, engine2d]
 import gpu3d/gpu3d
@@ -54,6 +54,10 @@ type
     spu*: Spu
     rtc*: Rtc
     wifi*: Wifi
+    tm*: MemTiming              ## ARM9 caches + cachability (timing.nim)
+    wait9*, wait7*: int64       ## bus cycles charged to the running instruction
+    last_fetch9*, last_data9*: uint32  ## sequential-access tracking
+    last_fetch7*, last_data7*: uint32
     frame_done*: bool
     line_start*: int64          ## master cycle the current line began
     unmapped_log*: int          ## first few unmapped accesses are logged
@@ -65,8 +69,8 @@ type
 
 const
   MAIN_RAM_SIZE = 4 * 1024 * 1024
-  ARM9_CYCLES_PER_INSTR = 2     ## placeholder timing (docs/nds/spec.md)
-  ARM7_CYCLES_PER_INSTR = 4
+  ARM9_CYCLES_PER_INSTR = 1     ## one ARM9 clock; memory adds the rest (timing.nim)
+  ARM7_CYCLES_PER_INSTR = 0     ## all ARM7 time is its fetch + data + internal cycles
   SLICE = 64                    ## max master cycles one CPU runs ahead
 
 proc note_unmapped(n: NDS; who: string; a: uint32; write: bool) =
@@ -75,10 +79,11 @@ proc note_unmapped(n: NDS; who: string; a: uint32; write: bool) =
     stderr.writeLine("nds " & who & ": unmapped " & (if write: "write " else: "read ") &
                      "0x" & toHex(a, 8))
 
-proc log_io(n: NDS; who: string; a, v, mask: uint32; write: bool) =
+proc log_io(n: NDS; who: string; a, v, mask: uint32; write: bool; pc: uint32) =
   ## -d:ndsdebug: one line per I/O access, repeats folded into a count.
   let line = who & (if write: " W " else: " R ") & toHex(a, 8) & " = " & toHex(v, 8) &
-             (if write and mask != 0xFFFF_FFFF'u32: " mask " & toHex(mask, 8) else: "")
+             (if write and mask != 0xFFFF_FFFF'u32: " mask " & toHex(mask, 8) else: "") &
+             " pc=" & toHex(pc, 8)
   if line == n.io_last:
     inc n.io_repeat
     return
@@ -221,6 +226,7 @@ proc dispatch(n: NDS; ev: NdsEvent) =
     n.spu.next_tick += SPU_TICK_CYCLES
     n.sched.schedule(n.spu.next_tick, evSpuSample)
   of evGxFifo: discard
+  of evWifi: n.wifi.on_event()
 
 # ---------------------------------------------------------------------------
 # Construction and the frame loop
@@ -257,13 +263,18 @@ proc new_nds*(rom: seq[uint8]; bios9, bios7, firmware: seq[uint8];
   n.ipc = new_ipc(n.irq9, n.irq7)
   n.divsqrt = new_divsqrt(n.sched)
   n.spi = new_spi(if firmware.len > 0: firmware else: synth_firmware(), n.irq7, n.input)
+  n.spi.sched = n.sched
   n.cart = new_cart(rom, n.irq9, n.irq7, n.sched)
   n.spu = new_spu()
   n.rtc = new_rtc()
-  n.wifi = Wifi()
+  n.wifi = new_wifi(n.sched, n.irq7)
   n.arm9 = new_arm_cpu(Arm9Bus(nds: n), ARM9_CYCLES_PER_INSTR)
   n.arm7 = new_arm_cpu(Arm7Bus(nds: n), ARM7_CYCLES_PER_INSTR)
   n.cp15.reset()
+  n.tm.init_timing()
+  n.tm.update_regions(n.cp15)
+  n.last_fetch9 = NO_ADDR; n.last_data9 = NO_ADDR
+  n.last_fetch7 = NO_ADDR; n.last_data7 = NO_ADDR
   n.direct_boot()
   n.sched.schedule(HBLANK_CYCLES, evHBlank)
   n.sched.schedule(LINE_CYCLES, evLineEnd)

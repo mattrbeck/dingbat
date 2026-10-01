@@ -22,10 +22,29 @@
 ## spu_read32 / spu_write32 at instantiation (bus7.nim defines them for
 ## Arm7Bus; tests bring their own).
 ##
-## Not modelled: the hardware FIFOs (samples are read when they are played,
-## so a write to sample memory is heard immediately), the 1.05 MHz internal
-## mixer rate (output is point-sampled at the PWM rate), sub-tick start
-## timing (a start bit takes effect at the next mixer tick).
+## FIFOs (GBATEK's block diagram). A channel reads its sample words ahead of
+## playback: the first FIFO_WORDS words during the start delay, then one
+## more each time playback moves on a word, following the loop. So a write
+## to sample memory is heard only once the read-ahead reaches it, and a
+## channel replaying the buffer a capture unit is filling (capture-based
+## reverb) hears what was captured one loop earlier instead of feeding
+## straight back. The depth (8 words) is Assumed; the loop-late delay was
+## compared by running snd_suite against melonDS DS (docs/oracles.md, NDS
+## core). Capture stores each word when it is complete (its FIFO not
+## modelled).
+##
+## Repeat modes: 1 loops, 2 is one-shot, 3 ("Prohibited") loops like 1, and
+## 0 ("Manual") keeps playing past PNT+LEN through the following memory,
+## busy until stopped -- GBATEK names 0 and 3 only; both are Assumed
+## (docs/oracles.md, NDS core: the reference emulators disagree).
+##
+## Not modelled: the 1.05 MHz internal mixer rate (the PWM word is the
+## mixer's value at each 1024-cycle tick, so a channel faster than the
+## output rate aliases at full level: Assumed), sub-tick start timing (a
+## start bit takes effect at the next mixer tick).
+
+const
+  FIFO_WORDS* = 8           ## channel read-ahead, words (Assumed)
 
 type
   SpuChannel* = object
@@ -41,8 +60,10 @@ type
     adpcm_pcm*, adpcm_index*: int32
     loop_pcm*, loop_index*: int32  ## ADPCM state saved at the loop start
     lfsr*: uint16           ## noise channels 14-15
-    word_addr*: uint32      ## last sample word fetched
-    word*: uint32
+    fifo*: array[FIFO_WORDS, uint32]  ## sample words read ahead of playback
+    sw*: int32              ## stream index of the word being played
+    fetched*: int32         ## stream index of the next word to read
+    cur_word*: int32        ## word offset from SAD of the word being played
 
   SpuCapture* = object
     cnt*: uint8             ## SNDCAPxCNT
@@ -134,7 +155,7 @@ proc vol7(v: uint32): int32 {.inline.} =
   ## 7-bit volume/pan register value N: 0..126 as is, 127 counts as 128.
   if v == 127: 128 else: int32(v)
 
-proc total_samples(c: SpuChannel): int32 =
+proc total_samples(c: SpuChannel): int32 {.inline.} =
   ## One-shot length, PNT + LEN, in samples.
   let words = int32(c.pnt) + int32(c.len)
   case c.fmt
@@ -142,13 +163,13 @@ proc total_samples(c: SpuChannel): int32 =
   of FMT_PCM16: words * 2
   else: (words - 1) * 8
 
-proc loop_start(c: SpuChannel): int32 =
+proc loop_start(c: SpuChannel): int32 {.inline.} =
   case c.fmt
   of FMT_PCM8: int32(c.pnt) * 4
   of FMT_PCM16: int32(c.pnt) * 2
   else: max(int32(c.pnt) - 1, 0) * 8
 
-proc adpcm_step(c: var SpuChannel; nibble: uint32) =
+proc adpcm_step(c: var SpuChannel; nibble: uint32) {.inline.} =
   ## GBATEK's decode, with the hardware's rounding and clipping.
   let t = ADPCM_TABLE[c.adpcm_index]
   var diff = t shr 3
@@ -159,13 +180,32 @@ proc adpcm_step(c: var SpuChannel; nibble: uint32) =
   else: c.adpcm_pcm = max(c.adpcm_pcm - diff, -0x7FFF)
   c.adpcm_index = clamp(c.adpcm_index + ADPCM_INDEX[nibble and 7], 0, 88)
 
-proc fetch_word[B](c: var SpuChannel; bus: B; a: uint32): uint32 =
+proc stream_addr(c: SpuChannel; n: int32): uint32 {.inline.} =
+  ## Address of the n-th word the channel reads after a start: the words
+  ## from SAD up to PNT+LEN, then (looping) the loop part over and over.
+  let total = int32(c.pnt) + int32(c.len)
+  var w = n
+  if n >= total and c.repeat_mode != 0:
+    let lw = if c.fmt == FMT_ADPCM: max(int32(c.pnt), 1) else: int32(c.pnt)
+    w = lw + (n - total) mod max(total - lw, 1)
+  (c.sad + uint32(w) * 4) and 0x07FF_FFFC'u32
+
+proc fill[B](c: var SpuChannel; bus: B) =
+  ## Keep the FIFO FIFO_WORDS words ahead of the word being played.
   mixin spu_read32
-  let w = a and not 3'u32
-  if w != c.word_addr:
-    c.word_addr = w
-    c.word = spu_read32(bus, w)
-  c.word
+  while c.fetched < c.sw + FIFO_WORDS:
+    c.fifo[c.fetched and (FIFO_WORDS - 1)] = spu_read32(bus, c.stream_addr(c.fetched))
+    inc c.fetched
+
+proc fetch_word[B](c: var SpuChannel; bus: B; wi: int32; looped: bool): uint32 {.inline.} =
+  ## The word at offset `wi` (words from SAD) for the sample being played,
+  ## from the FIFO. Every change of word -- including a loop back to the
+  ## same word -- moves on one stream word and reads one more ahead.
+  if wi != c.cur_word or looped:
+    inc c.sw
+    c.cur_word = wi
+    c.fill(bus)
+  c.fifo[c.sw and (FIFO_WORDS - 1)]
 
 # ---------------------------------------------------------------------------
 # Channels
@@ -174,7 +214,9 @@ proc start(s: Spu; i: int) =
   template c: untyped = s.ch[i]
   c.active = true
   c.ctr = c.tmr
-  c.word_addr = 0xFFFF_FFFF'u32
+  c.sw = 0
+  c.fetched = 0
+  c.cur_word = 0
   c.lfsr = 0x7FFF
   c.pos = case c.fmt
           of FMT_PSG: -1
@@ -198,8 +240,10 @@ proc step[B](c: var SpuChannel; i: int; bus: B) =
   ## Advance one sample period.
   inc c.pos
   if c.pos < 0:
-    # Start delay: a held level lasts only the first delay sample.
+    # Start delay: a held level lasts only the first delay sample. The
+    # FIFO fills during it (PSG/noise have none).
     c.output = 0
+    if c.fetched == 0 and c.fmt != FMT_PSG: c.fill(bus)
     return
   let f = c.fmt
   if f == FMT_PSG:
@@ -225,35 +269,38 @@ proc step[B](c: var SpuChannel; i: int; bus: B) =
     c.output = 0
     c.pos = 0
     return
-  if c.pos >= total:
+  var looped = false
+  # Mode 0 ("Manual") reads on past the end (Assumed, see the header).
+  if c.pos >= total and c.repeat_mode != 0:
     if c.repeat_mode == 2:
       c.finish()
       return
-    # Loop (mode 1). TODO(hw): mode 0 "manual" and 3 "prohibited" loop too.
+    # Loop: mode 1, and mode 3 ("Prohibited") the same (Assumed).
     c.pos = c.loop_start
+    looped = true
     if f == FMT_ADPCM:
       c.adpcm_pcm = c.loop_pcm
       c.adpcm_index = c.loop_index
   case f
   of FMT_PCM8:
-    let a = c.sad + uint32(c.pos)
-    let b = (c.fetch_word(bus, a) shr ((a and 3) * 8)) and 0xFF
+    let wd = c.fetch_word(bus, c.pos shr 2, looped)
+    let b = (wd shr (uint32(c.pos and 3) * 8)) and 0xFF
     c.output = int32(cast[int8](uint8(b))) shl 8
   of FMT_PCM16:
-    let a = c.sad + uint32(c.pos) * 2
-    let h = (c.fetch_word(bus, a) shr ((a and 2) * 8)) and 0xFFFF
+    let wd = c.fetch_word(bus, c.pos shr 1, looped)
+    let h = (wd shr (uint32(c.pos and 1) * 16)) and 0xFFFF
     c.output = int32(cast[int16](uint16(h)))
   else:  # ADPCM
-    if c.pos == 0:
-      let hdr = c.fetch_word(bus, c.sad)
+    if c.pos == 0 and not looped:
+      let hdr = c.fifo[0]           # stream word 0, read during the delay
       c.adpcm_pcm = int32(cast[int16](uint16(hdr and 0xFFFF)))
       c.adpcm_index = min(int32((hdr shr 16) and 0x7F), 88)
-    if c.pos == c.loop_start:
+    if c.pos == c.loop_start and not looped:
       # The state a loop restores: what the decoder held arriving here.
       c.loop_pcm = c.adpcm_pcm
       c.loop_index = c.adpcm_index
-    let a = c.sad + 4 + uint32(c.pos) div 2
-    let byte = (c.fetch_word(bus, a) shr ((a and 3) * 8)) and 0xFF
+    let wd = c.fetch_word(bus, 1 + (c.pos shr 3), looped)
+    let byte = (wd shr (uint32((c.pos shr 1) and 3) * 8)) and 0xFF
     let nib = if (c.pos and 1) == 0: byte and 0xF else: byte shr 4
     c.adpcm_step(nib)
     c.output = c.adpcm_pcm

@@ -376,6 +376,69 @@ proc test_capture() =
   check b8 == want8, "PCM8 looped capture of channel 2 wraps at SNDCAP1LEN", $b8 & " want " & $want8
   check bus.mem[0x2004] == 0, "nothing past the loop"
 
+proc test_fifo() =
+  echo "Channel FIFO: sample words are read ahead of playback"
+  let bus = new_bus()
+  for i in 0 ..< 64: bus.put16(0x600 + i * 2, 0x1000 + i)
+  let s = new_spu()
+  s.master()
+  s.play(0, PCM16, ONESHOT, 0x600, len = 32, pan = 0)   # 64 samples
+  discard s.run(bus, 3 + 10)          # delay, then samples 0..9 played
+  # Samples 10..(2 * FIFO_WORDS + 9) are already in the FIFO; later ones not.
+  for i in 0 ..< 64: bus.put16(0x600 + i * 2, -0x1000)
+  let o = s.run(bus, 40)
+  let old_v = expect_out(0x1000 + 10, 127, 0, 127, false)
+  let new_v = expect_out(-0x1000, 127, 0, 127, false)
+  check o[0][0] == old_v, "the next sample comes from the FIFO (old data)", $o[0]
+  var first_new = -1
+  for k in 0 ..< 40:
+    if o[k][0] == new_v: (first_new = k; break)
+  # Sample 10 was playing (word 5); words 5..12 (samples 10..25) were
+  # already read, so o[0] = sample 11 and new data starts at sample 26.
+  check first_new == 2 * FIFO_WORDS - 1, "new data is heard once the FIFO has moved past it",
+        "first new sample at +" & $first_new
+  # Capture loop-back: ch1 replays the buffer capture 0 writes into, both
+  # on ch1's timer, so it hears what was captured one loop earlier.
+  let b2 = new_bus()
+  for i in 0 ..< 64: b2.put16(0x700 + i * 2, if i < 8: 0x2000 else: 0)
+  let s2 = new_spu()
+  s2.master()
+  s2.wr(0x414, 0x3000)                 # ch1 SAD = capture buffer
+  s2.wr(0x418, uint32(RATE_TICK))
+  s2.wr(0x41C, 32)                     # 32 words = 64 samples
+  s2.wr(0x510, 0x3000)
+  s2.wr(0x514, 32)
+  s2.wr(0x508, 0x80)                   # capture 0: left mixer, loop, PCM16
+  s2.wr(0x410, 64'u32 or (1'u32 shl 27) or (1'u32 shl 29) or 0x8000_0000'u32)  # vol 64, pan 0, loop
+  s2.play(0, PCM16, ONESHOT, 0x700, len = 32, pan = 0)   # 8-sample burst, centre-left
+  let e = s2.run(bus = b2, ticks = 3 + 64 * 3)
+  var bursts: seq[int]
+  for k in 1 ..< e.len:
+    if e[k][0] != 0x200 and e[k - 1][0] == 0x200: bursts.add k
+  # Capture stores sample j at tick j + 1, ch1 plays it at tick j + 3 one
+  # loop later: buffer + 2 samples (melonDS DS gives the same 4194 output
+  # samples for snd_suite's 4096-sample loop).
+  check bursts.len >= 3 and bursts[1] - bursts[0] == 66 and bursts[2] - bursts[1] == 66,
+        "echoes repeat every buffer length + 2 samples", $bursts
+
+proc test_repeat_modes() =
+  echo "Repeat modes 0 (manual) and 3 (prohibited)"
+  let bus = new_bus()
+  for i in 0 ..< 8: bus.put16(0x800 + i * 2, 0x1000)
+  for i in 8 ..< 32: bus.put16(0x800 + i * 2, 0x3000)   # past PNT + LEN
+  let s = new_spu()
+  s.master()
+  s.play(0, PCM16, 0, 0x800, pnt = 2, len = 2, pan = 0)   # 8 samples
+  let o = s.run(bus, 3 + 8 + 8)
+  check o[3 + 8][0] == expect_out(0x3000, 127, 0, 127, false),
+        "mode 0 plays on past PNT+LEN into the following memory", $o[3 + 8]
+  check (s.read_reg(0x400) and 0x8000_0000'u32) != 0, "mode 0 stays busy"
+  let s3 = new_spu()
+  s3.master()
+  s3.play(0, PCM16, 3, 0x800, pnt = 2, len = 2, pan = 0)
+  let p = s3.run(bus, 3 + 8 + 4)
+  check p[3 + 8][0] == expect_out(0x1000, 127, 0, 127, false), "mode 3 loops like mode 1", $p[3 + 8]
+
 proc test_machine() =
   echo "Machine: evSpuSample runs once per 2048 master cycles"
   let n = new_nds(cast[seq[uint8]](readFile(currentSourcePath.parentDir / "nds/roms/fb_both.nds")),
@@ -399,6 +462,8 @@ when isMainModule:
   test_psg()
   test_control()
   test_capture()
+  test_fifo()
+  test_repeat_modes()
   test_machine()
   if failures > 0:
     echo failures, " failure(s)"

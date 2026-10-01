@@ -10,6 +10,13 @@
 ## width (GBATEK, "Detection (in emulators)"). An RDID before that picks
 ## FLASH (EEPROMs answer it with FFh). A loaded save picks the type by its
 ## size instead (`set_data`).
+##
+## Infrared carts (game code starting 'I', e.g. the P-letter series) put an
+## IR controller between the SPI bus and the save chip (GBATEK "DS Cart
+## Infrared Cartridge SPI Commands"): the first byte after chip select picks
+## 00h = pass the rest of the transfer to the save chip, 01h = IR receive
+## (length, then data), 02h = IR transmit, 08h = version (NEW firmware: AAh).
+## No IR peer is modelled: receives return length 0, transmits vanish.
 
 type
   BackupKind* = enum
@@ -17,6 +24,13 @@ type
 
   BackupPhase = enum
     bpIdle, bpDetect, bpAddr, bpData, bpStatus, bpWrsr, bpId, bpDone
+
+  IrPhase = enum
+    irCommand,            ## next byte is the IR controller's command
+    irPass,               ## 00h: bytes go to the save chip
+    irVersion,            ## 08h: the version byte follows
+    irRecv,               ## 01h: length (0), then nothing
+    irIgnore              ## 02h-07h and unknown: swallowed
 
   Backup* = ref object
     kind*: BackupKind
@@ -31,6 +45,8 @@ type
     id_idx: int
     detect: seq[uint8]        ## bkAuto: address bytes held until decided
     detect_pc: uint32
+    ir*: bool                 ## infrared cart: IR controller in front
+    ir_phase: IrPhase
 
 const
   DEFAULT_SIZE: array[BackupKind, int] =
@@ -126,8 +142,29 @@ proc flash_erase(b: Backup; size: uint32) =
   for i in 0 ..< min(int(size), b.data.len - base): b.data[base + i] = 0xFF
   b.dirty = true
 
+proc chip_transfer(b: Backup; v: uint8; pc: uint32): uint8
+
 proc transfer*(b: Backup; v: uint8; pc: uint32): uint8 =
-  ## One byte while the chip is selected; returns the chip's reply.
+  ## One byte while the chip is selected; returns the reply.
+  if not b.ir: return b.chip_transfer(v, pc)
+  case b.ir_phase
+  of irPass: return b.chip_transfer(v, pc)
+  of irCommand:
+    b.ir_phase = case v
+      of 0x00: irPass
+      of 0x01: irRecv
+      of 0x08: irVersion
+      else: irIgnore
+    # Assumed: the controller drives nothing during its command byte.
+    return 0xFF
+  of irVersion:
+    b.ir_phase = irIgnore
+    return 0xAA
+  of irRecv, irIgnore:
+    return 0x00
+
+proc chip_transfer(b: Backup; v: uint8; pc: uint32): uint8 =
+  ## One byte at the save chip itself.
   result = 0xFF
   if b.kind == bkNone: return
   case b.phase
@@ -188,6 +225,7 @@ proc transfer*(b: Backup; v: uint8; pc: uint32): uint8 =
 
 proc deselect*(b: Backup) =
   ## Chip select released: a finished write drops the write-enable latch.
+  b.ir_phase = irCommand
   if b.phase == bpDetect and b.detect.len > 0: b.decide()
   if b.phase in {bpAddr, bpData, bpDone} and b.cmd in {0x02'u8, 0x0A, 0xDB, 0xD8}:
     b.status = b.status and not 2'u8

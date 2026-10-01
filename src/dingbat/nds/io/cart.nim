@@ -17,6 +17,7 @@
 ## TODO(cart): KEY1 (real-BIOS boot), NAND carts.
 
 import irq, backup
+when defined(ndsdebug): import std/strutils
 import ../sched
 
 export backup
@@ -36,6 +37,8 @@ type
     owner_arm7*: bool         ## EXMEMCNT bit 11
     backup*: Backup
     spi_out*: uint8
+    spilog*: bool             ## -d:ndsdebug: log AUXSPI bytes to stderr
+    spi_busy_until: int64     ## AUXSPICNT.7 reads set until this master cycle
 
 proc chip_id_for(size: int): uint32 =
   var mb = max(1, size shr 20)
@@ -44,8 +47,10 @@ proc chip_id_for(size: int): uint32 =
   0xC2'u32 or (uint32(p - 1) shl 8)
 
 proc new_cart*(rom: seq[uint8]; irq9, irq7: IrqCtl; sched: NdsScheduler): Cart =
-  Cart(rom: rom, chip_id: chip_id_for(rom.len), irq9: irq9, irq7: irq7, sched: sched,
-       backup: new_backup())
+  result = Cart(rom: rom, chip_id: chip_id_for(rom.len), irq9: irq9, irq7: irq7,
+                sched: sched, backup: new_backup())
+  # Game code 'I...' = cart with an infrared port (GBATEK "NDS Gamecodes")
+  result.backup.ir = rom.len > 0x0C and rom[0x0C] == uint8('I')
 
 proc byte_cycles(c: Cart): int64 {.inline.} =
   ## Master cycles per card byte (bus/5 or bus/8 clock, 2 master per bus).
@@ -115,9 +120,16 @@ proc data_ready*(c: Cart): bool = (c.romctrl and 0x0080_0000'u32) != 0
 
 proc read_reg*(c: Cart; offset: uint32): uint32 =
   case offset
-  of 0x1A0: uint32(c.auxspicnt) or (uint32(c.spi_out) shl 16)
+  of 0x1A0:
+    let busy = if c.sched.now < c.spi_busy_until: 0x80'u32 else: 0
+    uint32(c.auxspicnt) or busy or (uint32(c.spi_out) shl 16)
   of 0x1A4: c.romctrl
   else: 0
+
+proc spi_byte_cycles*(cnt: uint16): int64 =
+  ## Master cycles for one 8-bit SPI transfer at baud rate bits 0-1.
+  const hz = [4_000_000'i64, 2_000_000, 1_000_000, 512 * 1024]
+  (8 * MASTER_HZ + hz[cnt and 3] - 1) div hz[cnt and 3]
 
 proc spi_selected(c: Cart): bool {.inline.} =
   ## AUXSPICNT: slot enabled (15) in backup-SPI mode (13).
@@ -135,6 +147,14 @@ proc write_reg*(c: Cart; offset: uint32; v, mask: uint32; pc = 0'u32) =
       # AUXSPIDATA: one byte each way; without the hold bit (6) the chip is
       # deselected after it
       c.spi_out = c.backup.transfer(uint8(v shr 16), pc)
+      # 8 bits at the AUXSPICNT baud rate (4/2/1 MHz, 512 kHz) keep the busy
+      # flag up; the reply is stored at once (GBATEK "AUXSPIDATA")
+      c.spi_busy_until = c.sched.now + spi_byte_cycles(c.auxspicnt)
+      when defined(ndsdebug):
+        if c.spilog:
+          stderr.writeLine("spi " & toHex(uint8(v shr 16)) & " -> " & toHex(c.spi_out) &
+                           " pc=" & toHex(pc, 8) &
+                           (if (c.auxspicnt and 0x40) == 0: " (end)" else: ""))
       if (c.auxspicnt and 0x40) == 0: c.backup.deselect()
   of 0x1A4:
     let was_busy = (c.romctrl and 0x8000_0000'u32) != 0

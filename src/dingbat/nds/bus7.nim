@@ -63,8 +63,9 @@ proc io7_read(n: NDS; a: uint32): uint32 =
 
 proc io7_write(n: NDS; a: uint32; v, mask: uint32) =
   if (a and 0x00FF_0000'u32) >= 0x0080_0000'u32:
-    if (mask and 0xFFFF) != 0: n.wifi.write16(a, uint16(v))
-    if (mask and 0xFFFF_0000'u32) != 0: n.wifi.write16(a + 2, uint16(v shr 16))
+    # byte writes are ignored (GBATEK "DS Wifi I/O Map")
+    if (mask and 0xFFFF) == 0xFFFF: n.wifi.write16(a, uint16(v))
+    if (mask and 0xFFFF_0000'u32) == 0xFFFF_0000'u32: n.wifi.write16(a + 2, uint16(v shr 16))
     return
   let o = a and 0x00FF_FFFC'u32
   case o
@@ -143,9 +144,18 @@ proc read7(n: NDS; a: uint32; width: static int): uint32 =
     if shared: rd(n.shared_wram, i) else: rd(n.arm7_wram, i)
   of 0x04:
     n.sync7()
+    if (a and 0x00FF_0000'u32) >= 0x0080_0000'u32:
+      # wifi: 16-bit ports with read side effects, so only the halfwords
+      # actually accessed are read (a byte read reads its halfword)
+      when width == 32:
+        return uint32(n.wifi.read16(a)) or (uint32(n.wifi.read16(a + 2)) shl 16)
+      elif width == 16:
+        return uint32(n.wifi.read16(a))
+      else:
+        return (uint32(n.wifi.read16(a and not 1'u32)) shr ((a and 1) * 8)) and 0xFF
     let w = n.io7_read(a and not 3'u32)
     when defined(ndsdebug):
-      if n.iolog: n.log_io("7", a, w, 0xFFFF_FFFF'u32, false)
+      if n.iolog: n.log_io("7", a, w, 0xFFFF_FFFF'u32, false, n.arm7.cur_pc)
     when width == 32: w
     elif width == 16: (w shr ((a and 2) * 8)) and 0xFFFF
     else: (w shr ((a and 3) * 8)) and 0xFF
@@ -177,7 +187,7 @@ proc write7(n: NDS; a: uint32; v: uint32; width: static int) =
                elif width == 16: 0xFFFF'u32 shl sh
                else: 0xFF'u32 shl sh
     when defined(ndsdebug):
-      if n.iolog: n.log_io("7", a and not 3'u32, v shl sh, mask, true)
+      if n.iolog: n.log_io("7", a and not 3'u32, v shl sh, mask, true, n.arm7.cur_pc)
     n.io7_write(a and not 3'u32, v shl sh, mask)
   of 0x06:
     let off = int(a and 0x3FFFF)
@@ -189,22 +199,51 @@ proc write7(n: NDS; a: uint32; v: uint32; width: static int) =
 
 # --- CPU mixins --------------------------------------------------------
 
-proc read8*(b: Arm7Bus; a: uint32): uint32 {.inline.} = b.nds.read7(a, 8)
-proc read16*(b: Arm7Bus; a: uint32): uint32 {.inline.} = b.nds.read7(a, 16)
-proc read32*(b: Arm7Bus; a: uint32): uint32 {.inline.} = b.nds.read7(a, 32)
+proc data_cost7(n: NDS; a: uint32; width: static int) {.inline.} =
+  ## Charge a CPU data access (timing.nim); DMA's own accesses are not.
+  if n.dma7.dma_access: return
+  let seq = a == n.last_data7 + (when width == 32: 4'u32 else: 2'u32)
+  n.last_data7 = a
+  n.wait7 += data7(a shr 24, width, seq)
+
+proc fetch_cost7(n: NDS; a: uint32; width: static int) {.inline.} =
+  ## A nonsequential fetch (a branch) also pays the refill's second fetch.
+  n.last_data7 = NO_ADDR
+  let seq = a == n.last_fetch7 + (when width == 32: 4'u32 else: 2'u32)
+  n.last_fetch7 = a
+  let top = a shr 24
+  n.wait7 += code7(top, width, seq)
+  if not seq: n.wait7 += code7(top, width, true)
+
+proc read8*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
+  b.nds.data_cost7(a, 8)
+  b.nds.read7(a, 8)
+proc read16*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
+  b.nds.data_cost7(a, 16)
+  b.nds.read7(a, 16)
+proc read32*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
+  b.nds.data_cost7(a, 32)
+  b.nds.read7(a, 32)
 
 proc write8*(b: Arm7Bus; a: uint32; v: uint8) {.inline.} =
+  b.nds.data_cost7(a, 8)
   b.nds.sync7()
   b.nds.write7(a, uint32(v), 8)
 proc write16*(b: Arm7Bus; a: uint32; v: uint16) {.inline.} =
+  b.nds.data_cost7(a, 16)
   b.nds.sync7()
   b.nds.write7(a, uint32(v), 16)
 proc write32*(b: Arm7Bus; a: uint32; v: uint32) {.inline.} =
+  b.nds.data_cost7(a, 32)
   b.nds.sync7()
   b.nds.write7(a, v, 32)
 
-proc fetch32*(b: Arm7Bus; a: uint32): uint32 {.inline.} = b.nds.read7(a, 32)
-proc fetch16*(b: Arm7Bus; a: uint32): uint32 {.inline.} = b.nds.read7(a, 16)
+proc fetch32*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
+  b.nds.fetch_cost7(a, 32)
+  b.nds.read7(a, 32)
+proc fetch16*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
+  b.nds.fetch_cost7(a, 16)
+  b.nds.read7(a, 16)
 
 # Sound: channel sample fetch and capture stores (io/spu.nim). No CPU clock
 # sync -- they run inside the evSpuSample dispatch.
@@ -213,7 +252,9 @@ proc spu_write32*(b: Arm7Bus; a: uint32; v: uint32) = b.nds.write7(a, v, 32)
 
 proc irq_line*(b: Arm7Bus): bool {.inline.} = b.nds.irq7.line()
 proc irq_wake*(b: Arm7Bus): bool {.inline.} = b.nds.irq7.wake()
-proc access_cycles*(b: Arm7Bus): int64 {.inline.} = 0   # TODO(timing)
+proc access_cycles*(b: Arm7Bus): int64 {.inline.} =
+  result = b.nds.wait7
+  b.nds.wait7 = 0
 proc cp15_read*(b: Arm7Bus; op1, cn, cm, op2: uint32): uint32 = 0
 proc cp15_write*(b: Arm7Bus; op1, cn, cm, op2, v: uint32) = discard
 
