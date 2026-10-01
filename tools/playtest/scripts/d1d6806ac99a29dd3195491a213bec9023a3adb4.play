@@ -1,0 +1,84 @@
+@title Tony Hawk's Pro Skater 3 (USA)
+@file Tony Hawk's Pro Skater 3 (U) [!].gba
+@game AT3E
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+
+# Career as Tony Hawk in the Foundry: skate a few seconds, pause > End Run,
+# Main Menu, Options > Quickstart Off -> On, Credits, back to the main menu.
+# The game has no save menu: it writes its EEPROM on its own (all three
+# leave byte-identical 8 KB files with 1800 data bytes).
+# [load]: Options shows Quickstart On (the saved setting), then start the
+# Foundry session again.
+# Findings: in the live session nba's run drifted (f2250: timer 1:54 vs 1:53,
+# skater elsewhere) and the pause/options transitions fade at different
+# rates (f3546); animated menus, so checkpoints are compare=text/none.
+
+[new]
+wait 900
+checkpoint main_menu window=30 compare=text
+press A
+wait 300
+press START
+wait 300
+checkpoint gameplay window=30 compare=none
+hold UP
+wait 60
+release
+press A
+wait 60
+hold RIGHT
+wait 40
+release
+press A
+press B hold=20
+wait 100
+hold UP
+wait 120
+release
+press A
+wait 200
+checkpoint skating window=30 compare=none
+press START
+wait 60
+checkpoint paused window=30 compare=text
+tap DOWN times=5 every=15 hold=4
+wait 10
+press A
+wait 200
+checkpoint post_skate window=30 compare=text
+tap DOWN times=7 every=15 hold=4
+wait 10
+press A
+wait 200
+tap DOWN times=4 every=15 hold=4
+wait 10
+press A
+wait 90
+checkpoint options window=30 compare=text
+tap DOWN times=3 every=15 hold=4
+wait 10
+press RIGHT
+wait 30
+tap DOWN times=3 every=15 hold=4
+wait 10
+press A
+wait 60
+wait 60
+press B
+wait 120
+checkpoint after_options window=30 compare=text
+
+[load]
+wait 900
+checkpoint main_menu window=30 compare=text
+tap DOWN times=4 every=15 hold=4
+wait 10
+press A
+wait 90
+checkpoint options_loaded window=30 compare=text
+press B
+wait 90
+press START
+wait 300
+checkpoint resumed window=30 compare=text

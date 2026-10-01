@@ -2,10 +2,10 @@
 @file Mario & Luigi - Superstar Saga (U).gba
 @game A88E
 @chip EEPROM
-@frozen dingbat-bios,mgba,nba
 
 # Recorded by hand in the desktop app (2026-09-16): new file, the opening in
 # Mario's house and Peach's Castle, to the first Save Album; [load] continues.
+
 # converted from input.log: 192 keypad changes, 839 sync hashes checked in dingbat
 [new]
 wait 1102
@@ -27,7 +27,7 @@ release
 wait 594
 press A hold=51
 wait 6
-checkpoint 01_f3600 window=30
+checkpoint 01_f3600
 wait 273
 hold A
 wait 92
@@ -37,9 +37,9 @@ hold A
 wait 62
 release
 wait 2750
-checkpoint 02_f7200 window=30
+checkpoint 02_f7200
 wait 1428
-checkpoint 03_mark window=30
+checkpoint 03_mark
 wait 684
 hold A
 wait 64
@@ -59,7 +59,7 @@ release
 wait 264
 hold LEFT
 wait 175
-checkpoint 04_f12228 window=30
+checkpoint 04_f12228
 wait 99
 release
 wait 121
@@ -85,13 +85,13 @@ hold A
 wait 83
 release
 wait 581
-checkpoint 05_f15828 window=30
+checkpoint 05_f15828
 wait 1492
 press A hold=30
 wait 2078
-checkpoint 06_f19428 window=30
+checkpoint 06_f19428
 wait 439
-checkpoint 07_mark window=30
+checkpoint 07_mark
 wait 656
 press A hold=58
 wait 336
@@ -119,7 +119,7 @@ hold A
 wait 108
 release
 wait 347
-checkpoint 08_f23467 window=30
+checkpoint 08_f23467
 wait 27
 hold A
 wait 100
@@ -137,9 +137,9 @@ hold A
 wait 112
 release
 wait 1981
-checkpoint 09_f27067 window=30
+checkpoint 09_f27067
 wait 249
-checkpoint 10_mark window=30
+checkpoint 10_mark
 wait 573
 hold A
 wait 85
@@ -171,7 +171,7 @@ release
 wait 72
 hold A
 wait 105
-checkpoint 11_f30916 window=30
+checkpoint 11_f30916
 wait 16
 release
 wait 378
@@ -195,7 +195,7 @@ press RIGHT hold=33
 wait 324
 press A hold=58
 wait 535
-checkpoint 12_f34516 window=30
+checkpoint 12_f34516
 wait 113
 hold A
 wait 64
@@ -207,7 +207,7 @@ release
 wait 1111
 press A hold=5
 wait 50
-press A
+press A hold=6
 wait 47
 press A hold=5
 wait 102
@@ -215,13 +215,13 @@ press A hold=5
 wait 60
 press A hold=8
 wait 131
-press A
+press A hold=6
 wait 40
 press A hold=7
 wait 43
-press A
+press A hold=6
 wait 223
-press A
+press A hold=6
 wait 493
 hold A
 wait 74
@@ -231,7 +231,7 @@ hold A
 wait 71
 release
 wait 65
-checkpoint 13_f38116 window=30
+checkpoint 13_f38116
 wait 212
 hold A
 wait 98
@@ -267,7 +267,7 @@ release
 wait 281
 hold A
 wait 45
-checkpoint 14_f41716 window=30
+checkpoint 14_f41716
 wait 39
 release
 wait 212
@@ -307,7 +307,7 @@ hold UP
 wait 67
 hold RIGHT+UP
 wait 139
-checkpoint 15_f45316 window=30
+checkpoint 15_f45316
 wait 40
 hold UP
 wait 110
@@ -361,7 +361,7 @@ press RIGHT hold=4
 wait 14
 press UP hold=23
 wait 42
-checkpoint 16_f48916 window=30
+checkpoint 16_f48916
 wait 40
 press LEFT hold=23
 wait 18
@@ -369,7 +369,7 @@ press LEFT hold=3
 wait 29
 press A hold=25
 wait 160
-checkpoint 17_mark window=30
+checkpoint 17_mark
 wait 61
 press A hold=5
 wait 40
@@ -377,24 +377,25 @@ press UP hold=2
 wait 39
 press A hold=4
 wait 750
-checkpoint 18_mark window=30
+checkpoint 18_mark
 wait 243
-checkpoint 19_end window=30
+checkpoint 19_end
 
+# converted from input.log: 10 keypad changes, 27 sync hashes checked in dingbat
 [load]
 wait 158
 press A hold=10
 wait 654
-press A
+press A hold=6
 wait 132
 press A hold=5
 wait 217
 press A hold=5
 wait 82
-checkpoint 01_mark window=30
+checkpoint 01_mark
 wait 41
 press A hold=5
 wait 183
-checkpoint 02_mark window=30
+checkpoint 02_mark
 wait 137
-checkpoint 03_end window=30
+checkpoint 03_end

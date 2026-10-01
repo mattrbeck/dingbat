@@ -129,6 +129,8 @@ class Session:
         if op == 'mark':
             label = words[1]
             res = self.each(lambda ex: ex.emu.state_save(os.path.join(self.dir, f'mark-{label}-{ex.emu.name}.state')))
+            # marks stay in creation order: a rewind forgets every later one
+            self.marks.pop(label, None)
             self.marks[label] = (len(self.recorded), self.section, {n: ex.emu.frame for n, ex in self.execs.items()})
             return {'mark': label, 'results': res}
         if op == 'rewind':
@@ -142,7 +144,13 @@ class Session:
             res = self.each(restore)
             del self.recorded[pos:]
             self.section = section
-            return {'rewound': label, 'results': res}
+            # marks made after this one belong to the timeline just abandoned:
+            # rewinding to one would replay the emulators to that timeline but
+            # keep this one's recorded steps
+            later = list(self.marks)[list(self.marks).index(label) + 1:]
+            for m in later:
+                del self.marks[m]
+            return {'rewound': label, 'results': res, 'forgotten_marks': later}
         step = script.parse_step(line)
         # snapshot first so a step that fails anywhere can be undone everywhere:
         # the recorded script then always reproduces the emulators' state
