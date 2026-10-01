@@ -62,6 +62,8 @@ type
     icycles*: int64         ## internal (I) cycles of the running instruction,
                             ## in this CPU's clocks (step converts)
     trace*: int             ## instructions left to log to stderr (debug)
+    exc_count*: int         ## undefined-instruction / abort exceptions taken
+    exc_pc*: uint32         ## the instruction that raised the last one
     when defined(ndsdebug):
       profiling*: bool      ## count executed instructions per 64-byte block
       profile*: CountTable[uint32]   ## instructions per block
@@ -143,6 +145,10 @@ proc jump_load[B](cpu: ArmCpu[B]; target: uint32) {.inline.} =
     cpu.jump(target)
 
 proc exception*[B](cpu: ArmCpu[B]; mode: CpuMode; vector: uint32; lr: uint32) =
+  if mode in {mUND, mABT}:
+    # counted for tools/ndssweep.nim's crash check
+    inc cpu.exc_count
+    cpu.exc_pc = cpu.cur_pc
   let old = cpu.cpsr
   cpu.switch_mode(uint32(mode))
   cpu.spsr = old

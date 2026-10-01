@@ -61,6 +61,7 @@ type
     frame_done*: bool
     line_start*: int64          ## master cycle the current line began
     unmapped_log*: int          ## first few unmapped accesses are logged
+    unmapped_count*: int        ## all of them (tools/ndssweep.nim)
     # -d:ndsdebug only (tools/ndsrun.nim flags)
     iolog*: bool                ## log I/O accesses to stderr
     watch*: uint32              ## log writes to this word (0 = off)
@@ -74,6 +75,7 @@ const
   SLICE = 64                    ## max master cycles one CPU runs ahead
 
 proc note_unmapped(n: NDS; who: string; a: uint32; write: bool) =
+  inc n.unmapped_count
   if n.unmapped_log < 32:
     inc n.unmapped_log
     stderr.writeLine("nds " & who & ": unmapped " & (if write: "write " else: "read ") &
