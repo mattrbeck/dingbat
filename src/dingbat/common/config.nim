@@ -328,8 +328,10 @@ proc new_config*(): Config =
     sgb_enable:      false,
     sgb_border:      true,
     rewind:          true,
-    pitch_correct_ff: false,
-    audio_lowpass:   false,
+    # Both on since defaults rev 2 (CONFIG_DEFAULTS_REV): pitch correction
+    # costs nothing outside fast-forward, the low-pass runs per output sample.
+    pitch_correct_ff: true,
+    audio_lowpass:   true,
     fifo_interp:     true,
     mp2k_hle:        false,
     frame_size:      3,
@@ -411,8 +413,20 @@ proc describe*(ov: BootOverrides): string =
   if ov.bios_path.len > 0: parts.add("BIOS " & ov.bios_path)
   parts.join(", ")
 
+const CONFIG_DEFAULTS_REV = 2
+  ## Rev 2 (2026-09-30) turned pitch_correct_ff and audio_lowpass on. The file
+  ## writes every key, so a rev-1 file's `false` for those two is the old
+  ## default saved with some other change, not a choice (neither could be
+  ## turned off without first being turned on): a rev-1 file takes the new
+  ## defaults for them. Parsed here, so a save's merge with the file on disk
+  ## sees the same values and writes them with the new rev.
+
 proc parse_config(j: JsonNode): Config =
   var cfg = new_config()
+  let defaults_rev =
+    if j.hasKey("defaults_rev") and j["defaults_rev"].kind == JInt:
+      j["defaults_rev"].getInt(1)
+    else: 1
   if j.hasKey("explorer_dir") and j["explorer_dir"].kind == JString:
     cfg.explorer_dir = j["explorer_dir"].getStr(getCurrentDir())
   if j.hasKey("recents") and j["recents"].kind == JArray:
@@ -453,10 +467,10 @@ proc parse_config(j: JsonNode): Config =
     cfg.preserve_aspect = j["preserve_aspect"].getBool(true)
   if j.hasKey("rewind"):
     cfg.rewind = j["rewind"].getBool(true)
-  if j.hasKey("pitch_correct_ff"):
-    cfg.pitch_correct_ff = j["pitch_correct_ff"].getBool(false)
-  if j.hasKey("audio_lowpass"):
-    cfg.audio_lowpass = j["audio_lowpass"].getBool(false)
+  if j.hasKey("pitch_correct_ff") and defaults_rev >= 2:
+    cfg.pitch_correct_ff = j["pitch_correct_ff"].getBool(true)
+  if j.hasKey("audio_lowpass") and defaults_rev >= 2:
+    cfg.audio_lowpass = j["audio_lowpass"].getBool(true)
   if j.hasKey("fifo_interp"):
     cfg.fifo_interp = j["fifo_interp"].getBool(true)
   if j.hasKey("mp2k_hle"):
@@ -576,6 +590,7 @@ proc config_entries(cfg: Config): seq[ConfigEntry] =
   let bios = if cfg.bios_path.len > 0: " " & yaml_str(cfg.bios_path) else: ""
   let bootrom = if cfg.gb_bootrom_path.len > 0: " " & yaml_str(cfg.gb_bootrom_path) else: ""
   @[
+    ("defaults_rev",       "defaults_rev: " & $CONFIG_DEFAULTS_REV),
     ("explorer_dir",       "explorer_dir: " & yaml_str(cfg.explorer_dir)),
     ("keybindings",        kb_text),
     ("controller_bindings", pad_text),

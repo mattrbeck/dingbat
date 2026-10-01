@@ -377,6 +377,30 @@ block:
   when defined(macosx):
     check not ns_window_fullscreen(nil), "no window: not fullscreen"
 
+block:
+  # Defaults rev 2 turned pitch_correct_ff and audio_lowpass on. A file from
+  # before it wrote `false` for both with every save, so it takes the new
+  # defaults; once rewritten at rev 2, a `false` is the user's and stays.
+  let path = dir / "rev.yml"
+  writeFile(path, "---\nvolume: 40\npitch_correct_ff: false\naudio_lowpass: false\n")
+  let old = load_config_file(path)
+  check old.pitch_correct_ff and old.audio_lowpass and old.volume == 40,
+        "a rev-1 file takes the new audio defaults and keeps the rest"
+  old.volume = 41
+  save_config_file(old, path)
+  let text = readFile(path)
+  check "defaults_rev: 2" in text and "pitch_correct_ff: true" in text and
+        "audio_lowpass: true" in text, "the next save writes them at rev 2"
+  let again = load_config_file(path)
+  again.pitch_correct_ff = false
+  again.audio_lowpass = false
+  save_config_file(again, path)
+  let back = load_config_file(path)
+  check not back.pitch_correct_ff and not back.audio_lowpass,
+        "turned off at rev 2, they stay off"
+  check new_config().pitch_correct_ff and new_config().audio_lowpass,
+        "a fresh install starts with both on"
+
 removeDir(dir)
 
 if failures > 0:
