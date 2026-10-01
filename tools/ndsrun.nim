@@ -23,6 +23,10 @@
 ## --dump9/--dump7 ADDR:LEN:FILE writes LEN bytes read through that CPU's bus at the
 ## end of the run to FILE (hex ADDR/LEN), for disassembly.
 ## --wav writes the sound output of the whole run (16-bit stereo, 32728 Hz).
+## --mic FILE.wav[@F] feeds a 16-bit PCM WAV (mono, or stereo mixed down) to
+## the microphone from frame F (default 0), at the file's rate.
+## LID@F[+D|-L] in --press closes the hinge for those frames (opening it
+## raises the ARM7's lid IRQ; a game may sleep while it is shut).
 ##
 ## --save FILE loads the card's save chip from FILE (its size picks the
 ## chip) and writes it back when the run changed it.
@@ -93,6 +97,7 @@ proc screens_rgba*(n: NDS): seq[uint32] =
 type Press = object
   button: NdsButton
   touch: bool
+  lid: bool
   x, y: int
   first, last: int
 
@@ -116,6 +121,8 @@ proc parse_presses(spec: string): seq[Press] =
       let xy = what.split(':')
       p.touch = true
       p.x = parseInt(xy[1]); p.y = parseInt(xy[2])
+    elif what == "LID":
+      p.lid = true
     else:
       p.button = case what
         of "A": nbA
@@ -132,6 +139,30 @@ proc parse_presses(spec: string): seq[Press] =
         of "Y": nbY
         else: quit("unknown button " & what)
     result.add p
+
+proc read_wav_mono(path: string; rate: var int): seq[int16] =
+  ## 16-bit PCM WAV -> mono samples (channels averaged).
+  let d = readFile(path)
+  template u16(o: int): int = int(uint8(d[o])) or (int(uint8(d[o + 1])) shl 8)
+  template u32(o: int): int = u16(o) or (u16(o + 2) shl 16)
+  if d.len < 12 or d[0 ..< 4] != "RIFF" or d[8 ..< 12] != "WAVE": quit("--mic: not a WAV file")
+  var o = 12
+  var channels, bits = 0
+  while o + 8 <= d.len:
+    let id = d[o ..< o + 4]
+    let size = u32(o + 4)
+    if id == "fmt ":
+      channels = u16(o + 10); rate = u32(o + 12); bits = u16(o + 22)
+    elif id == "data":
+      if bits != 16 or channels < 1: quit("--mic: needs 16-bit PCM")
+      let frames = min(size, d.len - o - 8) div (2 * channels)
+      for f in 0 ..< frames:
+        var acc = 0
+        for c in 0 ..< channels: acc += int(cast[int16](u16(o + 8 + (f * channels + c) * 2)))
+        result.add int16(acc div channels)
+      return
+    o += 8 + size + (size and 1)
+  quit("--mic: no data chunk")
 
 proc bg_text*(n: NDS; engine_b: bool; bg: int; offset: int): string =
   ## A text BG's 32x24 tile map as characters (tile index + `offset`): the
@@ -204,6 +235,8 @@ when isMainModule:
   var wav = ""
   var save = ""
   var rtc_at = ""
+  var mic_path = ""
+  var mic_at = 0
   var perf_from = 0
   var perf_t0: MonoTime
   var p = initOptParser(commandLineParams(), shortNoVal = {'h'},
@@ -222,6 +255,10 @@ when isMainModule:
       of "wav": wav = val
       of "save": save = val
       of "rtc": rtc_at = val
+      of "mic":
+        let m = val.split('@')
+        mic_path = m[0]
+        if m.len > 1: mic_at = parseInt(m[1])
       of "perf-from": perf_from = parseInt(val)
       of "press": presses.add parse_presses(val)
       of "peek9":
@@ -259,7 +296,10 @@ when isMainModule:
   if save.len > 0 and fileExists(save):
     n.cart.backup.set_data(cast[seq[uint8]](readFile(save)))
   var audio: seq[float32]
+  var mic_rate = 0
+  let mic_samples = if mic_path.len > 0: read_wav_mono(mic_path, mic_rate) else: @[]
   for f in 0 ..< frames:
+    if mic_path.len > 0 and f == mic_at: n.push_mic(mic_samples, mic_rate)
     if f == perf_from: perf_t0 = getMonoTime()
     if f == trace_at:
       n.arm9.trace = trace9
@@ -289,12 +329,13 @@ when isMainModule:
     for p in presses:
       if f == p.first or f == p.last:
         if p.touch: n.set_touch(p.x, p.y, f == p.first)
+        elif p.lid: n.set_lid(f == p.first)
         else: n.set_button(p.button, f == p.first)
     n.run_frame()
     if pcs:
       echo "frame ", f, " arm9 pc=", toHex(n.arm9.next_pc, 8),
            (if n.arm9.halted: " H" else: "  "), " arm7 pc=", toHex(n.arm7.next_pc, 8),
-           (if n.arm7.halted: " H" else: "")
+           (if n.sleeping: " S" elif n.arm7.halted: " H" else: "")
     if wav.len > 0: audio.add n.spu.take_samples()
     if f + 1 in shots:
       let px = n.screens_rgba()
