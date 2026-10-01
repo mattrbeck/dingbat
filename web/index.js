@@ -8603,6 +8603,9 @@ const canvasEl = /** @type {HTMLCanvasElement} */ (document.getElementById("canv
 const stageEl = document.getElementById("stage");
 const glowCanvas = /** @type {HTMLCanvasElement} */ (document.getElementById("glow-canvas"));
 const glowCtx = glowCanvas.getContext("2d");
+// The ambient glow's sample grid; glpresent.js composes it (createGlowComposer).
+const GLOW_SAMPLE_W = 24, GLOW_SAMPLE_H = 16;
+const glowComposer = createGlowComposer(GLOW_SAMPLE_W, GLOW_SAMPLE_H);
 const integerScaleToggle = /** @type {HTMLInputElement} */ (document.getElementById("integer-scale-toggle"));
 const lcdResponseToggle = /** @type {HTMLInputElement} */ (document.getElementById("lcd-response-toggle"));
 const ambientGlowToggle = /** @type {HTMLInputElement} */ (document.getElementById("ambient-glow-toggle"));
@@ -8686,17 +8689,19 @@ const updateCanvasScaling = () => {
     glowCanvas.style.top = c.top - s.top + "px";
     glowCanvas.style.width = c.width + "px";
     glowCanvas.style.height = c.height + "px";
+    // The blur is sized in the box's CSS pixels, so the grid follows the box.
+    const [gw, gh] = glowComposer.layout(c.width, c.height, glowCtx);
+    if (glowCanvas.width !== gw || glowCanvas.height !== gh) {
+      glowCanvas.width = gw; glowCanvas.height = gh;   // clears it
+      glowTick = 0;                                    // repaint next tick
+    }
   }
   glowCanvas.hidden = !(ambientGlow && singleCore);
 };
 
-// Sample a coarse grid from the presented framebuffer into the glow canvas
-// at ~10 Hz, blended over the previous sample.
-const glowBuf = document.createElement("canvas");
-glowBuf.width = glowCanvas.width;
-glowBuf.height = glowCanvas.height;
-const glowBufCtx = glowBuf.getContext("2d");
-let glowImage = null;
+// Sample a coarse grid from the presented framebuffer at ~10 Hz; the
+// composer blends it over the last sample, blurs it and fades it to the
+// ellipse, into the glow canvas.
 let glowTick = 0;
 let glowFresh = true; // first sample after enabling paints at full alpha
 
@@ -8710,37 +8715,18 @@ const updateGlow = () => {
   if (glowCanvas.hidden || !currentRomName) return;
   if (typeof Module === "undefined" || !Module._wasm_glow_sample) return;
   if (glowTick++ % 6 !== 0) return;
-  const gw = glowCanvas.width;
-  const gh = glowCanvas.height;
   // The core samples (it owns the LUT and the SGB border) and touches only
-  // the gw*gh cells asked for. See wasm_glow_sample for what is not sampled.
+  // the cells asked for. See wasm_glow_sample for what is not sampled.
   const pal = gbMonoPanel && !sgbActive() ? gbPaletteColors() : null;
   const remap = !!(pal && pal.length === 4);
   const ptr = Module._wasm_glow_sample(
-    gw, gh, remap ? 1 : 0,
+    GLOW_SAMPLE_W, GLOW_SAMPLE_H, remap ? 1 : 0,
     remap ? glowPackHex(pal[0]) : 0, remap ? glowPackHex(pal[1]) : 0,
     remap ? glowPackHex(pal[2]) : 0, remap ? glowPackHex(pal[3]) : 0);
   if (!ptr) return;
-  const heap = new Uint8Array(Module.memory.buffer, ptr, gw * gh * 4);
-  if (!glowImage) glowImage = glowBufCtx.createImageData(gw, gh);
-  const d = glowImage.data;
-  for (let y = 0; y < gh; y++) {
-    for (let x = 0; x < gw; x++) {
-      const si = (y * gw + x) * 4;
-      const di = si;
-      const r = heap[si], g = heap[si + 1], b = heap[si + 2];
-      // Saturation folded in here so the CSS filter is just the blur (one
-      // compositor pass). Luma-preserving, matches saturate(1.5).
-      const luma = 0.299 * r + 0.587 * g + 0.114 * b;
-      d[di] = luma + (r - luma) * 1.5;
-      d[di + 1] = luma + (g - luma) * 1.5;
-      d[di + 2] = luma + (b - luma) * 1.5;
-      d[di + 3] = 255;
-    }
-  }
-  glowBufCtx.putImageData(glowImage, 0, 0);
-  glowCtx.globalAlpha = glowFresh ? 1 : 0.3;
-  glowCtx.drawImage(glowBuf, 0, 0);
+  glowComposer.compose(
+    new Uint8Array(Module.memory.buffer, ptr, GLOW_SAMPLE_W * GLOW_SAMPLE_H * 4),
+    glowCtx, glowFresh);
   glowFresh = false;
 };
 

@@ -408,3 +408,187 @@ void main() {
     },
   };
 }
+
+// --- Ambient glow composer ---
+// The glow behind the game is a coarse sample of the picture, blurred and
+// faded to a soft ellipse. It was CSS (filter: blur(32px) plus a radial
+// mask-image), and the game canvas repaints over it every frame, so the
+// compositor re-ran that blur and mask on every frame: +0.25-0.65 ms of
+// GPU-process work per frame on an M2 (docs/settings-cost.md). Here it is
+// composed once per sample (10 Hz), and not at all while the picture holds
+// still, on a grid of a few dozen texels; the compositor only stretches a
+// bitmap. The model is the CSS it replaced, in the element's own CSS pixels:
+// the sw x sh sample stretched bilinearly over the box, a Gaussian of sigma
+// 32 px with nothing outside the box, then radial-gradient(ellipse at
+// center, black 40%, transparent 78%) as alpha.
+function createGlowComposer(sw, sh) {
+  const SIGMA_CSS = 32;
+  const TEXELS_PER_SIGMA = 1.6;      // the grid only has to hold a blurred image
+  const SETTLED = 0.25;              // largest change, in 8-bit levels, not redrawn
+  const MIN_SIGMA = 0.8;             // a sampled Gaussian narrower than this is not one
+  const ema = new Float32Array(sw * sh * 3);
+  let gw = 0, gh = 0, lw = 0, lh = 0, img = null, dirty = true;
+  let work = null, lo = null, lotmp = null;
+  let ksx = null, ksy = null, kSigX = 0, kSigY = 0, losum = null, alpha = null;
+  let ux0 = null, ux1 = null, ufx = null, uy0 = null, uy1 = null, ufy = null;
+  let sx0 = null, sx1 = null, fx = null, sy0 = null, sy1 = null, fy = null;
+
+  const gauss = (sigma) => {
+    const rad = Math.ceil(3 * sigma);
+    const k = new Float32Array(2 * rad + 1);
+    let sum = 0;
+    for (let i = -rad; i <= rad; i++) sum += (k[i + rad] = Math.exp(-(i * i) / (2 * sigma * sigma)));
+    for (let i = 0; i < k.length; i++) k[i] /= sum;
+    return k;
+  };
+  // Weight of the kernel that lands inside [0, n) from texel i: the blur of
+  // the box's own (opaque) alpha.
+  const coverage = (k, n) => {
+    const rad = (k.length - 1) >> 1, out = new Float32Array(n);
+    for (let i = 0; i < n; i++)
+      for (let j = -rad; j <= rad; j++) if (i + j >= 0 && i + j < n) out[i] += k[j + rad];
+    return out;
+  };
+  // Bilinear source taps for a stretch of `src` texels over `dst`, edges
+  // clamped, centres aligned (what the browser does to a stretched canvas).
+  const taps = (src, dst) => {
+    const i0 = new Int32Array(dst), i1 = new Int32Array(dst), f = new Float32Array(dst);
+    for (let i = 0; i < dst; i++) {
+      const s = Math.min(src - 1, Math.max(0, (i + 0.5) * src / dst - 0.5));
+      i0[i] = Math.floor(s); i1[i] = Math.min(src - 1, i0[i] + 1); f[i] = s - i0[i];
+    }
+    return [i0, i1, f];
+  };
+  // Bilinear stretch of a 3-channel (w x h) plane into (dw x dh), given taps.
+  const stretch = (from, w, to, dw, dh, x0, x1, xf, y0, y1, yf) => {
+    for (let y = 0; y < dh; y++) {
+      const a0 = y0[y] * w, a1 = y1[y] * w, wy = yf[y];
+      for (let x = 0; x < dw; x++) {
+        const wx = xf[x], q = (y * dw + x) * 3;
+        const p00 = (a0 + x0[x]) * 3, p01 = (a0 + x1[x]) * 3;
+        const p10 = (a1 + x0[x]) * 3, p11 = (a1 + x1[x]) * 3;
+        const w00 = (1 - wx) * (1 - wy), w01 = wx * (1 - wy);
+        const w10 = (1 - wx) * wy, w11 = wx * wy;
+        to[q] = from[p00] * w00 + from[p01] * w01 + from[p10] * w10 + from[p11] * w11;
+        to[q + 1] = from[p00 + 1] * w00 + from[p01 + 1] * w01 + from[p10 + 1] * w10 + from[p11 + 1] * w11;
+        to[q + 2] = from[p00 + 2] * w00 + from[p01 + 2] * w01 + from[p10 + 2] * w10 + from[p11 + 2] * w11;
+      }
+    }
+  };
+
+  return {
+    // Grid for a box of cssW x cssH CSS pixels; returns [w, h] for the
+    // canvas. An unchanged box costs nothing.
+    layout(cssW, cssH, ctx) {
+      if (!(cssW > 0 && cssH > 0)) return [gw, gh];
+      const w = Math.max(32, Math.min(64, Math.round(TEXELS_PER_SIGMA * cssW / SIGMA_CSS)));
+      const h = Math.max(16, Math.min(64, Math.round(w * cssH / cssW)));
+      // Blur and stretch are both linear, so the blur runs on the sample
+      // (sigma in its cells; a big box first stretches it 2x or more so the
+      // kernel stays a Gaussian) and the stretch to the grid follows. The
+      // colour is renormalised by the kernel weight inside the box; the
+      // alpha, the blurred box edge times the ellipse, is exact on the grid.
+      const mx = Math.ceil(MIN_SIGMA * cssW / (SIGMA_CSS * sw));
+      const my = Math.ceil(MIN_SIGMA * cssH / (SIGMA_CSS * sh));
+      const sigX = SIGMA_CSS * sw * mx / cssW, sigY = SIGMA_CSS * sh * my / cssH;
+      if (w === gw && h === gh && lw === sw * mx && lh === sh * my &&
+          Math.abs(kSigX - sigX) < 0.02 && Math.abs(kSigY - sigY) < 0.02) return [gw, gh];
+      gw = w; gh = h; lw = sw * mx; lh = sh * my; dirty = true;
+      ksx = gauss(sigX); kSigX = sigX;
+      ksy = gauss(sigY); kSigY = sigY;
+      const lcx = coverage(ksx, lw), lcy = coverage(ksy, lh);
+      losum = new Float32Array(lw * lh);
+      for (let y = 0; y < lh; y++) for (let x = 0; x < lw; x++) losum[y * lw + x] = lcx[x] * lcy[y];
+      work = new Float32Array(lw * lh * 3);
+      lo = new Float32Array(lw * lh * 3); lotmp = new Float32Array(lw * lh * 3);
+      [ux0, ux1, ufx] = taps(sw, lw);
+      [uy0, uy1, ufy] = taps(sh, lh);
+      const cx = coverage(gauss(SIGMA_CSS * gw / cssW), gw);
+      const cy = coverage(gauss(SIGMA_CSS * gh / cssH), gh);
+      alpha = new Float32Array(gw * gh);
+      for (let y = 0; y < gh; y++) {
+        const v = (y + 0.5) / gh - 0.5;
+        for (let x = 0; x < gw; x++) {
+          const u = (x + 0.5) / gw - 0.5;
+          // farthest-corner ellipse: radii sqrt(2) x the half box
+          const t = Math.SQRT2 * Math.sqrt(u * u + v * v);
+          alpha[y * gw + x] = 255 * Math.min(1, Math.max(0, (0.78 - t) / 0.38)) * cx[x] * cy[y];
+        }
+      }
+      [sx0, sx1, fx] = taps(lw, gw);
+      [sy0, sy1, fy] = taps(lh, gh);
+      img = ctx.createImageData(gw, gh);
+      return [gw, gh];
+    },
+    // One sample: `rgba` is sw x sh RGBA8888. Saturation x1.5 (luma kept),
+    // then blended over the running picture at 0.3, or taken whole when
+    // `fresh`. Draws the composed glow into ctx, unless nothing moved.
+    compose(rgba, ctx, fresh) {
+      if (!img) return;
+      let moved = 0;
+      for (let i = 0, o = 0; i < sw * sh * 4; i += 4, o += 3) {
+        const R = rgba[i], G = rgba[i + 1], B = rgba[i + 2];
+        const luma = 0.299 * R + 0.587 * G + 0.114 * B;
+        const s0 = Math.min(255, Math.max(0, luma + (R - luma) * 1.5));
+        const s1 = Math.min(255, Math.max(0, luma + (G - luma) * 1.5));
+        const s2 = Math.min(255, Math.max(0, luma + (B - luma) * 1.5));
+        if (fresh) { ema[o] = s0; ema[o + 1] = s1; ema[o + 2] = s2; continue; }
+        const d0 = (s0 - ema[o]) * 0.3, d1 = (s1 - ema[o + 1]) * 0.3, d2 = (s2 - ema[o + 2]) * 0.3;
+        ema[o] += d0; ema[o + 1] += d1; ema[o + 2] += d2;
+        moved = Math.max(moved, Math.abs(d0), Math.abs(d1), Math.abs(d2));
+      }
+      if (!fresh && !dirty && moved < SETTLED) return;
+      dirty = false;
+      // The sample at blur resolution (itself, when the box is small enough).
+      let src = ema;
+      if (lw !== sw || lh !== sh) {
+        stretch(ema, sw, work, lw, lh, ux0, ux1, ufx, uy0, uy1, ufy);
+        src = work;
+      }
+      // Blur: rows, then columns, zero outside the box, renormalised.
+      const rx = (ksx.length - 1) >> 1, ry = (ksy.length - 1) >> 1;
+      for (let y = 0; y < lh; y++) {
+        for (let x = 0; x < lw; x++) {
+          let s0 = 0, s1 = 0, s2 = 0;
+          const j0 = Math.max(-rx, -x), j1 = Math.min(rx, lw - 1 - x);
+          for (let j = j0; j <= j1; j++) {
+            const k = ksx[j + rx], p = (y * lw + x + j) * 3;
+            s0 += src[p] * k; s1 += src[p + 1] * k; s2 += src[p + 2] * k;
+          }
+          const q = (y * lw + x) * 3;
+          lotmp[q] = s0; lotmp[q + 1] = s1; lotmp[q + 2] = s2;
+        }
+      }
+      for (let y = 0; y < lh; y++) {
+        const j0 = Math.max(-ry, -y), j1 = Math.min(ry, lh - 1 - y);
+        for (let x = 0; x < lw; x++) {
+          let s0 = 0, s1 = 0, s2 = 0;
+          for (let j = j0; j <= j1; j++) {
+            const k = ksy[j + ry], p = ((y + j) * lw + x) * 3;
+            s0 += lotmp[p] * k; s1 += lotmp[p + 1] * k; s2 += lotmp[p + 2] * k;
+          }
+          const n = 1 / losum[y * lw + x], q = (y * lw + x) * 3;
+          lo[q] = s0 * n; lo[q + 1] = s1 * n; lo[q + 2] = s2 * n;
+        }
+      }
+      // Stretch to the grid; the alpha is precomputed.
+      const d = img.data;
+      for (let y = 0; y < gh; y++) {
+        const a0 = sy0[y] * lw, a1 = sy1[y] * lw, wy = fy[y];
+        for (let x = 0; x < gw; x++) {
+          const wx = fx[x];
+          const p00 = (a0 + sx0[x]) * 3, p01 = (a0 + sx1[x]) * 3;
+          const p10 = (a1 + sx0[x]) * 3, p11 = (a1 + sx1[x]) * 3;
+          const w00 = (1 - wx) * (1 - wy), w01 = wx * (1 - wy);
+          const w10 = (1 - wx) * wy, w11 = wx * wy;
+          const k = y * gw + x, i = k * 4;
+          d[i] = lo[p00] * w00 + lo[p01] * w01 + lo[p10] * w10 + lo[p11] * w11;
+          d[i + 1] = lo[p00 + 1] * w00 + lo[p01 + 1] * w01 + lo[p10 + 1] * w10 + lo[p11 + 1] * w11;
+          d[i + 2] = lo[p00 + 2] * w00 + lo[p01 + 2] * w01 + lo[p10 + 2] * w10 + lo[p11 + 2] * w11;
+          d[i + 3] = alpha[k];
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+    },
+  };
+}

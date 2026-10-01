@@ -1,5 +1,6 @@
 // GPU-process cost of a page scene, from a Chrome trace: starts the scene
-// with `on` true and false in turn, traces each for SECONDS, and sums the
+// with the glow off, as the old CSS and as the composed bitmap in turn
+// (settingsGlowScene), traces each for SECONDS, and sums the
 // busy time of the GPU process's threads (task durations from the toplevel
 // category). The difference is what the compositor pays for the effect.
 //
@@ -81,21 +82,24 @@ const traceOnce = async () => {
   return out;
 };
 
-const results = { on: [], off: [] };
+const MODES = ["off", "css", "composed"];
+const results = Object.fromEntries(MODES.map((m) => [m, []]));
 for (let r = 0; r < REPS; r++) {
-  for (const on of [false, true]) {
-    await evalPage(`window.settingsGlowScene(${on})`);
+  for (const mode of MODES) {
+    await evalPage(`window.settingsGlowScene(${JSON.stringify(mode)})`);
     await new Promise((x) => setTimeout(x, 1000)); // settle
-    results[on ? "on" : "off"].push(await traceOnce());
+    results[mode].push(await traceOnce());
   }
 }
 await evalPage("window.settingsSceneStop()");
 const med = (a) => { const s = [...a].sort((x, y) => x - y); return s[(s.length / 2) | 0]; };
-const threads = new Set([...results.on, ...results.off].flatMap((o) => Object.keys(o)));
+const threads = new Set(MODES.flatMap((m) => results[m].flatMap((o) => Object.keys(o))));
 const rows = [...threads].map((t) => {
-  const off = med(results.off.map((o) => o[t] || 0)), on = med(results.on.map((o) => o[t] || 0));
-  return { thread: t, offMsPerSec: +off.toFixed(2), onMsPerSec: +on.toFixed(2),
-           addedMsPerFrame: +((on - off) / 60).toFixed(4) };
-}).filter((r) => r.offMsPerSec + r.onMsPerSec > 0.5);
+  const v = Object.fromEntries(MODES.map((m) => [m, med(results[m].map((o) => o[t] || 0))]));
+  const row = { thread: t };
+  for (const m of MODES) row[m + "MsPerSec"] = +v[m].toFixed(2);
+  for (const m of MODES.slice(1)) row[m + "AddedMsPerFrame"] = +((v[m] - v.off) / 60).toFixed(4);
+  return row;
+}).filter((r) => MODES.some((m) => r[m + "MsPerSec"] > 0.5));
 console.log(JSON.stringify(rows, null, 2));
 browser.ws.close(); pg.ws.close();

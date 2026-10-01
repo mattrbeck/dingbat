@@ -1969,23 +1969,16 @@ body.running #canvas {
 
 /* Ambient glow backdrop: a coarse sample of the frame, inflated past the
    canvas edges and heavily blurred. JS pins it to the canvas rect and feeds
-   it ~10 samples/second with temporal smoothing. */
+   it ~10 samples/second with temporal smoothing. The blur and the elliptical
+   fade are already in the bitmap (createGlowComposer, glpresent.js): as a
+   CSS filter and mask-image they re-ran every frame, because the game canvas
+   repaints over this one. Here the compositor only stretches it. */
 #glow-canvas {
   position: absolute;
   z-index: 0;
   pointer-events: none;
   transform: scale(1.45);
-  /* Blur only — saturation is baked into the sampled bitmap (updateGlow), so
-     the compositor runs a single filter pass. The source is a 24x16 image blown
-     up ~60x per cell, so a smaller radius still blends the cells smoothly at a
-     fraction of the large-radius blur's GPU cost. */
-  filter: blur(32px);
   opacity: 0.8;
-  border-radius: 28px;
-  /* The sampled bitmap is opaque edge-to-edge, so blur() alone yields a
-     blurred rectangle; the radial mask feathers it to a soft ellipse. */
-  -webkit-mask-image: radial-gradient(ellipse at center, black 40%, transparent 78%);
-  mask-image: radial-gradient(ellipse at center, black 40%, transparent 78%);
 }
 
 /* Scanlines are drawn by the WebGL2 fragment shader, not a DOM overlay. */

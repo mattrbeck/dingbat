@@ -288,32 +288,41 @@ window.settingsGlow = (calls = 3000) => {
 // styles.css behind the game canvas. Its blur runs in the GPU process, out of
 // reach of page timers: run it under a trace (glowtrace.mjs) with on and off.
 let sceneRaf = 0;
-window.settingsGlowScene = (on) => {
+// `mode`: "off", "css" (the CSS blur + mask the app shipped until
+// 2026-09-30) or "composed" (createGlowComposer, what it ships now).
+window.settingsGlowScene = (mode) => {
   cancelAnimationFrame(sceneRaf);
+  if (mode === true) mode = "css";
+  if (mode === false) mode = "off";
   const can = document.getElementById("gl-canvas");
   const [nw, nh] = IS_GBA ? [240, 160] : [160, 144];
   if (!window._sceneRenderer) window._sceneRenderer = createGlRenderer(can, () => [nw, nh], sLog);
-  let glow = document.getElementById("glow-canvas");
-  if (!glow) {
-    glow = document.createElement("canvas");
-    glow.id = "glow-canvas"; glow.width = 24; glow.height = 16;
-    Object.assign(glow.style, {
-      position: "absolute", zIndex: "0", pointerEvents: "none",
-      transform: "scale(1.45)", filter: "blur(32px)", opacity: "0.8",
-      borderRadius: "28px",
-      maskImage: "radial-gradient(ellipse at center, black 40%, transparent 78%)",
-      webkitMaskImage: "radial-gradient(ellipse at center, black 40%, transparent 78%)",
-    });
-    can.style.position = "relative"; can.style.zIndex = "1";
-    can.parentNode.insertBefore(glow, can);
-  }
+  document.getElementById("glow-canvas")?.remove();
+  const glow = document.createElement("canvas");
+  glow.id = "glow-canvas"; glow.width = 24; glow.height = 16;
+  Object.assign(glow.style, {
+    position: "absolute", zIndex: "0", pointerEvents: "none",
+    transform: "scale(1.45)", opacity: "0.8",
+  });
+  if (mode === "css") Object.assign(glow.style, {
+    filter: "blur(32px)", borderRadius: "28px",
+    maskImage: "radial-gradient(ellipse at center, black 40%, transparent 78%)",
+    webkitMaskImage: "radial-gradient(ellipse at center, black 40%, transparent 78%)",
+  });
+  can.style.position = "relative"; can.style.zIndex = "1";
+  can.parentNode.insertBefore(glow, can);
   // A desktop-sized stage (the app stretches the 960x640 backing to fit).
   can.style.width = "960px"; can.style.height = "640px";
   const r = can.getBoundingClientRect();
   Object.assign(glow.style, { left: r.left + scrollX + "px", top: r.top + scrollY + "px",
                               width: r.width + "px", height: r.height + "px" });
-  glow.hidden = !on;
+  glow.hidden = mode === "off";
   const gctx = glow.getContext("2d");
+  const comp = createGlowComposer(24, 16);
+  if (mode === "composed") {
+    const [gw, gh] = comp.layout(r.width, r.height, gctx);
+    glow.width = gw; glow.height = gh;
+  }
   const buf = document.createElement("canvas"); buf.width = 24; buf.height = 16;
   const bctx = buf.getContext("2d");
   const img = bctx.createImageData(24, 16);
@@ -322,18 +331,122 @@ window.settingsGlowScene = (on) => {
   const tick = () => {
     Module._loop_tick(); drainAudio();
     window._sceneRenderer.draw({ colorCorrect: true, panelGbc: !IS_GBA, filter: "none" });
-    if (on && n++ % 6 === 0) {
+    if (mode !== "off" && n++ % 6 === 0) {
       const ptr = Module._wasm_glow_sample(24, 16, 0, 0, 0, 0, 0);
-      img.data.set(new Uint8Array(Module.memory.buffer, ptr, 24 * 16 * 4));
-      bctx.putImageData(img, 0, 0);
-      gctx.globalAlpha = 0.3; gctx.drawImage(buf, 0, 0);
+      const px = new Uint8Array(Module.memory.buffer, ptr, 24 * 16 * 4);
+      if (mode === "composed") {
+        comp.compose(px, gctx, n === 1);
+      } else {
+        img.data.set(px);
+        bctx.putImageData(img, 0, 0);
+        gctx.globalAlpha = 0.3; gctx.drawImage(buf, 0, 0);
+      }
     }
     sceneRaf = requestAnimationFrame(tick);
   };
   sceneRaf = requestAnimationFrame(tick);
-  return { on, canvasCss: [r.width, r.height], dpr: devicePixelRatio };
+  return { mode, canvasCss: [r.width, r.height], grid: [glow.width, glow.height], dpr: devicePixelRatio };
 };
 window.settingsSceneStop = () => cancelAnimationFrame(sceneRaf);
+
+// --- Glow composer vs the CSS it replaced, as pictures ---
+// The reference is the old CSS model drawn with Chrome's own canvas filter:
+// the 24x16 sample stretched over a W x H box, blur(32px) with nothing
+// outside, the radial mask as destination-in. The candidate is
+// createGlowComposer's bitmap stretched to the same box. Both premultiplied;
+// returns the per-channel error and both pictures as PNG data URLs.
+window.settingsGlowCompare = (W = 960, H = 640) => {
+  loadState();
+  for (let i = 0; i < 30; i++) Module._loop_tick();
+  const sw = 24, sh = 16;
+  const ptr = Module._wasm_glow_sample(sw, sh, 0, 0, 0, 0, 0);
+  const rgba = new Uint8Array(Module.memory.buffer, ptr, sw * sh * 4).slice();
+  // saturated sample, as the old updateGlow drew it
+  const src = document.createElement("canvas"); src.width = sw; src.height = sh;
+  const sctx = src.getContext("2d");
+  const si = sctx.createImageData(sw, sh);
+  for (let i = 0; i < sw * sh * 4; i += 4) {
+    const r = rgba[i], g = rgba[i + 1], b = rgba[i + 2];
+    const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+    si.data[i] = luma + (r - luma) * 1.5; si.data[i + 1] = luma + (g - luma) * 1.5;
+    si.data[i + 2] = luma + (b - luma) * 1.5; si.data[i + 3] = 255;
+  }
+  sctx.putImageData(si, 0, 0);
+  const ref = document.createElement("canvas"); ref.width = W; ref.height = H;
+  const rctx = ref.getContext("2d");
+  rctx.imageSmoothingEnabled = true;
+  rctx.filter = "blur(32px)";
+  rctx.drawImage(src, 0, 0, W, H);
+  rctx.filter = "none";
+  rctx.globalCompositeOperation = "destination-in";
+  rctx.save();
+  rctx.translate(W / 2, H / 2);
+  rctx.scale(Math.SQRT2 * W / 2, Math.SQRT2 * H / 2);   // farthest-corner ellipse
+  const grad = rctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+  grad.addColorStop(0.40, "rgba(0,0,0,1)");
+  grad.addColorStop(0.78, "rgba(0,0,0,0)");
+  rctx.fillStyle = grad;
+  rctx.fillRect(-1, -1, 2, 2);
+  rctx.restore();
+  const comp = createGlowComposer(sw, sh);
+  const small = document.createElement("canvas");
+  const smctx = small.getContext("2d");
+  const [gw, gh] = comp.layout(W, H, smctx);
+  small.width = gw; small.height = gh;
+  comp.compose(rgba, smctx, true);
+  const cand = document.createElement("canvas"); cand.width = W; cand.height = H;
+  const cctx = cand.getContext("2d");
+  cctx.imageSmoothingEnabled = true; cctx.imageSmoothingQuality = "low";
+  cctx.drawImage(small, 0, 0, W, H);
+  const a = rctx.getImageData(0, 0, W, H).data, b = cctx.getImageData(0, 0, W, H).data;
+  // Compare what reaches the screen: colour times alpha.
+  let sum = 0, max = 0, n = 0;
+  const hist = [0, 0, 0, 0];   // |err| < 2, < 4, < 8, >= 8
+  for (let i = 0; i < a.length; i += 4) {
+    for (let c = 0; c < 3; c++) {
+      const e = Math.abs(a[i + c] * a[i + 3] / 255 - b[i + c] * b[i + 3] / 255);
+      sum += e; n++; if (e > max) max = e;
+      hist[e < 2 ? 0 : e < 4 ? 1 : e < 8 ? 2 : 3]++;
+    }
+    const ea = Math.abs(a[i + 3] - b[i + 3]); if (ea > max) max = ea;
+  }
+  const r = { W, H, grid: [gw, gh], meanAbs: +(sum / n).toFixed(3), max: +max.toFixed(1),
+              under2: +(hist[0] / n * 100).toFixed(2), under4: +((hist[0] + hist[1]) / n * 100).toFixed(2),
+              over8: +(hist[3] / n * 100).toFixed(3) };
+  sLog("glow compare: " + JSON.stringify(r));
+  // Side by side over the page's dark backdrop, for a look.
+  const sbs = document.createElement("canvas"); sbs.width = W * 2 + 16; sbs.height = H;
+  const x = sbs.getContext("2d");
+  x.fillStyle = "#111"; x.fillRect(0, 0, sbs.width, H);
+  x.globalAlpha = 0.8; x.drawImage(ref, 0, 0); x.drawImage(cand, W + 16, 0);
+  r.png = sbs.toDataURL("image/png");
+  return r;
+};
+
+// Fidelity against the CSS model and main-thread cost per composed sample,
+// at a desktop, a phone and a large box. Timing passes `fresh` so every call
+// composes (a settled picture skips the work altogether).
+window.settingsGlowComposer = (sizes = [[960, 640], [375, 250], [1400, 933], [500, 450]]) => {
+  const out = {};
+  for (const [W, H] of sizes) {
+    const r = window.settingsGlowCompare(W, H);
+    delete r.png;
+    const c = document.createElement("canvas"), x = c.getContext("2d");
+    const comp = createGlowComposer(24, 16);
+    const [gw, gh] = comp.layout(W, H, x);
+    c.width = gw; c.height = gh;
+    const ptr = Module._wasm_glow_sample(24, 16, 0, 0, 0, 0, 0);
+    const px = new Uint8Array(Module.memory.buffer, ptr, 24 * 16 * 4).slice();
+    for (let i = 0; i < 300; i++) comp.compose(px, x, true);
+    const t0 = performance.now();
+    for (let i = 0; i < 3000; i++) comp.compose(px, x, true);
+    r.msPerSample = +((performance.now() - t0) / 3000).toFixed(4);
+    r.msPerFrame = +(r.msPerSample / 6).toFixed(4);
+    out[W + "x" + H] = r;
+  }
+  sLog("glow composer: " + JSON.stringify(out));
+  return out;
+};
 
 // --- Analog filter: one BiquadFilterNode, rendered offline ---
 // The node runs on the audio rendering thread, not the main thread; this is
