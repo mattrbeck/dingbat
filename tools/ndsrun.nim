@@ -6,7 +6,13 @@
 ##       [--bios DIR] [--trace9 N] [--trace7 N] [--press A,START@frame]
 ##
 ## --bios defaults to $DINGBAT_NDS_BIOS (bios9.bin, bios7.bin, firmware.bin).
-## --traceN prints the first N instructions of that CPU (pc + regs).
+##
+## Debug flags (build with -d:ndsdebug):
+##   --trace9 N / --trace7 N   print N instructions of that CPU (pc + regs),
+##                             starting at frame --trace-from F (default 0)
+##   --iolog                   log every I/O access (repeats folded), from
+##                             frame --iolog-from F
+##   --pcs                     print both CPUs' pc / halted state each frame
 
 import std/[os, strutils, parseopt]
 import zippy
@@ -63,7 +69,10 @@ when isMainModule:
   var outp = "nds_out.png"
   var bios = ""
   var trace9, trace7 = 0
-  var p = initOptParser(commandLineParams(), shortNoVal = {'h'}, longNoVal = @["help"])
+  var trace_from, iolog_from = 0
+  var iolog, pcs = false
+  var p = initOptParser(commandLineParams(), shortNoVal = {'h'},
+                        longNoVal = @["help", "iolog", "pcs"])
   for kind, key, val in p.getopt():
     case kind
     of cmdArgument: rom = key
@@ -74,14 +83,24 @@ when isMainModule:
       of "bios": bios = val
       of "trace9": trace9 = parseInt(val)
       of "trace7": trace7 = parseInt(val)
+      of "trace-from": trace_from = parseInt(val)
+      of "iolog": iolog = true
+      of "iolog-from": iolog_from = parseInt(val)
+      of "pcs": pcs = true
       else: quit("unknown option --" & key)
     of cmdEnd: discard
   if rom.len == 0: quit("usage: ndsrun ROM [--frames N] [--out PNG] [--bios DIR]")
   let n = load_nds(rom, bios)
-  n.arm9.trace = trace9 > 0
-  n.arm7.trace = trace7 > 0
   for f in 0 ..< frames:
+    if f == trace_from:
+      n.trace9 = trace9
+      n.trace7 = trace7
+    if f == iolog_from: n.iolog = iolog
     n.run_frame()
+    if pcs:
+      echo "frame ", f, " arm9 pc=", toHex(n.arm9.next_pc, 8),
+           (if n.arm9.halted: " H" else: "  "), " arm7 pc=", toHex(n.arm7.next_pc, 8),
+           (if n.arm7.halted: " H" else: "")
   write_png(outp, 256, 384, n.screens_rgba())
   echo "frames=", frames, " arm9 instrs=", n.arm9.instr_count, " pc=0x",
        toHex(n.arm9.next_pc, 8), " arm7 instrs=", n.arm7.instr_count, " pc=0x",

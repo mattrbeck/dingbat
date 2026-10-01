@@ -113,6 +113,8 @@ proc read7(n: NDS; a: uint32; width: static int): uint32 =
     if shared: rd(n.shared_wram, i) else: rd(n.arm7_wram, i)
   of 0x04:
     let w = n.io7_read(a and not 3'u32)
+    when defined(ndsdebug):
+      if n.iolog: n.log_io("7", a, w, 0xFFFF_FFFF'u32, false)
     when width == 32: w
     elif width == 16: (w shr ((a and 2) * 8)) and 0xFFFF
     else: (w shr ((a and 3) * 8)) and 0xFF
@@ -142,6 +144,8 @@ proc write7(n: NDS; a: uint32; v: uint32; width: static int) =
     let mask = when width == 32: 0xFFFF_FFFF'u32
                elif width == 16: 0xFFFF'u32 shl sh
                else: 0xFF'u32 shl sh
+    when defined(ndsdebug):
+      if n.iolog: n.log_io("7", a and not 3'u32, v shl sh, mask, true)
     n.io7_write(a and not 3'u32, v shl sh, mask)
   of 0x06:
     let off = int(a and 0x3FFFF)
@@ -167,8 +171,12 @@ proc write32*(b: Arm7Bus; a: uint32; v: uint32) {.inline.} =
   b.nds.sched.now = b.nds.arm7.cycles
   b.nds.write7(a, v, 32)
 
-proc fetch32*(b: Arm7Bus; a: uint32): uint32 {.inline.} = b.nds.read7(a, 32)
-proc fetch16*(b: Arm7Bus; a: uint32): uint32 {.inline.} = b.nds.read7(a, 16)
+proc fetch32*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
+  trace_fetch(b.nds, b.nds.arm7, b.nds.trace7, "7", a)
+  b.nds.read7(a, 32)
+proc fetch16*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
+  trace_fetch(b.nds, b.nds.arm7, b.nds.trace7, "7t", a)
+  b.nds.read7(a, 16)
 
 proc irq_line*(b: Arm7Bus): bool {.inline.} = b.nds.irq7.line()
 proc irq_wake*(b: Arm7Bus): bool {.inline.} = b.nds.irq7.wake()

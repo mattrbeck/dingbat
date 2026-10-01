@@ -18,6 +18,7 @@ type
     data_perm*, code_perm*: uint32       ## c5,c0,2 / c5,c0,3
     dcache_lock*, icache_lock*: uint32
     halt_request*: bool       ## c7,c0,4 / c7,c8,2: wait for interrupt
+    trace_pid*: uint32        ## c13,c0,1 / c13,c1,1: R/W, no effect (calico's IRQ scratch)
 
 const
   CP15_ID* = 0x41059461'u32
@@ -65,6 +66,7 @@ proc read*(c: Cp15; op1, cn, cm, op2: uint32): uint32 =
   of 9:
     if cm == 1: (if op2 == 1: c.itcm_reg else: c.dtcm_reg)
     else: (if op2 == 1: c.icache_lock else: c.dcache_lock)
+  of 13: (if op2 == 1: c.trace_pid else: 0)   # c13,c0,0 FCSE PID reads 0
   else: 0
 
 proc write*(c: var Cp15; op1, cn, cm, op2, v: uint32) =
@@ -89,5 +91,6 @@ proc write*(c: var Cp15; op1, cn, cm, op2, v: uint32) =
       else: c.dtcm_reg = v and 0xFFFF_F03E'u32
     else:
       if op2 == 1: c.icache_lock = v else: c.dcache_lock = v
+  of 13: (if op2 == 1: c.trace_pid = v)
   else: discard
   c.update_tcm()

@@ -53,6 +53,11 @@ type
     frame_done*: bool
     line_start*: int64          ## master cycle the current line began
     unmapped_log*: int          ## first few unmapped accesses are logged
+    # -d:ndsdebug only (tools/ndsrun.nim flags)
+    iolog*: bool                ## log I/O accesses to stderr
+    trace9*, trace7*: int       ## instructions left to trace per CPU
+    io_last: string
+    io_repeat: int
 
 const
   MAIN_RAM_SIZE = 4 * 1024 * 1024
@@ -65,6 +70,18 @@ proc note_unmapped(n: NDS; who: string; a: uint32; write: bool) =
     inc n.unmapped_log
     stderr.writeLine("nds " & who & ": unmapped " & (if write: "write " else: "read ") &
                      "0x" & toHex(a, 8))
+
+proc log_io(n: NDS; who: string; a, v, mask: uint32; write: bool) =
+  ## -d:ndsdebug: one line per I/O access, repeats folded into a count.
+  let line = who & (if write: " W " else: " R ") & toHex(a, 8) & " = " & toHex(v, 8) &
+             (if write and mask != 0xFFFF_FFFF'u32: " mask " & toHex(mask, 8) else: "")
+  if line == n.io_last:
+    inc n.io_repeat
+    return
+  if n.io_repeat > 0: stderr.writeLine("  (x" & $(n.io_repeat + 1) & ")")
+  n.io_last = line
+  n.io_repeat = 0
+  stderr.writeLine(line)
 
 template rd16(s: seq[uint8]; i: int): uint32 =
   uint32(s[i]) or (uint32(s[i + 1]) shl 8)
