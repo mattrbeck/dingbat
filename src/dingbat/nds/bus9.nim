@@ -21,6 +21,13 @@ proc write32*(b: Arm9Bus; a: uint32; v: uint32) {.inline.}
 
 # --- I/O ---------------------------------------------------------------
 
+proc write_vcount(n: NDS; v: uint32) =
+  ## VCOUNT is writable (GBATEK "DS Video", for syncing linked consoles):
+  ## only while the line is 202..212 and to a value in 202..212. The new
+  ## line number applies from the next line start.
+  let v = int(v and 0x1FF)
+  if n.gpu.vcount in 202..212 and v in 202..212: n.vcount_write = v
+
 template sync9(n: NDS) =
   ## Bring the timeline to this CPU's clock before a register access, so
   ## timers, busy flags and new events see the access's time. A DMA started
@@ -72,7 +79,7 @@ proc io9_write(n: NDS; a: uint32; v, mask: uint32) =
   of 0x000, 0x008 .. 0x05C, 0x064 .. 0x06C: n.gpu.engine_a.write_reg(o, v, mask)
   of 0x004:
     n.gpu.stat9.dispstat_write(uint16(v), uint16(mask))
-    # TODO(gpu): VCOUNT (high half) is writable during V-blank
+    if (mask and 0xFFFF_0000'u32) != 0: n.write_vcount(v shr 16)
   of 0x060: n.gpu3d.write_reg(o, v, mask)
   of 0x0B0 .. 0x0EC: n.dma9.write_reg(Arm9Bus(nds: n), o, v, mask)
   of 0x100 .. 0x10C: n.timers9.write_reg(o, v, mask)
@@ -86,7 +93,9 @@ proc io9_write(n: NDS; a: uint32; v, mask: uint32) =
   of 0x1A0 .. 0x1AC: (if not n.cart.owner_arm7: n.cart.write_reg(o, v, mask))
   of 0x204:
     if (mask and 0xFFFF) != 0:
-      n.exmemcnt = (n.exmemcnt and not uint16(mask)) or (uint16(v) and uint16(mask))
+      # bits 8-10 and 12 read zero, bit 13 reads set (GBATEK)
+      let m = uint16(mask) and 0xC8FF'u16
+      n.exmemcnt = (n.exmemcnt and not m) or (uint16(v) and m) or 0x2000
       n.cart.owner_arm7 = (n.exmemcnt and 0x800) != 0
   of 0x208, 0x210, 0x214: n.irq9.write_reg(o, v, mask)
   of 0x240, 0x244, 0x248:
@@ -169,8 +178,7 @@ proc read9(n: NDS; a: uint32; width: static int): uint32 =
     when width == 32: uint32(p[i]) or (uint32(p[i+1]) shl 8) or (uint32(p[i+2]) shl 16) or (uint32(p[i+3]) shl 24)
     elif width == 16: uint32(p[i]) or (uint32(p[i+1]) shl 8)
     else: uint32(p[i])
-  of 0x08, 0x09, 0x0A:
-    0'u32   # TODO(slot2): GBA slot (EXMEMCNT bit 7 owner); no cart = open bus
+  of 0x08, 0x09, 0x0A: n.slot2_read(a, true, width)
   of 0xFF:
     if a >= 0xFFFF0000'u32: rd(n.bios9, int(a and 0xFFF)) else: 0'u32
   else:

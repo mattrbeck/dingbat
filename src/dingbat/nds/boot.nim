@@ -105,6 +105,7 @@ proc direct_boot*(n: NDS) =
   n.postflg9 = 1
   n.postflg7 = 1
   n.exmemcnt = 0x6000
+  n.exmem7_lo = 0
   n.gpu.write_powcnt1(0x0203)
   n.powcnt2 = 1
   n.biosprot = 0x1204

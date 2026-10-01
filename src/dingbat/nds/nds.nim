@@ -33,7 +33,9 @@ type
     bios9*: seq[uint8]          ## 4 KB at 0xFFFF0000
     bios7*: seq[uint8]          ## 16 KB at 0x00000000
     wramcnt*: uint8
-    exmemcnt*: uint16
+    exmemcnt*: uint16           ## ARM9 EXMEMCNT; bits 7-15 are shared
+    exmem7_lo*: uint16          ## ARM7 EXMEMSTAT bits 0-6 (its own copy)
+    vcount_write*: int          ## VCOUNT written in lines 202-212, else -1
     postflg9*, postflg7*: uint8
     powcnt2*: uint16
     biosprot*: uint32
@@ -90,6 +92,26 @@ template watch_write(n: NDS; who: string; cpu: untyped; a, v: uint32) =
       stderr.writeLine(who & " watch W " & toHex(a, 8) & " = " & toHex(v, 8) &
                        " pc=" & toHex(cpu.cur_pc, 8) & " line=" & $n.gpu.vcount)
 
+proc slot2_read(n: NDS; a: uint32; is9: bool; width: static int): uint32 =
+  ## GBA slot with no cartridge (GBATEK "GBA Slot"): the owning CPU
+  ## (EXMEMCNT.7) sees open bus -- ROM halfwords read addr/2, ORed with 0xFE08
+  ## at the 10-cycle setting and 0xFFFF at 18; SRAM reads 0xFF -- and the
+  ## other CPU reads zeros.
+  let owner9 = (n.exmemcnt and 0x80) == 0
+  if owner9 != is9: return 0
+  if a >= 0x0A00_0000'u32:
+    return when width == 32: 0xFFFF_FFFF'u32 elif width == 16: 0xFFFF'u32 else: 0xFF'u32
+  let lo = if is9: n.exmemcnt else: n.exmem7_lo
+  proc half(n: NDS; a: uint32; lo: uint16): uint32 =
+    case (lo shr 2) and 3
+    of 0: ((a shr 1) and 0xFFFF) or 0xFE08
+    of 3: 0xFFFF
+    else: (a shr 1) and 0xFFFF
+  when width == 32:
+    half(n, a, lo) or (half(n, a + 2, lo) shl 16)
+  elif width == 16: half(n, a, lo)
+  else: (half(n, a, lo) shr ((a and 1) * 8)) and 0xFF
+
 template rd16(s: seq[uint8]; i: int): uint32 =
   uint32(s[i]) or (uint32(s[i + 1]) shl 8)
 template rd32(s: seq[uint8]; i: int): uint32 =
@@ -123,8 +145,12 @@ proc on_hblank(n: NDS) =
 proc on_line_end(n: NDS) =
   let g = n.gpu
   g.in_hblank = false
-  inc g.vcount
-  if g.vcount == LINES: g.vcount = 0
+  if n.vcount_write >= 0:
+    g.vcount = n.vcount_write
+    n.vcount_write = -1
+  else:
+    inc g.vcount
+    if g.vcount == LINES: g.vcount = 0
   n.line_start = n.sched.now
   if g.vcount == VISIBLE_LINES:
     g.in_vblank = true
@@ -166,7 +192,7 @@ proc read_file_bytes(path: string): seq[uint8] =
   if s.len > 0: copyMem(addr result[0], unsafeAddr s[0], s.len)
 
 proc new_nds*(rom: seq[uint8]; bios9, bios7, firmware: seq[uint8]): NDS =
-  let n = NDS(sched: new_nds_scheduler())
+  let n = NDS(sched: new_nds_scheduler(), vcount_write: -1)
   n.main_ram = newSeq[uint8](MAIN_RAM_SIZE)
   n.shared_wram = newSeq[uint8](32 * 1024)
   n.arm7_wram = newSeq[uint8](64 * 1024)

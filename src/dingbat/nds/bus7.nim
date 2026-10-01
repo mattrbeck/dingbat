@@ -44,7 +44,7 @@ proc io7_read(n: NDS; a: uint32): uint32 =
   of 0x184: n.ipc.read_fifocnt(false)
   of 0x1A0 .. 0x1AC: (if n.cart.owner_arm7: n.cart.read_reg(o) else: 0'u32)
   of 0x1C0: n.spi.read_reg(o)
-  of 0x204: uint32(n.exmemcnt and 0xFF80'u16) or 0'u32
+  of 0x204: uint32((n.exmemcnt and 0xFF80'u16) or n.exmem7_lo)
   of 0x208, 0x210, 0x214: n.irq7.read_reg(o)
   of 0x240: uint32(n.gpu.vram.vramstat) or (uint32(n.wramcnt) shl 8)
   of 0x300: uint32(n.postflg7)
@@ -62,7 +62,13 @@ proc io7_write(n: NDS; a: uint32; v, mask: uint32) =
     return
   let o = a and 0x00FF_FFFC'u32
   case o
-  of 0x004: n.gpu.stat7.dispstat_write(uint16(v), uint16(mask))
+  of 0x004:
+    n.gpu.stat7.dispstat_write(uint16(v), uint16(mask))
+    if (mask and 0xFFFF_0000'u32) != 0: n.write_vcount(v shr 16)
+  of 0x204:
+    # EXMEMSTAT: the ARM7 sets only its own bits 0-6
+    if (mask and 0x7F) != 0:
+      n.exmem7_lo = (n.exmem7_lo and not uint16(mask and 0x7F)) or uint16(v and mask and 0x7F)
   of 0x0B0 .. 0x0DC: n.dma7.write_reg(Arm7Bus(nds: n), o, v, mask)
   of 0x100 .. 0x10C: n.timers7.write_reg(o, v, mask)
   of 0x130:
@@ -80,13 +86,17 @@ proc io7_write(n: NDS; a: uint32; v, mask: uint32) =
     if (mask and 0x00FF_0000'u32) != 0: n.spi.write_data(uint8(v shr 16))
   of 0x208, 0x210, 0x214: n.irq7.write_reg(o, v, mask)
   of 0x300:
-    if (mask and 0xFF) != 0: n.postflg7 = (n.postflg7 and 1) or uint8(v and 1)
+    # POSTFLG: only BIOS code can set it, nothing can clear it
+    if (mask and 0xFF) != 0 and n.arm7.cur_pc < 0x4000:
+      n.postflg7 = n.postflg7 or uint8(v and 1)
     if (mask and 0xFF00) != 0:
       # HALTCNT: 2 = halt, 3 = sleep (TODO: sleep wakes on key/lid only)
       let mode = (v shr 14) and 3
       if mode >= 2: n.arm7.halted = true
   of 0x304: (if (mask and 0xFFFF) != 0: n.powcnt2 = uint16(v) and 3)
-  of 0x308: n.biosprot = (n.biosprot and not mask) or (v and mask)  # write-once
+  of 0x308:
+    # write-once (the BIOS sets 0x1205; bit 0 is ignored)
+    if n.biosprot == 0: n.biosprot = v and mask and 0x3FFE
   of 0x400 .. 0x51C: n.spu.write_reg(o, v, mask)
   else: n.note_unmapped("arm7 io", a, true)
 
@@ -111,8 +121,14 @@ proc read7(n: NDS; a: uint32; width: static int): uint32 =
     else: uint32(s[i])
   case a shr 24
   of 0x00:
-    if a < 0x4000: rd(n.bios7, int(a)) else: 0'u32
-    # TODO(bios): BIOSPROT -- reads from outside the BIOS see the last fetch
+    # BIOSPROT (GBATEK "DS Memory Control - BIOS"): only code inside the
+    # BIOS reads it, and only code below BIOSPROT reads below BIOSPROT;
+    # anything else reads 0xFF bytes. Fetches pass (pc is the address).
+    if a >= 0x4000: 0'u32
+    elif n.arm7.cur_pc < (if a < n.biosprot: n.biosprot else: 0x4000'u32):
+      rd(n.bios7, int(a))
+    else:
+      when width == 32: 0xFFFF_FFFF'u32 elif width == 16: 0xFFFF'u32 else: 0xFF'u32
   of 0x02: rd(n.main_ram, int(a and 0x3FFFFF))
   of 0x03:
     var shared: bool
@@ -131,7 +147,7 @@ proc read7(n: NDS; a: uint32; width: static int): uint32 =
     when width == 32: n.gpu.vram.read32(vrArm7, off)
     elif width == 16: uint32(n.gpu.vram.read16(vrArm7, off))
     else: uint32(n.gpu.vram.read8(vrArm7, off))
-  of 0x08, 0x09, 0x0A: 0'u32   # TODO(slot2)
+  of 0x08, 0x09, 0x0A: n.slot2_read(a, false, width)
   else:
     n.note_unmapped("arm7", a, false)
     0'u32
