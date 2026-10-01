@@ -10,7 +10,8 @@
 # Recorded without nba: in the authoring session nba drew a Zoomer at a
 # different place from f2715 (dingbat-bios and mgba agree), its kill drop gave
 # 99 energy instead of 84 around f3300, and by f4968 an extra Zoomer had
-# knocked Samus back, so nba could not follow the route.
+# knocked Samus back, so the session went on without it. (The replay with
+# nba still reaches the save: morph_ball differs MAJOR on nba, energy 99.)
 
 [new]
 wait 600

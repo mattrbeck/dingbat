@@ -2,66 +2,85 @@
 @file Fire Emblem (U) [!].gba
 @game AE7E
 @chip SRAM_F (FRAM)
+@frozen dingbat-bios,mgba,nba
 
 # New game in the first slot with the default tactician (Mark, January,
 # Male). Confirming the personal information writes the slot; the Prologue
 # title card follows.
-
 [new]
 wait 600
 press START
-until text "START" timeout=600 every=10
+# until text START timeout=600 every=10  [reached dingbat-bios+110 mgba+110 nba+110]
+wait 114
 wait 120
-checkpoint title
+checkpoint title window=30
 press START
-until text "New Game" timeout=600 every=10
+# until text 'New Game' timeout=600 every=10  [reached dingbat-bios+50 mgba+40 nba+30]
+wait 54
 wait 60
 press A
-until text "NO DATA" timeout=300 every=5
+# until text 'NO DATA' timeout=300 every=5  [reached dingbat-bios+5 mgba+5 nba+5]
+wait 9
 wait 60
-checkpoint slots_empty
+checkpoint slots_empty window=30
 press A
-until text "Personal" timeout=600 every=10
+# until text Personal timeout=600 every=10  [reached dingbat-bios+90 mgba+90 nba+90]
+wait 94
 wait 60
-checkpoint personal_info
-mash A until notext "Personal" timeout=600 every=30
-until text "Name Entry" timeout=600 every=10
+checkpoint personal_info window=30
+# mash A until notext Personal timeout=600 every=30  [taps dingbat-bios:11 mgba:11 nba:11]
+tap A times=11 every=30 hold=4
+# until text 'Name Entry' timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+20]
+wait 24
 wait 60
-checkpoint name_entry
+checkpoint name_entry window=30
 press START after=30
 press A
-until text "finish" timeout=600 every=10
+# until text finish timeout=600 every=10  [reached dingbat-bios+80 mgba+80 nba+80]
+wait 84
 wait 30
 press START
-until text "Are these" timeout=600 every=10
-until text "want" timeout=300 every=5
+# until text 'Are these' timeout=600 every=10  [reached dingbat-bios+50 mgba+50 nba+50]
+wait 54
+# until text want timeout=300 every=5  [reached dingbat-bios+100 mgba+100 nba+105]
+wait 109
 wait 60
-checkpoint confirm
-mash A until notext "Personal" timeout=900 every=40
-until text "Plains" timeout=1500 every=5
+checkpoint confirm window=30
+# mash A until notext Personal timeout=900 every=40  [taps dingbat-bios:2 mgba:2 nba:2]
+tap A times=2 every=40 hold=4
+# until text Plains timeout=1500 every=5  [reached dingbat-bios+305 mgba+305 nba+305]
+wait 309
 wait 30
 checkpoint prologue window=30
-until text "awake" timeout=1500 every=5
+# until text awake timeout=1500 every=5  [reached dingbat-bios+365 mgba+365 nba+365]
+wait 369
 wait 90
 checkpoint lyn window=30
 
 [load]
 wait 600
 press START
-until text "START" timeout=600 every=10
+# until text START timeout=600 every=10  [reached dingbat-bios+110 mgba+110 nba+110]
+wait 114
 wait 120
 press START
-until text "Restart Chapter" timeout=600 every=10
+# until text 'Restart Chapter' timeout=600 every=10  [reached dingbat-bios+40 mgba+40 nba+40]
+wait 44
 wait 60
-checkpoint main_menu
+checkpoint main_menu window=30
 press A
-until text "Plains" timeout=300 every=5
+# until text Plains timeout=300 every=5  [reached dingbat-bios+10 mgba+5 nba+10]
+wait 14
 wait 60
-checkpoint slots
+checkpoint slots window=30
 press A
-until notext "NO DATA" timeout=300 every=5
-until notext "Plains" timeout=600 every=5
-until text "Plains" timeout=1500 every=5
-until text "awake" timeout=1500 every=5
+# until notext 'NO DATA' timeout=300 every=5  [reached dingbat-bios+30 mgba+30 nba+30]
+wait 34
+# until notext Plains timeout=600 every=5  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
+# until text Plains timeout=1500 every=5  [reached dingbat-bios+310 mgba+310 nba+310]
+wait 314
+# until text awake timeout=1500 every=5  [reached dingbat-bios+450 mgba+450 nba+450]
+wait 454
 wait 90
 checkpoint lyn window=30

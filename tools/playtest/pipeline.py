@@ -542,7 +542,12 @@ def verdicts(report, names):
             v['notes'].append('the script does not reach a save (@save skip)')
         elif report.get('no_save'):
             if sv.get('exists') and not sv.get('blank'):
-                v['problems'].append(f"game has no battery save, but dingbat wrote {sv['size']} bytes of data")
+                # the game itself writes the save window (scratch use): only a
+                # problem if no reference keeps that data too
+                same = [r for r in refs if report['saves'].get(r, {}).get('sha1') == sv.get('sha1')]
+                (v['notes'] if same else v['problems']).append(
+                    f"game has no battery save, but dingbat wrote {sv['size']} bytes of data"
+                    + (f" (as {'/'.join(same)} did)" if same else ''))
             for r in refs:
                 rs = report['saves'].get(r, {})
                 if rs.get('exists'):

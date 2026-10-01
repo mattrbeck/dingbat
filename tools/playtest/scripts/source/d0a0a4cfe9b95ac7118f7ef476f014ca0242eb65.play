@@ -2,16 +2,16 @@
 @file Advance Wars (U) (V1.0) [!].gba
 @game AWRE
 @chip FLASH
-@frozen dingbat-bios,mgba,nba
 
 # Recorded by hand in the desktop app (2026-09-16): name the player, play into
 # Nell's Troop Orders map, save from the map menu; [load] continues onto that map.
+
 # converted from input.log: 222 keypad changes, 293 sync hashes checked in dingbat
 [new]
 wait 664
 press A hold=3
 wait 488
-checkpoint 01_mark window=30
+checkpoint 01_mark
 wait 86
 press A hold=4
 wait 188
@@ -65,7 +65,7 @@ press A hold=10
 wait 135
 press A hold=8
 wait 213
-checkpoint 02_mark window=30
+checkpoint 02_mark
 wait 79
 press A hold=5
 wait 124
@@ -101,7 +101,7 @@ press A hold=15
 wait 71
 press A hold=16
 wait 806
-checkpoint 03_mark window=30
+checkpoint 03_mark
 wait 186
 press LEFT hold=5
 wait 40
@@ -115,21 +115,21 @@ press A hold=8
 wait 134
 press A hold=7
 wait 164
-press A
+press A hold=6
 wait 148
 press A hold=14
 wait 170
 press A hold=11
 wait 220
-press A
+press A hold=6
 wait 119
 press A hold=15
 wait 110
-press A
+press A hold=6
 wait 187
 press A hold=10
 wait 173
-press A
+press A hold=6
 wait 97
 press LEFT hold=7
 wait 29
@@ -141,7 +141,7 @@ press LEFT hold=9
 wait 26
 press DOWN hold=7
 wait 219
-checkpoint 04_mark window=30
+checkpoint 04_mark
 wait 102
 press A hold=11
 wait 3
@@ -149,7 +149,7 @@ press A hold=3
 wait 255
 press RIGHT hold=11
 wait 83
-press A
+press A hold=6
 wait 87
 press A hold=10
 wait 4
@@ -169,7 +169,7 @@ press RIGHT hold=11
 wait 20
 press RIGHT hold=8
 wait 242
-checkpoint 05_mark window=30
+checkpoint 05_mark
 wait 104
 press A hold=8
 wait 126
@@ -183,7 +183,7 @@ press A hold=16
 wait 260
 press A hold=9
 wait 337
-checkpoint 06_mark window=30
+checkpoint 06_mark
 wait 45
 press A hold=9
 wait 106
@@ -199,7 +199,7 @@ press A hold=19
 wait 79
 press UP hold=8
 wait 25
-press UP
+press UP hold=6
 wait 22
 press LEFT hold=9
 wait 25
@@ -239,24 +239,25 @@ press DOWN hold=11
 wait 69
 press UP hold=5
 wait 219
-checkpoint 07_mark window=30
+checkpoint 07_mark
 wait 101
 press A hold=9
 wait 229
 press A hold=11
 wait 556
-checkpoint 08_mark window=30
+checkpoint 08_mark
 wait 1544
-checkpoint 09_end window=30
+checkpoint 09_end
 
+# converted from input.log: 6 keypad changes, 20 sync hashes checked in dingbat
 [load]
 wait 218
-press A
+press A hold=6
 wait 238
 press A hold=8
 wait 74
-press A
+press A hold=6
 wait 449
-checkpoint 01_mark window=30
+checkpoint 01_mark
 wait 227
-checkpoint 02_end window=30
+checkpoint 02_end

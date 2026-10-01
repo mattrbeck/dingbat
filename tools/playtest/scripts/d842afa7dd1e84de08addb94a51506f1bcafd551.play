@@ -2,6 +2,7 @@
 @file Sonic Advance (U) [!].gba
 @game ASOE
 @chip FLASH
+@frozen dingbat-bios,mgba,nba
 
 # A blank cart asks for the language first; picking ENGLISH writes the save
 # (the "PIRO" header block). With a save the game skips the language screen
@@ -11,25 +12,35 @@
 # Recorded on mGBA alone: dingbat (HLE and real BIOS) and the second reference
 # both sit on a screen of empty grey bars from boot and never reach the
 # language screen, with or without a battery file.
-
 [new]
-until text "LANGUAGE" timeout=1200 every=10
-until stable 20 timeout=300
-checkpoint language
+# nba could not follow from here: 'until text "LANGUAGE" timeout=1200 every=10': timed out after 1200 frames waiting for text 'LANGUAGE'
+# until text LANGUAGE timeout=1200 every=10  [reached dingbat-bios+10 mgba+10]
+wait 14
+# until stable 20 timeout=300 every=4  [reached dingbat-bios+60 mgba+60]
+wait 64
+checkpoint language window=30
 press A
-until text "PRESENTED" timeout=900 every=10
-checkpoint presented
-mash START until text "OPTION" timeout=1500 every=40
-until stable 20 timeout=300
-checkpoint main_menu compare=text
+# until text PRESENTED timeout=900 every=10  [reached dingbat-bios+160 mgba+160]
+wait 164
+checkpoint presented window=30
+# mash START until text OPTION timeout=1500 every=40  [taps dingbat-bios:18 mgba:18]
+tap START times=18 every=40 hold=4
+# until stable 20 timeout=300 every=4  [reached dingbat-bios+20 mgba+20]
+wait 24
+checkpoint main_menu window=30 compare=text
 
 [load]
-until text "PRESENTED" timeout=900 every=10
-checkpoint presented
-mash START until text "OPTION" timeout=1500 every=40
-until stable 20 timeout=300
-checkpoint main_menu compare=text
+# nba could not follow from here: 'until text "PRESENTED" timeout=900 every=10': timed out after 900 frames waiting for text 'PRESENTED'
+# until text PRESENTED timeout=900 every=10  [reached dingbat-bios+130 mgba+130]
+wait 134
+checkpoint presented window=30
+# mash START until text OPTION timeout=1500 every=40  [taps dingbat-bios:18 mgba:18]
+tap START times=18 every=40 hold=4
+# until stable 20 timeout=300 every=4  [reached dingbat-bios+20 mgba+20]
+wait 24
+checkpoint main_menu window=30 compare=text
 press A
-until text "HEDGEHOG" timeout=300 every=5
+# until text HEDGEHOG timeout=300 every=5  [reached dingbat-bios+70 mgba+70]
+wait 74
 wait 30
-checkpoint character_select compare=text
+checkpoint character_select window=30 compare=text
