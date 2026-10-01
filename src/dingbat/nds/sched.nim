@@ -4,8 +4,10 @@
 ##
 ## Separate from common/scheduler.nim on purpose: that one's EventType enum
 ## ordinals are GB/GBA save-state format, and its CycleCount is 32-bit on
-## wasm. The DS has no save-state format yet, so its events stay local until
-## it does (docs/nds/spec.md, "Reuse").
+## wasm (docs/nds/spec.md, "Reuse"). The DS state (savestate.nim) stores
+## the pending events in queue order with their absolute times; NdsEvent's
+## members are part of its layout hash, so adding one refuses older states
+## rather than misreading them.
 
 type
   NdsEvent* = enum

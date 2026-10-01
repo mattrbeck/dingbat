@@ -36,7 +36,8 @@ on a dev page (`web/nds.html`). Hardware reference: `docs/nds/gbatek-notes.md`
   through the VRAM bank page tables (`mem/vram.nim`). Port the algorithms
   into `gpu/engine2d.nim`.
 - **Shared as is:** `bitfield.nim`, `common/util.nim`, `common/resampler.nim`
-  (sound output, later), `common/serialize.nim` (save states, later), the
+  (sound output, later), `common/serialize.nim` (the state container,
+  docs/nds/savestate.md), the
   frontends' plumbing.
 - **BIOS:** real dumps are used when present (`--bios DIR` /
   `$DINGBAT_NDS_BIOS`: `bios9.bin`, `bios7.bin`, `firmware.bin`); firmware is
@@ -96,12 +97,15 @@ src/dingbat/nds/
   io/spu.nim       ARM7 sound: 16 channels, capture, stereo out at 32728.5 Hz
   io/rtc.nim       ARM7 RTC (host clock, or emulated time from a date)
   io/wifi.nim      wifi MAC/BB/RF without a radio (nothing is received)
+  savestate.nim    save states: the machine walked field by field
+                   (docs/nds/savestate.md)
 src/dingbat_nds_wasm.nim(+.nims)  wasm exports for web/nds.html
 tools/ndsrun.nim                   headless runner: ROM -> PNG of both screens
 web/nds.html, web/nds/             dev page (two canvases, keys, touch)
 tests/nds/                         ROM sources, build tools, README
 tests/nds_3d_test.nim              3D engine driven through write_reg -> checks + PNGs
 tests/nds_hle_bios_test.nim        every HLE SWI against the real BIOS
+tests/nds_savestate_test.nim       save states: round trips at awkward moments, refusals
 ```
 
 I/O registers are reached as aligned 32-bit words with a byte mask
