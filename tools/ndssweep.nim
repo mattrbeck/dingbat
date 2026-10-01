@@ -19,12 +19,15 @@
 ##   one 256-byte window and the screens did not change;
 ## - blank: a screen that is one colour at every shot;
 ## - frames_changed: how many frames differed from the one before;
-## - audio peak / RMS of the whole run; ms per frame (wall clock).
+## - audio peak / RMS of the whole run; ms per frame (process CPU time, so
+##   a loaded machine does not skew it).
 ## The reference run gives its shots and audio; the table compares the two:
 ##   ok              every shot identical
+##   ok-phase        every shot identical to a reference frame at most
+##                   PHASE frames away (the "offset" column: ref frame - ours)
 ##   differs         runs in both, shots differ (largest diff % shown)
-##   broken          ours crashed / hung / stayed blank / silent where the
-##                   reference is not
+##   broken          ours stayed blank where the reference did not, or
+##                   crashed / hung with shots >= BROKEN_DIFF % off
 ##   broken-ref-too  the reference is blank too (or fails to load)
 ##
 ## --press defaults to a generic "get past the title" script: START, A, a
@@ -44,6 +47,8 @@ const
                   "DOWN@450,A@480,B@540"
   DEFAULT_SHOTS = "30,115,240,360,600"
   HANG_WINDOW = 120
+  PHASE = 2                    ## reference frames either side of each shot
+  BROKEN_DIFF = 25.0           ## % of a screen: a crash/hang this far off is ours
 
 # ---------------------------------------------------------------------------
 # PNG in/out (8-bit RGB / RGBA, non-interlaced: what ndsref and we write)
@@ -220,7 +225,7 @@ proc one_colour(px: openArray[uint32]; lo, hi: int): bool =
 proc run_one(rom, outdir, bios, press: string; frames: int; shots: seq[int]) =
   createDir(outdir)
   let presses = parse_presses(press)
-  let t0 = getMonoTime()
+  let t0 = cpuTime()
   let n = load_nds(rom, bios)
   var audio: seq[float32]
   var prev_hash = (0'u64, 0'u64)
@@ -262,7 +267,7 @@ proc run_one(rom, outdir, bios, press: string; frames: int; shots: seq[int]) =
       blank_top = blank_top and bt
       blank_bottom = blank_bottom and bb
       shot_info.add %*{"frame": f + 1, "blank_top": bt, "blank_bottom": bb}
-  let secs = (getMonoTime() - t0).inNanoseconds.float / 1e9
+  let secs = cpuTime() - t0
   var peak = 0.0
   var sumsq = 0.0
   for s in audio:
@@ -336,13 +341,20 @@ proc diff_pct(a, b: seq[uint32]): (float, float) =
     if a[256 * 192 + i] != b[256 * 192 + i]: inc m
   (t * 100 / (256 * 192), m * 100 / (256 * 192))
 
-proc fmt1(x: float): string = formatFloat(x, ffDecimal, 1)
+proc fmt1(x: float): string = formatFloat(x, ffDecimal, 2)
 
 proc sweep(roms: seq[string]; outdir, bios, press, core, ndsref: string;
            frames: int; shots: seq[int]; width: int; timeout: float; report_only = false) =
   createDir(outdir)
   let self = getAppFilename()
   let shots_s = shots.mapIt($it).join(",")
+  # the reference also shoots +-PHASE frames around each shot, so a run that
+  # is only a frame or two out of phase is told apart from a real difference
+  var ref_shots: seq[int]
+  for f in shots:
+    for k in -PHASE .. PHASE:
+      if f + k >= 1 and f + k <= frames and f + k notin ref_shots: ref_shots.add f + k
+  let ref_shots_s = ref_shots.mapIt($it).join(",")
   var jobs: seq[Job]
   for rom in roms:
     let d = outdir / rom.splitFile.name
@@ -363,7 +375,7 @@ proc sweep(roms: seq[string]; outdir, bios, press, core, ndsref: string;
           r = d / "reloc.nds"
           discard execCmd(quoteShell(currentSourcePath().parentDir / "ndsref" / "ndsreloc") & " " &
                           quoteShell(rom) & " " & quoteShell(r))
-      var rargs = @["--core", core, r, "--frames", $frames, "--shots", shots_s,
+      var rargs = @["--core", core, r, "--frames", $frames, "--shots", ref_shots_s,
                     "--press", press, "--depth5", "--no-final", "--out", d / "ref",
                     "--wav", d / "ref.wav"]
       if bios.len > 0: rargs.add ["--bios", bios]
@@ -371,8 +383,8 @@ proc sweep(roms: seq[string]; outdir, bios, press, core, ndsref: string;
   if not report_only: run_pool(jobs, width, timeout)
 
   # --- the table
-  var tsv = "rom\tstatus\tdiff_max\tdiffs\tours\tref\taudio_ours\taudio_ref\tunmapped\texc\tms_frame\tnotes\n"
-  var md = "| ROM | status | max diff % (top/bottom) | ours | reference | audio RMS ours / ref | unmapped | ms/frame |\n" &
+  var tsv = "rom\tstatus\tdiff_max\taligned_max\tdiffs\tours\tref\taudio_ours\taudio_ref\tunmapped\texc\tms_frame\tnotes\n"
+  var md = "| ROM | status | diff % | aligned diff % (offset) | ours | reference | audio RMS ours / ref | ms/frame |\n" &
            "|---|---|---|---|---|---|---|---|\n"
   for rom in roms:
     let name = rom.splitFile.name
@@ -387,6 +399,8 @@ proc sweep(roms: seq[string]; outdir, bios, press, core, ndsref: string;
     var status = ""
     var diffs: seq[string]
     var dmax = 0.0
+    var amax = 0.0             # worst shot after the best phase offset
+    var offsets: seq[int]
     var ref_blank_all = true
     var ref_loaded = false
     var ours_blank_all = true
@@ -414,6 +428,20 @@ proc sweep(roms: seq[string]; outdir, bios, press, core, ndsref: string;
       if t >= 0:
         diffs.add fmt1(t) & "/" & fmt1(m)
         dmax = max(dmax, max(t, m))
+        var best = t + m
+        var bestk = 0
+        for k in -PHASE .. PHASE:
+          if k == 0: continue
+          var w3, h3: int
+          let c = read_png(d / "ref_" & $(f + k) & ".png", w3, h3)
+          let (t2, m2) = diff_pct(a, c)
+          if t2 >= 0 and t2 + m2 < best: best = t2 + m2; bestk = k
+        if bestk != 0:
+          var w3, h3: int
+          let (t2, m2) = diff_pct(a, read_png(d / "ref_" & $(f + bestk) & ".png", w3, h3))
+          amax = max(amax, max(t2, m2))
+        else: amax = max(amax, max(t, m))
+        offsets.add bestk
       else: diffs.add "-"
     let (rpeak, rrms, _) = wav_stats(d / "ref.wav")
     var arms = -1.0
@@ -445,9 +473,13 @@ proc sweep(roms: seq[string]; outdir, bios, press, core, ndsref: string;
     # a program that exits powers the DS off (PM register 0 bit 6, GBATEK
     # "DS Power Management"); our screens keep the last picture, so a
     # power-off is not counted as a hang
+    # an exception or a hang is "broken" only when the picture is far from
+    # the reference's too: a program that crashes the same way on both
+    # (a libnds exception screen on each) is a difference, not our bug
     let off = j != nil and j["power_off"].getBool
-    let ours_broken = j == nil or exc > 0 or ours_blank_all or
-                      (j != nil and j["hang"].getBool and not off)
+    let stuck = exc > 0 or (j != nil and j["hang"].getBool and not off)
+    let ours_broken = j == nil or (ours_blank_all and not ref_blank_all) or
+                      (stuck and (core.len == 0 or amax >= BROKEN_DIFF))
     let silent_only = j != nil and j["audio_peak"].getFloat == 0 and rpeak > 0.01
     if core.len == 0:
       status = if ours_broken: "broken" else: "ran"
@@ -455,18 +487,20 @@ proc sweep(roms: seq[string]; outdir, bios, press, core, ndsref: string;
       status = if ours_broken: "broken-ref-too" else: "ref-broken"
     elif ours_broken: status = "broken"
     elif dmax == 0 and not silent_only: status = "ok"
+    elif amax == 0 and not silent_only: status = "ok-phase"
     else:
       status = "differs"
       if silent_only: notes.add "silent in ours"
     let ours_s = if ours_flags.len > 0: ours_flags.join(" ") else: "-"
     let ref_s = if ref_flags.len > 0: ref_flags.join(" ") else: "-"
-    tsv.add [name, status, fmt1(dmax), diffs.join(" "), ours_s, ref_s,
+    let offs = offsets.deduplicate.filterIt(it != 0)
+    let aligned = fmt1(amax) & (if offs.len > 0: " (" & offs.mapIt((if it > 0: "+" else: "") & $it).join(",") & ")" else: "")
+    tsv.add [name, status, fmt1(dmax), aligned, diffs.join(" "), ours_s, ref_s,
              formatFloat(arms, ffDecimal, 4), formatFloat(rrms, ffDecimal, 4),
              $unm, $exc, formatFloat(msf, ffDecimal, 2), notes.join("; ")].join("\t") & "\n"
-    md.add "| " & name & " | " & status & " | " & fmt1(dmax) & " (" & diffs.join(", ") &
-           ") | " & ours_s & " | " & ref_s & " | " & formatFloat(arms, ffDecimal, 4) &
-           " / " & formatFloat(rrms, ffDecimal, 4) & " | " & $unm & " | " &
-           formatFloat(msf, ffDecimal, 2) & " |\n"
+    md.add "| " & name & " | " & status & " | " & fmt1(dmax) & " | " & aligned & " | " &
+           ours_s & " | " & ref_s & " | " & formatFloat(arms, ffDecimal, 3) &
+           " / " & formatFloat(rrms, ffDecimal, 3) & " | " & formatFloat(msf, ffDecimal, 2) & " |\n"
   writeFile(outdir / "results.tsv", tsv)
   writeFile(outdir / "table.md", md)
   stdout.write md
