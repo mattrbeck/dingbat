@@ -1,9 +1,11 @@
 ## ARM7 SPI hub: SPICNT 0x40001C0, SPIDATA 0x40001C2. Three devices behind
 ## one chip select: power manager (0), firmware flash (1), touchscreen
-## controller (2). Transfers complete instantly in the skeleton (busy never
-## reads set); an IRQ (IF.23) is raised on completion if enabled.
+## controller (2). A byte's reply is stored at once; the busy flag (bit 7)
+## reads set for the 8 bits' time at the baud rate (bits 0-1), and an IRQ
+## (IF.23) is raised if enabled.
 
 import irq, input
+import ../sched
 
 type
   FlashState = enum fsIdle, fsAddr, fsRead, fsWrite, fsStatus, fsId, fsOther
@@ -29,6 +31,8 @@ type
     irq* {.cursor.}: IrqCtl
     input* {.cursor.}: Input
     selected: int            ## device held by chip select, -1 = none
+    sched* {.cursor.}: NdsScheduler  ## for the busy time (nil: never busy)
+    busy_until: int64
 
 proc new_spi*(firmware: seq[uint8]; irq: IrqCtl; input: Input): Spi =
   result = Spi(firmware: firmware, irq: irq, input: input, selected: -1, pm_index: -1)
@@ -176,7 +180,11 @@ proc write_data*(s: Spi; v: uint8) =
     # no hold: deselect; a finished page write/program drops write enable
     if dev == 1 and s.fstate == fsWrite: s.write_enable = false
     s.selected = -1
+  if s.sched != nil:
+    const hz = [4_000_000'i64, 2_000_000, 1_000_000, 512 * 1024]
+    s.busy_until = s.sched.now + (8 * MASTER_HZ + hz[s.cnt and 3] - 1) div hz[s.cnt and 3]
   if (s.cnt and 0x4000) != 0: s.irq.raise_irq(irqSpi)
 
 proc read_reg*(s: Spi; offset: uint32): uint32 =
-  uint32(s.cnt) or (uint32(s.data_out) shl 16)
+  let busy = if s.sched != nil and s.sched.now < s.busy_until: 0x80'u32 else: 0
+  uint32(s.cnt) or busy or (uint32(s.data_out) shl 16)
