@@ -50,6 +50,9 @@ task test_savestate_compat, "Run the save-state format compatibility guards":
 task test_gbartc, "Run the GBA cartridge RTC + battery-save RTC trailer tests":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_gbartc_test tests/gba_rtc_test.nim"
 
+task test_ndshlebios, "Run the DS HLE BIOS SWIs against the real BIOS (or computed expectations)":
+  exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_ndshlebios_test tests/nds_hle_bios_test.nim"
+
 task test_desktop, "Run the desktop frontend tests (input, settings, link, saves, game loading, modals)":
   # modal drives Dear ImGui headless, so it needs imguin (CI's test job
   # installs it: .github/scripts/install-test-deps.sh).
