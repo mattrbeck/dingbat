@@ -9,6 +9,8 @@ when defined(test_harness):
 import ../common/lut_macros
 import rtc_calendar
 export rtc_calendar
+import storage_chip
+export storage_chip
 
 when defined(pftrace):
   # -d:pftrace: dump ROM-bus activity inside each mGBA-suite Timing window
@@ -73,10 +75,6 @@ type
     size*:   int
 
 
-  StorageType* = enum
-    stEEPROM, stSRAM, stFLASH, stFLASH512, stFLASH1M,
-    stNone   # no backup chip on the cart (storage.nim find_storage_type)
-
   StorageObj* = object of RootObj
     memory*:    seq[byte]
     save_path*: string
@@ -100,9 +98,6 @@ type
   SRAM* = ref object of StorageObj
 
   NoBackup* = ref object of StorageObj   # empty memory, no .sav
-
-  FlashStateFlag* = enum
-    fsReady, fsCmd1, fsCmd2, fsIdentification, fsPrepareWrite, fsPrepareErase, fsSetBank
 
   Flash* = ref object of StorageObj
     flash_type*: StorageType
