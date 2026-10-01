@@ -243,8 +243,16 @@ proc set_light_vector(g: Geometry; p: uint32) =
   # 1.9 components scaled to 12-bit fractions before the matrix
   let l = g.vec_mul3(sext10(p) shl 3, sext10(p shr 10) shl 3, sext10(p shr 20) shl 3)
   g.light_vec[i] = l
-  # half vector: (light + line of sight (0, 0, -1.0)) / 2
-  g.half_vec[i] = [l[0] shr 1, l[1] shr 1, (l[2] - ONE) shr 1]
+  # half vector: light + line of sight (0, 0, -1.0) (GBATEK), here scaled
+  # to unit length: the specular falloff of the reference cores
+  # (3d_probe_light_spec/_tab) is cos(2 * angle to the unit half vector),
+  # far sharper than GBATEK's square of the unnormalised dot product
+  let hx = float(l[0])
+  let hy = float(l[1])
+  let hz = float(l[2] - ONE)
+  let m = sqrt(hx * hx + hy * hy + hz * hz)
+  g.half_vec[i] = if m == 0: [0'i32, 0, 0]
+                  else: [int32(hx / m * 4096), int32(hy / m * 4096), int32(hz / m * 4096)]
 
 proc apply_normal(g: Geometry; p: uint32) =
   let nx = sext10(p)
@@ -266,9 +274,11 @@ proc apply_normal(g: Geometry; p: uint32) =
                     0'i64, int64(ONE))
     var shi = clamp(-((int64(h[0]) * n[0] + int64(h[1]) * n[1] + int64(h[2]) * n[2]) shr 12),
                     0'i64, int64(ONE))
-    shi = (shi * shi) shr 12
-    if g.shine_table_on:
-      shi = int64(g.shine[min(127, int(shi shr 5))]) shl 4   # 0.8 -> 0.12
+    shi = max(0'i64, ((2 * shi * shi) shr 12) - ONE)
+    # the level indexes the shininess table (7 bits); without the table the
+    # entries count up linearly (GBATEK, SHININESS)
+    let idx = min(127, int(shi shr 5))
+    shi = (if g.shine_table_on: int64(g.shine[idx]) else: int64(idx) * 2) shl 4   # 0.8 -> 0.12
     for c in 0..2:
       let lc = int64(g.light_col[i][c])
       col[c] += (int64(g.specular[c]) * lc * shi) shr 17
