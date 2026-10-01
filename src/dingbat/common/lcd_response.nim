@@ -44,6 +44,8 @@ type
     lut:     seq[uint16]   ## 256*32 fused (next_state8 shl 8) or displayed8
     state:   seq[uint32]   ## per-pixel packed 8-bit cell state (r, g, b)
     outbuf:  seq[uint16]   ## BGR555 handed to the uploader
+    prev:    seq[uint16]   ## the last frame's input, per CHUNK that was run
+    calm:    seq[bool]     ## per CHUNK: every cell ended settled on `prev`
 
 const
   # Both cores run at ~59.73 Hz (70224 dots / 4194304 Hz)
@@ -73,6 +75,7 @@ const
   ]
 
   STATE_MAX = 248'i32   ## 31 * 8: the settled state of a full-scale code
+  CHUNK = 32            ## pixels apply() skips together when nothing moves
 
 proc build_lut(p: LcdPanel; gamma: float): seq[uint16] =
   ## Precompute the (state, target) -> (next state, displayed) table. `gamma`
@@ -152,29 +155,56 @@ proc apply*(r: var LcdResponse; fb: ptr UncheckedArray[uint16];
   ## to display; with the model off this is the core's own framebuffer.
   if r.panel == lpOff or r.lut.len == 0: return fb
   if r.outbuf.len != pixels: r.outbuf.setLen(pixels)
+  let chunks = pixels div CHUNK
   if r.state.len != pixels:
     # First frame after a reset: the cells start settled, nothing ghosts in.
     r.state.setLen(pixels)
     for i in 0 ..< pixels: r.state[i] = settled(fb[i])
+    r.prev.setLen(pixels)
+    r.calm.setLen(chunks)
+    for k in 0 ..< chunks: r.calm[k] = false
   let lut = cast[ptr UncheckedArray[uint16]](addr r.lut[0])
   let st = cast[ptr UncheckedArray[uint32]](addr r.state[0])
   let outb = cast[ptr UncheckedArray[uint16]](addr r.outbuf[0])
-  for i in 0 ..< pixels:
+  template cell(i: int; calm: var bool) =
     let c = fb[i]
     let s = st[i]
     # Settled and asked to stay: skip the lookups (most of the screen most
     # frames; settled and moving pixels come in runs, so the branch predicts).
     if s == settled(c):
       outb[i] = c and 0x7FFF
-      continue
-    let er = lut[(int(s and 0xFF) shl 5) or int(c and 31)]
-    let eg = lut[(int((s shr 8) and 0xFF) shl 5) or int((c shr 5) and 31)]
-    let eb = lut[(int((s shr 16) and 0xFF) shl 5) or int((c shr 10) and 31)]
-    st[i] = uint32(er shr 8) or (uint32(eg shr 8) shl 8) or
-            (uint32(eb shr 8) shl 16)
-    outb[i] = ((er and 0xFF) shr 3) or
-              (((eg and 0xFF) shr 3) shl 5) or
-              (((eb and 0xFF) shr 3) shl 10)
+    else:
+      let er = lut[(int(s and 0xFF) shl 5) or int(c and 31)]
+      let eg = lut[(int((s shr 8) and 0xFF) shl 5) or int((c shr 5) and 31)]
+      let eb = lut[(int((s shr 16) and 0xFF) shl 5) or int((c shr 10) and 31)]
+      let ns = uint32(er shr 8) or (uint32(eg shr 8) shl 8) or
+               (uint32(eb shr 8) shl 16)
+      st[i] = ns
+      outb[i] = ((er and 0xFF) shr 3) or
+                (((eg and 0xFF) shr 3) shl 5) or
+                (((eb and 0xFF) shr 3) shl 10)
+      calm = calm and ns == settled(c)
+  # A chunk whose cells all ended settled last frame, fed the same pixels
+  # again, would only rewrite the output it already holds: one compare of
+  # its input instead (-81 % on a FireRed overworld standing still).
+  let prev = cast[ptr UncheckedArray[uint16]](addr r.prev[0])
+  for k in 0 ..< chunks:
+    let base = k * CHUNK
+    if r.calm[k]:
+      let a = cast[ptr UncheckedArray[uint64]](addr fb[base])
+      let b = cast[ptr UncheckedArray[uint64]](addr prev[base])
+      var same = true
+      for w in 0 ..< CHUNK div 4:
+        if a[w] != b[w]:
+          same = false
+          break
+      if same: continue
+    var calm = true
+    for i in base ..< base + CHUNK: cell(i, calm)
+    copyMem(addr prev[base], addr fb[base], CHUNK * 2)
+    r.calm[k] = calm
+  var spare = true
+  for i in chunks * CHUNK ..< pixels: cell(i, spare)
   return outb
 
 proc resolve*(on: bool; gba: bool; cgb: bool; sgb = false): LcdPanel =
