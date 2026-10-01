@@ -84,6 +84,12 @@ jobs:
         # rewind ring's crash). A program assembled in the test; no ROMs.
         shell: bash
         run: ./dingbat_gbapurebase_test
+      - name: PSG AGB-only behaviour (the SP's answers, both cores)
+        # Wave RAM banks, the NR22 period-0 rewrite cells and the noise
+        # shift-14 freeze as the GBA SP answered them, and the GB core
+        # keeping the CGB's NR22 cells. Programs assembled in the test.
+        shell: bash
+        run: ./dingbat_psgagb_test
       - name: Save states while running (range-checked soak, both cores)
         # Every committed ROM and a seeded random register-writing program
         # per core, a payload built into a real rewind ring every frame, with

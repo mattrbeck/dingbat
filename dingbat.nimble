@@ -70,6 +70,10 @@ task test_gbapurebase, "Run the GB APU deadline checks across the per-frame sche
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_gbapurebase_test tests/gbapu_rebase_test.nim"
 
+task test_psgagb, "Run the PSG's AGB-only checks (the SP's answers) on both cores":
+  exec "nim c -r -d:test_harness -d:release --path:src " &
+       "-o:dingbat_psgagb_test tests/psg_agb_test.nim"
+
 task test_statesoak, "Run the range-checked serialize-while-running soak (both cores)":
   exec "nim c -r -d:test_harness -d:release --path:src " &
        "-o:dingbat_state_soak_test tests/state_soak_test.nim"
