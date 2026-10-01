@@ -1,23 +1,30 @@
 // End-to-end guard for the symmetric manual code exchange: both sides offer,
 // each rewrites the peer's code into an answer (SDPCodec.answerFrom) with the
 // DTLS role netplay.js picks on Confirm. Drives real RTCPeerConnections in
-// headless Chromium (no STUN: host candidates only, so no network needed) and
+// headless Chromium or WebKit (no STUN: host candidates only, so no network needed) and
 // asserts the host's DataChannel opens on both sides and a message round-trips.
 //
-// Run:  node web/manualpair.test.mjs   (after: npx playwright install chromium)
+// Run:  node web/manualpair.test.mjs [webkit]   (after: npx playwright install chromium webkit)
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-let chromium;
+// Which engine: `node <this> webkit` for Safari's (the iPhone's); Chromium
+// by default. CI runs both.
+const engine = process.argv[2] || "chromium";
+let browserType;
 try {
-  ({ chromium } = await import("playwright"));
+  browserType = (await import("playwright"))[engine];
 } catch {
   console.error(
     "Playwright is not installed. From web/: `npm ci` (or npm install) then " +
-    "`npx playwright install --with-deps chromium`, then re-run this test."
+    `\`npx playwright install --with-deps ${engine}\`, then re-run this test.`
   );
+  process.exit(2);
+}
+if (!browserType) {
+  console.error(`No Playwright browser called "${engine}" (chromium, webkit, firefox).`);
   process.exit(2);
 }
 
@@ -32,7 +39,7 @@ const assert = (cond, msg) => {
 };
 
 const run = async () => {
-  const browser = await chromium.launch();
+  const browser = await browserType.launch();
   const page = await browser.newPage();
   await page.addScriptTag({ content: sdputilSrc });
 
@@ -128,7 +135,7 @@ const run = async () => {
     return out;
   });
 
-  console.log("symmetric manual-code pairing in headless Chromium:");
+  console.log(`symmetric manual-code pairing in headless ${engine}:`);
   assert(!result.error, `no errors (${result.error || "none"}) [${result.steps.join(" -> ")}]`);
   assert(result.codeLenA > 0 && result.codeLenA < 400, `code A is compact (${result.codeLenA} chars)`);
   assert(result.codeLenB > 0 && result.codeLenB < 400, `code B is compact (${result.codeLenB} chars)`);

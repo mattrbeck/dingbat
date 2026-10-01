@@ -259,27 +259,31 @@ jobs:
         # Asserts the live `v_uv` expression in web/glpresent.js maps the
         # screen to the full [0,1] texture, row 0 at the top.
         run: node web/uv.test.mjs
-      - name: Cache Playwright's Chromium
+      - name: Cache Playwright's browsers
         # Exact key on the lockfile: a playwright bump must miss and re-download.
+        # The browser set is in the key: a hit restores only what was saved.
         if: runner.os == 'Linux'
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
+          key: playwright-chromium-webkit-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
 
-      - name: Web browser tests (headless Chromium)
+      - name: Web browser tests (headless Chromium and WebKit)
         # render.test.mjs compiles the real present shaders and checks corner
         # mapping (needs WebGL2); manualpair.test.mjs round-trips the manual-
-        # code link fallback over real RTCPeerConnections. Installs only Chromium.
+        # code link fallback over real RTCPeerConnections. Each in both
+        # engines: WebKit is Safari's, so the iPhone's.
         if: runner.os == 'Linux'
         working-directory: web
-        # npm ci and the Chromium download are idempotent network fetches.
+        # npm ci and the browser downloads are idempotent network fetches.
         run: |
           set -e
           ../.github/scripts/retry.sh 3 npm ci
-          ../.github/scripts/retry.sh 3 npx playwright install --with-deps chromium
-          node render.test.mjs
-          node manualpair.test.mjs
+          ../.github/scripts/retry.sh 3 npx playwright install --with-deps chromium webkit
+          node render.test.mjs chromium
+          node render.test.mjs webkit
+          node manualpair.test.mjs chromium
+          node manualpair.test.mjs webkit
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
@@ -290,13 +294,11 @@ jobs:
             tests/results_mgba_suite.md
             tests/results_gambatte.md
 
-  web-e2e:
-    # The web app end to end: two browsers (an iPhone and a Mac) running the
-    # real build against one fake Google Drive -
-    # picking a game up on another device (web/e2e/). Its own job because it
-    # needs the wasm build, which the test job never makes.
+  wasm:
+    # The web build, made once for both end-to-end jobs (the test job never
+    # makes it).
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Install Nim
@@ -314,6 +316,27 @@ jobs:
         run: .github/scripts/retry.sh 3 nimble install -y sdl2
       - name: Build WASM
         run: nim c -d:emscripten src/dingbat_wasm.nim
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasm
+          path: |
+            web/em.js
+            web/em.wasm
+          retention-days: 3
+
+  web-e2e:
+    # The web app end to end: two browsers (an iPhone and a Mac) running the
+    # real build against one fake Google Drive -
+    # picking a game up on another device (web/e2e/).
+    needs: wasm
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm
+          path: web
       - name: Cache Playwright's browsers
         uses: actions/cache@v4
         with:
@@ -330,5 +353,33 @@ jobs:
           set -e
           ../.github/scripts/retry.sh 3 npm ci
           ../.github/scripts/retry.sh 3 npx playwright install --with-deps chromium webkit
+          node e2e/speed-probe.mjs || true   # how fast each browser runs the game here
+          node --test e2e/*.e2e.mjs
+
+  web-e2e-macos:
+    # The same on a Mac, where Playwright's WebKit is Apple's - the engine an
+    # iPhone and Safari run; the Linux job's is the GTK port.
+    needs: wasm
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm
+          path: web
+      - name: Cache Playwright's browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ms-playwright
+          key: playwright-e2e-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
+      - name: Two devices, one fake Drive
+        working-directory: web
+        env:
+          DINGBAT_E2E_NO_CHROMIUM: "1"
+        run: |
+          set -e
+          ../.github/scripts/retry.sh 3 npm ci
+          ../.github/scripts/retry.sh 3 npx playwright install chromium webkit
           node e2e/speed-probe.mjs || true   # how fast each browser runs the game here
           node --test e2e/*.e2e.mjs

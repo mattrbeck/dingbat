@@ -1,5 +1,5 @@
 // WebGL2 readback guard: compiles the shipped present shaders (via
-// glshaders.mjs) in headless Chromium, uploads a corner-distinguishable
+// glshaders.mjs) in headless Chromium or WebKit, uploads a corner-distinguishable
 // 240x160 pattern exactly as glRenderer.draw() does (R16UI BGR555), and
 // asserts each canvas corner shows the right source corner. Catches quadrant
 // sampling, Y-flips, scale errors and wrong upload dims. Needs WebGL2
@@ -8,21 +8,28 @@
 // Pattern (texture row 0 = top): TL red, TR green, BL blue, BR white,
 // center yellow. A PNG of the filter=none render is written to the temp dir.
 //
-// Run:  node web/render.test.mjs   (after: npx playwright install chromium)
+// Run:  node web/render.test.mjs [webkit]   (after: npx playwright install chromium webkit)
 
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readShaders } from "./glshaders.mjs";
 
-let chromium;
+// Which engine: `node <this> webkit` for Safari's (the iPhone's); Chromium
+// by default. CI runs both.
+const engine = process.argv[2] || "chromium";
+let browserType;
 try {
-  ({ chromium } = await import("playwright"));
+  browserType = (await import("playwright"))[engine];
 } catch {
   console.error(
     "Playwright is not installed. From web/: `npm ci` (or npm install) then " +
-    "`npx playwright install --with-deps chromium`, then re-run this test."
+    `\`npx playwright install --with-deps ${engine}\`, then re-run this test.`
   );
+  process.exit(2);
+}
+if (!browserType) {
+  console.error(`No Playwright browser called "${engine}" (chromium, webkit, firefox).`);
   process.exit(2);
 }
 
@@ -136,7 +143,8 @@ const distinct = (a, b) =>
 async function run() {
   const { VERT, FRAG } = readShaders();
   const pattern = buildPattern();
-  const browser = await chromium.launch({ args: ["--enable-unsafe-swiftshader"] });
+  const browser = await browserType.launch(
+    engine === "chromium" ? { args: ["--enable-unsafe-swiftshader"] } : {});
   const page = await browser.newPage();
   await page.setContent("<!doctype html><canvas id=c></canvas>");
   page.on("console", (m) => { if (m.type() === "error") console.error("  [page] " + m.text()); });
