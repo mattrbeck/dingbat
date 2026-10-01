@@ -38,10 +38,20 @@ const assert = (cond, msg) => {
   console.error(`  FAIL: ${msg}`);
 };
 
+// A browser that wedges (a WebGL or WebRTC stack that never answers) fails
+// the test with where it stopped instead of holding CI to its timeout.
+let stage = "launching " + engine;
+setTimeout(() => {
+  console.error(`  FAIL: timed out after 120 s while ${stage}`);
+  process.exit(1);
+}, 120_000).unref();
+
 const run = async () => {
   const browser = await browserType.launch();
+  stage = "opening a page";
   const page = await browser.newPage();
   await page.addScriptTag({ content: sdputilSrc });
+  stage = "pairing two RTCPeerConnections";
 
   const result = await page.evaluate(async () => {
     const out = { steps: [] };

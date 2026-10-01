@@ -274,6 +274,7 @@ jobs:
         # code link fallback over real RTCPeerConnections. Each in both
         # engines: WebKit is Safari's, so the iPhone's.
         if: runner.os == 'Linux'
+        timeout-minutes: 15
         working-directory: web
         # npm ci and the browser downloads are idempotent network fetches.
         run: |

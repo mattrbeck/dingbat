@@ -140,18 +140,27 @@ const nonBlack = (p) => Math.max(p[0], p[1], p[2]) > 40;
 const distinct = (a, b) =>
   Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) > 40;
 
+// A browser that wedges (a WebGL or WebRTC stack that never answers) fails
+// the test with where it stopped instead of holding CI to its timeout.
+let stage = "launching " + engine;
+setTimeout(() => {
+  console.error(`  FAIL: timed out after 120 s while ${stage}`);
+  process.exit(1);
+}, 120_000).unref();
+
 async function run() {
   const { VERT, FRAG } = readShaders();
   const pattern = buildPattern();
   const browser = await browserType.launch(
     engine === "chromium" ? { args: ["--enable-unsafe-swiftshader"] } : {});
+  stage = "opening a page";
   const page = await browser.newPage();
   await page.setContent("<!doctype html><canvas id=c></canvas>");
   page.on("console", (m) => { if (m.type() === "error") console.error("  [page] " + m.text()); });
 
   const render = (opts, wantPng = false) =>
-    page.evaluate(renderInPage,
-      { VERT, FRAG, cw: CW, ch: CH, nw: NW, nh: NH, pattern, opts, wantPng });
+    (stage = `rendering ${JSON.stringify(opts)}`, page.evaluate(renderInPage,
+      { VERT, FRAG, cw: CW, ch: CH, nw: NW, nh: NH, pattern, opts, wantPng }));
 
   try {
     // filter=none, color-correct off, grid off: the mapping is pure, so
