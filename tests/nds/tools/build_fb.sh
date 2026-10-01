@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build the no-library ROMs (src/fb_*, src/snd_tone) into roms/.
+# Build the no-library ROMs (src/fb_*, src/snd_tone, src/gx_tri) into roms/.
 # Needs only GNU binutils for arm-none-eabi (Homebrew arm-none-eabi-binutils
 # or devkitARM) and python3.
 set -e
@@ -13,7 +13,7 @@ out="$here/roms"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-for name in fb_hello fb_both snd_tone; do
+for name in fb_hello fb_both snd_tone gx_tri; do
   src="$here/src/$name"
   ${X}as -march=armv5te -o "$tmp/$name.9.o" "$src/arm9.s"
   ${X}ld -Ttext=0x02000000 -e _start -o "$tmp/$name.9.elf" "$tmp/$name.9.o"
