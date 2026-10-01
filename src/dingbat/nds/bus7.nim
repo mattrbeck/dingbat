@@ -76,6 +76,7 @@ proc io7_write(n: NDS; a: uint32; v, mask: uint32) =
     # EXMEMSTAT: the ARM7 sets only its own bits 0-6
     if (mask and 0x7F) != 0:
       n.exmem7_lo = (n.exmem7_lo and not uint16(mask and 0x7F)) or uint16(v and mask and 0x7F)
+      n.slot7_t = slot_timing(n.exmem7_lo)
   of 0x0B0 .. 0x0DC: n.dma7.write_reg(Arm7Bus(nds: n), o, v, mask)
   of 0x100 .. 0x10C: n.timers7.write_reg(o, v, mask)
   of 0x130:
@@ -194,7 +195,8 @@ proc write7(n: NDS; a: uint32; v: uint32; width: static int) =
     when width == 32: n.gpu.vram.write32(vrArm7, off, v)
     elif width == 16: n.gpu.vram.write16(vrArm7, off, uint16(v))
     else: n.gpu.vram.write8(vrArm7, off, uint8(v))
-  of 0x00, 0x08, 0x09, 0x0A: discard
+  of 0x08, 0x09, 0x0A: n.slot2_write(a, v, false, width)
+  of 0x00: discard
   else: n.note_unmapped("arm7", a, true)
 
 # --- CPU mixins --------------------------------------------------------
@@ -204,7 +206,7 @@ proc data_cost7(n: NDS; a: uint32; width: static int) {.inline.} =
   if n.dma7.dma_access: return
   let seq = a == n.last_data7 + (when width == 32: 4'u32 else: 2'u32)
   n.last_data7 = a
-  n.wait7 += data7(a shr 24, width, seq)
+  n.wait7 += data7(a shr 24, width, seq, n.slot7_t)
 
 proc fetch_cost7(n: NDS; a: uint32; width: static int) {.inline.} =
   ## A nonsequential fetch (a branch) also pays the refill's second fetch.
@@ -212,8 +214,8 @@ proc fetch_cost7(n: NDS; a: uint32; width: static int) {.inline.} =
   let seq = a == n.last_fetch7 + (when width == 32: 4'u32 else: 2'u32)
   n.last_fetch7 = a
   let top = a shr 24
-  n.wait7 += code7(top, width, seq)
-  if not seq: n.wait7 += code7(top, width, true)
+  n.wait7 += code7(top, width, seq, n.slot7_t)
+  if not seq: n.wait7 += code7(top, width, true, n.slot7_t)
 
 proc read8*(b: Arm7Bus; a: uint32): uint32 {.inline.} =
   b.nds.data_cost7(a, 8)

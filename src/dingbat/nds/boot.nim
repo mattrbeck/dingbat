@@ -96,7 +96,8 @@ proc direct_boot*(n: NDS) =
   m16(0x027FF850'u32, 0x5835); m16(0x027FFC10'u32, 0x5835)
   m32(0x027FF880'u32, 7); m32(0x027FF884'u32, 6)
   m32(0x027FF868'u32, uint32(n.spi.user_settings_offset()))
-  for i in 0 ..< 12: n.main_ram[0x3FFC30 + i] = 0xFF   # no GBA cart
+  let gba = n.slot2.gba_header_info()                   # 0xFF: no GBA cart
+  for i in 0 ..< 12: n.main_ram[0x3FFC30 + i] = gba[i]
   m16(0x027FFC40'u32, 1)                                 # boot indicator
   let us = n.spi.user_settings()
   for i in 0 ..< 0x70: n.main_ram[0x3FFC80 + i] = n.spi.firmware[us + i]
@@ -106,6 +107,8 @@ proc direct_boot*(n: NDS) =
   n.postflg7 = 1
   n.exmemcnt = 0x6000
   n.exmem7_lo = 0
+  n.slot9_t = slot_timing(n.exmemcnt)
+  n.slot7_t = slot_timing(n.exmem7_lo)
   n.gpu.write_powcnt1(0x0203)
   n.powcnt2 = 1
   n.biosprot = 0x1204
