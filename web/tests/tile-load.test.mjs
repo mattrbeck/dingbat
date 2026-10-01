@@ -154,6 +154,8 @@ test("a failed download says so until the next tap, which tries again", async ()
   const app = await boot();
   const d = drive(app);
   await home(app);
+  // A 500 is tried again a few times first (driveRetryWait); quickly here.
+  app.runIn("driveRetryMs = 1");
   d.fail = true;
   d.release();
   launchOf(app, "B.gba").click();

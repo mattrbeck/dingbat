@@ -2504,8 +2504,45 @@ const driveFetch = async (url, opts = {}) => {
     live();
     res = await send();
   }
+  // Drive asking to slow down, or briefly failing: sent again after a wait
+  // (driveRetryWait) rather than failing the whole sync to "Offline" - a sync
+  // keeps several requests in flight (SYNC_PARALLEL), so a burst can meet
+  // Drive's per-user rate limit. Again only in the session it began in.
+  for (let attempt = 0; !res.ok && attempt < DRIVE_RETRIES; attempt++) {
+    let wait = await driveRetryWait(res, opts.method || "GET", attempt);
+    if (wait === null) break;
+    await new Promise((r) => setTimeout(r, wait));
+    live();
+    res = await send();
+  }
   if (!res.ok) throw new Error("Drive request failed (HTTP " + res.status + ")");
   return res;
+};
+
+// How many times, and from what first wait, a refused Drive request is sent
+// again; the wait doubles each time.
+const DRIVE_RETRIES = 3;
+let driveRetryMs = 500;
+// The wait before sending `res`'s request again, or null when it is not one
+// to repeat. A rate limit (429, or 403 with a rate reason) refused the request
+// before doing anything, so any request goes again. A server error (5xx) may
+// have done it anyway: only a read or an in-place update (GET, PATCH) is
+// safe to repeat - a repeated create could leave two files of one name, and
+// a repeated delete would fail on the file it just deleted. Drive's
+// Retry-After is honoured up to 10 s.
+const driveRetryWait = async (res, method, attempt) => {
+  let limited = res.status === 429;
+  if (res.status === 403) {
+    let body = await res.json?.().catch(() => null);
+    let reasons = (body?.error?.errors || []).map((e) => e?.reason);
+    limited = reasons.some((r) => r === "rateLimitExceeded" || r === "userRateLimitExceeded");
+  }
+  let transient = [500, 502, 503, 504].includes(res.status) &&
+                  (method === "GET" || method === "PATCH");
+  if (!limited && !transient) return null;
+  let after = Number(res.headers?.get?.("retry-after"));
+  if (after > 0) return Math.min(after * 1000, 10000);
+  return driveRetryMs * 2 ** attempt * (0.75 + Math.random() / 2);
 };
 
 // Every page of the listing. A library runs to about 22 Drive files a game,
