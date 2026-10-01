@@ -129,3 +129,18 @@ ch1/ch3 mixer bits, mixer capture and its clip, register masks.
 | `spu.nim` output sampling | the PWM word is the mixer's value at each 1024-cycle tick: a channel above the output rate aliases at full level (a 47.6 kHz tone comes out at 14.9 kHz, full scale) | melonDS 0.9.3 the same; melonDS DS -14 dB (it also low-passes ~7 kHz and high-passes its output); DeSmuME resamples to 44.1 kHz | run — snd_suite `timer` | GBATEK gives the 1.04876 MHz mixer and 32.768 kHz PWM, not how the PWM word is taken; Assumed |
 | `spu.nim` SOUNDBIAS | output is bias - 200h as DC, also with master enable off | melonDS 0.9.3 identical ramp; melonDS DS high-passes it away; DeSmuME ignores bias | run — snd_suite `bias` | GBATEK SOUNDBIAS ("always enabled") |
 | `nds/io/timers.nim` write_reg | writing TMxCNT_H of a running timer without changing start/prescaler/cascade (an IRQ-enable toggle) keeps the count and prescaler phase | melonDS DS | run — maxmod `basic_sound` music drifted 4 ms/s (0.4%) late against melonDS DS until fixed (maxmod toggles TM1's IRQ enable every tick); after it the envelopes line up over 10 s | GBATEK timers (control writes do not reload); the prescaler phase surviving is Assumed |
+
+## NDS core
+
+Comparisons against the melonDS DS 1.4.0 core run through `tools/ndsref`
+(settings in the table above, `--rtc 2004-01-01` on ndsrun to match its
+`melonds_start_time_mode=absolute`), on Pokemon SoulSilver unless named.
+
+| Where | Behaviour | Compared against | How | Independent evidence |
+|---|---|---|---|---|
+| `nds/timing.nim` | the whole memory-timing model: per-region N/S access costs, ARM9 N32 fetches, cache tags, internal cycles | melonDS DS 1.4.0 | run — SoulSilver boot reached the first black frame at 130 (placeholder 2/4 cycles per instruction), 150 (this model), 190 (+ SPI busy) vs the core's ~195; frames 205-1600 then match pixel for pixel apart from fades and 3D | GBATEK "DS Memory Timings" gives every table value; Assumed: code-cache line fill = data fill, write-buffered store = 1 bus cycle, ARM9 branch refill 2 cycles, ARM7 refill = one extra S fetch; a hardware cycle-count ROM would pin them |
+| `io/cart.nim`, `io/spi.nim` | AUXSPICNT.7 / SPICNT.7 busy for 8 bits at the baud rate | melonDS DS 1.4.0 | run — removing it puts SoulSilver's boot ~40 frames ahead of the core (its 512 KB save is read at 4 MHz) | GBATEK AUXSPICNT/SPICNT (baud rates, busy flag) |
+| `io/backup.nim` | IR-cart SPI front-end (00h pass-through, 01h receive length 0, 08h version AAh) | melonDS DS 1.4.0 | run — both show the Continue menu with CONNECT TO POKéWALKER from the same save | GBATEK "DS Cart Infrared Cartridge SPI Commands"; the reply byte during the IR command byte (FFh) is Assumed |
+| `io/wifi.nim` | enough of the MAC/BB/RF for the SDK's wireless manager to start: without it SoulSilver's Continue showed "A communication error has occurred" | melonDS DS 1.4.0 | run — both reach CONTINUE / NEW GAME / CONNECT TO POKéWALKER and continue into New Bark Town | GBATEK DS Wifi chapters (register widths, reset values, IRQ edge, power states, timers, BB/RF tables); Assumed: power-up applies at once, a frame to a station fails (no ACK), wifi RAM above 0x6000 reads FFFFh |
+| `io/rtc.nim` | `--rtc` clocks the RTC from emulated time | melonDS DS 1.4.0 | run — with both at 2004-01-01 00:00 the same input script gives identical frames 3000 and 5000 (the game seeds from the RTC) | none needed: a test-harness choice, the hardware clock is the host's |
+
