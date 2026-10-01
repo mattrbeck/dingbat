@@ -530,7 +530,7 @@ static void write_wav(const char *path) {
 /* ---------------------------------------------------------------- input */
 
 typedef struct { int touch, button, x, y, first, last; } Press;
-static Press presses[256];
+static Press presses[4096];
 static int n_presses;
 
 static int button_id(const char *s) {
@@ -556,7 +556,7 @@ static void parse_presses(const char *spec, int force_touch) {
     char *at = strchr(item, '@');
     if (!at) die("--press/--touch want KEY@FRAME[+DUR|-LAST]");
     *at = 0;
-    if (n_presses == 256) die("too many presses");
+    if (n_presses == 4096) die("too many presses");
     Press *p = &presses[n_presses++];
     memset(p, 0, sizeof *p);
     char *when = at + 1, *plus = strchr(when, '+'), *minus = strchr(when, '-');
