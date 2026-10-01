@@ -388,8 +388,13 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
     let b = v[(i + 1) mod n]
     area += int64(a.sx) * b.sy - int64(b.sx) * a.sy
   let line = area == 0
+  # GBATEK "Polygon Size": opaque polygons drop their right and bottom
+  # edges; wire-frames, translucent ones while blending is on, and every
+  # polygon while edge marking or anti-aliasing is on keep them (vertical
+  # right edges excepted)
+  let full = wire or (disp3dcnt and 0x30) != 0 or poly.translucent and c.blend
   let ytop = int(poly.ymin)
-  let ybot = if poly.ymax == poly.ymin: ytop + 1 else: int(poly.ymax)
+  let ybot = if poly.ymax == poly.ymin or full: int(poly.ymax) + 1 else: int(poly.ymax)
   for y in max(0, ytop) ..< min(H, ybot):
     var L, R: EdgeSample
     var found = 0
@@ -408,19 +413,23 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
       elif e.x > R.x or e.x == R.x and e.xn >= R.xn: R = e
       inc found
     if found == 0:
-      # a flat polygon: its row runs between the outermost vertices
-      var li, ri = 0
-      for i in 1 ..< n:
-        if v[i].sx < v[li].sx: li = i
-        if v[i].sx > v[ri].sx: ri = i
+      # a flat polygon, or a full-size one's bottom row: the row runs
+      # between the outermost vertices on it
+      var li, ri = -1
+      for i in 0 ..< n:
+        if v[i].sy != y: continue
+        if li < 0 or v[i].sx < v[li].sx: li = i
+        if ri < 0 or v[i].sx > v[ri].sx: ri = i
+      if li < 0: continue
       L = vertex_sample(v[li], wn[li])
       R = vertex_sample(v[ri], wn[ri])
-    elif found >= 2 and not line:
+    elif found >= 2 and not line and not full:
       # the right edge owns the dots left of its boundary
       dec R.lo
       dec R.hi
     let xs = int((L.x + 0x8000) shr 16)
     var xe = int((R.x + 0x8000) shr 16)
+    if full and (found == 0 or R.xn != R.x): xe = max(xe, int(R.hi) + 1)
     if xe <= xs: xe = xs + 1           # at least one dot wide
     let rim = y == ytop or y == ybot - 1
     let inv = if R.x > L.x: (1'i64 shl 32) div (R.x - L.x) else: 0'i64
