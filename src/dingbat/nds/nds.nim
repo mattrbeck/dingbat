@@ -4,7 +4,7 @@
 ## The bus maps are in bus9.nim / bus7.nim and the boot path in boot.nim,
 ## included here so they see the NDS type. docs/nds/spec.md is the map.
 
-import std/[os, strutils]
+import std/[os, strutils, sequtils]
 import arm/[cpu, cp15]
 import sched, timing
 import mem/vram
@@ -16,6 +16,10 @@ import hle_bios
 export cpu, sched, gpu, engine2d, input, vram, cart, spu
 
 type
+  NdsBoot* = enum
+    nbDirect      ## load the card's binaries and start them (boot.nim)
+    nbFirmware    ## run the real BIOSes and firmware from power-on
+
   Arm9Bus* = object
     nds* {.cursor.}: NDS
   Arm7Bus* = object
@@ -237,9 +241,17 @@ proc read_file_bytes(path: string): seq[uint8] =
   result = newSeq[uint8](s.len)
   if s.len > 0: copyMem(addr result[0], unsafeAddr s[0], s.len)
 
+proc can_firmware_boot*(bios9, bios7, firmware: seq[uint8]): bool =
+  ## A firmware boot runs the real BIOSes and the real firmware: all three
+  ## dumps are needed (the synthesized firmware has no boot code).
+  bios9.len >= BIOS9_SIZE and bios7.len >= BIOS7_SIZE and firmware.len >= 256 * 1024
+
 proc new_nds*(rom: seq[uint8]; bios9, bios7, firmware: seq[uint8];
-              force_hle = false): NDS =
+              force_hle = false; boot = nbDirect): NDS =
   ## A missing BIOS dump (or `force_hle`) gets the HLE BIOS for that CPU.
+  ## `boot = nbFirmware` starts from power-on in the real BIOS + firmware
+  ## (an empty `rom` = no card: the firmware menu); without all three dumps
+  ## it says so on stderr and direct-boots instead.
   let n = NDS(sched: new_nds_scheduler(), vcount_write: -1)
   n.main_ram = newSeq[uint8](MAIN_RAM_SIZE)
   n.shared_wram = newSeq[uint8](32 * 1024)
@@ -265,6 +277,7 @@ proc new_nds*(rom: seq[uint8]; bios9, bios7, firmware: seq[uint8];
   n.spi = new_spi(if firmware.len > 0: firmware else: synth_firmware(), n.irq7, n.input)
   n.spi.sched = n.sched
   n.cart = new_cart(rom, n.irq9, n.irq7, n.sched)
+  n.cart.set_key1_table(key1_table_from_bios7(bios7))
   n.spu = new_spu()
   n.rtc = new_rtc()
   n.wifi = new_wifi(n.sched, n.irq7)
@@ -275,21 +288,28 @@ proc new_nds*(rom: seq[uint8]; bios9, bios7, firmware: seq[uint8];
   n.tm.update_regions(n.cp15)
   n.last_fetch9 = NO_ADDR; n.last_data9 = NO_ADDR
   n.last_fetch7 = NO_ADDR; n.last_data7 = NO_ADDR
-  n.direct_boot()
+  if boot == nbFirmware and not force_hle and can_firmware_boot(bios9, bios7, firmware):
+    n.firmware_boot()
+  else:
+    if boot == nbFirmware:
+      stderr.writeLine("nds: firmware boot needs bios9.bin, bios7.bin and firmware.bin " &
+                       "dumps (and no forced HLE); direct boot instead")
+    n.direct_boot()
   n.sched.schedule(HBLANK_CYCLES, evHBlank)
   n.sched.schedule(LINE_CYCLES, evLineEnd)
   n.sched.schedule(n.spu.next_tick, evSpuSample)
   n
 
-proc load_nds*(rom_path: string; bios_dir = ""): NDS =
+proc load_nds*(rom_path: string; bios_dir = ""; boot = nbDirect): NDS =
   ## Load a ROM; BIOS/firmware come from `bios_dir` (bios9.bin, bios7.bin,
   ## firmware.bin), else $DINGBAT_NDS_BIOS, else none (firmware synthesized,
   ## HLE BIOS). DINGBAT_NDS_HLE=1 forces the HLE BIOS even with dumps.
+  ## An empty `rom_path` is an empty card slot.
   let dir = if bios_dir.len > 0: bios_dir else: getEnv("DINGBAT_NDS_BIOS")
   new_nds(read_file_bytes(rom_path),
           read_file_bytes(dir / "bios9.bin"), read_file_bytes(dir / "bios7.bin"),
           read_file_bytes(dir / "firmware.bin"),
-          force_hle = getEnv("DINGBAT_NDS_HLE") == "1")
+          force_hle = getEnv("DINGBAT_NDS_HLE") == "1", boot = boot)
 
 proc run_until*(n: NDS; target: int64) =
   var ev: NdsEvent

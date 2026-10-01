@@ -7,6 +7,9 @@
 ##       [--shots 60,120] [--wav OUT.wav]
 ##
 ## --bios defaults to $DINGBAT_NDS_BIOS (bios9.bin, bios7.bin, firmware.bin).
+## --boot firmware starts from power-on in the real BIOS and firmware (needs
+## all three dumps; the ROM may then be left out: an empty card slot, the
+## firmware menu); --boot direct (default) starts the card's binaries.
 ## --traceN prints the first N instructions of that CPU (pc, opcode, regs) to
 ## stderr, starting at frame --trace-at F (default 0).
 ## --press KEY@F[+D] holds KEY from frame F for D frames (default 2), or
@@ -38,6 +41,8 @@
 ##   --prof F0-F1       count instructions and master cycles per 64-byte code
 ##                      block over frames F0..F1-1; print the costliest blocks
 ##   --spilog           log every card-SPI (save chip) byte: sent -> reply, pc
+##   --cartlog          log every card ROM transfer: mode, ROMCTRL, plain
+##                      command, length, first reply bytes as the CPU sees them
 
 import std/[os, strutils, parseopt, tables, sequtils, monotimes, times]
 import zippy
@@ -188,9 +193,10 @@ when isMainModule:
   var frames = 60
   var outp = "nds_out.png"
   var bios = ""
+  var boot = nbDirect
   var trace9, trace7, trace_at = 0
   var iolog_from = 0
-  var iolog, pcs, spilog = false
+  var iolog, pcs, spilog, cartlog = false
   var prof_from, prof_to = -1
   var watch = 0'u32
   var text = ""
@@ -207,7 +213,7 @@ when isMainModule:
   var perf_from = 0
   var perf_t0: MonoTime
   var p = initOptParser(commandLineParams(), shortNoVal = {'h'},
-                        longNoVal = @["help", "iolog", "pcs", "spilog"])
+                        longNoVal = @["help", "iolog", "pcs", "spilog", "cartlog"])
   for kind, key, val in p.getopt():
     case kind
     of cmdArgument: rom = key
@@ -216,6 +222,11 @@ when isMainModule:
       of "frames": frames = parseInt(val)
       of "out": outp = val
       of "bios": bios = val
+      of "boot":
+        boot = case val
+          of "firmware": nbFirmware
+          of "direct": nbDirect
+          else: quit("--boot firmware|direct")
       of "trace9": trace9 = parseInt(val)
       of "trace7": trace7 = parseInt(val)
       of "trace-at": trace_at = parseInt(val)
@@ -235,6 +246,7 @@ when isMainModule:
         for f in val.split(','): shots.add parseInt(f)
       of "iolog": iolog = true
       of "spilog": spilog = true
+      of "cartlog": cartlog = true
       of "prof":
         let r = val.split('-')
         prof_from = parseInt(r[0]); prof_to = parseInt(r[1])
@@ -246,10 +258,12 @@ when isMainModule:
       of "bgshot": shot = val
       else: quit("unknown option --" & key)
     of cmdEnd: discard
-  if rom.len == 0: quit("usage: ndsrun ROM [--frames N] [--out PNG] [--bios DIR]")
-  let n = load_nds(rom, bios)
+  if rom.len == 0 and boot != nbFirmware:
+    quit("usage: ndsrun ROM [--frames N] [--out PNG] [--bios DIR] [--boot firmware|direct]")
+  let n = load_nds(rom, bios, boot)
   n.watch = watch
   n.cart.spilog = spilog
+  n.cart.cartlog = cartlog
   if rtc_at.len > 0:
     # --rtc YYYY-MM-DD[THH:MM:SS]: the RTC starts there and follows emulated time
     let d = rtc_at.replace('T', '-').replace(':', '-').split('-')
