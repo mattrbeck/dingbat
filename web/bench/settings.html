@@ -485,6 +485,39 @@ window.settingsLowpass = async (seconds = 60, reps = 7) => {
   return r;
 };
 
+// --- Super Game Boy mode: also a core-construction setting. Needs an SGB
+// cart (?rom=PokemonBlue.gb) and a state made in each mode, <name>.state and
+// <name>SGB.state (a state carries the adapter or not). ---
+window.settingsSgb = async (frames = 1200, rounds = 9, warm = 120) => {
+  const base = STATE_NAME.replace(/\.state$/, "");
+  const states = {
+    0: new Uint8Array(await fetch(base + ".state").then((r) => r.arrayBuffer())),
+    1: new Uint8Array(await fetch(base + "SGB.state").then((r) => r.arrayBuffer())),
+  };
+  const init = (on) => {
+    Module._wasm_sgb_enable(on);
+    Module.ccall("initFromEmscripten", null, ["string"], [ROM_NAME]);
+    STATE = states[on];
+  };
+  const res = { 0: [], 1: [] };
+  let active = null;
+  for (let r = 0; r < rounds; r++) {
+    for (const on of [0, 1]) {
+      init(on);
+      const o = runCore({ ...DEFAULTS }, frames, warm);
+      res[on].push(o.msPerFrame);
+      active = Module._wasm_sgb_active();
+      await yieldTask();
+    }
+  }
+  init(0);
+  const ratio = median(res[1].map((x, i) => x / res[0][i]));
+  const r = { offMs: +median(res[0]).toFixed(4), onMs: +median(res[1]).toFixed(4),
+              costPct: +((ratio - 1) * 100).toFixed(2), sgbActiveOn: active };
+  sLog(`SGB mode: ${JSON.stringify(r)}`);
+  return r;
+};
+
 // --- Real BIOS vs HLE: a core-construction setting, so it re-inits the core
 // with bios.bin in the FS (fetched from ./bios.bin, gitignored). ---
 window.settingsBios = async (frames = 600, rounds = 7, warm = 120) => {
