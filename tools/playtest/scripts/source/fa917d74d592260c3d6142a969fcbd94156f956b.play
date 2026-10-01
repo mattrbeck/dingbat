@@ -2,7 +2,6 @@
 @file Mario Party Advance (U).gba
 @game B8ME
 @chip EEPROM
-@frozen dingbat-bios,mgba,nba
 
 # A blank cart formats itself ("Saving..." right after the Hudson logo), then
 # the host has the player fill in a profile: name, birth month JAN, hobby,
@@ -12,23 +11,20 @@
 # nothing) instead of typing a few letters. The game saves the profile
 # ("Saving...") and drops into Shroom City. [load] boots straight to "Welcome
 # to Party World" instead of the new-game profile interview.
+
 [new]
-# until text 'Press any button' timeout=900 every=10  [reached dingbat-bios+140 mgba+140 nba+140]
-wait 144
+until text "Press any button" timeout=900 every=10
 checkpoint health window=10
 press A
-# until text HUDSON timeout=600 every=10  [reached dingbat-bios+170 mgba+160 nba+160]
-wait 174
+until text "HUDSON" timeout=600 every=10
 press START after=20
-# until text Saving timeout=900 every=10  [reached dingbat-bios+110 mgba+100 nba+110]
-wait 114
+until text "Saving" timeout=900 every=10
 checkpoint format_saving window=0 compare=text
-# until notext Saving timeout=1200 every=10  [reached dingbat-bios+0 mgba+10 nba+0]
-wait 14
-# until text there timeout=600 every=10  [reached dingbat-bios+460 mgba+480 nba+440]
-wait 484
-# mash A until text 'you should' timeout=3000 every=30  [taps dingbat-bios:31 mgba:31 nba:31]
-tap A times=31 every=30 hold=4
+until notext "Saving" timeout=1200 every=10
+until text "there" timeout=600 every=10
+mash A until text "you should" timeout=3000 every=30
+# fill the name field to its maximum length, whenever the keyboard
+# starts accepting keys, then jump to OK and confirm
 press A after=8
 press A after=8
 press A after=8
@@ -70,14 +66,14 @@ press A after=8
 press A after=8
 press A after=8
 press START after=30
-checkpoint name window=30 compare=text
+checkpoint name compare=text
 press A after=90
-# mash A until text born timeout=900 every=60  [taps dingbat-bios:3 mgba:3 nba:3]
-tap A times=3 every=60 hold=4
+mash A until text "born" timeout=900 every=60
 wait 60
 press A after=90
-# mash A until text hobby timeout=1500 every=90  [taps dingbat-bios:6 mgba:6 nba:6]
-tap A times=6 every=90 hold=4
+mash A until text "hobby" timeout=1500 every=90
+# fill the hobby field to its maximum length, whenever the keyboard
+# starts accepting keys, then jump to OK and confirm
 press A after=8
 press A after=8
 press A after=8
@@ -119,10 +115,11 @@ press A after=8
 press A after=8
 press A after=8
 press START after=30
-checkpoint hobby window=30 compare=text
+checkpoint hobby compare=text
 press A after=90
-# mash A until text 'just enter' timeout=1500 every=90  [taps dingbat-bios:2 mgba:2 nba:2]
-tap A times=2 every=90 hold=4
+mash A until text "just enter" timeout=1500 every=90
+# fill the comment field to its maximum length, whenever the keyboard
+# starts accepting keys, then jump to OK and confirm
 press A after=8
 press A after=8
 press A after=8
@@ -164,10 +161,11 @@ press A after=8
 press A after=8
 press A after=8
 press START after=30
-checkpoint comment window=30 compare=text
+checkpoint comment compare=text
 press A after=90
-# mash A until text dream timeout=1500 every=60  [taps dingbat-bios:10 mgba:10 nba:10]
-tap A times=10 every=60 hold=4
+mash A until text "dream" timeout=1500 every=60
+# fill the dream field to its maximum length, whenever the keyboard
+# starts accepting keys, then jump to OK and confirm
 press A after=8
 press A after=8
 press A after=8
@@ -209,10 +207,11 @@ press A after=8
 press A after=8
 press A after=8
 press START after=30
-checkpoint dream window=30 compare=text
+checkpoint dream compare=text
 press A after=90
-# mash A until text secret timeout=1500 every=60  [taps dingbat-bios:2 mgba:3 nba:4]
-tap A times=4 every=60 hold=4
+mash A until text "secret" timeout=1500 every=60
+# fill the secret field to its maximum length, whenever the keyboard
+# starts accepting keys, then jump to OK and confirm
 press A after=8
 press A after=8
 press A after=8
@@ -254,27 +253,21 @@ press A after=8
 press A after=8
 press A after=8
 press START after=30
-checkpoint secret window=30 compare=text
+checkpoint secret compare=text
 press A after=90
-# mash A until text Saving timeout=1500 every=60  [taps dingbat-bios:13 mgba:13 nba:13]
-tap A times=13 every=60 hold=4
+mash A until text "Saving" timeout=1500 every=60
 checkpoint profile_saving window=0 compare=text
-# until notext Saving timeout=1200 every=10  [reached dingbat-bios+40 mgba+50 nba+30]
-wait 54
+until notext "Saving" timeout=1200 every=10
 wait 60
-checkpoint shroom_city window=30 compare=none
+checkpoint shroom_city compare=none
 
 [load]
-# until text 'Press any button' timeout=900 every=10  [reached dingbat-bios+140 mgba+140 nba+140]
-wait 144
+until text "Press any button" timeout=900 every=10
 press A
-# until text HUDSON timeout=600 every=10  [reached dingbat-bios+170 mgba+160 nba+160]
-wait 174
+until text "HUDSON" timeout=600 every=10
 press START after=20
-# until text 'Welcome to' timeout=900 every=10  [reached dingbat-bios+350 mgba+350 nba+350]
-wait 354
+until text "Welcome to" timeout=900 every=10
 wait 30
-checkpoint welcome window=30 compare=text
-# mash A until text 'let'"'"'s' timeout=900 every=40  [taps dingbat-bios:11 mgba:11 nba:11]
-tap A times=11 every=40 hold=4
-checkpoint lets_go window=30 compare=text
+checkpoint welcome compare=text
+mash A until text "let's" timeout=900 every=40
+checkpoint lets_go compare=text

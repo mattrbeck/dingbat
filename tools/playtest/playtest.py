@@ -265,6 +265,12 @@ def suite(args):
         print(f"{row['status']:8} {title[:56]}", flush=True)
         return row
 
+    # an existing suite of the same tag is extended: its games stay unless
+    # this run replaces them
+    index_path = os.path.join(sdir, 'index.json')
+    if os.path.exists(index_path):
+        mine = {sha1 for sha1, _ in todo} | {r['sha1'] for r in rows}
+        rows = [r for r in json.load(open(index_path))['games'] if r['sha1'] not in mine] + rows
     print(f'== suite {tag}: {len(todo)} games, {args.jobs} at a time -> {sdir}', flush=True)
     with cf.ThreadPoolExecutor(max(1, args.jobs)) as pool:
         for row in pool.map(one, todo):

@@ -1,0 +1,62 @@
+@title Super Mario Advance 4 - Super Mario Bros. 3 (USA)
+@file Super Mario Advance 4 - Super Mario Bros. 3 (U) (V1.1).gba
+@game AX4E
+@chip FLASH1M
+
+# Single player, File 1, one Mario. On the World 1 map open the START menu
+# and "save & quit" (a save the game says can be continued once), which
+# returns to the title screen.
+
+[new]
+mash START until text "Single Player" timeout=2400 every=40
+wait 60
+checkpoint game_select window=0
+press A
+mash START until text "File 1" timeout=3000 every=40
+wait 60
+checkpoint file_select_empty window=0
+press A
+until text "Mode" timeout=600 every=10
+wait 30
+checkpoint player_select window=0
+press A
+until text "WORLD" timeout=900 every=10
+wait 300
+checkpoint world_map window=0
+press START
+until text "continue" timeout=120 every=5
+wait 30
+press DOWN after=20
+checkpoint map_menu window=0
+press A
+until text "title screen" timeout=300 every=5
+wait 30
+press LEFT after=20
+checkpoint quit_prompt window=0
+press A
+until notext "title screen" timeout=300 every=5
+# back on the Super Mario Bros. 3 title
+until text "SUPER" timeout=2400 every=20
+wait 60
+checkpoint saved window=0
+
+[load]
+mash START until text "Single Player" timeout=2400 every=40
+wait 60
+press A
+mash START until text "File 1" timeout=3000 every=40
+wait 60
+checkpoint file_select_saved window=0
+press A
+until text "Mode" timeout=600 every=10
+wait 30
+press A
+until text "WORLD" timeout=900 every=10
+# the WORLD 1 / MARIO x 5 banner blocks the map menu until it closes
+until notext "MARIO" timeout=900 every=10
+wait 60
+checkpoint resumed window=0
+press START
+until text "continue" timeout=300 every=5
+wait 30
+checkpoint resumed_menu window=0

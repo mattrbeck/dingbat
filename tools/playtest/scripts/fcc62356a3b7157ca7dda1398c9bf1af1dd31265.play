@@ -2,59 +2,71 @@
 @file Donkey Kong Country (U) [!].gba
 @game A5NE
 @chip EEPROM
+@frozen dingbat-bios,mgba,nba
 
 # Start > file 1 > 1 player > name "A", mash through the opening (Cranky,
 # the Kremlings, Diddy) to the Kongo Jungle map, then START > Save Game >
 # Yes. [load]: file 1 shows the save time, and resumes on the same map.
 # OCR reads the map banner as "Kongo Jongle"/"Кongo" (Cyrillic K), hence "ongo".
-
 [new]
-mash START until text "EXTRAS" timeout=2400 every=40
+# mash START until text EXTRAS timeout=2400 every=40  [taps dingbat-bios:26 mgba:26 nba:26]
+tap START times=26 every=40 hold=4
 wait 60
 checkpoint main_menu window=30 compare=text
 press A
-until text "SELECT" timeout=600 every=10
+# until text SELECT timeout=600 every=10  [reached dingbat-bios+110 mgba+110 nba+110]
+wait 114
 wait 60
 checkpoint file_select_empty window=30 compare=text
 press A
-until text "Player" timeout=600 every=10
+# until text Player timeout=600 every=10  [reached dingbat-bios+50 mgba+50 nba+50]
+wait 54
 wait 60
 press A
-until text "NAME" timeout=600 every=10
+# until text NAME timeout=600 every=10  [reached dingbat-bios+60 mgba+60 nba+100]
+wait 104
 wait 60
 checkpoint name_entry window=30
-# "A": A types it, START ends the entry
 press A after=20
 press START after=60
-until text "stand guard" timeout=900 every=10
+# until text 'stand guard' timeout=900 every=10  [reached dingbat-bios+240 mgba+240 nba+260]
+wait 264
 wait 30
-checkpoint cranky compare=text
-mash A until text "ongo" timeout=8000 every=30
+checkpoint cranky window=30 compare=text
+# mash A until text ongo timeout=8000 every=30  [taps dingbat-bios:76 mgba:76 nba:76]
+tap A times=76 every=30 hold=4
 wait 120
 checkpoint kongo_jungle_map window=30
 press START
-until text "SAVE" timeout=300 every=5
+# until text SAVE timeout=300 every=5  [reached dingbat-bios+15 mgba+15 nba+20]
+wait 24
 wait 60
 checkpoint pause_menu window=30 compare=text
 press A
 wait 60
 checkpoint save_prompt window=0 compare=text
 press A
-until text "plete" timeout=600 every=5
+# until text plete timeout=600 every=5  [reached dingbat-bios+95 mgba+100 nba+95]
+wait 104
 checkpoint saved window=0
 
 [load]
-mash START until text "EXTRAS" timeout=2400 every=40
+# mash START until text EXTRAS timeout=2400 every=40  [taps dingbat-bios:25 mgba:25 nba:26]
+tap START times=26 every=40 hold=4
 wait 60
 press A
-until text "SELECT" timeout=600 every=10
+# until text SELECT timeout=600 every=10  [reached dingbat-bios+110 mgba+110 nba+110]
+wait 114
 wait 120
 checkpoint file_select_saved window=30 compare=text
 press A
-until text "ongo" timeout=1200 every=10
+# nba could not follow from here: 'until text "ongo" timeout=1200 every=10': timed out after 1200 frames waiting for text 'ongo'
+# until text ongo timeout=1200 every=10  [reached dingbat-bios+70 mgba+70]
+wait 74
 wait 120
 checkpoint resumed_map window=30
 press START
-until text "SAVE" timeout=300 every=5
+# until text SAVE timeout=300 every=5  [reached dingbat-bios+20 mgba+20]
+wait 24
 wait 60
 checkpoint resumed_menu window=30 compare=text

@@ -2,15 +2,164 @@
 @file Final Fantasy IV Advance (U).gba
 @game BZ4E
 @chip SRAM
-@status wip: reaches the opening dialogue on the Red Wings airship deck ("we will arrive at Baron shortly"). Live, mashing A on from there reaches the monster attack and "Cecil: Is everyone okay?", but the emulators drift tens of frames apart through it (the second reference reaches each screen early), so it is not scripted. The opening then runs the fly-in credits (an A press there skips back to the title, where A starts a New Game again, so mashing loops), the Baron castle audience, Cecil's room and the next morning; the first save is on the world map after walking Cecil and Kain out of Baron castle. A human should record: New Game, advance the dialogue (not during the credits), walk out of Baron castle to the world map, Save to slot 1, quit after the save message. [load]: title > Load Game > slot 1 > the world map.
+@frozen dingbat-bios,mgba,nba
+
+# New Game, the Red Wings opening and the Baron audience (A every 60 frames),
+# then free in the castle at night: down to 1F, west stairs to the rampart,
+# west tower (Rosa), the NW courtyard (Cid), West Tower 1F/2F (the maid moves
+# off the stairs after talking to her), Cecil's Chamber, into the bed; the
+# night scene, the prologue crawl (no input: A there skips to the title) and
+# the world map outside Baron with Kain. Save to slot 1 from the menu.
+# Cutscene walks run at slightly different speeds on the three emulators:
+# the "okay" mash is mgba's count (138 taps), dingbat-bios and nba had already
+# left that box; the screens converge at every later text box. mgba's
+# animated water / clouds / menu gradient often differ by a frame or two.
 
 [new]
 wait 600
 press A
-mash START until text "Game" timeout=3000 every=40
+# mash START until text Game timeout=3000 every=40  [taps dingbat-bios:16 mgba:15 nba:16]
+tap START times=16 every=40 hold=4
 wait 60
 checkpoint title window=0
 press A hold=10
-until text "Baron shortly" timeout=4000 every=10
+# until text 'Baron shortly' timeout=4000 every=10  [reached dingbat-bios+1800 mgba+1710 nba+1800]
+wait 1804
 wait 30
 checkpoint deck window=30 compare=text
+# mash A until text okay timeout=6000 every=40  [taps dingbat-bios:137 mgba:138 nba:137]
+tap A times=138 every=40 hold=4
+wait 60
+press A
+wait 120
+press A
+wait 100
+press A
+wait 100
+press A
+wait 100
+press A
+wait 100
+press A
+wait 100
+press A
+wait 100
+press A
+wait 100
+press A
+wait 100
+wait 600
+wait 600
+wait 600
+wait 300
+tap A times=8 every=60 hold=6
+tap A times=8 every=60 hold=6
+wait 200
+tap A times=4 every=60 hold=6
+tap A times=10 every=60 hold=6
+tap A times=10 every=60 hold=6
+tap A times=10 every=60 hold=6
+tap A times=10 every=60 hold=6
+tap A times=10 every=60 hold=6
+tap A times=10 every=60 hold=6
+tap A times=10 every=60 hold=6
+tap A times=10 every=60 hold=6
+press DOWN hold=100 after=30
+wait 60
+press DOWN hold=20 after=20
+press DOWN hold=10 after=10
+press LEFT hold=8 after=10
+press DOWN hold=22 after=10
+press LEFT hold=40 after=30
+press UP after=20
+wait 60
+press DOWN hold=10 after=60
+press DOWN hold=10 after=30
+press DOWN hold=10 after=80
+press DOWN hold=30 after=80
+press UP after=20
+press DOWN hold=12 after=60
+wait 30
+press DOWN hold=9 after=10
+press LEFT hold=30 after=20
+press DOWN hold=9 after=10
+press RIGHT hold=4 after=10
+press DOWN hold=14 after=10
+press RIGHT hold=4 after=10
+press DOWN hold=20 after=10
+press LEFT hold=30 after=10
+press DOWN hold=4 after=10
+press LEFT hold=40 after=10
+press UP hold=30 after=40
+wait 60
+wait 60
+press LEFT hold=40 after=10
+wait 60
+press DOWN hold=30 after=60
+tap A times=20 every=60 hold=6
+press DOWN hold=40 after=60
+press DOWN hold=4 after=10
+press LEFT hold=20 after=10
+press UP hold=10 after=60
+press UP hold=30 after=30
+press UP hold=12 after=80
+tap A times=15 every=60 hold=6
+tap A times=15 every=60 hold=6
+press UP hold=8 after=80
+wait 30
+press UP hold=4 after=30
+press UP after=90
+wait 30
+press DOWN hold=1 after=30
+press RIGHT hold=20 after=10
+press UP after=90
+wait 60
+press UP hold=2 after=10
+press A after=60
+press A after=60
+wait 60
+press UP hold=4 after=10
+press RIGHT hold=12 after=90
+wait 30
+press DOWN hold=1 after=30
+press LEFT hold=40 after=30
+press LEFT hold=16 after=60
+press UP hold=4 after=10
+press LEFT hold=12 after=60
+wait 300
+wait 200
+tap A times=10 every=60 hold=6
+tap A times=15 every=60 hold=6
+tap A times=15 every=60 hold=6
+tap A times=20 every=60 hold=6
+tap A times=20 every=60 hold=6
+wait 600
+wait 600
+wait 1200
+wait 1200
+wait 1200
+wait 1200
+checkpoint world_map window=10
+press START after=60
+checkpoint menu window=0 compare=text
+tap DOWN times=8 every=12 hold=4
+wait 20
+press A after=60
+checkpoint save_slots window=0
+press A after=60
+wait 60
+checkpoint saved window=10
+
+[load]
+wait 600
+press A
+tap START times=16 every=40 hold=4
+wait 60
+checkpoint title_load window=0
+press A after=90
+checkpoint load_slot window=0
+press A after=200
+checkpoint resumed window=10
+press START after=60
+checkpoint resumed_menu window=0 compare=text
+

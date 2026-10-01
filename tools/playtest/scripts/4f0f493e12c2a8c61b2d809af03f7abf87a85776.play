@@ -1,0 +1,209 @@
+@title Mother 3 (Japan)
+@file Mother 3 (J).gba
+@game A3UJ
+@chip FLASH512
+@frozen dingbat-bios,mgba,nba
+
+# New game: every name by おまかせ (default) + START (cursor to おわり) + A,
+# message speed はやい, confirm. Chapter 1 at Alec's house: Lucas comes
+# downstairs, is sent back up to change out of his pyjamas, goes outside,
+# walks past the pig pen to the south-east, where a frog (カエル) explains
+# saving; はい, slot 1, "セーブちゅうです".
+# Findings: the flash save takes a different time on each emulator (the
+# screen changes dingbat-bios+30, nba+35, mgba+65 frames after the slot is
+# picked), and the mgba save differs from dingbat-bios/nba (which are
+# byte-identical). In the bedroom (~f12200) and during the circle-wipe after
+# changing clothes (~f13968) the three show different animation phases /
+# wipe radii.
+[new]
+wait 600
+press A
+wait 1220
+checkpoint title window=30
+press START
+wait 200
+wait 60
+press START
+wait 150
+tap DOWN times=6 every=10 hold=4
+wait 10
+press A
+wait 30
+press START
+wait 30
+press A
+wait 150
+tap DOWN times=6 every=10 hold=4
+wait 10
+press A
+wait 30
+press START
+wait 30
+press A
+wait 360
+tap DOWN times=6 every=10 hold=4
+wait 10
+press A
+wait 30
+press START
+wait 30
+press A
+wait 200
+tap DOWN times=6 every=10 hold=4
+wait 10
+press A
+wait 30
+press START
+wait 30
+press A
+wait 210
+wait 60
+tap DOWN times=6 every=10 hold=4
+wait 10
+press A
+wait 30
+press START
+wait 30
+press A
+wait 250
+tap DOWN times=6 every=10 hold=4
+wait 10
+press A
+wait 30
+press START
+wait 30
+press A
+wait 250
+tap DOWN times=6 every=10 hold=4
+wait 10
+press A
+wait 30
+press START
+wait 30
+press A
+wait 400
+checkpoint settings window=30
+press A
+wait 20
+press UP
+wait 10
+press A
+wait 20
+tap DOWN times=2 every=10 hold=4
+wait 10
+press A
+wait 150
+checkpoint confirm_names window=30
+press A
+wait 600
+tap A times=40 every=30 hold=4
+tap A times=40 every=30 hold=4
+tap A times=40 every=30 hold=4
+tap A times=40 every=30 hold=4
+tap A times=40 every=30 hold=4
+press RIGHT hold=40
+press DOWN hold=60
+wait 30
+press UP hold=40
+press RIGHT hold=120
+wait 30
+press UP hold=30
+press RIGHT hold=60
+press DOWN hold=60
+wait 60
+press LEFT hold=30
+press DOWN hold=80
+wait 60
+checkpoint downstairs window=30
+press DOWN hold=50
+press LEFT hold=60
+press A
+tap A times=10 every=30 hold=4
+press RIGHT hold=20
+press DOWN hold=80
+press LEFT hold=30
+press DOWN hold=60
+wait 60
+tap A times=3 every=30 hold=4
+press UP hold=40
+press RIGHT hold=20
+press UP hold=80
+wait 140
+press RIGHT hold=75
+press DOWN hold=80
+wait 60
+press UP hold=110
+press RIGHT hold=60
+wait 10
+press LEFT hold=30
+press DOWN hold=80
+wait 60
+press DOWN hold=50
+press LEFT hold=60
+press RIGHT hold=20
+press DOWN hold=80
+press LEFT hold=30
+press DOWN hold=60
+wait 60
+press LEFT hold=50
+press DOWN hold=80
+wait 90
+tap A times=30 every=30 hold=4
+checkpoint outside window=30
+press DOWN hold=140
+press RIGHT hold=300
+wait 10
+press DOWN hold=80
+press RIGHT hold=60
+wait 10
+press UP hold=20
+press RIGHT hold=40
+press A
+wait 40
+checkpoint frog window=30
+press A
+wait 40
+press A
+wait 40
+press A
+wait 40
+press A
+wait 40
+press A
+wait 40
+press A
+wait 40
+press A
+wait 40
+press A
+wait 40
+press A
+wait 40
+press A
+wait 40
+checkpoint save_prompt window=30
+press A
+wait 60
+wait 60
+press A
+wait 60
+# until changed timeout=1200 every=5  [reached dingbat-bios+30 mgba+65 nba+35]
+wait 69
+wait 60
+checkpoint saved window=30
+
+[load]
+wait 600
+press A
+wait 1220
+press START
+wait 200
+checkpoint file_select window=30
+press A
+wait 60
+press A
+wait 300
+checkpoint resumed window=30
+press LEFT hold=60
+wait 20
+checkpoint walked window=30

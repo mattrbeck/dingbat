@@ -2,7 +2,7 @@
 @file Ninja Five-0 (U).gba
 @game ANXE
 @chip EEPROM
-@save skip: the game only writes a 12-byte signature at boot (LOAD GAME stays greyed out on the next boot); the first real save is after clearing Mission 1-1 (bank robbery), and the room behind the first door had no way on that I could find in budget
+@save skip: the game only writes a 12-byte signature at boot (LOAD GAME stays greyed out on the next boot); the first real save is after clearing Mission 1-1 (bank robbery), and its exit was not found in budget (the ground-floor door leads to a closed two-storey room; the balcony door, reached by grappling under the balcony and grabbing its edge, leads to a room split by a pillar with a gunman and a solid red bag on each side)
 @frozen dingbat-bios,mgba
 
 # New Game > Normal > Mission 1 (bank): briefing, then the street: slash

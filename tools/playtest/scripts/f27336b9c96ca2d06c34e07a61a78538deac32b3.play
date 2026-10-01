@@ -1,0 +1,176 @@
+@title Mother 1+2 (Japan)
+@file Mother 1+2 (J).gba
+@game A2UJ
+@chip SRAM
+@frozen dingbat-bios,mgba,nba
+
+# MOTHER (the first game): GAME (1), hero named "あ", the default
+# companion names, favourite food "あ". In Ninten's bedroom the possessed
+# lamp attacks (A through the fight), then down the hall stairs to the
+# living room and the phone: the first call is Dad's story, the second
+# offers きろくする, which records the game ("たたかいのきろくは つけといたよ"),
+# then つづける.
+# In the live session the room-entry fades looked different on the three
+# (f9532, and f2124 after loading); the frozen replay is identical on all
+# three at every checkpoint, so those were not reproduced.
+[new]
+wait 600
+checkpoint game_select window=30
+press A
+wait 300
+wait 600
+press START
+wait 120
+checkpoint title window=30
+press START
+wait 120
+wait 60
+press A
+wait 90
+press A
+wait 20
+press START
+wait 20
+press START
+wait 40
+press START
+wait 40
+press START
+wait 40
+press A
+wait 20
+press START
+wait 60
+checkpoint confirm_names window=30
+press A
+wait 300
+tap A times=40 every=30 hold=4
+tap A times=60 every=30 hold=4
+press B
+wait 20
+checkpoint bedroom window=30
+press LEFT hold=60
+wait 30
+press UP hold=30
+press LEFT hold=60
+wait 30
+wait 300
+press DOWN hold=30
+press RIGHT hold=30
+wait 20
+press LEFT hold=150
+wait 20
+press RIGHT hold=50
+press UP hold=50
+press LEFT hold=40
+wait 40
+press LEFT hold=30
+press DOWN hold=10
+press LEFT hold=30
+wait 60
+press DOWN hold=16
+press RIGHT hold=40
+wait 60
+checkpoint lamp_battle window=30
+tap A times=40 every=30 hold=4
+press B
+wait 20
+press B
+wait 20
+press B
+wait 20
+press LEFT hold=40
+wait 60
+press DOWN hold=30
+press LEFT hold=150
+wait 20
+press LEFT hold=100
+press UP hold=60
+wait 60
+wait 90
+press UP hold=80
+wait 60
+press DOWN hold=60
+wait 60
+press UP+LEFT hold=60
+wait 60
+press RIGHT hold=30
+press UP+LEFT hold=80
+wait 60
+press LEFT hold=20
+wait 60
+wait 60
+press RIGHT hold=40
+press DOWN hold=30
+wait 30
+checkpoint living_room window=30
+press UP hold=40
+press RIGHT hold=150
+wait 20
+wait 30
+press RIGHT hold=4
+press A
+wait 30
+press A
+wait 60
+press A
+wait 60
+press A
+wait 60
+press A
+wait 60
+press A
+wait 60
+press A
+wait 60
+press A
+wait 60
+press A
+wait 60
+press A
+wait 60
+press A
+wait 60
+press A
+wait 60
+press A
+wait 60
+press A
+wait 30
+press A
+wait 60
+press A
+wait 60
+press A
+wait 60
+press A
+wait 60
+press A
+wait 60
+checkpoint save_prompt window=30
+press A
+wait 60
+press A
+wait 60
+checkpoint saved window=30
+press A
+wait 60
+press A
+wait 60
+
+[load]
+wait 600
+press A
+wait 900
+press START
+wait 120
+press START
+wait 120
+checkpoint file_select window=30
+press A
+wait 300
+wait 60
+checkpoint resumed window=30
+press LEFT hold=60
+wait 20
+checkpoint walked window=30
