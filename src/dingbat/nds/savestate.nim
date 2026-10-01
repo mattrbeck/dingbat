@@ -325,18 +325,19 @@ template obj_section(s, tag, title, x, skip: untyped) =
   when typeof(s) is Layout: dec s.depth
 
 proc io_machine[S](s: var S; n: NDS) =
-  ## The payload after the preamble: one section per subsystem object.
+  ## The payload after the preamble: one section per subsystem object,
+  ## those of fixed size first. Sections holding seqs whose length changes
+  ## while a game runs (the card's transfer, the IPC FIFOs, the event queue,
+  ## the GX FIFO and polygon/vertex RAM) come last, so between two snapshots
+  ## everything before them stays at the same offset: a rewind ring's XOR
+  ## delta of a 6 MB SoulSilver payload is then mostly zeros. The tags are
+  ## the sections' names, not their order.
   obj_section(s, 1, "machine (NDS)", n[], NDS_SKIP)
-  obj_section(s, 2, "scheduler", n.sched[], NO_SKIP)
   obj_section(s, 3, "ARM9", n.arm9[], CPU_SKIP)
   obj_section(s, 4, "ARM7", n.arm7[], CPU_SKIP)
   obj_section(s, 5, "ARM9 memory timing (cache tags)", n.tm, TIMING_SKIP)
   obj_section(s, 6, "display (Gpu)", n.gpu[], GPU_SKIP)
   obj_section(s, 7, "VRAM", n.gpu.vram[], VRAM_SKIP)
-  obj_section(s, 8, "2D engine A", n.gpu.engine_a[], ENGINE_SKIP)
-  obj_section(s, 9, "2D engine B", n.gpu.engine_b[], ENGINE_SKIP)
-  obj_section(s, 10, "3D engine (Gpu3d)", n.gpu3d[], GPU3D_SKIP)
-  obj_section(s, 11, "3D geometry", n.gpu3d.geo[], NO_SKIP)
   obj_section(s, 12, "3D renderer", n.gpu3d.ren[], RENDER_SKIP)
   obj_section(s, 13, "ARM9 IRQ", n.irq9[], NO_SKIP)
   obj_section(s, 14, "ARM7 IRQ", n.irq7[], NO_SKIP)
@@ -344,17 +345,25 @@ proc io_machine[S](s: var S; n: NDS) =
   obj_section(s, 16, "ARM7 timers", n.timers7[], TIMERS_SKIP)
   obj_section(s, 17, "ARM9 DMA", n.dma9[], DMA_SKIP)
   obj_section(s, 18, "ARM7 DMA", n.dma7[], DMA_SKIP)
-  obj_section(s, 19, "IPC FIFOs", n.ipc[], IPC_SKIP)
   obj_section(s, 20, "IPC ARM9 side", n.ipc.arm9[], IPC_END_SKIP)
   obj_section(s, 21, "IPC ARM7 side", n.ipc.arm7[], IPC_END_SKIP)
   obj_section(s, 22, "DIV/SQRT", n.divsqrt[], DIVSQRT_SKIP)
   obj_section(s, 23, "input", n.input[], NO_SKIP)
   obj_section(s, 24, "SPI (power manager, firmware flash, touch)", n.spi[], SPI_SKIP)
-  obj_section(s, 25, "card", n.cart[], CART_SKIP)
-  obj_section(s, 26, "backup chip", n.cart.backup[], BACKUP_SKIP)
   obj_section(s, 27, "sound", n.spu[], SPU_SKIP)
   obj_section(s, 28, "RTC", n.rtc[], RTC_SKIP)
   obj_section(s, 29, "wifi", n.wifi[], WIFI_SKIP)
+  # the save chip's size is fixed once the game has used it
+  obj_section(s, 26, "backup chip", n.cart.backup[], BACKUP_SKIP)
+  # the main-memory display frame appears once and stays
+  obj_section(s, 8, "2D engine A", n.gpu.engine_a[], ENGINE_SKIP)
+  obj_section(s, 9, "2D engine B", n.gpu.engine_b[], ENGINE_SKIP)
+  # lengths that change frame to frame
+  obj_section(s, 25, "card", n.cart[], CART_SKIP)
+  obj_section(s, 19, "IPC FIFOs", n.ipc[], IPC_SKIP)
+  obj_section(s, 2, "scheduler", n.sched[], NO_SKIP)
+  obj_section(s, 10, "3D engine (Gpu3d)", n.gpu3d[], GPU3D_SKIP)
+  obj_section(s, 11, "3D geometry", n.gpu3d.geo[], NO_SKIP)
   section(s, 0xFF'u8, "end")
 
 # ---------------------------------------------------------------------------
