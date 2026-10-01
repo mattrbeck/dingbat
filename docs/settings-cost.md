@@ -27,7 +27,7 @@ read within 0.1 % on FireRed.
 | Run-ahead 1 / 2 / 3 | off (0) | emulator CPU | +118 / +213 / +308 % | **+104 / +199 / +294 %** | +133 / +240 / +325 % → **+101 / +200 / +290 %** |
 | Enhanced music (MP2K HLE) | off | emulator CPU | +3.4 % (native +3.8 %) | unchanged | n/a |
 | Audio interpolation | **on** | emulator CPU | +0.3 % (native +0.34 %) | unchanged | n/a |
-| Pitch-correct fast-forward | off | emulator CPU, FF only | +3.1 % of FF speed, 0 at 1x | **+1.1 %** of FF speed, 0 at 1x | +7.0 % → **+2.9 %** of FF speed |
+| Pitch-correct fast-forward | **on** (was off) | emulator CPU, FF only | +3.1 % of FF speed, 0 at 1x | **+1.1 %** of FF speed, 0 at 1x | +7.0 % → **+2.9 %** of FF speed |
 | LCD response | off | emulator CPU | +3.4 % | **+0.6 %** standing (walking −4 % only) | +4.5 % → **+0.6 %** |
 | Colour correction | **on** | GPU shader | 0 CPU; +0.013 ms/present | unchanged | 0 CPU |
 | Filter: LCD grid | none | GPU | +0.001 ms/present | unchanged | |
@@ -35,7 +35,7 @@ read within 0.1 % on FireRed.
 | Filter: RGB subpixels | none | GPU (6x backing) | +0.17 ms/present | unchanged | |
 | Filter: xBR | none | GPU | +0.23 ms/present | unchanged | |
 | Ambient glow | off | GPU process / main thread | +0.40–0.64 ms/frame GPU process (blur + mask recomposited every frame) | **+0.07–0.08 ms/frame** GPU process; main thread 0.007 ms/frame, 0 while the picture is still | |
-| Analog filter | off | audio thread | 0.013 ms per frame-equivalent, off the emulation thread | unchanged | n/a |
+| Analog filter | **on** (was off) | audio thread, GBA games only | 0.013 ms per frame-equivalent, off the emulation thread | unchanged | n/a (Game Boy games are not filtered) |
 | GBA BIOS: real BIOS | HLE | emulator CPU | +5.7 % (native +6.0 %) | unchanged (inherent) | n/a |
 | GBA BIOS: real boot, HLE calls | HLE | one-time | 0 after boot | | n/a |
 | Play BIOS intro | **on** | one-time | 0 after boot (needs a BIOS file) | | n/a |
@@ -63,6 +63,26 @@ These run beside emulation, so they slow a game only on a device whose GPU
 or spare cores are already saturated. `web/bench/glowshots.mjs` captures
 the real app with the glow on, at an identical held frame per build, for
 before/after pictures.
+
+## Defaults changed on 2026-09-30
+
+Decided on the numbers above; every other default stayed.
+
+* **Pitch-correct fast-forward: on.** Both APUs reach the stretcher only
+  while turbo is set (and allocate it only then), so it costs nothing at
+  normal speed; in fast-forward it costs ~1 % (GBA) to ~3 % (GB) of
+  fast-forward speed.
+* **Analog filter: on, GBA games only.** It runs on the audio thread on the
+  web (a `BiquadFilterNode`) and once per output sample natively, never in
+  the emulation loop. The web build used to filter Game Boy games too,
+  against its own label and the desktop build; it is now routed out of the
+  graph for them.
+* **Existing settings.** Web and desktop both saved every audio field with
+  any change, so a stored `false` for these two from before could be the old
+  default rather than a choice. Records from before the change take the new
+  defaults once (web `audio` record `rev: 2`, desktop `defaults_rev: 2`);
+  turned off after that, they stay off. Tests: `web/tests/audio-defaults.test.mjs`,
+  `tests/desktop_settings_test.nim`.
 
 ## What changed (each commit on the branch)
 

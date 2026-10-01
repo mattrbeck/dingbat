@@ -8414,12 +8414,21 @@ const syncVolumeUI = () => {
   muteBtn.title = muted ? "Unmute" : "Mute";
 };
 
+// The "audio" record's defaults revision. Rev 2 (2026-09-30) turned
+// pitch-correct fast-forward and the analog filter on by default. Every
+// audio change writes all six fields, so a rev-1 record's `false` for those
+// two is the old default saved alongside a volume change, not a choice
+// (neither could be turned off without first being turned on): a rev-1
+// record takes the new defaults for them once.
+const AUDIO_REV = 2;
+
 let audioSaveTimer = null;
 const saveAudioSettings = () => {
   if (!db) return;
   clearTimeout(audioSaveTimer);
   audioSaveTimer = setTimeout(
-    () => dbPut("audio", { volume, muted, pitchCorrectFF, audioLowpass, mp2kHle, fifoInterp }), 250);
+    () => dbPut("audio", { rev: AUDIO_REV, volume, muted, pitchCorrectFF, audioLowpass,
+                           mp2kHle, fifoInterp }), 250);
 };
 
 const setVolume = (v) => {
@@ -8446,10 +8455,11 @@ const loadAudioSettings = async () => {
     syncVolumeUI();
     if (typeof updateGain === "function") updateGain();
   }
-  if (s && typeof s.pitchCorrectFF === "boolean") pitchCorrectFF = s.pitchCorrectFF;
+  const current = !!s && s.rev === AUDIO_REV;
+  if (current && typeof s.pitchCorrectFF === "boolean") pitchCorrectFF = s.pitchCorrectFF;
   if (pcffToggle) pcffToggle.checked = pitchCorrectFF;
   applyPitchCorrectFF();
-  if (s && typeof s.audioLowpass === "boolean") audioLowpass = s.audioLowpass;
+  if (current && typeof s.audioLowpass === "boolean") audioLowpass = s.audioLowpass;
   if (lowpassToggle) lowpassToggle.checked = audioLowpass;
   applyAudioLowpass();
   if (s && typeof s.mp2kHle === "boolean") mp2kHle = s.mp2kHle;
@@ -8497,7 +8507,9 @@ const loadColorCorrect = async () => {
 
 // --- Pitch-correct fast-forward (WSOLA time-stretch at 2x) ---
 // Persisted in the "audio" record; independent of the rollback-synced 2x state.
-var pitchCorrectFF = false;
+// On by default: the APUs reach the stretcher only while turbo is set, so it
+// costs nothing at normal speed (~1-3 % of fast-forward speed when used).
+var pitchCorrectFF = true;
 const pcffToggle = /** @type {HTMLInputElement} */ (document.getElementById("pitch-correct-ff-toggle"));
 
 const applyPitchCorrectFF = () => {
@@ -8559,8 +8571,10 @@ if (mp2kHleToggle) {
 }
 
 // --- Analog low-pass filter (optional BiquadFilter) ---
-// Off by default: routed out of the graph, bit-identical to no filter.
-var audioLowpass = false;
+// On by default, GBA games only (the GBA's own output filter and speaker).
+// Off, or on a Game Boy game, it is routed out of the graph: bit-identical
+// to no filter. It runs on the audio thread, never the emulation's.
+var audioLowpass = true;
 const lowpassToggle = /** @type {HTMLInputElement} */ (document.getElementById("audio-lowpass-toggle"));
 
 const applyAudioLowpass = () => {
@@ -9560,8 +9574,8 @@ const resetAllSettings = async () => {
   volume = 100; muted = false;
   syncVolumeUI();
   if (typeof updateGain === "function") updateGain();
-  pitchCorrectFF = false;
-  if (pcffToggle) pcffToggle.checked = false;
+  pitchCorrectFF = true;
+  if (pcffToggle) pcffToggle.checked = true;
   applyPitchCorrectFF();
   mp2kHle = false;
   if (mp2kHleToggle) mp2kHleToggle.checked = false;
@@ -9569,8 +9583,8 @@ const resetAllSettings = async () => {
   fifoInterp = true;
   if (fifoInterpToggle) fifoInterpToggle.checked = true;
   applyFifoInterp();
-  audioLowpass = false;
-  if (lowpassToggle) lowpassToggle.checked = false;
+  audioLowpass = true;
+  if (lowpassToggle) lowpassToggle.checked = true;
   applyAudioLowpass();
 
   colorCorrect = true;
@@ -9824,6 +9838,7 @@ const loadRom = async (romName, originalName, opts = {}) => {
   loadingName = null;
   currentRomName = romName;
   currentOriginalName = name;
+  applyAudioLowpass(); // the filter follows the machine: GBA in, GB out
   lastFrameSig = null; // a new game: the tick's skip must not carry over
   // The session the home screen chose to go back into, put back in this same
   // synchronous run so no frame of the boot is ever drawn. Checked once more
@@ -13436,7 +13451,10 @@ var Module = {
     const routeOutput = () => {
       if (!audioCtx || !gainNode) return;
       try { gainNode.disconnect(); } catch (e) {}
-      if (typeof audioLowpass !== "undefined" && audioLowpass) {
+      // GBA games only, as the setting says: the filter models the GBA's
+      // output stage, and a Game Boy game keeps the unfiltered path.
+      if (typeof audioLowpass !== "undefined" && audioLowpass &&
+          !!currentRomName && extOf(currentRomName) === ".gba") {
         if (!lowpassNode) {
           lowpassNode = audioCtx.createBiquadFilter();
           lowpassNode.type = "lowpass";

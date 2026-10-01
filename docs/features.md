@@ -62,8 +62,9 @@ origins allowlist — https required off localhost, raw IPs rejected).
 - Open ROMs; select a BIOS file; rebind keys; controller support
 - Save states (nine slots with thumbnails, Quick Save / Quick Load); a refused state says
   why (wrong ROM, newer build, corrupt)
-- Cheats; rewind; fast forward and 2x (pitch-preserving WSOLA, opt-in); pause and frame
-  advance; screenshots; volume and per-channel audio
+- Cheats; rewind; fast forward and 2x (pitch-preserving WSOLA, on by default, costing
+  nothing at normal speed); pause and frame advance; screenshots; volume and per-channel
+  audio
 - LCD color correction per panel; scanlines; LCD response (DMG / CGB / AGB-001 / AGS-101
   ghosting models); hq4x / xBR upscaling
 - MBC5 rumble (controller rumble + screen shake)
@@ -85,7 +86,8 @@ origins allowlist — https required off localhost, raw IPs rejected).
 ## Game Boy Advance
 
 - Direct Sound and PSG audio; optional "Improve audio quality" mode re-renders MP2K/M4A
-  music per note above the FIFO's mix rate
+  music per note above the FIFO's mix rate; an analog filter (~12 kHz low-pass, the
+  GBA's output stage and speaker) on by default
 - HLE BIOS — gaps in [hle-bios-shortcomings.md](hle-bios-shortcomings.md)
 - PPU modes 0–5, affine backgrounds and sprites, alpha blending, windowing, mosaic
 - CPU passes armwrestler, FuzzARM and all 13 jsmolka/gba-tests ROMs
