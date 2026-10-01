@@ -51,8 +51,10 @@ type
     cycles*: int64          ## master-clock timestamp this CPU has reached
     base_cycles*: int64     ## master cycles charged per instruction
     vector_base*: uint32    ## 0xFFFF0000 (ARM9, CP15 control bit 13) or 0
+    no_load_interwork*: bool  ## CP15 control bit 15 ("pre-ARMv5 mode"): LDR,
+                              ## LDM and POP to r15 keep the T bit (GBATEK)
     instr_count*: uint64
-    trace*: bool
+    trace*: int             ## instructions left to log to stderr (debug)
 
 proc bank_of(mode: uint32): int {.inline.} =
   case mode and 0x1F
@@ -119,6 +121,15 @@ proc jump_interwork*[B](cpu: ArmCpu[B]; target: uint32) {.inline.} =
   else:
     cpu.cpsr = cpu.cpsr and not FLAG_T
     cpu.next_pc = target and not 3'u32
+
+proc jump_load[B](cpu: ArmCpu[B]; target: uint32) {.inline.} =
+  ## A load into r15 (LDR, LDM, POP): ARMv5 interworks unless CP15 control
+  ## bit 15 is set; ARMv4 stays in the current state.
+  mixin armv5
+  when armv5(B):
+    if cpu.no_load_interwork: cpu.jump(target) else: cpu.jump_interwork(target)
+  else:
+    cpu.jump(target)
 
 proc exception*[B](cpu: ArmCpu[B]; mode: CpuMode; vector: uint32; lr: uint32) =
   let old = cpu.cpsr
@@ -312,15 +323,19 @@ proc arm_mrs[B](cpu: ArmCpu[B]; instr: uint32) =
   cpu.r[rd] = if (instr and (1'u32 shl 22)) != 0: cpu.spsr else: cpu.cpsr
 
 proc arm_msr[B](cpu: ArmCpu[B]; instr: uint32) =
-  let value =
+  mixin armv5
+  # PSR bits that exist: NZCV, Q on ARMv5, and the control byte; mode bit 4
+  # is wired high (no 26-bit modes on either core).
+  const psr_bits = when armv5(B): 0xF800_00FF'u32 else: 0xF000_00FF'u32
+  var value =
     if (instr and (1'u32 shl 25)) != 0:
       rotateRightBits(instr and 0xFF, ((instr shr 8) and 0xF) * 2)
     else: cpu.r[instr and 0xF]
+  value = value or 0x10
   var mask = 0'u32
   if (instr and (1'u32 shl 19)) != 0: mask = mask or 0xFF00_0000'u32
-  if (instr and (1'u32 shl 18)) != 0: mask = mask or 0x00FF_0000'u32
-  if (instr and (1'u32 shl 17)) != 0: mask = mask or 0x0000_FF00'u32
   if (instr and (1'u32 shl 16)) != 0: mask = mask or 0x0000_00FF'u32
+  mask = mask and psr_bits
   if (instr and (1'u32 shl 22)) != 0:
     if bank_of(cpu.cpsr) != 0:
       cpu.spsr = (cpu.spsr and not mask) or (value and mask)
@@ -378,10 +393,7 @@ proc load_word_rotated[B](cpu: ArmCpu[B]; a: uint32): uint32 {.inline.} =
 
 proc write_reg_load[B](cpu: ArmCpu[B]; rd: int; v: uint32) {.inline.} =
   ## A load into rd; r15 interworks on ARMv5.
-  mixin armv5
-  if rd == 15:
-    when armv5(B): cpu.jump_interwork(v)
-    else: cpu.jump(v)
+  if rd == 15: cpu.jump_load(v)
   else:
     cpu.r[rd] = v
 
@@ -461,7 +473,9 @@ proc arm_halfword_transfer[B](cpu: ArmCpu[B]; instr: uint32) =
         cpu.r[rd] = lo
         cpu.write_reg_load(rd + 1, hi)
       else:
-        cpu.undefined_instr()
+        # ARM7TDMI: no transfer, no exception, but the base is written back
+        # (arm7wrestler, hardware-verified)
+        if wb: cpu.r[rn] = offset_addr
     else: # STRD
       when armv5(B):
         if (rd and 1) != 0: cpu.undefined_instr(); return
@@ -470,7 +484,7 @@ proc arm_halfword_transfer[B](cpu: ArmCpu[B]; instr: uint32) =
                 if rd + 1 == 15: cpu.cur_pc + 12 else: cpu.r[rd + 1])
         if wb: cpu.r[rn] = offset_addr
       else:
-        cpu.undefined_instr()
+        if wb: cpu.r[rn] = offset_addr  # as LDRD above
 
 proc arm_block_transfer[B](cpu: ArmCpu[B]; instr: uint32) =
   mixin read32, write32, armv5
@@ -483,17 +497,19 @@ proc arm_block_transfer[B](cpu: ArmCpu[B]; instr: uint32) =
   var list = instr and 0xFFFF
   var count = uint32(countSetBits(list))
   let base = cpu.r[rn]
-  var empty = false
   if list == 0:
     # Empty list: ARMv4 transfers r15 and steps the base by 0x40; ARMv5
-    # transfers nothing but still steps the base.
-    empty = true
+    # transfers nothing but still steps the base (GBATEK "ARM Opcodes:
+    # Memory: Block Data Transfer").
     when not armv5(B): list = 0x8000
     count = 16
   let start =
     if u: (if p: base + 4 else: base)
     else: (if p: base - count * 4 else: base - count * 4 + 4)
   let new_base = if u: base + count * 4 else: base - count * 4
+  let rn_bit = 1'u32 shl rn
+  # S without a loaded r15: the user-bank registers are transferred, but the
+  # base and its writeback stay in the current mode's bank.
   let user_bank = s and (not load or (list and 0x8000) == 0)
   var old_mode = 0'u32
   if user_bank:
@@ -501,40 +517,40 @@ proc arm_block_transfer[B](cpu: ArmCpu[B]; instr: uint32) =
     cpu.switch_mode(uint32(mUSR))
   var a = start
   if load:
-    if w: cpu.r[rn] = new_base
+    # Rb in the list with writeback: ARMv4 keeps the loaded value; ARMv5
+    # writes back if Rb is the only register or not the last one (GBATEK).
+    var wb = w
+    if (list and rn_bit) != 0:
+      when armv5(B): wb = w and (list == rn_bit or (list and not ((rn_bit shl 1) - 1)) != 0)
+      else: wb = false
+    var pc_val = 0'u32
     for i in 0..15:
       if (list and (1'u32 shl i)) != 0:
         let v = read32(cpu.bus, a and not 3'u32)
         a += 4
-        if i == 15:
-          if s and not user_bank:
-            cpu.restore_spsr()
-            cpu.jump(v)
-          else:
-            when armv5(B): cpu.jump_interwork(v)
-            else: cpu.jump(v)
-        else:
-          cpu.r[i] = v
-    # ARMv5 keeps the written-back base if rn is in the list but not the
-    # only/last register; ARMv4 always takes the loaded value.
-    when armv5(B):
-      if w and (list and (1'u32 shl rn)) != 0:
-        let higher = list and not ((2'u32 shl rn) - 1)
-        if higher != 0 or list == (1'u32 shl rn):
-          if list != (1'u32 shl rn): cpu.r[rn] = new_base
+        if i == 15: pc_val = v
+        else: cpu.r[i] = v
+    if user_bank: cpu.switch_mode(old_mode)
+    if wb: cpu.r[rn] = new_base
+    if (list and 0x8000) != 0:
+      if s:
+        cpu.restore_spsr()
+        cpu.jump(pc_val)
+      else:
+        cpu.jump_load(pc_val)
   else:
-    var first = true
+    # ARMv4 stores the new base for Rb not first in the list; ARMv5 always
+    # stores the old base.
+    let first_bit = list and (not list + 1)
     for i in 0..15:
       if (list and (1'u32 shl i)) != 0:
         var v = if i == 15: cpu.cur_pc + 12 else: cpu.r[i]
         when not armv5(B):
-          if i == rn and not first and w: v = new_base
+          if i == rn and w and first_bit != rn_bit: v = new_base
         write32(cpu.bus, a and not 3'u32, v)
         a += 4
-        first = false
+    if user_bank: cpu.switch_mode(old_mode)
     if w: cpu.r[rn] = new_base
-  if user_bank: cpu.switch_mode(old_mode)
-  discard empty
 
 proc arm_branch[B](cpu: ArmCpu[B]; instr: uint32) =
   let offset = uint32(cast[int32](instr shl 8) shr 6)
@@ -633,6 +649,16 @@ proc arm_coproc_transfer[B](cpu: ArmCpu[B]; instr: uint32) =
         cp15_write(cpu.bus, op1, cn, cm, op2,
                    if rd == 15: cpu.cur_pc + 12 else: cpu.r[rd])
       return
+  else:
+    # ARM7TDMI: CP14 is the EmbeddedICE debug comms channel; with no debugger
+    # attached reads are 0 and writes vanish. MRC p14 does not trap on the DS
+    # (arm7wrestler); p15 and the rest are undefined.
+    if cp == 14:
+      if (instr and (1'u32 shl 20)) != 0:
+        let rd = int((instr shr 12) and 0xF)
+        if rd == 15: cpu.cpsr = cpu.cpsr and 0x0FFF_FFFF'u32
+        else: cpu.r[rd] = 0
+      return
   cpu.undefined_instr()
 
 proc execute_arm*[B](cpu: ArmCpu[B]; instr: uint32) =
@@ -677,7 +703,10 @@ proc execute_arm*[B](cpu: ArmCpu[B]; instr: uint32) =
           elif (instr and 0x0F90_0090'u32) == 0x0100_0080'u32: cpu.arm_signed_mul16(instr)
           else: cpu.undefined_instr()
         else:
-          cpu.undefined_instr()
+          # ARM7TDMI: CLZ/Q*/BKPT/BLX (bit 4 set) are undefined, the
+          # halfword multiplies (bit 7 set, bit 4 clear) execute as nothing
+          # (arm7wrestler, hardware-verified)
+          if (instr and 0x10) != 0: cpu.undefined_instr()
     else:
       cpu.arm_data_processing(instr)
   of 1:
@@ -843,9 +872,7 @@ proc execute_thumb*[B](cpu: ArmCpu[B]; instr: uint32) =
           if (list and (1'u32 shl i)) != 0:
             cpu.r[i] = read32(cpu.bus, a and not 3'u32); a += 4
         if r:
-          let v = read32(cpu.bus, a and not 3'u32); a += 4
-          when armv5(B): cpu.jump_interwork(v)
-          else: cpu.jump(v)
+          cpu.jump_load(read32(cpu.bus, a and not 3'u32)); a += 4
         cpu.r[13] = a
       else:
         let n = uint32(countSetBits(list)) + (if r: 1'u32 else: 0'u32)
@@ -878,12 +905,8 @@ proc execute_thumb*[B](cpu: ArmCpu[B]; instr: uint32) =
       for i in 0..7:
         if (list and (1'u32 shl i)) != 0:
           cpu.r[i] = read32(cpu.bus, a and not 3'u32); a += 4
-      # writeback unless rb was loaded (ARMv5: also if rb is not the last)
+      # no writeback when rb is loaded, ARMv5 included (GBATEK)
       if (list and (1'u32 shl rb)) == 0: cpu.r[rb] = a
-      else:
-        when armv5(B):
-          if (list and not ((2'u32 shl rb) - 1)) != 0 and list != (1'u32 shl rb):
-            cpu.r[rb] = a
     else:
       var first = true
       for i in 0..7:
@@ -923,6 +946,14 @@ proc execute_thumb*[B](cpu: ArmCpu[B]; instr: uint32) =
 # ---------------------------------------------------------------------------
 # Run loop
 
+proc trace_instr(cpu: ArmCpu; instr: uint32) {.noinline.} =
+  dec cpu.trace
+  var line = toHex(cpu.cur_pc, 8) & ": " &
+             (if cpu.thumb: "    " & toHex(instr, 4) else: toHex(instr, 8))
+  for i in 0..14: line.add(" " & toHex(cpu.r[i], 8))
+  line.add(" " & toHex(cpu.cpsr, 8))
+  stderr.writeLine(line)
+
 proc step*[B](cpu: ArmCpu[B]) {.inline.} =
   mixin fetch16, fetch32, irq_line, access_cycles
   if irq_line(cpu.bus) and (cpu.cpsr and FLAG_I) == 0:
@@ -931,11 +962,13 @@ proc step*[B](cpu: ArmCpu[B]) {.inline.} =
   cpu.cur_pc = a
   if cpu.thumb:
     let instr = fetch16(cpu.bus, a)
+    if unlikely(cpu.trace > 0): cpu.trace_instr(instr)
     cpu.next_pc = a + 2
     cpu.r[15] = a + 4
     cpu.execute_thumb(instr)
   else:
     let instr = fetch32(cpu.bus, a)
+    if unlikely(cpu.trace > 0): cpu.trace_instr(instr)
     cpu.next_pc = a + 4
     cpu.r[15] = a + 8
     cpu.execute_arm(instr)
