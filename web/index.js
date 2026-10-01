@@ -471,6 +471,7 @@ var currentRomName = null;
 var currentOriginalName = null;
 var paused = false;
 var fastForward = false;
+var resumeAudio = () => {}; // set once the runtime initializes
 
 const pauseButton = document.getElementById("pause");
 const resetButton = document.getElementById("reset");
@@ -493,6 +494,7 @@ const loadRom = async (romName, originalName) => {
   // Restore save for the new ROM
   await restoreSave(romName, currentOriginalName);
   Module.ccall("initFromEmscripten", null, ["string"], [romName]);
+  resumeAudio();
 };
 
 document.getElementById("open-rom").addEventListener("click", () => {
@@ -553,19 +555,47 @@ var Module = {
     let audioCtx = null;
     let playTime = 0;
 
+    // iOS Safari (16.4+): "ambient" mixes with other apps' audio (e.g. Music)
+    // and respects the silent switch, instead of the default "playback"
+    // session that interrupts background audio.
+    if (navigator.audioSession) {
+      try {
+        navigator.audioSession.type = "ambient";
+      } catch (e) {}
+    }
+
     const initAudio = () => {
       if (audioCtx) return;
       audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
       playTime = 0;
     };
 
-    // Resume audio context on first user interaction (browser autoplay policy)
-    const resumeAudio = () => {
-      initAudio();
-      if (audioCtx.state === "suspended") audioCtx.resume();
+    // Only hold an active AudioContext while a game is actually running, so
+    // the page doesn't keep the system audio session when idle, paused, or
+    // in the background.
+    const audioWanted = () =>
+      currentRomName !== null && !paused && document.visibilityState === "visible";
+
+    const syncAudio = () => {
+      if (!audioCtx) return;
+      if (audioWanted()) {
+        if (audioCtx.state === "suspended") audioCtx.resume();
+      } else if (audioCtx.state === "running") {
+        audioCtx.suspend();
+      }
     };
-    document.addEventListener("click", resumeAudio, { once: false });
-    document.addEventListener("keydown", resumeAudio, { once: false });
+
+    // Create/resume the context from a user gesture (browser autoplay policy)
+    resumeAudio = () => {
+      if (!audioWanted()) return;
+      initAudio();
+      syncAudio();
+    };
+    document.addEventListener("click", resumeAudio);
+    document.addEventListener("keydown", resumeAudio);
+    document.addEventListener("touchend", resumeAudio);
+    document.addEventListener("visibilitychange", syncAudio);
+    pauseButton.addEventListener("click", syncAudio);
 
     const pushAudio = () => {
       if (!audioCtx || audioCtx.state !== "running") return;

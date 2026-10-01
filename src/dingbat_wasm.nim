@@ -128,7 +128,10 @@ when defined(emscripten):
   proc dummyLoop() {.cdecl.} = discard
   emscripten_set_main_loop(dummyLoop, 0, 0)
 
-discard sdl2.init(INIT_VIDEO or INIT_AUDIO)
+# No INIT_AUDIO: audio goes through web/index.js. SDL's audio subsystem would
+# create its own AudioContext and resume it on every tap/keypress, which on iOS
+# claims the system audio session and interrupts other apps' playback.
+discard sdl2.init(INIT_VIDEO)
 stateWindow = createWindow("dingbat", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
                             GBA_W * 4, GBA_H * 4, SDL_WINDOW_SHOWN)
 stateRenderer = stateWindow.createRenderer(-1, Renderer_Accelerated)
