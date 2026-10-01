@@ -4,8 +4,10 @@
 ##   nim c -d:release --path:src -o:ndsrun tools/ndsrun.nim
 ##   ./ndsrun tests/nds/roms/fb_hello.nds --frames 10 --out /tmp/fb.png
 ##       [--bios DIR] [--press A@10,DOWN@20-25,TOUCH:128:96@30-40]
+##       [--wav OUT.wav]
 ##
 ## --bios defaults to $DINGBAT_NDS_BIOS (bios9.bin, bios7.bin, firmware.bin).
+## --wav writes the sound output of the whole run (16-bit stereo, 32728 Hz).
 ##
 ## Debug flags (build with -d:ndsdebug):
 ##   --trace9 N / --trace7 N   print N instructions of that CPU (pc + regs),
@@ -169,6 +171,7 @@ when isMainModule:
   var text_offset = 0
   var presses: seq[Press]
   var shot = ""
+  var wav = ""
   var p = initOptParser(commandLineParams(), shortNoVal = {'h'},
                         longNoVal = @["help", "iolog", "pcs"])
   for kind, key, val in p.getopt():
@@ -190,11 +193,13 @@ when isMainModule:
       of "text-offset": text_offset = parseInt(val)
       of "press": presses.add parse_presses(val)
       of "bgshot": shot = val
+      of "wav": wav = val
       else: quit("unknown option --" & key)
     of cmdEnd: discard
   if rom.len == 0: quit("usage: ndsrun ROM [--frames N] [--out PNG] [--bios DIR]")
   let n = load_nds(rom, bios)
   n.watch = watch
+  var audio: seq[float32]
   for f in 0 ..< frames:
     if f == trace_from:
       n.trace9 = trace9
@@ -209,6 +214,10 @@ when isMainModule:
       echo "frame ", f, " arm9 pc=", toHex(n.arm9.next_pc, 8),
            (if n.arm9.halted: " H" else: "  "), " arm7 pc=", toHex(n.arm7.next_pc, 8),
            (if n.arm7.halted: " H" else: "")
+    if wav.len > 0: audio.add n.spu.take_samples()
+  if wav.len > 0:
+    writeFile(wav, wav_bytes(audio))
+    echo "audio: ", audio.len div 2, " frames -> ", wav
   if shot.len == 2:
     # --bgshot A0: that BG replaces the top half of the PNG
     let px = n.bg_shot(shot[0] == 'B', ord(shot[1]) - ord('0'))

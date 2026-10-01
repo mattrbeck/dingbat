@@ -77,7 +77,7 @@ src/dingbat/nds/
   io/input.nim     KEYINPUT/KEYCNT/EXTKEYIN, touch, lid
   io/spi.nim       ARM7 SPI: power manager, firmware flash, touchscreen
   io/cart.nim      card slot (ROMCTRL, B7 reads), backup (stub)
-  io/spu.nim       ARM7 sound (stub)
+  io/spu.nim       ARM7 sound: 16 channels, capture, stereo out at 32728.5 Hz
   io/rtc.nim       ARM7 RTC (stub)
   io/wifi.nim      wifi registers (stub)
 src/dingbat_nds_wasm.nim(+.nims)  wasm exports for web/nds.html
@@ -115,7 +115,7 @@ Third-party test ROMs: `~/.cache/dingbat-nds/roms/` (tests/nds/README.md).
 | IRQ / timers / DMA / IPC / maths | gbeplus irq/math/dma, rockwrestler system tests, `pxi`, `timercallback` |
 | Input / touch / SPI / RTC | `touch_test` tracks the mouse |
 | 3D | `Simple_Tri`, `Simple_Quad` |
-| Sound | maxmod example plays |
+| Sound | maxmod example plays (so far: tests/nds_spu_test.nim and `snd_tone.nds`) |
 | Card + backup | a commercial ROM's B7 reads + save detection |
 | Timing | wait states, cache model, frame-rate-stable commercial boot |
 | Frontend | desktop SDL target with both screens; main web UI integration |

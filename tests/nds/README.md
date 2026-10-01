@@ -17,6 +17,7 @@ under Building if the cache is lost.
 |---|---|---|---|
 | `roms/fb_hello.nds` | `src/fb_hello` (ours) | ARM9 stores only | top screen gradient: TL blue, TR red, BL cyan, BR yellow (exact formula in `arm9.s`) |
 | `roms/fb_both.nds` | `src/fb_both` (ours) | + engine B backdrop | fb_hello on top, solid magenta (0x7C1F) bottom |
+| `roms/snd_tone.nds` | `src/snd_tone` (ours) | ARM7 I/O stores, SPU | green top, blue bottom; sound: 440 Hz PSG square (ch 8, panned left) + 220 Hz PCM8 saw (ch 0, panned right). `ndsrun --wav` dumps it |
 | `roms/armwrestler.nds` | [mic-/armwrestler](https://github.com/mic-/armwrestler), built by `tools/build_wrestlers.sh` | ARM9 ARM/Thumb, LCDC VRAM display, KEYINPUT, DISPSTAT polling | menu of ARM9 instruction tests (ALU, LDR/STR, LDM/STM, Thumb), pass/fail per row |
 | `roms/arm7wrestler.nds` | [Arisotura/arm7wrestler](https://github.com/Arisotura/arm7wrestler), same script | both CPUs; ARM7 runs the tests, ARM9 copies its frame | same menu run on the ARM7, including v5 opcodes that must be undefined/no-op there |
 | `roms/rockwrestler.nds` | [RockPolish/rockwrestler](https://github.com/RockPolish/rockwrestler) (prebuilt upstream) | both CPUs, IPCSYNC/IPCFIFO, DIV/SQRT, WRAMCNT, VRAMCNT, TCM, CP15 | ARMv4/v5 extras + DS system tests, LCDC display |
@@ -27,7 +28,7 @@ under Building if the cache is lost.
 
 Load/entry addresses:
 
-- `fb_*`, `arm7wrestler`: ARM9 0x02000000, ARM7 0x037F8000.
+- `fb_*`, `snd_tone`, `arm7wrestler`: ARM9 0x02000000, ARM7 0x037F8000.
 - `armwrestler`: ARM9 0x02004000, ARM7 0x03800000. Its crt0 puts the stacks at
   0x00803EC0/0x00803FA0 without touching CP15, so it relies on ITCM being
   mirrored across 0x00000000-0x01FFFFFF as it is after a normal boot.
@@ -41,7 +42,7 @@ Load/entry addresses:
 
 ## Building
 
-### No library (fb_*, wrestlers)
+### No library (fb_*, snd_tone, wrestlers)
 
 Only GNU binutils for `arm-none-eabi` (Homebrew `arm-none-eabi-binutils`, or
 devkitARM) and python3:
