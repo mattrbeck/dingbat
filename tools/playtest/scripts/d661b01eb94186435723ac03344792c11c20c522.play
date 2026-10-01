@@ -2,23 +2,36 @@
 @file Castlevania - Circle of the Moon (U) [!].gba
 @game AAME
 @chip SRAM
-@status wip: stops in the opening cutscene (Dracula's "you sealed me" line); mashing A on through the dialog (about 1,700 more frames) drops Nathan into the catacombs with control, but the game writes only its "DRACULA AGB" header at boot and nothing at name entry, so the first real save needs Nathan walked to the first save room. Explored live: from the landing spot RIGHT leads down a shaft of wooden ledges to a wall, the way on is left past a skeleton. A human should record: DATA SELECT, empty file, name AA, the opening dialog, walk to the first save room and touch the save statue, quit after the save message; [load]: DATA SELECT shows the file, pick it to resume in the save room.
-
-# Title skip -> DATA SELECT -> empty file -> name AA -> opening scroll and the
-# Dracula cutscene.
+@frozen dingbat-bios,mgba,nba
+@save skip: the first save room is further into the Catacombs (past the bone-throwing skeletons, down the plank shaft and along to the Dash Boots area); the skeletons' bone throws run on different frames in each emulator, so the first hit lands differently and the three runs drift apart
+# DATA SELECT > empty file > name AA > opening dialog (A taps) > Nathan lands
+# in the Catacombs; walk to the left wall, then right and down the shaft of
+# wooden planks past the skeletons to the bottom ledge.
+# Findings from the authoring sessions (lockstep, same inputs):
+# - nba: Nathan's landing pose/camera differs at f6698 and f7078; by f8110
+#   nba's Nathan is in another part of the shaft (knocked elsewhere).
+# - dingbat-bios vs mgba: identical to f7158; at f7178 the lower-left
+#   skeleton's throw pose differs (dingbat-bios is the odd one, mgba = nba),
+#   at f7188 mgba is the odd one (dingbat-bios = nba); bones in flight sit at
+#   different places at f7790 in all three. After the hit at ~f8058 the
+#   knockback differs and by f8178 dingbat-bios and mgba show different
+#   camera positions.
 
 [new]
 wait 600
 press START
-until text "Game" timeout=600 every=10
+# until text Game timeout=600 every=10
+wait 164
 wait 60
-checkpoint main_menu compare=text
+checkpoint main_menu window=30 compare=text
 press A
-until text "Choose" timeout=300 every=10
+# until text Choose timeout=300 every=10
+wait 34
 wait 30
 checkpoint data_select window=10
 press A
-until text "ENTRY" timeout=300 every=10
+# until text ENTRY timeout=300 every=10
+wait 34
 wait 30
 checkpoint name_entry window=10
 press A after=20
@@ -26,7 +39,39 @@ press A after=20
 press START after=30
 checkpoint name_aa window=10
 press A
-until text "1830" timeout=900 every=10
-checkpoint intro_scroll compare=text
-mash A until text "sealed" timeout=6000 every=20
-checkpoint dracula compare=text
+# until text 1830 timeout=900 every=10
+wait 414
+checkpoint intro_scroll window=30 compare=text
+# mash A until text sealed timeout=6000 every=20
+tap A times=159 every=20 hold=4
+checkpoint dracula window=30 compare=text
+tap A times=90 every=20 hold=4
+wait 30
+checkpoint catacombs window=0
+press LEFT hold=150
+press RIGHT hold=200
+wait 60
+press LEFT hold=20
+press LEFT hold=20
+wait 10
+press LEFT hold=40
+tap B times=6 every=15 hold=4
+checkpoint plank_shaft window=0
+tap B times=3 every=15 hold=4
+hold LEFT
+press A hold=20 after=10
+release
+tap B times=5 every=15 hold=4
+press LEFT hold=60
+wait 60
+press SELECT
+wait 40
+checkpoint map window=0 compare=text
+press SELECT
+wait 30
+press RIGHT hold=60
+tap B times=4 every=15 hold=4
+hold RIGHT
+tap B times=10 every=20 hold=4
+release
+checkpoint shaft_bottom window=0

@@ -2,35 +2,110 @@
 @file Castlevania - Harmony of Dissonance (U) [!].gba
 @game ACHE
 @chip SRAM
-@status wip: reaches Juste's first control on the castle bridge after the Juste/Maxim dialogue (New Game, name "A"); holding RIGHT runs into a giant armoured monster that blocks the bridge, and the first save needs Juste to get past it into the castle and reach the first save room (combat and platforming). A human should record: Game Start, New Game, name, skip the dialogue, fight/run through the entrance to the first save room, stand in it until the save message, quit. [load]: Game Start > Select data > DATA1 > resume in the save room.
+@frozen dingbat-bios,mgba,nba
+@save skip: the first save needs a save room inside the castle; the route found here (bridge chase, Entrance, break the atlas statue, the window hall) ends in the Shrine of the Apostates, where a brick pillar stops Juste and no way on to a save room was found
+# Game Start > DATA1 > name "A" > story > bridge dialogue; climb over the
+# wrecked machine on the bridge, outrun the giant armour (the drawbridge
+# crushes it), Entrance: whip the atlas statue so its beam falls as a ramp,
+# right through the window hall (zombies) into the Shrine of the Apostates.
+# Findings (lockstep, same inputs): the bridge lightning flashes on different
+# frames (f7220/f7480: only mgba white; f7765: all three in different
+# phases); the armour's death flames are laid out differently in all three
+# (f9730); heart drops from the hall's candles/zombies differ (on this
+# script's route the Shrine shows dingbat-bios 11, mgba 10, nba 15 hearts;
+# an earlier route with 300 more frames of walking gave 10/11/15); nba's
+# Juste shows the whip pose where the others are already walking.
 
 [new]
 wait 600
 press START
-until text "START" timeout=600 every=10
+# until text START timeout=600 every=10  [reached dingbat-bios+10 mgba+10 nba+10]
+wait 14
 wait 30
 checkpoint title window=30 compare=text
 press START
-until text "INFORMATION" timeout=600 every=10
+# until text INFORMATION timeout=600 every=10  [reached dingbat-bios+100 mgba+100 nba+90]
+wait 104
 wait 30
 press A
-until text "DATA1" timeout=600 every=10
+# until text DATA1 timeout=600 every=10  [reached dingbat-bios+20 mgba+20 nba+20]
+wait 24
 wait 30
 checkpoint select_data window=0 compare=text
 press A
 wait 120
 checkpoint name_entry window=0
-# name "A": A types it, START confirms
 press A after=20
 press START after=60
-until text "Simon" timeout=900 every=10
-checkpoint story compare=text
-until text "CASTLEVANIA" timeout=6000 every=20
-until notext "CASTLEVANIA" timeout=3000 every=20
-until text "Juste" timeout=900 every=10
+# until text Simon timeout=900 every=10  [reached dingbat-bios+160 mgba+170 nba+170]
+wait 174
+checkpoint story window=30 compare=text
+# until text CASTLEVANIA timeout=6000 every=20  [reached dingbat-bios+4140 mgba+4120 nba+4120]
+wait 4144
+# until notext CASTLEVANIA timeout=3000 every=20  [reached dingbat-bios+640 mgba+0 nba+640]
+wait 644
+# until text Juste timeout=900 every=10  [reached dingbat-bios+20 mgba+20 nba+20]
+wait 24
 wait 60
-checkpoint bridge_dialogue compare=text
-mash A until text "inside" timeout=3000 every=40
+checkpoint bridge_dialogue window=30 compare=text
+# mash A until text inside timeout=3000 every=40  [taps dingbat-bios:15 mgba:15 nba:15]
+tap A times=15 every=40 hold=4
 press A after=60
 wait 200
 checkpoint gameplay window=30
+press RIGHT hold=200
+press RIGHT hold=60
+hold RIGHT
+press A hold=25 after=60
+release
+press RIGHT hold=200
+hold RIGHT
+press A hold=25 after=80
+release
+press RIGHT hold=300
+press RIGHT hold=300
+press RIGHT hold=300
+press RIGHT hold=400
+press RIGHT hold=300
+checkpoint gate window=0 compare=none
+press RIGHT hold=200
+wait 60
+wait 200
+press RIGHT hold=120
+wait 60
+checkpoint entrance window=0 compare=none
+press RIGHT hold=250
+press RIGHT hold=4
+tap B times=6 every=20 hold=4
+wait 60
+press RIGHT hold=250
+press RIGHT hold=250
+tap B times=6 every=20 hold=4
+press RIGHT hold=60
+tap B times=4 every=20 hold=4
+tap B times=4 every=20 hold=4
+hold RIGHT
+tap B times=10 every=25 hold=4
+release
+hold RIGHT
+tap B times=12 every=30 hold=4
+release
+hold RIGHT
+tap B times=12 every=30 hold=4
+release
+press RIGHT hold=300
+press RIGHT hold=300
+wait 60
+press RIGHT hold=20
+press LEFT hold=10
+press RIGHT hold=1
+press B hold=4 after=10
+tap B times=4 every=25 hold=4
+press RIGHT hold=120
+press START
+wait 40
+press START
+wait 40
+press LEFT hold=20
+checkpoint shrine window=0
+

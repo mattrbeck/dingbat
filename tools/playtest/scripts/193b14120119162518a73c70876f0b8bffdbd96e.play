@@ -2,18 +2,49 @@
 @file Megaman Zero (U).gba
 @game AZCE
 @chip SRAM
-@status wip: the script replays to the "Watch out!!!" line of the opening; explored live to the opening stage after New Game (Ciel's rescue of Zero, "Watch out!!!", Zero in control in the ruins); the title has only NEW GAME / CONTINUE and nothing is written to SRAM until the first save at the Resistance Base, which needs the opening stage cleared, including the Golem boss. A human should record: New Game, play the opening stage and the Golem fight, at the Resistance Base save at Ciel's computer, quit after the save message. [load]: title > CONTINUE > the slot > the base.
+@frozen dingbat-bios,mgba,nba
+@save skip: nothing is written until the first save at the Resistance Base, after the opening stage (Pantheon waves, the long run, the Golem boss); the Pantheon waves already come in different formations in each emulator on the same inputs, so a lockstep route through the stage and the boss fight is not reproducible
+# NEW GAME, A taps through Ciel's rescue of Zero and "Watch out!!!", Zero in
+# control in the ruins: over the rubble, through the gate, wall-kick up the
+# cliff and buster shots at the first Pantheons.
+# Findings (lockstep, same inputs): f10910 nba draws Ciel as a white
+# silhouette where the others show her normally; f11820 the arriving
+# Pantheon squad sits in a different formation in each emulator; f12200 a
+# flying enemy is on screen only in dingbat-bios.
 
 [new]
-until text "PRESS START" timeout=1500 every=10
+# until text 'PRESS START' timeout=1500 every=10  [reached dingbat-bios+610 mgba+610 nba+610]
+wait 614
 wait 30
 checkpoint title window=0
 press START
-until text "GAME" timeout=300 every=5
+# until text GAME timeout=300 every=5  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 30
 checkpoint new_game window=0
 press A
-mash A until text "Watch out" timeout=9000 every=30
+# mash A until text 'Watch out' timeout=9000 every=30  [taps dingbat-bios:164 mgba:164 nba:164]
+tap A times=164 every=30 hold=4
 checkpoint watch_out window=0 compare=text
-# Explored live: about 5000 more frames of A-mashing (Ciel's "......", the
-# Golem reveal) hand control to Zero in the ruins.
+tap A times=170 every=30 hold=4
+checkpoint ruins window=0
+press RIGHT hold=200
+hold RIGHT
+press A hold=20 after=100
+release
+press RIGHT hold=150
+wait 60
+tap A times=10 every=30 hold=4
+hold RIGHT
+tap A times=8 every=20 hold=10
+release
+hold RIGHT
+tap B times=10 every=12 hold=4
+release
+tap B times=20 every=10 hold=4
+hold RIGHT
+press A hold=20 after=40
+tap B times=10 every=12 hold=4
+release
+checkpoint pantheons window=0
+

@@ -2,9 +2,10 @@
 @file Megaman Zero 3 (U).gba
 @game BZ3E
 @chip SRAM
-@status wip: reaches the snowfield scene after the opening story crawl ("Two months later...", the Resistance soldiers and Ciel with Zero, dialogue still running); nothing is saved on New Game. The first save is at the Resistance Base after the opening mission (the crashed-ship stage and its boss), which needs real platforming and combat. A human should record: NEW GAME, hold A through the story, play the opening mission, then save at the base computer and quit after the save message. [load]: LOAD GAME > the slot > the base.
-
-# The story crawl only advances while a button is held.
+@frozen dingbat-bios,mgba,nba
+@save skip: nothing is saved on NEW GAME; the first save is at the Resistance Base after the opening mission (the snowfield, the crashed ship and its boss); this session plays the start of the snowfield, where nba already drifts (extra ice debris at f15186, a different Zero pose at f15386) and the snowfall particles differ between all three
+# NEW GAME, hold A through the story crawl, A through the snowfield scene to
+# Zero in control; run right shooting, destroy the igloo turret.
 
 [new]
 wait 600
@@ -12,18 +13,36 @@ press START after=60
 checkpoint title window=0 compare=text
 press START after=90
 checkpoint title_menu window=10
-# NEW GAME
 press START
-until blank timeout=600 every=4
-until notblank timeout=900 every=4
+# until blank timeout=600 every=4  [reached dingbat-bios+28 mgba+28 nba+28]
+wait 32
+# until notblank timeout=900 every=4  [reached dingbat-bios+8 mgba+8 nba+12]
+wait 16
 wait 60
 hold A
-until blank timeout=9000 every=10
+# until blank timeout=9000 every=10  [reached dingbat-bios+5290 mgba+5290 nba+5290]
+wait 5294
 release
-until notblank timeout=1200 every=4
+# until notblank timeout=1200 every=4  [reached dingbat-bios+24 mgba+24 nba+24]
+wait 28
 wait 60
 checkpoint two_months window=10
-mash A until blank timeout=4000 every=30
-until notblank timeout=900 every=4
+# mash A until blank timeout=4000 every=30  [taps dingbat-bios:6 mgba:6 nba:6]
+tap A times=6 every=30 hold=4
+# until notblank timeout=900 every=4  [reached dingbat-bios+100 mgba+100 nba+104]
+wait 108
 wait 3000
 checkpoint snowfield window=10
+tap A times=60 every=30 hold=4
+tap A times=60 every=30 hold=4
+tap A times=60 every=30 hold=4
+checkpoint zero_control window=0
+hold RIGHT
+tap B times=15 every=12 hold=4
+release
+press RIGHT hold=200
+press LEFT hold=15
+press RIGHT hold=1
+tap B times=15 every=10 hold=4
+checkpoint igloo_down window=0
+

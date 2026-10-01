@@ -2,39 +2,171 @@
 @file Sword of Mana (U) [!].gba
 @game AVSE
 @chip FLASH512
-@status wip: reaches the opening narration after New Game (hero, named "A"); A-mashing then runs a long prologue (narration, the Granz castle-town flashback) and nothing is written to flash along the way. The first save needs the prologue played through to the first save point. A human should record: New Game, hero, name, play to the first save point and save, quit after the save message. [load]: title > the file > resume.
+@frozen dingbat-bios,mgba,nba
 
-# Title (PUSH START) > NEW GAME > hero > name entry: DOWN to the letters,
-# A types "A", START jumps to OK!, A; "Is this okay?" defaults to No, so
-# LEFT then A > "This dream again."
+# Title (PUSH START) > NEW GAME > hero > name "A" ("Is this okay?" defaults
+# to No, so LEFT then A) > the prologue and the Granz castle flashback by
+# A every 40 frames; the A taps also name the heroine "AAAAAA". Free in the
+# gladiators' cell: talk to the slave and to Willy, walk to the right-hand
+# bed and up to the Mana Goddess statue in the top right corner, pray, save
+# to slot 1.
+# The three emulators write different save files (same size, a couple of
+# bytes differ); nba draws the blue gradient behind the save/load file list
+# differently from dingbat-bios and mgba.
 
 [new]
 wait 600
 press START
 wait 720
-until text "PUSH START" timeout=900 every=10
-checkpoint title
+# until text 'PUSH START' timeout=900 every=10  [reached dingbat-bios+50 mgba+60 nba+50]
+wait 64
+checkpoint title window=30
 press START
-until notext "PUSH" timeout=600 every=10
+# until notext PUSH timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 120
 press A
-until text "Select a" timeout=600 every=10
+# until text 'Select a' timeout=600 every=10  [reached dingbat-bios+40 mgba+40 nba+40]
+wait 44
 wait 60
-checkpoint character_select
+checkpoint character_select window=30
 press A after=120
 press A
-until text "your character" timeout=600 every=10
+# until text 'your character' timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 60
 press A after=60
 press DOWN after=15
 press A after=15
 press A after=15
 press START after=30
-checkpoint name_entry
+checkpoint name_entry window=30
 press A
-until text "okay" timeout=300 every=5
+# until text okay timeout=300 every=5  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 30
 press LEFT after=20
 press A
-until text "dream" timeout=900 every=10
-checkpoint prologue
+# until text dream timeout=900 every=10  [reached dingbat-bios+90 mgba+90 nba+90]
+wait 94
+checkpoint prologue window=30
+tap A times=20 every=40 hold=6
+tap A times=20 every=40 hold=6
+tap A times=20 every=40 hold=6
+tap A times=20 every=40 hold=6
+tap A times=30 every=40 hold=6
+tap A times=30 every=40 hold=6
+tap A times=30 every=40 hold=6
+tap A times=30 every=40 hold=6
+tap A times=30 every=40 hold=6
+tap A times=30 every=40 hold=6
+tap A times=30 every=40 hold=6
+tap A times=30 every=40 hold=6
+tap A times=40 every=40 hold=6
+tap A times=40 every=40 hold=6
+tap A times=40 every=40 hold=6
+tap A times=40 every=40 hold=6
+checkpoint heroine_name window=0
+press START after=30
+press A
+# until text okay timeout=300 every=5  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
+wait 30
+press LEFT after=20
+press A after=60
+tap A times=20 every=40 hold=6
+tap A times=20 every=40 hold=6
+tap A times=20 every=40 hold=6
+tap A times=20 every=40 hold=6
+tap A times=10 every=40 hold=6
+press RIGHT hold=40 after=5
+press UP hold=20 after=5
+press A after=40
+tap A times=6 every=40 hold=6
+press A after=30
+press DOWN hold=10 after=5
+press LEFT hold=40 after=10
+press A after=40
+tap A times=10 every=40 hold=6
+tap A times=3 every=40 hold=6
+wait 30
+tap B times=4 every=40 hold=6
+wait 30
+press A after=40
+press A after=40
+press A after=40
+press A after=40
+press A after=40
+press A after=40
+press A after=40
+tap A times=4 every=46 hold=6
+wait 20
+press DOWN hold=20 after=5
+press LEFT hold=40 after=10
+press LEFT hold=4 after=10
+press A after=40
+press LEFT hold=12 after=10
+press A after=40
+press A after=46
+press A after=46
+press A after=46
+press A after=46
+press A after=46
+wait 20
+press RIGHT hold=60 after=5
+press UP hold=40 after=10
+press DOWN hold=8 after=2
+press RIGHT hold=30 after=5
+press UP hold=40 after=10
+press A after=40
+tap A times=4 every=46 hold=6
+wait 20
+press DOWN hold=20 after=2
+press RIGHT hold=60 after=10
+press A after=46
+press DOWN hold=20 after=2
+press RIGHT hold=60 after=10
+press RIGHT hold=20 after=10
+press A after=40
+press RIGHT hold=8 after=10
+press A after=40
+press UP hold=30 after=5
+press RIGHT hold=30 after=5
+press UP hold=10 after=5
+press A after=40
+press RIGHT after=10
+press A after=40
+wait 30
+checkpoint statue window=0
+press A after=40
+press A after=60
+checkpoint save_slots window=0
+press A after=60
+wait 120
+wait 30
+checkpoint saved window=10
+
+[load]
+wait 600
+press START
+wait 720
+# until text 'PUSH START' timeout=900 every=10  [reached dingbat-bios+50 mgba+50 nba+60]
+wait 64
+checkpoint title window=30
+press START
+# until notext PUSH timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
+wait 120
+checkpoint continue_menu window=0
+press A after=90
+checkpoint file_select window=0
+press A after=240
+press A after=300
+press A after=60
+checkpoint load_prompt window=0
+press LEFT after=20
+press A after=300
+checkpoint resumed window=10
+press START after=40
+checkpoint resumed_menu window=0 compare=text
+

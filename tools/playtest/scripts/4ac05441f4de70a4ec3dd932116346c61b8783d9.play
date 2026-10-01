@@ -2,24 +2,65 @@
 @file Final Fantasy Tactics Advance (U) [!].gba
 @game AFXE
 @chip FLASH512
-@status wip: reaches the snowball-fight tutorial battle at St. Ivalice (after naming Marche); mashing A does not advance the battle (the turn waits on a real command), and the first chance to save is the world map in Ivalice after this battle, the dream sequence and the first clan battle. A human should record: New Game, keep "Marche", play the snowball fight and the first battles, then Save on the world map and quit after the save message. [load]: title > SAVED GAME (Continue) > the slot > world map.
+@frozen dingbat-bios,mgba,nba
+@save skip: the first save is on the Ivalice world map after the snowball fight, the dream and the first clan battle; the battles cannot be frozen because the three emulators roll different random numbers from New Game on (unit stats, then turn order and AI moves), so the same inputs play a different battle on each
 
 # Title > NEW GAME > A through the school scenes > name entry (START, then
-# LEFT to Yes on "Confirm action. OK?", which defaults to No) > the snowball
-# fight begins.
+# LEFT to Yes on "Confirm action. OK?", which defaults to No) > the
+# snowball-fight tutorial > Ritz's first turn: Wait.
+# Finding: at Ritz's first turn (ritz_menu, f11221+) dingbat-bios shows Ritz
+# HP 19/19 while mgba and nba show 18/18. After Ritz waits, mgba stops on
+# the "Ah, there's a trick to throwing a snowball, too." hint while
+# dingbat-bios and nba run an AI turn, and by f11941 dingbat-bios and nba
+# have moved different kids (after_ritz / diverged checkpoints, compare=none).
+# The battle's random numbers depend on something besides the input timeline
+# on every emulator, so no frozen route through it exists.
 
 [new]
 wait 600
-mash START until text "NEW GAME" timeout=3000 every=60
-wait 60
-checkpoint title
+wait 600
+tap START times=4 every=60 hold=4
+checkpoint title window=0
 press A
-mash A until text "Name" timeout=6000 every=40
-mash A until text "Enter" timeout=3000 every=40
+# mash A until text Name timeout=6000 every=40  [taps dingbat-bios:82 mgba:82 nba:82]
+tap A times=82 every=40 hold=4
+# mash A until text Enter timeout=3000 every=40  [taps dingbat-bios:5 mgba:5 nba:5]
+tap A times=5 every=40 hold=4
 wait 30
-checkpoint name_entry
+checkpoint name_entry window=0
 press START
-until text "Confirm" timeout=300 every=5
+# until text Confirm timeout=300 every=5  [reached dingbat-bios+5 mgba+5 nba+5]
+wait 9
 wait 30
 press LEFT after=20
 press A after=60
+wait 60
+tap A times=10 every=40 hold=6
+press RIGHT after=20
+wait 300
+tap A times=10 every=40 hold=6
+tap A times=15 every=40 hold=6
+tap A times=15 every=40 hold=6
+wait 60
+press A after=50
+press A after=50
+tap A times=15 every=50 hold=6
+wait 120
+wait 200
+tap A times=10 every=50 hold=6
+tap A times=10 every=50 hold=6
+tap A times=10 every=50 hold=6
+tap A times=10 every=50 hold=6
+tap A times=10 every=50 hold=6
+wait 30
+press B after=40
+checkpoint ritz_menu window=0
+press DOWN after=15
+press DOWN after=15
+press A after=30
+press A after=60
+wait 200
+checkpoint after_ritz window=0 compare=none
+wait 300
+checkpoint diverged window=0 compare=none
+
