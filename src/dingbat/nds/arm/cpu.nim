@@ -320,7 +320,9 @@ proc arm_data_processing[B](cpu: ArmCpu[B]; instr: uint32) =
 
 proc arm_mrs[B](cpu: ArmCpu[B]; instr: uint32) =
   let rd = int((instr shr 12) and 0xF)
-  cpu.r[rd] = if (instr and (1'u32 shl 22)) != 0: cpu.spsr else: cpu.cpsr
+  # User and System have no SPSR: reading it gives the CPSR
+  cpu.r[rd] = if (instr and (1'u32 shl 22)) != 0 and bank_of(cpu.cpsr) != 0: cpu.spsr
+              else: cpu.cpsr
 
 proc arm_msr[B](cpu: ArmCpu[B]; instr: uint32) =
   mixin armv5

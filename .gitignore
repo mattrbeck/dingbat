@@ -177,6 +177,7 @@ tools/gbgate/roms.txt
 /dingbat_cyclelaws_test
 /dingbat_gbapurebase_test
 /dingbat_psgagb_test
+/dingbat_ndscpu_test
 /dingbat_state_soak_test
 /dingbat_desktop_settings_test
 /dingbat_desktop_lifecycle_test
