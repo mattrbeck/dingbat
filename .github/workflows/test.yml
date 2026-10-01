@@ -271,8 +271,9 @@ jobs:
         # render.test.mjs compiles the real present shaders and checks corner
         # mapping (needs WebGL2); manualpair.test.mjs round-trips the manual-
         # code link fallback over real RTCPeerConnections. Chromium here, whose
-        # system libraries the runner mostly has; WebKit runs them in
-        # web-e2e-macos, where it needs none and is Apple's own.
+        # system libraries the runner mostly has; in WebKit the shaders run in
+        # web-e2e-macos (Apple's own, no system packages) and the pairing in
+        # web-e2e (the macOS runner gives headless WebKit no ICE candidates).
         if: runner.os == 'Linux'
         timeout-minutes: 30
         working-directory: web
@@ -360,6 +361,11 @@ jobs:
           ../.github/scripts/retry.sh 3 npx playwright install --with-deps chromium webkit
           node e2e/speed-probe.mjs || true   # how fast each browser runs the game here
           node --test e2e/*.e2e.mjs
+      - name: Manual-code pairing in WebKit
+        # WebKit's libraries are installed above; the test job runs it in
+        # Chromium.
+        working-directory: web
+        run: node manualpair.test.mjs webkit
 
   web-e2e-macos:
     # The same on a Mac, where Playwright's WebKit is Apple's - the engine an
@@ -389,11 +395,9 @@ jobs:
           ../.github/scripts/retry.sh 3 npx playwright install chromium webkit
           node e2e/speed-probe.mjs || true   # how fast each browser runs the game here
           node --test e2e/*.e2e.mjs
-      - name: Web browser tests in WebKit (Safari's engine, the iPhone's)
-        # The shaders and the manual-code pairing, as the Linux test job runs
-        # them in Chromium.
+      - name: Present shaders in WebKit (Safari's engine, the iPhone's)
+        # As the Linux test job runs them in Chromium. The manual-code pairing
+        # runs in web-e2e: this runner gives headless WebKit no network for
+        # WebRTC (no ICE candidates, so no code to exchange).
         working-directory: web
-        run: |
-          set -e
-          node render.test.mjs webkit
-          node manualpair.test.mjs webkit
+        run: node render.test.mjs webkit
