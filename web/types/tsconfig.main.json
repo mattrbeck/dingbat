@@ -15,7 +15,10 @@
   "files": [
     "em.d.ts",
     "globals.d.ts",
+    "nds.d.ts",
     "../glpresent.js",
+    "../nds/ndsutil.js",
+    "../nds/ndsaudio.js",
     "../index.js",
     "../sdputil.js",
     "../netplay.js"

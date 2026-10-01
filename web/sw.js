@@ -8,6 +8,8 @@ const ASSETS = [
   "./index.js",
   "./glpresent.js",
   "./saveimport.js",
+  "./nds/ndsutil.js",
+  "./nds/ndsaudio.js",
   "./sdputil.js",
   "./netplay.js",
   "./styles.css",
@@ -158,10 +160,19 @@ self.addEventListener("fetch", (/** @type {FetchEvent} */ event) => {
   }
   // Match only this version's cache: caches.match() searches every cache,
   // and an installed-but-waiting version's assets would skew with ours.
+  // The DS core (nds/nds.js + nds.wasm, fetched only when a DS game starts)
+  // is not precached; its first fetch is kept in this version's cache, so a
+  // DS game also plays offline after it has once played online.
+  const lazy = /\/nds\/nds\.(js|wasm)$/.test(new URL(event.request.url).pathname);
   event.respondWith(
     caches
       .open(CACHE_NAME)
-      .then((cache) => cache.match(event.request))
-      .then((cached) => cached || fetch(event.request))
+      .then((cache) => cache.match(event.request).then((cached) => {
+        if (cached || !lazy) return cached || fetch(event.request);
+        return fetch(event.request).then((res) => {
+          if (res.ok) cache.put(event.request, res.clone()).catch(() => {});
+          return res;
+        });
+      }))
   );
 });

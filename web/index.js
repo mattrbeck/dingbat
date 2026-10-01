@@ -853,7 +853,7 @@ const pickFile = (accept, callback) => {
 // Layout is CSS's (styles.css "Settings surface"); this owns which section
 // shows, which screen the sheet is on, and the sheet-only navigation
 // (push/pop, stepper, hardware back). Section order is fixed.
-const SETTINGS_SECTIONS = ["controls", "gb", "gba", "video", "audio", "general"];
+const SETTINGS_SECTIONS = ["controls", "gb", "gba", "ds", "video", "audio", "general"];
 const SETTINGS_LAST_KEY = "settings-section";
 
 const settingsTabs = Array.from(/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".settings-tab")));
@@ -1143,6 +1143,7 @@ const openSettingsModal = () => {
     })
     .catch(() => {});
   updateBiosStatusText();
+  updateNdsBiosStatus();
   // The Drive controls live under General now; nothing else paints them.
   renderGdriveSection();
   kbSelection = -1;
@@ -1411,6 +1412,7 @@ const restoreCheats = async () => {
 
 const openCheatsModal = () => {
   menuDropdown.hidden = true;
+  if (ndsGameLoaded()) return; // the cheat engines are the GB/GBA core's
   showCheatError("");
   renderCheatList();
   cheatsModal.classList.add("open");
@@ -1700,7 +1702,7 @@ const setRomsSort = async (v) => {
 };
 if (libSortSel) libSortSel.addEventListener("change", () => setRomsSort(libSortSel.value));
 
-const SYSTEM_ORDER = { GBA: 0, GBC: 1, GB: 2 };
+const SYSTEM_ORDER = { GBA: 0, GBC: 1, GB: 2, DS: 3 };
 // Rows carry .name; "recent" keeps the order given (the index's).
 const sortRoms = (rows) => {
   if (romsSort === "alpha") return [...rows].sort((a, b) => a.name.localeCompare(b.name));
@@ -1811,7 +1813,7 @@ const applyLibFilter = () => {
 // counts are desktop detail (styles.css hides them on phones).
 const renderLibChips = (roms, localRoms) => {
   if (!libChips) return;
-  let counts = { GBA: 0, GBC: 0, GB: 0 };
+  let counts = { GBA: 0, GBC: 0, GB: 0, DS: 0 };
   let local = 0;
   let onDrive = 0;
   for (let { name } of roms) {
@@ -3111,6 +3113,15 @@ const readDriveLibrary = async (remote) => {
 // again before writing). The write goes to the oldest copy; the other
 // copies that read merged are then deleted, their contents being in it.
 const writeDriveLibrary = async (lib, remote, readFrom = remote) => {
+  // DS games are this device's only (driveExcluded): not one of their
+  // entries, tombstones or rename markers goes up.
+  const ds = (n) => isNdsRomName(n);
+  lib = {
+    ...lib,
+    recents: (lib.recents || []).filter((e) => !ds(e?.name)),
+    tomb: (lib.tomb || []).filter((t) => !ds(t?.name)),
+    ren: (lib.ren || []).filter((r) => !ds(r?.from) && !ds(r?.to)),
+  };
   let bytes = new TextEncoder().encode(JSON.stringify(lib));
   let keep = remote.get(LIBRARY_FILE);
   await driveUploadFile(LIBRARY_FILE, bytes, keep?.id);
@@ -3491,7 +3502,7 @@ const scheduleFlush = () => {
 const syncRemarked = new Set();
 const markUpload = (name) => {
   if (!driveEnrolled()) return;
-  if (!parseDriveFileName(name)) return;
+  if (!parseDriveFileName(name) || driveExcluded(name)) return;
   if (!syncState.queueUp.includes(name)) syncState.queueUp.push(name);
   else syncRemarked.add(name);
   saveSyncState();
@@ -3499,7 +3510,7 @@ const markUpload = (name) => {
 };
 const markDelete = (name) => {
   if (!driveEnrolled()) return;
-  if (!parseDriveFileName(name)) return;
+  if (!parseDriveFileName(name) || driveExcluded(name)) return;
   if (!syncState.queueDel.includes(name)) syncState.queueDel.push(name);
   // Stamped with the moment it was asked for, not the moment it reaches
   // Drive: a delete made offline on Tuesday must not outrank another
@@ -3510,7 +3521,7 @@ const markDelete = (name) => {
   scheduleFlush();
 };
 const markGameUpload = (game) => {
-  if (!driveEnrolled()) return;
+  if (!driveEnrolled() || isNdsRomName(game)) return;
   localFilesForGame(game).then((names) => {
     for (let n of names) if (!syncState.queueUp.includes(n)) syncState.queueUp.push(n);
     saveSyncState();
@@ -4279,7 +4290,7 @@ const runFullSync = async ({ label } = /** @type {{label?: string}} */ ({})) => 
     await persistAutoState();
     await persistSave(currentRomName, currentOriginalName);
   }
-  let names = [...(await localSyncFiles()).keys()];
+  let names = [...(await localSyncFiles()).keys()].filter((n) => !driveExcluded(n));
   for (let n of names) if (!syncState.queueUp.includes(n)) syncState.queueUp.push(n);
   await saveSyncState();
   await flushSync();
@@ -6017,6 +6028,7 @@ const frameBlobFromFb = (heap, w, h) => new Promise((resolve) => {
 let frameStoreChain = Promise.resolve();
 // The screen as it is now, copied out of the wasm heap; null with no core.
 const copyFramebuffer = () => {
+  if (ndsGameLoaded()) return ndsTopRgba(); // the DS's top screen
   if (typeof Module === "undefined" || !Module._wasm_fb_ptr) return null;
   const ptr = Module._wasm_fb_ptr();
   if (!ptr) return null;
@@ -6398,9 +6410,13 @@ const sessionMenuEntries = () => {
   // No Screenshot and no Clip that!: both are about the frame in front of
   // you, and the frame in front of you here is the card's own picture of a
   // game that stopped. They stay in the menu over a running game.
+  // A DS session has no link cable or cheats, nor save states until its
+  // core has them (body.nds-mode in the bar's menu, the same here).
+  const ds = ndsGameLoaded();
   let items = [
-    tileMenuItem({ label: "Save states", icon: MENU_ICONS.states,
-                   run: () => openStatesModal() }),
+    ...(ds && !ndsHasStates() ? [] : [
+      tileMenuItem({ label: "Save states", icon: MENU_ICONS.states,
+                     run: () => openStatesModal() })]),
     tileMenuItem({ label: "Manage saves", icon: MENU_ICONS.saves,
                    run: () => openSavesModal() }),
   ];
@@ -6408,14 +6424,18 @@ const sessionMenuEntries = () => {
     items.push(tileMenuItem({ label: "Printed photos", icon: MENU_ICONS.prints,
                               run: () => printsItem.click() }));
   }
+  if (!ds) {
+    items.push(
+      tileMenuItem({
+        label: "Link cable",
+        icon: MENU_ICONS.link,
+        run: () => document.getElementById("net-connect").click(),
+      }),
+      tileMenuItem({ label: "Cheats", icon: MENU_ICONS.cheats,
+                     run: () => openCheatsModal() }),
+    );
+  }
   items.push(
-    tileMenuItem({
-      label: "Link cable",
-      icon: MENU_ICONS.link,
-      run: () => document.getElementById("net-connect").click(),
-    }),
-    tileMenuItem({ label: "Cheats", icon: MENU_ICONS.cheats,
-                   run: () => openCheatsModal() }),
     tileMenuItem({ label: "Report a bug", icon: MENU_ICONS.bug,
                    run: () => openReportModal() }),
   );
@@ -6490,6 +6510,8 @@ const tileMenuEntries = (name, f) => {
 // nothing else can say is that a freed game left its save behind.
 const tileMenuStatus = (name, f) => {
   let bits = [systemOf(name)];
+  // DS games never sync (driveExcluded): say so where sync is in play.
+  if (isNdsRomName(name) && driveLinked()) bits.push("this device only");
   let size = romSizeOf(name);
   if (size) bits.push(formatBytes(size));
   if (f.missing) {
@@ -7042,7 +7064,7 @@ const refreshHomeRecent = async () => {
         fetchTileGame(romName); // download only — no launch
       });
       tile.appendChild(dl);
-    } else {
+    } else if (!isNdsRomName(romName)) {
       // Local 2P link: two linked cores of this ROM.
       let link2p = document.createElement("button");
       link2p.type = "button";
@@ -7145,8 +7167,17 @@ const flushSoloSave = () => {
 const persistSave = async (romName, originalName) => {
   let savName = romName.substring(0, romName.lastIndexOf(".")) + ".sav";
   try {
-    if (romName === currentRomName) flushSoloSave(); // the solo core's file
-    let data = FS.readFile(savName);
+    let data;
+    if (isNdsRomName(romName)) {
+      // The DS core's cart backup, only while it holds this game; unchanged
+      // since the last store (the chip's dirty flag) costs nothing.
+      if (ndsCoreGame !== originalName) return;
+      if (!ndsSaveDirty() && lastSaveSigKey === originalName && lastSaveSig !== null) return;
+      data = ndsSaveBytes(true);
+    } else {
+      if (romName === currentRomName) flushSoloSave(); // the solo core's file
+      data = FS.readFile(savName);
+    }
     if (data && data.length > 0) {
       const sig = saveSignature(data);
       if (lastSaveSigKey === originalName && sig === lastSaveSig) return;
@@ -7181,8 +7212,11 @@ const persistSave = async (romName, originalName) => {
 // newer copy another device put there meanwhile).
 const installSave = (romName, originalName, data) => {
   let savName = romName.substring(0, romName.lastIndexOf(".")) + ".sav";
-  if (data && data.length) writeToFS(savName, data);
-  else try { FS.unlink(savName); } catch {}
+  // A DS game's battery goes into its core at the boot (ndsStart) instead.
+  if (!isNdsRomName(romName)) {
+    if (data && data.length) writeToFS(savName, data);
+    else try { FS.unlink(savName); } catch {}
+  }
   lastSaveSig = data && data.length ? saveSignature(data) : null;
   lastSaveSigKey = lastSaveSig === null ? null : originalName;
 };
@@ -7420,6 +7454,7 @@ const dismissGameToasts = () => {
 const stateKey = (name) => "state:" + name;
 
 const captureStateBytes = () => {
+  if (ndsGameLoaded()) return ndsCaptureState(); // null until the DS core has states
   if (typeof Module === "undefined" || !Module._wasm_state_size) return null;
   let len = Module._wasm_state_size();
   if (len <= 0) return null;
@@ -7492,6 +7527,11 @@ const stateRejectMessage = (bytes) => {
 // a rewind-scrubber commit (same timeline as the ring); every other load
 // drops the ring.
 const applyStateBytes = (bytes, keepRewind = false) => {
+  if (ndsGameLoaded()) {
+    const ok = ndsApplyState(bytes);
+    if (ok) sessionMoved = true;
+    return ok;
+  }
   if (typeof Module === "undefined" || !Module._wasm_load_state) return false;
   let ptr = Module._malloc(bytes.length);
   if (!ptr) return false;
@@ -7525,11 +7565,9 @@ const fmtStateTime = (ts) => {
 // Thumbnail dataURL from the wasm framebuffer pointer (works paused; needs
 // no preserveDrawingBuffer).
 const captureThumbnail = () => {
-  if (typeof Module === "undefined" || !Module._wasm_fb_ptr) return null;
-  const ptr = Module._wasm_fb_ptr();
-  if (!ptr) return null;
-  const [w, h] = gameRes();
-  const heap = new Uint8Array(Module.memory.buffer, ptr, w * h * 4);
+  const fb = copyFramebuffer();
+  if (!fb) return null;
+  const { heap, w, h } = fb;
   const full = document.createElement("canvas");
   full.width = w;
   full.height = h;
@@ -7555,6 +7593,10 @@ const captureThumbnail = () => {
 
 const saveToSlot = async (slot) => {
   if (!currentOriginalName) return false;
+  if (ndsGameLoaded() && !ndsHasStates()) {
+    showToast("Save states aren't available for DS games yet");
+    return false;
+  }
   const bytes = captureStateBytes();
   if (!bytes) {
     showToast("Couldn't capture the emulator state");
@@ -7595,6 +7637,10 @@ const undoStateLoad = () => {
 // a mismatch.
 const loadFromSlot = async (slot) => {
   if (!currentOriginalName) return false;
+  if (ndsGameLoaded() && !ndsHasStates()) {
+    showToast("Save states aren't available for DS games yet");
+    return false;
+  }
   let bytes = null;
   try {
     bytes = await dbGet(slotStateKey(currentOriginalName, slot));
@@ -7755,6 +7801,7 @@ const sessionFromBundle = (bytes) => {
 // of it) and save:<name> catches up with only at the next autosave (up to 5 s
 // later).
 const liveSaveSig = () => {
+  if (ndsGameLoaded()) return sigOfSave(ndsSaveBytes());
   flushSoloSave();
   let sav = null;
   try { sav = FS.readFile(stripExt(currentRomName) + ".sav"); } catch {}
@@ -7903,6 +7950,10 @@ const renderStatesGrid = async () => {
 
 const openStatesModal = () => {
   menuDropdown.hidden = true;
+  if (ndsGameLoaded() && !ndsHasStates()) {
+    showToast("Save states aren't available for DS games yet");
+    return;
+  }
   statesModal.classList.add("open");
   trapFocus(statesModal);
   renderStatesGrid();
@@ -7974,11 +8025,9 @@ const bgr555ToImageData = (src, off, w, h) => {
 };
 
 const drawReportLivePreview = () => {
-  if (typeof Module === "undefined" || !Module._wasm_fb_ptr) return;
-  const ptr = Module._wasm_fb_ptr();
-  if (!ptr) return;
-  const [w, h] = gameRes();
-  const heap = new Uint8Array(Module.memory.buffer, ptr, w * h * 4);
+  const fb = copyFramebuffer(); // a DS game's top screen
+  if (!fb) return;
+  const { heap, w, h } = fb;
   reportPreview.width = w;
   reportPreview.height = h;
   const ctx = reportPreview.getContext("2d");
@@ -8024,7 +8073,8 @@ const openReportModal = () => {
   paused = true;
   reportSamples = 0;
   reportThumbs = null;
-  if (currentOriginalName && Module._wasm_rewind_scrub_generate) {
+  // A DS game has no rewind ring: this moment only (its timeline is hidden).
+  if (currentOriginalName && !ndsGameLoaded() && Module._wasm_rewind_scrub_generate) {
     reportSamples = Module._wasm_rewind_scrub_generate(48);
     if (reportSamples > 0) {
       reportThumbW = Module._wasm_rewind_scrub_thumb_w();
@@ -8528,6 +8578,7 @@ rwSlider.addEventListener("input", () => {
 const openRewindScrubber = () => {
   menuDropdown.hidden = true;
   if (!rewindOn) return;   // no ring, so the strip would only ever be empty
+  if (ndsGameLoaded()) return; // nor on the DS core
   if (!currentOriginalName || !speedControlsOk()) return;
   if (typeof Module === "undefined" || !Module._wasm_rewind_scrub_generate) return;
   rwWasPaused = paused;
@@ -8897,6 +8948,9 @@ const upscaleFilterSelect = /** @type {HTMLSelectElement} */ (document.getElemen
 // Native picture size. The core is authoritative (an SGB border makes it
 // 256x224); the filename check covers the window before the core exists.
 const nativeRes = () => {
+  // A DS game: the two screens' composite frame (ndsLay, set by
+  // updateCanvasScaling from the room the stage has).
+  if (ndsGameLoaded()) return [ndsLay.w, ndsLay.h];
   if (typeof Module !== "undefined" && Module._wasm_out_w && currentRomName) {
     const w = Module._wasm_out_w(), h = Module._wasm_out_h();
     if (w > 0 && h > 0) return [w, h];
@@ -8915,15 +8969,29 @@ const sgbActive = () =>
   !!(typeof Module !== "undefined" && Module._wasm_sgb_active &&
      currentRomName && Module._wasm_sgb_active());
 
+// The stage's content box: the tablet-landscape tier reserves the rail
+// width as stage padding, and the frame must yield to the rails.
+/** @returns {[number, number]} */
+const stageAvail = () => {
+  const stageCS = getComputedStyle(stageEl);
+  return [
+    stageEl.clientWidth - parseFloat(stageCS.paddingLeft) - parseFloat(stageCS.paddingRight),
+    stageEl.clientHeight - parseFloat(stageCS.paddingTop) - parseFloat(stageCS.paddingBottom),
+  ];
+};
+
 const updateCanvasScaling = () => {
   // Backing store = native * glScale(). Only assign on change: assigning
   // canvas.width/height resets the GL drawing buffer.
   presentDirty = true; // resize can wipe the backing — repaint on the next tick
   const running0 =
     document.body.classList.contains("running") && !!currentRomName;
+  // A DS game picks its screens' arrangement from the room there is first
+  // (nativeRes follows it).
+  if (running0 && ndsGameLoaded()) ndsUpdateLayout(...ndsAvail(stageAvail()));
   if (running0 && !linkMode && !rollbackMode) {
     const [nw, nh] = nativeRes();
-    const s = glScale();
+    const s = ndsGameLoaded() ? ndsBackingScale() : glScale();
     const bw = nw * s, bh = nh * s;
     if (canvasEl.width !== bw) canvasEl.width = bw;
     if (canvasEl.height !== bh) canvasEl.height = bh;
@@ -8940,15 +9008,8 @@ const updateCanvasScaling = () => {
       : 1.5;
   const running =
     document.body.classList.contains("running") && !!currentRomName;
-  // Stage content box: the tablet-landscape tier reserves the rail width as
-  // stage padding, and the frame must yield to the rails.
-  const stageCS = getComputedStyle(stageEl);
-  const availW =
-    stageEl.clientWidth -
-    parseFloat(stageCS.paddingLeft) - parseFloat(stageCS.paddingRight);
-  const availH =
-    stageEl.clientHeight -
-    parseFloat(stageCS.paddingTop) - parseFloat(stageCS.paddingBottom);
+  let [availW, availH] = stageAvail();
+  if (running && ndsGameLoaded()) [availW, availH] = ndsAvail([availW, availH]);
   if (integerScale && running) {
     const [w, h] = nativeRes();
     const k = Math.max(1, Math.floor(Math.min(availW / w, availH / h)));
@@ -8963,8 +9024,9 @@ const updateCanvasScaling = () => {
     canvasEl.style.width = "";
     canvasEl.style.height = "";
   }
-  // Keep the glow canvas pinned to the canvas rect.
-  const singleCore = running && !linkMode && !rollbackMode;
+  // Keep the glow canvas pinned to the canvas rect. Not for a DS game: the
+  // glow samples the GB/GBA core.
+  const singleCore = running && !linkMode && !rollbackMode && !ndsGameLoaded();
   if (ambientGlow && singleCore) {
     const c = canvasEl.getBoundingClientRect();
     const s = stageEl.getBoundingClientRect();
@@ -8980,6 +9042,7 @@ const updateCanvasScaling = () => {
     }
   }
   glowCanvas.hidden = !(ambientGlow && singleCore);
+  if (running && ndsGameLoaded()) ndsPlaceHinge();
 };
 
 // Sample a coarse grid from the presented framebuffer at ~10 Hz; the
@@ -8995,7 +9058,7 @@ const glowPackHex = (c) => {
 };
 
 const updateGlow = () => {
-  if (glowCanvas.hidden || !currentRomName) return;
+  if (glowCanvas.hidden || !currentRomName || ndsGameLoaded()) return;
   if (typeof Module === "undefined" || !Module._wasm_glow_sample) return;
   if (glowTick++ % 6 !== 0) return;
   // The core samples (it owns the LUT and the SGB border) and touches only
@@ -9053,6 +9116,21 @@ var lastOutW = 0, lastOutH = 0;
 
 const drawGame = () => {
   if (!currentRomName || linkMode || rollbackMode) return;
+  if (ndsGameLoaded()) {
+    const frame = ndsFrame();
+    if (!frame) return;
+    if (frame.w !== lastOutW || frame.h !== lastOutH) {
+      lastOutW = frame.w; lastOutH = frame.h;
+      updateCanvasScaling();
+    }
+    // The DS's own LCDs: no GB/GBA panel colour model, no shade palette.
+    glRenderer.draw({
+      colorCorrect: false, dmgPalette: null, panelGbc: false, frame,
+      grid: upscaleFilter === "grid", subpixel: upscaleFilter === "rgb",
+      filter: upscaleFilter,
+    });
+    return;
+  }
   const [ow, oh] = nativeRes();
   if (ow !== lastOutW || oh !== lastOutH) {
     lastOutW = ow; lastOutH = oh;
@@ -9218,7 +9296,11 @@ const watchCanvasBacking = () => {
 
 // --- Keyboard settings ---
 
-const INPUT_NAMES = ["Up", "Down", "Left", "Right", "A", "B", "Select", "Start", "L", "R"];
+// X and Y (ids 10, 11) are the DS's: bound on every system, live only while
+// a DS game runs (boundInput), so elsewhere their keys stay free.
+const INPUT_NAMES = ["Up", "Down", "Left", "Right", "A", "B", "Select", "Start", "L", "R",
+                     "X", "Y"];
+const DS_ONLY_INPUTS = 10;
 
 // event.code -> SDL keycode mapping.
 const JS_TO_SDL = (() => {
@@ -9258,14 +9340,16 @@ const SDL_TO_NAME = (() => {
   return m;
 })();
 
-// Presets: 10 SDL keycodes indexed by Input enum order.
+// Presets: one SDL keycode per INPUT_NAMES entry, in order.
 const PRESET_DEFAULT = [
   0x40000052, 0x40000051, 0x40000050, 0x4000004F, // Up Down Left Right
-  122, 120, 8, 13, 97, 115 // Z X Backspace Return A S
+  122, 120, 8, 13, 97, 115, // Z X Backspace Return A S
+  100, 99 // DS X Y: D C (C beside X = B, as Y sits beside B; D above it)
 ];
 const PRESET_HOMEROW = [
   101, 100, 115, 102, // E D S F
-  107, 106, 108, 59, 119, 114 // K J L ; W R
+  107, 106, 108, 59, 119, 114, // K J L ; W R
+  105, 117 // DS X Y: I U (above K = A and J = B)
 ];
 
 var activeBindings = [...PRESET_DEFAULT];
@@ -9283,6 +9367,13 @@ const rebuildLookup = () => {
   }
 };
 rebuildLookup();
+
+// The game input a key is bound to, or undefined. The DS-only ones count
+// only while a DS game is loaded.
+const boundInput = (code) => {
+  const id = codeLookup[code];
+  return id !== undefined && id >= DS_ONLY_INPUTS && !ndsGameLoaded() ? undefined : id;
+};
 
 // Rollback mode: this player's held buttons as a bitmask (bit i = input id
 // i), handed to rollback_tick and shipped to the peer each frame.
@@ -9364,6 +9455,12 @@ const loadInputDisplayFromStorage = async () => {
 // Route P1 input: the single core, core 0 in 2P link, or localButtons in
 // rollback mode.
 const routeP1Input = (inputId, down) => {
+  if (ndsGameLoaded()) {
+    noteInputDisplay(inputId, down);
+    ndsSetInput(inputId, down);
+    return;
+  }
+  if (inputId >= DS_ONLY_INPUTS) return; // X/Y: the DS's only
   noteInputDisplay(inputId, down);
   // Tilt cart: the D-pad doubles as a tilt source (smoothed in updateTilt);
   // the real press goes through too for menus.
@@ -9388,7 +9485,7 @@ const gameKeyHandler = (e, down) => {
   // Not while typing in a text field.
   const t = e.target;
   if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-  let inputId = codeLookup[e.code];
+  let inputId = boundInput(e.code);
   if (inputId !== undefined && typeof Module !== "undefined" && Module._setInput) {
     e.preventDefault();
     e.stopImmediatePropagation();
@@ -9426,7 +9523,7 @@ const renderKbBindings = () => {
       renderKbBindings();
     });
     let label = document.createElement("span");
-    label.textContent = INPUT_NAMES[i];
+    label.textContent = INPUT_NAMES[i] + (i >= DS_ONLY_INPUTS ? " (DS)" : "");
     row.appendChild(btn);
     row.appendChild(label);
     kbBindingsDiv.appendChild(row);
@@ -9472,6 +9569,11 @@ const kbKeyHandler = (e) => {
 
 const loadKeybindingsFromStorage = async () => {
   let stored = await dbGet("keybindings");
+  // A profile from before X/Y (10 keys) takes the defaults for them, unless
+  // one of its keys already is one.
+  if (stored && stored.length === 10) {
+    stored = stored.concat(PRESET_DEFAULT.slice(10).map((k) => (stored.includes(k) ? -1 : k)));
+  }
   if (stored && stored.length === INPUT_NAMES.length) {
     // Heal profiles saved before Escape became unbindable.
     applyKeybindings(stored.map((k) => (k === 27 ? -1 : k)));
@@ -9828,7 +9930,7 @@ const SETTINGS_KEYS = [
   "system", "audio", "colorCorrect", "video",
   "keybindings", "large-controls", "opaque-controls",
   "control-style", "joystick-mode", "hide-touch-on-gamepad",
-  "runahead", "gb-palette", "input-display", "library-open",
+  "runahead", "gb-palette", "input-display", "library-open", "nds-layout",
 ];
 
 const resetAllSettings = async () => {
@@ -9884,6 +9986,7 @@ const resetAllSettings = async () => {
   applyLibraryOpen("resume");
 
   applyRunahead(0);
+  applyNdsLayout("auto");
 
   gbPaletteMode = "default";
   gbPaletteCustom = GB_HW_SHADES.slice();
@@ -10091,6 +10194,31 @@ const loadRom = async (romName, originalName, opts = {}) => {
   // The outgoing game stays named, running on its own rom.sav, until the
   // core is replaced below: every flush until then is still its own.
   const name = originalName || romName;
+  // A DS game: its core (fetched once), the optional BIOS dumps, and the ROM
+  // when the core does not already hold it (a reset reboots in place).
+  const ds = isNdsRomName(romName);
+  let dsBios = null;
+  let dsRom = opts.rom || null;
+  if (ds) {
+    try {
+      await loadNdsCore();
+    } catch (e) {
+      console.warn("DS core:", e);
+      if (gen === loadGen) showToast("Couldn't load the DS emulator — check the connection");
+      return;
+    }
+    if (abandoned()) return;
+    dsBios = await ndsBiosFiles();
+    if (abandoned()) return;
+    if (!dsRom && ndsCoreGame !== name) {
+      dsRom = await getRomBytes(name);
+      if (abandoned()) return;
+      if (!dsRom) {
+        showToast("This game's ROM is no longer stored — load the file again");
+        return;
+      }
+    }
+  }
   loadingName = name;
   const save = await dbGet("save:" + name);
   if (abandoned()) {
@@ -10101,9 +10229,20 @@ const loadRom = async (romName, originalName, opts = {}) => {
   // go down, the core is built on them, and only then is the game named. So
   // no flush, snapshot or picture ever pairs one game's name with another
   // game's core or battery.
-  if (opts.rom) writeToFS(romName, opts.rom);
-  installSave(romName, name, save);
-  Module.ccall("initFromEmscripten", null, ["string"], [romName]);
+  if (ds) {
+    if (!ndsStart(name, dsRom, save, dsBios)) {
+      loadingName = null;
+      showToast("The DS emulator couldn't start this game");
+      return;
+    }
+    dsRom = null; // the core has its own copy now
+    installSave(romName, name, save);
+  } else {
+    if (ndsCoreGame !== null) ndsUnload(); // the DS core's memory goes back
+    if (opts.rom) writeToFS(romName, opts.rom);
+    installSave(romName, name, save);
+    Module.ccall("initFromEmscripten", null, ["string"], [romName]);
+  }
   loadingName = null;
   currentRomName = romName;
   currentOriginalName = name;
@@ -10149,8 +10288,11 @@ const loadRom = async (romName, originalName, opts = {}) => {
   fastForwardButton.classList.remove("active");
   speed2xButton.classList.remove("active");
   rewindButton.classList.remove("active");
-  // body.gb-mode drops the L/R row.
-  document.body.classList.toggle("gb-mode", systemOf(romName) !== "GBA");
+  // body.gb-mode drops the L/R row; body.nds-mode adds X/Y and the stylus
+  // and drops what the DS core lacks.
+  document.body.classList.toggle("gb-mode", !["GBA", "DS"].includes(systemOf(romName)));
+  ndsApplyModeClasses();
+  if (ds) ndsNoteDriveSkip();
   // Before the class, not after: body.running hides #home, and a flight
   // measured from a display:none hero has nowhere to come from.
   flyBrand(true);
@@ -10158,6 +10300,19 @@ const loadRom = async (romName, originalName, opts = {}) => {
   setBrandP(1);
   takePendingFlight(); // a launch from the home screen lands on the screen
   playedThisVisit = true;
+  if (ds) {
+    // None of the GB/GBA core's per-cart work applies (the cart detectors
+    // below read that core, which still holds the last GB/GBA game).
+    detectTiltCart();
+    detectCameraCart();
+    gbMonoPanel = false;
+    stateUndoBytes = null;
+    rwUndoBytes = null;
+    updateCanvasScaling();
+    if (!opts.skipResumeOffer && ndsHasStates()) offerAutoResume();
+    setTimeout(() => logViewportDiag("romload"), 500);
+    return;
+  }
   await restoreCheats();  // fresh core: re-apply this game's saved cheats
   if (gen !== loadGen) return; // the next load re-applies all of this to its core
   applyPitchCorrectFF();  // fresh core: re-push the local audio preference
@@ -10178,10 +10333,11 @@ const loadRom = async (romName, originalName, opts = {}) => {
 
 // --- File type helpers ---
 
-// The same list as src/dingbat/common/rom_exts.nim, which picks the core.
+// The same list as src/dingbat/common/rom_exts.nim, which picks the core,
+// plus .nds for the DS core ("Nintendo DS"; this branch only).
 // .cgb/.sgb are Color-only and Super Game Boy carts some ROM sets name so;
 // the core reads the mode from the header. Not .dmg: a macOS disk image.
-const ROM_EXTS = [".gba", ".gb", ".gbc", ".cgb", ".sgb"];
+const ROM_EXTS = [".gba", ".gb", ".gbc", ".cgb", ".sgb", ".nds"];
 const IMG_EXTS = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
 
 const extOf = (n) => {
@@ -10191,7 +10347,8 @@ const extOf = (n) => {
 const baseName = (n) => n.slice(n.lastIndexOf("/") + 1);
 const systemOf = (name) => {
   let e = extOf(name);
-  return e === ".gba" ? "GBA" : e === ".gbc" || e === ".cgb" ? "GBC" : "GB";
+  return e === ".gba" ? "GBA" : e === ".nds" ? "DS"
+    : e === ".gbc" || e === ".cgb" ? "GBC" : "GB";
 };
 const mimeForImg = (e) =>
   ({ ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -10265,6 +10422,7 @@ const bytesMatchAt = (bytes, offset, ref) =>
   ref.every((b, i) => bytes[offset + i] === b);
 
 const looksLikeValidRom = (bytes, ext) => {
+  if (ext === ".nds") return NdsUtil.looksLikeNdsRom(bytes); // header CRCs (ndsutil.js)
   if (ext === ".gba") {
     if (bytes.length >= 4 && bytes[3] === 0xea) return true; // ARM branch entry
     if (bytes.length < 0xc0) return false; // no full header to check
@@ -10307,7 +10465,7 @@ const askRomWarn = (title, text) =>
   });
 
 const confirmSuspectRom = (fileName, ext) => {
-  let system = ext === ".gba" ? "GBA"
+  let system = ext === ".gba" ? "GBA" : ext === ".nds" ? "Nintendo DS"
     : ext === ".gbc" || ext === ".cgb" ? "Game Boy Color" : "Game Boy";
   return askRomWarn("File Check Failed",
     `"${fileName}" doesn't look like a valid ${system} ROM — it may be ` +
@@ -10332,7 +10490,7 @@ const handleZipFile = async (file) => {
   }
   let romEntry = zip.entries.find((e) => usable(e) && ROM_EXTS.includes(extOf(e.name)));
   if (!romEntry) {
-    alert("No .gba, .gb or .gbc ROM was found inside that zip.");
+    alert("No .gba, .gb, .gbc or .nds ROM was found inside that zip.");
     return;
   }
   // The largest embedded image is almost always the box art.
@@ -10370,7 +10528,7 @@ let handleRomFile = (file) => {
   let ext = extOf(file.name);
   if (ext === ".zip") return handleZipFile(file);
   if (!ROM_EXTS.includes(ext)) {
-    alert("Unsupported file. Load a .gba, .gb, or .gbc ROM (or a .zip containing one).");
+    alert("Unsupported file. Load a .gba, .gb, .gbc or .nds ROM (or a .zip containing one).");
     return;
   }
   let romName = "rom" + ext;
@@ -10619,6 +10777,11 @@ speed2xButton.addEventListener("click", () => {
 const frameAdvance = () => {
   if (typeof Module === "undefined" || !Module._loop_tick) return;
   if (!paused || !currentRomName || !speedControlsOk()) return;
+  if (ndsGameLoaded()) {
+    ndsStepFrame();
+    drawGame();
+    return;
+  }
   Module._loop_tick();
   sessionMoved = true;
   if (Module._clearAudioBuffer) Module._clearAudioBuffer();
@@ -10984,6 +11147,7 @@ document.getElementById("clip-preset-all").addEventListener("click", () => clipS
 const openClipScrubber = () => {
   menuDropdown.hidden = true;
   if (!currentRomName || !speedControlsOk()) return;
+  if (ndsGameLoaded()) return; // the clip history is the GB/GBA core's
   // A build missing the scrub API from EXPORTED_FUNCTIONS (web/tests/wasm-exports.test.mjs).
   if (typeof Module === "undefined" || !Module._clip_scrub_generate) {
     console.error("clip: the scrub API is missing from this build " +
@@ -11077,7 +11241,7 @@ const stopClipRecording = () => {
 };
 
 const startClipRecording = () => {
-  if (recRecorder || clipReplayActive || !currentRomName) return;
+  if (recRecorder || clipReplayActive || !currentRomName || ndsGameLoaded()) return;
   const mime = clipMimeType();
   if (!mime) { showToast("Video recording isn't supported in this browser"); return; }
   let stream;
@@ -11187,7 +11351,7 @@ const frameStepButton = document.getElementById("frame-step");
 // Hold-to-rewind. Gated here for every caller: with rewind off there is no
 // ring to pop. Only turning it on is refused.
 const setRewindHeld = (on) => {
-  rewindHeld = on && rewindOn;
+  rewindHeld = on && rewindOn && !ndsGameLoaded(); // no rewind ring on the DS core
   rewindButton.classList.toggle("active", rewindHeld);
 };
 
@@ -11300,7 +11464,7 @@ const shortcutKeyHandler = (e, down) => {
   // A capture replay owns the machine: no state loads, speed changes or
   // pauses (game keys still pass as the post-replay held state).
   if (typeof clipReplayActive !== "undefined" && clipReplayActive) return;
-  if (codeLookup[e.code] !== undefined) return; // game bindings always win
+  if (boundInput(e.code) !== undefined) return; // game bindings always win
   if (e.ctrlKey || e.metaKey || e.altKey) return; // browser/OS chords
 
   // Releases skip the modal/typing guards so a hold cannot stick.
@@ -12023,11 +12187,10 @@ const setHeroMode = (mode, name) => {
 const drawPausedHero = () => {
   // Single-core only: the link modes render to their own canvases.
   if (!currentRomName || linkMode || rollbackMode || netActive()) { setHeroShown(false); return; }
-  if (typeof Module === "undefined" || !Module._wasm_fb_ptr) { setHeroShown(false); return; }
-  const ptr = Module._wasm_fb_ptr();
-  if (!ptr) { setHeroShown(false); return; }
-  const [w, h] = gameRes(); // GBA 240x160, GB/GBC 160x144
-  const heap = new Uint8Array(Module.memory.buffer, ptr, w * h * 4);
+  // GBA 240x160, GB/GBC 160x144, a DS game's top screen 256x192.
+  const fb = copyFramebuffer();
+  if (!fb) { setHeroShown(false); return; }
+  const { heap, w, h } = fb;
   heroCanvas.width = w;
   heroCanvas.height = h;
   const ctx = heroCanvas.getContext("2d");
@@ -12077,7 +12240,8 @@ const renderClosedHero = async (name, file, keys) => {
       heroCanvas.height = bitmap.height;
       ctx?.drawImage?.(bitmap, 0, 0);
     } else {
-      const [w, h] = systemOf(name) === "GBA" ? [240, 160] : [160, 144];
+      const sys = systemOf(name);
+      const [w, h] = sys === "GBA" ? [240, 160] : sys === "DS" ? [256, 192] : [160, 144];
       heroCanvas.width = w;
       heroCanvas.height = h;
       if (ctx) { ctx.fillStyle = "#000"; ctx.fillRect?.(0, 0, w, h); }
@@ -12361,7 +12525,14 @@ const unloadGame = async ({ flushSave = true, picture = true } = {}) => {
   const flushed = flushSave ? persistSave(romName, originalName) : null;
   currentRomName = null;
   currentOriginalName = null;
-  try { FS.unlink(stripExt(romName) + ".sav"); } catch {}
+  if (isNdsRomName(romName)) {
+    // The flush read the DS battery before its first await: the core can go.
+    ndsAudioQuiet();
+    ndsUnload();
+    ndsApplyModeClasses();
+  } else {
+    try { FS.unlink(stripExt(romName) + ".sav"); } catch {}
+  }
   // The cheat list belongs to the game that left; restoreCheats refills it.
   cheatList = [];
   renderCheatList();
@@ -12426,6 +12597,7 @@ const thumbsCandidates = async (includeDrive, known) => {
   let out = [];
   for (let { name } of await getRecentMeta()) {
     if (keys.has(frameKey(name))) continue;
+    if (isNdsRomName(name)) continue; // the batch runs the GB/GBA core only
     let local = keys.has(romKey(name));
     if (local || includeDrive) out.push({ name, local });
   }
@@ -12631,8 +12803,9 @@ const takeScreenshot = () => {
   menuDropdown.hidden = true;
   if (!currentRomName || typeof Module === "undefined" || !Module._loop_tick) return;
   if (paused) {
-    // Paused: draw one frame, then grab it in the same task.
-    Module._loop_tick();
+    // Paused: draw one frame, then grab it in the same task (a DS game's
+    // screens are drawn again from the core as they are).
+    if (!ndsGameLoaded()) Module._loop_tick();
     drawGame();
     captureCanvas();
   } else {
@@ -12675,7 +12848,7 @@ document.getElementById("topbar-handle").addEventListener("click", () => {
 
 // --- Gamepad support (polled each frame) ---
 
-const gpPrev = new Array(10).fill(false);
+const gpPrev = new Array(INPUT_NAMES.length).fill(false);
 const GP_DEADZONE = 0.4;
 
 // Gamepad inside Settings: shoulders cycle sections, d-pad walks controls,
@@ -12707,14 +12880,24 @@ const pollGamepads = () => {
   const settingsOpen = settingsModal.classList.contains("open");
   if (!settingsOpen && (typeof Module === "undefined" || !Module._setInput)) return;
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-  const want = new Array(10).fill(false);
+  const want = new Array(INPUT_NAMES.length).fill(false);
   let anyConnected = false;
+  // A DS game has four face buttons: each by its label on the pad (the
+  // standard mapping's 0-3 are A B X Y on an Xbox-style pad).
+  const ds = ndsGameLoaded();
   for (const pad of pads) {
     if (!pad) continue;
     anyConnected = true;
     const b = (i) => pad.buttons[i] && pad.buttons[i].pressed;
-    if (b(0) || b(3)) want[4] = true; // A / Y -> A
-    if (b(1) || b(2)) want[5] = true; // B / X -> B
+    if (ds) {
+      if (b(0)) want[4] = true;  // A
+      if (b(1)) want[5] = true;  // B
+      if (b(2)) want[10] = true; // X
+      if (b(3)) want[11] = true; // Y
+    } else {
+      if (b(0) || b(3)) want[4] = true; // A / Y -> A
+      if (b(1) || b(2)) want[5] = true; // B / X -> B
+    }
     if (b(8)) want[6] = true; // Back -> Select
     if (b(9)) want[7] = true; // Start
     if (b(4) || b(6)) want[8] = true; // LB / LT -> L
@@ -12749,16 +12932,20 @@ const pollGamepads = () => {
   if (settingsOpen) {
     settingsGamepadNav(want);
     // A button held across the close must not arrive as a fresh press.
-    for (let i = 0; i < 10; i++) gpPrev[i] = want[i];
+    for (let i = 0; i < want.length; i++) gpPrev[i] = want[i];
     return;
   }
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < want.length; i++) {
     if (want[i] !== gpPrev[i]) {
       // The gamepad does not pass through routeP1Input, so it notifies the
       // overlay itself; not in 2P link, where it is the other console's.
       if (!linkMode) noteInputDisplay(i, want[i]);
       // 2P link: player 2's controller; rollback: this player's.
-      if (rollbackMode) {
+      if (ds) {
+        ndsSetInput(i, want[i]);
+      } else if (i >= DS_ONLY_INPUTS) {
+        // the DS's X/Y: nothing on the GB/GBA cores
+      } else if (rollbackMode) {
         noteLocalButton(i, want[i]);
       } else if (linkMode) {
         if (Module._link_input) Module._link_input(1, i, want[i] ? 1 : 0);
@@ -12779,8 +12966,9 @@ const TILT_SMOOTHING = 0.18;  // per-tick ease factor toward the target
 const TILT_ORIENT_RANGE = 25; // degrees of physical tilt = full deflection
 
 const detectTiltCart = () => {
+  // A DS game is not on the GB/GBA core, which still holds the last cart.
   tiltKind =
-    typeof Module !== "undefined" && Module._wasm_cart_has_tilt
+    !ndsGameLoaded() && typeof Module !== "undefined" && Module._wasm_cart_has_tilt
       ? Module._wasm_cart_has_tilt() : 0; // 1 = accelerometer, 2 = gyro rate
   tiltActive = tiltKind > 0;
   tiltTargetX = tiltTargetY = tiltX = tiltY = 0;
@@ -13121,7 +13309,7 @@ const collectPrint = async (h) => {
 };
 
 const pollPrinter = () => {
-  if (typeof Module === "undefined" || !Module._printer_poll) return;
+  if (typeof Module === "undefined" || !Module._printer_poll || ndsGameLoaded()) return;
   if (Module._printer_poll() > 0) collectPrint(Module._printer_take());
 };
 
@@ -13229,7 +13417,7 @@ const camLive = () =>
   !!camStream && camStream.getVideoTracks().some((t) => t.readyState === "live");
 
 const camCartLoaded = () =>
-  typeof Module !== "undefined" && !!Module._wasm_cart_has_camera &&
+  !ndsGameLoaded() && typeof Module !== "undefined" && !!Module._wasm_cart_has_camera &&
   Module._wasm_cart_has_camera() === 1;
 
 const camUsable = () => !!navigator.mediaDevices?.getUserMedia;
@@ -13552,7 +13740,7 @@ let rumbling = false;
 let lastRumblePulse = 0;
 
 const updateRumble = (timestamp) => {
-  const on = !!(gbRumble && currentRomName && !paused &&
+  const on = !!(gbRumble && currentRomName && !paused && !ndsGameLoaded() &&
     typeof Module !== "undefined" && Module._wasm_rumble && Module._wasm_rumble());
   if (on !== rumbling) {
     rumbling = on;
@@ -13575,6 +13763,459 @@ const updateRumble = (timestamp) => {
     try { navigator.vibrate?.(45); } catch {}
   }
 };
+
+// --- Nintendo DS -------------------------------------------------------------
+// A .nds game runs on its own wasm core (web/nds/nds.js, built from
+// src/dingbat_nds_wasm.nim), fetched the first time a DS game starts so a
+// GB/GBA session never pays for it. It is the loaded game like any other
+// (currentRomName "rom.nds"): the library, battery saves, pause, the home
+// screen and the WebGL presenter all serve it. What the DS core does not
+// have yet is gated off under body.nds-mode: save states (with them resume
+// snapshots, slots, rewind, run-ahead and retroactive clips), the link cable
+// and cheats. docs/nds/web.md has the list and the reasons.
+//
+// DS games are local-only: no ROM, save, picture or library entry of one
+// goes to Google Drive (driveExcluded). The app on the account's other
+// devices (main has no DS core) would list them as Game Boy games.
+
+const isNdsRomName = (n) => NdsUtil.isNdsName(n);
+const ndsGameLoaded = () => !!currentRomName && isNdsRomName(currentRomName);
+// A Drive file name / IndexedDB key that belongs to a DS game.
+const driveExcluded = (key) => {
+  const p = parseDriveFileName(String(key || ""));
+  return !!p && isNdsRomName(p.game);
+};
+
+/** @type {NdsCoreModule | null} */
+let ndsCore = null;          // the createNdsCore() instance, once fetched
+/** @type {Promise<NdsCoreModule> | null} */
+let ndsCorePromise = null;
+let ndsCoreGame = null;      // the game the DS core holds (nds_reboot's)
+// Cache-busting for the lazy fetch: the LAN dev server (web/serve.py --dev)
+// stamps window.DINGBAT_ASSET_V into index.html; production fetches the bare
+// URLs, which the service worker caches.
+const ndsAssetQuery = () => {
+  const v = window.DINGBAT_ASSET_V?.nds;
+  return v ? "?v=" + encodeURIComponent(v) : "";
+};
+const loadNdsCore = () => {
+  if (ndsCore) return Promise.resolve(ndsCore);
+  if (!ndsCorePromise) {
+    ndsCorePromise = new Promise((resolve, reject) => {
+      if (typeof createNdsCore === "function") { resolve(undefined); return; }
+      const s = document.createElement("script");
+      s.src = "nds/nds.js" + ndsAssetQuery();
+      s.onload = () => resolve(undefined);
+      s.onerror = () => reject(new Error("the DS core did not load"));
+      document.head.appendChild(s);
+    })
+      .then(() => createNdsCore({ locateFile: (p) => "nds/" + p + ndsAssetQuery() }))
+      .then((m) => { ndsCore = m; log("DS core loaded"); return m; })
+      .catch((e) => { ndsCorePromise = null; throw e; });
+  }
+  return ndsCorePromise;
+};
+
+// Optional dumps (Settings > Nintendo DS). None needed: without them the core
+// boots on its HLE BIOS and a synthesized firmware.
+const NDS_BIOS_KEYS = { bios9: "bios:nds9", bios7: "bios:nds7", firmware: "bios:ndsfw" };
+const ndsBiosFiles = async () => {
+  const out = { bios9: null, bios7: null, firmware: null };
+  for (const kind of NdsUtil.BIOS_KINDS) {
+    const rec = await dbGet(NDS_BIOS_KEYS[kind]).catch(() => null);
+    if (rec?.data?.length) out[kind] = new Uint8Array(rec.data);
+  }
+  return out;
+};
+
+const ndsHeapCopy = (c, bytes) => {
+  if (!bytes || !bytes.length) return 0;
+  const p = c._malloc(bytes.length);
+  if (p) c.HEAPU8.set(bytes, p);
+  return p;
+};
+
+// Build the core: on `rom` (written once, straight into the buffer
+// nds_rom_alloc hands out: a 128 MB ROM must not exist twice in the heap),
+// or with no `rom` on the ROM the core already holds (nds_reboot: reset,
+// a save imported or reset). `save` is the battery to start from.
+const ndsBoot = (c, rom, bios, save) => {
+  const sp = ndsHeapCopy(c, save);
+  const sn = sp ? save.length : 0;
+  let ok = false;
+  if (rom) {
+    const rp = c._nds_rom_alloc(rom.length);
+    if (rp) {
+      c.HEAPU8.set(rom, rp); // HEAPU8 read after the alloc: growth replaces it
+      const b = [bios.bios9, bios.bios7, bios.firmware];
+      const p = b.map((x) => ndsHeapCopy(c, x));
+      ok = c._nds_boot(p[0], p[0] ? b[0].length : 0, p[1], p[1] ? b[1].length : 0,
+                       p[2], p[2] ? b[2].length : 0, sp, sn) === 1;
+      for (const x of p) if (x) c._free(x);
+    }
+  } else {
+    ok = c._nds_reboot(sp, sn) === 1;
+  }
+  if (sp) c._free(sp);
+  return ok;
+};
+
+// --- Audio: the core's 32728.5 Hz stereo into the app's graph (the master
+// gain, so volume, mute and the clip tap apply), through ndsaudio.js's ring
+// and resampler. Emulation is paced by that ring's fill, as on the dev page:
+// the audio clock sets the speed. Before audio is unlocked, by wall time.
+let ndsOut = null;
+const ndsAudioOut = () => ndsOut || (ndsOut = createNdsAudio(NdsUtil.AUDIO_RATE, NdsUtil.FPS));
+const NDS_FRAME_MS = 1000 / NdsUtil.FPS;
+// Fast-forward runs frames for this long a tick (the GB/GBA path's vsync
+// aiming is not worth it on a core this heavy).
+const NDS_FF_BUDGET_MS = 12;
+let ndsAcc = 0;
+let ndsLastTs = 0;
+let ndsQuiet = true; // the ring was emptied (pause, hidden tab): refill it first
+
+// Paused, hidden, or left: drop what is queued now, so the ring empties
+// silently instead of underrunning (which would grow its target).
+const ndsAudioQuiet = () => {
+  if (ndsOut && !ndsQuiet) ndsOut.reset();
+  ndsQuiet = true;
+  ndsLastTs = 0;
+};
+
+const ndsRunFrame = (c, out, keepAudio, speed) => {
+  c._nds_run_frame();
+  const n = c._nds_audio_frames();
+  if (n > 0 && keepAudio && out.attached()) {
+    const p = c._nds_audio_ptr();
+    out.push(NdsUtil.speedAudio(new Float32Array(c.HEAPU8.buffer, p, n * 2).slice(), speed));
+  }
+  c._nds_audio_clear();
+};
+
+// One rAF tick of the running DS game; returns the frames it ran. 2x and
+// slow motion change how much audio each frame contributes (every other
+// sample, or each twice), so the same fill-based pacing runs them at speed.
+const ndsTick = (timestamp) => {
+  const c = ndsCore;
+  if (!c || ndsCoreGame === null) return 0;
+  const out = ndsAudioOut();
+  const graph = typeof window.appAudioOut === "function" ? window.appAudioOut() : null;
+  if (graph && graph.ctx.state === "running") out.attach(graph.ctx, graph.dest);
+  if (ndsQuiet) { out.reset(); ndsQuiet = false; }
+  const dt = ndsLastTs ? Math.min(100, timestamp - ndsLastTs) : 0;
+  ndsLastTs = timestamp;
+  let fill = out.fillFrames();
+  let n = 0;
+  if (fastForward) {
+    // Audio only while the ring wants it: realtime-rate sound, the rest dropped.
+    const end = performance.now() + NDS_FF_BUDGET_MS;
+    do {
+      const keep = fill !== null && fill < out.target();
+      ndsRunFrame(c, out, keep, 1);
+      if (keep) fill += out.FRAME;
+      n++;
+    } while (performance.now() < end && n < 60);
+    ndsAcc = 0;
+    return n;
+  }
+  const speed = speed2x ? 2 : slowMotion ? 0.5 : 1;
+  if (fill !== null) {
+    const per = out.FRAME / speed;
+    const cap = speed > 1 ? 8 : 4;
+    while (fill < out.target() && n < cap) {
+      ndsRunFrame(c, out, true, speed);
+      fill += per;
+      n++;
+    }
+    ndsAcc = 0;
+  } else {
+    ndsAcc += dt;
+    const step = NDS_FRAME_MS / speed;
+    const cap = speed > 1 ? 4 : 2;
+    while (ndsAcc >= step && n < cap) {
+      ndsRunFrame(c, out, false, speed);
+      ndsAcc -= step;
+      n++;
+    }
+    if (ndsAcc > 2 * step) ndsAcc = 2 * step;
+  }
+  return n;
+};
+
+// Frame advance while paused: one frame, its audio dropped.
+const ndsStepFrame = () => {
+  if (!ndsCore || ndsCoreGame === null) return;
+  ndsRunFrame(ndsCore, ndsAudioOut(), false, 1);
+};
+
+// Unpaced frames for the log and the bench: ms per frame.
+const ndsBench = (frames = 120) => {
+  if (!ndsCore || ndsCoreGame === null) return null;
+  const t0 = performance.now();
+  for (let i = 0; i < frames; i++) {
+    ndsCore._nds_run_frame();
+    ndsCore._nds_audio_clear();
+  }
+  return (performance.now() - t0) / frames;
+};
+window.ndsBench = ndsBench;
+
+// --- Video: the two screens as one composite frame (NdsUtil.layout), drawn
+// by the presenter from the core's BGR555 buffers in place.
+const NDS_LAYOUTS = ["auto", "stack", "side"];
+let ndsLayoutPref = "auto";
+// The gap between the screens, in composite pixels (#nds-hinge paints it).
+const NDS_GAP = 8;
+let ndsLay = NdsUtil.layout(0, 0, "stack", { gap: NDS_GAP });
+
+const ndsUpdateLayout = (availW, availH) => {
+  ndsLay = NdsUtil.layout(availW, availH, ndsLayoutPref,
+                          { gap: NDS_GAP, integer: integerScale });
+  document.body.classList.toggle("nds-side", ndsLay.mode === "side");
+};
+
+// The backing store: glScale(), except that a plain or smoothed picture
+// shown small needs no more backing pixels than it covers on the display
+// (the DS frame is 2.5x a GBA's, and every one is a fragment).
+const ndsBackingScale = () => {
+  const full = glScale();
+  if (upscaleFilter === "grid" || upscaleFilter === "rgb") return full;
+  const dpr = typeof devicePixelRatio === "number" && devicePixelRatio > 0 ? devicePixelRatio : 1;
+  return Math.min(full, Math.max(2, Math.ceil((ndsLay.scale || 1) * dpr)));
+};
+
+// #nds-hinge over the gap between the screens, in the stage's coordinates.
+const ndsPlaceHinge = () => {
+  const el = document.getElementById("nds-hinge");
+  if (!el || typeof canvasEl.getBoundingClientRect !== "function") return;
+  const c = canvasEl.getBoundingClientRect(), s = stageEl.getBoundingClientRect();
+  if (!c.width || !ndsLay.gap) { el.style.width = "0px"; return; }
+  const side = ndsLay.mode === "side";
+  const kx = c.width / ndsLay.w, ky = c.height / ndsLay.h;
+  const x = side ? NdsUtil.W * kx : 0, y = side ? 0 : NdsUtil.H * ky;
+  el.style.left = c.left - s.left + x + "px";
+  el.style.top = c.top - s.top + y + "px";
+  el.style.width = (side ? ndsLay.gap * kx : c.width) + "px";
+  el.style.height = (side ? c.height : ndsLay.gap * ky) + "px";
+};
+
+const ndsFrame = () => {
+  const c = ndsCore;
+  if (!c || ndsCoreGame === null) return null;
+  const t = c._nds_fb555_top(), b = c._nds_fb555_bottom();
+  if (!t || !b) return null;
+  const r = NdsUtil.screenRects(ndsLay.mode, ndsLay.gap);
+  const buf = c.HEAPU8.buffer, n = NdsUtil.W * NdsUtil.H;
+  return { w: ndsLay.w, h: ndsLay.h, parts: [
+    { view: new Uint16Array(buf, t, n), x: r.top.x, y: r.top.y, w: NdsUtil.W, h: NdsUtil.H },
+    { view: new Uint16Array(buf, b, n), x: r.bottom.x, y: r.bottom.y, w: NdsUtil.W, h: NdsUtil.H },
+  ] };
+};
+
+// The top screen as RGBA: the library's picture, the paused hero and the
+// state-slot thumbnail (the 4:3 screen the game's title and scenes are on).
+const ndsTopRgba = () => {
+  const c = ndsCore;
+  if (!c || ndsCoreGame === null) return null;
+  const p = c._nds_fb_top();
+  if (!p) return null;
+  return { heap: c.HEAPU8.slice(p, p + NdsUtil.W * NdsUtil.H * 4), w: NdsUtil.W, h: NdsUtil.H };
+};
+
+// --- Battery: the cart's save chip, copied out when the game wrote it.
+const ndsSaveDirty = () =>
+  !!ndsCore && ndsCoreGame !== null && ndsCore._nds_save_dirty() === 1;
+// The chip's bytes (null before the game first touched it). `clean` marks
+// them stored, for persistSave.
+const ndsSaveBytes = (clean = false) => {
+  const c = ndsCore;
+  if (!c || ndsCoreGame === null) return null;
+  const n = c._nds_save_size();
+  const p = n > 0 ? c._nds_save_ptr() : 0;
+  if (!p) return null;
+  const out = c.HEAPU8.slice(p, p + n);
+  if (clean) c._nds_save_clean();
+  return out;
+};
+
+// --- Save states: the one place they plug in. When the core exports
+// nds_state_size / nds_state_data / nds_state_load, captureStateBytes and
+// applyStateBytes come through here and body.nds-states shows every state
+// feature that only needs those three (quick save/load, slots, the session
+// a library tile resumes). Rewind and run-ahead need more and stay off.
+const ndsHasStates = () => !!(ndsCore && ndsCore._nds_state_size &&
+                              ndsCore._nds_state_data && ndsCore._nds_state_load);
+const ndsCaptureState = () => {
+  const c = ndsCore;
+  if (!ndsHasStates() || ndsCoreGame === null) return null;
+  const n = c._nds_state_size();
+  const p = n > 0 ? c._nds_state_data() : 0;
+  return p ? c.HEAPU8.slice(p, p + n) : null;
+};
+const ndsApplyState = (bytes) => {
+  const c = ndsCore;
+  if (!ndsHasStates() || ndsCoreGame === null || !bytes?.length) return false;
+  const p = c._malloc(bytes.length);
+  if (!p) return false;
+  c.HEAPU8.set(bytes, p);
+  const ok = c._nds_state_load(p, bytes.length) === 1;
+  c._free(p);
+  return ok;
+};
+
+// --- Input: the app's ids (INPUT_NAMES) to the core's buttons.
+const ndsSetInput = (appId, down) => {
+  const id = NdsUtil.fromAppInput(appId);
+  if (id >= 0 && ndsCore && ndsCoreGame !== null) ndsCore._nds_set_button(id, down ? 1 : 0);
+};
+
+// The stylus: mouse, pen or finger on the bottom screen. A touch starts only
+// on the bottom screen and then follows the pointer (captured), clamped to
+// the screen's edge, until it lifts.
+let ndsTouchId = null;
+const ndsTouchAt = (e, down) => {
+  const p = NdsUtil.touchPoint(e.clientX, e.clientY, canvasEl.getBoundingClientRect(), ndsLay);
+  if (ndsCore && ndsCoreGame !== null) ndsCore._nds_set_touch(p.x, p.y, down ? 1 : 0);
+  return p;
+};
+const ndsTouchEnd = (e) => {
+  if (ndsTouchId === null || (e && e.pointerId !== ndsTouchId)) return;
+  if (e) ndsTouchAt(e, false);
+  else if (ndsCore && ndsCoreGame !== null) ndsCore._nds_set_touch(0, 0, 0);
+  ndsTouchId = null;
+};
+canvasEl.addEventListener("pointerdown", (e) => {
+  if (!ndsGameLoaded() || !document.body.classList.contains("running")) return;
+  if (ndsTouchId !== null || (e.pointerType === "mouse" && e.button !== 0)) return;
+  const p = NdsUtil.touchPoint(e.clientX, e.clientY, canvasEl.getBoundingClientRect(), ndsLay);
+  if (!p.inside) return;
+  e.preventDefault();
+  ndsTouchId = e.pointerId;
+  try { canvasEl.setPointerCapture(e.pointerId); } catch {}
+  ndsTouchAt(e, true);
+});
+canvasEl.addEventListener("pointermove", (e) => {
+  if (e.pointerId === ndsTouchId) ndsTouchAt(e, true);
+});
+canvasEl.addEventListener("pointerup", ndsTouchEnd);
+canvasEl.addEventListener("pointercancel", ndsTouchEnd);
+window.addEventListener("blur", () => ndsTouchEnd(null));
+
+// The room the screens get. On a phone held sideways the touch controls are
+// rails over the stage's sides (styles.css), and the bottom screen under a
+// rail could not be touched: the screens fit between the d-pad (or stick)
+// and the face buttons instead, centred as the stage centres them.
+/** @param {[number, number]} wh @returns {[number, number]} */
+const ndsAvail = ([w, h]) => {
+  const ctl = document.getElementById("controls");
+  if (!ctl || typeof ctl.getBoundingClientRect !== "function") return [w, h];
+  if (getComputedStyle(ctl).position !== "fixed") return [w, h];
+  const left = document.getElementById(controlStyle === "joystick" ? "joystick-base" : "dpad");
+  const right = document.getElementById("ab");
+  const l = left?.getBoundingClientRect(), r = right?.getBoundingClientRect();
+  if (!l?.width || !r?.width) return [w, h];
+  const s = stageEl.getBoundingClientRect();
+  const mid = s.left + s.width / 2;
+  // Symmetric about the stage's centre: the canvas is centred there.
+  const half = Math.min(mid - l.right, r.left - mid) - 8;
+  return half > 0 ? [Math.min(w, 2 * half), h] : [w, h];
+};
+
+// --- Starting and leaving a DS game (loadRom's synchronous part, unloadGame).
+const ndsStart = (name, rom, save, bios) => {
+  const c = ndsCore;
+  if (!c || (!rom && ndsCoreGame !== name)) return false;
+  if (!ndsBoot(c, rom, bios, save)) {
+    ndsCoreGame = null; // whatever it held went with the attempt
+    return false;
+  }
+  ndsCoreGame = name;
+  ndsTouchId = null;
+  ndsAcc = 0;
+  ndsAudioQuiet();
+  return true;
+};
+// The core and its ROM go (a GB/GBA game took over, or the game was closed).
+const ndsUnload = () => {
+  if (ndsCore && ndsCoreGame !== null) ndsCore._nds_unload();
+  ndsCoreGame = null;
+  ndsTouchId = null;
+  if (ndsOut) ndsOut.detach();
+};
+
+// The session's mode classes: what to show and hide (styles.css "DS mode").
+const ndsApplyModeClasses = () => {
+  const on = ndsGameLoaded();
+  document.body.classList.toggle("nds-mode", on);
+  document.body.classList.toggle("nds-states", on && ndsHasStates());
+  if (!on) document.body.classList.remove("nds-side");
+};
+
+// Signed in to Drive: say once a session that DS games stay here.
+let ndsDriveNoted = false;
+const ndsNoteDriveSkip = () => {
+  if (ndsDriveNoted || !driveEnrolled()) return;
+  ndsDriveNoted = true;
+  showToast("DS games stay on this device — Drive sync skips them for now");
+};
+
+// --- Layout preference: Settings > Nintendo DS and the bar's layout button.
+const ndsLayoutChips = Array.from(/** @type {NodeListOf<HTMLElement>} */ (
+  document.querySelectorAll("#nds-layout-picker .choice-chip")));
+const ndsLayoutBtn = document.getElementById("nds-layout-btn");
+const NDS_LAYOUT_NAMES = { auto: "Automatic", stack: "Stacked", side: "Side by side" };
+const applyNdsLayout = (v) => {
+  ndsLayoutPref = NDS_LAYOUTS.includes(v) ? v : "auto";
+  syncChipGroup(ndsLayoutChips, ndsLayoutPref);
+  if (ndsLayoutBtn) {
+    ndsLayoutBtn.title = "Screens: " + NDS_LAYOUT_NAMES[ndsLayoutPref];
+    ndsLayoutBtn.dataset.layout = ndsLayoutPref;
+  }
+  updateCanvasScaling();
+};
+const setNdsLayout = async (v) => {
+  applyNdsLayout(v);
+  if (db) await dbPut("nds-layout", ndsLayoutPref);
+};
+for (const chip of ndsLayoutChips) {
+  chip.addEventListener("click", () => setNdsLayout(chip.dataset.value));
+}
+ndsLayoutBtn?.addEventListener("click", () => {
+  const next = NDS_LAYOUTS[(NDS_LAYOUTS.indexOf(ndsLayoutPref) + 1) % NDS_LAYOUTS.length];
+  setNdsLayout(next);
+  showToast("Screens: " + NDS_LAYOUT_NAMES[next]);
+});
+const loadNdsLayoutFromStorage = async () => {
+  applyNdsLayout(await dbGet("nds-layout"));
+};
+
+// --- BIOS / firmware rows (Settings > Nintendo DS), stored like the GBA BIOS.
+const NDS_BIOS_LABEL = { bios9: "ARM9 BIOS", bios7: "ARM7 BIOS", firmware: "Firmware" };
+const updateNdsBiosStatus = async () => {
+  for (const kind of NdsUtil.BIOS_KINDS) {
+    const el = document.getElementById("nds-" + kind + "-status");
+    if (!el) continue;
+    const rec = await dbGet(NDS_BIOS_KEYS[kind]).catch(() => null);
+    el.textContent = rec ? rec.name || "Set" : kind === "firmware" ? "Built-in" : "HLE";
+  }
+};
+for (const kind of NdsUtil.BIOS_KINDS) {
+  document.getElementById("pick-nds-" + kind)?.addEventListener("click", () => {
+    pickFile(".bin", async (bytes, name) => {
+      if (!NdsUtil.biosSizeOk(kind, bytes.length)) {
+        alert(`That file is ${bytes.length} bytes — a DS ${NDS_BIOS_LABEL[kind]} dump is ` +
+              (kind === "firmware" ? "128, 256 or 512 KB." : kind === "bios9" ? "4 KB." : "16 KB."));
+        return;
+      }
+      await dbPut(NDS_BIOS_KEYS[kind], { name, data: bytes });
+      updateNdsBiosStatus();
+    });
+  });
+  document.getElementById("remove-nds-" + kind)?.addEventListener("click", async () => {
+    await dbDelete(NDS_BIOS_KEYS[kind]);
+    updateNdsBiosStatus();
+  });
+}
 
 // --- Early (pre-wasm) boot -------------------------------------------------
 // initStorage runs at DOMContentLoaded so the home grid never waits on the
@@ -13611,6 +14252,7 @@ const initStorage = async () => {
   await loadHideTouchOnGamepadFromStorage();
   await loadInputDisplayFromStorage();
   await loadControlStyleFromStorage();
+  await loadNdsLayoutFromStorage();
   await loadLibraryOpenFromStorage();
   await loadRunaheadFromStorage();
   await loadAudioSettings();
@@ -13823,6 +14465,8 @@ var Module = {
     window.updateGain = () => {
       if (gainNode) gainNode.gain.value = effectiveGain();
     };
+    // The DS core's audio joins the graph here, at the master gain (ndsTick).
+    window.appAudioOut = () => (audioCtx && gainNode ? { ctx: audioCtx, dest: gainNode } : null);
 
     // Resume on first user interaction (autoplay policy); on iOS also play a
     // silent buffer and an <audio> element to activate the session.
@@ -13993,6 +14637,7 @@ var Module = {
     // Mobile browsers kill backgrounded tabs without pagehide: snapshot on hide.
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) return;
+      ndsAudioQuiet(); // rAF stops: a DS game's ring would underrun
       persistAutoState();
       storeLastFrame(); // as at beforeunload
     });
@@ -14024,7 +14669,8 @@ var Module = {
     // "SLEEPING" in place of the FPS counter while the GBA is in Stop mode.
     let sleepVisible = false;
     const updateSleepOverlay = () => {
-      const sleeping = !!(Module._isStopped && Module._isStopped());
+      // The GB/GBA core's Stop mode; a DS game is not on it.
+      const sleeping = !ndsGameLoaded() && !!(Module._isStopped && Module._isStopped());
       if (sleeping !== sleepVisible) {
         sleepVisible = sleeping;
         fpsDiv.textContent = sleeping ? "SLEEPING" : "";
@@ -14041,7 +14687,7 @@ var Module = {
     let hleActive = false;
     let hlePressed = true;
     const updateHleIndicator = () => {
-      const avail = mp2kHle && !!(
+      const avail = mp2kHle && !ndsGameLoaded() && !!(
         Module._wasm_mp2k_available && Module._wasm_mp2k_available()
       );
       const on = avail && !!(
@@ -14106,6 +14752,7 @@ var Module = {
         watchCanvasBacking();
         lastFrameTime = 0;
         accumulator = 0;
+        ndsAudioQuiet(); // a DS game's queued audio goes silently
         requestAnimationFrame(tick);
         return;
       }
@@ -14115,7 +14762,13 @@ var Module = {
       if (!fastForward && rafIv > 4 && rafIv < 40) ffVsyncMs += (rafIv - ffVsyncMs) * 0.05;
       accumulator += timestamp - lastFrameTime;
       lastFrameTime = timestamp;
-      if (rollbackMode) {
+      if (ndsGameLoaded()) {
+        // A DS game: its own core, paced by its own audio ring (ndsTick).
+        const n = ndsTick(timestamp);
+        frameCount += n;
+        accumulator = 0;
+        presentSkip = n === 0 && !presentDirty;
+      } else if (rollbackMode) {
         // Rollback: rollback_tick returns the frame just simulated (ship it)
         // or -1 when stalled at the prediction window. 2x is allowed because
         // both peers halve the step together (RB_SPEED).
@@ -14288,7 +14941,7 @@ var Module = {
       presentSkip = false;
       // Screenshot: grab it in this task (no preserveDrawingBuffer).
       if (pendingShot) {
-        Module._loop_tick();
+        if (!ndsGameLoaded()) Module._loop_tick(); // a DS frame just redraws
         drawGame();
         captureCanvas();
       }
@@ -14440,7 +15093,7 @@ document.getElementById("dpad").addEventListener("touchcancel", dpadTouchEnd);
 
 // Standalone buttons; d-pad children are handled above.
 document
-  .querySelectorAll("#l, #r, #a, #b, #select, #start")
+  .querySelectorAll("#l, #r, #a, #b, #x, #y, #select, #start")
   .forEach((element) => {
     element.addEventListener("touchstart", (event) => {
       event.preventDefault();

@@ -239,9 +239,10 @@ const createNdsAudio = (inRate = 33513982 / 1024, fps = 59.8261) => {
     },
     // Interleaved stereo; the array is transferred (do not reuse it).
     push(data) {
-      if (!send || !data.length) return;
+      const n = data.length >> 1; // before the send: a transfer empties `data`
+      if (!send || !n) return;
       send(data);
-      sent += data.length >> 1;
+      sent += n;
     },
     // Drop what is queued and refill from scratch (pause, hidden tab).
     reset() {
