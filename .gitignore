@@ -194,6 +194,7 @@ tests/roms/mbprobe/build/payload_mirror_cart.gba
 formal/.lake/
 web/nds/nds.js
 web/nds/nds.wasm
+web/nds/demos/
 # DS test ROMs (ours and third-party) stay out of the repo: they are built into
 # ~/.cache/dingbat-nds/roms (tests/nds/README.md).
 tests/nds/roms/

@@ -118,6 +118,7 @@ nim c -d:release -d:test_harness --path:src -o:ndsrun tools/ndsrun.nim
 
 # web dev page
 nim c -d:emscripten src/dingbat_nds_wasm.nim      # -> web/nds/nds.{js,wasm}
+cp ~/.cache/dingbat-nds/roms/fb_both.nds web/nds/demos/   # demos are gitignored
 python3 -m http.server 8791 -d web                # open /nds.html?rom=nds/demos/fb_both.nds
 ```
 
