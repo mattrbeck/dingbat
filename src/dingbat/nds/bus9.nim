@@ -61,7 +61,7 @@ proc io9_read(n: NDS; a: uint32): uint32 =
   of 0x130: uint32(n.input.keyinput()) or (uint32(n.input.keycnt9) shl 16)
   of 0x180: n.ipc.read_sync(true)
   of 0x184: n.ipc.read_fifocnt(true)
-  of 0x1A0 .. 0x1AC: (if n.cart.owner_arm7: 0'u32 else: n.cart.read_reg(o))
+  of 0x1A0 .. 0x1B8: (if n.cart.owner_arm7: 0'u32 else: n.cart.read_reg(o))
   of 0x204: uint32(n.exmemcnt)
   of 0x208, 0x210, 0x214: n.irq9.read_reg(o)
   of 0x240:
@@ -100,7 +100,7 @@ proc io9_write(n: NDS; a: uint32; v, mask: uint32) =
   of 0x180: n.ipc.write_sync(true, v, mask)
   of 0x184: n.ipc.write_fifocnt(true, v, mask)
   of 0x188: n.ipc.send(true, v)
-  of 0x1A0 .. 0x1AC:
+  of 0x1A0 .. 0x1B8:
     if not n.cart.owner_arm7: n.cart.write_reg(o, v, mask, n.arm9.cur_pc)
   of 0x204:
     if (mask and 0xFFFF) != 0:
