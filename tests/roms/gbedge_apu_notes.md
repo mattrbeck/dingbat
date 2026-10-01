@@ -73,9 +73,9 @@ in `gbedge.py`):
 
 ## Page 1B `CH2PHASE` — channel 2's trigger phase (CGB/AGB only)
 
-`apu/channel2.nim` says of `ch2_pcm_edge_zero` and `ch2_reload_is_now`: *"no
-channel_2 build of the ROM measures it. Assumed"* — they are channel 1's
-constants copied across. This page is that build. PCM12 (`$FF76`) carries CH1
+`sq_pcm_edge_zero` (`gb/apu/psg_host.nim`) and `sq_reload_is_now`
+(`common/psg_channels.nim`) apply channel 1's measurements to channel 2: *"no
+channel_2 build of the ROM measures it -- assumed"*. This page is that build. PCM12 (`$FF76`) carries CH1
 in the low nibble and CH2 in the high one; a power cycle leaves CH1's DAC off,
 so every byte reads `x0` and `x` **is** channel 2's 4-bit output.
 
@@ -92,7 +92,7 @@ NR23 `$F8` (freq $7F8 → a duty step every 8 M), NR24 `$87`.
 
 **What it pins.** The k of the first `F0` is `gb_trigger_deadline`'s start-up
 delay at 1 M resolution: `period + extra_ticks` with **2** extra ticks from
-off and **1** on a restart (`apu/abstract_channels.nim`), plus the 1 M the
+off and **1** on a restart (`gb/apu/psg_host.nim`), plus the 1 M the
 write takes to reach the APU's 1 MHz grid (`gb_apu_edge`). The *difference*
 between the two rows' edges is that extra tick on its own, independent of
 every other constant. A byte reading `00` where both neighbours read `F0` is
@@ -110,7 +110,7 @@ effect and `ch2_pcm_edge_zero` should go.
 
 ## Page 1C `SWPPHASE` — sweep restart phase and the sweep-delay split
 
-Two things: `channel1.nim:242` (*"A pending sweep stop does not survive the
+Two things: `ch1_trigger_sweep` in `common/psg_channels.nim` (*"A pending sweep stop does not survive the
 restart (only reachable when the trigger lands on the calculation's cycle).
 Assumed"*), and the split of the 8 M-cycles SameSuite `channel_1_sweep*`
 measures into `GB_SWEEP_SHADOW_DELAY` (2 M), `GB_SWEEP_CHECK_DELAY` (7 M) and
@@ -138,8 +138,9 @@ trigger could not cancel, and its k is the cycle the stop becomes
 irrevocable — i.e. where the shadow load, the trailing check and the stop
 actually sit inside those 8 M-cycles. In 10-1E, the last edge of the running
 2 M waveform and the first frozen sample bracket the cycle the new period
-takes effect on: the `reload_now` race in `sweep_step` (`channel1.nim` ~147),
-which is the same race `channel1.nim:212` assumes for a frequency write.
+takes effect on: the `reload_now` race in `sweep_step`
+(`common/psg_channels.nim`), which is the same race `sq_write_freq_hi` assumes
+for a frequency write.
 
 **dingbat.** 00-0E: `08` — the cap, i.e. still playing — in all fifteen: a
 restart before the check re-arms the check with the zero shadow, one between
@@ -162,11 +163,11 @@ The other two thirds of hwprobe row 14.
 *inverted* bit 0, so the channel starts silent and goes loud on exactly the
 15th shift: the count is 14.5 LFSR periods plus the trigger delay, a direct
 ruler of the divisor. `ch4_frequency_timer` makes the period `8 T` for code 0
-and `16·code T` otherwise; `gb_noise_deadline` says outright *"Codes 5-7 are
+and `16·code T` otherwise; `psg_noise_deadline` says outright *"Codes 5-7 are
 not exercised by any test and follow the >= 2 case"*. Codes 1-4 (which
 SameSuite does exercise) calibrate the ruler; **5, 6 and 7 must come out at
 5:6:7 against them, and their trigger alignment must follow the same 512 kHz
-grid rule, or `gb_noise_deadline` needs a case for them.** On DMG `$FF77`
+grid rule, or `psg_noise_deadline` needs a case for them.** On DMG `$FF77`
 reads `$FF` and every row reads `00 00` — the no-PCM-readback fingerprint, not
 a measurement.
 
@@ -174,7 +175,7 @@ a measurement.
 M-cycle: the fetch grid and the CPU's coincide only every 12 T, which is what
 makes a window tied to the fetch reachable at all (at a 4 T-multiple period it
 never is, and every read comes back `$FF` whatever the window). `ch3_wave_open`
-(`apu/channel3.nim`, `GB_WAVE_ACCESS_WINDOW = 2 T`) says DMG lets the CPU
+(`common/psg_channels.nim`, `GB_WAVE_ACCESS_WINDOW = 2 T`) says DMG lets the CPU
 through only in the half-cycle after a completed fetch. The pattern's **phase**
 is the window's position; how many of each three bytes are readable is its
 **width**. Sixteen `$FF` means the window is narrower than 2 T or does not line
@@ -224,8 +225,8 @@ Identical on CGB-C and CGB-E.
 
 *"NR10 pace 0 → nonzero write reloads the sweep timer"*. dingbat's NR10 write
 stores fields only, so the timer keeps the count it has been running since the
-trigger — with pace 0 that count started at 8 (`channel1.nim`: *"if
-sweep_period > 0: sweep_period else: 8"*) and reaches zero on the **eighth**
+trigger — with pace 0 that count started at 8 (`common/psg_channels.nim`:
+*"if sweep_period > 0: sweep_period else: 8"*) and reaches zero on the **eighth**
 sweep step whatever the write does. Pan Docs' reload puts the first
 calculation `pace` sweep steps after the **write**. The two disagree by up to
 seven sweep steps, and — more usefully — they disagree in *shape*.
@@ -315,7 +316,7 @@ dying at 4096 with the first event skipped and one count spent at the trigger.
 
 ## Not covered
 
-* **`channel1.nim:212`'s own case** — the `square_freq_backstep_halftick`
+* **`sq_write_freq_hi`'s own case** — the `square_freq_backstep_halftick`
   duty-position undo — is only reachable at **CGB double speed**, where a
   frequency write can land half an APU tick after a duty step. Page 1C
   measures the sweep writeback's version of that race at single speed, which

@@ -109,7 +109,7 @@ after a trigger leaves `next_step` exactly one period out and would look like a 
 exists), and onto the sweep unit, which writes the same register pair from the one path
 outside `ch1_write`: `channel_1_sweep_restart` round 1 runs at `$7ff` (one M-cycle per
 step) so its sweep tick always lands on a reload, and without the rule every step after
-it sits one M-cycle early. `ch1_reload_is_now` is the discriminator.
+it sits one M-cycle early. `sq_reload_is_now` is the discriminator.
 
 ### Channel 3
 
@@ -157,7 +157,7 @@ NR43 write re-interprets both stages: the shift picks a different bit of the cou
 reached, and the divisor countdown keeps running, reloading with the new divisor only when
 it expires — except a write on the exact increment cycle, where the reload is the new
 divisor rounded up onto the 512 kHz grid. Code: `GbChannel4.div_counter` / `div_next`,
-`ch4_steps_to_rise`, the NR43 arm of `ch4_write`; `gb_noise_deadline` stays the trigger's
+`ch4_steps_to_rise`, the NR43 arm of `ch4_write`; `psg_noise_deadline` stays the trigger's
 single source of truth. The divisor stage is advanced lazily (`ch4_advance_divisor`) —
 eagerly it cost measurable instructions for state nothing reads between writes.
 

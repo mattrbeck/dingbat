@@ -135,7 +135,7 @@ proc gb_trigger_deadline*(gb: GB; period: CycleCount;
   ## channel_1_align / channel_1_align_cpu), then one full period plus
   ## extra_ticks of startup delay -- 2 for a square that was off
   ## (channel_1_delay), 1 for a restart (channel_1_restart). The waveform
-  ## position is untouched. Channel 4 has its own rule: gb_noise_deadline.
+  ## position is untouched. Channel 4 has its own rule: psg_noise_deadline.
   var edge = if APU_TRIGGER_EDGE_BEFORE != 0: gb_apu_edge_before(gb)
              else: gb_apu_edge(gb)
   when APU_DS_TRIGGER_SNAP != 0:

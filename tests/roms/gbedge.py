@@ -2478,9 +2478,10 @@ def poll_nr52_coarse(a, tag, dest, cap=0xFF):
 def t_ch2phase(a, slot, p):
     """Channel 2's trigger phase: the channel-1 PCMPSG measurement mirrored.
 
-    `ch2_pcm_edge_zero` and `ch2_reload_is_now` (apu/channel2.nim) are
-    channel 1's constants copied across with "no channel_2 build of the ROM
-    measures it. Assumed" — this page is that build.  PCM12 ($FF76) carries
+    `sq_pcm_edge_zero` (gb/apu/psg_host.nim) and `sq_reload_is_now`
+    (common/psg_channels.nim) apply channel 1's measurements to channel 2:
+    "no channel_2 build of the ROM measures it -- assumed" — this page is
+    that build.  PCM12 ($FF76) carries
     CH1 in the low nibble and CH2 in the high one, and a power cycle leaves
     CH1's DAC off, so every byte reads x0 and x IS channel 2's output.
     (EE at +1F = not CGB/AGB: no PCM readback.)
@@ -2544,14 +2545,15 @@ def t_ch2phase(a, slot, p):
 
 @test("SWPPHASE")
 def t_swpphase(a, slot, p):
-    """The two sweep phases channel1.nim marks "Assumed; no ROM pins this",
+    """The two square-channel phases common/psg_channels.nim marks "Assumed;
+    no ROM pins this",
     and with them the sweep-delay split of hwprobe row 14.
 
     dingbat splits the 8 M-cycles SameSuite channel_1_sweep* measures into
     GB_SWEEP_SHADOW_DELAY (2 M, trigger -> shadow loaded),
     GB_SWEEP_CHECK_DELAY (7 M, writeback -> the second overflow check) and
     GB_SWEEP_STOP_DELAY (1 M, check -> the stop visible in NR52), and states
-    at channel1.nim:242 that a pending stop does NOT survive a restart
+    in ch1_trigger_sweep that a pending stop does NOT survive a restart
     ("only reachable when the trigger lands on the calculation's cycle").
     Rows 00-0E land a restart on each of the 15 M-cycles that window spans.
 
@@ -2592,8 +2594,8 @@ def t_swpphase(a, slot, p):
            M-cycle apart, so this is the waveform itself at CPU
            resolution).  The last 2 M edge before the freeze pins the cycle
            the new period takes effect on: the `reload_now` race in
-           sweep_step (channel1.nim ~147), which is the race
-           channel1.nim:212 assumes for a frequency write and no ROM pins.
+           sweep_step (common/psg_channels.nim), which is the race
+           sq_write_freq_hi assumes for a frequency write and no ROM pins.
            dingbat: 0F 0F then 00 in all thirteen — the waveform's high
            step ends on cycle 6138, and the writeback on 6144 freezes the
            position it lands on, so the high step an unfrozen 2 M waveform
@@ -2645,9 +2647,9 @@ def t_noisewave(a, slot, p):
     """hwprobe row 14's other two halves: the noise divisor codes no test
     ROM reaches, and DMG's wave-RAM access window.
 
-    00-0F  divisor codes 0-7 (lo, hi per code).  gb_noise_deadline
-           (apu/abstract_channels.nim) says "Codes 5-7 are not exercised by
-           any test and follow the >= 2 case", and ch4_frequency_timer makes
+    00-0F  divisor codes 0-7 (lo, hi per code).  psg_noise_deadline
+           (common/psg_channels.nim) says "Codes 5-7 are not exercised by
+           any test and follow the >= 2 case", and ch4_timer makes
            the LFSR period (8 T for code 0, else 16*code T) << shift.  Each
            row: APU power cycle, NR42 = $F0, NR43 = $40 | code (shift 4,
            15-bit), NR44 = $80 trigger, then poll PCM34 ($FF77) every 14
@@ -2668,7 +2670,7 @@ def t_noisewave(a, slot, p):
            M-cycles later.  $7FD steps the wave pointer every 6 T-cycles,
            deliberately NOT a whole M-cycle: the fetch grid and the CPU's
            coincide only every 12 T, which is what makes a window tied to
-           the fetch reachable at all.  ch3_wave_open (apu/channel3.nim,
+           the fetch reachable at all.  ch3_wave_open (common/psg_channels.nim,
            GB_WAVE_ACCESS_WINDOW = 2 T) says DMG lets the CPU through only
            in the half-cycle after a completed fetch, so dingbat predicts
            every third byte readable and the rest $FF:
@@ -2784,7 +2786,8 @@ def t_nr10pace(a, slot, p):
 
     dingbat's NR10 write stores the fields only, so the timer keeps the
     count it has been running since the trigger — with pace 0 that count
-    started at 8 (channel1.nim: `if sweep_period > 0: sweep_period else: 8`)
+    started at 8 (sweep_step / ch1_trigger_sweep in common/psg_channels.nim:
+    `if sweep_period > 0: sweep_period else: 8`)
     and reaches 0 on the EIGHTH sweep step whatever the write does.  Pan
     Docs' reload puts the first calculation `pace` sweep steps after the
     WRITE instead.  The two disagree by up to seven sweep steps, and they

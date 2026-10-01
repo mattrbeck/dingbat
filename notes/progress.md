@@ -37,8 +37,8 @@ Dated work logs live in git history. This is where each subsystem stands.
 - `-d:psgverify` shadows every closed-form APU catch-up with the per-period loop it
   replaced and asserts they agree.
 - Scheduler tie-break: when a waveform step lands on an observer's cycle, the more
-  recently armed (shorter `arm_delay`) event wins. `gb_steps_due` in
-  `gb/apu/abstract_channels.nim` reproduces it.
+  recently armed (shorter `arm_delay`) event wins. `psg_steps_due` in
+  `common/psg_channels.nim` reproduces it.
 - Two places read `scheduler.next_event` to decide how far to skip the clock
   (`cpu.tick`'s idle-loop path, `dma.nim`'s mid-burst drain). Both must also consult
   `apu_next_step()`, or the skip length becomes the PSG's observation resolution.
