@@ -5,7 +5,7 @@ Fixtures for the DS core, ordered roughly from "first thing that can work" to
 
 ## Where the ROMs live
 
-Only our own `fb_*.nds`, `2d_*.nds`, `snd_tone.nds`, `snd_suite.nds` and `gx_tri.nds` are committed. The third-party
+Only our own `fb_*.nds`, `2d_*.nds`, `3d/3d_*.nds`, `snd_tone.nds`, `snd_suite.nds` and `gx_tri.nds` are committed. The third-party
 ROMs below carry no licence (gbe-plus-nds-tests is GPLv2), so they are
 gitignored and kept in **`~/.cache/dingbat-nds/roms/`** (same layout as
 `roms/`), where every worktree can reach them. Rebuild them with the scripts
@@ -23,6 +23,7 @@ under Building if the cache is lost.
 | `roms/snd_tone.nds` | `src/snd_tone` (ours) | ARM7 I/O stores, SPU | green top, blue bottom; sound: 440 Hz PSG square (ch 8, panned left) + 220 Hz PCM8 saw (ch 0, panned right). `ndsrun --wav` dumps it |
 | `roms/snd_suite.nds` | `src/snd_suite` (ours, C on both CPUs) | ARM7 timers/VCOUNT, SPU, capture | ~14 s timeline of SPU sections (formats, PSG duties, noise, repeat modes, hold, volume/divider/pan/master, output selectors, capture echo, timer extremes, SOUNDBIAS, 16 channels, start/busy timing) then register/capture readbacks drawn as bit rows on the top screen; bottom turns white when done. Measure with `tools/snd_analyze.py OUT.wav --png OUT.png` (section list in `arm7.c`) |
 | `roms/gx_tri.nds` | `src/gx_tri` (ours) | + 3D geometry/rendering, engine A BG0 = 3D | top: RGB-shaded triangle (left, command ports) and yellow quad (right, packed GXFIFO) over a dark blue (0x2042) rear plane |
+| `roms/3d/3d_*.nds` | `src/3d_*` (ours, C, no library: `src/3d_common/t3d.{h,c}`) | 3D engine, engine B text BG | one static 3D scene each, legend on the bottom screen: every texture format (`texfmt`, `tex4x4`, `texwrap`, `texcoord`), blending modes (`blendmodes`, `highlight`), `vcolor`, `alpha`(`_noblend`), `shadow`, `fog`(`_alpha`), `edge`, `aa`, `rearbitmap`, `depth`(`_w`), `lines`, `small`, `clip`, `sort`(`_manual`), `light`, `geom` (every geometry command path), `status` (GX register readbacks, DMA mode 7, FIFO IRQ). The `3d_probe_*` ROMs draw LCG-generated shapes for fitting rasteriser rules (docs/oracles.md, NDS 3D engine). Each source file's header lists what it draws. `nimble test_nds3d` checks every ROM's 3D buffer. |
 | `roms/armwrestler.nds` | [mic-/armwrestler](https://github.com/mic-/armwrestler), built by `tools/build_wrestlers.sh` | ARM9 ARM/Thumb, LCDC VRAM display, KEYINPUT, DISPSTAT polling | menu of ARM9 instruction tests (ALU, LDR/STR, LDM/STM, Thumb), pass/fail per row |
 | `roms/arm7wrestler.nds` | [Arisotura/arm7wrestler](https://github.com/Arisotura/arm7wrestler), same script | both CPUs; ARM7 runs the tests, ARM9 copies its frame | same menu run on the ARM7, including v5 opcodes that must be undefined/no-op there |
 | `roms/rockwrestler.nds` | [RockPolish/rockwrestler](https://github.com/RockPolish/rockwrestler) (prebuilt upstream) | both CPUs, IPCSYNC/IPCFIFO, DIV/SQRT, WRAMCNT, VRAMCNT, TCM, CP15 | ARMv4/v5 extras + DS system tests, LCDC display |
@@ -66,6 +67,15 @@ zeroed; `--logo-from` copies one if a firmware boot is ever wanted).
 needs an `arm-none-eabi-gcc` (devkitARM's in `/opt/devkitpro` is used when
 none is on PATH). `src/common2d/` holds the crt0, linker script and a register
 header with a small 3x5 font.
+
+### No library, C (3d_*)
+
+    tests/nds/tools/build_3d.sh [3d_name ...]
+
+same toolchain as the 2d_* ROMs (libgcc for soft-float); writes
+`roms/3d/`. A variant directory's `main.c` may `#include` another's with a
+`#define` (e.g. `3d_highlight`). The ROMs put plain ARM9 code at ROM
+0x4000, so the melonDS-family reference cores need `--relocate`.
 
 ### libnds (nds-examples and the rebuilt third-party ROMs)
 
