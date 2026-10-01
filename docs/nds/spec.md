@@ -68,7 +68,9 @@ src/dingbat/nds/
   mem/vram.nim     VRAM banks A-I, VRAMCNT page tables
   gpu/gpu.nim      display timing, DISPSTAT, POWCNT1, screen routing
   gpu/engine2d.nim 2D engine A/B registers + line renderer
-  gpu3d/gpu3d.nim  3D engine (stub)
+  gpu3d/gpu3d.nim  3D engine: GXFIFO/ports, GXSTAT, registers, BG0 line output
+  gpu3d/geometry.nim matrices, lighting, polygon assembly, clipping, tests
+  gpu3d/render.nim  whole-frame rasteriser: textures, depth, blending, fog, edges
   io/irq.nim       IME/IE/IF per CPU
   io/timers.nim    4 timers per CPU
   io/dma.nim       4 channels per CPU (+ ARM9 fill regs)
@@ -84,6 +86,7 @@ src/dingbat_nds_wasm.nim(+.nims)  wasm exports for web/nds.html
 tools/ndsrun.nim                   headless runner: ROM -> PNG of both screens
 web/nds.html, web/nds/             dev page (two canvases, keys, touch)
 tests/nds/                         ROM sources, build tools, README
+tests/nds_3d_test.nim              3D engine driven through write_reg -> checks + PNGs
 ```
 
 I/O registers are reached as aligned 32-bit words with a byte mask

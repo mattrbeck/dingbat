@@ -61,6 +61,9 @@ type
     textured: bool
     fog: bool
     wbuffer: bool
+    highlight: bool               ## DISP3DCNT.1
+    blend: bool                   ## DISP3DCNT.3
+    aref: int32                   ## dots need alpha > aref (ALPHA_TEST_REF or 0)
 
 proc new_renderer*(): Renderer =
   result = Renderer(zero_page: newSeq[uint8](0x4000))
@@ -111,6 +114,10 @@ proc build_pages(r: Renderer; vram: Vram) =
   let zero = cast[ptr UncheckedArray[uint8]](addr r.zero_page[0])
   for p in 0..31: r.tex_pages[p] = r.page_ptr(vram, vrTexture, p)
   for p in 0..7: r.pal_pages[p] = (if p < 6: r.page_ptr(vram, vrTexPal, p) else: zero)
+
+# The per-dot path runs without runtime checks: every index into the
+# buffers and page tables is clamped or masked to its range.
+{.push checks: off.}
 
 template tex8(r: Renderer; a: int): uint32 = uint32(r.tex_pages[(a shr 14) and 31][a and 0x3FFF])
 template tex16(r: Renderer; a: int): uint32 = r.tex8(a) or (r.tex8(a + 1) shl 8)
@@ -231,6 +238,7 @@ proc clear(r: Renderer; disp3dcnt: uint32) =
 proc persp(f, w0, w1: int64): int64 {.inline.} =
   ## Linear factor f (0..1 as 0..0x10000) from end 0 to end 1, made
   ## perspective-correct with the ends' normalised w.
+  if w0 == w1: return f
   let den = (0x10000 - f) * w1 + f * w0
   if den <= 0: f else: ((f * w0) shl 16) div den
 
@@ -263,7 +271,7 @@ proc vertex_sample(v: Vertex; wn: int64): EdgeSample =
              r: int64(v.r) shl 8, g: int64(v.g) shl 8, b: int64(v.b) shl 8,
              s: int64(v.s) shl 4, t: int64(v.t) shl 4)
 
-proc blend_texel(r: Renderer; c: PolyCtx; vr, vg, vb: int32; tx: uint32; disp3dcnt: uint32): uint32 =
+proc blend_texel(r: Renderer; c: PolyCtx; vr, vg, vb: int32; tx: uint32): uint32 {.inline.} =
   ## Vertex colour x texel by polygon mode (GBATEK "DS 3D Texture Blending");
   ## 6-bit colour, 5-bit alpha.
   let av = c.alpha
@@ -289,20 +297,18 @@ proc blend_texel(r: Renderer; c: PolyCtx; vr, vg, vb: int32; tx: uint32; disp3dc
     var rr = ((tr + 1) * (sr + 1) - 1) shr 6
     var gg = ((tg + 1) * (sg + 1) - 1) shr 6
     var bb = ((tb + 1) * (sb + 1) - 1) shr 6
-    if (disp3dcnt and 2) != 0:
+    if c.highlight:
       rr = min(63, rr + sr); gg = min(63, gg + sg); bb = min(63, bb + sb)
     pack(rr, gg, bb, ((ta + 1) * (av + 1) - 1) shr 5)
   else:
     pack(((tr + 1) * (vr + 1) - 1) shr 6, ((tg + 1) * (vg + 1) - 1) shr 6,
          ((tb + 1) * (vb + 1) - 1) shr 6, ((ta + 1) * (av + 1) - 1) shr 5)
 
-proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EdgeSample; edge: bool;
-          disp3dcnt: uint32) {.inline.} =
+proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EdgeSample; inv: int64; edge: bool) {.inline.} =
+  ## One dot; `inv` = 2^32 / span width (16.16), 0 for a zero-width span.
   let i = y * W + x
   # position along the span, at the dot's centre
-  let dx = R.x - L.x
-  let f = if dx <= 0: 0'i64
-          else: clamp((((int64(x) shl 16) + 0x8000 - L.x) shl 16) div dx, 0'i64, 0x10000'i64)
+  let f = clamp((((int64(x) shl 16) + 0x8000 - L.x) * inv) shr 16, 0'i64, 0x10000'i64)
   let p = persp(f, L.wn, R.wn)
   let dval = if c.wbuffer: uint32(clamp(L.w + (R.w - L.w) * p div 0x10000, 0'i64, 0xFF_FFFF'i64))
              else: uint32(clamp(L.z + (R.z - L.z) * f div 0x10000, 0'i64, 0xFF_FFFF'i64))
@@ -328,11 +334,9 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EdgeSample; edge: bool;
     let s = L.s + (R.s - L.s) * p div 0x10000
     let t = L.t + (R.t - L.t) * p div 0x10000
     tx = r.texel(c.tex, c.pltt, s shr 4, t shr 4)
-  let px = r.blend_texel(c, clamp(vr, 0, 63), clamp(vg, 0, 63), clamp(vb, 0, 63), tx, disp3dcnt)
+  let px = r.blend_texel(c, clamp(vr, 0, 63), clamp(vg, 0, 63), clamp(vb, 0, 63), tx)
   let a = int32(px shr 24)
-  # alpha test: drawn only if alpha > ALPHA_TEST_REF (or > 0 when disabled)
-  let aref = if (disp3dcnt and 4) != 0: int32(r.reg8(0x340) and 31) else: 0'i32
-  if a <= aref: return
+  if a <= c.aref: return
   if a == 31 and c.mode != 3:
     r.color[i] = px
     r.depth[i] = dval
@@ -344,7 +348,7 @@ proc plot(r: Renderer; c: PolyCtx; x, y: int; L, R: EdgeSample; edge: bool;
     if r.trans_id[i] == c.id: return
     let o = r.color[i]
     let oa = int32(o shr 24)
-    if (disp3dcnt and 8) != 0 and oa != 0:
+    if c.blend and oa != 0:
       template mixc(k: int): int32 = (ch(px, k) * (a + 1) + ch(o, k) * (31 - a)) shr 5
       r.color[i] = pack(mixc(0), mixc(1), mixc(2), max(a, oa))
     else:
@@ -374,7 +378,10 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
                   id: uint8((poly.attr shr 24) and 0x3F),
                   alpha: (if wire: 31'i32 else: alpha), mode: (poly.attr shr 4) and 3,
                   textured: (disp3dcnt and 1) != 0 and fmt != 0,
-                  fog: (poly.attr and 0x8000) != 0, wbuffer: wbuffer)
+                  fog: (poly.attr and 0x8000) != 0, wbuffer: wbuffer,
+                  highlight: (disp3dcnt and 2) != 0, blend: (disp3dcnt and 8) != 0,
+                  # alpha test: drawn only if alpha > ALPHA_TEST_REF (> 0 when off)
+                  aref: (if (disp3dcnt and 4) != 0: int32(r.reg8(0x340) and 31) else: 0'i32))
   var area = 0'i64
   for i in 0 ..< n:
     let a = v[i]
@@ -416,17 +423,20 @@ proc draw_polygon(r: Renderer; poly: Polygon; verts: openArray[Vertex]; disp3dcn
     var xe = int((R.x + 0x8000) shr 16)
     if xe <= xs: xe = xs + 1           # at least one dot wide
     let rim = y == ytop or y == ybot - 1
+    let inv = if R.x > L.x: (1'i64 shl 32) div (R.x - L.x) else: 0'i64
     if line and found > 0 or wire and not rim:
       # only the edges: line segments, and wire-frames between their rims
       for x in max(0, int(L.lo)) .. min(W - 1, int(L.hi)):
-        r.plot(c, x, y, L, R, true, disp3dcnt)
+        r.plot(c, x, y, L, R, inv, true)
       for x in max(0, int(R.lo)) .. min(W - 1, int(R.hi)):
-        if x < int(L.lo) or x > int(L.hi): r.plot(c, x, y, L, R, true, disp3dcnt)
+        if x < int(L.lo) or x > int(L.hi): r.plot(c, x, y, L, R, inv, true)
     else:
       for x in max(0, xs) ..< min(W, xe):
         let edge = rim or (x >= int(L.lo) and x <= int(L.hi)) or
                    (x >= int(R.lo) and x <= int(R.hi))
-        r.plot(c, x, y, L, R, edge, disp3dcnt)
+        r.plot(c, x, y, L, R, inv, edge)
+
+{.pop.}
 
 # ---------------------------------------------------------------------------
 # Post passes

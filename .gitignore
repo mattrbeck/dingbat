@@ -191,7 +191,8 @@ formal/.lake/
 web/nds/nds.js
 web/nds/nds.wasm
 # Third-party DS test ROMs carry no licence; they live in ~/.cache/dingbat-nds/roms
-# (tests/nds/README.md). Only our own fb_*.nds are committed.
+# (tests/nds/README.md). Only our own fb_*.nds and gx_tri.nds are committed.
 tests/nds/roms/*
 !tests/nds/roms/fb_hello.nds
 !tests/nds/roms/fb_both.nds
+!tests/nds/roms/gx_tri.nds
