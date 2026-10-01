@@ -378,11 +378,22 @@ proc cp15_read*(b: Arm9Bus; op1, cn, cm, op2: uint32): uint32 =
 
 proc cp15_write*(b: Arm9Bus; op1, cn, cm, op2, v: uint32) =
   let n {.cursor.} = b.nds
+  template tables(c: Cp15): untyped =
+    (c.dcache_cfg, c.icache_cfg, c.wbuf_cfg, c.data_perm, c.code_perm, c.prot_regions)
+  let ctl_before = n.cp15.control
+  let before = tables(n.cp15)
   n.cp15.write(op1, cn, cm, op2, v)
   case cn
   of 1, 2, 3, 5, 6:
-    n.tm.update_regions(n.cp15)
-    n.pu_ok = [NO_PAGE, NO_PAGE, NO_PAGE]
+    # rewriting a value changes nothing, and a control write only the
+    # enables (the BIOS toggles the PU thousands of times a frame in "The
+    # Strongest Demo"; timing.nim update_control)
+    if tables(n.cp15) != before:
+      n.tm.update_regions(n.cp15)
+      n.pu_ok = [NO_PAGE, NO_PAGE, NO_PAGE]
+    elif n.cp15.control != ctl_before:
+      n.tm.update_control(n.cp15)
+      n.pu_ok = [NO_PAGE, NO_PAGE, NO_PAGE]
   of 7:
     # cache maintenance (GBATEK "ARM CP15 Cache Control"): only the tags exist
     case cm

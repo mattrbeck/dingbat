@@ -157,6 +157,22 @@ block protection_unit:
     check n.arm9.r[14] == 0x0C00_0004'u32, "lr_abt = opcode + 4"
 
   block:
+    # control-only writes switch the unit without rebuilding the tables
+    # (the BIOS toggles it in a loop): off lets the store through, on
+    # refuses it again
+    let n = machine()
+    n.setup(5)
+    let b = Arm9Bus(nds: n)
+    n.arm9.r[0] = 0x0500_0100; n.arm9.r[1] = 0x1111
+    b.cp15_write(0, 1, 0, 0, n.cp15.control and not 1'u32)
+    n.run9(STR_R1_R0)
+    check (n.arm9.cpsr and 0x1F) == uint32(mSYS) and n.gpu.palette[0x80] == 0x1111,
+          "PU switched off by a control write: the store goes through"
+    b.cp15_write(0, 1, 0, 0, n.cp15.control or 1)
+    n.run9(STR_R1_R0)
+    check (n.arm9.cpsr and 0x1F) == uint32(mABT), "switched back on: the store aborts again"
+
+  block:
     let n = machine()                        # PU off: nothing aborts
     n.arm9.r[0] = 0x0C00_0000
     n.arm9.set_cpsr(uint32(mSYS))
