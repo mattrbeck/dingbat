@@ -679,11 +679,29 @@ proc edge_mark(r: Renderer; aa: bool) =
 
 proc anti_alias(r: Renderer) =
   ## Opaque edge dots with partial coverage mix over the colour they were
-  ## drawn on (3d_probe_aa / _aa2 / _aa_edge on the reference cores: also
-  ## between polygons of one ID). Dots a translucent polygon covered since
-  ## are left alone (Assumed).
-  for i in 0 ..< NPIX:
-    if r.aacov[i] >= 31 or r.trans_id[i] != NO_ID: continue
+  ## drawn on, where a 4-neighbour has another polygon ID and lies further
+  ## away (the edge-marking test): a mesh of one ID shows no seams, as
+  ## the reference core draws Pokemon SoulSilver's title Lugia and
+  ## overworld (3d_probe_aa / _aa_edge pin the coverage itself). Dots a
+  ## translucent polygon covered since are left alone (Assumed).
+  let cc = r.regs[(0x350 - 0x320) shr 2]
+  let clear_id = uint8((cc shr 24) and 0x3F)
+  let d15 = r.reg16(0x354) and 0x7FFF
+  let clear_depth = d15 * 0x200 + ((d15 + 1) div 0x8000) * 0x1FF
+  var todo: seq[int32]
+  for y in 0 ..< H:
+    for x in 0 ..< W:
+      let i = y * W + x
+      if r.aacov[i] >= 31 or r.trans_id[i] != NO_ID: continue
+      let id = r.opaque_id[i]
+      let d = r.depth[i]
+      template differs(xx, yy: int): bool =
+        let (nid, nd) = if xx < 0 or xx >= W or yy < 0 or yy >= H: (clear_id, clear_depth)
+                        else: (r.opaque_id[yy * W + xx], r.depth[yy * W + xx])
+        id != nid and d < nd
+      if differs(x - 1, y) or differs(x + 1, y) or differs(x, y - 1) or differs(x, y + 1):
+        todo.add int32(i)
+  for i in todo:
     let cov = int32(r.aacov[i])
     let o = r.below[i]
     let px = r.color[i]
