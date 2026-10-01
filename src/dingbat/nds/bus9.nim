@@ -231,7 +231,6 @@ proc fetch16*(b: Arm9Bus; a: uint32): uint32 {.inline.} =
 proc irq_line*(b: Arm9Bus): bool {.inline.} = b.nds.irq9.line()
 proc irq_wake*(b: Arm9Bus): bool {.inline.} = b.nds.irq9.wake()
 proc access_cycles*(b: Arm9Bus): int64 {.inline.} = 0   # TODO(timing)
-proc swi_hook*(b: Arm9Bus; comment: uint32): bool = false  # TODO(bios): HLE
 
 proc cp15_read*(b: Arm9Bus; op1, cn, cm, op2: uint32): uint32 =
   b.nds.cp15.read(op1, cn, cm, op2)
@@ -244,3 +243,7 @@ proc cp15_write*(b: Arm9Bus; op1, cn, cm, op2, v: uint32) =
   if n.cp15.halt_request:
     n.cp15.halt_request = false
     n.arm9.halted = true
+
+proc swi_hook*(b: Arm9Bus; comment: uint32): bool =
+  ## HLE BIOS: true = the SWI ran in Nim (hle_bios.nim), skip the vector.
+  b.nds.hle_bios9 and b.nds.arm9.hle_swi(comment)
