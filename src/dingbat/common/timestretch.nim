@@ -36,6 +36,8 @@ type
     outL, outR: seq[float32]         ## output FIFO (frames)
     outHead: int                     ## FIFO read cursor
     win: array[FRAME, float32]       ## precomputed periodic Hann window
+    monoRef: array[OVL, float32]     ## bestOffset scratch: the reference, L+R
+    monoCand: array[2 * SEARCH + OVL, float32] ## and every candidate's samples
 
 proc new_time_stretch*(): TimeStretch =
   result = TimeStretch(outL: @[], outR: @[])
@@ -79,18 +81,42 @@ proc bestOffset(ts: TimeStretch): int =
   var best = -1e30'f32
   var lo = -SEARCH
   if ts.anNominal + lo < 0: lo = -ts.anNominal
+  # The mono mix of the reference and of the whole search span, once: the
+  # candidates overlap, so mixing per candidate read each sample up to
+  # 2*SEARCH+1 times.
+  for n in 0 ..< OVL:
+    let i = (refBase + n) and CAPMASK
+    ts.monoRef[n] = ts.inL[i] + ts.inR[i]
+  for n in 0 ..< SEARCH - lo + OVL:
+    let i = (ts.anNominal + lo + n) and CAPMASK
+    ts.monoCand[n] = ts.inL[i] + ts.inR[i]
+  # The window's energy slides one sample per candidate instead of being
+  # summed again, and the dot product runs eight independent sums: one
+  # chain of dependent adds was the whole cost of the search (-76 % native).
+  # The scores round differently, so a near-tie could pick another offset;
+  # on 70 s of FireRed audio every offset, so every output bit, is the same.
+  var energy = 0.0'f32
+  for n in 0 ..< OVL: energy += ts.monoCand[n] * ts.monoCand[n]
   for cand in lo .. SEARCH:
-    let cbase = ts.anNominal + cand
-    var dot = 0.0'f32
-    var energy = 0.0'f32
-    for n in 0 ..< OVL:
-      let rIdx = (refBase + n) and CAPMASK
-      let cIdx = (cbase + n) and CAPMASK
-      let rv = ts.inL[rIdx] + ts.inR[rIdx]
-      let cv = ts.inL[cIdx] + ts.inR[cIdx]
-      dot += rv * cv
-      energy += cv * cv
-    let score = dot / (sqrt(energy) + 1e-6'f32)
+    let cbase = cand - lo
+    if cbase > 0:
+      let gone = ts.monoCand[cbase - 1]
+      let come = ts.monoCand[cbase + OVL - 1]
+      energy += come * come - gone * gone
+    var d0, d1, d2, d3, d4, d5, d6, d7 = 0.0'f32
+    var n = 0
+    while n < OVL:
+      d0 += ts.monoRef[n] * ts.monoCand[cbase + n]
+      d1 += ts.monoRef[n + 1] * ts.monoCand[cbase + n + 1]
+      d2 += ts.monoRef[n + 2] * ts.monoCand[cbase + n + 2]
+      d3 += ts.monoRef[n + 3] * ts.monoCand[cbase + n + 3]
+      d4 += ts.monoRef[n + 4] * ts.monoCand[cbase + n + 4]
+      d5 += ts.monoRef[n + 5] * ts.monoCand[cbase + n + 5]
+      d6 += ts.monoRef[n + 6] * ts.monoCand[cbase + n + 6]
+      d7 += ts.monoRef[n + 7] * ts.monoCand[cbase + n + 7]
+      n += 8
+    let dot = ((d0 + d1) + (d2 + d3)) + ((d4 + d5) + (d6 + d7))
+    let score = dot / (sqrt(max(energy, 0.0'f32)) + 1e-6'f32)
     if score > best:
       best = score
       d = cand
