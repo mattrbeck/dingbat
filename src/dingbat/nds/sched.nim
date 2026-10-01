@@ -17,6 +17,8 @@ type
     evGxFifo        ## geometry engine drain (gpu3d)
     evSpuSample     ## sound mixer tick (spu)
     evWifi          ## wifi timers / transmit end (io/wifi)
+    evSpi           ## SPI transfer end: busy off, reply, IRQ (io/spi)
+    evRtc           ## RTC /INT may change: alarm, minute, frequency (io/rtc)
 
   Pending = object
     at: int64
