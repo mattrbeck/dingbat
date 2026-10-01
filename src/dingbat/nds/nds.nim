@@ -56,6 +56,7 @@ type
     # -d:ndsdebug only (tools/ndsrun.nim flags)
     iolog*: bool                ## log I/O accesses to stderr
     trace9*, trace7*: int       ## instructions left to trace per CPU
+    watch*: uint32              ## log writes to this word (0 = off)
     io_last: string
     io_repeat: int
 
@@ -82,6 +83,12 @@ proc log_io(n: NDS; who: string; a, v, mask: uint32; write: bool) =
   n.io_last = line
   n.io_repeat = 0
   stderr.writeLine(line)
+
+template watch_write(n: NDS; who: string; cpu: untyped; a, v: uint32) =
+  when defined(ndsdebug):
+    if n.watch != 0 and (a and not 3'u32) == n.watch:
+      stderr.writeLine(who & " watch W " & toHex(a, 8) & " = " & toHex(v, 8) &
+                       " pc=" & toHex(cpu.cur_pc, 8) & " line=" & $n.gpu.vcount)
 
 template rd16(s: seq[uint8]; i: int): uint32 =
   uint32(s[i]) or (uint32(s[i + 1]) shl 8)

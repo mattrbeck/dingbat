@@ -54,6 +54,7 @@ proc io9_read(n: NDS; a: uint32): uint32 =
   of 0x304: uint32(n.gpu.powcnt1)
   of 0x320 .. 0x6A0: n.gpu3d.read_reg(o)
   of 0x1000 .. 0x106C: n.gpu.engine_b.read_reg(o - 0x1000)
+  of 0x4000 .. 0x4FFC: 0   # DSi SCFG/NDMA block: absent on a DS (runtimes probe it)
   else:
     n.note_unmapped("arm9 io", a, false)
     0
@@ -165,6 +166,7 @@ proc read9(n: NDS; a: uint32; width: static int): uint32 =
     0'u32
 
 proc write9(n: NDS; a: uint32; v: uint32; width: static int) =
+  watch_write(n, "9", n.arm9, a, v)
   template wr(s: var seq[uint8]; i: int) =
     when width == 32: wr32(s, i, v)
     elif width == 16: wr16(s, i, v)

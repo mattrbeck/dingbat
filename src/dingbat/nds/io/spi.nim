@@ -60,8 +60,10 @@ proc touch_adc(s: Spi; channel: int): uint16 =
   let scr_x2 = int(s.firmware[u + 0x62])
   let scr_y2 = int(s.firmware[u + 0x63])
   proc lerp(p, s1, s2, a1, a2: int): int =
+    # The centre of pixel p's ADC span, so both the truncating (GBATEK) and
+    # the rounding conversions back to pixels land on p.
     if s2 == s1: return a1
-    (p - s1 + 1) * (a2 - a1) div (s2 - s1) + a1
+    a1 + ((2 * (p - s1) + 1) * (a2 - a1)) div (2 * (s2 - s1))
   let v = if channel == 5: lerp(s.input.touch_x, scr_x1, scr_x2, adc_x1, adc_x2)
           else: lerp(s.input.touch_y, scr_y1, scr_y2, adc_y1, adc_y2)
   uint16(clamp(v, 0, 0xFFF))

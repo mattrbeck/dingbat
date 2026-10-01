@@ -129,6 +129,7 @@ proc read7(n: NDS; a: uint32; width: static int): uint32 =
     0'u32
 
 proc write7(n: NDS; a: uint32; v: uint32; width: static int) =
+  watch_write(n, "7", n.arm7, a, v)
   template wr(s: var seq[uint8]; i: int) =
     when width == 32: wr32(s, i, v)
     elif width == 16: wr16(s, i, v)
