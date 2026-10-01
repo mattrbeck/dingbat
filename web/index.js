@@ -3696,10 +3696,13 @@ const flushSyncInner = async () => {
       // A session another device wrote since this one last saw Drive's copy
       // is not written over unseen: it stays queued, and the pull after this
       // flush decides (a hand-off, or the offer to switch, which marks it
-      // seen - then this one, the newer, goes up).
+      // seen - then this one, the newer, goes up). One a deleted generation
+      // of the game left is no other device's moment, and nothing would ever
+      // mark it seen: it is written over (below).
       let r0 = remote.get(name);
       let forced = handoffForce.delete(name);
-      if (bytes && parsed?.kind === "session" && r0 && syncState.rmt[name] !== r0.modifiedTime &&
+      if (bytes && parsed?.kind === "session" && r0 && fileGen(r0) >= gen &&
+          syncState.rmt[name] !== r0.modifiedTime &&
           sigOfBytes(bytes) !== syncState.sigs[name] && !forced) {
         continue;
       }

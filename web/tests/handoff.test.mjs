@@ -372,3 +372,29 @@ test("Resume tapped during the hand-off's check: the game is not yanked", async 
   assert.ok(app.document.body.classList.contains("running"));
   assert.ok(app.toasts.some((t) => t.includes("since you opened it here")), app.toasts.join(" | "));
 });
+
+// A session left on Drive by a deleted generation of the game is no other
+// device's newer moment: nothing will ever mark it seen, and held back for it
+// this device's session would never go up (the status stuck on Syncing).
+test("a session from a deleted generation of the game does not hold this one back", async () => {
+  const clock = makeClock();
+  const drive = makeDrive({ clock });
+  const app = await device(drive, clock);
+  app.idb.set("recent", [{ name: "A.gba", ts: 1, gen: 2 }]);
+  await playAndPause(app, 4);
+  await app.api.flushSync();
+  await drain();
+  // Drive's copy is now an older generation's, written since this device looked.
+  const f = drive.get("stateauto:A.gba");
+  f.bytes = u8(1, 2, 3);
+  f.appProperties = { gen: "1" };
+  f.modifiedTime = new Date(Date.parse(f.modifiedTime) + 60e3).toISOString();
+  app.runIn("resumeGame(); sessionMoved = true; showMainMenu()");
+  await drain();
+  await app.api.flushSync();
+  await drain();
+  assert.ok(!app.api.syncState.queueUp.includes("stateauto:A.gba"), "not held back");
+  const s = app.runIn(`sessionFromBundle(new Uint8Array(${JSON.stringify([...drive.get("stateauto:A.gba").bytes])}))`);
+  assert.ok(s, "this device's session replaced the stale one");
+  assert.equal(drive.get("stateauto:A.gba").appProperties?.gen, "2");
+});

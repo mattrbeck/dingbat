@@ -360,7 +360,7 @@
   },
   "WebState/Handoff": {
     "web/index.js#autoStateMatchesSave": "bc3c934af799b85b",
-    "web/index.js#flushSyncInner": "8e8c2164fd13023a",
+    "web/index.js#flushSyncInner": "e1e3c5a1ab6bc3d1",
     "web/index.js#handoffNews": "d5150144636227a5",
     "web/index.js#heldGameIsSent": "a63b109a83858e3b",
     "web/index.js#launchRom": "146f86a54c5e0a22",

@@ -352,12 +352,14 @@ proved as traces so the behaviour is stated, not implied):
 Keeping the overwritten save aside (the 30-day `oldsave:` mechanism) would
 make all three recoverable.
 
-**Found by reading, not fixed:** a session file on Drive written for an
-older generation of the game (a delete and re-import racing another
-device's upload) is never marked seen, so the flush holds this device's
-session back on every pass and the lamp stays on "Syncing…". The hold-back
-should not apply when `fileGen(r0) < gen`. Rare, and the model has no
-generations.
+**Found by reading, fixed (2026-10-01):** a session file on Drive written
+for an older generation of the game (a delete and re-import racing another
+device's upload) was never marked seen, so the flush held this device's
+session back on every pass and the lamp stayed on "Syncing…". The hold-back
+now applies only when `fileGen(r0) >= gen`; regression test "a session from
+a deleted generation of the game does not hold this one back" in
+web/tests/handoff.test.mjs. The model has no generations, so this one is
+guarded by the test alone.
 
 **Abstractions:** listed in the file's header. Bytes are opaque (compression
 is invisible here), one game, both devices hold its ROM, loads are atomic.
