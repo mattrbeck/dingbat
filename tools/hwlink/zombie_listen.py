@@ -54,7 +54,9 @@ def runs(x, rate):
     projection dominates the window's RMS (a noise burst projects too, but is
     mostly not that frequency)."""
     win = rate // 20
-    floor = np.median([ac_rms(x, i, i + win) for i in range(0, len(x) - win, win)])
+    # the room between notes: a low percentile, not the median, which a take
+    # mostly made of notes (nrx2table.s) puts at note level
+    floor = np.percentile([ac_rms(x, i, i + win) for i in range(0, len(x) - win, win)], 10)
     flags = []
     for i in range(0, len(x) - win, win):
         r = ac_rms(x, i, i + win) + 1e-9

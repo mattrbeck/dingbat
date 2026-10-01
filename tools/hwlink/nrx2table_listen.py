@@ -84,9 +84,12 @@ def analyse(path):
     pts = [(int(m[0][1:]), a) for m in meas if m[0].startswith('R') for a in (m[4], m[5])]
     v, a = np.array([p[0] for p in pts], float), np.array([p[1] for p in pts])
     s = float(np.sum(v * a) / np.sum(v * v))
-    err = np.abs(a / s - v)
-    print(f'  check: references read as volume within {err.max():.2f} (mean {err.mean():.2f}) of 6 / 8 / 10 / 12')
-    if err.max() > 0.6:
+    err = np.abs(a / s - v) / v
+    print(f'  check: references read within {100 * err.max():.1f}% (mean {100 * err.mean():.1f}%) '
+          f'of volumes 6 / 8 / 10 / 12')
+    # a microphone reads a held note to a few percent (the first SP take:
+    # 16.0-17.4 per volume step); a reading is taken as the nearer prediction
+    if err.max() > 0.10:
         print('  verdict: none -- this take is not linear enough to read whole volumes')
         return
     print('  case  old->new  writes   before  after   CGB  AGB?   (each round)')
@@ -95,12 +98,16 @@ def analyse(path):
         if name.startswith('R'):
             continue
         bv, av = b / s, aft / s
-        bi = int(round(bv))
+        # a period-0 note starts at its NR22 volume; an old period-7 one has
+        # moved, so its start is read
+        bi = old >> 4 if not old & 7 else int(round(bv))
+        if not old & 7:
+            av = bi * aft / b              # within one note: gain drift cancels
         cgb = predict(bi, old, new, writes, True)
         agb = predict(bi, old, new, writes, False)
-        got = int(round(av))
-        tag = ('both' if cgb == agb else 'CGB' if got == cgb else 'AGB?' if got == agb else 'neither') \
-            if got in (cgb, agb) else 'neither'
+        near = min((abs(av - cgb), 'CGB'), (abs(av - agb), 'AGB?'))
+        tag = ('both' if cgb == agb and abs(av - cgb) <= 0.75 else
+               near[1] if near[0] <= 0.75 and cgb != agb else 'neither')
         tally.setdefault(name, []).append(tag)
         print(f'  {name}    {old:02X}->{new:02X}   x{writes}     {bv:5.2f}  {av:5.2f}   {cgb:3d}  {agb:3d}   {tag}')
     print('  summary:')

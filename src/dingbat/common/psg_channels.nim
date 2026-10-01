@@ -112,9 +112,18 @@ proc write_nrx2(ch: PsgEnvChannel; value: uint8) =
     #   old per!=0 dec|       0        |         0         |   +2    |
     #   old per 0 inc |       0        |        +1         |   +1    |
     #   old per!=0 inc|       0        |         0         |    0    |
+    #
+    # The AGB differs in the two `new inc` cells of period 0: a period-0
+    # envelope is never "still updating" there, so they give +2 (decrease)
+    # and 0 (increase). AGB SP, by ear (tests/roms/payloads/nrx2table.s,
+    # tools/hwlink/nrx2table_listen.py, 2026-09-30): 0x88 over a volume-8
+    # note 6 (CGB: 7), 0x68 over volume 6 decreasing 8 (CGB: 9), 0x68 over
+    # volume 6 increasing 6 (CGB: 7), three rounds each; the cells both
+    # tables agree on read as predicted.
+    let still_updating = when PSG_AGB: false else: ch.vol_env_is_updating
     var d = 0
     if new_add_mode:
-      d = if ch.period == 0 and ch.vol_env_is_updating: 1
+      d = if ch.period == 0 and still_updating: 1
           elif not ch.envelope_add_mode: 2
           else: 0
     elif new_period != 0 and ch.period == 0:

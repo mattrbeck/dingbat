@@ -273,11 +273,15 @@ stamped by its own write:
   (`tests/roms/payloads/zombie.s`, `tools/hwlink/zombie_listen.py`: the SP's
   speaker recorded by a microphone, 1000.5 Hz amplitudes within one take):
   volume 12 / 8 = 1.49, the written note 1.00 of its own volume-8 start; a
-  second take (zombie.s v2) again 0.99. But not every cell matches the CGB:
-  one write of 0x88 (increase, period 0) over a playing volume-8 note leaves
-  it at 6.0 (a steady plateau, the volume-7 reference beside it reading
-  7.0), where the CGB's table gives 7 -- +2 then 16 - v, as if a period-0
-  envelope were not "still updating". One cell, one take.
+  second take (zombie.s v2) again 0.99. But the `new increase` column
+  differs for period-0 notes: there a period-0 envelope is never "still
+  updating", so the rewrite adds +2 over a decreasing note and 0 over an
+  increasing one (the CGB: +1 both), before the usual 16 - v on a direction
+  flip. `nrx2table.s` / `tools/hwlink/nrx2table_listen.py`, three rounds:
+  0x88 over volume 8 decreasing reads 6 (CGB 7), 0x68 over volume 6
+  decreasing 8 (CGB 9; one round 7.1), 0x68 over volume 6 increasing 6
+  (CGB 7); the cells the two tables share read as predicted (references
+  linear to ~5%). Readings in `tests/roms/payloads/nrx2table-agb.txt`.
 * Worth adding: noise shift 14 freezes the LFSR on the AGB as Pan Docs says
   for the GB (zombie.s v2: shift 14 at 1.2x the silence around it, the
   shift-13 controls 6.0x and 5.0x, measured past the LFSR's 15-step start-up).
