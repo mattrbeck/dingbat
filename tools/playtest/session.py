@@ -58,6 +58,15 @@ AUTHORING = ['dingbat-bios', 'mgba', 'nba']   # the official-BIOS emulators
 SLACK = 4      # frames past the slowest emulator before the next input
 
 
+def restore_keys(emu, held):
+    """After a state load: the keys held when the state was saved, sent
+    unconditionally (the driver's own idea of what is held may differ).
+    Resetting them to none instead would part the live emulators from the
+    recorded script whenever a `hold` was in effect."""
+    emu.held = -1
+    emu.set_keys(held)
+
+
 class Session:
     def __init__(self, name, rom, emus, outroot, save=None, rtc=None, lockstep=True):
         """`save`: one battery file for every emulator, or {emu: file} so
@@ -131,7 +140,8 @@ class Session:
             res = self.each(lambda ex: ex.emu.state_save(os.path.join(self.dir, f'mark-{label}-{ex.emu.name}.state')))
             # marks stay in creation order: a rewind forgets every later one
             self.marks.pop(label, None)
-            self.marks[label] = (len(self.recorded), self.section, {n: ex.emu.frame for n, ex in self.execs.items()})
+            self.marks[label] = (len(self.recorded), self.section,
+                                 {n: (ex.emu.frame, ex.emu.held) for n, ex in self.execs.items()})
             return {'mark': label, 'results': res}
         if op == 'rewind':
             label = words[1]
@@ -139,8 +149,8 @@ class Session:
 
             def restore(ex):
                 ex.emu.state_load(os.path.join(self.dir, f'mark-{label}-{ex.emu.name}.state'))
-                ex.emu.frame = frames[ex.emu.name]
-                ex.emu.set_keys(0)
+                ex.emu.frame, held = frames[ex.emu.name]
+                restore_keys(ex.emu, held)
             res = self.each(restore)
             del self.recorded[pos:]
             self.section = section
@@ -154,7 +164,7 @@ class Session:
         step = script.parse_step(line)
         # snapshot first so a step that fails anywhere can be undone everywhere:
         # the recorded script then always reproduces the emulators' state
-        before = {n: ex.emu.frame for n, ex in self.execs.items()}
+        before = {n: (ex.emu.frame, ex.emu.held) for n, ex in self.execs.items()}
         self.each(lambda ex: ex.emu.state_save(os.path.join(self.dir, f'undo-{ex.emu.name}.state')))
         res = self.each(lambda ex: ex.do(step))
         ok = all(r[0] == 'ok' for r in res.values())
@@ -176,8 +186,8 @@ class Session:
 
             def undo(ex):
                 ex.emu.state_load(os.path.join(self.dir, f'undo-{ex.emu.name}.state'))
-                ex.emu.frame = before[ex.emu.name]
-                ex.emu.set_keys(0)
+                ex.emu.frame, held = before[ex.emu.name]
+                restore_keys(ex.emu, held)
             bad = {n: r[1] for n, r in self.each(undo).items() if r[0] != 'ok'}
             if bad:
                 # an emulator that could not roll back is on another timeline now

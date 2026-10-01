@@ -1,0 +1,71 @@
+@title Iridion II (USA)
+@file Iridion II (U) [!].gba
+@game AI2E
+@save none
+@chip none (password game: no save library string, main menu offers NEW GAME / PASSWORD)
+@frozen dingbat-bios,mgba,nba
+
+# The cart has no battery save: progress is a password. Logos, title,
+# NEW GAME, default difficulty, Story Mode, skip the intro text, A through
+# the briefing, then the Reality Training tutorial stage: fire held, strafe
+# left and right past the "?" gates, pause.
+# The stage scrolls a constantly moving 3D grid, so in-game checkpoints are
+# compare=none; the three emulators draw the same scene but their frame
+# hashes differ from the title on (logo fades and the menu backdrop are a
+# frame apart: title f1026 nba differs, main menu f1332 all three differ).
+# The game does write the SRAM window although it has no save: 269 bytes
+# from 0x3000 on (every third byte a falling sequence, the rest FF), the
+# same 32 KB file on dingbat-bios and nba; mgba keeps a 0-byte file. The
+# run's verdict calls this "no battery save, but dingbat wrote data".
+[new]
+wait 600
+wait 300
+press START
+wait 120
+wait 120
+checkpoint title window=30 compare=text
+press START
+wait 120
+checkpoint main_menu window=30 compare=text
+press A
+wait 120
+wait 30
+checkpoint difficulty window=30 compare=text
+press A
+wait 300
+checkpoint mode_select window=30 compare=text
+press A
+wait 300
+checkpoint story_intro window=30 compare=none
+press START
+wait 300
+tap A times=10 every=40 hold=4
+tap A times=10 every=40 hold=4
+checkpoint tutorial_stage window=30 compare=none
+hold A
+wait 120
+hold A+LEFT
+wait 40
+hold A
+wait 120
+hold A+RIGHT
+wait 60
+hold A
+wait 120
+release
+checkpoint gate window=30 compare=none
+hold A
+wait 200
+hold A+LEFT
+wait 30
+hold A
+wait 200
+hold A+RIGHT
+wait 30
+hold A
+wait 200
+release
+checkpoint tutorial_later window=30 compare=none
+press START
+wait 60
+checkpoint pause window=30 compare=text

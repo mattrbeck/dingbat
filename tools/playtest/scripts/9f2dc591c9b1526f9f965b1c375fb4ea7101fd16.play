@@ -1,0 +1,97 @@
+@title Phantasy Star Collection (USA)
+@file Phantasy Star Collection (U) [!].gba
+@game AYCE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+
+# Phantasy Star (the first game) from the collection menu: START, through
+# the intro, Alis in Camineet, walk right, B opens the command menu, SAVE >
+# slot 1 (the first YES/NO answer lands on the default NO and backs out, so
+# the save is entered again), YES, name "A", END, "NOW SAVING".
+# Finding: dingbat-bios draws every SMS window garbled in the first-person
+# town view and on the save/continue screens: from ~f3800 (B opens the
+# command menu) the menu, status and message windows show repeated or
+# shifted scanlines, struck-through text and stray pixels; mgba and nba
+# draw them clean. The game itself carries on (the save is byte-identical
+# on all three). Also the intro starfield twinkle (f2318/f2325) is out of
+# phase on dingbat-bios compared with mgba/nba.
+[new]
+wait 1400
+checkpoint title window=30
+press START
+wait 120
+checkpoint game_select window=30
+press A
+wait 300
+checkpoint ps1_title window=30 compare=text
+press A
+wait 307
+tap A times=60 every=20 hold=4
+checkpoint camineet window=30
+press RIGHT hold=40
+wait 40
+press B hold=10
+wait 130
+checkpoint field_menu window=30
+tap DOWN times=4 every=15 hold=4
+wait 20
+press A
+wait 60
+press A
+wait 60
+checkpoint save_slot window=30
+press A
+wait 120
+press A
+wait 20
+tap DOWN times=4 every=15 hold=4
+wait 20
+press A
+wait 60
+press A
+wait 60
+press A
+wait 200
+wait 8
+wait 8
+press UP
+wait 20
+press A
+wait 120
+press A
+wait 20
+press A
+wait 20
+tap DOWN times=3 every=15 hold=4
+tap LEFT times=1 every=15 hold=4
+wait 20
+tap RIGHT times=2 every=15 hold=4
+wait 20
+checkpoint save_name window=30
+press A
+wait 120
+# until notext SAVING timeout=1800 every=10  [reached dingbat-bios+40 mgba+40 nba+30]
+wait 44
+wait 60
+checkpoint saved window=30
+press B
+wait 60
+
+[load]
+wait 1400
+press START
+wait 120
+press A
+wait 300
+press DOWN
+wait 20
+checkpoint continue_menu window=30 compare=text
+press A
+wait 120
+checkpoint continue_prompt window=30
+press A
+wait 120
+checkpoint load_slot window=30
+press A
+wait 200
+checkpoint resumed window=30

@@ -165,11 +165,42 @@ def game_findings(game, rep, base):
     for norm, hits in probs.items():
         who = [s for s, _ in hits]
         add('save', suspect_of(who), hits[0][1], configs=who)
-    # references failing to read saves
-    for key, cell in (rep.get('load') or {}).items():
-        w, r = key.split('-in-')
-        if r in REFS and not cell['ok'] and w not in DINGBAT[1:]:
-            add('save', r, f'{r} could not complete [load] with the {w} save: {cell["error"]}', cell=key)
+    # reading saves: per writer, the readers that show its save the same way
+    lc = rep.get('load_checkpoints') or {}
+    groups = rep.get('save_groups') or [[w] for w in {k.split('-in-')[0] for k in lc}]
+    seen_load = set()
+    for group in groups:
+        w = group[0]
+        readers = [r for r in emus if f'{w}-in-{r}' in lc]
+        cps = []
+        for r in readers:
+            for cp in lc[f'{w}-in-{r}']:
+                if cp not in cps:
+                    cps.append(cp)
+        for cp in cps:
+            have = [r for r in readers if lc[f'{w}-in-{r}'].get(cp, {}).get('reached')]
+            same = {}
+            for i, a in enumerate(have):
+                for b in have[i + 1:]:
+                    v = lc[f'{w}-in-{a}'][cp]['vs'].get(b) or lc[f'{w}-in-{b}'][cp]['vs'].get(a)
+                    same[(a, b)] = bool(v) and v['verdict'] in ('IDENTICAL', 'SLIP', 'MINOR')
+            clusters = _clusters(have, same) + [[r] for r in readers if r not in have]
+            if len(clusters) < 2:
+                continue
+            odd = odd_group(clusters)
+            key = (tuple(group), json.dumps(clusters))
+            if key in seen_load:
+                continue
+            seen_load.add(key)
+            who = suspect_of(odd) if odd else 'unclear'
+            own = odd and set(odd) & set(group)
+            add('load', who,
+                f"[load] of the save written by {'/'.join(group)}, checkpoint {cp}: "
+                + ' | '.join('+'.join(g) for g in clusters)
+                + (' (a writer cannot read back its own save)' if own else ''),
+                writers=group, checkpoint=cp, clusters=clusters, odd=odd,
+                images=[os.path.join(base, 'cmp', f'load-{cp}.png')])
+            break   # the first checkpoint that splits the readers is enough per save
     for k, p in rep.get('save_pairs', {}).items():
         a, b = k.split('~')
         if {a, b} == set(REFS) and not p.get('same_size'):
@@ -179,6 +210,18 @@ def game_findings(game, rep, base):
                 f"{a} {rep['saves'][a]['size']} bytes, {b} {rep['saves'][b]['size']} bytes, dingbat {mine} "
                 f"(chip sizes {rep['rom_info'].get('canonical_sizes')})", pair=k)
     return out
+
+
+def _clusters(names, same):
+    groups = []
+    for n in names:
+        joined = [g for g in groups if any(same.get((m, n), same.get((n, m))) for m in g)]
+        merged = [n]
+        for g in joined:
+            merged = g + merged
+            groups.remove(g)
+        groups.append(merged)
+    return sorted(groups, key=lambda g: -len(g))
 
 
 def collect(suite_dir):

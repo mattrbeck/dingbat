@@ -1,0 +1,58 @@
+@title Donkey Kong Country 2 (USA)
+@file Donkey Kong Country 2 (U).gba
+@game B2DE
+@chip EEPROM
+
+# Start, save slot 1, 1-Player, name AAA, skip the opening, then save from
+# the pause screen on the Gangplank Galleon map ("Save Game? Yes"). [load]
+# picks the filled slot and returns to the map; the pause screen shows AAA.
+
+[new]
+mash START until text "Games" timeout=1500 every=60
+wait 30
+checkpoint main_menu compare=text
+press A
+until text "SLOT" timeout=900 every=10
+wait 30
+checkpoint slots
+press A
+until text "Tea" timeout=900 every=10
+wait 30
+checkpoint player_select compare=text
+press A
+until text "END" timeout=900 every=10
+wait 60
+checkpoint name_entry window=10
+press A after=20
+press A after=20
+press A after=40
+checkpoint name_aaa window=10
+press A
+# the opening cutscene skips on START; on the map START opens the pause screen
+mash START until text "Save Game" timeout=4000 every=60
+wait 30
+checkpoint pause_stats
+press A
+wait 60
+checkpoint save_prompt window=10
+press A
+until text "Saving" timeout=300 every=5
+until text "Successful" timeout=900 every=10
+checkpoint saved window=10
+
+[load]
+mash START until text "Games" timeout=1500 every=60
+wait 30
+checkpoint main_menu compare=text
+press A
+until text "SLOT" timeout=900 every=10
+wait 30
+checkpoint slots
+press A
+until text "plank" timeout=1500 every=10
+wait 60
+checkpoint map compare=text
+press START
+until text "Save Game" timeout=300 every=10
+wait 30
+checkpoint pause_stats

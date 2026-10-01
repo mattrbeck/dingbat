@@ -10,9 +10,11 @@
 # leave byte-identical 8 KB files with 1800 data bytes).
 # [load]: Options shows Quickstart On (the saved setting), then start the
 # Foundry session again.
-# Findings: in the live session nba's run drifted (f2250: timer 1:54 vs 1:53,
-# skater elsewhere) and the pause/options transitions fade at different
-# rates (f3546); animated menus, so checkpoints are compare=text/none.
+# Findings: menus sit over an animated skater/background, so they differ
+# (MINOR; nba's pause and post-run menus MAJOR) and are compare=text. In the
+# live session nba's run drifted (f2250: timer 1:54 vs 1:53, skater
+# elsewhere) and an options fade ran at different rates (f3546); on the
+# frozen replay gameplay/skating are IDENTICAL on all three.
 
 [new]
 wait 900

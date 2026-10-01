@@ -2,48 +2,41 @@
 @file Dragon Ball Z - The Legacy of Goku (U) [!].gba
 @game ALGE
 @chip EEPROM
-@frozen dingbat-bios,mgba,nba
 
 # New Game, tap through the story crawl until the cut to Kame House, open
 # the START menu and Save to Slot 1 (the opening cutscene then carries on).
 # [load]: the title menu opens on Continue, Load Game shows Slot 1 lit and
 # Slot 2 dimmed, and loading lands back at Kame House.
+
 [new]
 wait 600
 press START after=200
 press A after=200
-# until text 'Press Start' timeout=1200 every=20  [reached dingbat-bios+540 mgba+540 nba+540]
-wait 544
+until text "Press Start" timeout=1200 every=20
 wait 30
-checkpoint title window=30
+checkpoint title
 press START hold=10 after=160
 checkpoint title_menu window=0
 press A hold=10
-# until text story timeout=900 every=10  [reached dingbat-bios+150 mgba+150 nba+150]
-wait 154
+until text "story" timeout=900 every=10
 checkpoint story window=0
-# mash A until blank timeout=6000 every=30  [taps dingbat-bios:44 mgba:44 nba:44]
-tap A times=44 every=30 hold=4
-# until notblank timeout=600 every=5  [reached dingbat-bios+10 mgba+10 nba+10]
-wait 14
+mash A until blank timeout=6000 every=30
+until notblank timeout=600 every=5
 wait 180
 checkpoint kame_house window=10
 press START hold=10
-# until text Credits timeout=300 every=10  [reached dingbat-bios+40 mgba+40 nba+40]
-wait 44
+until text "Credits" timeout=300 every=10
 wait 20
 checkpoint pause_menu window=0
 press DOWN after=20
 press DOWN after=20
 press DOWN after=20
 press A hold=10
-# until text 'Save Game' timeout=300 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
-wait 4
+until text "Save Game" timeout=300 every=10
 wait 30
 checkpoint save_slots window=0
 press A hold=10
-# until notext 'Save Game' timeout=300 every=5  [reached dingbat-bios+0 mgba+0 nba+0]
-wait 4
+until notext "Save Game" timeout=300 every=5
 wait 120
 checkpoint saved window=0
 
@@ -51,8 +44,7 @@ checkpoint saved window=0
 wait 600
 press START after=200
 press A after=200
-# until text 'Press Start' timeout=1200 every=20  [reached dingbat-bios+540 mgba+540 nba+540]
-wait 544
+until text "Press Start" timeout=1200 every=20
 wait 30
 press START hold=10 after=160
 checkpoint title_menu_loaded window=0

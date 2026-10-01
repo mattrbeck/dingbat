@@ -2,45 +2,39 @@
 @file Pokemon Pinball - Ruby & Sapphire (E) (M5).gba
 @game BPPP
 @chip SRAM_F (FRAM)
-@frozen dingbat-bios,mgba,nba
 
 # First boot asks for a language; confirming English writes it to the save
 # (the game formats the save at boot, the language press changes it). [load]
 # boots without the language screen straight into the title, then opens the
 # Pokedex from the main menu.
+
 [new]
-# until text ENGLISH timeout=600 every=10  [reached dingbat-bios+250 mgba+250 nba+250]
-wait 254
+until text "ENGLISH" timeout=600 every=10
 wait 30
 checkpoint language window=30
 press A
 wait 320
 press START
-# until text 'PRESS START' timeout=900 every=10  [reached dingbat-bios+20 mgba+20 nba+20]
-wait 24
+until text "PRESS START" timeout=900 every=10
 wait 30
 checkpoint title window=30
 press START
-# until text OPTIONS timeout=300 every=5  [reached dingbat-bios+35 mgba+35 nba+35]
-wait 39
+until text "OPTIONS" timeout=300 every=5
 wait 30
 checkpoint main_menu window=30 compare=text
 
 [load]
 wait 600
 press START
-# until text 'PRESS START' timeout=900 every=10  [reached dingbat-bios+20 mgba+20 nba+20]
-wait 24
+until text "PRESS START" timeout=900 every=10
 wait 30
 checkpoint title window=30
 press START
-# until text OPTIONS timeout=300 every=5  [reached dingbat-bios+35 mgba+35 nba+35]
-wait 39
+until text "OPTIONS" timeout=300 every=5
 wait 30
 checkpoint main_menu window=30 compare=text
 press DOWN after=20
 press A
-# until text 'N0. 002' timeout=300 every=5  [reached dingbat-bios+70 mgba+85 nba+70]
-wait 89
+until text "N0. 002" timeout=300 every=5
 wait 30
 checkpoint pokedex window=30

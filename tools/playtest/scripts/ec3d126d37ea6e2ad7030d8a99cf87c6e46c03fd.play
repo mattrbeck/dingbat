@@ -1,0 +1,50 @@
+@title The Lord of the Rings - The Return of the King (USA)
+@file Lord of the Rings, The - The Return of the King (U) (M5).gba
+@game BLRE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+@save skip: the game saves a hero only when a level is finished (Load Game lists four Empty slots after this route); the first level (Isengard, Aragorn with Gandalf) was not finished. The EEPROM written here holds the language only (21 bytes): on a reload dingbat-bios and mgba skip the language menu.
+
+# English, logos, title, New Game, Aragorn, A through the Orthanc story,
+# into the first level: Gandalf's lines, walk down-right past the barrels
+# towards the ledge, sword swings on the way.
+# Findings: nba does not read back its own 8 KB battery file (on a reload
+# it shows the language menu again, the other two do not). Menu tab and
+# logo fades land on different frames per emulator (EA logo f1532: all
+# three differ; backpack tabs f3506..f3598 mid-transition).
+[new]
+wait 600
+wait 60
+checkpoint language window=30 compare=text
+press A
+wait 300
+wait 300
+press START
+wait 200
+press START
+wait 200
+checkpoint title window=30 compare=text
+press START
+wait 120
+checkpoint main_menu window=30 compare=text
+press A
+wait 120
+checkpoint select_hero window=30
+press A
+wait 180
+press START
+wait 200
+press A
+wait 120
+tap A times=15 every=40 hold=4
+checkpoint level1 window=30 compare=none
+press RIGHT hold=60
+tap A times=8 every=40 hold=4
+press DOWN+RIGHT hold=120
+tap A times=4 every=40 hold=4
+press DOWN+RIGHT hold=120
+checkpoint walking window=30 compare=none
+press DOWN+RIGHT hold=150
+tap A times=3 every=20 hold=4
+press DOWN+RIGHT hold=150
+checkpoint ledge window=30 compare=none

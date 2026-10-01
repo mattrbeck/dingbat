@@ -1,0 +1,83 @@
+@title Advance Guardian Heroes (USA)
+@file Advance Guardian Heroes (U).gba
+@game BGCE
+@chip EEPROM
+@frozen dingbat-bios,mgba,nba
+
+# Story Mode > 1 Player > Enn, skip through the opening, beat the first
+# wave of soldiers; the game writes the EEPROM at the first Level Up
+# (Laboratory) screen, then back into the stage. [load]: Story Mode now
+# offers NEW GAME / CONTINUE STAGE 1; Continue opens the Level Up screen
+# with the saved stats.
+# Session notes: the opening cutscene drifts apart (lightning flash white
+# on dingbat-bios+nba, not on mgba at f3542) and the first fight runs
+# differently on all three (f5262: mgba already past the "find your way
+# out" dialogue; f5742 three different fights), but all three reach the
+# same Level Up screen with the same 100 points, and the save data is
+# identical. Unit shadows are drawn every other frame, so whether a
+# frame shows them depends on each emulator's phase (dingbat-bios showed
+# none at f1680/f1740, mgba/nba none at f7784).
+# Save size: dingbat-bios and mgba write 512 bytes, nba 8 KB (same data).
+# Load: the 8 KB file nba writes is not read as a save anywhere (nba
+# itself, dingbat-bios, mgba): Story Mode skips the NEW GAME / CONTINUE
+# menu and goes straight to Character Select (f1434), as on a blank cart.
+# The 512-byte files from dingbat-bios and mgba load fine in all three.
+
+[new]
+wait 600
+wait 300
+press START
+wait 120
+checkpoint title window=30
+press START
+wait 90
+checkpoint main_menu window=30 compare=text
+press A
+wait 120
+press A
+wait 120
+checkpoint char_select window=30
+press A
+wait 120
+wait 60
+checkpoint intro_rain window=30
+press START
+wait 120
+press START
+wait 10
+tap A times=40 every=20 hold=4
+tap A times=40 every=20 hold=4
+tap A times=60 every=20 hold=4
+checkpoint stage1 window=30
+tap B times=20 every=10 hold=4
+press RIGHT hold=60
+tap B times=20 every=10 hold=4
+tap B times=60 every=8 hold=4
+tap B times=120 every=8 hold=4
+checkpoint level_up window=30 compare=text
+tap A times=3 every=30 hold=4
+tap A times=6 every=30 hold=4
+tap A times=10 every=30 hold=4
+press B
+wait 60
+press START
+wait 60
+wait 120
+checkpoint back_in_stage window=30
+
+[load]
+wait 600
+wait 300
+press START
+wait 120
+checkpoint title window=30
+press START
+wait 90
+press A
+wait 120
+press A
+wait 120
+checkpoint continue_menu window=30
+press A
+wait 180
+checkpoint resumed_levelup window=30
