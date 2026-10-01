@@ -261,15 +261,28 @@ export const closeGame = async (d) => {
 };
 
 // Sync now from the account menu (or the empty library's own Sync).
+// Which of the two is on screen can change under the tap: a sync already
+// running (the one opening the app starts) fills an empty library, and the
+// empty state's Sync goes with it. So: let that sync finish, then tap what
+// is there, and look again if it went.
 export const syncNow = async (d) => {
   await front(d);
-  const slot = await d.page.evaluate(() =>
-    getComputedStyle(document.getElementById("account-slot")).display !== "none");
-  if (slot) {
-    await d.page.click("#account-btn");
-    await d.page.click("#account-sync");
-  } else {
-    await d.page.click("#home-drive");
+  await idle(d);
+  for (let tries = 0; ; tries++) {
+    const slot = await d.page.evaluate(() =>
+      getComputedStyle(document.getElementById("account-slot")).display !== "none");
+    try {
+      if (slot) {
+        await d.page.click("#account-btn", { timeout: 5000 });
+        await d.page.click("#account-sync", { timeout: 5000 });
+      } else {
+        await d.page.click("#home-drive", { timeout: 5000 });
+      }
+      break;
+    } catch (e) {
+      if (tries >= 3) throw e;
+      await d.page.keyboard.press("Escape").catch(() => {});
+    }
   }
   await idle(d);
   await d.page.keyboard.press("Escape").catch(() => {});
