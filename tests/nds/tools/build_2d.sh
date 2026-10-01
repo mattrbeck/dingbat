@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build the no-library C 2D test ROMs (src/2d_*) into roms/. Needs an
+# Build the no-library C 2D test ROMs (src/2d_*, boot_cp15) into roms/. Needs an
 # arm-none-eabi gcc (devkitARM's, or any bare-metal one) plus binutils and
 # python3; the ARM7 side is fb_both's spin loop.
 set -e
@@ -20,7 +20,7 @@ ${X}ld -Ttext=0x037F8000 -e _start -o "$tmp/arm7.elf" "$tmp/arm7.o"
 ${X}objcopy -O binary "$tmp/arm7.elf" "$tmp/arm7.bin"
 ${X}as -march=armv5te -o "$tmp/crt0.o" "$here/src/common2d/crt0.s"
 
-for name in 2d_text 2d_bitmap 2d_sprites; do
+for name in 2d_text 2d_bitmap 2d_sprites boot_cp15; do
   ${X}gcc -march=armv5te -marm -Os -ffreestanding -fno-builtin -nostdlib \
     -Wall -c -o "$tmp/$name.o" "$here/src/$name/arm9.c"
   ${X}gcc -march=armv5te -marm -nostdlib -T "$here/src/common2d/link.ld" \

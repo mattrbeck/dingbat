@@ -59,6 +59,9 @@ task test_ndssystem, "Run the DS system device tests (maths unit, RTC, save chip
 task test_nds3d, "Run the DS 3D engine tests (command scenes + the 3d_* test ROMs)":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_nds3d_test tests/nds_3d_test.nim nds3d_out"
 
+task test_ndscompat, "Run the DS homebrew-sweep fix checks (docs/nds/compat.md)":
+  exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_ndscompat_test tests/nds_compat_test.nim"
+
 task test_ndshlebios,"Run the DS HLE BIOS SWIs against the real BIOS (or computed expectations)":
   exec "nim c -r -d:test_harness -d:release --path:src -o:dingbat_ndshlebios_test tests/nds_hle_bios_test.nim"
 
