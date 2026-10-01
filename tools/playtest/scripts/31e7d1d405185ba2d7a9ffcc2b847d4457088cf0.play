@@ -1,0 +1,72 @@
+@title Super Ghouls 'N Ghosts (USA)
+@file Super Ghouls 'N Ghosts (U).gba
+@game AG5E
+@chip EEPROM
+@save skip: nothing is written by Option Mode (difficulty EASY), by starting a game, or by a full game over (Continue screen > END), checked by stopping after each; the first save should come at the end of Stage 1 (the title then offers more than NEW GAME), which needs the whole graveyard/forest stage and its boss in lockstep
+@frozen dingbat-bios,mgba,nba
+
+# Option Mode: Difficulty EASY, Exit; Super Ghouls Mode > New Game, skip
+# the castle cutscene, Stage 1 graveyard: shoot the first zombies, walk
+# on, pause and unpause. Menu presses need hold=10 here (4-6 frame taps
+# are often dropped).
+# Session notes: the attract intro runs out of phase on dingbat-bios
+# (f900, f3015: dingbat-bios a frame or so off mgba/nba). In the stage
+# the three run a frame apart: at f3715 a zombie rising on the right is
+# drawn on mgba/nba but not yet on dingbat-bios, and nba at f3940 shows
+# exactly the frame dingbat-bios showed at f3939. In a second session
+# (walk into the enemies until game over) mgba lost its first life well
+# before the others and reached GAME OVER about 240 frames later than
+# dingbat-bios and nba (f8199). No emulator wrote any data (mgba leaves a
+# blank 512-byte file, nba a blank 8 KB one, dingbat-bios none).
+
+[new]
+wait 600
+wait 300
+press START
+wait 120
+checkpoint title window=30
+press DOWN
+wait 15
+press DOWN
+wait 15
+press A
+wait 90
+press LEFT
+wait 20
+checkpoint options_easy window=30
+tap DOWN times=3 every=15 hold=4
+wait 10
+press A
+wait 60
+press DOWN hold=10
+wait 30
+press DOWN hold=10
+wait 30
+press A hold=10
+wait 90
+press A hold=10
+wait 240
+checkpoint new_game window=30
+press A hold=10
+wait 300
+# until notblank timeout=900 every=10  [reached dingbat-bios+10 mgba+10 nba+10]
+wait 14
+wait 60
+wait 400
+press START hold=10
+wait 300
+wait 400
+checkpoint stage1 window=30
+hold RIGHT
+tap RIGHT+B times=20 every=12 hold=6
+release
+press RIGHT hold=40
+tap B times=6 every=12 hold=6
+press RIGHT hold=40
+tap B times=6 every=12 hold=6
+checkpoint graveyard window=30
+press START hold=10
+wait 30
+checkpoint paused window=30
+press START hold=10
+wait 30

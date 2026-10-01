@@ -2,7 +2,6 @@
 @file Battle Network Rockman EXE 4.5 - Real Operation (J).gba
 @game BR4J
 @chip FLASH512 + RTC
-@frozen dingbat-bios,mgba,nba
 
 # New game (はじめから): the PET asks for the date and time first. The year is
 # raised 2000 -> 2006 so the game-set clock (kept by dingbat) matches the
@@ -15,10 +14,10 @@
 # Rockman; decline the tournament, UP wraps to セーブ, save.
 # [load]: title shows つづきから, NAVI SELECT, the PET menu on the saved date.
 # Japanese text does not OCR, so steps are fixed waits (menus here do not lag).
+
 [new]
 wait 600
-# until text RESERVED timeout=900 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
-wait 4
+until text "RESERVED" timeout=900 every=10
 wait 120
 checkpoint title window=0 compare=text
 press START after=120
@@ -59,6 +58,7 @@ press A after=150
 checkpoint navi_confirm window=10
 press A after=420
 checkpoint pet_greeting window=10
+# greeting and mail dialogue; the last A opens the tournament prompt
 press A after=90
 press A after=90
 press A after=90
@@ -83,8 +83,7 @@ press A after=120
 
 [load]
 wait 600
-# until text RESERVED timeout=900 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
-wait 4
+until text "RESERVED" timeout=900 every=10
 wait 120
 press START after=120
 checkpoint title_menu_loaded window=10

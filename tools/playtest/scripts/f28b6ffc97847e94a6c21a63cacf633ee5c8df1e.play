@@ -2,75 +2,92 @@
 @file Pokemon - Ruby Version (U) (V1.0) [!].gba
 @game AXVE
 @chip FLASH1M + RTC
+@frozen dingbat-bios,mgba,nba
 
 # New game as a boy named AA, straight to the moving truck, save there.
 # (Same route as the Emerald script; Ruby's start menu highlight defeats the
 # selected-entry heuristic, so SAVE is reached with two DOWN presses.)
-
 [new]
 wait 900
 press START
-until text "PRESS START" timeout=1200 every=10
+# until text 'PRESS START' timeout=1200 every=10  [reached dingbat-bios+460 mgba+460 nba+460]
+wait 464
 checkpoint title window=0
 press START
-until text "NEW GAME" timeout=600 every=10
-until stable 20 timeout=300
+# until text 'NEW GAME' timeout=600 every=10  [reached dingbat-bios+50 mgba+50 nba+50]
+wait 54
+# until stable 20 timeout=300 every=4  [reached dingbat-bios+20 mgba+20 nba+20]
+wait 24
 checkpoint main_menu window=0
 press A
-until text "waiting" timeout=1200 every=10
-checkpoint birch
-mash A until text "GIRL" timeout=3000 every=20
-until stable 10 timeout=200
-checkpoint gender
+# until text waiting timeout=1200 every=10  [reached dingbat-bios+580 mgba+580 nba+580]
+wait 584
+checkpoint birch window=30
+# mash A until text GIRL timeout=3000 every=20  [taps dingbat-bios:88 mgba:88 nba:88]
+tap A times=88 every=20 hold=4
+# until stable 10 timeout=200 every=4  [reached dingbat-bios+10 mgba+10 nba+10]
+wait 14
+checkpoint gender window=30
 press A
-mash A until text "name" timeout=600 every=20
+# mash A until text name timeout=600 every=20  [taps dingbat-bios:4 mgba:4 nba:4]
+tap A times=4 every=20 hold=4
 wait 90
 press A
-until text "BACK" timeout=600 every=10
+# until text BACK timeout=600 every=10  [reached dingbat-bios+40 mgba+40 nba+40]
+wait 44
 wait 60
-checkpoint naming
-# type "AA", jump to OK, confirm
+checkpoint naming window=30
 press A after=20
 press A after=20
 press START after=20
 press A after=60
-until text "YES" timeout=300 every=5
+# until text YES timeout=300 every=5  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 press A after=10
-mash A until blank timeout=3000 every=20
-until notblank timeout=1200 every=10
-# the truck is moving: no menu until it stops and the door opens
+# mash A until blank timeout=3000 every=20  [taps dingbat-bios:54 mgba:54 nba:54]
+tap A times=54 every=20 hold=4
+# until notblank timeout=1200 every=10  [reached dingbat-bios+250 mgba+250 nba+250]
+wait 254
 wait 800
 press RIGHT hold=40 after=60
-checkpoint truck
+checkpoint truck window=30
 press START
-until text "SAVE" timeout=120 every=5
+# until text SAVE timeout=120 every=5  [reached dingbat-bios+0 mgba+0 nba+5]
+wait 9
 wait 10
-# BAG -> AA -> SAVE
 press DOWN after=10
 press DOWN after=10
-checkpoint start_menu
+checkpoint start_menu window=30
 press A
-until text "save the game" timeout=300 every=5
+# until text 'save the game' timeout=300 every=5  [reached dingbat-bios+90 mgba+90 nba+95]
+wait 99
 wait 30
 checkpoint save_prompt window=10
 press A
-until text "saved the game" timeout=900 every=5
+# until text 'saved the game' timeout=900 every=5  [reached dingbat-bios+315 mgba+385 nba+320]
+wait 389
 checkpoint saved window=0
 
 [load]
 wait 900
 press START
-until text "PRESS START" timeout=1200 every=10
+# until text 'PRESS START' timeout=1200 every=10  [reached dingbat-bios+460 mgba+460 nba+460]
+wait 464
 press START
-until text "CONTINUE" timeout=600 every=10
-until text "PLAYER" timeout=300 every=5
+# until text CONTINUE timeout=600 every=10  [reached dingbat-bios+50 mgba+50 nba+50]
+wait 54
+# until text PLAYER timeout=300 every=5  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
 wait 30
 checkpoint continue_menu window=0
 press A
-until notblank timeout=600 every=10
-until stable 30 timeout=900
-checkpoint resumed
+# until notblank timeout=600 every=10  [reached dingbat-bios+0 mgba+0 nba+0]
+wait 4
+# until stable 30 timeout=900 every=4  [reached dingbat-bios+90 mgba+90 nba+90]
+wait 94
+checkpoint resumed window=30
 press START
-until text "SAVE" timeout=120 every=5
+# until text SAVE timeout=120 every=5  [reached dingbat-bios+0 mgba+0 nba+5]
+wait 9
 wait 10
-checkpoint resumed_menu
+checkpoint resumed_menu window=30
