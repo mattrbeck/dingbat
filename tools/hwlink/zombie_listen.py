@@ -109,7 +109,14 @@ def analyse(path):
     seg = {'Z1 ref 8': (5.00, .25), 'Z2 ref 12': (5.50, .25), 'Z3a 8': (6.00, .25),
            'Z3b 4x 0x80': (6.25, .25), 'Z4 ref 8': (6.75, .25), 'Z5a 8': (7.25, .25),
            'Z5b 0x88': (7.50, .25), 'Z6 ref 7': (8.00, .25)}
-    amp = {k: tone(x, rate, *mid(*v)) for k, v in seg.items()}
+    # each tone measured from where it really starts (a dropped buffer moves
+    # everything after it); the 0.5 s runs Z3 / Z5 split into halves
+    zr = [r for r in rs if r[0] >= z1 - 0.01][:6]
+    starts = {'Z1 ref 8': zr[0][0], 'Z2 ref 12': zr[1][0], 'Z3a 8': zr[2][0],
+              'Z3b 4x 0x80': zr[2][0] + 0.25, 'Z4 ref 8': zr[3][0], 'Z5a 8': zr[4][0],
+              'Z5b 0x88': zr[4][0] + 0.25, 'Z6 ref 7': zr[5][0]}
+    amp = {k: tone(x, rate, int((starts[k] + 0.05) * rate), int((starts[k] + 0.20) * rate))
+           for k in seg}
     ref = np.mean([amp['Z1 ref 8'], amp['Z4 ref 8']])
     for k in seg:
         print(f'  {k:12s} ~volume {8 * amp[k] / ref:5.2f}')
@@ -124,11 +131,31 @@ def analyse(path):
               'GB table (no change)' if abs(z3 - 1.0) < abs(z3 - 1.5) else 'old GBA rule (+1 a write)')
 
 
+def mic():
+    """The Mac's own microphone, by name: device 0 can be an iPhone's,
+    offered through Continuity (wireless, voice-processed, and it drops audio --
+    the second and third takes). ZOMBIE_MIC overrides the name to look for."""
+    want = os.environ.get('ZOMBIE_MIC', 'MacBook')
+    out = subprocess.run(['ffmpeg', '-hide_banner', '-f', 'avfoundation', '-list_devices', 'true', '-i', ''],
+                         capture_output=True, text=True).stderr
+    audio = out[out.index('audio devices'):] if 'audio devices' in out else ''
+    for line in audio.splitlines():
+        if '] [' in line and want in line:
+            idx, name = line.split('] [', 1)[1].split('] ', 1)
+            return idx, name.strip()
+    raise SystemExit(f'no audio device matching {want!r}:\n{audio}')
+
+
 def record(seconds):
     os.makedirs(os.path.join(HERE, '.payloadcmp'), exist_ok=True)
     out = os.path.join(HERE, '.payloadcmp', 'zombie.wav')
-    rec = subprocess.Popen(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-f', 'avfoundation',
-                            '-i', ':0', '-t', str(seconds), '-ac', '1', '-ar', '48000', out])
+    idx, name = mic()
+    print(f'recording from [{idx}] {name}')
+    # a small input queue makes avfoundation drop whole buffers (the third
+    # take lost 1.8 s of 14), which shifts every segment after the gap
+    rec = subprocess.Popen(['ffmpeg', '-hide_banner', '-loglevel', 'warning', '-y',
+                            '-thread_queue_size', '8192', '-f', 'avfoundation',
+                            '-i', f':{idx}', '-t', str(seconds), '-ac', '1', '-ar', '48000', out])
     import time
     time.sleep(1.5)                         # the microphone takes a moment to open
     sys.path.insert(0, HERE)
@@ -140,6 +167,10 @@ def record(seconds):
         m.call = lambda address, arg=0, timeout=20.0: call(address, arg, timeout)
         print('payload answered', hex(m.run_payload(code, 0)))
     rec.wait()
+    got = wave.open(out).getnframes() / 48000
+    if got < seconds - 0.2:
+        print(f'the recording is {got:.2f} s of {seconds}: the capture dropped audio; take it again')
+        return
     analyse(out)
 
 
