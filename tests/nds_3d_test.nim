@@ -10,6 +10,7 @@ import zippy
 import dingbat/nds/mem/vram
 import dingbat/nds/io/irq
 import dingbat/nds/gpu3d/gpu3d
+import dingbat/nds/nds
 
 # --- PNG (as tools/ndsrun.nim) --------------------------------------------
 
@@ -526,8 +527,11 @@ proc scene_registers() =
   g.cmd(0x15)
   g.cmd(0x10, 0)
   let st = g.read_reg(0x600)
-  check(((st shr 16) and 0x1FF) == 2 and (st and (1'u32 shl 27)) != 0,
-        "two commands queued behind the swap, engine busy: " & toHex(st))
+  check(((st shr 16) and 0x1FF) == 0 and (st and (1'u32 shl 27)) != 0 and (st and (1'u32 shl 26)) != 0,
+        "two commands behind the swap sit in the PIPE: FIFO empty, engine busy: " & toHex(st))
+  for i in 0 ..< 10: g.cmd(0x15)
+  let st2 = g.read_reg(0x600)
+  check(((st2 shr 16) and 0x1FF) == 8, "12 queued: 4 in the PIPE, 8 in the FIFO: " & toHex(st2))
   g.on_vblank()
   check((g.read_reg(0x600) and (1'u32 shl 26)) != 0, "FIFO drained at V-blank")
   # POS_TEST through identity clip matrix
@@ -547,6 +551,84 @@ proc scene_registers() =
   g2.reg(0x600, 2'u32 shl 30, 0xC000_0000'u32)
   check((irq.iff and (1'u32 shl 21)) != 0, "GX FIFO empty IRQ raised")
 
+# --- the 3d_* test ROMs through the whole machine ---------------------------
+#
+# Each ROM's 3D colour buffer after 30 frames, as a CRC32 of its pixels.
+# Where docs/oracles.md (NDS core) lists a ROM as matching a reference core
+# at 18-bit colour, the hash is that output too, so a change here is a
+# regression against the reference, not just against ourselves.
+# NDS3D_UPDATE=1 prints the current table instead of checking it.
+
+const ROM_HASHES = [
+  ("3d_aa", 0xD975E35C'u32),
+  ("3d_alpha", 0xF2349E45'u32),
+  ("3d_alpha_noblend", 0xDD017278'u32),
+  ("3d_blendmodes", 0xE339E209'u32),
+  ("3d_clip", 0x5A21F942'u32),
+  ("3d_depth", 0x2DFBB5E5'u32),
+  ("3d_depth_w", 0x674FA30D'u32),
+  ("3d_edge", 0xEAD6701D'u32),
+  ("3d_fog", 0x01CED223'u32),
+  ("3d_fog_alpha", 0xB462745B'u32),
+  ("3d_geom", 0x5DDB7367'u32),
+  ("3d_highlight", 0x98B0EEB4'u32),
+  ("3d_light", 0xC97F4195'u32),
+  ("3d_lines", 0x39602BC0'u32),
+  ("3d_probe_aa", 0x56D6975B'u32),
+  ("3d_probe_aa2", 0xE4B88D5F'u32),
+  ("3d_probe_aa_edge", 0xE3239CE2'u32),
+  ("3d_probe_clip", 0xA5425543'u32),
+  ("3d_probe_clip_persp", 0xED82B05F'u32),
+  ("3d_probe_clipq", 0x318D51CE'u32),
+  ("3d_probe_lerp", 0xB433E213'u32),
+  ("3d_probe_light", 0x758ED3D5'u32),
+  ("3d_probe_light_spec", 0x9CE83578'u32),
+  ("3d_probe_light_sum", 0x087F8B9D'u32),
+  ("3d_probe_light_tab", 0x73BB57EB'u32),
+  ("3d_probe_line", 0xCBAC0DCE'u32),
+  ("3d_probe_persp", 0x20F374FC'u32),
+  ("3d_probe_persp_tex", 0xD826BD30'u32),
+  ("3d_probe_persp_w16", 0x99540F9B'u32),
+  ("3d_probe_persp_w256", 0x99540F9B'u32),
+  ("3d_probe_tri", 0xD166D2B0'u32),
+  ("3d_probe_tri_edge", 0x3EF4A7F0'u32),
+  ("3d_probe_tri_flat", 0xFC1EEC8A'u32),
+  ("3d_probe_tri_flat_edge", 0xFEE01043'u32),
+  ("3d_probe_tri_rgb", 0x9BA28853'u32),
+  ("3d_probe_tri_s2", 0x3E8D02B5'u32),
+  ("3d_probe_tri_s2_edge", 0xC04E4977'u32),
+  ("3d_probe_tri_xlu", 0x7CF56E69'u32),
+  ("3d_probe_wire", 0xF9C3C7B7'u32),
+  ("3d_rearbitmap", 0xE3EA2B86'u32),
+  ("3d_shadow", 0x355DB884'u32),
+  ("3d_small", 0xB917CCF7'u32),
+  ("3d_sort", 0x0BC6BFF2'u32),
+  ("3d_sort_manual", 0x6ADC1A16'u32),
+  ("3d_status", 0xC265245B'u32),
+  ("3d_tex4x4", 0x2B703353'u32),
+  ("3d_texcoord", 0x2B123AE8'u32),
+  ("3d_texfmt", 0x2550B011'u32),
+  ("3d_texwrap", 0x1CBBF735'u32),
+  ("3d_vcolor", 0x230F1C99'u32),
+]
+
+proc rom_scenes() =
+  echo "3d_* ROMs (30 frames)"
+  let dir = currentSourcePath().parentDir / "nds" / "roms" / "3d"
+  let update = getEnv("NDS3D_UPDATE") == "1"
+  for (name, want) in ROM_HASHES:
+    let path = dir / name & ".nds"
+    if not fileExists(path):
+      check(false, "missing " & path)
+      continue
+    let n = load_nds(path)
+    for f in 0 ..< 30: n.run_frame()
+    var bytes = newSeq[uint8](256 * 192 * 4)
+    copyMem(addr bytes[0], addr n.gpu3d.ren.color[0], bytes.len)
+    let h = crc32(bytes)
+    if update: echo "  (\"", name, "\", 0x", toHex(h), "'u32),"
+    else: check(h == want, name & ": 3D buffer CRC " & toHex(h) & ", expected " & toHex(want))
+
 when isMainModule:
   if paramCount() >= 1: outdir = paramStr(1)
   createDir(outdir)
@@ -561,6 +643,7 @@ when isMainModule:
   scene_shadow()
   scene_wbuffer()
   scene_registers()
+  rom_scenes()
   if failures > 0:
     echo failures, " check(s) failed"
     quit(1)
