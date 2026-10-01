@@ -43,10 +43,25 @@ proc user_settings_offset*(s: Spi): int =
   let o = (int(s.firmware[0x20]) or (int(s.firmware[0x21]) shl 8)) * 8
   if o <= 0 or o + 0x200 > s.firmware.len: 0x3FE00 else: o
 
+proc settings_crc_ok(s: Spi; a: int): bool =
+  ## CRC16 (initial FFFFh) of entries 00h..6Fh against entry 72h.
+  var crc = 0xFFFF'u16
+  for i in a ..< a + 0x70:
+    crc = crc xor uint16(s.firmware[i])
+    for _ in 0..7:
+      crc = if (crc and 1) != 0: (crc shr 1) xor 0xA001'u16 else: crc shr 1
+  crc == (uint16(s.firmware[a + 0x72]) or (uint16(s.firmware[a + 0x73]) shl 8))
+
 proc user_settings*(s: Spi): int =
-  ## The newer of the two user-settings copies (update counter 0x70).
+  ## The current user-settings copy (GBATEK "DS Firmware User Settings"):
+  ## of two with valid CRCs the one whose update counter (70h) is one more
+  ## than the other's; else the one with a valid CRC; neither valid: the
+  ## first (Assumed; the firmware would ask for the settings again).
   let a = s.user_settings_offset()
   let b = a + 0x100
+  let oka = s.settings_crc_ok(a)
+  let okb = s.settings_crc_ok(b)
+  if oka != okb: return (if okb: b else: a)
   let ca = int(s.firmware[a + 0x70]) and 0x7F
   let cb = int(s.firmware[b + 0x70]) and 0x7F
   if ((ca + 1) and 0x7F) == cb: b else: a

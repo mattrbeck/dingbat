@@ -13,7 +13,7 @@
 
 import std/[os, strutils]
 import dingbat/nds/[sched, nds]
-import dingbat/nds/io/[irq, cart, cartcrypt]
+import dingbat/nds/io/[irq, cart, cartcrypt, spi, input]
 
 var failures = 0
 
@@ -297,6 +297,18 @@ block direct_boot_unit:
   let fb = new_nds(hb, @[], @[], @[], boot = nbFirmware)
   check fb.arm9.next_pc == 0x02000800'u32 and fb.cart.mode == cmMain,
         "firmware boot without dumps falls back to direct boot"
+
+block firmware_settings_unit:
+  echo "firmware user settings"
+  var fw = synth_firmware()
+  check new_spi(fw, IrqCtl(), Input()).user_settings() == 0x3FF00,
+        "two valid copies: the one whose counter is one more"
+  fw[0x3FF00 + 0x10] = fw[0x3FF00 + 0x10] xor 1
+  check new_spi(fw, IrqCtl(), Input()).user_settings() == 0x3FE00,
+        "a copy with a bad CRC is skipped"
+  let n = new_nds(fake_rom(0x20000, saDestroyed, fake_table()), @[], @[], @[])
+  check n.main_ram[0x3FFC80 ..< 0x3FFCF0] == synth_firmware()[0x3FF00 ..< 0x3FF70],
+        "direct boot copies the current copy to 0x27FFC80"
 
 # ---------------------------------------------------------------------------
 # The real KEY1 table (local only: needs the user's dumps)
