@@ -19,6 +19,7 @@
 
 import std/bitops
 from std/strutils import toHex
+when defined(ndsdebug): import std/tables
 
 type
   CpuMode* = enum
@@ -55,6 +56,9 @@ type
                               ## LDM and POP to r15 keep the T bit (GBATEK)
     instr_count*: uint64
     trace*: int             ## instructions left to log to stderr (debug)
+    when defined(ndsdebug):
+      profiling*: bool      ## count executed instructions per 64-byte block
+      profile*: CountTable[uint32]
 
 proc bank_of(mode: uint32): int {.inline.} =
   case mode and 0x1F
@@ -962,6 +966,8 @@ proc step*[B](cpu: ArmCpu[B]) {.inline.} =
     cpu.exception(mIRQ, 0x18, cpu.next_pc + 4)
   let a = cpu.next_pc
   cpu.cur_pc = a
+  when defined(ndsdebug):
+    if cpu.profiling: cpu.profile.inc(a and not 63'u32)
   if cpu.thumb:
     let instr = fetch16(cpu.bus, a)
     if unlikely(cpu.trace > 0): cpu.trace_instr(instr)

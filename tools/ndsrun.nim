@@ -20,6 +20,8 @@
 ## ASCII, as the libnds console font; --text-offset N).
 ## --bgshot A0 draws that text BG straight from VRAM into the PNG's top half
 ## (no scroll/priority/blending).
+## --dump9/--dump7 ADDR:LEN:FILE writes LEN bytes read through that CPU's bus at the
+## end of the run to FILE (hex ADDR/LEN), for disassembly.
 ## --wav writes the sound output of the whole run (16-bit stereo, 32728 Hz).
 ##
 ## --save FILE loads the card's save chip from FILE (its size picks the
@@ -30,9 +32,11 @@
 ##   --iolog            log every I/O access (repeats folded), from frame
 ##                      --iolog-from F
 ##   --watch HEX        log every write to that word (pc, line)
+##   --prof F0-F1       count instructions per 64-byte code block over frames
+##                      F0..F1-1 and print the busiest blocks per CPU
 ##   --spilog           log every card-SPI (save chip) byte: sent -> reply, pc
 
-import std/[os, strutils, parseopt]
+import std/[os, strutils, parseopt, tables]
 import zippy
 import dingbat/nds/nds
 
@@ -182,6 +186,7 @@ when isMainModule:
   var trace9, trace7, trace_at = 0
   var iolog_from = 0
   var iolog, pcs, spilog = false
+  var prof_from, prof_to = -1
   var watch = 0'u32
   var text = ""
   var text_offset = 0
@@ -190,6 +195,7 @@ when isMainModule:
   var shots: seq[int]
   var tops: seq[seq[uint32]]
   var peek9, peek7: seq[uint32]
+  var dumps: seq[(bool, uint32, int, string)]
   var wav = ""
   var save = ""
   var p = initOptParser(commandLineParams(), shortNoVal = {'h'},
@@ -210,12 +216,18 @@ when isMainModule:
       of "press": presses.add parse_presses(val)
       of "peek9":
         for a in val.split(','): peek9.add uint32(parseHexInt(a))
+      of "dump9", "dump7":
+        let d = val.split(':')
+        dumps.add (key == "dump7", uint32(parseHexInt(d[0])), parseHexInt(d[1]), d[2])
       of "peek7":
         for a in val.split(','): peek7.add uint32(parseHexInt(a))
       of "shots":
         for f in val.split(','): shots.add parseInt(f)
       of "iolog": iolog = true
       of "spilog": spilog = true
+      of "prof":
+        let r = val.split('-')
+        prof_from = parseInt(r[0]); prof_to = parseInt(r[1])
       of "iolog-from": iolog_from = parseInt(val)
       of "pcs": pcs = true
       of "watch": watch = uint32(parseHexInt(val))
@@ -236,6 +248,21 @@ when isMainModule:
       n.arm9.trace = trace9
       n.arm7.trace = trace7
     if f == iolog_from: n.iolog = iolog
+    when defined(ndsdebug):
+      if f == prof_from: n.arm9.profiling = true; n.arm7.profiling = true
+      if f == prof_to:
+        n.arm9.profiling = false; n.arm7.profiling = false
+        for (name, cpu_prof) in [("arm9", n.arm9.profile), ("arm7", n.arm7.profile)]:
+          var p = cpu_prof
+          p.sort()
+          var total = 0
+          for _, c in p: total += c
+          echo name, " profile: ", total, " instrs"
+          var k = 0
+          for blk, c in p:
+            echo "  ", toHex(blk, 8), " ", c, " ", formatFloat(100 * c / max(total, 1), ffDecimal, 1), "%"
+            inc k
+            if k == 25: break
     for p in presses:
       if f == p.first or f == p.last:
         if p.touch: n.set_touch(p.x, p.y, f == p.first)
@@ -283,5 +310,10 @@ when isMainModule:
       stdout.write(n.bg_text(spec[0] == 'B', ord(spec[1]) - ord('0'), text_offset))
   echo "arm9 ", n.arm9.reg_dump()
   echo "arm7 ", n.arm7.reg_dump()
+  for (is7, a, len, file) in dumps:
+    var bytes = newString(len)
+    for i in 0 ..< len:
+      bytes[i] = char(if is7: read8(n.arm7.bus, a + uint32(i)) else: read8(n.arm9.bus, a + uint32(i)))
+    writeFile(file, bytes)
   for a in peek9: echo "arm9 [", toHex(a, 8), "] = ", toHex(read32(n.arm9.bus, a), 8)
   for a in peek7: echo "arm7 [", toHex(a, 8), "] = ", toHex(read32(n.arm7.bus, a), 8)
