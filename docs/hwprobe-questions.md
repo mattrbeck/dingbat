@@ -168,7 +168,10 @@ Open (dingbat assumes; the CPU cannot see it):
 
 - **Which physical bank channel 3 plays.** dingbat follows GBATEK (playback
   the selected bank, the CPU the other), but the CPU reads back the same
-  either way. Two banks holding different waves, heard, would settle it.
+  either way. The games side with GBATEK -- under the old mapping Mega Man
+  Battle Network's wave voices were silent and FireRed played the first of
+  the two waves it loads, not the second -- but nothing on the SP has
+  shown it. Two banks holding different waves, heard, would settle it.
 - **Channel 3's trigger start-up.** dingbat scales the CGB's 6 T-cycles to
   24 GBA cycles; the CPU has no view of the playback position on the GBA
   (wavedly.s), so this is unmeasurable over the link.
