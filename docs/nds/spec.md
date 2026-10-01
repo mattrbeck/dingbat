@@ -62,6 +62,14 @@ gap1 and gap2, and both SPI buses keep their busy flags for the byte's time at
 the selected baud rate. With these, SoulSilver runs frame-locked with the
 reference core (docs/oracles.md, "NDS core").
 
+The geometry engine takes GBATEK's cycles per command, a full GX FIFO holds
+the writing CPU (and the ARM7), SWAP_BUFFERS waits for V-blank + 392, DMA
+mode 7 and the GXFIFO IRQ follow the FIFO level through an `evGxFifo`
+booking, and DMA mode 4 feeds the main-memory display FIFO 4 words per
+request as the display reads it. The renderer's line budget gives
+RDLINES_COUNT and the underflow flag. docs/nds/3d-timing.md has the model
+and its evidence.
+
 ## Layout
 
 ```
@@ -80,10 +88,11 @@ src/dingbat/nds/
   arm/cp15.nim     CP15 registers, TCM regions
   mem/vram.nim     VRAM banks A-I, VRAMCNT page tables
   gpu/gpu.nim      display timing, DISPSTAT, POWCNT1, screen routing
-  gpu/engine2d.nim 2D engine A/B registers + line renderer
-  gpu3d/gpu3d.nim  3D engine: GXFIFO/ports, GXSTAT, registers, BG0 line output
+  gpu/engine2d.nim 2D engine A/B registers + line renderer, main-memory display FIFO
+  gpu3d/gpu3d.nim  3D engine: GXFIFO/ports, command timing, GXSTAT, registers, BG0 line output
   gpu3d/geometry.nim matrices, lighting, polygon assembly, clipping, tests
-  gpu3d/render.nim  whole-frame rasteriser: textures, depth, blending, fog, edges
+  gpu3d/render.nim  whole-frame rasteriser: textures, depth, blending, fog, edges,
+                   line budget (RDLINES)
   io/irq.nim       IME/IE/IF per CPU
   io/timers.nim    4 timers per CPU
   io/dma.nim       4 channels per CPU (+ ARM9 fill regs)
@@ -100,7 +109,8 @@ src/dingbat_nds_wasm.nim(+.nims)  wasm exports for web/nds.html
 tools/ndsrun.nim                   headless runner: ROM -> PNG of both screens
 web/nds.html, web/nds/             dev page (two canvases, keys, touch)
 tests/nds/                         ROM sources, build tools, README
-tests/nds_3d_test.nim              3D engine driven through write_reg -> checks + PNGs
+tests/nds_3d_test.nim              3D engine driven through write_reg -> checks + PNGs,
+                                   command timing, the 3d_* ROM hashes
 tests/nds_hle_bios_test.nim        every HLE SWI against the real BIOS
 ```
 
